@@ -141,6 +141,30 @@ extension 与 taiji runtime 之间的请求-回包通道原语（`packages/exten
 
 `schedule` 工具创建路径的「先确认后创建」交互：agent 提交预填草稿，用户可视化确认/调整后任务才创建，取消 = 不创建（D5：agent 收到明确 cancelled 语义，不猜测、不重试）。协议 SSOT = `packages/extension-protocol/src/extensions/scheduler-create/`（marker `SCHEDULE_CREATE_MARKER = '\x00TAIJI_SCHEDULE_CREATE'`，复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc` 传输核）。双协议形态：GUI 走 select 通道（runtime event-adapter 第 4 marker 分支翻译为 `extension.ui_request` 帧，`scheduleCreate: true` + `scheduleDraft` payload；renderer `ScheduleCreateOverlay` 与 AskUserOverlay 同点互斥挂载）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent` 多 tab 表单。两侧共享同一契约类型：草稿 `ScheduleDraft`（extension → 前端，LLM 参数即预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（前端 → extension，`action: 'create'`；取消不走此形状——select resolve undefined）。时间折叠单点（D2）：一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转 helper `dateToOnceCron` / `onceCronToDate`，GUI/TUI 共用禁止双实现。
 
+### 计划模式（Plan Mode）
+
+pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或内置模板产出计划文档；文档就绪后 `submit-review` 挂审阅，用户三键裁决（确认执行 / 提交评论并要求修订 / 请求进一步解释），approve/abort 退出并恢复工具集。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入）。
+
+**代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills 解析 / tool.ts 六 action / state.ts 状态 / prompts.ts 提示词四段 / index.ts hooks）。
+
+### plan-state entry
+
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 三个 optional 字段 `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+
+**代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
+
+### PLAN_REVIEW_MARKER
+
+plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `ASK_USER_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 askUser 同构分流），前端审批条渲染三键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise·explain 必带 `{ quote, comment }[]`）。
+
+**代码映射**: `packages/extension-protocol/src/core/markers.ts`（常量）+ `core/types.ts`（payload/decision/comment 契约 SSOT）。
+
+### record 投影链
+
+会话持久派生态到前端 stateSnapshot 的统一通道（subagent/workflow 现役，plan-state 为第三员——plan-mode-redesign 方案 A）。链路：custom entry append → event-adapter `handleEntryAppended` 白名单 → interpreter record 联合类型 + 失效透传 → `SessionRecords.invalidateRecordEntries` 派生扫描（冷启动读盘与 live 更新共用同一份派生代码，live ≡ reload 构造性成立）→ publish 走 diff 基线 → message-bus `TOPIC_TABLE` / `STATE_TYPE_KEY_MAP` 分发 → 前端 store 订阅 + 切换/冷启动 RPC 首拉。三道运行时 customType 门 + 冷启动首拉全部要过，缺一则静默失效（三道门均为字符串判定，编译器不保护——加员时逐点核对）。
+
+**代码映射**: `packages/runtime/src/infra/pi/event-adapter.ts` / `packages/runtime/src/services/session/session-records.ts` / `packages/runtime/src/services/message-bus/message-bus.ts`。
+
 ### Tool Approval
 工具权限审批。Agent 执行危险操作（如写入文件、运行命令）前请求用户许可。用户回复是三选一：Allow（本次允许）/ Deny（拒绝）/ Always Allow（永久允许该工具）。
 

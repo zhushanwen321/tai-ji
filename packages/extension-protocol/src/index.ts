@@ -23,6 +23,11 @@ export type {
   GuiComponentType,
   GuiComponentProps,
   GuiRenderResult,
+  PlanDocMeta,
+  PlanReviewComment,
+  PlanReviewDecision,
+  PlanReviewRequest,
+  PlanReviewResponse,
   StatItem,
   TreeItem,
   TreeItemIcon,
@@ -31,7 +36,7 @@ export type {
 
 // ── core：通用常量 ──
 export { PROTOCOL_VERSION } from './core/types'
-export { GUI_WIDGET_MARKER } from './core/markers'
+export { GUI_WIDGET_MARKER, PLAN_REVIEW_MARKER } from './core/markers'
 
 // ── core：通用 helper ──
 export {

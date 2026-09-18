@@ -525,19 +525,20 @@ export interface EventInterpreterOptions {
    */
   pingPi?: () => Promise<Record<string, unknown> | undefined> | undefined
   /**
-   * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow
+   * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow/plan
    * 派生缓存失效。组合根注入 sessionService.invalidateRecordEntries——markDirty + 防抖
-   * get_entries(since) 增量重拉，entry 扫描（scanSubagentEntries / scanWorkflowEntries）
-   * 是派生缓存唯一数据写路径，事件 payload 永不直写缓存（ReplicatedState「事件只做
-   * 失效」不变量；W12-W18 过渡态例外至此撤销）。
+   * get_entries(since) 增量重拉，entry 扫描（scanSubagentEntries / scanWorkflowEntries /
+   * scanPlanStateEntries）是派生缓存唯一数据写路径，事件 payload 永不直写缓存
+   * （ReplicatedState「事件只做失效」不变量；W12-W18 过渡态例外至此撤销）。
    *
    * 触发源（全部降级为失效信号，W18 起事件直写退役）：
-   * - entry_appended{customType: subagent-record | workflow-record}（主信号，adapter 过滤）
+   * - entry_appended{customType: subagent-record | workflow-record | plan-state}
+   *   （主信号，adapter 过滤；plan-state 第三员为 plan 模式重设计 D1② 扩容）
    * - subagent-bg-notify / subagent tool-call-end / workflow-result / workflow tool-call-end
    *   （兜底信号：extension 在同一状态迁移点既 append 自描述 entry 又发上述事件——主信号
    *   丢失（W22 混沌）时兜底触发重拉收敛）
    */
-  onRecordEntriesInvalidated?: (sessionId: string, customType: 'subagent-record' | 'workflow-record') => void
+  onRecordEntriesInvalidated?: (sessionId: string, customType: 'subagent-record' | 'workflow-record' | 'plan-state') => void
   /**
    * W1（fix-chat-flow-order 探针 ②）：pi agent_settled（run 级联结束）到达时触发。
    * 组合根注入 sessionService.flushPendingBashResults——dispatcher 把 streaming 期间

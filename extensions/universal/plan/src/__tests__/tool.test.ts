@@ -31,6 +31,7 @@ vi.mock("../widget.js", () => ({
 }));
 
 import { detectGoalCapability, handlePlanComplete } from "../compact.js";
+import { DEFAULT_PLAN_STATE } from "../state.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
 
@@ -39,6 +40,7 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 
 function setup() {
   const sessions = new Map();
+  const controllers = new Map<string, AbortController>();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -46,7 +48,7 @@ function setup() {
     setActiveTools: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions);
+  registerPlanTool(pi, sessions, controllers);
 
   const ctx = {
     sessionId: "test-session",
@@ -56,7 +58,7 @@ function setup() {
   };
 
   const exec = (params: Record<string, unknown>) => executeFn!("tc0", params, undefined, undefined, ctx);
-  return { pi, sessions, ctx, exec };
+  return { pi, sessions, controllers, ctx, exec };
 }
 
 describe("registerPlanTool", () => {
@@ -126,7 +128,7 @@ describe("registerPlanTool", () => {
       await expect(
         exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
       ).rejects.toThrow(
-        "Unknown plan action: create-template. Valid actions: list-template, select-template, complete, abort",
+        "Unknown plan action: create-template. Valid actions: list-template, select-template, complete, abort, register-doc, submit-review",
       );
     });
   });
@@ -245,13 +247,28 @@ describe("registerPlanTool", () => {
   describe("abort", () => {
     it("resets state and cleans up session", async () => {
       const { exec, pi, sessions } = setup();
-      // Pre-populate a session
-      sessions.set("test-session", { isActive: true, planFilePath: "/tmp/plan.md", requirement: "test", templateName: "t" });
+      // Pre-populate a session（工具层 abort 走 resetPlanState——命令层 abort 联动的顺序断言在 command.test.ts）
+      sessions.set("test-session", {
+        ...DEFAULT_PLAN_STATE,
+        isActive: true,
+        planFilePath: "/tmp/plan.md",
+        requirement: "test",
+        templateName: "t",
+        skills: ["tech-design"],
+        docs: [{ fileName: "design.md", absPath: "/tmp/design.md", sourceSkill: "tech-design", version: 1 }],
+        reviewState: "awaiting",
+      });
       const res = await exec({ action: "abort" });
       expect(res.details.action).toBe("abort");
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
       expect(sessions.has("test-session")).toBe(false);
       expect(updatePlanWidget).toHaveBeenCalled();
+      // 终态矩阵：reset entry 落 isActive=false + skills/reviewState 清空 + docs 保留
+      expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: false }));
+      const entry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as Record<string, unknown>;
+      expect(entry.docs).toHaveLength(1);
+      expect(entry.skills).toEqual([]);
+      expect(entry.reviewState).toBeUndefined();
     });
   });
 });

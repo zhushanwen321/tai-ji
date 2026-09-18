@@ -32,7 +32,9 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft } from '@zhushanwen/extension-protocol'
+// plan-state customType 常量单源在 plan-state-extractor（D1①：runtime 侧常量，shared 无此字面量）
+import { PLAN_STATE_CUSTOM_TYPE } from '../../services/session/plan-state-extractor.js'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -766,6 +768,42 @@ function tryTranslateScheduleCreateSelect(
 }
 
 /**
+ * plan 审批请求检测（plan 模式重设计 D5）：select title 为 PLAN_REVIEW_MARKER → options[0]
+ * 是 PlanReviewRequest JSON（extension-protocol 契约 { docs: PlanDocMeta[] }）。
+ * 检测成功广播 extension.ui_request 带 planReview: true 标记（与 askUser: true 同构分流——
+ * 前端 C4 过滤器识别后路由审批条三键 + 行内评论，不得落入 CompanionBand 渲染 marker
+ * 控制符 title）；挂起请求由前端 respond 回传（select 挂起不超时语义同 ask-user，:728-730
+ * 注释）。SUBAGENT_INFLIGHT 是唯一不广播例外（文件头 D5 例外登记），plan-review 走
+ * ask-user 广播家族。检测失败（非合法 JSON / docs 缺失）返回 undefined 降级普通 select，
+ * 与 ask-user 降级边界同构；docs 守卫只判数组不判非空（extension 侧 E6 守卫保证非空才发
+ * select，空数组仍可路由审批条——比降级乱码 title 好）。
+ */
+function tryTranslatePlanReviewSelect(
+  event: PiExtensionUiRequestEvent,
+  sid: string,
+  requestId: string,
+  dialogMethod: ExtensionInteractMethod,
+): PiTranslatedEvent[] | undefined {
+  const planReviewData = parseSelectOptionsPayload(event) as { docs?: unknown } | undefined
+  if (!Array.isArray(planReviewData?.docs)) {
+    return undefined
+  }
+  const requestPayload = {
+    sessionId: sid,
+    requestId,
+    method: 'select',              // 仍是 select（复用 respond 回传通道）
+    planReview: true,              // 标记 plan 审批富交互，前端据此路由到审批条（C4 过滤器）
+    planReviewDocs: planReviewData.docs, // PlanDocMeta[]（unknown[] 透传，保持 shared 依赖最小化同 askUserQuestions 先例）
+  }
+  return [
+    // ★ extension-ui kind 事件：interpreter 暂停 watchdog + server 跟踪请求 + 缓存 pending
+    //（与 ask-user 同款——审批挂起依赖「不超时 + pending 可 respond」语义）。
+    { kind: 'extension-ui', requestId, sessionId: sid, method: dialogMethod, payload: requestPayload },
+    extensionUiRequestBroadcast(requestPayload),
+  ]
+}
+
+/**
  * 普通 select / confirm / input / editor（无 marker 命中，或 ask-user 检测失败降级到此）。
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
@@ -823,6 +861,13 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
     const scheduleEvents = tryTranslateScheduleCreateSelect(event, sid, requestId, dialogMethod)
     if (scheduleEvents) return scheduleEvents
     // 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（下方分支）
+  }
+  // plan 审批（plan 模式重设计 D5）：marker 家族第 6 员，检测形态照 ask-user（title 精确
+  // 匹配 + payload 结构守卫，失败降级普通 select）。
+  if (method === 'select' && event.title === PLAN_REVIEW_MARKER) {
+    const planEvents = tryTranslatePlanReviewSelect(event, sid, requestId, dialogMethod)
+    if (planEvents) return planEvents
+    // 检测失败（非合法 JSON / docs 缺失）→ 降级普通 select（下方分支）
   }
   return translatePlainDialogRequest(event, sid, requestId, dialogMethod)
 }
@@ -1299,9 +1344,10 @@ function handleCompactionEnd(event: PiCompactionEndEvent, _sid: string): PiTrans
  *
  * pi 只对 extension appendEntry 发射本事件（agent-session.ts appendEntry 回调唯一发射点，
  * message entry 不发射——W25 契约测试固化）。customType 过滤：只对 subagent-record /
- * workflow-record 自描述 entry 产出失效信号（interpreter → sessionService markDirty → 防抖
- * get_entries 增量重拉，唯一数据写路径），其他 custom type（含未来新增的 extension 自有
- * entry）no-op——避免无关 entry 触发拉取。
+ * workflow-record / plan-state 自描述 entry 产出失效信号（interpreter → sessionService
+ * markDirty → 防抖 get_entries 增量重拉，唯一数据写路径；plan-state 第三员为 plan 模式
+ * 重设计 D1① 扩容），其他 custom type（含未来新增的 extension 自有 entry）no-op——
+ * 避免无关 entry 触发拉取。
  *
  * 事件 payload（entry 对象）不进任何数据缓存：失效信号只携带 customType，数据本体由
  * get_entries 权威拉取获得（ReplicatedState「事件只做失效」核心不变量）。
@@ -1314,6 +1360,9 @@ function handleEntryAppended(event: PiEntryAppendedEvent, _sid: string): PiTrans
   }
   if (entry.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
     return [{ kind: 'record-entry-appended', customType: WORKFLOW_RECORD_CUSTOM_TYPE }]
+  }
+  if (entry.customType === PLAN_STATE_CUSTOM_TYPE) {
+    return [{ kind: 'record-entry-appended', customType: PLAN_STATE_CUSTOM_TYPE }]
   }
   return [{ kind: 'noop' }]
 }
@@ -1344,8 +1393,9 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // compaction_start/compaction_end 在 M4 移出此列（改事件驱动，interpreter 唯一编排 compaction 生命周期）。
 // agent_start 在 M5 移出此列——其 hook 分支在 translate() 内单独消费（onPiEvent/agent_start hook，
 // 消费方是插件 executeHooks，S1）。若放回 NULL_EVENTS 会被此处 short-circuit，hook 分支不可达。
-// [W18] entry_appended 移出此列——对 subagent-record / workflow-record customType 产出失效信号
-// （handleEntryAppended：subagent/workflow 派生缓存 markDirty → 防抖 get_entries 增量重拉），
+// [W18] entry_appended 移出此列——对 subagent-record / workflow-record / plan-state
+// customType 产出失效信号（handleEntryAppended：subagent/workflow/plan 派生缓存 markDirty →
+// 防抖 get_entries 增量重拉；plan-state 第三员为 plan 模式重设计 D1① 扩容），
 // 其他 custom type no-op（W21 TODO(W18) 锚点在此兑现；message entry 不发射本事件，W25 契约）。
 // [W21] message_end 移出此列——重构 message entry 喂前端 reducer（handleMessageEnd，实时 feed
 // 权威载体）。pi 上游未来若为常规 message append 补发射 entry_appended：只换喂入源头

@@ -47,3 +47,28 @@ describe('drawer types：bashTask tab 扩展（D5①）', () => {
     expect(getDrawerControlState().selectedBackgroundTaskId).toBe('bt-abc123')
   })
 })
+
+// ── plan tab 扩展（plan 模式重设计 u1-drawer-tab，第 9 员）──
+// 形态照 bashTask 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法 + 默认控制态
+// 零加员即可满足接口（plan tab 无选中态字段，OpenDrawerOptions 零加员）。
+
+// 'plan' 可赋给 SideDrawerTab（成员缺失即 vue-tsc 红）
+const planTab: SideDrawerTab = 'plan'
+
+describe('drawer types：plan tab 扩展（plan 模式重设计 u1-drawer-tab）', () => {
+  afterEach(() => {
+    _resetDrawerControlForTest()
+  })
+
+  it("'plan' 是合法 SideDrawerTab 成员（编译期断言的运行期影子）", () => {
+    expect(planTab).toBe('plan')
+  })
+
+  it("默认控制态零加员即满足接口（'plan' 作 activeTab 写入分区可读回）", () => {
+    bindDrawerSessionId(ref<string | null>('sess-plan'))
+    const state = getDrawerControlState()
+    expect(state.activeTab).not.toBe('plan')
+    state.activeTab = 'plan'
+    expect(getDrawerControlState().activeTab).toBe('plan')
+  })
+})

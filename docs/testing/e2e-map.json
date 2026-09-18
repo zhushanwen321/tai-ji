@@ -178,6 +178,34 @@
       "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言的 @taiji/ui 渲染面——gui-components.spec.ts 的 8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）+ v6-shell-baseline 打开 drawer 后断言的容器（renderer `components/workspace/PanelContainer.vue` 渲染 `features/drawer/DrawerPanel.vue`，`aside[aria-label=\"侧边抽屉\"]` 即其根）；改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。（归属澄清：v6-shell-baseline 的 shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 属 renderer 的 `packages/renderer/src/components/panel/Composer.vue`（输入区 ComposerInput 来自 @taiji/ui）——前者由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。"
     },
     {
+      "id": "E2E-MOCK-02",
+      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（横幅/审批条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
+      "scope": [
+        "packages/ui/src/features/drawer/**",
+        "packages/renderer/src/components/panel/plan/**",
+        "packages/renderer/src/stores/plan-store.ts",
+        "packages/renderer/src/composables/use-plan-sync.ts",
+        "packages/renderer/src/composables/use-plan-drawer-sync.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/stores/plan-store.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-plan-drawer-sync.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-banner.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"
+    },
+    {
       "id": "E2E-REAL-01",
       "summary": "e2e real 轨：真实 app 启动（launch-app-real）4 spec，开发阶段按改动面空载串行跑",
       "scope": [

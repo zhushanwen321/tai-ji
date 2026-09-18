@@ -22,10 +22,11 @@
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
  * - getPendingRequests（切回拉取）保留 RPC 路径（C3）
  *
- * filter 仅用于读取分流 + 入队第二道闸（富交互 overlay 硬过滤之后）：store 存全量 pending，
- * 多个 composable 实例各按 filter 读同一份 store 分区。默认 overlayFilter（ask-user ∨
- * schedule-create，Panel inline 渲染面）；dialog 请求（非 overlay 类）已由 CompanionBand
- * 消费 bus 直连（wave1 起），不再经 store。
+ * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存全量 pending，
+ * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
+ * filter 读同一份 store 分区。默认 overlayFilter（ask-user ∨ schedule-create，Panel
+ * inline 渲染面）；dialog 请求（非标记类）已由 CompanionBand 消费 bus 直连（wave1 起），
+ * 不再经 store。
  */
 import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
@@ -50,6 +51,31 @@ export const scheduleCreateFilter: UIRequestFilter = (req) => req.scheduleCreate
  * 消费 bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
  */
 export const overlayFilter: UIRequestFilter = (req) => askUserFilter(req) || scheduleCreateFilter(req)
+
+// ── planReview 分流（plan 模式重设计 u1-banner，设计 D5 PLAN_REVIEW_MARKER select 通道）──
+
+/**
+ * planReview 审批请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后在 extension.ui_request
+ * 上附加的 `planReview: true` 标记，与 askUser 同构分流）。
+ *
+ * core 的 ExtensionUIRequest 契约未加员（runtime 侧路由归 u1-rpc），本地同形扩展——与
+ * plan-store.ts 的 PlanReviewComment 本地同形惯例一致（renderer 不依赖 extension-protocol，
+ * 最底层共享包不反向加员；字段运行时存在，经 isPlanReviewRequest 类型守卫收窄）。
+ */
+export interface PlanReviewUIRequest extends ExtensionUIRequest {
+  planReview: true
+}
+
+/**
+ * 类型守卫：是否 planReview 审批请求。select 挂起期是「审批可交互」的权威信号（D5：
+ * 挂起 select 是 GUI→extension 的唯一可靠交互通道），审批条「有挂起请求」判定以此为源。
+ */
+export function isPlanReviewRequest(req: ExtensionUIRequest): req is PlanReviewUIRequest {
+  return (req as { planReview?: unknown }).planReview === true
+}
+
+/** planReview 审批请求过滤器（审批条用；与 askUserFilter 互斥——一个请求只归一面） */
+export const planReviewFilter: UIRequestFilter = (req) => isPlanReviewRequest(req)
 
 // ── 模块级 refCount bus 订阅（项目规则 #2：多实例共享单次注册，防事件处理翻倍） ──
 // split 双 panel 多实例各自订阅同一 bus 事件，若每实例直接 bus.on 则同一事件被 N 个
@@ -115,6 +141,9 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     // scheduleDraft 值域 unknown（isScheduleDraft 守卫在消费端收窄），无需断言
     ...(request.scheduleCreate !== undefined ? { scheduleCreate: request.scheduleCreate as boolean } : {}),
     ...(request.scheduleDraft !== undefined ? { scheduleDraft: request.scheduleDraft } : {}),
+    // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
+    // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
+    ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
     receivedAt: Date.now(),
   }
 }
@@ -138,10 +167,12 @@ export function useExtensionUI(
     if (!sid) return
     // bus 订阅（IF2）：ui-request 事件按**事件 sid** 入 store 分区（M1 竞态语义——
     // 切 session 后旧 sid 迟到事件写旧分区，不污染新分区；事件自带归属，无需捕获订阅时 sid）。
-    // C4 分流：富交互 overlay 硬过滤先行（askUser / scheduleCreate 两类入 store——
-    // 分别渲染 AskUserOverlay / ScheduleCreateOverlay；普通 dialog 由 CompanionBand 消费 bus，
-    // extension-host-dialog 侧对称排除两类，零重叠契约），filter 是第二道闸。
-    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——overlay 渲染依赖 session 分区。
+    // C4 分流：富交互硬过滤先行（askUser / scheduleCreate / planReview 三标记请求入 store
+    // 分区——分别渲染 AskUserOverlay / ScheduleCreateOverlay / PlanReviewBar；普通 dialog 由
+    // CompanionBand 消费 bus，extension-host-dialog 侧对称排除三类，零重叠契约），
+    // filter 是第二道闸（实例只放各自标记——store 共享，谁放行谁入队，requestId dedup
+    // 兜底双实例幂等）。
+    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染面依赖 session 分区。
     unsubFns.push(
       subscribeBus((e) => {
         const eventSid = e.sessionId
@@ -149,7 +180,8 @@ export function useExtensionUI(
           console.warn('[useExtensionUI] ui-request 事件缺少 sessionId，跳过入队:', e.request.requestId)
           return
         }
-        if (e.request.askUser !== true && e.request.scheduleCreate !== true) return // C4：只入富交互 overlay 类
+        const isPlanReview = e.request.planReview === true
+        if (e.request.askUser !== true && e.request.scheduleCreate !== true && !isPlanReview) return // C4：三类标记放行
         const adapted = toExtensionUIRequest(eventSid, e.request)
         if (filter && !filter(adapted)) return // filter 第二道闸
         store.addRequest(eventSid, adapted)
@@ -197,6 +229,18 @@ export function useExtensionUI(
     )
   })
 
+  /**
+   * 挂起 planReview 审批请求列表（D5 审批条消费面）：
+   * 「有挂起请求」判定 + respond 定位都按 requestId 枚举本列表——正常时序恒单条
+   * （extension 单挂起），列表形态防多请求并发时的队首假设（pi 无串行保证，对齐
+   * removeRequest 的 requestId 精确语义）。切 session 读不同分区，无 sid 恒空。
+   */
+  const currentPlanReviewRequests = computed<PlanReviewUIRequest[]>(() => {
+    const sid = sessionId.value
+    if (!sid) return []
+    return store.recordsOf(sid).value.filter(isPlanReviewRequest)
+  })
+
   /** 用户回复指定请求（按 requestId 精确定位，不假设队首） */
   function respond(requestId: string, result: boolean | string | null): void {
     const sid = sessionId.value
@@ -216,6 +260,7 @@ export function useExtensionUI(
 
   return {
     currentAskUserRequest,
+    currentPlanReviewRequests,
     respond,
     cancel,
   }

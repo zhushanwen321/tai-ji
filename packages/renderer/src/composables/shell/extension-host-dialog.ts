@@ -137,6 +137,10 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
         // 漏排除则同一请求被转成空壳 select dialog 入队（用户误点 = respond null = 误触取消）
         // 并与 overlay 双 UI 并存，违反双消费方「零重叠」契约。
         if (e.request.askUser === true || e.request.scheduleCreate === true) return
+        // C4（plan 模式重设计 D5）：planReview 审批请求由 PlanReviewBar 消费（useExtensionUI
+        // planReviewFilter 实例入 store 枚举 + respond 回传）——不落 CompanionBand 原始 dialog
+        // 渲染 marker 控制符 title。
+        if (e.request.planReview === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))

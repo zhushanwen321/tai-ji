@@ -18,6 +18,8 @@ export type {
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
   RollingRestartStatusPayload,
   ReattachDeferReason, ReattachDeferredPayload,
+  // plan 模式投影域（plan-state entry 派生视图 + 产物元数据，形状与 extension-protocol 同形）
+  PlanDocMeta, PlanStateView,
   ConnectionTestResultRow,
 } from './protocol'
 export type {

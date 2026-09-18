@@ -27,6 +27,7 @@ import type {
   FileNode,
   SubagentRecord,
   WorkflowRunRecord,
+  PlanStateView,
   SystemPromptConfig,
   TerminalConfig,
   BatchDeleteResult,
@@ -204,6 +205,13 @@ export interface ISessionService {
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
    */
   getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]>
+  /**
+   * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，session.getPlanState
+   * RPC 后端）。纯磁盘读取（主 session JSONL 最后一条 plan-state entry → scanPlanStateEntries
+   * 派生，与 live 投影同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
+   * 「未激活」缺省 View（reply 契约 planState 无 null 域）。
+   */
+  getPlanState(sessionId: string): Promise<PlanStateView>
   /**
    * 获取 workflow 内 agent call 的对话流历史。
    * agentCallSessionId 是 trace[].sessionId（pi session ID），按 sessionId 全局查找 JSONL。

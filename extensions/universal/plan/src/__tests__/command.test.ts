@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies before importing
 vi.mock("node:fs", () => ({
@@ -22,6 +22,7 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
+  const controllers = new Map<string, AbortController>();
 
   const pi = {
     registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
@@ -30,6 +31,7 @@ function createMocks() {
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
     sendUserMessage: vi.fn(),
+    getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
 
@@ -50,6 +52,7 @@ function createMocks() {
   return {
     pi,
     ctx,
+    controllers,
     getHandler: () => capturedHandler!,
   };
 }
@@ -58,14 +61,16 @@ describe("registerPlanCommand", () => {
   let pi: ExtensionAPI;
   let ctx: ExtensionContext;
   let handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+  let controllers: Map<string, AbortController>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     const mocks = createMocks();
     pi = mocks.pi;
     ctx = mocks.ctx;
+    controllers = mocks.controllers;
     const sessions = new Map();
-    registerPlanCommand(pi, sessions);
+    registerPlanCommand(pi, sessions, controllers);
     handler = mocks.getHandler();
   });
 
@@ -92,6 +97,31 @@ describe("registerPlanCommand", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
     expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("Plan mode aborted.", "info");
+  });
+
+  it("abort 联动（E10）：controller.abort() 先于 resetPlanState 的 entry 落盘", async () => {
+    await handler("implement user auth", ctx);
+    vi.clearAllMocks();
+
+    // 模拟一个挂起 select 的 controller（submit-review / complete 执行方式两处共用注册表）
+    const controller = new AbortController();
+    const abortSpy = vi.spyOn(controller, "abort");
+    controllers.set("test-session", controller);
+
+    await handler("abort", ctx);
+
+    // 挂起 select 被 abort（→ resolve undefined → tool execute 已取消分支 → turn 结束 → settled → busy defer 恢复）
+    expect(controller.signal.aborted).toBe(true);
+    // 顺序断言：abort 必须先于 reset entry 落盘（反序 = 挂起 select 无人 resolve → session 卡死）
+    const resetCallIndex = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.findIndex(
+      (c) => (c[1] as { isActive?: boolean }).isActive === false,
+    );
+    expect(resetCallIndex).toBeGreaterThanOrEqual(0);
+    expect(abortSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      (pi.appendEntry as ReturnType<typeof vi.fn>).mock.invocationCallOrder[resetCallIndex],
+    );
+    // 注册表条目已清理
+    expect(controllers.has("test-session")).toBe(false);
   });
 
   // --- status subcommand ---
@@ -133,6 +163,9 @@ describe("registerPlanCommand", () => {
       planFilePath: "/tmp/test-project/.taiji-harness/implement-user-auth/plan.md",
       requirement: "Implement User Auth",
       templateName: "",
+      skills: [],
+      docs: [],
+      reviewState: undefined,
     });
   });
 
