@@ -71,6 +71,13 @@ export interface CliEngineDescriptor {
   portFactory: EngineFactory;
   /** manifest 快照余项（modelCatalog/displayName；capabilities 已提升为直读字段）。 */
   manifest?: Omit<EngineManifestSnapshot, "capabilities">;
+  /**
+   * 引擎包版本面（package.json `version`，发现器装配时盖章；L3 显式配置无
+   * package.json → 缺省 undefined）。参与稳定标识比较——引擎包升级即使 bin 路径与
+   * capabilities 碰巧全同，版本变化也必须触发 dispose 换新实例（否则同进程内旧单例
+   * 持续跑旧代码直到进程重启）。两侧均 undefined（L3 显式配置 / 旧 descriptor）视为等价。
+   */
+  packageVersion?: string;
 }
 
 /** inproc 形态 descriptor（过渡期）：内建引擎工厂。DoD#5 后随 inproc 分支删除。 */
@@ -235,8 +242,9 @@ function stableDescriptorKey(value: unknown): string {
  *   - command + args（spawn 面：bin 路径与启动参数）
  *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
  *     实例，否则与「真换引擎」场景自相矛盾）
- *   - manifest 余项（modelCatalog + displayName——「manifest 版本面」的实际落点：
- *     发现器不把 package name/version 写进 descriptor，manifest 派生字段即此二者）
+ *   - manifest 余项（modelCatalog + displayName——manifest 派生版本面）
+ *   - packageVersion（package.json version——包版本面：升级即使 bin/capabilities
+ *     碰巧全同也要换新实例，防旧单例跑旧代码）
  * portFactory 闭包不参与比较：每次 discovery 重跑都是新函数实例，但等价标识下其
  * 产物行为等价；闭包内捕获的 engineConfig（L3 显式配置）与 entry.cwd（config.json
  * 显式登记的引擎工作目录，同经 buildExplicitDescriptor 的 portFactory 闭包消费）
@@ -262,6 +270,7 @@ function isStableEquivalentDescriptor(
     if (previous.args[i] !== next.args[i]) return false;
   }
   return (
+    previous.packageVersion === next.packageVersion &&
     stableDescriptorKey(previous.capabilities) === stableDescriptorKey(next.capabilities) &&
     stableDescriptorKey(previous.manifest) === stableDescriptorKey(next.manifest)
   );

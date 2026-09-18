@@ -507,6 +507,80 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
     expect(getEngine("kind-change")).not.toBe(inprocSingleton);
   });
 
+  // ── O2 版本面（packageVersion 比较字段）──────────────────────────────
+
+  it("同 packageVersion 重注册（其余标识字段全同）：幂等——singleton 保留、无 dispose", () => {
+    const manifest = makeManifestSnapshot("Versioned");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("ver-same", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    registerEngineDescriptor("ver-same", {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      packageVersion: "1.2.3",
+      portFactory: () => oldPort as EnginePort,
+    });
+    const singleton = getEngine("ver-same");
+
+    const secondFactory = vi.fn(() => makeRemoteEngine("ver-same", manifest) as EnginePort);
+    registerEngineDescriptor("ver-same", {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      packageVersion: "1.2.3",
+      portFactory: secondFactory,
+    });
+    expect(getEngine("ver-same")).toBe(singleton);
+    expect(dispose).not.toHaveBeenCalled();
+    expect(secondFactory).not.toHaveBeenCalled();
+  });
+
+  it("packageVersion 变化（bin/capabilities/manifest 碰巧全同）：触发 dispose 换新实例", () => {
+    const manifest = makeManifestSnapshot("Versioned");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("ver-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    registerEngineDescriptor("ver-change", {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      packageVersion: "1.2.3",
+      portFactory: () => oldPort as EnginePort,
+    });
+    getEngine("ver-change");
+
+    // 引擎包升级形态：bin 未变、能力面碰巧未变，只有版本号前进——旧实现
+    //（版本不在比较面）会误判等价保留旧单例，同进程内持续跑旧代码直到重启
+    const newPort = makeRemoteEngine("ver-change", manifest);
+    registerEngineDescriptor("ver-change", {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      packageVersion: "1.3.0",
+      portFactory: () => newPort as EnginePort,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("ver-change")).toBe(newPort);
+  });
+
+  it("packageVersion 两侧均缺省（L3 显式配置形态）：视为等价（undefined === undefined）", () => {
+    const manifest = makeManifestSnapshot("Explicit");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("ver-absent", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("ver-absent", manifest, () => oldPort as EnginePort);
+    const singleton = getEngine("ver-absent");
+
+    reregisterEquivalent("ver-absent", manifest, () => makeRemoteEngine("ver-absent", manifest) as EnginePort);
+    expect(getEngine("ver-absent")).toBe(singleton);
+    expect(dispose).not.toHaveBeenCalled();
+  });
+
   it("inproc → inproc 重注册：恒判不等价（工厂闭包捕获宿主模块图状态，不可跨 reload 存活）", () => {
     const dispose = vi.fn(() => Promise.resolve());
     registerEngine("inproc-again", () => ({ ...makeFakeEngine("inproc-again"), dispose }));

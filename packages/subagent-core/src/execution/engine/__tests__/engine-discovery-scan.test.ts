@@ -43,6 +43,8 @@ interface PkgOptions {
   binMode?: number;
   /** bin 文件不落盘（bin 缺失反例）。 */
   omitBin?: boolean;
+  /** package.json 顶层 version 覆盖（缺省不写字段——版本面缺省形态；非法形态传非 string）。 */
+  version?: unknown;
 }
 
 /** 在 rootDir 下造一个带 manifest 的引擎包，返回包目录。 */
@@ -60,6 +62,7 @@ function makeEnginePkg(
     JSON.stringify({
       name: `test-${pkgDirName}`,
       bin: { "test-engine-cli": binRel },
+      ...(opts.version !== undefined ? { version: opts.version } : {}),
       "taiji": { subagentEngine: { id: pkgDirName, bin: "test-engine-cli", protocol: 1, ...manifest } },
     }),
   );
@@ -193,6 +196,18 @@ describe("manifest schema 字段级解析", () => {
     expect(result.discovered[0].descriptor.command).toBe(
       path.join(tmpRoot, "binmap", "bin/cli.mjs"),
     );
+  });
+
+  it("O2 版本面盖章：package.json version → descriptor.packageVersion；缺失/非 string 宽容 undefined", () => {
+    makeEnginePkg(tmpRoot, "with-ver", { capabilities: FULL_CAPABILITIES }, { version: "1.4.2" });
+    makeEnginePkg(tmpRoot, "no-ver", { capabilities: FULL_CAPABILITIES });
+    makeEnginePkg(tmpRoot, "bad-ver", { capabilities: FULL_CAPABILITIES }, { version: 42 });
+    const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
+    expect(result.discovered).toHaveLength(3);
+    const byId = new Map(result.discovered.map((d) => [d.id, d.descriptor.packageVersion]));
+    expect(byId.get("with-ver")).toBe("1.4.2");
+    expect(byId.get("no-ver")).toBeUndefined();
+    expect(byId.get("bad-ver")).toBeUndefined();
   });
 
   it("必需字段缺失 → skip：id / bin / protocol 各自缺失均不装载", () => {

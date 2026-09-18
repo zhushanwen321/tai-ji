@@ -215,7 +215,9 @@ function resolveExplicitCommand(command: string, env: NodeJS.ProcessEnv): string
 /**
  * L3 显式配置的 descriptor：无 manifest 面（用户手工配置 command）→ capabilities 取
  * 全保守值 + warn（gate 同步拦生成，运行期不踩未声明能力）；无 modelCatalog / 无
- * displayName（= id）。engineConfig 经 initialize.engineConfig 透传。
+ * displayName（= id）。无 packageVersion（config.json 引擎无 package.json 版本面——
+ * 稳定标识不因版本变化，command/args 变化已覆盖换实例判据）。engineConfig 经
+ * initialize.engineConfig 透传。
  */
 function buildExplicitDescriptor(
   id: string,

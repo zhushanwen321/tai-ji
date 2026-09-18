@@ -171,13 +171,15 @@ function buildManifestCliDescriptor(params: {
   modelCatalog: { dynamic: boolean; models: ModelCatalogEntry[] } | null | undefined;
   displayName: string | undefined;
   manifestSnapshot: RemoteEngineManifestSnapshot;
+  packageVersion: string | undefined;
 }): CliEngineDescriptor {
-  const { id, binPath, hostKind, env, caps, envPrefixes, modelCatalog, displayName, manifestSnapshot } = params;
+  const { id, binPath, hostKind, env, caps, envPrefixes, modelCatalog, displayName, manifestSnapshot, packageVersion } = params;
   return {
     kind: "cli",
     command: binPath,
     args: [],
     capabilities: caps,
+    ...(packageVersion !== undefined ? { packageVersion } : {}),
     portFactory: () => {
       // 惰性求值：portFactory 在 getEngine 首次取用时才执行（registry 惰性单例），
       // 那时宿主已 configureCore（或宿主进程 env 已带数据根）——扫描期可能早于
@@ -246,6 +248,13 @@ export function inspectEnginePackage(
 
   const displayName = parseOptionalDisplayFields(m, id);
 
+  // O2 版本面：package.json `version` 盖章进 descriptor（registry 稳定标识比较字段——
+  // 包升级触发 dispose 换新实例）。非 string / 空串宽容忽略（版本面缺失只降低标识
+  // 灵敏度，不影响装载）。
+  const rawVersion = pkgStep.pkg["version"];
+  const packageVersion =
+    typeof rawVersion === "string" && rawVersion.trim() !== "" ? rawVersion : undefined;
+
   const manifestSnapshot: RemoteEngineManifestSnapshot = {
     capabilities: caps,
     ...(modelCatalog !== undefined ? { modelCatalog } : {}),
@@ -261,6 +270,7 @@ export function inspectEnginePackage(
     modelCatalog,
     displayName,
     manifestSnapshot,
+    packageVersion,
   });
   return { status: "ok", entry: { id, source, descriptor } };
 }
