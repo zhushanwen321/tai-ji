@@ -60,8 +60,10 @@ export interface DialogRequestSource {
   /** 订阅 ui-request 事件（S2 InternalEventBus ui-request 的适配入口）。返回退订函数 */
   onUiRequest(handler: (req: DialogRequest) => void): () => void
   /**
-   * 订阅超时事件（runtime ExtensionTimeoutManager 5 分钟无响应广播，已向 pi 发默认响应）。
-   * 返回退订函数。超时出队**不发回传**（继承旧语义：回传会发送过期 ui_response）。
+   * 订阅超时事件（extension.ui_timeout 自 registerTimeout 停排定时器后为死链，
+   * 出队保留为防御路径，见 extension-host-dialog.ts 头注）。返回退订函数。
+   * 超时出队**不发回传**（继承旧语义：按 requestId 出队防对话框残留，回传会
+   * 发送过期 ui_response）。
    */
   onUiTimeout(handler: (e: UiTimeoutEvent) => void): () => void
   /**
