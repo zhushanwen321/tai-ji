@@ -98,6 +98,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/tool.ts、src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -157,6 +162,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/isEnoentError/toErrorMessage（src/runtime.ts、replay.ts、service.ts、importer.ts、index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import scheduleCreateInteract/dateToOnceCron/onceCronToDate/ScheduleDraft/ScheduleFormResult 等（src/tool.ts、src/create-form-component.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
