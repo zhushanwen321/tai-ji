@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtemp, rm, mkdirSync, existsSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -178,6 +178,27 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     store.flushAll()
     expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(true)
     expect(existsSync(join(tmpDir, 'session-data', 's2.json'))).toBe(true)
+  })
+
+  // ── corrupt file quarantined (D1c parity), not silently overwritten ──
+  it('corrupt partition file on load → quarantined to .corrupt-<ts> copy, set/flush rebuilds clean', () => {
+    const filePath = join(tmpDir, 'session-data', 's-broken.json')
+    mkdirSync(join(tmpDir, 'session-data'), { recursive: true })
+    writeFileSync(filePath, '{"broken": tr', 'utf-8') // 半截 JSON
+
+    // lazy loadPartition：损坏 → quarantine rename + 空 Map 降级
+    expect(store.get('s-broken', 'anyKey')).toBeUndefined()
+
+    const dirEntries = readdirSync(join(tmpDir, 'session-data'))
+    expect(dirEntries).not.toContain('s-broken.json')
+    const quarantineCopy = dirEntries.find((n) => /^s-broken\.json\.corrupt-\d{4}-\d{2}-\d{2}T\d{9}Z$/.test(n))
+    expect(quarantineCopy).toBeDefined()
+    expect(readFileSync(join(tmpDir, 'session-data', quarantineCopy!), 'utf-8')).toBe('{"broken": tr')
+
+    // set + flush：原路径重建干净文件（quarantine 后 flush 走 ENOENT 放行）
+    store.set('s-broken', 'fresh', 'v')
+    store.flushSession('s-broken')
+    expect(JSON.parse(readFileSync(filePath, 'utf-8'))).toEqual({ fresh: 'v' })
   })
 
   // ── persisted data reloadable via new store ──────────────────

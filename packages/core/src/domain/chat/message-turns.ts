@@ -20,8 +20,9 @@
  * 2. 隐藏完成通知（display===false 且 customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES，shared SSOT
  *    常量——与 apply-entry 覆写同一常量源，无第二份判定）→ turn 边界：关闭当前 turn，开启
  *    user:null + trigger:'bg-notify' 的新 turn，后续 assistant 归入（G3 续跑可见起点）。
- *    空 turn 折叠：边界未被 assistant 填实即遇下一边界/user/数组结束 → 不产出（连续边界
- *    折叠为一个 trigger turn，取最新）
+ *    通知本体压入该组 hiddenNotifies 并同步派生 notifySummary（D5 边界行聚合投影，连续
+ *    折叠复用组时累积追加）。空 turn 折叠：边界未被 assistant 填实即遇下一边界/user/数组
+ *    结束 → 不产出（连续边界折叠为一个 trigger turn，取最新）
  * 3. assistant → 归当前 turn（无则自启 user:null turn，首条 assistant 边缘保留）
  * 4. inline notice（bashExecution 存在 或 liveOnly===true）→ 归当前 turn 的 notices 列表
  *    （按到达序追加末尾，不切断 turn、不出独立渲染项）；无当前 turn 时退化为独立 static 项
@@ -42,6 +43,11 @@ import {
   WORKFLOW_TOOL_NAMES,
 } from '@taiji/shared'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
+import { deriveNotifySummary } from './notify-summary'
+import type { NotifySummary } from './notify-summary'
+
+// D5 边界聚合投影的公开类型（消费方：Turn.vue / 测试）；派生实现与判据在 ./notify-summary
+export type { NotifyOutcome, NotifySummary } from './notify-summary'
 
 /** 一个渲染回合：起点 user + 其后的 assistant 消息序列 */
 export interface MessageTurn {
@@ -58,6 +64,11 @@ export interface MessageTurn {
    *  任务完成）触发的续跑 turn。W4 据此渲染「后台任务完成」起点行（替代 user 气泡）。
    *  undefined = user 锚 turn 或 assistant 自启 turn（现状形态）。 */
   trigger?: 'bg-notify'
+  /** bg-notify 边界行聚合投影（D5）：仅 trigger:'bg-notify' 的 turn 有值（分组层规则 2
+   *  从 hiddenNotifies 派生，两个构造点同款携带——避免只在快车道构造点派生、全量路缺字段）。
+   *  纯派生值（可随时从 hiddenNotifies 重建），渲染层零解析零回扫。
+   *  undefined = 非边界 turn 或无可聚合载荷。 */
+  notifySummary?: NotifySummary
   /** 文本是否正在流式生成（turn 级信号，最后一条 assistant 处于 streaming 或 subagent 强制态）。
    *  语义仅「文本正在流式生成」——驱动 Loader 转圈、streaming 光标、计时器、滚动跟随。
    *  ask-user 等待期间 message 已 complete → false，但对话仍在进行中（该信号由 session 级
@@ -179,6 +190,14 @@ interface TurnGroup {
   assistants: Message[]
   /** turn 内 notice（D4 规则 4），按到达序追加；undefined = 尚无 notice（输出形态同历史 turn） */
   notices?: Message[]
+  /** 被隐藏的完成通知本体（D5 载体）：规则 2 开/复用 trigger turn 时压入，连续边界折叠
+   *  复用组时累积追加。**不进渲染项**（本体仍不渲染），只服务 notifySummary 派生与增量
+   *  复用键；命名与 notices（字面仅差一词）刻意区分语义：notices = 要渲染的 turn 内
+   *  notice，hiddenNotifies = 已消费为边界语义的完成通知（本体不渲染）。 */
+  hiddenNotifies?: Message[]
+  /** hiddenNotifies 的聚合派生值（D5）：每次压入后同步重算（组内条数极少，重算成本可忽略），
+   *  两个 MessageTurn 构造点直接读取该字段——派生单点收敛在 ./notify-summary，无第二份聚合逻辑。 */
+  notifySummary?: NotifySummary
   /** 无 user 起点的续跑 turn 标记（D3 规则 2）；undefined = user 锚 / assistant 自启 turn */
   trigger?: 'bg-notify'
 }
@@ -203,8 +222,22 @@ function isInlineNotice(msg: Message): boolean {
   return msg.bashExecution !== undefined || msg.liveOnly === true
 }
 
+// ── bg-notify 边界聚合投影（D5）─────────────────────────────────────────────
+// 判据/去重/耗时聚合的实现在 ./notify-summary（载荷解析聚合轴，与分组轴分离）；
+// 本文件只负责：规则 2 分支压入通知本体 + 旁挂派生值（分组状态机的一部分）。
+
+/** 隐藏完成通知累积载体（D5 规则 2）：压入通知本体 + 同步重算聚合派生值。 */
+function appendHiddenNotify(msg: Message, group: TurnGroup): void {
+  ;(group.hiddenNotifies ??= []).push(msg)
+  group.notifySummary = deriveNotifySummary(group.hiddenNotifies)
+}
+
 /** turn 未被填实（无 user、无 assistant、无 notice）→ 折叠候选。实际只可能是未被后续
- *  assistant 填实的 trigger turn（user 锚 turn 必有 user；assistant 自启 turn 必有 assistant）。 */
+ *  assistant 填实的 trigger turn（user 锚 turn 必有 user；assistant 自启 turn 必有 assistant）。
+ *  [D5 钉死] hiddenNotifies 刻意不纳入本判定：纳入会破坏「连续边界折叠复用同组」承诺
+ *  （第二条通知另开新组、两行各显 1），且 hidden-only 组的 turnStableId 回落空串致
+ *  renderKey 重复。后果显式登记：无 assistant 填充的 hidden-only 组随空 turn 折叠、边界行
+ *  不渲染——与现状零劣化（通知本体本就不渲染），正常路径由 triggerTurn 唤醒 assistant 填实。 */
 function isEmptyTurn(g: TurnGroup): boolean {
   return g.user === null && g.assistants.length === 0 && (g.notices?.length ?? 0) === 0
 }
@@ -307,6 +340,9 @@ function groupRenderInput(
       if (current === null || !isEmptyTurn(current)) {
         current = openTurn(null, 'bg-notify', groups, slots, starts, i)
       }
+      // D5 聚合载体：本体压入该组 hiddenNotifies 并同步派生 notifySummary（连续折叠复用组
+      // 时累积追加；跨组不重复计量——assistant 填实后收起属独立事件，两行各计一次）
+      appendHiddenNotify(msg, current)
     } else if (msg.display === false) {
       // 隐藏非完成通知消息（todo-context 等）透明：不参与边界、不产出渲染项——现状语义
       // （分组前被 filterDisplayableMessages 滤除）原样保留。消息仍在 store，不丢。
@@ -364,16 +400,24 @@ function signatureEquals(a: Message[], b: Message[]): boolean {
   return true
 }
 
-/** turn 组成员引用签名（[user?, ...assistants, ...notices]；首条 assistant 自启/触发
- *  turn 无 user 位，notice 追加改变签名触发重建）。尾部快车道与全量重扫共用同一构造。 */
+/** turn 组成员引用签名（[user?, ...assistants, ...notices, ...hiddenNotifies]；首条 assistant
+ *  自启/触发 turn 无 user 位，notice / 隐藏完成通知追加改变签名触发重建）。尾部快车道与
+ *  全量重扫共用同一构造。
+ *  hiddenNotifies 纳入签名（D5 等价性义务）：其引用变化 = notifySummary 派生输入变化，
+ *  复用判定必须重建——签名未变则聚合值必然不变（成员引用相等 = 内容相等，ADR-0039）。 */
 function turnSignature(g: TurnGroup): Message[] {
-  return [...(g.user ? [g.user] : []), ...g.assistants, ...(g.notices ?? [])]
+  return [
+    ...(g.user ? [g.user] : []),
+    ...g.assistants,
+    ...(g.notices ?? []),
+    ...(g.hiddenNotifies ?? []),
+  ]
 }
 
 /** turn 对象解析（尾部快车道与全量重扫共用的复用判定）：abs = 该组在 turnObjects 全序
- *  中的绝对下标。同位置签名逐引用对齐 → 复用上次 turn 对象。成员（含 notices）未变 →
- *  hasFoldable/user/assistants/notices/trigger 必然不变，只需校正 isStreaming
- *  （末位地位变化 / forceWorking 翻转会让上次值过期，不可变替换）。否则整组重建。 */
+ *  中的绝对下标。同位置签名逐引用对齐 → 复用上次 turn 对象。成员（含 notices/hiddenNotifies）
+ *  未变 → hasFoldable/user/assistants/notices/trigger/notifySummary 必然不变，只需校正
+ *  isStreaming（末位地位变化 / forceWorking 翻转会让上次值过期，不可变替换）。否则整组重建。 */
 function reuseOrRebuildTurn(
   cache: TurnRenderCache,
   sig: Message[],
@@ -394,6 +438,7 @@ function reuseOrRebuildTurn(
     assistants: g.assistants,
     notices: g.notices,
     trigger: g.trigger,
+    notifySummary: g.notifySummary,
     isStreaming: computeIsStreaming(g.assistants, isLastTurn, forceWorking),
     hasFoldable: computeHasFoldable(g.assistants),
   }
@@ -661,6 +706,7 @@ export function toRenderItems(
     assistants: g.assistants,
     notices: g.notices,
     trigger: g.trigger,
+    notifySummary: g.notifySummary,
     isStreaming: computeIsStreaming(g.assistants, i === groups.length - 1, forceWorking),
     hasFoldable: computeHasFoldable(g.assistants),
   }))

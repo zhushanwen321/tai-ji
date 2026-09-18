@@ -2,8 +2,8 @@
 /**
  * 垂直组合容器——无视觉样式的透明分组（v6）。
  *
- * 定位：WidgetArea 壳层承担卡壳/head/折叠后，widget 内容需要多组件组合时的
- * 组合根（如 goal = stats-line + list-tree）。此前唯一选择是「无头 card」，但
+ * 定位：widget 宿主壳层（托盘 widget 面板等）承担卡壳/head/折叠后，widget 内容需要多组件
+ * 组合时的组合根（如 goal = stats-line + list-tree）。此前唯一选择是「无头 card」，但
  * card 自带 bg/padding/圆角，套在宿主卡壳内形成双层卡——group 显式表达
  * 「只组合、不加视觉」，与 card（自带卡片视觉）语义分离。
  *

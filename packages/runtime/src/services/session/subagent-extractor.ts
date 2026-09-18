@@ -35,13 +35,12 @@
  * projectEngineHandle 删除。
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { parseJsonl } from '../../utils/jsonl.js'
 import { getSubagentSessionDir } from '../../infra/pi/pi-paths.js'
-import { isEnoent } from '../../utils/errors.js'
-import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared'
 import { parseEngineHandle } from '@zhushanwen/subagent-core'
+import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
 import type { NormalizedSubagentStatus } from './subagent-status.js'
 import type { SubagentRecord, BgNotifyRecord } from '@taiji/shared'
@@ -290,13 +289,11 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // [U6] closed 遗留诊断位：归一明细仅 closed 分支返回（防 running + closedReason
     // 脏组合的守卫内化到归一层——closed 已不存在于两态词表，原始字面守卫随之退役）。
     closedReason: norm.derivedClosedReason,
-    // [U8 / 永久会话模型 §3.2.8] 意愿 + 展示维度下行投影：intent 字面量守卫（缺省/
-    // 非法 → undefined = active 语义，存量 entry 零迁移）。不对称守卫：closedReason
-    // closed-only（防 running + closedReason 脏组合）；stopReason 有值即投影——string
+    // [U8 / 永久会话模型 §3.2.8] 展示维度下行投影：stopReason 有值即投影——string
     // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。[U6] entry
     // 自带 stopReason 恒优先（A-lite 轮终展示位 / W4 failed 等真实数据），归一合成
-    // （legacy 值映射）仅兜缺失。
-    intent: d.intent === 'active' || d.intent === 'archived' ? d.intent : undefined,
+    // （legacy 值映射）仅兜缺失。[2026-09-16 裁决] intent 意愿维度已全链路删除——
+    // 旧 entry 残留 intent 键在此被忽略（读侧容忍）。
     stopReason: optString(d.stopReason) ?? norm.derivedStopReason,
     turns: optNumber(d.turns),
     totalTokens: optNumber(d.totalTokens),
@@ -320,71 +317,28 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
   }
 }
 
-/** MB 换算常数（oversize 降级 warn 文案的体积展示，对齐 trace-sync BYTES_PER_MB） */
-// eslint-disable-next-line no-magic-numbers -- 1MB = 1024 * 1024 bytes
-const BYTES_PER_MB = 1024 * 1024
-
-/**
- * extract*FromSessionFile 的结果形状：records + oversize 正交降级标志。
- *
- * 形状对齐 HistoryFileReadResult {messages, truncated} / traceEntries source:'oversize'
- * 的正交字段先例（不往 records 里塞哨兵记录）。oversize = 主 session JSONL 超
- * READ_PRECHECK_MAX_BYTES（32MB），extractor 已降级返回空列表（G3 峰值治理：statSync
- * 预检挡在读全文之前，消灭冷启动列表拉取的一次性巨分配）。
- */
-export interface SubagentFileExtraction {
-  /** 派生记录列表；oversize 时恒空数组（设计裁决：不做尾读部分提取——extractor 是
-   * 全文扫描语义，部分提取的记录缺失面难界定，memory-leak-remediation 三审 INFO-3） */
-  records: SubagentRecord[]
-  /** 主 session JSONL 超预检阈值的降级标记（true = 未读文件，records 为降级空列表） */
-  oversize: boolean
-}
-
 /**
  * 从主 session JSONL 文件提取 SubagentRecord[]（冷启动 / getSubagents RPC 路径）。
  *
- * 读取文件 → parseJsonl → scanSubagentEntries（与实时增量拉取同一份派生代码）。
+ * 读取/预检/降级语义走 ./session-file-extraction.ts 共享骨架（与 workflow-extractor
+ * 同一实现）；本函数只注入日志标签、降级文案与 scanSubagentEntries 扫描器。
  *
- * 读失败分级（renderer 侧栏 stale 守卫的契约前提）：
+ * 读失败分级（renderer 侧栏 stale 守卫的契约前提，由骨架承担）：
  * - 文件不存在（ENOENT）→ 返回空数组（合法边界：pi session 文件延迟写入，首条 assistant
  *   前 file 可能不存在——文件都没有必然无 subagent）。
  * - 其他读错误（EACCES / EISDIR 等）→ 原样上抛（RPC 报错，renderer catch 保留旧分区并
  *   显示重试态；降级 [] 会让 renderer 的空结果守卫把「读失败」与「真实删空」混淆）。
  * 文件存在但无 subagent 调用时返回空数组（真实删空语义）。
  *
- * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检：statSync 大小 > READ_PRECHECK_MAX_BYTES
- * （32MB，与 session-file-utils 全量读预检同阈值同标尺）时不读全文，降级返回空列表 +
- * oversize 标记 + warn 留痕（对齐 trace-sync D5④ 的 oversize 降级范式）。预检 stat 失败
- * （含 ENOENT）走原读路径——错误分级语义由 readFileSync 路径原样承担（ENOENT→空 /
- * 其他上抛），预检不引入新的抛错形态。
+ * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检（> 32MB 降级空列表 + oversize 标记
+ * + warn 留痕）语义见骨架文件。
  */
-export function extractSubagentsFromSessionFile(filePath: string): SubagentFileExtraction {
-  let fileSize = -1
-  try {
-    fileSize = statSync(filePath).size
-  } catch {
-    // 预检失败不改变错误契约：fall through 到读路径，由 readFileSync 产生原分级错误
-    fileSize = -1
-  }
-  if (fileSize > READ_PRECHECK_MAX_BYTES) {
-    console.warn(
-      `[subagent-extractor] session file oversize ` +
-      `(${(fileSize / BYTES_PER_MB).toFixed(1)} MB > ${(READ_PRECHECK_MAX_BYTES / BYTES_PER_MB).toFixed(0)} MB), ` +
-      `skip subagent extraction (degraded to empty list): ${filePath}`,
-    )
-    return { records: [], oversize: true }
-  }
-
-  let content: string
-  try {
-    content = readFileSync(filePath, 'utf-8')
-  } catch (e) {
-    if (isEnoent(e)) return { records: [], oversize: false }
-    throw e
-  }
-
-  const entries = parseJsonl(content)
-  return { records: scanSubagentEntries(entries), oversize: false }
+export function extractSubagentsFromSessionFile(filePath: string): SessionFileExtraction<SubagentRecord> {
+  return extractRecordsFromSessionFile(filePath, {
+    warnTag: 'subagent-extractor',
+    subject: 'subagent',
+    scan: scanSubagentEntries,
+  })
 }
 
 /**

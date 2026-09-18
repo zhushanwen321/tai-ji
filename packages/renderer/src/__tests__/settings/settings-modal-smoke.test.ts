@@ -10,7 +10,7 @@
  *
  * 另含（原独立文件 settings-modal-skill-dirs.test.ts 并入，同 mount 脚手架）：
  * W2 · D10 回归——onUpdateSkillDirs 的 transport.setSkillDirs reject 时 error toast
- * 反馈（非静默吞，CLAUDE.md 规则 #3）。
+ * 反馈（非静默吞，AGENTS.md 规则 #3）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/settings-modal-smoke.test.ts
  */

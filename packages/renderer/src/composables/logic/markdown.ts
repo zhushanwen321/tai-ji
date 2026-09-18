@@ -64,7 +64,7 @@ const t = i18n.global.t
  *
  * - filePaths：当前 session 项目里文件的**完整路径**集合（如 {'src/index.ts', 'packages/x.ts'}）。
  *   含/路径识别的白名单——正文里的裸路径（如 src/foo.ts）必须命中此集合才链接化。
- *   数据源：fileSearchStore 的全量递归 file.search 结果（FileNode[]），扁平化为 FileNode.path Set。
+ *   数据源：useFileSearch.load 的全量递归 file.search 结果（FileNode[]，每次现拉），扁平化为 FileNode.path Set。
  * - localFiles：当前 session 项目里文件的 **basename** 集合（如 {'design.md', 'README.md'}）。
  *   裸 basename（无 / 前缀，如 design.md）识别的白名单。
  *   数据源：同上，扁平化为 FileNode.name Set。

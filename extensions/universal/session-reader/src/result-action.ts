@@ -1,5 +1,5 @@
 /**
- * result action（subagent-sync-collect U6：design subagent-sync-collect.md §3.1.3）。
+ * result action。
  *
  * 从 tool-handler.ts 机械提取（max-lines 拆分轮）：纯移动零行为变更。纯函数 helper
  *（err/stripHash/requireStr/SESSION_ID_PREFIX_LEN）直接 import 自 handler-utils

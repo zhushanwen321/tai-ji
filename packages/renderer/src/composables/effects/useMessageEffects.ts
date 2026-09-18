@@ -3,7 +3,7 @@
  *
  * core use-connection 是 headless（零 store / 零 DOM），入站消息的副作用回调
  * （session.exited / message.complete / session.subagents / session.subagentEntriesAppended /
- * session.workflowUpdate / subagent.stream_delta / 全局 error）与 runtime 崩溃清理
+ * session.workflowUpdate / 全局 error）与 runtime 崩溃清理
  * （finalizeAllStreaming / clearAllPending）统一归位到本层。
  *
  * 本文件是 renderer 层（可 import store），供 useConnection 装配点经
@@ -23,12 +23,12 @@ import { handleCompletion } from '@/composables/effects/useCompletionNotify'
 import { consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { invalidateStreamSubscription, subscribeSession } from '@taiji/core'
 import type { InboundEffects } from '@taiji/core'
-import { resolveSubagentParentSessionId, subagentVirtualId } from '@taiji/shared'
-import type { PiEntry, PiToolCallEntryForm, ServerMessage, ServerMessageMap, SubagentRecord } from '@taiji/shared'
+import { subagentVirtualId } from '@taiji/shared'
+import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } from '@taiji/shared'
 
 const t = i18n.global.t
 
-// ── [crash-resilience T4 回流修复] 恢复窗口编排（respawn 过渡态）──
+// ── [T4 回流修复] 恢复窗口编排（respawn 过渡态）──
 //
 // Gate B 实测缺陷（0/3 提示条）根因：pi 死亡 → runtime removeSessionEntry → bus.clearSession
 // 清掉 renderer 订阅；自动恢复成功 publish session.restored 时 bus entry 内零订阅者（live 不达）；
@@ -125,7 +125,7 @@ function handleSessionExited(sessionId: string, payload: { code: number | null; 
 }
 
 /**
- * [u8] 处理 session.restored（pi 崩溃自动恢复成功，crash-resilience D7 / T4）。
+ * [u8] 处理 session.restored（pi 崩溃自动恢复成功，D7 / T4）。
  *
  * 对话流插入恢复提示条（T4 文案：在途回合未保留、后台任务/子代理已终止不自动恢复、
  * 可继续发消息）+ 复位 dead 态标记 + 收口过渡态（respawnPending 清除 → panel 派生回
@@ -223,23 +223,6 @@ function handleWorkflowUpdate(sessionId: string, update: ServerMessageMap['sessi
   useWorkflowStore().triggerWorkflowReload(sessionId, update.status ?? 'unknown')
 }
 
-/**
- * [idle-refresh] 处理 subagent.stream_delta 帧（docs/design/timeout-streaming-ui-idle.md §5.1 D1 桥接）。
- *
- * sync subagent/workflow 编排期父 session 的 message.* 帧构造性为零（生产端不消费
- * onUpdate），子代理活跃信号走本帧旁路——core routeInbound FALLBACK 按 type 识别后
- * 经 InboundEffects 调用本回调。解析 payload.sessionId（shared 纯函数双形态归一：
- * relay tee 通道三段式虚拟 id `subagent:<mainSessionId>:<subagentId>` → 提取父 sid；
- * 旧 widget 通道主 sid 原样）后刷新父 session 的 streaming idle timer，防「子面板
- * 在打字、父气泡被判无进展」。sessionId 缺失（坏形状帧）no-op——解析是纯字符串
- * 函数无失败形态，无 id 即无可刷新目标。
- */
-function handleSubagentStreamDelta(frame: ServerMessage): void {
-  const sid = (frame.payload as { sessionId?: string } | null)?.sessionId
-  if (typeof sid !== 'string' || !sid) return
-  useChatStore().refreshStreamingTimer(resolveSubagentParentSessionId(sid))
-}
-
 /** 全局 error 兜底（无 sessionId 无 id 的 server-push error → toast 提示）。 */
 function handleGlobalError(message: string): void {
   useToast().error(message)
@@ -271,7 +254,6 @@ export function createInboundEffects(): InboundEffects {
     onMessageComplete: handleMessageComplete,
     onSubagents: handleSubagents,
     onSubagentEntries: handleSubagentEntries,
-    onSubagentStreamDelta: handleSubagentStreamDelta,
     onWorkflowUpdate: handleWorkflowUpdate,
     onGlobalError: handleGlobalError,
     onSessionError: handleSessionError,

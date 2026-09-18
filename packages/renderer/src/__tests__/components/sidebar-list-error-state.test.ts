@@ -62,12 +62,9 @@ vi.mock('@/stores/subagent', () => ({
 }))
 vi.mock('@/stores/workflow', () => ({
   useWorkflowStore: () => ({
-    recordsOf: () => ({ value: [] }), getRecordsBySession: () => [], hasRunningOrPaused: () => false,
+    recordsOf: () => ({ value: [] }), getRecordsBySession: () => [],
     isLoading: false, loadError: null,
-    workflowCount: () => 0, getCurrentWorkflow: () => null,
-    selectWorkflow: vi.fn(), backToWorkflowList: vi.fn(),
     loadWorkflows: vi.fn(() => Promise.resolve()),
-    selectAgentCall: vi.fn(() => Promise.resolve()), backFromAgentCall: vi.fn(),
   }),
 }))
 vi.mock('@/stores/navigation', () => ({
@@ -84,7 +81,6 @@ vi.mock('@/composables/features/command/useCommandStore', () => ({
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
 }))
-vi.mock('@/composables/features/chat/useListSync', () => ({ useListSync: vi.fn() }))
 vi.mock('@taiji/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
   dispatchSession: vi.fn(),

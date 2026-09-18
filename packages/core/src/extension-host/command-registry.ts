@@ -138,7 +138,7 @@ export class CommandRegistry {
   /**
    * slash 命令合并源（W3 收编，D1 归一终态）：registry 声明 ∪ pi 真源。
    *
-   * 合并规则（03-slash-command-unify.md §3.2 D3-1/D3-2）：
+   * 合并规则：
    * - 同名去重：两源都有 → 1 项，description 元数据取声明（schema v2 声明是 description 唯一来源）
    * - 存在性交叉校验：pi 真源非空（有 session 真源可对照）→ 仅声明侧存在（pi 无）隐藏，避免死命令；
    *   pi 真源为空（landing 态无 session）→ 交叉校验不生效，声明即显示（slice TC2 裁决）

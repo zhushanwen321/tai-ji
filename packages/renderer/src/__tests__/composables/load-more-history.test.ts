@@ -1,5 +1,5 @@
 /**
- * [u6-paging-protocol] 「加载更早」游标翻页测试（crash-resilience §3.3 D4 中期）。
+ * [u6-paging-protocol] 「加载更早」游标翻页测试（D4 中期）。
  *
  * 原 W4 getFullHistory 全量通路已退役（游标翻页完全替代）。策略：mock WS RPC
  * （chat.getHistory 带 cursor），验证：

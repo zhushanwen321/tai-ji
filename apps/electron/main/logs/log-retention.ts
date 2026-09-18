@@ -1,7 +1,7 @@
 /**
  * logs/ 目录保留期清理扫描（main 进程侧）。
  *
- * [crash-resilience §3.3 D6-⑦] 现状缺口：runtime logger 的 cleanExpiredLogs 唯一调用点
+ * [D6-⑦] 现状缺口：runtime logger 的 cleanExpiredLogs 唯一调用点
  * 是 initLogger（只在 runtime 启动时跑一次）；桌面 app 长开（实测 uptime 20 天）下，
  * runtime-* / pi-*（tee 实测单 session 累计 198MB）/ plugin-crash-* 的超龄文件在长寿
  * 运行期间无任何清理触发。本模块由 main 进程挂**每日定时器复扫** logs/ 全部清理前缀，
@@ -15,7 +15,7 @@
  * 保留天数 = shared `readLogKeepDays()`（env `TAIJI_LOG_KEEP_DAYS` 覆盖 || 默认 7）：
  * main（本模块）与 runtime（initLogger 清理）两进程同调同一函数，不出现两套值域漂移。
  *
- * 领地注：本文件属 crash-resilience u5a-main-logging 单元；u2（renderer-log handler）
+ * 领地注：本文件属 u5a-main-logging 单元；u2（renderer-log handler）
  * 落盘的 renderer-error-<date>.log 前缀已提前纳入清理清单（设计 D6-⑦ 全前缀覆盖）。
  */
 import { readdirSync, statSync, unlinkSync } from 'node:fs'

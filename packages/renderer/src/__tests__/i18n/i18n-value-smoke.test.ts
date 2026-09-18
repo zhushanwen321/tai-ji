@@ -75,15 +75,18 @@ describe('Sidebar zh-CN locale + SegmentedTab tab label i18n', () => {
     expect(i18n.global.t('sidebar.retry')).toBe('重试')
   })
 
-  it('SegmentedTab tab label 走 i18n key（subagent/workflow 已新增 key）', async () => {
+  it('SegmentedTab tab label 走 i18n key（三 tab 终态：session/file/plugin）', async () => {
     await setLocale('zh-CN')
-    const subagentLabel = i18n.global.t('sidebar.segmentedTab.subagent')
-    const workflowLabel = i18n.global.t('sidebar.segmentedTab.workflow')
-    expect(subagentLabel).toBeTruthy()
-    expect(workflowLabel).toBeTruthy()
+    const sessionLabel = i18n.global.t('sidebar.segmentedTab.session')
+    const fileLabel = i18n.global.t('sidebar.segmentedTab.file')
+    const pluginLabel = i18n.global.t('sidebar.segmentedTab.plugin')
+    expect(sessionLabel).toBeTruthy()
+    expect(fileLabel).toBeTruthy()
+    expect(pluginLabel).toBeTruthy()
     // 不应回退到 key 本身（说明 key 缺失）
-    expect(subagentLabel).not.toBe('sidebar.segmentedTab.subagent')
-    expect(workflowLabel).not.toBe('sidebar.segmentedTab.workflow')
+    expect(sessionLabel).not.toBe('sidebar.segmentedTab.session')
+    expect(fileLabel).not.toBe('sidebar.segmentedTab.file')
+    expect(pluginLabel).not.toBe('sidebar.segmentedTab.plugin')
   })
 
   it('SegmentedTab.vue 源码不再含 \'Agents\' / \'Flows\' 硬编码字面量', () => {
@@ -93,6 +96,9 @@ describe('Sidebar zh-CN locale + SegmentedTab tab label i18n', () => {
     )
     expect(source).not.toMatch(/label:\s*['"]Agents['"]/)
     expect(source).not.toMatch(/label:\s*['"]Flows['"]/)
+    // 2026-09-16 三 tab 终态：subagents / workflows 两枚 tab 值不再出现在 tab 定义里
+    expect(source).not.toMatch(/value:\s*['"]subagents['"]/)
+    expect(source).not.toMatch(/value:\s*['"]workflows['"]/)
   })
 })
 

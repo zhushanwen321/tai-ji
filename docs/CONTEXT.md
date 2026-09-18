@@ -82,6 +82,15 @@ taiji 与 pi 之间对 pi 私有语义的统一适配层（[ADR-0064](../adr/dec
 
 taiji subagent 体系的子任务执行单元：由引擎进程派生子进程（pi 引擎 spawn pi 子进程；zcode 引擎走 app-server RPC）执行子任务，宿主与引擎经 engine-protocol v1（NDJSON stdio）通信。体系由 5 类包协作：shell（`extensions/universal/subagent-workflow`）→ host core（`packages/subagent-core`）→ engine（`packages/pi-subagent-cli` / `packages/zcode-subagent-cli`）→ contract（`packages/subagent-engine-sdk`）。结构导航 SSOT：[docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)。
 
+### Fan-out / 批量派发
+
+2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收口后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
+
+**collect 退役迁移说明（2026-09-16 落地）**：
+1. 旧调用形态（`subagent start` 显式带 `collect` 字段）不会被 pi 拒绝——typebox 参数校验无 `additionalProperties`，未知字段静默放行且不剥离；字段退役后行为等价原 `collect:"async"` 缺省路径（立即逐条通知），无迁移动作、无功能损失。
+2. 误读风险 = 调用方以为仍会攒批、等一条聚合通知——`subagent` tool 的 start description 已留迁移期提示（"The former collect param is removed — for 2+ independent tasks in one dispatch, use the `subagents` tool instead."）。
+3. 2+ 独立任务并行的正确调用 = `subagents` tool（`tasks` 数组、一次调用、一条聚合结果通知）。
+
 ### Execution Record
 
 subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。
@@ -184,7 +193,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。
 
 ### Sidebar（侧栏）
-L0/L1。持久容器（非单列表），所有 view 共用。顶部 Logo + 主操作区 → segmented tab（会话|文件）互斥切换 → 子视图列表 → 底部设置/用户。透明融合于 base（无 background）。折叠态。
+L0/L1。持久容器（非单列表），所有 view 共用。顶部 Logo + 主操作区 → segmented tab（会话|文件|Plugins）互斥切换 → 子视图列表 → 底部设置/用户。透明融合于 base（无 background）。折叠态。
 
 ### Workspace（工作区）
 L1 Region。main 区在 `view=chat` 时的容器。承载双 Panel 主从模式（单 Panel = 默认态，开第二 session 才 split）。
@@ -245,5 +254,7 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 ### Composer 工具条
 composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率）、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
 
-### WidgetArea
-对话流内的单行 pill 状态带（`packages/ui/src/features/chat/WidgetArea.vue`）：聚合该 session 全部 extension widget（todo/goal 等「给 agent 看的工作记忆」），每个 widget 一个 seg（状态点 + 标题 + 进度计数），点击 pill 经 Popover 弹出完整列表浮层，对话流零挤压。
+### 任务托盘（Widget Tray）
+composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。
+
+> **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。

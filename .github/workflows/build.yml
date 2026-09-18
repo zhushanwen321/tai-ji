@@ -41,6 +41,10 @@ jobs:
 
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+    # 上限守卫只能放本 job：GitHub 对 uses: 复用 workflow 的 caller job 只接受
+    # name/needs/if/permissions/concurrency/strategy/with/secrets 字段，caller 上写
+    # timeout-minutes 是 parse 期 startup_failure（ci.yml 全线 0 job 失败，2026-09-18）。
+    timeout-minutes: 20
     env:
       # 提到 job 级：Cache pi resources 步骤的 key 和 prepare 步骤共用同一版本号。
       # 与 scripts/prepare-pi-resources.sh 默认值对齐（0.84.4），避免 CI 打包内置旧 pi。

@@ -9,7 +9,6 @@
 // - 合法样本落 tmp：目录参数注入生效（真实落盘断言，非 mock fs）；
 // - 缺省目录 = pi 布局（相对 cwd resolve，pi 现行为不变）；
 // - barrel 逐名探针（红线 9）。
-// 设计权威源：docs/design/subagent-core-convergence.md §3.2 D-6。
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

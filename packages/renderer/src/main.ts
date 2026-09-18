@@ -31,7 +31,7 @@ resolvePlatform()
 setImageCacheWritePort(getImageCacheWritePort())
 
 const app = createApp(App)
-// 全局错误捕获三件套（crash-resilience §3.3 D2）：errorHandler/window error/unhandledrejection
+// 全局错误捕获三件套（D2）：errorHandler/window error/unhandledrejection
 // → electronAPI.reportRendererLog → main 落盘 renderer-error-<date>.log（E3 教训：崩溃前零日志）。
 // 必须在 mount 前安装（覆盖启动期错误）；自身零抛错，见 boot/error-reporter.ts。
 installRendererErrorReporting(app)

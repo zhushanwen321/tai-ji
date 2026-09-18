@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-smart-context",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "main": "index.ts",
   "taiji": {
@@ -15,8 +15,8 @@
             "ref": ""
           },
           "reminderThresholds": [
-            200000,
             400000,
+            500000,
             600000
           ],
           "excludedModels": []

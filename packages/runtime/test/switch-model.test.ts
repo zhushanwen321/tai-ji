@@ -12,20 +12,24 @@
  *
  * 写点单测追加（composer-model-session-isolation 设计 §5 U8 承诺的 model-control 写点覆盖；
  * impl-plan 台账中写点接入属 U1，本组用例是 Gate B 端到端之外的最小单测防线）：
- * 写点①（switchModel）/ 写点②（setThinkingLevel）成功后 persistModelBinding 落盘值 ==
- * get_state 读回的生效值（生效值胜请求值）；空值守卫负例 = sessionFilePath 缺失（pi 未
- * flush 窗口，Gate B 偏差 #9① 形态）时写点①不触发。注意「读回失败」在实现中是 fallback
- * 请求值仍写（自愈设计，session-model-control switchModel catch 分支），非「不写」。
+ * switchModel / setThinkingLevel 成功后读回值 == get_state 读回的生效值（生效值胜请求值）。
+ *
+ * [缓存治理批 3 U7 适配 → U8a/U8b 收口] 读侧 = extractLatestModelFromJsonl 反向读 JSONL
+ * 真源，pi mock 在 setModel / setThinkingLevel 成功后 append 对应 JSONL entry（真实 pi
+ * 行为：model_change / thinking_level_change 落盘），断言语义 = 「反向读 JSONL 可见」。
+ * U8 写点退役（W1/W2/W6）：persistModelBinding 的 sidecar 落盘断言（persistBindingCalls
+ * 记录 + 空值守卫负例）与原 readModelBinding 包装随写点删除一并移除——taiji 不再写任何
+ * model 持久层，持久层唯一写方 = pi JSONL。
  *
  * 运行：cd packages/runtime && npx vitest run test/switch-model.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, ProviderId } from '@taiji/shared'
 
-import { readModelBinding } from '../src/infra/pi/session-model-sidecar.js'
+import { extractLatestModelFromJsonl } from '../src/infra/pi/session-file-utils.js'
 
 import type {
   IMessageBroker,
@@ -54,20 +58,13 @@ vi.mock('../src/infra/pi/pi-provider-store.js', async (importOriginal) => {
     readSettings: () => ({}),
   }
 })
-// 写点①②断言：记录 persistModelBinding 的全部调用（真身委托，落盘行为不变）——
-// 既有用例透明；正例断言落盘值、负例断言「sessionFilePath 缺失时写点①不触发」。
-const persistBindingCalls = vi.hoisted(() =>
-  [] as Array<{ filePath: string; modelId: string; thinkingLevel: string }>,
-)
+// [U8a W1/W2 后] persistModelBinding 记录 mock 已随写点退役删除——taiji 侧不再有
+// model 持久层写点可观察；本 mock 仅保留 scanPiSessions 拦截（列表扫描走测试装置）。
 vi.mock('../src/infra/pi/session-file-utils.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/session-file-utils.js')>()
   return {
     ...actual,
     scanPiSessions: () => [],
-    persistModelBinding: (filePath: string, modelId: string, thinkingLevel: string) => {
-      persistBindingCalls.push({ filePath, modelId, thinkingLevel })
-      return actual.persistModelBinding(filePath, modelId, thinkingLevel)
-    },
   }
 })
 vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
@@ -210,13 +207,12 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
   })
 })
 
-describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1）——switchModel/setThinkingLevel → .model.json sidecar 落盘', () => {
+describe('model-control 生效值链（原 U1 写点覆盖，U8a 写点退役后 = 反向读 JSONL 可见）——switchModel/setThinkingLevel [U7/U8a]', () => {
   let tmpDir: string
 
   beforeEach(() => {
     vi.clearAllMocks()
     providerMocks.defaultModel.value = { provider: 'test-provider', modelId: 'test-model' }
-    persistBindingCalls.length = 0
     tmpDir = mkdtempSync(join(tmpdir(), 'switch-model-sidecar-'))
   })
 
@@ -225,7 +221,7 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
     rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  /** 建一个带已 materialize 主文件的 seed session（persistBindingSidecar 的 existsSync 守卫要求主文件存在）。 */
+  /** 建一个带已 materialize 主文件的 seed session（对齐真实 pi：会话文件先于对话存在）。 */
   async function seedSessionWithFile(ctx: ReturnType<typeof createService>, id: string): Promise<string> {
     const sessionFile = join(tmpDir, `${id}.jsonl`)
     writeFileSync(sessionFile, '{"type":"session"}\n', 'utf8')
@@ -237,7 +233,12 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
     return sessionFile
   }
 
-  it('写点①: switchModel 成功后 sidecar 落盘 get_state 读回的生效值（生效值胜请求值）', async () => {
+  /** [U7] 模拟 pi 的 JSONL append（真实 pi 在 setModel/setThinkingLevel 成功后写对应 entry）。 */
+  function appendJsonl(sessionFile: string, line: object): void {
+    appendFileSync(sessionFile, JSON.stringify(line) + '\n', 'utf8')
+  }
+
+  it('switchModel 成功后 get_state 读回的生效值反向读 JSONL 可见（生效值胜请求值；持久层唯一写方 = pi）', async () => {
     const ctx = createService()
     const sessionFile = await seedSessionWithFile(ctx, 's1')
     const client = ctx.clientMap.get('s1')!
@@ -248,18 +249,24 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
       model: { provider: 'eff-provider', id: 'eff-model' },
       thinkingLevel: 'high',
     })
+    // [U7] pi 侧生效落盘：setModel 成功后 append model_change；thinking 'high' 是 pi 既有状态
+    vi.mocked(client.setModel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'model_change', provider: 'eff-provider', modelId: 'eff-model' })
+      appendJsonl(sessionFile, { type: 'thinking_level_change', thinkingLevel: 'high' })
+    })
 
     const effective = await ctx.service.switchModel('s1', 'req-provider' as ProviderId, 'req-model')
 
     expect(effective).toBe('eff-provider/eff-model')
-    // 断言目标：落盘值 == get_state 读回生效值（非请求值）
-    expect(readModelBinding(sessionFile)).toEqual({
+    // 断言目标：读回值 == get_state 读回生效值（非请求值）——持久层唯一写方 = pi JSONL
+    //（U8a W1 后 taiji 不再写 .model.json），列表可见性经扫描反向读达成
+    expect(extractLatestModelFromJsonl(sessionFile)).toEqual({
       modelId: 'eff-provider/eff-model',
       thinkingLevel: 'high',
     })
   })
 
-  it('写点②: setThinkingLevel 成功后 sidecar 落盘钳制生效值（get_state 读回胜请求值）', async () => {
+  it('setThinkingLevel 成功后钳制生效值反向读 JSONL 可见（get_state 读回胜请求值）', async () => {
     const ctx = createService()
     const sessionFile = await seedSessionWithFile(ctx, 's1')
     const client = ctx.clientMap.get('s1')!
@@ -270,35 +277,21 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
       // P3 钳制形态：请求 max，pi 钳到 xhigh
       thinkingLevel: 'xhigh',
     })
+    vi.mocked(client.setModel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'model_change', provider: 'eff-provider', modelId: 'eff-model' })
+    })
     await ctx.service.switchModel('s1', 'eff-provider' as ProviderId, 'eff-model')
 
+    // [U7] pi 侧生效落盘：setThinkingLevel 成功后 append thinking_level_change（钳制值）
+    vi.mocked(client.setThinkingLevel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'thinking_level_change', thinkingLevel: 'xhigh' })
+    })
     const effective = await ctx.service.setThinkingLevel('s1', 'max')
 
     expect(effective).toBe('xhigh')
-    expect(readModelBinding(sessionFile)).toEqual({
+    expect(extractLatestModelFromJsonl(sessionFile)).toEqual({
       modelId: 'eff-provider/eff-model',
       thinkingLevel: 'xhigh',
     })
-  })
-
-  it('写点①空值守卫负例: sessionFilePath 缺失（pi 未 flush 窗口）→ 写点①不触发、无 sidecar', async () => {
-    const ctx = createService()
-    // Gate B 偏差 #9① 形态：create 瞬间 pi 尚未首 flush，getState 无 sessionFile
-    const client = makeClient()
-    vi.mocked(client.getState).mockResolvedValue({ sessionId: 's2' })
-    vi.mocked(ctx.pm.createSession).mockResolvedValueOnce(client)
-    ctx.clientMap.set('s2', client)
-    await ctx.service.create('/tmp', 'seed-s2')
-
-    vi.mocked(client.getState).mockResolvedValue({
-      sessionId: 's2',
-      model: { provider: 'eff-provider', id: 'eff-model' },
-    })
-    await ctx.service.switchModel('s2', 'req-provider' as ProviderId, 'req-model')
-
-    // 守卫（if (session.sessionFilePath)）生效：写点①未以空/缺失路径触发，也无 sidecar 产物
-    expect(persistBindingCalls.some((c) => !c.filePath)).toBe(false)
-    expect(persistBindingCalls.some((c) => c.filePath === join(tmpDir, 's2.jsonl'))).toBe(false)
-    expect(existsSync(join(tmpDir, 's2.jsonl.model.json'))).toBe(false)
   })
 })

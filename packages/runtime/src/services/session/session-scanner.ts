@@ -15,7 +15,7 @@ import type { IScannerSessionOps } from './session-internal.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
 import type { ScannedSession } from './types.js'
-import { detectBareWorkspaceCached, pruneBareCache } from '../worktree/workspace-detector.js'
+import { detectBareWorkspaceCached } from '../worktree/workspace-detector.js'
 
 export class SessionScanner {
   constructor(
@@ -56,11 +56,12 @@ export class SessionScanner {
     return result
   }
 
-  /** Prune git-info + bare-workspace cache entries for cwds no longer represented in any session. */
+  /** Prune stale repo-observer cache entries for cwds no longer represented in any session. */
   private pruneGitCache(allSummaries: SessionSummary[]): void {
     const cwds = new Set(allSummaries.map(s => s.cwd))
+    // 收缩动作打观测器单点：gitInfoCache/bareCache 已合并为观测器单一缓存，
+    // pruneStaleCache（门面）一次调用即覆盖 branch/worktree/bare 全部条目
     this.gitInfoReader.pruneStaleCache(cwds)
-    pruneBareCache(cwds)
   }
 
   private scannedToSummary(s: ScannedSession): SessionSummary {
@@ -79,7 +80,7 @@ export class SessionScanner {
       isBareWorkspace: detectBareWorkspaceCached(s.cwd),
       status: (outcome ?? 'idle') as SessionStatus,
       lastActiveAt: s.lastModified,
-      // modelId 来自 scanSessionMeta 第七读的 .model.json sidecar（scan 占位语义）。
+      // modelId 来自 scanSessionMeta 第七读的反向读 JSONL 真源（scan 占位语义）。
       // source:'scan' 标记让合并侧（core mergeViewSnapshot 守卫）能按来源分流——扫描占位
       // 空值不覆盖实例/广播真值（#2 空串覆盖事故防线）；owner 快照的显式空值不受此守卫。
       modelId: s.modelId ?? '',

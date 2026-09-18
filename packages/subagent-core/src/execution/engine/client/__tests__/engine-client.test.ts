@@ -19,6 +19,10 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
   hasLiveProcessHandleCore,
 } from "../../host/spawned-children.ts";
+import {
+  _resetHostUiRequestEndpointForTest,
+  setHostUiRequestEndpoint,
+} from "../../host/host-ui-endpoint.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -31,6 +35,9 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
+  // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后必须清空，
+  // 防跨用例/跨文件串扰（槽是进程级 globalThis 状态）
+  _resetHostUiRequestEndpointForTest();
 });
 
 interface ClientHandle {
@@ -276,13 +283,9 @@ describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
 });
 
 describe("host/askUser ack 两阶段（R9-2）", () => {
-  it("uiRequestHandler 注入：先回 {ack:true}，handler 结果异步补帧②（引擎 echo 结果 event）", async () => {
+  it("host/askUser 应答端（槽注入）：先回 {ack:true}，handler 结果异步补帧②（引擎 echo 结果 event）", async () => {
     const events: Array<{ type: string; message?: string }> = [];
     const { client, cleanup } = makeClient({
-      uiRequestHandler: async (req) => {
-        expect(req.method).toBe("select");
-        return { value: "answer-A" };
-      },
       args: [
         FAKE_ENGINE,
         "--run-actions",
@@ -291,6 +294,12 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
           { op: "askUser", request: { method: "select", id: "q1", title: "pick" } },
         ]),
       ],
+    });
+    // [D3] 构造后经槽登记（生产 = SubagentService init/initSession 写点）——reverse-router
+    // 消费时现读，构造期无固化面
+    setHostUiRequestEndpoint(async (req) => {
+      expect(req.method).toBe("select");
+      return { value: "answer-A" };
     });
     const unregister = client.registerRunRoute("run-1", {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
@@ -306,14 +315,14 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
   it("handler 抛错 → 引擎收 {cancelled:true}（dialog-queue 应答链同款兜底）", async () => {
     const events: Array<{ type: string; message?: string }> = [];
     const { client, cleanup } = makeClient({
-      uiRequestHandler: async () => {
-        throw new Error("handler exploded");
-      },
       args: [
         FAKE_ENGINE,
         "--run-actions",
         JSON.stringify([{ op: "askUser", request: { method: "confirm", id: "q2" } }]),
       ],
+    });
+    setHostUiRequestEndpoint(async () => {
+      throw new Error("handler exploded");
     });
     const unregister = client.registerRunRoute("run-1", {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
@@ -326,8 +335,9 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
     await cleanup();
   });
 
-  it("无 uiRequestHandler → {unsupported:true}（未实现的交互能力，引擎自行降级）", async () => {
+  it("槽无应答端 → {unsupported:true}（未实现的交互能力，引擎自行降级）", async () => {
     const events: Array<{ type: string; message?: string }> = [];
+    _resetHostUiRequestEndpointForTest(); // 槽显式清空（防其他文件的进程级槽残留）
     const { client, cleanup } = makeClient({
       args: [
         FAKE_ENGINE,
@@ -384,13 +394,13 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
   it("人机交互面 ack 后永不计时：handler 挂 60s 不判引擎故障（R9-2 负向 + ADR-0047）", async () => {
     vi.useFakeTimers();
     const { client, cleanup } = makeClient({
-      uiRequestHandler: () => new Promise(() => {}), // 用户永不回答
       args: [
         FAKE_ENGINE,
         "--run-actions",
         JSON.stringify([{ op: "askUser", request: { method: "select", id: "q-hang" } }]),
       ],
     });
+    setHostUiRequestEndpoint(() => new Promise(() => {})); // 用户永不回答（槽注入，D3）
     await client.ensureConnected();
     const enginePid = client.enginePid!;
     void client

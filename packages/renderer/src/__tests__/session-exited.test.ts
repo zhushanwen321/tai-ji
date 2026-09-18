@@ -128,7 +128,7 @@ describe('session.exited 事件端到端反馈链路', () => {
     expect(msgs.length).toBeGreaterThanOrEqual(1)
     expect(msgs.some((m) => m.role === 'assistant' && m.status === 'error')).toBe(true)
     const errMsg = msgs.find((m) => m.status === 'error')!
-    expect(errMsg.content).toContain('extension load failed')
+    expect(errMsg.error).toContain('extension load failed') // [M2] 错误文本只住 msg.error
 
     // 2. session store：status 置 dead
     expect(sessionStore.list.find((s) => s.id === 's-exit')?.status).toBe('dead')

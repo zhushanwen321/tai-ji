@@ -18,60 +18,22 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import {
+  composerChatModule,
+  composerFlowModule,
+  composerApiModule,
+  composerChatStoreModule,
+  composerChildStubs,
+} from '../helpers/composer-mount'
 
-// ── mock composable / api（防真依赖构造报错，同 composer-file-injection.test.ts）──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    startFlow: vi.fn(),
-    submitFirstMessage: vi.fn(),
-    currentModel: ref(null),
-    setPendingModel: vi.fn(),
-    state: ref('idle'),
-    currentSessionId: ref(null),
-    currentCwd: ref(null),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    getQueueState: () => undefined,
-    isCompacting: () => false,
-    // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
+// ── mock composable / api / store（公共骨架收敛到 helpers/composer-mount.ts 单源；
+//    sessionStore 因需可变 active 保留本地 vi.hoisted 形态）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/stores/chat', () => composerChatStoreModule())
 // sessionStore mock：SessionItem（写入侧目标路由）与 Composer 壳 getActiveSessionId 共用
 const sessionState = vi.hoisted(() => ({
   active: undefined as { id: string; cwd: string } | undefined,
@@ -124,20 +86,8 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const composerStubs = {
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
-  const wrapper = mount(Composer, { props, global: { stubs: composerStubs } })
+  const wrapper = mount(Composer, { props, global: { stubs: composerChildStubs } })
   mounted.push(wrapper)
   const spy = inputSpies.at(-1)
   if (!spy) throw new Error('ComposerInput spy 未生成')
@@ -148,7 +98,7 @@ function mountSessionItem(id: string, label: string) {
   const wrapper = mount(SessionItem, {
     attachTo: document.body,
     props: { session: { id, label, cwd: '/p', lastActiveAt: 0 }, active: false, status: 'done' as never },
-    global: { stubs: composerStubs },
+    global: { stubs: composerChildStubs },
   })
   mounted.push(wrapper)
   return wrapper

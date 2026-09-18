@@ -1,0 +1,298 @@
+/**
+ * skill-reload real 轨共享 helper（skill-reload-survival / -askuser / -spawn-race 三 spec 共用）。
+ * 来源设计：.tmp/tech-design/skill-reload-nondestructive.md §4（S1/S1b/S2）；faux LLM 轨
+ * 装配复用 launch-app-real（L2.5，凭证无关零 token——选型理由见 e2e-map.json E2E-SKILLRELOAD-* note）。
+ *
+ * ── 各断言的「样本来源」（全部 grep/读源码核实，非推断）──
+ * - D8-a 归因行 `[skill-reload] dir=<global|project:<cwd>> event=<chokidar 原生枚举>
+ *   affectedSessions=[...]`：packages/runtime/src/services/skill-registry.ts:762
+ *   （console.log → infra/logger.ts:434 console 补丁 → <dataDir>/logs/runtime-<date>.log，
+ *   logger.ts:346）。
+ * - D8-b 决策行 `[reload-orchestrator] sessionId=<sid> decision=immediate|queued|
+ *   queued-consumed|skipped-deleted`：services/session/reload-orchestrator.ts:70/89/100/108/113。
+ * - preserved 行 `[workflow-events] session_shutdown reason=reload preserved={runs:N,
+ *   records:M, stores:K}`：extensions/universal/subagent-workflow/src/workflow-events.ts:486，
+ *   走 extension-logger logger.debug——**仅在 TAIJI_AGENT_DEBUG=1 时落文件**
+ *   （extensions/shared/extension-logger/src/index.ts:411-434：`<agentDir>/logs/<extName>-<date>.log`，
+ *   extName="subagents"；agentDir = PI_CODING_AGENT_DIR = <dataDir>/agent，rpc-client.ts:283 注入）。
+ *   因此消费本 helper 的 spec 必须在 launchRealApp 前设 process.env.TAIJI_AGENT_DEBUG='1'。
+ * - preserved 计数语义：runs = workflow run 聚合根数；records = Σ run.state.calls.size
+ *   （每 call 对应一条 subagent record）；stores = sessionState 条目数（workflow-events.ts:477-487）。
+ * - run 存活反证串：`[relay] connection lost, killing child (kill-on-disconnect)` 与
+ *   `[relay] child exited recordId=... code=143`（infra/relay/relay-registry.ts:465/459）。
+ * - workflow-record 权威 entry：主 session JSONL `{"customType":"workflow-record","data":
+ *   {v:1,snapshot}}`，snapshot.state.status ∈ 'running'|'done'（orchestration/models/types.ts:34
+ *   两态；终态 flush 永不节流），读取形态同 workflow-thinkinglevel-real.spec.ts findWorkflowRecord。
+ * - composer skill 浮层候选行：CommandPopover.vue:95 `.cmd-row`（portal 到 body，00-overview §6.4），
+ *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
+ *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
+ * - 托盘：`[data-testid="tray-builtin-button"][data-kind="workflow"]` +
+ *   `[data-testid="tray-builtin-count"]`（ComposerTray.vue:81/106-110；data-state running|idle）。
+ * - 引擎 CLI 进程 marker：`pi-subagent-cli.mjs`（faux 轨 seedFauxDataDir 的 subagents/config.json
+ *   command/args，launch-app-real.ts:185-193）；relay 代理 marker `relay.mjs`（内嵌镜像脚本文件名，
+ *   subagent-core/src/execution/relay-env.ts:12）；真实 pi 子进程 marker：bundled pi 二进制
+ *   `resources/pi/`（findPiExecutable 缺省）。
+ * - 项目 skill 目录 `<cwd>/.pi/skills` 进扫描集与 watch 集：services/skill-dirs.ts:39/95
+ *   （A1 扫描集对账）；skill name = 目录名（scanners/skill-scanner.ts loadSkillFromDir）。
+ * - 全局 skill 目录：`<dataDir>/agent/skills`（skill-dirs.ts:72 resolveGlobalSkillDirs 首项）。
+ */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { readRuntimeLogs, type FauxStep } from './launch-app-real'
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/**
+ * 把一个 staged builtin extension bundle 种进 `<dataDir>/agent/extensions/<name>/`
+ * （subagent pi 孙进程的唯一扩展发现通道——TAIJI_EXTENSION_PATHS 只注入主 pi）。
+ * 用 staged 形态而非源码：bundle 自包含（esbuild noExternal，零外部 require），源码形态
+ * 的 workspace 依赖（@zhushanwen/extension-protocol 等）在 mkdtemp 目录解析不到。
+ * staged package.json 的 main 指向 index.ts（builtin 装载链不走 main），此处改指 index.js。
+ */
+export function seedSubagentExtension(dataDir: string, stagedName: string): string {
+  const staged = path.join(REPO_ROOT, 'apps', 'electron', 'resources', 'extensions', '@zhushanwen', stagedName)
+  const bundle = path.join(staged, 'index.js')
+  if (!fs.existsSync(bundle)) {
+    throw new Error(`seedSubagentExtension: staged bundle 缺失 ${bundle}——先跑 node scripts/bundle-extensions.mjs`)
+  }
+  const dest = path.join(dataDir, 'agent', 'extensions', stagedName)
+  fs.mkdirSync(dest, { recursive: true })
+  fs.copyFileSync(bundle, path.join(dest, 'index.js'))
+  const pkg = JSON.parse(fs.readFileSync(path.join(staged, 'package.json'), 'utf8'))
+  pkg.main = 'index.js'
+  // eslint-disable-next-line no-magic-numbers -- 缩进 2 空格，staged package.json 与源格式保持一致（auth-storage 同款豁免）
+  fs.writeFileSync(path.join(dest, 'package.json'), JSON.stringify(pkg, null, 2))
+  return dest
+}
+
+/** faux 流控（tokens/s，pi-ai faux 按 chars/4 估 token）：长文本 2400 chars ≈ 60s 单响应 */
+export const FAUX_TPS = 10
+/** subagent 长响应文本长度（chars）。duration ≈ chars / (4 × FAUX_TPS) */
+export const SUBAGENT_STREAM_CHARS = 2400
+
+/** faux 槽位演员（launch-app-real seedFauxDataDir 四演员清单内的两个 slot actor） */
+export const SUB_MODEL_A = 'faux/faux-1-b'
+export const SUB_MODEL_B = 'faux/faux-1-c'
+
+/** mkdtemp 前缀统一走 os.tmpdir()（测试红线：写删目标自建自删） */
+export function makeTempDir(prefix: string): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+}
+
+/** SKILL.md 最小内容（skill-scanner：description 取正文首个非标题行；name 取目录名） */
+export function makeSkillMd(description: string): string {
+  return ['# skill', '', description, '', 'Instructions: reply with a short confirmation.', ''].join('\n')
+}
+
+/** 写项目 skill `<projectDir>/.pi/skills/<name>/SKILL.md`（存在即覆盖 = 模拟编辑） */
+export function writeProjectSkill(projectDir: string, name: string, description: string): string {
+  const dir = path.join(projectDir, '.pi', 'skills', name)
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'SKILL.md')
+  fs.writeFileSync(file, makeSkillMd(description))
+  return file
+}
+
+/**
+ * 写全局 skill `<dataDir>/agent/skills/<name>/SKILL.md`（resolveGlobalSkillDirs 首项目录）。
+ * 返回 skill 目录路径——调用方 finally 里必须 rmSync（全局目录写入红线：唯一临时名 + 清理；
+ * dataDir 本身是 mkdtemp，整树删除是兜底，显式删是纪律）。
+ */
+export function writeGlobalSkill(dataDir: string, name: string, description: string): string {
+  const dir = path.join(dataDir, 'agent', 'skills', name)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), makeSkillMd(description))
+  return dir
+}
+
+/**
+ * workflow 探针脚本源码（单 agent() 调用，faux 槽位演员长响应保持 run 在飞）。
+ * lintScript 约束：含 agent() 入口 / 无 bare IIFE / 不用 result 作变量名。
+ */
+export function makeSurvivalProbeSource(scriptName: string, model: string, description: string): string {
+  return [
+    `// ${scriptName} — skill-reload real 轨探针（e2e 运行期生成，非 repo fixture）`,
+    '/* @pi-meta',
+    `name: ${scriptName}`,
+    `description: ${description}`,
+    'phases: ["probe"]',
+    '*/',
+    '',
+    'phase("probe");',
+    '',
+    `const outcome = await agent({`,
+    '  prompt: "Reply with the verification text and nothing else.",',
+    `  model: "${model}",`,
+    `  description: "${description}",`,
+    '});',
+    '',
+    'return outcome;',
+    '',
+  ].join('\n')
+}
+
+/** 写 user 级 workflow 脚本（<dataDir>/agent/workflows/，00-overview §5.4 唯一可靠发现路径） */
+export function writeUserWorkflowScripts(dataDir: string, scripts: Array<{ name: string; source: string }>): string[] {
+  const dir = path.join(dataDir, 'agent', 'workflows')
+  fs.mkdirSync(dir, { recursive: true })
+  return scripts.map(({ name, source }) => {
+    const file = path.join(dir, `${name}.js`)
+    fs.writeFileSync(file, source)
+    return file
+  })
+}
+
+/** 主对话 faux 队列：逐轮 toolCall workflow run → 收尾文本（run 后台启动，turn 随即结束） */
+export function mainDispatchSteps(runPaths: string[], closingText: string): FauxStep[] {
+  const steps: FauxStep[] = runPaths.map((p) => ({
+    toolCalls: [{ name: 'workflow', args: { action: 'run', name: p } }],
+  }))
+  steps.push({ text: closingText })
+  return steps
+}
+
+/** subagent faux 队列（model-keyed）：长流式响应保持 run 在飞跨越编辑→reload→adoption 全窗口 */
+export function survivorSteps(model: string, streamText: string, extraSteps: FauxStep[] = []): Record<string, FauxStep[]> {
+  return { [model]: [{ text: streamText }, ...extraSteps] }
+}
+
+/** 读 <dataDir>/agent/logs/ 下 extension 文件日志（preserved 行证据源；TAIJI_AGENT_DEBUG=1 时产出） */
+export function readExtensionLogs(dataDir: string): string {
+  const logDir = path.join(dataDir, 'agent', 'logs')
+  if (!fs.existsSync(logDir)) return ''
+  return fs.readdirSync(logDir)
+    .filter((f) => f.endsWith('.log'))
+    .map((f) => fs.readFileSync(path.join(logDir, f), 'utf8'))
+    .join('\n')
+}
+
+/** 轮询节奏常量（日志/文件轮询间隔） */
+const LOG_POLL_INTERVAL_MS = 500
+/** 引擎执行树死亡级联（stdin EOF → relay 断连 → kill-on-disconnect）的宽限上界 */
+const ENGINE_TREE_GONE_TIMEOUT_MS = 15_000
+/** 引擎执行树归零核对间隔 */
+const TREE_POLL_INTERVAL_MS = 1000
+
+/** 轮询 readFn 产物直到 matcher 命中，返回命中行；超时返回 null（断言由调用方继续） */
+export async function waitForLogLine(
+  readFn: () => string,
+  matcher: (line: string) => boolean,
+  timeoutMs: number,
+  intervalMs = LOG_POLL_INTERVAL_MS,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const hit = readFn().split('\n').find((l) => matcher(l))
+    if (hit !== undefined) return hit
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return null
+}
+
+/** preserved 行计数解析（取最后一条；计数语义见文件头） */
+export interface PreservedCounts {
+  runs: number
+  records: number
+  stores: number
+}
+export function parseLastPreserved(logs: string): PreservedCounts | null {
+  const lines = logs.split('\n').filter((l) => l.includes('session_shutdown reason=reload preserved={'))
+  const last = lines[lines.length - 1]
+  if (last === undefined) return null
+  const runs = /runs:(\d+)/.exec(last)?.[1]
+  const records = /records:(\d+)/.exec(last)?.[1]
+  const stores = /stores:(\d+)/.exec(last)?.[1]
+  if (runs === undefined || records === undefined || stores === undefined) return null
+  return { runs: Number(runs), records: Number(records), stores: Number(stores) }
+}
+
+/** runtime 日志按行谓词匹配（D8-a/D8-b/kill 串的读取口；路径 = readRuntimeLogs） */
+export function runtimeLogLines(dataDir: string): string[] {
+  return readRuntimeLogs(dataDir).split('\n')
+}
+
+/** 读 JSONL 文件为 unknown[]（不可读/空文件返回 null——pi 延迟写入策略下文件可能未落） */
+export function readJsonlEntries(file: string): unknown[] | null {
+  try {
+    const raw = fs.readFileSync(file, 'utf8').trim()
+    if (raw === '') return null
+    return raw.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as unknown)
+  } catch {
+    return null
+  }
+}
+
+/** workflow-record entry 最小投影（只取断言消费的 runId/status 面） */
+export interface WorkflowRecordView {
+  runId: string
+  status: string | undefined
+}
+
+/** 提取主 session JSONL 内指定 runId 的最后一条 workflow-record（W17：last-wins 终态） */
+export function lastWorkflowRecordFor(file: string, runId: string): WorkflowRecordView | null {
+  const entries = readJsonlEntries(file)
+  if (entries === null) return null
+  let latest: WorkflowRecordView | null = null
+  for (const e of entries) {
+    const rec = e as { customType?: unknown; data?: { v?: unknown; snapshot?: { runId?: unknown; state?: { status?: unknown } } } }
+    if (rec?.customType !== 'workflow-record' || rec?.data?.v !== 1) continue
+    const snap = rec.data.snapshot
+    if (typeof snap?.runId !== 'string' || snap.runId !== runId) continue
+    latest = {
+      runId: snap.runId,
+      status: typeof snap.state?.status === 'string' ? snap.state.status : undefined,
+    }
+  }
+  return latest
+}
+
+// ── 进程面（孤儿检查 / 引擎 pid 稳定性） ──────────────────────────────
+
+/** ps 单行最小面 */
+interface PsEntry {
+  pid: number
+  command: string
+}
+
+function psEntries(): PsEntry[] {
+  const out = execFileSync('ps', ['-Ao', 'pid=', '-o', 'command='], { encoding: 'utf8' })
+  return out.split('\n').flatMap((line) => {
+    const m = /^\s*(\d+)\s+(.+)$/.exec(line)
+    if (m === null) return []
+    return [{ pid: Number(m[1]), command: m[2] }]
+  })
+}
+
+/** 引擎执行树 marker（含子进程；孤儿子集都是这三族，见文件头 marker 说明） */
+const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'relay.mjs', 'resources/pi/'] as const
+
+function pidsMatching(markers: readonly string[]): number[] {
+  return psEntries()
+    .filter((e) => markers.some((mk) => e.command.includes(mk)))
+    .map((e) => e.pid)
+    .sort((a, b) => a - b)
+}
+
+/** 引擎 CLI 进程 pid 集（D2b 稳定性断言面：reload 前后同一集合 = 单例未被 dispose 重建） */
+export function engineCliPids(): number[] {
+  return pidsMatching(['pi-subagent-cli.mjs'])
+}
+
+/** 引擎执行树全量 pid（派发后采集 = 基线；清理后归零核对 = 无孤儿） */
+export function engineTreePids(): number[] {
+  return pidsMatching(ENGINE_TREE_MARKERS)
+}
+
+/** 轮询引擎执行树 pid 归零（相对基线；宽限给 stdin EOF → relay 断连 → kill 级联留时） */
+export async function waitForEngineTreeGone(baselinePids: number[], timeoutMs = ENGINE_TREE_GONE_TIMEOUT_MS): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs
+  let remaining = engineTreePids().filter((pid) => baselinePids.includes(pid))
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, TREE_POLL_INTERVAL_MS))
+    remaining = engineTreePids().filter((pid) => baselinePids.includes(pid))
+  }
+  return remaining
+}

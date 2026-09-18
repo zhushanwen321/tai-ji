@@ -1,5 +1,5 @@
 // lifecycle-predicates 单测（v4 B-1；W6 随拆依赖改写：读点改 core 侧状态镜像）。
-// 验证 isIdle/isResumable/hasLiveProcessHandle 在两态收敛后的判定逻辑。
+// 验证 hasArmedIdleTimer/isResumable/hasLiveProcessHandle 在两态收敛后的判定逻辑。
 // 依赖 lifecycle-manager 模块级 idleTimers 与 core 侧 spawnedChildren 镜像
 // （engine/host/spawned-children.ts），beforeEach 重置隔离。
 // [W3 改写] inproc 过渡桥并读用例随 inproc pi 引擎目录 删除消亡——镜像成为唯一数据源
@@ -18,7 +18,7 @@ import {
 } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
-import { hasLiveProcessHandle, isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 
 /** 构造最小 ExecutionRecord（status 默认 running）。 */
 function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -54,22 +54,22 @@ describe("lifecycle-predicates (v4 B-1)", () => {
     _resetCoreSpawnedChildrenMirrorForTest();
   });
 
-  describe("isIdle (= hasIdleTimer)", () => {
+  describe("hasArmedIdleTimer (= hasIdleTimer)", () => {
     it("armed idle timer → true", () => {
       const rec = makeRecord();
       armIdleTimer(rec.id, () => {});
-      expect(isIdle(rec)).toBe(true);
+      expect(hasArmedIdleTimer(rec)).toBe(true);
     });
 
     it("no idle timer → false", () => {
-      expect(isIdle(makeRecord())).toBe(false);
+      expect(hasArmedIdleTimer(makeRecord())).toBe(false);
     });
 
     it("disarmed timer → false", () => {
       const rec = makeRecord();
       armIdleTimer(rec.id, () => {});
       disarmIdleTimer(rec.id);
-      expect(isIdle(rec)).toBe(false);
+      expect(hasArmedIdleTimer(rec)).toBe(false);
     });
   });
 

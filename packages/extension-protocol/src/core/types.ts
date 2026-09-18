@@ -70,7 +70,7 @@ export interface GuiComponentProps {
     numbered?: boolean
   }
 
-  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（WidgetArea）承担卡壳/head/折叠
+  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（托盘 widget 面板）承担卡壳/head/折叠
    *  后，widget 内容需要多组件组合时的组合根（替代「无头 card」的语义滥用） */
   'group': {
     children: GuiComponent[]
@@ -85,6 +85,13 @@ export interface GuiComponentProps {
   /** 标签栏——替代 TUI 的 tab │ 分隔 */
   'tab-bar': {
     tabs: { label: string; active?: boolean; status?: 'done' | 'pending' }[]
+    /**
+     * 容器化分段（可选）：第 i 段 = tabs[i] 激活时渲染的子树，与 tabs 等长。
+     * 缺省维持「纯展示 tab-bar」现状（旧 extension 一行不改）；宿主本地持有
+     * active（首挂载取 tabs[i].active，点击只切本地索引，后续推送不重置用户
+     * 选择）；与 tabs 长度不等时忽略 sections 退化为纯展示（见协议文档）。
+     */
+    sections?: GuiComponent[][]
   }
 
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册） */
@@ -101,7 +108,7 @@ export interface GuiRenderResult {
   v: typeof PROTOCOL_VERSION
   component: GuiComponent
   /**
-   * widget 宿主元数据（M17 对话流 widget 面板消费）：标题/状态点/进度计数由
+   * widget 宿主元数据（composer 任务托盘的协议 widget 区消费）：标题/状态点/进度计数由
    * 宿主壳层统一渲染成单一 head（含折叠交互），extension 不再用 card 原语
    * 的 header 表达这些（壳层 head 与 payload card header 双头重复的根因修复）。
    * 可选：不发时宿主 fallback 到 viewId 标题、无状态点/进度。
@@ -126,6 +133,19 @@ export interface WidgetMeta {
     /** fill 语义色（预算阈值映射）；缺省按 meta.status（done→success，否则 accent） */
     severity?: 'ok' | 'warn' | 'danger'
   }
+  /**
+   * 托盘 icon：icon key 字符串（宿主按 lucide 名解析）或自定义形状 `{ paths }`。
+   * **形状归 extension、风格归宿主锁死**——extension 只给 path d 数组，线宽/颜色/
+   * 尺寸由宿主固定（与 @lucide 细线 icon 同构），故不会出现风格失控。
+   * 自定义形状经 `validateWidgetIconPaths` 白名单校验（字符集/条数/长度上限），
+   * 超限落兜底 icon + warn。缺省 → 宿主按 widgetKey 内置映射 → 通用 widget icon。
+   */
+  icon?: string | { paths: string[] }
+  /**
+   * 托盘 badge：extension 全权格式化的短文本（'2' / '42%' / '!'），建议 ≤6 字符
+   * （宿主超长 truncate 至 6，全文进 title）。缺省 → 宿主按 progress 派生 → 无 badge。
+   */
+  badge?: string
 }
 
 // ── 布局原语子类型 ──

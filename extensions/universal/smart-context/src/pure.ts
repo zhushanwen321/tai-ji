@@ -2,7 +2,6 @@
  * 纯函数层：配置 schema / 加载 / 门控判定 / 阈值检查 / 摘要后处理。
  *
  * 无副作用（fs 读取经 llm-shared loadConfig 的缓存封装），全部可单测。
- * 设计文档：docs/extensions/smart-context/design.md（D5 门控矩阵 / D6 阈值保护 / D8 配置 schema）。
  */
 
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
@@ -19,9 +18,9 @@ export const CHARS_PER_TOKEN_ESTIMATE = 4;
 /** 提醒阈值最大档数（3 档）。 */
 const MAX_THRESHOLD_TIERS = 3;
 
-/** 3 档提醒阈值默认值（token 绝对数）：200K / 400K / 600K。 */
-const DEFAULT_REMINDER_THRESHOLD_TIER_1_TOKENS = 200_000;
-const DEFAULT_REMINDER_THRESHOLD_TIER_2_TOKENS = 400_000;
+/** 3 档提醒阈值默认值（token 绝对数）：400K / 500K / 600K。 */
+const DEFAULT_REMINDER_THRESHOLD_TIER_1_TOKENS = 400_000;
+const DEFAULT_REMINDER_THRESHOLD_TIER_2_TOKENS = 500_000;
 const DEFAULT_REMINDER_THRESHOLD_TIER_3_TOKENS = 600_000;
 const DEFAULT_REMINDER_THRESHOLDS: readonly number[] = [
 	DEFAULT_REMINDER_THRESHOLD_TIER_1_TOKENS,

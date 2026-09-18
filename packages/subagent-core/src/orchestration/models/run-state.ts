@@ -1,7 +1,7 @@
 /**
  * Workflow Extension — RunState 值对象
  *
- * 单次 workflow run 的可持久化状态（domain-models.md §3）。
+ * 单次 workflow run 的可持久化状态。
  *
  * 设计：
  * - status/reason/budget/calls/trace/errorLogs 是可变字段（运行中持续更新）
@@ -9,8 +9,6 @@
  * - 与 RunSpec 的区别：RunSpec 不可变（输入），RunState 可变（执行快照）
  *
  * 层归属：Engine。
- *
- * 参考：domain-models.md §3。
  */
 
 import type { AgentCall } from "./agent-call.ts";

@@ -16,6 +16,7 @@
 
 import { shallowRef, type ShallowRef } from 'vue'
 import type { Message } from '@taiji/shared'
+import type { FinalizeReason } from './store-types'
 import { readUsage } from './readers'
 
 /** messages ref 的结构类型（兼容 Vue Ref 与裸 { value } 结构）。 */
@@ -73,12 +74,12 @@ export function truncateMessagesFrom(
  * 终态消息 patch（message.complete 双通道单源，S4-A6 收口）。
  *
  * 为什么在此导出：message.complete 的两条消费链——registry 的 streaming 收口分支与
- * complete-recovery 的 premature-timeout 恢复分支——对同一气泡应用同一组终态字段
+ * message.complete 追加分支——对同一气泡应用同一组终态字段
  * （status / usage / error / content 条件展开），此前靠注释「finalizeMessages 双通道同语义」
  * 人肉同步。本函数把该不变量结构化：任一分支的终态字段演化只需改这一处。
  *
  * 只做字段 patch，不含通道各自的命中守卫（streaming 收口 vs timeoutIds 打标实体）与
- * prematureTimeout 清标（仅恢复分支需要，调用方 spread 后追加）。外层守卫留在调用方。
+ * 外层守卫留在调用方。
  */
 export interface TerminalMessagePatchOptions {
   /** 末位 assistant 索引（usage 回填 / content 覆盖 / error 写入只作用于末位，turn 级聚合） */
@@ -93,6 +94,39 @@ export interface TerminalMessagePatchOptions {
   payload: Record<string, unknown>
 }
 
+/**
+ * error 类收口 reason（终态取向 error 的 FinalizeReason 子集）。
+ * 类型谓词 isErrorFinalizeReason 收窄后 REASON_FALLBACK_ERROR_TEXT[reason] 恒 string。
+ */
+export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'timeout' | 'disconnect' | 'restart'>
+
+/** reason 是否终态取向 error（类型谓词；与 ErrorFinalizeReason 成员一一对应）。 */
+export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFinalizeReason {
+  return reason === 'error' || reason === 'stream_error' || reason === 'timeout' || reason === 'disconnect' || reason === 'restart'
+}
+
+/**
+ * error 类收口 reason 的兜底错误文案（errorText 缺失路径）。
+ *
+ * 不变量（M2 error-visibility 追加形态的渲染依据）：凡 streaming 收口产出 error 终态的
+ * assistant 消息，error 字段必非空——渲染层以「error 字段有无」区分纯 error 形态（content
+ * 即错误文本，整条 danger）与追加形态（content 崩溃前正文原色 + error 独立 danger 行）。
+ * errorText 缺失时若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
+ *
+ * 本模块导出（两个终态出口共享单一实现）：finalizeStreamingMessage
+ * （streaming-state-machine.ts，断连/超时/重启等 FinalizeReason 收口）与
+ * terminalMessagePatch（本文件，message.complete 的 isErrorStop 收口）。
+ * 兜底收口在出口而非各调用点——新增收口调用漏传文案不破坏不变量。
+ * 文案对齐 runtime 侧用户可见错误文本惯例（中文，随消息持久化）。
+ */
+export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
+  error: '会话出错，回复已中断。',
+  stream_error: '输出流中断，回复不完整。',
+  timeout: '等待超时，回复已中断。',
+  disconnect: '与运行时的连接已断开，回复已中断。重新连接后可继续。',
+  restart: '运行时已重启，回复已中断。重新连接后可继续。',
+}
+
 /** 单条消息的终态 patch（纯函数；status/usage/error/content 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */
 export function terminalMessagePatch(m: Message, i: number, opts: TerminalMessagePatchOptions): Message {
   const { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload } = opts
@@ -103,7 +137,9 @@ export function terminalMessagePatch(m: Message, i: number, opts: TerminalMessag
     ...m,
     status: isErrorStop ? 'error' : 'complete',
     ...(usage ? { usage } : {}),
-    ...(i === lastAssistantIdx && isErrorStop && errorMessage ? { error: errorMessage } : {}),
+    // isErrorStop 时 error 字段必非空（追加形态不变量）：errorMessage 缺失/空串按
+    // reason='error' 兜底（terminalMessagePatch 只有 isErrorStop 布尔，reason 语义恒 'error'）
+    ...(i === lastAssistantIdx && isErrorStop ? { error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error } : {}),
     ...(shouldOverrideContent ? { content: finalContent } : {}),
   }
 }

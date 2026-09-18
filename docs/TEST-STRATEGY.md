@@ -58,6 +58,16 @@ cd packages/runtime && npx tsc --noEmit
 node scripts/verify-scheduler-e2e.cjs
 ```
 
+### 测试数据隔离防线（test-guard，仓库级强制）
+
+> 规则 SSOT = AGENTS.md「测试」节「测试禁止触碰真实数据目录」。双层防线原为 runtime 包私有（2026-09-02 会话丢失事故后固化在 runtime vitest），2026-09-16 升级为仓库级强制——从非包 cwd 误跑 workspace 全仓 vitest 时 runtime 配置不加载、防线整段失效，测试删光 prod 数据目录（2026-09-16 同族事故）。
+
+- **双层防线**：① global-setup 将 `TAIJI_AGENT_DATA_DIR` 钉死 tmp + 对「注入真实 `~/.taiji` / 非白名单目录」的注入值**自动脱钩**（2026-09-17 前为 fail-fast 拒跑；脱钩 = 删 env 后落 tmp，安全等价且免去人人 `env -u` 的摩擦，判定与 `isInjectedEnvAllowed` 共用）；② fs-guard（setupFiles 切面）拦截全部破坏性 fs 操作（写/删/移动），白名单 = `os.tmpdir()` + `$TAIJI_AGENT_DATA_DIR`（≠ 真实目录）+ `~/.taiji-dev`（homedir 动态推导），其余目录一律抛错
+- **唯一防线入口 = `taijiTestConfig` 工厂**（`test-guard/factory.ts`）：全仓所有 vitest.config.ts 一律经工厂包装，无条件注入 globalSetup + fs-guard（绝对路径注入，不受各包 root 差异影响；防线排最前，用户 setupFiles/globalSetup 追加保留，其余字段只增不改）；根级兜底 vitest.config.ts 同样经工厂包装——从仓库根 cwd 跑 vitest 防线同样生效
+- **漏挂机器守卫**：`scripts/check-vitest-guard.mjs` 静态扫描全部含测试的包根 + test-guard/ + 仓库根兜底 config，校验 config 经工厂包装（特征 = 引用 `test-guard/factory`），漏挂/缺失 exit 1（pre-commit 按路径触发 + CI invariants）；防线元测试收敛在 `test-guard/fs-guard.test.ts`
+- **写删目标约束**：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）
+- **运行边界 [HISTORICAL]**（2026-09-16 事故）：禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）；单包测试固定 `cd <包目录> && npx vitest run`（见上「运行命令（cwd 敏感）」）
+
 ## 3. 三视角模型 + 渲染 gate DoD [HISTORICAL — 2026-06-27「新建任务」事故]
 
 > **事故**：「新建任务」77 单测 + 24 集成全绿、tsc EXIT 0、verdict pass，用户手动打开却发现 Landing 态根本没有 composer 输入区——阻塞级 bug。根因：测试只做了构建者（白盒）视角，缺使用者/观察者两个视角。
@@ -152,7 +162,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | **流式 block 双轴尾部追踪 + 折叠头截短** | thinking 折叠预览/tool 折叠头在 streaming/running 中渲染尾部行窗口且 scrollLeft 钉右（`scrollLeft >= scrollWidth - clientWidth - 1`）、完成态回落静态摘要；折叠头路径 `…/末两段` 截短但展开态/copy 全量；preview 行高恒定（virtua 高度断言依赖）。破坏=流式预览死在开头/折叠头丢命令可见性/虚拟列表行高抖动 | `cw-2026-08-25-chat-visual-font-optimize`（实测发现：pi bash 部分输出无流式增量广播，tool 接入点按预案降级静态 argPath，thinking 链路钉尾 3/3）`[from: chat-visual-font-optimize (cw-2026-08-25) §D4]` | `packages/ui/src/features/chat/composables/__tests__/useTailScroll.test.ts`（9 用例：钉右/translateY/降级/未挂载）+ `packages/ui/src/features/chat/__tests__/Block.test.ts`（双态 DOM 断言）+ `format-utils.test.ts`（shortenForHeader/tailLines 规则） |
 | **等价性测试双轨** | live ≡ reload / broadcast ≡ get_state / 混沌注入收敛等不变量断言。CI 与 PR/merge 门禁只跑凭证无关子集（mock RPC / fixture 重放，`TAIJI_SKIP_REAL_PI=1` 双侧显式声明），真实 LLM turn 用例在开发阶段按改动面跑（详见下方「等价性测试双轨」小节） | `2026-08-19 data-source-governance P1-P4` goal-audit 问题 1（CI 无 pi 凭证，push 后 test-runtime 预期红） | `packages/runtime/src/__tests__/equivalence/` 13 文件（skip 机制 SSOT = `pi-fixture.ts` `REAL_PI_READY`） |
 | **pi 语义守卫探针族** | 静态直读 pi dist 断言私有语义契约（pattern 引擎匹配规则 / reasoning 两级门控 / RPC 响应面 / steer drain 窗 / settled 复位序 / entry→context 映射），pi 升级语义漂移即红；配套 `check-pi-semantics.mjs` 版本门禁（四包一致 + verifiedWith 比对）与 `diff-probe-thinking.mjs` 档位对账。破坏=pi bump 后语义假设批量过期无人知（登记≠防御：8-20 登记观察项 8-27 照样出事的实证） | `2026-08-27 事故对`（subagent 派发 429/gc + 思考等级自动变关）`[from: pi-boundary-reliability U7]` | `packages/runtime/src/infra/pi/__tests__/pi-semantics-*.test.ts`（6 文件，凭证无关 CI 可跑）+ `scripts/check-pi-semantics.mjs`（pre-commit + CI）+ `scripts/diff-probe-thinking.mjs` |
-| **sync-collect 探针手工复跑 SOP** | subagent sync 批崩溃恢复的真实 fs 时序回归探针（V2 含成功成员崩溃批 / V3 kill -9 全灭；L2.5 faux 轨——真 pi 进程 + `PI_PROBE_FAUX=1` faux LLM 演员，凭证无关零 token，真实进程空载串行不进 CI）。**触发条件：升级 pi 或改动 manifest 写点/屏障逻辑（flushBatch 时序、appendBatchFinalizedEntry、finalizeOrphanRecord merge、E1 判定口径、settled 重扫）后必跑 v2/v3**，实跑记录回写 RESULTS.md。断言已降级（modeless wave3 E1 崩溃恢复钩子退役：`recoverSyncCollectBatch()` 调用点保留为 accepted-no-op，崩溃批补发语义由 extension 侧 E1 恢复钩子承担）——v2 断言弱化为容忍形态（批头计数 finished/failed 两形态二选一，kill 时序不可构造时走降级门并注明）。登记 = `docs/testing/e2e-map.json` E2E-PROBE-01（on-pi-bump）。CI 回归防线 = subagent-core 真实文件通路集成测试；探针是时序面唯一防线 | `dev-0.9.15 对抗式审查 B4 裁决`（探针不在 CI）`[from: adversarial-review-fixes §3.3 B4]` | `scripts/probes/subagent-sync-collect/`（V2/V3 + RESULTS.md） |
+| **sync-collect 探针（已退役，R3 归档）** | sync 批机制已随 collect 退役整体删除（2026-09-16）——探针的被测写点（flushBatch 时序、appendBatchFinalizedEntry、finalizeOrphanRecord merge、E1 判定）已不存在，v2/v3 不再可跑，e2e-map 登记已摘除。`scripts/probes/subagent-sync-collect/` 目录（18 文件，含 RESULTS.md 与 v1/v2/v3）已删除（2026-09-16 随 collect 退役清理，git 可追溯）；此处记录退役原因（禁止只删不记）。 | `collect 退役`（u8 文档同步）`[from: subagents-batch-tool-fanout P2.4]` | 探针目录已删除（git 可追溯） |
 
 ### 等价性测试双轨（真实 LLM turn 基线：开发阶段按改动面跑）[from: 2026-08-19 data-source-governance]
 
@@ -183,6 +193,15 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 - **factory 不能引用外部变量**（hoisted）：用 `vi.hoisted()` 或在 factory 内 inline + `import { session as sessionMock } from '@/api'`
 - **mock 整个 api 模块时记得 mock 所有被测路径用到的方法**（漏 mock 会 undefined 崩溃）
 - **happy-dom 对 contenteditable/Selection/Range 支持有限**：测 contenteditable 组件用 textContent + querySelector + dispatch input event，不要依赖真实光标操作
+
+### mock 保真度登记（类型锚定 + override 生效面，2026-09-17 G4）
+
+门面三元（renderer `api/index.ts` 的 `isMock ? mockApi.x : realX`）两侧同构的保证方式：mock 域对象显式标注 real 域导出类型（`XDomain = typeof real 域模块`，定义与断言基建在 `packages/core/src/transport/mock/index.ts` 头部「[G4 类型锚定]」注释块），配 `AssertExact<DomainParamsExact<XDomain, typeof xImpl>>` 逐方法比较 `Parameters` 元组全等——real 域加参/删参/改参型时 mock 侧少参/多参/错型直接 tsc 编译失败（注解的可赋值性抓不到「少可选参」，元组 identity 断言补齐这一层）。
+
+- **已类型锚定（10 域）**：session / chat / config / model / plugin / composer / workspace / quota / project / preset。锚定顺带修复并补齐的漂移：session.create 补 presetId/projectId/modelOverride/thinkingOverride、session.fork 补 modelOverride/thinkingOverride、session.handoff 补 options、session 补缺失成员 getSubagentEngineConfig / setSubagentDefaultEngine / getAgentCallFilePath；config 补 retry 配置三成员（getRetryConfig / setRetryConfig / onRetryConfig）、scanSkills/scanAgents 补返回类型、discoverModels req 补 mode 字段、onAuth 系列 payload 改引 real 域类型别名；chat.compact 补 customInstructions 形参；plugin 补 approvePermissions/revokePermissions；composer.getMentionCandidates 对齐 real 已废弃语义（恒 `[]`）、getFileCandidates 补 sessionId 形参、补 getFileCandidatesByCwd stub。
+- **override 生效面（mock 可断言的最小投影，不追求全仿真）**：session.create/fork 的 presetId → `SessionSummary.launchPresetId`、projectId → `projectId`、modelOverride → `modelId`、thinkingOverride → `thinkingLevel`，落返回值与 `session.list()` 快照；fork 另落血缘键 `parentSession`（恒源 sessionId，FR-20 fallback 键形态）+ `forkEntryId`，projectId 继承父归属（与 real fork 同语义）。行为契约测试：`packages/core/src/transport/mock/__tests__/mock-domains.test.ts`（create/fork override 生效面用例）。
+- **mock 不支持项（显式登记，非静默丢弃）**：session.handoff 的 options（modelOverride/thinkingOverride）——无 runtime HandoffService / handoff turn 可跑，stub resolve；chat.compact 的 customInstructions——无 pi 会话可挂指令；config retry 配置——get 恒 `configured:false`、不持久化、不广播；session.getSubagentEngineConfig 恒空清单（无 engines.json 基建）。
+- **未锚定域及理由**：settings（mock 是 7 成员子集转发器，real 是 40+ 方法全域，补齐属独立工作）／extension（onExtensions 宽类型为登记过的有意偏差，W08 收口时一并锚定）／search（real 侧无单源 domain，编排归 useSearchModalDeps）／git、file（独立 mock 文件，待后续同法锚定）。
 
 ## 6. pre-commit hook
 
@@ -239,7 +258,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 | **R2 保留为按改动面触发的 e2e 子集** | 依赖真实进程 / 真实 LLM / 特定环境，CI 跑不了或不该跑 | dev-flow 验收计划（L2）/ 触发式回归（L3）/ L2.5 调研线 | **触发条件必填**（见下），登记进 `docs/testing/e2e-map.json`（机器登记 SSOT；结构校验 = `scripts/validate-e2e-map.mjs`，防漏门禁 = `scripts/select-affected-e2e.mjs --check`；本章节表格保留宿主叙述） |
 | **R3 归档为文档** | 退役（守护对象已消亡 / 断言面被更强资产覆盖 / 环境前提永久不可复现） | docs/testing/ 手册对应章节，注明退役原因 | spec 文件删除 + 手册记录「退役原因 + git 可追溯」；禁止只删不记 |
 
-**触发条件必填原则**：R2 资产必须写明「什么改动触发重跑」——可判定的条件（改动路径 glob / 事件如 pi bump / release），写法参考 §4 sync-collect 探针 SOP（「升级 pi 或改动 manifest 写点/屏障逻辑（flushBatch 时序、appendBatchFinalizedEntry、finalizeOrphanRecord merge、E1 判定口径、settled 重扫）后必跑 v2/v3」——条件可判定、路径可 grep）。tech-design 设计文档的「e2e 影响面评估」据此圈定子集，dev-flow 验收计划表承接。
+**触发条件必填原则**：R2 资产必须写明「什么改动触发重跑」——可判定的条件（改动路径 glob / 事件如 pi bump / release，条件可判定、路径可 grep）。tech-design 设计文档的「e2e 影响面评估」据此圈定子集，dev-flow 验收计划表承接。写法参考：`docs/testing/e2e-map.json` 的 E2E-BATCH-01（现行 R2：scope = 路径 glob 集合 + trigger = on-diff）；trigger 的事件形态参考 E2E-BATCH-02（R3 人工验收，trigger = on-pi-bump 表达重验时机信号）。
 
 > **术语桥接（与逐用例处置标签的编号区分）**：本节三态 R1/R2/R3 是**资产生命周期归宿**；R2（按改动面触发）资产进一步标注执行层——L2 真实 LLM（dev-flow）/ L2.5 faux 轨（真 pi + 假 LLM，凭证无关）/ L3 触发式（发布前、pi bump）。并行调研使用的 R1-R5 是**逐用例处置标签**（R1 毕业单测 / R2 翻 faux 轨 / R3 保留真实 LLM / R4 触发式 / R5 归档），编号撞名但语义不同，阅读时按上下文区分。逐用例的处置判定与触发条件机器登记已落地（2026-09-16）：**SSOT = `docs/testing/e2e-map.json`**（全部 e2e 资产的触发面/层级/运行命令/触发器登记），消费与守卫脚本 = `scripts/select-affected-e2e.mjs`（--base 按 diff 选受影响 rules / --release 选发布与 pi-bump 面 / --layer 过滤 / --check 防漏登记门禁）与 `scripts/validate-e2e-map.mjs`（结构 + asset 磁盘存在校验）；文档此处只定纪律，下方表格为 2026-09-15 行为轨初判登记（逐例权威以 e2e-map.json 为准）。
 
@@ -265,7 +284,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 本次行为轨全量实跑（52 用例）暴露 4 个存量问题，随本批修复（正是「无固定环节的 e2e 悄悄烂掉」的实证——接入 CI 前无一被发现）：
 
-1. **mock 产物被 real bundle 覆盖**：行为轨与 real 轨共用 `apps/electron/renderer/dist` 输出（VITE_MOCK 构建期 define），跑过 real 轨/普通 build 后 mock 轨全量挂（页面停在「连接中…」），globalSetup 只查产物存在不查构建形态。修复 = 重建 mock 产物；根治方向（产物形态标记/分离输出目录）登记为待办，跑 real 轨后需 `VITE_E2E=true VITE_MOCK=true pnpm run build:e2e` 重建（见 docs/testing/00-overview.md §5）
+1. **mock 产物被 real bundle 覆盖**：行为轨与 real 轨共用 `apps/electron/renderer/dist` 输出（VITE_MOCK 构建期 define），跑过 real 轨/普通 build 后 mock 轨全量挂（页面停在「连接中…」），globalSetup 只查产物存在不查构建形态。修复 = 重建 mock 产物；根治方向（产物形态标记/分离输出目录）登记为待办，跑 real 轨后需 `VITE_E2E=true VITE_MOCK=true pnpm run build:e2e` 重建（见 docs/testing/00-overview.md §5）。**2026-09-16 反向变体实证**（system-notice-rendering-upgrade 阶段 5）：dist 为 stale **mock** 形态时 real spec 的 UI 断言必挂且信号高度误导——renderer 走 mock transport 渲染 mock 种子数据（sidebar/workspace popover 出现假 session/工作区、mock 相对时间戳恒等于当下），而 spec 自带的 WS 直连断言照常全过，症状酷似「环境数据串扰/连错实例」。归因抓手 = 失败现场 DOM 里的条目与 `core/src/transport/mock/` 种子数据逐字比对。修复同款 = 按轨重建产物（`VITE_E2E=true pnpm run build:e2e` 不带 VITE_MOCK）后空载串行复跑
 2. **`build:e2e` script 断链**：root 别名指向 apps/electron 不存在的 script（pnpm --filter 无匹配时静默 exit 0），本地因产物恒存在从未暴露、CI fresh checkout 上 globalSetup 必报「产物仍缺失」。已补 `apps/electron/package.json` 的 `build:e2e`（build:main + build:preload + build:vite 组合；VITE_E2E/VITE_MOCK env 注入职责留在 globalSetup，script 不硬编码跨平台 env）
 3. **title 断言过期**：App.vue 运行时把 title 设为 i18n `app.title`（zh=太极），全部 `toHaveTitle(/TaiJi/)` 在 zh locale 必挂——mock 轨 6 处已改 `/太极|TaiJi/` 双兼容（real 轨 6 处同病，随 real 轨调研线处置）
 4. **「会话」segmented tab 定位脆弱**：SegmentedTab icon-only 模式下 tab 的 accessible name 被 count 徽标文本（如「6」）抢占（内容优先于 title 属性），`getByRole('button', { name: /^会话/ })` 只在冷启动 sessionCount=0 的极短窗口命中——中途点击（如 ST-5 的 switchBackToS3）必挂。修复 = activateSession 改「直接等 session 文本」（v6-shell-baseline 模式，composer / state-tearing / search-modal / gui-components）+ tab 切换改 `button[title="会话"]` 属性选择器（file-tree，workflow-sidebar-sync 既有模式）

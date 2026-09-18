@@ -1,7 +1,8 @@
 /**
  * useBackgroundWork —— background 异步任务（subagent/workflow）谓词。
  *
- * 聚合 subagent + workflow 的 running/paused 判定，供 deriveStatus（working 态）与
+ * 聚合 subagent + workflow 的 running 判定（workflow 一次性生命周期 D-2：paused 态已删），
+ * 供 deriveStatus（working 态）与
  * handleCompletion（完成提示守卫）共用。单一真相源：未来新增 background 任务类型
  * （非 subagent/workflow）只需在 hasBackgroundWork 实现里注册判定。
  *
@@ -18,9 +19,11 @@ export function useBackgroundWork() {
   const workflowStore = useWorkflowStore()
 
   /**
-   * 指定 session 是否有 background 任务仍在跑（subagent running 或 workflow running/paused）。
-   * subagent 无 paused 概念（只有 running/done/failed/cancelled/crashed）；workflow 有 paused（用户暂停）。
-   * paused 算 background work：paused 不发 triggerTurn 续跑，主 agent 不会推进，仍是未完成状态。
+   * 指定 session 是否有 background 任务仍在跑（subagent running 或 workflow running）。
+   * subagent 只有 running/done/failed/cancelled/crashed；workflow 一次性生命周期
+   * （subagent-workflow D-2）只产出 running/done 两态（paused legacy 值已删）。
+   * running 算 background work：running 期间不发 triggerTurn 续跑，主 agent 不会推进，
+   * 仍是未完成状态。
    *
    * H2 W1（record-unification D1③）：workflow 脚本派发的 subagent（origin==='workflow'）
    * 不算本 session 的后台工作——其生命周期由 workflow run 承载（终态化收口见 D7），
@@ -30,7 +33,7 @@ export function useBackgroundWork() {
    */
   function hasBackgroundWork(sessionId: string): boolean {
     const subagentWorking = subagentStore.hasRunning(sessionId, { excludeOrigin: 'workflow' })
-    return subagentWorking || workflowStore.hasRunningOrPaused(sessionId)
+    return subagentWorking || workflowStore.hasRunningWorkflow(sessionId)
   }
 
   return { hasBackgroundWork }

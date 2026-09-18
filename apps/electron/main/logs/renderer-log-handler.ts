@@ -1,5 +1,5 @@
 /**
- * renderer-log IPC handler（crash-resilience §3.3 D2-② / u2-renderer-errors +
+ * renderer-log IPC handler（D2-② / u2-renderer-errors +
  * crash-forensics §3.3 D8 结构化标记承接）。
  *
  * 接收 renderer 三件套（app.config.errorHandler / window error / unhandledrejection）
@@ -196,7 +196,7 @@ function sweepIdleEntries(now: number): void {
 // ── payload 运行时校验（不可信输入）────────────────────────────────
 
 /**
- * 合法捕获面（RendererErrorSource 联合）：三件套（crash-resilience D2-①）+
+ * 合法捕获面（RendererErrorSource 联合）：三件套（D2-①）+
  * 'inbound-frame-dropped' 结构化标记（crash-forensics D8 入站超界帧丢弃上报）。
  */
 const VALID_SOURCES: ReadonlySet<string> = new Set([

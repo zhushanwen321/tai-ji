@@ -177,7 +177,7 @@ export class ExtensionResolver implements IExtensionResolver {
   /**
    * 扫描 bundled extensions（builtin pi-* 包）
    *
-   * dev/build 加载路径分流（见 docs/architecture/builtin-extension-dev-build-split.md）：
+   * dev/build 加载路径分流：
    *   - packaged（build）：读 electron-builder extraResources 拷贝的 staged bundle
    *     （Resources/extensions/@zhushanwen/<pkg>/，esbuild 全量 bundle 的自包含 index.js）。
    *   - dev：读源码目录 extensions/<pkg>/（repo root，pi 原生加载 .ts），

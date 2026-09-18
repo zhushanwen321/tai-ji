@@ -9,13 +9,13 @@
  *    pending:unregister → onRunDone」终态序列的唯一定义点（D5-② 单点化，收敛原
  *    8 处逐字复制；OR-8 收口步骤与 OR-4/B-4 双围栏内化于本函数）
  *
- * 4 个 handle* 路由函数（domain-models.md §失败处理矩阵）+ 终态化/重建/防御 helper 若干：
+ * 4 个 handle* 路由函数 + 终态化/重建/防御 helper 若干：
  * - handleWorkerMessage(run, raw, deps, handlers) — 路由 agent_call/return/error/log
  * - handleWorkerError(run, err, deps, handlers) — worker uncaught error
  * - handleWorkerExit(run, code, handle, deps, handlers) — worker exit
  * - handleScriptError(run, msg, deps, handlers) — type:"error" from worker
  *
- * 重试矩阵（domain-models.md §失败处理矩阵）：
+ * 重试矩阵：
  * - worker error/exit（非零）→ 3 次重试 + 指数退避 1s/2s/4s；超限 failed
  * - script error → 3 次重试 + 指数退避；超限 failed
  * - 重试前 rebuildRuntime（G3-001：整个 RunRuntime 重建：worker+controller）
@@ -33,8 +33,6 @@
  *
  * 层归属：Engine。依赖 ports + WorkflowRun + executeAgentCall。
  * （旧并发门闩 gate 抽象已删——no-op，实际并发由 SubagentService ConcurrencyPool 管理。）
- *
- * 参考：domain-models.md §失败处理矩阵。
  */
 
 import { getLogger } from "../core/logger.ts";
@@ -55,7 +53,7 @@ const logger = getLogger("subagents");
 // ── 常量 ─────────────────────────────────────────────────────
 
 /**
- * 单类错误最大重试次数（domain-models.md §失败处理矩阵）。
+ * 单类错误最大重试次数。
  *
  * 注意：workerErrorCount 和 scriptErrorCount 是两个独立计数器，各自上限 MAX_WORKER_RETRIES。
  * 最坏情况（先连续 worker error 3 次 + 再连续 script error 3 次）= 6 次 rebuild。
@@ -1093,7 +1091,7 @@ async function handleReturn(
 /**
  * 处理 worker 线程 uncaught error。
  *
- * 重试矩阵（domain-models.md §失败处理矩阵）：
+ * 重试矩阵：
  * - run.meta.workerErrorCount（C.5，跨 runtime 存活）< MAX → 退避 + rebuildRuntime
  * - >= MAX → transition done,failed
  *

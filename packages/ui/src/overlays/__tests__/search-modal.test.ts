@@ -15,7 +15,7 @@
  *  - 焦点管理：open → nextTick 聚焦 input（document.activeElement）
  *
  * deps 构造对齐 w3 core search.test.ts 先例：ports 全 vi.fn + core 真实 factory
- * （createCommandStore/createFileSearchStore，规避 mock 漏方法运行时崩溃 R1）+ storage
+ * （createCommandStore，规避 mock 漏方法运行时崩溃 R1）+ storage
  * KVStorage mock。fake timers 推进 debounce 120ms / loading 200ms。
  * 时序断言与常量解耦：debounce 用 150ms（>120 且 <200），loading 显用 201ms（>200）——
  * 断言窗口只依赖常量间的大小关系，不依赖具体差值。
@@ -24,7 +24,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createCommandStore, createFileSearchStore, resetSearchModal } from '@taiji/core'
+import { createCommandStore, resetSearchModal } from '@taiji/core'
 import type { SearchDeps, Section } from '@taiji/core'
 import type { FileNode, SessionGroup } from '@taiji/shared'
 import SearchModal from '../SearchModal.vue'
@@ -57,11 +57,9 @@ function makeDeps(): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
-      watchFileChanges: vi.fn(() => () => {}),
       t: vi.fn((key: string) => key),
     },
     commandStore: createCommandStore(makeMockStorage()),
-    fileSearchStore: createFileSearchStore(),
     storage: makeMockStorage(),
     fileTree: { loadTree: vi.fn(async () => {}), selectFile: vi.fn() },
     appCommandActions: {

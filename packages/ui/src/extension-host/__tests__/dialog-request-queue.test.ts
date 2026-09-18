@@ -26,11 +26,6 @@ class MockDialogRequestSource implements DialogRequestSource {
     const spy = vi.fn()
     return spy as unknown as () => void
   })
-  onUiTimeout = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
-    this.timeoutHandler = handler
-    const spy = vi.fn()
-    return spy as unknown as () => void
-  })
   onUiRequestExpired = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
     this.expiredHandler = handler
     const spy = vi.fn()
@@ -38,15 +33,10 @@ class MockDialogRequestSource implements DialogRequestSource {
   })
 
   requestHandler: ((req: DialogRequest) => void) | null = null
-  timeoutHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
   expiredHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
 
   triggerUiRequest(req: Partial<DialogRequest> & { requestId: string; sessionId: string }): void {
     this.requestHandler?.(makeRequest(req))
-  }
-
-  triggerTimeout(sessionId: string, requestId: string): void {
-    this.timeoutHandler?.({ sessionId, requestId })
   }
 
   triggerExpired(sessionId: string, requestId: string): void {
@@ -194,43 +184,21 @@ describe('DialogRequestQueue', () => {
     }
   })
 
-  it('TC-7 超时出队：onUiTimeout 移除对应 requestId，不发回传（runtime 已发默认响应）', () => {
-    const sid = ref<string | null>('A')
-    const { source, transport, scope, getQueue } = createHarness(sid)
-    try {
-      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
-      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
-      const q = getQueue()
-      source.triggerTimeout('A', 'r1')
-      // r1 出队，r2 保留（对照：只移除目标）
-      expect(q.pendingCount.value).toBe(1)
-      expect(q.currentRequest.value?.requestId).toBe('r2')
-      // 超时出队不发回传（runtime 已向 pi 发默认响应）
-      expect(transport.sendPiResponse).not.toHaveBeenCalled()
-      expect(transport.sendPluginResponse).not.toHaveBeenCalled()
-    } finally {
-      scope.stop()
-    }
-  })
-
   it('TC-8 订阅清理：scope.stop() 后事件不入队，unsubscribe 被调用（listener 防翻倍）', () => {
     const sid = ref<string | null>('A')
     const { source, scope, getQueue } = createHarness(sid)
     const q = getQueue()
     scope.stop()
     source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
-    source.triggerTimeout('A', 'r1')
+    source.triggerExpired('A', 'r1')
     // stop 后 emit 不入队
     expect(q.pendingCount.value).toBe(0)
-    // onUiRequest/onUiTimeout/onUiRequestExpired 返回的 unsubscribe 均被调用
+    // onUiRequest/onUiRequestExpired 返回的 unsubscribe 均被调用
     expect(source.onUiRequest).toHaveBeenCalledTimes(1)
-    expect(source.onUiTimeout).toHaveBeenCalledTimes(1)
     expect(source.onUiRequestExpired).toHaveBeenCalledTimes(1)
     const unsubUiRequest = source.onUiRequest.mock.results[0]?.value as () => void
-    const unsubUiTimeout = source.onUiTimeout.mock.results[0]?.value as () => void
     const unsubUiRequestExpired = source.onUiRequestExpired.mock.results[0]?.value as () => void
     expect(unsubUiRequest).toHaveBeenCalledTimes(1)
-    expect(unsubUiTimeout).toHaveBeenCalledTimes(1)
     expect(unsubUiRequestExpired).toHaveBeenCalledTimes(1)
   })
 

@@ -18,7 +18,7 @@ import type {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentFailureKind } from "../../orchestration/models/types.ts";
-import type { ModelInfo, ModelRegistryLike } from "./model-resolver.ts";
+import type { ModelInfo } from "./model-resolver.ts";
 
 // ============================================================
 // 全局常量
@@ -53,9 +53,9 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
  * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
- * （out-of-scope 维持现状）；意愿动作（U5）走 markSettled 只写 stopReason 不写
- * closedReason（不终态化），markArchived 翻 intent 位——closedReason 不再由
- * cancel/close/编排性关闭产出。
+ * （out-of-scope 维持现状）；收口动作（U5）走 markSettled 只写 stopReason 不写
+ * closedReason（不终态化），close 收口落账走 markSettledOut（不动占用位）——
+ * closedReason 不再由 cancel/close/编排性关闭产出。
  */
 export type ExecutionStatus = "running" | "idle";
 
@@ -126,7 +126,11 @@ export function isReconnectableFinalReason(reason: string | undefined): reason i
  */
 export class ResurrectDeniedError extends Error {}
 
-/** ClosedReason 全枚举值（运行时守卫用——防御性解析外部输入时校验成员资格）。 */
+/**
+ * ClosedReason 中 6 个可写终态原因（运行时守卫用——防御性解析外部输入时校验成员资格）。
+ * disconnected 是读侧兜底产出、无写点（.finalized sidecar 空内容兜底），不在本清单；
+ * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
+ */
 export const CLOSED_REASONS: readonly ClosedReason[] = [
   'parent-shutdown',
   'parent-fork',
@@ -180,19 +184,11 @@ export type ExecutionMode = "background";
 // ============================================================
 
 /**
- * 意愿维度（§3.2.1 三维正交之一）：用户是否把会话收起来了（列表可见性）。
- *   active   = 默认列表可见（缺省语义——存量 record undefined 零迁移）；
- *   archived = 已收起（close 动作；message 到达自动翻回 active = 隐含寻回）。
- * 谁改它：用户动作（close 收起 / message 寻回），不参与占用判定与资格判定。
- */
-export type Intent = "active" | "archived";
-
-/**
  * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值
  * + 2 个正常轮终展示值：
  *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
  *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
- *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
+ *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收口）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
  *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
  *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
@@ -311,8 +307,7 @@ export function isZcodeTranscriptRef(ref: TranscriptRef): ref is ZcodeTranscript
 //   - 设计：AgentEvent 携带 updateFromEvent 收口进 record 所需的**全部数据**——
 //     tool_end 带 result（供 turn.toolCalls 存完整 ToolCall），无需翻译层旁路累积。
 //
-//   ACP 词汇对照（D11 注记级校准，零行为变更；新引擎实现者按本表对齐语义，
-//   详见 docs/architecture/subagent-engine-gui-visibility.md §3.3 D11）：
+//   ACP 词汇对照（D11 注记级校准，零行为变更；新引擎实现者按本表对齐语义）：
 //     text_delta / thinking_delta ↔ ACP content blocks（text / thinking）
 //     tool_start / tool_end      ↔ ACP tool_call / tool_call_update
 //     turn_end / message_end     ↔ ACP prompt turn 终态（stop_reason + usage）
@@ -577,22 +572,15 @@ export interface ExecutionRecord {
    */
   outcome?: ExecutionOutcome;
   /**
-   * 离开批的终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
-   * 两出口统一落标：① 批闭合 flush 写账成功后；② E9 dispose 逐条转 async 写账后
-   * （均 appendEntry 持久化，U3/U5 写点）。undefined = 未离开批 / 旧记录零迁移。
-   * 消费方：E9 dispose 转账落标 + flush 落标（[modeless 波3] 起 E1 排除判据随其
-   * 退役消亡，标记保留为批域审计/孤儿 merge 透传面）。
+   * 离开批的终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**）。
+   * 历史写点（批闭合 flush 落标 / E9 dispose 落标）已随 sync 批机制退役删除；磁盘上
+   * 存量 record 的 batchFinalized entry 必须容忍解析（旧 session 文件可读），标记保留
+   * 为批域审计/孤儿 merge 透传面。undefined = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
 
-  // ── 永久会话模型新维度（§3.2.1 三维正交；u-foundation 类型面，U2 实装写点）──
+  // ── 永久会话模型新维度（§3.2.1；u-foundation 类型面，U2 实装写点）──
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
-  /**
-   * 意愿维度：用户是否把会话收起来了（列表可见性）。undefined = "active"。
-   * 写点：close（收起）置 archived / message 到达自动翻回 active（隐含寻回）——
-   * 经 store 意图原语 markArchived（U2 实装）。
-   */
-  intent?: Intent;
   /**
    * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
    * undefined = 从未收口 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
@@ -639,8 +627,8 @@ export interface ExecutionRecord {
   idleSince?: number;
   /**
    * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
-   * 收口轮的轮次通知送达后归档消费（Continuation settle 分支 / one-shot 主干尾部，
-   * 顺序约束 [写死]——intent 翻转必须在通知链之后）。
+   * 收口轮的轮次通知送达后收口落账消费（Continuation settle 分支 / one-shot 主干尾部，
+   * 顺序约束 [写死]——收口落账必须在通知链之后，提前会丢收口轮通知）。
    * undefined/false = 正常 idle 分流（轮次完成进 idle 等续聊）。
    * 仅 running 时有意义；force:true（立即终止）不走此标志。
    */
@@ -772,16 +760,9 @@ export interface ExecuteOptions {
   worktree?: boolean | WorktreeHandle;
   /** 覆盖执行 cwd（默认 mainCwd）。 */
   cwd?: string;
-  /**
-   * 同步收集模式（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
-   * [modeless 波3] collect = 派发时通知路由选项（sync=完成通知攒批一次唤醒 +
-   * 批闭合自动 close 成员 / async=逐个通知），非 record 模式（collectMode 字段已
-   * 删除，成员身份 = 协调器登记态）。
-   * undefined = config collectSync.default（缺省 "async"，新 session 生效）。
-   * schema 层枚举限 "async"|"sync"；运行时宽收 string 与 engine 字段同风格
-   * （非法值 ≠ "sync" 按 async 处理）。
-   */
-  collect?: string;
+  // [collect 退役] 原 collect 字段（sync 批通知路由选项，U1 foundation）已随批机制
+  // 整体删除——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为逐条 async
+  // 投递。pi 对未知字段静默放行，存量调用形态的 collect 值不进本选项。
   /**
    * 空闲超时毫秒数（全 record 生效的 idle GC 节奏——原「仅 conversation 模式」
    * 限定随 chatMode 消亡移除）。覆盖默认 5min idle timeout。
@@ -876,13 +857,8 @@ export interface BgResponse {
    * 值语义由 U2（execution/notify-ledger.ts）兑现。
    */
   notifyContract: "ledger+at-least-once";
-  /**
-   * 同步收集登记回显段（subagent-sync-collect 设计 §3.1.1 交互样例，U1 foundation）。
-   * 仅 resolved 模式为 sync 时附带（async 响应字节零变化，G3）：mode = 生效模式；
-   * pendingSyncCount = 当前未闭合批的 sync 成员总数（含本条；跨轮派发续累不重置，
-   * 与 D2 隐式批一致）。
-   */
-  collect?: { mode: "sync"; pendingSyncCount: number };
+  // [collect 退役] 原 collect 回显段（sync 登记回显，§3.1.1）已随批机制删除——
+  // 完成通知恒为逐条 async 投递，无回显段。
 }
 
 /** list 的内层响应（挂在 SubagentToolResult.listResponse）。 */
@@ -967,13 +943,6 @@ export interface SubagentRecord {
    * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收口 / 旧数据。
    */
   stopReason?: StopReason;
-  /**
-   * 意愿维度（§3.2.1 三维正交之一，U8 additive 投影）：用户是否把会话收起来了。
-   * 与 {@link ExecutionRecord.intent} 同源投影；undefined = "active"（存量零迁移）。
-   * 消费点：manifest 下行映射（derivedManifestRecord——archived → legacy closed，
-   * U5-D10）+ entry/重建面的 intent 载体（GUI 已收起分区 U8b 的数据源）。
-   */
-  intent?: Intent;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
   outcome?: ExecutionOutcome;
   mode: ExecutionMode;
@@ -1043,8 +1012,9 @@ export interface SubagentRecord {
   // [modeless 波3·已删除字段] collectMode 快照投影随字段消亡删除（读侧丢弃，
   // 存量 entry 残留键零迁移）。
   /**
-   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建，U1 foundation）。
-   * 缺省 = 未离开批；U5 E1 重建扫描据此排除已离场成员。
+   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建——存量 entry
+   * 读侧兼容面，[collect 退役] 起只读不写：旧 session 文件反查投影仍携带）。
+   * 缺省 = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
 }
@@ -1054,26 +1024,12 @@ export interface SubagentRecord {
 // ============================================================
 
 /**
- * 同步收集（sync collect）配置节类型（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
- * 权威默认值在 config.ts DEFAULT_COLLECT_SYNC；坏值 sanitize 回默认不炸启动（E5，
- * 与 maxConcurrent 同判）。类型定义于 types.ts（避免 config → types 反向依赖成环），
- * config.ts re-export。
- */
-export interface CollectSyncConfig {
-  /** start 未显式传 collect 时的缺省模式。新 session 生效（与 engine 配置时机一致）。 */
-  default: "async" | "sync";
-  /** 批通知单条目结果正文预算（字符）：超出截断并接 session_read 指针行。flush 时热读。 */
-  perItemChars: number;
-  /** 批通知结果正文总量预算（字符）：Σ 超限时统一收紧 effectivePerItem（U4 算法）。flush 时热读。 */
-  totalChars: number;
-}
-
-/**
  * 全局配置（~/.pi/agent/subagents/config.json）。
  *
  * 模型解析已退化为「主 agent model 优先，仅 override 时查 registry」——
  * 不再有 category/fallback/yolo 字段。config.json 只保留 maxConcurrent
  * （pool 大小）。旧 config.json 中的 categories/fallback 等字段读取时忽略。
+ * [collect 退役] 原 collectSync 节随 sync 批机制删除，残留键读取时忽略（零迁移）。
  */
 export interface SubagentsGlobalConfig {
   version: number;
@@ -1085,11 +1041,6 @@ export interface SubagentsGlobalConfig {
   defaultEngine?: string;
   /** 引擎路由策略（D9①）：strict=true 时一切 probe 失败直接报错（不 fallback）。 */
   engineRouting?: { strict: boolean };
-  /**
-   * 同步收集配置节（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
-   * 整节缺省 = DEFAULT_COLLECT_SYNC（config.ts）；逐字段 sanitize 回默认（E5）。
-   */
-  collectSync?: CollectSyncConfig;
 }
 
 // ============================================================
@@ -1123,73 +1074,3 @@ export interface RecordSnapshot {
   readonly sessionFile: string | undefined;
 }
 
-// Re-export 用于 ExecuteOptions 的 agent/model 契约
-// ============================================================
-// SDK duck-typed 接口（测试可 mock，session-runner 消费）
-// ============================================================
-
-/** AgentSession 的最小可用接口（duck-typed，与 SDK AgentSession 结构兼容）。 */
-export interface AgentSessionLike {
-  prompt(task: string, options?: unknown): Promise<void>;
-  steer(message: string): Promise<void>;
-  abort(): Promise<void>;
-  dispose(): void;
-  subscribe(fn: (event: unknown) => void): () => void;
-  sessionId: string;
-  readonly sessionManager: {
-    getSessionFile(): string | undefined;
-    getSessionId(): string;
-    /** 写 custom entry（subagent-identity 持久化用）。SDK SessionManager.appendCustomEntry 的 duck-type。 */
-    appendCustomEntry(customType: string, data?: unknown): string;
-  };
-  messages: ReadonlyArray<{
-    role: string;
-    content?: ReadonlyArray<{ type: string; text?: string }>;
-  }>;
-  getAllTools(): Array<{ name: string }>;
-  setActiveToolsByName(names: string[]): void;
-}
-
-/** DefaultResourceLoader 的最小可用接口（duck-typed）。 */
-export interface ResourceLoaderLike {
-  reload(): Promise<void>;
-}
-
-/** createAgentSession 入参的类型化子集（对应 SDK CreateAgentSessionOptions）。 */
-export interface CreateAgentSessionArgs {
-  model: unknown;
-  thinkingLevel?: string;
-  cwd: string;
-  resourceLoader: ResourceLoaderLike;
-  modelRegistry: ModelRegistryLike;
-  sessionManager: unknown;
-}
-
-/** DefaultResourceLoader 构造参数的类型化子集。 */
-export interface ResourceLoaderOptions {
-  cwd: string;
-  agentDir: string;
-  appendSystemPrompt: string[];
-  additionalSkillPaths?: string[];
-}
-
-/** SessionManager 实例的最小接口（duck-typed，fork 路径消费 SDK 静态方法的返回值）。 */
-export interface SessionManagerLike {
-  getLeafId(): string | null;
-  createBranchedSession(leafId: string): string | undefined;
-  getSessionFile(): string | undefined;
-  getSessionId(): string;
-}
-
-/** Pi SDK 动态 import 的形状（getSdk() 获取）。 */
-export interface SdkLike {
-  DefaultResourceLoader: new (opts: ResourceLoaderOptions) => ResourceLoaderLike;
-  SessionManager: {
-    inMemory(cwd?: string): SessionManagerLike;
-    create(cwd: string, sessionDir?: string): SessionManagerLike;
-    open(sessionFile: string, sessionDir?: string, cwdOverride?: string): SessionManagerLike;
-    /** [MF#1] fork 静态方法：从源 session 文件 fork 到目标 cwd，返回 SessionManager。 */
-    forkFrom(sourcePath: string, targetCwd: string, sessionDir?: string): SessionManagerLike;
-  };
-  createAgentSession: (opts: CreateAgentSessionArgs) => Promise<{ session: AgentSessionLike }>;
-}

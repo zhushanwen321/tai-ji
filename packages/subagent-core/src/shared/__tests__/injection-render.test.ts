@@ -12,7 +12,6 @@
 //   不截）、先排后截（乱序输入）、models 段无预算完整渲染；
 // - guide 宿主注入（渲染源码无内嵌平台文案）；
 // - summarizeDescription / sortByCodepoint / barrel 逐名探针。
-// 设计权威源：docs/design/subagent-core-convergence.md §3.2 D-3 / §3.3 红线 5、7。
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";

@@ -43,16 +43,12 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
     focusedSession: { value: null },
   }),
 }))
-vi.mock('@/composables/features/chat/useListSync', () => ({ useListSync: vi.fn() }))
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({
     derivedStatus: vi.fn(() => 'idle'),
     invalidateStatusCache: vi.fn(),
   }),
   invalidateStatusCache: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => ({
-  useSidebarSubagentActions: () => ({ stopSubagent: vi.fn() }),
 }))
 vi.mock('@taiji/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
@@ -109,9 +105,6 @@ function mountSidebar() {
         SegmentedTab: true,
         SessionList: true,
         FileView: true,
-        SubagentList: true,
-        WorkflowList: true,
-        WorkflowDetail: true,
         RenameSessionDialog: true,
         SearchModal: true,
       },

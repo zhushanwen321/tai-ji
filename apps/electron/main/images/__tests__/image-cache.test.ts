@@ -1,5 +1,5 @@
 /**
- * toolResult 图片缓存生命周期测试（crash-resilience §3.3 D6-⑨ / u7-memory-governance，main 侧）。
+ * toolResult 图片缓存生命周期测试（D6-⑨ / u7-memory-governance，main 侧）。
  *
  * 运行池：guarded（vitest.config projects——真实文件 IO，挂全套 fs-guard；夹具全部
  * mkdtempSync(tmpdir) 自建自删，TAIJI_AGENT_DATA_DIR 由 globalSetup 指向 tmp）。

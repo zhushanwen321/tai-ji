@@ -30,7 +30,7 @@ function mockContext(overrides?: Partial<WorktreeHandlerContext>): WorktreeHandl
     reply: vi.fn(),
     gitService: mockGitService() as unknown as IGitService,
     worktreeService: {
-      create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x' })),
+      create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project' })),
       detect: vi.fn(async () => ({
         mode: 'bare-workspace' as const,
         wsRoot: '/project',
@@ -154,10 +154,10 @@ describe('WorktreeMessageHandler worktree.create', () => {
   })
 })
 
-// ── worktree.create 写操作失效（perf 03 §5 检查点闭环，2026-08-17）──
+// ── worktree.create 写操作失效（perf 03 §5 检查点闭环，2026-08-17；失效键改 repo 根：缓存治理 1-6）──
 
 describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
-  it('成功后按 payload.workspaceHint 调 invalidateStatusCache，且在 reply 之前', async () => {
+  it('操作后缓存失效：成功后按 create 返回的 repo 根失效——hint 为深层子目录时不与缓存键错位（下次 getStatus 按 repo 根重读为新值）', async () => {
     const gitService = mockGitService()
     // 持有 reply 原始 mock（ctx 类型里 reply 是具体签名，.mock 不可达）——「失效在 reply 前」
     // 用 vitest mock 的 invocationCallOrder 全局单调序断言失效先于 reply 发生
@@ -165,16 +165,22 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
     const ctx = mockContext({
       gitService: gitService as unknown as IGitService,
       reply: reply as unknown as WorktreeHandlerContext['reply'],
+      worktreeService: {
+        ...mockContext().worktreeService,
+        // hint 指向深层子目录：create 内部 detect 解析出的 repo 根是 /project（≠ hint 原值）
+        create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project' })),
+      },
     })
     const handler = new WorktreeMessageHandler(ctx)
     const ws = mockWs()
 
     await handler.handleWorktreeMessage(
-      msg('worktree.create', { branch: 'feat/x', workspaceHint: '/project' }),
+      msg('worktree.create', { branch: 'feat/x', workspaceHint: '/project/deep/sub' }),
       ws,
     )
 
-    // 失效调用真实发生，且目标 cwd = 发起请求的 cwd（workspaceHint）
+    // 失效键 = create 内部 detect 实际解析出的 repo 根（session statusCache 键所在的 cwd 形态），
+    // 不是 hint 原值——修复前这里失效 { cwd: '/project/deep/sub' }，与缓存键错位、失效落空。
     expect(gitService.invalidateStatusCache).toHaveBeenCalledTimes(1)
     expect(gitService.invalidateStatusCache).toHaveBeenCalledWith({ cwd: '/project' })
     expect(reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
@@ -189,7 +195,24 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
     expect(invalidateOrder).toBeLessThan(replyOrder)
   })
 
-  it('成功且 payload 无 workspaceHint → 按 process.cwd() 失效（与 service.detect 起点同式）', async () => {
+  it('WS 契约不变：repoRoot 仅供 runtime 内部失效，worktree.created payload 不携带', async () => {
+    const ctx = mockContext()
+    const handler = new WorktreeMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleWorktreeMessage(
+      msg('worktree.create', { branch: 'feat/x', workspaceHint: '/project' }),
+      ws,
+    )
+
+    // toHaveBeenCalledWith 深比较：payload 恰为 { cwd, branch }，多出 repoRoot 即失败
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
+      cwd: '/project/feat-x',
+      branch: 'feat/x',
+    })
+  })
+
+  it('成功且 payload 无 workspaceHint → 失效键仍为 create 返回的 repo 根（起点缺省由 service 内部决定）', async () => {
     const gitService = mockGitService()
     const ctx = mockContext({ gitService: gitService as unknown as IGitService })
     const handler = new WorktreeMessageHandler(ctx)
@@ -200,7 +223,7 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
       ws,
     )
 
-    expect(gitService.invalidateStatusCache).toHaveBeenCalledWith({ cwd: process.cwd() })
+    expect(gitService.invalidateStatusCache).toHaveBeenCalledWith({ cwd: '/project' })
   })
 
   it('create 失败 → 不失效（状态未变）', async () => {

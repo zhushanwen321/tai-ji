@@ -6,6 +6,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
+import { isMissingFsError } from "./fs-error.ts";
 import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
@@ -34,14 +35,6 @@ export interface ManifestRecord {
    * （全景① ExecutionStatus+ClosedReason）在 manifest 写面的过渡锚。
    */
   executionStatus?: ExecutionStatus;
-  /**
-   * [U8 / §3.2.8 session-reader 前向兼容铁律] 意愿维度下行：'archived' = 已收起
-   * （close 动作）。写侧经 derivedManifestRecord 投影（intent 持久化的 manifest
-   * 锚——binding/entry 面之外的第三持久化点，孤儿 record 重启后意图不丢）；
-   * 读侧 manifestToSubagent 回读。旧版 session-reader 的 RecordManifest 接口无
-   * 本字段，未知字段跳过——无破坏（与 executionStatus 同款过渡锚形态）。
-   */
-  intent?: "active" | "archived";
   /**
    * [U8 / B-restart manifest 契约面] 实际执行引擎 id（引擎域下行）。zcode record
    * 无子 session 文件（磁盘扫描缺员），manifest 是其重启可见性的兜底承载——
@@ -180,7 +173,13 @@ export class ManifestStore {
     let files: string[];
     try {
       files = fs.readdirSync(this.dir);
-    } catch {
+    } catch (err) {
+      // 目录不存在（ENOENT）= 无 manifest 可列（外部删除/首启窗口的合法缺省，静默
+      // 空表）；其余读失败（EACCES/EIO 等）best-effort 留痕——静默空表会把 IO 故障
+      // 伪装成 not-found，冷查链（collectRecords orphan 投影）消费方无从分辨。
+      if (!isMissingFsError(err)) {
+        bestEffort(err, `list manifests (readdir ${this.dir})`, "error");
+      }
       return [];
     }
     const names = files.filter((f) => f.endsWith(".json") && !f.includes(".tmp."));

@@ -19,9 +19,10 @@
  *
  * 与 GitStateService 缓存失效的关系（perf 03 §5 worktree 检查点闭环，2026-08-17）：本服务自身
  * 不触发失效（编排层不感知缓存），失效由 transport/worktree-message-handler.ts 在
- * worktree.create 成功后、reply 前对发起请求的 cwd 调 gitService.invalidateStatusCache({ cwd })
- * （内部即 GitStateService.invalidateByCwd，覆盖共享该 cwd 的全部 session）挂钩，失败路径不失效。
- * 此前「声明接受陈旧」的取舍（perf W17 审查 Fix-6）已被该闭环取代。
+ * worktree.create 成功后、reply 前对 create 返回值携带的 repo 根（detect 解析结果，
+ * 缓存治理 1-6）调 gitService.invalidateStatusCache({ cwd })
+ * （内部即 GitStateService.invalidateByCwd，覆盖共享该 repo 上下文的全部 session）挂钩，
+ * 失败路径不失效。此前「声明接受陈旧」的取舍（perf W17 审查 Fix-6）已被该闭环取代。
  */
 import { join, basename } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -322,7 +323,7 @@ export class WorktreeService implements IWorktreeService {
     const bareSetupScriptRel = this.deps.configService.getBareSetupScript()
     await this.runSetupScript(barePath, newWtPath, bareSetupScriptRel)
 
-    return { cwd: newWtPath, branch }
+    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
   }
 
   /** plain-repo 模式下创建 worktree。 */
@@ -382,7 +383,7 @@ export class WorktreeService implements IWorktreeService {
     const setupScriptRel = this.deps.configService.getSetupScript()
     await this.runSetupScript(repoRoot, newWtPath, setupScriptRel)
 
-    return { cwd: newWtPath, branch }
+    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
   }
 
   /** 运行 setup 脚本（通用逻辑）。setupScriptRel 来自 configService（相对 cwd 解析）；不存在则跳过。 */

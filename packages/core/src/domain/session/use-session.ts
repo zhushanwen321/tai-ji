@@ -193,7 +193,7 @@ export interface UseSessionDeps {
   sessionEntry?: SessionEntryPort
 }
 
-// ── session.list server-push 订阅（#7 方案 A；CLAUDE.md 规则 #2 防重复注册）──
+// ── session.list server-push 订阅（#7 方案 A；listener 防重复注册）──
 // useSidebar 被 5+ 组件实例化（Sidebar/Turn/AppShell/PanelContainer/Workspace），
 // 若每实例各注册一次 onGlobalType，每次广播会触发 N 次相同整表快照应用（事件处理翻倍）。
 // 模块级 refCount：首个实例注册，末个实例卸载时取消，中间实例共享同一监听。

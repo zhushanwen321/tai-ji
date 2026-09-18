@@ -25,7 +25,8 @@ import type { Message, SessionStatus } from '@taiji/shared'
 import type { RetryState } from './store-types'
 
 /** SessionStatus 前端派生状态：9 态扩展版（方案 C 优化版 v3 + working 后台任务态）
- * working：主 agent turn 已结束但有 background subagent/workflow 仍在 running/paused。 */
+ * working：主 agent turn 已结束但有 background subagent/workflow 仍在 running（workflow
+ * 一次性生命周期 D-2：paused 态已删）。 */
 export type DerivedStatus =
   | 'streaming'
   | 'pending'
@@ -96,7 +97,7 @@ function terminalStatusOfLastMessage(last: Message): DerivedStatus {
  * @param chat chat store 实例（读 getMessages / getRetryState / isGenerating 分区）
  * @param isActive 该 session 是否活跃（pendingSend ∨ isGenerating）
  * @param isCompacting 该 session 是否处于 compact 互斥态
- * @param hasBackgroundWork 该 session 是否有 background subagent/workflow 仍在 running/paused
+ * @param hasBackgroundWork 该 session 是否有 background subagent/workflow 仍在 running
  * @param metaStatus runtime session 元数据 status（未 hydrate 兜底用，W6）
  * @param hasAskUserPending 该 session 是否有 ask-user 富交互请求 pending（CW wave
  *   `session-active-ssot` T3）。ask-user 走 extension.ui_request 通道，不产生 toolCall
@@ -131,7 +132,7 @@ export function deriveStatus(
   // 文本流式生成中
   if (isTextStreaming(chat, sessionId, last)) return 'streaming'
 
-  // 主 turn 结束但有 background subagent/workflow 仍在 running/paused
+  // 主 turn 结束但有 background subagent/workflow 仍在 running
   if (hasBackgroundWork) return 'working'
 
   // 已提交、等待 pi 确认（pendingSend 空窗期）

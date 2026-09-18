@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-goal",
-  "version": "0.14.4",
+  "version": "0.14.5",
   "description": "Codex-style /goal command for Pi — persistent goal-driven autonomous loop with evidence-based completion, token budget, agent-reported blocking, and steering templates.",
   "type": "module",
   "main": "src/index.ts",
@@ -32,7 +32,8 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@zhushanwen/extension-protocol": "workspace:*"
+    "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {

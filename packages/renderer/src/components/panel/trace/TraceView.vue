@@ -30,7 +30,7 @@
       <p class="max-w-[420px] text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim">{{ t('panel.trace.loadFailedHint') }}</p>
       <p class="font-mono text-[length:var(--text-3xs)] text-neutral-faint">{{ partition.errorCode }}</p>
       <!-- envelope message 透出（分区已存此前未渲染）：payload_too_large 等传输守卫错误
-           的恢复指引在此字段（「加载更早」分页入口 + session 文件路径，crash-resilience §3.4），
+           的恢复指引在此字段（「加载更早」分页入口 + session 文件路径，），
            只显示 code 会把恢复路径藏掉 -->
       <p
         v-if="partition.errorMessage"
@@ -55,7 +55,7 @@
         {{ t('panel.trace.retry') }}
       </Button>
     </div>
-    <!-- 失败路径：文件超 runtime 读取预检阈值（crash-resilience §3.3 D5④）——entries 恒空，
+    <!-- 失败路径：文件超 runtime 读取预检阈值（D5④）——entries 恒空，
          独立分支渲染，不与 empty 空态混淆。降级文案（体积 + 源文件绝对路径）由 runtime
          formatTraceOversizeMessage 产出经分区透传（设计定版文案 SSOT 在 runtime；快照无
          独立体积字段，组件不可本地重组）。组件形态对齐 empty 分支（icon + 文案 + 重试）。 -->

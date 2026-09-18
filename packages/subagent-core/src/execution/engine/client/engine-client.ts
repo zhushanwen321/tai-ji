@@ -189,7 +189,6 @@ export class EngineClient {
     this.engineId = opts.engineId;
     this.reverseRouterDeps = {
       engineId: opts.engineId,
-      uiRequestHandler: opts.uiRequestHandler,
       runRoutes: this.runRoutes,
       mirror: this.mirror,
       setPartialHandle: (partial) => {

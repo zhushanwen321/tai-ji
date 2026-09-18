@@ -41,6 +41,7 @@ export default {
     repoBareBadge: 'bare-workspace',
     repoChange: 'Change…',
     repoNotRepo: 'Current directory is not in a Git repository. Please select a repository directory first.',
+    repoDetectFailed: 'Failed to detect the repository. Please close and retry; check logs if it persists.',
     branchLabel: 'Branch name',
     branchPlaceholder: 'e.g. feat/oauth',
     branchValidation: 'Branch name must not contain spaces / .. / ~ / ^ / : , nor start with - or .',

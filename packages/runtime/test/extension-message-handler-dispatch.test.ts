@@ -2,8 +2,8 @@
  * ExtensionMessageHandler 单测（分发路由特征锚定 + getPendingRequests，自 extension-message-handler.test.ts 归并）。
  *
  * 背景：handleExtensionMessage 从 ~13 分支 switch 重构为表驱动分发（routes map + case 体
- * 提取为私有 helper）。本文件锁定此前无测试覆盖的分支：extension.ui_response 全部四路
- * （bridge 短路 / 超时迟到短路 / 无活跃 client / 正常转发）、extension.list/recommended
+ * 提取为私有 helper）。本文件锁定此前无测试覆盖的分支：extension.ui_response 三路
+ * （bridge 短路 / 无活跃 client / 正常转发）、extension.list/recommended
  * service 缺席空 reply、toggle 领域错误透传、installDir/setAutoUpgrade 校验分支。
  * 另锁 extension.getPendingRequests 非破坏只读快照（CW wave `ui-requests-push-model` T2
  * 回归：双消费者并发拉取不再「先到者清空、后到者拿空」）。
@@ -30,8 +30,6 @@ function makeHandler(opts: HandlerOpts = {}) {
   const extensionTimeoutMgr = {
     isBridgeRequest: vi.fn().mockReturnValue(false),
     removeBridgeRequest: vi.fn(),
-    isTimedOut: vi.fn().mockReturnValue(false),
-    clearTimedOut: vi.fn(),
     clearTimeout: vi.fn(),
     removePendingRequest: vi.fn(),
     getPendingRequests: vi.fn().mockReturnValue([]),
@@ -47,8 +45,6 @@ function makeHandler(opts: HandlerOpts = {}) {
     sessionService: { getRpcClient: opts.getRpcClient ?? vi.fn().mockReturnValue(undefined) },
     extensionService: opts.extensionService,
     extensionTimeoutMgr,
-    broadcast: vi.fn(),
-    nextPushId: vi.fn().mockReturnValue('push-1'),
   }
   const handler = new ExtensionMessageHandler(ctx as unknown as ConstructorParameters<typeof ExtensionMessageHandler>[0])
   return { ctx, cap, handler, extensionTimeoutMgr }
@@ -61,7 +57,7 @@ function msg(type: string, payload: Record<string, unknown>, id = 'm1'): ClientM
 const WS = {} as never
 
 describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定）', () => {
-  describe('extension.ui_response 四路（超时/桥接/无 client/正常转发）', () => {
+  describe('extension.ui_response 三路（桥接/无 client/正常转发）', () => {
     it('bridge 请求（select marker 通道）→ 移除桥接记录，不转发 pi、不 reply、不报错', async () => {
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue({ sendExtensionUiResponse: vi.fn() }) })
       extensionTimeoutMgr.isBridgeRequest.mockReturnValue(true)
@@ -70,20 +66,6 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
       expect(extensionTimeoutMgr.removePendingRequest).toHaveBeenCalledWith('s1', 'r1')
       // 不向 pi 转发、不 reply、不 sendError
       expect(ctx.sessionService.getRpcClient).not.toHaveBeenCalled()
-      expect(cap.replies).toHaveLength(0)
-      expect(cap.errors).toHaveLength(0)
-    })
-
-    it('超时后迟到响应 → 清理 timedOut/pending，不向 pi 二次响应（P2-6 双响应拦截）', async () => {
-      const client = { sendExtensionUiResponse: vi.fn() }
-      const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue(client) })
-      extensionTimeoutMgr.isTimedOut.mockReturnValue(true)
-      await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'confirm', result: true }), WS)
-      expect(extensionTimeoutMgr.clearTimedOut).toHaveBeenCalledWith('r1')
-      expect(extensionTimeoutMgr.clearTimeout).toHaveBeenCalledWith('r1')
-      expect(extensionTimeoutMgr.removePendingRequest).toHaveBeenCalledWith('s1', 'r1')
-      // 关键：不向 pi 再发（runtime 超时已发过默认响应）
-      expect(client.sendExtensionUiResponse).not.toHaveBeenCalled()
       expect(cap.replies).toHaveLength(0)
       expect(cap.errors).toHaveLength(0)
     })

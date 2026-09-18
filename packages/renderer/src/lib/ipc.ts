@@ -385,7 +385,7 @@ export async function playSystemSound(
   return api?.playSystemSound?.(name, kind) ?? {}
 }
 
-// ── renderer 错误上报（crash-resilience §3.3 D2 / u2）────────────────
+// ── renderer 错误上报（D2 / u2）────────────────
 // 三件套（boot/error-reporter）捕获后经此上报，main 落盘 renderer-error-<date>.log
 // （windowId 限流在 main 侧）。fire-and-forget：invoke reject / 无 IPC（web/mock）/
 // 旧 preload 未暴露时全部静默——日志通道故障不得再炸 renderer（D2 降级契约）。
@@ -416,7 +416,7 @@ export function exportDiagnosticBundle(
   return api?.exportDiagnosticBundle?.(payload) ?? Promise.resolve({ status: 'canceled' })
 }
 
-// ── 图片缓存写 port（crash-resilience §3.3 D6-⑨，MF-7 装配点）────────
+// ── 图片缓存写 port（D6-⑨，MF-7 装配点）────────
 
 /**
  * toolResult 图片落盘 write port：core image-cache 编排层的 main 侧调用腿。

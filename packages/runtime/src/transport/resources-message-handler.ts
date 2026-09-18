@@ -58,24 +58,18 @@ export class ResourcesMessageHandler {
         // rebuildGlobal 内部 notifyGlobalChange → onChange → 广播 config.skillCacheInvalidated('global') + reloadOrchestrator。
         // 显式广播 ('project')——让前端 useProjectSkills 也失效重拉。
         //
-        // Promise 链语义（W1 修正：原 `.then` 内 invalidate+broadcast 在 rebuild reject 时被整段跳过，
-        // 与下方「失败不阻塞后续 invalidate/broadcast」注释不符——原写法 broadcast 在 `.then` 里，
-        // reject 时前端收不到 project 失效信号、useProjectSkills 仍展示陈旧缓存）：
-        //   - 成功：invalidateAllProjects（清 projectCache，globalCache 已由 rebuild 重扫）+ broadcast('project')
-        //   - 失败：仅 broadcast('project')（让前端至少重拉一次；projectCache 暂不清——rebuild 失败时
-        //     globalCache 可能损坏，invalidateAllProjects 此时意义不大且 reloadOrchestrator 可能已在处理错误，
-        //     等下次成功 rebuild 再清；用户重试 settings 操作可恢复）。
-        // broadcast 总是执行（无论 rebuild 成败都通知前端 project 失效），invalidate 只在成功时。
-        // best-effort：失败只记日志，不阻塞 WS 消息处理（reply/broadcastSkillDirs 已立即返回）。
+        // Promise 链语义：失效与广播在成败两分支同款执行（语义对称）→ finally 单点。
+        // 成败都 invalidateAllProjects（清 projectCache，globalCache 已由 rebuild 重扫）+ broadcast('project')：
+        // 缓存治理 1-5——invalidate 只让下次读重扫不破坏数据；rebuild 失败时不清 projectCache
+        // 会让失效广播与缓存实际状态不一致（前端重拉仍命中旧值；useProjectSkills 收不到失效
+        // 信号则展示陈旧缓存）。best-effort：失败只记日志，不阻塞 WS 消息处理
+        //（reply/broadcastSkillDirs 已立即返回）。invalidateAllProjects 是 Map 清理，不会抛。
         void this.ctx.skillRegistry.rebuildGlobal()
-          .then(() => {
-            this.ctx.skillRegistry.invalidateAllProjects()
-            this.ctx.broadcastSkillCacheInvalidated('project')
-          })
           .catch((e: unknown) => {
             console.error('[settings-handler] skillRegistry.rebuildGlobal failed after setSkillDirs:', e)
-            // rebuild 失败也广播失效，让前端至少重拉一次（projectCache 未清，前端拉到旧值——
-            // 但比完全不通知好，用户重试 settings 操作可恢复）。
+          })
+          .finally(() => {
+            this.ctx.skillRegistry.invalidateAllProjects()
             this.ctx.broadcastSkillCacheInvalidated('project')
           })
         this.ctx.broadcastSkillDirs()

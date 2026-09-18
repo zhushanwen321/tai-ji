@@ -41,22 +41,14 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { armSettledWatchdog, hasSettledWatchdog, SETTLED_MID_ROUND_NO_PROGRESS_MS, _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { armIdleTimer, hasIdleTimer, _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-recovery-bounds-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}): ExecutionRecord {
@@ -79,7 +71,7 @@ interface ServiceInternals {
   store: RecordStore;
 }
 
-type MockPi = ReturnType<typeof makePi>;
+type MockPi = PiMock;
 
 function setup(): { agentDir: string; service: SubagentService; store: RecordStore; pi: MockPi; fake: FakePiEnginePort } {
   const agentDir = makeTmpAgentDir();
@@ -152,7 +144,7 @@ describe("T2④ service-side kill convergence", () => {
     expect(record.stopReason).toBe("interrupted");
     expect(record.closedReason).toBeUndefined();
     expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
-    expect(record.intent).toBeUndefined(); // cancel ≠ 收起
+    expect(record.hadWorktree).toBeUndefined(); // cancel ≠ 收口
   });
 
   it("archiveIdleRecord (via closeSubagent force:false on idle) routes through killRecordChildWithEscalation and disarms timers", async () => {
@@ -161,11 +153,10 @@ describe("T2④ service-side kill convergence", () => {
     armIdleTimer(record.id, () => {}); // Path A：idle timer armed（进程保活）
     armSettledWatchdog(record.id, () => {});
     await service["closeSubagent"](record, false);
-    // [U5] close = 归档收口（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
+    // [U5] close = 收口落账（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
     expect(killChildSpy).toHaveBeenCalledWith(record.id, "archiveIdleRecord");
     expect(hasIdleTimer(record.id)).toBe(false);
     expect(hasSettledWatchdog(record.id)).toBe(false);
-    expect(record.intent).toBe("archived");
     expect(record.status).toBe("idle");
     // [H1 U6] 旧引擎侧 close force 受理断言随 interact 面退役（无在跑轮无需进程回收，
     // Path A 保活进程由镜像记账 + reaper 兜底回收）。
@@ -191,15 +182,14 @@ describe("T2④ service-side kill convergence", () => {
     // 回收面 iii：idle timer + settled watchdog 双 disarm
     expect(hasIdleTimer(idle.id)).toBe(false);
     expect(hasSettledWatchdog(idle.id)).toBe(false);
-    // [U5] 自动收起：settle idle + interrupted-by-parent + intent=archived（不终态化
+    // [U5] 编排性关闭：settle idle + interrupted-by-parent + 收口落账（不终态化
     // ——closedReason 恒 undefined，stopReason 承载展示位）；在飞轮置放弃轮标记。
     expect(running.status).toBe("idle");
     expect(idle.status).toBe("idle");
     expect(running.closedReason).toBeUndefined();
     expect(running.stopReason).toBe("interrupted-by-parent");
-    expect(running.intent).toBe("archived");
-    expect(idle.intent).toBe("archived");
     expect(running.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
+    expect(running.worktreeHandle).toBeUndefined(); // 收口落账 worktreeHandle 清句（S5）
   });
 });
 
@@ -272,7 +262,7 @@ describe("T2③ hot-path settled watchdog", () => {
     expect(record.lastError).toContain("action:'list'");
     // 失败通知送达（Continuation 独立载荷——正文带失败摘要与恢复指引）
     expect(pi.sendMessage).toHaveBeenCalled();
-    const sendMessageCalls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[{ content?: string }]>;
+    const sendMessageCalls = pi.sendMessage.mock.calls;
     const notifyContent = sendMessageCalls[0]?.[0]?.content ?? "";
     expect(notifyContent).toContain("settled watchdog");
     // [H1 U6] 引擎侧终止意图（watchdog fire 的 cancel 受理断言）随 interact 面退役——

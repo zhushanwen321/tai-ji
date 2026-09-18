@@ -38,7 +38,6 @@ import { useSidebarSessionActions } from '@/composables/features/sidebar/useSide
 /** 最小注入：onForceQuitSession 不消费这些依赖，stub 即可 */
 function makeOptions() {
   return {
-    focusedSessionId: ref<string | null>(null),
     selectSession: vi.fn(),
     restoreSession: vi.fn(),
     newSession: vi.fn(),

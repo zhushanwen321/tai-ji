@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ PROBE（subagent-sync-collect 探针）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -32,14 +32,38 @@
       ],
       "layer": "L1",
       "assets": [
-        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
-        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
-        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
-        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
-        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
-        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/global-setup.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/state-tearing.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/v6-shell-baseline.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/file-tree.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/update-cleanup.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/search-modal.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/failure-paths.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/global-setup.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app.ts"
+        }
       ],
       "trigger": "always",
       "serial": false,
@@ -53,26 +77,38 @@
       "summary": "visual-chromium：像素 diff 轨（chromium + vite dev mock），CI L1 固定环节",
       "scope": [
         "packages/renderer/src/**",
-        "e2e/visual/**"
+        "packages/ui/src/**",
+        "e2e/visual/**",
+        "e2e/visual-baselines/**"
       ],
       "layer": "L1",
       "assets": [
-        { "kind": "spec", "ref": "e2e/visual/shell.spec.ts" },
-        { "kind": "spec", "ref": "e2e/visual/composer.spec.ts" },
-        { "kind": "harness", "ref": "e2e/visual/fixtures/visual-server.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/visual/shell.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/visual/composer.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/visual/fixtures/visual-server.ts"
+        }
       ],
       "trigger": "always",
       "serial": false,
       "run": "npx playwright test --project=visual-chromium",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#c-层playwright-像素-diffci-内形态级",
-      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记"
+      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记。[2026-09-16 composer-task-tray 补 scope] 增补 `e2e/visual-baselines/**`：baseline 目录本身不是资产（不登记 assets），但 `e2e/` 是 asset 族看护根，基线 PNG 变更属本 rule 的触发面却没有 coverage → 按 --check 口径是漏登记（本次更新 composer 基线时实跑检出）。补 scope 而非登记 asset（资产 = 可执行 e2e 本体，基线是快照数据）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言与截图子树消费的 @taiji/ui 组件都落 packages/ui——8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）、composer-box 输入区 `features/composer/ComposerInput.vue`、drawer 容器 `features/drawer/DrawerPanel.vue`；改这些组件会在像素层直接击穿本轨基线却圈不到本 rule（同批缺口：该目录此前不在任何 rule 的 scope 内）。补 scope 即把「@taiji/ui 组件形态变更」纳入触发面。（归属澄清：shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 本体在 renderer 的 `packages/renderer/src/components/panel/Composer.vue`——这两处由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）"
     },
     {
       "id": "E2E-MOCK-01",
       "summary": "行为轨 mock 全量（electron project，mock 构建产物 + _electron.launch，零 token）",
       "scope": [
         "packages/renderer/src/**",
+        "packages/ui/src/**",
         "packages/core/src/**",
         "packages/runtime/src/**",
         "apps/electron/**",
@@ -89,24 +125,57 @@
       ],
       "layer": "L2",
       "assets": [
-        { "kind": "spec", "ref": "e2e/workspace.spec.ts" },
-        { "kind": "spec", "ref": "e2e/composer.spec.ts" },
-        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
-        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
-        { "kind": "spec", "ref": "e2e/gui-components.spec.ts" },
-        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
-        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
-        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
-        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
-        { "kind": "spec", "ref": "e2e/workflow-sidebar-sync.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/workspace.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/composer.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/failure-paths.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/file-tree.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/gui-components.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/search-modal.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/state-tearing.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/update-cleanup.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/v6-shell-baseline.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/workflow-sidebar-sync.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
       "run": "npx playwright test --project=electron",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集"
+      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言的 @taiji/ui 渲染面——gui-components.spec.ts 的 8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）+ v6-shell-baseline 打开 drawer 后断言的容器（renderer `components/workspace/PanelContainer.vue` 渲染 `features/drawer/DrawerPanel.vue`，`aside[aria-label=\"侧边抽屉\"]` 即其根）；改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。（归属澄清：v6-shell-baseline 的 shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 属 renderer 的 `packages/renderer/src/components/panel/Composer.vue`（输入区 ComposerInput 来自 @taiji/ui）——前者由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。"
     },
     {
       "id": "E2E-REAL-01",
@@ -116,6 +185,7 @@
         "packages/core/src/**",
         "packages/runtime/src/**",
         "apps/electron/**",
+        "extensions/universal/**",
         "e2e/workspace-real.spec.ts",
         "e2e/ask-user-real.spec.ts",
         "e2e/tasks-drawer-real.spec.ts",
@@ -123,18 +193,123 @@
       ],
       "layer": "L2",
       "assets": [
-        { "kind": "spec", "ref": "e2e/workspace-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/ask-user-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/tasks-drawer-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/workflow-thinkinglevel-real.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app-real.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/workspace-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/ask-user-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/tasks-drawer-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/workflow-thinkinglevel-real.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app-real.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
       "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）"
+      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。"
+    },
+    {
+      "id": "E2E-SKILLRELOAD-01",
+      "summary": "skill-reload S1 主场景：编辑项目 skill 时在飞 workflow run 存活 + 面板 2s 即时 + 三段归因日志 + 终态 entry（真实 app + faux LLM 演员）",
+      "scope": [
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/services/skill-registry.ts",
+        "packages/runtime/src/services/skill-dirs.ts",
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/src/execution/engine/**",
+        "e2e/skill-reload-survival.spec.ts",
+        "e2e/fixtures/skill-reload-real-helpers.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/skill-reload-survival.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/skill-reload-real-helpers.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "npx playwright test e2e/skill-reload-survival.spec.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 归宿（来源设计 .tmp/tech-design/skill-reload-nondestructive.md §4 S1 + impl-plan B5；执行属开发阶段空载串行，PR/merge/CI 门禁不跑）。layer 定 L2.5 非 L3 的裁决：被测对象是「编辑 skill → watcher → reload → adoption → 在飞 run 存活」机制链，非模型智能——LLM 轮次全部 faux 脚本化（workflow toolCall 确定性触发 + TAIJI_FAUX_TPS 长流式保持 run 在飞），零 token 凭证无关且消除真实 LLM 延迟抖动对「2s 面板窗口」断言的污染；同 real 轨全族 2026-09-15 翻轨口径。前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，与 mock bundle 同 outDir 分批构建，launch-app-real pre-flight 会 fail-fast 指路）。preserved 归因行走 extension-logger 文件通道，spec 内已设 TAIJI_AGENT_DEBUG=1。S5 收尾段以 session.delete 驱动真杀级联（runtime WS 无 new_session 面、pi RPC prompt('/new') 不执行内置命令，已核实）——设计 S5 的手工 /new 项归 B5b 真机手工段。renderer panel 候选源（A2 档2）改动面由 E2E-MOCK-01 / E2E-REAL-01 的 packages/renderer/src/** scope 承担，不在本 rule 重复登记。"
+    },
+    {
+      "id": "E2E-SKILLRELOAD-02",
+      "summary": "skill-reload S1b：双 session 并发 reload 存活 + dir=global 归因行列双 sid + ask_user 反向请求送达可应答（真实 app + faux LLM 演员）",
+      "scope": [
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/services/skill-registry.ts",
+        "packages/runtime/src/services/skill-dirs.ts",
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/src/execution/engine/**",
+        "e2e/skill-reload-askuser.spec.ts",
+        "e2e/fixtures/skill-reload-real-helpers.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/skill-reload-askuser.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/skill-reload-real-helpers.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "npx playwright test e2e/skill-reload-askuser.spec.ts",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 ask-user-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。"
+    },
+    {
+      "id": "E2E-SKILLRELOAD-03",
+      "summary": "skill-reload S2：派发 run 后 <1s 编辑 skill 撞 spawn 窗口竞态 → run 确定收口 + 终态可读回 + 无孤儿（真实 app + faux LLM 演员）",
+      "scope": [
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/services/skill-registry.ts",
+        "packages/runtime/src/services/skill-dirs.ts",
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/src/execution/engine/**",
+        "e2e/skill-reload-spawn-race.spec.ts",
+        "e2e/fixtures/skill-reload-real-helpers.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/skill-reload-spawn-race.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/skill-reload-real-helpers.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "npx playwright test e2e/skill-reload-spawn-race.spec.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 归宿（设计 §4 S2 + §3.4 探针清单末行「reload 撞 spawn 瞬时窗口不产生孤儿」）。与 01/02 同 faux/L2.5 裁决与执行前置。竞态注入 = message.send ack 后 setTimeout 400ms 写项目 skill（设计「<1s 内」）；reload 决策 queued（生成期）与 immediate（空闲）均为设计内合法路径，断言只要求归因行在场 + run 落终态（正常完成为主预期；done,failed 分支的用户可见性 = S3 单测契约 + 同一 workflowUpdate 广播通道）+ 主 session JSONL 末条 workflow-record 可读回（无状态分裂）+ session.delete 级联后 ps 引擎执行树归零。spawn 窗口内形态（record 已建/child 未 spawn）的机制面已由 B0 单测覆盖，本轨只留端到端串联。"
     },
     {
       "id": "E2E-EQUIV-01",
@@ -147,25 +322,82 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "packages/runtime/src/__tests__/equivalence/pi-fixture.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/relay-live-reload.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts" }
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-fixture.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/relay-live-reload.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -183,7 +415,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -200,7 +435,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -217,7 +455,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -237,8 +478,14 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "spec", "ref": "e2e/models-json-sanitize-real.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/sanitize-providers.mts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/models-json-sanitize-real.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/sanitize-providers.mts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
@@ -255,14 +502,38 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/rename-session/e2e/harness.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a1.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a3.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a4.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a5.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a6.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a7.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-all.mjs" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/rename-session/e2e/harness.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a1.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a3.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a4.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a5.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a6.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a7.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-all.mjs"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -280,7 +551,10 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a2.mjs" }
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a2.mjs"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
@@ -298,7 +572,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "script", "ref": "scripts/verify-scheduler-e2e.cjs" }
+        {
+          "kind": "script",
+          "ref": "scripts/verify-scheduler-e2e.cjs"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
@@ -308,25 +585,155 @@
       "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
     },
     {
-      "id": "E2E-PROBE-01",
-      "summary": "subagent-sync-collect 探针 v2/v3：崩溃批补发与 kill -9 恢复面（PI_PROBE_FAUX=1 通道）",
+      "id": "E2E-BATCH-01",
+      "summary": "S1 批量基本链：subagents 双任务并行 → 一条 notifyDone 收齐（pi CLI 真机，真 LLM）",
       "scope": [
-        "scripts/probes/subagent-sync-collect/**",
-        "packages/subagent-core/src/execution/service/sync-collect-domain.ts"
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/src/execution/service/**"
       ],
-      "layer": "L2.5",
+      "layer": "L3",
       "assets": [
-        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/common.mjs" },
-        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/faux-script.mjs" },
-        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs" },
-        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A1）bash .tmp/dev-flow/subagents-batch-tool-fanout.acceptance/s1-basic-chain.sh <worktree>（一次性剧本，环境三要素内嵌：TAIJI_AGENT_ENGINE_ROOTS=<worktree>/packages，pi 进程 cwd=<worktree> 根，模板副本布 .pi/workflows/（含 _shared））",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板 / core 执行链（orchestration + execution/service）改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok； 真机已过：status=ok/results=2/taskIndex 0,1/计数正确/wf-done 落账。"
+    },
+    {
+      "id": "E2E-BATCH-02",
+      "summary": "S2 三审真实负载：真实 LLM 三路并行审查收齐（人工验收形态，R3 归档）",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
-      "run": "PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs && PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs",
+      "run": "（人工验收，无脚本化命令——prompt 模型对本仓任一 tech-design 走 subagents 三路审查，父会话保持 idle 观察）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R3 人工验收形态归档：依赖真实模型智能，无法脚本化，不进机器对账执行面；on-pi-bump 表达重验时机信号（模型智能依赖面，与 E2E-RENAME-02 同理），pi bump 后按需人工复跑。通过标准按 G2 口径：三份报告落盘 + notifyDone 一次收齐三路 summary；成员失败时 run 收口 partial 且通知照达即本设计职责内通过（成员存活为观察项，归范围外 relay 线）"
+    },
+    {
+      "id": "E2E-BATCH-03",
+      "summary": "S3 部分失败 + 反向断言：坏 agent 路径 partial / message 拒绝 / agents 数量错配 fail-fast",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 5/5 PASS 2026-09-17 A3——④经双缺陷修复真机终验全绿：1543b39c1 冷复活 origin 透传 + 5ccdccd59 message 冷查口径 includeWorkflow:true）a3-s3-partial.sh + a3b（错配）+ a3-reverify.sh（④回归）同目录同环境",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；④冷复活绕过守卫为双缺陷：①origin/parentRunId 透传缺失 ②冷查兜底全扫吃 origin 展示过滤（原 A3 通过系 list 预热索引的无关副作用），两修复均有红绿回归用例；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+    },
+    {
+      "id": "E2E-BATCH-04",
+      "summary": "S4 中途停止：派发后 workflow abort → run 终态 aborted + 通知到达 + 无孤儿 pi 子进程",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/src/execution/service/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A4）a4-s4-abort.sh（FIFO 派发后立即 abort 分支 + ps 孤儿核对）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），孤儿进程 ps 核对为通过条件之一（设计 S4）； 真机已过：done(aborted) 通知照达 + 零孤儿进程。"
+    },
+    {
+      "id": "E2E-BATCH-05",
+      "summary": "S5 collect 退役回归：存量调用无批副作用（pi 静默放行）+ 存量 batchFinalized entry 旧 session 可读",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts",
+        "packages/subagent-core/src/execution/persistence/**",
+        "extensions/universal/session-reader/src/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/persistence/record-store-rebuild.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A5）a5-s5-collect-retire.sh（带 collect:'sync' 的存量式 start + 事件流批副作用断言；旧 session 可读由 u6 mock 轨 24/24 覆盖）",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "收录清单记「packages/runtime 下」按盘面修正为 scripts/probes/subagent-sync-collect/。断言已降级：上游 modeless wave3 E1 移除 crash-redelivery 后补发语义由 extension 侧 E1 恢复钩子承担，断言弱化为容忍形态（批头计数 finished/failed 两形态二选一、kill 时序不可构造时走降级门并注明）。收录裁决：保留 on-pi-bump 重验、不 R3 归档——v2/v3 是 sync-collect 崩溃恢复面唯一机器验收资产；a1-a8/v1 历史探针不入本表（其结论已沉淀 RESULTS.md）"
+      "note": "R2 态：触发面 = collect 退役相关面（schema 退役留痕 / 存量 entry 读侧容忍投影 / session-reader 反查）改动。真机确认项 = pi 静默放行结论（typebox 无 additionalProperties——S5 期门实测：未知字段静默放行且不剥离，退役后语义等价原 async 缺省路径，迁移说明见 docs/CONTEXT.md fan-out 词条）；读侧容忍已有 mock 轨守卫（batch-finalized / rebuild-indexes / permanent-session-legacy-compat 改造后用例断言「存量 entry 可读」），真机轨验旧 session 打开渲染不炸； 静默放行分支真机闭合（u4 typebox 证据链一致）。"
+    },
+    {
+      "id": "E2E-BATCH-06",
+      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R2 已激活并执行 PASS 2026-09-17 A6）",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/helpers.ts",
+        "packages/subagent-core/src/execution/notify/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/helpers.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/notify/notify-ledger.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（已执行 PASS 2026-09-17 A6）dev 环境：GUI 批量派发 → kill 成员 relay 代理（PID 精确）→ kill-on-disconnect 连坐 → 断言会话文件 ledger/ack/送达各恰 1 条（ground truth = session jsonl + runtime log）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
     }
   ]
 }

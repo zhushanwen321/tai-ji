@@ -115,13 +115,7 @@ export function workflowStoreModule() {
       getRecordsBySession: () => [],
       isLoading: false,
       loadError: null,
-      workflowCount: () => 0,
-      getCurrentWorkflow: () => null,
-      selectWorkflow: vi.fn(),
-      backToWorkflowList: vi.fn(),
       loadWorkflows: vi.fn(() => Promise.resolve()),
-      selectAgentCall: vi.fn(() => Promise.resolve()),
-      backFromAgentCall: vi.fn(),
     }),
   }
 }
@@ -156,20 +150,6 @@ export function chatComposableModule() {
 export function sessionDerivationsModule() {
   return {
     useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
-  }
-}
-
-/** '@/composables/features/chat/useListSync' mock 工厂（屏蔽 Sidebar 挂载时的列表首拉 watch）。 */
-export function listSyncModule() {
-  return {
-    useListSync: vi.fn(),
-  }
-}
-
-/** '@/composables/features/sidebar/useSidebarSubagentActions' mock 工厂。 */
-export function sidebarSubagentActionsModule() {
-  return {
-    useSidebarSubagentActions: () => ({ onSelectSubagent: vi.fn(), onCancelSubagent: vi.fn(), onRetrySubagents: vi.fn() }),
   }
 }
 

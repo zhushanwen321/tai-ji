@@ -24,7 +24,7 @@
  * 适配（见 extension-host-dialog.ts）经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
  */
 import type { App } from 'vue'
-import { computed, effectScope, reactive, shallowReactive, watch, type EffectScope } from 'vue'
+import { reactive, shallowReactive, watch } from 'vue'
 import {
   ContributionRegistry,
   createSessionScopedMap,
@@ -51,8 +51,6 @@ import {
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
 import {
   DIALOG_REQUEST_SOURCE_KEY,
-  L2_TAB_BADGE_SOURCE_KEY,
-  NATIVE_VIEWS_KEY,
   PluginSettingsDataSourceKey,
   STATUS_BAR_SOURCE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
@@ -62,17 +60,12 @@ import {
   type ContributionInfo,
 } from '@taiji/ui/extension-host'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
-import BackgroundTaskListView from '@/components/extension/BackgroundTaskListView.vue'
 import { createDialogRequestSource, createUiResponseTransport } from './extension-host-dialog'
 import type { ServerMessage } from '@taiji/shared'
 import { onCrossSession, onGlobal } from '@taiji/core/transport/api'
 import { onPlugins } from '@taiji/core/transport/api/domains/plugin'
 import { createNotifyToastHandler } from './notify-toast'
 import type { ContributionRecord } from '@taiji/core'
-import { usePanelStore } from '@/stores/panel'
-import { useBackgroundTasks, __resetBackgroundTasksForTest } from '@/composables/features/sidebar/useBackgroundTasks'
-import type { UseBackgroundTasksReturn } from '@/composables/features/sidebar/useBackgroundTasks'
-import { countBackgroundTasks } from '@/lib/background-task-bucket'
 
 /** 把 renderer 的 WS 消息流（events 通道的 plugin:/extension: 下行）适配成 PluginMessageSource。 */
 
@@ -88,7 +81,7 @@ import { countBackgroundTasks } from '@/lib/background-task-bucket'
  *
  * ADR-0060：数据源从 raw-message-tap 旁路改为 events 正规双订阅（route-inbound 单一真相源）：
  * - onGlobal：收无 sid 的 plugin:*（statusBarUpdate/notification/uiRequest 等走 global 通道）
- * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request/ui_timeout
+ * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request
  *   + plugin:uiRequest/plugin:viewUpdate，route-inbound 声明式条目 crossSession 字段分发，
  *   全局单例消费者 ExtensionHost 接收）
  * 经 source filter 后消息集合与旧 raw-tap 全量订阅等价（plugin:* 无 sid + extension.* 带 sid）。
@@ -229,7 +222,7 @@ function ensureCommandDeclarationsSync(
  * 挂载点注册态 → ContributionInfo 映射（M16，PluginSettingsPage 数据源）。
  *
  * available = 挂载点已注册（MountPointRegistry SSOT）；未注册 → available=false + reason
- * （置灰 + 原因，04-settings-and-visual.md 场景 E AC3）。纯函数便于单测（TC2）。
+ * （置灰 + 原因，场景 E AC3）。纯函数便于单测（TC2）。
  */
 export function toContributionInfos(
   records: ContributionRecord[],
@@ -243,45 +236,14 @@ export function toContributionInfos(
   }))
 }
 
-// ── L2 badge 数据源（background-task-sidebar-view D4④ 生产接线）──
-// 装配惰性化：initExtensionHostBridge 在 main.ts 模块体执行（先于 app.use(pinia)），
-// 不能同步装配 useBackgroundTasks——其 watch immediate 首次求值 focusedSessionId 时
-// lazy usePanelStore() 会因无 active pinia 抛错。badge 源首次调用发生在
-// PluginViewContainer 的 tabs computed（组件渲染期，pinia 已就绪），彼时经独立
-// effectScope 装配并 app 级常驻（badge 需要独立于列表视图挂载的常驻数据源——tab
-// 未激活也要亮）；effectScope（非裸调用）使内部 onScopeDispose 有归属、无 Vue warn。
-// refCount 语义：badge 实例与列表视图实例共用 useBackgroundTasks 的 per-sid 订阅表，
-// 同 sid 时 refCount=2 仍单条物理 events.on（AGENTS 规则 2 不破坏）。
-// @data-owner #25
-let badgeScope: EffectScope | null = null
-// @data-owner #25
-let badgeTasks: UseBackgroundTasksReturn | null = null
-
-function ensureBadgeTasks(): UseBackgroundTasksReturn {
-  if (badgeTasks) return badgeTasks
-  const scope = effectScope()
-  badgeTasks = scope.run(() =>
-    useBackgroundTasks(computed<string | null>(() => usePanelStore().focusedSessionId)),
-  ) as UseBackgroundTasksReturn
-  badgeScope = scope
-  return badgeTasks
-}
-
 /**
  * 测试后门命名空间（生产代码禁止消费，与生产 import 面物理分离，audit 清理点#9 归整）。
  * - lastInitHandles：最近一次 initExtensionHostBridge 装配的测试所需句柄快照——init 返回
  *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose（bridge）与注册
  *   注入用例（contributions）取内部实例的唯一通道。仅存测试实际消费的两字段。
- * - resetBadgeSource：释放 badge 常驻实例 + 重置 useBackgroundTasks 订阅表（测试隔离）。
  */
 export const __testing = {
   lastInitHandles: null as null | { bridge: MessageBusBridge; contributions: ContributionRegistry },
-  resetBadgeSource(): void {
-    badgeScope?.stop()
-    badgeScope = null
-    badgeTasks = null
-    __resetBackgroundTasksForTest()
-  },
 }
 
 /**
@@ -359,11 +321,11 @@ export function initExtensionHostBridge(app: App): void {
   // ui 组件数据源（ViewHost/StatusBar 经 inject 取，壳 provide 真实实现；形状对齐 IF10/IF5）
   app.provide(VIEW_HOST_SOURCE_KEY, {
     getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
-    // M17 WidgetArea 消费面：枚举该 session 全部缓存 viewId（纯透传 core store）
+    // widget 视图消费面（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
     getViewIds: (sessionId: string) => viewHostStore.getViewIds(sessionId),
   })
   // L2 二级 tab 数据源（PluginViewContainer 经 inject 取；纯静态声明——sidebar.tab 视图贡献清单，
-  // widget 推送经 M17 对话流面板 WidgetArea 承接、不进 sidebar，M17 wave2 D5）。
+  // widget 推送经 Composer 托盘 widget 区承接、不进 sidebar，M17 wave2 D5）。
   // 不裸委托 getViewsByPlacement——它缺 pluginId，builtin 判定（tasks 不可关闭）需要
   // pluginId，故从 getContributions 直接映射（design-review 已确认此设计）。
   // icon 当前无图标源，透传 undefined（PluginViewContainer 以统一 default icon 兜底）。
@@ -383,25 +345,10 @@ export function initExtensionHostBridge(app: App): void {
       return staticViews
     },
   })
-  // L2 原生视图路由表（background-task-sidebar-view D4② 生产接线）：ui 包不反向依赖
-  // renderer（无法静态注册 BackgroundTaskListView），由壳 provide 真实映射；viewId 与
-  // core builtin-contributions 的 base-tool-enhance「后台命令」view 贡献 id 对齐。
-  // 命中 activeView 即渲染原生组件（sessionId 透传），未命中走 ViewHost 原路径。
-  app.provide(NATIVE_VIEWS_KEY, {
-    'background-tasks': BackgroundTaskListView,
-  })
-  // L2 tab badge 数据源（D4④ 生产接线）：亮 = 焦点 session「运行中」桶 > 0，与分桶
-  // SSOT countBackgroundTasks 同源派生（G1：badge 亮 = 默认桶非空）。数据经常驻
-  // useBackgroundTasks 实例（拉取腿每次焦点切换自动重拉 + 广播腿 refCount 单物理订阅）。
-  // 入参与焦点 sid 不一致（切换瞬态）→ 返回不亮，防旧 session badge 串显。
-  app.provide(L2_TAB_BADGE_SOURCE_KEY, (sessionId: string): Record<string, boolean> => {
-    const tasks = ensureBadgeTasks()
-    const focusedSid = usePanelStore().focusedSessionId
-    if (focusedSid === null || sessionId !== focusedSid) return {}
-    return {
-      'background-tasks': countBackgroundTasks(tasks.current.value.tasks).active > 0,
-    }
-  })
+  // L2 原生视图路由表与 L2 tab badge 源已随「后台命令」native 视图退役
+  // （composer-task-tray D10：托盘承接后台命令观察面；PluginViewContainer 的
+  // 同名分支同批删除）。plugin sidebar view 机制本身保留——
+  // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费面。
   app.provide(STATUS_BAR_SOURCE_KEY, {
     // 两 scope 重载（ui 契约）：直接委托 StatusBarController（签名对齐 IF8）。
     // MF-2（R2）：global scope 经 controller 的 sessionScoped 保留分区（GLOBAL_SCOPE_KEY）存储，
@@ -415,7 +362,7 @@ export function initExtensionHostBridge(app: App): void {
       return statusBarController.getItems('per-session', sessionId as string)
     },
   })
-  // PluginSettingsPage 数据源（M16，04-settings-and-visual.md §3.1）：onPlugins 委托 api 域
+  // PluginSettingsPage 数据源（M16）：onPlugins 委托 api 域
   // （config.plugins 广播订阅），getContributions 委托 ContributionRegistry + MountPointRegistry
   // （toContributionInfos：未注册挂载点 → 置灰 + 原因，场景 E AC3）。
   app.provide(PluginSettingsDataSourceKey, {

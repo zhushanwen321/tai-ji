@@ -11,7 +11,7 @@
  *
  * 运行：npx vitest run src/__tests__/stores/chat-dispose-session.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import type { Message } from '@taiji/shared'
@@ -28,6 +28,11 @@ function makeMessage(id: string, role: Message['role'] = 'assistant'): Message {
 
 describe('chat store disposeSession（W1：清理 per-session 全部状态）', () => {
   beforeEach(() => setActivePinia(createPinia()))
+  // fake timers 统一恢复：放用例尾部会在断言失败时跳过恢复 → 向后续用例泄漏 fake timers
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
 
   it('U1: disposeSession 后 per-session 状态全部清空', () => {
     vi.useFakeTimers()
@@ -38,7 +43,6 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     store.hydrate(sid, [makeMessage('m1')])
     store.addPendingSend(sid)
     store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
-    store.testInternals.armStreamingTimer(sid)
     // retryStates / queueStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
     store.markHistoryFailed(sid)
     // changeSetStatuses：key 格式 `${sid}:${messageId}`，disposeSession 按前缀清理（W19 Fix-2）
@@ -66,8 +70,6 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     // failedHistory 是 Set 且无公开 getter——disposeSession 的 setRefs 遍历
     // （core store.ts:1306 含 failedHistory）覆盖其清理；可观测回归经
     // m7-virtual-key-cleanup / delete-cleanup 的分区释放断言承担
-    vi.clearAllTimers()
-    vi.useRealTimers()
   })
 
   it('disposeSession 对未写入的 session 幂等（不抛错）', () => {

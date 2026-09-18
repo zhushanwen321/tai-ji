@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * check-pi-sync.mjs —— pi 构建期派生锚点跟随守卫。
- * （设计：docs/design/pi-evolution-consistency-and-project-switcher.md §3.2 方向 1A / D1 / D2；实施单元 u2）
  *
  * 与 check-pi-semantics.mjs 的分工（设计 §2.1 分工声明）——逐项零重叠自查：
  * - check-pi-semantics 管「实装内部一致 + pi 语义漂移」：pi-coding-agent/pi-ai/pi-agent-core

@@ -1,6 +1,6 @@
 <template>
   <!--
-    [u8-pi-respawn] pi 崩溃恢复提示条（crash-resilience §3.3 D7 / 场景 T4）。
+    [u8-pi-respawn] pi 崩溃恢复提示条（D7 / 场景 T4）。
     渲染分支由 SystemNotice 按 PI_RESPAWN_NOTICE_CUSTOM_TYPE customType 派发（subagent
     定向气泡同款分支先例），数据源 = 对话流内的 ephemeral system 消息（core chat store
     appendRespawnNotice 写入，liveOnly——重开 session 不出现，一次性通知语义）。

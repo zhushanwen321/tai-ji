@@ -25,7 +25,6 @@
  * 守卫 + dist 冒烟链消费）。
  *
  * 设计权威源：docs/architecture/subagent-core-package-extraction.md §3.3 D5；
- * docs/design/subagent-post-convergence-architecture.md §3.2 B-2 / §3.6 D3/D8/D9；
  * docs/design/subagent-core-sink-design.md（已删，git 可追溯）（sink 下沉收口扩面，2026-08-31）；
  * 宿主接入示例见包 README（§3.4 core_host_not_configured 恢复指引的落点）。
  */
@@ -33,7 +32,7 @@
 // 0.4.0 = 首个公开发布的收敛收口面（0.3.0 为 2026-08-30 裁决的跳号占位，永不单独
 // 发布；+ minor changeset 收口面落本号）；与 package.json version 的一致性由
 // src/__tests__/smoke.test.ts 动态守护，改版本须两处同步。
-export const CORE_PACKAGE_VERSION = "0.10.4";
+export const CORE_PACKAGE_VERSION = "0.10.5";
 
 // ── 宿主端口接线面（core/）────────────────────────────────────
 // HostServices：dataRoot / log / discoveryRoots 端口 + configureCore 注入；
@@ -227,9 +226,10 @@ export {
   setSubagentService,
   type SubagentServiceInit,
 } from "./execution/service/service-bootstrap.ts";
-// notifyGateAllowsDelivery：[U5/K11] 轮次完成回注的投递门——三元组判据（intent=archived
-// 静默 / 回注 epoch 世代比对 + 放弃轮标记命中阻断 / 收口轮构造性豁免），判据源已从旧
-// 「closedReason 形态枚举」切换为「意愿 + 放弃标记」两维——
+// notifyGateAllowsDelivery：[U5/K11] 轮次完成回注的投递门——二元组判据（回注
+// epoch 世代比对 + 放弃轮标记命中阻断；收口轮构造性豁免——close 收口落账挂在
+// 通知送达之后且不置标记），判据源已从旧「closedReason 形态枚举」切换为
+// 「放弃标记」单维——
 // 投递内核与壳侧 notify 链的共同语义锚点（execution 生产域消费，A2a/U5）。
 export { notifyGateAllowsDelivery } from "./execution/subagent-service.ts";
 
@@ -543,6 +543,12 @@ export {
 export { THINKING_ORDER } from "./shared/model-ref.ts";
 // 定时器上限（壳 tool-workflow.ts OR-1 消费，D3 判定进 barrel）
 export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
+// 入口态 fail-fast 断言（time 上界 / slug 长度）：两个 tool 入口共用的同一份实现
+// （findings g11a-F2；schema 第一道关卡之外，副作用链之前的运行时第二道）。
+export {
+  assertEntryTimeBudget,
+  assertSlugWithinLimit,
+} from "./shared/entry-guards.ts";
 // 资源发现面（W2③）：discoverResources——agent .md / workflow .js 的多源统一发现
 // （ADR-031）——多源扫描 + stem last-writer-wins 合并 + realpath 去重。宿主（zsw
 // 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键，

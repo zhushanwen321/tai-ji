@@ -284,12 +284,17 @@ describe("updateWidget dual payload（gui 臂）", () => {
 		updateWidget(session, ui);
 		const widgetCall = calls.find((c) => c.method === "setWidget" && c.args[0] === "goal");
 		const payload = widgetCall!.args[1] as {
-			gui: { component: { type: string }; meta: { title: string; progress?: { total: number } } };
+			gui: {
+				component: { type: string };
+				meta: { title: string; progress?: { total: number }; icon?: string | { paths: string[] } };
+			};
 			text: string[];
 		};
 		// v1.1：gui 臂整个 GuiRenderResult（group 组合根 + meta 宿主元数据，head 由壳层渲染）
 		expect(payload.gui.component.type).toBe("group");
 		expect(payload.gui.meta.progress).toMatchObject({ total: 10000 });
+		// 托盘 icon 随 dual payload 的 gui 臂到达宿主（协议形状 = string key）
+		expect(payload.gui.meta.icon).toBe("target");
 		// text 臂同步构造（TUI 渲染行）
 		expect(payload.text.length).toBeGreaterThan(0);
 	});
@@ -301,9 +306,11 @@ describe("updateWidget dual payload（gui 臂）", () => {
 		updateWidget(session, ui);
 		const widgetCall = calls.find((c) => c.method === "setWidget" && c.args[0] === "goal");
 		const payload = widgetCall!.args[1] as {
-			gui: { component: { type: string }; meta: { title: string; progress?: unknown } };
+			gui: { component: { type: string }; meta: { title: string; progress?: unknown; icon?: unknown } };
 		};
 		expect(payload.gui.component.type).toBe("group");
 		expect(payload.gui.meta.progress).toBeUndefined();
+		// icon 与预算无关，两种形态都推（托盘不依赖宿主 widgetKey 映射兜底）
+		expect(payload.gui.meta.icon).toBe("target");
 	});
 });

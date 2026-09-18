@@ -23,44 +23,17 @@
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/effects.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, shallowRef } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { dispatchMessageEvent } from '../effects/registry'
+import { makeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'
 import type { Message, PiBranchSummaryEntry, PiCompactionEntry, PiCustomMessageEntry, Segment, ServerMessage } from '@taiji/shared'
 
 const SID = 's-test'
 
-/** 构造 ctx：真实 vue ref + 回调 mock（D-1 容器：分区值为 ShallowRef<Message[]>） */
-function makeCtx(initial: Message[] = []): MessageEffectContext {
-  return {
-    messages: ref(new Map([[SID, shallowRef(initial)]])),
-    retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
-    applyFileChanges: vi.fn(),
-    markChangeSetsSuperseded: vi.fn(),
-    finalizeSession: vi.fn(),
-    clearPendingSend: vi.fn(),
-    armStreamingTimer: vi.fn(),
-    // m2→W14：queue_update drain 接线 drainN（计数 FIFO）+ appendUser + 深度对账 reconcilePending
-    drainN: vi.fn(() => []),
-    reconcilePending: vi.fn(),
-    appendUser: vi.fn(),
-    // w21：entry 载体帧喂 reducer 的接入点（store.applyEntryFrame 注入）
-    applyEntryFrame: vi.fn(),
-    // steer-bubble u1/D2：inflight 确认计数读写（message_end 腿 2 裁决输入，store 注入）
-    getInflight: vi.fn(() => 0),
-    incrementInflight: vi.fn(),
-    decrementInflight: vi.fn(),
-    clearInflight: vi.fn(),
-    // [premature-timeout §5.2 D2] timeout 打标快照消费/清除（默认无打标 → take 返回空集）
-    takePrematureTimeoutIds: vi.fn(() => new Set<string>()),
-    clearPrematureTimeoutIds: vi.fn(),
-  }
-}
-
+/** ServerMessage 便捷构造（sid 固定文件常量；实现收敛到 helpers/fixtures.ts） */
 function msg(type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: SID, ...payload } } as ServerMessage
+  return serverMsg(SID, type, payload)
 }
 
 /** [w21] toolCall entry 形态构造（payload.entry——event-adapter 重构载体） */
@@ -672,7 +645,41 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
     expect(list).toHaveLength(1)
     expect(list[0].role).toBe('assistant')
     expect(list[0].status).toBe('error')
-    expect(list[0].content).toBe('400: Unsupported model mimo-v2-pro')
+    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（无=空）
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('400: Unsupported model mimo-v2-pro')
+  })
+
+  // [M2 不变量·terminalMessagePatch 出口] pi error stop 但 errorMessage 缺失
+  // （extras.errorMessage 可 undefined）：error 字段走兜底——缺失会让崩溃前正文
+  // 被 Block.vue 误判纯 error 整条染红。
+  it('streaming 气泡收口且 errorMessage 缺失：error 字段写 reason 兜底文案（不变量）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '崩溃前正文' }))
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const a = lastAssistant(ctx)
+    expect(a.status).toBe('error')
+    expect(a.content).toBe('崩溃前正文')
+    expect(a.error).toBe('会话出错，回复已中断。')
+  })
+
+  // [错误可见性] 秒败 turn 且 errorMessage 缺失：仍追加纯 error 气泡（兜底文案）——
+  // 旧条件 isErrorStop && errorMessage && !changed 在此场景什么都不追加，错误完全静默。
+  it('无 streaming 气泡且 errorMessage 缺失：仍追加兜底纯 error 气泡（错误不得静默）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const list = getMsgs(ctx)
+    expect(list).toHaveLength(1)
+    expect(list[0].status).toBe('error')
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('会话出错，回复已中断。')
   })
 
   it('非 error stopReason 不消费 errorMessage 字段（正常完成不受影响）', () => {
@@ -835,7 +842,7 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
   })
 })
 
-// ── [steer-bubble u1 / docs/design/steer-followup-user-bubble-display.md D1+D2]
+// ── [steer-bubble u1 / D1+D2]
 //    message_end(user) 腿 2 确认制——投递事实驱动的用户气泡兜底显示 ──
 //
 // 与 queue_update TC1-TC4 同为 handler 接线测试：测裁决分支对 ctx 方法/快照的调用与
@@ -953,7 +960,7 @@ describe('dispatchMessageEvent message_end(user) 腿 2 确认制（steer-bubble 
   })
 })
 
-// ── [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4+F4]
+// ── [steer-bubble u2 / D4+F4]
 //    message_start G-023 条件清 + 同点僵尸清理；message.complete abort 只清 inflight ──
 //
 // 条件清保真前提（P3 探针 ✅）：message_start(assistant) 时点快照深度 == pi 真实队列
@@ -1062,5 +1069,43 @@ describe('dispatchMessageEvent message.complete abort 清理（steer-bubble u2 /
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).not.toHaveBeenCalled()
     expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
+  })
+})
+
+describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异常帧不断流）', () => {
+  // [设计裁决登记（registry.ts 三处守卫，2026-09-17 错误处理审查 A5）] 正常流经
+  // event-adapter 构造的帧不会产生 undefined/形态不符 entry；守卫静默 return 是
+  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为面：坏帧
+  // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认腿均不触发）。
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('tool_call_start 缺 entry → 不抛错、streaming assistant 无 toolCall/contentBlocks 增量', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', {}))).not.toThrow()
+    const a = lastAssistant(ctx)
+    expect(a.toolCalls ?? []).toHaveLength(0)
+    expect(a.contentBlocks ?? []).toHaveLength(0)
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+  })
+
+  it('tool_call_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与 overlay 双零副作用', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: { type: 'toolCall' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(lastAssistant(ctx).toolCalls ?? []).toHaveLength(0)
+  })
+
+  it('message_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与腿 2 确认双零副作用', () => {
+    const ctx = makeCtx()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: { type: 'compaction' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(getMsgs(ctx)).toHaveLength(0)
+    // 腿 2（user 投递确认）在形态守卫处短路：确认计数零触碰
+    expect(ctx.incrementInflight).not.toHaveBeenCalled()
+    expect(ctx.decrementInflight).not.toHaveBeenCalled()
   })
 })

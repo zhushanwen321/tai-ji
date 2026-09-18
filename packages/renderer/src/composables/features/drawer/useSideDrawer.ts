@@ -12,7 +12,7 @@
  * 1. 绑定分区键：bindDrawerSessionId(computed(() => usePanelStore().focusedSessionId))
  *    ——惰性 computed（首次求值 pinia 已 active，避免模块加载期 pinia 未初始化）
  * 2. re-export + 函数形状兼容：useSideDrawer() 返回形状与旧版逐字段一致（isOpen/activeTab/
- *    docked/selectedCommandName/detailFilePath/browserUrl/consumeBrowserUrl/open/close/
+ *    docked/selectedCommandName/detailFilePath/open/close/
  *    toggle/setTab/toggleDock），~20 处旧调用方（SideDrawer.vue/PanelContainer.vue/
  *    useSidebar/useDetailPane/chat.ts 等）import '@/composables/
  *    features/useSideDrawer' 路径不变、零改动。
@@ -61,8 +61,6 @@ import {
   toggleDrawerDock,
   selectedCommandName,
   detailFilePath,
-  browserUrl,
-  consumeBrowserUrl,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import type { SideDrawerTab, OpenDrawerOptions } from '@taiji/core/domain/drawer'
@@ -90,9 +88,6 @@ export function useSideDrawer() {
     // 瞬时参数（core coordination 模块级单例，消费后清空）
     selectedCommandName,
     detailFilePath,
-    browserUrl,
-    /** 消费 browserUrl：读取并清空（BrowserPane 挂载时调，取到非空值触发导航） */
-    consumeBrowserUrl,
     open: openDrawerTab,
     close: closeDrawer,
     toggle: toggleDrawer,

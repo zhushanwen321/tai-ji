@@ -487,8 +487,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
 })
 
 /**
- * 非 pi 终态回填桥（status watch，设计 D2 / docs/design/subagent-nonpi-visibility-followups.md
- * §3.3）：运行中打开的 tab 在 record 跨越 running→终态 时经 loadSubagentData 重拉一次，
+ * 非 pi 终态回填桥（status watch，D2）：运行中打开的 tab 在 record 跨越 running→终态 时经 loadSubagentData 重拉一次，
  * 对话流自动收敛到完整内容。四守卫反例（pi 零变化 / vid 切换 / 已终态不二拉）同组守护。
  */
 describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {

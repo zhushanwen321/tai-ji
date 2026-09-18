@@ -154,6 +154,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useBackgroundTasks } from '@/composables/features/sidebar/useBackgroundTasks'
 import { backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
+import { formatClockDuration } from '@/lib/duration-format'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import { useToast } from '@/composables/useToast'
 import { useCopy } from '@/composables/panel/useCopy'
@@ -302,10 +303,10 @@ const durationText = computed(() => {
   const value = displayEntry.value
   if (!value) return ''
   if (isActiveBackgroundTaskState(value.state)) {
-    return t('panel.sideDrawer.bashTaskRunningFor', { duration: formatDuration(now.value - value.startedAt) })
+    return t('panel.sideDrawer.bashTaskRunningFor', { duration: formatClockDuration(now.value - value.startedAt, { padHours: true }) })
   }
   const ms = value.durationMs ?? (value.endedAt !== undefined ? value.endedAt - value.startedAt : 0)
-  return t('panel.sideDrawer.bashTaskDuration', { duration: formatDuration(ms) })
+  return t('panel.sideDrawer.bashTaskDuration', { duration: formatClockDuration(ms, { padHours: true }) })
 })
 
 /** reason 文案（仅终态；orphaned 契约缺省 reason，按状态单独承载） */
@@ -317,28 +318,14 @@ const reasonText = computed(() => {
   return t(REASON_KEYS[value.reason])
 })
 
-/** 时分秒补零宽度（HH:MM:SS / mm:ss 定宽） */
+/** 时分秒补零宽度（HH:MM:SS 定宽） */
 const PAD_WIDTH = 2
-/** 时间换算基数（ms→s→min→hour） */
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const SECONDS_PER_HOUR = 3600
 
 /** epoch ms → HH:MM:SS（设计终态样例「开始 14:32:05」） */
 function formatClock(ts: number): string {
   const d = new Date(ts)
   const pad = (n: number): string => String(n).padStart(PAD_WIDTH, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-/** ms → mm:ss / hh:mm:ss（设计终态样例「已运行 00:37」） */
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / MS_PER_SECOND))
-  const pad = (n: number): string => String(n).padStart(PAD_WIDTH, '0')
-  const h = Math.floor(total / SECONDS_PER_HOUR)
-  const m = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
-  const s = total % SECONDS_PER_MINUTE
-  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
 // ── 两段式终止（D10④ drawer 内同款：第一次点击确认态，再点发 kill）──

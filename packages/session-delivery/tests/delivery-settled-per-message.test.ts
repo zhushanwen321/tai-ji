@@ -1,6 +1,5 @@
 /**
- * 合批 per-message settled 契约（探针 P1，设计 docs/design/ext-simplify-08-scheduler.md
- * §6.4 D1/B1）。
+ * 合批 per-message settled 契约（探针 P1，设计 D1/B1）。
  *
  * 锁死契约：合批 N 条投出后 onSettled 恰 N 次——每条消息各获一次终态回调，msg 为
  * 该条原始消息（非 composed 合批消息），dedupeKey/outcome 各自正确；单消息批次

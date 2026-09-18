@@ -202,6 +202,9 @@ export default {
       commandInjection: '{count} 个凭据使用 !command（pi 运行时执行 shell 命令），请确认安全',
       envBundleSkipped: '{count} 个 env 包凭据跳过（Phase 2 支持）',
       orphanImported: '{count} 个凭据已用内置模板补全导入',
+      // coding-plan 额度显示自动开启（导入即默认同意，runtime 写 extras 成功才提示）
+      quotaAutoEnabledOne: '已自动开启「{name}」的 Coding Plan 额度显示，可在设置中关闭',
+      quotaAutoEnabledMany: '已自动开启 {count} 个 provider 的 Coding Plan 额度显示，可在设置中关闭',
     },
     // ── 内置 provider 模板（wave 3 builtin-provider-ui）──
     builtinTemplate: {
@@ -552,7 +555,7 @@ export default {
     loadRecommendedFailed: '加载推荐扩展失败: {msg}',
     autoUpgradeFailed: '设置自动升级失败: {msg}',
     cancelInstallTempHint: '（临时文件可能未清理）',
-    // ── 插件贡献子页（M16，04-settings-and-visual.md 场景 E）──
+    // ── 插件贡献子页（M16，场景 E）──
     contributionsEntry: '插件贡献',
     contributionsTitle: '插件贡献',
     contributionsDesc: '查看插件挂载点贡献与可用性',
@@ -674,12 +677,6 @@ export default {
     llmRetryUnitMs: '毫秒',
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
-    // ── 对话流式空闲超时（SystemStreamingIdleSection，timeout-streaming-ui-idle §4.3）──
-    streamingIdleTitle: '对话流',
-    streamingIdleLabel: '流式空闲超时（分钟）',
-    streamingIdleDesc: '生成中气泡持续无新内容超过该时长后收口并提示；若任务实际仍在进行，完成时会自动恢复显示。保存后对新对话轮次生效',
-    streamingIdleUnitMin: '分钟',
-    streamingIdleInvalid: '请输入 {min}-{max} 之间的数值',
     saved: '已保存',
     saveFailed: '保存失败',
     shortcutTitle: '快捷键',

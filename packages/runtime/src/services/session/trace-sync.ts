@@ -28,6 +28,7 @@ import type {
   SessionTraceSessionEndPayload,
 } from '@taiji/shared'
 import { parseSessionTraceJsonl } from '@taiji/core/domain/session-trace'
+import { BYTES_PER_MB } from '@taiji/shared'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
@@ -109,9 +110,6 @@ export function collectMalformedLines(text: string | null): SessionTraceMalforme
   }
   return malformed
 }
-
-// eslint-disable-next-line no-magic-numbers -- 字节量纲换算基数（1MB = 1024×1024），命名常量自解释
-const BYTES_PER_MB = 1024 * 1024
 
 /**
  * D5④ oversize 降级文案（crash-resilience §3.3 错误规格表「历史文件超 32MB」行）。

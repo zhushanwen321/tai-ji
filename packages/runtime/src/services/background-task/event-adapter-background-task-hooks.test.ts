@@ -5,7 +5,7 @@
  * 触发旁路回调；其他事件不触发；未注入回调零影响；翻译输出不受旁路影响（纯旁路，
  * 消费端与轮询共享 last-seen——单广播源由 BackgroundTaskService 侧单测覆盖）。
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run src/services/background-task
+ * 运行：cd packages/runtime && npx vitest run src/services/background-task
  */
 import { describe, it, expect, vi } from 'vitest'
 

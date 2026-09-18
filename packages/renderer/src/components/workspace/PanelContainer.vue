@@ -15,7 +15,7 @@
     不再承载 overlay 返回/标题/JSONL 路径（那套展示层已随 overlay 移除）。本容器渲染跨端共享容器
     DrawerPanel（@taiji/ui/features/drawer，W3 迁移自旧
     SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/TerminalView/
-    BrowserPane 等，v-if chain 对齐旧 SideDrawer 内容区结构）。git 状态唯一数据源在此层 provide
+    SubagentTab 等，v-if chain 对齐旧 SideDrawer 内容区结构）。git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
     壳层职责（W3 C3 裁决，旧 SideDrawer 逻辑迁移至此）：ESC 关闭
@@ -109,8 +109,7 @@
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
                Detail tab → DetailPane（useDetailPane watch selectedPath 自动加载）
-               Browser tab 有 browserUrl → BrowserPane（嵌入式 WebContentsView 导航）；
-                 无 browserUrl → 不注入 → DrawerPanel 空态 fallback
+               Browser tab → 无 URL 注入链（browserUrl 死链已删）→ DrawerPanel 空态 fallback
                Terminal tab → TerminalView（PTY 优先，交互式终端） -->
           <!-- session-trace inspector（D5b 临时上下文页）：选中 trace 行时切入 default slot
                最前（v-if chain 首项——优先于 activeTab 面板，点击即明确意图）；「← 返回」清
@@ -123,11 +122,6 @@
             v-else-if="drawerTab === 'detail'"
             :key="detailRetryKey"
             :session-id="panelSessionId"
-          />
-          <BrowserPane
-            v-else-if="drawerTab === 'browser' && browserUrl"
-            :session-id="panelSessionId ?? ''"
-            :url="browserUrlForRender"
           />
           <TerminalView
             v-else-if="drawerTab === 'terminal'"
@@ -178,7 +172,6 @@ import {
   toggleDrawer,
   setDrawerTab,
   toggleDrawerDock,
-  browserUrl,
   getDrawerControlState,
 } from '@taiji/core/domain/drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
@@ -197,7 +190,6 @@ import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import GitPanel from '@/components/panel/GitPanel.vue'
 import CommandDocPanel from '@/components/panel/CommandDocPanel.vue'
-import BrowserPane from '@/components/panel/BrowserPane.vue'
 import SubagentTab from '@/components/panel/SubagentTab.vue'
 import WorkflowTab from '@/components/panel/WorkflowTab.vue'
 import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
@@ -206,7 +198,7 @@ import AsyncErrorFallback, { LAZY_RETRY_KEY } from '@/components/ui/AsyncErrorFa
 // D-8 抽屉面板懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：
 // DetailPane（DiffView 等专属依赖）/ TerminalView（xterm + 4 addon）是 drawerTab 的 v-else-if
 // 互斥分支，切到该 tab 才挂载 → 首次切 tab 才拉取对应 chunk（xterm 移出首屏初始请求集合）。
-// 其余条件挂载面板（GitPanel/CommandDocPanel/BrowserPane/SubagentTab/WorkflowTab）不拆：
+// 其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab/WorkflowTab）不拆：
 // 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益（边界评估结论写 W31 汇报）。
 // 错误兜底（§3.5）：file:// 下 chunk 404 是配置性错误，不自动重试，错误占位 + 重试按钮经
 // LAZY_RETRY_KEY 注入触发 loader 重跑（重试 = userRetry 重跑 loader + key 重挂 wrapper，两者缺一
@@ -331,11 +323,6 @@ const git = provideGitStatus(() => panelSessionId.value)
 function gitIndicatorOf(_l: PanelLeaf): GitIndicator | undefined {
   return git.indicator.value
 }
-
-/** browserUrl 瞬时参数（core coordination 模块级单例，消费后清空）。
- *  browser tab 传给 BrowserPane 触发导航；为空（null）时传空字符串让 BrowserPane 显空态。
- *  注：无 browserUrl 时 browser tab 不注入 BrowserPane，走 DrawerPanel 空态 fallback（C2）。 */
-const browserUrlForRender = computed(() => browserUrl.value ?? '')
 
 // ── AC-13：drawer 打开期间 agent 新消息感知（壳层职责，C3；旧 SideDrawer 逻辑迁移）──
 // drawer 打开时对话流被遮挡，agent 新消息需非侵入式感知（spec §4.5）。

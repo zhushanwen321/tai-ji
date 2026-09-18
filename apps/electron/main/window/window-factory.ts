@@ -11,7 +11,7 @@
  * - windowId 注入到 URL query，renderer 读取后用于注册到 WindowManager
  * - D2b 导航拦截：will-navigate 拒绝非应用自身源 + setWindowOpenHandler 默认 deny
  *   （integrity-hardening §3.2；防 XSS 经整页导航/新窗口接管 electronAPI）
- * - renderer 崩溃自动恢复链（crash-resilience §3.3 D2-③）：render-process-gone 详情
+ * - renderer 崩溃自动恢复链（D2-③）：render-process-gone 详情
  *   经 main-logger 落盘 + 按 windowId 熔断的自动 reload（60s 滑窗 ≤3 次）+ 超限静态
  *   错误页（重试按钮导航回应用源时重置该窗口计数）
  *
@@ -41,7 +41,7 @@ export const VITE_READY_TIMEOUT_MS = 30_000
 /** Vite 轮询间隔 */
 export const VITE_POLL_INTERVAL_MS = 300
 
-// ── renderer 崩溃自动恢复（crash-resilience §3.3 D2-③ / u3-renderer-recovery）────
+// ── renderer 崩溃自动恢复（D2-③ / u3-renderer-recovery）────
 
 /** 模块级熔断计数器：以 windowId 为键（设计 D2 原文），多窗口互不影响；
  *  窗口 'closed' 时 reset 防长寿进程 Map 泄漏（见 createWindow 内挂点）。 */
@@ -362,7 +362,7 @@ export async function createWindow(
   // W7 加载失败 / 渲染进程崩溃监听（webContents 创建后立即挂，覆盖 loadFile/loadURL 全过程）：
   //   - did-fail-load：loadURL/loadFile 失败（如 Vite 重启中、构建产物损坏）。打 error 日志。
   //   - render-process-gone：渲染进程崩溃（OOM / 崩溃）。详情经 main-logger 落盘
-  //     （crash-resilience G5：reason/exitCode/窗口标识/时间戳）+ 自动恢复链（D2-③）：
+  //     （G5：reason/exitCode/窗口标识/时间戳）+ 自动恢复链（D2-③）：
   //     非 destroyed 窗口经熔断计数（recovery-policy，60s 滑窗 ≤3 次按窗口隔离）决策
   //     自动 reload 或静态错误页。此处不持有 windowManager 引用，windows Map 的清理
   //     仍由 win 'closed' 事件（window-manager.register 已绑定）兜底。

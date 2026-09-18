@@ -1,8 +1,7 @@
 // src/execution/engine/common/event-journal.ts
 //
-// 宿主 event journal（P2 公共降级层）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md D6（第②级归属宿主——host 统一落盘
-// 则全引擎免费获得、格式唯一）+ §3.3.6 event journal 格式（JSONL 中立 v1）。
+// 宿主 event journal（P2 公共降级层）。设计决策：第②级归属宿主——host 统一落盘
+// 则全引擎免费获得、格式唯一；格式 = JSONL 中立 v1。
 //
 // 为什么 host 落盘而非各 adapter 缓存：adapter 各自缓存会演变出六种格式；host 消费
 // onEvent 统一落盘，read 第②级（journal 重放）与探针 golden 语料共用同一份产物。

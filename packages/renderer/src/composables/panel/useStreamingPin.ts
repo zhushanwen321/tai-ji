@@ -16,8 +16,8 @@
  * streamingTurnIdx（派生自 items / sessionId），session 切换导致 items 重建时 computed 自动重算，
  * 无需 watch 副作用驱动（旧的空 watch 已删）。
  *
- * [pin-identity U1] 编辑钉扎从「数组索引快照」改为「turn 稳定身份反查」（设计
- * docs/design/message-stream-editing-pin-identity.md §3.3 D1）：裸索引快照在 session 切换 /
+ * [pin-identity U1] 编辑钉扎从「数组索引快照」改为「turn 稳定身份反查」（D1）：
+ * 裸索引快照在 session 切换 /
  * 消息增删后过期（E-now-1 越界崩溃刷屏 / E-now-2 错钉他回合），身份（turnStableId）不过期——
  * 索引只在 pinnedIndexes 求值那一刻从当前 items 反查得出，钉扎始终指向「正在编辑的那一回合」
  * 本身。streamingTurnIdx 维持位置派生不身份化（D5：「末回合在流式」本身即位置语义，computed

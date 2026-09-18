@@ -17,7 +17,7 @@
  *   ['off','minimal','low','medium','high']，是 thinking-level 正常档位用例的确定性
  *   演员——两演员让 thinking-level-effective-e2e 摆脱宿主 models.json 内容依赖。
  * - faux-1-b / faux-1-c（reasoning:false）：纯槽位演员，供「同一次装配内多个子进程需
- *   各自独立响应队列」的场景区分个体——subagent 探针（scripts/probes/subagent-sync-collect，
+ *   各自独立响应队列」的场景区分个体——subagent 探针（已随 collect 退役删除，git 可追溯；
  *   L2.5 faux 通道）的主 pi 与 N 个 subagent 子进程共享同一 TAIJI_FAUX_SCRIPT，靠
  *   model-keyed 脚本（见 loadScript）+ 各自 --model 选队：主 = faux-1-reasoning，
  *   子按派发时的 model 覆盖落到 b/c 槽位。行为差异全部由脚本步骤定义，模型本身无语义。

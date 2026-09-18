@@ -529,7 +529,7 @@ function tryDecodeWidgetGui(sid: string, widgetKey: string, rawLines: unknown[])
     const json = (rawLines[0] as string).slice(GUI_WIDGET_MARKER.length)
     const decoded: unknown = JSON.parse(json)
     // v1.1 wire：GuiRenderResult 信封 {v, component, meta?} → 解包 component + meta
-    // （meta = widget 宿主元数据，前端 WidgetArea 渲染统一 head）
+    // （meta = widget 宿主元数据，前端托盘 widget 面板渲染统一 head）
     if (isGuiRenderResult(decoded)) {
       return [{
         kind: 'message',

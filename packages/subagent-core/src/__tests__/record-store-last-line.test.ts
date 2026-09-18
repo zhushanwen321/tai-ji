@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManifestStore } from "../execution/persistence/manifest-store";
 import { RecordStore } from "../execution/persistence/record-store";
+import { makePi } from "../execution/__tests__/helpers/pi-mock.ts";
 
 // [Gate A teardown 稳定性] no-op 掉索引落盘。根因：recoverOrphanRecords 走的
 // reconstructAll（record-store.ts）扫描尾 fire-and-forget saveIndex（tmp+fsync+rename
@@ -36,14 +37,6 @@ vi.mock("../execution/persistence/sessions-index.ts", async (importOriginal) => 
 interface CapturedEntry {
   type: string;
   data: Record<string, unknown>;
-}
-
-function makePiHook() {
-  const entries: CapturedEntry[] = [];
-  return {
-    entries,
-    pi: { appendEntry: vi.fn((type: string, entry: unknown) => { entries.push({ type, data: entry as Record<string, unknown> }); }) },
-  };
 }
 
 describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行无感知）", () => {
@@ -85,7 +78,11 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
   }
 
   function recovered(id: string, mainFile: string) {
-    const { pi, entries } = makePiHook();
+    const entries: CapturedEntry[] = [];
+    const pi = makePi();
+    pi.appendEntry.mockImplementation((type: string, entry: unknown) => {
+      entries.push({ type, data: entry as Record<string, unknown> });
+    });
     const store = new RecordStore(sessionsDir, new ManifestStore(path.join(rootDir, "records")), pi);
     store.recoverOrphanRecords("session-main", mainFile);
     const hits = entries.filter((e) => e.data && (e.data as { id?: string }).id === id);

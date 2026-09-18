@@ -89,7 +89,7 @@ export function extractFinalText(message: unknown): string {
 }
 
 /**
- * 取 message 载荷的文本（设计 rename-session-three-modes.md D2 first-prompt：message_end(role=user) 的 event.message）。
+ * 取 message 载荷的文本（first-prompt：message_end(role=user) 的 event.message）。
  * content 为 string 直接返回；blocks 数组拼接 text blocks——与 extractUserPromptText 的
  * 单条 message 拼装逻辑同构（探针 P1 实测：rpc 模式 user message_end 载荷 content 为
  * text blocks 数组）。非对象 / 异常形态返回 ''（调用方按无文本 skip）。
@@ -218,7 +218,7 @@ export interface CallRenameLLMOptions {
 	 */
 	appendUsageEntry?: (model: string, usage: Usage) => void;
 	/**
-	 * 显式 prompt 文本（设计 rename-session-three-modes.md D2 first-prompt 模式）：文本从 message_end(role=user) 的
+		 * 显式 prompt 文本（first-prompt 模式）：文本从 message_end(role=user) 的
 	 * event 载荷取（handler 先于 entries append，getEntries() 此时不含本条，探针 P1 实测），
 	 * 调用方（index.ts）负责提取并保证非空（空文本在 handler 侧先 skip）。
 	 * 未提供时走 extractUserPromptText 从 session entries 取（first-stop 现状路径）。
@@ -233,7 +233,7 @@ export interface CallRenameLLMOptions {
  * assistant message，final text 零遍历可得）。
  *
  * 收口要点（对比旧版搭便车逻辑）：
- * - model：空 ref → `ctx.model` 跟随会话主模型（设计 rename-session-three-modes.md D5，消灭「默认配置静默不工作」）；
+ * - model：空 ref → `ctx.model` 跟随会话主模型（消灭「默认配置静默不工作」）；
  *   非空 ref → `resolveModel(ctx, config.model)` 独立选模（解析失败静默跳过 + warn）
  * - systemPrompt：`RENAME_SYSTEM_PROMPT` 精简版（旧版 `ctx.getSystemPrompt()` 整个 agent prompt）
  * - messages：两段信号 [user(prompt), assistant(finalText), user(instruction)]
@@ -256,7 +256,7 @@ export async function callRenameLLM(
 ): Promise<string | null> {
 	// 内部顺序不可调换（E2E 竞态断言依赖「内省日志在请求发起前打出」）：
 	// resolveModel（含空 ref fallback）→ extract prompt → extract finalText → truncate ×2 → build → debug 内省 → callLLM
-	// 模型解析（设计 rename-session-three-modes.md D5）：空 ref = 未配置语义 → 跟随会话主模型（ctx.model，探针 P2 实测首轮可用；
+	// 模型解析：空 ref = 未配置语义 → 跟随会话主模型（ctx.model，探针 P2 实测首轮可用；
 	// undefined 时无 fallback 走下方静默跳过）；非空 ref 解析失败 = 显式配错 → 同一守卫静默跳过 + warn。
 	const model =
 		config.model.ref === "" ? ctx.model : resolveModel(ctx, config.model);

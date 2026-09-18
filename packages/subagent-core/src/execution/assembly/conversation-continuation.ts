@@ -135,13 +135,11 @@ export interface ContinuationHost {
   dispatchChatRound(record: ExecutionRecord, input: ContinuationDispatchInput): void;
   /** 轮终簿记（doFinalizeRoundToIdle wrapper，D7 outcome 入参）。 */
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
-  /** 成功通知路由（collectCoordinator.route——正文权威 = record.result）。 */
-  routeRecord(record: ExecutionRecord): void;
-  /** [modeless 波3] 批成员资格查询（collectCoordinator.isMember——失败轮分流判据：
-   *  成员失败入批（批头 failed 计数）/ async 失败单发。route 自带通知副作用，
-   *  不可作谓词使用）。 */
-  isCollectMember(recordId: string): boolean;
-  /** 失败通知直投（独立构造载荷——不经 route，正文不读 record.result）。 */
+  /** 成功完成通知（toNotifyRecord 守卫映射 + notify——正文权威 = record.result）。
+   *  [collect 退役] 原 collectCoordinator.route（async 直通/sync 批缓冲双路）收敛为
+   *  单一 async 直通面。 */
+  notifyComplete(record: ExecutionRecord): void;
+  /** 失败通知直投（独立构造载荷——不经 toNotifyRecord 守卫映射，正文不读 record.result）。 */
   notifyRecord(record: BgNotifyRecord): void;
   /** 红线②派发前兜底：镜像在途子进程活着 → kill 等退出（引擎存活期状态错配）。 */
   killStaleChild(recordId: string): Promise<void>;
@@ -174,11 +172,6 @@ export interface ContinuationHost {
    * 三失败形态在 outcome 判别联合内表达（形态③ IO 错 = throw 响亮）。
    */
   rebuildWorktree(record: ExecutionRecord): Promise<WorktreeRebuildOutcome>;
-  /**
-   * [U5 / §3.2.2 事件表] message 隐含寻回的宿主面：store.markReactivated（intent 翻回
-   * active + manifest 投影）。
-   */
-  reactivateRecord(record: ExecutionRecord): void;
   /**
    * [U5 / §3.2.5 形态②] apply 冲突的用户可见提示通道（appendEntry 落主 session，
    * 含 patch 备份路径）。
@@ -257,11 +250,8 @@ export class ConversationContinuation {
    */
   onMessage(text: string): void {
     const record = this.record;
-    // [U5 / §3.2.2 事件表] archived + message = **隐含寻回**——挂点独立于 revive 格：
-    // 轮终 idle（markRoundIdle 翻边收口 [two-state-convergence U4/D3]）与轮间 running
-    // 同样可达 close 归档后的续聊，寻回不能只在 idle 分流内。幂等：非 archived 时
-    // markReactivated no-op。
-    this.host.reactivateRecord(record);
+    // [u-arch merge] reactivateRecord 挂点随 dev 线意图机制清除移除——寻回语义由
+    // reviveOrThrow 构造性承接（万物可续：close 收口落账 record 的续聊照常可达）。
     if (record.status !== "running") {
       this.reviveOrThrow();
     }
@@ -695,11 +685,11 @@ export class ConversationContinuation {
     // 相位帧只在成功收敛后到达，同构）；drain 派发排队消息时经 dispatchRoundGuarded
     // disarm 接回「正在执行」。
     this.armIdleKeepalive();
-    // 成功通知：「门 → route」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
-    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本 route 之后，settle 时点
-    // intent 尚未翻转；route 正文权威 = record.result = 本轮 content）。
+    // 成功通知：「门 → 直发」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
+    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本通知之后，settle 时点
+    // intent 尚未翻转；正文权威 = record.result = 本轮 content）。
     if (notifyGateAllowsDelivery(record)) {
-      this.host.routeRecord(record);
+      this.host.notifyComplete(record);
       // [U5 / §3.2.5 close 顺序约束] 收口轮通知送达后归档（closeAfterRound 挂起消费，
       // chat 域挂点）。归档后 drain：record 已 archived（intent 翻转，占用位 idle
       // 化由后续流程承接）——drain 的 status 守卫决定排队消息去留。
@@ -730,19 +720,8 @@ export class ConversationContinuation {
     }
     // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
     // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
-    // [modeless 波3·成员资格判定] sync 成员经 route 进攒批缓冲（批语义保持：
-    // 失败成员同样计入批头 failed 计数与一次唤醒；载荷经 toNotifyRecord 投影——
-    // markRoundIdle failed 已写 record.error，outcome 派生正确），成员资格由协调器
-    // 登记集承载（isCollectMember 查询——collectMode 已出 record）。async 成员保持
-    // 失败单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
-    if (this.host.isCollectMember(record.id)) {
-      this.host.routeRecord(record);
-      if (record.closeAfterRound === true) {
-        await this.host.archiveAfterClosingRound(record);
-      }
-      this.drain();
-      return;
-    }
+    // [collect 退役] 原 sync 成员失败入批分流（isCollectMember → routeRecord）随批
+    // 机制删除——失败统一单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
     const notify: BgNotifyRecord = {
       id: record.id,
       // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态
@@ -919,10 +898,13 @@ export class ConversationContinuation {
         //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
         this.pendingReopenSummary = summary;
       } else {
-        // pi：CAS false = 竞态防御（此刻仍 idle 的前提下理论不可达），响亮上抛。
+        // pi：false = CAS 拒绝（竞态翻位）或 binding 持久化失败（epoch 硬要求，
+        // markReopened 已回滚内存面）——两者 record 都保持 idle 可重试，响亮上抛
+        //（Recovery 指引同款：重试 message 即可，写失败详情见 markReopened warn）。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
-          `while the message was being processed). Recovery: retry the message (action:'message').`,
+          `while the message was being processed, or persisting the reopened generation failed). ` +
+          `Recovery: retry the message (action:'message').`,
         );
       }
     }

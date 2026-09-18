@@ -202,21 +202,38 @@ describe('RuntimeServer: extension message routing', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close()
     }
+    // server.stop() 内部 httpServer.close 等全部连接结束才 resolve（close 握手毫秒级，
+    // 2s force 兜底）——teardown 的等待原语是事件（server close 落定），无固定 sleep。
     await server.stop()
   })
 
   function connectClient(): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
-      ws = new WebSocket(`ws://localhost:${port}`)
+      // 127.0.0.1 显式直连：server 只绑 127.0.0.1（ConnectionManager.start 的 listen 参数）。
+      // 禁止写 ws://localhost——Node happy-eyeballs 对 localhost 竞速 ::1，机器上任一
+      // [::1]:<port> 的 v6only listener（dev Vite、各类本地工具 server）与本测试 getFreePort
+      // 取到的端口号撞号时（v6only 与 127.0.0.1 同端口可合法共存，kernel 不互斥），连接会
+      // 错连到外部进程并被 RST（实测复现：error [ECONNRESET] read ECONNRESET）——满载下
+      // 端口 churn 放大撞号率，单跑近零，即本文件曾发的满载 flake。
+      ws = new WebSocket(`ws://127.0.0.1:${port}`)
       ws.on('open', () => {
         // S1-W1：首条消息 auth，等 auth.result ok 后连接才可用
         ws.send(JSON.stringify({ type: 'auth', payload: { token: TEST_WS_TOKEN } }))
       })
+      let authed = false
       ws.on('message', (data) => {
         try {
           const msg = JSON.parse(String(data))
           if (msg.type === 'auth.result' && msg.payload?.ok === true) {
-            setTimeout(() => resolve(ws), 100)
+            authed = true
+          }
+          // auth 通过后 server 会 fire-and-forget 推送 initial state（broker.sendInitialState，
+          // 末段 config.extensions 为 async 扫描结果）。等它送达再 resolve：下游 waitForMessage
+          // 按 type 过滤，推送若晚于 attach 会被误认成显式请求的响应（extension.list/toggle 等
+          // 对 config.extensions 有 id 断言）。此前用 setTimeout 100ms 硬等——满载下推送可晚于
+          // 100ms，竞态仍在；改为事件驱动（server 发送序保证 auth.result 先于推送段）。
+          if (authed && msg.type === 'config.extensions') {
+            resolve(ws)
           }
         } catch { /* skip */ }
       })
@@ -329,16 +346,18 @@ describe('RuntimeServer: extension message routing', () => {
       // sendInitialState 在 ws.onConnect（S1-W1 后 = auth 通过）时推，config.extensions 段
       // 是 fire-and-forget（scanExtensions async，.then 后 send）。必须在 ws 'open' 之前
       // attach 'message' handler，否则会漏掉 auth 后触发的 initial state 推送。
+      // 127.0.0.1 直连原因同 connectClient（localhost 双栈竞速会错连 [::1]:port 外部进程）。
       const collected: Record<string, unknown>[] = []
       await new Promise<void>((resolve, reject) => {
-        ws = new WebSocket(`ws://localhost:${port}`)
+        ws = new WebSocket(`ws://127.0.0.1:${port}`)
         ws.on('message', (data: Buffer) => {
           try {
             const msg = JSON.parse(data.toString()) as Record<string, unknown>
             collected.push(msg)
             if (msg.type === 'auth.result' && (msg.payload as { ok?: boolean } | undefined)?.ok === true) {
-              // auth 通过后再等一拍收 initial state
-              setTimeout(() => resolve(), 100)
+              // auth.result 即 resolve；initial state 推送由下方 vi.waitFor 轮询等待
+              // （config.extensions 段是 async fire-and-forget，固定 sleep 硬等压不住满载延迟）。
+              resolve()
             }
           } catch { /* skip */ }
         })

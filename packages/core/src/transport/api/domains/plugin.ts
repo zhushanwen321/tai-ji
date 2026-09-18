@@ -4,7 +4,7 @@
  * approvePermissions/revokePermissions 是 permissionRequest 闭环的回传通道：
  * runtime 广播 plugin:permissionRequest → bridge → Dialog → 用户操作 → 本域命令
  * → runtime plugin-service.approvePermissions/revokePermissions → reply config.plugins。
- * 契约见 contract.md §2.6（命令名对齐 runtime transport/plugin-message-handler.ts）。
+ * 命令名对齐 runtime transport/plugin-message-handler.ts。
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。
  */

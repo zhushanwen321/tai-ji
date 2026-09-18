@@ -20,10 +20,10 @@
  * 2. 发 prompt `/skill:u6-golden-probe`，等 agent_end 后读 session JSONL 落盘文本
  *    （PS-14：assistant entry 落账才 flush，故文件出现即含本轮 user entry 展开文本），
  *    提取 user message 文本为 golden；
- * 3. 同输入跑 taiji 侧 SkillInjector：mock client 的 getCommands 原样返回真实 pi 的
- *    get_commands 响应（权威映射同源，不改写任何字段），getSessionStats 给巨大窗口绕过
- *    D6 降级；对照输入 = 生产标记形态 `<taiji-skill name="..."/>`（设计 D3/场景 2，name 为
- *    skill 名、无 `skill:` 前缀）；
+ * 3. 同输入跑 taiji 侧 SkillInjector：映射源（D7 切源后为 SkillMappingSource 形态）携带
+ *    真实 get_commands skill 项的 SKILL.md 路径（展开输入同源），getSessionStats 给巨大窗口
+ *    绕过 D6 降级；对照输入 = 生产标记形态 `<taiji-skill name="..."/>`（设计 D3/场景 2，
+ *    name 为 skill 名、无 `skill:` 前缀）；
  * 4. 终断言（R4 D11）：整条消息形态 = 标记保留 + 空行 + 末尾包裹块；块内单 `<skill>`
  *    block 内容与 pi golden 逐字相等。映射失效（skill_missing）与格式/形态漂移分别给出
  *    定向失败信息。
@@ -156,10 +156,29 @@ describe.skipIf(!FAUX_PI_READY)(
           `pi 侧 user entry 不是展开形态（原样透传？）：${piGolden.slice(0, 120)}`,
         ).toBe(true)
 
-        // ── 3. taiji 侧：同输入跑生产注入器（get_commands 原样透传 = 映射同源；大窗口绕过 D6 降级）──
-        const injector = new SkillInjector()
+        // ── 3. taiji 侧：同输入跑生产注入器（映射源携带 pi 实际加载的 SKILL.md 路径 =
+        //    展开输入同源；大窗口绕过 D6 降级）。D7 切源后注入器消费 SkillMappingSource
+        //    （registry 扫描形态，name 裸名 + sourcePath）——探针以真实 get_commands 的
+        //    skill 项 path 构造同形 stub（pi 侧 get_commands 仍是「这个路径被谁加载」的
+        //    权威取径），golden 对照目标不变（同路径 → 同 block）。──
+        const skillMdPath = skillCmd?.sourceInfo?.path
+        expect(
+          skillMdPath,
+          'get_commands skill 项缺 sourceInfo.path——无法构造注入器映射源（复核 pi createSkillSourceInfo）',
+        ).toBeTypeOf('string')
+        const injector = new SkillInjector({
+          getGlobalSkills: () => [{
+            id: `probe-${SKILL_NAME}`,
+            name: SKILL_NAME,
+            description: 'u6 golden probe entry',
+            enabled: true,
+            source: 'pi',
+            triggers: [],
+            sourcePath: skillMdPath as string,
+          }],
+          getProjectSkills: async () => [],
+        })
         const client = {
-          getCommands: async () => commands,
           getSessionStats: async () => ({ contextUsage: { tokens: 0, contextWindow: 100_000_000, percent: 0 } }),
         } as unknown as IPiEngine
         const marker = buildSkillMarker(SKILL_NAME)
@@ -169,10 +188,8 @@ describe.skipIf(!FAUX_PI_READY)(
         const missing = result.notices.find((n) => n.reason === 'skill_missing')
         expect(
           missing,
-          `注入器报 skill_missing：生产标记形态（name="${SKILL_NAME}"，无前缀）在 get_commands 映射中未命中。` +
-            `pi 实装的 skill 项 name 恒带 "skill:" 前缀（agent-session.js getCommands：name: \`skill:\${skill.name}\`）——` +
-            `注入器若以 cmd.name 原样作 map key（或以 cmd.name 插值 block 的 name 属性），与生产标记形态错位。` +
-            `修复面：skill-injector 映射/插值用剥离前缀后的 skill 名（PI 锚点 PS-24）`,
+          `注入器报 skill_missing：映射源未提供 name="${SKILL_NAME}"（裸名）条目。` +
+            `修复面：skill-injector 的 registry 映射构建（buildSkillsByNameFromRegistry，key 用 SkillInfo.name 裸名）或本探针映射源构造`,
         ).toBeUndefined()
 
         // ── 5. 终断言：整条消息形态（R4 D11「标记保留 + 末尾包裹块」）+ golden diff

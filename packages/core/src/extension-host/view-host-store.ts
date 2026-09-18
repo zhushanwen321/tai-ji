@@ -22,7 +22,7 @@ import type { InternalEventBus } from './internal-event-bus'
 import type { SessionScopedMap } from './utils/session-scoped-map'
 import type { WidgetPayload } from './types'
 
-/** view 缓存条目（IF10 契约）。meta 为 widget 宿主元数据（WidgetArea head 渲染），可选。 */
+/** view 缓存条目（IF10 契约）。meta 为 widget 宿主元数据（托盘 widget 区 head/badge 渲染），可选。 */
 export interface ViewCacheEntry {
   viewId: string
   pluginId: string
@@ -59,10 +59,14 @@ export class ViewHostStore {
   }
 
   /**
-   * 列出该 session 当前有缓存内容的全部 viewId（通用 widget bridge 动态发现用）。
+   * 列出该 session 当前有缓存内容的全部 viewId（widget 消费端动态发现用）。
    *
-   * sidebar L2TabBar 据此动态暴露 view tab——任何 extension 推 extension:widget 后，
-   * 对应 viewId 自动出现在 tab 栏，无需壳侧硬编码声明、无需 extension 做 taiji 适配。
+   * **顺序契约 = 当前插入序**：实现为 `[...partition.keys()]`，即内部 Map 的迭代序（Map 迭代序 =
+   * 插入序，ECMAScript 规范语义；renderer 侧 reactive 包装不改迭代序）——**invalidate 后重新注册
+   * 的 key 落尾部**，不回原位（是「当前插入序」而非「首次出现序」）。消费端（renderer 托盘 widget 区：
+   * known-order `['todo','goal']` 优先 + 其余 key 按本数组序追加）直接消费该序：有 entry 即出现、
+   * invalidate 即消失。**勿新增自增 seq 字段**重建同一派生态——赋值时机引入顺序依赖，且每次重推
+   * 换 seq 会让未知 key 起伏抖动（比 Map 原地保位更差），见 docs/design/composer-task-tray.md §3.3 D6。
    */
   getViewIds(sessionId: string): string[] {
     const partition = this.deps.sessionScoped.get(sessionId)
@@ -107,7 +111,7 @@ export class ViewHostStore {
       this.notifyListeners()
       return
     }
-    const guiTree = this.narrowGuiTree(widget.guiTree)
+    const guiTree = this.narrowGuiTree(widget.guiTree, widget.viewId)
     const meta = this.narrowMeta(widget.meta)
     this.setView(sessionId, widget.viewId, {
       viewId: widget.viewId,
@@ -120,23 +124,30 @@ export class ViewHostStore {
   }
 
   /** 窄化 unknown → WidgetMeta：title 是 string 即认（最小形状校验，progress/status
-   *  深度字段由消费端 WidgetArea 按可选处理，脏数据不崩）。非法形状丢弃（undefined）。 */
+   *  深度字段由消费端（托盘 widget 区）按可选处理，脏数据不崩）。非法形状丢弃（undefined）。 */
   private narrowMeta(raw: unknown): WidgetMeta | undefined {
     if (raw === null || typeof raw !== 'object') return undefined
     const obj = raw as Record<string, unknown>
     return typeof obj.title === 'string' ? (raw as WidgetMeta) : undefined
   }
 
-  /** 窄化 unknown[] → GuiComponent[]：isGuiComponent 直存；string 行包装 ansi-text（clarify Q1）。 */
-  private narrowGuiTree(raw: unknown[]): GuiComponent[] {
+  /**
+   * 窄化 unknown[] → GuiComponent[]：isGuiComponent 直存；string 行包装 ansi-text（clarify Q1）；
+   * 其余形状（非法对象等）丢弃不阻断其余项，console.warn 留痕（viewId + 位置 + 实际形状，
+   * STANDARDS §11.2 静默丢弃必须登记）供 extension 作者定位坏数据。
+   */
+  private narrowGuiTree(raw: unknown[], viewId: string): GuiComponent[] {
     const result: GuiComponent[] = []
-    for (const item of raw) {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i]
       if (isGuiComponent(item)) {
         result.push(item)
       } else if (typeof item === 'string') {
         result.push({ type: 'ansi-text', props: { lines: [item] } })
+      } else {
+        const shape = Array.isArray(item) ? 'array' : typeof item
+        console.warn(`[view-host-store] view "${viewId}" guiTree[${i}] 非法形状已丢弃（期待 GuiComponent 对象或 string 行，收到 ${shape}）；其余合法项已保留`)
       }
-      // 其他形状（非法对象等）丢弃——不静默吞，调用方 setView 仍会更新（保留合法项）
     }
     return result
   }

@@ -25,13 +25,13 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——chat 轮次走协议 seam
 //（registerFakePiEngine 替身，kickOffChatRound 的 notify 门经 engine.run 应答驱动）。
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { bindNotifyLedgerHost, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "../notify/notify-ledger.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { notifyGateAllowsDelivery, SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
@@ -39,29 +39,11 @@ function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-notify-gate-"));
 }
 
-function makePi(): PiLike & {
-  appendEntry: ReturnType<typeof vi.fn>;
-  events: { emit: ReturnType<typeof vi.fn> };
-  sendMessage: ReturnType<typeof vi.fn>;
-  on?: ReturnType<typeof vi.fn>;
-} {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike & {
-    appendEntry: ReturnType<typeof vi.fn>;
-    events: { emit: ReturnType<typeof vi.fn> };
-    sendMessage: ReturnType<typeof vi.fn>;
-    on?: ReturnType<typeof vi.fn>;
-  };
-}
-
 interface ServiceInternals {
   store: RecordStore;
 }
 
-type MockPi = ReturnType<typeof makePi>;
+type MockPi = PiMock;
 
 function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
   agentDir: string;
@@ -78,22 +60,20 @@ function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
   return { agentDir, service, store, pi };
 }
 
-describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮标记阻断 / 其余放行）", () => {
-  it("blocks archived (gate ①) and abandoned-round hits (gate ②); allows settled/running without marks", () => {
-    // ① intent=archived 静默（承接原 parent-new/parent-fork 阻断——编排性关闭即自动收起）。
-    expect(notifyGateAllowsDelivery({ intent: "archived" })).toBe(false);
-    // ② 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
+describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + 跨世代丢弃 / 其余放行）", () => {
+  it("blocks abandoned-round hits and cross-epoch inbound; allows settled/running without marks", () => {
+    // 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
     expect(
       notifyGateAllowsDelivery({ lastAbandonedRound: { epoch: 0, round: 2 }, round: 2 }),
     ).toBe(false);
-    // ② 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
+    // 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
     expect(
       notifyGateAllowsDelivery(
         { epoch: 1, lastAbandonedRound: { epoch: 0, round: 2 } },
         { epoch: 0, round: 2 },
       ),
     ).toBe(false);
-    // ② 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
+    // 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
     expect(
       notifyGateAllowsDelivery({ epoch: 1, round: 1, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
@@ -101,12 +81,15 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     expect(
       notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
-    // 无标记无归档（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // [u-arch] gate ①（intent=archived 静默）随收起概念删除退役——编排性关闭的
+    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份守卫 + notifyId
+    // 账本承接。
     expect(notifyGateAllowsDelivery({})).toBe(true);
     expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);
   });
 
-  it("kickOffChatRound 应答回注不注入 archived records（[U5] 编排性关闭自动收起 → gate ①静默）", async () => {
+  it("kickOffChatRound 迟到应答回注不注入已编排性关闭的 record（放弃轮标记 gate 承接，[u-arch] gate ①删除后主防线）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -120,19 +103,18 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 模拟 disposeAllRecords 先行编排性关闭（自动收起）后，迟到的 kickOffChatRound
-    // 应答回注。[U5 适配] 新形态 = idle + intent=archived + 放弃轮标记（gate ①②
-    // 双重阻断）——record 补 register 进 store 对齐「store 外 record 无编排性关闭
-    // 可达」的生产形态。
+    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注。
+    // [u-arch] 关闭形态 = idle + 放弃轮标记（disposeAllRecords 置标记 → settle 持久化）
+    // ——gate ① 删除后，迟到回注由放弃轮标记 gate 阻断（同世代、回注轮 ≤ 标记轮）。
     // [modeless 波1] 经 Continuation 统一入口驱动：message 派发轮（run 挂起）→
-    // 编排性关闭先行（markArchived——disposeAllRecords 的 store 原语）→ 迟到引擎
-    // 应答被 gate ①静默（intent=archived + 放弃轮标记 gate ②双重阻断）。
+    // 编排性关闭先行（markSettledOut——disposeAllRecords 的 store 原语）→ 迟到引擎
+    // 应答被 gate 阻断。
     record.status = "idle";
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "go");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
-    store.markArchived(record);
+    store.markSettledOut(record);
     fake.runs[0]!.settle({ content: "late round text" });
     await Promise.resolve();
     await Promise.resolve();
@@ -142,7 +124,7 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，三元组无阻断）", async () => {
+  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，gate 无阻断）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -262,6 +244,50 @@ describe("T4④ shutdown flush blocked → pending persisted for replay", () => 
     };
     const ledger2 = bindNotifyLedgerHost(host2);
     expect(ledger2.recoverFromSession()).toBe(1);
+  });
+
+  it("rewritten entry carries deliveryCustomType — wf-done replays on workflow-result channel, not default", () => {
+    // 通道保真回归：复写 entry 缺通道字段时，恢复扫描的后写覆盖会把 wf-done 改判成
+    // 默认通道（subagent-bg-notify）——runtime W18 失效信号按 customType==='workflow-result'
+    // 判定，错通道则 workflows 增量不刷新 + 边缘聚合误判 unparsed。
+    const ledger = bindNotifyLedgerHost({
+      appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
+      readSessionEntries: () => [],
+      isIdle: () => false,
+      onAgentSettled: () => {},
+      sendDelivery: (message) => pi.sendMessage(message as never),
+    });
+    expect(
+      ledger.record("wf-done:run-1", "Workflow run finished", { name: "my-flow" }, { deliveryCustomType: "workflow-result" }),
+    ).toBe(true);
+
+    service.dispose();
+
+    // dispose 复写（最后一条 NOTIFY_LEDGER_CUSTOM_TYPE entry）必须携带通道字段
+    const replayEntries = pi.appendEntry.mock.calls.filter(
+      (c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE && (c[1] as { notifyId?: string })?.notifyId === "wf-done:run-1",
+    );
+    expect(replayEntries.length).toBeGreaterThanOrEqual(2);
+    const rewritten = replayEntries[replayEntries.length - 1]?.[1] as { deliveryCustomType?: string };
+    expect(rewritten.deliveryCustomType).toBe("workflow-result");
+
+    // 恢复侧闭环：新 ledger 扫账面（含复写 entry 的后写覆盖），pending 通道保持 workflow-result
+    const host2 = {
+      appendLedgerEntry: vi.fn(),
+      readSessionEntries: () =>
+        pi.appendEntry.mock.calls
+          .filter((c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE)
+          .map((c) => ({ type: "custom", customType: c[0], data: c[1] })),
+      isIdle: () => false,
+      onAgentSettled: () => {},
+      sendDelivery: vi.fn(),
+    };
+    const ledger2 = bindNotifyLedgerHost(host2);
+    expect(ledger2.recoverFromSession()).toBe(1);
+    expect(ledger2.pendingEntries()[0]).toMatchObject({
+      notifyId: "wf-done:run-1",
+      deliveryCustomType: "workflow-result",
+    });
   });
 
   it("does not rewrite when main agent is idle (flush already delivered)", () => {

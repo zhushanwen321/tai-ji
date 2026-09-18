@@ -27,7 +27,7 @@
  * utils/file-lock 同款部分 mock 仅注入 ⑤ 锁获取失败分支（默认委托真实实现）。
  * timer 用 fake timers。
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run src/services/background-task
+ * 运行：cd packages/runtime && npx vitest run src/services/background-task
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'

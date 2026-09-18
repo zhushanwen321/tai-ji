@@ -32,6 +32,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { writeFinalizedState } from "../persistence/state-marker.ts";
 import { ResurrectDeniedError } from "../assembly/types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
@@ -48,24 +49,6 @@ const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_FORK_DEPTH",
 ] as const;
 
-/** initSession 注入的最小 pi duck-type（同 subagent-service PiLike 形状，结构匹配即可）。 */
-interface PiStub {
-  appendEntry(customType: string, data?: unknown): void;
-  events: { emit(channel: string, data: unknown): void };
-  sendMessage(
-    message: { customType: string; content: string; display: boolean; details?: unknown },
-    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-  ): void;
-}
-
-function makePi(): PiStub {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
-
 /** 写一个最小合法 session.jsonl（session header + identity entry + 1 条 assistant message）。
  *  不写任何 sidecar（.alive/.cancelled/.finalized）→ sidecar 矩阵分支 4 → running。 */
 function writeSessionJsonl(
@@ -77,6 +60,8 @@ function writeSessionJsonl(
     depth?: number;
     chatMode?: boolean;
     worktree?: boolean;
+    origin?: "workflow";
+    parentRunId?: string;
   },
 ): string {
   const file = path.join(sessionsDir, `${identity.id}.jsonl`);
@@ -107,6 +92,8 @@ function writeSessionJsonl(
         ...(identity.depth !== undefined ? { depth: identity.depth } : {}),
         ...(identity.chatMode !== undefined ? { chatMode: identity.chatMode } : {}),
         ...(identity.worktree !== undefined ? { worktree: identity.worktree } : {}),
+        ...(identity.origin !== undefined ? { origin: identity.origin } : {}),
+        ...(identity.parentRunId !== undefined ? { parentRunId: identity.parentRunId } : {}),
       },
     }),
     JSON.stringify({
@@ -214,6 +201,35 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(record.status).toBe("running"); // 接管翻边
     expect(record.sessionFile).toBe(file);
     expect(store.getMutable("sa-fin")).toBe(record); // 重建注册
+  });
+
+  it("[a3rv 归因] workflow-origin record 归档后、索引未预热（无 list 前置）→ 冷查仍能定位（origin 过滤只属展示面，D7 守卫可达）", () => {
+    // 复现 a3rv 重验：批成员收口（idle+gc）归档出内存后直接 message（无 action:'list'
+    // 预热 idToFile 索引）。修复前冷查兜底全扫吃 [H2 W1] origin 展示过滤 → 同树
+    // workflow record 被滤 → 候选 undefined → 「not found or not owned」上转，
+    // endedMessageGuard 误分流「different session tree」；D7 workflow-origin 守卫
+    // 不可达。修复后冷查口径 includeWorkflow:true（治理语义），候选定位成功，
+    // origin/parentRunId 随 resurrectColdRecord 透传（1543b39c1）。
+    const file = writeSessionJsonl(sessionsDir, {
+      id: "sa-wf-member",
+      rootSessionId: "root-session",
+      origin: "workflow",
+      parentRunId: "wf-test-run",
+    });
+    writeFinalizedState(file, "gc"); // GC 收口终态 → 重建 idle + closedReason 遗留位
+
+    // 前置：内存确无（归档形态）；且未跑过任何 collectRecords（索引未热——与 a3rv
+    // 剧本一致，list 预热会走 findLightById 直查，掩盖不了本缺陷的兜底全扫口径）
+    expect(store.getMutable("sa-wf-member")).toBeUndefined();
+
+    const record = service.chatActions.getRecordForAction("sa-wf-member", { allowReconnect: true });
+
+    // 候选定位成功 + 身份域透传：messageHandler 的 D7 守卫读 origin==="workflow"
+    // 给出正确域边界拒绝（而非归属误导文案）
+    expect(record.origin).toBe("workflow");
+    expect(record.parentRunId).toBe("wf-test-run");
+    expect(record.rootSessionId).toBe("root-session");
+    expect(record.sessionFile).toBe(file);
   });
 
   // ============================================================

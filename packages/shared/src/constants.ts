@@ -16,13 +16,20 @@ export const DEV_PORT_OFFSET = 100 as const
 export const MAX_PORT = 65535 as const
 
 /** pi-subagents 扩展的 subagent tool 名集合（识别 subagent 调用用，SSOT）。
- *  pi-subagents 通过名为 "subagent" 的 tool 执行子 agent，前端据此判定特殊渲染。 */
+ *  pi-subagents 通过名为 "subagent" 的 tool 执行子 agent，前端据此判定特殊渲染。
+ *  刻意不含 'subagents'（批量派发 tool——它跑的是 workflow run 不是 subagent record，
+ *  见 WORKFLOW_TOOL_NAMES 注释）；两集合判定并存处（Block.vue isSubagent 分支在前）
+ *  双收录会把批量块误路由进 subagent 分支。 */
 export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['subagent'])
 
-/** pi-subagent-workflow 扩展的 workflow tool 名集合（识别 workflow 调用用，SSOT）。
+/** pi-subagent-workflow 扩展的 workflow 族 tool 名集合（识别 workflow run 调用用，SSOT）。
  *  workflow 扩展通过名为 "workflow" 的 tool 执行 workflow run，event-interpreter 据此
- *  捕获发起时刻（action=run → 广播 session.workflows 增量信号）。 */
-export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow'])
+ *  做 W18 record 失效兜底分类（entry_appended 主信号丢失时的双保险收敛）。
+ *  'subagents' = 批量派发入口（N 个独立任务一次派发，handler 转译 runWorkflow("fan-out")）：
+ *  执行的是一次性 workflow run（record 快照为 workflow-record entry），故与 'workflow'
+ *  同集合——单收录是零 runtime 改动的唯一全对解（D1 裁决：进 SUBAGENT 集合会误触发
+ *  subagent-record 失效分支，双收录则两分支双打）。 */
+export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'subagents'])
 
 /**
  * W16/W17 [D4]：subagent/workflow 自描述持久化 entry 的 customType（runtime 侧消费值）。
@@ -124,7 +131,7 @@ export const IMAGE_LIMITS = {
 export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
 
 /**
- * ADR-0021 §2/§3 预设可选 skill/agent 目录候选（UI 「可选目录」的固定来源）。
+ * ADR-0021 §2/§3 预设可选 skill/agent/extension 目录候选（UI 「可选目录」的固定来源）。
  *
  * SSOT：services/skill-dir-config.ts（buildDirConfigs 读取端）与 infra/pi/discovery-store.ts
  * （setSkillDirs/setAgentDirs 写入端）共同 import 此常量，消除本地副本漂移风险。
@@ -132,17 +139,23 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  * 语义：用户可勾选启用/可拖排序；勾选的进 discovery.json 数组。强制目录
  * （~/.taiji/...）不在此列（UI 另行只读展示）。preset 成员豁免 existsSync 脏数据过滤
  * ——推荐候选语义，启用后即使此机器不存在也要保留（防 UI 消失回归）。
+ *
+ * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，pi + taiji 相关路径）：
+ * 用户打开设置页即见已勾选态，无需手动配置。preset 即「默认启用集合」，新增成员时
+ * 须同步评估 DEFAULT_DISCOVERY_CONFIG。
+ *
+ * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
+ * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
+ * 无法真正移除；且 claude 目录非本产品默认扫描面。用户仍可手动「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
   '~/.pi/agent/skills',
-  '~/.claude/skills',
   '~/.agents/skills',
   '.agents/skills',
 ] as const
 
 export const PRESET_AGENT_DIRS = [
   '~/.pi/agent/agents',
-  '~/.claude/agents',
   '~/.agents/agents',
   '.agents/agents',
 ] as const
@@ -165,6 +178,36 @@ export const PRESET_EXTENSION_DIRS = [
   '.pi/extensions',
   '.taiji/extensions',
 ] as const
+
+/**
+ * preset 候选目录按路径形态拆成 discovery.json 两组：`.` 开头（含相对路径）→ projectPaths，
+ * `~` 开头 → globalPaths；各自保持 presets 原序。
+ *
+ * DEFAULT_DISCOVERY_CONFIG 的唯一派生源——消除原先手写的第二份 preset 编码（成员/顺序
+ * 逐项与 PRESET_*_DIRS 相同，仅按 project/global 分组），新增 preset 成员自动进默认勾选。
+ */
+function splitPresetDirs(presets: readonly string[]): { projectPaths: string[]; globalPaths: string[] } {
+  return {
+    projectPaths: presets.filter((p) => p.startsWith('.')),
+    globalPaths: presets.filter((p) => p.startsWith('~')),
+  }
+}
+
+/**
+ * discovery.json 默认态（首启 / 文件缺失时的回落值）：全部 preset 目录默认勾选。
+ *
+ * 语义：skill/agent/extension 扫描目录打开设置即默认勾选（pi + taiji 相关路径），
+ * 用户无需手动配置。对应产品默认：pi 原生目录（~/.pi/agent/*、.pi/*）+ taiji/agents
+ * 惯例目录（.agents/*、.taiji/*）。claude 目录已移出预设（见 PRESET_SKILL_DIRS 注）。
+ *
+ * 消费方：discovery-store 的 DEFAULT_DISCOVERY（JsonStore ENOENT 回落）+ core mock fixture。
+ * 数组内顺序 = preset 顺序（project/global 各自内部），与 buildDirConfigs 的展示序一致。
+ */
+export const DEFAULT_DISCOVERY_CONFIG = {
+  skill: splitPresetDirs(PRESET_SKILL_DIRS),
+  agent: splitPresetDirs(PRESET_AGENT_DIRS),
+  extension: splitPresetDirs(PRESET_EXTENSION_DIRS),
+} as const
 
 /**
  * 插件通知/状态栏防毒化限流参数（D7「限流与防毒化」，plugin-trust-hardening S3-W4）。
@@ -202,7 +245,7 @@ export const PLUGIN_NOTIFY_LIMITS = {
 } as const
 
 /**
- * 引擎子进程 env 契约常量 SSOT（W12，docs/design/subagent-engine-protocolization.impl-plan.md §2.12）。
+ * 引擎子进程 env 契约常量 SSOT（W12）。
  *
  * 消费形态：@zhushanwen/subagent-engine-sdk 的 src/env.ts 内联镜像本块（构建期生成物，
  * SDK 不得运行时 import @taiji/shared——F9：zsw 宿主链不可依赖 shared）；
@@ -254,12 +297,12 @@ export const ENGINE_LAUNCH_ENV_KEYS = {
  
 export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 
-// ── 崩溃韧性共享契约（docs/design/crash-resilience.md §3.3，实施计划 u-foundation）──
+// ── 崩溃韧性共享契约（实施计划 u-foundation）──
 // 本段是 DAG 根共享契约：u4a（出站守卫）/ u4b（历史预算）/ u4c（读预检）/
 // u5a/u5b（日志保留期）从这里取值，禁止各单元自写魔数。
 
 /**
- * server→client 出站帧告警阈值（默认 8MB）[crash-resilience §3.3 D3]。
+ * server→client 出站帧告警阈值（默认 8MB）[D3]。
  *
  * RPC reply 与 messageBus push 两种通路共用：序列化后超此值写 warn 日志
  * （消息类型、sessionId、字节数），**不截断**——哨兵定位：pi 上游自截（read/bash
@@ -283,7 +326,7 @@ export const OUTBOUND_FRAME_WARN_BYTES: number = 8 * 1024 * 1024
 export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
 
 /**
- * server→client 出站帧截断阈值（默认 32MB）[crash-resilience §3.3 D3]。
+ * server→client 出站帧截断阈值（默认 32MB）[D3]。
  *
  * 按通路分两种守卫形态：reply 通路超限 → 替换为 `payload_too_large` 错误 envelope
  * （前端 pending 对 type:'error' 且 id 命中的 reply 走 reject，Promise 收口不悬挂）；
@@ -301,7 +344,7 @@ export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
 export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 
 /**
- * runtime 全量读预检阈值（默认 32MB）[crash-resilience §3.3 D5]。
+ * runtime 全量读预检阈值（默认 32MB）[D5]。
  *
  * 五条全量读入口统一 statSync 大小预检：① getHistoryFromFilePath（含 subagent 历史
  * 消费方）② 离线尾读 fallback ③ findLastEntryField fallback ④ readSessionJsonlText
@@ -317,7 +360,16 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 export const READ_PRECHECK_MAX_BYTES: number = 32 * 1024 * 1024
 
 /**
- * session 历史加载双预算 [crash-resilience §3.3 D4]。
+ * 字节量纲换算基数（1MB = 1024×1024）：oversize 降级文案与体积展示、内存水位采样等
+ * 字节→MB 换算的单一来源（结构收敛批单点化——此前 runtime 5 处本地常量 3 种字面量
+ * 形态：trace-sync / restore-seeding / mem-pressure / subagent-extractor /
+ * workflow-extractor）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 字节量纲换算基数（1MB = 1024×1024），命名常量自解释
+export const BYTES_PER_MB: number = 1024 * 1024
+
+/**
+ * session 历史加载双预算 [D4]。
  *
  * 语义：活跃 session 的 doGetHistory 与离线尾读合并为同一预算逻辑——按「最近
  * RECENT_TURNS turns 且总字节 ≤ MAX_BYTES」双条件截取，响应携带 truncated /
@@ -349,7 +401,7 @@ export const DEFAULT_LOG_KEEP_DAYS = 7 as const
 /**
  * 读取日志保留天数：env `TAIJI_LOG_KEEP_DAYS` 覆盖 || 默认 7（DEFAULT_LOG_KEEP_DAYS）。
  *
- * [crash-resilience §3.3 D6-⑦] 从 runtime infra/logger.ts:50-55 的模块级常量
+ * [D6-⑦] 从 runtime infra/logger.ts:50-55 的模块级常量
  * `Number(process.env.TAIJI_LOG_KEEP_DAYS) || 7` **等价提升**为共享函数：main（每日
  * 清理定时器）与 runtime（initLogger 清理）两进程同调同一函数——既保留用户 env
  * 旋钮，也不出现两套值域漂移。语义与现状逐字等价：`Number(env)` 结果 falsy

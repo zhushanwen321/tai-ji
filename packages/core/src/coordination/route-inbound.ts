@@ -133,23 +133,6 @@ export interface InboundEffects {
     entries: Array<PiEntry | PiToolCallEntryForm>,
   ): void
   onWorkflowUpdate?(sessionId: string, update: ServerMessageMap['session.workflowUpdate']['update']): void
-  /**
-   * [idle-refresh] subagent.stream_delta 帧桥接（docs/design/timeout-streaming-ui-idle.md §5.1 D1 / §6）。
-   *
-   * sync subagent/workflow 编排期父 session 的 message.* 帧构造性为零（生产端
-   * executeSubagent 不消费 onUpdate），子代理活跃信号走本帧旁路（relay tee / 旧
-   * widget 通道，不经 chat store.applyMessageEvent）。本回调在 routeInbound 有 sid 的
-   * 默认兜底路径（原 FALLBACK，现收编进 dispatchRouted）按 type 识别后调用（该 type 不在
-   * ROUTE_TABLE/CROSS_SESSION_TYPES，帧与
-   * payload.sessionId 在挂载点完全可见；pending 分流不拦截（旁路帧无 pending id），seq gap 与 session 通道同 gate——gap drop 帧不触发刷新，route-inbound.test.ts 锁定）。
-   *
-   * 实现方（renderer 装配层，useMessageEffects 范本）：解析 payload.sessionId
-   * （shared resolveSubagentParentSessionId——三段式虚拟 id `subagent:<mainSessionId>:<subagentId>`
-   * 提取父 sid / 旧 widget 通道主 sid 原样，双形态兼容，纯字符串函数零失败模式）
-   * → 调 chatStore.refreshStreamingTimer(父sid)，防「子面板在打字、父气泡被判无进展」。
-   * 非 subagent.stream_delta 类型帧不调用（type guard 在默认兜底挂载点）。
-   */
-  onSubagentStreamDelta?(frame: ServerMessage): void
   onGlobalError?(message: string): void
   /**
    * 带 sessionId、未命中 pending 的 error envelope 兜底（D6b，integrity-hardening §3.6）。
@@ -218,7 +201,7 @@ function applySeqGap(sid: string, msg: ServerMessage): boolean {
 
 /**
  * 路由序言的 session 半边（dispatchRouted 有 sid 分支提取，行为零改变）：
- * seqGate → dispatchSession → crossSession? → payloadGuard → sessionEffect → stream_delta 桥接。
+ * seqGate → dispatchSession → crossSession? → payloadGuard → sessionEffect。
  * 闭包变量 resolved.events / effectsCtx 改经参数注入。
  */
 function dispatchSessionRouted(
@@ -240,14 +223,6 @@ function dispatchSessionRouted(
   // crossSession 分发（per-session 订阅者可能自带消费逻辑）。
   if (entry?.payloadGuard && !entry.payloadGuard(msg.payload)) return
   entry?.sessionEffect?.(sid, msg.payload, effectsCtx)
-  // [idle-refresh] subagent.stream_delta 桥接（§5.1 D1）：该 type 不在 ROUTE_TABLE /
-  // CROSS_SESSION_TYPES（唯一关切是活跃信号，无需独立路由条目），恒走默认兜底路径
-  // （原 FALLBACK）——此处按 type 识别后透传原始 frame，父 sid 解析与
-  // refreshStreamingTimer 调用由 effects 实现方完成（见 InboundEffects.onSubagentStreamDelta
-  // 注释）。非本 type 帧不调用（no-op）；未注册回调时跳过（生产接线前行为与现状一致）。
-  if (msg.type === 'subagent.stream_delta') {
-    effectsCtx.onSubagentStreamDelta?.(msg)
-  }
 }
 
 /**
@@ -390,8 +365,6 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   'extension:status': { crossSession: true },
   'extension:notify': { crossSession: true },
   'extension.ui_request': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
-  // 带 sid 的 ui 超时广播：DialogRequestQueue onUiTimeout 经 crossSession 通道订阅（MF-6）
-  'extension.ui_timeout': { crossSession: true },
   // plugin:* 带 sid 下行（runtime 广播注入 sessionId）：ExtensionHost 全局单例消费者需同时收
   // session 通道 + crossSession 通道（ViewHostStore / DialogRequestQueue 按 per-session 分区）
   'plugin:uiRequest': { crossSession: true },

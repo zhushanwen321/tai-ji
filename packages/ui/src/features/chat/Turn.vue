@@ -19,18 +19,53 @@
       @edit-state-change="emit('edit-state-change', $event)"
     />
 
-    <!-- trigger 起点行（W4·D3）：无 user 起点的后台续跑 turn（隐藏完成通知边界开启）渲染轻量
-         弱化起点行替代 user 气泡——横线分隔 + Bell 图标 + 小号文案，视觉语言对齐 SystemNotice
-         元信息行（不冒充用户发言）。assistant 自启 turn（user:null 无 trigger）两者皆不渲染。 -->
+    <!-- trigger 起点行（W4·D3 + U6·D5 聚合增强）：无 user 起点的后台续跑 turn（隐藏完成通知
+         边界开启）渲染轻量弱化起点行替代 user 气泡——横线分隔（D3 增强规格：border-strong +
+         两端渐隐）+ 三态图标 + 计数/成败/耗时，视觉语言对齐 SystemNotice 元信息行（不冒充用户
+         发言）。计数/成败/耗时来自 core 分组层 notifySummary（D5 单一派生点），渲染层零解析、
+         零回扫 store。assistant 自启 turn（user:null 无 trigger）两者皆不渲染。 -->
     <div
       v-else-if="turn.trigger === 'bg-notify'"
-      class="mx-auto flex w-full min-w-0 items-center gap-2 py-1 animate-notice-in"
+      class="mx-auto flex w-full min-w-0 items-center gap-2 py-1.5 animate-notice-in"
       data-testid="turn-trigger-bgnotify"
     >
-      <span class="h-px flex-1 bg-border" />
-      <Bell class="size-3 shrink-0 text-neutral-mid" />
-      <span class="min-w-0 shrink-0 text-[length:var(--text-xs)] leading-snug text-neutral-mid">{{ t('panel.message.turnTriggerBgNotify') }}</span>
-      <span class="h-px flex-1 bg-border" />
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
+      <component
+        :is="notifyIcon"
+        class="size-[13px] shrink-0"
+        :class="notifyIconClass"
+        stroke-width="2.2"
+        data-testid="turn-trigger-bgnotify-icon"
+      />
+      <!-- 主文案/失败分句/状态点列/从文案/耗时 meta：片段数组单点 v-for（g9-F2），段间分隔点
+           唯一渲染点在下方（sep 标记由 script 侧段规格按 D5 样本给出）。 -->
+      <template v-for="seg in notifySegments" :key="seg.id">
+        <span
+          v-if="seg.sep"
+          class="shrink-0 text-neutral-faint"
+          data-testid="turn-trigger-bgnotify-sep"
+        >·</span>
+        <!-- 状态点列（D5）：≤8 逐点三色（成功绿 / 失败金 / 中性灰）；>8 只显计数不渲染点列 -->
+        <span
+          v-if="seg.dots"
+          class="flex shrink-0 items-center gap-[3px]"
+          data-testid="turn-trigger-bgnotify-dots"
+        >
+          <span
+            v-for="(outcome, i) in seg.dots"
+            :key="i"
+            class="size-1.5 rounded-full"
+            :class="NOTIFY_DOT_CLASS[outcome]"
+            data-testid="turn-trigger-bgnotify-dot"
+          />
+        </span>
+        <span
+          v-else
+          :class="seg.class"
+          :data-testid="`turn-trigger-bgnotify-${seg.id}`"
+        >{{ seg.text }}</span>
+      </template>
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
     </div>
 
     <!-- assistant 区 -->
@@ -107,18 +142,6 @@
         <span v-if="showStreamingCursor" class="streaming-tail ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
 
-      <!-- [premature-timeout] idle 超时误判收口的恢复指引（docs/design/timeout-streaming-ui-idle.md §4.2）：
-           该气泡的 error 是前端 idle timer 兜底强推（非 pi 真实终态），提示用户「等待自愈 / 手动止损 / 调阈值」；
-           迟到的 message.complete 自愈清标后本行随 computed 消失。turn 内任一 assistant 命中即显示（聚合一次）。 -->
-      <div
-        v-if="hasPrematureTimeout"
-        data-testid="turn-premature-timeout"
-        class="flex items-start gap-1.5 text-[length:var(--text-sm)] leading-snug text-warn"
-      >
-        <Timer class="mt-0.5 size-3.5 shrink-0" />
-        <span class="min-w-0 flex-1">{{ t('panel.message.prematureTimeoutNotice') }}</span>
-      </div>
-
       <!-- 操作栏：TurnSummary 子组件（去内容化后仅 hover actions） -->
       <TurnSummary
         :turn="turn"
@@ -154,9 +177,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bell, Timer } from '@lucide/vue'
-import type { MessageTurn, FlatBlock } from '@taiji/core/domain/chat'
+import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
+import type { MessageTurn, FlatBlock, NotifyOutcome } from '@taiji/core/domain/chat'
 import { countThinking, countToolCalls, flattenTurnBlocks, computeTraceWindow, turnStableId, W } from '@taiji/core/domain/chat'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
 import ChangeSetCard from './ChangeSetCard.vue'
@@ -168,6 +192,7 @@ import TraceCompactorRow from './TraceCompactorRow.vue'
 import BashOutputBlock from './BashOutputBlock.vue'
 import SystemNotice from './SystemNotice.vue'
 import { useTurnElapsed } from './composables/useTurnElapsed'
+import { formatDurationHms } from './format-utils'
 import { useChatViewDeps } from './chat-view-deps'
 
 const props = withDefaults(
@@ -185,6 +210,129 @@ const props = withDefaults(
 
 /** trigger 起点行文案（W4·D3）：仅 bg-notify turn 渲染，见 template 注释。 */
 const { t } = useI18n()
+
+// ── trigger 起点行聚合展示（D5，U6）─────────────────────────────────────────
+// 聚合口径全部在 core（domain/chat/notify-summary 的 NotifySummary，经分组层旁挂到 turn），
+// 本组件只做「数字 → 文案/色」的展示映射：图标三态 + 主文案计数 + 失败分句 + 状态点列 + 耗时 meta。
+
+/** 状态点列上限（D5）：≤8 逐点三色；>8 只显计数（点列过密不可读） */
+const MAX_NOTIFY_DOTS = 8
+
+/** 边界行三态（D5）：失败 / 中性（未判定——旧 session 无 details / cancelled，不冒充成功）/
+ *  成功。count===0（全解析失败/中性，罕见）落中性档，只渲染图标 + 从文案。 */
+type NotifyTone = 'failed' | 'neutral' | 'success'
+
+const NOTIFY_ICON: Record<NotifyTone, Component> = {
+  failed: TriangleAlert,
+  neutral: Bell,
+  success: CheckCircle2,
+}
+
+const NOTIFY_TONE_CLASS: Record<NotifyTone, string> = {
+  failed: 'text-warn',
+  neutral: 'text-neutral-mid',
+  success: 'text-success',
+}
+
+/** 状态点三色（D5）：成功绿 / 失败金 / 中性灰 */
+const NOTIFY_DOT_CLASS: Record<NotifyOutcome, string> = {
+  success: 'bg-success',
+  failed: 'bg-warn',
+  neutral: 'bg-neutral-dim',
+}
+
+const notifyTone = computed<NotifyTone>(() => {
+  const s = props.turn.notifySummary
+  if (s && s.failedCount > 0) return 'failed'
+  if (s && s.neutralCount > 0) return 'neutral'
+  return 'success'
+})
+
+const notifyIcon = computed(() => NOTIFY_ICON[notifyTone.value])
+const notifyIconClass = computed(() => NOTIFY_TONE_CLASS[notifyTone.value])
+
+const notifyCount = computed(() => props.turn.notifySummary?.count ?? 0)
+
+/** 状态点列（去重后逐 record；>8 只显计数不渲染点列） */
+const notifyDots = computed<NotifyOutcome[]>(() => {
+  const outcomes = props.turn.notifySummary?.outcomes ?? []
+  return outcomes.length > MAX_NOTIFY_DOTS ? [] : outcomes
+})
+
+/**
+ * 失败分句（D5「· M 失败」）：专用键 `panel.message.turnTriggerBgNotifyFailed`（zh「{count} 失败」）。
+ * 不复用 TraceCompactorRow 的 `traceFailed`（「含 {count} 次失败」/「{count} failed」）——两者
+ * 语义域不同（收编行子计数 vs 边界行失败分句），复用会致 zh 呈现与设计字面不符。
+ */
+const notifyFailedText = computed(() => {
+  const failedCount = props.turn.notifySummary?.failedCount ?? 0
+  return failedCount > 0 ? t('panel.message.turnTriggerBgNotifyFailed', { count: failedCount }) : ''
+})
+
+/** 耗时 meta（D5）：去重后含 endedAt 值记录的 max(endedAt) − min(startedAt)；无值不显。
+ *  格式化单点在 format-utils.formatDurationHms（补零口径 26m03s，design §3.1 样本锚定）。 */
+const notifyDuration = computed(() => {
+  const ms = props.turn.notifySummary?.durationMs
+  return ms === undefined ? '' : formatDurationHms(ms)
+})
+
+// ── 边界行片段（g9-F2）──────────────────────────────────────────────────────
+// 段序 = D5 设计样本「N 个后台任务完成 · M 失败 ●●● · 已继续处理 · 26m03s」：计数 / 失败分句 /
+// 状态点列 / 从文案 / 耗时。段集合与各段前置分隔点在 script 侧单点产出（模板只留一个 v-for +
+// 一个分隔点渲染位），不再由模板内 5 段 v-if 各自拼装。
+// 分隔点规则（与既有 DOM 逐字一致）：失败分句与耗时前置点无条件；从文案仅在有主文案时带前导点
+// （D5「无主文案时不带前导点」）；计数与点列段无前置点（点列恒紧贴前段，不单独成段群）。
+
+/** 主文案（D3）：text-sm + 550 字重 + fg 提色 */
+const NOTIFY_COUNT_CLASS = 'shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg'
+/** 失败分句（D3）：text-xs + mid 提色 */
+const NOTIFY_FAILED_CLASS = 'shrink-0 text-[length:var(--text-xs)] text-neutral-mid'
+/** 从文案（D3）：faint 弱化 */
+const NOTIFY_CONTINUED_CLASS = 'shrink-0 text-neutral-faint'
+/** 耗时 meta（D3 meta 规格，钉右）：mono + tabular-nums + dim */
+const NOTIFY_DURATION_CLASS =
+  'shrink-0 font-mono text-[length:var(--text-2xs)] font-medium tabular-nums text-neutral-dim'
+
+/** 边界行片段：id 即 data-testid 后缀（turn-trigger-bgnotify-<id>；dots 段为点列容器） */
+interface NotifySegment {
+  id: 'count' | 'failed' | 'dots' | 'continued' | 'duration'
+  /** 段前置分隔点（D5「·」） */
+  sep: boolean
+  /** 文本段文案（dots 段无） */
+  text?: string
+  /** 文本段 class（dots 段无） */
+  class?: string
+  /** 状态点列段（≤8 逐点三色；>8 由 notifyDots 归空 → 段不产出） */
+  dots?: NotifyOutcome[]
+}
+
+/** 边界行片段数组（渲染序）：空段由 null + filter 剔除，模板不判空 */
+const notifySegments = computed<NotifySegment[]>(() => {
+  const count = notifyCount.value
+  const failed = notifyFailedText.value
+  const dots = notifyDots.value
+  const duration = notifyDuration.value
+  const segments: Array<NotifySegment | null> = [
+    count > 0
+      ? {
+        id: 'count',
+        sep: false,
+        text: t('panel.message.turnTriggerBgNotifySummary', { count }),
+        class: NOTIFY_COUNT_CLASS,
+      }
+      : null,
+    failed ? { id: 'failed', sep: true, text: failed, class: NOTIFY_FAILED_CLASS } : null,
+    dots.length > 0 ? { id: 'dots', sep: false, dots } : null,
+    {
+      id: 'continued',
+      sep: count > 0,
+      text: t('panel.message.turnTriggerBgNotifyContinued'),
+      class: NOTIFY_CONTINUED_CLASS,
+    },
+    duration ? { id: 'duration', sep: true, text: duration, class: NOTIFY_DURATION_CLASS } : null,
+  ]
+  return segments.filter((seg): seg is NotifySegment => seg !== null)
+})
 
 /**
  * B9：编辑状态变化通知父组件。
@@ -273,15 +421,6 @@ const assistantById = computed(() => {
   for (const a of props.turn.assistants) m.set(a.id, a)
   return m
 })
-
-/**
- * [premature-timeout] 本 turn 是否含 idle 超时误判收口的气泡（§4.2）：error 态且带
- * prematureTimeout 标记。complete 自愈恢复（status 翻 complete + 清标）后 computed 失效，
- * 恢复指引行自动消失——不依赖用户重开 session。
- */
-const hasPrematureTimeout = computed(() =>
-  props.turn.assistants.some((a) => a.status === 'error' && a.prematureTimeout === true),
-)
 
 /** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。未 provide setTakeover 时 no-op。 */
 function onToggleTakeover(): void {

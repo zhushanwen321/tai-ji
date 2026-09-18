@@ -845,7 +845,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 直发原文，带 `<!--taiji:msg:-->` 标记会污染重放文本）。holdsInflight=true：本通道挂了
     // inflight 占位（下方 incrementInflight），被拒时 handler 同步回收。
     pendingDirectSends.set(sid, { clientUuid, text: promptText, holdsInflight: true })
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D2 维护点 2]
+    // [steer-bubble u2 / D2 维护点 2]
     // send 乐观 +1：乐观插入即「已显示」，其自身投递的 message_end(user) 到达时被
     // inflight 计数抵消（不落入腿 2 includes 兜底——send 文本通常不在队列数组，但与
     // 队列未投递条目同文本碰撞时会误命中，计数优先裁决）。挂钩在 send 调用点（与
@@ -958,7 +958,7 @@ export function createUseChat(deps: UseChatDeps) {
 
     // [steer-bubble u2] pending 暂存（**不进对话流**）：steer 提交先写 pendingBuffer 暂存
     // （store.pushPending），投递时经腿 1（queue_update drain 差集）/ 腿 2（message_end(user)
-    // includes 兜底）消费入流（docs/design/steer-followup-user-bubble-display.md D1）。
+    // includes 兜底）消费入流（D1）。
     // S7「steer 发出后立即入流，投递时转 complete」的旧设计与实现早已背离（pending 从
     // 不进对话流），过时注释易误导后续维护——本注释为设计 §2 根因 3 的文档性收尾。
     // [W1] API 失败（WS 断连/steer_failed envelope/hook 拦截）回滚 pending + toast 提示，

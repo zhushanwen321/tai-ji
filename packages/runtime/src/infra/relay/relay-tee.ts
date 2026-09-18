@@ -1,5 +1,5 @@
 /**
- * relay tee 翻译层（E 方案，subagent-realtime-channel.md §4.3）。
+ * relay tee 翻译层。
  *
  * 每个注册的 relay 子进程一个实例：child stdout 字节 → event-adapter 纯翻译函数
  * （PiEvent → PiTranslatedEvent[]，独立实例语义——不与主 pi 会话的 adapter/interpreter

@@ -1,13 +1,20 @@
 /**
  * Mock 门面 —— 与 @/api 同接口签名，VITE_MOCK=true 时由 api/index 注入。
  *
+ * [G4 类型锚定] 同接口不再靠注释承诺：session/chat/config/model/plugin/composer/workspace/
+ * quota/project/preset 十域对象显式标注 real 域导出类型（XDomain = typeof real 域模块），
+ * 并配 AssertExact<DomainParamsExact<...>> 逐方法比较 Parameters 元组全等——real 域加参/改签名时
+ * mock 侧缺参/少参/多参/错型直接 tsc 编译失败。锚定范围与未锚定域（settings/extension/
+ * search/git/file）的理由登记见下方「[G4 类型锚定]」注释块与 docs/TEST-STRATEGY.md §5。
+ *
  * 行为（D7 工程默认）：
  * - 不走 transport/ws-client，直接返回内存 fixture + setTimeout 模拟流式
  * - 不模拟失败（v1 永远成功），除 switchSession 的 id 不存在（契约要求抛）
  * - 全内存（reload 重置）
  * - 流式事件名严格按 protocol.ts ServerMessageType（message_start/text_delta/complete）
  *
- * 依赖方向：无（不 import transport/events/pending，独立内存实现）。
+ * 依赖方向：无（不 import transport/events/pending，独立内存实现；real 域模块仅 import type
+ * 引形状，编译期擦除，无运行时依赖、不影响生产构建 mock 链摇除）。
  *
  * [W17] ⚠️ 事件总线共享警告：mock 直接复用 real events 总线（pushSession/dispatchSession
  * 走的是 real events，core transport/api/events），mock 推送的 server-push 会被所有经 events.on 注册的订阅者收到。
@@ -27,11 +34,15 @@ import type {
   SkillCacheInvalidatedPayload,
   ProviderId,
   QuotaConfigurePayload,
+  ThinkingLevel,
+  LlmRetryConfig,
+  ScannedSkillInfo,
+  ScannedAgentInfo,
 } from '@taiji/shared'
-import { recommendedExtensions } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
-import { MOCK_MODELS, mockModelToInfo, MENTION_CANDIDATES, FILE_CANDIDATES } from './composer-data'
+import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
 import { SEARCH_MOCK, SEARCH_RECENTS, SEARCH_SUGGESTED_COUNT, type SearchItem } from './search-data'
 // 相对路径直达定义处（new-task-search/types.ts）：经 '@taiji/core' barrel 回引会成环，ESM 序隐患
 import type { Section } from '../../domain/new-task-search/types'
@@ -43,6 +54,68 @@ import * as wsClient from '../ws-client'
 // [W4] getSystem/updateSystem 持久化已迁 @taiji/core domain/settings/system-storage
 // （经 PlatformPort.storage KVStorage，renderer 壳 useSettingsShell providePlatform 注入）。
 // mock 不再转发这两个方法（消费方已切 core getSystem(getPlatform().storage)）。
+
+// ── [G4 类型锚定] mock 域对象显式标注 real 域导出类型 ──────────────────────────
+// 为什么：门面三元（renderer api/index `isMock ? mockApi.x : realX`）的两侧同构此前只靠
+// 注释承诺（「与 real domain 同接口，签名一致」），real 域加参（如 session.create 的
+// presetId/projectId/modelOverride/thinkingOverride 四参）时 mock 侧静默漂移、参数被丢弃。
+// real 域是散函数模块（无对象/命名空间形态可复用），模块本身（typeof import）即形状单点，
+// 直接引用不另抽接口。锚定后漂移变 tsc 编译错误，两层防线：
+// ① `export const x: XDomain = xImpl` —— 抓成员缺失/多余、参数/返回类型漂移；
+// ② AssertExact<DomainParamsExact<...>> —— 可赋值性抓不到「少可选参」（少参函数可赋给多参函数类型），
+//    须逐方法比较 Parameters 元组全等（identity）。断言别名 export：未导出的 unused 类型
+//    别名会被 lint no-unused-vars 拦截（tsc 侧本包未开 noUnusedLocals，不设防）。
+// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset（10 域）。
+// 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（7 成员子集转发器，
+// real 是 40+ 方法全域）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
+// search（real 侧无单源 domain，编排归 useSearchModalDeps）/ git、file（独立 mock 文件，
+// 待后续同法锚定）。
+import type * as realSessionDomain from '../api/domains/session'
+import type * as realChatDomain from '../api/domains/chat'
+import type * as realConfigDomain from '../api/domains/config'
+import type * as realModelDomain from '../api/domains/model'
+import type * as realPluginDomain from '../api/domains/plugin'
+import type * as realComposerDomain from '../api/domains/composer'
+import type * as realWorkspaceDomain from '../api/domains/workspace'
+import type * as realQuotaDomain from '../api/domains/quota'
+import type * as realProjectDomain from '../api/domains/project'
+import type * as realPresetDomain from '../api/domains/preset'
+
+/** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
+export type SessionDomain = typeof realSessionDomain
+export type ChatDomain = typeof realChatDomain
+export type ConfigDomain = typeof realConfigDomain
+export type ModelDomain = typeof realModelDomain
+export type PluginDomain = typeof realPluginDomain
+export type ComposerDomain = typeof realComposerDomain
+export type WorkspaceDomain = typeof realWorkspaceDomain
+export type QuotaDomain = typeof realQuotaDomain
+export type ProjectDomain = typeof realProjectDomain
+export type PresetDomain = typeof realPresetDomain
+
+/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对） */
+type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
+/**
+ * 元组类型全等（identity 比对而非可赋值性——可赋值性抓不到可选元素的增删）。
+ * 判别臂用字符串字面量（非数值）：同为 identity 探针的两臂标记，避免 no-magic-numbers warning。
+ */
+type SameTuple<A extends unknown[], B extends unknown[]> =
+  (<T>() => T extends PlainTuple<A> ? 'eq' : 'ne') extends (<T>() => T extends PlainTuple<B> ? 'eq' : 'ne') ? true : false
+/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错） */
+type AssertExact<T extends true> = T
+/**
+ * 逐方法比较 mock 实现与 real 域的 Parameters 元组全等（identity）；任一方法少参/多参/错型，
+ * 结果联合含 false。抓的正是「注解可赋值性放行」的漂移：mock 少声明一个可选参，TS 结构化
+ * 比较视为合法（少参函数可赋给多参函数类型）。用法：AssertExact<DomainParamsExact<D, M>>——
+ * 泛型定义内不能直接套 AssertExact（未解析泛型上约束不可证，会在定义处误报）。
+ */
+type DomainParamsExact<Real, Mock extends Real> = {
+  [K in keyof Real]: Real[K] extends (...args: infer P) => unknown
+    ? Mock[K] extends (...args: infer Q) => unknown
+      ? SameTuple<P, Q>
+      : false
+    : true
+}[keyof Real]
 
 // mock/git.ts 的 git domain + fixtureGitStatus 透出（Wave 1a real git domain 落地后由 api/index 接线）
 export { git, fixtureGitStatus } from './git'
@@ -293,7 +366,7 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
-export const session = {
+const sessionImpl = {
   /**
    * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
    * 恒返回 empty 快照（Trace 视图空态）；real 轨道走 runtime A1 混合路由。
@@ -324,9 +397,20 @@ export const session = {
     return buildGroups()
   },
 
-  async create(cwd?: string, label?: string): Promise<SessionSummary> {
+  /**
+   * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参）。
+   * override 生效面（对齐 real 关键语义，落 SessionSummary 可断言）：
+   * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
+   * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
+   * 覆盖值）。mock 无 pi/runtime，仅内存投影，不追求全仿真。
+   */
+  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel): Promise<SessionSummary> {
     await sleep(TIMING.ack)
     const s = createSession(cwd, label)
+    if (presetId !== undefined) s.launchPresetId = presetId
+    if (projectId !== undefined) s.projectId = projectId
+    if (modelOverride !== undefined) s.modelId = modelOverride
+    if (thinkingOverride !== undefined) s.thinkingLevel = thinkingOverride
     fixtureSessions.push(s)
     // 模拟 runtime create 后 broadcastSessionList（server-push 全量分组）
     pushSessionList()
@@ -336,13 +420,32 @@ export const session = {
   /**
    * Mock fork：模拟 runtime 截断 + 新进程，返回新 session。
    * mock 模式无真实 JSONL 截断，仅创建空 session（历史由前端 selectSession 拉）。
-   * 与 real domain 同接口，签名一致（opts 必选，对齐 session.ts fork）。
+   * [G4 锚定 SessionDomain] 类型锚定保证与 real 域 fork 签名全等（编译强制，不再靠注释承诺）。
+   * override 生效面同 create（modelOverride → modelId / thinkingOverride → thinkingLevel，
+   * ADR-0056 Staging Mode 覆盖优先于源 preset）；血缘字段落 parentSession（FR-20 fallback 键：
+   * mock 无 sessionFile，恒用源 sessionId）+ forkEntryId；projectId 继承父归属（real fork 同语义）。
    */
-  async fork(srcSessionId: string, opts: { piEntryId?: string; messageTimestamp?: number; messageRole?: string; includeFrom?: boolean; label?: string }): Promise<SessionSummary> {
+  async fork(
+    srcSessionId: string,
+    opts: {
+      piEntryId?: string
+      messageTimestamp?: number
+      messageRole?: string
+      includeFrom?: boolean
+      label?: string
+      modelOverride?: string
+      thinkingOverride?: string
+    },
+  ): Promise<SessionSummary> {
     await sleep(TIMING.ack)
     const src = fixtureSessions.find((s) => s.id === srcSessionId)
     const cwd = src?.cwd
     const s = createSession(cwd, opts?.label)
+    if (opts?.modelOverride !== undefined) s.modelId = opts.modelOverride
+    if (opts?.thinkingOverride !== undefined) s.thinkingLevel = opts.thinkingOverride
+    if (src?.projectId) s.projectId = src.projectId
+    s.parentSession = srcSessionId
+    if (opts?.piEntryId !== undefined) s.forkEntryId = opts.piEntryId
     fixtureSessions.push(s)
     pushSessionList()
     return { ...s }
@@ -471,8 +574,32 @@ export const session = {
     return []
   },
 
-  /** Mock workflow 操作（pause/resume/abort，E2E 不断言此路径，stub resolve 即可） */
-  async workflowAction(_sessionId: string, _action: string, _runId: string): Promise<void> {
+  /**
+   * Mock agent call 对话流 JSONL 路径解析（[G4 锚定补齐]：锚定前 mock 缺此成员，门面三元
+   * 下不可达）。real 按 trace 找不到返回空串（展示型功能不 throw），mock 恒 '' 同形。
+   */
+  async getAgentCallFilePath(_sessionId: string, _agentCallSessionId: string): Promise<string> {
+    await sleep(TIMING.ack)
+    return ''
+  },
+
+  /**
+   * Mock 子代理引擎配置视图（[G4 锚定补齐]：锚定前 mock 缺此成员）。mock 无 engines.json
+   * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 轨展示空态）。
+   */
+  async getSubagentEngineConfig(): Promise<{ engines: string[]; defaultEngine: string }> {
+    await sleep(TIMING.ack)
+    return { engines: [], defaultEngine: '' }
+  },
+
+  /** Mock 设置默认子代理引擎（回执 = 请求值回显，对齐 model.switchModel mock 同模式；无持久化） */
+  async setSubagentDefaultEngine(engineId: string): Promise<{ engineId: string }> {
+    await sleep(TIMING.ack)
+    return { engineId }
+  },
+
+  /** Mock workflow 操作（abort；pause/resume 已随扩展 D-2 移除。E2E 不断言此路径，stub resolve 即可） */
+  async workflowAction(_sessionId: string, _action: 'abort', _runId: string): Promise<void> {
     await sleep(TIMING.ack)
   },
 
@@ -485,8 +612,13 @@ export const session = {
     await sleep(TIMING.ack)
   },
 
-  /** Mock handoff（fast-handoff：stub resolve 即可，E2E 走 runtime 真路径） */
-  async handoff(_sessionId: string, _reply?: string): Promise<void> {
+  /**
+   * Mock handoff（fast-handoff：stub resolve 即可，E2E 走 runtime 真路径）。
+   * [G4 锚定 SessionDomain] options 形参补齐与 real 域全等；mock 不支持仿真——无 runtime
+   * HandoffService / handoff turn 可跑，modelOverride/thinkingOverride 无生效面（显式登记，
+   * 非静默丢弃；登记同步 docs/TEST-STRATEGY.md §5 mock 保真度表）。
+   */
+  async handoff(_sessionId: string, _reply?: string, _options?: { modelOverride?: string; thinkingOverride?: string }): Promise<void> {
     await sleep(TIMING.ack)
   },
 
@@ -550,6 +682,10 @@ export const session = {
   },
 }
 
+// [G4] 参数全等断言：mock session 任一方法少参/多参/错型（含 override 参数）在此行编译失败
+export type SessionDomainParamsExact = AssertExact<DomainParamsExact<SessionDomain, typeof sessionImpl>>
+export const session: SessionDomain = sessionImpl
+
 /**
  * W7（PR#116 review）：按命令关键字分流 mock bash 结果（success/error/empty/timeout 四态）。
  *
@@ -602,14 +738,15 @@ function resolveBashMockBranch(
   }
 }
 
-export const chat = {
+const chatImpl = {
   /**
    * 拉 session 历史（深拷贝 fixture，避免外部突变污染）。
    * [u6] 窗口契约字段必填（legacy historyTruncated 退役，偏差表 D7 双轨收口）；mock 无截断
    * （truncated=false，loadedTurns 数 fixture user 消息）。query 游标参数 mock 不模拟翻页
-   * （fixture 无窗口概念，恒返回全量——与 truncated=false 一致）。
+   * （fixture 无窗口概念，恒返回全量——与 truncated=false 一致）；类型引 real 域 HistoryQuery
+   *（G4 锚定，杜绝内联形状漂移）。
    */
-  async getHistory(sessionId: string, _query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }> {
+  async getHistory(sessionId: string, _query?: realChatDomain.HistoryQuery): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }> {
     await sleep(TIMING.ack)
     const messages = (fixtureMessages[sessionId] ?? []).map((m) => ({ ...m }))
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
@@ -640,10 +777,12 @@ export const chat = {
 
   /**
    * compact（#6）：模拟 session.compact 生命周期（compacting → compacted）。
+   * [G4 锚定 ChatDomain] customInstructions 形参补齐与 real 域全等；mock 不支持仿真——
+   * 无 pi 会话可挂自定义压缩指令（显式登记，非静默丢弃）。
    * 不推 compactionSummary——那是 pi 自主压缩才推的 system 行，与用户主动 /compact 语义不同
    * （§4.4：compactionSummary 走 message.compactionSummary，由 pi 驱动，mock 捆绑会造成语义混淆）。
    */
-  async compact(sessionId: string): Promise<void> {
+  async compact(sessionId: string, _customInstructions?: string): Promise<void> {
     await sleep(TIMING.ack)
     emit(sessionId, { type: 'session.compacting', payload: { sessionId, status: 'compacting', reason: 'manual' } })
     await sleep(TIMING.fileChangesGap)
@@ -760,6 +899,10 @@ export const chat = {
   },
 }
 
+// [G4] 参数全等断言：mock chat 任一方法少参/多参/错型在此行编译失败
+export type ChatDomainParamsExact = AssertExact<DomainParamsExact<ChatDomain, typeof chatImpl>>
+export const chat: ChatDomain = chatImpl
+
 /* ── Config mock（请求 + 订阅 + 动作）── */
 
 // 订阅型 sub（注册即触发初始值）；请求型直接返 fixture 深拷贝
@@ -778,26 +921,34 @@ const agentsSub = makeMockSubscription(() => fixtureAgents.map((a) => ({ ...a })
 const defaultsSub = makeMockSubscription(() => 'Anthropic/claude-sonnet-4.5')
 
 // ADR-0021 §1 discovery 加载路径配置（v2 嵌套 project/global，UI 层 A 勾选/↑↓ 用）。
-// preset 按 §2.3 路径特征拆 project（相对）/ global（绝对 ~ 或 / 开头），对齐 runtime buildDirConfigs 归属。
-const PRESET_SKILL_DIRS_PROJECT = ['.agents/skills']
-const PRESET_SKILL_DIRS_GLOBAL = ['~/.pi/agent/skills', '~/.claude/skills', '~/.agents/skills']
-const PRESET_AGENT_DIRS_PROJECT = ['.agents/agents']
-const PRESET_AGENT_DIRS_GLOBAL = ['~/.pi/agent/agents', '~/.claude/agents', '~/.agents/agents']
-const PRESET_EXTENSION_DIRS_PROJECT = ['.agents/extensions']
-const PRESET_EXTENSION_DIRS_GLOBAL = ['~/.pi/agent/extensions', '~/.claude/extensions', '~/.agents/extensions']
+// preset 直接引 shared SSOT（PRESET_*_DIRS），scope 按路径特征拆（相对→project / ~或/开头→global），
+// 消除此前本地副本漂移（旧副本含已移除的 ~/.claude/* 与不存在的 .agents/extensions）。
+const isGlobalShape = (p: string): boolean => p.startsWith('/') || p.startsWith('~')
+const splitPreset = (preset: readonly string[]): { project: string[]; global: string[] } => ({
+  project: preset.filter((p) => !isGlobalShape(p)),
+  global: preset.filter(isGlobalShape),
+})
+const PRESET_SKILL_DIRS_PROJECT = splitPreset(PRESET_SKILL_DIRS).project
+const PRESET_SKILL_DIRS_GLOBAL = splitPreset(PRESET_SKILL_DIRS).global
+const PRESET_AGENT_DIRS_PROJECT = splitPreset(PRESET_AGENT_DIRS).project
+const PRESET_AGENT_DIRS_GLOBAL = splitPreset(PRESET_AGENT_DIRS).global
+const PRESET_EXTENSION_DIRS_PROJECT = splitPreset(PRESET_EXTENSION_DIRS).project
+const PRESET_EXTENSION_DIRS_GLOBAL = splitPreset(PRESET_EXTENSION_DIRS).global
 
-// v2 mock 当前态：完整 SkillDirConfig[]（含 enabled + scope）。初始 fixture 与 runtime buildDirConfigs 顺序一致。
+/** scoped 路径组 → SkillDirConfig[]（全部 enabled，对齐 runtime 默认态 = preset 全勾）。 */
+const toEnabledConfigs = (scoped: { projectPaths: readonly string[]; globalPaths: readonly string[] }): SkillDirConfig[] => [
+  ...scoped.projectPaths.map((path) => ({ path, enabled: true, scope: 'project' as const })),
+  ...scoped.globalPaths.map((path) => ({ path, enabled: true, scope: 'global' as const })),
+]
+
+// v2 mock 当前态：完整 SkillDirConfig[]（含 enabled + scope）。初始 fixture = 默认态
+// （DEFAULT_DISCOVERY_CONFIG，pi+taiji 全勾，与 runtime ENOENT 回落一致），
+// 顺序与 runtime buildDirConfigs 一致（project.enabled → global.enabled → ...）。
 // setSkillDirs 等整体透传 SkillDirConfig[]（v2 scope 穿越路 A，不降维为 string[]）。
-let mockSkillDirs: SkillDirConfig[] = [
-  { path: '~/.pi/agent/skills', enabled: true, scope: 'global' },
-  { path: '~/.claude/skills', enabled: true, scope: 'global' },
-  { path: '~/.agents/skills', enabled: true, scope: 'global' },
-]
-let mockAgentDirs: SkillDirConfig[] = [
-  { path: '~/.agents/agents', enabled: true, scope: 'global' },
-]
-// extension 默认空（Phase 4，仅强制目录生效）
-let mockExtensionDirs: SkillDirConfig[] = []
+let mockSkillDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.skill)
+let mockAgentDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.agent)
+// extension 默认同样全勾（与 runtime 默认态一致）
+let mockExtensionDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.extension)
 
 /**
  * v2 buildMockDirConfigs：产带 scope 的 SkillDirConfig[]，顺序对齐 runtime buildDirConfigs
@@ -853,7 +1004,7 @@ function defaultTerminalConfig(): TerminalConfig {
 // 终端配置订阅（模拟 config.terminalConfig 广播；初始推默认配置，corrupted=false）。
 const terminalSub = makeMockSubscription(() => ({ config: defaultTerminalConfig(), corrupted: false }))
 
-export const config = {
+const configImpl = {
   // 请求型：直接返 fixture 深拷贝（不依赖 sub）。
   // scoped-model D7：与真实门面同形返回 { providers, scopedModels }，scopedModels 与
   // broadcastProviders 同源（mockScopedModels，setScopedModels 后保持一致）。
@@ -904,11 +1055,14 @@ export const config = {
     return false
   },
   // OAuth 事件订阅：mock 不推送，返回 no-op unsubscribe 保持签名同构。
-  onAuthDeviceCode: (_h: (payload: { providerId: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresIn?: number; interval?: number }) => void) => () => {},
-  onAuthAuthUrl: (_h: (payload: { providerId: string; url: string; callbackPort?: number }) => void) => () => {},
-  onAuthSuccess: (_h: (payload: { providerId: string }) => void) => () => {},
-  onAuthError: (_h: (payload: { providerId: string; message: string }) => void) => () => {},
-  async discoverModels(req: { baseUrl: string; apiKey?: string; providerType?: string; providerId?: string }) {
+  // payload 类型引 real 域导出别名（锚定曾抓出 onAuthSuccess 内联手抄缺 oauthName? 字段——杜绝再漂移）
+  onAuthDeviceCode: (_h: (payload: realConfigDomain.AuthDeviceCodePayload) => void) => () => {},
+  onAuthAuthUrl: (_h: (payload: realConfigDomain.AuthAuthUrlPayload) => void) => () => {},
+  onAuthSuccess: (_h: (payload: realConfigDomain.AuthSuccessPayload) => void) => () => {},
+  onAuthError: (_h: (payload: realConfigDomain.AuthErrorPayload) => void) => () => {},
+  // [G4 锚定 ConfigDomain] req 形状与 real 全等（含 mode?: 'test' | 'discover'——锚定抓出
+  // mock 缺该键）。mock 无网络发现层，恒返回空模型集 + success（真实发现由 runtime 驱动）。
+  async discoverModels(req: { baseUrl: string; apiKey?: string; providerType?: string; providerId?: string; mode?: 'test' | 'discover' }) {
     await sleep(TIMING.ack)
     void req
     // mock：返回空模型集 + success（真实发现由 runtime discoverModelsFromApi 驱动）
@@ -989,10 +1143,16 @@ export const config = {
     if (deduped.length > 0) defaultsSub.broadcast(deduped[0])
     return deduped
   },
-  async scanSkills(_sources: string[]) {
+  /**
+   * [G4 锚定 ConfigDomain] 返回类型补齐：real scanSkills 返回扫描结果 ScannedSkillInfo[]
+   * （锚定前 mock 返回 void，调用方读返回值在 mock 轨静默 undefined）。mock 无真实文件系统
+   * 扫描，返回空结果（空 sources 扫描的同形语义）；skillsSub 广播照旧驱动订阅演示。
+   */
+  async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
     await sleep(TIMING.ack)
     // 扫描后广播当前 skills 快照（runtime scan 后会刷新 config.skills）
     skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    return []
   },
   // W2（ADR-0051）：按 session cwd 拉 project skill。mock 返回空（mock 模式无真实文件系统扫描）。
   async scanSessionSkills(_cwd: string) {
@@ -1028,9 +1188,11 @@ export const config = {
     if (idx >= 0) fixtureSkills.splice(idx, 1)
     skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
   },
-  async scanAgents(_sources: string[]) {
+  /** [G4 锚定 ConfigDomain] 返回类型补齐（同 scanSkills——real 返回 ScannedAgentInfo[]，mock 无扫描返回空） */
+  async scanAgents(_sources: string[]): Promise<ScannedAgentInfo[]> {
     await sleep(TIMING.ack)
     agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    return []
   },
   /**
    * W1（cw-2026-07-26-migration-other-agents）：检测本机其他 agent 的 skill/agent 目录。
@@ -1125,7 +1287,28 @@ export const config = {
   },
   onTerminalConfig: (h: (config: TerminalConfig, corrupted: boolean) => void) =>
     terminalSub.subscribe((p) => h(p.config, p.corrupted)),
+  // ── 重试配置（[G4 锚定补齐]：锚定前 mock 缺 getRetryConfig/setRetryConfig/onRetryConfig，
+  //    Settings 重试页在 mock 轨调用会 crash）──
+  // mock 内存态 stub：get 恒 configured=false（无 config.json 条目的同形语义）、set 回显
+  // configured=true；不持久化、不广播（onRetryConfig no-op）——登记 docs/TEST-STRATEGY.md §5。
+  async getRetryConfig(): Promise<{ config: LlmRetryConfig; configured: boolean }> {
+    await sleep(TIMING.ack)
+    return { config: mockRetryConfig, configured: false }
+  },
+  async setRetryConfig(config: LlmRetryConfig): Promise<{ config: LlmRetryConfig; configured: boolean }> {
+    await sleep(TIMING.ack)
+    mockRetryConfig = { ...config }
+    return { config: mockRetryConfig, configured: true }
+  },
+  onRetryConfig: (_h: (payload: { config: LlmRetryConfig; configured: boolean }) => void) => () => {},
 }
+
+// retry 配置内存态（pi 默认值兜底；声明在 configImpl 之后同 mockScopedModels 模式——方法运行期才读）
+let mockRetryConfig: LlmRetryConfig = { enabled: true, maxRetries: 3, baseDelayMs: 2000 }
+
+// [G4] 参数全等断言：mock config 任一方法少参/多参/错型/返回漂移在此行编译失败
+export type ConfigDomainParamsExact = AssertExact<DomainParamsExact<ConfigDomain, typeof configImpl>>
+export const config: ConfigDomain = configImpl
 
 /** 向 providers 订阅者广播最新 fixture 快照（模拟 runtime 动作后广播） */
 let mockScopedModels: string[] = []
@@ -1144,7 +1327,7 @@ const modelsSub = makeMockSubscription(() =>
     : MOCK_MODELS.filter((m) => mockScopedModels.includes(`${m.providerId}/${m.id}`)).map(mockModelToInfo),
 )
 
-export const model = {
+const modelImpl = {
   onModels: (h: (models: ModelInfo[]) => void) => modelsSub.subscribe(h),
   // 主动拉取（与 onModels 同源快照，对齐 real 侧「订阅首推 + 按需拉取」双通路契约；
   // settings-lifecycle init 的 listModels 兜底拉取在 mock 模式依赖本方法——u17 mock 接回）
@@ -1157,6 +1340,10 @@ export const model = {
     return { sessionId, provider, modelId }
   },
 }
+
+// [G4] 参数全等断言：mock model 任一方法少参/多参/错型在此行编译失败
+export type ModelDomainParamsExact = AssertExact<DomainParamsExact<ModelDomain, typeof modelImpl>>
+export const model: ModelDomain = modelImpl
 
 /* ── Extension mock ── */
 // fixture 的 FixtureExtension 带 tools（ExtensionPage 模板依赖），与 shared ExtensionInfo
@@ -1241,20 +1428,37 @@ export const extension = {
 
 const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
-export const plugin = {
+const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
+  // 插件权限审批/回收（[G4 锚定补齐]：锚定前 mock 缺此二成员，门面三元下不可达）。
+  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions 与 real 同为单参
+  // （回收即撤销插件全部授权，无 permissions 参数——锚定曾抓出 stub 多参，已对齐）。
+  async approvePermissions(_pluginId: string, _permissions: string[]): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  async revokePermissions(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
 }
+
+// [G4] 参数全等断言：mock plugin 任一方法少参/多参/错型在此行编译失败
+export type PluginDomainParamsExact = AssertExact<DomainParamsExact<PluginDomain, typeof pluginImpl>>
+export const plugin: PluginDomain = pluginImpl
 
 /* ── Composer mock（@ 引用 / # 文件候选；# 已接 real domain，mock 模式仍用 fixture 演示）── */
 /* 门面三元同构：getFileCandidates 返回 FileNode[]（与 real composer domain 一致），
    FILE_CANDIDATES（UI 形状）→ FileNode 映射在此处，消费侧 lib/file-candidates.ts 统一做 FileNode→候选映射。 */
 
-export const composer = {
-  async getMentionCandidates() {
+const composerImpl = {
+  /**
+   * [G4 锚定 ComposerDomain] 返回类型对齐 real 域：real getMentionCandidates 已废弃、恒返回
+   * 空数组（类型 Promise<[]>），mock 原返回 MENTION_CANDIDATES 演示数据属漂移，对齐后恒 []。
+   */
+  async getMentionCandidates(): Promise<[]> {
     await sleep(TIMING.ack)
-    return MENTION_CANDIDATES.map((m) => ({ ...m }))
+    return []
   },
-  async getFileCandidates(): Promise<FileNode[]> {
+  async getFileCandidates(_sessionId: string): Promise<FileNode[]> {
     await sleep(TIMING.ack)
     // FILE_CANDIDATES（UI 形状 {name,kind,path}）→ FileNode（{path,name,type}），与 real 同构
     return FILE_CANDIDATES.map((f) => ({
@@ -1263,7 +1467,19 @@ export const composer = {
       type: (f.kind === '目录' ? 'dir' : 'file') as FileNode['type'],
     }))
   },
+  /**
+   * [G4 锚定补齐] landing cwd 路文件候选（锚定前 mock 缺此成员）。现消费方
+   * （command-popover-open-fetch）直连 real domain 不经本门面，mock stub 返回空页保持签名同构。
+   */
+  async getFileCandidatesByCwd(_cwd: string): Promise<{ files: FileNode[]; truncated: boolean }> {
+    await sleep(TIMING.ack)
+    return { files: [], truncated: false }
+  },
 }
+
+// [G4] 参数全等断言：mock composer 任一方法少参/多参/错型在此行编译失败
+export type ComposerDomainParamsExact = AssertExact<DomainParamsExact<ComposerDomain, typeof composerImpl>>
+export const composer: ComposerDomain = composerImpl
 
 /* ── Search mock（全局搜索浮层 ⌘K；后端 LSP/命令注册表就绪后接 real domain）── */
 
@@ -1336,7 +1552,7 @@ function listRecentRecords(): import('@taiji/shared').RecentWorkspaceRecord[] {
 }
 
 // Mock quota domain（w4 coding-plan 额度查询）
-export const quota = {
+const quotaImpl = {
   async getCached(_providerId: string) {
     return { data: null, lastFetchAt: null }
   },
@@ -1346,14 +1562,17 @@ export const quota = {
   async refreshQuota(_providerId: string) {
     return { data: null, lastFetchAt: null }
   },
-  // 签名与 real 轨（api/domains/quota.ts）同构：M2 契约收敛后为单一 payload（项目约定，
-  // 非编译强制——门面三元只在有人经门面调 configure 时生效；同构由 mock-domains.test.ts 头注释守）
+  // [G4 锚定 QuotaDomain] 签名同构由编译强制（原注释「非编译强制」随锚定退役）
   async configure(_payload: QuotaConfigurePayload) {
     return { ok: true }
   },
 }
 
-export const workspace = {
+// [G4] 参数全等断言：mock quota 任一方法少参/多参/错型在此行编译失败
+export type QuotaDomainParamsExact = AssertExact<DomainParamsExact<QuotaDomain, typeof quotaImpl>>
+export const quota: QuotaDomain = quotaImpl
+
+const workspaceImpl = {
   async listRecent(): Promise<import('@taiji/shared').RecentWorkspaceRecord[]> {
     return listRecentRecords()
   },
@@ -1372,23 +1591,33 @@ export const workspace = {
   },
 }
 
+// [G4] 参数全等断言：mock workspace 任一方法少参/多参/错型在此行编译失败
+export type WorkspaceDomainParamsExact = AssertExact<DomainParamsExact<WorkspaceDomain, typeof workspaceImpl>>
+export const workspace: WorkspaceDomain = workspaceImpl
+
 // project 域 mock 占位（D14，2026-08-04）：mock 模式无 runtime，project 列表回退默认空态。
 // 与 real 轨 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
-export const project = {
+const projectImpl = {
   async load(): Promise<import('@taiji/shared').ProjectStoreState> {
     return { projects: [], activeProjectId: '' }
   },
-  async save(state: import('@taiji/shared').ProjectStoreState): Promise<import('@taiji/shared').ProjectStoreState> {
-    return { ...state }
+  // [G4 锚定 ProjectDomain] 对齐 real 契约返回 void（原 mock 返回 state 属未登记偏差，随锚定收口；
+  // mock 无持久化，save 即 ack）
+  async save(state: import('@taiji/shared').ProjectStoreState): Promise<void> {
+    void state
   },
 }
+
+// [G4] 参数全等断言：mock project 任一方法少参/多参/错型在此行编译失败
+export type ProjectDomainParamsExact = AssertExact<DomainParamsExact<ProjectDomain, typeof projectImpl>>
+export const project: ProjectDomain = projectImpl
 
 // preset 域 mock 占位（pi-launch-presets wave1）：返回空预设列表 + 默认全工具模式 id。
 // 与 real 轨 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
 // mock 模式无 runtime，preset 演示由 real 轨驱动；此处仅供 landing 渲染不崩。
 import type { PiLaunchPreset } from '@taiji/shared'
 const mockPresets: PiLaunchPreset[] = []
-export const preset = {
+const presetImpl = {
   async list(): Promise<PiLaunchPreset[]> {
     return mockPresets.map((p) => ({ ...p }))
   },
@@ -1412,3 +1641,7 @@ export const preset = {
     if (idx >= 0) mockPresets.splice(idx, 1)
   },
 }
+
+// [G4] 参数全等断言：mock preset 任一方法少参/多参/错型在此行编译失败
+export type PresetDomainParamsExact = AssertExact<DomainParamsExact<PresetDomain, typeof presetImpl>>
+export const preset: PresetDomain = presetImpl

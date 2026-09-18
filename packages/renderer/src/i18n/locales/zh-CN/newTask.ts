@@ -41,6 +41,7 @@ export default {
     repoBareBadge: 'bare-workspace',
     repoChange: '更换…',
     repoNotRepo: '当前目录不在 Git 仓库中，请先选择一个仓库目录。',
+    repoDetectFailed: '仓库状态检测失败，请关闭后重试；若持续出现请查看日志。',
     branchLabel: '分支名',
     branchPlaceholder: '例如 feat/oauth',
     branchValidation: '分支名不能含空格 / .. / ~ / ^ / : ，且不能以 - 或 . 开头',

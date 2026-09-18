@@ -1,6 +1,6 @@
 <template>
   <!--
-    展示组件 · toolResult 图片渲染（crash-resilience §3.3 D6-⑨ / u7-memory-governance）。
+    展示组件 · toolResult 图片渲染（D6-⑨ / u7-memory-governance）。
     - 数据源：toolCall.images（pi toolResult content 的 ImageContent 块，base64）。
       渲染引用 = main 落盘后的路径（local-file:// 协议，与 ImageThumb 同协议形态）——
       base64 不直接进 img src（内存中转 + 落盘引用化是 D6-⑨ 的核心语义）。

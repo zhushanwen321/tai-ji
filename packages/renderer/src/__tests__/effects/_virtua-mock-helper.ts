@@ -5,7 +5,7 @@
  * 满足 VirtualizerHandle 接口的 mock 对象（happy-dom 下真实 Virtualizer 行为不可控）。
  * 提取至此避免重复定义。导出 createMockVlist，签名与 w1 实现一致（向后兼容）。
  *
- * chat-pin-bottom-fix U1 追加导出 ManualResizeObserverStub（向后兼容，纯新增）：
+ * U1 追加导出 ManualResizeObserverStub（向后兼容，纯新增）：
  * happy-dom RO 手动派发 stub，供挂载级测试确定性驱动 ResizeObserver 回调。
  */
 import { vi } from 'vitest'
@@ -58,7 +58,7 @@ export function createMockVlist(
 }
 
 /**
- * 手动派发 ResizeObserver stub（chat-pin-bottom-fix U1 定稿，实施计划 §6.3-1 检查点）。
+ * 手动派发 ResizeObserver stub（U1 定稿，实施计划 §6.3-1 检查点）。
  *
  * 背景（前任核实）：happy-dom 20.10.6 提供 ResizeObserver 构造器，但派发语义不受控
  * （回调时机与 entries 形态不保证）——挂载级测试需要「observe → 手动 dispatch → 同步回调」

@@ -86,7 +86,7 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 
 1. **新建 session**（必须——当前 session 不重读配置）。
 2. 让主 agent 派一个 subagent（例：用 `subagents` 工具发个简单任务）。
-3. taiji 侧边栏 **Agents tab** 看该项最左的引擎 icon（pi / zcode）——这是统一验证面。
+3. taiji composer **任务托盘**（task tray）的 Subagents 面板看该项最左的引擎 icon（pi / zcode）——这是统一验证面。
 4. journal 落点 `~/.taiji-dev/engines/<engineId>/` **仅适用非 pi 引擎**（zcode 分支建 journal）；pi 分支不建 journal，pi 任务以 icon 为验证面。
 
 ## 常见错误排查

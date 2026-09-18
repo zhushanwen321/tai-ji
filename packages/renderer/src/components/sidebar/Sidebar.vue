@@ -1,9 +1,12 @@
 <template>
   <!--
     容器组件 · L1 Sidebar（sidebar/spec.md 四态）。
-    分层（自上而下）：Brand → 主操作 nav（新建 ⌘N / 导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Agents|Flows|Plugins）→ 子视图区 → 用户区。
+    分层（自上而下）：Brand → 主操作 nav（新建 ⌘N / 导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Plugins）→ 子视图区 → 用户区。
     折叠态 C：整体隐藏（width:0 + opacity:0），spec §收起态。
     File View 内容 G2-003 defer。
+    [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：Agents（子代理列表）/ Flows（工作流列表 +
+    详情视图）两 tab 及其挂载分支退役，任务观察入口唯一化收口到 composer 任务托盘——原
+    「侧栏任务 tab 数 vs 托盘计数」双口径穿帮面随之消灭。
   -->
   <div
     data-fs-scope="sidebar"
@@ -20,7 +23,7 @@
       </Brand>
 
       <!-- 主操作 nav：新建任务 ⌘N（primary 主操作）/ 导入会话 ⌘I / 搜索 ⌘K（ghost 次操作）。
-           v6-master-spec §6.2 NavItem：primary=accent 实色 / ghost=透明 双层级。 -->
+           NavItem 层级：primary=accent 实色 / ghost=透明 双层级。 -->
       <nav class="flex flex-col gap-1 px-1">
         <Button
           variant="ghost"
@@ -60,16 +63,14 @@
       <!-- ProjectSwitcher（v6 D14：nav 下方 Project 一级导航，spec §6.2） -->
       <ProjectSwitcher />
 
-      <!-- segmented tab（会话 | 文件 | Agents | Flows | Plugins） -->
+      <!-- segmented tab（会话 | 文件 | Plugins） -->
       <SegmentedTab
         v-model="sidebar.activeTab"
         :session-count="sessionCount"
         :file-count="fileCount"
-        :subagent-running-count="subagentRunningCount"
-        :workflow-running-count="workflowRunningCount"
       />
 
-      <!-- 子视图区：会话列表 / 文件视图 / subagent 列表 -->
+      <!-- 子视图区：会话列表 / 文件视图 / plugin sidebar view -->
       <div class="mt-1 min-h-0 flex-1 overflow-hidden">
         <template v-if="sidebar.activeTab === 'sessions'">
           <!-- S5：加载失败态 + 重试（session.listLoadError 非空时） -->
@@ -96,40 +97,6 @@
             @stop-branch="onStopBranch"
             @force-quit="onForceQuitSession"
             @set-project="onAssignProject"
-          />
-        </template>
-        <template v-else-if="sidebar.activeTab === 'subagents'">
-          <SubagentList
-            :session-id="focusedSessionId"
-            :subagents="subagentList"
-            :is-loading="subagentStore.isLoading"
-            :load-error="subagentStore.loadError"
-            @select="onSelectSubagent"
-            @cancel="onCancelSubagent"
-            @retry="onRetrySubagents"
-          />
-        </template>
-        <template v-else-if="sidebar.activeTab === 'workflows'">
-          <!-- [HISTORICAL] 列表 ↔ 详情切换原用 wf-slide Transition（out-in + 120ms 滑动），
-               2026-08-14 移除：Electron 下 transitionend 偶发丢失（元素 detach 竞态）导致 out-in
-               卡在中间态——内容区空白、详情永不挂载（真实用户点击 workflow 后侧边栏空白）。
-               曾尝试 :duration 超时兜底（Vue 3.5 理论支持）实测仍卡；CDP 自动化下 3/3 复现，
-               去 Transition 后 3/3 正常。稳定性优先，直接 v-if/v-else 切换（无动画）。 -->
-          <WorkflowDetail
-            v-if="currentWorkflow"
-            :workflow="currentWorkflow"
-            @back="onWorkflowBack"
-            @select-agent-call="onSelectAgentCall"
-            @action="onWorkflowAction"
-          />
-          <WorkflowList
-            v-else
-            :workflows="workflowList"
-            :is-loading="workflowStore.isLoading"
-            :load-error="workflowStore.loadError"
-            @select="onSelectWorkflow"
-            @action="onWorkflowAction"
-            @retry="onRetryWorkflows"
           />
         </template>
         <!-- ExtensionHost sidebar view 宿主（audit §12.1 sidebar.tab 挂载点）。
@@ -225,19 +192,12 @@ import UpdateButton from './UpdateButton.vue'
 import Brand from './Brand.vue'
 import ProjectSwitcher from './ProjectSwitcher.vue'
 import FileView from './FileView.vue'
-import SubagentList from './SubagentList.vue'
-import WorkflowList from './WorkflowList.vue'
-import WorkflowDetail from './WorkflowDetail.vue'
 import RenameSessionDialog from './RenameSessionDialog.vue'
 import ImportSessionDialog from './ImportSessionDialog.vue'
 import {
   markImportedFresh,
   type ImportSessionImportedPayload,
 } from '@/composables/features/sidebar/useImportSession'
-import { useSubagentStore } from '@/stores/subagent'
-import { useWorkflowStore } from '@/stores/workflow'
-import { useListSync } from '@/composables/features/chat/useListSync'
-import { useSidebarSubagentActions } from '@/composables/features/sidebar/useSidebarSubagentActions'
 import { useGlobalShortcuts } from '@/composables/shell/useGlobalShortcuts'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarCounts } from '@/composables/features/sidebar/useSidebarCounts'
@@ -254,8 +214,6 @@ const searchModal = useSearchModal()
 const { isOpen } = searchModal
 const session = useSessionStore()
 const sidebar = useSidebarStore()
-const subagentStore = useSubagentStore()
-const workflowStore = useWorkflowStore()
 const { error: toastError } = useToast()
 const openSettings = inject<() => void>('openSettings', () => {})
 const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
@@ -269,11 +227,10 @@ const importOpen = ref(false)
 function onSessionImported(payload: ImportSessionImportedPayload): void {
   markImportedFresh(payload.sessionId)
 }
-const { sessionCount, fileCount, subagentRunningCount, subagentList, workflowRunningCount, workflowList, currentWorkflow } = useSidebarCounts(focusedSessionId)
+const { sessionCount, fileCount } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
-const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, onRetryWorkflows, onRetrySubagents, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ focusedSessionId, selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
-const { onSelectSubagent, onCancelSubagent, onSelectWorkflow, onWorkflowBack, onSelectAgentCall, onWorkflowAction } = useSidebarSubagentActions(focusedSessionId)
+const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
 // [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以
 // v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是
@@ -284,8 +241,6 @@ let unsubscribeAppInfo: (() => void) | null = null
 onMounted(() => {
   void loadSessions()
   unsubscribeAppInfo = events.onGlobalType('app.info', (msg) => { piVersion.value = msg.payload.piVersion })
-  useListSync({ tab: 'subagents', load: subagentStore.loadSubagents })
-  useListSync({ tab: 'workflows', load: workflowStore.loadWorkflows })
 })
 onBeforeUnmount(() => {
   unsubscribeAppInfo?.()

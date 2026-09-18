@@ -1,6 +1,6 @@
 <template>
   <!--
-    Settings · Extension 菜单页（issues.md #5 方案 A · 安装多步流 + 内联候选展开 + 卸载确认）。
+    Settings · Extension 菜单页（方案 A · 安装多步流 + 内联候选展开 + 卸载确认）。
     刷新机制：finishInstall/uninstall 后 runtime 推 config.extensions → onExtensions 订阅（SettingsModal 持有）
     → extensions prop 流入本页，无需本页自建订阅。
     容器职责：header + 加载路径配置 + 装配子组件（安装流 ExtensionInstallFlow / 列表 ExtensionList）。
@@ -44,13 +44,13 @@
 </template>
 
 <script setup lang="ts">
-import { provide } from 'vue'
+import { computed, onMounted, ref, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SkillDirConfig } from '@taiji/shared'
 import { LoadPaths, SETTINGS_CONFIG_API_KEY, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
 import { Button } from '@/components/ui/button'
 import { config } from '@/api'
-import { chooseDirectory } from '@/api/domains/settings'
+import { chooseDirectory, getDataDir } from '@/api/domains/settings'
 
 provide(SETTINGS_CONFIG_API_KEY, config) // LoadPaths(SourceImportSection) 迁 ui，config 经 inject
 // v2 §3 目录选择 dialog：LoadPaths 经 inject 调 chooseDirectory（lib/ipc 封装，preload 复用 pick-directory handler）
@@ -69,8 +69,18 @@ const { error: toastError } = useToast()
 const { t } = useI18n()
 
 // ── 加载路径配置（Phase 4，接 store.extensionDirs，回写 store.setExtensionDirs）──
-/** 强制目录（ADR-0021 §1.1 桥接层硬编码注入，UI 只读展示） */
-const forcedExtDirs = ['~/.taiji/extensions', '.taiji/extensions']
+/**
+ * 强制目录（ADR-0021 §1.1 桥接层硬编码注入，UI 只读展示）。
+ * user 级动态推导数据目录（dev=~/.taiji-dev，prod=~/.taiji）——与 SettingsResourcePage 同款：
+ * 写死 '~/.taiji/extensions' 在 dev 下与实际扫描路径不一致、误导排查（resource 页已修过同款问题）。
+ * getDataDir 为 async（IPC），初始用 ~ 形式兑底，拉取完成后更新。
+ */
+const dataDirDisplay = ref('~/.taiji')
+onMounted(async () => {
+  const dir = await getDataDir()
+  if (dir) dataDirDisplay.value = dir
+})
+const forcedExtDirs = computed(() => [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'])
 
 /** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。 */
 async function onUpdateExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {

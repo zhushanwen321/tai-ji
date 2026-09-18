@@ -1,5 +1,5 @@
 /**
- * runtime 侧 relay env 注入（E 方案，subagent-realtime-channel.md §2.2/§10-1）。
+ * runtime 侧 relay env 注入。
  *
  * 注入链：runtime（本模块算出 3 个基础设施 env）→ process-manager createSession 的
  * RpcClient env（与 TAIJI_AGENT_DATA_DIR 同点）→ buildSafeEnv 显式 extras（TAIJI_ 前缀

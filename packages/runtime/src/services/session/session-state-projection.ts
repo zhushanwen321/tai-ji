@@ -101,8 +101,6 @@ export interface SessionStateProjectionDeps {
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void
   /** Facade 私有 helper（project sidecar 兜底补写，唯一消费方 = 本域 handleTurn* 两方法）。 */
   tryPersistProjectBinding(session: IManagedSessionView): void
-  /** Facade 私有 helper（model sidecar 兜底补写，唯一消费方 = 本域 handleTurn* 两方法）。 */
-  tryPersistModelBinding(session: IManagedSessionView): void
 }
 
 /**
@@ -236,10 +234,6 @@ export class SessionStateProjection {
     // D14 语义修正：turn_end 时 pi 已完成 flush（文件存在）→ 兜底补写归属 project sidecar
     //（create 时文件未落盘被 existsSync 守卫跳过，内存态 projectId 在此落盘）。
     this.deps.tryPersistProjectBinding(session)
-    // D1 写点③延迟 flush 兜底（Gate B 实证）：create 瞬间 sessionFilePath undefined，
-    // 写点③恒跳过且无后续补写点；首 turn 结束时文件已 materialize，在此补写启动生效值
-    //（缺失才写，sidecar 已有值不覆写——新鲜度归写点①⑤）。
-    this.deps.tryPersistModelBinding(session)
   }
 
   /**
@@ -254,7 +248,6 @@ export class SessionStateProjection {
    *      isGenerating=true，下一条消息被 busy 拒绝（message-dispatcher preemptive reject）。
    *   2. project sidecar 兜底补写 —— turn_end 时仍未落盘则在此补写（label 持久化已不在此
    *      承载：W1 起活跃 label 唯一写入口 = set_session_name RPC）。
-   *      D1 写点③延迟 flush 兜底（Gate B 实证）同点镜像补写 model sidecar。
    *   3. session_end 终态写入（W4，ADR 0042）—— 让 scanner 读到终态，前端无需预加载历史。
    *
    * @param stopReason pi agent_end 的 stopReason。
@@ -268,9 +261,6 @@ export class SessionStateProjection {
     applySessionOccupancyTransition(session, this.deps.getMessageBus(), 'settling')
     // D14 语义修正：agent_end 兜底补写归属（turn_end 时仍未落盘则在此补写）。
     this.deps.tryPersistProjectBinding(session)
-    // D1 写点③延迟 flush 兜底（Gate B 实证）：agent_end 是 turn_end 主路径错过后的
-    // 最后补写点（缺失才写，已有值不覆写）。
-    this.deps.tryPersistModelBinding(session)
     // W4：写 session_end 终态。aborted→stopped（与 abort 路径一致），error→error，其余→done
     const outcome = stopReason === 'error' ? 'error'
       : stopReason === 'aborted' ? 'stopped'

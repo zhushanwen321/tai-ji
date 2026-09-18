@@ -97,22 +97,14 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
   })
 
   it('TC-5b: builtin 插件骨架与 manifest 声明一致', () => {
-    // D4①（background-task-sidebar-view）：新增 base-tool-enhance 的 sidebar.tab view 贡献
-    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'base-tool-enhance'])
+    // composer-task-tray D10：「后台命令」view 贡献随该 native 视图退役
+    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks'])
     expect(builtinContributions[0].contributes.statusBarItems).toHaveLength(1)
     expect(builtinContributions[1].contributes.slashCommands).toHaveLength(2)
-    // D5（5e2dd96f0）：tasks 不再声明 views——todo/goal 经 extension widget 推送由
-    // M17 对话流 WidgetArea 承接，不进 sidebar
+    // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
+    // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
-    // D4①：base-tool-enhance 声明「后台命令」view（viewType 沿用 'gui' 不改 schema）
-    const bgViews = builtinContributions[2].contributes.views
-    expect(bgViews).toHaveLength(1)
-    expect(bgViews?.[0]).toMatchObject({
-      id: 'background-tasks',
-      title: '后台命令',
-      placement: 'sidebar.tab',
-      viewType: 'gui',
-    })
+    expect(builtinContributions.every((b) => b.contributes.views === undefined)).toBe(true)
   })
 })
 
@@ -205,16 +197,13 @@ describe('ContributionRegistry.loadExternal（IF4/ERR5）', () => {
 })
 
 describe('ContributionRegistry.getViewsByPlacement（IF1）', () => {
-  it('AC1: registerBuiltin 后 sidebar.tab 恰含 builtin「后台命令」view（D4①）；external view 字段映射与顺序正确', () => {
+  it('AC1: registerBuiltin 后 sidebar.tab 零 builtin view；external view 字段映射与顺序正确', () => {
     const { registry } = setup()
     registry.registerBuiltin()
-    // D4①（background-task-sidebar-view）：builtin 现有一条 sidebar.tab view
-    //（initialVisibility 未声明 → parseContributes 缺省 'hidden'）
-    expect(registry.getViewsByPlacement('sidebar.tab')).toEqual([
-      { viewId: 'background-tasks', title: '后台命令', icon: undefined, initialVisibility: 'hidden' },
-    ])
+    // 「后台命令」视图退役（composer-task-tray D10）后 builtin 无 sidebar.tab view 声明
+    expect(registry.getViewsByPlacement('sidebar.tab')).toEqual([])
 
-    // 字段映射与顺序用 external 注入验证（manifest 数组序保留；builtin 先注册排在前）
+    // 字段映射与顺序用 external 注入验证（manifest 数组序保留）
     registry.loadExternal([{
       pluginId: 'p1',
       contributes: {
@@ -225,15 +214,15 @@ describe('ContributionRegistry.getViewsByPlacement（IF1）', () => {
       },
     }])
     const views = registry.getViewsByPlacement('sidebar.tab')
-    expect(views).toHaveLength(3)
-    expect(views.map((v) => v.viewId)).toEqual(['background-tasks', 'todo', 'goal'])
-    expect(views[1]).toEqual({
+    expect(views).toHaveLength(2)
+    expect(views.map((v) => v.viewId)).toEqual(['todo', 'goal'])
+    expect(views[0]).toEqual({
       viewId: 'todo',
       title: '任务',
       icon: undefined,
       initialVisibility: 'visible',
     })
-    expect(views[2]).toEqual({
+    expect(views[1]).toEqual({
       viewId: 'goal',
       title: '目标',
       icon: undefined,
@@ -274,6 +263,6 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
     registry.registerBuiltin()
     expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo'])
     expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    expect(registry.getContributions()).toHaveLength(4) // 1 statusline + 2 tasks slashCommands + 1 base-tool-enhance view（D4①）
+    expect(registry.getContributions()).toHaveLength(3) // 1 statusline + 2 tasks slashCommands（「后台命令」view 已退役）
   })
 })

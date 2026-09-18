@@ -1,5 +1,5 @@
 /**
- * Chat store 流式状态复位回归测试（CLAUDE.md 规则 #3）。
+ * Chat store 流式状态复位回归测试（AGENTS.md 规则 #3）。
  *
  * 锁定 MUST_FIX #1 的修复：message.error 到达时，若最后一条 assistant 仍
  * status:'streaming'（流中途错误 / 进程崩溃），必须将其转为 error 并并入 errorText，
@@ -63,7 +63,8 @@ describe('chat store message.error 流式状态复位（规则 #3）', () => {
     expect(msgs).toHaveLength(2) // user + 新建 error
     expect(msgs[1].role).toBe('assistant')
     expect(msgs[1].status).toBe('error')
-    expect(msgs[1].content).toBe('hook 拒绝')
+    expect(msgs[1].content).toBe('') // [M2] 错误文本不拼进 content
+    expect(msgs[1].error).toBe('hook 拒绝')
   })
 
   it('已 complete 的历史 assistant 遇 message.error：不回写历史，新建独立 error 消息', () => {
@@ -91,7 +92,8 @@ describe('chat store message.error 流式状态复位（规则 #3）', () => {
     expect(after[0].status).toBe('complete') // 历史消息保持
     expect(after[0].content).toBe('') // 未被并入 errorText
     expect(after[1].status).toBe('error') // 新建 error 消息
-    expect(after[1].content).toBe('后置错误')
+    expect(after[1].content).toBe('') // [M2] 错误文本不拼进 content
+    expect(after[1].error).toBe('后置错误')
   })
 
   it(`errorText 缺省时落 'Unknown error'（流中途仍复位 streaming）`, () => {
@@ -208,7 +210,8 @@ describe('chat store markSessionError —— session 级错误统一入口', () 
     expect(msgs).toHaveLength(2) // user + 新建 error
     expect(msgs[1].role).toBe('assistant')
     expect(msgs[1].status).toBe('error')
-    expect(msgs[1].content).toBe('进程退出')
+    expect(msgs[1].content).toBe('') // [M2] 错误文本不拼进 content
+    expect(msgs[1].error).toBe('进程退出')
   })
 
   it('有 streaming assistant 时：并入该消息并转 error 态（不新建气泡）', () => {
@@ -267,6 +270,7 @@ describe('chat store markSessionError —— session 级错误统一入口', () 
     expect(msgs).toHaveLength(1)
     expect(msgs[0].role).toBe('assistant')
     expect(msgs[0].status).toBe('error')
-    expect(msgs[0].content).toBe('extension 加载失败')
+    expect(msgs[0].content).toBe('') // [M2] 错误文本不拼进 content
+    expect(msgs[0].error).toBe('extension 加载失败')
   })
 })

@@ -1018,6 +1018,48 @@ describe("RecordStore", () => {
       expect(appended.find((c) => c.data.id === "sa-settled")).toBeUndefined();
       expect(appended.find((c) => c.data.id === "sa-foreign")).toBeUndefined();
     });
+
+    it("[A11] 损坏 entry（身份域缺失）→ warn 留痕跳过：不抛错、不纠偏、不重判", () => {
+      // task 缺失 = rebuildEntryRecord 拒绝重建（null）——末条 running 的损坏 entry
+      // 意味着该 record 永远无法被纠偏落 idle，静默 continue 会把损坏伪装成
+      // 「无孤儿可判」，排障无从下手（warn 必须含 id）。
+      const mainFile = writeMainSession([
+        { v: 1, id: "sa-corrupt-1", agent: "worker", status: "running", mode: "background", startedAt: 9000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
+      ]);
+      const { store, appended } = makeRecoveryStore();
+      expect(() => store.recoverEntryOnlyOrphans(mainFile, "sess-orphan")).not.toThrow();
+      expect(appended).toHaveLength(0); // 不纠偏
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining("sa-corrupt-1"),
+      );
+      // 防重：orphanJudged 已标记，二次扫描不重复 warn
+      loggerMock.warn.mockClear();
+      store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // [A11] reconstructAll 目录级读失败分通道：ENOENT = 合法缺省（静默空表）；
+  // 非 ENOENT（ENOTDIR/EACCES 等）= 真 IO 故障（warn 留痕——空表不得伪装 not-found）
+  // ============================================================
+  describe("reconstructAll 目录读失败分通道（collectRecords 冷查链消费）", () => {
+    it("sessions 目录不存在（ENOENT）→ 空表且零 warn（合法缺省静默）", () => {
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      const store = new RecordStore(tmpDir);
+      expect(store.collectRecords(100)).toEqual([]);
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    it("sessions 目录位被文件占据（ENOTDIR）→ 空表 + warn 留痕（IO 故障可诊断）", () => {
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      fs.writeFileSync(tmpDir, "not a directory");
+      const store = new RecordStore(tmpDir);
+      expect(store.collectRecords(100)).toEqual([]);
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining("reconstructAll"),
+      );
+    });
   });
 
   // ============================================================

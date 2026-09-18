@@ -60,7 +60,7 @@
           {{ installButtonText }}
         </Button>
       </div>
-      <!-- 错误反馈（非静默吞，CLAUDE.md 规则 #3） -->
+      <!-- 错误反馈（非静默吞，AGENTS.md 规则 #3） -->
       <div v-if="actionError" class="flex items-center gap-1.5 border-t border-border px-3 py-1.5 text-[11px] text-danger">
         <AlertCircle class="size-3.5 shrink-0" />
         <span class="truncate">{{ actionError }}</span>

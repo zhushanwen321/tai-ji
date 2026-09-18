@@ -129,6 +129,8 @@ ls -la ~/.taiji/run/          # dev 用 ~/.taiji-dev
 lsof | grep relay-.*\.sock
 ```
 
+**listen EINVAL（2026-09-18 B5b 实测）**：socket 路径 `<dataDir>/run/relay-<pid>.sock` 受 macOS unix domain socket 104 字节路径上限约束——dataDir 路径过长（深层临时目录 / 长目录名，实测 106 字节中招）时 bind EINVAL，runtime 起不来且日志仅此一行。短 dataDir（如 `/tmp/<短前缀>`，全路径含 socket 文件名 ≤100 字节）无此问题。e2e spec 的 mkdtemp 前缀必须短（skill-reload-askuser 系列前缀曾因此从中招形态改短）。
+
 机制细节见 relay 模块（源码注释待后续批次补齐）。
 
 ### 9. agent 会话内执行 validate-runtime-bundle 失败："Bundled pi binary not found"
@@ -229,6 +231,35 @@ ls -la ~/.taiji-dev/logs/             # runtime-*.log / pi-<date>-<sessionId>.js
 ```
 
 首启缺配置（provider / secrets / 默认模型）时从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单语义补种到 `~/.taiji-dev/` 根（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
+
+### 17. 子包目录 `pnpm exec vitest` 全仓扫跑 + 测试红线「测试禁止触碰真实数据目录」
+
+**现象**：在子包目录（如 `packages/renderer/`）执行 `pnpm exec vitest run`，跑的不是该包测试而是全仓扫描（大量无关包测试启动，甚至触发数据目录防线红灯）。
+
+**根因**（实测，pnpm workspace 行为）：`pnpm exec` 会把 cwd 切回仓库根再执行 bin——vitest 收到的 root 是仓库根，包级 vitest.config.ts（含 `taijiTestConfig` 防线注入）不生效。
+
+**正确跑法**：
+
+```bash
+cd <子包目录> && <repo-root>/node_modules/.bin/vitest run   # cwd 留在包内，包级 config 生效
+vitest run --root <子包目录>                                 # 或从仓库根指定 root
+```
+
+全仓入口只有仓库根一个（根级兜底 config 防线齐备）；单包测试永远用上面两种形态，禁 `pnpm exec vitest` / `pnpm vitest`。测试数据目录红线全文见 AGENTS.md「测试」节。
+
+### 18. 宿主 shell 注入 `TAIJI_AGENT_DATA_DIR=~/.taiji` 时的测试行为（自动脱钩，2026-09-17）
+
+**现象（旧行为）**：Electron / dev 宿主 shell 的 env 天然带 `TAIJI_AGENT_DATA_DIR=~/.taiji`（app 自身的数据目录）。在该 shell 里跑 `pnpm test`，或在该 shell 里 `git commit`（pre-commit 钩子内的守卫单测同为 vitest），会被 global-setup 以「指向真实用户数据目录」为由拒跑，必须 `env -u TAIJI_AGENT_DATA_DIR` 才能继续——人人需感知的环境摩擦。
+
+**现状（自动脱钩 + 单行通告）**：`test-guard/global-setup.ts` 检测到注入值指向**真实数据目录**或**非白名单目录**时，不再 `exit 1`，而是删除该 env 并落 tmp 重定向（判定条件与 `isInjectedEnvAllowed` 白名单共用，单一实现）：
+
+```
+[global-setup] 检测到宿主注入的 TAIJI_AGENT_DATA_DIR=/Users/<user>/.taiji（真实用户数据目录）——已自动脱钩，本次测试改用 tmp 重定向
+```
+
+**安全性等价**：测试永远拿不到真实目录（脱钩后一律 tmp 重定向），第二层 fs-guard（setupFiles 切面）仍拦全部白名单外破坏性操作；**合法注入不受影响**——注入 `tmpdir()` 或 `~/.taiji-dev` 之下的路径（CI 自定义 tmp / dev 实例）仍「尊重不覆盖」。
+
+**排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
 
 
 ## 环境变量速查

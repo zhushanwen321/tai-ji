@@ -12,7 +12,7 @@ export { default as ChatView } from './ChatView.vue'
 export { default as TruncatedHistoryBar } from './TruncatedHistoryBar.vue'
 // deps inject token（ChatViewDeps）。trace 折叠 stick-guard 通路已随 <Transition> 删除退役
 //（useVirtuaFollow INVAR-M4-2′ 复合判据：程序性写入回声不翻 stickToBottom=false，guarded
-// 回归结构上不可能；现行语义见 docs/design/chat-pin-bottom-fix.md §4.3 D7）。
+// 回归结构上不可能）。
 export { ChatViewDepsKey, useChatViewDeps } from './chat-view-deps'
 export type { ChatViewDeps, DrawerOpenOptions } from './chat-view-deps'
 // 纯函数（图标决策 + 耗时格式化）
@@ -40,5 +40,3 @@ export { default as MarkdownRenderer } from './MarkdownRenderer.vue'
 export { default as MermaidRenderer } from './MermaidRenderer.vue'
 export { default as BashOutputBlock } from './BashOutputBlock.vue'
 export { default as ChangeSetCard } from './ChangeSetCard.vue'
-// M17 对话流 widget 面板（ViewHostStore 多卡消费端，Panel 消息区与 composer 之间）
-export { default as WidgetArea } from './WidgetArea.vue'

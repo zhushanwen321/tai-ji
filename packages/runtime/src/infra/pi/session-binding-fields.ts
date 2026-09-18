@@ -26,7 +26,7 @@ type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[
  * 显式透传，见 forkSession 的 parentSessionKey）。已核实的全集事实：ScannedSessionMeta
  * 可选字段恰好 9 个 = 2 排除 + 7 绑定（handedOffTo / launchPresetId / projectId /
  * spawnSource / parentAgentSessionId + modelId / thinkingLevel——后两者经 ModelBindingFields
- * extends 收编，声明在 session-model-sidecar.ts）；outcome 与 name 是 `| null` 非 `| undefined`，
+ * extends 收编，声明在 session-file-utils.ts）；outcome 与 name 是 `| null` 非 `| undefined`，
  * 天然不进 OptionalKeys。决策 4 残余边界：必填字段不受此守卫保护——绑定字段天然可选
  *（sidecar 缺失 = undefined），误声明必填会在 scanSessionMeta 构造处撞理想类型冲突。
  */

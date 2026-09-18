@@ -12,7 +12,7 @@
  * 超时撤窗（timeout-plugin-service D3）：runtime 广播 plugin:permissionRequestExpired
  * （审批等待超时，取消非判拒——payload { pluginId }，无 sessionId → global 通道）。
  * 该帧不经 MessageBusBridge（bridge 无此归一项），本 composable 直接订阅 WS global
- * 通道消费（同 extension-host-dialog.ts onUiTimeout 的「保留 WS 路径不经 bus」先例）。
+ * 通道消费（同 extension-host-dialog.ts onUiRequestExpired 的「保留 WS 路径不经 bus」先例）。
  * 按 pluginId 匹配撤回：命中才置 pending=false；不匹配（陈旧广播 vs 新插件的弹窗）noop，
  * 无挂起弹窗时 noop 幂等（迟到批准对已删 pending noop 语义的前端对称面）。
  *

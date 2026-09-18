@@ -137,12 +137,37 @@ const MAX_WATCHER_ERRORS = 5
 const MAX_PROJECT_WATCHERS = 8
 
 /**
+ * [U2 / cache-governance 1-4] 兜底周期重扫间隔（ms）：5min。
+ *
+ * 背景：watcher 存在三种「缓存与磁盘发散且不自愈」的形态——① error 熔断只 close 不恢复
+ * （熔断后该 scope 冻结到重启）；② macOS fs.watch 静默丢事件前科（2026-07-27 实测 ~40%
+ * 触发率，见 WATCH_POLL_INTERVAL_MS 注释）；③ project watcher LRU 驱逐窗口失明。
+ * 兜底语义：固定周期无条件重扫 globalCache + 全部活跃 projectCache cwd 使缓存重新收敛，
+ * 一个机制闭合全部三种发散（cache-governance 设计 §3.1 项 1-4，G5「失效机制故障可自愈」：
+ * 不允许任何形态的永久发散到重启）。watcher 正常时成本 = 每 5min 一次 readdir 级扫描，
+ * 量级与 chokidar 初始扫描相同，可忽略。
+ */
+const FALLBACK_RESCAN_INTERVAL_MS = 300_000 // 5min（= 5 * 60 * 1000，单值字面量形式对齐 watchdog/npm-installer 惯例）
+
+/**
+ * [U2] skill 列表逐项严格相等（兜底重扫的「值变化」收敛判定）。
+ * SkillInfo 是扁平 DTO（含可选嵌套 sources），同实现扫描产物键序稳定，序列化比对足够精确；
+ * 列表量级小（skill 条目 < 50），成本可忽略。
+ */
+function sameSkillLists(a: SkillInfo[], b: SkillInfo[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, i) => JSON.stringify(item) === JSON.stringify(b[i]))
+}
+
+/**
  * SkillRegistry：全局 + 项目级 skill 缓存 + chokidar 文件监听。
  *
  * 生命周期：
- * - initGlobal()：组合根在 server.start 后调用，扫描全局目录 + 挂全局 watcher。
+ * - initGlobal()：组合根在 server.start 后调用，扫描全局目录 + 挂全局 watcher + 武装兜底重扫定时器。
  * - getProjectSkills(cwd)：按需懒扫描 + 挂项目 watcher，命中缓存直接返回。
- * - dispose()：关闭所有 watcher（测试 / shutdown 时调）。
+ * - 兜底重扫（U2）：固定周期无条件重扫全部缓存 scope，值变化才广播（watcher 熔断/丢事件/
+ *   LRU 驱逐发散的自愈通道，cache-governance G5）。
+ * - dispose()：关闭所有 watcher + 清兜底定时器（测试 / shutdown 时调）。
  */
 export class SkillRegistry {
   private globalCache: SkillInfo[] = []
@@ -164,6 +189,13 @@ export class SkillRegistry {
   private globalWatcher: FSWatcher | null = null
   private readonly changeHandlers = new Set<(event: SkillChangeEvent) => void>()
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>()
+  /**
+   * [skill-reload D8-a] debounce 窗口内累计的 watcher 事件类型（按 debounceKey 分区，
+   * 与 debounceTimers 同生命周期）。watcher 'all' 事件到达时登记，debounce 批触发时
+   * 取出落归因日志——高频编辑合并为一行，不逐事件刷屏（对齐 reap-orphan-pi kill
+   * decision 的 console.log 归因先例）。
+   */
+  private readonly pendingWatcherEvents = new Map<string, Set<string>>()
   private readonly scanFn: SkillScanFn
   /**
    * 进行中的 rebuildGlobal Promise，并发去重（用户快速连触 setSkillDirs 时共享同一个 Promise）。
@@ -172,18 +204,124 @@ export class SkillRegistry {
   private rebuildInFlight: Promise<void> | null = null
   /** 是否已 dispose。置 true 后 getProjectSkills/rebuildGlobal 直接 return，防止 dispose 后 in-flight 写回。 */
   private disposed = false
+  /** [U2] 兜底周期重扫定时器（initGlobal 武装 / dispose 清理；unref 不持有事件循环）。 */
+  private fallbackTimer: NodeJS.Timeout | null = null
+  /** [U2] 兜底重扫防重入：上一轮未完成（scanFn 慢于周期）时跳过本轮 tick，防扫描堆叠。 */
+  private fallbackRescanRunning = false
 
   constructor(private readonly options: SkillRegistryOptions) {
     this.scanFn = options._scanFn ?? this.defaultScanFn.bind(this)
   }
 
   /**
-   * 启动期扫描全局 skill 目录并缓存 + 挂全局 watcher。
+   * 启动期扫描全局 skill 目录并缓存 + 挂全局 watcher + 武装兜底周期重扫定时器（U2）。
    * 必须在 server.start 后调用（组合根 index.ts 编排）。
    */
   async initGlobal(): Promise<void> {
-    this.globalCache = await this.scanFn('')
-    this.setupGlobalWatcher()
+    try {
+      this.globalCache = await this.scanFn('')
+      this.setupGlobalWatcher()
+    } finally {
+      // finally 武装：启动扫描失败时（globalCache 空 + watcher 未挂，组合根对该失败只降级
+      // 不阻塞启动）兜底重扫是唯一自愈通道，下个周期自动补上缓存——G5 自愈语义覆盖
+      // 「启动即故障」形态。
+      this.armFallbackRescan()
+    }
+  }
+
+  // ── [U2] 周期兜底重扫（watcher 熔断 / 静默丢事件 / LRU 驱逐发散的自愈通道）──────
+
+  /**
+   * 武装兜底重扫定时器（幂等，防重复 init 堆叠定时器）。
+   * 触发无条件（不判断 watcher 健康状态——静默丢事件形态下 watcher 看起来健康，判断不可靠）；
+   * 广播有条件（值变化才经 onChange 通知链，见 fallbackRescanGlobal/Project）。
+   * 不重挂 watcher：watch 恢复是批 4 观测器的职责，本兜底只保证缓存收敛。
+   */
+  private armFallbackRescan(): void {
+    if (this.fallbackTimer) return
+    const timer = setInterval(() => {
+      void this.runFallbackRescan()
+    }, FALLBACK_RESCAN_INTERVAL_MS)
+    // 纯兜底周期任务：unref 不持有事件循环（不阻进程退出）；shutdown 由 dispose 显式清理
+    timer.unref()
+    this.fallbackTimer = timer
+  }
+
+  /**
+   * 兜底重扫一轮：globalCache + 全部活跃 projectCache cwd，逐 scope 独立容错
+   * （单 scope scanFn 失败保留该 scope 旧值，不拖垮其他 scope 的收敛）。
+   * 串行执行：readdir 级成本，量级可忽略，串行避免多 cwd 并发扫描的 IO 尖峰。
+   */
+  private async runFallbackRescan(): Promise<void> {
+    if (this.disposed || this.fallbackRescanRunning) return
+    this.fallbackRescanRunning = true
+    try {
+      await this.fallbackRescanGlobal()
+      for (const cwd of this.projectCache.keys()) {
+        await this.fallbackRescanProject(cwd)
+      }
+    } finally {
+      this.fallbackRescanRunning = false
+    }
+  }
+
+  /**
+   * 重扫全局缓存：值有变化才刷新广播。广播链下游 = reloadOrchestrator（global 通知 =
+   * 全部活跃 idle session 的 pi reload）+ renderer 失效重拉，无差别周期广播违背设计
+   * 「watcher 正常时兜底成本可忽略」的成本口径——值比对即收敛判定：相等 = 缓存与磁盘
+   * 已一致，无信息需要传播。scanFn 失败保留旧值（与 rebuildGlobal 同款容错），下周期重试。
+   */
+  private async fallbackRescanGlobal(): Promise<void> {
+    return this.rescanScope({
+      scan: () => this.scanFn(''),
+      tag: 'global',
+      read: () => this.globalCache,
+      write: (v) => { this.globalCache = v },
+      notify: () => this.notifyGlobalChange(),
+    })
+  }
+
+  /**
+   * 兜底重扫单 scope 的共用收敛骨架（global / project 两腿同款，收敛口径单点）：scanFn
+   * 失败保留该 scope 旧值；读取时分区已不存在（project 腿被 invalidateAllProjects 清掉
+   * → read() 返回 undefined）则不复活已清分区；值变化才落缓存 + 广播（相等 = 缓存与磁盘
+   * 已一致，无信息需传播）。
+   */
+  private async rescanScope(opts: {
+    scan: () => Promise<SkillInfo[]>
+    tag: string
+    read: () => SkillInfo[] | undefined
+    write: (v: SkillInfo[]) => void
+    notify: () => Promise<void>
+  }): Promise<void> {
+    let fresh: SkillInfo[]
+    try {
+      fresh = await opts.scan()
+    } catch (e) {
+      console.warn(`[skill-registry] fallback rescan: ${opts.tag} scan failed, keeping stale cache:`, e)
+      return
+    }
+    const current = opts.read()
+    if (current === undefined) return
+    const changed = !sameSkillLists(current, fresh)
+    opts.write(fresh)
+    if (!changed) return
+    console.warn(`[skill-registry] fallback rescan: ${opts.tag} cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)`)
+    await opts.notify()
+  }
+
+  /**
+   * 重扫单个项目缓存：同 fallbackRescanGlobal 的值变化收敛语义（scope='project' + cwd 广播）。
+   * 扫描期间分区被 invalidateAllProjects 清掉时不复活已清分区（重建交由下次 getProjectSkills）。
+   */
+  private async fallbackRescanProject(cwd: string): Promise<void> {
+    return this.rescanScope({
+      scan: () => this.scanFn(cwd),
+      tag: `project:${cwd}`,
+      read: () => this.projectCache.get(cwd),
+      write: (v) => { this.projectCache.set(cwd, v) },
+      notify: () => this.notifyProjectChange(cwd),
+    })
   }
 
   /**
@@ -215,11 +353,13 @@ export class SkillRegistry {
     if (this.rebuildInFlight) return this.rebuildInFlight
     // 清掉 GLOBAL_KEY pending debounce（避免 rebuild 后又被旧 timer 触发冗余重扫）：
     // 全局 skill 文件变动会排队 GLOBAL_KEY timer，rebuildGlobal 立即重扫+通知后，原 timer 到点
-    // 会再触发一次 scanFn + notify（冗余），故此处先清掉。
+    // 会再触发一次 scanFn + notify（冗余），故此处先清掉。pending 事件随 timer 一并丢弃
+    // （其通知义务已由 rebuild 的 notifyGlobalChange 兑现，留下会被下一个批误记归因）。
     const globalTimer = this.debounceTimers.get(GLOBAL_KEY)
     if (globalTimer) {
       clearTimeout(globalTimer)
       this.debounceTimers.delete(GLOBAL_KEY)
+      this.pendingWatcherEvents.delete(GLOBAL_KEY)
     }
     this.rebuildInFlight = (async () => {
       try {
@@ -332,10 +472,12 @@ export class SkillRegistry {
     this.projectInFlight.clear()
     // 清 project 级 debounce timer：避免 pending 重扫在 dispose 后写回陈旧缓存。
     // 仅清 project 级（cwd key），保留 GLOBAL_KEY 的 timer（global 由 rebuildGlobal 独立处理）。
+    // pending 事件随 timer 一并丢弃（同 rebuildGlobal 的 GLOBAL_KEY 处理）。
     for (const [key, timer] of this.debounceTimers.entries()) {
       if (key !== GLOBAL_KEY) {
         clearTimeout(timer)
         this.debounceTimers.delete(key)
+        this.pendingWatcherEvents.delete(key)
       }
     }
   }
@@ -412,7 +554,7 @@ export class SkillRegistry {
    * 前缀 _ 表示测试可直调（U3 模拟全局目录变动触发通知）。
    */
   async notifyGlobalChange(): Promise<void> {
-    const ids = this.options.sessionService.getActiveSessionIds()
+    const ids = this.getAffectedSessionIds()
     for (const handler of this.changeHandlers) {
       handler({ scope: 'global', affectedSessionIds: ids })
     }
@@ -422,12 +564,27 @@ export class SkillRegistry {
    * 通知上游：指定 cwd 的项目 skill 变动。affectedSessionIds = cwd 匹配的活跃 session。
    */
   async notifyProjectChange(cwd: string): Promise<void> {
-    const allIds = this.options.sessionService.getActiveSessionIds()
-    const getSessionCwd = this.options.sessionService.getSessionCwd
-    const affected = getSessionCwd ? allIds.filter(sid => getSessionCwd(sid) === cwd) : allIds
+    const affected = this.getAffectedSessionIds(cwd)
     for (const handler of this.changeHandlers) {
       handler({ scope: 'project', cwd, affectedSessionIds: affected })
     }
+  }
+
+  /**
+   * 受影响 session 的单一计算口径（通知 payload 与 D8-a 归因日志共用，防两处过滤逻辑漂移）：
+   * global（cwd 缺省）= 全部活跃 session；project = getSessionCwd 匹配的活跃 session
+   * （getSessionCwd 未注入时降级为全部——与原 notifyProjectChange 行为一致）。
+   */
+  private getAffectedSessionIds(cwd?: string): string[] {
+    const allIds = this.options.sessionService.getActiveSessionIds()
+    if (cwd === undefined) return allIds
+    // 经宿主对象调用（保 this）：解绑提取（const fn = svc.fn）后调用会因 this=undefined
+    // 炸 TypeError，且发生在 watcher debounce 定时器里 = uncaughtException 整机崩。
+    // bind 提取而非裸引用：既保 this，又让可选方法的 truthiness narrowing 落到局部
+    // 变量上（可选方法二次属性访问不继承 narrowing，TS2722）。
+    const sessionService = this.options.sessionService
+    const getSessionCwd = sessionService.getSessionCwd?.bind(sessionService)
+    return getSessionCwd ? allIds.filter(sid => getSessionCwd(sid) === cwd) : allIds
   }
 
   // 测试兼容别名（保持测试用 _notifyGlobalChange 不破坏，内部转发到 notifyGlobalChange）
@@ -436,7 +593,7 @@ export class SkillRegistry {
   }
 
   /**
-   * 关闭所有 watcher + 清缓存与 in-flight 状态（全局 + 项目级）。shutdown / 测试清理时调。
+   * 关闭所有 watcher + 清兜底定时器 + 清缓存与 in-flight 状态（全局 + 项目级）。shutdown / 测试清理时调。
    *
    * W-dispose：必须清 projectInFlight——竞态场景下 getProjectSkills 进入 in-flight await scanFn →
    * 期间调 dispose → scanFn resolve → 守卫 projectInFlight.has(cwd) 仍 true → 走 projectCache.set +
@@ -447,10 +604,15 @@ export class SkillRegistry {
    */
   dispose(): void {
     this.disposed = true
+    if (this.fallbackTimer) {
+      clearInterval(this.fallbackTimer)
+      this.fallbackTimer = null
+    }
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer)
     }
     this.debounceTimers.clear()
+    this.pendingWatcherEvents.clear()
     this.globalWatcher?.close().catch((e: unknown) => {
       console.warn('[skill-registry] global watcher dispose close failed:', e)
     })
@@ -525,7 +687,16 @@ export class SkillRegistry {
         console.error(`[skill-registry] ${label} watcher error (${errorCount}/${MAX_WATCHER_ERRORS} ${code}):`, err)
       }
     })
-    watcher.on('all', () => {
+    watcher.on('all', (event: string) => {
+      // [skill-reload D8-a] 登记事件类型到 debounce 窗口（批触发时随归因日志一并取出，
+      // 不逐事件落日志）。事件名透传 chokidar 原生枚举（add/addDir/change/unlink/unlinkDir），
+      // 不收敛到设计枚举——目录级 add/unlink 与文件级在归因上是不同因果。
+      let events = this.pendingWatcherEvents.get(debounceKey)
+      if (!events) {
+        events = new Set()
+        this.pendingWatcherEvents.set(debounceKey, events)
+      }
+      events.add(event)
       void this.debounce(debounceKey, rescan)
     })
   }
@@ -563,15 +734,52 @@ export class SkillRegistry {
   /**
    * debounce 包装：相同 key 的多次触发合并为一次（DEBOUNCE_MS 后执行）。
    * key 区分全局（GLOBAL_KEY）与各项目 cwd，互不干扰。
+   *
+   * [skill-reload D8-a] 批触发边界落一行归因日志（`[skill-reload] dir= event=
+   * affectedSessions=[...]`）：窗口内累计的事件类型合并为一行，回答「哪个目录的
+   * 哪类变动 → 影响哪些 session」，与下游 orchestrator 的 decision= 行串出因果链
+   * （G4/S4）。无累计事件（非 watcher 路径的直调）不落日志。
    */
   private debounce(key: string, fn: () => Promise<void>): NodeJS.Timeout {
     const existing = this.debounceTimers.get(key)
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
       this.debounceTimers.delete(key)
+      // watcher 归因日志是辅助功能：其同步段任何 throw 不得升级为 uncaughtException
+      // 整机崩（44beb27cf 事故的类级兜底——实例级修复只保住 getSessionCwd 一处，
+      // 后续往该段加任何会 throw 的代码都会复活整机杀链）。降级 = 跳过本批归因。
+      // rescan 主链（fn）必须在 try 之外：归因失败不得吞掉重扫通知义务；fn 是
+      // async 函数，同步 throw 语义上变成 rejected promise，由全局 unhandledRejection
+      // handler 兜底（只记日志不崩）。
+      try {
+        this.logWatcherBatch(key)
+      } catch (err) {
+        // 降级：归因是辅助日志，失败只记 stderr 不传播——重扫义务由下方 fn 独立承接（理由见上方注释）
+        console.error(
+          `[skill-registry] watcher batch attribution failed (degraded, rescan continues): ${
+            err instanceof Error ? err.stack ?? err.message : String(err)
+          }`,
+        )
+      }
       void fn()
     }, DEBOUNCE_MS)
     this.debounceTimers.set(key, timer)
     return timer
+  }
+
+  /**
+   * [skill-reload D8-a] watcher 批归因日志：dir 用 debounceKey 的 label 形态（global /
+   * project:<cwd>，与熔断/兜底重扫日志的 tag 一致）；affectedSessions 与通知 payload
+   * 共用 getAffectedSessionIds 单一口径。
+   */
+  private logWatcherBatch(key: string): void {
+    const events = this.pendingWatcherEvents.get(key)
+    if (!events || events.size === 0) return
+    this.pendingWatcherEvents.delete(key)
+    const dir = key === GLOBAL_KEY ? 'global' : `project:${key}`
+    const affected = this.getAffectedSessionIds(key === GLOBAL_KEY ? undefined : key)
+    console.log(
+      `[skill-reload] dir=${dir} event=${[...events].join(',')} affectedSessions=[${affected.join(',')}]`,
+    )
   }
 }

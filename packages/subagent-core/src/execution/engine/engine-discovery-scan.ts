@@ -49,7 +49,6 @@ import { readExplicitEngines } from "./config.ts";
 import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine } from "./client/remote-engine.ts";
 import { hasEngine, registerEngineDescriptor, type CliEngineDescriptor } from "./registry.ts";
-import { getHostUiRequestEndpoint } from "./host/host-ui-endpoint.ts";
 import type { EngineCapabilities } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -216,7 +215,9 @@ function resolveExplicitCommand(command: string, env: NodeJS.ProcessEnv): string
 /**
  * L3 显式配置的 descriptor：无 manifest 面（用户手工配置 command）→ capabilities 取
  * 全保守值 + warn（gate 同步拦生成，运行期不踩未声明能力）；无 modelCatalog / 无
- * displayName（= id）。engineConfig 经 initialize.engineConfig 透传。
+ * displayName（= id）。无 packageVersion（config.json 引擎无 package.json 版本面——
+ * 稳定标识不因版本变化，command/args 变化已覆盖换实例判据）。engineConfig 经
+ * initialize.engineConfig 透传。
  */
 function buildExplicitDescriptor(
   id: string,
@@ -245,8 +246,8 @@ function buildExplicitDescriptor(
         hostKind: opts.hostKind,
         dataDir,
         envPrefixes: [],
-        // [W6 R3 MF-A] 同上：host/askUser 应答端经壳侧登记处接线。
-        uiRequestHandler: getHostUiRequestEndpoint(),
+        // [W6 R3 MF-A] host/askUser 应答端不经构造参数注入——reverse-router 消费时
+        // 经 host-ui-endpoint 槽现读（D3），本构造点无固化面。
         ...(entry.config !== undefined ? { engineConfig: entry.config } : {}),
         manifestDiagnostics: { capabilities: caps, models: null },
       });

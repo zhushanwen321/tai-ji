@@ -82,7 +82,6 @@ function mountActionsHost(): { actions: ReturnType<typeof useSidebarSessionActio
   const Host = defineComponent({
     setup() {
       captured = useSidebarSessionActions({
-        focusedSessionId: ref(null),
         selectSession: vi.fn().mockResolvedValue(undefined),
         restoreSession: vi.fn().mockResolvedValue(undefined),
         newSession: vi.fn().mockResolvedValue(null),

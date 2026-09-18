@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtemp, mkdtempSync, rm, readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { JsonStore, WriteBackCache } from '../src/utils/json-store.js'
+import { cleanupAgedBackupResidue, JsonStore, WriteBackCache } from '../src/utils/json-store.js'
 import { atomicWrite } from '../src/utils/fs-utils.js'
 
 const mkdtempP = promisify(mkdtemp)
@@ -17,7 +17,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await rmP(tmpDir, { recursive: true, force: true })
+  await rmP(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
 /** 读回某分区文件，断言文件存在并返回解析结果。 */
@@ -28,7 +28,9 @@ function readPart(dir: string, k: string): Record<string, unknown> {
 /** 真实临时目录的 backing：每分区一个 JSON 文件。 */
 function makeBacking(dir: string) {
   mkdirSync(join(dir, 'parts'), { recursive: true })
+  const partitionPath = (k: string): string => join(dir, 'parts', `${k}.json`)
   return {
+    partitionPath,
     loadPartition(k: string): Map<string, unknown> {
       try {
         const raw = readFileSync(join(dir, 'parts', `${k}.json`), 'utf-8')
@@ -70,23 +72,72 @@ describe('JsonStore', () => {
       errorSpy.mockRestore()
     })
 
-    it('serves cached value within TTL', () => {
-      const path = join(tmpDir, 'ttl.json')
+    it('serves cached value without reloading disk while fingerprint matches', () => {
+      const path = join(tmpDir, 'hit.json')
       writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 10_000 })
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
-      writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
+      const loadSpy = vi.spyOn(store as unknown as { readFromDisk: () => unknown }, 'readFromDisk')
       expect(store.read()).toEqual({ v: 1 })
+      // 指纹一致：零盘读，热路径成本 = 一次 stat syscall
+      expect(loadSpy).not.toHaveBeenCalled()
     })
 
-    it('re-reads disk after TTL expires', async () => {
-      const path = join(tmpDir, 'ttl-expire.json')
-      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 20 })
+    it('re-reads disk when external write changes mtime with identical size', () => {
+      const path = join(tmpDir, 'mtime.json')
+      const before = JSON.stringify({ v: 1 })
+      const after = JSON.stringify({ v: 2 })
+      expect(Buffer.byteLength(before)).toBe(Buffer.byteLength(after)) // size 恒定 → 失配必来自 mtime 族
+      writeFileSync(path, before, 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
-      writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
-      await new Promise(resolve => setTimeout(resolve, 30))
+      writeFileSync(path, after, 'utf-8') // 外部原地改写：size 不变、mtime 变
       expect(store.read()).toEqual({ v: 2 })
+    })
+
+    it('re-reads disk when file size changes', () => {
+      const path = join(tmpDir, 'size.json')
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+      writeFileSync(path, JSON.stringify({ v: 22222 }), 'utf-8') // 外部改写：size 变
+      expect(store.read()).toEqual({ v: 22222 })
+    })
+
+    it('serves defaultValue after external file deletion, stably on repeated reads', () => {
+      const path = join(tmpDir, 'gone.json')
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+      unlinkSync(path)
+      // stat ENOENT → 丢缓存 → 读盘 ENOENT 容错 → 默认值（文件被外部删 = 外部写的一种）
+      expect(store.read()).toEqual({ v: 0 })
+      // 文件持续缺失：默认值缓存（revision undefined）稳定命中，不反复触盘读
+      expect(store.read()).toEqual({ v: 0 })
+    })
+
+    it('returns cached value with warn when stat probe fails (non-ENOENT)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const blocker = join(tmpDir, 'blocker')
+      const path = join(blocker, 'f.json')
+      mkdirSync(blocker, { recursive: true })
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+
+      // blocker 目录替换为同名普通文件 → stat(f.json) 抛 ENOTDIR（非 ENOENT，真实 fs 异常）
+      rmSync(blocker, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      writeFileSync(blocker, 'x', 'utf-8')
+
+      const loadSpy = vi.spyOn(store as unknown as { readFromDisk: () => unknown }, 'readFromDisk')
+      expect(store.read()).toEqual({ v: 1 }) // 探针失败 ≠ 文件变更，不否定缓存
+      expect(loadSpy).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const warnMsg = String(warnSpy.mock.calls[0]!.join(' '))
+      expect(warnMsg).toContain('stat 探针失败')
+      expect(warnMsg).toContain(path)
+      expect(warnMsg).toContain('权限')
+      warnSpy.mockRestore()
     })
 
     it('deserialize hook shapes raw value', () => {
@@ -202,12 +253,12 @@ describe('JsonStore', () => {
       expect(readFileSync(path, 'utf-8')).toBe(JSON.stringify({ n: 1 }, null, 4))
     })
 
-    it('after write, cache blocks external changes', () => {
+    it('external changes after write are visible on next read (fingerprint mismatch)', () => {
       const path = join(tmpDir, 'write-cache.json')
-      const store = new JsonStore<{ n: number }>(path, { n: 0 }, { ttlMs: 60_000 })
+      const store = new JsonStore<{ n: number }>(path, { n: 0 })
       store.write({ n: 9 })
       writeFileSync(path, JSON.stringify({ n: 99 }), 'utf-8')
-      expect(store.read()).toEqual({ n: 9 })
+      expect(store.read()).toEqual({ n: 99 })
     })
   })
 
@@ -215,7 +266,7 @@ describe('JsonStore', () => {
     it('forces next read to hit disk', () => {
       const path = join(tmpDir, 'inv.json')
       writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 60_000 })
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
       writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
       store.invalidate()
@@ -482,6 +533,110 @@ describe('WriteBackCache', () => {
     })
   })
 
+  // ── stat 校验与冲突备份（cache-governance §3.2.4：读侧外部优先、写侧内存优先 + 备份出声）──
+  describe('stat 校验与冲突备份', () => {
+    const FROZEN_ISO = '2026-01-01T00:00:00.000Z'
+
+    it('非 dirty 分区外部改动在下一次读生效（指纹失配 → drop + 重载）', () => {
+      const cache = new WriteBackCache(makeBacking(tmpDir))
+      expect(cache.get('p1', 'a')).toBe(undefined) // 触发 lazy load（文件尚不存在）
+      writeFileSync(join(tmpDir, 'parts', 'p1.json'), JSON.stringify({ a: 'external', b: 'new' }), 'utf-8')
+      expect(cache.get('p1', 'a')).toBe('external')
+      expect(cache.get('p1', 'b')).toBe('new')
+    })
+
+    it('外部删除返空重载（stat ENOENT → drop → loadPartition ENOENT 容错返空 Map）', () => {
+      const backing = makeBacking(tmpDir)
+      backing.persistPartition('p1', new Map([['a', 1]]))
+      const cache = new WriteBackCache(backing)
+      expect(cache.get('p1', 'a')).toBe(1)
+      unlinkSync(join(tmpDir, 'parts', 'p1.json'))
+      expect(cache.get('p1', 'a')).toBe(undefined)
+      // 文件持续缺失：undefined 指纹与加载时相等，稳定命中不抖动重载
+      expect(cache.get('p1', 'a')).toBe(undefined)
+    })
+
+    it('dirty 分区跳过读侧校验（外部改动 dirty 窗口内不可见，不 drop 连带丢写）', () => {
+      const cache = new WriteBackCache(makeBacking(tmpDir))
+      cache.set('p1', 'a', 'memory') // 分区转 dirty
+      // dirty 窗口内外部改盘；若未跳过校验，get 会 drop 重载返回外部值
+      writeFileSync(join(tmpDir, 'parts', 'p1.json'), JSON.stringify({ a: 'external' }), 'utf-8')
+      expect(cache.get('p1', 'a')).toBe('memory')
+    })
+
+    it('flush 撞外部改动：先备份 .conflict-<ts> 再覆写，warn 含双路径与恢复指引', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(FROZEN_ISO))
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const backing = makeBacking(tmpDir)
+      backing.persistPartition('p1', new Map([['a', 'initial']]))
+      const path = join(tmpDir, 'parts', 'p1.json')
+      const cache = new WriteBackCache(backing)
+      expect(cache.get('p1', 'a')).toBe('initial') // 加载：loadRevision = 当前指纹
+      cache.set('p1', 'a', 'memory') // dirty
+      writeFileSync(path, JSON.stringify({ a: 'external' }), 'utf-8') // dirty 窗口内外部改
+      cache.flush('p1')
+
+      // 照常覆写：盘 = 内存值（内存优先）
+      expect(readPart(tmpDir, 'p1')).toEqual({ a: 'memory' })
+      // 备份存在且内容 = 覆写前磁盘态（外部改动可从 .conflict 找回）
+      const backupPath = `${path}.conflict-${FROZEN_ISO.replace(/[:.]/g, '')}`
+      expect(existsSync(backupPath)).toBe(true)
+      expect(readFileSync(backupPath, 'utf-8')).toBe(JSON.stringify({ a: 'external' }))
+      // warn 含原文件与备份双路径 + 恢复指引
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const msg = String(warnSpy.mock.calls[0]!.join(' '))
+      expect(msg).toContain(path)
+      expect(msg).toContain(backupPath)
+      expect(msg).toContain('.conflict')
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    })
+
+    it('flush 无冲突不产生备份文件、不出 warn', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const cache = new WriteBackCache(makeBacking(tmpDir))
+      expect(cache.get('p1', 'a')).toBe(undefined)
+      cache.set('p1', 'a', 1)
+      cache.flush('p1')
+      expect(readPart(tmpDir, 'p1')).toEqual({ a: 1 })
+      const conflictFiles = readdirSync(join(tmpDir, 'parts')).filter((f) => f.includes('.conflict-'))
+      expect(conflictFiles).toEqual([])
+      expect(warnSpy).not.toHaveBeenCalled()
+      warnSpy.mockRestore()
+    })
+
+    it('persistPartition 失败保留 dirty，重试成功落盘（W0 现状在冲突检测路径下不回归）', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const backing = makeBacking(tmpDir)
+      const realPersist = backing.persistPartition.bind(backing)
+      let failCount = 0
+      backing.persistPartition = vi.fn((k: string, data: Map<string, unknown>) => {
+        failCount++
+        if (failCount <= 1) throw new Error('disk full')
+        realPersist(k, data)
+      })
+      const cache = new WriteBackCache(backing)
+      cache.set('p1', 'a', 1)
+
+      expect(() => cache.flush('p1')).not.toThrow()
+      expect(existsSync(join(tmpDir, 'parts', 'p1.json'))).toBe(false)
+
+      cache.flush('p1') // dirty 保留 → 重试成功落盘
+      expect(readPart(tmpDir, 'p1')).toEqual({ a: 1 })
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      errorSpy.mockRestore()
+    })
+
+    it('flush 后刷新指纹：再次外部改动在下一次读生效（flush 不固化旧指纹）', () => {
+      const cache = new WriteBackCache(makeBacking(tmpDir))
+      cache.set('p1', 'a', 'v1')
+      cache.flush('p1')
+      writeFileSync(join(tmpDir, 'parts', 'p1.json'), JSON.stringify({ a: 'external' }), 'utf-8')
+      expect(cache.get('p1', 'a')).toBe('external')
+    })
+  })
+
   describe('dispose', () => {
     it('clears pending timers without flushing', () => {
       const cache = new WriteBackCache(makeBacking(tmpDir), { flushMs: 10_000 })
@@ -509,5 +664,44 @@ describe('WriteBackCache', () => {
       // 两次写合并成一次 flush
       expect(readPart(tmpDir, 'p1')).toEqual({ a: 1, b: 2 })
     })
+  })
+})
+
+describe('cleanupAgedBackupResidue（备份残留按龄回收）', () => {
+  const OLD_ISO = '2020-01-01T000000000Z'
+  const RECENT_ISO = new Date().toISOString().replace(/[:.]/g, '')
+
+  function makeScanRoot(): string {
+    return mkdtempSync(join(tmpdir(), 'aged-backup-'))
+  }
+
+  it('超龄 ISO 后缀备份删除；龄内保留；非 ISO 后缀不动；一层子目录展开命中（plugins/<id>/ 形态）', () => {
+    const root = makeScanRoot()
+    try {
+      const pluginDir = join(root, 'plugins', 'my-plugin')
+      mkdirSync(pluginDir, { recursive: true })
+      // ① 子目录层超龄副本（plugin-storage quarantine 落点形态）
+      writeFileSync(join(pluginDir, `globalState.json.corrupt-${OLD_ISO}`), 'corrupt old')
+      // ② 根层龄内副本（取证窗口内保留）
+      writeFileSync(join(root, `settings.json.conflict-${RECENT_ISO}`), 'conflict recent')
+      // ③ 非 ISO 后缀（用户文件误撞前缀）
+      writeFileSync(join(root, 'notes.corrupt-anything'), 'user file')
+      // ④ 根层超龄副本
+      writeFileSync(join(root, `models.json.conflict-${OLD_ISO}`), 'conflict old')
+
+      const removed = cleanupAgedBackupResidue([root, join(root, 'plugins')])
+
+      expect(removed).toBe(2)
+      expect(existsSync(join(pluginDir, `globalState.json.corrupt-${OLD_ISO}`))).toBe(false)
+      expect(existsSync(join(root, `models.json.conflict-${OLD_ISO}`))).toBe(false)
+      expect(existsSync(join(root, `settings.json.conflict-${RECENT_ISO}`))).toBe(true)
+      expect(existsSync(join(root, 'notes.corrupt-anything'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('目录不存在 no-op（返回 0 不抛）', () => {
+    expect(cleanupAgedBackupResidue([join(tmpdir(), 'no-such-aged-backup-dir')])).toBe(0)
   })
 })

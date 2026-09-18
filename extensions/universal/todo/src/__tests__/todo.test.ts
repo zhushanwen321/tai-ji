@@ -1,15 +1,24 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+// handlers.ts 模块级 getLogger —— 测试里 spy warn（脏条目汇总留痕断言面）
+const loggerWarnSpy = vi.hoisted(() => vi.fn());
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+	getLogger: () => ({ warn: loggerWarnSpy, debug: vi.fn(), error: vi.fn() }),
+}));
 
 import {
 	addTodos,
 	formatTodoLine,
 	formatTodoList,
+	isBlankUpdateText,
+	isValidTodoStatus,
 	migrateTodo,
 	type Todo,
 	updateTodos,
 	VALID_STATUSES,
 } from "../model";
+import { reconstructState } from "../handlers";
 import { renderWidgetLines } from "../render";
 import { createTodoSessionState } from "../state";
 import { handleAdd, handleSingleUpdate } from "../tool";
@@ -28,6 +37,25 @@ describe("Todo data model", () => {
 
 	it("VALID_STATUSES 仅三态（pending/in_progress/completed）", () => {
 		expect(VALID_STATUSES).toEqual(["pending", "in_progress", "completed"]);
+	});
+
+	// 共享校验原语：migrateTodo 迁移映射 / tool 单条 update / model 批量 update
+	// 三处共用的同一判据（校验收敛单点，文案由调用方编排）
+	it("isValidTodoStatus — 三态字面量为真、其余（含历史 verifying）为假", () => {
+		expect(isValidTodoStatus("pending")).toBe(true);
+		expect(isValidTodoStatus("in_progress")).toBe(true);
+		expect(isValidTodoStatus("completed")).toBe(true);
+		expect(isValidTodoStatus("verifying")).toBe(false);
+		expect(isValidTodoStatus("done")).toBe(false);
+		expect(isValidTodoStatus("")).toBe(false);
+	});
+
+	it("isBlankUpdateText — trim 后空串为真（CT5 不只判 ===）、非空为假", () => {
+		expect(isBlankUpdateText("")).toBe(true);
+		expect(isBlankUpdateText("   ")).toBe(true);
+		expect(isBlankUpdateText("\t\n")).toBe(true);
+		expect(isBlankUpdateText("hello")).toBe(false);
+		expect(isBlankUpdateText(" a ")).toBe(false);
 	});
 
 	it("should migrate verifying → in_progress", () => {
@@ -66,6 +94,74 @@ describe("Todo data model", () => {
 		expect(() => migrateTodo(null)).toThrow(TypeError);
 		expect(() => migrateTodo(undefined)).toThrow(TypeError);
 		expect(() => migrateTodo("garbage")).toThrow(TypeError);
+	});
+
+	it("dirty id (string / NaN) → TypeError（不产 NaN 毒化 nextId）", () => {
+		expect(() => migrateTodo({ id: "1", text: "x", status: "pending" })).toThrow(/invalid id/);
+		expect(() => migrateTodo({ id: Number.NaN, text: "x", status: "pending" })).toThrow(/invalid id/);
+		expect(() => migrateTodo({ text: "missing id", status: "pending" })).toThrow(/invalid id/);
+	});
+
+	it("dirty text (number / missing) → TypeError", () => {
+		expect(() => migrateTodo({ id: 1, text: 42, status: "pending" })).toThrow(/invalid text/);
+		expect(() => migrateTodo({ id: 1, status: "pending" })).toThrow(/invalid text/);
+	});
+});
+
+// ── reconstructState 脏条目降级（汇总 warn + 不产 NaN）──
+
+describe("reconstructState dirty entry degradation", () => {
+	/** 构造最小 ctx：sessionManager.getEntries 返回给定 toolResult 快照。 */
+	function makeCtx(details: unknown): Parameters<typeof reconstructState>[1] {
+		return {
+			sessionManager: {
+				getEntries: () => [
+					{ type: "message", message: { role: "toolResult", toolName: "todo", details } },
+				],
+			},
+		} as unknown as Parameters<typeof reconstructState>[1];
+	}
+
+	beforeEach(() => {
+		loggerWarnSpy.mockClear();
+	});
+
+	it("脏条目跳过 + 汇总一次 warn，好条目保留、nextId 不产 NaN", () => {
+		const state = createTodoSessionState();
+		reconstructState(
+			state,
+			makeCtx({
+				todos: [
+					{ id: 1, text: "ok", status: "completed" },
+					{ id: "bad", text: "dirty id" },
+					{ id: 2, text: 42 },
+				],
+				nextId: 9,
+			}),
+		);
+		expect(state.todos).toHaveLength(1);
+		expect(state.todos[0]).toMatchObject({ id: 1, text: "ok", status: "completed" });
+		// details.nextId 存在 → 直接采用，Math.max 不见脏 id
+		expect(state.nextId).toBe(9);
+		// 计数可见：一次 warn 带跳过数与总量（不逐条刷屏）
+		expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+		expect(loggerWarnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("skipped dirty todo entries"),
+			expect.objectContaining({ skipped: 2, total: 3, errors: expect.any(Array) }),
+		);
+	});
+
+	it("nextId 缺失 + 脏条目跳过 → nextId 从存活条目推导（不产 NaN）", () => {
+		const state = createTodoSessionState();
+		reconstructState(
+			state,
+			makeCtx({
+				todos: [{ id: "bad", text: "dirty" }, { id: 5, text: "ok", status: "pending" }],
+			}),
+		);
+		expect(state.todos).toHaveLength(1);
+		expect(state.nextId).toBe(6);
+		expect(Number.isNaN(state.nextId)).toBe(false);
 	});
 });
 

@@ -152,6 +152,12 @@ test.describe('搜索浮层 E2E', () => {
     // 等命令分组出现 + 含 commit 项
     await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('search-section-命令')).toContainText('commit')
+    // Enter 消费的是**当前选中项**：逐字输入期间防抖窗口内的前缀结果可能仍在前（'c'/'o'/'co'
+    // 子串命中概览 sub 'Mission Control'，概览 app 命令排名在 commit 前 + 默认选中首项），
+    // 此时 Enter 会确认概览 → goOverview 跳概览页（2026-09-18 CI 实发，SM-E2E-8 搜 review
+    // 无前缀碰撞故恒绿）。等选中项收敛为 commit 再按 Enter——断言的是 Enter 真正消费的信号。
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('commit', { timeout: 5_000 })
 
     // Enter confirm 第一项（commit 应排前）
     await page.getByTestId('search-input').press('Enter')

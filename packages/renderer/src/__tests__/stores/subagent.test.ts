@@ -116,8 +116,8 @@ describe('subagent store — loadSubagents', () => {
     // M1 契约：失败不覆盖现有分区数据，设 loadError 供错误态展示
     expect(store.getRecordsBySession('session-1')).toHaveLength(1)
     expect(store.getRecordsBySession('session-1')[0].subagentId).toBe('bg-test-1-111')
-    expect(store.loadError).toBe('network')
-    expect(store.isLoading).toBe(false)
+    expect(store.loadErrorOf('session-1')).toBe('network')
+    expect(store.isLoadingOf('session-1')).toBe(false)
   })
 
   it('sessionId 为空时不写分区', async () => {
@@ -169,7 +169,7 @@ describe('subagent store — loadSubagents 空结果守卫（接线冒烟）', (
       'session-1',
     )
     // 守卫不是错误态：不设 loadError
-    expect(store.loadError).toBeNull()
+    expect(store.loadErrorOf('session-1')).toBeNull()
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {
@@ -562,3 +562,42 @@ describe('subagent store — hasRunning / isStreamingSubagent 窄口径（轮终
     expect(store.isStreamingSubagent('session-1', 'nonexistent')).toBe(false)
   })
 })
+
+describe('subagent store — split 双 session 加载态隔离（P2-3 回归锁）', () => {
+  it('pane A 失败置 loadError 不影响 pane B 的错误/加载态（per-session 分区）', async () => {
+    vi.mocked(sessionApi.getSubagents)
+      .mockRejectedValueOnce(new Error('pane-a rpc down')) // sid-a 失败
+      .mockResolvedValueOnce([makeRecord()]) // sid-b 成功
+
+    const store = useSubagentStore()
+    await store.loadSubagents('sid-a')
+    await store.loadSubagents('sid-b')
+
+    // 各自分区互不串扰：旧全局单值形态下 sid-b 面板也会显示 pane A 的错误
+    expect(store.loadErrorOf('sid-a')).toBe('pane-a rpc down')
+    expect(store.loadErrorOf('sid-b')).toBeNull()
+    expect(store.isLoadingOf('sid-a')).toBe(false)
+    expect(store.isLoadingOf('sid-b')).toBe(false)
+    expect(store.getRecordsBySession('sid-b')).toHaveLength(1)
+  })
+
+  it('load 在途时另一 session 的读取不受影响（isIdle 分区读取）', async () => {
+    let releaseB: (() => void) | undefined
+    vi.mocked(sessionApi.getSubagents)
+      .mockResolvedValueOnce([makeRecord()])
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseB = () => resolve([makeRecord()]) }))
+
+    const store = useSubagentStore()
+    const pA = store.loadSubagents('sid-a') // 立即完成
+    const pB = store.loadSubagents('sid-b') // 挂起（模拟长轮询）
+    await pA
+    await Promise.resolve()
+
+    expect(store.isLoadingOf('sid-a')).toBe(false)
+    expect(store.isLoadingOf('sid-b')).toBe(true)
+    releaseB?.()
+    await pB
+    expect(store.isLoadingOf('sid-b')).toBe(false)
+  })
+})
+

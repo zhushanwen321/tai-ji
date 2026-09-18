@@ -98,7 +98,7 @@ const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[
 }
 
 /**
- * settings.json 存储：read-through（TTL 缓存 + ENOENT 容错）+ atomicWrite。
+ * settings.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。
  * schema guard（必须是 object）放进 deserialize 钩子。
  */
 let settingsStore = createSettingsStore(getSettingsPath())
@@ -111,7 +111,6 @@ let lockOptions: SyncFileLockOptions = {}
 
 function createSettingsStore(path: string): JsonStore<PiSettings> {
   return new JsonStore<PiSettings>(path, {}, {
-    ttlMs: 3_000,
     deserialize: (raw): PiSettings => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         console.warn(`[pi-settings-store] ${path} schema 不匹配，使用 fallback`)
@@ -146,7 +145,7 @@ export function invalidateSettingsCache(): void {
 }
 
 /**
- * 读取 settings.json（带 3s 缓存）。
+ * 读取 settings.json（带 revision 指纹缓存，U5——命中以磁盘 stat 指纹未变为前提，无固定 TTL）。
  * 模块外的「读」统一经此函数；缓存让高频读（getDefaultModel 等）不每次触盘。
  */
 export function readSettings(): PiSettings {
@@ -186,7 +185,7 @@ function withSettingsLock<T>(fn: () => T): T {
  */
 export function updateSettingsFields(scope: SettingsFieldScope, mutator: (settings: PiSettings) => void): void {
   withSettingsLock(() => {
-    // 锁内重读最新（绕过 3s TTL 缓存——缓存值可能早于取锁，基于它写回会丢并发方修改）
+    // 锁内强制重读最新（显式失效——不依赖指纹校验，基于缓存值写回会丢并发方修改）
     settingsStore.invalidate()
     const latest = readSettings()
     const draft: PiSettings = JSON.parse(JSON.stringify(latest))

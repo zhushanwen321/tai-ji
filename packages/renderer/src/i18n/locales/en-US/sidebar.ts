@@ -6,11 +6,6 @@ export default {
   selectSessionHint: 'Select a session to view files',
   sessionListLoadFailed: 'Failed to load sessions ({error})',
   switchSessionFailed: 'Failed to switch session: {msg}',
-  loadSubagentFailed: 'Failed to load subagent history: {msg}',
-  cancelSubagentFailed: 'Failed to cancel subagent: {msg}',
-  agentCallFailed: 'Agent call failed, no session was created, no conversation to view',
-  agentCallLoadFailed: 'Failed to load agent call conversation: {msg}',
-  workflowOpFailed: 'Workflow operation failed: {msg}',
   newTaskFailed: 'Failed to create task: {msg}',
   deleteSessionFailed: 'Failed to delete session: {msg}',
   deleteFolderFailed: 'Failed to delete folder sessions: {msg}',
@@ -81,15 +76,6 @@ export default {
   forceQuitFailed: 'Failed to force quit: {msg}',
   // [session-dead structural fix D3] explicit toast after forceQuit recovers the defer queue into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
-  // [session-dead structural fix D6/D7 C1 option 1] long-turn progress bar (above Composer).
-  // Copy discipline (D7): state facts only, no judgment words (stuck/unresponsive/error); neutral actions, no preset recommendation
-  turnProgress: {
-    turnElapsed: 'Turn running for {duration}',
-    abortTurn: 'Abort this turn',
-    keepWaiting: 'Keep waiting',
-    durationMin: '{min} min',
-    durationHourMin: '{h}h {min}m',
-  },
   forkGroup: {
     title: 'Branches',
     branchN: 'Branch {n}',
@@ -99,8 +85,6 @@ export default {
   segmentedTab: {
     session: 'Session',
     file: 'File',
-    subagent: 'Subagents',
-    workflow: 'Workflows',
     plugin: 'Plugins',
   },
   projectSwitcher: {
@@ -140,93 +124,20 @@ export default {
     validationMaxLength: 'Name cannot exceed {max} characters',
     validationPattern: 'Newlines not allowed, max {max} characters',
   },
-  subagentList: {
-    loading: 'Loading background tasks…',
-    loadFailed: 'Load failed ({error})',
-    retry: 'Retry',
-    empty: 'No background tasks',
-    emptyHint: "Ask the main agent to call the {'@'}subagent tool to start a background task; running tasks appear here",
-    cancel: 'Cancel',
-    cancelConfirm: 'Confirm cancel?',
-    alreadyEnded: 'Task already ended',
-    turnsUnit: 'turns',
-    tokUnit: 'tok',
-  },
-  // Agents tab secondary filter (design docs/design/subagent-sidebar-filter.md §3.4 [deleted, see git
-  // history] + permanent
-  // session model §3.2.8 default-visibility flip, U8b: default view = all active sessions
-  // (running + idle, legacy terminal statuses shown read-only); the Archived view carries
-  // archive retrieval (scenario 3))
-  // [C7 word-choice note] "Running" here vs backgroundTaskList.filter.active "Running" is a deliberate
-  // distinction: this one is task-scoped (subagent sessions with a round in flight); that one is
-  // process-scoped (background commands whose process state is running). A true conceptual
-  // difference — do not unify the wording (adversarial-review-fixes §3.4 C7 ruling).
-  subagentFilter: {
-    active: 'All',
-    running: 'Running',
-    archived: 'Archived',
-    emptyActive: 'No sessions',
-    emptyActiveHint: 'Archived sessions can be found in the Archived view',
-    viewArchived: 'View archived ({count})',
-    viewAll: 'View all ({count})',
-    emptyRunning: 'No running sessions',
-    emptyRunningHint: 'Idle sessions are ready to continue anytime',
-    emptyArchived: 'No archived sessions',
-  },
+  // [HISTORICAL] 2026-09-16 sidebar task tabs retired: the four dead-key groups (subagent
+  // list / subagent filter bar / workflow list / "background commands" L2 view) are deleted —
+  // their consumer components were retired in the same batch; task copy now lives in the
+  // composer tray namespace `panel.tray.*` (locales/en-US/tray.ts).
+  // [C7 word-choice note, migrated] The former deliberate split between "Running" (task-scoped:
+  // subagent sessions with a round in flight) and "Running" (process-scoped: background commands)
+  // is now registered in two places: tray.ts file header [term ruling]
+  // (`panel.tray.bucket.running` task scope / `panel.tray.bucket.runningProcess` process scope)
+  // and the turnProgress section of this file. A true conceptual difference — do not unify.
   workflowDetail: {
-    backToList: 'Back to workflow list',
-    pause: 'Pause',
-    resume: 'Resume',
     terminate: 'Terminate',
     terminateConfirm: 'Confirm terminate?',
     pendingHint: 'Waiting to start',
     agentsLabel: '{count} agents',
-    modelDefault: 'default',
-    tokenInUnit: 'in',
-    tokenOutUnit: 'out',
     turnsUnit: 'turns',
-  },
-  workflowList: {
-    loading: 'Loading workflows…',
-    loadFailed: 'Load failed ({error})',
-    retry: 'Retry',
-    pause: 'Pause',
-    resume: 'Resume',
-    terminate: 'Terminate',
-    terminateConfirm: 'Confirm terminate?',
-    empty: 'No workflows',
-    emptyHint: 'Workflows are multi-step automation scripts. Start one in chat and its progress appears here',
-    agentsLabel: '{done}/{total}',
-  },
-  // "Background commands" L2 view (background-task-sidebar-view D10). Term ruling (design §1):
-  // distinct from subagent "background tasks"
-  // [C7 word-choice note] "Running" here vs subagentFilter.running "Running" is a deliberate
-  // distinction: process-scoped (process state running) vs task-scoped (subagent sessions in flight).
-  backgroundTaskList: {
-    filter: {
-      active: 'Running',
-      ended: 'Ended',
-      all: 'All',
-    },
-    emptyAllTitle: 'No background commands',
-    emptyAllHint: 'Ask AI to run a command in the background during a conversation and it will appear here',
-    emptyActive: 'No running background commands',
-    emptyEnded: 'No finished background commands',
-    viewAll: 'View all ({count})',
-    kill: 'Terminate',
-    killConfirm: 'Confirm terminate',
-    pidLabel: 'pid',
-    exitLabel: 'exit',
-    status: {
-      running: 'Running',
-      killing: 'Terminating',
-      orphaned: 'Orphaned',
-      killed: 'Terminated',
-      succeeded: 'Succeeded',
-      failed: 'Failed',
-    },
-    // S7 corrupted banner / S6 disconnect banner (consistency review fix batch)
-    corruptBanner: 'Task data corrupted and ignored (.corrupt preserved for inspection)',
-    disconnectBanner: 'Connection lost — will refresh automatically after reconnect',
   },
 }

@@ -1,15 +1,15 @@
 /**
- * SP-4 idle record GC：30 天 TTL 定时归档，防 idle record 永久驻留内存。
+ * SP-4 idle record GC：30 天 TTL 定时内存回收，防 idle record 永久驻留内存。
  * 从 subagent-service.ts 抽出（文件超 max-lines；逻辑自包含：interval + TTL 扫描）。
  * 启动幂等由调用方（service.startGcTimer）守卫；返回 stop 函数供 dispose 清理。
  *
  * [W4 idle-gc 扩展 · 设计 chat-domain-v1x-liveness-governance D4 连带面 2③]
  * 注册翻 process 档后的兜底通道扩展（与翻档同批生效，先行期 = 无兜底挂账窗口）：
- *  1. 锚扩展：无 idleSince 的可归档 record 以 startedAt（创建时确定，
- *     types.ts ExecutionRecord.startedAt）为锚——兜底定位 30 天量级终态归档，
+ *  1. 锚扩展：无 idleSince 的可回收 record 以 startedAt（创建时确定，
+ *     types.ts ExecutionRecord.startedAt）为锚——兜底定位 30 天量级回收，
  *     创建时锚的精度损失在该量级可接受（同设计对 record startedAt 的 rationale）。
- *  2. **只归档不补注销**：被归档 record 的注册注销统一交 core 注册对账 sweep
- *     （判据含「已归档 = 视同终态」）——归档跨 session record 时 appendEntry 只达
+ *  2. **只回收不补注销**：被回收 record 的注册注销统一交 core 注册对账 sweep
+ *     （判据含「已回收 = 视同终态」）——回收跨 session record 时 appendEntry 只达
  *     当前 session entries（写达域无效），且 archive 不走 finalizeRecord、无注销
  *     发射枚举身份（发射点枚举 D2 的 5 处不含 GC）。
  *  3. WorkflowRun store 同批纳入：running 且 meta.startedAt 超 IDLE_TTL_MS 的 run
@@ -19,6 +19,8 @@
  *     record startedAt 同 rationale）。**只终态化不补注销**同上：run 的注销发射
  *     身份在 transition("done") 路径（发射点③）与其宿主收口链，GC 不越权补发。
  */
+import { toErrorMessage } from "../../core/error-message.ts";
+import { isHostNotConfiguredError } from "../../core/host-services.ts";
 import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
@@ -29,7 +31,7 @@ const logger = getLogger("subagents");
 /** GC 扫描间隔：1 小时。 */
 // eslint-disable-next-line no-magic-numbers -- 60*60*1000 = 1h 的毫秒换算常数
 const GC_INTERVAL_MS = 60 * 60 * 1000;
-/** idle record TTL：30 天（超龄归档）。record 锚窗与 workflow run 锚窗共用。 */
+/** idle record TTL：30 天（超龄回收）。record 锚窗与 workflow run 锚窗共用。 */
 // eslint-disable-next-line no-magic-numbers -- 30*24*60*60*1000 = 30d 的毫秒换算常数
 const IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** 毫秒/天（GC 日志的 d 换算）。 */
@@ -54,10 +56,10 @@ export interface WorkflowRunGcStore {
  *    GC 候选从「running 桥接形态」扩张到全部 idle，含中断族 idle / `.state` 重建
  *    idle；W4 死亡纳管态 running 退出候选，supervisor 接管链 settle 后落 idle 回到
  *    候选集，设计待验证①范围扩张已接受）的，锚点（idleSince
- *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的归档
- *    （[U2b] markIdleEvicted：archive 先 + `.alive` release 后——归档 = 放弃持有
+ *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的回收
+ *    （[U2b] markIdleEvicted：archive 先 + `.alive` release 后——回收 = 放弃持有
  *    即放弃写权声明，D3a release 出口②）。单条失败不阻断其余（bestEffort 留痕）。
- *    **只归档不补注销**（见文件头注）。
+ *    **只回收不补注销**（见文件头注）。
  *  - workflow 面（注入 workflowRuns 时）：running 且 meta.startedAt 超
  *    IDLE_TTL_MS 的 run 终态化归档（transition + save），单 run 失败不阻断。
  *
@@ -70,7 +72,7 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
   const timer = setInterval(() => {
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
-    // idle 派生，候选集（idle record）不在 listAllActive 的 running 过滤结果里。
+    // idle 派生，候选集（idle record）不在 listRunningMutable 的 running 过滤结果里。
     for (const record of store.listAllInMemory()) {
       if (!isResumable(record)) continue;
       // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）
@@ -80,17 +82,17 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
       const age = now - anchorMs;
       if (age > IDLE_TTL_MS) {
         logger.warn(
-          `[subagents] GC: archiving idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
+          `[subagents] GC: evicting idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
         );
         try {
           // [U2b / D3a release 出口②] 归口 markIdleEvicted：store.archive 先、`.alive`
-          // release 后（写序在 store 内部——归档 = 放弃持有 = 放弃写权声明，残留声明
+          // release 后（写序在 store 内部——回收 = 放弃持有 = 放弃写权声明，残留声明
           // 会把 idle 回收后 message 同 id 续聊的冷查重建 + 新轮 spawn 通道拦死至宿主
           // 退出，纯成本零防御收益；回收 record 后续被接管时统一 acquireWriteLease
           // 重新声明）。
           store.markIdleEvicted(record);
         } catch (err) {
-          bestEffort(err, `GC archive record ${record.id}`);
+          bestEffort(err, `GC evict record ${record.id}`);
         }
       }
     }
@@ -113,11 +115,16 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
   try {
     runs = await workflowRuns.loadAll();
   } catch (err) {
-    // 宿主未 configureCore（core_host_not_configured）/ IO 失败：本轮跳过，
-    // 下轮重试。debug 留痕——这是「workflow 域未启用」的正常形态，warn 会噪声。
-    logger.debug(`[subagents] GC: workflow run store loadAll failed (skipped this cycle): ${
-      err instanceof Error ? err.message : String(err)
-    }`);
+    // 读失败与「域未启用」分通道（2026-09-17 错误处理审查 A11）：宿主未
+    // configureCore（core_host_not_configured）= workflow 域未启用的正常形态，
+    // debug 不噪声；其余（真 IO 故障）warn 留痕——静默跳过会把持续故障伪装成
+    // 「无 run 可回收」，超龄 run 永不终态化且无从归因。两通道均单轮跳过下轮重试。
+    const message = toErrorMessage(err);
+    if (isHostNotConfiguredError(err)) {
+      logger.debug(`[subagents] GC: workflow run store loadAll skipped (domain not enabled): ${message}`);
+    } else {
+      logger.warn(`[subagents] GC: workflow run store loadAll failed (skipped this cycle): ${message}`);
+    }
     return;
   }
   for (const run of runs) {

@@ -28,9 +28,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService（自 subagent-service.test.ts 迁移段自持副本）──
 
@@ -42,18 +42,6 @@ function makeTmpAgentDir(): string {
 
 function makeModelService(agentDir: string): ModelConfigService {
   return new ModelConfigService({ agentDir, cwd: agentDir });
-}
-
-function makePi(): PiLike & {
-  appendEntry: ReturnType<typeof vi.fn<(customType: string, data?: unknown) => void>>;
-  events: { emit: ReturnType<typeof vi.fn<(channel: string, data: unknown) => void>> };
-  sendMessage: ReturnType<typeof vi.fn<(message: Parameters<PiLike["sendMessage"]>[0], options?: Parameters<PiLike["sendMessage"]>[1]) => void>>;
-} {
-  return {
-    appendEntry: vi.fn((customType: string, data?: unknown) => {}),
-    events: { emit: vi.fn((channel: string, data: unknown) => {}) },
-    sendMessage: vi.fn(() => {}),
-  };
 }
 
 describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {

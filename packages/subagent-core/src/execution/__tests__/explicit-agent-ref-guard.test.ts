@@ -26,6 +26,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
@@ -50,14 +51,6 @@ function makeRegistry(models: ModelInfo[]): ModelRegistryLike {
     find: (provider, modelId) => models.find((m) => m.provider === provider && m.id === modelId),
     hasConfiguredAuth: () => true,
   };
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 describe("显式 agent ref 失败报错（非静默降级 general-purpose）", () => {

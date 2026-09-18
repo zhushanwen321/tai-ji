@@ -5,7 +5,7 @@
  * 重点验证 ADR §5 脏数据过滤 + v2 scope 分组顺序 [project.enabled → global.enabled → project.preset → global.preset]。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join, basename } from 'node:path'
 import type { SkillDirConfig } from '@taiji/shared'
@@ -14,10 +14,17 @@ import {
   PRESET_SKILL_DIRS,
   PRESET_AGENT_DIRS,
 } from '../src/services/skill-dir-config.js'
+import { PRESET_EXTENSION_DIRS } from '@taiji/shared'
 import {
   setSkillDirs,
+  setAgentDirs,
+  setExtensionDirs,
   getSkillDirs,
+  getAgentDirs,
+  getExtensionDirs,
   getSkillPathScopes,
+  getAgentPathScopes,
+  getExtensionPathScopes,
   setDiscoveryPath,
 } from '../src/infra/pi/discovery-store.js'
 
@@ -80,15 +87,15 @@ describe('skill-dir-config buildDirConfigs', () => {
   })
 
   it('preset 全部未启用时，按 scope 分组追加（project preset 在前，global preset 在后）', () => {
-    // PRESET_SKILL_DIRS = ['~/.pi/agent/skills'(g), '~/.claude/skills'(g), '~/.agents/skills'(g), '.agents/skills'(p)]
+    // PRESET_SKILL_DIRS = ['~/.pi/agent/skills'(g), '~/.agents/skills'(g), '.agents/skills'(p)]
+    // （claude 已移出预设，2026-09：preset 成员恒在 UI 重挂导致 claude 行无法真正删除）
     const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: [] })
     expect(configs).toHaveLength(PRESET_SKILL_DIRS.length)
     expect(configs.every(c => c.enabled === false)).toBe(true)
-    // project preset（'.agents/skills'）在前，global preset（前三个）在后，各自内层按 preset 固定顺序
+    // project preset（'.agents/skills'）在前，global preset（前两个）在后，各自内层按 preset 固定顺序
     expect(configs.map(c => c.path)).toEqual([
       '.agents/skills',
       '~/.pi/agent/skills',
-      '~/.claude/skills',
       '~/.agents/skills',
     ])
     expect(configs.find(c => c.path === '.agents/skills')!.scope).toBe('project')
@@ -121,7 +128,7 @@ describe('skill-dir-config buildDirConfigs', () => {
     expect(enabled[1]).toEqual({ path: tmpRealDir, enabled: true, scope: 'global' })
     // 之后是 project preset 未启用（'.agents/skills'），再 global preset 未启用
     const disabled = configs.filter(c => !c.enabled)
-    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.claude/skills', '~/.agents/skills'])
+    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
   })
 
   it('agent preset 结构对称（PRESET_AGENT_DIRS）', () => {
@@ -130,14 +137,35 @@ describe('skill-dir-config buildDirConfigs', () => {
     expect(configs.every(c => c.enabled === false)).toBe(true)
   })
 
+  it('preset 不含 claude 目录（2026-09 移除：预设成员无法真正删除 + 非默认扫描面）', () => {
+    expect(PRESET_SKILL_DIRS.some(p => p.includes('.claude'))).toBe(false)
+    expect(PRESET_AGENT_DIRS.some(p => p.includes('.claude'))).toBe(false)
+    expect(PRESET_EXTENSION_DIRS.some(p => p.includes('.claude'))).toBe(false)
+  })
+
   it('preset 成员即使不存在也保留为 enabled（推荐候选语义，防回归）', () => {
-    const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: ['~/.claude/skills'] })
-    const claudeEntry = configs.find(c => c.path === '~/.claude/skills')
-    expect(claudeEntry).toBeTruthy()
-    expect(claudeEntry!.enabled).toBe(true)
-    expect(claudeEntry!.scope).toBe('global')
-    const otherPresets = configs.filter(c => c.path !== '~/.claude/skills' && !c.enabled)
+    const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: ['~/.agents/skills'] })
+    const agentsEntry = configs.find(c => c.path === '~/.agents/skills')
+    expect(agentsEntry).toBeTruthy()
+    expect(agentsEntry!.enabled).toBe(true)
+    expect(agentsEntry!.scope).toBe('global')
+    const otherPresets = configs.filter(c => c.path !== '~/.agents/skills' && !c.enabled)
     expect(otherPresets).toHaveLength(PRESET_SKILL_DIRS.length - 1)
+  })
+
+  it('已启用的非 preset 绝对路径（如历史遗留 claude 绝对路径）不再是预设成员，移除后不再重现', () => {
+    // 用户报告的回归场景：preset 含 claude 时，用户删除该行后 buildDirConfigs 会把未启用候选补回
+    // （永远删不掉）。移出预设后，遗留的已启用 claude 条目仍可见可删，且删除后不再补回。
+    // 路径必须真实存在（非 preset 启用条目走 existsSync 脏数据过滤），且自建自删——
+    // 禁止依赖真实 ~/.claude（CI Linux runner 无此目录，条目被过滤后 find 返回 undefined，
+    // 2026-09-18 CI 实发）。
+    const claudeAbs = join(tmpRealDir, '.claude', 'skills')
+    mkdirSync(claudeAbs, { recursive: true })
+    const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: [claudeAbs] })
+    // 存量启用条目仍展示（用户可见、可手动删）
+    expect(configs.find(c => c.path === claudeAbs)!.enabled).toBe(true)
+    // 但不再是 preset 候选：无未启用的 claude 行被补回
+    expect(configs.filter(c => c.path.includes('.claude'))).toHaveLength(1)
   })
 })
 
@@ -164,8 +192,8 @@ describe('discovery-store setSkillDirs 脏数据写入过滤（v2 SkillDirConfig
   })
 
   it('preset 成员即使不存在也保留（推荐候选语义，豁免 existsSync）', () => {
-    setSkillDirs([glob('~/.claude/skills'), glob('~/.pi/agent/skills'), glob('/path/a')])
-    expect(getSkillDirs()).toEqual(['~/.claude/skills', '~/.pi/agent/skills'])
+    setSkillDirs([glob('~/.agents/skills'), glob('~/.pi/agent/skills'), glob('/path/a')])
+    expect(getSkillDirs()).toEqual(['~/.agents/skills', '~/.pi/agent/skills'])
   })
 
   it('相对路径不检查存在性（project scope，无 cwd 上下文）', () => {
@@ -191,16 +219,42 @@ describe('discovery-store setSkillDirs 脏数据写入过滤（v2 SkillDirConfig
   })
 
   it('按 scope 分发写 projectPaths/globalPaths（getSkillPathScopes 验证）', () => {
-    setSkillDirs([glob(realDir), proj('.agents/skills'), glob('~/.claude/skills')])
+    setSkillDirs([glob(realDir), proj('.agents/skills'), glob('~/.agents/skills')])
     expect(getSkillPathScopes()).toEqual({
       projectPaths: ['.agents/skills'],
-      globalPaths: [realDir, '~/.claude/skills'],
+      globalPaths: [realDir, '~/.agents/skills'],
     })
   })
 
   it('合并顺序：project 在前（优先级 > 全局），保留各组内顺序', () => {
-    setSkillDirs([glob(realDir), glob('~/.claude/skills'), glob('/path/a'), proj('.agents/skills')])
-    // '/path/a' 被过滤；project('.agents/skills') 在前，global(realDir, ~/.claude/skills) 在后
-    expect(getSkillDirs()).toEqual(['.agents/skills', realDir, '~/.claude/skills'])
+    setSkillDirs([glob(realDir), glob('~/.agents/skills'), glob('/path/a'), proj('.agents/skills')])
+    // '/path/a' 被过滤；project('.agents/skills') 在前，global(realDir, ~/.agents/skills) 在后
+    expect(getSkillDirs()).toEqual(['.agents/skills', realDir, '~/.agents/skills'])
+  })
+
+  it('文件缺失（ENOENT）→ 读回落到默认态：preset 全勾（pi + taiji，无 claude）', () => {
+    // 新装 / 首启：discovery.json 不存在时，UI 打开即见 pi+taiji 目录默认勾选，无需手动配置。
+    setDiscoveryPath(join(discoveryTmpDir, 'nonexistent', 'discovery.json'))
+    const scopes = getSkillPathScopes()
+    expect(scopes.projectPaths).toEqual(['.agents/skills'])
+    expect(scopes.globalPaths).toEqual(['~/.pi/agent/skills', '~/.agents/skills'])
+    // agent / extension 同构默认勾选
+    expect(getAgentPathScopes().globalPaths).toContain('~/.pi/agent/agents')
+    expect(getExtensionPathScopes().projectPaths).toEqual(['.pi/extensions', '.taiji/extensions'])
+  })
+
+  it('用户显式取消全部勾选 → 全空态持久保留，不会被默认态复活', () => {
+    // 旧「六字段全空 → 删文件」会让下次读回落到默认态，用户关掉的目录重启后「复活」。
+    // 现在：全空写入后文件保留，读回仍为全空（用户意图优先于默认值）。
+    // （前置 ENOENT 用例改写了 store 路径，此处先拨回本 describe 的固定路径。）
+    setDiscoveryPath(discoveryPath)
+    setSkillDirs([])
+    setAgentDirs([])
+    setExtensionDirs([])
+    expect(existsSync(discoveryPath)).toBe(true)
+    expect(getSkillDirs()).toEqual([])
+    expect(getAgentDirs()).toEqual([])
+    expect(getExtensionDirs()).toEqual([])
+    expect(getSkillPathScopes()).toEqual({ projectPaths: [], globalPaths: [] })
   })
 })

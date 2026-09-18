@@ -1,5 +1,5 @@
 /**
- * log-retention 单测（crash-resilience u5a-main-logging 验收条款）。
+ * log-retention 单测（u5a-main-logging 验收条款）。
  *
  * 覆盖：
  * - 清理扫描只删「超龄 + 匹配清理前缀」的文件（runtime- / pi- / plugin-crash- / main- / renderer-error- 前缀族）

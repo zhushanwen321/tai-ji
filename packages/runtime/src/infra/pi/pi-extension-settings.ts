@@ -26,18 +26,15 @@ type AutoUpgradeRecord = { autoUpgrade: string[] }
 /**
  * disabled-packages.json 存储：read-through（ENOENT 容错）+ atomicWrite。
  * 空数组时删文件（shouldDeleteWhen），与原 writeDisabledArray 行为一致。
- * 不带 TTL 缓存（调用频率低：仅 scanExtensions / toggle，每次触盘与原行为一致）。
  */
 function createDisabledStore(path: string): JsonStore<DisabledRecord> {
   return new JsonStore<DisabledRecord>(path, { disabled: [] }, {
-    ttlMs: 0,
     shouldDeleteWhen: (v) => v.disabled.length === 0,
   })
 }
 
 function createAutoUpgradeStore(path: string): JsonStore<AutoUpgradeRecord> {
   return new JsonStore<AutoUpgradeRecord>(path, { autoUpgrade: [] }, {
-    ttlMs: 0,
     shouldDeleteWhen: (v) => v.autoUpgrade.length === 0,
   })
 }

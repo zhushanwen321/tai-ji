@@ -8,7 +8,9 @@
  *
  * 重构说明（Phase 1 拆分）：本文件曾是 Config 域唯一 facade（1059 行，超 ESLint max-lines）。
  * 现已按职责拆到多个 config helper（provider / skill / agent / system-prompt / terminal /
- * app-config-store / worktree-config-helper），本文件退化为构造 + appConfig IO + 单行委托桩，
+ * app-config-store / worktree-config-helper / rename-session-config / smart-context-config，
+ * 后两者与 ext-config-rmw 共享 RMW 基建自 worktree-config-helper 名实拆分迁入），本文件
+ * 退化为构造 + appConfig IO + 单行委托桩，
  * 行为 / 签名 / import 路径零变化（复用 worktree-config-helper 验证的 accessors 注入模式）。
  * IConfigService 接口不动，现有测试不改动即全绿（行为零变化的证据）。
  */
@@ -45,23 +47,25 @@ import {
   setBareSetupScript as setBareSetupScriptImpl,
   getTimeout as getTimeoutImpl,
   setTimeout as setTimeoutImpl,
-  getStreamingIdleTimeout as getStreamingIdleTimeoutImpl,
-  setStreamingIdleTimeout as setStreamingIdleTimeoutImpl,
   getDefaultBaseBranch as getDefaultBaseBranchImpl,
   setDefaultBaseBranch as setDefaultBaseBranchImpl,
+} from './worktree-config-helper.js'
+import {
   getAutoRenameEnabled as getAutoRenameEnabledImpl,
   setAutoRenameEnabled as setAutoRenameEnabledImpl,
   getRenameModel as getRenameModelImpl,
   setRenameModel as setRenameModelImpl,
   getRenameMode as getRenameModeImpl,
   setRenameMode as setRenameModeImpl,
+} from './rename-session-config.js'
+import {
   getSmartContextConfig as getSmartContextConfigImpl,
   setSmartContextEnabled as setSmartContextEnabledImpl,
   setSmartContextCompactModel as setSmartContextCompactModelImpl,
   setSmartContextThresholds as setSmartContextThresholdsImpl,
   setSmartContextExcludedModels as setSmartContextExcludedModelsImpl,
   type SmartContextConfigSnapshot,
-} from './worktree-config-helper.js'
+} from './smart-context-config.js'
 import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl } from './app-config-store.js'
 import {
   getDefaultModel as getDefaultModelImpl,
@@ -276,7 +280,9 @@ export class ConfigService implements IConfigService {
     this.saveAppConfig(config)
   }
 
-  // ── Worktree config（git-cwt-anywhere，委托 worktree-config-helper）──
+  // ── Worktree / rename-session / smart-context config ──────────────
+  // worktree 偏好委托 worktree-config-helper；auto-rename/rename 委托 rename-session-config；
+  // smart-context 委托 smart-context-config（P1-7 名实拆分后各归其位）。
   // loadAppConfig / saveAppConfig 仍为 private，通过 appConfig() 暴露 accessors 注入。
 
   private appConfig(): { load(): Record<string, unknown>; save(config: Record<string, unknown>): void } {
@@ -316,16 +322,6 @@ export class ConfigService implements IConfigService {
 
   setTimeout(timeout: number): void {
     setTimeoutImpl(this.appConfig(), timeout)
-  }
-
-  /** 读取对话流式空闲超时（config.json.streamingIdleTimeout，秒），默认 1800s（timeout-streaming-ui-idle §5.3 D3）。 */
-  getStreamingIdleTimeout(): number {
-    return getStreamingIdleTimeoutImpl(this.appConfig())
-  }
-
-  /** 设置对话流式空闲超时（clamp 到 [60, 3600] 秒后落盘，返回生效值）。 */
-  setStreamingIdleTimeout(timeout: number): number {
-    return setStreamingIdleTimeoutImpl(this.appConfig(), timeout)
   }
 
   getDefaultBaseBranch(): string {
@@ -393,8 +389,20 @@ export class ConfigService implements IConfigService {
 
   // ── Scoped Models（委托 provider-extras-store）──
 
+  /**
+   * 显式守卫 = 恒注入前提（组合根 index.ts 恒注入；构造参数非后置回填，无窗口期）。
+   * 三个消费点（model-service / provider-message-handler / message-broker）全经组合根
+   * 实例；与 provider 无关的局部实例（skill-registry）不触此法。静默返回 [] 会把
+   * 「装配错误」伪装成「白名单为空」的合法状态广播出去，与 write 侧 modifyScopedModels
+   * 的抛错语义也不对称——未注入即构造错误，报错指向恢复动作（同 resolver() 模式）。
+   */
   getScopedModels(): string[] {
-    return this.providerExtrasStore?.getScopedModelsSync() ?? []
+    if (!this.providerExtrasStore) {
+      throw new Error(
+        '[config-service] providerExtrasStore 未注入：getScopedModels 需要 providers.json 存储能力（scoped models 读）。恢复：在组合根构造 ConfigService 时注入 providerExtrasStore；若调用点与 provider 无关，改用不触此法的实例',
+      )
+    }
+    return this.providerExtrasStore.getScopedModelsSync()
   }
 
   async modifyScopedModels(fn: (current: string[]) => string[]): Promise<string[]> {
@@ -516,7 +524,10 @@ export class ConfigService implements IConfigService {
   }
 
   async applyImportProviders(importId: string, selectedIds: string[]): Promise<{ result: ProviderImportResult } | { error: { code: string; message: string } }> {
-    return applyImportImpl(importId, selectedIds, this.credentialWriter)
+    // 第 4 参：providers.json 写通道——导入即默认同意的 coding-plan 额度显示自动开启
+    // （api-key 类 preset + 明文 key 才写 quota.enabled；条件与写入语义见
+    // provider-importer.matchAutoEnablePreset）。未注入（部分测试）时 importer 跳过写入。
+    return applyImportImpl(importId, selectedIds, this.credentialWriter, this.providerExtrasStore)
   }
 
   // ── System prompt config（FR-6/FR-7，ADR-0044，委托 system-prompt-config-helper）──

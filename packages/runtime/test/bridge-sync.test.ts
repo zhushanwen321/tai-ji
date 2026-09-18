@@ -27,7 +27,7 @@ const noopGitInfoReader: IGitInfoReader = { readGitInfo: () => undefined, pruneS
  * Test strategy:
  * - Server bridge routing: test handleBridgeRequest directly with mock IPiEngine
  *   （回包断言按新契约：JSON.stringify + 'select'，设计 bridge-rewrite-pi-0.84 §3.3-D1）
- * - Bridge 请求不排前端超时 + addBridgeRequest 登记（registerTimeout 误传 bridge: 的
+ * - Bridge 请求不排前端超时 + addBridgeRequest 登记（trackUiRequest 误传 bridge: 的
  *   防回归锁在 extension-timeout-manager.test.ts）
  *
  * [HISTORICAL] 旧通道的「EventAdapter 对 method='bridge:*' 前缀帧的直接识别」用例已删除

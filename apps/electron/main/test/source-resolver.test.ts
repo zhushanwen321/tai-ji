@@ -1,7 +1,7 @@
 /**
  * u-source-resolver 单测：auto 模式源顺序决策表（update-multi-source D4）。
  *
- * 覆盖验收条款（docs/design/update-multi-source.impl-plan.md §2 u-source-resolver 行）：
+ * 覆盖验收条款：
  *   ① 三偏好映射（github / gitcode / auto）
  *   ② 代理短路：auto + 代理 URL → [github, gitcode]，断言未发起探测请求
  *   ③ 双探测可达排序：仅 github 可达 / 仅 gitcode 可达 / 均可达 tie-break github /

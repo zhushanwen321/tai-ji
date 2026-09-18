@@ -23,11 +23,10 @@ export class BridgeHandler {
     private readonly pluginService: IPluginService | null,
     /**
      * bridge 请求登记所（marker 通道识别后的登记点）：新通道 method 恒为 'select'，
-     * ExtensionTimeoutManager.registerTimeout 的 bridge: 前缀判定不再命中，识别出的
-     * 请求到达本 handler 时登记进 bridgeRequestIds——供 extension-message-handler 拦截
-     * 前端误发的 ui_response（bridge 请求由 runtime 内部应答，前端不得抢答）；
-     * clearForSession 按 session 跟踪清理。bridge:event 例外不登记（见 handleBridgeRequest
-     * 入口注释）。结构类型：生产注入 ExtensionTimeoutManager。
+     * 识别出的请求到达本 handler 时登记进 ExtensionTimeoutManager 的 bridgeRequestIds
+     * ——供 extension-message-handler 拦截前端误发的 ui_response（bridge 请求由 runtime
+     * 内部应答，前端不得抢答）；clearForSession 按 session 跟踪清理。bridge:event 例外
+     * 不登记（见 handleBridgeRequest 入口注释）。结构类型：生产注入 ExtensionTimeoutManager。
      */
     private readonly timeoutManager?: {
       addBridgeRequest(sessionId: string, requestId: string): void

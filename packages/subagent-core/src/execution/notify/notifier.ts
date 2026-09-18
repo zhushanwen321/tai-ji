@@ -1,17 +1,18 @@
 // src/execution/notify/notifier.ts
 //
-// Background 完成回注主对话。collect:"sync" 的批通知不经单条 notify() 生命周期，
-// 由 collect-coordinator 合批后调本文件 notifyBatch 投递（成员结果不直接返回调用方）。
+// Background 完成回注主对话（单条通知通道）。
 //
-// 职责（U2 后）：
+// 职责：
 //   - buildLlmContent：格式化通知文案（本文件唯一逻辑职责）
 //   - createNotifier：薄工厂——ledger 装配时（bindNotifyLedgerHost 已注入）走
 //     四步生命周期（写账 → courier 边沿投递 → 回执销账 → notifyId 幂等重放，
 //     notify-ledger.ts）；未装配时退回投递内核路径（createDelivery 经通知域窄端口
 //     NotifyDomainPorts 注入——core 依赖闭包不含 session-delivery，见 core/notify-ports.ts；
 //     合并窗口 / 去重 / 退避 / flush 委托内核，旧装配 / 无 ledger 测试兼容）
-//   - notifyBatch / buildBatchLlmContent / computeBatchBudget：sync 批通知三件套（U3/U4）
 //
+// [collect 退役] 原 notifyBatch / buildBatchLlmContent / computeBatchBudget /
+// buildBatchNotifyId（sync 批通知三件套 + 批幂等键）已随 collect 批机制整体删除。
+
 // 投递通道（D5 单通道化）：ledger 路径经 courier 在 settled 边沿直达
 // pi.sendMessage({triggerTurn:true})；内核路径的 port.send 同样只传
 // {triggerTurn:true}——steer / followUp / nextTurn 通道已全部删除（nextTurn 的
@@ -19,32 +20,28 @@
 // 设计 D5 实测证伪）；busy 场景由 ledger（settled 边沿 + isIdle 二次复查）或内核
 // settled 订阅驱动在空闲边沿投递。
 
-import { createHash } from "node:crypto";
-
 import { getLogger } from "../../core/logger.ts";
 import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "../../core/notify-ports.ts";
 
 import { deriveOutcome } from "../persistence/execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
-import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome, Intent } from "../assembly/types.ts";
+import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../assembly/types.ts";
 
 // ============================================================
-// [T4① / PS-2 → U5 三元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
+// [T4① / PS-2 → U5 二元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
 // Continuation 成功/失败分支双闸共用；原位置 re-export 保持既有 import 路径不变）
 // ============================================================
 
 /**
- * notify 门的 record 状态入参（永久会话模型 §3.2.7 通知 gate 三元组的判据源，
+ * notify 门的 record 状态入参（永久会话模型 §3.2.7 通知 gate 的判据源，
  * 全部从 ExecutionRecord 同名字段直传——调用点 `notifyGateAllowsDelivery(record)`）。
  */
 export interface NotifyGateRecordState {
-  /** 意愿位（gate ①）：archived = 静默（归档后一切回注不打扰）。 */
-  readonly intent?: Intent;
   /** record 当前世代（两步判定的比较基准——非标记槽 epoch，§3.2.7 显式两步）。 */
   readonly epoch?: Epoch;
-  /** 放弃轮标记（gate ②判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
+  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
   readonly lastAbandonedRound?: AbandonedRoundMark | null;
-  /** 当前轮次（gate ②第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
+  /** 当前轮次（gate 第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
    *  越过旧标记；被中断轮不推进，迟到回注轮 ≤ 标记轮被丢弃）。 */
   readonly round?: number;
 }
@@ -63,22 +60,24 @@ export interface NotifyGateInbound {
 }
 
 /**
- * [U5 / §3.2.7 通知 gate 三元组] 轮次完成回注的投递门。
+ * [U5 / §3.2.7 通知 gate] 轮次完成回注的投递门。
  *
- * 三个阻断分支逐一承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
- * 防双发），判据源从「形态枚举（closedReason）」切换为「意愿 + 放弃标记」两维：
+ * 两个阻断维度承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
+ * 防双发），判据源 = 「放弃标记」单维（收口/静默场景由放弃轮标记 + 轮身份守卫 +
+ * notifyId 账本三层承接——原 intent=archived 静默 gate 随 intent 概念删除退役）：
  *
- *   ① intent=archived → 静默（承接原 parent-new/parent-fork 阻断——编排性关闭在新
- *      模型即自动收起；用户 close 后迟到回注不再打扰）；
+ *   ① 回注 epoch ≠ record 当前 epoch → 丢弃（跨世代回注）；
  *   ② 放弃轮标记命中 → 阻断（承接原 cancelled 阻断防双发）。**显式两步**（比较基准
  *      = record 当前 epoch，非标记槽 epoch——reopen 后标记残留旧 epoch，按标记槽比较
  *      会把新世代全部正常轮通知吞掉）：
  *        第一步：回注 epoch ≠ record 当前 epoch → 丢弃；
  *        第二步：同 epoch 时标记非空、标记槽世代 = 当前世代且回注轮 ≤ 标记轮 → 丢弃。
- *   ③ 收口轮豁免：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常送达——
- *      构造性豁免：归档（intent 翻转）编排挂在轮次通知送达之后（§3.2.5 顺序约束
- *      [写死]），settle 时点 intent 尚未 archived、收口轮非放弃轮（close 不置标记），
- *      ①②均不命中——豁免无需独立判据，静默只作用于收口轮之后新产生的回注。
+ *
+ * 收口轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
+ * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收口
+ * 落账编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
+ * running 非放弃轮，①②均不命中。收口后的残余迟到回注由轮身份守卫（Continuation
+ * abortAndClearQueue 废弃轮身份）+ notifyId 账本去重承接。
  *
  * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
  * 后 round 已推进（markRoundIdle +1），回注轮 = record.round > 标记轮 → 放行，重复帧由
@@ -92,10 +91,8 @@ export function notifyGateAllowsDelivery(
   state: NotifyGateRecordState,
   inbound: NotifyGateInbound = {},
 ): boolean {
-  // ① 归档静默。
-  if (state.intent === "archived") return false;
   const currentEpoch = state.epoch ?? 0;
-  // ② 第一步：跨世代回注丢弃（比较基准 = record 当前 epoch）。
+  // ① 第一步：跨世代回注丢弃（比较基准 = record 当前 epoch）。
   const inboundEpoch = inbound.epoch ?? currentEpoch;
   if (inboundEpoch !== currentEpoch) return false;
   // ② 第二步：标记槽在当前世代且回注轮 ≤ 标记轮 → 丢弃（防双发）。标记槽世代 ≠
@@ -174,7 +171,7 @@ export interface BgNotifyRecord {
    */
   dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
-   *  仅归档提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
+   *  仅收口落账提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
@@ -201,186 +198,6 @@ export interface NotifierHost {
    * 靠退避达上限强发，不走 settled 边沿驱动）。
    */
   onAgentSettled?(handler: () => void): void;
-}
-
-/** sync 批通知幂等键前缀（subagent-sync-collect 设计 §3.1.3 批身份）。 */
-const BATCH_NOTIFY_ID_PREFIX = "sync-batch:";
-
-/** 批身份成员视图：notifyId 的参与面——id + 世代 + 轮次（BgNotifyRecord 的同构子集）。 */
-export interface BatchNotifyMember {
-  readonly id: string;
-  /** [round2-notify-fix] 世代（reopen 后归零防撞段；缺省 0 = 未推进世代的旧格式）。 */
-  readonly epoch?: Epoch;
-  /** [round2-notify-fix] 成员轮次（chatMode 续轮每轮 +1；one-shot settle 快照携带）。 */
-  readonly round?: number;
-}
-
-/**
- * [round2-notify-fix] 批身份键 = 成员 (id, epoch, round) 三元组的排序摘要，
- * `sync-batch:<sha1(sorted "id:epoch:round")>`。
- *
- * 历史 bug（2026-09-14 事故，session 01a09f85）：旧实现只 hash 成员 id 集合——
- * `collect:"sync"` 批的成员经 `action:"message"` 续轮后（collectMode 残留 sync，
- * 轮次通知被路由进批缓冲），第二轮 flush 的成员集与第一轮相同 → 同 notifyId →
- * 账本 `ackedIds` 命中第一轮已销账的键 → `ledger.record` 幂等拒绝 → 批通知静默
- * 丢失（无日志无补偿），主 agent 永久悬挂。三元组键使同批第 N 轮必为新键。
- *
- * 语义保持：同成员集（同轮次）不同登记顺序同 hash（D2 隐式批身份稳定性——重启
- * 重建批 / E1 补发凭此与账本原条目对齐）；同一轮 settle 的重复 flush / E1 重建重发
- * （成员快照 round 相同）仍同键被账本幂等去重拦截——只把「跨轮」分开，不放松
- * 「同轮重发」。成员 id 为 sa-xxx 格式无分隔歧义，三元组 join(",") 仅作边界防御。
- */
-export function buildBatchNotifyId(members: readonly BatchNotifyMember[]): string {
-  const digest = createHash("sha1")
-    .update([...members].map((m) => `${m.id}:${m.epoch ?? 0}:${m.round ?? 0}`).sort().join(","))
-    .digest("hex");
-  return `${BATCH_NOTIFY_ID_PREFIX}${digest}`;
-}
-
-// ─── U4 预算截断 + 指针（设计 §3.1.2 两段式预算，确定性统一收紧）───
-
-/** sync 批预算参数（config collectSync 节语义）。U4 以设计默认值锁规格；
- * config 热读（flush 时读值）需 service 传参接线，不在本函数内自行读 config。 */
-export interface BatchBudgetParams {
-  /** 单条目正文上限（第一段截断）。 */
-  perItemChars: number;
-  /** 全批正文中量预算（第二段收紧触发阈值）。 */
-  totalChars: number;
-}
-
-/** 设计默认预算（§3.1.3 config 示例值）。 */
-const DEFAULT_BATCH_BUDGET: BatchBudgetParams = { perItemChars: 4000, totalChars: 24000 };
-
-/** 预算计划（computeBatchBudget 输出，纯数据）。 */
-export interface BatchBudgetPlan {
-  /** ② 总量再压缩是否触发（Σ per-item 截断后正文 > totalChars）。 */
-  tightened: boolean;
-  /** 每条目正文有效上限：未收紧 = perItemChars（兼作第一段截断上限）；纯清单退化 = 0。 */
-  effectivePerItem: number;
-  /** 纯清单退化（floor(totalChars/n) < 200 → 条目只剩头行 + 指针行，正文 0 字符）。 */
-  listOnly: boolean;
-}
-
-/** 绝对下限（设计 §3.1.2）：预算折算低于它时放弃正文，条目退化为「头行 + 指针行」。 */
-const LIST_ONLY_FLOOR = 200;
-
-/**
- * 两段式批预算计划（纯函数，规格测试 collect-budget.test.ts 锁定）。
- *
- * ① per-item：每条目正文 ≤ perItemChars；② 总量：Σ(截断后) > totalChars 时
- * effectivePerItem = clamp(floor(totalChars / n), 200, perItemChars) 统一收紧
- * （n = 成员数）。刻意放弃按剩余预算的瀑布分配（非确定、依赖条目顺序），
- * 统一收紧换确定性；收紧后 Σ ≤ n × floor(totalChars/n) ≤ totalChars 恒回到预算内。
- * 未触发收紧时 effectivePerItem = perItemChars（同时承担第一段截断上限）。
- */
-export function computeBatchBudget(
-  bodyLengths: readonly number[],
-  perItemChars: number,
-  totalChars: number,
-): BatchBudgetPlan {
-  const n = bodyLengths.length;
-  const sumAfterPerItem = bodyLengths.reduce((sum, len) => sum + Math.min(len, perItemChars), 0);
-  if (n === 0 || sumAfterPerItem <= totalChars) {
-    return { tightened: false, effectivePerItem: perItemChars, listOnly: false };
-  }
-  const tight = Math.floor(totalChars / n);
-  if (tight < LIST_ONLY_FLOOR) {
-    return { tightened: true, effectivePerItem: 0, listOnly: true };
-  }
-  return { tightened: true, effectivePerItem: Math.min(tight, perItemChars), listOnly: false };
-}
-
-/** 千位分隔（对齐设计样例 11,234；手写正则零 ICU 依赖）。 */
-function formatChars(n: number): string {
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-/**
- * session_read result action 的默认单条字符上限（adversarial-review-fixes §3.4 C3）。
- * 对齐 extensions/universal/session-reader/src/result-action.ts 的 RESULT_DEFAULT_LIMIT
- * （8000）——extension 与 runtime 包无共享常量处、反向 import 会建立 subagent-core 对
- * extension 的依赖，故本地常量 + 注释锚定；两侧改动须同步。
- */
-const SESSION_READ_DEFAULT_LIMIT = 8000;
-
-/** 截断指针行（设计 §3.1.2 样例）：主 agent 据此按需 session_read 取回全文。
- *  [S8 code-simplify 口径注] 本函数的 X（total - kept）= **丢弃**字符数；而
- *  session-reader result-action.ts formatResultTruncation 同模板的 X = **保留**
- *  字符数（limit）——同模板异语义，统一字符串 = 行为变更，勿顺手改口径。
- *  [C3 limit 随附] perItemLimit = 该成员实际截断预算（effectivePerItem）：预算超过
- *  session_read 默认 limit(8000) 时附 "limit":N——模型照抄指针行 JSON 调用才能取到
- *  ≥ 默认值的有效正文（否则默认 8000 反而少于通知里已见的 kept，触发第二层截断）；
- *  ≤8000 不附（默认已覆盖，避免噪音）。 */
-function buildTruncationPointer(id: string, kept: number, total: number, perItemLimit: number): string {
-  const limitPart = perItemLimit > SESSION_READ_DEFAULT_LIMIT ? `,"limit":${perItemLimit}` : "";
-  return `[truncated ${formatChars(total - kept)} of ${formatChars(total)} chars — full result: session_read {"action":"result","session":"${id}"${limitPart}}]`;
-}
-
-/** closed 成员 outcome 兑底物化（与下方 notify() 投影边界同款）；running 原样透传。 */
-function withMaterializedOutcome(record: BgNotifyRecord): BgNotifyRecord {
-  return record.status === "closed"
-    ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error) }
-    : record;
-}
-
-/**
- * sync 批通知文案（U3 批形态 + U4 两段式预算截断）。
- *
- * 形态（设计 §3.1.1 交互样例）：批头行 `Subagent batch completed: N finished,
- * M failed, K cancelled.` + 各成员条目（buildLlmContent 同语义）以 "\n\n---\n\"
- * \n" join（分隔符对齐 ledger mergeItems / 内核合批——TUI/LLM 两消费方同构）。
- * 批头计数口径 = 成员 outcome 三态（completed→finished）；closed 成员 outcome 缺省
- * 时按单一权威 deriveOutcome 兑底（与 notify() 投影边界同款，幂等无害）。
- *
- * [U4 预算截断] 仅对展示结果正文的条目（closed+completed / running）生效；
- * failed/cancelled 条目无 result 可取回（指针无意义）不计正文预算、原样输出。
- * totalChars 口径（§3.1.2）：仅计条目正文（截断后）之和，批头/头行/指针行/
- * 分隔符等包装开销为有界常量不入预算。未触预算时输出与 U3 基线逐字节一致。
- * budget 缺省 = 设计默认值；config 热读接线由 flush 调用方传入。
- */
-export function buildBatchLlmContent(
-  records: readonly BgNotifyRecord[],
-  budget: BatchBudgetParams = DEFAULT_BATCH_BUDGET,
-): string {
-  // 入口一次物化（S1，code-simplify）：closed 成员 outcome 兑底仅此一处，bodies/计数/
-  // 条目全部读物化结果——「单一权威 deriveOutcome」从注释承诺变构造事实。幂等纯函数，
-  // 与原四处各自推导逐字节等价；running 原样透传零拷贝。
-  const mat = records.map(withMaterializedOutcome);
-  let finished = 0;
-  let failed = 0;
-  let cancelled = 0;
-  // 各条目参与预算的正文（§3.1.2 口径）；null = 该条目不展示 result 正文。
-  const bodies = mat.map((record): string | null => {
-    if (record.status === "closed" && record.outcome !== "completed") return null;
-    return record.result ?? "(empty)";
-  });
-  const plan = computeBatchBudget(
-    bodies.map((body) => body?.length ?? 0),
-    budget.perItemChars,
-    budget.totalChars,
-  );
-  const items = mat.map((record, i) => {
-    if (record.status === "closed") {
-      const outcome = record.outcome;
-      if (outcome === "completed") finished += 1;
-      else if (outcome === "failed") failed += 1;
-      else if (outcome === "cancelled") cancelled += 1;
-    }
-    const body = bodies[i];
-    if (body === null || body.length <= plan.effectivePerItem) {
-      // 未触预算（含 failed/cancelled 条目）：U3 基线字节不变。
-      return buildLlmContent(record);
-    }
-    // 截断：正文保留前 limit 字符 + 省略号，尾接指针行（kept=0 纯清单时省略号一并省略）。
-    const kept = body.slice(0, plan.effectivePerItem);
-    const truncated = buildLlmContent({ ...record, result: plan.listOnly ? "" : `${kept}…` });
-    // 纯清单时 result 置空会在 buildLlmContent 内残留头行尾换行（"Result:\n" + ""），
-    // 收掉该空行让条目严格为「头行 + 指针行」两行形态（设计 §3.1.2 纯清单退化）。
-    const stripped = plan.listOnly ? truncated.replace(/\n$/, "") : truncated;
-    return `${stripped}\n${buildTruncationPointer(record.id, kept.length, body.length, plan.effectivePerItem)}`;
-  });
-  const header = `Subagent batch completed: ${finished} finished, ${failed} failed, ${cancelled} cancelled.`;
-  return [header, ...items].join("\n\n---\n\n");
 }
 
 /**
@@ -414,8 +231,8 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) failed: ${record.error}`;
       }
       // 成功完成或通用结束：展示结果。
-      // [C-2] close 归档提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
-      // totalRounds 仅 notifyClosed（归档提示）携带；轮次通知不设置（轮次身份由
+      // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
+      // totalRounds 仅 notifyClosed（收口提示）携带；轮次通知不设置（轮次身份由
       // round 承载），文案保持 "completed. Result:" 逐字节（G4 硬约束锚定）。
       const roundsSuffix =
         record.totalRounds != null && record.totalRounds > 0
@@ -443,14 +260,6 @@ function buildLlmContent(record: BgNotifyRecord): string {
 export interface BgNotifier {
   /** 入队一条完成通知（去重 + 合批窗口合并）。dispose 后短路。 */
   notify(record: BgNotifyRecord): void;
-  /**
-   * sync 批通知（subagent-sync-collect U3）：成员集 → 单条批投递。幂等键
-   * `sync-batch:<sha1(sorted id:epoch:round)>`（[round2-notify-fix] 三元组——同批跨轮
-   * 异键），走与 notify 同一写账→settled 边沿投递链（单 entry）。返回 false = 幂等
-   * 拒绝（同键批已在账/已销账）或空批 / dispose 后——调用方（service flushBatch 接线）
-   * 据此决定 batchFinalized 落标。
-   */
-  notifyBatch(records: readonly BgNotifyRecord[], budget?: BatchBudgetParams): boolean;
   /** 立即 flush（session_shutdown 调用，防丢失）。 */
   flushPendingNotifications(): void;
   /** session 结束：清队列，dispose 内核 handle。 */
@@ -579,13 +388,11 @@ export function createNotifier(host: NotifierHost): BgNotifier {
   };
   let handle: DeliveryHandle = createHandle();
 
-  /** 四步投递链尾部共用段（S2，code-simplify）：notify 单条与 notifyBatch 逐行同构
-   *  的收尾——原两份手写拷贝使注释宣称的「同一四步链」无结构强制，现单点实现。
-   *  ledger 在 → ①写账（拒绝 = false，幂等去重：同 notifyId 已在账/已销账）→
-   *  ②attemptDeliver（settled 边沿 + isIdle 二次复查，③④销账/重放在 ledger 内）；
-   *  ledger 缺（旧装配 / 部分测试，含 jiti 单例分裂的失效形态）→ 内核路径降级 +
-   *  降级留痕 warn（C-ext-06 配套，不改变向后兼容行为）。返回 false 仅 notifyBatch
-   *  消费（调用方跳过落标）；notify 忽略（fire-and-forget）。闭包读 let handle：
+  /** 四步投递链收尾共用段（S2，code-simplify）：ledger 在 → ①写账（拒绝 = false，
+   *  幂等去重：同 notifyId 已在账/已销账）→ ②attemptDeliver（settled 边沿 + isIdle
+   *  二次复查，③④销账/重放在 ledger 内）；ledger 缺（旧装配 / 部分测试，含 jiti
+   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，不改变向
+   *  后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读 let handle：
    *  revive 重建后自然指向新 handle。 */
   function deliverViaLedgerOrKernel(notifyId: string, content: string, details: object): boolean {
     const ledger = getBoundNotifyLedger();
@@ -645,34 +452,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 无 ledger 装配时内核路径降级 + 降级留痕（C-ext-06 配套，见 helper 注释）。
       // 单条通知为 fire-and-forget，返回值忽略。
       deliverViaLedgerOrKernel(notifyId, content, payload);
-    },
-
-    notifyBatch(records: readonly BgNotifyRecord[], budget?: BatchBudgetParams): boolean {
-      if (disposed || records.length === 0) return false;
-
-      // 投影边界物化（与 notify 同款）：closed 成员补 outcome——批头计数与成员条目
-      // 单一来源。消源自入参浅拷贝，不改写协调器缓冲持有的快照对象。
-      const payloads = records.map((record) =>
-        record.status === "closed"
-          ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error) }
-          : { ...record },
-      );
-      // [round2-notify-fix] 批身份键含轮次维度：payloads（BgNotifyRecord）结构兼容
-      // BatchNotifyMember——同批续轮后第二轮必为新键（见 buildBatchNotifyId 注释）。
-      const batchNotifyId = buildBatchNotifyId(payloads);
-      // budget（可选）= service flushBatch/E1 补发接线传入的 config 热读值（U4 deviation #8
-      // 由 U5 接线）；undefined → buildBatchLlmContent 参数缺省 = 设计默认值（4000/24000）。
-      // 账本重放走写入时已定格的 content，预算在写账时刻生效（“flush 时热读”语义）。
-      const content = buildBatchLlmContent(payloads, budget);
-      // details 形态 = ledger mergeItems 批量分支（{batch:true, items}——bg-notify-render
-      // extractBatch 已支持，⛔1 核对）+ 顶层 notifyId：collectDeliveredNotifyIds 的回执
-      // 匹配键认 details.notifyId / details.items[].notifyId，批身份键必须顶层可达，
-      // 否则批 entry 永不销账、重投至放弃。顶层 notifyId 键对 extractBatch 透明（多键无感）。
-      const details = { batch: true as const, notifyId: batchNotifyId, items: payloads };
-
-      // 与 notify 同一四步链（deliverViaLedgerOrKernel，S2 提取）：返回 false = 同成
-      // 员集批已在账（E1 重建重发 / 重复 flush）→ 调用方跳过落标。
-      return deliverViaLedgerOrKernel(batchNotifyId, content, details);
     },
 
     flushPendingNotifications(): void {

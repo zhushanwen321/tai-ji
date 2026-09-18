@@ -548,13 +548,13 @@ describe('getSubagentHistory / getAgentCallFilePath：负路径守卫', () => {
 describe('workflowAction / subagentAction：命令转发', () => {
   it('workflowAction 转发 /workflows <action> <runId> 到活跃 client', async () => {
     const { records, client } = makeRecords()
-    await records.workflowAction('s1', 'pause', 'run-1')
-    expect(client.prompt).toHaveBeenCalledWith('/workflows pause run-1')
+    await records.workflowAction('s1', 'abort', 'run-1')
+    expect(client.prompt).toHaveBeenCalledWith('/workflows abort run-1')
   })
 
   it('workflowAction：session 不活跃 throw', async () => {
     const { records } = makeRecords({ pm: { getClient: vi.fn(() => undefined) } as unknown as IProcessManager })
-    await expect(records.workflowAction('s1', 'pause', 'run-1')).rejects.toThrow('Session s1 not active')
+    await expect(records.workflowAction('s1', 'abort', 'run-1')).rejects.toThrow('Session s1 not active')
   })
 
   it('subagentAction cancel 转发 /subagents cancel <subagentId>', async () => {
@@ -716,7 +716,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const { injector, inject } = makeSpyInjector()
     const { records } = makeRecords({}, injector)
     await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
-    await records.workflowAction('s1', 'pause', 'run-1')
+    await records.workflowAction('s1', 'abort', 'run-1')
     expect(inject).not.toHaveBeenCalled()
   })
 

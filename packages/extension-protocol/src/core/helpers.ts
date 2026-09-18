@@ -29,7 +29,7 @@ export function isGuiCapable(ctx: GuiContext): boolean {
 }
 
 /**
- * 构造 GuiRenderResult。当前主用途是 guiSetWidget 的载荷（M17 对话流 widget 面板）；
+ * 构造 GuiRenderResult。当前主用途是 guiSetWidget 的载荷（composer 任务托盘的协议 widget 区）；
  * details.__gui__（tool result 通道）为遗留兼容路径，todo/goal 已不再使用。
  * stripUndefined 确保序列化不含 undefined（JSON.stringify 会丢弃 undefined 字段）。
  */
@@ -120,9 +120,74 @@ export function setWidgetDual(
   }
 }
 
+// ── widget icon paths 白名单校验（自定义形状的防御单点，宿主 fallback 消费）──
+
+/**
+ * d 语法白名单字符集：SVG path 命令字母（MLCQAZHVST 大小写——含 S/s/T/t 平滑曲线
+ * 命令，@lucide/vue 全量图标约 1% 的 d 串用到）+ 数字 + 空格/逗号/小数点/负号。
+ * 刻意不含 e/E 等其余任何字符——白名单外即拒，故无注入面（渲染侧也只用 DOM 属性
+ * 赋值，无 innerHTML）。
+ */
+const ICON_PATH_D_ALLOWED_RE = /^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$/
+const ICON_PATHS_MAX_ENTRIES = 8
+const ICON_PATH_MAX_CHARS = 512
+const ICON_PATHS_MAX_TOTAL_CHARS = 2048
+
+/** 拒绝原因（宿主 warn 文案与 fallback 分诊用；判定顺序同 validateWidgetIconPaths 实现）。 */
+export type WidgetIconPathsRejection =
+  /** 入参不是数组（含 undefined / null / 其他类型） */
+  | 'not-array'
+  /** 空数组——渲染无形状，等同无效自定义 icon */
+  | 'empty'
+  /** 条数 > 8 */
+  | 'too-many'
+  /** 存在非 string 条目 */
+  | 'non-string'
+  /** 单条 > 512 字符 */
+  | 'too-long'
+  /** 全部条目总长 > 2048 字符 */
+  | 'total-too-long'
+  /** 含白名单外字符 */
+  | 'illegal-char'
+
+/** icon paths 校验判定：合法携带白名单内的 paths 副本；非法携带原因（不抛异常）。 */
+export type WidgetIconPathsValidation =
+  | { valid: true; paths: string[] }
+  | { valid: false; reason: WidgetIconPathsRejection }
+
+/**
+ * 校验 WidgetMeta.icon 的自定义形状 paths（`{ paths: string[] }` 的内层数组）。
+ * 不抛异常——非法即返回原因，宿主据此落兜底 icon + warn（协议对 extension 的
+ * 宽容边界：坏数据不崩渲染，只是拿不到自定义形状）。
+ */
+export function validateWidgetIconPaths(value: unknown): WidgetIconPathsValidation {
+  if (!Array.isArray(value)) return { valid: false, reason: 'not-array' }
+  if (value.length === 0) return { valid: false, reason: 'empty' }
+  if (value.length > ICON_PATHS_MAX_ENTRIES) return { valid: false, reason: 'too-many' }
+
+  // Array.isArray 窄化出 any[]——显式落回 unknown[]，让逐条 typeof 守卫真正收窄到 string
+  const entries = value as unknown[]
+  const paths: string[] = []
+  let total = 0
+  for (const entry of entries) {
+    if (typeof entry !== 'string') return { valid: false, reason: 'non-string' }
+    if (entry.length > ICON_PATH_MAX_CHARS) return { valid: false, reason: 'too-long' }
+    if (!ICON_PATH_D_ALLOWED_RE.test(entry)) return { valid: false, reason: 'illegal-char' }
+    paths.push(entry)
+    total += entry.length
+  }
+  if (total > ICON_PATHS_MAX_TOTAL_CHARS) return { valid: false, reason: 'total-too-long' }
+
+  return { valid: true, paths }
+}
+
 /**
  * 从 details 中提取 GuiRenderResult。前端统一用此函数读取 __gui__，
  * 集中校验版本号，避免散落的 as 断言。
+ * component 字段校验（质量收敛批升级）：从「仅查存在性」升级为复用 isGuiComponent
+ * 结构校验（type 字符串 + props 对象——含 null 排除；component 不是函数，可调用性
+ * 检查对其无意义）。非法值 → undefined，走调用方既有降级路径（AnsiText/纯文本兜底），
+ * 畸形 component 不再进渲染层。
  */
 export function extractGui(details: Record<string, unknown> | undefined): GuiRenderResult | undefined {
   const g = details?.__gui__
@@ -130,7 +195,7 @@ export function extractGui(details: Record<string, unknown> | undefined): GuiRen
     g &&
     typeof g === 'object' &&
     'v' in g &&
-    'component' in g &&
+    isGuiComponent((g as { component?: unknown }).component) &&
     (g as { v: unknown }).v === PROTOCOL_VERSION
   ) {
     return g as GuiRenderResult

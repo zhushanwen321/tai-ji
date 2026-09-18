@@ -34,6 +34,13 @@ interface ManagedProcess {
 const EPHEMERAL_READY_TIMEOUT_MS = 5_000
 
 /**
+ * pi 版本探测失败的负缓存时长（缓存治理 1-7）：失败值 60s 内直接返 'unknown' 不再探测，
+ * 过期重试——瞬态失败（pi 缺失/PATH 未就绪/探测超时）不永久定罪，也避免 pi 缺失环境
+ * 每次调用都吃 5s 探测超时。对齐 GitStateService notRepoCache 先例；成功值仍永久缓存。
+ */
+const PI_VERSION_FAILURE_TTL_MS = 60_000
+
+/**
  * 给 promise 套一层超时（短命 pi 就绪等待专用）。
  *
  * 超时后底层 promise 仍可能 pending（switchSession 自身 SLOW_TIMEOUT_MS 120s）——
@@ -62,6 +69,8 @@ export class ProcessManager implements IProcessManager {
   private piPath: string | null = null
   private piPathPromise: Promise<string> | null = null
   private piVersionCache: string | null = null
+  /** 最近一次版本探测失败时刻（缓存治理 1-7：失败负缓存，成功后清空）。 */
+  private piVersionFailedAt: number | null = null
 
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
@@ -90,9 +99,21 @@ export class ProcessManager implements IProcessManager {
     return this.piPathPromise
   }
 
-  /** 探测 pi 版本（首次调用 execSync，后续读缓存）。失败返回 'unknown'。 */
+  /**
+   * 探测 pi 版本（首次调用 execSync，后续读缓存）。失败返回 'unknown'。
+   *
+   * 缓存语义（缓存治理 1-7）：成功值永久缓存；失败值只负缓存 PI_VERSION_FAILURE_TTL_MS——
+   * 窗口内直接返 'unknown' 不再探测，过期后重新探测（修复前失败值写死 piVersionCache
+   * 恒驻进程生命周期，pi 修好/装好后版本仍显示 unknown 的故障态固化）。
+   */
   async getPiVersion(): Promise<string> {
     if (this.piVersionCache) return this.piVersionCache
+    if (
+      this.piVersionFailedAt !== null
+      && Date.now() - this.piVersionFailedAt < PI_VERSION_FAILURE_TTL_MS
+    ) {
+      return 'unknown'
+    }
     try {
       const piPath = await this.getPiPath()
       const cmd = piPath !== 'pi' ? `"${piPath}" --version` : 'pi --version'
@@ -103,11 +124,13 @@ export class ProcessManager implements IProcessManager {
         env: buildOutboundChildEnv({ parentEnv: process.env }),
       }).trim()
       this.piVersionCache = version || 'unknown'
+      this.piVersionFailedAt = null
+      return this.piVersionCache
     } catch (e) {
       console.warn('[process-manager] failed to detect pi version:', e)
-      this.piVersionCache = 'unknown'
+      this.piVersionFailedAt = Date.now()
+      return 'unknown'
     }
-    return this.piVersionCache
   }
 
   /**

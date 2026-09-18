@@ -25,7 +25,7 @@ import type { SessionSummary } from '@taiji/shared'
 
 // normalizeInactiveSessionFileIfNeeded 需要真实文件（statSync ENOENT 即 throw）——本测试
 // 目标是编排时序非归一化管线，mock 为 no-op；同模块 seedRestoreMetaOverride 保留真身
-//（内部 persistModelBinding 自带 existsSync 守卫，假路径零副作用）。
+//（U8a W3 后只读 get_state + 内存组装，无持久层写入，假路径零副作用）。
 vi.mock('../src/services/session/restore-seeding.js', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../src/services/session/restore-seeding.js')>()
   return { ...mod, normalizeInactiveSessionFileIfNeeded: vi.fn() }

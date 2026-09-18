@@ -65,8 +65,6 @@
  * 是 opt-out 通道）；内存侧由 evictDoneRunsBeyondCap 淘汰。W17 后 state 文件
  * 已降级为纯性能缓存（权威数据在 session JSONL 的 workflow-record entry），随 session
  * 文件被用户删除时一并消失。
- *
- * 参考：domain-models.md §Ports（RunStore 定义）、clarification.md D-5。
  */
 
 import * as fs from "node:fs";
@@ -90,7 +88,7 @@ import {
   pruneStateFilesBeyondCap,
   type RunSnapshot,
 } from "@zhushanwen/subagent-core";
-import { isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Workflow-record self-describing entry (W17, D4) ─────────
 
@@ -297,8 +295,13 @@ interface JsonlRunStoreOptions {
 
 export class JsonlRunStore {
   private readonly sessionDir: string;
-  private readonly pi?: ExtensionAPI;
-  private readonly ctx?: ExtensionContext;
+  /**
+   * workflow-record entry 的 appendEntry 源。store 对 pi 的唯一消费面是 doFlush 的
+   * appendEntry（W17 权威 entry 写入），类型收窄为该面——[skill-reload D3] rebind
+   * 时换入 stale-guarded 包装（见 {@link rebind}），构造时为裸 pi 原引用。
+   */
+  private pi?: Pick<ExtensionAPI, "appendEntry">;
+  private ctx?: ExtensionContext;
   private readonly saveDebounceMs: number;
   /** workflow-record entry append 节流最小间隔（ms），0 = 禁用。 */
   private readonly entryAppendMinIntervalMs: number;
@@ -590,6 +593,63 @@ export class JsonlRunStore {
     await this.flushPendingSaves();
     // await 全部 in-flight 链（ES4：flush 全部落定后才返回）
     await Promise.allSettled(Array.from(this.chains.values()));
+  }
+
+  /**
+   * [skill-reload D3] adoption 就地重绑：post-reload session_start 接管（adoption）时
+   * 原地改写 entry 写入源与 ctx——store 实例跨 reload 存活（D2 槽），在飞去抖批与
+   * per-runId 串行 flush 链持有 this，原地改写对后续 flush 天然可见（不遍历对象图
+   * 重绑：闭包引用不可枚举，漏一处 = 恢复后随机 assertActive 抛——设计被否项）。
+   * writtenOnce / lastEntryAppendAt / pending / chains 全部保留（接管而非重建）。
+   *
+   * [skill-reload D5] 换入的 appendEntry 源包 guardStaleCtx：下一次 reload 窗口
+   * （invalidate → adoption rebind 完成之间，通常 <1s）in-flight flush 触碰已 stale
+   * 的本 pi 时统一 debug 丢弃（不分中间态/终态——appendEntry 是同步 void，stale
+   * 表现为同步 assertActive 抛错，不包会把窗口内 flush 打成 IO 错误路径：settlers
+   * reject + writtenOnce 回滚）。终态保全不依赖窗口内写入，由 adoption 快照重发
+   * （{@link resendSnapshots}）承担：窗口内终态的 run 在 adoption 时刻内存对象已
+   * 是终态，快照重发追加的就是终态 entry。
+   */
+  rebind(pi: ExtensionAPI, ctx: ExtensionContext): void {
+    this.pi = {
+      appendEntry: (customType: string, data?: unknown) => {
+        guardStaleCtx(() => pi.appendEntry(customType, data), {
+          label: "subagent-workflow:jsonl-run-store.appendEntry",
+          // 「统一 stale → debug 丢弃」：窗口内丢弃是设计内降级，debug 留痕可归因
+          onStale: (error) =>
+            logger.debug(
+              "[subagent-workflow] workflow-record entry append skipped (stale ctx)",
+              { reason: toErrorMessage(error) },
+            ),
+        });
+      },
+    };
+    this.ctx = ctx;
+  }
+
+  /**
+   * [skill-reload D4] adoption 快照重发：把 runs 内全部 run 的当前快照经 per-runId
+   * 串行 flush 链（enqueueFlush → doFlush）重发一条权威 workflow-record entry。
+   *
+   * 设计红线：必须经本链而非裸 pi.appendEntry——doFlush 的 await writeFile 与
+   * appendEntry 之间存在事件循环间隙（W17 补充事实），绕链直接 append 会与
+   * in-flight 中间态 flush 物理乱序（终态在前中间态在后，last-ways 读回 running →
+   * 崩溃恢复误判）；走串行链后同 runId 的 entry 顺序由链内闭合保证。
+   *
+   * 节流语义自然继承 doFlush：终态 flush 永不节流（最终状态必进 pi 权威文件）；
+   * running 中间态受既有 entryAppendMinIntervalMs（缺省 60s）节流约束可跳过——
+   * 与常规 flush 同源（pi 文件最后一条 entry 最多落后真实状态一个窗口）。测试
+   * 断言因此按终态/首写路径构造，不依赖中间态重发必落。
+   *
+   * rollbackFirstWrite=false：重发不是新文件首写（不触发磁盘保留裁剪）；失败不
+   * 回滚 writtenOnce——重发失败向上抛，由 adoption 失败处置整体兜底（G3 可见）。
+   */
+  async resendSnapshots(runs: Map<string, WorkflowRun>): Promise<void> {
+    for (const run of runs.values()) {
+      // 串行 await：adoption 是一次性路径，跨 runId 顺序无语义，但全部重发完成
+      //（或首个失败上抛）后才返回，调用方据此判定接管完成。
+      await this.enqueueFlush(run.runId, run, [], false);
+    }
   }
 
  /**

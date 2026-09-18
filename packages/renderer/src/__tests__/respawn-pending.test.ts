@@ -1,5 +1,5 @@
 /**
- * respawn 过渡态端到端测试（crash-resilience T4 回流修复，Gate B 实测缺陷回归）。
+ * respawn 过渡态端到端测试（T4 回流修复，Gate B 实测缺陷回归）。
  *
  * Gate B 实测：pi kill -9 后 runtime 3/3 自动恢复成功，但 renderer 0/3 出现 T4 提示条——
  * UI 立即进终态错误页（composer 卸载），session.restored 两条通路（live 定向推送 /
@@ -113,7 +113,7 @@ function injectRestoreFailed(sessionId: string, willRetry: boolean): void {
   })
 }
 
-describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
+describe('respawn 过渡态（T4 回流修复）', () => {
   it('① 意外退出 → 进过渡态（不进终态派生：composer 判据保持 conversation）', async () => {
     await initAndConnect()
     const chatStore = useChatStore()

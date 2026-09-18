@@ -43,7 +43,7 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
  * core 包（@zhushanwen/subagent-core）agents/ 资产进 pi 发现面的注入根（C5⑥，
- * convergence §5.4 检查点 2；探针证据 docs/design/subagent-core-convergence.probe-c5.md）。
+ * convergence §5.4 检查点 2）。
  *
  * 解析锚点 = `@zhushanwen/subagent-core/workflows/README.md`：`./workflows/*` 子入口
  * 在 workspace TS 直引与 npm dist 两种发布形态下同径（publishConfig 保留该子入口），

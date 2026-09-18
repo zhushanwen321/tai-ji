@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-system-prompt-trace",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "System prompt trace extension: appends taiji:system-prompt entries to the session JSONL whenever the effective system prompt is established or changes",
   "type": "module",
   "main": "index.ts",

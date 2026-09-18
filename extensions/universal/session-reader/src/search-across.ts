@@ -16,6 +16,7 @@ import {
 import { parseSessionFile } from './core/parser.js'
 import { segmentTurns, type Turn } from './core/turns.js'
 import { buildTreeView } from './core/tree.js'
+import { BYTES_PER_KB, BYTES_PER_MB } from './core/units.js'
 import { err, pad } from './handler-utils.js'
 import type { SessionReadSignals } from './doctor.js'
 import type { SessionReadParams, ToolResult } from './tool-handler.js'
@@ -162,10 +163,6 @@ export function formatSearchText(
  * 第一道闸（超限明确拒绝并指引先 find，不静默超时）。
  */
 export const MULTI_SEARCH_MAX_SESSIONS = 10
-
-/** 字节展示/预算换算基数（人话格式化与预算常量共用同一量纲）。 */
-const BYTES_PER_KB = 1024
-const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 
 /** 跨会话单次检索的预算 MB 数（§8.2 V8 字节上限的量纲；换算见 SEARCH_SCAN_BYTE_BUDGET）。 */
 const SEARCH_SCAN_BUDGET_MB = 64

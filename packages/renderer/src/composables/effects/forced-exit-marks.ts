@@ -1,5 +1,5 @@
 /**
- * 强制退出意图标记（crash-resilience T4 回流修复的退出语义区分器）。
+ * 强制退出意图标记（T4 回流修复的退出语义区分器）。
  *
  * 背景：session.exited 帧对「pi 意外崩溃（runtime 会自动 respawn）」与「用户强制退出
  * （forceQuit RPC，runtime 构造性不 respawn）」不可区分（wire payload 相同，不改帧协议）。

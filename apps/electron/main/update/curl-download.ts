@@ -1,7 +1,7 @@
 /**
  * curl 整文件下载器（升级网络双引擎的第二引擎，D6/D7/D10）。
  *
- * 设计：docs/design/update-network-resilience.md §3.3 D6（curl 调用规格全节）/
+ * 设计：D6（curl 调用规格全节）/
  * D7（probe 引擎为 curl 时放弃多段、整文件走本模块）/ D10（三步降级链中本模块是
  * 第二步 curl+代理与第三步 curl 直连的执行体）。
  *

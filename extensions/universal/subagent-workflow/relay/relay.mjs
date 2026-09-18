@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * subagent relay 代理 CLI（E-1，docs/architecture/subagent-realtime-channel.md §3）。
+ * subagent relay 代理 CLI。
  *
  * 角色：双面字节泵——extension 眼中的 pi 子进程（stdio 与 spawn 真实 pi 字节级同构：
  * 逐行 JSONL RPC / get_state 握手由 extension 侧 session-runner 原样驱动，代理只搬运字节）

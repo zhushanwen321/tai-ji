@@ -261,8 +261,7 @@ describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
 // `fileBasename(path)`、session 显示 `label`（序列化为 `#sessionId`）、skill/subagent 显示
 // name/slug、image 显示缩略图，均 ≠ 序列化形态；且 `segmentsToText` 经 `needsBoundarySpace`
 // 对 chip→text 边界补空格，气泡只对 prev 为 slash 时渲染空格、其余 badge 走自身 `mr-1` 间距
-// ——两条原因并存。该展示投影与序列化的差异是本分支之前既有（登记于
-// docs/design/composer-multi-skill-injection.md §3.5-⑤ 的「normalizeContent 纯文本投影面」），
+// ——两条原因并存。该展示投影与序列化的差异是本分支之前既有（normalizeContent 纯文本投影面），
 // 不在本组用例锁定范围。
 //
 // **等价锁的层次（轮 3-5 复审 N-3a）**：本锁在下方 `MarkdownContentStub`（显式注册、只回显

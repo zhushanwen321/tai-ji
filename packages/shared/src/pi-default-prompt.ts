@@ -6,7 +6,7 @@
  * createAllToolDefinitions 7 工具（dist/core/tools/index.js:81-89），工具行 = 各工具
  * promptSnippet，guidelines = 各工具 promptGuidelines 按工具顺序 + 2 条 always 项。
  * 相对 0.80.3 的 diff：① 工具列表 4 → 7（+grep/find/ls）；② guidelines 新增 bash 的
- * PI_* 环境变量行；③ pi 文档路由行末尾 +environment variables (docs/environment-variables.md)。
+ * PI_* 环境变量行；③ pi 文档路由行末尾 +environment variables 指引（pi 上游文档，非本仓路径）。
  * 不含：AGENTS.md（project_context）/ skills / cwd / 日期 / hook 注入等动态段——
  * 这些段在 `--system-prompt` 替换后仍由 pi 照常拼接。
  *

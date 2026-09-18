@@ -2,7 +2,7 @@
  * SettingsMessageHandler config.getProviders supportedLevels 接线（U5 下发标注）测试。
  *
  * 锁定：getProviders reply 的 providers 与广播链路（message-broker.buildProviderListMsgs）
- * 同标 supportedLevels——modelService 用真实 ModelCapabilityRegistry 小 fixture（pi-ai 同源
+ * 同标 supportedLevels——modelService 用真实 attachSupportedLevels 纯函数小 fixture（pi-ai 同源
  * 计算），断言端到端 view-ready 值；并锁定 modelService 缺 attachSupportedLevels
  * （方法缺失降级）时原样 reply 不抛。
  *
@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
-import { ModelCapabilityRegistry } from '../services/model-capability.js'
+import { attachSupportedLevels } from '../services/model-capability.js'
 import type { ClientMessage, ProviderId, ProviderInfo, ServerMessage } from '@taiji/shared'
 
 const PROVIDERS: ProviderInfo[] = [
@@ -26,13 +26,12 @@ const PROVIDERS: ProviderInfo[] = [
   },
 ]
 
-/** 真实 registry 小 fixture：attachSupportedLevels 走 pi-ai 同源 computeSupportedLevels。 */
+/** 真实纯函数小 fixture：attachSupportedLevels 走 pi-ai 同源 computeSupportedLevels。 */
 function makeRegistryBackedModelService() {
-  const registry = new ModelCapabilityRegistry()
   return {
     aggregateModels: vi.fn(() => []),
-    attachSupportedLevels: vi.fn((providers: ProviderInfo[], piVersion?: string) =>
-      registry.attachSupportedLevels(providers, piVersion),
+    attachSupportedLevels: vi.fn((providers: ProviderInfo[], _piVersion?: string) =>
+      attachSupportedLevels(providers),
     ),
   }
 }

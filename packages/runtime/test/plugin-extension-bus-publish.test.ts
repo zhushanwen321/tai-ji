@@ -1,13 +1,11 @@
 /**
- * wave:perf-w08（02 文档 D1-1）——plugin / extension 三类消息接 MessageBus 的回归保护。
+ * wave:perf-w08（02 文档 D1-1）——plugin / extension 消息接 MessageBus 的回归保护。
  *
- * 覆盖 plan.md W08 验收点的三类断言：
+ * 覆盖 plan.md W08 验收点的断言：
  * - plugin:viewUpdate（transient）：bus 装配时经 publish 定向——订阅者收到、无 seq、
  *   不入 ring、seq 计数不推进、不再全局 broadcast；bus 未装配回退全局广播。
  * - plugin:uiRequest（stream）：sid 为 string 且 bus 装配 → publish 定向（有 seq、
  *   入 ring 可回放）且不再 broadcast；sid undefined（无活跃 session）保持全局 broadcast。
- * - extension.ui_timeout（stream）：payload 恒含 sessionId → bus publish 单通道
- *   （有 seq、入 ring；W09 D1-2 已收口）；bus 未装配回退 broadcast 兜底（消息不丢）。
  *
  * 测试框架：vitest（禁止 node:test）。运行：
  * cd packages/runtime && npx vitest run test/plugin-extension-bus-publish.test.ts
@@ -19,7 +17,6 @@ import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
 import type { WorkerPort } from '../src/services/plugin-service/plugin-rpc-server.js'
 import type { RpcRequest } from '../src/services/plugin-service/plugin-types.js'
-import { ExtensionMessageHandler } from '../src/transport/extension-message-handler.js'
 import type { IMessageBroker, ISessionService } from '../src/interfaces.js'
 import type { IPluginServiceDeps } from '../src/services/plugin-service/plugin-types.js'
 
@@ -239,69 +236,5 @@ describe('W08: plugin:uiRequest 经 bus publish（stream）', () => {
 
     service.handleUiResponse(bcast.payload.requestId, true)
     await expect(confirmPromise).resolves.toBe(true)
-  })
-})
-
-// ══════════════════════════════════════════════════════════════
-// extension.ui_timeout —— stream 类（bus 单通道 + broadcast 兜底）
-// ══════════════════════════════════════════════════════════════
-
-describe('W08/W09: extension.ui_timeout 经 bus publish（stream，单通道）', () => {
-  function makeTimeoutHandler(withBus: boolean) {
-    const bus = withBus ? new MessageBus() : undefined
-    const broadcast = vi.fn()
-    const ctx = {
-      send: vi.fn(),
-      reply: vi.fn(),
-      sendError: vi.fn(),
-      sessionService: { getRpcClient: vi.fn().mockReturnValue(undefined) },
-      extensionService: undefined,
-      extensionTimeoutMgr: { markTimedOut: vi.fn() },
-      broadcast,
-      nextPushId: vi.fn().mockReturnValue('p1'),
-      ...(bus ? { messageBus: bus } : {}),
-    }
-    const handler = new ExtensionMessageHandler(ctx as unknown as ConstructorParameters<typeof ExtensionMessageHandler>[0])
-    return { bus: bus as MessageBus, broadcast, handler }
-  }
-
-  it('bus 装配 → publish 定向（订阅者收到、有 seq、入 ring）+ broadcast 不再被调（D1-2 收口）', () => {
-    const { bus, broadcast, handler } = makeTimeoutHandler(true)
-    const ws = createMockClient()
-    bus.subscribe('s1', ws)
-
-    handler.handleExtensionTimeout('s1', 'r1', 'confirm')
-
-    // 订阅者收到（stream 类：有 seq）
-    expect(ws.sent).toHaveLength(1)
-    const parsed = JSON.parse(ws.sent[0]!) as { type: string; payload: { sessionId: string; requestId: string }; seq?: number }
-    expect(parsed.type).toBe('extension.ui_timeout')
-    expect(parsed.payload.sessionId).toBe('s1')
-    expect(parsed.payload.requestId).toBe('r1')
-    expect(parsed.seq).toBe(1)
-
-    // 入 ring：回放视角可见
-    const ws2 = createMockClient()
-    const snap = bus.subscribe('s1', ws2)
-    expect(snap.snapshot).toHaveLength(1)
-    expect(snap.snapshot[0]!.type).toBe('extension.ui_timeout')
-
-    // wave:perf-w09（D1-2）：broadcast 双写腿已删——不再盲广播
-    expect(broadcast).not.toHaveBeenCalled()
-  })
-
-  it('bus 未装配 → 回退 broadcast 兜底（消息不丢，对齐 plugin-service 语义）', () => {
-    const { broadcast, handler } = makeTimeoutHandler(false)
-
-    // W09 review 修正：bus 未装配时不能静默丢弃——回退 broker.broadcast 盲广播，
-    // 与 plugin-service publishViewUpdate 的 broadcastOrBroker 兜底同「消息不丢」哲学
-    //（组合根恒装配 bus，此为防御路径的真实兜底行为断言）。
-    handler.handleExtensionTimeout('s1', 'r1', 'confirm')
-
-    expect(broadcast).toHaveBeenCalledTimes(1)
-    const msg = broadcast.mock.calls[0][0] as { type: string; payload: { sessionId: string; requestId: string } }
-    expect(msg.type).toBe('extension.ui_timeout')
-    expect(msg.payload.sessionId).toBe('s1')
-    expect(msg.payload.requestId).toBe('r1')
   })
 })

@@ -247,7 +247,9 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
 ]
 ```
 
-**自动关联逻辑**：用户在 Provider 设置里填好 baseUrl + apiKey 后，前端按 `match` 规则匹配 `QUOTA_PRESETS`，命中则自动建议「启用 Coding Plan 额度查询」。
+**自动关联逻辑**（现行两条路径）：
+- **设置页手动路径**：Provider 编辑体的额度配置面板按 `match` 规则自动回填查询类型默认值（`useQuotaConfigure` 的 preset fallback）；开关默认关，由「保存并测试」或开关显式落盘（D4：enabled 是用户同意位）。
+- **导入自动开启（导入即默认同意，用户可关闭）**：从其他 agent 导入 provider（W2）时，runtime 侧对「本次真实落盘（imported）+ 按 baseUrl/name 命中 api-key 类 preset + 凭证为明文」的条目自动写 providers.json extras `quota { enabled: true, fetcher }`（`provider-importer.matchAutoEnablePreset`）。fetcher 显式落盘——catalog provider（如 zai-coding-cn 孤儿凭据）无 models.json 条目，查询侧的 baseUrl/name 自动匹配读不到定义。cookie 类（mimo / opencode-go）与 env/command 占位凭证不自动开启（查询条件不齐备）；skipped（同名冲突）条目不动，不覆盖既存配置。
 
 #### 2.2.2 Provider 配置扩展（数据模型）
 
@@ -399,7 +401,7 @@ grid-template-columns: 32px 1fr 32px 52px;
 | **P1** | runtime QuotaService + RPC 协议 + quota store | P0 |
 | **P2** | Settings UI：内置预设表 + ProviderEditModal 额度查询 Section | P1 |
 | **P3** | Composer hover 浮层：ModelSelectPopover 外层包 HoverCard | P1（数据） + 现有 HoverCard 组件 |
-| **P4** | 自动关联：provider 配置完成后自动建议启用额度查询 | P2 |
+| **P4** | 自动关联：导入即默认同意（api-key 类 preset + 明文凭证，runtime 自动开启）+ 设置页类型默认回填（见 §2.2.1） | P2 |
 
 P3 可以与 P2 并行（数据通路打通后，UI 两处独立）。
 
