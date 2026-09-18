@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-ask-user",
-  "version": "7.2.3",
+  "version": "7.2.4",
   "description": "Inline adaptive ask_user tool for Pi — single/multi-question structured input with split-pane preview and an inline free-text editor.",
   "type": "module",
   "main": "index.ts",

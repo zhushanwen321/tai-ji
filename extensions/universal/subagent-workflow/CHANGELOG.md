@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 8.14.5
+
+### Patch Changes
+
+- 10bde2f26: Fix README inaccuracies found in a fact-check pass: correct trigger conditions, config keys, and feature descriptions against current source behavior.
+
 ## 8.14.4
 
 ### Patch Changes
