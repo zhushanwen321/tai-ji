@@ -67,7 +67,6 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
     fileTree: { loadTree: vi.fn(async () => {}), selectFile: vi.fn() },
     appCommandActions: {
       newSession: vi.fn(),
-      goOverview: vi.fn(),
       toggleSidebar: vi.fn(),
       requestPresetOpen: vi.fn(),
     },

@@ -194,7 +194,7 @@ export interface UseSessionDeps {
 }
 
 // ── session.list server-push 订阅（#7 方案 A；CLAUDE.md 规则 #2 防重复注册）──
-// useSidebar 被 6+ 组件实例化（Sidebar/Turn/AppShell/PanelContainer/Workspace/Overview），
+// useSidebar 被 5+ 组件实例化（Sidebar/Turn/AppShell/PanelContainer/Workspace），
 // 若每实例各注册一次 onGlobalType，每次广播会触发 N 次相同整表快照应用（事件处理翻倍）。
 // 模块级 refCount：首个实例注册，末个实例卸载时取消，中间实例共享同一监听。
 let sessionListSubCount = 0
@@ -460,7 +460,7 @@ export function createUseSession(deps: UseSessionDeps) {
     hooks.evictVirtualKeys(id)
     hooks.clearAgentCallMapping(id)
     hooks.disposeChat(id)
-    // 清除该 session 的 derivedStatus/sessionDigest 缓存，避免已删 session 的 computed 残留
+    // 清除该 session 的 derivedStatus 缓存，避免已删 session 的 computed 残留
     hooks.invalidateStatus(id)
     // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线（hooks 序列末位追加）：
     // fire-and-forget——rejection 由 hook 实现方显式 .catch 消化（见接口契约），不阻塞删除链。

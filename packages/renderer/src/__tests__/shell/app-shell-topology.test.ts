@@ -11,7 +11,7 @@
  *
  * Mock 策略（沿用 sidebar-layout / session-status-icons 既有模式，避免全局副作用）：
  *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测面）
- *  - SettingsModal / Workspace / Overview / Sidebar stub（重组件依赖树，非拓扑被测面）
+ *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测面）
  *  - useSidebar stub（AppShell 仅消费 syncSessionToPanel）
  *  - 其余（AsideRegion / AppNavControls / TrafficLight / MainPanel + stores）走真实实现
  *
@@ -30,9 +30,6 @@ vi.mock('@/components/settings/SettingsModal.vue', () => ({
 }))
 vi.mock('@/components/workspace/Workspace.vue', () => ({
   default: { name: 'Workspace', template: '<div />' },
-}))
-vi.mock('@/components/overview/Overview.vue', () => ({
-  default: { name: 'Overview', template: '<div />' },
 }))
 vi.mock('@/components/sidebar/Sidebar.vue', () => ({
   default: { name: 'Sidebar', template: '<div data-testid="sidebar-stub" />' },

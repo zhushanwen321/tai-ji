@@ -5,7 +5,6 @@ import settings from './en-US/settings'
 import sidebar from './en-US/sidebar'
 import panel from './en-US/panel'
 import workspace from './en-US/workspace'
-import overview from './en-US/overview'
 import newTask from './en-US/newTask'
 import shell from './en-US/shell'
 import extensionUI from './en-US/extensionUI'
@@ -22,7 +21,6 @@ export default {
   sidebar,
   panel,
   workspace,
-  overview,
   newTask,
   shell,
   extensionUI,

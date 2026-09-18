@@ -5,7 +5,6 @@ import settings from './zh-CN/settings'
 import sidebar from './zh-CN/sidebar'
 import panel from './zh-CN/panel'
 import workspace from './zh-CN/workspace'
-import overview from './zh-CN/overview'
 import newTask from './zh-CN/newTask'
 import shell from './zh-CN/shell'
 import extensionUI from './zh-CN/extensionUI'
@@ -22,7 +21,6 @@ export default {
   sidebar,
   panel,
   workspace,
-  overview,
   newTask,
   shell,
   extensionUI,

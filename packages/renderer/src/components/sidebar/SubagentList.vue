@@ -187,7 +187,7 @@ const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
   subagents: SubagentRecord[]
-  /** 焦点 session id（null = Overview 态既有空态路径）；per-session 筛选分区 key（D5） */
+  /** 焦点 session id（null = 无聚焦 session 的空态路径）；per-session 筛选分区 key（D5） */
   sessionId: string | null
   isLoading?: boolean
   loadError?: string | null

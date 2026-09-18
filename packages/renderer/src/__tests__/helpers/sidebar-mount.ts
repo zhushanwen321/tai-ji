@@ -24,7 +24,6 @@ export const sidebarActionMocks = {
   deleteFolder: vi.fn(),
   renameSession: vi.fn(),
   newSession: vi.fn(),
-  goOverview: vi.fn(),
   loadSessions: vi.fn(() => Promise.resolve()),
   syncSessionToPanel: vi.fn(),
   assignSessionToProject: vi.fn(),

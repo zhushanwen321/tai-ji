@@ -1,7 +1,6 @@
 export default {
   newTask: '新建任务',
   search: '搜索',
-  overview: '概览',
   developer: '开发者',
   settingsTitle: '设置',
   selectSessionHint: '选择会话查看文件',

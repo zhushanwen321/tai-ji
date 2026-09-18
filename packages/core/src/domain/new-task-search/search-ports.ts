@@ -79,16 +79,14 @@ export interface FileChangeWatchPort {
 }
 
 /**
- * 应用命令 actions 端口（C-W3-5 四项全注入，打破循环 import 先例）。
+ * 应用命令 actions 端口（C-W3-5 全注入，打破循环 import 先例）。
  * 壳适配 renderer useSidebar/useSidebar initApp 注入：
  * - newSession：useSidebar().newSession（新建任务）
- * - goOverview：useSidebar().goOverview（进入概览）
  * - toggleSidebar：useSidebarStore().toggleCollapsed（原 useAppCommands 直调，收编端口）
  * - requestPresetOpen：usePresetStore().requestOpen（原 useAppCommands 直调，收编端口）
  */
 export interface AppCommandActionsPort {
   newSession(): void
-  goOverview(): void
   toggleSidebar(): void
   requestPresetOpen(): void
 }

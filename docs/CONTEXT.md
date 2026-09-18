@@ -168,12 +168,12 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 ### ~~Panel Grid~~（v3 已废弃）
 
-> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要"全局 panel 缩略图网格"。该鸟瞰能力收敛到 [Overview](#overview)（session 维度统筹）+ 双 Panel split。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
+> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要“全局 panel 缩略图网格”。鸟瞰形态已随 Overview 视图整体移除而消亡（见 [ADR-0067](adr/decisions.md)），会话统筹由 Sidebar Session List 承担。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
 
 ~~全局面板网格视图。展示所有 Panel 的缩略图，类似 macOS Mission Control / Windows Task View。用于快速定位和跳转 Panel。~~
 
 ### Window
-操作系统级 Electron BrowserWindow。v3 拓扑：窗口 (bg-base 平铺) 内含 `.app-shell`（flex + p-3），由持久 **Sidebar**（透明融合）+ 可切换的 **main** 区（float-panel 浮起）组成。main 区在 chat / overview / settings 三 view 间互斥切换。支持多窗口。
+操作系统级 Electron BrowserWindow。v3 拓扑：窗口 (bg-base 平铺) 内含 `.app-shell`（flex + p-3），由持久 **Sidebar**（透明融合）+ 可切换的 **main** 区（float-panel 浮起）组成。main 区在 chat / settings 两 view 间互斥切换。支持多窗口。
 
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
@@ -184,18 +184,13 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。
 
 ### Sidebar（侧栏）
-L0/L1。持久容器（非单列表），所有 view 共用。顶部 Logo + 主操作区 → segmented tab（会话|文件）互斥切换 → 子视图列表 → 底部设置/用户。透明融合于 base（无 background）。折叠态 + Overview 入口按钮。
+L0/L1。持久容器（非单列表），所有 view 共用。顶部 Logo + 主操作区 → segmented tab（会话|文件）互斥切换 → 子视图列表 → 底部设置/用户。透明融合于 base（无 background）。折叠态。
 
 ### Workspace（工作区）
 L1 Region。main 区在 `view=chat` 时的容器。承载双 Panel 主从模式（单 Panel = 默认态，开第二 session 才 split）。
 
 ### Panel（面板）的 5 zone
 L2 Module。一个 Panel 内部固定 5 个 zone 自上而下：① panel-header（per-session 元信息）② message-stream（消息流 + 回合折叠）③ progress-zone（单 Session 进度，内嵌 composer 上方）④ composer（输入区 + 工具区）⑤ git-zone（暂存/提交/Diff 入口）。
-
-### Overview（概览）
-L1 独立 Region（与 Sidebar / Workspace 并列，非 workspace 子视图）。多会话鸟瞰统筹——卡片网格 + 筛选排序 + 后台 agent 聚合。入口现状：仅经 SearchModal 的 go-overview 命令可达（v6 D14 nav 重构移除 sidebar 入口按钮，⌘⇧O 未绑定），激活后覆盖 main 区，sidebar 持久。与 Session List 分工：Session List = 导航切换（紧凑单列），Overview = 统筹监控（信息密集网格）。入口演变与原裁决见 [ADR-0023](../adr/decisions.md)（已否谱系注记）。
-
-> **别名**：`Mission Control`（已废弃，统一用 Overview）、`Panel Grid`（概念被 Overview 吸收，见上）。
 
 ### Search Modal（搜索浮层）
 L1 Overlay。⌘K 全局搜索浮层，归 Overlay 层（非 Sidebar 子组件）。Sidebar 仅保留触发入口。

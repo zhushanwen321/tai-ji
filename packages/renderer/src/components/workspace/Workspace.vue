@@ -2,7 +2,7 @@
   <!--
     容器组件 · Workspace（workspace/spec.md 双 Panel 主从容器）。
     承载 PanelContainer（单/双 panel 主从状态机）。
-    FG4 骨架：仅 chat view 内容（Overview 覆盖 main 区属 FG6 ADR-0023，此处不渲染）。
+    FG4 骨架：仅 chat view 内容（main 区 view 路由唯一分支）。
     无 session 时空态引导（spec §8.5 基础空态：欢迎语）。
   -->
   <div class="flex h-full w-full flex-col overflow-hidden">

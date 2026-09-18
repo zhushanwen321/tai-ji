@@ -86,7 +86,6 @@ function mountActionsHost(): { actions: ReturnType<typeof useSidebarSessionActio
         selectSession: vi.fn().mockResolvedValue(undefined),
         restoreSession: vi.fn().mockResolvedValue(undefined),
         newSession: vi.fn().mockResolvedValue(null),
-        goOverview: vi.fn(),
         loadSessions: vi.fn(),
         renameSession: vi.fn().mockResolvedValue(undefined),
         deleteSession: vi.fn().mockResolvedValue(undefined),

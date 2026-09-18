@@ -154,6 +154,6 @@ const iconKind = computed<IconKind>(() => {
  *  仅在无 fork 血缘且无 gitBranch 时作为副标题兜底（避免空行）。 */
 const dirName = computed(() => dirNameOf(props.session.cwd))
 
-/** 时间格式化：复用 logic 层相对时间纯函数（与 SessionCard 同一信息原子） */
+/** 时间格式化：复用 logic 层相对时间纯函数（同一信息原子） */
 const timeLabel = computed(() => formatRelativeTime(props.session.lastActiveAt))
 </script>

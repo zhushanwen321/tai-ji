@@ -30,7 +30,7 @@
   </template>
   <!-- Toast 通知：不再在根部固定挂载——ToastContainer 改 absolute 右上角锚定，挂载点
        收敛到 main-panel 内两分支（PanelContainer main-area（chat 主区）/ MainPanel
-       overview/settings 兜底），避免遮 composer 与 drawer。 -->
+       settings 兜底），避免遮 composer 与 drawer。 -->
   <!-- renderer 崩溃恢复一次性提示条（crash-resilience §3.1 T2）：窗口级，URL query 标志驱动
        （main 侧 reloadWindowAfterCrash 注入），useCrashRecoveryNotice 消费即清除标志
        （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->

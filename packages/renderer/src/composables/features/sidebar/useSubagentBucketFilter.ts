@@ -29,7 +29,7 @@ import type { SubagentFilterValue } from '@/lib/subagent-bucket'
 export function useSubagentBucketFilter(sessionId: Ref<string | null>): {
   /** 当前 session 的筛选视图（新 session 初值 = 'active' 默认视图） */
   filter: ComputedRef<SubagentFilterValue>
-  /** 切换当前 session 的筛选桶（null sid 时工厂内部 no-op，Overview 态不可改） */
+  /** 切换当前 session 的筛选桶（null sid 时工厂内部 no-op，无聚焦 session 态不可改） */
   setFilter: (value: SubagentFilterValue) => void
 } {
   // 标量需对象包装且必须 reactive 容器（见文件头响应式契约）

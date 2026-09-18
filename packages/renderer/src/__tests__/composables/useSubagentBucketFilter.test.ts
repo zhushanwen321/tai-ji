@@ -7,7 +7,7 @@
  *   （per-instance Map 挂载期内分区独立，D5）
  * - MF-A 响应式回归：setFilter 后 filter computed 立即反映（响应式容器契约——init 若是
  *   plain object，mutate 不触发 computed 失效，本断言必红，锁死 MF-A）
- * - null sid（Overview 态）：filter 默认 active，setFilter no-op
+ * - null sid（无聚焦 session 态）：filter 默认 active，setFilter no-op
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/composables/useSubagentBucketFilter.test.ts
  */
@@ -80,7 +80,7 @@ describe('useSubagentBucketFilter（D5 工厂分区）', () => {
     expect(label.value).toBe('bucket:all')
   })
 
-  it('null sid（Overview 态）：filter 默认 active，setFilter no-op 不可改', () => {
+  it('null sid（无聚焦 session 态）：filter 默认 active，setFilter no-op 不可改', () => {
     const sid = ref<string | null>(null)
     const { result } = runWithScope(() => useSubagentBucketFilter(sid))
 

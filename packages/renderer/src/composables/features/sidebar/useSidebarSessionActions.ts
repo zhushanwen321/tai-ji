@@ -2,10 +2,10 @@
  * useSidebarSessionActions —— Sidebar session 操作 handler 集合（从 Sidebar.vue 提取，减行用）。
  *
  * 职责：session 选择/新建/重命名/删除 + folder 删除 + branch 停止 + 列表重试 + SearchModal
- * 接线（searchDeps/onOpenSearchDrawer，复用 selectSession/newSession/goOverview 注入）的事件处理。
+ * 接线（searchDeps/onOpenSearchDrawer，复用 selectSession/newSession 注入）的事件处理。
  * 对称于 useSidebarSubagentActions。跨 store 编排（chat abort / subagent / workflow load）在此层完成。
  *
- * 依赖注入说明：useSidebar 的方法（selectSession/newSession/goOverview/loadSessions/renameSession/
+ * 依赖注入说明：useSidebar 的方法（selectSession/newSession/loadSessions/renameSession/
  * deleteSession/deleteFolder/focusedSessionId）由调用方注入——useSidebar 非单例（每次调用
  * createSessionStore + createUseSession 新建实例），不能在本 composable 内重复调用。
  * renameOpen/targetSessionId 是 RenameSessionDialog 的本地 UI ref，由 Sidebar.vue 创建并注入，
@@ -33,7 +33,6 @@ export interface UseSidebarSessionActionsOptions {
   /** dead session 重开（显式 restore RPC），sidebar 点击 dead session 时分流到此 */
   restoreSession: (id: string) => Promise<void>
   newSession: (cwd?: string) => Promise<string | null>
-  goOverview: () => void
   loadSessions: () => void
   renameSession: (id: string, label: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
@@ -52,7 +51,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     selectSession,
     restoreSession,
     newSession,
-    goOverview,
     loadSessions,
     renameSession,
     deleteSession,
@@ -248,7 +246,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   const searchDeps = useSearchModalDeps({
     selectSession,
     newSession: () => { void newSession() },
-    goOverview,
   })
   function onOpenSearchDrawer(tab: string): void {
     const { open } = useSideDrawer()

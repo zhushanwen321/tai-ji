@@ -772,7 +772,6 @@ export default {
   command: {
     'new-session': '新建任务',
     'toggle-sidebar': '收起侧栏',
-    'go-overview': '概览',
     'open-preset-select': '打开启动预设',
   },
   // ── Preset 页（PiPresetsPage）──

@@ -97,7 +97,7 @@ useSettingsShell()
 
 // 导航栈指针变化 → 同步 session.activeId + panel 载入（shell spec §八.5 G3-003「历史状态正确恢复」）。
 // 覆盖 ⌘[/⌘] 与 AppNavControls 后退/前进：pointer 变后若落在 chat+sessionId 条目，恢复该 session 到 panel。
-// overview/settings 条目不动 session（main 区被覆盖，保留上次 chat session 供回退）。
+// settings 条目不动 session（main 区被覆盖，保留上次 chat session 供回退）。
 // selectSession 主路径已立即同步，此 watch 兜底导航回退/前进；syncSessionToPanel 幂等，重复调用无副作用。
 watch(
   () => navigation.pointer,

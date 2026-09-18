@@ -42,7 +42,6 @@ function makeOptions() {
     selectSession: vi.fn(),
     restoreSession: vi.fn(),
     newSession: vi.fn(),
-    goOverview: vi.fn(),
     loadSessions: vi.fn(),
     renameSession: vi.fn(),
     deleteSession: vi.fn(),

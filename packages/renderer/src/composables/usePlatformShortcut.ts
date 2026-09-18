@@ -16,7 +16,7 @@
  * formatKbd('k')        // mac→'⌘K', win→'Ctrl+K'
  * ```
  *
- * 统一收口：此前 Sidebar/Workspace/Overview/Turn 各自硬编码 ⌘，win/linux 显示错误。
+ * 统一收口：此前 Sidebar/Workspace/Turn 各自硬编码 ⌘，win/linux 显示错误。
  */
 import { isMacPlatform } from '@/lib/platform'
 

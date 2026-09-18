@@ -140,6 +140,9 @@ landing 合并两源（本地 + pi）、session 内只用 pi 源（CommandPopove
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
+### ADR-0067 Overview 视图整体移除
+用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。
