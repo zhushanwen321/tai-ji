@@ -8,10 +8,10 @@
   <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
 </p>
 
-太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口：同时推进多个任务，实时看着 AI 思考、改文件、跑命令，随时分叉重试或并行铺开。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 18 个扩展，支持接入各类模型服务。
+太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 18 个扩展，支持接入各类模型服务。
 
 <p align="center">
-  <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面 — 侧栏多会话管理 + Agent 对话流：思考、工具调用、文件编辑全程实时可见" width="900" />
+  <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面：侧栏多会话管理与 Agent 对话流，思考、工具调用、文件编辑实时可见" width="900" />
 </p>
 
 > 开发约定、关键规则与调试纪律见 [AGENTS.md](AGENTS.md)。
@@ -97,37 +97,37 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ## 它能做什么
 
-### Agent 执行内核
+### Agent 执行
 
-- **并行 Subagent** — 重活派给子 agent 并行跑，主对话保持干净。侧栏 Subagent 面板总览全部子任务状态，点开任一个在右侧抽屉里看它的完整对话与产出；预算与轮次护栏兜底，跑飞了自动刹住
-- **Workflow 编排** — 把多个 subagent 串成 chain、并成 parallel 等有状态工作流：上游产出自动流转给下游，崩溃后可恢复续跑。侧栏 Workflow 面板实时看每个节点的执行进度
-- **Todo 与 Goal** — Agent 自动把任务拆成 todo 清单，完成一项勾一项；更大的目标走 goal 自治循环：你定验收标准，Agent 拿证据交付，预算烧完自动收尾而不是无限烧下去
-- **上下文自动管理** — 会话变长时 Agent 可自主压缩上下文（同模型摘要保留细节，前缀缓存尽量命中），接近阈值时主动提醒你；输入框旁随时 hover 查看当前上下文占用
-- **会话即资产** — 任何会话可分叉（⌘G 换方向重来）、交接（⌘J 打包上下文给新会话）、导入（⌘I 收录历史会话）；输入框里 `/` 唤命令、`#` 引用其他会话、`$` 引用文件、`@` 派 subagent。会话全部落盘为标准 JSONL，标题栏一键复制路径，pi 生态工具可直接读取
+- **并行 Subagent**：把独立任务派给多个子 agent 同时跑，主对话只留结论。侧栏 Subagents 面板汇总所有子任务，点开任一条可在右侧抽屉查看它的完整对话和产出。每个子任务带预算与轮次上限，超出即停。
+- **Workflow 编排**：用 chain、parallel 等模板把多个 subagent 组成有状态工作流，上游输出自动传给下游，中断后可从断点恢复。侧栏 Workflows 面板显示每个节点的状态。
+- **Todo 与 Goal**：Agent 会把任务拆成 todo 清单逐项完成；需要长时间运行的目标走 goal 模式，先定验收标准和预算，达成后自动收尾。
+- **定时任务**：Agent 可以创建 cron 或 interval 定时任务，到点自动唤醒会话执行，适合定时提醒、周期巡检、定时跑批。任务支持暂停、删除和手动触发一次。
+- **上下文管理**：会话变长时 Agent 可以自主压缩上下文（同模型生成摘要，尽量命中前缀缓存），接近阈值会主动提醒。输入框旁悬停即可查看当前上下文占用。
+- **会话操作**：⌘G 从最近的回复分叉出新会话，⌘J 把当前上下文交接给新会话，⌘I 导入已有会话。输入框支持 / 命令、# 引用会话、$ 引用文件、@ 派 subagent。所有会话以 JSONL 格式落盘，点击标题栏文件名即复制路径，pi 生态工具可以直接读取。
 
-### 执行过程看得见
+### 执行过程可见
 
-- **全程实时流** — 思考、工具调用、文件编辑边跑边出，markdown 增量渲染；每轮工作自动折叠成一行摘要（已工作 27s · 思考 ×3 · 工具 ×3），点开回看全过程
-- **Trace 台账** — 对话流之外一键切到 Trace：全量执行记录逐条列示，按类型筛选、全文搜索、一键只看上下文边界——压缩发生在哪、哪些内容进入了上下文，一目了然
-- **任务状态条** — todo / goal 进度以常驻状态条挂在对话流里，不用追问「干到哪了」
-- **结构化问答** — Agent 需要你拍板时弹结构化表单：多个问题、选项、自由输入分栏预览，答案原样回传，不在聊天里来回猜
-- **后台任务不丢** — 长耗时命令转后台跑，完成自动通知并继续处理；抽屉后台任务页集中查看输出
+- **实时对话流**：思考、工具调用、文件编辑逐步流出；每轮结束折叠成一行摘要（耗时、思考与工具次数），点开可查看完整过程。
+- **Trace 视图**：以台账形式列出会话的全部执行记录，支持按类型筛选和全文搜索，也可以只看上下文边界，检查压缩发生在哪里、哪些内容进入了上下文。
+- **任务状态条**：todo 和 goal 的进度以状态条形式固定显示在对话流中。
+- **结构化问答**：Agent 需要确认时弹出表单，可以包含多个问题、选项和自由输入，答案按结构回传给 Agent。
+- **后台任务**：耗时较长的命令可以转到后台执行，结束后自动通知并继续处理；抽屉中有专门页面集中查看输出。
 
 ### 工作台
 
-- **文件树** — 侧栏文件面板，万级目录流畅滚动，改过的文件直接带 git 角标
-- **内置终端** — 抽屉里的真终端，按会话各留现场，切回来接着用
-- **Git 面板** — 当前分支与文件变更一目了然；worktree 创建 / 切换 / 清理，多个任务各占一个工作目录并行不冲突
-- **浏览器面板** — 抽屉内嵌浏览器，Agent 操作的网页你可以亲眼看着它点
+- **文件树**：侧栏文件面板，大目录下依然流畅，改动过的文件带 git 标记。
+- **终端**：抽屉内置终端，每个会话独立保留现场。
+- **Git 与 worktree**：查看当前分支和文件变更；支持创建、切换、清理 worktree，让多个任务在不同目录并行进行。
+- **浏览器面板**：抽屉内置浏览器，可以直接查看 Agent 操作网页的过程。
 
-### 控制与自定义
+### 设置与控制
 
-- **系统提示词自定义** — 设置中整段替换 Agent 的系统提示词：显式保存不误触、改前快照随时还原、一键恢复默认
-- **工具权限档位** — 输入框旁切换 Agent 的工具权限，从只读分析到全工具放行
-- **多模型接入** — 预置主流 provider 目录，填 API key 即用；模型与思考档位在输入框旁一键切换，各 provider / 模型的配额随时可查
-- **设置中心** — Provider / 外观 / 技能 / Agent / 扩展 / System Prompt / 终端 / 预设 / worktree / 更新 / 系统 / 用量 12 个分区
-- **自动更新** — 新版本自动检测，确认后重启升级，Release Notes 中英双语
-
+- **系统提示词**：在设置中整段替换 Agent 的系统提示词，手动保存，修改前自动快照，可随时还原或恢复默认。
+- **工具权限**：在输入框旁切换工具权限档位，从只读到全工具。
+- **模型接入**：内置常用 provider 目录，填写 API key 即可使用；模型和思考档位在输入框旁切换，各 provider 的配额可在设置中查看。
+- **设置中心**：包含 Provider、外观、技能、Agent、扩展、System Prompt、终端、预设、worktree、更新、系统、用量 12 个分区。
+- **自动更新**：自动检测新版本，确认后重启升级。
 ## pi 扩展
 
 taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个随应用打包内置，开箱即用。以下 16 个扩展功能自足、可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
@@ -206,37 +206,6 @@ pnpm build:e2e && pnpm test:e2e
 | 国际化 | vue-i18n 10 |
 | 后端通信 | ws (WebSocket) + pi 子进程 RPC |
 | 打包 | electron-builder 26 |
-
-## 项目结构
-
-```
-├── apps/electron/            # Electron 壳
-│   ├── main/                 # 主进程（supervisor / window / gateway / shortcuts）
-│   └── preload/              # 安全桥接（electronAPI）
-├── packages/                 # pnpm workspace 包
-│   ├── renderer/             # Vue 前端（components / composables / stores / lib）
-│   ├── runtime/              # Node.js Runtime（transport / services / infra + plugins）
-│   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation 等）
-│   ├── ui/                   # taiji ui 组件库（@taiji/ui）
-│   ├── shared/               # 前后端共享类型
-│   ├── dom-core/             # composer DOM 层
-│   ├── mobile-renderer/      # 移动端渲染入口
-│   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
-│   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   ├── subagent-core/        # subagent 执行核心（跨引擎共享的编排 / 预算 / 通道层）
-│   ├── subagent-engine-sdk/  # 引擎协议 SDK（NDJSON stdio 契约与引擎原语）
-│   ├── pi-subagent-cli/      # pi 引擎 CLI（engine-protocol v1）
-│   ├── zcode-subagent-cli/   # zcode 引擎 CLI（app-server RPC）
-│   ├── pi-rpc/               # pi 子进程 RPC 共享层
-│   ├── session-delivery/     # 会话消息投递内核（队列 / 批量 / 去重 / 门控 flush）
-│   └── create-taiji-plugin/  # 插件项目脚手架
-├── extensions/               # 21 个 @zhushanwen/pi-* pi 扩展源码 + shared/ 共享库
-├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
-├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
-├── resources/                # 内置插件（statusline）
-├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
-└── .agents/                  # 项目级 agent / skill（merge / pr-cr-fix 等）
-```
 
 ## 发布
 

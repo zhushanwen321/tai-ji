@@ -8,10 +8,10 @@
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a> | <a href="https://github.com/zhushanwen321/tai-ji/releases">Download</a>
 </p>
 
-TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks in parallel, watch the AI think, edit files, and run commands in real time, and branch off to retry or fan out whenever you need. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel (npm package `@earendil-works/pi-coding-agent`), with 18 extensions bundled and ready out of the box.
+TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks side by side, watch the AI think, edit files, and run commands as it happens, and fork a session to retry whenever a reply goes the wrong way. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel (npm package `@earendil-works/pi-coding-agent`), with 18 extensions bundled and ready out of the box.
 
 <p align="center">
-  <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window — multi-session sidebar plus live agent conversation stream with thinking, tool calls, and file edits" width="900" />
+  <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window: multi-session sidebar and live agent conversation stream with thinking, tool calls, and file edits" width="900" />
 </p>
 
 > For development conventions, key rules, and debugging discipline, see [AGENTS.md](AGENTS.md).
@@ -97,37 +97,37 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ## What It Can Do
 
-### Agent execution core
+### Agent execution
 
-- **Parallel subagents** — hand heavy work to subagents running in parallel and keep the main conversation clean. The sidebar Subagents panel gives you an overview of every subtask; click one to inspect its full conversation and output in the right-hand drawer. Budget and turn guards are always on, so a runaway agent stops itself
-- **Workflow orchestration** — chain subagents into pipelines or fan them out in parallel as stateful workflows: upstream output flows downstream automatically, and a crashed run can resume. The sidebar Workflows panel shows live progress for every node
-- **Todo & goal loops** — the agent breaks work into a todo list and checks items off as it goes; bigger goals run a goal loop: you set acceptance criteria, the agent delivers evidence, and the loop winds down when the budget runs out instead of burning forever
-- **Autonomous context management** — when a session grows long the agent can compact its own context (same-model summaries that keep the details, with prefix cache kept warm) and warns you as thresholds approach; hover next to the input box to see current context usage at any time
-- **Sessions are assets** — fork any session (⌘/Ctrl+G to retry in a new direction), hand it off (⌘/Ctrl+J packages the context into a fresh session), or import past sessions (⌘/Ctrl+I). In the input box, `/` opens commands, `#` references other sessions, `$` references files, `@` spawns a subagent. Sessions are stored as standard JSONL — copy the path from the title bar and any pi-ecosystem tool can read it
+- **Parallel subagents**: dispatch independent tasks to multiple subagents at once and keep the main conversation for conclusions only. The sidebar Subagents panel lists every subtask; click one to read its full conversation and output in the drawer. Each subtask runs under a budget and turn limit and stops when either is exceeded.
+- **Workflow orchestration**: compose subagents into stateful workflows with templates like chain and parallel. Upstream output flows downstream automatically, and an interrupted run resumes from where it stopped. The sidebar Workflows panel shows the state of every node.
+- **Todo & goal**: the agent breaks work into a todo list and completes items one by one. Long-running goals run in goal mode: set acceptance criteria and a budget up front, and the agent wraps up once they are met.
+- **Scheduled tasks**: the agent can create cron or interval tasks that wake a session automatically at the scheduled time, for daily reminders, periodic checks, or recurring batch runs. Tasks can be paused, deleted, or triggered once manually.
+- **Context management**: when a session grows long the agent can compact its own context (same-model summaries, keeping the prefix cache warm) and warns you as thresholds approach. Hover next to the input box to check current usage.
+- **Session operations**: ⌘/Ctrl+G forks a new session from the latest reply, ⌘/Ctrl+J hands the current context over to a fresh session, ⌘/Ctrl+I imports an existing one. The input box supports / commands, # to reference sessions, $ to reference files, and @ to spawn subagents. Every session is stored as JSONL; click the file name in the title bar to copy its path, and any pi-ecosystem tool can read it directly.
 
-### An execution you can watch
+### Watching the execution
 
-- **Live streaming** — thinking, tool calls, and file edits stream in as they happen with incremental markdown; each working turn collapses into a one-line summary (worked 27s · thinking ×3 · tools ×3) you can expand to replay
-- **Trace ledger** — flip from the conversation to a structured Trace: every execution entry listed one by one, filterable by type, full-text searchable, with a one-click context-only view — see exactly where compaction happened and what entered the context
-- **Status strips** — todo / goal progress lives as a persistent strip inside the conversation, so you never have to ask "how far along are we?"
-- **Structured prompts** — when the agent needs a decision it presents a structured form: multiple questions, options, and free-form input with split-pane preview; your answers flow back verbatim
-- **Background tasks never drop** — long-running commands move to the background, notify on completion, and processing continues; a drawer page collects all background task output
+- **Live conversation**: thinking, tool calls, and file edits stream in as they happen; each turn collapses into a one-line summary (duration, thinking and tool counts) that expands on click.
+- **Trace view**: a ledger of every execution entry in the session, filterable by type and searchable in full text. A context-only mode shows where compaction happened and what entered the context.
+- **Status strips**: todo and goal progress stays pinned inside the conversation as a status strip.
+- **Structured prompts**: when the agent needs a decision it opens a form with multiple questions, options, and free-form input; answers return to the agent in structured form.
+- **Background tasks**: long-running commands can move to the background and notify you on completion, with a dedicated drawer page collecting their output.
 
 ### Workbench
 
-- **File tree** — a file panel in the sidebar that stays smooth on ten-thousand-entry directories, with git badges right on modified files
-- **Built-in terminal** — a real terminal in the drawer, one per session, each keeping its own state for when you switch back
-- **Git panel** — current branch and file changes at a glance; create / switch / clean up worktrees so parallel tasks each own a working directory without interference
-- **Browser pane** — an embedded browser in the drawer: watch the agent click through the pages it works on
+- **File tree**: a file panel in the sidebar that stays smooth on large directories, with git badges on modified files.
+- **Terminal**: a terminal built into the drawer, one per session, each keeping its own state.
+- **Git & worktrees**: check the current branch and file changes; create, switch, and clean up worktrees so parallel tasks work in separate directories.
+- **Browser pane**: a browser built into the drawer where you can watch the agent work through web pages.
 
-### Control & customization
+### Settings & control
 
-- **System prompt override** — replace the agent's system prompt entirely from settings: explicit save (no accidental writes), a snapshot to restore from, and one-click reset to default
-- **Tool permission modes** — switch the agent's tool permissions right next to the input box, from read-only analysis to full tool access
-- **Bring your own models** — a built-in provider catalog: paste an API key and go; switch model and thinking level next to the input box, and check quotas per provider / model anytime
-- **Settings center** — 12 domains: provider / appearance / skills / agent / extensions / system prompt / terminal / presets / worktree / updates / system / usage
-- **Auto update** — new versions are detected automatically; confirm and the app restarts to upgrade, with bilingual release notes
-
+- **System prompt**: replace the agent's system prompt entirely from settings. Saving is explicit, a snapshot is taken before each edit, and you can restore it or go back to the default at any time.
+- **Tool permissions**: switch tool permission levels next to the input box, from read-only to full access.
+- **Models**: a built-in catalog of common providers; paste an API key to start. Switch model and thinking level next to the input box and check quotas per provider in settings.
+- **Settings center**: 12 sections covering provider, appearance, skills, agent, extensions, system prompt, terminal, presets, worktree, updates, system, and usage.
+- **Auto update**: new versions are detected automatically; confirm and the app restarts to upgrade.
 ## pi Extensions
 
 TaiJi's Agent capabilities are implemented through the pi extension mechanism; source lives in [`extensions/`](extensions/) (21 `@zhushanwen/pi-*` packages + the `shared/` library), 18 of which ship bundled with the app, ready out of the box. The following 16 extensions are self-sufficient and usable standalone outside taiji (all published to npm, or loadable via `--extension`):
@@ -151,7 +151,7 @@ TaiJi's Agent capabilities are implemented through the pi extension mechanism; s
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection + attribution analysis |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner hands-on guide + read-only `cw_query` query tool |
 
-The remaining 5 (`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`) are taiji-integration-specific and have no function outside the taiji host. The 18 bundled extensions = 13 of the 16 in the table above + these 5; `pi-plan` / `pi-cache-probe` / `pi-cw-tool` are not bundled — install via npm or load with `--extension`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
+The remaining 5 (`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`) are taiji-integration-specific and have no function outside the taiji host. The 18 bundled extensions = 13 of the 16 in the table above + these 5; `pi-plan` / `pi-cache-probe` / `pi-cw-tool` are not bundled; install via npm or load with `--extension`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
 ## Quick Start (Development)
 
@@ -182,7 +182,7 @@ pnpm extensions:test
 pnpm build:e2e && pnpm test:e2e
 ```
 
-Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debugging port (stably derived from the worktree name; run `node apps/electron/scripts/dev-instance.mjs --print` to see this instance's port); connect with Playwright for screenshots / DOM snapshots / JS execution (without stealing focus) — see [AGENTS.md "Frontend Debugging"](AGENTS.md). Note that runtime source code is not hot-reloaded (tsx runs without watch), so restart `pnpm dev` after changing runtime code; renderer changes take effect automatically via vite HMR.
+Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debugging port (stably derived from the worktree name; run `node apps/electron/scripts/dev-instance.mjs --print` to see this instance's port); connect with Playwright for screenshots / DOM snapshots / JS execution (without stealing focus), see [AGENTS.md "Frontend Debugging"](AGENTS.md). Note that runtime source code is not hot-reloaded (tsx runs without watch), so restart `pnpm dev` after changing runtime code; renderer changes take effect automatically via vite HMR.
 
 ### Environment Variables
 
@@ -206,37 +206,6 @@ Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debuggin
 | Internationalization | vue-i18n 10 |
 | Backend communication | ws (WebSocket) + pi child-process RPC |
 | Packaging | electron-builder 26 |
-
-## Project Structure
-
-```
-├── apps/electron/            # Electron shell
-│   ├── main/                 # Main process (supervisor / window / gateway / shortcuts)
-│   └── preload/              # Secure bridge (electronAPI)
-├── packages/                 # pnpm workspace packages
-│   ├── renderer/             # Vue frontend (components / composables / stores / lib)
-│   ├── runtime/              # Node.js runtime (transport / services / infra + plugins)
-│   ├── core/                 # Frontend core layer (coordination / domain / extension-host / foundation, etc.)
-│   ├── ui/                   # taiji ui component library (@taiji/ui)
-│   ├── shared/               # Shared frontend-runtime types
-│   ├── dom-core/             # composer DOM layer
-│   ├── mobile-renderer/      # Mobile renderer entry
-│   ├── plugin-sdk/           # Plugin development SDK (types + mock)
-│   ├── extension-protocol/   # Extension GUI rendering protocol (TUI/GUI dual-mode types)
-│   ├── subagent-core/        # subagent execution core (engine-agnostic orchestration / budget / channel layer)
-│   ├── subagent-engine-sdk/  # Engine protocol SDK (NDJSON stdio contract + engine primitives)
-│   ├── pi-subagent-cli/      # pi engine CLI (engine-protocol v1)
-│   ├── zcode-subagent-cli/   # zcode engine CLI (app-server RPC)
-│   ├── pi-rpc/               # Shared pi child-process RPC layer
-│   ├── session-delivery/     # Session message delivery kernel (queue / batch / dedup / gated flush)
-│   └── create-taiji-plugin/  # Plugin project scaffolding
-├── extensions/               # 21 @zhushanwen/pi-* pi extension sources + shared/ library
-├── e2e/                      # Playwright E2E specs + visual baselines
-├── scripts/                  # Build / verification / release scripts (preflight / postbuild / verify-* / bundle-extensions)
-├── resources/                # Built-in plugins (statusline)
-├── docs/                     # Docs (architecture / design SSOT / extension guides / testing / ADR / troubleshooting)
-└── .agents/                  # Project-level agents / skills (merge / pr-cr-fix, etc.)
-```
 
 ## Release
 
