@@ -16,5 +16,6 @@
   { "name": "@zhushanwen/pi-smart-context", "description": "Agent-driven context compaction: compact_context tool, dual-mode summary takeover, tiered reminders", "tier": "feature" },
   { "name": "@zhushanwen/pi-session-manager", "description": "Agent-managed sessions: create/send/history/status/list/abort child sessions via select+marker channel to runtime handler", "tier": "feature" },
   { "name": "@zhushanwen/pi-base-tool-enhance", "description": "Bash tool override: foreground delegates to pi official factory, incremental background mode + tool error audit (migrated from unified-hooks)", "tier": "infrastructure" },
-  { "name": "@zhushanwen/pi-plugin-bridge", "description": "Plugin system bridge: register plugin tools into pi and relay events/intercepts via select marker channel", "tier": "infrastructure" }
+  { "name": "@zhushanwen/pi-plugin-bridge", "description": "Plugin system bridge: register plugin tools into pi and relay events/intercepts via select marker channel", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-plan", "description": "Lightweight plan mode for Pi coding agent", "tier": "feature" }
 ]
