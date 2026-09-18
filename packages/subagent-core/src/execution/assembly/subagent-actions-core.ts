@@ -126,8 +126,9 @@ export type StartHandlerResult = {
   /**
    * registry 全等回显：handle.details.model = record.model = `${provider}/${id}`，
    * 源头是 resolveModel 裁决放行的条目——通过校验 = 子进程必然按此名执行。
+   * [R4/D6-① 连带] undefined = 用户未指定模型（引擎自身缺省解析），缺席如实回显。
    */
-  model: string;
+  model: string | undefined;
   response: BgResponse;
 };
 

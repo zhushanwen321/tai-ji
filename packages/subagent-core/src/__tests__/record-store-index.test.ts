@@ -469,7 +469,9 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     if (aEntry === undefined || aEntry.negative === true) throw new Error("a.jsonl should be a positive entry");
     expect(aEntry.id).toBe(recordsA.find((r) => r.id === "sa-1")?.id);
     expect(aEntry.task).toBe("test task");
-    expect(aEntry.model).toBe(""); // 头部探测拿不到 model_change → 空串（DS4 合法）
+    // [R4/D6-①] 头部探测拿不到 model_change → undefined（缺席语义——旧「空串 DS4
+    // 合法」哨兵随 model 可选化退役，索引读侧守卫已放行 undefined）
+    expect(aEntry.model).toBeUndefined();
   });
 
   it("S1TC9: 节流——60s 最小间隔窗内不写、过窗后 dirty 才写", { timeout: 30_000 }, async () => {

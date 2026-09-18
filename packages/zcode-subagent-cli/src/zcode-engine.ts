@@ -302,8 +302,17 @@ export class ZcodeEngine implements EnginePort {
       return this.abortedAppServerRun(task, ctx, startedAt);
     }
 
-    // ① prepare 期：模型解析（provider 体系校验——错误语义为进程创建前 reject）
-    const modelRef = resolveZcodeModelRef(task.model, this.deps.sources);
+    // ① prepare 期：模型解析（[R4/G3] 条件携带——task.model 显式（trim 非空）才走
+    // v2 单源校验解析；缺席时不携带 model 键，create 交由 zcode 自身缺省解析（用户
+    // defaultModelSelection 优先——恒传会静默压掉用户配置，R4 根因）。缺席跳过
+    // resolveZcodeModelRef 即跳过凭据预校验（D3）：preparer 的凭据空检查与具体模型
+    // 无关，缺席时无从预校验——跳过是正确行为而非放松，模型不可用的暴露点后移到
+    // 引擎侧 send/首响应（上游错误原文经 buildAppServerRunFailedMessage 透传）。
+    const requestedModel = task.model?.trim();
+    const modelRef =
+      requestedModel !== undefined && requestedModel !== ""
+        ? resolveZcodeModelRef(requestedModel, this.deps.sources)
+        : undefined;
     this.warnIgnoredCtxModel(task, ctx, modelRef);
     // [RX2-F1] 非常见档位出声一行（不拦截透传）；放主编排而非 attemptAppServerTurn——
     // schema 重试轮会二次进 attempt，warn 只应随任务出声一次
@@ -360,7 +369,7 @@ export class ZcodeEngine implements EnginePort {
   private async runAppServerAttemptsWithRetry(
     task: AgentCallOpts,
     ctx: RunContext,
-    modelRef: string,
+    modelRef: string | undefined,
     cwd: string,
     basePrompt: string,
     schema: JsonSchemaObject | undefined,
@@ -447,14 +456,15 @@ export class ZcodeEngine implements EnginePort {
   private async attemptAppServerTurn(
     task: AgentCallOpts,
     ctx: RunContext,
-    modelRef: string,
+    modelRef: string | undefined,
     cwd: string,
     prompt: string,
     opts: { turnTimeoutMs?: number; retried?: boolean } = {},
   ): Promise<AttemptResult> {
     const rt = this.ensureAppServerRuntime();
-    const { providerId, modelId } = splitZcodeModelRef(modelRef);
-    const createParams = buildAppServerCreateParams(task, providerId, modelId, cwd);
+    // [R4/G3] modelRef 缺席 → create 帧不携带 model 键（zcode 自身缺省解析）；
+    // 显式 → 拆分为 per-session {providerId, modelId}。
+    const createParams = buildAppServerCreateParams(task, modelRef, cwd);
 
     let currentSessionId: string | undefined;
     let signalSessionCreated: (() => void) | undefined;
@@ -897,10 +907,17 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * [u-h2 D2-2] 派发同步期 model 校验：委托 resolveZcodeModelRef（与 run prepare 期
-   * 同一函数——canonicalRef 归一化、短名缺省 provider、凭据与清单校验单一权威，无双实现）。
-   * modelRef undefined = 返回引擎缺省模型 canonical 全名（ZCODE_FALLBACK_DEFAULT_MODEL，
-   * D2-1 ctxModel 不透传的承接面）。校验失败原样抛 ZcodePrepareError，由编排层
+   * 显式路径同一函数——canonicalRef 归一化、短名缺省 provider、凭据与清单校验单一
+   * 权威，无双实现）。校验失败原样抛 ZcodePrepareError，由编排层
    * （engine/model-validation.ts）包装成「引擎与模型不配套」文案。
+   *
+   * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断面（宿主 cli 形态消费的是
+   * RemoteEngine 的 manifest 本地判定，不经本方法——SDK protocol methods.ts 明示
+   * validateModel 为诊断面）。缺席 modelRef 时返回 ZCODE_FALLBACK_DEFAULT_MODEL
+   * canonical 全名作为「引擎缺省模型」的呈现值（诊断面只读不 create，不参与
+   * create 缺席不携带的 G3 行为链）。帧应答形态维持 {canonicalRef: string}（SDK
+   * port-contract 契约必填——「帧字段缺席」的 optional 对齐需放宽 SDK 契约与
+   * server handler 签名，非本包单方面可完成）。
    */
   validateModel(modelRef: string | undefined): { canonicalRef: string } {
     return { canonicalRef: resolveZcodeModelRef(modelRef, this.deps.sources) };
@@ -999,20 +1016,23 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * [F16b] ctxModel 忽略留痕：ctxModel 是 pi 链路的第三层兜底（port.ts 契约——
-   * 依赖 pi resolveModel 链的引擎才消费它），zcode 自带 provider 体系与缺省模型
-   * （resolveZcodeModelRef：requested > ZCODE_FALLBACK_DEFAULT_MODEL），不消费
-   * ctxModel。「调用方给了 ctxModel 但 task.model 未显式指定」时出声一行，说明
-   * 实际落引擎缺省模型（含实际 model id）——防静默降档无据可查。只在「ctx 有模型
-   * 但被忽略」场景输出：显式 task.model 走正常解析链、ctx 本就无模型属预期缺省，
-   * 均不出声（避免噪音）。
+   * 依赖 pi resolveModel 链的引擎才消费它），zcode 不消费。「调用方给了 ctxModel 但
+   * task.model 未显式指定」时出声一行。只在「ctx 有模型但被忽略」场景输出：显式
+   * task.model 走正常解析链、ctx 本就无模型属预期缺省，均不出声（避免噪音）。
+   * [R4/G3] 文案更新：缺席 model 时 create 不携带 model 键（缺省模型由 zcode 自身
+   * 解析——用户 defaultModelSelection 优先），不再声称「实际使用引擎缺省模型
+   * <fallback>」（恒传时代的表述，与缺席不携带的新行为不符）。
    */
-  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext, modelRef: string): void {
+  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext, modelRef: string | undefined): void {
     if (ctx.ctxModel === undefined) return;
     const requested = task.model?.trim();
     if (requested !== undefined && requested !== "") return;
+    const resolution = modelRef !== undefined
+      ? `显式解析为 ${modelRef}`
+      : `create 不携带 model 键，缺省模型由 zcode 自身解析（用户 defaultModelSelection 优先）`;
     logger.warn(
       `[zcode-engine] ctx.ctxModel（${ctx.ctxModel.id}）被忽略——ctxModel 是 pi 链路兜底，zcode 不消费；` +
-        `task.model 未显式指定，实际使用引擎缺省模型 ${modelRef}`,
+        `task.model 未显式指定，${resolution}`,
       { taskId: ctx.taskId },
     );
   }
@@ -1364,23 +1384,26 @@ function appendSchemaRetryDirective(basePrompt: string, validationError: string)
   );
 }
 
-/** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。 */
+/** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。
+ *  [R4/G3] modelRef 条件携带：显式（trim 非空，上游已裁决 canonical）拆分为
+ *  per-session model；缺席不设键——zcode 走自身缺省解析（用户 defaultModelSelection
+ *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。 */
 function buildAppServerCreateParams(
   task: AgentCallOpts,
-  providerId: string,
-  modelId: string,
+  modelRef: string | undefined,
   cwd: string,
 ): SessionCreateParams {
   const denyTools = (task.denyTools ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
   // thinkingLevel → thoughtLevel（A.2 ① 键集内）：空白串归一为不设键——strict 对象下
   // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）
   const thoughtLevel = task.thinkingLevel?.trim();
+  const model = modelRef !== undefined && modelRef !== "" ? splitZcodeModelRef(modelRef) : undefined;
   return {
     workspacePath: cwd,
     mode: "yolo",
-    // per-session model（G3）：create 参数透传（A.2 ① strict 对象）——同进程任务
-    // 各用各的模型，互不干扰
-    model: { providerId, modelId },
+    // per-session model（G3）：显式指定时 create 参数透传（A.2 ① strict 对象）——同进程任务
+    // 各用各的模型，互不干扰；缺席不设键（zcode 自身缺省解析）
+    ...(model !== undefined ? { model } : {}),
     ...(thoughtLevel !== undefined && thoughtLevel !== "" ? { thoughtLevel } : {}),
     ...(denyTools.length > 0 ? { toolDenylist: denyTools } : {}),
   };

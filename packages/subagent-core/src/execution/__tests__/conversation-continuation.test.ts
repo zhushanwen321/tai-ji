@@ -1897,11 +1897,13 @@ describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循�
 
   /** zcode record（idle、sessionFile 恒 undefined、锚 = engineHandle.sessionRef）。
    *  engine 走 makeRecord overrides 通道（ExecutionRecord.engine readonly——创建期
-   *  确定不可变，测试经 Object.assign 注入替身值）。 */
-  function makeZcodeChatRecord(id: string, sessionId: string): ExecutionRecord {
+   *  确定不可变，测试经 Object.assign 注入替身值）。model 缺省 undefined = [U4/R4]
+   *  用户未指定形态（显式 undefined 经 Object.assign 覆盖 makeRecord 的默认留痕）。 */
+  function makeZcodeChatRecord(id: string, sessionId: string, model?: string | undefined): ExecutionRecord {
     return makeRecord({
       id,
       engine: "zcode",
+      model,
       status: "idle",
       round: 1,
       sessionFile: undefined,
@@ -2035,5 +2037,34 @@ describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循�
       sessionRef: { recordId: record.id, sessionFile: newFile },
     });
     expect(fake.runs[1]!.task.prompt).toBe("第二条");
+  });
+
+  // ── [U4/R4-G3] model 可选化辐射回归（缺席 = undefined 非空串）──
+
+  it("[U4/R4] 首轮 zcode 派发不指定模型 → record.model === undefined（非空串，缺席不盖章）+ taskSpec 无 model 键", async () => {
+    const handle = await service.execute({ task: "首轮无模型", slug: "nomodel", engine: "zcode" });
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    const record = store.getMutable(handle.subagentId);
+    // 写侧三处（D6-②）生效：validateModel 链缺席 → resolved.model undefined →
+    // record.model 留空（旧实现扁平化 ""）
+    expect(record?.model).toBeUndefined();
+    // 宿主 taskSpec 条件携带：record.model 缺席 → engine.run 的 task 不带 model 键
+    //（引擎侧 create 帧无 model 键的断言在 zcode-subagent-cli 侧 U4 用例）
+    expect("model" in zcode.runs[0]!.task).toBe(false);
+  });
+
+  it("[U4/R4] record.model undefined → 续聊轮 identity 重建判空不炸（D6-④）+ 任务不带 model", async () => {
+    await seedZcodeSessionDb([{ id: "sess_z_anchor" }]); // 活锚 = 正常 resume 路径
+    const record = makeZcodeChatRecord("sa-z-nomodel", "sess_z_anchor", undefined);
+    store.register(record);
+    expect(record.model).toBeUndefined();
+
+    // 旧实现在 dispatchChatRoundForContinuation 对 undefined 调 splitEngineModelRef
+    // 直接 TypeError——判空跳过后轮派发正常
+    await service.chatActions.deliverChatMessage(record, "无模型续聊");
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    expect(zcode.runs[0]!.task.prompt).toBe("无模型续聊");
+    // 与首轮同语义：任务不带 model 键（缺席交 zcode 自身缺省解析）
+    expect("model" in zcode.runs[0]!.task).toBe(false);
   });
 });

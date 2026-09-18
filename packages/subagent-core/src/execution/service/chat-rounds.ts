@@ -707,16 +707,25 @@ export class ChatRounds {
    * 编排而丢失（旧 chatMode 首轮亦有此缺口，坍缩后一并修复）；缺省（续轮）按
    * record 最小重建。task 恒以 input.task 为准（守卫段可能注入 reopen 摘要 /
    * worktree 重建提示前缀），worktree 恒以 record.worktreeHandle 现值为准。
-   * identity 恒从 record.model 重建（resolved 留痕词形往返自洽，等价）。
+   * identity 恒从 record.model 重建（resolved 留痕词形往返自洽，等价；[R4/D6-④]
+   * record.model 缺席 = 用户未指定 → resolved.model 留空、任务不带 model，与首轮
+   * 「缺席不盖章」同语义）。
    */
   dispatchChatRoundForContinuation(record: ExecutionRecord, input: ContinuationDispatchInput): void {
     const spec = input.firstRoundSpec;
-    const model = splitEngineModelRef(record.model);
+    // [R4/D6-④] 续聊 identity 重建对 record.model 判空：undefined = 用户未指定模型
+    //（引擎自身缺省解析）——跳过 splitEngineModelRef 重建、resolved.model 留空，
+    // 与首轮「缺席不盖章」同语义（禁空串哨兵：读侧水合归一后 "" 不再产生）。
+    const splitModel =
+      record.model !== undefined && record.model !== "" ? splitEngineModelRef(record.model) : undefined;
     const identity: ResolvedIdentity = {
       agent: record.agent,
       agentConfig: undefined,
       resolved: {
-        model: { id: model.id, name: model.name, provider: model.provider, reasoning: false },
+        model:
+          splitModel === undefined
+            ? undefined
+            : { id: splitModel.id, name: splitModel.name, provider: splitModel.provider, reasoning: false },
         thinkingLevel: record.thinkingLevel,
       },
     };
