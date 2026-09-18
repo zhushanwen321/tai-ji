@@ -63,6 +63,7 @@ export function seedSubagentExtension(dataDir: string, stagedName: string): stri
   fs.copyFileSync(bundle, path.join(dest, 'index.js'))
   const pkg = JSON.parse(fs.readFileSync(path.join(staged, 'package.json'), 'utf8'))
   pkg.main = 'index.js'
+  // eslint-disable-next-line no-magic-numbers -- 缩进 2 空格，staged package.json 与源格式保持一致（auth-storage 同款豁免）
   fs.writeFileSync(path.join(dest, 'package.json'), JSON.stringify(pkg, null, 2))
   return dest
 }

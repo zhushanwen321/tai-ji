@@ -244,6 +244,7 @@ export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions)
 const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt)-(\d{4}-\d{2}-\d{2}T\d{9}Z)$/
 
 /** 备份保留窗口：conflict/corrupt 副本是人工恢复的取证文件，7 天内不删。 */
+// eslint-disable-next-line no-magic-numbers -- 备份保留窗口时长表达式（7 天，校准依据见上方 JSDoc）
 export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
@@ -293,9 +294,7 @@ function expandOneLevel(dir: string, seen: Set<string>): string[] {
         if (statSync(entryPath).isDirectory()) push(entryPath)
       } catch { void 0 /* 单项 stat 失败跳过 */ }
     }
-  } catch {
-    // 目录不存在/不可读：no-op（启动链兜底，失败不上抛）
-  }
+  } catch { void 0 /* 目录不存在/不可读：no-op（启动链兜底，失败不上抛） */ }
   return out
 }
 

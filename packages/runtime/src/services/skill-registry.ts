@@ -754,6 +754,7 @@ export class SkillRegistry {
       try {
         this.logWatcherBatch(key)
       } catch (err) {
+        // 降级：归因是辅助日志，失败只记 stderr 不传播——重扫义务由下方 fn 独立承接（理由见上方注释）
         console.error(
           `[skill-registry] watcher batch attribution failed (degraded, rescan continues): ${
             err instanceof Error ? err.stack ?? err.message : String(err)
