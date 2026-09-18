@@ -202,6 +202,66 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
   });
 });
 
+describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）", () => {
+  it("首次 submit-review：无警告行、details 无 changed 字段", async () => {
+    const { exec } = setupActive();
+    const res = await exec({ action: "submit-review" });
+
+    expect(res.content[0].text).not.toContain("no documents changed");
+    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+  });
+
+  it("register-doc 后重提交：无警告且快照指纹随 version 更新落盘", async () => {
+    const { exec, pi } = setupActive();
+    await exec({ action: "submit-review" });
+    // 修订闭环：rewrite 后重登记，version 1 → 2
+    await exec({ action: "register-doc", fileName: "design.md" });
+    const res = await exec({ action: "submit-review" });
+
+    expect(res.content[0].text).not.toContain("no documents changed");
+    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:2");
+  });
+
+  it("未 register-doc 重提交：result 末行追加警告 + details.changed=false", async () => {
+    const { exec, pi } = setupActive();
+    await exec({ action: "submit-review" });
+    const res = await exec({ action: "submit-review" });
+
+    expect(res.content[0].text).toContain(
+      "Note: no documents changed since the last submit-review. " +
+      "If the user requested changes, you MUST rewrite the file(s) and re-register each via plan(action='register-doc') BEFORE calling submit-review again.",
+    );
+    // 追加为末行（追加一行契约）
+    expect(res.content[0].text.split("\n").at(-1)).toMatch(/^Note: no documents changed/);
+    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1, changed: false });
+    // 重提交不改写快照基线：指纹仍是上次值（docs 确实没变）
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:1");
+  });
+
+  it("gui 分支（revise 后未改文档重提交）同样追加警告 + changed=false", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    const comments = [{ quote: "第二节", comment: "补失败分支" }];
+    (ctx.ui.select as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ decision: "revise", comments }))
+      .mockResolvedValueOnce(JSON.stringify({ decision: "revise", comments }));
+
+    const first = await exec({ action: "submit-review" });
+    expect(first.content[0].text).not.toContain("no documents changed");
+    expect(first.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1 });
+
+    // 未 register-doc 直接重调 submit-review → 警告
+    const second = await exec({ action: "submit-review" });
+    expect(second.content[0].text).toContain(
+      "Note: no documents changed since the last submit-review",
+    );
+    expect(second.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1, changed: false });
+  });
+});
+
 describe("三 decision 消费（taiji 形态）", () => {
   function setupTaiji() {
     vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");

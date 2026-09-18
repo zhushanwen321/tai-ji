@@ -19,7 +19,7 @@ import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from 
 import type { GoalBridgeOutcome } from "./compact.js";
 import { formatReviewComments } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { freshAbortController, getPlanState, persistPlanState, resetPlanState } from "./state.js";
+import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -90,6 +90,11 @@ interface SubmitReviewDetails {
   /** gui = taiji 形态挂 PLAN_REVIEW_MARKER select；text = 独立 pi 软门（E8） */
   channel: "gui" | "text";
   docsCount: number;
+  /**
+   * 重提交无变化信号：false = 本次提交与上次 submit-review 之间无任何 register-doc
+   * （警告行已追加到 result 文本）。正常提交不携带该字段（缺失 = 无警告）。
+   */
+  changed?: false;
 }
 
 /** 审阅闭环的失败出口（E5/E6/取消）——details 与 content 文本都带恢复动作 */
@@ -159,6 +164,28 @@ function relativePath(fullPath: string, projectDir: string): string {
  */
 function isTaijiHost(): boolean {
   return process.env.TAIJI_AGENT_EXT_LOG === "1";
+}
+
+/**
+ * 重提交无变化警告（E8 机制级兜底）：独立 pi 实测（mimo-v2.5-pro，干净 session × 3）
+ * LLM 收到用户修改意见后不 rewrite/re-register 直接重调 submit-review——result 文本
+ * 已带的修订闭环指令不足以纠正，升级为确定性检测（docs 快照指纹比对）后逐次警告。
+ * 提示词级引导保留：警告行是追加信号，不替换原有闭环指令。
+ */
+const UNCHANGED_RESUBMIT_WARNING =
+  "Note: no documents changed since the last submit-review. " +
+  "If the user requested changes, you MUST rewrite the file(s) and re-register each via plan(action='register-doc') BEFORE calling submit-review again.";
+
+/** 警告命中时把警告行追加为 result 文本末行（「追加一行」契约），未命中原文返回 */
+function withUnchangedWarning(text: string, unchangedResubmit: boolean): string {
+  return unchangedResubmit ? `${text}\n${UNCHANGED_RESUBMIT_WARNING}` : text;
+}
+
+/** submit-review details 构造：警告命中时附 changed=false（正常提交字段缺失） */
+function submitReviewDetails(channel: "gui" | "text", docsCount: number, unchangedResubmit: boolean): SubmitReviewDetails {
+  return unchangedResubmit
+    ? { action: "submit-review", channel, docsCount, changed: false }
+    : { action: "submit-review", channel, docsCount };
 }
 
 // ── renderResult ───────────────────────────────────────────────────
@@ -373,7 +400,8 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
 /**
  * submit-review（D5/E6/E8/E10）：
  * - E6 双守卫：isActive=false → 错误不挂 select；docs 空 → 错误提示先 register-doc。
- * - 挂起前落 reviewState='awaiting'（崩溃恢复 E3 依赖此持久态）。
+ * - 挂起前落 reviewState='awaiting'（崩溃恢复 E3 依赖此持久态）+ docs 快照指纹
+ *   （重提交无变化检测基线，text/gui 两分支共用；快照缺失 = 无既往提交不警告）。
  * - 宿主分流：taiji（TAIJI_AGENT_EXT_LOG=1）发 PLAN_REVIEW_MARKER select；
  *   独立 pi 返回 E8 文本软门。
  * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按三 decision 消费。
@@ -401,9 +429,18 @@ async function executeSubmitReview(
     );
   }
 
+  // 重提交无变化检测：指纹与上次快照相同 ⇔ 上次 submit-review 后无任何 register-doc。
+  // 快照缺失 = 无既往提交（首次 / reset 后新轮次 / 旧版 entry 重挂），不警告。
+  const fingerprint = planDocsFingerprint(state.docs);
+  const unchangedResubmit =
+    state.lastSubmitReviewDocsFingerprint !== undefined &&
+    state.lastSubmitReviewDocsFingerprint === fingerprint;
+
   // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复后冷启动扫描
-  // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）
+  // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）。指纹快照同点更新：
+  // 单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review 时的 docs」）
   state.reviewState = "awaiting";
+  state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);
 
   // E8 宿主分流：独立 pi 无 marker 路由，pi TUI 会把 \x00 title + JSON options
@@ -412,12 +449,15 @@ async function executeSubmitReview(
     return {
       content: [{
         type: "text" as const,
-        text: `Documents are ready for review (${state.docs.length} registered). ` +
+        text: withUnchangedWarning(
+          `Documents are ready for review (${state.docs.length} registered). ` +
           `Tell the user the documents are ready and ask them to give feedback directly in the conversation. ` +
           `When they request changes: rewrite the file for each comment, then re-register it via plan(action='register-doc') (version bumps so the UI refreshes) — after ALL comments are addressed, call plan(action='submit-review') again. ` +
           `When the user is satisfied, they confirm and you call plan(action='complete').`,
+          unchangedResubmit,
+        ),
       }],
-      details: { action: "submit-review", channel: "text", docsCount: state.docs.length },
+      details: submitReviewDetails("text", state.docs.length, unchangedResubmit),
     };
   }
 
@@ -468,9 +508,12 @@ async function executeSubmitReview(
       return {
         content: [{
           type: "text" as const,
-          text: `User requested revision with ${response.comments.length} comment(s) — injected into the conversation. Handle the comments, re-register revised documents, then re-submit for review.`,
+          text: withUnchangedWarning(
+            `User requested revision with ${response.comments.length} comment(s) — injected into the conversation. Handle the comments, re-register revised documents, then re-submit for review.`,
+            unchangedResubmit,
+          ),
         }],
-        details: { action: "submit-review", channel: "gui", docsCount: state.docs.length },
+        details: submitReviewDetails("gui", state.docs.length, unchangedResubmit),
       };
     }
 
@@ -481,9 +524,12 @@ async function executeSubmitReview(
       return {
         content: [{
           type: "text" as const,
-          text: `User requested further explanation with ${response.comments.length} comment(s) — injected into the conversation. Answer them, then call plan(action='submit-review') again to re-hang the review.`,
+          text: withUnchangedWarning(
+            `User requested further explanation with ${response.comments.length} comment(s) — injected into the conversation. Answer them, then call plan(action='submit-review') again to re-hang the review.`,
+            unchangedResubmit,
+          ),
         }],
-        details: { action: "submit-review", channel: "gui", docsCount: state.docs.length },
+        details: submitReviewDetails("gui", state.docs.length, unchangedResubmit),
       };
     }
   }

@@ -58,7 +58,7 @@ describe("PlanState", () => {
 });
 
 describe("State persistence", () => {
-  it("persistPlanState calls appendEntry with all seven fields (no phase field — D6)", () => {
+  it("persistPlanState calls appendEntry with all eight fields (no phase field — D6)", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
@@ -72,7 +72,8 @@ describe("State persistence", () => {
 
     persistPlanState(mockPi, state);
 
-    // 精确匹配：新写的 plan-state entry 为七字段 schema（D1：四现状 + skills/docs/reviewState）
+    // 精确匹配：新写的 plan-state entry 为八字段 schema（D1：四现状 + skills/docs/reviewState
+    // + lastSubmitReviewDocsFingerprint）；无既往提交时指纹字段为 undefined（JSON 序列化自然消失）
     expect(mockPi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
       planFilePath: ".taiji-harness/test/plan.md",
@@ -81,6 +82,7 @@ describe("State persistence", () => {
       skills: ["tech-design"],
       docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 }],
       reviewState: "awaiting",
+      lastSubmitReviewDocsFingerprint: undefined,
     });
   });
 
@@ -201,8 +203,46 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
 
     const state = reconstructPlanState(mockCtx);
-    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "planFilePath", "requirement", "reviewState", "skills", "templateName"]);
+    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "reviewState", "skills", "templateName"]);
     expect(state.isActive).toBe(true);
+  });
+
+  it("lastSubmitReviewDocsFingerprint persists and reconstructs (E3 重挂恢复)；非 string 值按无既往提交丢弃", () => {
+    const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
+    const state: PlanState = {
+      isActive: true,
+      planFilePath: ".taiji-harness/auth/plan.md",
+      requirement: "auth",
+      templateName: "",
+      skills: [],
+      docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+      reviewState: "awaiting",
+      lastSubmitReviewDocsFingerprint: "design.md:1",
+    };
+
+    persistPlanState(mockPi, state);
+
+    // 用持久化 entry 走冷启动重建（E3：submit-review 崩溃 → 重开 session 后恢复快照，
+    // 重提交无变化检测仍能比对到上次基线）
+    const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const reopenCtx = {
+      sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(reopenCtx).lastSubmitReviewDocsFingerprint).toBe("design.md:1");
+
+    // 垃圾数据不进内存态：非 string 指纹按无既往提交处理（不警告语义）
+    const badCtx = {
+      sessionManager: {
+        getEntries: () => [
+          {
+            type: "custom",
+            customType: "plan-state",
+            data: { ...persisted, lastSubmitReviewDocsFingerprint: 42 },
+          },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(badCtx).lastSubmitReviewDocsFingerprint).toBeUndefined();
   });
 });
 
@@ -272,6 +312,20 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       { fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 },
     ]);
     expect(state.skills).toEqual([]);
+  });
+
+  it("fingerprint snapshot is cleared on reset (新 plan 轮次从无既往提交重新计数)", () => {
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
+    const active = sessions.get("session-1");
+    if (!active) throw new Error("setupActiveSession must seed session-1");
+    active.lastSubmitReviewDocsFingerprint = "design.md:2";
+
+    const state = resetPlanState(mockPi, sessions, "session-1", mockCtx);
+
+    // 指纹随退出失效（同 reviewState 同款 delete）；docs 保留不影响——
+    // 保留的 docs 不作为下一轮检测基线，reset 后首次 submit-review 不警告
+    expect(state.lastSubmitReviewDocsFingerprint).toBeUndefined();
+    expect(state.docs).toHaveLength(1);
   });
 });
 

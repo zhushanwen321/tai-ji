@@ -18,6 +18,12 @@ export interface PlanState {
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
   docs: PlanDocMeta[];
   reviewState?: PlanReviewState;
+  /**
+   * 上次 submit-review 时的 docs 快照指纹（planDocsFingerprint 产物）。缺失 = 无既往
+   * 提交（首次提交 / reset 后 / 旧版 entry 重挂），重提交无变化检测不警告；reset 随
+   * 退出失效（新 plan 轮次重新计数），重开 session 经 entry 恢复（E3 重挂同款受益）。
+   */
+  lastSubmitReviewDocsFingerprint?: string;
 }
 
 export const DEFAULT_PLAN_STATE: PlanState = {
@@ -31,6 +37,16 @@ export const DEFAULT_PLAN_STATE: PlanState = {
 
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
+
+/**
+ * docs 快照指纹：fileName:version 按登记序拼接。register-doc 任何形态（新增 /
+ * 同名原位 version+1）都会改变指纹 ⇒「与上次 submit-review 快照相同 ⇔ 期间无任何
+ * register-doc」。空 docs 的指纹是空串，但 submit-review 的 no-docs 守卫先行拦截，
+ * 空串指纹不会入库。
+ */
+export function planDocsFingerprint(docs: PlanDocMeta[]): string {
+  return docs.map((d) => `${d.fileName}:${d.version}`).join("|");
+}
 
 /**
  * 挂起 select 的 per-session AbortController 注册表（E10）。
@@ -72,8 +88,9 @@ export function getPlanState(
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
-  // 派生扫描），两侧独立常量，勿改字面量。reviewState 为 undefined 时 JSON 序列化自然消失
-  // （optional 字段），旧 entry 消费方对该字段惰性（D4 向后兼容）。
+  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（reviewState /
+  // lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化自然消失，旧 entry
+  // 消费方对该字段惰性（D4 向后兼容）。
   pi.appendEntry("plan-state", {
     isActive: state.isActive,
     planFilePath: state.planFilePath,
@@ -82,6 +99,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     skills: state.skills,
     docs: state.docs,
     reviewState: state.reviewState,
+    lastSubmitReviewDocsFingerprint: state.lastSubmitReviewDocsFingerprint,
   });
 }
 
@@ -106,6 +124,9 @@ export function resetPlanState(
   state.templateName = "";
   state.skills = [];
   delete state.reviewState;
+  // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
+  // 首次 submit-review 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
+  delete state.lastSubmitReviewDocsFingerprint;
   persistPlanState(pi, state);
   sessions.delete(sessionId);
   return state;
@@ -148,6 +169,13 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
+/** 快照指纹白名单式读取：非 string（含缺失）按无既往提交处理（D4 字段级降级） */
+function readDocsFingerprint(data: Partial<PlanState>): string | undefined {
+  return typeof data.lastSubmitReviewDocsFingerprint === "string"
+    ? data.lastSubmitReviewDocsFingerprint
+    : undefined;
+}
+
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const state = { ...DEFAULT_PLAN_STATE };
   const entries = ctx.sessionManager.getEntries();
@@ -166,6 +194,7 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
     state.skills = readSkills(data ?? {});
     state.docs = readDocs(data ?? {});
     state.reviewState = readReviewState(data ?? {});
+    state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(data ?? {});
     break;
   }
 
