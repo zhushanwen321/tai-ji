@@ -413,8 +413,9 @@ async function executeSubmitReview(
       content: [{
         type: "text" as const,
         text: `Documents are ready for review (${state.docs.length} registered). ` +
-          `Tell the user the documents are ready and ask them to give feedback directly in the conversation — ` +
-          `you will revise accordingly. When the user is satisfied, they confirm and you call plan(action='complete').`,
+          `Tell the user the documents are ready and ask them to give feedback directly in the conversation. ` +
+          `When they request changes: rewrite the file for each comment, then re-register it via plan(action='register-doc') (version bumps so the UI refreshes) — after ALL comments are addressed, call plan(action='submit-review') again. ` +
+          `When the user is satisfied, they confirm and you call plan(action='complete').`,
       }],
       details: { action: "submit-review", channel: "text", docsCount: state.docs.length },
     };

@@ -161,6 +161,10 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
     expect(res.content[0].text).toContain("directly in the conversation");
+    // E8 软门修订闭环：text result 就近携带与 formatReviewComments revise 对齐的指令
+    expect(res.content[0].text).toContain("rewrite the file");
+    expect(res.content[0].text).toContain("register-doc");
+    expect(res.content[0].text).toContain("plan(action='submit-review') again");
     // 挂起前落 awaiting（E3 崩溃恢复依赖此持久态）
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
