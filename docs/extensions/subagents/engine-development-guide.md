@@ -82,13 +82,13 @@
 | 方法 | 调用时机 | 时序约束 | 超时分级 | 幂等 | 失败形态 |
 |---|---|---|---|---|---|
 | `initialize` | 引擎进程启动后、首个 run 前握手（`engine-client.ts:422-441`） | 必须是首个请求；应答仅诊断面——capabilities/models 与 manifest 不一致 → warn 留痕，不参与同步成员判据（`methods.ts:11-13`、:126） | 控制面：`HANDSHAKE_TIMEOUT_MS` = 10s（`engine-protocol.ts:60`） | 否（每连接一次） | 超时 → `engine_handshake_timeout` 引擎不可用；版本越界 → `engine_protocol_mismatch`；gate 位多声明 → `engine_capability_mismatch`（§3） |
-| `probe` | 宿主诊断（可用性/版本漂移检测、fallback 三守卫输入） | 连接就绪后（`remote-engine.ts:183-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` `PROBE_TIMEOUT_MS` = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed` |
+| `probe` | 宿主诊断（可用性/版本漂移检测、fallback 三守卫输入） | 连接就绪后（`remote-engine.ts:183-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` **PROBE_TIMEOUT_MS** = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed` |
 | `run` | 任务派发（chat 域 `executeViaEngine` / workflow 域 SAR（SubprocessAgentRunner）.run） | 握手后；期间事件经 event 通知、句柄经 `host/handleReady` 回传；**应答到达即终态**（`methods.ts:153`） | **任务级无墙钟**（宿主不传 timeoutMs——`engine-client.ts:539`；超时治理 = 宿主显式 `timeoutMs` 走 cancel 链 + 引擎侧回收层 timer，§7） | 否（每 runId 一次） | 运行中失败不 reject——合成 error outcome + handle 正常返回（`remote-engine.ts:196-200`）；error 帧码按 §4 透传；进程崩 → `engine_crashed`（附 stderr 尾 400 字） |
 | `cancel` | 用户取消或宿主超时链触发，仅 run 在途时 | 应答仅受理确认；**终态本体由该 run 的 run 应答承载**（`methods.ts:164-170`） | 控制面：`CANCEL_SETTLE_GRACE_MS` = 3s（`engine-protocol.ts:63`；`engine-client.ts:602`）——超窗 core 走杀链 | 是（`ok:true` 恒定） | 引擎须 3s 内收敛终态；stop 生效 = 终态在窗内到达；超窗 = 共享进程收割、在途任务走崩溃路径（zcode 实装 §7 abort 链） |
 | `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:271-277`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
 | `listModels` | 模型目录诊断 | **宿主现行实装不发协议帧**——RemoteEngine 直读 manifest 快照三态映射（`remote-engine.ts:139-150`）；协议方法保留（`methods.ts:178-186`，`models: null` = 无枚举面） | 同步内存判定，无超时语义。引擎仍须实现并应答（属 9 方法集），宿主现行不调用 | 是 | 无（三态：null / [] / 数组） |
 | `validateModel` | 模型 ref 校验 | manifest 同源判定（`remote-engine.ts:154-177`）；`dynamic:false` 且未命中（含 undefined 查缺省）→ 同步拒 **record 不创建** | 同步内存判定 | 是 | `engine_model_unknown`（同步拒）；`dynamic:true` 放行原样 ref，运行期引擎拒绝 → `engine_model_mismatch`（run 失败 + record 标 failed，`error-codes.ts:15`） |
-| `dispose` | 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制面：`DISPOSE_GRACE_MS` = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
+| `dispose` | 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制面：**DISPOSE_GRACE_MS** = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
 | `ping` | 健康检查 | 连接就绪后任意时点（`engine-client.ts:593-597`） | 任务级（不设墙钟） | 是（`pong:true` 恒定） | **ADR-0047：静默 ≠ 卡死，不据此杀任务**（`methods.ts:14`）——ping 失败仅作诊断信号 |
 
 超时分级的依据：控制面单请求（握手/取消受理/停机）= 秒级具名常量；run/read/ping 等任务级 = 无墙钟——任务执行正常路径禁自带超时，回收层兜底允许默认有界（opt-out），见根 AGENTS.md「超时默认原则」与 [crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E。zcode 引擎侧双 timer（idle 30min / ceiling 60min，`zcode-subagent-cli/src/constants.ts:111`/:120）即回收层默认有界的实装先例（env 可关）。
@@ -298,23 +298,23 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 |---|---|---|---|
 | §1 准入 | `subagent-core/src/execution/engine/engine-manifest.ts` + `engine-inspect-package.ts` + `engine-discovery-*.ts` + `registry.ts`/`routing.ts` | discovery 检查管线三态判定；extensions 结构守卫 | [architecture.md](architecture.md) §1/§2.3、[extension-conventions.md](../extension-conventions.md) |
 | §2 协议 | `subagent-engine-sdk/src/protocol/`（methods/frames/reverse-channels/engine-protocol） + `subagent-core/.../engine/client/`（engine-client/remote-engine） | `protocol.test.ts` 封闭断言 + `contract-closure.test.ts` 双向可赋值 + conformance 套件 | [architecture.md](architecture.md) §3、C-proc-13、[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md) |
-| §3 capabilities | `protocol/contract-types.ts`（`EngineCapabilities`）+ 两引擎声明点（`zcode-engine.ts` `capabilities()` + 各包 manifest） + `capability-gate.ts` + `chat-rounds.ts` | 新增能力位同批：`EngineCapabilities` 类型 + manifest `CAPABILITY_ENUMS` 词表 + `CONSERVATIVE_CAPABILITIES` 保守值 + gate 判据 + 两引擎两镜像声明（枚举编译校验拦截漏改）；gate 双向判定 | C-ext-20 |
+| §3 capabilities | `protocol/contract-types.ts`（`EngineCapabilities`）+ 两引擎声明点（`zcode-engine.ts` `capabilities()` + 各包 manifest） + `capability-gate.ts` + `chat-rounds.ts` | 新增能力位同批：`EngineCapabilities` 类型 + manifest **CAPABILITY_ENUMS** 词表 + `CONSERVATIVE_CAPABILITIES` 保守值 + gate 判据 + 两引擎两镜像声明（枚举编译校验拦截漏改）；gate 双向判定 | C-ext-20 |
 | §4 错误码 | `subagent-core/.../engine/common/errors.ts` + SDK `protocol/error-codes.ts` | **封闭枚举 + `DEFAULT_RECOVERY_HINTS` Record 全集编译强制** | — |
 | §5 run 载荷 | `protocol/methods.ts`（`RunParams`/`RunContextParams`）+ `contract-types.ts`（`AgentCallOpts`/`ResumeAnchor`） | 帧级 schema（`protocol-schema.test.ts`/`resume-schema.test.ts`） | C-proc-09（relay 身份键）、[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
 | §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
 | §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件；settled-watchdog 活性守护（`lifecycle/settled-watchdog.ts`） | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
 | §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
-| §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`ENV_WHITELIST_CHECK` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
+| §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`check_env_whitelist_sync.py` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
 | §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
 | §11 验收 | `subagent-engine-sdk/src/node-executor.ts`（执行器矩阵）+ [TEST-STRATEGY.md](../../TEST-STRATEGY.md) | `check-vitest-guard.mjs`（测试防线挂载） | [TEST-STRATEGY.md](../../TEST-STRATEGY.md)、docs/testing/ |
-| 待建守卫 | 本指南枚举/词表表 ↔ 源码投影 diff（先例：CSS token SSOT check） | — | — |
+| 投影守卫（已建，2026-09-18） | `scripts/check-guide-contract-projection.mjs`——本指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影 diff（pre-commit 按指南与契约源码路径触发，install-hooks.sh 对应块；先例：CSS token SSOT check） | 投影失同步即拦截（计数 + 集合双向对账） | 根 AGENTS.md 主题索引「更新触发」行 |
 
-本表即 doc-symbol-drift 守卫（`scripts/check-doc-symbol-drift.mjs` 的 `DOC_MODULE_MAP`）的登记蓝本：按实际引用符号逐模块登记，宁缺勿滥。
+本表即 doc-symbol-drift 守卫（`scripts/check-doc-symbol-drift.mjs` 的 **DOC_MODULE_MAP**）的登记蓝本：按实际引用符号逐模块登记，宁缺勿滥。
 
 ## 13. 新引擎接入 checklist
 
 1. 读 [architecture.md](architecture.md) §1-§3（拓扑 + 协议面）。
-2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）、依赖红线（只依赖 SDK，消费入口仅 `.` 与 `./protocol`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 `ENGINE_ICON_REGISTRY` 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
+2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）、依赖红线（只依赖 SDK，消费入口仅 `.` 与 `./protocol`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 **ENGINE_ICON_REGISTRY** 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
 3. 按 §2 实现 9 方法 + 6 反向通道（控制面超时上限记牢；run 无墙钟；conformance 过 + bin 级协议 e2e 五断言）。
 4. 按 §3 声明 capabilities（引擎类 + package.json 两镜像同批；头注同批写依据）。
 5. 按 §4 登记错误码（引擎合成码进宿主枚举 + 恢复模板，漏登记编译失败）。

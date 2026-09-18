@@ -59,6 +59,15 @@ const DOC_MODULE_MAP = {
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
   // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
+  //
+  // 引擎开发指南（docs/extensions/subagents/engine-development-guide.md）：登记蓝本 =
+  // 该指南 §12 映射表——SDK 全 src（protocol 契约 + spawn/env/node-executor）、core 引擎
+  // 子域（errors/engine-manifest/capability-gate/journal-wiring/session-view）+ path-encoding
+  // （getSubagentSessionDir）、两引擎包（zcode constants/engine/session-channel/reader/parser、
+  // pi constants/spawn-args）、shared constants（ENV_WHITELIST_PREFIXES）。非导出的模块内
+  // const（PROBE_TIMEOUT_MS/DISPOSE_GRACE_MS/CAPABILITY_ENUMS/ENGINE_ICON_REGISTRY 等）不进
+  // 守卫符号表，指南以粗体非反引号形态引用（书写约定见指南头部断言分级）。
+  'docs/extensions/subagents/engine-development-guide.md': ['packages/subagent-engine-sdk/src', 'packages/subagent-core/src/execution/engine', 'packages/subagent-core/src/execution/assembly/path-encoding.ts', 'packages/zcode-subagent-cli/src', 'packages/pi-subagent-cli/src', 'packages/shared/src/constants.ts', 'packages/shared/src/paths.ts'],
 }
 
 /** 环境变量名白名单（非导出符号，文档合法引用）：项目（TAIJI_/PI_）与运行平台（NODE_/ELECTRON_/ZCODE_）env 前缀 */
