@@ -59,8 +59,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-// ask_user 豁免信号（D6）：extensionUIStore pending SSOT 的非响应式 getter（与
+// 豁免信号（D6）：extensionUIStore pending SSOT 的非响应式 getter（与
 // deriveStatus 同模式）——每秒 tick 轮询，信号出现后 ≤1 tick 抑制 warn（bar 不渲染）。
+// getter 谓词已扩义为富交互 overlay（ask-user ∨ schedule-create）：schedule-create
+// 确认等待同样 block turn 非空闲，漏接则等待超 10 分钟被误挂「turn 超时」警示 + abort 入口。
 const extensionUIStore = useExtensionUIStore()
 
 const { snapshot, snoozeWarn } = useTurnProgress(

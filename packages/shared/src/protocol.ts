@@ -1409,6 +1409,9 @@ export interface ServerMessageMapBase {
   // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
   // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
   // 前端消费时用类型守卫收窄为 AskUserQuestion[]。
+  // schedule-create 扩展字段（scheduleCreate/scheduleDraft）仅在 method='select' + scheduleCreate=true 时存在
+  // （runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select，U5）；
+  // scheduleDraft 用 unknown 保持 shared 依赖最小化，前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
   'extension.ui_request': {
     sessionId: string
     requestId: string
@@ -1423,6 +1426,9 @@ export interface ServerMessageMapBase {
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
+    // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在）
+    scheduleCreate?: boolean
+    scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
   }
   // session 通道推送（runtime session-service / index.ts 生产，W04 收紧）
   // compacting：compaction_start → interpreter 广播（唯一发送点 event-interpreter.handleCompactionStart），
