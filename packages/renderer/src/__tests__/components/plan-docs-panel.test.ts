@@ -154,6 +154,23 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
     expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="plan-docs-tab"]')).toHaveLength(3)
   })
+
+  it('首拉失败且无既有 view（C-U1）→ 空态分支呈现错误行（错误原文 + 恢复指引），非静默降级', async () => {
+    commandMock.mockRejectedValue(new Error('rpc timeout'))
+    const wrapper = mount(PlanDocsPanel, {
+      props: { sessionId: SID },
+      global: { stubs: { PlanCommentPopover: true } },
+    })
+    await flushAsync()
+
+    // view=null → 横幅 isActive 门不渲染、错误不可见（C-U1 场景）；错误落本面板空态就近呈现
+    const err = wrapper.find('[data-testid="plan-docs-load-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('rpc timeout')
+    expect(err.text()).toContain('稍后重试或重开会话')
+    // 空态容器仍在（错误行是空态分支内的附加呈现）
+    expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(true)
+  })
 })
 
 describe('PlanDocsPanel 旧 schema 降级（D4）', () => {

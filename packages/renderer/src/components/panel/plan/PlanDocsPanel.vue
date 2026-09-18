@@ -15,6 +15,18 @@
   >
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.noPlan') }}</p>
     <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('plan.drawer.planHint') }}</p>
+    <!-- 首拉失败（分区 loadError，u1-store 错误通路）：view 为空时横幅不渲染（isActive 门），
+         错误若只落横幅呈全面即静默降级（C-U1）——本面板空态就近呈现「错误 + 恢复指引」，
+         与 PlanModeBanner 错误行同款形态 -->
+    <p
+      v-if="loadError"
+      data-testid="plan-docs-load-error"
+      role="alert"
+      class="text-[length:var(--text-2xs)] leading-relaxed text-danger"
+    >
+      {{ loadError }}
+      <span class="text-neutral-dim">{{ t('plan.docs.loadErrorHint') }}</span>
+    </p>
   </div>
   <div v-else data-testid="plan-docs-panel" class="flex h-full min-h-0 flex-col overflow-hidden">
     <!-- L2 横排文档 tab（demo doc-tabs 形态）：fileName ellipsis 截断（title 全名）+
@@ -183,7 +195,7 @@ const { t } = useI18n()
 
 // MarkdownRenderer 经 ChatViewDepsKey inject 壳层依赖；面板在 DrawerPanel 作用域内
 // （MessageStream provide 之外），须自行 provide——CommandDocPanel:143 同范式
-const { view, drafts, addDraft, removeDraft } = usePlanState(computed(() => props.sessionId))
+const { view, loadError, drafts, addDraft, removeDraft } = usePlanState(computed(() => props.sessionId))
 provide(ChatViewDepsKey, useChatViewDeps(computed(() => props.sessionId ?? '')))
 
 /** tab 条目（docItems 归一后的渲染模型；degraded = D4 降级条目） */

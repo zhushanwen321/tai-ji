@@ -37,6 +37,8 @@ export default {
     // E2: registered doc file missing (file.read failed) → error placeholder + re-produce hint, entry kept
     notFound: 'Document not found or deleted',
     notFoundHint: 'The file may have been moved or deleted. Ask the agent to re-produce it, or mention it in the conversation',
+    // First-load failure (partition loadError) surfaced in the panel empty state (C-U1): raw error + recovery hint
+    loadErrorHint: 'Failed to load plan state. Retry later or reopen the session',
   },
   comment: {
     // Selection comments (u1-docs-panel: select text → popover → draft, D6 lifecycle)

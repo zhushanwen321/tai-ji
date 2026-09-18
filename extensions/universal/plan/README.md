@@ -40,4 +40,4 @@
 
 ## 依赖
 
-peer 依赖 `@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）；`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约）。
+依赖：`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约，dependencies）；peer 依赖：`@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）。

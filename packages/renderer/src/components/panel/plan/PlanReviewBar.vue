@@ -144,9 +144,10 @@ const submitting = ref(false)
 
 /**
  * 三键裁决回传（D5）：payload 序列化 JSON 经 respond（extension.ui_response）回 pi select
- * resolve；revise/explain 打包评论草稿（拷贝快照，不传响应式引用），回传即清草稿（D6：
- * 评论已注入对话流持久，草稿生命周期到提交为止）；approve 无评论字段（判别联合结构上
- * 不可混带）。取首个挂起请求——正常时序恒单条（extension 单挂起），requestId 精确回传。
+ * resolve；revise/explain 打包评论草稿（拷贝快照，不传响应式引用）；三键回传后一律清草稿
+ * （D6：草稿生命周期到提交为止——revise/explain 注入对话流、approve 终局同样清（C-U2：
+ * 否则跨 plan run 残留，同 session 再次 /plan 时审批条显旧评论计数、误触 revise 注入旧
+ * 评论）。取首个挂起请求——正常时序恒单条（extension 单挂起），requestId 精确回传。
  */
 function submit(decision: 'approve' | 'revise' | 'explain'): void {
   const request: PlanReviewUIRequest | undefined = currentPlanReviewRequests.value[0]
@@ -157,7 +158,7 @@ function submit(decision: 'approve' | 'revise' | 'explain'): void {
     const payload: PlanReviewResponse =
       decision === 'approve' ? { decision: 'approve' } : { decision, comments }
     respond(request.requestId, JSON.stringify(payload))
-    if (decision !== 'approve') clearDrafts()
+    clearDrafts()
   } finally {
     submitting.value = false
   }

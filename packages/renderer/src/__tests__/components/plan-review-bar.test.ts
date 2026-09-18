@@ -210,6 +210,30 @@ describe('PlanReviewBar 三键 respond payload（PlanReviewResponse 判别联合
     expect('comments' in JSON.parse(result as string)).toBe(false)
   })
 
+  it('approve 终局同样清草稿（C-U2）：跨 plan run 无残留计数，同 session 再次 /plan 不误触 revise', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+
+    const store = usePlanStore()
+    store.addDraftComment({ quote: '遗留评论引文', comment: '遗留评语' })
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('1 条评论')
+
+    await wrapper.find('[data-testid="plan-review-approve"]').trigger('click')
+    await flushAsync()
+
+    // D6 草稿生命周期到提交为止的终局半边：approve 后草稿清空
+    expect(store.draftComments).toHaveLength(0)
+
+    // 跨 run 模拟：同 session 再次 /plan 挂起新审批请求 → 计数归零（旧评论不残留、
+    // 不会被误打包进新 run 的 revise payload）
+    emitPlanReviewRequest('pr-2')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
+  })
+
   it('revise → comments 打包自草稿快照（{quote, comment} 数组），提交后草稿清空（D6）', async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
     emitPlanReviewRequest('pr-1')

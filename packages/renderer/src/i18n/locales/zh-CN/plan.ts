@@ -37,6 +37,8 @@ export default {
     // E2：docs 登记的文件不存在（file.read 失败）→ 占位错误态 + agent 可重新产出提示，条目不清
     notFound: '文档不存在或已删除',
     notFoundHint: '该文件可能已被移动或删除。可让 agent 重新产出，或在对话中说明处理方式',
+    // 首拉失败（分区 loadError）在面板空态的就近呈现（C-U1）：错误原文 + 恢复指引
+    loadErrorHint: '计划状态加载失败，请稍后重试或重开会话',
   },
   comment: {
     // 划选评论（u1-docs-panel：划选文字 → 浮条 → 评论草稿，D6 生命周期）

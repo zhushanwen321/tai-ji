@@ -169,8 +169,9 @@
         </DrawerPanel>
       </div>
     </div>
-    <!-- 审批条（plan 模式重设计 u1-banner）：主面板底部独立行（drawer 底部集成归 u1-drawer-tab，
-         届时迁挂载点不动组件）。显示驱动公式在组件内（D5 四分支，isActive=false 不渲染 DOM）。 -->
+    <!-- 审批条（plan 模式重设计 u1-banner）：主面板底部独立行 = 终态位置（drawer 关闭时
+         审批操作仍可达，不随 drawer 显隐）。显示驱动公式在组件内（D5 四分支，isActive=false
+         不渲染 DOM）。 -->
     <PlanReviewBar :session-id="panelSessionId" />
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项） -->
