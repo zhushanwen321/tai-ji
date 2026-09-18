@@ -27,6 +27,12 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 import { ConversationContinuation } from "../assembly/conversation-continuation.ts";
+// [W1/R1] mock host reopenRecord 按 transcriptAnchorOf 派生锚写入（对齐
+// markReopenedImpl 写「闭包传入锚」的真实语义）。
+import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
+// [W1/R1 U1/U1b] zcode 新锚 binding 键基底（真链 binding 落盘断言用）。
+import { zcodeAnchorBasePath, RECORD_BINDING_SIDECAR_EXT } from "../persistence/state-marker.ts";
+import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type {
   ContinuationDispatchInput,
   ContinuationHost,
@@ -36,7 +42,7 @@ import { createNotifier, type BgNotifyRecord } from "../notify/notifier.ts";
 import { bindNotifyLedgerHost } from "../notify/notify-ledger.ts";
 import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
-import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { registerFakePiEngine, FakeRun, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
@@ -180,9 +186,13 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     },
     reopenRecord: (rec) => {
       // [U4 / §3.2.3] 模拟 store.markReopened 副作用（round 归零 + epoch+1 +
-      // stopReason=reopened）——降级路径的字段断言在单元面锁定。
+      // stopReason=reopened + transcriptRef = 闭包传入锚）——降级路径的字段断言在
+      // 单元面锁定。[W1/R1] 锚按 transcriptAnchorOf 派生写入（pi/zcode 形态各自
+      // 对齐 markReopenedImpl「写重开时刻锚」的真实语义：pi = sessionFile 路径锚、
+      // zcode = {sessionId, dbPath} 双键锚——正是后续回填点要清空的过渡锚形态）。
       if (!calls.reopenAllowed) return false;
-      record.transcriptRef = { engine: "pi", sessionFile: record.sessionFile ?? "" };
+      const anchor = transcriptAnchorOf(rec);
+      if (anchor !== undefined) record.transcriptRef = anchor;
       record.round = 0;
       record.epoch = (record.epoch ?? 0) + 1;
       record.stopReason = "reopened";
@@ -1741,24 +1751,56 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
     expect(calls.dispatched[0]!.task).toBe("继续看导出接口");
   });
 
-  it("锚失效（库条目被 TTL 清）→ 降级：reopenRecord 闭包恒 false（zcode 无 pi 锚）不抛错，无世代推进 + 摘要前缀 + resume:undefined", async () => {
+  it("[U1] 锚失效（库条目被 TTL 清）→ 闭包分派 reopenRecord（世代推进）：round 归零 + epoch+1 + 摘要前缀 + resume:undefined", async () => {
     // dbPath 指向不存在文件 = 锚失效（isAnchorResolvable fail-closed）
     const record = makeZcodeRecord({ dbPath: path.join(zcodeDir, "swept.sqlite"), round: 4 });
     record.status = "idle";
-    // reopenAllowed=false 复刻真实 run-orchestration 闭包对 zcode record 的行为
-    //（sessionFile undefined → markReopened pi 锚不可构造 → 恒 false）
+    // [W1/R1 D1a] 原「reopenRecord 闭包恒 false 无世代推进降级」固化用例翻转：
+    // 宿主闭包经 transcriptAnchorOf 单点分派 zcode 锚后，mock host（reopenAllowed
+    // 缺省 true）模拟 markReopened 世代推进副作用（round 归零 + epoch+1 + 过渡死锚
+    // 写入 transcriptRef）。binding 落盘真链断言见下方集成面（真实 store.markReopened）。
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("继续");
+
+    // markReopened 降级原语触达（host.reopenRecord 闭包分派 zcode 锚达点）
+    expect(calls.reopened).toEqual([record.id]);
+    // 世代推进：round 归零 + epoch+1（mock 内模拟真实原语副作用）
+    expect(record.round).toBe(0);
+    expect(record.epoch).toBe(1);
+    // [U6/D4 轮始清点族扩字段] reopened 展示位随清点族退役——markReopened 写入的
+    // stopReason='reopened' 被 revive 格同步清（重开信息由摘要 prompt 体感承载）。
+    expect(record.stopReason).toBeUndefined();
+    // 重开时刻过渡死锚写入 transcriptRef（markReopened 真实语义）——新轮回填点
+    // 清空（U1b 集成面专防）
+    expect(record.transcriptRef).toEqual({
+      engine: "zcode",
+      sessionId: "sess_z_anchor",
+      dbPath: path.join(zcodeDir, "swept.sqlite"),
+    });
+    expect(record.status).toBe("running");
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    // reopen 降级轮：resume:undefined（引擎开新 session，新锚由 onHandleReady 回填）
+    expect(calls.dispatched[0]!.resume).toBeUndefined();
+    // 首轮 prompt = 历史摘要前缀 + 用户消息（buildReopenSummaryPrompt 契约）
+    expect(calls.dispatched[0]!.task).toContain("[Session reopened]");
+    expect(calls.dispatched[0]!.task).toContain("- Completed rounds: 4");
+    expect(calls.dispatched[0]!.task).toContain("继续");
+  });
+
+  it("[U2] 锚失效 + reopenRecord false（binding 写失败注入）→ 与 pi 同构响亮抛错（不再静默降级）", async () => {
+    const record = makeZcodeRecord({ dbPath: path.join(zcodeDir, "swept.sqlite"), round: 4 });
+    record.status = "idle";
+    // [W1/R1 D1a] 原 zcode false → 静默降级分支已删除：false（binding 写失败 /
+    // CAS 拒绝注入）与 pi 同构响亮上抛，不再以无世代推进形态静默吞掉。
     const { host, calls } = makeHost(record, { reopenAllowed: false });
     const cont = new ConversationContinuation(record, host);
 
-    expect(() => cont.onMessage("继续")).not.toThrow();
-    expect(record.status).toBe("running");
-    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
-    // 无世代推进（无 markReopened 侧作用）：round 保持连续
-    expect(record.round).toBe(4);
-    expect(record.epoch).toBeUndefined();
-    expect(calls.dispatched[0]!.resume).toBeUndefined();
-    expect(calls.dispatched[0]!.task).toContain("[Session reopened]");
-    expect(calls.dispatched[0]!.task).toContain("继续");
+    expect(() => cont.onMessage("继续")).toThrow(/could not be reopened for a fresh transcript/);
+    expect(record.status).toBe("idle");
+    expect(calls.dispatched.length).toBe(0);
+    expect(calls.revived).toEqual([]);
   });
 
   it("锚缺失（zcode record 无 engineHandle——从未开跑）→ 全新 session 直派（resume:undefined、无摘要）", async () => {
@@ -1774,5 +1816,224 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     expect(calls.dispatched[0]!.resume).toBeUndefined();
     expect(calls.dispatched[0]!.task).toBe("first contact");
+  });
+});
+
+// ============================================================
+// 集成：[W1/R1] 锚失效重开真链（真实 store.markReopened + 真实回填点）——
+// U1（binding 落 `${dbPath}.${sessionId}` / pi 同构）+ U1b 循环专防（D1b：两处新轮
+// 锚确立点清空 transcriptRef，第二条消息判锚走派生键不再重开）+ D1b 边界③根治
+// （zcode 回填点补写新锚 binding）。引擎替身：pi = registerFakePiEngine、zcode =
+// ZcodeChatEngine（FakeRun 组装，conversation 能力放行 message 资格 gate）。
+// ============================================================
+
+/** zcode 会话形态轮替身（run 捕获挂 FakeRun；emitHandleReady/settle 由用例驱动）。 */
+class ZcodeChatEngine implements EnginePort {
+  readonly id = "zcode";
+  readonly runs: FakeRun[] = [];
+
+  capabilities(): EngineCapabilities {
+    // conversation 非 unsupported——message 资格引擎轴 gate 放行（真实 zcode 引擎
+    // capabilities.conversation = "cold" 同族语义；替身取放行值即可）。
+    return {
+      schemaEnforcement: "emulated",
+      steer: "unsupported",
+      conversation: "native",
+      personaInjection: "prompt",
+      eventGranularity: "stream",
+      sandbox: "none",
+      sessionRead: "full",
+      resume: "cold",
+      interrupt: "kill-only",
+      permissionMode: "native",
+      maxTurns: false,
+    };
+  }
+
+  async probe(): Promise<{ ok: true; engineVersion: string; checks: Array<{ name: string; ok: true }> }> {
+    return { ok: true, engineVersion: "fake-zcode-chat", checks: [{ name: "bin", ok: true }] };
+  }
+
+  run(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
+    const captured = new FakeRun(task, ctx);
+    this.runs.push(captured);
+    return captured.promise;
+  }
+
+  async read(): Promise<{ engineId: string; turns: never[]; source: "outcome-only" }> {
+    return { engineId: this.id, turns: [], source: "outcome-only" };
+  }
+}
+
+describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循环专防 + D1b 边界③ 新锚 binding 补写）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let store: RecordStore;
+  let pi: PiMock;
+  let fake: FakePiEnginePort;
+  let zcodeDir: string;
+  let zcodeDb: string;
+  let zcode: ZcodeChatEngine;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    killChildSpy.mockClear();
+    ({ agentDir, service, store, pi, fake } = makeService());
+    zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cont-zcode-reopen-"));
+    zcodeDb = path.join(zcodeDir, "db.sqlite");
+    zcode = new ZcodeChatEngine();
+    registerEngine("zcode", () => zcode);
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetSettledWatchdogsForTest();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** zcode record（idle、sessionFile 恒 undefined、锚 = engineHandle.sessionRef）。
+   *  engine 走 makeRecord overrides 通道（ExecutionRecord.engine readonly——创建期
+   *  确定不可变，测试经 Object.assign 注入替身值）。 */
+  function makeZcodeChatRecord(id: string, sessionId: string): ExecutionRecord {
+    return makeRecord({
+      id,
+      engine: "zcode",
+      status: "idle",
+      round: 1,
+      sessionFile: undefined,
+      engineHandle: {
+        sessionRef: { sessionId, dbPath: zcodeDb },
+        poolKey: "shared",
+      },
+    });
+  }
+
+  /** 真实 node:sqlite 建隔离库 + seed 条目（空 entries = 全部条目已被 TTL 清）。 */
+  async function seedZcodeSessionDb(entries: Array<{ id: string }>): Promise<void> {
+    const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
+    type Db = { exec: (s: string) => void; prepare: (s: string) => { run: (...a: unknown[]) => void }; close: () => void };
+    const db = new DatabaseSync(zcodeDb) as unknown as Db;
+    db.exec("CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY, time_created INTEGER)");
+    for (const e of entries) {
+      db.prepare("INSERT INTO session (id, time_created) VALUES (?, 1)").run(e.id);
+    }
+    db.close();
+  }
+
+  it("[U1] zcode 锚失效（库条目被 TTL 清）→ 真链 markReopened：round 归零 + epoch+1 + binding 落 `${dbPath}.${sessionId}` + 摘要注入", async () => {
+    await seedZcodeSessionDb([]); // 库在、条目无 = 锚失效
+    const record = makeZcodeChatRecord("sa-z-reopen", "sess_z_anchor");
+    store.register(record);
+    const markReopenedSpy = vi.spyOn(store, "markReopened");
+
+    await service.chatActions.deliverChatMessage(record, "继续");
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+
+    // 闭包分派真链：宿主闭包经 transcriptAnchorOf 派生 zcode 锚传入 store.markReopened
+    expect(markReopenedSpy).toHaveBeenCalledTimes(1);
+    expect(markReopenedSpy).toHaveBeenCalledWith(record, {
+      engine: "zcode",
+      sessionId: "sess_z_anchor",
+      dbPath: zcodeDb,
+    });
+    // 世代推进
+    expect(record.round).toBe(0);
+    expect(record.epoch).toBe(1);
+    // binding 落旧锚基底 `${dbPath}.${sessionId}.record-binding`（epoch 随 binding
+    // 持久化是硬要求——跨重启单调）
+    const bindingPath = `${zcodeAnchorBasePath({ sessionId: "sess_z_anchor", dbPath: zcodeDb })}${RECORD_BINDING_SIDECAR_EXT}`;
+    const binding = JSON.parse(fs.readFileSync(bindingPath, "utf-8")) as { recordId: string; epoch?: number };
+    expect(binding.recordId).toBe(record.id);
+    expect(binding.epoch).toBe(1);
+    // reopen 降级轮：fresh session（resume:undefined）+ 历史摘要前缀
+    expect(zcode.runs[0]!.task.prompt).toContain("[Session reopened]");
+    expect(zcode.runs[0]!.task.prompt).toContain("继续");
+    expect(zcode.runs[0]!.ctx.resume?.resume).toBeUndefined();
+  });
+
+  it("[U1b] zcode 循环专防：回填点清空 transcriptRef + 新锚 binding 补写（D1b 边界③）→ 第二条消息走派生键活锚不再重开", async () => {
+    await seedZcodeSessionDb([]);
+    const record = makeZcodeChatRecord("sa-z-loop", "sess_z_anchor");
+    store.register(record);
+
+    // 第一条消息：锚失效 → reopen（世代推进）→ 轮派发
+    await service.chatActions.deliverChatMessage(record, "第一条");
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    expect(record.epoch).toBe(1);
+
+    // 新轮回填：引擎回传新 sessionRef（每轮 session/create 新会话）——backfillRoundHandle
+    // 权威整替分支
+    zcode.runs[0]!.emitHandleReady({ sessionId: "sess_new", dbPath: zcodeDb });
+
+    // D1b ①：transcriptRef 过渡死锚清空（防「下一条消息再触发 reopen」永久循环）
+    expect(record.transcriptRef).toBeUndefined();
+    expect(record.engineHandle?.sessionRef["sessionId"]).toBe("sess_new");
+    // D1b ②（边界③根治）：新锚 binding 补写——重开窗口内崩溃重启后 epoch/统计基线
+    // 不致在新锚下从零开始（「epoch 随 binding 持久化是硬要求」）
+    const newBindingPath = `${zcodeAnchorBasePath({ sessionId: "sess_new", dbPath: zcodeDb })}${RECORD_BINDING_SIDECAR_EXT}`;
+    const newBinding = JSON.parse(fs.readFileSync(newBindingPath, "utf-8")) as { recordId: string; epoch?: number };
+    expect(newBinding.recordId).toBe(record.id);
+    expect(newBinding.epoch).toBe(1);
+
+    // 轮终收敛 → idle（轮终翻边）
+    zcode.runs[0]!.settle({ content: "第一轮回复" });
+    await vi.waitFor(() => expect(record.round).toBe(1));
+    expect(record.status).toBe("idle");
+
+    // 第二条消息：seed 新锚条目（活锚）→ 判锚走派生键 → 正常续聊、无第二次 reopen
+    await seedZcodeSessionDb([{ id: "sess_new" }]);
+    const markReopenedSpy = vi.spyOn(store, "markReopened");
+    await service.chatActions.deliverChatMessage(record, "第二条");
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(2));
+    expect(markReopenedSpy).not.toHaveBeenCalled();
+    expect(record.epoch).toBe(1); // 世代不再推进
+    // resume 锚 = 派生键新锚（引擎侧 session/resume 读 sess_new 历史）
+    expect(zcode.runs[1]!.ctx.resume?.resume).toEqual({
+      sessionRef: { sessionId: "sess_new", dbPath: zcodeDb },
+    });
+    // 活锚续聊：无 reopen 摘要注入
+    expect(zcode.runs[1]!.task.prompt).toBe("第二条");
+  });
+
+  it("[U1b] pi 循环专防：sessionFile 回填点清空 transcriptRef → 第二条消息走派生键活锚不再重开（与 zcode 同构）", async () => {
+    const record = makeChatRecord("sa-pi-loop", agentDir);
+    record.status = "idle";
+    store.register(record);
+    // 锚失效：session 文件被回收
+    fs.rmSync(record.sessionFile!);
+
+    // 第一条消息：锚失效 → reopen（真链 markReopened）→ 轮派发
+    const markReopenedSpy = vi.spyOn(store, "markReopened");
+    await service.chatActions.deliverChatMessage(record, "第一条");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(markReopenedSpy).toHaveBeenCalledTimes(1);
+    expect(record.epoch).toBe(1);
+    // 重开时刻过渡死锚写入 transcriptRef（markReopened 真实语义）
+    expect(record.transcriptRef).toEqual({ engine: "pi", sessionFile: record.sessionFile });
+
+    // 新轮回填：run 应答回填新 sessionFile → D1b 清空 transcriptRef + binding 落盘
+    //（round 断言：reopen 已把初值 1 归零，重开世代第一轮完成 = 1）
+    const newFile = path.join(agentDir, "sa-pi-loop-new.jsonl");
+    fs.writeFileSync(newFile, "{}\n", "utf-8");
+    fake.runs[0]!.settle({ content: "第一轮回复", sessionFile: newFile });
+    await vi.waitFor(() => expect(record.round).toBe(1));
+    expect(record.sessionFile).toBe(newFile);
+    expect(record.transcriptRef).toBeUndefined();
+    expect(fs.existsSync(`${newFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true);
+
+    // 第二条消息：新文件在盘（活锚）→ 判锚走派生键 → 正常续聊、无第二次 reopen
+    await service.chatActions.deliverChatMessage(record, "第二条");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    expect(markReopenedSpy).toHaveBeenCalledTimes(1); // 不再重开
+    expect(record.epoch).toBe(1);
+    // resume 锚 = 派生键新 sessionFile（续写新文件）
+    expect(fake.runs[1]!.ctx.resume?.resume).toEqual({
+      sessionRef: { recordId: record.id, sessionFile: newFile },
+    });
+    expect(fake.runs[1]!.task.prompt).toBe("第二条");
   });
 });

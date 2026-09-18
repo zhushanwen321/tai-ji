@@ -53,6 +53,11 @@ import {
 } from "../assembly/conversation-continuation.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
 import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
+// [W1/R1 方案 A] 锚派生单点（reopenRecord 闭包分派）+ zcode 新锚 binding 补写原语
+//（D1b 边界③根治——回填点补写对齐 pi 链 writeBindingForRecord）。
+import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
+import { persistSettleSnapshot } from "../persistence/record-store-terminal.ts";
+import { zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation, registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import { RemoteEngine } from "../engine/client/remote-engine.ts";
@@ -342,6 +347,12 @@ export class ChatRounds {
         );
         if (outcome.sessionFile !== undefined) {
           record.sessionFile = outcome.sessionFile;
+          // [W1/R1 D1b] 新轮锚确立点清空 transcriptRef：它是「重开已发生、新轮未
+          // 确立」窗口内的过渡锚（markReopened 写入的重开时刻旧锚），新锚
+          //（sessionFile 派生键）一经确立即过期——残留会让 transcriptAnchorOf 的
+          // transcriptRef 优先分支持续读到死锚，下一条消息再次触发 reopen（永久
+          // 循环，U1b 专防）。清空后锚派生回落 sessionFile 派生键（与写入值同源）。
+          record.transcriptRef = undefined;
           // [UF-1] 轮应答锚点落盘：跨重启后 coldLookupForAction 据此解析 id→file；
           // [D3a 时机①] 统一入口内 acquire 写权声明（fresh 首轮与 resume 续轮同经）。
           this.deps.writeBindingForRecord(record);
@@ -446,6 +457,19 @@ export class ChatRounds {
           // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
           poolKey: SHARED_POOL_KEY,
         };
+        // [W1/R1 D1b] 新轮锚确立点（zcode 侧）：① 清空 transcriptRef 过渡锚——
+        // 语义与 pi sessionFile 回填点同构（死锚残留会让下一条消息经
+        // transcriptAnchorOf 的 transcriptRef 优先分支再次触发 reopen，U1b 专防）；
+        // 先清再派生，锚回落刚覆写的 engineHandle.sessionRef 派生键。
+        // ② 补写新锚 binding（persistSettleSnapshot merge-or-create，best-effort
+        // 同 pi 链 writeBindingForRecord 记账面）——消 D1b 边界③双引擎不对称：
+        // 此前本回填点只落 entry 不写 binding，重开窗口内崩溃重启后新锚下
+        // epoch/统计基线从零开始（违反「epoch 随 binding 持久化是硬要求」）。
+        record.transcriptRef = undefined;
+        const freshAnchor = transcriptAnchorOf(record);
+        if (freshAnchor !== undefined && freshAnchor.engine === "zcode") {
+          persistSettleSnapshot(zcodeAnchorBasePath(freshAnchor), record, freshAnchor);
+        }
         this.deps.getStore().reportRecordTransition(record);
         return;
       }
@@ -629,14 +653,18 @@ export class ChatRounds {
       },
       // [U4 / §3.2.3] reopen 降级原语接线：锚失效 → store.markReopened（同 id 带
       // 历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘）。
-      // 锚入参 = record.sessionFile 路径复用（pi transcript 按路径定位：旧文件已被
-      // 回收，续轮 resume:undefined 派发后引擎在同目录开新 session，新锚由 run 应答
-      // 回填——writeBindingForRecord 在回填点重写 binding，markReopened 落旧路径旁
-      // 的 binding 为过渡死数据，随 session-file-gc 孤儿清理回收）。zcode 锚
-      //（sessionId 变更）的重开接线归 U6 transcript 锚单元。
+      // [W1/R1 方案 A] 锚入参经 transcriptAnchorOf 单点派生（引擎中立判别联合——
+      // pi = sessionFile、zcode = engineHandle.sessionRef {sessionId,dbPath}，与
+      // 判活 isAnchorResolvable / fork 守卫共享同一派生逻辑，无双源）。pi 锚取
+      // rec.sessionFile 派生键（每轮回填更新，绕开 transcriptRef 过渡死锚——D1b
+      // 清空后 transcriptRef 只在「重开已发生、新轮未确立」窗口内有值）；zcode 锚
+      // 派生自 engineHandle.sessionRef。undefined = 无锚（从未开跑）——无世代可
+      // 推进，返回 false 由调用方降级（派发守卫按全新 session 直派，不在此路径：
+      // reviveOrThrow 仅在锚在且不可解析时调用本闭包）。
       reopenRecord: (rec) => {
-        if (rec.sessionFile === undefined) return false;
-        return this.deps.getStore().markReopened(rec, { engine: "pi", sessionFile: rec.sessionFile });
+        const anchor = transcriptAnchorOf(rec);
+        if (anchor === undefined) return false;
+        return this.deps.getStore().markReopened(rec, anchor);
       },
       // [U2b 修复轮/D2] 轮始簿记（store.markRoundStarted）——Continuation 的唯一轮始写点。
       markRoundStarted: (rec) => {

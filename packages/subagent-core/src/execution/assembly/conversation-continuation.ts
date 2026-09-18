@@ -152,7 +152,10 @@ export interface ContinuationHost {
   reviveClosedRecord(record: ExecutionRecord): void;
   /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
-   *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
+   *  [W1/R1 方案 A] 宿主闭包经 transcriptAnchorOf 单点分派两引擎锚（pi = sessionFile /
+   *  zcode = engineHandle.sessionRef）——两引擎对 true/false 语义同构。
+   *  false = CAS 拒绝（record 非 idle——竞态收口）或 binding 持久化失败，调用方按
+   *  降级失败响亮上抛（D1a：原 zcode 静默降级分支已随闭包接线删除）。 */
   reopenRecord(record: ExecutionRecord): boolean;
   /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
@@ -890,17 +893,13 @@ export class ConversationContinuation {
       });
       if (this.host.reopenRecord(record)) {
         this.pendingReopenSummary = summary;
-      } else if (anchor.engine === "zcode") {
-        // [U6 偏差登记] zcode 锚失效降级：现行 reopenRecord 宿主闭包（run-orchestration
-        // 领地）只承载 pi 锚（sessionFile 缺失恒 false）——zcode 走无世代推进降级
-        //（fresh session + 摘要注入，round 连续——与 drain 窗口降级/U4-D2 偏差同族：
-        // round 不重置则 notifyId 无撞键面，epoch 推进非必要）。世代推进版 reopen
-        //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
-        this.pendingReopenSummary = summary;
       } else {
-        // pi：false = CAS 拒绝（竞态翻位）或 binding 持久化失败（epoch 硬要求，
-        // markReopened 已回滚内存面）——两者 record 都保持 idle 可重试，响亮上抛
-        //（Recovery 指引同款：重试 message 即可，写失败详情见 markReopened warn）。
+        // [W1/R1 D1a] pi 与 zcode 同构两分支（原 zcode 无世代推进静默降级分支随
+        // 宿主闭包 transcriptAnchorOf 单点分派接线删除——分支的存在前提「闭包对
+        // zcode 恒 false」已消失）。false = CAS 拒绝（竞态翻位）或 binding 持久化
+        // 失败（epoch 硬要求，markReopened 已回滚内存面）——两者 record 都保持
+        // idle 可重试，响亮上抛（Recovery 指引同款：重试 message 即可，写失败详情
+        // 见 markReopened warn）。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
           `while the message was being processed, or persisting the reopened generation failed). ` +
