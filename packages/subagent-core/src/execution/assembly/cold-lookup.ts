@@ -203,11 +203,19 @@ function findColdLookupCandidate(deps: ColdLookupDeps, id: string): SubagentReco
  *  该记录（findRecord 契约）。 */
 function assertAdmissionAllowed(found: SubagentRecord, id: string): void {
   if (found.worktree === true) {
+    // [R5] 历史保全占位按锚形态分流：pi 锚 = session 文件路径，直接指出处；
+    // zcode record 无 sessionFile（历史由隔离会话库经 engineHandle.sessionRef 承载、
+    // 不随 worktree checkout 丢失），硬渲染 `${sessionFile}` 会产出 "at undefined"。
+    // 拒绝语义本身不变，仅修文案占位的锚准确性。
+    const historyNote =
+      found.sessionFile !== undefined
+        ? `its conversation history remains intact at ${found.sessionFile}.`
+        : `its conversation history lives in the engine's isolated session db (carried by its session ref) and is not affected by the lost checkout.`;
     throw new ResurrectDeniedError(
       `subagent ${id} cannot be transparently resumed: it was created with worktree isolation, ` +
         `and its worktree checkout no longer exists after restart (resuming in place would make spawn cwd fall back to the main repo). ` +
         `Recovery: action:'start' a fresh subagent (with a new worktree if isolation is still needed); ` +
-        `its conversation history remains intact at ${found.sessionFile}.`,
+        historyNote,
     );
   }
   const foreign = found.sessionFile ? findForeignLiveInstance(found.sessionFile) : undefined;
