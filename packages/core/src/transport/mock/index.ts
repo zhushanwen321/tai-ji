@@ -373,6 +373,9 @@ function sleep(ms: number): Promise<void> {
 const ZCODE_MOCK_DB_PATH = '/mock/zcode/session-db/db.sqlite'
 const MOCK_HOUR_MS = 3_600_000
 const MOCK_DAY_MS = 86_400_000
+const MOCK_KB_BYTES = 1024
+const ZCODE_MOCK_SIZE_LARGE_KB = 512
+const ZCODE_MOCK_SIZE_SMALL_KB = 96
 const ZCODE_MOCK_ROWS: ReadonlyArray<{
   sessionId: string
   name: string | null
@@ -381,8 +384,8 @@ const ZCODE_MOCK_ROWS: ReadonlyArray<{
   ageMs: number
   alreadyImported: boolean
 }> = [
-  { sessionId: 'sess_9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88', name: '修复构建脚本', cwd: '/Users/demo/zcode-alpha', sizeBytes: 512 * 1024, ageMs: MOCK_HOUR_MS, alreadyImported: false },
-  { sessionId: 'sess_1c7e05a2-f3b9-47d2-9a41-5e8c6b0d2f37', name: null, cwd: '/Users/demo/zcode-beta', sizeBytes: 96 * 1024, ageMs: MOCK_DAY_MS, alreadyImported: true },
+  { sessionId: 'sess_9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88', name: '修复构建脚本', cwd: '/Users/demo/zcode-alpha', sizeBytes: ZCODE_MOCK_SIZE_LARGE_KB * MOCK_KB_BYTES, ageMs: MOCK_HOUR_MS, alreadyImported: false },
+  { sessionId: 'sess_1c7e05a2-f3b9-47d2-9a41-5e8c6b0d2f37', name: null, cwd: '/Users/demo/zcode-beta', sizeBytes: ZCODE_MOCK_SIZE_SMALL_KB * MOCK_KB_BYTES, ageMs: MOCK_DAY_MS, alreadyImported: true },
 ]
 
 /** zcode mock 候选快照（map 新对象——mock 惯例 fixture 快照隔离，调用方突变不污染源数据） */
