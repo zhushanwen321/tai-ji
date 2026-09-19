@@ -69,7 +69,8 @@ const TEMPLATE_USAGE_SAMPLE = "e.g. /plan <requirement> --template /path/to/temp
 
 /**
  * --template 值解析与校验（D5）：
- * - `~` 前缀展开（os.homedir，仅前缀 `~` 与 `~/`——无 per-user home 展开）；
+ * - `~` 前缀展开（os.homedir，仅 `~` 本身与 `~/` 前缀——`~name` 不展开，
+ *   无 per-user home 展开语义）；
  * - 相对路径相对 ctx.cwd（pi 进程 cwd = 项目根）解析，不做额外路径猜测；
  * - 存在性校验先于 .md 校验，两失败文案分家（not found / not a markdown file），
  *   报错一律带解析后的绝对路径供用户核对。
@@ -79,7 +80,7 @@ export function resolveTemplateFile(raw: string, projectDir: string): TemplateFi
   if (!trimmed) {
     return { ok: false, problem: `--template was given but no path followed it. ${TEMPLATE_USAGE_SAMPLE}` };
   }
-  const expanded = trimmed.startsWith("~") ? path.join(os.homedir(), trimmed.slice(1)) : trimmed;
+  const expanded = trimmed === "~" || trimmed.startsWith("~/") ? path.join(os.homedir(), trimmed.slice(1)) : trimmed;
   const absPath = path.resolve(projectDir, expanded);
   if (!fs.existsSync(absPath)) {
     return { ok: false, problem: `Template file not found: ${absPath}. ${TEMPLATE_USAGE_SAMPLE}` };

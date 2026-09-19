@@ -359,6 +359,18 @@ describe("resolveTemplateFile (D5 校验与文案分家)", () => {
     }
   });
 
+  it("~name form is not expanded (no per-user home semantics): resolves against projectDir verbatim", () => {
+    // `~foo` 不是用户名展开场景（D5 最小语义：仅 `~` 本身与 `~/` 前缀展开）——
+    // 按字面路径相对 projectDir 解析，不得吞进 os.homedir()
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === path.resolve("/tmp/test-project", "~foo/plan.md"));
+    const res = resolveTemplateFile("~foo/plan.md", "/tmp/test-project");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.absPath).toBe(path.resolve("/tmp/test-project", "~foo/plan.md"));
+      expect(res.absPath).not.toContain(os.homedir());
+    }
+  });
+
   it("relative path resolves against projectDir; not-found message carries usage sample", () => {
     const res = resolveTemplateFile("tpl.md", "/tmp/test-project");
     expect(res.ok).toBe(false);
