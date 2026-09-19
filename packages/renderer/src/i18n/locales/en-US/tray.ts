@@ -21,6 +21,7 @@ export default {
       bash: 'Background commands',
       subagent: 'Subagents',
       workflow: 'Workflows',
+      session: 'Child sessions',
     },
     /** Bucket view labels (runningProcess is bash-only, see header note; two-view ruling 2026-09-16: no third bucket) */
     bucket: {
@@ -75,6 +76,25 @@ export default {
     /** Order-4 aggregate entry (stacked icons + running count): title / aria-label interpolates the count */
     aggregate: {
       title: 'Task tray · {running} running',
+    },
+    /**
+     * Fourth entry "child sessions" (u7, design .tmp/tech-design/mode-system-composer-density.md §6.7 D7).
+     * Row status copy mirrors TraySessionPanel's process-level status map (see DISPLAY_STATUS there).
+     */
+    session: {
+      /** Header summary ({total} total · {running} running) */
+      header: '{total} total · {running} running',
+      empty: 'No child sessions',
+      status: {
+        running: 'Running',
+        done: 'Done',
+        error: 'Failed',
+        stopped: 'Stopped',
+      },
+      stop: 'Stop',
+      stopConfirm: 'Confirm stop',
+      stopFailed: 'Failed to stop child session: {msg}',
+      openFailed: 'Failed to open child session: {msg}',
     },
   },
 }

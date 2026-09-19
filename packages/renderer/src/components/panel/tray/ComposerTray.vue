@@ -7,10 +7,11 @@
   隐藏与 GenStatsTriggers 同判据）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
   「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
-  条目 = built-in 三件（bash → subagent → workflow，固定序恒在最左）+ 协议 widget 区（排序后逐个
+  条目 = built-in 四件（bash → subagent → workflow → session，固定序恒在最左）+ 协议 widget 区（排序后逐个
   TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），面板内容按类型分流：
 
-    built-in → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
+    built-in 三件 → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
+    built-in 第 4 件 session（u7）→ TraySessionPanel（子会话扁平列表，:session-id / pinned）
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
@@ -178,7 +179,7 @@
             v-if="item.running > 0"
             data-testid="tray-builtin-count"
             :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
-          >{{ item.running }}</span>
+          >{{ badgeCount(item) }}</span>
         </Button>
       </PopoverAnchor>
       <TrayPanelSurface
@@ -190,8 +191,14 @@
         @open-auto-focus="onOpenAutoFocus"
       >
         <TrayNativePanel
+          v-if="item.kind !== 'session'"
           :session-id="sessionId"
           :kind="item.kind"
+          :pinned="isPinnedOf(builtinKey(item.kind))"
+        />
+        <TraySessionPanel
+          v-else
+          :session-id="sessionId"
           :pinned="isPinnedOf(builtinKey(item.kind))"
         />
       </TrayPanelSurface>
@@ -245,18 +252,19 @@
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, LayoutGrid, SquareTerminal, Workflow } from '@lucide/vue'
+import { Bot, LayoutGrid, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
-import type { TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
+import type { TrayBuiltinKind } from '@/components/panel/tray/useTrayCounts'
 import { orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 import TrayAggregatePanel from '@/components/panel/tray/TrayAggregatePanel.vue'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import TrayPanelSurface from '@/components/panel/tray/TrayPanelSurface.vue'
+import TraySessionPanel from '@/components/panel/tray/TraySessionPanel.vue'
 import TrayWidgetButton from '@/components/panel/tray/TrayWidgetButton.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'
 import { TRAY_ITEM_COUNT_CLASS, TRAY_PULSE_CLASS, trayItemButtonClass } from '@/components/panel/tray/tray-item-button'
@@ -290,21 +298,19 @@ const HOVER_OPEN_DELAY_MS = 160
 /** 指针离开 icon+面板整体后的收起延时（D8：240ms——覆盖 icon 与面板之间 6px 间隙的移动耗时） */
 const HOVER_CLOSE_DELAY_MS = 240
 
-/** built-in 三件固定序（D1：不参与 widget 动态排序，恒在最左） */
-const BUILTIN_ORDER: readonly TrayTaskKind[] = ['bash', 'subagent', 'workflow']
+/** built-in 四件固定序（D1：不参与 widget 动态排序，恒在最左；第 4 件 session 见 u7 / §6.7 D7） */
+const BUILTIN_ORDER: readonly TrayBuiltinKind[] = ['bash', 'subagent', 'workflow', 'session']
 
-/** built-in 三件 icon（三件各自语义直取：bash = 终端、subagent = Bot、workflow = 流程） */
-const BUILTIN_ICONS: Record<TrayTaskKind, Component> = {
+/** built-in 四件 icon（四件各自语义直取：bash = 终端、subagent = Bot、workflow = 流程、session = 层叠路径） */
+const BUILTIN_ICONS: Record<TrayBuiltinKind, Component> = {
   bash: SquareTerminal,
   subagent: Bot,
   workflow: Workflow,
+  session: Waypoints,
 }
 
-/**
- * 面板键：built-in 与 widget 各带命名空间前缀，避免「widget 恰好叫 bash」撞键
- * （单 activeKey 是互斥的唯一真相，键必须无歧义）。
- */
-type BuiltinPanelKey = `native:${TrayTaskKind}`
+/** 面板键：built-in 与 widget 各带命名空间前缀，避免「widget 恰好叫 bash」撞键（单 activeKey 互斥，键必须无歧义） */
+type BuiltinPanelKey = `native:${TrayBuiltinKind}`
 type WidgetPanelKey = `widget:${string}`
 /** 序 4 聚合入口的面板键（单入口单面板，故为单字面量而非前缀模板） */
 type AggregatePanelKey = 'aggregate'
@@ -312,7 +318,7 @@ type TrayPanelKey = AggregatePanelKey | BuiltinPanelKey | WidgetPanelKey
 
 const AGGREGATE_PANEL_KEY: AggregatePanelKey = 'aggregate'
 
-function builtinKey(kind: TrayTaskKind): BuiltinPanelKey {
+function builtinKey(kind: TrayBuiltinKind): BuiltinPanelKey {
   return `native:${kind}`
 }
 function widgetKey(viewId: string): WidgetPanelKey {
@@ -320,7 +326,7 @@ function widgetKey(viewId: string): WidgetPanelKey {
 }
 
 interface BuiltinItem {
-  kind: TrayTaskKind
+  kind: TrayBuiltinKind
   icon: Component
   /** 进行中计数（> 0 决定亮计数/呼吸点；0 且 total > 0 → dim 常驻） */
   running: number
@@ -357,6 +363,11 @@ const builtinItems = computed<BuiltinItem[]>(() =>
     return [{ kind, icon: BUILTIN_ICONS[kind], running, total }]
   }),
 )
+
+/** 计数徽标值：session 件 = 子会话总数（设计 `.tmp/tech-design/mode-system-composer-density.md` §6.7 D7），其余件 = 进行中数 */
+function badgeCount(item: BuiltinItem): number {
+  return item.kind === 'session' ? item.total : item.running
+}
 
 /** ViewHost 数据源（未 provide 时视为无 widget：不抛错不 warn——缺 source 只影响 widget 区渲染） */
 const viewHostSource = inject(VIEW_HOST_SOURCE_KEY, null)

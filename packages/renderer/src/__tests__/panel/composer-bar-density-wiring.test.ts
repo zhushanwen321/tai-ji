@@ -44,11 +44,14 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
         bash: { running: trayFixture.bashRunning, ended: 0, total: trayFixture.bashRunning },
         subagent: { running: trayFixture.subagentRunning, ended: 0, total: trayFixture.subagentRunning },
         workflow: { running: 0, ended: 0, total: 0 },
+        // u7 第 4 件：本文件不验 session 件（无子会话 → 该件不渲染），恒 0
+        session: { running: 0, ended: 0, total: 0 },
       })),
       lists: {
         bash: { running: emptyList(), ended: emptyList() },
         subagent: { running: emptyList(), ended: emptyList() },
         workflow: { running: emptyList(), ended: emptyList() },
+        session: { children: emptyList() },
       },
       bashPartition: computed(() => ({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })),
       errors: { subagent: computed(() => null), workflow: computed(() => null) },
@@ -111,7 +114,7 @@ const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const stubs = {
   ComposerInput: ComposerInputMock,
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
+  // AddMenuPopover 保持真实：序 0 的 `+` 是「不退化」断言对象（trigger 带 title）
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
   GenStatsTriggers: SIMPLE,
@@ -263,9 +266,13 @@ describe('③ 序 0 不退化：窄档下发送位（+ 添加内容）仍在', (
     // 发送位（序 0）：四态之一必在（此处全 idle → send），title 含「发送」
     const sendButton = bar().findAll('button').find((n) => n.attributes('title')?.includes('发送'))
     expect(sendButton).toBeDefined()
-    // `+` 添加内容（序 0）：AddMenuPopover 的图标 trigger 仍在底栏内
-    expect(bar().findAll('button').length).toBeGreaterThan(0)
-    expect(bar().find('[data-testid="composer-input"]').exists()).toBe(false) // 输入区不在底栏（结构对照）
+    // `+` 添加内容（序 0）：真实 AddMenuPopover 触发器仍在底栏左簇
+    const addButton = bar().findAll('button').find((n) => n.attributes('title') === '添加内容（附件 / 命令）')
+    expect(addButton).toBeDefined()
+    // 序 0 的 `+` 在左簇首位、发送位在右簇末位（三簇结构下两端锚定）
+    const buttons = bar().findAll('button')
+    expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
+    expect(buttons[buttons.length - 1]?.attributes('title')).toContain('发送')
     // 序 1/2 合流形态生效（信息不丢，只是合成单 chip 容器）
     expect(bar().attributes('data-slot-capacity')).toBe('merged')
     expect(bar().attributes('data-slot-model')).toBe('merged')

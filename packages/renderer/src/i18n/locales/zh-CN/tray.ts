@@ -22,6 +22,7 @@ export default {
       bash: '后台命令',
       subagent: '子代理',
       workflow: '工作流',
+      session: '子会话',
     },
     /** 分桶视图标签（runningProcess 仅 bash 使用，见文件头词表裁决；[两视图裁决 2026-09-16] subagent 无第三桶） */
     bucket: {
@@ -76,6 +77,25 @@ export default {
     /** 序 4 聚合入口（层叠图标 + 运行数）：title / aria-label 带运行数插值 */
     aggregate: {
       title: '任务托盘 · {running} 项进行中',
+    },
+    /**
+     * 第 4 件「子会话」（u7，设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）。
+     * 行状态文案与 TraySessionPanel 的进程级 status 映射一一对应（见该文件 DISPLAY_STATUS）。
+     */
+    session: {
+      /** 段头摘要（{total} 个 · {running} 运行中） */
+      header: '{total} 个 · {running} 运行中',
+      empty: '暂无子会话',
+      status: {
+        running: '运行中',
+        done: '已完成',
+        error: '失败',
+        stopped: '已停止',
+      },
+      stop: '停止',
+      stopConfirm: '确认停止',
+      stopFailed: '停止子会话失败：{msg}',
+      openFailed: '打开子会话失败：{msg}',
     },
   },
 }

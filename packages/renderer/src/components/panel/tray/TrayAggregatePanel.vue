@@ -27,7 +27,7 @@
   >
     <ScrollArea class="min-h-0 flex-1">
       <div class="flex flex-col gap-2 p-0.5">
-        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow） -->
+        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session） -->
         <section
           v-for="section in sections"
           :key="section.kind"
@@ -47,7 +47,13 @@
             >{{ section.running }}/{{ section.total }}</span>
           </div>
           <div :class="[SEGMENT_HEIGHT_CLASS, 'flex min-h-0 flex-col']">
-            <TrayNativePanel :kind="section.kind" :session-id="sessionId" :pinned="pinned" />
+            <TrayNativePanel
+              v-if="section.kind !== 'session'"
+              :kind="section.kind"
+              :session-id="sessionId"
+              :pinned="pinned"
+            />
+            <TraySessionPanel v-else :session-id="sessionId" :pinned="pinned" />
           </div>
         </section>
 
@@ -82,12 +88,13 @@ import type { Component } from 'vue'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
+import TraySessionPanel from '@/components/panel/tray/TraySessionPanel.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'
-import type { TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
+import type { TrayBuiltinKind } from '@/components/panel/tray/useTrayCounts'
 
 /** 单个 built-in 类别段（kind / 图标 / 进行中与全量计数） */
 export interface TrayAggregateSection {
-  kind: TrayTaskKind
+  kind: TrayBuiltinKind
   icon: Component
   running: number
   total: number
