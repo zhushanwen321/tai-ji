@@ -306,6 +306,15 @@ export class MessageDispatcher {
     const injection = await this.injector.inject(client, promptText, activeSession?.cwd)
     try {
       await client.prompt(injection.text, images)
+      // [扩展命令 occupancy 收口] requireCommand 命中的写路径 = pi 扩展命令（P2 实测：同步
+      // 执行、不进模型、无 turn 开启 → agent_start/agent_end 永不回流）。#1 'dispatching'
+      // 置位的 isGenerating 若不在此收口将永不复位 → 会话假死 busy，后续写路径全被
+      // rejectBusyPrecheck 以 busy 拒绝。'/' 开头 + requireCommand 命中双条件确保只收
+      // 「确为扩展命令且 pi 已同步执行完毕」的 prompt；普通 turn 消息不带 requireCommand
+      // 参数、不经此分支。
+      if (requireCommand !== undefined && injection.text.startsWith('/') && activeSession) {
+        applySessionOccupancyTransition(activeSession, this.messageBus, 'idle')
+      }
     } catch (e) {
       return this.handlePromptFailure(sessionId, activeSession, clientUuid, e)
     }
