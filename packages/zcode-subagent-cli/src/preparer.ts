@@ -145,8 +145,13 @@ function defaultProviderForShortName(
  * 解析并校验模型引用 → 规范化全名 `provider/model`。
  *
  * 解析链（requested > 默认链）：
- *   1. 显式 requested（task.model）；
+ *   1. 显式 requested（task.model，trim 非空——run 显式路径传入前已归一）；
  *   2. ZCODE_FALLBACK_DEFAULT_MODEL（zsub 同构兜底）。
+ *
+ * [R4/G3] 消费面（条件携带后）：① run 显式路径（task.model trim 非空才调用——缺席
+ * 时 runViaAppServer 不进本函数、create 不携带 model 键，走 zcode 自身缺省解析，
+ * 用户 defaultModelSelection 优先）；② validateModel 诊断面（缺席 = 查引擎缺省模型
+ * 呈现值）。本函数不再承担「create 恒传」的缺省供给职责。
  *
  * 校验对「带 apiKey 的 provider 注册表」做（没配凭据的 provider 写进池也跑不起来，
  * resolve 期报错比运行时挂掉可诊断——zsub 经验）。provider 存在但无 apiKey →

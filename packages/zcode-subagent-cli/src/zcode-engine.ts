@@ -192,8 +192,9 @@ export class ZcodeEngine implements EnginePort {
       personaInjection: "prompt",
       // app-server 推送流实时流出（session/event payload.delta → text_delta）
       eventGranularity: "stream",
-      // 首期未接 worktree 隔离（公共层 worktree-manager 接入后升 emulated）
-      sandbox: "none",
+      // 无 OS sandbox；worktree 隔离由公共层 worktree-manager 承担（引擎侧仅消费
+      // task.cwd → session/create 的 workspacePath）= emulated（pi 同款声明语义）
+      sandbox: "emulated",
       // sqlite 三级 JOIN 完整重建 turns（reader 实测）
       sessionRead: "full",
       // --resume 冷启动可用（实测）
@@ -301,9 +302,18 @@ export class ZcodeEngine implements EnginePort {
       return this.abortedAppServerRun(task, ctx, startedAt);
     }
 
-    // ① prepare 期：模型解析（provider 体系校验——错误语义为进程创建前 reject）
-    const modelRef = resolveZcodeModelRef(task.model, this.deps.sources);
-    this.warnIgnoredCtxModel(task, ctx, modelRef);
+    // ① prepare 期：模型解析（[R4/G3] 条件携带——task.model 显式（trim 非空）才走
+    // v2 单源校验解析；缺席时不携带 model 键，create 交由 zcode 自身缺省解析（用户
+    // defaultModelSelection 优先——恒传会静默压掉用户配置，R4 根因）。缺席跳过
+    // resolveZcodeModelRef 即跳过凭据预校验（D3）：preparer 的凭据空检查与具体模型
+    // 无关，缺席时无从预校验——跳过是正确行为而非放松，模型不可用的暴露点后移到
+    // 引擎侧 send/首响应（上游错误原文经 buildAppServerRunFailedMessage 透传）。
+    const requestedModel = task.model?.trim();
+    const modelRef =
+      requestedModel !== undefined && requestedModel !== ""
+        ? resolveZcodeModelRef(requestedModel, this.deps.sources)
+        : undefined;
+    this.warnIgnoredCtxModel(task, ctx);
     // [RX2-F1] 非常见档位出声一行（不拦截透传）；放主编排而非 attemptAppServerTurn——
     // schema 重试轮会二次进 attempt，warn 只应随任务出声一次
     this.warnThoughtLevelUncommon(task, ctx);
@@ -359,7 +369,7 @@ export class ZcodeEngine implements EnginePort {
   private async runAppServerAttemptsWithRetry(
     task: AgentCallOpts,
     ctx: RunContext,
-    modelRef: string,
+    modelRef: string | undefined,
     cwd: string,
     basePrompt: string,
     schema: JsonSchemaObject | undefined,
@@ -446,14 +456,15 @@ export class ZcodeEngine implements EnginePort {
   private async attemptAppServerTurn(
     task: AgentCallOpts,
     ctx: RunContext,
-    modelRef: string,
+    modelRef: string | undefined,
     cwd: string,
     prompt: string,
     opts: { turnTimeoutMs?: number; retried?: boolean } = {},
   ): Promise<AttemptResult> {
     const rt = this.ensureAppServerRuntime();
-    const { providerId, modelId } = splitZcodeModelRef(modelRef);
-    const createParams = buildAppServerCreateParams(task, providerId, modelId, cwd);
+    // [R4/G3] modelRef 缺席 → create 帧不携带 model 键（zcode 自身缺省解析）；
+    // 显式 → 拆分为 per-session {providerId, modelId}。
+    const createParams = buildAppServerCreateParams(task, modelRef, cwd);
 
     let currentSessionId: string | undefined;
     let signalSessionCreated: (() => void) | undefined;
@@ -896,10 +907,17 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * [u-h2 D2-2] 派发同步期 model 校验：委托 resolveZcodeModelRef（与 run prepare 期
-   * 同一函数——canonicalRef 归一化、短名缺省 provider、凭据与清单校验单一权威，无双实现）。
-   * modelRef undefined = 返回引擎缺省模型 canonical 全名（ZCODE_FALLBACK_DEFAULT_MODEL，
-   * D2-1 ctxModel 不透传的承接面）。校验失败原样抛 ZcodePrepareError，由编排层
+   * 显式路径同一函数——canonicalRef 归一化、短名缺省 provider、凭据与清单校验单一
+   * 权威，无双实现）。校验失败原样抛 ZcodePrepareError，由编排层
    * （engine/model-validation.ts）包装成「引擎与模型不配套」文案。
+   *
+   * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断面（宿主 cli 形态消费的是
+   * RemoteEngine 的 manifest 本地判定，不经本方法——SDK protocol methods.ts 明示
+   * validateModel 为诊断面）。缺席 modelRef 时返回 ZCODE_FALLBACK_DEFAULT_MODEL
+   * canonical 全名作为「引擎缺省模型」的呈现值（诊断面只读不 create，不参与
+   * create 缺席不携带的 G3 行为链）。帧应答形态维持 {canonicalRef: string}（SDK
+   * port-contract 契约必填——「帧字段缺席」的 optional 对齐需放宽 SDK 契约与
+   * server handler 签名，非本包单方面可完成）。
    */
   validateModel(modelRef: string | undefined): { canonicalRef: string } {
     return { canonicalRef: resolveZcodeModelRef(modelRef, this.deps.sources) };
@@ -998,20 +1016,22 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * [F16b] ctxModel 忽略留痕：ctxModel 是 pi 链路的第三层兜底（port.ts 契约——
-   * 依赖 pi resolveModel 链的引擎才消费它），zcode 自带 provider 体系与缺省模型
-   * （resolveZcodeModelRef：requested > ZCODE_FALLBACK_DEFAULT_MODEL），不消费
-   * ctxModel。「调用方给了 ctxModel 但 task.model 未显式指定」时出声一行，说明
-   * 实际落引擎缺省模型（含实际 model id）——防静默降档无据可查。只在「ctx 有模型
-   * 但被忽略」场景输出：显式 task.model 走正常解析链、ctx 本就无模型属预期缺省，
-   * 均不出声（避免噪音）。
+   * 依赖 pi resolveModel 链的引擎才消费它），zcode 不消费。「调用方给了 ctxModel 但
+   * task.model 未显式指定」时出声一行。只在「ctx 有模型但被忽略」场景输出：显式
+   * task.model 走正常解析链、ctx 本就无模型属预期缺省，均不出声（避免噪音）。
+   * [R4/G3] 文案更新：缺席 model 时 create 不携带 model 键（缺省模型由 zcode 自身
+   * 解析——用户 defaultModelSelection 优先），不再声称「实际使用引擎缺省模型
+   * <fallback>」（恒传时代的表述，与缺席不携带的新行为不符）。modelRef 参数已随
+   * R4 条件携带移除——warn 可达即缺席态（显式 task.model 在 requested 非空早退处
+   * 返回），无第三形态。
    */
-  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext, modelRef: string): void {
+  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext): void {
     if (ctx.ctxModel === undefined) return;
     const requested = task.model?.trim();
     if (requested !== undefined && requested !== "") return;
     logger.warn(
       `[zcode-engine] ctx.ctxModel（${ctx.ctxModel.id}）被忽略——ctxModel 是 pi 链路兜底，zcode 不消费；` +
-        `task.model 未显式指定，实际使用引擎缺省模型 ${modelRef}`,
+        `task.model 未显式指定，create 不携带 model 键，缺省模型由 zcode 自身解析（用户 defaultModelSelection 优先）`,
       { taskId: ctx.taskId },
     );
   }
@@ -1019,11 +1039,12 @@ export class ZcodeEngine implements EnginePort {
   /**
    * [U6 / §3.2.6 要点 3] resume 锚 → 历史前缀（interact-resume 的读半段）。
    *
-   * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（条目被 TTL 清 /
-   * 会话失效 / 控制面错误）= 宿主侧锚判据通过后、引擎派发前的窄竞态窗——降级为
-   * **无历史前缀的新会话**（warn 留痕；宿主 reopen 摘要承担主降级面），不炸轮：
-   * 续聊消息本身仍可送达（模型缺历史上下文，比整轮失败可用性高，与 reopen 降级
-   * 的「带摘要重开」语义同族）。
+   * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（会话失效 / 控制
+   * 面错误）= 锚真失效的权威信号——宿主侧库投影预检查已退役（app-server 落库滞后
+   * 于 create 应答，分钟级窗 + 部分行永不落库，预检查系统性误判；resume 走
+   * app-server resident 内存态才是真实活性判据），因此此处不再静默降级为无前缀
+   * 裸跑，而是返回锚失效声明段：让模型知情「延续但无历史」，基于最新消息独立
+   * 续推，而非在缺上下文时臆测连续性。用户消息照常执行，不炸轮。
    */
   private async buildResumeHistoryPrefix(ctx: RunContext): Promise<string | undefined> {
     const anchor = zcodeResumeAnchorOf(ctx, this.deps.engineDataDir());
@@ -1037,10 +1058,10 @@ export class ZcodeEngine implements EnginePort {
       tokens = extractResumeTotalTokens(result);
     } catch (err) {
       logger.warn(
-        `[zcode-engine] session/resume 读历史失败（锚 ${anchor.sessionId}）——降级为无历史前缀的新会话: ${errMessage(err)}`,
+        `[zcode-engine] session/resume 读历史失败（锚 ${anchor.sessionId}）——判定锚真失效，注入锚失效声明段继续执行: ${errMessage(err)}`,
         { taskId: ctx.taskId },
       );
-      return undefined;
+      return buildResumeUnavailableNoticeSegment();
     }
     if (history.length === 0) return undefined; // 空历史（锚存在但从未成轮）不注入空段
     return buildResumeInjectionSegment(history, anchor.sessionId, tokens);
@@ -1127,6 +1148,22 @@ export function buildResumeInjectionSegment(
     `conversation history recovered from the session store follows. Continue seamlessly from it; the user ` +
     `message after this block is the next turn of the SAME conversation.\n\n` +
     `<conversation_history>\n${omissionNote}${kept.join("\n")}\n</conversation_history>${usageNote}\n\n`
+  );
+}
+
+/**
+ * [U3] resume 读失败 → 锚失效声明段（纯函数，单测锁定文案契约）。
+ *
+ * resume 走 app-server resident 内存态，读失败即锚真失效的权威信号（宿主侧库投影
+ * 预检查已退役——落库滞后使预检查系统性误判，见 buildResumeHistoryPrefix 方法头）。
+ * 声明段让模型知情「这是延续会话但历史不可恢复」，避免其在零上下文时臆测任务进展
+ * 或假装记得（静默裸跑的缺陷面）；语义与 buildResumeInjectionSegment 的「延续且有
+ * 历史」相对，尾部 `\n\n` 形态一致（与后续 prompt 空行分隔）。
+ */
+export function buildResumeUnavailableNoticeSegment(): string {
+  return (
+    "[会话延续提示] 本消息是同一任务的延续会话，但上一会话的历史记录不可恢复（原始会话已失效）。\n" +
+    "没有更早的对话上下文可引用——请基于下方最新消息独立判断并继续推进任务。\n\n"
   );
 }
 
@@ -1363,23 +1400,26 @@ function appendSchemaRetryDirective(basePrompt: string, validationError: string)
   );
 }
 
-/** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。 */
+/** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。
+ *  [R4/G3] modelRef 条件携带：显式（trim 非空，上游已裁决 canonical）拆分为
+ *  per-session model；缺席不设键——zcode 走自身缺省解析（用户 defaultModelSelection
+ *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。 */
 function buildAppServerCreateParams(
   task: AgentCallOpts,
-  providerId: string,
-  modelId: string,
+  modelRef: string | undefined,
   cwd: string,
 ): SessionCreateParams {
   const denyTools = (task.denyTools ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
   // thinkingLevel → thoughtLevel（A.2 ① 键集内）：空白串归一为不设键——strict 对象下
   // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）
   const thoughtLevel = task.thinkingLevel?.trim();
+  const model = modelRef !== undefined && modelRef !== "" ? splitZcodeModelRef(modelRef) : undefined;
   return {
     workspacePath: cwd,
     mode: "yolo",
-    // per-session model（G3）：create 参数透传（A.2 ① strict 对象）——同进程任务
-    // 各用各的模型，互不干扰
-    model: { providerId, modelId },
+    // per-session model（G3）：显式指定时 create 参数透传（A.2 ① strict 对象）——同进程任务
+    // 各用各的模型，互不干扰；缺席不设键（zcode 自身缺省解析）
+    ...(model !== undefined ? { model } : {}),
     ...(thoughtLevel !== undefined && thoughtLevel !== "" ? { thoughtLevel } : {}),
     ...(denyTools.length > 0 ? { toolDenylist: denyTools } : {}),
   };

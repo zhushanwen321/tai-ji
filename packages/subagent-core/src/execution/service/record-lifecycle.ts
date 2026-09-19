@@ -240,8 +240,8 @@ export class RecordLifecycle {
   /**
    * [M1 Gate B] sessionFile 锚点提升：record.sessionFile 未回填（run 应答未到）但 R4
    * 运行中句柄回填已把引擎上报的子 session 文件路径写进 engineHandle.sessionRef 时，
-   * 提升为 record.sessionFile。提升源与 settle 回填（outcomeToAgentResult /
-   * finalizeEngineOutcome）同 authority（引擎 sessionRef.sessionFile）。
+   * 提升为 record.sessionFile。提升源与 settle 回填（outcomeToAgentResult）同
+   * authority（引擎 sessionRef.sessionFile）。
    *
    * 消费方：disposeAllRecords / cancelBackground 的终态化——让 archive entry 与
    * manifest 带真实锚点，重启后 revive/fork-from 可定位子文件。无 engineHandle 或

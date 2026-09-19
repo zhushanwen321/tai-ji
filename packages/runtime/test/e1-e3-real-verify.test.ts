@@ -3,7 +3,7 @@
  * 用真实 ConfigService + PiConfigStore 指向 dev 数据的副本，验证 setProvider/setDefaultModel 后文件落盘。
  * 跑完即清理，不污染 dev 数据。
  *
- * E1 已按设计 D1③ 分体系对齐（catalog provider 字段权威裁决 v3.3）：catalog
+ * E1 已按设计 D1③ 分体系对齐（原设计文档已删除、git 可追溯）：catalog
  * provider 的 provider 级 `type` 被忽略（协议是模型级属性，provider 级 api 对 catalog 无用户语义），
  * 只有 custom provider 的 provider 级 api 才落盘——故 E1 显式按 kind 选取被测 provider 并给不同期望，
  * 不再依赖 listProviders() 的数组顺序。

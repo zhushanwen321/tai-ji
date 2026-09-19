@@ -11,8 +11,8 @@
 // fire 处置 + 轮末收口协作（finalizeRoundToIdle / consumePendingArchive）+ message
 // 资格引擎轴 gate（engineSupportsConversation——[modeless 波1] SP-5 记录级升级门
 // canUpgradeToConversation 消亡后的唯一资格判据）+ Continuation 生命周期显式接口（清理/清队/在飞轮
-// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、引擎编排
-//（kickOffEngineRun/runEngineTask/adopt）、终态收口（settleOneShotOutcome）与
+// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、引擎死亡
+// 分诊（adoptOnProcessDeath）、终态收口（settleOneShotOutcome）与
 // pool/worktree 资源装配留 run-orchestration。
 //
 // [G2 / R1 打样模式 3] 与 run-orchestration 零互调零 import：跨文件协作经壳 deps
@@ -53,6 +53,11 @@ import {
 } from "../assembly/conversation-continuation.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
 import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
+// [W1/R1 方案 A] 锚派生单点（reopenRecord 闭包分派）+ zcode 新锚 binding 补写原语
+//（D1b 边界③根治——回填点补写对齐 pi 链 writeBindingForRecord）。
+import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
+import { persistSettleSnapshot } from "../persistence/record-store-terminal.ts";
+import { zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation, registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import { RemoteEngine } from "../engine/client/remote-engine.ts";
@@ -342,6 +347,12 @@ export class ChatRounds {
         );
         if (outcome.sessionFile !== undefined) {
           record.sessionFile = outcome.sessionFile;
+          // [W1/R1 D1b] 新轮锚确立点清空 transcriptRef：它是「重开已发生、新轮未
+          // 确立」窗口内的过渡锚（markReopened 写入的重开时刻旧锚），新锚
+          //（sessionFile 派生键）一经确立即过期——残留会让 transcriptAnchorOf 的
+          // transcriptRef 优先分支持续读到死锚，下一条消息再次触发 reopen（永久
+          // 循环，U1b 专防）。清空后锚派生回落 sessionFile 派生键（与写入值同源）。
+          record.transcriptRef = undefined;
           // [UF-1] 轮应答锚点落盘：跨重启后 coldLookupForAction 据此解析 id→file；
           // [D3a 时机①] 统一入口内 acquire 写权声明（fresh 首轮与 resume 续轮同经）。
           this.deps.writeBindingForRecord(record);
@@ -405,8 +416,8 @@ export class ChatRounds {
    *
    * [U6b / B-routing] 非 pi 会话轮（zcode cold 续聊）的运行中句柄回填通道：每轮
    * session/create 新会话，新 sessionRef 经 onHandleReady 回传——**覆写**语义，
-   * 刻意区别于 runEngineTask backfillEngineHandle 的补缺语义（one-shot 单轮 +
-   * LC-4 迟到补发用补缺；cold 续聊每轮换锚，旧 sessionId 必须被替换——否则
+   * 刻意区别于 one-shot 回填的按字段补缺语义（one-shot 单轮 + LC-4 迟到补发
+   * 用补缺；cold 续聊每轮换锚，旧 sessionId 必须被替换——否则
    * transcriptAnchorOf 派生的 resume 锚停在旧 session，引擎侧注入的历史每轮缺最新
    * 一轮）。落 entry 经 store.reportRecordTransition（appendEvent 既有 engineHandle
    * 投影通道——GUI 经 entry 重建 record 即拿到新锚）。pi 不挂本回调：pi 会话锚是
@@ -425,8 +436,8 @@ export class ChatRounds {
       updateFromEvent(record, event);
       refreshFromProtocolEvent(record.id);
     };
-    // [modeless 波1] 运行中句柄回填的两段语义（每 run 局部状态——承接原
-    // runEngineTask backfillEngineHandle 补缺族 + 每轮换锚两形态的并集）：
+    // [modeless 波1] 运行中句柄回填的两段语义（每 run 局部状态——承接 one-shot
+    // 单轮按字段补缺 + 每轮换锚两形态的并集）：
     //   - 本 run 首回调 = 权威整替（zcode 每轮 session/create 的新 sessionRef 必须
     //     覆盖旧轮锚点——旧 sessionId 残留会把 resume 锚停在旧 session）；
     //   - 后续回调 = 按字段补缺（LC-4 迟到只补 sessionFile 的 partial 不丢
@@ -446,6 +457,19 @@ export class ChatRounds {
           // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
           poolKey: SHARED_POOL_KEY,
         };
+        // [W1/R1 D1b] 新轮锚确立点（zcode 侧）：① 清空 transcriptRef 过渡锚——
+        // 语义与 pi sessionFile 回填点同构（死锚残留会让下一条消息经
+        // transcriptAnchorOf 的 transcriptRef 优先分支再次触发 reopen，U1b 专防）；
+        // 先清再派生，锚回落刚覆写的 engineHandle.sessionRef 派生键。
+        // ② 补写新锚 binding（persistSettleSnapshot merge-or-create，best-effort
+        // 同 pi 链 writeBindingForRecord 记账面）——消 D1b 边界③双引擎不对称：
+        // 此前本回填点只落 entry 不写 binding，重开窗口内崩溃重启后新锚下
+        // epoch/统计基线从零开始（违反「epoch 随 binding 持久化是硬要求」）。
+        record.transcriptRef = undefined;
+        const freshAnchor = transcriptAnchorOf(record);
+        if (freshAnchor !== undefined && freshAnchor.engine === "zcode") {
+          persistSettleSnapshot(zcodeAnchorBasePath(freshAnchor), record, freshAnchor);
+        }
         this.deps.getStore().reportRecordTransition(record);
         return;
       }
@@ -483,7 +507,7 @@ export class ChatRounds {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // [modeless 波1] D10 终止链接线（原 runEngineTask 专属，随四象限坍缩并入统一
+        // [modeless 波1] D10 终止链接线（原 runEngineTask 专属——已删，随四象限坍缩并入统一
         // 轮次面）：engine spawn 的子进程注册进 spawnedChildren 记账（cancelBackground
         // SIGTERM / dispose killAll 收割对引擎 per-run 子进程生效）。
         onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
@@ -629,14 +653,18 @@ export class ChatRounds {
       },
       // [U4 / §3.2.3] reopen 降级原语接线：锚失效 → store.markReopened（同 id 带
       // 历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘）。
-      // 锚入参 = record.sessionFile 路径复用（pi transcript 按路径定位：旧文件已被
-      // 回收，续轮 resume:undefined 派发后引擎在同目录开新 session，新锚由 run 应答
-      // 回填——writeBindingForRecord 在回填点重写 binding，markReopened 落旧路径旁
-      // 的 binding 为过渡死数据，随 session-file-gc 孤儿清理回收）。zcode 锚
-      //（sessionId 变更）的重开接线归 U6 transcript 锚单元。
+      // [W1/R1 方案 A] 锚入参经 transcriptAnchorOf 单点派生（引擎中立判别联合——
+      // pi = sessionFile、zcode = engineHandle.sessionRef {sessionId,dbPath}，与
+      // 判活 isAnchorResolvable / fork 守卫共享同一派生逻辑，无双源）。pi 锚取
+      // rec.sessionFile 派生键（每轮回填更新，绕开 transcriptRef 过渡死锚——D1b
+      // 清空后 transcriptRef 只在「重开已发生、新轮未确立」窗口内有值）；zcode 锚
+      // 派生自 engineHandle.sessionRef。undefined = 无锚（从未开跑）——无世代可
+      // 推进，返回 false 由调用方降级（派发守卫按全新 session 直派，不在此路径：
+      // reviveOrThrow 仅在锚在且不可解析时调用本闭包）。
       reopenRecord: (rec) => {
-        if (rec.sessionFile === undefined) return false;
-        return this.deps.getStore().markReopened(rec, { engine: "pi", sessionFile: rec.sessionFile });
+        const anchor = transcriptAnchorOf(rec);
+        if (anchor === undefined) return false;
+        return this.deps.getStore().markReopened(rec, anchor);
       },
       // [U2b 修复轮/D2] 轮始簿记（store.markRoundStarted）——Continuation 的唯一轮始写点。
       markRoundStarted: (rec) => {
@@ -679,16 +707,25 @@ export class ChatRounds {
    * 编排而丢失（旧 chatMode 首轮亦有此缺口，坍缩后一并修复）；缺省（续轮）按
    * record 最小重建。task 恒以 input.task 为准（守卫段可能注入 reopen 摘要 /
    * worktree 重建提示前缀），worktree 恒以 record.worktreeHandle 现值为准。
-   * identity 恒从 record.model 重建（resolved 留痕词形往返自洽，等价）。
+   * identity 恒从 record.model 重建（resolved 留痕词形往返自洽，等价；[R4/D6-④]
+   * record.model 缺席 = 用户未指定 → resolved.model 留空、任务不带 model，与首轮
+   * 「缺席不盖章」同语义）。
    */
   dispatchChatRoundForContinuation(record: ExecutionRecord, input: ContinuationDispatchInput): void {
     const spec = input.firstRoundSpec;
-    const model = splitEngineModelRef(record.model);
+    // [R4/D6-④] 续聊 identity 重建对 record.model 判空：undefined = 用户未指定模型
+    //（引擎自身缺省解析）——跳过 splitEngineModelRef 重建、resolved.model 留空，
+    // 与首轮「缺席不盖章」同语义（禁空串哨兵：读侧水合归一后 "" 不再产生）。
+    const splitModel =
+      record.model !== undefined && record.model !== "" ? splitEngineModelRef(record.model) : undefined;
     const identity: ResolvedIdentity = {
       agent: record.agent,
       agentConfig: undefined,
       resolved: {
-        model: { id: model.id, name: model.name, provider: model.provider, reasoning: false },
+        model:
+          splitModel === undefined
+            ? undefined
+            : { id: splitModel.id, name: splitModel.name, provider: splitModel.provider, reasoning: false },
         thinkingLevel: record.thinkingLevel,
       },
     };

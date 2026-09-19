@@ -1,6 +1,6 @@
 // zcode-session-db-pool-gc.test.ts —— 池 GC 守卫（W5 迁移改写）。
 //
-// 原 core 版经公共 API（acquirePool / releasePoolRef / cleanupExpiredPoolRefs）+
+// 原 core 版经公共 API（acquirePool / releasePoolRef / cleanupExpiredPoolRefs——后者已更名 cleanupExpiredJournals）+
 // spy fs 断言「TTL 扫描枚举 session-db/ 伪池但不删隔离库」——pool-manager 是 core
 // 模块，行为守卫留在 core 侧原文件（过渡期双轨，deviation 登记）。引擎包侧本文件
 // 钉死结构前提（设计 zcode-session-db-isolation.md D1/F11）：

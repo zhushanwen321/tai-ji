@@ -45,13 +45,32 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import {
   _setStateMarkerSleepForTest,
+  readRecordBinding,
   readStateMarker,
   statStateStamp,
   writeCancelledState,
   writeFinalizedState,
+  writeRecordBinding,
   writeSettledState,
 } from "../persistence/state-marker.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
+
+/** binding 往返用例的最小合法身份基底（readRecordBinding 的重建最低要求）。 */
+function makeBinding(model: string | undefined): Parameters<typeof writeRecordBinding>[1] {
+  return {
+    v: 1,
+    recordId: "sa-bind",
+    agent: "general-purpose",
+    task: "t",
+    slug: "bind",
+    mode: "background",
+    startedAt: 1000,
+    depth: 0,
+    worktree: false,
+    model,
+    thinkingLevel: undefined,
+  };
+}
 
 describe("state-marker", () => {
   let tmpDir: string;
@@ -278,6 +297,36 @@ describe("state-marker", () => {
       });
       writeFinalizedState(sessionFile, "user-close");
       expect(readStateMarker(sessionFile)).toEqual({ status: "finalized", reason: "user-close" });
+    });
+  });
+
+  // ============================================================
+  // [U4/R4-D6③] record binding 的 model 水合往返（空串归一缺席）
+  // ============================================================
+  describe("record binding model 水合往返", () => {
+    it("model 有值 → 往返原样（显式留痕）", () => {
+      expect(writeRecordBinding(sessionFile, makeBinding("prov/model-1"))).toBe(true);
+      expect(readRecordBinding(sessionFile)?.model).toBe("prov/model-1");
+    });
+
+    it("model undefined（用户未指定）→ 落盘经 JSON 缺省 + 重启水合仍 undefined（U4 跨重启往返）", () => {
+      expect(writeRecordBinding(sessionFile, makeBinding(undefined))).toBe(true);
+      // 磁盘字节形态：undefined 经 JSON.stringify 自然缺省（无 model 键，非空串）
+      const raw = JSON.parse(
+        fs.readFileSync(`${sessionFile}.record-binding`, "utf-8"),
+      ) as Record<string, unknown>;
+      expect("model" in raw).toBe(false);
+      expect(readRecordBinding(sessionFile)?.model).toBeUndefined();
+    });
+
+    it("存量 binding 残留 model=\"\" → 读侧归一 undefined（D6-③：空串不再复活进 record）", () => {
+      expect(writeRecordBinding(sessionFile, makeBinding(undefined))).toBe(true);
+      fs.writeFileSync(
+        `${sessionFile}.record-binding`,
+        JSON.stringify({ ...makeBinding(undefined), model: "" }),
+        "utf-8",
+      );
+      expect(readRecordBinding(sessionFile)?.model).toBeUndefined();
     });
   });
 

@@ -51,6 +51,18 @@ import { CLOSED_REASONS as CLOSED_REASON_LIST, isZcodeTranscriptRef, isValidStop
 
 const logger = getLogger("subagents");
 
+/**
+ * [R4/D6-③ 空串归一] 水合读侧的 model 空串 → 缺席归一（禁空串哨兵纪律覆盖持久化
+ * 读写两侧）：写侧（R4 起）record.model 缺席恒为 undefined，但存量磁盘数据与新链
+ * 的防御面可能残留 ""（旧写侧「仅满足非可选类型」的 `?? ""` 产物）——空串若复活进
+ * record，taskSpecWithModel 对 `""` 仍带键，引擎侧「压掉 defaultModelSelection」
+ * 会经空串路径静默回归。四处水合点（entry 投影 / manifest 投影 / 孤儿合并 / binding
+ * 守卫）统一归一。
+ */
+function modelOrUndefined(v: string | undefined): string | undefined {
+  return v !== undefined && v.trim() !== "" ? v : undefined;
+}
+
 // ============================================================
 // 缓存/戳类型（FileCache 族——容器 scanFile/reconstructAll 与本文件投影共享）
 // ============================================================
@@ -374,7 +386,8 @@ export function rebuildEntryRecord(id: string, d: Record<string, unknown>): Suba
     endedAt: entryNum(d, "endedAt"),
     turns: entryNum(d, "turns") ?? 0,
     totalTokens: entryNum(d, "totalTokens") ?? 0,
-    model: entryStr(d, "model") ?? "",
+    // [R4/D6-③] 空串归一缺席（存量 entry 的 "" 兜底产物不再复活）。
+    model: modelOrUndefined(entryStr(d, "model")),
     thinkingLevel: entryStr(d, "thinkingLevel"),
     eventLog: [],
     displayItems: [],
@@ -511,7 +524,10 @@ export function buildFileCacheEntry(
   };
 }
 
-/** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。 */
+/** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。
+ *  [R4/D6-③] base 直查路径同批归一（存量索引 "" 条目）：索引命中分支把 `...hit` 展开为
+ *  IdentityHeaderRecon 直入本函数，R4 升级前旧写侧落盘的 `model:""` 条目（loadIndex 守卫
+ *  接受 "" 合法 string）经此水合——与 entry/manifest/孤儿合并三水合点同批 modelOrUndefined。 */
 export function buildRecord(
   base: IdentityHeaderRecon | ReconstructedRecord,
   m: SidecarMatrix,
@@ -535,7 +551,7 @@ export function buildRecord(
       endedAt: undefined,
       turns: base.turnCount,
       totalTokens: base.totalTokens,
-      model: base.model,
+      model: modelOrUndefined(base.model),
       thinkingLevel: base.thinkingLevel,
       task: base.task,
       currentActivity: undefined,
@@ -564,7 +580,7 @@ export function buildRecord(
       endedAt: undefined,
       turns: 0,
       totalTokens: 0,
-      model: base.model,
+      model: modelOrUndefined(base.model),
       thinkingLevel: base.thinkingLevel,
       task: base.task,
       currentActivity: undefined,
@@ -716,7 +732,8 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
 }
 
 /** FR-8: ManifestRecord → SubagentRecord（manifest 源投影）。
- *  task/slug/model 从 manifest 真实值投影（配合 writeManifest 补字段），缺失兜底空串。
+ *  task/slug 从 manifest 真实值投影（配合 writeManifest 补字段），缺失兜底空串；
+ *  model 经空串归一缺席（R4/D6-③——undefined = 用户未指定，禁空串哨兵）。
  *  status 越界（mapManifestStatus 返回 null）时返回 null，由 collectRecords 跳过。
  *  [M2 Gate B] closedReason 投影（枚举守卫，同 mapManifestStatus 的越界容错口径）：
  *  旧 manifest 无此字段 / 损坏值 → undefined。缺失曾让 manifest 源快照在
@@ -744,7 +761,8 @@ export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
     endedAt: m.completedAt,
     turns: 0,
     totalTokens: 0,
-    model: m.model ?? "",
+    // [R4/D6-③] 空串归一缺席（manifest 旧数据的 "" 兜底产物不再复活）。
+    model: modelOrUndefined(m.model),
     thinkingLevel: undefined,
     eventLog: [],
     displayItems: [],
@@ -813,9 +831,11 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
 }
 
 /** [v2 D3] 孤儿覆写 merge 字段集：末条 entry 的批域标记 + 轮终正文/模型，仅补 rec 侧
- *  undefined/空值（model 的空值形态是 ""——light 重建无 model_change entry 时起步
- *  空串），不覆盖已有值。merge 后写 entry 经 reportSubagentRecord →
- *  toSubagentRecordEntry 序列化，undefined 字段自然缺省（不引入显式 null）。 */
+ *  undefined/空值（model 空值形态含 "" 与 undefined——旧数据空串经归一后与缺席同域），
+ *  不覆盖已有值。merge 后写 entry 经 reportSubagentRecord →
+ *  toSubagentRecordEntry 序列化，undefined 字段自然缺省（不引入显式 null）。
+ *  [R4/D6-③] merge 产物经 modelOrUndefined 归一：两侧均空（含旧数据 ""）→ undefined
+ *  （缺席），不再以 `?? ""` 收尾产空串。 */
 export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord): SubagentRecord {
   const pickStr = (cur: string | undefined, src: string | undefined): string | undefined =>
     cur !== undefined && cur !== "" ? cur : src;
@@ -823,10 +843,7 @@ export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord):
     ...rec,
     batchFinalized: rec.batchFinalized ?? last.batchFinalized,
     result: pickStr(rec.result, last.result),
-    // 类型收尾：两侧实参恒 string（rec.model 类型非可选；last.model 重建投影自带
-    // `?? ""`），pickStr 签名宽返回 string|undefined —— `?? ""` 运行时不可达，
-    // 仅满足 model 非可选类型，空串回退语义不变（cur 空 → src，src 也空 → ""）。
-    model: pickStr(rec.model, last.model) ?? "",
+    model: modelOrUndefined(pickStr(rec.model, last.model)),
   };
 }
 

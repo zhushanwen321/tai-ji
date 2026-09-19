@@ -28,6 +28,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { withWorktreeCwd } from "../service/run-orchestration.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { makePi } from "./helpers/pi-mock.ts";
@@ -183,5 +184,27 @@ describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {
     // 返回 early-failed 形态（details.status 已 closed），而非 kickOff 的 running 形态
     expect(ret.mode).toBe("background");
     expect(ret.details).toMatchObject({ status: "idle" });
+  });
+});
+
+// ── withWorktreeCwd：worktree 隔离合流（taskSpecWithModel 的协议化断链修复）──
+
+describe("withWorktreeCwd（worktree handle → task.cwd 合流）", () => {
+  const handle = { path: "/tmp/wt/pi-sub-r1", branch: "pi-sub-r1", baseCommit: "abc", mainCwd: "/repo" };
+
+  it("handle 形态 → cwd = handle.path（协议 ctx.cwd 契约：worktree 隔离时 = worktree 路径）", () => {
+    expect(withWorktreeCwd({ prompt: "t", worktree: handle })).toEqual({ prompt: "t", worktree: handle, cwd: handle.path });
+  });
+
+  it("handle 优先于显式 cwd（文件隔离是安全语义，不允许显式 cwd 拉回主仓）", () => {
+    expect(withWorktreeCwd({ prompt: "t", worktree: handle, cwd: "/repo" }).cwd).toBe(handle.path);
+  });
+
+  it("boolean true / false / undefined 形态不动 cwd（创建时序在 taskSpec 装配前完成，handle 必已解析）", () => {
+    expect(withWorktreeCwd({ prompt: "t", worktree: true })).toEqual({ prompt: "t", worktree: true });
+    expect(withWorktreeCwd({ prompt: "t", worktree: false })).toEqual({ prompt: "t", worktree: false });
+    expect(withWorktreeCwd({ prompt: "t" })).toEqual({ prompt: "t" });
+    // 显式 cwd 无 worktree 时原样保留（正交参数语义不变）
+    expect(withWorktreeCwd({ prompt: "t", cwd: "/repo" }).cwd).toBe("/repo");
   });
 });

@@ -107,6 +107,10 @@ taiji subagent 体系的子任务执行单元：由引擎进程派生子进程�
 2. 误读风险 = 调用方以为仍会攒批、等一条聚合通知——`subagent` tool 的 start description 已留迁移期提示（"The former collect param is removed — for 2+ independent tasks in one dispatch, use the `subagents` tool instead."）。
 3. 2+ 独立任务并行的正确调用 = `subagents` tool（`tasks` 数组、一次调用、一条聚合结果通知）。
 
+### Resume 锚点（锚）
+
+subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `ResumeAnchor`，`packages/subagent-engine-sdk/src/protocol/contract-types.ts`）：引擎自选载体——zcode 锚 = `sessionRef {sessionId, dbPath}`（隔离库定位），pi 锚 = `{recordId?, sessionFile?}`（JSONL 定位）。经 `run.params.resume` 协议帧携带；锚判活 = 引擎侧载体存在性（库条目/文件在），失效走世代推进（reopen，同 id 带历史重开）。衍生用语：「锚稳定」（续轮 sessionId 不变）、「锚换钉」（锚被替换为新会话锚，历史连续性切断的降级形态）、「锚生命周期」（锚的确立/复刻/清空时点义务）。契约义务权威：[docs/extensions/subagents/engine-development-guide.md](../extensions/subagents/engine-development-guide.md) §5/§7/§10。
+
 ### Execution Record
 
 subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。

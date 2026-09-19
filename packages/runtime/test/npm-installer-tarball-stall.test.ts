@@ -1,7 +1,7 @@
 /**
  * npm-installer tarball 下载 stall 兜底单测（timeout-audit-hygiene-batch u-h3）。
  *
- * 设计依据：timeout 审计卫生批次裁决（D3-1~D3-4 / V3）。
+ * 设计依据：timeout-audit 原设计 §3.3（D3-1~D3-4）+ §4.3 V3（文档已删除、git 可追溯）。
  * 故障注入 = 本地 HTTPS 服务器真实 TCP 语义（非 mock 下载逻辑）：
  * - stall-after-header：发 header 后不发 body（V3-1 原挂死场景）
  * - stall-after-bytes：发部分 body 后停发（中途断流，gunzip 已挂载）
