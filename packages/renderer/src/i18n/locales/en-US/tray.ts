@@ -70,5 +70,11 @@ export default {
     /** Panel top banners (bash) */
     corruptBanner: 'Task data corrupted; ignored (.corrupt snapshot kept)',
     disconnectBanner: 'Disconnected; refreshes automatically after reconnect',
+    /** Order-3 overflow entry (`»` ellipsis; a different semantic from the aggregate entry's stacked icons) */
+    more: 'More tools',
+    /** Order-4 aggregate entry (stacked icons + running count): title / aria-label interpolates the count */
+    aggregate: {
+      title: 'Task tray · {running} running',
+    },
   },
 }
