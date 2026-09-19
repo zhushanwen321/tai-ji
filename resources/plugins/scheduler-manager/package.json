@@ -1,0 +1,20 @@
+{
+  "name": "scheduler-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "displayName": "Scheduler Manager",
+  "description": "Session-scoped scheduled-task manager: header-action entry + modal list + /schedule write path (plugin-header-action-modal-points first consumer)",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": [
+      "onStartupFinished"
+    ],
+    "trustLevel": "trusted",
+    "source": "built-in",
+    "permissions": [
+      "sessions.readState"
+    ]
+  }
+}
