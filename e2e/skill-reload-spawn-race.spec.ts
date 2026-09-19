@@ -8,9 +8,10 @@
  * 或 turn 已结束则 immediate，两形态均为设计内合法路径）。
  *
  * 通过标准（设计 S2 + reload-closeout-reliability §4 A1 断言升级）：
- * - run 收口确定：正常完成（faux 确定性主预期）或落 done,failed 且用户可见——两者共享同一
- *   用户可见通道（session.workflowUpdate 广播 → 托盘/Turn 渲染；失败分支可见性 = S3 单测
- *   契约 + 同通道，设计 §4 S3 已明示真机无法安全伪造 adoption 失败）；
+ * - run 收口确定：done 为 faux 主预期断言面（≤30s done-latency 必达；helpers 的
+ *   awaitWorkflowDoneTimed 只断 status === 'done'）；done,failed 分支的用户可见性 =
+ *   S3 单测契约 + 同一 workflowUpdate 通道（真机无法安全伪造 adoption 失败，非本 spec
+ *   通过分支）；
  * - 无状态分裂：主 session JSONL 可读回末条 workflow-record 终态（store 与内存一致，
  *   W17 权威 entry last-wins）；
  * - G1 必达窗口（A1 新断言，2026-09-19）：run 完成（JSONL 终态 done 落盘）后 ≤30s

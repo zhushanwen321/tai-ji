@@ -179,6 +179,13 @@ export const RECORD_RECONCILE_INTERVAL_MS = 15_000
 export const RECORD_RECONCILE_ROUND_BUDGET_MS = 100
 
 /**
+ * [reload-closeout D2 重审触发线第二维度] 对账扫描域规模观测阈值：域内 session 数超过
+ * 此值时 warn（跨阈值边沿触发一次，稳态持续超线不重复刷）。超线 = 定时间隔/扫描域需
+ * 重新校准的信号——设计 D2 重审触发线两维度之一（另一维度 = 上方单轮耗时红线）。
+ */
+export const RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD = 10
+
+/**
  * 定向消息文本的换行编码（composer 四符号 §3.3.3 / 探针 P3 转义协议）。
  *
  * 为什么编码：`/subagents message <id> <text>` 经 client.prompt 单行传输（pi 以首个
@@ -209,6 +216,13 @@ export class SessionRecords {
    * 与防抖失效路径 / agent_settled 腿的重入经 per-session inflight 合并（既有机制）。
    */
   private reconcileTimer: ReturnType<typeof setInterval> | null = null
+
+  /**
+   * [reload-closeout D2 重审触发线第二维度] 扫描域规模边沿状态（上次 sweep 是否已超
+   * 阈值）——纯 bool 随服务实例生命周期，无需 dispose；边沿翻转才 warn，防止 15s 轮询
+   * 稳态持续超线时刷屏。
+   */
+  private reconcileDomainOverThreshold = false
 
   constructor(
     private readonly deps: SessionRecordsDeps,
@@ -273,7 +287,13 @@ export class SessionRecords {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache || !isInReconcileDomain(cache)) return
     void this.refreshRecordEntries(sessionId).catch((e) => {
-      console.warn(`[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`)
+      // 恢复指引（设计 §3.1 场景 B / §3.4 错误规格「日志含恢复指引」）：数据目录可读性
+      // 是该腿失败的常见根因；W18 失效链全量重拉是既有兜底路径，指给排障者。
+      console.warn(
+        `[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`
+        + ` — recovery: check readability of the sessions/ directory under the session data dir;`
+        + ` next session start re-pulls full records via the W18 invalidation chain as fallback`,
+      )
     })
   }
 
@@ -361,6 +381,19 @@ export class SessionRecords {
   private runReconcileSweep(): void {
     try {
       const domain = this.reconcileScanDomain()
+      // [reload-closeout D2 重审触发线第二维度] 扫描域规模观测（此前仅耗时红线单维度，
+      // 「扫描域 session 数 > 10」零观测）：跨阈值边沿 warn 一次，稳态持续超线不重复刷；
+      // 措辞与单轮耗时红线同族（recalibration trigger）。域空时 overThreshold 恒 false，
+      // 边沿自然回落，下次重超线会再次 warn。
+      const overThreshold = domain.length > RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD
+      if (overThreshold && !this.reconcileDomainOverThreshold) {
+        console.warn(
+          `[session-service] record reconcile sweep domain grew to ${domain.length} sessions`
+          + ` (threshold ${RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD})`
+          + ` — scan-domain red line exceeded, recalibration trigger`,
+        )
+      }
+      this.reconcileDomainOverThreshold = overThreshold
       if (domain.length === 0) {
         this.stopReconcileTimer()
         return
@@ -370,7 +403,12 @@ export class SessionRecords {
         if (!cache) continue
         if (cache.cursor === null) continue // 实施期门③
         void this.refreshRecordEntries(sessionId).catch((e) => {
-          console.warn(`[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`)
+          // 恢复指引与 agent_settled 腿（reconcileRecordEntries）同款，两处保持一致。
+          console.warn(
+            `[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`
+            + ` — recovery: check readability of the sessions/ directory under the session data dir;`
+            + ` next session start re-pulls full records via the W18 invalidation chain as fallback`,
+          )
         })
       }
     } catch (e) {
