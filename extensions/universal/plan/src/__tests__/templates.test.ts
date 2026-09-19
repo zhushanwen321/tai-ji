@@ -129,6 +129,22 @@ describe("三源合并发现器（D2/D4）", () => {
     });
     expect(templates).toEqual([]);
   });
+
+  it("existsSync 通过但 readdir 失败（权限/TOCTOU，U3）→ 该源降级为空清单 + warn，不向上抛（进入链半进入态防御）", () => {
+    // 目录位放普通文件：existsSync 恒真、readdirSync 恒炸（ENOTDIR）——确定性
+    // 复现「存在性防御通过后枚举失败」，零 mock；命令层进入顺序 persist →
+    // setActiveTools → buildPlanModePrompt，此处 throw 会留半进入态
+    const warnSpy = vi.spyOn(getLogger("pi-plan"), "warn");
+    const builtinDir = mkTmpDir("plan-scan-ok-");
+    writeTemplate(builtinDir, "fine.md");
+    const fileAsDir = join(mkTmpDir("plan-scan-filedir-"), "file.md");
+    fs.writeFileSync(fileAsDir, "not a directory");
+
+    const templates = listTemplates({ builtinDir, userPlansDir: fileAsDir });
+    expect(templates.map((t) => t.name)).toEqual(["fine"]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[1]).toMatchObject({ dir: fileAsDir });
+  });
 });
 
 describe("空发现 warn（bundle 布局事故信号）", () => {

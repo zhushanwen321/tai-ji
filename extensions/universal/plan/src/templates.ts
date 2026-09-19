@@ -33,13 +33,28 @@ export function getBuiltinTemplateDir(): string {
   return path.resolve(__dirname, "..", "templates");
 }
 
+/**
+ * 单源目录扫描：纯 readdir 枚举 .md 文件，不读内容。existsSync 通过后 readdir
+ * 仍可能失败（权限 / TOCTOU 竞态）——此处属发现/注入增强面，降级为已扫到的
+ * 清单（空/部分）+ warn 不向上抛（U3）：命令层进入顺序 persist → setActiveTools
+ * → buildPlanModePrompt（内含本扫描），throw 会留下「entry 已写、工具已限、
+ * 提示词未注入」半进入态；与 --template 直传 readFileSync 的 fail-fast（用户
+ * 显式输入，R3）形成对称降级边界——显式输入 fail-fast，增强面降级。
+ */
 function scanTemplateDir(dir: string): TemplateInfo[] {
   const results: TemplateInfo[] = [];
   if (!fs.existsSync(dir)) return results;
-  for (const file of fs.readdirSync(dir)) {
-    if (file.endsWith(".md")) {
-      results.push({ name: file.replace(/\.md$/, ""), path: path.join(dir, file) });
+  try {
+    for (const file of fs.readdirSync(dir)) {
+      if (file.endsWith(".md")) {
+        results.push({ name: file.replace(/\.md$/, ""), path: path.join(dir, file) });
+      }
     }
+  } catch (error) {
+    logger.warn("plan: template source scan failed — source degraded to empty, entering plan mode continues", {
+      dir,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return results;
 }

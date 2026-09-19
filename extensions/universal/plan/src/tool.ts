@@ -233,8 +233,9 @@ interface ActionResult {
 
 /**
  * select-template（D7）：三源合并视图解析 + content 携带胜者文件全文。
- * - 合并视图与注入段同源（listTemplates({ projectRoot })，项目级锚点 = ctx.cwd）：
- *   模型看到什么清单就能选中什么（含用户级/项目级投放）。
+ * - 合并视图与注入段同源：两轨都以 ctx.cwd 为 projectRoot 调 listTemplates
+ *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
+ *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
  * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
  *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
  * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。

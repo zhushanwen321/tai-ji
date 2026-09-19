@@ -1,5 +1,3 @@
-import * as path from "node:path";
-
 import type { PlanReviewComment } from "@zhushanwen/extension-protocol";
 
 import { formatAvailablePlans, listTemplates } from "./templates.js";
@@ -22,10 +20,18 @@ export interface ProvidedTemplate {
   content: string;
 }
 
-/** buildPlanModePrompt 的入参（requirement/planFilePath 来自命令解析，skills 来自 E1 校验后的解析结果） */
+/** buildPlanModePrompt 的入参（requirement/planFilePath/projectRoot 来自命令解析，skills 来自 E1 校验后的解析结果） */
 export interface PlanPromptInput {
   requirement: string;
   planFilePath: string;
+  /**
+   * 项目级模板源锚点（设计 D2 锚定 = 命令层 ctx.cwd），注入段扫描
+   * <projectRoot>/.agents/plans。显式传入而非从 planFilePath 逆推层级——
+   * planFilePath = <ctx.cwd>/.taiji-harness/<slug>/plan.md 三层深，层级逆推
+   * 曾差一层得 <ctx.cwd>/.taiji-harness 致项目级源恒扫空（U1），且与
+   * select-template 侧（listTemplates({ projectRoot: ctx.cwd })）同锚点双轨同源。
+   */
+  projectRoot: string;
   skills: SkillRef[];
   /** --template 直传时给出（D5）：抑制 <available-plans> 清单段 + 提示词内嵌全文 */
   template?: ProvidedTemplate;
@@ -106,11 +112,7 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
   } else if (input.skills.length === 0) {
     // <available-plans> 三源清单随本提示词一次性注入（D3：选型期一次性信息，
     // select-template 报错自带清单兜底自愈）
-    // 项目级模板源锚点（设计 D2 锚定 ctx.cwd）：命令层把 planFilePath 构造为
-    // <ctx.cwd>/.taiji-harness/<slug>/plan.md，两级上溯即项目根——prompts 侧
-    // 自行回推，命令层无需为此增传参
-    const projectRoot = path.dirname(path.dirname(input.planFilePath));
-    const plansSection = formatAvailablePlans(listTemplates({ projectRoot }));
+    const plansSection = formatAvailablePlans(listTemplates({ projectRoot: input.projectRoot }));
     const pickTemplateStep = plansSection !== ""
       ? `1. Pick the template that best fits this requirement from the <available-plans> list below and call plan tool (select-template, templateName='<name>') — you pick the template yourself; the user can override by replying.`
       : `1. No plan templates were discovered — structure the plan document with your own chapter skeleton (e.g. Overview / Requirements / Implementation Steps).`;

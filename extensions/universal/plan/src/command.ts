@@ -376,10 +376,13 @@ function handleEnterPlanMode(
 
   // Inject plan mode prompt inline (四段：技能指令 / 产物纪律 / 只读纪律 / 模板流程——D2)
   // --template 直传走 prompts.ts 直传分支（清单段抑制 + 全文内嵌，D5）
+  // projectRoot 显式传 ctx.cwd（设计 D2 项目级锚点）——与 select-template 侧
+  // listTemplates({ projectRoot: ctx.cwd }) 同锚点，禁从 planFilePath 逆推层级
   pi.sendUserMessage(
     buildPlanModePrompt({
       requirement,
       planFilePath,
+      projectRoot: projectDir,
       skills: resolved,
       ...(templateAbsPath !== undefined && templateContent !== undefined
         ? { template: { absPath: templateAbsPath, content: templateContent } }
