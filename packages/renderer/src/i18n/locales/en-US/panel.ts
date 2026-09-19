@@ -19,6 +19,14 @@ export default {
     denyCount: '{count} disabled',
     promptCount: '{count} part(s)',
   },
+  // Mode declaration row (u5 mode-declaration-row; derived row at the top of the message stream, no new entry type)
+  modeDeclaration: {
+    label: 'Mode: {name}',
+    toolChip: 'Tools · {surface}',
+    promptChip: 'Prompt · {count} part(s)',
+    deleted: 'Mode deleted ({id})',
+    newSession: 'New session',
+  },
   header: {
     toggleSidebarExpand: 'Expand sidebar',
     toggleSidebarCollapse: 'Collapse sidebar',

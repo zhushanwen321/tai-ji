@@ -19,6 +19,14 @@ export default {
     denyCount: '禁用 {count} 项',
     promptCount: '{count} 段',
   },
+  // 模式声明行（u5 mode-declaration-row；消息流顶部的派生行，零新 entry 类型）
+  modeDeclaration: {
+    label: '模式：{name}',
+    toolChip: '工具 · {surface}',
+    promptChip: '提示词 · {count} 段',
+    deleted: '模式已删除（{id}）',
+    newSession: '新建会话',
+  },
   header: {
     toggleSidebarExpand: '展开侧栏',
     toggleSidebarCollapse: '收起侧栏',
