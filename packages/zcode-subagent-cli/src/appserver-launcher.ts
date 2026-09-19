@@ -22,9 +22,14 @@
 // ① 配置读取路径/方式：zcode 升级若改变，失败信号 = missing baseURL / Model config
 //    is missing 明确报错（不静默坏）——与协议漂移直接报错的既有姿态同级。
 // ② argv[1] 入口锚：上游 provider bootstrap 以 argv[1] 为入口锚定位 CLI 内建
-//    provider 配置（本修复针对的行为事实，import 前改写 argv[1] = CLI_PATH）。上游
-//    若改变 bootstrap 锚定方式，失败信号 = 「无法定位 CLI ZCode Built-in Provider
-//    Config」，恢复动作 = 核对 wrapper 的 argv 改写与上游锚定方式是否一致。
+//    provider 配置（本修复针对的行为事实，import 前改写 argv[1] = CLI_PATH）。3.12.x
+//    起内建 provider 配置文件挪位（<cliDir>/provider/ → app Resources/config/provider/，
+//    用户侧 ~/.zcode/v2/runtime/provider/<plat>-<arch> 或 Rust arch 变体如
+//    darwin-aarch64/<ver>/endpoint-*/），CLI 改为
+//    依赖宿主注入 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 定位——wrapper import 前补齐
+//    该键（显式传入优先，否则按上述目录派生），缺席时原生报错透出。上游若改变
+//    bootstrap 锚定方式，失败信号 = 「无法定位 CLI ZCode Built-in Provider Config」，
+//    恢复动作 = 核对 wrapper 的 argv 改写与上游锚定方式是否一致。
 // ③ 模块标识维度（require.main / process.mainModule）：import() 形态下仍指向
 //    wrapper（CLI 模块自身作用域的 __filename 不受影响，解析为 CLI 自身路径）
 //    ——现行 0.16.5 实证无此类消费（行为由 argv[1] 驱动），登记为
@@ -141,6 +146,55 @@ if (text !== null) {
     }
     return fs.__origExistsSync.call(fs, p);
   };
+}
+
+// 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
+// ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
+// 本 wrapper 链需自给。显式传入优先 → v2 runtime 目录下平台目录（精确
+// <plat>-<arch> 优先，Rust arch 变体如 darwin-aarch64 字典序跟后）× 版本目录
+// （semver 最大）的 endpoint-*/zcode-builtin.json → 都找不到则不设键，让 CLI
+// 原生报错透出（错误文案含恢复指引）。
+if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
+  let located = null;
+  try {
+    const providerRoot = path.join(os.homedir(), '.zcode', 'v2', 'runtime', 'provider');
+    // 平台目录双命名：Node 形态 <plat>-<arch>（darwin-arm64）与桌面 app 的 Rust
+    // arch 命名（darwin-aarch64/linux-x86_64）并存——按平台前缀收集子目录，
+    // 精确形态排最先（向后兼容自建布局），Rust 变体按字典序跟后逐个尝试
+    const exact = process.platform + '-' + process.arch;
+    const platDirs = fs.readdirSync(providerRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith(process.platform + '-'))
+      .map((d) => d.name)
+      .sort((a, b) => {
+        if ((a === exact) !== (b === exact)) return a === exact ? -1 : 1;
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+    const byVerDesc = (a, b) => {
+      const pa = a.split('.'), pb = b.split('.');
+      for (let i = 0; i < 3; i++) {
+        const na = parseInt(pa[i], 10) || 0, nb = parseInt(pb[i], 10) || 0;
+        if (na !== nb) return nb - na;
+      }
+      return 0;
+    };
+    for (const plat of platDirs) {
+      const rtRoot = path.join(providerRoot, plat);
+      let vers = [];
+      try { vers = fs.readdirSync(rtRoot).filter((v) => /^\\d+\\.\\d+/.test(v)).sort(byVerDesc); } catch { /* 平台目录不可读 → 试下一个 */ }
+      for (const ver of vers) {
+        const verDir = path.join(rtRoot, ver);
+        let endpoints = [];
+        try { endpoints = fs.readdirSync(verDir).filter((e) => e.startsWith('endpoint-')).sort(); } catch { /* 版本目录不可读 → 跳过 */ }
+        for (const ep of endpoints) {
+          const candidate = path.join(verDir, ep, 'zcode-builtin.json');
+          if (fs.existsSync(candidate)) { located = candidate; break; }
+        }
+        if (located) break;
+      }
+      if (located) break;
+    }
+  } catch { /* provider 目录缺失/不可读 → 不设键 */ }
+  if (located) process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = located;
 }
 
 // 上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI 内建
