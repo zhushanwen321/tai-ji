@@ -473,6 +473,19 @@ export class PluginService implements IPluginService {
         await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
         // 激活成功后，对外部插件启动热重载监听
         this.watchExternalIfActive(descriptor)
+        // E2 修复：enable 腿补 plugin:statusChange 广播（此前全仓唯一 producer 在 external
+        // 热重载回调，toggle 腿无广播 → renderer E2 触发链无触发源，重启用不恢复顶栏按钮）。
+        // newStatus 按激活终态派生（对齐 hot-reload producer 的 getState 判定；激活未达
+        // ACTIVE 不产虚假 active 帧致 renderer 重放声明）。payload 键集逐字对齐
+        // StatusChangeCallback 契约（pluginId/oldStatus/newStatus），信封与 crashed 腿同款
+        //（broker.broadcast 三键 type/id/payload，id 前缀按源命名：crash_/watch_/toggle_）。
+        if (this.activator.getState(pluginId) === 'ACTIVE') {
+          this.broker.broadcast({
+            type: 'plugin:statusChange',
+            id: `toggle_${pluginId}_${Date.now()}`,
+            payload: { pluginId, oldStatus: 'inactive', newStatus: 'active' },
+          })
+        }
       } else {
         // 禁用
         await this.activator.deactivatePlugin(pluginId, this.host)
@@ -489,6 +502,17 @@ export class PluginService implements IPluginService {
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
         await this.syncToolsToBridge()
+        // E2 修复：disable 腿补 plugin:statusChange 广播——renderer E2 触发链
+        //（plugin-status-change{inactive} → handlePluginGone：三容器清理 + 命令注销 +
+        // 顶栏按钮/modal 收起）此前无触发源，禁用后按钮残留。deactivatePlugin 抛错走
+        // catch 不广播（虚假 inactive 帧会清掉仍在运行的插件的 renderer 镜像）；
+        // 正常返回（含对未装载插件重入禁用）终态必为 UNLOADED，'inactive' 恒为真。
+        // payload/信封与 enable 腿及 hot-reload producer 同形状。
+        this.broker.broadcast({
+          type: 'plugin:statusChange',
+          id: `toggle_${pluginId}_${Date.now()}`,
+          payload: { pluginId, oldStatus: 'active', newStatus: 'inactive' },
+        })
       }
      
     } catch (err: unknown) {

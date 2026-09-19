@@ -539,6 +539,95 @@ describe('PluginService 三路清理接线（AP-2 关②：crash / disable / uni
   })
 })
 
+describe('togglePlugin plugin:statusChange 广播（E2 修复：disable/enable 腿 renderer 触发源）', () => {
+  let tmpDir: string
+
+  /** 同三路清理接线的最小 PluginService，另暴露 mock broker 供广播断言 */
+  function buildServiceWithBroker() {
+    const registryMock = {
+      getDescriptor: vi.fn((id: string) => ({ pluginId: id, pluginPath: join(tmpDir, id), name: id })),
+      getAllDescriptors: () => [],
+    }
+    const broker = createMockBroker()
+    const service = new PluginService(registryMock as never, broker, { configDir: tmpDir })
+    return { service, broker }
+  }
+
+  /** 测试装配直通点：seed activator 私有状态表（模拟激活终态，免真实 Worker） */
+  function seedActivatorState(service: PluginService, pluginId: string, state: string): void {
+    ;(service as unknown as { activator: { pluginStates: Map<string, string> } }).activator.pluginStates.set(pluginId, state)
+  }
+
+  function broadcastFrames(broker: IMessageBroker): Array<{ type: string; id: string; payload: Record<string, unknown> }> {
+    return (broker.broadcast as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]) as never
+  }
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'toggle-status-change-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('disable → plugin:statusChange{newStatus:inactive} 广播（E2 触发源：renderer handlePluginGone 清三容器/顶栏/modal）', async () => {
+    const { service, broker } = buildServiceWithBroker()
+
+    await service.togglePlugin('p1', false)
+
+    expect(broker.broadcast).toHaveBeenCalledWith({
+      type: 'plugin:statusChange',
+      id: expect.stringMatching(/^toggle_p1_/),
+      payload: { pluginId: 'p1', oldStatus: 'active', newStatus: 'inactive' },
+    })
+  })
+
+  it('enable（激活终态 ACTIVE）→ plugin:statusChange{newStatus:active} 广播（renderer handlePluginBack 重放 builtin 声明恢复按钮）', async () => {
+    const { service, broker } = buildServiceWithBroker()
+    seedActivatorState(service, 'p1', 'ACTIVE')
+
+    await service.togglePlugin('p1', true)
+
+    expect(broker.broadcast).toHaveBeenCalledWith({
+      type: 'plugin:statusChange',
+      id: expect.stringMatching(/^toggle_p1_/),
+      payload: { pluginId: 'p1', oldStatus: 'inactive', newStatus: 'active' },
+    })
+  })
+
+  it('enable（激活未达 ACTIVE，如权限拒绝/描述缺失）→ 零 statusChange 广播（不产虚假 active 帧致 renderer 重放声明）', async () => {
+    const { service, broker } = buildServiceWithBroker()
+
+    await service.togglePlugin('p1', true)
+
+    expect(broadcastFrames(broker).filter((f) => f.type === 'plugin:statusChange')).toHaveLength(0)
+  })
+
+  it('广播信封与 crashed 腿同构：type/id/payload 三键一致；statusChange payload 键集 = StatusChangeCallback 契约', async () => {
+    const { service, broker } = buildServiceWithBroker()
+    ;(service as unknown as { registerWorkerCallbacks(): void }).registerWorkerCallbacks()
+
+    // crashed 腿（既有广播点）
+    const host = (service as unknown as { host: { onCrash?: (workerId: string, pluginIds: string[], error: unknown) => void } }).host
+    host.onCrash!('w1', ['pC'], new Error('worker died'))
+
+    // toggle disable 腿（本次新增广播点）
+    await service.togglePlugin('p1', false)
+
+    const frames = broadcastFrames(broker)
+    const crashed = frames.find((f) => f.type === 'plugin:crashed')
+    const statusChange = frames.find((f) => f.type === 'plugin:statusChange')
+
+    expect(crashed).toBeDefined()
+    expect(statusChange).toBeDefined()
+    // 同一 broker.broadcast 出线的同构信封（三键）
+    expect(Object.keys(crashed!).sort()).toEqual(['id', 'payload', 'type'])
+    expect(Object.keys(statusChange!).sort()).toEqual(['id', 'payload', 'type'])
+    // statusChange payload 键集逐字对齐既有 producer 契约（plugin-hot-reload StatusChangeCallback）
+    expect(Object.keys(statusChange!.payload).sort()).toEqual(['newStatus', 'oldStatus', 'pluginId'])
+  })
+})
+
 describe('modalClosed notify 通道名（server→Worker notify，非 WS 帧）', () => {
   it('PLUGIN_MODAL_CLOSED_NOTIFY_METHOD 与 Worker 侧监听方法一致', () => {
     expect(PLUGIN_MODAL_CLOSED_NOTIFY_METHOD).toBe('plugin.ui.modalClosed')
