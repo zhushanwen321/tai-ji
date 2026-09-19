@@ -133,6 +133,46 @@ describe('resolveComponent: 脏数据 → 降级不抛（ES1/ES2）', () => {
   })
 })
 
+describe('resolveComponent: P5 降级契约（D8：加 type 不 bump PROTOCOL_VERSION）', () => {
+  /** 旧宿主白名单 = 本设计前的 7 个布局原语（action-bar 引入前的事实集合） */
+  const LEGACY_BUILTIN_TYPES = [
+    'card', 'stats-line', 'progress-bar', 'list-tree', 'columns', 'tab-bar', 'group',
+  ]
+
+  it('P5 断言 a：新宿主 action-bar 合法 props → 原样透传（BUILTIN_TYPES 已加）', () => {
+    const props = {
+      items: [
+        { id: 'pause-1', label: '暂停', commandId: 'sched.toggle', args: { id: 'job-9' } },
+        { id: 'rm-1', label: '删除', kind: 'danger' as const, commandId: 'sched.rm', args: { id: 'job-9' } },
+        { id: 'stat-1', label: '共 2 项' },
+      ],
+    }
+    const r = resolveComponent({ type: 'action-bar', props })
+    expect(r).toStrictEqual({ type: 'action-bar', props })
+  })
+
+  it('P5 断言 b：旧宿主（白名单不含 action-bar）→ 降级 ansi-text 且 label 可读', () => {
+    // BUILTIN_TYPES 是模块私有常量不可注入；旧宿主上 `!BUILTIN_TYPES.has('action-bar')`
+    // 为真，与新宿主上任意未知 type 共用同一降级分支（resolve.ts `!BUILTIN_TYPES.has`
+    // → serializeFallback）。此处以「旧集合不含 action-bar」谓词锚定旧宿主行为，
+    // 并对同分支实产输出断言 D8 契约：label 经 JSON 序列化保留在可读文本里。
+    expect(LEGACY_BUILTIN_TYPES).not.toContain('action-bar')
+    const tree = {
+      type: 'action-bar',
+      props: {
+        items: [{ id: 'rm-1', label: '删除任务 job-9', kind: 'danger', commandId: 'sched.rm', args: { id: 'job-9' } }],
+      },
+    }
+    const degraded = resolveComponent({ type: 'type-not-in-whitelist', props: tree.props })
+    expect(degraded.type).toBe('ansi-text')
+    const content = (degraded.props as { content: string }).content
+    // label 可读（用户看得到但点不动，D8 代价条款）
+    expect(content).toContain('删除任务 job-9')
+    // 结构化信息完整保留（JSON.parse 可逆）
+    expect(JSON.parse(content)).toStrictEqual(tree.props)
+  })
+})
+
 describe('resolveComponent: ES3 序列化失败兜底（仅降级路径）', () => {
   it('builtin 合法形状 + 循环引用 props → 原样透传不序列化不抛（深度校验留 renderer）', () => {
     const circular: Record<string, unknown> = {}

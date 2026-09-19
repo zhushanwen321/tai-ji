@@ -16,6 +16,7 @@ import { registerPrimitiveContainers } from './container-registry'
 // 详见 container-registry.ts 头注释。
 registerPrimitiveContainers({ card: Card, columns: Columns, group: Group })
 
+export { default as Actionbar } from './Actionbar.vue'
 export { default as AnsiText } from './AnsiText.vue'
 export { default as Card } from './Card.vue'
 export { default as Columns } from './Columns.vue'
