@@ -88,6 +88,23 @@ export type {
   ScheduleCreateInteractOptions,
 } from './extensions/scheduler-create/helpers'
 
+// ── ./extensions/ui-form：统一提问表单协议（plan / scheduler / ask-user 三方提问的统一入口：select 通道 + marker + 类型化问题集；设计 ui-presentation-protocol，ask-user / scheduler-create 两定制协议随 u5/u6 迁移退役）──
+export type {
+  FormQuestion,
+  ChoiceQuestion,
+  TextQuestion,
+  ScheduleQuestion,
+  FormOption,
+  FormAnswers,
+} from './extensions/ui-form/types'
+export { UI_FORM_MARKER } from './extensions/ui-form/marker'
+export { uiFormInteract } from './extensions/ui-form/helpers'
+export type {
+  UiFormInteractResult,
+  UiFormInteractOptions,
+} from './extensions/ui-form/helpers'
+export { isFormQuestion, isFormAnswers } from './extensions/ui-form/guards'
+
 // ── session-manager 协议（agent-managed session：select 通道 + marker；实现在 extensions/universal/session-manager）──
 export type {
   SessionManagerAction,
