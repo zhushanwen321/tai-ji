@@ -127,8 +127,9 @@ describe('SessionMessageHandler session.importCandidates', () => {
   })
 
   it('payload 携带 source 等多源字段 → 原样透传（handler 对源零分支，路由在 ImportService）', async () => {
-    // 多源 §3.7：source/sessionId/dbPath 已在 ImportCandidatesRequest/ImportRequest 契约内，
-    // handler 只透传不裁剪——本用例锁「新增源字段不经 handler 本地分支」的接线形态
+    // 多源 §3.7：source 在 ImportCandidatesRequest/ImportRequest 两契约内；sessionId/dbPath
+    // 仅在 ImportRequest——candidates 用例塞 dbPath 是验证 handler 透传不裁剪的测试手段
+    // 而非契约字段。本用例锁「新增源字段不经 handler 本地分支」的接线形态
     //（service mock 直接消费 payload，字段值用 zcode 形态验证透传不被吞/改）。
     const svc = mockImportService()
     svc.listCandidates.mockResolvedValue({ total: 0, items: [], dirs: [] })

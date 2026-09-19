@@ -149,6 +149,12 @@ export class ImportService {
       } catch {
         // tmp 未创建/已被清理：忽略
       }
+      // 相位分离（§3.6）：write 闭包内的领域错误（zcode 源转换相位抛的
+      // import_source_missing / import_invalid_session）原样透传——错误码承载恢复
+      // 动作路由（刷新重选/升级太极），重包装 import_copy_failed 会把指引降格成
+      // 「写入目标目录出错」；仅环境故障（磁盘满/权限等非领域错误）才映射
+      // import_copy_failed。tmp 清理对两条路径同样生效。
+      if (e instanceof ImportServiceError) throw e
       throw new ImportServiceError('import_copy_failed', `导入失败（写入目标目录出错）：${toErrorMessage(e)}`)
     }
 

@@ -89,6 +89,19 @@ export class ZcodeImportSource implements SessionImportSource {
     // alreadyImported 归一化域（§3.7）：扫描集是 header.id 域 = 归一化域，原始 sess_ 形态
     // 直接比对会失配；默认 TTL 读（列表展示允许秒级 stale，force 双检在编排层互斥区内）
     const importedIds = new Set(scanPiSessions().map((s) => s.id))
+    /**
+     * 单行打标降级：id 归一化后置条件不满足（形态超出已验证域）时按未导入处理 + warn
+     * 留痕，不让单行坏 id 让整表不可用——列表是展示面，幂等真校验在编排层互斥区内
+     * force 双检；同条件的 fail-fast 语义保留在 prepareImport 的 T1 校验（导入路径）不动。
+     */
+    const isAlreadyImported = (row: ZcodeSessionRow): boolean => {
+      try {
+        return importedIds.has(zcodeCandidateKey(row.id))
+      } catch (e) {
+        console.warn(`[runtime] zcode 候选 alreadyImported 打标降级（按未导入处理）：sessionId=${row.id}，${toErrorMessage(e)}`)
+        return false
+      }
+    }
     const toCandidate = (row: ZcodeSessionRow): ImportCandidate => ({
       sessionId: row.id,
       name: row.title,
@@ -97,7 +110,7 @@ export class ZcodeImportSource implements SessionImportSource {
       lastModified: row.timeUpdated,
       size: 0, // 占位，返回页确定后统一回填（§3.8：字节聚合仅对返回页逐条）
       dirLabel: basename(row.directory),
-      alreadyImported: importedIds.has(zcodeCandidateKey(row.id)),
+      alreadyImported: isAlreadyImported(row),
       cwdExists: existsSync(row.directory),
     })
 

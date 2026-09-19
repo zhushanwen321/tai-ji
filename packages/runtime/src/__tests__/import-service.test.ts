@@ -594,6 +594,34 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     warnSpy.mockRestore()
   })
 
+  it('write 相位抛领域错误 → 错误码原样透传，不重包装 import_copy_failed（§3.6 相位分离）', async () => {
+    // zcode 源的 write 闭包在 write 相位抛领域错误（转换相位 db 消失 →
+    // import_source_missing；会话消失/查询失败 → import_invalid_session）——编排层
+    // catch 若无条件重包装 import_copy_failed，错误码承载的恢复指引（刷新列表重选/
+    // 升级太极）会被降格成「写入目标目录出错」。stub source 锁编排层透传语义。
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-dom-00001', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/stub-dom-cwd' },
+        fileName: 'stub-dom.jsonl',
+        write: async () => {
+          throw new ImportServiceError('import_invalid_session', '该会话已不在 zcode 库中（sessionId=sess_x），请刷新列表后重选')
+        },
+        degradations: [],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+
+    await expect(catchCode(() => svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })))
+      .resolves.toBe('import_invalid_session')
+    // 领域错误透传同样走 tmp 清理路径：无 .tmp-import- 残留、正式名未落地（重试不被去重拦截）
+    const targetDir = join(getSessionsDir(), encodeCwd('/tmp/stub-dom-cwd'))
+    const residue = existsSync(targetDir) ? readdirSync(targetDir).filter((n) => n.includes('.tmp-import-')) : []
+    expect(residue).toEqual([])
+    expect(existsSync(join(targetDir, 'stub-dom.jsonl'))).toBe(false)
+  })
+
   it('注册表缺项 → import_source_missing（防御分支：闭合联合 + 组合根全注册下仅版本不匹配可达）', async () => {
     // U2 阶段 zcode 尚未注册（U3 加入）——空表构造即可触达；同时锁「未知源字面量不静默走 pi」
     const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>())

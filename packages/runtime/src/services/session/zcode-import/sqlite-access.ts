@@ -251,15 +251,3 @@ export async function openZcodeReadonlyDb(dbPath: string): Promise<ZcodeReadonly
   type DatabaseSyncLike = new (path: string, opts: { readOnly: boolean }) => SqliteDb
   return wrapDb(new (DatabaseSyncCtor as DatabaseSyncLike)(dbPath, { readOnly: true }))
 }
-
-/**
- * open → fn → close（吞错）生命周期包装：fn 抛错也保证连接关闭（调用方只管查询语义）。
- */
-export async function withZcodeReadonlyDb<T>(dbPath: string, fn: (db: ZcodeReadonlyDb) => T): Promise<T> {
-  const db = await openZcodeReadonlyDb(dbPath)
-  try {
-    return fn(db)
-  } finally {
-    db.close()
-  }
-}

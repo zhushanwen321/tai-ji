@@ -291,6 +291,32 @@ describe('ZcodeImportSource.listCandidates', () => {
     expect(plain.alreadyImported).toBe(false)
   })
 
+  it('alreadyImported 打标：单行 id 形态漂移 → 该行降级 false、列表不崩（导入侧 fail-fast 不受影响）', async () => {
+    // 回归锚：打标输入 zcodeCandidateKey（=normalizeZcodeSessionId）后置条件不满足会抛，
+    // 修复前单行坏 id 让整表崩溃（listCandidates 整体 import_invalid_session → 前端列表 404）；
+    // 同条件在导入侧（prepareImport T1 校验）仍 fail-fast（下方 prepareImport describe 已锁定）
+    const dbPath3 = join(fixturesRoot, 'zc-badid-list.sqlite')
+    buildFixtureDb(
+      dbPath3,
+      [
+        // 'sess_-badid-0001' 剥前缀后首字符 '-'，超出后置条件字符集（首尾必须字母数字）
+        { id: 'sess_-badid-0001', title: 'Drifted id row', directory: '/tmp/zc-drift-cwd', taskType: 'interactive', timeCreated: 1000, timeUpdated: 1000 },
+        { id: 'sess_goodid-0002', title: 'Good id row', directory: '/tmp/zc-drift-cwd', taskType: 'interactive', timeCreated: 2000, timeUpdated: 2000 },
+      ],
+      [],
+    )
+    const reply = await makeSource(dbPath3).listCandidates({})
+    // 列表仍完整返回：坏 id 行不缺失、不拖垮其余行（warn 留痕不强制断言——降级 ≠ 吞错，
+    // 日志通道与 conversion degraded 留痕共用 console，次数/顺序不是契约）
+    expect(reply.total).toBe(2)
+    const drifted = reply.items.find((i) => i.sessionId === 'sess_-badid-0001')!
+    expect(drifted.alreadyImported).toBe(false)
+    expect(reply.items.find((i) => i.sessionId === 'sess_goodid-0002')!.alreadyImported).toBe(false)
+    // 导入侧同条件保持 fail-fast（降级只在列表展示面，幂等防线不放松）
+    await expect(catchCode(() => makeSource(dbPath3).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_-badid-0001', dbPath: dbPath3 })))
+      .resolves.toBe('import_invalid_session')
+  })
+
   it('db 不存在 → import_source_missing（listCandidates 与 prepareImport 同映射）', async () => {
     const missing = join(fixturesRoot, 'no-such.sqlite')
     expect(existsSync(missing)).toBe(false)
