@@ -49,7 +49,7 @@
 | `protocol` | 必填 | 整数且落 `SUPPORTED_PROTOCOL_RANGE` [1,2)（:95-111；越界 → unusable，判据 `isProtocolVersionCompatible`，`engine-protocol.ts:44-50`） |
 | `capabilities` | 必需 | 段缺失 = 全保守值 + warn；缺键/坏值 = 该键保守值 + warn；未知键忽略 + warn（`engine-manifest.ts:84-139`；保守值表 `CONSERVATIVE_CAPABILITIES` :32-44） |
 | `envPrefixes` | 可选 | 非法条目（非 `^[A-Za-z0-9_]+$` / 含 `*` / 命中宿主保留前缀 `TAIJI_` 族）丢弃该前缀 + warn，包仍可用（:142-172；保留字 :23） |
-| `modelCatalog` | 可选 | 缺省（不写该字段）、`null`、对象三态在解析后必须保持可区分，解析器不得归并（:182-207）：缺省/`null` = 不注入（宿主侧表现为「无枚举面」——模型校验整体跳过，该形态必须保持可达）；对象 = `{dynamic(缺省 true), models[]}`，声明了对象却无有效 models 时归一为 `null`；`models: []` 是「有枚举面但为空」的作者显式声明，解析器不得代填 |
+| `modelCatalog` | 可选 | 缺省（不写该字段）、`null`、对象三态在解析后必须保持可区分，解析器不得归并（:182-207）：缺省/`null` = 不注入（宿主侧表现为「无枚举面」——模型校验整体跳过，该形态必须保持可达）；对象 = `{dynamic(缺省 true), models[]}`，models 键缺失/非数组时归一为 `null` + warn；models 数组存在但条目全无效时保留 `{dynamic, models: []}`——`models: []` 是「有枚举面但为空」的作者显式声明，解析器不得代填 |
 | `displayName` / `description` | 可选 | 形态校验，坏值忽略 + warn（`engine-inspect-package.ts:146-161`） |
 
 包级义务：`package.json` `version` 盖章进 descriptor（registry 稳定标识比较字段——包升级触发 dispose 换新实例，:254-256）。检查产物三态：ok（装载）/ skip（必需字段缺失，warn 跳过）/ unusable（protocol 不兼容、bin 不可执行，标记不可用）（:31-34）。依赖红线：引擎包只依赖 SDK（`@zhushanwen/subagent-engine-sdk`），不依赖 core（[architecture.md](architecture.md) §2.3）；SDK 消费入口仅限其 exports 两入口——`.`（契约根）与 `./protocol`（协议面），深路径 import 不在支持面。包命名与 `taiji.role` 分组约束见 [extension-conventions.md](../extension-conventions.md)。
@@ -243,7 +243,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **zcode ①级读取链实装锚**：`readZcodeSessionView`（`reader.ts:342`，三级 JOIN 按会话全量读；db 缺失/表漂移 → 结构化错误交降级链）；`usageFromStepFinish` 只填 input/output/cacheRead/cacheWrite 四项（:107-119）；`ReplayedTurn.closed` 恒 true（重放物无进行时语义，`contract-types.ts:161-168`）。
 
-**读取安全义务（dbPath 白名单）**：宿主两条读取链（`session-view-service` ①级投影 + `EnginePort.read` 协议 read）对引擎上报的 `handle.sessionRef.dbPath` 均按 `zcodeDbPathAllowlist(dataDir)` **白名单集合成员判定放行**（集合 = 隔离库路径 + 宿主库存量兼容锚点），不盲信引擎回传路径——新引擎若在 sessionRef 携带文件路径类定位键，宿主侧必须同型加白名单判定，防路径注入面。
+**读取安全义务（dbPath 白名单）**：dbPath 白名单判定**内聚引擎包**（zcode 先例：`zcode-engine.ts` read 方法内单点判定——`zcodeDbPathAllowlist(dataDir)` 封闭集合成员判定，集合 = 隔离库路径 + 宿主库存量兼容锚点，非集合内路径拒绝①级降 journal）；宿主两条读取链（`session-view-service` ①级投影 + `EnginePort.read` 协议 read）经协议 read 复用同一判定，不自行校验。新引擎若在 sessionRef 携带文件路径类定位键，必须在**引擎 read 内**同型加封闭白名单判定，防路径注入面。
 
 **已知投影形态（必须写进验收防误报**，设计 3（native resume，已裁决未实施）两点）：① 中间轮 user 消息不进 `turns`（reader 只取 assistant 视角，`turnsToMessages` 只前置 record.task 一条 user）——多轮续聊详情页呈「task + 全部 assistant turns、无中间提问」，问答对应关系不可见，属已知形态非 bug；② usage 聚合挂最后一个 turn（`session-view-service.ts:305-310`）——全量累计值展示在末条 assistant 上，与单轮语义有别。引擎新增投影形态同样入此清单。
 
@@ -303,7 +303,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | §5 run 载荷 | `protocol/methods.ts`（`RunParams`/`RunContextParams`）+ `contract-types.ts`（`AgentCallOpts`/`ResumeAnchor`） | 帧级 schema（`protocol-schema.test.ts`/`resume-schema.test.ts`） | C-proc-09（relay 身份键）、[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
 | §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
 | §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件；settled-watchdog 活性守护（`lifecycle/settled-watchdog.ts`） | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
-| §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
+| §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `db-path.ts`（`zcodeDbPathAllowlist` 白名单集合）+ `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
 | §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`check_env_whitelist_sync.py` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
 | §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
 | §11 验收 | `subagent-engine-sdk/src/node-executor.ts`（执行器矩阵）+ [TEST-STRATEGY.md](../../TEST-STRATEGY.md) | `check-vitest-guard.mjs`（测试防线挂载） | [TEST-STRATEGY.md](../../TEST-STRATEGY.md)、docs/testing/ |
@@ -341,3 +341,5 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | 2026-09-19 | 漂移修复：锚点单 hash 声明废弃，改「最后全量复核 + 本追记节」两级结构；journal 接线域归属修正为 workflow 域两处（chat 域不接，②级降级结构性不可达）；DOC_MODULE_MAP「登记待办」表述事实化 | 头部 / §2.1 / §6 / §7 / §12 | 本次修订首笔 |
 | 2026-09-19 | W2（commit 45c511aa6，2026-09-18）：zcode sandbox 声明值 none → emulated（解锁 worktree 任务），§1 manifest 示例同步更正 | §1 | 补登——变更当时漏同步指南 |
 | 2026-09-19 | U3（commit f98d9e459，2026-09-19）：zcode resume 读失败分支由静默降级改为注入 `[会话延续提示]` 锚失效声明段继续执行（run 不失败、零世代推进；宿主 zcode 锚预检查退役收窄 pi 专属），§7/§10/台账登记 | 头部 / §7 / §10 / 台账 | 补登——变更当时漏同步指南 |
+| 2026-09-19 | 漂移修复：§8 读取安全义务主体修正——dbPath 白名单判定内聚引擎包（zcode-engine read 方法内单点，zcodeDbPathAllowlist 封闭集合成员判定），宿主两读取链经协议 read 复用同一判定不自行校验（原表述误写为宿主侧判定）；§12 权威源表 §8 行补 db-path.ts | §8 / §12 | 补登——文档单侧漂移，对齐审查发现 |
+| 2026-09-19 | 漂移修复：§1 modelCatalog 归一条件精确化——「声明了对象却无有效 models 时归一 null」有歧义（实装：models 键缺失/非数组才归一 null + warn；数组存在但条目全无效保留 models: []），对齐解析器实装改写 | §1 | 补登——文档单侧漂移，对齐审查发现 |
