@@ -24,7 +24,7 @@ import type { ExecSkill } from "./exec-skills.js";
 import { formatReviewComments } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
 import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
-import { listTemplates, loadTemplate } from "./templates.js";
+import { loadTemplate } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
@@ -32,7 +32,6 @@ const logger = getLogger("pi-plan");
 // ── Action types ───────────────────────────────────────────────────
 
 export const PLAN_ACTIONS = [
-  "list-template",
   "select-template",
   "complete",
   "abort",
@@ -53,11 +52,6 @@ export function validateAction(action: string): action is PlanAction {
 }
 
 // ── Details types ──────────────────────────────────────────────────
-
-interface ListTemplateDetails {
-  action: "list-template";
-  templates: Array<{ name: string; path: string }>;
-}
 
 interface SelectTemplateDetails {
   action: "select-template";
@@ -108,7 +102,6 @@ interface ReviewErrorDetails {
 }
 
 type PlanDetails =
-  | ListTemplateDetails
   | SelectTemplateDetails
   | CompleteDetails
   | CompleteCancelledDetails
@@ -123,30 +116,6 @@ type PlanDetails =
 function restoreFullToolSet(pi: ExtensionAPI): void {
   const allToolNames = pi.getAllTools().map((t: { name: string }) => t.name);
   pi.setActiveTools(allToolNames);
-}
-
-/** Compact template list for TUI display. Two-column, max 5 lines. */
-function formatTemplateList(templates: Array<{ name: string }>): string {
-  const names = templates.map((t) => t.name);
-  if (names.length === 0) return "No templates available.";
-
-  const MAX_DISPLAY = 8;
-  const HALF = 2;
-  const truncated = names.length > MAX_DISPLAY;
-  const display = names.slice(0, MAX_DISPLAY);
-
-  // Two-column layout
-  const half = Math.ceil(display.length / HALF);
-  const col1 = display.slice(0, half);
-  const col2 = display.slice(half);
-  const lines: string[] = [];
-  for (let i = 0; i < half; i++) {
-    const right = col2[i] ? `    ${half + i + 1} ${col2[i]}` : "";
-    lines.push(`  ${i + 1} ${col1[i] ?? ""}` + right);
-  }
-
-  if (truncated) lines.push(`  ... ${names.length - MAX_DISPLAY} more`);
-  return lines.join("\n");
 }
 
 /** Relative path from project dir */
@@ -207,14 +176,7 @@ function renderPlanResult(
   const fg = (token: ThemeColor, text: string) => theme.fg(token, text);
   const NL = "\n";
 
-  switch (details.action) {
-    case "list-template": {
-      const header = fg("accent", `${details.templates.length} 个模板可用`) + NL;
-      const body = formatTemplateList(details.templates) + NL;
-      const hint = fg("dim", "→ plan(select-template, templateName='xxx')");
-      return new Text(header + body + hint, 0, 0);
-    }
-
+	switch (details.action) {
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
@@ -268,14 +230,6 @@ function renderPlanResult(
 interface ActionResult {
   content: Array<{ type: "text"; text: string }>;
   details: PlanDetails;
-}
-
-function executeListTemplate(): ActionResult {
-  const templates = listTemplates();
-  return {
-    content: [{ type: "text" as const, text: `${templates.length} templates available` }],
-    details: { action: "list-template", templates },
-  };
 }
 
 function executeSelectTemplate(
@@ -760,7 +714,7 @@ export function registerPlanTool(
     description:
       "Manages plan mode lifecycle (template selection, document registration, review, state transitions). " +
       "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
-      "Actions: list-template, select-template, register-doc, submit-review, complete, abort.",
+      "Actions: select-template, register-doc, submit-review, complete, abort.",
     parameters: Type.Object({
       action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
@@ -775,7 +729,7 @@ export function registerPlanTool(
     promptSnippet:
       "## When to use this tool vs the bash tool\n" +
       "Use 'plan' tool ONLY for plan mode state management:\n" +
-      "- list-template / select-template — template operations\n" +
+      "- select-template — template selection\n" +
       "- register-doc — register a produced document (call after writing each deliverable; re-call after revisions to bump its version)\n" +
       "- submit-review — all documents done, request user review\n" +
       "- complete — user approved plan, exit plan mode\n" +
@@ -817,9 +771,6 @@ export function registerPlanTool(
       const projectDir = ctx.cwd;
 
       switch (action) {
-        case "list-template":
-          return executeListTemplate();
-
         case "select-template":
           return executeSelectTemplate(pi, params, state);
 

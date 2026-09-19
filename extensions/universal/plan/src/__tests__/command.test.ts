@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies before importing
 vi.mock("node:fs", () => ({
@@ -13,10 +13,12 @@ vi.mock("../widget.js", () => ({
 }));
 
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { registerPlanCommand } from "../command.js";
+import { parsePlanArgs, registerPlanCommand, resolveTemplateFile } from "../command.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -202,5 +204,172 @@ describe("registerPlanCommand", () => {
       expect.stringContaining("Template: (not selected)"),
       "info",
     );
+  });
+
+  // --- --template 直传（D5：校验 + 解析 + 最小进入）---
+
+  /** 取第一条 sendUserMessage 的文本（fail-fast 回复 / 进入提示词共用通道） */
+  function sentMessage(): string {
+    return (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+  }
+
+  describe("--template via /plan handler", () => {
+    afterEach(() => {
+      // 还原默认 existsSync=false，避免路径实现泄漏到后续用例
+      vi.mocked(fs.existsSync).mockImplementation(() => false);
+    });
+
+    it("mutual exclusion with --skills: fail-fast — no entry, no tool restriction, both usage forms in reply", async () => {
+      await handler("复盘 --template tpl.md --skills a", ctx);
+
+      // 不进入计划模式（§3.1：不写 entry / 不限制工具 / 不注入计划提示词）
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+      expect(pi.sendUserMessage).toHaveBeenCalledOnce();
+      const message = sentMessage();
+      expect(message).toContain("--template and --skills are mutually exclusive");
+      expect(message).toContain("/plan <requirement> --skills a,b");
+      expect(message).toContain("/plan <requirement> --template <path>");
+    });
+
+    it("missing file: fail-fast reports resolved absolute path + usage sample", async () => {
+      // existsSync 默认 false（模块 mock 出厂实现）
+      await handler("复盘 --template tpl.md", ctx);
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+      const message = sentMessage();
+      expect(message).toContain("Template file not found: /tmp/test-project/tpl.md");
+      expect(message).toContain("e.g. /plan <requirement> --template /path/to/template.md");
+    });
+
+    it("existing non-markdown file: fail-fast reports 'Not a markdown file' (文案分家)", async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => p === "/tmp/test-project/notes.txt");
+      await handler("复盘 --template notes.txt", ctx);
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      const message = sentMessage();
+      expect(message).toContain("Not a markdown file: /tmp/test-project/notes.txt");
+      expect(message).not.toContain("not found");
+    });
+
+    it("flag with no value: fail-fast (与 --skills 空值同款显式错误)", async () => {
+      await handler("复盘 --template", ctx);
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      const message = sentMessage();
+      expect(message).toContain("--template was given but no path followed it");
+    });
+
+    it("valid template: enters plan mode — templateName = 去扩展名 basename + 占位声明段注入 (v2a 骨架)", async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => p === "/tmp/test-project/docs/retro-template.md");
+      await handler("retro meeting --template docs/retro-template.md", ctx);
+
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "plan-state",
+        expect.objectContaining({
+          isActive: true,
+          requirement: "retro meeting",
+          templateName: "retro-template",
+          skills: [],
+        }),
+      );
+      expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+      const prompt = sentMessage();
+      expect(prompt).toContain("模板已由 --template 指定: /tmp/test-project/docs/retro-template.md");
+      expect(prompt).toContain("Do NOT call plan(action='select-template')");
+    });
+
+    it("spaced path with ~ prefix: whole-segment value + homedir expansion reach validation and entry", async () => {
+      const spacedAbs = path.join(os.homedir(), "my plans", "retro template.md");
+      vi.mocked(fs.existsSync).mockImplementation((p) => p === spacedAbs);
+      await handler("retro --template ~/my plans/retro template.md", ctx);
+
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "plan-state",
+        expect.objectContaining({ isActive: true, templateName: "retro template" }),
+      );
+      const prompt = sentMessage();
+      expect(prompt).toContain(`模板已由 --template 指定: ${spacedAbs}`);
+    });
+  });
+});
+
+describe("parsePlanArgs (--template 整段取值语义, D5)", () => {
+  it("no flag: templatePath undefined", () => {
+    const parsed = parsePlanArgs("重构 auth 模块");
+    expect(parsed.templatePath).toBeUndefined();
+    expect(parsed.skills).toBeUndefined();
+  });
+
+  it("value = whole text after the flag — spaces preserved without quoting (整段取值)", () => {
+    const parsed = parsePlanArgs("复盘事故 --template ~/docs/my retro template.md");
+    expect(parsed.requirement).toBe("复盘事故");
+    expect(parsed.templatePath).toBe("~/docs/my retro template.md");
+  });
+
+  it("flag at the very start leaves empty requirement", () => {
+    const parsed = parsePlanArgs("--template tpl.md");
+    expect(parsed.requirement).toBe("");
+    expect(parsed.templatePath).toBe("tpl.md");
+  });
+
+  it("'--templatex' is not treated as the flag (word boundary)", () => {
+    const parsed = parsePlanArgs("req --templatex is part of requirement");
+    expect(parsed.templatePath).toBeUndefined();
+    expect(parsed.requirement).toBe("req --templatex is part of requirement");
+  });
+
+  it("both flags present (either order): both parsed — caller fail-fasts mutual exclusion", () => {
+    const templateFirst = parsePlanArgs("req --template a.md --skills b");
+    expect(templateFirst.templatePath).toBeDefined();
+    expect(templateFirst.skills).toBeDefined();
+
+    const skillsFirst = parsePlanArgs("req --skills b --template a.md");
+    expect(skillsFirst.templatePath).toBeDefined();
+    expect(skillsFirst.skills).toBeDefined();
+  });
+});
+
+describe("resolveTemplateFile (D5 校验与文案分家)", () => {
+  afterEach(() => {
+    vi.mocked(fs.existsSync).mockImplementation(() => false);
+  });
+
+  it("empty value is an explicit error (flag given, nothing followed)", () => {
+    const res = resolveTemplateFile("   ", "/tmp/test-project");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.problem).toContain("--template was given but no path followed it");
+  });
+
+  it("~ prefix expands against os.homedir and missing file reports absolute path", () => {
+    const res = resolveTemplateFile("~/docs/retro.md", "/tmp/test-project");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.problem).toContain(`Template file not found: ${path.join(os.homedir(), "docs/retro.md")}`);
+    }
+  });
+
+  it("relative path resolves against projectDir; not-found message carries usage sample", () => {
+    const res = resolveTemplateFile("tpl.md", "/tmp/test-project");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.problem).toContain("Template file not found: /tmp/test-project/tpl.md");
+      expect(res.problem).toContain("e.g. /plan <requirement> --template /path/to/template.md");
+    }
+  });
+
+  it("existing non-markdown file reports 'Not a markdown file' (文案分家)", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/tmp/test-project/notes.txt");
+    const res = resolveTemplateFile("notes.txt", "/tmp/test-project");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.problem).toContain("Not a markdown file: /tmp/test-project/notes.txt");
+      expect(res.problem).not.toContain("not found");
+    }
+  });
+
+  it("existing markdown file resolves ok with absolute path", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/tmp/test-project/docs/retro.md");
+    const res = resolveTemplateFile("docs/retro.md", "/tmp/test-project");
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.absPath).toBe("/tmp/test-project/docs/retro.md");
   });
 });

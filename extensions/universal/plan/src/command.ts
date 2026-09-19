@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -12,32 +13,81 @@ import { updatePlanWidget } from "./widget.js";
 
 const MAX_SLUG_LENGTH = 30;
 
-/** /plan 参数解析产物：requirement = --skills 标记前的自由文本；skills 为 undefined = 未提供 flag */
+/** /plan 参数解析产物：requirement = 最早 flag 标记前的自由文本；skills / templatePath 为 undefined = 未提供对应 flag */
 export interface ParsedPlanArgs {
   requirement: string;
   skills: string[] | undefined;
+  /** --template 的原始值（flag 后至命令结尾整段 trim，不切分——含空格路径天然支持，无需引号约定） */
+  templatePath: string | undefined;
 }
 
 /**
- * --skills 解析定则（§5 待验证检查点的 u0 落定）：
- * - 标记 = 独立的 `--skills` token（\b 词边界防 `--skillsabc` 误切）；
- * - 清单按逗号原样切分 + 每项去首尾空格——内部空格保留（「code review」「中文 技能」不丢字符）；
- * - 切分后空项丢弃（容忍尾逗号/连续逗号）；
- * - flag 提供但清单为空 = 显式错误（与不存在技能同走 E1 fail-fast，不静默忽略——
- *   用户显式用了 flag 却没给值多半是打错了）。
+ * --skills / --template 解析定则：
+ * - 标记 = 独立 token（\b 词边界防 `--skillsabc` / `--templatex` 误切）；
+ * - 值语义两 flag 同构 = flag 之后至命令结尾的整段文本（requirement 取最早出现
+ *   flag 之前的部分）：
+ *   - `--skills` 按逗号原样切分 + 每项去首尾空格——内部空格保留（「code review」
+ *     「中文 技能」不丢字符），切分后空项丢弃（容忍尾逗号/连续逗号）；
+ *   - `--template` 不切分——trim 后整段即路径（D5）；
+ * - flag 提供但值为空 = 显式错误（E1 fail-fast，不静默忽略——用户显式用了 flag
+ *   却没给值多半是打错了）；
+ * - 两 flag 同给 = 互斥 fail-fast（消费方 handleEnterPlanMode 判定，§3.1——
+ *   解析层照常返回两个字段供其判定）。
  */
 export function parsePlanArgs(args: string): ParsedPlanArgs {
-  const match = /(?:^|\s)--skills\b/.exec(args);
-  if (!match) {
-    return { requirement: args.trim(), skills: undefined };
+  const skillsMatch = /(?:^|\s)--skills\b/.exec(args);
+  const templateMatch = /(?:^|\s)--template\b/.exec(args);
+  if (!skillsMatch && !templateMatch) {
+    return { requirement: args.trim(), skills: undefined, templatePath: undefined };
   }
-  const requirement = args.slice(0, match.index).trim();
-  const raw = args.slice(match.index + match[0].length).trim();
-  const skills = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  return { requirement, skills };
+  const firstFlagIndex = Math.min(
+    skillsMatch?.index ?? Number.POSITIVE_INFINITY,
+    templateMatch?.index ?? Number.POSITIVE_INFINITY,
+  );
+  const requirement = args.slice(0, firstFlagIndex).trim();
+  const skills = skillsMatch === null
+    ? undefined
+    : args
+        .slice(skillsMatch.index + skillsMatch[0].length)
+        .trim()
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+  const templatePath = templateMatch === null
+    ? undefined
+    : args.slice(templateMatch.index + templateMatch[0].length).trim();
+  return { requirement, skills, templatePath };
+}
+
+/** --template 校验结果：ok=false 时 problem 为 fail-fast 回复的问题句（自带用法样例） */
+export type TemplateFileResolution =
+  | { ok: true; absPath: string }
+  | { ok: false; problem: string };
+
+/** --template 系报错附带的用法样例（错误 → 纠正闭环） */
+const TEMPLATE_USAGE_SAMPLE = "e.g. /plan <requirement> --template /path/to/template.md";
+
+/**
+ * --template 值解析与校验（D5）：
+ * - `~` 前缀展开（os.homedir，仅前缀 `~` 与 `~/`——无 per-user home 展开）；
+ * - 相对路径相对 ctx.cwd（pi 进程 cwd = 项目根）解析，不做额外路径猜测；
+ * - 存在性校验先于 .md 校验，两失败文案分家（not found / not a markdown file），
+ *   报错一律带解析后的绝对路径供用户核对。
+ */
+export function resolveTemplateFile(raw: string, projectDir: string): TemplateFileResolution {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { ok: false, problem: `--template was given but no path followed it. ${TEMPLATE_USAGE_SAMPLE}` };
+  }
+  const expanded = trimmed.startsWith("~") ? path.join(os.homedir(), trimmed.slice(1)) : trimmed;
+  const absPath = path.resolve(projectDir, expanded);
+  if (!fs.existsSync(absPath)) {
+    return { ok: false, problem: `Template file not found: ${absPath}. ${TEMPLATE_USAGE_SAMPLE}` };
+  }
+  if (!absPath.endsWith(".md")) {
+    return { ok: false, problem: `Not a markdown file: ${absPath}. ${TEMPLATE_USAGE_SAMPLE}` };
+  }
+  return { ok: true, absPath };
 }
 
 /** E1 技能解析结果：ok=false 时携带缺失项与可用清单（fail-fast 回复的材料） */
@@ -86,7 +136,7 @@ export function registerPlanCommand(
 ): void {
   pi.registerCommand("plan", {
     description:
-      "Enter plan mode: /plan [description] [--skills a,b]. " +
+      "Enter plan mode: /plan [description] [--skills a,b] or /plan [description] --template <path-to-markdown>. " +
       "Subcommands: /plan abort, /plan status. " +
       "With no args, show status or detect existing plan.",
     getArgumentCompletions(prefix: string) {
@@ -225,6 +275,32 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
   );
 }
 
+/**
+ * --template 系 fail-fast 回复（E1 同款形态）：不进入计划模式（不写 entry /
+ * 不限制工具 / 不注入计划提示词），回复问题句（互斥/不存在/非 md，problem 内
+ * 已带用法样例）。
+ */
+function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
+  pi.sendUserMessage(
+    `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
+    `Do NOT enter plan mode. Reply to the user with the problem and the corrected command.`,
+  );
+}
+
+/**
+ * --template 直传的提示词占位段（v2a 骨架）：终态为「不注入清单段 + 内嵌文件
+ * 全文」（prompts.ts --template 分支，v2b 落地）。本段先声明路径并指引模型 read
+ * 该文件按章节写——文件内容获取在 v2b 前仍由模型 read 完成。
+ */
+function templateProvidedSection(absPath: string): string {
+  return (
+    `## Template (via --template)\n` +
+    `模板已由 --template 指定: ${absPath}\n` +
+    `Read this file first and write the plan following its chapter structure. ` +
+    `Do NOT call plan(action='select-template') — the template is already chosen.`
+  );
+}
+
 /** Handle entering plan mode */
 function handleEnterPlanMode(
   pi: ExtensionAPI,
@@ -234,8 +310,30 @@ function handleEnterPlanMode(
   state: PlanState,
   args: string,
 ): void {
-  // --skills 解析 + E1 校验先行：校验失败 fail-fast，不产生任何进入动作（横幅不出现）
+  // flag 解析 + 校验先行：--template / --skills 任一校验失败 fail-fast，
+  // 不产生任何进入动作（横幅不出现：不写 entry / 不限制工具 / 不注入提示词）
   const parsed = parsePlanArgs(args);
+
+  // 互斥 fail-fast（§3.1）：两 flag 同给先于一切值校验报错
+  if (parsed.skills !== undefined && parsed.templatePath !== undefined) {
+    reportTemplateFlagError(
+      pi,
+      "--template and --skills are mutually exclusive. Use one: /plan <requirement> --skills a,b | /plan <requirement> --template <path>",
+    );
+    return;
+  }
+
+  let templateAbsPath: string | undefined;
+  if (parsed.templatePath !== undefined) {
+    const resolution = resolveTemplateFile(parsed.templatePath, ctx.cwd);
+    if (!resolution.ok) {
+      reportTemplateFlagError(pi, resolution.problem);
+      return;
+    }
+    templateAbsPath = resolution.absPath;
+  }
+
+  // --skills E1 校验（互斥已判过后，走到这里 templatePath 必为 undefined）
   const requested = parsed.skills ?? [];
   if (parsed.skills !== undefined && requested.length === 0) {
     reportUnknownSkills(pi, { ok: false, available: pi.getCommands().filter((c) => c.source === "skill").map((c) => c.name), missing: [] });
@@ -264,7 +362,9 @@ function handleEnterPlanMode(
   state.isActive = true;
   state.planFilePath = planFilePath;
   state.requirement = requirement;
-  state.templateName = "";
+  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，
+  // 复用既有字段既有值形态——D5）；模板流程进入时仍为空，等 select-template 写入
+  state.templateName = templateAbsPath ? path.basename(templateAbsPath, ".md") : "";
   state.skills = resolved.map((s) => s.name);
   state.docs = [];
   delete state.reviewState;
@@ -276,5 +376,7 @@ function handleEnterPlanMode(
   pi.setActiveTools(PLAN_MODE_TOOLS);
 
   // Inject plan mode prompt inline (四段：技能指令 / 产物纪律 / 只读纪律 / 模板流程——D2)
-  pi.sendUserMessage(buildPlanModePrompt({ requirement, planFilePath, skills: resolved }));
+  const prompt = buildPlanModePrompt({ requirement, planFilePath, skills: resolved });
+  // --template 直传附加占位声明段（v2a 骨架，终态见 templateProvidedSection 注释）
+  pi.sendUserMessage(templateAbsPath === undefined ? prompt : `${prompt}\n\n${templateProvidedSection(templateAbsPath)}`);
 }

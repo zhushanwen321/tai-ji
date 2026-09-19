@@ -388,9 +388,9 @@ describe("三 decision 消费（taiji 形态）", () => {
 });
 
 describe("submit-review 的 PLAN_ACTIONS 面", () => {
-  it("action list contains exactly the six actions", () => {
+  it("action list contains exactly the five actions (list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "list-template", "register-doc", "select-template", "submit-review"],
+      ["abort", "complete", "register-doc", "select-template", "submit-review"],
     );
   });
 });

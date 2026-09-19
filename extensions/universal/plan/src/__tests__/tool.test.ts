@@ -81,28 +81,14 @@ describe("registerPlanTool", () => {
     expect((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0].name).toBe("plan");
   });
 
-  // --- list-template ---
-  describe("list-template", () => {
-    it("returns template list", async () => {
-      const { exec } = setup();
-      const res = await exec({ action: "list-template" });
-      expect(res.content[0].type).toBe("text");
-      expect(res.details.action).toBe("list-template");
-      expect(Array.isArray(res.details.templates)).toBe(true);
-    });
-
-    it("returns exactly the 5 builtin templates with no source field (D3 / V4)", async () => {
-      const { exec } = setup();
-      const res = await exec({ action: "list-template" });
-      const templates = res.details.templates as Array<{ name: string; source?: string; path: string }>;
-      expect(templates.map((t) => t.name).sort()).toEqual(
-        ["feature-plan", "bugfix-plan", "refactor-plan", "research-plan", "implementation-plan"].sort(),
-      );
-      for (const t of templates) {
-        expect(t.source).toBeUndefined();
-        expect(t).toEqual({ name: t.name, path: t.path });
-      }
-    });
+  it("tool description and promptSnippet no longer mention list-template (D1 删链不留兼容通道)", () => {
+    const { pi } = setup();
+    const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      description: string;
+      promptSnippet: string;
+    };
+    expect(tool.description).not.toContain("list-template");
+    expect(tool.promptSnippet).not.toContain("list-template");
   });
 
   // --- select-template ---
@@ -119,12 +105,8 @@ describe("registerPlanTool", () => {
 
     it("sets templateName and persists (D6：无 phase 写入)", async () => {
       const { exec, pi, sessions } = setup();
-      // Use a builtin template name — find one first
-      const listRes = await exec({ action: "list-template" });
-      const templates = listRes.details.templates as { name: string }[];
-      if (templates.length === 0) return; // no builtin templates available
-
-      const name = templates[0].name;
+      // 内置模板名直接断言（templates.test.ts 覆盖清单内容，这里只测选中与持久化）
+      const name = "feature-plan";
       const res = await exec({ action: "select-template", templateName: name });
       expect(res.details.templateName).toBe(name);
       expect(res.details.action).toBe("select-template");
@@ -134,14 +116,21 @@ describe("registerPlanTool", () => {
     });
   });
 
-  // --- removed action (D3) ---
-  describe("create-template removal", () => {
+  // --- removed actions (D1 / D3) ---
+  describe("removed action rejections", () => {
+    it("rejects plan(action='list-template') as an unknown action with the 5-action list (D1)", async () => {
+      const { exec } = setup();
+      await expect(exec({ action: "list-template" })).rejects.toThrow(
+        "Unknown plan action: list-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
+      );
+    });
+
     it("rejects plan(action='create-template') as an unknown action (D3 / V4)", async () => {
       const { exec } = setup();
       await expect(
         exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
       ).rejects.toThrow(
-        "Unknown plan action: create-template. Valid actions: list-template, select-template, complete, abort, register-doc, submit-review",
+        "Unknown plan action: create-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
       );
     });
   });
@@ -455,8 +444,13 @@ describe("validateAction", () => {
   });
   it("rejects invalid", () => {
     expect(validateAction("bogus")).toBe(false);
+    expect(validateAction("list-template")).toBe(false);
   });
-  it("action list no longer contains create-template (D3)", () => {
+  it("action list contains exactly the five actions (list-template removed, D1)", () => {
+    expect([...PLAN_ACTIONS].sort()).toEqual(
+      ["abort", "complete", "register-doc", "select-template", "submit-review"],
+    );
     expect(PLAN_ACTIONS).not.toContain("create-template");
+    expect(PLAN_ACTIONS).not.toContain("list-template");
   });
 });
