@@ -180,7 +180,11 @@ export async function resolveLaunchPresetOptions(
     preset = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)
     if (!preset) return undefined  // 理论上不会发生（builtin 永在）
   }
-  const resolution = presetService.resolve(preset, cwd)
+  // `resolve` 是 async（PresetService.resolve → Promise<PresetResolution>）：必须 await，
+  // 否则回落分支的 `{ ...resolution }` 展开 Promise 得空壳对象，静默丢掉 toolArgs/flags/
+  // extensionPaths/prompt 等全部字段（回落会话实际拿不到全工具参数，而披露行仍称「以全工具
+  // 模式启动」→ 假陈述）。无回落分支在 async 调用方 await 后恰好正确，故该缺陷长期未暴露。
+  const resolution = await presetService.resolve(preset, cwd)
   // 无回落时保持对象同一性（既有测试/调用方断言 `.toBe(resolution)`；回落才新建对象附加事实）。
   return fellBackFromPresetId === undefined ? resolution : { ...resolution, fellBackFromPresetId }
 }
