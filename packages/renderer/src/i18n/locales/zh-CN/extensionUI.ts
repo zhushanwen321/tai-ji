@@ -7,7 +7,8 @@ export default {
   selectPlaceholder: '请选择',
   additionalComment: '附加评论',
   commentPlaceholder: '选填，补充说明…',
-  // ── schedule 创建确认弹框（ScheduleCreateOverlay）──
+  // ── schedule 创建确认表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
+  // scheduleCreateTitle/Subtitle/Submit 仅供旧 ScheduleCreateOverlay（u4 接线前仍挂载），随旧组件同批删除
   scheduleCreateTitle: '创建定时任务',
   scheduleCreateSubtitle: 'agent 已预填草稿，可调整后确认',
   scheduleCreateTimeLabel: '执行时间',

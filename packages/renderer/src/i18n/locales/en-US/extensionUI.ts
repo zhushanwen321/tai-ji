@@ -7,7 +7,8 @@ export default {
   selectPlaceholder: 'Please select',
   additionalComment: 'Additional comment',
   commentPlaceholder: 'Optional, add a note…',
-  // ── Schedule create confirm overlay (ScheduleCreateOverlay) ──
+  // ── Schedule create confirm form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
+  // scheduleCreateTitle/Subtitle/Submit serve only the legacy ScheduleCreateOverlay (mounted until u4 rewiring); removed together with it
   scheduleCreateTitle: 'Create scheduled task',
   scheduleCreateSubtitle: 'Draft pre-filled by the agent — adjust then confirm',
   scheduleCreateTimeLabel: 'Schedule',

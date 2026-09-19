@@ -5,7 +5,7 @@
  * - A1 协议透传：真实 ask_user tool 调用 → extension.ui_request 广播
  *   （comment 删除回归核心：askUserQuestions 无 allowComment 字段）+ 回写闭环（pi 恢复 turn）
  * - A2 UI 渲染：AskUserOverlay 在真实 page 渲染（Playwright DOM 断言），
- *   Other 保留（ask-user-option-__other__）+ 页面无 comment 字样
+ *   Other 保留（form-option-__other__）+ 页面无 comment 字样
  * - A3 交互回写：Playwright 操作真实 UI（选 Other → 填自由文本 → submit），
  *   断言 overlay 关闭 + pi 恢复 turn。注：ui_response 帧内容不可捕获——
  *   routeWebSocket 实测无法拦截 Electron renderer 的 WS（Playwright 限制），
@@ -259,13 +259,13 @@ test('A2: ask-user overlay 真实渲染 — overlay/Other 保留，页面无 com
     listenWs.close()
 
     // ── 断言 1：overlay 真实渲染在 page DOM ──
-    const overlay = page.getByTestId('ask-user-overlay')
+    const overlay = page.getByTestId('form-overlay')
     await expect(overlay).toBeVisible({ timeout: 10_000 })
     const q = firstQuestion(askUserReq!)
     expect(q.question.length).toBeGreaterThan(0)
 
     // ── 断言 2：Other 保留（comment 删除不影响 Other 自由输入）──
-    await expect(page.getByTestId('ask-user-option-__other__')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByTestId('form-option-__other__')).toBeVisible({ timeout: 5_000 })
 
     // ── 断言 3：overlay UI 无 comment 字样（comment UI/i18n 已删除）──
     // 注意：不能断言全页 —— 消息流可能渲染含 "comment" 的自由文本（faux 回复文本受控，
@@ -315,15 +315,15 @@ test('A3: 选 Other 填自由文本提交 → overlay 关闭 + pi 恢复 turn（
     const qKey = q.header ?? q.question
     const uiReqIdx = events.indexOf(askUserReq!)
 
-    await expect(page.getByTestId('ask-user-overlay')).toBeVisible({ timeout: 10_000 })
-    await page.getByTestId('ask-user-option-__other__').click()
-    const otherInput = page.getByTestId(`ask-user-other-${qKey}`)
+    await expect(page.getByTestId('form-overlay')).toBeVisible({ timeout: 10_000 })
+    await page.getByTestId('form-option-__other__').click()
+    const otherInput = page.getByTestId(`form-other-${qKey}`)
     await expect(otherInput).toBeVisible({ timeout: 5_000 })
     await otherInput.fill(OTHER_TEXT)
-    await page.getByTestId('ask-user-submit').click()
+    await page.getByTestId('form-submit').click()
 
     // ── 断言 1：overlay 关闭（前端 onSubmit 回写成功信号）──
-    await expect(page.getByTestId('ask-user-overlay')).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByTestId('form-overlay')).toBeHidden({ timeout: 15_000 })
 
     // ── 断言 2：pi 收到响应后恢复 turn（message_start / complete）──
     const resumeDeadline = Date.now() + 60_000
