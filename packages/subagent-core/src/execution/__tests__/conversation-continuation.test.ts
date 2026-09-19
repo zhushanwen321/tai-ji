@@ -1704,7 +1704,8 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record).toBeDefined();
     expect(record!.totalTokens).toBe(42); // 修复前：事件只喂 journal，record 恒 0
 
-    // 非 pi one-shot 一次 run 即终态化（finalizeEngineOutcome → closed/gc + entry 落盘）
+    // 非 pi one-shot 一次 run 即轮末收口（Continuation markRoundIdle：idle 翻边 +
+    // entry 落盘；旧 finalizeEngineOutcome closed/gc 终态化已删）
     zcode.runs[0]!.settle("done");
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
     const finalEntry = entriesFor(record!.id).at(-1);
