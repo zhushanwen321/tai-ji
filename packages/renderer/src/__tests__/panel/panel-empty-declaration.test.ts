@@ -26,19 +26,20 @@ import { usePresetStore } from '@/stores/preset'
 import { useChatStore } from '@/stores/chat'
 import type { PiLaunchPreset } from '@taiji/shared'
 
-// ── useExtensionUI mock（usePanelView 的 overlay 订阅：无 pending 请求）──
+// ── useExtensionUI mock（usePanelView 的 overlay 订阅：无 pending 请求；
+//    返回面与真实实现一致——currentFormRequest/currentPlanReviewRequests/respond/cancel）──
 const uiMock = vi.hoisted(() => ({
-  askUserReq: { value: undefined as undefined | { askUser?: boolean } },
+  formReq: { value: undefined as undefined | Record<string, unknown> },
   respond: () => {},
   cancel: () => {},
 }))
 vi.mock('@/composables/useExtensionUI', () => ({
   useExtensionUI: () => ({
-    currentAskUserRequest: uiMock.askUserReq,
+    currentFormRequest: uiMock.formReq,
+    currentPlanReviewRequests: { value: [] },
     respond: uiMock.respond,
     cancel: uiMock.cancel,
   }),
-  askUserFilter: (req: { askUser?: boolean } | undefined) => req?.askUser === true,
 }))
 
 /** 重子组件 stub（ModeDeclarationRow 保持真实——它是被测挂载点） */
@@ -94,7 +95,7 @@ function mountPanel(sessionId: string) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  uiMock.askUserReq.value = undefined
+  uiMock.formReq.value = undefined
   const presetStore = usePresetStore()
   presetStore.setPresets([])
   presetStore.setDefaultPresetId('')
