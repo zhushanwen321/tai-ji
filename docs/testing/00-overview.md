@@ -13,6 +13,7 @@
 | [02-panels-sidebar.md](./02-panels-sidebar.md) | 文件树 / SideDrawer / 搜索浮层（⌘K）/ GUI 组件渲染 / Subagent-Workflow 面板 / 后台命令侧边栏 | 04-file-tree.md + 05-side-drawer.md + 06-search-modal.md + 07-gui-components.md + 09-subagent-workflow-panel.md + 14-background-task-sidebar.md |
 | [03-runtime-extensions.md](./03-runtime-extensions.md) | 系统提示词配置 / extension 层运行时测试体系 / 插件系统非 mock E2E / 自动升级验证 | 10-settings-system-prompt.md + 12-extension-runtime-testing.md + 13-plugin-e2e.md + update-e2e.md |
 | [visual/vlm-prompt-template.md](./visual/vlm-prompt-template.md) | VLM 视觉验证派发模板（TEST-STRATEGY 引用的 SSOT，独立不并入） | — |
+| [render-sampling.md](./render-sampling.md) | 渲染采样管道（基线采集/真机验收共用：CDP 连接/选择器/注入/等待信号/DOM 采样脚本资产 + 清单表；采样前必读，禁现场重写管道） | 2026-09-19 markdown HTML 支持验收脚本提炼 |
 
 图例：✅ = 可测且稳定 / ⚠️ = 有约束或待补 / ❌ = 不可测（需手工）；**已落地** = spec 文件存在于 `e2e/` 且能跑通。
 

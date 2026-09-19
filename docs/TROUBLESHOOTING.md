@@ -232,6 +232,8 @@ ls -la ~/.taiji-dev/logs/             # runtime-*.log / pi-<date>-<sessionId>.js
 
 首启缺配置（provider / secrets / 默认模型）时从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单语义补种到 `~/.taiji-dev/` 根（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
 
+**实验隔离正式通道（2026-09-19）**：需要独立数据目录（基线采集 / mock 实例 / 多实验并行 / 多 worktree 隔离）时，用装配器显式参数 `node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/<suffix>`——值域限 `~/.taiji-dev/` 树内（fs-guard 白名单与路径守卫按该前缀放行），装配器注入 `TAIJI_DEV_ASSEMBLED=1` 供 main.ts dev 分支采信（显式标记 + 值域白名单双约束，裸 env 泄漏仍不采信，2026-09-08 防线语义不变）。此通道取代已废弃的「临时改 main.ts dataDir + 用完 revert」实验做法。
+
 ### 17. 子包目录 `pnpm exec vitest` 全仓扫跑 + 测试红线「测试禁止触碰真实数据目录」
 
 **现象**：在子包目录（如 `packages/renderer/`）执行 `pnpm exec vitest run`，跑的不是该包测试而是全仓扫描（大量无关包测试启动，甚至触发数据目录防线红灯）。

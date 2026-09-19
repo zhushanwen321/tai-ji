@@ -13,7 +13,9 @@
  *    → process.stdout/stderr.on('error', EPIPE → destroy())
  *
  * 2. Dev 模式隔离：
- *    - TAIJI_AGENT_DATA_DIR = ~/.taiji-dev（dev 无条件钉死，外部 env 不采信——2026-09-08 泄漏事故）
+ *    - TAIJI_AGENT_DATA_DIR = ~/.taiji-dev（dev 钉死为缺省；仅两类受控豁免采信外部值：
+ *      ① TAIJI_E2E=1（e2e 受控测试进程）；② TAIJI_DEV_ASSEMBLED=1 + 值在 ~/.taiji-dev
+ *      树内（装配器 --data-dir 显式通道）——2026-09-08 泄漏事故防线，裸泄漏仍不采信）
  *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险面，保持兜底语义）
  *    - app.setPath('userData', 隔离目录)  ← 防 Chromium LevelDB LOCK 竞争
  *
@@ -131,18 +133,32 @@ const isDev = !app.isPackaged
 // TAIJI_AGENT_DATA_DIR=/Users/<user>/.taiji 泄漏进 dev Electron，旧实现
 // `env ?? ~/.taiji-dev` 只在 undefined 兜底、泄漏值被采信，dev app 整个
 // 跑在用户 prod 数据目录上，与「隔离 prod 实例」语义相反。
-// 需要临时指向其他目录做实验时，直接改这一行或用 TAIJI_AGENT_PORT_OFFSET 同款
-// 显式机制；PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
+// 需要临时指向其他目录做实验时，用装配器显式通道：node scripts/dev-instance.mjs
+// --data-dir ~/.taiji-dev/<suffix>（取代已废弃的「直接改这一行 + 用完 revert」）。
+// PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
 if (isDev) {
   // e2e 受控装配豁免（2026-09-15）：TAIJI_E2E=1（e2e fixtures launch-app.ts /
   // launch-app-real.ts 显式注入）时尊重外部 TAIJI_AGENT_DATA_DIR——e2e 是受控测试
   // 进程，mkdtemp 隔离目录正是其注入意图，不属于「宿主 shell 泄漏」场景；豁免让
   // real 轨 seed/断言（runtime.port / settings 预置）与 mock 轨数据隔离承诺真正生效
   // （钉死期间 launch fixture 的 TAIJI_AGENT_DATA_DIR 一直被静默覆盖）。
+  // 装配器受控豁免（2026-09-19）：TAIJI_DEV_ASSEMBLED=1（dev-instance.mjs --data-dir
+  // 显式传入时注入）且值落在 ~/.taiji-dev 树内时同样采信——显式参数 + 值域白名单双
+  // 约束，防泄漏语义不变（宿主 shell 裸泄漏不含装配标记，值越界也不采信）。值域谓词
+  // 镜像 apps/electron/scripts/dev-instance-lib.mjs isWithinDevDataParent（构建分层
+  // 不可互引），改动须双侧同步。
+  const externalDataDir = process.env.TAIJI_AGENT_DATA_DIR
+  const devDataParent = path.join(homedir(), '.taiji-dev')
+  const isWithinDevDataParent = (p: string): boolean =>
+    p.startsWith(devDataParent + path.sep)
+  const assembledOverride =
+    process.env.TAIJI_DEV_ASSEMBLED === '1' &&
+    !!externalDataDir &&
+    isWithinDevDataParent(externalDataDir)
   process.env.TAIJI_AGENT_DATA_DIR =
-    process.env.TAIJI_E2E === '1' && process.env.TAIJI_AGENT_DATA_DIR
-      ? process.env.TAIJI_AGENT_DATA_DIR
-      : path.join(homedir(), '.taiji-dev')
+    (process.env.TAIJI_E2E === '1' && externalDataDir) || assembledOverride
+      ? externalDataDir
+      : devDataParent
   process.env.TAIJI_AGENT_PORT_OFFSET = process.env.TAIJI_AGENT_PORT_OFFSET ?? String(DEV_PORT_OFFSET)
   // 隔离 Electron userData，防止与 prod 实例共享 Chromium 存储（LevelDB LOCK 竞争）。
   // 从 TAIJI_AGENT_DATA_DIR 派生（而非硬编码 .taiji-dev）：多 worktree 并行 dev 时
