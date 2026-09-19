@@ -179,72 +179,94 @@ function resolveHrefPath(base: string, rel: string): string {
  * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
  * 文件操作经 deps 桥接（onFileClick/openDrawer）。代码块复制是 DOM 副作用，ui 本地处理。
  */
+/** ① 代码块复制按钮（data-code 是 base64 编码的源码）。代码块复制是 DOM 副作用，ui 本地处理。 */
+function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
+  e.preventDefault()
+  // base64 解码失败（无合法 data-code）：code 保持空串，跳过剪贴板写入，仅保留反馈态
+  let code = ''
+  try {
+    code = atob(btn.dataset.code ?? '')
+  } catch {
+    code = ''
+  }
+  if (code) {
+    navigator.clipboard.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
+  }
+  btn.classList.add('is-copied')
+  if (copiedBtn && copiedBtn !== btn) copiedBtn.classList.remove('is-copied')
+  copiedBtn = btn
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    btn.classList.remove('is-copied')
+    if (copiedBtn === btn) copiedBtn = null
+  }, COPIED_FEEDBACK_MS)
+}
+
+/** ② 含/路径文件链接（.md-filepath 带 data-path，base64 编码）→ 打开文件 detail */
+function handleFilepathClick(e: MouseEvent, pathLink: HTMLElement): void {
+  e.preventDefault()
+  const raw = pathLink.dataset.path
+  const path = raw ? decodeB64(raw) : (pathLink.textContent ?? '')
+  if (path) {
+    deps.onFileClick(path)
+    deps.openDrawer('detail', { filePath: path })
+  }
+}
+
+/** ③ 裸 basename（.md-ambiguous）：弹歧义浮层（多匹配时由 AmbiguousFilePopover 选择） */
+function handleAmbiguousClick(e: MouseEvent, ambLink: HTMLElement): void {
+  e.preventDefault()
+  const basename = ambLink.textContent ?? ''
+  if (basename) ambiguousState.value = { basename, anchorEl: ambLink }
+}
+
+/**
+ * ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
+ * 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
+ * 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+ */
+function handleAnchorClick(e: MouseEvent, anchor: Element): void {
+  // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
+  const href = anchor.getAttribute('href')
+  if (!href || !isRelativeHref(href)) return
+  e.preventDefault()
+  // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
+  // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd（可选链容错——mock 壳未
+  // provide 时 undefined）；两者皆缺 → preventDefault + 无动作（死链无害，优于窗口导航走）
+  const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
+  if (base) {
+    deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
+  }
+}
+
+/**
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
+ * 文件操作经 deps 桥接（onFileClick/openDrawer）。
+ */
 function onClick(e: MouseEvent): void {
   const target = e.target as HTMLElement
 
-  // ① 代码块复制按钮（data-code 是 base64 编码的源码）
   const btn = target.closest('.md-codeblock__copy') as HTMLElement | null
   if (btn) {
-    e.preventDefault()
-    // base64 解码失败（无合法 data-code）：code 保持空串，跳过剪贴板写入，仅保留反馈态
-    let code = ''
-    try {
-      code = atob(btn.dataset.code ?? '')
-    } catch {
-      code = ''
-    }
-    if (code) {
-      navigator.clipboard.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
-    }
-    btn.classList.add('is-copied')
-    if (copiedBtn && copiedBtn !== btn) copiedBtn.classList.remove('is-copied')
-    copiedBtn = btn
-    if (copiedTimer) clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => {
-      btn.classList.remove('is-copied')
-      if (copiedBtn === btn) copiedBtn = null
-    }, COPIED_FEEDBACK_MS)
+    handleCodeblockCopy(e, btn)
     return
   }
 
-  // ② 含/路径文件链接（.md-filepath 带 data-path，base64 编码）
   const pathLink = target.closest('.md-filepath') as HTMLElement | null
   if (pathLink) {
-    e.preventDefault()
-    const raw = pathLink.dataset.path
-    const path = raw ? decodeB64(raw) : (pathLink.textContent ?? '')
-    if (path) {
-      deps.onFileClick(path)
-      deps.openDrawer('detail', { filePath: path })
-    }
+    handleFilepathClick(e, pathLink)
     return
   }
 
-  // ③ 裸 basename（.md-ambiguous）：弹歧义浮层（多匹配时由 AmbiguousFilePopover 选择）
   const ambLink = target.closest('.md-ambiguous') as HTMLElement | null
   if (ambLink) {
-    e.preventDefault()
-    const basename = ambLink.textContent ?? ''
-    if (basename) ambiguousState.value = { basename, anchorEl: ambLink }
+    handleAmbiguousClick(e, ambLink)
     return
   }
-  // ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
-  // 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
-  // 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+
   const anchor = target.closest('a')
   if (anchor) {
-    // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
-    const href = anchor.getAttribute('href')
-    if (href && isRelativeHref(href)) {
-      e.preventDefault()
-      // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
-      // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd（可选链容错——mock 壳未
-      // provide 时 undefined）；两者皆缺 → preventDefault + 无动作（死链无害，优于窗口导航走）
-      const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
-      if (base) {
-        deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
-      }
-    }
+    handleAnchorClick(e, anchor)
   }
   // 其余点击：默认冒泡，不拦截
 }

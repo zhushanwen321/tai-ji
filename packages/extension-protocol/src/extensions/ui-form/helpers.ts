@@ -42,6 +42,67 @@ const RESPONSE_PREVIEW_LENGTH = 200
 /** echo 检测命中时的升级指引（D3）：用户可操作的恢复动作 = 升级 taiji 或钉住 extension 版本 */
 const ECHO_UPGRADE_HINT = 'taiji host too old for form protocol — upgrade taiji or pin extension version'
 
+/** 发送侧守卫（D2 失败策略）：不合法项 = 调用方编码 bug，fail-fast 抛错而非发出坏帧 */
+function assertFormQuestionsValid(form: FormQuestion[]): void {
+  const invalidIndex = form.findIndex((q) => !isFormQuestion(q))
+  if (invalidIndex >= 0) {
+    throw new Error(
+      `uiFormInteract(): form[${invalidIndex}] is not a valid FormQuestion ` +
+      "(type must be 'choice' | 'text' | 'schedule' with required fields present) — " +
+      'fix the question definition at the call site.',
+    )
+  }
+}
+
+/** RPC 模式门：TUI 模式抛错，extension 自行渲染 */
+function assertRpcModeAvailable(ctx: GuiContext): void {
+  if (!(isGuiCapable(ctx) && ctx.ui?.select)) {
+    // 非 RPC 模式不代劳 TUI 渲染。抛错而非返回判别失败——返回失败态会与
+    // 「用户取消」混淆，让 extension 误以为用户取消了（沿已退役的 askUserInteract 先例）。
+    throw new Error(
+      'uiFormInteract() is only available in RPC mode. ' +
+      'In TUI mode, use ctx.ui.custom() with your own Component directly.',
+    )
+  }
+}
+
+/**
+ * 回包解析：echo 检测（先于 JSON.parse 的逐字节判定）→ parse → FormAnswers 形状守卫。
+ * 四态判别返回而非抛错（channel-error / non-json 两态在此产生）。
+ */
+function parseFormAnswersResponse(
+  rpcValue: string,
+  payload: string,
+  opts?: UiFormInteractOptions,
+): UiFormInteractResult {
+  // echo 检测：「旧 taiji + 新 npm」组合下宿主不识别 UI_FORM_MARKER，form 帧降级普通
+  // select 落 band，单选项 = payload 自身；用户点选即回显 payload（D7 下三角矩阵）。
+  // 收包与发送 payload 逐字节相等 = 确定性识别该不支持组合（payload 是合法 JSON，
+  // 必须在 JSON.parse 之前判定），折叠 channel-error + 升级指引。
+  if (rpcValue === payload) {
+    opts?.log?.('ui-form response echoed the request payload (host does not understand UI_FORM_MARKER)', {
+      responseHead: rpcValue.slice(0, RESPONSE_PREVIEW_LENGTH),
+    })
+    return { ok: false, reason: 'channel-error', message: ECHO_UPGRADE_HINT }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rpcValue)
+  } catch {
+    // callMarkerRpc 已检测过 JSON 合法性，此处为防御性兜底，保持判别完备
+    return { ok: false, reason: 'non-json' }
+  }
+  if (!isFormAnswers(parsed)) {
+    // JSON 合法但非本协议形状 = 协议版本错配类故障，按 non-json 同折叠
+    opts?.log?.('ui-form response is not a FormAnswers record', {
+      responseHead: rpcValue.slice(0, RESPONSE_PREVIEW_LENGTH),
+    })
+    return { ok: false, reason: 'non-json' }
+  }
+  return { ok: true, answers: parsed }
+}
+
 /**
  * 统一提问表单入口（RPC 模式专用）。
  *
@@ -59,24 +120,8 @@ export async function uiFormInteract(
   // 空 questions 防御（沿已退役的 askUserInteract 先例：「用户 Submit 空表单」语义，answers = {}）
   if (form.length === 0) return { ok: true, answers: {} }
 
-  // 发送侧守卫（D2 失败策略）：不合法项 = 调用方编码 bug，fail-fast 抛错而非发出坏帧
-  const invalidIndex = form.findIndex((q) => !isFormQuestion(q))
-  if (invalidIndex >= 0) {
-    throw new Error(
-      `uiFormInteract(): form[${invalidIndex}] is not a valid FormQuestion ` +
-      "(type must be 'choice' | 'text' | 'schedule' with required fields present) — " +
-      'fix the question definition at the call site.',
-    )
-  }
-
-  if (!(isGuiCapable(ctx) && ctx.ui?.select)) {
-    // 非 RPC 模式不代劳 TUI 渲染。抛错而非返回判别失败——返回失败态会与
-    // 「用户取消」混淆，让 extension 误以为用户取消了（沿已退役的 askUserInteract 先例）。
-    throw new Error(
-      'uiFormInteract() is only available in RPC mode. ' +
-      'In TUI mode, use ctx.ui.custom() with your own Component directly.',
-    )
-  }
+  assertFormQuestionsValid(form)
+  assertRpcModeAvailable(ctx)
 
   // questions 数据序列化进 options[0]：pi select 的 request 硬编码
   // {method, title, options, timeout}，自定义数据只能借 options 数组携带
@@ -95,31 +140,5 @@ export async function uiFormInteract(
   if (!rpcResult.ok) {
     return { ok: false, reason: rpcResult.reason }
   }
-
-  // echo 检测：「旧 taiji + 新 npm」组合下宿主不识别 UI_FORM_MARKER，form 帧降级普通
-  // select 落 band，单选项 = payload 自身；用户点选即回显 payload（D7 下三角矩阵）。
-  // 收包与发送 payload 逐字节相等 = 确定性识别该不支持组合（payload 是合法 JSON，
-  // 必须在 JSON.parse 之前判定），折叠 channel-error + 升级指引。
-  if (rpcResult.value === payload) {
-    opts?.log?.('ui-form response echoed the request payload (host does not understand UI_FORM_MARKER)', {
-      responseHead: rpcResult.value.slice(0, RESPONSE_PREVIEW_LENGTH),
-    })
-    return { ok: false, reason: 'channel-error', message: ECHO_UPGRADE_HINT }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rpcResult.value)
-  } catch {
-    // callMarkerRpc 已检测过 JSON 合法性，此处为防御性兜底，保持判别完备
-    return { ok: false, reason: 'non-json' }
-  }
-  if (!isFormAnswers(parsed)) {
-    // JSON 合法但非本协议形状 = 协议版本错配类故障，按 non-json 同折叠
-    opts?.log?.('ui-form response is not a FormAnswers record', {
-      responseHead: rpcResult.value.slice(0, RESPONSE_PREVIEW_LENGTH),
-    })
-    return { ok: false, reason: 'non-json' }
-  }
-  return { ok: true, answers: parsed }
+  return parseFormAnswersResponse(rpcResult.value, payload, opts)
 }

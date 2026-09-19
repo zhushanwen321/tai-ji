@@ -74,6 +74,36 @@ export class PresetGuardError extends Error {
 }
 
 /**
+ * 单段校验（validatePresetPrompt 循环体抽出）：段形状 / enabled / prompt 类型 / 段限，
+ * 违规即抛 PresetGuardError（整条拒绝语义）；合法段长记入 lengths 供合计判定。
+ */
+function validatePresetPromptSegment(
+  segmentKey: 'replace' | 'append',
+  rawSegment: unknown,
+  lengths: Record<'replace' | 'append', number>,
+): void {
+  if (rawSegment === undefined || rawSegment === null) return
+  if (typeof rawSegment !== 'object' || Array.isArray(rawSegment)) {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey} 必须是对象`)
+  }
+  const segment = rawSegment as Record<string, unknown>
+  const enabled = segment['enabled']
+  const prompt = segment['prompt']
+  if (typeof enabled !== 'boolean') {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.enabled 必须是 boolean`)
+  }
+  if (typeof prompt !== 'string') {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.prompt 必须是 string`)
+  }
+  if (prompt.length > SYSTEM_PROMPT_MAX_LENGTH) {
+    throw new PresetGuardError(
+      `模式提示词 prompt.${segmentKey} 长度 ${prompt.length} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符，超出单段上限，请精简该段`,
+    )
+  }
+  lengths[segmentKey] = prompt.length
+}
+
+/**
  * 校验模式提示词（prompt 字段）——**整条拒绝**语义（写路 savePreset / 导入路 importPresets 共用）。
  *
  * 三条约束（设计文档 §7.1 校验接线）：
@@ -99,26 +129,7 @@ export function validatePresetPrompt(preset: unknown): void {
   const container = rawPrompt as Record<string, unknown>
   const lengths: Record<'replace' | 'append', number> = { replace: 0, append: 0 }
   for (const segmentKey of ['replace', 'append'] as const) {
-    const rawSegment = container[segmentKey]
-    if (rawSegment === undefined || rawSegment === null) continue
-    if (typeof rawSegment !== 'object' || Array.isArray(rawSegment)) {
-      throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey} 必须是对象`)
-    }
-    const segment = rawSegment as Record<string, unknown>
-    const enabled = segment['enabled']
-    const prompt = segment['prompt']
-    if (typeof enabled !== 'boolean') {
-      throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.enabled 必须是 boolean`)
-    }
-    if (typeof prompt !== 'string') {
-      throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.prompt 必须是 string`)
-    }
-    if (prompt.length > SYSTEM_PROMPT_MAX_LENGTH) {
-      throw new PresetGuardError(
-        `模式提示词 prompt.${segmentKey} 长度 ${prompt.length} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符，超出单段上限，请精简该段`,
-      )
-    }
-    lengths[segmentKey] = prompt.length
+    validatePresetPromptSegment(segmentKey, container[segmentKey], lengths)
   }
   const total = lengths.replace + lengths.append
   if (total > SYSTEM_PROMPT_MAX_LENGTH) {
@@ -700,6 +711,41 @@ function coerceRecordField(value: unknown): Record<string, unknown> | undefined 
     : undefined
 }
 
+/** 合计超限丢段：优先丢 append 保留 replace（替换段语义更重且用户更难自恢复）。 */
+function dropSegmentOverTotalLimit(value: PresetPromptConfig, total: number, issues: string[]): void {
+  // 两段各自 ≤ 段限却合计超限 → 必然两段都在场；优先丢 append 保留 replace。
+  if (value.append) {
+    delete value.append
+    issues.push(
+      `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 append 段并保留 replace 段`,
+    )
+  } else if (value.replace) {
+    delete value.replace
+    issues.push(
+      `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 replace 段`,
+    )
+  }
+}
+
+/** 无可识别段的可观测性补记（仍丢弃，只增可见性；只记键名不记值）。 */
+function pushNoRecognizedSegmentIssue(
+  container: Record<string, unknown>,
+  value: PresetPromptConfig,
+  issues: string[],
+): void {
+  // 可观测契约（设计 §7.1「畸形/超限只丢该段 + warn」）：raw 是普通对象但**无任何可识别段**
+  //（如 `{foo:1}`）时当前实现会静默丢整个 prompt 容器——补一条 issue 让丢弃可见（仍丢弃，
+  // 只增可观测性）。**只记键名不记值**：值可能是用户提示词正文，不应进日志。
+  // 条件用「容器无 replace/append 键」而非「value 为空」：`{replace: <畸形>}` 已由段级 issue
+  // 覆盖，再叠一条会误导（键是被识别的，只是值非法）。
+  const hasSegment = value.replace !== undefined || value.append !== undefined
+  const containerKeys = Object.keys(container)
+  const hasKnownSegmentKey = containerKeys.includes('replace') || containerKeys.includes('append')
+  if (!hasSegment && !hasKnownSegmentKey && containerKeys.length > 0) {
+    issues.push(`prompt 容器无可识别段（键：${containerKeys.join(', ')}），已丢弃全部提示词段`)
+  }
+}
+
 /**
  * 段级折叠模式提示词（读路 / 导入折叠用）。
  *
@@ -729,30 +775,10 @@ function coercePresetPrompt(raw: unknown): { value?: PresetPromptConfig; issues:
   }
   const total = (value.replace?.prompt.length ?? 0) + (value.append?.prompt.length ?? 0)
   if (total > SYSTEM_PROMPT_MAX_LENGTH) {
-    // 两段各自 ≤ 段限却合计超限 → 必然两段都在场；优先丢 append 保留 replace。
-    if (value.append) {
-      delete value.append
-      issues.push(
-        `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 append 段并保留 replace 段`,
-      )
-    } else if (value.replace) {
-      delete value.replace
-      issues.push(
-        `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 replace 段`,
-      )
-    }
+    dropSegmentOverTotalLimit(value, total, issues)
   }
+  pushNoRecognizedSegmentIssue(container, value, issues)
   const hasSegment = value.replace !== undefined || value.append !== undefined
-  // 可观测契约（设计 §7.1「畸形/超限只丢该段 + warn」）：raw 是普通对象但**无任何可识别段**
-  //（如 `{foo:1}`）时当前实现会静默丢整个 prompt 容器——补一条 issue 让丢弃可见（仍丢弃，
-  // 只增可观测性）。**只记键名不记值**：值可能是用户提示词正文，不应进日志。
-  // 条件用「容器无 replace/append 键」而非「value 为空」：`{replace: <畸形>}` 已由段级 issue
-  // 覆盖，再叠一条会误导（键是被识别的，只是值非法）。
-  const containerKeys = Object.keys(container)
-  const hasKnownSegmentKey = containerKeys.includes('replace') || containerKeys.includes('append')
-  if (!hasSegment && !hasKnownSegmentKey && containerKeys.length > 0) {
-    issues.push(`prompt 容器无可识别段（键：${containerKeys.join(', ')}），已丢弃全部提示词段`)
-  }
   return hasSegment ? { value, issues } : { issues }
 }
 

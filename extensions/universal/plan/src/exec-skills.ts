@@ -308,65 +308,101 @@ export function detectExecSkills(options: DetectExecSkillsOptions): ExecSkill[] 
   }
 }
 
-function detectExecSkillsInternal(options: DetectExecSkillsOptions, log: LogFn): ExecSkill[] {
-  const cwd = resolve(options.cwd);
-  const agentDir = resolve(options.agentDir ?? getAgentDir());
-  const homeDir = resolve(options.homeDir ?? defaultHomeDir());
+/**
+ * trusted 门内两族根（④）：`.pi/skills` 根 + 祖先链；overrides 挂 project settings。
+ * 祖先链每根 baseDir = 各自的 `.agents` 目录；与 `~/.agents/skills`
+ * 同路径的项滤掉（pi :1979 同款——cwd 在 HOME 下时防与第四根重复）。
+ */
+function collectTrustedProjectRoots(cwd: string, homeDir: string, projectOverrides: string[]): SkillRoot[] {
+  const roots: SkillRoot[] = [];
+  roots.push({ dir: join(cwd, CONFIG_DIR_NAME, "skills"), baseDir: join(cwd, CONFIG_DIR_NAME), overrides: projectOverrides });
+  const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
+  for (const dir of collectAncestorAgentsSkillDirs(cwd)) {
+    if (resolve(dir) === resolve(userAgentsSkillsDir)) continue;
+    roots.push({ dir, baseDir: dirname(dir), overrides: projectOverrides });
+  }
+  return roots;
+}
 
+/** 四根 root 序组装（pi 本体加载集序，见 detectExecSkills 头注）；overrides 按根挂载 */
+function collectSkillRoots(
+  options: DetectExecSkillsOptions,
+  cwd: string,
+  agentDir: string,
+  homeDir: string,
+  log: LogFn,
+): SkillRoot[] {
   const userOverrides = readSkillsOverrides(join(agentDir, "settings.json"), log);
   // project settings 仅 trusted 时参与（pi loadFromStorage 对 untrusted 的 project 恒 {}）
   const projectOverrides = options.trusted
     ? readSkillsOverrides(join(cwd, CONFIG_DIR_NAME, "settings.json"), log)
     : [];
-
-  const roots: SkillRoot[] = [];
-  if (options.trusted) {
-    roots.push({ dir: join(cwd, CONFIG_DIR_NAME, "skills"), baseDir: join(cwd, CONFIG_DIR_NAME), overrides: projectOverrides });
-    // 祖先链（④trusted 门内）：每根 baseDir = 各自的 `.agents` 目录；与 `~/.agents/skills`
-    // 同路径的项滤掉（pi :1979 同款——cwd 在 HOME 下时防与第四根重复）
-    const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
-    for (const dir of collectAncestorAgentsSkillDirs(cwd)) {
-      if (resolve(dir) === resolve(userAgentsSkillsDir)) continue;
-      roots.push({ dir, baseDir: dirname(dir), overrides: projectOverrides });
-    }
-  }
+  const roots: SkillRoot[] = options.trusted
+    ? collectTrustedProjectRoots(cwd, homeDir, projectOverrides)
+    : [];
   roots.push({ dir: join(agentDir, "skills"), baseDir: agentDir, overrides: userOverrides });
   roots.push({ dir: join(homeDir, ".agents", "skills"), baseDir: join(homeDir, ".agents"), overrides: userOverrides });
+  return roots;
+}
+
+/**
+ * 单根扫描：overrides 过滤（②）→ first-writer-wins 去重（⑤，seen 集跨根共享）→
+ * marker 过滤。根目录缺失 / 整根读失败 → 空集（降级规格，不中断其余根）。
+ */
+function scanSkillRoot(
+  root: SkillRoot,
+  seenNames: Set<string>,
+  seenRealPaths: Set<string>,
+  log: LogFn,
+): ExecSkill[] {
+  if (!fs.existsSync(root.dir)) return []; // 合法缺省（~/.agents/skills 不存在是常态主路径）
+  let skills: Skill[];
+  try {
+    skills = loadSkillsFromDir({ dir: root.dir, source: "detect" }).skills;
+  } catch (error) {
+    log("plan: exec-skill root scan failed (root skipped)", {
+      dir: root.dir,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+  const found: ExecSkill[] = [];
+  for (const skill of skills) {
+    // ② 用户显式 disable 的 skill 不提议（意图对齐）
+    if (!isEnabledByOverrides(skill.filePath, root.overrides, root.baseDir)) continue;
+    // ⑤ first-writer-wins（含非 marker skill 占名——pi 的 collision 语义以加载集为准，
+    // 后根同名不因 marker 缺席而让位）
+    const realPath = canonicalizePath(skill.filePath);
+    if (seenRealPaths.has(realPath) || seenNames.has(skill.name)) continue;
+    seenRealPaths.add(realPath);
+    seenNames.add(skill.name);
+    if (!hasPlanExecMarker(skill.filePath, log)) continue;
+    found.push({
+      name: skill.name,
+      description: skill.description,
+      // 入口文件路径两种形态统一：标准形态 filePath 即 SKILL.md 路径、散 .md 形态即
+      // 文件本身——接收端（steer 文案）直接 read 该值，不再拼 SKILL.md（散 .md 形态
+      // 拼接会得到不存在的 `<skills根>/SKILL.md` 悬空指引）
+      skillDir: skill.filePath,
+      skillPath: skill.filePath,
+    });
+  }
+  return found;
+}
+
+function detectExecSkillsInternal(options: DetectExecSkillsOptions, log: LogFn): ExecSkill[] {
+  const cwd = resolve(options.cwd);
+  const agentDir = resolve(options.agentDir ?? getAgentDir());
+  const homeDir = resolve(options.homeDir ?? defaultHomeDir());
+
+  const roots = collectSkillRoots(options, cwd, agentDir, homeDir, log);
 
   const seenNames = new Set<string>();
   const seenRealPaths = new Set<string>();
   const found: ExecSkill[] = [];
   for (const root of roots) {
-    if (!fs.existsSync(root.dir)) continue; // 合法缺省（~/.agents/skills 不存在是常态主路径）
-    let skills: Skill[];
-    try {
-      skills = loadSkillsFromDir({ dir: root.dir, source: "detect" }).skills;
-    } catch (error) {
-      log("plan: exec-skill root scan failed (root skipped)", {
-        dir: root.dir,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      continue;
-    }
-    for (const skill of skills) {
-      // ② 用户显式 disable 的 skill 不提议（意图对齐）
-      if (!isEnabledByOverrides(skill.filePath, root.overrides, root.baseDir)) continue;
-      // ⑤ first-writer-wins（含非 marker skill 占名——pi 的 collision 语义以加载集为准，
-      // 后根同名不因 marker 缺席而让位）
-      const realPath = canonicalizePath(skill.filePath);
-      if (seenRealPaths.has(realPath) || seenNames.has(skill.name)) continue;
-      seenRealPaths.add(realPath);
-      seenNames.add(skill.name);
-      if (!hasPlanExecMarker(skill.filePath, log)) continue;
-      found.push({
-        name: skill.name,
-        description: skill.description,
-        // 入口文件路径两种形态统一：标准形态 filePath 即 SKILL.md 路径、散 .md 形态即
-        // 文件本身——接收端（steer 文案）直接 read 该值，不再拼 SKILL.md（散 .md 形态
-        // 拼接会得到不存在的 `<skills根>/SKILL.md` 悬空指引）
-        skillDir: skill.filePath,
-        skillPath: skill.filePath,
-      });
+    for (const skill of scanSkillRoot(root, seenNames, seenRealPaths, log)) {
+      found.push(skill);
     }
   }
   return found;

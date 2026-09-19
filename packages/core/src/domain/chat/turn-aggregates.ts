@@ -1,3 +1,4 @@
+import type { Message } from '@taiji/shared'
 import type { MessageTurn } from './message-turns'
 
 /**
@@ -50,21 +51,42 @@ export function deriveTurnAggregates(turn: MessageTurn): TurnAggregates {
   let endedAt = 0
   let generatedTokens = 0
   for (const m of turn.assistants) {
-    // 消息产出结束时刻：缺省回退开始时刻（旧数据降级，与修复前同值）
-    const msgEnd = m.endedAt ?? m.timestamp
+    const msgEnd = assistantMessageEndAt(m)
     if (msgEnd > endedAt) endedAt = msgEnd
-    for (const th of m.thinking ?? []) {
-      const thEnd = th.endTime ?? th.startTime
-      if (thEnd !== undefined && thEnd > endedAt) endedAt = thEnd
-    }
-    for (const tc of m.toolCalls ?? []) {
-      const tcEnd = tc.endTime ?? tc.startTime
-      if (tcEnd > endedAt) endedAt = tcEnd
-    }
-    // 已上报的真实用量：无 usage（流式中的当前调用 / 异常历史帧）计入 0，不估算——
-    // 数字宁可暂时偏小也不给近似值（用户裁决 A）。
-    generatedTokens += m.usage?.outputTokens ?? 0
+    generatedTokens += reportedOutputTokens(m)
   }
-  const startedAt = turn.user?.timestamp ?? turn.assistants[0]?.timestamp ?? 0
+  const startedAt = turnStartedAt(turn)
   return { startedAt, endedAt, generatedTokens }
+}
+
+/**
+ * 单条 assistant 消息的产出结束时刻：消息收口与 thinking/toolCall 结束取最大。
+ * 消息结束时刻缺失（旧历史帧）时回退其开始时刻——与修复前行为等价（单条 assistant
+ * 的 turn 会退化为 1s，属已知降级）。
+ */
+function assistantMessageEndAt(m: Message): number {
+  let endedAt = m.endedAt ?? m.timestamp
+  for (const th of m.thinking ?? []) {
+    const thEnd = th.endTime ?? th.startTime
+    if (thEnd !== undefined && thEnd > endedAt) endedAt = thEnd
+  }
+  for (const tc of m.toolCalls ?? []) {
+    const tcEnd = tc.endTime ?? tc.startTime
+    if (tcEnd > endedAt) endedAt = tcEnd
+  }
+  return endedAt
+}
+
+/**
+ * 已上报的真实用量（token 口径）：无 usage（流式中的当前调用 / 异常历史帧）计入 0，
+ * 不估算——数字宁可暂时偏小也不给近似值（用户裁决 A）。
+ */
+function reportedOutputTokens(m: Message): number {
+  return m.usage?.outputTokens ?? 0
+}
+
+/** turn 起点：user 消息时间戳（有 user 锚时）/ 首条 assistant 时间戳（bg-notify 续跑
+ * turn、assistant 自启 turn）；无成员 = 0。 */
+function turnStartedAt(turn: MessageTurn): number {
+  return turn.user?.timestamp ?? turn.assistants[0]?.timestamp ?? 0
 }

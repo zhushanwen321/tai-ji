@@ -278,6 +278,37 @@ const DONE_TIMING_POLL_MS = 500
 const DONE_TIMING_TIMEOUT_MS = 150_000
 
 /**
+ * events 全量扫描（禁 find 的教训见 awaitWorkflowDoneTimed doc）：取首条 workflowUpdate
+ * 帧的 runId（events 追加式，首帧不变——逐轮重扫恒取同一 runId）+ 目标 runId 的 done 帧
+ * 是否已在场。
+ */
+function scanWorkflowUpdateEvents(
+  events: Array<{ type?: string; payload?: Record<string, unknown> }>,
+): { firstRunId: string; doneSeen: boolean } {
+  let firstRunId = ''
+  let doneSeen = false
+  for (const e of events) {
+    if (e.type !== 'session.workflowUpdate') continue
+    const update = e.payload?.update as { status?: unknown; runId?: unknown } | undefined
+    if (update === undefined || typeof update.runId !== 'string') continue
+    if (firstRunId === '') firstRunId = update.runId
+    if (update.runId === firstRunId && update.status === 'done') {
+      doneSeen = true
+    }
+  }
+  return { firstRunId, doneSeen }
+}
+
+/**
+ * JSONL 权威 record 是否已落 done：是 → 首见时刻 Date.now()，否 → 0。
+ * （调用方以 runId 已定 + 未计时为前置——保持 lastWorkflowRecordFor 的原短路语义。）
+ */
+function doneRecordSeenAt(sessionFile: string | null, runId: string): number {
+  if (sessionFile === null) return 0
+  return lastWorkflowRecordFor(sessionFile, runId)?.status === 'done' ? Date.now() : 0
+}
+
+/**
  * 等「run 完成（JSONL 终态 done）+ done 增量信号帧到达 spec WS」双事件并记录各自首见时刻。
  * 两锚都见到才返回（时序不定：帧可先于文件 flush 到达，反之亦然）；deadline 内未见全返回 null。
  *
@@ -295,18 +326,11 @@ export async function awaitWorkflowDoneTimed(
   let tDoneRecord = 0
   let tFrameSeen = 0
   while (Date.now() < deadline) {
-    for (const e of events) {
-      if (e.type !== 'session.workflowUpdate') continue
-      const update = e.payload?.update as { status?: unknown; runId?: unknown } | undefined
-      if (update === undefined || typeof update.runId !== 'string') continue
-      if (runId === '') runId = update.runId
-      if (update.runId === runId && update.status === 'done' && tFrameSeen === 0) {
-        tFrameSeen = Date.now()
-      }
-    }
-    if (runId !== '' && tDoneRecord === 0 && sessionFile !== null
-      && lastWorkflowRecordFor(sessionFile, runId)?.status === 'done') {
-      tDoneRecord = Date.now()
+    const scanned = scanWorkflowUpdateEvents(events)
+    if (runId === '' && scanned.firstRunId !== '') runId = scanned.firstRunId
+    if (scanned.doneSeen && tFrameSeen === 0) tFrameSeen = Date.now()
+    if (runId !== '' && tDoneRecord === 0) {
+      tDoneRecord = doneRecordSeenAt(sessionFile, runId)
     }
     if (runId !== '' && tDoneRecord !== 0 && tFrameSeen !== 0) {
       return { runId, tDoneRecord, tFrameSeen }

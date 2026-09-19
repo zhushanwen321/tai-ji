@@ -186,6 +186,46 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
   busHandlers.clear()
 }
 
+/** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
+ *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约断言收窄。 */
+function pickDialogFields(
+  request: DialogRequest,
+): Partial<Pick<ExtensionUIRequest, 'title' | 'message' | 'options' | 'default' | 'level' | 'prefill'>> {
+  return {
+    ...(request.title !== undefined ? { title: request.title } : {}),
+    ...(request.message !== undefined ? { message: request.message as string } : {}),
+    ...(request.options !== undefined ? { options: request.options as string[] } : {}),
+    ...(request.default !== undefined ? { default: request.default as string } : {}),
+    ...(request.level !== undefined ? { level: request.level as 'info' | 'warn' | 'error' } : {}),
+    ...(request.prefill !== undefined ? { prefill: request.prefill as string } : {}),
+  }
+}
+
+/** 统一表单扩展字段搬运（白名单漏补 = 字段静默剥离，FormOverlay 渲染拿不到问题集）；
+ *  formQuestions 值域 unknown[]（isFormQuestion 守卫在消费端收窄），无需断言 */
+function pickFormFields(
+  request: DialogRequest,
+): Partial<Pick<ExtensionUIRequest, 'form' | 'formQuestions' | 'allowCancel'>> {
+  return {
+    ...(request.form !== undefined ? { form: request.form as true } : {}),
+    ...(request.formQuestions !== undefined ? { formQuestions: request.formQuestions as unknown[] } : {}),
+    ...(request.allowCancel !== undefined ? { allowCancel: request.allowCancel as boolean } : {}),
+  }
+}
+
+/** legacy 键搬运窗口内保留（D7 归一层依赖 + FormOverlay draft 直挂源分流；替换式剥离
+ *  会断 ScheduleForm 直挂 draft 链），窗口末随归一层删——formFilter 只认 form 键 */
+function pickLegacyFields(
+  request: DialogRequest,
+): Partial<Pick<ExtensionUIRequest, 'askUser' | 'askUserQuestions' | 'scheduleCreate' | 'scheduleDraft'>> {
+  return {
+    ...(request.askUser !== undefined ? { askUser: request.askUser as boolean } : {}),
+    ...(request.askUserQuestions !== undefined ? { askUserQuestions: request.askUserQuestions as unknown[] } : {}),
+    ...(request.scheduleCreate !== undefined ? { scheduleCreate: request.scheduleCreate as boolean } : {}),
+    ...(request.scheduleDraft !== undefined ? { scheduleDraft: request.scheduleDraft } : {}),
+  }
+}
+
 /**
  * bus 事件 request（DialogRequest）→ ExtensionUIRequest 适配（IF3）。
  *
@@ -199,23 +239,9 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     sessionId: sid,
     requestId: request.requestId,
     method: (request.method as ExtensionInteractMethod | undefined) ?? request.kind,
-    ...(request.title !== undefined ? { title: request.title } : {}),
-    ...(request.message !== undefined ? { message: request.message as string } : {}),
-    ...(request.options !== undefined ? { options: request.options as string[] } : {}),
-    ...(request.default !== undefined ? { default: request.default as string } : {}),
-    ...(request.level !== undefined ? { level: request.level as 'info' | 'warn' | 'error' } : {}),
-    ...(request.prefill !== undefined ? { prefill: request.prefill as string } : {}),
-    // 统一表单扩展字段搬运（白名单漏补 = 字段静默剥离，FormOverlay 渲染拿不到问题集）；
-    // formQuestions 值域 unknown[]（isFormQuestion 守卫在消费端收窄），无需断言
-    ...(request.form !== undefined ? { form: request.form as true } : {}),
-    ...(request.formQuestions !== undefined ? { formQuestions: request.formQuestions as unknown[] } : {}),
-    ...(request.allowCancel !== undefined ? { allowCancel: request.allowCancel as boolean } : {}),
-    // legacy 键搬运窗口内保留（D7 归一层依赖 + FormOverlay draft 直挂源分流；替换式剥离
-    // 会断 ScheduleForm 直挂 draft 链），窗口末随归一层删——formFilter 只认 form 键
-    ...(request.askUser !== undefined ? { askUser: request.askUser as boolean } : {}),
-    ...(request.askUserQuestions !== undefined ? { askUserQuestions: request.askUserQuestions as unknown[] } : {}),
-    ...(request.scheduleCreate !== undefined ? { scheduleCreate: request.scheduleCreate as boolean } : {}),
-    ...(request.scheduleDraft !== undefined ? { scheduleDraft: request.scheduleDraft } : {}),
+    ...pickDialogFields(request),
+    ...pickFormFields(request),
+    ...pickLegacyFields(request),
     // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
     // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
     ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),

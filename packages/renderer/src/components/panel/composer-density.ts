@@ -155,67 +155,43 @@ export function resolveComposerDensityTier(
   return 'narrow'
 }
 
-/**
- * 密度状态机：可用宽度 + 能力标志 → 逐元素形态。
- *
- * @param availableWidth 容器可用宽度（px，由 ResizeObserver 实测 `.composer-bar` 内容宽）
- * @param capabilities 可选能力标志（缺省 = 插件零贡献 + 托盘有面）
- * @param thresholdOverrides 三档阈值的部分覆盖（缺省全用命名常量）
- */
-export function resolveComposerDensity(
-  availableWidth: number,
-  capabilities: ComposerDensityCapabilities = {},
-  thresholdOverrides: Partial<ComposerDensityThresholds> = {},
-): ComposerDensityLayout {
-  const thresholds: ComposerDensityThresholds = {
+/** 阈值归一：覆盖项缺省回落命名常量（D6 定值）。 */
+function resolveThresholds(thresholdOverrides: Partial<ComposerDensityThresholds>): ComposerDensityThresholds {
+  return {
     expandedMinWidth:
       thresholdOverrides.expandedMinWidth ?? COMPOSER_DENSITY_EXPANDED_MIN_WIDTH,
     aggregatedBelowWidth:
       thresholdOverrides.aggregatedBelowWidth ?? COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH,
   }
-  const tier = resolveComposerDensityTier(availableWidth, thresholds)
+}
 
-  // 档位决定退化面：compact/narrow 用序 1–3；narrow 再用序 4（累计）。
-  const mergesOrder1And2 = tier !== 'expanded'
-  const aggregatesTray = tier === 'narrow'
+/** 序 1/2 合流形态：合流序生效即 `merged`，否则原形态 `expanded`。 */
+function resolveMergeForm(merged: boolean): 'merged' | 'expanded' {
+  return merged ? 'merged' : 'expanded'
+}
 
-  const hasPluginToolbarContributions =
-    (capabilities.pluginToolbarContributionCount ?? 0) > 0
-  const hasTrayItems = capabilities.hasTrayItems ?? true
+/** 序 3：零贡献 → 不渲染（也绝不产生死入口）；有贡献才可能被收起。 */
+function resolvePluginToolbarForm(
+  hasPluginToolbarContributions: boolean,
+  mergesOrder1And2: boolean,
+): ComposerDensitySlots['pluginToolbar'] {
+  if (!hasPluginToolbarContributions) return 'absent'
+  return mergesOrder1And2 ? 'collapsed-to-menu' : 'expanded'
+}
 
-  // 序 3：零贡献 → 不渲染（也绝不产生死入口）；有贡献才可能被收起。
-  const pluginToolbar: ComposerDensitySlots['pluginToolbar'] = !hasPluginToolbarContributions
-    ? 'absent'
-    : mergesOrder1And2
-      ? 'collapsed-to-menu'
-      : 'expanded'
+/** 序 4：全无条目 → 不渲染（沿用托盘三态契约）；否则窄档才聚合。 */
+function resolveTrayForm(hasTrayItems: boolean, aggregatesTray: boolean): ComposerDensitySlots['tray'] {
+  if (!hasTrayItems) return 'absent'
+  return aggregatesTray ? 'aggregated' : 'expanded'
+}
 
-  // 序 4：全无条目 → 不渲染（沿用托盘三态契约）；否则窄档才聚合。
-  const tray: ComposerDensitySlots['tray'] = !hasTrayItems
-    ? 'absent'
-    : aggregatesTray
-      ? 'aggregated'
-      : 'expanded'
+/** 溢出菜单条目：当前唯一来源 = 序 3 的插件 toolbar（有被收起项才有 `»`）。 */
+function resolveOverflowItems(pluginToolbar: ComposerDensitySlots['pluginToolbar']): ComposerDensitySlotKey[] {
+  return pluginToolbar === 'collapsed-to-menu' ? ['pluginToolbar'] : []
+}
 
-  const slots: ComposerDensitySlots = {
-    // 序 0：任何宽度都保留原形态。
-    add: 'expanded',
-    send: 'expanded',
-    // 序 1：容量 + 生成指标合流。
-    capacity: mergesOrder1And2 ? 'merged' : 'expanded',
-    genStats: mergesOrder1And2 ? 'merged' : 'expanded',
-    // 序 2：模型 + 推理档位合体。
-    model: mergesOrder1And2 ? 'merged' : 'expanded',
-    thinking: mergesOrder1And2 ? 'merged' : 'expanded',
-    pluginToolbar,
-    tray,
-  }
-
-  // 溢出菜单条目：当前唯一来源 = 序 3 的插件 toolbar（有被收起项才有 `»`）。
-  const overflowItems: ComposerDensitySlotKey[] =
-    pluginToolbar === 'collapsed-to-menu' ? ['pluginToolbar'] : []
-
-  // 已生效退化序由 slots 派生（保证 `appliedOrders` 与形态恒一致，不引入第二真源）。
+/** 已生效退化序由 slots 派生（保证 `appliedOrders` 与形态恒一致，不引入第二真源）。 */
+function deriveAppliedOrders(slots: ComposerDensitySlots): ComposerDegradationOrder[] {
   const appliedOrders: ComposerDegradationOrder[] = []
   if (slots.capacity === 'merged') {
     appliedOrders.push(COMPOSER_DEGRADATION_ORDER.CAPACITY_METRICS_MERGE)
@@ -229,6 +205,48 @@ export function resolveComposerDensity(
   if (slots.tray === 'aggregated') {
     appliedOrders.push(COMPOSER_DEGRADATION_ORDER.TRAY_AGGREGATION)
   }
+  return appliedOrders
+}
+
+/**
+ * 密度状态机：可用宽度 + 能力标志 → 逐元素形态。
+ *
+ * @param availableWidth 容器可用宽度（px，由 ResizeObserver 实测 `.composer-bar` 内容宽）
+ * @param capabilities 可选能力标志（缺省 = 插件零贡献 + 托盘有面）
+ * @param thresholdOverrides 三档阈值的部分覆盖（缺省全用命名常量）
+ */
+export function resolveComposerDensity(
+  availableWidth: number,
+  capabilities: ComposerDensityCapabilities = {},
+  thresholdOverrides: Partial<ComposerDensityThresholds> = {},
+): ComposerDensityLayout {
+  const thresholds = resolveThresholds(thresholdOverrides)
+  const tier = resolveComposerDensityTier(availableWidth, thresholds)
+
+  // 档位决定退化面：compact/narrow 用序 1–3；narrow 再用序 4（累计）。
+  const mergesOrder1And2 = tier !== 'expanded'
+  const aggregatesTray = tier === 'narrow'
+
+  const hasPluginToolbarContributions =
+    (capabilities.pluginToolbarContributionCount ?? 0) > 0
+  const hasTrayItems = capabilities.hasTrayItems ?? true
+
+  const slots: ComposerDensitySlots = {
+    // 序 0：任何宽度都保留原形态。
+    add: 'expanded',
+    send: 'expanded',
+    // 序 1：容量 + 生成指标合流。
+    capacity: resolveMergeForm(mergesOrder1And2),
+    genStats: resolveMergeForm(mergesOrder1And2),
+    // 序 2：模型 + 推理档位合体。
+    model: resolveMergeForm(mergesOrder1And2),
+    thinking: resolveMergeForm(mergesOrder1And2),
+    pluginToolbar: resolvePluginToolbarForm(hasPluginToolbarContributions, mergesOrder1And2),
+    tray: resolveTrayForm(hasTrayItems, aggregatesTray),
+  }
+
+  const overflowItems = resolveOverflowItems(slots.pluginToolbar)
+  const appliedOrders = deriveAppliedOrders(slots)
 
   return {
     tier,

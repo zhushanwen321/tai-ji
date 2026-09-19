@@ -37,6 +37,7 @@ import {
   wsRoundTrip,
   openListenWs,
   waitForExtensionsReady,
+  type WsFrame,
 } from './fixtures/launch-app-real'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -69,6 +70,84 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
   await expect(item).toBeVisible({ timeout: 30_000 })
   await item.click()
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
+}
+
+/** run 在飞确认：轮询 spec WS events 直到首条 workflowUpdate 帧的 runId 出现并返回
+ * （running 帧即目标 run——单 run 场景；超时返回空串，断言由调用方继续）。 */
+async function pollRunningRunId(
+  events: WsFrame[],
+  timeoutMs: number,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  let runId = ''
+  while (Date.now() < deadline && runId === '') {
+    for (const e of events) {
+      if (e.type !== 'session.workflowUpdate') continue
+      const update = e.payload?.update as { runId?: unknown } | undefined
+      if (typeof update?.runId === 'string') {
+        runId = update.runId // 首条（running）帧即目标 run——单 run 场景
+        break
+      }
+    }
+    if (runId === '') await new Promise((r) => setTimeout(r, 500))
+  }
+  return runId
+}
+
+/** 断连期间 run 完成：轮询主 session JSONL 权威 record 至 done，返回首见时刻（超时 0）。 */
+async function waitForDoneRecordAt(
+  sessionFile: string,
+  runId: string,
+  timeoutMs: number,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (lastWorkflowRecordFor(sessionFile, runId)?.status === 'done') {
+      return Date.now()
+    }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  return 0
+}
+
+/** 恢复来源①观测：subscribe reply.stateSnapshot 内该 run 的 done last-value 帧。 */
+function findReplayedDoneFrame(
+  stateSnapshot: WsFrame[],
+  runId: string,
+): WsFrame | undefined {
+  return stateSnapshot.find((f) => {
+    if (f.type !== 'session.workflowUpdate') return false
+    const update = f.payload?.update as { runId?: unknown; status?: unknown } | undefined
+    return update?.runId === runId && update?.status === 'done'
+  })
+}
+
+/** 重连稳态观测：窗口内重复的 done workflowUpdate live 帧（结构属性：应为空）。 */
+function doneLiveFrames(events: WsFrame[], runId: string): WsFrame[] {
+  return events.filter((e) => {
+    if (e.type !== 'session.workflowUpdate') return false
+    const update = e.payload?.update as { runId?: unknown; status?: unknown } | undefined
+    return update?.runId === runId && update?.status === 'done'
+  })
+}
+
+/** 失败取证（appCleanup 之前调用）：logs 拷到固定路径，规避后续清理丢失现场。 */
+function collectFailureArtifacts(dataDir: string): void {
+  const keep = `/tmp/a2-failed-${Date.now()}`
+  try {
+    fs.mkdirSync(keep, { recursive: true })
+    fs.cpSync(path.join(dataDir, 'logs'), path.join(keep, 'logs'), { recursive: true })
+    fs.cpSync(path.join(dataDir, 'agent', 'logs'), path.join(keep, 'agent-logs'), { recursive: true })
+    console.log(`[A2] 失败取证：logs -> ${keep}（dataDir=${dataDir}）`)
+  } catch (e) {
+    console.log(`[A2] 失败取证拷贝失败：${e}（dataDir=${dataDir}）`)
+  }
+}
+
+/** 通过后的临时目录清理（mkdtemp 自建自删红线）。 */
+function removeTempDirs(projectDir: string, dataDir: string): void {
+  fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 }
 
 test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉恢复 + GUI 收敛', async () => {
@@ -125,19 +204,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     // ── run 在飞确认：running 增量信号帧到 spec WS + 托盘 running ──
     const workflowBtn = page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')
     await expect(workflowBtn).toHaveAttribute('data-state', 'running', { timeout: 60_000 })
-    let runId = ''
-    const runningDeadline = Date.now() + 30_000
-    while (Date.now() < runningDeadline && runId === '') {
-      for (const e of listen1.events) {
-        if (e.type !== 'session.workflowUpdate') continue
-        const update = e.payload?.update as { runId?: unknown } | undefined
-        if (typeof update?.runId === 'string') {
-          runId = update.runId // 首条（running）帧即目标 run——单 run 场景
-          break
-        }
-      }
-      if (runId === '') await new Promise((r) => setTimeout(r, 500))
-    }
+    const runId = await pollRunningRunId(listen1.events, 30_000)
     expect(runId, 'spec WS 应收到 run 的 running 增量信号帧（断连前在飞确认）').not.toBe('')
 
     // ── 断连：spec WS 关闭时 run 必须仍在飞（窗口真实，非空转）──
@@ -150,15 +217,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     console.log(`[A2] spec WS 已断连（runId=${runId}，run 在飞中）`)
 
     // ── 断连期间 run 完成：权威 record 落盘，无需任何 WS 观察者 ──
-    const doneDeadline = Date.now() + 150_000
-    let tDoneRecord = 0
-    while (Date.now() < doneDeadline) {
-      if (lastWorkflowRecordFor(sessionFile!, runId)?.status === 'done') {
-        tDoneRecord = Date.now()
-        break
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
+    const tDoneRecord = await waitForDoneRecordAt(sessionFile!, runId, 150_000)
     expect(tDoneRecord, '断连期间 run 应完成（主 session JSONL 终态 done）').not.toBe(0)
 
     // ── GUI 收敛（用户可见）：run 完成后托盘 workflow 条目回 idle（≤30s）──
@@ -179,11 +238,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
       type?: string
       payload?: Record<string, unknown>
     }>
-    const replayed = stateSnapshot.find((f) => {
-      if (f.type !== 'session.workflowUpdate') return false
-      const update = f.payload?.update as { runId?: unknown; status?: unknown } | undefined
-      return update?.runId === runId && update?.status === 'done'
-    })
+    const replayed = findReplayedDoneFrame(stateSnapshot, runId)
     expect(
       replayed,
       '恢复来源①（stateSnapshot 回放帧）：重连 re-subscribe reply 应携带该 run 的 done workflowUpdate last-value 帧',
@@ -211,11 +266,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     const listen2 = await openListenWs(port, sessionId)
     listenWs2 = listen2.ws
     await new Promise((r) => setTimeout(r, STEADY_WINDOW_MS))
-    const dupLive = listen2.events.filter((e) => {
-      if (e.type !== 'session.workflowUpdate') return false
-      const update = e.payload?.update as { runId?: unknown; status?: unknown } | undefined
-      return update?.runId === runId && update?.status === 'done'
-    })
+    const dupLive = doneLiveFrames(listen2.events, runId)
     expect(
       dupLive,
       '重连后稳态不应出现重复 done workflowUpdate live 帧（回放已在 subscribe reply 交付，live 通道静默）',
@@ -227,22 +278,9 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     reachedEnd = true
   } finally {
     // 失败取证放最前（appCleanup 之前）：logs 拷到固定路径，规避后续清理丢失现场
-    if (!reachedEnd) {
-      const keep = `/tmp/a2-failed-${Date.now()}`
-      try {
-        fs.mkdirSync(keep, { recursive: true })
-        fs.cpSync(path.join(dataDir, 'logs'), path.join(keep, 'logs'), { recursive: true })
-        fs.cpSync(path.join(dataDir, 'agent', 'logs'), path.join(keep, 'agent-logs'), { recursive: true })
-        console.log(`[A2] 失败取证：logs -> ${keep}（dataDir=${dataDir}）`)
-      } catch (e) {
-        console.log(`[A2] 失败取证拷贝失败：${e}（dataDir=${dataDir}）`)
-      }
-    }
+    if (!reachedEnd) collectFailureArtifacts(dataDir)
     listenWs2?.close()
     if (appCleanup) await appCleanup()
-    if (reachedEnd) {
-      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
+    if (reachedEnd) removeTempDirs(projectDir, dataDir)
   }
 })

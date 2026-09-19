@@ -193,6 +193,25 @@ function readTemplateProvidedPath(data: Partial<PlanState>): string | undefined 
   return typeof data.templateProvidedPath === "string" ? data.templateProvidedPath : undefined;
 }
 
+/**
+ * 单条 plan-state entry 数据的逐字段应用（调用方已过 isPlanStateEntry 门，data 为
+ * 非空对象；`?? {}` 仅为 data?: T 的类型 shim）。
+ */
+function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefined): void {
+  // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）；
+  // 新字段缺失（旧 entry）归一为空清单/无值（D4 字段级降级）
+  const entryData = data ?? {};
+  state.isActive = entryData.isActive ?? false;
+  state.planFilePath = entryData.planFilePath ?? "";
+  state.requirement = entryData.requirement ?? "";
+  state.templateName = entryData.templateName ?? "";
+  state.templateProvidedPath = readTemplateProvidedPath(entryData);
+  state.skills = readSkills(entryData);
+  state.docs = readDocs(entryData);
+  state.reviewState = readReviewState(entryData);
+  state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
+}
+
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const state = { ...DEFAULT_PLAN_STATE };
   const entries = ctx.sessionManager.getEntries();
@@ -201,18 +220,7 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
     // entries[i] 是复杂表达式（TS 不收窄），守卫移到 const 变量上
     const entry = entries[i];
     if (!isPlanStateEntry(entry)) continue;
-    const data = entry.data;
-    // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）；
-    // 新字段缺失（旧 entry）归一为空清单/无值（D4 字段级降级）
-    state.isActive = data?.isActive ?? false;
-    state.planFilePath = data?.planFilePath ?? "";
-    state.requirement = data?.requirement ?? "";
-    state.templateName = data?.templateName ?? "";
-    state.templateProvidedPath = readTemplateProvidedPath(data ?? {});
-    state.skills = readSkills(data ?? {});
-    state.docs = readDocs(data ?? {});
-    state.reviewState = readReviewState(data ?? {});
-    state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(data ?? {});
+    applyPlanStateEntry(state, entry.data);
     break;
   }
 

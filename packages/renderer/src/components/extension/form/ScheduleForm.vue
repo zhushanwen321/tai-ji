@@ -148,28 +148,45 @@ const models = computed(() => props.question.initial?.models ?? [])
 const currentModel = computed(() => props.question.initial?.currentModel)
 
 // ── draft → 表单初值（预填，用户可改；isScheduleDraft 守卫已在挂载侧收窄）──
-function initFromDraft(): void {
-  const d = props.question.initial
+/** prompt/name 文本与 recurring 过期档的标量初值（draft 缺省回落空串/7d） */
+function initPromptNameAndExpires(d: ScheduleQuestion['initial']): void {
   promptText.value = d?.prompt ?? ''
   nameText.value = d?.name ?? ''
   expires.value = d?.expires === '30d' || d?.expires === 'never' ? d.expires : '7d'
-  // 模型预选：draft.model 优先，回退会话当前模型，再回退列表首项
+}
+
+/** 模型预选：draft.model 优先，回退会话当前模型，再回退列表首项 */
+function initModelSelection(d: ScheduleQuestion['initial']): void {
   const prefer = d?.model ?? d?.currentModel
   selectedModel.value = prefer !== undefined && models.value.includes(prefer) ? prefer : models.value[0]
-  if (d?.kind === 'once') {
-    // 一次性 cron 还原本地时刻；还原失败（非 once 形态）退默认下一整点
-    const restored = onceCronToDate(d.schedule)
-    if (restored) {
-      onceLocal.value = toLocalInput(restored)
-    } else {
-      onceLocal.value = ''
-      switchKind('once')
-    }
+}
+
+/** once 路径还原：一次性 cron 还原本地时刻；还原失败（非 once 形态）退默认下一整点 */
+function restoreOnceSchedule(schedule: string): void {
+  const restored = onceCronToDate(schedule)
+  if (restored) {
+    onceLocal.value = toLocalInput(restored)
   } else {
-    // recurring：duration 形态（5m/2h）或非预设 cron → 自定义输入框展示原文
-    const matched = CRON_CHIPS.find((c) => c.cron === d?.schedule)
-    cronText.value = d?.schedule ?? '0 9 * * *'
-    isCustomCron.value = matched === undefined
+    onceLocal.value = ''
+    switchKind('once')
+  }
+}
+
+/** recurring 路径还原：duration 形态（5m/2h）或非预设 cron → 自定义输入框展示原文 */
+function restoreRecurringSchedule(schedule: string | undefined): void {
+  const matched = CRON_CHIPS.find((c) => c.cron === schedule)
+  cronText.value = schedule ?? '0 9 * * *'
+  isCustomCron.value = matched === undefined
+}
+
+function initFromDraft(): void {
+  const d = props.question.initial
+  initPromptNameAndExpires(d)
+  initModelSelection(d)
+  if (d?.kind === 'once') {
+    restoreOnceSchedule(d.schedule)
+  } else {
+    restoreRecurringSchedule(d?.schedule)
   }
 }
 watch(() => props.question, initFromDraft, { immediate: true })

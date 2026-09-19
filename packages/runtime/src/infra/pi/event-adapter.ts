@@ -895,25 +895,25 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
   const dialogMethod = method as ExtensionInteractMethod
   const requestId = String(event.id ?? '')
 
-  if (method === 'select' && event.title === SESSION_MANAGER_MARKER) {
+  if (isMarkerSelect(event, SESSION_MANAGER_MARKER)) {
     return translateSessionManagerSelect(event, sid, requestId)
   }
-  if (method === 'select' && event.title === BRIDGE_MARKER) {
+  if (isMarkerSelect(event, BRIDGE_MARKER)) {
     return translateBridgeSelect(event, sid, requestId)
   }
-  if (method === 'select' && event.title === ASK_USER_MARKER) {
+  if (isMarkerSelect(event, ASK_USER_MARKER)) {
     const askEvents = tryTranslateAskUserSelect(event, sid, requestId, dialogMethod)
     if (askEvents) return askEvents
     // 检测失败（非合法 JSON / questions 空）→ 降级普通 select（下方分支）
   }
-  if (method === 'select' && event.title === SCHEDULE_CREATE_MARKER) {
+  if (isMarkerSelect(event, SCHEDULE_CREATE_MARKER)) {
     const scheduleEvents = tryTranslateScheduleCreateSelect(event, sid, requestId, dialogMethod)
     if (scheduleEvents) return scheduleEvents
     // 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（下方分支）
   }
   // plan 审批（plan 模式重设计 D5）：marker 家族第 6 员，检测形态照 ask-user（title 精确
   // 匹配 + payload 结构守卫，失败降级普通 select）。
-  if (method === 'select' && event.title === PLAN_REVIEW_MARKER) {
+  if (isMarkerSelect(event, PLAN_REVIEW_MARKER)) {
     const planEvents = tryTranslatePlanReviewSelect(event, sid, requestId, dialogMethod)
     if (planEvents) return planEvents
     // 检测失败（非合法 JSON / docs 缺失）→ 降级普通 select（下方分支）
@@ -921,12 +921,20 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
   // 统一提问表单（ui-presentation-protocol D2）：plan / scheduler / ask-user 三方提问的
   // 统一通道，检测形态照 ask-user（title 精确匹配 + payload 守卫）；差异在守卫失败策略——
   // 逐项过滤而非整体判否（见 tryTranslateFormSelect）。
-  if (method === 'select' && event.title === UI_FORM_MARKER) {
+  if (isMarkerSelect(event, UI_FORM_MARKER)) {
     const formEvents = tryTranslateFormSelect(event, sid, requestId, dialogMethod)
     if (formEvents) return formEvents
     // 检测失败（非合法 JSON / formQuestions 全不合法）→ 降级普通 select（下方分支）
   }
   return translatePlainDialogRequest(event, sid, requestId, dialogMethod)
+}
+
+/**
+ * marker 家族统一守卫（六个 title-marker 分支共用）：select 方法 + title 精确匹配。
+ * 检测失败时各 marker 分支自行降级普通 select（见 translateInteractiveRequest）。
+ */
+function isMarkerSelect(event: PiExtensionUiRequestEvent, marker: string): boolean {
+  return event.method === 'select' && event.title === marker
 }
 
 /** extension_ui_request — route by method (setStatus, setWidget, editor, etc.) */
