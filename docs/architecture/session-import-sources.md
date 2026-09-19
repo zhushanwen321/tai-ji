@@ -14,17 +14,19 @@
 └──────────────┬───────────────────────────────────────────────────┘
                │ WS: session.importCandidates / session.import（带 source 字段）
 ┌─ runtime ────▼───────────────────────────────────────────────────┐
-│ session-message-handler ──按 source 路由──► source 注册表           │
+│ session-message-handler（payload 整体透传，对源零分支）──►        │
+│ ImportService（公共编排层，源无关；内持 source 注册表，           │
+│               按 request.source 分发，缺省 'pi'）                 │
 │                                          ├─ ExternalFileImportSource（pi）│
 │                                          └─ ZcodeImportSource    │
 │                    （SessionImportSource SPI，见 §3）               │
-│ ImportService（公共编排层，源无关）                                  │
 │   互斥链 → prepareImport → 去重双检 → tmp+rename 落盘 →            │
-│   sidecar → tombstone 摘碑 → 缓存失效 → reply+broadcast            │
+│   sidecar → tombstone 摘碑 → 缓存失效 → reply                     │
+│   （reply 帧与导入完成广播由 handler 层承担，广播在 reply 后）    │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**分层原则**：源特有知识（去哪找会话、怎么读、怎么转 pi 格式）全部在 source 实现内；源无关流程（原子落盘/去重/sidecar/广播）收在编排层单点。新增一个源 = 新增一个 source 模块 + 注册一行 + GUI 加一个选项卡，编排层不动。
+**分层原则**：源特有知识（去哪找会话、怎么读、怎么转 pi 格式）全部在 source 实现内；源无关流程（原子落盘/去重/sidecar）收在编排层单点，导入完成广播由 handler 层在 reply 后发出。新增一个源 = 新增一个 source 模块 + 注册一行 + GUI 加一个选项卡，编排层不动。
 
 ## 2. 关键背景概念
 
@@ -69,7 +71,7 @@ export interface SessionImportSource {
 | 校验源会话合法（自己的格式规则） | projectId 存在性校验 |
 | 转换为合法 pi JSONL（§5 不变量） | mkdir + tmp 写入 + rename 原子落盘 + 失败清理 |
 | 归一化幂等键（§5-I2） | project sidecar 写入 + readback |
-| 降级明细收集（degradations） | tombstone 摘碑 / 扫描缓存失效 / broadcast / reply 组装 |
+| 降级明细收集（degradations） | tombstone 摘碑 / 扫描缓存失效 / reply 结果组装（reply 帧发送与广播归 handler 层） |
 
 **RPC 契约**（`packages/shared/src/import-session.ts`）：`ImportCandidatesRequest.source?` / `ImportRequest.source?`（缺省 `'pi'`，存量调用行为不变）+ `ImportRequest.sessionId?`（zcode 等以 id 定位会话的源必填）+ `dbPath?`（源数据路径注入：缺省动态推导宿主路径；**也是测试 fixture 注入通道**——单测传 fixture 库路径，不覆写 HOME 不 mock import）。
 
@@ -117,7 +119,7 @@ session(id sess_<uuid>, directory, title NOT NULL, task_type, time_created/time_
 - 消息语义：一条 assistant message = 完整多步执行段（多个 step 循环）；转换按 `step-finish` 边界切分为多条 pi assistant entry
 - 候选范围：`task_type` 取 `interactive/fork/selection_side_chat`，排除 `subagent_child`（内部子任务噪音）
 - 索引齐备：`message_session_sequence_idx`、`part_session_idx`、`session_task_type_idx`——按会话取数、按类型筛会话毫秒级
-- 已知坑：①`packages/zcode-subagent-cli/src/reader.ts` 的 `toolFromPart` 只认 state 为 JSON 字符串的旧形态（0.16.5 全库已是内嵌对象，该存量 bug 独立修复，勿抄）；②zcode `finish` 有 10 种取值，pi `StopReason` 是封闭枚举——需完备映射表（保底 `stop`，渲染链零消费安全）；③zcode `cost` 是 number，pi `Usage.cost` 是对象（映射到 `cost.total`）
+- 已知坑：①`packages/zcode-subagent-cli/src/reader.ts` 的 `toolFromPart` 兼容 state 双形态——内嵌 JSON 对象为主（0.16.5+ 宿主库全量形态）、旧 JSON 字符串回归兼容、两形态均非法时降级 state=undefined（status 落 `'unknown'`）；新增源的 tool part 解析按此三段优先链处理。②zcode `finish` 有 10 种取值，pi `StopReason` 是封闭枚举——需完备映射表（保底 `stop`，渲染链零消费安全）；③zcode `cost` 是 number，pi `Usage.cost` 是对象（映射到 `cost.total`）
 
 ## 7. 测试要求
 
