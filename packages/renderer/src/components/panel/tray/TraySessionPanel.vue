@@ -106,8 +106,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useToast } from '@/composables/useToast'
 import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
-import { DOT_CLASS } from '@/composables/logic/sessionStatus'
-import type { DerivedStatus } from '@/composables/logic/sessionStatus'
+import { DOT_CLASS, DISPLAY_STATUS } from '@/composables/logic/sessionStatus'
 import { useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import TrayConfirmButton from '@/components/panel/tray/TrayConfirmButton.vue'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
@@ -139,20 +138,8 @@ const headerText = computed(() =>
 )
 
 /**
- * 进程级 status → 展示态（色语言复用侧栏 DOT_CLASS 单点）。
- * agent 派发的子会话通常未 hydrate，derivedStatus 会兜底 done（见 useTrayCounts 文件头），
- * 故托盘直接用进程级真值映射：active → 生成中（accent）；error → 失败；stopped/dead → 已停止；
- * idle/done → 已完成。
+ * 状态文案 key（i18n 子表；与 sessionStatus.ts 的 DISPLAY_STATUS 一一对应）。
  */
-const DISPLAY_STATUS: Record<SessionStatus, DerivedStatus> = {
-  active: 'streaming',
-  idle: 'done',
-  done: 'done',
-  error: 'error',
-  stopped: 'stopped',
-  dead: 'stopped',
-}
-/** 状态文案 key（i18n 子表；与 DISPLAY_STATUS 一一对应） */
 const STATUS_TEXT_KEY: Record<SessionStatus, string> = {
   active: 'running',
   idle: 'done',

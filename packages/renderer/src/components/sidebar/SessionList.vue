@@ -112,6 +112,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { dirNameOf } from '@taiji/ui'
 import { collectNamedProjectIds, sessionBelongsToProject } from '@/composables/logic/project-session'
+import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { useProjectStore } from '@/stores/project'
 import SessionItem from './SessionItem.vue'
 
@@ -188,6 +189,9 @@ function isFolderDeleteAvailable(cwd: string): boolean {
 
 /**
  * 子会话计数（D9 中性计数徒标）：按 parentAgentSessionId 分组计数（零新协议，纯内存推导）。
+ * 口径 = **未完成数**（判据见 sessionStatus.ts 的 isSessionCompleted）：绿点（idle/done）
+ * 不予计入，active / error / stopped / dead 都算——与徒标「还有多少未完成」的阅读预期一致，
+ * 不再显示子会话总数。
  * 取可见分组（visibleGroups）计数——徒标与屏幕上实际可扫读的行保持一致（项目过滤下不会
  * 报出不可见子会话）。fork 分支走 parentSession 血缘，不计数：它已在扁平列表逐行可见，
  * 无需计数补偿（只有 agent 子会话在 project 视图下可能被遗漏）。
@@ -198,13 +202,14 @@ const childCountByParent = computed<Map<string, number>>(() => {
     for (const s of g.sessions) {
       const parent = s.parentAgentSessionId
       if (!parent) continue
+      if (isSessionCompleted(s.status)) continue
       counts.set(parent, (counts.get(parent) ?? 0) + 1)
     }
   }
   return counts
 })
 
-/** 取某 session 的子会话数（0 = 无子会话，徒标不渲染） */
+/** 取某 session 的未完成子会话数（0 = 无未完成子会话，徒标不渲染） */
 function childCountOf(s: SessionSummary): number {
   return childCountByParent.value.get(s.id) ?? 0
 }

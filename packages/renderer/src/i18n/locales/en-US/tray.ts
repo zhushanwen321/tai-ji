@@ -79,7 +79,8 @@ export default {
     },
     /**
      * Fourth entry "child sessions" (u7, design .tmp/tech-design/mode-system-composer-density.md §6.7 D7).
-     * Row status copy mirrors TraySessionPanel's process-level status map (see DISPLAY_STATUS there).
+     * Row status copy mirrors TraySessionPanel's process-level status map (see DISPLAY_STATUS in
+     * composables/logic/sessionStatus.ts).
      */
     session: {
       /** Header summary ({total} total · {running} running) */

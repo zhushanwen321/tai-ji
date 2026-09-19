@@ -12,7 +12,7 @@
  *  - R3 未读合流：unreadByBranch 并入既有 session-unread-dot（后台完成 / 分支停止两源都点亮）
  *  - R4 软停止迁入通用行：运行中行右键「停止」两段确认 → SessionItem / SessionList emit abort
  *  - R5 两源同点清除：clearSessionUnread 一次清 session 标记 + fork 分支角标（core select 链 step 4）
- *  - R6 父条目中性计数徽标（D9 新增元素）
+ *  - R6 父条目未完成子会话数徽标（D9 元素，U-B 口径：非绿点子会话数）
  *
  * 三视角（TEST-STRATEGY §3）：每条用例至少 1 个用户可见 DOM 断言；清除点（编排层）用纯函数锁语义。
  *
@@ -267,21 +267,43 @@ describe('R5: 未读两源在同一清除点被清（core select 链 step 4）',
   })
 })
 
-// ── R6：父条目中性计数徽标（D9 新增元素） ────────────────────
+// ── R6：父条目未完成子会话数徽标（D9 + U-B 口径改未完成数） ────
 describe('R6: 父条目子会话计数徽标', () => {
-  it('有 agent 子会话的父行渲染计数徽标（数字=子会话数），无子会话行不渲染', () => {
+  it('混合态（2 已完成 + 1 active）→ 徽标只数未完成 = 1；无子会话行不渲染', () => {
     const parent = makeSession({ id: 'p-1', label: '父会话' })
-    const childA = makeSession({ id: 'c-1', label: '子会话 A', parentAgentSessionId: 'p-1', spawnSource: 'agent' })
-    const childB = makeSession({ id: 'c-2', label: '子会话 B', parentAgentSessionId: 'p-1', spawnSource: 'agent' })
+    const doneA = makeSession({ id: 'c-1', label: '子会话 A', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'idle' })
+    const doneB = makeSession({ id: 'c-2', label: '子会话 B', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const running = makeSession({ id: 'c-3', label: '子会话 C', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'active' })
     const plain = makeSession({ id: 'plain', label: '普通会话' })
-    const wrapper = mountList([parent, childA, childB, plain])
+    const wrapper = mountList([parent, doneA, doneB, running, plain])
 
     const badges = wrapper.findAll('[data-testid="session-child-count"]')
-    // 仅父行有徽标（子行 / 普通行无）
+    // 仅父行有徽标（子行 / 普通行无）；数字 = 未完成数（2 个绿点子会话不计入）
     expect(badges).toHaveLength(1)
-    expect(badges[0].text()).toContain('2')
+    expect(badges[0].text()).toBe('1')
     // 中性色（不用 accent——accent 已被 [AI] 来源徽标占用）
     expect(badges[0].classes()).toContain('text-neutral-dim')
     expect(badges[0].classes()).not.toContain('text-accent')
+  })
+
+  it('全部子会话已完成（idle / done = 绿点）→ 未完成数 0，徽标不渲染', () => {
+    const parent = makeSession({ id: 'p-1', label: '父会话' })
+    const doneA = makeSession({ id: 'c-1', label: '子会话 A', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'idle' })
+    const doneB = makeSession({ id: 'c-2', label: '子会话 B', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const wrapper = mountList([parent, doneA, doneB])
+
+    expect(wrapper.findAll('[data-testid="session-child-count"]')).toHaveLength(0)
+  })
+
+  it('error / stopped 子会话计入未完成数（判据 = 非绿点，非仅 active）', () => {
+    const parent = makeSession({ id: 'p-1', label: '父会话' })
+    const failed = makeSession({ id: 'c-1', label: '失败子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'error' })
+    const stopped = makeSession({ id: 'c-2', label: '停止子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'stopped' })
+    const doneChild = makeSession({ id: 'c-3', label: '已完子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const wrapper = mountList([parent, failed, stopped, doneChild])
+
+    const badges = wrapper.findAll('[data-testid="session-child-count"]')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].text()).toBe('2')
   })
 })

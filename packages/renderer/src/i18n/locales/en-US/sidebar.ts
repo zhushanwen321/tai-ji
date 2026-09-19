@@ -68,8 +68,10 @@ export default {
     // 软停止（右键两段确认，ForkGroup 退役后迁入通用行）：运行中菜单项「停止」
     stop: 'Stop',
     stopConfirm: 'Confirm stop?',
-    // 子会话计数徒标（D9）：父条目右侧中性 chip 的 tooltip
-    childCount: '{n} child session | {n} child sessions',
+    // Child-session count chip (D9): tooltip of the neutral chip on the parent row. The number
+    // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
+    // rather than "running".
+    childCount: '{n} child session unfinished | {n} child sessions unfinished',
   },
   sessionList: {
     empty: 'No sessions',

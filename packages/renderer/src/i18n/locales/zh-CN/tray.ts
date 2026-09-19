@@ -80,7 +80,8 @@ export default {
     },
     /**
      * 第 4 件「子会话」（u7，设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）。
-     * 行状态文案与 TraySessionPanel 的进程级 status 映射一一对应（见该文件 DISPLAY_STATUS）。
+     * 行状态文案与 TraySessionPanel 的进程级 status 映射一一对应（映射本体见
+     * composables/logic/sessionStatus.ts 的 DISPLAY_STATUS）。
      */
     session: {
       /** 段头摘要（{total} 个 · {running} 运行中） */

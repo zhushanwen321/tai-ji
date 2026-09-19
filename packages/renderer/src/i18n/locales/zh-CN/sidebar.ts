@@ -67,8 +67,9 @@ export default {
     // 软停止（右键两段确认，ForkGroup 退役后迁入通用行）：运行中菜单项「停止」
     stop: '停止',
     stopConfirm: '确认停止？',
-    // 子会话计数徒标（D9）：父条目右侧中性 chip 的 tooltip
-    childCount: '{n} 个子会话',
+    // 子会话计数徒标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
+    // （非绿点：active / error / stopped / dead 都计入），故文案用「未完成」而非「运行中」。
+    childCount: '{n} 个子会话未完成',
   },
   sessionList: {
     empty: '暂无会话',
