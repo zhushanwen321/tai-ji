@@ -71,7 +71,7 @@
 }
 ```
 
-`modelCatalog` 与 §2 `listModels`/`validateModel` 的联动（`remote-engine.ts:109-163`）：manifest 省略 catalog 或 `models: null` → `validateModel` 成员**整体摘除**（消费方 `typeof validateModel !== "function"` → 跳过校验恒放行）；`dynamic: false`（静态目录）未命中 → 同步拒；`dynamic: true` 未命中 → 放行运行期自证。作者按引擎模型目录的真实形态选 `dynamic`：静态可枚举 → false，代价是未命中模型在派发前即被同步拒；动态（无法预先枚举）→ true，未命中放行、由引擎运行期自证。声明与实际形态不符会在错误的方向上放行或拒绝。
+`modelCatalog` 与 §2 `listModels`/`validateModel` 的联动（`remote-engine.ts:108-182`）：manifest 省略 catalog 或 `models: null` → `validateModel` 成员**整体摘除**（消费方 `typeof validateModel !== "function"` → 跳过校验恒放行）；`dynamic: false`（静态目录）未命中 → 同步拒；`dynamic: true` 未命中 → 放行运行期自证。作者按引擎模型目录的真实形态选 `dynamic`：静态可枚举 → false，代价是未命中模型在派发前即被同步拒；动态（无法预先枚举）→ true，未命中放行、由引擎运行期自证。声明与实际形态不符会在错误的方向上放行或拒绝。
 
 ## 2. 协议实现义务（engine-protocol v1）
 
@@ -82,18 +82,18 @@
 | 方法 | 调用时机 | 时序约束 | 超时分级 | 幂等 | 失败形态 |
 |---|---|---|---|---|---|
 | `initialize` | 引擎进程启动后、首个 run 前握手（`engine-client.ts:422-441`） | 必须是首个请求；应答仅诊断面——capabilities/models 与 manifest 不一致 → warn 留痕，不参与同步成员判据（`methods.ts:11-13`、:126） | 控制面：`HANDSHAKE_TIMEOUT_MS` = 10s（`engine-protocol.ts:60`） | 否（每连接一次） | 超时 → `engine_handshake_timeout` 引擎不可用；版本越界 → `engine_protocol_mismatch`；gate 位多声明 → `engine_capability_mismatch`（§3） |
-| `probe` | 宿主诊断（可用性/版本漂移检测、fallback 三守卫输入） | 连接就绪后（`remote-engine.ts:183-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` **PROBE_TIMEOUT_MS** = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed` |
+| `probe` | 宿主诊断（可用性/版本漂移检测、fallback 三守卫输入） | 连接就绪后（`remote-engine.ts:184-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` **PROBE_TIMEOUT_MS** = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed` |
 | `run` | 任务派发（chat 域 `executeViaEngine` / workflow 域 SAR（SubprocessAgentRunner）.run） | 握手后；期间事件经 event 通知、句柄经 `host/handleReady` 回传；**应答到达即终态**（`methods.ts:153`） | **任务级无墙钟**（宿主不传 timeoutMs——`engine-client.ts:539`；超时治理 = 宿主显式 `timeoutMs` 走 cancel 链 + 引擎侧回收层 timer，§7） | 否（每 runId 一次） | 运行中失败不 reject——合成 error outcome + handle 正常返回（`remote-engine.ts:196-200`）；error 帧码按 §4 透传；进程崩 → `engine_crashed`（附 stderr 尾 400 字） |
 | `cancel` | 用户取消或宿主超时链触发，仅 run 在途时 | 应答仅受理确认；**终态本体由该 run 的 run 应答承载**（`methods.ts:164-170`） | 控制面：`CANCEL_SETTLE_GRACE_MS` = 3s（`engine-protocol.ts:63`；`engine-client.ts:602`）——超窗 core 走杀链 | 是（`ok:true` 恒定） | 引擎须 3s 内收敛终态；stop 生效 = 终态在窗内到达；超窗 = 共享进程收割、在途任务走崩溃路径（zcode 实装 §7 abort 链） |
-| `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:271-277`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
-| `listModels` | 模型目录诊断 | **宿主现行实装不发协议帧**——RemoteEngine 直读 manifest 快照三态映射（`remote-engine.ts:139-150`）；协议方法保留（`methods.ts:178-186`，`models: null` = 无枚举面） | 同步内存判定，无超时语义。引擎仍须实现并应答（属 9 方法集），宿主现行不调用 | 是 | 无（三态：null / [] / 数组） |
-| `validateModel` | 模型 ref 校验 | manifest 同源判定（`remote-engine.ts:154-177`）；`dynamic:false` 且未命中（含 undefined 查缺省）→ 同步拒 **record 不创建** | 同步内存判定 | 是 | `engine_model_unknown`（同步拒）；`dynamic:true` 放行原样 ref，运行期引擎拒绝 → `engine_model_mismatch`（run 失败 + record 标 failed，`error-codes.ts:15`） |
+| `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:272-279`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
+| `listModels` | 模型目录诊断 | **宿主现行实装不发协议帧**——RemoteEngine 直读 manifest 快照三态映射（`remote-engine.ts:134-144`）；协议方法保留（`methods.ts:178-186`，`models: null` = 无枚举面） | 同步内存判定，无超时语义。引擎仍须实现并应答（属 9 方法集），宿主现行不调用 | 是 | 无（三态：null / [] / 数组） |
+| `validateModel` | 模型 ref 校验 | manifest 同源判定（`remote-engine.ts:155-182`）；`dynamic:false` 且未命中（含 undefined 查缺省）→ 同步拒 **record 不创建** | 同步内存判定 | 是 | `engine_model_unknown`（同步拒）；`dynamic:true` 放行原样 ref，运行期引擎拒绝 → `engine_model_mismatch`（run 失败 + record 标 failed，`error-codes.ts:15`） |
 | `dispose` | 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制面：**DISPOSE_GRACE_MS** = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
 | `ping` | 健康检查 | 连接就绪后任意时点（`engine-client.ts:593-597`） | 任务级（不设墙钟） | 是（`pong:true` 恒定） | **ADR-0047：静默 ≠ 卡死，不据此杀任务**（`methods.ts:14`）——ping 失败仅作诊断信号 |
 
-超时分级的依据：控制面单请求（握手/取消受理/停机）= 秒级具名常量；run/read/ping 等任务级 = 无墙钟——任务执行正常路径禁自带超时，回收层兜底允许默认有界（opt-out），见根 AGENTS.md「超时默认原则」与 [crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E。zcode 引擎侧双 timer（idle 30min / ceiling 60min，`zcode-subagent-cli/src/constants.ts:111`/:120）即回收层默认有界的实装先例（env 可关）。
+超时分级的依据：控制面单请求（握手/取消受理/停机）= 秒级具名常量；run/read/ping 等任务级 = 无墙钟——任务执行正常路径禁自带超时，回收层兜底允许默认有界（opt-out），见根 AGENTS.md「超时默认原则」与 [crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E。zcode 引擎侧双 timer（idle 30min / ceiling 60min，`zcode-subagent-cli/src/constants.ts:113`/:122）即回收层默认有界的实装先例（env 可关）。
 
-**run 的事件时序不变量**：事件 emit 完成先于 run resolve（不变量 5——journal 完整性依赖此序，journal 接线面 = workflow 域见 §6：coarse 事件在终态收口处补发，`zcode-engine.ts:888-890`）——引擎不得在 run 应答发出后再补发该 run 的事件。**进程自灭义务**：stdin 关闭（宿主退出/杀链断管）后引擎进程必须自行退出（SDK `armEngineSelfDestruct` 守卫，`spawn.ts:163`；bin 级 e2e 断言⑤「dispose 幂等 + 进程随 stdin 关闭退出」）——宿主不承诺显式 dispose 每个引擎进程。
+**run 的事件时序不变量**：事件 emit 完成先于 run resolve（不变量 5——journal 完整性依赖此序，journal 接线面 = workflow 域见 §6：coarse 事件在终态收口处补发，`zcode-engine.ts:900`）——引擎不得在 run 应答发出后再补发该 run 的事件。**进程自灭义务**：stdin 关闭（宿主退出/杀链断管）后引擎进程必须自行退出（SDK `armEngineSelfDestruct` 守卫，`spawn.ts:163`；bin 级 e2e 断言⑤「dispose 幂等 + 进程随 stdin 关闭退出」）——宿主不承诺显式 dispose 每个引擎进程。
 
 ### 2.2 反向通道 6 条（`protocol/reverse-channels.ts:24-55`；超时二分 `engine-protocol.ts:85-92`）
 
@@ -132,7 +132,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 |---|---|---|
 | `schemaEnforcement` | native/emulated | 结构化输出约束（§5 `task.schema` 分流依据） |
 | `steer` | native/emulated/unsupported | 运行中注入；与 fork 通道族判定联动（`capability-gate.ts:85-94`） |
-| `conversation` | **native/cold/unsupported** | 「怎么续」形态轴兼 message 资格轴：非 unsupported = 可续聊（`chat-rounds.ts:737`）；cold = 冷恢复重建 + 新 run + resume 锚点（`engine-manifest.ts:50-55`） |
+| `conversation` | **native/cold/unsupported** | 「怎么续」形态轴兼 message 资格轴：非 unsupported = 可续聊（`chat-rounds.ts:774`）；cold = 冷恢复重建 + 新 run + resume 锚点（`engine-manifest.ts:50-55`） |
 | `personaInjection` | file/flag/prompt | persona 路由通道 |
 | `eventGranularity` | stream/coarse | 粗粒度引擎 GUI 降级为阶段态 |
 | `sandbox` | native/emulated/none | worktree 隔离（none → worktree 任务同步拒） |
@@ -142,11 +142,11 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `permissionMode` | native/fixed/ignored | 权限档位映射 |
 | `maxTurns` | boolean | 轮数上限执行能力（false → `maxTurns` 参数同步拒，`capability-gate.ts:95-102`） |
 
-**声明点两处镜像必须同批改**：引擎类 `capabilities()`（`zcode-engine.ts:180-208`）与引擎包 package.json `taiji.subagentEngine.capabilities` 块（zcode 两处现行同为 `conversation: "cold"` / `resume: "cold"` 等 11 键，两侧逐键核对一致）。capability 头注必须与声明同批改写。设计 3（native resume，已裁决未实施）的清扫清单：`zcode-engine.ts:186-190` 头注、:313-317 续聊注释、`session-channel.ts` resumeSession 头注、`conversation-continuation.ts` resumeAnchor 注释——升位时若不与声明同批改写，声明旁会残留与新版声明自相矛盾的旧依据。
+**声明点两处镜像必须同批改**：引擎类 `capabilities()`（`zcode-engine.ts:180-208`）与引擎包 package.json `taiji.subagentEngine.capabilities` 块（zcode 两处现行同为 `conversation: "cold"` / `resume: "cold"` 等 11 键，两侧逐键核对一致）。capability 头注必须与声明同批改写。设计 3（native resume，已裁决未实施）的清扫清单：`zcode-engine.ts:186-190` 头注、:322-327 续聊注释、`session-channel.ts` resumeSession 头注、`conversation-continuation.ts` resumeAnchor 注释——升位时若不与声明同批改写，声明旁会残留与新版声明自相矛盾的旧依据。
 
 **消费判据与 gate 三方向**（`capability-gate.ts`）：
 
-1. 放行判据 = `!== "unsupported"` 分支（`chat-rounds.ts:737`、`capability-gate.ts:143-148`）——升位不破坏消费方；`cold` 与 `native` 等价放行。
+1. 放行判据 = `!== "unsupported"` 分支（`chat-rounds.ts:774`、`capability-gate.ts:143-148`）——升位不破坏消费方；`cold` 与 `native` 等价放行。
 2. **少声明**（任务要求的能力 manifest 未声明）→ 派发前同步拒 `engine_capability_unsupported`（`assertTaskShapeSupported` :80-111；fork 通道族判据：manifest 的 steer 与 conversation **任一非 unsupported 即视为具备 fork 能力**（OR 判据，:149-158，manifest 与握手应答成对比较））。
 3. **多声明**（manifest 支持而实装不支持）→ gate 读不到（同步面只有 manifest），由首个 run 握手发现 → `engine_capability_mismatch`：该 run 失败 + record 标 failed + 清理前置副作用（worktree 已建则清理）（`assertGateCapabilitiesMatched` :138-165）。
 4. **非 gate 位**（personaInjection/eventGranularity/sessionRead/resume/interrupt/permissionMode/schemaEnforcement）不一致 → 一律 warn 留痕不阻断（头注 :33-35，`EngineClient.warnOnManifestDiagnostics`）。
@@ -160,7 +160,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 1. **宿主词表**（`packages/subagent-core/src/execution/engine/common/errors.ts:20-33`）：`ENGINE_ERROR_CODES` 封闭枚举 12 条——`engine_not_found` / `engine_probe_failed` / `engine_credential_missing` / `nested_spawn_rejected` / `schema_emulation_failed` / `engine_timeout` / `engine_capability_unsupported` / `engine_capability_mismatch` / `engine_session_not_resumable` / `model_not_available` / `prompt_too_large` / `engine_run_failed`。`DEFAULT_RECOVERY_HINTS` 为 `Record<EngineErrorCode, string>` 全集覆盖（:77-114）——**新增错误码漏写恢复模板在此处编译失败**（机器守卫；恢复模板全文以 errors.ts 为准，本指南不复制）。
 2. **SDK 协议码**（`packages/subagent-engine-sdk/src/protocol/error-codes.ts:23-33`）：`ENGINE_PROTOCOL_ERROR_CODES` 9 条固定词表（全文见 `error-codes.ts:23-33`）+ 透传前缀判定（`ENGINE_ERROR_CODE_PREFIX = "engine_"`，:46-52）——非固定词表但带 `engine_` 前缀的引擎自报码由 core **原样透传，不解释文案**。
 
-**引擎新增错误码的登记义务**：引擎侧合成码不进 SDK 词表（透传面自管），但**必须登记进宿主 `ENGINE_ERROR_CODES` 枚举 + `DEFAULT_RECOVERY_HINTS`**——否则 GUI 无法按 code 分流、宿主词表出现未收录码。先例：zcode `schema_emulation_failed`（`zcode-engine.ts:882` 形态——SDK 词表无此码，宿主词表有）；待登记先例：`schema_gate_exhausted`（设计 4 拟新增，已裁决未实施；实施期定型项）。
+**引擎新增错误码的登记义务**：引擎侧合成码不进 SDK 词表（透传面自管），但**必须登记进宿主 `ENGINE_ERROR_CODES` 枚举 + `DEFAULT_RECOVERY_HINTS`**——否则 GUI 无法按 code 分流、宿主词表出现未收录码。先例：zcode `schema_emulation_failed`（`zcode-engine.ts:893` 形态——SDK 词表无此码，宿主词表有）；待登记先例：`schema_gate_exhausted`（设计 4 拟新增，已裁决未实施；实施期定型项）。
 
 **错误消息可操作性要求**：结构化错误载体恒为 `<code>: <detail>` 前缀格式（宿主 `EngineError`，`errors.ts:50-60`；协议侧 `EngineSdkError` → `ProtocolError{code,message,recovery,data}`，`frames.ts:18-27`、`error-codes.ts:67-84`）。`recovery` 必须指向具体恢复动作（命令/配置路径/替代方案），非安慰性文案——「错误 → 权威源 → 重试」闭环。动态参数文案走具名构造器先例：`engineProtocolMismatchError`（含双方版本 + 升级指引，`error-codes.ts:90-101`）、`engineTimeoutDetail`（stdout 尾 2000 字 + 建议，:164-170）。
 
@@ -183,7 +183,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 `AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 23 字段——SDK 侧字段裁决注写的「22」已滞后——其中 model/schemaEnv/cwd 改挂 ctx 不双写，`engineFallback` 本就是 ctx 独有字段、从不在任务面，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
 
-**resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, journalPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:296-328` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1066-1090）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
+**resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, journalPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
 
 ## 6. 事件族与投影义务
 
@@ -193,40 +193,40 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 |---|---|---|
 | `tool_start` | toolName + args | 工具调用开始；args 携带义务（:110） |
 | `tool_end` | toolName + args + result? + isError? | **必须带 result**——reducer 收口进 `turn.toolCalls` 无需翻译层旁路（assembly/types.ts:307-308） |
-| `text_delta` / `thinking_delta` | delta | 正文/推理流式增量（reasoning 与 answer 分流的引擎不得混流——zcode 实装口径，`zcode-engine.ts:465-468`） |
+| `text_delta` / `thinking_delta` | delta | 正文/推理流式增量（reasoning 与 answer 分流的引擎不得混流——zcode 实装口径，`zcode-engine.ts:475-479`） |
 | `turn_end` | summary? | turn 闭合（`Turn.closed` 置位的驱动） |
 | `message_end` | usage?（`AgentUsage` 四项 + cost?）+ error? | token 增量上报（§8 usage 聚合的源头） |
 | `compaction` | 无 | 上下文压缩发生 |
 | `activity` | 无 | **纯活性信号**：双侧 reducer no-op、不开 turn、不写状态、不落 journal，只承诺「引擎活跃时周期性出现」——供宿主无进展守护刷新判活（长工具执行期）；节流属生产者实现细节不进协议承诺（:101-108） |
 | `error` | message | 事件流内错误（不替代 run 终态应答的 error outcome） |
 
-**上游实名对照义务**（教训：taiji SDK 命名 ≠ 引擎上游实名）：SDK `tool_start`/`tool_end`（`contract-types.ts:110-111`）在 zcode bundle 实名是 `tool.updated`（kind=scheduled 的 input 可 omitted/inputRef 变体，kind=result 含 result+duration）——引擎适配层负责实名映射与 args 完整性不假设；zcode 现状不向 `ctx.onEvent` 投影 tool 事件，活性经 `session/event` 非终态非增量帧 → `activity`（`zcode-engine.ts:469-474`，真机探针实证约 1s 一帧）。
+**上游实名对照义务**（教训：taiji SDK 命名 ≠ 引擎上游实名）：SDK `tool_start`/`tool_end`（`contract-types.ts:110-111`）在 zcode bundle 实名是 `tool.updated`（kind=scheduled 的 input 可 omitted/inputRef 变体，kind=result 含 result+duration）——引擎适配层负责实名映射与 args 完整性不假设；zcode 现状不向 `ctx.onEvent` 投影 tool 事件，活性经 `session/event` 非终态非增量帧 → `activity`（`zcode-engine.ts:480-485`，真机探针实证约 1s 一帧）。
 
-**journal 落盘义务**（`subagent-core/src/execution/engine/common/journal-wiring.ts:60-87`，已实现；接线面 = workflow 域两处——`workflow-dispatch.ts:333` + `run-orchestration.ts:650`，chat 域不接 event journal）：先落盘再转发（:66-78）；`activity` 豁免 append——双侧 reducer 对其 no-op，豁免不破坏 live≡reload 重放等价性；seq 由 append 铸造、过滤在 append 前，故无 seq 空洞（:72-73）；close 在 run 终态（成功/失败均达）flush + fsync 一次、不抛（②级尽力而为数据源，:13-15）。
+**journal 落盘义务**（`subagent-core/src/execution/engine/common/journal-wiring.ts:61-88`，已实现；接线面 = workflow 域两处——`workflow-dispatch.ts:333` + `run-orchestration.ts:650`，chat 域不接 event journal）：先落盘再转发（:67-79）；`activity` 豁免 append——双侧 reducer 对其 no-op，豁免不破坏 live≡reload 重放等价性；seq 由 append 铸造、过滤在 append 前，故无 seq 空洞（:73-74）；close 在 run 终态（成功/失败均达）flush + fsync 一次、不抛（②级尽力而为数据源，:14-16）。
 
 **投影决策义务**：引擎层新观察到的事件是否向 `ctx.onEvent` 投影须显式声明消费方面——journal/SessionView/workflow trace 三消费方随投影新增面。裁决先例（设计 4，已裁决未实施）：submit_result 工具调用选择不投影——仅在引擎层内部提取，三消费方零新增面。该先例确立的判据：投影有消费方面成本；确需投影时必须同步补 apply-entry-equivalence 的 zcode tool_end 用例。
 
-**schema 分流义务**（`task.schema` × `capabilities.schemaEnforcement`）：native 引擎直传 schema 通道，宿主对其 `parsedOutput` **不做二次校验**（D4 硬分流——`AgentOutcome.parsedOutput` 注释，`contract-types.ts:284`）；emulated 引擎自行仿真（prompt 约定 + 容错提取 + ajv，SDK `schema-emulation.ts`），终报失败走 `schema_emulation_failed`。coarse 粒度引擎（`eventGranularity: "coarse"`）须在 run resolve 前补发离散语义事件（`synthesizeCoarseEvents` 调用点 `zcode-engine.ts:888-890`）——text_delta 等增量可省，tool/turn 边界与 message_end 不可省（reducer turns 收口依赖）。
+**schema 分流义务**（`task.schema` × `capabilities.schemaEnforcement`）：native 引擎直传 schema 通道，宿主对其 `parsedOutput` **不做二次校验**（D4 硬分流——`AgentOutcome.parsedOutput` 注释，`contract-types.ts:284`）；emulated 引擎自行仿真（prompt 约定 + 容错提取 + ajv，SDK `schema-emulation.ts`），终报失败走 `schema_emulation_failed`。coarse 粒度引擎（`eventGranularity: "coarse"`）须在 run resolve 前补发离散语义事件（`synthesizeCoarseEvents` 调用点 `zcode-engine.ts:900`）——text_delta 等增量可省，tool/turn 边界与 message_end 不可省（reducer turns 收口依赖）。
 
 ## 7. 生命周期与接管点义务
 
 **轮终语义**（create 轮时序。下序以 zcode 为参照：带〔契约〕的步骤/标注是协议义务，任何引擎必须满足等价行为；带〔zcode〕的是该引擎实装形态，只须满足其中标注的〔契约〕义务，不必照抄内部结构；带〔宿主〕的是宿主侧行为，引擎作者对照面）：
 
-0.〔宿主〕编排前置：journal 接线面 = workflow 域两处——`workflow-dispatch.ts:333` 与 `runAndFinalize`（`run-orchestration.ts:650`，函数头自述 workflow 域专用）各自 `wireEventJournal`（taskId = record.id，journal 是事件唯一出口或转发 workflow liveRecord）；chat 域 Continuation 轮不接 event journal（`chat-rounds.ts:270` 明文，pi 子代理 session JSONL 即原生数据源），其 §8 降级链②级结构性不可达——降级链实际覆盖 = ①级 read + ③级 outcome-only → 派 run 帧。
-1.〔契约〕宿主派 run 帧 →〔zcode〕引擎 `runViaAppServer`（`zcode-engine.ts:296-328`）：pre-aborted 短路（:300-302，取消先于启动不建会话）→ 模型解析 → resume 前缀构造（:318）→ 首轮执行 + schema 仿真重试（:324）。
-2.〔zcode〕引擎 → `SessionChannel.runTurn`（`session-channel.ts:748-795`）：`createSession`（:755）→〔契约〕**create 应答即接管点回调**（下文）→ `openTurn` 挂双 timer（:838-868）→ `subscribe`（:761，〔契约〕deliveryKind 必填否则终态事件不达）→ send → 事件流（text/thinking/activity 三回调 → `ctx.onEvent`，journal 落盘仅随 workflow 域接线面——步骤 0）→ 终态 → `readBestEffort`（:773）→〔契约〕**finally 无条件 `closeSession`**（:790-794——终态后循环/续发类机制必须在 close 前发生，见闸门续轮）。
-3.〔zcode〕回引擎层：`parsedAppServerAttempt`（`zcode-engine.ts:1406-1419`，`interrupted` 不在 `isFailedTerminalStatus`、不误判失败——:1400-1404 注释）→〔契约〕schema 校验 → outcome + handle → run 应答。
-4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 journalPath，`journal-wiring.ts:83-85`）。
+0.〔宿主〕编排前置：journal 接线面 = workflow 域两处——`workflow-dispatch.ts:333` 与 `runAndFinalize`（`run-orchestration.ts:650`，函数头自述 workflow 域专用）各自 `wireEventJournal`（taskId = record.id，journal 是事件唯一出口或转发 workflow liveRecord）；chat 域 Continuation 轮不接 event journal（`chat-rounds.ts:273-274` 明文，pi 子代理 session JSONL 即原生数据源），其 §8 降级链②级结构性不可达——降级链实际覆盖 = ①级 read + ③级 outcome-only → 派 run 帧。
+1.〔契约〕宿主派 run 帧 →〔zcode〕引擎 `runViaAppServer`（`zcode-engine.ts:297-338`）：pre-aborted 短路（:299-303，取消先于启动不建会话）→ 模型解析 → resume 前缀构造（:328）→ 首轮执行 + schema 仿真重试（:334）。
+2.〔zcode〕引擎 → `SessionChannel.runTurn`（`session-channel.ts:749-796`）：`createSession`（:756）→〔契约〕**create 应答即接管点回调**（下文）→ `openTurn` 挂双 timer（:839-869）→ `subscribe`（:762，〔契约〕deliveryKind 必填否则终态事件不达）→ send → 事件流（text/thinking/activity 三回调 → `ctx.onEvent`，journal 落盘仅随 workflow 域接线面——步骤 0）→ 终态 → `readBestEffort`（:774）→〔契约〕**finally 无条件 `closeSession`**（:791-795——终态后循环/续发类机制必须在 close 前发生，见闸门续轮）。
+3.〔zcode〕回引擎层：`parsedAppServerAttempt`（`zcode-engine.ts:1446-1459`，`interrupted` 不在 `isFailedTerminalStatus`、不误判失败——:1440-1445 注释）→〔契约〕schema 校验 → outcome + handle → run 应答。
+4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 journalPath，`journal-wiring.ts:84-86`）。
 
-**resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:312-318`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库投影预检查已退役收窄 pi 锚专属——库投影滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
+**resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:322-328`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库投影预检查已退役收窄 pi 锚专属——库投影滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
 
-**闸门续轮形态**（设计 4 已裁决未实施，实施期定型项）：自纠重试循环落在 `runTurn` **内部**（turn 终态 → 缺 parsedOutput 且未耗尽 → 同 session 再 send → 新 turn，≤3 次）→ 终态 → read 兜底 → finally close——**循环必须在 close 之前**（finally 无条件 `closeSession` 是硬约束，`session-channel.ts:790-794`）；idle/ceiling 双 timer 以 run 边界为界不随 steer turn 重置（防闸门轮被 TurnTimeoutError 打断改新会话重试，破坏同会话语义）；每轮 steer 决策前检查 `ctx.signal.aborted`——`interrupted` 终态直接出口，不进闸门、不因新轮拖延 settle 触发 killChain 连坐。
+**闸门续轮形态**（设计 4 已裁决未实施，实施期定型项）：自纠重试循环落在 `runTurn` **内部**（turn 终态 → 缺 parsedOutput 且未耗尽 → 同 session 再 send → 新 turn，≤3 次）→ 终态 → read 兜底 → finally close——**循环必须在 close 之前**（finally 无条件 `closeSession` 是硬约束，`session-channel.ts:791-795`）；idle/ceiling 双 timer 以 run 边界为界不随 steer turn 重置（防闸门轮被 TurnTimeoutError 打断改新会话重试，破坏同会话语义）；每轮 steer 决策前检查 `ctx.signal.aborted`——`interrupted` 终态直接出口，不进闸门、不因新轮拖延 settle 触发 killChain 连坐。
 
-**abort/取消链**（zcode 实装锚）：`ctx.signal` abort → `onAbort` → `appServerAbortChain`（`zcode-engine.ts:495-501`）；链体（:584-606）：stop 帧（`ZCODE_APPSERVER_STOP_TIMEOUT_MS` = 3s）→ grace 窗（`ZCODE_APPSERVER_ABORT_GRACE_MS` = 3s，`constants.ts:158`）内 turn 落定即止（共享进程不杀）→ 超窗 `killChain` 收割共享进程（**接受连坐**——协议已不可信，在途其他任务走崩溃路径，:600-604）；abort 与 create 竞态（signal 先到、session 未建）→ 等会话建立（带上限）再发 stop。引擎义务：cancel 受理 3s 内收敛（§2.1）；用户取消不得被任何续跑机制强制续烧 token。
+**abort/取消链**（zcode 实装锚）：`ctx.signal` abort → `onAbort` → `appServerAbortChain`（`zcode-engine.ts:506-512`）；链体（:595-667）：stop 帧（`ZCODE_APPSERVER_STOP_TIMEOUT_MS` = 3s）→ grace 窗（`ZCODE_APPSERVER_ABORT_GRACE_MS` = 3s，`constants.ts:160`）内 turn 落定即止（共享进程不杀）→ 超窗 `killChain` 收割共享进程（**接受连坐**——协议已不可信，在途其他任务走崩溃路径，:611-616）；abort 与 create 竞态（signal 先到、session 未建）→ 等会话建立（带上限）再发 stop。引擎义务：cancel 受理 3s 内收敛（§2.1）；用户取消不得被任何续跑机制强制续烧 token。
 
-**timer 语义**：引擎侧回收层双 timer（idle 主判定 `ZCODE_TURN_IDLE_TIMEOUT_MS` = 30min 刷新重挂 + 总上界 `ZCODE_TURN_MAX_TIMEOUT_MS` = 60min 固定倒数，`session-channel.ts:838-853`；显式传参/env 覆盖/关闭通道齐备）——任一 fire → 类型化 `TurnTimeoutError` reject，宿主分流走可重试形态。任务级正常路径无墙钟（§2.1），此为回收层 opt-out 兜底。
+**timer 语义**：引擎侧回收层双 timer（idle 主判定 `ZCODE_TURN_IDLE_TIMEOUT_MS` = 30min 刷新重挂 + 总上界 `ZCODE_TURN_MAX_TIMEOUT_MS` = 60min 固定倒数，`session-channel.ts:839-854`；显式传参/env 覆盖/关闭通道齐备）——任一 fire → 类型化 `TurnTimeoutError` reject，宿主分流走可重试形态。任务级正常路径无墙钟（§2.1），此为回收层 opt-out 兜底。
 
-**接管点副作用复刻义务**：`onSessionCreated`（`zcode-engine.ts:475-484`）承载两个宿主侧副作用——`rt.activeSessions.add(sessionId)`（TTL sweep 豁免集 + dispose close-fire 目标集；`rt.activeSessions` 全仓唯一调用点即此，:709-718 sweep 消费）与 `ctx.onHandleReady` 回传（sessionRef 同源 `zcodeSessionDbPath`）。**任何「会话确立」的新形态（resume 装载确认等）必须在装载确认时点复刻两者**——漏登记的竞态后果（设计 3（native resume，已裁决未实施）实装推演）：超 30 天高龄会话整轮在途期间不在豁免集，TTL sweep（运行时建立 +50ms defer 触发，`ZCODE_SESSION_SWEEP_DEFER_MS`，`constants.ts:239`）可删其库条目，`persistence:"immediate"` 下对已删行续写行为上游未定义。
+**接管点副作用复刻义务**：`onSessionCreated`（`zcode-engine.ts:486-495`）承载两个宿主侧副作用——`rt.activeSessions.add(sessionId)`（TTL sweep 豁免集 + dispose close-fire 目标集；`rt.activeSessions` 全仓唯一调用点即此，:720-729 sweep 消费）与 `ctx.onHandleReady` 回传（sessionRef 同源 `zcodeSessionDbPath`）。**任何「会话确立」的新形态（resume 装载确认等）必须在装载确认时点复刻两者**——漏登记的竞态后果（设计 3（native resume，已裁决未实施）实装推演）：超 30 天高龄会话整轮在途期间不在豁免集，TTL sweep（运行时建立 +50ms defer 触发，`ZCODE_SESSION_SWEEP_DEFER_MS`，`constants.ts:241`）可删其库条目，`persistence:"immediate"` 下对已删行续写行为上游未定义。
 
 **宿主侧轮活性守护（引擎的配合义务）**：宿主 run 域共用 settled-watchdog（`subagent-core/src/execution/lifecycle/settled-watchdog.ts`）两段式守护——中段无进展检测（刷新源 = run 事件通道既有事件，**含 `activity` 变体**：引擎在长工具执行期周期性发 activity 即履行刷新义务，静默 ≠ 卡死 ADR-0047）+ 收尾段固定上界（交棒 = run 应答驱动）。引擎义务由此推出：① 活跃产出期保证事件流不断流（至少 activity）；② 终态应答必须可达（subscribe deliveryKind 缺失则终态事件不达、会话假死——`session-channel.ts:70`）。宿主 idle 回收（`lifecycle/lifecycle-manager.ts` per-record idle timer，`armIdleKeepalive` 轮成功收口翻入保活）在轮间生效，与引擎内 timer 正交。
 
@@ -245,7 +245,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **读取安全义务（dbPath 白名单）**：宿主两条读取链（`session-view-service` ①级投影 + `EnginePort.read` 协议 read）对引擎上报的 `handle.sessionRef.dbPath` 均按 `zcodeDbPathAllowlist(dataDir)` **白名单集合成员判定放行**（集合 = 隔离库路径 + 宿主库存量兼容锚点），不盲信引擎回传路径——新引擎若在 sessionRef 携带文件路径类定位键，宿主侧必须同型加白名单判定，防路径注入面。
 
-**已知投影形态（必须写进验收防误报**，设计 3（native resume，已裁决未实施）两点）：① 中间轮 user 消息不进 `turns`（reader 只取 assistant 视角，`turnsToMessages` 只前置 record.task 一条 user）——多轮续聊详情页呈「task + 全部 assistant turns、无中间提问」，问答对应关系不可见，属已知形态非 bug；② usage 聚合挂最后一个 turn（`session-view-service.ts:303-310`）——全量累计值展示在末条 assistant 上，与单轮语义有别。引擎新增投影形态同样入此清单。
+**已知投影形态（必须写进验收防误报**，设计 3（native resume，已裁决未实施）两点）：① 中间轮 user 消息不进 `turns`（reader 只取 assistant 视角，`turnsToMessages` 只前置 record.task 一条 user）——多轮续聊详情页呈「task + 全部 assistant turns、无中间提问」，问答对应关系不可见，属已知形态非 bug；② usage 聚合挂最后一个 turn（`session-view-service.ts:305-310`）——全量累计值展示在末条 assistant 上，与单轮语义有别。引擎新增投影形态同样入此清单。
 
 ## 9. env 与数据目录契约
 
@@ -257,12 +257,12 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 - **manifest envPrefixes**：引擎声明自己消费的第三方前缀（如 zcode 的 `ZCODE_`）；宿主保留前缀 `TAIJI_` 族禁声明（`engine-manifest.ts:23`、:161-165）。
 - 经 env 传载荷的尺寸上限先例：`SCHEMA_ENV_MAX_BYTES` = 256KiB（`pi-subagent-cli/src/constants.ts:24`），注入前按 UTF-8 字节 fail-fast 拒绝（`spawn-args.ts:88-101`，防 execve E2BIG 难归因错误）——新增 env 载荷通道照此办。
 
-**引擎数据目录布局**（根 = `getEngineDataDir()`，`subagent-core/src/execution/engine/common/data-dir.ts:56-77`：`TAIJI_AGENT_DATA_DIR` env 优先，缺省回退宿主数据根 + warn 一次）：
+**引擎数据目录布局**（根 = `getEngineDataDir()`，`subagent-core/src/execution/engine/common/data-dir.ts:43-62`：`TAIJI_AGENT_DATA_DIR` env 优先，缺省回退宿主数据根 + warn 一次）：
 
 | 落点 | 义务 |
 |---|---|
-| `engines/<id>/shared/`（journal） | 固定分组（SDK `SHARED_POOL_KEY`，路径构造即终值，`journal-wiring.ts:60-65`）；30 天 mtime TTL 回收 = 唯一清理机制（`pool-manager.ts` `cleanupExpiredJournals`）——引擎不得在 journal 目录自建第二套清理 |
-| 会话库隔离模式（zcode 先例） | spawn env 覆写 `ZCODE_SESSION_DB_PATH` + 清空别名键；路径单一来源 `zcodeSessionDbPath()`（`<engineDataDir>/engines/zcode/session-db/db.sqlite`）；与 GUI 引擎库分离（约束 C-ext-20，[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md)）。隔离条目 TTL sweep 引擎侧（C-data-22：30 天同窗 / 活跃豁免集 / 进程级 24h 节流，`zcode-engine.ts:709-718`） |
+| `engines/<id>/shared/`（journal） | 固定分组（SDK `SHARED_POOL_KEY`，路径构造即终值，`journal-wiring.ts:61-66`）；30 天 mtime TTL 回收 = 唯一清理机制（`pool-manager.ts` `cleanupExpiredJournals`）——引擎不得在 journal 目录自建第二套清理 |
+| 会话库隔离模式（zcode 先例） | spawn env 覆写 `ZCODE_SESSION_DB_PATH` + 清空别名键；路径单一来源 `zcodeSessionDbPath()`（`<engineDataDir>/engines/zcode/session-db/db.sqlite`）；与 GUI 引擎库分离（约束 C-ext-20，[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md)）。隔离条目 TTL sweep 引擎侧（C-data-22：30 天同窗 / 活跃豁免集 / 进程级 24h 节流，`zcode-engine.ts:720-729`） |
 | 新增写入面登记义务 | 引擎新增任何磁盘写入面必须显式登记清理通道，或登记「无清理可接受」判定及理由。先例（设计 4（schemaEnforcement 升级，已裁决未实施）裁决）：`mcp/` 脚本目录——单文件恒覆盖、内容随包版本、无累积增长 → 「无清理通道」判定可接受 |
 
 **路径动态推导红线**：禁硬编码绝对路径，一律从 `getDataDir()` / `getEngineDataDir()` 等动态推导（pre-commit 路径白名单检查；根 AGENTS.md 规则 22）。
@@ -273,7 +273,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 | 模式 | 完整表述 | 状态与实例锚 |
 |---|---|---|
-| **降级链族分层**（本指南定义：按失败通道给降级形态分层的裁决模式） | 降级通道与主路径共享同一物理 RPC/子通道时，主路径失败则降级的输入前缀/数据必同样缺席——**不得假设「降级后仍可用全量」**。按失败通道逐族定义「降级后还剩什么」；每族给标记值：`degradedReason` 标量字段（设计 3 拟新增）标注最新一次降级的族别，随轮覆写，允许冷重建丢（诊断态非账务数据，丢 = 回无标记态，下轮降级重写） | 已裁决未实施（设计 3 D6：send 门族 → 带历史降级 `cold-resume-with-history`（拟新增）；RPC 族 → 无历史降级 + 锚换钉 `cold-resume-no-history`（拟新增）——历史连续性永久断的最差形态显式暴露）。[U3 2026-09-19] 边界注记：zcode resume 读失败已落地的单级朴素降级（无标记值——`degradedReason` 标注与 `cold-resume-*` 标记值机制均未实施，形态见 §7 读失败分支）不是本模式已实施例；zcode cold 形态每轮新 session 锚整替（§7）是设计内常态，与 D6「降级致锚换钉」的拟新增语义在 zcode 侧已消解。已实现参照：journal `activity` 豁免的「同通道同失败」判别（`journal-wiring.ts:70-78`） |
+| **降级链族分层**（本指南定义：按失败通道给降级形态分层的裁决模式） | 降级通道与主路径共享同一物理 RPC/子通道时，主路径失败则降级的输入前缀/数据必同样缺席——**不得假设「降级后仍可用全量」**。按失败通道逐族定义「降级后还剩什么」；每族给标记值：`degradedReason` 标量字段（设计 3 拟新增）标注最新一次降级的族别，随轮覆写，允许冷重建丢（诊断态非账务数据，丢 = 回无标记态，下轮降级重写） | 已裁决未实施（设计 3 D6：send 门族 → 带历史降级 `cold-resume-with-history`（拟新增）；RPC 族 → 无历史降级 + 锚换钉 `cold-resume-no-history`（拟新增）——历史连续性永久断的最差形态显式暴露）。[U3 2026-09-19] 边界注记：zcode resume 读失败已落地的单级朴素降级（无标记值——`degradedReason` 标注与 `cold-resume-*` 标记值机制均未实施，形态见 §7 读失败分支）不是本模式已实施例；zcode cold 形态每轮新 session 锚整替（§7）是设计内常态，与 D6「降级致锚换钉」的拟新增语义在 zcode 侧已消解。已实现参照：journal `activity` 豁免的「同通道同失败」判别（`journal-wiring.ts:71-79`） |
 | **族差分级告警 + 不设连续性计数器**（本指南定义） | 最差形态单次即 error、较轻形态 warn；**不做「连续 N 次升级」计数器**。两段论证：① Worker Thread 多实例下「同进程连续」无全序语义；② 「夹成功即清零」语义空洞（失败-成功-失败与连续失败不可区分）。常态化信号 = 标记/日志持续出现（日志检索判）——感知线已由族差分级 + 标记持续出现承载 | 已裁决未实施（两设计审查各自独立裁决后收敛同型：设计 3 D6 / 设计 4 D8） |
 | **瞬态防护**（本指南定义：幂等 RPC 失败的快速重试前置） | 幂等 RPC 失败先**一次快速重试**再落最差形态；重试限同进程代内（进程代际重建由连接层自动处理，不计入重试预算）——防一次瞬时超时直接触发不可逆降级（如锚换钉永久断历史）。前提 = 操作幂等已核实 | 已裁决未实施（设计 3 D6，前提 resume 幂等已经 bundle 探针核实） |
 | **宽限窗**（本指南定义：异步就绪观察的显式窗口） | 异步注册/就绪观察给显式窗口防竞态误降级：窗口内到达即正常，超窗未到才降级；窗长挂实施期探针定型（量级预期亚秒），禁拍脑袋写死 | 已裁决未实施（设计 4 D8：MCP 工具注册观察窗——subscribe 后至首 send 前） |
