@@ -1,5 +1,5 @@
 /**
- * Composer task tray (built-in three kinds) — English copy.
+ * Composer task tray (built-in four kinds: bash / subagent / workflow / session) — English copy.
  * Design: docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 error spec.
  *
  * Namespace shape: default export holds only the `tray` subtree; the aggregator

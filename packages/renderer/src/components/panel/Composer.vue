@@ -80,7 +80,7 @@
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
              设计 D5）+ landing 态 slot（directory/branch/模式选择 chip，panel 态不传 slot 即空）。 -->
         <div v-if="modeChipPresetId" class="flex min-w-0 items-center px-2.5 pt-2.5">
-          <PresetChip variant="readonly" :preset-id="modeChipPresetId" />
+          <PresetChip :preset-id="modeChipPresetId" />
         </div>
         <slot name="meta-row" />
         <!-- 已附上下文 chip 行（§2f）。W4：从 segments 派生 image chips，× 删除定位 DOM 节点移除 -->
@@ -270,12 +270,11 @@ import QueueBubble from './QueueBubble.vue'
 import PresetChip from './PresetChip.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
-import { usePresetStore } from '@/stores/preset'
-import { BUILTIN_PRESET_IDS } from '@taiji/shared'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
 import { useDeferQueueRows } from '@/composables/panel/useDeferQueueRows'
+import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import { useComposerBarDensity, MERGED_CHIP_CLASS, MODEL_MERGED_CHIP_CLASS } from '@/components/panel/tray/use-composer-bar-density'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
@@ -301,15 +300,9 @@ const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDen
 )
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
-const presetStore = usePresetStore()
 const flow = useNewTaskFlow()
-/** 对话态只读模式 chip（u4）：仅非默认模式渲染（判据 = §6.5 D5 `launchPresetId !== defaultPresetId ?? full`） */
-const modeChipPresetId = computed<string | null>(() => {
-  if (props.variant !== 'panel' || !props.sessionId) return null
-  const launchPresetId = sessionStore.list.find((s) => s.id === props.sessionId)?.launchPresetId
-  const fallbackModeId = presetStore.defaultPresetId || BUILTIN_PRESET_IDS.FULL
-  return launchPresetId && launchPresetId !== fallbackModeId ? launchPresetId : null
-})
+// 对话态只读模式 chip（u4，判据与 E7 三态闸见 useComposerModeChip）
+const { modeChipPresetId } = useComposerModeChip(() => props.sessionId, () => props.variant)
 // 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，
 // split mode 各 pane 各自 session 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
 const projectSkillsCwd = computed<string | null>(() => {

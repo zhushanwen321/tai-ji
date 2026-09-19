@@ -1138,6 +1138,8 @@ testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有�
 
 ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役——子会话与 fork 分支都按**一般 session** 展示（不聚合）。
 
+> **第三项能力（新 fork 分支入场高亮 `fresh`）的处置**：同批退役，属**已接受代价**——它只是聚合容器内的一次性入场提示（`FRESH_FADE_MS` + 定时清除），容器删除后不再有承载语义，非可独立消费的信号；因此 D9「两项独家能力」的清单指「可迁移的独立能力」，fresh 不在其中，其用例已随死元素删除并在 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts` 注释段说明。
+
 | testid | 原所在组件 | 处置 |
 |--------|-----------|------|
 | `fork-group-*` 全族（`fork-group` / `fork-group-header` / `fork-group-item` 等，此前以 `[data-testid^="fork-group"]` 概括断言） | `ForkGroup.vue`（已删除） | 侧栏退役不聚合；回归断言改为**反向断言零命中**：`wrapper.find('[data-testid^="fork-group"]').exists() === false`（见 `packages/renderer/src/__tests__/sidebar/fork-group.test.ts` 与 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts`） |
@@ -1145,7 +1147,7 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 **退役不丢能力**（两项独家能力处置，均不新增平行元素）：
 
 - **分支未读角标** → **合流进通用行既有未读点**（不新增 testid）：`SessionItemDisplay.vue` 的 `unread` computed 现为 `isUnread(id) || unreadByBranch.has(id)`（两源合流）；清除仍在既有 select → `clearUnread` 通路同点清两源。语义折叠理由：两类未读都是「这里有没看的东西」，无需求区分。
-- **分支软停止入口** → **迁入通用行菜单项**：运行中行的右键菜单新增「停止」（复用既有 `session.abort`，两段确认沿用）。
+- **分支软停止入口** → **迁入通用行菜单项**：运行中行的右键菜单新增「停止」（复用既有 **`chat.abort`**，两段确认沿用；**注**：全仓无 `session.abort` 帧，实施期修正见设计 v1.9；与既有硬杀 `forceQuit` 是两项不同能力）。
 
 ## §2 新增（现行 testid）
 

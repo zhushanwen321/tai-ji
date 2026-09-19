@@ -1,6 +1,6 @@
 /**
- * Composer 任务托盘（tray）—— built-in 三件面板文案
- * （设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格）。
+ * Composer 任务托盘（tray）—— built-in 四件面板文案
+ * （bash / subagent / workflow / session；设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格）。
  *
  * 命名空间形态：本模块 default export 只含 tray 子树，由 aggregator（locales/zh-CN.ts）
  * 展开并入 panel 命名空间（`panel: { ...panel, ...tray }`）——运行时 key 前缀 =
@@ -17,7 +17,7 @@ export default {
   tray: {
     /** 托盘 icon 行的 aria-label（整行为一个语义组；各 icon 另有 title.<kind>） */
     trayLabel: '任务托盘',
-    /** 三件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
+    /** 四件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
     title: {
       bash: '后台命令',
       subagent: '子代理',
@@ -33,7 +33,7 @@ export default {
     loading: '加载中…',
     loadFailed: '加载失败（{error}）',
     retry: '重试',
-    /** 当前桶为空时的提示（{name} = 三件标题） */
+    /** 当前桶为空时的提示（{name} = 四件标题） */
     empty: {
       running: '没有进行中的{name}',
       runningProcess: '没有运行中的{name}',

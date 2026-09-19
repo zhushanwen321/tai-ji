@@ -33,6 +33,9 @@ import type { ComposerDensityLayout } from '@/components/panel/composer-density'
 /** 插件 toolbar 挂载点名（= Composer 模板 `view-id` 字面量，ViewHost viewId 同源） */
 const PLUGIN_TOOLBAR_MOUNT_POINT = 'composer.toolbar'
 
+/** ResizeObserver 缺失时的一次性告警闸（模块级：分屏多实例 / 重复挂载不刷屏） */
+let warnedNoResizeObserver = false
+
 /**
  * 序 1 / 序 2 合流·合体形态的单 chip 容器类（形态 → class 映射的单点，与状态机输出同处）：
  * 同底色 + 去内部间距，各触发器自身浮层保留为再入路径。序 2 额外对模型名做容器级单行截断，
@@ -81,8 +84,15 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
 
   let observer: ResizeObserver | null = null
   onMounted(() => {
-    // 非浏览器环境（SSR / 无 RO 的测试宿主）静默跳过：无实测即停留在全展开档，不崩
-    if (typeof ResizeObserver === 'undefined') return
+    // 非浏览器环境（SSR / 无 RO 的测试宿主）跳过：无实测即停留在全展开档，不崩
+    if (typeof ResizeObserver === 'undefined') {
+      // 降级留痕（P0/P1 降级纪律）：一次性告警，不随实例数刷屏
+      if (!warnedNoResizeObserver) {
+        warnedNoResizeObserver = true
+        console.warn('[composer-density] ResizeObserver 不可用，底栏停留在全展开档（可能横向溢出）')
+      }
+      return
+    }
     const el = barRef.value
     if (!el) return
     observer = new ResizeObserver((entries) => {

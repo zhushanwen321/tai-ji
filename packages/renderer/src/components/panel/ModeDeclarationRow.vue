@@ -11,10 +11,9 @@
  * - 锚在 MessageStream 的滚动容器**之外**（流顶），不随滚动消失。
  *
  * 可见性判据（D5 可执行判据，与 PresetChip 同源）：
- * `launchPresetId !== (defaultPresetId ?? 'builtin:full')`——只对非默认模式渲染；
+ * `launchPresetId !== (defaultPresetId || 'builtin:full')`——只对非默认模式渲染（实现用 `||` 而非 `??`：
+ * store 未加载时 defaultPresetId 是空串，`'' ?? x` 仍是 `''`，会让任意 id 都被判成「非默认」而误显示）；
  * **不得**套用 landing 的 resolve 链（会话创建后 launchPresetId 恒有值，照字面代入首项恒假）。
- * 实现用 `||` 而非 `??`：store 未加载时 defaultPresetId 是空串，`'' ?? x` 仍是 `''`，
- * 会让任意 id 都被判成「非默认」而误显示。
  *
  * E7 三态（§7.5）：
  * ① 未加载（store 空且无错误）→ **不渲染**（不能当「已删除」）；

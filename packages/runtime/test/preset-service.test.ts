@@ -942,6 +942,42 @@ describe('PresetService · 模式提示词校验', () => {
     warnSpy.mockRestore()
   })
 
+  it('读路段级折叠：容器无任何可识别段（{foo:1}）→ 仍丢弃 prompt，但产出 issue + warn（可观测）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-unknown',
+            name: 'fold-unknown',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            // 普通对象但无可识别段（replace/append 都不在）——旧行为静默丢弃，无可观测信号
+            prompt: { foo: 'SECRET_VALUE' },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-unknown')
+    // 行为不变：preset 保留、prompt 容器仍被丢弃
+    expect(folded).toBeDefined()
+    expect(folded!.prompt).toBeUndefined()
+    // 可观测：warn 恰一次，文案含「无可识别段」与键名 foo（只记键名不记值）
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('无可识别段')
+    expect(warnText).toContain('foo')
+    // 值不进日志（值可能是用户提示词正文）
+    expect(warnText).not.toContain('SECRET_VALUE')
+    warnSpy.mockRestore()
+  })
+
   it('导入路整条拒：超限项导入 → 拒绝且不写盘（合法项也不落盘）', () => {
     // 盘上放一个既有合法 preset，用于验证导入失败后磁盘内容不变
     writeFile({

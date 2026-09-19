@@ -315,9 +315,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 触发/可见条件 |
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
-| `composer-bar` | 恒显（底栏三簇容器，`flex-nowrap`） |
-| `composer-overflow-menu` | 序 3 生效且确有被收起项（插件 toolbar 贡献进 `»`）时渲染 |
-| `composer-capacity-merged` / `composer-model-merged` | 序 1 / 序 2 合流态（密度降档时替代原独立触发器） |
+| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged`）；本表不重复登记，避免两处漂移 |
 | `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
 
@@ -343,7 +341,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | `tray-aggregate-button` | 序 4 生效（`<520px`）且托盘有条目（`hasTrayItems`）；聚合入口 = 层叠图标 + 运行数 |
 | `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
 | `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
-| `tray-session-panel` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认） |
+| `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
 | `tray-native-panel` | 面板容器（`data-kind` = 面板类型；`data-pinned` = pin 态） |
 | `tray-panel-tabs` / `tray-panel-tab-{running|ended}` / `tray-panel-tab-count-{bucket}` | 分桶筛选槽（进行中 / 已结束两桶） |
 | `tray-bash-row` / `tray-subagent-row` / `tray-workflow-row` | 各面板行（行内操作仅 pin 态） |
@@ -355,7 +353,7 @@ testid 以组件 template 内 data-testid 属性为准。
 |--------|---------|--------------|
 | `chip-preset` | `@taiji/ui` PresetSelectChip.vue（landing） | landing 首行第三 chip（有选中 id 才渲染） |
 | `chip-preset-locked` | `@taiji/ui` PresetSelectChip.vue | 已建 session 的锁定态（landing chip 只读分支） |
-| `preset-chip` | PresetChip.vue（对话态只读 chip） | 仅**非默认模式**渲染（判据 `launchPresetId !== (defaultPresetId ?? 'builtin:full')`） |
+| `preset-chip` | PresetChip.vue（对话态只读 chip） | 仅**非默认模式**渲染（判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`；**用 `||` 不用 `??`**——store 未加载时空串会让 `??` 穿透）；**E7 三态同声明行口径**：模式列表未加载 / 加载失败时不渲染（避免闪裸 `custom:xxxx`） |
 | `preset-chip-replace-badge` | PresetChip.vue | 模式 `replace` 启用且文案非空 **且** chip 退化为纯图标档（文本/短名档改为 chip 内后缀，无独立 testid） |
 | `preset-chip-popover` | PresetChip.vue | hover chip 弹出（模式详情 + 锁定说明 + 新建会话出口） |
 | `mode-declaration-row` | ModeDeclarationRow.vue | 非默认模式在消息流顶部渲染一条派生声明行（零新 entry 类型；三态降级：未加载 / 已加载缺 id / 加载失败） |

@@ -7,7 +7,8 @@
  * - 能力标志：`pluginToolbarContributionCount`（挂载点 view 有内容 → 1，无内容/未 provide → 0）；
  *   `hasTrayItems`（缺省 true，`onTrayItemsChange(false)` → 序 4 不生效）。
  * - 脏输入：entry 缺 contentRect / width 非有限值 → 不崩，非有限值落最保守档（narrow）。
- * - 生命周期：无 ResizeObserver 宿主静默跳过；卸载断开 observer（派发不再触达）。
+ * - 生命周期：无 ResizeObserver 宿主跳过观测并**一次性告警**（降级留痕，多实例不刷屏）；卸载断开
+ *   observer（派发不再触达）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/tray/use-composer-bar-density.test.ts
  */
@@ -93,6 +94,8 @@ afterEach(() => {
   ManualResizeObserverStub.uninstall()
   wrapper?.unmount()
   wrapper = null
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('useComposerBarDensity：首帧与阈值边界', () => {
@@ -177,12 +180,23 @@ describe('useComposerBarDensity：脏输入与生命周期', () => {
     expect(host.getDensity().tier).toBe('expanded')
   })
 
-  it('无 ResizeObserver 宿主 → 静默跳过（不崩，停留全展开）', async () => {
+  it('无 ResizeObserver 宿主 → 跳过观测（不崩，停留全展开）+ 降级一次性告警（多实例不刷屏）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     ManualResizeObserverStub.uninstall()
     vi.stubGlobal('ResizeObserver', undefined)
     const host = mountHost(makeSource())
     expect(host.getDensity().tier).toBe('expanded')
     expect(ManualResizeObserverStub.created()).toHaveLength(0)
+    // 降级留痕：一次性告警带可检索前缀，不静默
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[composer-density] ResizeObserver 不可用，底栏停留在全展开档（可能横向溢出）',
+    )
+    // 同模块第二次挂载（分屏另一 pane / 重挂载）不再重复刷告警
+    wrapper?.unmount()
+    wrapper = null
+    mountHost(makeSource())
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
   it('卸载断开 observer：派发不再触达（宿主 DOM 已消失）', async () => {

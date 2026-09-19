@@ -10,7 +10,7 @@
  * - E2E-CF-4: + 菜单只剩「附件」「命令」（# 文件改走 inline，@ 引用废弃）
  * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项；托盘同判据隐藏（D1）
  * - E2E-CF-6: 非默认模式会话（launchPresetId='builtin:session-dispatch'）→ 只读模式 chip +
- *   流顶声明行（[u7a test-first]，待 u4/u5 落地后可绿——见下方用例注释）
+ *   流顶声明行（u4/u5 已落地，本用例为回归断言——见下方用例注释）
  *
  * [2026-09-16 composer-task-tray] 工具条结构断言复核：托盘插在 `+ 添加` 菜单之后、
  * composer.toolbar 挂载点之前（设计 D1），不改变本 spec 原有断言面（输入区 / + 菜单 portal
@@ -64,8 +64,8 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
   })
 
   /**
-   * [u7a test-first 断言，本次不跑] u4（mode-visibility-chip）/ u5（mode-declaration-row）
-   * 落地前两条 testid 在 DOM 不存在，本用例预期红；u4/u5 提交门 + 阶段 5 跑作回归。
+   * [u4/u5 已落地：回归断言] u4（mode-visibility-chip，edc77ccf4）/ u5（mode-declaration-row，
+   * 43c74c438）均已落地，两条 testid 在 DOM 存在，本用例为回归防线。
    *
    * 数据依赖：mock fixture s3（「API 性能优化」）带 launchPresetId='builtin:session-dispatch'，
    * 且 mock preset 域返回内置模式目录（含 builtin:full / builtin:session-dispatch）——

@@ -1,18 +1,28 @@
+<script lang="ts">
+/**
+ * ResizeObserver 缺失时的一次性告警闸（模块作用域：分屏多实例 / 重复挂载只告警一次）。
+ * 放普通 `<script>` 块而非 `<script setup>`：后者的顶层声明随 setup 每次挂载重建，
+ * 无法跨实例去重。
+ */
+let warnedNoResizeObserver = false
+</script>
+
 <script setup lang="ts">
 /**
  * PresetChip —— 「模式」（PiLaunchPreset）chip（u4 mode-visibility-chip）。
  *
  * 设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5（可见性）+ §7.4（renderer 界面表）
- * + §7.1（信任处置：含替换提示词的标记跨档不丢）。
+ * + §7.1（信任处置：含替换提示词的标记跨档不丢）+ §7.5 E7（数据源三态降级）。
  *
- * 语义：
- * - 只读（variant='readonly'，对话态 composer `#meta-row`）：`[模式图标] 模式名 + 锁（lucide Lock）`；
- *   **只对非默认模式渲染**——可执行判据 = `launchPresetId !== (defaultPresetId ?? builtin:full)`。
- *   store 未加载（defaultPresetId 空串）时按 builtin:full 兜底，避免把「未加载」误报成「模式已删除」。
- * - landing（variant='landing'）：可点选 chip（chevron）+ emit select。landing 的预选 popover 归
- *   ui 包 `PresetSelectChip`（ui 不得反向 import renderer，故本组件只提供 chip 外观与事件）。
+ * 语义（只读形态 —— 对话态 composer `#meta-row`）：`[模式图标] 模式名 + 锁（lucide Lock）`；
+ *   **只对非默认模式渲染**——可执行判据 = `launchPresetId !== (defaultPresetId || 'builtin:full')`。
+ *   用 `||` 回落：store 未加载时 `defaultPresetId` 是空串（`'' ?? x` 仍为 `''`），`||` 才能落
+ *   `builtin:full`——避免把默认模式会话误判为非默认而错误显示。
+ *   E7 三态（§7.5）：未加载（store 空且无错误）/ 加载失败 → **不渲染**（不报「已删除」）；
+ *   已加载但缺 id → 「模式已删除（<presetId>）」。
+ *   landing 态的预选 chip 走 ui 包 `PresetSelectChip`（ui 不得反向 import renderer），非本组件职责。
  * - 三档退化（模式名 → 短名 → 仅图标，§7.4）：`density` prop 显式指定（测试/父级驱动），
- *   不传则内部 ResizeObserver 按自身实测宽度自适应（无 RO 环境如 jsdom 回落 full）。
+ *   不传则内部 ResizeObserver 按自身实测宽度自适应（无 RO 环境如 jsdom 回落 full 并一次性告警）。
  * - 信任标记跨档不丢（§7.1）：文本/短名档 = chip 内小后缀（warn 色）；纯图标档 = 右上角警示色
  *   角标（`data-testid="preset-chip-replace-badge"`）+ tooltip。**刻意不用 accent**（accent 底已表示
  *   「非默认模式」，两个语义不共色）。
@@ -24,7 +34,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Lock, SlidersHorizontal } from '@lucide/vue'
+import { Lock, SlidersHorizontal } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { usePlatformShortcut } from '@/composables/usePlatformShortcut'
@@ -36,20 +46,13 @@ export type PresetChipDensity = 'full' | 'short' | 'icon'
 
 const props = withDefaults(
   defineProps<{
-    /** 模式（PiLaunchPreset）id；readonly 档为 null → 不渲染 */
+    /** 模式（PiLaunchPreset）id；null → 不渲染 */
     presetId?: string | null
-    /** readonly = 对话态只读 chip（锁）；landing = 可点选 chip（chevron） */
-    variant?: 'landing' | 'readonly'
     /** 显式密度档；不传 = 内部实测自适应（测试显式传，保证确定性） */
     density?: PresetChipDensity
   }>(),
-  { presetId: null, variant: 'readonly', density: undefined },
+  { presetId: null, density: undefined },
 )
-
-const emit = defineEmits<{
-  /** landing 档点击（父级开预选 popover / 写 pendingPreset） */
-  select: [{ presetId: string }]
-}>()
 
 const { t } = useI18n()
 const { formatKbd } = usePlatformShortcut()
@@ -62,22 +65,22 @@ const preset = computed<PiLaunchPreset | null>(() => {
   if (!id) return null
   return presetStore.presets.find((p) => p.id === id) ?? null
 })
-/** presets 是否已加载（E7 三态口径：区分「未加载」与「已加载但缺 id」） */
-const presetsLoaded = computed(() => presetStore.presets.length > 0)
+/** presets 是否已加载（E7 三态口径：加载失败 → 等同未加载；与 ModeDeclarationRow 同判据） */
+const presetsLoaded = computed(
+  () => presetStore.loadError === null && presetStore.presets.length > 0,
+)
 /**
  * 默认模式 id（D5「默认」口径 = defaultPresetId 解析结果）。
  * store 初值 ''（未加载）→ 回落 builtin:full：未加载期不得把任意模式都判成「非默认」而误显示。
  */
 const defaultModeId = computed(() => presetStore.defaultPresetId || BUILTIN_PRESET_IDS.FULL)
 
-/** 生效模式 id（landing 未显式指定时回落默认链；readonly 取 props 原值） */
-const resolvedId = computed(() => props.presetId || defaultModeId.value)
-
-/** 只读档可见性（D5 可执行判据：非默认模式才渲染；默认档 → 空） */
+/** 可见性（D5 可执行判据 + §7.5 E7 闸：非默认模式且 presets 已加载才渲染） */
 const isVisible = computed(() => {
-  if (!resolvedId.value) return false
-  if (props.variant === 'readonly') return resolvedId.value !== defaultModeId.value
-  return true
+  if (!props.presetId) return false
+  // E7 ①③：列表未加载 / 加载失败 → 不渲染（既不可误报「模式已删除」，也不闪裸 `custom:xxxx`）
+  if (!presetsLoaded.value) return false
+  return props.presetId !== defaultModeId.value
 })
 
 /** 模式全名（缺 id 时按 E7 区分未加载 / 已删除） */
@@ -121,7 +124,14 @@ function applyMeasuredWidth(width: number): void {
 
 onMounted(() => {
   if (props.density !== undefined) return
-  if (typeof ResizeObserver === 'undefined') return
+  if (typeof ResizeObserver === 'undefined') {
+    // 降级留痕（P0/P1 降级纪律）：无实测即停留全名档，一次性告警，不随实例数刷屏
+    if (!warnedNoResizeObserver) {
+      warnedNoResizeObserver = true
+      console.warn('[preset-chip] ResizeObserver 不可用，模式 chip 停留在全名档（可能横向溢出）')
+    }
+    return
+  }
   const el = rootRef.value?.$el
   if (!el) return
   resizeObserver = new ResizeObserver((entries) => {
@@ -179,16 +189,16 @@ const ariaLabel = computed(() => {
 })
 /** 新建会话快捷键显示（跨平台；⌘N / Ctrl+N） */
 const newSessionKbd = computed(() => formatKbd('n'))
-/** chip 基础类（只读/landing 共用；accent 底 = 非默认模式这一状态通道） */
+/** chip 基础类（accent 底 = 非默认模式这一状态通道） */
 const CHIP_CLASS =
   'relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5'
 </script>
 
 <template>
-  <!-- 可见性闸（只读档：默认模式 / 未选中 → 不渲染；landing 档：有 id 才渲染） -->
+  <!-- 可见性闸（默认模式 / 未选中 / E7 未加载·加载失败 → 不渲染） -->
   <template v-if="isVisible">
-    <!-- 只读态：chip + hover popover（模式详情 + 锁定说明 + 新建会话出口） -->
-    <HoverCard v-if="variant === 'readonly'" :open-delay="150">
+    <!-- chip + hover popover（模式详情 + 锁定说明 + 新建会话出口） -->
+    <HoverCard :open-delay="150">
       <HoverCardTrigger as-child>
         <Button
           ref="rootRef"
@@ -262,38 +272,5 @@ const CHIP_CLASS =
         </div>
       </HoverCardContent>
     </HoverCard>
-
-    <!-- landing 态：可点选 chip（chevron）；预选 popover 由 ui 包 PresetSelectChip 承载 -->
-    <Button
-      v-else
-      data-testid="preset-chip"
-      variant="ghost"
-      :class="[CHIP_CLASS, 'bg-accent-soft text-accent hover:bg-accent-soft']"
-      :aria-label="ariaLabel"
-      :title="density === 'icon' ? fullName : undefined"
-      @click="emit('select', { presetId: resolvedId })"
-    >
-      <SlidersHorizontal class="shrink-0" />
-      <span
-        v-if="density !== 'icon'"
-        class="min-w-0 truncate font-mono"
-        :class="density === 'short' && 'max-w-[48px]'"
-      >{{ displayName }}</span>
-      <span
-        v-if="hasReplace && density !== 'icon'"
-        class="shrink-0 text-[10px] text-warn"
-      >{{ t('panel.presetChip.replaceHint') }}</span>
-      <span
-        v-if="hasReplace && density === 'icon'"
-        data-testid="preset-chip-replace-badge"
-        class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-warn ring-1 ring-bg-input"
-        :title="t('panel.presetChip.replaceHint')"
-        aria-hidden="true"
-      />
-      <ChevronDown
-        v-if="density !== 'icon'"
-        class="ml-px shrink-0 transition-transform duration-200"
-      />
-    </Button>
   </template>
 </template>

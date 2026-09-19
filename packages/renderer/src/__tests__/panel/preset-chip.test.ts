@@ -1,21 +1,22 @@
 /**
  * PresetChip（u4 mode-visibility-chip）单测。
  *
- * 覆盖设计 §6.5 D5 / §7.4 / §7.1 的可执行条款：
+ * 覆盖设计 §6.5 D5 / §7.4 / §7.1 / §7.5 E7 的可执行条款：
  * 1. 非默认模式 → 对话态只读 chip 渲染；默认模式 / store 未加载（defaultPresetId 空）→ 不渲染。
- * 2. 三档退化（模式名 → 短名 → 仅图标）**各档信任标记不丢**：文本/短名档 = chip 内后缀
+ * 2. §7.5 E7 三态：列表未加载 / 加载失败 → 不渲染（不报「已删除」、不闪裸 id）；
+ *    已加载但缺 id → 「模式已删除」；加载成功且非默认模式 → 渲染并显示模式全名。
+ * 3. 三档退化（模式名 → 短名 → 仅图标）**各档信任标记不丢**：文本/短名档 = chip 内后缀
  *    「含替换提示词」；纯图标档 = 右上角警示色角标（`preset-chip-replace-badge`）+ tooltip。
- * 3. 只读 popover 含锁定说明（「模式在创建时确定…不能更换」）+「新建会话以使用其他模式」出口
+ * 4. 只读 popover 含锁定说明（「模式在创建时确定…不能更换」）+「新建会话以使用其他模式」出口
  *    + 工具面/扩展面/提示词段数。
- * 4. landing 档点击 emit select。
  *
- * 策略：pinia 真 store（setPresets/setDefaultPresetId）+ HoverCard 家族 stub 常开
+ * 策略：pinia 真 store（setPresets/setDefaultPresetId/setLoadError）+ HoverCard 家族 stub 常开
  * （reka HoverCard 未 hover 不渲染 content；stub 常开使浮层内容可 DOM 断言，
  * 对齐 gen-stats-triggers.test.ts 的观察者形态）；i18n 走全局 zh-CN mock。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/preset-chip.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick } from 'vue'
@@ -68,7 +69,7 @@ beforeEach(() => {
 
 describe('PresetChip 可见性（设计 D5 可执行判据）', () => {
   it('非默认模式 → 只读 chip 渲染（模式名 + 图标 + 锁）', () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'readonly' })
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
     const chip = wrapper.find('[data-testid="preset-chip"]')
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toContain('调度模式')
@@ -79,35 +80,69 @@ describe('PresetChip 可见性（设计 D5 可执行判据）', () => {
   })
 
   it('默认模式 → 不渲染（launchPresetId === defaultPresetId）', () => {
-    const wrapper = mountChip({ presetId: 'builtin:full', variant: 'readonly' })
+    const wrapper = mountChip({ presetId: 'builtin:full' })
     expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
   })
 
   it('store 未加载（defaultPresetId 空）→ 按 builtin:full 兜底：默认模式不渲染', () => {
     usePresetStore().setDefaultPresetId('')
-    const wrapper = mountChip({ presetId: 'builtin:full', variant: 'readonly' })
+    const wrapper = mountChip({ presetId: 'builtin:full' })
     expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
   })
 
   it('判据锚在 defaultPresetId（不是硬编码 builtin:full）：默认 = 自定义模式时它不渲染、builtin:full 反而渲染', () => {
-    // 回归点：若误用 landing 的 resolve 链（或把默认写死成 builtin:full），本用例必红
+    // 回归点：若把默认写死成 builtin:full，本用例必红
     usePresetStore().setDefaultPresetId('custom:dispatch')
     expect(
-      mountChip({ presetId: 'custom:dispatch', variant: 'readonly' })
+      mountChip({ presetId: 'custom:dispatch' })
         .find('[data-testid="preset-chip"]')
         .exists(),
     ).toBe(false)
     expect(
-      mountChip({ presetId: 'builtin:full', variant: 'readonly' })
+      mountChip({ presetId: 'builtin:full' })
         .find('[data-testid="preset-chip"]')
         .exists(),
     ).toBe(true)
   })
 })
 
+describe('PresetChip E7 三态（设计 §7.5：与 ModeDeclarationRow 同判据）', () => {
+  it('① 列表未加载（presets 空且无错误）→ 不渲染（不报「已删除」、不闪裸 id）', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([])
+    presetStore.setLoadError(null)
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
+    expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
+    // 裸 id 不泄漏到 DOM（避免闪 custom:xxxx）
+    expect(wrapper.text()).not.toContain('custom:dispatch')
+  })
+
+  it('③ 加载失败（loadError 非空）→ 等同未加载：不渲染', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([])
+    presetStore.setLoadError('preset.list rejected')
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
+    expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
+  })
+
+  it('加载成功且非默认模式 → 渲染并显示模式全名', () => {
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('调度模式')
+  })
+
+  it('② 已加载但缺 id → 降级为「模式已删除（id）」（不静默）', () => {
+    const wrapper = mountChip({ presetId: 'custom:gone' })
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('custom:gone')
+  })
+})
+
 describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §7.1）', () => {
   it('文本档：显示模式全名 + chip 内「含替换提示词」后缀', () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'readonly', density: 'full' })
+    const wrapper = mountChip({ presetId: 'custom:dispatch', density: 'full' })
     const chip = wrapper.find('[data-testid="preset-chip"]')
     expect(chip.text()).toContain('调度模式')
     expect(chip.text()).toContain('含替换提示词')
@@ -115,7 +150,7 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
   })
 
   it('短名档：显示去尾缀短名 + 信任标记仍在', () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'readonly', density: 'short' })
+    const wrapper = mountChip({ presetId: 'custom:dispatch', density: 'short' })
     const chip = wrapper.find('[data-testid="preset-chip"]')
     expect(chip.text()).toContain('调度')
     expect(chip.text()).not.toContain('调度模式')
@@ -123,7 +158,7 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
   })
 
   it('纯图标档：无文本（全名进 aria-label / tooltip）+ 右上角警示色角标仍在', () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'readonly', density: 'icon' })
+    const wrapper = mountChip({ presetId: 'custom:dispatch', density: 'icon' })
     const chip = wrapper.find('[data-testid="preset-chip"]')
     expect(chip.text()).not.toContain('调度')
     expect(chip.attributes('aria-label')).toContain('调度模式')
@@ -135,9 +170,11 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
   })
 
   it('无替换提示词的模式：三档均不显示信任标记', () => {
+    // builtin:full 无 prompt；令「非默认档」= custom:dispatch → builtin:full 成为非默认模式可渲染，
+    // 用真实 props 观察三档（不再借已删除的 landing 分支绕过默认闸）
+    usePresetStore().setDefaultPresetId('custom:dispatch')
     for (const density of ['full', 'short', 'icon'] as const) {
-      // builtin:full 无 prompt；landing 档不受「默认不渲染」闸限制，可直接观察三档
-      const wrapper = mountChip({ presetId: 'builtin:full', variant: 'landing', density })
+      const wrapper = mountChip({ presetId: 'builtin:full', density })
       expect(wrapper.find('[data-testid="preset-chip-replace-badge"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="preset-chip"]').text()).not.toContain('含替换提示词')
     }
@@ -146,7 +183,7 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
 
 describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
   it('popover 含锁定说明 + 新建会话出口 + 工具/扩展/提示词面', () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'readonly' })
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
     const popover = wrapper.find('[data-testid="preset-chip-popover"]')
     expect(popover.exists()).toBe(true)
     // 不可切换声明（验收条款）
@@ -162,14 +199,6 @@ describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
     expect(popover.text()).toContain('提示词段数')
     // 提示词两段都启用 → 段数 2
     expect(popover.text()).toContain('2 段')
-  })
-})
-
-describe('PresetChip landing 档', () => {
-  it('点击 emit select（父级负责写 pendingPreset）', async () => {
-    const wrapper = mountChip({ presetId: 'custom:dispatch', variant: 'landing' })
-    await wrapper.find('[data-testid="preset-chip"]').trigger('click')
-    expect(wrapper.emitted('select')).toEqual([[{ presetId: 'custom:dispatch' }]])
   })
 })
 
@@ -267,5 +296,62 @@ describe('Composer 集成：对话态 meta 行只读模式 chip', () => {
     presetStore.setDefaultPresetId('custom:dispatch')
     await nextTick()
     expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
+  })
+
+  it('E7 ① 列表未加载 → chip 不渲染（不闪裸 custom:xxxx）', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([])
+    presetStore.setLoadError(null)
+    const wrapper = mount(Composer, {
+      props: { sessionId: 's1' },
+      global: { stubs: composerStubs },
+    })
+    expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
+  })
+
+  it('E7 ③ 加载失败 → chip 不渲染（等同未加载）', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([])
+    presetStore.setLoadError('preset.list rejected')
+    const wrapper = mount(Composer, {
+      props: { sessionId: 's1' },
+      global: { stubs: composerStubs },
+    })
+    expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(false)
+  })
+
+  it('E7 ② 加载成功且非默认模式 → chip 渲染且显示模式全名', async () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets(samplePresets())
+    presetStore.setLoadError(null)
+    presetStore.setDefaultPresetId('builtin:full')
+    const wrapper = mount(Composer, {
+      props: { sessionId: 's1' },
+      global: { stubs: composerStubs },
+    })
+    await nextTick()
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('调度模式')
+  })
+})
+
+describe('PresetChip 无 ResizeObserver 宿主（降级留痕）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('无 RO → 停留全名档 + 一次性告警（重复挂载不刷屏）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('ResizeObserver', undefined)
+    const first = mountChip({ presetId: 'custom:dispatch' })
+    expect(first.find('[data-testid="preset-chip"]').text()).toContain('调度模式')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[preset-chip] ResizeObserver 不可用，模式 chip 停留在全名档（可能横向溢出）',
+    )
+    mountChip({ presetId: 'custom:dispatch' })
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 })

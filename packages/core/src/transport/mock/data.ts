@@ -2,7 +2,8 @@
 /**
  * Mock fixture —— 最小但结构完整的预制数据（D7：严格镜像 shared 类型）。
  *
- * - 5 个 SessionSummary，覆盖 D6 派生 5 态（error/waiting/done/running/stopped 各一）
+ * - 8 个 SessionSummary（5 个演示态 + 3 个 agent 子会话 s3-c1/c2/c3），覆盖 D6 派生 5 态
+ *   （error/waiting/done/running/stopped 各一）
  * - [u7a 模式/调度 fixture] s3 额外承载两个演示角色（同一会话，不是新增第三类）：
  *   ① 非默认模式会话：launchPresetId = builtin:session-dispatch（≠ 全局默认 builtin:full）→
  *      composer 只读模式 chip + 流顶声明行的渲染断言锚点；

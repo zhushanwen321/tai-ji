@@ -729,6 +729,16 @@ function coercePresetPrompt(raw: unknown): { value?: PresetPromptConfig; issues:
     }
   }
   const hasSegment = value.replace !== undefined || value.append !== undefined
+  // 可观测契约（设计 §7.1「畸形/超限只丢该段 + warn」）：raw 是普通对象但**无任何可识别段**
+  //（如 `{foo:1}`）时当前实现会静默丢整个 prompt 容器——补一条 issue 让丢弃可见（仍丢弃，
+  // 只增可观测性）。**只记键名不记值**：值可能是用户提示词正文，不应进日志。
+  // 条件用「容器无 replace/append 键」而非「value 为空」：`{replace: <畸形>}` 已由段级 issue
+  // 覆盖，再叠一条会误导（键是被识别的，只是值非法）。
+  const containerKeys = Object.keys(container)
+  const hasKnownSegmentKey = containerKeys.includes('replace') || containerKeys.includes('append')
+  if (!hasSegment && !hasKnownSegmentKey && containerKeys.length > 0) {
+    issues.push(`prompt 容器无可识别段（键：${containerKeys.join(', ')}），已丢弃全部提示词段`)
+  }
   return hasSegment ? { value, issues } : { issues }
 }
 

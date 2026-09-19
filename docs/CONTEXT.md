@@ -33,7 +33,7 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 
 **锁定语义 = 锁模式 id，不锁模式定义**：模式 id 在会话创建时确定、生命周期内不可更换（无任何 UI 路径可切）；模式定义（提示词文本 / 工具面 / 扩展面）以设置页为唯一可信源（活定义），用户编辑后该模式的全部会话（含已建）在**下次进程启动**（restore / fork / respawn）采用新定义。会话 = 对模式 id 的引用，不是创建时快照。
 
-**可见性**：landing 首行第三 chip（可选，三档退化：模式名 → 短名 → 纯图标）+ 对话态 `#meta-row` 只读 chip（**仅非默认模式渲染**，判据 `launchPresetId !== (defaultPresetId ?? 'builtin:full')`）+ 非默认模式在消息流顶部一条派生**模式声明行**（零新 entry 类型，不进 transcript、不进 LLM 上下文）。
+**可见性**：landing 首行第三 chip（可选，三档退化：模式名 → 短名 → 纯图标）+ 对话态 `#meta-row` 只读 chip（**仅非默认模式渲染**，判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`——**用 `||` 不用 `??`**：store 未加载时 `defaultPresetId === ''`，`??` 会让空串穿透，把任意会话误判为非默认）+ 非默认模式在消息流顶部一条派生**模式声明行**（零新 entry 类型，不进 transcript、不进 LLM 上下文）。
 
 ### 模式提示词（Mode Prompt）
 模式的可选提示词面（`PiLaunchPreset.prompt`）：`replace` 段顶掉 pi 核心系统提示词、`append` 段追加在 pi 基础之后，两段各自启用；**单段与两段合计均 ≤ 16000 字符**。校验双语义：写路（保存 / 导入）整条拒绝、读路（磁盘加载）段级折叠（超限优先丢 `append`）。注入通道 = pi 原生两条 argv（`--system-prompt` / `--append-system-prompt`），**不新增 env、扩展零改动**；替换优先级 = **模式 > 全局 > pi 默认**。链序与 `\n` 前缀构造性区分（防 pi 把文案当文件路径）见 [pi-launch-presets.md §2.6](architecture/pi-launch-presets.md)。
