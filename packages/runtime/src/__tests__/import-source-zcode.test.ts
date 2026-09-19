@@ -18,7 +18,8 @@
  *   import_invalid_session 且 message 带 schema_migration 版本；sessionId 缺失/不存在 →
  *   import_invalid_session
  * - prepareImport（T1 全量 header/fileName）：fileName 尾段 === header.id 不变量；
- *   write = U4 占位 stub（调用即抛，不产出半成品）
+ *   write = U4 转换器落盘（空会话产物 = header + session_info 两行；转换明细测试在
+ *   zcode-import/converter.test.ts——U4 领地）
  *
  * 夹具：node:sqlite 在 mkdtemp(tmpdir) 自建最小列集库（session/message/part +
  * schema_migration）。fixture 库注入通道：listCandidates 走构造依赖
@@ -27,7 +28,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -341,9 +342,17 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
     // ISO 段 ：→. 后与归一化 id 均不含 '_'，文件名唯一 '_' 即分隔符
     expect(artifact.fileName).toBe(`2026-01-01T00.00.00.000Z_${normalized}.jsonl`)
     expect(artifact.fileName.replace(/\.jsonl$/, '').split('_').pop()).toBe(normalized)
+    // prepareImport 时点 degradations 恒空（转换在 write 闭包内发生，明细 write 后才可见）
     expect(artifact.degradations).toEqual([])
-    // write = U4 占位 stub：调用即抛（本单元不产出半成品文件）
-    await expect(artifact.write(join(fixturesRoot, 'zc-tmp.jsonl'))).rejects.toThrow('U4-pending')
+    // write 落地产物（U4 转换器）：空会话（无 message 行）= 首行 header + 第 2 行 session_info
+    const tmpPath = join(fixturesRoot, 'zc-tmp.jsonl')
+    await artifact.write(tmpPath)
+    const outLines = readFileSync(tmpPath, 'utf8').trimEnd().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(outLines).toHaveLength(2)
+    expect(outLines[0]).toEqual({ type: 'session', version: 3, id: normalized, timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/zc-prep-cwd' })
+    expect(outLines[1]?.type).toBe('session_info')
+    expect((outLines[1] as { name?: unknown }).name).toBe('Prepare me')
+    expect(artifact.degradations).toEqual([])
   })
 
   it('sessionId 缺失 / 不在库中 → import_invalid_session', async () => {

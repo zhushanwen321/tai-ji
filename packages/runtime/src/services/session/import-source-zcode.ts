@@ -15,6 +15,7 @@
  */
 
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type { ImportCandidate, ImportCandidatesReply, ImportCandidatesRequest, ImportRequest } from '@taiji/shared'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -23,11 +24,10 @@ import { ImportServiceError, type ImportArtifact, type SessionImportSource } fro
 import { normalizeZcodeSessionId, zcodeCandidateKey } from './zcode-import/normalize.js'
 import {
   openZcodeReadonlyDb,
-  withZcodeReadonlyDb,
   type ZcodeReadonlyDb,
   type ZcodeSessionRow,
 } from './zcode-import/sqlite-access.js'
-import { writeZcodeSessionFile } from './zcode-import/converter.js'
+import { convertZcodeSession, type ZcodeConversionOutput } from './zcode-import/converter.js'
 
 /** items 截断默认值（与 pi 源一致，D5：limit 缺省 100）。 */
 const DEFAULT_CANDIDATE_LIMIT = 100
@@ -150,9 +150,15 @@ export class ZcodeImportSource implements SessionImportSource {
   }
 
   /**
-   * 校验源可达 + session 行存在 + 产出 T1 header/fileName。write 委托 converter
-   * （U4 占位 stub，当前调用即抛——本单元交付候选列表能力，转换是 U4 领地）；
-   * degradations 恒空数组占位（U4 转换器接入后由 converter 收集 D6/D7 明细）。
+   * 校验源可达 + session 行存在 + 产出 T1 header/fileName + 转换产物（U4）。
+   *
+   * write 相位分离（§3.6 错误规格）：转换（读库 + 纯转换）失败 → import_source_missing
+   * （db 消失）/ import_invalid_session（查询/JSON 解析失败即 schema 漂移域，含版本诊断）；
+   * 落盘 writeFile 失败原样上抛 → 编排层统一映射 import_copy_failed（磁盘满等）。
+   *
+   * degradations 是 artifact 级可变数组：编排层在 write 完成后才读它聚合
+   * warning='conversion_degraded'（import-service doImport 步骤 8），故转换明细在
+   * write 闭包内 push 进同一数组引用，而非 prepareImport 返回时静态填好。
    */
   async prepareImport(request: ImportRequest): Promise<ImportArtifact> {
     const sessionId = request.sessionId
@@ -188,18 +194,40 @@ export class ZcodeImportSource implements SessionImportSource {
     const timestamp = new Date(row.timeCreated).toISOString()
     const header = { id: normalizedId, timestamp, cwd: row.directory }
 
+    // artifact 级降级明细（转换期 push，编排层 write 后读取聚合 warning）
+    const degradations: string[] = []
+
     return {
       header,
       // 文件名不变量（§3.4 T1）：ISO 段（: → .）与归一化 id 均不含 `_`，文件名唯一 `_`
       // 即分隔符——剥 .jsonl 后尾段 === header.id 严格成立
       fileName: `${timestamp.replaceAll(':', '.')}_${normalizedId}.jsonl`,
-      // write 惰性开只读连接（prepareImport 校验连接已关；去重拒绝路径 write 不被调用，
-      // 不持有连接），转换完成/失败都在 finally 内关闭
       write: async (tmpPath) => {
-        await withZcodeReadonlyDb(dbPath, (writeDb) => writeZcodeSessionFile(writeDb, sessionId, header, tmpPath))
+        // 转换相位：惰性开只读连接（prepareImport 校验连接已关；去重拒绝路径 write 不被
+        // 调用，不持有连接），完成/失败都在 finally 内关闭
+        let out: ZcodeConversionOutput
+        let writeDb: ZcodeReadonlyDb
+        try {
+          writeDb = await openZcodeReadonlyDb(dbPath)
+        } catch (e) {
+          throw new ImportServiceError(
+            'import_source_missing',
+            `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
+          )
+        }
+        try {
+          out = convertZcodeSession(writeDb, sessionId, header)
+        } catch (e) {
+          // converter 语义化错误（会话消失）原样透传；查询/JSON 失败按 schema 漂移映射
+          throw e instanceof ImportServiceError ? e : queryFailed(writeDb, e)
+        } finally {
+          writeDb.close()
+        }
+        degradations.push(...out.degradations)
+        // 落盘相位（§3.6 import_copy_failed 域）：失败原样上抛给编排层统一映射 + 清理 tmp
+        await writeFile(tmpPath, out.content, 'utf8')
       },
-      // U4 转换器落地后由 writeZcodeSessionFile 收集降级明细（D6 artifact 丢弃 / D7 未完成 tool）
-      degradations: [],
+      degradations,
     }
   }
 }

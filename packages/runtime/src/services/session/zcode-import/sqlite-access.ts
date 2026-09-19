@@ -39,6 +39,18 @@ export interface ZcodeSessionRow {
   timeUpdated: number
 }
 
+/**
+ * 单会话全量转换行集的 message 行（U4 转换器输入）。parts 元素 = part.data 已解析
+ * JSON 对象本体（不包 {sequence, data} 行壳——转换器把 parts 元素直接当 part 消费，
+ * 包装壳会让 part.type 全体读成 undefined；part 序即数组序 = 联合序，sequence 冗余不导出）。
+ */
+export interface ZcodeTranscriptMessageRow {
+  id: string
+  sequence: number
+  data: Record<string, unknown>
+  parts: Array<Record<string, unknown>>
+}
+
 /** node:sqlite 驱动的最小消费面（结构类型，禁 any；与 reader.ts 的 SqliteDb 同手法）。 */
 interface SqliteStatement {
   all: (...args: unknown[]) => unknown[]
@@ -60,6 +72,13 @@ export interface ZcodeReadonlyDb {
   listCandidateSessions(opts?: { limit?: number }): ZcodeSessionRow[]
   /** 按原始 id 取单行（prepareImport 校验用）；不存在返回 undefined。 */
   getSessionRow(id: string): ZcodeSessionRow | undefined
+  /**
+   * 单会话全量转换行集（U4 转换器输入）：message 按 sequence 升序，每条 message 的
+   * parts 按 (message.sequence, part.sequence) 联合序排好。LEFT JOIN 保留无 part 的
+   * message（parts 空数组）。data 列 JSON 解析失败抛 Error（调用方按 §3.6 ② schema
+   * 漂移映射 import_invalid_session）。
+   */
+  getSessionTranscript(sessionId: string): ZcodeTranscriptMessageRow[]
   /**
    * 真字节口径的会话体量（§3.7）：SUM(length(CAST(part.data AS BLOB)))——TEXT 直接
    * length() 返回字符数，CJK 内容会低估；GROUP BY session_id 走 part_session_idx。
@@ -96,6 +115,27 @@ function rowToSessionRow(row: unknown): ZcodeSessionRow {
   }
 }
 
+/**
+ * message/part 行的 data 列（JSON 字符串）→ 已解析对象。非法 JSON / 非对象形态抛
+ * Error（上下文带表与行标识）——上游（import-source-zcode write 闭包）按 §3.6 ②
+ * schema 漂移映射 import_invalid_session，不在本层静默跳过（整行丢失会破坏切段配对）。
+ */
+function parseRowData(raw: unknown, ctx: string): Record<string, unknown> {
+  if (typeof raw !== 'string') {
+    throw new Error(`${ctx} 列类型异常（期望 JSON 字符串，实际 ${typeof raw}）`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`${ctx} 不是合法 JSON（${err instanceof Error ? err.message : String(err)}）`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${ctx} 解析后非对象（实际 ${parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed}）`)
+  }
+  return parsed as Record<string, unknown>
+}
+
 function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
   return {
     listCandidateSessions(opts) {
@@ -112,6 +152,39 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
         .prepare('SELECT id, title, directory, task_type, time_created, time_updated FROM session WHERE id = ?')
         .get(id)
       return row === undefined ? undefined : rowToSessionRow(row)
+    },
+    getSessionTranscript(sessionId) {
+      // 联合序（C1 探针 2026-09-19 实测，见 converter.ts 头注）：ORDER BY m.sequence, p.sequence
+      // 与 part 自身 time.start 时序一致（3 个 interactive 会话 3415 parts 零逆序）。
+      // LEFT JOIN 保留无 part 的 message（pseq/pdata 为 NULL 的行）
+      const rows = db
+        .prepare(
+          'SELECT m.id AS mid, m.sequence AS mseq, m.data AS mdata, p.sequence AS pseq, p.data AS pdata ' +
+            'FROM message m LEFT JOIN part p ON p.message_id = m.id ' +
+            'WHERE m.session_id = ? ORDER BY m.sequence, p.sequence',
+        )
+        .all(sessionId)
+      const messages: ZcodeTranscriptMessageRow[] = []
+      let current: ZcodeTranscriptMessageRow | undefined
+      for (const row of rows) {
+        if (typeof row !== 'object' || row === null) throw new Error('message/part 联合查询返回非对象行')
+        const r = row as Record<string, unknown>
+        const mid = asString(r.mid, 'message.id')
+        // ORDER BY 保证同一 message 的行连续：id 变化即开新组（message.id 是主键）
+        if (current?.id !== mid) {
+          current = {
+            id: mid,
+            sequence: asNumber(r.mseq, 'message.sequence'),
+            data: parseRowData(r.mdata, `message(${mid}).data`),
+            parts: [],
+          }
+          messages.push(current)
+        }
+        if (r.pseq !== null && r.pseq !== undefined && r.pdata !== null && r.pdata !== undefined) {
+          current.parts.push(parseRowData(r.pdata, `part(message=${mid}).data`))
+        }
+      }
+      return messages
     },
     candidatesByteSize(sessionIds) {
       if (sessionIds.length === 0) return new Map<string, number>()
