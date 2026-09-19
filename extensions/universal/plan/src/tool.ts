@@ -557,7 +557,7 @@ interface ExecOption {
   label: string;
   mode: string;
   description?: string;
-  /** skill 档携带（CompleteChoiceOutcome 数据通路 → steer 文案 read <skillDir>/SKILL.md） */
+  /** skill 档携带（skill 入口文件路径，标准形态 SKILL.md / 散 .md 形态文件本身；CompleteChoiceOutcome 数据通路 → steer 文案 read 该路径） */
   skillDir?: string;
 }
 

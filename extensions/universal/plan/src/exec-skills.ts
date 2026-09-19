@@ -3,6 +3,7 @@ import * as os from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import {
+  CONFIG_DIR_NAME,
   getAgentDir,
   loadSkillsFromDir,
   parseFrontmatter,
@@ -29,7 +30,7 @@ const logger = getLogger("pi-plan");
  *   （`plan-exec: true`；pi 的 Skill 对象不保留原始 frontmatter）。skill 侧自愿
  *   opt-in，`disable-model-invocation` 与 plan-exec 并存不过滤（用户显式选择是
  *   另一通路，设计 D10 顺手裁决）。
- * - steer 执行走路径读取（read `<skillDir>/SKILL.md`），不依赖 pi skill 注册。
+ * - steer 执行走路径读取（read `<skillDir>` = skill 入口文件路径），不依赖 pi skill 注册。
  *
  * 已登记偏差（对照表⑦散 .md 形态）：与 pi auto 源（collectSkillEntries）方向相反——
  * agents 源根级散 .md 检测收而 pi 不收（多提议）、子目录散 .md pi 收而检测不收
@@ -37,7 +38,7 @@ const logger = getLogger("pi-plan");
  * plan-exec skill，出现时补第五根）。
  *
  * 降级规格（检测失败最坏后果 = skill 选项空集，绝不允许炸 executeComplete 的
- * P0 交互闭环；pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync
+ * 核心交互闭环；pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync
  * 守卫 + 整根 try/catch（EACCES 等任何 fs 错 → 跳过该根 + warn）；单 skill
  * frontmatter 读/解析失败 → 跳过该项 + warn；settings 读取/解析失败 → 视为
  * 无 overrides。
@@ -265,13 +266,13 @@ export function hasPlanExecMarker(skillFilePath: string, log: LogFn = defaultLog
 export interface ExecSkill {
   name: string;
   description: string;
-  /** SKILL.md 所在目录（steer 指引 read `<skillDir>/SKILL.md`；散 .md 形态 = 文件所在目录） */
+  /** skill 入口文件路径（标准形态 = SKILL.md 路径，散 .md 形态 = 文件本身；steer 指引 read 该路径，两种形态统一无分支） */
   skillDir: string;
   skillPath: string;
 }
 
 export interface DetectExecSkillsOptions {
-  /** 项目目录（`.pi/skills` 根 + 祖先链起点）。生产调用传 ctx.cwd */
+  /** 项目目录（`<CONFIG_DIR_NAME>/skills` 根 + 祖先链起点，目录名跟 pi CONFIG_DIR_NAME 导出）。生产调用传 ctx.cwd */
   cwd: string;
   /** 项目信任态（untrusted 跳过 `.pi/skills` 与祖先链两族，④）。生产调用传 ctx.isProjectTrusted() */
   trusted: boolean;
@@ -315,12 +316,12 @@ function detectExecSkillsInternal(options: DetectExecSkillsOptions, log: LogFn):
   const userOverrides = readSkillsOverrides(join(agentDir, "settings.json"), log);
   // project settings 仅 trusted 时参与（pi loadFromStorage 对 untrusted 的 project 恒 {}）
   const projectOverrides = options.trusted
-    ? readSkillsOverrides(join(cwd, ".pi", "settings.json"), log)
+    ? readSkillsOverrides(join(cwd, CONFIG_DIR_NAME, "settings.json"), log)
     : [];
 
   const roots: SkillRoot[] = [];
   if (options.trusted) {
-    roots.push({ dir: join(cwd, ".pi", "skills"), baseDir: join(cwd, ".pi"), overrides: projectOverrides });
+    roots.push({ dir: join(cwd, CONFIG_DIR_NAME, "skills"), baseDir: join(cwd, CONFIG_DIR_NAME), overrides: projectOverrides });
     // 祖先链（④trusted 门内）：每根 baseDir = 各自的 `.agents` 目录；与 `~/.agents/skills`
     // 同路径的项滤掉（pi :1979 同款——cwd 在 HOME 下时防与第四根重复）
     const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
@@ -360,7 +361,10 @@ function detectExecSkillsInternal(options: DetectExecSkillsOptions, log: LogFn):
       found.push({
         name: skill.name,
         description: skill.description,
-        skillDir: dirname(skill.filePath),
+        // 入口文件路径两种形态统一：标准形态 filePath 即 SKILL.md 路径、散 .md 形态即
+        // 文件本身——接收端（steer 文案）直接 read 该值，不再拼 SKILL.md（散 .md 形态
+        // 拼接会得到不存在的 `<skills根>/SKILL.md` 悬空指引）
+        skillDir: skill.filePath,
         skillPath: skill.filePath,
       });
     }

@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -248,8 +248,9 @@ export function extractPlanSteps(planContent: string): string[] {
  * v2 的 mode 值域 = develop | goal | skill:<name>）。成功发 goal steer——「Execute via
  * /goal」只在 goal 真实创建成功时说出；失败发含 reason 与恢复动作的降级 steer +
  * warning notify。skill 档动态构造 steer（含 skillDir 路径，对齐 register-doc
- * sourceSkill 的 skill 关联先例）；其余档按 execMode 组 steer。返回 goalInit 的
- * outcome（非 goal 档为 undefined）。
+ * sourceSkill 的 skill 关联先例；skillDir = skill 入口文件路径——标准形态 SKILL.md
+ * 路径 / 散 .md 形态文件本身，直接 read 不再拼 SKILL.md）；其余档按 execMode 组
+ * steer。返回 goalInit 的 outcome（非 goal 档为 undefined）。
  */
 function deliverExecutionNotice(
   pi: ExtensionAPI,
@@ -272,7 +273,7 @@ function deliverExecutionNotice(
   if (execMode.startsWith(SKILL_MODE_PREFIX)) {
     const skillName = execMode.slice(SKILL_MODE_PREFIX.length);
     modeHint = skillDir
-      ? `Execute via skill: read the ${skillName} skill at ${join(skillDir, "SKILL.md")} first, then follow its workflow to execute the plan file.`
+      ? `Execute via skill: read the ${skillName} skill at ${skillDir} first, then follow its workflow to execute the plan file.`
       : `Execute via skill: load the ${skillName} skill and follow its workflow to execute the plan file.`;
   } else if (outcome === undefined) {
     modeHint = modeMessages[execMode] ?? modeMessages.develop;

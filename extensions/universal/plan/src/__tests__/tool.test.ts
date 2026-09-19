@@ -243,9 +243,9 @@ describe("registerPlanTool", () => {
 
     it("detected plan-exec skill appears as an option and its choice maps to skill:<name> with skillDir (D10)", async () => {
       const { exec, ctx } = setup();
-      const skillDir = "/tmp/fixtures/skills/dev-flow";
+      const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir, skillPath: `${skillDir}/SKILL.md` },
+        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir: skillEntryPath, skillPath: skillEntryPath },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute via skill: dev-flow");
       const res = await exec({ action: "complete" });
@@ -260,7 +260,7 @@ describe("registerPlanTool", () => {
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("skill:dev-flow");
       // skillDir 数据通路：CompleteChoiceOutcome → handlePlanComplete（steer 文案的路径来源）
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillDir);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
     it("empty detection set leaves no skill options (空集不误伤选项集)", async () => {
@@ -354,9 +354,9 @@ describe("registerPlanTool", () => {
 
     it("skill option carries its description into the form and maps to skill:<name>", async () => {
       const { exec, ctx } = setupGui();
-      const skillDir = "/tmp/fixtures/skills/dev-flow";
+      const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir, skillPath: `${skillDir}/SKILL.md` },
+        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir: skillEntryPath, skillPath: skillEntryPath },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>)
         .mockResolvedValue(JSON.stringify({ "Execution method": "Execute via skill: dev-flow" }));
@@ -366,7 +366,7 @@ describe("registerPlanTool", () => {
       const skillOption = options.find((o) => o.label === "Execute via skill: dev-flow");
       expect(skillOption?.description).toBe("Deliver a plan via dev-flow.");
       expect(res.details.execMode).toBe("skill:dev-flow");
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillDir);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
     it("cancelled (undefined resolve) folds to complete-cancelled staying in plan mode (D4 四态折叠)", async () => {
