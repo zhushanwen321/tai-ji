@@ -247,7 +247,7 @@ choice/text 部分与旧 `AskUserAnswers` 逐字兼容（含 Other 键规则与�
 |---|---|---|
 | `ok` | 收到 FormAnswers | 正常消费 |
 | `cancelled` / `timeout` | 用户未作答 | 按「用户取消」折叠 |
-| `channel-error` | 通道契约破坏，含 **echo 检测**：收包等于发送 payload 表明宿主 taiji 过旧不识别 `UI_FORM_MARKER`（用户在 band 看到的是 payload 乱码单选项），message 携带升级指引 | 明确报错（scheduler 禁用本会话工具 / plan 折 cancelled result 留 plan mode） |
+| `channel-error` | 通道契约破坏，含 **echo 检测**：收包等于发送 payload 表明宿主 taiji 过旧不识别 `UI_FORM_MARKER`（用户在 band 看到的是 payload 乱码单选项），echo 命中时 message 携带升级指引（非 echo 的真实通道故障 message 为 undefined） | 明确报错（scheduler 禁用本会话工具 / plan 折 cancelled result 留 plan mode） |
 | `non-json` | 协议版本错配类故障 | 同 channel-error 策略 |
 
 **TUI 模式**：`uiFormInteract` 抛错（RPC 专用）——formQuestions 在 TUI 无呈现语义，extension 必须自行调 `ctx.ui.custom()` 传 TUI Component（按 `ctx.mode` 分支）。

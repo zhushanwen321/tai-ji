@@ -27,7 +27,7 @@
 
 假设读者了解 pi extension 基本形态（factory 函数 `export default (pi: ExtensionAPI) => void`），但不懂 plan/goal 内部。三个关键角色：
 
-- **plan 扩展**（`extensions/universal/plan/`，universal 组 = 独立通用包）：提供 `plan` 工具，AI 在计划模式下起草 plan 文件后调 `action=complete` 结束计划期。complete 时弹出执行方式对话框（`resolveCompleteChoice`，tool.ts:245-251），选项由 `buildExecOptions(pi)` 构造——其中 goal 档「Goal-driven execution (/goal)」按 `detectGoalCapability(pi)` 探测结果决定是否出现（tool.ts:225）。
+- **plan 扩展**（`extensions/universal/plan/`，universal 组 = 独立通用包）：提供 `plan` 工具，AI 在计划模式下起草 plan 文件后调 `action=complete` 结束计划期。complete 时弹出执行方式对话框（`resolveCompleteChoice` 三路分流：headless 默认 develop / taiji rpc 走统一表单协议 / 原生 plain select），选项由 `buildExecOptions` 构造（动态参数：检测到的 exec skills + goal 能力）——其中 goal 档「Goal-driven execution (/goal)」按 `detectGoalCapability()` 探测结果决定是否出现。
 - **goal 扩展**（`extensions/universal/goal/`）：目标驱动执行——`/goal` 命令族 + `goal_control` 工具 + widget 投影 + token 预算。goal 创建有两条入口：用户命令（`/goal <objective>`）与编程式接口 `__goalInit`（service.ts `createGoal` 唯一创建入口，FR-3.1）。**goal 桥**指后者被 plan 消费的通道——这是两包唯一的跨包运行时接触面（类型经 `import type { GoalInitFn } from "@zhushanwen/pi-goal"` 擦除，运行时零依赖，compact.ts:6）。
 - **pi 扩展加载器**（实装 `dist/core/extensions/loader.js`）：对每个 `--extension` 路径走 `loadExtensionsInternal`（:499-509 循环）→ `initializeExtension`（:459-472）：先建全新登记表 `createExtension()`（:441-458），再建全新 API 对象 `createExtensionAPI(extension, runtime, cwd, eventBus)`（:209），然后 `factory(load.api)`。官方注释自述设计意图（:204-208）：*"Create the ExtensionAPI for an extension. Registration methods write to the extension object. Action methods delegate to the shared runtime."*——**pi 的共享面是 runtime 与 eventBus（循环外创建一次、逐个传入），API 对象本身从不共享**。
 
