@@ -59,9 +59,13 @@ function makeConfigStore(paths: string[]): IConfigStore {
 }
 
 function makePresetService(presets: Record<string, unknown>, resolveImpl?: (preset: unknown, cwd: string) => PresetResolution): PresetServiceType {
+  const impl = resolveImpl ?? ((preset: unknown) => preset as PresetResolution)
   return {
     getPreset: (id: string) => presets[id],
-    resolve: resolveImpl ?? ((preset: unknown) => preset as PresetResolution),
+    // 真实 PresetService.resolve 是 async：fake 必须同为 async。同步 fake 会让
+    // resolveLaunchPresetOptions 里「漏 await」不可观测（回落分支 `{ ...resolution }`
+    // 展开 Promise 得空壳、静默丢字段，而本文件仍全绿）[HISTORICAL]
+    resolve: async (preset: unknown, cwd: string) => impl(preset, cwd),
   } as unknown as PresetServiceType
 }
 
