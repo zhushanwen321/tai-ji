@@ -14,6 +14,7 @@ import { registerAllRpcMethods } from './plugin-rpc-setup.js'
 import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
+import { EntryInvalidationDispatch, ENTRY_INVALIDATION_NOTIFY_METHOD } from './plugin-entry-invalidation-dispatch.js'
 import { executeCommand as executePluginCommand, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
 import type { InstallResult } from '../ports/plugin-installer.js'
 import { handleBridgeToolExecute, handleBridgeEvent, handleBridgeIntercept, BridgeToolCache, PI_HOOK_EVENT_MAP } from './bridge-interop.js'
@@ -131,6 +132,9 @@ export class PluginService implements IPluginService {
   /** session 生命周期事件注册表（S3-W2）：handlerId → workerId 定向投递 */
   private readonly sessionEventDispatch: SessionEventDispatch
 
+  /** Entry 失效信号订阅注册表（AP-4，U2）：(sessionId, customType) 分桶，notifyEntryInvalidation 派发 */
+  private readonly entryInvalidationDispatch: EntryInvalidationDispatch
+
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报，views.listMountPoints 中继查询，AC10） */
   private mountPoints: string[] = []
 
@@ -169,6 +173,14 @@ export class PluginService implements IPluginService {
 
     // session 事件注册表：复用同一 rpcServer（workerId↔port 映射 + notify 通道）
     this.sessionEventDispatch = new SessionEventDispatch(this.rpcServer)
+
+    // Entry 失效信号订阅注册表（AP-4，U2）。存在性谓词取 listPersistedSessions（侧边栏
+    // 会话列表同一权威源）——getSummary 只查内存 lifecycle 表，会误拒「存在但未加载」的
+    // 历史会话。deps.sessionService 后置绑定，谓词调用时求值（activeSessionResolver 同模式）。
+    this.entryInvalidationDispatch = new EntryInvalidationDispatch({
+      sessionExists: (sessionId) =>
+        this.deps.sessionService?.listPersistedSessions().flatMap(g => g.sessions).some(s => s.id === sessionId) ?? false,
+    })
 
     // Hook 管道：持有共享 hookRegistry（rpc-setup 注册侧与本类消费侧同一实例），
     // 复用 host / rpcServer 引用。
@@ -356,6 +368,7 @@ export class PluginService implements IPluginService {
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
         this.sessionEventDispatch.clearForPlugin(pluginId)
+        this.entryInvalidationDispatch.clearForPlugin(pluginId)
       }
       void this.syncToolsToBridge().catch((err: unknown) => {
         console.error('[plugin-service] syncToolsToBridge after crash failed:', toErrorMessage(err))
@@ -451,7 +464,24 @@ export class PluginService implements IPluginService {
       })
       this.deps.sessionService.setOnSessionDestroyed(summary => {
         this.sessionEventDispatch.didDestroy(sessionInfoFromSummary(summary))
+        // AP-4（U2）：设计 §3.4 钦定与 didDestroy 同址（回调体内链式追加）；sessionId 维度
+        // 清理 owner，缺此路则长会话反复建删时订阅条目单调累积。setOnSessionDestroyed
+        // 为追加式回调列表（D6a），不挤占既有投递。
+        this.entryInvalidationDispatch.clearForSession(summary.id)
       })
+    }
+  }
+
+  /**
+   * Entry 失效信号派发（AP-4，U2）：组合根 onRecordEntriesInvalidated 两路注入的 plugin 腿
+   * （session 腿 = invalidateRecordEntries，record 三族早退门保留）。按 (sessionId,
+   * customType) 双匹配命中订阅注册表，命中者经 rpcServer.notify 定向投递（server→Worker
+   * notify 非 WS 帧，与 didCreate/didDestroy 同族；Worker 已死时静默 no-op 既有口径）；
+   * 无订阅者零开销（零 notify）。
+   */
+  notifyEntryInvalidation(sessionId: string, customType: string): void {
+    for (const { workerId, handlerId } of this.entryInvalidationDispatch.dispatch(sessionId, customType)) {
+      this.rpcServer.notify(workerId, ENTRY_INVALIDATION_NOTIFY_METHOD, { handlerId, sessionId, customType })
     }
   }
 
@@ -482,6 +512,7 @@ export class PluginService implements IPluginService {
         this.removeCommandEntriesFor(pluginId)
         // S3-W2：session 事件注册表同步清理（禁用插件的 didCreate/didDestroy 订阅不再投递）
         this.sessionEventDispatch.clearForPlugin(pluginId)
+        this.entryInvalidationDispatch.clearForPlugin(pluginId)
         await this.syncToolsToBridge()
       }
      
@@ -566,6 +597,7 @@ export class PluginService implements IPluginService {
     this.removeCommandEntriesFor(pluginId)
     // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
     this.sessionEventDispatch.clearForPlugin(pluginId)
+    this.entryInvalidationDispatch.clearForPlugin(pluginId)
 
     // 清理 status bar items
     this.statusBarRegistry.clearForPlugin(pluginId)

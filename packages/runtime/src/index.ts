@@ -661,6 +661,10 @@ async function main(): Promise<void> {
       // 调用发生在 session 创建后，引用恒就绪）。
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
+        // AP-4（U2）：plugin 订阅腿——custom entry 失效信号按 (sessionId, customType)
+        // 双匹配订阅注册表，命中者定向 notify 对应 Worker；无订阅者零开销。
+        // record 三族早退门在 invalidateRecordEntries 内部保留，本腿不受扰。
+        pluginService.notifyEntryInvalidation(sid, customType)
       },
       // W1（fix-chat-flow-order 探针 ②）：agent_settled（run 级联结束，晚于 pi finally 的
       // bash 落盘 flush）→ dispatcher 按序发布 per-session bash 待落列（D2 双分支延迟）。
