@@ -372,27 +372,37 @@ function onClick(e: MouseEvent): void {
   text-align: center;
 }
 
-/* 表格横向滚动 wrapper（markdown.ts table_open rule 产出）：超宽表格自身 overflow-x:auto
-   滚动，不撑宽 .md-render / detail-content（与 .md-codeblock 同策略：离散块自带滚动容器）。
-   table 的 margin 移到 wrapper（避免双 margin）；table width:100% 在 wrapper 内仍撑满窄表格。 */
-.md-render :deep(.md-table-wrap) {
+/* 表格滚动 CSS 化（原 .md-table-wrap div 包裹已删——markdown.ts 不再产出 wrapper，
+   table 直挂滚动能力）：GitHub 全套四条声明缺一不可——只写 display:block+overflow 时
+   块盒默认撑满容器、收缩只发生在内部匿名 table 盒，出现「全宽外框 + 收缩网格 + 外框
+   内大片空白」的混合形态；补 width:max-content 后窄表真收缩、max-width:100% 封顶，
+   超宽表横向滚动不撑宽 .md-render / detail-content。窄表收缩到内容宽 = GitHub 同形态
+   （显式接受的行为变化，设计 §3.5）。border/radius/margin 自原 wrapper 迁移直挂。 */
+.md-render :deep(table) {
+  display: block;
   overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 0.7em 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-}
-.md-render :deep(table) {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  margin: 0;
   font-size: 0.92em;
 }
+/* th/td 规则拆两条（th/td 对齐转写的配套条件，设计 D3 R5/R6）：border/padding 无条件
+   ——整条加守卫会让带 align 的单元格连边框内边距一起丢；仅 text-align 移入 :not([align])
+   守卫——无 align 属性兜底 left（维持现状视觉基线），有 align 属性（markdown-it 的
+   style 经 markdown.ts 转写而来）时守卫不命中、HTML 呈现属性生效（align 优先级低于
+   任何作者规则，转写不同批改宿主 CSS 则列对齐回归依旧）。 */
 .md-render :deep(th),
 .md-render :deep(td) {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 0.35em 0.6em;
+}
+.md-render :deep(th:not([align])),
+.md-render :deep(td:not([align])) {
   text-align: left;
 }
 .md-render :deep(th:last-child),
