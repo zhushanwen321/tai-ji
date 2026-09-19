@@ -1481,6 +1481,12 @@ export interface ServerMessageMapBase {
     // 前端消费时收窄为 PlanDocMeta[]。
     planReview?: boolean
     planReviewDocs?: unknown[]
+    // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+    // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
+    // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
+    // 前端消费时用 extension-protocol 的 isFormQuestion 守卫收窄为 FormQuestion[]。
+    form?: true
+    formQuestions?: unknown[]
   }
   // session 通道推送（runtime session-service / index.ts 生产，W04 收紧）
   // compacting：compaction_start → interpreter 广播（唯一发送点 event-interpreter.handleCompactionStart），

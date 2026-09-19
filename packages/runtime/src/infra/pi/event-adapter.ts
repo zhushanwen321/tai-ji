@@ -34,7 +34,7 @@ import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessa
 import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
 // plan-state customType 常量单源在 plan-state-extractor（D1①：runtime 侧常量，shared 无此字面量）
 import { PLAN_STATE_CUSTOM_TYPE } from '../../services/session/plan-state-extractor.js'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -804,6 +804,50 @@ function tryTranslatePlanReviewSelect(
 }
 
 /**
+ * 统一提问表单请求检测（ui-presentation-protocol D2 末条）：select title 为
+ * UI_FORM_MARKER → options[0] 是 JSON payload（uiFormInteract helper 序列化的
+ * { formQuestions, allowCancel }）。
+ * 检测成功广播 extension.ui_request 带 form: true 标记（与 askUser: true 同构分流——
+ * 前端 C4 过滤器识别后路由 FormOverlay 类型渲染器）。
+ *
+ * 消费端守卫失败策略与 ask-user 分支的「整体判否」不同：isFormQuestion **逐项过滤**，
+ * 合法项 ≥1 才产 form 帧——混合数组中个别不合法项（extension 侧 bug / 协议错配）只
+ * 剔除该项，不废掉整张表单；全不合法（含非 JSON / formQuestions 非数组 / 空数组）返回
+ * undefined，由调用方降级普通 select（与既有 marker 守卫失败降级一致，对齐 :856-871
+ * ask-user/schedule-create 的兜底模式）。
+ */
+function tryTranslateFormSelect(
+  event: PiExtensionUiRequestEvent,
+  sid: string,
+  requestId: string,
+  dialogMethod: ExtensionInteractMethod,
+): PiTranslatedEvent[] | undefined {
+  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean } | undefined
+  const rawQuestions = formData?.formQuestions
+  if (!Array.isArray(rawQuestions)) {
+    return undefined
+  }
+  const validQuestions = rawQuestions.filter(isFormQuestion)
+  if (validQuestions.length === 0) {
+    return undefined
+  }
+  const requestPayload = {
+    sessionId: sid,
+    requestId,
+    method: 'select',              // 仍是 select（复用 respond 回传通道）
+    form: true,                    // 标记统一表单富交互，前端据此路由到 FormOverlay（C4 过滤器）
+    formQuestions: validQuestions, // 守卫过滤后的合法问题集透传（前端复核守卫收窄，设计 D2）
+    allowCancel: formData?.allowCancel ?? true,
+  }
+  return [
+    // 与 ask-user 分支同构：extension-ui kind 事件使 EventInterpreter 暂停 watchdog，
+    // 并通知 server 跟踪请求 + 缓存 pending 请求（block 等用户响应，不超时）。
+    { kind: 'extension-ui', requestId, sessionId: sid, method: dialogMethod, payload: requestPayload },
+    extensionUiRequestBroadcast(requestPayload),
+  ]
+}
+
+/**
  * 普通 select / confirm / input / editor（无 marker 命中，或 ask-user 检测失败降级到此）。
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
@@ -868,6 +912,14 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
     const planEvents = tryTranslatePlanReviewSelect(event, sid, requestId, dialogMethod)
     if (planEvents) return planEvents
     // 检测失败（非合法 JSON / docs 缺失）→ 降级普通 select（下方分支）
+  }
+  // 统一提问表单（ui-presentation-protocol D2）：plan / scheduler / ask-user 三方提问的
+  // 统一通道，检测形态照 ask-user（title 精确匹配 + payload 守卫）；差异在守卫失败策略——
+  // 逐项过滤而非整体判否（见 tryTranslateFormSelect）。
+  if (method === 'select' && event.title === UI_FORM_MARKER) {
+    const formEvents = tryTranslateFormSelect(event, sid, requestId, dialogMethod)
+    if (formEvents) return formEvents
+    // 检测失败（非合法 JSON / formQuestions 全不合法）→ 降级普通 select（下方分支）
   }
   return translatePlainDialogRequest(event, sid, requestId, dialogMethod)
 }
