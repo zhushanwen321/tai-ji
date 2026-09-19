@@ -343,7 +343,7 @@ prompt?: {
 
 `--no-context-files` 禁用 AGENTS.md / CLAUDE.md 自动发现（不影响显式 `--system-prompt`）。
 
-**argv 日志脱敏**：两条 prompt flag 的值都是用户可编辑的成段文本，spawn 回显（`rpc-client` 日志行）与孤儿回收的 crash journal `argvSummary()` 必须经共享脱敏纯函数只记 `--flag <N chars>`，不得落正文。
+**argv 日志脱敏**：两条 prompt flag 的值都是用户可编辑的成段文本，spawn 回显（`rpc-client` 日志行）与孤儿回收的 crash journal `argvSummary()` 必须经共享脱敏纯函数只记 `--flag <N chars>`，不得落正文。**（已实施）** 落点 = `packages/runtime/src/infra/pi/argv-redact.ts`（数组形态 `redactArgv` + 行形态 `redactArgvLine`；只蔽值型 flag 的值、其余 token 原样保留、按索引遮蔽不做全局替换、换行归一 + 长度封顶），两处调用点均已接线。
 
 ---
 

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { getPiAgentDir } from './pi-paths.js'
+import { redactArgv } from './argv-redact.js'
 import { recordSpawnMarkers } from './spawn-markers.js'
 import { getDefaultModel } from './pi-provider-store.js'
 import { RpcTimeoutError } from '../../utils/errors.js'
@@ -320,7 +321,9 @@ export class RpcClient implements IPiEngine {
     //   实测 cwd=HOME//tmp//usr 三种 cwd 下 getPackageDir/getThemesDir 返回完全一致。
     const spawnCwd = this.options.cwd ?? process.cwd()
 
-    console.log('[rpc] spawning pi:', piCmd, args.join(' '), 'cwd:', spawnCwd)
+    // argv 回显脱敏（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.2 argv 日志脱敏
+    // / §7.6 写入面 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
+    console.log('[rpc] spawning pi:', piCmd, redactArgv(args), 'cwd:', spawnCwd)
 
     this.proc = spawn(piCmd, args, {
       cwd: spawnCwd,

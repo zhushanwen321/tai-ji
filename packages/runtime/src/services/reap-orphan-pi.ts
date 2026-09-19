@@ -70,6 +70,7 @@
 import { execFile } from 'node:child_process'
 import type { CrashJournalEvent } from '@taiji/shared'
 import { getCrashJournal } from '../infra/crash-journal.js'
+import { redactArgvLine } from '../infra/pi/argv-redact.js'
 
 /**
  * reaped 台账行使用 schema 登记的扩展字段 pid/ppid（偏差 #32③：扩展字段登记 SSOT =
@@ -284,9 +285,14 @@ function isProcessGone(e: unknown): boolean {
 /** argv 日志摘要截断长度：防 ps 极端长 command 刷屏，保留头部（pi 路径 + --mode rpc 可辨识）。 */
 const ARGV_SUMMARY_MAX = 200
 
-/** argv 摘要：截断防 ps 极端长 command 刷屏，保留头部（pi 路径 + --mode rpc 可辨识）。 */
+/**
+ * argv 摘要：先经共享脱敏（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.2
+ * argv 日志脱敏 / §7.6 写入面 / 探针 P15）再做长度封顶——两处回显（本处与 rpc-client spawn
+ * 日志）必须共用同一实现，只堵一条等于没堵。脱敏保留非值 token，故 `--mode rpc` 等诊断串
+ * 与 `detailDigest` 既有断言不受影响；提示词 flag 的值只记 `<N chars>`。
+ */
 function argvSummary(command: string): string {
-  return command.length > ARGV_SUMMARY_MAX ? command.slice(0, ARGV_SUMMARY_MAX) + '…' : command
+  return redactArgvLine(command, ARGV_SUMMARY_MAX)
 }
 
 function defaultListProcesses(): Promise<string> {

@@ -276,3 +276,57 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
     expect(spawnArgs).not.toContain('--system-prompt')
   })
 })
+
+describe('RpcClient spawn 日志 argv 脱敏（设计 §7.2 argv 日志脱敏 / 探针 P15）', () => {
+  let RpcClientCtor: typeof import('../src/infra/pi/rpc-client.js').RpcClient
+
+  beforeEach(async () => {
+    spawnArgs = []
+    fakeProc.on.mockClear()
+    fakeProc.stdin.write.mockClear()
+    fakeProc.kill.mockClear()
+
+    const mod = await import('../src/infra/pi/rpc-client.js')
+    RpcClientCtor = mod.RpcClient
+  })
+
+  afterEach(() => {
+    try {
+      const exitHandlers = fakeProc.on.mock.calls
+        .filter(([event]) => event === 'exit')
+        .map(([, handler]) => handler as (code: number | null) => void)
+      for (const h of exitHandlers) {
+        h(0)
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  })
+
+  it('spawn 日志不含系统提示词正文，仅 --flag <N chars>（非值 token 保留）', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const secret = 'TOP SECRET MODE PROMPT BODY'
+      const options = {
+        cwd: '/project',
+        systemPrompt: secret,
+        appendSystemPrompt: `${secret} append`,
+      } as unknown as RpcClientOptions
+      await new RpcClientCtor(options).start()
+
+      const spawnLines = logSpy.mock.calls
+        .map((call) => call.map((part) => String(part)).join(' '))
+        .filter((line) => line.includes('[rpc] spawning pi:'))
+      expect(spawnLines).toHaveLength(1)
+      const line = spawnLines[0]
+      // 正文不出现；两个提示词 flag 只记字符数
+      expect(line).not.toContain(secret)
+      expect(line).toMatch(/--system-prompt <\d+ chars>/)
+      expect(line).toMatch(/--append-system-prompt <\d+ chars>/)
+      // 非值诊断 token 保留
+      expect(line).toContain('--mode rpc')
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+})
