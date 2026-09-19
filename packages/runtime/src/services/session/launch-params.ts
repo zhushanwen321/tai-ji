@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, resolve, sep } from 'node:path'
 import { expandHome } from '../../utils/path-utils.js'
 import type { ThinkingLevel } from '@taiji/shared'
-import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS, PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
 import type { IExtensionService, IConfigService } from '../../interfaces.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { PresetService, PresetResolution } from '../preset-service.js'
@@ -183,6 +183,28 @@ export async function resolveLaunchPresetOptions(
   const resolution = presetService.resolve(preset, cwd)
   // 无回落时保持对象同一性（既有测试/调用方断言 `.toBe(resolution)`；回落才新建对象附加事实）。
   return fellBackFromPresetId === undefined ? resolution : { ...resolution, fellBackFromPresetId }
+}
+
+/**
+ * 模式回落事实 → pi 子进程出站 env（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * §7.5 E4 的 trace 披露面）。
+ *
+ * `resolveLaunchPresetOptions` 检测到悬空 presetId 时在 resolution 上附
+ * `fellBackFromPresetId`，本 helper 把它翻译成 pi 子进程 env：回落时 FROM=原悬空 id /
+ * TO=`builtin:full`；**未回落时两键写空串**而非省略——出站基座是「白名单过滤后的父 env」，
+ * 父 env 的 `TAIJI_` 前缀键会被继承，空串覆盖可显式清除陈旧值（避免非回落 session 被
+ * 误披露为已回落）。两键恒存在让 extension 侧读取形状稳定。
+ *
+ * 返回值直接作为 `RpcClientOptions.env` 的 extras（经 ProcessManager.createSession →
+ * rpc-client.start → buildPiOutboundEnv → buildOutboundChildEnv，C-proc-09 出站契约）。
+ * 纯函数、无副作用。
+ */
+export function buildPresetFallbackEnv(resolution: PresetResolution | undefined): Record<string, string> {
+  const from = resolution?.fellBackFromPresetId
+  return {
+    [PRESET_FALLBACK_ENV_KEYS.FROM]: from ?? '',
+    [PRESET_FALLBACK_ENV_KEYS.TO]: from === undefined ? '' : BUILTIN_PRESET_IDS.FULL,
+  }
 }
 
 /** buildPresetClientOptions 的返回形状：pi createSession options（preset 相关字段）的子集（全部可选）。 */

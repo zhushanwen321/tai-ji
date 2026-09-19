@@ -289,6 +289,29 @@ export const ENGINE_LAUNCH_ENV_KEYS = {
 } as const
 
 /**
+ * 模式回落事实 env 名 SSOT（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * §7.5 E4 的 trace 披露面）。
+ *
+ * 语义：restore / create / fork 解析模式时，sidecar 里的 presetId 定义不可得 → 本次已
+ * 回落 `builtin:full` 启动。runtime 把这一「本进程本次运行」的事实经出站 env 传给 pi
+ * 子进程，`@zhushanwen/pi-system-prompt-trace` 读取后写进 `taiji:system-prompt` entry
+ * 的可选 `presetFallback` 字段——事后审计从 trace 即可得知「提示词为何变了」。
+ *
+ * 写入 = `packages/runtime/src/services/session/launch-params.ts` 的
+ * `buildPresetFallbackEnv`（未回落时写空串**显式清除**，防白名单继承的父 env 陈旧值
+ * 穿透造成假披露）；读取 = `extensions/taiji/system-prompt-trace/src/types.ts`
+ * （extension 独立发布体系不依赖 @taiji/shared，按字面量镜像，单侧改名即静默断链）。
+ * 出站路径 = runtime ProcessManager → RpcClient → buildPiOutboundEnv →
+ * buildOutboundChildEnv（C-proc-09 出站契约构建器）。
+ */
+export const PRESET_FALLBACK_ENV_KEYS = {
+  /** 原（悬空）模式 id——发生回落时有值，否则空串 */
+  FROM: 'TAIJI_PRESET_FALLBACK_FROM',
+  /** 回落目标模式 id（现行恒 builtin:full）——发生回落时有值，否则空串 */
+  TO: 'TAIJI_PRESET_FALLBACK_TO',
+} as const
+
+/**
  * 前端 toast 并发上限（D7「限流与防毒化」）。
  *
  * 在列 toast 超过上限时新 toast 丢弃并计数（droppedCount），防止通知风暴刷屏。
