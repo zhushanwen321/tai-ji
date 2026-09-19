@@ -241,6 +241,19 @@ export function closeRuntimeModalForPlugin(pluginId: string): RuntimeModalSlotEn
   return entry
 }
 
+/**
+ * 插件消失（crash/disable/uninstall，E2 关②）的 closed 路径（PluginService 三路清理点
+ * 与既有贡献清理同址转调）：命中该插件的 open 层时清槽并经出线广播 closed{plugin-gone}
+ * + notify owner Worker，返回是否命中（无 open 层返回 false、零广播——closed 对未开层
+ * no-op，与宿主 dismiss 路径的幂等语义一致）。
+ */
+export function dismissRuntimeModalForPluginGone(pluginId: string): boolean {
+  const entry = closeRuntimeModalForPlugin(pluginId)
+  if (!entry) return false
+  closeRuntimeModalViaExits(entry, 'plugin-gone')
+  return true
+}
+
 /** closed 路径的唯一出口（AP-2：宿主侧「关层」= runtime 广播 closed → renderer 收起，runtime 不操作 DOM）：清槽后广播 closed 帧 + notify owner Worker。 */
 function closeRuntimeModalViaExits(entry: RuntimeModalSlotEntry, reason: PluginModalClosedReason): void {
   const exits = runtimeModalExits
@@ -566,7 +579,10 @@ export function createUiApi(
   onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
 } {
   // modalClosed 通知派发：单一 notification listener + 本地 handler 集（多订阅互不覆盖；
-  // rpcClient.onNotification 同名方法单 listener——session-api 的 handlerId 分派同款约束）。
+  // rpcClient.onNotification 同名方法实装为 Set 多 listener（plugin-rpc-client.ts），此处
+  // 刻意收敛为单 listener + 本地 Set——订阅注销语义（Disposable.dispose）由本地 handler 集
+  // 承载，不依赖 rpcClient 返回的 unsubscribe 逐个挂，与 session-api 的 handlerId 分派
+  // 同款约束）。
   const modalClosedHandlers = new Set<(event: { modalId: string; reason: PluginModalClosedReason }) => void>()
   rpcClient.onNotification(PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, (params: unknown) => {
     const p = params as { modalId: string; reason: PluginModalClosedReason }

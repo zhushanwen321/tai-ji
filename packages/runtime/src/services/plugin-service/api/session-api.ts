@@ -366,17 +366,27 @@ export function registerSessionRpcHandlers(
   rpcServer.registerMethod('plugin.sessions.sendMessage', async (params) => {
     // [D6/u5b] sessionId 必填（E15）：替换既有「缺省 = 活跃 session + 静默 no-op」——
     // 那与「失败必须说话」正面冲突（AP-4 实装口径更正），畸形/缺失一律 INVALID_SESSION_ID 拒绝。
+    // 窄校验在 try 外：INVALID_* 结构化错误保持 RPC error 语义（校验层与执行层不混）。
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
     const role = asString(params.role, 'role')
     const content = asString(params.content, 'content')
     const requireCommand = asOptionalString(params.requireCommand, 'requireCommand')
-    const receipt = await deps.sendMessage(sessionId, role, content, requireCommand)
-    // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件面
-    // {accepted, reason?}；command-missing 由 requireCommand 校验在 dispatcher 内产生。
-    if (receipt.blocked) {
-      return { accepted: false, ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}) }
+    // 执行异常统一转回执（AP-4 修复，裁决方案①）：dispatcher 的 ensureActiveOrBroadcast
+    // 在自身 try 外 rethrow（E4「会话恢复失败」等），插件侧回执契约是 {accepted, reason?}
+    // 词表、不应要求插件 catch RPC 异常——异常在此收口为 {accepted:false, reason:'error'}，
+    // 错误详情进宿主日志（前端已由 dispatcher 的 message.error 广播看到错误气泡）。
+    try {
+      const receipt = await deps.sendMessage(sessionId, role, content, requireCommand)
+      // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件面
+      // {accepted, reason?}；command-missing 由 requireCommand 校验在 dispatcher 内产生。
+      if (receipt.blocked) {
+        return { accepted: false, ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}) }
+      }
+      return { accepted: true }
+    } catch (e: unknown) {
+      console.error(`[session-api] sendMessage failed for session '${sessionId}' (reported to plugin as accepted:false/error):`, toErrorMessage(e))
+      return { accepted: false, reason: 'error' }
     }
-    return { accepted: true }
   })
 
   // ── AP-4 读面（U2，SESSION_READ_METHODS）──────────────────

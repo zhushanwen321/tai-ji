@@ -27,6 +27,7 @@ import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plu
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
 import { toPluginInfos } from './plugin-info-mapper.js'
 import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEntries } from './plugin-contributions.js'
+import { dismissRuntimeModalForPluginGone } from './api/ui-api.js'
 import { broadcastOrBrokerWith, publishViewUpdateTo, createUiRequestBroadcastFn } from './plugin-broadcast.js'
 import type { PluginBroadcastDeps, ViewUpdateBroadcastPayload } from './plugin-broadcast.js'
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
@@ -326,6 +327,8 @@ export class PluginService implements IPluginService {
       // 都指向已死 Worker，调用必超时）。rebuild 成功后 onRebuilt 重激活会重新注册。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
+        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（崩溃插件的层必须收起）
+        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId)
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
@@ -475,6 +478,8 @@ export class PluginService implements IPluginService {
         await this.activator.deactivatePlugin(pluginId, this.host)
         this.activator.stopWatching(pluginId) // 停止热重载监听
         this.statusBarRegistry.clearForPlugin(pluginId) // 清理 status bar items
+        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（禁用插件的层必须收起）
+        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId) // P-1：清 hook 注册，禁用插件的 hook 不再执行
         // Fix-7：禁用插件的工具/命令同步清注册——与 P-1 的 hook 清理对称，否则禁用插件的
         // 工具仍可被 bridge 调用、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
@@ -571,6 +576,8 @@ export class PluginService implements IPluginService {
 
     // 清理 status bar items
     this.statusBarRegistry.clearForPlugin(pluginId)
+    // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（卸载插件的层必须收起）
+    dismissRuntimeModalForPluginGone(pluginId)
 
     await this.syncToolsToBridge()
     this.broadcastPluginList()

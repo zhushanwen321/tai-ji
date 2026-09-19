@@ -16,13 +16,18 @@
  *
  * 运行：cd packages/runtime && npx vitest run test/plugin-modal-headeraction-contract.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-server.js'
 import type { WorkerPort } from '../src/services/plugin-service/plugin-rpc-server.js'
 import { registerViewRpcHandlers } from '../src/services/plugin-service/api/views-api.js'
 import { registerSessionRpcHandlers, SessionEventDispatch } from '../src/services/plugin-service/api/session-api.js'
 import type { SessionHandlers } from '../src/services/plugin-service/api/session-api.js'
+import { PluginService } from '../src/services/plugin-service/plugin-service.js'
+import type { IMessageBroker } from '../src/interfaces.js'
 import {
   registerUiRpcHandlers,
   wireRuntimeModalExits,
@@ -30,6 +35,7 @@ import {
   getRuntimeModalSlot,
   openRuntimeModalSlot,
   closeRuntimeModalForPlugin,
+  dismissRuntimeModalForPluginGone,
   PLUGIN_MODAL_CLOSED_NOTIFY_METHOD,
 } from '../src/services/plugin-service/api/ui-api.js'
 import type { PluginModalStatePayload, HeaderActionUpdatePayload } from '@taiji/shared'
@@ -83,6 +89,11 @@ function minimalUiHandlers() {
     notify: vi.fn(),
     updateStatusBarItem: vi.fn(),
   }
+}
+
+/** PluginService 行为级测试用 mock broker（broadcast 不触达真实 ws） */
+function createMockBroker(): IMessageBroker {
+  return { send: vi.fn(), broadcast: vi.fn(), sendError: vi.fn() }
 }
 
 beforeEach(() => {
@@ -335,6 +346,18 @@ describe('sendMessage 回执映射（D6/AP-4 两步之②）', () => {
     expect(resp.result).toEqual({ accepted: false })
     expect('reason' in (resp.result as Record<string, unknown>)).toBe(false)
   })
+
+  it('dispatcher 抛错（E4 恢复失败等）→ {accepted:false, reason:"error"} 回执（非 RPC error，插件侧无需 catch）', async () => {
+    const sendMessage = vi.fn(async () => { throw new Error('Failed to restore session: pi exited during restore') })
+    const { rpc, port } = buildWithSender(sendMessage)
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.sessions.sendMessage', {
+      sessionId: 's1', role: 'user', content: 'x',
+    })
+
+    expect(resp.error).toBeUndefined()
+    expect(resp.result).toEqual({ accepted: false, reason: 'error' })
+  })
 })
 
 describe('updateHeaderAction 广播（AP-1）', () => {
@@ -423,6 +446,96 @@ describe('hideModal / plugin-gone（closed 路径复用）', () => {
     openRuntimeModalSlot({ pluginId: 'p2', modalId: 'm2', sessionId: 's2', workerId: 'w1' })
     expect(closeRuntimeModalForPlugin('p1')).toBeNull()
     expect(getRuntimeModalSlot()).toMatchObject({ pluginId: 'p2' })
+  })
+
+  it('dismissRuntimeModalForPluginGone（接线便捷函数）：命中 → 广播 closed{plugin-gone} + notify owner + 清槽', () => {
+    const exits = wireCapturingExits()
+    openRuntimeModalSlot({ pluginId: 'p1', modalId: 'm1', sessionId: 's1', workerId: 'w1' })
+
+    expect(dismissRuntimeModalForPluginGone('p1')).toBe(true)
+    expect(exits.modalState).toHaveLength(1)
+    expect(exits.modalState[0]).toMatchObject({
+      pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 1, reason: 'plugin-gone',
+    })
+    expect(exits.modalClosedNotifies).toEqual([{ workerId: 'w1', payload: { modalId: 'm1', reason: 'plugin-gone' } }])
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('dismissRuntimeModalForPluginGone：无该插件的 open 层 → false 且零广播零 notify', () => {
+    const exits = wireCapturingExits()
+    // 槽属其他插件（或无槽）→ 不命中、不广播
+    openRuntimeModalSlot({ pluginId: 'p2', modalId: 'm2', sessionId: 's2', workerId: 'w2' })
+
+    expect(dismissRuntimeModalForPluginGone('p1')).toBe(false)
+    expect(exits.modalState).toHaveLength(0)
+    expect(exits.modalClosedNotifies).toHaveLength(0)
+    expect(getRuntimeModalSlot()).toMatchObject({ pluginId: 'p2' })
+  })
+})
+
+describe('PluginService 三路清理接线（AP-2 关②：crash / disable / uninstall → closed{plugin-gone}）', () => {
+  let tmpDir: string
+
+  /** 最小 PluginService（不 initialize：清理点不依赖 Worker 侧状态，UNLOADED 插件 deactivate no-op） */
+  function buildService() {
+    const registryMock = {
+      getDescriptor: vi.fn((id: string) => ({ pluginId: id, pluginPath: join(tmpDir, id), name: id })),
+      getAllDescriptors: () => [],
+    }
+    const service = new PluginService(registryMock as never, createMockBroker(), { configDir: tmpDir })
+    return service
+  }
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'modal-plugin-gone-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('disable 路：togglePlugin(false) 命中 open 层 → 广播 closed{plugin-gone} 且槽清空', async () => {
+    const exits = wireCapturingExits()
+    const service = buildService()
+    openRuntimeModalSlot({ pluginId: 'p1', modalId: 'm1', sessionId: 's1', workerId: 'w1' })
+
+    await service.togglePlugin('p1', false)
+
+    expect(exits.modalState).toHaveLength(1)
+    expect(exits.modalState[0]).toMatchObject({ state: 'closed', reason: 'plugin-gone', pluginId: 'p1', modalId: 'm1', sessionId: 's1' })
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('disable 路：无该插件的 open 层 → 零广播（closed 对未开层 no-op）', async () => {
+    const exits = wireCapturingExits()
+    const service = buildService()
+    openRuntimeModalSlot({ pluginId: 'p2', modalId: 'm2', sessionId: 's2', workerId: 'w2' })
+
+    await service.togglePlugin('p1', false)
+
+    expect(exits.modalState).toHaveLength(0)
+    expect(getRuntimeModalSlot()).toMatchObject({ pluginId: 'p2' })
+  })
+
+  it('crash 路：Worker 崩溃回调触发 → 崩溃插件的 open 层 closed{plugin-gone} 广播', () => {
+    const exits = wireCapturingExits()
+    const service = buildService()
+    openRuntimeModalSlot({ pluginId: 'pA', modalId: 'm1', sessionId: 's1', workerId: 'w1' })
+
+    ;(service as unknown as { registerWorkerCallbacks(): void }).registerWorkerCallbacks()
+    const host = (service as unknown as { host: { onCrash?: (workerId: string, pluginIds: string[], error: unknown) => void } }).host
+    expect(host.onCrash).toBeTypeOf('function')
+    host.onCrash!('w1', ['pA'], new Error('worker died'))
+
+    expect(exits.modalState).toHaveLength(1)
+    expect(exits.modalState[0]).toMatchObject({ state: 'closed', reason: 'plugin-gone', pluginId: 'pA', modalId: 'm1' })
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('三路接线守卫：crash / disable / uninstall 各恰好一处 dismissRuntimeModalForPluginGone 调用', () => {
+    const source = readFileSync(new URL('../src/services/plugin-service/plugin-service.ts', import.meta.url), 'utf8')
+
+    expect(source.match(/dismissRuntimeModalForPluginGone\(pluginId\)/g)).toHaveLength(3)
   })
 })
 
