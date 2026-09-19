@@ -307,7 +307,7 @@
       "run": "npx playwright test e2e/skill-reload-askuser.spec.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 form-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。[2026-09-19] S1b 两次稳定复现失败并归因：run 的 done 处理在 stale ctx emit 失败 → done 广播未送达 spec WS → awaitDone 150s 超时（reload preserved 收口链既有问题，非 ui-presentation-protocol 迁移回归——同运行中 form-overlay 渲染/应答/关闭 + pi 恢复 turn 全通过）；本 rule 现处已知失败态，修复另开任务后复跑。"
+      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 form-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。[2026-09-19] S1b 曾两次稳定复现失败并归因（run 的 done 处理 stale ctx emit 失败 → done 广播丢失 → awaitDone 150s 超时，reload preserved 收口链既有问题）；同日由 reload-closeout-reliability 流水线修复（u1 送达水位对账 2aa709f79 + u2 finalizeRun 直落 a4fe8ad16），断言升级 ≤30s done-latency 必达后复跑全绿（实测 0ms），已知失败态撤除。"
     },
     {
       "id": "E2E-SKILLRELOAD-03",
