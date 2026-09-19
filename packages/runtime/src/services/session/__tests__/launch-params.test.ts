@@ -126,9 +126,16 @@ describe('resolveReplaceSystemPrompt', () => {
 })
 
 describe('resolveEffectiveSystemPrompt / resolveAppendSystemPrompt（D3 优先级取值 helper）', () => {
-  /** 最小 resolution 形状（仅 prompt 面参与本组断言）。 */
+  /**
+   * 最小 resolution 形状（仅 prompt 面参与本组断言）。
+   *
+   * flags 两个必填字段显式补全（不用 `as` 断言）：`flags: {}` 会让字面量类型与
+   * PresetResolution 的重叠不足 → TS2352，而补全后字面量**本就**可赋给 PresetResolution
+   * （skillPaths 可为 undefined / toolArgs 全可选 / prompt 可选）——去掉断言让 fixture 保留
+   * 对真实类型的编译期强度，不用 `as` 绕过。
+   */
   function resolution(prompt?: PresetResolution['prompt']): PresetResolution {
-    return { skillPaths: undefined, extensionPaths: [], toolArgs: {}, flags: {}, prompt } as PresetResolution
+    return { skillPaths: undefined, extensionPaths: [], toolArgs: {}, flags: { noSkills: false, noContextFiles: false }, prompt }
   }
 
   it('模式 replace 启用且非空 → 返回模式文本（全局值被压）', () => {
