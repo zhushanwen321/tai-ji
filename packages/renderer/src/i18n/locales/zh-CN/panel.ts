@@ -1,4 +1,24 @@
 export default {
+  // 模式 chip（u4 mode-visibility-chip；对话态只读 chip + hover popover）
+  presetChip: {
+    ariaLabel: '模式：{name}',
+    replaceHint: '含替换提示词',
+    lockNote: '模式在创建时确定，本会话内不能更换；模式定义可在设置页编辑（下次启动采用新定义）',
+    newSession: '新建会话以使用其他模式',
+    toolSurface: '工具面',
+    extensionSurface: '扩展面',
+    promptSegments: '提示词段数',
+    builtin: '内置',
+    deleted: '模式已删除（{id}）',
+    unknownSurface: '—',
+    toolAll: '全部工具',
+    toolNone: '无工具',
+    extAll: '全部扩展',
+    extNone: '无扩展',
+    allowCount: '允许 {count} 项',
+    denyCount: '禁用 {count} 项',
+    promptCount: '{count} 段',
+  },
   header: {
     toggleSidebarExpand: '展开侧栏',
     toggleSidebarCollapse: '收起侧栏',

@@ -1,0 +1,299 @@
+<script setup lang="ts">
+/**
+ * PresetChip —— 「模式」（PiLaunchPreset）chip（u4 mode-visibility-chip）。
+ *
+ * 设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5（可见性）+ §7.4（renderer 界面表）
+ * + §7.1（信任处置：含替换提示词的标记跨档不丢）。
+ *
+ * 语义：
+ * - 只读（variant='readonly'，对话态 composer `#meta-row`）：`[模式图标] 模式名 + 锁（lucide Lock）`；
+ *   **只对非默认模式渲染**——可执行判据 = `launchPresetId !== (defaultPresetId ?? builtin:full)`。
+ *   store 未加载（defaultPresetId 空串）时按 builtin:full 兜底，避免把「未加载」误报成「模式已删除」。
+ * - landing（variant='landing'）：可点选 chip（chevron）+ emit select。landing 的预选 popover 归
+ *   ui 包 `PresetSelectChip`（ui 不得反向 import renderer，故本组件只提供 chip 外观与事件）。
+ * - 三档退化（模式名 → 短名 → 仅图标，§7.4）：`density` prop 显式指定（测试/父级驱动），
+ *   不传则内部 ResizeObserver 按自身实测宽度自适应（无 RO 环境如 jsdom 回落 full）。
+ * - 信任标记跨档不丢（§7.1）：文本/短名档 = chip 内小后缀（warn 色）；纯图标档 = 右上角警示色
+ *   角标（`data-testid="preset-chip-replace-badge"`）+ tooltip。**刻意不用 accent**（accent 底已表示
+ *   「非默认模式」，两个语义不共色）。
+ * - hover popover（只读）：模式描述 / 工具面 / 扩展面 / 提示词段数 / 锁定说明 + 「新建会话…」出口。
+ * - chip **不承载子会话计数**（设计 D5/P0-22：计数归托盘第 4 件与侧栏）。
+ *
+ * 约束：禁 Emoji（图标全走 @lucide/vue）；禁原生表单元素（Button/HoverCard 原语）；颜色用 token；
+ * 圆角走 Button 默认档（tokens）。
+ */
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ChevronDown, Lock, SlidersHorizontal } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
+import { usePlatformShortcut } from '@/composables/usePlatformShortcut'
+import { usePresetStore } from '@/stores/preset'
+import { BUILTIN_PRESET_IDS, type PiLaunchPreset } from '@taiji/shared'
+
+/** 三档退化密度（设计 §7.4：模式名 → 短名 → 仅图标） */
+export type PresetChipDensity = 'full' | 'short' | 'icon'
+
+const props = withDefaults(
+  defineProps<{
+    /** 模式（PiLaunchPreset）id；readonly 档为 null → 不渲染 */
+    presetId?: string | null
+    /** readonly = 对话态只读 chip（锁）；landing = 可点选 chip（chevron） */
+    variant?: 'landing' | 'readonly'
+    /** 显式密度档；不传 = 内部实测自适应（测试显式传，保证确定性） */
+    density?: PresetChipDensity
+  }>(),
+  { presetId: null, variant: 'readonly', density: undefined },
+)
+
+const emit = defineEmits<{
+  /** landing 档点击（父级开预选 popover / 写 pendingPreset） */
+  select: [{ presetId: string }]
+}>()
+
+const { t } = useI18n()
+const { formatKbd } = usePlatformShortcut()
+const presetStore = usePresetStore()
+
+// ── 数据解析（preset store 是 renderer 侧模式定义 SSOT）──
+/** 模式定义；store 未加载 / id 悬空 → null（名字走兜底，不误报「已删除」） */
+const preset = computed<PiLaunchPreset | null>(() => {
+  const id = props.presetId
+  if (!id) return null
+  return presetStore.presets.find((p) => p.id === id) ?? null
+})
+/** presets 是否已加载（E7 三态口径：区分「未加载」与「已加载但缺 id」） */
+const presetsLoaded = computed(() => presetStore.presets.length > 0)
+/**
+ * 默认模式 id（D5「默认」口径 = defaultPresetId 解析结果）。
+ * store 初值 ''（未加载）→ 回落 builtin:full：未加载期不得把任意模式都判成「非默认」而误显示。
+ */
+const defaultModeId = computed(() => presetStore.defaultPresetId || BUILTIN_PRESET_IDS.FULL)
+
+/** 生效模式 id（landing 未显式指定时回落默认链；readonly 取 props 原值） */
+const resolvedId = computed(() => props.presetId || defaultModeId.value)
+
+/** 只读档可见性（D5 可执行判据：非默认模式才渲染；默认档 → 空） */
+const isVisible = computed(() => {
+  if (!resolvedId.value) return false
+  if (props.variant === 'readonly') return resolvedId.value !== defaultModeId.value
+  return true
+})
+
+/** 模式全名（缺 id 时按 E7 区分未加载 / 已删除） */
+const fullName = computed(() => {
+  if (preset.value) return preset.value.name
+  if (!props.presetId) return ''
+  return presetsLoaded.value
+    ? t('panel.presetChip.deleted', { id: props.presetId })
+    : props.presetId
+})
+
+/** 短名去尾缀后的最小保留长度（低于此值回退原标题，避免「模式」二字模式名被去空） */
+const MIN_SHORT_NAME_LENGTH = 2
+
+/** 短名（中文本土模式名去「模式」尾缀；无尾缀保持原名，由 truncate 收窄） */
+const shortName = computed(() => {
+  const name = preset.value?.name ?? fullName.value
+  const stripped = name.replace(/模式$/, '')
+  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
+})
+
+// ── 三档退化 ──
+/** 内部实测自适应结果（无显式 density 时生效） */
+const autoDensity = ref<PresetChipDensity>('full')
+const density = computed<PresetChipDensity>(() => props.density ?? autoDensity.value)
+/** 自适应阈值（px）：≤ ICON 仅图标；≤ SHORT 短名；否则全名。纯图标 chip 实宽约 28px + 余量 */
+const ICON_TIER_MAX_WIDTH = 52
+const SHORT_TIER_MAX_WIDTH = 116
+
+/** 模板 ref 取其宿主 DOM（Button 根是 reka Primitive 渲染的 <button>） */
+interface ElementHost { $el?: HTMLElement }
+const rootRef = ref<ElementHost | null>(null)
+let resizeObserver: ResizeObserver | null = null
+
+/** 按实测宽度落档（内部自适应；实测驱动，非布局硬编码 —— 阈值仅作档位边界） */
+function applyMeasuredWidth(width: number): void {
+  if (width <= ICON_TIER_MAX_WIDTH) autoDensity.value = 'icon'
+  else if (width <= SHORT_TIER_MAX_WIDTH) autoDensity.value = 'short'
+  else autoDensity.value = 'full'
+}
+
+onMounted(() => {
+  if (props.density !== undefined) return
+  if (typeof ResizeObserver === 'undefined') return
+  const el = rootRef.value?.$el
+  if (!el) return
+  resizeObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect.width
+    if (typeof width === 'number') applyMeasuredWidth(width)
+  })
+  resizeObserver.observe(el)
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
+
+// ── 信任标记与模式面摘要 ──
+/** 替换提示词段（信任标记判据 = enabled && 文案非空） */
+const hasReplace = computed(() => {
+  const seg = preset.value?.prompt?.replace
+  return !!seg?.enabled && (seg.prompt ?? '').trim().length > 0
+})
+/** 启用的提示词段数（替换 + 追加；popover 展示用） */
+const promptSegmentCount = computed(() => {
+  const p = preset.value?.prompt
+  if (!p) return 0
+  return [p.replace, p.append].filter((s) => s?.enabled && (s.prompt ?? '').trim().length > 0).length
+})
+/** 工具面摘要（toolMode + 名单数） */
+const toolSurface = computed(() => {
+  const p = preset.value
+  if (!p) return t('panel.presetChip.unknownSurface')
+  if (p.toolMode === 'all') return t('panel.presetChip.toolAll')
+  if (p.toolMode === 'none') return t('panel.presetChip.toolNone')
+  if (p.toolMode === 'allowlist') {
+    return t('panel.presetChip.allowCount', { count: p.allowedTools?.length ?? 0 })
+  }
+  return t('panel.presetChip.denyCount', { count: p.deniedTools?.length ?? 0 })
+})
+/** 扩展面摘要（extensionMode + 名单数） */
+const extensionSurface = computed(() => {
+  const p = preset.value
+  if (!p) return t('panel.presetChip.unknownSurface')
+  if (p.extensionMode === 'all') return t('panel.presetChip.extAll')
+  if (p.extensionMode === 'none') return t('panel.presetChip.extNone')
+  if (p.extensionMode === 'allowlist') {
+    return t('panel.presetChip.allowCount', { count: p.allowedExtensions?.length ?? 0 })
+  }
+  return t('panel.presetChip.denyCount', { count: p.deniedExtensions?.length ?? 0 })
+})
+
+/** 密度档下的显示名（短名档用去尾缀短名） */
+const displayName = computed(() => (density.value === 'short' ? shortName.value : fullName.value))
+/** 三档统一的 a11y 名（纯图标档的可见信息全在此） */
+const ariaLabel = computed(() => {
+  const base = t('panel.presetChip.ariaLabel', { name: fullName.value })
+  return hasReplace.value ? `${base} · ${t('panel.presetChip.replaceHint')}` : base
+})
+/** 新建会话快捷键显示（跨平台；⌘N / Ctrl+N） */
+const newSessionKbd = computed(() => formatKbd('n'))
+/** chip 基础类（只读/landing 共用；accent 底 = 非默认模式这一状态通道） */
+const CHIP_CLASS =
+  'relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5'
+</script>
+
+<template>
+  <!-- 可见性闸（只读档：默认模式 / 未选中 → 不渲染；landing 档：有 id 才渲染） -->
+  <template v-if="isVisible">
+    <!-- 只读态：chip + hover popover（模式详情 + 锁定说明 + 新建会话出口） -->
+    <HoverCard v-if="variant === 'readonly'" :open-delay="150">
+      <HoverCardTrigger as-child>
+        <Button
+          ref="rootRef"
+          data-testid="preset-chip"
+          variant="ghost"
+          :class="[CHIP_CLASS, 'bg-accent-soft text-accent hover:bg-accent-soft']"
+          :aria-label="ariaLabel"
+          :title="density === 'icon' ? fullName : undefined"
+        >
+          <SlidersHorizontal class="shrink-0" />
+          <span
+            v-if="density !== 'icon'"
+            class="min-w-0 truncate font-mono"
+            :class="density === 'short' && 'max-w-[48px]'"
+          >{{ displayName }}</span>
+          <!-- 信任标记（文本/短名档）：chip 内小后缀 -->
+          <span
+            v-if="hasReplace && density !== 'icon'"
+            class="shrink-0 text-[10px] text-warn"
+          >{{ t('panel.presetChip.replaceHint') }}</span>
+          <!-- 信任标记（纯图标档）：右上角警示色角标（accent 底不参与）；tooltip 保留全名与标记 -->
+          <span
+            v-if="hasReplace && density === 'icon'"
+            data-testid="preset-chip-replace-badge"
+            class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-warn ring-1 ring-bg-input"
+            :title="t('panel.presetChip.replaceHint')"
+            aria-hidden="true"
+          />
+          <Lock class="shrink-0 text-neutral-dim" />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent side="top" align="start" class="w-[300px] p-0">
+        <div data-testid="preset-chip-popover" class="p-3">
+          <div class="flex items-center gap-2">
+            <SlidersHorizontal class="size-3.5 shrink-0 text-accent" />
+            <span class="min-w-0 truncate text-[13px] font-medium text-neutral-fg">{{ fullName }}</span>
+            <span
+              v-if="preset?.builtin"
+              class="shrink-0 rounded-sm border border-border px-1 text-[10px] text-neutral-dim"
+            >{{ t('panel.presetChip.builtin') }}</span>
+          </div>
+          <p v-if="preset?.description" class="mt-1.5 text-[11px] text-neutral-mid">
+            {{ preset.description }}
+          </p>
+          <dl class="mt-2 space-y-1 text-[11px]">
+            <div class="flex items-center justify-between gap-2">
+              <dt class="text-neutral-dim">{{ t('panel.presetChip.toolSurface') }}</dt>
+              <dd class="font-mono text-neutral-mid">{{ toolSurface }}</dd>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <dt class="text-neutral-dim">{{ t('panel.presetChip.extensionSurface') }}</dt>
+              <dd class="font-mono text-neutral-mid">{{ extensionSurface }}</dd>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <dt class="text-neutral-dim">{{ t('panel.presetChip.promptSegments') }}</dt>
+              <dd class="font-mono text-neutral-mid">
+                {{ t('panel.presetChip.promptCount', { count: promptSegmentCount }) }}
+              </dd>
+            </div>
+          </dl>
+          <!-- 锁定说明：模式 id 在创建时确定、本会话内不可更换（模式定义可在设置页编辑，下次启动生效） -->
+          <p class="mt-2 flex items-start gap-1.5 text-[11px] text-neutral-mid">
+            <Lock class="mt-px size-3 shrink-0 text-neutral-dim" />
+            <span>{{ t('panel.presetChip.lockNote') }}</span>
+          </p>
+          <!-- 出口提示（快捷键由全局 keymap 承载；本处只做可达性披露，不新增点击机制） -->
+          <div class="mt-2 border-t border-border pt-2 text-[11px] text-neutral-dim">
+            <span>{{ t('panel.presetChip.newSession') }}</span>
+            <span class="ml-1 font-mono text-neutral-mid">{{ newSessionKbd }}</span>
+          </div>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+
+    <!-- landing 态：可点选 chip（chevron）；预选 popover 由 ui 包 PresetSelectChip 承载 -->
+    <Button
+      v-else
+      data-testid="preset-chip"
+      variant="ghost"
+      :class="[CHIP_CLASS, 'bg-accent-soft text-accent hover:bg-accent-soft']"
+      :aria-label="ariaLabel"
+      :title="density === 'icon' ? fullName : undefined"
+      @click="emit('select', { presetId: resolvedId })"
+    >
+      <SlidersHorizontal class="shrink-0" />
+      <span
+        v-if="density !== 'icon'"
+        class="min-w-0 truncate font-mono"
+        :class="density === 'short' && 'max-w-[48px]'"
+      >{{ displayName }}</span>
+      <span
+        v-if="hasReplace && density !== 'icon'"
+        class="shrink-0 text-[10px] text-warn"
+      >{{ t('panel.presetChip.replaceHint') }}</span>
+      <span
+        v-if="hasReplace && density === 'icon'"
+        data-testid="preset-chip-replace-badge"
+        class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-warn ring-1 ring-bg-input"
+        :title="t('panel.presetChip.replaceHint')"
+        aria-hidden="true"
+      />
+      <ChevronDown
+        v-if="density !== 'icon'"
+        class="ml-px shrink-0 transition-transform duration-200"
+      />
+    </Button>
+  </template>
+</template>

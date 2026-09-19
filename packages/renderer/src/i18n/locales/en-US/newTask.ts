@@ -88,4 +88,9 @@ export default {
     loadingPresets: 'Loading…',
     noPresets: 'No presets',
   },
+  // Mode chip (u4): landing three-tier degradation + cross-tier "replaces prompt" trust marker
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
+  },
 }

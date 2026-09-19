@@ -1,4 +1,24 @@
 export default {
+  // Mode chip (u4 mode-visibility-chip; conversation read-only chip + hover popover)
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
+    lockNote: 'The mode is fixed when the session is created and cannot be changed here; edit the mode definition in Settings (applies on the next launch)',
+    newSession: 'Start a new session to use another mode',
+    toolSurface: 'Tools',
+    extensionSurface: 'Extensions',
+    promptSegments: 'Prompt parts',
+    builtin: 'Built-in',
+    deleted: 'Mode deleted ({id})',
+    unknownSurface: '—',
+    toolAll: 'All tools',
+    toolNone: 'No tools',
+    extAll: 'All extensions',
+    extNone: 'No extensions',
+    allowCount: '{count} allowed',
+    denyCount: '{count} disabled',
+    promptCount: '{count} part(s)',
+  },
   header: {
     toggleSidebarExpand: 'Expand sidebar',
     toggleSidebarCollapse: 'Collapse sidebar',

@@ -88,4 +88,9 @@ export default {
     loadingPresets: '加载中…',
     noPresets: '暂无预设',
   },
+  // 模式 chip（u4）：landing 首行三档退化 + 跨档不丢的「含替换提示词」信任标记
+  presetChip: {
+    ariaLabel: '模式：{name}',
+    replaceHint: '含替换提示词',
+  },
 }
