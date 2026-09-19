@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary } from '@taiji/shared'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
@@ -57,11 +57,16 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   （session-records.ts:510，磁盘 JSONL → scanPlanStateEntries 派生）。SessionService
    *   已按 workflowAction 同款形态转发（session-service.ts getWorkflows 转发区）；可选成员
    *   形态对齐 backgroundTasks 先例，缺省仅出现在测试最小 mock 中。
+   * - notifySessionActivated（plugin-header-action-modal-points AP-4/u5a relay ①）：
+   *   session.switch 成功分支投递激活信号（PluginService 注册回调 → didActivate 定向投递）。
+   *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应让
+   *   switch 请求失败。
    */
   sessionService: ISessionService & {
     readonly backgroundTasks?: BackgroundTaskRpcPort
     markSessionViewed?(sessionId: string): void
     getPlanState?(sessionId: string): Promise<PlanStateView>
+    notifySessionActivated?(summary: SessionSummary): void
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -394,6 +399,7 @@ export class SessionMessageHandler {
     }
     const summary = this.ctx.sessionService.getSummary(switchId)
     if (summary) {
+      this.notifySessionActivatedSafe(summary)
       this.ctx.reply(ws, msg.id, 'session.switched', { sessionId: switchId, session: summary })
     } else {
       try {
@@ -402,6 +408,9 @@ export class SessionMessageHandler {
         if (!restored) {
           throw new Error(`Session ${switchId} restored but summary unavailable`)
         }
+        // 自动 restore 分支同投递（AP-4：switch 成功含其自动 restore 路径——冷启动/崩溃恢复
+        // 后的补拉由 didActivate 承接，场景 9「重启后仍正确」）。
+        this.notifySessionActivatedSafe(restored)
         this.ctx.reply(ws, msg.id, 'session.switched', { sessionId: switchId, session: restored })
       } catch (e) {
         const errMsg = toErrorMessage(e)
@@ -412,6 +421,23 @@ export class SessionMessageHandler {
         console.error('[runtime] session.switch auto-restore failed:', errMsg)
         this.ctx.sendError(ws, isENOENT ? 'file_not_found' : 'not_found', userMsg, msg.id, { sessionId: switchId })
       }
+    }
+  }
+
+  /**
+   * relay ①（plugin-header-action-modal-points AP-4/u5a）：switch 成功 → 激活信号投递。
+   * 可选链防御（SessionHandlerContext 注释：最小 mock 缺该成员不失败）+ try/catch（markSessionViewed
+   * 同款——投递失败只损失一次激活信号，绝不拖垮 switch 主流程；reply 语义不变）。
+   * 注册侧链路：session-service.onSessionActivated（追加式回调列表）→ PluginService
+   * sessionEventDispatch.didActivate 定向投递 Worker。
+   */
+  private notifySessionActivatedSafe(summary: SessionSummary): void {
+    try {
+      this.ctx.sessionService.notifySessionActivated?.(summary)
+    } catch (e) {
+      // 降级策略（best-effort）：激活投递只损失一次补拉信号（插件下次失效订阅/激活重试可收敛），
+      // switch 主流程照常（reply 语义不变）；warn 落日志留排查线索（非静默吞，无需豁免）。
+      console.warn('[runtime] session.switch notifySessionActivated failed:', toErrorMessage(e))
     }
   }
 

@@ -144,8 +144,29 @@ export interface ISessionService {
    *
    * clientUuid（session-occupancy-send-closure D2）：客户端幂等 id 透传给 dispatcher，
    * 拒绝广播（预检与 pi 转译两路）原样带回；正常路径不消费。
+   *
+   * requireCommand（plugin-header-action-modal-points D6/u5a）：插件写路径前置原子校验的
+   * 命令名（可选；既有调用方不传 = 行为不变）。dispatcher 在 restore 之后、busy 预检之前
+   * 直连 client.getCommands() 校验（不走 getCommands 的 markDirty 查询语义），未命中短重试
+   * （P9 定案 500ms × 6）后仍失败即拒发，回执 reason:'command-missing'——命令串永不漏进
+   * 模型（E14 结构性防线）。
+   *
+   * reason 回执词表（AP-4）：'busy' | 'compacting' | 'bash'（busy 预检三态，bash 分类为本
+   * 设计新增）| 'command-missing' | 'hook-blocked'（hook 管道既有 reason 经 message.error
+   * 上浮）| 'error'（其余失败）。与 message-dispatcher.ts 的 SendPromptReason 对齐（interface
+   * 层不反向 import service 实现文件——既有内联惯例）；既有布尔消费方按字段兼容不受影响。
    */
-  sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }>
+  sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }>
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：
   // 定向消息改走 subagentAction(message/start) 直达 subagent。
   abort(sessionId: string): Promise<void>
@@ -347,6 +368,19 @@ export interface ISessionService {
    *（PluginService didDestroy 投递 + server 的挂起 UI 请求汇聚清理），单 handler 异常被隔离。
    */
   setOnSessionDestroyed(handler: (summary: SessionSummary) => void): void
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注册 session 激活回调（relay ③ 注册侧）：
+   * transport 层 session.switch 成功（含自动 restore 分支）经 notifySessionActivated 触发，
+   * PluginService 转发到激活订阅注册表定向投递 didActivate。**追加式回调列表**（D6a 同款，
+   * 显式禁 setOnSessionCreated 式单槽——单槽二次注册会覆盖，丢投递）。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 switch 成功分支）。回调逐个隔离异常（notifySessionCreated
+   * 同款），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
   /** Steer an actively generating session */

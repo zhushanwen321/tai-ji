@@ -27,6 +27,8 @@ import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plu
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
 import { toPluginInfos } from './plugin-info-mapper.js'
 import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEntries } from './plugin-contributions.js'
+import { broadcastOrBrokerWith, publishViewUpdateTo, createUiRequestBroadcastFn } from './plugin-broadcast.js'
+import type { PluginBroadcastDeps, ViewUpdateBroadcastPayload } from './plugin-broadcast.js'
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
 import { join } from 'node:path'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -190,40 +192,15 @@ export class PluginService implements IPluginService {
       rpcServer: this.rpcServer,
     })
 
-    // UI 请求队列：广播走 broadcastFn（优先）或 broker.broadcast（回退），与原实现一致。
-    // MF-2：广播 payload 注入当前活跃 sessionId（与 views.update 同源，ActiveSessionResolver 求值时点）——
-    // 前端 DialogRequestQueue/useExtensionUI 均按 sessionId 分区消费，无 sid 的 uiRequest 会被双消费方
-    // 丢弃（C2 守卫），plugin dialog 永不弹出。resolve 时点求值：同一会话串行队列内 resolve 稳定。
-    // wave:perf-w08（02 文档 D1-1）：sid 为 string 且 bus 已装配 → bus.publish(sid) 定向发布
-    // （plugin:uiRequest 归 stream 类，分配 seq + 入 ring 可回放），不再 broadcast；
-    // sid undefined（无活跃 session 的弹窗仍须必达全部连接）或 bus 未装配 → 保持全局广播。
-    this.uiRequestQueue = new UiRequestQueue((type, payload) => {
-      // 撤窗广播不走 session 级 bus（D2 收尾修正，与 D3 permissionRequestExpired 直发
-      // 形态对称）：bus.publish(sid) 落 session 级帧 onGlobal 永不可达 → 撤窗生产常态
-      // 失效。直发 global 通道；payload 注入活跃 sessionId（协议可选字段，S1：renderer
-      // 重启后 requestId 反查 Map 为空致过期弹窗残留——renderer 以 requestId 反查 Map 为主（MF-4），
-      // payload sid 仅作 renderer 重启后 Map 为空的兜底）。
-      if (type === 'plugin:uiRequestExpired') {
-        const sid = this.activeSessionResolver.resolve()?.id
-        this.broadcastOrBroker(type, `ui_${payload.requestId}`, { ...payload, sessionId: sid })
-        return
-      }
-      const active = this.activeSessionResolver.resolve()
-      const sid = active?.id
-      const fullPayload = { ...payload, sessionId: sid }
-      if (sid !== undefined && this.messageBus) {
-        // m2：'plugin:uiRequest' 已收录 ServerMessageMap 具名条目（requestId 必带 + 索引签名
-        // 透传 dialog 字段），UiBroadcastFn payload 同步收紧——免 as ServerMessage 断言，
-        // payload 形状漂移在编译期被 shared 契约拦截。
-        this.messageBus.publish(sid, {
-          type,
-          id: `ui_${payload.requestId}`,
-          payload: fullPayload,
-        })
-        return
-      }
-      this.broadcastOrBroker(type, `ui_${payload.requestId}`, fullPayload)
-    })
+    // UI 请求队列：广播回调装配迁 plugin-broadcast.ts（u5a max-lines 回落拆分，行为保持——
+    // MF-2 活跃 sessionId 注入 / 撤窗直发 global / bus 定向与回退双腿的决策注释随迁彼处）。
+    // 动态状态经闭包注入（调用时求值）：activeSessionResolver / messageBus（晚期注入）/
+    // broadcastOrBroker（动态读 broadcastFn 与 broker）。
+    this.uiRequestQueue = new UiRequestQueue(createUiRequestBroadcastFn({
+      resolveActiveSessionId: () => this.activeSessionResolver.resolve()?.id,
+      getMessageBus: () => this.messageBus,
+      broadcastOrBroker: (type, id, payload) => this.broadcastOrBroker(type, id, payload),
+    }))
 
     // Status bar 注册表：广播保持 `plugin:statusBarUpdate` 契约（ADR-0015）。
     this.statusBarRegistry = new StatusBarRegistry((payload) => this.broker.broadcast({
@@ -244,13 +221,18 @@ export class PluginService implements IPluginService {
     })
   }
 
-  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（广播契约不变） */
-  private broadcastOrBroker(type: string, id: string, payload: unknown): void {
-    if (this.deps.broadcastFn) {
-      this.deps.broadcastFn(type, payload)
-    } else {
-      this.broker.broadcast({ type, id, payload } as ServerMessage)
+  /** 广播出口共享依赖快照（动态读 messageBus 晚期注入 / deps.broadcastFn，调用时求值）。 */
+  private get broadcastDeps(): PluginBroadcastDeps {
+    return {
+      broadcastFn: this.deps.broadcastFn,
+      broker: this.broker,
+      getMessageBus: () => this.messageBus,
     }
+  }
+
+  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（实现迁 plugin-broadcast.ts，行为保持） */
+  private broadcastOrBroker(type: string, id: string, payload: unknown): void {
+    broadcastOrBrokerWith(this.broadcastDeps, type, id, payload)
   }
 
   /**
@@ -282,32 +264,12 @@ export class PluginService implements IPluginService {
 
   /**
    * views.update 的广播出口（wave:perf-w08，02 文档 D1-1；rpc-setup 的
-   * handleViewUpdate 构造 payload 后经此发布）。
-   *
-   * payload.sessionId 由调用方保证存在（rpc-setup ES2：无活跃 session 已提前丢弃）。
-   * bus 已装配 → publish 定向（plugin:viewUpdate 归 transient 类：高频 UI 流，不占
-   * seq、不入 ring，直传订阅者——丢失可接受，ExtensionHost 不靠 ring 回放重建状态），
-   **不再 broadcast**；bus 未装配（测试构造）→ 回退全局广播，保持消息不丢。
+   * handleViewUpdate 构造 payload 后经此发布）。实现迁 plugin-broadcast.ts
+   * （u5a max-lines 回落拆分，行为保持）：bus 已装配 → publish 定向（transient 类），
+   * 未装配（测试构造）→ 回退全局广播。
    */
-  publishViewUpdate(payload: {
-    sessionId: string
-    viewId: string
-    pluginId: string
-    guiTree: import('@zhushanwen/extension-protocol').GuiComponent[]
-    updatedAt: number
-  }): void {
-    if (this.messageBus) {
-      // m2/m3：'plugin:viewUpdate' 已是 ServerMessageMap 精确条目（payload 形状一致），
-      // 免 as ServerMessage 断言；push id 改单调计数（Date.now() 同毫秒多视图更新会碰撞，
-      // 前端按 id 去重/追踪场景下碰撞导致更新被误判重复）。
-      this.messageBus.publish(payload.sessionId, {
-        type: 'plugin:viewUpdate',
-        id: this.nextViewUpdateId(),
-        payload,
-      })
-      return
-    }
-    this.broadcastOrBroker('plugin:viewUpdate', this.nextViewUpdateId(), payload)
+  publishViewUpdate(payload: ViewUpdateBroadcastPayload): void {
+    publishViewUpdateTo(this.broadcastDeps, payload, () => this.nextViewUpdateId())
   }
 
   /**
@@ -468,6 +430,14 @@ export class PluginService implements IPluginService {
         // 清理 owner，缺此路则长会话反复建删时订阅条目单调累积。setOnSessionDestroyed
         // 为追加式回调列表（D6a），不挤占既有投递。
         this.entryInvalidationDispatch.clearForSession(summary.id)
+      })
+      // AP-4 会话激活 relay ③（u5a）：session.switch 成功（含自动 restore）→ transport 层
+      // notifySessionActivated（relay ①②）流经本回调 → 激活订阅注册表定向投递 didActivate
+      // （sessionInfoFromSummary 转换照 didCreate 先例）。onSessionActivated 为追加式回调
+      // 列表（禁 setOnSessionCreated 式单槽），与既有 didCreate/didDestroy 接线互不挤占；
+      // u5b 落地 registerActivate 前 SessionEventDispatch.activateHandlers 恒空，投递 no-op。
+      this.deps.sessionService.onSessionActivated(summary => {
+        this.sessionEventDispatch.didActivate(sessionInfoFromSummary(summary))
       })
     }
   }

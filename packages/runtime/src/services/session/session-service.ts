@@ -214,6 +214,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
   /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活回调列表（relay ②）。触发点 =
+   * transport 层 session.switch 成功分支（含自动 restore）经 notifySessionActivated。
+   * 追加式列表（D6a 同款）：显式禁单槽——setOnSessionCreated 单槽是反面教材（其注释已写
+   * 「二次调用会覆盖」），PluginService 的 didActivate 投递与未来其他消费方互不挤占。
+   */
+  private readonly onSessionActivatedHandlers: Array<(summary: SessionSummary) => void> = []
+  /**
    * MessageBus 引用（组合根注入，wave:runtime-wiring）。
    *
    * session 级消息（带 sessionId payload）单通道走 bus.publish（per-session 单调 seq +
@@ -673,6 +680,30 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注入 session 激活回调（relay ③ 注册侧）。
+   * 追加式注册（D6a 同款，非覆盖）——禁改写为 setOnSessionCreated 式单槽。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void {
+    this.onSessionActivatedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 session.switch 成功分支，含自动 restore）。回调逐个隔离
+   * 异常（notifySessionCreated 同款 best-effort 降级），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void {
+    for (const handler of this.onSessionActivatedHandlers) {
+      try {
+        handler(summary)
+      } catch (e: unknown) {
+        // 降级策略（best-effort）：激活投递异常不阻断 switch 主流程，仅落日志供排查。
+        console.error(`[session-service] onSessionActivated listener error (sessionId=${summary.id}):`, e)
+      }
+    }
+  }
+
+  /**
    * U6（D2② 在线对账）：注入能力对账回调（组合根绑 modelService.reconcileModelCapabilities）。
    * session 附着路径（registerSession 的 onSessionRegistered 订阅,S3 前为 initializeManagedSession
    * 体内调用）fire-and-forget 调用——失败不阻断附着（内部降级：引擎不可用 / RPC 失败一律
@@ -784,7 +815,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.lifecycle.forkSession(srcSessionId, fromPiEntryId, includeFrom, label, opts)
   }
 
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid) }
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
   // [HISTORICAL] sendSubagentMessage（marker 半成品通道）已删除（composer 四符号设计 D2）：
   // base64 隐藏注释前缀在 extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标——定向消息改走 subagentAction(message/start)。
