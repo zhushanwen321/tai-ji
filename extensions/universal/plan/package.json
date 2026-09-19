@@ -18,7 +18,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.73.0",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
     "typebox": "*",
     "@earendil-works/pi-ai": "^0.84.4",
     "@zhushanwen/pi-goal": "workspace:*"
