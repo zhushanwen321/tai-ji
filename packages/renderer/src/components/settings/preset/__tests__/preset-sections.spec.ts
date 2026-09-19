@@ -250,8 +250,11 @@ describe('PiPresetsPage（容器集成）', () => {
     await flushPromises()
 
     // 首屏：标题 + 新建按钮（用户可见）
-    expect(wrapper.text()).toContain('启动预设')
-    const newBtn = wrapper.findAll('button').find((b) => b.text().includes('新建预设'))
+    // D4 改名：「预设」→「模式」。标题 = settings.menu.preset「模式」；
+    // 页描述 = settings.preset.pageDesc「管理模式，配置工具、扩展访问策略与提示词」。
+    expect(wrapper.find('h1').text()).toBe('模式')
+    expect(wrapper.text()).toContain('管理模式，配置工具、扩展访问策略与提示词')
+    const newBtn = wrapper.findAll('button').find((b) => b.text().includes('新建模式'))
     expect(newBtn).toBeTruthy()
     // 列表渲染（经 PresetListSection）
     expect(wrapper.text()).toContain('我的预设')
