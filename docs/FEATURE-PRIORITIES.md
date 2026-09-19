@@ -37,7 +37,7 @@
 | 模块 | 关键用例组 | 代码锚点 |
 |------|-----------|---------|
 | 应用启动与进程编排 | Electron 窗口创建、runtime 子进程拉起、WS 握手、renderer 加载、单实例锁 | `apps/electron/main/` + `packages/runtime/src/server.ts` |
-| 会话创建与首发 | 新建任务旅程（Landing → 选目录 → 首发提交）、pi 进程绑定 | `useSidebar` / `SessionService`（testing 01） |
+| 会话创建与首发 | 新建任务旅程（Landing → 选目录 → 首发提交）、模式选择（landing 第三 chip，模式 id 创建时锁定）、pi 进程绑定 | `useSidebar` / `SessionService`（testing 01） |
 | 对话发送与流式渲染 | composer 输入三态、发送、流式 delta 回显、错误作为 assistant 消息入流、isGenerating 重置 | composer / `run-send-stream`（testing 02/03） |
 | pi RPC 适配 | EventAdapter 协议翻译、session-pool、sendCommand success 检查、pi stdout tee 落盘 | `packages/runtime/src/` pi 适配层 |
 | session 持久化与恢复 | pi session 文件延迟写入、live ≡ reload（同一 applyEntry reducer）、重开一致、全 entry 类型 | entry reducer 链（关键规则 9） |
@@ -52,8 +52,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
-| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
-| 设置页 | provider/API key 管理、系统提示词编辑、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
+| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
+| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
@@ -89,7 +89,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | cache-probe | 前缀指纹采集、analyze.py 归因 | 缓存分析用户 |
 | goal | 目标管理 | goal 用户 |
 | scheduler | 定时调度 | 定时任务用户 |
-| session-manager | agent-managed session 6 工具 | 高级编排用户 |
+| session-manager | agent-managed session 6 工具 | 高级编排用户（**调度模式内置预设的工具面承载**；模式面不可用仅该模式降级，6 工具本身仍属高级编排，判例 #8） |
 | rename-session | 会话重命名 | 全体但低频、有手动路径 |
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
@@ -146,3 +146,4 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 5 | base-tool-enhance | P1 | bash 是 agent 执行能力的主体；原生工厂回退只保底不保等价（后台模式/审计全失） |
 | 6 | 设置页 / 插件系统 / 扩展装载 | P0（2026-09-12 用户裁决） | provider 配置是首次使用必经路径；插件/扩展是 harness 可扩展能力主体 |
 | 7 | permission 审批闭环 | P1（待复核） | yolo 模式不经过审批、主链路可走；approve 模式下挂了工具卡死。业务价值视角下若审批是主用法则应升 P0 |
+| 8 | 模式体系（预设→模式）/ 调度模式 / composer 密度策略 | **不改分级**（2026-09 复核） | 三者均落在既有 P0 面之内，不新增独立功能模块：模式选择属「会话创建与首发」、模式编辑属「设置页」、密度与托盘属 composer/托盘 P0 面（composer 发送位在任何宽度不退化，属 P0 不可用面）；调度模式复用「subagent/workflow 面板与派发」（P0）与 session-manager（P3）既有能力，无「挂掉后果」阶跃；无新协议/新数据格式，不产生新的可逆性修正 |

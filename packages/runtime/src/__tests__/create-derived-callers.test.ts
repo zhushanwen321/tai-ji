@@ -53,7 +53,15 @@ function acceptedNames(field: BindingFieldKey): readonly string[] {
 /** 按 semantic 通道的禁传绑定字段（防顺手继承漂移；handoff 刻意全 none 的字段在此落地） */
 const FORBIDDEN_FIELDS_BY_SEMANTIC: Record<CreateDerivedCaller['semantic'], readonly BindingFieldKey[]> = {
   'user-facing': ['spawnSource', 'parentAgentSessionId'],
-  'agent-managed': ['projectId'],
+  // agent-managed（D8，2026-09 裁决）：projectId 已从禁传清单移除——该通道经服务端
+  // 从父会话 summary 派生 projectId（不读 params.projectId，见 session-binding-fields.ts
+  // 的登记注释与 session-manager-handler 单测的伪造参数断言）。
+  // 本通道其余写入字段（spawnSource / parentAgentSessionId）不属本清单：它们由服务端
+  // 从路由上下文注入、同样不读请求参数，属「允许透传的绑定字段」（登记 passedBindingFields
+  // 承诺 + handler 的 params 信任边界守卫），列入禁传会与本通道实际传参自相矛盾。
+  // 「不得由请求参数携带」的精神由 handler 侧单测（伪造 spawnSource/parentAgentSessionId
+  // 被忽略）与登记注释共同保全。
+  'agent-managed': [],
   handoff: ['spawnSource', 'parentAgentSessionId', 'launchPresetId'],
 }
 

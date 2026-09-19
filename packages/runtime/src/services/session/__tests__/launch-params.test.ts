@@ -30,7 +30,10 @@ import {
   resolveSkillPaths,
   resolveExtensionPaths,
   resolveReplaceSystemPrompt,
+  resolveEffectiveSystemPrompt,
+  resolveAppendSystemPrompt,
   resolveLaunchPresetOptions,
+  buildPresetFallbackEnv,
   buildPresetClientOptions,
   warnLaunchEffectiveMismatch,
 } from '../launch-params.js'
@@ -49,15 +52,20 @@ import type { IManagedSessionView } from '../types.js'
 import type { IEventAdapter } from '../../../interfaces.js'
 import type { IProcessManager } from '../../ports/pi-engine.js'
 import type { SessionSummary } from '@taiji/shared'
+import { PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
 
 function makeConfigStore(paths: string[]): IConfigStore {
   return { getSkillPaths: () => paths } as unknown as IConfigStore
 }
 
 function makePresetService(presets: Record<string, unknown>, resolveImpl?: (preset: unknown, cwd: string) => PresetResolution): PresetServiceType {
+  const impl = resolveImpl ?? ((preset: unknown) => preset as PresetResolution)
   return {
     getPreset: (id: string) => presets[id],
-    resolve: resolveImpl ?? ((preset: unknown) => preset as PresetResolution),
+    // 真实 PresetService.resolve 是 async：fake 必须同为 async。同步 fake 会让
+    // resolveLaunchPresetOptions 里「漏 await」不可观测（回落分支 `{ ...resolution }`
+    // 展开 Promise 得空壳、静默丢字段，而本文件仍全绿）[HISTORICAL]
+    resolve: async (preset: unknown, cwd: string) => impl(preset, cwd),
   } as unknown as PresetServiceType
 }
 
@@ -123,6 +131,57 @@ describe('resolveReplaceSystemPrompt', () => {
   })
 })
 
+describe('resolveEffectiveSystemPrompt / resolveAppendSystemPrompt（D3 优先级取值 helper）', () => {
+  /**
+   * 最小 resolution 形状（仅 prompt 面参与本组断言）。
+   *
+   * flags 两个必填字段显式补全（不用 `as` 断言）：`flags: {}` 会让字面量类型与
+   * PresetResolution 的重叠不足 → TS2352，而补全后字面量**本就**可赋给 PresetResolution
+   * （skillPaths 可为 undefined / toolArgs 全可选 / prompt 可选）——去掉断言让 fixture 保留
+   * 对真实类型的编译期强度，不用 `as` 绕过。
+   */
+  function resolution(prompt?: PresetResolution['prompt']): PresetResolution {
+    return { skillPaths: undefined, extensionPaths: [], toolArgs: {}, flags: { noSkills: false, noContextFiles: false }, prompt }
+  }
+
+  it('模式 replace 启用且非空 → 返回模式文本（全局值被压）', () => {
+    const r = resolution({ replace: { enabled: true, prompt: '模式替换' } })
+    expect(resolveEffectiveSystemPrompt(r, '全局替换')).toBe('模式替换')
+  })
+
+  it('模式 replace 未启用 / 文本空白 / 未配置 / resolution 缺失 → 回落全局值', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: false, prompt: '模式替换' } }), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: '   \n ' } }), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(resolution({}), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(undefined, '全局替换')).toBe('全局替换')
+  })
+
+  it('模式 replace 启用且非空但全局未配置 → 模式文本；两侧皆无 → undefined（pi 默认）', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: '模式替换' } }), undefined)).toBe('模式替换')
+    expect(resolveEffectiveSystemPrompt(resolution({}), undefined)).toBeUndefined()
+    expect(resolveEffectiveSystemPrompt(undefined, undefined)).toBeUndefined()
+  })
+
+  it('模式 append 启用且非空 → 文本；未启用 / 空白 / 未配置 / resolution 缺失 → undefined（无全局对手）', () => {
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: '模式追加' } }))).toBe('模式追加')
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: false, prompt: '模式追加' } }))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: '  \n ' } }))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(resolution({}))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(undefined)).toBeUndefined()
+  })
+
+  it('append 与 replace 互不影响：仅 append 启用时替换仍回落全局', () => {
+    const r = resolution({ append: { enabled: true, prompt: '追加' } })
+    expect(resolveEffectiveSystemPrompt(r, '全局替换')).toBe('全局替换')
+    expect(resolveAppendSystemPrompt(r)).toBe('追加')
+  })
+
+  it('取值阶段不加 \\n 前缀（前缀统一落在 spawn-args argv 拼装处，两条通道同处覆盖）', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: 'AGENTS.md' } }), undefined)).toBe('AGENTS.md')
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: 'AGENTS.md' } }))).toBe('AGENTS.md')
+  })
+})
+
 describe('resolveLaunchPresetOptions', () => {
   it('presetService 未注入 → undefined', async () => {
     await expect(resolveLaunchPresetOptions(null, 'p1', '/cwd')).resolves.toBeUndefined()
@@ -136,17 +195,55 @@ describe('resolveLaunchPresetOptions', () => {
     expect(resolveSpy).toHaveBeenCalledWith({ id: 'builtin:minimal' }, '/cwd')
   })
 
-  it('preset 被删/失效 → fallback builtin:full（全工具模式兜底，§4.3）', async () => {
+  it('preset 被删/失效 → fallback builtin:full（全工具模式兜底，§4.3）+ 回落事实随 resolution 上抛（F1/E4）', async () => {
     const full = { id: 'builtin:full' }
     const resolveSpy = vi.fn((preset: unknown) => preset as PresetResolution)
     const svc = makePresetService({ 'builtin:full': full }, resolveSpy)
-    await expect(resolveLaunchPresetOptions(svc, 'deleted-preset', '/cwd')).resolves.toBe(full)
+    const resolution = await resolveLaunchPresetOptions(svc, 'deleted-preset', '/cwd')
+    // 回落事实（原悬空 id）——restore 路径据此置 SessionSummary.launchPresetFallbackTo 披露
+    expect(resolution?.fellBackFromPresetId).toBe('deleted-preset')
+    // 其余字段仍是 builtin:full 的 resolve 产物（回落语义不变）
+    expect(resolution).toMatchObject(full)
     expect(resolveSpy).toHaveBeenCalledWith(full, '/cwd')
+  })
+
+  it('preset 存在 → 不附回落事实（fellBackFromPresetId undefined，且保持 resolve 对象同一性）', async () => {
+    const resolution = {} as PresetResolution
+    const resolveSpy = vi.fn(() => resolution)
+    const svc = makePresetService({ 'mode-live': { id: 'mode-live' } }, resolveSpy)
+    const result = await resolveLaunchPresetOptions(svc, 'mode-live', '/cwd')
+    expect(result?.fellBackFromPresetId).toBeUndefined()
+    // 无回落不新建对象（既有 .toBe 身份断言与调用方不变）
+    expect(result).toBe(resolution)
   })
 
   it('builtin:full 也取不到（理论不可达）→ undefined', async () => {
     const svc = makePresetService({})
     await expect(resolveLaunchPresetOptions(svc, 'p1', '/cwd')).resolves.toBeUndefined()
+  })
+})
+
+describe('buildPresetFallbackEnv（F1b：回落事实 → pi 出站 env）', () => {
+  it('回落 → FROM=原悬空 id / TO=builtin:full（两键齐备，trace 据此记 presetFallback）', () => {
+    const resolution = { fellBackFromPresetId: 'custom:gone-uuid' } as PresetResolution
+    expect(buildPresetFallbackEnv(resolution)).toEqual({
+      [PRESET_FALLBACK_ENV_KEYS.FROM]: 'custom:gone-uuid',
+      [PRESET_FALLBACK_ENV_KEYS.TO]: 'builtin:full',
+    })
+  })
+
+  it('未回落 / resolution undefined → 两键写空串（显式清除父 env 可能继承的陈旧值，防假披露）', () => {
+    const empty = {
+      [PRESET_FALLBACK_ENV_KEYS.FROM]: '',
+      [PRESET_FALLBACK_ENV_KEYS.TO]: '',
+    }
+    expect(buildPresetFallbackEnv(undefined)).toEqual(empty)
+    expect(buildPresetFallbackEnv({} as PresetResolution)).toEqual(empty)
+  })
+
+  it('键名与 shared SSOT 一致（写读两侧字面量镜像的权威端）', () => {
+    expect(PRESET_FALLBACK_ENV_KEYS.FROM).toBe('TAIJI_PRESET_FALLBACK_FROM')
+    expect(PRESET_FALLBACK_ENV_KEYS.TO).toBe('TAIJI_PRESET_FALLBACK_TO')
   })
 })
 

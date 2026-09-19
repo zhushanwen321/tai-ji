@@ -13,6 +13,8 @@
  *   `sidebar.update.${mapped}`，escape 出 locale-key-usage-guard 的字面扫描，本文件是
  *   该命名空间唯一存在性守卫）+ 插值占位符（{version}/{from}/{to}）
  * - settings.update testProxy keys 完整性
+ * - landing 模式改名（D4）值的回归锁定：`newTask.presetSelect.*` 用「模式」措辞
+ *   （R3 补完——landing 侧曾漏改，改名落地无测试覆盖即会再次回退）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/i18n/i18n-value-smoke.test.ts
  */
@@ -24,6 +26,8 @@ import zhCN from '@/i18n/locales/zh-CN/sidebar'
 import enUS from '@/i18n/locales/en-US/sidebar'
 import zhCNSettings from '@/i18n/locales/zh-CN/settings'
 import enUSSettings from '@/i18n/locales/en-US/settings'
+import zhNewTask from '@/i18n/locales/zh-CN/newTask'
+import enNewTask from '@/i18n/locales/en-US/newTask'
 import {
   THINKING_LEVELS,
   getDisplayLabel,
@@ -191,5 +195,38 @@ describe('sidebar.update / settings.update 双语 keys 存在', () => {
     expect(enUSSettings.update.testSuccess).toBeDefined()
     expect(zhCNSettings.update.testFailed).toBeDefined()
     expect(enUSSettings.update.testFailed).toBeDefined()
+  })
+})
+
+// ── landing 模式改名（D4，设计 `.tmp/tech-design/mode-system-composer-density.md` §6.4）──
+
+describe('landing 改名 D4：newTask.presetSelect 用户可见文案用「模式」', () => {
+  it('zh-CN 标题 / 空态不做旧词，锁定 tooltip 用「以「{name}」创建」', async () => {
+    await setLocale('zh-CN')
+    expect(i18n.global.t('newTask.presetSelect.title')).toBe('选择启动模式')
+    expect(i18n.global.t('newTask.presetSelect.noPresets')).toBe('暂无模式')
+    // 占位符必须是 {name}（消费方 @taiji/ui PresetSelectChip.vue 传 { name }）
+    expect(
+      i18n.global.t('newTask.presetSelect.presetLockedTooltip', { name: '调度模式' }),
+    ).toBe('此会话以「调度模式」创建，不可更改')
+  })
+
+  it('en-US 镜像同义文案（title / 空态 / 锁定 tooltip）', async () => {
+    await setLocale('en-US')
+    expect(i18n.global.t('newTask.presetSelect.title')).toBe('Launch mode')
+    expect(i18n.global.t('newTask.presetSelect.noPresets')).toBe('No modes')
+    expect(
+      i18n.global.t('newTask.presetSelect.presetLockedTooltip', { name: 'Dispatch' }),
+    ).toBe('This session was created with "Dispatch" and cannot be changed')
+  })
+
+  it('已改值的叶子不含旧词（zh「预设」/ en "preset"）', () => {
+    // 词表断言（不经 t()）：防未来用「旧词 + 模式」这类混合形态绕过
+    expect(zhNewTask.presetSelect.title).not.toContain('预设')
+    expect(zhNewTask.presetSelect.noPresets).not.toContain('预设')
+    expect(zhNewTask.presetSelect.legacySessionTooltip).not.toContain('预设')
+    expect(enNewTask.presetSelect.title.toLowerCase()).not.toContain('preset')
+    expect(enNewTask.presetSelect.noPresets.toLowerCase()).not.toContain('preset')
+    expect(enNewTask.presetSelect.legacySessionTooltip.toLowerCase()).not.toContain('preset')
   })
 })

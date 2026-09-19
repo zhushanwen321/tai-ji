@@ -1,11 +1,12 @@
 /**
  * RpcClient preset / systemPrompt 启动参数 CLI args 单测（wave1）。
  *
- * 覆盖 6 个新增字段的 args push 行为：
+ * 覆盖各新增字段的 args push 行为：
  * - tools / excludeTools（逗号连接）
  * - noTools / noSkills / noContextFiles（单 flag）
  * - thinkingLevel（--thinking，非 --thinking-level）
  * - systemPrompt（--system-prompt，自 rpc-client-system-prompt.test.ts 并入）
+ * - appendSystemPrompt（--append-system-prompt，u2 模式提示词注入通道）
  *
  * spawn mock 范式（捕获 args 数组）为 rpc-client args 系测试共享形态
  * （rpc-client-start-args-anchor.test.ts 同款）。
@@ -171,6 +172,7 @@ describe('RpcClient preset args CLI', () => {
     expect(spawnArgs).not.toContain('--no-skills')
     expect(spawnArgs).not.toContain('--no-context-files')
     expect(spawnArgs).not.toContain('--thinking')
+    expect(spawnArgs).not.toContain('--append-system-prompt')
   })
 
   it('组合：tools + thinkingLevel + noSkills 同时生效', async () => {
@@ -218,14 +220,44 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
     }
   })
 
-  it('options.systemPrompt 有值 → args 包含 --system-prompt 和该值', async () => {
+  it('options.systemPrompt 有值 → args 包含 --system-prompt 和该值（\n 前缀）', async () => {
     const options = { cwd: '/project', systemPrompt: 'custom core prompt' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
     expect(spawnArgs).toContain('--system-prompt')
     const idx = spawnArgs.indexOf('--system-prompt')
-    expect(spawnArgs[idx + 1]).toBe('custom core prompt')
+    // u2：内联值前置 \n（pi 二义陷阱构造性区分，见 spawn-args.toInlinePromptValue）
+    expect(spawnArgs[idx + 1]).toBe('\ncustom core prompt')
+  })
+
+  it('options.appendSystemPrompt 有值 → args 包含 --append-system-prompt 和该值（\n 前缀）', async () => {
+    const options = { cwd: '/project', appendSystemPrompt: 'mode append prompt' } as unknown as RpcClientOptions
+    const client = new RpcClientCtor(options)
+    await client.start()
+
+    expect(spawnArgs).toContain('--append-system-prompt')
+    expect(spawnArgs[spawnArgs.indexOf('--append-system-prompt') + 1]).toBe('\nmode append prompt')
+  })
+
+  it('options.systemPrompt + appendSystemPrompt 同时给 → 两 flag 均出现（对称）', async () => {
+    const options = { cwd: '/project', systemPrompt: 'sys', appendSystemPrompt: 'app' } as unknown as RpcClientOptions
+    const client = new RpcClientCtor(options)
+    await client.start()
+
+    expect(spawnArgs[spawnArgs.indexOf('--system-prompt') + 1]).toBe('\nsys')
+    expect(spawnArgs[spawnArgs.indexOf('--append-system-prompt') + 1]).toBe('\napp')
+  })
+
+  it('options.appendSystemPrompt 仅空白/未传 → args 不包含 --append-system-prompt', async () => {
+    const blank = { cwd: '/project', appendSystemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
+    await new RpcClientCtor(blank).start()
+    expect(spawnArgs).not.toContain('--append-system-prompt')
+
+    spawnArgs = []
+    const absent = { cwd: '/project' } as unknown as RpcClientOptions
+    await new RpcClientCtor(absent).start()
+    expect(spawnArgs).not.toContain('--append-system-prompt')
   })
 
   it('options.systemPrompt 仅空白 → args 不包含 --system-prompt', async () => {
@@ -242,5 +274,59 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
     await client.start()
 
     expect(spawnArgs).not.toContain('--system-prompt')
+  })
+})
+
+describe('RpcClient spawn 日志 argv 脱敏（设计 §7.2 argv 日志脱敏 / 探针 P15）', () => {
+  let RpcClientCtor: typeof import('../src/infra/pi/rpc-client.js').RpcClient
+
+  beforeEach(async () => {
+    spawnArgs = []
+    fakeProc.on.mockClear()
+    fakeProc.stdin.write.mockClear()
+    fakeProc.kill.mockClear()
+
+    const mod = await import('../src/infra/pi/rpc-client.js')
+    RpcClientCtor = mod.RpcClient
+  })
+
+  afterEach(() => {
+    try {
+      const exitHandlers = fakeProc.on.mock.calls
+        .filter(([event]) => event === 'exit')
+        .map(([, handler]) => handler as (code: number | null) => void)
+      for (const h of exitHandlers) {
+        h(0)
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  })
+
+  it('spawn 日志不含系统提示词正文，仅 --flag <N chars>（非值 token 保留）', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const secret = 'TOP SECRET MODE PROMPT BODY'
+      const options = {
+        cwd: '/project',
+        systemPrompt: secret,
+        appendSystemPrompt: `${secret} append`,
+      } as unknown as RpcClientOptions
+      await new RpcClientCtor(options).start()
+
+      const spawnLines = logSpy.mock.calls
+        .map((call) => call.map((part) => String(part)).join(' '))
+        .filter((line) => line.includes('[rpc] spawning pi:'))
+      expect(spawnLines).toHaveLength(1)
+      const line = spawnLines[0]
+      // 正文不出现；两个提示词 flag 只记字符数
+      expect(line).not.toContain(secret)
+      expect(line).toMatch(/--system-prompt <\d+ chars>/)
+      expect(line).toMatch(/--append-system-prompt <\d+ chars>/)
+      // 非值诊断 token 保留
+      expect(line).toContain('--mode rpc')
+    } finally {
+      logSpy.mockRestore()
+    }
   })
 })

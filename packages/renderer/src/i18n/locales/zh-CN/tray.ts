@@ -1,6 +1,6 @@
 /**
- * Composer 任务托盘（tray）—— built-in 三件面板文案
- * （设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格）。
+ * Composer 任务托盘（tray）—— built-in 四件面板文案
+ * （bash / subagent / workflow / session；设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格）。
  *
  * 命名空间形态：本模块 default export 只含 tray 子树，由 aggregator（locales/zh-CN.ts）
  * 展开并入 panel 命名空间（`panel: { ...panel, ...tray }`）——运行时 key 前缀 =
@@ -17,11 +17,12 @@ export default {
   tray: {
     /** 托盘 icon 行的 aria-label（整行为一个语义组；各 icon 另有 title.<kind>） */
     trayLabel: '任务托盘',
-    /** 三件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
+    /** 四件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
     title: {
       bash: '后台命令',
       subagent: '子代理',
       workflow: '工作流',
+      session: '子会话',
     },
     /** 分桶视图标签（runningProcess 仅 bash 使用，见文件头词表裁决；[两视图裁决 2026-09-16] subagent 无第三桶） */
     bucket: {
@@ -32,7 +33,7 @@ export default {
     loading: '加载中…',
     loadFailed: '加载失败（{error}）',
     retry: '重试',
-    /** 当前桶为空时的提示（{name} = 三件标题） */
+    /** 当前桶为空时的提示（{name} = 四件标题） */
     empty: {
       running: '没有进行中的{name}',
       runningProcess: '没有运行中的{name}',
@@ -71,5 +72,31 @@ export default {
     /** 面板顶部提示条（bash） */
     corruptBanner: '任务数据损坏，已忽略（.corrupt 保留现场）',
     disconnectBanner: '连接断开，重连后自动刷新',
+    /** 序 3 溢出入口（`»` 省略号；与聚合入口的层叠图标是两个语义，见 Composer.vue 底栏注释） */
+    more: '更多工具',
+    /** 序 4 聚合入口（层叠图标 + 运行数）：title / aria-label 带运行数插值 */
+    aggregate: {
+      title: '任务托盘 · {running} 项进行中',
+    },
+    /**
+     * 第 4 件「子会话」（u7，设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）。
+     * 行状态文案与 TraySessionPanel 的进程级 status 映射一一对应（映射本体见
+     * composables/logic/sessionStatus.ts 的 DISPLAY_STATUS）。
+     */
+    session: {
+      /** 段头摘要（{total} 个 · {running} 运行中） */
+      header: '{total} 个 · {running} 运行中',
+      empty: '暂无子会话',
+      status: {
+        running: '运行中',
+        done: '已完成',
+        error: '失败',
+        stopped: '已停止',
+      },
+      stop: '停止',
+      stopConfirm: '确认停止',
+      stopFailed: '停止子会话失败：{msg}',
+      openFailed: '打开子会话失败：{msg}',
+    },
   },
 }

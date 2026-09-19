@@ -39,7 +39,7 @@ import type {
   ScannedSkillInfo,
   ScannedAgentInfo,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -1684,11 +1684,14 @@ const projectImpl = {
 export type ProjectDomainParamsExact = AssertExact<DomainParamsExact<ProjectDomain, typeof projectImpl>>
 export const project: ProjectDomain = projectImpl
 
-// preset 域 mock 占位（pi-launch-presets wave1）：返回空预设列表 + 默认全工具模式 id。
+// preset 域 mock（pi-launch-presets wave1）：返回内置预设目录 + 默认全工具模式 id。
 // 与 real 轨 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
-// mock 模式无 runtime，preset 演示由 real 轨驱动；此处仅供 landing 渲染不崩。
+// mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
+// （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
+// chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
+// launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收口）。
 import type { PiLaunchPreset } from '@taiji/shared'
-const mockPresets: PiLaunchPreset[] = []
+const mockPresets: PiLaunchPreset[] = DEFAULT_PRESETS.map((p) => ({ ...p }))
 const presetImpl = {
   async list(): Promise<PiLaunchPreset[]> {
     return mockPresets.map((p) => ({ ...p }))

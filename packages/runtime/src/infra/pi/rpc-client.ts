@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { getPiAgentDir } from './pi-paths.js'
+import { redactArgv } from './argv-redact.js'
 import { recordSpawnMarkers } from './spawn-markers.js'
 import { getDefaultModel } from './pi-provider-store.js'
 import { RpcTimeoutError } from '../../utils/errors.js'
@@ -79,8 +80,21 @@ export interface RpcClientOptions {
   extensionPaths?: string[]
   /** session id（用于命名 pi stdout 日志文件，架构约定 #4） */
   sessionId?: string
-  /** 替换 pi 核心系统提示词（走 --system-prompt CLI，仅新建会话生效）。空白时不传。 */
+  /**
+   * 替换 pi 核心系统提示词（走 --system-prompt CLI）。空白时不传。
+   *
+   * [HISTORICAL] 原注释称本 flag「仅新建会话生效」——不准确。实测 pi 在**每次进程启动**
+   * 都读取该 flag（restore/resume/switch_session 路径每次附着都会重新 spawn 一个 pi 进程，
+   * 故 CLI 值同样生效）。这正是 D1「提示词是活定义」语义的依据：restore/fork 不必重写
+   * session 文件，靠 spawn argv 即可让当前生效的提示词落地。
+   * 内联值由 spawn-args 加 \n 前缀（pi 二义陷阱，见 spawn-args.toInlinePromptValue）。
+   */
   systemPrompt?: string
+  /**
+   * 追加在 pi 基础系统提示词之后（走 --append-system-prompt CLI；与 --system-prompt 同解析路径）。
+   * 空白时不传；内联值同经 spawn-args 加 \n 前缀。
+   */
+  appendSystemPrompt?: string
   /**
    * 工具白名单（替换语义，映射 pi `--tools <comma-joined>`，附录 A.1）。
    * 非空时以逗号连接 push，只启用列出的工具。与 excludeTools/noTools 互斥；
@@ -307,7 +321,9 @@ export class RpcClient implements IPiEngine {
     //   实测 cwd=HOME//tmp//usr 三种 cwd 下 getPackageDir/getThemesDir 返回完全一致。
     const spawnCwd = this.options.cwd ?? process.cwd()
 
-    console.log('[rpc] spawning pi:', piCmd, args.join(' '), 'cwd:', spawnCwd)
+    // argv 回显脱敏（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.2 argv 日志脱敏
+    // / §7.6 写入面 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
+    console.log('[rpc] spawning pi:', piCmd, redactArgv(args), 'cwd:', spawnCwd)
 
     this.proc = spawn(piCmd, args, {
       cwd: spawnCwd,

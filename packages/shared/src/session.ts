@@ -95,6 +95,18 @@ export interface SessionSummary {
    */
   launchPresetId?: string
   /**
+   * 模式回落事实（F1 披露，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：
+   * 该会话本次 restore 时锁定的模式定义已不可得，pi 实际以本 id（恒 `builtin:full`）启动
+   * ——即「模式已删除，本次以全工具模式启动」。
+   *
+   * **语义边界（避免假陈述）**：这是「本进程本次运行」的内存态事实，只在 session 真正被
+   * restore（pi 以 builtin:full 启动）后置位；`launchPresetId` 悬空但会话尚未重启的窗口内
+   * 不置位（此时 chip/声明行只能预告「重启后将回落」，不得声称「本次已回落」）。
+   * renderer reload / 会话状态重读经 runtime 内存态（buildSessionSummary）复现。
+   * undefined = 无回落事实（模式仍可得 / 从未 restore / 已随进程重开回落态归零）。
+   */
+  launchPresetFallbackTo?: string
+  /**
    * 发起来源：'user' = 用户手动创建（默认），'agent' = agent 通过 session-manager 创建。
    * 运行期为内存态（handler 注入），重启后从 .agent.json sidecar 恢复。
    * 用于 session-manager list 过滤和前端展示区分。

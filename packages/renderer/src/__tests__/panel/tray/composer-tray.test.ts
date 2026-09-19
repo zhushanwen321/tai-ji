@@ -39,11 +39,11 @@ import type { MockWidgetSource } from './tray-view-host-mock'
 import { makeTrayCountsStub } from './tray-counts-stub'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import ComposerTray from '@/components/panel/tray/ComposerTray.vue'
-import type { TrayTaskKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
+import type { TrayBuiltinKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
-import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 
 // ── mock：数据面（三件计数/行集；口径与首拉触发在 useTrayCounts.test.ts）──
@@ -57,6 +57,8 @@ interface TrayState {
   workflowRunning: WorkflowRunRecord[]
   workflowEnded: WorkflowRunRecord[]
   workflowLoading: boolean
+  /** 第 4 件子会话行集（u7） */
+  sessionChildren: SessionSummary[]
 }
 
 function createTrayState(): TrayState {
@@ -70,6 +72,7 @@ function createTrayState(): TrayState {
     workflowRunning: [],
     workflowEnded: [],
     workflowLoading: false,
+    sessionChildren: [],
   }
 }
 
@@ -125,6 +128,12 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
   }),
 }))
 
+// ── mock：打开链（第 4 件 session 面板行点击 → selectSession；真实 useSidebar 依赖重，替身即可）──
+const selectSessionMock = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
+vi.mock('@/composables/features/sidebar/useSidebar', () => ({
+  useSidebar: () => ({ selectSession: selectSessionMock }),
+}))
+
 const SID = 's-tray-shell'
 const SID2 = 's-tray-shell-2'
 /** fake timers 固定「现在」（bash 行耗时派生确定性） */
@@ -170,15 +179,30 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord> & { runId: string })
   }
 }
 
+/** 子会话 fixture（u7：第 4 件 session kind） */
+function makeChild(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
+  return {
+    label: '子会话',
+    cwd: '/Users/dev/Code/work-project',
+    status: 'active',
+    lastActiveAt: FIXED_NOW - 5 * 60_000,
+    modelId: 'Anthropic/claude-sonnet-4.5',
+    tokenCount: 0,
+    spawnSource: 'agent',
+    parentAgentSessionId: SID,
+    ...overrides,
+  }
+}
+
 // ── widget 区响应式数据源 mock（同构壳层桥；与 tray-widget.test.ts 共用 tray-view-host-mock）──
 
 // ── 挂载与查询工具 ──
 
 let wrapper: VueWrapper | null = null
 
-function mountTray(mock: MockWidgetSource, sessionId = SID): VueWrapper {
+function mountTray(mock: MockWidgetSource, sessionId = SID, aggregated = false): VueWrapper {
   wrapper = mount(ComposerTray, {
-    props: { sessionId },
+    props: { sessionId, aggregated },
     global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: mock.source } },
     attachTo: document.body,
   })
@@ -868,5 +892,155 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
     expect(panelKeys()).toEqual(['native:bash'])
     expect(panelContentNodes('tray-panel-loading')).toHaveLength(0)
     expect(panelContentNodes('tray-bash-row')).toHaveLength(1)
+  })
+})
+
+// ── 序 4 聚合入口（u6b / D6：「层叠图标 + 运行数」→ 面板内分段展示全部类别）──
+
+describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
+  it('aggregated + 有进行中条目 → 单入口按钮（层叠图标 + 运行数），逐件按钮不再渲染', () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
+    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    const aggregate = row().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+    // 层叠图标：两个类别 icon（bash + subagent）重叠于入口内
+    expect(aggregate.findAll('svg').length).toBeGreaterThanOrEqual(2)
+    // 运行数 = 进行中合计（仅历史件不计入）
+    expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
+    expect(aggregate.find('[data-testid="tray-aggregate-pulse"]').exists()).toBe(true)
+    // 逐件按钮整体退场（聚合就是聚合，不是叠加展示）
+    expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+  })
+
+  it('点击聚合入口 → 面板内分段展示全部类别（段头 = 类别标题 + running/total）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
+    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
+
+    expect(panelKeys()).toEqual(['aggregate'])
+    expect(panelContentNodes('tray-aggregate-panel')).toHaveLength(1)
+    // 段 = 有记录的类别（bash + workflow），全无记录的类别不出段
+    expect(panelContentNodes('tray-aggregate-section-bash')).toHaveLength(1)
+    expect(panelContentNodes('tray-aggregate-section-workflow')).toHaveLength(1)
+    expect(panelContentNodes('tray-aggregate-section-subagent')).toHaveLength(0)
+    const bashCount = panelNodes()[0]?.querySelector('[data-testid="tray-aggregate-count-bash"]')
+    expect(bashCount?.textContent).toBe('1/2')
+    // 段体复用真实 built-in 面板（行渲染/行内操作零复制）
+    expect(panelContentNodes('tray-native-panel')).toHaveLength(2)
+  })
+
+  it('aggregated + 全无条目（三态之「全无」）→ 聚合入口不渲染（无死入口）', () => {
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+  })
+
+  it('widget-only（无 built-in 记录）→ 聚合入口仍渲染（通用图标兜底）且面板含 widget 段', async () => {
+    const mock = makeWidgetSource(SID)
+    mock.push(makeEntry('todo', [ansiLine('widget body')], { title: 'Todo', status: 'running' }))
+    mountTray(mock, SID, true)
+
+    const aggregate = row().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+    // 运行数来自 widget meta.status === 'running'
+    expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('1')
+    expect(row().findAll('[data-testid="tray-widget-button"]')).toHaveLength(0)
+
+    await realClick(aggregate)
+    expect(panelKeys()).toEqual(['aggregate'])
+    expect(panelContentNodes('tray-aggregate-widget-todo')).toHaveLength(1)
+    expect(panelContentNodes('tray-widget-panel')).toHaveLength(1)
+  })
+
+  it('三态上抛（能力标志 hasTrayItems）：有面无面各上报一次', () => {
+    mountTray(makeWidgetSource(SID), SID, true)
+    expect(row().emitted('update:hasItems')).toEqual([[false]])
+
+    wrapper?.unmount()
+    wrapper = null
+    document.body.innerHTML = ''
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource(SID), SID, true)
+    expect(row().emitted('update:hasItems')).toEqual([[true]])
+  })
+})
+
+// ── ①b 第 4 件「子会话」（u7 / 设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）──
+
+describe('ComposerTray 第 4 件「子会话」（u7）', () => {
+  it('有子会话（进行中）→ data-kind="session" 按钮渲染 + 呼吸点 + 计数徽标 = 子会话总数', () => {
+    trayState.sessionChildren = [
+      makeChild({ id: 'c-1', status: 'active' }),
+      makeChild({ id: 'c-2', status: 'done' }),
+      makeChild({ id: 'c-3', status: 'error' }),
+    ]
+    mountTray(makeWidgetSource(SID))
+
+    const button = builtinButton('session')
+    expect(button.exists()).toBe(true)
+    expect(button.attributes('title')).toBe(zhTray.tray.title.session)
+    expect(button.attributes('data-state')).toBe('running')
+    expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(true)
+    // 计数徽标 = 子会话总数（设计 §6.7：`● 3`；运行中信号由呼吸点承载）
+    expect(button.find('[data-testid="tray-builtin-count"]').text()).toBe('3')
+  })
+
+  it('仅历史（无进行中）→ dim 常驻：按钮在，计数与呼吸点都不出（不虚亮）', () => {
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'done' })]
+    mountTray(makeWidgetSource(SID))
+
+    const button = builtinButton('session')
+    expect(button.exists()).toBe(true)
+    expect(button.attributes('data-state')).toBe('idle')
+    expect(button.find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
+    expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
+  })
+
+  it('全无子会话 → 该件不渲染（三态之「全无」；DOM 层不存在）', () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource(SID))
+
+    expect(builtinButton('session').exists()).toBe(false)
+    expect(builtinKinds()).toEqual(['bash'])
+  })
+
+  it('固定序末位：bash → subagent → workflow → session（不参与 widget 动态排序）', () => {
+    trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
+    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
+    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'done' })]
+    mountTray(makeWidgetSource(SID))
+
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'session'])
+  })
+
+  it('聚合入口共存（序 4）：聚合面板含 session 段，且段内复用 TraySessionPanel', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
+    expect(panelKeys()).toEqual(['aggregate'])
+    expect(panelContentNodes('tray-aggregate-section-session')).toHaveLength(1)
+    expect(panelContentNodes('tray-session-panel')).toHaveLength(1)
+    // bash 段仍走 TrayNativePanel（分流未改变）
+    expect(panelContentNodes('tray-native-panel')).toHaveLength(1)
+  })
+
+  it('聚合入口运行数含子会话运行中计数（跨件求和）', () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    trayState.sessionChildren = [
+      makeChild({ id: 'c-1', status: 'active' }),
+      makeChild({ id: 'c-2', status: 'done' }),
+    ]
+    mountTray(makeWidgetSource(SID), SID, true)
+    // bash 1 + session 1 = 2
+    expect(row().find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
   })
 })

@@ -28,6 +28,19 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 ### 新建任务（New Task Flow）
 用户从「无活跃会话」进入「准备开聊」的业务动作。终点是 session 发出第一条消息。用户流程 5 步：落地空态 → 选目录 popover → 选分支 popover → 系统原生目录选择器 → 创建分支 modal；对应状态机 8 态（`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled`，`useNewTaskFlow.ts`）。**directory / branch** 是 session 的元信息，非任务本体，显示为 composer 顶部 chip，可随时改。
 
+### 模式（Mode）
+**启动预设（launch preset）的用户可见名**：一组 pi 启动参数（工具面 + 扩展面 + 提示词面）的命名集合，用户可创建/编辑/删除，内置四项（全工具 / Orchestrator / 只读 / 调度）。**代码与协议保留 `preset` 标识**（RPC `preset.*`、类型 `PiLaunchPreset`、**会话绑定字段 `SessionSummary.launchPresetId`**、sidecar `<sessionFile>.preset.json`）——改名只落在用户可见文案层（设置页菜单、landing chip、命令面板、chip tooltip）。
+
+**锁定语义 = 锁模式 id，不锁模式定义**：模式 id 在会话创建时确定、生命周期内不可更换（无任何 UI 路径可切）；模式定义（提示词文本 / 工具面 / 扩展面）以设置页为唯一可信源（活定义），用户编辑后该模式的全部会话（含已建）在**下次进程启动**（restore / fork / respawn）采用新定义。会话 = 对模式 id 的引用，不是创建时快照。
+
+**可见性**：landing 首行第三 chip（可选，三档退化：模式名 → 短名 → 纯图标）+ 对话态 `#meta-row` 只读 chip（**仅非默认模式渲染**，判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`——**用 `||` 不用 `??`**：store 未加载时 `defaultPresetId === ''`，`??` 会让空串穿透，把任意会话误判为非默认）+ 非默认模式在消息流顶部一条派生**模式声明行**（零新 entry 类型，不进 transcript、不进 LLM 上下文）。
+
+### 模式提示词（Mode Prompt）
+模式的可选提示词面（`PiLaunchPreset.prompt`）：`replace` 段顶掉 pi 核心系统提示词、`append` 段追加在 pi 基础之后，两段各自启用；**单段与两段合计均 ≤ 16000 字符**。校验双语义：写路（保存 / 导入）整条拒绝、读路（磁盘加载）段级折叠（超限优先丢 `append`）。注入通道 = pi 原生两条 argv（`--system-prompt` / `--append-system-prompt`），**不新增 env、扩展零改动**；替换优先级 = **模式 > 全局 > pi 默认**。链序与 `\n` 前缀构造性区分（防 pi 把文案当文件路径）见 [pi-launch-presets.md §2.6](architecture/pi-launch-presets.md)。
+
+### 调度模式（Session Dispatch Mode）
+内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具面 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展面 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
+
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
 
@@ -300,6 +313,6 @@ composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 
 ### 任务托盘（Widget Tray）
-composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。
+composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。窄窗口下底盘密度状态机可将整托盘聚合为「层叠图标 + 运行数」单入口（层叠图标 = 聚合入口，省略号 = 溢出菜单入口，两者不共用）。设计文档 `docs/design/composer-task-tray.md`。
 
-> **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。
+> **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。

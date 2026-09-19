@@ -559,18 +559,26 @@ describe('mock workspace / quota / project / preset domain', () => {
     await expect(project.save(state)).resolves.toBeUndefined()
   })
 
-  it('preset：CRUD + default', async () => {
-    expect(await preset.list()).toEqual([])
+  it('preset：内置目录非空 + CRUD + default', async () => {
+    // [u7a] 由「返回空列表」收口为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
+    // 会话的 chip / 声明行永远落不到正常分支（见 mock/index.ts 的 mockPresets 注释）。
+    const builtins = await preset.list()
+    expect(builtins.map((x) => x.id)).toEqual([
+      'builtin:full',
+      'builtin:orchestrator',
+      'builtin:readonly',
+      'builtin:session-dispatch',
+    ])
     expect(await preset.getDefault()).toBe('builtin:full')
     const p = { id: 'p1', name: 'n', tools: [] } as never
     const created = await preset.create(p)
     expect(created.id).toBe('p1')
-    expect((await preset.list())).toHaveLength(1)
+    expect((await preset.list())).toHaveLength(builtins.length + 1)
     await preset.setDefault('p1')
     await preset.update({ ...created, name: 'n2' } as never)
-    expect((await preset.list())[0]?.name).toBe('n2')
+    expect((await preset.list()).find((x) => x.id === 'p1')?.name).toBe('n2')
     await preset.remove('p1')
-    expect(await preset.list()).toEqual([])
+    expect((await preset.list()).map((x) => x.id)).toEqual(builtins.map((x) => x.id))
   })
 })
 

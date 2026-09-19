@@ -29,11 +29,9 @@ import type { ServerMessage, SessionGroup } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
-  clearUnread,
   registerFork,
   resetForkBranchState,
   syncForkBranches,
-  unreadByBranch,
   type BranchChangeKind,
 } from '@/composables/features/fork-handoff/useForkBranchNotify'
 
@@ -241,18 +239,4 @@ export function bindForkNoticeEffect(): void {
     unsubForkNotice()
     resetForkBranchState()
   })
-}
-
-/**
- * 读取分支未读角标状态（侧栏角标消费，RV2）。
- * 直接转发 useForkBranchNotify 的模块级单例（unreadByBranch SSOT 在 features 层，
- * 本函数仅是 ForkGroup 的读取门面）。clearUnread 透传：用户查看分支后清未读角标。
- */
-export function useForkBranchBadges(): {
-  /** 分支 id → 未读标记（需关注/已完成未查看） */
-  unreadByBranch: Ref<ReadonlyMap<string, boolean>>
-  /** 清除某分支未读角标（用户查看后调） */
-  clearUnread: (branchId: string) => void
-  } {
-  return { unreadByBranch, clearUnread }
 }

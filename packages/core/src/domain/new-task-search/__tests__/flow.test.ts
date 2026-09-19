@@ -476,6 +476,41 @@ describe('useNewTaskFlow', () => {
       expect.objectContaining({ presetId: 'preset-1', cwd: '/preset', pendingModel: 'p/m' }),
     )
   })
+
+  it('preset-popover 打开时 setPendingPreset 成功写入——模式选择在 overlay 内完成，不阻断透传', async () => {
+    // [HISTORICAL] 缺陷回归：用户在 landing 点 PresetSelectChip 展开模式 popover（state 进
+    // preset-popover），再点列表项时守卫 `state !== 'landing'` 把真实选择静默丢弃——
+    // pendingPreset 恒 null → chip 文案不回显（props.modeName 源自 pendingPreset）、
+    // 建出的 session launchPresetId=undefined。本用例复现「点击时的真实态 = preset-popover」。
+    const deps = makeDeps({
+      ports: {
+        launchConfig: {
+          getInput: () => ({ presets: [makePreset({ id: 'builtin:session-dispatch' })] }),
+          ensureReady: async () => {},
+        },
+      },
+    })
+    const flow = useNewTaskFlow(deps)
+    await enterLanding(flow)
+    // 点 chip 展开模式 popover（openPresetPopover 是 Landing 的 isPresetOpen setter 调用点）
+    flow.openPresetPopover()
+    expect(useNewTaskFlowState().state.value).toBe('preset-popover')
+    // 用户点列表项 → Landing.onPresetSelect → setPendingPreset（此时 state 是 preset-popover）
+    flow.setPendingPreset('builtin:session-dispatch')
+    // 修复前：pendingPreset 恒 null（chip 显示 / submit 透传双链断裂）
+    expect(flow.pendingPreset.value).toBe('builtin:session-dispatch')
+    // 关闭 popover 回 landing（用户点空白/Esc 关）后提交：透传所选模式（显示 ≡ 生效）
+    flow.closeOverlay()
+    expect(useNewTaskFlowState().state.value).toBe('landing')
+    ;(deps.ports.createSessionFlow.createSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      session: mockSession,
+      migratedSegments: [textSeg('hello')],
+    })
+    await flow.submitFirstMessage([textSeg('hello')])
+    expect(deps.ports.createSessionFlow.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ presetId: 'builtin:session-dispatch' }),
+    )
+  })
 })
 
 /** 测试辅助：直置模块级 createInFlight ref（controller 的 setCreateInFlight 语义） */

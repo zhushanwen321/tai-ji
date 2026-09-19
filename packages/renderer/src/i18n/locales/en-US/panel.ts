@@ -1,4 +1,39 @@
 export default {
+  // Mode chip (u4 mode-visibility-chip; conversation read-only chip + hover popover)
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
+    lockNote: 'The mode is fixed when the session is created and cannot be changed here; edit the mode definition in Settings (applies on the next launch)',
+    newSession: 'Start a new session to use another mode',
+    toolSurface: 'Tools',
+    extensionSurface: 'Extensions',
+    promptSegments: 'Prompt parts',
+    builtin: 'Built-in',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (design `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4):
+    // the two states are strictly distinct — pending only forecasts, fell-back may claim "this time".
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    unknownSurface: '—',
+    toolAll: 'All tools',
+    toolNone: 'No tools',
+    extAll: 'All extensions',
+    extNone: 'No extensions',
+    allowCount: '{count} allowed',
+    denyCount: '{count} disabled',
+    promptCount: '{count} part(s)',
+  },
+  // Mode declaration row (u5 mode-declaration-row; derived row at the top of the message stream, no new entry type)
+  modeDeclaration: {
+    label: 'Mode: {name}',
+    toolChip: 'Tools · {surface}',
+    promptChip: 'Prompt · {count} part(s)',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (§7.5 E4): same wording axis as panel.presetChip (pending only forecasts).
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    newSession: 'New session',
+  },
   header: {
     toggleSidebarExpand: 'Expand sidebar',
     toggleSidebarCollapse: 'Collapse sidebar',

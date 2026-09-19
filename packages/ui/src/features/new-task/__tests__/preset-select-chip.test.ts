@@ -255,3 +255,136 @@ describe('PresetSelectChip 重入同步（G1 破口修复：explicitPresetId 跟
     expect(wrapper.find('[data-testid="chip-preset"]').text()).not.toContain('只读模式')
   })
 })
+
+describe('PresetSelectChip 三档退化 + 信任标记跨档不丢（u4a）', () => {
+  // 可见文案全部由 renderer 侧经 props 传入（ui 包不耦合 i18n）；此处用固定串模拟 renderer 文案。
+  const MODE_NAME = '调度模式'
+  const SHORT_NAME = '调度'
+  const REPLACE_HINT = '含替换提示词'
+
+  /** 挂载 chip：默认文案 props 齐备；extra 覆盖 density / 信任标记判据等档位开关 */
+  function mountChip(extra: Record<string, unknown> = {}) {
+    const deps = makeDeps({
+      presets: ref(samplePresets()),
+      defaultPresetId: ref('custom:read-only'),
+    })
+    return mount(PresetSelectChip, {
+      props: {
+        sessionId: null,
+        launchPresetId: undefined,
+        presetOpen: false,
+        modeName: MODE_NAME,
+        shortName: SHORT_NAME,
+        ...extra,
+      },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+  }
+
+  it('① 文本档（full）：显示模式全名 + chip 内替换提示文案，无角标', async () => {
+    const wrapper = mountChip({ density: 'full', hasReplacePrompt: true, replaceHint: REPLACE_HINT })
+    await flushPromises()
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.text()).toContain(MODE_NAME)
+    expect(chip.text()).toContain(REPLACE_HINT)
+    // 文本档用内嵌后缀，不出现角标（两档形态互斥）
+    expect(chip.find('[data-testid="preset-chip-replace-badge"]').exists()).toBe(false)
+  })
+
+  it('①b 短名档（short）：显示短名 + 信任标记仍在（内嵌后缀）', async () => {
+    const wrapper = mountChip({ density: 'short', hasReplacePrompt: true, replaceHint: REPLACE_HINT })
+    await flushPromises()
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.text()).toContain(SHORT_NAME)
+    expect(chip.text()).not.toContain(MODE_NAME)
+    expect(chip.text()).toContain(REPLACE_HINT)
+  })
+
+  it('② 窄档（icon）：纯图标无可见文本，但信任标记仍以右上角警示色角标存在（+ tooltip）', async () => {
+    const wrapper = mountChip({ density: 'icon', accent: true, hasReplacePrompt: true, replaceHint: REPLACE_HINT })
+    await flushPromises()
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.text()).not.toContain(MODE_NAME)
+    expect(chip.text()).not.toContain(REPLACE_HINT)
+    // accent 底跨档保留（非默认模式档，颜色 = 状态）；角标独立于 accent 通道（用 warn 色）
+    expect(chip.classes().join(' ')).toContain('bg-accent-soft')
+    const badge = chip.find('[data-testid="preset-chip-replace-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.attributes('title')).toBe(REPLACE_HINT)
+  })
+
+  it('③ 无替换文案：三档均不渲染信任标记（缺省 false / 文案空）', async () => {
+    for (const density of ['full', 'short', 'icon'] as const) {
+      const wrapper = mountChip({ density })
+      await flushPromises()
+      const chip = wrapper.find('[data-testid="chip-preset"]')
+      expect(chip.find('[data-testid="preset-chip-replace-badge"]').exists()).toBe(false)
+      expect(chip.text()).not.toContain(REPLACE_HINT)
+    }
+    // 判据含「文案非空」：布尔为 true 但文案为空白 → 不渲染空后缀 / 空 tooltip
+    const emptyText = mountChip({ density: 'icon', hasReplacePrompt: true, replaceHint: '  ' })
+    await flushPromises()
+    expect(emptyText.find('[data-testid="preset-chip-replace-badge"]').exists()).toBe(false)
+  })
+
+  it('④ 窄档 aria-label / title 保留全名（aria-label 追加信任标记文案；不依赖可见文本）', async () => {
+    const wrapper = mountChip({ density: 'icon', hasReplacePrompt: true, replaceHint: REPLACE_HINT })
+    await flushPromises()
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.attributes('aria-label')).toContain(MODE_NAME)
+    expect(chip.attributes('aria-label')).toContain(REPLACE_HINT)
+    expect(chip.attributes('title')).toBe(MODE_NAME)
+  })
+})
+
+/**
+ * 模式 chip 底色（方案 B：默认模式中性底 / 非默认模式 accent 底）。
+ *
+ * 设计 §5.1「颜色即状态」：accent 底只在**非默认模式**档出现，颜色才携带信息（恒亮 = 无色差
+ * = 用户读不出状态）。判据由 renderer 侧算好经 `accent` prop 传入（本包只按 prop 出样式），
+ * 故断言分两向：缺省/false → 无 accent 底 + 中性文字档；true → accent 底原样（非默认模式零变化）。
+ * ① 是反向断言（防将来又退回「无条件 accent 底」）；② 守住 accent 档的既有形态不被顺手改掉。
+ */
+describe('PresetSelectChip 模式 chip 底色（accent prop：默认中性 / 非默认 accent）', () => {
+  function mountTone(accent?: boolean) {
+    const deps = makeDeps({
+      presets: ref(samplePresets()),
+      defaultPresetId: ref('custom:read-only'),
+    })
+    return mount(PresetSelectChip, {
+      props: { sessionId: null, launchPresetId: undefined, presetOpen: false, accent },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+  }
+
+  it('① 默认模式（accent 缺省 false）：无 accent 底，文字走中性档 + 邻位 chip 同款 hover 反馈', async () => {
+    const wrapper = mountTone()
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    // 反向断言：默认档不得有 accent 底/强调文字（否则「颜色即状态」恒亮失效）
+    expect(cls).not.toContain('bg-accent-soft')
+    expect(cls).not.toContain('text-accent')
+    // 中性档 = 与 landing 首行邻位 chip（chip-directory / chip-branch）同一套反馈
+    expect(cls).toContain('text-neutral-mid')
+    expect(cls).toContain('hover:bg-surface-hover')
+    expect(cls).toContain('hover:text-neutral-fg')
+  })
+
+  it('①b 显式 accent=false：与缺省同档（默认模式中性底，非默认模式外观零变化）', async () => {
+    const wrapper = mountTone(false)
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    expect(cls).not.toContain('bg-accent-soft')
+    expect(cls).toContain('text-neutral-mid')
+  })
+
+  it('② 非默认模式（accent=true）：保留 accent 底 + 强调文字 + accent hover（逐字原样）', async () => {
+    const wrapper = mountTone(true)
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    expect(cls).toContain('bg-accent-soft')
+    expect(cls).toContain('text-accent')
+    expect(cls).toContain('hover:bg-accent-soft')
+    expect(cls).not.toContain('text-neutral-mid')
+  })
+})

@@ -20,6 +20,7 @@ const logger = getLogger("pi-system-prompt-trace");
 import { summarizePromptDiff } from "./diff.js";
 import { mapReasonForFirstWrite, SYSTEM_PROMPT_CUSTOM_TYPE } from "./types.js";
 import type {
+	PresetFallbackFact,
 	PromptBaseline,
 	SwitchStash,
 	SystemPromptTraceEntryData,
@@ -38,6 +39,13 @@ export interface TraceContext {
 /** 文件系统侧依赖（wiring 用真实 fs；测试注入临时目录实现）。 */
 export interface TraceEnv {
 	readLastPromptFromFile(filePath: string): PromptBaseline | null;
+	/**
+	 * 本次 pi 进程启动时的模式回落事实（F1b，E4 trace 披露面）；未回落 / 未注入 → undefined。
+	 *
+	 * 进程 env 在生命期内不变，故工厂构造时读一次即可；为空字符串（runtime 的「显式
+	 * 清除」形态）时同样返回 undefined——不得把空串当回落事实。
+	 */
+	getPresetFallback(): PresetFallbackFact | undefined;
 }
 
 export interface SystemPromptTrace {
@@ -65,6 +73,10 @@ export function createSystemPromptTrace(env: TraceEnv, stash: SwitchStash): Syst
 	let sessionStartReason: SessionStartEvent["reason"] | null = null;
 	let baseline: PromptBaseline | null = null;
 	let current: CurrentPrompt | null = null;
+	// F1b（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4 trace 披露面）：
+	// 本次 pi 进程的模式回落事实由 spawn 出站 env 携带，进程生命期内恒定，构造时读一次。
+	// 未回落 / 未注入 → undefined，entry 的 presetFallback 字段不出现（既有形状向后兼容）。
+	const presetFallback = env.getPresetFallback();
 
 	const write = (
 		ctx: TraceContext,
@@ -83,6 +95,11 @@ export function createSystemPromptTrace(env: TraceEnv, stash: SwitchStash): Syst
 		};
 		if (parentFullText !== undefined) {
 			data.parentVersionDiffSummary = summarizePromptDiff(parentFullText, text);
+		}
+		// 回落事实随本进程写出的每条 entry 携带：本次 pi 运行确实以回落档启动，
+		// resume 快照与后续 change 同属该运行，披露一致（事件语义 = 本次运行口径）。
+		if (presetFallback !== undefined) {
+			data.presetFallback = presetFallback;
 		}
 		ctx.appendEntry(SYSTEM_PROMPT_CUSTOM_TYPE, data);
 	};

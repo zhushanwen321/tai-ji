@@ -452,10 +452,18 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    *
    * 对齐 pendingCwd/pendingModel 范式。PresetSelectChip emit select 时调用，
    * submitFirstMessage create session 时透传给 sessionApi.create。
-   * 守卫：仅 landing 态生效。
+   *
+   * 守卫（[HISTORICAL]「选模式后不生效」缺陷根修）：模式选择发生在 PresetSelectChip 的
+   * preset-popover overlay 内——用户先点 chip 展开列表（`openPresetPopover` 把 state 置为
+   * `preset-popover`），再点选项，此时写入点的 state 恒为 `preset-popover` 而非 `landing`。
+   * 原守卫 `state !== 'landing'` 把这次真实选择静默丢弃：pendingPreset 恒 null → chip 文案
+   * 不回显（Landing 的 modeName 源自 pendingPreset）+ 建出的 session launchPresetId=undefined。
+   * preset-popover 是 landing 上下文的 overlay（打开态由 Landing 的 isPresetOpen 绑定、
+   * 选择在列表内原地完成），与 landing 同属「选择进行中」态，一并放行；
+   * 其余 overlay（dir/branch/modal）与终态仍 noop，防污染别的流程。
    */
   function setPendingPreset(presetId: string): void {
-    if (state.value !== 'landing') return
+    if (state.value !== 'landing' && state.value !== 'preset-popover') return
     pendingPreset.value = presetId
   }
 
