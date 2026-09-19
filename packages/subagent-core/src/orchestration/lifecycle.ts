@@ -154,11 +154,25 @@ function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
   // emit 被 assertActive 拒绝，注销事件静默丢失（幽灵 pending 条目，skill-reload
   // e2e 实证）。原型链视图把 getter 留在原型上，属性访问仍逐次现读；spread 形态下
   // 未来 deps 新增任何 getter 都会复发同族快照缺陷，故在构造层面排除。
+  //
+  // onRunDone 覆盖必须走 Object.defineProperty（DefineOwnProperty 语义）、禁止普通
+  // 赋值（Set 语义）：生产装配 lazyDeps（workflow-events.ts）的全部成员都是
+  // getter-only accessor（含 onRunDone），普通赋值沿原型链命中同名无 setter 的
+  // accessor → 严格模式抛 TypeError（Bun/JSC「Attempted to assign to readonly
+  // property.」/ V8「Cannot set property ... which has only a getter」），run 派发
+  // 即炸（skill-reload e2e 复验实证，2026-09-19）。defineProperty 在视图上定义
+  // 自身数据属性，不查原型 setter，两种原型形态（数据属性/getter-only）均合法；
+  // eventBus 等其余成员仍走原型链现读，D3 语义不变。
   const depsWithTerminalCleanup: LifecycleDeps = Object.create(deps);
-  depsWithTerminalCleanup.onRunDone = (doneRun: WorkflowRun): void => {
-    disposeSignalAbortListener(run);
-    deps.onRunDone?.(doneRun);
-  };
+  Object.defineProperty(depsWithTerminalCleanup, "onRunDone", {
+    value: (doneRun: WorkflowRun): void => {
+      disposeSignalAbortListener(run);
+      deps.onRunDone?.(doneRun);
+    },
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
   // 自引用——worker-message-pump rebuildRuntime 需要 handlers 参数（handlers 引用自身）
   const handlers: WorkerHandlers = {
     async onMessage(raw: unknown): Promise<void> {

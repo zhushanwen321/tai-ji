@@ -396,4 +396,44 @@ describe("[D3] makeHandlers deps 视图保持 eventBus getter 现读", () => {
     // 旧 bus 只收过启动 register，绝不收到终态 unregister（getter 被快照即在此红）
     expect(oldBus.emit).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
   });
+
+  it("生产 lazyDeps 形态（成员全 getter-only）下视图构造不抛错且 onRunDone 覆盖仍生效", async () => {
+    // 回归锚（2026-09-19 skill-reload e2e 复验）：生产装配 lazyDeps
+    // （workflow-events.ts）的全部成员都是 getter-only accessor。per-run 视图
+    // 构造若用普通赋值（view.onRunDone = fn），Set 语义沿 Object.create 原型链
+    // 命中同名无 setter 的 accessor → 严格模式 TypeError（Bun/JSC「Attempted to
+    // assign to readonly property.」/ V8「Cannot set property ... which has only
+    // a getter」）——run 派发即炸，e2e 三 spec 全红。本用例按生产形态构造 deps
+    // 锁定 defineProperty 修复；spread 形态（快照）在此不红但由上一用例拦截。
+    let bus: { emit: ReturnType<typeof vi.fn> } = { emit: vi.fn() };
+    const onRunDone = vi.fn();
+    const base = makeDeps();
+    const deps = Object.defineProperties({}, {
+      store: { get: () => base.store },
+      workerHost: { get: () => base.workerHost },
+      runner: { get: () => base.runner },
+      runs: { get: () => base.runs },
+      eventBus: { get: () => bus },
+      onRunDone: { get: () => onRunDone },
+      log: { get: () => base.log },
+    }) as unknown as LifecycleDeps;
+
+    const runId = await runWorkflow(makeSpec(), deps);
+    const handlers = base.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
+    expect(bus.emit).toHaveBeenCalledWith("pending:register", expect.anything());
+
+    const oldBus = bus;
+    bus = { emit: vi.fn() };
+    await handlers.onMessage({ type: "return", result: { ok: true } });
+
+    expect(base.runs.get(runId)?.state.reason).toBe("completed");
+    // 新 bus 收到注销——原型 getter 现读生效
+    expect(bus.emit).toHaveBeenCalledWith("pending:unregister", {
+      id: runId,
+      reason: "completed",
+    });
+    expect(oldBus.emit).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
+    // 视图自身 onRunDone 覆盖仍生效（dispose + deps.onRunDone 转译链）
+    expect(onRunDone).toHaveBeenCalledWith(base.runs.get(runId));
+  });
 });
