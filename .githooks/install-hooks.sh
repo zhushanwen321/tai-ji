@@ -1606,8 +1606,8 @@ fi
 #   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
-GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts scripts/check-guide-contract-projection.mjs)
-if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
+GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
+if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
     print_section "[引擎指南契约投影守卫]"
     if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（守卫脚本被删除）${NC}"
@@ -1619,7 +1619,7 @@ if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine
         exit 1
     fi
     echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
-    if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$" \
+    if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$" \
         && ! echo "$GUIDE_PROJECTION_STAGED" | grep -q "^docs/extensions/subagents/engine-development-guide\.md$"; then
         echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
     fi
