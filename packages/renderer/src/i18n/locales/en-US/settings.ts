@@ -75,6 +75,8 @@ export default {
     appendTitle: 'Inject extra prompt',
     appendSubtitle: 'Append content to the end of the system prompt',
     appendHint: 'Appended to the end of the system prompt; takes effect on the next turn after saving (including in-progress sessions)',
+    capabilityLabel: 'TaiJi built-in capability notice',
+    capabilityHint: 'Injects a TaiJi rendering-capability note into the system prompt (inline HTML, relative images and links resolved per session directory); takes effect on the next turn after saving',
     appendLabel: 'Prompt to append',
     appendPlaceholder: 'Enter the prompt to append…',
     save: 'Save',
