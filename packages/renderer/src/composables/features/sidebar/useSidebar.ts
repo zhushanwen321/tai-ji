@@ -27,8 +27,8 @@
  * 命名收尾（2026-09-03 dev-merge dev-0.9.14）：本文件由 useSidebar.ts 重命名接管原名——
  * main 侧 2026-08-31 已独立完成同一 strangler 收尾（af96fa94c），两侧合并时采纳其终态命名。
  *
- * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 四挂载点注册表
- * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar，无 'sessions' 挂载点）；
+ * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 五挂载点注册表
+ * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar / modal，无 'sessions' 挂载点）；
  * 如需替换挂载实现，走该注册表（packages/core/src/bootstrap.ts），勿另起壳侧入口。
  */
 import type { ComputedRef } from 'vue'
