@@ -33,6 +33,11 @@
  * vitest 侧既有消费者（pi-fixture / equivalence / idle-pi-reclaim）不走 compat 通道，
  * 行为不变；fauxProvider() 换 createFauxCore + createProvider 等价组合（fauxProvider
  * 内部即此组合，见 pi-ai dist/providers/faux.js）。
+ *
+ * reload 防重播种（进程级 once，见 factory 内 setResponses 守卫）：pi reload 重跑 factory 时
+ * 跳过播种——响应队列跨 reload 不回卷，reload 后的后续 turn 命中 faux 耗尽 error 是预期形态。
+ * 依赖「reload 后队列重置」的消费者不存在（2026-09-19 排查：全部消费者中仅 skill-reload 三
+ * spec 触发 reload，其余 e2e/runtime 单测均为单次加载，once 守卫对其零行为差异）。
  */
 import { readFileSync } from 'node:fs'
 import {
@@ -129,6 +134,9 @@ function toAssistantMessage(step: ScriptedStep): AssistantMessage {
   })
 }
 
+/** 防重播种的进程级单例槽（Symbol.for 同 key 即同一 symbol，跨 jiti 模块实例共享——理由见 factory 内守卫注释） */
+const SEEDED_KEY = Symbol.for('@taiji/faux-llm-ext.seeded')
+
 export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
   const scriptPath = process.env['TAIJI_FAUX_SCRIPT']
   if (scriptPath === undefined || scriptPath === '') {
@@ -137,8 +145,6 @@ export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
   // 可选流控：tokensPerSecond > 0 才生效（token 级流式切块节奏），否则不限速
   const tpsRaw = Number(process.env['TAIJI_FAUX_TPS'] ?? '0')
   const tokensPerSecond = Number.isFinite(tpsRaw) && tpsRaw > 0 ? tpsRaw : undefined
-
-  const script = loadScript(scriptPath)
 
   const core = createFauxCore({
     provider: 'faux',
@@ -180,7 +186,18 @@ export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
     ],
   })
 
-  core.setResponses(script.map(toAssistantMessage))
+  // 防重播种（进程级 once）：pi reload 会重跑本 factory——resource-loader reload() 先
+  // clearExtensionCache（缓存清空 + generation++），loadExtensionsCached 未命中后经 jiti
+  // （moduleCache:false）重新求值本模块文件，模块级 flag 随新模块实例重置而无效，必须用
+  // Symbol.for 进程级单例槽跨 jiti 实例存活（pi-subagents workflow-domain-state 同族防线）。
+  // 无守卫时 reload 把响应队列重置回队首 → 完成通知 triggerTurn 后主 agent 重放 toolCall 步 →
+  // 幽灵 round-2 run（skill-reload e2e 托盘收口断言假红的根因）。跳过播种后新 core 队列为空，
+  // reload 后的后续 turn 命中 faux 耗尽语义（pi-ai "No more faux responses queued" error），
+  // 与真实 LLM「回文本、不重跑工具」在「不再派发工具」上等价。
+  if (Reflect.get(globalThis, SEEDED_KEY) !== true) {
+    core.setResponses(loadScript(scriptPath).map(toAssistantMessage))
+    Reflect.set(globalThis, SEEDED_KEY, true)
+  }
   // 与 fauxProvider() 等价的 provider 组装（auth 形态照抄 pi-ai dist/providers/faux.js）
   const provider: Provider = createProvider({
     id: core.provider,

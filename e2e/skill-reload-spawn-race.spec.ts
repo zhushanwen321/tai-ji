@@ -147,21 +147,25 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
     expect(preserved?.records, 'preserved records ≥1（在飞 subagent 被接管）').toBeGreaterThanOrEqual(1)
 
     // ── run 确定收口：workflowUpdate done 广播（用户可见通道；失败分支同通道可见，见文件头）──
+    // 全量遍历（禁 find：running 帧先入数组且 find 恒返回首帧，done 帧永不被检视 → 卡帧假
+    // 失败；survival 同款遍历模式。harness 防重播种后单 run 无 round-2 帧，首个终态即目标）
     let runId = ''
     let updateStatus = ''
     const doneDeadline = Date.now() + 150_000
     while (Date.now() < doneDeadline && runId === '') {
-      const hit = listen.events.find((e) => e.type === 'session.workflowUpdate')
-      const update = hit?.payload?.update as { status?: unknown; runId?: unknown } | undefined
-      // 必须等终态（done/failed）：running 广播先到（run 启动即广播），拿到就 break 会让
-      // 后续 JSONL 读回在 60s 长流式未结束时必然读到 running（假失败）
-      if (update !== undefined && typeof update.runId === 'string'
-        && (update.status === 'done' || update.status === 'failed')) {
-        runId = update.runId
-        updateStatus = String(update.status)
-        break
+      for (const e of listen.events) {
+        if (e.type !== 'session.workflowUpdate') continue
+        const update = e.payload?.update as { status?: unknown; runId?: unknown } | undefined
+        // 必须等终态（done/failed）：running 广播先到（run 启动即广播），拿到就返回会让
+        // 后续 JSONL 读回在 60s 长流式未结束时必然读到 running（假失败）
+        if (update !== undefined && typeof update.runId === 'string'
+          && (update.status === 'done' || update.status === 'failed')) {
+          runId = update.runId
+          updateStatus = String(update.status)
+          break
+        }
       }
-      await new Promise((r) => setTimeout(r, 1000))
+      if (runId === '') await new Promise((r) => setTimeout(r, 1000))
     }
     expect(runId, 'run 应有终态广播（正常完成或 done,failed，用户可见）').not.toBe('')
     console.log(`[S2] run 终态广播: runId=${runId} status=${updateStatus}`)

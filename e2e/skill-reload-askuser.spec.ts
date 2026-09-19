@@ -246,9 +246,13 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
     async function awaitDone(events: WsFrame[]): Promise<string> {
       const deadline = Date.now() + 150_000
       while (Date.now() < deadline) {
-        const hit = events.find((e) => e.type === 'session.workflowUpdate')
-        const update = hit?.payload?.update as { status?: unknown; runId?: unknown } | undefined
-        if (update?.status === 'done' && typeof update.runId === 'string') return update.runId
+        // 全量遍历（禁 find：running 帧先入数组且 find 恒返回首帧，done 帧永不被检视 → 卡帧
+        // 假失败；survival 同款遍历模式。harness 防重播种后每 session 单 run，首个 done 即目标）
+        for (const e of events) {
+          if (e.type !== 'session.workflowUpdate') continue
+          const update = e.payload?.update as { status?: unknown; runId?: unknown } | undefined
+          if (update?.status === 'done' && typeof update.runId === 'string') return update.runId
+        }
         await new Promise((r) => setTimeout(r, 1000))
       }
       return ''
