@@ -1,9 +1,16 @@
+// @vitest-environment jsdom
+// [U1 sanitize] DOMPurify 需要 nodeName getter 在 Node.prototype 上（realm 安全缓存 getter
+// 依赖它）；happy-dom 把 nodeName 定义在各元素子类，DOMPurify 3.4.11 在 happy-dom 下把
+// 所有元素判为不允许标签（P1 探针实证）——markdown 管线测试族统一跑 jsdom。
 /**
  * D-5 增量渲染单测（W22）：稳定边界判定 9 形态矩阵 + segments 增量协议。
  *
  * 覆盖：稳定边界判定矩阵与 W22 验收清单——
  * - findStableBoundary：边界位置精确 offset 断言（fence ``` 与 ~~~ 变体 / 列表续并 /
  *   表格中段 / blockquote / 缩进代码 / setext / 数学块奇偶 / 链接引用定义 / 超大单行降级）
+ * - HTML 块感知（设计 markdown-html-sanitize-render D7，U2）：type 1-7 边界与 md.parse
+ *   html_block token 边界全等（同源常量复刻的正确性判据）+ type 7 段落打断约束 +
+ *   标签配平检查（配平设边界 / 不配平 poisoned 留 tail）+ `<details>` 空行反例
  * - 拼接等价判据（正确性的唯一定义）：分段渲染拼接与全文渲染 DOM 等价
  * - renderIncremental：前缀缓存引用恒等（零重渲染）/ 边界前进 / 边界回退降级 /
  *   segId 单调递增稳定 / 未闭合 fence 占位段 / finalize 转完整渲染 / env 签名失效
@@ -14,11 +21,53 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/markdown-incremental.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import MarkdownIt from 'markdown-it'
 import type {
   IncrementalRenderCache,
   IncrementalRenderResult,
 } from '@/composables/logic/markdown-incremental'
 import type { MarkdownSegment } from '@/composables/logic/markdown'
+
+// ── U2（设计 D7）：HTML 块边界全等断言的对照基准 ──────────────────────────
+// 真实 markdown-it 实例（静态 import，不经 freshModule 的 doMock 模块图）：md.parse 的
+// html_block token 是块边界的权威源，block 层解析只依赖 html:true（fence/表格等其余
+// 配置不影响 html_block 规则）；扫描器常量同源复刻的正确性 = 边界与它全等。
+const mdHtml = new MarkdownIt({ html: true })
+
+/** 行首 offset 表（与实现 enumerateLines 同语义的测试侧复刻） */
+function lineStartsOf(src: string): number[] {
+  const starts: number[] = []
+  let s = 0
+  for (const line of src.split('\n')) {
+    starts.push(s)
+    s += line.length + 1
+  }
+  return starts
+}
+
+/** md.parse 的 html_block token 行区间列表（[startLine, endLine)） */
+function htmlBlockRanges(src: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  for (const t of mdHtml.parse(src, {})) {
+    if (t.type === 'html_block' && t.map && t.map.length === 2) {
+      ranges.push([t.map[0], t.map[1]])
+    }
+  }
+  return ranges
+}
+
+/** 断言边界 = doc 第 lineIdx 行的行首 offset（行索引越界时夹具自证失败，输出 doc 定位） */
+function expectBoundaryAtLine(
+  find: (content: string) => number | null,
+  doc: string,
+  lineIdx: number,
+): void {
+  const expected = lineStartsOf(doc)[lineIdx]
+  if (expected === undefined) {
+    throw new Error(`test fixture: line ${lineIdx} out of range for ${JSON.stringify(doc)}`)
+  }
+  expect(find(doc), doc).toBe(expected)
+}
 
 // stub shiki：避免真实语法加载（fine-grained 后入口是 shiki/core）；codeToHtml 计数同时用作「前缀零重渲染」的可观测探针
 const fakeCodeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`)
@@ -47,9 +96,14 @@ function segsToHtml(segs: MarkdownSegment[]): string {
     .join('')
 }
 
-/** DOM 级归一化：块级标签间空白折叠（<p>a</p>\n<p>b</p> 与分段产出的 <p>a</p><p>b</p> 渲染等价） */
+/** DOM 级归一化：块级标签间空白折叠（<p>a</p>\n<p>b</p> 与分段产出的 <p>a</p><p>b</p> 渲染等价）；
+ *  标签前换行折叠（x\n\n<p>after</p> 与段尾 trimEnd 后拼接的 x<p>after</p> 渲染等价——
+ *  U2 HTML 块剥标签后产裸文本段，段边界空白差异在此归一） */
 function normalizeHtml(html: string): string {
-  return html.replace(/>\s+</g, '><').trim()
+  return html
+    .replace(/>\s+</g, '><')
+    .replace(/\n+</g, '<')
+    .trim()
 }
 
 /** 拼接等价断言：增量（前缀+tail）拼接 与 全量渲染 在归一化后一致 */
@@ -232,6 +286,118 @@ describe('findStableBoundary — 9 形态矩阵（精确 offset）', () => {
   })
 })
 
+describe('findStableBoundary — HTML 块感知（D7：markdown-it 同源常量复刻 + 配平检查）', () => {
+  beforeEach(() => {
+    fakeCodeToHtml.mockClear()
+    vi.resetModules()
+  })
+
+  it('H1 闭合 HTML 块（type 1-7 矩阵）：边界 = md.parse html_block token 结束后的 streaming 行首', async () => {
+    const { findStableBoundary } = await freshModule()
+    const blocks = [
+      '<pre>\ncode\n</pre>', // type 1：闭合标签行闭合（闭合行属于块）
+      '<pre>x</pre>', // type 1：开行自身含闭合序列 → 单行块
+      '<!-- multi\nline -->', // type 2：--> 行内闭合
+      '<!-- multi\n\nblank inside -->', // type 2 块内空行（空行是块内内容，非闭合——R2 被否语义锚点）
+      '<?php\necho 1;\n?>', // type 3：?> 闭合
+      '<!DOCTYPE\ntitle>', // type 4：> 闭合
+      '<![CDATA[\ndata\n]]>', // type 5：]]> 闭合
+      '<div>\nx\n</div>', // type 6：div 在 html_blocks 名单，空行闭合（</div> 是块内容）
+      '<mytag>\nx\n</mytag>', // type 7：mytag 不在名单，完整标签行进入，空行闭合
+    ]
+    for (const block of blocks) {
+      const doc = `para\n\n${block}\n\nstreaming`
+      const ranges = htmlBlockRanges(doc)
+      // md.parse 对照基准有效性：确有 html_block（防测试形态构造漂移）
+      expect(ranges.length, doc).toBeGreaterThan(0)
+      const [, endLine] = ranges[0]
+      // 全部形态块内标签配平（注释/PI/声明/CDATA/开闭对计 0）→ 块后可切：最后合法边界
+      // = 紧邻块后的 streaming 行首。若扫描器把块内空行当块闭合（type 1-5 语义弄反），
+      // 边界会提前落进块内 → 与 token 边界全等失败。
+      expectBoundaryAtLine(findStableBoundary, doc, endLine + 1)
+    }
+  })
+
+  it('H2 未闭合 HTML 块（到 EOF）：块内无边界，边界退到块首行首（md.parse token 首行）', async () => {
+    const { findStableBoundary } = await freshModule()
+    const blocks = [
+      '<pre>\ncode', // type 1 未闭合
+      '<!-- multi', // type 2 未闭合（EOF）
+      '<?php', // type 3 未闭合
+      '<div>\nx', // type 6 未闭合（空行未到）
+      '<table>\n<tr>', // type 6 名单标签多行
+      '<mytag>\nx', // type 7 未闭合
+    ]
+    for (const block of blocks) {
+      const doc = `para\n\n${block}`
+      const ranges = htmlBlockRanges(doc)
+      expect(ranges.length, doc).toBeGreaterThan(0)
+      const [startLine] = ranges[0]
+      // 块开着（EOF 未闭合）→ 块内行首全部不可切 → 最后合法边界 = 块首行首
+      expectBoundaryAtLine(findStableBoundary, doc, startLine)
+    }
+  })
+
+  it('H3 type 7 段落打断约束：完整标签行不可打断段落；type 1-6 可打断（实装第三列语义）', async () => {
+    const { findStableBoundary } = await freshModule()
+    // type 7 不打断段落：md.parse 无 html_block（三行是一个 paragraph 的 lazy 续行），
+    // 扫描器同语义（paraOpen 持续）→ 边界 0
+    const inPara = 'para\n<mytag>\nmore'
+    expect(htmlBlockRanges(inPara)).toEqual([])
+    expect(findStableBoundary(inPara)).toBe(0)
+    // 对照 type 6 可打断段落：md.parse 侧 para 单行闭合 + html_block [1,3)；扫描器侧
+    // 与 fence 打断段落形态（M6 末条）同保守语义——行 0 处理后段落开放，行 1 行首候选
+    // 不可切 → 边界 0（少切不切不破坏等价，tail 含 div 块整段渲染）
+    const interrupted = 'para\n<div>\nx'
+    expect(htmlBlockRanges(interrupted)).toEqual([[1, 3]])
+    expect(findStableBoundary(interrupted)).toBe(0)
+    // type 7 在段落开始处（前无段落内容）可进入：文档首行完整标签 → html_block，正常设边界
+    const atStart = '<mytag>\nx\n</mytag>\n\nafter'
+    expect(htmlBlockRanges(atStart)).toEqual([[0, 3]])
+    expectBoundaryAtLine(findStableBoundary, atStart, 4)
+  })
+
+  it('H4 配平检查：配平块设边界；不配平块（裸开标签/孤立闭标签）禁设边界，块及其后留 tail', async () => {
+    const { findStableBoundary } = await freshModule()
+    // 配平：div±0；img（void）/br/（自闭合）/注释对计数透明不计
+    const balanced = '<div>\n<img src="x">\n<br/>\n<!-- c -->\n</div>\n\nstreaming'
+    expect(htmlBlockRanges(balanced)).toEqual([[0, 5]])
+    expectBoundaryAtLine(findStableBoundary, balanced, 6)
+    // 裸开标签（README 居中形态，D2 锚点）：块按 type 6 空行闭合但标签不配平 → 块首起
+    // 候选全部失效 → 边界回退。块前空行行首（5）的候选在段落行处理后评估（paraOpen=true，
+    // 段落开放保守语义——同 M6 fence 打断形态）不可用 → 边界退到 0：para 与裸 div 及其
+    // 后内容整体留 tail（比「块前切」更保守，等价方向不变）
+    const bareOpen = 'para\n\n<div align=center>\n\n# Title\n\nintro'
+    expect(htmlBlockRanges(bareOpen)).toEqual([[2, 3]])
+    expect(findStableBoundary(bareOpen)).toBe(0)
+    // 孤立闭标签：净计数 -1 不配平 → 同上
+    const orphanClose = 'para\n\n</div>\n\nstreaming'
+    expect(htmlBlockRanges(orphanClose)).toEqual([[2, 3]])
+    expect(findStableBoundary(orphanClose)).toBe(0)
+    // 不配平块后的内容整体不可切：裸 div 后的配平块也不设边界（poisoned 不恢复）
+    const afterBare = 'para\n\n<div align=center>\n\n<div>\nx\n</div>\n\nstreaming'
+    expect(findStableBoundary(afterBare)).toBe(0)
+  })
+
+  it('H5 `<details>` 展开形态：块内空行不切块（两块均不配平 → 文档级 fallback-full）', async () => {
+    const { findStableBoundary } = await freshModule()
+    // md.parse：两个 html_block（[0,2) 空行闭合块1 / [5,6)）夹段落——行 2 空行闭合块1
+    // 是 type 6 语义（details 在名单）；两块各含裸 <details>(+1) / </details>(-1) 不配平
+    // → poisonedFrom=0 → 无候选 → null（fallback-full：整文档单段渲染，性能换正确性——
+    // 若无配平检查，空行处切块会把裸 <details> 补闭固化进前缀缓存，live ≠ reload 永久化）
+    const unfolded = '<details>\n<summary>s</summary>\n\ncontent inside\n\n</details>\n\nafter'
+    expect(htmlBlockRanges(unfolded)).toEqual([
+      [0, 2],
+      [5, 6],
+    ])
+    expect(findStableBoundary(unfolded)).toBeNull()
+    // 对照：配平 details（单块内 <details>x</details> 净计数 0）正常设边界
+    const balancedDetails = '<details>\nx\n</details>\n\nafter'
+    expect(htmlBlockRanges(balancedDetails)).toEqual([[0, 3]])
+    expectBoundaryAtLine(findStableBoundary, balancedDetails, 4)
+  })
+})
+
 describe('renderIncremental — 拼接等价判据（闭合内容 DOM 等价）', () => {
   beforeEach(() => {
     fakeCodeToHtml.mockClear()
@@ -257,6 +423,24 @@ describe('renderIncremental — 拼接等价判据（闭合内容 DOM 等价）'
     await expectSpliceEquivalent('para\r\n\r\n```ts\r\ncode\r\n```\r\ntail')
     // W22 review 回归：反引号 fence info 含反引号按段落处理（误判 fence 会产占位段发散）
     await expectSpliceEquivalent('para\n\n``` a `b`\ncode')
+  })
+
+  // U2（设计 D2/D7）：HTML 块形态的切段/整串全等——裸开标签「吸进」语义下两态一致的
+  // 构造性验证（不配平块留 tail → tail 整段渲染与整串同语义；配平块切段前后无裸结构）
+  it('HTML 块形态（D2/D7）：切段渲染与全量渲染 DOM 等价', async () => {
+    // README 居中裸 div（带前缀段落：poisoned → 边界退到 div 前空行，div 及其后留 tail）
+    await expectSpliceEquivalent('para\n\n<div align=center>\n\n# 太极 TaiJi\n\nintro streaming')
+    // README 居中裸 div（文档首：poisonedFrom=0 → 无候选 → fallback-full 整文档单段）
+    await expectSpliceEquivalent('<div align=center>\n\n# Title\n\npara')
+    // <details> 展开形态（两块不配平 → fallback-full；空行不切块）
+    await expectSpliceEquivalent('<details>\n<summary>s</summary>\n\ncontent inside\n\n</details>\n\nafter')
+    // 配平块：增量切段（前缀可含完整配平 HTML 块，段级 DOM 往返不补闭）
+    await expectSpliceEquivalent('<div>\nx\n</div>\n\nafter')
+    // type 2 块内空行（空行是块内内容，块整体闭合后才可切）
+    await expectSpliceEquivalent('<!-- multi\n\nblank inside -->\n\nafter')
+    // type 1 / type 7 代表形态
+    await expectSpliceEquivalent('<pre>\ncode\n</pre>\n\nafter')
+    await expectSpliceEquivalent('<mytag>\nx\n</mytag>\n\nafter')
   })
 })
 
@@ -466,6 +650,28 @@ describe('renderIncremental — 缓存协议 / segId / 降级 / 占位', () => {
     expect(r4.prefixSegments).toBe(r3.prefixSegments)
   })
 
+  it('P7b env 签名失效：resourceBaseDir 值变化 → 前缀缓存重建（切 session cwd 防旧基准残留，设计 D4）', async () => {
+    const m = await freshModule()
+    const cache = m.createIncrementalRenderCache()
+    // resourceBaseDir 是 string：值比较（与 Set 的引用比较同语义层——「基准变了就重建」）
+    const envA = { resourceBaseDir: '/home/project-a' }
+    const content = 'plain para\n\nstreaming tail'
+    const r1 = await m.renderIncremental(content, cache, envA)
+    expect(r1.stableBoundary).toBeGreaterThan(0)
+
+    // 同值：缓存命中（引用恒等）
+    const r2 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-a' })
+    expect(r2.prefixSegments).toBe(r1.prefixSegments)
+
+    // 值变化（切 session cwd）：缓存失效 → 前缀重建（新对象）
+    const r3 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-b' })
+    expect(r3.prefixSegments).not.toBe(r1.prefixSegments)
+    expect(r3.prefixSegments[0]).not.toBe(r1.prefixSegments[0])
+    // 重建后同 env 再渲染 → 新缓存命中
+    const r4 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-b' })
+    expect(r4.prefixSegments).toBe(r3.prefixSegments)
+  })
+
   it('P8 无 cache 调用：无状态拆分渲染（一次性消费），前缀+tail 覆盖全文', async () => {
     const m = await freshModule()
     const r: IncrementalRenderResult = await m.renderIncremental('A\n\nB\n\nC')
@@ -581,6 +787,53 @@ describe('renderIncremental — 缓存协议 / segId / 降级 / 占位', () => {
     // env 引用签名已同步为新引用（下一帧同 env 命中缓存校验）
     expect(cache.envFilePaths).toBe(envB.filePaths)
     expect(cache.boundary).toBe(0)
+  })
+
+  // U2（设计 D7）：裸 div 流式帧序列——块未闭合时边界可推进到块前空行（6），空行到达
+  // 触发配平检查 → 不配平 → poisoned → 边界要求回退（6 → 5）→ 既有「边界回退防御」
+  // 接管（fallback-full 一帧 + 缓存重置），后续帧在裸 div 前稳定（块及其后整体留 tail，
+  // 前缀永不固化被补闭的裸开标签——live ≡ reload 构造性成立）
+  it('P15 裸 div 流式帧序列：不配平块闭合 → 边界回退防御 fallback-full → 恢复增量', async () => {
+    const m = await freshModule()
+    const cache = m.createIncrementalRenderCache()
+    // 帧1：块开着（EOF 未闭合）→ 边界 6（div 行首；div 是独立开放块起始）
+    const f1 = await m.renderIncremental('para\n\n<div align=center>', cache)
+    expect(f1.mode).toBe('incremental')
+    expect(f1.stableBoundary).toBe(6)
+    // 帧2：空行 + 后续标题到达 → type 6 空行闭合 + 配平检查不配平 → poisonedFrom=6 →
+    // 合法边界回退（块前段落行尾候选不可用 → 0 < 缓存 6）→ 既有边界单调性防御触发
+    // （fallback-full，输出等同全量）
+    const f2 = await m.renderIncremental('para\n\n<div align=center>\n\n# T', cache)
+    expect(f2.mode).toBe('fallback-full')
+    expect(f2.stableBoundary).toBe(0)
+    // 帧3：标题补全 → 边界稳定在 0（para 与裸 div 及其后整体留 tail——块前段落行尾
+    // 候选因段落开放保守语义不可用），前缀永不固化被补闭的裸开标签
+    const f3content = 'para\n\n<div align=center>\n\n# Title'
+    const f3 = await m.renderIncremental(f3content, cache)
+    expect(f3.mode).toBe('incremental')
+    expect(f3.stableBoundary).toBe(0)
+    // live ≡ reload：帧3 前缀 + tail 拼接与同帧全量渲染等价（tail 段整段渲染承载吸进语义）
+    const full3 = await m.renderMarkdownSegments(f3content)
+    expect(normalizeHtml(segsToHtml([...f3.prefixSegments, ...f3.tailSegments]))).toBe(
+      normalizeHtml(segsToHtml(full3)),
+    )
+  })
+
+  // U2（设计 D7）：配平 HTML 块流式——块闭合且配平后边界正常前进（前缀可含完整块）
+  it('P16 配平 HTML 块流式：块闭合后边界推进过块（前缀含配平块，无回退）', async () => {
+    const m = await freshModule()
+    const cache = m.createIncrementalRenderCache()
+    // 帧1：块开着 → 边界 6（块前）
+    const f1 = await m.renderIncremental('para\n\n<div>\nx', cache)
+    expect(f1.stableBoundary).toBe(6)
+    // 帧2：空行到达块闭合（配平）+ after 段落 → 边界推进到 after 行首，模式保持增量
+    const f2content = 'para\n\n<div>\nx\n</div>\n\nafter'
+    const f2 = await m.renderIncremental(f2content, cache)
+    expect(f2.mode).toBe('incremental')
+    expect(f2.stableBoundary).toBe(lineStartsOf(f2content)[6])
+    // 前缀含配平 div 块的渲染（段级 DOM 往返不补闭）
+    expect(f2.prefixSegments.map((s) => s.content).join('')).toContain('<div>')
+    expect(f2.prefixSegments.map((s) => s.content).join('')).toContain('</div>')
   })
 })
 

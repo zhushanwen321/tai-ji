@@ -27,6 +27,8 @@ import {
   ensureInstanceDir,
   fnv1a,
   isRuntimeStateEntry,
+  isWithinDevDataParent,
+  resolveCustomDataDir,
 } from '../dev-instance-lib.mjs'
 
 const fixtures = []
@@ -137,6 +139,74 @@ describe('模板运行时状态过滤', () => {
     expect(existsSync(join(dst, 'copy', 'agent', 'settings.json'))).toBe(true)
     expect(existsSync(join(dst, 'copy', 'agent', 'skills', 'x.md'))).toBe(true)
     expect(existsSync(join(dst, 'copy', 'agent', 'sessions'))).toBe(false)
+  })
+})
+
+// ── --data-dir 实验数据目录 ───────────────────────────────────────────
+
+describe('resolveCustomDataDir 值域校验', () => {
+  function devRoot() {
+    return tmpdir2('di-devroot-')
+  }
+
+  it('树内绝对路径归一化（.. 消解后仍在树内即放行）', () => {
+    const root = devRoot()
+    expect(resolveCustomDataDir(join(root, 'renderopt'), { devDataParent: root })).toBe(join(root, 'renderopt'))
+    expect(resolveCustomDataDir(join(root, 'a', '..', 'b'), { devDataParent: root })).toBe(join(root, 'b'))
+  })
+
+  it('树外路径拒绝并给值域指引（防绕过 fs-guard 白名单 / 指向真实数据目录）', () => {
+    const root = devRoot()
+    for (const bad of [tmpdir2('di-outside-'), join(root, '../elsewhere')]) {
+      expect(() => resolveCustomDataDir(bad, { devDataParent: root })).toThrow(/必须落在|值域/)
+    }
+  })
+
+  it('保留目录拒绝（DEV_DATA_PARENT 本体按值域外拒绝、instances 按保留目录拒绝——--fresh 会整目录删除）', () => {
+    const root = devRoot()
+    expect(() => resolveCustomDataDir(root, { devDataParent: root })).toThrow(/必须落在/)
+    expect(() => resolveCustomDataDir(join(root, 'instances'), { devDataParent: root })).toThrow(/保留目录/)
+  })
+
+  it('空参拒绝并指向显式路径用法', () => {
+    expect(() => resolveCustomDataDir(undefined, { devDataParent: devRoot() })).toThrow(/--data-dir/)
+  })
+
+  it('isWithinDevDataParent：严格子路径成立，本体与树外不成立', () => {
+    const root = devRoot()
+    expect(isWithinDevDataParent(join(root, 'x'), root)).toBe(true)
+    expect(isWithinDevDataParent(root, root)).toBe(false)
+    expect(isWithinDevDataParent(join(root, '..', 'escape'), root)).toBe(false)
+  })
+})
+
+describe('ensureInstanceDir --data-dir 分支', () => {
+  function setup() {
+    const root = tmpdir2('di-inst-')
+    const instancesDir = join(root, 'instances')
+    const templateDir = join(root, 'template')
+    mkdirSync(instancesDir, { recursive: true })
+    mkdirSync(templateDir, { recursive: true })
+    writeFileSync(join(templateDir, 'config.json'), '{}')
+    return { root, instancesDir, templateDir }
+  }
+
+  it('树内自定义目录允许就绪（--fresh 可清实验目录）', () => {
+    const { root, instancesDir, templateDir } = setup()
+    const custom = join(root, 'renderopt')
+    const ok = ensureInstanceDir({ dataDir: custom, name: 'x' }, false, {
+      instancesDir, templateDir, devDataParent: root, log: () => {},
+    })
+    expect(ok).toBe(true)
+    expect(existsSync(join(custom, 'config.json'))).toBe(true)
+  })
+
+  it('树外目录仍拒绝（防误删语义对 --data-dir 分支不放松）', () => {
+    const { root, instancesDir, templateDir } = setup()
+    const fail = (msg) => { throw new Error(msg) }
+    expect(() => ensureInstanceDir({ dataDir: tmpdir2('di-elsewhere-'), name: 'x' }, true, {
+      instancesDir, templateDir, devDataParent: root, fail,
+    })).toThrow(/越界/)
   })
 })
 

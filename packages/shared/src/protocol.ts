@@ -263,11 +263,20 @@ export interface SetProviderData {
 /** 系统提示词配置（FR-6）。文件：<dataDir>/system-prompt.json。
  *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，仅新建会话生效）
  *  - append:  追加注入（走 before_agent_start hook，每轮读配置热生效）
+ *  - capability: taiji capability 固定注入段开关（schema v2 新增，D6）
  *  version: schema 版本号（SR1） */
 export interface SystemPromptConfig {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  /**
+   * 可选 = v1 存量 json 无此字段的常态形态。语义权威在扩展侧解析（消费方是
+   * system-prompt 扩展的 before_agent_start hook，直接读原始 json）：缺字段/
+   * 形态不对/文件损坏 → 按 enabled true 生效，仅显式布尔 false 关闭——与
+   * replace/append 的「缺省 false」方向相反（capability 是 taiji 内置告知，
+   * 默认开是设计裁决）。renderer 读侧对 undefined 同样兜底 true。
+   */
+  capability?: { enabled: boolean }
 }
 
 /** 终端配置（Phase 6 settings）。文件：<dataDir>/terminal.json。
