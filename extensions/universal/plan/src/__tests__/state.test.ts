@@ -203,7 +203,7 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
 
     const state = reconstructPlanState(mockCtx);
-    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "reviewState", "skills", "templateName"]);
+    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "reviewState", "skills", "templateName", "templateProvidedPath"]);
     expect(state.isActive).toBe(true);
   });
 

@@ -7,24 +7,27 @@
 ```
 /plan 修复项目中所有失败的测试                      # 进入 plan mode（模板流程）
 /plan 重构 auth 模块 --skills tech-design,dev-flow  # 进入 plan mode（挂载技能流程）
+/plan 复盘事故 --template ~/docs/retro.md           # 进入 plan mode（直传模板文件）
 /plan status                                       # 查看状态、技能与产物清单
 /plan abort                                        # 取消活跃的 plan mode
 ```
 
-`--skills` 接受逗号分隔的技能名（按逗号原样切分 + 去首尾空格，含中文/内部空格的技能名不丢字符）。技能名经 `pi.getCommands()` 的 `source === "skill"` 枚举校验，不存在则不进入计划模式并回复可用技能清单。未指定 `--skills` 时回落内置模板流程。
+`--skills` 接受逗号分隔的技能名（按逗号原样切分 + 去首尾空格，含中文/内部空格的技能名不丢字符）。技能名经 `pi.getCommands()` 的 `source === "skill"` 枚举校验，不存在则不进入计划模式并回复可用技能清单。未指定 `--skills` 时回落模板流程。
+
+`--template <path>` 直传任意外部 md 文件作模板（与 `--skills` 互斥，同给 fail-fast）：`~` 前缀展开、含空格路径无需引号（flag 后整段即路径）；文件不存在 / 非 .md 分别报错（不进入计划态）。进入后提示词内嵌该文件全文且不注入模板清单段，无需 select-template。
 
 ## 计划态生命周期
 
 进入后 agent 限只读工具集（read/bash/grep/find/ls/plan），按注入提示词产出文档：
 
 - **技能流程**（挂载 `--skills`）：按技能 SKILL.md 流程产出文档（AI 自行 read 技能文件）。
-- **模板流程**（未挂载）：内置 5 模板选型后撰写 plan.md。
+- **模板流程**（未挂载）：从三源发现的模板清单中选型后撰写 plan.md（见下节）。
 
 文档全部就绪后调 `submit-review` 提交审阅；taiji 宿主（`TAIJI_AGENT_EXT_LOG=1`）挂 `PLAN_REVIEW_MARKER` select 弹 GUI 审批（确认执行 / 提交评论修订 / 请求进一步解释），独立 pi 返回文本软门（对话中反馈评论，满意后调 `complete`）。
 
 ## plan 工具
 
-模型经 `plan` tool 驱动状态流转，actions 六项：`list-template` / `select-template` / `register-doc` / `submit-review` / `complete` / `abort`。
+模型经 `plan` tool 驱动状态流转，actions 五项：`select-template` / `register-doc` / `submit-review` / `complete` / `abort`。
 
 - `register-doc`：登记一份产物文档（同 fileName 重登 = version+1 覆盖），供 GUI 产物 tab 展示与内容刷新。
 - `submit-review`：全部文档就绪后请求审阅。docs 为空或计划态已退出时返回错误提示（E6 双守卫）。
@@ -45,7 +48,15 @@
 
 ## 模板
 
-内置 5 个（`templates/`）：`feature-plan` / `bugfix-plan` / `refactor-plan` / `implementation-plan` / `research-plan`。支持项目自定义模板（`listTemplates` / `loadTemplate` 按 projectDir 发现）。
+三源发现（同名 last-writer-wins，项目 > 用户 > 内置）：
+
+1. **内置**（包内 `templates/`）：`feature-plan` / `bugfix-plan` / `refactor-plan` / `implementation-plan` / `research-plan`
+2. **用户级** `~/.agents/plans/*.md`：个人模板投放点
+3. **项目级** `<project>/.agents/plans/*.md`：项目/团队模板投放点（项目级覆盖用户级覆盖内置）
+
+进入计划态时全量清单以 `<available-plans>` 段随提示词一次性注入（name + location），模型自选后调 `select-template`——返回的 content 携带胜者文件全文（章节骨架直达，无需再 read）；错名报错自带可用清单，模型当场自愈。`--template <path>` 直传时跳过选型（见用法节）。
+
+**goal 桥结构建议**：自定义模板（含直传文件）建议包含 `## Implementation Steps` 编号步骤节——`complete` 选 goal 档执行时步骤提取（`extractPlanSteps` 正则）硬依赖该节；无该节会退化到 fallback（扫全部编号项，可能收进其他节噪音）或提取失败（no-steps 启动失败，有恢复文案）。
 
 ## 依赖
 

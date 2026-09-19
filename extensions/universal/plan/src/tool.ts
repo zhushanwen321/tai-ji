@@ -24,7 +24,7 @@ import type { ExecSkill } from "./exec-skills.js";
 import { formatReviewComments } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
 import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
-import { loadTemplate } from "./templates.js";
+import { listTemplates, loadTemplate } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
@@ -56,7 +56,6 @@ export function validateAction(action: string): action is PlanAction {
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
-  content: string;
 }
 
 interface CompleteDetails {
@@ -232,24 +231,47 @@ interface ActionResult {
   details: PlanDetails;
 }
 
+/**
+ * select-template（D7）：三源合并视图解析 + content 携带胜者文件全文。
+ * - 合并视图与注入段同源（listTemplates({ projectRoot })，项目级锚点 = ctx.cwd）：
+ *   模型看到什么清单就能选中什么（含用户级/项目级投放）。
+ * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
+ *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
+ * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。
+ * - --template 直传防御：模板已由用户指定并全文内嵌注入，select-template 是
+ *   画蛇添足——报错不带三源清单（直传文件不在清单里，清单会误导改选内置
+ *   模板、偏离用户意图）。
+ */
 function executeSelectTemplate(
   pi: ExtensionAPI,
   params: Record<string, unknown>,
   state: PlanState,
+  projectDir: string,
 ): ActionResult {
   const templateName = params.templateName as string;
   if (!templateName) {
     throw new Error("templateName is required for select-template");
   }
-  const content = loadTemplate(templateName);
-  if (!content) {
-    throw new Error(`Template not found: ${templateName}`);
+  if (state.templateProvidedPath !== undefined) {
+    throw new Error("template was provided via --template, write the plan following the file above");
+  }
+  const templates = listTemplates({ projectRoot: projectDir });
+  const winner = templates.find((t) => t.name === templateName);
+  if (!winner) {
+    throw new Error(`Template not found: ${templateName}. Available: ${templates.map((t) => t.name).join(", ")}`);
+  }
+  const content = loadTemplate(templateName, { projectRoot: projectDir });
+  if (content === null) {
+    throw new Error(`Template not readable: ${winner.path}`);
   }
   state.templateName = templateName;
   persistPlanState(pi, state);
   return {
-    content: [{ type: "text" as const, text: `Template selected: ${templateName}` }],
-    details: { action: "select-template", templateName, content },
+    content: [{
+      type: "text" as const,
+      text: `Template selected: ${templateName} (${winner.path}). Write the plan following the template's chapter structure below.\n\n<template>\n${content}\n</template>`,
+    }],
+    details: { action: "select-template", templateName },
   };
 }
 
@@ -772,7 +794,7 @@ export function registerPlanTool(
 
       switch (action) {
         case "select-template":
-          return executeSelectTemplate(pi, params, state);
+          return executeSelectTemplate(pi, params, state, projectDir);
 
         case "register-doc":
           return executeRegisterDoc(pi, params, state);

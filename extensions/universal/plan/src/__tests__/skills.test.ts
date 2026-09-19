@@ -236,9 +236,10 @@ describe("E1 fail-fast via /plan handler", () => {
       expect.objectContaining({ isActive: true, skills: [] }),
     );
     const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    // 无技能指令段，回落模板流程段
+    // 无技能指令段，回落模板流程段（v2b 注入形态：mock fs 空发现 → no-plans 分支
+    // 自构章节骨架，无任何模板查询 action 指引）
     expect(prompt).not.toContain("Skill Workflow");
     expect(prompt).toContain("Phase C: Writing");
-    expect(prompt).toContain("list-template");
+    expect(prompt).toContain("No plan templates were discovered");
   });
 });

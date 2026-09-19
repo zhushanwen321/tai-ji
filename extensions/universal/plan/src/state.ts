@@ -13,6 +13,13 @@ export interface PlanState {
   planFilePath: string;
   requirement: string;
   templateName: string;
+  /**
+   * --template 直传标记（D7 select-template 防御的判定信号）：直传进入时 =
+   * 展开后模板文件绝对路径；模板流程进入缺失。templateName 字段两流程共用
+   * （直传存 basename / 选中存模板名），单看它无法区分「已直传」与「已选中」，
+   * 故独立持久化直传事实——重启经 entry 恢复，reset 时随退出失效。
+   */
+  templateProvidedPath?: string;
   /** 挂载技能名清单（--skills 解析产物；模板流程为空数组——挂载声明，reset 时随退出失效） */
   skills: string[];
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
@@ -99,6 +106,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     planFilePath: state.planFilePath,
     requirement: state.requirement,
     templateName: state.templateName,
+    templateProvidedPath: state.templateProvidedPath,
     skills: state.skills,
     docs: state.docs,
     reviewState: state.reviewState,
@@ -125,6 +133,7 @@ export function resetPlanState(
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
+  delete state.templateProvidedPath;
   state.skills = [];
   delete state.reviewState;
   // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
@@ -179,6 +188,11 @@ function readDocsFingerprint(data: Partial<PlanState>): string | undefined {
     : undefined;
 }
 
+/** 直传标记白名单式读取：非 string（含缺失）按模板流程处理（D4 字段级降级） */
+function readTemplateProvidedPath(data: Partial<PlanState>): string | undefined {
+  return typeof data.templateProvidedPath === "string" ? data.templateProvidedPath : undefined;
+}
+
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const state = { ...DEFAULT_PLAN_STATE };
   const entries = ctx.sessionManager.getEntries();
@@ -194,6 +208,7 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
     state.planFilePath = data?.planFilePath ?? "";
     state.requirement = data?.requirement ?? "";
     state.templateName = data?.templateName ?? "";
+    state.templateProvidedPath = readTemplateProvidedPath(data ?? {});
     state.skills = readSkills(data ?? {});
     state.docs = readDocs(data ?? {});
     state.reviewState = readReviewState(data ?? {});

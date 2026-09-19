@@ -287,20 +287,6 @@ function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
   );
 }
 
-/**
- * --template 直传的提示词占位段（v2a 骨架）：终态为「不注入清单段 + 内嵌文件
- * 全文」（prompts.ts --template 分支，v2b 落地）。本段先声明路径并指引模型 read
- * 该文件按章节写——文件内容获取在 v2b 前仍由模型 read 完成。
- */
-function templateProvidedSection(absPath: string): string {
-  return (
-    `## Template (via --template)\n` +
-    `模板已由 --template 指定: ${absPath}\n` +
-    `Read this file first and write the plan following its chapter structure. ` +
-    `Do NOT call plan(action='select-template') — the template is already chosen.`
-  );
-}
-
 /** Handle entering plan mode */
 function handleEnterPlanMode(
   pi: ExtensionAPI,
@@ -324,10 +310,20 @@ function handleEnterPlanMode(
   }
 
   let templateAbsPath: string | undefined;
+  let templateContent: string | undefined;
   if (parsed.templatePath !== undefined) {
     const resolution = resolveTemplateFile(parsed.templatePath, ctx.cwd);
     if (!resolution.ok) {
       reportTemplateFlagError(pi, resolution.problem);
+      return;
+    }
+    // 全文在校验通过后、任何进入副作用（entry/工具限制）之前读好——读失败
+    // （权限/竞态删除）同族 fail-fast，不留「已持久 isActive 但提示词没注入」
+    // 的半进入态（D5）
+    try {
+      templateContent = fs.readFileSync(resolution.absPath, "utf-8");
+    } catch {
+      reportTemplateFlagError(pi, `Template file not readable: ${resolution.absPath}. ${TEMPLATE_USAGE_SAMPLE}`);
       return;
     }
     templateAbsPath = resolution.absPath;
@@ -363,8 +359,11 @@ function handleEnterPlanMode(
   state.planFilePath = planFilePath;
   state.requirement = requirement;
   // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，
-  // 复用既有字段既有值形态——D5）；模板流程进入时仍为空，等 select-template 写入
+  // 复用既有字段既有值形态——D5）；模板流程进入时仍为空，等 select-template 写入。
+  // 直传事实另落 templateProvidedPath（select-template 防御的判定信号——
+  // templateName 单看无法区分「已直传」与「已选中」，D7）
   state.templateName = templateAbsPath ? path.basename(templateAbsPath, ".md") : "";
+  state.templateProvidedPath = templateAbsPath;
   state.skills = resolved.map((s) => s.name);
   state.docs = [];
   delete state.reviewState;
@@ -376,7 +375,15 @@ function handleEnterPlanMode(
   pi.setActiveTools(PLAN_MODE_TOOLS);
 
   // Inject plan mode prompt inline (四段：技能指令 / 产物纪律 / 只读纪律 / 模板流程——D2)
-  const prompt = buildPlanModePrompt({ requirement, planFilePath, skills: resolved });
-  // --template 直传附加占位声明段（v2a 骨架，终态见 templateProvidedSection 注释）
-  pi.sendUserMessage(templateAbsPath === undefined ? prompt : `${prompt}\n\n${templateProvidedSection(templateAbsPath)}`);
+  // --template 直传走 prompts.ts 直传分支（清单段抑制 + 全文内嵌，D5）
+  pi.sendUserMessage(
+    buildPlanModePrompt({
+      requirement,
+      planFilePath,
+      skills: resolved,
+      ...(templateAbsPath !== undefined && templateContent !== undefined
+        ? { template: { absPath: templateAbsPath, content: templateContent } }
+        : {}),
+    }),
+  );
 }

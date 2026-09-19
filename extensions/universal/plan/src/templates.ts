@@ -21,7 +21,7 @@ export interface TemplateInfo {
  *  - bundle 形态（staged 打包内置，esbuild 把本文件 inline 进包根 index.js）：
  *    __dirname = …/extensions/@zhushanwen/pi-plan，模板由 bundle-extensions.mjs
  *    专项拷贝到同级 `templates/`。若仍按 `../templates` 推导会错位一级解析到
- *    …/@zhushanwen/templates（不存在）→ 打包版 list-template 恒 0、select-template
+ *    …/@zhushanwen/templates（不存在）→ 打包版模板发现恒空、select-template
  *    恒 null（scanTemplateDir 的 existsSync 防御不崩溃但静默失效）。
  * 探测先 bundle 形态后源码形态：两形态目录互斥（staged 无 src/；源码布局 src/ 下
  * 无 templates/），existsSync 判别即可定位；均缺失时回退源码形态路径，由

@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// --template 直传注入的全文 fixture（vi.hoisted：vi.mock 工厂引用需先于模块体初始化）
+const TEMPLATE_FILE_FIXTURE = vi.hoisted(() => "# retro skeleton\n\n## Implementation Steps\n- step one\n");
+
 // Mock dependencies before importing
 vi.mock("node:fs", () => ({
   mkdirSync: vi.fn(),
   readdirSync: vi.fn(() => []),
   statSync: vi.fn(),
   existsSync: vi.fn(() => false),
+  // --template 直传的全文内嵌读取（v2b：prompts 分支消费）
+  readFileSync: vi.fn(() => TEMPLATE_FILE_FIXTURE),
 }));
 
 vi.mock("../widget.js", () => ({
@@ -258,7 +263,7 @@ describe("registerPlanCommand", () => {
       expect(message).toContain("--template was given but no path followed it");
     });
 
-    it("valid template: enters plan mode — templateName = 去扩展名 basename + 占位声明段注入 (v2a 骨架)", async () => {
+    it("valid template: enters plan mode — basename + 直传分支（全文内嵌 + 清单段抑制，v2b 终态）", async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => p === "/tmp/test-project/docs/retro-template.md");
       await handler("retro meeting --template docs/retro-template.md", ctx);
 
@@ -268,13 +273,19 @@ describe("registerPlanCommand", () => {
           isActive: true,
           requirement: "retro meeting",
           templateName: "retro-template",
+          templateProvidedPath: "/tmp/test-project/docs/retro-template.md",
           skills: [],
         }),
       );
       expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
       const prompt = sentMessage();
-      expect(prompt).toContain("模板已由 --template 指定: /tmp/test-project/docs/retro-template.md");
+      // 直传声明 + 全文内嵌（文件内容直达模型，不赌自发 read——D5）
+      expect(prompt).toContain("template was provided via --template");
+      expect(prompt).toContain("/tmp/test-project/docs/retro-template.md");
+      expect(prompt).toContain(TEMPLATE_FILE_FIXTURE);
       expect(prompt).toContain("Do NOT call plan(action='select-template')");
+      // 清单段抑制：guide 行与「模板已指定」并存会诱导画蛇添足调 select-template
+      expect(prompt).not.toContain("<available-plans>");
     });
 
     it("spaced path with ~ prefix: whole-segment value + homedir expansion reach validation and entry", async () => {
@@ -284,10 +295,11 @@ describe("registerPlanCommand", () => {
 
       expect(pi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
-        expect.objectContaining({ isActive: true, templateName: "retro template" }),
+        expect.objectContaining({ isActive: true, templateName: "retro template", templateProvidedPath: spacedAbs }),
       );
       const prompt = sentMessage();
-      expect(prompt).toContain(`模板已由 --template 指定: ${spacedAbs}`);
+      expect(prompt).toContain(spacedAbs);
+      expect(prompt).toContain(TEMPLATE_FILE_FIXTURE);
     });
   });
 });
