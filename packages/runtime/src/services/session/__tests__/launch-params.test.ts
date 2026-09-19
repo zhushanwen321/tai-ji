@@ -189,12 +189,26 @@ describe('resolveLaunchPresetOptions', () => {
     expect(resolveSpy).toHaveBeenCalledWith({ id: 'builtin:minimal' }, '/cwd')
   })
 
-  it('preset 被删/失效 → fallback builtin:full（全工具模式兜底，§4.3）', async () => {
+  it('preset 被删/失效 → fallback builtin:full（全工具模式兜底，§4.3）+ 回落事实随 resolution 上抛（F1/E4）', async () => {
     const full = { id: 'builtin:full' }
     const resolveSpy = vi.fn((preset: unknown) => preset as PresetResolution)
     const svc = makePresetService({ 'builtin:full': full }, resolveSpy)
-    await expect(resolveLaunchPresetOptions(svc, 'deleted-preset', '/cwd')).resolves.toBe(full)
+    const resolution = await resolveLaunchPresetOptions(svc, 'deleted-preset', '/cwd')
+    // 回落事实（原悬空 id）——restore 路径据此置 SessionSummary.launchPresetFallbackTo 披露
+    expect(resolution?.fellBackFromPresetId).toBe('deleted-preset')
+    // 其余字段仍是 builtin:full 的 resolve 产物（回落语义不变）
+    expect(resolution).toMatchObject(full)
     expect(resolveSpy).toHaveBeenCalledWith(full, '/cwd')
+  })
+
+  it('preset 存在 → 不附回落事实（fellBackFromPresetId undefined，且保持 resolve 对象同一性）', async () => {
+    const resolution = {} as PresetResolution
+    const resolveSpy = vi.fn(() => resolution)
+    const svc = makePresetService({ 'mode-live': { id: 'mode-live' } }, resolveSpy)
+    const result = await resolveLaunchPresetOptions(svc, 'mode-live', '/cwd')
+    expect(result?.fellBackFromPresetId).toBeUndefined()
+    // 无回落不新建对象（既有 .toBe 身份断言与调用方不变）
+    expect(result).toBe(resolution)
   })
 
   it('builtin:full 也取不到（理论不可达）→ undefined', async () => {

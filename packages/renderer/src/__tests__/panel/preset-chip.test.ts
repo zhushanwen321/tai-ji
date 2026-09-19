@@ -138,6 +138,32 @@ describe('PresetChip E7 三态（设计 §7.5：与 ModeDeclarationRow 同判据
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toContain('custom:gone')
   })
+
+  it('②b F1 未回落（无 fallbackTo）→ 只预告「会话重启后将回落全工具」，不声称本次已用全工具', () => {
+    const wrapper = mountChip({ presetId: 'custom:gone' })
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.text()).toContain('模式已删除')
+    expect(chip.text()).toContain('会话重启后将回落全工具')
+    // 假陈述闸：未重启窗口内禁声称「本次已回落」
+    expect(chip.text()).not.toContain('本次以全工具模式启动')
+  })
+
+  it('②c F1 已回落（fallbackTo=builtin:full）→ 披露「本次以全工具模式启动」，且不预告', () => {
+    const wrapper = mountChip({ presetId: 'custom:gone', fallbackTo: 'builtin:full' })
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.text()).toContain('模式已删除')
+    expect(chip.text()).toContain('本次以全工具模式启动')
+    expect(chip.text()).not.toContain('会话重启后将回落全工具')
+    // popover 亦有完整披露文案（chip 截断时的可靠落点）
+    expect(wrapper.find('[data-testid="preset-chip-fallback-popover"]').exists()).toBe(true)
+  })
+
+  it('②d F1 模式可得时无回落披露（正常态不得带回落文案）', () => {
+    const wrapper = mountChip({ presetId: 'custom:dispatch' })
+    expect(wrapper.find('[data-testid="preset-chip-fallback"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('回落全工具')
+    expect(wrapper.text()).not.toContain('本次以全工具模式启动')
+  })
 })
 
 describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §7.1）', () => {
@@ -219,6 +245,10 @@ const composerFlowMock = vi.hoisted(() => ({
   closeOverlay: vi.fn(),
   setPendingModel: vi.fn(),
 }))
+/** 可变的会话行（F1 分态用例改写 launchPresetFallbackTo）。 */
+const composerSessionState = vi.hoisted(() => ({
+  session: { id: 's1', launchPresetId: 'custom:dispatch', cwd: '/repo' } as Record<string, unknown>,
+}))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => composerFlowMock,
   resetNewTaskFlow: vi.fn(),
@@ -248,9 +278,10 @@ vi.mock('@/api', () => ({
 }))
 vi.mock('@/stores/session', () => ({
   // Composer 的模式 chip 判据读 sessionStore.list 的 launchPresetId（非默认模式）
+  // + launchPresetFallbackTo（F1 回落披露）；session 行对象可变，供分态用例改写。
   useSessionStore: () => ({
     active: undefined,
-    list: [{ id: 's1', launchPresetId: 'custom:dispatch', cwd: '/repo' }],
+    list: [composerSessionState.session],
     applySnapshot: vi.fn(),
     revive: vi.fn(),
   }),
@@ -279,6 +310,44 @@ const composerStubs = {
 }
 
 describe('Composer 集成：对话态 meta 行只读模式 chip', () => {
+  afterEach(() => {
+    // 分态用例改写过的会话行复位（后续用例依赖默认 dispatch）
+    composerSessionState.session = { id: 's1', launchPresetId: 'custom:dispatch', cwd: '/repo' }
+  })
+
+  it('F1 已回落（SessionSummary.launchPresetFallbackTo）→ chip 披露「本次以全工具模式启动」', async () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([{
+      id: 'builtin:full', name: '全工具模式', builtin: true, order: 0,
+      toolMode: 'all', extensionMode: 'all',
+    }])
+    presetStore.setDefaultPresetId('builtin:full')
+    composerSessionState.session = {
+      id: 's1', launchPresetId: 'custom:gone', launchPresetFallbackTo: 'builtin:full', cwd: '/repo',
+    }
+    const wrapper = mount(Composer, { props: { sessionId: 's1' }, global: { stubs: composerStubs } })
+    await nextTick()
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.text()).toContain('模式已删除')
+    expect(chip.text()).toContain('本次以全工具模式启动')
+    // 假陈述闸：已回落态不显示未重启预告
+    expect(chip.text()).not.toContain('会话重启后将回落全工具')
+  })
+
+  it('F1 未回落（无 launchPresetFallbackTo）→ 只预告，不声称本次已用全工具', async () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([{
+      id: 'builtin:full', name: '全工具模式', builtin: true, order: 0,
+      toolMode: 'all', extensionMode: 'all',
+    }])
+    presetStore.setDefaultPresetId('builtin:full')
+    composerSessionState.session = { id: 's1', launchPresetId: 'custom:gone', cwd: '/repo' }
+    const wrapper = mount(Composer, { props: { sessionId: 's1' }, global: { stubs: composerStubs } })
+    await nextTick()
+    const chip = wrapper.find('[data-testid="preset-chip"]')
+    expect(chip.text()).toContain('会话重启后将回落全工具')
+    expect(chip.text()).not.toContain('本次以全工具模式启动')
+  })
   it('非默认模式 → 渲染 chip（模式名 + 信任后缀）；切为默认 → 不渲染', async () => {
     const presetStore = usePresetStore()
     presetStore.setPresets(samplePresets())

@@ -169,13 +169,20 @@ export async function resolveLaunchPresetOptions(
 ): Promise<PresetResolution | undefined> {
   if (!presetService) return undefined
   let preset = presetService.getPreset(presetId)
+  let fellBackFromPresetId: string | undefined
   if (!preset) {
     // 找不到 preset 时 fallback 到 builtin:full（设计文档 §4.3）。
     // 避免返回 undefined 让 session-lifecycle 退到无 tool/thinking args 的旧行为。
+    // F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：回落事实必须
+    // 随 resolution 上抛——restore 路径据此向 renderer 披露「模式已删除，本次以全工具模式启动」。
+    // 只报「已删除」不报后果即 E4 判定前提未达成。
+    fellBackFromPresetId = presetId
     preset = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)
     if (!preset) return undefined  // 理论上不会发生（builtin 永在）
   }
-  return presetService.resolve(preset, cwd)
+  const resolution = presetService.resolve(preset, cwd)
+  // 无回落时保持对象同一性（既有测试/调用方断言 `.toBe(resolution)`；回落才新建对象附加事实）。
+  return fellBackFromPresetId === undefined ? resolution : { ...resolution, fellBackFromPresetId }
 }
 
 /** buildPresetClientOptions 的返回形状：pi createSession options（preset 相关字段）的子集（全部可选）。 */

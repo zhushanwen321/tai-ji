@@ -18,6 +18,10 @@
  * E7 三态（§7.5）：
  * ① 未加载（store 空且无错误）→ **不渲染**（不能当「已删除」）；
  * ② 已加载但缺 id → 「模式已删除（<presetId>）」+「新建会话 ⌘N」出口；
+ *    F1 回落披露（设计 §7.5 E4）：删除态下**两态区分**——未回落（会话尚未重启）仍报
+ *    「模式已删除（id）」并**预告**「会话重启后将回落全工具」；已回落
+ *    （`SessionSummary.launchPresetFallbackTo` 非空，pi 本次已以 builtin:full 启动）才声称
+ *    「本次以全工具模式启动」。禁在未重启窗口内声称已用全工具（假陈述）。
  * ③ 加载失败（loadError 非空）→ **等同未加载：不渲染**（恢复通道 = 下一次 connected 自动补拉，
  *    见 usePiPresets.installPresetAutoLoad）。
  * 三态均不阻断会话。
@@ -46,6 +50,13 @@ const presetStore = usePresetStore()
 const launchPresetId = computed<string | undefined>(
   () => sessionStore.list.find((s) => s.id === props.sessionId)?.launchPresetId,
 )
+/**
+ * F1 回落目标（`SessionSummary.launchPresetFallbackTo`）：非空 = 本进程本次 restore 已回落
+ * 该 id（恒 builtin:full）启动。undefined = 未回落（模式仍可得 / 会话尚未重启）。
+ */
+const launchPresetFallbackTo = computed<string | undefined>(
+  () => sessionStore.list.find((s) => s.id === props.sessionId)?.launchPresetFallbackTo,
+)
 
 /** 默认模式 id（D5 口径；未加载 → 回落 builtin:full，与 PresetChip.defaultModeId 同源）。 */
 const defaultModeId = computed(() => presetStore.defaultPresetId || BUILTIN_PRESET_IDS.FULL)
@@ -72,6 +83,14 @@ const isVisible = computed(() => isNonDefault.value && presetsLoaded.value)
 
 /** E7 ②：已加载但缺该 id → 降级为「模式已删除」+ 新建会话出口。 */
 const isDeleted = computed(() => isVisible.value && preset.value === null)
+/** F1 已回落（pi 本次确以 builtin:full 启动）——仅删除态下可成立。 */
+const isFellBack = computed(() => isDeleted.value && launchPresetFallbackTo.value !== undefined)
+/** 回落披露文案：未回落只预告后果；已回落才声称本次（E4 判定前提）。 */
+const fallbackDisclosure = computed(() =>
+  isFellBack.value
+    ? t('panel.modeDeclaration.deletedFellBack')
+    : t('panel.modeDeclaration.deletedFallbackPending'),
+)
 
 /** 主文案：模式名（E7 ② 为「模式已删除（id）」）。 */
 const label = computed(() =>
@@ -135,6 +154,13 @@ const newSessionKbd = computed(() => formatKbd('n'))
         :class="isDeleted ? 'text-neutral-mid' : 'text-neutral-fg'"
         data-testid="mode-declaration-label"
       >{{ label }}</span>
+      <!-- F1 回落披露（设计 §7.5 E4）：未回落预告 / 已回落声称本次——两态文案不同，禁混用 -->
+      <span
+        v-if="isDeleted"
+        data-testid="mode-declaration-fallback"
+        class="shrink-0 text-[length:var(--text-2xs)]"
+        :class="isFellBack ? 'text-warn' : 'text-neutral-dim'"
+      >{{ fallbackDisclosure }}</span>
       <!-- 正常态：工具面摘要 + 提示词段数（两个描边 chip） -->
       <template v-if="!isDeleted">
         <span

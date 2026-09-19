@@ -10,6 +10,10 @@ export default {
     promptSegments: 'Prompt parts',
     builtin: 'Built-in',
     deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (design `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4):
+    // the two states are strictly distinct — pending only forecasts, fell-back may claim "this time".
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
     unknownSurface: '—',
     toolAll: 'All tools',
     toolNone: 'No tools',
@@ -25,6 +29,9 @@ export default {
     toolChip: 'Tools · {surface}',
     promptChip: 'Prompt · {count} part(s)',
     deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (§7.5 E4): same wording axis as panel.presetChip (pending only forecasts).
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
     newSession: 'New session',
   },
   header: {

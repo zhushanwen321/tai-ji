@@ -5,6 +5,9 @@
  * - loadPresets()：mock presetApi.list/getDefault 并行调用，结果写 store（TC-4）
  * - loadPresets 降级：getDefault 失败不阻断 list 写 store（allSettled，TC-4 边界）
  * - setDefault(id)：乐观更新 store + 调 RPC（TC-5）
+ * - **u5 加载点：`installPresetAutoLoad()`**（下方独立 describe）——首次 connected 后拉取 /
+ *   安装时已 connected 立即可用 / 失败后下一次 connected 补拉（可自愈）/ 重连不重复请求（幂等）
+ *   （`mode-declaration-row.test.ts` 头注声明“加载点本身由本文件覆盖”，即指该 describe）
  *
  * mock 策略：mock @/api 的 preset 域（vi.hoisted 捕获调用），真 pinia + 真 preset store。
  * 验证编排层「RPC 拉取 → store 写入」接线正确（不验 RPC 本身——那是 preset-domain.test 的职责）。

@@ -80,7 +80,7 @@
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
              设计 D5）+ landing 态 slot（directory/branch/模式选择 chip，panel 态不传 slot 即空）。 -->
         <div v-if="modeChipPresetId" class="flex min-w-0 items-center px-2.5 pt-2.5">
-          <PresetChip :preset-id="modeChipPresetId" />
+          <PresetChip :preset-id="modeChipPresetId" :fallback-to="modeChipFallbackTo" />
         </div>
         <slot name="meta-row" />
         <!-- 已附上下文 chip 行（§2f）。W4：从 segments 派生 image chips，× 删除定位 DOM 节点移除 -->
@@ -302,7 +302,7 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
 // 对话态只读模式 chip（u4，判据与 E7 三态闸见 useComposerModeChip）
-const { modeChipPresetId } = useComposerModeChip(() => props.sessionId, () => props.variant)
+const { modeChipPresetId, modeChipFallbackTo } = useComposerModeChip(() => props.sessionId, () => props.variant)
 // 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，
 // split mode 各 pane 各自 session 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
 const projectSkillsCwd = computed<string | null>(() => {

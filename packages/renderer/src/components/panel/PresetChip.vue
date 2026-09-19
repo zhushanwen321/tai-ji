@@ -20,6 +20,10 @@ let warnedNoResizeObserver = false
  *   `builtin:full`——避免把默认模式会话误判为非默认而错误显示。
  *   E7 三态（§7.5）：未加载（store 空且无错误）/ 加载失败 → **不渲染**（不报「已删除」）；
  *   已加载但缺 id → 「模式已删除（<presetId>）」。
+ *   F1 回落披露（§7.5 E4，`fallbackTo` prop 由 useComposerModeChip 从 SessionSummary 透传）：
+ *   删除态下**两态文案严格区分**——未回落（会话尚未重启）只预告「重启后将回落全工具」；
+ *   已回落（`fallbackTo` 非空，pi 本次已以 builtin:full 启动）才声称「本次以全工具模式启动」。
+ *   禁在未重启窗口内声称已用全工具（假陈述）。披露同时进 aria-label / icon 档 title / popover（不丢）。
  *   landing 态的预选 chip 走 ui 包 `PresetSelectChip`（ui 不得反向 import renderer），非本组件职责。
  * - 三档退化（模式名 → 短名 → 仅图标，§7.4）：`density` prop 显式指定（测试/父级驱动），
  *   不传则内部 ResizeObserver 按自身实测宽度自适应（无 RO 环境如 jsdom 回落 full 并一次性告警）。
@@ -34,7 +38,7 @@ let warnedNoResizeObserver = false
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Lock, SlidersHorizontal } from '@lucide/vue'
+import { Lock, SlidersHorizontal, TriangleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { usePlatformShortcut } from '@/composables/usePlatformShortcut'
@@ -48,10 +52,15 @@ const props = withDefaults(
   defineProps<{
     /** 模式（PiLaunchPreset）id；null → 不渲染 */
     presetId?: string | null
+    /**
+     * 回落目标 id（F1，设计 §7.5 E4）：该会话本次 restore 已回落本 id（恒 builtin:full）启动。
+     * null/undefined = 无回落事实（模式仍可得，或会话尚未重启）→ 删除态只预告不声称。
+     */
+    fallbackTo?: string | null
     /** 显式密度档；不传 = 内部实测自适应（测试显式传，保证确定性） */
     density?: PresetChipDensity
   }>(),
-  { presetId: null, density: undefined },
+  { presetId: null, fallbackTo: null, density: undefined },
 )
 
 const { t } = useI18n()
@@ -90,6 +99,17 @@ const fullName = computed(() => {
   return presetsLoaded.value
     ? t('panel.presetChip.deleted', { id: props.presetId })
     : props.presetId
+})
+/** E7 ②：已加载但缺 id = 模式已删除（回落披露只在删除态下有义）。 */
+const isDeleted = computed(() => !!props.presetId && presetsLoaded.value && preset.value === null)
+/** F1：已回落（本进程本次 restore 已以 builtin:full 启动）——仅删除态下可成立。 */
+const isFellBack = computed(() => isDeleted.value && props.fallbackTo != null)
+/** 回落披露文案（未回落只预告；已回落才声称本次）——非删除态 null。 */
+const fallbackDisclosure = computed<string | null>(() => {
+  if (!isDeleted.value) return null
+  return isFellBack.value
+    ? t('panel.presetChip.deletedFellBack')
+    : t('panel.presetChip.deletedFallbackPending')
 })
 
 /** 短名去尾缀后的最小保留长度（低于此值回退原标题，避免「模式」二字模式名被去空） */
@@ -182,11 +202,18 @@ const extensionSurface = computed(() => {
 
 /** 密度档下的显示名（短名档用去尾缀短名） */
 const displayName = computed(() => (density.value === 'short' ? shortName.value : fullName.value))
-/** 三档统一的 a11y 名（纯图标档的可见信息全在此） */
+/** 三档统一的 a11y 名（纯图标档的可见信息全在此）；F1：回落披露一并入名（不丢）。 */
 const ariaLabel = computed(() => {
   const base = t('panel.presetChip.ariaLabel', { name: fullName.value })
-  return hasReplace.value ? `${base} · ${t('panel.presetChip.replaceHint')}` : base
+  const parts = [base]
+  if (hasReplace.value) parts.push(t('panel.presetChip.replaceHint'))
+  if (fallbackDisclosure.value) parts.push(fallbackDisclosure.value)
+  return parts.join(' · ')
 })
+/** icon 档 title（可见信息唯一落点）；含回落披露。 */
+const iconTitle = computed(() =>
+  fallbackDisclosure.value ? `${fullName.value} · ${fallbackDisclosure.value}` : fullName.value,
+)
 /** 新建会话快捷键显示（跨平台；⌘N / Ctrl+N） */
 const newSessionKbd = computed(() => formatKbd('n'))
 /** chip 基础类（accent 底 = 非默认模式这一状态通道） */
@@ -206,7 +233,7 @@ const CHIP_CLASS =
           variant="ghost"
           :class="[CHIP_CLASS, 'bg-accent-soft text-accent hover:bg-accent-soft']"
           :aria-label="ariaLabel"
-          :title="density === 'icon' ? fullName : undefined"
+          :title="density === 'icon' ? iconTitle : undefined"
         >
           <SlidersHorizontal class="shrink-0" />
           <span
@@ -214,6 +241,14 @@ const CHIP_CLASS =
             class="min-w-0 truncate font-mono"
             :class="density === 'short' && 'max-w-[48px]'"
           >{{ displayName }}</span>
+          <!-- F1 回落披露（设计 §7.5 E4）：删除态两态区分——未回落预告 / 已回落声称本次。
+               icon 档入 title/aria-label（不丢）；popover 另有一份完整文案。 -->
+          <span
+            v-if="fallbackDisclosure && density !== 'icon'"
+            data-testid="preset-chip-fallback"
+            class="shrink-0 text-[10px]"
+            :class="isFellBack ? 'text-warn' : 'text-neutral-dim'"
+          >{{ fallbackDisclosure }}</span>
           <!-- 信任标记（文本/短名档）：chip 内小后缀 -->
           <span
             v-if="hasReplace && density !== 'icon'"
@@ -259,6 +294,16 @@ const CHIP_CLASS =
               </dd>
             </div>
           </dl>
+          <!-- F1 回落披露（设计 §7.5 E4）：popover 完整文案（chip 截断时的可靠落点），两态区分 -->
+          <p
+            v-if="fallbackDisclosure"
+            data-testid="preset-chip-fallback-popover"
+            class="mt-2 flex items-start gap-1.5 text-[11px]"
+            :class="isFellBack ? 'text-warn' : 'text-neutral-mid'"
+          >
+            <TriangleAlert class="mt-px size-3 shrink-0" />
+            <span>{{ fallbackDisclosure }}</span>
+          </p>
           <!-- 锁定说明：模式 id 在创建时确定、本会话内不可更换（模式定义可在设置页编辑，下次启动生效） -->
           <p class="mt-2 flex items-start gap-1.5 text-[11px] text-neutral-mid">
             <Lock class="mt-px size-3 shrink-0 text-neutral-dim" />

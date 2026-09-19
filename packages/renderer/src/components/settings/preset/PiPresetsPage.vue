@@ -55,7 +55,7 @@
           class="flex flex-col gap-3 border-t border-border px-3 py-3"
           data-testid="preset-prompt-section"
         >
-          <!-- 替换卡（红字警示 + 保存二次确认，E2） -->
+          <!-- 替换卡（红字警示；保存二次确认由共用写盘闸判定，E2） -->
           <GroupCard>
             <template #head>
               <h3 class="text-[12px] font-semibold text-neutral-fg">{{ t('settings.preset.promptReplaceTitle') }}</h3>
@@ -90,14 +90,14 @@
                 <Button data-testid="preset-prompt-replace-reset" variant="secondary" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="resetReplaceCard(preset.id)">
                   {{ t('settings.preset.promptRestoreDefault') }}
                 </Button>
-                <Button data-testid="preset-prompt-replace-save" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="onSaveReplace(preset.id)">
+                <Button data-testid="preset-prompt-replace-save" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="onSavePrompt(preset.id)">
                   {{ t('settings.preset.promptSave') }}
                 </Button>
               </div>
             </div>
           </GroupCard>
 
-          <!-- 追加卡 -->
+          <!-- 追加卡（保存入口与替换卡共用闸门——写盘 payload 恒含两段） -->
           <GroupCard>
             <template #head>
               <h3 class="text-[12px] font-semibold text-neutral-fg">{{ t('settings.preset.promptAppendTitle') }}</h3>
@@ -123,7 +123,7 @@
                 <Button data-testid="preset-prompt-append-discard" variant="danger" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="discardPromptCard(preset.id, 'append')">
                   {{ t('settings.preset.promptDiscard') }}
                 </Button>
-                <Button data-testid="preset-prompt-append-save" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="onSaveAppend(preset.id)">
+                <Button data-testid="preset-prompt-append-save" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="onSavePrompt(preset.id)">
                   {{ t('settings.preset.promptSave') }}
                 </Button>
               </div>
@@ -311,34 +311,36 @@ const replaceConfirmOpen = computed({
   },
 })
 
-/** 替换卡保存入口：启用且文案非空 → 先二次确认；否则直接保存。 */
-function onSaveReplace(id: string): void {
+/** E2 判据：payload 含「启用 + 文案非空」的替换段，且相对已保存快照有变化（改写或此前未启用）。
+ * 设计 `.tmp/tech-design/mode-system-composer-density.md` §6.3 D3b / §7.5 E2（用户裁决 ③）。 */
+function needsReplaceConfirm(id: string): boolean {
   const draft = promptDrafts[id]
-  if (!draft) return
-  if (draft.replaceEnabled && draft.replaceText.trim()) {
-    replaceConfirmId.value = id
-    return
-  }
+  const saved = promptSaved[id]
+  if (!draft?.replaceEnabled || !draft.replaceText.trim()) return false
+  return !saved || !saved.replaceEnabled || saved.replaceText !== draft.replaceText
+}
+
+/** 两卡共用保存入口——闸门只在唯一写点 persistPrompt（payload 恒含两段）。 */
+function onSavePrompt(id: string): void {
   void persistPrompt(id)
 }
 
-/** 追加卡保存入口（无需二次确认）。 */
-function onSaveAppend(id: string): void {
-  void persistPrompt(id)
-}
-
-/** 二次确认通过：保存替换（含追加当前值）。 */
+/** 二次确认通过：放行写盘（confirmed 跳过闸门，避免重入弹窗）。 */
 async function onConfirmReplaceSave(): Promise<void> {
   const id = replaceConfirmId.value
   replaceConfirmId.value = ''
-  await persistPrompt(id)
+  if (id) await persistPrompt(id, { confirmed: true })
 }
 
-/** 写盘：组装完整 preset.prompt，走 preset.update（超限/形状错误由后端返回文案）。 */
-async function persistPrompt(id: string): Promise<void> {
+/** 写盘（两卡唯一入口）；未确认 → 不落盘任何段（避免半成功态）。超限/形状错误由后端返回文案。 */
+async function persistPrompt(id: string, opts?: { confirmed?: boolean }): Promise<void> {
   const preset = presets.value.find((p) => p.id === id)
   const draft = promptDrafts[id]
   if (!preset || !draft) return
+  if (!opts?.confirmed && needsReplaceConfirm(id)) {
+    replaceConfirmId.value = id
+    return
+  }
   const updated: PiLaunchPreset = {
     ...preset,
     prompt: {

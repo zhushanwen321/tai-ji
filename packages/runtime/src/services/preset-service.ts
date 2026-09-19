@@ -164,6 +164,16 @@ export interface PresetResolution {
    * 与 skillPaths 不同，undefined 即「无模式提示词」（无 ?? fallback 语义）。
    */
   prompt?: PresetPromptConfig
+  /**
+   * 模式回落事实（F1，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：
+   * 请求的 presetId 定义不可得、本次 resolve 已回落 builtin:full 时，填原（悬空）presetId。
+   *
+   * 由 `resolveLaunchPresetOptions`（launch-params.ts）在 fallback 分支附加——**不是**
+   * `PresetService.resolve()` 的产物（resolve 只认已到手的 preset 定义）。消费方
+   * `spawnRestoreClient` 据此置 `SessionSummary.launchPresetFallbackTo` 披露「本次以全工具
+   * 模式启动」；create/fork 路径不消费（回落仍照常发生，只是不披露）。
+   */
+  fellBackFromPresetId?: string
 }
 
 /**

@@ -91,14 +91,14 @@ function dispatchPreset(): PiLaunchPreset {
   }
 }
 
-/** 写会话列表（含 launchPresetId）；groups 整表覆盖 = store 唯一写入口。 */
-function setSession(id: string, launchPresetId?: string): void {
+/** 写会话列表（含 launchPresetId / F1 回落事实）；groups 整表覆盖 = store 唯一写入口。 */
+function setSession(id: string, launchPresetId?: string, launchPresetFallbackTo?: string): void {
   useSessionStore().applySnapshot({
     groups: [{
       cwd: '/repo',
       sessions: [{
         id, label: id, cwd: '/repo', status: 'idle',
-        lastActiveAt: 1, modelId: 'm', tokenCount: 0, launchPresetId,
+        lastActiveAt: 1, modelId: 'm', tokenCount: 0, launchPresetId, launchPresetFallbackTo,
       }],
     }],
   })
@@ -192,6 +192,51 @@ describe('ModeDeclarationRow 可见性（D5 判据 + E7 三态）', () => {
     // 删除态无从计算面摘要 → 不渲染两枚 chip
     expect(wrapper.find('[data-testid="mode-declaration-tool"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="mode-declaration-prompt"]').exists()).toBe(false)
+  })
+
+  it('③a F1 未回落（无 launchPresetFallbackTo）→ 保持「模式已删除」+ 预告「会话重启后将回落全工具」，不声称本次', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([FULL])
+    presetStore.setDefaultPresetId('builtin:full')
+    setSession('s1', 'custom:gone')
+
+    const wrapper = mountRow()
+    const row = wrapper.find('[data-testid="mode-declaration-row"]')
+    expect(row.text()).toContain('模式已删除（custom:gone）')
+    const disclosure = wrapper.find('[data-testid="mode-declaration-fallback"]')
+    expect(disclosure.exists()).toBe(true)
+    expect(disclosure.text()).toBe('会话重启后将回落全工具')
+    // 假陈述闸：未重启窗口内禁声称本次已回落
+    expect(row.text()).not.toContain('本次以全工具模式启动')
+  })
+
+  it('③b F1 已回落（launchPresetFallbackTo=builtin:full）→ 披露「本次以全工具模式启动」，不预告', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([FULL])
+    presetStore.setDefaultPresetId('builtin:full')
+    setSession('s1', 'custom:gone', 'builtin:full')
+
+    const wrapper = mountRow()
+    const row = wrapper.find('[data-testid="mode-declaration-row"]')
+    expect(row.text()).toContain('模式已删除（custom:gone）')
+    const disclosure = wrapper.find('[data-testid="mode-declaration-fallback"]')
+    expect(disclosure.exists()).toBe(true)
+    expect(disclosure.text()).toBe('本次以全工具模式启动')
+    expect(row.text()).not.toContain('会话重启后将回落全工具')
+    // 出口仍在（回落不阻断会话，仅多一层披露）
+    expect(wrapper.find('[data-testid="mode-declaration-new-session"]').exists()).toBe(true)
+  })
+
+  it('③c F1 模式可得时无回落披露（正常态不携带回落文案）', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([FULL, dispatchPreset()])
+    presetStore.setDefaultPresetId('builtin:full')
+    setSession('s1', 'custom:dispatch')
+
+    const wrapper = mountRow()
+    expect(wrapper.find('[data-testid="mode-declaration-fallback"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('回落全工具')
+    expect(wrapper.text()).not.toContain('本次以全工具模式启动')
   })
 
   it('④ 加载失败（presets 空 + loadError 非空）→ 不渲染（不误报删除）', () => {

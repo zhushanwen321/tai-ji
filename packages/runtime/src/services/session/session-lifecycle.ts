@@ -978,7 +978,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const target = this.resolveRestoreTarget(sessionId)
     await this.clearExistingSessionForRestore(sessionId)
     const { sessionCwd, cwdFellBack } = this.resolveRestoreCwd(target)
-    const { client, presetId, allExtPaths } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
     await this.attachRestoreFile(client, target, sessionId, cwdFellBack)
 
     // U2: get_state 读回 pi 生效 model + thinkingLevel（D2 设计）。
@@ -1010,6 +1010,15 @@ export class SessionLifecycle implements ISessionRegistry {
       parentAgentSessionId: target.parentAgentSessionId,
       handedOffTo: target.handedOffTo,
     }, 'restore')
+    // F1 披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：模式定义不可得
+    // （fellBackFromPresetId 非空）时，本次 pi 确以 builtin:full 启动——把回落事实写到内存态，
+    // 经 toSummary（buildSessionSummary 透传）随 session summary 到达 renderer，chip/声明行据此
+    // 区分「已回落」（本次以全工具模式启动）与「未回落」（仅预告重启后回落）。
+    // 事实只在真发生回落时置位（避免「模式刚删、会话未重启」窗口内的假陈述）；不写 sidecar——
+    // 回落是「本进程本次运行」的内存态事实，进程重开未 restore 时不成立（详见 SessionSummary 字段注释）。
+    if (fellBackFromPresetId !== undefined) {
+      (session as { launchPresetFallbackTo?: string }).launchPresetFallbackTo = BUILTIN_PRESET_IDS.FULL
+    }
     const restoredSummary = this.svc.toSummary(session)
     // D4（session-dead-structural-fixes）：restore-abort——返回前检测 userStopped 标记。判定
     // 保持在主流程（位置同拆分前：toSummary 之后、notifySessionCreated 之前）：无标记时本行
@@ -1104,6 +1113,11 @@ export class SessionLifecycle implements ISessionRegistry {
    * sidecar 不清理。target.launchPresetId undefined 时（历史 session 无 sidecar）用
    * 'builtin:full' 兜底（FR-10）。
    *
+   * F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：target.launchPresetId
+   * 存在但定义不可得时，`getLaunchPresetOptions` 回落 builtin:full 并在 resolution 上附
+   * `fellBackFromPresetId`——本函数原样上抛给 restoreSession 置披露位（不在此处写 summary，
+   * 与 hydrateBindingMeta 回填同点）。
+   *
    * 求值顺序硬约束（同拆分前，勿把 options 字面量提到 gate 之前）：getLaunchPresetOptions →
    * extensionPaths 兜底 → buildPresetClientOptions → **await migrationGate** → createSession
    *（skillPaths / systemPrompt 在 options 字面量内求值 = gate 之后）。
@@ -1112,7 +1126,7 @@ export class SessionLifecycle implements ISessionRegistry {
     target: ScannedSession,
     sessionId: string,
     sessionCwd: string,
-  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[] }> {
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
     const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
     const resolution = await this.svc.getLaunchPresetOptions(presetId, sessionCwd)
     const allExtPaths = resolution?.extensionPaths ?? await this.svc.getExtensionPaths(sessionCwd)
@@ -1136,7 +1150,7 @@ export class SessionLifecycle implements ISessionRegistry {
       model: undefined,
       inheritSessionModel: true,
     })
-    return { client, presetId, allExtPaths }
+    return { client, presetId, allExtPaths, fellBackFromPresetId: resolution?.fellBackFromPresetId }
   }
 
   /**

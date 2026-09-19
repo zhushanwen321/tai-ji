@@ -261,7 +261,7 @@ export interface SetProviderData {
 }
 
 /** 系统提示词配置（FR-6）。文件：<dataDir>/system-prompt.json。
- *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，仅新建会话生效）
+ *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，**每次进程启动都生效**，含 restore/resume——D1 活定义依据；[HISTORICAL] 早期注释写"仅新建会话生效"与实装不符）
  *  - append:  追加注入（走 before_agent_start hook，每轮读配置热生效）
  *  version: schema 版本号（SR1） */
 export interface SystemPromptConfig {
