@@ -366,6 +366,43 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
+// ── zcode 导入源 mock fixture（sess-session-import u-foundation）─────────────
+// 契约语义对齐：sessionId 保持原始 sess_ 前缀形态（候选 id = 源系统主键原始形态，
+// 归一化发生在 import source 内部）；sourcePath = db 路径结构占位（契约同构，
+// zcode 的 query 匹配不消费）；lastModified 以 now 偏移现算（保持降序演示真实性）。
+const ZCODE_MOCK_DB_PATH = '/mock/zcode/session-db/db.sqlite'
+const MOCK_HOUR_MS = 3_600_000
+const MOCK_DAY_MS = 86_400_000
+const ZCODE_MOCK_ROWS: ReadonlyArray<{
+  sessionId: string
+  name: string | null
+  cwd: string
+  sizeBytes: number
+  ageMs: number
+  alreadyImported: boolean
+}> = [
+  { sessionId: 'sess_9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88', name: '修复构建脚本', cwd: '/Users/demo/zcode-alpha', sizeBytes: 512 * 1024, ageMs: MOCK_HOUR_MS, alreadyImported: false },
+  { sessionId: 'sess_1c7e05a2-f3b9-47d2-9a41-5e8c6b0d2f37', name: null, cwd: '/Users/demo/zcode-beta', sizeBytes: 96 * 1024, ageMs: MOCK_DAY_MS, alreadyImported: true },
+]
+
+/** zcode mock 候选快照（map 新对象——mock 惯例 fixture 快照隔离，调用方突变不污染源数据） */
+function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
+  const now = Date.now()
+  return ZCODE_MOCK_ROWS.map((r) => ({
+    sessionId: r.sessionId,
+    name: r.name,
+    cwd: r.cwd,
+    sourcePath: ZCODE_MOCK_DB_PATH,
+    lastModified: now - r.ageMs,
+    size: r.sizeBytes,
+    // dirLabel = basename(cwd)（zcode 源 dirs 聚合同规则；fixture cwd 无尾斜杠，
+    // mock 浏览器环境无 node:path，手写 split 与 composer getFileCandidates 同模式）
+    dirLabel: r.cwd.split('/').pop() ?? r.cwd,
+    alreadyImported: r.alreadyImported,
+    cwdExists: true,
+  }))
+}
+
 const sessionImpl = {
   /**
    * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
@@ -668,17 +705,42 @@ const sessionImpl = {
   async writeSegments(_payload: { sessionId: string; entry: import('@taiji/shared').SegmentsMetadataEntry }): Promise<void> {
     await sleep(TIMING.ack)
   },
-  // ── 导入 pi 会话（import-session U5；与 real domain 同接口，门面三元要求两侧同构；
-  //     r1-S19：payload 类型 import shared 契约，不手写内联形状）──
-  /** Mock importCandidates：恒返回空候选集（mock 轨道无外部 pi sessions 目录可扫）。 */
-  async importCandidates(_payload: import('@taiji/shared').ImportCandidatesRequest): Promise<import('@taiji/shared').ImportCandidatesReply> {
+  // ── 导入会话（import-session U5 → sess-session-import u-foundation 多源扩展；与
+  //     real domain 同接口，门面三元要求两侧同构；r1-S19：payload 类型 import shared
+  //     契约，不手写内联形状）──
+  /**
+   * Mock importCandidates：缺省/pi/未知 source 恒空候选集（现状——mock 轨道无外部
+   * pi sessions 目录可扫）；source='zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
+   * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）。不模拟
+   * query 过滤——与 pi 分支不模拟目录扫描同保真度层级（mock 只驱动 UI 状态机）。
+   */
+  async importCandidates(payload: import('@taiji/shared').ImportCandidatesRequest): Promise<import('@taiji/shared').ImportCandidatesReply> {
     await sleep(TIMING.ack)
-    return { total: 0, items: [], dirs: [] }
+    if (payload.source !== 'zcode') {
+      return { total: 0, items: [], dirs: [] }
+    }
+    const items = zcodeMockCandidates()
+    // dirs 按 dirLabel 聚合 count（zcode 源 dirs 聚合规则：basename(directory) 分组）
+    const countByLabel = new Map<string, number>()
+    for (const item of items) countByLabel.set(item.dirLabel, (countByLabel.get(item.dirLabel) ?? 0) + 1)
+    const dirs = Array.from(countByLabel, ([label, count]) => ({ label, count }))
+    return { total: items.length, items, dirs }
   },
-  /** Mock importSession：恒 reject（空候选集下不可达；与 fetchCurrentSystemPrompt 同形，供 UI 错误态演示）。 */
-  async importSession(_payload: import('@taiji/shared').ImportRequest): Promise<import('@taiji/shared').ImportReply> {
+  /**
+   * Mock importSession：source='zcode' 返回固定 reply——reply.sessionId = T1 归一化
+   * 形态（剥 sess_ 前缀 + '_'→'-'，对齐契约「reply.sessionId 与侧边栏/扫描集同域，
+   * 非请求传入的原始 sess_ 形态」）；payload.sessionId 缺省回退首条候选 id。缺省/
+   * pi/未知 source 维持现状 reject import_source_missing（空候选集下不可达，供 UI
+   * 错误态演示，与 fetchCurrentSystemPrompt 同形）。
+   */
+  async importSession(payload: import('@taiji/shared').ImportRequest): Promise<import('@taiji/shared').ImportReply> {
     await sleep(TIMING.ack)
-    throw Object.assign(new Error('No external sessions available in mock mode'), { code: 'import_source_missing' })
+    if (payload.source !== 'zcode') {
+      throw Object.assign(new Error('No external sessions available in mock mode'), { code: 'import_source_missing' })
+    }
+    const raw = payload.sessionId ?? ZCODE_MOCK_ROWS[0].sessionId
+    const normalized = raw.replace(/^sess_/, '').replace(/_/g, '-')
+    return { sessionId: normalized, targetPath: `/mock/taiji/sessions/zcode-demo/${normalized}.jsonl` }
   },
 }
 

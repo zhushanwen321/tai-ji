@@ -6,7 +6,7 @@
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
-import type { ProviderId } from '@taiji/shared'
+import type { ProviderId, ImportSourceKind } from '@taiji/shared'
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
@@ -207,6 +207,38 @@ describe('mock session domain', () => {
     const cand = await session.importCandidates({} as never)
     expect(cand.total).toBe(0)
     await expect(session.importSession({} as never)).rejects.toMatchObject({ code: 'import_source_missing' })
+  })
+
+  it('importCandidates/importSession source 路由（sess-session-import u-foundation）：zcode sess_ 形态候选 + 归一化 reply；缺省/显式 pi/未知 source 维持现状', async () => {
+    // zcode 分支：sessionId 带 sess_ 前缀（原始源 id 形态）+ dirLabel = basename(cwd)
+    // + sourcePath 为 db 路径结构占位（候选间共享同源，不参与 zcode query 匹配）
+    const zc = await session.importCandidates({ source: 'zcode' })
+    expect(zc.items.length).toBeGreaterThan(0)
+    expect(zc.total).toBe(zc.items.length)
+    for (const item of zc.items) {
+      expect(item.sessionId).toMatch(/^sess_[0-9a-f-]{36}$/)
+      expect(item.dirLabel).toBe(item.cwd.split('/').pop())
+      expect(item.sourcePath).toBe(zc.items[0].sourcePath)
+    }
+    // lastModified 降序（契约排序键）+ dirs 按 dirLabel 聚合 count
+    const times = zc.items.map((i) => i.lastModified)
+    expect([...times].sort((a, b) => b - a)).toEqual(times)
+    for (const d of zc.dirs) {
+      expect(d.count).toBe(zc.items.filter((i) => i.dirLabel === d.label).length)
+    }
+    // zcode import 固定 reply：reply.sessionId = T1 归一化形态（剥 sess_ 前缀 + '_'→'-'，
+    // 与侧边栏/扫描集同域——非请求传入的原始 sess_ 形态）
+    const first = zc.items[0]
+    const imported = await session.importSession({ source: 'zcode', sessionId: first.sessionId, sourcePath: first.sourcePath, projectId: 'p1' })
+    expect(imported.sessionId).not.toMatch(/^sess_/)
+    expect(imported.sessionId).not.toContain('_')
+    expect(imported.targetPath).toContain(imported.sessionId)
+    // 缺省（向后兼容）/ 显式 pi / 类型外未知 source（JS 调用方运行时值）：维持现状 pi 行为
+    const emptyReply = { total: 0, items: [], dirs: [] }
+    expect(await session.importCandidates({})).toEqual(emptyReply)
+    expect(await session.importCandidates({ source: 'pi' })).toEqual(emptyReply)
+    expect(await session.importCandidates({ source: 'ghost' as ImportSourceKind })).toEqual(emptyReply)
+    await expect(session.importSession({ sourcePath: '/x.jsonl', projectId: 'p1' })).rejects.toMatchObject({ code: 'import_source_missing' })
   })
 
   it('setMockE2E(true)：cwd 注入时 e2eTestSession 并入 list / switch / restore 放行；cwd 空串不注入', async () => {
