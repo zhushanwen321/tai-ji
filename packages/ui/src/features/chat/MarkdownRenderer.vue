@@ -78,9 +78,12 @@ const props = defineProps<{
   /** 所属 assistant 是否正在流式（Block text 分支透传）。true 期间未闭合 fence 走 streaming-fence
    *  占位（静默 ≥阈值或翻 false 时 finalize 转完整渲染）；false/undefined（complete/静态内容）直接完整渲染。 */
   streaming?: boolean
-  /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4）：相对链接点击按此
-   *  resolve 后经 drawer detail 打开。对话流经 deps env（壳装配 session cwd），此处 props 供
-   *  DetailPane 等静态宿主传打开文件所在目录；undefined（更新日志等）→ 相对链接 preventDefault 无动作。 */
+  /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4，双通道取值
+   *  props 覆盖优先）：props 供 DetailPane 等静态宿主传打开文件所在目录（④路点击语义）；
+   *  缺省（对话流/命令文档零模板传 props）经 deps.sessionCwdOf 拿 session cwd；两者皆缺
+   *  （未知 sid / mock 壳未 provide）→ ④路 preventDefault 无动作（死链无害）。
+   *  注意：本 props 只喂 ④路点击；img 相对 src 重写走 deps env（壳层工厂装配）——drawer
+   *  宿主经工厂 override 参数使 env 与本 props 同值（D4 矩阵 drawer 行「两通道同值」）。 */
   resourceBaseDir?: string
 }>()
 
@@ -234,9 +237,12 @@ function onClick(e: MouseEvent): void {
     const href = anchor.getAttribute('href')
     if (href && isRelativeHref(href)) {
       e.preventDefault()
-      // resourceBaseDir 缺失（更新日志等场景）→ preventDefault + 无动作（死链无害，优于窗口导航走）
-      if (props.resourceBaseDir) {
-        deps.openDrawer('detail', { filePath: resolveHrefPath(props.resourceBaseDir, href) })
+      // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
+      // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd（可选链容错——mock 壳未
+      // provide 时 undefined）；两者皆缺 → preventDefault + 无动作（死链无害，优于窗口导航走）
+      const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
+      if (base) {
+        deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
       }
     }
   }

@@ -530,4 +530,30 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
     expect(clicks[0]?.defaultPrevented).toBe(true)
     expect(openDrawer).not.toHaveBeenCalled()
   })
+
+  it('props 缺省 → deps.sessionCwdOf fallback 按 session cwd resolve（D4 双通道：对话流/命令文档零模板传 props 的消费面）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn((sid: string) => (sid === 's1' ? '/home/proj' : undefined))
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 's1' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(sessionCwdOf).toHaveBeenCalledWith('s1')
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+
+  it('props 覆盖优先：props 有值时不咨询 deps.sessionCwdOf（drawer 文件目录语义不被 session cwd 抢占）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn(() => '/home/session-cwd')
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 's1', resourceBaseDir: '/home/proj' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(sessionCwdOf).not.toHaveBeenCalled()
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+
+  it('sessionCwdOf 返回 undefined（未知 sid）→ preventDefault + 无动作（fallback 缺省同样死链无害）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn(() => undefined)
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 'ghost' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
 })

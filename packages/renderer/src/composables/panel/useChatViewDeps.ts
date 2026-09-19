@@ -24,7 +24,7 @@
  * - renderMermaid（mermaid.ts）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
@@ -54,8 +54,16 @@ import { useToast } from '@/composables/useToast'
  * 装配 ChatViewDeps。
  *
  * @param sessionId 当前 panel 绑定的 session（Ref，驱动 turn-expansion 分区 + 文件白名单刷新）
+ * @param override 基准目录覆盖（设计 markdown-html-sanitize-render D4 双通道矩阵）：传入
+ *   `resourceBaseDir` 时 env 通道（sanitize hook img 相对 src 重写）改用该值而非 session
+ *   cwd——drawer DetailPane 调用点传「打开文件所在目录」computed，使 env 与 MarkdownRenderer
+ *   props 通道（④路点击）同值；主 provide（MessageStream/ChatView）与 CommandDocPanel 不传，
+ *   env 保持 session cwd。
  */
-export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
+export function useChatViewDeps(
+  sessionId: Ref<string>,
+  override?: { resourceBaseDir?: ComputedRef<string | undefined> },
+): ChatViewDeps {
   const { t } = useI18n()
   const { error: toastError } = useToast()
   const chat = useChatStore()
@@ -91,14 +99,20 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
   }
   watch(sessionId, (sid) => { void refreshLocalFiles(sid) }, { immediate: true })
 
-  /** 当前 session 的相对资源解析基准目录（resourceBaseDir，设计 markdown-html-sanitize-render
-   *  D4）：sessionStore.list 按 id 查 cwd（与 useDetailPane.sessionCwd 同源同层），无 session /
-   *  查不到 → undefined（该消息不做相对资源解析）。响应式：cwd 变化经 env 签名触发增量全量重建。 */
-  const resourceBaseDir = computed<string | undefined>(() => {
-    const sid = sessionId.value
+  /** 按 id 查 session cwd（sessionStore.list 线性查，与 useDetailPane.sessionCwd 同源同层）。
+   *  resourceBaseDir env 装配与 deps.sessionCwdOf（ui MarkdownRenderer ④路 props 缺省
+   *  fallback，设计 D4 双通道）共用此单一实现，避免双份查询逻辑漂移。 */
+  function sessionCwdOf(sid: string): string | undefined {
     if (!sid) return undefined
     return sessionStore.list.find((s) => s.id === sid)?.cwd ?? undefined
-  })
+  }
+
+  /** 当前 session 的相对资源解析基准目录（resourceBaseDir，设计 markdown-html-sanitize-render
+   *  D4）：默认 session cwd；调用点传 override 时直接沿用调用方的 computed（自带响应式，值 =
+   *  打开文件所在目录），不再包一层 computed。无 session / 查不到 → undefined（该消息不做
+   *  相对资源解析）。cwd 变化经 env 签名触发增量全量重建。 */
+  const resourceBaseDir = override?.resourceBaseDir
+    ?? computed<string | undefined>(() => sessionCwdOf(sessionId.value))
 
   return {
     // ── 数据获取器（读 chatStore 派生状态）──
@@ -111,6 +125,10 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
     // [D3] pendingSend 投影桥接：UserBubble submitEdit 双发锁（「正在提交」最贴近的既有信号
     // ——send/editAndResend 提交前置位、message_start 清；语义窄于 isActive）
     isPendingSend: (sid: string): boolean => chat.isPendingSend(sid),
+    // D4 双通道：ui MarkdownRenderer ④路相对链接点击的 props 缺省 fallback（与上方
+    // resourceBaseDir env 装配共用 sessionCwdOf 单一实现；override 存在时 env 与 deps
+    // 字段取值不同是有意的——override 只覆盖 env 通道，deps 恒按 id 查 session cwd）
+    sessionCwdOf,
 
     // ── 操作回调 ──
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),

@@ -14,8 +14,10 @@
  * env 装配正确性）；markdown/incremental 渲染函数 mock 捕获 env 参数断言（不跑真管线）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { ref, nextTick, effectScope, type EffectScope } from 'vue'
+import { mount } from '@vue/test-utils'
+import { computed, defineComponent, h, inject, provide, nextTick, effectScope, ref, type EffectScope, type ComputedRef } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { ChatViewDepsKey, type ChatViewDeps } from '@taiji/ui'
 
 const mockRenderMarkdownSegments = vi.fn(async () => [{ type: 'text', content: '<p>x</p>' }])
 const mockRenderIncremental = vi.fn(async () => ({
@@ -93,9 +95,9 @@ beforeEach(() => {
 
 /** 装配器在组件 setup 外直调：effectScope 提供响应式上下文（onScopeDispose 等不告警），用完 stop */
 let scope: EffectScope | null = null
-function assemble(sid: ReturnType<typeof ref<string>>) {
+function assemble(sid: ReturnType<typeof ref<string>>, override?: { resourceBaseDir?: ComputedRef<string | undefined> }) {
   scope = effectScope()
-  return scope.run(() => useChatViewDeps(sid))!
+  return scope.run(() => useChatViewDeps(sid, override))!
 }
 afterEach(() => {
   scope?.stop()
@@ -154,5 +156,62 @@ describe('useChatViewDeps — resourceBaseDir 传值矩阵（对话流 cwd 装�
     await nextTick()
     await deps.renderMarkdown('b')
     expect((mockRenderMarkdownSegments.mock.calls[1]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-b')
+  })
+})
+
+describe('useChatViewDeps — sessionCwdOf deps 字段 + override 传值矩阵（设计 D4 双通道）', () => {
+  it('deps.sessionCwdOf 按 id 查 cwd（与 env 装配同源）；未知/空 sid → undefined', () => {
+    const deps = assemble(ref('s1'))
+    expect(deps.sessionCwdOf).toBeTypeOf('function')
+    expect(deps.sessionCwdOf?.('s1')).toBe('/home/demo/project-a')
+    expect(deps.sessionCwdOf?.('s2')).toBe('/home/demo/project-b')
+    expect(deps.sessionCwdOf?.('unknown')).toBeUndefined()
+    expect(deps.sessionCwdOf?.('')).toBeUndefined()
+  })
+
+  it('override 传入 → env 通道用覆盖值（drawer 文件目录语义，session cwd 被覆盖）', async () => {
+    const deps = assemble(ref('s1'), { resourceBaseDir: computed(() => '/home/demo/project-a/docs') })
+    await deps.renderMarkdown('hello')
+    expect(mockRenderMarkdownSegments).toHaveBeenCalledWith('hello', {
+      filePaths: expect.any(Set),
+      localFiles: expect.any(Set),
+      resourceBaseDir: '/home/demo/project-a/docs',
+    })
+  })
+
+  it('override computed 变化 → env 跟随（直用调用方 computed 不包层，仍响应式）', async () => {
+    const dir = ref('/dir-1')
+    const deps = assemble(ref('s1'), { resourceBaseDir: computed(() => dir.value) })
+    await deps.renderMarkdown('a')
+    expect((mockRenderMarkdownSegments.mock.calls[0]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/dir-1')
+    dir.value = '/dir-2'
+    await deps.renderMarkdown('b')
+    expect((mockRenderMarkdownSegments.mock.calls[1]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/dir-2')
+  })
+
+  it('未传 override → env 保持 session cwd（MessageStream 主 provide / CommandDocPanel 形态不回归）', async () => {
+    const deps = assemble(ref('s1'))
+    await deps.renderMarkdown('hello')
+    expect((mockRenderMarkdownSegments.mock.calls[0]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
+  })
+
+  it('面板 provide 作用域集成：宿主 provide 工厂 deps → 子组件 inject 到的 renderMarkdown env 携带 cwd（CommandDocPanel.vue:143 / DetailPane.vue:284 同范式）', async () => {
+    let injected: ChatViewDeps | undefined
+    const Probe = defineComponent({
+      setup() {
+        injected = inject(ChatViewDepsKey)
+        return () => null
+      },
+    })
+    const Host = defineComponent({
+      setup() {
+        provide(ChatViewDepsKey, useChatViewDeps(ref('s1')))
+        return () => h(Probe)
+      },
+    })
+    const wrapper = mount(Host)
+    await injected!.renderMarkdown('hello')
+    expect((mockRenderMarkdownSegments.mock.calls[0]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
+    wrapper.unmount()
   })
 })

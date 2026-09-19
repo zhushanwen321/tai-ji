@@ -280,8 +280,8 @@ const { state, toggleView, sessionCwd } = useDetailPane(
 )
 
 // [w6 T6] ui MarkdownRenderer 经 ChatViewDeps inject 消费壳层依赖。DetailPane 不在 MessageStream
-// provide 作用域内，需自行 provide（sessionId 可为 null，coalesce '' 后 renderMarkdown 无路径链接降级）
-provide(ChatViewDepsKey, useChatViewDeps(computed(() => props.sessionId ?? '')))
+// provide 作用域内，需自行 provide（sessionId 可为 null，coalesce '' 后 renderMarkdown 无路径链接降级）。
+// provide 语句在下方 resourceBaseDir computed 声明之后（override 对象字面量即时求值，前置会 TDZ）。
 
 /** 文件名（basename，从 state.path 取） */
 const fileName = computed(() => {
@@ -309,6 +309,16 @@ const resourceBaseDir = computed<string | undefined>(() => {
   if (slash <= 0) return undefined
   return abs.slice(0, slash)
 })
+
+// [w6 T6] provide（须在上方 resourceBaseDir 声明之后，见前注）。工厂 override 参数（设计 D4
+// 矩阵 drawer 行「两通道同值」）：env 通道（sanitize hook img 相对 src 重写）不再用 session
+// cwd，与本组件传给 MarkdownRenderer 的 props 通道（④路点击）同用文件所在目录——修正
+// R-B 审查发现的「env=session cwd vs props=文件目录」双基准分裂（子目录文档相对 img 曾按
+// session cwd 错位解析）。
+provide(
+  ChatViewDepsKey,
+  useChatViewDeps(computed(() => props.sessionId ?? ''), { resourceBaseDir }),
+)
 
 /** shiki 语言名（code 类文件高亮用） */
 const lang = computed(() => extToLang(state.value.path ?? ''))
