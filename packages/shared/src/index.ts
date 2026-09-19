@@ -203,6 +203,8 @@ export type {
   ExtensionMode,
   ThinkingLevel,
   PiLaunchPreset,
+  PresetPromptConfig,
+  PresetPromptSegment,
   PresetUsageEntry,
   PiPresetsFile,
   PresetExportPayload,

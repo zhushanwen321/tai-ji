@@ -202,7 +202,7 @@ describe('SessionService · wave 3 PresetService 注入', () => {
         extensionService as unknown as ConstructorParameters<typeof PresetService>[1],
       )
       // 构造后立即可用（无 deferred initialization）
-      expect(ps.getAllPresets()).toHaveLength(3) // DEFAULT_PRESETS
+      expect(ps.getAllPresets()).toHaveLength(4) // DEFAULT_PRESETS
     }).not.toThrow()
   })
 })
