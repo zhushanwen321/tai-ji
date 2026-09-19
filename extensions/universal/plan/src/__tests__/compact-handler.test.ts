@@ -119,11 +119,28 @@ describe("handlePlanComplete", () => {
     it("non-goal mode: onComplete sends mode steer without calling goalInit", () => {
       const goalInit = attachGoalInit(() => true);
 
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "subagent");
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "develop");
       ctx._onCompleteFns[0]();
 
       expect(goalInit).not.toHaveBeenCalled();
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("subagent-driven"), { deliverAs: "steer" });
+      // D10 develop 文案：复杂度自判（subagent 委派 + 当前会话逐步执行收口一句）
+      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Develop (auto-parallel)"), { deliverAs: "steer" });
+      expect(lastSteer(pi)).toContain("subagents");
+      expect(lastSteer(pi)).toContain("current session");
+    });
+
+    it("skill mode (compact): onComplete steer carries the skill directory path (D10 skillDir 通路)", () => {
+      const goalInit = attachGoalInit(() => true);
+      const skillDir = "/tmp/fixtures/skills/dev-flow";
+
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "skill:dev-flow", skillDir);
+      ctx._onCompleteFns[0]();
+
+      expect(goalInit).not.toHaveBeenCalled();
+      const steer = lastSteer(pi);
+      expect(steer).toContain("skill:dev-flow"); // Execution mode 行透传 execMode
+      expect(steer).toContain("dev-flow"); // 指引按名加载
+      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md"); // 路径读取指引
     });
 
     it("onError (goal mode, init-refused): compact-failure notify + degraded steer + warning notify, no /goal promise", () => {
@@ -158,12 +175,35 @@ describe("handlePlanComplete", () => {
     it("non-goal mode: returns undefined, mode steer, no goalInit call", () => {
       const goalInit = attachGoalInit(() => true);
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "single-agent");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "develop");
 
       expect(outcome).toBeUndefined();
       expect(goalInit).not.toHaveBeenCalled();
       expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("step by step"), { deliverAs: "steer" });
       expect(ctx.compact).not.toHaveBeenCalled();
+    });
+
+    it("skill mode (direct): returns undefined, steer with skillDir path (steer 文案含 skillDir，D10)", () => {
+      attachGoalInit(() => true);
+      const skillDir = "/tmp/fixtures/skills/dev-flow";
+
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow", skillDir);
+
+      expect(outcome).toBeUndefined();
+      const steer = lastSteer(pi);
+      expect(steer).toContain("Execution mode: skill:dev-flow");
+      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md");
+      expect(steer).toContain("follow its workflow");
+    });
+
+    it("skill mode without skillDir falls back to name-only guidance (防御形态)", () => {
+      attachGoalInit(() => true);
+
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow");
+
+      const steer = lastSteer(pi);
+      expect(steer).toContain("load the dev-flow skill");
+      expect(steer).not.toContain("SKILL.md");
     });
 
     it("unknown isolation value falls through to direct delivery instead of silently dropping the choice (D1 防御形态)", () => {

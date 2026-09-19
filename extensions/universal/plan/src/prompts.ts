@@ -75,7 +75,7 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
       `## Phase D: Completion\n` +
       `1. Ask user to review the complete plan.\n` +
       `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
-      `3. After plan complete: the user picks an execution path (subagent-driven / goal-driven / single-agent) via the completion dialog.`,
+      `3. After plan complete: the user picks an execution method in the completion dialog — Develop (auto-parallel: complexity-driven subagent delegation vs current-session steps), an execution skill (Execute via skill: <name>, when detected), or goal-driven execution.`,
     );
   }
 

@@ -27,6 +27,11 @@ vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
 }));
 
+// Mock exec-skills（D10 检测）：审批用例不扫真实目录，skill 选项恒空
+vi.mock("../exec-skills.js", () => ({
+  detectExecSkills: vi.fn(() => []),
+}));
+
 import { handlePlanComplete } from "../compact.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
@@ -70,6 +75,10 @@ function setup(state?: PlanState) {
   const ctx = {
     sessionId: "test-session",
     cwd: "/tmp/test-project",
+    // D4 三路分流 ctx 形态字段：审批 approve → complete 在 taiji 形态走 uiFormInteract（rpc）
+    hasUI: true,
+    mode: "rpc" as const,
+    isProjectTrusted: () => true,
     sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
     ui: { select: vi.fn(), notify: vi.fn() },
   };
@@ -272,17 +281,17 @@ describe("三 decision 消费（taiji 形态）", () => {
     return setupActive();
   }
 
-  it("approve → walks the existing complete flow (execution-method select), resets state keeping docs", async () => {
+  it("approve → walks the existing complete flow (execution-method form), resets state keeping docs", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(JSON.stringify({ decision: "approve" }))
-      .mockResolvedValueOnce("Single-agent (current session)");
+      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Develop (auto-parallel)" }));
 
     const res = await exec({ action: "submit-review" });
 
     expect(ctx.ui.select).toHaveBeenCalledTimes(2);
     expect(res.details.action).toBe("complete");
-    expect(res.details.execMode).toBe("single-agent");
+    expect(res.details.execMode).toBe("develop");
     expect(handlePlanComplete).toHaveBeenCalled();
     // reset 终态矩阵经 resetPlanState 落盘：isActive=false + docs 保留
     expect(pi.appendEntry).toHaveBeenCalledWith(

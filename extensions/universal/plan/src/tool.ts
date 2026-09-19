@@ -6,8 +6,10 @@ import { Text } from "@earendil-works/pi-tui";
 import {
   firstContentText,
   PLAN_REVIEW_MARKER,
+  uiFormInteract,
 } from "@zhushanwen/extension-protocol";
 import type {
+  ChoiceQuestion,
   PlanDocMeta,
   PlanReviewRequest,
   PlanReviewResponse,
@@ -17,6 +19,8 @@ import { Type } from "typebox";
 
 import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
 import type { GoalBridgeOutcome } from "./compact.js";
+import { detectExecSkills } from "./exec-skills.js";
+import type { ExecSkill } from "./exec-skills.js";
 import { formatReviewComments } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
 import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
@@ -543,69 +547,151 @@ async function executeSubmitReview(
 }
 
 /**
- * 执行方式对话框的 label→mode 映射表（发现 8）——SDK `ui.select(title, options: string[])`
- * 只收字符串数组，无法传结构化选项，故用本地查表而非文案反查。
+ * 执行方式选项（D10 v2）：内置 Develop（subagent / single-agent 收口——按任务复杂度
+ * 内部切换，不暴露给开发者）+ 检测到的 plan-exec skill 项（label `Execute via skill:
+ * <name>`，mode `skill:<name>`，skillDir 随选项携带）+ goal 档（tryGoalInit 真实
+ * 副作用，保留独立选项）。动态构造：skill 项随 complete 时检测产出，label→mode
+ * 映射随选项集携带（`skill:<name>` 动态项不进静态表）。
  */
-const EXEC_MODE_OPTIONS: Array<{ label: string; mode: string }> = [
-  { label: "Subagent-driven execution", mode: "subagent" },
-  { label: "Goal-driven execution (/goal)", mode: "goal" },
-  { label: "Single-agent (current session)", mode: "single-agent" },
-];
+interface ExecOption {
+  label: string;
+  mode: string;
+  description?: string;
+  /** skill 档携带（CompleteChoiceOutcome 数据通路 → steer 文案 read <skillDir>/SKILL.md） */
+  skillDir?: string;
+}
+
+const DEVELOP_OPTION: ExecOption = {
+  label: "Develop (auto-parallel)",
+  mode: "develop",
+  description:
+    "Auto-parallel by complexity: delegate independent tasks to subagents, execute small or tightly-coupled steps in this session.",
+};
+
+/** Build execution options: Develop + detected plan-exec skills + goal tier (capability-filtered). */
+function buildExecOptions(execSkills: ExecSkill[], goalAvailable: boolean): ExecOption[] {
+  const options: ExecOption[] = [DEVELOP_OPTION];
+  for (const skill of execSkills) {
+    options.push({
+      label: `Execute via skill: ${skill.name}`,
+      mode: `skill:${skill.name}`,
+      description: skill.description,
+      skillDir: skill.skillDir,
+    });
+  }
+  if (goalAvailable) {
+    options.push({ label: "Goal-driven execution (/goal)", mode: "goal" });
+  }
+  return options;
+}
 
 /** 对话框尾部的两个"留在 plan mode"选项（complete-cancelled 路径） */
 const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
 
-/** Build execution options filtered by available capabilities. */
-function buildExecOptions(): string[] {
-  const modeLabels = EXEC_MODE_OPTIONS
-    .filter((opt) => opt.mode !== "goal" || detectGoalCapability())
-    .map((opt) => opt.label);
-  return [...modeLabels, ...CANCEL_OPTIONS];
-}
-
-/** Map the user's execution-method choice (dialog label) to the chosenMode string. */
-function chosenModeFromChoice(choice: string): string {
-  return EXEC_MODE_OPTIONS.find((opt) => opt.label === choice)?.mode ?? "single-agent";
-}
+/** GUI form 单 choice 问题的 answers key（协议 fallback 规则 key = header ?? question） */
+const EXEC_QUESTION_KEY = "Execution method";
 
 /** Outcome of the complete-action execution-method prompt. */
 type CompleteChoiceOutcome =
   | { kind: "cancelled"; result: ActionResult }
-  | { kind: "mode"; chosenMode: string };
+  | { kind: "mode"; chosenMode: string; skillDir?: string };
+
+/** complete-cancelled result（用户取消 / 留在 plan mode 两选项，reason = 点选 label 或 cancelled） */
+function cancelledByUserResult(choice: string | undefined): ActionResult {
+  return {
+    content: [
+      { type: "text" as const, text: `User chose: ${choice ?? "cancelled"}. Staying in plan mode.` },
+    ],
+    details: { action: "complete-cancelled", reason: choice ?? "cancelled" },
+  };
+}
+
+/** 通道失败折叠 result（D4 四态折叠表）：不 throw 炸 turn、也不默认执行，注明失败态留 plan mode */
+function cancelledByChannelResult(reason: string, message?: string): ActionResult {
+  const detail = message ? ` (${message})` : "";
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Interaction channel failed: ${reason}${detail}. Staying in plan mode — call plan(action='complete') again once the host/connection is fixed.`,
+      },
+    ],
+    details: { action: "complete-cancelled", reason },
+  };
+}
 
 /**
- * Prompt the user for an execution method (no-op selection when headless).
- * Cancel / "Modify the plan first" / "Save for later" → cancelled with a
- * complete-cancelled result; otherwise the mapped chosenMode.
+ * Prompt the user for an execution method（D4 三路分流 + D10 v2 选项集）：
+ * 1. `!ctx.hasUI`（print/json headless，noOp UI）→ 默认 develop，不进任何 select——
+ *    替换失效的 `typeof ctx.ui.select` 软门（noOp 的 select 是返回 undefined 的函数，
+ *    函数存在性不可判形态，pi runner.js 实码）；
+ * 2. taiji rpc 宿主（TAIJI_AGENT_EXT_LOG=1 且 mode==='rpc'）→ uiFormInteract 单
+ *    choice 问题（FormOverlay 单视图）；mode 收紧 rpc = helper 的 RPC-only 契约 +
+ *    TUI 保留原生 select（D8）——env 异常置位的 TUI 落回第 3 路而非 throw；
+ * 3. else（TUI / 独立 pi）→ pi 原生 plain select（现状行为逐字保留）。
+ * 四态折叠：cancelled/timeout → cancelled result；channel-error/non-json → 同折
+ * cancelled result + 通道失败说明（plan 是流程对话，通道故障不炸 turn 也不默认执行）。
  */
 async function resolveCompleteChoice(
   ctx: ExtensionContext,
   controllers: PlanAbortControllers,
   sessionId: string,
 ): Promise<CompleteChoiceOutcome> {
-  const execOptions = buildExecOptions();
-
-  if (typeof ctx.ui.select !== "function") {
-    return { kind: "mode", chosenMode: "single-agent" };
+  if (!ctx.hasUI) {
+    return { kind: "mode", chosenMode: "develop" };
   }
+
+  // D10：complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
+  // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillDir 随 outcome 流转
+  const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
+  const execOptions = buildExecOptions(execSkills, detectGoalCapability());
+
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
   // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
-  const choice = await ctx.ui.select("Plan is ready. Choose execution method:", execOptions, { signal: controller.signal });
-  controllers.delete(sessionId);
 
-  if (!choice || choice === "Modify the plan first" || choice === "Save for later") {
-    return {
-      kind: "cancelled",
-      result: {
-        content: [
-          { type: "text" as const, text: `User chose: ${choice ?? "cancelled"}. Staying in plan mode.` },
-        ],
-        details: { action: "complete-cancelled", reason: choice ?? "cancelled" },
-      },
+  let chosenLabel: string | undefined;
+  if (isTaijiHost() && ctx.mode === "rpc") {
+    const question: ChoiceQuestion = {
+      type: "choice",
+      header: EXEC_QUESTION_KEY,
+      question: "Plan is ready. Choose the execution method:",
+      options: [
+        ...execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
+        ...CANCEL_OPTIONS.map((label) => ({ label })),
+      ],
+      allowOther: false,
     };
+    // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
+    // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）
+    const form = await uiFormInteract(
+      { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select } },
+      [question],
+      { signal: controller.signal },
+    );
+    controllers.delete(sessionId);
+    if (!form.ok) {
+      if (form.reason === "cancelled" || form.reason === "timeout") {
+        return { kind: "cancelled", result: cancelledByUserResult(undefined) };
+      }
+      return { kind: "cancelled", result: cancelledByChannelResult(form.reason, form.message) };
+    }
+    chosenLabel = form.answers[EXEC_QUESTION_KEY];
+  } else {
+    const labels = [...execOptions.map((opt) => opt.label), ...CANCEL_OPTIONS];
+    chosenLabel = await ctx.ui.select("Plan is ready. Choose execution method:", labels, { signal: controller.signal });
+    controllers.delete(sessionId);
   }
-  return { kind: "mode", chosenMode: chosenModeFromChoice(choice) };
+
+  if (!chosenLabel || CANCEL_OPTIONS.includes(chosenLabel)) {
+    return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
+  }
+  const option = execOptions.find((opt) => opt.label === chosenLabel);
+  if (!option) {
+    // 选项集与 labels 同源构造，选中的 label 必在集内——找不到即编码 bug，fail-fast
+    throw new Error(`plan: unknown execution choice label: ${chosenLabel}`);
+  }
+  return { kind: "mode", chosenMode: option.mode, skillDir: option.skillDir };
 }
 
 /**
@@ -648,7 +734,7 @@ async function executeComplete(
   restoreFullToolSet(pi);
 
   // Execute completion handler (compact setup + steer/goalInit delivery)
-  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode);
+  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillDir);
 
   // Reset state and clear widget — same as abort
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx);
