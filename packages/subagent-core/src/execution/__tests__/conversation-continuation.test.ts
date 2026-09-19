@@ -356,6 +356,38 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
     // 无锚 = 无历史可摘要，不注入 reopen 摘要前缀
     expect(calls.dispatched[0]!.task).toBe("first message ever");
   });
+
+  it("[U3] zcode 锚库投影不可解析（dbPath 不存在）→ 不降级：零 reopen + 带锚正常派发", async () => {
+    // app-server 对 session 元数据行的落库滞后于 session/create 应答（分钟级窗 +
+    // 部分行永不落库）——dbPath 不存在即滞后窗形态。锚活性由引擎真实 resume 结果
+    // 承担（失败时引擎注入锚失效声明段），宿主侧不得按库投影误降级 reopen。
+    const dbPath = path.join(fixtureDir, "lagging-window", "db.sqlite");
+    const record = makeRecord({
+      id: "sa-zcode-anchor-unresolved",
+      engine: "zcode",
+      sessionFile: undefined,
+      engineHandle: { sessionRef: { sessionId: "sess_x", dbPath }, poolKey: "shared" },
+    });
+    record.status = "idle";
+    record.closedReason = "disconnected";
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("continue the work");
+
+    // 零 reopen：zcode 锚不进 markReopened 降级（世代不推进）
+    expect(calls.reopened).toEqual([]);
+    expect(record.epoch).toBeUndefined();
+    expect(record.status).toBe("running");
+    expect(calls.revived).toEqual([record.id]);
+    // 续聊轮正常派发：resume 锚携带（zcode cold 形态——引擎侧据此 resume 读历史）
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    expect(calls.dispatched[0]!.resume).toEqual({
+      sessionRef: { sessionId: "sess_x", dbPath },
+    });
+    // 无 reopen 摘要前缀（用户消息原样派发）
+    expect(calls.dispatched[0]!.task).toBe("continue the work");
+  });
 });
 
 describe("ConversationContinuation — D2 打断 / abort 不终态化 / 单飞", () => {
@@ -1683,10 +1715,12 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
 // ============================================================
 // [U6 / §3.2.6] zcode record 的 Continuation 续聊派发：resumeAnchor 引擎分派
 //（zcode 锚 {sessionId, dbPath} → 引擎侧 resume 读 + 新 session 注入）+ 锚缺失/
-// 失效分支的引擎中立化。fixture：真实 node:sqlite 建 tmp 库（锚可解析形态）。
+// 失效分支。[U3] zcode 锚不进 reopen 降级（库投影预检查退役——见
+// conversation-continuation.ts reviveOrThrow 注），失效形态锁定零 reopen 带锚派发。
+// fixture：真实 node:sqlite 建 tmp 库（锚可解析形态）。
 // ============================================================
 
-describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
+describe("ConversationContinuation — [U6] zcode 锚分派与续聊派发", () => {
   let zcodeDir: string;
   let zcodeDb: string;
 
@@ -1751,56 +1785,54 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
     expect(calls.dispatched[0]!.task).toBe("继续看导出接口");
   });
 
-  it("[U1] 锚失效（库条目被 TTL 清）→ 闭包分派 reopenRecord（世代推进）：round 归零 + epoch+1 + 摘要前缀 + resume:undefined", async () => {
-    // dbPath 指向不存在文件 = 锚失效（isAnchorResolvable fail-closed）
+  it("[U3] zcode 锚库投影不可解析（dbPath 不存在）→ 不降级：零 reopen + 带锚正常派发", async () => {
+    // dbPath 指向不存在文件 = 库投影不可解析（app-server 落库滞后于 create 应答的
+    // 分钟级窗 / TTL 清的形态）。[U3] zcode 锚不进 reopen 降级：库投影预检查系统性
+    // 误判（滞后窗内恒 false，会丢有效锚的 resume 通道），锚活性由引擎真实 resume
+    // 结果承担（失败时引擎注入锚失效声明段）——宿主侧带锚派发、不动世代。
     const record = makeZcodeRecord({ dbPath: path.join(zcodeDir, "swept.sqlite"), round: 4 });
     record.status = "idle";
-    // [W1/R1 D1a] 原「reopenRecord 闭包恒 false 无世代推进降级」固化用例翻转：
-    // 宿主闭包经 transcriptAnchorOf 单点分派 zcode 锚后，mock host（reopenAllowed
-    // 缺省 true）模拟 markReopened 世代推进副作用（round 归零 + epoch+1 + 过渡死锚
-    // 写入 transcriptRef）。binding 落盘真链断言见下方集成面（真实 store.markReopened）。
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
 
     cont.onMessage("继续");
 
-    // markReopened 降级原语触达（host.reopenRecord 闭包分派 zcode 锚达点）
-    expect(calls.reopened).toEqual([record.id]);
-    // 世代推进：round 归零 + epoch+1（mock 内模拟真实原语副作用）
-    expect(record.round).toBe(0);
-    expect(record.epoch).toBe(1);
-    // [U6/D4 轮始清点族扩字段] reopened 展示位随清点族退役——markReopened 写入的
-    // stopReason='reopened' 被 revive 格同步清（重开信息由摘要 prompt 体感承载）。
+    // 零 reopen：不触 markReopened 原语（host.reopenRecord 分派达点零调用）
+    expect(calls.reopened).toEqual([]);
+    // 世代不动：round 保持、epoch 不推进、无过渡死锚写入
+    expect(record.round).toBe(4);
+    expect(record.epoch).toBeUndefined();
+    expect(record.transcriptRef).toBeUndefined();
     expect(record.stopReason).toBeUndefined();
-    // 重开时刻过渡死锚写入 transcriptRef（markReopened 真实语义）——新轮回填点
-    // 清空（U1b 集成面专防）
-    expect(record.transcriptRef).toEqual({
-      engine: "zcode",
-      sessionId: "sess_z_anchor",
-      dbPath: path.join(zcodeDir, "swept.sqlite"),
-    });
     expect(record.status).toBe("running");
+    expect(calls.revived).toEqual([record.id]);
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
-    // reopen 降级轮：resume:undefined（引擎开新 session，新锚由 onHandleReady 回填）
-    expect(calls.dispatched[0]!.resume).toBeUndefined();
-    // 首轮 prompt = 历史摘要前缀 + 用户消息（buildReopenSummaryPrompt 契约）
-    expect(calls.dispatched[0]!.task).toContain("[Session reopened]");
-    expect(calls.dispatched[0]!.task).toContain("- Completed rounds: 4");
-    expect(calls.dispatched[0]!.task).toContain("继续");
+    // 带锚正常派发：resume 锚携带旧 session（引擎侧据此 resume 读历史）
+    expect(calls.dispatched[0]!.resume).toEqual({
+      sessionRef: { sessionId: "sess_z_anchor", dbPath: path.join(zcodeDir, "swept.sqlite") },
+    });
+    // 无 reopen 摘要前缀（用户消息原样派发）
+    expect(calls.dispatched[0]!.task).toBe("继续");
   });
 
-  it("[U2] 锚失效 + reopenRecord false（binding 写失败注入）→ 与 pi 同构响亮抛错（不再静默降级）", async () => {
+  it("[U3] zcode 锚不可解析 + reopenAllowed=false → reopen 原语不可达：仍带锚正常派发", async () => {
     const record = makeZcodeRecord({ dbPath: path.join(zcodeDir, "swept.sqlite"), round: 4 });
     record.status = "idle";
-    // [W1/R1 D1a] 原 zcode false → 静默降级分支已删除：false（binding 写失败 /
-    // CAS 拒绝注入）与 pi 同构响亮上抛，不再以无世代推进形态静默吞掉。
+    // [U3] zcode 锚不进 reopen 分支——reopenRecord 的 false 形态（binding 写失败 /
+    // CAS 拒绝注入）对 zcode 不可达：锚库投影不可解析不再触发 reopen 原语，派发
+    // 不受 reopenAllowed 影响（pi 侧的同构响亮抛错用例另行保留）。
     const { host, calls } = makeHost(record, { reopenAllowed: false });
     const cont = new ConversationContinuation(record, host);
 
-    expect(() => cont.onMessage("继续")).toThrow(/could not be reopened for a fresh transcript/);
-    expect(record.status).toBe("idle");
-    expect(calls.dispatched.length).toBe(0);
-    expect(calls.revived).toEqual([]);
+    cont.onMessage("继续");
+
+    expect(calls.reopened).toEqual([]);
+    expect(record.status).toBe("running");
+    expect(calls.revived).toEqual([record.id]);
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    expect(calls.dispatched[0]!.resume).toEqual({
+      sessionRef: { sessionId: "sess_z_anchor", dbPath: path.join(zcodeDir, "swept.sqlite") },
+    });
   });
 
   it("锚缺失（zcode record 无 engineHandle——从未开跑）→ 全新 session 直派（resume:undefined、无摘要）", async () => {
@@ -1820,10 +1852,12 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
 });
 
 // ============================================================
-// 集成：[W1/R1] 锚失效重开真链（真实 store.markReopened + 真实回填点）——
-// U1（binding 落 `${dbPath}.${sessionId}` / pi 同构）+ U1b 循环专防（D1b：两处新轮
+// 集成：锚失效处置的真链断言——pi 侧 reopen 链（U1 binding 落
+// `${dbPath}.${sessionId}` / pi 同构）+ U1b 循环专防（D1b：两处新轮
 // 锚确立点清空 transcriptRef，第二条消息判锚走派生键不再重开）+ D1b 边界③根治
-// （zcode 回填点补写新锚 binding）。引擎替身：pi = registerFakePiEngine、zcode =
+// （zcode 回填点补写新锚 binding）。[U3] zcode 侧预检查退役：库投影不可解析不再
+// 触发 reopen（带锚正常派发，锚活性归引擎真实 resume 结果），zcode 用例翻转锁定
+// 零 reopen 闭环。引擎替身：pi = registerFakePiEngine、zcode =
 // ZcodeChatEngine（FakeRun 组装，conversation 能力放行 message 资格 gate）。
 // ============================================================
 
@@ -1865,7 +1899,7 @@ class ZcodeChatEngine implements EnginePort {
   }
 }
 
-describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循环专防 + D1b 边界③ 新锚 binding 补写）", () => {
+describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1b 边界③ 新锚 binding 补写；[U3] zcode 零 reopen 闭环）", () => {
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
@@ -1926,8 +1960,8 @@ describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循�
     db.close();
   }
 
-  it("[U1] zcode 锚失效（库条目被 TTL 清）→ 真链 markReopened：round 归零 + epoch+1 + binding 落 `${dbPath}.${sessionId}` + 摘要注入", async () => {
-    await seedZcodeSessionDb([]); // 库在、条目无 = 锚失效
+  it("[U3] zcode 锚库投影不可解析（库条目无）→ 零 markReopened：世代不动 + 带锚派发（无摘要）", async () => {
+    await seedZcodeSessionDb([]); // 库在、条目无 = 库投影不可解析（落库滞后窗形态）
     const record = makeZcodeChatRecord("sa-z-reopen", "sess_z_anchor");
     store.register(record);
     const markReopenedSpy = vi.spyOn(store, "markReopened");
@@ -1935,64 +1969,55 @@ describe("集成：[W1/R1] 锚失效重开真链（U1 binding 落盘 + U1b 循�
     await service.chatActions.deliverChatMessage(record, "继续");
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
 
-    // 闭包分派真链：宿主闭包经 transcriptAnchorOf 派生 zcode 锚传入 store.markReopened
-    expect(markReopenedSpy).toHaveBeenCalledTimes(1);
-    expect(markReopenedSpy).toHaveBeenCalledWith(record, {
-      engine: "zcode",
-      sessionId: "sess_z_anchor",
-      dbPath: zcodeDb,
+    // [U3] 库投影预检查退役：zcode 锚不触发 markReopened（真链零调用、世代零推进）
+    expect(markReopenedSpy).not.toHaveBeenCalled();
+    expect(record.round).toBe(1);
+    expect(record.epoch).toBeUndefined();
+    // 带锚正常派发：resume 锚携带旧 session（引擎侧 resume 读真失败时由引擎注入
+    // 锚失效声明段——活性判据归引擎，宿主不预判）
+    expect(zcode.runs[0]!.ctx.resume?.resume).toEqual({
+      sessionRef: { sessionId: "sess_z_anchor", dbPath: zcodeDb },
     });
-    // 世代推进
-    expect(record.round).toBe(0);
-    expect(record.epoch).toBe(1);
-    // binding 落旧锚基底 `${dbPath}.${sessionId}.record-binding`（epoch 随 binding
-    // 持久化是硬要求——跨重启单调）
-    const bindingPath = `${zcodeAnchorBasePath({ sessionId: "sess_z_anchor", dbPath: zcodeDb })}${RECORD_BINDING_SIDECAR_EXT}`;
-    const binding = JSON.parse(fs.readFileSync(bindingPath, "utf-8")) as { recordId: string; epoch?: number };
-    expect(binding.recordId).toBe(record.id);
-    expect(binding.epoch).toBe(1);
-    // reopen 降级轮：fresh session（resume:undefined）+ 历史摘要前缀
-    expect(zcode.runs[0]!.task.prompt).toContain("[Session reopened]");
-    expect(zcode.runs[0]!.task.prompt).toContain("继续");
-    expect(zcode.runs[0]!.ctx.resume?.resume).toBeUndefined();
+    // 无 reopen 摘要前缀（用户消息原样派发）
+    expect(zcode.runs[0]!.task.prompt).toBe("继续");
   });
 
-  it("[U1b] zcode 循环专防：回填点清空 transcriptRef + 新锚 binding 补写（D1b 边界③）→ 第二条消息走派生键活锚不再重开", async () => {
+  it("[U3] zcode 锚不可解析续聊闭环：零 reopen + 回填点清空 transcriptRef + 新锚 binding 补写 → 第二条消息活锚续聊", async () => {
     await seedZcodeSessionDb([]);
     const record = makeZcodeChatRecord("sa-z-loop", "sess_z_anchor");
     store.register(record);
 
-    // 第一条消息：锚失效 → reopen（世代推进）→ 轮派发
+    // 第一条消息：库投影不可解析 → 不降级，带锚正常派发（世代零推进——round 连续）
     await service.chatActions.deliverChatMessage(record, "第一条");
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
-    expect(record.epoch).toBe(1);
+    expect(record.epoch).toBeUndefined();
 
     // 新轮回填：引擎回传新 sessionRef（每轮 session/create 新会话）——backfillRoundHandle
     // 权威整替分支
     zcode.runs[0]!.emitHandleReady({ sessionId: "sess_new", dbPath: zcodeDb });
 
-    // D1b ①：transcriptRef 过渡死锚清空（防「下一条消息再触发 reopen」永久循环）
+    // D1b ①：transcriptRef 清空照常（死锚/过渡锚残留会让后续消息拿错 resume 锚——
+    // 该回填行为与是否 reopen 无关）
     expect(record.transcriptRef).toBeUndefined();
     expect(record.engineHandle?.sessionRef["sessionId"]).toBe("sess_new");
-    // D1b ②（边界③根治）：新锚 binding 补写——重开窗口内崩溃重启后 epoch/统计基线
-    // 不致在新锚下从零开始（「epoch 随 binding 持久化是硬要求」）
+    // D1b ②：新锚 binding 补写照常（身份记账；非 reopen 轮世代未推进，无 epoch 可记）
     const newBindingPath = `${zcodeAnchorBasePath({ sessionId: "sess_new", dbPath: zcodeDb })}${RECORD_BINDING_SIDECAR_EXT}`;
     const newBinding = JSON.parse(fs.readFileSync(newBindingPath, "utf-8")) as { recordId: string; epoch?: number };
     expect(newBinding.recordId).toBe(record.id);
-    expect(newBinding.epoch).toBe(1);
+    expect(newBinding.epoch).toBeUndefined();
 
-    // 轮终收敛 → idle（轮终翻边）
+    // 轮终收敛 → idle（轮终翻边；round 从初值 1 连续推进——无 reopen 归零）
     zcode.runs[0]!.settle({ content: "第一轮回复" });
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.status).toBe("idle");
 
-    // 第二条消息：seed 新锚条目（活锚）→ 判锚走派生键 → 正常续聊、无第二次 reopen
+    // 第二条消息：seed 新锚条目（活锚）→ 正常续聊、零 reopen
     await seedZcodeSessionDb([{ id: "sess_new" }]);
     const markReopenedSpy = vi.spyOn(store, "markReopened");
     await service.chatActions.deliverChatMessage(record, "第二条");
     await vi.waitFor(() => expect(zcode.runs.length).toBe(2));
     expect(markReopenedSpy).not.toHaveBeenCalled();
-    expect(record.epoch).toBe(1); // 世代不再推进
+    expect(record.epoch).toBeUndefined(); // 世代恒不推进（零 reopen）
     // resume 锚 = 派生键新锚（引擎侧 session/resume 读 sess_new 历史）
     expect(zcode.runs[1]!.ctx.resume?.resume).toEqual({
       sessionRef: { sessionId: "sess_new", dbPath: zcodeDb },

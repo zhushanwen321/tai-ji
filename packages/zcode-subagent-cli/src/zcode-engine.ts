@@ -1039,11 +1039,12 @@ export class ZcodeEngine implements EnginePort {
   /**
    * [U6 / §3.2.6 要点 3] resume 锚 → 历史前缀（interact-resume 的读半段）。
    *
-   * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（条目被 TTL 清 /
-   * 会话失效 / 控制面错误）= 宿主侧锚判据通过后、引擎派发前的窄竞态窗——降级为
-   * **无历史前缀的新会话**（warn 留痕；宿主 reopen 摘要承担主降级面），不炸轮：
-   * 续聊消息本身仍可送达（模型缺历史上下文，比整轮失败可用性高，与 reopen 降级
-   * 的「带摘要重开」语义同族）。
+   * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（会话失效 / 控制
+   * 面错误）= 锚真失效的权威信号——宿主侧库投影预检查已退役（app-server 落库滞后
+   * 于 create 应答，分钟级窗 + 部分行永不落库，预检查系统性误判；resume 走
+   * app-server resident 内存态才是真实活性判据），因此此处不再静默降级为无前缀
+   * 裸跑，而是返回锚失效声明段：让模型知情「延续但无历史」，基于最新消息独立
+   * 续推，而非在缺上下文时臆测连续性。用户消息照常执行，不炸轮。
    */
   private async buildResumeHistoryPrefix(ctx: RunContext): Promise<string | undefined> {
     const anchor = zcodeResumeAnchorOf(ctx, this.deps.engineDataDir());
@@ -1057,10 +1058,10 @@ export class ZcodeEngine implements EnginePort {
       tokens = extractResumeTotalTokens(result);
     } catch (err) {
       logger.warn(
-        `[zcode-engine] session/resume 读历史失败（锚 ${anchor.sessionId}）——降级为无历史前缀的新会话: ${errMessage(err)}`,
+        `[zcode-engine] session/resume 读历史失败（锚 ${anchor.sessionId}）——判定锚真失效，注入锚失效声明段继续执行: ${errMessage(err)}`,
         { taskId: ctx.taskId },
       );
-      return undefined;
+      return buildResumeUnavailableNoticeSegment();
     }
     if (history.length === 0) return undefined; // 空历史（锚存在但从未成轮）不注入空段
     return buildResumeInjectionSegment(history, anchor.sessionId, tokens);
@@ -1147,6 +1148,22 @@ export function buildResumeInjectionSegment(
     `conversation history recovered from the session store follows. Continue seamlessly from it; the user ` +
     `message after this block is the next turn of the SAME conversation.\n\n` +
     `<conversation_history>\n${omissionNote}${kept.join("\n")}\n</conversation_history>${usageNote}\n\n`
+  );
+}
+
+/**
+ * [U3] resume 读失败 → 锚失效声明段（纯函数，单测锁定文案契约）。
+ *
+ * resume 走 app-server resident 内存态，读失败即锚真失效的权威信号（宿主侧库投影
+ * 预检查已退役——落库滞后使预检查系统性误判，见 buildResumeHistoryPrefix 方法头）。
+ * 声明段让模型知情「这是延续会话但历史不可恢复」，避免其在零上下文时臆测任务进展
+ * 或假装记得（静默裸跑的缺陷面）；语义与 buildResumeInjectionSegment 的「延续且有
+ * 历史」相对，尾部 `\n\n` 形态一致（与后续 prompt 空行分隔）。
+ */
+export function buildResumeUnavailableNoticeSegment(): string {
+  return (
+    "[会话延续提示] 本消息是同一任务的延续会话，但上一会话的历史记录不可恢复（原始会话已失效）。\n" +
+    "没有更早的对话上下文可引用——请基于下方最新消息独立判断并继续推进任务。\n\n"
   );
 }
 
