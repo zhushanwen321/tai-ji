@@ -14,11 +14,23 @@
 // config，readFileSync 不被调用——GUI-only 登录宿主上不拦 existsSync = 注入整体
 // 不可见），把对 cli/config.json 精确路径的读取重定向为「真实文件 + v2 provider
 // 注入」的内存合并结果（同 id 时 v2 整条优先——v2 是权威凭据源，等价复刻 GUI
-// 直传 modelConfig），再以原 argv 启动 zcode.cjs。HOME 保持真实值（共享语义
-// 不变：db/plugins/MCP 全继承宿主 HOME）。
+// 直传 modelConfig），再启动 zcode.cjs（import 前把 argv[1] 改写为 zcode.cjs 路径
+// ——上游 provider bootstrap 以 argv[1] 为入口锚，不改写则启动即退，见下方漂移
+// 面登记）。HOME 保持真实值（共享语义不变：db/plugins/MCP 全继承宿主 HOME）。
 //
-// 漂移面如实登记：zcode 升级若改变配置读取路径/方式，失败信号 = missing baseURL /
-// Model config is missing 明确报错（不静默坏）——与协议漂移直接报错的既有姿态同级。
+// 漂移面如实登记：
+// ① 配置读取路径/方式：zcode 升级若改变，失败信号 = missing baseURL / Model config
+//    is missing 明确报错（不静默坏）——与协议漂移直接报错的既有姿态同级。
+// ② argv[1] 入口锚：上游 provider bootstrap 以 argv[1] 为入口锚定位 CLI 内建
+//    provider 配置（本修复针对的行为事实，import 前改写 argv[1] = CLI_PATH）。上游
+//    若改变 bootstrap 锚定方式，失败信号 = 「无法定位 CLI ZCode Built-in Provider
+//    Config」，恢复动作 = 核对 wrapper 的 argv 改写与上游锚定方式是否一致。
+// ③ 模块标识维度（require.main / process.mainModule）：import() 形态下仍指向
+//    wrapper（CLI 模块自身作用域的 __filename 不受影响，解析为 CLI 自身路径）
+//    ——现行 0.16.5 实证无此类消费（行为由 argv[1] 驱动），登记为
+//    观察项；上游未来引入模块标识入口判定致静默漂移时，指定对策 = spawn 改
+//    `node --require <wrapper> <cliPath>` preload 形态（设计 §3.1 方案 E——wrapper
+//    退化为纯 fs-patch preload，argv 与模块标识双双恢复原生）。
 //
 // 源码以内嵌字符串形态进 dist bundle（vendored 面只拷 dist/，独立 .cjs 资产会被
 // vendor 脚本漏掉——字符串常量无此问题），运行时幂等落盘 engineDataDir。
@@ -131,8 +143,14 @@ if (text !== null) {
   };
 }
 
-// 以原 argv 形态启动 zcode.cjs（argv[0]=node, argv[1]=本 wrapper，argv[2]=app-server——
-// zcode.cjs 的 includes('app-server') 判定不受影响）。import() 兼容 CJS/ESM 入口。
+// 上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI 内建
+// provider 配置——wrapper 形态下 argv[1] = 本 wrapper 落盘路径，bootstrap 会在
+// wrapper 邻域找 provider 配置而失败（真机报「无法定位 CLI ZCode Built-in Provider
+// Config」启动即退）。import 前把 argv[1] 改写为 CLI_PATH：CLI 看到的 argv 序列与
+// 无 wrapper 直跑（node <cliPath> app-server ...）逐位一致，argv[0]=node、
+// argv[2]='app-server' 不变，includes('app-server') 子命令判定不受影响。
+// import() 兼容 CJS/ESM 入口。
+process.argv[1] = CLI_PATH;
 import(CLI_PATH).catch((err) => {
   process.stderr.write('[zcode-launcher] zcode.cjs 加载失败: ' + (err && err.message || err) + '\\n');
   process.exit(3);

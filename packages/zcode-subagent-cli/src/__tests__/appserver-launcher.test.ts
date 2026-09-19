@@ -33,6 +33,7 @@ function grab(v) {
 }
 async function main() {
   const out = {};
+  out.argv1 = process.argv[1] || null;
   out.existsConfig = fs.existsSync(CONFIG);
   out.existsMissing = fs.existsSync(path.join(os.homedir(), '.no-such-file'));
   out.existsOther = fs.existsSync(OTHER);
@@ -55,6 +56,8 @@ main().then(() => process.exit(0), (err) => {
 `;
 
 interface ProbeState {
+  /** CLI 内看到的入口锚（wrapper 修复后应 = 真实 CLI 路径） */
+  argv1: string | null;
   existsConfig: boolean;
   existsMissing: boolean;
   existsOther: boolean;
@@ -80,7 +83,12 @@ interface HomeSpec {
   real?: unknown;
 }
 
-function setupHome(spec: HomeSpec): { run: () => childProcess.SpawnSyncReturns<string>; state: () => ProbeState } {
+function setupHome(spec: HomeSpec): {
+  run: () => childProcess.SpawnSyncReturns<string>;
+  state: () => ProbeState;
+  /** 探针 fake CLI 路径（= spawn env 的 ZCODE_ENG_CLI_PATH） */
+  cliPath: string;
+} {
   const home = fs.mkdtempSync(path.join(tmpRoot, "home-"));
   const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-"));
   const cliDir = path.join(home, ".zcode", "cli");
@@ -100,6 +108,7 @@ function setupHome(spec: HomeSpec): { run: () => childProcess.SpawnSyncReturns<s
   const statePath = path.join(tmpRoot, `state-${path.basename(home)}.json`);
 
   return {
+    cliPath: probePath,
     run: () =>
       childProcess.spawnSync(process.execPath, [launcher], {
         env: {
@@ -163,6 +172,18 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(res.status).toBe(0);
     const cfg = JSON.parse(h.state().syncUtf8.text as string);
     expect(cfg.model.main).toBe("p1/model-x");
+  });
+});
+
+describe("入口锚（argv[1] 改写）", () => {
+  it("CLI 内看到的 argv[1] = 真实 CLI 路径（ZCODE_ENG_CLI_PATH），wrapper 路径不泄漏回 argv[1]", () => {
+    // 守卫语义：上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI
+    // 内建 provider 配置——wrapper 路径泄漏回 argv[1] 即启动期 provider 配置定位
+    // 失败（真机事故形态：报「无法定位 CLI ZCode Built-in Provider Config」即退）。
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().argv1).toBe(h.cliPath);
   });
 });
 
