@@ -30,6 +30,8 @@ import {
   resolveSkillPaths,
   resolveExtensionPaths,
   resolveReplaceSystemPrompt,
+  resolveEffectiveSystemPrompt,
+  resolveAppendSystemPrompt,
   resolveLaunchPresetOptions,
   buildPresetClientOptions,
   warnLaunchEffectiveMismatch,
@@ -120,6 +122,50 @@ describe('resolveReplaceSystemPrompt', () => {
   it('注入时委托 ConfigService.getReplaceSystemPrompt', () => {
     const config = { getReplaceSystemPrompt: () => 'custom prompt' } as unknown as IConfigService
     expect(resolveReplaceSystemPrompt(config)).toBe('custom prompt')
+  })
+})
+
+describe('resolveEffectiveSystemPrompt / resolveAppendSystemPrompt（D3 优先级取值 helper）', () => {
+  /** 最小 resolution 形状（仅 prompt 面参与本组断言）。 */
+  function resolution(prompt?: PresetResolution['prompt']): PresetResolution {
+    return { skillPaths: undefined, extensionPaths: [], toolArgs: {}, flags: {}, prompt } as PresetResolution
+  }
+
+  it('模式 replace 启用且非空 → 返回模式文本（全局值被压）', () => {
+    const r = resolution({ replace: { enabled: true, prompt: '模式替换' } })
+    expect(resolveEffectiveSystemPrompt(r, '全局替换')).toBe('模式替换')
+  })
+
+  it('模式 replace 未启用 / 文本空白 / 未配置 / resolution 缺失 → 回落全局值', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: false, prompt: '模式替换' } }), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: '   \n ' } }), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(resolution({}), '全局替换')).toBe('全局替换')
+    expect(resolveEffectiveSystemPrompt(undefined, '全局替换')).toBe('全局替换')
+  })
+
+  it('模式 replace 启用且非空但全局未配置 → 模式文本；两侧皆无 → undefined（pi 默认）', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: '模式替换' } }), undefined)).toBe('模式替换')
+    expect(resolveEffectiveSystemPrompt(resolution({}), undefined)).toBeUndefined()
+    expect(resolveEffectiveSystemPrompt(undefined, undefined)).toBeUndefined()
+  })
+
+  it('模式 append 启用且非空 → 文本；未启用 / 空白 / 未配置 / resolution 缺失 → undefined（无全局对手）', () => {
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: '模式追加' } }))).toBe('模式追加')
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: false, prompt: '模式追加' } }))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: '  \n ' } }))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(resolution({}))).toBeUndefined()
+    expect(resolveAppendSystemPrompt(undefined)).toBeUndefined()
+  })
+
+  it('append 与 replace 互不影响：仅 append 启用时替换仍回落全局', () => {
+    const r = resolution({ append: { enabled: true, prompt: '追加' } })
+    expect(resolveEffectiveSystemPrompt(r, '全局替换')).toBe('全局替换')
+    expect(resolveAppendSystemPrompt(r)).toBe('追加')
+  })
+
+  it('取值阶段不加 \\n 前缀（前缀统一落在 spawn-args argv 拼装处，两条通道同处覆盖）', () => {
+    expect(resolveEffectiveSystemPrompt(resolution({ replace: { enabled: true, prompt: 'AGENTS.md' } }), undefined)).toBe('AGENTS.md')
+    expect(resolveAppendSystemPrompt(resolution({ append: { enabled: true, prompt: 'AGENTS.md' } }))).toBe('AGENTS.md')
   })
 })
 

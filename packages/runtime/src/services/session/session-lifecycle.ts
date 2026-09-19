@@ -30,7 +30,13 @@ import { getImageCacheDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
-import { buildPresetClientOptions, hasSubagentWorkflowExtension, warnLaunchEffectiveMismatch } from './launch-params.js'
+import {
+  buildPresetClientOptions,
+  hasSubagentWorkflowExtension,
+  resolveAppendSystemPrompt,
+  resolveEffectiveSystemPrompt,
+  warnLaunchEffectiveMismatch,
+} from './launch-params.js'
 import type { PresetClientOptions } from './launch-params.js'
 // D5 在途镜像（crash-forensics §3.3 D5 ①）：registerSession 汇聚点按本次 spawn 注入列表
 // 写 injected（presetZero 订阅在 session-service，本处只写注入态——两写方字段互不触碰，
@@ -495,7 +501,10 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(tempId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——replace 走 D3 优先级（模式 > 全局 > pi 默认），
+      // append 只有模式一段（全局追加归 pi-system-prompt 扩展）。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
       ...presetClientOptions,
     })
 
@@ -1116,7 +1125,9 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(sessionId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——restore 用本次 resolve 的 resolution。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
       ...presetClientOptions,
       // P1（pi-assumption final gate V1⑤）：pi CLI --model 恒优先于 session entry 恢复
       //（main.js buildSessionOptions），restore 路径曾因全局默认兜底把 --model 拼进 spawn
@@ -1412,7 +1423,9 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(forkedId, sessionCwd, {
       skillPaths: forkResolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——fork 继承源 session 的 preset，用 forkResolution。
+      systemPrompt: resolveEffectiveSystemPrompt(forkResolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(forkResolution),
       ...presetClientOptions,
     })
 

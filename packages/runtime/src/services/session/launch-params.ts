@@ -86,6 +86,48 @@ export function resolveReplaceSystemPrompt(configService: IConfigService | null 
 }
 
 /**
+ * 模式 replace 段是否「启用且有实义文本」。
+ *
+ * 空白判定用 trim（与 spawn-args 的 `?.trim()` 拼装门同口径）：若只按 `!== ''` 判非空，
+ * 一个「enabled + 纯空白」的模式段会返回空白串 → spawn-args 的 trim 门将其丢弃 →
+ * 替换无值可传且**全局值已被压掉**，等价于「替换为空」的静默失效。故空白视为「未配置」，
+ * 回落下一步（全局 / pi 默认）。
+ */
+function hasEffectivePromptSegment(segment: { enabled: boolean; prompt: string } | undefined): segment is { enabled: boolean; prompt: string } {
+  return segment !== undefined && segment.enabled && segment.prompt.trim() !== ''
+}
+
+/**
+ * 模式级替换系统提示词的取值 helper（D3 优先级：模式 replace > 全局 replace > pi 默认）。
+ *
+ * 规则集中这一处，create/restore/fork 三处 spawn 共用（避免三处各写一份优先级判断）。
+ * 返回 undefined 即「无替换」——pi 走自带系统提示词。
+ *
+ * 取值与 argv 拼装的职责边界：本 helper 只做「选谁」，**不做** pi 二义陷阱的 `\n` 前缀处理
+ * ——前缀统一落在 spawn-args 的 argv 拼装处（`toInlinePromptValue`），模式值与全局值两条
+ * 来路同一处加前缀，不会出现「漏了某条通道」。
+ */
+export function resolveEffectiveSystemPrompt(
+  resolution: PresetResolution | undefined,
+  globalReplace: string | undefined,
+): string | undefined {
+  const segment = resolution?.prompt?.replace
+  return hasEffectivePromptSegment(segment) ? segment.prompt : globalReplace
+}
+
+/**
+ * 模式级追加系统提示词的取值 helper（D3 链序：模式 append 段无全局对手——全局追加由
+ * `@zhushanwen/pi-system-prompt` 扩展独立处理，两者共存不互斥）。
+ *
+ * 未启用 / 空白 / 未配置 → undefined（不拼 `--append-system-prompt`）。
+ * `\n` 前缀处理同 resolveEffectiveSystemPrompt，落在 spawn-args 拼装处。
+ */
+export function resolveAppendSystemPrompt(resolution: PresetResolution | undefined): string | undefined {
+  const segment = resolution?.prompt?.append
+  return hasEffectivePromptSegment(segment) ? segment.prompt : undefined
+}
+
+/**
  * 单条 extension 路径是否指向 subagent-workflow（in-flight 上报方，D5 ① per-session
  * 可用性判定的谓词）。
  *
