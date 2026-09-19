@@ -6,7 +6,8 @@
  * - order 升序排序（缺省排后）
  * - badge ≤4 字符宿主截断 + 全文进 tooltip（AP-1 徽标契约）
  * - E13 三态：registered 可点 / unregistered 灰置 / unknown 首次缺省可点 + 保持上次值
- * - 运行时镜像 entry.disabled：true 灰置（插件业务态）/ false / undefined 不灰置
+ * - 运行时镜像 entry.disabled：true 灰置（插件业务态）/ false / undefined 不灰置；
+ *   disabled=true 缺 tooltip → 「本会话未加载所需扩展」（场景 12），插件显式 tooltip 优先
  * - E3 点击 → executeCommand(commandId)；命令缺失（返回 false）→ 本地置灰（禁静默 no-op）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/extension/HeaderActionsHost.test.ts
@@ -144,7 +145,7 @@ describe('HeaderActionsHost', () => {
     expect(wrapper.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('3 个启用任务')
   })
 
-  it('运行时镜像 entry.disabled=true：按钮灰置（插件 updateHeaderAction 推的业务态被消费）', () => {
+  it('运行时镜像 entry.disabled=true 且无 tooltip：灰置 + tooltip「本会话未加载所需扩展」（场景 12）', () => {
     const entry: HeaderActionEntry = {
       headerActionId: 'scheduler-manager.open',
       pluginId: 'scheduler-manager',
@@ -155,19 +156,37 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
-    // 灰置只挡点击，tooltip 仍是插件侧运行时文案（非 unregistered 提示）
-    expect(btn.attributes('title')).toBe('定时任务')
+    // 灰置按钮缺插件文案时落 disabled 态泛化提示，不得落到声明 title（误导可点语义）
+    expect(btn.attributes('title')).toBe('本会话未加载所需扩展')
   })
 
-  it('运行时镜像 entry.disabled=false / 未推送（undefined）：不灰置', () => {
+  it('运行时镜像 entry.disabled=true 且插件推了 tooltip：插件文案优先于泛化提示', () => {
+    const entry: HeaderActionEntry = {
+      headerActionId: 'scheduler-manager.open',
+      pluginId: 'scheduler-manager',
+      disabled: true,
+      tooltip: '调度器运行中不可配置',
+      updatedAt: 1,
+    }
+    const source = makeSource({ getRuntimeState: () => entry })
+    const wrapper = mountHost(source)
+    const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.attributes('title')).toBe('调度器运行中不可配置')
+  })
+
+  it('运行时镜像 entry.disabled=false：不灰置且 tooltip 仍落声明 title（现状不变）', () => {
     const disabledEntry: HeaderActionEntry = {
       headerActionId: 'scheduler-manager.open',
       pluginId: 'scheduler-manager',
       disabled: false,
       updatedAt: 1,
     }
-    const enabled = mountHost(makeSource({ getRuntimeState: () => disabledEntry }))
-    expect(enabled.find('[data-testid=header-action-scheduler-manager-open]').attributes('disabled')).toBeUndefined()
+    const source = makeSource({ getRuntimeState: () => disabledEntry })
+    const wrapper = mountHost(source)
+    const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    expect(btn.attributes('disabled')).toBeUndefined()
+    expect(btn.attributes('title')).toBe('定时任务')
     // 未推送运行时帧（getRuntimeState → undefined）：E13 registered 主路径可点
     const noEntry = mountHost(makeSource({ getRuntimeState: () => undefined }))
     expect(noEntry.find('[data-testid=header-action-scheduler-manager-open]').attributes('disabled')).toBeUndefined()

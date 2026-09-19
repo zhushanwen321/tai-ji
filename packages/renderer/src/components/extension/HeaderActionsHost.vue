@@ -9,8 +9,8 @@
   - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
-  - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置
-    （插件侧业务态消费，残留风险 #6 场景 12 主修方向）
+  - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置；
+    缺 tooltip 时提示「未加载扩展」不落声明 title（场景 12，插件侧业务态消费）
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op
   - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
@@ -98,12 +98,13 @@ const buttons = computed(() => {
     const disabled = effective === 'unregistered' || missing || entry?.disabled === true
 
     // tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
+    // ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点）
     // ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）
     const tooltipLines: string[] = []
     if (entry?.badge && entry.badge.length > BADGE_MAX_CHARS) tooltipLines.push(entry.badge)
     if (availability === 'unknown') tooltipLines.push(t('panel.header.pluginActionRestoring'))
     else if (effective === 'unregistered') tooltipLines.push(t('panel.header.pluginActionExtensionNotLoaded'))
-    else tooltipLines.push(entry?.tooltip ?? ha.title)
+    else tooltipLines.push(entry?.tooltip ?? (entry?.disabled === true ? t('panel.header.pluginActionExtensionNotLoaded') : ha.title))
     const badge = entry?.badge ? entry.badge.slice(0, BADGE_MAX_CHARS) : ''
 
     return {
