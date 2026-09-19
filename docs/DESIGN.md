@@ -142,8 +142,8 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 | 类型 | 适用组件 | 范式 |
 |---|---|---|
-| **tab 型** | SegmentedTab / drawer L1-L2 tab / AskUserOverlay au-tab / plugin seg-tab | `bg-bg-elevated` + `text-neutral-fg`（中性浮起） |
-| **列表项型** | SessionItem / FileTree / SearchModal sm-item / au-opt / wf-call / CommandPopover 项 / SettingsNavItem | `bg-surface` + `text-accent`（实色块 + 蓝字，无 ring 无左条） |
+| **tab 型** | SegmentedTab / drawer L1-L2 tab / FormOverlay form-tab / plugin seg-tab | `bg-bg-elevated` + `text-neutral-fg`（中性浮起） |
+| **列表项型** | SessionItem / FileTree / SearchModal sm-item / form-option / wf-call / CommandPopover 项 / SettingsNavItem | `bg-surface` + `text-accent`（实色块 + 蓝字，无 ring 无左条） |
 
 **accent-soft 仅留瞬时高亮**（fresh 新增项 / is-current popover 项），不作持久选中态。
 
@@ -533,7 +533,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 快捷键 | 动作 |
 |---|---|
-| `Esc` | 关闭所有 overlay（search/settings/askUser/confirm/quickComposer），退出 staging/fork/handoff 模式 |
+| `Esc` | 关闭所有 overlay（search/settings/confirm/quickComposer），退出 staging/fork/handoff 模式；提问表单 FormOverlay 壳级无 Esc（schedule 渲染器内 Esc = 取消，渲染器级键位） |
 | `⌘/Ctrl+K` | 打开 SearchModal（命令面板） |
 | `⌘/Ctrl+B` | 切 sidebar 折叠 |
 | `⌘/Ctrl+N` | 新建任务 |
@@ -641,8 +641,8 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.5 Overlays
 
 - **SearchModal**：手写覆盖层；命令/文件聚合（session 源待接入，demo 现有 2 group：建议命令 + 最近打开）；选中态见 §3.4 例外（surface-hover + 蓝字，dialog 底 surface 上 bg-surface 会淹没）；分组 header 去 uppercase；高亮 `<span class="sm-hit">` font-semibold 不染蓝（颜色继承父元素）；loading 防闪 200ms（见 §5.10）；default 态尾部 clock icon 表最近/历史
-- **AskUserOverlay**：内联（非 modal），companion-band 统一交互出口（B3）
-  - **多问题切 tab**（au-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
+- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收口，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
+  - **多问题切 tab**（form-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
   - **单选 radio**：16px，unchecked=`border-strong` 空心，checked=`accent` 实心 + `inset 2px bg-input` 形成环
   - **多选 checkbox**：16px 方块，checked=`accent` 实心 + `accent-fg` 勾 10px
   - **Other 选项**：末尾追加，选中后 label 下方展开 Input（surface-2 内嵌，自动聚焦）
@@ -672,7 +672,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | 维度 | 挂载点 | 级别 | 当前状态 |
 |---|---|---|---|
 | **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
-| **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog+ask-user) | L2/L1 | **已实现**（5 闭环） |
+| **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog) | L2/L1 | **已实现**（5 闭环；提问表单走 FormOverlay 覆盖 composer，不进 band） |
 | **D 命令配置** | D1 slash / D2 settings 区段 | L1 | D1 已实现（双轨待统一） |
 | **E 独立 view** | E1 独立 view 路由 | L3 | 未实现（仅 built-in） |
 
@@ -755,7 +755,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | C3 | 侧栏（SegmentedTab/SessionItem/FileTree/plugin tab；终态 = 三 tab 中的第 3 枚） |
 | C4 | Drawer（一体化 + 形态 B + 7 tab + GitPanel MVP） |
 | C5 | 设置页（FullSettingsOverlay + 11 page + GroupCard） |
-| C6 | Overlays（SearchModal/AskUserOverlay/ConfirmDialog） |
+| C6 | Overlays（SearchModal/FormOverlay/ConfirmDialog） |
 | C7 | Plugin 渲染（7 原语 v6 视觉 + ExtensionHost + builtin tasks） |
 | C8 | 横切清理（正文提亮/彩色降噪/uppercase 清除/z-index）+ 全量验收 |
 
@@ -849,7 +849,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 │  ├─ chat/（MessageStream/TurnRail[滚动条二合一+折展toggle]/LandingView[landing页]/ToolBlock/ThinkingBlock/ChangeSetCard/...）
 │  ├─ drawer/（SideDrawer/GitPanel/DiffView/DetailPane/TerminalView/BrowserPane/...）
 │  ├─ settings/（SettingsOverlay/GroupCard/ProviderPage/SystemPage[6太极主题]/TokenDebugPage/...11 page）
-│  ├─ overlays/（SearchModal/AskUserOverlay/ConfirmDialog）
+│  ├─ overlays/（SearchModal/FormOverlay/ConfirmDialog）
 │  ├─ composer/（Composer[variant双形态+landing meta-row]/CommandPopover/QueueBubble/QuickComposer）
 │  ├─ common/（预留共享控件层，当前为空；UiInput/UiSwitch/SettingRow/SettingsNavItem 等暂在 settings/ 下）
 │  └─ icons/（TaijiLogo 图标组件）

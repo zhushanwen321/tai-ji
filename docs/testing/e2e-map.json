@@ -247,7 +247,7 @@
       "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。"
+      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。"
     },
     {
       "id": "E2E-SKILLRELOAD-01",
@@ -307,7 +307,7 @@
       "run": "npx playwright test e2e/skill-reload-askuser.spec.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 ask-user-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。"
+      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 form-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。[2026-09-19] S1b 两次稳定复现失败并归因：run 的 done 处理在 stale ctx emit 失败 → done 广播未送达 spec WS → awaitDone 150s 超时（reload preserved 收口链既有问题，非 ui-presentation-protocol 迁移回归——同运行中 form-overlay 渲染/应答/关闭 + pi 恢复 turn 全通过）；本 rule 现处已知失败态，修复另开任务后复跑。"
     },
     {
       "id": "E2E-SKILLRELOAD-03",
@@ -610,7 +610,7 @@
       "run": "node scripts/verify-scheduler-e2e.cjs",
       "owner": "extensions/universal/scheduler",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。2026-09-18 U7 起驱动器具备 extension_ui_request→extension_ui_response 应答循环（schedule-create 确认/取消可配置 uiActor，S18 确认 / S19 取消；既有场景默认 auto-confirm）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
+      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。2026-09-18 U7 起驱动器具备 extension_ui_request→extension_ui_response 应答循环（schedule-create 确认/取消可配置 uiActor，S18 确认 / S19 取消；既有场景默认 auto-confirm）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行。[2026-09-19 ui-presentation-protocol u6] scheduler 创建确认迁统一表单协议：uiFormInteract + UI_FORM_MARKER（ScheduleQuestion 单问整表单），回包 FormAnswers envelope（schedule value = JSON.stringify(ScheduleFormResult)）；verify 脚本 marker 识别与 S18 确认 / S19 取消断言已随 form 契约改造，S1-S19 空载串行复验全绿（exit 0）"
     },
     {
       "id": "E2E-BATCH-01",

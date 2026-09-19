@@ -56,7 +56,7 @@
 
 ### 2.1 现状的真实样子
 
-**用户看到的**（2026-09-14 真机实测，probe-06 driver 全链路）：plan complete 对话框恒为 4 选项——`["Subagent-driven execution", "Single-agent (current session)", "Modify the plan first", "Save for later"]`，goal 档「Goal-driven execution (/goal)」恒缺失；goal 扩展本体加载成功（同会话 `/goal status` 响应正常）。
+**用户看到的**（2026-09-14 真机实测，probe-06 driver 全链路；当时选项集）：plan complete 对话框恒为 4 选项——`["Subagent-driven execution", "Single-agent (current session)", "Modify the plan first", "Save for later"]`，goal 档「Goal-driven execution (/goal)」恒缺失；goal 扩展本体加载成功（同会话 `/goal status` 响应正常）。现行选项集为 v2（统一表单协议 + Develop 收口，见 §3.1 场景 A）。
 
 **代码里的**（两侧取自实装，行号为 2026-09-14 HEAD）：
 
@@ -117,7 +117,7 @@ plan 使用时（buildExecOptions / tryGoalInit）──读──▶ 同一 slot
 
 ### 3.1 终态（使用者视角先行）
 
-**场景 A：成功路径**（回溯 G1/G2）。独立 pi 用户安装 goal+plan，AI 起草含 `## Implementation Steps` 编号步骤的 plan 文件后调 `plan(action=complete, isolation=compact)`。对话框出现 5 选项（goal 档「Goal-driven execution (/goal)」排在第 2 位，tool.ts EXEC_MODE_OPTIONS 定义序）：`["Subagent-driven execution", "Goal-driven execution (/goal)", "Single-agent (current session)", "Modify the plan first", "Save for later"]`。用户选 goal 档 → compaction 完成 → AI 收到 goal steer（`Execute via /goal: Execute plan: <path>`）并开始执行 → `/goal status` 显示 active goal（objective/slug/预算/成功判据来自 plan 文件派生）→ goal widget 投影出现 → goal 状态 entry 在压缩后世界存活（`session_before_compact` 的 onComplete 时序，06 已定）。
+**场景 A：成功路径**（回溯 G1/G2）。独立 pi 用户安装 goal+plan，AI 起草含 `## Implementation Steps` 编号步骤的 plan 文件后调 `plan(action=complete, isolation=compact)`。执行方式选择现为统一表单单 choice 问题（FormOverlay 单视图，taiji rpc 宿主）/ pi 原生 select（独立 pi TUI），选项集 v2 = 内置「Develop (auto-parallel)」（subagent / single-agent 收口，按任务复杂度内部切换）+ 检测到的 plan-exec skill 项（`Execute via skill: <name>`，每检测到一个一项）+ goal 档「Goal-driven execution (/goal)」（`detectGoalCapability` 有能力时出现）+ 尾部两项 `["Modify the plan first", "Save for later"]`（留在 plan mode）。用户选 goal 档 → compaction 完成 → AI 收到 goal steer（`Execute via /goal: Execute plan: <path>`）并开始执行 → `/goal status` 显示 active goal（objective/slug/预算/成功判据来自 plan 文件派生）→ goal widget 投影出现 → goal 状态 entry 在压缩后世界存活（`session_before_compact` 的 onComplete 时序，06 已定）。
 
 **场景 B：失败路径**（回溯 G3/G4）。五值出口全部带恢复指引（GOAL_FAILURE_RECOVERY，compact.ts:156-162，本设计零变更），每个失败经降级 steer（AI 可见）+ warning notify（用户可见）报告：
 
