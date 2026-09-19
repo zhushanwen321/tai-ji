@@ -77,6 +77,11 @@ const t = i18n.global.t
  *
  * 两者首渲染时可能为空集（fileSearch 未加载）→ 路径降级纯文本，加载完成后响应式重渲染。
  *
+ * - resourceBaseDir：本条消息/文档的相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render
+ *   D4）。无则该消费面不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
+ *   preventDefault 无动作。来源：对话流 = session cwd（useChatViewDeps 工厂装配）、drawer =
+ *   打开文件所在目录（DetailPane 传 dirname）、更新日志不传（undefined）。
+ *
  * 净化层信任槽（Symbol 键）挂 env 但不属于本公开类型——管线内部自产自销，不随
  * markdown-types 镜像/序列化泄漏、不参与增量轴 env 签名，见 markdown-sanitize.ts。
  */
@@ -85,6 +90,8 @@ export interface MarkdownEnv {
   filePaths?: Set<string>
   /** 裸 basename 识别的白名单（FileNode.name 集合） */
   localFiles?: Set<string>
+  /** 相对资源（img src / 正文链接 href）解析基准目录（绝对路径）；无则不做相对资源解析 */
+  resourceBaseDir?: string
 }
 
 /**
@@ -315,7 +322,8 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 走与 core rule 对称的候选正则 + 白名单（env 透传），产出
   // <code>...<a class="md-filepath" data-path="...">path</a>...</code>——
   // 保留等宽 code 视觉，路径可点击（点击处理由 ui 包 MarkdownRenderer.vue 的 onClick
-  // 事件委托原生实现：代码块复制 / .md-filepath / .md-ambiguous / 外链四路分流）。
+  // 事件委托原生实现：代码块复制 / .md-filepath / .md-ambiguous / 相对链接与外链④路分流——
+  // 相对链接按 resourceBaseDir resolve 后经 drawer detail 打开，设计 markdown-html-sanitize-render D4）。
   // 摘出点 4/5（设计 D3）：<code> 整段（含 md-filepath 链接）存信任槽返回哨兵
   md.renderer.rules.code_inline = (tokens, idx, _options, env): string => {
     const mdEnv = env as MarkdownEnv | undefined

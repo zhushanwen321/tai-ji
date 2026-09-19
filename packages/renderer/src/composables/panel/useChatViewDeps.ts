@@ -24,11 +24,12 @@
  * - renderMermaid（mermaid.ts）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
-import { ref, watch, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
@@ -58,6 +59,7 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
   const { t } = useI18n()
   const { error: toastError } = useToast()
   const chat = useChatStore()
+  const sessionStore = useSessionStore()
   const { abortBash, editAndResend } = useChat()
   const turnExpansion = useTurnExpansion(sessionId)
   const { forkSession, handoff } = useSidebar()
@@ -88,6 +90,15 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
     }
   }
   watch(sessionId, (sid) => { void refreshLocalFiles(sid) }, { immediate: true })
+
+  /** 当前 session 的相对资源解析基准目录（resourceBaseDir，设计 markdown-html-sanitize-render
+   *  D4）：sessionStore.list 按 id 查 cwd（与 useDetailPane.sessionCwd 同源同层），无 session /
+   *  查不到 → undefined（该消息不做相对资源解析）。响应式：cwd 变化经 env 签名触发增量全量重建。 */
+  const resourceBaseDir = computed<string | undefined>(() => {
+    const sid = sessionId.value
+    if (!sid) return undefined
+    return sessionStore.list.find((s) => s.id === sid)?.cwd ?? undefined
+  })
 
   return {
     // ── 数据获取器（读 chatStore 派生状态）──
@@ -158,24 +169,31 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
     loadFileCandidates: (sid: string): Promise<FileNode[]> => loadFileCandidates(sid),
 
     // ── 渲染桥接 ──
-    /** 渲染 markdown 为 segments（含 shiki 高亮 + 路径/basename 链接化，白名单由 refreshLocalFiles 维护） */
+    /** 渲染 markdown 为 segments（含 shiki 高亮 + 路径/basename 链接化 + img 相对 src 重写，
+     *  白名单与 resourceBaseDir 由上方 computed/watch 维护） */
     renderMarkdown: (source: string, sid?: string) => {
-      void sid // sid 仅作 sessionId 派生提示，实际白名单由 watch(sessionId) 统一刷新（单 session 壳）
+      void sid // sid 仅作 sessionId 派生提示，实际白名单/基准目录由 watch(sessionId) 统一刷新（单 session 壳）
       return renderMarkdownSegments(source, {
         filePaths: filePaths.value,
         localFiles: localFiles.value,
+        resourceBaseDir: resourceBaseDir.value,
       })
     },
     /** D-5 增量渲染（W22 协议 / W23 消费）：前缀段引用恒等缓存 + tail 段每帧重建 + streaming-fence
      *  占位。cache 为 opaque 句柄（ui 组件 per-instance 持有）：首次 null 由本桥接创建，随返回值
-     *  带回；env（filePaths/localFiles）引用变化由 renderIncremental 内部全量重建处理。 */
+     *  带回；env（filePaths/localFiles/resourceBaseDir）引用/值变化由 renderIncremental 内部
+     *  全量重建处理。 */
     renderMarkdownIncremental: async (source, cache, sid, opts) => {
-      void sid // 同 renderMarkdown：白名单由 watch(sessionId) 统一刷新
+      void sid // 同 renderMarkdown：白名单/基准目录由 watch(sessionId) 统一刷新
       const c = cache ?? createIncrementalRenderCache()
       const result = await renderIncremental(
         source,
         c,
-        { filePaths: filePaths.value, localFiles: localFiles.value },
+        {
+          filePaths: filePaths.value,
+          localFiles: localFiles.value,
+          resourceBaseDir: resourceBaseDir.value,
+        },
         opts,
       )
       return { ...result, cache: c }

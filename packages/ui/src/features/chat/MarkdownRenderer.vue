@@ -78,6 +78,10 @@ const props = defineProps<{
   /** 所属 assistant 是否正在流式（Block text 分支透传）。true 期间未闭合 fence 走 streaming-fence
    *  占位（静默 ≥阈值或翻 false 时 finalize 转完整渲染）；false/undefined（complete/静态内容）直接完整渲染。 */
   streaming?: boolean
+  /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4）：相对链接点击按此
+   *  resolve 后经 drawer detail 打开。对话流经 deps env（壳装配 session cwd），此处 props 供
+   *  DetailPane 等静态宿主传打开文件所在目录；undefined（更新日志等）→ 相对链接 preventDefault 无动作。 */
+  resourceBaseDir?: string
 }>()
 
 const deps = useChatViewDeps()
@@ -137,8 +141,39 @@ let copiedBtn: HTMLElement | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 const COPIED_FEEDBACK_MS = 1200
 
+// ── ④路相对链接判定/resolve（设计 markdown-html-sanitize-render D4）──
+// 与 renderer markdown-sanitize.ts 的 isRelativeResourcePath/resolveResourcePath 同标准镜像
+// （ui→renderer 依赖禁令不可直接 import——镜像纪律同 markdown-types.ts 的协议镜像，两侧
+// 注释互指，改动需同批同步）。
+
+/** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，与 sanitize 侧同款） */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
+
+/** 相对资源路径判定：非 # 开头（页内锚点）、非 // 开头（协议相对 = 远程）、无 scheme 前缀。空串非路径。 */
+function isRelativeHref(value: string): boolean {
+  if (value === '') return false
+  if (value.startsWith('#')) return false
+  if (value.startsWith('//')) return false
+  return !SCHEME_RE.test(value)
+}
+
+/** POSIX resolve（Node path.resolve 语义的纯函数实现；renderer 运行时无 node:path，两侧同款镜像） */
+function resolveHrefPath(base: string, rel: string): string {
+  const joined = rel.startsWith('/') ? rel : `${base}/${rel}`
+  const parts: string[] = []
+  for (const seg of joined.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(seg)
+  }
+  return `/${parts.join('/')}`
+}
+
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 外链）。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
  * 文件操作经 deps 桥接（onFileClick/openDrawer）。代码块复制是 DOM 副作用，ui 本地处理。
  */
 function onClick(e: MouseEvent): void {
@@ -190,7 +225,22 @@ function onClick(e: MouseEvent): void {
     if (basename) ambiguousState.value = { basename, anchorEl: ambLink }
     return
   }
-  // ④ 其余点击（外链等）：默认冒泡，不拦截
+  // ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
+  // 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
+  // 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+  const anchor = target.closest('a')
+  if (anchor) {
+    // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
+    const href = anchor.getAttribute('href')
+    if (href && isRelativeHref(href)) {
+      e.preventDefault()
+      // resourceBaseDir 缺失（更新日志等场景）→ preventDefault + 无动作（死链无害，优于窗口导航走）
+      if (props.resourceBaseDir) {
+        deps.openDrawer('detail', { filePath: resolveHrefPath(props.resourceBaseDir, href) })
+      }
+    }
+  }
+  // 其余点击：默认冒泡，不拦截
 }
 </script>
 
@@ -252,6 +302,14 @@ function onClick(e: MouseEvent): void {
   padding-left: 0.85em;
   margin: 0.6em 0;
   color: var(--neutral-mid);
+}
+
+/* img 布局约束（设计 D8）：README 的 width=900 截图等撑破容器——max-width 封顶 + height
+   auto 保比例；垂直 margin 对齐 blockquote 同族节奏（图片是内容通道，不引入装饰）。 */
+.md-render :deep(img) {
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
 }
 
 .md-render :deep(a) {

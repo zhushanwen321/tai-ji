@@ -85,12 +85,14 @@ export interface ChatViewDeps {
   loadFileCandidates: (sessionId: string, basename?: string) => FileNode[] | Promise<FileNode[]>
 
   // ── 渲染桥接（重库渲染经壳注入，ui 不带 shiki/mermaid 依赖）──
-  /** 渲染 markdown 为 segments（renderer 壳 renderMarkdownSegments，含 shiki 高亮 + 路径链接化） */
+  /** 渲染 markdown 为 segments（renderer 壳 renderMarkdownSegments，含 shiki 高亮 + 路径链接化；
+   *  env 携带相对资源基准目录 resourceBaseDir——对话流 = session cwd，设计 markdown-html-sanitize-render D4） */
   renderMarkdown: (source: string, sessionId?: string) => MarkdownSegment[] | Promise<MarkdownSegment[]>
   /**
    * D-5 增量渲染（W22 协议 / W23 消费，renderer 壳 renderIncremental）：前缀段引用恒等缓存 +
    * tail 段每帧重建。cache 是 opaque 句柄——首次传 null 由壳创建（随返回值带回，组件持有后透传），
-   * 壳内原地更新；env（filePaths/localFiles）引用变化由壳内全量重建处理。
+   * 壳内原地更新；env（filePaths/localFiles 引用恒等 + resourceBaseDir 值恒等，设计 D4 相对资源
+   * 基准目录）变化由壳内全量重建处理。
    * optional：未 provide（mock 壳/降级）时 MarkdownRenderer 回退 renderMarkdown 全量渲染（等价旧版）。
    */
   renderMarkdownIncremental?: (

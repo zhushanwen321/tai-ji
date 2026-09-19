@@ -128,18 +128,81 @@ const SANITIZE_CONFIG = {
   // - URI 见文件头注释（默认正则，相对 URL 放行）。
 }
 
-// afterSanitizeAttributes 双职责 hook（D4 单点；U1 只落 a 补齐职责，img 相对 src 重写
-// 由 U3 的 resourceBaseDir 通道在本 hook 内扩展）：
+// afterSanitizeAttributes 双职责 hook（D4 单点：img 相对 src 重写 + a 补齐）：
 // a 补齐（R10 覆盖条件收紧）：target 非 _blank 一律覆盖为 _blank+noopener——「无 target
 // 才补」会被用户显式 _self/_parent/_top 绕过（同窗导航面正是要消灭的对象，安全优先于
 // 排版意图）；统一走 setWindowOpenHandler（http(s) 经 openExternal 开浏览器，其余 deny 惰性）。
 // markdown 语法链接（link_open 规则）注入的 target 恒 _blank，不会被覆盖。
+// img 重写（D4）：src 为相对路径且 resourceBaseDir 存在 → resolve 成绝对路径 → local-file://
+// 协议 URL（复用 DetailPane 现有拼法语义）。绝对路径/带协议 URL/data URI 不动（协议 URL
+// 交给 URI 白名单与 CSP）。hook 无调用级参数通道（DOMPurify 3.4.11 _parseConfig 只解构
+// 已知键，自定义键不进 CONFIG），resourceBaseDir 经下方模块级变量传递——sanitize 同步
+// 执行，set/clear 夹住单次调用即无交错。
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A' && node.getAttribute('target') !== '_blank') {
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener')
   }
+  if (node.tagName === 'IMG') {
+    const src = node.getAttribute('src')
+    // 与 ④路 href 判定同三条排除（# 锚点 / // 协议相对 / scheme），另排除绝对路径
+    // （img 的根相对 src 依赖 http origin 解析，前端无 origin——绝对/根相对一律不动，D4）
+    if (src && currentResourceBaseDir && isRelativeResourcePath(src) && !src.startsWith('/')) {
+      node.setAttribute('src', toLocalFileUrl(resolveResourcePath(currentResourceBaseDir, src)))
+    }
+  }
 })
+
+// ── 相对资源协议纯函数（D4）──
+// ④路消费方在 ui 包 MarkdownRenderer.vue（ui→renderer 依赖禁令，不可直接 import），
+// 判定/resolve 以镜像形态在彼处维护同标准实现——镜像纪律同 markdown-types.ts 的
+// MarkdownSegment 协议镜像（壳侧改动需人工同步镜像，注释互指防漂移）。
+
+/** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，设计 D4 原文） */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * 当前 sanitize 调用的相对资源基准目录。sanitizeAndRestore 入口 set / finally clear——
+ * DOMPurify hook 是模块级注册（全局单例），调用级 env 经此变量桥接；sanitize 同步执行，
+ * 夹住单次调用即无交错面。
+ */
+let currentResourceBaseDir: string | undefined
+
+/**
+ * 相对资源路径判定（img src 重写与 ④路 href 分流共用标准，D4）：
+ * 非 # 开头（页内锚点）、非 // 开头（协议相对 = 远程）、无 scheme 前缀。空串非路径。
+ */
+export function isRelativeResourcePath(value: string): boolean {
+  if (value === '') return false
+  if (value.startsWith('#')) return false
+  if (value.startsWith('//')) return false
+  return !SCHEME_RE.test(value)
+}
+
+/**
+ * POSIX resolve（Node path.resolve 语义的纯函数实现，D4）：base 恒为绝对目录（resourceBaseDir
+ * 契约），rel 相对。../ 穿越按 POSIX 语义出 base（真收口在下游 runtime 守门——git.getDiff
+ * 的 path_not_allowed / stat 的 not_found，见设计错误规格表）。renderer 运行时无 node:path
+ * （vite browser build），全仓运行时源码零 node:path 先例，故自实现等价语义。
+ */
+export function resolveResourcePath(base: string, rel: string): string {
+  const joined = rel.startsWith('/') ? rel : `${base}/${rel}`
+  const parts: string[] = []
+  for (const seg of joined.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(seg)
+  }
+  return `/${parts.join('/')}`
+}
+
+/** local-file:// 协议 URL（复用 DetailPane 现有拼法：encodeURIComponent 处理中文/空格） */
+export function toLocalFileUrl(absPath: string): string {
+  return `local-file:///${encodeURIComponent(absPath)}`
+}
 
 /**
  * 净化 + 回填 + 完整性断言（renderMarkdown 出口调用，D2：净化点在最终输出整串——
@@ -159,28 +222,35 @@ export function sanitizeAndRestore(html: string, env: unknown): string {
     throw new Error('DOMPurify unsupported (no DOM API) — refusing unsanitized output')
   }
   const trust = (env as TrustCarrier)[TRUST_SLOT]
-  const sanitized = DOMPurify.sanitize(html, SANITIZE_CONFIG)
-  if (!trust || trust.store.length === 0) return sanitized
+  // img 重写 hook 的调用级参数桥接（finally clear：异常路径也不残留到下一次调用）。
+  // 结构化类型取值：本模块被 markdown.ts import，反向 import MarkdownEnv 会成循环依赖
+  currentResourceBaseDir = (env as { resourceBaseDir?: string }).resourceBaseDir
+  try {
+    const sanitized = DOMPurify.sanitize(html, SANITIZE_CONFIG)
+    if (!trust || trust.store.length === 0) return sanitized
 
-  const sentinelRe = new RegExp(`TJMD${trust.nonce}-(\\d+)END`, 'g')
-  const consumed = new Set<number>()
-  // 函数形态 replace：单遍替换不重扫（store 内容含哨兵形态文本不会被二次替换），
-  // 且 replacement 中的 $& 等特殊序列按字面插入
-  const restored = sanitized.replace(sentinelRe, (match, digits: string) => {
-    const i = Number(digits)
-    if (!Number.isInteger(i) || i < 0 || i >= trust.store.length) return match
-    consumed.add(i)
-    return trust.store[i] ?? match
-  })
+    const sentinelRe = new RegExp(`TJMD${trust.nonce}-(\\d+)END`, 'g')
+    const consumed = new Set<number>()
+    // 函数形态 replace：单遍替换不重扫（store 内容含哨兵形态文本不会被二次替换），
+    // 且 replacement 中的 $& 等特殊序列按字面插入
+    const restored = sanitized.replace(sentinelRe, (match, digits: string) => {
+      const i = Number(digits)
+      if (!Number.isInteger(i) || i < 0 || i >= trust.store.length) return match
+      consumed.add(i)
+      return trust.store[i] ?? match
+    })
 
-  const residualRe = new RegExp(`TJMD${trust.nonce}-\\d+END`)
-  const residual = residualRe.test(restored)
-  if (consumed.size !== trust.store.length || residual) {
-    throw new Error(
-      `[markdown-sanitize] trusted-fragment backfill incomplete: consumed ${consumed.size}/${trust.store.length}, residual=${residual}. ` +
-        'Sentinel likely destroyed by sanitization (content inside removed elements). ' +
-        'Recovery: renderMarkdown degrades this message to escaped plain text.',
-    )
+    const residualRe = new RegExp(`TJMD${trust.nonce}-\\d+END`)
+    const residual = residualRe.test(restored)
+    if (consumed.size !== trust.store.length || residual) {
+      throw new Error(
+        `[markdown-sanitize] trusted-fragment backfill incomplete: consumed ${consumed.size}/${trust.store.length}, residual=${residual}. ` +
+          'Sentinel likely destroyed by sanitization (content inside removed elements). ' +
+          'Recovery: renderMarkdown degrades this message to escaped plain text.',
+      )
+    }
+    return restored
+  } finally {
+    currentResourceBaseDir = undefined
   }
-  return restored
 }

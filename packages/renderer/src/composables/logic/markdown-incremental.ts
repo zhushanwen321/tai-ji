@@ -544,9 +544,11 @@ export interface IncrementalRenderCache {
   prefixSegments: MarkdownSegment[]
   /** segId 分配器（单调递增；降级/重建时保留不回退，防 key 复用） */
   nextSegId: number
-  /** env 引用签名（filePaths/localFiles 引用恒等；变化 → 前缀缓存失效全量重建） */
+  /** env 引用签名（filePaths/localFiles 引用恒等、resourceBaseDir 值恒等；变化 → 前缀缓存
+   *  失效全量重建。resourceBaseDir 防切 session 后 cwd 变化而缓存段仍持旧基准——设计 D4） */
   envFilePaths?: Set<string>
   envLocalFiles?: Set<string>
+  envResourceBaseDir?: string
 }
 
 /** 创建空的前缀缓存 */
@@ -596,6 +598,7 @@ function resetIncrementalCache(cache: IncrementalRenderCache, env?: MarkdownEnv)
   cache.prefixSegments = []
   cache.envFilePaths = env?.filePaths
   cache.envLocalFiles = env?.localFiles
+  cache.envResourceBaseDir = env?.resourceBaseDir
 }
 
 /** 降级全量渲染：整段 content 作为 tailSegments，前缀缓存重置（可恢复——下一帧重走增量） */
@@ -635,7 +638,11 @@ function isCacheStable(
 ): boolean {
   const hasCache = c.boundary > 0 || c.prefixSegments.length > 0
   if (!hasCache) return true
-  if (c.envFilePaths !== env?.filePaths || c.envLocalFiles !== env?.localFiles) {
+  if (
+    c.envFilePaths !== env?.filePaths ||
+    c.envLocalFiles !== env?.localFiles ||
+    c.envResourceBaseDir !== env?.resourceBaseDir
+  ) {
     // env 签名变化：重置缓存走正常路径（本帧全量重渲染 prefix+tail 并重建前缀缓存）
     resetIncrementalCache(c, env)
   } else if (c.boundary > content.length || content.slice(0, c.boundary) !== c.prefixText) {
@@ -664,6 +671,7 @@ async function advancePrefixCache(
   }
   c.envFilePaths = env?.filePaths
   c.envLocalFiles = env?.localFiles
+  c.envResourceBaseDir = env?.resourceBaseDir
 }
 
 /** 前缀段获取：缓存命中返回引用恒等的前缀段；无缓存时独立渲染前缀区（segId 从 0 分配） */
@@ -732,7 +740,8 @@ async function buildTailSegments(
  *   mermaid 段组件实例跨帧保活）。
  * - 边界前进：新增稳定区（slice(oldBoundary, newBoundary)）独立渲染并入前缀缓存。
  * - 单调性防御：边界回退（新 < 旧）或前缀被改写（非 append-only）→ fallback-full + 缓存重置。
- * - env 签名变化（filePaths/localFiles 引用变）→ 前缀缓存失效，本帧全量重渲染并重建。
+ * - env 签名变化（filePaths/localFiles 引用变 / resourceBaseDir 值变）→ 前缀缓存失效，
+ *   本帧全量重渲染并重建（resourceBaseDir 入签名防切 session 后 cwd 变化旧基准残留，设计 D4）。
  * - 未闭合 fence（非 finalize 态）：fence 之前的 tail 闭区正常渲染，fence 整体以
  *   streaming-fence 占位段呈现（语言名 + streaming 标记数据；UI 呈现归 W23）。
  * - cache 省略：无状态调用（边界拆分照常，前缀每帧重建，供一次性消费）。

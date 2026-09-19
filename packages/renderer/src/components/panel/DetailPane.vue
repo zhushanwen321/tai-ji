@@ -201,6 +201,7 @@
           v-if="state.kind === 'markdown'"
           :content="state.content"
           :session-id="sessionId ?? undefined"
+          :resource-base-dir="resourceBaseDir"
           class="detail-md p-2 text-[length:var(--text-sm)] leading-[1.5]"
           data-testid="detail-markdown"
         />
@@ -294,6 +295,19 @@ const absolutePath = computed(() => {
   const cwd = sessionCwd(props.sessionId)
   if (!cwd || !state.value.path) return ''
   return resolvePreviewPath(cwd, state.value.path).absolute
+})
+
+/**
+ * 相对资源解析基准目录（MarkdownRenderer resourceBaseDir，设计 markdown-html-sanitize-render
+ * D4）：打开文件所在目录（absolutePath 取 dirname）。无 cwd / 无 path → undefined（该文档
+ * 不做相对资源解析）。drawer 预览的相对 img src / 相对链接都按文件自身目录解析。
+ */
+const resourceBaseDir = computed<string | undefined>(() => {
+  const abs = absolutePath.value
+  if (!abs) return undefined
+  const slash = abs.lastIndexOf('/')
+  if (slash <= 0) return undefined
+  return abs.slice(0, slash)
 })
 
 /** shiki 语言名（code 类文件高亮用） */

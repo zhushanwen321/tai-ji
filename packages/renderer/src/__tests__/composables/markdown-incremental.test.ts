@@ -650,6 +650,28 @@ describe('renderIncremental — 缓存协议 / segId / 降级 / 占位', () => {
     expect(r4.prefixSegments).toBe(r3.prefixSegments)
   })
 
+  it('P7b env 签名失效：resourceBaseDir 值变化 → 前缀缓存重建（切 session cwd 防旧基准残留，设计 D4）', async () => {
+    const m = await freshModule()
+    const cache = m.createIncrementalRenderCache()
+    // resourceBaseDir 是 string：值比较（与 Set 的引用比较同语义层——「基准变了就重建」）
+    const envA = { resourceBaseDir: '/home/project-a' }
+    const content = 'plain para\n\nstreaming tail'
+    const r1 = await m.renderIncremental(content, cache, envA)
+    expect(r1.stableBoundary).toBeGreaterThan(0)
+
+    // 同值：缓存命中（引用恒等）
+    const r2 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-a' })
+    expect(r2.prefixSegments).toBe(r1.prefixSegments)
+
+    // 值变化（切 session cwd）：缓存失效 → 前缀重建（新对象）
+    const r3 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-b' })
+    expect(r3.prefixSegments).not.toBe(r1.prefixSegments)
+    expect(r3.prefixSegments[0]).not.toBe(r1.prefixSegments[0])
+    // 重建后同 env 再渲染 → 新缓存命中
+    const r4 = await m.renderIncremental(content, cache, { resourceBaseDir: '/home/project-b' })
+    expect(r4.prefixSegments).toBe(r3.prefixSegments)
+  })
+
   it('P8 无 cache 调用：无状态拆分渲染（一次性消费），前缀+tail 覆盖全文', async () => {
     const m = await freshModule()
     const r: IncrementalRenderResult = await m.renderIncremental('A\n\nB\n\nC')

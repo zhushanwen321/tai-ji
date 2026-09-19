@@ -34,7 +34,7 @@ vi.mock('shiki/core', () => ({
 /** fresh 渲染：resetModules 后重 mock shiki，拿干净的 markdown 模块（cachedMarkdown 独立） */
 async function freshRender(
   content: string,
-  env?: { filePaths?: Set<string>; localFiles?: Set<string> },
+  env?: { filePaths?: Set<string>; localFiles?: Set<string>; resourceBaseDir?: string },
 ): Promise<string> {
   vi.resetModules()
   vi.doMock('shiki/core', () => ({
@@ -276,6 +276,73 @@ describe('a 补齐（afterSanitizeAttributes hook，R10 覆盖条件）', () => 
     expect(html).toContain('target="_blank"')
     expect(html).not.toContain('_self')
     expect(html).toContain('rel="noopener"')
+  })
+})
+
+describe('img 相对 src 重写（afterSanitizeAttributes hook，D4 U3：resourceBaseDir 通道）', () => {
+  const BASE = '/home/demo/project'
+
+  it.each([
+    { name: 'markdown 语法相对图片', content: '![](docs/foo.png)\n', src: 'docs/foo.png' },
+    { name: '原生 HTML img 相对 src', content: '<img src="docs/foo.png">\n', src: 'docs/foo.png' },
+    { name: '嵌套相对段', content: '![](a/b/c.png)\n', src: 'a/b/c.png' },
+  ])('$name：带 base → local-file:///<encoded abs>（复用 DetailPane 拼法）', async ({ content, src }) => {
+    const html = await freshRender(content, { resourceBaseDir: BASE })
+    const abs = `${BASE}/${src}`
+    expect(html).toContain(`src="local-file:///${encodeURIComponent(abs)}"`)
+    expect(html).not.toContain(`src="${src}"`)
+  })
+
+  it.each([
+    { name: '绝对路径', content: '![](/etc/passwd.png)\n', keep: '/etc/passwd.png' },
+    { name: '根相对路径', content: '![](//cdn.example.com/a.png)\n', keep: '//cdn.example.com/a.png' },
+    { name: 'https URL', content: '![](https://example.com/a.png)\n', keep: 'https://example.com/a.png' },
+    { name: 'data URI', content: '![x](data:image/png;base64,iVBORw0KGgo=)\n', keep: 'data:image/png;base64,iVBORw0KGgo=' },
+    { name: '# 锚点形态', content: '![](#anchor)\n', keep: '#anchor' },
+  ])('$name：不重写（原样输出，D4「绝对/带协议/data URI 不动」）', async ({ content, keep }) => {
+    const html = await freshRender(content, { resourceBaseDir: BASE })
+    expect(html).toContain(`src="${keep}"`)
+    expect(html).not.toContain('local-file://')
+  })
+
+  it('base 缺失（undefined）不重写——原样输出（现状等价，无回归）', async () => {
+    const html = await freshRender('![](docs/foo.png)\n')
+    expect(html).toContain('<img src="docs/foo.png"')
+    expect(html).not.toContain('local-file://')
+  })
+
+  it('`../` 穿越按 POSIX resolve 出 base（真收口在 local-file 白名单 403 裂图——错误规格表）', async () => {
+    const html = await freshRender('![](../outside.png)\n', { resourceBaseDir: BASE })
+    expect(html).toContain(`src="local-file:///${encodeURIComponent('/home/demo/outside.png')}"`)
+  })
+})
+
+describe('相对资源协议纯函数（D4：isRelativeResourcePath / resolveResourcePath / toLocalFileUrl）', () => {
+  it('isRelativeResourcePath 判定矩阵（④路 href 与 img src 共用三条排除 + 空串）', async () => {
+    const { isRelativeResourcePath } = await import('@/composables/logic/markdown-sanitize')
+    expect(isRelativeResourcePath('docs/foo.md')).toBe(true)
+    expect(isRelativeResourcePath('README.md')).toBe(true)
+    expect(isRelativeResourcePath('')).toBe(false)
+    expect(isRelativeResourcePath('#anchor')).toBe(false)
+    expect(isRelativeResourcePath('//cdn.example.com/a.png')).toBe(false)
+    expect(isRelativeResourcePath('https://example.com')).toBe(false)
+    expect(isRelativeResourcePath('data:text/html,x')).toBe(false)
+    expect(isRelativeResourcePath('mailto:a@b.c')).toBe(false)
+  })
+
+  it('resolveResourcePath：POSIX 语义（.. 穿越出 base / . 归一 / 多斜杠 / 根相对吃 base）', async () => {
+    const { resolveResourcePath } = await import('@/composables/logic/markdown-sanitize')
+    expect(resolveResourcePath('/a/b', 'c.md')).toBe('/a/b/c.md')
+    expect(resolveResourcePath('/a/b', '../c.md')).toBe('/a/c.md')
+    expect(resolveResourcePath('/a/b', '../../c.md')).toBe('/c.md')
+    expect(resolveResourcePath('/a/b', './c.md')).toBe('/a/b/c.md')
+    expect(resolveResourcePath('/a/b', 'x//y/./z.md')).toBe('/a/b/x/y/z.md')
+    expect(resolveResourcePath('/a/b', '/abs/c.md')).toBe('/abs/c.md')
+  })
+
+  it('toLocalFileUrl：与 DetailPane 现有拼法一致（encodeURIComponent 处理中文/空格）', async () => {
+    const { toLocalFileUrl } = await import('@/composables/logic/markdown-sanitize')
+    expect(toLocalFileUrl('/a b/中文名.png')).toBe(`local-file:///${encodeURIComponent('/a b/中文名.png')}`)
   })
 })
 
