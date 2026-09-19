@@ -9,6 +9,9 @@ export default {
     branch: 'Branch',
     gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
+    // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
+    pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
+    pluginActionRestoring: 'Session restoring, availability unknown',
   },
   composer: {
     send: 'Send',

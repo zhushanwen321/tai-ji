@@ -49,4 +49,7 @@ export default {
   scheduleCreateRelHours: '{h} 小时后',
   scheduleCreateRelHoursMinutes: '{h} 小时 {m} 分后',
   scheduleCreateRelDays: '{n} 天后',
+  // ── plugin modal 宿主 chrome（PluginModalHost，AP-2：chrome 只有标题 + 关闭键）──
+  pluginModalClose: '关闭',
+  pluginModalCloseEsc: '关闭 (Esc)',
 }

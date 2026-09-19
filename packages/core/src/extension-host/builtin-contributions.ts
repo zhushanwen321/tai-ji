@@ -38,4 +38,22 @@ export const builtinContributions: BuiltinContribution[] = [
       ],
     },
   },
+  {
+    // scheduler-manager（plugin-header-action-modal-points 首消费者，AP-1/AP-2）：
+    // headerActions/modals 为新点位声明（icon 为 lucide 名宿主解析，插件不给 SVG；width 三档闭集）。
+    // commands 一条是顶栏按钮点击链的必要配套：commandId 'scheduler-manager.open' 须经
+    // ensureCommandDeclarationsSync 注册进 CommandRegistry，点击才走 execute → WS
+    // plugin.executeCommand → Worker handler → api.ui.showModal 闭环；缺声明则 E3
+    // 「命令查不到」错误路径成为唯一路径，G1（点击开层）失效。
+    pluginId: 'scheduler-manager',
+    contributes: {
+      headerActions: [
+        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20 },
+      ],
+      modals: [
+        { id: 'scheduler-manager.panel', title: '定时任务', width: 'md' },
+      ],
+      commands: [{ command: 'scheduler-manager.open', title: '定时任务' }],
+    },
+  },
 ]

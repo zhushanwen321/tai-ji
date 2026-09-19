@@ -98,13 +98,18 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
 
   it('TC-5b: builtin 插件骨架与 manifest 声明一致', () => {
     // composer-task-tray D10：「后台命令」view 贡献随该 native 视图退役
-    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks'])
+    // scheduler-manager 为 plugin-header-action-modal-points AP-1/AP-2 首消费者（u4b 登记）
+    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'scheduler-manager'])
     expect(builtinContributions[0].contributes.statusBarItems).toHaveLength(1)
     expect(builtinContributions[1].contributes.slashCommands).toHaveLength(2)
     // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
     expect(builtinContributions.every((b) => b.contributes.views === undefined)).toBe(true)
+    // scheduler-manager 声明形状（AP-1/AP-2）：headerActions 1 + modals 1 + commands 1（点击链配套）
+    expect(builtinContributions[2].contributes.headerActions).toHaveLength(1)
+    expect(builtinContributions[2].contributes.modals).toHaveLength(1)
+    expect(builtinContributions[2].contributes.commands).toHaveLength(1)
   })
 })
 
@@ -263,7 +268,8 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
     registry.registerBuiltin()
     expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo'])
     expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    expect(registry.getContributions()).toHaveLength(3) // 1 statusline + 2 tasks slashCommands（「后台命令」view 已退役）
+    // 1 statusline + 2 tasks slashCommands + scheduler-manager 3 条（AP-1/AP-2：1 headerAction + 1 modal + 1 command）
+    expect(registry.getContributions()).toHaveLength(6)
   })
 })
 

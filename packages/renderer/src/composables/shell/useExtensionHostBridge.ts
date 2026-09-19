@@ -22,13 +22,19 @@
  *
  * CompanionBand（plugin:uiRequest dialog）接线：createDialogRequestSource/createUiResponseTransport
  * 适配（见 extension-host-dialog.ts）经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
+ *
+ * plugin-header-action-modal-points（u4b）接线：HeaderActionStore（#38 徽标镜像）+
+ * plugin-modal-slot 帧订阅（#39 槽镜像）+ headerAction 声明镜像（响应式，E2 清理/重放后
+ * 刷新）+ E2 触发链（plugin:statusChange/plugin:crashed → 三容器清理 + 命令注销）+
+ * ACTION_EXECUTOR_KEY / HEADER_ACTIONS_SOURCE_KEY / PLUGIN_MODAL_SOURCE_KEY 三个 provide。
  */
-import type { App } from 'vue'
-import { reactive, shallowReactive, watch } from 'vue'
+import type { App, InjectionKey } from 'vue'
+import { reactive, shallowReactive, shallowRef, watch } from 'vue'
 import {
   ContributionRegistry,
   createSessionScopedMap,
   EXTENSION_BRIDGE_TYPES,
+  HeaderActionStore,
   InternalEventBus,
   MessageBusBridge,
   MountPointRegistry,
@@ -39,8 +45,12 @@ import {
   OverlayLifecycle,
   ActivationManager,
   CommandRegistry,
+  clearPluginModalForPlugin,
+  subscribePluginModalSlot,
   type ActivationTrigger,
   type CommandExecutor,
+  type ContributionRecord,
+  type HeaderActionEntry,
   type OverlayState,
   type IncomingPluginMessage,
   type PluginMessageSource,
@@ -59,13 +69,14 @@ import {
   OVERLAY_LIFECYCLE_KEY,
   type ContributionInfo,
 } from '@taiji/ui/extension-host'
+import { ACTION_EXECUTOR_KEY } from '@taiji/ui/rendering-protocol'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
 import { createDialogRequestSource, createUiResponseTransport } from './extension-host-dialog'
 import type { ServerMessage } from '@taiji/shared'
 import { onCrossSession, onGlobal } from '@taiji/core/transport/api'
 import { onPlugins } from '@taiji/core/transport/api/domains/plugin'
 import { createNotifyToastHandler } from './notify-toast'
-import type { ContributionRecord } from '@taiji/core'
+import { useCommandStore } from '@/composables/features/command/useCommandStore'
 
 /** 把 renderer 的 WS 消息流（events 通道的 plugin:/extension: 下行）适配成 PluginMessageSource。 */
 
@@ -236,6 +247,73 @@ export function toContributionInfos(
   }))
 }
 
+// ── u4b（plugin-header-action-modal-points AP-1/AP-2）两个渲染宿主的数据源契约 ──
+//
+// key 定义在本模块（对齐 SLASH_COMMAND_SOURCE_KEY 的「壳内定义、壳 provide、组件 inject」
+// 先例），组件侧只认 key 不认实现；单测经 global.provide 注入 mock 源。
+
+/** E13 命令可用性三态（HeaderActionsHost 灰置状态机的判定输入）。 */
+export type HeaderActionCommandAvailability = 'registered' | 'unregistered' | 'unknown'
+
+/** HeaderActionsHost 数据源（声明镜像 + per-session 运行时镜像 + E13/E3 执行面）。 */
+export interface HeaderActionsSource {
+  /** headerAction 型声明（panel.header 挂载点）。响应式镜像：注册同步 / E2 清理与重放后刷新。 */
+  getDeclarations(): ContributionRecord[]
+  /** per-session 运行时状态镜像（#38；reactive 分区读，未收到帧返回 undefined）。 */
+  getRuntimeState(sessionId: string, headerActionId: string): HeaderActionEntry | undefined
+  /** E13 三态判定（实现见 resolveHeaderActionAvailability）。 */
+  resolveCommandAvailability(sessionId: string, commandId: string): HeaderActionCommandAvailability
+  /** E3 点击执行：返回 false = 命令缺失（CommandRegistry 已 emit error，禁静默 no-op）。 */
+  executeCommand(commandId: string): boolean
+}
+
+export const HEADER_ACTIONS_SOURCE_KEY: InjectionKey<HeaderActionsSource> = Symbol('header-actions-source')
+
+/** plugin.dismissModal 关闭原因闭集（core types 同构别名，组件签名可读性） */
+export type PluginModalDismissReason =
+  | 'dismissed'
+  | 'session-switched'
+  | 'host-overlay'
+  | 'replaced'
+  | 'plugin-gone'
+
+/** PluginModalHost 数据源（声明侧元数据 fallback：E1 降级链 declaration 段）+
+ *  C→S dismissModal 上报（经本 bridge 门面发出——D3/R4 WS send 统一门面，组件禁直调
+ *  ws-client，check_no_direct_ws_send.py 白名单只有 bridge/dialog/singleton 三文件）。 */
+export interface PluginModalSource {
+  getDeclaration(
+    pluginId: string,
+    modalId: string,
+  ): { title?: string; width?: 'sm' | 'md' | 'lg' } | undefined
+  /** 上报 C→S plugin.dismissModal（runtime 校验 (pluginId, modalId, epoch) 三元组后广播 closed + notify 插件；接收侧归 u5b）。 */
+  dismiss(pluginId: string, modalId: string, epoch: number, reason: PluginModalDismissReason): void
+}
+
+export const PLUGIN_MODAL_SOURCE_KEY: InjectionKey<PluginModalSource> = Symbol('plugin-modal-source')
+
+/**
+ * E13 判定（bridge 真实实现，双源 OR）：
+ * ① 会话命令分区（commandStore，pi getCommands 消费产物）含同名命令 → registered；
+ * ② CommandRegistry（plugin 命令注册表，builtin 声明经 ensureCommandDeclarationsSync 注册）
+ *    含该命令 → registered——scheduler-manager.open 的主命中路径（其命令名非 pi slash 命令）；
+ * ③ 会话分区非空但两源皆无 → unregistered（E2 禁用清理 CommandRegistry 后灰置的主路径）；
+ * ④ 分区为空 → unknown（无法区分「未拉取/恢复窗口」与「空命令表」的保守判定——
+ *    组件侧保持上次值、首次缺省可点，失败由 E14 写路径兜底不拦入口）。
+ * 已知近似：真「空命令表」会话被判 unknown 而非 unregistered（登记 u4b deviations）。
+ */
+function resolveHeaderActionAvailability(
+  commandStore: ReturnType<typeof useCommandStore>,
+  commandRegistry: CommandRegistry,
+  sessionId: string,
+  commandId: string,
+): HeaderActionCommandAvailability {
+  const commands = commandStore.getCommands(sessionId)
+  if (commands.some((c) => c.name === commandId)) return 'registered'
+  if (commandRegistry.get(commandId)) return 'registered'
+  if (commands.length > 0) return 'unregistered'
+  return 'unknown'
+}
+
 /**
  * 测试后门命名空间（生产代码禁止消费，与生产 import 面物理分离，audit 清理点#9 归整）。
  * - lastInitHandles：最近一次 initExtensionHostBridge 装配的测试所需句柄快照——init 返回
@@ -403,6 +481,108 @@ export function initExtensionHostBridge(app: App): void {
     },
   })
   notificationController.subscribe()
+
+  // ── u4b（AP-1/AP-2）渲染宿主接线 ────────────────────────────────
+
+  // HeaderActionStore（#38 徽标镜像）：reactive 分区（对齐 ViewHostStore 响应式桥两层
+  // reactive 化范式，MF-4）+ bus 帧订阅自驱动（plugin:headerActionUpdate 写入 /
+  // session-destroyed 清理）。声明处 @data-owner #38。
+  const headerActionStore = new HeaderActionStore({
+    bus,
+    sessionScoped: createReactiveSessionScopedMap(() => reactive(new Map<string, HeaderActionEntry>())),
+  })
+  headerActionStore.subscribe()
+  // plugin-modal-slot 帧订阅（#39）：plugin:modalState → 槽镜像（open/closed 仲裁在 core 单模块）。
+  // 幂等（模块级守卫），重复 init 不翻倍。
+  subscribePluginModalSlot(bus)
+
+  // headerAction 声明镜像：ContributionRegistry 是 headless 非响应 Map（组件 computed 无法
+  // 追踪 clearForPlugin/registerBuiltin 的原地变化），shallowRef 整表替换供组件响应式消费。
+  const headerActionDeclarations = shallowRef<ContributionRecord[]>([])
+  const refreshHeaderActionDeclarations = (): void => {
+    headerActionDeclarations.value = contributions.getContributions({ type: 'headerAction' })
+  }
+  refreshHeaderActionDeclarations()
+  // 注册同步时机与 ensureCommandDeclarationsSync 同款（connected 后 bootstrap step5 声明已就绪）
+  watch(getWsState(), (s) => {
+    if (s === 'connected') refreshHeaderActionDeclarations()
+  }, { immediate: true })
+
+  // E2 触发链：runtime plugin:statusChange / plugin:crashed 广播 → bus 事件 → 清理三容器 +
+  // 注销该插件命令（ContributionRegistry 无按插件枚举，先查后清）；disabled→active 重启用走
+  // 静态表重放（registerBuiltin + 命令声明重放；external 声明表壳侧无镜像，重放归 s3 透传）。
+  const handlePluginGone = (pluginId: string): void => {
+    const commandIds = contributions
+      .getContributions({ pluginId })
+      .filter((c) => c.type === 'command' || c.type === 'slashCommand')
+      .map((c) => c.contributionId)
+    contributions.clearForPlugin(pluginId)
+    for (const id of commandIds) commandRegistry.unregisterCommand(id)
+    headerActionStore.clearForPlugin(pluginId)
+    clearPluginModalForPlugin(pluginId)
+    refreshHeaderActionDeclarations()
+  }
+  const handlePluginBack = (pluginId: string): void => {
+    contributions.registerBuiltin()
+    for (const c of contributions.getContributions({ pluginId })) {
+      if (c.type === 'command' || c.type === 'slashCommand') commandRegistry.registerFromContribution(c)
+    }
+    refreshHeaderActionDeclarations()
+  }
+  bus.on('plugin-status-change', (e) => {
+    // inactive=禁用 / crashed=崩溃 → 清理（E2）；loaded/active=装载/启用 → 静态表重放；
+    // discovered 是发现态（未装载），不动作。
+    if (e.status === 'inactive' || e.status === 'crashed') handlePluginGone(e.pluginId)
+    else if (e.status === 'active' || e.status === 'loaded') handlePluginBack(e.pluginId)
+  })
+  bus.on('plugin-crashed', (e) => handlePluginGone(e.pluginId))
+  // AP-2 开帧残留治理：closed 帧到达时清该 (sessionId, viewId) 的 ViewHostStore 分区——
+  // 重开首帧为空白而非上次残留树（宁缺勿错；插件契约 = showModal 后立即 views.update）。
+  bus.on('plugin:modalState', (e) => {
+    const f = e.modalState
+    if (f.state === 'closed') viewHostStore.invalidate(f.sessionId, `modal-${f.pluginId}-${f.modalId}`)
+  })
+
+  // action-bar 执行器（AP-3）：ui 侧 ACTION_EXECUTOR_KEY（跨包 symbol 同一实例），
+  // 实现 = core CommandRegistry.execute 包装（结构兼容 ui 最小接口，无 ui→core 依赖边）。
+  app.provide(ACTION_EXECUTOR_KEY, {
+    execute: (id, args) => {
+      void commandRegistry.execute(id, args as Record<string, unknown> | undefined)
+    },
+  })
+  // HeaderActionsHost 数据源（声明镜像 + 运行时镜像 + E13/E3 面）
+  const commandStore = useCommandStore()
+  app.provide(HEADER_ACTIONS_SOURCE_KEY, {
+    getDeclarations: () => headerActionDeclarations.value,
+    getRuntimeState: (sessionId, headerActionId) => headerActionStore.get(sessionId, headerActionId),
+    resolveCommandAvailability: (sessionId, commandId) =>
+      resolveHeaderActionAvailability(commandStore, commandRegistry, sessionId, commandId),
+    executeCommand: (commandId) => {
+      // E3：缺失命令也走 execute（内部 emit ERR6 error 出声），返回 false 供组件本地置灰
+      const missing = !commandRegistry.get(commandId)
+      void commandRegistry.execute(commandId)
+      return !missing
+    },
+  })
+  // PluginModalHost 数据源（声明侧元数据 fallback；E1 降级链的 declaration 段）
+  // + dismissModal 出站（D3 门面：renderer WS send 白名单仅 bridge/dialog/singleton）
+  app.provide(PLUGIN_MODAL_SOURCE_KEY, {
+    getDeclaration: (pluginId, modalId) => {
+      const c = contributions
+        .getContributions({ type: 'modal' })
+        .find((r) => r.pluginId === pluginId && r.contributionId === modalId)
+      return c?.modal ? { title: c.modal.title, width: c.modal.width } : undefined
+    },
+    dismiss: (pluginId, modalId, epoch, reason) => {
+      // 帧类型 'plugin.dismissModal' 由 u5b 登记进 shared protocol.ts 的 ClientMessage union；
+      // renderer 先行按设计帧常量发送，此断言是跨单元暂态缝隙的显式登记点（u5b 落地后删除，
+      // 届时编译器直接校验帧形状）。payload 形状 = 设计 protocol.ts 原文，无 any。
+      send({
+        type: 'plugin.dismissModal',
+        payload: { pluginId, modalId, epoch, reason },
+      } as unknown as Parameters<typeof send>[0])
+    },
+  })
 
   __testing.lastInitHandles = { bridge, contributions }
 }

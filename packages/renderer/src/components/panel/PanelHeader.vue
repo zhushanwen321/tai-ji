@@ -111,6 +111,19 @@
         :session-id="sessionId"
         empty="hidden"
       />
+      <!-- plugin headerAction 按钮区（plugin-header-action-modal-points AP-1 / u4b）：
+           声明驱动按钮组，与内置按钮同视觉规格（size-[22px]，DESIGN.md §11 几何不动）。
+           无声明时零 DOM（不挤压内置按钮）。 -->
+      <HeaderActionsHost
+        v-if="sessionId"
+        :session-id="sessionId"
+      />
+      <!-- plugin modal 全局单例层（AP-2 / u4b）：Teleport 到 body，本组件只承载挂载点；
+           模块级守卫保证 split 双 panel 下仅首个实例渲染层。无 open 槽时零 DOM。 -->
+      <PluginModalHost
+        v-if="sessionId"
+        :session-id="sessionId"
+      />
       <!-- session JSONL 文件名（id 前 8 位 + .jsonl）：点击复制磁盘真实绝对路径。
            路径为空（pi 延迟写入窗口，规则 #6）时不渲染。放右侧按钮组最前。
            [U7] overlay 移除后恒用主 sessionFile（不再有 overlaySessionFile 两态）。 -->
@@ -176,6 +189,8 @@ import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useCopy } from '@/composables/panel/useCopy'
 import { useSessionTrace, setTraceView } from '@/composables/features/trace/useSessionTrace'
 import TraceViewToggle from './trace/TraceViewToggle.vue'
+import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
+import PluginModalHost from '@/components/extension/PluginModalHost.vue'
 import { ViewHost } from '@taiji/ui/extension-host'
 import type { DerivedStatus } from '@/types'
 import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
