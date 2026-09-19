@@ -1,4 +1,8 @@
+import * as path from "node:path";
+
 import type { PlanReviewComment } from "@zhushanwen/extension-protocol";
+
+import { formatAvailablePlans, listTemplates } from "./templates.js";
 
 /**
  * 提示词注入的技能引用：名字 + SKILL.md 路径。
@@ -23,7 +27,8 @@ export interface PlanPromptInput {
  * ② 产物纪律（恒注入）——register-doc 登记 / 修订重调 version+1 / 全部完成调
  *    submit-review / submit-review 被消费后当轮回应完重挂直到确认；
  * ③ 只读纪律（恒注入，现状 pi-ext-021 提示词保持）；
- * ④ 模板流程（仅未指定 --skills 时）——回落现状 5 内置模板流程（G5 行为不劣于现状）。
+ * ④ 模板流程（仅未指定 --skills 时）——<available-plans> 三源清单注入（内置 5
+ *    + 用户级 + 项目级，模型自选模板，D8）；空发现不注入段（warn 另落）。
  */
 export function buildPlanModePrompt(input: PlanPromptInput): string {
   const sections: string[] = [`[PLAN MODE] Entered plan mode.\n\nRequirement: ${input.requirement || "(from conversation context)"}\nPlan directory documents root: ${input.planFilePath}`];
@@ -58,8 +63,17 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
     `- All plan content goes to plan documents only.`,
   );
 
-  // ④ 模板流程（无 --skills 回落）
+  // ④ 模板流程（无 --skills 回落）——<available-plans> 三源清单随本提示词
+  //    一次性注入（D3：选型期一次性信息，select-template 报错自带清单兜底自愈）
   if (input.skills.length === 0) {
+    // 项目级模板源锚点（设计 D2 锚定 ctx.cwd）：命令层把 planFilePath 构造为
+    // <ctx.cwd>/.taiji-harness/<slug>/plan.md，两级上溯即项目根——prompts 侧
+    // 自行回推，命令层无需为此增传参
+    const projectRoot = path.dirname(path.dirname(input.planFilePath));
+    const plansSection = formatAvailablePlans(listTemplates({ projectRoot }));
+    const pickTemplateStep = plansSection !== ""
+      ? `1. Pick the template that best fits this requirement from the <available-plans> list below and call plan tool (select-template, templateName='<name>') — you pick the template yourself; the user can override by replying.`
+      : `1. No plan templates were discovered — structure the plan document with your own chapter skeleton (e.g. Overview / Requirements / Implementation Steps).`;
     sections.push(
       `## Phase B: Brainstorming\n` +
       `1. **Quick Overview**: ls project root, read README, package.json — build context (< 30s).\n` +
@@ -68,11 +82,11 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
       `4. **Propose 2-3 approaches** with trade-offs + recommendation.\n` +
       `5. **Assumption audit**: Grep-verify interfaces/types exist. Mark [UNVERIFIED] what can't be verified.\n\n` +
       `## Phase C: Writing\n` +
-      `1. Call plan tool (list-template) to show available templates.\n` +
-      `2. After user selects template, call plan tool (select-template).\n` +
-      `3. Write chapters in template order — do NOT skip unwritten chapters.\n` +
-      `4. Write all chapters in one turn, then ask user to review.\n\n` +
-      `## Phase D: Completion\n` +
+      `${pickTemplateStep}\n` +
+      `2. Write chapters in template order — do NOT skip unwritten chapters.\n` +
+      `3. Write all chapters in one turn, then ask user to review.` +
+      (plansSection !== "" ? `\n\n${plansSection}` : "") +
+      `\n\n## Phase D: Completion\n` +
       `1. Ask user to review the complete plan.\n` +
       `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
       `3. After plan complete: the user picks an execution method in the completion dialog — Develop (auto-parallel: complexity-driven subagent delegation vs current-session steps), an execution skill (Execute via skill: <name>, when detected), or goal-driven execution.`,
