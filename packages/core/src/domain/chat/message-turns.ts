@@ -725,6 +725,61 @@ export function countToolCalls(turn: MessageTurn): number {
   return turn.assistants.reduce((sum, m) => sum + (m.toolCalls?.length ?? 0), 0)
 }
 
+/**
+ * turn 级聚合事实（**整个 agent-turn** 口径，不是单条 assistant 消息口径）。
+ *
+ * TurnMeta 状态行（「工作中/已工作 + 时长 + 时刻区间 + 已生成 N 字符」）的单一输入。
+ * 口径设计依据（2026-09 用户裁决）：状态行展示的是「这个 turn 一共干了多少活」——
+ * 时间轴覆盖整 turn 墙钟（含工具执行/思考/等待），产出覆盖整个 turn 的模型生成文本。
+ *
+ * - `startedAt`：turn 起点 = user 消息时间戳（有 user 锚时）/ 首条 assistant 时间戳
+ *   （bg-notify 续跑 turn、assistant 自启 turn）；无成员 = 0。
+ * - `endedAt`：最后一次**产出结束** = max(assistant.endedAt ?? assistant.timestamp,
+ *   toolCall.endTime, thinking.endTime)。消息结束时刻缺失（旧历史帧）时回退其开始时刻——
+ *   与修复前行为等价（单条 assistant 的 turn 会退化为 1s，属已知降级）。
+ *   notices（bash 记录 / liveOnly 警告）刻意不参与：它们不是 agent 产出。
+ * - `generatedChars`：模型生成文本总量 = Σ(assistant 正文) + Σ(thinking)。跨 turn 内**全部**
+ *   assistant 段累计；不含工具参数/工具输出（环境产出）、不含 user/system 文本。
+ *
+ * 性能：正文/思考是字符串，`.length` 为 O(1) 读；整体 O(turn 内消息与块数)，与
+ * countThinking / countToolCalls 同档，可在渲染派生里按 delta 重算（无字符串分配）。
+ */
+export interface TurnAggregates {
+  /** turn 起点（epoch ms）；无成员 = 0 */
+  startedAt: number
+  /** 最后一次产出结束（epoch ms）；无成员 = 0 */
+  endedAt: number
+  /** 模型生成文本总量（字符）= Σ 正文 + Σ thinking */
+  generatedChars: number
+}
+
+/**
+ * 派生 turn 级聚合事实（纯函数，live 与 reload 同一公式——两条链路共用同一份 Message
+ * 数据，故「重开 session 数值一致」是构造性的）。
+ */
+export function deriveTurnAggregates(turn: MessageTurn): TurnAggregates {
+  let endedAt = 0
+  let generatedChars = 0
+  for (const m of turn.assistants) {
+    // 正文（assistant content 恒为 string，normalizeContent 兜住历史/异常 Segment[] 形态）
+    generatedChars += normalizeContent(m.content).length
+    // 消息产出结束时刻：缺省回退开始时刻（旧数据降级，与修复前同值）
+    const msgEnd = m.endedAt ?? m.timestamp
+    if (msgEnd > endedAt) endedAt = msgEnd
+    for (const th of m.thinking ?? []) {
+      generatedChars += th.content.length
+      const thEnd = th.endTime ?? th.startTime
+      if (thEnd !== undefined && thEnd > endedAt) endedAt = thEnd
+    }
+    for (const tc of m.toolCalls ?? []) {
+      const tcEnd = tc.endTime ?? tc.startTime
+      if (tcEnd > endedAt) endedAt = tcEnd
+    }
+  }
+  const startedAt = turn.user?.timestamp ?? turn.assistants[0]?.timestamp ?? 0
+  return { startedAt, endedAt, generatedChars }
+}
+
 /** turn 是否含失败的 tool（影响 trace 渲染：失败 tool 整块红框） */
 export function hasFailedTool(turn: MessageTurn): boolean {
   return turn.assistants.some((m) =>

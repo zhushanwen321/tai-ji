@@ -10,7 +10,8 @@
  * 测试框架：vitest（从 vitest 导入），运行：npx vitest run，禁止 node:test。
  */
 import { describe, it, expect } from 'vitest'
-import { mapSessionEntries } from '../session-entry-mapper.js'
+import { applyEntryEndTimes, mapSessionEntries } from '../session-entry-mapper.js'
+import type { Message } from '@taiji/shared'
 import type {
   PiSessionEntry,
   PiSessionMessageEntry,
@@ -237,5 +238,59 @@ describe('TC4 畸形 data 降级', () => {
     const after = Date.now()
     expect(ts).toBeGreaterThanOrEqual(before)
     expect(ts).toBeLessThanOrEqual(after)
+  })
+})
+
+// ── applyEntryEndTimes：产出结束时刻回填（整个 agent-turn 聚合口径的时间轴右端）──────
+//
+// 语义：pi 在 appendMessage（message_end 之后）写 entry → entry.timestamp ≈ 该 assistant
+// 消息产出结束；body message.timestamp 是其开始。两者差值即生成时长，是「单条 assistant 的
+// turn 恒显 1s」修复的数据源。展示字段回填，不进 reducer（保 apply-entry 两路喂入同构）。
+
+describe('applyEntryEndTimes assistant 产出结束时刻回填', () => {
+  const ENTRY_TS = '2026-01-01T00:01:00.000Z'
+  const ENTRY_MS = new Date(ENTRY_TS).getTime()
+
+  function assistantMsg(over: Partial<Message> = {}): Message {
+    return { id: 'm1', role: 'assistant', content: 'hi', status: 'complete', timestamp: ENTRY_MS - 5_000, ...over }
+  }
+
+  /** message entry 工厂（entry 时间戳独立于消息体时间戳） */
+  function entryWithTs(id: string, role: 'user' | 'assistant'): PiSessionEntry {
+    return { type: 'message', id, parentId: null, timestamp: ENTRY_TS, message: { role, content: [], timestamp: ENTRY_MS - 5_000 } as PiHistoryMessage }
+  }
+
+  it('assistant 消息按 piEntryId 回填 entry 时间戳（ISO → ms）——同一条消息 live/reload 同一语义', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBe(ENTRY_MS)
+  })
+
+  it('user 消息不回填（无「产出结束」语义，不得污染「已工作」时长起点/终点）', () => {
+    const msgs: Message[] = [{ id: 'u1', piEntryId: 'e1', role: 'user', content: [], status: 'complete', timestamp: ENTRY_MS - 5_000 }]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'user')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('entry 时间戳早于消息开始（时钟回拨/畸形数据）→ 不回填（消费侧回退 timestamp）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1', timestamp: ENTRY_MS + 1_000 })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('窗口内无对应 entry（截断窗口）/ 无 piEntryId → 不回填（降级 = 修复前行为）', () => {
+    const noEntry = [assistantMsg({ piEntryId: 'e-missing' })]
+    applyEntryEndTimes(noEntry, [entryWithTs('e1', 'assistant')])
+    expect(noEntry[0].endedAt).toBeUndefined()
+
+    const noPiEntryId = [assistantMsg()]
+    applyEntryEndTimes(noPiEntryId, [entryWithTs('e1', 'assistant')])
+    expect(noPiEntryId[0].endedAt).toBeUndefined()
+  })
+
+  it('空 entries → 早退不抛错（空 session / 全非 message entry）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    expect(() => applyEntryEndTimes(msgs, [])).not.toThrow()
+    expect(msgs[0].endedAt).toBeUndefined()
   })
 })

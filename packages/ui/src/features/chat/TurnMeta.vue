@@ -32,13 +32,15 @@
         <span class="lbl" :class="isWorkingTurn ? 'text-accent' : 'text-neutral-mid'">{{ statusLabel }}</span>
         <span class="elapsed ml-1 font-mono font-medium tracking-[0.01em]" :class="elapsedColor">{{ elapsed }}</span>
       </span>
-      <!-- Turn 区间：首末时刻 -->
-      <span v-if="firstTs > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
-        · {{ formatClock(firstTs) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(lastTs) }}
+      <!-- Turn 区间（整个 agent-turn 起止时刻）：进行中右端显「（进行中）」，
+           定格后显末次产出结束时刻 -->
+      <span v-if="startedAt > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
+        · {{ formatClock(startedAt) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(endedAt) }}
       </span>
-      <!-- [u3 remove-turn-progress-bar] 已生成字符数（设计 §2.1，B1 完成态定格常驻）：
-           TurnMeta 是 per-turn 事实聚合位，chars 与 elapsed/时刻区间同族事实。样式跟
-           tm-range 档（text-2xs neutral-dim mono）；0 不渲染（零内容 turn 不占行宽） -->
+      <!-- 已生成字符数（B1 完成态定格常驻；口径 = **整个 agent-turn** 的模型生成文本
+           总量（Σ 正文 + Σ thinking，跨全部 assistant 段），不含工具参数/工具输出等
+           环境产出）：TurnMeta 是 per-turn 事实聚合位，chars 与 elapsed/时刻区间同族
+           事实。样式跟 tm-range 档（text-2xs neutral-dim mono）；0 不渲染（零内容 turn 不占行宽） -->
       <span
         v-if="generatedChars > 0"
         data-testid="turn-meta-chars"
@@ -82,7 +84,7 @@ const props = withDefaults(
     thinkCount: number
     toolCount: number
     elapsed: string
-    /** 已耗时秒数（与 elapsed 字符串同源，用于长时生成分级警示配色） */
+    /** 已耗时秒数（整 turn 墙钟，与 elapsed 字符串同源，用于长时生成分级警示配色） */
     elapsedSecs: number
     /** 当前 turn 在 session 内的序列下标（仅展示/testid 用） */
     turnIndex: number
@@ -90,13 +92,13 @@ const props = withDefaults(
     turnKey: string
     /** session id（透传保留） */
     sessionId: string
-    /** turn 首条 assistant 时刻（epoch ms） */
-    firstTs: number
-    /** turn 末条 assistant 时刻（epoch ms） */
-    lastTs: number
-    /** 是否正在流式生成 */
+    /** turn 起点时刻（epoch ms；user 消息 / 首条 assistant，core deriveTurnAggregates） */
+    startedAt: number
+    /** turn 终点时刻（epoch ms；最后一次产出结束；进行中 = 当下已发生活动的结束时刻） */
+    endedAt: number
+    /** 本 turn 是否仍在产出（未定格）——驱动「（进行中）」与 spinner 外的 live 语义 */
     isLive: boolean
-    /** [u3 remove-turn-progress-bar] 已生成字符数（useTurnElapsed 秒级 tick 重算/完成定格）；0 不渲染。
+    /** 整个 turn 的模型生成文本总量（Σ 正文 + Σ thinking）；0 不渲染。
      *  可选 + 默认 0：非可选类型经 withDefaults 会编译出 required:true，漏传即 Vue warn */
     generatedChars?: number
   }>(),

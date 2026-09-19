@@ -1,21 +1,19 @@
 /**
- * useTurnElapsed 可见性停表单测（perf W05 Q1-7）。
+ * useTurnElapsed 单测（整 turn 墙钟口径 + 可见性停表）。
+ *
+ * 口径（2026-09 用户裁决「状态行应为整个 agent-turn 的聚合」）：
+ * - elapsed = 整 turn 墙钟（起点 → 最后一次产出结束）；producing 期间 now − 起点（含工具执行 /
+ *   思考 / 等待），定格读 endedAt。**核心回归：单条 assistant 的 turn 不再是 1s**。
+ * - generatedChars = Σ 正文 + Σ thinking（读 core 聚合值，非本地求和）。
+ * - 时间模型：vi.useFakeTimers() 接管 Date.now；advanceTimersByTime 同步推进系统时间。
  *
  * 覆盖（fake timers + document.hidden mock）：
- * - 可见 + streaming：每秒 tick 正常（基线回归）
- * - 失焦（visibilitychange hidden）：停止每秒 tick——interval 回调不触发，elapsed 不更新
- * - 失焦期间 streaming 开始：同样不挂 interval（startElapsedTimer 的 hidden 分支）
- * - 恢复可见：elapsed 立即以 Date.now() 差值补算失焦期间耗时，并重启每秒 tick
- * - 失焦期间完成定格：恢复可见不误重启 tick（isStreaming 已 false）
- * - 卸载：移除 visibilitychange listener + 清 interval（无泄漏）
- * - listener 生命周期与 streaming 对齐（W05 review）：完成态实例零 listener，
- *   开始计时挂载、完成定格摘除、二次周期幂等不叠加
- * - [u3 remove-turn-progress-bar] generatedChars（设计 §2.1）：Σ 口径（跨 assistant 段
- *   normalizeContent 累计）/ 秒级节拍（挂载算一次、每 tick 重算、停表定格，tick 间增长
- *   不计——不随 delta 重算）/ 零字符（空 assistants / 空内容均 0）
- *
- * 时间模型：vi.useFakeTimers() 同时接管 Date.now；advanceTimersByTime 同步推进系统时间，
- * elapsed 是 now - firstTs 的绝对差值，停 tick 不丢时间，恢复可见一次重算即补全。
+ * - 单条 assistant 定格 = endedAt − startedAt（不再是 min 1s）；endedAt 缺失回退（旧数据降级）
+ * - producing 秒级 tick 增长；工具执行/等待期间 producing 保持 true → 计时连续
+ * - 定格不回跳（末帧 live 值 ≤ 定格值）
+ * - 聚合值（起点/终点/生成字符总量）从 core deriveTurnAggregates 读取（含 user 起点 + thinking）
+ * - 可见性：失焦停 tick / 恢复补算重启 / 失焦期间 producing 开始不挂 interval / 卸载清理 /
+ *   listener 生命周期与 producing 对齐（完成态实例零 document listener）
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/useTurnElapsed.test.ts
  */
@@ -23,13 +21,25 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent, nextTick, ref, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { Message } from '@taiji/shared'
+import { deriveTurnAggregates, type MessageTurn, type TurnAggregates } from '@taiji/core/domain/chat'
 import { useTurnElapsed } from '../composables/useTurnElapsed'
 
 /** 测试起点系统时间（任意固定值） */
 const T0 = 1_000_000
 
-function makeAssistant(timestamp: number, content: Message['content'] = 'text', id = 'a-1'): Message {
-  return { id, role: 'assistant', content, status: 'streaming', timestamp }
+function makeAssistant(timestamp: number, content = 'text', overrides: Partial<Message> = {}): Message {
+  return { id: `a-${timestamp}`, role: 'assistant', content, status: 'streaming', timestamp, ...overrides }
+}
+
+/** 最小合法 MessageTurn（聚合派生只读 user / assistants 两个字段） */
+function makeTurn(userTs: number | null, assistants: Message[]): MessageTurn {
+  return {
+    index: 1,
+    user: userTs === null ? null : { id: 'u-1', role: 'user', content: [{ type: 'text', text: 'q' }], status: 'complete', timestamp: userTs },
+    assistants,
+    isStreaming: assistants.some((a) => a.status === 'streaming'),
+    hasFoldable: false,
+  }
 }
 
 /** mock document.hidden / visibilityState（happy-dom 下 spyOn getter 生效） */
@@ -45,25 +55,34 @@ function fireVisibilityChange(): void {
 
 /**
  * mount 宿主组件驱动 useTurnElapsed（onUnmounted/watch 需组件实例）。
- * 返回 elapsed refs + 可变的 streaming 驱动源。
+ * @param getAggregates 聚合事实 getter（测试直接给 TurnAggregates 或经 deriveTurnAggregates）
  */
-function mountElapsed(assistants: Message[], isStreamingInitial: boolean) {
-  const streaming = ref(isStreamingInitial)
-  const exposed = {} as { elapsed: Ref<string>; elapsedSecs: Ref<number>; generatedChars: Ref<number> }
+function mountElapsed(
+  getAggregates: () => TurnAggregates,
+  producing: Ref<boolean>,
+  sessionActive?: Ref<boolean>,
+) {
+  const exposed = {} as {
+    elapsed: Ref<string>
+    elapsedSecs: Ref<number>
+    isLive: Ref<boolean>
+    generatedChars: Ref<number>
+  }
+  const collapses: number[] = []
   const Host = defineComponent({
     setup() {
-      const { elapsed, elapsedSecs, generatedChars } = useTurnElapsed(
-        () => assistants,
-        () => streaming.value,
+      const result = useTurnElapsed(
+        getAggregates,
+        () => producing.value,
+        sessionActive ? () => sessionActive.value : undefined,
+        () => collapses.push(1),
       )
-      exposed.elapsed = elapsed
-      exposed.elapsedSecs = elapsedSecs
-      exposed.generatedChars = generatedChars
+      Object.assign(exposed, result)
       return () => null
     },
   })
   const wrapper = mount(Host)
-  return { wrapper, exposed, streaming }
+  return { wrapper, exposed, collapses }
 }
 
 beforeEach(() => {
@@ -77,20 +96,118 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+// ═════════════════════════════════════════════════════════════
+// 整 turn 墙钟口径（核心修复：状态行 = 整个 agent-turn 聚合）
+// ═════════════════════════════════════════════════════════════
+describe('useTurnElapsed 整 turn 墙钟', () => {
+  it('单条 assistant 定格 = endedAt − startedAt（回归：旧实现两条时间戳同源 → 恒显 1s）', () => {
+    const start = T0
+    const end = T0 + 6_800
+    const aggregates: TurnAggregates = { startedAt: start, endedAt: end, generatedChars: 322 }
+    const { wrapper, exposed } = mountElapsed(() => aggregates, ref(false))
+    expect(exposed.elapsed.value).toBe('7s')
+    expect(exposed.elapsedSecs.value).toBe(7)
+    wrapper.unmount()
+  })
+
+  it('endedAt 缺失（旧历史帧）→ 回退聚合终点（= 修复前行为，不崩不虚高）', () => {
+    const aggregates: TurnAggregates = { startedAt: T0, endedAt: T0, generatedChars: 10 }
+    const { wrapper, exposed } = mountElapsed(() => aggregates, ref(false))
+    expect(exposed.elapsed.value).toBe('1s')
+    wrapper.unmount()
+  })
+
+  it('producing 中每秒 tick 增长（now − 起点）', () => {
+    const aggregates: TurnAggregates = { startedAt: T0, endedAt: 0, generatedChars: 5 }
+    const { wrapper, exposed } = mountElapsed(() => aggregates, ref(true))
+    expect(exposed.elapsed.value).toBe('1s') // 挂载即 now − 起点 = 0 → min 1s
+    vi.advanceTimersByTime(4_000)
+    expect(exposed.elapsed.value).toBe('4s')
+    wrapper.unmount()
+  })
+
+  it('工具执行 / 等待用户输入期间 producing 保持 true → 计时连续（含工具时间的墙钟）', () => {
+    // 末位 assistant 仍 streaming（live 下工具执行期保持 streaming）→ producing true，
+    // 期间无任何文本 delta，elapsed 仍持续增长
+    const assistants = [makeAssistant(T0, '先读文件')]
+    const turn = makeTurn(T0 - 200, assistants)
+    const aggregates = () => deriveTurnAggregates(turn)
+    const { wrapper, exposed } = mountElapsed(aggregates, ref(true))
+    expect(exposed.elapsed.value).toBe('1s')
+    vi.advanceTimersByTime(40_000) // 40s 工具执行
+    expect(exposed.elapsed.value).toBe('40s') // 计时未被工具期截断
+    wrapper.unmount()
+  })
+
+  it('定格不回跳：endedAt 落定瞬间定格值 ≥ 末帧 live 值（不再退化成 1s）', async () => {
+    const assistants = ref<Message[]>([makeAssistant(T0, 'abc')])
+    const turn = () => makeTurn(null, assistants.value)
+    const producing = ref(true)
+    const { wrapper, exposed } = mountElapsed(() => deriveTurnAggregates(turn()), producing)
+    vi.advanceTimersByTime(12_000)
+    expect(exposed.elapsed.value).toBe('12s')
+
+    // 收口：写入产出结束时刻（墙钟 12.4s 处）→ producing false → 定格
+    assistants.value = [{ ...assistants.value[0], status: 'complete', endedAt: T0 + 12_400 }]
+    producing.value = false
+    await nextTick()
+    expect(exposed.elapsed.value).toBe('12s') // 定格值 = 真实墙钟（旧实现此处回跳成 1s）
+    expect(exposed.elapsedSecs.value).toBe(12)
+    wrapper.unmount()
+  })
+
+  it('生成字符总量 = Σ 正文 + Σ thinking（跨 assistant 段），随聚合值反应式更新', () => {
+    const assistants = ref<Message[]>([
+      makeAssistant(T0, 'abc', { thinking: [{ id: 'th1', content: '想了一', collapsed: true }] }),
+      makeAssistant(T0 + 1000, 'de', { thinking: [{ id: 'th2', content: '想二', collapsed: true }] }),
+    ])
+    const { wrapper, exposed } = mountElapsed(() => deriveTurnAggregates(makeTurn(null, assistants.value)), ref(true))
+    // 正文 3 + 2 = 5；思考 3（想了一）+ 2（想二）= 5 → 10
+    expect(exposed.generatedChars.value).toBe(10)
+
+    assistants.value = [
+      assistants.value[0],
+      { ...assistants.value[1], content: 'def', thinking: [{ id: 'th2', content: '想二想', collapsed: true }] },
+    ]
+    // 正文 3 + 3 = 6；思考 3 + 3 = 6 → 12
+    expect(exposed.generatedChars.value).toBe(12)
+    wrapper.unmount()
+  })
+
+  it('起点取 user 消息时间戳（整 turn 从用户发送算起，不从首条 assistant 算起）', () => {
+    const userTs = T0
+    const assistants = [makeAssistant(T0 + 3_000, 'abc', { status: 'complete', endedAt: T0 + 9_000 })]
+    const { wrapper, exposed } = mountElapsed(() => deriveTurnAggregates(makeTurn(userTs, assistants)), ref(false))
+    expect(exposed.elapsed.value).toBe('9s')
+    wrapper.unmount()
+  })
+
+  it('空 turn（无 user / 无 assistant）→ 0s / 0 字符 / startedAt 0', () => {
+    const aggregates: TurnAggregates = { startedAt: 0, endedAt: 0, generatedChars: 0 }
+    const { wrapper, exposed } = mountElapsed(() => aggregates, ref(false))
+    expect(exposed.elapsed.value).toBe('0s')
+    expect(exposed.elapsedSecs.value).toBe(0)
+    expect(exposed.generatedChars.value).toBe(0)
+    wrapper.unmount()
+  })
+})
+
+// ═════════════════════════════════════════════════════════════
+// 可见性停表（Q1-7）
+// ═════════════════════════════════════════════════════════════
 describe('useTurnElapsed 可见性停表（Q1-7）', () => {
-  it('可见 + streaming：每秒 tick 正常推进 elapsed（基线回归）', () => {
-    const { wrapper, exposed } = mountElapsed([makeAssistant(T0)], true)
-    // 挂载即算：now-first=0 → max(1, 0)=1s
+  it('可见 + producing：每秒 tick 正常推进 elapsed（基线回归）', () => {
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: 0, generatedChars: 0 }), ref(true))
     expect(exposed.elapsed.value).toBe('1s')
 
-    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(3_000)
     expect(exposed.elapsed.value).toBe('3s')
     expect(exposed.elapsedSecs.value).toBe(3)
     wrapper.unmount()
   })
 
   it('失焦停止每秒 tick：hidden 后推进 10s，elapsed 不更新（interval 回调不触发）', () => {
-    const { wrapper, exposed } = mountElapsed([makeAssistant(T0)], true)
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: 0, generatedChars: 0 }), ref(true))
     expect(exposed.elapsed.value).toBe('1s')
 
     setHidden(true)
@@ -100,16 +217,16 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     // tick 已停：Date.now 已推进 10s，但 elapsed 仍为定格值
     expect(Date.now()).toBe(T0 + 10_000)
     expect(exposed.elapsed.value).toBe('1s')
-    expect(exposed.elapsedSecs.value).toBe(1)
     wrapper.unmount()
   })
 
-  it('失焦期间 streaming 开始：不挂 interval（hidden 下 startElapsedTimer 只立即算一次）', async () => {
-    const { wrapper, exposed, streaming } = mountElapsed([makeAssistant(T0)], false)
-    expect(exposed.elapsed.value).toBe('1s') // completed 定格（无第二条消息，min 1s）
+  it('失焦期间 producing 开始：不挂 interval（hidden 下 startElapsedTimer 只立即算一次）', async () => {
+    const producing = ref(false)
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: T0, generatedChars: 0 }), producing)
+    expect(exposed.elapsed.value).toBe('1s')
 
     setHidden(true)
-    streaming.value = true
+    producing.value = true
     await nextTick() // watch flush:pre → startElapsedTimer（hidden 分支不挂 interval）
 
     vi.advanceTimersByTime(10_000)
@@ -119,7 +236,7 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
   })
 
   it('恢复可见：elapsed 立即以 Date.now() 差值补算失焦期间耗时，并重启每秒 tick', () => {
-    const { wrapper, exposed } = mountElapsed([makeAssistant(T0)], true)
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: 0, generatedChars: 0 }), ref(true))
 
     setHidden(true)
     fireVisibilityChange()
@@ -128,24 +245,23 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
 
     setHidden(false)
     fireVisibilityChange()
-    // 补算：now-first = 10s（Date.now 差值覆盖失焦期间）
+    // 补算：now-start = 10s（Date.now 差值覆盖失焦期间）
     expect(exposed.elapsed.value).toBe('10s')
-    expect(exposed.elapsedSecs.value).toBe(10)
 
     // tick 已重启：继续每秒推进
-    vi.advanceTimersByTime(2000)
+    vi.advanceTimersByTime(2_000)
     expect(exposed.elapsed.value).toBe('12s')
     wrapper.unmount()
   })
 
-  it('失焦期间完成定格：恢复可见不误重启 tick（isStreaming 已 false）', async () => {
-    const { wrapper, exposed, streaming } = mountElapsed([makeAssistant(T0)], true)
+  it('失焦期间产出结束定格：恢复可见不误重启 tick（producing 已 false）', async () => {
+    const producing = ref(true)
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: T0 + 5_000, generatedChars: 0 }), producing)
 
     setHidden(true)
     fireVisibilityChange()
 
-    // 失焦期间流完成（watch 定格分支）
-    streaming.value = false
+    producing.value = false
     await nextTick()
     const frozen = exposed.elapsed.value
 
@@ -153,20 +269,18 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     fireVisibilityChange()
     vi.advanceTimersByTime(10_000)
 
-    // 仍定格：无 tick、无补算重启
     expect(exposed.elapsed.value).toBe(frozen)
     wrapper.unmount()
   })
 
   it('卸载：移除 visibilitychange listener + 清 interval（无泄漏）', () => {
     const removeSpy = vi.spyOn(document, 'removeEventListener')
-    const { wrapper, exposed } = mountElapsed([makeAssistant(T0)], true)
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: 0, generatedChars: 0 }), ref(true))
     expect(exposed.elapsed.value).toBe('1s')
 
     wrapper.unmount()
     expect(removeSpy).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
 
-    // 卸载后 interval 已清 + listener 已移除：推进时间不再变更 elapsed，也不抛错
     vi.advanceTimersByTime(10_000)
     expect(exposed.elapsed.value).toBe('1s')
     expect(() => fireVisibilityChange()).not.toThrow()
@@ -174,36 +288,32 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
 
   it('完成态实例零 listener：未开始计时不挂 visibilitychange（W05 review，N 实例不叠 N listener）', () => {
     const addSpy = vi.spyOn(document, 'addEventListener')
-    const { wrapper } = mountElapsed([makeAssistant(T0)], false)
-    // 早已完成/未开始的 Turn：不进入 startElapsedTimer → 不挂 document listener
+    const { wrapper } = mountElapsed(() => ({ startedAt: T0, endedAt: T0 + 3_000, generatedChars: 0 }), ref(false))
     expect(addSpy).not.toHaveBeenCalledWith('visibilitychange', expect.any(Function))
     wrapper.unmount()
   })
 
-  it('listener 生命周期与 streaming 对齐：开始计时挂载、完成定格摘除、二次周期不叠加', async () => {
+  it('listener 生命周期与 producing 对齐：开始计时挂载、完成定格摘除、二次周期不叠加', async () => {
     const addSpy = vi.spyOn(document, 'addEventListener')
     const removeSpy = vi.spyOn(document, 'removeEventListener')
     const addedCount = () => addSpy.mock.calls.filter(([t]) => t === 'visibilitychange').length
-    const removedCount = () =>
-      removeSpy.mock.calls.filter(([t]) => t === 'visibilitychange').length
+    const removedCount = () => removeSpy.mock.calls.filter(([t]) => t === 'visibilitychange').length
 
-    const { wrapper, streaming } = mountElapsed([makeAssistant(T0)], false)
+    const producing = ref(false)
+    const { wrapper } = mountElapsed(() => ({ startedAt: T0, endedAt: T0, generatedChars: 0 }), producing)
     expect(addedCount()).toBe(0) // 初始完成态：零 listener
 
-    // 完成 → streaming：startElapsedTimer 挂 listener
-    streaming.value = true
+    producing.value = true
     await nextTick()
     expect(addedCount()).toBe(1)
 
-    // streaming → 完成：定格停表摘 listener
-    streaming.value = false
+    producing.value = false
     await nextTick()
     expect(removedCount()).toBe(1)
 
-    // 二次 streaming 周期：再挂再摘，数量对齐（无叠加残留）
-    streaming.value = true
+    producing.value = true
     await nextTick()
-    streaming.value = false
+    producing.value = false
     await nextTick()
     expect(addedCount()).toBe(2)
     expect(removedCount()).toBe(2)
@@ -212,143 +322,27 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
 })
 
 // ═════════════════════════════════════════════════════════════
-// u3 remove-turn-progress-bar：generatedChars（设计 §2.1）
-//
-// 口径 = Σ normalizeContent(turn.assistants[].content).length（跨 assistant 段整段计入）。
-// 节拍 = 挂载算一次 / streaming 每秒重算（与 elapsed 同一 interval tick）/ 停表定格一次；
-// 性能纪律 = 不随 delta 重算（绝不在内容 watcher 里算）。失焦停 tick / 恢复补算对齐 elapsed。
+// 完成收起回调（isSessionActive 驱动，非 producing 驱动）
 // ═════════════════════════════════════════════════════════════
-describe('useTurnElapsed generatedChars（u3 remove-turn-progress-bar）', () => {
-  it('Σ 口径含多 assistant 段：text→tool→text 跨段整段累计，Segment[] content 经 normalizeContent 归一化', () => {
-    // 三 assistant：'abc'(3) + Segment[] text 'de'(2) + 'f'(1) = 6（旧观测条同口径：
-    // 同函数 normalizeContent，非仅末段）；挂载即算（完成态定格一次）
-    const assistants = [
-      makeAssistant(T0, 'abc', 'a-1'),
-      makeAssistant(T0 + 1000, [{ type: 'text', text: 'de' }], 'a-2'),
-      makeAssistant(T0 + 2000, 'f', 'a-3'),
-    ]
-    const { wrapper, exposed } = mountElapsed(assistants, false)
-    expect(exposed.generatedChars.value).toBe(6)
-    wrapper.unmount()
-  })
+describe('useTurnElapsed 完成收起回调', () => {
+  it('isSessionActive true→false 触发 onComplete（ask-user 期间 producing false 但会话仍活跃 → 不收起）', async () => {
+    const producing = ref(true)
+    const sessionActive = ref(true)
+    const { wrapper, collapses } = mountElapsed(
+      () => ({ startedAt: T0, endedAt: 0, generatedChars: 0 }),
+      producing,
+      sessionActive,
+    )
 
-  it('streaming 秒级增长：同一 interval tick 后重算，两次 tick 之间内容增长不反映（不随 delta 重算）', () => {
-    const assistants = [makeAssistant(T0, 'a')]
-    const { wrapper, exposed } = mountElapsed(assistants, true)
-    expect(exposed.generatedChars.value).toBe(1)
+    // producing false（工具阻塞 / ask-user 等待）但会话仍活跃 → 不收起
+    producing.value = false
+    await nextTick()
+    expect(collapses).toHaveLength(0)
 
-    // 内容增长（getter 每次拉取最新数组，无需响应式）：下一个 tick 之前不计入
-    assistants[0] = { ...assistants[0], content: 'abc' }
-    expect(exposed.generatedChars.value).toBe(1) // 未到 tick：性能纪律（不在内容变化点算）
-
-    vi.advanceTimersByTime(1000) // 一次 tick
-    expect(exposed.generatedChars.value).toBe(3)
-    wrapper.unmount()
-  })
-
-  it('停表定格：isStreaming true→false 重算一次读到权威内容，之后内容再变不跟随', async () => {
-    const assistants = [makeAssistant(T0, 'abc')]
-    const { wrapper, exposed, streaming } = mountElapsed(assistants, true)
-    expect(exposed.generatedChars.value).toBe(3)
-
-    streaming.value = false
-    await nextTick() // 停表定格重算一次
-    expect(exposed.generatedChars.value).toBe(3)
-
-    // 定格后内容再变（完成态权威覆盖等）：无 tick、无 watcher，值不随内容漂移
-    assistants[0] = { ...assistants[0], content: 'abcdef' }
-    vi.advanceTimersByTime(5000)
-    expect(exposed.generatedChars.value).toBe(3)
-    wrapper.unmount()
-  })
-
-  it('零字符：空 assistants / 空内容均 0（v-if chars>0 不渲染的上游口径）', () => {
-    const { wrapper, exposed } = mountElapsed([], true)
-    expect(exposed.generatedChars.value).toBe(0)
-    wrapper.unmount()
-
-    const assistants = [makeAssistant(T0, '')]
-    const { wrapper: w2, exposed: e2 } = mountElapsed(assistants, true)
-    expect(e2.generatedChars.value).toBe(0)
-    w2.unmount()
-  })
-
-  it('失焦停 tick / 恢复补算语义对齐 elapsed：失焦期内容增长不反映，恢复可见立即补算并重启 tick', () => {
-    const assistants = [makeAssistant(T0, 'ab')]
-    const { wrapper, exposed } = mountElapsed(assistants, true)
-    expect(exposed.generatedChars.value).toBe(2)
-
-    setHidden(true)
-    fireVisibilityChange()
-    assistants[0] = { ...assistants[0], content: 'abcd' }
-    vi.advanceTimersByTime(5000)
-    expect(exposed.generatedChars.value).toBe(2) // 失焦：tick 已停不重算
-
-    setHidden(false)
-    fireVisibilityChange()
-    expect(exposed.generatedChars.value).toBe(4) // 恢复：一次补算
-
-    assistants[0] = { ...assistants[0], content: 'abcdef' }
-    vi.advanceTimersByTime(1000)
-    expect(exposed.generatedChars.value).toBe(6) // tick 已重启：继续每秒跟随
-    wrapper.unmount()
-  })
-})
-
-describe('useTurnElapsed 首末时刻输出', () => {
-  it('streaming 态 firstTs/lastTs 有值，isLive=true', async () => {
-    const t1 = T0 + 1000
-    const t2 = T0 + 5000
-    const assistants = [makeAssistant(t1), makeAssistant(t2)]
-    const streaming = ref(true)
-    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> }
-    const Host = defineComponent({
-      setup() {
-        const result = useTurnElapsed(() => assistants, () => streaming.value)
-        Object.assign(exposed, result)
-        return () => null
-      },
-    })
-    const wrapper = mount(Host)
-    expect(exposed.firstTs.value).toBe(t1)
-    expect(exposed.lastTs.value).toBe(t2)
-    expect(exposed.isLive.value).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('完成态 firstTs/lastTs 有值，isLive=false', () => {
-    const t1 = T0 + 1000
-    const t2 = T0 + 5000
-    const assistants = [makeAssistant(t1), makeAssistant(t2)]
-    const streaming = ref(false)
-    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> }
-    const Host = defineComponent({
-      setup() {
-        const result = useTurnElapsed(() => assistants, () => streaming.value)
-        Object.assign(exposed, result)
-        return () => null
-      },
-    })
-    const wrapper = mount(Host)
-    expect(exposed.firstTs.value).toBe(t1)
-    expect(exposed.lastTs.value).toBe(t2)
-    expect(exposed.isLive.value).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('空 assistants → firstTs/lastTs=0', () => {
-    const streaming = ref(false)
-    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number> }
-    const Host = defineComponent({
-      setup() {
-        const result = useTurnElapsed(() => [], () => streaming.value)
-        Object.assign(exposed, result)
-        return () => null
-      },
-    })
-    const wrapper = mount(Host)
-    expect(exposed.firstTs.value).toBe(0)
-    expect(exposed.lastTs.value).toBe(0)
+    // 对话真正结束 → 收起一次
+    sessionActive.value = false
+    await nextTick()
+    expect(collapses).toHaveLength(1)
     wrapper.unmount()
   })
 })

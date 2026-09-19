@@ -9,10 +9,11 @@
  * 测试需 setActivePinia + 传 turnIndex/sessionId，chevron 展开态通过 store 预置 isExpanded(sid, idx) 驱动。
  *
  * [chat-flow-timestamp U2] TurnMeta 区间（设计 §3 A1/A2）：
- * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）
- * - A2 live 态：结束侧不定格 lastTs，以 `→` + panel.message.inProgress 文案结尾
+ * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（起止 = 整个 agent-turn 的
+ *   startedAt/endedAt，core deriveTurnAggregates 聚合值）
+ * - A2 live 态：结束侧不定格 endedAt，以 `→` + panel.message.inProgress 文案结尾
  *
- * [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1）：
+ * 已生成字符数（口径 = 整个 turn 模型生成文本总量 = Σ 正文 + Σ thinking）：
  * - 三态渲染：工作中显示 / 完成态定格常驻（B1）/ chars=0 不渲染
  * - 数字 toLocaleString() 千分位（用户可见 DOM 断言，锚定 turn-meta-chars testid）
  *
@@ -52,13 +53,13 @@ function mountMeta(props: {
   elapsed?: string
   /** 已耗时秒数（组件必填 prop，驱动长时生成分级配色） */
   elapsedSecs?: number
-  /** turn 首条 assistant 时刻 */
-  firstTs?: number
-  /** turn 末条 assistant 时刻 */
-  lastTs?: number
-  /** 是否正在流式生成 */
+  /** turn 起点时刻（整个 agent-turn 聚合） */
+  startedAt?: number
+  /** turn 终点时刻（最后一次产出结束） */
+  endedAt?: number
+  /** 本 turn 是否仍在产出（未定格） */
   isLive?: boolean
-  /** [u3] 已生成字符数（默认 0 不渲染） */
+  /** 整个 turn 的生成字符总量（默认 0 不渲染） */
   generatedChars?: number
 }) {
   const turn = props.turn ?? makeTurn()
@@ -71,8 +72,8 @@ function mountMeta(props: {
       toolCount: props.toolCount ?? 1,
       elapsed: props.elapsed ?? '5s',
       elapsedSecs: props.elapsedSecs ?? 0,
-      firstTs: props.firstTs ?? NOW,
-      lastTs: props.lastTs ?? NOW + 5000,
+      startedAt: props.startedAt ?? NOW,
+      endedAt: props.endedAt ?? NOW + 5000,
       isLive: props.isLive ?? false,
       generatedChars: props.generatedChars ?? 0,
       turnIndex: turn.index,
@@ -192,7 +193,7 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     const turn = makeTurn()
     const toggleExpand = vi.fn()
     const wrapper = mount(TurnMeta, {
-      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', elapsedSecs: 5, firstTs: NOW, lastTs: NOW + 5000, isLive: false, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
+      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', elapsedSecs: 5, startedAt: NOW, endedAt: NOW + 5000, isLive: false, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
       global: { provide: mockChatProvide({ toggleExpand }) },
     })
     await wrapper.find('.turn-meta').trigger('click')
@@ -232,22 +233,22 @@ describe('chat-flow-timestamp U2: TurnMeta 区间（A1/A2）', () => {
   const FIRST_TS = 1700000000000
   const LAST_TS = 1700000005000
 
-  it('A1 完成态（isLive=false）：.tm-range 文本 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）', () => {
-    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: false })
+  it('A1 完成态（isLive=false）：.tm-range 文本 `· HH:MM:SS → HH:MM:SS`（起止 = turn 聚合起止时刻）', () => {
+    const wrapper = mountMeta({ startedAt: FIRST_TS, endedAt: LAST_TS, isLive: false })
     const range = wrapper.find('.tm-range')
     expect(range.exists()).toBe(true)
     // 归一化空白后整串比对（模板换行在 condense 模式下空白处理不进断言语义）
     expect(range.text().replace(/\s+/g, ' ').trim()).toBe(`· ${clockOf(FIRST_TS)} → ${clockOf(LAST_TS)}`)
   })
 
-  it('A2 live 态（isLive=true）：.tm-range 以 → + panel.message.inProgress 文案结尾（结束侧不定格 lastTs）', () => {
-    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: true })
+  it('A2 live 态（isLive=true）：.tm-range 以 → + panel.message.inProgress 文案结尾（结束侧不定格 endedAt）', () => {
+    const wrapper = mountMeta({ startedAt: FIRST_TS, endedAt: LAST_TS, isLive: true })
     const range = wrapper.find('.tm-range')
     expect(range.exists()).toBe(true)
     const normalized = range.text().replace(/\s+/g, ' ').trim()
     // 测试环境 vue-i18n mock 的 t() 返回 key（vitest.setup.ts），断言口径同 W4TC1 'panel.message.worked'
     expect(normalized).toBe(`· ${clockOf(FIRST_TS)} → panel.message.inProgress`)
-    // live 态结束侧不定格：lastTs 本地时刻不应出现
+    // live 态结束侧不定格：endedAt 本地时刻不应出现
     expect(normalized).not.toContain(clockOf(LAST_TS))
   })
 })

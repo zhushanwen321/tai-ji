@@ -79,8 +79,8 @@
         :tool-count="toolCount"
         :elapsed="elapsed"
         :elapsed-secs="elapsedSecs"
-        :first-ts="firstTs"
-        :last-ts="lastTs"
+        :started-at="startedAt"
+        :ended-at="endedAt"
         :is-live="isLive"
         :generated-chars="generatedChars"
         :turn-index="turn.index"
@@ -181,7 +181,15 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
 import type { MessageTurn, FlatBlock, NotifyOutcome } from '@taiji/core/domain/chat'
-import { countThinking, countToolCalls, flattenTurnBlocks, computeTraceWindow, turnStableId, W } from '@taiji/core/domain/chat'
+import {
+  countThinking,
+  countToolCalls,
+  deriveTurnAggregates,
+  flattenTurnBlocks,
+  computeTraceWindow,
+  turnStableId,
+  W,
+} from '@taiji/core/domain/chat'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
 import ChangeSetCard from './ChangeSetCard.vue'
 import UserBubble from './UserBubble.vue'
@@ -369,6 +377,19 @@ const thinkCount = computed(() => countThinking(props.turn))
 const toolCount = computed(() => countToolCalls(props.turn))
 
 /**
+ * 整个 agent-turn 的聚合事实（core 纯函数，live 与 reload 同一公式）：
+ * 起点 / 最后一次产出结束 / 模型生成文本总量。状态行（时长、时刻区间、字符数）统一读它。
+ */
+const turnAggregates = computed(() => deriveTurnAggregates(props.turn))
+
+/**
+ * 本 turn 是否仍在产出（驱动秒级 tick 与「（进行中）」）：
+ * 末位 assistant 仍在 streaming（live 下工具执行 / 等待输入期间保持 streaming，故整 turn
+ * 墙钟连续）且本 turn 是工作 turn。定格后（endedAt 落定 / 会话收口）不再计时。
+ */
+const isProducing = computed(() => isWorkingTurn.value && lastAssistant.value?.status === 'streaming')
+
+/**
  * 折叠作用域（scope wave D1）：工作 turn 或手动 expanded 时展开 trace。
  * [M5 stable-key] 展开态按 turnStableId(turn)（首条消息 id）查询。
  */
@@ -428,11 +449,11 @@ function onToggleTakeover(): void {
 }
 
 /**
- * 工作耗时 live 计时。
+ * 整 turn 墙钟 live 计时 + 整 turn 生成字符总量（聚合事实在 core deriveTurnAggregates）。
  */
-const { elapsed, elapsedSecs, firstTs, lastTs, isLive, generatedChars } = useTurnElapsed(
-  () => props.turn.assistants,
-  () => isStreaming.value,
+const { elapsed, elapsedSecs, startedAt, endedAt, isLive, generatedChars } = useTurnElapsed(
+  () => turnAggregates.value,
+  () => isProducing.value,
   () => sessionActive.value,
   () => {
     collapse(turnStableId(props.turn))

@@ -31,7 +31,7 @@ import { HISTORY_BUDGET, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import type { ISessionStore } from './ports/session.js'
 import { isEnoent } from '../utils/errors.js'
 import { parseJsonl } from '../utils/jsonl.js'
-import { mapSessionEntries } from '../infra/pi/session-entry-mapper.js'
+import { applyEntryEndTimes, mapSessionEntries } from '../infra/pi/session-entry-mapper.js'
 import type { PiSessionEntry } from '../infra/pi/pi-protocol.js'
 import { forEachReversedLineChunk } from '../utils/history-reverse-read.js'
 
@@ -153,12 +153,10 @@ export async function getHistoryFromFilePath(filePath: string, sessionStore: ISe
     }
     throw e
   }
-  // 经共享 mapper（mapSessionEntries）映射四类 entry → 伪消息 + 平行 entryIds（M3）。
-  // filterObjectEntries 前置过滤非 object（parseJsonl 可能返回裸数字/字符串/null）。
-  const { messages, entryIds } = mapSessionEntries(filterObjectEntries(parseJsonl(content)))
-
-  // 经 port 透传 entryIds（MF5），使 user/assistant message 带 piEntryId（fork 定位截断点用）。
-  return { messages: sessionStore.convertHistory(messages, entryIds), truncated: false }
+  // 经共享转换单点（convertWindowEntries：mapper + port 翻译 + endedAt 回填），
+  // filterObjectEntries 前置过滤非 object（parseJsonl 可能返回裸数字/字符串/null）
+  // ——与①②档同一条链，避免全量读路径漏掉 entry 专属回填（如产出结束时刻）。
+  return { messages: convertWindowEntries(filterObjectEntries(parseJsonl(content)), sessionStore), truncated: false }
 }
 
 /**
@@ -390,10 +388,18 @@ function collectRecentTurnEntriesFromTail(
   }
 }
 
-/** 窗口 entries → Message[]（共享 mapper + port 翻译，①②档共用单点）。 */
+/**
+ * entries → Message[]（共享 mapper + port 翻译 + entry 专属回填，全量读与①②档窗口共用单点）。
+ *
+ * 回填步骤 applyEntryEndTimes：用 entry 时间戳写 assistant 消息的产出结束时刻（Message.endedAt，
+ * pi 落盘于 message_end → ≈ 该消息产出结束）；turn 聚合口径（「已工作」时长/时刻区间）
+ * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
+ */
 function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
   const { messages, entryIds } = mapSessionEntries(entries)
-  return sessionStore.convertHistory(messages, entryIds)
+  const converted = sessionStore.convertHistory(messages, entryIds)
+  applyEntryEndTimes(converted, entries)
+  return converted
 }
 
 /**
