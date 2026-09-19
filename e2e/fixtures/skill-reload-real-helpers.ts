@@ -270,8 +270,19 @@ function psEntries(): PsEntry[] {
 const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'relay.mjs', 'resources/pi/'] as const
 
 function pidsMatching(markers: readonly string[]): number[] {
+  // 排除宿主同跑实例：marker 是通用串（relay.mjs / resources/pi/ / pi-subagent-cli.mjs），
+  // 同机其他 taiji 实例的引擎执行树进程同样命中，全局 ps 扫描凭 marker 无法区分。
+  // 判属锚点 = binary/cli 载体路径（REPO_ROOT）：被测实例全部引擎进程都从本 worktree
+  // 的 resources 加载（electron dist spawn 的 pi binary / relay / cli 全在本仓下），
+  // argv 必含 REPO_ROOT；兄弟 worktree dev 实例与打包版 TaiJi.app 的载体路径都在别处。
+  // 不能凭 session-dir / 数据目录特征判属——数据目录走 env 不走 argv，两类外来实例
+  // 都实测出现过 argv 无 --session-dir 且无 ~/.taiji 提法的形态（打包版 relay 曾因此
+  // 误计入 baseline，2026-09-19 复验实证；兄弟 dev 的 rpc pi 曾因此落入「不含 ~/.taiji
+  // 兜底」误报孤儿，2026-09-19 终态确认实证，活态污染 3→6→8 个）；--append-system-prompt
+  // 等参数值也可能恰好落在本机 tmp 根下，任意 tmp 提法匹配同样不可靠。
   return psEntries()
     .filter((e) => markers.some((mk) => e.command.includes(mk)))
+    .filter((e) => e.command.includes(REPO_ROOT))
     .map((e) => e.pid)
     .sort((a, b) => a - b)
 }

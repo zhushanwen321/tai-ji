@@ -146,9 +146,9 @@ export * from './file-tree'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
-// 导入 pi 会话 RPC 契约（设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 D5，runtime/renderer 两端共同 import）
+// 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
-  ImportWarning, ImportErrorCode,
+  ImportSourceKind, ImportWarning, ImportErrorCode,
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'

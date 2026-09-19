@@ -78,7 +78,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
-| session 导入 | ImportSessionDialog |
+| session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 

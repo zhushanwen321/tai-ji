@@ -354,3 +354,86 @@ describe("[B-2] runWorkflow fail-fast throw 路径不泄漏 signal abort listene
     expect(deps.runs.size).toBe(0);
   });
 });
+
+// ── [D3] makeHandlers deps 视图保持 eventBus getter 现读 ──────────────
+
+describe("[D3] makeHandlers deps 视图保持 eventBus getter 现读", () => {
+  it("run 启动后替换底层 bus → handleReturn 的 pending:unregister 路由到新 bus（旧 bus 零收到 unregister）", async () => {
+    // 复现生产形态（workflow-events makeDeps）：deps.eventBus 是 getter，每次属性
+    // 访问现读槽位上的 currentPi.events。pi reload 重跑 factory 覆盖槽位——run 启动
+    // 于 reload 前、完成于 reload 后时，per-run deps 视图若把 getter 快照成静态值，
+    // finalizeRun 的 pending:unregister 会经旧 pi.events emit 被 assertActive 拒绝，
+    // 注销事件丢失（pending-notifications 幽灵条目）。
+    // bus.emit 静态类型对齐 LifecycleDeps.eventBus 方法签名（运行时是 vi.fn() spy，
+    // 经 toHaveBeenCalledWith 断言），避免 Mock 泛型与 port 签名的结构差进 deps 类型。
+    type MockBus = { emit(channel: string, data: unknown): void };
+    let bus: MockBus = { emit: vi.fn() };
+    const deps = {
+      ...makeDeps(),
+      get eventBus(): MockBus {
+        return bus;
+      },
+    };
+
+    const runId = await runWorkflow(makeSpec(), deps);
+    // handlers 持有 makeHandlers 构造的 per-run deps 视图（run 启动时刻构造）
+    const handlers = deps.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
+    // 启动时的 register 经 getter 现读落在当时的 bus 上
+    expect(bus.emit).toHaveBeenCalledWith("pending:register", expect.anything());
+
+    // pi reload 等价物：底层 bus 替换为新实例（旧实例保持可观察）
+    const oldBus = bus;
+    bus = { emit: vi.fn() };
+
+    await handlers.onMessage({ type: "return", result: { ok: true } });
+
+    expect(deps.runs.get(runId)?.state.reason).toBe("completed");
+    // 新 bus 收到注销——getter 现读生效
+    expect(bus.emit).toHaveBeenCalledWith("pending:unregister", {
+      id: runId,
+      reason: "completed",
+    });
+    // 旧 bus 只收过启动 register，绝不收到终态 unregister（getter 被快照即在此红）
+    expect(oldBus.emit).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
+  });
+
+  it("生产 lazyDeps 形态（成员全 getter-only）下视图构造不抛错且 onRunDone 覆盖仍生效", async () => {
+    // 回归锚（2026-09-19 skill-reload e2e 复验）：生产装配 lazyDeps
+    // （workflow-events.ts）的全部成员都是 getter-only accessor。per-run 视图
+    // 构造若用普通赋值（view.onRunDone = fn），Set 语义沿 Object.create 原型链
+    // 命中同名无 setter 的 accessor → 严格模式 TypeError（Bun/JSC「Attempted to
+    // assign to readonly property.」/ V8「Cannot set property ... which has only
+    // a getter」）——run 派发即炸，e2e 三 spec 全红。本用例按生产形态构造 deps
+    // 锁定 defineProperty 修复；spread 形态（快照）在此不红但由上一用例拦截。
+    let bus: { emit: ReturnType<typeof vi.fn> } = { emit: vi.fn() };
+    const onRunDone = vi.fn();
+    const base = makeDeps();
+    const deps = Object.defineProperties({}, {
+      store: { get: () => base.store },
+      workerHost: { get: () => base.workerHost },
+      runner: { get: () => base.runner },
+      runs: { get: () => base.runs },
+      eventBus: { get: () => bus },
+      onRunDone: { get: () => onRunDone },
+      log: { get: () => base.log },
+    }) as unknown as LifecycleDeps;
+
+    const runId = await runWorkflow(makeSpec(), deps);
+    const handlers = base.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
+    expect(bus.emit).toHaveBeenCalledWith("pending:register", expect.anything());
+
+    const oldBus = bus;
+    bus = { emit: vi.fn() };
+    await handlers.onMessage({ type: "return", result: { ok: true } });
+
+    expect(base.runs.get(runId)?.state.reason).toBe("completed");
+    // 新 bus 收到注销——原型 getter 现读生效
+    expect(bus.emit).toHaveBeenCalledWith("pending:unregister", {
+      id: runId,
+      reason: "completed",
+    });
+    expect(oldBus.emit).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
+    // 视图自身 onRunDone 覆盖仍生效（dispose + deps.onRunDone 转译链）
+    expect(onRunDone).toHaveBeenCalledWith(base.runs.get(runId));
+  });
+});

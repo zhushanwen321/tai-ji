@@ -769,9 +769,11 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImportCandidates(msg: Extract<ClientMessage, { type: 'session.importCandidates' }>, ws: WsType): Promise<void> {
-    // 导入 pi 会话（import-session D5/u3）：候选列表（对话框打开/搜索/切目录，renderer
-    // debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply 类型
-    // SSOT = shared import-session.ts，此处只透传不做字段裁剪。
+    // 导入会话（import-session D5/u3 + 多源 §3.7）：候选列表（对话框打开/搜索/切目录，
+    // renderer debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply
+    // 类型 SSOT = shared import-session.ts，此处只透传不做字段裁剪——payload.source
+    //（含 sessionId/dbPath）随 payload 整体透传，路由在 ImportService 的 source 注册表内，
+    // handler 对源零分支（缺省不传 = pi，存量调用行为不变）。
     const candidatesSvc = this.ctx.importService
     if (!candidatesSvc) {
       // importService 未注入（理论不可达——组合根必传），防御性报错（对齐 handoffService 惯例）。
@@ -793,9 +795,11 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImport(msg: Extract<ClientMessage, { type: 'session.import' }>, ws: WsType): Promise<void> {
-    // 执行导入（D5）：互斥/校验/原子复制/sidecar/缓存失效全在 service（U2），handler 只
-    // 负责 reply 与广播。warning（sidecar_failed）是成功 reply 的可选字段（r4-INFO，
-    // 非 error envelope），随 result 原样透传。
+    // 执行导入（D5 + 多源 §3.7）：互斥/校验/原子落地/sidecar/缓存失效全在 service 编排层
+    //（按 payload.source 路由到对应 SessionImportSource，缺省 'pi'），handler 只负责 reply
+    // 与广播；payload（含 source/sessionId/dbPath）整体透传不做字段裁剪。warning
+    //（sidecar_failed / conversion_degraded）是成功 reply 的可选字段（r4-INFO，非 error
+    // envelope），随 result 原样透传。
     const importSvc = this.ctx.importService
     if (!importSvc) {
       return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)

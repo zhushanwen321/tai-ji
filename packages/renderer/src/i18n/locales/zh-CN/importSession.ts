@@ -7,6 +7,15 @@ export default {
   title: '导入会话',
   dialogTitle: '导入 pi 会话',
   description: '来自磁盘上的 pi session 记录，导入后可继续对话',
+  pickSourceTitle: '导入会话',
+  pickSourceDescription: '选择要导入的会话来源',
+  sourcePiTitle: '导入 pi 会话',
+  sourcePiDesc: '来自 pi 会话目录的 .jsonl 会话记录，导入后可继续对话',
+  sourceZcodeTitle: '导入 zcode 会话',
+  sourceZcodeDesc: '来自 zcode 本机会话库，转换为太极会话后可继续对话',
+  zcodeDialogTitle: '导入 zcode 会话',
+  zcodeDescription: '来自 zcode 本机会话库，转换为太极会话后可继续对话',
+  backToSource: '返回重选来源',
   searchPlaceholder: '搜索名称或 Session ID（支持 01a044 式短 ID），或粘贴 .jsonl 绝对路径',
   allDirs: '全部目录',
   chooseDirBtn: '选择其他目录',
@@ -34,6 +43,7 @@ export default {
   retry: '重试',
   toastImported: '已导入「{name}」到 {project} · 可继续对话',
   toastWarnSidecar: '项目归属写入失败：请在侧边栏手动将该会话归类到项目',
+  toastWarnDegraded: '部分内容（如截图）未随导入迁移',
   freshBadge: '导入',
   errors: {
     import_source_missing: '源文件不存在或不可读：请确认文件未被移动或删除后重试，或用「选择其他目录」重新定位 sessions 目录',
@@ -46,5 +56,12 @@ export default {
     import_project_invalid: '目标项目无效：请重新选择项目后重试',
     timeout: '请求超时：请重试',
     unknown: '导入失败：请重试',
+  },
+  // zcode 源特化恢复指引（§3.6：同码不同义的三场景，组件 ZCODE_ERROR_KEYS 消费；
+  // 未列出的码两源恢复动作一致，共用 errors 通用文案）
+  errorsZcode: {
+    import_source_missing: '未找到 zcode 会话库：请确认已安装 zcode 并至少运行过一次会话',
+    import_invalid_session: '该会话已不在 zcode 库中，或库结构已变化：请刷新列表后重选；若持续失败，请升级太极后重试',
+    import_target_conflict: '该会话与已有太极会话发生目标位置冲突：请联系反馈',
   },
 }
