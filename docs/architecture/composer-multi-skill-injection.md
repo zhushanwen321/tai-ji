@@ -313,7 +313,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ⑦ **subagent/landing 出站注入的预算近似与 encode 膨胀（2026-09-07 登记，指针——裁决与论证 SSOT 在 [adversarial-review-fixes.md](adversarial-review-fixes.md) D-A2-4）**。①注入预算 80% 阈值按主 session contextWindow 计算，subagent / 新 session 实际窗口可能更小——阈值偏松，pi 侧既有上下文裁剪兜底（v1 已知近似，维持）；②注入产物（≤50KB 全文）经 `encodeDirectiveText`（反斜杠翻倍 + 换行转义）后命令长度膨胀，代码密集 SKILL.md 最坏接近翻倍（~100KB 命令串）——pi CLI 单命令长度上限的探针确认（adversarial-review-fixes §5 检查点④）截至 u2 落地尚未回填结论；超限兜底 = 降级块先行（降级块 <1KB 无膨胀问题），出现单命令超长报错即按该检查点处置。
 
-⑧ **历史读取链路字节预算耦合（R4 新增登记）**。注入块使含 chip 消息的落盘体积膨胀（单 skill 最大 50KB），三级读取面随之变化：getHistory 双预算窗口按 turn 字节选窗（HISTORY_BUDGET 640KB / 20 turns）→ skill 重度会话更早触发 truncated、「加载更早」翻页增多；get_entries 全量重建 reply 体积增大；离线尾读分块扩窗同源预算。**量级**：per-turn 字节与注入量同阶；**恢复路径**：翻页/优雅降级（truncated 置位，非正确性问题）；**重审条件**：用户反馈历史加载频繁截断；**判定**：可接受。
+⑧ **历史读取链路字节预算耦合（R4 新增登记）**。注入块使含 chip 消息的落盘体积膨胀（单 skill 最大 50KB），三级读取面随之变化：getHistory 双预算窗口按 turn 字节选窗（HISTORY_BUDGET 640KB / 20 turns）→ skill 重度会话更早触发 truncated、「加载更早」翻页增多；get_entries 全量重建 reply 体积增大；离线尾读分块扩窗同源预算。**量级**：per-turn 字节与注入量同阶；**恢复路径**：翻页/优雅降级（truncated 置位，非正确性问题）；**重审条件**：用户反馈历史加载频繁截断——2026-09-19 已触发（归因不是 skill 注入：重 agent 会话实测 7 轮 3.5MB、单轮均 500KB，640KB 预算窗口只剩 1 轮），处置为触顶自动续载（renderer `useLoadMoreHistory.onScrollOffset`，预算常量未动），本项的注入膨胀耦合维持可接受；**判定**：可接受。
 
 ---
 
