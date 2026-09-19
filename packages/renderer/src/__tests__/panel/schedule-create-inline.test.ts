@@ -292,4 +292,53 @@ describe('cron 预览与提交解耦（前端解析子集不拦合法草稿，G1
     await nextTick()
     assertSubmittable(wrapper)
   })
+
+  // once 已过时刻拦截：无年份 once-cron 提交后会被 croner 顺延到明年同刻（用户意图的
+  // 「今天 14:30」变「明年今天 14:30」）——表单持完整时刻（含年份）在提交门前精确拦截
+  it('once 手输过去时刻 → 预览区提示已过 + 禁止提交（重选未来恢复）', async () => {
+    mockState.overlayReq.value = draftReqWithSchedule('0 9 * * MON', 'once')
+    const wrapper = mountPanel('session-A')
+    assertSubmittable(wrapper)
+
+    // datetime-local 可手输任意过去值：预览区已过警示 + 提交门关闭
+    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2020-01-01T09:00')
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')
+    expect(
+      wrapper.find('[data-testid="schedule-create-submit"]').attributes('disabled'),
+    ).toBeDefined()
+    expect(mockState.respond).not.toHaveBeenCalled()
+
+    // 重选未来时刻 → 恢复可提交
+    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:00')
+    await nextTick()
+    assertSubmittable(wrapper)
+  })
+
+  it('once 时刻停留至过期后点击提交 → 提交瞬间复核拦截（computed 不依赖真实时钟）', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2030, 0, 1, 9, 0, 0, 0))
+    try {
+      mockState.overlayReq.value = draftReqWithSchedule('0 9 * * MON', 'once')
+      const wrapper = mountPanel('session-A')
+      await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:05')
+      await nextTick()
+      assertSubmittable(wrapper)
+
+      // 时间流逝到 09:06（时刻已过）：无交互 → canSubmit 缓存仍 true（按钮亮），
+      // 点击后由 onSubmit 的提交瞬间复核（刷新表单时钟）拦截
+      vi.setSystemTime(new Date(2030, 0, 1, 9, 6, 0, 0))
+      await wrapper.find('[data-testid="schedule-create-submit"]').trigger('click')
+      expect(mockState.respond).not.toHaveBeenCalled()
+
+      // 复核刷新驱动重渲染：按钮转禁用、预览区已过警示
+      await nextTick()
+      expect(
+        wrapper.find('[data-testid="schedule-create-submit"]').attributes('disabled'),
+      ).toBeDefined()
+      expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

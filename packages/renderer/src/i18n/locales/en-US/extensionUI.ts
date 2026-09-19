@@ -27,6 +27,7 @@ export default {
   scheduleCreatePreviewRecurring: 'Next runs (first 5)',
   scheduleCreatePreviewUnavailable: 'Preview unavailable: the schedule will be validated on creation',
   scheduleCreatePreviewNoTime: 'Select a time to preview',
+  scheduleCreatePreviewTimePast: 'Selected time is in the past',
   scheduleCreateModelLabel: 'Model',
   scheduleCreateCurrentTag: 'current session',
   scheduleCreateNoModelsHint: 'Follows the session model (no candidate models)',

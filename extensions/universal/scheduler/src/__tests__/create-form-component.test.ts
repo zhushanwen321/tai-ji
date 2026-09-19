@@ -3,7 +3,7 @@
 // （实施计划 U3 验收：tab 推进 / 两段 Esc / 掩码覆盖 / cron·prompt 插入编辑 /
 //   Submit 确认门 / once→cron 折叠回传）。
 // 驱动方式与 ask-user component.test.ts 同构：handleInput 键序列 + render DOM 断言。
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { dateToOnceCron, onceCronToDate, type ScheduleDraft } from '@zhushanwen/extension-protocol'
 
@@ -422,6 +422,41 @@ describe('ScheduleCreateComponent — Submit 确认门与回传', () => {
 		c.handleInput(ENTER)
 		expect(result.val).not.toBeNull()
 		expect(result.val!.model).toBeUndefined()
+	})
+
+	// 非编辑态过期拦截：掩码编辑态 parseMaskedDate 已拒过去时刻（M-4），本用例锁
+	// 「时刻合法保存后随时间流逝过期」的缝隙——不拦则折叠出的无年份 once-cron 会被
+	// croner 顺延到明年同刻静默创建（登记残留风险的现网表现）
+	it('S-8: once 时刻保存后停留至过期 → 时间行/预览警示已过且 Enter 不提交', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 8, 19, 8, 0, 0, 0))
+		try {
+			const { c, result } = make({ ...baseDraft, kind: 'once', schedule: FAR_ONCE_CRON })
+			c.handleInput(ENTER) // tab0 确认一次性
+			c.handleInput(ENTER) // 进掩码编辑器（预填还原值）
+			c.handleInput(HOME)
+			for (const d of '202609190810') c.handleInput(d) // 输入 08:10（> 08:00 合法保存）
+			c.handleInput(ENTER) // 保存时刻并前进
+			c.handleInput(ENTER) // tab2 确认模型
+			c.handleInput(ENTER) // tab3 进 prompt 编辑
+			c.handleInput(ENTER) // 保存并前进 → Submit tab
+
+			// 未过期：时间行正常（✓ 一次性）
+			expect(text(c)).toContain('一次性）')
+
+			// 时间流逝到 08:11（时刻已过 1 分钟）：timeValid 非编辑态判定生效
+			// 时间流逝到 08:11（时刻已过 1 分钟）：timeValid 非编辑态判定生效。
+			// render 有行缓存（真实 TUI 由交互驱动重绘）——invalidate 模拟下次重绘
+			vi.setSystemTime(new Date(2026, 8, 19, 8, 11, 0, 0))
+			c.invalidate()
+			const out = text(c)
+			expect(out).toContain('时刻已过') // Submit 时间行 ✗ 说明
+			expect(out).toContain('已过，请重选未来时刻') // 预览警示
+			c.handleInput(ENTER) // 确认按钮 Enter → canSubmit false 拦截
+			expect(result.val).toBeUndefined()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
 

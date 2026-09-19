@@ -27,6 +27,7 @@ export default {
   scheduleCreatePreviewRecurring: '下次运行（前 5 次）',
   scheduleCreatePreviewUnavailable: '无法预览：表达式将由创建端验证',
   scheduleCreatePreviewNoTime: '请选择执行时间',
+  scheduleCreatePreviewTimePast: '所选时间已过，请选择未来时刻',
   scheduleCreateModelLabel: '执行模型',
   scheduleCreateCurrentTag: '当前会话',
   scheduleCreateNoModelsHint: '跟随会话当前模型（无候选模型列表）',

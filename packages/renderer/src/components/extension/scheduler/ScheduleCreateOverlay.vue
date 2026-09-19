@@ -102,6 +102,18 @@ const onceDate = computed<Date | null>(() => {
   return Number.isNaN(d.getTime()) ? null : d
 })
 
+/** 表单时钟：交互驱动刷新（提交复核时更新）。computed 不依赖真实时钟——纯时间流逝
+ *  不触发重算，once 有效性判定统一读它，提交瞬间刷新即可同时驱动提交门/预览重算 */
+const nowMs = ref(Date.now())
+
+/** once 目标时刻有效 = 已选且未过（<= now 即过，与 TUI parseMaskedDate 同判）。
+ *  已过时刻提交后 dateToOnceCron 折叠的无年份 cron 会被 croner 静默顺延到明年同刻
+ *  （用户意图的「今天 14:30」变「明年今天 14:30」）——表单持完整时刻（含年份），
+ *  是唯一能精确判定的层。type guard：true 即非 null，供预览 runs 收窄 */
+function onceTimeValid(d: Date | null): d is Date {
+  return d !== null && d.getTime() > nowMs.value
+}
+
 function setOnceByMinutes(mins: number): void {
   onceLocal.value = toLocalInput(new Date(Date.now() + mins * MS_PER_MINUTE))
 }
@@ -280,7 +292,8 @@ function parseDurationMs(s: string): number | null {
 const nextRuns = computed<{ runs: Date[]; once: boolean } | null>(() => {
   if (kind.value === 'once') {
     const d = onceDate.value
-    return d ? { runs: [d], once: true } : null
+    // 已过时刻不出预览（负相对时间会落「不到 1 分钟后」误导）——由 hint 位给出已过警示
+    return onceTimeValid(d) ? { runs: [d], once: true } : null
   }
   const expr = cronText.value.trim()
   const durMs = parseDurationMs(expr)
@@ -325,19 +338,20 @@ const scheduleSummary = computed<string>(() => {
 
 // canSubmit 与预览解耦：预览是前端轻量解析子集（后端权威 = 创建端 parseSchedule/croner），
 // 预览失败不禁止提交——表达式由创建端验证（非法时后端拒，G1 预填草稿可直接确认）。
-// once 未选时刻除外：提交体需要时间值，属「未补全」而非「预览失败」。
+// once 未选时刻 / 已过时刻除外：提交体需要有效未来时间值，属「未补全」而非「预览失败」。
 const canSubmit = computed(() =>
   promptText.value.trim().length > 0
-  && (props.draft.models.length === 0 || selectedModel.value !== undefined)
-  && (kind.value === 'recurring' || onceDate.value !== null),
+    && (props.draft.models.length === 0 || selectedModel.value !== undefined)
+    && (kind.value === 'recurring' || onceTimeValid(onceDate.value)),
 )
 
-/** 预览不可用时的非阻塞警示文案（once 未选时刻 / recurring 前端子集解析不了） */
-const previewUnavailableHint = computed(() =>
-  kind.value === 'once'
+/** 预览不可用时的非阻塞警示文案（once 未选时刻 / once 已过 / recurring 前端子集解析不了） */
+const previewUnavailableHint = computed(() => {
+  if (kind.value !== 'once') return t('extensionUI.scheduleCreatePreviewUnavailable')
+  return onceDate.value === null
     ? t('extensionUI.scheduleCreatePreviewNoTime')
-    : t('extensionUI.scheduleCreatePreviewUnavailable'),
-)
+    : t('extensionUI.scheduleCreatePreviewTimePast')
+})
 
 const footNote = computed(() =>
   canSubmit.value
@@ -347,6 +361,9 @@ const footNote = computed(() =>
 
 // ── Submit：构造 FormResult（once 折叠为一次性 cron，D2）→ JSON 回传 select 通道 ──
 function onSubmit(): void {
+  // 提交瞬间刷新表单时钟再过提交门：否则「选 +1 分钟时刻后停留 2 分钟」场景下
+  // canSubmit 返回缓存 true，已过时刻会绕过 onceTimeValid 静默提交（顺延到明年）
+  nowMs.value = Date.now()
   if (!canSubmit.value) return
   const result: ScheduleFormResult = {
     action: 'create',

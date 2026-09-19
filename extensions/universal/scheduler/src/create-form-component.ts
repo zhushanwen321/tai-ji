@@ -357,7 +357,13 @@ export class ScheduleCreateComponent implements Component {
 	}
 
 	private timeValid(now: Date = new Date()): boolean {
-		return this.kind === 'once' ? this.currentOnceDate(now) !== null : this.cronSpec() !== undefined
+		if (this.kind !== 'once') return this.cronSpec() !== undefined
+		const d = this.currentOnceDate(now)
+		// 已过时刻对 once 无效：dateToOnceCron 折叠的无年份 cron 会被 croner 静默顺延到
+		// 明年同刻（用户意图的「今天 14:30」变「明年今天 14:30」）。编辑态 parseMaskedDate
+		// 已拒，这里补非编辑态（preset 选定 / draft 预填后停留至过期）——表单持完整
+		// 时刻（含年份），是唯一能精确判定的层
+		return d !== null && d.getTime() > now.getTime()
 	}
 
 	private answerValid(index: number, now: Date = new Date()): boolean {
@@ -612,11 +618,14 @@ export class ScheduleCreateComponent implements Component {
 		]
 	}
 
-	/** 时间行 value：once 显示确认时刻（未设置则警示），recurring 显示表达式 + 无效标记。 */
+	/** 时间行 value：once 显示确认时刻（未设置/已过则警示），recurring 显示表达式 + 无效标记。 */
 	private submitTimeValue(onceDate: Date | null): string {
 		const t = this.theme
 		if (this.kind === 'once') {
-			return onceDate ? `${formatAbs(onceDate)}（一次性）` : t.fg('warning', '未设置')
+			if (!onceDate) return t.fg('warning', '未设置')
+			return onceDate.getTime() > Date.now()
+				? `${formatAbs(onceDate)}（一次性）`
+				: `${formatAbs(onceDate)}（一次性${t.fg('warning', '，时刻已过')}）`
 		}
 		return this.cronText + (this.timeValid() ? '' : t.fg('warning', '（表达式无效）'))
 	}
@@ -659,6 +668,10 @@ export class ScheduleCreateComponent implements Component {
 			const d = this.currentOnceDate(now)
 			if (!d) {
 				return [`${t.fg('warning', '✗')} ${this.onceEdit ? '日期无效（YYYY-MM-DD HH:mm，须晚于当前）' : '尚未选择时间'}`]
+			}
+			// 已过警示（timeValid 同判）：无年份 once-cron 提交后会被 croner 顺延到明年同刻
+			if (d.getTime() <= now.getTime()) {
+				return [`${t.fg('warning', '✗')} ${formatAbs(d)} 已过，请重选未来时刻（否则将顺延到明年同刻执行）`]
 			}
 			return [`${t.fg('success', '✓')} ${formatAbs(d)} · ${t.fg('accent', formatRelative(d.getTime() - now.getTime()))}（一次性）`]
 		}
