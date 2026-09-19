@@ -301,12 +301,12 @@ describe('PresetSelectChip 三档退化 + 信任标记跨档不丢（u4a）', ()
   })
 
   it('② 窄档（icon）：纯图标无可见文本，但信任标记仍以右上角警示色角标存在（+ tooltip）', async () => {
-    const wrapper = mountChip({ density: 'icon', hasReplacePrompt: true, replaceHint: REPLACE_HINT })
+    const wrapper = mountChip({ density: 'icon', accent: true, hasReplacePrompt: true, replaceHint: REPLACE_HINT })
     await flushPromises()
     const chip = wrapper.find('[data-testid="chip-preset"]')
     expect(chip.text()).not.toContain(MODE_NAME)
     expect(chip.text()).not.toContain(REPLACE_HINT)
-    // accent 底跨档保留（颜色 = 非默认模式状态）；角标独立于 accent 通道（用 warn 色）
+    // accent 底跨档保留（非默认模式档，颜色 = 状态）；角标独立于 accent 通道（用 warn 色）
     expect(chip.classes().join(' ')).toContain('bg-accent-soft')
     const badge = chip.find('[data-testid="preset-chip-replace-badge"]')
     expect(badge.exists()).toBe(true)
@@ -334,5 +334,57 @@ describe('PresetSelectChip 三档退化 + 信任标记跨档不丢（u4a）', ()
     expect(chip.attributes('aria-label')).toContain(MODE_NAME)
     expect(chip.attributes('aria-label')).toContain(REPLACE_HINT)
     expect(chip.attributes('title')).toBe(MODE_NAME)
+  })
+})
+
+/**
+ * 模式 chip 底色（方案 B：默认模式中性底 / 非默认模式 accent 底）。
+ *
+ * 设计 §5.1「颜色即状态」：accent 底只在**非默认模式**档出现，颜色才携带信息（恒亮 = 无色差
+ * = 用户读不出状态）。判据由 renderer 侧算好经 `accent` prop 传入（本包只按 prop 出样式），
+ * 故断言分两向：缺省/false → 无 accent 底 + 中性文字档；true → accent 底原样（非默认模式零变化）。
+ * ① 是反向断言（防将来又退回「无条件 accent 底」）；② 守住 accent 档的既有形态不被顺手改掉。
+ */
+describe('PresetSelectChip 模式 chip 底色（accent prop：默认中性 / 非默认 accent）', () => {
+  function mountTone(accent?: boolean) {
+    const deps = makeDeps({
+      presets: ref(samplePresets()),
+      defaultPresetId: ref('custom:read-only'),
+    })
+    return mount(PresetSelectChip, {
+      props: { sessionId: null, launchPresetId: undefined, presetOpen: false, accent },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+  }
+
+  it('① 默认模式（accent 缺省 false）：无 accent 底，文字走中性档 + 邻位 chip 同款 hover 反馈', async () => {
+    const wrapper = mountTone()
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    // 反向断言：默认档不得有 accent 底/强调文字（否则「颜色即状态」恒亮失效）
+    expect(cls).not.toContain('bg-accent-soft')
+    expect(cls).not.toContain('text-accent')
+    // 中性档 = 与 landing 首行邻位 chip（chip-directory / chip-branch）同一套反馈
+    expect(cls).toContain('text-neutral-mid')
+    expect(cls).toContain('hover:bg-surface-hover')
+    expect(cls).toContain('hover:text-neutral-fg')
+  })
+
+  it('①b 显式 accent=false：与缺省同档（默认模式中性底，非默认模式外观零变化）', async () => {
+    const wrapper = mountTone(false)
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    expect(cls).not.toContain('bg-accent-soft')
+    expect(cls).toContain('text-neutral-mid')
+  })
+
+  it('② 非默认模式（accent=true）：保留 accent 底 + 强调文字 + accent hover（逐字原样）', async () => {
+    const wrapper = mountTone(true)
+    await flushPromises()
+    const cls = wrapper.find('[data-testid="chip-preset"]').classes().join(' ')
+    expect(cls).toContain('bg-accent-soft')
+    expect(cls).toContain('text-accent')
+    expect(cls).toContain('hover:bg-accent-soft')
+    expect(cls).not.toContain('text-neutral-mid')
   })
 })

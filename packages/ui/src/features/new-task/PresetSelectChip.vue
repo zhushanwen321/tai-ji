@@ -9,6 +9,9 @@
  * ui 原语走包内相对导入（不经顶层 barrel，防自引用环）。三态（landing/锁定/历史）逻辑 + emit 契约（select/
  * update:presetOpen）逐字迁移（CT-4，不做功能改动）。
  *
+ * landing 态 chip 底色（设计文档 pi-launch-presets.md §5.1「颜色即状态」）：默认模式中性底（text-neutral-mid + 邻位 chip
+ * 同款 hover 反馈），非默认模式 accent 底（props.accent，判据由 renderer 侧算好传入）。
+ *
  * 三态（由 props.sessionId + props.launchPresetId 派生）：
  * 1. landing 态（sessionId=null）：Popover 可展开，列预设（PopoverListItem 项 + selected
  *    单选语义）+ 描述 + 「设为默认」Checkbox。回显 = launch-config 解析输出
@@ -75,6 +78,14 @@ const props = defineProps<{
   hasReplacePrompt?: boolean
   /** 信任标记文案（renderer 侧 i18n）：文本/短名档 = 内嵌后缀；纯图标档 = 角标 tooltip；空文案不渲染 */
   replaceHint?: string
+  /**
+   * 强调底档（设计 §5.1：「颜色即状态」）：真值 = 当前生效模式为**非默认模式**（默认档中性底，
+   * 与 landing 首行邻位 chip 同弱反馈；非默认档保留 accent 底）。
+   * 判据由 renderer 侧计算传入（`displayPreset.id !== (defaultPresetId || builtin:full)`，
+   * 注意 `||` 而非 `??`——store 未加载时 defaultPresetId 为 `''`，`'' ?? x` 仍是 `''` 会误判非默认）；
+   * 缺省 false = 中性底（恒亮 accent 不携带信息，且与对话态 PresetChip 只在非默认模式渲染的语义冲突）。
+   */
+  accent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -305,7 +316,12 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
         ref="chipRootRef"
         data-testid="chip-preset"
         variant="ghost"
-        class="relative h-auto min-w-0 shrink gap-1.5 rounded-md bg-accent-soft px-2 py-1 text-[12px] font-normal text-accent hover:bg-accent-soft [&_svg]:size-3.5"
+        class="relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5"
+        :class="
+          accent
+            ? 'bg-accent-soft text-accent hover:bg-accent-soft'
+            : 'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+        "
         :aria-label="ariaLabel"
         :title="chipDensity === 'icon' ? displayName : undefined"
       >

@@ -205,6 +205,20 @@ const modeHasReplace = computed(() => {
 const modeReplaceHint = computed(() =>
   modeHasReplace.value ? t('newTask.presetChip.replaceHint') : undefined,
 )
+/**
+ * 模式 chip 强调底判据（设计 §5.1「颜色即状态」；方案 B）：当前生效模式 ≠ 默认模式才算非默认。
+ *
+ * 与 displayPreset 同源（同一 resolve 链）——displayPreset 存在 + id !== 默认档。默认档用
+ * `||` 而非 `??`：store 未加载时 deps.defaultPresetId 为 `''`（非 null），`'' ?? x` 仍是 `''`，
+ * 会把默认模式误判成非默认（恒亮 accent = 不携带信息，正是本判据要消除的退化）。
+ * 注意 displayPreset 已把「解析不到」回落到 builtin:full（含 presets 未加载的 `''` 分支），
+ * 故存在性 + 默认档比对即可，无需再处理空档。
+ */
+const isNonDefaultPreset = computed(() => {
+  const p = displayPreset.value
+  if (!p) return false
+  return p.id !== (deps.defaultPresetId.value || BUILTIN_PRESET_IDS.FULL)
+})
 
 function onSelectWorkspace(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
@@ -285,7 +299,8 @@ function onPresetSelect(payload: { presetId: string }): void {
         <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
              各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
              （纯 CSS flex-shrink，分支 shrink-[8] 先于模式 shrink）→ 模式退化为纯图标
-             （PresetSelectChip 内部实测自适应，保留 accent 底 + 跨档不丢的信任标记）。 -->
+             （PresetSelectChip 内部实测自适应，颜色即状态：默认模式中性底 / 非默认模式 accent 底
+             [方案 B，:accent=isNonDefaultPreset]，跨档不丢的信任标记）。 -->
         <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-2.5 pt-2.5">
           <Popover v-model:open="isDirOpen">
             <PopoverTrigger as-child>
@@ -338,6 +353,7 @@ function onPresetSelect(payload: { presetId: string }): void {
           <PresetSelectChip
             :session-id="composerSid"
             :launch-preset-id="flow.currentSession.value?.launchPresetId"
+            :accent="isNonDefaultPreset"
             :mode-name="modeName"
             :short-name="modeShortName"
             :has-replace-prompt="modeHasReplace"

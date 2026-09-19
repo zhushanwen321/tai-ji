@@ -18,6 +18,10 @@
  * 本用例补上缺口：真实 Landing + 真实 core flow（真守卫）+ 真实 ui PresetSelectChip，
  * 点真实选项 DOM，断言「flow.pendingPreset 被写 + chip 展示名随之变化」。
  *
+ * [U-A 方案 B] 同一真实链路上补模式 chip 底色接线断言：`accent` prop 由 Landing 的
+ * isNonDefaultPreset 算好传入（displayPreset.id !== (defaultPresetId **||** builtin:full)），
+ * 默认模式中性底 / 非默认模式 accent 底——含 `defaultPresetId === ''`（store 未加载）不得误判非默认的守卫。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/new-task/landing-preset-select.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -129,6 +133,9 @@ describe('Landing 模式选择端到端（点击 → chip 回显 → flow 透传
     // 默认档显示（未显式选择 → 回落全局默认 builtin:full）
     const chip = wrapper.find('[data-testid="chip-preset"]')
     expect(chip.text()).toContain('全工具')
+    // U-A 方案 B：默认模式 = 中性底（无 accent 底，颜色只在非默认档携带信息）
+    expect(chip.classes().join(' ')).not.toContain('bg-accent-soft')
+    expect(chip.classes().join(' ')).toContain('text-neutral-mid')
 
     // 用户点 chip 展开模式 popover（Landing 的 isPresetOpen setter → flow.openPresetPopover）
     flow.openPresetPopover()
@@ -145,7 +152,29 @@ describe('Landing 模式选择端到端（点击 → chip 回显 → flow 透传
     // ② chip 展示名随之切换（修复前仍为「全工具」——Landing 的 modeName 源自 pendingPreset）
     expect(chip.text()).toContain('调度')
     expect(chip.text()).not.toContain('全工具')
+    // U-A 方案 B：切到非默认模式 → accent 底接上（颜色即状态）
+    expect(chip.classes().join(' ')).toContain('bg-accent-soft')
+    expect(chip.classes().join(' ')).toContain('text-accent')
     // ③ 选项自身选中态
     expect(option!.getAttribute('data-active')).toBe('true')
+  })
+
+  /**
+   * `||` 而非 `??` 守卫（设计 §5.1 判据已踩过的坑）：store 未加载时 defaultPresetId 为 `''`
+   * 而非 null，`'' ?? builtin:full` 仍是 `''` → 会把 builtin:full 默认档误判成非默认（恒亮 accent）。
+   * 此处默认档解析链完全走 `''` 输入（presets 已加载，无显式选择），断言 chip 仍为中性底。
+   */
+  it('defaultPresetId 为空（store 未加载）：builtin:full 兜底档不误判非默认 → chip 中性底', async () => {
+    defaultPresetId.value = ''
+    await flow.startFlow()
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: '/repo', gitBranch: 'main' },
+    })
+    await flushPromises()
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    // displayPreset 兜底 builtin:full（presets 已加载）
+    expect(chip.text()).toContain('全工具')
+    expect(chip.classes().join(' ')).not.toContain('bg-accent-soft')
+    expect(chip.classes().join(' ')).toContain('text-neutral-mid')
   })
 })
