@@ -146,12 +146,18 @@ function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
   // handleScriptError / handleWorkerExit / 预算终止 / time_limited / [OR-2] rebuild
   // 失败收敛——均经 finalizeRun）都经 handlers 调用链消费本视图——消息面终态在此
   // 统一收口；abortRun / terminateRunningRuns 两个 lifecycle 自有终态路径另行显式 dispose。
-  const depsWithTerminalCleanup: LifecycleDeps = {
-    ...deps,
-    onRunDone: (doneRun: WorkflowRun): void => {
-      disposeSignalAbortListener(run);
-      deps.onRunDone?.(doneRun);
-    },
+  //
+  // 视图必须经 Object.create 原型链承载、禁止 object spread：Interface 层注入的
+  // eventBus 是现读 getter（D3——每次属性访问重取当前 pi.events，reload 重跑 factory
+  // 后自动路由新 pi），spread 会对 getter 求值一次并快照成静态值。run 启动于 pi
+  // reload 前、完成于 reload 后时，finalizeRun 的 pending:unregister 经旧 pi.events
+  // emit 被 assertActive 拒绝，注销事件静默丢失（幽灵 pending 条目，skill-reload
+  // e2e 实证）。原型链视图把 getter 留在原型上，属性访问仍逐次现读；spread 形态下
+  // 未来 deps 新增任何 getter 都会复发同族快照缺陷，故在构造层面排除。
+  const depsWithTerminalCleanup: LifecycleDeps = Object.create(deps);
+  depsWithTerminalCleanup.onRunDone = (doneRun: WorkflowRun): void => {
+    disposeSignalAbortListener(run);
+    deps.onRunDone?.(doneRun);
   };
   // 自引用——worker-message-pump rebuildRuntime 需要 handlers 参数（handlers 引用自身）
   const handlers: WorkerHandlers = {
