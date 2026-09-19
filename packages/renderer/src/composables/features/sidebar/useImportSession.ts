@@ -45,7 +45,7 @@ export type ImportFreshState = 'visible' | 'fading'
 
 /**
  * fresh 徽标开始淡出前的实显时长（demo doImport 3.2s 后加 fade class；
- * ForkGroup FRESH_FADE_MS 同值——侧边栏 fresh 信号统一节奏）。
+ * 侧边栏 fresh 信号统一节奏）。
  */
 export const IMPORT_FRESH_VISIBLE_MS = 3_200
 
