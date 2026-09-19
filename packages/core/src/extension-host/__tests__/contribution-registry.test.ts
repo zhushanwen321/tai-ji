@@ -266,3 +266,182 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
     expect(registry.getContributions()).toHaveLength(3) // 1 statusline + 2 tasks slashCommands（「后台命令」view 已退役）
   })
 })
+
+// ── 新点位：headerAction（AP-1）/ modal（AP-2）────────────────────────
+
+describe('ContributionRegistry 新点位路由（AP-1/AP-2）', () => {
+  it('AP-1a: headerAction 路由到已注册 panel.header → available=true 且不 emit unregistered', () => {
+    const { emit, registry, mounts } = setup()
+    mounts.register('panel.header') // bootstrap registerMountPoints 既有挂载点，复用不新增名字
+    registry.registerContribution({
+      pluginId: 'sched',
+      contributionId: 'sched.open',
+      type: 'headerAction',
+      placement: 'panel.header',
+      available: false,
+      headerAction: { title: '定时任务', icon: 'clock', commandId: 'sched.open', order: 20 },
+    })
+    registry.routeAll(mounts)
+    expect(registry.getContributions({ pluginId: 'sched' })[0].available).toBe(true)
+    expect(emit.mock.calls.filter((c) => c[0].kind === 'unregistered-mount-point')).toHaveLength(0)
+  })
+
+  it('AP-2a: modal 路由到已注册 modal 挂载点 → available=true', () => {
+    const { emit, registry, mounts } = setup()
+    mounts.register('modal') // bootstrap registerMountPoints 新注册挂载点
+    registry.registerContribution({
+      pluginId: 'sched',
+      contributionId: 'sched.panel',
+      type: 'modal',
+      placement: 'modal',
+      available: false,
+      modal: { title: '定时任务', width: 'md' },
+    })
+    registry.routeAll(mounts)
+    expect(registry.getContributions({ pluginId: 'sched' })[0].available).toBe(true)
+    expect(emit.mock.calls.filter((c) => c[0].kind === 'unregistered-mount-point')).toHaveLength(0)
+  })
+
+  it('AP-2b: modal 挂载点未注册 → unregistered-mount-point 事件 + available=false（AC9 置灰）', () => {
+    const { emit, registry, mounts } = setup()
+    registry.registerContribution({
+      pluginId: 'sched',
+      contributionId: 'sched.panel',
+      type: 'modal',
+      placement: 'modal', // 未注册
+      available: false,
+      modal: { title: '定时任务' },
+    })
+    registry.routeAll(mounts)
+    const evt = emit.mock.calls.map((c) => c[0]).find((e) => e.kind === 'unregistered-mount-point')
+    expect(evt).toMatchObject({
+      kind: 'unregistered-mount-point',
+      pluginId: 'sched',
+      contributionId: 'sched.panel',
+      expectedMountPoint: 'modal',
+    })
+    expect(registry.getContributions({ pluginId: 'sched' })[0].available).toBe(false)
+  })
+
+  it('AP-1b/AP-2c: loadExternal 解析 headerActions/modals 段，type-specific payload 可读，跨段顺序固定', () => {
+    const { registry } = setup()
+    registry.loadExternal([{
+      pluginId: 'sched',
+      contributes: {
+        // 声明顺序故意与解析顺序不一致：顺序由 parseContributes 段 concat 决定（TC-5h 同款口径）
+        modals: [{ id: 'sched.panel', title: '定时任务', width: 'md' }],
+        headerActions: [{ id: 'sched.open', title: '定时任务', icon: 'clock', commandId: 'sched.open', order: 20 }],
+      },
+    }])
+    const all = registry.getContributions({ pluginId: 'sched' })
+    expect(all.map((c) => c.type)).toEqual(['headerAction', 'modal'])
+    expect(all[0].placement).toBe('panel.header')
+    expect(all[0].headerAction).toEqual({ title: '定时任务', icon: 'clock', commandId: 'sched.open', order: 20 })
+    expect(all[1].placement).toBe('modal')
+    expect(all[1].modal).toEqual({ title: '定时任务', width: 'md' })
+  })
+
+  it('AP-2d: modal 声明 width 缺省 → record payload 保留 undefined（renderer fallback 解析源）', () => {
+    const { registry } = setup()
+    registry.loadExternal([{
+      pluginId: 'p1',
+      contributes: { modals: [{ id: 'p1.m', title: 'Only Title' }] },
+    }])
+    const rec = registry.getContributions({ pluginId: 'p1' })[0]
+    expect(rec.modal?.title).toBe('Only Title')
+    expect(rec.modal?.width).toBeUndefined()
+  })
+})
+
+describe('ContributionRegistry.clearForPlugin（E2 清理族）', () => {
+  it('E2a: 清除该插件全部 type 贡献；其他插件不受扰', () => {
+    const { registry } = setup()
+    registry.loadExternal([
+      {
+        pluginId: 'p1',
+        contributes: {
+          headerActions: [{ id: 'p1.open', title: 'T', icon: 'clock', commandId: 'p1.open' }],
+          modals: [{ id: 'p1.m', title: 'M' }],
+          commands: [{ command: 'p1.cmd', title: 'C' }],
+        },
+      },
+      {
+        pluginId: 'p2',
+        contributes: { commands: [{ command: 'p2.cmd', title: 'C2' }] },
+      },
+    ])
+    registry.clearForPlugin('p1')
+    expect(registry.getContributions({ pluginId: 'p1' })).toEqual([])
+    expect(registry.getContributions({ pluginId: 'p2' })).toHaveLength(1)
+  })
+
+  it('E2b: 幂等——清两次不抛错；对不存在 pluginId 为 no-op', () => {
+    const { registry } = setup()
+    registry.loadExternal([{
+      pluginId: 'p1',
+      contributes: { headerActions: [{ id: 'p1.open', title: 'T', icon: 'clock', commandId: 'p1.open' }] },
+    }])
+    expect(() => {
+      registry.clearForPlugin('p1')
+      registry.clearForPlugin('p1')
+      registry.clearForPlugin('nonexistent')
+    }).not.toThrow()
+    expect(registry.getContributions({ pluginId: 'p1' })).toEqual([])
+  })
+
+  it('E2c: 清后 routeAll 不再产出该插件贡献（无 unregistered 事件、getContributions 为空）', () => {
+    const { emit, registry, mounts } = setup()
+    // 不注册任何挂载点 → routeAll 必 emit unregistered
+    registry.loadExternal([{
+      pluginId: 'p1',
+      contributes: { modals: [{ id: 'p1.m', title: 'M' }] },
+    }])
+    registry.routeAll(mounts)
+    expect(emit.mock.calls.filter((c) => c[0].kind === 'unregistered-mount-point')).toHaveLength(1)
+    registry.clearForPlugin('p1')
+    emit.mockClear()
+    registry.routeAll(mounts) // 清后重路由：该插件零贡献 → 零事件
+    expect(emit.mock.calls).toHaveLength(0)
+    expect(registry.getContributions({ pluginId: 'p1' })).toEqual([])
+  })
+})
+
+describe('E2 触发链 core 侧通路（事件订阅回调内调 clearForPlugin）', () => {
+  // renderer 接线归 u4b；本组只锁 core 侧事实：plugin-status-change / plugin-crashed
+  // 两内部事件可经 InternalEventBus 订阅，订阅回调内可调 clearForPlugin 完成清理。
+  it('E2d: plugin-status-change 广播 → 订阅回调 clearForPlugin → 该插件贡献消失', () => {
+    const { bus, registry, mounts } = setup()
+    registry.loadExternal([{
+      pluginId: 'p1',
+      contributes: { headerActions: [{ id: 'p1.open', title: 'T', icon: 'clock', commandId: 'p1.open' }] },
+    }])
+    mounts.register('panel.header')
+    registry.routeAll(mounts)
+    expect(registry.getContributions({ pluginId: 'p1' })[0].available).toBe(true)
+
+    const unsubscribe = bus.on('plugin-status-change', (e) => {
+      if (e.status === 'inactive' || e.status === 'crashed') registry.clearForPlugin(e.pluginId)
+    })
+    bus.emit({ kind: 'plugin-status-change', pluginId: 'p1', status: 'inactive' })
+    expect(registry.getContributions({ pluginId: 'p1' })).toEqual([])
+
+    unsubscribe()
+    bus.emit({ kind: 'plugin-status-change', pluginId: 'p1', status: 'active' }) // 退订后不再触发
+    expect(registry.getContributions()).toEqual([])
+  })
+
+  it('E2e: plugin-crashed 广播 → 订阅回调 clearForPlugin（含 headerAction+modal 两新点位）', () => {
+    const { bus, registry } = setup()
+    registry.loadExternal([{
+      pluginId: 'p1',
+      contributes: {
+        headerActions: [{ id: 'p1.open', title: 'T', icon: 'clock', commandId: 'p1.open' }],
+        modals: [{ id: 'p1.m', title: 'M' }],
+      },
+    }])
+    bus.on('plugin-crashed', (e) => registry.clearForPlugin(e.pluginId))
+    expect(registry.getContributions({ pluginId: 'p1' })).toHaveLength(2)
+    bus.emit({ kind: 'plugin-crashed', pluginId: 'p1', error: 'boom' })
+    expect(registry.getContributions({ pluginId: 'p1' })).toEqual([])
+  })
+})

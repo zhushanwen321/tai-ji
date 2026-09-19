@@ -81,6 +81,42 @@ export interface NotificationPayload {
   [key: string]: unknown
 }
 
+/** plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集）。 */
+export type PluginModalClosedReason =
+  | 'dismissed'
+  | 'session-switched'
+  | 'host-overlay'
+  | 'replaced'
+  | 'plugin-gone'
+
+/** plugin modal 开合帧载荷（AP-2；kind='plugin:modalState'，S→C 全局广播 transient 帧）。
+ *  payload = 调用参数原文（可缺省）——title/width 解析与 fallback 在 renderer（单一解析源）；
+ *  sessionId 必带（AP-1/AP-2 必填契约，仅作 payload 归属信息，路由键 = 全局广播）。 */
+export interface PluginModalStatePayload {
+  pluginId: string
+  modalId: string
+  sessionId: string
+  title?: string
+  width?: 'sm' | 'md' | 'lg'
+  state: 'open' | 'closed'
+  /** 单调递增槽代数（同 (pluginId,modalId) 重复 open / replaced 均递增） */
+  epoch: number
+  /** state='closed' 时的关闭原因（PluginModalClosedReason 闭集） */
+  reason?: PluginModalClosedReason
+}
+
+/** headerAction 运行时更新帧载荷（AP-1；kind='plugin:headerActionUpdate'，必带 sessionId）。
+ *  渲染端按 (sessionId, headerActionId) 写入对应会话分区。 */
+export interface HeaderActionUpdatePayload {
+  pluginId: string
+  headerActionId: string
+  sessionId: string
+  /** 徽标 ≤4 字符（宿主截断，全文进 tooltip） */
+  badge?: string
+  tooltip?: string
+  disabled?: boolean
+}
+
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */
 export type InternalEvent =
   | { kind: 'plugin-status-bar-update'; sessionId?: string; items: StatusBarEntry[] }
@@ -96,12 +132,14 @@ export type InternalEvent =
   | { kind: 'extension-widget'; sessionId?: string; widget: WidgetPayload } // widget + widgetGui 归一
   | { kind: 'extension-notify'; sessionId?: string; notification: NotificationPayload }
   | { kind: 'session-destroyed'; sessionId: string }
+  | { kind: 'plugin:modalState'; modalState: PluginModalStatePayload } // S→C 开合帧（AP-2，u4a bridge 接线）
+  | { kind: 'plugin:headerActionUpdate'; headerAction: HeaderActionUpdatePayload } // S→C 徽标更新帧（AP-1，u4a bridge 接线）
   | { kind: 'unregistered-mount-point'; pluginId: string; contributionId: string; expectedMountPoint: string }
   | { kind: 'error'; source: string; message: string }
 
 // ── ContributionRecord（DM1）─────────────────────────────────────────
 
-/** contribution 类型（DM1）。 */
+/** contribution 类型（DM1）。headerAction/modal 为 plugin-header-action-modal-points 新增点位（AP-1/AP-2）。 */
 export type ContributionType =
   | 'view'
   | 'menu'
@@ -109,6 +147,8 @@ export type ContributionType =
   | 'statusBarItem'
   | 'slashCommand'
   | 'configuration'
+  | 'headerAction'
+  | 'modal'
 
 /**
  * 解析后 contribution 统一结构（DM1）。
@@ -130,6 +170,10 @@ export interface ContributionRecord {
   statusBarItem?: { text: string; alignment: 'left' | 'right'; priority: number; scope: 'global' | 'per-session'; commandId?: string }
   slashCommand?: { name: string; description: string }
   configuration?: { properties: unknown }
+  /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状 */
+  headerAction?: { title: string; icon: string; commandId: string; order?: number }
+  /** 声明原文存档（AP-2/D4：无 commandId 字段）——title/width 供 renderer fallback 读声明 */
+  modal?: { title: string; width?: 'sm' | 'md' | 'lg' }
 }
 
 // ── ViewContributionSummary（IF1，视图宿主消费的扁平视图摘要）───────────
@@ -160,10 +204,11 @@ export interface PluginContributesView {
   initialVisibility?: 'visible' | 'hidden'
 }
 
-/** menu contribution（s1 DM2）。 */
+/** menu contribution（s1 DM2）。键集不含 'panel.header'——该键自 schema 起无渲染端消费方
+ *  （声明死通道，D3 删除），顶栏点位由 headerActions 承接；composer.toolbar/sidebar.footer
+ *  同为无消费键但与本点位无语义冲突，保留待规范清理另行裁决。 */
 export interface PluginContributesMenu {
   'composer.toolbar'?: PluginMenuItem[]
-  'panel.header'?: PluginMenuItem[]
   'sidebar.footer'?: PluginMenuItem[]
 }
 export interface PluginMenuItem {
@@ -206,6 +251,25 @@ export interface PluginContributesStatusBarItem {
   tooltip?: string
 }
 
+/** headerAction contribution（AP-1，panel header 按钮区）。icon 为 lucide 名字符串（宿主解析，插件不给 SVG）；
+ *  badge/tooltip/disabled 等可变字段不在声明侧，经 api.ui.updateHeaderAction + plugin:headerActionUpdate 广播。 */
+export interface PluginContributesHeaderAction {
+  id: string
+  title: string
+  icon: string
+  commandId: string
+  /** 与内置按钮组的相对序；缺省追加在后 */
+  order?: number
+}
+
+/** modal contribution（AP-2/D4：声明只有 {id,title,width?}，无 commandId 字段——开层只有
+ *  api.ui.showModal 一条路，声明侧供枚举/置灰/默认元数据）。 */
+export interface PluginContributesModal {
+  id: string
+  title: string
+  width?: 'sm' | 'md' | 'lg'
+}
+
 /**
  * 插件 contributes 声明 v2（对齐 s1 schema v2 的 PluginContributes，见
  * packages/plugin-sdk/src/types.ts 同形状定义）。core 独立定义（D6 接口即契约，
@@ -220,6 +284,8 @@ export interface PluginContributes {
   commands?: PluginContributesCommand[]
   configuration?: PluginContributesConfiguration
   statusBarItems?: PluginContributesStatusBarItem[]
+  headerActions?: PluginContributesHeaderAction[]
+  modals?: PluginContributesModal[]
 }
 
 /**

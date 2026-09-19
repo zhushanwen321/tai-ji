@@ -133,6 +133,8 @@ export interface PluginContributes {
   commands?: PluginContributesCommand[]
   configuration?: PluginContributesConfiguration
   statusBarItems?: PluginContributesStatusBarItem[]
+  headerActions?: PluginContributesHeaderAction[]
+  modals?: PluginContributesModal[]
 }
 
 /**
@@ -152,11 +154,11 @@ export interface PluginContributesView {
 
 /**
  * @proposed — schema v2 menus 按挂载点名分组的命令菜单映射
- * （VSCode contribution points 风格）。
+ * （VSCode contribution points 风格）。键集不含 'panel.header'——该键自 schema 起无
+ * 渲染端消费方（声明死通道，D3 删除），顶栏点位由 headerActions 承接。
  */
 export interface PluginContributesMenu {
   'composer.toolbar'?: PluginMenuItem[]
-  'panel.header'?: PluginMenuItem[]
   'sidebar.footer'?: PluginMenuItem[]
 }
 
@@ -210,6 +212,29 @@ export interface PluginContributesStatusBarItem {
   scope?: 'per-session' | 'global'
   commandId?: string
   tooltip?: string
+}
+
+/**
+ * @proposed — panel header 按钮区贡献（icon 为 lucide 名字符串，宿主解析；
+ * badge/tooltip/disabled 等可变字段经 api.ui.updateHeaderAction 运行时更新）。
+ */
+export interface PluginContributesHeaderAction {
+  id: string
+  title: string
+  icon: string
+  commandId: string
+  /** 与内置按钮组的相对序；缺省追加在后 */
+  order?: number
+}
+
+/**
+ * @proposed — modal 弹层声明（只有 {id,title,width?}，无 commandId 字段——开层只有
+ * api.ui.showModal 一条路，声明侧供枚举/置灰/默认元数据）。
+ */
+export interface PluginContributesModal {
+  id: string
+  title: string
+  width?: 'sm' | 'md' | 'lg'
 }
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────
