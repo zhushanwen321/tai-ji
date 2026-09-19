@@ -15,7 +15,7 @@
                │ WS: session.importCandidates / session.import（带 source 字段）
 ┌─ runtime ────▼───────────────────────────────────────────────────┐
 │ session-message-handler ──按 source 路由──► source 注册表           │
-│                                          ├─ PiImportSource       │
+│                                          ├─ ExternalFileImportSource（pi）│
 │                                          └─ ZcodeImportSource    │
 │                    （SessionImportSource SPI，见 §3）               │
 │ ImportService（公共编排层，源无关）                                  │
