@@ -4,6 +4,9 @@
     位于上下文容量触发器左侧：左 = TOKEN 速度（t/s），右 = 缓存命中率（%），独立判定
     null → 「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
     命中率语义色三档：≥80 success · 50–80 warn · <50 danger（项目语义色 token）。
+    归因降噪（2026-09-19 D-A）：帧带 cacheRatio.currentMiss（cold-start / idle-expiry /
+    context-rewrite）时，本次行不再显示裸 0%，改渲染成因文案（中性色，非故障）+ 浮层说明行；
+    未知成因的 0%（如服务端淘汰）仍显示 0% 三档色——那正是需要被看到的信号。
     hover 出各自浮层：速度四行（本次/今日/7天/30天）+ 口径说明；缓存两行（本次/今日加权）
     + bar + 口径说明。「本次」= 本会话最近一次请求样本（会话视角，runtime per-session 槽）；
     今日/7天/30天 = 该模型跨会话全局聚合（模型视角）。数据纯读 useGenStats 分区
@@ -94,8 +97,8 @@
           <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
             <div class="flex flex-col gap-0.5">
               <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsCurrentReq') }}</span>
-              <span class="font-sans text-[14px] font-semibold tabular-nums" :class="frame.cacheRatio.current == null ? 'text-neutral-dim' : 'text-neutral-fg'">
-                {{ cachePercentDisplay(frame.cacheRatio.current) }}
+              <span class="font-sans text-[14px] font-semibold tabular-nums" :class="cacheCurrentClass">
+                {{ cacheDisplay }}
               </span>
             </div>
             <div class="flex flex-col gap-0.5">
@@ -105,16 +108,22 @@
               </span>
             </div>
           </div>
-          <!-- bar（仅本次命中率有值时显示；宽度/颜色按三档语义色） -->
-          <div v-if="frame.cacheRatio.current != null" class="mx-2.5 mt-0.5 h-1 overflow-hidden rounded-full bg-surface-2">
+          <!-- bar（仅未归因的数值命中率有值时显示；宽度/颜色按三档语义色）——归因态无 0% 数值可画，
+               空轨道反而会读成「命中率 0」的另一种画法，故整体隐藏 -->
+          <div v-if="frame.cacheRatio.current != null && !cacheMiss" class="mx-2.5 mt-0.5 h-1 overflow-hidden rounded-full bg-surface-2">
             <div
               :class="cn('h-full rounded-full transition-[width,background-color]', cacheBarClass)"
               :style="{ width: `${frame.cacheRatio.current}%` }"
               data-testid="genstats-cache-bar"
             />
           </div>
-          <!-- 口径说明 -->
+          <!-- 口径说明（归因降噪：已知成因的 0% 先把成因说清，再接通用口径） -->
           <div class="mt-2 border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-neutral-dim">
+            <p
+              v-if="cacheMissNote"
+              class="mb-1 text-neutral-mid"
+              data-testid="genstats-cache-miss-note"
+            >{{ cacheMissNote }}</p>
             {{ t('panel.context.genStatsCacheNote') }}
           </div>
         </template>
@@ -130,6 +139,7 @@ import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
 import { useGenStats } from '@/composables/features/model/useGenStats'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 
 /**
  * 纯读组件（D5）：per-session 分区状态在 useGenStats composable，组件只做帧 → 显示映射。
@@ -168,15 +178,32 @@ const speedRows = computed(() => {
 const CACHE_SUCCESS_THRESHOLD = 80
 const CACHE_WARN_THRESHOLD = 50
 
+/** 空闲时长格式化基数（毫秒/分钟、分钟/小时；模块级常量，避免 no-magic-numbers） */
+const MS_PER_MINUTE = 60_000
+const MINUTES_PER_HOUR = 60
+
 const cacheCurrent = computed(() => frame.value?.cacheRatio.current ?? null)
 
+/**
+ * 归因降噪（2026-09-19 D-A）：帧内 currentMiss（runtime 已归因的「预期内 0%」）为
+ * 显示与着色的最高优先依据——有归因时本次行渲染成因文案 + 中性色（非故障），
+ * 无归因才回落到数值三档色。
+ */
+const cacheMiss = computed(() => frame.value?.cacheRatio.currentMiss ?? null)
+
 const cacheTriggerClass = computed(() => {
+  if (cacheMiss.value) return 'text-neutral-dim hover:text-neutral-mid'
   const v = cacheCurrent.value
   if (v == null) return 'text-neutral-dim hover:text-neutral-mid'
   if (v >= CACHE_SUCCESS_THRESHOLD) return 'text-success hover:text-success'
   if (v >= CACHE_WARN_THRESHOLD) return 'text-warn hover:text-warn'
   return 'text-danger hover:text-danger'
 })
+
+/** 浮层本次行文字色：归因态与无值同为中性（归因不是异常，不该用 fg 强调） */
+const cacheCurrentClass = computed(() =>
+  cacheMiss.value || cacheCurrent.value == null ? 'text-neutral-dim' : 'text-neutral-fg',
+)
 
 const cacheBarClass = computed(() => {
   const v = cacheCurrent.value
@@ -191,5 +218,43 @@ function cachePercentDisplay(v: number | null | undefined): string {
   return v == null ? '—' : `${v}%`
 }
 
-const cacheDisplay = computed(() => cachePercentDisplay(cacheCurrent.value))
+/** 归因 reason → 触发器短文案（i18n；三值均为「预期内 miss，非故障」语义） */
+function cacheMissLabel(reason: GenStatsCacheMiss['reason']): string {
+  switch (reason) {
+    case 'cold-start':
+      return t('panel.context.genStatsCacheMissColdStart')
+    case 'idle-expiry':
+      return t('panel.context.genStatsCacheMissIdle')
+    case 'context-rewrite':
+      return t('panel.context.genStatsCacheMissCompaction')
+  }
+}
+
+/** 空闲时长显示（locale-neutral 短单位：< 1h →「20m」，≥ 1h →「3h50m」） */
+function formatIdle(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / MS_PER_MINUTE))
+  if (minutes < MINUTES_PER_HOUR) return `${minutes}m`
+  const hours = Math.floor(minutes / MINUTES_PER_HOUR)
+  const rest = minutes % MINUTES_PER_HOUR
+  return rest === 0 ? `${hours}h` : `${hours}h${rest}m`
+}
+
+/** 浮层归因说明行（无归因 → null，不出行；reason 穷尽分支，防御分支只接住未来新增值） */
+const cacheMissNote = computed(() => {
+  const miss = cacheMiss.value
+  if (!miss) return null
+  if (miss.reason === 'cold-start') return t('panel.context.genStatsCacheMissColdStartNote')
+  if (miss.reason === 'idle-expiry') {
+    return t('panel.context.genStatsCacheMissIdleNote', { duration: formatIdle(miss.idleMs ?? 0) })
+  }
+  if (miss.reason === 'context-rewrite') return t('panel.context.genStatsCacheMissCompactionNote')
+  // 防御：协议新增 reason 时不出说明行（触发器文案侧的穷尽 switch 会在编译期拦下）
+  return null
+})
+
+/** 触发器显示：归因态 → 成因文案（「空闲过期」等）；否则数值（null →「—」） */
+const cacheDisplay = computed(() => {
+  const miss = cacheMiss.value
+  return miss ? cacheMissLabel(miss.reason) : cachePercentDisplay(cacheCurrent.value)
+})
 </script>

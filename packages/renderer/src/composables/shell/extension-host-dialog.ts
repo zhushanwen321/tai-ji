@@ -6,7 +6,7 @@
  * 由 initExtensionHostBridge provide 注入，CompanionBand 消费。
  *
  * 数据流：bus 'ui-request'（plugin:uiRequest + extension.ui_request 双源归一）
- * → createDialogRequestSource.onUiRequest（无 sid 跳过 / askUser 过滤 C4 分流）
+ * → createDialogRequestSource.onUiRequest（无 sid 跳过 / form 类过滤 C4 分流）
  * → convertToDialogRequest → DialogRequestQueue → CompanionBand 渲染
  * → 用户操作 → queue.respond → transport 回传（pi → extension.ui_response / plugin → plugin.uiResponse）。
  *
@@ -18,8 +18,11 @@
  * （source 投递写入 / transport respond 删除两工厂共管），respond
  * （sendPiResponse + sendPluginResponse 双通道）即删；plugin 源另有撤窗广播删除点。
  *
- * 分流契约（feature clarify C2/C4）：askUser 请求由 useExtensionUI 消费（Panel inline 独占），
- * 本适配层只投递非 askUser（CompanionBand 独占 dialog）；两者在数据源层分流，零重叠。
+ * 分流契约（feature clarify C2/C4 + ui-presentation-protocol D5 收敛）：统一表单 overlay
+ * 请求（form 键；窗口期含 legacy askUser / scheduleCreate 原始帧键——本侧消费 bus 原始帧，
+ * 归一只发生在 useExtensionUI handler 内，故排除面按窗口键集合对称排除）由 useExtensionUI
+ * 消费（Panel inline 独占，挂 FormOverlay），本适配层只投递其余请求（CompanionBand 独占
+ * dialog）；两类在数据源层分流，零重叠。
  */
 import type { InternalEvent, InternalEventBus } from '@taiji/core'
 import type {
@@ -37,7 +40,7 @@ type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
 // ── 类型守卫（索引签名字段收窄，禁止 any 断言） ──────────────────────
 
-const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor', 'askUser']
+const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor']
 
 function isDialogMethod(v: unknown): v is DialogRequest['method'] {
   return typeof v === 'string' && (DIALOG_METHODS as readonly string[]).includes(v)
@@ -75,19 +78,16 @@ function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
 /**
  * 转换 bus ui-request 事件为 ui 包 DialogRequest（AC2）：
  * - source：request.pluginId !== '' → 'plugin'（plugin 源），否则 'pi'（extension 源统一 ''）
- * - method：askUser === true → 'askUser'（C2 改写，askUserQuestions/allowCancel 透传）；
- *   否则索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐 toExtensionUIRequest 语义）
+ * - method：索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐
+ *   toExtensionUIRequest 语义）；form 类请求已被 C4 排除，不会到达本转换
  * - options：双形状归一（normalizeOptions）
  * - receivedAt：转换时刻时间戳（队列倒计时基准）
  */
 export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   const req = e.request
-  const askUser = req.askUser === true
-  const method: DialogRequest['method'] = askUser
-    ? 'askUser'
-    : isDialogMethod(req.method)
-      ? req.method
-      : req.kind
+  const method: DialogRequest['method'] = isDialogMethod(req.method)
+    ? req.method
+    : req.kind
   return {
     source: req.pluginId !== '' ? 'plugin' : 'pi',
     sessionId: e.sessionId ?? '',
@@ -99,8 +99,6 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
     ...(req.default !== undefined ? { default: req.default as string } : {}),
     ...(req.prefill !== undefined ? { prefill: req.prefill as string } : {}),
     ...(req.level !== undefined ? { level: req.level as 'info' | 'warn' | 'error' } : {}),
-    ...(askUser ? { askUserQuestions: req.askUserQuestions as unknown[] } : {}),
-    ...(askUser ? { allowCancel: req.allowCancel as boolean } : {}),
     receivedAt: Date.now(),
   }
 }
@@ -116,7 +114,7 @@ const requestIdSessions = new Map<string, string>()
 /**
  * 创建 DialogRequestSource（bus 'ui-request' + WS plugin:uiRequestExpired 适配）：
  * - onUiRequest：无 sessionId 跳过 + console.warn（C2，防 '' 分区脏数据）；
- *   askUser === true 跳过投递（C4 分流，CompanionBand 独占 dialog）
+ *   form 类请求跳过投递（C4 分流，CompanionBand 独占 dialog）
  * - onUiRequestExpired：WS plugin:uiRequestExpired（timeout-plugin-service D2 超时撤窗，
  *   不经 bus——bridge 无此归一项）。按 requestId 反查（onUiRequest 流经时记录 requestId→sessionId
  *   映射，投递时归属 sid，MF-4 反查为主）；Map miss 时 payload 可选 sessionId 兜底（renderer 重启）。
@@ -131,7 +129,16 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
           console.warn('[dialog-adapters] ui-request 事件缺少 sessionId，跳过投递:', e.request.requestId)
           return
         }
-        if (e.request.askUser === true) return // C4：askUser 由 useExtensionUI 消费（Panel inline）
+        // C4：统一表单 overlay 类由 useExtensionUI 消费（Panel inline 挂 FormOverlay），本侧
+        // 对称排除（窗口键集合 = form ∨ askUser ∨ scheduleCreate——本侧消费 bus 原始帧，
+        // legacy 帧无 form 键，归一只发生在 useExtensionUI handler 内；窗口末 legacy 键删）——
+        // 漏排除则同一请求被转成空壳 select dialog 入队（用户误点 = respond null = 误触取消）
+        // 并与 overlay 双 UI 并存，违反双消费方「零重叠」契约。
+        if (e.request.form === true || e.request.askUser === true || e.request.scheduleCreate === true) return
+        // C4（plan 模式重设计 D5）：planReview 审批请求由 PlanReviewBar 消费（useExtensionUI
+        // planReviewFilter 实例入 store 枚举 + respond 回传）——不落 CompanionBand 原始 dialog
+        // 渲染 marker 控制符 title。
+        if (e.request.planReview === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))
@@ -157,7 +164,7 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
   }
 }
 
-/** method 收窄到 ExtensionInteractMethod（askUser 请求已被 C4 过滤，不会到达回传通道） */
+/** method 收窄到 ExtensionInteractMethod（form 类请求已被 C4 过滤，不会到达回传通道） */
 function toInteractMethod(method: string): ExtensionInteractMethod {
   return method === 'confirm' || method === 'select' || method === 'input' || method === 'editor'
     ? method

@@ -159,6 +159,15 @@ OUTPOST_CALLSITES = [
         "用户附言（控制字符折叠 + 截断）——非 composer skill chip 出口路径，"
         "登记豁免；若未来 handoff 支持富内容需回头重审",
     ),
+    (
+        "transport/session-message-handler.ts",
+        "client.prompt('/plan abort')",
+        "internal",
+        "exempt",
+        "abortPlan 退出命令：固定命令字面量（无任何用户内容插值），pi 对 / 前缀"
+        "prompt 先行执行 extension command；刻意绕 busy 预检（workflowAction 先例，"
+        "设计 D5/E9——挂起审批期退出是高概率动线）",
+    ),
 ]
 
 

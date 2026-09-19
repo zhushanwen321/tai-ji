@@ -543,7 +543,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.appended ?? []).toHaveLength(0);
   });
 
-  it("终态 subagent record（内存 closed，closedReason 有值）→ 差集补发注销（reason 直传 closedReason）+ 尽力 emit", () => {
+  it("终态 subagent record（内存 closed，closedReason 有值）→ 差集补发注销（reason 直传 closedReason，status 经 mapReasonToStatus）", () => {
     setup();
     writeRegister("bg-done", "subagent");
     const h = makeBinding({ sessionFile });
@@ -552,10 +552,11 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.appended).toEqual([
       { customType: "pending:unregister", data: { id: "bg-done", reason: "cancelled", status: "cancelled" } },
     ]);
-    expect(h.pi?.emitted).toEqual([{ channel: "pending:unregister", data: { id: "bg-done", reason: "cancelled" } }]);
+    // [reload-closeout D4] 尽力 emit 已删（恒 no-op 死路径）——注销唯一持久化路径 = appendEntry
+    expect(h.pi?.emitted ?? []).toHaveLength(0);
   });
 
-  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason）", () => {
+  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason，未知值 status 兜底 completed）", () => {
     setup();
     writeRegister("bg-old", "subagent");
     const h = makeBinding({ sessionFile });
@@ -565,7 +566,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     );
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
-      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "gc" } },
+      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "completed" } },
     ]);
   });
 

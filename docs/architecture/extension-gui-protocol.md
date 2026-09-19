@@ -260,7 +260,7 @@ badge 的视觉态（亮/色/呼吸点）由 `meta.status` 决定，与 built-in
 | `setWidget(key, factory)` | `setWidgetDual()` helper（内部 `guiSetWidget` 直编码 GUI 臂） | extension_ui_request（marker 编码进 string[]） | **M17** composer 任务托盘的协议 widget 区 | 单向 |
 | `setStatus(key, text)` | 复用 pi 原生（已有效） | extension_ui_request | **M8** status bar | 单向 |
 | `registerMessageRenderer` | extension 在 sendMessage 中构造 | `message.details.__gui__` | **M5** custom message | 单向 |
-| `ctx.ui.custom(factory)` | `askUserInteract()` helper（extensions/ask-user/） | select 通道 + `ASK_USER_MARKER` + WS 回传 | **M11** companion | **双向** |
+| `ctx.ui.custom(factory)` | `uiFormInteract()` helper（extension-protocol ui-form 模块） | select 通道 + `UI_FORM_MARKER` + WS 回传 | **M11** companion | **双向** |
 
 ### 4.2 tool result（renderCall + renderResult）
 
@@ -499,11 +499,19 @@ export { firstContentText }   // toolResult content[0] 文本提取（renderResu
 export type { MarkerRpcResult, MarkerRpcOptions, ChannelErrorResult }
 export { callMarkerRpc, isChannelErrorResult, formatChannelErrorText }
 
-// ── extensions/ask-user（富交互，见 §6）──
+// ── extensions/ask-user（legacy 解码契约，见 §6）──
 export type { AskUserQuestion, AskUserOption, AskUserAnswers }
-export { ASK_USER_MARKER }
-export { askUserInteract }    // 双向交互（select+marker 通道）
+export { ASK_USER_MARKER }   // legacy 帧识别（D7 退役窗口末清理）
 export { getAskUserAnswer, getAskUserOther, isAskUserQuestion }  // 答案解析与守卫
+
+// ── extensions/ui-form（统一提问表单，见 §6）──
+export type {
+  FormQuestion, ChoiceQuestion, TextQuestion, ScheduleQuestion,
+  FormOption, FormAnswers, UiFormInteractResult, UiFormInteractOptions,
+}
+export { UI_FORM_MARKER }
+export { uiFormInteract }    // 双向交互（select+marker 通道，四态判别返回）
+export { isFormQuestion, isFormAnswers }
 ```
 
 包出口不止上面这些：session-manager / plugin-bridge / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费面结构性不触达 node 内建。
@@ -562,7 +570,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 
 ---
 
-## 6. ask-user 富交互层
+## 6. 富交互层（统一提问表单 ui-form）
 
 ### 6.1 技术约束
 
@@ -572,152 +580,17 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 
 **但 `ctx.ui.select()` 在 RPC 模式下有效**——它走 `extension_ui_request` / `extension_ui_response` 双向通道，runtime 已有完整的请求-回复路由 + 5 分钟超时兜底。
 
-### 6.2 设计：askUserInteract() — 复用 select 通道 + marker 检测
+### 6.2 统一提问表单协议（ui-form）
 
-ask-user 不走 `details.__gui__`（那是单向渲染通道），而是**借用 select 的双向通信能力**。helper 把富交互数据序列化进 select 的 `options[0]`，用 marker 标记区分普通 select：
+原 ask-user 定制富交互（`askUserInteract` + `ASK_USER_MARKER` + AskUserOverlay）已升级为**统一提问表单协议（ui-form）**：ask-user / scheduler / plan 三方提问收口为一个协议、一个渲染器。权威描述（问题类型/答案格式/回包四态表/完整调用示例/内置消费方）见 [gui-protocol-guide.md §3.4](../extensions/gui-protocol-guide.md)，要点：
 
-```typescript
-// extensions/ask-user/helpers.ts
-async function askUserInteract(
-  ctx: GuiContext,
-  questions: AskUserQuestion[],
-  options?: { signal?: AbortSignal; allowCancel?: boolean }
-): Promise<AskUserAnswers | null> {
-  if (!isGuiCapable(ctx) || !ctx.ui?.select) {
-    throw new Error('askUserInteract requires RPC mode. TUI mode: use ctx.ui.custom() directly.')
-  }
+- **交互入口**：`uiFormInteract(ctx, form, opts?): Promise<UiFormInteractResult>`（`packages/extension-protocol/src/extensions/ui-form/helpers.ts`），marker = `UI_FORM_MARKER`，复用 select 双向通道（传输核 `callMarkerRpc`）。不走 `details.__gui__`——那是单向渲染通道，无法承载双向交互；select 是 pi 原生双向通道，复用它获得队列/超时/abort 能力。
+- **问题集**：`FormQuestion` 判别联合（`choice` / `text` / `schedule`），wire 帧 `form: true` + `formQuestions`；legacy `askUser: true` + `askUserQuestions` 帧由 renderer `normalizeFormRequest` 双挂点归一进同一渲染器（版本偏斜窗口期现状，随 D7 窗口末清理）。
+- **渲染面**：`FormOverlay`（`packages/renderer/src/components/extension/form/`，三渲染器 ChoiceQuestion / TextQuestion / ScheduleForm），Panel.vue inline 覆盖 composer 位置（多问 = 多 tab，单问 = 单视图）。
+- **回包四态判别**（返回判别联合，不抛错）：`ok` / `cancelled` / `timeout` / `channel-error` / `non-json`；channel-error 含 echo 检测（旧宿主 × 新扩展组合的确定性识别，message 携带升级指引）。
+- **答案解码**：choice/text 部分与旧 `AskUserAnswers` 逐字兼容，`getAskUserAnswer` / `getAskUserOther` 解码零改动。
 
-  // pi select 的 request 硬编码 { method, title, options, timeout }，
-  // helper 无法通过标准参数注入自定义字段，只能借用 options 数组。
-  const payload = JSON.stringify({
-    questions,
-    allowCancel: options?.allowCancel ?? true,
-  })
-
-  const value = await ctx.ui.select(
-    ASK_USER_MARKER,    // title = marker，runtime/前端据此识别
-    [payload],          // options[0] = JSON payload
-    { signal: options?.signal },
-  )
-
-  if (value === undefined) return null  // 取消/超时/abort
-  return JSON.parse(value) as AskUserAnswers
-}
-```
-
-**数据流**：
-
-```
-extension: askUserInteract(ctx, questions)
-  │
-  ├─ ctx.ui.select(ASK_USER_MARKER, [JSON_payload])
-  │
-  ▼
-pi RPC: extension_ui_request{method:'select', title:ASK_USER_MARKER, options:[JSON]}
-  │
-  ▼
-runtime event-adapter (L379):
-  ├─ 检测 title === ASK_USER_MARKER
-  ├─ JSON.parse(options[0]) → { questions, allowCancel }
-  ├─ 产 extension-ui kind 事件（timeout-manager 注册 5min 超时）
-  └─ 产 extension.ui_request WS 帧 { askUser:true, askUserQuestions, allowCancel }
-  │
-  ▼
-前端 useExtensionUI:
-  ├─ currentAskUserRequest = queue.find(r => r.askUser === true)
-  └─ Panel.vue inline 渲染 AskUserOverlay（覆盖 composer 位置）
-  │
-  ▼
-用户操作 → extension.ui_response { result: JSON_answers }
-  │
-  ▼
-runtime → pi stdin → ctx.ui.select() Promise resolve
-  │
-  ▼
-askUserInteract 返回 parsed answers
-```
-
-**为什么不走 `details.__gui__`**：`__gui__` 是单向渲染通道（extension → 前端），无法承载双向交互（等用户回传答案）。select 是 pi 原生的双向通道，复用它意味着零 runtime 改动就获得队列/超时/abort 能力。
-
-### 6.3 AskUserQuestion 类型
-
-```typescript
-export interface AskUserQuestion {
-  header?: string           // Tab 标签（≤12 字符，缺失时用 question）
-  question: string          // 完整问题文本
-  context?: string          // 上下文摘要
-  options?: AskUserOption[] // 互斥选项（无 = 纯自由文本输入）
-  multiSelect?: boolean     // 多选
-  allowOther?: boolean      // Other 自由文本输入（有 options 时默认 true）
-  allowComment?: boolean    // 附加评论
-}
-
-export interface AskUserOption {
-  label: string
-  value?: string            // 缺失时用 label
-  description?: string
-}
-
-export type AskUserAnswers = Record<string, string>
-```
-
-**答案编码规则**：key = `header`（缺失时用 `question`）；单选 value = 选中值 string；多选 value = `JSON.stringify(string[])`；Other 单独 key `${header}__other`；comment 单独 key `${header}__comment`。
-
-### 6.4 前端集成：Panel.vue inline（非 ExtensionUIDialog）
-
-ask-user 富交互**不走 ExtensionUIDialog**（那是 confirm/select/input 等标准对话框的渲染器）。AskUserOverlay 在 `Panel.vue` 中 inline 渲染，覆盖 composer 位置——per-panel 隔离，非全屏 modal。
-
-```typescript
-// useExtensionUI.ts 分流
-currentAskUserRequest = computed(() => queue.value.find(r => r.askUser === true))   // → Panel
-currentDialogRequest  = computed(() => queue.value.find(r => r.askUser !== true))   // → ExtensionUIDialog
-```
-
-`AskUserOverlay.vue`（`components/extension/ask-user/`）：标签页切换、单选（radio 圆圈）、多选（复选框）、Other 输入、评论输入、提交/取消。与 Composer 互斥（`v-if="hasAskUserRequest"` / `v-else-if="showPanelComposer"`）。
-
-### 6.5 答案解析 helper
-
-```typescript
-// 多选自动 JSON.parse，失败降级返回 [raw]
-function getAskUserAnswer(answers: AskUserAnswers, question: AskUserQuestion): string | string[] | undefined
-
-// 读 `${header}__other` key
-function getAskUserOther(answers: AskUserAnswers, question: AskUserQuestion): string | undefined
-
-// 读 `${header}__comment` key
-function getAskUserComment(answers: AskUserAnswers, question: AskUserQuestion): string | undefined
-```
-
-### 6.6 extension 怎么用
-
-```typescript
-import { askUserInteract, type AskUserQuestion, type GuiContext } from '@zhushanwen/extension-protocol'
-
-execute(toolCallId, params, signal, onUpdate, ctx) {
-  const questions: AskUserQuestion[] = [
-    {
-      header: '部署目标',
-      question: '选择部署环境',
-      options: [
-        { label: '生产环境', value: 'prod', description: '正式环境，需审批' },
-        { label: '预发环境', value: 'staging' },
-      ],
-      allowComment: true,
-    },
-  ]
-
-  const answers = await askUserInteract(ctx as GuiContext, questions, { signal })
-
-  if (answers === null) {
-    return { content: [{ type: 'text', text: '用户取消' }], details: { cancelled: true } }
-  }
-
-  const target = getAskUserAnswer(answers, questions[0])  // 'prod' | 'staging'
-  return { content: [{ type: 'text', text: `部署到 ${target}` }], details: { answers } }
-}
-```
-
-**TUI 模式**：`askUserInteract` 抛错（RPC-only）。extension 必须自行调 `ctx.ui.custom(AskUserComponent)`。
+**TUI 模式**：`uiFormInteract` 抛错（RPC-only）——formQuestions 在 TUI 无呈现语义，extension 必须自行调 `ctx.ui.custom()` 传 TUI Component（按 `ctx.mode` 分支）。
 
 ---
 
@@ -1005,13 +878,13 @@ export function useExtensionStatus(sessionId: Ref<string | null>) {
 
 挂载点：`Workspace.vue` 底部（PanelContainer 的兄弟节点），不依赖 SideDrawer 开关。
 
-### 9.5 ExtensionUIDialog + AskUserOverlay（已实现）
+### 9.5 ExtensionUIDialog + FormOverlay（已实现）
 
-**ExtensionUIDialog**（`components/extension/ExtensionUIDialog.vue`）：渲染 pi 原生的 confirm/select/input/editor 对话框。消费 `useExtensionUI().currentDialogRequest`（非 ask-user 的请求）。
+**ExtensionUIDialog**（`components/extension/ExtensionUIDialog.vue`）：渲染 pi 原生的 confirm/select/input/editor 对话框。消费 `useExtensionUI().currentDialogRequest`（非表单类请求）。
 
-**AskUserOverlay**（`components/extension/ask-user/AskUserOverlay.vue`）：渲染 ask-user 富交互。在 `Panel.vue` inline 集成（非 ExtensionUIDialog），覆盖 composer 位置。消费 `useExtensionUI().currentAskUserRequest`。
+**FormOverlay**（`components/extension/form/FormOverlay.vue`）：渲染统一提问表单（ask-user / scheduler / plan 三方提问收口）。在 `Panel.vue` inline 集成（非 ExtensionUIDialog），覆盖 composer 位置。
 
-两者通过 `useExtensionUI` 分流：`askUser === true` → AskUserOverlay，否则 → ExtensionUIDialog。
+两者通过 `useExtensionUI` 分流：`form === true` → FormOverlay（legacy `askUser === true` 帧由 renderer 归一层归一后同走 FormOverlay），否则 → ExtensionUIDialog。
 
 **回复通道**：用户操作后前端发 `extension.ui_response` WS 帧，runtime `extension-message-handler.ts` 注入回 pi stdin → pi 的 select/confirm/input Promise resolve。
 
@@ -1179,7 +1052,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 | pi-goal | `card` + `stats-line` + `progress-bar` | — |
 | pi-subagents | `card`(bg-notify) + `list-tree`(eventLog) + `stats-line` | — |
 | pi-workflow | `card` + `columns` + `list-tree` | sidebar+main 双列 |
-| ask-user | AskUserOverlay（独立组件，不走 GuiComponentRenderer） | — |
+| ask-user | FormOverlay（统一表单渲染器，`components/extension/form/`，不走 GuiComponentRenderer） | — |
 
 **设计原则**：协议层不定义 extension 专属类型。各 extension 的领域数据（任务状态、目标生命周期、工作流 reason 码等）用通用原语的 props 表达。如果通用原语组合无法覆盖，走 `custom` 通道在前端注册专属 Vue 组件。
 
@@ -1225,11 +1098,11 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 | `Group.vue` | `group` | **已实现** | 垂直组合容器（无视觉样式，子组件递归渲染） |
 | `TabBar.vue` | `tab-bar` | **已实现**（容器化：`sections` 与 `tabs` 等长时渲染 `tabs[active]` 子树） | `flex gap-1` + active 样式 + 分段容器 |
 
-**ask-user 富交互组件**（不在 BUILTIN_MAP，独立集成）：
+**统一提问表单组件**（不在 BUILTIN_MAP，独立集成）：
 
 | 组件 | 位置 | 状态 |
 |------|------|------|
-| `AskUserOverlay.vue` | `components/extension/ask-user/` | **已实现** |
+| `FormOverlay.vue`（+ ChoiceQuestion / TextQuestion / ScheduleForm 渲染器） | `components/extension/form/` | **已实现** |
 
 降级：未知 type / 未注册的 custom 由 core `resolveComponent` 统一降级为 JSON 序列化文本展示（`ansi-text`，不崩渲染、不丢信息）。
 
@@ -1240,7 +1113,7 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 | tool result GuiComponent | Block.vue 展开态详情内（`extractGui` 调用 ×2） | `Block.vue:191,198` |
 | widget GuiComponent（M17） | **composer 任务托盘的协议 widget 区**（composer 工具条左簇；`extension:widgetGui`/`extension:widget` WS 事件 → ViewHostStore per-session 缓存 → 托盘 widget 按钮/面板渲染） | `packages/renderer/src/components/panel/tray/TrayWidgetButton.vue` / `TrayWidgetPanel.vue`（已实现）；历史：对话流 pill（`WidgetArea.vue`，已随 2026-09-16 退役删除）、SideDrawer.vue:332-345（已废弃方向） |
 | custom message GuiComponent | MessageStream.vue system 消息分支（`extractGui` 调用 ×1） | `MessageStream.vue:130` |
-| ask-user 富交互 | **Panel.vue inline**（覆盖 composer 位置，与 Composer 互斥） | `Panel.vue:90-97` |
+| 统一提问表单（ui-form）富交互 | **Panel.vue inline**（覆盖 composer 位置，与 Composer 互斥） | `Panel.vue:110,117`（FormOverlay 双挂载点） |
 | ExtensionUIDialog（confirm/select/input） | 全局 portal | `ExtensionUIDialog.vue` |
 
 ---
@@ -1250,7 +1123,7 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 | Phase | 范围 | 状态 |
 |---|---|---|
 | **P0: ANSI 兜底 + 历史路径修复** | tool output ANSI 渲染（ansi_up + Block.vue + outputRaw）+ message-converter.ts details 透传（F1）+ handleToolExecutionUpdate details 提取（S5） | ✅ 已完成 |
-| **P1: 协议包 + ExtensionUIDialog + ask-user 富交互** | extension-protocol 包 + event-adapter widget/ask-user marker 检测 + shared/protocol.ts 类型 + ExtensionUIDialog（confirm/select/input）+ askUserInteract + AskUserOverlay（Panel.vue inline） | ✅ 已完成 |
+| **P1: 协议包 + ExtensionUIDialog + ask-user 富交互** | extension-protocol 包 + event-adapter widget/ask-user marker 检测 + shared/protocol.ts 类型 + ExtensionUIDialog（confirm/select/input）+ askUserInteract + AskUserOverlay（Panel.vue inline）。askUserInteract/AskUserOverlay 已随 ui-presentation-protocol（2026-09-19）退役，现行形态见 [gui-protocol-guide.md](../extensions/gui-protocol-guide.md) §3.4 | ✅ 已完成 |
 | **P2: 通用原语渲染** | 渲染原语 Vue 组件（`packages/ui/src/rendering-protocol/primitives/`：ansi-text + card / stats-line / progress-bar / list-tree / columns / group / tab-bar）+ custom 注册机制 | ✅ 已完成 |
 | **P3: extension 迁移** | 各 extension 接入协议（用通用原语组合表达领域数据） | 待实现 |
 
@@ -1278,7 +1151,7 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 | ID | 问题 | 修正 |
 |---|---|---|
 | **F1** | `message-converter.ts:73-95` toolResult 分支不读 details，重开 session 后 `__gui__` 全丢，违反 [HISTORICAL] 关键规则 9 | §8.2 补 details 透传 + `PiHistoryToolResult` 类型补 `details?` 字段 |
-| **F2** | 前端无 `extension.ui_request` handler，交互 RPC 分支不可用，select() 卡 5 分钟超时 | §6 明确标注约束；ExtensionUIDialog + AskUserOverlay 已实现（§11 P1 完成）|
+| **F2** | 前端无 `extension.ui_request` handler，交互 RPC 分支不可用，select() 卡 5 分钟超时 | §6 明确标注约束；ExtensionUIDialog + AskUserOverlay 已实现（§11 P1 完成；askUserInteract/AskUserOverlay 已随 ui-presentation-protocol（2026-09-19）退役，现行形态见 [gui-protocol-guide.md](../extensions/gui-protocol-guide.md) §3.4）|
 
 ### 严重问题（需改设计/文档）
 

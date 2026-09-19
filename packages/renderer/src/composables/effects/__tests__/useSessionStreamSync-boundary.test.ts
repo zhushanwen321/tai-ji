@@ -179,7 +179,7 @@ describe('bindSessionStreamSync 边界验证（w2）', () => {
       payload: { sessionId: sid, messageId: 'm1' },
     } as ServerMessage)
     // message_start 后应 streaming（isActive=isGenerating=true）
-    // deriveStatus 签名：(sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasAskUserPending=false)
+    // deriveStatus 签名：(sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasFormOverlayPending=false)
     const statusDuring = deriveStatus(sid, chatStore, chatStore.isActive(sid))
     expect(statusDuring).toBe('streaming')
 

@@ -115,6 +115,9 @@ function buildPlanSlug(planFilePath: string): string {
 
 /** step preview 条数上限（1 条总述 + 3 条 preview，合计 ≤4 条，满足 goal schema maxItems:8） */
 const PREVIEW_COUNT = 3;
+
+/** skill 档 execMode 前缀（D10：`skill:<name>` 动态项，与 tool.ts 选项构造同源约定） */
+const SKILL_MODE_PREFIX = "skill:";
 /** 单条 preview 最大长度（超出部分截断，以 "..." 结尾） */
 const PREVIEW_MAX_CHARS = 80;
 const ELLIPSIS = "...";
@@ -241,28 +244,39 @@ export function extractPlanSteps(planContent: string): string[] {
 
 
 /**
- * 投递 complete 后的执行通知（D2：goal 档先 goalInit、后按结果选 steer）。
- * 成功发 goal steer——「Execute via /goal」只在 goal 真实创建成功时说出；失败发
- * 含 reason 与恢复动作的降级 steer + warning notify。非 goal 档无 goalInit，按
- * execMode 组 steer。返回 goalInit 的 outcome（非 goal 档为 undefined）。
+ * 投递 complete 后的执行通知（D2：goal 档先 goalInit、后按结果选 steer；D10：选项集
+ * v2 的 mode 值域 = develop | goal | skill:<name>）。成功发 goal steer——「Execute via
+ * /goal」只在 goal 真实创建成功时说出；失败发含 reason 与恢复动作的降级 steer +
+ * warning notify。skill 档动态构造 steer（含 skillDir 路径，对齐 register-doc
+ * sourceSkill 的 skill 关联先例；skillDir = skill 入口文件路径——标准形态 SKILL.md
+ * 路径 / 散 .md 形态文件本身，直接 read 不再拼 SKILL.md）；其余档按 execMode 组
+ * steer。返回 goalInit 的 outcome（非 goal 档为 undefined）。
  */
 function deliverExecutionNotice(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   planFilePath: string,
   execMode: string,
+  skillDir?: string,
 ): GoalBridgeOutcome | undefined {
   const outcome = execMode === "goal" ? tryGoalInit(planFilePath, ctx) : undefined;
 
+  // 静态表只留 develop/goal 两键（subagent/single-agent 已收口为 develop，D10）；
+  // skill:<name> 动态项不进静态表
   const modeMessages: Record<string, string> = {
-    subagent: "Execute via subagent-driven development: delegate each task to an independent subagent for parallel execution.",
+    develop:
+      "Develop (auto-parallel): judge by task complexity — delegate independent, parallelizable tasks to subagents; execute small or tightly-coupled steps step by step in the current session.",
     goal: "Execute via /goal: set up tracked task decomposition with budget control using the goal extension.",
-    "single-agent": "Execute step by step in the current session.",
   };
 
   let modeHint: string;
-  if (outcome === undefined) {
-    modeHint = modeMessages[execMode] ?? modeMessages["single-agent"];
+  if (execMode.startsWith(SKILL_MODE_PREFIX)) {
+    const skillName = execMode.slice(SKILL_MODE_PREFIX.length);
+    modeHint = skillDir
+      ? `Execute via skill: read the ${skillName} skill at ${skillDir} first, then follow its workflow to execute the plan file.`
+      : `Execute via skill: load the ${skillName} skill and follow its workflow to execute the plan file.`;
+  } else if (outcome === undefined) {
+    modeHint = modeMessages[execMode] ?? modeMessages.develop;
   } else if (outcome.started) {
     modeHint = modeMessages.goal;
   } else {
@@ -296,6 +310,7 @@ export function handlePlanComplete(
   state: PlanState,
   isolation: string,
   execMode: string,
+  skillDir?: string,
 ): GoalBridgeOutcome | undefined {
   const planFilePath = state.planFilePath;
 
@@ -311,7 +326,7 @@ export function handlePlanComplete(
         // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
         onComplete: () => {
           guardStaleCtx(() => {
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
           }, {
             label: "plan:compact-onComplete",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -320,7 +335,7 @@ export function handlePlanComplete(
         onError: (_error: Error) => {
           guardStaleCtx(() => {
             ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
           }, {
             label: "plan:compact-onError",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -332,7 +347,7 @@ export function handlePlanComplete(
 
     case "direct":
     default: {
-      return deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
     }
   }
 }

@@ -12,13 +12,13 @@
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run session-manager-handler
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../transport/session-manager-handler.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
-import type { ISessionService } from '../interfaces.js'
+import type { ISessionService, SessionCreateOptions } from '../interfaces.js'
 import type { SessionSummary } from '@taiji/shared'
 
 function makeMockSessionService(overrides: Partial<ISessionService> = {}): ISessionService {
@@ -668,6 +668,122 @@ describe('SessionManagerHandler', () => {
       // create 成功的 respond 已发出（虽然后续 broadcast 失败导致错误 respond 覆盖）
       // 但 create 本身的结果已被记录
       expect(opts.sessionService.create).toHaveBeenCalled()
+    })
+  })
+
+  describe('u8: 子会话 project 归属继承父会话（设计 D8 / 错误规格 E6）', () => {
+    // warn 断言用的 console spy 在每个用例后恢复（避免污染后续用例的 stderr 断言面）
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    /** create 的第三个实参（SessionCreateOptions）——归属继承的唯一观测点 */
+    function createOptionsOf(sessionService: ISessionService): SessionCreateOptions {
+      const create = sessionService.create as unknown as { mock: { calls: [unknown, unknown, SessionCreateOptions][] } }
+      expect(create).toHaveBeenCalled()
+      return create.mock.calls[0][2]
+    }
+
+    /** 父会话 summary 工厂（u8 关注点只有 projectId，其余字段取 managed-parent 常态） */
+    function parentSummaryWith(projectId?: string): SessionSummary {
+      return makeSessionSummary({
+        id: 'sid-parent',
+        spawnSource: 'agent',
+        parentAgentSessionId: 'sid-grandparent',
+        projectId,
+      })
+    }
+
+    it('父会话有 projectId → create 收到该 projectId（服务端继承，读父 summary）', async () => {
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({
+          getSummary: vi.fn().mockReturnValue(parentSummaryWith('proj-alpha')),
+          create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-1' })),
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test', label: 'child' })
+
+      // 归属来源 = 路由上下文的父 session id（不是子 id、不是请求参数）
+      expect(opts.sessionService.getSummary).toHaveBeenCalledWith('sid-parent')
+      const options = createOptionsOf(opts.sessionService)
+      expect(options.projectId).toBe('proj-alpha')
+      // 既有语义零改动（spawnSource / parentAgentSessionId / persistLabel 原样透传）
+      expect(options.spawnSource).toBe('agent')
+      expect(options.parentAgentSessionId).toBe('sid-parent')
+      expect(options.persistLabel).toBe(true)
+    })
+
+    it('父会话无 projectId → projectId 为 undefined，不阻断创建（落默认项目）+ debug 留痕（非 warn）', async () => {
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({
+          getSummary: vi.fn().mockReturnValue(parentSummaryWith(undefined)),
+          create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-2' })),
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test' })
+
+      // 缺省即「不写 .project.json」（session-lifecycle 空值守卫），等价于落默认项目
+      expect(createOptionsOf(opts.sessionService).projectId).toBeUndefined()
+      // 不阻断：created 结果照常回写
+      expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
+        'sid-parent',
+        'req-1',
+        JSON.stringify({ sessionId: 'child-2', status: 'created', modelId: 'openai/gpt-4' }),
+        'select',
+      )
+      // 「父项目本就是默认项目」是正常降级路径：debug 陈述事实，不进 warn 通道（防假信号）
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining('has no projectId'))
+      expect(debug).toHaveBeenCalledTimes(1)
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it('父 summary 不可得 → 会话照常创建成功 + warn 记录（E6 非错误路径，不 throw）', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({
+          getSummary: vi.fn().mockReturnValue(undefined),
+          create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-3' })),
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await expect(
+        handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test' }),
+      ).resolves.toBeUndefined()
+
+      expect(createOptionsOf(opts.sessionService).projectId).toBeUndefined()
+      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      expect(response).toEqual({ sessionId: 'child-3', status: 'created', modelId: 'openai/gpt-4' })
+      expect(response.error).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('summary unavailable'))
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(debug).not.toHaveBeenCalled()
+    })
+
+    it('params 伪造 projectId 被忽略（归属决策不交给 LLM，D8 不新增工具参数）', async () => {
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({
+          getSummary: vi.fn().mockReturnValue(parentSummaryWith('proj-alpha')),
+          create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-4' })),
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-1', 'sid-parent', 'create', {
+        cwd: '/test',
+        label: 'child',
+        projectId: 'proj-forged',
+      })
+
+      // 父归属优先（与伪造 parentAgentSessionId 同款信任边界口径）
+      expect(createOptionsOf(opts.sessionService).projectId).toBe('proj-alpha')
     })
   })
 

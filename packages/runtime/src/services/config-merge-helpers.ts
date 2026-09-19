@@ -16,6 +16,8 @@ export function defaultSystemPromptConfig(): SystemPromptConfig {
     version: 1,
     replace: { enabled: false, prompt: '' },
     append: { enabled: false, prompt: '' },
+    // capability 默认开（设计 D6）：缺文件/损坏回退形态与解析语义同向——仅显式布尔 false 关闭
+    capability: { enabled: true },
   }
 }
 
@@ -35,6 +37,10 @@ export function mergeSystemPromptConfig(raw: unknown): SystemPromptConfig {
   const append = (typeof appendRaw === 'object' && appendRaw !== null && !Array.isArray(appendRaw))
     ? appendRaw as Record<string, unknown>
     : {}
+  const capabilityRaw = r['capability']
+  const capability = (typeof capabilityRaw === 'object' && capabilityRaw !== null && !Array.isArray(capabilityRaw))
+    ? capabilityRaw as Record<string, unknown>
+    : {}
   return {
     version: typeof r['version'] === 'number' ? r['version'] : base.version,
     replace: {
@@ -45,6 +51,13 @@ export function mergeSystemPromptConfig(raw: unknown): SystemPromptConfig {
       enabled: typeof append['enabled'] === 'boolean' ? append['enabled'] : false,
       prompt: typeof append['prompt'] === 'string' ? append['prompt'] : '',
     },
+    // capability 解析方向与 replace/append 刻意相反（设计 D6 防照抄锚点）：replace/append
+    // 是用户显式配置（缺省关闭才安全），capability 是 taiji 内置告知（默认开）——仅显式
+    // 布尔 false 关闭（enabled !== false），缺字段（v1 存量 json）/形态不对（如字符串
+    // "false"）/非对象 → true。必须透传：设置页经此 merge 读回开关态，剥字段会导致
+    // 「关闭后重开设置页误显开 + 后续保存以 UI 态误开写回」（与扩展侧
+    // readCapabilityEnabled 语义对齐）。
+    capability: { enabled: capability['enabled'] !== false },
   }
 }
 

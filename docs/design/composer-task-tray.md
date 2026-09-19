@@ -14,7 +14,7 @@
 
 **系统是什么**：taiji 是 Electron + Vue 3 的 AI Agent 桌面工作台。与本文相关的既有机制：
 
-- **Panel / Composer**：每个 Panel 绑定一个 session，底部是 Composer（输入框 + 工具条）。工具条 `composer-bar` 现有布局：左簇 `[+ 添加]`（AddMenuPopover）+ extension toolbar 挂载点（ViewHost `composer.toolbar`）→ 弹性空隙 → 右簇（生成指标 / 上下文容量 / 模型 / 思考等级 / 发送位）。源码 `packages/renderer/src/components/panel/Composer.vue`。
+- **Panel / Composer**：每个 Panel 绑定一个 session，底部是 Composer（输入框 + 工具条）。工具条 `composer-bar` 现有布局：左簇 `[+ 添加]`（AddMenuPopover）+ 任务托盘（`ComposerTray`）+ extension toolbar 挂载点（ViewHost `composer.toolbar`）→ 弹性空隙 → 右簇（生成指标 / 上下文容量 / 模型 / 思考等级 / 发送位）。底栏形态由密度状态机驱动（三簇 + 按序退化 + 溢出兜底，见 D16）。源码 `packages/renderer/src/components/panel/Composer.vue`。
 - **任务观察入口（现状）**：左侧栏 segmented tab 五枚（会话/文件/Agents/Flows/Plugins）。Agents tab = SubagentList（三视图筛选：全部活跃/只看正在跑/已收起）、Flows tab = WorkflowList + WorkflowDetail 详情视图；后台命令是 Plugins tab 下的 L2 视图（`BackgroundTaskListView`，经 NATIVE_VIEWS 路由）。任务详情的深度检视归宿是右侧 drawer（subagent / workflow / bashTask 三 tab；现状：subagent 与 bash 卡片/行点击开 drawer，workflow 卡片进 Flows tab 内 detail 视图——本设计将 workflow 详情统一收口 drawer，见 D2 归宿变更）。另有一个消费面：对话流内 WidgetArea pill（todo/goal 状态带，`getViewIds` 唯一现役消费方；L2 tab 走 VIEWS_SOURCE 静态贡献声明，widget 不进 sidebar）。
 - **对话流内 subagent/workflow 内联块**：subagent-workflow extension 推的 `details.__gui__`（GuiComponentRenderer 渲染），属对话历史内容（tool call 记录），非观察入口。
 - **widget GUI 协议（已存在）**：pi extension 调 `ctx.ui.setWidget(key, [GUI_WIDGET_MARKER + JSON{v, component, meta}])` → taiji runtime event-adapter 解码 → WS 帧 `extension:widgetGui` → core `ViewHostStore.setView(sessionId, viewId=key, {guiTree, meta})`。渲染消费端经 inject `VIEW_HOST_SOURCE_KEY` 取 `getViewIds(sessionId)` / `getView(sessionId, viewId)`，用 `GuiComponentRenderer` 渲染 `GuiComponent` 树（协议原语：list-tree / stats-line / progress-bar / group / card / columns / tab-bar / ansi-text / custom）。**`setWidget(key, undefined)` = 清屏 → invalidate 该 viewId。** 关键概念锚定：**widget key** 就是 extension 调 setWidget 时传的第一个参数（如 todo extension 恒用 `'todo'`、goal 恒用 `'goal'`），在 ViewHostStore 中即 viewId——它是托盘识别一个 widget 的唯一标识。
@@ -86,7 +86,9 @@ todo/goal:      extension setWidget → event-adapter → WS extension:widgetGui
 
 **场景 B（todo/goal widget）**：同一托盘，built-in 三件右侧：`[☑ 2] [◎ 42%]`——todo icon 带 badge「2」（未完成数），goal icon 带 badge「42%」（token 预算百分比）。hover todo icon：面板头部 = title「Todo」+ 状态点 + 进度「2/5」mini bar（`WidgetMeta` 渲染），body = tab-bar 原语（待办 N | 已完成 M）+ 待办 list-tree；用户点「已完成」tab，面板本地切换（不请求 extension）。AI 清空 todo → widget 清屏 → 托盘 icon 消失。goal 终态（complete）→ 同样消失（终态折叠进 status bar 是 goal extension 现状）。
 
-**场景 C（空闲）**：全部任务结束、todo/goal 清空后，托盘只剩 `[term] [bot] [flow]` 三枚 dim icon（有历史可查，无计数无呼吸点）；彻底无记录的类（如本 session 从未跑过 workflow）icon 隐藏。新 session 冷启动：托盘空，视觉零噪音。
+**场景 C（空闲）**：全部任务结束、todo/goal 清空后，托盘只剩 `[term] [bot] [flow] [sess]` 四枚 dim icon（有历史可查，无计数无呼吸点）；彻底无记录的类（如本 session 从未跑过 workflow）icon 隐藏。新 session 冷启动：托盘空，视觉零噪音。
+
+**场景 B2（调度模式：派发的子会话）**：主 agent 在调度模式下派发 3 个子会话——托盘第 4 件 `[sess³]` 亮起 accent 计数 + 呼吸点；hover 弹出面板（400px），每行 = 状态点 + label + cwd 末段 + 时长；pin 后行内出现「打开」与「停止」（两段确认）；点行 = 跳到该子会话。用户不离开当前 composer 即掌握派发进度。
 
 **失败路径与恢复**：
 
@@ -110,13 +112,13 @@ todo/goal:      extension setWidget → event-adapter → WS extension:widgetGui
 ### 3.3 关键决策与权衡
 
 **D1：托盘挂 composer-bar 左簇，两类条目构成（选定）**
-- **采用**：`Composer.vue` 的 `.composer-bar` 在 `AddMenuPopover` 之后插入 `ComposerTray` 组件（`v-if="sessionId"`，landing 态隐藏与 GenStats 同判据）；条目 = built-in 三件（bash → subagent → workflow，固定序）+ 协议 widget 区（known-order `['todo','goal']` → 未知 key 按 ViewHostStore entry 序号排尾部）。
+- **采用**：`Composer.vue` 的 `.composer-bar` 在 `AddMenuPopover` 之后插入 `ComposerTray` 组件（`v-if="sessionId"`，landing 态隐藏与 GenStats 同判据）；条目 = built-in **四件**（bash → subagent → workflow → session 子会话，固定序）+ 协议 widget 区（known-order `['todo','goal']` → 未知 key 按 ViewHostStore entry 序号排尾部）。
 - **被否**：挂 Panel 顶部状态条（新增横行，占对话流纵向空间）；挂 drawer（方案 B）。
 - **证据**：composer-bar 现有左簇锚点 `AddMenuPopover` + `ViewHost composer.toolbar`（Composer.vue L114-122）；demo C4 用户裁决。
 - **效果**：§1 目标 1 成立（视线零转移）。
 
-**D2：built-in 三件 = native 组件直连既有 store（选定）**
-- **采用**：托盘内三枚 icon 与面板由 Vue 原生组件实现，计数/列表/操作直连既有数据链路——bash：`useBackgroundTasks`（per-session 分区，拉取+广播双腿）+ `background-task-bucket` SSOT（二桶 active/ended + all 筛选值；托盘面板两视图「运行中/已结束」由 SSOT 谓词派生）+ kill 两段式；subagent：`subagentStore.recordsOf(sid)` 过滤 `origin!=='workflow'`，**面板两视图（用户裁决 2026-09-16：执行状态对用户只有两态，「已收起」不以第三状态呈现；同日终裁全链路删除该机制）**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = `!isRunningProjection`（含 idle 与死亡纳管态 running+stopReason——「已收起」机制（intent 意愿字段 + 归档原语）已随终裁从 shared 契约至 subagent-core 执行层一并删除，收口记录自然落「已结束」桶，message 续聊语义经 status/revive 链不变）；workflow：`workflowStore.recordsOf(sid)`，进行中 = `status === 'running'`（workflow 一次性生命周期 D-2：'paused' legacy 值已删，判据修正见 §4 A2b），已结束 = 其余。操作 RPC abort 已存在（kill / subagent cancel / workflow abort；pause/resume 已随扩展 D-2 移除，见 §4 A2b 修正标注），cancel 的「迟到收口不发 RPC」防误报逻辑自 `useSidebarSubagentActions` 迁入托盘复用。**行点击归宿矩阵**：subagent 行 → `openSubagent` 开 drawer subagent tab（对齐现状）；bash 行 → 设置 `selectedBackgroundTaskId` 开 drawer bashTask tab（对齐现状）；workflow 行 → `setWorkflowView` 开 drawer workflow tab——**归宿变更**（现状侧栏卡片进 Flows 内 detail 视图 2；改 drawer 后并排不遮侧栏，且 drawer WorkflowTab 已复用其 phase 分组逻辑，变更即收敛）。drawer 三 tab 骨架已在（PanelContainer.vue），并排详情范式不变。
+**D2：built-in 四件 = native 组件直连既有 store（选定）**
+- **采用**：托盘内四枚 icon 与面板由 Vue 原生组件实现，计数/列表/操作直连既有数据链路——bash：`useBackgroundTasks`（per-session 分区，拉取+广播双腿）+ `background-task-bucket` SSOT（二桶 active/ended + all 筛选值；托盘面板两视图「运行中/已结束」由 SSOT 谓词派生）+ kill 两段式；subagent：`subagentStore.recordsOf(sid)` 过滤 `origin!=='workflow'`，**面板两视图（用户裁决 2026-09-16：执行状态对用户只有两态，「已收起」不以第三状态呈现；同日终裁全链路删除该机制）**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = `!isRunningProjection`（含 idle 与死亡纳管态 running+stopReason——「已收起」机制（intent 意愿字段 + 归档原语）已随终裁从 shared 契约至 subagent-core 执行层一并删除，收口记录自然落「已结束」桶，message 续聊语义经 status/revive 链不变）；workflow：`workflowStore.recordsOf(sid)`，进行中 = `status === 'running'`（workflow 一次性生命周期 D-2：'paused' legacy 值已删，判据修正见 §4 A2b），已结束 = 其余；**session 子会话：renderer session store 中 `parentAgentSessionId === 当前 sessionId` 的条目（详见 D15）**。操作 RPC abort 已存在（kill / subagent cancel / workflow abort / **session 用 `chat.abort`**——全仓**无** `session.abort` 帧，详见 D15 实施期修正；pause/resume 已随扩展 D-2 移除，见 §4 A2b 修正标注），cancel 的「迟到收口不发 RPC」防误报逻辑自 `useSidebarSubagentActions` 迁入托盘复用。**行点击归宿矩阵**：subagent 行 → `openSubagent` 开 drawer subagent tab（对齐现状）；bash 行 → 设置 `selectedBackgroundTaskId` 开 drawer bashTask tab（对齐现状）；workflow 行 → `setWorkflowView` 开 drawer workflow tab——**归宿变更**（现状侧栏卡片进 Flows 内 detail 视图 2；改 drawer 后并排不遮侧栏，且 drawer WorkflowTab 已复用其 phase 分组逻辑，变更即收敛）；**session 行 → `useSidebar.selectSession` 跳到该子会话（行内 pin 态另有「停止」= `chat.abort` 两段确认）**。drawer 三 tab 骨架已在（PanelContainer.vue），并排详情范式不变。
 - **被否**：三件也走 GUI 协议（把 bash/sub/wf 状态序列化成 GuiComponent 推送）——它们是 taiji core 数据不是 extension widget，反向协议化需要 runtime 侧造一个假 extension 推送链，纯增复杂度；且行内操作（kill 两段式等）协议无交互原语承载。两视图丢「已收起」寻回——**[2026-09-16 用户裁决推翻本段保留结论，同日终裁升级为全链路删除]**：原「已收起」（执行层自动归档 + intent 字段）机制已整体删除——UI 无第三状态，执行层亦无该字段与归档原语（markArchived 语义重表达为 markSettledOut 资源收尾）；收口记录落「已结束」桶，message 续聊经 status/revive 链直接生效。
 - **证据**：`useTrayCounts.ts`（计数口径终态宿主；设计期证据指针 `useSidebarCounts.ts` 的计数段已随 D10 迁出，该文件仅存退役说明头注）、~~`BackgroundTaskListView.vue` 头注~~（该文件已随 D10 整体删除，其「分桶/计数/排序全消费 SSOT」纪律由 bash 面板的 `background-task-bucket` 谓词消费实现承接）、FEATURE-PRIORITIES §2（subagent/workflow 面板 = P0，迁移期必须保数据链路不动只换皮）。
 - **效果**：§1 目标 1 的操作面成立；P0 数据链路零改动降低迁移风险。
@@ -205,13 +207,43 @@ interface WidgetMeta {
 - **证据**：D2 计数同源（两入口读同一 store 派生，口径不漂移）；P2 含三处修改（挂载/TabBar/i18n）但 TabBar 改造向后兼容（缺 sections 时纯展示，旧 widget 不受影响）；P3 删除型 revert 可行。
 - **效果**：最高风险窗口受控；P3 迁移回归风险隔离。
 
+**D15：托盘第 4 件「子会话」= native 直连 session store（选定；模式体系设计 D7）**
+
+> **[落地状态]** 已随 u7 落地：`useTrayCounts` 新增 `session`（`TrayBuiltinKind = TrayTaskKind | 'session'`，不并入 `TrayTaskKind`/`TRAY_BUCKETS`——`session` 走独立扁平列表面板 `TraySessionPanel.vue` 而非分桶槽）。
+
+- **采用**：`useTrayCounts` 增加第 4 个 kind（`session`），数据 = renderer session store 中 `parentAgentSessionId === 当前 sessionId` 的条目（该字段 live 从内存透传、reload 从 `.agent.json` 读，两条读取链齐备），**零新协议**。三态沿用既有契约：有进行中 → accent 计数 + 呼吸点；仅历史 → dim；全无 → 不渲染。面板 400px、行 = 7px 状态点（**色源 = 进程级 `SessionSummary.status` 经 `DOT_CLASS` 映射**；**实施期修正**：初稿写的 `useSessionDerivations.derivedStatus` 对 `status='active'` 又无消息的未 hydrate 子会话会兜底 `done`，无法表达运行中，故改用进程级 status）+ label + cwd 末段 + 状态 + 时长；pin 态行内「打开」（`useSidebar.selectSession`）与「停止」（既有 **`chat.abort`** RPC，两段确认）；行点击 = 打开该子会话。**徽标计数口径** = 子会话**总数**（对齐 demo 的「● 3」与面板头「3 个 · 1 运行中」；与其他三件的「运行中数」口径不同，属登记在案的形态）。固定序位于 built-in 四件末位（bash → subagent → workflow → session）。
+- **被否**：**走 widget 协议**（会话管理扩展推 GUI widget）——宿主无法承载「行点击跳转」（协议无 UI→extension 写通道，且 widget 面板内写操作是既有 out-of-scope），而跳转正是该入口的核心价值。
+- **证据**：`SessionSummary` 已含 `spawnSource` / `parentAgentSessionId`；托盘三态契约见 D7。
+- **落地形态**：`TraySessionPanel.vue`（扁平列表，非分桶槽）——行 = `tray-session-dot`（状态点）+ label + `tray-session-meta`（cwd 末段 · 时长）；空态 `tray-session-empty`；`useTrayCounts` 的 `session` 计数 = 子会话行集长度（running = `status === 'active'`）。
+- **效果**：调度模式（主 agent 只派发、子会话执行）的「一键查看我派发的子会话」成立；托盘与侧栏形成互补（托盘 = 我派发的，侧栏 = 全部会话）。
+- **子会话 project 归属（模式体系设计 D8）**：`SessionManagerHandler.handleCreate` 读父会话 summary 的 `projectId` 并透传给 `sessionService.create(..., { projectId })`（**不新增工具参数**——归属决策不给 LLM 可控面）；父 summary 不可得时不写 `.project.json`（落默认项目），侧栏右键「归入项目」可补。
+
+**D16：composer 底栏密度 = 三簇结构 + 按序退化 + 溢出兜底（选定；模式体系设计 D6）**
+
+- **采用**：底栏改为**三簇**——左簇（`+` / 托盘 / 插件 toolbar，`shrink-0`）、中簇（可压缩区，`min-w-0 overflow-hidden`）、右簇（容量 / 模型 / 发送位，`shrink-0` 且发送位右锚）；容器 `flex-nowrap`（**永不换行**）。按序退化（宽度不足时从上往下生效，累计叠加）：
+
+  | 序 | 退化对象 | 退化形态 | 再入路径 |
+  |---|---|---|---|
+  | 0 | 发送位 / `+` | 不退化（右锚位置稳定） | — |
+  | 1 | 容量 + 生成指标 | 合流为一个 chip（`41%`；流式中追加 `62 t/s`），细节进 hover 浮层 | 浮层（hover/点） |
+  | 2 | 模型 + 思考档位 | 合体为一个 chip（`模型 · 档位 ⌄`，popover 内两段）；窄档用模型短名 | popover |
+  | 3 | 插件 toolbar 贡献（`composer.toolbar` 挂载点） | 收进 `»` 溢出菜单（**默认安装零贡献 → 菜单不渲染**，不留死入口） | `»` 菜单 |
+  | 4 | 托盘整体 | 聚合为单入口（**层叠图标 + 运行数**）→ 面板内分段展示全部类别（含第 4 件 session） | 托盘聚合面板 |
+
+- **落地断点**（实测推导，非硬编码）：**≥640px 全展开；520–640px 用序 1–3；<520px 用序 1–4**。实施以 `ResizeObserver` 实测 `.composer-bar` 内容宽驱动档位（模型名长短 / 插件贡献数量会改变实宽）；阈值与退化序全在纯状态机 `packages/renderer/src/components/panel/composer-density.ts`，接线在 `use-composer-bar-density.ts`，消费方只做「形态 → DOM」映射。
+- **图标语义硬约束**：**聚合入口 = 层叠图标 + 运行数**，**溢出入口 = 省略号**——两个不同语义不得共用同一图标。
+- **被否**：**允许换行**（现状）——发送位位置随模型名长度与插件数量漂移，用户每次都要重新找；**全部收进溢出菜单**——生成指标在长任务期间是「正在发生的事」，全藏会让用户失去实时反馈（故序 1 保留百分比在触发器上）。
+- **托盘三态与 hover/pin 契约（D7/D8）不变**：密度层只新增退化层，不引入「隐藏 dim 常驻条目」这类改契约的退化层。
+- **效果**：最小窗口下底栏单行、无横向溢出，被收起入口都经聚合入口或溢出菜单重新到达。
+
 ### 3.4 终态数据流
 
 ```
 built-in（native 直连，无协议变化）:
   bash:  useBackgroundTasks(sid) ─┐
   sub:   subagentStore.recordsOf(sid) + isRunningProjection ─┤→ ComposerTray 计数/呼吸点
-  wf:    workflowStore.recordsOf(sid) ─┘    → native 面板（分桶列表+操作，RPC 既有）
+  wf:    workflowStore.recordsOf(sid) ─┤
+  sess:  session store 中 parentAgentSessionId === sid（D15） ─┘    → native 面板（分桶列表+操作，RPC 既有）
 
 协议 widget（既有链路 + 第三消费端）:
   ext: setWidget(key, {v, component, meta+icon+badge})

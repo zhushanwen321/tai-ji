@@ -729,6 +729,11 @@ describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn �
     // usage 是 turn 级聚合：只回填最后一条 assistant（回填到非末条语义错位）
     expect(list[0].usage).toBeUndefined()
     expect(list[1].usage).toEqual({ inputTokens: 100, outputTokens: 50 })
+    // 产出结束时刻（turn 聚合口径时间轴右端）：只标末条 assistant；中间段保持缺省
+    // （live 不可知其真实结束时刻，消费侧回退 timestamp；reload 侧由 entry 时间戳补齐）
+    expect(list[0].endedAt).toBeUndefined()
+    expect(list[1].endedAt).toBeTypeOf('number')
+    expect(list[1].endedAt).toBeGreaterThanOrEqual(list[1].timestamp)
   })
 
   it('权威 content 覆盖最后一条 assistant（末 delta 异步渲染竞态防线）；非末气泡 content 不动', () => {

@@ -18,6 +18,7 @@
 //   S1TC12     模块级单条目字段损坏仅丢弃该条目
 //   S1TC13     dispose→revive 后重扫惰性重载索引命中
 //   S1TC14     索引命中 + .cancelled sidecar 冷启动——命中分支读取 tombstone 置 closed
+//   S1TC15     [R4/D6-③] 存量索引 model:"" 条目经直查路径归一为 undefined（禁空串哨兵）
 //
 // 异步落盘等待约定：断言「写完成」用 vi.waitFor(existsSync/内容)（rename 原子性保证
 // 文件出现即完整）；断言「未写」用 bounded settle（50ms 检测窗口——正确实现的写决策
@@ -469,7 +470,9 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     if (aEntry === undefined || aEntry.negative === true) throw new Error("a.jsonl should be a positive entry");
     expect(aEntry.id).toBe(recordsA.find((r) => r.id === "sa-1")?.id);
     expect(aEntry.task).toBe("test task");
-    expect(aEntry.model).toBe(""); // 头部探测拿不到 model_change → 空串（DS4 合法）
+    // [R4/D6-①] 头部探测拿不到 model_change → undefined（缺席语义——旧「空串 DS4
+    // 合法」哨兵随 model 可选化退役，索引读侧守卫已放行 undefined）
+    expect(aEntry.model).toBeUndefined();
   });
 
   it("S1TC9: 节流——60s 最小间隔窗内不写、过窗后 dirty 才写", { timeout: 30_000 }, async () => {
@@ -555,5 +558,34 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(sa1?.closedReason).toBe("cancelled");
     expect(sa1?.error).toBe("cancelled by user");
     expect(sa1?.endedAt).toBe(3000); // tombstone 的精确结束时间，非 mtime 近似
+  });
+
+  chmodProbeIt("S1TC15: [R4/D6-③] 存量索引空串归一回归——索引直查路径 model:\"\" 条目产出 model undefined 的 record", { timeout: 15_000 }, async () => {
+    const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
+
+    const storeA = new RecordStore(sessionsDir);
+    storeA.collectRecords(100, "all", "root-1");
+    await waitForIndex();
+
+    // 篡改落盘索引为 R4 升级前旧写侧形态（model:"" 存量条目）：loadIndex 的
+    // hasModelFields 守卫接受 "" 合法 string，条目可进内存映像参与直查命中
+    const loaded = loadIndex(encDir);
+    const aEntry = loaded.entries.get("a.jsonl");
+    if (aEntry === undefined || aEntry.negative === true) throw new Error("a.jsonl should be a positive entry");
+    await saveIndex(encDir, { entries: new Map([["a.jsonl", { ...aEntry, model: "" }]]) });
+    expect(loadIndex(encDir).entries.get("a.jsonl")).toMatchObject({ model: "" }); // 篡改生效
+
+    // 冷启动新实例：jsonl 未变、戳匹配 → buildEntryFromIndex 索引直查命中（零探测）。
+    // chmod 000 阻断内容读取防假绿：若实现退化回读/重探测，readIdentityHeader 失败 →
+    // sa-1 消失，下方 toBeDefined 即失败（S1TC1 同款守卫手法）
+    fs.chmodSync(f1, 0o000);
+    try {
+      const storeB = new RecordStore(sessionsDir);
+      const light = storeB.collectRecords(100, "all", "root-1").find((r) => r.id === "sa-1");
+      expect(light).toBeDefined();
+      expect(light?.model).toBeUndefined(); // 空串归一为缺席，非 ""
+    } finally {
+      fs.chmodSync(f1, 0o644);
+    }
   });
 });

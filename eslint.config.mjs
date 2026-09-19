@@ -186,6 +186,16 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [HISTORICAL] session-records.ts 是 record 域唯一聚合中心（W18 派生缓存族 + 磁盘读侧/
+  // 动作/引擎配置，冷热同源共用同一份 scan 派生代码——拆开会造成派生逻辑双份）。
+  // 2026-09-19 reload-closeout D2 送达水位机制入列（发布门换基线 + 对账两腿 + 定时器）
+  // 时代码行越过 500。与 event-adapter 等 override 同型，拆分属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/session-records.ts'],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
   // [HISTORICAL] session-channel.ts 是 zcode 单任务会话通道的唯一聚合点：A.2 协议帧序
   // SSOT（create/subscribe/send/终态双保险判定/read/close）+ P0-1 turn 等待两 timer
   // 状态机（idle 主判定 + 总上界兜底，2026-09-05 落地后超限）。职责内聚（帧序分发、

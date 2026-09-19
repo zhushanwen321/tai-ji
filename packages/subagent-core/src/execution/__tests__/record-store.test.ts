@@ -44,6 +44,7 @@ import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-e
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { manifestToSubagent, rebuildEntryRecord } from "../persistence/record-store-rebuild.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
@@ -1227,5 +1228,55 @@ describe("RecordStore", () => {
       );
       expect(warnIndexMsgs).toHaveLength(0);
     });
+  });
+});
+
+// ============================================================
+// [U4/R4-D6③] model 水合往返：entry/manifest 读侧空串归一缺席
+// （写侧 undefined 经 JSON 缺省落盘 → 重建仍 undefined；旧数据 "" 残留 → 归一
+// undefined，不再以 `?? ""` 复活——「压掉 defaultModelSelection」的空串复活链切断）
+// ============================================================
+describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
+  it.each([
+    { label: "无 model 键（新写侧缺席形态）", entryModel: "absent", expected: undefined },
+    { label: "model=\"\"（旧写侧空串残留）", entryModel: "", expected: undefined },
+    { label: "model 有值（显式留痕）", entryModel: "prov/model-1", expected: "prov/model-1" },
+  ])("entry 投影：$label → $expected", ({ entryModel, expected }) => {
+    const data: Record<string, unknown> = {
+      v: 1,
+      id: "sa-model-roundtrip",
+      agent: "worker",
+      task: "t",
+      slug: "s",
+      status: "running",
+      mode: "background",
+      startedAt: 1000,
+      rootSessionId: "sess-m",
+      depth: 0,
+      turns: 0,
+      totalTokens: 0,
+      eventLog: [],
+      displayItems: [],
+    };
+    if (entryModel !== "absent") data.model = entryModel;
+    const rec = rebuildEntryRecord("sa-model-roundtrip", data);
+    expect(rec).not.toBeNull();
+    expect(rec?.model).toBe(expected);
+  });
+
+  it("manifest 投影：model 缺失/空串 → undefined；有值 → 透传", () => {
+    const base: ManifestRecord = {
+      id: "sa-mani-m",
+      rootSessionId: "sess-m",
+      agentName: "worker",
+      status: "closed",
+      createdAt: 1000,
+      completedAt: 2000,
+      task: "t",
+      slug: "s",
+    };
+    expect(manifestToSubagent(base)?.model).toBeUndefined();
+    expect(manifestToSubagent({ ...base, model: "" })?.model).toBeUndefined();
+    expect(manifestToSubagent({ ...base, model: "prov/model-1" })?.model).toBe("prov/model-1");
   });
 });

@@ -1,9 +1,11 @@
 /**
- * SessionMessageHandler 导入 pi 会话 case 分发测试（import-session u3 / D5）。
+ * SessionMessageHandler 导入会话 case 分发测试（import-session u3 / D5 + 多源 §3.7）。
  *
  * 覆盖：
  * - payload→reply 映射：session.importCandidates / session.import 两命令（reply 与 request
- *   同名，payload/reply 类型 SSOT = shared import-session.ts，handler 只透传不裁剪）
+ *   同名，payload/reply 类型 SSOT = shared import-session.ts，handler 只透传不裁剪——
+ *   含 source/sessionId/dbPath 多源字段随 payload 整体透传，路由在 ImportService 的
+ *   source 注册表内，handler 对源零分支）
  * - 错误 envelope：ImportServiceError.code 透传；非预期无 code 错误归 import_failed
  * - import 成功后 broadcastSessionList 被调（P-broadcast，reply 先于广播）
  * - importService 缺席 → import_unsupported（对齐 handoffService 可选服务惯例）
@@ -122,6 +124,26 @@ describe('SessionMessageHandler session.importCandidates', () => {
 
     expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
     expect(ctx.reply).not.toHaveBeenCalled()
+  })
+
+  it('payload 携带 source 等多源字段 → 原样透传（handler 对源零分支，路由在 ImportService）', async () => {
+    // 多源 §3.7：source 在 ImportCandidatesRequest/ImportRequest 两契约内；sessionId/dbPath
+    // 仅在 ImportRequest——candidates 用例塞 dbPath 是验证 handler 透传不裁剪的测试手段
+    // 而非契约字段。本用例锁「新增源字段不经 handler 本地分支」的接线形态
+    //（service mock 直接消费 payload，字段值用 zcode 形态验证透传不被吞/改）。
+    const svc = mockImportService()
+    svc.listCandidates.mockResolvedValue({ total: 0, items: [], dirs: [] })
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    const payload = { source: 'zcode', query: 'refactor', dbPath: '/tmp/fixture/db.sqlite' }
+
+    await handler.handleSessionMessage(msg('session.importCandidates', payload), ws)
+
+    expect(svc.listCandidates).toHaveBeenCalledWith(payload)
+    expect(svc.listCandidates).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'session.importCandidates', { total: 0, items: [], dirs: [] })
+    expect(ctx.sendError).not.toHaveBeenCalled()
   })
 })
 
@@ -252,5 +274,29 @@ describe('SessionMessageHandler session.import', () => {
     expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
     expect(ctx.reply).not.toHaveBeenCalled()
     expect(ctx.broadcastSessionList).not.toHaveBeenCalled()
+  })
+
+  it('payload 携带 source/sessionId/dbPath → 原样透传（zcode 形态，handler 零分支）', async () => {
+    const svc = mockImportService()
+    const result: ImportReply = { sessionId: 'normalized-id', targetPath: '/taiji/sessions/--x--/2026-01-01_normalized-id.jsonl' }
+    svc.importSession.mockResolvedValue(result)
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    // zcode 源形态：sourcePath 是 db 路径占位、以 sessionId + dbPath 定位（契约注释语义）
+    const payload = {
+      sourcePath: '/host/zcode/session-db/db.sqlite',
+      projectId: 'p1',
+      source: 'zcode',
+      sessionId: 'sess_0199abc',
+      dbPath: '/host/zcode/session-db/db.sqlite',
+    }
+
+    await handler.handleSessionMessage(msg('session.import', payload), ws)
+
+    expect(svc.importSession).toHaveBeenCalledWith(payload)
+    expect(svc.importSession).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'session.import', result)
+    expect(ctx.broadcastSessionList).toHaveBeenCalledTimes(1)
   })
 })

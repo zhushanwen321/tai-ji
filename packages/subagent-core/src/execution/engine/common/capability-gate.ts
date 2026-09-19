@@ -27,7 +27,7 @@
 //   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步面只有
 //     manifest），由首个 run 的协议握手 `initialize` 发现 → engine_capability_mismatch
 //     该 run 失败 + record 标 failed + **清理 run 前已建的前置副作用**（worktree：
-//     executeViaEngine 在 kickOffEngineRun 前创建，经 finalizeFailed → finalizeRecord
+//     executeViaEngine 在 kickOffChatRound 派发前创建，经 finalizeFailed → finalizeRecord
 //     Step 3b cleanupWorktreeIfBound 清理）。判定函数 = 本文件
 //     assertGateCapabilitiesMatched（core 侧判据；协议客户端握手尾接线归 client/ 领地）。
 //   - **非 gate 位**（personaInjection / eventGranularity / sessionRead / resume /

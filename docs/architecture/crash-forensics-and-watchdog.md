@@ -306,7 +306,7 @@ pi 崩溃（exit 1）
 | 11 | 白屏但两侧日志无记录 → crashReporter 立项 | crash-resilience.md（已删，git 可追溯）D2 代价 A | requires-user-report |
 | 12 | reload 丢草稿反馈 → 草稿持久化立项 | 同上 D2 代价 B | requires-user-report |
 | 13 | live/reload 大文本可见差异反馈 | 同上 D3 代价 C | requires-user-report |
-| 14 | 「加载更早」翻页高频抱怨 | 同上 D4 | requires-user-report |
+| 14 | 「加载更早」翻页高频抱怨 | 同上 D4 | **2026-09-19 已触发并收口**：实测重 agent 会话 7 轮 3.5MB（均 500KB/轮）→ 640KB 字节预算下窗口仅 1 轮、每次手点只翻一轮；改为**触顶自动续载**（`useLoadMoreHistory.onScrollOffset` + MessageStream virtua @scroll 透传，按钮保留为兜底/进度位）。预算常量未动；若仍高频，再按「窗口体积重审」立项（证据：该 session 的 turn 字节分布） |
 | 15 | Trace 首个真实命中 / cache size 帽占位真实出现 | 同上 D5/D6 | requires-user-report |
 | 16 | E2 型连坐复发 → dev/prod 隔离升级立项（datadir pin 已在 main 缩小残余面） | 同上 D6 代价 | 同秒多 SIGTERM 形态检测（窗口内 ≥3 session 同秒 exit 且非计划内——计划内以 destroyAll/destroySession **杀链发起事件**（D1 矩阵 shutdown 行挂点，连坐死亡的 pi 侧事件同样产自发起处）时间窗关联排除 |
 | 17 | 降级反弹：memory-relief 执行后 10min 内水位不降反升 >5% 的比例周均 >30% → 降级清单重审 | 本文 D4 降级代价 | **消费方 = Gate W（u8）人工复审**（判据需 memory-relief 前后水位对比——60s 采样环内存态不落台账，评估器不可算；水位 5min 明细行在 runtime 日志供人工深查） |

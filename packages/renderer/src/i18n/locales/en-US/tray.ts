@@ -1,5 +1,5 @@
 /**
- * Composer task tray (built-in three kinds) — English copy.
+ * Composer task tray (built-in four kinds: bash / subagent / workflow / session) — English copy.
  * Design: docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 error spec.
  *
  * Namespace shape: default export holds only the `tray` subtree; the aggregator
@@ -21,6 +21,7 @@ export default {
       bash: 'Background commands',
       subagent: 'Subagents',
       workflow: 'Workflows',
+      session: 'Child sessions',
     },
     /** Bucket view labels (runningProcess is bash-only, see header note; two-view ruling 2026-09-16: no third bucket) */
     bucket: {
@@ -70,5 +71,31 @@ export default {
     /** Panel top banners (bash) */
     corruptBanner: 'Task data corrupted; ignored (.corrupt snapshot kept)',
     disconnectBanner: 'Disconnected; refreshes automatically after reconnect',
+    /** Order-3 overflow entry (`»` ellipsis; a different semantic from the aggregate entry's stacked icons) */
+    more: 'More tools',
+    /** Order-4 aggregate entry (stacked icons + running count): title / aria-label interpolates the count */
+    aggregate: {
+      title: 'Task tray · {running} running',
+    },
+    /**
+     * Fourth entry "child sessions" (u7, design .tmp/tech-design/mode-system-composer-density.md §6.7 D7).
+     * Row status copy mirrors TraySessionPanel's process-level status map (see DISPLAY_STATUS in
+     * composables/logic/sessionStatus.ts).
+     */
+    session: {
+      /** Header summary ({total} total · {running} running) */
+      header: '{total} total · {running} running',
+      empty: 'No child sessions',
+      status: {
+        running: 'Running',
+        done: 'Done',
+        error: 'Failed',
+        stopped: 'Stopped',
+      },
+      stop: 'Stop',
+      stopConfirm: 'Confirm stop',
+      stopFailed: 'Failed to stop child session: {msg}',
+      openFailed: 'Failed to open child session: {msg}',
+    },
   },
 }

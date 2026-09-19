@@ -77,7 +77,11 @@
             <X class="size-3" />
           </Button>
         </div>
-        <!-- 顶部元信息行 slot（landing 态：directory/branch chip；panel 态留空） -->
+        <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
+             设计 D5）+ landing 态 slot（directory/branch/模式选择 chip，panel 态不传 slot 即空）。 -->
+        <div v-if="modeChipPresetId" class="flex min-w-0 items-center px-2.5 pt-2.5">
+          <PresetChip :preset-id="modeChipPresetId" :fallback-to="modeChipFallbackTo" />
+        </div>
         <slot name="meta-row" />
         <!-- 已附上下文 chip 行（§2f）。W4：从 segments 派生 image chips，× 删除定位 DOM 节点移除 -->
         <ContextChipsBar :items="attachedItems" @remove="onRemoveContextChip" />
@@ -100,35 +104,84 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 工具条（panel/spec §composer line 51）：上下文/模型/thinking-level 展示型 + 发送位三态。
-           gap-0：三触发器贴合紧凑成一条工具带（draft「不画分隔线」，仅靠 padding 区隔），发送位 ml-1.5 独立锚点。 -->
-      <div class="composer-bar flex flex-wrap items-center justify-end gap-0 px-2.5 pb-2 mt-1">
-        <!-- + 添加内容（左锚定，spec §1 ①，click 出浮层：附件 / 命令；# 文件改走 inline 触发） -->
-        <AddMenuPopover @select="onAddSelect" />
-        <!-- 任务托盘（设计 docs/design/composer-task-tray.md D1：`+` 之后、composer.toolbar 之前）。
-             landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。 -->
-        <ComposerTray v-if="sessionId" :session-id="sessionId" />
-        <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
-             plugin 贡献工具栏视图 → ViewHost 渲染。empty="hidden"：无贡献时零 DOM 不影响布局。
-             见 02-extension-host-wiring.md 重构 2。 -->
-        <ViewHost
-          v-if="sessionId"
-          view-id="composer.toolbar"
-          :session-id="sessionId"
-          empty="hidden"
-        />
-        <span class="flex-1" />
-        <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
-             landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。 -->
-        <GenStatsTriggers v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" />
-        <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update）；landing 同上隐藏 -->
-        <ContextCapacityPopover v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" />
-        <!-- 模型（spec §2b：click 出模型切换 popover） -->
-        <ModelSelectPopover :selected="currentModelId" @select="onModelSelect" />
-        <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集——non-reasoning 只 off） -->
-        <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" @select="onThinkingSelect" />
+      <!-- 底栏三簇（u6b / D6）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）· 中簇（可压缩占位）·
+           右簇（容量+指标 / 模型+档位 / 发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；
+           逐元素形态由密度状态机（ResizeObserver 实测内容宽 → composer-density）驱动，按序退化：
+           序 0 发送位/`+` 不退化 · 序 1 容量+指标合流 · 序 2 模型+档位合体 · 序 3 插件 toolbar 进 `»`
+           （仅有收起项时渲染）· 序 4 托盘聚合单入口。禁硬编码 px 断点（阈值只在状态机常量里）。 -->
+      <div
+        ref="composerBarRef"
+        data-testid="composer-bar"
+        :data-tier="density.tier"
+        :data-slot-capacity="density.slots.capacity"
+        :data-slot-model="density.slots.model"
+        :data-slot-plugin-toolbar="density.slots.pluginToolbar"
+        :data-slot-tray="density.slots.tray"
+        class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
+      >
+        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ 任务托盘（序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
+        <div class="flex min-w-0 shrink-0 items-center gap-0.5">
+          <AddMenuPopover @select="onAddSelect" />
+          <!-- 任务托盘（设计 docs/design/composer-task-tray.md D1：`+` 之后、composer.toolbar 之前）。
+               landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
+               aggregated = 序 4：托盘整体收为单入口（层叠图标 + 运行数）→ 面板内分段展示。
+               @update:has-items = 托盘三态上抛（托盘数据面唯一实例在外壳，Composer 不建第二份）。 -->
+          <ComposerTray
+            v-if="sessionId"
+            :session-id="sessionId"
+            :aggregated="density.slots.tray === 'aggregated'"
+            @update:has-items="onTrayItemsChange"
+          />
+          <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
+               序 3 收起后本处不渲染（腾出宽度），同一挂载点 view 改在 `»` 菜单内渲染（仍是同一份缓存）。 -->
+          <ViewHost
+            v-if="sessionId && density.slots.pluginToolbar === 'expanded'"
+            view-id="composer.toolbar"
+            :session-id="sessionId"
+            empty="hidden"
+          />
+          <!-- 序 3 溢出兜底：被收起项（当前 = 插件 toolbar）进 `»`；**仅有收起项时渲染**（overflowMenuVisible
+               由状态机从 overflowItems 派生，零贡献插件时不留死入口）。图标语义硬约束：溢出入口 = 省略号，
+               与聚合入口的层叠图标不得共用。 -->
+          <span v-if="sessionId && density.overflowMenuVisible" data-testid="composer-overflow-menu" class="inline-flex shrink-0">
+            <Popover>
+              <PopoverTriggerButton variant="icon" :show-chevron="false" :title="t('panel.tray.more')">
+                <Ellipsis class="size-4" />
+              </PopoverTriggerButton>
+              <PopoverContent side="top" align="start" class="w-auto min-w-[180px] p-1.5">
+                <ViewHost view-id="composer.toolbar" :session-id="sessionId" empty="hidden" />
+              </PopoverContent>
+            </Popover>
+          </span>
+        </div>
+        <!-- 中簇：可压缩占位（宽度不足时只压它，两簇元素不因换行漂位） -->
+        <span class="min-w-0 flex-1" />
 
-        <!-- 发送位四态（u6b / D6 表「发送位」列）：staging（fork/handoff，含 streaming 中）→
+        <!-- 右簇：容量+指标 / 模型+档位 / 发送位（shrink-0，发送位右锚不漂移） -->
+        <div class="flex min-w-0 shrink-0 items-center gap-0">
+          <!-- 序 1：容量 + 生成指标（merged = 合流为一个 chip；各触发器自身浮层保留为再入路径） -->
+          <div
+            :data-testid="density.slots.capacity === 'merged' ? 'composer-capacity-merged' : undefined"
+            :class="density.slots.capacity === 'merged' ? MERGED_CHIP_CLASS : 'flex items-center gap-0'"
+          >
+            <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
+                 landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。 -->
+            <GenStatsTriggers v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" />
+            <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update）；landing 同上隐藏 -->
+            <ContextCapacityPopover v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" />
+          </div>
+          <!-- 序 2：模型 + 推理档位（merged = 合体为一个 chip；模型名窄档用容器级截断收口） -->
+          <div
+            :data-testid="density.slots.model === 'merged' ? 'composer-model-merged' : undefined"
+            :class="density.slots.model === 'merged' ? MODEL_MERGED_CHIP_CLASS : 'flex items-center gap-0'"
+          >
+            <!-- 模型（spec §2b：click 出模型切换 popover） -->
+            <ModelSelectPopover :selected="currentModelId" @select="onModelSelect" />
+            <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集） -->
+            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" @select="onThinkingSelect" />
+          </div>
+
+          <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
              staging send / stop（turn 活跃 dispatching|generating；settling 单独）→ ■ stop /
              queue（compacting/bash/settling+compacting）→ ↑ 带时钟角标（可点入队，flush 于占用
              解除后自动投递）/ S5 sending→spinner / 全 idle→send。
@@ -188,6 +241,7 @@
         >
           <ArrowUp class="size-[15px]" />
         </Button>
+        </div>
       </div>
     </div>
     </CommandPopover>
@@ -198,8 +252,9 @@
 <script setup lang="ts">
 import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
+import { ArrowUp, Clock, Ellipsis, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
@@ -212,13 +267,16 @@ import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
 import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
 import QueueBubble from './QueueBubble.vue'
+import PresetChip from './PresetChip.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
 import { useDeferQueueRows } from '@/composables/panel/useDeferQueueRows'
+import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
+import { useComposerBarDensity, MERGED_CHIP_CLASS, MODEL_MERGED_CHIP_CLASS } from '@/components/panel/tray/use-composer-bar-density'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
 import { useCompositionFlag } from '@/composables/panel/composition-flag'
@@ -235,13 +293,18 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+/** 底栏密度接线（u6b / D6）：ResizeObserver 实测内容宽 → `density`（档位/形态/溢出菜单可见性）；
+ * 阈值与退化序全在 `composer-density.ts`，本处零 px 常量（合流容器类见接线件导出）。 */
+const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(
+  computed(() => props.sessionId),
+)
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
-// 项目 skill 的 cwd 源（ADR-0050 修订，skill-reload-nondestructive D6）：panel 态 = sessionStore
-// 投影的 session cwd（session 创建时锁定；split mode 各 panel 各自 session → 各自 cwd，
-// Composer 按 props.sessionId 查询天然分流）；landing 态维持 flow.currentCwd（新任务流选定
-// 目录，普通对象内嵌套 ComputedRef 不自动解包须显式 .value，可选链兼容旧 mock 形态）。
+// 对话态只读模式 chip（u4，判据与 E7 三态闸见 useComposerModeChip）
+const { modeChipPresetId, modeChipFallbackTo } = useComposerModeChip(() => props.sessionId, () => props.variant)
+// 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，
+// split mode 各 pane 各自 session 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
 const projectSkillsCwd = computed<string | null>(() => {
   if (props.variant === 'panel') {
     if (!props.sessionId) return null
@@ -262,11 +325,8 @@ const queueState = computed(() => (props.sessionId ? chatStore.getQueueState(pro
 
 const draft = ref('')
 const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
-// W4：shell 的 input 契约是结构类型 ShellInputInstance（composer-shell.ts）——
-// ui 包 ComposerInput 实例含全部 expose 方法（clear/focus/getText/getSegments/setText/
-// insertTextAtCursor/insertSlashChip/insertFileChip/insertImageBadge/removeImageChip/
-// moveCaretVertical），与契约结构兼容，模板 ref 类型断言传递（Vue 实例类型含 props/emits
-// 无法直接赋给结构契约 ref）
+// W4：shell 的 input 契约是结构类型 ShellInputInstance（ui 包 ComposerInput 实例含全部 expose
+// 方法，与契约结构兼容）——Vue 实例类型含 props/emits，无法直接赋给结构契约 ref，故此处断言传递
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 
 const sessionIdRef = computed(() => props.sessionId)
@@ -309,8 +369,7 @@ const popoverQuery = computed(() => {
 const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
-// [u6b] 本地 isCompacting computed 已退役：压缩维度的唯一读口收敛到 shell sendButtonState
-// （occupancy 投影派生，与分发器 sendRoute 同源——双轨收口完成）。
+// [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState（与 sendRoute 同源）
 
 // composer-box 容器 ref（拖拽落位 + 视觉）——先声明，再喂给 shell
 const composerBoxRef = ref<HTMLElement | null>(null)

@@ -70,8 +70,8 @@ describe('scanExternalSessions', () => {
   })
 
   it('header 缺 id / 缺 cwd / id 空串的 .jsonl 不收录（D1 字段清单，正常文件不受波及）', async () => {
-    // 缺 id：修复前会被宽松收录为 id===undefined，令 import-service.matchesQuery 的
-    // sessionId.slice(0, 6) TypeError（任意搜索词下 listCandidates 整体崩溃）
+    // 缺 id：修复前会被宽松收录为 id===undefined，令 pi 导入源（import-source-external-file.ts 的
+    // matchesQuery）sessionId.slice(0, 6) TypeError（任意搜索词下 listCandidates 整体崩溃）
     writeFileSync(join(rootDir, 'no-id.jsonl'), [
       JSON.stringify({ type: 'session', version: 1, cwd: '/tmp/no-id', timestamp: '2026-01-01T00:00:00.000Z' }),
       '',

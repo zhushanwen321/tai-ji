@@ -66,16 +66,17 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
 }
 
 function makeDeps(opts: {
-  /** eventBus.emit 同步抛错（模拟 listener 异常）。 */
-  emitThrows?: boolean;
+  /** appendEntry（pending:unregister 直落权威面）同步抛错（模拟 reload 转换窗 assertActive）。 */
+  appendThrows?: boolean;
   /** onRunDone 同步抛错（模拟 evictDoneRunsBeyondCap 等收尾异常）。 */
   onRunDoneThrows?: boolean;
-} = {}): Omit<LifecycleDeps, "store" | "workerHost" | "runner" | "eventBus" | "onRunDone" | "log"> & {
+} = {}): Omit<LifecycleDeps, "store" | "workerHost" | "runner" | "eventBus" | "appendEntry" | "onRunDone" | "log"> & {
   // 真实类型整体保留（接口成员完整），仅 mock 方法交叉 vi.fn 能力
   store: LifecycleDeps["store"] & { save: LifecycleDeps["store"]["save"] & ReturnType<typeof vi.fn> };
   workerHost: LifecycleDeps["workerHost"] & { start: LifecycleDeps["workerHost"]["start"] & ReturnType<typeof vi.fn> };
   runner: LifecycleDeps["runner"] & { run: LifecycleDeps["runner"]["run"] & ReturnType<typeof vi.fn> };
   eventBus: NonNullable<LifecycleDeps["eventBus"]> & { emit: NonNullable<LifecycleDeps["eventBus"]>["emit"] & ReturnType<typeof vi.fn> };
+  appendEntry: NonNullable<LifecycleDeps["appendEntry"]> & ReturnType<typeof vi.fn>;
   onRunDone: LifecycleDeps["onRunDone"] & ReturnType<typeof vi.fn>;
   log: LifecycleDeps["log"] & ReturnType<typeof vi.fn>;
 } {
@@ -89,12 +90,13 @@ function makeDeps(opts: {
     runner: { run: vi.fn(async () => ({}) as AgentResult) },
     runs: new Map(),
     eventBus: {
-      emit: opts.emitThrows
-        ? vi.fn(() => {
-            throw new Error("listener exploded");
-          })
-        : vi.fn(),
+      emit: vi.fn(),
     },
+    appendEntry: opts.appendThrows
+      ? vi.fn(() => {
+          throw new Error("assertActive exploded");
+        })
+      : vi.fn(),
     onRunDone: opts.onRunDoneThrows
       ? vi.fn(() => {
           throw new Error("onRunDone exploded");
@@ -131,10 +133,10 @@ afterEach(() => {
 
 // ── [OR-4] 终态收尾围栏 ──────────────────────────────────────
 
-describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection）", () => {
-  it("handleReturn：eventBus.emit 同步抛错 → promise resolve + error 留痕（save 已发生）", async () => {
+describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejection）", () => {
+  it("handleReturn：appendEntry 同步抛错 → promise resolve + error 留痕（save 已发生）", async () => {
     const run = makeRealRun("wf-fence-1");
-    const deps = makeDeps({ emitThrows: true });
+    const deps = makeDeps({ appendThrows: true });
 
     await expect(
       handleWorkerMessage(run, { type: "return", result: { ok: true } }, deps, makeHandlers()),
@@ -142,7 +144,7 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
 
     expect(run.state.status).toBe("done");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    // [B-4] 独立围栏：emit 故障不再跳过 onRunDone（旧实现同一 try 会跳过）
+    // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
@@ -156,13 +158,13 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
 
     expect(run.state.status).toBe("done");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.eventBus.emit).toHaveBeenCalledTimes(1); // emit 正常发出后才抛
+    expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 直落正常发生后才抛
   });
 
-  it("handleWorkerError 超限：emit 抛错 → resolve（旧实现裸调 → unhandledRejection）", async () => {
+  it("handleWorkerError 超限：直落抛错 → resolve（旧实现裸调 → unhandledRejection）", async () => {
     const run = makeRealRun("wf-fence-3");
     (run.meta as { workerErrorCount?: number }).workerErrorCount = 3; // count=4 > MAX
-    const deps = makeDeps({ emitThrows: true });
+    const deps = makeDeps({ appendThrows: true });
 
     await expect(handleWorkerError(run, new Error("boom"), deps, makeHandlers())).resolves.toBeUndefined();
     expect(run.state.reason).toBe("failed");
@@ -179,9 +181,9 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
-  it("handleWorkerExit 无终态消息路径：emit 抛错 → resolve", async () => {
+  it("handleWorkerExit 无终态消息路径：直落抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-5");
-    const deps = makeDeps({ emitThrows: true });
+    const deps = makeDeps({ appendThrows: true });
     const handle = { isCurrent: true } as unknown as WorkerHandle;
 
     await expect(handleWorkerExit(run, 0, handle, deps, makeHandlers())).resolves.toBeUndefined();
@@ -189,11 +191,11 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
-  it("time_limited 路径（预算耗尽 + 超限重试）：emit 抛错 → resolve", async () => {
+  it("time_limited 路径（预算耗尽 + 超限重试）：直落抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-6", { budgetTimeMs: 5000 });
     // 已耗 6000ms > 预算 5000ms（fake timers 冻结 Date）
     run.meta.startedAt = new Date(Date.now() - 6000).toISOString();
-    const deps = makeDeps({ emitThrows: true });
+    const deps = makeDeps({ appendThrows: true });
 
     const p = handleScriptError(run, "boom", [], deps, makeHandlers());
     await vi.advanceTimersByTimeAsync(1000); // 退避
@@ -201,7 +203,7 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
 
     expect(run.state.reason).toBe("time_limited");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    // [B-4] 独立围栏：emit 故障不再跳过 onRunDone（旧实现同一 try 会跳过）
+    // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
@@ -216,17 +218,24 @@ describe("[OR-4] 终态收尾 emit/onRunDone 围栏（不产 unhandledRejection�
     expect(errLogs.some((m) => m.includes("onRunDone failed") && m.includes("onRunDone exploded"))).toBe(true);
   });
 
-  it("[B-4] emit 抛错 → onRunDone 仍执行（独立围栏，完成回调不被通知总线故障吞掉）", async () => {
+  it("[B-4] 直落 appendEntry 抛错 → onRunDone 仍执行（独立围栏，完成回调不被直落故障吞掉）", async () => {
     const errorSpy = vi.spyOn(getLogger("subagents"), "error");
     const run = makeRealRun("wf-fence-8");
-    const deps = makeDeps({ emitThrows: true });
+    const deps = makeDeps({ appendThrows: true });
 
     await handleWorkerMessage(run, { type: "return", result: 1 }, deps, makeHandlers());
 
     expect(run.state.reason).toBe("completed");
-    expect(deps.onRunDone).toHaveBeenCalledTimes(1); // 旧实现同一 try：emit 抛错会跳过
+    expect(deps.onRunDone).toHaveBeenCalledTimes(1); // 旧实现同一 try：直落抛错会跳过
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
-    expect(errLogs.some((m) => m.includes("pending:unregister emit failed") && m.includes("listener exploded"))).toBe(true);
+    expect(
+      errLogs.some(
+        (m) =>
+          m.includes("pending:unregister appendEntry failed") &&
+          m.includes("assertActive exploded") &&
+          m.includes("runId=wf-fence-8"),
+      ),
+    ).toBe(true);
   });
 });
 

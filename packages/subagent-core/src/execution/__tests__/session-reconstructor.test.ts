@@ -435,7 +435,7 @@ describe("reconstructFromFile", () => {
       expect(rec!.model).toBe("p2/m2");
     });
 
-    it("model_change 字段非字符串（provider 缺失）→ model 保持空串", () => {
+    it("model_change 字段非字符串（provider 缺失）→ model 保持缺席 undefined（[R4/D6-①] 空串哨兵退役）", () => {
       writeJsonl([
         headerLine(),
         identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100 }),
@@ -443,7 +443,7 @@ describe("reconstructFromFile", () => {
         assistantEntry([{ type: "text", text: "ok" }]),
       ]);
       const rec = reconstructFromFile(filePath);
-      expect(rec!.model).toBe("");
+      expect(rec!.model).toBeUndefined();
     });
 
     it("thinking_level_change → thinkingLevel 恢复；无该 entry → undefined", () => {
@@ -635,7 +635,8 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
       JSON.stringify(identityEntry({ id: "bg-8", agent: "w", mode: "background", task: "t", startedAt: 1 })),
       JSON.stringify({ type: "model_change", provider: "late", modelId: "m", timestamp: new Date(900).toISOString() }),
     ]);
-    expect(readIdentityHeader(filePath)?.model).toBe("");
+    // [R4/D6-①] 缺席语义：identity 之后途经的 model_change 不捕获 → undefined
+    expect(readIdentityHeader(filePath)?.model).toBeUndefined();
   });
 
   it("头部无 identity → readIdentityHeader undefined", () => {
@@ -659,8 +660,8 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
     expect(readIdentityHeader(filePath)).toBeUndefined();
     const tail = readIdentityTail(filePath);
     expect(tail?.id).toBe("bg-tail");
-    // model/thinkingLevel 在尾部窗口外 → best-effort 空/undefined
-    expect(tail?.model).toBe("");
+    // model/thinkingLevel 在尾部窗口外 → best-effort 缺席（[R4/D6-①] 空串哨兵退役）
+    expect(tail?.model).toBeUndefined();
     expect(tail?.thinkingLevel).toBeUndefined();
     expect(readIdentityAnywhere(filePath)?.id).toBe("bg-tail");
   });

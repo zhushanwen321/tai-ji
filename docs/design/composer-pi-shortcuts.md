@@ -81,9 +81,9 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 
 用户：按 ctrl+p
 系统：模型 chip 切到模型列表的下一个模型；按 ctrl+shift+p 切回上一个；到表尾绕回首尾。
-      预设 popover 不受影响：它由全局快捷键 mod+shift+p 触发（mac ⌘⇧P / win·Linux ctrl+shift+p，
+      模式 popover 不受影响：它由全局快捷键 mod+shift+p 触发（mac ⌘⇧P / win·Linux ctrl+shift+p，
       mod 判定含纯 ctrl，见 §2.2）——但 composer 聚焦时除外：动作表拦截同名组合只切模型
-      （决策 7）；要开预设用鼠标点工具条。
+      （决策 7）；要开模式选择用鼠标点工具条。
       快速连按逐步前进（RTT 内按本地意图续步，不重步，§3.3 决策 8）；按住不放只切一步
       （auto-repeat 忽略）。
 
@@ -151,7 +151,7 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 
   动作 id 沿用 pi 的 namespaced id 作为常量名（`COMPOSER_ACTION_KEYS`），注释声明与 pi `keybindings.json` 同构——P1 注册表化时的迁移锚点，本版不做用户配置。ctrl+x 不标非 repeat：复制动作幂等且无 RPC，repeat 不产生级联，不忽略（与三个切换键的差异见决策 8）。
 - **决策 6：平台差异裁决——GUI 统一 `ctrl+shift+p`，不跟进 pi 的 win/WSL `alt+p`**。pi 0.84.4 实装中 `app.model.cycleBackward` 在 win/WSL 是 `alt+p`（`windowsKeybindings ? "alt+p" : "shift+ctrl+p"`，win/WSL 判定含 `WSL_DISTRO_NAME` 环境变量）——该差异的动机是终端键盘生态约束（部分终端无法传递完整 ctrl 组合），不是语义设计。GUI 是 Electron：KeyboardEvent 完整无终端约束，统一 `ctrl+shift+p` 让跨平台行为一致、文档与提示单一。代价：pi 的 Windows/WSL 用户向后循环肌肉记忆为 `alt+p`，GUI 上不成立——显式偏离，不做 alt+p 双绑定（双绑定压缩了未来 P1 用户自定义的空间且增加守卫矩阵维度；如收到 win 用户反馈再重审，重审条件 = win/WSL 用户反馈）。
-- **决策 7：与全局快捷键表的裁决——composer 聚焦时动作表优先，命中键 `stopPropagation + preventDefault`**。被击穿的旧论断（记入被否谱系）：「ctrl 系与 ⌘ 系键位表分离，互不冲突」——实况是 `useGlobalShortcuts` 的 mod 判定为 `metaKey || ctrlKey`（L117），`open-preset-select`（mod+shift+p）条目无 composer 焦点守卫且不检查 `defaultPrevented`，其监听挂 window bubble 阶段：若动作表只 `preventDefault`，ctrl+shift+p 会在**全平台**双触发（模型循环 + 预设 popover）。裁决：动作表**命中任一键位即同时 `stopPropagation() + preventDefault()`（含动作 no-op 的情形）**（唯一例外 = §3.4 矩阵「composer 内有选区」行的 ctrl+x：放行原生剪切，不拦截）——事件不再冒泡到 window 层，键位语义归动作表统一裁决；⌘⇧P（metaKey）不受影响（动作表要求 `!e.metaKey`，meta 组合正常冒泡触发预设）。与 `shortcutOverrides` 用户重录的关系：composer 聚焦时动作表恒优先（重录的是全局键位语义）；用户在 composer 内要开预设用鼠标点工具条（popover 现有入口）。重审条件：用户反馈「composer 聚焦时无法用全局键开预设」的诉求聚集，或 P1 注册表化时统一裁决全局/composer 两层键位优先级。
+- **决策 7：与全局快捷键表的裁决——composer 聚焦时动作表优先，命中键 `stopPropagation + preventDefault`**。被击穿的旧论断（记入被否谱系）：「ctrl 系与 ⌘ 系键位表分离，互不冲突」——实况是 `useGlobalShortcuts` 的 mod 判定为 `metaKey || ctrlKey`（L117），`open-preset-select`（mod+shift+p）条目无 composer 焦点守卫且不检查 `defaultPrevented`，其监听挂 window bubble 阶段：若动作表只 `preventDefault`，ctrl+shift+p 会在**全平台**双触发（模型循环 + 模式 popover）。裁决：动作表**命中任一键位即同时 `stopPropagation() + preventDefault()`（含动作 no-op 的情形）**（唯一例外 = §3.4 矩阵「composer 内有选区」行的 ctrl+x：放行原生剪切，不拦截）——事件不再冒泡到 window 层，键位语义归动作表统一裁决；⌘⇧P（metaKey）不受影响（动作表要求 `!e.metaKey`，meta 组合正常冒泡触发模式选择）。与 `shortcutOverrides` 用户重录的关系：composer 聚焦时动作表恒优先（重录的是全局键位语义）；用户在 composer 内要开模式选择用鼠标点工具条（popover 现有入口）。重审条件：用户反馈「composer 聚焦时无法用全局键开模式选择」的诉求聚集，或 P1 注册表化时统一裁决全局/composer 两层键位优先级。
 - **决策 8：连按与 auto-repeat——`e.repeat` 忽略 + 本地意图目标续步**。已建态切换是回执写 store（U6 弃乐观写），计算起点滞后于 RPC 往返：直接基于 store 真值算目标，RTT 窗口内两次快按会算出同一目标（被击穿方案，记入被否谱系）。裁决：① `e.repeat === true` 直接忽略（按住只走一步，防 auto-repeat ~20-30Hz 的 RPC 风暴与记忆 KV 写穿放大）；② 动作模块持有本地意图目标（模型串/thinking 档各一）：计算起点 = 意图目标 ?? store 真值，算出新目标后立即写意图目标并发起动作；store 真值（回执/同步写）到达且**等于**意图目标时清除；动作 promise reject 时清除（回到真值起算）；**sessionId 变化即清除**（deps 已含 sessionId，防跨 session 意图残留错一步起点）；**仅已建态设立与续步**——staging/landing 分支是同步写（无 RTT 问题）不设意图，进入 staging 时清除既有已建意图（deps 补 staging 活跃只读信号，防跨态残留；影响面审 S-1）。反例重演：RTT 内快按 3 次 → 目标 A1→A2→A3 逐次递进，RPC 三发各不相同，最终一致；回执乱序/钳制（回执值 ≠ 意图目标）不清，直到等于或失败才清；乱序回跳最坏亚秒级，由既有 state_changed 防抖快照收敛自愈（runtime 侧 replicated-state markDirty 置失效 → 防抖重拉 → 快照广播 → renderer store applySnapshot，session.state_changed 通路；影响面审第 2 轮核实闭环）。级联量级：人手速连按（≤5 次/秒）与 popover 连点同量级，记忆 KV 写穿为既有每次显式选档同款语义，有界。
 - **决策 9：`shift+tab` 接管原生反向焦点导航（显式让位，P0-20 四要素）**：① 量级 = composer 聚焦时 shift+tab 不再移出输入框（Tab 前向移动不受影响）；② 恢复路径 = Tab 前向移焦 / 鼠标点击 / popover 内 Esc；③ 重审条件 = 键盘可访问性（a11y）用户反馈；④ 显式判定 = 接受——反向移焦低频，档位循环是 pi 同语义高频动作，pi TUI 中该键本就无焦点语义。
 - **thinking 循环的起点**：`currentThinkingLevel` 为 undefined（占位）时取归一序列第一个（`off`）；当前档非 undefined 但不在归一集（脏值/钳制残值）时，与模型侧规则对称：forward 取第一档、backward 取最后一档。行为确定、可预期；落点仍走 `onThinkingSelect`（authored 记忆记录点——cycle 是用户显式选择，语义正确）。
@@ -209,13 +209,13 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 | S3 | 新任务页（landing，session 未建）按 `ctrl+p` 切到目标模型，输入首发消息提交 | G2 | 创建的 session 使用该模型（session 详情/chip 显示）；再次 `shift+tab` 在新 session 上生效（landing → 已建迁移无断裂） |
 | S4 | 有 ≥1 条 AI 回复的 session 中按 `ctrl+x`，到外部编辑器粘贴；再在流式输出中按一次 | G1 | 非流式时粘贴内容 = 最后一条回复全文（含 markdown 纯文本形态）；流式时 = 当前已生成部分文本；toast「已复制最后回复」出现 |
 | S5 | composer 内输入文字并选中一段，按 `ctrl+x` | G3 | 触发原生剪切（文字进剪贴板、从输入框消失），**无**「已复制最后回复」toast |
-| S6 | 按 `/`（或既有唤起方式）打开命令浮层，按 `ctrl+p` 与 `shift+tab`；再按 `ctrl+shift+p` | G3 | 浮层行为不受影响，模型/档位 chip 不变；`ctrl+shift+p` 冒泡触发预设 popover 弹出（既有行为：浮层 open 时动作表 cmdOpen 守卫不拦截、全局表正常命中——两 popover 并存为现状语义，非本设计引入） |
+| S6 | 按 `/`（或既有唤起方式）打开命令浮层，按 `ctrl+p` 与 `shift+tab`；再按 `ctrl+shift+p` | G3 | 浮层行为不受影响，模型/档位 chip 不变；`ctrl+shift+p` 冒泡触发模式 popover 弹出（既有行为：浮层 open 时动作表 cmdOpen 守卫不拦截、全局表正常命中——两 popover 并存为现状语义，非本设计引入） |
 | S7 | 中文输入法组合中（候选词悬浮）按 `shift+tab` 与 `ctrl+p` | G3 | 组合不中断、不触发任何动作；上屏后按键恢复正常触发 |
 | S8 | 进入 fork staging 模式（chip 出现），按 `shift+tab`/`ctrl+p`，提交 fork | G2/G3 | 源 session 的模型/档位不变；新 fork session 使用暂存后的值（`getStagingConfig` 透传） |
 | S9 | 单模型环境（或仅剩 1 个 enabled 模型）按 `ctrl+p`；non-reasoning 模型按 `shift+tab` | G3 | 无反应、无报错、无 toast 噪音 |
 | S10 | 停掉 runtime（或断开后端）后按 `ctrl+p`，再连按 2 次 | G2/G3 | chip 保持旧值不变（回执真值），无错误 toast；恢复后按 1 次，从真值起算切到下一个（拒绝的意图目标不残留） |
 | S11 | 新建空 session（无任何消息）按 `ctrl+x`；再在 composer 内选中文字按 `ctrl+x` | G3 | 空流时无反应、无 toast；选中时触发原生剪切、无「已复制」toast |
-| S12 | 已建 session 按 `ctrl+shift+p` | G3 | 模型 chip 切到上一个；**预设 popover 不弹出**（动作表 stopPropagation，决策 7）；鼠标点工具条/⌘⇧P 仍可打开预设（既有入口不回归） |
+| S12 | 已建 session 按 `ctrl+shift+p` | G3 | 模型 chip 切到上一个；**模式 popover 不弹出**（动作表 stopPropagation，决策 7）；鼠标点工具条/⌘⇧P 仍可打开模式选择（既有入口不回归） |
 | S13 | 已建 session 长按 `shift+tab`（auto-repeat）1 秒后松开；焦点在 composer 内按一次 `shift+tab` 后观察焦点 | G1/G3 | 长按期间仅首按切换一步（不风暴）；切换后焦点仍在 composer（反向焦点让位，决策 9） |
 
 **e2e 影响面评估**：改动面 = renderer composer 键盘分发 + 动作触发（零 runtime / 零 pi / 零协议变更）。既有 e2e/真实进程测试面不受影响（runtime equivalence real-pi 池、`TAIJI_PI_LIVE` 轨均不触及 renderer 键盘层）；开发阶段按改动面跑 `node scripts/select-affected-e2e.mjs --base main` 圈定结果，预期仅需 composer 相关 mock 轨（如有）。**单测化路径**：守卫矩阵（§3.4 全行）与循环取值全部可单测（`composer-keydown.test.ts` 既有模式扩展），是本设计回归防线的主体。
@@ -265,7 +265,7 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 | # | 来源 | 修复落点 |
 |---|---|---|
 | MF | 主审：§3.3 旧版键位表残留未删（含已击穿的「同键」表头，与新表重复并存——第 1 轮编辑残留） | 删除旧表整块，保留新表；ctrl+x 行补非 repeat 差异说明 |
-| S | 主审：§3.1「预设只由 ⌘⇧P（mac）触发」为被否论断③语义残留 | 按 mod=meta\|\|ctrl 事实改写（win/Linux composer 外同样触发预设） |
+| S | 主审：§3.1「模式选择只由 ⌘⇧P（mac）触发」为被否论断③语义残留 | 按 mod=meta\|\|ctrl 事实改写（win/Linux composer 外同样触发模式选择） |
 | S | 主审：意图目标生命周期缺跨 session 清除 | 决策 8 + U1 补 sessionId 变化即清 |
 | S | 主审：§4 注记「全部负面行为均钉住」过宽 | 收窄为实钉清单 + 未钉行（低风险）归 U1 单测矩阵，显式声明而非声称全覆盖 |
 | S | 主审：U1 deps 缺模型循环序源 | 补 enabledModels（与 ModelSelectPopover 双保险同款） |

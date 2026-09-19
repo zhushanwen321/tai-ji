@@ -2,6 +2,9 @@
  * ConfigService system-prompt 新方法单测（TDD 红灯）。
  *
  * 覆盖：getSystemPromptConfig / setSystemPromptConfig / getReplaceSystemPrompt 的常规与异常路径。
+ * schema v2 增量：capability 段透传与非布尔回退（设计 D6：仅显式布尔 false 关闭，
+ * 与扩展侧 readCapabilityEnabled 对齐——merge 若剥字段，用户关闭开关保存后重开设置页
+ * 会误显「开」，且后续保存以 UI 态误开写回）。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
@@ -24,12 +27,14 @@ interface SystemPromptConfig {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  capability?: { enabled: boolean }
 }
 
 const DEFAULT_SYSTEM_PROMPT_CONFIG: SystemPromptConfig = {
   version: 1,
   replace: { enabled: false, prompt: '' },
   append: { enabled: false, prompt: '' },
+  capability: { enabled: true },
 }
 
 /** 只暴露 getConfigDir 的最小假 configStore。 */
@@ -78,6 +83,7 @@ describe('ConfigService system-prompt', () => {
       version: 1,
       replace: { enabled: true, prompt: 'replace-me' },
       append: { enabled: true, prompt: 'append-me' },
+      capability: { enabled: false },
     }
 
     const setResult = service.setSystemPromptConfig(cfg)
@@ -168,5 +174,35 @@ describe('ConfigService system-prompt', () => {
 
     const after = readFileSync(systemPromptPath(), 'utf-8')
     expect(after).toBe(before)
+  })
+
+  it('capability 透传：磁盘 v2 json 的 enabled 布尔原样读回（merge 不剥字段）', () => {
+    writeFileSync(
+      systemPromptPath(),
+      JSON.stringify({
+        version: 2,
+        replace: { enabled: false, prompt: '' },
+        append: { enabled: false, prompt: '' },
+        capability: { enabled: false },
+      }),
+      'utf-8',
+    )
+    // 关闭态回读不丢失：若 merge 层剥字段，UI 重开设置页会误显「开」并误开写回
+    expect(service.getSystemPromptConfig().config.capability).toEqual({ enabled: false })
+  })
+
+  it('capability 非布尔 / 缺字段 / 非对象 → 回退 enabled true（默认开，D6 解析方向）', () => {
+    const bads: unknown[] = [
+      // v1 存量 json：无 capability 字段
+      { version: 1, replace: { enabled: false, prompt: '' }, append: { enabled: false, prompt: '' } },
+      // 损坏形态：enabled 为字符串 "false"（非布尔）
+      { capability: { enabled: 'false' } },
+      // 损坏形态：capability 字段非对象
+      { capability: 'off' },
+    ]
+    for (const bad of bads) {
+      writeFileSync(systemPromptPath(), JSON.stringify(bad), 'utf-8')
+      expect(service.getSystemPromptConfig().config.capability).toEqual({ enabled: true })
+    }
   })
 })

@@ -10,16 +10,70 @@
  *
  * 不职责：
  * - 不持状态本身（状态在 preset store，本 composable 只做「RPC 拉取 → store 写入」的接线）。
- * - 不挂常驻订阅（preset 域无 server-push 广播，preset.* 不在 ServerMessageType）。组件
- *   （PresetSelectChip）onMounted 调 loadPresets 按需拉取，无 onScopeDispose 订阅清理。
+ * - 不挂常驻订阅（preset 域无 server-push 广播，preset.* 不在 ServerMessageType）。
+ * - 唯一例外 = installPresetAutoLoad 的「首次 connected 必拉一次」单例 watch（u5
+ *   mode-declaration-row · 设计 §6.5 P0-12 / §7.5 E7）——preset 域无广播，但**冷启动直接进入
+ *   上次的非默认模式会话**（不经 landing）时 store 为空，声明行会误报「模式已删除」。
+ *   App bootstrap 只提交连接编排、**不等 connected**（冷启时 preset.list/getDefault 两条 WS RPC
+ *   必 rejected），故加载点挂在连接态（`watch(getState())`）而非 bootstrap：首次 connected 拉一次，
+ *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补拉（E7 ③ 恢复通道）。
  *
  * 依赖方向：
  * - 读 @/api（preset 域 RPC：list / getDefault / setDefault）。
+ * - 读 @taiji/core/transport/ws-client（连接态；与 useBackgroundTasks 同源依赖）。
  * - 写 preset store（presets / defaultPresetId）。
  */
+import { effectScope, watch } from 'vue'
+import type { EffectScope } from 'vue'
+import { getState } from '@taiji/core/transport/ws-client'
 import { preset as presetApi } from '@/api'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
+
+// ── 首次 connected 自动拉取单例（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
+/** 单例安装标志（幂等：HMR / 多次调用只挂一个 watcher）。 */
+let presetAutoLoadInstalled = false
+/** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
+let presetLoadedOnce = false
+/** detached effect scope 持有单例 watch（不随调用方组件卸载停止）。 */
+let presetAutoLoadScope: EffectScope | null = null
+
+/**
+ * 安装 preset「首次 connected 必拉一次」单例（幂等）。
+ *
+ * 何时调用：会话面板常驻挂载点（MessageStream setup）。安装后：
+ * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
+ * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
+ * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
+ * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+ */
+export function installPresetAutoLoad(): void {
+  if (presetAutoLoadInstalled) return
+  presetAutoLoadInstalled = true
+  presetAutoLoadScope = effectScope(true)
+  presetAutoLoadScope.run(() => {
+    const { loadPresets } = usePiPresets()
+    watch(
+      getState(),
+      (s) => {
+        if (s !== 'connected' || presetLoadedOnce) return
+        void loadPresets().then(() => {
+          // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
+          if (usePresetStore().loadError === null) presetLoadedOnce = true
+        })
+      },
+      { immediate: true },
+    )
+  })
+}
+
+/** 测试专用：停止单例 watch 并复位标志（生产不调用）。 */
+export function __resetPresetAutoLoadForTest(): void {
+  presetAutoLoadScope?.stop()
+  presetAutoLoadScope = null
+  presetAutoLoadInstalled = false
+  presetLoadedOnce = false
+}
 
 /**
  * preset 域编排 composable。

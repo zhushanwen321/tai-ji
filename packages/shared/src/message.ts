@@ -531,6 +531,20 @@ export interface Message {
   usage?: Usage
   timestamp: number
   /**
+   * 该消息产出的结束时刻（epoch ms）；`timestamp` 是开始时刻。
+   *
+   * 只对 assistant message 有意义（唯一写入面）：
+   * - live：终态收口（message.complete / abort / error / 断连）当下写入
+   * - reload：JSONL / get_entries 的 entry 时间戳（pi appendMessage 落在 message_end，
+   *   即该消息产出结束；entry 时间戳不参与 reducer——由运行时历史链路回填，见
+   *   runtime infra `session-entry-mapper.applyEntryEndTimes`）
+   *
+   * 用途 = turn 级聚合口径的时间轴右端（TurnMeta「已工作」时长/时刻区间）：没有它，
+   * 单条 assistant 的 turn 会退化为 startedAt === endedAt（旧实现恒显「1s」）。
+   * 缺失（旧历史帧/未收口）时消费侧回退 `timestamp`，等价于修复前行为。
+   */
+  endedAt?: number
+  /**
    * 该 assistant 消息产生的文件变更集合（flow-2 FileChanges 通道）。
    * runtime 经 pi 工具事件解析后推送，变更集卡（W11 WP-L3-11）据此渲染。
    * 仅 assistant 消息有值；user/system 消息不设置。

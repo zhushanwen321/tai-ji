@@ -15,8 +15,12 @@
  *  不再使用 MarkdownIt 构造选项的 highlight 回调，fence 规则完全自控（单一职责，
  *  避免与 highlight 回调的 `<pre` 跳过机制双重逻辑）。
  *
- * XSS 安全：markdown-it 关 html:false（不透传用户原始 HTML），shiki codeToHtml 转义所有
- * 非 token 文本（只发 scoped <span>），linkify 识别的 <a> 加 rel/target 安全属性。
+ * XSS 安全（html:true + 分通道净化，设计 markdown-html-sanitize-render D1-D3）：
+ * 用户 HTML 经出口 DOMPurify 两级白名单净化（markdown-sanitize.ts——GitHub 风格标签/属性面，
+ * class/style/data-* 构造性全剥）；可信 renderer 输出（fence/math_inline/math_block/
+ * code_inline/md_trusted_inline 五个摘出点）经 nonce 哨兵摘出-回填绕过净化，逐字节保留。
+ * shiki codeToHtml 转义所有非 token 文本（只发 scoped <span>），linkify 识别的 <a> 加
+ * rel/target 安全属性（target/rel 在白名单内，无需摘出）。
  * linkify fuzzyLink:false：只识别带 scheme（http(s)://、ftp://、//）的 URL，不识别裸域名，
  * 避免 .md/.io 等 ccTLD 把文件名误判成 URL（见 getMarkdown 内注释）。
  *
@@ -29,6 +33,7 @@ import katex from 'katex'
 import MarkdownIt from 'markdown-it'
 import markdownItKatex from 'markdown-it-katex'
 import type Token from 'markdown-it/lib/token.mjs'
+import type { RenderRule } from 'markdown-it/lib/renderer.mjs'
 import type StateCore from 'markdown-it/lib/rules_core/state_core.mjs'
 import { createHighlighterCore } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
@@ -56,6 +61,7 @@ import rust from '@shikijs/langs/rust'
 import minDark from '@shikijs/themes/min-dark'
 import minLight from '@shikijs/themes/min-light'
 import i18n from '@/i18n'
+import { resetTrustSlot, sanitizeAndRestore, stashTrusted } from './markdown-sanitize'
 
 const t = i18n.global.t
 
@@ -70,12 +76,22 @@ const t = i18n.global.t
  *   数据源：同上，扁平化为 FileNode.name Set。
  *
  * 两者首渲染时可能为空集（fileSearch 未加载）→ 路径降级纯文本，加载完成后响应式重渲染。
+ *
+ * - resourceBaseDir：本条消息/文档的相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render
+ *   D4）。无则该消费面不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
+ *   preventDefault 无动作。来源：对话流 = session cwd（useChatViewDeps 工厂装配）、drawer =
+ *   打开文件所在目录（DetailPane 传 dirname）、更新日志不传（undefined）。
+ *
+ * 净化层信任槽（Symbol 键）挂 env 但不属于本公开类型——管线内部自产自销，不随
+ * markdown-types 镜像/序列化泄漏、不参与增量轴 env 签名，见 markdown-sanitize.ts。
  */
 export interface MarkdownEnv {
   /** 含/路径识别的白名单（FileNode.path 集合，相对 cwd，无前导 /） */
   filePaths?: Set<string>
   /** 裸 basename 识别的白名单（FileNode.name 集合） */
   localFiles?: Set<string>
+  /** 相对资源（img src / 正文链接 href）解析基准目录（绝对路径）；无则不做相对资源解析 */
+  resourceBaseDir?: string
 }
 
 /**
@@ -177,7 +193,10 @@ async function getMarkdown(): Promise<MarkdownIt> {
   if (cachedMarkdown) return cachedMarkdown
   const hl = await getHighlighter()
   const md = new MarkdownIt({
-    html: false, // 不透传用户原始 HTML（XSS 防线）
+    // 解析内嵌 HTML（README 排版 HTML/AI 输出表格等呈现为元素而非源代码）。XSS 主防线
+    // 移至 renderMarkdown 出口的净化层（markdown-sanitize.ts：两级白名单 + 可信段摘出-回填），
+    // html:true 只是「放行解析」，不再承担安全职责
+    html: true,
     linkify: true, // 自动识别 URL（识别范围由下方 fuzzyLink:false 收紧）
     typographer: true, // 排版引号/省略号
     // breaks:true：单 \n 转 <br>，让用户气泡里软换行可见（不靠 CSS whitespace-pre-wrap）。
@@ -197,7 +216,9 @@ async function getMarkdown(): Promise<MarkdownIt> {
   md.linkify.set({ fuzzyLink: false })
 
   // ── fence 规则覆盖：代码块增强（语言标签 + 复制按钮）+ mermaid 占位 ──
-  md.renderer.rules.fence = (tokens, idx): string => {
+  // 摘出点 1/5（设计 D3）：fence 容器整块（class/data-code 契约属性）存信任槽返回哨兵，
+  // 出口净化后回填，绕过白名单（shiki/KaTeX 同理，见各摘出点注释）
+  md.renderer.rules.fence = (tokens, idx, _options, env): string => {
     const token = tokens[idx]
     const info = token.info ? token.info.trim() : ''
     const lang = info.split(/(\s+)/)[0] ?? ''
@@ -206,7 +227,7 @@ async function getMarkdown(): Promise<MarkdownIt> {
     // mermaid 块：输出占位容器，由 MermaidRenderer 异步渲染成 SVG（不调 shiki）
     // base64 编码源码进 data-source，杜绝引号/HTML 注入
     if (lang.toLowerCase() === 'mermaid') {
-      return `<div class="md-mermaid" data-source="${encodeBase64(code)}"></div>\n`
+      return stashTrusted(env, `<div class="md-mermaid" data-source="${encodeBase64(code)}"></div>`) + '\n'
     }
 
     // 普通代码块：shiki 高亮 + 语言标签 + 复制按钮
@@ -217,13 +238,16 @@ async function getMarkdown(): Promise<MarkdownIt> {
     // 需自己 escape。复用 shiki 失败空串场景：拼一个转义的 pre>code）
     const codeHtml = shikiHtml || `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`
     return (
-      `<div class="md-codeblock">` +
-      `<div class="md-codeblock__header">` +
-      `<span class="md-codeblock__lang">${escapeHtml(langLabel)}</span>` +
-      `<button class="md-codeblock__copy" data-code="${dataCode}" type="button" title="${t('composable.copyLabel')}"></button>` +
-      `</div>` +
-      codeHtml +
-      `</div>\n`
+      stashTrusted(
+        env,
+        `<div class="md-codeblock">` +
+          `<div class="md-codeblock__header">` +
+          `<span class="md-codeblock__lang">${escapeHtml(langLabel)}</span>` +
+          `<button class="md-codeblock__copy" data-code="${dataCode}" type="button" title="${t('composable.copyLabel')}"></button>` +
+          `</div>` +
+          codeHtml +
+          `</div>`,
+      ) + '\n'
     )
   }
 
@@ -232,8 +256,12 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 转义处理 / 块检测，逻辑非平凡，复用插件）。renderer 由本处覆盖为调 katex.renderToString，
   // 控制displayMode 与错误降级（插件默认的 <p> 包裹 + console.log 错误不适用本项目）。
   md.use(markdownItKatex)
-  md.renderer.rules.math_inline = (tokens, idx): string => renderKatex(tokens[idx].content, false)
-  md.renderer.rules.math_block = (tokens, idx): string => `${renderKatex(tokens[idx].content, true)}\n`
+  // 摘出点 2/5、3/5（设计 D3）：KaTeX 输出整段（MathML 树/57 class/布局 style 契约）
+  // 存信任槽返回哨兵——白名单枚举路线不可维护（D3 被否谱系），按来源分通道绕过
+  md.renderer.rules.math_inline = (tokens, idx, _options, env): string =>
+    stashTrusted(env, renderKatex(tokens[idx].content, false))
+  md.renderer.rules.math_block = (tokens, idx, _options, env): string =>
+    stashTrusted(env, renderKatex(tokens[idx].content, true)) + '\n'
 
   // 外链安全属性：linkify 产生的 <a> 加 target/rel，防 opener 钓鱼
   const defaultLinkOpen =
@@ -246,21 +274,27 @@ async function getMarkdown(): Promise<MarkdownIt> {
     return defaultLinkOpen(tokens, idx, options, env, self)
   }
 
-  // ── table 横向滚动 wrapper：超宽表格自身 overflow-x:auto 滚动，不撑宽 .md-render / detail-content ──
-  // markdown-it 默认 table render 输出裸 <table>（无 overflow 容器），多列/长内容表格撑宽父级，
-  // 拖整个面板横向滚动（段落被拉开、表格边框裁切）。包一层 .md-table-wrap，离散块自带滚动容器
-  // （与 .md-codeblock 同策略）。保留默认 renderToken 链以透传 table attrs（未来插件加 class 不丢）。
-  // 滚动样式在 MarkdownRenderer scoped style 的 .md-table-wrap（overflow-x:auto + 接管 margin）。
-  const defaultTableOpen =
-    md.renderer.rules.table_open ??
-    ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
-  const defaultTableClose =
-    md.renderer.rules.table_close ??
-    ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
-  md.renderer.rules.table_open = (tokens, idx, options, env, self) =>
-    `<div class="md-table-wrap">\n` + defaultTableOpen(tokens, idx, options, env, self)
-  md.renderer.rules.table_close = (tokens, idx, options, env, self) =>
-    defaultTableClose(tokens, idx, options, env, self) + `\n</div>\n`
+  // ── 表格：无 table_open/close override（.md-table-wrap 已删，滚动容器 CSS 化——
+  // table 直挂 GitHub 全套四条声明，见 MarkdownRenderer/UpdateButton 两宿主样式；表格
+  // 结构全部走用户通道白名单，无契约属性，摘出点不存在）── 只覆盖 th_open/td_open 做
+  // 列对齐转写：markdown-it 对 |:---:| 语法输出 style="text-align:*"，style 不在用户
+  // 白名单会被剥除 → 列对齐回归。转写为 align 呈现属性（在 GitHub 白名单全局属性集内，
+  // HTML4 属性现代浏览器对 th/td 仍渲染）；值域三枚举由 markdown 源的 :--- 语法决定。
+  // 配套：两宿主 th/td 规则的 text-align 移入 :not([align]) 守卫（转写不同批改宿主 CSS
+  // 则列对齐回归依旧——align 呈现属性优先级低于任何作者规则，设计 D3 R5/R6）
+  const ALIGN_STYLE_RE = /^text-align:(left|center|right)$/
+  const transcribeAlign: RenderRule = (tokens, idx, options, _env, self) => {
+    const token = tokens[idx]
+    const styleIdx = token.attrIndex('style')
+    if (styleIdx >= 0 && token.attrs) {
+      const m = (token.attrs[styleIdx]?.[1] ?? '').match(ALIGN_STYLE_RE)
+      token.attrs.splice(styleIdx, 1)
+      if (m) token.attrSet('align', m[1])
+    }
+    return self.renderToken(tokens, idx, options)
+  }
+  md.renderer.rules.th_open = transcribeAlign
+  md.renderer.rules.td_open = transcribeAlign
 
   // ── 文件路径识别（core rule，注册于 replacements 之后） ──
   // [HISTORICAL] 架构选型（2026-07-20 重构）：
@@ -273,7 +307,8 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 新实现改为 core rule（注册于 replacements 之后）：此时 emphasis 已配对完毕，token 树里
   // **bold** 已是 strong_open/text/strong_close 三段。本 rule 遍历 inline token 的 children，
   // 对 text token 的 .content 做候选扫描 + 白名单校验，命中则把该 text token 拆成
-  // [text(前缀), link_open, text(路径), link_close, text(后缀)]。拆分发生在「已确定无 emphasis
+  // [text(前缀), md_trusted_inline(路径单 token), text(后缀)]（单 token 化见 makeFilepathLink）。
+  // 拆分发生在「已确定无 emphasis
   // 边界的纯 text token 内部」，不影响任何相邻 strong/emphasis/code/link token 的开闭配对
   // （那些配对在更外层已成立）。PoC 实测验证 emphasis 完整保留。
   //
@@ -287,10 +322,26 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 走与 core rule 对称的候选正则 + 白名单（env 透传），产出
   // <code>...<a class="md-filepath" data-path="...">path</a>...</code>——
   // 保留等宽 code 视觉，路径可点击（点击处理由 ui 包 MarkdownRenderer.vue 的 onClick
-  // 事件委托原生实现：代码块复制 / .md-filepath / .md-ambiguous / 外链四路分流）。
-  md.renderer.rules.code_inline = (tokens, idx, _options, env) => {
+  // 事件委托原生实现：代码块复制 / .md-filepath / .md-ambiguous / 相对链接与外链④路分流——
+  // 相对链接按 resourceBaseDir resolve 后经 drawer detail 打开，设计 markdown-html-sanitize-render D4）。
+  // 摘出点 4/5（设计 D3）：<code> 整段（含 md-filepath 链接）存信任槽返回哨兵
+  md.renderer.rules.code_inline = (tokens, idx, _options, env): string => {
     const mdEnv = env as MarkdownEnv | undefined
-    return `<code>${linkifyFilePathsHtml(tokens[idx].content, mdEnv?.filePaths, mdEnv?.localFiles)}</code>`
+    return stashTrusted(
+      env,
+      `<code>${linkifyFilePathsHtml(tokens[idx].content, mdEnv?.filePaths, mdEnv?.localFiles)}</code>`,
+    )
+  }
+
+  // 摘出点 5/5（设计 D3）：md_trusted_inline（filepathCoreRule 产出的单 token，见
+  // makeFilepathLink）整件 <a class="md-filepath">——class/data-path 契约属性经摘出绕过
+  // 白名单。普通链接的 link_open 分支保持现状不摘出（target/rel 在白名单内）
+  md.renderer.rules.md_trusted_inline = (tokens, idx, _options, env): string => {
+    const path = tokens[idx].content
+    return stashTrusted(
+      env,
+      `<a class="md-filepath" data-path="${encodeBase64(path)}">${escapeHtml(path)}</a>`,
+    )
   }
 
   cachedMarkdown = md
@@ -396,18 +447,19 @@ function makeTextToken(TokenCtor: TokenCtor, content: string): Token {
   return t
 }
 
-/** 构造 md-filepath 链接三件套 [link_open, text, link_close] */
+/**
+ * 构造 md_trusted_inline 单 token（filepath 正文链接的承载形态）。
+ *
+ * [HISTORICAL] 2026-09 前是三 token（link_open/text/link_close），html:false 时代直出
+ * 即安全。html:true 后链接整件需经摘出绕过净化层（class/data-path 契约属性不在用户
+ * 白名单），而「拆分开/闭标签摘出」不可行（孤立闭标签在 DOM parse 阶段被丢弃 → 回填后
+ * a 闭合漂移、链接吞并后续同级内容——设计 D3 摘出单位原则：摘出单位 ≥ 完整配对元素），
+ * 故合并为单 token，renderer 期整件摘出。
+ */
 function makeFilepathLink(TokenCtor: TokenCtor, path: string): Token[] {
-  const open = new TokenCtor('link_open', 'a', 1)
-  // data-path base64 编码（与 code_inline / mermaid 同 XSS 防线，防引号注入）
-  open.attrs = [
-    ['class', 'md-filepath'],
-    ['data-path', encodeBase64(path)],
-  ]
-  const text = new TokenCtor('text', '', 0)
-  text.content = path
-  const close = new TokenCtor('link_close', 'a', -1)
-  return [open, text, close]
+  const t = new TokenCtor('md_trusted_inline', '', 0)
+  t.content = path
+  return [t]
 }
 
 /**
@@ -415,7 +467,7 @@ function makeFilepathLink(TokenCtor: TokenCtor, path: string): Token[] {
  *
  * 此时 emphasis 已在 inline parser 的 ruler2 后处理阶段配对完毕。本 rule 遍历所有 inline token
  * 的 children，对 text token 的 .content 做候选扫描 + 白名单校验，命中则把该 text token 拆成
- * [text(前缀), link_open, text(路径), link_close, text(后缀)]。
+ * [text(前缀), md_trusted_inline(路径单 token), text(后缀)]（单 token 化见 makeFilepathLink）。
  *
  * 安全性（emphasis 不被破坏）：拆分发生在「已确定无 emphasis 边界的纯 text token 内部」——
  * emphasis 的 ** 已在更早阶段被剥离为 strong_open/close，此处的 text token 是独立纯文本段。
@@ -541,13 +593,32 @@ function linkifyFilePathsHtml(content: string, filePaths?: Set<string>, localFil
 /**
  * 把 markdown 文本渲染成 HTML 字符串。
  * 首次调用 await shiki 加载（异步）；之后 markdown-it 实例缓存，后续渲染同步。
+ *
+ * 净化点在本函数出口（D2：md.render 返回整串 → DOMPurify 两级白名单 → 哨兵回填 +
+ * 完整性断言 → trimEnd）——唯一解析入口 + 净化先于任何 v-html，覆盖全部消费面
+ * （对话流/drawer/命令文档/UpdateButton 自建 v-html）。sanitize/回填异常 → catch 降级
+ * 转义纯文本 + console.error 出声（渲染不中断；md.render 自身的异常保持原有向上
+ * 抛出语义，由 useMarkdownStreaming 的降级路径接住并作废增量缓存）。
+ *
  * @param env 透传给 markdown-it inline rule + renderer rule（见 MarkdownEnv）
  */
 export async function renderMarkdown(content: string, env?: MarkdownEnv): Promise<string> {
   const md = await getMarkdown()
+  // 信任槽每次调用无条件覆盖重置（R5）：调用方复用同一 env 时，上次调用的 store/nonce
+  // 不泄漏进本次；增量轴同 env 多段顺序渲染依赖此重置（每段独立 nonce）
+  const renderEnv: MarkdownEnv = env ?? {}
+  resetTrustSlot(renderEnv)
   // trimEnd：markdown-it 输出末尾带格式化 \n（如 "<p>hi</p>\n"），防御性清理。
   // breaks:true 后软换行走 <br>，不再依赖 pre-wrap 容器，但末尾空白文本节点无意义，保留清理。
-  return md.render(content, env ?? {}).trimEnd()
+  const html = md.render(content, renderEnv)
+  try {
+    return sanitizeAndRestore(html, renderEnv).trimEnd()
+  } catch (e) {
+    // 降级必须出声（[HISTORICAL] 2026-08 CSP 事故教训：静默吞错不可查），公式哨兵落进
+    // 连删元素等形态触发完整性断言时走此路径——出声优于静默丢内容（设计 D3）
+    console.error('[markdown] sanitize failed, fallback to escaped plain text:', e)
+    return escapeHtml(content).trimEnd()
+  }
 }
 
 /** markdown 渲染段（供 MarkdownRenderer 按 segment 分别渲染，mermaid 段走 MermaidRenderer 组件）。

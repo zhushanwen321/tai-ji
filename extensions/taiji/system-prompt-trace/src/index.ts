@@ -19,6 +19,7 @@ import { setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { readLastPromptFromSessionFile } from "./baseline.js";
 import { createSystemPromptTrace } from "./trace.js";
 import type { TraceContext, TraceEnv } from "./trace.js";
+import { readPresetFallbackFromEnv } from "./types.js";
 import type { SwitchStash } from "./types.js";
 
 // 模块级单例：session_before_switch（旧 runtime）→ session_start（新 runtime）之间传递
@@ -45,6 +46,9 @@ export default function systemPromptTraceExtension(pi: ExtensionAPI): void {
 
 	const env: TraceEnv = {
 		readLastPromptFromFile: (filePath) => readLastPromptFromSessionFile(filePath),
+		// F1b（E4 trace 披露面）：模式回落事实由 runtime 经 spawn 出站 env 携带。
+		// 工厂调用时读一次（进程 env 生命期内不变）；未回落 → 空串 → undefined。
+		getPresetFallback: () => readPresetFallbackFromEnv(),
 	};
 
 	const logic = createSystemPromptTrace(env, switchStash);

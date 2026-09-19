@@ -101,7 +101,7 @@
 <a id="pi-ext-033"></a>
 ### ADR-033：subagent UI 透传通用化架构（method 交互模型 + channel 注册表正交）（Accepted）
 - 结论：透传 + 排队由 Pi method 交互模型决定（dialog 类 select/confirm/input/editor 自动透传 + L2 排队；fire-and-forget 仅 GUI 透传；TUI 纯展示不透传），业务路由由 channel 注册表（NUL 前缀 marker 解析，提取位置依赖 method）决定——新增 channel 零改 adapter/session-runner/SubagentService。
-- 去向：已实现——透传通道现行落点 `extensions/taiji/plugin-bridge/src/index.ts`（ASK_USER_MARKER 经 select 通道中转）；subagent-workflow 侧原 ui-channels/dialog-queue 模块已随重构演进。
+- 去向：已实现——透传通道历史落点 `extensions/taiji/plugin-bridge/src/index.ts`（ASK_USER_MARKER 经 select 通道中转；2026-09-19 起由 UI_FORM_MARKER 取代）；subagent-workflow 侧原 ui-channels/dialog-queue 模块已随重构演进。
 
 <a id="pi-ext-034"></a>
 ### ADR-034：Subagent 执行记录 Manifest（REJECTED，不可行）

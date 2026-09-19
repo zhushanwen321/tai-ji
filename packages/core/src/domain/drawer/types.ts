@@ -16,8 +16,11 @@
  * [P4 s5 drawer-widget-removal] tasks 成员已随 tasks 域删除移除（PluginViewContainer 承接）。
  * subagent/workflow 一级 tab（2026-08-14 subagent-workflow-drawer-tab）：collapsed only chat 块点击 → openSubagent/openWorkflow 开对应 tab。
  * subagent tab = 嵌套只读 MessageStream（复用主对话流渲染，D3）；workflow tab = agent call 列表（点 call 切 subagent tab）。
- * bashTask tab（2026-09 background-task-sidebar-view D5①）：后台命令详情（命令全文/元信息/输出尾部跟随/终止）。 */
-export type SideDrawerTab = 'terminal' | 'browser' | 'git' | 'doc' | 'detail' | 'subagent' | 'workflow' | 'bashTask'
+ * bashTask tab（2026-09 background-task-sidebar-view D5①）：后台命令详情（命令全文/元信息/输出尾部跟随/终止）。
+ * plan tab（2026-09 plan 模式重设计 u1-drawer-tab）：计划产物（agent 按 skill 流程产出的多文档审阅面）。
+ * 无打开参数（OpenDrawerOptions 零加员，bashTask 同款先例）；自动打开经 ADR-0053 per-session
+ * pendingOpen 语义（renderer 接线，core 只持 tab 枚举成员）。 */
+export type SideDrawerTab = 'terminal' | 'browser' | 'git' | 'doc' | 'detail' | 'subagent' | 'workflow' | 'bashTask' | 'plan'
 
 /** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab） */
 export interface OpenDrawerOptions {

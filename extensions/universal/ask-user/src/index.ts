@@ -4,14 +4,15 @@ import type { AgentToolResult, AgentToolUpdateCallback, ExtensionAPI, ExtensionC
 import { type Static } from "typebox";
 import {
 	type AskUserAnswers,
-	askUserInteract,
 	type AskUserQuestion,
 	getAskUserAnswer,
 	getAskUserOther,
+	uiFormInteract,
 } from "@zhushanwen/extension-protocol";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import { createAskUserChannelHandler } from "./channel-handler";
+import { internalToFormQuestions } from "./form-adapter";
 import { registerAskUserChannelHandler } from "./channel-registry-register";
 import { AskUserComponent } from "./component";
 import { answerValueText } from "./submit-view";
@@ -178,8 +179,11 @@ function protoAnswersToResult(
 /**
  * RPC 模式（taiji GUI）交互入口。
  *
- * 走 askUserInteract（select 通道 + ASK_USER_MARKER），前端 AskUserOverlay 渲染富交互 UI。
- * 返回 Result（正常/取消），或抛错（select 异常 / 非 RPC 模式调用了此函数）。
+ * 走 uiFormInteract（统一表单协议：select 通道 + UI_FORM_MARKER），问题经包内归一
+ * adapter 转为 FormQuestion 家族（choice 形态），前端 FormOverlay 渲染表单。
+ * 回包 FormAnswers 的 choice 部分与旧 AskUserAnswers 逐字兼容（键位规则 D2），
+ * 解码复用 getAskUserAnswer/getAskUserOther 零改动。
+ * 返回 Result（正常/取消），或抛错（通道契约破坏 / 非 RPC 模式调用了此函数）。
  *
  * 注意：从 ExtensionContext 构造 GuiContext 子集传入，而非直接传 ctx——
  * ExtensionContext.ui.custom 的泛型签名与 GuiContext.ui.custom 不兼容（前者复杂泛型，后者简化签名），
@@ -191,19 +195,38 @@ async function runRpcInteraction(
 	ctx: ExtensionContext,
 ): Promise<Result> {
 	const protoQuestions = toProtoQuestions(questions);
+	const formQuestions = internalToFormQuestions(questions);
 	const guiCtx = {
 		mode: ctx.mode,
 		hasUI: ctx.hasUI,
 		ui: { select: ctx.ui.select.bind(ctx.ui) },
 	};
-	const answers = await askUserInteract(guiCtx, protoQuestions, { signal, allowCancel: true });
+	// 通道失败留痕（select throw / echo 命中）：channel-error 折叠 throw 时透出根因
+	let lastChannelLog = "";
+	const interact = await uiFormInteract(guiCtx, formQuestions, {
+		signal,
+		allowCancel: true,
+		log: (msg, detail) => {
+			lastChannelLog = detail === undefined ? msg : `${msg} ${JSON.stringify(detail)}`;
+		},
+	});
 
-	if (answers === null) {
+	if (!interact.ok) {
+		if (interact.reason === "channel-error") {
+			// 通道契约破坏：echo 检测命中的旧宿主组合（D7 下三角，message 携带升级指引）
+			// 或 select 抛错。throw 而非折叠 cancelled——「明确报错」让用户与 LLM 拿到
+			// 恢复动作，误报「用户取消」会诱导 LLM 俊等用户。
+			throw new Error(
+				interact.message ?? `form channel error${lastChannelLog ? ` (${lastChannelLog})` : ""}`,
+			);
+		}
+		// cancelled / timeout / non-json → 用户未作答或回包不可解，与旧 askUserInteract
+		// 的 null 语义一致，折叠 cancelled result
 		return { questions, answers: {}, cancelled: true };
 	}
 	return {
 		questions,
-		answers: protoAnswersToResult(questions, protoQuestions, answers),
+		answers: protoAnswersToResult(questions, protoQuestions, interact.answers),
 		cancelled: false,
 	};
 }
@@ -295,7 +318,7 @@ Don't:
 				);
 			}
 
-			// 4. 交互执行：TUI 走 ctx.ui.custom，RPC（taiji GUI）走 askUserInteract。
+			// 4. 交互执行：TUI 走 ctx.ui.custom，RPC（taiji GUI）走 uiFormInteract（统一表单协议）。
 			// 注意：hasUI 在 TUI 和 RPC 模式都为 true（dialog-capable），不能用于区分——
 			// 用 ctx.mode === 'rpc' 判定 GUI 渲染通道。
 			const useRpc = ctx.mode === "rpc";

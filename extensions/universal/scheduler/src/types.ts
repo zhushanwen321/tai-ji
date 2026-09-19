@@ -15,6 +15,7 @@ export interface ScheduledTask {
   prompt: string                    // 到期时注入的 message
   kind: TaskKind
   schedule: ScheduleSpec            // once 时 intervalMs = delayMs
+  model?: string                    // 任务执行模型（scoped model id，provider/model）；undefined = 跟随会话当前模型
   enabled: boolean
   createdAt: number
   nextRunAt: number
@@ -70,6 +71,7 @@ export interface TaskSnapshot {
   prompt: string
   kind: TaskKind
   schedule: ScheduleSpec
+  model?: string
   enabled: boolean
   createdAt: number
   nextRunAt: number
@@ -122,6 +124,7 @@ export function snapshotToTask(snapshot: TaskSnapshot): ScheduledTask {
     prompt: snapshot.prompt,
     kind: snapshot.kind,
     schedule: snapshot.schedule,
+    model: snapshot.model,
     enabled: snapshot.enabled,
     createdAt: snapshot.createdAt,
     nextRunAt: snapshot.nextRunAt,
@@ -152,4 +155,6 @@ export interface AddOptions {
   name?: string
   kind?: TaskKind
   expires?: string
+  /** 任务执行模型（scoped model id，provider/model）；缺省 = 跟随会话当前模型 */
+  model?: string
 }

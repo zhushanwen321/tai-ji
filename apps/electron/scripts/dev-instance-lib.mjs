@@ -16,6 +16,51 @@ export const DEV_DATA_PARENT = path.join(os.homedir(), '.taiji-dev')
 export const INSTANCES_DIR = path.join(DEV_DATA_PARENT, 'instances')
 export const TEMPLATE_DIR = path.join(os.homedir(), '.taiji-dev.template')
 
+/**
+ * --data-dir 值域：DEV_DATA_PARENT 树内严格子路径（<homedir>/.taiji-dev/<suffix>）。
+ * 刻意不收 homedir 直下的兄弟目录形态（~/.taiji-dev-xxx）——test-guard fs-guard 白名单
+ * 是 ~/.taiji-dev 前缀匹配（test-guard/fs-guard-impl.ts allowedRootVariants），树内目录
+ * 天然被测试防线覆盖，兄弟目录会整目录落在防线之外；且一棵 .taiji-dev 树好清理。
+ * main 侧采信判定在 utils/dev-data-dir.ts resolveDevDataDir（树内含树根即采信）；
+ * 本谓词不含树根——树根本体由 resolveCustomDataDir 保留目录拒绝兜住（--fresh 不可删
+ * 它），两处判定独立演化、非镜像，改动各自带测试。
+ */
+export function isWithinDevDataParent(p, devDataParent = DEV_DATA_PARENT) {
+  const resolved = path.resolve(p)
+  return resolved.startsWith(devDataParent + path.sep)
+}
+
+/**
+ * 解析并校验 --data-dir CLI 入参：落在 DEV_DATA_PARENT 树内的绝对路径。
+ * 非法值抛带恢复指引的 Error（错误 → 权威源 → 重试闭环）；等于保留目录
+ * （DEV_DATA_PARENT 本体 / instances 目录）同样拒绝——--fresh 会整目录删除，
+ * 保留目录是既有实例布局的祖先，不可作为实例数据目录。
+ *
+ * @returns 绝对路径（path.resolve 归一化）
+ */
+export function resolveCustomDataDir(value, opts = {}) {
+  const devDataParent = opts.devDataParent ?? DEV_DATA_PARENT
+  const instancesDir = opts.instancesDir ?? path.join(devDataParent, 'instances')
+  if (!value) {
+    throw new Error('[dev-instance] --data-dir 需要显式路径参数')
+  }
+  const resolved = path.resolve(value)
+  if (!isWithinDevDataParent(resolved, devDataParent)) {
+    throw new Error(
+      `[dev-instance] --data-dir 必须落在 ${devDataParent} 目录之内（如 ${devDataParent}/my-experiment）: ${resolved}\n` +
+        `  值域约束原因：test-guard fs-guard 白名单与路径守卫按 ${devDataParent} 前缀放行，树外目录会绕过测试防线；` +
+        `禁止指向真实数据目录 ~/.taiji。`,
+    )
+  }
+  if (resolved === devDataParent || resolved === instancesDir) {
+    throw new Error(
+      `[dev-instance] --data-dir 不可指向保留目录（${devDataParent} 或 ${instancesDir}）——--fresh 会整目录删除\n` +
+        `  恢复动作：改用 ${devDataParent}/<自定义子目录>，或不传 --data-dir 走默认实例派生。`,
+    )
+  }
+  return resolved
+}
+
 /** workspace AGENTS.md「Dev 与子进程环境变量隔离 MANDATORY」泄漏清单。
  *  TAIJI_AGENT_DATA_DIR 不在列——装配器对它覆盖注入（实例隔离权威来源）。
  *  互引（场景域分化，勿互混）：引擎 spawn 面的另一份剥除清单 =
@@ -114,9 +159,13 @@ export function ensureInstanceDir(p, fresh, opts = {}) {
   const log = opts.log ?? (() => {})
   const fail = opts.fail ?? ((msg) => { throw new Error(msg) })
   const resolved = path.resolve(p.dataDir)
-  // 安全断言：--fresh 只允许删 instances/ 直属子目录，防误删任意路径
-  if (!resolved.startsWith(instancesDir + path.sep)) {
-    fail(`[dev-instance] 实例目录越界（须在 ${instancesDir} 下）: ${resolved}`)
+  // 安全断言：--fresh 只允许删 instances/ 直属子目录或 DEV_DATA_PARENT 树内目录
+  // （后者 = --data-dir 显式指定的实验目录，值域已由 resolveCustomDataDir 收敛且
+  // 保留目录——DEV_DATA_PARENT 本体 / instances——在解析期即被拒绝），防误删任意路径
+  const inInstances = resolved.startsWith(instancesDir + path.sep)
+  const inDevParent = isWithinDevDataParent(resolved, opts.devDataParent ?? DEV_DATA_PARENT)
+  if (!inInstances && !inDevParent) {
+    fail(`[dev-instance] 实例目录越界（须在 ${instancesDir} 下或 --data-dir 值域内）: ${resolved}`)
     return false
   }
   if (fresh && fs.existsSync(resolved)) {

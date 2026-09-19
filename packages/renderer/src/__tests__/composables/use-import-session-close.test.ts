@@ -108,6 +108,7 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
   it('C1: 打开写入候选 → close() 清 items/dirs/total + open 收口', async () => {
     const t = mountComposable()
     t.s.resetForOpen()
+    t.s.selectSource('pi') // 选定缺省源（两阶段视图：resetForOpen 不首拉，首拉由 selectSource 承担）
     await flushPromises()
     expect(t.s.open.value).toBe(true)
     expect(t.counts()).toBe('2/2/2')
@@ -131,7 +132,8 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
       }),
     )
     const t = mountComposable()
-    t.s.resetForOpen() // 发起首拉（在途）
+    t.s.resetForOpen()
+    t.s.selectSource('pi') // 发起首拉（在途）
     t.s.close() // 关闭（清结果 + 失效在途写回）
     resolveFetch?.({
       items: [makeCandidate('late-1')],
@@ -146,7 +148,8 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
   it('C3: close 取消 pending debounce——关窗后不发出新候选查询', async () => {
     vi.useFakeTimers()
     const t = mountComposable()
-    t.s.resetForOpen() // 空查询立即首拉（调用 #1）
+    t.s.resetForOpen()
+    t.s.selectSource('pi') // 选定缺省源（首拉，调用 #1）
     await vi.advanceTimersByTimeAsync(0)
     expect(apiMocks.importCandidates).toHaveBeenCalledTimes(1)
 

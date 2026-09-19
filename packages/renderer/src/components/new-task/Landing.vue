@@ -19,6 +19,8 @@ import { computed, onMounted, onUnmounted, provide, watch } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { Folder, GitFork, RefreshCw } from '@lucide/vue'
+import { resolveLaunchConfig } from '@taiji/core'
+import { BUILTIN_PRESET_IDS, type PiLaunchPreset } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -165,6 +167,59 @@ const isWorktreeModalOpen = computed(() => flow.state.value === 'worktree-modal'
 /** 当前 cwd 所在 workspace 的已有 worktree 列表（BranchSelectPopover Worktree tab 数据源）。 */
 const worktreeItems = computed(() => flow.worktreeItems?.value ?? [])
 
+/** 短名去尾缀后的最小保留长度（低于此值回退全名，避免「模式」二字模式名被去空） */
+const MIN_SHORT_NAME_LENGTH = 2
+
+/**
+ * 当前显示 / 将生效的模式（u4b 接线）：与 PresetSelectChip 内部同一 resolve 链
+ * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 / 短名 /
+ * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约）。
+ */
+const displayPreset = computed<PiLaunchPreset | null>(() => {
+  const presets = deps.presets.value
+  const resolved = resolveLaunchConfig({
+    pendingPreset: flow.pendingPreset?.value ?? null,
+    presets,
+    defaultPresetId: deps.defaultPresetId.value,
+  })
+  const id =
+    resolved.presetId ??
+    (presets.some((p) => p.id === BUILTIN_PRESET_IDS.FULL) ? BUILTIN_PRESET_IDS.FULL : '')
+  return presets.find((p) => p.id === id) ?? null
+})
+/** 模式全名（缺省 undefined → ui chip 回落其内部解析名，既有接入零改动） */
+const modeName = computed(() => displayPreset.value?.name)
+/** 模式短名（中文本土模式名去「模式」尾缀；无尾缀保持全名） */
+const modeShortName = computed(() => {
+  const name = modeName.value
+  if (!name) return undefined
+  const stripped = name.replace(/模式$/, '')
+  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
+})
+/** 信任标记判据（设计 §7.1：`replace.enabled && 文案非空`） */
+const modeHasReplace = computed(() => {
+  const seg = displayPreset.value?.prompt?.replace
+  return !!seg?.enabled && (seg.prompt ?? '').trim().length > 0
+})
+/** 信任标记文案（文本/短名档 = chip 内后缀；纯图标档 = 角标 tooltip；空 → ui chip 不渲染标记） */
+const modeReplaceHint = computed(() =>
+  modeHasReplace.value ? t('newTask.presetChip.replaceHint') : undefined,
+)
+/**
+ * 模式 chip 强调底判据（设计 §5.1「颜色即状态」；方案 B）：当前生效模式 ≠ 默认模式才算非默认。
+ *
+ * 与 displayPreset 同源（同一 resolve 链）——displayPreset 存在 + id !== 默认档。默认档用
+ * `||` 而非 `??`：store 未加载时 deps.defaultPresetId 为 `''`（非 null），`'' ?? x` 仍是 `''`，
+ * 会把默认模式误判成非默认（恒亮 accent = 不携带信息，正是本判据要消除的退化）。
+ * 注意 displayPreset 已把「解析不到」回落到 builtin:full（含 presets 未加载的 `''` 分支），
+ * 故存在性 + 默认档比对即可，无需再处理空档。
+ */
+const isNonDefaultPreset = computed(() => {
+  const p = displayPreset.value
+  if (!p) return false
+  return p.id !== (deps.defaultPresetId.value || BUILTIN_PRESET_IDS.FULL)
+})
+
 function onSelectWorkspace(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
 }
@@ -241,17 +296,22 @@ function onPresetSelect(payload: { presetId: string }): void {
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
     <Composer variant="landing" :session-id="composerSid">
       <template #meta-row>
-        <div class="flex items-center gap-2 px-2.5 pt-2.5">
+        <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
+             各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
+             （纯 CSS flex-shrink，分支 shrink-[8] 先于模式 shrink）→ 模式退化为纯图标
+             （PresetSelectChip 内部实测自适应，颜色即状态：默认模式中性底 / 非默认模式 accent 底
+             [方案 B，:accent=isNonDefaultPreset]，跨档不丢的信任标记）。 -->
+        <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-2.5 pt-2.5">
           <Popover v-model:open="isDirOpen">
             <PopoverTrigger as-child>
               <Button
                 data-testid="chip-directory"
                 variant="ghost"
-                class="h-auto gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-w-0 shrink-0 gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
                 :class="{ '!text-accent': !cwd }"
               >
                 <Folder class="shrink-0" />
-                <span class="font-mono">{{ dirLabel }}</span>
+                <span class="max-w-[110px] truncate font-mono">{{ dirLabel }}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" :collision-padding="8" class="w-[320px] p-0">
@@ -263,16 +323,16 @@ function onPresetSelect(payload: { presetId: string }): void {
               />
             </PopoverContent>
           </Popover>
-          <span v-if="isGitRepo" aria-hidden="true" class="h-3.5 w-px bg-border" />
+          <span v-if="isGitRepo" aria-hidden="true" class="h-3.5 w-px shrink-0 bg-border" />
           <Popover v-if="isGitRepo" v-model:open="isBranchOpen">
             <PopoverTrigger as-child>
               <Button
                 data-testid="chip-branch"
                 variant="ghost"
-                class="h-auto gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-w-0 shrink-[8] gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
               >
                 <GitFork class="shrink-0" />
-                <span class="font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
+                <span class="max-w-[76px] min-w-0 truncate font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" :collision-padding="8" class="w-[420px] p-0">
@@ -289,10 +349,15 @@ function onPresetSelect(payload: { presetId: string }): void {
               />
             </PopoverContent>
           </Popover>
-          <span aria-hidden="true" class="h-3.5 w-px bg-border" />
+          <span aria-hidden="true" class="h-3.5 w-px shrink-0 bg-border" />
           <PresetSelectChip
             :session-id="composerSid"
             :launch-preset-id="flow.currentSession.value?.launchPresetId"
+            :accent="isNonDefaultPreset"
+            :mode-name="modeName"
+            :short-name="modeShortName"
+            :has-replace-prompt="modeHasReplace"
+            :replace-hint="modeReplaceHint"
             v-model:preset-open="isPresetOpen"
             @select="onPresetSelect"
           />

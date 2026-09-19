@@ -891,9 +891,63 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 3：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
+  it("[R5] 守卫 3：zcode 源 → fork 通道未接入文案（准确理由 + 行动语言，无 retention 误导文字）", async () => {
+    // zcode 形态：sessionFile 恒 undefined，历史在隔离 sqlite 会话库（engineHandle.sessionRef）。
+    // 旧链路下该形态落守卫 6 锚判据，文案「never started / retention expired」对 zcode 失实
+    // （历史不随 pi retention 回收，真实原因是 fork 通道未接入）——zcode 按引擎早分流给出准确理由。
+    const r = await errOf(() =>
+      forkFromHandler(
+        makeForkService(
+          makeRec({
+            id: "bg-1",
+            status: "idle",
+            engine: "zcode",
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ),
+        { sourceSubagentId: "bg-1" },
+      ),
+    );
+    expect(r.errorName).toBe("Error");
+    // 准确理由：通道未接入 + 历史在隔离会话库
+    expect(r.message).toContain("fork-from channel is not wired up yet");
+    expect(r.message).toContain("isolated sqlite session db");
+    // [G4] 不得复用 pi 的失实表述
+    expect(r.message).not.toContain("never started");
+    expect(r.message).not.toContain("retention expired");
+    // 行动语言：message 同 id 重开（历史摘要自动注入）或 start 全新子代理
+    expect(r.message).toContain("action:'message'");
+    expect(r.message).toContain("(prior-task summary auto-injected)");
+    expect(r.message).toContain("action:'start'");
+  });
+
+  it("[R5] 守卫 3 先于 worktree 守卫：zcode + worktree 源 → 仍是 zcode 通道文案（worktree 文案对 zcode 失实）", async () => {
+    // 分流位置在 worktree 守卫之前（设计 §5 W4：worktree 文案的「read its session file」
+    // 行动语言对 zcode 无意义——zcode 无 sessionFile 载体）
+    const r = await errOf(() =>
+      forkFromHandler(
+        makeForkService(
+          makeRec({
+            id: "bg-1",
+            status: "idle",
+            engine: "zcode",
+            worktree: true,
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ),
+        { sourceSubagentId: "bg-1" },
+      ),
+    );
+    expect(r.errorName).toBe("Error");
+    expect(r.message).toContain("fork-from channel is not wired up yet");
+    expect(r.message).not.toContain("worktree isolation");
+  });
+
+  it("守卫 4：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
     // [U4b/E2] 双宿主形态：宿主 A 持有中的 record（.alive = A 进程的活 pid 声明）被
-    // 宿主 B 冷查重建，B fork-from 该源时守卫 3 现查探针命中 → 拒绝（源仍在异进程
+    // 宿主 B 冷查重建，B fork-from 该源时守卫 4 现查探针命中 → 拒绝（源仍在异进程
     // 运行，接续会读到半截历史）。[U1/A4] self-pid 排除后「异进程」不能用本测试进程
     // pid 模拟，改恒活外部 pid 1（launchd/init：kill(1,0) → EPERM → isProcessAlive 判活）。
     const sessionFile = path.join(forkDir, "sess-foreign.jsonl");
@@ -913,7 +967,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 3 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
+  it("守卫 4 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
     // [U4] 锚可解析性要求源 sessionFile 真实在盘（isAnchorResolvable = existsSync）。
     const sessionFile = path.join(forkDir, "sess-live.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");

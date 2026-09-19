@@ -69,9 +69,13 @@ describe("[F1] 不可克隆 return → run failed（非悬挂）— e2e", () => 
         runner: { run: vi.fn(async () => ({})) },
         runs,
         eventBus: { emit: vi.fn() },
+        appendEntry: vi.fn(),
         onRunDone: vi.fn(),
         log: vi.fn(),
-      } as unknown as LifecycleDeps & { onRunDone: ReturnType<typeof vi.fn> };
+      } as unknown as LifecycleDeps & {
+        appendEntry: ReturnType<typeof vi.fn>;
+        onRunDone: ReturnType<typeof vi.fn>;
+      };
 
       const spec: RunSpec = {
         scriptSource: "return { ok: true, fn: () => 1 };",
@@ -91,9 +95,9 @@ describe("[F1] 不可克隆 return → run failed（非悬挂）— e2e", () => 
       // worker 侧 fallback 消息经 handleScriptError 超限路径写入归因
       expect(run.state.error).toContain("structured-clone failed");
       // 终态副作用齐全（对比 SW-DATA-3/F1 前的幽灵悬挂：无 unregister / 无 onRunDone）
-      expect(deps.eventBus!.emit).toHaveBeenCalledWith(
+      expect(deps.appendEntry).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: runId, reason: "failed" }),
+        expect.objectContaining({ id: runId, reason: "failed", status: "failed" }),
       );
       expect(deps.onRunDone).toHaveBeenCalledTimes(1);
       // 终态已落盘（F1 不变式的持久化半边：非但收敛，且状态被记录可恢复）

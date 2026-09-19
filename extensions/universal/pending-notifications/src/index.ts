@@ -13,15 +13,25 @@
  * - index.ts（本文件）: 工厂入口（EventBus 写侧监听 + session 基准 + 查询 tool）
  *
  * 事件契约（emit 端三组，与 extension-dependencies.json 本包条目 reason 同口径：
- * ① subagent-core——notify-host.ts / orchestration/lifecycle.ts /
- *   worker-message-pump.ts / round-supervisor/reconcile-sweep.ts（崩溃恢复 sweep
- *   补注销）；② base-tool-enhance——bash 投影（notify.ts register/unregister 主链 +
+ * ① subagent-core——notify-host.ts（register + record 终态化 unregister——finalizeRun
+ *   直落后的残留发射面，观测通道 = sweep reconciled WARN）/ orchestration/lifecycle.ts
+ *   （register 主链）；
+ * ② base-tool-enhance——bash 投影（notify.ts register/unregister 主链 +
  *   process-exit-guard.ts 退出边沿尽力补 emit（pending-reconcile 对账走 appendEntry
  *   权威路径，不经 emit））；
  * ③ subagent-workflow——仅崩溃恢复时 emit pending:unregister（session-lifecycle.ts
  *   recoverCrashedRuns 回调））：
  * - emit("pending:register", { id, type, name })
  * - emit("pending:unregister", { id, reason })
+ *
+ * 直落写方（不经本事件、直接 appendEntry 权威落盘——listener 的 isPendingActive
+ * 现算幂等门对两族写方统一生效，重复注销被自然拦截）：
+ * - subagent-core worker-message-pump.ts finalizeRun（reload-closeout D4：workflow
+ *   run 终态注销直落，emit 发射点已删——reload 转换窗/factory 顺序窗内 emit 丢失
+ *   即注销 entry 永缺位）；
+ * - subagent-core round-supervisor/reconcile-sweep.ts（对账 sweep 补注销，对账走
+ *   appendEntry 权威路径，不经 emit）；
+ * - base-tool-enhance pending-reconcile.ts（session_start 对账，同款）。
  *
  * entry 契约（与 goal before-agent-start.ts 对齐，读取端按 e.data.id 算差集）：
  * - pending:register → { id, type, name, registeredAt, sessionId }

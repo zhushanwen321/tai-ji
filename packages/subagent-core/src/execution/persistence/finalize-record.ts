@@ -45,8 +45,9 @@ export interface FinalizeDeps {
    * 在闭包内自行兜底）。[永久会话模型] 现行调用面（recordLifecycle.finalizeRecord →
    * doFinalizeRecord 的全部生产入口）：workflow-origin D7 例外族（settleOneShotOutcome
    * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
-   * 监督器放弃（finalizeClosed）+ finalizeEngineOutcome 兜底（引擎死亡不可接管形态
-   * 的终态化）。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
+   * 监督器放弃（finalizeClosed）。旧 finalizeEngineOutcome 兜底（引擎死亡不可接管
+   * 形态的终态化）已删——引擎死亡现走 Continuation 失败分支收口（settleRoundFailed，
+   * idle 可恢复不终态化），不经本钩子。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
    * settle/markRoundIdle 不终态化（万物可续 G1），close = 收口落账（consumePendingArchive）、
    * dispose = settle + 自动收口，均不经本钩子。收口面现 = Continuation 实例清理
    *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销面已随 interact 面退役）。

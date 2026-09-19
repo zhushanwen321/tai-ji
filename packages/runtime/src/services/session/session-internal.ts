@@ -67,6 +67,19 @@ export interface ManagedSession extends IManagedSessionRecord {
    */
   launchPresetId?: string
   /**
+   * restore 回落事实的内存态持有（F1，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）。
+   *
+   * 语义 = **本进程本次运行**的事实：restore 时 sidecar 里的 presetId 定义不可得
+   * （`fellBackFromPresetId` 非空）→ 本次 pi 已回落 `builtin:full` 启动。
+   * **不持久化**（不写 sidecar）：回落是「本进程本次运行」的内存态事实，进程重开、
+   * 未 restore 时并不成立——持久化会让未重启的会话产生假陈述。
+   *
+   * 与 launchPresetId 同模式：不入 IManagedSessionView / IManagedSessionRecord，
+   * 由 session-lifecycle restore 路径 as 转换写入，toSummary 透传到
+   * SessionSummary.launchPresetFallbackTo（UI 披露位仅 restore 置位）。
+   */
+  launchPresetFallbackTo?: string
+  /**
    * 归属 project id 的内存态持有（D14 语义修正，2026-08-04）。
    *
    * 与 launchPresetId 同模式：create 路径 sidecar 已放行落盘（V9-④ 根修），仅异常时序

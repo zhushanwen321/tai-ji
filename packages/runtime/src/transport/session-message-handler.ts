@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView } from '@taiji/shared'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
@@ -53,10 +53,15 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   查看时间戳（存储在 session-service 侧 per-sid Map）。可选链静默跳过而非报错——
    *   记录是 reaper 豁免信号（u2 消费），非 switch 主流程的一部分，最小 mock 缺该
    *   成员不应让 switch 请求失败。
+   * - getPlanState（plan 模式重设计 D1⑥）：SessionRecords.getPlanState 冷路径读取
+   *   （session-records.ts:510，磁盘 JSONL → scanPlanStateEntries 派生）。SessionService
+   *   已按 workflowAction 同款形态转发（session-service.ts getWorkflows 转发区）；可选成员
+   *   形态对齐 backgroundTasks 先例，缺省仅出现在测试最小 mock 中。
    */
   sessionService: ISessionService & {
     readonly backgroundTasks?: BackgroundTaskRpcPort
     markSessionViewed?(sessionId: string): void
+    getPlanState?(sessionId: string): Promise<PlanStateView>
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -105,6 +110,8 @@ export class SessionMessageHandler {
     // wave:runtime-wiring：session.subscribe/unsubscribe RPC（IF6/IF7）。
     'session.subscribe', 'session.unsubscribe',
     'session.getSubagents', 'session.getSubagentHistory',
+    // plan 模式重设计（D1⑥/D5）：getPlanState 冷启动/切换首拉 + abortPlan 横幅退出命令。
+    'session.getPlanState', 'session.abortPlan',
     // [U7] 子代理引擎配置（Settings 引擎选择器：动态列表 + defaultEngine 读写）
     'session.getSubagentEngineConfig', 'session.setSubagentDefaultEngine',
     'session.getWorkflows', 'session.getAgentCallHistory', 'session.getAgentCallFilePath',
@@ -141,6 +148,8 @@ export class SessionMessageHandler {
     'session.switch': (msg, ws) => this.handleSessionSwitch(msg, ws),
     'session.history': (msg, ws) => this.handleSessionHistory(msg, ws),
     'session.getSubagents': (msg, ws) => this.handleSessionGetSubagents(msg, ws),
+    'session.getPlanState': (msg, ws) => this.handleSessionGetPlanState(msg, ws),
+    'session.abortPlan': (msg, ws) => this.handleSessionAbortPlan(msg, ws),
     'session.getSubagentHistory': (msg, ws) => this.handleSessionGetSubagentHistory(msg, ws),
     'session.getSubagentEngineConfig': (msg, ws) => this.handleSessionGetSubagentEngineConfig(msg, ws),
     'session.setSubagentDefaultEngine': (msg, ws) => this.handleSessionSetSubagentDefaultEngine(msg, ws),
@@ -536,6 +545,51 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'session.workflowActionDone', { sessionId: msg.payload.sessionId, action: msg.payload.action, runId: msg.payload.runId })
   }
 
+  // ── plan 模式重设计（D1⑥ 冷启动首拉 + D5/E9 横幅退出命令）──
+
+  private async handleSessionGetPlanState(msg: Extract<ClientMessage, { type: 'session.getPlanState' }>, ws: WsType): Promise<void> {
+    // D1⑥：冷启动/切换首拉（stateSnapshot 是 bus 内存态、pi exit 即清空——冷送达靠本 RPC，
+    // 与 getSubagents 首拉同构）。冷路径 = SessionRecords.getPlanState（session-records.ts:510，
+    // 磁盘 JSONL → scanPlanStateEntries 派生，与 live 投影同一份派生代码），照 getSubagents
+    // handler 消费形态透传；reply 复用 session.planState 广播 payload（shared 协议同
+    // getSubagents → session.subagents 复用形态）。
+    const { sessionId } = msg.payload
+    const svc = this.ctx.sessionService
+    if (!svc.getPlanState) {
+      // SessionService 未组装转发（仅测试最小 mock 形态，对齐 backgroundTasks 防御分支口径）
+      // → 显式报错不留静默。
+      return this.ctx.sendError(ws, 'plan_state_unsupported', 'plan state reader not available', msg.id, { sessionId })
+    }
+    const planState = await svc.getPlanState(sessionId)
+    return this.ctx.reply(ws, msg.id, 'session.planState', { sessionId, planState })
+  }
+
+  private async handleSessionAbortPlan(msg: Extract<ClientMessage, { type: 'session.abortPlan' }>, ws: WsType): Promise<void> {
+    // D5/E9/E10：横幅「退出 ×」。① ensureActive 自动恢复 pi（join 语义，session-service.ts
+    // ensureActive——崩溃恢复后懒重生未发生的窗口一步到位，不要求用户先发消息；恢复失败
+    // → 下方 error envelope，前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：
+    // `/` 前缀 prompt 被 pi 先行执行为 extension command、不产用户消息、streaming 中可用
+    // （主审 R2 复核实证）；pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——
+    // prompt 对 `/` 前缀先行尝试 extension command（源码注释明言 execute immediately,
+    // even during streaming），handled 即 return 不产用户消息；命令解析
+    // _tryExecuteExtensionCommand :954。本断言双承重：此写入路径 +
+    // .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过 dispatcher busy 预检——照 workflowAction（session-records.ts
+    // workflowAction）先例，审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发
+    // 让 extension 侧 abort handler（先 controller.abort 再 resetPlanState）落地。
+    // 退出结果经投影链 session.planState 广播推回（isActive=false），此处只回 message.status
+    // ack（renderer register<void> 不读 status 值，CL10 宽 string 形态）。
+    const { sessionId } = msg.payload
+    try {
+      const client = await this.ctx.sessionService.ensureActive(sessionId)
+      await client.prompt('/plan abort')
+      return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
+    } catch (e) {
+      const errMsg = toErrorMessage(e)
+      console.error('[runtime] session.abortPlan failed:', errMsg)
+      return this.ctx.sendError(ws, 'abort_plan_failed', errMsg, msg.id, { sessionId })
+    }
+  }
+
   private async handleSessionSubagentAction(msg: Extract<ClientMessage, { type: 'session.subagentAction' }>, ws: WsType): Promise<void> {
     // action 分支（cancel/message/start 的命令拼装与换行编码）在 service 层，handler 只透传
     // payload 字段；reply 回显目标标识（cancel/message→subagentId，start→slug）。
@@ -715,9 +769,11 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImportCandidates(msg: Extract<ClientMessage, { type: 'session.importCandidates' }>, ws: WsType): Promise<void> {
-    // 导入 pi 会话（import-session D5/u3）：候选列表（对话框打开/搜索/切目录，renderer
-    // debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply 类型
-    // SSOT = shared import-session.ts，此处只透传不做字段裁剪。
+    // 导入会话（import-session D5/u3 + 多源 §3.7）：候选列表（对话框打开/搜索/切目录，
+    // renderer debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply
+    // 类型 SSOT = shared import-session.ts，此处只透传不做字段裁剪——payload.source
+    //（含 sessionId/dbPath）随 payload 整体透传，路由在 ImportService 的 source 注册表内，
+    // handler 对源零分支（缺省不传 = pi，存量调用行为不变）。
     const candidatesSvc = this.ctx.importService
     if (!candidatesSvc) {
       // importService 未注入（理论不可达——组合根必传），防御性报错（对齐 handoffService 惯例）。
@@ -739,9 +795,11 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImport(msg: Extract<ClientMessage, { type: 'session.import' }>, ws: WsType): Promise<void> {
-    // 执行导入（D5）：互斥/校验/原子复制/sidecar/缓存失效全在 service（U2），handler 只
-    // 负责 reply 与广播。warning（sidecar_failed）是成功 reply 的可选字段（r4-INFO，
-    // 非 error envelope），随 result 原样透传。
+    // 执行导入（D5 + 多源 §3.7）：互斥/校验/原子落地/sidecar/缓存失效全在 service 编排层
+    //（按 payload.source 路由到对应 SessionImportSource，缺省 'pi'），handler 只负责 reply
+    // 与广播；payload（含 source/sessionId/dbPath）整体透传不做字段裁剪。warning
+    //（sidecar_failed / conversion_degraded）是成功 reply 的可选字段（r4-INFO，非 error
+    // envelope），随 result 原样透传。
     const importSvc = this.ctx.importService
     if (!importSvc) {
       return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)

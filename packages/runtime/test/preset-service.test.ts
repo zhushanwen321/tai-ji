@@ -172,16 +172,16 @@ describe('PresetService · wave 1 存储内核', () => {
     writeFile(file)
 
     const all = presetService.getAllPresets()
-    // 3 个 DEFAULT + 1 个自定义
-    expect(all).toHaveLength(4)
+    // 4 个 DEFAULT + 1 个自定义
+    expect(all).toHaveLength(5)
     const full = all.find(p => p.id === BUILTIN_PRESET_IDS.FULL)!
     expect(full.description).toBe('我被用户改了')
     expect(full.toolMode).toBe('all') // 来自 DEFAULT 兜底（用户未传则保留 DEFAULT 值）
     const custom = all.find(p => p.id === 'uuid-custom-1')
     expect(custom).toBeDefined()
     expect(custom!.builtin).toBe(false)
-    // 按 order 升序：0(full), 1(orch), 2(ro), 10(custom)
-    expect(all.map(p => p.order)).toEqual([0, 1, 2, 10])
+    // 按 order 升序：0(full), 1(orch), 2(ro), 3(dispatch), 10(custom)
+    expect(all.map(p => p.order)).toEqual([0, 1, 2, 3, 10])
   })
 
   it('w1-tc9: getPreset 找不到返回 undefined，builtin:full 总能找到', () => {
@@ -462,6 +462,64 @@ describe('PresetService · wave 2 resolve', () => {
     expect(result.skillPaths).toBeUndefined()
     expect(result.flags.noSkills).toBe(false)
   })
+
+  // ── 模式提示词透传（scope 微扩：PresetResolution.prompt）──
+
+  it('模式提示词透传：resolve 返回 prompt，replace/append 逐段相等', async () => {
+    const presetWithPrompt = makePreset({
+      id: 'uuid-resolve-prompt',
+      prompt: {
+        replace: { enabled: true, prompt: '替换段' },
+        append: { enabled: true, prompt: '追加段' },
+      },
+    })
+    const result = await svcWithMock.resolve(presetWithPrompt, '/cwd')
+    expect(result.prompt).toEqual({
+      replace: { enabled: true, prompt: '替换段' },
+      append: { enabled: true, prompt: '追加段' },
+    })
+    // 逐段相等（字段不丢失 / 不重写）
+    expect(result.prompt!.replace).toEqual(presetWithPrompt.prompt!.replace)
+    expect(result.prompt!.append).toEqual(presetWithPrompt.prompt!.append)
+  })
+
+  it('模式提示词透传：未配置 prompt → resolution.prompt 为 undefined', async () => {
+    const result = await svcWithMock.resolve(makePreset({}), '/cwd')
+    expect(result.prompt).toBeUndefined()
+  })
+
+  it('非法/超限段不进入 resolution：直改盘合计超限 → resolve 拿到折叠后值（append 已丢）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-resolve-fold',
+            name: 'fold',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: {
+              replace: { enabled: true, prompt: 'x'.repeat(16000) },
+              append: { enabled: true, prompt: 'y'.repeat(16000) },
+            },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    // 经读路 coercePreset 折叠后再 resolve：resolution 只拿得到合法剩余段
+    const preset = svcWithMock.getPreset('uuid-resolve-fold')!
+    const result = await svcWithMock.resolve(preset, '/cwd')
+    expect(result.prompt).toBeDefined()
+    expect(result.prompt!.replace!.prompt.length).toBe(16000)
+    expect(result.prompt!.append).toBeUndefined()
+    warnSpy.mockRestore()
+  })
 })
 
 // ── PR #117 review fixes: W-RT-1 / W-RT-2 / W-RT-3 / S-RT-2 ──────────
@@ -696,3 +754,291 @@ function statSyncOptional(path: string): { mtimeMs: number; size: number } | und
     return undefined
   }
 }
+
+// ── 模式提示词：写路整条拒 + 读路段级折叠 + 导入路整条拒 ──────────
+
+describe('PresetService · 模式提示词校验', () => {
+  /** 生成指定长度的提示词占位文本。 */
+  const longPrompt = (n: number): string => 'x'.repeat(n)
+
+  it('写路整条拒：replace 9000 + append 9000（合计 18000）→ savePreset 抛错，文案含实际合计值 18000', () => {
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-total',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+    // 错误文案含实际合计值（形如「模式提示词合计 18000 / 16000 字符，请精简总长」）
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-total-2',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        }),
+      )
+    }).toThrow(/模式提示词合计 18000 \/ 16000/)
+    // 整条拒绝 → 未写盘
+    expect(readFile()?.presets ?? []).toEqual([])
+  })
+
+  it('写路整条拒：段限 单段 16001 → 抛错且文案含该段实际长度', () => {
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-seg',
+          prompt: { append: { enabled: true, prompt: longPrompt(16001) } },
+        }),
+      )
+    }).toThrow(/16001/)
+    expect(readFile()?.presets ?? []).toEqual([])
+  })
+
+  it('写路整条拒：prompt 段形状非法 → 抛 PresetGuardError', () => {
+    // prompt 非对象
+    expect(() => {
+      presetService.savePreset(
+        makePreset({ id: 'uuid-prompt-shape-1', prompt: 'not-an-object' as unknown as PiLaunchPreset['prompt'] }),
+      )
+    }).toThrow(PresetGuardError)
+    // enabled 非 boolean
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-shape-2',
+          prompt: { append: { enabled: 'yes' as unknown as boolean, prompt: 'x' } },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+    // prompt 非 string
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-shape-3',
+          prompt: { append: { enabled: true, prompt: 42 as unknown as string } },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+  })
+
+  it('写路：合法提示词（合计恰为 16000 边界）正常写入并可读回', () => {
+    presetService.savePreset(
+      makePreset({
+        id: 'uuid-prompt-ok',
+        prompt: {
+          replace: { enabled: true, prompt: longPrompt(8000) },
+          append: { enabled: false, prompt: longPrompt(8000) },
+        },
+      }),
+    )
+    const saved = presetService.getPreset('uuid-prompt-ok')
+    expect(saved).toBeDefined()
+    expect(saved!.prompt!.replace!.enabled).toBe(true)
+    expect(saved!.prompt!.replace!.prompt.length).toBe(8000)
+    expect(saved!.prompt!.append!.enabled).toBe(false)
+  })
+
+  it('读路段级折叠：两段各 16000（各不超段限、合计 32000）→ 保留 preset，丢 append、留 replace，issues 记合计与丢弃项', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-total',
+            name: 'fold-total',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: {
+              replace: { enabled: true, prompt: longPrompt(16000) },
+              append: { enabled: true, prompt: longPrompt(16000) },
+            },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-total')
+    // 不整条丢：preset 仍在
+    expect(folded).toBeDefined()
+    // replace 保留（语义更重 / 用户更难自恢复），append 优先丢弃
+    expect(folded!.prompt!.replace).toBeDefined()
+    expect(folded!.prompt!.replace!.prompt.length).toBe(16000)
+    expect(folded!.prompt!.append).toBeUndefined()
+    // issues 记录实际合计值与丢弃项（经 warn 日志可观测）
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('32000')
+    expect(warnText).toContain('append')
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：单段超段限（16001）→ 只丢该段，preset 与另一段保留', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-seg',
+            name: 'fold-seg',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: {
+              replace: { enabled: true, prompt: longPrompt(16001) },
+              append: { enabled: true, prompt: 'kept' },
+            },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-seg')
+    expect(folded).toBeDefined()
+    expect(folded!.prompt!.replace).toBeUndefined()
+    expect(folded!.prompt!.append!.prompt).toBe('kept')
+    expect(warnSpy.mock.calls.map(c => c.join(' ')).join('\n')).toContain('16001')
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：prompt 形状非法 → 丢 prompt 字段，preset 整条保留', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-shape',
+            name: 'fold-shape',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: 'not-an-object',
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-shape')
+    expect(folded).toBeDefined()
+    expect(folded!.prompt).toBeUndefined()
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：容器无任何可识别段（{foo:1}）→ 仍丢弃 prompt，但产出 issue + warn（可观测）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-unknown',
+            name: 'fold-unknown',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            // 普通对象但无可识别段（replace/append 都不在）——旧行为静默丢弃，无可观测信号
+            prompt: { foo: 'SECRET_VALUE' },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-unknown')
+    // 行为不变：preset 保留、prompt 容器仍被丢弃
+    expect(folded).toBeDefined()
+    expect(folded!.prompt).toBeUndefined()
+    // 可观测：warn 恰一次，文案含「无可识别段」与键名 foo（只记键名不记值）
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('无可识别段')
+    expect(warnText).toContain('foo')
+    // 值不进日志（值可能是用户提示词正文）
+    expect(warnText).not.toContain('SECRET_VALUE')
+    warnSpy.mockRestore()
+  })
+
+  it('导入路整条拒：超限项导入 → 拒绝且不写盘（合法项也不落盘）', () => {
+    // 盘上放一个既有合法 preset，用于验证导入失败后磁盘内容不变
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-existing', name: 'existing', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    const before = readFile()
+
+    const json = JSON.stringify({
+      version: 1,
+      presets: [
+        {
+          id: 'imp-ok',
+          name: 'ok',
+          builtin: false,
+          order: 5,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: { append: { enabled: true, prompt: longPrompt(100) } },
+        },
+        {
+          id: 'imp-over',
+          name: 'over',
+          builtin: false,
+          order: 6,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        },
+      ],
+    })
+
+    expect(() => presetService.importPresets(json)).toThrow(PresetGuardError)
+
+    // 不写盘：既有内容逐字不变，合法项 imp-ok 也未落盘（整条语义）
+    const after = readFile()
+    expect(after!.presets.map(p => p.id)).toEqual(before!.presets.map(p => p.id))
+    expect(presetService.getPreset('imp-ok')).toBeUndefined()
+  })
+
+  it('导入路：合法提示词正常导入（与写路同契约）', () => {
+    const json = JSON.stringify({
+      version: 1,
+      presets: [
+        {
+          id: 'imp-prompt-ok',
+          name: 'ok',
+          builtin: false,
+          order: 5,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: { append: { enabled: true, prompt: '你好' } },
+        },
+      ],
+    })
+    expect(presetService.importPresets(json)).toBe(1)
+    expect(presetService.getPreset('imp-prompt-ok')!.prompt!.append!.prompt).toBe('你好')
+  })
+})

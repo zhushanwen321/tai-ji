@@ -1,4 +1,39 @@
 export default {
+  // Mode chip (u4 mode-visibility-chip; conversation read-only chip + hover popover)
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
+    lockNote: 'The mode is fixed when the session is created and cannot be changed here; edit the mode definition in Settings (applies on the next launch)',
+    newSession: 'Start a new session to use another mode',
+    toolSurface: 'Tools',
+    extensionSurface: 'Extensions',
+    promptSegments: 'Prompt parts',
+    builtin: 'Built-in',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (design `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4):
+    // the two states are strictly distinct — pending only forecasts, fell-back may claim "this time".
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    unknownSurface: '—',
+    toolAll: 'All tools',
+    toolNone: 'No tools',
+    extAll: 'All extensions',
+    extNone: 'No extensions',
+    allowCount: '{count} allowed',
+    denyCount: '{count} disabled',
+    promptCount: '{count} part(s)',
+  },
+  // Mode declaration row (u5 mode-declaration-row; derived row at the top of the message stream, no new entry type)
+  modeDeclaration: {
+    label: 'Mode: {name}',
+    toolChip: 'Tools · {surface}',
+    promptChip: 'Prompt · {count} part(s)',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (§7.5 E4): same wording axis as panel.presetChip (pending only forecasts).
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    newSession: 'New session',
+  },
   header: {
     toggleSidebarExpand: 'Expand sidebar',
     toggleSidebarCollapse: 'Collapse sidebar',
@@ -99,8 +134,9 @@ export default {
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
     toolCount: 'Tool ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta generated chars (TurnMeta.vue, design §2.1/§2.4)
-    generatedChars: 'Generated {chars} chars',
+    // [u3 remove-turn-progress-bar] TurnMeta generated tokens (TurnMeta.vue, design §2.1/§2.4;
+    // 2026-09 token 口径: sum of reported output tokens over all LLM calls in the turn, no estimation)
+    generatedTokens: 'Generated {tokens} tokens',
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
@@ -189,7 +225,14 @@ export default {
     genStatsD30: 'Last 30 days',
     genStatsDayShort: 'Today weighted (this model)',
     genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (weighted avg); based on single LLM request duration, excluding tool execution time',
-    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows 0% when the model does not support caching',
+    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows "—" when the model does not support caching',
+    // Miss attribution (2026-09-19 D-A): expected 0% causes — all non-fault, rendered in neutral tone
+    genStatsCacheMissColdStart: 'First request',
+    genStatsCacheMissIdle: 'Idle expiry',
+    genStatsCacheMissCompaction: 'Rebuilt',
+    genStatsCacheMissColdStartNote: 'First request in this session — cache not established yet (expected miss)',
+    genStatsCacheMissIdleNote: '{duration} idle since the last request — the provider cache expired (expected miss)',
+    genStatsCacheMissCompactionNote: 'Prefix rebuilt after context compaction — this request must miss (expected)',
     genStatsNoData: 'No data yet',
   },
   sideDrawer: {

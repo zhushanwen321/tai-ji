@@ -15,6 +15,7 @@ import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
 import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
 // u1b（crash-forensics-and-watchdog D1）runtime 台账单例。初始化是组合根职责（与
@@ -84,6 +85,12 @@ import { FsExecutor } from './infra/fs-executor.js'
 import { RecentWorkspacesStore } from './services/workspace/recent-workspaces-store.js'
 import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
+import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
+import { ZcodeImportSource } from './services/session/import-source-zcode.js'
+import type { SessionImportSource } from './services/session/import-source.js'
+// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（sqlite-access 内重声明，与引擎包
+// db-path.ts 同语义；runtime 不依赖引擎包）
+import { hostZcodeDbPath } from './services/session/zcode-import/sqlite-access.js'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
 import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →
@@ -452,13 +459,19 @@ async function main(): Promise<void> {
   // ProjectStore：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)
-  // ImportService：外部 pi 会话导入（import-session U2）。projects 仅用于 importSession 的
-  // projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面；getRootDir 供
-  // listCandidates 的 rootDir 缺省（D5：pi 全局 sessions 经 getPiGlobalAgentDir 动态推导，
-  // 组合根合法 import infra 装配——services 层禁止 value import pi-maintenance，C-comm-03）。
+  // ImportService：导入编排层（session-import-unified 设计 §3.3）。projects 仅用于
+  // importSession 的 projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面。
+  // source 注册表（G2 可扩展）：pi 项的 rootDir 缺省 = pi 全局 sessions 经
+  // getPiGlobalAgentDir 动态推导（组合根合法 import infra 装配——services 层禁止 value
+  // import pi-maintenance，C-comm-03）；zcode 项的默认库 = 宿主库路径动态推导（注入模式
+  // 同 pi）；第三源接入 = 表加一项，编排层与 RPC 契约零改动。
+  const importSources = new Map<ImportSourceKind, SessionImportSource>([
+    ['pi', new ExternalFileImportSource({ getRootDir: () => join(getPiGlobalAgentDir(), 'sessions') })],
+    ['zcode', new ZcodeImportSource({ getHostDbPath: hostZcodeDbPath })],
+  ])
   const importService = new ImportService({
     projects: projectStore,
-    getRootDir: () => join(getPiGlobalAgentDir(), 'sessions'),
+    sources: importSources,
   })
   // S1-W4（D3）：built-in 插件目录显式注入（主进程 spawn 时传 --builtin-plugins-dir）。
   // 提供时 registry 只扫该目录、不做 cwd 探测（防用户 repo 预置目录冒充 built-in）；
@@ -584,6 +597,11 @@ async function main(): Promise<void> {
       // 声明在下方（先于 sessionService 构造后）——createAdapter 仅在 session 创建后调用，
       // 引用恒就绪（与上方 sessionService 自引用闭包同模式）。
       onGenStats: (sid, sample) => genStatsService.recordSample(sid, sample),
+      // 归因降噪（2026-09-19）：成功 compaction → 标记上下文重写，紧随其后的命中率样本
+      // 若显示 0% 归因为 context-rewrite（预期内重建）；failed/aborted 不标记（见
+      // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
+      // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
+      onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
       // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
       // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
@@ -656,6 +674,13 @@ async function main(): Promise<void> {
       // 调用发生在 session 创建后，引用恒就绪）。
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
+      },
+      // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget）：重跑 record
+      // 派生管线，发布门 = 已发布快照水位——守卫/发布门处丢的帧下轮触发必补发（回调
+      // 内部自带扫描域门与 inflight 合并，不阻塞 interpret 批次；15s 定时腿为低频兜底，
+      // 在 SessionRecords 服务级单例 timer 内自持）。
+      onRecordReconcile: (sid) => {
+        sessionService.reconcileRecordEntries(sid)
       },
       // W1（fix-chat-flow-order 探针 ②）：agent_settled（run 级联结束，晚于 pi finally 的
       // bash 落盘 flush）→ dispatcher 按序发布 per-session bash 待落列（D2 双分支延迟）。
@@ -957,7 +982,8 @@ async function main(): Promise<void> {
     // sd-u5：sessionId 单例注册表（上方 createSessionDeliveryRegistry 装配）。
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
-    // 导入 pi 会话（import-session D5/U2）：session.importCandidates / session.import 路由。
+    // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
+    // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。
     importService,
     // composer-gen-stats（D4）：session.getGenStats 恢复腿 RPC（降级链 + 写 3 回填在 service 内部）。
     genStats: genStatsService,

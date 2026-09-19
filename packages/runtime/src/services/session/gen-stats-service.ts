@@ -11,6 +11,13 @@
  *   - 清    registerSessionCleanup   session 销毁（removeSessionEntry 汇聚点）删该 sid 全部条目
  *                                    （映射 + per-session current 槽）
  *
+ * 缓存命中率归因降噪（2026-09-19）：current 显示 0% 时，服务侧对**已知成因**附归因
+ * （cold-start / idle-expiry / context-rewrite，类型 SSOT = @taiji/shared GenStatsCacheMiss，
+ * 分类 SSOT = gen-stats-store classifyCacheMiss），随帧下发——UI 渲染成因文案，不再把预期内的
+ * miss 当作刺眼的裸 0%。状态：per-session current 槽携带 lastSampleAt（idle 归因基准）+
+ * contextRewritten（compaction 一次性标记，markContextRewritten 写、下一条样本消费即清）；
+ * 归因只影响帧内注解，**不改内存槽的数值语义也不改落盘**（磁盘仍 append-only 原始样本）。
+ *
  * 固定帧序（MF9，构造性闭合）：同一触发点内「先广播 state_changed → 再重登记映射 →
  * 最后推帧」。本服务的 onModelSwitched 由 session-service 的 state_changed 发布挂钩
  * （组合根 tap 接线）在 bus.publish(state_changed) 同步返回后调用——单 WS 连接有序送达，
@@ -27,7 +34,7 @@
  *   0 只允许作为真实测量值出现。
  */
 
-import type { GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, ServerMessage } from '@taiji/shared'
+import type { GenStatsCacheMiss, GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, ServerMessage } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
 import { getOrCreate } from '../../utils/collections.js'
@@ -37,7 +44,10 @@ import {
   aggregateCacheRatio,
   aggregateSpeed,
   cacheRatioFilePath,
+  classifyCacheMiss,
+  hasReportedCacheFields,
   isBogusSpeedSample,
+  isDisplayedZeroCacheRatio,
   localDayKey,
   readDayRecords,
   speedFilePath,
@@ -60,10 +70,36 @@ interface ModelAggregates {
 /**
  * per-session current 槽（会话视角 current 的权威源）：速度/命中率两槽独立、各自携带来源
  * modelKey——单边无效样本只跳过该边（另一边保留上一条合法值），展示与否由 modelKey 匹配决定。
+ * 归因降噪状态（lastSampleAt / contextRewritten）与缓存槽同级，生命周期同随 session。
  */
 interface SessionCurrentEntry {
   speed?: { modelKey: string; record: SpeedRecord }
-  cache?: { modelKey: string; record: CacheRatioRecord }
+  /** cache.miss = 展示 0% 时的归因（归因降噪，仅已知成因存在；缺省=不降噪） */
+  cache?: { modelKey: string; record: CacheRatioRecord; miss?: GenStatsCacheMiss }
+  /**
+   * 本会话最近一次采样时刻（**含未产出记录的无效样本**——idle 归因基准；空值 = 尚无前序
+   * 请求，即 cold-start 形态）。recordSample 每次调用刷新。
+   */
+  lastSampleAt?: number
+  /**
+   * 上一次采样之后出现过成功 compaction（context-rewrite 归因的一次性标记）：
+   * markContextRewritten 写；下一条样本在 updateSessionCurrent 评估后**消费即清**
+   * （只解释紧随其后的那次采样，不外溢到后续请求）。
+   */
+  contextRewritten?: boolean
+}
+
+/**
+ * 命中率样本有效性判定 + 组装（SSOT，同 buildSpeedRecord；promptTotal≤0 不采，D7③）。
+ * provider 未上报 cache 字段（两字段全缺省）→ 不采（归因降噪 2026-09-19：无缓存计量 ≠ 0%，
+ * 判定 SSOT = store hasReportedCacheFields；旧行为按 0 计入 promptTotal，会把无缓存能力的
+ * provider 恒写成 0% miss）。
+ */
+function buildCacheRecord(s: GenStatsSample): CacheRatioRecord | null {
+  if (!hasReportedCacheFields(s.cacheRead, s.cacheWrite)) return null
+  const promptTotal = (s.input ?? 0) + (s.cacheRead ?? 0) + (s.cacheWrite ?? 0)
+  if (promptTotal <= 0) return null
+  return [s.cacheRead ?? 0, promptTotal]
 }
 
 /**
@@ -108,13 +144,6 @@ function buildSpeedRecord(s: GenStatsSample): SpeedRecord | null {
   if (s.outputTokens === null || s.durationMs === null || s.durationMs <= 0) return null
   if (isBogusSpeedSample(s.outputTokens, s.durationMs)) return null
   return [s.outputTokens, s.durationMs]
-}
-
-/** 命中率样本有效性判定 + 组装（SSOT，同 buildSpeedRecord；promptTotal≤0 不采，D7③） */
-function buildCacheRecord(s: GenStatsSample): CacheRatioRecord | null {
-  const promptTotal = (s.input ?? 0) + (s.cacheRead ?? 0) + (s.cacheWrite ?? 0)
-  if (promptTotal <= 0) return null
-  return [s.cacheRead ?? 0, promptTotal]
 }
 
 /** 窗口内（key >= cutoffDay）全部条目（YYYY-MM-DD 规范形字典序 = 时间序） */
@@ -200,16 +229,52 @@ export class GenStatsService {
 
   /**
    * per-session current 槽写入：只记「本会话该模型最近一次合法样本」。速度/命中率两槽
-   * 独立更新——单边无效（bogus / promptTotal≤0）各自保留上一条合法值，与磁盘 append-only
-   * 的「丢弃不入聚合」语义同构（§3.5）。
+   * 独立更新——单边无效（bogus / promptTotal≤0 / provider 未上报 cache 字段）各自保留上一条
+   * 合法值，与磁盘 append-only 的「丢弃不入聚合」语义同构（§3.5）。
+   *
+   * 归因降噪（2026-09-19）：本方法同时维护 idle 基准（lastSampleAt，**每次调用都刷新**——
+   * 无记录样本也是「一次真实请求」）与 context-rewrite 一次性标记的消费（**无论本次样本是否
+   * 产出记录都消费**：标记只解释紧随 compaction 之后的那一次采样，证据见 classifyCacheMiss）。
+   * 缓存槽归因只在「展示 0%」（store isDisplayedZeroCacheRatio，与 UI 四舍五入口径同源）时求——
+   * 它是展示层注解，不改变 record 数值本身（落盘与聚合仍用原始 [cacheRead, promptTotal]）。
    */
   private updateSessionCurrent(sid: string, modelKey: string, s: GenStatsSample): void {
+    const entry = getOrCreate(this.sessionCurrent, sid, (): SessionCurrentEntry => ({}))
+    // 前序请求与 compaction 标记的读取（标记先读后清：本条样本消费它，不外溢到后续请求）
+    const prevSampleAt = entry.lastSampleAt
+    const contextRewritten = entry.contextRewritten === true
+    entry.contextRewritten = undefined
+    const now = Date.now()
+    entry.lastSampleAt = now
+
     const speedRecord = buildSpeedRecord(s)
     const cacheRecord = buildCacheRecord(s)
     if (!speedRecord && !cacheRecord) return
-    const entry = getOrCreate(this.sessionCurrent, sid, (): SessionCurrentEntry => ({}))
     if (speedRecord) entry.speed = { modelKey, record: speedRecord }
-    if (cacheRecord) entry.cache = { modelKey, record: cacheRecord }
+    if (cacheRecord) {
+      // 仅展示 0% 的样本求归因（命中样本恒缺省——currentMiss 与「刺眼的 0」严格同域）
+      let miss: GenStatsCacheMiss | undefined
+      if (isDisplayedZeroCacheRatio(cacheRecord[0], cacheRecord[1])) {
+        miss = classifyCacheMiss({
+          hasPreviousRequest: prevSampleAt !== undefined,
+          idleMs: prevSampleAt === undefined ? null : now - prevSampleAt,
+          contextRewritten,
+        })
+      }
+      // 整槽替换（非保留旧 miss）：新样本无归因时旧注解必须一并清掉
+      entry.cache = { modelKey, record: cacheRecord, ...(miss ? { miss } : {}) }
+    }
+  }
+
+  /**
+   * context-rewrite 归因标记（归因降噪 2026-09-19）：成功 compaction 之后调用（组合根经
+   * interpreter onCompactionContextRewritten 接线；失败/aborted 不得调用——上下文未变）。
+   * 语义 = 「上下文刚被重写，紧随其后的首条缓存样本若显示 0% 属预期重建」；写入即入槽，
+   * 下一条样本消费后清（updateSessionCurrent）。
+   */
+  markContextRewritten(sid: string): void {
+    const entry = getOrCreate(this.sessionCurrent, sid, (): SessionCurrentEntry => ({}))
+    entry.contextRewritten = true
   }
 
   /**
@@ -314,17 +379,24 @@ export class GenStatsService {
    * 帧合成：聚合层（模型全局）+ 本会话 current（sessionCurrent 槽，按 modelKey 匹配）。
    * 无回落纪律：本会话无样本 / 槽 modelKey ≠ 当前模型 → current null（UI「—」），绝不回落
    * 到模型全局末条。已预计算聚合层的调用方（broadcastModel 逐 sid 发帧）直接调本函数。
+   *
+   * 归因降噪（2026-09-19）：缓存槽带归因时随帧下发 cacheRatio.currentMiss（与 current 同源
+   * 同生命周期——槽 modelKey 不匹配时两者一起缺省，不会出现「无 current 却有归因」的错位帧）。
    */
   private composeFrame(sid: string, modelKey: string | null, aggregate: ModelAggregates): GenStatsFrame {
     const entry = this.sessionCurrent.get(sid)
     const speedCurrent =
       modelKey !== null && entry?.speed?.modelKey === modelKey ? aggregateSpeed([entry.speed.record]) : null
-    const cacheCurrent =
-      modelKey !== null && entry?.cache?.modelKey === modelKey ? aggregateCacheRatio([entry.cache.record]) : null
+    const cacheSlot = modelKey !== null && entry?.cache?.modelKey === modelKey ? entry.cache : undefined
+    const cacheCurrent = cacheSlot ? aggregateCacheRatio([cacheSlot.record]) : null
     return {
       sessionId: sid,
       speed: { current: speedCurrent, ...aggregate.speed },
-      cacheRatio: { current: cacheCurrent, ...aggregate.cacheRatio },
+      cacheRatio: {
+        current: cacheCurrent,
+        ...aggregate.cacheRatio,
+        ...(cacheSlot?.miss ? { currentMiss: cacheSlot.miss } : {}),
+      },
       ...(aggregate.model !== undefined ? { model: aggregate.model } : {}),
     }
   }

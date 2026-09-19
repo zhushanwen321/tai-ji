@@ -249,11 +249,65 @@ export function buildReinjectSection(contents: ReadonlyArray<{ path: string; con
 /** sessionManager entries 的宽松形状（降智计数）。 */
 export interface EntryLike {
 	type: string;
+	/** custom entry 的类型标识（deriveFiredThresholds 读 marker 用；非 custom entry 缺省）。 */
+	customType?: string;
+	/** custom entry 的载荷（同上；形状由写入方定义）。 */
+	data?: unknown;
 }
 
 /** 累计 compaction 次数（D13-12 判据）。 */
 export function countCompactions(entries: ReadonlyArray<EntryLike>): number {
 	return entries.filter((e) => e.type === "compaction").length;
+}
+
+/**
+ * 已提醒档位 marker 的 custom entry 类型（session entries 持久化）。
+ *
+ * 为什么必须持久化：pi reload（taiji 的 skill reload 走 `/__taiji_reload__` → ctx.reload()）会
+ * 重建 extension runner 并**重新 import 扩展模块**（pi loader `moduleCache: false`）——闭包态与
+ * 模块级态一律归零；reload 随后补发的 `session_start` 的 reason 还是 `startup`（pi
+ * `_buildRuntime` → bindExtensions 发的是 `_sessionStartEvent` 默认值），用它区分不了
+ * 「真新 session」与「同 session 重载」。故 fired 档位以 custom entry 写入 session 自身，
+ * 每次重建从 entries 推导：同 session 的 reload / 进程重启 / 切回都不再重复提醒同一档。
+ */
+export const FIRED_ENTRY_CUSTOM_TYPE = "smart-context:fired";
+
+/** 越档提醒注入的 custom message 类型（静默通道：只进 LLM 上下文，不进对话流）。 */
+export const THRESHOLD_REMINDER_CUSTOM_TYPE = "smart-context:threshold-reminder";
+
+/** fired marker 的载荷形状（写入方 index.ts 与本文件推导函数共用的唯一定义点）。 */
+export interface FiredMarkerData {
+	/** 本次标记已提醒的档位（token 值）。 */
+	tiers: number[];
+	/** 标记时刻的上下文用量（排查用，不参与语义）。 */
+	tokens: number;
+}
+
+/**
+ * 已提醒档位重建（D15：session entries → Set）。
+ *
+ * 语义与内存态一致：遇 `compaction` entry **清空**（压缩后档位重置，D3 既有契约），
+ * 其上方的 fired marker 累加 tiers。marker 载荷畸形（非对象 / tiers 非数组 / 元素非数）
+ * 逐条降级跳过——session JSONL 被截断或手改过时不抛错。
+ *
+ * 调用点：session_start（本代状态装配）+ agent_settled 首次使用前的兜底 seed
+ * （reload 后新模块实例可能先收到 settle 再收到 session_start）。
+ */
+export function deriveFiredThresholds(entries: ReadonlyArray<EntryLike>): Set<number> {
+	const fired = new Set<number>();
+	for (const entry of entries) {
+		if (entry.type === "compaction") {
+			fired.clear();
+			continue;
+		}
+		if (entry.type !== "custom" || entry.customType !== FIRED_ENTRY_CUSTOM_TYPE) continue;
+		const data = isRecord(entry.data) ? entry.data : undefined;
+		const tiers = Array.isArray(data?.tiers) ? data.tiers : [];
+		for (const tier of tiers) {
+			if (typeof tier === "number" && Number.isFinite(tier)) fired.add(tier);
+		}
+	}
+	return fired;
 }
 
 /**

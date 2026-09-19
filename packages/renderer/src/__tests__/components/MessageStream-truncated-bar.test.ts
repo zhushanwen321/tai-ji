@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+// [U1 sanitize] DOMPurify 需要 nodeName getter 在 Node.prototype 上（realm 安全缓存 getter
+// 依赖它）；happy-dom 把 nodeName 定义在各元素子类，DOMPurify 3.4.11 在 happy-dom 下把
+// 所有元素判为不允许标签（P1 探针实证）——markdown 管线测试族统一跑 jsdom。
 /**
  * [u4d-truncated-ui] MessageStream 历史预算截断顶部条接线测试（D4 /
  * 场景 T3 / 验收 A5/A6 的单测回归面）。

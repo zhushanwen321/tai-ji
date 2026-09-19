@@ -259,8 +259,9 @@ export const ENGINE_ENV_PREFIXES: readonly string[] = [
 ]
 
 export const ENGINE_ENV_DENY_LIST: readonly string[] = [
-  // 出站 deny 清单（与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员——
-  // 引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）
+  // 出站 deny 清单。前两键与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员
+  // （引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）；
+  // 其余为引擎面特有的 deny 项（见各条注释）。
   'TAIJI_AGENT_PACKAGED',
   'TAIJI_RUNTIME_TOKEN',
   // 凭证键：引擎凭据不跨进程（设计不变量 5），泄漏面与 WS 令牌同级
@@ -269,6 +270,13 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 误继承会把孙帧归到父 record
   'TAIJI_SUBAGENT_RELAY_SESSION_ID',
   'TAIJI_SUBAGENT_RELAY_RECORD_ID',
+  // 「进程生命周期标志不出站」同族（env 名 SSOT = 下方 PRESET_FALLBACK_ENV_KEYS，
+  // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
+  // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
+  // → 子 agent pi）继承陈旧值会让子 agent pi 的 trace 扩展记一个从未发生的
+  // presetFallback 假披露——故在引擎出站面一律剥除。
+  'TAIJI_PRESET_FALLBACK_FROM',
+  'TAIJI_PRESET_FALLBACK_TO',
 ]
 
 /**
@@ -286,6 +294,29 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
 export const ENGINE_LAUNCH_ENV_KEYS = {
   ROOTS: 'TAIJI_AGENT_ENGINE_ROOTS',
   NODE: 'TAIJI_AGENT_ENGINE_NODE',
+} as const
+
+/**
+ * 模式回落事实 env 名 SSOT（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * §7.5 E4 的 trace 披露面）。
+ *
+ * 语义：restore / create / fork 解析模式时，sidecar 里的 presetId 定义不可得 → 本次已
+ * 回落 `builtin:full` 启动。runtime 把这一「本进程本次运行」的事实经出站 env 传给 pi
+ * 子进程，`@zhushanwen/pi-system-prompt-trace` 读取后写进 `taiji:system-prompt` entry
+ * 的可选 `presetFallback` 字段——事后审计从 trace 即可得知「提示词为何变了」。
+ *
+ * 写入 = `packages/runtime/src/services/session/launch-params.ts` 的
+ * `buildPresetFallbackEnv`（未回落时写空串**显式清除**，防白名单继承的父 env 陈旧值
+ * 穿透造成假披露）；读取 = `extensions/taiji/system-prompt-trace/src/types.ts`
+ * （extension 独立发布体系不依赖 @taiji/shared，按字面量镜像，单侧改名即静默断链）。
+ * 出站路径 = runtime ProcessManager → RpcClient → buildPiOutboundEnv →
+ * buildOutboundChildEnv（C-proc-09 出站契约构建器）。
+ */
+export const PRESET_FALLBACK_ENV_KEYS = {
+  /** 原（悬空）模式 id——发生回落时有值，否则空串 */
+  FROM: 'TAIJI_PRESET_FALLBACK_FROM',
+  /** 回落目标模式 id（现行恒 builtin:full）——发生回落时有值，否则空串 */
+  TO: 'TAIJI_PRESET_FALLBACK_TO',
 } as const
 
 /**

@@ -99,6 +99,9 @@ function finalizeStreamingMessage(
     content: m.content,
     error: finalError,
     toolCalls,
+    // 产出结束时刻（turn 聚合时间轴右端）：收口即本消息产出结束。终端 patch 已写过
+    // （message.complete 正常路径）则不动——幂等，迟到收口不覆写真实结束时刻。
+    ...(m.role === 'assistant' && m.endedAt === undefined ? { endedAt: Date.now() } : {}),
   }
 }
 
@@ -171,7 +174,12 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     const lastAssistantIdx = findLastAssistantIndex(prev)
     if (lastAssistantIdx < 0 || prev[lastAssistantIdx].status !== 'streaming') return
     const next = [...prev]
-    next[lastAssistantIdx] = { ...next[lastAssistantIdx], status: 'complete' }
+    // 产出结束时刻：subagent 镜像流同样经 TurnMeta 展示时长/字符，与主链路同口径
+    next[lastAssistantIdx] = {
+      ...next[lastAssistantIdx],
+      status: 'complete',
+      ...(next[lastAssistantIdx].endedAt === undefined ? { endedAt: Date.now() } : {}),
+    }
     commitMessages(messages, virtualId, next)
   }
 

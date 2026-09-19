@@ -6,6 +6,9 @@
     文案 N = loadedTurns（u4b session.history 窗口契约）；「加载更早」走 [u6] 游标翻页
     （壳层 @load → useLoadMoreHistory.handleLoadMore → useChat.loadMoreHistory，
     session.history 带 cursor——原 getFullHistory 全量通路已退役）。
+    [2026-09-19 触顶自动续载] 滚到顶即自动走同一加载通路（useLoadMoreHistory.onScrollOffset，
+    «keep 触发条件 = 已脱离锚定 + offset 触顶），本按钮降级为兜底/进度位：loading 期间显示
+    spinner（「正在续载」），触顶信号不可达（如窗口内容短于视口）时仍可手点。
   -->
   <div data-testid="truncated-history-bar" class="flex items-center gap-1">
     <span data-testid="truncated-history-info" class="text-[length:var(--text-sm)] leading-snug text-neutral-mid">

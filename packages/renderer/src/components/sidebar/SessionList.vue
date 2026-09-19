@@ -63,32 +63,24 @@
             </Button>
           </div>
         </div>
-        <!-- 每条 session 渲染 SessionItem；当前激活 session 下方紧跟其分支小列表
-             （spec §2 层③ 方案3：仅当前 session 展开自己的分支，不破坏其他 session 扁平结构）。
-             用 template v-for 聚合 SessionItem + 条件 ForkGroup，保持 s 在作用域内。 -->
-        <template v-for="s in g.sessions" :key="s.id">
-          <SessionItem
-            :session="s"
-            :active="s.id === activeId"
-            :status="statusOf(s.id)"
-            :parent-label="parentLabelOf(s)"
-            @select="emit('select', $event)"
-            @rename="emit('rename', $event)"
-            @delete="emit('delete', $event)"
-            @set-project="emit('setProject', $event)"
-            @navigate-parent="emit('navigateParent', $event)"
-            @force-quit="emit('forceQuit', $event)"
-          />
-          <!-- 当前 session 的分支：从组内 sessions filter parentSession 指向当前 session
-               （sessionFile 路径或 sessionId，FR-20 fallback）。无分支时不渲染空容器。 -->
-          <ForkGroup
-            v-if="s.id === activeId && branchesOf(s).length > 0"
-            :branches="branchesOf(s)"
-            :parent-id="s.id"
-            @select="emit('select', $event)"
-            @stop="emit('stopBranch', $event)"
-          />
-        </template>
+        <!-- 每条 session 渲染 SessionItem（扁平列表：fork 分支 / agent 子会话均按一般 session 各占一行，
+             侧栏不做父子聚合——D9；父条目右侧徒标承载子会话计数）。 -->
+        <SessionItem
+          v-for="s in g.sessions"
+          :key="s.id"
+          :session="s"
+          :active="s.id === activeId"
+          :status="statusOf(s.id)"
+          :child-count="childCountOf(s)"
+          :parent-label="parentLabelOf(s)"
+          @select="emit('select', $event)"
+          @rename="emit('rename', $event)"
+          @delete="emit('delete', $event)"
+          @set-project="emit('setProject', $event)"
+          @navigate-parent="emit('navigateParent', $event)"
+          @abort="emit('abort', $event)"
+          @force-quit="emit('forceQuit', $event)"
+        />
       </div>
     </div>
     <div
@@ -120,9 +112,9 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { dirNameOf } from '@taiji/ui'
 import { collectNamedProjectIds, sessionBelongsToProject } from '@/composables/logic/project-session'
+import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { useProjectStore } from '@/stores/project'
 import SessionItem from './SessionItem.vue'
-import ForkGroup from './ForkGroup.vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
@@ -142,8 +134,8 @@ const emit = defineEmits<{
   newSession: []
   /** 目录行「+」：以该 cwd 为预选目录进 landing 新建（延迟 create，由 Sidebar 调 newSession(cwd)） */
   newSessionInFolder: [cwd: string]
-  /** 停止后台分支 session（FR-19，ForkGroup 两段式确认后调 abort） */
-  stopBranch: [sessionId: string]
+  /** 停止运行中的 session（软停止，SessionItem 两段确认后调 abort → stopped，可 restore） */
+  abort: [sessionId: string]
   /** 删除指定 cwd 下所有 session（folder 维度批量删除，两段式确认后由 Sidebar 调 deleteFolder） */
   deleteFolder: [cwd: string]
   /** 归入项目（D14 语义修正）：透传 SessionItem 的 setProject */
@@ -196,25 +188,30 @@ function isFolderDeleteAvailable(cwd: string): boolean {
 }
 
 /**
- * 取当前 session 的直接子分支列表（FR-17，spec §2 层③）。
- * 从组内 sessions filter parentSession 指向当前 session：
- * - 优先匹配 parentSession === sessionFile（活跃 session 落盘路径，§8.1 规范）
- * - fallback 匹配 parentSession === id（源 session 未落盘时用 sessionId 作血缘键，FR-20）
- *
- * 竞态修复（RV5）：同时匹配两种 key，而非 `sessionFile || id` 单一键。
- * FR-20 fallback 在 fork 时可能写 srcSessionId（源未落盘），渲染时源已落盘 sessionFile 变为文件路径，
- * 若只取 sessionFile 会漏掉按 id 注册的分支；若只取 id 会漏掉已落盘的源。两种 key 取并集保证稳定命中。
- * 仅在当前 session 所在组内 filter（分支与父同 cwd，不需跨组扫描）。
+ * 子会话计数（D9 中性计数徒标）：按 parentAgentSessionId 分组计数（零新协议，纯内存推导）。
+ * 口径 = **未完成数**（判据见 sessionStatus.ts 的 isSessionCompleted）：绿点（idle/done）
+ * 不予计入，active / error / stopped / dead 都算——与徒标「还有多少未完成」的阅读预期一致，
+ * 不再显示子会话总数。
+ * 取可见分组（visibleGroups）计数——徒标与屏幕上实际可扫读的行保持一致（项目过滤下不会
+ * 报出不可见子会话）。fork 分支走 parentSession 血缘，不计数：它已在扁平列表逐行可见，
+ * 无需计数补偿（只有 agent 子会话在 project 视图下可能被遗漏）。
  */
-function branchesOf(s: SessionSummary): SessionSummary[] {
-  return visibleGroups.value
-    .filter((g) => g.cwd === s.cwd)
-    .flatMap((g) => g.sessions)
-    .filter(
-      (b) =>
-        b.parentSession != null &&
-        (b.parentSession === s.sessionFile || b.parentSession === s.id),
-    )
+const childCountByParent = computed<Map<string, number>>(() => {
+  const counts = new Map<string, number>()
+  for (const g of visibleGroups.value) {
+    for (const s of g.sessions) {
+      const parent = s.parentAgentSessionId
+      if (!parent) continue
+      if (isSessionCompleted(s.status)) continue
+      counts.set(parent, (counts.get(parent) ?? 0) + 1)
+    }
+  }
+  return counts
+})
+
+/** 取某 session 的未完成子会话数（0 = 无未完成子会话，徒标不渲染） */
+function childCountOf(s: SessionSummary): number {
+  return childCountByParent.value.get(s.id) ?? 0
 }
 
 /**
@@ -224,7 +221,7 @@ function branchesOf(s: SessionSummary): SessionSummary[] {
  * 从未传 parentLabel → 实际显示 parentSession（文件路径或 UUID，不可读）。本 helper 按
  * session.parentSession 反查父 session，取其 label 注入 parentLabel。
  *
- * 匹配规则与 branchesOf 一致（FR-20 双键兜底）：parentSession 可能是父的 sessionFile（活跃 session
+ * 匹配规则（FR-20 双键兜底）：parentSession 可能是父的 sessionFile（活跃 session
  * 落盘路径）或父的 id（源未落盘时用 sessionId 作血缘键），两种 key 取并集保证命中。
  * 仅在当前 session 所在组内查找（分支与父同 cwd，不需跨组扫描）；无父（parentSession 空）或
  * 父不在当前分组返回空串，SessionItem 回退到 parentSession 原值。

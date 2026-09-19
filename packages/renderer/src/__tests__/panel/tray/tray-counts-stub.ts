@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
-import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 export interface TrayCountsStubState {
   bashRunning: BackgroundTaskEntry[]
@@ -20,11 +20,14 @@ export interface TrayCountsStubState {
   workflowRunning: WorkflowRunRecord[]
   workflowEnded: WorkflowRunRecord[]
   workflowLoading: boolean
+  /** 第 4 件子会话行集（u7）：缺省空（既有三件断言无需关心；session 用例显式注入） */
+  sessionChildren?: SessionSummary[]
 }
 
 export function makeTrayCountsStub(
   state: TrayCountsStubState,
 ): Pick<UseTrayCountsReturn, 'counts' | 'lists' | 'loading'> {
+  const sessionChildren = () => state.sessionChildren ?? []
   return {
     counts: computed(() => ({
       bash: {
@@ -42,6 +45,11 @@ export function makeTrayCountsStub(
         ended: state.workflowEnded.length,
         total: state.workflowRunning.length + state.workflowEnded.length,
       },
+      session: {
+        running: sessionChildren().filter((s) => s.status === 'active').length,
+        ended: sessionChildren().filter((s) => s.status !== 'active').length,
+        total: sessionChildren().length,
+      },
     })),
     lists: {
       bash: {
@@ -55,6 +63,9 @@ export function makeTrayCountsStub(
       workflow: {
         running: computed(() => state.workflowRunning),
         ended: computed(() => state.workflowEnded),
+      },
+      session: {
+        children: computed(() => sessionChildren()),
       },
     },
     loading: {

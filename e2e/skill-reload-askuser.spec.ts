@@ -9,13 +9,23 @@
  * 编辑面取**全局** skill 目录（<dataDir>/agent/skills，resolveGlobalSkillDirs 首项），
  * 驱动全部活跃 session 并发 reload+adoption。
  *
- * 通过标准（设计 S1b）：
+ * 通过标准（设计 S1b + reload-closeout-reliability §4 A1 断言升级）：
  * - 两 session 的 run 都存活（各自 preserved 归因行 records=1 + 双 done 广播 + 无
  *   `connection lost`/`code=143`）；
  * - D8-a dir=global 归因行 affectedSessions 同时列出两个 sid；D8-b 双 decision 行；
- * - reload 完成后触发的 ask_user 反向请求正常送达 UI 且可应答（ask-user-overlay 渲染 →
+ * - reload 完成后触发的 ask_user 反向请求正常送达 UI 且可应答（form-overlay 渲染 →
  *   选项 → submit → overlay 关闭；pi 恢复 turn 由 run 后续 faux 步骤继续消费证明）——
- *   无静默取消（静默取消 = {cancelled:true}，overlay 根本不渲染，本断言直接击穿）。
+ *   无静默取消（静默取消 = {cancelled:true}，overlay 根本不渲染，本断言直接击穿）；
+ * - G1 必达窗口（A1 新断言，2026-09-19）：run 完成（主 session JSONL 终态 done 落盘）
+ *   后 ≤30s `session.workflowUpdate` done 帧到达 spec WS——agent_settled 对账腿秒级 /
+ *   15s 定时腿最坏 ≈15s+单轮，30s = 2x 余量。按 u0 报告 §5 分派：断点在当前 HEAD
+ *   零复现（②段全链健康 0/6），按「守卫/发布门跳 = 水位」主形态编写，不预设 bus
+ *   内部分支预期红。
+ *
+ * 断言顺序契约（u0 报告 §1.1，spec 断言竞态解耦）：dialog 阶段 select 后必须先
+ * answerOverlay 再断言 composer——FormOverlay 与 composer 互斥（Panel.vue：overlay
+ * 挂起时 composer 不在 DOM），目标 session 的 ask_user 若在 select 前已触发，
+ * 先断言 composer 会 30s 扑空（2026-09-19 复跑运行 2 实证的假失败形态，非产品缺陷）。
  *
  * L2 dialog 队列按 pi 进程分域（DialogGlobalQueue 进程级单例，每 session 独立 pi 进程），
  * 两个 dialog 相互独立送达——先切 A 应答，再切 B 应答，无跨 session 串行依赖。
@@ -30,7 +40,6 @@ import {
   wsRoundTrip,
   openListenWs,
   waitForExtensionsReady,
-  type WsFrame,
 } from './fixtures/launch-app-real'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -47,8 +56,10 @@ import {
   parseLastPreserved,
   waitForLogLine,
   runtimeLogLines,
-  lastWorkflowRecordFor,
   writeGlobalSkill,
+  awaitWorkflowDoneTimed,
+  WORKFLOW_DONE_MAX_LATENCY_MS,
+  DONE_TIMING_OBSERVE_SLACK_MS,
 } from './fixtures/skill-reload-real-helpers'
 
 const PROJ_LABEL = 'skill-reload-askuser-proj'
@@ -117,14 +128,31 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
 }
 
-/** 应答当前 panel 上的 ask-user overlay（选第一项 → submit → overlay 关闭） */
+/** 应答当前 panel 上的提问表单 overlay（选第一项 → submit → overlay 关闭） */
 async function answerOverlay(page: Page): Promise<void> {
-  const overlay = page.getByTestId('ask-user-overlay')
+  const overlay = page.getByTestId('form-overlay')
   await expect(overlay, 'ask_user 反向请求应送达 UI（overlay 渲染，无静默取消）').toBeVisible({ timeout: 60_000 })
-  const option = page.locator('[data-testid^="ask-user-option-"]').first()
+  const option = page.locator('[data-testid^="form-option-"]').first()
   await option.click()
-  await page.getByTestId('ask-user-submit').click()
+  await page.getByTestId('form-submit').click()
   await expect(overlay, '应答后 overlay 应关闭').toBeHidden({ timeout: 15_000 })
+}
+
+/**
+ * dialog 阶段的 session 切换 + 应答（u0 §1.1 断言竞态解耦后的顺序契约）：
+ * 点击侧栏 → answerOverlay → 断言 composer 回归。
+ *
+ * 必须先 overlay 后 composer：FormOverlay 挂起时 composer 不在 DOM（互斥），目标
+ * session 的 ask_user 可能在 select 前已触发（对端 overlay 等待窗把本次 select 推进
+ * 本 session 的 overlay 窗口），先断言 composer 必然 30s 扑空。应答关闭后 composer
+ * 回归 = 激活成功 + 输入可用的原断言面（时点后移，强度不变）。
+ */
+async function selectAndAnswerOverlay(page: Page, label: string): Promise<void> {
+  const item = page.locator('.session-item').filter({ hasText: label }).first()
+  await expect(item).toBeVisible({ timeout: 30_000 })
+  await item.click()
+  await answerOverlay(page)
+  await expect(page.getByTestId('composer-box'), 'overlay 应答关闭后 composer 应回归').toBeVisible({ timeout: 15_000 })
 }
 
 test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid + ask_user 送达可应答', async () => {
@@ -234,46 +262,48 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
       expect(p?.records, '每 session preserved records 应 = 1 个在飞 subagent').toBe(1)
     }
 
+    // ── 存活反证：无断连杀链（必须在 run 在飞窗口内断言）──
+    // 位置契约与 survival 同款：reload 窗口 + run 在飞期间 relay 不得 kill-on-disconnect。
+    // 不能移到 done 之后——两 run 终态后完成通知 triggerTurn 命中 faux 队列耗尽（防重播种
+    // 守卫的预期形态）→ 主 pi turn 收尾与引擎子进程退场存在时序竞态，收尾兜底
+    // 「connection lost, killing child (code=143)」会在 run 已终态、数据无损后落盘，
+    // 属设计内收尾形态，非「在飞 run 被误杀」——done 后再查必然误红（2026-09-19 复验实证）。
+    const runtimeLogInflight = runtimeLogLines(dataDir).join('\n')
+    expect(runtimeLogInflight.includes('connection lost'), '不应出现 relay kill-on-disconnect').toBe(false)
+    expect(runtimeLogInflight.includes('code=143'), '不应出现 code=143').toBe(false)
+
     // ── A 的 dialog：切回 A，reload 后触发的 ask_user 送达 UI → 应答 → 关闭 ──
-    await selectSessionInSidebar(page, SESSION_A_LABEL)
-    await answerOverlay(page)
+    // 顺序契约（u0 §1.1）：select 后先 answerOverlay 再断言 composer（见 helper 注释）
+    await selectAndAnswerOverlay(page, SESSION_A_LABEL)
 
     // ── B 的 dialog：切到 B，同样送达可应答（双 session 各自独立 L2 队列域）──
-    await selectSessionInSidebar(page, SESSION_B_LABEL)
-    await answerOverlay(page)
+    await selectAndAnswerOverlay(page, SESSION_B_LABEL)
 
-    // ── 双 run 自然完成：done 广播 + 各自主 session JSONL 终态 entry ──
-    async function awaitDone(events: WsFrame[]): Promise<string> {
-      const deadline = Date.now() + 150_000
-      while (Date.now() < deadline) {
-        const hit = events.find((e) => e.type === 'session.workflowUpdate')
-        const update = hit?.payload?.update as { status?: unknown; runId?: unknown } | undefined
-        if (update?.status === 'done' && typeof update.runId === 'string') return update.runId
-        await new Promise((r) => setTimeout(r, 1000))
-      }
-      return ''
+    // ── 双 run 自然完成：done 帧到达 + 各自主 session JSONL 终态 entry（双锚计时）──
+    for (const c of created) {
+      expect(c.file, '主 session JSONL 路径应存在').toBeTruthy()
     }
-    const [runIdA, runIdB] = [await awaitDone(listenA.events), await awaitDone(listenB.events)]
-    expect(runIdA, 'session A 的 run 应自然完成').not.toBe('')
-    expect(runIdB, 'session B 的 run 应自然完成').not.toBe('')
-    for (const [file, runId] of [[created[0].file, runIdA], [created[1].file, runIdB]] as const) {
-      expect(file, '主 session JSONL 路径应存在').toBeTruthy()
-      let rec = lastWorkflowRecordFor(file!, runId)
-      const deadline = Date.now() + 15_000
-      while ((rec === null || rec.status !== 'done') && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1000))
-        rec = lastWorkflowRecordFor(file!, runId)
-      }
-      expect(rec?.status, `run ${runId} 末条 workflow-record 应为终态 done`).toBe('done')
+    const [timingA, timingB] = [
+      await awaitWorkflowDoneTimed(listenA.events, created[0].file),
+      await awaitWorkflowDoneTimed(listenB.events, created[1].file),
+    ]
+    expect(timingA, 'session A 的 run 应自然完成（done 帧到达 + JSONL 终态 done）').not.toBeNull()
+    expect(timingB, 'session B 的 run 应自然完成（done 帧到达 + JSONL 终态 done）').not.toBeNull()
+    // G1 必达窗口（设计 §4 A1 新断言）：完成锚（JSONL 终态落盘）→ 到达锚（done 帧到
+    // spec WS）≤30s。负时差钳 0（帧先于文件 flush 被观测 = 收敛更早，仍满足必达）；
+    // +DONE_TIMING_OBSERVE_SLACK_MS = 双锚各一次轮询观测粒度。
+    for (const t of [timingA!, timingB!]) {
+      const latency = Math.max(0, t.tFrameSeen - t.tDoneRecord)
+      console.log(`[S1b] run ${t.runId} 完成→done 帧到达延迟 ${latency}ms`)
+      expect(
+        latency,
+        `run ${t.runId} 完成后 ≤${WORKFLOW_DONE_MAX_LATENCY_MS}ms workflowUpdate 帧应到达 spec WS`,
+      ).toBeLessThanOrEqual(WORKFLOW_DONE_MAX_LATENCY_MS + DONE_TIMING_OBSERVE_SLACK_MS)
     }
-
-    const runtimeLog = runtimeLogLines(dataDir).join('\n')
-    expect(runtimeLog.includes('connection lost'), '不应出现 relay kill-on-disconnect').toBe(false)
-    expect(runtimeLog.includes('code=143'), '不应出现 code=143').toBe(false)
 
     listenWsA?.close()
     listenWsB?.close()
-    console.log('[S1b] 通过：双 session 存活 / dir=global 双 sid / dialog 双送达可应答 / 终态 entry')
+    console.log('[S1b] 通过：双 session 存活 / dir=global 双 sid / dialog 双送达可应答 / 终态 entry / ≤30s 必达')
     reachedEnd = true
   } finally {
     delete process.env.TAIJI_AGENT_DEBUG

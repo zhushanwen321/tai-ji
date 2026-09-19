@@ -33,6 +33,7 @@ import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
   bindDrawerSessionId,
   openDrawerTab,
+  setDrawerTab,
   getDrawerControlState,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
@@ -100,6 +101,9 @@ async function mountContainer() {
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
         // bashTask tab 内容面板（background-task-sidebar-view D5③）同样 stub（接线断言面）
         BackgroundTaskDetailPanel: DesktopStub('BackgroundTaskDetailPanel', 'bash-task-detail-panel'),
+        // plan tab 内容面板（plan 模式重设计 u1-docs-panel）：PlanDocsPanel 起真面板内含
+        // RPC/订阅副作用，接线断言面 stub 同其余桌面面板
+        PlanDocsPanel: DesktopStub('PlanDocsPanel', 'plan-docs-panel'),
       },
     },
   })
@@ -213,6 +217,47 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
     // bashTask tab 按钮随 SideDrawerTab 扩展常驻（DrawerPanel D5②）
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
+  }, 60_000)
+})
+
+// plan tab 接线（plan 模式重设计 u1-drawer-tab + u1-docs-panel：v-if chain 分支 + 面板常驻注入；
+// u1-drawer-tab 阶段断言对象是空骨架 plan-docs-panel-skeleton，u1-docs-panel 起由 PlanDocsPanel
+// 真面板替换——testid 随被测对象演进为 plan-docs-panel，无条件注入语义不变）
+describe('PanelContainer plan tab 接线（u1-drawer-tab + u1-docs-panel）', () => {
+  it('plan tab 激活 → 注入 PlanDocsPanel（常驻容器，不经空态 fallback）；plan tab 按钮常驻', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-plan-skeleton')
+    openDrawerTab('plan')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    // 面板注入（u1-docs-panel 交付面；内部空态/文档渲染归 PlanDocsPanel 自身单测）
+    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(true)
+    // 无条件注入语义：面板存在时空态 fallback 不渲染（与 bashTask「未选中不注入」相反）
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+    // plan tab 按钮随 SideDrawerTab 第 9 员常驻（DrawerPanel TabMeta）
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
+    // 既有 8 tab 无回归
+    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+    }
+  }, 60_000)
+
+  it('切走 tab（git）→ plan 面板卸载（v-if 按 tab 激活切换）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-plan-switch')
+    openDrawerTab('plan')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(true)
+
+    // 切到 git tab → plan 面板卸载、git 面板注入（v-if chain 互斥）
+    setDrawerTab('git')
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
   }, 60_000)
 })
 

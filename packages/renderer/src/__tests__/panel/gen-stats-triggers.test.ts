@@ -156,6 +156,43 @@ describe('双触发器渲染（黑盒 DOM）', () => {
     expect(btn.classes()).toContain('text-neutral-dim')
     expect(btn.classes()).not.toContain('text-success')
   })
+
+  // ── 归因降噪（2026-09-19 D-A）：帧带 currentMiss → 成因文案 + 中性色（非故障）──
+  it.each([
+    { reason: 'cold-start', label: '首次请求' },
+    { reason: 'idle-expiry', label: '空闲过期' },
+    { reason: 'context-rewrite', label: '压缩重建' },
+  ] as const)('归因 $reason → 触发器显「$label」而非 0%，且为中性色（非 danger）', async ({ reason, label }) => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 0, currentMiss: { reason, idleMs: reason === 'idle-expiry' ? 12 * 60_000 : undefined } },
+      }),
+    })
+    await flushPromises()
+
+    const btn = wrapper.find(`[title="${CACHE_TITLE}"]`)
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe(label)
+    expect(btn.classes()).toContain('text-neutral-dim')
+    expect(btn.classes()).not.toContain('text-danger')
+  })
+
+  it('未知成因的 0%（无 currentMiss）→ 仍显「0%」+ danger 色（降噪不吞真 miss 信号）', async () => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 0, day: 0 } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('0%')
+    expect(wrapper.find(`[title="${CACHE_TITLE}"]`).classes()).toContain('text-danger')
+  })
 })
 
 // ── 观察者形态（浮层内容行，HoverCard stub 常开）────────────
@@ -201,8 +238,8 @@ describe('浮层内容（观察者形态）', () => {
     expect(text).toContain('今日加权（此模型）')
     expect(text).toContain('87%')
     expect(text).toContain('cacheRead ÷ (input + cacheRead + cacheWrite)')
-    // C4 口径补句：模型不支持缓存时恒为 0%
-    expect(text).toContain('模型不支持缓存时恒为 0%')
+    // C4 口径补句：模型不支持缓存时显示「—」（归因降噪后：无计量 ≠ 0%）
+    expect(text).toContain('模型不支持缓存时显示「—」')
 
     const bar = wrapper.find('[data-testid="genstats-cache-bar"]')
     expect(bar.exists()).toBe(true)
@@ -221,6 +258,58 @@ describe('浮层内容（观察者形态）', () => {
 
     expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('—')
+  })
+
+  // ── 归因降噪浮层（2026-09-19 D-A）：成因说明行 + bar 隐藏 + 本次行显成因文案 ──
+  it('归因态浮层：本次行显成因文案、成因说明行（含空闲时长）、bar 隐藏', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 96, currentMiss: { reason: 'idle-expiry', idleMs: 12 * 60_000 } },
+      }),
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('空闲过期')
+    expect(text).toContain('距上次请求已空闲 12m')
+    expect(text).toContain('provider 缓存已过期')
+    expect(text).toContain('今日加权（此模型）')
+    expect(text).toContain('96%') // 今日加权照常显示（归因只作用于本次行）
+
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').text()).toContain('空闲')
+    // 归因态无 0% 数值可画 → bar 整体隐藏（空轨道会被读成另一种 0）
+    expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
+  })
+
+  it('context-rewrite 归因浮层：压缩重建说明行', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 0, day: 90, currentMiss: { reason: 'context-rewrite' } } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('压缩重建')
+    expect(wrapper.text()).toContain('上下文压缩后前缀重建')
+  })
+
+  it('命中态无成因说明行（降噪行只在归因存在时出现）', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 91, day: 87 } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').exists()).toBe(false)
   })
 
   it('无合法帧 → 浮层显「暂无数据」（从未有帧与有帧无值的 UX 差异落在浮层）', () => {

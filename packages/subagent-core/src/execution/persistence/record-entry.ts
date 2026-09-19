@@ -72,7 +72,12 @@ export interface SubagentRecordEntryData {
   /** turn 计数。 */
   turns: number;
   totalTokens: number;
-  model: string;
+  /**
+   * 模型留痕（R4/D6-① 可选化）：undefined = 用户未指定模型（引擎自身缺省解析）。
+   * 禁空串哨兵——undefined 经 JSON.stringify 自然缺省；读侧（record-store-rebuild）
+   * 对存量 entry 的空串残留归一为 undefined。
+   */
+  model: string | undefined;
   thinkingLevel: string | undefined;
   /** 详情事件日志（/subagents 详情面板）。 */
   eventLog: AgentEventLogEntry[];

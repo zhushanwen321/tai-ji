@@ -89,8 +89,10 @@ export function appendToolArgs(
 
 /** 主 agent spawn 形状（runtime RpcClientOptions 的 argv 相关子集，结构兼容直传）。 */
 export interface PiMainAgentSpawnOptions {
-  /** 替换 pi 核心系统提示词（--system-prompt；空白时不传）。 */
+  /** 替换 pi 核心系统提示词（--system-prompt；空白时不传）。值经 toInlinePromptValue 加 \n 前缀。 */
   systemPrompt?: string
+  /** 追加在 pi 基础系统提示词之后（--append-system-prompt；空白时不传）。值经 toInlinePromptValue 加 \n 前缀。 */
+  appendSystemPrompt?: string
   /** skill 路径列表（每路径独立 --skill token）。 */
   skillPaths?: string[]
   /** pi 扩展路径列表（每路径独立 --extension token）。 */
@@ -114,6 +116,25 @@ export interface PiMainAgentSpawnOptions {
 }
 
 /**
+ * 内联提示词值 → argv 文本值：前置一个 `\n`（已以 `\n` 开头则不重复）。
+ *
+ * pi 对两个 prompt flag 的值走同一解析函数（`resolvePromptInput`）：先
+ * `existsSync(值)`（相对 pi 进程 cwd = 会话 cwd = 用户项目目录），命中即把**该文件内容**
+ * 当提示词注入，否则当字面文本。后果：模式文案若恰等于项目内存在的相对路径
+ * （`AGENTS.md` / `.env` / `config.json` 等），pi 会静默把文件全文当提示词（UI 显示
+ * 用户文案、实际生效文件内容，且可能把含密钥文件送进上下文）。
+ *
+ * 含换行的值不可能命中真实路径（除非磁盘真存在名为 `\nfoo` 的文件），故判定恒为文本；
+ * `\n` 对提示词语义无影响。**前缀必须落在内联值上（本函数）**——文件降级路径（若启用）
+ * 一律用**绝对路径**，不加前缀（加了反而会破坏 existsSync 判定、把降级路径堵死）。
+ *
+ * 两条通道（replace / append）与两条来路（模式值 / 全局值）共用本函数，前缀不会漏加。
+ */
+function toInlinePromptValue(value: string): string {
+  return value.startsWith('\n') ? value : `\n${value}`
+}
+
+/**
  * 主 agent 侧 pi CLI args（runtime rpc-client buildPiArgs 逐字等价提取）。
  *
  * 基座 flag 语义（架构约定 #11）：
@@ -128,8 +149,13 @@ export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: st
   if (model) args.push('--model', model)
   // --system-prompt: 替换 pi 核心系统提示词（身份/工具列表/指引/pi 文档路径 4 段）。
   // 动态段（project_context/skills/日期/cwd）仍由 pi 照常拼接。空白/未传不拼。
+  // --append-system-prompt: 追加在 pi 基础提示词之后（模式 append 段）。两 flag 对称。
+  // 内联值均经 toInlinePromptValue 加 \n 前缀（pi 二义陷阱构造性区分，见函数注释）。
   if (options.systemPrompt?.trim()) {
-    args.push('--system-prompt', options.systemPrompt)
+    args.push('--system-prompt', toInlinePromptValue(options.systemPrompt))
+  }
+  if (options.appendSystemPrompt?.trim()) {
+    args.push('--append-system-prompt', toInlinePromptValue(options.appendSystemPrompt))
   }
   appendSkillArgs(args, options.skillPaths)
   appendExtensionArgs(args, options.extensionPaths)

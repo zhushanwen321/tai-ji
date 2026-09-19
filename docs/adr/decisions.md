@@ -91,6 +91,9 @@ runtime 为 transport → services → infra 三层，组装在 index.ts 手动 
 ### ADR-0011（部分有效）builtin 扩展打包内置
 `@zhushanwen/pi-*` 扩展 esbuild bundle 后 staged 到 `apps/electron/resources/extensions/` 随应用打包，不走 npm 安装；清单 SSOT = `packages/shared/src/mandatory-extensions.json`。「随应用内置、版本随应用」核心决策延续（实现从源码拷贝演进为 bundle）。登记 C-build-02。
 
+### plan 模式重设计的决策承载（2026-09-18，显式裁决：不另立 ADR 编号条目）
+plan 模式重设计（GUI 投影 + skill 挂载 + 文档审阅闭环）的全部关键决策由 pi-ext ADR 家族（pi-ext-021 prompt-only readonly / pi-ext-022 session-manager state 等既有条目）与 `extensions/universal/plan/` 源码注释 + [CONTEXT.md](../CONTEXT.md) 的「计划模式 / plan-state entry / PLAN_REVIEW_MARKER / record 投影链」词条承载，不另立 ADR 编号条目。理由：决策密度已由设计期对抗式审查收敛，核心机制（marker select 通道 = Marker RPC 词条、投影链 = 既有 subagent/workflow 机制的参数化扩容）均复用已登记决策，新编号只增检索成本不增信息。本条目即「为何检索 plan 相关决策不到 ADR-XXXX 编号」的权威解释。
+
 ## 可靠性与看护
 
 ### ADR-0047 watchdog 用进程健康探测
@@ -131,8 +134,8 @@ isOpen/activeTab/docked 三控制态经 useSessionScopedState 按 focusedSession
 ### ADR-0032 thinkingLevelMap key/value 语义
 key = UI 档位（含 max），value = 发 pi 的实际 level（max → xhigh）；可用档位按 key 判定，传 pi 必经 resolveThinkingValue 映射（pi 不认识 max 会 clamp）。实装 `core/domain/composer/thinking-levels.ts`。
 
-### ADR-0050 slash/skill 候选源按 variant 分支（panel skill 段权威 = taiji registry）
-skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），但 panel 态 slash 段过滤 skill 项——panel 的 skill 段是唯一 skill 入口（双入口消除；landing 单列形态不过滤）。用户可感知后果两条：①panel `/` 浮层 slash 段不再列 skill 项（skill 只经行中 `/` 的 skill 段入口）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
+### ADR-0050 slash/skill 候选源按 variant 分支（skill 段与 slash 段 skill 项均 = taiji registry）
+skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），panel 态 slash 段的 skill 项**换源保留**（0.10.1 首版「过滤 skill 项、panel 的 skill 段是唯一 skill 入口」的双入口消除二次修订推翻）：pi 真源 skill 命令（reload 才刷新的滞后快照）仍剔除，registry 源 skill 项以 `/skill:<name>` 形态补入（与 landing 单列形态同构、同一追加函数）。行首 `/` 与行中 `/` skill 段双入口共存——跨入口防双插由 selectedSkillNames 已选标记（S-2）承担，不依赖入口裁剪。用户可感知后果两条：①panel `/` 浮层 slash 段列 registry 源 skill 项（首版不列致行首 `/` 肌肉记忆下 session 发起后 skill 不可见，属回归）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
 
 ### ADR-0028 / ADR-0029 / ADR-0030（digest）搜索域内聚（0028/0029 部分有效）
 多源聚合（命令/文件/会话/recents）收敛于 `core/src/domain/new-task-search/`（search.ts 编排 + match-engine + file-match 单一管线复用于 composer # 与 SearchModal）；mock 反向依赖生产类型，生产类型归 domain types.ts。登记 C-state-07。

@@ -29,7 +29,7 @@
  * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -961,6 +961,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [reload-closeout D2] 送达水位对账腿入口（agent_settled 触发，interpreter 经组合根
+   * 注入）。实现迁 session-records.ts——重跑同一条 fetch→merge→publish 管线，发布门 =
+   * 已发布快照水位（守卫/发布门处曾丢的帧补发；扫描域门与 inflight 合并见该模块）。
+   */
+  reconcileRecordEntries(sessionId: string): void {
+    return this.records.reconcileRecordEntries(sessionId)
+  }
+
+  /**
    * 确保会话活跃;不存在则自动 restore。
    *
    * 并发语义（crash-resilience D7-③，u8 join 改造）：[HISTORICAL] 原对并发调用直接
@@ -1057,6 +1066,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
   async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> { return this.records.getWorkflows(sessionId) }
+
+  /**
+   * plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，u1-rpc 补接线）：对称 getSubagents
+   * 转发形态，实现迁 session-records.ts（磁盘 JSONL → scanPlanStateEntries 派生，
+   * 与 live 投影同一份派生代码）。
+   */
+  async getPlanState(sessionId: string): Promise<PlanStateView> { return this.records.getPlanState(sessionId) }
 
   /**
    * session-trace 台账全量拉取（RPC 混合路由 → 文件降级 → empty 空态）。

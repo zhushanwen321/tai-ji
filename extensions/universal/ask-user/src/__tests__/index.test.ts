@@ -523,9 +523,11 @@ describe("execute — inline render (FR-3)", () => {
 });
 
 // ── RPC 模式（taiji GUI 富交互协议）──────────────────
-// hasUI=false + ui.select 存在 → 走 askUserInteract（select 通道 + ASK_USER_MARKER）。
-// select 的返回值是前端 JSON.stringify 的 AskUserAnswers，index.ts 做格式转换。
-describe("execute — RPC mode (askUserInteract via select channel)", () => {
+// mode='rpc' + ui.select 存在 → 走 uiFormInteract（统一表单协议：select 通道 +
+// UI_FORM_MARKER，问题经 form-adapter 转 FormQuestion choice 形态）。
+// select 的返回值是前端 FormOverlay JSON.stringify 的 FormAnswers（choice 部分与旧
+// AskUserAnswers 逐字兼容），index.ts 做格式转换。
+describe("execute — RPC mode (uiFormInteract via select channel)", () => {
 	it("R-1: single-select answer → converted to Result.answers (key=question)", async () => {
 		const tool = getTool();
 		// 协议 answers：key=header（单问题无 header → question 全文），value=选中 label
@@ -723,6 +725,127 @@ describe("execute — RPC mode (askUserInteract via select channel)", () => {
 		expect(result.details.answers["Which tools?"]).toEqual({ selected: ["A", "C"], other: "Custom" });
 		// Q3: 无选中 → 跳过（不在 answers map 中）
 		expect(result.details.answers["Which region?"]).toBeUndefined();
+	});
+
+	it("R-9: select 收到 title=UI_FORM_MARKER + options[0]={formQuestions, allowCancel}（D2 adapter 形态）", async () => {
+		const tool = getTool();
+		let capturedTitle = "";
+		let capturedOptions: string[] = [];
+		const ctx = {
+			mode: "rpc" as const,
+			hasUI: true,
+			signal: undefined as AbortSignal | undefined,
+			ui: {
+				select: async (
+					title: string,
+					options: string[],
+				): Promise<string> => {
+					capturedTitle = title;
+					capturedOptions = options;
+					return JSON.stringify({ "Which DB?": "Postgres" });
+				},
+				custom: async <T = void>(): Promise<T> => undefined as T,
+			},
+		};
+		await tool.execute("id", validSingle, undefined, undefined, ctx);
+
+		// wire 形态：统一表单协议 marker + 单元素 options
+		expect(capturedTitle).toBe("\x00TAIJI_UI_FORM");
+		expect(capturedOptions).toHaveLength(1);
+		const payload = JSON.parse(capturedOptions[0]!) as {
+			formQuestions?: Array<Record<string, unknown>>;
+			questions?: unknown;
+			allowCancel?: boolean;
+		};
+		expect(payload.questions).toBeUndefined();
+		expect(payload.allowCancel).toBe(true);
+		expect(payload.formQuestions).toEqual([
+			{
+				type: "choice",
+				question: "Which DB?",
+				options: [
+					{ label: "Postgres", description: undefined },
+					{ label: "SQLite", description: undefined },
+				],
+				allowOther: true,
+			},
+		]);
+		// A1 对拍基准：问题对象无 allowComment / comment 类字段
+		for (const key of Object.keys(payload.formQuestions![0]!)) {
+			expect(key.includes("comment"), `字段 ${key} 不应含 comment`).toBe(false);
+		}
+	});
+
+	it("R-9b: multiSelect → multi 重命名进 wire 形态", async () => {
+		const tool = getTool();
+		let capturedOptions: string[] = [];
+		const ctx = {
+			mode: "rpc" as const,
+			hasUI: true,
+			signal: undefined as AbortSignal | undefined,
+			ui: {
+				select: async (_title: string, options: string[]): Promise<string> => {
+					capturedOptions = options;
+					return JSON.stringify({ Tools: JSON.stringify(["A"]) });
+				},
+				custom: async <T = void>(): Promise<T> => undefined as T,
+			},
+		};
+		const multi = {
+			questions: [
+				{
+					question: "Which tools?",
+					header: "Tools",
+					options: [{ label: "A" }, { label: "B" }],
+					multiSelect: true,
+				},
+			],
+		};
+		await tool.execute("id", multi, undefined, undefined, ctx);
+		const payload = JSON.parse(capturedOptions[0]!) as {
+			formQuestions?: Array<Record<string, unknown>>;
+		};
+		expect(payload.formQuestions![0]!.multi).toBe(true);
+		expect(payload.formQuestions![0]!.multiSelect).toBeUndefined();
+	});
+
+	it("R-10: select 回显 payload（echo，旧 taiji 宿主）→ channel-error throw 带升级指引 + 工具禁用", async () => {
+		let capturedActive: string[] | null = null;
+		const tool = getTool({
+			getAllTools: () => [{ name: "ask_user" }, { name: "other" }],
+			setActiveTools: (names: string[]) => {
+				capturedActive = names;
+			},
+		});
+		// 旧宿主不识别 UI_FORM_MARKER → band 单选项 = payload 自身，点选回显
+		const ctx = {
+			mode: "rpc" as const,
+			hasUI: true,
+			signal: undefined as AbortSignal | undefined,
+			ui: {
+				select: async (_title: string, options: string[]): Promise<string> => options[0]!,
+				custom: async <T = void>(): Promise<T> => undefined as T,
+			},
+		};
+		await expect(
+			tool.execute("id", validSingle, undefined, undefined, ctx),
+		).rejects.toThrow(/ask_user failed[\s\S]*upgrade taiji/);
+		// channel-error 折叠 = 禁用工具（防 LLM 反复重试），与 R-6 一致
+		expect(capturedActive).not.toContain("ask_user");
+		expect(capturedActive).toContain("other");
+	});
+
+	it("R-11: select 返回合法 JSON 但非 FormAnswers 形状（JSON 数组）→ 折叠 cancelled（非 throw）", async () => {
+		const tool = getTool();
+		const result = await tool.execute(
+			"id",
+			validSingle,
+			undefined,
+			undefined,
+			makeCtx({ mode: "rpc", selectResult: JSON.stringify(["A", "B"]) }),
+		);
+		expect(result.content[0].text).toContain("User cancelled");
+		expect(result.details.cancelled).toBe(true);
 	});
 
 });

@@ -86,6 +86,12 @@ export type ClientMessageType =
   // wave:runtime-wiring 已在 ClientMessageMap 补登记 request payload 形状（见下方）。
   | 'session.subscribe' | 'session.unsubscribe'
   | 'session.getSubagents' | 'session.getSubagentHistory'
+  // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
+  // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
+  // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
+  // abortPlan：横幅「退出 ×」→ runtime 经 ensureActive 恢复后 client.prompt('/plan abort')
+  // 直发（绕 busy 预检，streaming 中可用）。
+  | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
   | 'session.getWorkflows' | 'session.getAgentCallHistory' | 'session.getAgentCallFilePath'
@@ -255,13 +261,22 @@ export interface SetProviderData {
 }
 
 /** 系统提示词配置（FR-6）。文件：<dataDir>/system-prompt.json。
- *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，仅新建会话生效）
+ *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，**每次进程启动都生效**，含 restore/resume——D1 活定义依据；[HISTORICAL] 早期注释写"仅新建会话生效"与实装不符）
  *  - append:  追加注入（走 before_agent_start hook，每轮读配置热生效）
+ *  - capability: taiji capability 固定注入段开关（schema v2 新增，D6）
  *  version: schema 版本号（SR1） */
 export interface SystemPromptConfig {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  /**
+   * 可选 = v1 存量 json 无此字段的常态形态。语义权威在扩展侧解析（消费方是
+   * system-prompt 扩展的 before_agent_start hook，直接读原始 json）：缺字段/
+   * 形态不对/文件损坏 → 按 enabled true 生效，仅显式布尔 false 关闭——与
+   * replace/append 的「缺省 false」方向相反（capability 是 taiji 内置告知，
+   * 默认开是设计裁决）。renderer 读侧对 undefined 同样兜底 true。
+   */
+  capability?: { enabled: boolean }
 }
 
 /** 终端配置（Phase 6 settings）。文件：<dataDir>/terminal.json。
@@ -418,6 +433,11 @@ export interface ClientMessageMap {
   // subagent 列表/对话流读取（runtime 直读主 session JSONL + subagent JSONL，不依赖扩展）
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
+  // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
+  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 横幅退出命令，
+  // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
+  'session.getPlanState': { sessionId: string }
+  'session.abortPlan': { sessionId: string }
   // [U7] 子代理引擎配置读写（payload：set 带 engineId；get 无参）
   'session.getSubagentEngineConfig': Record<string, never>
   'session.setSubagentDefaultEngine': { engineId: string }
@@ -781,6 +801,10 @@ export type ServerMessageType =
   | 'session.occupancy'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
+  // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
+  //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
+  // session.getPlanState RPC，reply 复用本 payload。
+  | 'session.planState'
   // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
   | 'session.subagentEngineConfig' | 'session.subagentDefaultEngineSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
@@ -1273,6 +1297,45 @@ export interface SessionSetProjectMutationReply {
   projectId: string
 }
 
+/**
+ * 计划产物文档元数据（plan 模式重设计 D1）。
+ * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形——shared 是最底层
+ * 共享包不能反向依赖 extension-protocol，同形状漂移由双端契约测试守卫。
+ */
+export interface PlanDocMeta {
+  /** 文件名（drawer 文档 tab 标题，不含目录） */
+  fileName: string
+  /** 文件绝对路径（前端 file.read RPC 带 sessionId 读取） */
+  absPath: string
+  /** 来源技能名（挂载 --skills 时产出该文档的技能；模板流程产出时为空串） */
+  sourceSkill: string
+  /** 修订版本，从 1 起，每次修订重登记 +1（前端凭 version 变化重拉 file.read） */
+  version: number
+}
+
+/**
+ * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
+ *
+ * 四个必填字段是 entry schema v1 原有字段；三个 optional 字段是 schema 扩展
+ * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
+ * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件）。
+ * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
+ * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
+ * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
+ */
+export interface PlanStateView {
+  isActive: boolean
+  planFilePath: string | null
+  requirement: string | null
+  templateName: string | null
+  /** 挂载技能名清单（/plan <需求> --skills a,b 解析结果） */
+  skills?: string[]
+  /** 产物文档清单（产物 tab 由 docs.length 驱动，与 isActive 解耦——退出/执行后仍可回看） */
+  docs?: PlanDocMeta[]
+  /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
+  reviewState?: 'awaiting' | 'revising'
+}
+
 export interface ServerMessageMapBase {
   // ── sendInitialState 推送 / domain 订阅（精确）──
   'config.providers': { providers: ProviderInfo[]; scopedModels?: string[] }
@@ -1401,6 +1464,9 @@ export interface ServerMessageMapBase {
   // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
   // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
   // 前端消费时用类型守卫收窄为 AskUserQuestion[]。
+  // schedule-create 扩展字段（scheduleCreate/scheduleDraft）仅在 method='select' + scheduleCreate=true 时存在
+  // （runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select，U5）；
+  // scheduleDraft 用 unknown 保持 shared 依赖最小化，前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
   'extension.ui_request': {
     sessionId: string
     requestId: string
@@ -1415,6 +1481,21 @@ export interface ServerMessageMapBase {
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
+    // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在）
+    scheduleCreate?: boolean
+    scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
+    // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
+    // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
+    // planReviewDocs 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
+    // 前端消费时收窄为 PlanDocMeta[]。
+    planReview?: boolean
+    planReviewDocs?: unknown[]
+    // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+    // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
+    // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
+    // 前端消费时用 extension-protocol 的 isFormQuestion 守卫收窄为 FormQuestion[]。
+    form?: true
+    formQuestions?: unknown[]
   }
   // session 通道推送（runtime session-service / index.ts 生产，W04 收紧）
   // compacting：compaction_start → interpreter 广播（唯一发送点 event-interpreter.handleCompactionStart），
@@ -1450,6 +1531,10 @@ export interface ServerMessageMapBase {
   'session.import': ImportReply
   // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）
   'session.subagents': { sessionId: string; subagents: SubagentRecord[] }
+  // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
+  // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
+  // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
+  'session.planState': { sessionId: string; planState: PlanStateView }
   // session.subagentHistory：subagent 对话流消息（runtime 直读 subagent JSONL，复用 convertPiHistory）。
   // truncated：u4b（D5①）巨型 subagent JSONL（高发源）超预检阈值后逆序窗口降级标志
   //（optional——mock / 旧 runtime 不带此键，消费方按 false 处理）。
@@ -2131,6 +2216,8 @@ export interface ReplyPayloadMap {
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
   'session.getSubagents': ServerMessageMap['session.subagents']
+  // plan 模式（D1-⑥ 冷启动首拉）：reply 复用 session.planState 广播 payload（同 getSubagents 先例）
+  'session.getPlanState': ServerMessageMap['session.planState']
   'session.getWorkflows': ServerMessageMap['session.workflows']
   'session.history': ServerMessageMap['session.history']
   'config.sessions': ServerMessageMap['config.sessions']
@@ -2259,6 +2346,10 @@ export interface ReplyPayloadMap {
   'session.abortHandoff': void    // reply message.status
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
+  // session.abortPlan：横幅退出 → runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
+  // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
+  // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
+  'session.abortPlan': void       // reply message.status
   // session.subscribe（runtime-message-bus wave:protocol-seq）：订阅某 session 的 live 事件流。
   // payload 消费型——renderer 读 snapshot 做 reconcile（订阅时刻 bus ring 内当前事件序列，
   // 元素为带 seq 的 ServerMessage），记 lastSeq 作为后续 gap 检测基线；gap=true 标记本次

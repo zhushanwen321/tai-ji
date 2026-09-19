@@ -106,6 +106,8 @@ export interface PiSessionOptions {
   extensionPaths?: string[]
   /** 替换 pi 核心系统提示词（透传到 RpcClientOptions.systemPrompt → --system-prompt CLI）。 */
   systemPrompt?: string
+  /** 追加在 pi 基础系统提示词之后（透传到 RpcClientOptions.appendSystemPrompt → --append-system-prompt CLI）。 */
+  appendSystemPrompt?: string
   piCommand?: string
   /** 工具白名单（替换语义），透传到 RpcClientOptions.tools → --tools。 */
   tools?: string[]

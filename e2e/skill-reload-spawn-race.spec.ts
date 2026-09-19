@@ -7,12 +7,16 @@
  * spawn 进行中」的竞态窗口（reload 决策在主 turn 生成期落 queued、message.complete 后消费，
  * 或 turn 已结束则 immediate，两形态均为设计内合法路径）。
  *
- * 通过标准（设计 S2）：
- * - run 收口确定：正常完成（faux 确定性主预期）或落 done,failed 且用户可见——两者共享同一
- *   用户可见通道（session.workflowUpdate 广播 → 托盘/Turn 渲染；失败分支可见性 = S3 单测
- *   契约 + 同通道，设计 §4 S3 已明示真机无法安全伪造 adoption 失败）；
+ * 通过标准（设计 S2 + reload-closeout-reliability §4 A1 断言升级）：
+ * - run 收口确定：done 为 faux 主预期断言面（≤30s done-latency 必达；helpers 的
+ *   awaitWorkflowDoneTimed 只断 status === 'done'）；done,failed 分支的用户可见性 =
+ *   S3 单测契约 + 同一 workflowUpdate 通道（真机无法安全伪造 adoption 失败，非本 spec
+ *   通过分支）；
  * - 无状态分裂：主 session JSONL 可读回末条 workflow-record 终态（store 与内存一致，
  *   W17 权威 entry last-wins）；
+ * - G1 必达窗口（A1 新断言，2026-09-19）：run 完成（JSONL 终态 done 落盘）后 ≤30s
+ *   `session.workflowUpdate` done 帧到达 spec WS（agent_settled 腿秒级 / 15s 定时腿最坏
+ *   ≈15s+单轮，30s = 2x 余量）；
  * - 无孤儿进程：session.delete 真杀级联后引擎执行树（引擎 CLI / relay / 真实 pi）ps 归零；
  * - reload 确实发生：`[skill-reload] dir=project:` 归因行在场。
  *
@@ -42,9 +46,11 @@ import {
   parseLastPreserved,
   waitForLogLine,
   runtimeLogLines,
-  lastWorkflowRecordFor,
   engineTreePids,
   waitForEngineTreeGone,
+  awaitWorkflowDoneTimed,
+  WORKFLOW_DONE_MAX_LATENCY_MS,
+  DONE_TIMING_OBSERVE_SLACK_MS,
 } from './fixtures/skill-reload-real-helpers'
 
 const SESSION_LABEL = 'skill-reload-spawn-race'
@@ -146,40 +152,23 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
     const preserved = parseLastPreserved(readExtensionLogs(dataDir))
     expect(preserved?.records, 'preserved records ≥1（在飞 subagent 被接管）').toBeGreaterThanOrEqual(1)
 
-    // ── run 确定收口：workflowUpdate done 广播（用户可见通道；失败分支同通道可见，见文件头）──
-    let runId = ''
-    let updateStatus = ''
-    const doneDeadline = Date.now() + 150_000
-    while (Date.now() < doneDeadline && runId === '') {
-      const hit = listen.events.find((e) => e.type === 'session.workflowUpdate')
-      const update = hit?.payload?.update as { status?: unknown; runId?: unknown } | undefined
-      // 必须等终态（done/failed）：running 广播先到（run 启动即广播），拿到就 break 会让
-      // 后续 JSONL 读回在 60s 长流式未结束时必然读到 running（假失败）
-      if (update !== undefined && typeof update.runId === 'string'
-        && (update.status === 'done' || update.status === 'failed')) {
-        runId = update.runId
-        updateStatus = String(update.status)
-        break
-      }
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-    expect(runId, 'run 应有终态广播（正常完成或 done,failed，用户可见）').not.toBe('')
-    console.log(`[S2] run 终态广播: runId=${runId} status=${updateStatus}`)
-
-    // ── 无状态分裂：主 session JSONL 可读回末条 workflow-record 终态 ──
-    let mainFile = sessionFile
-    const fileDeadline = Date.now() + 15_000
-    while ((!mainFile || !fs.existsSync(mainFile)) && Date.now() < fileDeadline) {
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-    expect(mainFile, '主 session JSONL 路径应存在').toBeTruthy()
-    let rec = lastWorkflowRecordFor(mainFile!, runId)
-    const recDeadline = Date.now() + 15_000
-    while ((rec === null || rec.status !== 'done') && Date.now() < recDeadline) {
-      await new Promise((r) => setTimeout(r, 1000))
-      rec = lastWorkflowRecordFor(mainFile!, runId)
-    }
-    expect(rec?.status, '末条 workflow-record 应为可读回的终态 done（store 与内存一致）').toBe('done')
+    // ── run 确定收口：workflowUpdate done 广播 + JSONL 终态（双锚计时，A1 断言升级）──
+    // awaitWorkflowDoneTimed 内全量遍历（禁 find 的卡帧教训注释在 helpers 文件）；runId 取
+    // 首条 workflowUpdate 帧（running 帧——run 启动即广播，harness 防重播种后单 run）。
+    // 必须等终态帧：拿到 running 帧就往下走会让 JSONL 锚在 60s 长流式未结束时恒为
+    // running（假失败）——helper 返回即双锚（终态帧 + JSONL 终态）都已见。
+    expect(sessionFile, '主 session JSONL 路径应存在').toBeTruthy()
+    const timing = await awaitWorkflowDoneTimed(listen.events, sessionFile)
+    expect(timing, 'run 应有终态广播 + JSONL 终态 done（正常完成或 done,failed，同通道用户可见）').not.toBeNull()
+    const runId = timing!.runId
+    // G1 必达窗口（设计 §4 A1 新断言，S2 同款）：完成锚（JSONL 终态落盘）→ 到达锚（done
+    // 帧到 spec WS）≤30s。负时差钳 0 + 观测容差语义见 helpers awaitWorkflowDoneTimed 注释。
+    const latency = Math.max(0, timing!.tFrameSeen - timing!.tDoneRecord)
+    console.log(`[S2] run ${runId} 完成→done 帧到达延迟 ${latency}ms`)
+    expect(
+      latency,
+      `run ${runId} 完成后 ≤${WORKFLOW_DONE_MAX_LATENCY_MS}ms workflowUpdate 帧应到达 spec WS`,
+    ).toBeLessThanOrEqual(WORKFLOW_DONE_MAX_LATENCY_MS + DONE_TIMING_OBSERVE_SLACK_MS)
 
     // ── 无孤儿：session.delete 真杀级联后引擎执行树归零 ──
     const treeBaseline = engineTreePids()
@@ -192,7 +181,7 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
     expect(orphans, '竞态收口 + session 删除后应无残留引擎执行树进程').toEqual([])
 
     listenWs?.close()
-    console.log('[S2] 通过：reload 命中 spawn 窗口 / run 确定收口 / 终态可读回 / 无孤儿')
+    console.log('[S2] 通过：reload 命中 spawn 窗口 / run 确定收口 / 终态可读回 / 无孤儿 / ≤30s 必达')
     reachedEnd = true
   } finally {
     delete process.env.TAIJI_AGENT_DEBUG

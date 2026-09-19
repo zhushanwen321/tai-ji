@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { isSystemPromptTraceEntryData, SYSTEM_PROMPT_CUSTOM_TYPE } from "../types.js";
+import { isSystemPromptTraceEntryData, PRESET_FALLBACK_ENV_KEYS, SYSTEM_PROMPT_CUSTOM_TYPE } from "../types.js";
 import type { SystemPromptTraceEntryData } from "../types.js";
 
 // trace.ts 的 computePromptHash 已收敛为包内私有（无外部消费方）；测试本地同款实现计算期望值。
@@ -335,6 +335,61 @@ describe("index.ts wiring SDK 契约", () => {
 			reason: "resume",
 			hash: computePromptHash(P1),
 		});
+	});
+
+	it("F1b wiring：process.env 两键齐备 → entry 带 presetFallback（from/to）；既有字段不削弱", async () => {
+		const ext = await loadExtension();
+		const h = createWiringHarness();
+		process.env[PRESET_FALLBACK_ENV_KEYS.FROM] = "custom:gone-uuid";
+		process.env[PRESET_FALLBACK_ENV_KEYS.TO] = "builtin:full";
+		try {
+			ext(h.pi);
+			const ctx = createCtx(() => P1, "sess-w-fb");
+			await emit(h, "session_start", { type: "session_start", reason: "startup" }, ctx);
+			await emit(h, "turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctx);
+		} finally {
+			delete process.env[PRESET_FALLBACK_ENV_KEYS.FROM];
+			delete process.env[PRESET_FALLBACK_ENV_KEYS.TO];
+		}
+		expect(h.entries).toHaveLength(1);
+		expect(entryData(h, 0).presetFallback).toEqual({ from: "custom:gone-uuid", to: "builtin:full" });
+		expect(entryData(h, 0)).toMatchObject({
+			version: 1,
+			reason: "initial",
+			fullText: P1,
+			charCount: P1.length,
+			hash: computePromptHash(P1),
+		});
+	});
+
+	it("F1b wiring：env 未注入 / 两键为空串（runtime 显式清除）→ entry 不含 presetFallback（无假披露）", async () => {
+		const ext = await loadExtension();
+		// 态 1：未注入
+		delete process.env[PRESET_FALLBACK_ENV_KEYS.FROM];
+		delete process.env[PRESET_FALLBACK_ENV_KEYS.TO];
+		const hAbsent = createWiringHarness();
+		ext(hAbsent.pi);
+		const ctxAbsent = createCtx(() => P1, "sess-w-fb-absent");
+		await emit(hAbsent, "session_start", { type: "session_start", reason: "startup" }, ctxAbsent);
+		await emit(hAbsent, "turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctxAbsent);
+		expect(hAbsent.entries).toHaveLength(1);
+		expect(Object.prototype.hasOwnProperty.call(entryData(hAbsent, 0), "presetFallback")).toBe(false);
+
+		// 态 2：空串（runtime 未回落时写空串显式清除继承值）——不得当回落事实
+		process.env[PRESET_FALLBACK_ENV_KEYS.FROM] = "";
+		process.env[PRESET_FALLBACK_ENV_KEYS.TO] = "";
+		const hEmpty = createWiringHarness();
+		try {
+			ext(hEmpty.pi);
+			const ctxEmpty = createCtx(() => P1, "sess-w-fb-empty");
+			await emit(hEmpty, "session_start", { type: "session_start", reason: "startup" }, ctxEmpty);
+			await emit(hEmpty, "turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctxEmpty);
+		} finally {
+			delete process.env[PRESET_FALLBACK_ENV_KEYS.FROM];
+			delete process.env[PRESET_FALLBACK_ENV_KEYS.TO];
+		}
+		expect(hEmpty.entries).toHaveLength(1);
+		expect(Object.prototype.hasOwnProperty.call(entryData(hEmpty, 0), "presetFallback")).toBe(false);
 	});
 
 	it("getSystemPrompt 抛错 → handler 吞掉不写 entry（留痕是诊断旁路，不影响 agent 主流程）", async () => {

@@ -334,7 +334,7 @@ export class WorkflowDispatch {
     let runSignal: MergedRunSignalHandle | undefined;
     let unbindStream: (() => void) | undefined;
     let noProgress: WorkflowNoProgressGuard | undefined;
-    // [W4] 在途记账（监督器「该等」判据源；与 kickOffEngineRun/kickOffChatRound 同款
+    // [W4] 在途记账（监督器「该等」判据源；与 kickOffChatRound 同款
     //——运行期监督对 workflow record 照旧纳管，只豁免 adopt 接管）。
     this.deps.getRoundSupervisor().noteRunStarted(record.id);
     try {

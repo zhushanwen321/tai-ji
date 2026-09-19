@@ -8,6 +8,9 @@
 // pi-subagent-cli spawn-args.ts buildSpawnArgs（切换前实现，行为由其
 // __tests__/spawn-args.test.ts 既有断言锚定）。本文件锚定公共层产出与两侧切换前
 // 输出一致（迁移契约：行为等价提取，非重写）。
+// [HISTORICAL] 唯一有意偏离：u2（模式提示词注入）起两个 prompt flag 的**内联值**
+// 统一前置 `\n`（pi 二义陷阱构造性区分，见 spawn-args.ts toInlinePromptValue），
+// 故含 systemPrompt/appendSystemPrompt 的快照值不再与切换前逐字节相同（其余 token 不变）。
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
@@ -41,11 +44,30 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     expect(buildPiMainAgentArgs({}, '')).not.toContain('--model')
   })
 
-  it('systemPrompt：非空白拼 --system-prompt；空白/未传不拼', () => {
+  it('systemPrompt / appendSystemPrompt：非空白拼 flag（值前置 \\n）；空白/未传不拼', () => {
     const args = buildPiMainAgentArgs({ systemPrompt: '  sys prompt  ' }, undefined)
-    expect(args[args.indexOf('--system-prompt') + 1]).toBe('  sys prompt  ')
+    expect(args[args.indexOf('--system-prompt') + 1]).toBe('\n  sys prompt  ')
+
+    const appended = buildPiMainAgentArgs({ appendSystemPrompt: 'appended' }, undefined)
+    expect(appended).toContain('--append-system-prompt')
+    expect(appended[appended.indexOf('--append-system-prompt') + 1]).toBe('\nappended')
+
     expect(buildPiMainAgentArgs({ systemPrompt: '   ' }, undefined)).not.toContain('--system-prompt')
+    expect(buildPiMainAgentArgs({ appendSystemPrompt: '   ' }, undefined)).not.toContain('--append-system-prompt')
     expect(buildPiMainAgentArgs({}, undefined)).not.toContain('--system-prompt')
+    expect(buildPiMainAgentArgs({}, undefined)).not.toContain('--append-system-prompt')
+  })
+
+  it('内联值构造性区分（pi 二义陷阱）：两 flag 值均带 \\n 前缀，恰为项目内相对路径也不命中文件读取', () => {
+    const args = buildPiMainAgentArgs({ systemPrompt: 'AGENTS.md', appendSystemPrompt: 'AGENTS.md' }, undefined)
+    expect(args[args.indexOf('--system-prompt') + 1]).toBe('\nAGENTS.md')
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('\nAGENTS.md')
+  })
+
+  it('已以 \\n 开头的内联值不重复前置（幂等）', () => {
+    const args = buildPiMainAgentArgs({ systemPrompt: '\nalready', appendSystemPrompt: '\nalready' }, undefined)
+    expect(args[args.indexOf('--system-prompt') + 1]).toBe('\nalready')
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('\nalready')
   })
 
   it('skillPaths/extensionPaths：每个路径独立 token、顺序保留', () => {
@@ -100,10 +122,11 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     expect(args).not.toContain('--thinking-level')
   })
 
-  it('快照等价：典型全参数集 argv 与切换前（runtime buildPiArgs）逐字节一致', () => {
+  it('快照：典型全参数集 argv（u2 起内联提示词带 \\n 前缀，其余逐字节与切换前一致）', () => {
     const args = buildPiMainAgentArgs(
       {
         systemPrompt: 'sys',
+        appendSystemPrompt: 'app',
         skillPaths: ['/s1', '/s2'],
         extensionPaths: ['/e1'],
         tools: ['read', 'grep'],
@@ -116,7 +139,8 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     expect(args).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
       '--model', 'prov/mid',
-      '--system-prompt', 'sys',
+      '--system-prompt', '\nsys',
+      '--append-system-prompt', '\napp',
       '--skill', '/s1', '--skill', '/s2',
       '--extension', '/e1',
       '--tools', 'read,grep',

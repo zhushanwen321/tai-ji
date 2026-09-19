@@ -28,9 +28,16 @@ import { BUILTIN_PRESET_IDS } from '@taiji/shared'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
 import { getImageCacheDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
-import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord } from './session-internal.js'
+import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
-import { buildPresetClientOptions, hasSubagentWorkflowExtension, warnLaunchEffectiveMismatch } from './launch-params.js'
+import {
+  buildPresetClientOptions,
+  buildPresetFallbackEnv,
+  hasSubagentWorkflowExtension,
+  resolveAppendSystemPrompt,
+  resolveEffectiveSystemPrompt,
+  warnLaunchEffectiveMismatch,
+} from './launch-params.js'
 import type { PresetClientOptions } from './launch-params.js'
 // D5 在途镜像（crash-forensics §3.3 D5 ①）：registerSession 汇聚点按本次 spawn 注入列表
 // 写 injected（presetZero 订阅在 session-service，本处只写注入态——两写方字段互不触碰，
@@ -495,7 +502,12 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(tempId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——replace 走 D3 优先级（模式 > 全局 > pi 默认），
+      // append 只有模式一段（全局追加归 pi-system-prompt 扩展）。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
+      env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
     })
 
@@ -969,7 +981,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const target = this.resolveRestoreTarget(sessionId)
     await this.clearExistingSessionForRestore(sessionId)
     const { sessionCwd, cwdFellBack } = this.resolveRestoreCwd(target)
-    const { client, presetId, allExtPaths } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
     await this.attachRestoreFile(client, target, sessionId, cwdFellBack)
 
     // U2: get_state 读回 pi 生效 model + thinkingLevel（D2 设计）。
@@ -1001,6 +1013,15 @@ export class SessionLifecycle implements ISessionRegistry {
       parentAgentSessionId: target.parentAgentSessionId,
       handedOffTo: target.handedOffTo,
     }, 'restore')
+    // F1 披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：模式定义不可得
+    // （fellBackFromPresetId 非空）时，本次 pi 确以 builtin:full 启动——把回落事实写到内存态，
+    // 经 toSummary（buildSessionSummary 透传）随 session summary 到达 renderer，chip/声明行据此
+    // 区分「已回落」（本次以全工具模式启动）与「未回落」（仅预告重启后回落）。
+    // 事实只在真发生回落时置位（避免「模式刚删、会话未重启」窗口内的假陈述）；不写 sidecar——
+    // 回落是「本进程本次运行」的内存态事实，进程重开未 restore 时不成立（详见 SessionSummary 字段注释）。
+    if (fellBackFromPresetId !== undefined) {
+      (session as ManagedSession).launchPresetFallbackTo = BUILTIN_PRESET_IDS.FULL
+    }
     const restoredSummary = this.svc.toSummary(session)
     // D4（session-dead-structural-fixes）：restore-abort——返回前检测 userStopped 标记。判定
     // 保持在主流程（位置同拆分前：toSummary 之后、notifySessionCreated 之前）：无标记时本行
@@ -1095,6 +1116,11 @@ export class SessionLifecycle implements ISessionRegistry {
    * sidecar 不清理。target.launchPresetId undefined 时（历史 session 无 sidecar）用
    * 'builtin:full' 兜底（FR-10）。
    *
+   * F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：target.launchPresetId
+   * 存在但定义不可得时，`getLaunchPresetOptions` 回落 builtin:full 并在 resolution 上附
+   * `fellBackFromPresetId`——本函数原样上抛给 restoreSession 置披露位（不在此处写 summary，
+   * 与 hydrateBindingMeta 回填同点）。
+   *
    * 求值顺序硬约束（同拆分前，勿把 options 字面量提到 gate 之前）：getLaunchPresetOptions →
    * extensionPaths 兜底 → buildPresetClientOptions → **await migrationGate** → createSession
    *（skillPaths / systemPrompt 在 options 字面量内求值 = gate 之后）。
@@ -1103,7 +1129,7 @@ export class SessionLifecycle implements ISessionRegistry {
     target: ScannedSession,
     sessionId: string,
     sessionCwd: string,
-  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[] }> {
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
     const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
     const resolution = await this.svc.getLaunchPresetOptions(presetId, sessionCwd)
     const allExtPaths = resolution?.extensionPaths ?? await this.svc.getExtensionPaths(sessionCwd)
@@ -1116,7 +1142,11 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(sessionId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——restore 用本次 resolve 的 resolution。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：回落事实现随 spawn 出站 env 到达 pi 子进程。
+      env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
       // P1（pi-assumption final gate V1⑤）：pi CLI --model 恒优先于 session entry 恢复
       //（main.js buildSessionOptions），restore 路径曾因全局默认兜底把 --model 拼进 spawn
@@ -1125,7 +1155,7 @@ export class SessionLifecycle implements ISessionRegistry {
       model: undefined,
       inheritSessionModel: true,
     })
-    return { client, presetId, allExtPaths }
+    return { client, presetId, allExtPaths, fellBackFromPresetId: resolution?.fellBackFromPresetId }
   }
 
   /**
@@ -1412,7 +1442,11 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(forkedId, sessionCwd, {
       skillPaths: forkResolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——fork 继承源 session 的 preset，用 forkResolution。
+      systemPrompt: resolveEffectiveSystemPrompt(forkResolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(forkResolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
+      env: buildPresetFallbackEnv(forkResolution),
       ...presetClientOptions,
     })
 

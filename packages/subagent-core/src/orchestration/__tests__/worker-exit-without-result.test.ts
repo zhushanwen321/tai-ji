@@ -81,10 +81,11 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
   } as unknown as WorkflowRun;
 }
 
-/** LifecycleDeps mock：store/workerHost/eventBus/onRunDone 可观察。 */
+/** LifecycleDeps mock：store/workerHost/eventBus/appendEntry/onRunDone 可观察。 */
 function makeDeps(): LifecycleDeps & {
   store: { save: ReturnType<typeof vi.fn> };
   eventBus: { emit: ReturnType<typeof vi.fn> };
+  appendEntry: ReturnType<typeof vi.fn>;
   onRunDone: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -93,6 +94,7 @@ function makeDeps(): LifecycleDeps & {
     runner: { run: vi.fn(async () => ({})) },
     runs: new Map(),
     eventBus: { emit: vi.fn() },
+    appendEntry: vi.fn(),
     onRunDone: vi.fn(),
     log: vi.fn(),
   } as unknown as ReturnType<typeof makeDeps>;
@@ -122,9 +124,9 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("failed");
     expect(run.state.error).toBe(EXITED_WITHOUT_RESULT_MSG);
-    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+    expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ id: "wf-test", reason: "failed" }),
+      expect.objectContaining({ id: "wf-test", reason: "failed", status: "failed" }),
     );
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
@@ -139,6 +141,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     expect(run.state.status).toBe("running");
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
+    expect(deps.appendEntry).not.toHaveBeenCalled();
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -262,7 +265,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       expect(run.state.status).toBe("done");
       expect(run.state.reason).toBe("failed");
       expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-      expect(deps.eventBus.emit).toHaveBeenCalledTimes(1); // 单次 unregister，无重复
+      expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 单次 unregister 直落，无重复
     } finally {
       vi.useRealTimers();
     }
@@ -324,7 +327,7 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
     ).resolves.toBeUndefined();
 
     expect(run.state.status).toBe("done");
-    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+    expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
       expect.objectContaining({ id: "wf-test" }),
     );
@@ -342,7 +345,7 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
 
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("failed");
-    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+    expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
       expect.objectContaining({ id: "wf-test", reason: "failed" }),
     );
@@ -360,7 +363,7 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
 
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("failed");
-    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+    expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
       expect.objectContaining({ id: "wf-test", reason: "failed" }),
     );

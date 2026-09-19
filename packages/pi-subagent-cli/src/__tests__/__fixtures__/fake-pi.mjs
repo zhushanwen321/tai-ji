@@ -8,6 +8,7 @@
 //     → 等 extension_ui_response → 追加 message_end + 退出码 0。
 
 import * as readline from "node:readline";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
@@ -41,6 +42,13 @@ rl.on("line", (line) => {
     return;
   }
   if (cmd.type === "get_state") {
+    // cwd 探针（protocol-e2e 断言「wire ctx.cwd → 引擎 spawn cwd」传导链）：
+    // 落盘本进程真实 cwd 到 session 目录，测试侧读文件比对。目录可能尚不存在
+    //（pi session 延迟创建语义）——recursive mkdir 兜底。
+    try {
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(path.join(sessionDir, "cwd-probe.txt"), process.cwd());
+    } catch { /* 探针失败不阻断协议应答 */ }
     write({ type: "response", id: cmd.id, command: "get_state", success: true, data: { sessionFile, sessionId: SESSION_ID } });
     return;
   }

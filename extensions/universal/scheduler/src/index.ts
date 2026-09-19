@@ -1,10 +1,10 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from '@earendil-works/pi-coding-agent'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
 import { importLegacyStore } from './importer.js'
-import { SchedulerRuntime } from './runtime.js'
+import { SchedulerRuntime, type SchedulerModelOps } from './runtime.js'
 import { SchedulerService } from './service.js'
 import {
   controlGuidelines,
@@ -78,7 +78,28 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // F2 catch 分诊判定 stale——不依赖 pi 错误文案。
     // 投递模型（scheduler-steer-direct-dispatch）：到期任务 steer 直投（backend.sendMessage），
     // 受理即记账，不经投递内核。
-    const runtime = new SchedulerRuntime(backend, () => sessionGeneration !== myGeneration)
+    // U4 模型控制面（设计 D3）：runtime 只见 'provider/id' ref（与 task.model 同域），pi 的
+    // Model 对象解析封在本闭包。setModelByRef 契约 = 不 throw、失败返回 false（ref 非法 /
+    // modelRegistry.find 无命中 / pi setModel false / 意外异常统一折叠）。
+    const modelOps: SchedulerModelOps = {
+      getCurrentModelRef: () => {
+        const m = ctx.model
+        return m ? `${m.provider}/${m.id}` : undefined
+      },
+      setModelByRef: async (ref: string) => {
+        try {
+          const slash = ref.indexOf('/')
+          if (slash <= 0 || slash === ref.length - 1) return false
+          const model = ctx.modelRegistry.find(ref.slice(0, slash), ref.slice(slash + 1))
+          if (!model) return false
+          return await pi.setModel(model)
+        } catch {
+          return false
+        }
+      },
+      isIdle: () => ctx.isIdle(),
+    }
+    const runtime = new SchedulerRuntime(backend, () => sessionGeneration !== myGeneration, modelOps)
     runtime.loadTasks(backend.loadTasks())
     // W2：tick 后回调刷新 widget（替代独立 widgetTimer + setInterval，节奏对齐 TICK_INTERVAL_MS）
     runtime.onAfterTick(() => refreshWidget(ctx))
@@ -90,13 +111,26 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     refreshWidget(ctx)
   })
 
-  pi.on('turn_end', () => {
+  // turn_end 单注册共用（U4 恢复挂点与 MF-1 cleanup 同事件）：真实 pi 的 on 是 handler 列表
+  // 追加，但测试仿真 mock 为覆盖式单 handler，且同事件单注册与「listener 防重复注册」纪律一致。
+  pi.on('turn_end', (event?: TurnEndEvent) => {
     // IMPORT-FLUSH-GUARD（MF-1）：延迟删除的主触发点——turn_end 前该轮所有 message_end 已持久化
     // （agent-session.js _handleAgentEvent 在 message_end 处理中调 appendMessage 触发 flush），
     // sessionFile 已出现 → cleanup 删 .imported；仍未 flush（无 assistant 消息的轮次）→ 静默保留，
     // 下次 turn_end / session_shutdown 重试。cleanup 幂等（importer.ts importFromFile）。
     importCleanup?.()
+    // U4 dispatch 模型切换恢复挂点（设计 D3 修订版）：状态机、恢复动作与 stale 代际守卫都在
+    // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
+    service?.runtime.handleTurnEnd(event?.turnIndex)
   })
+
+  // U4 dispatch 模型切换：归属状态机其余事件监听（P-MODEL-③④ 实测序态）。handler 只转发
+  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的窗口封口。
+  pi.on('agent_start', () => service?.runtime.handleAgentStart())
+  pi.on('turn_start', (event) => service?.runtime.handleTurnStart(event?.turnIndex))
+  pi.on('message_start', (event) => service?.runtime.handleMessageStart(event?.message))
+  pi.on('agent_end', () => service?.runtime.handleRunClosed())
+  pi.on('agent_settled', () => service?.runtime.handleRunClosed())
 
   pi.on('session_shutdown', async () => {
     // append-only 模型无 persistSync（runtime 已按 op appendEntry 落盘到 owner session JSONL）；
@@ -116,25 +150,32 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   })
 
   // 注册 schedule tool
-  // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取 params 转调
-  // handler。错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
+  // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
+  // 转调 handleSchedule 六步流（预校验 → headless 分支 → 交互确认 → 取消 → 创建）。
+  // pi 转传供 channel-error 时禁用本会话 schedule 工具（setActiveTools）。
+  // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
   // isError 被 agent-loop 丢弃）；getService() 未初始化异常穿透到这里，包装
   // 'Error: Scheduler not initialized' 格式（R3 格式保持）。
   pi.registerTool({
     name: 'schedule',
     label: 'Schedule',
-    description: 'Create a scheduled task that fires a message at intervals or cron schedule.',
+    description:
+      'Create a scheduled task that fires a message at intervals or cron schedule. ' +
+      'The call first opens a confirmation form pre-filled with your draft (time/model/prompt); ' +
+      'the task is created only after the user confirms it. Only initiate when the user asks ' +
+      'for a scheduled task. If the user cancels the form, the task is NOT created — do not ' +
+      'assume a configuration and do not retry.',
     parameters: ScheduleParams,
     promptGuidelines: scheduleGuidelines,
     async execute(
       _toolCallId: string,
       params: ScheduleParamsT,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate,
-      _ctx: ExtensionContext,
+      ctx: ExtensionContext,
     ) {
       try {
-        return await handleSchedule(getService(), params)
+        return await handleSchedule(pi, getService(), params, ctx, signal)
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }

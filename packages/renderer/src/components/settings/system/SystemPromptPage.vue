@@ -1,6 +1,6 @@
 <!--
   Settings · SystemPrompt 菜单页（FR-4/FR-5）。
-  两卡片：替换系统提示词 / 注入额外提示词。
+  两卡片：替换系统提示词 / 注入额外提示词（卡 2 含 taiji 内置能力告知开关，capability 段）。
   数据层：config.getSystemPrompt / setSystemPrompt（保存为显式按钮触发，不自动保存，
   失败走 toast error，成功走 toast info）。
   替换卡下方含可折叠的 pi 默认提示词参考区，展开后可一键复制（DEFAULT_PI_SYSTEM_PROMPT）。
@@ -138,6 +138,21 @@
       </template>
       <div class="px-4 py-3">
         <p class="mb-2 text-[11px] leading-relaxed text-neutral-mid">{{ t('settings.systemPrompt.appendHint') }}</p>
+        <!-- taiji 内置能力告知开关（capability 段）：与 append 同卡同保存流（编辑不写盘，保存生效）。 -->
+        <div class="mb-3 flex items-start justify-between gap-3 border-b border-border pb-3" data-testid="system-prompt-capability-row">
+          <div class="min-w-0">
+            <Label class="block text-[11px] text-neutral-dim" for="system-prompt-capability-switch">
+              {{ t('settings.systemPrompt.capabilityLabel') }}
+            </Label>
+            <p class="mt-0.5 text-[11px] leading-relaxed text-neutral-mid">{{ t('settings.systemPrompt.capabilityHint') }}</p>
+          </div>
+          <Switch
+            id="system-prompt-capability-switch"
+            data-testid="system-prompt-capability-switch"
+            :model-value="capabilityEnabled"
+            @update:model-value="capabilityEnabled = $event === true"
+          />
+        </div>
         <Label class="mb-1 block text-[11px] text-neutral-dim" for="system-prompt-append-input">
           {{ t('settings.systemPrompt.appendLabel') }}
         </Label>
@@ -202,33 +217,40 @@ const replaceEnabled = ref(false)
 const replacePrompt = ref('')
 const appendEnabled = ref(false)
 const appendPrompt = ref('')
+// capability 默认开：v1 存量 json / merge 层缺字段 → undefined → true（与扩展侧
+// 「仅显式布尔 false 关闭」解析语义同向，见 @taiji/shared SystemPromptConfig 注释）
+const capabilityEnabled = ref(true)
 
 /** 已保存快照（v6 demo 范式）：loadConfig / 保存成功后刷新，dirty = 快照 diff。 */
-const saved = ref({ replaceEnabled: false, replacePrompt: '', appendEnabled: false, appendPrompt: '' })
+const saved = ref({ replaceEnabled: false, replacePrompt: '', appendEnabled: false, appendPrompt: '', capabilityEnabled: true })
 function snapshot() {
   saved.value = {
     replaceEnabled: replaceEnabled.value,
     replacePrompt: replacePrompt.value,
     appendEnabled: appendEnabled.value,
     appendPrompt: appendPrompt.value,
+    capabilityEnabled: capabilityEnabled.value,
   }
 }
 const replaceDirty = computed(
   () => replaceEnabled.value !== saved.value.replaceEnabled || replacePrompt.value !== saved.value.replacePrompt,
 )
+// 卡 2（注入卡）dirty = append 编辑 + capability 开关（同卡同保存流）
 const appendDirty = computed(
-  () => appendEnabled.value !== saved.value.appendEnabled || appendPrompt.value !== saved.value.appendPrompt,
+  () => appendEnabled.value !== saved.value.appendEnabled || appendPrompt.value !== saved.value.appendPrompt
+    || capabilityEnabled.value !== saved.value.capabilityEnabled,
 )
 
 /** 参考区展开态（默认折叠）。 */
 const showDefaultPrompt = ref(false)
 
-/** 构造完整 SystemPromptConfig（替换卡与追加卡当前编辑值的快照）。 */
+/** 构造完整 SystemPromptConfig（schema v2：含 capability 段，保存时写回完整结构）。 */
 function buildConfig(): SystemPromptConfig {
   return {
-    version: 1,
+    version: 2,
     replace: { enabled: replaceEnabled.value, prompt: replacePrompt.value },
     append: { enabled: appendEnabled.value, prompt: appendPrompt.value },
+    capability: { enabled: capabilityEnabled.value },
   }
 }
 
@@ -241,6 +263,7 @@ async function loadConfig(): Promise<void> {
     replacePrompt.value = res.config.replace.prompt
     appendEnabled.value = res.config.append.enabled
     appendPrompt.value = res.config.append.prompt
+    capabilityEnabled.value = res.config.capability?.enabled ?? true
     snapshot()
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
@@ -253,10 +276,11 @@ function discardReplace(): void {
   replacePrompt.value = saved.value.replacePrompt
 }
 
-/** 放弃追加卡编辑：还原已保存快照（dirty 归零）。 */
+/** 放弃追加卡编辑（含 capability 开关）：还原已保存快照（dirty 归零）。 */
 function discardAppend(): void {
   appendEnabled.value = saved.value.appendEnabled
   appendPrompt.value = saved.value.appendPrompt
+  capabilityEnabled.value = saved.value.capabilityEnabled
 }
 
 /** 恢复默认（v6 demo resetDefault 语义）：清空 replace 文本 + 关开关。编辑操作不写盘，需保存生效。 */

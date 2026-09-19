@@ -462,3 +462,98 @@ describe('W23: 增量渲染失败降级（等价旧版兜底 + 缓存作废）',
     expect(lastCall?.[1]).toBeNull()
   })
 })
+
+// ── ④路相对链接分流（设计 markdown-html-sanitize-render D4，U3）──
+// 渲染含 <a href> 的 text 段，点击冒泡到 .md-render 根的 onClick 委托，断言分流与 openDrawer 参数。
+describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer detail）', () => {
+  /** 挂载含单个 <a href> 文档的 MarkdownRenderer，收集冒泡 click 事件供 defaultPrevented 断言 */
+  async function mountWithAnchor(href: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
+    const renderMarkdown = vi.fn().mockResolvedValue([
+      { type: 'text', content: `<p><a href="${href}">doc link</a></p>` },
+    ])
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, ...depsOverrides })
+    await flushRaf()
+    const clicks: Event[] = []
+    wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
+    await wrapper.find('a').trigger('click')
+    return { wrapper, clicks }
+  }
+
+  it('相对 href + resourceBaseDir → preventDefault + openDrawer("detail", path.resolve 后的绝对路径)', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('docs/x.md', { resourceBaseDir: '/home/proj' }, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openDrawer).toHaveBeenCalledTimes(1)
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+
+  it('相对 href 嵌套段（../ 穿越按 POSIX resolve）+ onFileClick 不被调用（设计只走 openDrawer）', async () => {
+    const openDrawer = vi.fn()
+    const onFileClick = vi.fn()
+    const { clicks } = await mountWithAnchor('../sibling.md', { resourceBaseDir: '/home/proj/sub' }, { openDrawer, onFileClick })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/sibling.md' })
+    expect(onFileClick).not.toHaveBeenCalled()
+  })
+
+  it('# 锚点不拦截（默认冒泡走外链闸）', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('#section', { resourceBaseDir: '/home/proj' }, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+
+  it('// 协议相对不拦截（远程，走外链闸）', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('//cdn.example.com/a', { resourceBaseDir: '/home/proj' }, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+
+  it('https: scheme 不拦截', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('https://example.com/x', { resourceBaseDir: '/home/proj' }, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+
+  it('data: / mailto: scheme 不拦截（SCHEME_RE 全族）', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('mailto:a@b.c', { resourceBaseDir: '/home/proj' }, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+
+  it('resourceBaseDir 缺失 → preventDefault + 无动作（死链无害，优于窗口导航走）', async () => {
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithAnchor('docs/x.md', {}, { openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+
+  it('props 缺省 → deps.sessionCwdOf fallback 按 session cwd resolve（D4 双通道：对话流/命令文档零模板传 props 的消费面）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn((sid: string) => (sid === 's1' ? '/home/proj' : undefined))
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 's1' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(sessionCwdOf).toHaveBeenCalledWith('s1')
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+
+  it('props 覆盖优先：props 有值时不咨询 deps.sessionCwdOf（drawer 文件目录语义不被 session cwd 抢占）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn(() => '/home/session-cwd')
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 's1', resourceBaseDir: '/home/proj' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(sessionCwdOf).not.toHaveBeenCalled()
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+
+  it('sessionCwdOf 返回 undefined（未知 sid）→ preventDefault + 无动作（fallback 缺省同样死链无害）', async () => {
+    const openDrawer = vi.fn()
+    const sessionCwdOf = vi.fn(() => undefined)
+    const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 'ghost' }, { openDrawer, sessionCwdOf })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openDrawer).not.toHaveBeenCalled()
+  })
+})

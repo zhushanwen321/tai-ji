@@ -66,6 +66,7 @@ import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import { clearUnread } from '@/composables/useSessionMarkers'
+import { clearUnread as clearForkBranchUnread } from '@/composables/features/fork-handoff/useForkBranchNotify'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { registerAppCommands } from '@/composables/features/command/useAppCommands'
 import { useForkActions } from '@/composables/features/fork-handoff/useForkActions'
@@ -82,6 +83,19 @@ export function resetAppBootstrap(): void {
   appBootstrapped = false
   hasConnectedBefore = false
   resetSessionListSubForTest()
+}
+
+/**
+ * 未读两源同点清除（D9 合流）：① session 标记（后台完成 → markUnread，localStorage）；
+ * ② fork 分支角标（useForkBranchNotify 模块级单例，SessionItemDisplay 同一枚 dot 读两源）。
+ *
+ * core select 链 step 4 的壳侧实现（core 零改动，见 packages/core/src/domain/session/use-session.ts:308）。
+ * 导出为纯函数供单测直接锁定「两源同点」语义——清除点在编排层，组件层只 emit select，
+ * 无法从 DOM 观测清除动作本身。
+ */
+export function clearSessionUnread(sid: string): void {
+  clearUnread(sid)
+  clearForkBranchUnread(sid)
 }
 
 export function useSidebar() {
@@ -169,7 +183,8 @@ export function useSidebar() {
 
   // ── sessionEntry 端口束接线（D3，u5.2）：切入链跨域步骤注入 core 12 步链 ──
   // 时序不变量（含 C-W3-4「订阅先于 panel 载入」）由 core 链本体保证，实现侧无需关心顺序；
-  // 适配映射：cancelActiveFlow←useNewTaskFlow / clearUnread←useSessionMarkers /
+  // 适配映射：cancelActiveFlow←useNewTaskFlow / clearUnread←clearSessionUnread（两源同点：
+  // useSessionMarkers + useForkBranchNotify 分支角标，D9 合流） /
   // ensureStreamSubscription←useChat 壳包装（(sid, chat, sessionStore) 签名收窄为 (sid)）/
   // touchRecency+evictLru←chat store LRU / preloadFileTree←useFileTree。
   const sessionEntry: SessionEntryPort = {
@@ -177,7 +192,7 @@ export function useSidebar() {
       const newTaskFlow = useNewTaskFlow()
       if (newTaskFlow.isActive.value) newTaskFlow.cancelFlow()
     },
-    clearUnread: (sid) => clearUnread(sid),
+    clearUnread: clearSessionUnread,
     ensureStreamSubscription: (sid) =>
       ensureStreamSubscription(sid, chat, useSessionStoreSafe()),
     touchRecency: (sid) => chat.touchLru(sid),

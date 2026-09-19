@@ -7,10 +7,11 @@
   隐藏与 GenStatsTriggers 同判据）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
   「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
-  条目 = built-in 三件（bash → subagent → workflow，固定序恒在最左）+ 协议 widget 区（排序后逐个
+  条目 = built-in 四件（bash → subagent → workflow → session，固定序恒在最左）+ 协议 widget 区（排序后逐个
   TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），面板内容按类型分流：
 
-    built-in → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
+    built-in 三件 → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
+    built-in 第 4 件 session（u7）→ TraySessionPanel（子会话扁平列表，:session-id / pinned）
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
@@ -67,6 +68,77 @@
     :aria-label="t('panel.tray.trayLabel')"
     class="flex min-w-0 shrink-0 items-center gap-0.5"
   >
+    <!-- 序 4 聚合单入口（D6 密度档 `aggregated`）：整个托盘收为「层叠图标 + 运行数」一个按钮，
+         点击开面板（TrayPanelSurface）内分段展示全部类别（TrayAggregatePanel）；
+         `hasTrayItems === false`（三态之「全无」）整块不渲染——聚合态同样不留死入口。
+         图标语义硬约束：聚合入口 = 层叠图标（此处），溢出入口 = 省略号（Composer 底栏），两者不共用。 -->
+    <Popover
+      v-if="aggregated && hasTrayItems"
+      :open="activeKey === AGGREGATE_PANEL_KEY"
+      @update:open="(open: boolean) => onPanelOpenChange(AGGREGATE_PANEL_KEY, open)"
+    >
+      <PopoverAnchor as-child>
+        <Button
+          type="button"
+          variant="ghost"
+          data-testid="tray-aggregate-button"
+          :data-running="aggregateRunningCount"
+          :title="aggregateTitle"
+          :aria-label="aggregateTitle"
+          :aria-expanded="activeKey === AGGREGATE_PANEL_KEY ? 'true' : 'false'"
+          :aria-pressed="isPinnedOf(AGGREGATE_PANEL_KEY) ? 'true' : 'false'"
+          :class="trayItemButtonClass(isPinnedOf(AGGREGATE_PANEL_KEY) || activeKey === AGGREGATE_PANEL_KEY)"
+          @pointerenter="onHoverStart(AGGREGATE_PANEL_KEY)"
+          @pointerleave="onHoverEnd"
+          @click="onTogglePin(AGGREGATE_PANEL_KEY)"
+        >
+          <!-- 层叠图标（各类别 icon 重叠排布；仅 widget 无 built-in 时给通用网格图标兜底） -->
+          <span class="flex shrink-0 items-center -space-x-1" aria-hidden="true">
+            <span
+              v-for="item in builtinItems"
+              :key="item.kind"
+              class="grid size-4 place-items-center rounded-full bg-bg-input ring-1 ring-border"
+            >
+              <component
+                :is="item.icon"
+                class="size-2.5"
+                :class="item.running > 0 ? 'text-accent' : 'text-neutral-dim'"
+              />
+            </span>
+            <LayoutGrid v-if="builtinItems.length === 0" class="size-4 text-neutral-dim" />
+          </span>
+          <!-- 运行数（归零不虚亮：running === 0 时呼吸点与计数都不出，与三态同款） -->
+          <span
+            v-if="aggregateRunningCount > 0"
+            data-testid="tray-aggregate-pulse"
+            :class="TRAY_PULSE_CLASS"
+            aria-hidden="true"
+          />
+          <span
+            v-if="aggregateRunningCount > 0"
+            data-testid="tray-aggregate-count"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
+          >{{ aggregateRunningCount }}</span>
+        </Button>
+      </PopoverAnchor>
+      <TrayPanelSurface
+        panel-key="aggregate"
+        :pinned="isPinnedOf(AGGREGATE_PANEL_KEY)"
+        @panel-enter="onPanelEnter"
+        @panel-leave="onPanelLeave"
+        @interact-outside="onInteractOutside"
+        @open-auto-focus="onOpenAutoFocus"
+      >
+        <TrayAggregatePanel
+          :session-id="sessionId"
+          :sections="builtinItems"
+          :widgets="widgetItems"
+          :pinned="isPinnedOf(AGGREGATE_PANEL_KEY)"
+        />
+      </TrayPanelSurface>
+    </Popover>
+
+    <template v-if="!aggregated">
     <!-- built-in 三件（固定序 bash → subagent → workflow；三态判定见文件头） -->
     <Popover
       v-for="item in builtinItems"
@@ -107,7 +179,7 @@
             v-if="item.running > 0"
             data-testid="tray-builtin-count"
             :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
-          >{{ item.running }}</span>
+          >{{ badgeCount(item) }}</span>
         </Button>
       </PopoverAnchor>
       <TrayPanelSurface
@@ -119,8 +191,14 @@
         @open-auto-focus="onOpenAutoFocus"
       >
         <TrayNativePanel
+          v-if="item.kind !== 'session'"
           :session-id="sessionId"
           :kind="item.kind"
+          :pinned="isPinnedOf(builtinKey(item.kind))"
+        />
+        <TraySessionPanel
+          v-else
+          :session-id="sessionId"
           :pinned="isPinnedOf(builtinKey(item.kind))"
         />
       </TrayPanelSurface>
@@ -162,6 +240,7 @@
         </ScrollArea>
       </TrayPanelSurface>
     </Popover>
+    </template>
   </div>
 </template>
 
@@ -173,25 +252,42 @@
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, SquareTerminal, Workflow } from '@lucide/vue'
+import { Bot, LayoutGrid, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
-import type { TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
+import type { TrayBuiltinKind } from '@/components/panel/tray/useTrayCounts'
 import { orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
+import TrayAggregatePanel from '@/components/panel/tray/TrayAggregatePanel.vue'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import TrayPanelSurface from '@/components/panel/tray/TrayPanelSurface.vue'
+import TraySessionPanel from '@/components/panel/tray/TraySessionPanel.vue'
 import TrayWidgetButton from '@/components/panel/tray/TrayWidgetButton.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'
 import { TRAY_ITEM_COUNT_CLASS, TRAY_PULSE_CLASS, trayItemButtonClass } from '@/components/panel/tray/tray-item-button'
 
-const props = defineProps<{
-  /** 焦点 session id（数据分区键；Composer 侧 `v-if="sessionId"` 保证非空） */
-  sessionId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** 焦点 session id（数据分区键；Composer 侧 `v-if="sessionId"` 保证非空） */
+    sessionId: string
+    /**
+     * 密度档驱动的托盘形态（u6b / D6 序 4）：true = 收为单个聚合入口
+     * （层叠图标 + 运行数 → 面板内分段展示全部类别）；false = 既有逐件按钮行。
+     */
+    aggregated?: boolean
+  }>(),
+  { aggregated: false },
+)
+
+/**
+ * 托盘三态上抛（能力标志 `hasTrayItems`）：托盘数据的唯一实例在本外壳（D2），Composer 底栏的
+ * 密度状态机需要「托盘是否全无条目」才能决定序 4 是否生效——故由本外壳 watch 后经事件上抛，
+ * 而不是让 Composer 自建第二份托盘数据面。
+ */
+const emit = defineEmits<{ 'update:hasItems': [hasItems: boolean] }>()
 
 const { t } = useI18n()
 
@@ -202,25 +298,27 @@ const HOVER_OPEN_DELAY_MS = 160
 /** 指针离开 icon+面板整体后的收起延时（D8：240ms——覆盖 icon 与面板之间 6px 间隙的移动耗时） */
 const HOVER_CLOSE_DELAY_MS = 240
 
-/** built-in 三件固定序（D1：不参与 widget 动态排序，恒在最左） */
-const BUILTIN_ORDER: readonly TrayTaskKind[] = ['bash', 'subagent', 'workflow']
+/** built-in 四件固定序（D1：不参与 widget 动态排序，恒在最左；第 4 件 session 见 u7 / §6.7 D7） */
+const BUILTIN_ORDER: readonly TrayBuiltinKind[] = ['bash', 'subagent', 'workflow', 'session']
 
-/** built-in 三件 icon（三件各自语义直取：bash = 终端、subagent = Bot、workflow = 流程） */
-const BUILTIN_ICONS: Record<TrayTaskKind, Component> = {
+/** built-in 四件 icon（四件各自语义直取：bash = 终端、subagent = Bot、workflow = 流程、session = 层叠路径） */
+const BUILTIN_ICONS: Record<TrayBuiltinKind, Component> = {
   bash: SquareTerminal,
   subagent: Bot,
   workflow: Workflow,
+  session: Waypoints,
 }
 
-/**
- * 面板键：built-in 与 widget 各带命名空间前缀，避免「widget 恰好叫 bash」撞键
- * （单 activeKey 是互斥的唯一真相，键必须无歧义）。
- */
-type BuiltinPanelKey = `native:${TrayTaskKind}`
+/** 面板键：built-in 与 widget 各带命名空间前缀，避免「widget 恰好叫 bash」撞键（单 activeKey 互斥，键必须无歧义） */
+type BuiltinPanelKey = `native:${TrayBuiltinKind}`
 type WidgetPanelKey = `widget:${string}`
-type TrayPanelKey = BuiltinPanelKey | WidgetPanelKey
+/** 序 4 聚合入口的面板键（单入口单面板，故为单字面量而非前缀模板） */
+type AggregatePanelKey = 'aggregate'
+type TrayPanelKey = AggregatePanelKey | BuiltinPanelKey | WidgetPanelKey
 
-function builtinKey(kind: TrayTaskKind): BuiltinPanelKey {
+const AGGREGATE_PANEL_KEY: AggregatePanelKey = 'aggregate'
+
+function builtinKey(kind: TrayBuiltinKind): BuiltinPanelKey {
   return `native:${kind}`
 }
 function widgetKey(viewId: string): WidgetPanelKey {
@@ -228,10 +326,12 @@ function widgetKey(viewId: string): WidgetPanelKey {
 }
 
 interface BuiltinItem {
-  kind: TrayTaskKind
+  kind: TrayBuiltinKind
   icon: Component
   /** 进行中计数（> 0 决定亮计数/呼吸点；0 且 total > 0 → dim 常驻） */
   running: number
+  /** 全量计数（聚合面板段头显示 running/total；与面板 tab 计数同源） */
+  total: number
 }
 
 interface WidgetItem {
@@ -260,9 +360,14 @@ const builtinItems = computed<BuiltinItem[]>(() =>
   BUILTIN_ORDER.flatMap((kind) => {
     const { running, total } = tray.counts.value[kind]
     if (total === 0) return []
-    return [{ kind, icon: BUILTIN_ICONS[kind], running }]
+    return [{ kind, icon: BUILTIN_ICONS[kind], running, total }]
   }),
 )
+
+/** 计数徽标值：session 件 = 子会话总数（设计 `.tmp/tech-design/mode-system-composer-density.md` §6.7 D7），其余件 = 进行中数 */
+function badgeCount(item: BuiltinItem): number {
+  return item.kind === 'session' ? item.total : item.running
+}
 
 /** ViewHost 数据源（未 provide 时视为无 widget：不抛错不 warn——缺 source 只影响 widget 区渲染） */
 const viewHostSource = inject(VIEW_HOST_SOURCE_KEY, null)
@@ -280,11 +385,36 @@ const widgetItems = computed<WidgetItem[]>(() => {
     .filter((item): item is WidgetItem => item.entry !== undefined && item.entry.guiTree.length > 0)
 })
 
+/**
+ * 托盘是否有条目（built-in 任一类别有记录 或 协议 widget 有 entry）——三态之「全无」的对立面，
+ * 供 ① 序 4 聚合入口是否渲染（本地）② Composer 底栏密度状态机的 `hasTrayItems`（上抛）。
+ * 声明位置在 widgetItems 之后：`immediate` 立即求值，不得落进 widgetItems 的 TDZ 窗口。
+ */
+const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems.value.length > 0)
+
+watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
+
+/** 聚合入口运行数（built-in 进行中 + widget 推送中；归零不虚亮由按钮 v-if 统一判定） */
+const aggregateRunningCount = computed(
+  () =>
+    builtinItems.value.reduce((sum, item) => sum + item.running, 0) +
+    widgetItems.value.filter((item) => item.entry.meta?.status === 'running').length,
+)
+
+/** 聚合入口 title / aria-label（带运行数：聚合态下这是唯一可扫读的数字） */
+const aggregateTitle = computed(() =>
+  t('panel.tray.aggregate.title', { running: aggregateRunningCount.value }),
+)
+
 /** 当前渲染出按钮的面板键集合（activeKey 有效性判据：键不在集合内 = 条目已消失，状态随之作废） */
-const renderedPanelKeys = computed<TrayPanelKey[]>(() => [
-  ...builtinItems.value.map((item) => builtinKey(item.kind)),
-  ...widgetItems.value.map((item) => widgetKey(item.viewId)),
-])
+const renderedPanelKeys = computed<TrayPanelKey[]>(() => {
+  // 聚合态下只有聚合面板键存在（条目集 = 「有任一条目」）；非聚合态逐件键（同既有语义）
+  if (props.aggregated) return hasTrayItems.value ? [AGGREGATE_PANEL_KEY] : []
+  return [
+    ...builtinItems.value.map((item) => builtinKey(item.kind)),
+    ...widgetItems.value.map((item) => widgetKey(item.viewId)),
+  ]
+})
 
 // ── 外壳状态机（D8：hover 预览 + pin 常驻 + 互斥）──
 

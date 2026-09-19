@@ -142,8 +142,8 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 | 类型 | 适用组件 | 范式 |
 |---|---|---|
-| **tab 型** | SegmentedTab / drawer L1-L2 tab / AskUserOverlay au-tab / plugin seg-tab | `bg-bg-elevated` + `text-neutral-fg`（中性浮起） |
-| **列表项型** | SessionItem / FileTree / SearchModal sm-item / au-opt / wf-call / CommandPopover 项 / SettingsNavItem | `bg-surface` + `text-accent`（实色块 + 蓝字，无 ring 无左条） |
+| **tab 型** | SegmentedTab / drawer L1-L2 tab / FormOverlay form-tab / plugin seg-tab | `bg-bg-elevated` + `text-neutral-fg`（中性浮起） |
+| **列表项型** | SessionItem / FileTree / SearchModal sm-item / form-option / wf-call / CommandPopover 项 / SettingsNavItem | `bg-surface` + `text-accent`（实色块 + 蓝字，无 ring 无左条） |
 
 **accent-soft 仅留瞬时高亮**（fresh 新增项 / is-current popover 项），不作持久选中态。
 
@@ -533,7 +533,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 快捷键 | 动作 |
 |---|---|
-| `Esc` | 关闭所有 overlay（search/settings/askUser/confirm/quickComposer），退出 staging/fork/handoff 模式 |
+| `Esc` | 关闭所有 overlay（search/settings/confirm/quickComposer），退出 staging/fork/handoff 模式；提问表单 FormOverlay 壳级无 Esc（schedule 渲染器内 Esc = 取消，渲染器级键位） |
 | `⌘/Ctrl+K` | 打开 SearchModal（命令面板） |
 | `⌘/Ctrl+B` | 切 sidebar 折叠 |
 | `⌘/Ctrl+N` | 新建任务 |
@@ -569,7 +569,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.1 对话流（assistant 居中 720）
 
 - **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-w-76%）；隐藏原生滚动条由 TurnRail 接管
-- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：RetryIndicator 不放 composer，重试期间 TurnMeta label 切「重试中 N/M」+ warn 色 spinner（区别 streaming 的 accent）〔2026-09-13 自 v6-design.md 并入〕
+- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：重试不进 composer——`RetryIndicator.vue` 独立行（RefreshCw + 「重试中 N/M」+ warn 色，`border-warn/35 bg-warn-soft`），TurnMeta 自身只随 streaming 转 accent spinner（无分级配色，2026-09 删 warn/danger 时长三档）〔2026-09-13 自 v6-design.md 并入；2026-09-19 校正归属 + 删分级配色〕
 - **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 双环 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
 - **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠，exit 标签色 0=`success` / N=`warn` / timeout=`dim`）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）〔exit 标签色 2026-09-13 自 v6-design.md 并入〕
@@ -578,11 +578,12 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **UserBubble**：删 border，仅 `bg-surface-hover`；删 pending 态（迁 QueueBubble 内嵌）
 - **Composer**：6 区（QueueBubble / staging chip / inline chip bar / landing meta / input / composer-bar）；宽度对齐 720 居中
   - **variant 双形态**：`variant="panel"`（正常态，固定 workspace 底部）vs `variant="landing"`（landing 态，垂直水平居中 + meta-row slot）；landing 触发：新建任务按钮设 `landingMode=true`，发送消息后 `landingMode=false` 切回 panel
-  - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + preset chip(Zap icon + 预设名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs neutral-mid，hover bg-surface-hover + neutral-fg
+  - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + mode chip(SlidersHorizontal icon + 模式名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs accent-soft 底 + accent 文字（hover 不变——**颜色即「非默认模式」状态**，见计划 D-8 待产品裁决）。窄窗口下按序退化（目录截断 → 分支截断 → 分支退化图标 → 模式退化纯图标），模式 chip 的「含替换提示词」信任标记**跨档不丢**（文本档 = chip 内后缀；纯图标档 = 右上角警示色角标 + tooltip）
   - **landing 页布局**（LandingView）：`flex items-center justify-center` 垂直水平居中；问候语 h1（22px font-650 neutral-fg，按时段「上午好呀/下午好呀/晚上好呀，有什么想让我帮忙的吗」）+ landing Composer（max-w 720px）
   - **inline chip 四色**（无底无边 + `font-weight 600` + 前缀 icon 13px + × 删除按钮 hover 染 danger-soft）：`file`=success 绿 / `image`=reasoning 紫 / `slash`=reasoning 紫 / `@`=accent 蓝；四色 chip 都有 × 删除按钮
   - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 生成指标(GenStatsTriggers) / 上下文容量(hover popover) / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
-  - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏）。条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（并排不遮 composer）。设计文档 `docs/design/composer-task-tray.md`（D1/D6/D8/D9）
+  - **composer-bar 密度策略（三簇 + 按序退化 + 溢出兜底）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；按序退化（累计）：序 1 容量+生成指标合流为单 chip → 序 2 模型+推理档位合体 → 序 3 插件 toolbar 进 `»` 溢出菜单（零贡献时菜单不渲染）→ 序 4 托盘聚合为单入口（层叠图标 + 运行数）。三档阈值 **≥640px 全展开 / 520–640px 用序 1–3 / <520px 用序 1–4**，由 `ResizeObserver` 实测 `.composer-bar` 内容宽驱动；纯状态机 `packages/renderer/src/components/panel/composer-density.ts`。图标语义硬约束：聚合入口 = 层叠图标，溢出入口 = 省略号，两者不共用
+  - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。窄档（<520px）整托盘聚合为「层叠图标 + 运行数」单入口。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档 `docs/design/composer-task-tray.md`（D1/D6/D8/D9/D15/D16）
   - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 守卫见 §5.12
   - **comp-box 态**：`.has-input`(2px `color-mix(surface-hover 40%)` 透明微环) / `.focused`(border-accent + 3px accent-ring 外环) / `.staging`(border-accent + 3px ring + bg-accent-soft，独立于焦点)
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
@@ -641,8 +642,8 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.5 Overlays
 
 - **SearchModal**：手写覆盖层；命令/文件聚合（session 源待接入，demo 现有 2 group：建议命令 + 最近打开）；选中态见 §3.4 例外（surface-hover + 蓝字，dialog 底 surface 上 bg-surface 会淹没）；分组 header 去 uppercase；高亮 `<span class="sm-hit">` font-semibold 不染蓝（颜色继承父元素）；loading 防闪 200ms（见 §5.10）；default 态尾部 clock icon 表最近/历史
-- **AskUserOverlay**：内联（非 modal），companion-band 统一交互出口（B3）
-  - **多问题切 tab**（au-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
+- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收口，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
+  - **多问题切 tab**（form-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
   - **单选 radio**：16px，unchecked=`border-strong` 空心，checked=`accent` 实心 + `inset 2px bg-input` 形成环
   - **多选 checkbox**：16px 方块，checked=`accent` 实心 + `accent-fg` 勾 10px
   - **Other 选项**：末尾追加，选中后 label 下方展开 Input（surface-2 内嵌，自动聚焦）
@@ -672,7 +673,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | 维度 | 挂载点 | 级别 | 当前状态 |
 |---|---|---|---|
 | **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
-| **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog+ask-user) | L2/L1 | **已实现**（5 闭环） |
+| **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog) | L2/L1 | **已实现**（5 闭环；提问表单走 FormOverlay 覆盖 composer，不进 band） |
 | **D 命令配置** | D1 slash / D2 settings 区段 | L1 | D1 已实现（双轨待统一） |
 | **E 独立 view** | E1 独立 view 路由 | L3 | 未实现（仅 built-in） |
 
@@ -755,7 +756,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | C3 | 侧栏（SegmentedTab/SessionItem/FileTree/plugin tab；终态 = 三 tab 中的第 3 枚） |
 | C4 | Drawer（一体化 + 形态 B + 7 tab + GitPanel MVP） |
 | C5 | 设置页（FullSettingsOverlay + 11 page + GroupCard） |
-| C6 | Overlays（SearchModal/AskUserOverlay/ConfirmDialog） |
+| C6 | Overlays（SearchModal/FormOverlay/ConfirmDialog） |
 | C7 | Plugin 渲染（7 原语 v6 视觉 + ExtensionHost + builtin tasks） |
 | C8 | 横切清理（正文提亮/彩色降噪/uppercase 清除/z-index）+ 全量验收 |
 
@@ -849,7 +850,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 │  ├─ chat/（MessageStream/TurnRail[滚动条二合一+折展toggle]/LandingView[landing页]/ToolBlock/ThinkingBlock/ChangeSetCard/...）
 │  ├─ drawer/（SideDrawer/GitPanel/DiffView/DetailPane/TerminalView/BrowserPane/...）
 │  ├─ settings/（SettingsOverlay/GroupCard/ProviderPage/SystemPage[6太极主题]/TokenDebugPage/...11 page）
-│  ├─ overlays/（SearchModal/AskUserOverlay/ConfirmDialog）
+│  ├─ overlays/（SearchModal/FormOverlay/ConfirmDialog）
 │  ├─ composer/（Composer[variant双形态+landing meta-row]/CommandPopover/QueueBubble/QuickComposer）
 │  ├─ common/（预留共享控件层，当前为空；UiInput/UiSwitch/SettingRow/SettingsNavItem 等暂在 settings/ 下）
 │  └─ icons/（TaijiLogo 图标组件）

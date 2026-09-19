@@ -127,10 +127,11 @@ describe('ComposerInput slash-trigger（U1-U5）', () => {
  * autocomplete，不通过 RPC 暴露），由 CommandPopover slashCommands computed 在
  * 前端注入。U7 断言 4 项 = 3 pi 命令 + 1 前端注入 compact。
  *
- * [ADR-0050 修订] 本组 fixture 不含 skill 项：panel slash 段过滤 skill 项（双入口消除）
- * 后 source='skill' 的 pi 命令不进列表；本组用例的测试对象是键盘导航/越界收敛（与 skill
- * 语义无关），凑数第三条用 extension source 保持 4 项列表形态不变。panel slash 段的
- * skill 过滤断言由 command-popover-landing.test.ts L5b / composer-skill-trigger.test.ts P5 覆盖。
+ * [ADR-0050 二次修订] 本组 fixture 不含 skill 项且未传 registry skill props：panel slash 段
+ * 的 skill 项已换源保留（pi 快照项剔除 + registry 项补入），无 registry 源传入时列表形态
+ * 与命令等价；本组用例的测试对象是键盘导航/越界收敛（与 skill 语义无关），凑数第三条用
+ * extension source 保持 4 项列表形态不变。panel slash 段的 skill 换源断言由
+ * command-popover-landing.test.ts L5 / composer-skill-trigger.test.ts P5 覆盖。
  */
 const MOCK_CMDS = [
   { name: 'commit', source: 'extension' },

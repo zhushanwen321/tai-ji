@@ -1,13 +1,18 @@
 /**
- * ImportService 测试（import-session 设计 §3.3 U2）。
+ * ImportService 测试（import-session 设计 §3.3 U2 + 多源 §3.3 SPI 编排层化）。
  *
  * 锁定行为：
- * - listCandidates：字段面 / lastModified 降序 / total（过滤前）/ dirs 聚合 / cwdExists 标注 /
- *   alreadyImported 打标（导入后立即翻转）/ query 匹配语义（name∪sessionId∪短ID∪sourcePath∪
- *   dirLabel，case-insensitive）/ rootDir 缺省 = getPiGlobalAgentDir()/sessions 动态推导
- * - importSession：幂等 already_imported（顺序 + 并发双击两型）、同 target 异 id target_conflict、
- *   copy 失败无残留 + 互斥链异常安全第二跳、marker 文件名拒绝、projectId 空串/不存在拒绝、
- *   sidecar readback 不符 → 成功 + warning（文件不回滚）、targetPath 构造（encodeCwd(resolve(cwd))）
+ * - 编排层 source 路由：缺省不传 source = 显式 'pi'（向后兼容，存量调用路径行为不变）；
+ *   注册表缺项防御（import_source_missing）；degradations 非空 → warning
+ *   conversion_degraded（stub source 注入）；sidecar_failed 优先级 + degradations 日志留痕
+ * - listCandidates（pi source 语义，零回归）：字段面 / lastModified 降序 / total（过滤前）/
+ *   dirs 聚合 / cwdExists 标注 / alreadyImported 打标（导入后立即翻转）/ query 匹配语义
+ *   （name∪sessionId∪短ID∪sourcePath∪dirLabel，case-insensitive）/ rootDir 缺省 =
+ *   getPiGlobalAgentDir()/sessions 动态推导
+ * - importSession（编排序列，零回归）：幂等 already_imported（顺序 + 并发双击两型）、
+ *   同 target 异 id target_conflict、copy 失败无残留 + 互斥链异常安全第二跳、marker 文件名
+ *   拒绝、projectId 空串/不存在拒绝、sidecar readback 不符 → 成功 + warning（文件不回滚）、
+ *   targetPath 构造（encodeCwd(resolve(cwd))）
  *
  * 夹具：os.tmpdir() 真实形态 header jsonl（与 scan-external.test.ts 同手法），afterAll 清理。
  * copy 失败注入：vi.mock 拦截 node:fs/promises.copyFile（failNext 单次翻转，其余透传 actual），
@@ -18,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { ImportSourceKind } from '@taiji/shared'
 
 // copyFile 失败注入开关（vi.hoisted：vi.mock 工厂提升后仍可引用）。
 const copyFailureState = vi.hoisted(() => ({ failNext: false }))
@@ -53,6 +59,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 import { encodeCwd, getSessionsDir } from '../infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir } from '../infra/pi/pi-maintenance.js'
 import { ImportService, ImportServiceError } from '../services/session/import-service.js'
+import { ExternalFileImportSource } from '../services/session/import-source-external-file.js'
+import type { SessionImportSource } from '../services/session/import-source.js'
 // B5 摘碑双路径②验证（memory-leak-remediation §3.2-B5）：import 同 id 复活的 tombstone 摘除
 import { SessionDataStore, isSessionDataCleared } from '../services/plugin-service/session-data-store.js'
 
@@ -72,11 +80,17 @@ function writeSessionJsonl(filePath: string, id: string, cwd: string, name: stri
   writeFileSync(filePath, lines.join('\n'))
 }
 
-function makeImportService(): ImportService {
+/** 与组合根装配同构（index.ts）：pi source 的 rootDir 缺省 = pi 全局 sessions 动态推导（惰性求值）。 */
+function makePiSources(): Map<ImportSourceKind, SessionImportSource> {
+  return new Map<ImportSourceKind, SessionImportSource>([
+    ['pi', new ExternalFileImportSource({ getRootDir: () => join(getPiGlobalAgentDir(), 'sessions') })],
+  ])
+}
+
+function makeImportService(sources: ReadonlyMap<ImportSourceKind, SessionImportSource> = makePiSources()): ImportService {
   return new ImportService({
     projects: { load: () => ({ projects: [{ id: 'proj-1' }], activeProjectId: '' }) },
-    // 与组合根装配同构（index.ts）：D5 rootDir 缺省 = pi 全局 sessions 动态推导（惰性求值）
-    getRootDir: () => join(getPiGlobalAgentDir(), 'sessions'),
+    sources,
   })
 }
 
@@ -496,5 +510,123 @@ describe('ImportService × B5 摘碑（memory-leak-remediation §3.2-B5 双路�
 
     expect(isSessionDataCleared(sid)).toBe(true) // 未摘
     store.dispose()
+  })
+})
+
+describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', () => {
+  it('缺省不传 source = 显式 source:"pi"（向后兼容：存量调用路径行为不变）', async () => {
+    const root = join(fixturesRoot, 'route-default-root')
+    mkdirSync(root, { recursive: true })
+    writeSessionJsonl(join(root, 'r1.jsonl'), 'route-def-00001', '/tmp/route-def-cwd', 'RouteDefault')
+    writeSessionJsonl(join(root, 'r2.jsonl'), 'route-exp-00001', '/tmp/route-exp-cwd', 'RouteExplicit')
+    const svc = makeImportService()
+
+    // listCandidates：不传 source 与显式 'pi' 结果一致（同一 fixture 集合）
+    const implicit = await svc.listCandidates({ rootDir: root })
+    const explicit = await svc.listCandidates({ rootDir: root, source: 'pi' })
+    expect(explicit).toEqual(implicit)
+    expect(explicit.total).toBe(2)
+
+    // importSession：不传 source 走 pi 落地链（readFirstLine + copyFile），产物/语义与存量一致
+    const reply = await svc.importSession({ sourcePath: join(root, 'r1.jsonl'), projectId: 'proj-1' })
+    expect(reply.sessionId).toBe('route-def-00001')
+    expect(reply.warning).toBeUndefined()
+    expect(reply.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/route-def-cwd'), 'r1.jsonl'))
+    expect(existsSync(reply.targetPath)).toBe(true)
+  })
+
+  it('degradations 非空 → reply.warning = conversion_degraded（stub source 注入，pi 不受影响）', async () => {
+    // stub 占 'pi' 槽（独立 service 实例 + 专用 id/cwd/fileName，不污染其他用例的 pi 全链路）
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-deg-00001', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/stub-deg-cwd' },
+        fileName: 'stub-deg.jsonl',
+        write: async (tmpPath) => {
+          writeFileSync(tmpPath, `${JSON.stringify({ type: 'session', version: 1, id: 'stub-deg-00001', cwd: '/tmp/stub-deg-cwd', timestamp: '2026-01-01T00:00:00.000Z' })}\n`)
+        },
+        degradations: ['file part 丢弃（zcode-artifact:// 私有协议引用无法解析）'],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const reply = await svc.importSession({ sourcePath: '/stub/source-not-read-by-stub', projectId: 'proj-1', source: 'pi' })
+    // warning 聚合（§3.6）：degradations 非空 → conversion_degraded；明细不进契约面、日志留痕（D6）
+    expect(reply.warning).toBe('conversion_degraded')
+    expect(reply.sessionId).toBe('stub-deg-00001')
+    expect(reply.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/stub-deg-cwd'), 'stub-deg.jsonl'))
+    expect(existsSync(reply.targetPath)).toBe(true) // 落地成功（降级是知情提示，非失败）
+    // degradations 日志留痕（D6）：只断言存在性——sidecar 等 best-effort 路径的 warn 与
+    // 本日志共用 console 通道，次数/顺序不是契约
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('sidecar 不符 + degradations 非空并存 → warning 单字段取 sidecar_failed（需动作警示优先），degradations 仍日志留痕', async () => {
+    const cwd = '/tmp/stub-both-cwd'
+    const targetPath = join(getSessionsDir(), encodeCwd(cwd), 'stub-both.jsonl')
+    // 预置 sidecar 路径为目录：readback 不符 → sidecar_failed（同 sidecar 用例注入手法）
+    mkdirSync(join(getSessionsDir(), encodeCwd(cwd)), { recursive: true })
+    mkdirSync(`${targetPath}.project.json`)
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-both-0001', timestamp: '2026-01-01T00:00:00.000Z', cwd },
+        fileName: 'stub-both.jsonl',
+        write: async (tmpPath) => {
+          writeFileSync(tmpPath, 'line\n')
+        },
+        degradations: ['timeline part 丢弃（纯 UI 事件）'],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const reply = await svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })
+    // ImportReply.warning 是单字段（r4-INFO）：sidecar_failed 引导手动归类（需动作）优先于
+    // conversion_degraded（知情提示，无需动作）；degradations 明细经日志通道不丢失
+    //（sidecar 写失败的 warn 同走 console，只断言 conversion degraded 调用存在）
+    expect(reply.warning).toBe('sidecar_failed')
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('write 相位抛领域错误 → 错误码原样透传，不重包装 import_copy_failed（§3.6 相位分离）', async () => {
+    // zcode 源的 write 闭包在 write 相位抛领域错误（转换相位 db 消失 →
+    // import_source_missing；会话消失/查询失败 → import_invalid_session）——编排层
+    // catch 若无条件重包装 import_copy_failed，错误码承载的恢复指引（刷新列表重选/
+    // 升级太极）会被降格成「写入目标目录出错」。stub source 锁编排层透传语义。
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-dom-00001', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/stub-dom-cwd' },
+        fileName: 'stub-dom.jsonl',
+        write: async () => {
+          throw new ImportServiceError('import_invalid_session', '该会话已不在 zcode 库中（sessionId=sess_x），请刷新列表后重选')
+        },
+        degradations: [],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+
+    await expect(catchCode(() => svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })))
+      .resolves.toBe('import_invalid_session')
+    // 领域错误透传同样走 tmp 清理路径：无 .tmp-import- 残留、正式名未落地（重试不被去重拦截）
+    const targetDir = join(getSessionsDir(), encodeCwd('/tmp/stub-dom-cwd'))
+    const residue = existsSync(targetDir) ? readdirSync(targetDir).filter((n) => n.includes('.tmp-import-')) : []
+    expect(residue).toEqual([])
+    expect(existsSync(join(targetDir, 'stub-dom.jsonl'))).toBe(false)
+  })
+
+  it('注册表缺项 → import_source_missing（防御分支：闭合联合 + 组合根全注册下仅版本不匹配可达）', async () => {
+    // U2 阶段 zcode 尚未注册（U3 加入）——空表构造即可触达；同时锁「未知源字面量不静默走 pi」
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>())
+    await expect(catchCode(() => svc.importSession({ sourcePath: '/any.jsonl', projectId: 'proj-1', source: 'zcode' })))
+      .resolves.toBe('import_source_missing')
+    await expect(catchCode(() => svc.listCandidates({ source: 'zcode' }))).resolves.toBe('import_source_missing')
   })
 })

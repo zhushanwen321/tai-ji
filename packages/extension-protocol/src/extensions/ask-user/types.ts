@@ -1,13 +1,15 @@
 /**
  * ask-user extension 的富交互类型定义。
  *
- * custom() 在 RPC 模式不可用（Component 是代码不是数据），ask-user 的「表单类」
- * 交互改走 select 通道：askUserInteract() 把 AskUserQuestion[] 序列化进 select 的
- * options[0]，runtime event-adapter 检测 ASK_USER_MARKER 透传 questions，
- * 前端 AskUserOverlay 渲染富交互 UI。
+ * GUI 提问交互已迁移统一表单协议（../ui-form：FormQuestion 类型化问题集 +
+ * UI_FORM_MARKER + uiFormInteract，前端 FormOverlay 渲染）——ask_user 工具的
+ * 问题在 ask-user 包内归一 adapter 转为 FormQuestion（choice/text 形态）发送。
  *
- * 这是 ask-user 的定制协议，不是通用富交互协议。
- * 设计参考 ask-user 的 Question 结构。
+ * 本模块保留的 AskUserQuestion / AskUserAnswers 是 ask-user 的 LLM 入参契约与
+ * TUI/解码消费形态：FormAnswers 的 choice/text 部分与 AskUserAnswers 逐字兼容
+ * （键位规则与多选序列化一致），解码 helper（getAskUserAnswer/getAskUserOther）
+ * 消费本类型。legacy 帧（ASK_USER_MARKER → {askUser, askUserQuestions}）在
+ * renderer 入口归一层转 FormQuestion（D7 兼容窗口），随窗口末清理退役。
  */
 
 /**

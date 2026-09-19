@@ -31,6 +31,32 @@ export interface GenStatsSpeed {
 export interface GenStatsCacheRatio {
   current: number | null
   day: number | null
+  /**
+   * current 显示 0% 时的**归因**（缓存命中率归因降噪，2026-09-19）：已知成因的 0 不再以裸
+   * 0% 呈现，UI 改为渲染成因文案（详见 GenStatsCacheMiss）。仅在 runtime 判定出「已知成因」时
+   * 存在——无法归因的真实 miss（如服务端淘汰）缺省，UI 照常显示 0%（仍是唯一保留 0% 的形态）。
+   * 与 current 同生命周期：current 为 null（无样本 / 槽 modelKey 不匹配）时恒缺省。
+   */
+  currentMiss?: GenStatsCacheMiss
+}
+
+/**
+ * current 0% 的归因（缓存命中率归因降噪，2026-09-19，SSOT）。
+ *
+ * 三值均为「预期内的 miss，非故障」——UI 以中性色呈现成因文案，不再用 danger 色的 0%：
+ *  - cold-start      ：本会话首条缓存样本（会话首个请求 / 新会话，缓存尚未建立）；
+ *  - idle-expiry     ：距上一次请求的空闲超过 provider 缓存 TTL（runtime 侧 5min 阈值，
+ *                      对齐 pi cache-stats CACHE_TTL_MS），缓存已过期；idleMs 携带实际空闲；
+ *  - context-rewrite ：上一次请求之后发生过成功 compaction——上下文被重写，
+ *                      本次请求的 prompt 前缀整体变化、缓存必然重建。
+ *
+ * 缺省（无 currentMiss）= 不是「展示 0% 且可归因」的样本：正常命中 / 未知成因的真实 miss。
+ * 未知成因的 0%（如 provider 服务端淘汰）**不做降噪**——那正是需要被看到的信号。
+ */
+export interface GenStatsCacheMiss {
+  reason: 'cold-start' | 'idle-expiry' | 'context-rewrite'
+  /** idle-expiry：距上一次请求的空闲毫秒数（≥ TTL 阈值）；仅该 reason 下存在 */
+  idleMs?: number
 }
 
 /** session.stats_update 帧 payload / session.getGenStats reply payload（同形，§3.3 D4）。

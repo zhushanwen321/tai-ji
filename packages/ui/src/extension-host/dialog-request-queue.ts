@@ -35,15 +35,13 @@ export interface DialogRequest {
   sessionId: string
   /** 全局唯一（pi 侧由 runtime 生成，plugin 侧由 runtime UiRequestQueue 生成，两族天然不冲突） */
   requestId: string
-  method: 'confirm' | 'select' | 'input' | 'editor' | 'askUser'
+  method: 'confirm' | 'select' | 'input' | 'editor'
   title?: string
   message?: string
   options?: DialogRequestOption[]
   default?: string
   prefill?: string
   level?: 'info' | 'warn' | 'error'
-  /** askUser 富交互问题列表（前端类型守卫收窄，规则同旧 useExtensionUI） */
-  askUserQuestions?: unknown[]
   allowCancel?: boolean
   /** 队列接收时间戳（倒计时基准） */
   receivedAt: number

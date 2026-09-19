@@ -19,6 +19,8 @@
  *  - permission 额外含 tree-sitter-bash.wasm + web-tree-sitter.wasm（手动拷贝，与 index.js 同目录）
  *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/（内置 workflow
  *    脚本资产，u1-staged 起源在 packages/subagent-core/workflows/，见下方常量注释）
+ *  - plan 额外含 templates/（内置计划模板 .md，list-template/select-template 数据源，
+ *    见 TEMPLATES_DIR_PACKAGES 注释）
  *
  * external 边界权威源：0.84.1 pi binary virtualModules 实测（0.80.3 首测，2026-08-12
  * 随 pi 0.84.1 升级重测 10 包 get_state 加载全绿后更新；见
@@ -164,6 +166,18 @@ const RELAY_DIR_PACKAGES = new Set(["subagent-workflow"]);
 const SUBAGENT_CORE_WORKFLOWS_DIR = join(REPO_ROOT, "packages", "subagent-core", "workflows");
 const WORKFLOW_DIR_PACKAGES = new Set(["subagent-workflow"]);
 
+/**
+ * plan 的内置模板资产（PR #19 review MF-7）：templates/*.md 是 list-template /
+ * select-template 的数据源。templates.ts 被 esbuild inline 进包根 index.js 后按同级
+ * templates/ 定位（双形态探测见该文件 getBuiltinTemplateDir 注释），esbuild 只 bundle
+ * JS，.md 资产必须在此整目录拷到 staged 包根。缺失后果：打包版 list-template 恒 0、
+ * select-template 恒 null（静默失效，prompts.ts 仍在引导 agent 调 list-template）。
+ * 不走 pi manifest 三字段（agents/skills/workflows）：templates 非 pi manifest 声明的
+ * 资源目录，manifest 模式的 resource-discovery 不会扫它（与 relay/workflows 同理）。
+ * 分发链与 relay 一致：bundle staged（此处）→ electron-builder extraResources 整目录携带。
+ */
+const TEMPLATES_DIR_PACKAGES = new Set(["plan"]);
+
 // permission 特殊处理（R1）：拷 2 个 wasm 到 staged 与 index.js 同目录
 async function copyPermissionWasm(outDir, extraAssets) {
 	for (const [depRel, outName] of PERMISSION_WASM) {
@@ -204,12 +218,27 @@ async function copyWorkflowDir(outDir, extraAssets) {
 	extraAssets.push("workflows/");
 }
 
-// 按包名 short 分发的三类特殊资产拷贝（顺序敏感：permission → relay → workflows，
-// 与 extraAssets 汇总顺序及 fail-fast 先后一致）
+// plan 内置模板（MF-7）：templates/*.md 整目录拷到 staged 包根（bundle 形态路径探测
+// 由 templates.ts getBuiltinTemplateDir 同级 existsSync 完成；动机与缺失后果见
+// TEMPLATES_DIR_PACKAGES 常量注释）
+async function copyTemplatesDir(srcDir, outDir, extraAssets) {
+	const src = join(srcDir, "templates");
+	if (!existsSync(src)) {
+		throw new Error(
+			`templates dir missing: ${src}（plan 包内置模板资产缺失 = 打包配置回归）`,
+		);
+	}
+	await cp(src, join(outDir, "templates"), { recursive: true });
+	extraAssets.push("templates/");
+}
+
+// 按包名 short 分发的特殊资产拷贝（顺序敏感：permission → relay → workflows →
+// templates，与 extraAssets 汇总顺序及 fail-fast 先后一致）
 async function copySpecialAssets(short, srcDir, outDir, extraAssets) {
 	if (short === "permission") await copyPermissionWasm(outDir, extraAssets);
 	if (RELAY_DIR_PACKAGES.has(short)) await copyRelayDir(srcDir, outDir, extraAssets);
 	if (WORKFLOW_DIR_PACKAGES.has(short)) await copyWorkflowDir(outDir, extraAssets);
+	if (TEMPLATES_DIR_PACKAGES.has(short)) await copyTemplatesDir(srcDir, outDir, extraAssets);
 }
 
 // 改写 staged 副本 package.json：pi.extensions 指向 ./index.js（不改源码 package.json）

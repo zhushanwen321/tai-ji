@@ -87,12 +87,12 @@ describe('deriveStatus 9 态 parity（M3 搬迁）', () => {
     expect(deriveStatus('s1', sut.store, false)).toBe('waiting')
   })
 
-  it('hasAskUserPending=true → waiting（与 toolCall 并列最优先）', () => {
-    // 未 hydrate + 非活跃 → 单独看兜底 done；ask-user pending 应改判 waiting
+  it('hasFormOverlayPending=true → waiting（与 toolCall 并列最优先）', () => {
+    // 未 hydrate + 非活跃 → 单独看兜底 done；富交互表单 pending 应改判 waiting
     expect(deriveStatus('s1', sut.store, false, false, false, undefined, true)).toBe('waiting')
   })
 
-  it('hasAskUserPending 默认 false：不传第 7 参行为不变', () => {
+  it('hasFormOverlayPending 默认 false：不传第 7 参行为不变', () => {
     expect(deriveStatus('s1', sut.store, false)).toBe('done')
     expect(deriveStatus('s1', sut.store, false, false, false, undefined, false)).toBe('done')
   })

@@ -79,11 +79,11 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('@/composables/useExtensionUI', () => ({
   useExtensionUI: () => ({
-    currentAskUserRequest: { value: undefined as unknown },
+    currentFormRequest: { value: undefined as unknown },
     respond: vi.fn(),
     cancel: vi.fn(),
   }),
-  askUserFilter: () => true,
+  formFilter: () => true,
 }))
 
 const MessageStreamStub = defineComponent({
@@ -107,7 +107,7 @@ function mountPanel(sessionId: string) {
     props: { panelId: 'p1', sessionId, sessionDir: '/tmp/x' },
     global: {
       plugins: [createPinia()],
-      stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, AskUserOverlay: true, ConfirmDialog: ConfirmDialogStub },
+      stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, FormOverlay: true, ConfirmDialog: ConfirmDialogStub },
     },
   })
 }

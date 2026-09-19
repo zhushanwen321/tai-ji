@@ -2,7 +2,7 @@
  * 相对时间格式化（R2 logic 层，纯函数无副作用）。
  *
  * 规则：今天 HH:MM；昨天「昨天」；7 天内「N 天前」；更早「M 月 D 日」。
- * 复用点：SessionItem（sidebar）/ ForkGroup / ImportSessionDialog——同一信息原子、同一呈现。
+ * 复用点：SessionItem（sidebar）/ ImportSessionDialog——同一信息原子、同一呈现。
  */
 import i18n from '@/i18n'
 

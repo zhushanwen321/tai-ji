@@ -205,6 +205,18 @@ export interface CreateDerivedCaller {
  */
 export const CREATE_DERIVED_CALLERS: readonly CreateDerivedCaller[] = [
   { file: 'transport/session-message-handler.ts', semantic: 'user-facing', passedBindingFields: ['launchPresetId', 'projectId'] },
-  { file: 'transport/session-manager-handler.ts', semantic: 'agent-managed', passedBindingFields: ['spawnSource', 'parentAgentSessionId'] },
+  {
+    file: 'transport/session-manager-handler.ts',
+    semantic: 'agent-managed',
+    // projectId（D8，2026-09 裁决）：值由服务端从**父会话 summary 派生**（子会话继承父归属，
+    // 消除「派发的子会话在命名 project 视图下消失」）——**显式不读 `params.projectId`**，
+    // 归属决策不交给 LLM（反伪造断言在 session-manager-handler 单测：「params 伪造
+    // projectId 被忽略」）。该字段原属本通道禁传清单（防「调用方（含 LLM 请求参数）顺手
+    // 注入绑定字段」），值完全服务端派生时该字面禁令被取化，反伪造精神完整保全。
+    // 本通道禁传清单随之清空（见守卫测试的 FORBIDDEN_FIELDS_BY_SEMANTIC）：
+    // spawnSource / parentAgentSessionId 同样是服务端从路由上下文注入、不读请求参数，
+    // 但它们是本通道的正常写入字段（属 passedBindingFields 承诺），不入禁传清单。
+    passedBindingFields: ['spawnSource', 'parentAgentSessionId', 'projectId'],
+  },
   { file: 'services/handoff-service.ts', semantic: 'handoff', passedBindingFields: ['projectId'] },
 ]

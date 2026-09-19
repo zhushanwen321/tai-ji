@@ -72,6 +72,8 @@ function makeHarness(initialPrompt: string, opts?: { noSessionFile?: boolean }):
 
 	const env: TraceEnv = {
 		readLastPromptFromFile: (filePath) => readLastPromptFromSessionFile(filePath),
+		// F1b：A12 聚焦基线恢复，不涉回落事实（回落专测在 a11 / wiring）
+		getPresetFallback: () => undefined,
 	};
 
 	const ctx: TraceContext = {

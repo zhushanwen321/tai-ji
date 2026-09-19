@@ -193,6 +193,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 - **factory 不能引用外部变量**（hoisted）：用 `vi.hoisted()` 或在 factory 内 inline + `import { session as sessionMock } from '@/api'`
 - **mock 整个 api 模块时记得 mock 所有被测路径用到的方法**（漏 mock 会 undefined 崩溃）
 - **happy-dom 对 contenteditable/Selection/Range 支持有限**：测 contenteditable 组件用 textContent + querySelector + dispatch input event，不要依赖真实光标操作
+- **DOMPurify 与 happy-dom 不兼容（nodeName 在元素子类而非 Node.prototype）**：DOMPurify 在 happy-dom 下全标签误拒（净化整体失真，且失真环境下既有断言可能假阴性通过）——markdown 渲染管线测试族（`markdown-sanitize.test.ts` 等触及 renderMarkdown/DOMPurify 的文件）已钉 `// @vitest-environment jsdom`（2026-09-19 markdown-html-sanitize-render U1 探针实证）；新增触及 DOMPurify 的测试文件照此办理
 
 ### mock 保真度登记（类型锚定 + override 生效面，2026-09-17 G4）
 

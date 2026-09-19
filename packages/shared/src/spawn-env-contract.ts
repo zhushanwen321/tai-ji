@@ -59,7 +59,7 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
 //
 // prefix 匹配语义与各进程既有 buildSafeEnv 一致：仅 key.startsWith(prefix)。
 // [S4] 该判定已覆盖 key === prefix 的精确匹配场景（s.startsWith(s) === true）。
-import { ENV_WHITELIST_PREFIXES } from './constants'
+import { ENV_WHITELIST_PREFIXES, PRESET_FALLBACK_ENV_KEYS } from './constants'
 
 /** buildOutboundChildEnv / composeChildEnvBase 入参。 */
 export interface BuildOutboundChildEnvOptions {
@@ -217,6 +217,22 @@ export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
       + 'shell-runner.ts / git-executor.ts 同源复用）',
     piConsumerAnchors: [
       'git clone git@… / git fetch / git push 的 ssh 子进程（OpenSSH agent 协议标准消费）',
+    ],
+  },
+  {
+    // F1b（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4 的 trace 披露面）：
+    // 模式定义不可得、本次回落 builtin:full 启动的事实（原悬空 id + 回落目标），随 spawn
+    // 出站 env 传到 pi 子进程，由 @zhushanwen/pi-system-prompt-trace 写入
+    // `taiji:system-prompt` entry 的 presetFallback 字段。非回落路径写空串显式清除
+    // （防白名单继承的父 env 陈旧值造成假披露）。
+    name: `${PRESET_FALLBACK_ENV_KEYS.FROM} / ${PRESET_FALLBACK_ENV_KEYS.TO}`,
+    injectionPath:
+      'extras 显式注入（runtime launch-params.ts buildPresetFallbackEnv → RpcClientOptions.env → '
+      + 'ProcessManager.createSession → rpc-client start → buildPiOutboundEnv → buildOutboundChildEnv）；'
+      + '名 SSOT = shared constants.ts PRESET_FALLBACK_ENV_KEYS（extension 侧按字面量镜像）',
+    piConsumerAnchors: [
+      'extensions/taiji/system-prompt-trace/src/index.ts:readPresetFallbackFromEnv 读 process.env'
+      + '（经 TraceEnv.getPresetFallback DI 进 trace.ts，回落时写入 entry.presetFallback）',
     ],
   },
 ]

@@ -14,6 +14,13 @@
     应用层只持领域语义（useVirtuaFollow 状态机 / streaming pin / rail jump / 瞬时块定位）。
   -->
   <div class="relative flex min-h-0 flex-1 flex-col">
+    <!-- [u5 mode-declaration-row] 模式声明行：锚在流顶**滚动容器之外**（不随滚动消失）。
+         数据 = session.launchPresetId + preset store 派生（零新 entry 类型 / 0 token）；
+         E7 三态降级在 ModeDeclarationRow 内（未加载/加载失败 → 不渲染）。 -->
+    <div class="shrink-0 px-5 pt-2">
+      <ModeDeclarationRow :session-id="sessionId" />
+    </div>
+
     <div
       ref="scrollEl"
       class="message-stream relative flex-1 overflow-y-auto px-5 pt-[var(--message-stream-pad-top)] pb-[8px]"
@@ -171,6 +178,11 @@ import { Button } from '@/components/ui/button'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import ModeDeclarationRow from './ModeDeclarationRow.vue'
+// [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store 为空
+// 会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点（AppShell 仅在 connected 后渲染），
+// 在此安装幂等单例（重连不重复 / 失败下一次 connected 补拉）。
+import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'
 // [u8-pi-respawn] 恢复提示条重试按钮的手动恢复 RPC（useSidebar.restoreSession 同源通道）。
 import { session as sessionApi } from '@/api'
@@ -211,11 +223,15 @@ const props = defineProps<{
   sessionId: string
 }>()
 
+// [u5] 安装 preset 首次 connected 自动加载（幂等；detached 单例 watch，不随本组件卸载停止）。
+installPresetAutoLoad()
+
 const { t } = useI18n()
 const chat = useChatStore()
 
-/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading 状态 + isPrepend（virta :shift 信号）+ handler。 */
-const { loadingMore, showLoadMore, handleLoadMore, isPrepend } = useLoadMoreHistory(() => props.sessionId)
+/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading 状态 + isPrepend（virta :shift 信号）+ handler
+ *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）。 */
+const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset } = useLoadMoreHistory(() => props.sessionId)
 
 /** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns（u4b session.history
  *  窗口契约；无记录（未 hydrate / 非截断）回落 0——showLoadMore 为 false 时条不渲染，值无关）。 */
@@ -374,7 +390,7 @@ const { pinnedIndexes } = useStreamingPin({
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
 // [D2 数学不变量] endOffset = tailEl 实测总高：scrollEl pt-20 + pb-8 = 28px 与 virtua
 // viewportSize 不含 padding 的 28px 扣除精确抵消 → offset=tailHeight 落点即真实底部（改任一 padding 必复核）。
-const { showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
+const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
       vlistRef,
@@ -422,6 +438,10 @@ provide(ChatViewDepsKey, useChatViewDeps(sessionId))
 function onVirtuaScroll(offset: number): void {
   onScroll(offset)
   rail.updateActiveTurnIndex()
+  // [scroll-top-auto-load] 触顶自动续载：只在用户已脱离锚定（主动上滑）时生效——
+  // 切 session 的 scrollTop clamp 回声（offset≈0）时长滚到底尚未落地，stickToBottom 仍为
+  // true，不会白拉一页历史；isPrepend 保位把插入后的 offset 抬到阈值以上，天然节流。
+  onScrollOffset(offset, !stickToBottom.value)
 }
 function onVirtuaScrollEnd(): void {
   // design.md IF7 预留：showJumpButton 稳定判定（virta @scrollEnd 触发，目前 showJumpButton 已是 computed，留空 no-op）

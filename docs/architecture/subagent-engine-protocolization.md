@@ -307,6 +307,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
 | `ctxModel` / `schemaEnv` / `engineFallback` | `run.params.ctx` | model 兜底/结构化输出降级 |
+| `cwd` | `run.params.ctx.cwd`（有值才上 wire；server additive 还原进 `task.cwd`） | worktree 隔离失效——core 的 `taskSpecWithModel` 把 `WorktreeHandle.path` 合流进 cwd，引擎以 `task.cwd ?? process.cwd()` 决定子进程 spawn cwd；缺省不上 wire = 引擎回退自身进程 cwd（与无 worktree 任务现状一致） |
 
 **同步成员清单（`EnginePort` 的四个同步面，逐条给源——协议化后无同步源即锁死）**：
 

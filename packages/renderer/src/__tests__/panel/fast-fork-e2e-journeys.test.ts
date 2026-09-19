@@ -19,7 +19,7 @@
  * 用例覆盖（按计划 §2 汇总表，只写真正新增的增量）：
  *   E2E-L1-1 fork-ask 完整旅程（P0，最核心）
  *   E2E-L1-2 纯后台 fork 旅程——反馈行 + fresh 高亮增量
- *   E2E-L1-5 后台分支停止——SessionList @stop → chat.abort 联动（fork-group U19 已测 ForkGroup emit，此处补上层联动）
+ *   E2E-L1-5 运行中 session 软停止——SessionList @abort → abortSession 联动（fork-group R4 已测菜单两段确认 emit，此处补上层 handler 联动）
  *
  * 已标注「已覆盖」的用例（E2E-L1-3 ⌘G/⌘⇧G、E2E-L1-4 Esc 退出、E2E-L1-6 血缘可见）此处不重复。
  *
@@ -39,7 +39,7 @@ import { textToSegments } from '@taiji/shared'
 // 真实 useForkActions / useSidebar 内部 import { chat as chatApi, session as sessionApi } from '@/api'，
 // 此 mock 让 fork/send/abort 调用可被 spy 断言，组件间交互保持真实。
 // vi.hoisted：mock factory 被 vitest hoist 到文件顶部，引用的 mock 对象也必须 hoisted。
-const { sessionApiMock, chatApiMock } = vi.hoisted(() => ({
+const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
   sessionApiMock: {
     fork: vi.fn(),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +55,8 @@ const { sessionApiMock, chatApiMock } = vi.hoisted(() => ({
     abort: vi.fn(() => Promise.resolve()),
     compact: vi.fn(() => Promise.resolve()),
   },
+  // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
+  useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   session: sessionApiMock,
@@ -76,7 +78,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
     send: vi.fn(),
     steer: vi.fn(),
     followUp: vi.fn(),
-    abort: vi.fn(),
+    abort: useChatAbortMock,
     compact: vi.fn(),
     editAndResend: vi.fn(),
     disposeSession: vi.fn(),
@@ -181,6 +183,7 @@ import Composer from '@/components/panel/Composer.vue'
 import { useChatStore } from '@/stores/chat'
 import ForkNotice from '@/components/panel/ForkNotice.vue'
 import SessionList from '@/components/sidebar/SessionList.vue'
+import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
 
 const onForkAskMock = vi.fn()
 
@@ -191,6 +194,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.useRealTimers()
+  document.body.innerHTML = ''
 })
 
 // ════════════════════════════════════════════════════════════════════════
@@ -336,10 +340,10 @@ describe('E2E-L1-1 反馈行：fork-ask 成功后 ForkNotice 走 askedPrefix + �
 })
 
 // ════════════════════════════════════════════════════════════════════════
-// E2E-L1-1 子用例 · 侧栏新增分支（mount SessionList，fork session 渲染为 ForkGroup）
+// E2E-L1-1 子用例 · 侧栏新增分支（mount SessionList，fork session 不聚合——D9 扁平行）
 // ════════════════════════════════════════════════════════════════════════
-describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionList 渲染 ForkGroup', () => {
-  it('groups 含父 session + fork 分支（parentSession 指向父）→ 渲染 ForkGroup + 分支项', () => {
+describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionList 渲染为扁平行（D9）', () => {
+  it('groups 含父 session + fork 分支（parentSession 指向父）→ 两条扁平行 + 分支血缘可见', () => {
     const parent: SessionSummary = {
       id: 's-src', label: '主线会话', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(),
       sessionFile: '/tmp/src.jsonl',
@@ -354,15 +358,19 @@ describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionL
       props: { groups, activeId: 's-src', statusOf: () => 'done' as never },
     })
 
-    // ForkGroup 组件被渲染
-    expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(true)
-    // 分支项存在且标题为 fork-ask 的提问预览
-    const branchItem = wrapper.find('[data-testid="fork-group-branch"]')
-    expect(branchItem.exists()).toBe(true)
-    expect(branchItem.text()).toContain('追问那条')
+    // D9 不聚合：父 + fork 分支各占一行（ForkGroup 退役后分支不再折进聚合容器）
+    const rows = wrapper.findAll('.session-item')
+    expect(rows).toHaveLength(2)
+    const branchRow = rows.find((r) => r.text().includes('追问那条'))
+    expect(branchRow).toBeTruthy()
+    // 分支自身行展示血缘（用户可见 sub 行）
+    expect(branchRow!.text()).toContain('fork 自')
+    // 聚合容器退役：无 ForkGroup 组件 / 无 fork-group-* testid
+    expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(false)
+    expect(wrapper.find('[data-testid^="fork-group"]').exists()).toBe(false)
   })
 
-  it('无分支的 session 不渲染 ForkGroup（spec §4「无分支不渲染空容器」）', () => {
+  it('无分支的 session 仍是单行，无聚合容器（spec §4「无分支不渲染空容器」）', () => {
     const plain: SessionSummary = {
       id: 's-plain', label: '普通会话', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(),
     } as SessionSummary
@@ -370,15 +378,18 @@ describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionL
     const wrapper = mount(SessionList, {
       props: { groups, activeId: 's-plain', statusOf: () => 'done' as never },
     })
+    expect(wrapper.findAll('.session-item')).toHaveLength(1)
     expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(false)
   })
 })
 
 // ════════════════════════════════════════════════════════════════════════
-// E2E-L1-2 · 纯后台 fork 旅程——反馈行 + fresh 高亮端到端增量
-// 现有 fork-entry-behavior U8 已测「forkSession 不 split」。此处补：反馈行渲染契约 + fresh 淡出。
+// E2E-L1-2 · 纯后台 fork 旅程——反馈行端到端增量
+// 现有 fork-entry-behavior U8 已测「forkSession 不 split」。此处补：反馈行渲染契约。
+// [D9] fork 分支 fresh 高亮随 ForkGroup 退役（fresh 不在两项迁移能力内——只迁未读角标与软停止），
+// 原「fresh class 3.2s 淡出」用例随已删元素一并退役，不再对不存在的 testid 断言。
 // ════════════════════════════════════════════════════════════════════════
-describe('E2E-L1-2: 纯后台 fork 反馈行（forkedPrefix）+ fresh 高亮淡出', () => {
+describe('E2E-L1-2: 纯后台 fork 反馈行（forkedPrefix）', () => {
   it('纯后台 fork 反馈行：forkedPrefix 文案 + 查看链接文案为「查看」（P4 区分 fork-ask）', () => {
     const wrapper = mount(ForkNotice, {
       // 纯 fork：只有 branchName 无 preview
@@ -396,45 +407,17 @@ describe('E2E-L1-2: 纯后台 fork 反馈行（forkedPrefix）+ fresh 高亮淡�
     expect(viewLink.text()).toContain('查看')
     expect(viewLink.text()).not.toContain('查看分支')
   })
-
-  it('ForkGroup fresh 高亮 3.2s 后淡出（用户可见 class 变化）', async () => {
-    vi.useFakeTimers()
-    setActivePinia(createPinia())
-    const ForkGroup = (await import('@/components/sidebar/ForkGroup.vue')).default
-    const branches: SessionSummary[] = [
-      { id: 'b-fresh', label: '刚 fork 的分支', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() } as SessionSummary,
-    ]
-    const wrapper = mount(ForkGroup, {
-      props: { branches, parentId: 's-src', freshIds: ['b-fresh'] },
-    })
-
-    // 初始：fresh class 存在（高亮态，用户可见）
-    const branchItem = wrapper.find('[data-testid="fork-group-branch"]')
-    expect(branchItem.exists()).toBe(true)
-    expect(branchItem.classes()).toContain('fresh')
-    // fresh 锚点 DOM 存在
-    expect(wrapper.find('[data-testid="fork-group-branch-fresh"]').exists()).toBe(true)
-
-    // 推进 3200ms（FRESH_FADE_MS）
-    vi.advanceTimersByTime(3200)
-    await nextTick()
-
-    // fresh class 已移除（淡出）
-    const branchItemAfter = wrapper.find('[data-testid="fork-group-branch"]')
-    expect(branchItemAfter.exists()).toBe(true)
-    expect(branchItemAfter.classes()).not.toContain('fresh')
-  })
 })
 
 // ════════════════════════════════════════════════════════════════════════
-// E2E-L1-5 · 后台分支停止——SessionList @stop → chat.abort 联动（增量）
-// 现有 fork-group U19 已测 ForkGroup 两段式确认 emit。此处补：SessionList 消费 @stop → emit stopBranch。
-// SessionList 是纯展示组件，stopBranch 经 Sidebar.onStopBranch → abortSession → chatApi.abort。
-// 本用例测 SessionList 的 emit 接线（@stop → stopBranch 透传），chatApi.abort 在真实 Sidebar 内联动。
+// E2E-L1-5 · 运行中 session 软停止——SessionList @abort → abortSession 联动（增量）
+// 现有 fork-group R4 已测通用行菜单「停止」两段确认 emit abort。此处补上层联动：
+// ① SessionList 消费运行中分支行的 abort → emit abort（带 sessionId）；
+// ② Sidebar 的 handler（useSidebarSessionActions.onAbortSession）→ useChat().abort(id)。
+// [D9] 原「SessionList @stop → stopBranch」链路随 ForkGroup 退役；软停止入口迁入通用 SessionItem 右键菜单。
 // ════════════════════════════════════════════════════════════════════════
-describe('E2E-L1-5: SessionList 消费 ForkGroup @stop → 透传 stopBranch（上层 abort 联动基础）', () => {
-  it('ForkGroup 两段式确认 → SessionList emit stopBranch（带 branchId）', async () => {
-    const ForkGroup = (await import('@/components/sidebar/ForkGroup.vue')).default
+describe('E2E-L1-5: 运行中 session 软停止 → SessionList @abort → abortSession', () => {
+  it('运行中分支行两段确认「停止」→ SessionList emit abort（带 sessionId）', async () => {
     const parent: SessionSummary = {
       id: 's-src', label: '主线', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(),
       sessionFile: '/tmp/src.jsonl',
@@ -445,24 +428,46 @@ describe('E2E-L1-5: SessionList 消费 ForkGroup @stop → 透传 stopBranch（�
     } as SessionSummary
     const groups: SessionGroup[] = [{ cwd: '/tmp', sessions: [parent, runningBranch] }]
     const wrapper = mount(SessionList, {
+      attachTo: document.body,
       props: { groups, activeId: 's-src', statusOf: () => 'done' as never },
     })
 
-    // 定位运行中分支的停止按钮（仅 running 显示）
-    const stopBtn = wrapper.find('[data-testid="fork-group-stop"]')
-    expect(stopBtn.exists()).toBe(true)
-    // 首次点击 → 进确认态（SessionList 此时不应 emit stopBranch）
-    await stopBtn.trigger('click')
-    expect(wrapper.emitted('stopBranch')).toBeFalsy()
+    // 定位运行中分支行（第二行，status='active' → canStop）并打开右键菜单
+    const rows = wrapper.findAll('.session-item')
+    expect(rows).toHaveLength(2)
+    await rows[1].trigger('contextmenu')
+    await nextTick()
+    await nextTick()
 
-    // 确认按钮出现 → 点击 → SessionList emit stopBranch
-    const confirmBtn = wrapper.find('[data-testid="fork-group-stop-confirm"]')
-    expect(confirmBtn.exists()).toBe(true)
-    await confirmBtn.trigger('click')
+    const stopItem = document.body.querySelector('[data-testid="session-stop-item"]') as HTMLElement | null
+    expect(stopItem).not.toBeNull()
+    // 首击 → 进确认态（不 emit）
+    stopItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('abort')).toBeUndefined()
+    // 再击 → SessionList emit abort（上层据此调 abortSession）
+    const confirming = document.body.querySelector('[data-testid="session-stop-item"]') as HTMLElement
+    confirming.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('abort')).toEqual([['b-running']])
+  })
 
-    const stopBranchEvents = wrapper.emitted('stopBranch')
-    expect(stopBranchEvents).toBeTruthy()
-    // emit 携带 branchId（上层据此调 chat.abort）
-    expect(stopBranchEvents![0]).toEqual(['b-running'])
+  it('useSidebarSessionActions.onAbortSession(id) → useChat().abort(id)（SessionList 上层 handler 联动）', () => {
+    const { onAbortSession } = useSidebarSessionActions({
+      selectSession: vi.fn(async () => {}),
+      restoreSession: vi.fn(async () => {}),
+      newSession: vi.fn(async () => null),
+      loadSessions: vi.fn(),
+      renameSession: vi.fn(async () => {}),
+      deleteSession: vi.fn(async () => {}),
+      deleteFolder: vi.fn(async () => ({ failed: [] })),
+      assignSessionToProject: vi.fn(async () => {}),
+      renameOpen: ref(false),
+      targetSessionId: ref(''),
+    })
+
+    onAbortSession('b-running')
+
+    expect(useChatAbortMock).toHaveBeenCalledWith('b-running')
   })
 })

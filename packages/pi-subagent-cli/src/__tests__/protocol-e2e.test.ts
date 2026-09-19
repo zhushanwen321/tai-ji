@@ -206,6 +206,14 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       expect(runResult.outcome.content).toContain("final answer");
       expect(runResult.outcome.usage?.input).toBeGreaterThan(0);
 
+      // [cwd 传导链 e2e] wire ctx.cwd=dataDir → 引擎还原 task.cwd → pi 子进程
+      // spawn cwd：fake-pi 在 get_state 握手时落盘自身真实 cwd（cwd-probe.txt），
+      // 此处比对——worktree 隔离修复的端到端锚点（server.test 只覆盖协议还原层）。
+      // realpath 归一：macOS 上 tmpdir 的 /var 与子进程 getcwd 的 /private/var 同指。
+      const sessionFile = runResult.handle.sessionRef.sessionFile as string;
+      const probedCwd = fs.readFileSync(path.join(path.dirname(sessionFile), "cwd-probe.txt"), "utf8");
+      expect(fs.realpathSync(probedCwd)).toBe(fs.realpathSync(dataDir));
+
       // 5. dispose + ping（引擎进程不退出——生命周期归宿主）
       const dispose = await host.request("dispose", {});
       expect((dispose.result as { ok: boolean }).ok).toBe(true);

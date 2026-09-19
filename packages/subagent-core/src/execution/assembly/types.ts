@@ -493,7 +493,13 @@ export interface ExecutionRecord {
 
   // ── 身份（创建时确定，不可变）──
   readonly agent: string;
-  readonly model: string;
+  /**
+   * 模型留痕（R4/D6-① 可选化）：undefined = 用户未指定模型（引擎走自身缺省解析，
+   * 如 zcode 的 defaultModelSelection）——如实投影「未选择」，不伪造成 fallback 已选。
+   * 禁空串哨兵：写侧（resolveIdentityForEngine）与读侧水合（record-store-rebuild /
+   * state-marker）均把空串归一为 undefined。
+   */
+  readonly model: string | undefined;
   readonly thinkingLevel: string | undefined;
   readonly mode: ExecutionMode;
   readonly task: string;
@@ -692,7 +698,7 @@ export interface SubagentToolDetails {
   outcome?: ProjectedOutcome;
   mode: ExecutionMode;
   agent: string;
-  model: string;
+  model: string | undefined;
   thinkingLevel: string | undefined;
   /** 短标签（≤35 字符），来自 record.slug。旧 record 反序列化时为空串。 */
   slug: string;
@@ -814,7 +820,7 @@ export interface SubagentListItem {
   mode: ExecutionMode;
   /** 运行秒数（running 态实时计算，终态 endedAt-startedAt）。 */
   duration: number;
-  model: string;
+  model: string | undefined;
   totalTokens: number;
   /** session jsonl 文件名（窗口期内可能 undefined）。 */
   sessionFile?: string;
@@ -901,7 +907,7 @@ export interface CloseResponse {
  *   - close → closeResponse（subagentId 有值；sessionFile 无意义，可为 null）
  */
 export type SubagentToolResult =
-  | { action: "start"; subagentId: string; sessionFile: string | null; slug: string; /** registry 全等回显（U1）：放行即与 registry 条目全等，"provider/id" 形态。 */ model: string; bgResponse: BgResponse; __gui__?: GuiRenderResult }
+  | { action: "start"; subagentId: string; sessionFile: string | null; slug: string; /** registry 全等回显（U1）；undefined = 用户未指定模型（R4 缺席语义，GUI 条件渲染不显示）。 */ model: string | undefined; bgResponse: BgResponse; __gui__?: GuiRenderResult }
   | { action: "list"; subagentId: null; sessionFile: null; listResponse: ListResponse; __gui__?: GuiRenderResult }
   | { action: "cancel"; subagentId: string; sessionFile: null; cancelResponse: CancelResponse; __gui__?: GuiRenderResult }
   | { action: "message"; subagentId: string; sessionFile: null; messageResponse: MessageResponse; __gui__?: GuiRenderResult }
@@ -967,7 +973,8 @@ export interface SubagentRecord {
   endedAt: number | undefined;
   turns: number;
   totalTokens: number;
-  model: string;
+  /** 模型留痕（R4/D6-①）：undefined = 用户未指定（引擎自身缺省解析），非空串。 */
+  model: string | undefined;
   thinkingLevel: string | undefined;
   eventLog: AgentEventLogEntry[];
   /** [STEP3] 从 turns[] 派生的展示项（对齐 nicobailon getDisplayItems）。 */
@@ -1058,7 +1065,7 @@ export interface SubagentsGlobalConfig {
 export interface RecordSnapshot {
   readonly id: string;
   readonly agent: string;
-  readonly model: string;
+  readonly model: string | undefined;
   readonly thinkingLevel: string | undefined;
   readonly mode: ExecutionMode;
   readonly task: string;

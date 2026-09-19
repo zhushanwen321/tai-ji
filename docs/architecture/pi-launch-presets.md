@@ -99,6 +99,16 @@ export interface PiLaunchPreset {
    */
   thinkingLevel?: ThinkingLevel
 
+  // ── 模式提示词（可选） ──
+  /**
+   * 模式提示词（可选）。`replace` 顶掉 pi 系统提示词；`append` 追加在 pi 基础之后。
+   * 两段各自启用；字段形状 / 上限 / 校验语义 / 注入通道见 §2.6。
+   */
+  prompt?: {
+    replace?: { enabled: boolean; prompt: string }
+    append?: { enabled: boolean; prompt: string }
+  }
+
   // ── 其他配置 ──
   /** 禁用所有 skill（映射 --no-skills） */
   noSkills?: boolean
@@ -111,6 +121,7 @@ export const BUILTIN_PRESET_IDS = {
   FULL: 'builtin:full',                // 全工具模式
   ORCHESTRATOR: 'builtin:orchestrator', // orchestrator 模式
   READONLY: 'builtin:readonly',         // 只读模式
+  SESSION_DISPATCH: 'builtin:session-dispatch', // 调度模式
 } as const
 
 /** 默认内置预设列表 */
@@ -143,6 +154,24 @@ export const DEFAULT_PRESETS: PiLaunchPreset[] = [
     toolMode: 'allowlist',
     allowedTools: ['read', 'grep', 'find', 'ls'],
     extensionMode: 'all',
+  },
+  {
+    id: BUILTIN_PRESET_IDS.SESSION_DISPATCH,
+    name: '调度模式',
+    description: '主 Agent 只做拆解与派发，执行由独立会话完成',
+    builtin: true,
+    order: 3, // 唯一且为既有 0/1/2 之后的下一个整数（mergePresets 按 (order, id) 复合键排序）
+    toolMode: 'allowlist',
+    allowedTools: [
+      'read', 'grep', 'find', 'ls',
+      'create_managed_session', 'send_to_session', 'read_session_history',
+      'list_my_sessions', 'get_session_status', 'abort_session',
+      'ask_user', 'todo',
+    ],
+    extensionMode: 'denylist',
+    deniedExtensions: ['@zhushanwen/pi-subagent-workflow'],
+    // 唯一带提示词的内置预设（预置可编辑 append 文案）；其余内置条目不设 prompt。
+    prompt: { append: { enabled: true, prompt: '…（调度纪律文案）' } },
   },
 ]
 ```
@@ -219,6 +248,7 @@ rpc-client.ts:128 当前**硬编码** `--no-extensions --approve`，所有 exten
 | `noContextFiles` | **新增维度** | 直接映射到 `--no-context-files`，不影响其他 |
 | `modelOverride` | 见 §5.2 优先级规则 | Landing Chip 覆盖 > preset > 全局默认 |
 | `thinkingLevel` | 见 §5.2 优先级规则 | Landing Chip 覆盖 > preset > 全局默认 |
+| `prompt` | **模式提示词面**（新增，见 §2.6） | `replace` = 模式 > 全局替换 > pi 默认；`append` = 模式段（全局追加由 pi-system-prompt 扩展独立处理） |
 
 ### 2.3 BUILTIN EXTENSION 强制注入（infrastructure 级不可 exclude）
 
@@ -272,18 +302,48 @@ return afterPreset.filter(r => r.loadable).map(r => r.path)
 
 **注意 `all` 模式不传 `--tools`**——因为 pi 默认就启用 read/bash/edit/write（不是全部 7 个）。若要启用 grep/find/ls，必须用 allowlist 显式列出。
 
-### 2.6 与现有 systemPrompt 的关系
+### 2.6 与现有 systemPrompt 的关系（模式提示词面）
 
-现有 `getReplaceSystemPrompt()` 读 `~/.taiji/system-prompt.json`，提供「替换 pi 核心系统提示词」功能。
+> **[2026-09 修订，推翻本节原结论]** 原文「preset 不引入新 systemPrompt 字段」已被模式体系设计推翻——预设（用户可见名「模式」）现引入可选的提示词字段，与全局系统提示词并列而非互斥。
 
-**preset 不引入新 systemPrompt 字段**（避免与现有机制冲突）。preset 仅控制是否禁用 context files：
+**字段形状**（shared `PiLaunchPreset.prompt`，与全局 `SystemPromptConfig` 同形，便于复用校验与 UI 范式）：
+
+```typescript
+prompt?: {
+  replace?: { enabled: boolean; prompt: string }  // 替换 pi 核心系统提示词
+  append?:  { enabled: boolean; prompt: string }  // 追加在 pi 基础提示词之后
+}
+```
+
+两段各自启用（一段缺失/未启用不影响另一段）。内置「调度模式」（`builtin:session-dispatch`）预置一段可编辑的 `append` 文案（与既有「内置可编辑」语义一致），其余内置预设不设 `prompt`。
+
+**上限**：每段 ≤ `SYSTEM_PROMPT_MAX_LENGTH`（16000 字符），且 **replace + append 合计 ≤ 16000**（复用全局系统提示词上限常量，同量纲理由 = argv / Windows 命令行长度）。设置页两卡共用一行「合计 N / 16000」计数（分卡各自计数会产生「两个计数器都说 OK、保存却被拒」）。
+
+**校验语义（两条路不同）**：
+
+- **写路（`savePreset` / `importPresets`）= 整条拒绝**：`validatePresetPrompt` 校验段形状（`enabled` boolean / `prompt` string）、单段上限、合计上限，任一不满足抛 `PresetGuardError`，经既有 envelope 通道（`preset_guard_error`）回 renderer，**不写盘**；错误文案带实际值（段长 / 两段合计）。
+- **读路（磁盘文件加载）= 段级折叠**：`coercePreset` 内 `coercePresetPrompt` 对畸形/超限的段**只丢该段 + warn**，不丢整个 preset、不阻断加载；合计超限时**优先丢 append、保留 replace**（替换段语义更重、用户更难自恢复）。
+- **导入路顺序不可颠倒**：先 `validatePresetPrompt`（整条拒）再 `coercePreset`（形状折叠）——先折叠会让超限段被静默丢段、整条拒永不触发。
+
+**注入通道 = 两条 pi 原生 argv（不新增 env、扩展零改动）**：
+
+| 段 | pi flag | 取值优先级 |
+|---|---|---|
+| `replace` | `--system-prompt <text>` | **模式 replace（启用且非空）> 全局替换 > pi 默认** |
+| `append` | `--append-system-prompt <text>` | **模式 append（启用且非空）> 不传**（全局追加由 `@zhushanwen/pi-system-prompt` 扩展独立处理，两者共存不互斥） |
+
+取值集中在 `resolveEffectiveSystemPrompt` / `resolveAppendSystemPrompt`（`packages/runtime/src/services/session/launch-params.ts`），create / restoreSession / forkSession 三处 spawn 共用（避免一处改了另两处漏）。argv 拼装在 `packages/pi-rpc/src/spawn-args.ts`；内联值统一**前置一个 `\n`**（`toInlinePromptValue`）——pi 对两个 flag 的值先 `existsSync(值)`（基准 = 会话 cwd），命中即把该文件内容当提示词；含换行的值不可能命中真实路径，从而构造性区分「字面文本」与「文件路径」（否则用户文案恰为项目内文件名如 `AGENTS.md` 时会被静默替换成文件内容）。该前缀覆盖两条通道 × 两条来路（模式值 / 全局值），不会漏加。
+
+`append` 段的链序（如实声明）：pi 基础 → 模式追加段 → project context（cwd AGENTS.md/CLAUDE.md）→ skills → 扩展全局 AGENTS.md（`~/.agents`）→ 全局追加段；即模式追加段在两条全局段**之前**，直接冲突时全局占优（逃逸路径 = 把文案放进该模式的替换段，但会一并丢弃 pi 内置行为规范）。
 
 | preset.noContextFiles | systemPrompt 来源 | pi args |
 |---|---|---|
-| `false` / 未设 | 现有 `getReplaceSystemPrompt()` | `--system-prompt <value>` |
-| `true` | 现有 `getReplaceSystemPrompt()` | `--system-prompt <value> --no-context-files` |
+| `false` / 未设 | 模式 replace > 全局替换 > pi 默认 | `--system-prompt <value>`（有模式 append 时增 `--append-system-prompt <value>`） |
+| `true` | 同上 | 同上 + `--no-context-files` |
 
 `--no-context-files` 禁用 AGENTS.md / CLAUDE.md 自动发现（不影响显式 `--system-prompt`）。
+
+**argv 日志脱敏**：两条 prompt flag 的值都是用户可编辑的成段文本，spawn 回显（`rpc-client` 日志行）与孤儿回收的 crash journal `argvSummary()` 必须经共享脱敏纯函数只记 `--flag <N chars>`，不得落正文。**（已实施）** 落点 = `packages/runtime/src/infra/pi/argv-redact.ts`（数组形态 `redactArgv` + 行形态 `redactArgvLine`；只蔽值型 flag 的值、其余 token 原样保留、按索引遮蔽不做全局替换、换行归一 + 长度封顶），两处调用点均已接线。
 
 ---
 

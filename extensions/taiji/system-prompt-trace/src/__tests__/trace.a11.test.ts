@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { createSystemPromptTrace } from "../trace.js";
 import type { SystemPromptTrace, TraceContext, TraceEnv } from "../trace.js";
 import { isSystemPromptTraceEntryData, SYSTEM_PROMPT_CUSTOM_TYPE } from "../types.js";
-import type { SystemPromptTraceEntryData, SwitchStash } from "../types.js";
+import type { PresetFallbackFact, SystemPromptTraceEntryData, SwitchStash } from "../types.js";
 
 // trace.ts 的 computePromptHash 已收敛为包内私有（无外部消费方）；测试本地同款实现计算期望值。
 const computePromptHash = (text: string): string =>
@@ -37,13 +37,15 @@ interface Harness {
 	newLogic(): SystemPromptTrace;
 }
 
-function makeHarness(initialPrompt: string): Harness {
+function makeHarness(initialPrompt: string, presetFallback?: PresetFallbackFact): Harness {
 	const entries: SystemPromptTraceEntryData[] = [];
 	let prompt = initialPrompt;
 	const stash: SwitchStash = { pending: null };
 	// A11 不涉文件路径：三档基线全部 miss（直读 / fork prev 文件路径均不可读），隔离验证时机/去重/映射逻辑
 	const env: TraceEnv = {
 		readLastPromptFromFile: () => null,
+		// F1b：默认无回落事实；需要时经参数注入（进程 env 语义的 fake）
+		getPresetFallback: () => presetFallback,
 	};
 	const ctx: TraceContext = {
 		getSystemPrompt: () => prompt,
@@ -132,6 +134,34 @@ describe("A11 留痕时机与去重", () => {
 		});
 		expect(entry.parentVersionDiffSummary).toContain("+1 -0 lines");
 		expect(entry.parentVersionDiffSummary).toContain("+ [Available Models]");
+	});
+
+	it("F1b 模式回落事实：env 携带 from/to → 本进程每条 entry 均带 presetFallback（resume 快照与 change 一致），既有字段不削弱", () => {
+		const fact: PresetFallbackFact = { from: "custom:gone-uuid", to: "builtin:full" };
+		const h = makeHarness(P1, fact);
+		h.logic.onSessionStart("resume", undefined, h.ctx);
+		h.logic.onTurnStart(h.ctx); // v1 resume
+		h.setPrompt(P2);
+		h.logic.onTurnStart(h.ctx); // v2 change
+		expect(h.entries).toHaveLength(2);
+		expect(h.entries[0]?.presetFallback).toEqual(fact);
+		expect(h.entries[1]?.presetFallback).toEqual(fact);
+		// 既有形状与语义不受影响
+		expect(h.entries[0]).toMatchObject({
+			version: 1, reason: "resume", fullText: P1, charCount: P1.length, hash: computePromptHash(P1),
+		});
+		expect(h.entries[1]).toMatchObject({
+			version: 2, reason: "change", fullText: P2, charCount: P2.length, hash: computePromptHash(P2),
+		});
+	});
+
+	it("F1b 无回落（getPresetFallback → undefined）→ entry 无 presetFallback 字段（形状向后兼容）", () => {
+		const h = makeHarness(P1);
+		h.logic.onSessionStart("startup", undefined, h.ctx);
+		h.logic.onTurnStart(h.ctx);
+		expect(h.entries).toHaveLength(1);
+		expect(h.entries[0]?.presetFallback).toBeUndefined();
+		expect(Object.prototype.hasOwnProperty.call(h.entries[0], "presetFallback")).toBe(false);
 	});
 
 	it("prompt 变回旧值再写 change v3（时间线保留真实历史，只对当前版本去重）", () => {

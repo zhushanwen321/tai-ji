@@ -46,6 +46,35 @@ export type ThinkingLevel = (typeof PI_THINKING_LEVELS)[number]
 /** pi 内置工具列表（pi 硬编码 7 个，0.84.1 实装锚点 dist/core/tools/index.js:81-89 createAllToolDefinitions） */
 export const BUILTIN_TOOLS = ['read', 'write', 'bash', 'edit', 'grep', 'find', 'ls'] as const
 
+/**
+ * 模式提示词单段（与全局 SystemPromptConfig 的段形状一致：enabled + prompt）。
+ *
+ * 抽成具名类型供 runtime 的段级校验/折叠函数（validatePresetPrompt / coercePresetPrompt）
+ * 表达返回形状，避免各处重复内联对象类型。
+ */
+export interface PresetPromptSegment {
+  /** 该段是否启用 */
+  enabled: boolean
+  /** 提示词文本 */
+  prompt: string
+}
+
+/**
+ * 模式提示词配置（可选）。
+ *
+ * replace 顶掉 pi 系统提示词；append 追加在 pi 基础之后（位置见设计文档 D3 链序表）。
+ * 两段各自启用——一段缺失/未启用不影响另一段。
+ *
+ * 与全局 `SystemPromptConfig`（protocol.ts）同形（便于复用校验与 UI 范式），但无 version
+ * 字段且两段可选（预设里「未配置提示词」是常态）。
+ */
+export interface PresetPromptConfig {
+  /** 替换 pi 核心系统提示词 */
+  replace?: PresetPromptSegment
+  /** 追加在 pi 基础提示词之后 */
+  append?: PresetPromptSegment
+}
+
 /** Pi 启动参数预设 */
 export interface PiLaunchPreset {
   /** 预设唯一 ID（内置用 'builtin:xxx'，自定义用 UUID） */
@@ -87,6 +116,16 @@ export interface PiLaunchPreset {
    */
   thinkingLevel?: ThinkingLevel
 
+  // ── 模式提示词（可选） ──
+  /**
+   * 模式提示词（可选）。replace 顶掉 pi 系统提示词；append 追加在 pi 基础之后。两段各自启用。
+   *
+   * 校验契约（runtime preset-service）：
+   *   - 写路（savePreset / importPresets）：整条拒绝（validatePresetPrompt）
+   *   - 读路（磁盘文件加载）：段级折叠（畸形/超限只丢该段 + warn，不丢整个 preset）
+   */
+  prompt?: PresetPromptConfig
+
   // ── 其他配置 ──
   /** 禁用所有 skill（映射 --no-skills） */
   noSkills?: boolean
@@ -99,6 +138,7 @@ export const BUILTIN_PRESET_IDS = {
   FULL: 'builtin:full',                // 全工具模式
   ORCHESTRATOR: 'builtin:orchestrator', // orchestrator 模式
   READONLY: 'builtin:readonly',         // 只读模式
+  SESSION_DISPATCH: 'builtin:session-dispatch', // 调度模式
 } as const
 
 /** 默认内置预设列表 */
@@ -131,6 +171,38 @@ export const DEFAULT_PRESETS: PiLaunchPreset[] = [
     toolMode: 'allowlist',
     allowedTools: ['read', 'grep', 'find', 'ls'],
     extensionMode: 'all',
+  },
+  {
+    id: BUILTIN_PRESET_IDS.SESSION_DISPATCH,
+    name: '调度模式',
+    description: '主 Agent 只做拆解与派发，执行由独立会话完成',
+    builtin: true,
+    // order 必须唯一且为既有 0/1/2 之后的下一个整数：mergePresets 按 (order, id) 复合键排序，
+    // 同序会退化为 id 字符串比较（'builtin:readonly' < 'builtin:session-dispatch'），排位与意图不符。
+    order: 3,
+    toolMode: 'allowlist',
+    allowedTools: [
+      'read', 'grep', 'find', 'ls',
+      'create_managed_session', 'send_to_session', 'read_session_history',
+      'list_my_sessions', 'get_session_status', 'abort_session',
+      'ask_user', 'todo',
+    ],
+    extensionMode: 'denylist',
+    deniedExtensions: ['@zhushanwen/pi-subagent-workflow'],
+    // 预置可编辑 append 提示词（与既有「内置可编辑」语义一致——用户可另存为副本修改）。
+    // 唯一带提示词的内置预设；其余内置条目不设置 prompt。
+    prompt: {
+      append: {
+        enabled: true,
+        prompt: [
+          '你在「调度模式」下工作：你是调度者，不是执行者。',
+          '- 需要动手的活（读代码、跑命令、写文件、大范围搜索）一律派发给子会话（create_managed_session），不要自己执行。',
+          '- 派发前把任务写成自包含 brief：目标、验收标准、涉及路径、约束——不要假设子会话看得到你的对话。',
+          '- 多个独立子任务优先并行派发；不要串行等待，也不要轮询子会话状态。',
+          '- 子会话完成后只做汇总与决策；不要把子会话的输出原文粘贴回对话流。',
+        ].join('\n'),
+      },
+    },
   },
 ]
 

@@ -5,7 +5,9 @@
  * baseline: e2e/visual-baselines/composer.spec/composer-default.png（git tracked，Q3/D3）。
  *
  * activateSession 复用 e2e/v6-shell-baseline.spec.ts 范式。mock 模式（VITE_MOCK=true，无 VITE_E2E）
- * session list 是 fixtureSessions（5 个：重构 auth 模块 / API 性能优化 等），不依赖 e2eTestSession 注入。
+ * session list 是 fixtureSessions（8 个：5 个演示态 + s3 的 3 个 agent 子会话 s3-c1/c2/c3，
+ * 如「重构 auth 模块」/「API 性能优化」等），不依赖 e2eTestSession 注入。本 spec 的托盘 session
+ * 条目断言依赖 s3 的三个子会话。
  * 运行：npx playwright test e2e/visual/composer.spec.ts --project=visual-chromium
  */
 import { test, expect } from './fixtures/visual-server'
@@ -41,6 +43,10 @@ test.describe('visual baseline: composer', () => {
     // s3 = 'API 性能优化'，mock 对该 session 有 workflow/subagent 历史记录 → 托盘挂 dim 条目。
     await expect(page.getByTestId('composer-tray')).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')).toBeVisible()
+    // [u7a / u7 已落地：回归断言] 第 4 件 session kind：mock fixture 给 s3 挂了 3 个
+    // parentAgentSessionId='s3' 的子会话 → 托盘必须渲染 session 条目（计数 ● 3）。
+    // 托盘条目存在性同时是视觉基线断言对象（底栏重排 + 第 4 件是本次基线变更驱动元素）。
+    await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="session"]')).toBeVisible()
     // settle：等 composer 渲染 + 动画平息
     await page.waitForTimeout(1500)
     await expect(page.getByTestId('composer-box')).toHaveScreenshot('composer-default.png', {

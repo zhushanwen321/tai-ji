@@ -117,6 +117,12 @@ async function runFullChain(): Promise<{ result: FullChainResult; fx: PiFixture;
     const childJsonl = join(sessionDir, `${childId}.jsonl`)
     let createCall: FullChainResult['createCall'] | undefined
     const sessionService = {
+      // u8（设计决策 D8）：handleCreate 开头会读父会话 summary 的 projectId 并透传给子会话。
+      // 本 fake 返回「无 project 的父 summary」（只带 id）⇒ parentProjectId=undefined
+      // ⇒ 子会话落默认项目。本 e2e 的被测对象是跨进程通道闭环（extension 工具 →
+      // ui_request → runtime 翻译/路由/处理 → 回写），project 继承语义由
+      // session-manager-handler.test.ts 的 u8 用例覆盖，此处只需保证新调用不打断链路。
+      getSummary: (id: string) => ({ id }),
       create: async (cwd: unknown, label: unknown, opts: Record<string, unknown> = {}) => {
         createCall = { cwd, label, opts }
         writeFileSync(

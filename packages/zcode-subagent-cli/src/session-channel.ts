@@ -705,7 +705,8 @@ export class SessionChannel {
    * session/resume 读通道（[U6 / §3.2.6 要点 3，P-1 探针实证]）：应答自带完整
    * 双向 messages 历史（user/assistant 全量、tokens、parts）——zcode 续聊选型的
    * 历史来源（读通道成立；原地 resume 续写被 -32031 卡死，写通道不可用）。错误
-   * 原样上抛（调用方决定降级形态——引擎侧 warn 后无历史前缀开新会话）。
+   * 原样上抛（调用方决定降级形态——引擎侧 warn 后注入锚失效声明段继续执行，
+   * run 不失败，[U3]）。
    * 经 conn.request 惰性启动连接（resume 是 run 的**首个**请求——调用时点连接
    * 可能尚未启动，与 readBestEffort 的「已死跳过」判据不同场景，不做 alive 守卫）。
    */

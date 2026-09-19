@@ -69,7 +69,8 @@ export interface WorktreeEntry {
   readonly branch: string;
   /** checkout 目录（tmpdir 下，= WorktreeHandle.path）。 */
   readonly checkout: string;
-  /** 子进程 pid（0 = create-spawn 窗口，尚未拿到 pid）。 */
+  /** 孤儿判据 pid（宿主 core 进程 pid——回收责任在 core，宿主死 = 无主）。
+   *  0 = 兼容旧条目/异常路径（SPAWN_GRACE 宽限后判孤儿）。 */
   readonly pid: number;
   /** 创建时间戳（ms，SPAWN_GRACE 判据 + 调试用）。 */
   readonly createdAt: number;
@@ -95,7 +96,7 @@ export class WorktreeRegistry {
   }
 
   /**
-   * 新增条目（create 成功后调，pid=0 占位）。
+   * 新增条目（create 成功后调，pid = 宿主进程 pid——孤儿判据锚定宿主死活）。
    * 同 branch 已存在则覆盖（防残留覆盖）。
    * 跨进程锁内 RMW（D5a）；锁降级路径见 mutate。
    */

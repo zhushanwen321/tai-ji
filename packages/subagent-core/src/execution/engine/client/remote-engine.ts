@@ -107,8 +107,9 @@ export class RemoteEngine implements EnginePort {
     this.id = opts.engineId;
     if (opts.manifest.modelCatalog === undefined || opts.manifest.modelCatalog === null) {
       // 同步成员形态映射（必写死）：manifest 省略 modelCatalog → validateModel 成员
-      // **不实现**（消费方 model-validation.ts:62 `typeof validateModel !== "function"`
-      // → 跳过校验恒放行）。实例 own property 置 undefined 遮蔽原型方法——
+      // **不实现**（消费方 model-validation.ts:115/:224 两处判定点
+      // `typeof engine.validateModel !== "function"` → 跳过校验恒放行）。实例 own
+      // property 置 undefined 遮蔽原型方法——
       // typeof engine.validateModel === "undefined"。
       (this as { validateModel?: unknown }).validateModel = undefined;
     }
@@ -317,7 +318,7 @@ interface WireRunParams {
   runId: string;
   task: SdkAgentCallOpts;
   ctx: {
-    cwd: string;
+    cwd?: string;
     model: string | undefined;
     schemaEnv: string | undefined;
     ctxModel: string | undefined;
@@ -360,7 +361,9 @@ function deriveHostSubagentSessionDir(): string {
 
 /**
  * run 帧 wire 载荷构建。协议 ctx 承载（RunContext 字段映射表）：cwd 取任务声明值
- * （缺省进程 cwd）；ctxModel 投影 canonical 词形（provider/id，ModelInfo 字段裁决）。
+ * （有值才上 wire——缺省不上，引擎侧回退自身进程 cwd；worktree 隔离路径由
+ * taskSpecWithModel 合流后必有值）；ctxModel 投影 canonical 词形（provider/id，
+ * ModelInfo 字段裁决）。
  * [H1 U6] 会话形态参数直传（RunContext.resume → run.params.resume；结构由
  * RunContext.resume 注释与 SDK RunResumeParams 的 implements 互证承载）。一次性轮
  * ctx.resume === undefined → wire 上不出现该键（协议 additive 语义）。
@@ -371,7 +374,10 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
     runId,
     task: toSdkTaskSubset(task),
     ctx: {
-      cwd: task.cwd ?? process.cwd(),
+      // cwd 有值才上 wire（additive，与 sessionRootId 同写法）——引擎侧 task.cwd
+      // undefined 时回退进程 cwd，与「core 进程 cwd 兜底上 wire」的旧行为相比不
+      // 改变无 worktree/无显式 cwd 任务的落点。
+      ...(task.cwd !== undefined ? { cwd: task.cwd } : {}),
       model: task.model,
       schemaEnv: ctx.schemaEnv ?? task.schemaEnv,
       ctxModel: ctxModelRef,

@@ -7,7 +7,6 @@
  * 真实数据源实现由壳（P5）provide（接 runtime config.plugins 订阅 + S2
  * status-bar-controller/view-host-store/contribution-registry + message-bus-bridge
  * / runtime WS 通道），本包只定义契约与组件本体。
- * AskUserForm 是 CompanionBand 的内部子组件（W2 clarify Q2），不进导出面。
  */
 export { default as PluginSettingsPage } from './PluginSettingsPage.vue'
 export {

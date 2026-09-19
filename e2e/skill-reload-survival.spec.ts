@@ -36,6 +36,7 @@ import {
   waitForExtensionsReady,
 } from './fixtures/launch-app-real'
 import fs from 'node:fs'
+import path from 'node:path'
 import {
   FAUX_TPS,
   SUB_MODEL_A,
@@ -92,6 +93,7 @@ test('S1: 编辑项目 skill 时在飞 run 存活 + 面板即时 + 归因日志 
   const probeNames = ['survival-probe-a', 'survival-probe-b']
   let listenWs: import('ws').default | null = null
   let appCleanup: (() => Promise<void>) | null = null
+  let reachedEnd = false // test.info().status 在 finally 不可靠（实测恒 'passed'），用确定性末行标志
   try {
     // ── 装配：项目 skill（demo-a）+ user 级 workflow 探针 + faux 脚本 ──
     writeProjectSkill(projectDir, 'demo-a', DEMO_A_DESC_V1)
@@ -236,7 +238,9 @@ test('S1: 编辑项目 skill 时在飞 run 存活 + 面板即时 + 归因日志 
     }
 
     // ── 托盘收口：run 结束后 workflow 按钮归 idle、计数消失（归零不虚亮）──
-    await expect(workflowBtn).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
+    // 长窗轮询（120s = 单 run 全生命周期 + 完成通知 triggerTurn 余量）：不假设「done 广播后
+    // 无后续派发」，窗口内全部 run 落终态托盘即归 idle，命中即返回不空耗
+    await expect(workflowBtn).toHaveAttribute('data-state', 'idle', { timeout: 120_000 })
     await expect(workflowBtn.getByTestId('tray-builtin-count')).toHaveCount(0)
 
     // ── S5 收尾段：session.delete 真杀路径 + 无孤儿（/new 偏差见文件头）──
@@ -251,16 +255,28 @@ test('S1: 编辑项目 skill 时在飞 run 存活 + 面板即时 + 归因日志 
 
     listenWs?.close()
     console.log('[S1] 通过：面板 2s 刷新 / run 存活 / 三段归因 / 终态 entry / 无孤儿')
+    reachedEnd = true
   } finally {
     delete process.env.TAIJI_AGENT_DEBUG
+    // 失败取证放最前（appCleanup 之前）：logs 拷到固定路径，规避后续清理丢失现场。
+    // agent/sessions 一并拷贝——W17 断言面（主 session JSONL 的 workflow-record entry）在这里
+    if (!reachedEnd) {
+      const keep = `/tmp/s1-failed-${Date.now()}`
+      try {
+        fs.mkdirSync(keep, { recursive: true })
+        fs.cpSync(path.join(dataDir, 'logs'), path.join(keep, 'logs'), { recursive: true })
+        fs.cpSync(path.join(dataDir, 'agent', 'logs'), path.join(keep, 'agent-logs'), { recursive: true })
+        fs.cpSync(path.join(dataDir, 'agent', 'sessions'), path.join(keep, 'agent-sessions'), { recursive: true })
+        console.log(`[S1] 失败取证：logs -> ${keep}（dataDir=${dataDir}）`)
+      } catch (e) {
+        console.log(`[S1] 失败取证拷贝失败：${e}（dataDir=${dataDir}）`)
+      }
+    }
     listenWs?.close()
     if (appCleanup) await appCleanup()
-    if (test.info().status === 'passed') {
+    if (reachedEnd) {
       fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
       fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    } else {
-      // 失败取证：保留现场目录（runtime 日志在 <dataDir>/logs/），归因后手动清理
-      console.log(`[S1] 失败取证：保留 projectDir=${projectDir} dataDir=${dataDir}`)
     }
   }
 })

@@ -75,6 +75,7 @@ packages/runtime/src/
 | ③b | `infra/crash-journal.ts` | 崩溃台账 writer（append-only JSONL + 轮转，best-effort），logger 同类横切 | 死亡/自愈决策点双写台账行 |
 | ③c | `infra/mem-pressure.ts` | os 级内存压力即时查询（无状态只读，永不 reject） | startup-reattach（watchdog 链） |
 | ③d | `infra/system/git-repo-resolver.ts` | 无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、查询不 reject）；IGitRepoResolver port 已存在，value import 仅为注入缺省实例（sharedRepoObserver 单例 + git-state-service fallback） | git/repo-observer、git/git-state-service |
+| ③e | `infra/pi/argv-redact.ts` | **kernel 类纯函数**（无状态、无 IO、无副作用，纯字符串/数组遮蔽）：spawn 日志行与 crash journal 摘要出口共用的「日志回显前蔽值」变换 | reap-orphan-pi（crash journal 摘要；另一消费方 `infra/pi/rpc-client.ts` 本就在 infra 层） |
 
 ### ④ node:fs 直用——基线债登记（非合规例外）
 

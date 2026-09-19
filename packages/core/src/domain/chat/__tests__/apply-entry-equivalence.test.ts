@@ -1302,6 +1302,103 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
   })
 })
 
+// ── plan-state entry 对话流行为（plan 模式重设计 A7）──────────────────────────
+//
+// plan-state 是 extension appendEntry 落盘的 type:'custom' 纯数据 entry（D1 schema：旧四
+// 字段 isActive/planFilePath/requirement/templateName；新七字段 + skills/docs/reviewState
+// 三 optional——D4 字段级判存在兼容）。两条通路的对话流语义：
+// - live：event-adapter 白名单（u1-proj）认出后走 record-entry-appended 失效信号 → runtime
+//   scanPlanStateEntries 派生 → stateSnapshot('plan') 独立通道——不经 message_end 进对话流
+//   reducer（D1 显式决策：plan 不进 chat reducer）；
+// - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 对非
+//   taiji.client-msg-id 早退（no-op），同样零对话流投影。
+// 「live ≡ reload 对话流呈现一致」由「reload 侧多出的 entry 被 reducer 忽略」构造性成立，
+// 本组钉住且断言新旧两种 schema 行为一致（schema 扩展不改对话流——plan 投影走独立通道）。
+describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）', () => {
+  /** ms → ISO（fixture 统一 timestamp 形态；独立于 W6 块的同形 helper） */
+  const ts = (ms: number) => new Date(ms).toISOString()
+  /** uuidv7 形态假 id（reload 侧专用，模拟 pi 持久化 id 空间） */
+  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+
+  /** 旧四字段 plan-state entry（JSONL 落盘形态：type:'custom'，设计 §2.1 现状实态） */
+  const legacyPlanEntry: PiEntry = {
+    type: 'custom',
+    id: piId(21),
+    parentId: null,
+    timestamp: ts(1500),
+    customType: 'plan-state',
+    data: {
+      isActive: true,
+      planFilePath: '/tmp/taiji-harness/auth-plan/plan.md',
+      requirement: '重构 auth 模块',
+      templateName: 'refactor',
+    },
+  }
+  /** 新七字段 plan-state entry（三 optional 字段全量：skills/docs/reviewState，D4 扩展） */
+  const extendedPlanEntry: PiEntry = {
+    type: 'custom',
+    id: piId(22),
+    parentId: null,
+    timestamp: ts(2500),
+    customType: 'plan-state',
+    data: {
+      isActive: true,
+      planFilePath: '/tmp/taiji-harness/auth-plan/plan.md',
+      requirement: '重构 auth 模块',
+      templateName: 'refactor',
+      skills: ['tech-design', 'dev-flow'],
+      docs: [
+        { fileName: 'design.md', absPath: '/tmp/taiji-harness/auth-plan/design.md', sourceSkill: 'tech-design', version: 1 },
+        { fileName: 'impl-plan.md', absPath: '/tmp/taiji-harness/auth-plan/impl-plan.md', sourceSkill: 'dev-flow', version: 2 },
+      ],
+      reviewState: 'awaiting',
+    },
+  }
+
+  // 对话流载体（两侧独立构造，W6 惯例）：live = message_end 重构形态（u- 前缀客户端 id、
+  // 无 id 的 assistant、parentId null）；reload = pi uuidv7 id + parentId 链
+  const liveChat: PiEntry[] = [
+    { type: 'message', id: 'u-00000021-0000-4000-8000-000000000021', parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: '进入计划模式' }], timestamp: 1000 } },
+    { type: 'message', id: undefined, parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'text', text: '已进入计划模式' }], timestamp: 2000 } },
+  ]
+  const reloadChat: PiEntry[] = [
+    { type: 'message', id: piId(21), parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: '进入计划模式' }], timestamp: 1000 } },
+    { type: 'message', id: piId(22), parentId: piId(21), timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'text', text: '已进入计划模式' }], timestamp: 2000 } },
+  ]
+
+  /** reload 侧完整序列：对话流载体之间插入新旧两种 schema 的 plan-state entry */
+  const reloadWithPlan: PiEntry[] = [reloadChat[0]!, legacyPlanEntry, reloadChat[1]!, extendedPlanEntry]
+
+  /** 归一（W6 同款：剥消息 id 与 piEntryId 后回填占位，uuidv7 异源差异类） */
+  function normalizeIds(state: ChatViewState): ChatViewState {
+    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
+      ...rest,
+      id: 'normalized',
+    })) as Message[]
+    return { ...state, messages }
+  }
+
+  it('新旧两种 schema 的 plan-state entry 均不进对话流，两 schema 对话流行为一致', () => {
+    const state = replayEntries(reloadWithPlan)
+    // 对话流只有 message entry 的投影（plan-state 零投影：无消息行、无 customType 行）
+    expect(state.messages).toHaveLength(2)
+    expect(state.messages.every((m) => m.customType !== 'plan-state')).toBe(true)
+    // reducer 纯函数确定性：同序列两次重放全等（expectDeterministic 同款口径，entry 形态直喂）
+    expect(state).toEqual(replayEntries(reloadWithPlan))
+    // schema 扩展不改对话流：只换 entry 的 data（旧 ↔ 新）终态一致
+    expect(replayEntries([reloadChat[0]!, extendedPlanEntry, reloadChat[1]!, legacyPlanEntry]).messages).toEqual(state.messages)
+  })
+
+  it('live ≡ reload：live 序列（失效信号通道不进 reducer，无 plan-state）≡ reload 序列（重放含新旧 entry）', () => {
+    const liveState = replayEntries(liveChat)
+    const reloadState = replayEntries(reloadWithPlan)
+    // reload 侧多出的 plan-state entry 被 reducer 忽略——两侧对话流归一 deep-equal（全量 state）
+    expect(normalizeIds(liveState)).toEqual(normalizeIds(reloadState))
+    // 对话流呈现（toRenderItems 分组：turn 边界 / 气泡）同样一致
+    expect(toRenderItems(normalizeIds(liveState).messages)).toEqual(toRenderItems(normalizeIds(reloadState).messages))
+  })
+})
+
 /** Array.prototype.findLastIndex 的内联实现（测试内避免对 Node 版本的库依赖） */
 function findLastIndex<T>(arr: T[], pred: (item: T) => boolean): number {
   for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i]!)) return i

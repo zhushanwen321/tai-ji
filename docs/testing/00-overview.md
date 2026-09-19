@@ -13,6 +13,7 @@
 | [02-panels-sidebar.md](./02-panels-sidebar.md) | 文件树 / SideDrawer / 搜索浮层（⌘K）/ GUI 组件渲染 / Subagent-Workflow 面板 / 后台命令侧边栏 | 04-file-tree.md + 05-side-drawer.md + 06-search-modal.md + 07-gui-components.md + 09-subagent-workflow-panel.md + 14-background-task-sidebar.md |
 | [03-runtime-extensions.md](./03-runtime-extensions.md) | 系统提示词配置 / extension 层运行时测试体系 / 插件系统非 mock E2E / 自动升级验证 | 10-settings-system-prompt.md + 12-extension-runtime-testing.md + 13-plugin-e2e.md + update-e2e.md |
 | [visual/vlm-prompt-template.md](./visual/vlm-prompt-template.md) | VLM 视觉验证派发模板（TEST-STRATEGY 引用的 SSOT，独立不并入） | — |
+| [render-sampling.md](./render-sampling.md) | 渲染采样管道（基线采集/真机验收共用：CDP 连接/选择器/注入/等待信号/DOM 采样脚本资产 + 清单表；采样前必读，禁现场重写管道） | 2026-09-19 markdown HTML 支持验收脚本提炼 |
 
 图例：✅ = 可测且稳定 / ⚠️ = 有约束或待补 / ❌ = 不可测（需手工）；**已落地** = spec 文件存在于 `e2e/` 且能跑通。
 
@@ -652,14 +653,15 @@ pnpm run dev
 
 | spec | 用例 | 验证目标 | 状态 |
 |---|---|---|---|
-| `e2e/ask-user-real.spec.ts` | A1/A2/A3 | ask-user 协议透传（问题对象无 allowComment）+ overlay 真实渲染（Other 保留）+ UI 交互闭环（overlay 关闭 + pi 恢复 turn） | ✅ 3/3（需 LLM） |
+| `e2e/ask-user-real.spec.ts` | A1/A2/A3 | ask-user 协议透传（问题对象无 allowComment）+ form-overlay 真实渲染（Other 保留）+ UI 交互闭环（overlay 关闭 + pi 恢复 turn）。wire 键断言双读 `formQuestions ?? askUserQuestions`（统一表单 form 帧 / legacy 帧双形态，ui-presentation-protocol） | ✅ 3/3（需 LLM；统一表单迁移后按双读断言复跑） |
 | `e2e/workflow-thinkinglevel-real.spec.ts` | TC1/TC2/TC3 | workflow agent() thinkingLevel 端到端：state 请求值 / pi 子进程 thinking_level_change / 完整跑通 | ✅ 3/3（需 LLM） |
 | `e2e/workspace-real.spec.ts` | 1 | 跨进程持久化 | ✅ 1/1 |
 | `e2e/skill-reload-survival.spec.ts` | S1 | 编辑项目 skill 时在飞 workflow run 存活：面板 2s 即时（G1）/ 托盘计数不变 + 无 `connection lost`/`code=143` + 引擎 CLI pid 不变（D2b）/ `[skill-reload]` 三段归因行计数吻合（D8）/ 主 session JSONL 终态 workflow-record（W17）/ session.delete 真杀无孤儿 | ✅ B5b 真机全绿（归因出 D8-a this 脱绑 runtime 崩溃，修复 44beb27cf 后复跑过） |
-| `e2e/skill-reload-askuser.spec.ts` | S1b | 双 session 并发 reload 存活：全局 skill 目录变动 → dir=global 归因行列双 sid / preserved 行每 session 一条 / reload 后触发的 ask_user 反向请求送达 overlay 且可应答（D3 槽现读，无静默取消） | ⚠️ B5b 已真机执行：reload 存活面全过；ask_user 送达 + 终态收口断言受残留风险 #8（run 收口面 stale pi 引用，未修）影响暂红，修复后复跑 |
-| `e2e/skill-reload-spawn-race.spec.ts` | S2 | 派发 run 后 <1s 编辑 skill 撞 spawn 窗口竞态：run 确定收口（workflowUpdate 广播）+ 主 session JSONL 末条 workflow-record 可读回（无状态分裂）+ 引擎执行树 ps 归零（无孤儿） | ⚠️ B5b 已真机执行：竞态命中 + preserved 过；终态收口断言受残留风险 #8 影响暂红，修复后复跑 |
+| `e2e/skill-reload-askuser.spec.ts` | S1b | 双 session 并发 reload 存活：全局 skill 目录变动 → dir=global 归因行列双 sid / preserved 行每 session 一条 / reload 后触发的 ask_user 反向请求送达 form-overlay 且可应答（D3 槽现读，无静默取消）；run 完成（主 session JSONL 终态 done 落盘）后 ≤30s `session.workflowUpdate` done 帧到达 spec WS（G1 必达窗口，A1 断言升级 2026-09-19）；dialog 阶段断言顺序解耦——select 后先 answerOverlay 再断言 composer（FormOverlay 与 composer 互斥，u0 复跑运行 2 的 30s 扑空假失败形态修复） | ✅ 2026-09-19 全绿：双 session 存活 / dir=global 双 sid / dialog 双送达可应答 / 终态 entry；run 完成 → ≤30s done 帧必达实测 0ms（失效链健康场景帧即时到达；水位门 + 两腿对账为丢帧形态兜底）——残留风险 #8 撤账（修复 = u1 送达水位对账 2aa709f79 + u2 finalizeRun 直落 a4fe8ad16，验证 spec = E2E-SKILLRELOAD-02/03/04） |
+| `e2e/skill-reload-spawn-race.spec.ts` | S2 | 派发 run 后 <1s 编辑 skill 撞 spawn 窗口竞态：run 确定收口（workflowUpdate 广播）+ 主 session JSONL 末条 workflow-record 可读回（无状态分裂）+ 引擎执行树 ps 归零（无孤儿）；run 完成后 ≤30s `session.workflowUpdate` done 帧到达 spec WS（G1 必达窗口，A1 断言升级 2026-09-19） | ✅ 2026-09-19 全绿：reload 命中 spawn 窗口 / run 确定收口 / JSONL 终态可读回 / 无孤儿；run 完成 → ≤30s done 帧必达实测 0ms（失效链健康场景帧即时到达；水位门 + 两腿对账为丢帧形态兜底）——残留风险 #8 撤账同 S1b 行（修复 2aa709f79 + a4fe8ad16） |
+| `e2e/workflow-disconnect-recovery.spec.ts` | A2 | WS 断开期间 run 完成 → 重连后收敛（传输兜底面回归，水位结构性不触发场景）：恢复来源双断言 = `session.subscribe` reply 的 stateSnapshot 携带该 run 的 done workflowUpdate last-value 回放帧 + `session.getWorkflows` 冷拉 RPC 返回终态记录；GUI 收敛（托盘 workflow 条目 data-state 回 idle ≤30s）；重连稳态无重复 done live 帧（断连空投下 publish 已完成、重连后 diff 恒空） | ✅ 2026-09-19 首跑全绿（reload-closeout-reliability u3b 执行，依赖 u1 送达水位对账已落地）：断连期间 run 完成 → 重连后 stateSnapshot 回放 done 帧 + `session.getWorkflows` 冷拉终态 + GUI 托盘 data-state=idle ≤30s 收敛 + 稳态无重复 done live 帧 |
 
-> skill-reload 三 spec（登记 E2E-SKILLRELOAD-01/02/03，见 [e2e-map.json](./e2e-map.json)）为 faux LLM 轨（L2.5）：被测对象是 reload 非破坏化机制链而非模型智能，LLM 轮次 faux 脚本化 + `TAIJI_FAUX_TPS` 长流式保持 run 在飞，零 token 确定性；共享装配与断言工具在 `e2e/fixtures/skill-reload-real-helpers.ts`（含每条断言的样本来源锚点）。preserved 归因行需 `TAIJI_AGENT_DEBUG=1`（spec 内自设）。
+> skill-reload 族四 spec（登记 E2E-SKILLRELOAD-01/02/03/04，见 [e2e-map.json](./e2e-map.json)）为 faux LLM 轨（L2.5）：被测对象是 reload 非破坏化机制链而非模型智能，LLM 轮次 faux 脚本化 + `TAIJI_FAUX_TPS` 长流式保持 run 在飞，零 token 确定性；共享装配与断言工具在 `e2e/fixtures/skill-reload-real-helpers.ts`（含每条断言的样本来源锚点）。preserved 归因行需 `TAIJI_AGENT_DEBUG=1`（spec 内自设）。
 
 ## 3. 运行
 
@@ -711,7 +713,7 @@ fs.symlinkSync(BRANCH_ASKUSER, path.join(zsDest, 'pi-ask-user'), 'dir')
 对策：需要断言"前端发出帧"时，降级为断言**可观测的副作用**：
 - overlay 关闭（前端 onSubmit 成功的 UI 信号）
 - pi 恢复 turn（`message.message_start` / `message.complete` 广播）
-- 帧内容本身由组件层测试（`AskUserOverlay.test.ts`）覆盖
+- 帧内容本身由组件层测试（`FormOverlay.test.ts` / `ScheduleForm.test.ts`）覆盖
 
 ### 5.3 mandatory npm install 与 pi spawn 存在启动竞态
 

@@ -39,7 +39,7 @@ import type {
   ScannedSkillInfo,
   ScannedAgentInfo,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -366,6 +366,46 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
+// ── zcode 导入源 mock fixture（sess-session-import u-foundation）─────────────
+// 契约语义对齐：sessionId 保持原始 sess_ 前缀形态（候选 id = 源系统主键原始形态，
+// 归一化发生在 import source 内部）；sourcePath = db 路径结构占位（契约同构，
+// zcode 的 query 匹配不消费）；lastModified 以 now 偏移现算（保持降序演示真实性）。
+const ZCODE_MOCK_DB_PATH = '/mock/zcode/session-db/db.sqlite'
+const MOCK_HOUR_MS = 3_600_000
+const MOCK_DAY_MS = 86_400_000
+const MOCK_KB_BYTES = 1024
+const ZCODE_MOCK_SIZE_LARGE_KB = 512
+const ZCODE_MOCK_SIZE_SMALL_KB = 96
+const ZCODE_MOCK_ROWS: ReadonlyArray<{
+  sessionId: string
+  name: string | null
+  cwd: string
+  sizeBytes: number
+  ageMs: number
+  alreadyImported: boolean
+}> = [
+  { sessionId: 'sess_9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88', name: '修复构建脚本', cwd: '/Users/demo/zcode-alpha', sizeBytes: ZCODE_MOCK_SIZE_LARGE_KB * MOCK_KB_BYTES, ageMs: MOCK_HOUR_MS, alreadyImported: false },
+  { sessionId: 'sess_1c7e05a2-f3b9-47d2-9a41-5e8c6b0d2f37', name: null, cwd: '/Users/demo/zcode-beta', sizeBytes: ZCODE_MOCK_SIZE_SMALL_KB * MOCK_KB_BYTES, ageMs: MOCK_DAY_MS, alreadyImported: true },
+]
+
+/** zcode mock 候选快照（map 新对象——mock 惯例 fixture 快照隔离，调用方突变不污染源数据） */
+function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
+  const now = Date.now()
+  return ZCODE_MOCK_ROWS.map((r) => ({
+    sessionId: r.sessionId,
+    name: r.name,
+    cwd: r.cwd,
+    sourcePath: ZCODE_MOCK_DB_PATH,
+    lastModified: now - r.ageMs,
+    size: r.sizeBytes,
+    // dirLabel = basename(cwd)（zcode 源 dirs 聚合同规则；fixture cwd 无尾斜杠，
+    // mock 浏览器环境无 node:path，手写 split 与 composer getFileCandidates 同模式）
+    dirLabel: r.cwd.split('/').pop() ?? r.cwd,
+    alreadyImported: r.alreadyImported,
+    cwdExists: true,
+  }))
+}
+
 const sessionImpl = {
   /**
    * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
@@ -668,17 +708,49 @@ const sessionImpl = {
   async writeSegments(_payload: { sessionId: string; entry: import('@taiji/shared').SegmentsMetadataEntry }): Promise<void> {
     await sleep(TIMING.ack)
   },
-  // ── 导入 pi 会话（import-session U5；与 real domain 同接口，门面三元要求两侧同构；
-  //     r1-S19：payload 类型 import shared 契约，不手写内联形状）──
-  /** Mock importCandidates：恒返回空候选集（mock 轨道无外部 pi sessions 目录可扫）。 */
-  async importCandidates(_payload: import('@taiji/shared').ImportCandidatesRequest): Promise<import('@taiji/shared').ImportCandidatesReply> {
+  // ── 导入会话（import-session U5 → sess-session-import u-foundation 多源扩展；与
+  //     real domain 同接口，门面三元要求两侧同构；r1-S19：payload 类型 import shared
+  //     契约，不手写内联形状）──
+  /**
+   * Mock importCandidates：source 显式判别（与 importSession 分支策略收敛，r-审查
+   * P3——real 侧 resolveSource 未知 source 抛 import_source_missing，mock 否决式分支
+   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 轨道无外部
+   * pi sessions 目录可扫）；'zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
+   * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）；其余字面量
+   * （WS JSON 注入的类型外运行时值）抛 import_source_missing。不模拟 query 过滤——
+   * 与 pi 分支不模拟目录扫描同保真度层级（mock 只驱动 UI 状态机）。
+   */
+  async importCandidates(payload: import('@taiji/shared').ImportCandidatesRequest): Promise<import('@taiji/shared').ImportCandidatesReply> {
     await sleep(TIMING.ack)
-    return { total: 0, items: [], dirs: [] }
-  },
-  /** Mock importSession：恒 reject（空候选集下不可达；与 fetchCurrentSystemPrompt 同形，供 UI 错误态演示）。 */
-  async importSession(_payload: import('@taiji/shared').ImportRequest): Promise<import('@taiji/shared').ImportReply> {
-    await sleep(TIMING.ack)
+    const source = payload.source ?? 'pi'
+    if (source === 'zcode') {
+      const items = zcodeMockCandidates()
+      // dirs 按 dirLabel 聚合 count（zcode 源 dirs 聚合规则：basename(directory) 分组）
+      const countByLabel = new Map<string, number>()
+      for (const item of items) countByLabel.set(item.dirLabel, (countByLabel.get(item.dirLabel) ?? 0) + 1)
+      const dirs = Array.from(countByLabel, ([label, count]) => ({ label, count }))
+      return { total: items.length, items, dirs }
+    }
+    if (source === 'pi') {
+      return { total: 0, items: [], dirs: [] }
+    }
     throw Object.assign(new Error('No external sessions available in mock mode'), { code: 'import_source_missing' })
+  },
+  /**
+   * Mock importSession：source='zcode' 返回固定 reply——reply.sessionId = T1 归一化
+   * 形态（剥 sess_ 前缀 + '_'→'-'，对齐契约「reply.sessionId 与侧边栏/扫描集同域，
+   * 非请求传入的原始 sess_ 形态」）；payload.sessionId 缺省回退首条候选 id。缺省/
+   * pi/未知 source 维持现状 reject import_source_missing（空候选集下不可达，供 UI
+   * 错误态演示，与 fetchCurrentSystemPrompt 同形）。
+   */
+  async importSession(payload: import('@taiji/shared').ImportRequest): Promise<import('@taiji/shared').ImportReply> {
+    await sleep(TIMING.ack)
+    if (payload.source !== 'zcode') {
+      throw Object.assign(new Error('No external sessions available in mock mode'), { code: 'import_source_missing' })
+    }
+    const raw = payload.sessionId ?? ZCODE_MOCK_ROWS[0].sessionId
+    const normalized = raw.replace(/^sess_/, '').replace(/_/g, '-')
+    return { sessionId: normalized, targetPath: `/mock/taiji/sessions/zcode-demo/${normalized}.jsonl` }
   },
 }
 
@@ -1612,11 +1684,14 @@ const projectImpl = {
 export type ProjectDomainParamsExact = AssertExact<DomainParamsExact<ProjectDomain, typeof projectImpl>>
 export const project: ProjectDomain = projectImpl
 
-// preset 域 mock 占位（pi-launch-presets wave1）：返回空预设列表 + 默认全工具模式 id。
+// preset 域 mock（pi-launch-presets wave1）：返回内置预设目录 + 默认全工具模式 id。
 // 与 real 轨 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
-// mock 模式无 runtime，preset 演示由 real 轨驱动；此处仅供 landing 渲染不崩。
+// mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
+// （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
+// chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
+// launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收口）。
 import type { PiLaunchPreset } from '@taiji/shared'
-const mockPresets: PiLaunchPreset[] = []
+const mockPresets: PiLaunchPreset[] = DEFAULT_PRESETS.map((p) => ({ ...p }))
 const presetImpl = {
   async list(): Promise<PiLaunchPreset[]> {
     return mockPresets.map((p) => ({ ...p }))

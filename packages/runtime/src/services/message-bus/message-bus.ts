@@ -102,6 +102,11 @@ const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'session.commands': 'state',
   'context.update': 'state',
   'session.subagents': 'state',
+  // plan 模式状态投影（plan 模式重设计 D1⑤）：last-value 单例状态——断连重连 / 切回
+  // session 经 stateSnapshot 'plan' key 回放恢复。**必须入 STATE_TYPE_KEY_MAP**：
+  // state 类但未映射 typeKey 的消息会走「不写快照」分支（stateTypeKey 返回 null），
+  // 横幅/审批条在重连后将拿不到恢复帧（投影链六件套之一，缺则静默失效）。
+  'session.planState': 'state',
   // E 方案（subagent-realtime-channel §4.3）：relay tee 产出的 subagent entry 增量帧。
   // state 类但刻意不进 STATE_TYPE_KEY_MAP——增量 entry 流不是 last-value 语义（快照
   // 覆盖会丢中间 entry），也不入 ring（subagent 长任务高频帧会冲刷主对话流的可回放
@@ -198,6 +203,9 @@ const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   'session.commands': 'commands',
   'context.update': 'context',
   'session.subagents': 'subagents',
+  // plan 模式状态投影（plan 模式重设计 D1⑤）：typeKey 'plan' 与 TOPIC_TABLE 的 state
+  // 登记配对——未入本表的 state 类消息永不写快照（stateTypeKey 返回 null），投影链静默失效。
+  'session.planState': 'plan',
   'session.workflowUpdate': 'workflows',
   'session.state_changed': 'state_changed',
   // occupancy（session-occupancy-send-closure P3）：last-value 快照 key，重连/切回 session
@@ -557,8 +565,9 @@ export class MessageBus implements IMessageBus {
    * B7：stateSnapshot 写入 + 字节记账（**仅观测**，超预算 warn 不驱逐）。
    *
    * 覆盖式当前值口径：同 typeKey set 替换时按新值重计（差值语义），非累计求和——
-   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（6 个 state topic），
-   * 每次重算总和 O(6)。该 warn 同时作为回收态 state 快照的跟进信号（回收态 ring 驻留
+   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（7 个，plan 模式
+   * 重设计 D1⑤ 加员 'plan' 后），每次重算总和 O(7)。该 warn 同时作为回收态 state 快照的
+   * 跟进信号（回收态 ring 驻留
    * 已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
    */
   private setStateSnapshotEntry(

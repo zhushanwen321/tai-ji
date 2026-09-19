@@ -21,9 +21,21 @@
  * （注入 prompt 的响应步骤预排余量）。prompt 文案保留（与 toolCall 参数对齐，作为
  * user 消息入 session）。
  *
+ * [U7 2026-09-18 创建确认交互应答；u6 2026-09-19 统一表单协议迁移] schedule 工具创建
+ * 路径为「先确认后创建」（rpc 模式经 UI_FORM_MARKER select 通道——统一提问表单协议：
+ * options[0] 携 {formQuestions, allowCancel}，schedule 问题 initial 预填 draft；应答回
+ * FormAnswers envelope = {key: flat ScheduleFormResult JSON}，key = header ?? question），
+ * pi 输出 extension_ui_request 帧、stdin 回 extension_ui_response 应答——帧契约实装核对
+ * @earendil-works/pi-coding-agent 0.84.4 dist/modes/rpc/rpc-mode.js。spawnSession 的
+ * uiActor 应答器（确认/取消可配置）：默认 = auto-confirm（按 initial 草稿原样回 envelope
+ * 确认形态，既有场景保持创建成功路径）；S18 = 用户改配置后确认（断言裁定值生效）；
+ * S19 = 用户取消（断言任务未创建）。无 uiActor 时非 marker 的 select 请求不应答
+ * （挂起语义与 taiji runtime S4 不超时同构）。
+ *
  * 场景分类（design task T1-T3）：
  *   A 类（必须自动化通过）：S1 once 回显 / S2 recurring 回显 / S3 session 隔离 /
- *     S5 resume 重放 / S9 删 session 无残留 / S17 entry 增长
+ *     S5 resume 重放 / S9 删 session 无残留 / S17 entry 增长 /
+ *     S18 确认交互（改配置后确认）/ S19 确认交互（取消）
  *   B 类（尽力自动化，跑不了标 followup）：S4/S6/S12/S14 实现；S7/S8/S10/S16 标 followup
  *   C 类（标 followup + 手工步骤）：S11 fork 隔离 / S13 延迟写入窗口 / S15 taiji 兼容
  *
@@ -33,7 +45,7 @@
  *
  * 用法：
  *   node scripts/verify-scheduler-e2e.cjs              # 默认跑全部 A 类
- *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S17 / V / aclass / bclass / all）
+ *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S19 / V / aclass / bclass / all）
  *   SCHED_E2E_MODEL=faux/faux-1-b node scripts/verify-scheduler-e2e.cjs  # 覆盖测试模型（仅限 faux/ 演员）
  *
  * 退出码：0 = 全过；1 = 任一失败；2 = 脚本异常
@@ -57,6 +69,13 @@ const { spawn } = require('node:child_process')
 const TAG = '[SCHED-E2E]'
 const REPO_ROOT = path.resolve(__dirname, '..')
 const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'scheduler')
+/**
+ * 统一提问表单请求的 select title marker（cjs 端口；SSOT =
+ * packages/extension-protocol/src/extensions/ui-form/marker.ts，改动须同步）。
+ * scheduler 创建确认迁移后走本通道（u6）：options[0] = {formQuestions, allowCancel}。
+ * NUL 前缀与 ask-user / session-manager marker 同规范。
+ */
+const UI_FORM_MARKER = '\x00TAIJI_UI_FORM'
 /** faux provider 注册 extension（与 runtime equivalence 套件同一 SSOT 文件） */
 const FAUX_LLM_EXT_PATH = path.join(
   REPO_ROOT, 'packages', 'runtime', 'src', '__tests__', 'fixtures', 'faux-llm-ext.ts',
@@ -203,7 +222,7 @@ function makeTempWorkspace(label) {
 /**
  * 处理一段 pi stdout 文本：累积行缓冲，按 \n 切行逐行分发。
  * @param {string} text
- * @param {{ stdoutBuf: string, turnEndResolver: { resolve: (v: unknown) => void } | null, sessionFileCache: string | null }} state
+ * @param {{ stdoutBuf: string, turnEndResolver: { resolve: (v: unknown) => void } | null, sessionFileCache: string | null, uiActor?: UiActor | null, respond: ((obj: Record<string, unknown>) => void) | null }} state
  * @param {unknown[]} captured
  * @param {Map<string, { resolve: (v: unknown) => void }>} pending
  */
@@ -217,7 +236,94 @@ function consumeStdoutChunk(text, state, captured, pending) {
   }
 }
 
-/** 解析一行 JSON 并按序分发：captured → sessionFile 缓存 → pending resolve → turn_end resolve。 */
+/**
+ * @typedef {Object} ExtensionUiRequestView
+ * @property {string} id pi 生成的请求 id（应答帧原样回传）
+ * @property {string} method 'select' | 'confirm' | 'input' | 'notify' | ...
+ * @property {string | undefined} title select 标题（marker 判定依据）
+ * @property {string[] | undefined} options select 选项（options[0] = 序列化 draft）
+ */
+
+/**
+ * @callback UiActor
+ * @param {ExtensionUiRequestView} req
+ * @returns {{ cancelled: true } | { value: string } | null} 取消 / 确认（value=回传值）/
+ *   null（不应答——select 挂起，语义与 taiji runtime 不超时等待同构）
+ */
+
+/**
+ * 统一表单请求的 schedule 问题（cjs 端口）：UI_FORM_MARKER select 且 options[0]
+ * payload 的 formQuestions[0] 为 type='schedule'（initial 预填 draft）时返回该问题，
+ * 否则 null（非本协议请求）。payload 非法 JSON 同样返回 null——不应答（挂起暴露
+ * 协议故障，不静默造回包）。
+ * @param {ExtensionUiRequestView} req
+ * @returns {{ type: 'schedule', header?: string, question: string, initial?: object } | null}
+ */
+function parseScheduleQuestion(req) {
+  if (req.method !== 'select' || req.title !== UI_FORM_MARKER) return null
+  try {
+    const payload = JSON.parse(req.options[0])
+    const q = payload && Array.isArray(payload.formQuestions) ? payload.formQuestions[0] : null
+    if (q && q.type === 'schedule') return q
+  } catch (_) {
+    return null
+  }
+  return null
+}
+
+/** answers key（D2 fallback：header ?? question——与 FormOverlay qKey 同规则） */
+function formAnswerKey(q) {
+  return typeof q.header === 'string' ? q.header : q.question
+}
+
+/**
+ * 统一表单 schedule 确认请求的默认应答：按 initial 草稿原样回确认。回包 =
+ * FormAnswers envelope（{key: flat ScheduleFormResult JSON}，kind/schedule/model/
+ * prompt/name/expires 字段同构透传，u6 迁移后的回包契约）。既有场景（S1-S17）
+ * 经此保持创建成功路径。非本协议 select 返回 null（不应答）。
+ * @param {ExtensionUiRequestView} req
+ * @returns {{ cancelled: true } | { value: string } | null}
+ */
+function autoConfirmScheduleForm(req) {
+  const question = parseScheduleQuestion(req)
+  if (!question) return null
+  const result = { action: 'create' }
+  for (const key of ['kind', 'schedule', 'model', 'prompt', 'name', 'expires']) {
+    if (
+      question.initial &&
+      typeof question.initial === 'object' &&
+      question.initial[key] !== undefined
+    ) {
+      result[key] = question.initial[key]
+    }
+  }
+  return { value: JSON.stringify({ [formAnswerKey(question)]: JSON.stringify(result) }) }
+}
+
+/**
+ * extension_ui_request 帧分发：按场景 uiActor（缺省 autoConfirmScheduleForm）应答。
+ * 帧契约（pi 0.84.4 dist/modes/rpc/rpc-mode.js）：stdout 输出
+ * {type:'extension_ui_request', id, method, ...}，stdin 回
+ * {type:'extension_ui_response', id, ...reply}（cancelled:true → resolve undefined；
+ * value → resolve value）。notify/setStatus 等单向帧不期待应答，actor 返回 null 即忽略。
+ * @param {Record<string, unknown>} msg 已解析的 stdout JSON 帧
+ * @param {{ uiActor?: UiActor | null, respond: ((obj: Record<string, unknown>) => void) | null }} state
+ */
+function respondExtensionUiRequest(msg, state) {
+  if (!msg || msg.type !== 'extension_ui_request') return
+  const actor = state.uiActor || autoConfirmScheduleForm
+  const reply = actor({
+    id: typeof msg.id === 'string' ? msg.id : String(msg.id),
+    method: typeof msg.method === 'string' ? msg.method : '',
+    title: typeof msg.title === 'string' ? msg.title : undefined,
+    options: Array.isArray(msg.options) ? msg.options.map(String) : undefined,
+  })
+  if (reply && state.respond) {
+    state.respond({ type: 'extension_ui_response', id: msg.id, ...reply })
+  }
+}
+
+/** 解析一行 JSON 并按序分发：captured → sessionFile 缓存 → pending resolve → ui 应答 → turn_end resolve。 */
 function consumeRpcLine(line, state, captured, pending) {
   if (!line.trim()) return
   let msg
@@ -229,6 +335,7 @@ function consumeRpcLine(line, state, captured, pending) {
   captured.push(msg)
   cacheSessionFile(msg, state)
   resolvePendingResponse(msg, pending)
+  respondExtensionUiRequest(msg, state)
   resolveTurnEndWaiter(msg, state)
 }
 
@@ -274,9 +381,12 @@ function resolveTurnEndWaiter(msg, state) {
  * 返回 RPC 控制 API。
  *
  * @param {{ piBin: string, cwd: string, sessionDir: string, sessionFile?: string, label: string,
- *           fauxSteps: Array<Object> }} opts
+ *           fauxSteps: Array<Object>, uiActor?: UiActor }} opts
  *   fauxSteps：faux 响应步骤队列（toolCall/text；faux 轨必填——每 session 独立 agentDir
  *   + 独立响应脚本，S3/S5 等多进程场景互不串队）。
+ *   uiActor：extension_ui_request 应答器（确认交互，确认/取消可配置）。缺省 =
+ *   autoConfirmScheduleForm（统一表单 schedule 问题按 initial 草稿原样确认——既有
+ *   场景的创建成功路径）；S18 注入改配置确认、S19 注入取消。
  */
 function spawnSession(opts) {
   const faux = makeFauxAgentDir(opts.label, opts.fauxSteps)
@@ -314,9 +424,20 @@ function spawnSession(opts) {
   const pending = new Map()
   /** @type {unknown[]} */ // 所有 stdout JSON 消息（response / streaming / turn_end 等）
   const captured = []
-  // 跨 chunk 可变状态：stdout 行缓冲 / turn_end 等待者 / sessionFile 缓存
-  const state = { stdoutBuf: '', turnEndResolver: null, sessionFileCache: null }
+  // 跨 chunk 可变状态：stdout 行缓冲 / turn_end 等待者 / sessionFile 缓存 /
+  // ui 应答器（extension_ui_request → extension_ui_response，确认交互）
+  const state = {
+    stdoutBuf: '',
+    turnEndResolver: null,
+    sessionFileCache: null,
+    uiActor: opts.uiActor || null,
+    respond: null,
+  }
   let stderrBuf = ''
+
+  state.respond = (obj) => {
+    child.stdin.write(JSON.stringify(obj) + '\n')
+  }
 
   child.stdout.on('data', (d) => {
     consumeStdoutChunk(d.toString('utf-8'), state, captured, pending)
@@ -532,6 +653,63 @@ function getOpSequence(schedulerEntries) {
 function countNumberedRunLines(text) {
   const matches = text.match(/^\s*\d+\.\s+in\s/mg)
   return matches ? matches.length : 0
+}
+
+/** ScheduleDraft 顶层形状守卫：非 null 的普通对象（排除数组）。 */
+function isDraftPayloadObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** ScheduleDraft 可选字段守卫：undefined（未提供）或 string。 */
+function isOptionalString(v) {
+  return v === undefined || typeof v === 'string'
+}
+
+/** ScheduleDraft kind 字段守卫：'once' 或 'recurring'。 */
+function isScheduleDraftKind(kind) {
+  return kind === 'once' || kind === 'recurring'
+}
+
+/**
+ * 对象是否为合法 ScheduleDraft 形状（cjs 端口；字段判定与
+ * packages/extension-protocol/src/extensions/scheduler-create/helpers.ts 的
+ * isScheduleDraft 一致，改动须同步）。驱动器用于断言请求帧 payload 的协议形状。
+ * 判定顺序与端口源一致（顶层形状 → kind → 各字段），不可调换。
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isScheduleDraftShape(value) {
+  if (!isDraftPayloadObject(value)) return false
+  const d = value
+  return isScheduleDraftKind(d.kind)
+    && typeof d.schedule === 'string'
+    && isOptionalString(d.model)
+    && typeof d.prompt === 'string'
+    && isOptionalString(d.name)
+    && isOptionalString(d.expires)
+    && Array.isArray(d.models)
+    && d.models.every((m) => typeof m === 'string')
+    && isOptionalString(d.currentModel)
+}
+
+/**
+ * 从 captured 提取统一表单 schedule 确认请求帧列表（确认交互的请求侧证据）。
+ * @param {unknown[]} captured
+ * @returns {Array<{ id: string, options: string[] }>}
+ */
+function getScheduleFormRequests(captured) {
+  return (captured || [])
+    .filter(
+      (m) =>
+        m &&
+        m.type === 'extension_ui_request' &&
+        m.method === 'select' &&
+        m.title === UI_FORM_MARKER,
+    )
+    .map((m) => ({
+      id: typeof m.id === 'string' ? m.id : String(m.id),
+      options: Array.isArray(m.options) ? m.options.map(String) : [],
+    }))
 }
 
 // ── 场景定义 ──
@@ -1264,6 +1442,196 @@ async function runS14(piBin) {
   }
 }
 
+// ── A 类：创建确认交互场景（U7 新增，设计 §3.4 协议契约 / §4 e2e 影响面）──
+
+/**
+ * S18 ① 请求帧契约校验：恰 1 次 UI_FORM_MARKER select，options[0] payload 的
+ * formQuestions[0] 为 schedule 问题且 initial 是合法 ScheduleDraft、schedule/prompt
+ * 反映 faux 参数（1h / confirm-draft-prompt）。
+ * @param {Array<{ id: string, options: string[] }>} reqs getScheduleFormRequests 产物
+ * @returns {{ ok: boolean, desc: string }} ok=契约成立；desc=请求侧诊断（未取到 draft 时 '(none)'）
+ */
+function checkScheduleFormDraftContract(reqs) {
+  const baseOk = reqs.length === 1 && reqs[0].options.length >= 1
+  let desc = '(none)'
+  if (!baseOk) return { ok: false, desc }
+  try {
+    const payload = JSON.parse(reqs[0].options[0])
+    const q = payload && Array.isArray(payload.formQuestions) ? payload.formQuestions[0] : null
+    if (!q || q.type !== 'schedule') return { ok: false, desc }
+    const draft = q.initial
+    const ok = isScheduleDraftShape(draft)
+      && draft.schedule === '1h'
+      && draft.prompt === 'confirm-draft-prompt'
+    desc = `kind=${draft.kind} schedule=${draft.schedule} prompt=${String(draft.prompt).slice(0, 40)} models=${Array.isArray(draft.models) ? draft.models.length : '?'}`
+    return { ok, desc }
+  } catch (_) {
+    // options[0] 非 JSON，或 draft 解析为 null 后属性访问失败 → 契约不成立，诊断维持 '(none)'
+    return { ok: false, desc }
+  }
+}
+
+/** S18 ② tool result 回显断言：45m 下次运行 + 改后 prompt 进自动任务名。 */
+function echoesEditedValues(blob) {
+  return /Next run:\s+in\s+45m/.test(blob)
+    && blob.includes('Task "user-edited-prompt"')
+}
+
+/** 恰 1 条 upsert entry 时取其 task 字段，否则 null。 */
+function getSingleUpsertTask(upserts) {
+  return upserts.length === 1 && upserts[0].data.task ? upserts[0].data.task : null
+}
+
+/** 落库 task 是否 = S18 用户裁定值（interval 45m + user-edited-prompt + once）。 */
+function isEditedValueTask(task) {
+  return !!task
+    && task.prompt === 'user-edited-prompt'
+    && task.kind === 'once'
+    && !!task.schedule
+    && task.schedule.mode === 'interval'
+    && task.schedule.intervalMs === 45 * 60 * 1000
+}
+
+/** S18 ③ 落库 task 的诊断摘要（缺失字段以 '?' 占位）。 */
+function describeUpsertTask(task) {
+  return `(prompt=${task ? String(task.prompt).slice(0, 40) : '?'} kind=${task ? task.kind : '?'} `
+    + `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'})`
+}
+
+/**
+ * S18：确认创建路径（用户改配置后确认）。
+ *
+ * faux 触发 schedule（draft: 1h / once / confirm-draft-prompt）→ extension_ui_request
+ * 帧到达 → uiActor 以「用户裁定值」回 FormAnswers envelope（key 的 value = 45m /
+ * user-edited-prompt 的 flat ScheduleFormResult）→ 确认创建。断言三面：
+ *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，formQuestions[0] 为 schedule 问题
+ *      且 initial 是合法 ScheduleDraft、反映 faux 参数
+ *   ② tool result 回显用户裁定值（45m echo + 改后 prompt 进任务名）
+ *   ③ 落库形态：upsert entry 恰 1 条，task 字段 = 用户裁定值（非 draft 原值）
+ */
+async function runS18(piBin) {
+  const ws = makeTempWorkspace('s18')
+  try {
+    const s = spawnSession({
+      piBin, cwd: ws.cwd, sessionDir: ws.sessionDir, label: 'S18',
+      fauxSteps: [
+        { toolCalls: [{ name: 'schedule', args: { prompt: 'confirm-draft-prompt', schedule: '1h', kind: 'once' } }] },
+        { text: 'done' },
+      ],
+      uiActor: (req) => {
+        const question = parseScheduleQuestion(req)
+        if (!question) return null
+        // 用户在确认弹框改了时间（1h → 45m）与提示词 → 回 FormAnswers envelope（裁定值）
+        return {
+          value: JSON.stringify({
+            [formAnswerKey(question)]: JSON.stringify({
+              action: 'create', kind: 'once', schedule: '45m', prompt: 'user-edited-prompt',
+            }),
+          }),
+        }
+      },
+    })
+    const ready = await s.waitReady()
+    if (!ready) return fail('S18', 'pi not ready / extension load failed: ' + s.stderrTail())
+
+    const turnEnd = await s.prompt(
+      'Create a scheduled task by calling the schedule tool with these exact arguments: prompt is "confirm-draft-prompt", schedule is "1h", kind is "once". After the tool returns, reply with the single word: done',
+    )
+    if (!turnEnd.ok) return fail('S18', 'turn did not end (timeout) — select 交互未闭环')
+
+    const reqs = getScheduleFormRequests(s.getCaptured())
+    const contract = checkScheduleFormDraftContract(reqs)
+    if (!contract.ok) {
+      s.kill()
+      return fail('S18', `schedule form request contract broken (count=${reqs.length}, draft=${contract.desc})`)
+    }
+
+    const entries = await s.getEntries()
+    const sched = getSchedulerEntries(entries)
+    const upserts = sched.filter((e) => e.data.op === 'upsert')
+    const messages = await s.getMessages()
+    const blob = fullTextBlob(messages, s.getCaptured())
+    s.kill()
+
+    // ② tool result 回显裁定值：45m 的下次运行 + 改后 prompt 进自动任务名
+    const echoEdited = echoesEditedValues(blob)
+    // ③ 落库 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
+    const task = getSingleUpsertTask(upserts)
+    const taskOk = isEditedValueTask(task)
+
+    const pass = contract.ok && echoEdited && taskOk
+    return {
+      name: 'S18',
+      status: pass ? 'PASS' : 'FAIL',
+      evidence:
+        `request draft=${contract.desc}; ` +
+        `echo edited values (45m + user-edited-prompt)=${echoEdited}; ` +
+        `upsert task = edited values=${taskOk} ` +
+        describeUpsertTask(task) + '; ' +
+        `upserts=${upserts.length}; jsonl=[${s.getJsonlSnippet()}]`,
+    }
+  } finally {
+    ws.cleanup()
+  }
+}
+
+/**
+ * S19：取消路径（D5——取消不是错误，任务不创建）。
+ *
+ * 统一表单 schedule 确认请求到达 → uiActor 回 cancelled（pi resolve undefined →
+ * cancelled/timeout 折叠 → cancelledCreateResult）。断言三面：
+ *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select（交互确实发生）
+ *   ② tool result 为 cancelled 明确文案（agent 不猜测、不重试的契约文本）
+ *   ③ 落库：零 scheduler entry（任务未创建）
+ */
+async function runS19(piBin) {
+  const ws = makeTempWorkspace('s19')
+  try {
+    const s = spawnSession({
+      piBin, cwd: ws.cwd, sessionDir: ws.sessionDir, label: 'S19',
+      fauxSteps: [
+        { toolCalls: [{ name: 'schedule', args: { prompt: 'cancel-path-task', schedule: '30m', kind: 'once' } }] },
+        { text: 'done' },
+      ],
+      uiActor: (req) => {
+        if (!parseScheduleQuestion(req)) return null
+        return { cancelled: true }
+      },
+    })
+    const ready = await s.waitReady()
+    if (!ready) return fail('S19', 'pi not ready / extension load failed: ' + s.stderrTail())
+
+    const turnEnd = await s.prompt(
+      'Create a scheduled task by calling the schedule tool with these exact arguments: prompt is "cancel-path-task", schedule is "30m", kind is "once". After the tool returns, reply with the single word: done',
+    )
+    if (!turnEnd.ok) return fail('S19', 'turn did not end (timeout) — select 交互未闭环')
+
+    const reqs = getScheduleFormRequests(s.getCaptured())
+    const entries = await s.getEntries()
+    const sched = getSchedulerEntries(entries)
+    const messages = await s.getMessages()
+    const blob = fullTextBlob(messages, s.getCaptured())
+    s.kill()
+
+    const oneInteraction = reqs.length === 1
+    const cancelledEcho = blob.includes('Cancelled. The task was NOT created')
+    const noTaskPersisted = sched.length === 0
+
+    const pass = oneInteraction && cancelledEcho && noTaskPersisted
+    return {
+      name: 'S19',
+      status: pass ? 'PASS' : 'FAIL',
+      evidence:
+        `form select requests=${reqs.length} (expect 1); ` +
+        `cancelled tool result present=${cancelledEcho}; ` +
+        `scheduler entries=${sched.length} (expect 0 — 任务未创建); ` +
+        `opSeq=${JSON.stringify(getOpSequence(sched))}`,
+    }
+  } finally {
+    ws.cleanup()
+  }
+}
+
 // ── B/C 类 followup 桩（明确标注难自动化原因 + 手工步骤）──
 
 function followupS7() {
@@ -1433,6 +1801,8 @@ const SCENARIOS = {
   S5: runS5,
   S9: runS9,
   S17: runS17,
+  S18: runS18,
+  S19: runS19,
   S4: runS4,
   S6: runS6,
   S12: runS12,
@@ -1446,7 +1816,7 @@ const SCENARIOS = {
   S16: followupS16,
 }
 
-const A_CLASS = ['S1', 'S2', 'S3', 'S5', 'S9', 'S17']
+const A_CLASS = ['S1', 'S2', 'S3', 'S5', 'S9', 'S17', 'S18', 'S19']
 const B_CLASS_IMPL = ['S4', 'S6', 'S12', 'S14']
 const B_CLASS_FOLLOWUP = ['S7', 'S8', 'S10', 'S16']
 const C_CLASS = ['S11', 'S13', 'S15']
@@ -1543,7 +1913,7 @@ async function main() {
   const toRun = selectScenarioList(arg)
   if (!toRun) {
     console.log(`${TAG} unknown scenario: ${arg}`)
-    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S17|aclass|bclass|all|v]`)
+    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S19|aclass|bclass|all|v]`)
     return 2
   }
 
@@ -1568,7 +1938,7 @@ async function main() {
   const counts = collectSummaryCounts(results)
   printSummary(counts, vResults)
 
-  // 任一已跑场景 FAIL = exit 1；aclass 聚合跑全 6 个且全过 = exit 0
+  // 任一已跑场景 FAIL = exit 1；aclass 聚合跑全 8 个且全过 = exit 0
   // （单场景跑成功也返回 0，便于分场景驱动；gate 用 aclass 聚合判定）
   const code = results.length > 0 && counts.aFail.length === 0 ? 0 : 1
   console.log(`${TAG} exit code: ${code}`)

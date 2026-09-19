@@ -185,13 +185,17 @@ export class WorktreeManager {
       cwd: mainCwd,
     });
 
-    // 注册到全局表（pid=0 占位）。runSpawn 在 spawn() 返回后异步补 pid。
+    // 注册到全局表，pid = 宿主（core）进程 pid。孤儿判据 = 宿主进程死活：回收
+    // 责任在 core（finalizeRecord 正常路径清理；core 崩溃/重启后由 reaper 按 pid
+    // 死回收）。不用「pid=0 占位 + 子进程 spawn 后补全」——补全链路已随 inproc
+    // 引擎删除（协议化后 spawn 发生在引擎进程，宿主侧无补全调用方），pid 恒 0 的
+    // 条目超 SPAWN_GRACE 即被误判孤儿，活任务的 worktree 会被 reaper 清掉。
     // 放在 worktree add 成功后、symlink 前——确保只有真正创建了 worktree 才登记。
     await this.registry.add({
       repo: mainCwd,
       branch,
       checkout: worktreePath,
-      pid: 0,
+      pid: process.pid,
       createdAt: Date.now(),
     });
 
@@ -229,20 +233,6 @@ export class WorktreeManager {
   }
 
   /**
-   * 注册子进程 pid（runSpawn spawn() 返回后调）。
-   * create 时 pid 未知写 0 占位，子进程 spawn 返回后（child.pid 同步可得）由此补全。
-   * reaper 据 pid 死活判孤儿，pid=0 条目用 SPAWN_GRACE 宽限。
-   * sessionFile 可选补全：传入时填入 registry entry（reaper 据 pid 死活判孤儿，不读本字段；保留供诊断）。
-   *
-   * [D5a] async 化：pid 补全走跨进程锁内 RMW（互斥窗口消除 updatePid 与并发 add/remove
-   * 的交错）。永不 reject（锁降级 + best-effort save 均内部兜底），调用方可安全
-   * fire-and-forget（session-runner 的 stdout data 回调上下文）。
-   */
-  async registerPid(branch: string, pid: number, sessionFile?: string): Promise<void> {
-    await this.registry.updatePid(branch, pid, sessionFile);
-  }
-
-  /**
    * [U5 / §3.2.5 worktree 续聊重建] 收口续聊时 worktree 已按保留期回收 → 自动重建：
    * worktree add（checkout 记录的分支，分支名可由 recordId 推导 `pi-sub-<id>`）+
    * apply patch（恢复收口时落盘的未提交改动）→ 原地续聊（transcript 还在）。
@@ -266,8 +256,8 @@ export class WorktreeManager {
    * 分支已被外部删除）。
    *
    * 与 create() 的差异：checkout 已有分支（无 -b 新建）、主树脏不校验（重建不动
-   * 主树工作区）、成功后补注册表条目（pid=0 占位——无子进程绑定，reaper 按宽限
-   * 期后回收无主条目，续聊轮 spawn 后经 registerPid 补全）。
+   * 主树工作区）、成功后补注册表条目（pid = 宿主进程 pid，同 create 的孤儿判据
+   * 语义——回收责任在 core，宿主死才由 reaper 回收）。
    *
    * @param repoPath 主仓库根目录（create 时的 mainCwd 同源值）
    * @param recordId record id（分支名推导键，必须匹配 `^[\w-]+$`）
@@ -313,14 +303,14 @@ export class WorktreeManager {
       }
       await this.gitRunAsync(["worktree", "add", worktreePath, branch], { cwd: repo });
     }
-    // 补注册表条目（pid=0 占位；add 成功后才登记，回滚对称 create MF#3——重建链
-    // 后续失败不回滚 worktree/分支（分支是既有资产），仅注册表条目由 reaper 宽限
-    // 期自然收敛，无需显式回滚）。
+    // 补注册表条目（pid = 宿主进程 pid；add 成功后才登记，回滚对称 create MF#3——
+    // 重建链后续失败不回滚 worktree/分支（分支是既有资产），仅注册表条目由 reaper
+    // 按宿主进程死活收敛，无需显式回滚）。
     await this.registry.add({
       repo,
       branch,
       checkout: worktreePath,
-      pid: 0,
+      pid: process.pid,
       createdAt: Date.now(),
     });
     // 软链 node_modules（复用主仓库依赖，同 create）。

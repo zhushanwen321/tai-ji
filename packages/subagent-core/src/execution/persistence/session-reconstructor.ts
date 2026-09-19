@@ -187,7 +187,12 @@ export interface ReconstructedRecord {
   turnCount: number;
   totalTokens: number;
   lastError: string | undefined;
-  model: string;
+  /**
+   * [R4/D6-① 连带] undefined = 扫描未途经 model_change entry（用户未指定模型）。
+   * 旧实现以 "" 表达「探测不到」——空串哨兵随 R4 禁空串纪律退役（record 链缺席
+   * 恒为 undefined）。
+   */
+  model: string | undefined;
   thinkingLevel: string | undefined;
   /** 最后一条 entry 的时间戳（ms）。供 finalize/crashed 重建填 endedAt，避免耗时无限增长。 */
   endedAt: number | undefined;
@@ -351,14 +356,15 @@ function readJsonlEntries(sessionFile: string): JsonlEntry[] | undefined {
 /** 身份/模型扫描产出（identity custom entry + 途经的 model/thinking_level change）。 */
 interface IdentityScan {
   identity: SubagentIdentityData | undefined;
-  model: string;
+  /** [R4/D6-① 连带] undefined = 未途经 model_change（缺席，禁空串哨兵）。 */
+  model: string | undefined;
   thinkingLevel: string | undefined;
 }
 
 /** 扫 identity custom entry（必须存在，否则无法构造 record）+ 途经 model/thinking_level。 */
 function scanIdentityAndModel(entries: JsonlEntry[]): IdentityScan {
   let identity: SubagentIdentityData | undefined;
-  let model = "";
+  let model: string | undefined;
   let thinkingLevel: string | undefined;
   for (const entry of entries) {
     if (entry.type === "custom" && entry.customType === IDENTITY_CUSTOM_TYPE) {
@@ -496,7 +502,7 @@ function buildReconstructedRecord(
   identity: SubagentIdentityData,
   rebuilt: RebuiltTurns,
   eventLog: AgentEventLogEntry[],
-  model: string,
+  model: string | undefined,
   thinkingLevel: string | undefined,
 ): ReconstructedRecord {
   // 终态 status：最后一条 assistant message 的 stopReason 推导（与 finalizeRecord 的判定一致）。
@@ -627,7 +633,8 @@ export interface IdentityHeaderRecon {
   origin: RecordOrigin | undefined;
   /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
   parentRunId: string | undefined;
-  model: string;
+  /** [R4/D6-① 连带] undefined = 头部未途经 model_change（用户未指定模型，禁空串哨兵）。 */
+  model: string | undefined;
   thinkingLevel: string | undefined;
   sessionFile: string;
 }
@@ -699,8 +706,8 @@ export function readIdentityAnywhere(sessionFile: string): IdentityHeaderRecon |
  * identity 离文件尾近，实测真实目录 65% 文件 identity 在尾 64KB）。
  *
  * 尾部块首行可能残缺（从行中间开始）——JSON.parse 失败自然跳过，不影响后续行。
- * model/thinking_level 在尾部块中拿不到 identity 之前的途经 entry，返回空/undefined
- * （best-effort，详情场景由全量重建补齐）。
+ * model/thinking_level 在尾部块中拿不到 identity 之前的途经 entry 时返回 undefined
+ * （[R4/D6-①] 缺席语义，best-effort，详情场景由全量重建补齐）。
  */
 export function readIdentityTail(sessionFile: string): IdentityHeaderRecon | undefined {
   let text: string;
@@ -753,7 +760,8 @@ function lineMayCarryScannableEntry(s: string): boolean {
 /** 轻量扫描的可变累积态（identity + 途经 model/thinkingLevel）。 */
 interface LightIdentityScan {
   identity: SubagentIdentityData | undefined;
-  model: string;
+  /** [R4/D6-① 连带] undefined = 未途经 model_change（缺席，禁空串哨兵）。 */
+  model: string | undefined;
   thinkingLevel: string | undefined;
 }
 
@@ -814,7 +822,7 @@ function toIdentityRecon(
  *  找不到返回 undefined。model/thinking_level 仅在 identity 之前的途经 entry 中
  *  best-effort 提取，详情场景由全量重建补齐。 */
 function parseIdentityFromText(text: string, sessionFile: string): IdentityHeaderRecon | undefined {
-  const state: LightIdentityScan = { identity: undefined, model: "", thinkingLevel: undefined };
+  const state: LightIdentityScan = { identity: undefined, model: undefined, thinkingLevel: undefined };
   for (const line of text.split("\n")) {
     const s = line.trim();
     if (!s) continue;

@@ -79,13 +79,18 @@ export default {
     gitRepo: 'Git repo',
   },
   presetSelect: {
-    title: 'Launch preset',
+    title: 'Launch mode',
     setAsDefault: 'Set as default',
     alreadyDefault: 'Already default',
-    presetLockedTooltip: 'This session was created with {name} mode and cannot be changed',
-    legacySessionTooltip: '(legacy session, preset not recorded)',
+    presetLockedTooltip: 'This session was created with "{name}" and cannot be changed',
+    legacySessionTooltip: '(legacy session, mode not recorded)',
     legacyPresetName: 'Full tools',
     loadingPresets: 'Loading…',
-    noPresets: 'No presets',
+    noPresets: 'No modes',
+  },
+  // Mode chip (u4): landing three-tier degradation + cross-tier "replaces prompt" trust marker
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
   },
 }

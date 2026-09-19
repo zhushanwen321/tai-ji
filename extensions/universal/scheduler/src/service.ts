@@ -39,6 +39,8 @@ export class SchedulerService {
    * ScheduleSpec）——这是对 IF-4 草案 create(parseResult) 的有意细化：
    * 解析失败需要结构化失败返回（success=false + 用户可读 message），把解析责任留在
    * service 内，tool/command 两层都不需要重复 parseSchedule。
+   * U2 起 tool 层在交互前做预校验性 parseSchedule（tool.ts 步骤 1），解析与结构化
+   * 失败责任仍在本方法。
    */
   async create(
     prompt: string,

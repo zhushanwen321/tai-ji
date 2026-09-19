@@ -25,7 +25,11 @@ const SHA256_HEX_LENGTH = 64
  * version 设为 999.999.999：compare-versions 比较时恒大于任何真实版本，
  * 确保前端 UpdateButton 一定能进入 available 态。
  * releaseNotes 含 markdown 元素（标题、列表、代码块），用于验证
- * hover 浮层的 markdown-it + shiki 渲染（HTML 含 <h2>/<pre>/<code>）。
+ * hover 浮层的 markdown-it + shiki 渲染（HTML 含 <h2>/<pre>/<code>）；
+ * 另含 A8 验收扩展段（tech-design markdown-html-sanitize-render §4 A8）：
+ * HTML 白名单段（details/summary、align 居中 p）、`:---:` 列对齐表格、
+ * 超宽表格——分别对应「HTML 段渲染、列对齐生效、表格形态与对话流宿主
+ * 一致（窄表收缩/超宽滚动，360px HoverCard 窄容器极端样本）」三个判据。
  */
 const MOCK_RELEASE: LatestReleaseInfo = {
   version: '999.999.999',
@@ -39,6 +43,29 @@ const MOCK_RELEASE: LatestReleaseInfo = {
     '```ts',
     'const x = 42',
     '```',
+    // 以下三段为 A8 验收样本（tech-design markdown-html-sanitize-render §4 A8）：
+    // ① HTML 白名单渲染 ② `:---:` 列对齐转写生效 ③ 超宽表在 360px 容器横向滚动
+    '',
+    '<details>',
+    '<summary>折叠区块标题（点击展开）</summary>',
+    '<p>折叠区块正文：展开后可见此段文本，验证 details/summary 在白名单内渲染。</p>',
+    '</details>',
+    '',
+    '<p align="center">居中段落：验证带 align 属性的 p 保留居中效果。</p>',
+    '',
+    '### 列对齐表格',
+    '',
+    '| 左对齐列 | 居中对齐列 | 右对齐列 |',
+    '|:---|:---:|---:|',
+    '| 左对齐样本一 | 居中样本一 | 右对齐样本一 |',
+    '| 左对齐样本二 | 居中样本二 | 右对齐样本二 |',
+    '',
+    '### 超宽表格（应横向滚动）',
+    '',
+    '| 功能模块名称与归属业务域说明列 | 变更类型与影响范围边界说明条目 | 兼容性风险等级评估结论说明条目 | 回归验证覆盖面与用例规模说明列 | 依赖包版本同步状态与锁文件说明列 | 文档同步完成度与漂移检查说明列 | 性能基准对比结论与采样窗口说明列 | 发布门禁校验结果与放行状态说明列 |',
+    '|---|---|---|---|---|---|---|---|',
+    '| 更新检测通道与代理网络接入状态 | 悬停浮层渲染链路与宿主样式匹配状态 | 净化白名单策略与标签属性基线状态 | 像素级截图比对与类别清单判定状态 | 上游依赖锁文件同步与版本门禁校验 | 领域术语表条目新增与语义漂移核对 | 冷启动耗时采样与性能基准线对比 | 发布门禁校验结果与放行状态记录 |',
+    '| 更新检测通道接入 | 悬停浮层渲染链路 | 白名单策略基线 | 像素级截图比对 | 上游锁文件同步 | 术语表条目核对 | 启动耗时采样 | 静态检查全绿 |',
   ].join('\n'),
   publishedAt: new Date().toISOString(),
   htmlUrl: 'https://github.com/zhushanwen321/tai-ji/releases/dev-mock',

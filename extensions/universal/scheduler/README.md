@@ -1,6 +1,6 @@
 # scheduler
 
-定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。任务随 owner session 持久化，resume 后继续触发。
+定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。`schedule` tool 走「先确认后创建」：LLM 参数作为草稿预填确认表单，用户确认后才创建任务（headless 无交互通道时直通创建并附注，见「创建确认」）。任务随 owner session 持久化，resume 后继续触发。
 
 ## 产品定位
 
@@ -57,7 +57,7 @@ session_start
 
 ## /schedule 命令用法
 
-注册为 `/schedule` 命令。无参数时返回 TUI 未实现提示（用 `/schedule list` 查看任务）；第一个参数匹配子命令关键词则走子命令分支，否则尝试创建任务。
+注册为 `/schedule` 命令。无参数时返回 TUI 未实现提示（用 `/schedule list` 查看任务）；第一个参数匹配子命令关键词则走子命令分支，否则尝试创建任务。命令由用户直接键入，创建分支**直接创建**、不走确认表单——确认表单是 `schedule` tool 的 LLM 调用路径（见「创建确认」）。
 
 ### 子命令
 
@@ -99,7 +99,7 @@ session_start
 | `h` / `hr` / `hour` / `hours` | 时 | 3,600,000 ms |
 | `d` / `day` / `days` | 天 | 86,400,000 ms |
 
-例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败 → 创建任务报 `Invalid schedule: "..."`。
+例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败：`schedule` tool 在预校验即报错（`Invalid parameters: unrecognized schedule "..."`，不发起确认表单，修正参数后重调）；`/schedule` 命令报 `Invalid schedule: "..."`。
 
 ### cron（时间点调度）
 
@@ -112,13 +112,37 @@ session_start
 
 ## 选项语义
 
-任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。下表为 `schedule` tool 的选项语义（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
+任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires` / `model`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。`schedule` 的参数是**确认表单的预填草稿**：调用先弹出预填表单，用户审阅（可修改）确认后才创建任务，创建以确认后的最终值为准（见「创建确认」）。下表为 `schedule` tool 的选项语义（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
 
 | 选项 | 取值 | 语义 |
 |------|------|------|
 | `kind` | `recurring`（默认）/ `once` | recurring 每次触发后按 schedule 重算下次时间；once 触发一次后自动删除 |
 | `name` | 字符串 | 任务可读名称，缺省从 prompt 自动生成（≤30 字原样，超长截前 27 字加省略号） |
 | `expires` | duration 字符串 / `never` | recurring 任务的过期时间：`now + duration`；`never` 永不过期；缺省 7 天。**once 任务忽略 expires 参数**（触发即删，传不传都不生效） |
+| `model` | scoped model id（`provider/model`） | 任务执行所用模型；缺省跟随会话当前模型 |
+
+## 创建确认
+
+`schedule` tool 的创建路径是「先确认后创建」六步流：预校验 → headless 直通 → 确认交互 → abort 兜底检查 → 取消判定 → 确认创建（交互前另有 abort 早退：signal 已中止时不发起表单，直接走取消语义）。仅在用户要求创建定时任务时发起确认。交互形态按会话模式分三路：
+
+| 形态 | 会话模式 | 交互 |
+|------|---------|------|
+| GUI 表单 | rpc + GUI | 统一表单协议（`uiFormInteract` + marker select 通道）：前端 FormOverlay 弹出 schedule 表单，草稿（模式/时间/模型/提示词，附名称/过期高级选项与模型候选列表）经 initial 预填，打开即可一键确认 |
+| TUI 表单 | tui | `ctx.ui.custom` 挂 `ScheduleCreateComponent`：模式 → 时间 → 模型 → 提示词 → 提交 五 tab 逐项确认，两段 Esc 取消 |
+| headless 直通 | 非 tui/rpc（如 print） | 无交互通道：按参数直接创建，result 末尾附注 `(Created without user confirmation: this session has no interactive channel.)`，工具不禁用 |
+
+确认后的创建以**用户在表单中裁定的最终值**为准（模式/时间/模型/提示词可改；GUI 另可改名称/过期，TUI 沿用草稿值）。**表单的确认按钮即用户的确认**：确认即创建生效，agent 不再在对话中二次确认，也不得禁用刚创建的任务。
+
+未确认的折叠语义（四态，任务均不创建）：
+
+| 态 | 触发 | 结果 |
+|----|------|------|
+| cancelled | 用户取消表单；agent 被外部终止（abort：goal 取消 / session 切换，交互前与交互中均覆盖） | 正常返回**非错误** result（`details: { cancelled: true }`），文案明示任务未创建、不假定配置、不重试（"The task was NOT created" / "do not retry"） |
+| timeout | 等待确认未决（GUI 用户取消与超时不可区分，同折叠为「未确认」） | 同 cancelled |
+| channel-error | RPC 交互通道不可用：select reject，或回包回显请求 payload（宿主不识别表单协议的旧组合） | **禁用本会话 `schedule` 工具**（`setActiveTools`）+ throw，防 LLM 反复重试 |
+| non-json | 回包形状非法（非协议 JSON / 非 ScheduleFormResult）= 协议版本错配 | throw（"protocol version mismatch"，提示不要重试、向用户报告），不禁用工具 |
+
+取消/超时不是错误：标错会诱导 LLM 重试，故走正常返回。channel-error / non-json 仅存在于 rpc 分支（TUI 无 select 通道）。
 
 ## 示例
 
@@ -146,7 +170,7 @@ session_start
 {"action": "run", "id": "<task-id>"}
 ```
 
-**永不过期**（tool 调用：长期 recurring 任务不设 7 天默认过期）：
+**永不过期**（`schedule` tool 调用：弹出确认表单并预填 `expires: "never"`，用户确认后创建长期 recurring 任务）：
 
 ```json
 {"prompt": "monthly report", "schedule": "1d", "expires": "never"}
@@ -169,7 +193,7 @@ session_start
 | 延迟写入窗口 | 新 session 首 turn 内建任务后进程崩溃可能丢失 | pi 延迟写入：首条 assistant 消息前不 flush。窗口窄、概率极低、无恢复手段 |
 | 触发条件 | pi 进程需存活且 session 打开 | 电脑睡眠 / pi 进程未运行 = 不触发（非系统 cron，无后台守护） |
 
-错误语义（失败经 message 文案 / tool throw 承载，无错误码）：创建时 schedule 解析失败 → `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`
+错误语义（失败经 message 文案 / tool throw 承载，无错误码）：`schedule` tool 创建时参数预校验失败（prompt 空 / schedule 非法）→ 发起确认表单**前**直接 throw `Invalid parameters: ...`（修正参数后重调）；`/schedule` 命令创建时 schedule 解析失败 → `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`。确认交互的取消/超时不是错误（正常返回，任务不创建），通道失败/回包非法走 throw——四态语义见「创建确认」。
 
 ## 数据存储位置
 
@@ -230,6 +254,7 @@ npx vitest run src/__tests__/<file>.test.ts   # 单个文件
 - **依赖反转**：`SchedulerRuntime` 只依赖 `SchedulerBackend` 接口（`sendMessage` / `appendEntry` / `now`），不触碰 FS/pi。测试注入 `MockSchedulerBackend`（`src/__tests__/mock-backend.ts` 测试专用实现）实现零副作用测试
 - **纯函数**：`parseDuration` / `formatDuration` / `parseSchedule` / `computeNextRunAt` / `computeNextRuns`（`src/parsing.ts`）无副作用，可直接断言
 - **重放折叠**：custom entry 折叠协议（upsert / advance / toggle / delete，含 nextRunAt 重放恢复、fork owner 过滤）
+- **创建确认流**：`handleSchedule` 六步流分支（预校验 throw / headless 直通附注 / rpc 与 TUI 的确认与取消 / abort / channel-error 禁用工具 / non-json，`src/__tests__/tool-create-flow.test.ts`）
 - **旧 store 导入**：rename `.imported` 原子收敛（单成功者、崩溃恢复）
 
-扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts` / `commands.ts`（tool 与 /schedule 命令适配层）→ `widget.ts`（状态栏 widget）→ `importer.ts`（旧 store 导入）。
+扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts` / `commands.ts`（tool 确认流与 /schedule 命令适配层）→ `create-form-component.ts`（TUI 创建确认表单组件，由 `tool.ts` 消费）→ `widget.ts`（状态栏 widget）→ `importer.ts`（旧 store 导入）。
