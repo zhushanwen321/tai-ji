@@ -9,7 +9,8 @@
 
   - title 解析单一源在 renderer：frame.title ?? declaration.title ?? modalId（E1 降级链）
   - width 三档落宿主档位闭集（sm/md/lg → 标准 max-w scale），插件不可指定像素
-  - 本地乐观关闭仅 Esc/关闭键（+ 上报 C→S plugin.dismissModal，u5b 落 runtime 接收）；
+  - 本地乐观关闭仅 Esc/关闭键（+ 上报 C→S plugin.dismissModal，u5b 落 runtime 接收；
+    CompanionBand 确认层挂起时 Esc 跳过——AP-2 规则③裁决权归确认层）；
     切会话 / 宿主浮层 / replaced / plugin-gone 由 plugin:modalState 广播驱动关闭
   - 浮层互斥（AP-2 规则①）：Search 打开（useSearchModal 单例）与 Settings 挂载
     （body 直挂 .fso 全屏层，MutationObserver 检测——settingsOpen 是 AppShell 局部 ref
@@ -193,8 +194,20 @@ onBeforeUnmount(() => {
 })
 
 // ── 键盘：Esc 双路 + Tab 焦点陷阱（SettingsModal 同款三路编排的层内两路）──
+/**
+ * CompanionBand 确认层挂起观测（AP-2 规则③）：renderer 侧无响应式 pending 态可读
+ * （DialogRequestQueue 实例局部于 CompanionBand，用户 respond/cancel 不经 bus 广播，
+ * 宿主侧自记簿记会在应答后滞留），按审查裁决用「band 挂载」观测形态判定——含
+ * minimized 收起态（收起只是视觉折叠，请求仍待响应）。挂起期间确认层在本层之上
+ * （--z-dialog > --z-modal），Esc 裁决权归确认层：本层（含 window 兜底）跳过
+ * dismiss，禁「顺手关掉 modal 而 confirm 仍挂起」。
+ */
+function hasPendingDialogRequest(): boolean {
+  return document.querySelector('[data-testid="companion-band"]') !== null
+}
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
+    if (hasPendingDialogRequest()) return
     e.preventDefault()
     dismiss('dismissed')
     return
@@ -202,13 +215,15 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Tab') handleTabCycle(e)
 }
 /** window 级 Esc 兜底：焦点逃逸到层外（如 Teleport 后焦点落 body）时层内 @keydown 收不到。
- *  层内 onKeydown 先 fire（preventDefault），本监听检查 defaultPrevented 跳过防重复 dismiss。 */
+ *  层内 onKeydown 先 fire（preventDefault），本监听检查 defaultPrevented 跳过防重复 dismiss；
+ *  确认层挂起时同样跳过（hasPendingDialogRequest——AP-2 规则③ Esc 裁决权归确认层）。 */
 useEventListener(
   () => (claimed && slot.value ? window : null),
   'keydown',
   (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     if (e.defaultPrevented) return
+    if (hasPendingDialogRequest()) return
     e.preventDefault()
     dismiss('dismissed')
   },

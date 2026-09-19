@@ -6,6 +6,8 @@
  * - title 单一解析链：frame.title ?? declaration.title ?? modalId（E1 降级链）
  * - width 三档档位闭集 → 标准 max-w scale（sm→xl / md→3xl / lg→5xl）
  * - Esc → 本地乐观关闭 + C→S dismissModal 上报 + 焦点归还触发元素（场景 1 归焦判据）
+ * - AP-2 规则③：CompanionBand 确认层挂起时 Esc 不关 modal（撤层后恢复）；
+ *   层级序 modal（--z-modal）< 确认层（--z-dialog，style.css token 序守卫）
  * - 切会话 → 关闭（reason session-switched，D1 生命周期）
  * - 浮层互斥：Search 打开 / Settings 挂载（body 直挂 .fso）→ reason host-overlay（AP-2 规则①）
  * - 关闭键、内容树 = ViewHost 消费 modal-<pluginId>-<modalId> per-session 分区
@@ -18,6 +20,8 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/extension/PluginModalHost.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import {
@@ -185,6 +189,55 @@ describe('PluginModalHost', () => {
     expect(modalSource.dismiss).toHaveBeenCalledWith('scheduler-manager', 'scheduler-manager.panel', 3, 'dismissed')
     // 焦点归还（场景 1 Esc 归焦判据）
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it('AP-2 规则③：CompanionBand 确认层挂起时 Esc 不关 modal（裁决权归确认层），撤层后恢复', async () => {
+    const modalSource = makeModalSource()
+    mountHost({ modalSource })
+    openSlot()
+    await nextTick()
+    expect(layerExists()).toBe(true)
+
+    // 模拟 CompanionBand 确认层挂起（band 挂载 = 存在待决 ui-request，含 minimized 收起态）
+    const band = document.createElement('div')
+    band.setAttribute('data-testid', 'companion-band')
+    document.body.appendChild(band)
+
+    // window 级兜底 Esc：跳过 dismiss（modal 仍开，confirm 不被顺手吞掉）
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(layerExists()).toBe(true)
+    expect(modalSource.dismiss).not.toHaveBeenCalled()
+
+    // 层内 Esc（焦点在层内的路径）：同样跳过
+    layerEl()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(layerExists()).toBe(true)
+    expect(modalSource.dismiss).not.toHaveBeenCalled()
+
+    // 确认层撤下（用户已应答）→ Esc 恢复关闭 modal（守卫不滞留）
+    band.remove()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(layerExists()).toBe(false)
+    expectDismissReported(modalSource, 'dismissed')
+  })
+
+  it('AP-2 规则③层级：modal 层钉 --z-modal 档，低于确认层 --z-dialog 档（新到 ui-request 叠其上）', async () => {
+    mountHost()
+    openSlot()
+    await nextTick()
+    // modal 层（Teleport body）钉在 modal 档 token
+    expect(layerEl()?.className).toContain('z-[var(--z-modal)]')
+    // 叠放序的数值前提：renderer style.css 中 --z-dialog > --z-modal（读源守卫 token 序；
+    // 本包测试运行契约 = cwd 在 packages/renderer，见文件头运行说明）
+    const css = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf-8')
+    const tokenValue = (name: string): number => {
+      const m = css.match(new RegExp(`--${name}:\\s*(\\d+)`))
+      if (!m) throw new Error(`style.css missing token --${name}（层级契约被破坏）`)
+      return Number(m[1])
+    }
+    expect(tokenValue('z-dialog')).toBeGreaterThan(tokenValue('z-modal'))
   })
 
   it('关闭键 → 本地关闭 + 上报 reason=dismissed', async () => {

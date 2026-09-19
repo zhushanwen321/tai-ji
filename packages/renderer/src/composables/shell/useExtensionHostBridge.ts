@@ -574,13 +574,9 @@ export function initExtensionHostBridge(app: App): void {
       return c?.modal ? { title: c.modal.title, width: c.modal.width } : undefined
     },
     dismiss: (pluginId, modalId, epoch, reason) => {
-      // 帧类型 'plugin.dismissModal' 由 u5b 登记进 shared protocol.ts 的 ClientMessage union；
-      // renderer 先行按设计帧常量发送，此断言是跨单元暂态缝隙的显式登记点（u5b 落地后删除，
-      // 届时编译器直接校验帧形状）。payload 形状 = 设计 protocol.ts 原文，无 any。
-      send({
-        type: 'plugin.dismissModal',
-        payload: { pluginId, modalId, epoch, reason },
-      } as unknown as Parameters<typeof send>[0])
+      // 帧类型与 payload 形状由 shared protocol.ts ClientMessageMap['plugin.dismissModal']
+      // 直接校验（u5b 已落地，无受控断言）
+      send({ type: 'plugin.dismissModal', payload: { pluginId, modalId, epoch, reason } })
     },
   })
 

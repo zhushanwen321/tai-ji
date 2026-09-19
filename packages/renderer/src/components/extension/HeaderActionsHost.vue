@@ -9,7 +9,9 @@
   - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
-  - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置 disabled，
+  - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置
+    （插件侧业务态消费，残留风险 #6 场景 12 主修方向）
+  - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op
   - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
 -->
@@ -91,7 +93,9 @@ const buttons = computed(() => {
     // E13 三态：unknown 保持上次值；首次（无上次值）缺省可点（E14 兜底不拦入口）
     const effective = availability === 'unknown' ? lastResolved.get(`${sid}::${ha.commandId}`) : availability
     const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
-    const disabled = effective === 'unregistered' || missing
+    // 运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#38 镜像）直接灰置
+    // （插件侧业务态，如「调度器运行中不可配置」），宿主侧 E13/E3 判定与之 OR 合成
+    const disabled = effective === 'unregistered' || missing || entry?.disabled === true
 
     // tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
     // ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）
