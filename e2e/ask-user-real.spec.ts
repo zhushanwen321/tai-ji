@@ -4,12 +4,12 @@
  * 验证目标（设计文档 /tmp/e2e-real-test-design-askuser-thinkinglevel.md §3）：
  * - A1 协议透传：真实 ask_user tool 调用 → extension.ui_request 广播
  *   （comment 删除回归核心：askUserQuestions 无 allowComment 字段）+ 回写闭环（pi 恢复 turn）
- * - A2 UI 渲染：AskUserOverlay 在真实 page 渲染（Playwright DOM 断言），
+ * - A2 UI 渲染：FormOverlay 在真实 page 渲染（Playwright DOM 断言），
  *   Other 保留（form-option-__other__）+ 页面无 comment 字样
  * - A3 交互回写：Playwright 操作真实 UI（选 Other → 填自由文本 → submit），
  *   断言 overlay 关闭 + pi 恢复 turn。注：ui_response 帧内容不可捕获——
  *   routeWebSocket 实测无法拦截 Electron renderer 的 WS（Playwright 限制），
- *   answers 无 __comment key 由 A1 + 组件层 AskUserOverlay.test.ts 覆盖
+ *   answers 无 __comment key 由 A1 + 组件层 FormOverlay.test.ts 覆盖
  *
  * ── 协议事实（读代码确认，非猜测）──
  * - wire 帧（双形态，event-adapter 互斥 marker 分支）：
@@ -26,8 +26,8 @@
  *   （extensions/universal/ask-user = 统一表单协议版），不再 symlink npm 目录绕开
  *   registry 旧版；FormAnswers key = header ?? question，与旧 AskUserAnswers 一致
  *   （回写 result 序列化格式不变）。
- * - AskUserOverlay.vue onSubmit：Other 文本替换 OTHER_VALUE 占位符作为主答案值，
- *   不产生 `__comment` key
+ * - FormOverlay.vue onSubmit：Other 文本写独立 `${key}__other` 键，主 key 值过滤
+ *   OTHER_VALUE 占位符（不留占位值），不产生 `__comment` key
  * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言面
  * - pi 恢复 turn 事件：message.message_start / message.complete（ServerMessageType）
  *

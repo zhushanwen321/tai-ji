@@ -197,22 +197,37 @@ const showPanelComposer = computed(() => {
   )
 })
 
-/** form 问题集（类型守卫收窄 unknown[] → FormQuestion[]，复核守卫——非法项跳过）。
+/** form 问题集（类型守卫收窄 unknown[] → FormQuestion[]，复核守卫——非法项跳过 + warn 留痕）。
  *  formQuestions 来源双路：新 form 帧（runtime event-adapter UI_FORM_MARKER 分支透传）/
  *  legacy askUser 帧经 useExtensionUI 归一层 type 推断映射。全不合法 → 空表单
  *  （仅取消可点语义由 FormOverlay 承接，不静默丢帧不挂死）。 */
 const formQuestions = computed<FormQuestion[]>(() => {
   const req = currentOverlayRequest.value
   if (!req?.form) return []
-  return (req.formQuestions ?? []).filter(isFormQuestion)
+  const raw = req.formQuestions ?? []
+  const valid = raw.filter(isFormQuestion)
+  // 跳过必须留痕（设计 D2）：「表单少渲染一题」排查靠此区分「上游没发」vs「renderer 滤除」
+  const dropped = raw.length - valid.length
+  if (dropped > 0) {
+    console.warn(
+      `[Panel] formQuestions 复核守卫滤除非法项（requestId=${req.requestId}）: dropped=${dropped}/${raw.length}`,
+    )
+  }
+  return valid
 })
 
 /** legacy scheduleCreate draft（isScheduleDraft 守卫收窄 unknown → ScheduleDraft；非法/无标记 → null）。
- *  守卫失败不挂载（正常路径不可达，runtime event-adapter 同守卫预检后非法降级普通 select）。 */
+ *  守卫失败不挂载（正常路径不可达，runtime event-adapter 同守卫预检后非法降级普通 select），
+ *  失败时 warn 留痕（设计 D2）——overlaySource 回落 null 挂 composer 的原因可追。 */
 const scheduleDraft = computed<ScheduleDraft | null>(() => {
   const req = currentOverlayRequest.value
   if (!req?.scheduleCreate) return null
-  return isScheduleDraft(req.scheduleDraft) ? req.scheduleDraft : null
+  if (isScheduleDraft(req.scheduleDraft)) return req.scheduleDraft
+  console.warn(
+    `[Panel] scheduleCreate 帧的 scheduleDraft 守卫失败，draft 源不挂载（requestId=${req.requestId}）:`,
+    req.scheduleDraft === undefined ? 'scheduleDraft 缺失' : 'isScheduleDraft 形状校验不通过',
+  )
+  return null
 })
 
 /**
