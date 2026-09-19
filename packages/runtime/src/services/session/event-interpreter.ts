@@ -538,14 +538,17 @@ export interface EventInterpreterOptions {
    * scanPlanStateEntries）是派生缓存唯一数据写路径，事件 payload 永不直写缓存
    * （ReplicatedState「事件只做失效」不变量；W12-W18 过渡态例外至此撤销）。
    *
+   * customType 历史上是三字面量 union，已放宽为 string（D5「失效转发的三段链路」③）：
+   * 任何 custom entry 均产出失效信号，「避免无关 entry 触发拉取」由派发层订阅者存在性
+   * 守住；record 三族消费方 invalidateRecordEntries 内部早退门保留、行为不变。
+   *
    * 触发源（全部降级为失效信号，W18 起事件直写退役）：
-   * - entry_appended{customType: subagent-record | workflow-record | plan-state}
-   *   （主信号，adapter 过滤；plan-state 第三员为 plan 模式重设计 D1② 扩容）
+   * - entry_appended{customType: string}（主信号，adapter 对任意 custom entry 产出）
    * - subagent-bg-notify / subagent tool-call-end / workflow-result / workflow tool-call-end
    *   （兜底信号：extension 在同一状态迁移点既 append 自描述 entry 又发上述事件——主信号
    *   丢失（W22 混沌）时兜底触发重拉收敛）
    */
-  onRecordEntriesInvalidated?: (sessionId: string, customType: 'subagent-record' | 'workflow-record' | 'plan-state') => void
+  onRecordEntriesInvalidated?: (sessionId: string, customType: string) => void
   /**
    * W1（fix-chat-flow-order 探针 ②）：pi agent_settled（run 级联结束）到达时触发。
    * 组合根注入 sessionService.flushPendingBashResults——dispatcher 把 streaming 期间
