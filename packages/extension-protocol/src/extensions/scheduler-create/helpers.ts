@@ -1,92 +1,25 @@
 /**
- * scheduler 创建确认的协议 helper（定制层）。
+ * scheduler 创建确认的共享协议资产（定制交互 helper 已退役）。
  *
- * scheduleCreateInteract() 是 schedule 工具在 RPC 模式下的确认交互入口。
- * TUI 模式下 extension 必须自行调 ctx.ui.custom()（ScheduleCreateComponent）。
+ * scheduleCreateInteract() 已随统一提问表单协议迁移退役（ui-presentation-protocol
+ * D3/u6，直接退役不保留 deprecated 别名）：scheduler 的创建确认改走
+ * uiFormInteract() + UI_FORM_MARKER（ScheduleQuestion 形态，initial 预填草稿），
+ * 交互入口在 extensions/universal/scheduler/src/tool.ts。
  *
- * 走 select 通道 + marker（SCHEDULE_CREATE_MARKER），传输核与失败折叠复用
- * callMarkerRpc 原语（D8：判别结果而非抛错，cancelled/timeout/channel-error/
- * non-json 四态），折叠动作留调用方（execute 六步流）：
- * - cancelled / timeout → cancelled result（D5：取消不是错误，agent 不重试）
- * - channel-error → 禁用本会话 schedule 工具 + throw（§3.5 错误规格）
- * - non-json → 协议版本错配类故障
+ * 本模块保留三类跨端共享资产：
+ * - isScheduleDraft / isScheduleFormResult 形状守卫：前者供 runtime event-adapter
+ *   legacy 分支（SCHEDULE_CREATE_MARKER 帧 payload 判定）与 ui-form 守卫的
+ *   schedule 分支（initial 深度校验）消费；后者供 scheduler 包回包判别
+ *   （uiFormInteract answers[key] 解包后收窄为 ScheduleFormResult）。
+ * - dateToOnceCron / onceCronToDate 时间折叠单点（D2）：GUI（ScheduleForm 渲染器）
+ *   与 TUI（ScheduleCreateComponent）共用本实现，禁止双端各写一份——时间语义
+ *   漂移正是本协议要关闭的失败模式（F1）。
  *
- * 时间折叠单点（D2）：dateToOnceCron / onceCronToDate 一次性时刻 ↔ 一次性 cron
- * 互转，GUI（ScheduleCreateOverlay）与 TUI（ScheduleCreateComponent）共用本实现，
- * 禁止双端各写一份——时间语义漂移正是本协议要关闭的失败模式（F1）。
  * 时区语义：按本地墙钟时间（croner 对 cron 默认本地解释，datetime 控件与 TUI
  * 掩码编辑均产出本地墙钟时间）。
  */
 
-import type { GuiContext } from '../../core/gui-context'
-import { isGuiCapable } from '../../core/helpers'
-import { callMarkerRpc } from '../../core/select-rpc'
 import type { ScheduleDraft, ScheduleFormResult } from './types'
-import { SCHEDULE_CREATE_MARKER } from './marker'
-
-/** scheduleCreateInteract 的判别结果：成功收窄为 FormResult；失败按 callMarkerRpc 四态折叠 */
-export type ScheduleCreateInteractResult =
-  | { ok: true; result: ScheduleFormResult }
-  | { ok: false; reason: 'cancelled' | 'timeout' | 'channel-error' | 'non-json' }
-
-export interface ScheduleCreateInteractOptions {
-  /** 透传 select dialog：abort 后 pi 本地 resolve(undefined) → cancelled */
-  signal?: AbortSignal
-  /** 失败留痕注入（channel-error / non-json / 回包形状错），日志策略归调用方 */
-  log?: (msg: string, detail?: object) => void
-}
-
-/**
- * scheduler 创建确认入口（RPC 模式专用）。
- *
- * RPC 模式：select 通道携带草稿数据，前端渲染确认弹框，回传 FormResult。
- * TUI 模式：抛错。extension 必须自行调 ctx.ui.custom()——返回 null 会与
- * 「用户取消」混淆，让 extension 误以为用户取消了。
- *
- * 确认交互不设墙钟超时（任务级正常路径无墙钟，AGENTS.md 超时默认原则）：
- * options 不提供 timeout 入口，timeout 态仅由「未 abort 的 undefined resolve」产生。
- */
-export async function scheduleCreateInteract(
-  ctx: GuiContext,
-  draft: ScheduleDraft,
-  options?: ScheduleCreateInteractOptions,
-): Promise<ScheduleCreateInteractResult> {
-  if (!(isGuiCapable(ctx) && ctx.ui?.select)) {
-    // 非 RPC 模式不代劳 TUI 渲染（TUI Component 是 extension 特定的，helper 不代劳）。
-    // 抛错而非返回判别失败——与 askUserInteract 先例同构。
-    throw new Error(
-      'scheduleCreateInteract() is only available in RPC mode. ' +
-      'In TUI mode, use ctx.ui.custom() with your own Component directly.',
-    )
-  }
-  const rpcResult = await callMarkerRpc(
-    ctx,
-    SCHEDULE_CREATE_MARKER,
-    JSON.stringify(draft), // undefined 可选字段由 JSON.stringify 天然丢弃
-    { signal: options?.signal, log: options?.log },
-  )
-  if (!rpcResult.ok) {
-    return { ok: false, reason: rpcResult.reason }
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rpcResult.value)
-  } catch {
-    // callMarkerRpc 已检测过 JSON 合法性，此处为防御性兜底，保持判别完备
-    return { ok: false, reason: 'non-json' }
-  }
-  if (!isScheduleFormResult(parsed)) {
-    // JSON 合法但非本协议形状 = 协议版本错配类故障，按 non-json 同折叠
-    options?.log?.('schedule-create response is not a ScheduleFormResult', {
-      responseHead: rpcResult.value.slice(0, RESPONSE_PREVIEW_LENGTH),
-    })
-    return { ok: false, reason: 'non-json' }
-  }
-  return { ok: true, result: parsed }
-}
-
-/** 形状错留痕里回包预览的截断长度（与 callMarkerRpc 的 RESPONSE_PREVIEW_LENGTH 同规范） */
-const RESPONSE_PREVIEW_LENGTH = 200
 
 /** 形状守卫公共前置：非 null 的普通对象（排除数组；JSON.parse 产物均为 JSON 值） */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -122,8 +55,9 @@ export function isScheduleDraft(value: unknown): value is ScheduleDraft {
     && isOptionalString(d.currentModel)
 }
 
-/** 回传形状守卫（模块内消费：scheduleCreateInteract 收窄 parsed 回包） */
-function isScheduleFormResult(value: unknown): value is ScheduleFormResult {
+/** 回传形状守卫（导出消费：scheduler 包对 uiFormInteract answers[key] 解包值收窄；
+ *  FormOverlay schedule 渲染器提交的 value = JSON.stringify(ScheduleFormResult)） */
+export function isScheduleFormResult(value: unknown): value is ScheduleFormResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const r = value as Record<string, unknown>
   return r.action === 'create'

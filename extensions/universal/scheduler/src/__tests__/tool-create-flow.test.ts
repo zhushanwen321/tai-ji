@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type { ScheduleFormResult } from '@zhushanwen/extension-protocol'
-import { SCHEDULE_CREATE_MARKER } from '@zhushanwen/extension-protocol'
+import { UI_FORM_MARKER } from '@zhushanwen/extension-protocol'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MockSchedulerBackend } from './mock-backend.js'
@@ -82,17 +82,39 @@ function formResult(overrides: Partial<ScheduleFormResult> = {}): ScheduleFormRe
   }
 }
 
-/** 捕获 rpc 交互的 select 调用参数（marker + draft payload） */
+/** 从请求 payload 解析 answers key（D2 fallback：header ?? question——与 FormOverlay
+ *  qKey 同规则；mock 与断言按协议规则取 key，与 tool.ts 的构造解耦） */
+function answerKeyFromPayload(options: string[]): string {
+  try {
+    const q = JSON.parse(options[0]!).formQuestions[0]
+    return typeof q.header === 'string' ? q.header : q.question
+  } catch {
+    return ''
+  }
+}
+
+/** 按请求 key 包装 FormAnswers envelope（value = flat ScheduleFormResult JSON，D2 回包契约） */
+function envelopeReturning(valueJson: string) {
+  return vi.fn(async (_header: string, options: string[]) => {
+    const key = answerKeyFromPayload(options)
+    return JSON.stringify({ [key]: valueJson })
+  })
+}
+
+/** 捕获 rpc 交互的 select 调用参数（marker + form payload） */
 function selectReturning(form: ScheduleFormResult | string | undefined) {
-  return vi.fn(async (_header: string, _options: string[]) =>
-    form === undefined ? undefined : typeof form === 'string' ? form : JSON.stringify(form),
+  return vi.fn(async (_header: string, options: string[]) =>
+    form === undefined ? undefined : typeof form === 'string' ? form
+      : envelopeReturning(JSON.stringify(form))(_header, options),
   )
 }
 
-/** rpc draft payload 断言辅助：从 select 首次调用的 options[0] 解析 draft */
+/** rpc form payload 断言辅助：从 select 首次调用的 options[0] 解析 schedule 问题的 initial draft */
 function capturedDraft(select: ReturnType<typeof selectReturning>): Record<string, unknown> {
-  const payload = select.mock.calls[0]![1]![0]!
-  return JSON.parse(payload) as Record<string, unknown>
+  const payload = JSON.parse(select.mock.calls[0]![1]![0]!) as {
+    formQuestions: { initial?: Record<string, unknown> }[]
+  }
+  return payload.formQuestions[0]!.initial!
 }
 
 // ── 六步流 ──
@@ -155,7 +177,7 @@ describe('handleSchedule 六步流', () => {
 
   // ── 步骤 3+6 rpc 交互：确认创建（draft 透传 / FormResult 值创建 / model 入快照） ──
 
-  it('rpc 确认：select 携带 marker + draft，FormResult 最终值创建且 model 透传入 entry 快照', async () => {
+  it('rpc 确认：select 携带 UI_FORM_MARKER + schedule 问题（initial 预填 draft），FormResult 最终值创建且 model 透传入 entry 快照', async () => {
     const form = formResult({ kind: 'once', schedule: '0 9 19 9 *', model: 'prov-b/m2' })
     const select = selectReturning(form)
     const ctx = createMockCtx({ select, model: stubModel('prov-a', 'm1') })
@@ -166,8 +188,17 @@ describe('handleSchedule 六步流', () => {
       ctx, undefined,
     )
 
-    // select 第一参 = marker，payload = JSON draft（LLM 参数原样预填）
-    expect(select.mock.calls[0]![0]).toBe(SCHEDULE_CREATE_MARKER)
+    // select 第一参 = UI_FORM_MARKER，payload = {formQuestions:[schedule 问题], allowCancel}
+    //（draft 经 initial 原样预填——LLM 参数原样透传）
+    expect(select.mock.calls[0]![0]).toBe(UI_FORM_MARKER)
+    const payload = JSON.parse(select.mock.calls[0]![1]![0]!) as {
+      formQuestions: { type: string; question: string }[]
+      allowCancel?: boolean
+    }
+    expect(payload.formQuestions).toHaveLength(1)
+    expect(payload.formQuestions[0]!.type).toBe('schedule')
+    expect(typeof payload.formQuestions[0]!.question).toBe('string')
+    expect(payload.allowCancel).toBe(true)
     const draft = capturedDraft(select)
     expect(draft.kind).toBe('recurring')
     expect(draft.schedule).toBe('0 9 * * *')
@@ -313,6 +344,38 @@ describe('handleSchedule 六步流', () => {
     await expect(handleSchedule(pi, service, { prompt: 'x', schedule: '5m' }, ctx, undefined))
       .rejects.toThrow('protocol version mismatch')
     expect(setActiveTools).not.toHaveBeenCalled()
+  })
+
+  it('rpc echo（回包=发送 payload，旧宿主组合）→ channel-error 折叠：禁用工具 + throw', async () => {
+    const select = vi.fn(async (_header: string, options: string[]) => options[0])
+    const ctx = createMockCtx({ select })
+
+    await expect(handleSchedule(pi, service, { prompt: 'x', schedule: '5m' }, ctx, undefined))
+      .rejects.toThrow('disabled for this session')
+    const disabledList = setActiveTools.mock.calls[0]![0] as string[]
+    expect(disabledList).not.toContain('schedule')
+    expect(backend.appendedOps).toHaveLength(0)
+  })
+
+  it('rpc envelope 值非 ScheduleFormResult 形状（action 非法）→ throw 协议版本错配', async () => {
+    const select = envelopeReturning(JSON.stringify({
+      action: 'cancel', kind: 'once', schedule: '0 9 19 9 *', prompt: 'p',
+    }))
+    const ctx = createMockCtx({ select })
+
+    await expect(handleSchedule(pi, service, { prompt: 'x', schedule: '5m' }, ctx, undefined))
+      .rejects.toThrow('protocol version mismatch')
+    expect(setActiveTools).not.toHaveBeenCalled()
+    expect(backend.appendedOps).toHaveLength(0)
+  })
+
+  it('rpc envelope 键缺失（空 FormAnswers，schedule 题无答案）→ throw 协议版本错配', async () => {
+    const select = selectReturning('{}')
+    const ctx = createMockCtx({ select })
+
+    await expect(handleSchedule(pi, service, { prompt: 'x', schedule: '5m' }, ctx, undefined))
+      .rejects.toThrow('protocol version mismatch')
+    expect(backend.appendedOps).toHaveLength(0)
   })
 
   // ── Draft.models 注入（P-SCOPED：scopedModels 优先 / getAvailable() 回退） ──

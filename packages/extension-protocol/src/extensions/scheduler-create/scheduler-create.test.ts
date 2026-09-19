@@ -1,41 +1,19 @@
-// scheduler-create.test.ts — scheduler 创建确认协议：
+// scheduler-create.test.ts — scheduler 创建确认共享协议资产：
 // 时间折叠往返（dateToOnceCron / onceCronToDate）/ isScheduleDraft 守卫 /
-// scheduleCreateInteract 四态折叠。
-// 经 barrel（../../index）导入：单测同时锚定新增导出面。
+// isScheduleFormResult 回包守卫（scheduleCreateInteract 已随统一表单协议退役，
+// 四态折叠由 ui-form 包的 uiFormInteract 测试承担——见 ../ui-form/ui-form.test.ts）。
+// 经 barrel（../../index）导入：单测同时锚定导出面。
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
-  SCHEDULE_CREATE_MARKER,
   dateToOnceCron,
   onceCronToDate,
   isScheduleDraft,
-  scheduleCreateInteract,
-  type GuiContext,
+  isScheduleFormResult,
   type ScheduleDraft,
 } from '../../index'
 
-type SelectImpl = (
-  marker: string,
-  options: string[],
-  opts?: { signal?: AbortSignal; timeout?: number },
-) => Promise<string | undefined>
-
-/** mock ctx：select 实现由用例注入（缺省 resolve undefined） */
-function makeCtx(impl?: SelectImpl): { ctx: GuiContext; selectMock: ReturnType<typeof vi.fn> } {
-  const selectMock = vi.fn(impl ?? (async () => undefined))
-  const ctx: GuiContext = { mode: 'rpc', hasUI: true, ui: { select: selectMock } }
-  return { ctx, selectMock }
-}
-
 const NOW = new Date(2026, 8, 18, 12, 0) // 2026-09-18 12:00 本地墙钟
-
-const draft: ScheduleDraft = {
-  kind: 'once',
-  schedule: '0 9 19 9 *',
-  prompt: '总结昨天的工作进展',
-  models: ['deepseek-flash'],
-  currentModel: 'mimo-v2.5-pro',
-}
 
 describe('dateToOnceCron（本地墙钟 → 5 段一次性 cron）', () => {
   it('基本折叠：2026-09-19 09:00 → "0 9 19 9 *"', () => {
@@ -208,134 +186,59 @@ describe('isScheduleDraft 守卫', () => {
   })
 })
 
-describe('scheduleCreateInteract（RPC 确认交互，四态折叠）', () => {
-  it('成功：回传 FormResult JSON → ok:true + 收窄 result', async () => {
-    const formResult = {
+describe('isScheduleFormResult 守卫', () => {
+  const validResult = {
+    action: 'create',
+    kind: 'recurring',
+    schedule: '*/7 * * * *',
+    prompt: '用户调整后的提示词',
+  }
+
+  it('最小合法 FormResult（必填字段齐）→ true', () => {
+    expect(isScheduleFormResult(validResult)).toBe(true)
+  })
+
+  it('全字段 FormResult → true', () => {
+    expect(isScheduleFormResult({
       action: 'create',
       kind: 'once',
-      schedule: '0 9 21 9 *',
-      prompt: '用户调整后的提示词',
+      schedule: '0 9 19 9 *',
       model: 'deepseek-flash',
-    }
-    const { ctx } = makeCtx(async () => JSON.stringify(formResult))
-
-    const outcome = await scheduleCreateInteract(ctx, draft)
-
-    expect(outcome).toEqual({ ok: true, result: formResult })
+      prompt: 'p',
+      name: '每日总结',
+      expires: '7d',
+    })).toBe(true)
   })
 
-  it('select 参数：marker / [draft JSON] / signal 透传', async () => {
-    const signal = new AbortController().signal
-    const { ctx, selectMock } = makeCtx(async () => JSON.stringify({
-      action: 'create', kind: 'once', schedule: '0 9 19 9 *', prompt: 'p',
-    }))
-
-    await scheduleCreateInteract(ctx, draft, { signal })
-
-    expect(selectMock).toHaveBeenCalledTimes(1)
-    const [marker, options, opts] = selectMock.mock.calls[0] as [string, string[], { signal?: AbortSignal }]
-    expect(marker).toBe(SCHEDULE_CREATE_MARKER)
-    expect(JSON.parse(options[0])).toEqual(draft)
-    expect(options).toHaveLength(1)
-    expect(opts.signal).toBe(signal)
+  it('action 非法（cancel）→ false', () => {
+    expect(isScheduleFormResult({ ...validResult, action: 'cancel' })).toBe(false)
   })
 
-  it('draft 的 undefined 可选字段不进 payload（JSON.stringify 天然丢弃）', async () => {
-    const { ctx, selectMock } = makeCtx(async () => JSON.stringify({
-      action: 'create', kind: 'once', schedule: '0 9 19 9 *', prompt: 'p',
-    }))
-    const minimal: ScheduleDraft = { kind: 'once', schedule: '0 9 19 9 *', prompt: 'p', models: [] }
-
-    await scheduleCreateInteract(ctx, minimal)
-
-    const payload = (selectMock.mock.calls[0] as [string, string[]])[1][0]
-    expect(payload).not.toContain('"model"')
-    expect(payload).not.toContain('"name"')
-    expect(payload).not.toContain('"currentModel"')
-    expect(payload).toContain('"models":[]')
+  it('kind 非法 → false', () => {
+    expect(isScheduleFormResult({ ...validResult, kind: 'daily' })).toBe(false)
   })
 
-  it('回传 FormResult 可选字段缺省 → ok:true（model 未选 = 缺省）', async () => {
-    const { ctx } = makeCtx(async () => JSON.stringify({
-      action: 'create', kind: 'recurring', schedule: '5m', prompt: 'p',
-    }))
-
-    const outcome = await scheduleCreateInteract(ctx, draft)
-
-    expect(outcome).toEqual({
-      ok: true,
-      result: { action: 'create', kind: 'recurring', schedule: '5m', prompt: 'p' },
-    })
+  it('缺 prompt → false', () => {
+    expect(isScheduleFormResult({ action: 'create', kind: 'once', schedule: '0 9 19 9 *' })).toBe(false)
   })
 
-  it('回包 undefined + signal 已 abort → cancelled', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const { ctx } = makeCtx(async () => undefined)
-
-    const outcome = await scheduleCreateInteract(ctx, draft, { signal: controller.signal })
-
-    expect(outcome).toEqual({ ok: false, reason: 'cancelled' })
+  it('可选字段类型错（model 非 string）→ false', () => {
+    expect(isScheduleFormResult({ ...validResult, model: 42 })).toBe(false)
   })
 
-  it('回包 undefined 无 signal → timeout（仅由未 abort 的 undefined resolve 产生）', async () => {
-    const { ctx } = makeCtx(async () => undefined)
-
-    const outcome = await scheduleCreateInteract(ctx, draft)
-
-    expect(outcome).toEqual({ ok: false, reason: 'timeout' })
+  it('可选字段类型错（expires 非 string）→ false', () => {
+    expect(isScheduleFormResult({ ...validResult, expires: 7 })).toBe(false)
   })
 
-  it('select throw → channel-error + log 留痕', async () => {
-    const log = vi.fn()
-    const { ctx } = makeCtx(async () => {
-      throw new Error('channel closed')
-    })
-
-    const outcome = await scheduleCreateInteract(ctx, draft, { log })
-
-    expect(outcome).toEqual({ ok: false, reason: 'channel-error' })
-    expect(log).toHaveBeenCalledTimes(1)
+  it('多字段（未知附加字段）→ true：字段白名单校验，多余字段忽略（isScheduleDraft 同构语义）', () => {
+    expect(isScheduleFormResult({ ...validResult, unknownFutureField: true })).toBe(true)
   })
 
-  it('非 JSON 回包 → non-json', async () => {
-    const log = vi.fn()
-    const { ctx } = makeCtx(async () => 'plain text response')
-
-    const outcome = await scheduleCreateInteract(ctx, draft, { log })
-
-    expect(outcome).toEqual({ ok: false, reason: 'non-json' })
-    expect(log).toHaveBeenCalledTimes(1)
-  })
-
-  it.each([
-    ['空对象', '{}'],
-    ['action 非法', JSON.stringify({ action: 'cancel', kind: 'once', schedule: '0 9 19 9 *', prompt: 'p' })],
-    ['kind 非法', JSON.stringify({ action: 'create', kind: 'daily', schedule: '0 9 * * *', prompt: 'p' })],
-    ['缺 prompt', JSON.stringify({ action: 'create', kind: 'once', schedule: '0 9 19 9 *' })],
-    ['数组形态', '["create"]'],
-  ])('JSON 合法但非本协议形状 → non-json（协议版本错配同折叠）：%s', async (_label, raw) => {
-    const log = vi.fn()
-    const { ctx } = makeCtx(async () => raw)
-
-    const outcome = await scheduleCreateInteract(ctx, draft, { log })
-
-    expect(outcome).toEqual({ ok: false, reason: 'non-json' })
-    expect(log).toHaveBeenCalledWith(
-      'schedule-create response is not a ScheduleFormResult',
-      expect.objectContaining({ responseHead: expect.any(String) }),
-    )
-  })
-
-  it('TUI 模式 → throw（extension 须自行 ctx.ui.custom，返回 null 会与用户取消混淆）', async () => {
-    const ctx: GuiContext = { mode: 'tui', hasUI: true }
-
-    await expect(scheduleCreateInteract(ctx, draft)).rejects.toThrow(/only available in RPC mode/)
-  })
-
-  it('RPC 但 ui.select 缺席 → throw（与 TUI 同一门控，恢复动作同指 ctx.ui.custom）', async () => {
-    const ctx: GuiContext = { mode: 'rpc', hasUI: true }
-
-    await expect(scheduleCreateInteract(ctx, draft)).rejects.toThrow(/only available in RPC mode/)
+  it('null / undefined / 非对象 / 数组 → false', () => {
+    expect(isScheduleFormResult(null)).toBe(false)
+    expect(isScheduleFormResult(undefined)).toBe(false)
+    expect(isScheduleFormResult('result')).toBe(false)
+    expect(isScheduleFormResult(['create'])).toBe(false)
+    expect(isScheduleFormResult({})).toBe(false)
   })
 })

@@ -5,7 +5,8 @@
 // - core/                  通用协议层（所有 extension 共用：GuiComponent + 布局原语 + 传输编码 + 双模 widget helper）
 // - extensions/            有运行时定制逻辑的 extension（marker + helper）
 //   - ask-user/            富交互（select 通道 + marker）
-//   - scheduler-create/    scheduler 创建确认（select 通道 + marker）
+//   - scheduler-create/    scheduler 创建确认共享资产（类型 + 形状/时间折叠守卫）
+//   - ui-form/             统一提问表单协议（类型 + marker + 交互 helper + 守卫）
 // - pending-entries        pending 事件流差集核心（纯算法，落盘形态语义）
 // - background-task        base-tool-enhance 后台任务 registry.json 文件契约（src 平级文件）
 //
@@ -60,17 +61,16 @@ export type { GuiContext } from './core/gui-context'
 export type { MarkerRpcResult, MarkerRpcOptions, ChannelErrorResult } from './core/select-rpc'
 export { callMarkerRpc, isChannelErrorResult, formatChannelErrorText } from './core/select-rpc'
 
-// ── ./extensions/ask-user：富交互（select 通道 + marker，本包内子目录）──
+// ── ./extensions/ask-user：富交互解码契约（GUI 提问已迁统一表单协议 ui-form；askUserInteract 已退役，ASK_USER_MARKER 留作 legacy 帧识别随 D7 窗口末清理）──
 export type { AskUserQuestion, AskUserOption, AskUserAnswers } from './extensions/ask-user/types'
 export { ASK_USER_MARKER } from './extensions/ask-user/marker'
 export {
-  askUserInteract,
   getAskUserAnswer,
   getAskUserOther,
   isAskUserQuestion,
 } from './extensions/ask-user/helpers'
 
-// ── ./extensions/scheduler-create：scheduler 创建确认（select 通道 + marker，本包内子目录；实现在 extensions/universal/scheduler + runtime event-adapter 第 4 marker 分支）──
+// ── ./extensions/scheduler-create：scheduler 创建确认的共享资产（定制交互 helper 已随统一表单协议退役；ScheduleDraft/FormResult 类型 + 形状/时间折叠守卫；实现在 extensions/universal/scheduler——交互入口 uiFormInteract，runtime event-adapter 保留 legacy 分支至退役窗口）──
 export type {
   ScheduleKind,
   ScheduleDraft,
@@ -78,14 +78,10 @@ export type {
 } from './extensions/scheduler-create/types'
 export { SCHEDULE_CREATE_MARKER } from './extensions/scheduler-create/marker'
 export {
-  scheduleCreateInteract,
   isScheduleDraft,
+  isScheduleFormResult,
   dateToOnceCron,
   onceCronToDate,
-} from './extensions/scheduler-create/helpers'
-export type {
-  ScheduleCreateInteractResult,
-  ScheduleCreateInteractOptions,
 } from './extensions/scheduler-create/helpers'
 
 // ── ./extensions/ui-form：统一提问表单协议（plan / scheduler / ask-user 三方提问的统一入口：select 通道 + marker + 类型化问题集；设计 ui-presentation-protocol，ask-user / scheduler-create 两定制协议随 u5/u6 迁移退役）──

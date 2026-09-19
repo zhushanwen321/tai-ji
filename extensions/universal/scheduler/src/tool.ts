@@ -1,6 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { Static, Type } from 'typebox'
-import { scheduleCreateInteract, type ScheduleDraft, type ScheduleFormResult } from '@zhushanwen/extension-protocol'
+import {
+  isScheduleFormResult,
+  uiFormInteract,
+  type ScheduleDraft,
+  type ScheduleFormResult,
+} from '@zhushanwen/extension-protocol'
 
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
@@ -101,6 +106,25 @@ function cancelledCreateResult(): {
 }
 
 /**
+ * schedule 确认表单的问题标题（统一表单协议 D2：同时是 FormOverlay 单问表头文本
+ * 与 FormAnswers 的 answers key——key = header ?? question，此处不用 header，
+ * key 与文本同源避免双写漂移）。
+ */
+const SCHEDULE_FORM_QUESTION = 'Confirm scheduled task'
+
+/** 形状错留痕里回包预览的截断长度（与 extension-protocol RESPONSE_PREVIEW_LENGTH 同规范） */
+const RESPONSE_PREVIEW_LENGTH = 200
+
+/** 回包形状非法（envelope 键缺失 / value 非 JSON / 非 ScheduleFormResult）→ throw
+ * （§3.5 第二行：协议版本错配类故障，与 uiFormInteract 的 non-json 态同折叠同文案） */
+function throwProtocolMismatch(): never {
+  throw new Error(
+    'schedule form response is not valid protocol JSON (extension/runtime protocol ' +
+    'version mismatch). Do not retry — report this to the user.',
+  )
+}
+
+/**
  * schedule tool handler（execute 流：预校验 → headless 分支 → abort 早退 → 交互 →
  * abort 兜底检查 → 取消 → 确认创建；设计 §5 U2 中 abort 检查先于交互）。
  *
@@ -150,7 +174,8 @@ export async function handleSchedule(
   }
 
   // 步骤 3 交互分支：TUI 挂 ScheduleCreateComponent（ctx.ui.custom）；
-  // rpc 走 scheduleCreateInteract（select + SCHEDULE_CREATE_MARKER 通道）
+  // rpc 走 uiFormInteract（select + UI_FORM_MARKER 通道，ScheduleQuestion 单问整表单，
+  // draft 经 initial 预填——统一表单协议 u6 迁移）
   const draft = buildDraft(params, ctx)
   let formResult: ScheduleFormResult | null | undefined
   if (ctx.mode === 'tui') {
@@ -170,32 +195,54 @@ export async function handleSchedule(
       hasUI: ctx.hasUI,
       ui: { select: ctx.ui.select.bind(ctx.ui) },
     }
-    const interacted = await scheduleCreateInteract(guiCtx, draft, {
-      signal,
-      log: (msg, detail) => logger.warn(msg, detail),
-    })
+    const interacted = await uiFormInteract(
+      guiCtx,
+      [{ type: 'schedule', question: SCHEDULE_FORM_QUESTION, initial: draft }],
+      {
+        signal,
+        log: (msg, detail) => logger.warn(msg, detail),
+      },
+    )
     if (!interacted.ok) {
       if (interacted.reason === 'channel-error') {
         // §3.5 第一行：RPC 通道不可用 → 禁用本会话 schedule 工具 + throw
+        //（echo 检测命中态附带升级指引 message，一并透出给用户）
         disableScheduleTool(pi)
+        const echoHint = interacted.message ? `${interacted.message} ` : ''
         throw new Error(
           'schedule requires an interactive channel, which is unavailable. ' +
+          `${echoHint}` +
           'The tool has been disabled for this session. Execute the immediate parts of the ' +
           'user\'s instructions directly — do not create scheduled tasks and do not retry.',
         )
       }
       if (interacted.reason === 'non-json') {
         // §3.5 第二行：回包形状非法 = 协议版本错配类故障
-        throw new Error(
-          'schedule-create response is not valid protocol JSON (extension/runtime protocol ' +
-          'version mismatch). Do not retry — report this to the user.',
-        )
+        throwProtocolMismatch()
       }
       // cancelled | timeout → 取消路径（D5）。rpc 模式 GUI 用户取消 resolve undefined，
       // 与超时不可区分（signal 未 abort 折叠 timeout），语义同为「未确认」。
       return cancelledCreateResult()
     }
-    formResult = interacted.result
+    // FormAnswers envelope 解包（D2 回包契约）：schedule 单问表单恰一键，value =
+    // flat ScheduleFormResult JSON（FormOverlay schedule 渲染器提交形态）。回包判别
+    // 职责在本包（D3：isScheduleFormResult 从 scheduler-create 模块导出复用）。
+    const rawResult: unknown = interacted.answers[SCHEDULE_FORM_QUESTION]
+    if (typeof rawResult !== 'string') throwProtocolMismatch()
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawResult)
+    } catch {
+      throwProtocolMismatch()
+    }
+    if (!isScheduleFormResult(parsed)) {
+      logger.warn('schedule form answer value is not a ScheduleFormResult', {
+        key: SCHEDULE_FORM_QUESTION,
+        valueHead: rawResult.slice(0, RESPONSE_PREVIEW_LENGTH),
+      })
+      throwProtocolMismatch()
+    }
+    formResult = parsed
   }
 
   // 步骤 4 abort 检查：agent 被外部终止（goal 取消 / session 切换）→ cancelled 语义
