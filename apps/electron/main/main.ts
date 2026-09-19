@@ -339,12 +339,19 @@ app.whenReady().then(async () => {
     // ~ 本身（含 ~/.ssh）」的注释护栏曾被该运行时环境击穿。不变量守护已移到单测：
     // main/test/local-file-prefixes.test.ts（打包态不含文件系统根 / 不含 homedir 本身）。
     // 各成员的取舍理由见 utils/local-file-prefixes.ts 文件头。
+    // projectRoot：仅 dev + dev-instance.mjs 装配器注入 TAIJI_DEV_PROJECT_ROOT 时生效
+    // （dev 装配的 electron cwd/appPath 都指向 apps/electron，白名单需要 worktree 根
+    // 成员才能放行 session cwd 下的用户文件）。打包态 env 不会被装配器注入，isDev
+    // 判断再显式防一层泄漏（isPackaged 时不传）。
     const allowedPrefixes = computeLocalFilePrefixes({
       isPackaged: app.isPackaged,
       cwd: process.cwd(),
       appPath: app.getAppPath(),
       dataDir: getDataDir(),
       tmpdir: tmpdir(),
+      ...(isDev && process.env.TAIJI_DEV_PROJECT_ROOT
+        ? { projectRoot: process.env.TAIJI_DEV_PROJECT_ROOT }
+        : {}),
     })
     const resolved = path.resolve(filePath)
     // 校验逻辑集中到 input-validators，拒绝不在白名单前缀内的路径（防目录穿越）

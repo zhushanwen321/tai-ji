@@ -180,6 +180,12 @@ if (argv[0] === 'init-template') {
 } else {
   const p = deriveParams(resolveInstanceName(cliName))
   const env = buildDevEnv(p)
+  // dev 装配 spawn 的 electron cwd = apps/electron（下方 launch 的 cwd: APP_ROOT），
+  // main 侧 local-file 白名单按 cwd/appPath 构造命中不了 worktree 根下的用户文件
+  // （对话流 <img src="docs/..."> 相对路径解析出的绝对路径会被 403）。显式注入项目根，
+  // main 侧仅 dev 态消费（打包态 env 不会被装配器注入且调用侧双重防泄漏），
+  // 供 local-file 图片预览恢复「项目根」语义。
+  env.TAIJI_DEV_PROJECT_ROOT = REPO_ROOT
   if (hasFlag('--mock')) {
     env.VITE_MOCK = 'true'
     env.TAIJI_MOCK = '1'
