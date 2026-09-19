@@ -265,8 +265,9 @@ function teardownMirror(sessionId: string): void {
   for (const d of mirror.disposables) {
     try {
       d.dispose()
-    } catch {
-      // 释放失败不阻断其余清理（订阅表由 runtime clearForSession 兜底）
+    } catch (e) {
+      // 释放失败不阻断其余清理（订阅表由 runtime clearForSession 兜底）；出声留诊断
+      console.warn('[scheduler-manager] dispose failed during teardown:', toMessage(e))
     }
   }
   mirrors.delete(sessionId)
@@ -365,8 +366,13 @@ async function handleReadFailure(api: Api, mirror: SessionMirror, e: unknown): P
   try {
     const status = (await api.sessions.get(mirror.sessionId))?.status
     terminal = status === 'dead' || status === 'error'
-  } catch {
-    // 状态查询失败：按可恢复处理（保守——不因元信息缺失宣判会话死亡）
+  } catch (e) {
+    // 状态查询失败：按可恢复处理（保守——不因元信息缺失宣判会话死亡；读错误本身
+    // 已写入 readFailure 推给用户），出声仅补诊断
+    console.warn(
+      '[scheduler-manager] status query failed, treating as recovering:',
+      toMessage(e),
+    )
   }
   if (terminal) {
     mirror.readFailure = { kind: 'unavailable', reason }
@@ -426,6 +432,7 @@ async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> 
   try {
     await api.views.update(MODAL_VIEW_ID, tree, { sessionId: mirror.sessionId })
   } catch (e) {
+    // best-effort：modal 可能刚被关闭（视图已不存在），不重抛——下一轮失效刷新/推送重试收敛
     console.warn('[scheduler-manager] views.update failed:', toMessage(e))
   }
   await pushHeaderAction(api, mirror)
@@ -440,6 +447,7 @@ async function pushHeaderAction(api: Api, mirror: SessionMirror): Promise<void> 
       ...(mirror.commandDisabled !== null ? { disabled: mirror.commandDisabled } : {}),
     })
   } catch (e) {
+    // best-effort：徽标推送失败不重抛——下一轮失效刷新/推送重试收敛
     console.warn('[scheduler-manager] updateHeaderAction failed:', toMessage(e))
   }
 }
@@ -484,7 +492,8 @@ function subcommandFor(action: 'toggle' | 'run' | 'delete', enabled: boolean): S
   return 'rm'
 }
 
-async function setNoticeAndPush(api: Api, sessionId: string, notice: string): Promise<void> {
+/** 设置行内 notice（null = 清除陈旧提示）并推一次树（写路径回执统一出口） */
+async function setNoticeAndPush(api: Api, sessionId: string, notice: string | null): Promise<void> {
   const mirror = mirrors.get(sessionId)
   if (!mirror) return
   mirror.notice = notice
@@ -527,11 +536,16 @@ async function handleWrite(
       requireCommand: SCHEDULE_COMMAND_NAME,
     })
     if (receipt.accepted) {
-      // 不乐观更新：快照与游标由失效订阅驱动刷新（C-pi-13）。恢复窗口写成功 →
-      // 显式提示 restore 副作用（E4：到期的 enabled 任务将照常触发）。
-      if (wasRecovering) {
-        await setNoticeAndPush(api, sessionId, '会话已恢复，未完成的排期任务将照常触发')
-      }
+      // 写成功：旧失败 notice 必须清掉再推——不清则下一次失效驱动刷新会把陈旧
+      // 「操作未生效」与已变更行一起重推（操作已生效却仍挂失败提示）。主动 push 让
+      // 清除立即可见、不依赖失效事件是否到来（重复推送幂等）；数据不乐观更新，快照
+      // 与游标仍由失效订阅驱动刷新（C-pi-13）。恢复窗口写成功 → 显式提示 restore
+      // 副作用（E4：到期的 enabled 任务将照常触发）。
+      await setNoticeAndPush(
+        api,
+        sessionId,
+        wasRecovering ? '会话已恢复，未完成的排期任务将照常触发' : null,
+      )
       return
     }
     // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）
@@ -624,6 +638,7 @@ export async function activate(context: PluginContext): Promise<void> {
       ensureMirror(api, latest.id, sink)
     }
   } catch (e) {
+    // best-effort 兜底失败：焦点会话由 onDidActivateSession 主通路补上，不中断插件激活
     console.warn('[scheduler-manager] cold-start list() failed:', toMessage(e))
   }
 

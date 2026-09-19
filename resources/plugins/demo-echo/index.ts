@@ -89,6 +89,7 @@ export async function activate(context: PluginContext): Promise<void> {
       focusSessionId = sessions.reduce((a, b) => (b.lastActiveAt > a.lastActiveAt ? b : a)).id
     }
   } catch (e) {
+    // best-effort 兜底失败：焦点会话由 onDidActivateSession 主通路补上
     console.warn('[demo-echo] cold-start list() failed:', toMessage(e))
   }
 
