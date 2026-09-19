@@ -12,12 +12,20 @@
  *   answers 无 __comment key 由 A1 + 组件层 AskUserOverlay.test.ts 覆盖
  *
  * ── 协议事实（读代码确认，非猜测）──
- * - event-adapter.ts:378-399：select + ASK_USER_MARKER → 透传 payload
- *   { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
- * - AskUserQuestion（@zhushanwen/extension-protocol）：header/question/context/options/multiSelect/
- *   allowOther —— 无 allowComment（commit 74a0b1001 删除字段 + UI + __comment key）。
- *   faux 轨 dev 装配下 mandatory 扩展经源码目录加载（extensions/universal/ask-user =
- *   删 comment 后版本），不再 symlink npm 目录绕开 registry 旧版。
+ * - wire 帧（双形态，event-adapter 互斥 marker 分支）：
+ *   - form 帧（现行）：select + UI_FORM_MARKER → tryTranslateFormSelect 透传 payload
+ *     { sessionId, requestId, method:'select', form:true, formQuestions, allowCancel }
+ *     （builtin ask-user 统一表单协议迁移，uiFormInteract + allowOther 固定 true）
+ *   - legacy 帧（版本偏斜窗口旧 npm 扩展仍可能发）：select + ASK_USER_MARKER →
+ *     { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
+ *   断言按双读兼容：形态判定 form===true || askUser===true，问题列表
+ *   formQuestions ?? askUserQuestions（两种帧语义同构，只做形态双读不降断言强度）。
+ * - FormQuestion / AskUserQuestion（@zhushanwen/extension-protocol）：header/question/
+ *   context/options/multiSelect/allowOther —— 无 allowComment（commit 74a0b1001 删除
+ *   字段 + UI + __comment key）。faux 轨 dev 装配下 mandatory 扩展经源码目录加载
+ *   （extensions/universal/ask-user = 统一表单协议版），不再 symlink npm 目录绕开
+ *   registry 旧版；FormAnswers key = header ?? question，与旧 AskUserAnswers 一致
+ *   （回写 result 序列化格式不变）。
  * - AskUserOverlay.vue onSubmit：Other 文本替换 OTHER_VALUE 占位符作为主答案值，
  *   不产生 `__comment` key
  * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言面
@@ -111,21 +119,28 @@ async function selectSessionInSidebar(page: import('@playwright/test').Page, lab
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
 }
 
-/** 轮询广播事件里第一个 ask-user 富交互请求（extension.ui_request + askUser:true） */
+/**
+ * 轮询广播事件里第一个 ask-user 富交互请求（extension.ui_request + 富交互标记）。
+ * 双读形态判定：form === true（统一表单帧，现行）或 askUser === true（legacy 帧，
+ * 版本偏斜窗口旧扩展）——两种帧 event-adapter 侧互斥分支产出，语义同构。
+ */
 async function waitForAskUserRequest(events: any[], deadlineMs: number): Promise<any | undefined> {
   while (Date.now() < deadlineMs) {
-    const evt = events.find((e) => e.type === 'extension.ui_request' && e.payload?.askUser === true)
+    const evt = events.find(
+      (e) => e.type === 'extension.ui_request'
+        && (e.payload?.form === true || e.payload?.askUser === true),
+    )
     if (evt) return evt
     await new Promise((r) => setTimeout(r, 1000))
   }
   return undefined
 }
 
-/** 找 askUserQuestions[0]（用类型守卫收窄 unknown[]） */
+/** 找问题列表[0]（formQuestions ?? askUserQuestions 双读；用类型守卫收窄 unknown[]） */
 function firstQuestion(askUserReq: any): { header?: string; question: string; options?: unknown[] } {
-  const qs = askUserReq.payload?.askUserQuestions as unknown[] | undefined
+  const qs = (askUserReq.payload?.formQuestions ?? askUserReq.payload?.askUserQuestions) as unknown[] | undefined
   const q = Array.isArray(qs) && qs.length > 0 ? qs[0] : undefined
-  expect(q, 'payload.askUserQuestions[0] 应存在（协议透传）').toBeDefined()
+  expect(q, 'payload.formQuestions[0] / payload.askUserQuestions[0] 应存在（协议透传）').toBeDefined()
   expect(typeof (q as { question?: unknown }).question).toBe('string')
   return q as { header?: string; question: string; options?: unknown[] }
 }
@@ -143,7 +158,7 @@ function findTurnResumeAfter(events: any[], idx: number): { type: string } | und
 
 // ── A1: 协议透传（comment 删除回归核心） ─────────────────────────────
 
-test('A1: ask_user 调用 → ui_request 广播含 askUserQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
+test('A1: ask_user 调用 → ui_request 广播含 formQuestions/askUserQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
   test.setTimeout(120_000)
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-askuser-'))
   const { page, cleanup } = await launchRealApp({ dataDir, faux: { responses: FAUX_SCRIPT } })
@@ -179,7 +194,12 @@ test('A1: ask_user 调用 → ui_request 广播含 askUserQuestions，问题无 
     expect(payload.sessionId).toBe(sessionId)
     expect(payload.requestId, 'ui_request 应带 requestId（回写用）').toBeTruthy()
     expect(payload.method).toBe('select')
-    expect(payload.askUser).toBe(true)
+    // 形态双读（不降强度）：统一表单帧 form===true 或 legacy 帧 askUser===true，
+    // event-adapter 互斥 marker 分支保证两键恰一为真
+    expect(
+      payload.form === true || payload.askUser === true,
+      'ui_request 应带富交互标记（form:true 统一表单帧 / askUser:true legacy 帧）',
+    ).toBe(true)
     const q = firstQuestion(askUserReq!)
     expect(q.question.length).toBeGreaterThan(0)
     expect(Array.isArray(q.options) && q.options.length >= 2,
