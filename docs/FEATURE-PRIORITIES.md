@@ -54,7 +54,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
-| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
+| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
