@@ -86,7 +86,11 @@ import { RecentWorkspacesStore } from './services/workspace/recent-workspaces-st
 import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
+import { ZcodeImportSource } from './services/session/import-source-zcode.js'
 import type { SessionImportSource } from './services/session/import-source.js'
+// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（sqlite-access 内重声明，与引擎包
+// db-path.ts 同语义；runtime 不依赖引擎包）
+import { hostZcodeDbPath } from './services/session/zcode-import/sqlite-access.js'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
 import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →
@@ -459,10 +463,11 @@ async function main(): Promise<void> {
   // importSession 的 projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面。
   // source 注册表（G2 可扩展）：pi 项的 rootDir 缺省 = pi 全局 sessions 经
   // getPiGlobalAgentDir 动态推导（组合根合法 import infra 装配——services 层禁止 value
-  // import pi-maintenance，C-comm-03）；第三源接入 = 表加一项，编排层与 RPC 契约零改动。
-  // （zcode 项由 U3 加入：import-source-zcode.ts。）
+  // import pi-maintenance，C-comm-03）；zcode 项的默认库 = 宿主库路径动态推导（注入模式
+  // 同 pi）；第三源接入 = 表加一项，编排层与 RPC 契约零改动。
   const importSources = new Map<ImportSourceKind, SessionImportSource>([
     ['pi', new ExternalFileImportSource({ getRootDir: () => join(getPiGlobalAgentDir(), 'sessions') })],
+    ['zcode', new ZcodeImportSource({ getHostDbPath: hostZcodeDbPath })],
   ])
   const importService = new ImportService({
     projects: projectStore,
