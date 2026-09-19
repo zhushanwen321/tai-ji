@@ -454,6 +454,14 @@ export type PiTranslatedEvent =
    * 在其 handler 内同调 onTraceSync（四类触发信号的第四类）。
    */
   | { kind: 'trace-trigger'; trigger: 'message_end' | 'agent_settled' | 'entry_appended' }
+  /**
+   * 送达水位对账触发信号（reload-closeout D2）—— agent_settled（run 级联结束）到达 →
+   * interpreter 调 onRecordReconcile 回调（sessionService.reconcileRecordEntries：重跑
+   * fetch→merge→publish 管线，发布门 = 已发布快照水位，diff 非空补发——守卫/发布门处
+   * 曾丢的帧下轮触发必补发）。组合注册追加（withRecordReconcileTrigger，照抄
+   * trace-trigger 先例），只由 agent_settled 产出。
+   */
+  | { kind: 'record-reconcile-trigger' }
 
 
 /**

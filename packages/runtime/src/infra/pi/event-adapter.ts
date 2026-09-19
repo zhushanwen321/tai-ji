@@ -1496,6 +1496,20 @@ function withTraceTrigger(base: Handler): Handler {
 
 const TRACE_TRIGGER_SOURCES = new Set(['message_end', 'agent_settled', 'entry_appended'])
 
+/**
+ * [reload-closeout D2] agent_settled 追加 record-reconcile-trigger 输出——interpreter 调
+ * onRecordReconcile（送达水位对账腿：重跑同一条 fetch→merge→publish 管线，发布门 = 已
+ * 发布快照水位，diff 非空补发）。组合注册形态照抄 withTraceTrigger（DISPATCHER 单
+ * handler 契约下「原 handler 输出在前、追加在后」，互不取代）；只挂 agent_settled——
+ * run 级联结束、晚于 pi 落盘 flush 的唯一边界信号（Q3 查证，见 handleAgentSettled 注释）。
+ */
+function withRecordReconcileTrigger(base: Handler): Handler {
+  return (event, sid) => {
+    const out = base(event, sid)
+    return event.type === 'agent_settled' ? [...out, { kind: 'record-reconcile-trigger' }] : out
+  }
+}
+
 // ── Dispatcher map ─────────────────────────────────────────────────
 // handler 入参是窄类型（PiMessageUpdateEvent 等），DISPATCHER value 是联合入参签名。
 // TS 逆变：窄入参 handler 不能直接赋给联合入参函数类型，注册处用 as 断言（运行时 event
@@ -1530,8 +1544,9 @@ const DISPATCHER = new Map<string, Handler>()
   // [session-trace A33] 组合追加 trace-trigger
   DISPATCHER.set('entry_appended', withTraceTrigger(handleEntryAppended as Handler))
   // [W1 fix-chat-flow-order] agent_settled：run 级联结束信号（bash 待落列 flush 触发点，
-  // 见 handleAgentSettled 注释）；[session-trace A33] 组合追加 trace-trigger
-  DISPATCHER.set('agent_settled', withTraceTrigger(handleAgentSettled as Handler))
+  // 见 handleAgentSettled 注释）；[session-trace A33] 组合追加 trace-trigger；
+  // [reload-closeout D2] 组合追加 record-reconcile-trigger（送达水位对账腿）
+  DISPATCHER.set('agent_settled', withRecordReconcileTrigger(withTraceTrigger(handleAgentSettled as Handler)))
 })()
 
 /**

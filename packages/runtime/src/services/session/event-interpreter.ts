@@ -508,6 +508,13 @@ export interface EventInterpreterOptions {
    */
   onTraceSync?: (sessionId: string, trigger: string) => void
   /**
+   * [reload-closeout D2] 送达水位对账腿回调（agent_settled 触发，组合根注入
+   * sessionService.reconcileRecordEntries——重跑 fetch→merge→publish 管线，发布门 =
+   * 已发布快照水位，守卫/发布门处曾丢的帧补发）。fire-and-forget（回调内部自带
+   * inflight 合并与扫描域门），不阻塞 interpret 批次。
+   */
+  onRecordReconcile?: (sessionId: string) => void
+  /**
    * 成功 compaction 后触发（归因降噪 2026-09-19；组合根注入 GenStatsService.markContextRewritten）。
    *
    * 语义：上下文被重写过（前缀整体变化）——命中率归因链路首个 0% 样本归为 context-rewrite。
@@ -819,6 +826,11 @@ export class EventInterpreter {
         // session-trace 增量腿（A33）：触发事件到达 → 追赶式 since 补拉（fire-and-forget，
         // 不阻塞本批次；拉到 delta 后由 syncTraceEntries 广播 session.traceEntryAppended）。
         this.opts.onTraceSync?.(this.sessionId, ev.trigger)
+        return true
+      case 'record-reconcile-trigger':
+        // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget——回调内部
+        // 重跑 record 派生管线并按已发布快照水位补发，不阻塞本批次）
+        this.opts.onRecordReconcile?.(this.sessionId)
         return true
       default:
         return false

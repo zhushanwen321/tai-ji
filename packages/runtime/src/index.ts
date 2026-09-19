@@ -675,6 +675,13 @@ async function main(): Promise<void> {
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
       },
+      // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget）：重跑 record
+      // 派生管线，发布门 = 已发布快照水位——守卫/发布门处丢的帧下轮触发必补发（回调
+      // 内部自带扫描域门与 inflight 合并，不阻塞 interpret 批次；15s 定时腿为低频兜底，
+      // 在 SessionRecords 服务级单例 timer 内自持）。
+      onRecordReconcile: (sid) => {
+        sessionService.reconcileRecordEntries(sid)
+      },
       // W1（fix-chat-flow-order 探针 ②）：agent_settled（run 级联结束，晚于 pi finally 的
       // bash 落盘 flush）→ dispatcher 按序发布 per-session bash 待落列（D2 双分支延迟）。
       // sd-u5 起多播化：bash flush 是第一条腿（原单播语义不变），其后分发 agentSettledListeners
