@@ -55,7 +55,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
-| ask-user overlay | agent 提问浮层、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
+| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
 
@@ -75,7 +75,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读 |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
-| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染 |
+| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | ImportSessionDialog |
@@ -113,7 +113,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
-| plan | universal | P2 | 面板能力 |
+| plan | universal | P2 | 面板能力 + 执行方式选择 |
 | session-reader | universal | P2 | 通知链依赖 |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |

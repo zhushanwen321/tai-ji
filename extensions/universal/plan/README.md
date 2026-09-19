@@ -28,7 +28,16 @@
 
 - `register-doc`：登记一份产物文档（同 fileName 重登 = version+1 覆盖），供 GUI 产物 tab 展示与内容刷新。
 - `submit-review`：全部文档就绪后请求审阅。docs 为空或计划态已退出时返回错误提示（E6 双守卫）。
-- `complete` / `abort`：退出计划态，恢复工具集；状态落 isActive=false + docs 保留（产物跨重开留存）。
+- `complete`：先弹执行方式选择（GUI 宿主经统一表单协议单 choice 问题）。选项 = 内置 Develop (auto-parallel)（LLM 自判复杂度：独立任务派 subagent 并行、小步/紧耦合本会话直执）+ 自动检测的 `plan-exec: true` skill + goal 档（能力在场时）+ 两个留在 plan mode 选项（Modify the plan first / Save for later）。headless 无 UI 默认 develop 不弹选择；通道失败（channel-error / non-json）与用户取消同折叠为 complete-cancelled result，留在 plan mode 不炸 turn。
+- `abort`：直接退出。两者退出后恢复工具集；状态落 isActive=false + docs 保留（产物跨重开留存）。
+
+## 执行方式与 plan-exec skill
+
+`complete` 选项中的 skill 档来自运行时自动检测：skill 作者在 SKILL.md frontmatter 标记 `plan-exec: true`，该 skill 即被提议为执行方式（label `Execute via skill: <name>`）。检测对过 description 必填门的 skill 二次读 frontmatter 判定；`disable-model-invocation` 与 plan-exec 并存不过滤。
+
+四根扫描（单根枚举复用 pi 公开导出的 `loadSkillsFromDir`，跨根组装同构 pi 本体加载序）：project `.pi/skills` → 祖先链 `.agents/skills`（近→远，git root 级含）→ `<agentDir>/skills` → `~/.agents/skills`；同名 first-writer-wins + realPath 去重；untrusted 项目跳过前两族。complete 时现扫无缓存（技能热装即见）。
+
+检测失败降级为空集，绝不炸 complete 交互闭环：每根 existsSync 守卫 + 整根 try/catch（EACCES 等 fs 错 → 跳过该根 + warn），单 skill frontmatter 读/解析失败跳过该项。
 
 ## Plan File
 
@@ -40,4 +49,4 @@
 
 ## 依赖
 
-依赖：`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约，dependencies）；peer 依赖：`@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）。
+依赖：`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约 + ui-form（`uiFormInteract` / `FormQuestion`，统一提问表单协议），dependencies）；peer 依赖：`@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）。

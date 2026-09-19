@@ -155,7 +155,7 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### 计划模式（Plan Mode）
 
-pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或内置模板产出计划文档；文档就绪后 `submit-review` 挂审阅，用户三键裁决（确认执行 / 提交评论并要求修订 / 请求进一步解释），approve/abort 退出并恢复工具集。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入）。
+pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或内置模板产出计划文档；文档就绪后 `submit-review` 挂审阅，用户三键裁决（确认执行 / 提交评论并要求修订 / 请求进一步解释），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：内置 Develop (auto-parallel)（LLM 自判复杂度）+ 自动检测带 `plan-exec: true` frontmatter 的 skill（四根扫描，同构 pi loadSkillsFromDir）+ goal 档（能力在场时）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入）。
 
 **代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills 解析 / tool.ts 六 action / state.ts 状态 / prompts.ts 提示词四段 / index.ts hooks）。
 
