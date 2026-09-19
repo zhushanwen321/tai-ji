@@ -149,6 +149,7 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 ## 架构约定
 
 - 视图切换状态驱动（settingsStore.currentView），不用 vue-router；Mock 用 `VITE_MOCK=true` 在 ws-client 层拦截
+- **markdown 渲染管线安全模型 = 分通道净化**（`markdown-sanitize.ts`，renderMarkdown 唯一出口）：markdown-it `html:true`；可信段（shiki/KaTeX/md-* 契约：fence/math/code_inline/filepath）以 per-call nonce 哨兵在 sanitize 前摘出、净化后单遍回填，不参与白名单过滤；用户 HTML 走 DOMPurify 两级白名单（GitHub 面对齐，class/style/data-* 构造性全剥——无样式伪造与交互借用通道）；相对资源（img src / 相对链接 href）在净化 hook 按 `resourceBaseDir` 解析（对话流 = session cwd、drawer = 文件所在目录，经 MarkdownEnv 透传）；CSP 由此降级为纵深第二层。禁止绕过 renderMarkdown 直调 md.render、禁止向用户白名单放宽 class/style/data-*
 - 共享类型经 `packages/shared/` workspace 共享；Runtime 通信走 WebSocket（ws-client.ts + event-bus.ts）；Electron IPC 经 preload 暴露 `electronAPI`
 - **Runtime broadcast 时序竞争 [HISTORICAL]**：session 激活/创建流程内部发出的 session 级 broadcast 早于 renderer 订阅 → 消息丢失。renderer 切换/创建 session 后需立即消费的 session 级状态必须主动拉取（`session.getCommands` RPC），不可依赖 broadcast
 - **数据目录隔离**：`~/.taiji/` 与 `~/.pi/agent/` 完全隔离；路径白名单禁止硬编码，从 `getConfigDir()` / `getPiAgentDir()` 动态推导（pre-commit 检查）

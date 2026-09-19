@@ -12,9 +12,9 @@
     双主题（ADR-0022-B：暗为默认）：shiki defaultColor:false 产出 --shiki-dark(暗)/--shiki-light(亮)
     双套 span，由 :root(暗默认) / [data-theme="light"] 的 scoped 样式切换，走 design-tokens 体系。
 
-    v-html：shiki + markdown-it(html:false) 的输出是 XSS 安全的——
-    shiki codeToHtml 转义所有非 token 文本（只发 scoped <span>），markdown-it 不透传用户原始 HTML，
-    代码源码经 base64 编码进 data 属性。故在此受控渲染点局部放开 taste-lint vue/no-v-html。仅此组件。
+    v-html：text 段消费 renderMarkdown 输出，已经 markdown-sanitize 分通道净化——markdown-it html:true，
+    可信段（shiki/KaTeX/md-* 契约）以 nonce 哨兵摘出-回填绕过净化，用户 HTML 走 DOMPurify 两级
+    白名单（class/style/data-* 构造性全剥）。故在此受控渲染点局部放开 taste-lint vue/no-v-html。仅此组件。
   -->
   <div class="md-render select-text" :class="{ 'md-render--thinking': variant === 'thinking' }" @click="onClick">
     <!-- v-for key：增量路径用段稳定键 segId（前缀段引用与 segId 跨帧不变 → DOM 复用，R-19）；
@@ -22,7 +22,7 @@
          spinner 旋转动画每帧重启（W23 review Fix-2），故用固定哨兵 'sf'（见 segKey）；
          全量/降级路径不携带 segId → 回退 index（等价旧版行为）。s/i 前缀隔离防两类 key 撞号。 -->
     <template v-for="(seg, i) in segments" :key="segKey(seg, i)">
-      <!-- eslint-disable-next-line vue/no-v-html -- text 段是 shiki+markdown-it(html:false) 安全输出，仅此受控点放开。 -->
+      <!-- eslint-disable-next-line vue/no-v-html -- text 段已经 markdown-sanitize 分通道净化（可信段摘出-回填 + 用户内容白名单），仅此受控点放开。 -->
       <div v-if="seg.type === 'text'" v-html="seg.content" />
       <!-- streaming-fence 占位（D-5/W23，R-20）：未闭合 fence 流式期不跑 shiki/mermaid——语言标签 +
            loader 行；token 静默 ≥阈值或消息 complete 后 finalize 转完整渲染（.md-codeblock/MermaidRenderer） -->
