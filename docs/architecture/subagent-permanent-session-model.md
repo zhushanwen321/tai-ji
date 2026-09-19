@@ -256,6 +256,8 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 
 事件表（全部经 store 意图原语，C-data-20 不变）：
   idle   --message/start-->        running   （锚有效：原地续聊；锚失效：reopen 降级路径）
+                                           （[U3 修订 2026-09-19] reopen 降级仅 pi 锚；zcode 锚失效 = 带锚派发 +
+                                            resume 失败时引擎注入锚失效声明段，零世代推进——见 §3.2.6 ③）
   running--settle(成功/失败)-->    idle      （stopReason=completed/failed；进程按 idle timer 回收）
       [实施形态 A-lite，阶段 3 裁决]：内存面轮终保持 running-resumable + stopReason 展示位
       （completed/failed），状态机翻边不发生——投影桥接（isDoneProjection）与续聊判定等价，
@@ -350,7 +352,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 4. **zcode conversation 能力位**：`capabilities.conversation` 从 `unsupported` 升为 `cold`（新值：冷恢复会话——resume 读 + 新 session 注入，无热 steering）——capability-gate 的 message 升级 gate（run-orchestration canUpgradeToConversation :1394-1401）自动放行 zcode record 的 chat 升级。`steer` 维持 unsupported（interrupt=true 的 message 对 zcode 先做「等轮结束再投」降级，映射 followUp 语义，capabilities 声明如实）。
 5. **entry-born 形态消亡**：zcode record 有了 transcriptRef，`finalizeEntryOnlyOrphan` 直断分支删除（见 3.2.3 删除清单）——Gate B F2（缓存重建缺员）与 F3（纳管态误结案）随 anchor 统一自动消解。
 
-**zcode 会话库资源生命周期（风险登记，四要素）**：万物可续聊后，zcode 隔离库（`<engineDataDir>/engines/zcode/session-db/db.sqlite`，含每会话全量 turns）成为单调累积写入面——每 subagent 每轮追加、reopen 再开新 sessionId 继续追加。要素登记：①**量级** = 会话数 × 轮均体积（sqlite 全量 turns，量级与 pi 侧 jsonl transcript 同源同阶；实施期以真实库采样校准，设计期上界假设 <1MB/会话）；②**清理通道（本设计锁定的约束）** = zcode 库条目 TTL **必须与 pi transcript 同窗 30 天**——通道二选一在实施设计定：引擎侧 sweep（协议加清理方法，宿主周期调）或宿主侧清库（写库并发/锁窗口评估）；通道落地前不得发布「zcode 万物可续聊」；③**恢复路径** = 条目被清 = 锚失效 → 自动走 reopen 降级（§3.2.3），无需人工恢复；④**重审条件** = 库体积 >100MB 或活跃条目 >1000（数字实施期校准）触发 TTL 窗口复审。**执行锚**（防纯文本承诺静默失效）：本约束随 U6 落地时登记进 constraints.json（C-data 系新条目，pre-commit / CI 检查按路径触发），S3 验收补通道存在性断言（zcode 库条目超窗被清 + 清后 message 走 reopen 降级）；**约束登记与 TTL 通道属同一发布单元，不拆分发布**（防「锚先合、通道后合」的裸奔窗口）。
+**zcode 会话库资源生命周期（风险登记，四要素）**：万物可续聊后，zcode 隔离库（`<engineDataDir>/engines/zcode/session-db/db.sqlite`，含每会话全量 turns）成为单调累积写入面——每 subagent 每轮追加、reopen 再开新 sessionId 继续追加。要素登记：①**量级** = 会话数 × 轮均体积（sqlite 全量 turns，量级与 pi 侧 jsonl transcript 同源同阶；实施期以真实库采样校准，设计期上界假设 <1MB/会话）；②**清理通道（本设计锁定的约束）** = zcode 库条目 TTL **必须与 pi transcript 同窗 30 天**——通道二选一在实施设计定：引擎侧 sweep（协议加清理方法，宿主周期调）或宿主侧清库（写库并发/锁窗口评估）；通道落地前不得发布「zcode 万物可续聊」；③**恢复路径** = 条目被清 = 锚失效 → 自动走 reopen 降级（§3.2.3），无需人工恢复（**[U3 修订 2026-09-19，commit `f98d9e459`]** zcode 侧降级形态改写：库投影预检查退役——app-server 对 session 元数据行落库滞后于 create 应答（分钟级窗 + 部分行永不落库，真机实证），预检查把有效锚系统性误判失效致每轮续聊误 reopen；现行 zcode 锚活性由引擎真实 resume 结果承担——resume 读失败 = 锚失效声明段裸跑（模型知情「延续但无历史」，不世代推进），reopen 触发面收缩为 pi 锚失效专属）；④**重审条件** = 库体积 >100MB 或活跃条目 >1000（数字实施期校准）触发 TTL 窗口复审。**执行锚**（防纯文本承诺静默失效）：本约束随 U6 落地时登记进 constraints.json（C-data 系新条目，pre-commit / CI 检查按路径触发），S3 验收补通道存在性断言（zcode 库条目超窗被清 + 清后 message 走 reopen 降级）；**约束登记与 TTL 通道属同一发布单元，不拆分发布**（防「锚先合、通道后合」的裸奔窗口）。
 
 #### 3.2.7 结算副作用与统计口径
 

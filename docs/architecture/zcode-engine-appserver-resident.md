@@ -4,6 +4,12 @@
 > ① **删除 CLI spawn 降级链**——`TAIJI_ZCODE_MODE` 钉扎、probe 冒烟门控（appserver-probe.ts）、
 > protocol-drift 首败降级全部移除；launcher.ts / appserver-home.ts / appserver-probe.ts 整文件删除。
 > 协议漂移不再降级保底，直接报可操作错误。本文 D2（降级链）章节随之**作废**。
+> **[注入机制观察项，2026-09-19 R-upgrade 阶段 5 trace 实证]** 3.12.x CLI 的 provider
+> 凭据/模型解析实际读取 `~/.zcode/v2/provider_config.json`（CLI homedir 解析走 passwd
+> 不吃 HOME env），而非本节所述 `~/.zcode/cli/config.json`——上句的 v2 provider 注入
+> 机制对现行 CLI 疑似 no-op（引擎全链靠 provider_config.json 原生凭据工作，V1/V6 真机
+> 通过不受影响）。注入面语义在引擎下次升级协议重锚时一并重验（R-upgrade impl-plan
+> 验收记录观察项①）。
 > ② **删除 HOME 池化，共享宿主 HOME**——spawn env 不再覆写 HOME（db/plugins/MCP 继承
 > 宿主 HOME，会话与 GUI 共写同一 SQLite，WAL 并发安全）；**凭据经 fs 拦截 launcher 注入**
 > （appserver-launcher.ts 落盘 wrapper 进程：CLI 形态 app-server 只从 `~/.zcode/cli/config.json`
