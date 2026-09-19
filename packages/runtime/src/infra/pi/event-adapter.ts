@@ -737,8 +737,10 @@ function tryTranslateAskUserSelect(
 /**
  * scheduler 创建确认请求检测（第 4 marker 分支，设计 scheduler-create-confirm-modal §3.4）：
  * select title 为 SCHEDULE_CREATE_MARKER → options[0] 是 JSON payload
- * （scheduleCreateInteract helper 序列化的 ScheduleDraft）。
- * 检测成功后透传 scheduleDraft（isScheduleDraft 守卫收窄），前端路由到 ScheduleCreateOverlay；
+ * （旧版 npm scheduler 扩展的 scheduleCreateInteract 序列化的 ScheduleDraft——本仓
+ * helper 已随统一表单协议退役，此分支仅服务版本偏斜窗口的旧扩展）。
+ * 检测成功后透传 scheduleDraft（isScheduleDraft 守卫收窄），前端 legacy 归一层
+ * （normalizeFormRequest）按 scheduleCreate 源渲染 FormOverlay；
  * 检测失败（非合法 JSON / draft 缺字段）返回 undefined，由调用方降级为普通 select
  * （与 ask-user 分支同款兜底，S2）。
  */
