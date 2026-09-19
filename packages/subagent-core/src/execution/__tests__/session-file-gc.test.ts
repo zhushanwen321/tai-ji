@@ -329,7 +329,7 @@ describe("maybeCleanupExpiredSessionFiles", () => {
   });
 });
 
-describe("[D8] 引擎池 TTL 兜底（maybeCleanupExpiredSessionFiles 挂载 cleanupExpiredPoolRefs）", () => {
+describe("[D8] 引擎池 TTL 兜底（maybeCleanupExpiredSessionFiles 挂载 cleanupExpiredJournals）", () => {
   /** 池内建一个 journal 并把 mtime 设为指定天数前。 */
   function createPoolJournal(poolKey: string, taskId: string, daysAgo: number): string {
     const poolDir = path.join(tmpAgentDir, "engines", "zcode", poolKey);

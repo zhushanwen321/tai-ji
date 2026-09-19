@@ -9,7 +9,7 @@
 // （两引擎 poolKey 恒 'shared'，journal 固定落 engines/<engineId>/shared/，落盘
 // 路径构造即终值——磁盘路径布局字节不变）。原 PoolRefs 引用计数（releasePoolRef /
 // refs.json）也已随 pool-manager 降级删除，journal 回收只靠 30 天 mtime TTL
-// （pool-manager cleanupExpiredPoolRefs）。
+// （pool-manager cleanupExpiredJournals）。
 //
 // 机制语义：writer 创建即路径定稿；run 终态后 close（flush + fsync 一次，§3.3.6
 // 写入纪律；写失败已由 writer 内部 warn + failed 收口，close 不抛，journal 是②级
