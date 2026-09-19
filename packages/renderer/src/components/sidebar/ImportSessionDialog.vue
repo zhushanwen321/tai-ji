@@ -398,14 +398,15 @@ const activeDescriptionKey = computed(() =>
 )
 
 /**
- * zcode 源特化恢复指引的错误码（设计 §3.6：zcode 未装库 / 会话不在库或 schema 漂移 /
- * 库文件权限三场景与 pi 同码不同义——pi 文案里的「选择其他目录」对 zcode 是死路指引）。
+ * zcode 源特化恢复指引的错误码（设计 §3.6，与 pi 同码不同义）：未装库 / 会话不在库或
+ * schema 漂移——pi 文案里的「选择其他目录」对 zcode 是死路指引；目标位置冲突——zcode 库内
+ * 会话无「原始文件名」可选（罕见，换目标 project 不影响本错误），指引联系反馈。
  * 其余码（already_imported / copy_failed 等）两源恢复动作一致，共用通用文案。
  */
 const ZCODE_ERROR_KEYS: ReadonlySet<string> = new Set([
   'import_source_missing',
   'import_invalid_session',
-  'import_dir_unreadable',
+  'import_target_conflict',
 ])
 
 /** 错误码 → 恢复指引起文案（zcode 源对特化码走 errorsZcode，其余回落通用清单） */

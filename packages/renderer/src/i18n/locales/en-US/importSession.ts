@@ -64,6 +64,6 @@ export default {
   errorsZcode: {
     import_source_missing: 'zcode session library not found: confirm zcode is installed and has run at least one session',
     import_invalid_session: 'This session is no longer in the zcode library, or the library schema has changed: refresh the list and pick again; if it keeps failing, upgrade Taiji and retry',
-    import_dir_unreadable: 'The zcode session library is unreadable (insufficient permissions): check the library file permissions and retry',
+    import_target_conflict: 'This session conflicts with an existing Taiji session: please contact feedback',
   },
 }

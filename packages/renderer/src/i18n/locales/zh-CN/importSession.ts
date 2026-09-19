@@ -62,6 +62,6 @@ export default {
   errorsZcode: {
     import_source_missing: '未找到 zcode 会话库：请确认已安装 zcode 并至少运行过一次会话',
     import_invalid_session: '该会话已不在 zcode 库中，或库结构已变化：请刷新列表后重选；若持续失败，请升级太极后重试',
-    import_dir_unreadable: 'zcode 会话库不可读（权限不足）：请检查库文件权限后重试',
+    import_target_conflict: '该会话与已有太极会话发生目标位置冲突：请联系反馈',
   },
 }

@@ -11,7 +11,7 @@
  *  6. 导入成功 emit('imported') + 结果 toast（u7：info 成功 / warning 预警合并——
  *     sidecar_failed / conversion_degraded 与死 cwd 追加同一条消息；显示名回退短 ID）
  *  7. 错误内联恢复指引：error envelope code → i18n 文案（含恢复动作）可见，不弹系统对话框；
- *     zcode 源对特化码（未装库/会话不在库/库权限）走 errorsZcode 文案
+ *     zcode 源对特化码（未装库/会话不在库/目标冲突）走 errorsZcode 文案
  *  8. cwdExists=false 标注：「原目录不存在…」降级提示可见
  *  9. 目录切换（V8）：「选择其他目录」（仅 pi 源显示）→ pickDirectory 选中根 → RPC 带
  *     新 rootDir 重载列表/dirs/计数；取消无操作；搜索词跨根保留；重开回默认根
@@ -1147,6 +1147,21 @@ describe('ImportSessionDialog（U5 验收）', () => {
       const errorEl = byTestId('import-error')!
       expect(errorEl.text()).toBe(zhCN.errorsZcode.import_source_missing)
       expect(errorEl.text()).not.toBe(zhCN.errors.import_source_missing)
+      // 失败不关闭对话框（可重试）
+      expect(wrapper!.emitted('update:open')).toBeUndefined()
+    })
+
+    it('zcode 错误文案：import_target_conflict 显示 zcode 特化恢复指引（§3.6——库内会话无「原始文件名」可选）', async () => {
+      apiMocks.importSession.mockRejectedValueOnce(importErrorWithCode('import_target_conflict'))
+      await mountDialogAtSource('zcode')
+
+      await importViaRowButton(0)
+
+      // 使用者：同码不同义——pi 文案引导「改用原始文件名」对 sqlite 库内会话不可执行，
+      // zcode 指引联系反馈（罕见场景，换目标 project 不影响本错误）
+      const errorEl = byTestId('import-error')!
+      expect(errorEl.text()).toBe(zhCN.errorsZcode.import_target_conflict)
+      expect(errorEl.text()).not.toBe(zhCN.errors.import_target_conflict)
       // 失败不关闭对话框（可重试）
       expect(wrapper!.emitted('update:open')).toBeUndefined()
     })
