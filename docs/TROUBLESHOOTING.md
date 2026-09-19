@@ -421,3 +421,16 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见）。
 - **机制**：`apps/electron/main.ts` dev 块（:137 附近）钉死数据目录，覆盖了装配器 `dev-instance.mjs` 注入的实例路径——C-dev-01 的实例隔离在 Electron 层失效（装配器 Vite/CDP 端口段隔离仍有效）。
 - **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按 C-dev-01 文档预期推定；需要干净环境时手动清理共享目录或使用 `--fresh`。修复属产品决策另行裁决（ext-simplify-17 验收登记）。
+- **同根因第二症状（2026-09-19 session 导入验收实测）**：dev 块同时钉死 Electron userData（`app.setPath('userData', <钉死目录>/electron)`）→ 单实例锁按 userData 区分的隔离随之失效——第二个 worktree 起 `pnpm dev` 时 Electron 打印 `DevTools listening` 后**立即静默退出（exit 0，无任何错误输出）**，vite/runtime 常驻但窗口永远不出现。判定：先查 `~/.taiji-dev/electron/SingletonLock` symlink 指向的 pid 是否为兄弟 worktree 实例；绕行 = `TAIJI_E2E=1` 透传实例层 `TAIJI_AGENT_DATA_DIR`（main.ts e2e 分支豁免钉死；副作用是窗口加载构建产物而非 Vite dev 源），或暂停持锁实例。
+
+### 16. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
+
+- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
+- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
+- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 守卫拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
+
+### 17. pi openai-completions 适配层对「缺 usage 的错误响应」崩坏（2026-09-19 导入验收发现，上游健壮性问题，既有未修）
+
+- **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
+- **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
+- **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
