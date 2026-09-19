@@ -1,12 +1,17 @@
 /**
  * scheduler 创建确认弹框的协议类型（Draft / FormResult）。
  *
- * 数据流：agent 调 schedule 工具提交预填草稿（Draft）→ ctx.ui.select 经
- * SCHEDULE_CREATE_MARKER 通道透传前端 → 用户在 ScheduleCreateOverlay（GUI）或
- * ScheduleCreateComponent（TUI）中确认/调整 → 回传 FormResult → execute 才真正创建。
+ * GUI 创建确认已迁移统一表单协议（ui-form 模块的 uiFormInteract + UI_FORM_MARKER，
+ * 交互入口 extensions/universal/scheduler/src/tool.ts：Draft 经 initial 预填为
+ * ScheduleQuestion 单问整表单，前端 FormOverlay 的 schedule 渲染器回传
+ * ScheduleFormResult）——ScheduleDraft / ScheduleFormResult 即该表单的预填与
+ * 回传形状，TUI 侧 ScheduleCreateComponent 同用本类型。
  *
- * 取消不走 FormResult：select resolve undefined（cancelled），execute 返回
+ * 取消不走 FormResult：interact 取消 resolve undefined，execute 返回
  * cancelled result（D5），任务不创建。
+ *
+ * SCHEDULE_CREATE_MARKER / ScheduleCreateOverlay 为 legacy 窗口语义（旧 npm 帧
+ * 由 runtime event-adapter 识别 / 迁移溯源锚点），随 D7 窗口末清理退役。
  *
  * 这是 scheduler 创建路径的定制协议，不是通用富交互协议（与 ask-user 同理）。
  */

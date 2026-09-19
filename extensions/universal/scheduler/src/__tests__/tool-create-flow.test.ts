@@ -11,10 +11,10 @@ import type { ScheduledTask, TaskSnapshot } from '../types.js'
 import { snapshotToTask, toTaskSnapshot } from '../types.js'
 
 /**
- * U2 六步流分支覆盖（.tmp/tech-design/scheduler-create-confirm-modal.md §3.1/§3.3/§3.5）：
- * 预校验 throw / headless 直通附注（D4）/ rpc 确认与取消（D5，GUI 用户取消经 timeout 折叠）/
- * TUI 确认与取消 / abort / channel-error 禁用工具 / non-json / draft models 注入
- * （scopedModels 优先、getAvailable() 回退——P-SCOPED）/ model 透传入 entry 快照。
+ * U2 六步流分支覆盖：预校验 throw / headless 直通附注（D4）/ rpc 确认与取消（D5，
+ * GUI 用户取消经 timeout 折叠）/ TUI 确认与取消 / abort / channel-error 禁用工具 /
+ * non-json / draft models 注入（scopedModels 优先、getAvailable() 回退——P-SCOPED）/
+ * model 透传入 entry 快照（决策编号与 tool.ts / helpers.ts 源码注释同源）。
  *
  * mock ctx 形态参照 sdk-contract.test.ts 的 createFakeCtx（as unknown as ExtensionContext）；
  * 协议层不 mock（四态经 ui.select mock 直接触达：reject → channel-error、undefined →

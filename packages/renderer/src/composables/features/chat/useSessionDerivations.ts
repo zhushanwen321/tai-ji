@@ -69,11 +69,13 @@ export function useSessionDerivations() {
         // hasBackgroundWork：主 turn 已结束但有 background subagent/workflow 仍在跑 → working 态。
         // 必须在 computed 体内读（建立对 recordsBySession 的响应式依赖，records 变化自动重算）。
         const hasBackgroundWork = hasSessionBackgroundWork(id)
-        // hasAskUserPending：富交互 overlay 请求 pending（ask-user ∨ schedule-create，
-        // store getter 谓词扩义自动联动）→ waiting 态（T3 + schedule-create U6）。
+        // hasFormOverlayPending：统一表单 overlay 请求 pending → waiting 态。
+        // 判定键 = form 键，权威口径见 stores/extension-ui.ts hasPendingBlockingOverlay
+        // 注释：新 form 帧原生携带、legacy askUser / scheduleCreate 帧经归一层附加后
+        // 统一命中（T3 + schedule-create U6 随判定键收敛自动联动）。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        const hasAskUserPending = extensionUIStore.hasPendingBlockingOverlay(id)
-        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasAskUserPending)
+        const hasFormOverlayPending = extensionUIStore.hasPendingBlockingOverlay(id)
+        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasFormOverlayPending)
       })
       statusCache.set(id, c)
     }

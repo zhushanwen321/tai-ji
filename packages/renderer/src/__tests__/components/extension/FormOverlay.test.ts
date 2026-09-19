@@ -131,7 +131,7 @@ describe('FormOverlay · choice/text 渲染（AskUserOverlay 等价迁移）', (
     expect(wrapper.find('[data-testid="form-question-text-multi"]').text()).toContain('选哪些语言?')
   })
 
-  it('U15: 单选最后一题不自动前进（Submit 常驻 action bar）', async () => {
+  it('U15: 单选最后一题不自动前进（末题显示 Submit，见 U16 互斥分支）', async () => {
     const wrapper = mountOverlay({ questions: [singleSelectQ] })
 
     await wrapper.find('[data-testid="form-option-Postgres"]').trigger('click')

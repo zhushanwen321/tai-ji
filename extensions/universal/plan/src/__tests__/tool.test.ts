@@ -369,9 +369,27 @@ describe("registerPlanTool", () => {
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
-    it("cancelled (undefined resolve) folds to complete-cancelled staying in plan mode (D4 四态折叠)", async () => {
+    it("timeout via undefined resolve (signal not aborted) folds to complete-cancelled staying in plan mode (D4 四态折叠)", async () => {
+      // rpc 模式 GUI 用户取消 resolve undefined，与超时不可区分（signal 未 abort 折叠
+      // timeout，库层 callMarkerRpc 判别），消费层 cancelled‖timeout 同折后 reason='cancelled'
       const { exec, ctx, pi } = setupGui();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      const res = await exec({ action: "complete" });
+      expect(res.details.action).toBe("complete-cancelled");
+      expect(res.details.reason).toBe("cancelled");
+      expect(res.content[0].text).toContain("Staying in plan mode");
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+    });
+
+    it("cancelled (abort via controllers registry during pending select) folds to complete-cancelled (D4 四态折叠)", async () => {
+      // 真实通道注入（command.ts handleAbort 同款 `controllers.get(sessionId)?.abort()`）：
+      // 挂起窗口内 session abort → pi 实装 resolve undefined → 库层以 signal.aborted 判
+      // reason='cancelled'（区别于上一例的 timeout 折叠源）
+      const { exec, ctx, controllers, pi } = setupGui();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        controllers.get("test-session")?.abort();
+        return undefined;
+      });
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
       expect(res.details.reason).toBe("cancelled");

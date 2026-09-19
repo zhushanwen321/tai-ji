@@ -123,7 +123,7 @@ const allAnswered = computed(() => questionsList.value.every(isQuestionAnswered)
 /** 未答题数（disabled tooltip 文案） */
 const unansweredCount = computed(() => questionsList.value.filter((q) => !isQuestionAnswered(q)).length)
 
-/** 单选选中后自动前进到下一题；已是最后一题则停（Submit 常驻底部 action bar） */
+/** 单选选中后自动前进到下一题；已是最后一题则停（末题显示 Submit，非末题显示下一题——见 isLastQuestion 与 action bar 互斥分支） */
 function advanceToNext(): void {
   if (activeIdx.value < questionsList.value.length - 1) {
     activeIdx.value++

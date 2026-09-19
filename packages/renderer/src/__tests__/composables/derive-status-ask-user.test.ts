@@ -3,11 +3,11 @@
  * hasPendingBlockingOverlay（form 键，ui-presentation-protocol D5 收敛）注入 deriveStatus
  * 的响应式接线（renderer 专属集成段）。
  *
- * deriveStatus 纯函数本体（含 hasAskUserPending 分支/优先级/默认 false）在 core
+ * deriveStatus 纯函数本体（含 hasFormOverlayPending 分支/优先级/默认 false）在 core
  * domain/chat/__tests__/derive-status.test.ts 已复刻全 9 态矩阵——原 describe#1 的
  * 5 个纯函数用例（搬迁残留）已删，回归职责归 core。
  *
- * ask-user 走 extension.ui_request 通道，不产生 toolCall running：agent 阻塞等待用户
+ * 富交互表单走 extension.ui_request 通道，不产生 toolCall running：agent 阻塞等待用户
  * 输入期间，即使后续有流式文本也不应脱离 waiting——本文件锁 store 注入 → 派生值
  * 响应式迁移的用户可见链路。
  *

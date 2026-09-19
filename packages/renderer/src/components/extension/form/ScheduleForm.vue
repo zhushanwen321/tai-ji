@@ -44,7 +44,7 @@ const props = defineProps<{
   question: ScheduleQuestion
 }>()
 const emit = defineEmits<{
-  /** 确认回包（扁平 ScheduleFormResult JSON；壳 Submit 门经经 submit() 触发） */
+  /** 确认回包（扁平 ScheduleFormResult JSON；壳 Submit 门经 submit() 触发） */
   submit: [result: string]
   /** Esc 取消（渲染器级键位，= cancelled result 语义） */
   cancel: []

@@ -11,7 +11,7 @@
  * 优先级：waiting > retrying > compacting > streaming > working > pending > error > stopped > done。
  *
  * - toolCall.status 'running' → waiting（tool 执行中/待审批，agent 暂停）
- * - hasAskUserPending → waiting（ask-user 富交互等用户输入，agent 阻塞；走 extension.ui_request
+ * - hasFormOverlayPending → waiting（富交互表单等用户输入，agent 阻塞；走 extension.ui_request
  *   通道不产生 toolCall running，需独立判定，与 toolCall waiting 并列最高优先级）
  * - chat.retryStates 存在 → retrying（自动重试中）
  * - isCompacting → compacting（上下文压缩中）
@@ -99,9 +99,11 @@ function terminalStatusOfLastMessage(last: Message): DerivedStatus {
  * @param isCompacting 该 session 是否处于 compact 互斥态
  * @param hasBackgroundWork 该 session 是否有 background subagent/workflow 仍在 running
  * @param metaStatus runtime session 元数据 status（未 hydrate 兜底用，W6）
- * @param hasAskUserPending 该 session 是否有 ask-user 富交互请求 pending（CW wave
- *   `session-active-ssot` T3）。ask-user 走 extension.ui_request 通道，不产生 toolCall
+ * @param hasFormOverlayPending 该 session 是否有富交互表单 overlay 请求 pending（CW wave
+ *   `session-active-ssot` T3）。表单走 extension.ui_request 通道，不产生 toolCall
  *   running，故需独立于 toolCall 的 waiting 判定；优先级最高（agent 阻塞等用户输入）。
+ *   判定键 = form 键（新 form 帧原生携带、legacy askUser/scheduleCreate 帧经归一层
+ *   附加后统一命中），权威口径见 renderer stores/extension-ui.ts hasPendingBlockingOverlay。
  */
 export function deriveStatus(
   sessionId: string,
@@ -110,7 +112,7 @@ export function deriveStatus(
   isCompacting = false,
   hasBackgroundWork = false,
   metaStatus?: SessionStatus,
-  hasAskUserPending = false,
+  hasFormOverlayPending = false,
 ): DerivedStatus {
   const msgs = chat.getMessages(sessionId)
   const last = msgs[msgs.length - 1]
@@ -118,10 +120,10 @@ export function deriveStatus(
   // 等待工具执行/审批（最优先：工具阻塞时即使后面有流式也不应显示 streaming）
   if (isWaitingOnToolCall(last)) return 'waiting'
 
-  // ask-user pending → waiting（与 toolCall waiting 并列最高优先级）。
-  // ask-user 走 extension.ui_request 通道不产生 toolCall running，需独立判定：
+  // 富交互表单 pending → waiting（与 toolCall waiting 并列最高优先级）。
+  // 表单走 extension.ui_request 通道不产生 toolCall running，需独立判定：
   // agent 阻塞等待用户回答期间，即使后续有流式文本/重试态也不应脱离 waiting（用户输入优先）。
-  if (hasAskUserPending) return 'waiting'
+  if (hasFormOverlayPending) return 'waiting'
 
   // 自动重试中
   if (chat.getRetryState?.(sessionId)) return 'retrying'

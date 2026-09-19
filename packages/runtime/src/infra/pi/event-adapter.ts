@@ -852,7 +852,8 @@ function tryTranslateFormSelect(
 }
 
 /**
- * 普通 select / confirm / input / editor（无 marker 命中，或 ask-user 检测失败降级到此）。
+ * 普通 select / confirm / input / editor（无 marker 命中，或任一 marker 分支（ask-user /
+ * schedule-create / plan-review / ui-form）检测失败降级到此）。
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
  * 对 string 元素调 .label 产出 undefined[]——普通 select 在前端是坏的。改为 .map(String) 透传。
