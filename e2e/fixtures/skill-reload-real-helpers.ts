@@ -319,8 +319,11 @@ export async function awaitWorkflowDoneTimed(
 /** G1 必达窗口红线（ms）：agent_settled 对账腿秒级 / 15s 定时腿最坏 ≈15s+单轮，30s = 2x 余量 */
 export const WORKFLOW_DONE_MAX_LATENCY_MS = 30_000
 
-/** 到达锚观测容差（ms）= 2× 轮询粒度（完成锚与到达锚各含一次观测延迟） */
-export const DONE_TIMING_OBSERVE_SLACK_MS = 2 * DONE_TIMING_POLL_MS
+/** 观测容差倍数：完成锚与到达锚各含一次观测延迟 */
+const OBSERVE_SLACK_MULTIPLIER = 2
+
+/** 到达锚观测容差（ms）= 2× 轮询粒度 */
+export const DONE_TIMING_OBSERVE_SLACK_MS = OBSERVE_SLACK_MULTIPLIER * DONE_TIMING_POLL_MS
 
 // ── 进程面（孤儿检查 / 引擎 pid 稳定性） ──────────────────────────────
 
