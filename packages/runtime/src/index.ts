@@ -584,6 +584,11 @@ async function main(): Promise<void> {
       // 声明在下方（先于 sessionService 构造后）——createAdapter 仅在 session 创建后调用，
       // 引用恒就绪（与上方 sessionService 自引用闭包同模式）。
       onGenStats: (sid, sample) => genStatsService.recordSample(sid, sample),
+      // 归因降噪（2026-09-19）：成功 compaction → 标记上下文重写，紧随其后的命中率样本
+      // 若显示 0% 归因为 context-rewrite（预期内重建）；failed/aborted 不标记（见
+      // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
+      // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
+      onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
       // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
       // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
