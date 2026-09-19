@@ -11,11 +11,14 @@
  * formatDuration 已移除（chat-flow-timestamp U2：耗时由 Block header 槽直用 format-utils）。
  */
 import { computed, type ComputedRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ToolCall } from '@taiji/shared'
 
 export interface MetaItem {
   /** 高亮态。当前只产出 muted（中性灰 dim）；保留枚举字段以备后续状态色扩展。 */
   tone: 'muted'
+  /** 统计种类：bash 展开态按种类剔除行数（字符串匹配会把「3 lines」这类英文文案漏掉）。 */
+  kind: 'lines' | 'chars'
   text: string
 }
 
@@ -30,10 +33,12 @@ export function useToolMeta(params: {
   isFailed: ComputedRef<boolean>
 }): { metaItems: ComputedRef<MetaItem[]> } {
 
-  /** 字符数格式化：>= CHAR_K_THRESHOLD 显示为 XK chars，否则原值 + chars */
+  const { t } = useI18n()
+
+  /** 字符数格式化：>= CHAR_K_THRESHOLD 显示为 XK + 单位键，否则原值 + 单位键 */
   function formatCharCount(n: number): string {
-    if (n >= CHAR_K_THRESHOLD) return `${(n / CHAR_K_THRESHOLD).toFixed(1)}K chars`
-    return `${n} chars`
+    if (n >= CHAR_K_THRESHOLD) return t('panel.message.metaCharsK', { n: (n / CHAR_K_THRESHOLD).toFixed(1) })
+    return t('panel.message.metaChars', { n })
   }
 
   const metaItems = computed<MetaItem[]>(() => {
@@ -46,10 +51,10 @@ export function useToolMeta(params: {
     const output = tool?.output ?? ''
     if (!params.isFailed.value && OUTPUT_META_TOOLS.has(name) && output.trim()) {
       const lineCount = output.split('\n').length
-      items.push({ tone: 'muted', text: `${lineCount} 行` })
+      items.push({ tone: 'muted', kind: 'lines', text: t('panel.message.metaLines', { n: lineCount }) })
       // read/cat 额外显示字符数（文件内容大小有参考价值）
       if (name === 'read' || name === 'cat') {
-        items.push({ tone: 'muted', text: formatCharCount(output.length) })
+        items.push({ tone: 'muted', kind: 'chars', text: formatCharCount(output.length) })
       }
     }
     return items

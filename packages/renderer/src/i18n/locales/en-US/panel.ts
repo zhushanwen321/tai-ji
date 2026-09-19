@@ -57,7 +57,12 @@ export default {
     // the collapsed state reuses collapse, no new key)
     blockScrollLines: '{from}–{to} of {total} lines',
     blockScrollExpandAll: 'Expand all',
+    // Process-block (third family) header prefixes and detail-bar stats
     thinkingBlock: 'Thinking',
+    subagent: 'Subagent',
+    metaLines: '{n} lines',
+    metaChars: '{n} chars',
+    metaCharsK: '{n}K chars',
     imagePlaceholder: 'Image cache full',
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',

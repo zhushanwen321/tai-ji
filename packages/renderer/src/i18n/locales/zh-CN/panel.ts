@@ -56,11 +56,16 @@ export default {
     // 无「全部」语义（收起态复用 collapse，不另立键）
     blockScrollLines: '{from}–{to} / {total} 行',
     blockScrollExpandAll: '展开全部',
+    // 过程块（第三族）header 前缀与细节条：前缀是「块类型标记」，细节条是技术统计
     thinkingBlock: '思考',
+    subagent: '子代理',
+    metaLines: '{n} 行',
+    metaChars: '{n} 字符',
+    metaCharsK: '{n}K 字符',
     imagePlaceholder: '图片缓存已满',
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
     imageUnavailable: '图片不可用',
-    workflow: 'Workflow',
+    workflow: '工作流',
     copyMarkdown: '复制为 Markdown',
     forkAsk: 'fork 提问（在新分支追问，与主线隔离）',
     forkFailed: 'fork 后台失败：{error}',
