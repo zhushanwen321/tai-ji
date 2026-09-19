@@ -48,7 +48,7 @@
 3. **新建会话不投 didActivate**（设计内边界：不经 session.switch 不投递）→ 首次 switch 前徽标补拉与 E13 判定不生效。
 4. **纯扩展命令会话的任务重启即失**：pi session 文件延迟写入（无 assistant 消息不落盘），建任务后若从未产生模型 turn，重启后会话 JSONL 为空。pi 既有行为。
 5. **杀 pi 后 3-6s 内点击的静默丢帧**：极端序列（多轮杀进程）诱发，帧出站但 runtime 零处理痕迹；疑似 pi-exited 后 client 状态与 ensureActiveOrBroadcast 竞态，建议单开排查。
-6. **对账表 tooltip 面（prompt/expiresAt/model/id 进 tooltip）未渲染**：GuiComponent TreeItem 无 tooltip 字段，结构性不可渲染；id 可达性由行内 notice 文案承担（E5/E7 文案明文含 id 与手敲退路）。补协议字段或改对账表呈现形态属后续设计裁决。
+6. **对账表 tooltip 面（prompt/expiresAt/model/id 进 tooltip）未渲染**：GuiComponent TreeItem 无 tooltip 字段，结构性不可渲染；id 可达性部分由行内 notice 承担：E7 busy 文案明文含 id 与手敲退路；E5（任务已不存在）与 command-missing 文案不含 id（任务已删场景 id 无消费价值；command-missing 场景的手敲退路缺口登记待裁决）。补协议字段或改对账表呈现形态属后续设计裁决。
 7. **写路径的重复通知**：scheduler 扩展命令 handler 的 `ctx.ui.notify` 与 modal 行内 notice 重复呈现（扩展既有行为，消除需改扩展，另一 scope）。
 
 ## 5. 验收产物
