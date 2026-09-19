@@ -17,8 +17,13 @@ const PERCENT_SCALE = 100;
 const PI_DEFAULT_RESERVE_TOKENS = 16_384;
 
 /**
- * 阈值提醒消息（D3/D4）：越档信息 + 用量数据 + 工具名 + 三条件自查 + 可忽略出口。
+ * 阈值提醒消息（D3/D4/D4'）：越档信息 + 工具名 + 三条件自查 + 可忽略出口。
  * 多档同时越过合并为一条（D3 去重规则）。
+ *
+ * D4' 短文约束：提醒是静默注入（不触发 turn、不进对话流），长度直接计入每次请求的
+ * 上下文——固定两行（降智提示另加一行），三条件压进一行序号列表，不再分点铺开。
+ * 语义不减：三条件、工具名、「可忽略」出口与「同档只提醒一次」全部保留（措辞仍是
+ * 数据投递不是指令——避免 agent 见提醒就压缩）。
  */
 export function buildThresholdReminder(
 	crossedThresholds: readonly number[],
@@ -31,17 +36,11 @@ export function buildThresholdReminder(
 		.map((t, index) => `${formatK(t)}（第 ${index + 1} 档）`)
 		.join("、");
 	const lines = [
-		`[smart-context 提示] 上下文当前 ${formatK(tokens)} / ${formatK(contextWindow)} tokens（${percent}%），已超过提醒阈值 ${tiers}。`,
-		``,
-		`compact_context 工具可用于压缩上下文。请自行判断是否现在压缩——仅当以下三个条件同时满足时才调用：`,
-		`1. 当前任务的一个阶段已完成并验证（如一批文件改完、测试通过）；`,
-		`2. 后续工作不再依赖将被压缩的早期细节；`,
-		`3. 上下文已超过阈值（本提示即第 3 条的数据依据）。`,
-		``,
-		`若任务仍在进行中、或近期仍需引用早期上下文，忽略本提示继续工作即可（本档位不会重复提醒，压缩后会重置）。`,
+		`[smart-context] 上下文 ${formatK(tokens)} / ${formatK(contextWindow)}（${percent}%），已越提醒阈值 ${tiers}。`,
+		`达阶段边界且后续不依赖早期细节时才调用 compact_context（三条件同时满足：①当前任务的一个阶段已完成并验证 ②后续工作不再依赖将被压缩的早期细节 ③上下文已超阈值）；否则忽略本提示继续工作（同档只提醒一次，压缩后重置）。`,
 	];
 	if (compactionCount >= DEGRADATION_HINT_MIN_COMPACTIONS) {
-		lines.push(``, buildDegradationHintLine());
+		lines.push(buildDegradationHintLine());
 	}
 	return lines.join("\n");
 }

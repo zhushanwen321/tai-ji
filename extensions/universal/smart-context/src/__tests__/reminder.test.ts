@@ -9,14 +9,18 @@ import {
 import { buildSameModelInstruction, buildTranscriptPointer, CHECKPOINT_PREAMBLE } from "../prompts.js";
 
 describe("buildThresholdReminder（D3/D4：数据投递不强制）", () => {
-	it("含用量数据、档位、三条件自查清单、可忽略出口", () => {
+	it("含用量数据、档位、三条件自查、可忽略出口，且固定两行（D4' 短文约束）", () => {
 		const msg = buildThresholdReminder([200_000], 215_000, 1_000_000, 0);
 		expect(msg).toContain("215K / 1000K");
 		expect(msg).toContain("21.5%");
 		expect(msg).toContain("200K");
 		expect(msg).toContain("compact_context");
-		expect(msg).toContain("1. 当前任务的一个阶段已完成");
+		// 三条件压缩进一行序号列表，语义不减
+		expect(msg).toContain("①当前任务的一个阶段已完成并验证");
+		expect(msg).toContain("②后续工作不再依赖将被压缩的早期细节");
+		expect(msg).toContain("③上下文已超阈值");
 		expect(msg).toContain("忽略本提示继续工作");
+		expect(msg.split("\n")).toHaveLength(2);
 	});
 
 	it("多档合并为一条消息", () => {
@@ -29,6 +33,7 @@ describe("buildThresholdReminder（D3/D4：数据投递不强制）", () => {
 		const with_ = buildThresholdReminder([200_000], 215_000, 1_000_000, 2);
 		expect(without).not.toContain("compacted multiple times");
 		expect(with_).toContain("compacted multiple times");
+		expect(with_.split("\n")).toHaveLength(3);
 	});
 });
 

@@ -8,7 +8,7 @@
 - **双模式生成接管**（`session_before_compact`，覆盖工具 / `/compact` / 内建 auto 三条路径）：
   - same-model：完整原始上下文 + 会话原 system prompt + tools + 末尾追加压缩指令——前缀缓存全命中，成本≈增量指令+输出，且模型看全量上下文（质量上限最高）
   - cross-model：调用 pi 原生 `compact()` 仅换模型与凭证——split-turn / fileOps / previousSummary 原生组装
-- **3 档阈值提醒**（默认 400K/500K/600K）：`agent_settled` 越档检查，每档一次、多档合并、压缩后重置，followUp 投递；措辞是数据投递不是指令
+- **3 档阈值提醒**（默认 400K/500K/600K）：`agent_settled` 越档检查，每档一次、多档合并、压缩后重置。投递是**静默注入**（`pi.sendMessage` custom message + `triggerTurn:false` + `display:false`）——只进 LLM 上下文，不触发新 turn、不进对话流，用户继续对话时模型在下一轮自然看到；已提醒档位经 `pi.appendEntry` 落在 session entries（`smart-context:fired`），reload / 进程重启后从 entries 重建，同一档不会重复提醒。提醒文案两行以内，措辞是数据投递不是指令
 - **排除模型**（精准 `provider/modelId` 匹配）：工具拒绝 + 不提醒 + 回落 pi 原生生成；切换跨界时注入一条可用性通知，downshift（切小窗模型将触线）时建议先压缩
 - **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断（本 session 内停止接管）、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示（累计压缩 ≥2 次后附加）
 - **subagent 进程**自动静默（`TAIJI_AGENT_SUBAGENT` 标记）
