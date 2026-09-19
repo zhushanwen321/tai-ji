@@ -1,8 +1,9 @@
 // src/execution/engine/common/journal-wiring.ts
 //
 // [D3-③ journal 接线合一] host 侧 event journal 接线的共享 helper（唯一实现，调用
-// 点全部在编排层：workflow 域（wireEventJournal taskId=record.id）+ chat 域
-// runEngineTask 与 tool 域 runAndFinalize 两处（同 record.id））。
+// 点全部在 workflow 域编排层两处：workflow-dispatch.ts 与 run-orchestration.ts 的
+// runAndFinalize（taskId 同为 record.id——workflow 域专用，chat 域不接 event
+// journal））。
 //
 // [池抽象降级 2026-09-13] 原「占位池 key + onPoolResolved retarget」机制已删除
 // （两引擎 poolKey 恒 'shared'，journal 固定落 engines/<engineId>/shared/，落盘
@@ -25,7 +26,7 @@ import type { EngineHandle } from "../types.ts";
 export interface JournalWiringOptions {
   /** 实际执行引擎 id（journal 路径分段 + line 元数据）。 */
   engineId: string;
-  /** 宿主侧任务标识（journal 文件名；三处调用点统一 = record.id）。 */
+  /** 宿主侧任务标识（journal 文件名；两处调用点统一 = record.id）。 */
   taskId: string;
   /**
    * journal 落盘后的事件转发（workflow 域的 liveRecord 通道）。缺省不转发（chat 域

@@ -11,8 +11,8 @@
 // fire 处置 + 轮末收口协作（finalizeRoundToIdle / consumePendingArchive）+ message
 // 资格引擎轴 gate（engineSupportsConversation——[modeless 波1] SP-5 记录级升级门
 // canUpgradeToConversation 消亡后的唯一资格判据）+ Continuation 生命周期显式接口（清理/清队/在飞轮
-// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、引擎编排
-//（kickOffEngineRun/runEngineTask/adopt）、终态收口（settleOneShotOutcome）与
+// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、引擎死亡
+// 分诊（adoptOnProcessDeath）、终态收口（settleOneShotOutcome）与
 // pool/worktree 资源装配留 run-orchestration。
 //
 // [G2 / R1 打样模式 3] 与 run-orchestration 零互调零 import：跨文件协作经壳 deps
@@ -416,8 +416,8 @@ export class ChatRounds {
    *
    * [U6b / B-routing] 非 pi 会话轮（zcode cold 续聊）的运行中句柄回填通道：每轮
    * session/create 新会话，新 sessionRef 经 onHandleReady 回传——**覆写**语义，
-   * 刻意区别于 runEngineTask backfillEngineHandle 的补缺语义（one-shot 单轮 +
-   * LC-4 迟到补发用补缺；cold 续聊每轮换锚，旧 sessionId 必须被替换——否则
+   * 刻意区别于 one-shot 回填的按字段补缺语义（one-shot 单轮 + LC-4 迟到补发
+   * 用补缺；cold 续聊每轮换锚，旧 sessionId 必须被替换——否则
    * transcriptAnchorOf 派生的 resume 锚停在旧 session，引擎侧注入的历史每轮缺最新
    * 一轮）。落 entry 经 store.reportRecordTransition（appendEvent 既有 engineHandle
    * 投影通道——GUI 经 entry 重建 record 即拿到新锚）。pi 不挂本回调：pi 会话锚是
@@ -436,8 +436,8 @@ export class ChatRounds {
       updateFromEvent(record, event);
       refreshFromProtocolEvent(record.id);
     };
-    // [modeless 波1] 运行中句柄回填的两段语义（每 run 局部状态——承接原
-    // runEngineTask backfillEngineHandle 补缺族 + 每轮换锚两形态的并集）：
+    // [modeless 波1] 运行中句柄回填的两段语义（每 run 局部状态——承接 one-shot
+    // 单轮按字段补缺 + 每轮换锚两形态的并集）：
     //   - 本 run 首回调 = 权威整替（zcode 每轮 session/create 的新 sessionRef 必须
     //     覆盖旧轮锚点——旧 sessionId 残留会把 resume 锚停在旧 session）；
     //   - 后续回调 = 按字段补缺（LC-4 迟到只补 sessionFile 的 partial 不丢
@@ -507,7 +507,7 @@ export class ChatRounds {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // [modeless 波1] D10 终止链接线（原 runEngineTask 专属，随四象限坍缩并入统一
+        // [modeless 波1] D10 终止链接线（原 runEngineTask 专属——已删，随四象限坍缩并入统一
         // 轮次面）：engine spawn 的子进程注册进 spawnedChildren 记账（cancelBackground
         // SIGTERM / dispose killAll 收割对引擎 per-run 子进程生效）。
         onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),

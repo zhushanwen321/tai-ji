@@ -107,8 +107,9 @@ export class RemoteEngine implements EnginePort {
     this.id = opts.engineId;
     if (opts.manifest.modelCatalog === undefined || opts.manifest.modelCatalog === null) {
       // 同步成员形态映射（必写死）：manifest 省略 modelCatalog → validateModel 成员
-      // **不实现**（消费方 model-validation.ts:62 `typeof validateModel !== "function"`
-      // → 跳过校验恒放行）。实例 own property 置 undefined 遮蔽原型方法——
+      // **不实现**（消费方 model-validation.ts:115/:224 两处判定点
+      // `typeof engine.validateModel !== "function"` → 跳过校验恒放行）。实例 own
+      // property 置 undefined 遮蔽原型方法——
       // typeof engine.validateModel === "undefined"。
       (this as { validateModel?: unknown }).validateModel = undefined;
     }
