@@ -234,6 +234,16 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
       expect(p?.records, '每 session preserved records 应 = 1 个在飞 subagent').toBe(1)
     }
 
+    // ── 存活反证：无断连杀链（必须在 run 在飞窗口内断言）──
+    // 位置契约与 survival 同款：reload 窗口 + run 在飞期间 relay 不得 kill-on-disconnect。
+    // 不能移到 done 之后——两 run 终态后完成通知 triggerTurn 命中 faux 队列耗尽（防重播种
+    // 守卫的预期形态）→ 主 pi turn 收尾与引擎子进程退场存在时序竞态，收尾兜底
+    // 「connection lost, killing child (code=143)」会在 run 已终态、数据无损后落盘，
+    // 属设计内收尾形态，非「在飞 run 被误杀」——done 后再查必然误红（2026-09-19 复验实证）。
+    const runtimeLogInflight = runtimeLogLines(dataDir).join('\n')
+    expect(runtimeLogInflight.includes('connection lost'), '不应出现 relay kill-on-disconnect').toBe(false)
+    expect(runtimeLogInflight.includes('code=143'), '不应出现 code=143').toBe(false)
+
     // ── A 的 dialog：切回 A，reload 后触发的 ask_user 送达 UI → 应答 → 关闭 ──
     await selectSessionInSidebar(page, SESSION_A_LABEL)
     await answerOverlay(page)
@@ -270,10 +280,6 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
       }
       expect(rec?.status, `run ${runId} 末条 workflow-record 应为终态 done`).toBe('done')
     }
-
-    const runtimeLog = runtimeLogLines(dataDir).join('\n')
-    expect(runtimeLog.includes('connection lost'), '不应出现 relay kill-on-disconnect').toBe(false)
-    expect(runtimeLog.includes('code=143'), '不应出现 code=143').toBe(false)
 
     listenWsA?.close()
     listenWsB?.close()

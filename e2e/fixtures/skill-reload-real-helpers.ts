@@ -269,9 +269,35 @@ function psEntries(): PsEntry[] {
 /** 引擎执行树 marker（含子进程；孤儿子集都是这三族，见文件头 marker 说明） */
 const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'relay.mjs', 'resources/pi/'] as const
 
+/** 从命令行提取 --session-dir 的参数值（缺该 flag 返回 null）。 */
+function sessionDirValueOf(command: string): string | null {
+  const FLAG = "--session-dir "
+  const idx = command.indexOf(FLAG)
+  if (idx === -1) return null
+  return command.slice(idx + FLAG.length).trim().split(" ")[0] ?? null
+}
+
 function pidsMatching(markers: readonly string[]): number[] {
+  // 排除宿主同跑实例：marker 是通用串（relay.mjs / resources/pi/ / pi-subagent-cli.mjs），
+  // 宿主机上同跑的打包版 TaiJi.app（数据目录 ~/.taiji）的引擎执行树进程同样命中——
+  // 全局 ps 扫描无法凭 marker 区分被测实例与宿主实例，打包版常驻 relay 会被误计入
+  // baseline 且永不退出 → waitForEngineTreeGone 误报孤儿（2026-09-19 复验实证：
+  // 3 个残留 pid 全部是 /Applications/TaiJi.app 的 relay）。判属只认 --session-dir
+  // 参数值：被测实例全部引擎进程的 session-dir 都在 mkdtemp 自建的 os.tmpdir() 下；
+  // 宿主实例恒在 ~/.taiji 下。注意不能用「command 含 tmp 提法」宽匹配——打包版
+  // relay 的 --append-system-prompt 参数值恰好也落在本机 tmp 根下（同上实证），
+  // 任意位置匹配会把宿主进程误判为被测。无 --session-dir 的引擎 CLI（dataDir 走
+  // env 不走 argv）以「不含宿主数据目录提法 ~/.taiji」兜底判属被测；宿主同族 cli
+  // 的 argv 带 --session-dir ~/.taiji/...，由前一支排除。
+  const tmpRoot = os.tmpdir()
+  const hostPackagedDataDir = path.join(os.homedir(), ".taiji")
   return psEntries()
-    .filter((e) => markers.some((mk) => e.command.includes(mk)))
+    .filter((e) => {
+      if (!markers.some((mk) => e.command.includes(mk))) return false
+      const sessionDir = sessionDirValueOf(e.command)
+      if (sessionDir !== null) return sessionDir.startsWith(tmpRoot)
+      return !e.command.includes(hostPackagedDataDir)
+    })
     .map((e) => e.pid)
     .sort((a, b) => a - b)
 }
