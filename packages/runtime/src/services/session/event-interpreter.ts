@@ -508,6 +508,13 @@ export interface EventInterpreterOptions {
    */
   onTraceSync?: (sessionId: string, trigger: string) => void
   /**
+   * 成功 compaction 后触发（归因降噪 2026-09-19；组合根注入 GenStatsService.markContextRewritten）。
+   *
+   * 语义：上下文被重写过（前缀整体变化）——命中率归因链路首个 0% 样本归为 context-rewrite。
+   * 只在 compaction-end 且 `result` 真值（成功）时调用；failed / aborted 不调（上下文未变）。
+   */
+  onCompactionContextRewritten?: (sessionId: string) => void
+  /**
    * [ADR-0047] ping get_state 进程健康探测回调（组合根注入）。
    *
    * 延迟解析 client：interpreter 在 session 创建时构造，那时 client 可能尚未 spawn。
@@ -620,6 +627,7 @@ export class EventInterpreter {
       onOccupancyTransition: opts.onOccupancyTransition,
       onContextUpdate: opts.onContextUpdate,
       onTraceSync: opts.onTraceSync,
+      onContextRewritten: () => opts.onCompactionContextRewritten?.(sessionId),
     })
   }
 
