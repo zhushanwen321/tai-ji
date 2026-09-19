@@ -120,6 +120,8 @@ grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.tai
 
 打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。机制细节见 relay 模块（源码注释待后续批次补齐）。
 
+**同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。
+
 ### 8. runtime 启动即退出："fatal: relay server init failed"
 
 relay socket server 在 runtime listen 后同步初始化，失败即 fatal + exit 1（fail-fast：覆盖/复用 socket 会劫持他人注册表，宁可不起）。常见原因：`<dataDir>/run` 不可写、残留 socket 文件被活实例持有：

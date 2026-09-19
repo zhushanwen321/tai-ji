@@ -3,8 +3,8 @@
  *
  * 用户裁决口径：TurnMeta 状态行展示的是**整个 agent-turn** 的聚合事实——
  * - 时长：turn 起点（user 消息 / 首条 assistant）→ 最后一次**产出结束**（含工具执行 / 思考）
- * - 字符：模型生成文本总量 = Σ 正文 + Σ thinking（跨 turn 内全部 assistant 段；不含工具
- *   参数 / 工具输出等环境产出）
+ * - token：本 turn 全部 LLM 调用的 usage.outputTokens 之和（**只统计已上报的真实值，不估算**——
+ *   用户裁决 A）——pi output 含正文 + 思考 + 工具参数
  *
  * 回归锚点（旧口径的两个可见缺陷）：
  * 1. 单条 assistant 的 turn 恒显「1s」（起止同源）→ 现在读 Message.endedAt，得真实墙钟。
@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Message } from '@taiji/shared'
 import type { MessageTurn } from '../message-turns'
-import { deriveTurnAggregates } from '../message-turns'
+import { deriveTurnAggregates } from '../turn-aggregates'
 
 const T0 = 1_700_000_000_000
 
@@ -85,61 +85,58 @@ describe('deriveTurnAggregates 时间轴', () => {
   })
 
   it('空 turn（无 user / 无 assistant）→ 0/0（消费侧 0s 兜底）', () => {
-    expect(deriveTurnAggregates(turn([]))).toEqual({ startedAt: 0, endedAt: 0, generatedChars: 0 })
+    expect(deriveTurnAggregates(turn([]))).toEqual({ startedAt: 0, endedAt: 0, generatedTokens: 0 })
   })
 
-  it('notices（bash 记录 / liveOnly 警告）不参与时间轴与字符（不是 agent 产出）', () => {
+  it('notices（bash 记录 / liveOnly 警告）不参与时间轴与 token（不是 agent 产出）', () => {
     const withNotice: MessageTurn = {
       ...turn([assistant({ timestamp: T0, endedAt: T0 + 1_000 })]),
       notices: [{ id: 'n1', role: 'system', content: 'x'.repeat(500), status: 'complete', timestamp: T0 + 99_000 }],
     }
-    expect(deriveTurnAggregates(withNotice)).toEqual({ startedAt: T0, endedAt: T0 + 1_000, generatedChars: 0 })
+    const agg = deriveTurnAggregates(withNotice)
+    expect(agg.startedAt).toBe(T0)
+    expect(agg.endedAt).toBe(T0 + 1_000)
+    expect(agg.generatedTokens).toBe(0)
   })
 })
 
-describe('deriveTurnAggregates 生成字符总量', () => {
-  it('Σ 正文 + Σ thinking，跨全部 assistant 段累计', () => {
+describe('deriveTurnAggregates 生成 token 总量（只统计已上报真值，不估算）', () => {
+  it('Σ usage.outputTokens，跨全部 assistant 段累计', () => {
     const agg = deriveTurnAggregates(turn([
-      assistant({ id: 'a1', content: 'abc', thinking: [{ id: 'th1', content: '想了一', collapsed: true }] }),
+      assistant({ id: 'a1', content: 'abc', usage: { inputTokens: 10, outputTokens: 120 } }),
+      assistant({ id: 'a2', content: 'de', usage: { inputTokens: 5, outputTokens: 41 } }),
+    ]))
+    expect(agg.generatedTokens).toBe(161)
+  })
+
+  it('无 usage 的段（live 流式中的当前调用）计入 0，不估算——数字宁小不假', () => {
+    const agg = deriveTurnAggregates(turn([
+      assistant({ id: 'a1', usage: { inputTokens: 1, outputTokens: 122 } }),
+      assistant({ id: 'a2', content: '正在写很长的正文，但这次调用还没结束', status: 'streaming' }),
+    ]))
+    expect(agg.generatedTokens).toBe(122)
+  })
+
+  it('单段 turn 流式中 → 0（状态行不渲染数字，收口后跳完整值）', () => {
+    const agg = deriveTurnAggregates(turn([assistant({ content: 'abc', status: 'streaming' })]))
+    expect(agg.generatedTokens).toBe(0)
+  })
+
+  it('工具参数不计入公式（token 来自 usage.output，而非文本重算——无按 block 分类）', () => {
+    const agg = deriveTurnAggregates(turn([
       assistant({
-        id: 'a2',
-        content: 'de',
-        thinking: [
-          { id: 'th2', content: '想二', collapsed: true },
-          { id: 'th3', content: '三点', collapsed: true },
-        ],
+        content: '',
+        usage: { inputTokens: 3, outputTokens: 272 },
+        toolCalls: [{ id: 'tc1', toolName: 'read', input: { path: 'a'.repeat(300) }, output: 'b'.repeat(5_000), status: 'completed', startTime: T0 }],
       }),
     ]))
-    // 正文 3 + 2 = 5；思考 3 + 2 + 2 = 7
-    expect(agg.generatedChars).toBe(12)
+    expect(agg.generatedTokens).toBe(272)
   })
 
-  it('user / system 文本不计入（只算模型生成）', () => {
-    const agg = deriveTurnAggregates(turn([assistant({ content: 'ok' })], T0))
-    expect(agg.generatedChars).toBe(2)
-  })
-
-  it('工具参数 / 工具输出不计入（环境产出，非模型生成）', () => {
+  it('usage 全零（失败帧）→ 0（0 是真实测量值，不视为缺失）', () => {
     const agg = deriveTurnAggregates(turn([
-      assistant({
-        content: 'ok',
-        toolCalls: [{
-          id: 'tc1',
-          toolName: 'read',
-          input: { path: 'a'.repeat(300) },
-          output: 'b'.repeat(5_000),
-          status: 'completed',
-          startTime: T0,
-        }],
-      }),
+      assistant({ content: '', usage: { inputTokens: 0, outputTokens: 0 } }),
     ]))
-    expect(agg.generatedChars).toBe(2)
-  })
-
-  it('Segment[] content 经 normalizeContent 归一（防御路径：assistant 理论恒 string）', () => {
-    const agg = deriveTurnAggregates(turn([
-      assistant({ content: [{ type: 'text', text: 'abcd' }] }),
-    ]))
-    expect(agg.generatedChars).toBe(4)
+    expect(agg.generatedTokens).toBe(0)
   })
 })
