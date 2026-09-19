@@ -54,7 +54,7 @@ import {
 
 const SESSION_LABEL = 'wf-disconnect-recovery'
 
-/** 稳态观察窗：覆盖一个完整 15s 对账定时腿周期 + 1s 余量（u1 落地后定时腿周期；当前 HEAD 无水位机制，窗口空过） */
+/** 稳态观察窗：覆盖一个完整 15s 对账定时腿周期 + 1s 余量（u1 落地后定时腿周期） */
 const STEADY_WINDOW_MS = 16_000
 
 function makeStreamText(tag: string): string {

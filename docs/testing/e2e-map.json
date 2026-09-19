@@ -343,6 +343,7 @@
       "id": "E2E-SKILLRELOAD-04",
       "summary": "workflow 断连恢复（A2）：WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉恢复 + GUI 收敛（真实 app + faux LLM 演员）",
       "scope": [
+        "packages/runtime/src/infra/pi/event-adapter.ts",
         "packages/runtime/src/services/session/**",
         "packages/runtime/src/services/message-bus/**",
         "packages/runtime/src/transport/session-message-handler.ts",
@@ -365,7 +366,7 @@
       "run": "npx playwright test e2e/workflow-disconnect-recovery.spec.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（来源设计 .tmp/tech-design/reload-closeout-reliability.md §4 A2，reload-closeout-reliability 流水线 u3a 编写 / u3b 执行）。传输兜底面回归非水位证明：断连下 publish 正常完成推进水位、重连后 diff 恒空（水位结构性不触发），恢复只能来自既有传输兜底——恢复来源双断言 = session.subscribe reply.stateSnapshot 携带 done workflowUpdate last-value 回放帧（message-bus state topic 写快照 + subscribe 回放既有机制）+ session.getWorkflows 冷拉 RPC 终态记录（renderer WS 重连冷拉同款）。断连载体 = spec 自备 WS 客户端（与 renderer 同协议面：auth + subscribe + 回放消费）；不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经验证，不押注未验证工具行为），GUI 收敛以托盘 data-state idle 终态断言锚定。稳态 16s 窗断言无重复 done live 帧（A3 单测锁定结构属性的 e2e 面）。与 01/02/03 同 faux/L2.5 裁决与执行前置。"
+      "note": "R2 归宿（来源设计 .tmp/tech-design/reload-closeout-reliability.md §4 A2，reload-closeout-reliability 流水线 u3a 编写 / u3b 执行）。传输兜底面回归非水位证明：断连下 publish 正常完成推进水位、重连后 diff 恒空（水位结构性不触发），恢复只能来自既有传输兜底——恢复来源双断言 = session.subscribe reply.stateSnapshot 携带 done workflowUpdate last-value 回放帧（message-bus state topic 写快照 + subscribe 回放既有机制）+ session.getWorkflows 冷拉 RPC 终态记录（renderer WS 重连冷拉同款）。断连载体 = spec 自备 WS 客户端（与 renderer 同协议面：auth + subscribe + 回放消费）；不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经验证，不押注未验证工具行为），GUI 收敛以托盘 data-state idle 终态断言锚定。稳态 16s 窗断言无重复 done live 帧（A3 单测锁定结构属性的 e2e 面）。与 01/02/03 同 faux/L2.5 裁决与执行前置。scope 含 event-adapter.ts（record-reconcile 触发接线必经链）。"
     },
     {
       "id": "E2E-EQUIV-01",
