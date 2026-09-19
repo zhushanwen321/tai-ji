@@ -33,6 +33,7 @@ import {
   resolveEffectiveSystemPrompt,
   resolveAppendSystemPrompt,
   resolveLaunchPresetOptions,
+  buildPresetFallbackEnv,
   buildPresetClientOptions,
   warnLaunchEffectiveMismatch,
 } from '../launch-params.js'
@@ -51,6 +52,7 @@ import type { IManagedSessionView } from '../types.js'
 import type { IEventAdapter } from '../../../interfaces.js'
 import type { IProcessManager } from '../../ports/pi-engine.js'
 import type { SessionSummary } from '@taiji/shared'
+import { PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
 
 function makeConfigStore(paths: string[]): IConfigStore {
   return { getSkillPaths: () => paths } as unknown as IConfigStore
@@ -214,6 +216,30 @@ describe('resolveLaunchPresetOptions', () => {
   it('builtin:full 也取不到（理论不可达）→ undefined', async () => {
     const svc = makePresetService({})
     await expect(resolveLaunchPresetOptions(svc, 'p1', '/cwd')).resolves.toBeUndefined()
+  })
+})
+
+describe('buildPresetFallbackEnv（F1b：回落事实 → pi 出站 env）', () => {
+  it('回落 → FROM=原悬空 id / TO=builtin:full（两键齐备，trace 据此记 presetFallback）', () => {
+    const resolution = { fellBackFromPresetId: 'custom:gone-uuid' } as PresetResolution
+    expect(buildPresetFallbackEnv(resolution)).toEqual({
+      [PRESET_FALLBACK_ENV_KEYS.FROM]: 'custom:gone-uuid',
+      [PRESET_FALLBACK_ENV_KEYS.TO]: 'builtin:full',
+    })
+  })
+
+  it('未回落 / resolution undefined → 两键写空串（显式清除父 env 可能继承的陈旧值，防假披露）', () => {
+    const empty = {
+      [PRESET_FALLBACK_ENV_KEYS.FROM]: '',
+      [PRESET_FALLBACK_ENV_KEYS.TO]: '',
+    }
+    expect(buildPresetFallbackEnv(undefined)).toEqual(empty)
+    expect(buildPresetFallbackEnv({} as PresetResolution)).toEqual(empty)
+  })
+
+  it('键名与 shared SSOT 一致（写读两侧字面量镜像的权威端）', () => {
+    expect(PRESET_FALLBACK_ENV_KEYS.FROM).toBe('TAIJI_PRESET_FALLBACK_FROM')
+    expect(PRESET_FALLBACK_ENV_KEYS.TO).toBe('TAIJI_PRESET_FALLBACK_TO')
   })
 })
 

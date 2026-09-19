@@ -81,7 +81,7 @@ function makeEnv(presetService: PresetService, scanned: ScannedSession) {
     setSessionName: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
   }
-  const createSession = vi.fn(async () => client)
+  const createSession = vi.fn(async (_sessionId: string, _cwd: string, _options?: unknown) => client)
   const svc: ILifecycleSessionOps = {
     getExtensionPaths: vi.fn(async () => [] as string[]),
     getSkillPaths: vi.fn(() => [] as string[]),
@@ -121,7 +121,13 @@ function makeEnv(presetService: PresetService, scanned: ScannedSession) {
     notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
-  return { lifecycle }
+  return { lifecycle, createSession }
+}
+
+/** 取 pm.createSession 第 n 次调用的 options.env（F1b 出站通道断言）。 */
+function spawnEnv(createSession: ReturnType<typeof makeEnv>['createSession'], n = 0): Record<string, string> {
+  const options = createSession.mock.calls[n]?.[2] as { env?: Record<string, string> } | undefined
+  return options?.env ?? {}
 }
 
 describe('restore 回落披露（F1 / 设计 §7.5 E4）', () => {
@@ -154,6 +160,12 @@ describe('restore 回落披露（F1 / 设计 §7.5 E4）', () => {
 
     const summary = await env.lifecycle.restoreSession('sess-restore')
 
+    // F1b 出站通道：回落事实随 spawn env 到达 pi 子进程（trace 扩展据此写 presetFallback）
+    expect(spawnEnv(env.createSession, 0)).toMatchObject({
+      TAIJI_PRESET_FALLBACK_FROM: GONE_PRESET_ID,
+      TAIJI_PRESET_FALLBACK_TO: 'builtin:full',
+    })
+
     // 携带层：summary 披露回落（renderer chip/声明行据此显示「本次以全工具模式启动」）
     expect(summary.launchPresetFallbackTo).toBe('builtin:full')
     // 原悬空 id 仍保留（chip 才能同时报「模式已删除（id）」）
@@ -171,6 +183,11 @@ describe('restore 回落披露（F1 / 设计 §7.5 E4）', () => {
 
     expect(summary.launchPresetId).toBe(GONE_PRESET_ID)
     expect(summary.launchPresetFallbackTo).toBeUndefined()
+    // F1b 出站通道：无回落 → 两键空串（不得对 pi 假披露）
+    expect(spawnEnv(env.createSession, 0)).toMatchObject({
+      TAIJI_PRESET_FALLBACK_FROM: '',
+      TAIJI_PRESET_FALLBACK_TO: '',
+    })
     const active = env.lifecycle.get('sess-restore') as unknown as { launchPresetFallbackTo?: string }
     expect(active.launchPresetFallbackTo).toBeUndefined()
   })
@@ -182,5 +199,10 @@ describe('restore 回落披露（F1 / 设计 §7.5 E4）', () => {
 
     expect(summary.launchPresetId).toBe('builtin:full')
     expect(summary.launchPresetFallbackTo).toBeUndefined()
+    // 历史 session 的 builtin:full 兜底不是「回落」——env 两键空串
+    expect(spawnEnv(env.createSession, 0)).toMatchObject({
+      TAIJI_PRESET_FALLBACK_FROM: '',
+      TAIJI_PRESET_FALLBACK_TO: '',
+    })
   })
 })
