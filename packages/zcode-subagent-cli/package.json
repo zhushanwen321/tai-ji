@@ -36,7 +36,7 @@
         "conversation": "cold",
         "personaInjection": "prompt",
         "eventGranularity": "stream",
-        "sandbox": "none",
+        "sandbox": "emulated",
         "sessionRead": "full",
         "resume": "cold",
         "interrupt": "kill-only",

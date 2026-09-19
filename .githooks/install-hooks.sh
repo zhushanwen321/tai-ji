@@ -1596,6 +1596,38 @@ else
 fi
 
 # ============================================================================
+# 引擎开发指南契约投影守卫（docs/extensions/subagents/engine-development-guide.md §12 待建守卫行落地）
+#   staged 命中指南或其投影源（errors.ts / error-codes.ts / engine-manifest.ts /
+#   contract-types.ts）或守卫脚本自身时触发：scripts/check-guide-contract-projection.mjs
+#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影一致性（引擎子进程域，2026-09-18
+#   引擎开发指南立项时同步落地）。
+#   契约源码 staged 而指南未同批 staged → 软提示（AGENT SMELL：语义漂移机器不可判，
+#   靠 AGENTS.md 主题索引「更新触发」义务 + 提示兜底；误报率数据出来前不收紧为硬门）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
+if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
+    print_section "[引擎指南契约投影守卫]"
+    if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（守卫脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-guide-contract-projection.mjs; then
+        echo -e "${RED}[ERROR] 指南契约表与源码词表投影失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
+    if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$" \
+        && ! echo "$GUIDE_PROJECTION_STAGED" | grep -q "^docs/extensions/subagents/engine-development-guide\.md$"; then
+        echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
+    fi
+else
+    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影守卫${NC}"
+fi
+
+# ============================================================================
 # 消息流滚动跟随链路守卫（约束 C-state-11，chat-pin-bottom-fix §4.4 护栏⑤）
 #   staged 命中跟随链路（composables/panel/ 或 MessageStream.vue）或守卫脚本自身时触发：
 #   scripts/check-scroll-follow.mjs —— ① 跟随链路内 scrollToIndex 只许白名单

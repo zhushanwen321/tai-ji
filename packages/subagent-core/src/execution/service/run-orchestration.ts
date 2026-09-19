@@ -192,6 +192,18 @@ export interface RunOrchestrationDeps {
 }
 
 /**
+ * worktree 隔离合流（协议化断链修复）：handle 形态时把任务 cwd 定为 worktree
+ * checkout 路径——协议 ctx.cwd 契约语义（RunContextParams.cwd「worktree 隔离时 =
+ * worktree 路径」，经 wire 传引擎后决定子进程 spawn cwd）。worktree 优先于显式
+ * cwd：文件隔离是安全语义，不允许显式 cwd 把任务拉回主仓（旧 session-runner
+ * `worktree?.path ?? cwd` 优先链的协议化承载）。boolean/undefined 形态不动 cwd。
+ */
+export function withWorktreeCwd(spec: AgentCallOpts): AgentCallOpts {
+  if (typeof spec.worktree !== "object") return spec;
+  return { ...spec, cwd: spec.worktree.path };
+}
+
+/**
  * 域 #6/#7/#12/#14/#15 聚合：run 域执行编排（R4 自 SubagentService 抽取）。
  *
  * 字段所有权（r0-inventory 清单①）：#31 continuations（Continuation 实例表）已随
@@ -500,8 +512,9 @@ export class RunOrchestration {
     // record 先创建，worktree 失败时可 finalizeFailed（record 已在 store 中）。
     // worktree 必须显式开启：worktree===true 创建新 worktree；worktree===undefined/false 不创建。
     // fork 不隐含 worktree（UC-1 fork 可独立使用，fork 仅继承上下文，在 parent cwd 跑）。
-    // 非 pi 引擎带 worktree 已被上方预检同步拒绝（caps.sandbox='none'），此段实际仅
-    // sandbox 能力引擎（pi：caps.sandbox='emulated'）可达。
+    // 带 worktree 的任务经上方预检 gate 过滤（caps.sandbox='none' 同步拒绝），此段
+    // 仅 sandbox 声明非 none 的引擎可达（现行 pi/zcode 均为 'emulated'——worktree
+    // 创建/patch/回收执行者是下方 core 层 worktree-manager，引擎侧只消费 task.cwd）。
     if (typeof opts.worktree === "object") {
       // [外部契约面登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
       // ExecuteOptions.worktree 公共 API 契约的合法成员：本仓零调用，外仓（workflow
@@ -628,7 +641,9 @@ export class RunOrchestration {
     }
 
     // worktree 句柄经 executeOptionsToEngineTaskSpec(opts).worktree 直传引擎
-    //（AgentCallOpts.worktree 接受 WorktreeHandle——原 runSpawn 显式传参的协议形态）。
+    //（AgentCallOpts.worktree 接受 WorktreeHandle——原 runSpawn 显式传参的协议形态）；
+    // checkout 路径经 taskSpecWithModel 的 withWorktreeCwd 合流进 cwd → wire ctx.cwd
+    // → 引擎子进程 spawn cwd（隔离生效的承载链）。
     const engine = this.resolveChatEnginePort();
     // journal 接线（D6 第②级，workflow 域专用）：forwardEvents = onEvent
     //（workflow liveRecord 桥接，D-A8）。
@@ -676,11 +691,11 @@ export class RunOrchestration {
   }
 
   /** engine.run taskSpec 装配单一来源（runAndFinalize 与 kickOffChatRound 共用）：
-   *  executeOptions 协议映射 + model = record 留痕词形（resolved 解析产物，
-   *  joinEngineModelRef 规范形）覆盖——原 identity.resolved 经 runSpawn --model
-   *  兜底的协议等价承载。 */
+   *  executeOptions 协议映射 + worktree 隔离合流（withWorktreeCwd）+ model = record
+   *  留痕词形（resolved 解析产物，joinEngineModelRef 规范形）覆盖——原 identity.resolved
+   *  经 runSpawn --model 兜底的协议等价承载。 */
   taskSpecWithModel(opts: ExecuteOptions, model: string | undefined): AgentCallOpts {
-    return { ...executeOptionsToEngineTaskSpec(opts), ...(model !== undefined ? { model } : {}) };
+    return withWorktreeCwd({ ...executeOptionsToEngineTaskSpec(opts), ...(model !== undefined ? { model } : {}) });
   }
 
   /**

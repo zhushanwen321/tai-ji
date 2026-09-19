@@ -61,8 +61,9 @@ export const PROTOCOL_METHODS = [
  * run 上下文（RunContext 字段映射的协议承载，设计 §3.3 RunContext 映射表）。
  */
 export interface RunContextParams {
-  /** 任务工作目录（worktree 隔离时 = worktree 路径）。 */
-  cwd: string;
+  /** 任务工作目录（worktree 隔离时 = worktree 路径）。缺省不上 wire——引擎侧
+   *  回退自身进程 cwd（spawn 继承语义）。 */
+  cwd?: string;
   /** 请求模型 ref（未传 = 引擎缺省模型）。 */
   model?: string;
   /** 结构化输出 schema 的 env 注入形态（schemaEnv 降级通道）。 */

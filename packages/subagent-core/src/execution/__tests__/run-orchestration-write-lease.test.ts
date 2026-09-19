@@ -6,8 +6,9 @@
 //   1. one-shot pi 轮（kickOffChatRound 回填点）：run 应答 sessionFile 回填后
 //      `.alive` 存在且 pid=本进程；轮终（settleOneShotOutcome SP-5 → markRoundIdle）
 //      后 marker 跨轮保留（D3a/B5）；
-//   2. 非 pi 引擎死亡 adopt 形态（finalizeEngineOutcome 回填点）：sessionFile 回填
-//      即声明写权，record 保持可续聊纳管态、marker 在（adopt 不终态化 → 声明不释放）；
+//   2. 非 pi 引擎死亡（run reject → Continuation 失败分支收口 settleRoundFailed：
+//      idle 可恢复 + 失败通知，无监督器 adopt 接管；旧 adopt 形态回填点
+//      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役）；
 //   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
 //      store 簿记⑧单轨发射（恰好一次）；

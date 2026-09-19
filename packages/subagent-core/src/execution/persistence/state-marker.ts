@@ -375,7 +375,12 @@ export interface RecordBinding {
   startedAt: number;
   /** 已完成对话轮数（绑定写时点快照；回填点早于轮终 +1，恢复值可滞后一拍）。 */
   round?: number;
-  model: string;
+  /**
+   * 模型留痕（R4/D6-① 可选化）：undefined = 用户未指定模型（引擎自身缺省解析）。
+   * 读侧守卫（normalizeOptionalBindingFields）对存量 binding 的空串残留归一 undefined
+   * ——禁空串哨兵纪律覆盖持久化读写两侧。
+   */
+  model: string | undefined;
   thinkingLevel?: string;
   /** 创建时启用 worktree 隔离（重建面 hadWorktree 恢复源）。 */
   worktree: boolean;
@@ -612,7 +617,10 @@ function normalizeOptionalBindingFields(
     depth: numOr(parsed.depth, 0),
     slug: strOr(parsed.slug, ""),
     round: numOrUndefined(parsed.round),
-    model: strOr(parsed.model, ""),
+    // [R4/D6-③] model 空串归一缺席：undefined/缺省/""（存量 binding 空串残留）→
+    // undefined = 用户未指定——空串若复活进 record，「压掉 defaultModelSelection」
+    // 经 taskSpec 空串带键路径静默回归（禁空串哨兵，持久化读写两侧纪律）。
+    model: modelOrUndefined(parsed.model),
     thinkingLevel: strOrUndefined(parsed.thinkingLevel),
     // 来源身份两字段（H2 S3）：字面量守卫归一（非法/缺省 → undefined = "tool" 语义），
     // 对齐 record-store.readEntryOriginFields 主 entry 重建侧的同名守卫。
@@ -640,6 +648,15 @@ function strOrUndefined(v: string | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * model 空串归一缺席（R4/D6-③，禁空串哨兵）：string 守卫 + trim 判空——undefined/
+ * 缺省/"" 一律归 undefined（= 用户未指定模型）。slug 仍走 strOr（"" 是其合法缺省域），
+ * model 的缺省域自 R4 起收敛为 undefined。
+ */
+function modelOrUndefined(v: string | undefined): string | undefined {
+  return typeof v === "string" && v.trim() !== "" ? v : undefined;
+}
+
 /** number 守卫（非法/缺省 → undefined）。 */
 function numOrUndefined(v: number | undefined): number | undefined {
   return typeof v === "number" ? v : undefined;
@@ -650,7 +667,7 @@ function numOr(v: number | undefined, fallback: number): number {
   return typeof v === "number" ? v : fallback;
 }
 
-/** string 守卫 + 显式缺省值（model "" 等非 undefined 缺省域）。 */
+/** string 守卫 + 显式缺省值（slug "" 等非 undefined 缺省域；model 已改归一缺席，R4/D6-③）。 */
 function strOr(v: string | undefined, fallback: string): string {
   return typeof v === "string" ? v : fallback;
 }
