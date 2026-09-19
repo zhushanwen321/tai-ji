@@ -194,7 +194,14 @@ export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
   // 幽灵 round-2 run（skill-reload e2e 托盘收口断言假红的根因）。跳过播种后新 core 队列为空，
   // reload 后的后续 turn 命中 faux 耗尽语义（pi-ai "No more faux responses queued" error），
   // 与真实 LLM「回文本、不重跑工具」在「不再派发工具」上等价。
-  if (Reflect.get(globalThis, SEEDED_KEY) !== true) {
+  // 退出通道（TAIJI_FAUX_RESEED_ON_RELOAD=1）：恢复「每次 factory 都播种」的旧语义。
+  // 消费者 = restore/回收后继续对话的场景（idle-pi-reclaim）：pi 进程内 factory 会跑
+  // 第二次（session_start 侧既有重载行为，探针实证 main/HEAD 一致），once 跳过播种会让
+  // 新 core 空队列、后续 turn 命中 faux 耗尽 error。skill-reload 防重放语义与此相反
+  // （reload 后队列必须空），两类消费者按 env 各选语义，fixture 不猜。
+  if (process.env['TAIJI_FAUX_RESEED_ON_RELOAD'] === '1') {
+    core.setResponses(loadScript(scriptPath).map(toAssistantMessage))
+  } else if (Reflect.get(globalThis, SEEDED_KEY) !== true) {
     core.setResponses(loadScript(scriptPath).map(toAssistantMessage))
     Reflect.set(globalThis, SEEDED_KEY, true)
   }
