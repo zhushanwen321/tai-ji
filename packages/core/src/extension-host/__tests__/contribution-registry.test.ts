@@ -106,10 +106,18 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
     expect(builtinContributions.every((b) => b.contributes.views === undefined)).toBe(true)
-    // scheduler-manager 声明形状（AP-1/AP-2）：headerActions 1 + modals 1 + commands 1（点击链配套）
+    // scheduler-manager 声明形状（AP-1/AP-2）：headerActions 1 + modals 1 + commands 4
+    // （open 点击链配套 + modal 内三个写操作 toggle/run/delete——缺声明则 action-bar
+    // 写操作在 CommandRegistry 无注册通路成死链，id 与插件 api.commands.register 逐字一致）
     expect(builtinContributions[2].contributes.headerActions).toHaveLength(1)
     expect(builtinContributions[2].contributes.modals).toHaveLength(1)
-    expect(builtinContributions[2].contributes.commands).toHaveLength(1)
+    expect(builtinContributions[2].contributes.commands).toHaveLength(4)
+    expect(builtinContributions[2].contributes.commands?.map((c) => c.command)).toEqual([
+      'scheduler-manager.open',
+      'scheduler-manager.toggle',
+      'scheduler-manager.run',
+      'scheduler-manager.delete',
+    ])
   })
 })
 
@@ -268,8 +276,8 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
     registry.registerBuiltin()
     expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo'])
     expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    // 1 statusline + 2 tasks slashCommands + scheduler-manager 3 条（AP-1/AP-2：1 headerAction + 1 modal + 1 command）
-    expect(registry.getContributions()).toHaveLength(6)
+    // 1 statusline + 2 tasks slashCommands + scheduler-manager 6 条（AP-1/AP-2：1 headerAction + 1 modal + 4 commands）
+    expect(registry.getContributions()).toHaveLength(9)
   })
 })
 

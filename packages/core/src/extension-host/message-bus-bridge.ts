@@ -7,7 +7,7 @@
  * unsubscribe（防 listener 翻倍，项目规则#2）。
  *
  * 映射表（IF3）：
- *   11 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
+ *   12 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
  *     plugin-status-set-update；permissionRequest→plugin-permission-request；crashed→
  *     plugin-crashed；notification→plugin-notification；config→plugin-config-changed；
  *     messageDecoration→plugin-message-decoration；statusChange→plugin-status-change；

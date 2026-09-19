@@ -7,7 +7,7 @@
  * clearPluginModalForPlugin（plugin-gone）；plugin:modalState 帧驱动镜像
  * （含「关闭在途→立即重开」陈旧 closed 帧不误关新层）；subscribePluginModalSlot 幂等防翻倍。
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   openPluginModal,
   closePluginModal,
@@ -153,6 +153,8 @@ describe('plugin-modal-slot（AP-2 全局单槽）', () => {
     })
 
     it('「关闭在途→立即重开」：重开后的陈旧 closed 帧（epoch 不等）不误关新层（AP-2 幂等与竞态）', () => {
+      // 陈旧 closed 帧触发 close not-applied 的 warn 留痕（AP-2 关①），本用例只断言槽语义，mock 掉输出
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
       const bus = new InternalEventBus()
       subscribePluginModalSlot(bus)
       bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'open', epoch: 1 } })
@@ -161,6 +163,29 @@ describe('plugin-modal-slot（AP-2 全局单槽）', () => {
       // 迟到的 ep1 closed 帧（镜像侧按同款三元组规则防御）
       bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 1, reason: 'dismissed' } })
       expect(getPluginModalSlot()).toMatchObject({ epoch: 2 })
+      vi.restoreAllMocks()
+    })
+
+    it('closed 帧三元组不匹配 → console.warn 留痕（pluginId/modalId/epoch + notApplied 原因）；命中 close 不 warn', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const bus = new InternalEventBus()
+      subscribePluginModalSlot(bus)
+      bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'open', epoch: 1 } })
+      bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'open', epoch: 2 } })
+      // 迟到的 ep1 closed 帧 → not-applied（epoch-mismatch）→ warn 带三元组与原因、槽不变
+      bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 1, reason: 'dismissed' } })
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const warnText = String(warnSpy.mock.calls[0]?.[0])
+      expect(warnText).toContain('epoch-mismatch')
+      expect(warnText).toContain('pluginId=p1')
+      expect(warnText).toContain('modalId=m1')
+      expect(warnText).toContain('epoch=1')
+      expect(getPluginModalSlot()).toMatchObject({ epoch: 2 })
+      // 命中 close（三元组匹配）→ 槽清空且不 warn
+      bus.emit({ kind: 'plugin:modalState', modalState: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 2, reason: 'dismissed' } })
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(getPluginModalSlot()).toBeNull()
+      vi.restoreAllMocks()
     })
 
     it('replaced 帧序列：不同 owner 的 open 帧 → 槽切到新 owner', () => {

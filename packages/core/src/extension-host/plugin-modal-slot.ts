@@ -125,6 +125,8 @@ export function clearPluginModalForPlugin(pluginId: string): ModalCloseResult {
 /**
  * 订阅 plugin:modalState 帧驱动槽镜像（open → openPluginModal / closed → closePluginModal）。
  * 幂等：已订阅时返回既有取消函数（防 listener 翻倍，项目规则#2）。
+ * close not-applied（陈旧 epoch / owner 不匹配 / 槽未开）是设计内合法产出（AP-2 关①：
+ * 忽略 + 日志），warn 留痕供陈旧帧排查，不阻断帧流。
  */
 export function subscribePluginModalSlot(bus: InternalEventBus): () => void {
   if (unsubscribe) return unsubscribe
@@ -140,7 +142,12 @@ export function subscribePluginModalSlot(bus: InternalEventBus): () => void {
         epoch: frame.epoch,
       })
     } else {
-      closePluginModal(frame.pluginId, frame.modalId, frame.epoch, frame.reason ?? 'dismissed')
+      const result = closePluginModal(frame.pluginId, frame.modalId, frame.epoch, frame.reason ?? 'dismissed')
+      if (!result.applied) {
+        console.warn(
+          `[plugin-modal-slot] close not-applied（${result.notApplied}）: pluginId=${frame.pluginId} modalId=${frame.modalId} epoch=${frame.epoch}`,
+        )
+      }
     }
   })
   return unsubscribe
