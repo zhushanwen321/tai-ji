@@ -50,7 +50,7 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.sessionData.set',
   'plugin.sessionData.delete',
   'plugin.sessionData.keys',
-  // sessions 域（api/session-api.ts，8 个——含 S3-W2 生命周期事件注册 4 个）
+  // sessions 域（api/session-api.ts，14 个——S3-W2 生命周期事件注册 4 个 + AP-4 读面 6 个）
   'plugin.sessions.list',
   'plugin.sessions.get',
   'plugin.sessions.getActive',
@@ -59,6 +59,16 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.sessions.registerDestroy',
   'plugin.sessions.unregisterCreate',
   'plugin.sessions.unregisterDestroy',
+  // AP-4 读面（readEntries/getCommands 数据面 + entry 失效订阅注册族；entriesInvalidated
+  // 是 server→Worker notify、不进本表，与 didCreate/didDestroy 同族）
+  'plugin.sessions.readEntries',
+  'plugin.sessions.getCommands',
+  'plugin.sessions.registerEntryInvalidation',
+  'plugin.sessions.unregisterEntryInvalidation',
+  // 会话激活订阅（registerActivate 族；didActivate 同为 server→Worker notify 不进本表；
+  // handler 随 U5 activate 订阅族落地）
+  'plugin.sessions.registerActivate',
+  'plugin.sessions.unregisterActivate',
   // storage 域（api/storage-api.ts，global + workspace 两 scope × 4 操作 = 8 个）
   'plugin.storage.global.get',
   'plugin.storage.global.set',
@@ -71,15 +81,20 @@ export const PLUGIN_RPC_METHODS = [
   // tools 域（tool-api.ts，2 个）
   'plugin.tools.register',
   'plugin.tools.unregister',
-  // ui 域（api/ui-api.ts，6 个——uiRequestExpired 是 Worker→host 到期取消 notification
+  // ui 域（api/ui-api.ts，9 个——uiRequestExpired 是 Worker→host 到期取消 notification
   // （D2），复用无 id dispatch 通路故也在注册表内；未被任何能力映射覆盖 → sandbox
-  // 不可授权（fail-closed），到期取消由 queue 防泄漏兜底收尾，trusted 不受影响）
+  // 不可授权（fail-closed），到期取消由 queue 防泄漏兜底收尾，trusted 不受影响。
+  // showModal/hideModal/updateHeaderAction 为 headerAction/modal 点位的命令式 API
+  // （handler 随 U5 落地）：ui 面今天无可声明能力词 → sandbox 永久 fail-closed（已知登记））
   'plugin.ui.showSelect',
   'plugin.ui.showConfirm',
   'plugin.ui.showInput',
   'plugin.ui.notify',
   'plugin.ui.updateStatusBarItem',
   'plugin.ui.uiRequestExpired',
+  'plugin.ui.showModal',
+  'plugin.ui.hideModal',
+  'plugin.ui.updateHeaderAction',
   // views 域（api/views-api.ts，2 个）
   'plugin.views.update',
   'plugin.views.listMountPoints',
@@ -117,9 +132,10 @@ const CAPABILITY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'tools.register': ['plugin.tools.register', 'plugin.tools.unregister'],
   'hooks.register': ['plugin.hooks.register', 'plugin.hooks.unregister'],
   'sessions.sendMessage': ['plugin.sessions.sendMessage'],
-  // sessions.readState 含生命周期事件订阅（S3-W2）：onDidCreateSession/
-  // onDidDestroySession 的注册/注销方法并入读侧能力（通知型，无写语义；
-  // 注册类连带 unregister 的既有成对授予模式）。不新增 SDK 常量（能力词汇表
+  // sessions.readState 含生命周期事件订阅（S3-W2）与 AP-4 读面（U2）：onDidCreateSession/
+  // onDidDestroySession 的注册/注销、readEntries/getCommands 状态读、entry 失效与
+  // 会话激活订阅（registerActivate 族）的注册/注销方法并入读侧能力（通知型/只读型，
+  // 无写语义；注册类连带 unregister 的既有成对授予模式）。不新增 SDK 常量（能力词汇表
   // 扩展属 SDK 契约变更，须与 PermissionConstants 同步评审）。
   'sessions.readState': [
     'plugin.sessions.list',
@@ -129,6 +145,12 @@ const CAPABILITY_ALIASES: Readonly<Record<string, readonly string[]>> = {
     'plugin.sessions.registerDestroy',
     'plugin.sessions.unregisterCreate',
     'plugin.sessions.unregisterDestroy',
+    'plugin.sessions.readEntries',
+    'plugin.sessions.getCommands',
+    'plugin.sessions.registerEntryInvalidation',
+    'plugin.sessions.unregisterEntryInvalidation',
+    'plugin.sessions.registerActivate',
+    'plugin.sessions.unregisterActivate',
   ],
   'storage.access': ALL_STORAGE_METHODS,
   'notify': ['plugin.notify', 'plugin.ui.notify'],
