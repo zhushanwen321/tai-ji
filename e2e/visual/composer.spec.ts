@@ -41,6 +41,10 @@ test.describe('visual baseline: composer', () => {
     // s3 = 'API 性能优化'，mock 对该 session 有 workflow/subagent 历史记录 → 托盘挂 dim 条目。
     await expect(page.getByTestId('composer-tray')).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')).toBeVisible()
+    // [u7a test-first / u7 落地后可绿] 第 4 件 session kind：mock fixture 给 s3 挂了 3 个
+    // parentAgentSessionId='s3' 的子会话 → 托盘必须渲染 session 条目（计数 ● 3）。
+    // 托盘条目存在性同时是视觉基线断言对象（底栏重排 + 第 4 件是本次基线变更驱动元素）。
+    await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="session"]')).toBeVisible()
     // settle：等 composer 渲染 + 动画平息
     await page.waitForTimeout(1500)
     await expect(page.getByTestId('composer-box')).toHaveScreenshot('composer-default.png', {
