@@ -709,22 +709,29 @@ const sessionImpl = {
   //     real domain 同接口，门面三元要求两侧同构；r1-S19：payload 类型 import shared
   //     契约，不手写内联形状）──
   /**
-   * Mock importCandidates：缺省/pi/未知 source 恒空候选集（现状——mock 轨道无外部
-   * pi sessions 目录可扫）；source='zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
-   * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）。不模拟
-   * query 过滤——与 pi 分支不模拟目录扫描同保真度层级（mock 只驱动 UI 状态机）。
+   * Mock importCandidates：source 显式判别（与 importSession 分支策略收敛，r-审查
+   * P3——real 侧 resolveSource 未知 source 抛 import_source_missing，mock 否决式分支
+   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 轨道无外部
+   * pi sessions 目录可扫）；'zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
+   * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）；其余字面量
+   * （WS JSON 注入的类型外运行时值）抛 import_source_missing。不模拟 query 过滤——
+   * 与 pi 分支不模拟目录扫描同保真度层级（mock 只驱动 UI 状态机）。
    */
   async importCandidates(payload: import('@taiji/shared').ImportCandidatesRequest): Promise<import('@taiji/shared').ImportCandidatesReply> {
     await sleep(TIMING.ack)
-    if (payload.source !== 'zcode') {
+    const source = payload.source ?? 'pi'
+    if (source === 'zcode') {
+      const items = zcodeMockCandidates()
+      // dirs 按 dirLabel 聚合 count（zcode 源 dirs 聚合规则：basename(directory) 分组）
+      const countByLabel = new Map<string, number>()
+      for (const item of items) countByLabel.set(item.dirLabel, (countByLabel.get(item.dirLabel) ?? 0) + 1)
+      const dirs = Array.from(countByLabel, ([label, count]) => ({ label, count }))
+      return { total: items.length, items, dirs }
+    }
+    if (source === 'pi') {
       return { total: 0, items: [], dirs: [] }
     }
-    const items = zcodeMockCandidates()
-    // dirs 按 dirLabel 聚合 count（zcode 源 dirs 聚合规则：basename(directory) 分组）
-    const countByLabel = new Map<string, number>()
-    for (const item of items) countByLabel.set(item.dirLabel, (countByLabel.get(item.dirLabel) ?? 0) + 1)
-    const dirs = Array.from(countByLabel, ([label, count]) => ({ label, count }))
-    return { total: items.length, items, dirs }
+    throw Object.assign(new Error('No external sessions available in mock mode'), { code: 'import_source_missing' })
   },
   /**
    * Mock importSession：source='zcode' 返回固定 reply——reply.sessionId = T1 归一化

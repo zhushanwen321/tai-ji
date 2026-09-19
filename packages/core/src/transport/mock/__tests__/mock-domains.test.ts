@@ -209,7 +209,7 @@ describe('mock session domain', () => {
     await expect(session.importSession({} as never)).rejects.toMatchObject({ code: 'import_source_missing' })
   })
 
-  it('importCandidates/importSession source 路由（sess-session-import u-foundation）：zcode sess_ 形态候选 + 归一化 reply；缺省/显式 pi/未知 source 维持现状', async () => {
+  it('importCandidates/importSession source 路由（sess-session-import u-foundation）：zcode sess_ 形态候选 + 归一化 reply；缺省/pi 空集，未知 source 两侧同构抛 import_source_missing', async () => {
     // zcode 分支：sessionId 带 sess_ 前缀（原始源 id 形态）+ dirLabel = basename(cwd)
     // + sourcePath 为 db 路径结构占位（候选间共享同源，不参与 zcode query 匹配）
     const zc = await session.importCandidates({ source: 'zcode' })
@@ -233,11 +233,13 @@ describe('mock session domain', () => {
     expect(imported.sessionId).not.toMatch(/^sess_/)
     expect(imported.sessionId).not.toContain('_')
     expect(imported.targetPath).toContain(imported.sessionId)
-    // 缺省（向后兼容）/ 显式 pi / 类型外未知 source（JS 调用方运行时值）：维持现状 pi 行为
+    // 缺省（向后兼容）/ 显式 pi：pi 分支空候选集（mock 无外部目录可扫）
     const emptyReply = { total: 0, items: [], dirs: [] }
     expect(await session.importCandidates({})).toEqual(emptyReply)
     expect(await session.importCandidates({ source: 'pi' })).toEqual(emptyReply)
-    expect(await session.importCandidates({ source: 'ghost' as ImportSourceKind })).toEqual(emptyReply)
+    // 类型外未知 source（JS 调用方运行时值）：importCandidates 与 importSession 同构抛
+    // import_source_missing（对齐 real 侧 resolveSource 缺项行为）
+    await expect(session.importCandidates({ source: 'ghost' as ImportSourceKind })).rejects.toMatchObject({ code: 'import_source_missing' })
     await expect(session.importSession({ sourcePath: '/x.jsonl', projectId: 'p1' })).rejects.toMatchObject({ code: 'import_source_missing' })
   })
 
