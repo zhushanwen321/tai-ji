@@ -41,18 +41,12 @@ interface ServiceInternals {
 }
 
 /**
- * SSOT 已登记、RPC handler 尚未实装的方法（headerAction/modal 点位的 U5 批次：
- * activate 订阅族 + ui 命令式三点位，落 plugin-rpc-setup / ui-api / session-api
- * activate 段）。登记一次到位（设计 §3.4 权限段），断言反向锁定：U5 实装后若
- * 未从本表移除（或移除后未更新 size 锚点），集合相等用例红——豁免表自身防漂移。
+ * SSOT 已登记、RPC handler 尚未实装的方法豁免表（u2d 批次建立）。[u5b 已清空]：
+ * activate 订阅族（session-api 六点扩表）与 ui 命令式三点位（ui-api showModal/
+ * hideModal/updateHeaderAction）handler 均已落地，5 方法全部转正——豁免表保留空集
+ * 形态供后续批次复用（登记即债务，落地即清账）。
  */
-const PENDING_U5B_METHODS: ReadonlySet<string> = new Set([
-  'plugin.sessions.registerActivate',
-  'plugin.sessions.unregisterActivate',
-  'plugin.ui.showModal',
-  'plugin.ui.hideModal',
-  'plugin.ui.updateHeaderAction',
-])
+const PENDING_U5B_METHODS: ReadonlySet<string> = new Set<string>([])
 
 describe('plugin-permission-map SSOT（AC-I6）', () => {
   let tmpDir: string
@@ -109,10 +103,10 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
     // 数量级回归锚点：47（agent5 commands3 config3 hooks2 notify1 sessionData4
     // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 9（readEntries/
-    // getCommands/register+unregisterEntryInvalidation 已实装 4，activate 族 2 + ui
-    // 三点位 3 待 U5 实装）= 56。registeredMethods.size 同步锚点：51 → U5 落地后 56。
+    // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2 + ui 三点位 3，
+    // [u5b] 后五者 handler 已落地转正）= 56。registeredMethods.size 同步锚点：56/56。
     expect(PLUGIN_RPC_METHODS.length).toBe(56)
-    expect(registeredMethods.size).toBe(51)
+    expect(registeredMethods.size).toBe(56)
   })
 
   it('AC-I6: 全部口径归一化产物无孤儿（每个产出方法名都在真实注册表）', () => {
@@ -127,7 +121,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       const methods = normalizePermissionInput(input)
       expect(methods.length, `input '${input}' must map to non-empty set`).toBeGreaterThan(0)
       for (const m of methods) {
-        // U5 待实装方法：登记在案即合法产出（authorized 一侧），handler 落地前不在注册表
+        // 豁免表（PENDING_U5B_METHODS）当前为空：全部登记方法均已实装
         expect(registeredMethods.has(m) || PENDING_U5B_METHODS.has(m), `mapped method '${m}' (from '${input}') not on real PluginRpcServer`).toBe(true)
       }
     }
@@ -145,7 +139,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       'plugin.sessions.list', 'plugin.sessions.get', 'plugin.sessions.getActive',
       'plugin.sessions.registerCreate', 'plugin.sessions.registerDestroy',
       'plugin.sessions.unregisterCreate', 'plugin.sessions.unregisterDestroy',
-      // AP-4 读面（U2）：数据读 + entry 失效订阅族 + 激活订阅族（后者 handler 随 U5）
+      // AP-4 读面（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
       'plugin.sessions.readEntries', 'plugin.sessions.getCommands',
       'plugin.sessions.registerEntryInvalidation', 'plugin.sessions.unregisterEntryInvalidation',
       'plugin.sessions.registerActivate', 'plugin.sessions.unregisterActivate',

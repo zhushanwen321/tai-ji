@@ -45,9 +45,13 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       list: noopArr,
       get: noop,
       getActive: noop,
-      sendMessage: noopVoid,
+      sendMessage: () => Promise.resolve({ accepted: true }),
+      readEntries: () => Promise.resolve({ entries: [] }),
+      getCommands: noopArr,
       onDidCreateSession: () => mockDisposable,
       onDidDestroySession: () => mockDisposable,
+      onDidActivateSession: () => mockDisposable,
+      onEntriesInvalidated: () => mockDisposable,
     },
     events: {
       on: () => mockDisposable,
@@ -82,6 +86,10 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       showInput: () => Promise.resolve(undefined),
       notify: noopVoid,
       updateStatusBarItem: noopVoid,
+      showModal: () => Promise.resolve({ opened: true, epoch: 1 }),
+      hideModal: () => Promise.resolve({ closed: false }),
+      updateHeaderAction: noopVoid,
+      onModalClosed: () => mockDisposable,
     },
     agent: {
       setModel: () => Promise.resolve('mock-model'),
@@ -100,7 +108,7 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       unregister: noopVoid,
     },
     views: {
-      update: noopVoid,
+      update: () => Promise.resolve(),
       listMountPoints: () => Promise.resolve([]),
     },
   }

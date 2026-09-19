@@ -13,6 +13,8 @@ import type { SessionDataStore } from './session-data-store.js'
 import { registerToolRpcHandlers } from './tool-api.js'
 import { registerHookRpcHandlers } from './hook-api.js'
 import { registerSessionRpcHandlers, ActiveSessionResolver, sessionInfoFromSummary, type SessionEventDispatch } from './api/session-api.js'
+import type { EntryInvalidationDispatch } from './plugin-entry-invalidation-dispatch.js'
+import { PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, wireRuntimeModalExits } from './api/ui-api.js'
 import { registerConfigRpcHandlers, toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
 import { registerStorageRpcHandlers, storageHandlersFrom } from './api/storage-api.js'
 import { registerNotifyRpcHandler, notifyHandlersFrom, broadcastPluginNotification, NotifyRateLimiter } from './api/notify-api.js'
@@ -93,6 +95,17 @@ export interface RpcSetupContext {
   commandRegistry: Map<string, CommandRegistration>
   /** session 事件注册表（S3-W2）：registerCreate/registerDestroy 的定向投递通道 */
   sessionEvents: SessionEventDispatch
+  /**
+   * Entry 失效订阅注册表（AP-4，u2c 产出）。sessionRead 装配（u2d 移交 u5b 接线）：
+   * 与 SessionHandlers.sessionRead 共享同一实例——registerEntryInvalidation 写入的条目
+   * 由 PluginService.notifyEntryInvalidation 派发。
+   */
+  entryInvalidation: EntryInvalidationDispatch
+  /**
+   * E10 判定（AP-2 浮层规则②）：ui-request-queue 是否有 pending 插件对话框。
+   * 缺省（未装配）时 showModal 跳过该判定（装配面收窄为「不拦截」，不误拒）。
+   */
+  hasPendingUiRequest?: () => boolean
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报的副本，AC10） */
   mountPoints: string[]
   /** Worker invoke.result 回传的 pending resolve/reject（S3-W1，PluginService 私有）；sourceWorkerId 为回传来源通道（D2 回传归属校验） */
@@ -121,6 +134,33 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // S3-W4：每插件 notify 令牌桶——plugin.notify 与 plugin.ui.notify 两入口共享
   // 同一实例（同一插件的配额跨入口合并计费），默认 20 条/s（shared SSOT）。
   const notifyLimiter = new NotifyRateLimiter()
+
+  // ── plugin modal/headerAction 广播出线装配（AP-1/AP-2，u5b）──────────────
+  // ui-api 的 runtime 槽是模块级单例（core plugin-modal-slot 先例），广播与 Worker
+  // notify 经此注入：全局广播走 broadcastFn（broker.broadcast 同语义回退由 broadcastFn
+  // 装配方承担——本层无 broker 引用），modalClosed 经 rpcServer 定向 notify owner Worker。
+  // 广播帧（plugin:modalState / plugin:headerActionUpdate）不经 message-bus publish，
+  // 结构性不入 ring（transient；renderer 另以 lastEpoch 兜底乱序）。
+  wireRuntimeModalExits({
+    broadcastModalState: (payload) => {
+      if (deps.broadcastFn) {
+        deps.broadcastFn('plugin:modalState', payload)
+      } else {
+        console.warn('[plugin-rpc-setup] plugin:modalState broadcast dropped: no broadcastFn configured')
+      }
+    },
+    broadcastHeaderActionUpdate: (payload) => {
+      if (deps.broadcastFn) {
+        deps.broadcastFn('plugin:headerActionUpdate', payload)
+      } else {
+        console.warn('[plugin-rpc-setup] plugin:headerActionUpdate broadcast dropped: no broadcastFn configured')
+      }
+    },
+    notifyModalClosed: (workerId, payload) => {
+      rpcServer.notify(workerId, PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, payload)
+    },
+    hasPendingUiRequest: () => ctx.hasPendingUiRequest?.() ?? false,
+  })
 
   // Tool RPC handlers
   registerToolRpcHandlers(rpcServer, {
@@ -156,12 +196,25 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
       const active = ctx.activeSessionResolver.resolve()
       return active ? sessionInfoFromSummary(active) : undefined
     },
-    sendMessage: async (sessionId: string | undefined, _role: string, content: string) => {
-      if (!deps.sessionService || !sessionId) return
-      await deps.sessionService.sendMessage(sessionId, content)
+    // [D6/u5b] 插件写路径透传（替换既有静默 no-op）：sessionId 必填校验在 session-api
+    // handler 层（asSafeKey → INVALID_SESSION_ID）；requireCommand 透传给 dispatcher 的
+    // 原子校验（restore 后、busy 预检前，E14 防漏进模型）。回执 {blocked, reason?} 由
+    // handler 层映射为 {accepted, reason}。role 在插件契约面保留（AP-4），runtime 管道
+    // 仅支持 user prompt 语义（既有行为——旧实现同样丢弃 role）。
+    sendMessage: async (sessionId: string, _role: string, content: string, requireCommand?: string) => {
+      if (!deps.sessionService) return { blocked: true, reason: 'error' as const }
+      return deps.sessionService.sendMessage(sessionId, content, undefined, undefined, requireCommand)
     },
     // S3-W2：session 生命周期事件注册表（registerCreate/registerDestroy 方法在此注册）
     sessionEvents: ctx.sessionEvents,
+    // [u2d 移交 / u5b 接线] AP-4 读面依赖：live client 经 sessionService.getRpcClient
+    // （= pm.getClient 同源），sessionFile 经 getSummary，失效订阅表与
+    // PluginService.notifyEntryInvalidation 派发共享同一实例——SESSION_READ_NOT_WIRED 装配缺口消除。
+    sessionRead: {
+      pm: { getClient: (sessionId: string) => deps.sessionService?.getRpcClient(sessionId) },
+      getSessionSummary: (sessionId: string) => deps.sessionService?.getSummary(sessionId),
+      entryInvalidation: ctx.entryInvalidation,
+    },
   })
 
   // ── Config RPC handlers ──────────────────────────────────
@@ -300,22 +353,18 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   })
 
   // ── Views RPC handlers ───────────────────────────────────
-  // views.update → handleViewUpdate（ES2：无活跃 session 丢弃广播 + warning）；
+  // views.update → handleViewUpdate（[D1/u5b] payload.sessionId 显式归属投递——旧
+  // ActiveSessionResolver 盖戳猜测路径已删除：空闲会话是 modal 推树的常态而非边缘，
+  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 被否④））。
   // listMountPoints → 读挂载点集合副本（AC10：sync 注入→查询一致）。
-  // wave:perf-w08（02 文档 D1-1，R-06）：广播出口改 ctx.publishViewUpdate——
-  // bus 已装配时按 payload.sessionId 定向 publish（plugin:viewUpdate 归 transient 类，
-  // 不占 seq 不入 ring），不再全局 broadcast。
+  // wave:perf-w08（02 文档 D1-1，R-06）：广播出口为 ctx.publishViewUpdate——
+  // bus 已装配时按 sessionId 定向 publish（plugin:viewUpdate 归 transient 类，
+  // 不占 seq 不入 ring）。
   registerViewRpcHandlers(rpcServer, {
     mountPoints: ctx.mountPoints,
-    handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[]) => {
-      const active = ctx.activeSessionResolver.resolve()
-      if (!active) {
-        // ES2: 无活跃 session 时丢弃广播 + warning（含 pluginId+viewId）
-        console.warn(`[plugin-rpc-setup] views.update dropped: no active session (plugin=${pluginId}, view=${viewId})`)
-        return
-      }
+    handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], sessionId: string) => {
       ctx.publishViewUpdate({
-        sessionId: active.id,
+        sessionId,
         viewId,
         pluginId,
         guiTree,

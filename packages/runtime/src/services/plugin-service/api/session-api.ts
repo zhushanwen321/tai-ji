@@ -17,7 +17,8 @@
  *   未接线时读方法抛 SESSION_READ_NOT_WIRED（装配缺陷显式报错，不伪装成会话状态）。
  *
  * Worker 侧：createSessionApi() 返回代理对象，通过 RPC 转发到主线程。
- *   onDidCreateSession / onDidDestroySession / onEntriesInvalidated 通过通知机制订阅。
+ *   onDidCreateSession / onDidDestroySession / onDidActivateSession（u5b activate 族）/
+ *   onEntriesInvalidated 通过通知机制订阅。
  */
 
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
@@ -25,12 +26,12 @@ import type { PluginRpcClient } from '../plugin-rpc-client.js'
 import type { SessionInfo, Disposable } from '../plugin-types.js'
 import type { IPluginServiceDeps } from '../plugin-types.js'
 import type { SessionSummary } from '../../../../../shared/src/session.js'
-import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
+import type { IPiEngine } from '../../ports/pi-engine.js'
 import type { EntryInvalidationDispatch } from '../plugin-entry-invalidation-dispatch.js'
 import { ENTRY_INVALIDATION_NOTIFY_METHOD } from '../plugin-entry-invalidation-dispatch.js'
 import { registerHandler, dispatchHandler } from '../handler-registry.js'
 import { errorWithCode, toErrorMessage } from '../../../utils/errors.js'
-import { asOptionalSafeKey, asOptionalString, asSafeKey, asString } from '../validation.js'
+import { asOptionalString, asSafeKey, asString } from '../validation.js'
 
 /**
  * AP-4 读面 RPC 方法（U2）。读数据两方法 + entry 失效订阅注册族（对齐
@@ -80,10 +81,12 @@ export interface PluginSessionEntries {
 /**
  * AP-4 读面的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
  * registerSessionRpcHandlers 实参）提供；缺失时读方法抛 SESSION_READ_NOT_WIRED。
+ * [u5b 接线] pm 收窄为 getClient 窄结构面——PluginService 不持 IProcessManager，
+ * 装配经 sessionService.getRpcClient（= pm.getClient 同源）适配。
  */
 export interface SessionReadDeps {
   /** live 进程解析（readEntries/getCommands 的 client 来源；存在且未 exited 才读——读不 spawn 进程）。 */
-  pm: IProcessManager
+  pm: { getClient(sessionId: string): IPiEngine | undefined }
   /** sessionFile 解析（readEntries 信封字段，SessionSummary 同源）。 */
   getSessionSummary(sessionId: string): Pick<SessionSummary, 'sessionFile'> | undefined
   /** entry 失效订阅注册表（u2c 产出；register 用其 sessionExists 校验语义）。 */
@@ -96,16 +99,28 @@ export interface SessionReadDeps {
  */
 export const SESSION_EVENT_METHODS = ['plugin.sessions.registerCreate', 'plugin.sessions.registerDestroy'] as const
 
+/**
+ * 会话激活订阅 RPC 方法（AP-4，u5b 六点扩表；onDidActivateSession 的
+ * registerActivate/unregisterActivate 对）。已登记 PLUGIN_RPC_METHODS（u2d 批次），
+ * handler 随本批次落地。
+ */
+export const SESSION_ACTIVATE_METHODS = {
+  register: 'plugin.sessions.registerActivate',
+  unregister: 'plugin.sessions.unregisterActivate',
+} as const
+
 /** register 对应的注销方法（Disposable.dispose 时发送；非 SESSION_EVENT_METHODS 契约成员） */
 const SESSION_EVENT_UNREGISTER_METHODS = {
   create: 'plugin.sessions.unregisterCreate',
   destroy: 'plugin.sessions.unregisterDestroy',
+  activate: SESSION_ACTIVATE_METHODS.unregister,
 } as const
 
 /** 主线程 → Worker 的定向投递通知方法名（与 createSessionApi 的 onNotification 对齐） */
 const SESSION_EVENT_NOTIFY_METHODS = {
   create: 'plugin.sessions.didCreate',
   destroy: 'plugin.sessions.didDestroy',
+  activate: 'plugin.sessions.didActivate',
 } as const
 
 /**
@@ -140,27 +155,27 @@ export class SessionEventDispatch {
   private readonly createHandlers = new Map<string, { workerId: string; pluginId: string }>()
   private readonly destroyHandlers = new Map<string, { workerId: string; pluginId: string }>()
   /**
-   * activate 订阅表（plugin-header-action-modal-points AP-4 会话激活订阅）。u5a relay 闭环
-   * 的最小接口（裁决范围）：仅「表 + didActivate 投递方法」落本类——register 的 kind 联合
-   * 放宽 / unregister 对本表的覆盖 / SESSION_EVENT_UNREGISTER_METHODS +
-   * SESSION_EVENT_NOTIFY_METHODS 两个常量 map 扩容 / clearForPlugin + clearAll 对本表的
-   * 覆盖，归 u5b 六点扩表（session-api sendMessage/activate 段）。u5b 落地前本表恒空
-   * （registerActivate RPC handler 不存在），didActivate 为空表遍历 = no-op。
+   * activate 订阅表（plugin-header-action-modal-points AP-4 会话激活订阅）。
+   * [u5b 六点扩表已落地] register kind 联合放宽 / unregister 与 clearForPlugin + clearAll
+   * 对本表的覆盖 / SESSION_EVENT_UNREGISTER_METHODS + SESSION_EVENT_NOTIFY_METHODS 扩容
+   * 均已并入；投递源 = u5a relay（session.switch 成功 → notifySessionActivated →
+   * PluginService 回调 → didActivate）。
    */
   private readonly activateHandlers = new Map<string, { workerId: string; pluginId: string }>()
 
   constructor(private readonly rpcServer: PluginRpcServer) {}
 
-  /** 注册一个 handler 的投递目标（registerCreate/registerDestroy handler 调用） */
-  register(kind: 'create' | 'destroy', handlerId: string, target: { workerId: string; pluginId: string }): void {
-    const table = kind === 'create' ? this.createHandlers : this.destroyHandlers
+  /** 注册一个 handler 的投递目标（registerCreate/registerDestroy/registerActivate handler 调用） */
+  register(kind: 'create' | 'destroy' | 'activate', handlerId: string, target: { workerId: string; pluginId: string }): void {
+    const table = kind === 'create' ? this.createHandlers : kind === 'destroy' ? this.destroyHandlers : this.activateHandlers
     table.set(handlerId, target)
   }
 
-  /** 注销（unregisterCreate/unregisterDestroy handler 调用；两表都试删，幂等） */
+  /** 注销（unregisterCreate/unregisterDestroy/unregisterActivate handler 调用；三表都试删，幂等） */
   unregister(handlerId: string): void {
     this.createHandlers.delete(handlerId)
     this.destroyHandlers.delete(handlerId)
+    this.activateHandlers.delete(handlerId)
   }
 
   /** 清理指定插件的全部注册条目（crash / disable / uninstall 对偶清理） */
@@ -171,12 +186,16 @@ export class SessionEventDispatch {
     for (const [handlerId, target] of this.destroyHandlers) {
       if (target.pluginId === pluginId) this.destroyHandlers.delete(handlerId)
     }
+    for (const [handlerId, target] of this.activateHandlers) {
+      if (target.pluginId === pluginId) this.activateHandlers.delete(handlerId)
+    }
   }
 
   /** 清空全部注册表（runtime 关停） */
   clearAll(): void {
     this.createHandlers.clear()
     this.destroyHandlers.clear()
+    this.activateHandlers.clear()
   }
 
   /** session 创建：向全部 create 订阅者定向投递 didCreate 通知 */
@@ -193,20 +212,16 @@ export class SessionEventDispatch {
     }
   }
 
-  /**
-   * session 激活：向全部 activate 订阅者定向投递 didActivate 通知（u5a relay ③ 消费侧：
-   * PluginService 经 sessionService.onSessionActivated 回调转发）。方法名字面量暂内联——
-   * u5b 六点扩表时并入 SESSION_EVENT_NOTIFY_METHODS（常量 map 归 u5b 领地）。
-   */
+  /** session 激活：向全部 activate 订阅者定向投递 didActivate 通知（u5a relay ③ 消费侧：PluginService 经 sessionService.onSessionActivated 回调转发）。 */
   didActivate(session: SessionInfo): void {
     for (const [handlerId, target] of this.activateHandlers) {
-      this.rpcServer.notify(target.workerId, 'plugin.sessions.didActivate', { handlerId, session })
+      this.rpcServer.notify(target.workerId, SESSION_EVENT_NOTIFY_METHODS.activate, { handlerId, session })
     }
   }
 
   /** 当前注册条目数（测试诊断用） */
   get size(): number {
-    return this.createHandlers.size + this.destroyHandlers.size
+    return this.createHandlers.size + this.destroyHandlers.size + this.activateHandlers.size
   }
 }
 
@@ -259,18 +274,38 @@ export class ActiveSessionResolver {
   }
 }
 
+/**
+ * 插件面 sendMessage 回执（AP-4/D6 词表；reason 与 interfaces.ts ISessionService
+ * sendMessage 的联合对齐——插件运行面分支只看 accepted，词表是诊断/文案面）。
+ */
+export interface PluginSendReceipt {
+  accepted: boolean
+  reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+}
+
 /** Session 服务依赖（主线程侧） */
 export interface SessionHandlers {
   listSessions(): SessionInfo[] | Promise<SessionInfo[]>
   getSession(id: string): SessionInfo | undefined | Promise<SessionInfo | undefined>
   getActiveSession(): SessionInfo | undefined | Promise<SessionInfo | undefined>
-  sendMessage(sessionId: string | undefined, role: string, content: string): Promise<void>
-  /** session 事件注册表（S3-W2）：registerCreate/registerDestroy 的投递目标 */
+  /**
+   * [D6/u5b] 写路径透传：sessionId 已由 handler 层窄校验（必填）；requireCommand 透传
+   * dispatcher 原子校验。回执 {blocked, reason?} 由 handler 层映射为 PluginSendReceipt。
+   */
+  sendMessage(
+    sessionId: string,
+    role: string,
+    content: string,
+    requireCommand?: string,
+  ): Promise<{ blocked: boolean; rejected?: boolean; reason?: PluginSendReceipt['reason'] }>
+  /** session 事件注册表（S3-W2）：registerCreate/registerDestroy/registerActivate 的投递目标 */
   sessionEvents: SessionEventDispatch
   /**
    * AP-4 读面依赖（U2）。可选：runtime 装配侧接线后读方法可用；缺失时读方法抛
    * SESSION_READ_NOT_WIRED（装配缺陷显式报错，不伪装成 SESSION_NOT_ACTIVE——
    * 两者恢复动作不同，前者修装配、后者等会话恢复/走会话列表核验）。
+   * [u5b] 生产装配已在 plugin-rpc-setup 接线（sessionService.getRpcClient 同源适配），
+   * 本缺口仅存于未装配的测试构造。
    */
   sessionRead?: SessionReadDeps
 }
@@ -329,11 +364,19 @@ export function registerSessionRpcHandlers(
   })
 
   rpcServer.registerMethod('plugin.sessions.sendMessage', async (params) => {
-    // sessionId 可选（缺省 = 发给活跃 session）；present 即过白名单
-    const sessionId = asOptionalSafeKey(params.sessionId, 'sessionId')
+    // [D6/u5b] sessionId 必填（E15）：替换既有「缺省 = 活跃 session + 静默 no-op」——
+    // 那与「失败必须说话」正面冲突（AP-4 实装口径更正），畸形/缺失一律 INVALID_SESSION_ID 拒绝。
+    const sessionId = asSafeKey(params.sessionId, 'sessionId')
     const role = asString(params.role, 'role')
     const content = asString(params.content, 'content')
-    await deps.sendMessage(sessionId, role, content)
+    const requireCommand = asOptionalString(params.requireCommand, 'requireCommand')
+    const receipt = await deps.sendMessage(sessionId, role, content, requireCommand)
+    // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件面
+    // {accepted, reason?}；command-missing 由 requireCommand 校验在 dispatcher 内产生。
+    if (receipt.blocked) {
+      return { accepted: false, ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}) }
+    }
+    return { accepted: true }
   })
 
   // ── AP-4 读面（U2，SESSION_READ_METHODS）──────────────────
@@ -455,6 +498,23 @@ export function registerSessionRpcHandlers(
     deps.sessionEvents.unregister(asSafeKey(params.handlerId, 'handlerId'))
     return { unregistered: true }
   })
+
+  // ── 会话激活订阅族（AP-4，u5b 六点扩表；SESSION_ACTIVATE_METHODS）──────────
+  // 形态逐字对齐 registerCreate/registerDestroy：ctx.workerId 定向投递目标 + handlerId
+  // 过 asSafeKey 防毒化；投递源 = u5a relay（session.switch 成功 → didActivate）。
+  rpcServer.registerMethod(SESSION_ACTIVATE_METHODS.register, async (params, ctx) => {
+    const handlerId = asSafeKey(params.handlerId, 'handlerId')
+    deps.sessionEvents.register('activate', handlerId, {
+      workerId: ctx.workerId,
+      pluginId: asString(params.pluginId, 'pluginId'),
+    })
+    return { registered: true }
+  })
+
+  rpcServer.registerMethod(SESSION_ACTIVATE_METHODS.unregister, async (params) => {
+    deps.sessionEvents.unregister(asSafeKey(params.handlerId, 'handlerId'))
+    return { unregistered: true }
+  })
 }
 
 let sessionCounter = 0
@@ -466,13 +526,16 @@ export function createSessionApi(
   list(): Promise<SessionInfo[]>
   get(id: string): Promise<SessionInfo | undefined>
   getActive(): Promise<SessionInfo | undefined>
-  sendMessage(params: { sessionId?: string; role: 'user' | 'system'; content: string }): Promise<void>
+  /** [D6/u5b] 写路径回执：sessionId 必填（E15）、requireCommand 可选；accepted=false 时 reason 为拒绝词表。 */
+  sendMessage(params: { sessionId: string; role: 'user' | 'system'; content: string; requireCommand?: string }): Promise<PluginSendReceipt>
   /** AP-4 条目镜像：live only 读 + customType 服务端过滤 + sinceEntryId 增量（无 client 抛 SESSION_NOT_ACTIVE）。 */
   readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>
   /** AP-4 状态查询：投影收窄到 {name, description?, source}，会话未激活抛 SESSION_NOT_ACTIVE。 */
   getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
   onDidCreateSession(handler: (session: SessionInfo) => void): Disposable
   onDidDestroySession(handler: (session: SessionInfo) => void): Disposable
+  /** AP-4 会话激活订阅（u5b）：session.switch 成功（含 auto-restore）时投递，徽标/列表补拉的刷新触发源。 */
+  onDidActivateSession(handler: (session: SessionInfo) => void): Disposable
   /**
    * AP-4 entry 失效订阅：失效信号无 payload（事件只做失效，插件收信号后 readEntries 重拉）。
    * 回调参数化 (sessionId, customType) 便于同一 handler 绑定多订阅/自检命中的会话。
@@ -485,9 +548,10 @@ export function createSessionApi(
 } {
   const createHandlers = new Map<string, (session: SessionInfo) => void>()
   const destroyHandlers = new Map<string, (session: SessionInfo) => void>()
+  const activateHandlers = new Map<string, (session: SessionInfo) => void>()
   const invalidateHandlers = new Map<string, (sessionId: string, customType: string) => void>()
 
-  // 监听主线程广播的 session 创建/销毁通知（C8: dispatchHandler 统一 onNotification 派发骨架）
+  // 监听主线程广播的 session 创建/销毁/激活通知（C8: dispatchHandler 统一 onNotification 派发骨架）
   rpcClient.onNotification('plugin.sessions.didCreate', (params: unknown) => {
     const p = params as { handlerId: string; session: SessionInfo }
     dispatchHandler(createHandlers, p, h => h(p.session))
@@ -496,6 +560,11 @@ export function createSessionApi(
   rpcClient.onNotification('plugin.sessions.didDestroy', (params: unknown) => {
     const p = params as { handlerId: string; session: SessionInfo }
     dispatchHandler(destroyHandlers, p, h => h(p.session))
+  })
+
+  rpcClient.onNotification(SESSION_EVENT_NOTIFY_METHODS.activate, (params: unknown) => {
+    const p = params as { handlerId: string; session: SessionInfo }
+    dispatchHandler(activateHandlers, p, h => h(p.session))
   })
 
   // entry 失效定向通知（ENTRY_INVALIDATION_NOTIFY_METHOD，u2c 派发侧经 PluginService 到达）
@@ -514,8 +583,8 @@ export function createSessionApi(
     getActive: () =>
       rpcClient.request('plugin.sessions.getActive', { pluginId }).then(v => v as SessionInfo | undefined),
 
-    sendMessage: (params: { sessionId?: string; role: 'user' | 'system'; content: string }) =>
-      rpcClient.request('plugin.sessions.sendMessage', { pluginId, ...params }).then(() => {}),
+    sendMessage: (params: { sessionId: string; role: 'user' | 'system'; content: string; requireCommand?: string }) =>
+      rpcClient.request('plugin.sessions.sendMessage', { pluginId, ...params }).then(v => v as PluginSendReceipt),
 
     readEntries: (sessionId: string, opts: { customType: string; sinceEntryId?: string }) =>
       rpcClient
@@ -549,6 +618,19 @@ export function createSessionApi(
       return registerHandler(destroyHandlers, handlerId, handler, () => {
         rpcClient.request(SESSION_EVENT_UNREGISTER_METHODS.destroy, { handlerId }).catch((e: unknown) => {
           console.error('[session-api] unregisterDestroy failed:', toErrorMessage(e))
+        })
+      })
+    },
+
+    onDidActivateSession: (handler: (session: SessionInfo) => void): Disposable => {
+      const handlerId = `session_activate_${pluginId}_${++sessionCounter}`
+      // 注册失败不静默吞（onDidCreateSession 同款处置）：记日志保留排查线索；handler 本地照常注册。
+      rpcClient.request(SESSION_ACTIVATE_METHODS.register, { pluginId, handlerId }).catch((e: unknown) => {
+        console.error('[session-api] registerActivate failed:', toErrorMessage(e))
+      })
+      return registerHandler(activateHandlers, handlerId, handler, () => {
+        rpcClient.request(SESSION_ACTIVATE_METHODS.unregister, { handlerId }).catch((e: unknown) => {
+          console.error('[session-api] unregisterActivate failed:', toErrorMessage(e))
         })
       })
     },

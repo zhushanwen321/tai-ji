@@ -127,7 +127,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
       listSessions: () => [],
       getSession: () => undefined,
       getActiveSession: () => undefined,
-      sendMessage: async () => {},
+      sendMessage: async () => ({ blocked: false }),
       sessionEvents: new SessionEventDispatch(rpc),
       sessionRead: {
         pm: createFakePm(clients),
@@ -324,7 +324,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
         listSessions: () => [],
         getSession: () => undefined,
         getActiveSession: () => undefined,
-        sendMessage: async () => {},
+        sendMessage: async () => ({ blocked: false }),
         sessionEvents: new SessionEventDispatch(rpc),
       }
       const bareRpc = new PluginRpcServer()

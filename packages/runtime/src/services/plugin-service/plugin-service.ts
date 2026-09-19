@@ -722,6 +722,11 @@ export class PluginService implements IPluginService {
       activeSessionResolver: this.activeSessionResolver,
       commandRegistry: this.commandRegistry,
       sessionEvents: this.sessionEventDispatch,
+      // [u5b] sessionRead 装配（u2d 移交）与 E10 判定的装配缝：失效订阅表与
+      // notifyEntryInvalidation 派发共享同一实例；pending 表直读（pendingUiRequests
+      // 是 UiRequestQueue 公开字段，无新增队列面）。
+      entryInvalidation: this.entryInvalidationDispatch,
+      hasPendingUiRequest: () => this.uiRequestQueue.pendingUiRequests.size > 0,
       deliverInvokeResult: (handlerId, payload, sourceWorkerId) =>
         deliverPluginInvokeResult(
           { commandRegistry: this.commandRegistry, commandInvokes: this.commandInvokes },
