@@ -18,7 +18,7 @@
 //      返回 undefined + pi.sendMessage 零调用）。
 //   6. 引擎死亡（§3.4）：engine_crashed → catch 合成 failed result 回脚本（swallow）
 //      + record 由失败路径立即终态化（不 adopt）；service 分诊两处豁免（runEngineTask
-//      catch / finalizeEngineOutcome exitCode===null）对 workflow record 落空即终态化。
+//      catch（已删）/ finalizeEngineOutcome exitCode===null）对 workflow record 落空即终态化。
 //   7. [H2 W3 must-fix] stream 缺省自构：runWorkflowEngineTask 在 stream 实参缺省时
 //      经 createBackgroundStream 自构（kickOffChatRound 同款策略）——三形态（TUI
 //      widget 接通 / GUI+relay 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护

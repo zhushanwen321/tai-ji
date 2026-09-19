@@ -7,12 +7,13 @@
 //
 // 链路事实（2026-09-09 grep/read 实测，W3 以测试锚定防后续单元破坏）：
 //   executeViaEngine（worktree 创建，record.worktreeHandle 绑定）
-//     → kickOffEngineRun → runEngineTask catch（engine.run prepare 期 reject，含协议
-//       握手 engine_capability_mismatch 形态）
+//     → kickOffEngineRun（已删）→ runEngineTask（已删）catch（engine.run prepare
+//       期 reject，含协议握手 engine_capability_mismatch 形态；该中段随 one-shot
+//       engine-run 编排坍缩删除，现行 catch 面 = kickOffChatRound 主干）
 //     → finalizeFailed（CAS tryTransition closed/gc 抢到锁）
 //     → finalizeRecord → doFinalizeRecord Step 3b cleanupWorktreeIfBound
 //     → worktreeManager.cleanup(record.worktreeHandle)。
-//   前置副作用唯一实体 = worktree（并发池槽在 kickOffEngineRun finally 自回收；journal
+//   前置副作用唯一实体 = worktree（并发池槽在 kickOffChatRound finally 自回收；journal
 //   是宿主②级数据源不清理）。本文件直接锚定执行体 doFinalizeRecord 的 worktree 清理
 //   行为——subagent-service.finalizeFailed 的 JSDoc 为链路登记处。
 

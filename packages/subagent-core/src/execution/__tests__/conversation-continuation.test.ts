@@ -1508,11 +1508,11 @@ describe("集成：[A5] message 资格引擎轴判定本体直测（engineSuppor
 //      （Continuation 轮间共用同一 record 实例）+ close 终态 entry 保真；
 //   2. pi one-shot（kickOffChatRound 非 chatMode 分支——修复前连 onEvent 都不传）：
 //      实时累积 + outcome 写入不重置（completeRecord 只读不重置契约）；
-//   3. 非 pi 引擎（kickOffEngineRun → runEngineTask——修复前事件只喂 journal）：
+//   3. 非 pi 引擎（one-shot 派发——修复前事件只喂 journal）：
 //      实时累积 + 终态 entry 保真（非 pi one-shot 一次 run 即终态化）。
 // 红锚：任一形态喂入行移除即转红（totalTokens 恒 0）。
 
-/** 非 pi 引擎替身（run 挂起捕获；settle 由用例驱动——runEngineTask 喂入用例专用）。 */
+/** 非 pi 引擎替身（run 挂起捕获；settle 由用例驱动——observedEvent 喂入用例专用）。 */
 class FeedCaptureEngine implements EnginePort {
   readonly id = "zcode";
   readonly runs: Array<{
@@ -1689,7 +1689,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record!.turnCount).toBe(1);
   });
 
-  it("非 pi 引擎（runEngineTask）：message_end(usage) → totalTokens 实时累积；终态 entry 保真", async () => {
+  it("非 pi 引擎 one-shot：message_end(usage) → totalTokens 实时累积；终态 entry 保真", async () => {
     const zcode = new FeedCaptureEngine();
     registerEngine("zcode", () => zcode);
 
