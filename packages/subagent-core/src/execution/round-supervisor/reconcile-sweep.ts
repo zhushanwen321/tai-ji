@@ -1,25 +1,30 @@
 // src/execution/round-supervisor/reconcile-sweep.ts
 //
-// [W4] 注册对账 sweep——死亡窗口投递缺口的补发通道（发射点枚举第 5 处）。
+// [W4] 注册对账 sweep——Plane E pending entry 死亡窗口对账 + ①段直落失败的窄竞态
+// 窗兜底（reload-closeout D5 正名：触发点/对账逻辑零改动，职责声明按真实章程）。
 //
-// 设计锚点：D2「注册对账
-// sweep」（R2 增补、R3 钉死判据与写法）。
+// 设计锚点：D2「注册对账 sweep」（R2 增补、R3 钉死判据与写法）+ reload-closeout
+// D4/D5（兜底归位：finalizeRun 直落承担注销主路径后，sweep 从「静默丢唯一兜底」
+// 降回死亡窗口兜底）。
 //
-// 问题：注销经进程内 pi.events appendEntry 落盘，进程死亡时发射源消失
-// （notify-host getPi() 为 null），注销 entry 可能永久缺位 → goal 守卫幻 defer、
-// pending_notifications 工具虚报活跃。
+// 兜底的两类窗口：
+// 1. 进程死亡（kill-9）：finalizeRun 未跑、无直落，注销 entry 永久缺位；
+// 2. 直落失败窄竞态：finalizeRun 的 appendEntry 撞 reload 转换窗 assertActive
+//    抛错（OR-4 围栏留痕后放行），差集残留到本 sweep 收口。
 //
 // 补发机制：对「本 session 的 register entry × 对应 record 状态 ∈ 终态集 ∪ record
 // 已离场/不存在」的差集补发 unregister。**已离场**（archive 从内存移除、磁盘有
 // finalized sidecar → 读侧重建 closed）与**不存在**（畸形条目对不上任何 record）
-// 同视同终态——「查不到即补注销」判据兜底链才闭合。
+// 同视同终态——「查不到即补注销」判据兜底链才闭合。与 finalizeRun 直落互斥幂等：
+// 直落后 id 不再 active，本 sweep 差集为空；直落失败时差集仍在，本 sweep 收口。
 //
-// 写法钉死（照 base-tool-enhance/src/background/pending-reconcile.ts 先例）：
-// **直接 appendEntry 权威落盘 + 尽力 emit 同步内存视图**——不经 bus emit 作权威：
-// pending-notifications 的 unregister listener 落盘条件是其内存 registry 该 id
-// active，而两个 extension 的加载/派发顺序无保障，顺序反转时 emit 被静默吞。
-// 差集消费方（goal 守卫）从持久化 entries 算差集，appendEntry 对守卫直接生效；
-// emit 之外尽力同步 listener 内存视图（失败无害）。
+// 写法钉死（照 base-tool-enhance/src/background/pending-reconcile.ts 终态写法
+// 先例）：**appendEntry 即唯一权威路径，不经 emit**——appendEntry 同步入账且不
+// 依赖 listener 存活，差集消费方（goal 守卫 / pending_notifications 工具）全部从
+// 持久化 entries 现算，appendEntry 对其直接生效。历史上并存过「尽力 emit 同步
+// listener 内存视图」的第二写路径，随 listener 侧内存 registry 机制删除（对 entries
+// 现算 isPendingActive 后，emit 到达时该 id 必已注销 = 恒 no-op 死路径）一并删除
+// （与 finalizeRun emit 发射点删除同款论证）。
 //
 // 触发时机：session reattach / session_start / 监督器启动（由 subagent-service 在
 // initSession 链内调用）。与 session_start 的 registry rebuild 先后时序不作保证，
@@ -38,6 +43,8 @@
 //    不受污染，本 session 虚报 defer 由熔断限损）。
 
 import * as fs from "node:fs";
+
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 import { getLogger } from "../../core/logger.ts";
 
@@ -69,8 +76,6 @@ export interface ReconcileSweepDeps {
   lookupWorkflowRunState?: (runId: string) => SupervisedRecordState;
   /** 权威写（pi.appendEntry）。缺失（dispose 后）= 本轮只判不写。 */
   appendEntry?: (customType: string, data: unknown) => void;
-  /** 尽力 emit（pi.events.emit；listener 缺失/抛错无害）。 */
-  emit?: (channel: string, data: unknown) => void;
 }
 
 /** sweep 结果（日志 + 测试断言面）。 */
@@ -101,8 +106,10 @@ export function runReconcileSweep(deps: ReconcileSweepDeps): ReconcileSweepResul
     sweepSingleRegister(deps, entry, result);
   }
   if (result.reconciled.length > 0) {
+    // WARN 收口日志 = ①②④发射点残差/直落失败的观测通道（reload-closeout D4 覆盖
+    // 判定：频次即残差兑现频率，日收口条数持续 > 个位数 → 按 D4 同款直落扩展）。
     logger.warn(
-      `[subagents] reconcile sweep re-emitted ${result.reconciled.length} unregister(s) for terminal/missing records: ${result.reconciled.join(",")}`,
+      `[subagents] reconcile sweep reconciled ${result.reconciled.length} unregister(s) for terminal/missing records: ${result.reconciled.join(",")}`,
     );
   }
   return result;
@@ -136,11 +143,11 @@ function sweepSingleRegister(
     result.skippedActive.push(id);
     return;
   }
-  reemitUnregister(deps, id, state, result);
+  appendUnregisterEntry(deps, id, state, result);
 }
 
-/** 补发单条 unregister：appendEntry 权威落盘 + 尽力 emit 同步内存视图（均失败保守处理）。 */
-function reemitUnregister(
+/** 补发单条 unregister：appendEntry 权威落盘（唯一写路径，不经 emit——论证见文件头注）。 */
+function appendUnregisterEntry(
   deps: ReconcileSweepDeps,
   id: string,
   state: Exclude<SupervisedRecordState, "active">,
@@ -148,9 +155,16 @@ function reemitUnregister(
 ): void {
   const reason =
     state === "missing" ? "expired" : closedReasonToPendingReason(state.closedReason);
-  // 权威路径：直接 appendEntry 落盘（不经 bus emit 作权威——先例论证见文件头注）。
+  // 权威路径：直接 appendEntry 落盘。status 经 protocol mapReasonToStatus 单点映射
+  // （与 pending-notifications listener / finalizeRun 直落 / bte 对账同一函数）——
+  // 原 `status: reason` 裸写是词表漂移源：非 identity 映射 case（budget_limited→
+  // failed）会落词表外值，未知值由 protocol default=completed 兜底。
   try {
-    deps.appendEntry?.("pending:unregister", { id, reason, status: reason });
+    deps.appendEntry?.(PENDING_UNREGISTER_ENTRY_TYPE, {
+      id,
+      reason,
+      status: mapReasonToStatus(reason),
+    });
   } catch (err) {
     // 落盘失败：差集残留交下次 sweep（session_start / 监督器启动）重试。
     logger.warn(
@@ -159,17 +173,6 @@ function reemitUnregister(
       }`,
     );
     return;
-  }
-  // 尽力补 emit（listener 就绪时同步 pending 内存视图，缩短工具投影不一致窗口）。
-  try {
-    deps.emit?.("pending:unregister", { id, reason });
-  } catch (err) {
-    // 尽力语义：emit 失败无害（appendEntry 已是权威路径），debug 留痕供排查。
-    logger.debug(
-      `[subagents] reconcile sweep best-effort emit failed (harmless) for ${id}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
   }
   result.reconciled.push(id);
 }

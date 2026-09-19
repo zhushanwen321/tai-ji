@@ -150,9 +150,11 @@ function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
   // 视图必须经 Object.create 原型链承载、禁止 object spread：Interface 层注入的
   // eventBus 是现读 getter（D3——每次属性访问重取当前 pi.events，reload 重跑 factory
   // 后自动路由新 pi），spread 会对 getter 求值一次并快照成静态值。run 启动于 pi
-  // reload 前、完成于 reload 后时，finalizeRun 的 pending:unregister 经旧 pi.events
-  // emit 被 assertActive 拒绝，注销事件静默丢失（幽灵 pending 条目，skill-reload
-  // e2e 实证）。原型链视图把 getter 留在原型上，属性访问仍逐次现读；spread 形态下
+  // reload 前、完成于 reload 后时，经旧 pi 的写路径（历史形态：finalizeRun 的
+  // pending:unregister emit，被 assertActive 拒绝、注销事件静默丢失；现行形态：
+  // pending:register emit / appendEntry 直落同理）静默丢副作用（幽灵 pending 条目，
+  // skill-reload e2e 实证——unregister 侧已由直落 + 调用时解析注入根治，reload
+  // closeout D4）。原型链视图把 getter 留在原型上，属性访问仍逐次现读；spread 形态下
   // 未来 deps 新增任何 getter 都会复发同族快照缺陷，故在构造层面排除。
   //
   // onRunDone 覆盖必须走 Object.defineProperty（DefineOwnProperty 语义）、禁止普通
@@ -481,8 +483,8 @@ export interface TerminateRunningRunsOptions {
  *
  * per-run 行为：`state.error = reason` → `finalizeRun(run, deps, "failed",
  * {notifyDone: options?.notifyDone ?? false})`（transition("done","failed") 内部先
- * releaseRuntime，A4 → save best-effort → `eventBus.emit("pending:unregister",
- * {reason:"failed"})`）。
+ * releaseRuntime，A4 → save best-effort → pending:unregister 直落 appendEntry
+ * （status 经 mapReasonToStatus 映射）→ onRunDone）。
  *
  * **缺省不调 deps.onRunDone**（经 finalizeRun 的 notifyDone 承载，D5-②）：
  * 对齐 session_start 恢复先例（index.ts kill-9 恢复只发
