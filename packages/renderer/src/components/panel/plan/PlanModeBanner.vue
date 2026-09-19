@@ -5,7 +5,7 @@
     落 isActive=false，经投影链 session.planState 广播到达，横幅随之消失）。
     视觉基线 = 用户验收 demo 的 M1 顶部横幅（太极纯灰 token，禁 emoji / 原生表单）。
     挂载位 = main-panel header 下、对话流之上（PanelContainer 层独立 flex 行，与 Panel 内的
-    AskUserOverlay/Composer 覆盖位天然不重叠）。
+    表单 overlay/Composer 覆盖位天然不重叠）。
   -->
   <div
     v-if="isActive"

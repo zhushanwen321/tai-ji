@@ -3,8 +3,8 @@
  *
  * 覆盖（impl-plan u1-banner 验收条款 C4 过滤器面）：
  * - planReview 标记请求入 store（C4 放行），挂起状态按 requestId 可枚举（currentPlanReviewRequests）
- * - 非 askUser 非 planReview 的 dialog 原语仍不入 store（C4 负向不回归）
- * - planReviewFilter 实例与 askUserFilter 实例互斥（一请求只归一面；ask-user 行为无回归）
+ * - 非 form 非 planReview 的 dialog 原语仍不入 store（C4 负向不回归）
+ * - planReviewFilter 实例与 formFilter 实例互斥（一请求只归一面；表单类行为无回归）
  * - respond 按 requestId 精确回传 + 出队（planReview 请求面）
  *
  * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus + extension domain mock），
@@ -52,7 +52,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 
 import {
   useExtensionUI,
-  askUserFilter,
+  formFilter,
   planReviewFilter,
   isPlanReviewRequest,
   __resetExtensionBusSubscriptionForTesting,
@@ -127,7 +127,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
     dispose()
   })
 
-  it('非 askUser 非 planReview 的 dialog 原语不入 store（C4 负向不回归）', () => {
+  it('非 form 非 planReview 的 dialog 原语不入 store（C4 负向不回归）', () => {
     const { result, dispose } = runWithScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
@@ -139,32 +139,32 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
     dispose()
   })
 
-  it('askUserFilter 实例拒绝 planReview 请求（两标记互斥，一请求只归一面）', () => {
+  it('formFilter 实例拒绝 planReview 请求（两标记互斥，一请求只归一面）', () => {
     const { result, dispose } = runWithScope(() =>
-      useExtensionUI(ref('sess-A'), askUserFilter),
+      useExtensionUI(ref('sess-A'), formFilter),
     )
 
     emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1'))
 
-    // askUser 实例不入 planReview 请求，currentAskUserRequest 不受污染（ask-user 无回归）
+    // form 实例不入 planReview 请求，currentFormRequest 不受污染（表单类无回归）
     expect(useExtensionUIStore().getRequestsBySession('sess-A')).toHaveLength(0)
-    expect(result.currentAskUserRequest.value).toBeUndefined()
+    expect(result.currentFormRequest.value).toBeUndefined()
     dispose()
   })
 
-  it('ask-user 请求不进 planReview 枚举（ask-user 行为无回归）', () => {
+  it('表单请求不进 planReview 枚举（表单类行为无回归）', () => {
     // 两个消费面实例各持各的 filter：planReviewFilter 实例只枚举 planReview；
-    // ask-user 入队回归由 askUserFilter 实例承载（互斥过滤是设计语义，不是丢失）
+    // 表单入队回归由 formFilter 实例承载（互斥过滤是设计语义，不是丢失）
     const review = runWithScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
-    const ask = runWithScope(() => useExtensionUI(ref('sess-A'), askUserFilter))
+    const form = runWithScope(() => useExtensionUI(ref('sess-A'), formFilter))
 
     emitBusUIRequest('sess-A', mkAskUserReq('au-1'))
 
     expect(review.result.currentPlanReviewRequests.value).toHaveLength(0)
-    expect(ask.result.currentAskUserRequest.value?.requestId).toBe('au-1')
+    expect(form.result.currentFormRequest.value?.requestId).toBe('au-1')
     expect(useExtensionUIStore().getRequestsBySession('sess-A').map((r) => r.requestId)).toEqual(['au-1'])
     review.dispose()
-    ask.dispose()
+    form.dispose()
   })
 
   it('respond 按 requestId 精确回传 + 出队；payload 原样透传给 sendExtensionUIResponse', () => {

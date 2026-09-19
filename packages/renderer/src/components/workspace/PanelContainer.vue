@@ -39,7 +39,7 @@
       @toggle-drawer="toggleDrawer()"
     />
     <!-- M1 计划模式横幅（plan 模式重设计 u1-banner）：header 下、对话流之上的独立 flex 行，
-         覆盖位互斥定则（impl-plan §0 待验证检查点）——AskUserOverlay/Composer 都在 Panel 内部，
+         覆盖位互斥定则（impl-plan §0 待验证检查点）——表单 overlay/Composer 都在 Panel 内部，
          本行在 split-area 之外，天然不重叠。isActive=false 时组件内部 v-if 不渲染。 -->
     <PlanModeBanner :session-id="panelSessionId" />
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。

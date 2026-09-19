@@ -60,7 +60,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
 import {
   useExtensionUI,
-  askUserFilter,
+  formFilter,
   __resetExtensionBusSubscriptionForTesting,
 } from '@/composables/useExtensionUI'
 import { usePlanStore } from '@/stores/plan-store'
@@ -174,12 +174,12 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
   })
 
-  it('跨实例共享 store：askUserFilter 实例入队的 ask-user 请求不影响 planReview 枚举', async () => {
+  it('跨实例共享 store：formFilter 实例入队的表单请求不影响 planReview 枚举', async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
-    // 另一消费面实例（Panel inline ask-user）注册订阅并入队 ask-user 请求
+    // 另一消费面实例（Panel inline 表单）注册订阅并入队表单请求
     const sidRef = computed(() => SID)
     const scope = effectScope()
-    scope.run(() => useExtensionUI(sidRef, askUserFilter))
+    scope.run(() => useExtensionUI(sidRef, formFilter))
     emitPlanReviewRequest('pr-1')
     mockBus.emit({
       kind: 'ui-request',

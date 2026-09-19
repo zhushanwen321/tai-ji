@@ -8,9 +8,6 @@ export default {
   additionalComment: '附加评论',
   commentPlaceholder: '选填，补充说明…',
   // ── schedule 创建确认表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
-  // scheduleCreateTitle/Subtitle/Submit 仅供旧 ScheduleCreateOverlay（u4 接线前仍挂载），随旧组件同批删除
-  scheduleCreateTitle: '创建定时任务',
-  scheduleCreateSubtitle: 'agent 已预填草稿，可调整后确认',
   scheduleCreateTimeLabel: '执行时间',
   scheduleCreateModeLabel: '执行模式',
   scheduleCreateKindOnce: '一次性',
@@ -44,7 +41,6 @@ export default {
   scheduleCreateExpiresNever: '永不过期',
   scheduleCreateExpiresHint: '仅循环任务生效',
   scheduleCreateFootIncomplete: '请补全时间与提示词',
-  scheduleCreateSubmit: '创建任务',
   scheduleCreateSummaryOnce: '一次性 · {detail}',
   scheduleCreateSummaryOnceNoTime: '一次性 · 未设置时间',
   scheduleCreateSummaryRecurring: '循环 · {detail}',

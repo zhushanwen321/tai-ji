@@ -81,20 +81,19 @@ vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
   useNewTaskDeps: () => ({ flow: { ...flowMock, currentCwd: ref<string | null>(null) }, ...depsMock }),
 }))
 
-// ── useExtensionUI mock（Panel 的 ask-user 订阅，ask-user-inline 范式）──
+// ── useExtensionUI mock（Panel 的表单订阅，ask-user-inline 范式）──
 const uiMock = vi.hoisted(() => ({
-  askUserReq: { value: undefined as { askUser?: boolean } | undefined },
-  dialogReq: { value: undefined as { askUser?: boolean } | undefined },
+  formReq: { value: undefined as { form?: boolean } | undefined },
   respond: () => {},
   cancel: () => {},
 }))
 vi.mock('@/composables/useExtensionUI', () => ({
   useExtensionUI: () => ({
-    currentAskUserRequest: uiMock.askUserReq,
+    currentFormRequest: uiMock.formReq,
     respond: uiMock.respond,
     cancel: uiMock.cancel,
   }),
-  askUserFilter: (req: { askUser?: boolean } | undefined) => req?.askUser === true,
+  formFilter: (req: { form?: boolean } | undefined) => req?.form === true,
 }))
 
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
@@ -153,7 +152,7 @@ const stubs = {
   // Panel 子组件
   PanelHeader: SIMPLE,
   MessageStream: SIMPLE,
-  AskUserOverlay: SIMPLE,
+  FormOverlay: SIMPLE,
   // Landing 子组件（popover/modal 重依赖）
   DirSelectPopover: SIMPLE,
   BranchSelectPopover: SIMPLE,

@@ -288,7 +288,7 @@ const total = computed(() => flatItems.value.length)
 
 function onKeydown(e: KeyboardEvent) {
   // IME 组合输入中不拦截：拼音/日文候选导航的 Enter/Arrow 属输入法操作，非浮层导航——
-  // 否则选中候选词会触发 confirmSel 跳转并关闭浮层（与 AskUserForm/AskUserOverlay/Composer 守卫一致）。
+  // 否则选中候选词会触发 confirmSel 跳转并关闭浮层（与表单 overlay/Composer 守卫一致）。
   if (e.isComposing) return
   // #9 AC-9.1：Tab/Shift+Tab 循环切类（先于 total 守卫，使空过滤态仍可继续切换出空类型）。
   if (e.key === 'Tab') {

@@ -57,18 +57,17 @@ describe('convertToDialogRequest（AC2）', () => {
     expect(pi.source).toBe('pi')
   })
 
-  it('TC2: askUser 改写——askUser:true → method=askUser + askUserQuestions/allowCancel 透传', () => {
+  it('TC2: form 类标记不参与 method 改写——form 帧（已被 C4 排除，不达本转换）残配 askUser 标记时 method 按 kind 兜底', () => {
+    // askUser 构造端已随 ui-presentation-protocol §3.4-2 退役：convertToDialogRequest 不再
+    // 改写 method=askUser / 搬运 askUserQuestions。form 类请求由 createDialogRequestSource
+    // C4 排除（见下方分流用例），本用例锁定构造端对标记类字段的「无改写」语义。
     const e = makeUiRequestEvent({ kind: 'input' }) as Extract<InternalEvent, { kind: 'ui-request' }> & {
       request: Record<string, unknown>
     }
     e.request.askUser = true
-    e.request.askUserQuestions = [{ question: '继续?' }]
-    e.request.allowCancel = false
 
     const req = convertToDialogRequest(e)
-    expect(req.method).toBe('askUser')
-    expect(req.askUserQuestions).toEqual([{ question: '继续?' }])
-    expect(req.allowCancel).toBe(false)
+    expect(req.method).toBe('input') // kind 兜底，不再改写为 askUser
   })
 
   it('TC3: options 归一——string[] → {label,value}[]；对象数组透传；非法项跳过', () => {

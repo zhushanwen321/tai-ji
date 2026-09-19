@@ -8,9 +8,6 @@ export default {
   additionalComment: 'Additional comment',
   commentPlaceholder: 'Optional, add a note…',
   // ── Schedule create confirm form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
-  // scheduleCreateTitle/Subtitle/Submit serve only the legacy ScheduleCreateOverlay (mounted until u4 rewiring); removed together with it
-  scheduleCreateTitle: 'Create scheduled task',
-  scheduleCreateSubtitle: 'Draft pre-filled by the agent — adjust then confirm',
   scheduleCreateTimeLabel: 'Schedule',
   scheduleCreateModeLabel: 'Mode',
   scheduleCreateKindOnce: 'One-time',
@@ -44,7 +41,6 @@ export default {
   scheduleCreateExpiresNever: 'Never',
   scheduleCreateExpiresHint: 'Recurring tasks only',
   scheduleCreateFootIncomplete: 'Complete the schedule and prompt to continue',
-  scheduleCreateSubmit: 'Create task',
   scheduleCreateSummaryOnce: 'One-time · {detail}',
   scheduleCreateSummaryOnceNoTime: 'One-time · time not set',
   scheduleCreateSummaryRecurring: 'Recurring · {detail}',

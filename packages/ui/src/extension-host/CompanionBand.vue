@@ -7,8 +7,11 @@
  *  - confirm → 消息 + 确认/取消按钮
  *  - select → 单选 radio 列表（indicator+label+desc 流式，v6 视觉，clarify Q3）+ 确认/取消
  *  - input → 单行文本框；editor → 多行文本（prefill/default 预填）
- *  - askUser → AskUserForm 富交互（tab/多选/Other/comment，clarify Q2）
  *  - 未知 method → 只读降级展示（title + message，无交互按钮，console.warn，ERR3）
+ *
+ * [ui-presentation-protocol §3.4-1] 原富交互表单分支已随 Panel inline 化退役删除——
+ * 表单类请求由 useExtensionUI 消费（FormOverlay 独占），本组件只渲染 band 简单对话框
+ * （permission 等），method 路由不再含 'askUser'。
  *
  * 响应回传：用户提交 → queue.respond(requestId, result)；取消 → queue.cancel(requestId)——
  * queue 内部按 source 路由（pi → sendPiResponse 带 method 透传，plugin → sendPluginResponse）。
@@ -17,12 +20,9 @@
  * 静默空态不崩（design-review R3，先例 StatusBar/ViewHost）。
  */
 import { computed, inject, ref, watch } from 'vue'
-import { isAskUserQuestion } from '@zhushanwen/extension-protocol'
-import type { AskUserQuestion } from '@zhushanwen/extension-protocol'
 import { createDialogRequestQueue } from './dialog-request-queue'
 import { DIALOG_REQUEST_SOURCE_KEY, UI_RESPONSE_TRANSPORT_KEY, OVERLAY_LIFECYCLE_KEY } from './companion-band-source'
 import type { OverlayState } from './companion-band-source'
-import AskUserForm from './AskUserForm.vue'
 import { Button } from '../primitives/button'
 import { Input } from '../primitives/input'
 import { Textarea } from '../primitives/textarea'
@@ -53,7 +53,7 @@ const queue =
 const currentRequest = computed(() => queue?.currentRequest.value)
 
 // 已知 method 集合（ERR3 判定用）
-const KNOWN_METHODS = ['confirm', 'select', 'input', 'editor', 'askUser'] as const
+const KNOWN_METHODS = ['confirm', 'select', 'input', 'editor'] as const
 
 // 未知 method（ERR3）：watch 记录 console.warn（模板不做副作用调用）
 watch(
@@ -131,13 +131,6 @@ watch(currentRequest, (r) => {
   refreshOverlayState()
 })
 
-/** ask-user questions（类型守卫收窄 unknown[] → AskUserQuestion[]，规则同旧 useExtensionUI） */
-const askUserQuestions = computed<AskUserQuestion[]>(() => {
-  const req = currentRequest.value
-  if (req?.method !== 'askUser') return []
-  return (req.askUserQuestions ?? []).filter(isAskUserQuestion)
-})
-
 /** confirm：确认回传 true，取消回传 null */
 function onConfirm(): void {
   const r = currentRequest.value
@@ -158,17 +151,10 @@ function onCancel(): void {
   queue?.cancel(r.requestId)
 }
 
-/** askUser 提交：answers JSON 原样回传（AskUserForm 已序列化） */
-function onAskUserSubmit(answersJson: string): void {
-  const r = currentRequest.value
-  if (!r) return
-  queue?.respond(r.requestId, answersJson)
-}
-
 </script>
 
 <template>
-  <!-- v6 无边框一体化：单容器 bg-input 靠间距分区（对齐旧 AskUserOverlay 容器样式）。
+  <!-- v6 无边框一体化：单容器 bg-input 靠间距分区（对齐统一表单 overlay 容器样式）。
        无请求时 v-if 自隐藏（不占位）。z-index 由 OverlayLifecycle 状态驱动（bandStyle）。
        MF-7：fixed 定位（overlay 挂载，脱离文档流）——弹 dialog 不挤压 panel 布局，
        bandStyle 的 z-index 对 fixed 元素生效；minimize 后 body 隐藏也不占位。 -->
@@ -281,15 +267,6 @@ function onAskUserSubmit(answersJson: string): void {
           <Button variant="default" data-testid="companion-input-ok" @click="onConfirm">{{ t('common.confirm') }}</Button>
         </div>
       </div>
-
-      <!-- askUser：富交互（AskUserForm） -->
-      <AskUserForm
-        v-else-if="currentRequest.method === 'askUser'"
-        :questions="askUserQuestions"
-        :allow-cancel="currentRequest.allowCancel"
-        @submit="onAskUserSubmit"
-        @cancel="onCancel"
-      />
 
       <!-- 未知 method（ERR3）：只读降级展示（title/message 已在上方渲染，无交互按钮），不白屏不崩溃 -->
       <p

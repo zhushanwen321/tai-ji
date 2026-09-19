@@ -1,13 +1,11 @@
 /**
- * Panel inline ask-user 真实 DOM 驱动测试（P-INLINE DOM 层，对齐 schedule-create-inline.test.ts 形态）。
+ * Panel inline 统一表单真实 DOM 驱动测试（u4 接线版——FormOverlay 单渲染器，
+ * questions 源（form 帧 / legacy askUser 归一后）的应答链路）。
  *
- * ask-user-inline.test.ts 只锁定挂载/互斥（不驱动事件），Panel.vue 的 ask-user 双 handler
- * （onAskUserSubmit / onAskUserCancel）与 overlayBandActive/overlayKind 挂载判据此前零 DOM 驱动
- * 覆盖——本文件按 schedule-create-inline 同模式补齐回归网对称性：
- * - 注入 ask-user pending 请求（isAskUserQuestion 形状）→ AskUserOverlay 挂载，ScheduleCreateOverlay
- *   / Composer 互斥不挂（overlayKind==='ask-user' 分型判据）
+ * ask-user-inline.test.ts 只锁定挂载/互斥（不驱动事件），本文件按真实 DOM 驱动补齐：
+ * - 注入表单 pending 请求（form 帧 questions 源）→ FormOverlay 挂载，Composer 互斥不挂
  * - 驱动真实 submit（选中选项 → 提交按钮解禁 → 点击）→ respond(requestId, answers) 以正确
- *   requestId 与答案 JSON（与 extension-protocol 解码契约同形）回传
+ *   requestId 与 FormAnswers envelope JSON 回传
  * - 驱动真实 cancel → cancel(requestId) 回传
  * - allowCancel:false 经 Panel 透传 → cancel 按钮不渲染（prop 接线）
  * - guard 失败兜底：请求队列在渲染后、点击前排空（另一实例已应答的真实竞态）→ handler
@@ -40,18 +38,15 @@ vi.mock('@/composables/useExtensionUI', async () => {
   mockState.overlayReq = currentReq
   return {
     useExtensionUI: () => ({
-      currentAskUserRequest: currentReq,
+      currentFormRequest: currentReq,
       respond: mockState.respond,
       cancel: mockState.cancel,
     }),
-    askUserFilter: (req: { askUser?: boolean }) => req.askUser === true,
-    scheduleCreateFilter: (req: { scheduleCreate?: boolean }) => req.scheduleCreate === true,
-    overlayFilter: (req: { askUser?: boolean; scheduleCreate?: boolean }) =>
-      req.askUser === true || req.scheduleCreate === true,
+    formFilter: (req: { form?: boolean }) => req.form === true,
   }
 })
 
-// stub 子组件（AskUserOverlay / ScheduleCreateOverlay 真实挂载，断言其形态）
+// stub 子组件（FormOverlay 真实挂载，断言其形态）
 const stubs = {
   PanelHeader: { template: '<div />' },
   MessageStream: { template: '<div data-testid="msg-stream" />' },
@@ -70,13 +65,13 @@ function mountPanel(sessionId: string | null) {
   })
 }
 
-/** isAskUserQuestion 形状的 pending 请求（header 作 answers key，与解码契约同形） */
-const askUserReq: ExtensionUIRequest = {
+/** form 帧 questions 源造数（legacy askUser 帧经归一后同形——formQuestions 推断产物） */
+const formReq: ExtensionUIRequest = {
   sessionId: 'session-A',
   requestId: 'req-ask',
   method: 'select',
-  askUser: true,
-  askUserQuestions: [{ header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
+  form: true,
+  formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
 }
 
 beforeEach(() => {
@@ -86,58 +81,57 @@ beforeEach(() => {
   mockState.cancel.mockClear()
 })
 
-describe('Panel ask-user 挂载判据（overlayKind 分型互斥）', () => {
-  it('ask-user 请求 → AskUserOverlay 挂载，ScheduleCreateOverlay / Composer 互斥不挂', () => {
-    mockState.overlayReq.value = askUserReq
+describe('Panel 统一表单挂载判据（questions 源）', () => {
+  it('表单请求 → FormOverlay 挂载，Composer 互斥不挂', () => {
+    mockState.overlayReq.value = formReq
 
     const wrapper = mountPanel('session-A')
 
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="schedule-create-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
     // 未作答：提交按钮禁用（allAnswered 守卫的用户可见形态）
-    expect(wrapper.find('[data-testid="ask-user-submit"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeDefined()
   })
 
   it('allowCancel:false 经 Panel 透传 → cancel 按钮不渲染（prop 接线），submit 仍在', () => {
-    mockState.overlayReq.value = { ...askUserReq, allowCancel: false }
+    mockState.overlayReq.value = { ...formReq, allowCancel: false }
 
     const wrapper = mountPanel('session-A')
 
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ask-user-cancel"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="ask-user-submit"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-cancel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-submit"]').exists()).toBe(true)
   })
 })
 
-describe('Panel ask-user 双 handler 真实 DOM 驱动（respond/cancel 按 requestId 回传）', () => {
-  it('submit 驱动：选中选项 → respond(requestId, answers) 以正确 requestId 与答案 JSON 回传', async () => {
-    mockState.overlayReq.value = askUserReq
+describe('Panel 统一表单双 handler 真实 DOM 驱动（respond/cancel 按 requestId 回传）', () => {
+  it('submit 驱动：选中选项 → respond(requestId, answers) 以正确 requestId 与 envelope JSON 回传', async () => {
+    mockState.overlayReq.value = formReq
     const wrapper = mountPanel('session-A')
 
     // 用户选中 Postgres：选项卡 aria-checked 翻转（用户可见选中态），提交按钮解禁
-    await wrapper.find('[data-testid="ask-user-option-Postgres"]').trigger('click')
+    await wrapper.find('[data-testid="form-option-Postgres"]').trigger('click')
     expect(
-      wrapper.find('[data-testid="ask-user-option-Postgres"]').attributes('aria-checked'),
+      wrapper.find('[data-testid="form-option-Postgres"]').attributes('aria-checked'),
     ).toBe('true')
-    expect(wrapper.find('[data-testid="ask-user-submit"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeUndefined()
 
-    // 提交 → Panel handler → respond(req.requestId, answers)
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
+    // 提交 → Panel handler → respond(req.requestId, answers envelope)
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
     expect(mockState.respond).toHaveBeenCalledTimes(1)
     expect(mockState.cancel).not.toHaveBeenCalled()
     const [reqId, answers] = mockState.respond.mock.calls[0] as [string, string]
     expect(reqId).toBe('req-ask')
-    // 单选答案编码：主 key = header，值 = 选中项 label（与 extension-protocol 解码契约同形）
+    // FormAnswers envelope 编码：主 key = header，值 = 选中项 label（与 extension-protocol 解码契约同形）
     expect(JSON.parse(answers)).toEqual({ db: 'Postgres' })
   })
 
   it('cancel 驱动：点击取消 → cancel(requestId) 以正确 requestId 回传，respond 不调用', async () => {
-    mockState.overlayReq.value = askUserReq
+    mockState.overlayReq.value = formReq
     const wrapper = mountPanel('session-A')
 
-    expect(wrapper.find('[data-testid="ask-user-cancel"]').exists()).toBe(true)
-    await wrapper.find('[data-testid="ask-user-cancel"]').trigger('click')
+    expect(wrapper.find('[data-testid="form-cancel"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="form-cancel"]').trigger('click')
 
     expect(mockState.cancel).toHaveBeenCalledTimes(1)
     expect(mockState.cancel).toHaveBeenCalledWith('req-ask')
@@ -147,34 +141,34 @@ describe('Panel ask-user 双 handler 真实 DOM 驱动（respond/cancel 按 requ
 
 describe('guard 失败兜底（队列排空竞态：渲染后点击 → handler 安全 no-op）', () => {
   it('submit 路径：请求排空后点击提交 → respond 不调用，overlay 卸载 composer 回落', async () => {
-    mockState.overlayReq.value = askUserReq
+    mockState.overlayReq.value = formReq
     const wrapper = mountPanel('session-A')
     // 先作答，让 submit 处于可点击态（绕开 allAnswered 禁用，直达 handler guard）
-    await wrapper.find('[data-testid="ask-user-option-Postgres"]').trigger('click')
+    await wrapper.find('[data-testid="form-option-Postgres"]').trigger('click')
 
     // 排空队列（另一实例已应答）但 nextTick flush 前元素仍在 DOM ——「渲染后点击」竞态
     mockState.overlayReq.value = undefined
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
 
     // guard（!req return）兜底：不向 select 通道回传幻影应答
     expect(mockState.respond).not.toHaveBeenCalled()
     // flush 后 overlay 卸载，composer 回落（band 恢复常态）
     await nextTick()
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
   })
 
   it('cancel 路径：请求排空后点击取消 → cancel 不调用，overlay 卸载 composer 回落', async () => {
-    mockState.overlayReq.value = askUserReq
+    mockState.overlayReq.value = formReq
     const wrapper = mountPanel('session-A')
 
     mockState.overlayReq.value = undefined
-    await wrapper.find('[data-testid="ask-user-cancel"]').trigger('click')
+    await wrapper.find('[data-testid="form-cancel"]').trigger('click')
 
     expect(mockState.cancel).not.toHaveBeenCalled()
     expect(mockState.respond).not.toHaveBeenCalled()
     await nextTick()
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
   })
 })

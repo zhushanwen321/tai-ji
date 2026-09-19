@@ -1,11 +1,14 @@
 /**
- * extension-ui store getter 扩义单测（schedule-create-confirm-modal U6）。
+ * extension-ui store getter form 键判定单测（ui-presentation-protocol u4；原名
+ * schedule-create 扩义面职责随 D5 收敛改写）。
  *
- * hasPendingBlockingOverlay 谓词扩义为「有 pending 富交互 overlay 请求」（askUser ∨ scheduleCreate），
- * hasPendingDialog 对称判据修正（两类 overlay 都不归 dialog）。本文件锁定：
- * - getter 扩义对 schedule-create 请求的查询结果（消费方 ①deriveStatus waiting 的数据源）
- * - hasPendingDialog 不把 scheduleCreate 误归 dialog 类（双 getter 恒不双真）
- * - ask-user 既有查询行为零变更（V7 回归面：老形状请求结果不变）
+ * hasPendingBlockingOverlay 判定键收敛为 form（新 form 帧原生携带 / legacy askUser /
+ * scheduleCreate 帧经 useExtensionUI 归一层附加——store 记录入队前必经归一），
+ * hasPendingDialog 对称判据（form 类不归 dialog）。本文件锁定：
+ * - getter 对 legacy scheduler 表单请求（归一后 form + scheduleCreate 双键）的查询结果
+ *   （消费方 ①deriveStatus waiting 的数据源）
+ * - hasPendingDialog 不把 form 类误归 dialog 类（双 getter 恒不双真）
+ * - 裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定（判定面收敛语义）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/extension-ui-schedule-create.test.ts
  */
@@ -18,12 +21,13 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-/** 构造 schedule 创建确认富交互请求（runtime event-adapter 第 4 marker 分支的帧形状） */
+/** 构造 legacy scheduler 表单请求（归一后形状：scheduleCreate/scheduleDraft 原键 + form 附加） */
 function makeScheduleCreate(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequest {
   return {
     sessionId: 'sess-A',
     requestId: 'r1',
     method: 'select',
+    form: true,
     scheduleCreate: true,
     scheduleDraft: {
       kind: 'recurring',
@@ -36,16 +40,17 @@ function makeScheduleCreate(overrides: Partial<ExtensionUIRequest> = {}): Extens
   }
 }
 
-function makeAskUser(requestId: string): ExtensionUIRequest {
-  return { sessionId: 'sess-A', requestId, method: 'select', askUser: true }
+/** 构造表单请求（form 帧形状） */
+function makeForm(requestId: string): ExtensionUIRequest {
+  return { sessionId: 'sess-A', requestId, method: 'select', form: true }
 }
 
 function makeDialog(requestId: string): ExtensionUIRequest {
   return { sessionId: 'sess-A', requestId, method: 'confirm' }
 }
 
-describe('getter 扩义：hasPendingBlockingOverlay 覆盖 scheduleCreate（有 pending 阻塞 overlay）', () => {
-  it('只有 scheduleCreate 请求 → hasPendingBlockingOverlay true（waiting/豁免消费方的数据源）', () => {
+describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表单（有 pending 阻塞 overlay）', () => {
+  it('只有 legacy scheduler 表单请求 → hasPendingBlockingOverlay true（waiting/豁免消费方的数据源）', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r1' }))
 
@@ -61,23 +66,25 @@ describe('getter 扩义：hasPendingBlockingOverlay 覆盖 scheduleCreate（有 
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
   })
 
-  it('askUser 与 scheduleCreate 双请求并存 → 恒 true；逐个移除后才 false', () => {
+  it('form 帧与 legacy scheduler 表单双请求并存 → 恒 true；逐个移除后才 false', () => {
     const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeAskUser('r1'))
+    store.addRequest('sess-A', makeForm('r1'))
     store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r2' }))
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
 
     store.removeRequest('sess-A', 'r1')
-    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)  // scheduleCreate 仍在等
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)  // scheduler 表单仍在等
 
     store.removeRequest('sess-A', 'r2')
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
   })
 
-  it('V7 回归：无 scheduleCreate 字段的老形状请求查询行为不变（askUser=true→true / dialog→false）', () => {
+  it('判定面收敛语义：裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定', () => {
+    // store 判定键只认 form——裸 scheduleCreate/askUser 形状只在归一层之前存在
+    //（useExtensionUI 双挂点保证入 store 前必经归一，此处裸形状 = 归一层回归的探针）
     const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeAskUser('r1'))
-    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
+    store.addRequest('sess-A', { sessionId: 'sess-A', requestId: 'r1', method: 'select', scheduleCreate: true } as Partial<ExtensionUIRequest> as ExtensionUIRequest)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
 
     store.clearSession('sess-A')
     store.addRequest('sess-A', makeDialog('r2'))
@@ -85,8 +92,8 @@ describe('getter 扩义：hasPendingBlockingOverlay 覆盖 scheduleCreate（有 
   })
 })
 
-describe('hasPendingDialog 对称判据：scheduleCreate 不归 dialog 类', () => {
-  it('只有 scheduleCreate 请求 → hasPendingDialog false（与 hasPendingBlockingOverlay 不双真）', () => {
+describe('hasPendingDialog 对称判据：form 类不归 dialog 类', () => {
+  it('只有 legacy scheduler 表单请求 → hasPendingDialog false（与 hasPendingBlockingOverlay 不双真）', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r1' }))
 
@@ -94,9 +101,9 @@ describe('hasPendingDialog 对称判据：scheduleCreate 不归 dialog 类', () 
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
   })
 
-  it('askUser 请求同样不归 dialog（既有对称语义保持）；普通 dialog 归 dialog', () => {
+  it('form 帧同样不归 dialog（对称语义保持）；普通 dialog 归 dialog', () => {
     const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeAskUser('r1'))
+    store.addRequest('sess-A', makeForm('r1'))
     expect(store.hasPendingDialog('sess-A')).toBe(false)
 
     store.addRequest('sess-A', makeDialog('r2'))
