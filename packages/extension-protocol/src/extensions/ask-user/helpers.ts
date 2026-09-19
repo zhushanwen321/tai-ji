@@ -1,71 +1,17 @@
 /**
- * ask-user extension 的富交互 helper（定制层）。
+ * ask-user extension 的富交互 helper（解码层）。
  *
- * askUserInteract() 是 ask-user extension 在 RPC 模式下的交互入口。
- * TUI 模式下 extension 必须自行调 ctx.ui.custom()。
+ * GUI 提问交互已迁移统一表单协议（ui-form 模块的 uiFormInteract + UI_FORM_MARKER，
+ * 设计 ui-presentation-protocol D3）——askUserInteract 传输 helper 随之退役，不保留
+ * deprecated 别名；AskUserQuestion↔FormQuestion 的归一职责下沉 ask-user 包内 adapter
+ * （extensions/universal/ask-user/src/form-adapter.ts）。
  *
- * 走 select 通道 + marker（ASK_USER_MARKER），复用 select 的全部管道逻辑
- * （队列 / 超时 / 回传 / abort），零重复代码。
+ * 本模块保留 answers 解码 helper（getAskUserAnswer / getAskUserOther）：FormAnswers 的
+ * choice/text 部分与 AskUserAnswers 逐字兼容（键位规则：key = header ?? question，
+ * 多选 = JSON 数组，Other = `${key}__other`），解码契约在此单源。
  */
 
-import type { GuiContext } from '../../core/gui-context'
-import { isGuiCapable, stripUndefined } from '../../core/helpers'
 import type { AskUserQuestion, AskUserAnswers } from './types'
-import { ASK_USER_MARKER } from './marker'
-
-/**
- * ask-user 富交互入口（RPC 模式专用）。
- *
- * RPC 模式：用 select 通道携带 questions 数据，前端渲染富交互 UI。
- * TUI 模式：抛错。extension 必须自行调 ctx.ui.custom()。
- *
- * @param ctx        ExtensionContext（pi 提供）
- * @param questions  交互问题声明
- * @param options    可选：signal（abort）、allowCancel（前端是否显示取消按钮）
- * @returns          answers（key=header/question, value=JSON编码的答案），用户取消返回 null
- */
-export async function askUserInteract(
-  ctx: GuiContext,
-  questions: AskUserQuestion[],
-  options?: { signal?: AbortSignal; allowCancel?: boolean },
-): Promise<AskUserAnswers | null> {
-  // 空 questions 防御（与「用户 Submit 空表单」语义一致，返回 {}）
-  if (questions.length === 0) return {}
-
-  // RPC 模式：select 通道携带 questions 数据
-  if (isGuiCapable(ctx) && ctx.ui?.select) {
-    // questions 数据序列化进 options[0]。
-    // pi select 的 request 硬编码 {method, title, options, timeout}（rpc-mode.ts:136-137），
-    // helper 无法通过 ctx.ui.select 的标准参数注入自定义字段，只能借用 options 数组。
-    // options 是 string[]，JSON.stringify 产出合法 string 元素，pi 原样透传。
-    const payload = JSON.stringify(stripUndefined({
-      questions,
-      allowCancel: options?.allowCancel ?? true,
-    }))
-    const value = await ctx.ui.select(
-      ASK_USER_MARKER,             // title = marker，runtime/前端据此识别
-      [payload],                    // options[0] = JSON payload（runtime 解析）
-      { signal: options?.signal },
-    )
-    // select 返回 undefined = 用户取消 / 超时 / abort
-    if (value === undefined) return null
-    // value 是前端 JSON.stringify 的 answers
-    try {
-      return JSON.parse(value) as AskUserAnswers
-    } catch {
-      // parse 失败（中间环节篡改）视为取消
-      return null
-    }
-  }
-
-  // 非 RPC 模式：askUserInteract 不支持 TUI 渲染。
-  // TUI Component 是 extension 特定的（AskUserComponent 不能通用），helper 不代劳。
-  // 抛错而非返回 null——返回 null 会与「用户取消」混淆，让 extension 误以为用户取消了。
-  throw new Error(
-    'askUserInteract() is only available in RPC mode. ' +
-    'In TUI mode, use ctx.ui.custom() with your own Component directly.',
-  )
-}
 
 /** answers 的 key：header 缺失时用 question 文本 */
 function askUserKey(question: AskUserQuestion): string {
