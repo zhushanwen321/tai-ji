@@ -30,7 +30,7 @@ export type UiFormInteractResult =
 export interface UiFormInteractOptions {
   /** 透传 select dialog：abort 后 pi 本地 resolve(undefined) → cancelled */
   signal?: AbortSignal
-  /** 前端是否显示取消按钮（默认 true，与 askUserInteract 现状一致） */
+  /** 前端是否显示取消按钮（默认 true，沿已退役的 askUserInteract 的默认值先例） */
   allowCancel?: boolean
   /** 失败留痕注入（echo 命中 / 形状错），日志策略归调用方 */
   log?: (msg: string, detail?: object) => void
@@ -56,7 +56,7 @@ export async function uiFormInteract(
   form: FormQuestion[],
   opts?: UiFormInteractOptions,
 ): Promise<UiFormInteractResult> {
-  // 空 questions 防御（与 askUserInteract 先例一致：「用户 Submit 空表单」语义，answers = {}）
+  // 空 questions 防御（沿已退役的 askUserInteract 先例：「用户 Submit 空表单」语义，answers = {}）
   if (form.length === 0) return { ok: true, answers: {} }
 
   // 发送侧守卫（D2 失败策略）：不合法项 = 调用方编码 bug，fail-fast 抛错而非发出坏帧
@@ -71,7 +71,7 @@ export async function uiFormInteract(
 
   if (!(isGuiCapable(ctx) && ctx.ui?.select)) {
     // 非 RPC 模式不代劳 TUI 渲染。抛错而非返回判别失败——返回失败态会与
-    // 「用户取消」混淆，让 extension 误以为用户取消了（askUserInteract 先例同构）。
+    // 「用户取消」混淆，让 extension 误以为用户取消了（沿已退役的 askUserInteract 先例）。
     throw new Error(
       'uiFormInteract() is only available in RPC mode. ' +
       'In TUI mode, use ctx.ui.custom() with your own Component directly.',
@@ -80,7 +80,8 @@ export async function uiFormInteract(
 
   // questions 数据序列化进 options[0]：pi select 的 request 硬编码
   // {method, title, options, timeout}，自定义数据只能借 options 数组携带
-  // （ask-user/helpers.ts 同一先例事实），options 是 string[]，JSON.stringify 产出合法元素。
+  // （沿已退役的 askUserInteract 同一先例，git 历史可溯），options 是 string[]，
+  // JSON.stringify 产出合法元素。
   const payload = JSON.stringify(stripUndefined({
     formQuestions: form,
     allowCancel: opts?.allowCancel ?? true,

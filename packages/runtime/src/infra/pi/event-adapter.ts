@@ -704,9 +704,11 @@ function translateBridgeSelect(
 
 /**
  * ask-user 富交互请求检测：select title 为 ASK_USER_MARKER → options[0] 是 JSON payload
- * （askUserInteract helper 序列化的 { questions, allowCancel }）。
- * 检测成功后透传 questions 等字段，前端路由到 AskUserOverlay；检测失败（非合法 JSON /
- * questions 空）返回 undefined，由调用方降级为普通 select。
+ * （旧版 npm ask-user 扩展的 askUserInteract 序列化的 { questions, allowCancel }——本仓
+ * helper 已随统一表单协议退役，此分支仅服务版本偏斜窗口的旧扩展）。
+ * 检测成功后透传 questions 等字段，前端 legacy 归一层（normalizeFormRequest）
+ * 按 askUser 源渲染 FormOverlay；检测失败（非合法 JSON / questions 空）返回 undefined，
+ * 由调用方降级为普通 select。
  */
 function tryTranslateAskUserSelect(
   event: PiExtensionUiRequestEvent,
@@ -722,7 +724,7 @@ function tryTranslateAskUserSelect(
     sessionId: sid,
     requestId,
     method: 'select',              // 仍是 select（复用回传通道）
-    askUser: true,                 // 标记 ask-user 富交互，前端据此路由到 AskUserOverlay
+    askUser: true,                 // 标记 ask-user 富交互，前端归一层据此渲染 FormOverlay
     askUserQuestions: askUserData.questions,
     allowCancel: askUserData.allowCancel ?? true,
   }
@@ -758,7 +760,7 @@ function tryTranslateScheduleCreateSelect(
     sessionId: sid,
     requestId,
     method: 'select',              // 仍是 select（复用回传通道）
-    scheduleCreate: true,          // 标记 schedule 创建确认，前端据此路由到 ScheduleCreateOverlay
+    scheduleCreate: true,          // 标记 schedule 创建确认，前端归一层据此渲染 FormOverlay（scheduleCreate 源）
     scheduleDraft: draft,          // 守卫收窄后的草稿对象透传（前端无需再 JSON.parse）
   }
   return [
