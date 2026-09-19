@@ -99,8 +99,9 @@ export default {
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
     toolCount: 'Tool ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta generated chars (TurnMeta.vue, design §2.1/§2.4)
-    generatedChars: 'Generated {chars} chars',
+    // [u3 remove-turn-progress-bar] TurnMeta generated tokens (TurnMeta.vue, design §2.1/§2.4;
+    // 2026-09 token 口径: sum of reported output tokens over all LLM calls in the turn, no estimation)
+    generatedTokens: 'Generated {tokens} tokens',
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',

@@ -18,6 +18,7 @@
  * 被丢弃（活跃重开丢压缩记录），离线文件路径反而完整；修一处漏一处的循环正是本次收敛
  * 单点的动因（「判别前置到数据入口，下游不做二次猜测」）。新增 entry 类型只改此处。
  */
+import type { Message } from '@taiji/shared'
 import type { PiSessionEntry, PiSessionCustomEntry } from './pi-protocol.js'
 import { COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
 
@@ -34,6 +35,41 @@ export interface MappedSessionEntries {
 /** ISO timestamp → ms；非字符串（缺失/畸形）兜底 Date.now()（与 mapEntriesToPiMessages 一致）。 */
 function toMs(timestamp: unknown): number {
   return typeof timestamp === 'string' ? new Date(timestamp).getTime() : Date.now()
+}
+
+/**
+ * 用 entry 时间戳回填 assistant 消息的 `Message.endedAt`（消息产出结束时刻）。
+ *
+ * 为什么需要独立回填步（而不在 reducer 里派生）：entry 时间戳是**持久化链路专有**数据——
+ * pi 在 `appendMessage`（message_end 之后）才写 entry，故 entry.timestamp ≈ 该 assistant
+ * 消息产出结束；而 live 链路的 message_end 帧不带 append 时刻（taiji 用消息体 timestamp
+ * 合成 entry，见 event-adapter handleMessageEnd）。若把已回填字段进 reducer，live 侧
+ * `Date.now()` 与 reload 侧 entry 时间戳的毫秒差会直接打穿 store 级 live≡reload 等价性断言
+ * （apply-entry 两路喂入必须逐字节同构）。故保持 reducer 纯净，本函数只在历史转换产物上
+ * 做一层展示字段回填，与 `backfillSegments` 同一层级（同为 reload 专属增强）。
+ *
+ * 语义与降级：
+ * - 只处理 assistant 消息（user/system 无「产出结束」语义，不再让「已工作」时长被 system
+ *   消息时间戳污染）。
+ * - 关联键 = `Message.piEntryId` ↔ `entry.id`（转换时经平行 entryIds 回填，见 MF5）。
+ * - `entry.timestamp < message.timestamp`（时钟回拨/畸形数据）→ 不回填，消费侧回退 timestamp。
+ * - 缺席 entry（截断窗口）→ 不写，消费侧回退 timestamp（与修复前行为等价）。
+ *
+ * 回溯性：entry 时间戳一直在 session JSONL / get_entries 里，历史 session 无需迁移即修好
+ * 「单条 assistant 的 turn 恒显 1s」问题。
+ */
+export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[]): void {
+  const endTimeByEntryId = new Map<string, number>()
+  for (const entry of entries) {
+    if (entry.type !== 'message' || typeof entry.id !== 'string') continue
+    endTimeByEntryId.set(entry.id, toMs(entry.timestamp))
+  }
+  if (endTimeByEntryId.size === 0) return
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || msg.piEntryId === undefined) continue
+    const endTime = endTimeByEntryId.get(msg.piEntryId)
+    if (endTime !== undefined && endTime >= msg.timestamp) msg.endedAt = endTime
+  }
 }
 
 /**

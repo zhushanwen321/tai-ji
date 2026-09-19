@@ -569,7 +569,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.1 对话流（assistant 居中 720）
 
 - **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-w-76%）；隐藏原生滚动条由 TurnRail 接管
-- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：RetryIndicator 不放 composer，重试期间 TurnMeta label 切「重试中 N/M」+ warn 色 spinner（区别 streaming 的 accent）〔2026-09-13 自 v6-design.md 并入〕
+- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：重试不进 composer——`RetryIndicator.vue` 独立行（RefreshCw + 「重试中 N/M」+ warn 色，`border-warn/35 bg-warn-soft`），TurnMeta 自身只随 streaming 转 accent spinner（无分级配色，2026-09 删 warn/danger 时长三档）〔2026-09-13 自 v6-design.md 并入；2026-09-19 校正归属 + 删分级配色〕
 - **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 双环 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
 - **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠，exit 标签色 0=`success` / N=`warn` / timeout=`dim`）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）〔exit 标签色 2026-09-13 自 v6-design.md 并入〕

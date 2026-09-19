@@ -78,11 +78,10 @@
         :think-count="thinkCount"
         :tool-count="toolCount"
         :elapsed="elapsed"
-        :elapsed-secs="elapsedSecs"
-        :first-ts="firstTs"
-        :last-ts="lastTs"
+        :started-at="startedAt"
+        :ended-at="endedAt"
         :is-live="isLive"
-        :generated-chars="generatedChars"
+        :generated-tokens="generatedTokens"
         :turn-index="turn.index"
         :turn-key="turnStableId(turn)"
         :session-id="sessionId"
@@ -181,7 +180,15 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
 import type { MessageTurn, FlatBlock, NotifyOutcome } from '@taiji/core/domain/chat'
-import { countThinking, countToolCalls, flattenTurnBlocks, computeTraceWindow, turnStableId, W } from '@taiji/core/domain/chat'
+import {
+  countThinking,
+  countToolCalls,
+  deriveTurnAggregates,
+  flattenTurnBlocks,
+  computeTraceWindow,
+  turnStableId,
+  W,
+} from '@taiji/core/domain/chat'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
 import ChangeSetCard from './ChangeSetCard.vue'
 import UserBubble from './UserBubble.vue'
@@ -369,6 +376,24 @@ const thinkCount = computed(() => countThinking(props.turn))
 const toolCount = computed(() => countToolCalls(props.turn))
 
 /**
+ * 整个 agent-turn 的聚合事实（core 纯函数，live 与 reload 同一公式）：
+ * 起点 / 最后一次产出结束 / 已上报的真实生成 token 总量。状态行（时长、时刻区间、tokens）统一读它。
+ */
+const turnAggregates = computed(() => deriveTurnAggregates(props.turn))
+
+/**
+ * 本 turn 是否仍在进行（驱动秒级 tick 与「（进行中）」）= 工作 turn。
+ *
+ * [口径修正 2026-09] 判据从「末位 assistant 仍在 streaming」改为「turn 进行中」：
+ * 整 turn 墙钟口径要求含**等待**（用户裁决「ask-user 等待也计入」），而 ask-user 等待期间
+ * pi 已 agent_end（assistant 转 complete）但会话仍在进行（sessionActive=true）——旧判据下
+ * 计时冻在 agent_end 那刻，作答后才跳变（定格值含等待，显示不含）。改后 live 连续、
+ * 定格时直接接到权威 endedAt（无跳变）。
+ * 工具执行期间两种判据同值（pi 整轮才 agent_end，assistant 保持 streaming）。
+ */
+const isTurnRunning = computed(() => isWorkingTurn.value)
+
+/**
  * 折叠作用域（scope wave D1）：工作 turn 或手动 expanded 时展开 trace。
  * [M5 stable-key] 展开态按 turnStableId(turn)（首条消息 id）查询。
  */
@@ -428,11 +453,11 @@ function onToggleTakeover(): void {
 }
 
 /**
- * 工作耗时 live 计时。
+ * 整 turn 墙钟 live 计时 + 整 turn 生成 token 总量（聚合事实在 core deriveTurnAggregates）。
  */
-const { elapsed, elapsedSecs, firstTs, lastTs, isLive, generatedChars } = useTurnElapsed(
-  () => props.turn.assistants,
-  () => isStreaming.value,
+const { elapsed, startedAt, endedAt, isLive, generatedTokens } = useTurnElapsed(
+  () => turnAggregates.value,
+  () => isTurnRunning.value,
   () => sessionActive.value,
   () => {
     collapse(turnStableId(props.turn))

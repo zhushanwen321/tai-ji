@@ -98,8 +98,9 @@ export default {
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
     toolCount: '工具 ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（TurnMeta.vue，设计 §2.1/§2.4）
-    generatedChars: '已生成 {chars} 字符',
+    // [u3 remove-turn-progress-bar] TurnMeta 已生成 token 数（TurnMeta.vue，设计 §2.1/§2.4；
+    // 2026-09 口径改 token：整 turn 全部 LLM 调用的 usage.outputTokens 之和，不估算）
+    generatedTokens: '已生成 {tokens} tokens',
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',
