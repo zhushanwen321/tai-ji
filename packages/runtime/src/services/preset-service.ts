@@ -169,9 +169,13 @@ export interface PresetResolution {
    * 请求的 presetId 定义不可得、本次 resolve 已回落 builtin:full 时，填原（悬空）presetId。
    *
    * 由 `resolveLaunchPresetOptions`（launch-params.ts）在 fallback 分支附加——**不是**
-   * `PresetService.resolve()` 的产物（resolve 只认已到手的 preset 定义）。消费方
-   * `spawnRestoreClient` 据此置 `SessionSummary.launchPresetFallbackTo` 披露「本次以全工具
-   * 模式启动」；create/fork 路径不消费（回落仍照常发生，只是不披露）。
+   * `PresetService.resolve()` 的产物（resolve 只认已到手的 preset 定义）。
+   *
+   * 两个消费面口径不同，勿混：
+   * - **UI 披露位**（`SessionSummary.launchPresetFallbackTo`）仅 restore 置位；create/fork
+   *   不置位（回落照常发生但 UI 不披露）。
+   * - **trace env 三路同注**：create/restore/fork 均经 `buildPresetFallbackEnv` 出站，
+   *   故 fork/create 的 trace entry 仍会带 `presetFallback`。
    */
   fellBackFromPresetId?: string
 }

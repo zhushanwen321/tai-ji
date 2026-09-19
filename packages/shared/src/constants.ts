@@ -259,8 +259,9 @@ export const ENGINE_ENV_PREFIXES: readonly string[] = [
 ]
 
 export const ENGINE_ENV_DENY_LIST: readonly string[] = [
-  // 出站 deny 清单（与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员——
-  // 引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）
+  // 出站 deny 清单。前两键与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员
+  // （引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）；
+  // 其余为引擎面特有的 deny 项（见各条注释）。
   'TAIJI_AGENT_PACKAGED',
   'TAIJI_RUNTIME_TOKEN',
   // 凭证键：引擎凭据不跨进程（设计不变量 5），泄漏面与 WS 令牌同级
@@ -269,6 +270,13 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 误继承会把孙帧归到父 record
   'TAIJI_SUBAGENT_RELAY_SESSION_ID',
   'TAIJI_SUBAGENT_RELAY_RECORD_ID',
+  // 「进程生命周期标志不出站」同族（env 名 SSOT = 下方 PRESET_FALLBACK_ENV_KEYS，
+  // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
+  // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
+  // → 子 agent pi）继承陈旧值会让子 agent pi 的 trace 扩展记一个从未发生的
+  // presetFallback 假披露——故在引擎出站面一律剥除。
+  'TAIJI_PRESET_FALLBACK_FROM',
+  'TAIJI_PRESET_FALLBACK_TO',
 ]
 
 /**

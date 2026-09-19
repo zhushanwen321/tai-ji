@@ -44,7 +44,7 @@ export function buildSessionSummary(
     // F1 披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：restore 回落
     // 到 builtin:full 的事实随内存态透传（scanner 磁盘路径无此字段——回落态是「本进程本次
     // 运行」的内存态事实，进程重开即归零，不持久化，避免「未重启也声称已回落」的假陈述）。
-    launchPresetFallbackTo: (s as { launchPresetFallbackTo?: string }).launchPresetFallbackTo,
+    launchPresetFallbackTo: (s as ManagedSession).launchPresetFallbackTo,
     // D14 语义修正：归属 project 透传到 summary（内存态兑底，sidecar 扫描路径在 scanner）。
     projectId: (s as ManagedSession).projectId,
     // B-2：agent-managed 标记透传——list 按 spawnSource/parentAgentSessionId 过滤时

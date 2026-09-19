@@ -28,7 +28,7 @@ import { BUILTIN_PRESET_IDS } from '@taiji/shared'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
 import { getImageCacheDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
-import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord } from './session-internal.js'
+import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
 import {
   buildPresetClientOptions,
@@ -1020,7 +1020,7 @@ export class SessionLifecycle implements ISessionRegistry {
     // 事实只在真发生回落时置位（避免「模式刚删、会话未重启」窗口内的假陈述）；不写 sidecar——
     // 回落是「本进程本次运行」的内存态事实，进程重开未 restore 时不成立（详见 SessionSummary 字段注释）。
     if (fellBackFromPresetId !== undefined) {
-      (session as { launchPresetFallbackTo?: string }).launchPresetFallbackTo = BUILTIN_PRESET_IDS.FULL
+      (session as ManagedSession).launchPresetFallbackTo = BUILTIN_PRESET_IDS.FULL
     }
     const restoredSummary = this.svc.toSummary(session)
     // D4（session-dead-structural-fixes）：restore-abort——返回前检测 userStopped 标记。判定

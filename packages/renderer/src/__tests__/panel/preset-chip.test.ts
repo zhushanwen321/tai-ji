@@ -156,6 +156,12 @@ describe('PresetChip E7 三态（设计 §7.5：与 ModeDeclarationRow 同判据
     expect(chip.text()).not.toContain('会话重启后将回落全工具')
     // popover 亦有完整披露文案（chip 截断时的可靠落点）
     expect(wrapper.find('[data-testid="preset-chip-fallback-popover"]').exists()).toBe(true)
+    // a11y 名（纯图标档唯一可见通道之一）不得漏披露——chip 文本之外的可靠落点
+    expect(chip.attributes('aria-label')).toContain('本次以全工具模式启动')
+    // 纯图标档：无 chip 文本，icon 档 title 是唯一可见通道（最脆一腿）——披露须随 iconTitle 落位
+    const iconWrapper = mountChip({ presetId: 'custom:gone', fallbackTo: 'builtin:full', density: 'icon' })
+    const iconChip = iconWrapper.find('[data-testid="preset-chip"]')
+    expect(iconChip.attributes('title')).toContain('本次以全工具模式启动')
   })
 
   it('②d F1 模式可得时无回落披露（正常态不得带回落文案）', () => {
