@@ -12,8 +12,8 @@
 // 不导入 SchedulerRuntime 的内部：只通过 index.ts 的 default export 测，
 // 保证 tool 注册逻辑的入口契约。
 //
-// 关键回归点：runtime 在 session_start 前为 null。execute 通过 getRuntime() 延迟
-// 读取——若在 factory 顶层捕获 runtime! 非空断言，注册时 runtime 为 null，
+// 关键回归点：service 在 session_start 前为 null。execute 通过 getService() 延迟
+// 读取——若在 factory 顶层捕获 service! 非空断言，注册时 service 为 null，
 // execute 调用会 NPE。此套件验证 session_start 前 execute 优雅 throw 而非 crash。
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
@@ -23,7 +23,7 @@ import { describe, expect, it, vi } from 'vitest'
 // 会触碰真实用户 FS（~/.pi/agent/scheduler/root/test/scheduler.json 的 renameSync/existsSync/
 // unlinkSync；该目录是活跃数据目录，一旦路径存在会 rename+unlink 真实用户数据且结果不确定）。
 // mock 掉 importer 模块：session_start 装配路径仍被调用（vi.fn 记录调用），FS 副作用为零；
-// 装配时序由 scripts/verify-scheduler-e2e.cjs 的 S10/S12/S17 真实环境覆盖。
+// 装配时序由 scripts/verify-scheduler-e2e.cjs 的 S12/S17 真实环境覆盖（S10 followup）。
 // mock 返回 vi.fn() 作为延迟删除 cleanup（MF-1：turn_end / session_shutdown 装配链路可测）。
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
@@ -159,11 +159,11 @@ describe('pi-scheduler SDK contract', () => {
     const fakeCtx = createFakeCtx()
     await events.get('session_start')!({ type: 'session_start', reason: 'startup' }, fakeCtx)
 
-    // 非法 cron 表达式：service.create 失败 → toToolResult throw service message 本体
-    //（无 'Error:' 前缀——前缀格式仅 index.ts 的初始化异常兜底使用）
+    // 非法 cron 表达式：U2 六步流预校验（§3.5 第三行）先于 service.create 拦截，
+    // throw 可自修复文案（经 index.ts execute catch 包装 'Error: ' 前缀进 toolResult）
     await expect(
       tools[0]!.execute('call-err', { prompt: 'x', schedule: 'invalid-cron-expr-xxx' }, undefined, undefined, fakeCtx),
-    ).rejects.toThrow('Invalid schedule')
+    ).rejects.toThrow('unrecognized schedule')
   })
 
   it('schedule_control tool 业务失败同样 throw（W4）', async () => {

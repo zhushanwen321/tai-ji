@@ -75,6 +75,8 @@ export default {
     appendTitle: '注入额外提示词',
     appendSubtitle: '在系统提示词末尾追加内容',
     appendHint: '追加到系统提示词末尾，保存后下一轮对话即生效（含进行中的会话）',
+    capabilityLabel: 'taiji 内置能力告知',
+    capabilityHint: '在系统提示词中注入 taiji 渲染能力说明（内联 HTML、相对图片与链接按会话目录解析等）；保存后下一轮对话生效',
     appendLabel: '追加的提示词',
     appendPlaceholder: '输入要追加的提示词……',
     save: '保存',

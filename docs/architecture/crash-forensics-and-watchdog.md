@@ -103,7 +103,7 @@ pi 崩溃（exit 1）
 
 ### 3.3 关键决策与权衡
 
-**本章结论**：9 个决策——D1 台账双文件（条件信号事件化）、D2 评估器（暗债根修）、D3 checkpoint 自动恢复、D4 看门狗采样与降级、D5 滚动重启执行链、D6 诊断导出、D7 tee size 轮转、D8 入站 parse 守卫、D9 两个 supersession/守卫裁决。
+**本章结论**：10 个决策——D1 台账双文件（条件信号事件化）、D2 评估器（暗债根修）、D3 checkpoint 自动恢复、D4 看门狗采样与降级、D5 滚动重启执行链、D6 诊断导出、D7 tee size 轮转、D8 入站 parse 守卫、D9 两个 supersession/守卫裁决、D10 崩溃时刻机器面关联取证（v12 增）。
 
 ---
 
@@ -236,6 +236,15 @@ pi 崩溃（exit 1）
 - **O3-C 截断反转 —— 裁决：被已交付形态 superseded，不实施**。原承诺「六工具白名单反转为默认截断 + 豁免名单」针对的「白名单外工具在 renderer 无界」问题，已被 crash-resilience.md（已删，git 可追溯）u7 交付的 **entryStates 64KB 条目截断**（apply-entry-utils.ts，live/reload 共用同一截断层）结构性覆盖——所有工具的 entry 累积态恒有界。再反转 display 层白名单（truncate-tool-output 4KB 投影）只是显示层一致性收益，引入双截断体系的维护成本。**登记 supersession 而非静默放弃**：对账动作已执行——prevention-deep-dive.md §5 总表 O3-C 行已加注 superseded-by（该文档已删除，git 可追溯；其 O3-C 行注记与本条裁决一致）。
 - **O1-2 审计覆盖机器守卫 —— 采用 B 方案（清单完备性检查）而非 AST lint**：新增检查脚本（挂 extensions 三连或 pre-commit）：解析 `stale-ctx-audit.md` **§3 全仓普查清单**（权威表——不是 §2 接入清单）vs `extensions/{taiji,universal,shared}/` **三组目录**的实际包列表——任何新增 extension 包未在普查表出现即红（forcing 新包接入时填写 stale 静默语义判定）。**合并行解析规则**：普查表存在一行多包斜杠分隔的合并行（如「rename-session / msg-id-mapper / …」），按 `/` 拆分后逐一比对。被否 A 方案（taste-lint AST 规则识别「未守卫的异步 ctx 调用」）：过匹配/漏匹配不可靠（回调形态发散：timer/事件/Promise/闭包传递），误报噪音会教人绕过；清单完备性是可机器判定的强不变量，语义判定交回人（普查表）+ 行为兜底交回守卫（guardStaleCtx 已交付）。
 
+---
+
+**D10：崩溃时刻机器面关联取证（v12 增，crash-correlation）**
+
+- **背景（2026-09-20 连坐崩溃实证）**：某 session 的 pi 四次以 exit code 143（SIGTERM）死亡，runtime 侧 kill_source=exit_converge 无从归因；事后人工取证（macOS 统一日志 + 进程表）才定位到真凶形态：另一进程按模式扫杀机器上所有 taiji 形态 pi（同秒 3 个 pi 跨实例死亡 + 同秒 Electron 退出，runningboardd/mDNSResponder 可证）。归因证据散在系统层，pi-crash log 当时不自带——本决策把它自动化。
+- **采用**：两个采集器挂既有链路（不新建探测），全部 best-effort 不影响 exit 主流程。① 同步机器面 pi 快照（`ps -axo pid=,ppid=,command=` 过滤 taiji 二进制名，~10ms）：rpc-client.writeCrashLogIfNeeded 写入快照 section；session-service 的 pi crash 台账行带 machinePiDigest 扩展字段（shared schema 登记面，偏差 #32③ 同款）。② 异步统一日志关联采样（`log show` 崩溃 ±5s 窗，darwin-only，超时 10s + 行上限 60）：runningboardd 进程退出 / mDNSResponder pi 连接断开 / launchd signaled service 三类证据，fire-and-forget 完成后补写进同一 pi-crash log（append 语义）。**采样门**：crash log sink 未启用（logger no-op 态）时两采集器结构性惰性（无 sink 不采样）——单测环境零副作用，生产恒采集。观测面：幸存同族 pi 及 ppid 归属（判孤儿化/他实例持有）+ 同窗 Electron 退出（跨树扫杀相关性）+ 阴性证据显式落盘（matched=0 / unavailable，区分「没采」与「采到空」）。
+- **被否**：常驻 `log stream` sidecar——崩溃是稀有事件，常驻进程 + 持续 CPU 不成比例，且需完整生命周期管理；`log show` 按崩溃时刻一次性采样（1-5s）在 fire-and-forget 下可忽略。台账事件枚举扩值（crash-correlation 事件）——20 值闭合枚举扩值需 D1 schema 块同步，而关联证据的完整形态是文本块（不适合结构化行），落 pi-crash log + 既有 crash 行带 machinePiDigest 已覆盖机查/人查两面。
+- **效果**：下次同类连坐崩溃，pi-crash log 自带凶器相关性证据（同秒 Electron 退出行 + 幸存者进程表），归因无需人工重放统一日志；#16（E2 型连坐）的台账输入多携带机器面摘要，人工复审与后续评估器增强都有锚。
+
 ### 3.4 探针清单（运行时断言，准则 7）
 
 | # | 断言 | 状态 | 失败降级 |
@@ -306,7 +315,7 @@ pi 崩溃（exit 1）
 | 11 | 白屏但两侧日志无记录 → crashReporter 立项 | crash-resilience.md（已删，git 可追溯）D2 代价 A | requires-user-report |
 | 12 | reload 丢草稿反馈 → 草稿持久化立项 | 同上 D2 代价 B | requires-user-report |
 | 13 | live/reload 大文本可见差异反馈 | 同上 D3 代价 C | requires-user-report |
-| 14 | 「加载更早」翻页高频抱怨 | 同上 D4 | requires-user-report |
+| 14 | 「加载更早」翻页高频抱怨 | 同上 D4 | **2026-09-19 已触发并收口**：实测重 agent 会话 7 轮 3.5MB（均 500KB/轮）→ 640KB 字节预算下窗口仅 1 轮、每次手点只翻一轮；改为**触顶自动续载**（`useLoadMoreHistory.onScrollOffset` + MessageStream virtua @scroll 透传，按钮保留为兜底/进度位）。预算常量未动；若仍高频，再按「窗口体积重审」立项（证据：该 session 的 turn 字节分布） |
 | 15 | Trace 首个真实命中 / cache size 帽占位真实出现 | 同上 D5/D6 | requires-user-report |
 | 16 | E2 型连坐复发 → dev/prod 隔离升级立项（datadir pin 已在 main 缩小残余面） | 同上 D6 代价 | 同秒多 SIGTERM 形态检测（窗口内 ≥3 session 同秒 exit 且非计划内——计划内以 destroyAll/destroySession **杀链发起事件**（D1 矩阵 shutdown 行挂点，连坐死亡的 pi 侧事件同样产自发起处）时间窗关联排除 |
 | 17 | 降级反弹：memory-relief 执行后 10min 内水位不降反升 >5% 的比例周均 >30% → 降级清单重审 | 本文 D4 降级代价 | **消费方 = Gate W（u8）人工复审**（判据需 memory-relief 前后水位对比——60s 采样环内存态不落台账，评估器不可算；水位 5min 明细行在 runtime 日志供人工深查） |
@@ -335,6 +344,7 @@ pi 崩溃（exit 1）
 - v9（2026-09-12）：**阶段 6 design-code-sync（交付现实回写，全部为文档措辞对齐、零设计裁决变更）**。要点：**D7 旋段形态改写**（`.1.gz` gzip 单代 + `TAIJI_LOG_MAX_BYTES` 单旋钮——dev-0.9.17 合并裁决回写；初版 `.1` 平面实现与打开时预滚的被取代事实落交付偏差注记两则）；**D1 矩阵对齐交付**（reaped 判据 v2 marker 化【spawn marker 清单 + argv + ppid=1】/ deleted 行号锚定 session-service.ts:1191 / reattach-skipped 拆双落点【runtime 编排三类 skip + main 侧冷启动残留隔离】/ shutdown 行补 `runtime.isRunning` 在场性 guard——偏差 #17 措辞回写）；**D3 补可信度判定 main 侧实施分工**（consumeResidualRunMarker → resolveColdStartTrust → isolateStaleCheckpoint，runtime 编排只消费 trusted-unclean）；**D4 补 LRU 已交付形态**（useMemoryPressure 可注入收紧动作 + core setLruMaxSessions 可变窗——偏差 #28②）；**D5 补引擎池 dispose 打点占位注记**（runtime 注册表恒空、实际杀链经 pi 侧 extension 收割钩子——偏差 #29，Gate B A4 挂死排查锚点）；**§4 补执行口径注记不删原判据**（A4 首轮 FAIL 退出链挂死复验中 / A5 SCALED 256KB / A6 BLOCKED 无注入钩子 / A8 CDP 替代口径；A3c 探针超时收口未落地事实化）；**§5 env 清单**补 `TAIJI_LOG_MAX_BYTES`、移除未实施的 liveness 旋钮占位；**约束引用对齐登记面现状**（renderer 熔断 C-proc-12→C-proc-16、stale ctx 守卫 C-pi-15→C-pi-16——v5 合并对侧重写 constraints.json 致编号撞车与三条登记丢失【原 C-comm-14 出站守卫 / 原 C-pi-15 stale ctx / C-state-12】，恢复登记见 constraints.json 同批变更）；**§5 约束登记义务五项兑现**（台账双文件与写入点矩阵 / checkpoint 五契约 / 滚动重启退出码与 planned 分支及推迟有界 / 入站 parse 守卫 / tee `pi-` 前缀与 gzip 单代有界轮转）+ 看门狗武装门控默认 off + reap 判据 v2 marker 化，同批登记 constraints.json（C-data-20 / C-proc-17~20 / C-comm-15 / C-build-08）。
 - v10（2026-09-13）：文档整合 Batch 4-I1——吸收 crash-resilience.md（v11）独有档案为新附录 D，该文档与 crash-resilience.impl-plan.md 删除（git 可追溯），正文引用逐处挂溯源标注。
 - v11（2026-09-13）：**D5 在途上报通道 oe-audit 坍缩（裸 TUI 闪框事故触发）**。审计报告 `.tmp/over-engineering-audit/over-engineering-audit-20260913-095736.md`（用户裁决全量执行）。要点：**送达可靠层立论改写**（原「旧版 extension/runtime 版本错配」被同 bundle 发布 + pi 随 runtime 退出销毁两条事实证伪——erss 兜底对象收敛为 reporter 放弃/通道结构性故障，缺席语义②④ 同步改写）；**重试改有界**（初始上报失败重试「直至成功一次」→ 累计 30 次放弃，对齐 plugin-bridge MAX_SYNC_ATTEMPTS 形态；60s 窗口覆盖 R2 attach 竞态，放弃走 absent-report errs 推迟）；**mode 门控**（inflight-reporter 与 plugin-bridge 的 marker-select 通道仅 rpc 模式启动——裸 pi TUI 下 marker select 无拦截方弹真框，2026-09-12 无限闪框事故根因；ask-user `ctx.mode === "rpc"` 二值判定同款先例，plugin-bridge 门控点收敛在 callBridge 入口兼覆盖 observe 转发）；**协议面坍缩**（删 `kind: initial/delta` 死字段——runtime 侧 applyReport 不读、reporter 自认等价，连同 INFLIGHT_REPORT_KINDS / InFlightReportKind / initialAcked 状态机 / isSubagentInFlightReport 的 kind 值域分支）；**死代码清除**（inflight-mirror.resetFor 孪生方法——与 presetZero 逐字同款且生产零调用；lastReportAt 死字段——生产零读者；InFlightListener 死参数——签名改无参）；**引擎槽删除**（EnginePort.inFlightSnapshot? 四段零调用链：port 可选成员 + zcode 实现 + rolling-restart 注入槽 + 求值分支 + zcode-engine-inflight.test，见 §3.3 D5 zcode 侧注记）。估算净删 ~150 行 + 1 协议常量 + 2 API + 1 状态机。**A4 验收影响注记**：镜像重建断言（reattach 后 extension 重载初始上报）行为不变——mode 门控不影响 rpc 模式（runtime 恒 rpc spawn），有界重试不影响正常路径（attach 竞态毫秒级自愈远早于 60s 窗口）。
+- v12（2026-09-20）：**D10 崩溃时刻机器面关联取证（crash-correlation，2026-09-20 连坐崩溃实证触发）**。某 session pi 四次 SIGTERM 死亡（exit 143）人工取证定位到「他进程按模式扫杀全部 taiji 形态 pi」的连坐形态后，把归因证据采集自动化：①同发布面 pi 快照（ps 过滤 taiji 二进制名）——rpc-client 写 crash log 快照 section + session-service 的 pi crash 台账行带 machinePiDigest 扩展字段（schema 登记面追加，14 主字段不变）；②统一日志关联采样（`log show` ±5s，darwin-only）——runningboardd 退出/mDNSResponder 断连/launchd 信号三类证据行补写进同一 pi-crash log。采样门 = crash log sink 启用态（无 sink 不采样）；`log stream` 常驻 sidecar 与台账枚举扩值被否（理由见 D10）。新模块 packages/runtime/src/infra/crash-correlation.ts，接线点 rpc-client.writeCrashLogIfNeeded / session-service onSessionExit 台账行。
 
 ## 附录 D：崩溃韧性防线档案（迁自 crash-resilience.md，该文档已删除 git 可追溯）
 

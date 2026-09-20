@@ -9,6 +9,10 @@ export default {
     branch: '分支',
     gitStatus: 'Git 状态 · 打开侧栏',
     copySessionFile: '复制 session 文件路径',
+    // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
+    pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
+    pluginActionRestoring: '会话恢复中，暂无法判定',
+    pluginActionTemporarilyUnavailable: '暂不可用',
   },
   composer: {
     send: '发送',
@@ -192,7 +196,14 @@ export default {
     genStatsD30: '近 30 天',
     genStatsDayShort: '今日加权（此模型）',
     genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
-    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
+    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时显示「—」',
+    // 归因降噪（2026-09-19 D-A）：预期内 0% 的成因文案——三值均非故障，以中性色呈现
+    genStatsCacheMissColdStart: '首次请求',
+    genStatsCacheMissIdle: '空闲过期',
+    genStatsCacheMissCompaction: '压缩重建',
+    genStatsCacheMissColdStartNote: '会话首个请求，缓存尚未建立（预期内未命中）',
+    genStatsCacheMissIdleNote: '距上次请求已空闲 {duration}，provider 缓存已过期（预期内未命中）',
+    genStatsCacheMissCompactionNote: '上下文压缩后前缀重建，本次请求必然未命中（预期内）',
     genStatsNoData: '暂无数据',
   },
   sideDrawer: {

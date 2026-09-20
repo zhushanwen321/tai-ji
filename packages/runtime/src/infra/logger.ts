@@ -734,6 +734,17 @@ function flushWatermarkDaily(acc: WatermarkDailyAccumulator): void {
 }
 
 /**
+ * crash log sink 是否可用（crash-correlation 采样门，D10）：pi-crash log 未初始化
+ * （单元测试 no-op 态）时关联取证无落点，采样本身是无意义功——快照/统一日志采集器
+ * 以此为门结构性惰性，生产（logger init 后）恒采集。与 writePiCrashLog 的内部
+ * `!logsDir || !currentLevel` 早退同源同语义，单独导出是为了让采样器在**做功前**短路
+ * （而非采完才发现没处写）。
+ */
+export function isPiCrashLogEnabled(): boolean {
+  return Boolean(logsDir && currentLevel)
+}
+
+/**
  * pi 崩溃 stderr 全量落盘（设计 file-lock-unification-and-reaper-sink §3.2-D4 / U3-4，
  * rpc-client exit handler 的异常退出分支调用）。
  *

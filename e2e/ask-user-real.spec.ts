@@ -4,22 +4,30 @@
  * 验证目标（设计文档 /tmp/e2e-real-test-design-askuser-thinkinglevel.md §3）：
  * - A1 协议透传：真实 ask_user tool 调用 → extension.ui_request 广播
  *   （comment 删除回归核心：askUserQuestions 无 allowComment 字段）+ 回写闭环（pi 恢复 turn）
- * - A2 UI 渲染：AskUserOverlay 在真实 page 渲染（Playwright DOM 断言），
- *   Other 保留（ask-user-option-__other__）+ 页面无 comment 字样
+ * - A2 UI 渲染：FormOverlay 在真实 page 渲染（Playwright DOM 断言），
+ *   Other 保留（form-option-__other__）+ 页面无 comment 字样
  * - A3 交互回写：Playwright 操作真实 UI（选 Other → 填自由文本 → submit），
  *   断言 overlay 关闭 + pi 恢复 turn。注：ui_response 帧内容不可捕获——
  *   routeWebSocket 实测无法拦截 Electron renderer 的 WS（Playwright 限制），
- *   answers 无 __comment key 由 A1 + 组件层 AskUserOverlay.test.ts 覆盖
+ *   answers 无 __comment key 由 A1 + 组件层 FormOverlay.test.ts 覆盖
  *
  * ── 协议事实（读代码确认，非猜测）──
- * - event-adapter.ts:378-399：select + ASK_USER_MARKER → 透传 payload
- *   { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
- * - AskUserQuestion（@zhushanwen/extension-protocol）：header/question/context/options/multiSelect/
- *   allowOther —— 无 allowComment（commit 74a0b1001 删除字段 + UI + __comment key）。
- *   faux 轨 dev 装配下 mandatory 扩展经源码目录加载（extensions/universal/ask-user =
- *   删 comment 后版本），不再 symlink npm 目录绕开 registry 旧版。
- * - AskUserOverlay.vue onSubmit：Other 文本替换 OTHER_VALUE 占位符作为主答案值，
- *   不产生 `__comment` key
+ * - wire 帧（双形态，event-adapter 互斥 marker 分支）：
+ *   - form 帧（现行）：select + UI_FORM_MARKER → tryTranslateFormSelect 透传 payload
+ *     { sessionId, requestId, method:'select', form:true, formQuestions, allowCancel }
+ *     （builtin ask-user 统一表单协议迁移，uiFormInteract + allowOther 固定 true）
+ *   - legacy 帧（版本偏斜窗口旧 npm 扩展仍可能发）：select + ASK_USER_MARKER →
+ *     { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
+ *   断言按双读兼容：形态判定 form===true || askUser===true，问题列表
+ *   formQuestions ?? askUserQuestions（两种帧语义同构，只做形态双读不降断言强度）。
+ * - FormQuestion / AskUserQuestion（@zhushanwen/extension-protocol）：header/question/
+ *   context/options/multiSelect/allowOther —— 无 allowComment（commit 74a0b1001 删除
+ *   字段 + UI + __comment key）。faux 轨 dev 装配下 mandatory 扩展经源码目录加载
+ *   （extensions/universal/ask-user = 统一表单协议版），不再 symlink npm 目录绕开
+ *   registry 旧版；FormAnswers key = header ?? question，与旧 AskUserAnswers 一致
+ *   （回写 result 序列化格式不变）。
+ * - FormOverlay.vue onSubmit：Other 文本写独立 `${key}__other` 键，主 key 值过滤
+ *   OTHER_VALUE 占位符（不留占位值），不产生 `__comment` key
  * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言面
  * - pi 恢复 turn 事件：message.message_start / message.complete（ServerMessageType）
  *
@@ -111,21 +119,28 @@ async function selectSessionInSidebar(page: import('@playwright/test').Page, lab
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
 }
 
-/** 轮询广播事件里第一个 ask-user 富交互请求（extension.ui_request + askUser:true） */
+/**
+ * 轮询广播事件里第一个 ask-user 富交互请求（extension.ui_request + 富交互标记）。
+ * 双读形态判定：form === true（统一表单帧，现行）或 askUser === true（legacy 帧，
+ * 版本偏斜窗口旧扩展）——两种帧 event-adapter 侧互斥分支产出，语义同构。
+ */
 async function waitForAskUserRequest(events: any[], deadlineMs: number): Promise<any | undefined> {
   while (Date.now() < deadlineMs) {
-    const evt = events.find((e) => e.type === 'extension.ui_request' && e.payload?.askUser === true)
+    const evt = events.find(
+      (e) => e.type === 'extension.ui_request'
+        && (e.payload?.form === true || e.payload?.askUser === true),
+    )
     if (evt) return evt
     await new Promise((r) => setTimeout(r, 1000))
   }
   return undefined
 }
 
-/** 找 askUserQuestions[0]（用类型守卫收窄 unknown[]） */
+/** 找问题列表[0]（formQuestions ?? askUserQuestions 双读；用类型守卫收窄 unknown[]） */
 function firstQuestion(askUserReq: any): { header?: string; question: string; options?: unknown[] } {
-  const qs = askUserReq.payload?.askUserQuestions as unknown[] | undefined
+  const qs = (askUserReq.payload?.formQuestions ?? askUserReq.payload?.askUserQuestions) as unknown[] | undefined
   const q = Array.isArray(qs) && qs.length > 0 ? qs[0] : undefined
-  expect(q, 'payload.askUserQuestions[0] 应存在（协议透传）').toBeDefined()
+  expect(q, 'payload.formQuestions[0] / payload.askUserQuestions[0] 应存在（协议透传）').toBeDefined()
   expect(typeof (q as { question?: unknown }).question).toBe('string')
   return q as { header?: string; question: string; options?: unknown[] }
 }
@@ -143,7 +158,7 @@ function findTurnResumeAfter(events: any[], idx: number): { type: string } | und
 
 // ── A1: 协议透传（comment 删除回归核心） ─────────────────────────────
 
-test('A1: ask_user 调用 → ui_request 广播含 askUserQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
+test('A1: ask_user 调用 → ui_request 广播含 formQuestions/askUserQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
   test.setTimeout(120_000)
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-askuser-'))
   const { page, cleanup } = await launchRealApp({ dataDir, faux: { responses: FAUX_SCRIPT } })
@@ -179,7 +194,12 @@ test('A1: ask_user 调用 → ui_request 广播含 askUserQuestions，问题无 
     expect(payload.sessionId).toBe(sessionId)
     expect(payload.requestId, 'ui_request 应带 requestId（回写用）').toBeTruthy()
     expect(payload.method).toBe('select')
-    expect(payload.askUser).toBe(true)
+    // 形态双读（不降强度）：统一表单帧 form===true 或 legacy 帧 askUser===true，
+    // event-adapter 互斥 marker 分支保证两键恰一为真
+    expect(
+      payload.form === true || payload.askUser === true,
+      'ui_request 应带富交互标记（form:true 统一表单帧 / askUser:true legacy 帧）',
+    ).toBe(true)
     const q = firstQuestion(askUserReq!)
     expect(q.question.length).toBeGreaterThan(0)
     expect(Array.isArray(q.options) && q.options.length >= 2,
@@ -259,13 +279,13 @@ test('A2: ask-user overlay 真实渲染 — overlay/Other 保留，页面无 com
     listenWs.close()
 
     // ── 断言 1：overlay 真实渲染在 page DOM ──
-    const overlay = page.getByTestId('ask-user-overlay')
+    const overlay = page.getByTestId('form-overlay')
     await expect(overlay).toBeVisible({ timeout: 10_000 })
     const q = firstQuestion(askUserReq!)
     expect(q.question.length).toBeGreaterThan(0)
 
     // ── 断言 2：Other 保留（comment 删除不影响 Other 自由输入）──
-    await expect(page.getByTestId('ask-user-option-__other__')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByTestId('form-option-__other__')).toBeVisible({ timeout: 5_000 })
 
     // ── 断言 3：overlay UI 无 comment 字样（comment UI/i18n 已删除）──
     // 注意：不能断言全页 —— 消息流可能渲染含 "comment" 的自由文本（faux 回复文本受控，
@@ -315,15 +335,15 @@ test('A3: 选 Other 填自由文本提交 → overlay 关闭 + pi 恢复 turn（
     const qKey = q.header ?? q.question
     const uiReqIdx = events.indexOf(askUserReq!)
 
-    await expect(page.getByTestId('ask-user-overlay')).toBeVisible({ timeout: 10_000 })
-    await page.getByTestId('ask-user-option-__other__').click()
-    const otherInput = page.getByTestId(`ask-user-other-${qKey}`)
+    await expect(page.getByTestId('form-overlay')).toBeVisible({ timeout: 10_000 })
+    await page.getByTestId('form-option-__other__').click()
+    const otherInput = page.getByTestId(`form-other-${qKey}`)
     await expect(otherInput).toBeVisible({ timeout: 5_000 })
     await otherInput.fill(OTHER_TEXT)
-    await page.getByTestId('ask-user-submit').click()
+    await page.getByTestId('form-submit').click()
 
     // ── 断言 1：overlay 关闭（前端 onSubmit 回写成功信号）──
-    await expect(page.getByTestId('ask-user-overlay')).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByTestId('form-overlay')).toBeHidden({ timeout: 15_000 })
 
     // ── 断言 2：pi 收到响应后恢复 turn（message_start / complete）──
     const resumeDeadline = Date.now() + 60_000

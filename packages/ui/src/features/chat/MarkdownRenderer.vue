@@ -12,9 +12,9 @@
     双主题（ADR-0022-B：暗为默认）：shiki defaultColor:false 产出 --shiki-dark(暗)/--shiki-light(亮)
     双套 span，由 :root(暗默认) / [data-theme="light"] 的 scoped 样式切换，走 design-tokens 体系。
 
-    v-html：shiki + markdown-it(html:false) 的输出是 XSS 安全的——
-    shiki codeToHtml 转义所有非 token 文本（只发 scoped <span>），markdown-it 不透传用户原始 HTML，
-    代码源码经 base64 编码进 data 属性。故在此受控渲染点局部放开 taste-lint vue/no-v-html。仅此组件。
+    v-html：text 段消费 renderMarkdown 输出，已经 markdown-sanitize 分通道净化——markdown-it html:true，
+    可信段（shiki/KaTeX/md-* 契约）以 nonce 哨兵摘出-回填绕过净化，用户 HTML 走 DOMPurify 两级
+    白名单（class/style/data-* 构造性全剥）。故在此受控渲染点局部放开 taste-lint vue/no-v-html。仅此组件。
   -->
   <div class="md-render select-text" :class="{ 'md-render--thinking': variant === 'thinking' }" @click="onClick">
     <!-- v-for key：增量路径用段稳定键 segId（前缀段引用与 segId 跨帧不变 → DOM 复用，R-19）；
@@ -22,7 +22,7 @@
          spinner 旋转动画每帧重启（W23 review Fix-2），故用固定哨兵 'sf'（见 segKey）；
          全量/降级路径不携带 segId → 回退 index（等价旧版行为）。s/i 前缀隔离防两类 key 撞号。 -->
     <template v-for="(seg, i) in segments" :key="segKey(seg, i)">
-      <!-- eslint-disable-next-line vue/no-v-html -- text 段是 shiki+markdown-it(html:false) 安全输出，仅此受控点放开。 -->
+      <!-- eslint-disable-next-line vue/no-v-html -- text 段已经 markdown-sanitize 分通道净化（可信段摘出-回填 + 用户内容白名单），仅此受控点放开。 -->
       <div v-if="seg.type === 'text'" v-html="seg.content" />
       <!-- streaming-fence 占位（D-5/W23，R-20）：未闭合 fence 流式期不跑 shiki/mermaid——语言标签 +
            loader 行；token 静默 ≥阈值或消息 complete 后 finalize 转完整渲染（.md-codeblock/MermaidRenderer） -->
@@ -78,6 +78,13 @@ const props = defineProps<{
   /** 所属 assistant 是否正在流式（Block text 分支透传）。true 期间未闭合 fence 走 streaming-fence
    *  占位（静默 ≥阈值或翻 false 时 finalize 转完整渲染）；false/undefined（complete/静态内容）直接完整渲染。 */
   streaming?: boolean
+  /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4，双通道取值
+   *  props 覆盖优先）：props 供 DetailPane 等静态宿主传打开文件所在目录（④路点击语义）；
+   *  缺省（对话流/命令文档零模板传 props）经 deps.sessionCwdOf 拿 session cwd；两者皆缺
+   *  （未知 sid / mock 壳未 provide）→ ④路 preventDefault 无动作（死链无害）。
+   *  注意：本 props 只喂 ④路点击；img 相对 src 重写走 deps env（壳层工厂装配）——drawer
+   *  宿主经工厂 override 参数使 env 与本 props 同值（D4 矩阵 drawer 行「两通道同值」）。 */
+  resourceBaseDir?: string
 }>()
 
 const deps = useChatViewDeps()
@@ -137,8 +144,39 @@ let copiedBtn: HTMLElement | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 const COPIED_FEEDBACK_MS = 1200
 
+// ── ④路相对链接判定/resolve（设计 markdown-html-sanitize-render D4）──
+// 与 renderer markdown-sanitize.ts 的 isRelativeResourcePath/resolveResourcePath 同标准镜像
+// （ui→renderer 依赖禁令不可直接 import——镜像纪律同 markdown-types.ts 的协议镜像，两侧
+// 注释互指，改动需同批同步）。
+
+/** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，与 sanitize 侧同款） */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
+
+/** 相对资源路径判定：非 # 开头（页内锚点）、非 // 开头（协议相对 = 远程）、无 scheme 前缀。空串非路径。 */
+function isRelativeHref(value: string): boolean {
+  if (value === '') return false
+  if (value.startsWith('#')) return false
+  if (value.startsWith('//')) return false
+  return !SCHEME_RE.test(value)
+}
+
+/** POSIX resolve（Node path.resolve 语义的纯函数实现；renderer 运行时无 node:path，两侧同款镜像） */
+function resolveHrefPath(base: string, rel: string): string {
+  const joined = rel.startsWith('/') ? rel : `${base}/${rel}`
+  const parts: string[] = []
+  for (const seg of joined.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(seg)
+  }
+  return `/${parts.join('/')}`
+}
+
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 外链）。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
  * 文件操作经 deps 桥接（onFileClick/openDrawer）。代码块复制是 DOM 副作用，ui 本地处理。
  */
 function onClick(e: MouseEvent): void {
@@ -190,7 +228,25 @@ function onClick(e: MouseEvent): void {
     if (basename) ambiguousState.value = { basename, anchorEl: ambLink }
     return
   }
-  // ④ 其余点击（外链等）：默认冒泡，不拦截
+  // ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
+  // 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
+  // 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+  const anchor = target.closest('a')
+  if (anchor) {
+    // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
+    const href = anchor.getAttribute('href')
+    if (href && isRelativeHref(href)) {
+      e.preventDefault()
+      // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
+      // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd（可选链容错——mock 壳未
+      // provide 时 undefined）；两者皆缺 → preventDefault + 无动作（死链无害，优于窗口导航走）
+      const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
+      if (base) {
+        deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
+      }
+    }
+  }
+  // 其余点击：默认冒泡，不拦截
 }
 </script>
 
@@ -252,6 +308,14 @@ function onClick(e: MouseEvent): void {
   padding-left: 0.85em;
   margin: 0.6em 0;
   color: var(--neutral-mid);
+}
+
+/* img 布局约束（设计 D8）：README 的 width=900 截图等撑破容器——max-width 封顶 + height
+   auto 保比例；垂直 margin 对齐 blockquote 同族节奏（图片是内容通道，不引入装饰）。 */
+.md-render :deep(img) {
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
 }
 
 .md-render :deep(a) {
@@ -372,27 +436,37 @@ function onClick(e: MouseEvent): void {
   text-align: center;
 }
 
-/* 表格横向滚动 wrapper（markdown.ts table_open rule 产出）：超宽表格自身 overflow-x:auto
-   滚动，不撑宽 .md-render / detail-content（与 .md-codeblock 同策略：离散块自带滚动容器）。
-   table 的 margin 移到 wrapper（避免双 margin）；table width:100% 在 wrapper 内仍撑满窄表格。 */
-.md-render :deep(.md-table-wrap) {
+/* 表格滚动 CSS 化（原 .md-table-wrap div 包裹已删——markdown.ts 不再产出 wrapper，
+   table 直挂滚动能力）：GitHub 全套四条声明缺一不可——只写 display:block+overflow 时
+   块盒默认撑满容器、收缩只发生在内部匿名 table 盒，出现「全宽外框 + 收缩网格 + 外框
+   内大片空白」的混合形态；补 width:max-content 后窄表真收缩、max-width:100% 封顶，
+   超宽表横向滚动不撑宽 .md-render / detail-content。窄表收缩到内容宽 = GitHub 同形态
+   （显式接受的行为变化，设计 §3.5）。border/radius/margin 自原 wrapper 迁移直挂。 */
+.md-render :deep(table) {
+  display: block;
   overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 0.7em 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-}
-.md-render :deep(table) {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  margin: 0;
   font-size: 0.92em;
 }
+/* th/td 规则拆两条（th/td 对齐转写的配套条件，设计 D3 R5/R6）：border/padding 无条件
+   ——整条加守卫会让带 align 的单元格连边框内边距一起丢；仅 text-align 移入 :not([align])
+   守卫——无 align 属性兜底 left（维持现状视觉基线），有 align 属性（markdown-it 的
+   style 经 markdown.ts 转写而来）时守卫不命中、HTML 呈现属性生效（align 优先级低于
+   任何作者规则，转写不同批改宿主 CSS 则列对齐回归依旧）。 */
 .md-render :deep(th),
 .md-render :deep(td) {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 0.35em 0.6em;
+}
+.md-render :deep(th:not([align])),
+.md-render :deep(td:not([align])) {
   text-align: left;
 }
 .md-render :deep(th:last-child),

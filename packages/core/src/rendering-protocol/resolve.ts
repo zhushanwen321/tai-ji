@@ -6,7 +6,7 @@
  * 零副作用零模块状态：customRegistry 参数注入（不调 inject），同输入同输出可纯单测。
  *
  * 四分支（IF1 contract）：
- *   1) builtin（card/columns/list-tree/progress-bar/stats-line/tab-bar）且 props 是对象
+ *   1) builtin（card/columns/group/list-tree/progress-bar/stats-line/tab-bar/action-bar）且 props 是对象
  *      → { type: 原type, props: 原props }（原样透传，不校验深度）
  *   2) custom 且 props.component 是 string 且已注册 → { type: 'custom', props: 原props }
  *      （ui 层用 props.component 查 CUSTOM_MAP）
@@ -32,10 +32,11 @@ export interface ResolvedRender {
   props: Record<string, unknown>
 }
 
-/** 已知 builtin type 集合（除 custom/ansi-text 的 7 个布局原语）。
- *  新增原语时四同步：extension-protocol 类型 + 此处 + ui 组件 + v6 视觉（§7.4）。 */
+/** 已知 builtin type 集合（除 custom/ansi-text 的 8 个原语：7 布局 + 首个交互原语 action-bar）。
+ *  新增原语时四同步：extension-protocol 类型 + 此处 + ui 组件 + v6 视觉（§7.4）。
+ *  漏加此白名单 = 静默降级 ansi-text（编译期不可见），由 resolve.test.ts P5 断言守卫。 */
 const BUILTIN_TYPES: ReadonlySet<string> = new Set([
-  'card', 'stats-line', 'progress-bar', 'list-tree', 'columns', 'tab-bar', 'group',
+  'card', 'stats-line', 'progress-bar', 'list-tree', 'columns', 'tab-bar', 'group', 'action-bar',
 ])
 
 const JSON_INDENT = 2

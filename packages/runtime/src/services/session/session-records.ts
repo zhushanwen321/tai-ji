@@ -3,9 +3,11 @@
  *
  * 域内容（一个概念域的两半，冷热同源）：
  * - W18 派生缓存族：recordEntriesCaches + get_entries 增量重拉编排（entry_appended
- *   失效信号 → 防抖 → cursor 三路径拉取 → merge → 变化发布）；
- * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（冷启动磁盘扫描，与缓存刷新
- *   共用 scanSubagentEntries/scanWorkflowEntries 同一份派生代码，D4）、
+ *   失效信号 → 防抖 → cursor 三路径拉取 → merge → 变化发布；plan 模式重设计 D1③④
+ *   扩容第三族——第二道 customType 早退门 + scanPlanStateEntries 派生 + session.planState
+ *   publish diff）；
+ * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows/getPlanState（冷启动磁盘扫描，与缓存刷新
+ *   共用 scanSubagentEntries/scanWorkflowEntries/scanPlanStateEntries 同一份派生代码，D4）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
  *   U7 引擎配置三方法（engines.json/config.json 读写）。
@@ -21,8 +23,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
 import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+import { PLAN_STATE_CUSTOM_TYPE, extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
 import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
 import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
@@ -72,6 +75,13 @@ export interface RecordEntriesCache {
   subagents: Map<string, SubagentRecord>
   /** workflow 派生缓存（runId → 最新快照记录）。 */
   workflows: Map<string, WorkflowRunRecord>
+  /**
+   * plan 状态派生缓存（最后一条 plan-state entry 的投影，D1④）——publish diff 基线：
+   * null = 从未派生过，或全量重建发现 plan-state entry 被外部清空（收敛归 null，见
+   * mergePlanState 的 isFullRebuild 分支——增量批的「本批无 plan entry」不归 null，
+   * 保持既有基线，GUI 端 isActive:false 是缺省语义）。
+   */
+  planState: PlanStateView | null
   /** 防抖定时器（null = 未在等待）。 */
   debounceTimer: ReturnType<typeof setTimeout> | null
   /** in-flight 拉取 promise（并发失效共享一次拉取，消除重复 RPC）。 */
@@ -80,6 +90,13 @@ export interface RecordEntriesCache {
 
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
 type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null } }
+
+/** workflow 增量信号形状（session.workflowUpdate payload.update；status/reason/步骤数任一变化一条）。 */
+interface WorkflowUpdateSignal {
+  runId: string
+  status: string
+  reason?: string
+}
 
 /**
  * SessionRecords 装配依赖（窄注入，S5/D2 风格：deps 面构造期固定，messageBus 经
@@ -173,7 +190,15 @@ export class SessionRecords {
    * 的磁盘扫描承接。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void {
-    if (customType !== SUBAGENT_RECORD_CUSTOM_TYPE && customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return
+    // 第二道 customType 早退门（D1③）：与 event-adapter 白名单（第一道门）同批扩容——
+    // 白名单放行而此处早退则 live 链静默 no-op（三道运行时字符串门之一，编译器不保护）。
+    if (
+      customType !== SUBAGENT_RECORD_CUSTOM_TYPE &&
+      customType !== WORKFLOW_RECORD_CUSTOM_TYPE &&
+      customType !== PLAN_STATE_CUSTOM_TYPE
+    ) {
+      return
+    }
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache) return
     if (cache.debounceTimer !== null) return // 已在防抖等待中：合并
@@ -191,6 +216,7 @@ export class SessionRecords {
       cursor: null,
       subagents: new Map(),
       workflows: new Map(),
+      planState: null,
       debounceTimer: null,
       inflight: null,
     }
@@ -216,7 +242,7 @@ export class SessionRecords {
       // 两轮：第 1 轮按 cursor 增量；Entry not found 丢 cursor 后第 2 轮全量自愈
       const MAX_REFRESH_ROUNDS = 2
       for (let round = 0; round < MAX_REFRESH_ROUNDS; round++) {
-        let fetched: { entries: unknown[]; leafId: string | undefined }
+        let fetched: { entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }
         try {
           fetched = await this.fetchRecordEntriesRound(client, cache)
         } catch (e) {
@@ -230,7 +256,7 @@ export class SessionRecords {
           console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
           return
         }
-        this.applyRecordEntries(cache, fetched.entries, sessionId)
+        this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
         if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
         return
       }
@@ -240,8 +266,11 @@ export class SessionRecords {
   }
 
   /**
-   * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量。
-   * 全量重建时派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）。
+   * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量（fullRebuild 随返回值上浮，
+   * 供 plan 收敛语义分流，见 mergePlanState）。
+   * 全量重建时 Map 族派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）；plan 基线
+   * **不**在此复位：「重建前基线」正是 entry 被外部清空时收敛发布的 diff 依据，复位会把
+   * 基线抹成 null 使收敛分支失去触发条件，语义由 mergePlanState 的 isFullRebuild 分支承接。
    *
    * 响应收窄（u-s4 EntriesSinceResult 同款先例）：entries 零字段消费——整体透传
    * scanSubagentEntries / scanWorkflowEntries（unknown[] 形参）。
@@ -249,15 +278,15 @@ export class SessionRecords {
   private async fetchRecordEntriesRound(
     client: IPiEngine,
     cache: RecordEntriesCache,
-  ): Promise<{ entries: unknown[]; leafId: string | undefined }> {
+  ): Promise<{ entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }> {
     if (cache.cursor !== null) {
       const inc = await client.getEntries(cache.cursor) as EntriesSinceResult
-      return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined }
+      return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined, fullRebuild: false }
     }
     const full = await client.getEntries() as EntriesSinceResult
     cache.subagents.clear()
     cache.workflows.clear()
-    return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined }
+    return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined, fullRebuild: true }
   }
 
   /**
@@ -268,33 +297,47 @@ export class SessionRecords {
    * - workflows：merge 时收集状态变化的 run（含新增），按扫描序逐个 publish
    *   session.workflowUpdate 增量信号——最后一条即 stateSnapshot 'workflows' last-value
    *   （话题 last-value 语义与 W12 一致）。
+   * - plan（D1④）：单例状态（最后一条 plan-state entry 派生），与缓存基线 planStateEquals
+   *   比对，有变化 publish session.planState 全量帧——plan 无「增量信号」形态，广播 payload
+   *   即完整 PlanStateView（shared 协议 `{ sessionId, planState }`）；diff 基线与 subagents
+   *   同语义（漏比对会静默吞 GUI 更新，D1 明示义务 b）。派生 null（本批/本次扫描无
+   *   plan-state entry）按全量/增量分流收敛语义（mergePlanState）：增量批保持基线不发布
+   *   （append-only 下 null = 本批无 plan 新信息，非「entry 被清空」）；全量重建基线非 null
+   *   才视为 entry 被外部清空，publish 缺省 View 收敛 GUI（基线 null 的首次全量不发布）。
    */
-  private applyRecordEntries(cache: RecordEntriesCache, entries: unknown[], sessionId: string): void {
-    const subagents = scanSubagentEntries(entries)
-    let subagentsChanged = false
-    for (const record of subagents) {
-      const prev = cache.subagents.get(record.subagentId)
-      if (prev === undefined || !subagentRecordEquals(prev, record)) subagentsChanged = true
-      cache.subagents.set(record.subagentId, record)
-    }
-
-    const workflows = scanWorkflowEntries(entries)
-    const workflowUpdates: Array<{ runId: string; status: string; reason?: string }> = []
-    for (const record of workflows) {
-      const prev = cache.workflows.get(record.runId)
-      // [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
-      // 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
-      // GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
-      // 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
-      // entry append 节流（缺省 60s）约束，不会刷屏。
-      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
-          prev.agentCalls.length !== record.agentCalls.length) {
-        workflowUpdates.push({ runId: record.runId, status: record.status, reason: record.reason })
-      }
-      cache.workflows.set(record.runId, record)
-    }
+  private applyRecordEntries(
+    cache: RecordEntriesCache,
+    entries: unknown[],
+    sessionId: string,
+    isFullRebuild: boolean,
+  ): void {
+    // 三家族（subagents / workflows / plan）同批扫描 + merge（同一份 entries，零额外 RPC），
+    // 分支与合并语义下沉到下方模块级 merge helper（顺序敏感投影链——各 helper 内判定
+    // 顺序与拆分前逐一等价，见各 helper 注释）。merge 先于 publish 守卫执行（已销毁
+    // session 也完成缓存 merge，只拦发布——见下方 hasSession 守卫）。
+    const subagentsChanged = mergeSubagentRecords(cache.subagents, scanSubagentEntries(entries))
+    const workflowUpdates = collectWorkflowUpdates(cache.workflows, scanWorkflowEntries(entries))
+    // D1④ plan 派生：diff 基线 = cache.planState。null → 缺省 View 的归一在发布帧完成
+    // （缓存基线保持 null | View 双态：null 参与比对见 planStateEquals）。
+    const planState = scanPlanStateEntries(entries)
+    const planStateChanged = mergePlanState(cache, planState, isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
+    this.publishRecordChanges(cache, sessionId, subagentsChanged, workflowUpdates, planStateChanged, planState)
+  }
+
+  /**
+   * merge 完成后的变化发布（subagents 全量帧 / workflows 增量信号 / plan 全量帧，帧形态
+   * 与发布顺序与拆分前逐一等价；每帧独立读 getMessageBus——晚期注入语义不变）。
+   */
+  private publishRecordChanges(
+    cache: RecordEntriesCache,
+    sessionId: string,
+    subagentsChanged: boolean,
+    workflowUpdates: WorkflowUpdateSignal[],
+    planStateChanged: boolean,
+    planState: PlanStateView | null,
+  ): void {
     if (subagentsChanged) {
       this.deps.getMessageBus()?.publish(sessionId, {
         type: 'session.subagents',
@@ -305,6 +348,12 @@ export class SessionRecords {
       this.deps.getMessageBus()?.publish(sessionId, {
         type: 'session.workflowUpdate',
         payload: { sessionId, update },
+      })
+    }
+    if (planStateChanged) {
+      this.deps.getMessageBus()?.publish(sessionId, {
+        type: 'session.planState',
+        payload: { sessionId, planState: planState ?? INACTIVE_PLAN_STATE_VIEW },
       })
     }
   }
@@ -459,6 +508,24 @@ export class SessionRecords {
   }
 
   /**
+   * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，供 session.getPlanState
+   * RPC handler 调用；u1-rpc 接线）。
+   *
+   * 纯磁盘读取，不依赖 pi 进程活跃——冷启动首拉 / 切换首拉与 live 投影（refreshRecordEntries
+   * → scanPlanStateEntries）共用同一份派生代码（D1「派生代码唯一」不变量）。文件不存在、
+   * 无 plan-state entry 等「从未进过 plan」形态归一为「未激活」缺省 View（INACTIVE_PLAN_STATE_VIEW，
+   * 对齐 extension DEFAULT_PLAN_STATE——RPC reply 契约 planState 无 null 域，GUI 端
+   * isActive:false 即不渲染横幅）。
+   */
+  async getPlanState(sessionId: string): Promise<PlanStateView> {
+    // 路径解析消费方 force 旁路 TTL（与 getSubagents/getWorkflows 同理：刚落盘 session 的
+    // plan 面板首拉在窗口内不静默返回空）。
+    const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
+    if (!target) return INACTIVE_PLAN_STATE_VIEW
+    return extractPlanStateFromSessionFile(target.filePath)
+  }
+
+  /**
    * 获取 workflow 内 agent call 的对话流历史。
    *
    * agentCallSessionId 是 trace[].sessionId。agent call 本质是 subagent（D4）：
@@ -568,6 +635,115 @@ export class SessionRecords {
       this.recordEntriesCaches.delete(sessionId)
     }
   }
+}
+
+// ── record 家族 merge helpers（applyRecordEntries 拆出：每家族「merge 进派生缓存 + 返回
+// 变化信号」一个副作用单元；与下方 equals helpers 同为 diff 基线语义的一体两面）──
+
+/**
+ * subagent 记录 merge 进派生缓存（同 id 后到覆盖），返回是否有变化（新增或字段级 diff——
+ * 逐条经 subagentRecordEquals，任一记录变化即整帧重发）。
+ */
+function mergeSubagentRecords(subagents: Map<string, SubagentRecord>, records: SubagentRecord[]): boolean {
+  let changed = false
+  for (const record of records) {
+    const prev = subagents.get(record.subagentId)
+    if (prev === undefined || !subagentRecordEquals(prev, record)) changed = true
+    subagents.set(record.subagentId, record)
+  }
+  return changed
+}
+
+/**
+ * workflow 记录 merge 进派生缓存（同 runId 后到覆盖），收集需发增量信号的 run
+ * （新增 / status / reason / agentCalls 步骤数任一变化一条）。
+ *
+ * [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
+ * 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
+ * GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
+ * 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
+ * entry append 节流（缺省 60s）约束，不会刷屏。
+ */
+function collectWorkflowUpdates(workflows: Map<string, WorkflowRunRecord>, records: WorkflowRunRecord[]): WorkflowUpdateSignal[] {
+  const updates: WorkflowUpdateSignal[] = []
+  for (const record of records) {
+    const prev = workflows.get(record.runId)
+    if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
+        prev.agentCalls.length !== record.agentCalls.length) {
+      updates.push({ runId: record.runId, status: record.status, reason: record.reason })
+    }
+    workflows.set(record.runId, record)
+  }
+  return updates
+}
+
+/**
+ * plan 派生 merge（单例状态，D1④）：cache.planState 基线与本次派生比对后更新基线，
+ * 返回是否有变化。
+ *
+ * [MF-1] 派生 null（本批/本次扫描窗口内无 plan-state entry）按 isFullRebuild 分流——
+ * JSONL append-only 下 entry 不会消失，「null = entry 被清空」的收敛只对全量重建路径
+ * 合法（全集扫描即新真值）；增量批（cursor delta）的 null 仅表示本批无 plan 新信息
+ * （subagent/workflow record entry 触发的重拉批必然不含 plan entry），必须保持基线
+ * 不发布，否则活跃 plan 的 GUI（横幅/审批条/产物面板）会被无关 record 增量重拉静默
+ * 打回未激活。派生非 null 恒写基线，基线 null 或字段级不等（planStateEquals）时视为
+ * 变化。
+ */
+function mergePlanState(cache: RecordEntriesCache, planState: PlanStateView | null, isFullRebuild: boolean): boolean {
+  const prevPlan = cache.planState
+  if (planState === null) {
+    // 增量批：null = 本批无 plan 新信息，保持基线不发布（基线归 null 会误发未激活帧）。
+    // 全量重建：基线非 null 且全集无 plan entry = entry 被外部清空 → 归 null 并收敛发布。
+    if (isFullRebuild && prevPlan !== null) {
+      cache.planState = null
+      return true
+    }
+    return false
+  }
+  cache.planState = planState
+  return prevPlan === null || !planStateEquals(prevPlan, planState)
+}
+
+/**
+ * D1④：PlanStateView 逐字段相等判定（plan 派生缓存的发布 diff 基线，义务 b）。
+ *
+ * 漏比对会静默吞 GUI 更新（与 subagentRecordEquals 同一教训——D1 明文引用
+ * subagentRecordEquals 的 diff 先例）。null 与 View 恒不等（无 entry → 有 entry 是真变化，
+ * 由 applyRecordEntries 分支显式处理，本函数只管 View vs View）。
+ *
+ * 结构固定（shared PlanStateView 七字段），逐字段比对而非 JSON.stringify（顺序无关、
+ * 无序列化抖动）；optional 字段以 undefined === undefined 参与比对（两 View 同缺某
+ * optional 字段 = 相等，单缺 = 不等——「无新字段区」的差异是真实显示差异，必须 publish）；
+ * skills/docs 数组逐元素比对（数组引用每轮重新派生，=== 引用比较对同值也判不等）。
+ */
+function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
+  if (a.isActive !== b.isActive) return false
+  if (a.planFilePath !== b.planFilePath) return false
+  if (a.requirement !== b.requirement) return false
+  if (a.templateName !== b.templateName) return false
+  if (a.reviewState !== b.reviewState) return false
+  if (!stringArrayEquals(a.skills, b.skills)) return false
+  return planDocListEquals(a.docs, b.docs)
+}
+
+/** string[] 逐元素相等（含 undefined 双缺语义，order-sensitive——技能清单顺序即挂载顺序）。 */
+function stringArrayEquals(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  return a.every((item, i) => item === b[i])
+}
+
+/** PlanDocMeta[] 逐元素字段级相等（version 翻转 / 文档增删 / 元数据修订任一变化都触发 publish）。 */
+function planDocListEquals(a: PlanDocMeta[] | undefined, b: PlanDocMeta[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  return a.every((doc, i) => {
+    const other = b[i]!
+    return doc.fileName === other.fileName &&
+      doc.absPath === other.absPath &&
+      doc.sourceSkill === other.sourceSkill &&
+      doc.version === other.version
+  })
 }
 
 /**

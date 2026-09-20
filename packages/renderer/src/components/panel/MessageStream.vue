@@ -214,8 +214,9 @@ const props = defineProps<{
 const { t } = useI18n()
 const chat = useChatStore()
 
-/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading 状态 + isPrepend（virta :shift 信号）+ handler。 */
-const { loadingMore, showLoadMore, handleLoadMore, isPrepend } = useLoadMoreHistory(() => props.sessionId)
+/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading 状态 + isPrepend（virta :shift 信号）+ handler
+ *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）。 */
+const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset } = useLoadMoreHistory(() => props.sessionId)
 
 /** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns（u4b session.history
  *  窗口契约；无记录（未 hydrate / 非截断）回落 0——showLoadMore 为 false 时条不渲染，值无关）。 */
@@ -374,7 +375,7 @@ const { pinnedIndexes } = useStreamingPin({
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
 // [D2 数学不变量] endOffset = tailEl 实测总高：scrollEl pt-20 + pb-8 = 28px 与 virtua
 // viewportSize 不含 padding 的 28px 扣除精确抵消 → offset=tailHeight 落点即真实底部（改任一 padding 必复核）。
-const { showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
+const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
       vlistRef,
@@ -422,6 +423,10 @@ provide(ChatViewDepsKey, useChatViewDeps(sessionId))
 function onVirtuaScroll(offset: number): void {
   onScroll(offset)
   rail.updateActiveTurnIndex()
+  // [scroll-top-auto-load] 触顶自动续载：只在用户已脱离锚定（主动上滑）时生效——
+  // 切 session 的 scrollTop clamp 回声（offset≈0）时长滚到底尚未落地，stickToBottom 仍为
+  // true，不会白拉一页历史；isPrepend 保位把插入后的 offset 抬到阈值以上，天然节流。
+  onScrollOffset(offset, !stickToBottom.value)
 }
 function onVirtuaScrollEnd(): void {
   // design.md IF7 预留：showJumpButton 稳定判定（virta @scrollEnd 触发，目前 showJumpButton 已是 computed，留空 no-op）

@@ -131,7 +131,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
       isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
       isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
       isTraceView: false,
-      hasAskUserRequest: false,
+      hasFormOverlay: false,
       isFlowActive: false,
     })
     // conversation 形态 = Panel.vue Composer 渲染判据（dead 才卸载 composer）
@@ -230,7 +230,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
         isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
         isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
         isTraceView: false,
-        hasAskUserRequest: false,
+        hasFormOverlay: false,
         isFlowActive: false,
       })
       expect(view.kind).toBe('dead')
@@ -296,7 +296,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
       isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
       isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
       isTraceView: false,
-      hasAskUserRequest: false,
+      hasFormOverlay: false,
       isFlowActive: false,
     })
     expect(view.kind).toBe('conversation')

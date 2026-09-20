@@ -133,6 +133,8 @@ export interface PluginContributes {
   commands?: PluginContributesCommand[]
   configuration?: PluginContributesConfiguration
   statusBarItems?: PluginContributesStatusBarItem[]
+  headerActions?: PluginContributesHeaderAction[]
+  modals?: PluginContributesModal[]
 }
 
 /**
@@ -152,11 +154,11 @@ export interface PluginContributesView {
 
 /**
  * @proposed — schema v2 menus 按挂载点名分组的命令菜单映射
- * （VSCode contribution points 风格）。
+ * （VSCode contribution points 风格）。键集不含 'panel.header'——该键自 schema 起无
+ * 渲染端消费方（声明死通道，D3 删除），顶栏点位由 headerActions 承接。
  */
 export interface PluginContributesMenu {
   'composer.toolbar'?: PluginMenuItem[]
-  'panel.header'?: PluginMenuItem[]
   'sidebar.footer'?: PluginMenuItem[]
 }
 
@@ -210,6 +212,29 @@ export interface PluginContributesStatusBarItem {
   scope?: 'per-session' | 'global'
   commandId?: string
   tooltip?: string
+}
+
+/**
+ * @proposed — panel header 按钮区贡献（icon 为 lucide 名字符串，宿主解析；
+ * badge/tooltip/disabled 等可变字段经 api.ui.updateHeaderAction 运行时更新）。
+ */
+export interface PluginContributesHeaderAction {
+  id: string
+  title: string
+  icon: string
+  commandId: string
+  /** 与内置按钮组的相对序；缺省追加在后 */
+  order?: number
+}
+
+/**
+ * @proposed — modal 弹层声明（只有 {id,title,width?}，无 commandId 字段——开层只有
+ * api.ui.showModal 一条路，声明侧供枚举/置灰/默认元数据）。
+ */
+export interface PluginContributesModal {
+  id: string
+  title: string
+  width?: 'sm' | 'md' | 'lg'
 }
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────
@@ -480,9 +505,36 @@ export interface Phase1AgentAPI {
     list(): Promise<SessionInfo[]>
     get(id: string): Promise<SessionInfo | undefined>
     getActive(): Promise<SessionInfo | undefined>
-    sendMessage(params: { sessionId?: string; role: 'user' | 'system'; content: string }): Promise<void>
+    /**
+     * [plugin-header-action-modal-points D6/u5b] 写路径回执：sessionId 必填（E15——缺省
+     * 在 runtime 层拒绝 INVALID_SESSION_ID）；requireCommand 为写路径前置原子校验的命令名
+     * （restore 后、busy 预检前校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
+     * present 但空串/全空白在 runtime 入口拒绝（INVALID_REQUIRE_COMMAND）。
+     * 回执 reason 词表：运行面分支只看 accepted，reason 是诊断/文案面。
+     */
+    sendMessage(params: {
+      sessionId: string
+      role: 'user' | 'system'
+      content: string
+      requireCommand?: string
+    }): Promise<{ accepted: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>
+    /**
+     * [AP-4/u2d] 条目镜像读：live only（无活跃 pi 进程抛 SESSION_NOT_ACTIVE），
+     * customType 服务端精确过滤，sinceEntryId 游标增量。
+     */
+    readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>
+    /** [AP-4/u2d] 状态查询（投影 {name, description?, source}）；会话未激活抛 SESSION_NOT_ACTIVE。 */
+    getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
     onDidCreateSession(handler: (session: SessionInfo) => void): Disposable
     onDidDestroySession(handler: (session: SessionInfo) => void): Disposable
+    /** [AP-4/u5b] 会话激活订阅：session.switch 成功（含 auto-restore）时投递（徽标/列表补拉触发源）。 */
+    onDidActivateSession(handler: (session: SessionInfo) => void): Disposable
+    /** [AP-4/u2d] entry 失效订阅：只发失效信号无 payload，收信号后 readEntries(sinceEntryId) 重拉。 */
+    onEntriesInvalidated(
+      sessionId: string,
+      customType: string,
+      handler: (sessionId: string, customType: string) => void,
+    ): Disposable
   }
   /**
    * @experimental — 插件间事件总线**未实现**（plugin.event.* 通知全仓无生产方，
@@ -509,7 +561,40 @@ export interface SessionInfo {
   lastActiveAt: number
 }
 
+/**
+ * @stable — [AP-2/u5b] plugin modal 关闭原因词表（单点闭集；宿主 dismiss / 切会话 /
+ * 宿主浮层 / runtime replaced / 插件消失五类发起方共用）。
+ */
+export type PluginModalClosedReason =
+  | 'dismissed'
+  | 'session-switched'
+  | 'host-overlay'
+  | 'replaced'
+  | 'plugin-gone'
+
 // ── Storage 类型 ─────────────────────────────────────────────────
+
+/**
+ * @stable — [AP-4/u2d] 条目镜像投影：含 type/customType（共享折叠器 replayFoldEntries
+ * 的首道守卫依赖这两个字段）；data 原样透传（域语义插件解）；pi 树结构噪声不出 runtime。
+ */
+export interface PluginSessionEntry {
+  id: string
+  timestamp: string
+  type: 'custom'
+  customType: string
+  data: unknown
+}
+
+/**
+ * @stable — [AP-4/u2d] readEntries 回包信封：sessionFile 供 fork 继承场景按
+ * ownerSessionFile 折叠过滤；leafEntryId = 下次调用的 sinceEntryId（pi 无叶子时省略）。
+ */
+export interface PluginSessionEntries {
+  sessionFile?: string
+  entries: PluginSessionEntry[]
+  leafEntryId?: string
+}
 
 /**
  * @stable — 键值存储接口（storage 面的稳定契约）。
@@ -711,6 +796,24 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     showInput(title: string, defaultValue?: string, opts?: UiDialogOptions): Promise<string | undefined>
     notify(level: 'info' | 'warn' | 'error', message: string): Promise<void>
     updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
+    /**
+     * [AP-2/u5b] 开层：sessionId 必填（E15）；有 pending 插件对话框时 reject
+     * MODAL_BLOCKED_BY_UI_REQUEST（E10）；广播出线未接线/broadcastFn 缺失时 reject
+     * MODAL_BROADCAST_NOT_WIRED（装配缺陷显式报错，不谎报 opened）。开层后应立即
+     * views.update 推内容（首帧空白 = 一次 RPC 往返）。
+     */
+    showModal(modalId: string, opts: { sessionId: string; title?: string; width?: 'sm' | 'md' | 'lg' }): Promise<{ opened: true; epoch: number }>
+    /** [AP-2/u5b] 插件自身关闭：走与宿主 dismiss 相同的 closed 路径；已关层 no-op。 */
+    hideModal(modalId: string): Promise<{ closed: boolean }>
+    /**
+     * [AP-1/u5b] headerAction 可变字段更新：sessionId 必填（徽标是 per-session 语义）；
+     * badge ≤4 字符由宿主截断，badge/tooltip 超 4KB 拒绝（INVALID_BADGE / INVALID_TOOLTIP）。
+     * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（宿主装配缺陷被丢弃）——
+     * 插件可据此告警，不应把 false 当成功。
+     */
+    updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
+    /** [AP-2/u5b] modal 被关闭（宿主 dismiss / 切会话 / 宿主浮层 / replaced / plugin-gone）的定向通知订阅。 */
+    onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
   }
   readonly agent: {
     /** U6 回执：resolve 生效模型复合串（pi pattern 换模时 ≠ 请求值；降级路径空串） */
@@ -734,7 +837,8 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     unregister(commandId: string): Promise<void>
   }
   readonly views: {
-    update(viewId: string, guiTree: GuiComponent[]): Promise<void>
+    /** [D1/u5b] sessionId 显式必填（E15）：内容绑打开时所在会话，runtime 按它定向投递。 */
+    update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string }): Promise<void>
     listMountPoints(): Promise<string[]>
   }
 }

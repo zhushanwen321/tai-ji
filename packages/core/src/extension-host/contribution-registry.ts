@@ -9,6 +9,7 @@
  * - loadExternal 幂等：重复注入同一 pluginId 覆盖不翻倍
  * - routeAll 后每条 contribution 的 available 反映挂载点注册态（AC9 置灰依据）；
  *   未注册挂载点 → emit unregistered-mount-point 事件（ERR1，不静默丢弃）
+ * - clearForPlugin(pluginId)：清除该插件全部贡献（崩溃/禁用/卸载清理族，幂等）
  * - 向后兼容：旧 panels 字段（legacy manifest）映射为 view（deprecated alias）
  * - loadExternal 的 descriptor 无 contributes → 注册为空不抛错（ERR5 降级，
  *   debug 日志——s3 未完成透传前的已知中间态）
@@ -29,13 +30,18 @@ const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, stri
   statusBarItem: 'statusbar',
   slashCommand: 'slash',
   configuration: 'settings',
+  // headerAction 复用已注册挂载点名 panel.header（不新增名字，AP-1）；modal 为新挂载点
+  // （bootstrap registerMountPoints 注册，AP-2）
+  headerAction: 'panel.header',
+  modal: 'modal',
 }
 
 // ── 解析：PluginContributes v2 → ContributionRecord[]（按 type 分段 helper）──
 //
 // parseContributes 的分段提取：每段只解析一种 contribution type，段内循环体与
 // 原内联实现逐字节一致；parseContributes 按原 push 顺序 concat 各段，
-// 跨段顺序（view→menu→command→statusBarItem→slashCommand→configuration）即注册顺序。
+// 跨段顺序（view→menu→command→statusBarItem→slashCommand→configuration→headerAction→modal）
+// 即注册顺序。
 
 function parseViewContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
   const out: ContributionRecord[] = []
@@ -137,6 +143,36 @@ function parseConfigurationContribution(pluginId: string, c: PluginContributes):
       configuration: { properties: c.configuration.properties },
     },
   ]
+}
+
+function parseHeaderActionContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
+  const out: ContributionRecord[] = []
+  for (const h of c.headerActions ?? []) {
+    out.push({
+      pluginId,
+      contributionId: h.id,
+      type: 'headerAction',
+      placement: PLACEMENT_BY_TYPE.headerAction,
+      available: false,
+      headerAction: { title: h.title, icon: h.icon, commandId: h.commandId, order: h.order },
+    })
+  }
+  return out
+}
+
+function parseModalContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
+  const out: ContributionRecord[] = []
+  for (const m of c.modals ?? []) {
+    out.push({
+      pluginId,
+      contributionId: m.id,
+      type: 'modal',
+      placement: PLACEMENT_BY_TYPE.modal,
+      available: false,
+      modal: { title: m.title, width: m.width },
+    })
+  }
+  return out
 }
 
 export class ContributionRegistry {
@@ -252,6 +288,17 @@ export class ContributionRegistry {
       }))
   }
 
+  /**
+   * 清除该插件全部贡献记录（E2 触发链：插件崩溃/禁用/卸载时由消费方在
+   * plugin-status-change / plugin-crashed 订阅回调内调用，对齐 statusBar 清理族语义；
+   * 重启用经 registerBuiltin/loadExternal 重放）。幂等：无记录时为 no-op。
+   */
+  clearForPlugin(pluginId: string): void {
+    for (const [k, c] of this.contributions) {
+      if (c.pluginId === pluginId) this.contributions.delete(k)
+    }
+  }
+
   // ── 解析：PluginContributes v2 → ContributionRecord[] ──────────────
 
   /**
@@ -266,6 +313,8 @@ export class ContributionRegistry {
       ...parseStatusBarItemContributions(pluginId, c),
       ...parseSlashCommandContributions(pluginId, c),
       ...parseConfigurationContribution(pluginId, c),
+      ...parseHeaderActionContributions(pluginId, c),
+      ...parseModalContributions(pluginId, c),
     ]
   }
 }

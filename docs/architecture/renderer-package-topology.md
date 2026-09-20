@@ -121,7 +121,9 @@ extension-host/
   view-host-store.ts         # plugin view 的 GuiComponent 树缓存（per viewId，per-session 分区）
 ```
 
-渲染件（ui/src/extension-host/）：`ViewHost.vue`、`StatusBar.vue`（main-panel 局部底栏）、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`、`AskUserForm.vue`。
+渲染件（ui/src/extension-host/）：`ViewHost.vue`、`StatusBar.vue`（main-panel 局部底栏）、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
+
+提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收口）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
 
 ### 4.2 三套 UI 接口统一（pi ctx.ui × plugin api.ui × GuiComponent）
 
@@ -130,12 +132,14 @@ extension-host/
 | 对话框原语 | pi `ctx.ui.select/confirm/input` + plugin `api.ui.showSelect/Confirm/Input` → 统一 `DialogRequest` 内部协议，渲染统一走 companion-band |
 | 状态展示 | pi `setStatus` + plugin `updateStatusBarItem` → 统一 StatusBarController。**信息流向**：只消费「runtime 广播的消息」，不主动读 domain store（与 §2.1「ExtensionHost 不 import domain」一致） |
 | 结构化渲染 | 统一 GuiComponent（§5） |
-| ask-user | 保留独立双向通道（等用户回传），不并入单向 GuiComponent |
+| 提问表单 | 统一表单协议（ui-form，select + `UI_FORM_MARKER` 双向通道）：ask-user / scheduler / plan 三方提问收口一个入口（`uiFormInteract`）+ 一个渲染器（renderer FormOverlay），覆盖 composer 挂载；不并入单向 GuiComponent（需等用户回传） |
 | overlay lifecycle | plugin 只 await 结果，不感知 expanded/minimized/restored；状态机集中在 overlay-lifecycle.ts |
 
 ### 4.3 挂载点注册表（desktop 全集 vs mobile 子集）
 
-**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header.action / composer.toolbar / statusbar 等；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
+**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar / statusbar / modal（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
+
+**Plugin 交互点位（headerAction / modal，2026-09-20）**：`panel.header` 挂载点上并存两条点位——既有 ViewHost GuiComponent 信息条（非交互）与 `headerActions` 声明式按钮区（宿主原生渲染，运行时 `api.ui.updateHeaderAction(sessionId, …)` 改徽标/tooltip/disabled）；`modal` 挂载点承载插件弹层（`contributes.modals` 声明元数据 + `api.ui.showModal/hideModal` 命令式开合，单一真相帧 `plugin:modalState`（epoch 仲裁、transient 不入 ring），切会话/宿主浮层/插件崩溃三路关闭）。内容仍走 `views.update`（显式 sessionId 必填，viewId 平铺命名 `modal-<pluginId>-<modalId>`）；可交互原语 `action-bar` 是 GuiComponent 协议首个交互件（items 携 commandId，点击经壳层 provide 的执行器走既有命令链）。首消费者 = `resources/plugins/scheduler-manager`（定时任务管理面）。
 
 **Plugin DX**：挂载点未注册 ≠ 静默失败——打 warning 日志（含 plugin id + contribution id + 期望挂载点），管理页对不可用 contribution 置灰；提供 `api.views.listMountPoints()` 让 plugin 自行降级。
 

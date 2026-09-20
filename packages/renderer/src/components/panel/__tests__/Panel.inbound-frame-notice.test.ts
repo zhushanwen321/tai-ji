@@ -10,7 +10,7 @@
  * - mock core：捕获 onInboundFrameDropped 回调（用真实 useInboundFrameGuard 消费它）+
  *   retryInboundDroppedSession/subscribeSession 调用断言；
  * - mock '@/lib/ipc'（reportRendererLog）——上报面非本用例关注点（unit 文件已覆盖）；
- * - mock 重型子组件（MessageStream/Composer/Landing/AskUserOverlay）；Panel 与
+ * - mock 重型子组件（MessageStream/Composer/Landing/FormOverlay）；Panel 与
  *   useInboundFrameGuard/InboundFrameDroppedNotice 均真实渲染；
  * - 真实 Pinia（守卫的 focus watch 数据源 = panel store focusedSessionId）。
  *
@@ -85,11 +85,11 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('@/composables/useExtensionUI', () => ({
   useExtensionUI: () => ({
-    currentAskUserRequest: { value: undefined as unknown },
+    currentFormRequest: { value: undefined as unknown },
     respond: vi.fn(),
     cancel: vi.fn(),
   }),
-  askUserFilter: () => true,
+  formFilter: () => true,
 }))
 
 const MessageStreamStub = defineComponent({
@@ -102,7 +102,7 @@ function mountPanel(sessionId: string) {
     props: { panelId: 'p1', sessionId, sessionDir: '/tmp/x' },
     global: {
       plugins: [createPinia()],
-      stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, AskUserOverlay: true },
+      stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, FormOverlay: true },
     },
   })
 }

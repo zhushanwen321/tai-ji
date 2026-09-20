@@ -50,12 +50,12 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 多会话管理 | 侧边栏会话列表、切换 12 步链、删除清理编排、LRU、未读标记 | harness 的本质 = 多 agent 工作流并行管理；单会话裸跑不构成工作台 |
 | 模型与 thinking level | 能力注册表、生效回执（RPC 状态化）、模型切换 | 用户控制 agent 智能水平/成本的核心旋钮；锁死单模型不可用 |
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
-| Markdown 渲染 | shiki 高亮、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
+| Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
-| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
-| ask-user overlay | agent 提问浮层、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
+| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
+| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
 
@@ -75,7 +75,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读 |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
-| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染 |
+| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | ImportSessionDialog |
@@ -114,7 +114,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
-| plan | universal | P2 | 面板能力 |
+| plan | universal | P2 | 面板能力 + 执行方式选择 |
 | session-reader | universal | P2 | 通知链依赖 |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |

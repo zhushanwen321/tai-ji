@@ -3,13 +3,16 @@
  *
  * 锁定：
  * - classifyPromptRejection：pi 双拒绝字符串 → 'compacting' | 'processing'，非 busy → null
- * - busy 预检分型：isCompacting → 'compacting'；isGenerating / isBashRunning → 'busy'（存量）
+ * - busy 预检分型：isCompacting → 'compacting'；isGenerating → 'busy'；isBashRunning →
+ *   'bash'（plugin-header-action-modal-points D6/u5a：bash 从 'busy' 拆出独立分类——
+ *   send.rejected 广播线保持 'busy' 词表，返回值回执面三态）
  * - catch 转译：pi busy 类拒绝 → send.rejected 分型广播 + 零 message.error（不进错误气泡链路）
  *   + 复位语义按分型分叉（processing → isGenerating=true + occupancy generating「pi 有 runtime
  *   不知情的 turn 在跑」；compacting → false + idle）+ 返回 rejected:true（handler 走
  *   message.status{rejected} ack，与预检拒绝同构）
  * - 非 busy pi 错误（auth/无模型等）：保留现状 message.error 广播，无 send.rejected
  * - clientUuid 原样回带：预检与转译两路；未传时 payload 不含该键
+ * - [D6/u5a] 返回值 reason 词表（busy/compacting/bash/hook-blocked/error）随各拒绝分支断言
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-send-rejection.test.ts
  */
@@ -151,7 +154,7 @@ describe('sendPrompt busy 预检分型（D2：按命中维度分型广播）', (
     const result = await dispatcher.sendMessage('s1', 'hello')
 
     expect(promptFn).not.toHaveBeenCalled()
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'compacting' })
     const payload = findRejected(broadcasts)
     expect(payload).toMatchObject({ sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' })
     // 转译/预检拒绝不进错误气泡链路
@@ -164,16 +167,17 @@ describe('sendPrompt busy 预检分型（D2：按命中维度分型广播）', (
     const result = await dispatcher.sendMessage('s1', 'hello')
 
     expect(promptFn).not.toHaveBeenCalled()
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
     expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'busy', message: 'Agent 正在处理' })
   })
 
-  it('仅 isBashRunning=true → reason:"busy"（存量，T7 语义保持）', async () => {
+  it('仅 isBashRunning=true → 回执 reason:"bash"（D6/u5a 拆分），send.rejected 广播线保持 "busy" 词表', async () => {
     const { dispatcher, broadcasts } = makeMocks({ isBashRunning: true })
 
     const result = await dispatcher.sendMessage('s1', 'hello')
 
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'bash' })
+    // 广播线不扩词（protocol.ts send.rejected.reason 未扩；renderer 全 reason 统一入队不分型）
     expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'busy' })
   })
 
@@ -212,7 +216,7 @@ describe('sendPrompt catch 拒绝转译（D2：pi busy 类拒绝不进 message.e
 
     const result = await dispatcher.sendMessage('s1', 'hello')
 
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'compacting' })
     // 转译广播（恰一条 send.rejected）+ 不进错误气泡链路
     const rejected = findRejected(broadcasts)
     expect(rejected).toMatchObject({ sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' })
@@ -229,7 +233,8 @@ describe('sendPrompt catch 拒绝转译（D2：pi busy 类拒绝不进 message.e
 
     const result = await dispatcher.sendMessage('s1', 'hello')
 
-    expect(result).toEqual({ blocked: true, rejected: true })
+    // pi 'processing' 拒绝在回执词表里归 busy（词表无 processing 成员；广播线保持 'processing'）
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
     expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'processing', message: 'Agent 正在处理' })
     expect(findError(broadcasts)).toBeUndefined()
     // 以 pi 的拒绝为权威信号：pi 在跑 → 置 generating，不得伪造 idle（否则 defer 队列无限重投）
@@ -275,7 +280,7 @@ describe('非 busy 的 pi 错误保留现状（D2 接管副作用表：非 busy 
 
     const result = await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-nonbusy')
 
-    expect(result).toEqual({ blocked: true })
+    expect(result).toEqual({ blocked: true, reason: 'error' })
     expect(findRejected(broadcasts)).toBeUndefined()
     const err = findError(broadcasts)
     expect(err).toBeDefined()

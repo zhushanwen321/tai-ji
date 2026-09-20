@@ -32,7 +32,16 @@ export interface SessionScopedMap<T> {
  * （headless 场景：plain object + 显式 update 触发消费者）。
  */
 export function createSessionScopedMap<T>(init: () => T): SessionScopedMap<T> {
-  const partitions = new Map<string, T>()
+  return createSessionScopedMapFrom(new Map<string, T>(), init)
+}
+
+/**
+ * 既有 createSessionScopedMap 的 store 参数化形态：调用方自带 partitions Map 实例。
+ * 供需要响应式/特殊 Map 实现的宿主复用同一接口骨架（如 renderer 的 shallowReactive
+ * Map——Vue 依赖留在宿主侧，本模块保持零框架依赖）。
+ */
+export function createSessionScopedMapFrom<T>(store: Map<string, T>, init: () => T): SessionScopedMap<T> {
+  const partitions = store
 
   return {
     get(sessionId: string): T | undefined {

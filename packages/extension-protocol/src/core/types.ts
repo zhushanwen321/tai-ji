@@ -94,6 +94,27 @@ export interface GuiComponentProps {
     sections?: GuiComponent[][]
   }
 
+  /**
+   * 操作按钮栏——GuiComponent 协议首个交互原语（设计 AP-3）。
+   * 点击经宿主壳 provide 的执行器走既有命令链（commandRegistry.execute → WS
+   * plugin.executeCommand），协议不新增回调通道（设计 §3.3 D2）。
+   * 未含此 type 的旧宿主自动降级 ansi-text 可读文本，PROTOCOL_VERSION 不 bump
+   * （设计 §3.3 D8，降级契约 P5）。
+   */
+  'action-bar': {
+    items: {
+      id: string
+      label: string
+      /** 视觉档位：只保留当前唯一实际消费的 danger（删除按钮）；更多档位有真实消费方时再加 */
+      kind?: 'danger'
+      disabled?: boolean
+      /** 缺省 = 纯展示项（不可点、弱化样式） */
+      commandId?: string
+      /** 只许标量：args 原样传给插件 handler，禁嵌套对象防无 schema 结构化旁路（设计 AP-3 校验） */
+      args?: Record<string, string | number | boolean>
+    }[]
+  }
+
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册） */
   'custom': {
     component: string
@@ -165,3 +186,55 @@ export interface TreeItem {
   children?: TreeItem[]
 }
 export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pause' | 'branch'
+
+// ── plan 审阅协议（submit-review select 通道；marker 常量见 core/markers.ts）──
+//
+// 与 ask-user 家族同构的「marker select + JSON payload」跨层契约：
+// extension 序列化 payload 进 select options，runtime event-adapter 按 marker 分流，
+// 前端审批条渲染并经 respond 回传 PlanReviewResponse。
+// shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（shared 是最底层包不能反向依赖
+// 本包，同形状漂移由双端注释互指 + 投影链契约测试守卫）。
+
+/**
+ * 计划产物文档元数据——agent 调 register-doc 登记的一份产物。
+ * version 由 extension 侧维护：修订后重写文档须重调 register-doc（version+1），
+ * 前端凭 version 变化重拉 file.read 刷新渲染。
+ */
+export interface PlanDocMeta {
+  /** 文件名（drawer L2 文档 tab 标题，不含目录） */
+  fileName: string
+  /** 文件绝对路径（前端 file.read RPC 带 sessionId 读取） */
+  absPath: string
+  /** 来源技能名（挂载 --skills 时产出该文档的技能；模板流程产出时为空串） */
+  sourceSkill: string
+  /** 修订版本，从 1 起，每次修订重登记 +1 */
+  version: number
+}
+
+/**
+ * submit-review 挂起审批时的 select payload（序列化为 options[0] JSON）。
+ * extension 侧解析失败走 E5（logger.warn + tool result 报错提示重挂，垃圾数据不进对话流）。
+ */
+export interface PlanReviewRequest {
+  docs: PlanDocMeta[]
+}
+
+/** 审批三键裁决。revise/explain 携带评论、approve 不携带（结构上不可混带）。 */
+export type PlanReviewDecision = 'approve' | 'revise' | 'explain'
+
+/** 用户对某文档划选段落的一条评论：quote 是划选引文（agent 定位段落用），comment 是评语。 */
+export interface PlanReviewComment {
+  quote: string
+  comment: string
+}
+
+/**
+ * 审批条 respond 回传（判别联合：approve 无评论字段，revise/explain 必带评论数组）。
+ * extension 消费：approve → 走现状 complete 执行方式 select；revise → 评论清单以
+ * 显式 deliverAs:'steer' 注入 + reviewState=revising；explain → 同款注入但不改 reviewState，
+ * 重挂审批靠提示词纪律驱动 agent 重调 submit-review。
+ */
+export type PlanReviewResponse =
+  | { decision: 'approve' }
+  | { decision: 'revise'; comments: PlanReviewComment[] }
+  | { decision: 'explain'; comments: PlanReviewComment[] }

@@ -11,7 +11,7 @@
  *   importOriginal 保留），withFileLockSync/atomicWrite 真实执行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
@@ -726,5 +726,257 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const { records, client } = makeRecords()
     await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '纯文本' })
     expect(client.prompt).toHaveBeenCalledWith('/subagents message sa-1 纯文本')
+  })
+})
+
+// ── plan-state 投影（plan 模式重设计 D1③④）─────────────────────────────
+
+/** plan-state entry fixture（data 平铺四必填 + 三 optional，无 v 字段——D4 否决版本轴）。 */
+function planStateEntry(data: Record<string, unknown>, entryId: string): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'plan-state',
+    id: entryId,
+    parentId: null,
+    timestamp: '2026-09-18T00:00:00Z',
+    data,
+  }
+}
+
+/** 新七字段形态（扩展三 optional 齐全）。 */
+function fullPlanData(reviewState: 'awaiting' | 'revising'): Record<string, unknown> {
+  return {
+    isActive: true,
+    planFilePath: '/tmp/taiji-plan/auth/plan.md',
+    requirement: '重构 auth 模块',
+    templateName: 'tech-design',
+    skills: ['tech-design', 'dev-flow'],
+    docs: [{ fileName: 'design.md', absPath: '/tmp/taiji-plan/auth/design.md', sourceSkill: 'tech-design', version: 1 }],
+    reviewState,
+  }
+}
+
+describe('plan-state 投影（D1③④）', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('第二道门扩容：plan-state 不被早退（失效 → 防抖拉取真发生）', async () => {
+    const { records, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(client.getEntries).toHaveBeenCalledTimes(1)
+  })
+
+  it('派生 publish：payload = { sessionId, planState }（与 shared 协议对齐，docs/skills 透传）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(1)
+    expect(planMsgs[0]![0]).toBe('s1')
+    const payload = (planMsgs[0]![1] as { payload: { sessionId: string; planState: Record<string, unknown> } }).payload
+    expect(payload.sessionId).toBe('s1')
+    expect(payload.planState).toEqual(expect.objectContaining({
+      isActive: true,
+      skills: ['tech-design', 'dev-flow'],
+      reviewState: 'awaiting',
+      docs: [expect.objectContaining({ fileName: 'design.md', version: 1 })],
+    }))
+  })
+
+  it('无 plan entry 不 publish（派生 null 且基线 null = 无变化，GUI 缺省即未激活）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({ data: { entries: [{ type: 'message', id: 'm1' }], leafId: 'm1' } })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(0)
+  })
+
+  it('同值重复 entry 不重复 publish（planStateEquals diff 基线）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 增量窗口返回同值新 entry（仅 entryId 变，快照未变）——不发布
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e9')], leafId: 'e9' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+  })
+
+  it('内容变化才 publish：reviewState 翻转 / docs version bump 各触发一次', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    // revise：reviewState awaiting → revising（第二帧）
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('revising'), 'e2')], leafId: 'e2' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    // 修订完成重登记：version bump（第三帧）
+    const bumped = fullPlanData('awaiting')
+    bumped.docs = [{ fileName: 'design.md', absPath: '/tmp/taiji-plan/auth/design.md', sourceSkill: 'tech-design', version: 2 }]
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(bumped, 'e3')], leafId: 'e3' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(3)
+    expect((planMsgs[1]![1] as { payload: { planState: { reviewState: string } } }).payload.planState.reviewState).toBe('revising')
+    expect((planMsgs[2]![1] as { payload: { planState: { docs: Array<{ version: number }> } } }).payload.planState.docs[0]!.version).toBe(2)
+  })
+
+  it('reset entry：isActive=false 且 docs 保留仍 publish（产物 tab 回看驱动，与 isActive 解耦）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    const resetData = {
+      isActive: false,
+      planFilePath: '/tmp/taiji-plan/auth/plan.md',
+      requirement: '',
+      templateName: '',
+      docs: [{ fileName: 'design.md', absPath: '/tmp/taiji-plan/auth/design.md', sourceSkill: 'tech-design', version: 1 }],
+    }
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(resetData, 'e2')], leafId: 'e2' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(2)
+    const last = (planMsgs[1]![1] as { payload: { planState: Record<string, unknown> } }).payload.planState
+    expect(last.isActive).toBe(false)
+    expect(last.docs).toEqual([expect.objectContaining({ fileName: 'design.md' })])
+  })
+
+  it('冷路径 getPlanState：定位 session 文件后经 extractor 提取（与热路径同一份派生代码）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-plan-'))
+    const filePath = join(dir, 'session.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify({ type: 'message', id: 'm1' }),
+      JSON.stringify(planStateEntry(fullPlanData('awaiting'), 'e1')),
+    ].join('\n'))
+    try {
+      const { records } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath }]) } as unknown as ISessionStore,
+      })
+      const view = await records.getPlanState('s1')
+      expect(view.isActive).toBe(true)
+      expect(view.reviewState).toBe('awaiting')
+      expect(view.docs).toEqual([expect.objectContaining({ fileName: 'design.md', version: 1 })])
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('冷路径 getPlanState：session 不在扫描结果返回未激活缺省 View（RPC reply 无 null 域）', async () => {
+    const { records } = makeRecords()
+    const view = await records.getPlanState('s-none')
+    expect(view).toEqual({
+      isActive: false,
+      planFilePath: null,
+      requirement: null,
+      templateName: null,
+    })
+  })
+
+  // [MF-1 回归] JSONL append-only 下 entry 不会消失，增量批（cursor delta）的
+  // 「无 plan-state entry」= 本批无 plan 新信息，非「entry 被清空」——误判会把活跃 plan
+  // 的 GUI（横幅/审批条/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
+  it('增量批无 plan-state entry：保持基线不 publish（非全量路径收敛语义不适用）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // 首拉（全量）：发布 awaiting 基线
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 增量 delta 只含 subagent-record（plan 实际仍活跃）——不 publish
+    client.getEntries.mockClear()
+    client.getEntries.mockResolvedValue({
+      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e2')], leafId: 'e2' },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(client.getEntries).toHaveBeenCalledWith('e1') // 确认走的是增量路径（非全量重建）
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 第三拉：同值 plan entry 重现——若基线曾被误清为 null，此处会多 publish 一次；
+    // 恰 1 帧 = 基线保持（planStateEquals diff 基线未被增量批破坏的间接证伪）
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e3')], leafId: 'e3' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+  })
+
+  it('全量重建 entry 消失：恰发布一次 session.planState 且为未激活缺省 View（收敛语义收归全量路径）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // 首拉（全量）：发布 awaiting 基线
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    // 游标失效自愈（session 文件被外部改写）：丢 cursor 全量重拉，全集中 plan-state entry 已消失
+    client.getEntries.mockImplementation(async (since?: string) => {
+      if (since !== undefined) throw new Error('Entry not found: e1')
+      return { data: { entries: [subagentRecordEntry('sa-1', 'done', 'e2')], leafId: 'e2' } } as GetEntriesResult
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(client.getEntries).toHaveBeenCalledWith('e1') // 第 1 轮增量（Entry not found）
+    expect(client.getEntries).toHaveBeenCalledWith() // 第 2 轮丢 cursor 全量重建
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(2) // awaiting 基线帧 + 收敛帧，恰一次收敛
+    expect((planMsgs[1]![1] as { payload: { planState: Record<string, unknown> } }).payload.planState)
+      .toEqual({ isActive: false, planFilePath: null, requirement: null, templateName: null })
   })
 })

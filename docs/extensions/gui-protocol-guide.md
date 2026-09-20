@@ -2,7 +2,7 @@
 
 > **面向**：pi extension 开发者（how-to）
 > **目标**：将现有 TUI-only extension 改造为 TUI/GUI 双模，在 taiji 桌面端获得结构化 GUI 渲染
-> **协议权威**：[docs/architecture/extension-gui-protocol.md](../architecture/extension-gui-protocol.md)——协议类型全集、Helper 完整语义、端到端数据流链路、runtime/前端改动、实现状态与审查日志一律以该文档为准，本文不重复。
+> **协议权威**：GuiComponent 渲染协议族（类型全集、Helper 完整语义、端到端数据流链路）见 [docs/architecture/extension-gui-protocol.md](../architecture/extension-gui-protocol.md)；**统一提问表单协议（ui-form）的权威描述在本指南 §3.4**，代码 SSOT = `packages/extension-protocol/src/extensions/ui-form/`。
 
 ---
 
@@ -107,7 +107,7 @@ export const myTool: ToolDefinition = {
 | renderResult（tool 结果） | `details.__gui__` | 否 |
 | setWidget（持久面板） | `setWidgetDual(ctx, key, { gui, text })` | 否 |
 | setStatus（状态栏） | pi 原生，无需改造 | 否 |
-| ctx.ui.custom（交互式） | `askUserInteract(ctx, questions)` | 是 |
+| ctx.ui.custom（交互式） | `uiFormInteract(ctx, form)`（统一提问表单协议，见 §3.4） | 是 |
 | registerMessageRenderer（消息卡片） | `message.details.__gui__` | 否 |
 
 ### 3.1 renderResult：tool 结果结构化渲染
@@ -174,59 +174,85 @@ ctx.ui.setStatus('my-ext:status', '\x1b[32m● Running\x1b[0m')
 // 前端收到 { text: '● Running', textRaw: '\x1b[32m● Running\x1b[0m' }
 ```
 
-### 3.4 ctx.ui.custom：富交互组件
+### 3.4 ctx.ui.custom：富交互组件（统一提问表单协议 ui-form）
 
-`ctx.ui.custom()` 在 RPC 模式下返回 undefined（崩溃）。`askUserInteract()` helper 复用 select 双向通道 + marker 检测，前端在 Panel.vue inline 渲染富交互对话框（AskUserOverlay），覆盖 composer 位置。
+`ctx.ui.custom()` 在 RPC 模式下返回 undefined（崩溃）。`uiFormInteract()` helper 复用 select 双向通道 + `UI_FORM_MARKER` 检测，前端 FormOverlay 在 Panel 内联渲染统一表单（覆盖 composer 位置；多问 = 多 tab，单问 = 单视图）。ask-user / scheduler / plan 三个内置 extension 的提问已全部收口到该协议；新 extension 的「向用户提问」应直接使用它，而不是自建 marker + 专用组件。
 
 ```typescript
-import { askUserInteract, getAskUserAnswer, type AskUserQuestion, type GuiContext } from '@zhushanwen/extension-protocol'
+import {
+  uiFormInteract,
+  type FormQuestion,
+  type GuiContext,
+} from '@zhushanwen/extension-protocol'
 
 async execute(toolCallId, params, signal, onUpdate, ctx) {
-  const questions: AskUserQuestion[] = [
+  const form: FormQuestion[] = [
     {
+      type: 'choice',
       header: '部署目标',
       question: '选择部署环境',
       options: [
-        { label: '生产环境', value: 'prod', description: '正式环境，需审批' },
-        { label: '预发环境', value: 'staging', description: '预发布验证' },
-        { label: '测试环境', value: 'dev', description: '开发测试' },
+        { label: '生产环境', description: '正式环境，需审批' },
+        { label: '预发环境', description: '预发布验证' },
       ],
     },
     {
+      type: 'text',
       header: '确认信息',
       question: '输入发布说明',
     },
   ]
 
-  const answers = await askUserInteract(ctx as GuiContext, questions, { signal })
+  const result = await uiFormInteract(ctx as GuiContext, form, { signal })
 
-  if (answers === null) {
+  if (!result.ok && (result.reason === 'cancelled' || result.reason === 'timeout')) {
     return {
       content: [{ type: 'text', text: '用户取消' }],
       details: { cancelled: true },
     }
   }
+  if (!result.ok) {
+    // channel-error（含 echo 检测，见下）/ non-json：通道契约破坏，按调用方策略折叠
+    return {
+      content: [{ type: 'text', text: `交互通道失败：${result.reason}` }],
+      details: { failed: result.reason },
+    }
+  }
 
-  // answers = { '部署目标': 'prod', '确认信息': '修复登录bug' }
-  const target = getAskUserAnswer(answers, questions[0])  // 'prod'
+  // answers = { '部署目标': '生产环境', '确认信息__other': '修复登录bug' }
+  // key = header ?? question，直接按键取值（choice 单选 = label）
+  const target = result.answers['部署目标']
   return {
     content: [{ type: 'text', text: `部署到 ${target}` }],
-    details: { answers },
+    details: { answers: result.answers },
   }
 }
 ```
 
-**RPC 模式行为**：
+**问题类型与答案格式**（`FormQuestion` 判别联合，answers key = `header ?? question`）：
 
 | 问题类型 | 前端渲染 | 答案格式 |
 |---|---|---|
-| 单选（有 options，无 multiSelect） | Radio 圆圈选择 | value string |
-| 多选（有 options + multiSelect） | Checkbox 复选框 | `JSON.stringify(string[])` |
-| 自由输入（无 options） | Text input | string |
-| Other（allowOther） | 额外文本输入 | `${header}__other` key |
-| 评论（allowComment） | 额外评论输入 | `${header}__comment` key |
+| choice 单选（无 multi） | Radio 圆圈选择 + auto-advance | 选中项 label（协议无独立 value 字段，label 即选中值） |
+| choice 多选（multi） | Checkbox 复选框 | `JSON.stringify(labels[])` |
+| choice Other（allowOther，默认 true） | 末尾 Other 项 + 展开文本输入 | `${key}__other` 独立键 |
+| text（无 options 纯自由文本） | Text input | `${key}__other` 键（与纯 Other 形态同键位） |
+| schedule（时间输入） | ScheduleForm 整表单（预填 `initial` 草稿打开即可一键确认） | `JSON.stringify(ScheduleFormResult)` |
 
-**TUI 模式**：`askUserInteract` 抛错（RPC-only）。extension 必须自行调 `ctx.ui.custom()` 传 TUI Component。
+choice/text 部分与旧 `AskUserAnswers` 逐字兼容（含 Other 键规则与多选序列化）——ask-user 等以 `AskUserQuestion` 为 LLM 契约的消费方用 `getAskUserAnswer` / `getAskUserOther` 解码零改动（两 helper 的入参类型是 `AskUserQuestion`；纯 `FormQuestion` 消费方直接按 `header ?? question` 键取值）。
+
+**回包四态判别**（`uiFormInteract` 返回判别联合，不抛错）：
+
+| 态 | 语义 | 调用方折叠建议 |
+|---|---|---|
+| `ok` | 收到 FormAnswers | 正常消费 |
+| `cancelled` / `timeout` | 用户未作答 | 按「用户取消」折叠 |
+| `channel-error` | 通道契约破坏，含 **echo 检测**：收包等于发送 payload 表明宿主 taiji 过旧不识别 `UI_FORM_MARKER`（用户在 band 看到的是 payload 乱码单选项），echo 命中时 message 携带升级指引（非 echo 的真实通道故障 message 为 undefined） | 明确报错（scheduler 禁用本会话工具 / plan 折 cancelled result 留 plan mode） |
+| `non-json` | 协议版本错配类故障 | 同 channel-error 策略 |
+
+**TUI 模式**：`uiFormInteract` 抛错（RPC 专用）——formQuestions 在 TUI 无呈现语义，extension 必须自行调 `ctx.ui.custom()` 传 TUI Component（按 `ctx.mode` 分支）。
+
+**内置消费方**：ask-user（问卷，包内 `AskUserQuestion ↔ FormQuestion` 归一 adapter；subagent 间接链 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参）/ scheduler（`ScheduleQuestion` 单问整表单）/ plan（complete 执行方式单 choice 问题）。
 
 ### 3.5 registerMessageRenderer：自定义消息卡片
 
@@ -304,8 +330,9 @@ async onMessage(msg, ctx) {
 | `guiComponent(type, props)` | 构造组件 | 类型参数约束 props 形状 |
 | `setWidgetDual(ctx, key, { gui, text } \| undefined)` | 设置/清除 widget（双模唯一入口） | 内部做 `isGuiCapable` 分派：RPC 编码 NUL 标记 JSON、TUI/json/print 推原生文本行；`undefined` 清屏且模式无关 |
 | `guiSetWidget(ctx, key, result \| undefined)` | 推送 GUI 臂（低层原语） | ⚠️ 无 mode 守卫：TUI/json/print 误调会把 marker 行推进原生 widget（乱码）；正常路径用 `setWidgetDual` |
-| `askUserInteract(ctx, questions, options?)` | 富交互问答 | 借 select 通道 + marker；取消返回 `null`；TUI 抛错 |
-| `getAskUserAnswer / getAskUserOther / isAskUserQuestion` | 答案解析与守卫 | `getAskUserAnswer` 多选自动 `JSON.parse`（失败降级 `[raw]`）；`getAskUserOther` 读 `${header}__other` key；`isAskUserQuestion` 收窄 `unknown` 为合法问题对象 |
+| `uiFormInteract(ctx, form, options?)` | 统一提问表单（RPC 专用） | select 通道 + `UI_FORM_MARKER`；返回判别联合 `ok / cancelled / timeout / channel-error / non-json`（不抛错，channel-error 含 echo 检测升级指引）；TUI 误调抛错 |
+| `isFormQuestion / isFormAnswers` | 表单形状守卫 | `isFormQuestion` 收窄 `unknown` 为合法问题对象（发送侧不合法项抛错 fail-fast，消费侧逐项过滤） |
+| `getAskUserAnswer / getAskUserOther / isAskUserQuestion` | 答案解析与守卫 | `getAskUserAnswer` 多选自动 `JSON.parse`（失败降级 `[raw]`）；`getAskUserOther` 读 `${header}__other` key；入参类型是 `AskUserQuestion`（ask-user 的 LLM 契约），`FormAnswers` 的 choice/text 部分与之逐字兼容 |
 | `extractGui(details)` | 提取 `__gui__`（带版本校验） | 前端消费侧用，extension 一般不需要 |
 
 ---
@@ -456,7 +483,7 @@ setWidgetDual(ctx as GuiContext, 'key', undefined)
 
 **别拿 `guiSetWidget()` 当双模入口**：它是 `setWidgetDual` 内部的 GUI 臂原语，**没有 mode 守卫**（只查 `ctx.ui?.setWidget` 是否存在）——TUI/json/print 模式下调用会把 marker 编码行推进 pi 原生 widget，表现为乱码，**不是 no-op**。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 
-同理 `askUserInteract()` —— TUI 模式下它抛错。extension 需按 ctx.mode 分支，TUI 调 `ctx.ui.custom()`，RPC 调 `askUserInteract()`。
+同理 `uiFormInteract()` —— TUI 模式下它抛错。extension 需按 ctx.mode 分支，TUI 调 `ctx.ui.custom()`，RPC 调 `uiFormInteract()`。
 
 ### 7.3 content 与 details 的分工
 
@@ -486,7 +513,7 @@ setWidgetDual(ctx as GuiContext, 'key', undefined)
 - [ ] RPC 分支构造 `guiComponent(type, props)` + `guiResult()` 放进 `details.__gui__`
 - [ ] TUI 分支保留原有 `renderResult` / `ctx.ui.setWidget` / `ctx.ui.custom` 逻辑
 - [ ] widget 用 `setWidgetDual()` 双模一次调用（`gui` 臂 + `text` 臂），清屏传 `undefined`；不要单独调 `guiSetWidget()`（它是无 mode 守卫的 GUI 臂原语，TUI 误调会乱码）
-- [ ] 交互用 `askUserInteract()`（RPC 模式）/ `ctx.ui.custom()`（TUI 模式）按 ctx.mode 分支
+- [ ] 提问交互用 `uiFormInteract()`（RPC 模式，统一提问表单协议 §3.4）/ `ctx.ui.custom()`（TUI 模式）按 ctx.mode 分支
 - [ ] `content` 只放 LLM 可见的摘要文本，结构化数据放 `details`
 - [ ] `details.__gui__` 放在 `result.details` 下，不在 `content` 内
 - [ ] 确认重开 session 后 `__gui__` 仍可见（依赖 runtime F1 修复，已落地）

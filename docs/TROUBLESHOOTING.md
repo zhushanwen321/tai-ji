@@ -217,20 +217,22 @@ grep "stripped unmarked provider-level keys" ~/.taiji/logs/runtime-*.log   # dev
 
 恢复：失败态浮层的「刷新/配置」双入口；设置页「保存并测试」是唯一落盘 + 查询动作，齐备性不满足时按钮置灰并给字段级提示。机制权威 = quota 配置相关代码注释与约束登记（原设计文档 design/coding-plan-quota-config-ux.md 已删除，git 可追溯）。
 
-### 16. dev 数据目录实际落点（装配偏差 R-13）
+### 16. dev 数据目录实际落点（per-worktree 实例目录）
 
-**现象**：按 AGENTS.md 去装配器派生目录 `~/.taiji-dev/instances/<worktree>/` 找 session / 日志一律找不到（该目录只有首启种子副本，之后不再更新）；dev 首启若没配模型，新建会话直接报 `No model configured. Please configure a provider and model in Settings before starting a session.`。
+**现象**：找 dev 实例的 session / 日志时落点不对；或 dev 首启没配模型，新建会话直接报 `No model configured. Please configure a provider and model in Settings before starting a session.`。
 
-**真相**：`apps/electron/main/main.ts` 的 dev 分支无条件钉死 `TAIJI_AGENT_DATA_DIR=~/.taiji-dev`（2026-09-08 防宿主 env 泄漏事故防线，外部 env 一律不采信），装配器派生的 `instances/<worktree>/` 实例层因此从未被 app 读取——属存量装配偏差（登记见 git 历史与 impl-plan R-13）。
+**现状**：dev 数据目录 = 装配器派生的 `~/.taiji-dev/instances/<worktree>/`——`main.ts` dev 分支受控采信树内实例目录（外部 `TAIJI_AGENT_DATA_DIR` 仅当 `path.resolve` 后位于 `~/.taiji-dev` 树内才采信，其余一律钉死回 `~/.taiji-dev`，防宿主 env 泄漏语义保留；`TAIJI_E2E=1` 受控装配豁免）。解析纯函数 = `apps/electron/main/utils/dev-data-dir.ts`（行为矩阵 = `main/test/dev-data-dir.test.ts`）。早期 dev 数据可能仍留在 `~/.taiji-dev/` 根——实例目录找不到旧 session 时去根目录核对。
 
 **排障动作**：
 
 ```bash
-ls -la ~/.taiji-dev/agent/sessions/   # session 数据实际落点（不要在 instances/<worktree>/ 里找）
-ls -la ~/.taiji-dev/logs/             # runtime-*.log / pi-<date>-<sessionId>.jsonl 实际落点
+ls -la ~/.taiji-dev/instances/<worktree>/agent/sessions/   # session 数据落点（per-worktree）
+ls -la ~/.taiji-dev/instances/<worktree>/logs/             # runtime-*.log / pi-<date>-<sessionId>.jsonl 落点
 ```
 
-首启缺配置（provider / secrets / 默认模型）时从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单语义补种到 `~/.taiji-dev/` 根（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
+首启缺配置（provider / secrets / 默认模型）时装配器自动从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单复制进实例目录（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
+
+**实验隔离正式通道（2026-09-19）**：需要独立数据目录（基线采集 / mock 实例 / 多实验并行 / 多 worktree 隔离）时，用装配器显式参数 `node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/<suffix>`——值域限 `~/.taiji-dev/` 树内（fs-guard 白名单与路径守卫按该前缀放行），装配器注入 `TAIJI_DEV_ASSEMBLED=1` 供 main.ts dev 分支采信（显式标记 + 值域白名单双约束，裸 env 泄漏仍不采信，2026-09-08 防线语义不变）。此通道取代已废弃的「临时改 main.ts dataDir + 用完 revert」实验做法。
 
 ### 17. 子包目录 `pnpm exec vitest` 全仓扫跑 + 测试红线「测试禁止触碰真实数据目录」
 
@@ -261,12 +263,29 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 **排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
 
+### 19. e2e real 轨用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
+
+**现象**：`e2e/*-real.spec.ts`（launch-app-real）跑出诡异失败——sidebar 列出大量不存在于临时数据目录的会话（mock 假数据），新建 session 的条目永远不出现；同 spec 的纯 WS 断言用例（不经 UI）却全绿。
+
+**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 轨与 real 轨共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
+
+**排障动作**：
+
+```bash
+# real 轨前重建 real 形态产物（无 VITE_MOCK）
+VITE_E2E=true pnpm run build:e2e
+# real 轨跑完、要跑 mock 轨（launch-app 形态）前再重建 mock 形态产物
+VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
+```
+
+判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
+
 
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
 |------|------|-----------|------------|
-| `TAIJI_AGENT_DATA_DIR` | 数据目录 | `~/.taiji` | `~/.taiji-dev` |
+| `TAIJI_AGENT_DATA_DIR` | 数据目录 | `~/.taiji` | `~/.taiji-dev/instances/<worktree>`（装配器注入、树内受控采信；树外值钉死 `~/.taiji-dev`） |
 | `TAIJI_AGENT_PORT_OFFSET` | 端口偏移 | `0` | `100` |
 | `TAIJI_AGENT_PACKAGED` | 打包标记 | `1` | 未设置 |
 | `ELECTRON_RUN_AS_NODE` | Node 模式 | `1`（runtime 子进程） | 未设置 |
@@ -416,8 +435,8 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一坍缩为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
 - **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时坍缩」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
 
-### 15. dev 实例数据目录被钉死共享：多 worktree 并行 dev 会互相污染（2026-09-14 V7 验收发现，既有未修）
+### 15. dev 实例数据目录共享污染（R-13，已修复：受控采信）
 
-- **症状**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见）。
-- **机制**：`apps/electron/main.ts` dev 块（:137 附近）钉死数据目录，覆盖了装配器 `dev-instance.mjs` 注入的实例路径——C-dev-01 的实例隔离在 Electron 层失效（装配器 Vite/CDP 端口段隔离仍有效）。
-- **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按 C-dev-01 文档预期推定；需要干净环境时手动清理共享目录或使用 `--fresh`。修复属产品决策另行裁决（ext-simplify-17 验收登记）。
+- **症状（修复前）**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见，单实例锁互踢）。
+- **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍钉死回 `~/.taiji-dev`。
+- **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。

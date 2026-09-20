@@ -33,7 +33,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | Renderer 终态包拓扑（现行 SSOT） | [architecture/renderer-package-topology.md](docs/architecture/renderer-package-topology.md)（现行 SSOT：§1 包拓扑 / §2 core 分层；原 renderer-rebuild-architecture.md 已改名，历史文档 renderer-target-architecture / v6-architecture-refactor 已删除，git 可追溯） |
 | pi 边界可靠性（语义吸收层四支柱） | [docs/architecture/pi-boundary-reliability.md](docs/architecture/pi-boundary-reliability.md)（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫；决策记录 [ADR-0064](docs/adr/decisions.md)，约束登记 C-pi-12 / C-pi-13 / C-ext-19 / C-proc-08） |
 | 功能开发地图（启动新 Phase 前更新） | [docs/architecture/feature-map.md](docs/architecture/feature-map.md)（滚动快照，只留最新一份；原 docs/feature-map/ 已并入 architecture，2026-09-13） |
-| 测试细则 | [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑） |
+| 测试细则 | [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑）；渲染采样管道资产 [docs/testing/render-sampling.md](docs/testing/render-sampling.md) + `scripts/render-sampling/`（真机采样前必读，复用管道禁现场重写） |
 | Release Notes 写作规范 | 全局规范 SSOT `~/.agents/guide/release-notes.md`（三节结构 / 30 字模糊化 / 双语强制；merge 阶段 5 撰写 notes 前必读）+ 项目特化 [docs/release-notes.md](docs/release-notes.md)（展示位 / release.sh 草稿行为） |
 | Pi Extension 开发 | [docs/extensions/development-guide.md](docs/extensions/development-guide.md)（指南）· [extension-conventions.md](docs/extensions/extension-conventions.md)（强约束）· [logging-conventions.md](docs/extensions/logging-conventions.md)（日志现行 SSOT）· [glossary.md](docs/extensions/glossary.md) · [local-dev-guide.md](docs/extensions/local-dev-guide.md) |
 | Subagent 体系架构（包拓扑 / 协议面 / 机制落点） | [docs/extensions/subagents/architecture.md](docs/extensions/subagents/architecture.md)（现状 SSOT 导航页：5 类包拓扑 · engine-protocol v1 · 关键机制落点表 · 主题文档指针） |
@@ -67,7 +67,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 ## 前端调试（Playwright 连 dev app）
 
-`pnpm dev` 走 `apps/electron/scripts/dev-instance.mjs` 装配器（C-dev-01）：按 worktree 名 hash 稳定派生端口（Vite/CDP/runtime 段）；**数据目录实际为 `~/.taiji-dev/`**（`main.ts` dev 分支对 dataDir 无条件钉死——2026-09-08 防宿主 env 泄漏事故防线；装配器派生的 `instances/<worktree>/` 实例层因钉死未被 app 读取，属存量装配偏差（R-13），见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「dev 数据目录实际落点」节），首启配置种子（provider/secrets 等）需落 `~/.taiji-dev/` 根（只读模板 `~/.taiji-dev.template/` 的 `TEMPLATE_TOP_FILES/DIRS` 白名单语义，`--seed-from` 生成）。**AI agent 真机验收必须 `TAIJI_DEV_BACKGROUND=1 pnpm dev`**（showInactive 不抢前台焦点，遵循 browser-automation skill 对策 2）；连接前 `node apps/electron/scripts/dev-instance.mjs --print` 查本实例 CDP 端口，browser-automation 连 `http://localhost:<cdp-port>`（截图/DOM/执行 JS）。验收要干净环境时加 `--fresh`。
+`pnpm dev` 走 `apps/electron/scripts/dev-instance.mjs` 装配器（C-dev-01）：按 worktree 名 hash 稳定派生端口（Vite/CDP/runtime 段）与**数据目录 `~/.taiji-dev/instances/<worktree>/`**——`main.ts` dev 分支受控采信该实例目录（外部 `TAIJI_AGENT_DATA_DIR` 仅当解析后位于 `~/.taiji-dev` 树内才采信，其余钉死回 `~/.taiji-dev`，防泄漏语义保留），多 worktree 并行 dev 数据自动隔离、单实例锁互不互踢；解析纯函数 = `apps/electron/main/utils/dev-data-dir.ts`（行为矩阵测试 `main/test/dev-data-dir.test.ts`）。首启配置种子（provider/secrets 等）由装配器从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES/DIRS` 白名单复制进实例目录（`--seed-from` 生成模板）。**AI agent 真机验收必须 `TAIJI_DEV_BACKGROUND=1 pnpm dev`**（showInactive 不抢前台焦点，遵循 browser-automation skill 对策 2）；连接前 `node apps/electron/scripts/dev-instance.mjs --print` 查本实例 CDP 端口，browser-automation 连 `http://localhost:<cdp-port>`（截图/DOM/执行 JS）。验收要干净环境时加 `--fresh`；需要额外独立数据目录（并行验收 / mock 实例 / 实验）时加 `--data-dir ~/.taiji-dev/<suffix>`（值域校验收敛在树内、拒保留目录，禁改 main.ts 实验通道）。
 
 - 实例排查：单实例锁按数据目录 userData 区分（多实例天然共存）；连错实例看旧代码——先确认 `list-pages` URL 是本实例的 `localhost:<vite-port>`；模板调整后 `node apps/electron/scripts/dev-instance.mjs init-template --force` 重建（只读模板勿直改）
 - 打包版应用（磁盘 bundle 名 `TaiJi.app`，Finder 显示「太极」）可能同跑（占 3210）；裸跑（不经装配器）时 dev CDP 9222 / Vite 1420 / runtime 3310
@@ -145,11 +145,12 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 ## pi 资源放置
 
-agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extension / 离开该 extension 不可用）→ `extensions/<group>/<pkg>/agents|workflows/` + package.json `pi.agents`/`pi.workflows`；项目自用 → `.agents/agents|workflows/`；跨项目通用 → `~/.agents/`。发现机制：resource-discovery 扫 7 源同名 last-writer-wins（project-agents 最高）；extension 内置 agent 须装到 npm 扫描目录才被发现（dev-link 不发现 agent）；skill 走 `pi.skills` 独立通路（first-writer-wins）。SSOT：`extensions/universal/subagent-workflow/src/shared/resource-discovery.ts`。
+agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extension / 离开该 extension 不可用）→ `extensions/<group>/<pkg>/agents|workflows/` + package.json `pi.agents`/`pi.workflows`；项目自用 → `.agents/agents|workflows/`；跨项目通用 → `~/.agents/`。发现机制：resource-discovery 扫 7 源同名 last-writer-wins（project-agents 最高）；extension 内置 agent 须装到 npm 扫描目录才被发现（dev-link 不发现 agent）；skill 走 `pi.skills` 独立通路（first-writer-wins）。SSOT：`packages/subagent-core/src/shared/resource-discovery.ts`。
 
 ## 架构约定
 
 - 视图切换状态驱动（settingsStore.currentView），不用 vue-router；Mock 用 `VITE_MOCK=true` 在 ws-client 层拦截
+- **markdown 渲染管线安全模型 = 分通道净化**（`markdown-sanitize.ts`，renderMarkdown 唯一出口）：markdown-it `html:true`；可信段（shiki/KaTeX/md-* 契约：fence/math/code_inline/filepath）以 per-call nonce 哨兵在 sanitize 前摘出、净化后单遍回填，不参与白名单过滤；用户 HTML 走 DOMPurify 两级白名单（GitHub 面对齐，class/style/data-* 构造性全剥——无样式伪造与交互借用通道）；相对资源的两条通道：img src 在净化 hook 按 `resourceBaseDir` 重写为 local-file URL（经 MarkdownEnv 透传，对话流 = session cwd、drawer = 文件所在目录）；相对链接 href 保持原样输出，点击时由 MarkdownRenderer ④路按 `props.resourceBaseDir ?? deps.sessionCwdOf()` resolve（drawer 走 props 通道不经 MarkdownEnv）；CSP 由此降级为纵深第二层。禁止绕过 renderMarkdown 直调 md.render、禁止向用户白名单放宽 class/style/data-*
 - 共享类型经 `packages/shared/` workspace 共享；Runtime 通信走 WebSocket（ws-client.ts + event-bus.ts）；Electron IPC 经 preload 暴露 `electronAPI`
 - **Runtime broadcast 时序竞争 [HISTORICAL]**：session 激活/创建流程内部发出的 session 级 broadcast 早于 renderer 订阅 → 消息丢失。renderer 切换/创建 session 后需立即消费的 session 级状态必须主动拉取（`session.getCommands` RPC），不可依赖 broadcast
 - **数据目录隔离**：`~/.taiji/` 与 `~/.pi/agent/` 完全隔离；路径白名单禁止硬编码，从 `getConfigDir()` / `getPiAgentDir()` 动态推导（pre-commit 检查）

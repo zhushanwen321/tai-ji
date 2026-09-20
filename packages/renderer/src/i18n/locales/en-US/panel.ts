@@ -9,6 +9,10 @@ export default {
     branch: 'Branch',
     gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
+    // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
+    pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
+    pluginActionRestoring: 'Session restoring, availability unknown',
+    pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
   },
   composer: {
     send: 'Send',
@@ -194,7 +198,14 @@ export default {
     genStatsD30: 'Last 30 days',
     genStatsDayShort: 'Today weighted (this model)',
     genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (weighted avg); based on single LLM request duration, excluding tool execution time',
-    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows 0% when the model does not support caching',
+    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows "—" when the model does not support caching',
+    // Miss attribution (2026-09-19 D-A): expected 0% causes — all non-fault, rendered in neutral tone
+    genStatsCacheMissColdStart: 'First request',
+    genStatsCacheMissIdle: 'Idle expiry',
+    genStatsCacheMissCompaction: 'Rebuilt',
+    genStatsCacheMissColdStartNote: 'First request in this session — cache not established yet (expected miss)',
+    genStatsCacheMissIdleNote: '{duration} idle since the last request — the provider cache expired (expected miss)',
+    genStatsCacheMissCompactionNote: 'Prefix rebuilt after context compaction — this request must miss (expected)',
     genStatsNoData: 'No data yet',
   },
   sideDrawer: {

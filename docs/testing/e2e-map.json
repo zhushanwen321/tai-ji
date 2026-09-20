@@ -178,6 +178,58 @@
       "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言的 @taiji/ui 渲染面——gui-components.spec.ts 的 8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）+ v6-shell-baseline 打开 drawer 后断言的容器（renderer `components/workspace/PanelContainer.vue` 渲染 `features/drawer/DrawerPanel.vue`，`aside[aria-label=\"侧边抽屉\"]` 即其根）；改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。（归属澄清：v6-shell-baseline 的 shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 属 renderer 的 `packages/renderer/src/components/panel/Composer.vue`（输入区 ComposerInput 来自 @taiji/ui）——前者由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。"
     },
     {
+      "id": "E2E-MOCK-02",
+      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（横幅/审批条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
+      "scope": [
+        "packages/ui/src/features/drawer/**",
+        "packages/renderer/src/components/panel/plan/**",
+        "packages/renderer/src/stores/plan-store.ts",
+        "packages/renderer/src/composables/use-plan-sync.ts",
+        "packages/renderer/src/composables/use-plan-drawer-sync.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/stores/plan-store.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-plan-drawer-sync.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-banner.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"
+    },
+    {
       "id": "E2E-REAL-01",
       "summary": "e2e real 轨：真实 app 启动（launch-app-real）4 spec，开发阶段按改动面空载串行跑",
       "scope": [
@@ -219,7 +271,7 @@
       "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。"
+      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。"
     },
     {
       "id": "E2E-SKILLRELOAD-01",
@@ -279,7 +331,7 @@
       "run": "npx playwright test e2e/skill-reload-askuser.spec.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 ask-user-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。"
+      "note": "R2 归宿（设计 §4 S1b）。与 E2E-SKILLRELOAD-01 同一 faux/L2.5 裁决与执行前置；断言核心 = D3 host-ui-endpoint 槽现读的真机验证（reload 完成后触发的 ask_user 反向请求送达 form-overlay 且可应答，无 {cancelled:true} 静默取消）+ 全局 skill 目录（<dataDir>/agent/skills）变动驱动双 session 并发 reload+adoption（dir=global 归因行同时列出两个 sid、preserved 行每 session 一条）。ask-user 主链路（overlay 渲染/应答回写协议）由 E2E-REAL-01 的 e2e/ask-user-real.spec.ts 与组件测试承担，本 rule 只验 reload 窗口后的反向请求面。[2026-09-19] S1b 两次稳定复现失败并归因：run 的 done 处理在 stale ctx emit 失败 → done 广播未送达 spec WS → awaitDone 150s 超时（reload preserved 收口链既有问题，非 ui-presentation-protocol 迁移回归——同运行中 form-overlay 渲染/应答/关闭 + pi 恢复 turn 全通过）；本 rule 现处已知失败态，修复另开任务后复跑。"
     },
     {
       "id": "E2E-SKILLRELOAD-03",
@@ -565,7 +617,7 @@
     },
     {
       "id": "E2E-SCHED-01",
-      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S17 契约）",
+      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S19 契约，含 schedule-create 确认交互应答）",
       "scope": [
         "extensions/universal/scheduler/**",
         "scripts/verify-scheduler-e2e.cjs"
@@ -582,7 +634,7 @@
       "run": "node scripts/verify-scheduler-e2e.cjs",
       "owner": "extensions/universal/scheduler",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
+      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。2026-09-18 U7 起驱动器具备 extension_ui_request→extension_ui_response 应答循环（schedule-create 确认/取消可配置 uiActor，S18 确认 / S19 取消；既有场景默认 auto-confirm）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行。[2026-09-19 ui-presentation-protocol u6] scheduler 创建确认迁统一表单协议：uiFormInteract + UI_FORM_MARKER（ScheduleQuestion 单问整表单），回包 FormAnswers envelope（schedule value = JSON.stringify(ScheduleFormResult)）；verify 脚本 marker 识别与 S18 确认 / S19 取消断言已随 form 契约改造，S1-S19 空载串行复验全绿（exit 0）"
     },
     {
       "id": "E2E-BATCH-01",
@@ -757,6 +809,55 @@
       "owner": "extensions/universal/provider-live-sync",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "faux 轨：真实 pi 二进制 + 真实扩展 + 本地 mock LLM（OpenAI chat-completions 流式，随机端口）——零 token 零外网；断言基线（新增前 Model not found）/ 新增后可直接切换 + get_state 真生效 / model_change 落 JSONL / 删除生效且其它模型无塌陷 / 扩展日志。验收结果与测试时序陷阱见 .tmp/tech-design/acceptance/pi-live-provider-e2e-RESULTS.md（设计过程档案）"
+    },
+    {
+      "id": "E2E-PLUGINCONTRACT-01",
+      "summary": "verify-plugin-contract：插件 API 契约硬化脚本轨（CT-D2 命令链+复合键防劫持 / CT-D1 session 事件端到端+events 降级 / CT-D1b 激活订阅定向投递）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/**",
+        "packages/runtime/src/transport/**",
+        "resources/plugins/**",
+        "scripts/verify-plugin-contract.sh",
+        "scripts/bundle-extensions.mjs",
+        "scripts/prepare-builtin-plugins.sh"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-plugin-contract.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "bash scripts/verify-plugin-contract.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（2026-09-20 阶段6收尾裁决，impl-plan 残留风险 #5 闭环）：开发期按改动面手工跑（验收计划表回归项），不在 CI 门禁（真实 pi 子进程链路，CI 只跑 unit 轨同口径）；自含 pnpm install、隔离 TAIJI_AGENT_DATA_DIR、空载串行；CT-D1b 段 SDK API 未就位时 SKIP 不计失败（u5b 已落地转硬 PASS）；标记行协议与 exit code 一致；scope 含插件装载链两脚本（bundle-extensions 引擎副本重建 + prepare-builtin-plugins 插件装载前置，u6a 验收串联项）——链变更随契约脚本一并回归"
+    },
+    {
+      "id": "E2E-SAMPLING-01",
+      "summary": "render-sampling 渲染采样管道：真机渲染验收/基线采集共用管道（设计期工具，R3 归档 docs/testing/render-sampling.md）",
+      "scope": [
+        "scripts/render-sampling/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/cli.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/lib.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（人工预飞形态——管道冒烟需真机 CDP：node scripts/render-sampling/cli.mjs --cdp-port <端口> --sample <样本.md> --out <目录> --name <名>；改管道本身时按 docs/testing/render-sampling.md 预飞纪律人工跑通）",
+      "owner": "docs/testing",
+      "authority": "docs/testing/render-sampling.md",
+      "note": "R3 归档态（2026-09-20 收尾登记）：管道六环节 SSOT = render-sampling.md，脚本与文档同 commit 维护；场景脚本自写不进本目录；on-diff = 改管道本身时提醒预飞，无独立 CI 环节"
     }
   ]
 }

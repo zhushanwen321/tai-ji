@@ -169,6 +169,20 @@ EXEMPT_CALLSITES = [
         "仅读系统进程表，不向下游传递任何数据（设计文档 §3.6 R5 点名）",
     ),
     (
+        "infra/crash-correlation.ts",
+        "execFileSync(",
+        "崩溃时刻机器面 pi 快照的 ps 只读探测（crash-forensics D10）：数组参数不经 "
+        "shell、显式 timeout，仅读系统进程表回读 stdout，无 env 传播意图"
+        "（与 reap-orphan-pi.ts ps 探测先例同构）",
+    ),
+    (
+        "infra/crash-correlation.ts",
+        "execFile(",
+        "崩溃关联的统一日志只读查询（`log show` ±5s 窗取证，crash-forensics D10）："
+        "数组参数不经 shell、显式 timeout + maxBuffer，仅读系统日志回读 stdout，"
+        "无 env 传播意图（与 reap-orphan-pi.ts ps 探测先例同构）",
+    ),
+    (
         "services/background-task/process-probe.ts",
         "execFileAsync(",
         "D6 进程 start time 按需现测（promisify(execFile) 产物 execFileAsync，"

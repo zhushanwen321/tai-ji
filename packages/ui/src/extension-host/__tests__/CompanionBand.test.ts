@@ -5,10 +5,13 @@
  *  - TC-1 confirm 渲染 + 确认/取消回传（AC3）
  *  - TC-2 select 渲染选项 + 选中回传；未选确认禁用（AC3）
  *  - TC-3 input 渲染 + 文本回传（prefill 预填）；editor 变体（Textarea）
- *  - TC-4 askUser 渲染（AskUserForm）+ 单选提交回传（AC3）
  *  - TC-5 无请求自隐藏（根元素 v-if 隐藏）
  *  - TC-5b expired 撤窗（plugin:uiRequestExpired → 出队 → band 自隐藏，D2）
  *  - TC-6 未知 method 只读降级（ERR3，无按钮 + console.warn)
+ *
+ * [ui-presentation-protocol §3.4-1] 原 TC-4/TC-4b askUser 富交互分支用例已随死分支
+ * 退役删除——表单类请求由 useExtensionUI 消费（FormOverlay 独占），CompanionBand
+ * 不再有 'askUser' method 路由。
  *
  * Mock 策略：MockDialogRequestSource（onUiRequest/onUiRequestExpired vi.fn
  * 存 handler 供触发，同 W1 测试模式）+ MockTransport（sendPiResponse/sendPluginResponse vi.fn），
@@ -185,59 +188,6 @@ describe('CompanionBand', () => {
     expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r3e', 'editor', 'multi\nline')
   })
 
-  it('TC-4 askUser 渲染（AskUserForm）+ 单选提交回传（AC3）', async () => {
-    const { wrapper, source, transport } = mountBand()
-    source.triggerUiRequest({
-      sessionId: 'A',
-      requestId: 'r4',
-      method: 'askUser',
-      askUserQuestions: [{ header: 'db', question: '选库?', options: [{ label: 'PG' }] }],
-    })
-    await nextTick()
-
-    // AskUserForm DOM
-    expect(wrapper.find('[data-testid="ask-user-form"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ask-user-option-PG"]').exists()).toBe(true)
-
-    // 单选 → 提交 → respond(answersJson)
-    await wrapper.find('[data-testid="ask-user-option-PG"]').trigger('click')
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-    expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r4', 'askUser', '{"db":"PG"}')
-  })
-
-  it('TC-4b askUser Other 编码：主 key 过滤 OTHER_VALUE + 独立 __other key（对齐 answer-codec）', async () => {
-    const { wrapper, source, transport } = mountBand()
-    source.triggerUiRequest({
-      sessionId: 'A',
-      requestId: 'r4b',
-      method: 'askUser',
-      askUserQuestions: [
-        {
-          header: 'db',
-          question: '选库?',
-          multiSelect: true,
-          allowOther: true,
-          options: [{ label: 'PG' }, { label: 'MySQL' }],
-        },
-      ],
-    })
-    await nextTick()
-
-    // 选中 PG + Other → Other 输入框展开
-    await wrapper.find('[data-testid="ask-user-option-PG"]').trigger('click')
-    await wrapper.find('[data-testid="ask-user-option-__other__"]').trigger('click')
-    await nextTick()
-    const otherInput = wrapper.find('[data-testid="ask-user-other-db"]')
-    expect(otherInput.exists()).toBe(true)
-
-    // 输入 Other 文本 → 提交
-    await otherInput.setValue('自研库')
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-
-    // 主 key = JSON.stringify(['PG'])（不含 OTHER_VALUE 占位符）；Other 文本进独立 `db__other` key
-    expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r4b', 'askUser', '{"db":"[\\"PG\\"]","db__other":"自研库"}')
-  })
-
   it('TC-5 无请求自隐藏（根元素 v-if 隐藏，不占位）（IF3）', async () => {
     const { wrapper } = mountBand()
     await nextTick()
@@ -346,6 +296,17 @@ describe('CompanionBand × OverlayLifecycle 契约（IF9）', () => {
     expect(wrapper.find('[data-testid="companion-band-message"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="companion-minimize"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: var(--z-overlay)')
+  })
+
+  it('expanded 态 → z-index 钉 --z-dialog 档（AP-2 规则③：用户待决确认层浮于 plugin modal 之上）', async () => {
+    // OverlayLifecycle 生产语义：ui-request 到达即建 expanded 分区——mock 预置 expanded 态
+    const overlay = new MockOverlayLifecycle()
+    overlay.transition('A', 'r4', 'expanded')
+    const { wrapper, source } = mountBand('A', overlay)
+    source.triggerUiRequest({ sessionId: 'A', requestId: 'r4', method: 'confirm', title: '确认', message: 'm' })
+    await nextTick()
+    // 用户可见断言：band 内联 z 钉确认层档 token（高于 --z-modal 的数值序由 renderer style.css 守卫）
+    expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: var(--z-dialog)')
   })
 
   it('无 OverlayLifecycle inject：minimize 点击不崩（静默 no-op）', async () => {

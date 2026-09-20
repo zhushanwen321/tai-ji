@@ -139,7 +139,47 @@ session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、sk
 
 ### Marker RPC（select+marker 通道原语，2026-09-14）
 
-extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter；错误回包形状单源为 `ChannelErrorResult`。
+extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter / ui-form（统一表单协议，见下节）；错误回包形状单源为 `ChannelErrorResult`。
+
+### 统一表单协议（ui-form，2026-09-19）
+
+ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问题即数据（类型化问题集），GUI 链路一个入口一个渲染器——多问 = 多 tab，单问 = 单视图（planReview 审批条与 permission 等 band 流程对话框不属提问表单，不在收口范围）。协议 SSOT = `packages/extension-protocol/src/extensions/ui-form/`：
+
+- **问题集 `FormQuestion` 判别联合**：`choice`（选项题：`options`（label 即选中值，无独立 value 字段）/ `multi` 多选 / `allowOther`，默认 true）/ `text`（纯自由文本）/ `schedule`（时间输入整表单，`initial` 预填 `ScheduleDraft`）。answers key = `header ?? question`。
+- **回传 `FormAnswers = Record<string, string>`**：choice 单选 = label、多选 = `JSON.stringify(labels[])`、Other 文本独立键 `${key}__other`、text 键位 `${key}__other`（与纯 Other 形态同键位）、schedule value = `JSON.stringify(ScheduleFormResult)`。choice/text 部分与 `AskUserAnswers` 逐字兼容——`getAskUserAnswer` / `getAskUserOther` 解码零改动。
+- **wire 通道**：extension 侧统一入口 `uiFormInteract(ctx, form, opts?)`（传输核复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc`）以 `UI_FORM_MARKER = '\x00TAIJI_UI_FORM'` 为 select title、`options[0]` 携 `{ formQuestions, allowCancel }` JSON；runtime event-adapter 按 marker 翻译为 `extension.ui_request` 帧（`form: true` + `formQuestions`，逐项 `isFormQuestion` 守卫过滤，全不合法降级普通 select 落 band）；renderer `FormOverlay`（`packages/renderer/src/components/extension/form/`）Panel 内联覆盖 composer 渲染，按问题 type 分派渲染器（ChoiceQuestion / TextQuestion / ScheduleForm）。回包四态判别（`cancelled` / `timeout` / `channel-error` / `non-json`），channel-error 含 **echo 检测**——收包等于发送 payload 时报「宿主过旧需升级」（旧 taiji × 新扩展组合的确定性识别）。
+- **TUI 契约**：`uiFormInteract` 在 TUI 误调抛错——formQuestions 在 TUI 无呈现语义，各 extension 自行渲染（ask-user AskUserComponent / scheduler ScheduleCreateComponent / plan 原生 select），属有意取舍。
+- **版本偏斜窗口**：旧 ask-user 帧（`askUser` + `askUserQuestions`）/ 旧 scheduler 帧（`scheduleCreate` + `scheduleDraft`）由 renderer `normalizeFormRequest` 双挂点归一（bus 判定前 + pending addRequest 前）后进 FormOverlay。退役窗口终局（新 marker 版三包 npm 发布 + 一个大版本后独立 PR）：event-adapter 的 ASK_USER / SCHEDULE_CREATE legacy 分支、两旧 marker 常量、payload 旧字段、renderer 归一层、ask-user channel 旧名注册（`ask_user`）一并清理。
+
+**代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
+
+### Schedule Create（schedule 创建确认，2026-09-18）
+
+`schedule` 工具创建路径的「先确认后创建」交互：agent 提交预填草稿，用户可视化确认/调整后任务才创建，取消 = 不创建（agent 收到明确 cancelled 语义，不猜测、不重试）。交互入口已收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传，打开即可一键确认），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，确认回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`。scheduler-create 模块现为共享资产层：草稿 `ScheduleDraft`（LLM 参数即预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
+
+### 计划模式（Plan Mode）
+
+pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或内置模板产出计划文档；文档就绪后 `submit-review` 挂审阅，用户三键裁决（确认执行 / 提交评论并要求修订 / 请求进一步解释），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：内置 Develop (auto-parallel)（LLM 自判复杂度）+ 自动检测带 `plan-exec: true` frontmatter 的 skill（四根扫描，同构 pi loadSkillsFromDir）+ goal 档（能力在场时）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入）。
+
+**代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills 解析 / tool.ts 六 action / state.ts 状态 / prompts.ts 提示词四段 / index.ts hooks）。
+
+### plan-state entry
+
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 三个 optional 字段 `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+
+**代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
+
+### PLAN_REVIEW_MARKER
+
+plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染三键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise·explain 必带 `{ quote, comment }[]`）。
+
+**代码映射**: `packages/extension-protocol/src/core/markers.ts`（常量）+ `core/types.ts`（payload/decision/comment 契约 SSOT）。
+
+### record 投影链
+
+会话持久派生态到前端 stateSnapshot 的统一通道（subagent/workflow 现役，plan-state 为第三员——plan-mode-redesign 方案 A）。链路：custom entry append → event-adapter `handleEntryAppended` 白名单 → interpreter record 联合类型 + 失效透传 → `SessionRecords.invalidateRecordEntries` 派生扫描（冷启动读盘与 live 更新共用同一份派生代码，live ≡ reload 构造性成立）→ publish 走 diff 基线 → message-bus `TOPIC_TABLE` / `STATE_TYPE_KEY_MAP` 分发 → 前端 store 订阅 + 切换/冷启动 RPC 首拉。三道运行时 customType 门 + 冷启动首拉全部要过，缺一则静默失效（三道门均为字符串判定，编译器不保护——加员时逐点核对）。
+
+**代码映射**: `packages/runtime/src/infra/pi/event-adapter.ts` / `packages/runtime/src/services/session/session-records.ts` / `packages/runtime/src/services/message-bus/message-bus.ts`。
 
 ### Tool Approval
 工具权限审批。Agent 执行危险操作（如写入文件、运行命令）前请求用户许可。用户回复是三选一：Allow（本次允许）/ Deny（拒绝）/ Always Allow（永久允许该工具）。
@@ -148,7 +188,7 @@ extension 与 taiji runtime 之间的请求-回包通道原语（`packages/exten
 
 > **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互面）。
 
-agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态见 `packages/ui/src/extension-host/AskUserForm.vue`：选项/多选/Other/自由文本/多行编辑）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
+agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态 = [统一表单协议](#统一表单协议ui-form2026-09-19)的 FormOverlay：选项/多选/Other/自由文本）。ask-user 包的 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参（孙进程版本不可控的兼容面）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
 
 **Tool Approval vs Ask User**: Tool Approval 是权限控制（binary + always allow），Ask User 是任务级沟通（开放式输入）。
 
@@ -257,6 +297,8 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 
 ### Composer 工具条
 composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率）、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
+
+> **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 
 ### 任务托盘（Widget Tray）
 composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。

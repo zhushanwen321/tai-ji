@@ -2,7 +2,7 @@
  * panel-view —— panel 主区/输入面渲染视图模型 + derivePanelView 派生纯函数。
  *
  * 背景（原始根因）：现行 Panel.vue 在组件 computed 里手工组合六个异构状态源
- * （session 绑定 / 消息有无 / flow 单例态 / dead / ask-user / trace），组合空间无穷举
+ * （session 绑定 / 消息有无 / flow 单例态 / dead / form overlay / trace），组合空间无穷举
  * 守卫——每个 bug 来自一个未被考虑的格子（flow 卡 landing → turn 结束后 composer 消失）。
  * 本模块把该组合收敛为单一纯函数：决策可穷举（G3，7 输入 = 2^7 = 128 组合全表单测守卫）、
  * 「flow 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
@@ -15,7 +15,7 @@
  *      trace 视图替换对话流位置，二者都依附具体会话）。
  *   ② conversation / trace：sessionId 非空即成立——conversation 有消息走 MessageStream、
  *      无消息走空对话态，消息有无只影响分支内部子视图（渲染层 switch 的事），不改变 kind；
- *      输入面按 hasAskUserRequest 互斥二选一（ask-user 阻塞应答替换 composer），trace
+ *      输入面按 hasFormOverlay 互斥二选一（表单 overlay 阻塞应答替换 composer），trace
  *      同样保留输入面 = session-trace 契约「composer 保留在底部，不打断对话能力」
  *      （D5/V4，一致性审查 R-U1 补入）。
  *      该分支吸收现行「已绑空 session 走空对话态 + band composer 供直输」与
@@ -50,8 +50,14 @@ export interface PanelViewInput {
   isSessionRespawning: boolean
   /** session-trace 视图态（per-session 分区，替换对话流位置） */
   isTraceView: boolean
-  /** ask-user 阻塞应答请求待答（与 composer 互斥） */
-  hasAskUserRequest: boolean
+  /**
+   * 有 pending 统一表单 overlay 请求待答（与 composer 互斥）。
+   * 布尔语义（ui-presentation-protocol D5）：form 帧富交互表单（ask-user / scheduler /
+   * plan 三源收口，legacy 键经 renderer 归一层附加 form 后统一命中）替换 composer 的
+   * 输入面；Panel 拿到请求后按挂载源分流 FormOverlay 的 questions / draft props，
+   * 组合表不扩维（union input 第三值兜底路线默认不做）。
+   */
+  hasFormOverlay: boolean
   /** 新建任务流程活跃（ACTIVE_STATES：landing + 六 overlay，flow-state.ts） */
   isFlowActive: boolean
 }
@@ -64,8 +70,10 @@ export interface PanelViewInput {
 export type PanelView =
   | { kind: 'dead'; sessionId: string }
   /** trace 保留输入面：session-trace 契约「composer 保留在底部，不打断对话能力」（D5） */
-  | { kind: 'trace'; sessionId: string; input: 'ask-user' | 'composer' }
-  | { kind: 'conversation'; sessionId: string; input: 'ask-user' | 'composer' }
+  | { kind: 'trace'; sessionId: string; input: 'form' | 'composer' }
+  // input='form' = 统一表单 overlay 替换 composer（ui-presentation-protocol D5 正名，
+  // 具体挂载源由渲染层按请求帧键分流 FormOverlay）。
+  | { kind: 'conversation'; sessionId: string; input: 'form' | 'composer' }
   | { kind: 'landing' }
   | { kind: 'empty'; sessionId: string | null }
 
@@ -77,10 +85,10 @@ export type PanelView =
  * 全输入组合（7 输入 = 2^7 = 128）的行为由 __tests__/panel-view.test.ts 组合表守卫（验收 V5）。
  */
 export function derivePanelView(input: PanelViewInput): PanelView {
-  const { sessionId, isSessionDead, isSessionRespawning, isTraceView, hasAskUserRequest, isFlowActive } = input
+  const { sessionId, isSessionDead, isSessionRespawning, isTraceView, hasFormOverlay, isFlowActive } = input
 
   // 无 session：flow 活跃 → landing（新建流程唯一承接场景）；否则 empty 兜底。
-  // dead/trace/ask-user 在此分支语义上不成立（前置约束：依附具体会话）。
+  // dead/trace/form 在此分支语义上不成立（前置约束：依附具体会话）。
   if (sessionId === null) {
     return isFlowActive ? { kind: 'landing' } : { kind: 'empty', sessionId: null }
   }
@@ -95,11 +103,11 @@ export function derivePanelView(input: PanelViewInput): PanelView {
   }
   if (isTraceView) {
     // trace 只替换对话流位置，输入面与 conversation 同规则保留（D5，见模块头注释②）
-    return { kind: 'trace', sessionId, input: hasAskUserRequest ? 'ask-user' : 'composer' }
+    return { kind: 'trace', sessionId, input: hasFormOverlay ? 'form' : 'composer' }
   }
   return {
     kind: 'conversation',
     sessionId,
-    input: hasAskUserRequest ? 'ask-user' : 'composer',
+    input: hasFormOverlay ? 'form' : 'composer',
   }
 }

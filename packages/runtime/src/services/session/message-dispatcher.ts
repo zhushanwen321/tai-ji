@@ -110,6 +110,32 @@ const REJECT_MESSAGE_BUSY = 'Agent 正在处理'
 export type PromptRejectionReason = 'compacting' | 'processing'
 
 /**
+ * sendPrompt 回执 reason 词表（plugin-header-action-modal-points D6/AP-4，u5a）：
+ * busy 预检三态（busy / compacting / bash，bash 分类为本设计新增）+ requireCommand
+ * 未命中（command-missing）+ BeforeSend hook 拦截（hook-blocked，hook 管道既有 reason
+ * 经 message.error 上浮，不新造来源）+ 其余错误（error）。词表是插件面回执契约
+ * （u5b plugin-rpc-setup 回执映射消费）；插件不得依赖 reason 精确值做行为分支
+ * （运行面只看 blocked）。
+ */
+export type SendPromptReason = 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+
+/** sendPrompt / sendMessage 返回契约（既有 blocked/rejected 布尔面兼容，reason 为增量可选字段）。 */
+export type SendPromptReceipt = {
+  blocked: boolean
+  rejected?: boolean
+  reason?: SendPromptReason
+}
+
+/**
+ * requireCommand 未命中的短重试参数（P9 探针定案，impl-plan u-probe 行）：restore 附着
+ * → 命令可用 gap 实测 1.3-3.0ms，500ms 间隔 × 6 次重试（初始 1 次探测 + 6 次重试，
+ * 总墙钟预算 3s）对 E4「30s 内首个 tick」约束留 10 倍余量。非任务级超时（AGENTS.md #19）：
+ * 这是发送路径内的确定性失败探测，量级按恢复窗口校准，不覆盖任务执行。
+ */
+const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
+const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
+
+/**
  * 识别 pi prompt() 的 busy 类确定性拒绝（按错误消息原文），输出转译 reason；非 busy 类返回 null。
  *
  * 两个拒绝分支（pi 0.84.4 agent-session.js prompt()）：
@@ -176,9 +202,18 @@ export class MessageDispatcher {
    * 返回 { blocked: true } 表示消息被 BeforeSend hook 拦截（已广播 message.error 错误气泡），
    * 调用方（session-message-handler）必须据此走 error envelope（带请求 id）让 renderer
    * pending.reject，不得 reply success（round7 must-fix #3：避免「composer 清空 + 错误气泡」矛盾态）。
+   *
+   * [plugin-header-action-modal-points D6/u5a] requireCommand 透传（可选，既有调用方零改动）：
+   * 插件写路径的前置原子校验，见 sendPrompt 内插入点注释。回执 reason 词表见 SendPromptReason。
    */
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> {
-    return this.sendPrompt(sessionId, content, images, clientUuid)
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<SendPromptReceipt> {
+    return this.sendPrompt(sessionId, content, images, clientUuid, requireCommand)
   }
 
   /**
@@ -190,13 +225,20 @@ export class MessageDispatcher {
    * @param clientUuid   客户端幂等 id（message.send RPC 透传，session-occupancy-send-closure D2）。
    *                     拒绝广播（预检与 catch 转译两路）原样带回，renderer 据此消歧发送来源
    *                     （flush 重放的拒绝不重入队）；正常路径不消费。
+   * @param requireCommand [D6/u5a] 插件写路径前置校验的命令名。undefined（既有路径）行为不变；
+   *                       有值时在 ensureActiveOrBroadcast（restore）之后、busy 预检之前
+   *                       原子校验该命令已注册（直连 client.getCommands()，不走
+   *                       sessionService.getCommands 的 markDirty 查询语义——那是 UI 状态
+   *                       查询面路径），未命中短重试（P9 定案 500ms × 6）后仍失败即拒发，
+   *                       命令串永不漏进模型（E14 结构性防线，§2.4 坑 1）。
    */
   private async sendPrompt(
     sessionId: string,
     hookContent: string,
     images?: Array<{ data: string; mimeType: string }>,
     clientUuid?: string,
-  ): Promise<{ blocked: boolean; rejected?: boolean }> {
+    requireCommand?: string,
+  ): Promise<SendPromptReceipt> {
     // ── dispatcher 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
     // markSessionActive 置 occupancy=dispatching 位于 await runBeforeSendHook（插件
     // hook，单 handler 5s 超时）与 await ensureActiveOrBroadcast（restore 600ms-3s）
@@ -211,9 +253,11 @@ export class MessageDispatcher {
     // ── BeforeSend hook ──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
+    // [D6/u5a] reason:'hook-blocked' 为回执面增量（hook 管道既有 reason 已随 message.error
+    // 上浮——plugin-service.ts:442 同族先例，不新造来源）；既有布尔消费方不受影响。
     const hookOutcome = await this.runBeforeSendHook(sessionId, hookContent)
     if (hookOutcome.blocked) {
-      return { blocked: true }
+      return { blocked: true, reason: 'hook-blocked' }
     }
 
     // D4 显式投递清标记：经 runtime sendPrompt 的投递（用户新消息 / 前端队列 flush 重放）
@@ -227,11 +271,28 @@ export class MessageDispatcher {
     // ── ensureActive(必要时 restore)──
     const client = await this.ensureActiveOrBroadcast(sessionId)
 
+    // ── requireCommand 原子校验（plugin-header-action-modal-points D6/u5a）──
+    // 唯一无竞态位置 = restore 之后、busy 预检之前（设计 §3.3 D6：命令缺失是确定性失败，
+    // 先于瞬时忙态回报；两者都不产生副作用——「先校验再发」两段式在 restore 窗口结构性
+    // 做不到，校验必须在发送路径内部）。未命中 → 拒发回执，不广播 send.rejected（该通道
+    // 会被前端 defer 队列重投——插件写命令绝不能入用户队列）也不广播 message.error：
+    // 回执机制（E14）就是它的反馈面，命令串不进模型、对话流无新消息（场景 12 判据）。
+    if (requireCommand !== undefined) {
+      const available = await this.ensureCommandAvailable(client, requireCommand)
+      if (!available) {
+        console.warn(
+          `[message-dispatcher] requireCommand "${requireCommand}" not registered after ${REQUIRE_COMMAND_RETRY_ATTEMPTS} retries, rejecting send (reason=command-missing), sid=${sessionId}`,
+        )
+        return { blocked: true, rejected: true, reason: 'command-missing' }
+      }
+    }
+
     // ── 标记活跃 + 生成中（busy 预检拒绝时中止）──
     const activeSession = this.svc.getSessionByClient(client)
     if (activeSession) {
-      if (this.rejectBusyPrecheck(sessionId, activeSession, clientUuid)) {
-        return { blocked: true, rejected: true }
+      const busyReason = this.rejectBusyPrecheck(sessionId, activeSession, clientUuid)
+      if (busyReason) {
+        return { blocked: true, rejected: true, reason: busyReason }
       }
       this.markSessionActive(activeSession, sessionId)
     }
@@ -243,8 +304,25 @@ export class MessageDispatcher {
     // [A1 接线] activeSession.cwd 作 project 扫描基准（D7）——session 未托管（view 缺失）
     // 时 undefined = global-only 映射（宁缺毋错，不猜 cwd）。
     const injection = await this.injector.inject(client, promptText, activeSession?.cwd)
+    // [u5a 收口扩展 / #12] 手敲链扩展命令判定（requireCommand === undefined 时才补判；判据与
+    // 降级语义见 willExecuteAsExtensionCommand 注释）。注意用 injection.text（实际发往 pi 的
+    // 文本——注入器产物才是 pi 收到的）。命中则 prompt 后主动收口；未命中/探测失败 → 不收口，
+    // 等 agent_start/end 回流正常管理。
+    const closeOccupancyAfterSend =
+      requireCommand !== undefined || (await this.willExecuteAsExtensionCommand(client, injection.text))
     try {
       await client.prompt(injection.text, images)
+      // [扩展命令 occupancy 收口] requireCommand 命中的写路径 = pi 扩展命令（P2 实测：同步
+      // 执行、不进模型、无 turn 开启 → agent_start/agent_end 永不回流）。#1 'dispatching'
+      // 置位的 isGenerating 若不在此收口将永不复位 → 会话假死 busy，后续写路径全被
+      // rejectBusyPrecheck 以 busy 拒绝。'/' 开头 + requireCommand 命中双条件确保只收
+      // 「确为扩展命令且 pi 已同步执行完毕」的 prompt；普通 turn 消息不带 requireCommand
+      // 参数、不经此分支。[u5a 收口扩展 / #12] 手敲链同族：/ 开头且命令表命中（
+      // willExecuteAsExtensionCommand，source==='extension' 对齐 pi 判据）同样无 turn 回流，
+      // 同批收口——未命中（进模型）/探测失败则不收，turn 回流自愈。
+      if (closeOccupancyAfterSend && injection.text.startsWith('/') && activeSession) {
+        applySessionOccupancyTransition(activeSession, this.messageBus, 'idle')
+      }
     } catch (e) {
       return this.handlePromptFailure(sessionId, activeSession, clientUuid, e)
     }
@@ -274,7 +352,7 @@ export class MessageDispatcher {
   }
 
   /**
-   * [D-009 预检] busy 预检拒绝（send.rejected 已广播，返回 true 调用方中止发送，不调 pi.prompt）。
+   * [D-009 预检] busy 预检拒绝（send.rejected 已广播，返回命中分类，调用方中止发送，不调 pi.prompt）。
    *
    * [W3, U6] 加 isCompacting：compact 进行中时 prompt 会与压缩竞态，同样必须拒。
    * [composer-bash-execute W1] 加 isBashRunning：bash 执行中 prompt 会与 bash 竞态，双向互斥。
@@ -284,20 +362,86 @@ export class MessageDispatcher {
    * 拒绝转 send.rejected{busy} → 消息入 defer 队列 → agent_settled idle 帧自动投递。这是
    * D2 显式声明的行为变更（原 settling 窗口直发成功的消息现在延迟 ≤2s 投递，P-2 探针门
    * P95 ≤ 2s）。occupancy 与三布尔经原语原子同步，缺省（undefined）按 idle 兜底。
+   *
+   * [plugin-header-action-modal-points D6/u5a] 返回值从布尔改为三态分类（'busy'|'compacting'|
+   * 'bash'，null = 放行）：E7 回执词表把 bash 拆出独立分类。send.rejected 广播线保持既有
+   * 词表（bash 维度以 'busy' 上线——shared protocol.ts 的 send.rejected.reason 不在本单元
+   * 领地内，且 renderer P3 起全 reason 统一静默入队不分型，词面无损）。
    */
   private rejectBusyPrecheck(
     sessionId: string,
     activeSession: IManagedSessionView,
     clientUuid: string | undefined,
-  ): boolean {
+  ): 'busy' | 'compacting' | 'bash' | null {
     const occ = activeSession.occupancy ?? IDLE_SESSION_OCCUPANCY
     if (occ.turn !== 'idle' || occ.compacting || occ.bash) {
-      const reason = occ.compacting ? ('compacting' as const) : ('busy' as const)
+      const reason = occ.compacting ? ('compacting' as const) : occ.bash ? ('bash' as const) : ('busy' as const)
       console.warn(`[message-dispatcher] preemptive reject (${reason}), sid=${sessionId}`)
-      this.publishSendRejected(sessionId, reason, clientUuid)
-      return true
+      this.publishSendRejected(sessionId, reason === 'bash' ? 'busy' : reason, clientUuid)
+      return reason
+    }
+    return null
+  }
+
+  /**
+   * [D6/u5a] requireCommand 原子校验：直连 client.getCommands() 按命令名精确匹配。
+   *
+   * 未命中短重试（P9 探针定案 500ms × 6 次，总预算 3s——覆盖 restore 附着→扩展命令注册
+   * 的窗口，实测 gap 1.3-3.0ms，10 倍余量）；探测 RPC 抛错（transport 抖动等）视同未命中
+   * 参与重试，预算耗尽后由调用方拒发（fail-closed：不确定 ≠ 放行，命令串永不漏进模型）。
+   */
+  private async ensureCommandAvailable(client: IPiEngine, requireCommand: string): Promise<boolean> {
+    for (let attempt = 0; attempt <= REQUIRE_COMMAND_RETRY_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, REQUIRE_COMMAND_RETRY_INTERVAL_MS))
+      }
+      try {
+        const commands = await client.getCommands()
+        if (commands.some((c) => c.name === requireCommand)) return true
+      } catch (e) {
+        // 降级策略（best-effort）：探测 RPC 失败（transport 抖动等）视同未命中参与重试，
+        // 不中断发送主流程——预算耗尽后由调用方拒发（fail-closed）。warn 落日志留排查线索
+        // （非静默吞，无需 no-silent-catch 豁免）。
+        console.warn(
+          `[message-dispatcher] requireCommand probe failed (attempt ${attempt + 1}/${REQUIRE_COMMAND_RETRY_ATTEMPTS + 1}):`,
+          toErrorMessage(e),
+        )
+      }
     }
     return false
+  }
+
+  /**
+   * 判定「此 prompt 将被 pi 作为扩展命令同步执行（无 agent_start/end 回流）」。
+   *
+   * [u5a 收口扩展 / 残留风险 #12] pi 语义（agent-session.js 0.84.4 `_tryExecuteExtensionCommand`）：
+   * `/` 开头 prompt 首段命中 extensionRunner 注册表 → 同步执行并 return（无 turn）；未命中 →
+   * 透传进模型（正常 turn 回流）。requireCommand 链的收口（sendPrompt 内既有分支）只覆盖插件
+   * 写路径——手敲链（message.send，无 requireCommand）同样产生扩展命令 prompt，缺收口则
+   * occupancy 卡 dispatching（UI「思考中」永不复位；#12 实证：手敲 /schedule list pi 已执行、
+   * 零 LLM 调用，前端却永久转圈被误判为「漏进模型」）。
+   *
+   * 判据对齐 pi：命令名取 `/` 后首段（空格前），命中 getCommands 中 `source==='extension'`
+   * 条目——skill（`skill:x`）/ prompt template（source:'prompt'）会被 pi 展开进模型、有 turn
+   * 回流，source 过滤天然排除（`/skill:` 前缀显式短路只为免无谓 RPC）。
+   *
+   * best-effort 单次查询：RPC 失败按「否」处理（prompt 将进模型、turn 回流自愈收口语义），
+   * 不重试不拒发——手敲链语义是「发消息」，查询只为 occupancy 收口服务。
+   */
+  private async willExecuteAsExtensionCommand(client: IPiEngine, text: string): Promise<boolean> {
+    if (!text.startsWith('/') || text.startsWith('/skill:')) return false
+    const commandName = text.slice(1).split(' ', 1)[0] ?? ''
+    if (!commandName) return false
+    try {
+      const commands = await client.getCommands()
+      return commands.some((c) => c.name === commandName && c.source === 'extension')
+    } catch (e) {
+      console.warn(
+        '[message-dispatcher] extension-command probe failed (occupancy close skipped):',
+        toErrorMessage(e),
+      )
+      return false
+    }
   }
 
   /**
@@ -344,7 +488,7 @@ export class MessageDispatcher {
     activeSession: IManagedSessionView | undefined,
     clientUuid: string | undefined,
     e: unknown,
-  ): { blocked: true; rejected?: boolean } {
+  ): { blocked: true; rejected?: boolean; reason?: SendPromptReason } {
     const errMsg = toErrorMessage(e)
     console.error(`[message-dispatcher] prompt failed: sessionId=${sessionId}`, errMsg)
     // [occupancy D2 拒绝转译] pi busy 类确定性拒绝分型：决定下方复位语义，并广播
@@ -380,13 +524,16 @@ export class MessageDispatcher {
     }
     if (rejectionReason) {
       this.publishSendRejected(sessionId, rejectionReason, clientUuid)
-      return { blocked: true, rejected: true }
+      // [D6/u5a] 回执分类：'compacting' 透传；'processing'（pi 有不知情 turn 在跑）在插件
+      // 面词表里归 busy（同一「会话忙」语义，词表无 processing 成员）。
+      return { blocked: true, rejected: true, reason: rejectionReason === 'compacting' ? 'compacting' : 'busy' }
     }
     const errMsgMsg = { type: 'message.error' as const, payload: { sessionId, message: errMsg } }
     this.messageBus?.publish(sessionId, errMsgMsg)
     // 与 hook 拦截同等对待：已广播 message.error 气泡，返回 blocked 让 handler 走 error envelope（sendError），
     // renderer pending.reject 触发 Composer 恢复草稿。否则 handler reply success → pending.resolve 误判发送成功。
-    return { blocked: true }
+    // [D6/u5a] 回执分类：非 busy 真失败 → 'error'。
+    return { blocked: true, reason: 'error' }
   }
 
   /**

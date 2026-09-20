@@ -77,6 +77,18 @@ export interface BrokerServices {
   appInfo: { appVersion: string; piVersion: string }
 }
 
+/**
+ * 全局广播通道的 sessionId 豁免清单（AP-2 裁定）：帧 payload 必带 sessionId，但
+ * sessionId 仅作 payload 归属信息（renderer 按会话过滤渲染），路由键 = 全局广播
+ * （所有连接都要收到——modal/headerAction 状态不是 per-connection 订阅态），且为
+ * transient 状态帧（不经 message-bus publish，结构性不入 ring）。清单外新增的带
+ * sessionId 全局广播帧仍触发下方哨兵告警。
+ */
+const GLOBAL_BROADCAST_SESSION_ID_EXEMPT = new Set<ServerMessageType>([
+  'plugin:modalState',
+  'plugin:headerActionUpdate',
+])
+
 export class ServerMessageBroker implements IMessageBroker {
   private pushId = 0
 
@@ -101,8 +113,10 @@ export class ServerMessageBroker implements IMessageBroker {
     // 误用告警（不 throw，不阻断发送）：新增消息类型接错通道时日志立即可见，
     // 是 V1「只推给订阅该 sid 的连接」不变量的运行时哨兵。合法的全局消息 payload 均无
     // sessionId 字段（见 02 文档 D5-1 排除清单）；uiRequest 无 sid 兜底时值为 undefined 不触发。
+    // 豁免清单（GLOBAL_BROADCAST_SESSION_ID_EXEMPT，AP-2）：两帧必带 sessionId 但语义上
+    // 就是全局广播（归属信息 + transient 不入 ring），不告警。
     const sid = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
-    if (sid !== undefined) {
+    if (sid !== undefined && !GLOBAL_BROADCAST_SESSION_ID_EXEMPT.has(msg.type)) {
       console.warn(`[broadcast] session-scoped message "${msg.type}" went through global broadcast — use IMessageBus.publish instead (02 §3.3 D1-2)`)
     }
     // L6（perf-quick-batch）：循环外序列化一次。

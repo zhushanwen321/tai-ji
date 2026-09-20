@@ -29,7 +29,7 @@
  * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -51,6 +51,7 @@ import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
+import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
 // respawn（经 registerSession 汇聚）/ detach / reclaim 四类生命周期事件处增量维护。
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
@@ -214,6 +215,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 列表语义允许多方注册，既有注入方（PluginService）行为不变，逐个隔离异常。
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活回调列表（relay ②）。触发点 =
+   * transport 层 session.switch 成功分支（含自动 restore）经 notifySessionActivated。
+   * 追加式列表（D6a 同款）：显式禁单槽——setOnSessionCreated 单槽是反面教材（其注释已写
+   * 「二次调用会覆盖」），PluginService 的 didActivate 投递与未来其他消费方互不挤占。
+   */
+  private readonly onSessionActivatedHandlers: Array<(summary: SessionSummary) => void> = []
   /**
    * MessageBus 引用（组合根注入，wave:runtime-wiring）。
    *
@@ -579,6 +587,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         sessionId,
         exitCode: code,
         detailDigest: buildCrashDetailDigest(code, stderr),
+        // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+        // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
+        // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+        // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
+        machinePiDigest: captureMachinePiDigest(),
       })
       session.adapter.detach()
 
@@ -678,6 +691,30 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   setOnSessionDestroyed(handler: (summary: SessionSummary) => void): void {
     this.onSessionDestroyedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注入 session 激活回调（relay ③ 注册侧）。
+   * 追加式注册（D6a 同款，非覆盖）——禁改写为 setOnSessionCreated 式单槽。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void {
+    this.onSessionActivatedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 session.switch 成功分支，含自动 restore）。回调逐个隔离
+   * 异常（notifySessionCreated 同款 best-effort 降级），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void {
+    for (const handler of this.onSessionActivatedHandlers) {
+      try {
+        handler(summary)
+      } catch (e: unknown) {
+        // 降级策略（best-effort）：激活投递异常不阻断 switch 主流程，仅落日志供排查。
+        console.error(`[session-service] onSessionActivated listener error (sessionId=${summary.id}):`, e)
+      }
+    }
   }
 
   /**
@@ -792,7 +829,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.lifecycle.forkSession(srcSessionId, fromPiEntryId, includeFrom, label, opts)
   }
 
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid) }
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
   // [HISTORICAL] sendSubagentMessage（marker 半成品通道）已删除（composer 四符号设计 D2）：
   // base64 隐藏注释前缀在 extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标——定向消息改走 subagentAction(message/start)。
@@ -1065,6 +1112,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
   async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> { return this.records.getWorkflows(sessionId) }
+
+  /**
+   * plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，u1-rpc 补接线）：对称 getSubagents
+   * 转发形态，实现迁 session-records.ts（磁盘 JSONL → scanPlanStateEntries 派生，
+   * 与 live 投影同一份派生代码）。
+   */
+  async getPlanState(sessionId: string): Promise<PlanStateView> { return this.records.getPlanState(sessionId) }
 
   /**
    * session-trace 台账全量拉取（RPC 混合路由 → 文件降级 → empty 空态）。

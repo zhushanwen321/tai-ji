@@ -125,6 +125,9 @@ vi.mock('../../logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
   // u5b D6-④：rpc-client 新增 import 的内存快照采集（mock 面随源码 import 面同步）
   captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
+  // D10：crash-correlation 采样门——本套件 sink 恒关（crash-correlation 真模块加载但
+  // 结构性惰性，无 ps/log show 副作用）；接线验证在 rpc-client-crash-correlation.test.ts
+  isPiCrashLogEnabled: () => false,
   writePiCrashLog: (sessionId: string | undefined, content: string) => {
     crashLogCalls.push({ sessionId, content })
   },

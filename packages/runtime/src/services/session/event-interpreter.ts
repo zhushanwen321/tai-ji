@@ -508,6 +508,13 @@ export interface EventInterpreterOptions {
    */
   onTraceSync?: (sessionId: string, trigger: string) => void
   /**
+   * 成功 compaction 后触发（归因降噪 2026-09-19；组合根注入 GenStatsService.markContextRewritten）。
+   *
+   * 语义：上下文被重写过（前缀整体变化）——命中率归因链路首个 0% 样本归为 context-rewrite。
+   * 只在 compaction-end 且 `result` 真值（成功）时调用；failed / aborted 不调（上下文未变）。
+   */
+  onCompactionContextRewritten?: (sessionId: string) => void
+  /**
    * [ADR-0047] ping get_state 进程健康探测回调（组合根注入）。
    *
    * 延迟解析 client：interpreter 在 session 创建时构造，那时 client 可能尚未 spawn。
@@ -525,19 +532,23 @@ export interface EventInterpreterOptions {
    */
   pingPi?: () => Promise<Record<string, unknown> | undefined> | undefined
   /**
-   * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow
+   * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow/plan
    * 派生缓存失效。组合根注入 sessionService.invalidateRecordEntries——markDirty + 防抖
-   * get_entries(since) 增量重拉，entry 扫描（scanSubagentEntries / scanWorkflowEntries）
-   * 是派生缓存唯一数据写路径，事件 payload 永不直写缓存（ReplicatedState「事件只做
-   * 失效」不变量；W12-W18 过渡态例外至此撤销）。
+   * get_entries(since) 增量重拉，entry 扫描（scanSubagentEntries / scanWorkflowEntries /
+   * scanPlanStateEntries）是派生缓存唯一数据写路径，事件 payload 永不直写缓存
+   * （ReplicatedState「事件只做失效」不变量；W12-W18 过渡态例外至此撤销）。
+   *
+   * customType 历史上是三字面量 union，已放宽为 string（D5「失效转发的三段链路」③）：
+   * 任何 custom entry 均产出失效信号，「避免无关 entry 触发拉取」由派发层订阅者存在性
+   * 守住；record 三族消费方 invalidateRecordEntries 内部早退门保留、行为不变。
    *
    * 触发源（全部降级为失效信号，W18 起事件直写退役）：
-   * - entry_appended{customType: subagent-record | workflow-record}（主信号，adapter 过滤）
+   * - entry_appended{customType: string}（主信号，adapter 对任意 custom entry 产出）
    * - subagent-bg-notify / subagent tool-call-end / workflow-result / workflow tool-call-end
    *   （兜底信号：extension 在同一状态迁移点既 append 自描述 entry 又发上述事件——主信号
    *   丢失（W22 混沌）时兜底触发重拉收敛）
    */
-  onRecordEntriesInvalidated?: (sessionId: string, customType: 'subagent-record' | 'workflow-record') => void
+  onRecordEntriesInvalidated?: (sessionId: string, customType: string) => void
   /**
    * W1（fix-chat-flow-order 探针 ②）：pi agent_settled（run 级联结束）到达时触发。
    * 组合根注入 sessionService.flushPendingBashResults——dispatcher 把 streaming 期间
@@ -620,6 +631,7 @@ export class EventInterpreter {
       onOccupancyTransition: opts.onOccupancyTransition,
       onContextUpdate: opts.onContextUpdate,
       onTraceSync: opts.onTraceSync,
+      onContextRewritten: () => opts.onCompactionContextRewritten?.(sessionId),
     })
   }
 

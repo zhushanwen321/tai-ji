@@ -379,6 +379,149 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
   })
 })
 
+// ── 缓存命中率归因降噪（2026-09-19 D-A）────────────────────────────────────────────────
+// 展示 0% 的样本在已知成因下附 currentMiss，UI 不再渲染裸 0%（shared GenStatsCacheMiss）。
+// 时间控制用 Date.now spy（不用 fake timers：localDayKey 走 new Date()，日键保持真实值）；
+// 测试状态文件级隔离，afterEach 统一 restoreAllMocks。
+
+/** 展示 0%（read=0，promptTotal=1000） */
+const ZERO_SAMPLE = { ...NORMAL_SAMPLE, input: 1000, cacheRead: 0, cacheWrite: 0 }
+/** 展示 90%（read=900，promptTotal=1000） */
+const HIT_SAMPLE_90 = { ...NORMAL_SAMPLE, input: 100, cacheRead: 900, cacheWrite: 0 }
+
+describe('GenStatsService 归因降噪（cacheRatio.currentMiss）', () => {
+  it('cold-start：本会话首条样本展示 0% → 归因（帧内下发，广播帧同源出口同带）', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBe(0)
+    expect(frame.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+    const broadcast = published.at(-1)!.msg.payload as GenStatsFrame
+    expect(broadcast.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('命中样本不带归因；随后的新 0% 样本会整槽替换旧注解', () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE) // 首条 0% → cold-start
+    service.recordSample('s1', HIT_SAMPLE_90)
+    // 命中样本：无归因（currentMiss 与「刺眼的 0」严格同域）
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+
+    // 非空闲、无 compaction 的 0%：未知成因 → 保留裸 0%（不降噪，清掉旧 cold-start 注解）
+    service.recordSample('s1', ZERO_SAMPLE)
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBe(0)
+    expect(frame.cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('idle-expiry：距上一次请求空闲 > 5min 的首个 0% → 归因 + 实际 idleMs', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 6 * 60_000) // 6 分钟
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 6 * 60_000,
+    })
+  })
+
+  it('idle 边界：空闲恰好 5min → 不归因；超 TTL 1ms → 归因（严格大于，基准 = 上一次请求）', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 5 * 60_000) // 恰好 TTL：不归因（严格大于）
+    service.recordSample('s1', ZERO_SAMPLE)
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+
+    now.mockReturnValue(1_000_000 + 2 * 5 * 60_000 + 1) // 距上一次请求 TTL+1ms → 归因
+    service.recordSample('s1', ZERO_SAMPLE)
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 5 * 60_000 + 1,
+    })
+  })
+
+  it('context-rewrite：markContextRewritten 后首个 0% → 归因；优先级高于空闲超时', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+    service.markContextRewritten('s1')
+
+    now.mockReturnValue(2_600_000) // 同时空闲超 TTL（1h）——前缀重写是结构性成因，优先
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({ reason: 'context-rewrite' })
+  })
+
+  it('context-rewrite 一次性：标记被紧随其后的样本消费（命中即消费），下一条 0% 不再归因', () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+    service.markContextRewritten('s1')
+    service.recordSample('s1', HIT_SAMPLE_90) // 标记被本条消费（非 0%，无注解可附）
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('provider 未上报 cache 字段（两字段全缺省）→ 不落盘不变槽（显示保留上一条，非 0%）', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90) // 首条：速度 + 命中率双落盘 + 广播
+    service.recordSample('s1', { ...HIT_SAMPLE_90, input: 5000, cacheRead: null, cacheWrite: null })
+
+    // 命中率文件不再写（无计量 ≠ 0% miss）；本条仍有合法速度样本 → 速度落盘 + 广播一帧
+    expect(readJson(cacheRatioFilePath('prov', 'mdl'))).toEqual({ [localDayKey()]: [[900, 1000]] })
+    const broadcast = published.at(-1)!.msg.payload as GenStatsFrame
+    expect(broadcast.cacheRatio.current).toBe(90) // 槽未被 null-null 样本改写
+    expect(broadcast.cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('会话隔离：sA 的 idle 归因不污染 sB（sB 首条仍为 cold-start，idle 基准各自独立）', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('sA', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 10 * 60_000) // 10 分钟后：sA 的 miss 返归因，sB 首条回 cold-start
+    service.recordSample('sA', ZERO_SAMPLE)
+    service.recordSample('sB', ZERO_SAMPLE)
+
+    expect(service.frameFor('sA', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 10 * 60_000,
+    })
+    expect(service.frameFor('sB', 'prov/mdl').cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('恢复腿保留归因：getSnapshotForSession（RPC 帧）与 live 帧同带 currentMiss', async () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    const frame = await service.getSnapshotForSession('s1')
+    expect(frame.model).toBe('prov/mdl')
+    expect(frame.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('销毁清理：session 销毁后归因状态同清（frameFor 全空，无残留注解）', () => {
+    const { service, setOnSessionDestroyed } = makeOfflineService()
+    service.registerSessionCleanup()
+    const handler = setOnSessionDestroyed.mock.calls[0]![0] as (s: { id: string }) => void
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    handler({ id: 's1' })
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBeNull()
+    expect(frame.cacheRatio.currentMiss).toBeUndefined()
+  })
+})
+
 describe('GenStatsService.getSnapshotForSession（恢复腿降级链，D4）', () => {
   it('① get_state 成功：解析 provider/id 复合 key + 写 3 回填 + 帧 current=本会话样本', async () => {
     const { service, getClient } = makeService(async () => ({ model: { id: 'mdl', provider: 'prov' } }))
@@ -518,6 +661,26 @@ describe('EventInterpreter gen-stats 接线（D1/D2）', () => {
     })
     interp.interpret([TURN_USAGE_EVENT])
     expect(onContextUpdate).toHaveBeenCalledWith('s1', { inputTokens: 30, totalTokens: 30 })
+  })
+
+  it('compaction 成功 → onCompactionContextRewritten（归因降噪接线：上下文重写标记）', () => {
+    const onCompactionContextRewritten = vi.fn()
+    const interp = new EventInterpreter('s1', { send: () => {}, onCompactionContextRewritten })
+    interp.interpret([{ kind: 'compaction-end', reason: 'manual', aborted: false, result: { summary: 'S' } }])
+
+    expect(onCompactionContextRewritten).toHaveBeenCalledTimes(1)
+    expect(onCompactionContextRewritten).toHaveBeenCalledWith('s1')
+  })
+
+  it('compaction aborted（无 result）/ failed（errorMessage 真值）→ 不标记（上下文未变，不得误标）', () => {
+    const onCompactionContextRewritten = vi.fn()
+    const interp = new EventInterpreter('s1', { send: () => {}, onCompactionContextRewritten })
+    interp.interpret([
+      { kind: 'compaction-end', reason: 'threshold', aborted: true },
+      { kind: 'compaction-end', reason: 'manual', aborted: false, errorMessage: 'summarize failed' },
+    ])
+
+    expect(onCompactionContextRewritten).not.toHaveBeenCalled()
   })
 })
 

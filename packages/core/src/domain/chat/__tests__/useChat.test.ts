@@ -1411,3 +1411,44 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
     f.dispose()
   })
 })
+
+// ── [u5a 收口扩展 / #12 对称腿] 扩展命令手敲链 pendingSend 复位 ──
+// pi 扩展命令（手敲 /schedule … 等）同步执行、无 message_start/agent_start 回流 →
+// pendingSend（send 前乐观置位、正常由 message_start 清）永久在挂 → isActive 并集判定
+// 恒 true（steer placeholder + abort 按钮卡死）。修复：handleSessionOccupancy 收到三维
+// 全 idle 权威帧时清 pendingSend（权威帧兜底乐观态；与 defer flush 判据同形）。
+
+describe('扩展命令手敲链 pendingSend 复位（#12 对称腿）', () => {
+  beforeEach(() => {
+    resetChatModuleStateForTest()
+  })
+
+  it('全 idle 权威帧到达清 pendingSend（无 turn 回流通路的乐观态复位 → isActive 复位）', async () => {
+    const f = makeFixture()
+    const p = f.useChat.send('ec1', textToSegments('/schedule list'))
+    // runtime 收口帧（message-dispatcher willExecuteAsExtensionCommand 命中后广播）：
+    // 扩展命令无 message_start，唯一复位信号就是这条全 idle 帧本身
+    f.emit('ec1', msg('ec1', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+    await p
+    expect(f.chatStore.isActive('ec1')).toBe(false)
+    f.dispose()
+  })
+
+  it('dispatching 帧不清 pendingSend（正常 turn 路径仍等 message_start）', async () => {
+    const f = makeFixture()
+    const p = f.useChat.send('ec2', textToSegments('普通消息'))
+    f.emit('ec2', msg('ec2', 'session.occupancy', { turn: 'dispatching', compacting: false, bash: false }))
+    await p
+    expect(f.chatStore.isActive('ec2')).toBe(true)
+    f.dispose()
+  })
+
+  it('turn=idle 但 bash 忙：不清（三维判据同 flush，防误清占用窗口）', async () => {
+    const f = makeFixture()
+    const p = f.useChat.send('ec3', textToSegments('/schedule list'))
+    f.emit('ec3', msg('ec3', 'session.occupancy', { turn: 'idle', compacting: false, bash: true }))
+    await p
+    expect(f.chatStore.isActive('ec3')).toBe(true)
+    f.dispose()
+  })
+})

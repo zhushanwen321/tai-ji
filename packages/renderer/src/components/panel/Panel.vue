@@ -18,7 +18,7 @@
     class="relative flex min-w-0 h-full flex-col overflow-hidden"
     :style="panelStyle"
   >
-    <!-- dead session 占位：进程已退出，不渲染对话流/composer，提供重开入口（W6：dead 优先级吞掉 ask-user） -->
+    <!-- dead session 占位：进程已退出，不渲染对话流/composer，提供重开入口（W6：dead 优先级吞掉 form overlay） -->
     <div
       v-if="panelView.kind === 'dead'"
       class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center"
@@ -77,8 +77,8 @@
 
     <!-- ④ composer companion zone（③ progress-zone 已删——真实任务态未接入，state 恒 null
          自隐藏死代码）。git 状态已移入 SideDrawer git tab（原 zone ⑤ 摘牌），此带仅 composer。
-         ask-user 富交互（W2）：请求到达时 AskUserOverlay 覆盖 composer 位置（互斥），
-         对话历史全程可见，composer 消失输入禁止（不再走全屏 modal）。
+         统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
+         composer 位置（互斥），对话历史全程可见，composer 消失输入禁止。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
     <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-5 pb-3.5">
       <!-- [T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
@@ -101,16 +101,24 @@
            （App 装配层 installInboundFrameGuard 已安装）；组件内部按 sessionId 自判 tripped，
            非本 session 不渲染（不连坐）。恢复动作 = 用户切走再切回本会话。 -->
       <InboundFrameDroppedNotice v-if="sessionId" :session-id="sessionId" />
-      <!-- ask-user 渲染 ⟺ (conversation || trace) && input==='ask-user'（D5）：dead 态被
-           派生优先级吞掉（kind==='dead'），保留 W6「dead 不渲染 ask-user」语义；trace 同样
-           承接 ask-user（session-trace 契约「不打断对话能力」，V4）；landing/empty 无 session，
-           ask-user 依附具体会话，天然不可达。 -->
-      <AskUserOverlay
-        v-if="(panelView.kind === 'conversation' || panelView.kind === 'trace') && panelView.input === 'ask-user'"
-        :questions="askUserQuestions"
-        :allow-cancel="currentAskUserRequest?.allowCancel"
-        @submit="onAskUserSubmit"
-        @cancel="onAskUserCancel"
+      <!-- 统一表单 overlay 渲染 ⟺ (conversation || trace) && input==='form'（D5 单渲染器）：
+           dead 态被派生优先级吞掉（kind==='dead'），保留 W6「dead 不应答」语义；trace 同样
+           承接（session-trace 契约「不打断对话能力」，V4）；landing/empty 无 session，
+           overlay 依附具体会话，天然不可达。挂载源分流在 script 单点（overlaySource）：
+           questions 源（新 form 帧 / legacy askUser 帧归一后）/ draft 源（legacy scheduler 帧
+           直挂）——应答形状分流在 FormOverlay 内按键判定（envelope / 扁平 FormResult）。 -->
+      <FormOverlay
+        v-if="overlayBandActive && overlaySource === 'questions'"
+        :questions="formQuestions"
+        :allow-cancel="currentOverlayRequest?.allowCancel"
+        @submit="onFormSubmit"
+        @cancel="onFormCancel"
+      />
+      <FormOverlay
+        v-else-if="overlayBandActive && overlaySource === 'draft'"
+        :draft="scheduleDraft!"
+        @submit="onFormSubmit"
+        @cancel="onFormCancel"
       />
       <!-- Composer 渲染 ⟺ conversation || trace || (empty && sessionId!==null)（D5）：
            会话中恒常驻（G1），trace 态 composer 保留（session-trace 契约「composer 保留在
@@ -126,13 +134,13 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
-import { isAskUserQuestion, type AskUserQuestion } from '@zhushanwen/extension-protocol'
+import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft } from '@zhushanwen/extension-protocol'
 import MessageStream from './MessageStream.vue'
 import Composer from './Composer.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'
 import Landing from '@/components/new-task/Landing.vue'
-import AskUserOverlay from '@/components/extension/ask-user/AskUserOverlay.vue'
+import FormOverlay from '@/components/extension/form/FormOverlay.vue'
 import InboundFrameDroppedNotice from '@/components/ui/InboundFrameDroppedNotice.vue'
 import DiagnosticsExportAction from './DiagnosticsExportAction.vue'
 import { usePanelView } from '@/composables/features/panel/usePanelView'
@@ -164,8 +172,10 @@ const restoreErrorCode = ref<string | null>(null)
  * 渲染视图单源（usePanelView：事实收集 + derivePanelView 单点派生）。
  * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入面存在性；
  * 「landing 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
+ * currentOverlayRequest 本地别名：currentFormRequest = 队列第一个统一表单 overlay 请求
+ * （form 键——新 form 帧与 legacy askUser / scheduleCreate 帧归一后统一命中）。
  */
-const { panelView, hasMessages, currentAskUserRequest, respond, cancel } = usePanelView(
+const { panelView, hasMessages, currentFormRequest: currentOverlayRequest, respond, cancel } = usePanelView(
   computed(() => props.sessionId),
 )
 
@@ -187,23 +197,75 @@ const showPanelComposer = computed(() => {
   )
 })
 
-/** ask-user questions（类型守卫收窄 unknown[] → AskUserQuestion[]）。
- *  askUserQuestions 字段由 runtime event-adapter 从 select 通道透传，
- *  用 isAskUserQuestion 守卫过滤掉结构异常的元素，避免渲染 undefined。 */
-const askUserQuestions = computed<AskUserQuestion[]>(() => {
-  const req = currentAskUserRequest.value
-  if (!req?.askUser || !req.askUserQuestions) return []
-  return req.askUserQuestions.filter(isAskUserQuestion)
+/** form 问题集（类型守卫收窄 unknown[] → FormQuestion[]，复核守卫——非法项跳过 + warn 留痕）。
+ *  formQuestions 来源双路：新 form 帧（runtime event-adapter UI_FORM_MARKER 分支透传）/
+ *  legacy askUser 帧经 useExtensionUI 归一层 type 推断映射。全不合法 → 空表单
+ *  （仅取消可点语义由 FormOverlay 承接，不静默丢帧不挂死）。 */
+const formQuestions = computed<FormQuestion[]>(() => {
+  const req = currentOverlayRequest.value
+  if (!req?.form) return []
+  const raw = req.formQuestions ?? []
+  const valid = raw.filter(isFormQuestion)
+  // 跳过必须留痕（设计 D2）：「表单少渲染一题」排查靠此区分「上游没发」vs「renderer 滤除」
+  const dropped = raw.length - valid.length
+  if (dropped > 0) {
+    console.warn(
+      `[Panel] formQuestions 复核守卫滤除非法项（requestId=${req.requestId}）: dropped=${dropped}/${raw.length}`,
+    )
+  }
+  return valid
 })
-/** ask-user Submit：answers JSON string 回传给 pi（select method）。 */
-function onAskUserSubmit(answers: string): void {
-  const req = currentAskUserRequest.value
+
+/** legacy scheduleCreate draft（isScheduleDraft 守卫收窄 unknown → ScheduleDraft；非法/无标记 → null）。
+ *  守卫失败不挂载（正常路径不可达，runtime event-adapter 同守卫预检后非法降级普通 select），
+ *  失败时 warn 留痕（设计 D2）——overlaySource 回落 null 挂 composer 的原因可追。 */
+const scheduleDraft = computed<ScheduleDraft | null>(() => {
+  const req = currentOverlayRequest.value
+  if (!req?.scheduleCreate) return null
+  if (isScheduleDraft(req.scheduleDraft)) return req.scheduleDraft
+  console.warn(
+    `[Panel] scheduleCreate 帧的 scheduleDraft 守卫失败，draft 源不挂载（requestId=${req.requestId}）:`,
+    req.scheduleDraft === undefined ? 'scheduleDraft 缺失' : 'isScheduleDraft 形状校验不通过',
+  )
+  return null
+})
+
+/**
+ * overlay 输入面带有效性（conversation/trace 且派生为 overlay 替换 composer）。
+ * 抽出公共判据供 overlay / Composer 分支复用（v-if/v-else-if 互斥对的第一段）。
+ */
+const overlayBandActive = computed(() =>
+  (panelView.value.kind === 'conversation' || panelView.value.kind === 'trace')
+  && panelView.value.input === 'form',
+)
+
+/**
+ * 当前 overlay 请求挂载源分型（互斥三值，分流判据单点）：
+ * - 'questions'：新 form 帧 / legacy askUser 帧归一后（formQuestions 渲染，应答 envelope）；
+ * - 'draft'：legacy scheduleCreate 帧直挂（draft 守卫通过才算可挂载，应答扁平 FormResult）；
+ * - null：draft 守卫失败等不可挂载形态（回落 composer）。
+ * 判据收敛在 script（手动 .value 读取）而非模板表达式——模板直接解引用请求对象
+ * 会在「{ value } 形态的测试替身」下失真（unwrap 语义只对真 ref 生效）。
+ */
+const overlaySource = computed<'questions' | 'draft' | null>(() => {
+  const req = currentOverlayRequest.value
+  if (!req?.form) return null
+  if (req.scheduleCreate === true) {
+    return scheduleDraft.value !== null ? 'draft' : null
+  }
+  return 'questions'
+})
+
+/** 统一表单 Submit：payload 形状由 FormOverlay 按挂载源分流（envelope / 扁平 FormResult
+ *  JSON string），Panel 只按 requestId 回传 pi（select method）。 */
+function onFormSubmit(payload: string): void {
+  const req = currentOverlayRequest.value
   if (!req) return
-  respond(req.requestId, answers)
+  respond(req.requestId, payload)
 }
-/** ask-user Cancel：等价 respond(requestId, null)。 */
-function onAskUserCancel(): void {
-  const req = currentAskUserRequest.value
+/** 统一表单 Cancel：等价 respond(requestId, null)（select resolve undefined → cancelled 语义）。 */
+function onFormCancel(): void {
+  const req = currentOverlayRequest.value
   if (!req) return
   cancel(req.requestId)
 }

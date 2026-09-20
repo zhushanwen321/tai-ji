@@ -119,11 +119,28 @@ describe("handlePlanComplete", () => {
     it("non-goal mode: onComplete sends mode steer without calling goalInit", () => {
       const goalInit = attachGoalInit(() => true);
 
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "subagent");
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "develop");
       ctx._onCompleteFns[0]();
 
       expect(goalInit).not.toHaveBeenCalled();
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("subagent-driven"), { deliverAs: "steer" });
+      // D10 develop 文案：复杂度自判（subagent 委派 + 当前会话逐步执行收口一句）
+      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Develop (auto-parallel)"), { deliverAs: "steer" });
+      expect(lastSteer(pi)).toContain("subagents");
+      expect(lastSteer(pi)).toContain("current session");
+    });
+
+    it("skill mode (compact): onComplete steer carries the skill entry path (D10 skillDir 通路)", () => {
+      const goalInit = attachGoalInit(() => true);
+      const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
+
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "skill:dev-flow", skillEntryPath);
+      ctx._onCompleteFns[0]();
+
+      expect(goalInit).not.toHaveBeenCalled();
+      const steer = lastSteer(pi);
+      expect(steer).toContain("skill:dev-flow"); // Execution mode 行透传 execMode
+      expect(steer).toContain("dev-flow"); // 指引按名加载
+      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md"); // 路径读取指引（skillDir = 入口文件路径，直接透传）
     });
 
     it("onError (goal mode, init-refused): compact-failure notify + degraded steer + warning notify, no /goal promise", () => {
@@ -158,12 +175,47 @@ describe("handlePlanComplete", () => {
     it("non-goal mode: returns undefined, mode steer, no goalInit call", () => {
       const goalInit = attachGoalInit(() => true);
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "single-agent");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "develop");
 
       expect(outcome).toBeUndefined();
       expect(goalInit).not.toHaveBeenCalled();
       expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("step by step"), { deliverAs: "steer" });
       expect(ctx.compact).not.toHaveBeenCalled();
+    });
+
+    it("skill mode (direct): returns undefined, steer with skill entry path (steer 文案含 skillDir，D10)", () => {
+      attachGoalInit(() => true);
+      const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
+
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow", skillEntryPath);
+
+      expect(outcome).toBeUndefined();
+      const steer = lastSteer(pi);
+      expect(steer).toContain("Execution mode: skill:dev-flow");
+      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md");
+      expect(steer).toContain("follow its workflow");
+    });
+
+    it("skill mode (散 .md 形态): steer carries the file path itself, not a dangling joined SKILL.md", () => {
+      attachGoalInit(() => true);
+      const looseEntryPath = "/tmp/fixtures/skills/loose-tool.md";
+
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:loose-tool", looseEntryPath);
+
+      const steer = lastSteer(pi);
+      expect(steer).toContain("/tmp/fixtures/skills/loose-tool.md"); // 文件路径本身
+      expect(steer).not.toContain("loose-tool.md/SKILL.md"); // 不再拼接 SKILL.md（悬空指引根修）
+      expect(steer).not.toContain("/tmp/fixtures/skills/SKILL.md"); // 旧缺陷形态：散 .md 的 dirname + SKILL.md
+    });
+
+    it("skill mode without skillDir falls back to name-only guidance (防御形态)", () => {
+      attachGoalInit(() => true);
+
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow");
+
+      const steer = lastSteer(pi);
+      expect(steer).toContain("load the dev-flow skill");
+      expect(steer).not.toContain("SKILL.md");
     });
 
     it("unknown isolation value falls through to direct delivery instead of silently dropping the choice (D1 防御形态)", () => {

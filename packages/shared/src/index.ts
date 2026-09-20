@@ -13,11 +13,15 @@ export type {
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
+  // plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）
+  PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
   RollingRestartStatusPayload,
   ReattachDeferReason, ReattachDeferredPayload,
+  // plan 模式投影域（plan-state entry 派生视图 + 产物元数据，形状与 extension-protocol 同形）
+  PlanDocMeta, PlanStateView,
   ConnectionTestResultRow,
 } from './protocol'
 export type {
@@ -218,7 +222,7 @@ export { LAUNCH_RESULT_STATUSES, UPDATE_STALE_RELEASE } from './update'
 export type { UsageMetrics, UsageRow, UsageStatsResult } from './usage-stats'
 // Composer 生成指标类型 SSOT（帧 session.stats_update /
 // RPC session.getGenStats 的 type→payload 登记在 protocol.ts，形状经 GenStatsFrame 引用防漂移）
-export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsFrame } from './gen-stats'
+export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsFrame } from './gen-stats'
 // 迁移功能（从其他 agent 迁移配置）类型
 export type {
   ProviderSource,

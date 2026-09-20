@@ -143,9 +143,8 @@ interface SlashCandidateInput {
   kind: string
   icon?: string
   description?: string
-  /** skill 项：SKILL.md 绝对路径（location = SkillInfo.sourcePath，经 landing slash 链回填，
-   *  可得时带上；panel slash 段已过滤 skill 项无 location 消费；onCmdSelect 按 isSkill 分流
-   *  后透传 insertSkillChip 落 chip dataset——设计 D3） */
+  /** skill 项：SKILL.md 绝对路径（location = SkillInfo.sourcePath，registry 源 skill 项自带，
+ *  可得时带上；onCmdSelect 按 isSkill 分流后透传 insertSkillChip 落 chip dataset——设计 D3） */
   location?: string
 }
 
@@ -153,8 +152,9 @@ interface SlashCandidateInput {
  * slash 项是否 skill 形态（单点判据）：kind === 'skill'（SessionCommand.kind = pi source，
  * pi 真源 skill 命令的 source 恒 'skill'）或归一化名带 /skill: 前缀（pi 的 skill 命令名是
  * 裸 `skill:<name>`，归一化补 / 后命中）。同时驱动：buildSlashCandidates 的 selected 比对/
- * onSelect 分流/displayName 剥前缀（isSkill 局部量）与 buildPanelSlashCandidates 的 panel
- * slash 段 skill 项过滤（ADR-0050 修订双入口消除）。
+ * onSelect 分流/displayName 剥前缀（isSkill 局部量）与 buildPanelSlashCandidates 的 pi 真源
+ * skill 项剔除（ADR-0050 二次修订换源保留——pi 真源 skill 命令是 reload 才刷新的滞后快照，
+ * 剔除后由 registry 源 skill 项补入）。
  */
 function isSkillSlashItem(name: string, kind?: string): boolean {
   return kind === 'skill' || normalizedSlashName(name).startsWith('/skill:')
@@ -217,40 +217,17 @@ export function buildSlashCandidates(
 }
 
 /**
- * panel 态 slash 候选组装（自 CommandPopover.vue 拆出，≤300 行规范）：
- * compact 固定头部 + merged 过滤内部命令 + skill 项过滤。skill 项过滤（ADR-0050 修订，
- * skill-reload-nondestructive D6 双入口消除）：pi 真源 skill 命令不再进 panel 的 slash 段
- * ——panel 的 skill 段是唯一 skill 入口，skill 候选/location 一律走 taiji 源
- * buildSkillCandidates（location 取 SkillInfo.sourcePath）；landing 态单列形态不适用本过滤
- * （过滤会把 skill 整体移出浮层 = 回归）。slash 命令族 compact + merged 语义不变——
- * skill 过滤只是展示段裁剪，不影响合并规则。
+ * registry 源 SkillInfo[] → slash 项（/skill:<name> 归一化）追加（两态共用追加函数）：
+ * 跳过 base 已有同名（seen 集合）与 `__` 内部 skill，global 优先、project 补独有。
+ * D3：location 取 SkillInfo.sourcePath（权威扫描产出，可得时带上）。
  */
-export function buildPanelSlashCandidates(
-  merged: ReadonlyArray<SlashCandidateInput>,
-  compactCmd: SlashCandidateInput,
-): Array<SlashCandidateInput> {
-  return [
-    compactCmd,
-    ...merged
-      .filter((c) => !isInternalSlashName(c.name))
-      .filter((c) => !isSkillSlashItem(c.name, c.kind)),
-  ]
-}
-
-/**
- * landing 态 slash 候选组装（自 CommandPopover.vue 拆出，≤300 行规范）：
- * merged 声明源 + SkillInfo[] → slash 项（/skill:<name> 归一化），跳过 merged 已有同名
- * 与 __ 内部 skill。优先级：merged 源已在 seen，全局次之（globalSkills），项目最后
- * （projectSkills 补独有项）。D3：location 取 SkillInfo.sourcePath（可得时带上）。
- */
-export function buildLandingSlashCandidates(
-  merged: ReadonlyArray<SlashCandidateInput>,
+function appendRegistrySkillItems(
+  base: ReadonlyArray<SlashCandidateInput>,
   globalSkills: SkillInfo[],
   projectSkills: SkillInfo[],
-): Array<SlashCandidateInput> {
+): SlashCandidateInput[] {
   const seen = new Set<string>()
-  merged.forEach((c) => seen.add(normalizedSlashName(c.name)))
-  // SkillInfo[] → slash 项（/skill:<name> 归一化），跳过 seen 同名 + __ 前缀
+  base.forEach((c) => seen.add(normalizedSlashName(c.name)))
   const mapSkillInfo = (skills: SkillInfo[]) =>
     skills
       .filter((s) => !isInternalSkillName(s.name))
@@ -266,5 +243,45 @@ export function buildLandingSlashCandidates(
           location: s.sourcePath,
         }
       })
-  return [...merged, ...mapSkillInfo(globalSkills), ...mapSkillInfo(projectSkills)]
+  return [...mapSkillInfo(globalSkills), ...mapSkillInfo(projectSkills)]
+}
+
+/**
+ * panel 态 slash 候选组装（自 CommandPopover.vue 拆出，≤300 行规范）：
+ * compact 固定头部 + merged 过滤内部命令与 pi 真源 skill 项 + registry 源 skill 项追加。
+ *
+ * skill 项换源保留（ADR-0050 二次修订，推翻 0.10.1 首版的「过滤 skill 项」）：pi 真源的
+ * `skill:xxx` 命令是 reload 才刷新的滞后快照（skill-reload D7 否决形态），仍剔除；skill
+ * 候选一律换 taiji registry 源补入（appendRegistrySkillItems，与 landing 单列形态同构）。
+ * 行首 `/` 与行中 `/` skill 段双入口共存——跨入口防双插由 selectedSkillNames 已选标记
+ * （S-2，buildSlashCandidates 对 slash 路 skill 项同样生效）承担，不依赖入口裁剪。
+ * slash 命令族 compact + merged 语义不变。
+ */
+export function buildPanelSlashCandidates(
+  merged: ReadonlyArray<SlashCandidateInput>,
+  compactCmd: SlashCandidateInput,
+  globalSkills: SkillInfo[],
+  projectSkills: SkillInfo[],
+): Array<SlashCandidateInput> {
+  const commands = merged
+    .filter((c) => !isInternalSlashName(c.name))
+    .filter((c) => !isSkillSlashItem(c.name, c.kind))
+  return [
+    compactCmd,
+    ...commands,
+    ...appendRegistrySkillItems(commands, globalSkills, projectSkills),
+  ]
+}
+
+/**
+ * landing 态 slash 候选组装（自 CommandPopover.vue 拆出，≤300 行规范）：
+ * merged 声明源 + registry 源 skill 项追加（appendRegistrySkillItems 两态共用）。
+ * 优先级：merged 源已在 seen，全局次之（globalSkills），项目最后（projectSkills 补独有项）。
+ */
+export function buildLandingSlashCandidates(
+  merged: ReadonlyArray<SlashCandidateInput>,
+  globalSkills: SkillInfo[],
+  projectSkills: SkillInfo[],
+): Array<SlashCandidateInput> {
+  return [...merged, ...appendRegistrySkillItems(merged, globalSkills, projectSkills)]
 }

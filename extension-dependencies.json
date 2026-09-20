@@ -92,12 +92,17 @@
         {
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
-          "reason": "代码层静态 import firstContentText（src/tool.ts top-level import，ext-simplify-17 D9 收敛），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import firstContentText/uiFormInteract/PLAN_REVIEW_MARKER 及 PlanDocMeta/PlanReviewRequest/PlanReviewResponse/ChoiceQuestion 类型（src/tool.ts top-level import，ext-simplify-17 D9 收敛 + 执行方式选择走统一表单协议 ui-form），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/tool.ts、src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -108,7 +113,7 @@
         {
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
-          "reason": "代码层静态 import askUserInteract/getAskUserAnswer/getAskUserComment/AskUserQuestion 等交互 API（src/index.ts、channel-handler.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import uiFormInteract/isFormQuestion/getAskUserAnswer/getAskUserOther/AskUserQuestion/FormQuestion 等（src/index.ts、channel-handler.ts、form-adapter.ts top-level import，提问交互走统一表单协议 ui-form），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-subagent-workflow",
@@ -157,6 +162,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/isEnoentError/toErrorMessage（src/runtime.ts、replay.ts、service.ts、importer.ts、index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import uiFormInteract/isScheduleFormResult/ScheduleDraft/ScheduleFormResult（src/tool.ts，创建确认走统一表单协议 ui-form）与 dateToOnceCron/onceCronToDate/ScheduleDraft/ScheduleFormResult（src/create-form-component.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

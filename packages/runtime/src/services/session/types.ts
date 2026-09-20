@@ -407,12 +407,16 @@ export type PiTranslatedEvent =
   | { kind: 'subagent-stream'; sessionId: string; recordId: string; lines: string[] | undefined }
   /**
    * 自描述 record entry 到达的失效信号（W18，D4）——pi entry_appended（extension appendEntry
-   * 路径，message entry 不发射）经 adapter customType 过滤后仅对 subagent-record / workflow-record
-   * 产出。interpreter 据此触发 onRecordEntriesInvalidated（组合根注入 sessionService
+   * 路径，message entry 不发射）。customType 历史上是三字面量 union（subagent-record /
+   * workflow-record / plan-state，第三员为 plan 模式重设计 D1② 扩容）；已放宽为 string
+   * （D5「失效转发的三段链路」②）：任何 custom entry 均产出失效信号，「避免无关 entry
+   * 触发拉取」由派发层订阅者存在性守住，record 三族消费方 invalidateRecordEntries
+   * 内部早退门保留、行为不变。interpreter 据此触发
+   * onRecordEntriesInvalidated（组合根注入 sessionService
    * .invalidateRecordEntries：markDirty → 防抖 get_entries(since) 增量重拉 → entry 扫描写入
    * 派生缓存）。事件 payload 不进任何数据缓存（ReplicatedState「事件只做失效」不变量）。
    */
-  | { kind: 'record-entry-appended'; customType: 'subagent-record' | 'workflow-record' }
+  | { kind: 'record-entry-appended'; customType: string }
   /**
    * compaction 生命周期开始（pi compaction_start{reason}）—— interpreter 编排：
    * 广播 session.compacting{reason} + isCompacting 置位经 occupancy 转移原语

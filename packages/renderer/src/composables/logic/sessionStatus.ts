@@ -16,7 +16,7 @@ export type { DerivedStatus }
 /**
  * deriveStatus 纯函数（re-export 自 core，M3 搬迁）。
  * 签名与迁移前一致：
- * (sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasAskUserPending=false)
+ * (sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasFormOverlayPending=false)
  */
 export { deriveStatus } from '@taiji/core'
 

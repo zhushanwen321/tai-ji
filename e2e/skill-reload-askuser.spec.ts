@@ -13,7 +13,7 @@
  * - 两 session 的 run 都存活（各自 preserved 归因行 records=1 + 双 done 广播 + 无
  *   `connection lost`/`code=143`）；
  * - D8-a dir=global 归因行 affectedSessions 同时列出两个 sid；D8-b 双 decision 行；
- * - reload 完成后触发的 ask_user 反向请求正常送达 UI 且可应答（ask-user-overlay 渲染 →
+ * - reload 完成后触发的 ask_user 反向请求正常送达 UI 且可应答（form-overlay 渲染 →
  *   选项 → submit → overlay 关闭；pi 恢复 turn 由 run 后续 faux 步骤继续消费证明）——
  *   无静默取消（静默取消 = {cancelled:true}，overlay 根本不渲染，本断言直接击穿）。
  *
@@ -117,13 +117,13 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
 }
 
-/** 应答当前 panel 上的 ask-user overlay（选第一项 → submit → overlay 关闭） */
+/** 应答当前 panel 上的提问表单 overlay（选第一项 → submit → overlay 关闭） */
 async function answerOverlay(page: Page): Promise<void> {
-  const overlay = page.getByTestId('ask-user-overlay')
+  const overlay = page.getByTestId('form-overlay')
   await expect(overlay, 'ask_user 反向请求应送达 UI（overlay 渲染，无静默取消）').toBeVisible({ timeout: 60_000 })
-  const option = page.locator('[data-testid^="ask-user-option-"]').first()
+  const option = page.locator('[data-testid^="form-option-"]').first()
   await option.click()
-  await page.getByTestId('ask-user-submit').click()
+  await page.getByTestId('form-submit').click()
   await expect(overlay, '应答后 overlay 应关闭').toBeHidden({ timeout: 15_000 })
 }
 

@@ -20,6 +20,10 @@ import {
   aggregateSpeed,
   aggregateCacheRatio,
   isBogusSpeedSample,
+  isDisplayedZeroCacheRatio,
+  hasReportedCacheFields,
+  classifyCacheMiss,
+  CACHE_TTL_MS,
   BOGUS_OUTPUT_THRESHOLD,
   BOGUS_DURATION_THRESHOLD_MS,
   SPEED_RETENTION_DAYS,
@@ -157,6 +161,56 @@ describe('isBogusSpeedSample（D7 bogus guard，阈值照抄蓝本 50/100）', (
   it('小样本短耗时合法（真实快速响应），大样本长耗时合法', () => {
     expect(isBogusSpeedSample(30, 50)).toBe(false)
     expect(isBogusSpeedSample(200, 1000)).toBe(false)
+  })
+})
+
+describe('归因降噪纯函数（2026-09-19 D-A，缓存命中率归因分类 SSOT）', () => {
+  it('isDisplayedZeroCacheRatio：与 UI 显示口径同源（四舍五入后为 0 才算「展示 0%」）', () => {
+    expect(isDisplayedZeroCacheRatio(0, 1000)).toBe(true)
+    expect(isDisplayedZeroCacheRatio(4, 1000)).toBe(true) // 0.4% → round 0（极小命中同样刺眼，一并归因）
+    expect(isDisplayedZeroCacheRatio(5, 1000)).toBe(false) // 0.5% → round 1（UI 显示 1%）
+    expect(isDisplayedZeroCacheRatio(999, 1000)).toBe(false)
+  })
+
+  it('isDisplayedZeroCacheRatio：promptTotal ≤ 0 → false（不是测量值，无归因对象）', () => {
+    expect(isDisplayedZeroCacheRatio(0, 0)).toBe(false)
+    expect(isDisplayedZeroCacheRatio(0, -5)).toBe(false)
+  })
+
+  it('hasReportedCacheFields：两字段全缺省 → 无计量；任一有值（含显式 0）→ 有计量', () => {
+    expect(hasReportedCacheFields(null, null)).toBe(false)
+    expect(hasReportedCacheFields(0, null)).toBe(true)
+    expect(hasReportedCacheFields(null, 0)).toBe(true)
+    expect(hasReportedCacheFields(120, 0)).toBe(true)
+  })
+
+  it('classifyCacheMiss：无前序请求 → cold-start（新会话首条，无 idleMs）', () => {
+    expect(classifyCacheMiss({ hasPreviousRequest: false, idleMs: null, contextRewritten: true })).toEqual({
+      reason: 'cold-start',
+    })
+  })
+
+  it('classifyCacheMiss：compaction 标记优先于空闲超时（前缀重写是结构性成因）', () => {
+    expect(
+      classifyCacheMiss({ hasPreviousRequest: true, idleMs: CACHE_TTL_MS * 10, contextRewritten: true }),
+    ).toEqual({ reason: 'context-rewrite' })
+  })
+
+  it('classifyCacheMiss：空闲严格大于 TTL → idle-expiry（携带实际空闲；恰好 TTL 不归因）', () => {
+    expect(classifyCacheMiss({ hasPreviousRequest: true, idleMs: CACHE_TTL_MS + 1, contextRewritten: false })).toEqual(
+      { reason: 'idle-expiry', idleMs: CACHE_TTL_MS + 1 },
+    )
+    expect(classifyCacheMiss({ hasPreviousRequest: true, idleMs: CACHE_TTL_MS, contextRewritten: false })).toBeUndefined()
+    expect(classifyCacheMiss({ hasPreviousRequest: true, idleMs: CACHE_TTL_MS - 1, contextRewritten: false })).toBeUndefined()
+  })
+
+  it('classifyCacheMiss：无标记不超 TTL → undefined（未知成因的真实 miss 保留裸 0%，不降噪）', () => {
+    expect(classifyCacheMiss({ hasPreviousRequest: true, idleMs: 7_000, contextRewritten: false })).toBeUndefined()
+    expect(classifyCacheMiss({ hasPreviousRequest: true, idleMs: null, contextRewritten: false })).toBeUndefined()
+  })
+
+  it('CACHE_TTL_MS 锁值：5 分钟（对齐 pi cache-stats 参考值）', () => {
+    expect(CACHE_TTL_MS).toBe(5 * 60 * 1000)
   })
 })
 
