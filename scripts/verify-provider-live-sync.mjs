@@ -43,8 +43,7 @@ const CUSTOM_MODEL = 'lt-1'
  * 需要一个已落盘的会话文件才能被观察到。全程无外网。
  */
 const mockServer = createServer((req, res) => {
-  let body = ''
-  req.on('data', (c) => { body += String(c) })
+  req.on('data', () => {})
   req.on('end', () => {
     if (!req.url?.includes('/chat/completions')) { res.writeHead(404).end('{}'); return }
     res.writeHead(200, { 'content-type': 'text/event-stream' })
