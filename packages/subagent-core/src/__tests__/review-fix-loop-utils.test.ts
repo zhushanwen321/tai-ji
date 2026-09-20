@@ -2506,4 +2506,15 @@ describe("buildAggregatorPrompt findings/groups（分组并行链路 prompt 段�
     const p = buildAggregatorPrompt(args);
     expect(p).toContain("also merge their guidance into the single most concrete direction");
   });
+  it("显式 id 延续：延续复用台账 id + 新条目 MF-<round>-<seq> 带轮号格式（L1 命中率优化）", () => {
+    const p = buildAggregatorPrompt(args);
+    expect(p).toContain("MUST reuse the tracked id verbatim");
+    expect(p).toContain("MF-1-<seq>");
+    // R2+：prevTitles 段升级为 id 复用源，新条目格式跟随轮号
+    const p2 = buildAggregatorPrompt({ ...args, round: 2, prevTitles: ["MF-1-1: stale title"] });
+    expect(p2).toContain("id column is the REUSE source");
+    expect(p2).toContain("reuse its id verbatim");
+    expect(p2).toContain("MF-2-<seq>");
+    expect(p2).toContain('<untrusted source="prev_titles">');
+  });
 });
