@@ -346,11 +346,14 @@ function onRetry(): void {
   font-size: 0.9em;
 }
 /* th/td 拆两条与 MarkdownRenderer 同理（对齐转写配套：带 align 的单元格靠呈现属性生效，
-   无 align 兜底 left；border/padding 无条件防视觉破损） */
+   无 align 兜底 left；border/padding 无条件防视觉破损）。min-width 列宽地板同在无条件侧——
+   与 MarkdownRenderer 同源同步（理由全文见该处注释）：CJK 列 min-content = 1 汉字，
+   auto table layout 夹紧下短中文列会被压成 1 字宽竖排；抬地板到 4em 兜底。 */
 .release-notes-markdown :deep(th),
 .release-notes-markdown :deep(td) {
   border: 1px solid var(--border);
   padding: 0.3em 0.5em;
+  min-width: 4em;
 }
 .release-notes-markdown :deep(th:not([align])),
 .release-notes-markdown :deep(td:not([align])) {

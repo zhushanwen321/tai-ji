@@ -480,12 +480,29 @@ function onClick(e: MouseEvent): void {
    ——整条加守卫会让带 align 的单元格连边框内边距一起丢；仅 text-align 移入 :not([align])
    守卫——无 align 属性兜底 left（维持现状视觉基线），有 align 属性（markdown-it 的
    style 经 markdown.ts 转写而来）时守卫不命中、HTML 呈现属性生效（align 优先级低于
-   任何作者规则，转写不同批改宿主 CSS 则列对齐回归依旧）。 */
+   任何作者规则，转写不同批改宿主 CSS 则列对齐回归依旧）。
+   min-width 列宽地板同样留无条件侧：地板与列对齐无关，进守卫会让带 align 的列丢地板。 */
 .md-render :deep(th),
 .md-render :deep(td) {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 0.35em 0.6em;
+  /* 列宽地板（CJK min-content 修正，2026-09-18）：table 的 width:max-content +
+     max-width:100% 夹紧后，auto table layout 把所有列压向各自 min-content。拉丁文
+     min-content = 最长单词（合理地板），CJK = 任意两个汉字间都是合法断行点 → 1 个
+     汉字（病态地板）：短中文标签列（「维度」「报告目录」）会被合法压成 1 字宽竖排，
+     而含长 inline code token 的列 min-content 大、占住大部分宽度。抬地板到 4em 后
+     表头不再竖排（border-box 含 1.2em padding ≈ 2.8 字空间；4 字标签仍可折 2 行——
+     地板语义是兜底非撑满，列有余量时照常伸长）。
+     已披露代价：① 窄表轻微变蓬（1 格内容的 2 列表 ~50px → ~105px）；② 多列表在
+     split mode 窄面板下从「挤扁」变「横向滚动」——挤扁不可读，滚动是上方
+     overflow-x:auto 设计好的逃生口，方向上更优。
+     否决备案：word-break:keep-all（让 CJK min-content = 整段）在窄容器下会把无标点
+     长中文变成不可断 → 表格被迫横滚，比现状更糟；table-layout:fixed + colgroup 百分比
+     需 renderer 侧改造且 fixed 下不可断 code token 会溢出单元格，留作后续升级。
+     布局回归守卫（jsdom 无 layout 引擎，单测不可行）：e2e/markdown-table-layout.spec.ts
+     @p0-smoke（L1 行为轨）。 */
+  min-width: 4em;
 }
 .md-render :deep(th:not([align])),
 .md-render :deep(td:not([align])) {
