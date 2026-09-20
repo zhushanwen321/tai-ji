@@ -8,8 +8,8 @@
  * 迁移裁决（设计 D5 壳层）：
  * - 组件级标题行退役（表头由壳的 form header 承担）；根容器 border/shadow 浮起样式随
  *   统一有意退役（无边框一体化，G3 scheduler 形态变更的一部分）
- * - Esc 取消保留为渲染器级键位（ask-user 不加 Esc 保零变化）
- * - foot 的取消/提交按钮退役由壳承担；foot 摘要行保留为表单体尾行
+ * - Esc 取消改为 document 级 capture 监听（焦点在 body 也能取消；ask-user 不加 Esc 保零变化）
+ * - foot 的取消/提交按钮退役由壳承担；foot 摘要行删除（与预览重复，D5）
  * - cron 预览引擎抽出 cron-preview.ts（script 行数上限；无状态纯函数零耦合）
  *
  * 时间折叠单点（D2）：once 模式提交前经 dateToOnceCron 折叠为一次性 cron，初值由
@@ -18,9 +18,10 @@
  * 不禁止提交（表达式由创建端 parseSchedule/croner 验证）。
  * 文案全走 i18n（extensionUI.scheduleCreate* 段）；星期名按当前 locale 经 Intl 输出。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Clock, Cpu, PencilLine } from '@lucide/vue'
+import { ChevronDown, ChevronRight, Clock, Cpu, PencilLine } from '@lucide/vue'
+import ModelPickerPanel, { type ModelPickerGroup } from '@/components/panel/ModelPickerPanel.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -147,6 +148,22 @@ function switchKind(next: ScheduleKind): void {
 const models = computed(() => props.question.initial?.models ?? [])
 const currentModel = computed(() => props.question.initial?.currentModel)
 
+/** 单行选框展开态（D4：模型墙 → 单行选框 + 可搜索/provider 分组列表） */
+const modelPickerOpen = ref(false)
+
+/** 候选 → ModelPickerPanel 分组：`provider/model` 前缀分组，无前缀归无标题组。
+ *  字符串 id → 展示名映射责任在表单侧（设计 §6.4）——候选即原文 id，无独立显示名 */
+const modelGroups = computed<ModelPickerGroup[]>(() => {
+  const map = new Map<string, ModelPickerGroup>()
+  for (const id of models.value) {
+    const provider = id.includes('/') ? id.slice(0, id.indexOf('/')) : ''
+    const group = map.get(provider) ?? { provider, models: [] }
+    group.models.push({ id })
+    map.set(provider, group)
+  }
+  return [...map.values()]
+})
+
 // ── draft → 表单初值（预填，用户可改；isScheduleDraft 守卫已在挂载侧收窄）──
 /** prompt/name 文本与 recurring 过期档的标量初值（draft 缺省回落空串/7d） */
 function initPromptNameAndExpires(d: ScheduleQuestion['initial']): void {
@@ -228,17 +245,6 @@ function formatRel(d: Date): string {
   return t('extensionUI.scheduleCreateRelDays', { n: Math.round(ms / MS_PER_DAY) })
 }
 
-/** 预览摘要（foot note 用）：cron 命中预设 chip 显本地化标签，否则原样表达式 */
-const scheduleSummary = computed<string>(() => {
-  if (kind.value === 'once') {
-    return onceDate.value
-      ? t('extensionUI.scheduleCreateSummaryOnce', { detail: formatAbs(onceDate.value) })
-      : t('extensionUI.scheduleCreateSummaryOnceNoTime')
-  }
-  const expr = cronText.value.trim()
-  return t('extensionUI.scheduleCreateSummaryRecurring', { detail: activeCronChip.value ? t(activeCronChip.value.labelKey) : expr })
-})
-
 // canSubmit 与预览解耦：预览是前端轻量解析子集（后端权威 = 创建端 parseSchedule/croner），
 // 预览失败不禁止提交——表达式由创建端验证（非法时后端拒，预填草稿可直接确认）。
 // once 未选时刻 / 已过时刻除外：提交体需要有效未来时间值，属「未补全」而非「预览失败」。
@@ -256,11 +262,15 @@ const previewUnavailableHint = computed(() => {
     : t('extensionUI.scheduleCreatePreviewTimePast')
 })
 
-const footNote = computed(() =>
-  canSubmit.value
-    ? `${scheduleSummary.value}${selectedModel.value ? ` · ${selectedModel.value.split('/').pop() ?? ''}` : ''}`
-    : t('extensionUI.scheduleCreateFootIncomplete'),
-)
+// ── Esc 取消：document 级 capture（根 div 不可聚焦，焦点在 body 时根上的 keydown 收不到），
+// 卸载清理；capture 阶段保证子输入框未 stopPropagation 时也能收口。
+function onDocumentKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  emit('cancel')
+}
+onMounted(() => document.addEventListener('keydown', onDocumentKeydown, true))
+onUnmounted(() => document.removeEventListener('keydown', onDocumentKeydown, true))
 
 // ── 确认：构造 FormResult（once 折叠为一次性 cron，D2）→ JSON 回传 ──
 // 壳 Submit 门委托 canSubmit；提交按钮在壳（本组件不再自带按钮）。submit() 是唯一
@@ -291,9 +301,9 @@ defineExpose({ canSubmit, submit })
 </script>
 
 <template>
-  <!-- Esc 关闭 = 取消（D5：select resolve undefined → cancelled，非错误）。
+  <!-- Esc 关闭 = 取消（D5：select resolve undefined → cancelled，非错误；document 级 capture 监听）。
        border/shadow 浮起样式随壳统一有意退役（无边框一体化）；按钮由壳承担。 -->
-  <div class="flex flex-col" @keydown.esc="emit('cancel')">
+  <div class="flex flex-col">
     <div class="flex max-h-[400px] flex-col gap-3 overflow-y-auto px-3.5 pb-1 pt-2">
       <!-- ① 执行模式 + 执行时间（含下次运行预览） -->
       <div class="flex flex-col gap-1.5">
@@ -395,36 +405,34 @@ defineExpose({ canSubmit, submit })
         </div>
       </div>
 
-      <!-- ② 执行模型（单选；空列表 = 跟随会话当前模型） -->
+      <!-- ② 执行模型（单行选框；空列表 = 跟随会话当前模型） -->
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center gap-1.5">
           <Cpu class="size-3 shrink-0 text-neutral-ico" aria-hidden="true" />
           <span class="text-[length:var(--text-2xs)] font-semibold tracking-[0.04em] text-neutral-dim">{{ t('extensionUI.scheduleCreateModelLabel') }}</span>
         </div>
         <div v-if="models.length > 0" class="flex flex-col gap-1">
-          <div
-            v-for="m in models"
-            :key="m"
-            role="radio"
-            :tabindex="0"
-            :aria-checked="selectedModel === m"
-            :data-testid="`schedule-create-model-${m}`"
-            :class="[
-              'flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              selectedModel === m ? 'bg-accent-soft' : 'hover:bg-surface-hover',
-            ]"
-            @click="selectedModel = m"
-            @keydown.enter="selectedModel = m"
-            @keydown.space.prevent="selectedModel = m"
+          <!-- D4 单行选框：默认选中会话当前模型；展开 = 可搜索 + provider 分组列表。
+               内联展开（非 portal）避免浮层被 FormOverlay overflow-hidden 裁切；列表体常挂 v-show。 -->
+          <Button
+            variant="ghost"
+            data-testid="schedule-create-model-trigger"
+            :aria-expanded="modelPickerOpen"
+            class="flex w-full items-center gap-2 rounded-sm border border-border-strong px-2.5 py-1.5 text-left transition-colors hover:bg-surface-hover"
+            @click="modelPickerOpen = !modelPickerOpen"
           >
-            <span
-              :class="[
-                'size-3.5 shrink-0 rounded-full border-2 transition-colors',
-                selectedModel === m ? 'border-accent bg-accent shadow-[inset_0_0_0_2px_var(--bg-input)]' : 'border-border-strong',
-              ]"
+            <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-xs)] text-neutral-fg">{{ selectedModel ?? '—' }}</span>
+            <span v-if="selectedModel === currentModel" class="shrink-0 rounded-sm border border-border-strong px-1 text-[length:var(--text-2xs)] text-neutral-dim">{{ t('extensionUI.scheduleCreateCurrentTag') }}</span>
+            <ChevronDown :class="['size-3 shrink-0 text-neutral-ico transition-transform', modelPickerOpen && 'rotate-180']" aria-hidden="true" />
+          </Button>
+          <div v-show="modelPickerOpen" data-testid="schedule-create-model-list" class="overflow-hidden rounded-sm border border-border-strong">
+            <ModelPickerPanel
+              :groups="modelGroups"
+              :model-value="selectedModel ?? ''"
+              :has-candidates="models.length > 0"
+              item-test-id-prefix="schedule-create-model"
+              @update:model-value="selectedModel = $event; modelPickerOpen = false"
             />
-            <span class="truncate font-mono text-[length:var(--text-xs)] text-neutral-fg">{{ m }}</span>
-            <span v-if="m === currentModel" class="shrink-0 rounded-sm border border-border-strong px-1 text-[length:var(--text-2xs)] text-neutral-dim">{{ t('extensionUI.scheduleCreateCurrentTag') }}</span>
           </div>
         </div>
         <p v-else class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('extensionUI.scheduleCreateNoModelsHint') }}</p>
@@ -485,9 +493,9 @@ defineExpose({ canSubmit, submit })
       </div>
     </div>
 
-    <!-- foot 摘要行（取消/提交按钮已退役由壳承担，摘要保留） -->
-    <div class="px-3.5 pb-1 pt-0.5">
-      <span data-testid="schedule-create-foot-note" class="block truncate text-[length:var(--text-2xs)] text-neutral-dim">{{ footNote }}</span>
+    <!-- Esc 取消提示（foot 摘要行已退役：与下次运行预览重复，D5） -->
+    <div class="flex items-center justify-end px-3.5 pb-1 pt-0.5">
+      <span data-testid="schedule-create-esc-hint" class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('extensionUI.scheduleCreateEscHint') }}</span>
     </div>
   </div>
 </template>

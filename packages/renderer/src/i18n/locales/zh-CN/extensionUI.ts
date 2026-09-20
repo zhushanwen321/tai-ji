@@ -9,7 +9,11 @@ export default {
   commentPlaceholder: '选填，补充说明…',
   // M1 环 3：断连期应答未送达（send 返 false），请求保留待连接恢复后重发
   responseNotDelivered: '回复未送达，连接恢复后可重新提交',
-  // ── schedule 创建确认表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
+  // ── schedule 创建表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
+  scheduleCreateFormTitle: '新建定时任务',
+  scheduleCreateSubtitle: '任务只在当前会话打开时触发。',
+  scheduleCreateSubmit: '创建任务',
+  scheduleCreateEscHint: 'Esc 取消',
   scheduleCreateTimeLabel: '执行时间',
   scheduleCreateModeLabel: '执行模式',
   scheduleCreateKindOnce: '一次性',
@@ -33,7 +37,7 @@ export default {
   scheduleCreateNoModelsHint: '跟随会话当前模型（无候选模型列表）',
   scheduleCreateModelHint: '任务触发时切换到该模型执行，完成后恢复会话原模型',
   scheduleCreatePromptLabel: '提示词',
-  scheduleCreatePromptHint: 'agent 起草 · {count} 字',
+  scheduleCreatePromptHint: '将作为消息注入 · {count} 字',
   scheduleCreateAdvancedToggle: '高级选项（任务名 / 过期策略）',
   scheduleCreateNameLabel: '任务名',
   scheduleCreateNamePlaceholder: '留空自动生成',
@@ -42,10 +46,6 @@ export default {
   scheduleCreateExpires30d: '30 天后',
   scheduleCreateExpiresNever: '永不过期',
   scheduleCreateExpiresHint: '仅循环任务生效',
-  scheduleCreateFootIncomplete: '请补全时间与提示词',
-  scheduleCreateSummaryOnce: '一次性 · {detail}',
-  scheduleCreateSummaryOnceNoTime: '一次性 · 未设置时间',
-  scheduleCreateSummaryRecurring: '循环 · {detail}',
   scheduleCreateRelUnderMin: '不到 1 分钟后',
   scheduleCreateRelMinutes: '{n} 分钟后',
   scheduleCreateRelHours: '{h} 小时后',

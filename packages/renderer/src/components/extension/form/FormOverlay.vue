@@ -123,6 +123,20 @@ const allAnswered = computed(() => questionsList.value.every(isQuestionAnswered)
 /** 未答题数（disabled tooltip 文案） */
 const unansweredCount = computed(() => questionsList.value.filter((q) => !isQuestionAnswered(q)).length)
 
+/** 表单标题：schedule 题型按本地化「新建定时任务」渲染（不再用 wire 串当标题，D3/D5）；其余题型保持问题文本 */
+const activeTitle = computed(() => {
+  const q = activeQuestion.value
+  if (!q) return ''
+  return q.type === 'schedule' ? t('extensionUI.scheduleCreateFormTitle') : q.question
+})
+
+/** 主按钮文案：含 schedule 题的表单 =「创建任务」（动作动词，D5）；纯 choice/text 保持通用「提交」 */
+const submitLabel = computed(() =>
+  questionsList.value.some((q) => q.type === 'schedule')
+    ? t('extensionUI.scheduleCreateSubmit')
+    : t('common.submit'),
+)
+
 /** 单选选中后自动前进到下一题；已是最后一题则停（末题显示 Submit，非末题显示下一题——见 isLastQuestion 与 action bar 互斥分支） */
 function advanceToNext(): void {
   if (activeIdx.value < questionsList.value.length - 1) {
@@ -214,7 +228,7 @@ function onSubmit(): void {
         class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium text-neutral-fg"
         data-testid="form-question-text"
       >
-        {{ activeQuestion?.question }}
+        {{ activeTitle }}
       </span>
       <!-- 多问题：tab 整合到 head 行 -->
       <div v-else class="flex items-center gap-0.5">
@@ -282,9 +296,16 @@ function onSubmit(): void {
     <template v-for="(q, i) in questionsList" :key="qKey(q)">
       <template v-if="q.type === 'schedule'">
         <p
-          v-if="q.context && i === activeIdx"
+          v-if="i === activeIdx"
           data-testid="form-context"
           class="px-3.5 pt-2.5 text-[12px] leading-1.5 text-neutral-mid"
+        >
+          {{ t('extensionUI.scheduleCreateSubtitle') }}
+        </p>
+        <p
+          v-if="q.context && i === activeIdx"
+          data-testid="form-context-note"
+          class="px-3.5 pt-1 text-[12px] leading-1.5 text-neutral-mid"
         >
           {{ q.context }}
         </p>
@@ -321,10 +342,10 @@ function onSubmit(): void {
         variant="default"
         data-testid="form-submit"
         :disabled="!allAnswered"
-        :title="allAnswered ? t('common.submit') : t('extensionUI.unansweredHint', { count: unansweredCount })"
+        :title="allAnswered ? submitLabel : t('extensionUI.unansweredHint', { count: unansweredCount })"
         @click="onSubmit"
       >
-        {{ t('common.submit') }}
+        {{ submitLabel }}
       </Button>
     </div>
   </div>

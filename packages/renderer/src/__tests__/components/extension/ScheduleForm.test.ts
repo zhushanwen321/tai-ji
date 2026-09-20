@@ -182,29 +182,49 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
   })
 
   it('⑥ 模型三态：draft.model 优先 / 回退 currentModel / 再回退列表首项；空列表 hint + 当前会话标记', () => {
-    // draft.model 优先
+    // 三态经单行选框（D4）呈现：触发器显示选中 id
     const byModel = mountForm({ ...baseDraft, model: 'm-2' })
-    expect(byModel.find('[data-testid="schedule-create-model-m-2"]').attributes('aria-checked')).toBe('true')
+    expect(byModel.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-2')
 
     // 回退 currentModel
     const byCurrent = mountForm({ ...baseDraft, currentModel: 'm-2' })
-    expect(byCurrent.find('[data-testid="schedule-create-model-m-2"]').attributes('aria-checked')).toBe('true')
+    expect(byCurrent.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-2')
 
     // model 不在候选列表 → 回退列表首项
     const fallback = mountForm({ ...baseDraft, model: 'm-x' })
-    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').attributes('aria-checked')).toBe('true')
+    expect(fallback.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-1')
 
-    // 「当前会话」标记跟随 draft.currentModel
-    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').text()).toContain('当前会话')
+    // 「当前会话」标记跟随 draft.currentModel（触发器内）
+    expect(fallback.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('当前会话')
+    // 候选列表常挂（v-show），选中项高亮（ModelPickerPanel 选中态）
+    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').classes().join(' ')).toContain('bg-accent-soft')
 
     // 空候选列表 → hint（跟随会话当前模型），提交不携带 model
     const noModels = mountForm({ ...baseDraft, models: [], currentModel: undefined })
     expect(noModels.find('[data-testid="schedule-create-model-m-1"]').exists()).toBe(false)
+    expect(noModels.find('[data-testid="schedule-create-model-trigger"]').exists()).toBe(false)
     expect(noModels.text()).toContain('跟随会话当前模型')
     expect((noModels.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
     const result = submitAndParse(noModels)
     expect(result).toMatchObject({ kind: 'recurring' })
     expect(result!.model).toBeUndefined()
+  })
+
+  it('⑥-选框展开：点击触发器展开候选列表，点选切换选中并回包（用户可见 DOM）', async () => {
+    const wrapper = mountForm(baseDraft)
+    const trigger = () => wrapper.find('[data-testid="schedule-create-model-trigger"]')
+    expect(trigger().text()).toContain('m-1')
+
+    // 收起时列表常挂（v-show）不可见
+    expect(wrapper.find('[data-testid="schedule-create-model-m-2"]').isVisible()).toBe(false)
+    await trigger().trigger('click')
+    expect(trigger().attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('[data-testid="schedule-create-model-m-2"]').isVisible()).toBe(true)
+
+    // 点选另一模型 → 触发器文案跟随 + 回包携带新模型
+    await wrapper.find('[data-testid="schedule-create-model-m-2"]').trigger('click')
+    expect(trigger().text()).toContain('m-2')
+    expect(submitAndParse(wrapper)).toMatchObject({ model: 'm-2' })
   })
 
   it('⑦ prompt 预填 + name 留空可选：留空回包不含 name，填写则携带', async () => {
@@ -249,7 +269,18 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     expect(wrapper.find('[data-testid="schedule-create-expires-never"]').isVisible()).toBe(true)
   })
 
-  it('⑩ Esc 键 = cancelled（渲染器级键位，emit cancel；按钮取消由壳承担）', async () => {
+  it('⑩ Esc 键 = cancelled（document 级 capture：焦点在 body 也能取消）', async () => {
+    const wrapper = mountForm(baseDraft)
+
+    // 真实焦点路径：打开后不点击任何控件（焦点在 body）直接 Esc
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    expect(document.activeElement).toBe(document.body)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('⑩-补充：焦点在表单内时 Esc 同样取消（document capture 不丢子节点路径）', async () => {
     const wrapper = mountForm(baseDraft)
 
     await wrapper.find('[data-testid="schedule-create-preview"]').trigger('keydown', { key: 'Escape' })
@@ -277,8 +308,15 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     const wrapper = mountForm(baseDraft)
 
     expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
-    // 摘要行给出可确认反馈（用户可见）
-    expect(wrapper.find('[data-testid="schedule-create-foot-note"]').text()).toContain('每天 09:00')
+    // Esc 提示（用户可见；foot 摘要行已退役，D5）
+    expect(wrapper.find('[data-testid="schedule-create-esc-hint"]').text()).toBe('Esc 取消')
+  })
+
+  it('提示词计数：非空时显示「将作为消息注入 · N 字」（D5 新文案）', () => {
+    const wrapper = mountForm(baseDraft)
+
+    expect(wrapper.find('[data-testid="schedule-create-prompt"]').element).toBeInstanceOf(HTMLTextAreaElement)
+    expect(wrapper.text()).toContain('将作为消息注入 · 9 字')
   })
 })
 

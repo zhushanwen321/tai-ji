@@ -393,8 +393,12 @@ describe('FormOverlay · schedule 渲染器与 Submit 门委托', () => {
     expect(wrapper.find('[data-testid="schedule-create-model-m-1"]').exists()).toBe(true)
     // 单问无 tab 条
     expect(wrapper.find('[data-testid="form-tab-0"]').exists()).toBe(false)
+    // D5：标题按题型本地化（非 wire 串）+ 副标题在 context 行（壳承担）
+    expect(wrapper.find('[data-testid="form-question-text"]').text()).toBe('新建定时任务')
+    expect(wrapper.find('[data-testid="form-context"]').text()).toBe('任务只在当前会话打开时触发。')
     // Submit 门 = 渲染器 canSubmit 委托：预填草稿有效 → 立即 enabled（一键确认路径）
     const submit = wrapper.find('[data-testid="form-submit"]')
+    expect(submit.text()).toContain('创建任务')
     expect(submit.attributes('disabled')).toBeUndefined()
 
     await submit.trigger('click')
@@ -419,8 +423,8 @@ describe('FormOverlay · schedule 渲染器与 Submit 门委托', () => {
 
     const submit = wrapper.find('[data-testid="form-submit"]')
     expect(submit.attributes('disabled')).toBeDefined()
-    // 表单体摘要行提示未补全（用户可见反馈）
-    expect(wrapper.find('[data-testid="schedule-create-foot-note"]').text()).toContain('请补全时间与提示词')
+    // 副标题在创建点声明会话存活前提（用户可见，D5；foot 摘要行已退役）
+    expect(wrapper.find('[data-testid="form-context"]').text()).toBe('任务只在当前会话打开时触发。')
 
     await wrapper.find('[data-testid="schedule-create-prompt"]').setValue('手动补全提示词')
     expect(submit.attributes('disabled')).toBeUndefined()
@@ -494,13 +498,15 @@ describe('FormOverlay · schedule 渲染器与 Submit 门委托', () => {
 })
 
 describe('FormOverlay · legacy draft 直挂（D7 上三角窗口挂载源分流）', () => {
-  it('draft 直挂：无 tab 无标题，Submit 立即可点，应答 = 扁平 ScheduleFormResult JSON', async () => {
+  it('draft 直挂：无 tab，标题按题型渲染（D5），Submit 立即可点，应答 = 扁平 ScheduleFormResult JSON', async () => {
     const wrapper = mountOverlay({ draft: scheduleDraft })
     await nextTick()
 
     // 壳根 testid 统一（schedule-create-overlay → form-overlay 正名）
     expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="form-tab-0"]').exists()).toBe(false)
+    // D5：draft 直挂同样按题型渲染本地化标题（不再依赖 wire 串）
+    expect(wrapper.find('[data-testid="form-question-text"]').text()).toBe('新建定时任务')
     // 表单体渲染 + 预填（模型候选来自 draft）
     expect(wrapper.find('[data-testid="schedule-create-model-m-2"]').exists()).toBe(true)
 
@@ -521,7 +527,7 @@ describe('FormOverlay · legacy draft 直挂（D7 上三角窗口挂载源分流
     await wrapper.find('[data-testid="form-cancel"]').trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
 
-    // Esc = 渲染器级键位（D5 壳层裁决保留）：事件冒泡到 ScheduleForm 根
+    // Esc = document 级 capture 监听（D5；焦点在 body 也能取消）——事件冒泡到 document 即取消
     await wrapper.find('[data-testid="schedule-create-preview"]').trigger('keydown', { key: 'Escape' })
     expect(wrapper.emitted('cancel')).toHaveLength(2)
   })
