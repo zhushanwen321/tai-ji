@@ -183,7 +183,7 @@
     },
     {
       "id": "E2E-MOCK-02",
-      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（横幅/审批条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
+      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（状态带/审阅条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
       "scope": [
         "packages/ui/src/features/drawer/**",
         "packages/renderer/src/components/panel/plan/**",
@@ -194,7 +194,7 @@
       "layer": "L1",
       "assets": [
         { "kind": "spec", "ref": "packages/renderer/src/__tests__/stores/plan-store.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts" },
+        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-mode-bar.test.ts" },
         { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts" },
         { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts" },
         { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts" },
@@ -204,7 +204,7 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-banner.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"

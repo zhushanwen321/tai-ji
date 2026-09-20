@@ -1,22 +1,8 @@
 /**
- * plan 模式 i18n（plan 模式重设计 u1-banner：M1 横幅 + 审批条）。
- * 文案基线 = 用户验收 demo 的 M1 横幅 / 底部审批条（验收 demo 不入库）。
+ * plan 模式 i18n：modeBar 状态带 + reviewBar 审阅条 + drawer 计划产物 tab + docs 文档面板
+ * + comment 划选评论。
  */
 export default {
-  banner: {
-    title: '计划模式',
-    // §3.5 文案修正：原「只读取代码……不修改源码」与 bash 在白名单内的实态有落差，
-    // 改准确描述（hint 长句已随 PlanModeBar 合并无渲染挂点，键族留待 u-closeout 清理）
-    hint: '已激活，agent 以只读纪律工作，不主动修改源码',
-    skillsLabel: '技能',
-    skillsUnspecified: '（未指定）',
-    stageExploring: '需求探索',
-    stageWriting: '文档撰写',
-    stageReviewing: '审阅确认',
-    exit: '退出',
-    // E9：错误消息内嵌恢复动作（错误 → 恢复闭环），横幅保持原状
-    exitError: '退出失败：{message}。修复后重试退出，或手动在对话输入 /plan abort',
-  },
   reviewBar: {
     commentsCount: '{count} 条评论',
     requestExplanation: '请求进一步解释',
@@ -34,8 +20,7 @@ export default {
     reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
     viewDrafts: '查看评论草稿',
   },
-  // PlanModeBar 左区（plan-mode-ux-refactor u-plan-bar：状态带收敛后自持键族，与待清理的
-  // banner 键族解耦——u-closeout 删 banner 时本族不受影响）
+  // PlanModeBar 左区（plan-mode-ux-refactor u-plan-bar：状态带收敛后自持键族）
   modeBar: {
     title: '计划模式',
     skillsLabel: '技能',

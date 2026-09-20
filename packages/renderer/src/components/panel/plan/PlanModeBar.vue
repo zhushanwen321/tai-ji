@@ -1,8 +1,8 @@
 <template>
   <!--
     PlanModeBar —— 计划模式状态带（plan-mode-ux-refactor u-plan-bar，设计 §3.3 D1）。
-    挂载位 = Panel 内 composer 正上方一行（.composer-band 之前），替换原顶部横幅
-    （PlanModeBanner 已删）+ 底部审批条（PlanReviewBar 改挂本组件右区）两处挂载。
+    挂载位 = Panel 内 composer 正上方一行（.composer-band 之前）；审阅动作由右区
+    PlanReviewBar 承载（D1 chrome 收敛为单行）。
     组件常驻挂载（Panel 无条件挂载本组件，isActive=false 时 template 根 v-if 不渲染
     DOM）——setup 内 useExtensionUI(planReviewFilter) 订阅与 getPendingRequests 拉取
     不随显隐销毁，isActive=false 期间 planReview 请求恒入 store（挂起审批的唯一兜底
@@ -50,7 +50,7 @@
         </span>
       </template>
     </span>
-    <!-- 退出（自 PlanModeBanner 迁移；D5：确认后 emit session.abortPlan WS 命令，E10：
+    <!-- 退出（D5：确认后 emit session.abortPlan WS 命令，E10：
          挂起 select 期退出联动在 extension 侧）。§3.5 退出确认 Popover：确认前置 + 分情境
          警示（revising = agent 侧修订将中止 / 有评论草稿 = 将丢弃，按序取首个命中）；
          degraded 右区退出按钮经 PlanReviewBar exit 事件复用本 Popover（确认守卫单入口） -->
@@ -141,8 +141,7 @@
  * PlanModeBar —— 计划模式状态带（左区常驻模式态 + 右区情境审批条）。
  *
  * 结构（设计 §3.3）：一行两区。左区 = 模式名 + 三阶段点 + 退出（常驻，isActive 即渲染）；
- * 右区 = PlanReviewBar（四分支情境渲染，机制知识随其文件延续）。原 PlanModeBanner /
- * PanelContainer 底部 PlanReviewBar 两处挂载收敛到本行。
+ * 右区 = PlanReviewBar（四分支情境渲染，机制知识随其文件延续）。
  *
  * 常驻挂载订阅约束（承接清单①，M1）：本组件由 Panel 无条件挂载（禁组件级 v-if），
  * isActive=false 时仅 template 根 v-if 不渲染 DOM——setup 内 useExtensionUI(

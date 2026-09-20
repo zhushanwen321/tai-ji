@@ -1,22 +1,8 @@
 /**
- * plan mode i18n (plan-mode redesign u1-banner: M1 banner + review bar).
- * Copy baseline = user-accepted demo (M1 banner / bottom action bar; the demo itself is not checked in).
+ * Plan mode i18n: modeBar status bar + reviewBar + drawer plan-artifacts tab + docs panel
+ * + selection comments.
  */
 export default {
-  banner: {
-    title: 'Plan Mode',
-    // §3.5 copy fix: "reads code…never modifies source" overpromised vs. bash being whitelisted;
-    // accurate wording (the hint line has no render site since the PlanModeBar merge; keys go with u-closeout)
-    hint: ' active — the agent works under read-only discipline and does not modify source code unprompted',
-    skillsLabel: 'Skills',
-    skillsUnspecified: '(unspecified)',
-    stageExploring: 'Explore',
-    stageWriting: 'Write docs',
-    stageReviewing: 'Review',
-    exit: 'Exit',
-    // E9: error message embeds the recovery action, banner stays as-is
-    exitError: 'Exit failed: {message}. Fix the issue and retry, or type /plan abort in the conversation',
-  },
   reviewBar: {
     commentsCount: '{count} comments',
     requestExplanation: 'Request explanation',
@@ -35,9 +21,7 @@ export default {
     reviseEmptyDisabled: 'Select text in the doc to add comments first, then submit for revision',
     viewDrafts: 'Review comment drafts',
   },
-  // PlanModeBar left zone (plan-mode-ux-refactor u-plan-bar: the merged bar owns its keys,
-  // decoupled from the banner family slated for cleanup — u-closeout can drop banner keys
-  // without touching this group)
+  // PlanModeBar left zone (plan-mode-ux-refactor u-plan-bar: the merged bar owns its keys)
   modeBar: {
     title: 'Plan Mode',
     skillsLabel: 'Skills',

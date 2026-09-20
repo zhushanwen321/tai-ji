@@ -18,7 +18,7 @@
  * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
  *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
  *
- * mock 形态照 plan-mode-banner.test.ts（command spread actual 保真实 events 通道）+
+ * mock 形态照 plan-mode-bar.test.ts（command spread actual 保真实 events 通道）+
  * command-doc-panel.test.ts（file.read mock + MarkdownRenderer 按名 stub + useChatViewDeps
  * 装配器 mock）。状态驱动用 store.applyFrame（真实 WS 帧路径，不绕被测消费链）。
  * i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。

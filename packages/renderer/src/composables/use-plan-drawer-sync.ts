@@ -26,11 +26,12 @@
  * 写入），本 composable 只读不写 store；drawer 控制态经 core 公开 API（openDrawerTab），
  * 与 useSessionTrace 的 drawer 联动同形态。
  *
- * 前置依赖：planStore.focusedSid 的注入方 = 同宿主的 PlanModeBanner / PlanReviewBar
- * （setup 内 usePlanState 的 watch immediate → syncFocus）。本接线自身不注入焦点——
- * 因此必须与横幅/审批条同宿主挂载（PanelContainer），单独挂载时 sid 恒 null、永不触发。
+ * 前置依赖：planStore.focusedSid 的注入方 = PlanModeBar（Panel 宿主内、composer 上方，
+ * setup 内 usePlanState 的 watch immediate → syncFocus）。本接线自身不注入焦点——
+ * 因此注入方必须与本接线的消费宿主（PanelContainer）同处一条单 Panel 宿主链
+ * （PanelContainer 恒单 Panel），注入方脱离该宿主关系单独挂载时 sid 恒 null、永不触发。
  *
- * 必须在组件 setup 同步调用（消费方 = PanelContainer，与横幅/审批条同宿主）。
+ * 必须在组件 setup 同步调用（消费方 = PanelContainer）。
  */
 import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
