@@ -10,8 +10,8 @@
  * TC1/TC2/TC5/TC6（dev/packaged 发会话、permission 解析 bash、source map）是 integration/e2e/manual，留 T7/T8。
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync, mkdtempSync } from "node:fs";
-import { execSync, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync, mkdtempSync, cpSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,9 +23,12 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		const idx = join(STAGED, "pi-ask-user/index.js");
 		expect(existsSync(idx), "staged pi-ask-user/index.js 存在").toBe(true);
 		const src = readFileSync(idx, "utf8");
-		// @zhushanwen/extension-protocol 有 runtime value export（PROTOCOL_VERSION/ASK_USER_MARKER），
+		// @zhushanwen/extension-protocol 有 runtime value export（u5 迁移后 = uiFormInteract /
+		// UI_FORM_MARKER，旧 ASK_USER_MARKER / PROTOCOL_VERSION 已随 a384df59d 换血移除），
 		// esbuild 应将其 inline 进 bundle（非 external）。若 inline 失败，bundle 里不会有这些标识符。
-		expect(src, "protocol runtime value 被 inline").toMatch(/ASK_USER_MARKER|PROTOCOL_VERSION/);
+		// 锚点换血记录（MF-2-1）：u5（a384df59d）ASK_USER_MARKER|PROTOCOL_VERSION →
+		// uiFormInteract|UI_FORM_MARKER——协议面再迁移时须同步更新此锚点，防过时恒红。
+		expect(src, "protocol runtime value 被 inline").toMatch(/uiFormInteract|UI_FORM_MARKER/);
 		// 反证：protocol 不应作为 external import 残留（@taiji 不是 virtualModule）
 		expect(src, "无 @taiji external 残留 import").not.toMatch(/from\s+["']@taiji\//);
 	});
@@ -44,26 +47,66 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		);
 	});
 
-	it("TC7: verify-staged 对残缺产物 fail-fast（pi-permission 缺 wasm → exit 1）", () => {
-		// 构造残缺 staged：复制 permission（index.js + package.json）但故意不拷 2 个 wasm
-		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦）
-		const tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-staged-"));
-		const tmpScoped = join(tmpBase, "@zhushanwen");
-		const tmpPerm = join(tmpScoped, "pi-permission");
-		mkdirSync(tmpPerm, { recursive: true });
-		copyFileSync(join(STAGED, "pi-permission/index.js"), join(tmpPerm, "index.js"));
-		copyFileSync(join(STAGED, "pi-permission/package.json"), join(tmpPerm, "package.json"));
-
-		const verify = join(REPO, "scripts/verify-staged-extensions.mjs");
-		let exitCode = 0;
-		try {
-			execSync(`node "${verify}" --staged-dir "${tmpScoped}"`, { stdio: "pipe", cwd: REPO });
-		} catch (err) {
-			exitCode = err.status ?? 1;
+	/**
+	 * TC7 fixture（mirror 形态，同 MF-1-6 makeMirror）：守卫脚本复制进 <tmp>/scripts/
+	 * （REPO_ROOT 即 <tmp>），SSOT fixture 只含 permission 且 staged 同集——SSOT 集合断言
+	 * 恒过，wasm 缺失成为唯一红灯源。改造前 tmp 单包直接对仓库真实 19 包 SSOT 跑
+	 * verify-staged，必然在 SSOT 分支先行 exit 1，exitCode 断言 trivially pass、wasm
+	 * 分支从未触达（MF-2-3）。withWasm = 正向对照拷入 2 个真实 wasm。
+	 */
+	function makePermissionMirror({ withWasm = false } = {}) {
+		const root = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-staged-"));
+		mkdirSync(join(root, "scripts"), { recursive: true });
+		copyFileSync(join(REPO, "scripts/verify-staged-extensions.mjs"), join(root, "scripts/verify-staged-extensions.mjs"));
+		mkdirSync(join(root, "packages/shared/src"), { recursive: true });
+		writeFileSync(
+			join(root, "packages/shared/src/mandatory-extensions.json"),
+			JSON.stringify([{ name: "@zhushanwen/pi-permission", description: "fixture", tier: "feature" }]),
+			"utf8",
+		);
+		const scoped = join(root, "staged/@zhushanwen");
+		const perm = join(scoped, "pi-permission");
+		mkdirSync(perm, { recursive: true });
+		// 构造残缺 staged：复制 permission（index.js + package.json），wasm 按 withWasm 决定是否拷
+		copyFileSync(join(STAGED, "pi-permission/index.js"), join(perm, "index.js"));
+		copyFileSync(join(STAGED, "pi-permission/package.json"), join(perm, "package.json"));
+		if (withWasm) {
+			for (const w of ["tree-sitter-bash.wasm", "web-tree-sitter.wasm"]) {
+				copyFileSync(join(STAGED, "pi-permission", w), join(perm, w));
+			}
+			// 真实 package.json 声明 pi.skills=["./skills"]，正向对照须一并拷齐才能过 checkManifest
+			cpSync(join(STAGED, "pi-permission/skills"), join(perm, "skills"), { recursive: true });
 		}
-		rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-		// fail-fast：缺 wasm 必须被拦截（exit 非 0），否则残缺产物会到 pi 加载时报错
-		expect(exitCode, "缺 wasm 时 verify-staged exit 非 0").not.toBe(0);
+		const run = () =>
+			spawnSync(process.execPath, [join(root, "scripts/verify-staged-extensions.mjs"), "--staged-dir", scoped], {
+				encoding: "utf8",
+			});
+		return { run, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) };
+	}
+
+	it("TC7: verify-staged 对残缺产物 fail-fast（pi-permission 缺 wasm → exit 1 + stderr 定位 wasm）", () => {
+		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦）
+		const fx = makePermissionMirror();
+		try {
+			const r = fx.run();
+			// fail-fast：缺 wasm 必须被拦截（exit 1），否则残缺产物会到 pi 加载时报错
+			expect(r.status, "缺 wasm 时 verify-staged exit 1").toBe(1);
+			// stderr 定位到 wasm 缺失本身，防 SSOT/manifest 等其它分支先行 exit 1 的假绿
+			expect(r.stderr, "失败原因定位到 wasm").toContain("tree-sitter-bash.wasm");
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("TC7 正向对照: pi-permission wasm 齐备 → exit 0", () => {
+		// 同 fixture 拷入 2 个真实 wasm → 全部校验通过，证明红灯确由 wasm 缺失引起（防 fixture 系统性误红）
+		const fx = makePermissionMirror({ withWasm: true });
+		try {
+			const r = fx.run();
+			expect(r.status, "wasm 齐备应通过").toBe(0);
+		} finally {
+			fx.cleanup();
+		}
 	});
 
 	it("TC8: bundle 拷贝 pi.skills 资源目录（M6a-04，manifest 资源拷贝分支）", () => {
@@ -124,11 +167,15 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
  * TC7 只覆盖 pi-permission 缺 wasm（wasm 校验，非 checkManifest），本组覆盖 checkManifest
  * 的 6 个失败分支——回归时任一分支失效会让残缺 manifest 的产物过 gate 进 pi 加载。
  *
- * 构造模式（同 TC7）：临时 scoped 目录 + 合法 index.js（过文件级检查到达 checkManifest）
- * + 残缺 package.json，断言 verify-staged exit 非 0。
+ * 构造模式（mirror 形态，同 MF-1-6）：守卫脚本复制进 <tmp>/scripts/（REPO_ROOT 即
+ * <tmp>），SSOT fixture 只含 pi-test-pkg 且 staged 同集——SSOT 集合断言恒过，残缺
+ * manifest 成为唯一红灯源；合法 index.js 过文件级检查到达 checkManifest；断言 stderr
+ * 含对应失败文案，防其它分支先行 exit 1 的假绿。改造前 tmp 单包直接对仓库真实 19 包
+ * SSOT 跑 verify-staged，六个用例的 exitCode 断言 trivially pass、checkManifest 分支
+ * 从未触达（MF-2-3）。
  */
 describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
-	const VERIFY = join(REPO, "scripts/verify-staged-extensions.mjs");
+	const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
 	let tmpBase;
 	let tmpScoped;
 	let tmpPkg;
@@ -137,7 +184,15 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦；
 		// mkdtemp 每次全新目录，免旧路径的预清理 rmSync）
 		tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-verify-"));
-		tmpScoped = join(tmpBase, "@zhushanwen");
+		mkdirSync(join(tmpBase, "scripts"), { recursive: true });
+		copyFileSync(VERIFY_SRC, join(tmpBase, "scripts/verify-staged-extensions.mjs"));
+		mkdirSync(join(tmpBase, "packages/shared/src"), { recursive: true });
+		writeFileSync(
+			join(tmpBase, "packages/shared/src/mandatory-extensions.json"),
+			JSON.stringify([{ name: "@zhushanwen/pi-test-pkg", description: "fixture", tier: "feature" }]),
+			"utf8",
+		);
+		tmpScoped = join(tmpBase, "staged/@zhushanwen");
 		tmpPkg = join(tmpScoped, "pi-test-pkg");
 		mkdirSync(tmpPkg, { recursive: true });
 		// 合法 index.js：过文件级检查（index.js 存在 + 无 .ts 残留），到达 checkManifest
@@ -148,45 +203,50 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 		rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 	});
 
-	/** 运行 verify-staged，返回 exit code（0=通过，非0=失败） */
+	/** 运行 mirror 内 verify-staged，返回 spawnSync 结果（status=0 通过，非 0 失败） */
 	function runVerify() {
-		try {
-			execSync(`node "${VERIFY}" --staged-dir "${tmpScoped}"`, { stdio: "pipe", cwd: REPO });
-			return 0;
-		} catch (err) {
-			return err.status ?? 1;
-		}
+		return spawnSync(process.execPath, [join(tmpBase, "scripts/verify-staged-extensions.mjs"), "--staged-dir", tmpScoped], {
+			encoding: "utf8",
+		});
 	}
 
-	it("缺 package.json → exit 非 0", () => {
+	it("缺 package.json → exit 1 + stderr 定位缺 manifest", () => {
 		// package.json 未生成（bundle 失败的早期回归）
-		expect(runVerify(), "checkManifest 应报「缺 package.json」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「缺 package.json」").toBe(1);
+		expect(r.stderr, "失败原因定位到缺 package.json（非 SSOT 假绿）").toContain("缺 package.json");
 	});
 
-	it("package.json JSON 损坏 → exit 非 0", () => {
+	it("package.json JSON 损坏 → exit 1 + stderr 定位解析失败", () => {
 		writeFileSync(join(tmpPkg, "package.json"), "{ not valid json,,,", "utf8");
-		expect(runVerify(), "checkManifest 应报「package.json 解析失败」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「package.json 解析失败」").toBe(1);
+		expect(r.stderr, "失败原因定位到解析失败").toContain("package.json 解析失败");
 	});
 
-	it("缺 pi.extensions 声明 → exit 非 0", () => {
+	it("缺 pi.extensions 声明 → exit 1 + stderr 定位缺声明", () => {
 		writeFileSync(
 			join(tmpPkg, "package.json"),
 			JSON.stringify({ name: "pi-test-pkg" }),
 			"utf8",
 		);
-		expect(runVerify(), "checkManifest 应报「缺 pi.extensions 声明」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「缺 pi.extensions 声明」").toBe(1);
+		expect(r.stderr, "失败原因定位到缺 pi.extensions 声明").toContain("缺 pi.extensions 声明");
 	});
 
-	it("pi.extensions 引用不存在的文件 → exit 非 0", () => {
+	it("pi.extensions 引用不存在的文件 → exit 1 + stderr 定位引用缺失", () => {
 		writeFileSync(
 			join(tmpPkg, "package.json"),
 			JSON.stringify({ name: "pi-test-pkg", pi: { extensions: ["./nonexistent.js"] } }),
 			"utf8",
 		);
-		expect(runVerify(), "checkManifest 应报「pi.extensions 引用文件缺失」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「pi.extensions 引用文件缺失」").toBe(1);
+		expect(r.stderr, "失败原因定位到引用文件缺失").toContain("pi.extensions 引用文件缺失");
 	});
 
-	it("pi.{agents,skills,workflows} 资源引用缺失 → exit 非 0", () => {
+	it("pi.{agents,skills,workflows} 资源引用缺失 → exit 1 + stderr 定位资源缺失", () => {
 		// pi.extensions 合法（指 ./index.js），但 pi.agents 引用未拷贝的目录 → bundle 拷贝逻辑回归
 		writeFileSync(
 			join(tmpPkg, "package.json"),
@@ -196,16 +256,30 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 			}),
 			"utf8",
 		);
-		expect(runVerify(), "checkManifest 应报「pi.agents 引用缺失」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「pi.agents 引用缺失」").toBe(1);
+		expect(r.stderr, "失败原因定位到 pi.agents 引用缺失").toContain("pi.agents 引用缺失");
 	});
 
-	it("pi.extensions 含非字符串项 → exit 非 0", () => {
+	it("pi.extensions 含非字符串项 → exit 1 + stderr 定位非字符串项", () => {
 		writeFileSync(
 			join(tmpPkg, "package.json"),
 			JSON.stringify({ name: "pi-test-pkg", pi: { extensions: [{ bad: "object" }] } }),
 			"utf8",
 		);
-		expect(runVerify(), "checkManifest 应报「pi.extensions 含非字符串项」").not.toBe(0);
+		const r = runVerify();
+		expect(r.status, "checkManifest 应报「pi.extensions 含非字符串项」").toBe(1);
+		expect(r.stderr, "失败原因定位到非字符串项").toContain("pi.extensions 含非字符串项");
+	});
+
+	it("合法 manifest → exit 0（正向对照：mirror fixture 无系统性误红）", () => {
+		writeFileSync(
+			join(tmpPkg, "package.json"),
+			JSON.stringify({ name: "pi-test-pkg", pi: { extensions: ["./index.js"] } }),
+			"utf8",
+		);
+		const r = runVerify();
+		expect(r.status, "合法 manifest 应通过（SSOT fixture 与 staged 同集、manifest 自洽）").toBe(0);
 	});
 });
 
@@ -300,5 +374,32 @@ describe("verify-staged per-package asset dirs (MF-1-6)", () => {
 		} finally {
 			fx.cleanup();
 		}
+	});
+});
+
+/**
+ * PACKAGE_ASSET_DIRS ↔ TEMPLATES_DIR_PACKAGES 投影一致性（MF-2-4）。
+ *
+ * verify 侧 PACKAGE_ASSET_DIRS（键 = staged 目录名 pi-<short>）与 bundle 侧
+ * TEMPLATES_DIR_PACKAGES（元素 = short 名）是同一份「专项拷贝资产包集合」的两处
+ * 投影，键形不同、仅注释互指——bundle 侧加 templates/ 包漏改 verify 侧时，MF-1-6
+ * 的 staged 校验静默失效（缺目录无人拦截，原缺失形态重开）。本用例读两脚本源码
+ * 文本做投影比对（仿 host-db-suffix-parity 的脚本投影文本比对形态），单侧加条目即红。
+ */
+describe("PACKAGE_ASSET_DIRS ↔ TEMPLATES_DIR_PACKAGES projection parity (MF-2-4)", () => {
+	it("两表归一（pi-<short> ↔ <short>）后包集合相等", () => {
+		const bundleSrc = readFileSync(join(REPO, "scripts/bundle-extensions.mjs"), "utf8");
+		const verifySrc = readFileSync(join(REPO, "scripts/verify-staged-extensions.mjs"), "utf8");
+
+		// bundle 侧：const TEMPLATES_DIR_PACKAGES = new Set(["plan"]) → 提取引号内元素
+		const bundleSetLiteral = bundleSrc.match(/const TEMPLATES_DIR_PACKAGES = new Set\(\[([^\]]*)\]\)/)?.[1] ?? "";
+		const bundlePkgs = [...bundleSetLiteral.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]).sort();
+		expect(bundlePkgs.length, "bundle 侧 TEMPLATES_DIR_PACKAGES 提取非空（常量改名/移位时防静默空集假绿）").toBeGreaterThan(0);
+
+		// verify 侧：PACKAGE_ASSET_DIRS 对象字面量 → 提取 "pi-xxx": 键集，去 pi- 前缀归一
+		const verifyTableSrc = verifySrc.match(/const PACKAGE_ASSET_DIRS = \{([\s\S]*?)\n\}/)?.[1] ?? "";
+		const verifyPkgs = [...verifyTableSrc.matchAll(/"(pi-[^"]+)"\s*:/g)].map((m) => m[1].replace(/^pi-/, "")).sort();
+
+		expect(verifyPkgs, "verify 侧键集（去 pi- 前缀）与 bundle 侧元素集相等").toEqual(bundlePkgs);
 	});
 });
