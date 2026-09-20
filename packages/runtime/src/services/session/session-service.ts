@@ -50,6 +50,7 @@ import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
+import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
 // respawn（经 registerSession 汇聚）/ detach / reclaim 四类生命周期事件处增量维护。
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
@@ -578,6 +579,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         sessionId,
         exitCode: code,
         detailDigest: buildCrashDetailDigest(code, stderr),
+        // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+        // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
+        // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+        // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
+        machinePiDigest: captureMachinePiDigest(),
       })
       session.adapter.detach()
 

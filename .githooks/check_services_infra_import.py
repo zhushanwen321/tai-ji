@@ -42,6 +42,12 @@ ALLOWED_MODULES = {
     # reject），2026-09-11 随 E 组恢复链落地列入（同 crash-journal 裁决：port 只增加无意义
     # 间接层）
     "mem-pressure",
+    # crash-correlation：崩溃时刻机器面只读取证查询（crash-forensics-and-watchdog 设计 D10，
+    # 2026-09-20 连坐崩溃实证后落地），mem-pressure 同款横切关注点——无业务语义、无状态、
+    # 只读（ps 进程表 + log show 系统日志，spawn-env-boundary 白名单豁免的同族只读探测）、
+    # best-effort 永不 reject（无 sink 不采样）；session-service pi crash 台账行消费
+    # captureMachinePiDigest（同 mem-pressure 由 D 系列消费先例）
+    "crash-correlation",
     # 现状基线（2026-08-22，待专项治理收编或正式豁免）
     "session-file-utils",
     "session-entry-mapper",
