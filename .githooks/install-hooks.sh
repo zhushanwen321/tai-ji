@@ -540,6 +540,31 @@ if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|m
 fi
 
 # ============================================================================
+# 2g. review-fix-loop 双实现锁步守卫
+#     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
+#     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
+#     ~/.zcode/workflows/review-fix-loop.dwf.ts），共享语义靠注释文字约定维系同步。
+#     2026-09-20 比对证实该约定不可靠（调度去重修复只在 pi 侧、早退点台账守门
+#     只在 pi 侧），本守卫用同一语料跑两侧 planReviewerOrder 对账调度结果 + 池/
+#     阈值常量，并把「order 恒为输入排列」去重不变量双侧断言。zcode 文件不存在
+#     时 SKIP（非 zcode 环境无第二实现可比）。复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix-loop|^scripts/check-rfl-parity\.mjs$"; then
+    print_section "[review-fix-loop 双实现锁步守卫]"
+
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-rfl-parity.mjs; then
+            echo -e "${RED}[ERROR] 双实现已漂移——改一侧必须同步另一侧（pi: review-fix-loop-utils.cjs / zcode: ~/.zcode/workflows/review-fix-loop.dwf.ts）${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] review-fix-loop 双实现锁步守卫已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 
@@ -1972,6 +1997,7 @@ echo -e "  ${GREEN}[+]${NC} 数据布局字面量守卫（C-pi-14：pi/ 兄弟�
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"
 echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
 echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
+echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

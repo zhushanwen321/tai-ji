@@ -292,6 +292,53 @@ describe("review-fix-loop.js 模块形态约束", () => {
   });
 });
 
+// ── B2：终态残留结构化清单（与 zcode 原生版 remaining 字段对齐） ──
+// 口径 = status != fixed/deferred；同源一致性由「与 message 残留 ID 同源」约束保证。
+describe("review-fix-loop.js buildRemaining（终态残留四字段清单）", () => {
+  function loadBuildRemaining() {
+    const src = [extractFn("buildRemaining"), "buildRemaining"].join("\n");
+    return vm.runInNewContext(src, {}) as (issues: unknown) => { id: string; title: string; severity: string; status: string }[];
+  }
+
+  it("issues 为 undefined/空：返回空数组（不抛错——state.issues 初始即 undefined）", () => {
+    const buildRemaining = loadBuildRemaining();
+    expect(buildRemaining(undefined)).toEqual([]);
+    expect(buildRemaining({})).toEqual([]);
+  });
+
+  it("残留口径：open/regressed 入选，fixed/deferred 被过滤（deferred 是显式挂起，不算残留）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({
+      "MF-1-1": { title: "still broken", severity: "major", status: "open" },
+      "MF-1-2": { title: "came back", severity: "critical", status: "regressed" },
+      "MF-1-3": { title: "done", severity: "major", status: "fixed" },
+      "MF-1-4": { title: "parked", severity: "minor", status: "deferred" },
+    });
+    expect(out.map((r) => r.id)).toEqual(["MF-1-1", "MF-1-2"]);
+    expect(out.map((r) => r.status)).toEqual(["open", "regressed"]);
+  });
+
+  it("字段兜底：缺失 title → 空串；缺失 severity → 'unknown'（消费侧不做 undefined 分支）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({ "MF-2-1": { status: "open" } });
+    expect(out).toEqual([{ id: "MF-2-1", title: "", severity: "unknown", status: "open" }]);
+  });
+
+  it("畸形条目（null/非对象）不崩溃、不入清单（state 脏数据不致终态渲染炸）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({ "MF-3-1": null, "MF-3-2": { status: "open", title: "ok", severity: "minor" } });
+    expect(out.map((r) => r.id)).toEqual(["MF-3-2"]);
+  });
+
+  it("顶层 return 确实透出 remaining 字段（防字段从返回体被移除）+ 清单由 buildRemaining 派生", () => {
+    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
+    // 字段透出：返回体必须含 remaining（且是 shorthand，值即 buildRemaining 调用结果）
+    expect(returnBlock).toContain("remaining,");
+    // 取值来源：声明行必须走 buildRemaining（改回内联对象字面量会被这条拦住）
+    expect(WORKFLOW_SOURCE).toContain("const remaining = buildRemaining(state.issues);");
+  });
+});
+
 // ── RX2-F2：fixAgent=fallow-scan 显式拒收（脚本顶层参数校验，非函数段） ──
 // 拒收逻辑位于脚本顶层（FIX_AGENT_RAW 解析后、resolveAgentDefs 前），函数段抽取法
 // 覆盖不到；改用 review-fix-loop-scriptpath-failfast.test.ts 同款「AsyncFunction 包装

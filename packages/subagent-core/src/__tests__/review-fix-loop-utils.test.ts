@@ -2568,8 +2568,25 @@ describe("collectAffectedFiles（affected_files 收集归一：stagePaths/fixImp
   });
 });
 
-describe("planUnifiedCommit（统一 commit 计划：存在性过滤 + '--' 分隔符 argv）", () => {
+describe("planUnifiedCommit（统一 commit 计划：首 token 清洗 + 存在性过滤 + '--' 分隔符 argv）", () => {
   const counters = { batchIndex: 1, round: 2, mustFix: 3, suggestion: 4 };
+  it("首 token 清洗：fixer 把说明文字拼在路径后（「src/a.ts （中文说明…）」）→ 只取路径，pathspec 不 fatal 128", () => {
+    const plan = planUnifiedCommit(
+      [{ issue_id: "MF-1", affected_files: ["src/a.ts （中文说明…）", "packages/x/y.js renamed in prose"] }],
+      counters,
+      () => true,
+    );
+    expect(plan.stagePaths).toEqual(["src/a.ts", "packages/x/y.js"]);
+  });
+  it("清洗后重复路径去重（两处引用同一文件 → 不重复 stage）", () => {
+    const plan = planUnifiedCommit(
+      [{ issue_id: "MF-1", affected_files: ["src/a.ts （说明一）"] }, { issue_id: "MF-2", affected_files: ["src/a.ts （说明二）"] }],
+      counters,
+      () => true,
+    );
+    expect(plan.stagePaths).toEqual(["src/a.ts"]);
+    expect(plan.addArgs).toEqual(["add", "--", "src/a.ts"]);
+  });
   it("存在性过滤：存在的进 stagePaths、不存在的进 skippedPaths（fixer 误报不炸整次 git add）", () => {
     const plan = planUnifiedCommit(
       [{ issue_id: "MF-1", affected_files: ["src/a.ts", "ghost/missing.ts"] }],

@@ -1701,9 +1701,10 @@ function collectAffectedFiles(fixes) {
 /**
  * 统一 commit 计划（MF-1-1 抽测：stagePaths 收集 + git add/commit argv 构造收敛为
  * 可测纯函数）：
- *  - stagePaths 经 exists 存在性过滤——fixer 误报/文件已删除的路径不再炸整次
- *    git add（pathspec did not match 的真实失败形态曾在本仓兑现过），skippedPaths
- *    供调用方逐条 WARN
+ *  - 候选路径先经**首 token 清洗**（fixer 把说明文字拼在路径后 → pathspec fatal 128），
+ *    再经 exists 存在性过滤——fixer 误报/文件已删除的路径不再炸整次 git add
+ *    （pathspec did not match 的真实失败形态曾在本仓兑现过），skippedPaths 供调用方
+ *    逐条 WARN
  *  - addArgs 带 "--" 分隔符——LLM 产出的 "-" 前缀路径防被解释为 git 选项
  *  - 计划层不兜底其余 add 失败形态（git index 锁争用等），仍由调用方分类为
  *    fix-failure 结构化终止（终止语义由 e2e 场景守护）
@@ -1712,10 +1713,17 @@ function collectAffectedFiles(fixes) {
  * @param exists 存在性判定注入（脚本侧传 fs.existsSync——注入保持纯函数可测）
  */
 function planUnifiedCommit(fixes, counters, exists) {
-  const candidates = collectAffectedFiles(fixes);
+  // 首 token 清洗（与 zcode 原生版对齐，2026-09-20）：fixer 返回「path.md（中文说明…）」
+  // 形态时说明文字进 pathspec 直接 fatal 128（该形态已在 zcode 侧实测兑现）。对每个候选路径
+  // 取首个空白分隔 token；清洗后去重、保持出现序——只改 commit 路径，不动 collectAffectedFiles
+  // 的归因/巡检口径（那里需要整串原文才能人工判读）。
+  const candidates = collectAffectedFiles(fixes)
+    .map((p) => p.split(/\s+/)[0] || "")
+    .filter(Boolean);
   const stagePaths = [];
   const skippedPaths = [];
   for (const p of candidates) {
+    if (stagePaths.includes(p) || skippedPaths.includes(p)) continue;
     if (exists(p)) stagePaths.push(p);
     else skippedPaths.push(p);
   }
@@ -1902,6 +1910,13 @@ module.exports = {
   collectAffectedFiles,
   planUnifiedCommit,
   REVIEWER_BATCH,
+  // 调度池/阈值一并导出（2026-09-20）：check-rfl-parity.mjs 需对账两侧同名字面量——
+  // 不导出时守卫只能比行为，池内容漂移（如某侧漏改一个关键词）无法被发现。
+  SLOW_POOL,
+  FAST_POOL,
+  DRIFTER_POOL,
+  SLOW_PKG_THRESHOLD,
+  SLOW_CHURN_THRESHOLD,
   planReviewerOrder,
   parseDiffStats,
   countDiffPackages,
