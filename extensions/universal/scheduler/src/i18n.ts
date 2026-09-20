@@ -153,7 +153,7 @@ export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
 
 // ── ack 文案键（u-ack-fallback 单点）──
 //
-// ack 文案**不经** ServiceMessage 通道（设计 §3.3 D5）：它不是服务结果——`ack.confirm` 是
+// ack 文案**不经** ServiceMessage 通道（设计 §3.3 D7）：它不是服务结果——`ack.confirm` 是
 // 合成 assistant 行的正文，`ack.notPersisted*` 是同步/异步通知文案（一个键两阶段共用）。
 // 故不做 messageKey↔params 判别联合，只以键常量露出：ack-notify.ts 消费常量而非字面量，
 // 键名改动由编译期兜住（改词典键漏改消费侧曾是本仓高频漂移形态）。

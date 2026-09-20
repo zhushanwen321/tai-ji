@@ -29,7 +29,7 @@ import { TICK_INTERVAL_MS } from './runtime.js'
 import { ACK_CUSTOM_TYPE, ACK_CUSTOM_TYPE_PREFIX } from './types.js'
 import type { AckAvailability, AckFailureKind, AckState, SchedulerCurrentModel } from './types.js'
 
-/** 30s 写盘自检窗口（设计 §3.3 D5）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
+/** 30s 写盘自检窗口（设计 §3.3 D7）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
 
 /**
  * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），

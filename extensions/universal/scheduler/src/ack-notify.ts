@@ -4,7 +4,7 @@
 // 级别」。不做编排、不发通知、不碰文件系统：30s 写盘自检定时器、ctx.ui.notify 调用与
 // session 生命周期清理归 u-ack-turn 单元接线。
 //
-// 反馈两阶段（设计 scheduler-command-path-persistence §3.3 D5）：
+// 反馈两阶段（设计 scheduler-command-path-persistence §3.3 D7）：
 // - 同步（创建成功即发的既有「已创建 X」通知）不归本单元；
 // - 「覆写不可用」（E8 无基座 / 显式禁用）在开窗之前就能确定 ⇒ 同步发如实文案
 //   （`honest-sync`），不拖到 30s 自检；
