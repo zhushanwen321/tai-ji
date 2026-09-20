@@ -6,6 +6,7 @@ vi.mock("typebox", () => ({
     Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
     String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
     Optional: (schema: unknown) => schema,
+    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
   },
   Static: class {},
 }));
@@ -179,10 +180,10 @@ describe("registerPlanTool", () => {
 
   // --- removed actions (D1 / D3) ---
   describe("removed action rejections", () => {
-    it("rejects plan(action='list-template') as an unknown action with the 5-action list (D1)", async () => {
+    it("rejects plan(action='list-template') as an unknown action with the 6-action list (D1)", async () => {
       const { exec } = setup();
       await expect(exec({ action: "list-template" })).rejects.toThrow(
-        "Unknown plan action: list-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
+        "Unknown plan action: list-template. Valid actions: enter, select-template, complete, abort, register-doc, submit-review",
       );
     });
 
@@ -191,7 +192,7 @@ describe("registerPlanTool", () => {
       await expect(
         exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
       ).rejects.toThrow(
-        "Unknown plan action: create-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
+        "Unknown plan action: create-template. Valid actions: enter, select-template, complete, abort, register-doc, submit-review",
       );
     });
   });
@@ -584,9 +585,9 @@ describe("validateAction", () => {
     expect(validateAction("bogus")).toBe(false);
     expect(validateAction("list-template")).toBe(false);
   });
-  it("action list contains exactly the five actions (list-template removed, D1)", () => {
+  it("action list contains exactly the six actions (enter added for agent self-entry; list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "register-doc", "select-template", "submit-review"],
+      ["abort", "complete", "enter", "register-doc", "select-template", "submit-review"],
     );
     expect(PLAN_ACTIONS).not.toContain("create-template");
     expect(PLAN_ACTIONS).not.toContain("list-template");

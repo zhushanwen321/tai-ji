@@ -150,10 +150,11 @@ describe("before_agent_start hook（D9：taiji 形态引导注入）", () => {
     ) as { systemPrompt?: string } | undefined;
 
     expect(result?.systemPrompt).toContain(basePrompt);
-    expect(result?.systemPrompt).toContain("/plan");
-    expect(result?.systemPrompt).toContain("--skills");
-    // 未经确认不自行进入的约束在场
-    expect(result?.systemPrompt).toContain("Do NOT enter plan mode without the user's confirmation");
+    // agent 自助进入引导在场（enter action + 无需确认）
+    expect(result?.systemPrompt).toContain("plan(action='enter'");
+    expect(result?.systemPrompt).toContain("Do not ask for permission to enter");
+    // 旧的「建议 + 需确认」措辞已移除（enter 是 tool action，无需确认闸门）
+    expect(result?.systemPrompt).not.toContain("Do NOT enter plan mode without the user's confirmation");
   });
 
   it("注入失败（systemPrompt 读取抛错）→ logger.warn 落盘 + 返回 undefined，不阻塞 agent loop（MF-1-8）", () => {

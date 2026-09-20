@@ -6,6 +6,7 @@ vi.mock("typebox", () => ({
     Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
     String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
     Optional: (schema: unknown) => schema,
+    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
   },
   Static: class {},
 }));
@@ -460,9 +461,9 @@ describe("三 decision 消费（taiji 形态）", () => {
 });
 
 describe("submit-review 的 PLAN_ACTIONS 面", () => {
-  it("action list contains exactly the five actions (list-template removed, D1)", () => {
+  it("action list contains exactly the six actions (enter added; list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "register-doc", "select-template", "submit-review"],
+      ["abort", "complete", "enter", "register-doc", "select-template", "submit-review"],
     );
   });
 });

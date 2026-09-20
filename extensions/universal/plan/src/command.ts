@@ -4,14 +4,12 @@ import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { buildPlanModePrompt } from "./prompts.js";
+import { activatePlanMode, resolveSkills } from "./enter.js";
+import type { SkillResolution } from "./enter.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { capPlanRequirement, getPlanState, persistPlanState, resetPlanState } from "./state.js";
-import { PLAN_MODE_TOOLS } from "./tool.js";
+import { getPlanState, resetPlanState } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
-
-const MAX_SLUG_LENGTH = 30;
 
 /** /plan 参数解析产物：requirement = 最早 flag 标记前的自由文本；skills / templatePath 为 undefined = 未提供对应 flag */
 export interface ParsedPlanArgs {
@@ -91,44 +89,10 @@ export function resolveTemplateFile(raw: string, projectDir: string): TemplateFi
   return { ok: true, absPath };
 }
 
-/** E1 技能解析结果：ok=false 时携带缺失项与可用清单（fail-fast 回复的材料） */
-export type SkillResolution =
-  | { ok: true; resolved: SkillRef[] }
-  | { ok: false; available: string[]; missing: string[] };
-
 /**
- * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
- * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
- * 这是 pi 的实现细节，不得泄漏到用户输入面——设计面（tech-design §步骤①）用户输入
- * 自然技能名（`--skills tech-design`）。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
+ * E1 校验与技能名归一已迁至 enter.ts（slash 与 plan(enter) tool 两入口共用）。
+ * 本文件只保留 slash 命令的入参解析（--skills/--template flag）与投递通道。
  */
-function normalizeSkillName(name: string): string {
-  return name.startsWith("skill:") ? name.slice("skill:".length) : name;
-}
-
-/**
- * E1 校验：pi.getCommands() 过滤 source === "skill" 枚举比对（技能枚举与路径
- * 经 pi 取得，不自扫描目录——D2）。比对前双向剥 `skill:` 前缀归一（trim 由
- * parsePlanArgs 保证）：resolved/missing 用归一后的短名；available 维持枚举
- * 原形态（错误信息里用户可直接复制为 pi 命令）。
- */
-export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
-  const skillCommands = pi.getCommands().filter((c) => c.source === "skill");
-  const byShortName = new Map(skillCommands.map((c) => [normalizeSkillName(c.name), c.sourceInfo.path]));
-  const available = skillCommands.map((c) => c.name);
-  const resolved: SkillRef[] = [];
-  const missing: string[] = [];
-  for (const raw of requested) {
-    const name = normalizeSkillName(raw);
-    const skillPath = byShortName.get(name);
-    if (skillPath === undefined) {
-      missing.push(name);
-    } else {
-      resolved.push({ name, skillPath });
-    }
-  }
-  return missing.length > 0 ? { ok: false, available, missing } : { ok: true, resolved };
-}
 
 export function registerPlanCommand(
   pi: ExtensionAPI,
@@ -347,53 +311,18 @@ function handleEnterPlanMode(
   }
 
   const requirement = parsed.requirement;
-  const slug = requirement
-        ? requirement.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, MAX_SLUG_LENGTH)
-    : "untitled";
+  // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
+  // flag 解析/校验（上方）与提示词投递（下方 sendUserMessage 对话流注入）。
+  // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
+  const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
+    requirement,
+    skills: resolved,
+    projectDir: ctx.cwd,
+    ...(templateAbsPath !== undefined && templateContent !== undefined
+      ? { template: { absPath: templateAbsPath, content: templateContent } }
+      : {}),
+  });
 
-  const projectDir = ctx.cwd;
-  const planDir = path.join(projectDir, ".taiji-harness", slug);
-  fs.mkdirSync(planDir, { recursive: true });
-  const planFilePath = path.join(planDir, "plan.md");
-
-  state.isActive = true;
-  state.planFilePath = planFilePath;
-  // state/entry/plan 帧侧 requirement 64KB 封顶（帧有界前提）；下方 buildPlanModePrompt
-  // 仍用未封顶的本地 requirement 全文直达模型（该通路由 message content 注册表登记兜底）
-  state.requirement = capPlanRequirement(requirement);
-  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，
-  // 复用既有字段既有值形态——D5）；模板流程进入时仍为空，等 select-template 写入。
-  // 直传事实另落 templateProvidedPath（select-template 防御的判定信号——
-  // templateName 单看无法区分「已直传」与「已选中」，D7）
-  state.templateName = templateAbsPath ? path.basename(templateAbsPath, ".md") : "";
-  state.templateProvidedPath = templateAbsPath;
-  state.skills = resolved.map((s) => s.name);
-  state.docs = [];
-  // 新轮次重置清单与 resetPlanState 对齐：reviewState 与指纹基线都随进入失效——
-  // entry 重建读到残留指纹（旧版/异常 entry 形态）时，不得把上一轮 docs 快照当
-  // 本轮「无变化」检测基线（首提即误报 unchanged）
-  delete state.reviewState;
-  delete state.lastSubmitReviewDocsFingerprint;
-
-  persistPlanState(pi, state);
-  updatePlanWidget(ctx, state);
-
-  // Restrict tools to the plan-mode set (includes bash — file-write constraints come from the injected plan mode prompt below)
-  pi.setActiveTools(PLAN_MODE_TOOLS);
-
-  // Inject plan mode prompt inline (四段：技能指令 / 产物纪律 / 只读纪律 / 模板流程——D2)
-  // --template 直传走 prompts.ts 直传分支（清单段抑制 + 全文内嵌，D5）
-  // projectRoot 显式传 ctx.cwd（设计 D2 项目级锚点）——与 select-template 侧
-  // listTemplates({ projectRoot: ctx.cwd }) 同锚点，禁从 planFilePath 逆推层级
-  pi.sendUserMessage(
-    buildPlanModePrompt({
-      requirement,
-      planFilePath,
-      projectRoot: projectDir,
-      skills: resolved,
-      ...(templateAbsPath !== undefined && templateContent !== undefined
-        ? { template: { absPath: templateAbsPath, content: templateContent } }
-        : {}),
-    }),
-  );
+  // Inject plan mode prompt inline（sendUserMessage 对话流注入；tool 入口走 tool result）
+  pi.sendUserMessage(prompt);
 }

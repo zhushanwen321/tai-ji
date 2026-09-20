@@ -42,6 +42,13 @@ export const DEFAULT_PLAN_STATE: PlanState = {
   docs: [],
 };
 
+/**
+ * 计划态工具白名单（进入计划模式三处共用——slash 命令 / plan(enter) tool / session_start
+ * 恢复；bash 在白名单内，文件写约束来自注入的计划模式提示词，见 pi-ext-021）。
+ * 放在 state.ts（叶模块）而非 tool.ts：enter.ts 与本常量互需会造成 enter↔tool 循环依赖。
+ */
+export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
+
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
 

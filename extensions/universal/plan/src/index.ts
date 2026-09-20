@@ -9,21 +9,23 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { type PlanAbortControllers, type PlanSessionMap, reconstructPlanState } from "./state.js";
-import { PLAN_MODE_TOOLS, registerPlanTool } from "./tool.js";
+import { type PlanAbortControllers, type PlanSessionMap, PLAN_MODE_TOOLS, reconstructPlanState } from "./state.js";
+import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
 
 /**
- * D9 引导文案（约 50 token）：仅在 taiji 宿主注入，驱使 AI 在合适时机「建议」
- * 进入计划模式而非自行进入（G6：把「AI 很少主动调用」从源头缓解）。
+ * D9 引导文案（约 60 token）：仅在 taiji 宿主注入。plan 模式是只读子集（读代码、产
+ * 文档、不改源码），进入它不是危险操作——agent 可在合适时机**自行进入**（plan-mode-
+ * agent-enter U1 后 enter 是 tool action，无需用户确认；用户随时可经 GUI 底栏退出）。
  */
 const PLAN_MODE_SUGGESTION_PROMPT =
   "\n\n" +
   "When the user's request involves large-scale refactoring, cross-module changes, or other high-risk modifications, " +
-  "proactively suggest entering plan mode first (e.g. `/plan <requirement> --skills <relevant skills>`). " +
-  "Do NOT enter plan mode without the user's confirmation.";
+  "proactively enter plan mode yourself by calling plan(action='enter', requirement='<the task>', skills=[...relevant skills]). " +
+  "Plan mode is read-only for source code: you explore and write plan documents, then the user reviews before implementation. " +
+  "Do not ask for permission to enter — entering plan mode is safe and reversible (the user can exit anytime).";
 
 export default function planExtension(pi: ExtensionAPI) {
   // Per-session state cache — keyed by sessionId

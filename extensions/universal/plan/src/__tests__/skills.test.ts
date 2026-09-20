@@ -16,7 +16,8 @@ import * as fs from "node:fs";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { parsePlanArgs, registerPlanCommand, resolveSkills } from "../command.js";
+import { parsePlanArgs, registerPlanCommand } from "../command.js";
+import { resolveSkills } from "../enter.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 

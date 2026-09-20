@@ -19,9 +19,11 @@ import { Type } from "typebox";
 
 import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
 import type { GoalBridgeOutcome } from "./compact.js";
+import { activatePlanMode, resolveSkills } from "./enter.js";
 import { detectExecSkills } from "./exec-skills.js";
 import type { ExecSkill } from "./exec-skills.js";
 import { formatReviewComments } from "./prompts.js";
+import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
 import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
@@ -32,6 +34,7 @@ const logger = getLogger("pi-plan");
 // ── Action types ───────────────────────────────────────────────────
 
 export const PLAN_ACTIONS = [
+  "enter",
   "select-template",
   "complete",
   "abort",
@@ -39,11 +42,8 @@ export const PLAN_ACTIONS = [
   "submit-review",
 ] as const;
 
-/**
- * 计划态工具白名单（进入计划模式与 session_start 恢复两处共用——bash 在白名单内，
- * 文件写约束来自注入的计划模式提示词，见 pi-ext-021）。
- */
-export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
+// PLAN_MODE_TOOLS 已迁至 state.ts（叶模块，避免 enter↔tool 循环依赖）；此处再导出保持兼容
+export { PLAN_MODE_TOOLS } from "./state.js";
 
 export type PlanAction = (typeof PLAN_ACTIONS)[number];
 
@@ -56,6 +56,12 @@ export function validateAction(action: string): action is PlanAction {
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
+}
+
+interface EnterDetails {
+  action: "enter";
+  requirement: string;
+  skills: string[];
 }
 
 interface CompleteDetails {
@@ -101,6 +107,7 @@ interface ReviewErrorDetails {
 }
 
 type PlanDetails =
+  | EnterDetails
   | SelectTemplateDetails
   | CompleteDetails
   | CompleteCancelledDetails
@@ -182,6 +189,13 @@ function renderPlanResult(
   const NL = "\n";
 
   switch (details.action) {
+    case "enter": {
+      const header = fg("success", `✓ 已进入计划模式`) + NL;
+      const skillsLine = details.skills.length > 0 ? fg("dim", `  技能: ${details.skills.join(" · ")}`) + NL : "";
+      const hint = fg("dim", "  只读规划：读代码、产文档，不改源码");
+      return new Text(header + skillsLine + hint, 0, 0);
+    }
+
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
@@ -259,6 +273,61 @@ function cascadeTurnAbort(controller: AbortController, signal: AbortSignal | und
 interface ActionResult {
   content: Array<{ type: "text"; text: string }>;
   details: PlanDetails;
+}
+
+/**
+ * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
+ * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
+ * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
+ * 用户随时可经底栏退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
+ * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
+ * 不走 sendUserMessage/steer 排队）。已在 plan 模式时幂等返回，不重复进入。
+ */
+function executeEnter(
+  pi: ExtensionAPI,
+  params: Record<string, unknown>,
+  state: PlanState,
+  sessions: PlanSessionMap,
+  sessionId: string,
+  ctx: ExtensionContext,
+): ActionResult {
+  if (state.isActive) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: "Already in plan mode. Continue: write each deliverable into the plan directory, register it via plan(action='register-doc'), then call plan(action='submit-review') when all are done.",
+      }],
+      details: { action: "enter", requirement: state.requirement, skills: state.skills },
+    };
+  }
+
+  const requirement = typeof params.requirement === "string" ? params.requirement.trim() : "";
+  // skills 可选（数组逐项 string 白名单）；缺失/空 = 不挂载技能走模板流程
+  const requestedSkills = Array.isArray(params.skills)
+    ? params.skills.filter((s): s is string => typeof s === "string")
+    : [];
+  let resolved: SkillRef[] = [];
+  if (requestedSkills.length > 0) {
+    const resolution = resolveSkills(pi, requestedSkills);
+    if (!resolution.ok) {
+      // 未知技能名 = 使用错误（同 executeSelectTemplate 错名先例 throw，带可用清单自愈）
+      throw new Error(
+        `Unknown skill(s): ${resolution.missing.join(", ")}. Available skills: ${resolution.available.join(", ") || "(none)"}. ` +
+        `Retry plan(action='enter') with valid skill names or omit the skills parameter.`,
+      );
+    }
+    resolved = resolution.resolved;
+  }
+
+  const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
+    requirement,
+    skills: resolved,
+    projectDir: ctx.cwd,
+  });
+  return {
+    content: [{ type: "text" as const, text: prompt }],
+    details: { action: "enter", requirement, skills: resolved.map((s) => s.name) },
+  };
 }
 
 /**
@@ -796,11 +865,13 @@ export function registerPlanTool(
     name: "plan",
     label: "Plan Mode",
     description:
-      "Manages plan mode lifecycle (template selection, document registration, review, state transitions). " +
+      "Manages plan mode lifecycle (enter, template selection, document registration, review, state transitions). " +
       "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
-      "Actions: select-template, register-doc, submit-review, complete, abort.",
+      "Actions: enter, select-template, register-doc, submit-review, complete, abort.",
     parameters: Type.Object({
       action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
+      requirement: Type.Optional(Type.String({ description: "Plan requirement / task description (for enter)" })),
+      skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to mount (for enter; omit to use the template-discovery flow)" })),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
       fileName: Type.Optional(Type.String({ description: "Document file name to register (for register-doc, e.g. 'design.md')" })),
       sourceSkill: Type.Optional(Type.String({ description: "Name of the mounted skill that produced this document (for register-doc; omit in template flow)" })),
@@ -811,8 +882,14 @@ export function registerPlanTool(
       ),
     }),
     promptSnippet:
+      "## Entering plan mode\n" +
+      "For large-scale refactoring, cross-module changes, or other high-risk work, proactively enter plan mode yourself: " +
+      "plan(action='enter', requirement='<what the user wants>', skills=[...]). Plan mode is read-only for source code — " +
+      "you read code and write plan documents, then the user reviews before any implementation. No user confirmation is needed to enter.\n" +
+      "\n" +
       "## When to use this tool vs the bash tool\n" +
       "Use 'plan' tool ONLY for plan mode state management:\n" +
+      "- enter — enter plan mode (self-service; requirement + optional skills)\n" +
       "- select-template — template selection\n" +
       "- register-doc — register a produced document (call after writing each deliverable; re-call after revisions to bump its version)\n" +
       "- submit-review — all documents done, request user review\n" +
@@ -822,8 +899,8 @@ export function registerPlanTool(
       "Use the bash tool for ALL document content: writing files, updating chapters (e.g. cat heredoc).\n" +
       "\n" +
       "## End-to-end workflow example\n" +
-      "1. /plan 'add dark mode' — user enters plan mode\n" +
-      "2. AI explores codebase (read, grep, bash) — brainstorming\n" +
+      "1. plan(action='enter', requirement='add dark mode') — you (the agent) enter plan mode\n" +
+      "2. Explore codebase (read, grep, bash) — brainstorming\n" +
       "3. Write each document, then plan(action='register-doc', fileName='...') for it\n" +
       "4. plan(action='submit-review') — user reviews in the review UI or conversation\n" +
       "5. Address revision comments (rewrite + re-register), re-submit until approved\n" +
@@ -855,6 +932,9 @@ export function registerPlanTool(
       const projectDir = ctx.cwd;
 
       switch (action) {
+        case "enter":
+          return executeEnter(pi, params, state, sessions, sessionId, ctx);
+
         case "select-template":
           return executeSelectTemplate(pi, params, state, projectDir);
 
