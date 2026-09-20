@@ -537,7 +537,8 @@ export interface Message {
    * - live：终态收口（message.complete / abort / error / 断连）当下写入
    * - reload：JSONL / get_entries 的 entry 时间戳（pi appendMessage 落在 message_end，
    *   即该消息产出结束；entry 时间戳不参与 reducer——由运行时历史链路回填，见
-   *   runtime infra `session-entry-mapper.applyEntryEndTimes`）
+   *   runtime infra `session-entry-mapper.applyEntryEndTimes`；pi 行为锚点见
+   *   docs/pi-semantics.json PS-37：agent-session.js :384/:398，0.84.4）
    *
    * 用途 = turn 级聚合口径的时间轴右端（TurnMeta「已工作」时长/时刻区间）：没有它，
    * 单条 assistant 的 turn 会退化为 startedAt === endedAt（旧实现恒显「1s」）。

@@ -5,7 +5,7 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 
 # scheduler 使用与存储指南
 
-> @zhushanwen/pi-scheduler：定时任务调度扩展。任务到期时向当前 session 注入一条 message（`deliverAs: 'followUp'` + `triggerTurn: true`），唤醒 agent 开新一轮 turn 处理。
+> @zhushanwen/pi-scheduler：定时任务调度扩展。任务到期时向当前 session 注入一条 message（`deliverAs: 'steer'` + `triggerTurn: true`，steer 直投：busy 时插入当前 turn、idle 时开新 turn），唤醒 agent 处理。
 
 **重要前提**：scheduler **没有独立的配置文件**。任务通过命令/工具交互创建，数据以 append-only event sourcing 方式存储在 session JSONL 中（见下文「数据存储位置」）。排查「任务存哪 / 为什么 resume 后任务变了 / fork 后任务是否继承」都必须基于此模型理解，不要去找独立的 `scheduler.json`（那是已废弃的旧版格式，仅迁移探测时使用）。
 
@@ -31,11 +31,21 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 
 ### 2. `schedule` / `schedule_control` 工具（AI 调用）
 
-- **`schedule`**（创建）：参数 `prompt`（必填，到期注入的消息）、`schedule`（必填，duration 或 cron）、`kind`（`once`/`recurring`，默认 `recurring`）、`name`（可选，缺省从 prompt 自动截取前 30 字）、`expires`（可选，默认 7 天；传 `"never"` 关闭过期）、`force`（可选，默认 `false`）。
+- **`schedule`**（创建）：参数 `prompt`（必填，到期注入的消息）、`schedule`（必填，duration 或 cron）、`kind`（`once`/`recurring`，默认 `recurring`）、`name`（可选，缺省从 prompt 自动截取前 30 字）、`expires`（可选，默认 7 天；传 `"never"` 关闭过期）、`model`（可选，scoped model id（`provider/model`），任务执行所用模型；缺省跟随会话当前模型）。
 - **`schedule_control`**（管理）：`action` = `list`/`toggle`/`delete`/`run`，`id`（toggle/delete/run 必填），`enabled`（toggle 必填）。
 - 两个工具的返回都是结构化 `{content: [{type:'text', text}], details}`；业务失败以异常抛出（pi 只对 execute throw 置 `isError:true`，错误 message 作为 toolResult content 返回），不通过返回值表达失败。
 
-> 创建/管理操作无需 agent idle——只有**到期 dispatch** 才受 idle/速率限制约束（见「运行限制与 dispatch 行为」）。
+> 创建/管理操作不受 agent 运行状态约束；**到期 dispatch** 也不等待 agent idle（steer 直投，busy 时插入当前 turn），仅受速率限制/同任务 in-flight 守卫约束（见「运行限制与 dispatch 行为」）。
+
+### 3. 创建确认（`schedule` tool 专属）
+
+`schedule` tool 的创建路径是「先确认后创建」：调用先弹出预填表单（LLM 参数即草稿，用户可改模式/时间/模型/提示词），**用户确认后才创建**，创建以确认后的最终值为准。表单的确认按钮即用户的确认——确认即创建生效，agent 不再二次确认。用户取消表单 → 任务**不创建**，正常返回非错误 result（不假定配置、不重试）。
+
+- **rpc + GUI**：前端表单弹出，草稿经 initial 预填，一键确认。
+- **tui**：`ScheduleCreateComponent` 多 tab 逐项确认，两段 Esc 取消。
+- **headless（非 tui/rpc，如 print 模式）**：无交互通道，按参数**直接创建**，result 末尾附注 `(Created without user confirmation: this session has no interactive channel.)`。
+
+`/schedule` 命令（用户直接键入）**不走确认表单，直接创建**——确认门只存在于 `schedule` tool 的 LLM 调用路径。
 
 ## 调度格式
 
@@ -117,12 +127,14 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 | 默认过期 | 7 天（`DEFAULT_EXPIRY_MS`） | 仅 recurring；`expires="never"` 关闭 |
 | 历史记录 | 最近 20 条（`HISTORY_LIMIT`） | 每任务的执行历史 |
 
-dispatch 触发条件（`dispatchTask`）：
+dispatch 行为（`dispatchTask`，scheduler-steer-direct-dispatch 直投模型）：
 
-- **非 force 任务**：走统一 session delivery 内核（park 模式）——到期即入队，agent 忙时消息 park 在内核队列，等 agent 空闲的 settled 边沿投递，scheduler 每 30s tick 触发一次 flush 兜底重试；不丢弃。
-- **force=true 任务**：即使 agent busy 也立即触发（用于必须准点执行的场景）。
-- dispatch 成功后：recurring 推进 `nextRunAt` 并 append `advance`；once 删除任务并 append `delete`；失败（`sendMessage` 抛错）记 `lastStatus='failed'` 不 rethrow，下个 tick 重试（transient 失败重试语义，不 append advance）。
-- 注入的消息：`{content: task.prompt, customType: 'pi-scheduler:dispatched', display: true}`，`deliverAs: 'followUp'` + `triggerTurn: true`（排进 followUp 队列并唤醒 agent 开新 turn）。
+- **steer 直投**：到期任务 `backend.sendMessage(..., {deliverAs: 'steer', triggerTurn: true})` 直接投递——agent busy 时消息插入当前 turn（立即被模型看到）、idle 时开新 turn。不排队、不等 idle、不丢弃。
+- **受理即记账**：`sendMessage` 是 fire-and-forget（返回 void），await 立即通过，`nextRunAt` 调用即推进——无「入队未终态」窗口。
+- **同任务 in-flight 守卫**：该任务 dispatch 在途（如 `/schedule run` 与 tick dispatch 并发）时本 tick 跳过，防双投。
+- **模型切换**（`task.model` 设定且 ≠ 会话当前模型）：sendMessage 前 `setModel` 切到目标任务模型、记未决切换记录，事件恢复（turn_end + isIdle 复核）后切回原模型；切换失败降级——照常 dispatch（模型字段不阻塞核心调度）。
+- dispatch 成功后：recurring 推进 `nextRunAt` 并 append `advance`；once 删除任务并 append `delete`；失败（`sendMessage` 同步抛错，如 session 关闭）记 `lastStatus='failed'` 不 rethrow，下个 tick 重试（transient 失败重试语义，不 append advance）。
+- 注入的消息：`{content: task.prompt, customType: 'pi-scheduler:dispatched', display: true}`，投递选项 `{deliverAs: 'steer', triggerTurn: true}`。
 
 ## 任务数据结构
 
@@ -133,8 +145,8 @@ dispatch 触发条件（`dispatchTask`）：
 - `prompt`：到期注入的 message 内容。
 - `kind`：`once` | `recurring`。
 - `schedule`：`{mode:'cron', cronExpression}` | `{mode:'interval', intervalMs}`。
+- `model?`：任务执行模型（scoped model id，`provider/model`）；缺省跟随会话当前模型。
 - `enabled`：是否启用。
-- `force`：是否在 agent busy 时强制 dispatch。
 - `createdAt` / `nextRunAt` / `expiresAt?`：时间戳（ms）。
 - `runCount` / `lastRunAt?` / `lastStatus?`（`success`|`failed`）/ `lastError?`：执行统计。
 - `history`：最近 20 条 `ExecutionRecord`（`{at, status}`）。
@@ -163,12 +175,11 @@ dispatch 触发条件（`dispatchTask`）：
 /schedule cron '*/30 * * * *' 跑一次 vitest 并报告结果
 ```
 
-创建工作日早 9 点的早会提醒（不过期、force）：
+创建工作日早 9 点的早会提醒（永不过期，用 `schedule` 工具传 `expires:"never"`，命令行暂未暴露该开关）：
 
 ```
 /schedule cron '0 9 * * 1-5' 早会时间到了，总结昨天进展和今天计划
 ```
-（如需 force + 不过期，用 `schedule` 工具传 `force:true, expires:"never"`，命令行暂未暴露这两个开关）
 
 列出并禁用某任务：
 
@@ -177,10 +188,10 @@ dispatch 触发条件（`dispatchTask`）：
 /schedule off abc12345
 ```
 
-AI 通过工具创建（force + 永不过期）：
+AI 通过工具创建（指定模型 + 永不过期；交互模式下会先弹确认表单预填这些值）：
 
 ```
-schedule({ prompt: "...", schedule: "1h", kind: "recurring", force: true, expires: "never", name: " hourly-check" })
+schedule({ prompt: "...", schedule: "1h", kind: "recurring", model: "anthropic/claude-sonnet-4-5", expires: "never", name: "hourly-check" })
 ```
 
 ## 备注

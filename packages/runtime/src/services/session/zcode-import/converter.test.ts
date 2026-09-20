@@ -424,6 +424,57 @@ describe('切段与 T3c 边界', () => {
   })
 })
 
+// ── 脏数据防御分支：zcode 外部格式的 malformed 形态（宽输入域，降级不抛错）────────────
+
+describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning 文本形态异常）', () => {
+  it('tool part 结构异常（缺 callID / callID 非 string / 缺 tool / state 非对象）→ 整对丢弃 + 降级登记', () => {
+    const msgs = [
+      assistantMessage([
+        stepStart(),
+        textPart('before', 2500),
+        part({ type: 'tool', tool: 'Edit', state: { status: 'completed', input: {}, output: 'o' } }),
+        part({ type: 'tool', callID: 42, tool: 'Edit', state: { status: 'completed', input: {}, output: 'o' } }),
+        part({ type: 'tool', callID: 'call_a', state: { status: 'completed', input: {}, output: 'o' } }),
+        part({ type: 'tool', callID: 'call_b', tool: 'Edit', state: 'not-an-object' }),
+        stepFinish('tool-calls', { input: 1, output: 1 }),
+      ]),
+    ]
+    const out = buildZcodeSessionFile(msgs, 'T', HEADER)
+    const { entries } = parseOutput(out)
+    // 产物仅 session_info + assistant（text 段）：4 个畸形 tool 零 toolCall、零 toolResult
+    expect(entries).toHaveLength(2)
+    const a = entries[1] as { message: { role: string; content: Array<Record<string, unknown>> } }
+    expect(a.message.role).toBe('assistant')
+    expect(a.message.content).toEqual([{ type: 'text', text: 'before' }])
+    expect(out.content).not.toContain('"call_a"')
+    expect(out.content).not.toContain('"call_b"')
+    const structDegradations = out.degradations.filter((d) => d.includes('tool part 结构异常'))
+    expect(structDegradations).toHaveLength(4)
+    for (const d of structDegradations) {
+      expect(d).toContain('（callID/tool/state 形态）整对丢弃：message=m-asst')
+    }
+  })
+
+  it('text 与 reasoning part 文本字段为 number → 各自降级登记 + content 不含该段', () => {
+    const msgs = [
+      assistantMessage([
+        stepStart(),
+        part({ type: 'text', text: 42, time: { start: 2500, end: 2500 } }),
+        part({ type: 'reasoning', text: 7, time: { start: 2600, end: 2600 } }),
+        textPart('kept', 2700),
+        stepFinish('stop', { input: 1, output: 1 }),
+      ]),
+    ]
+    const out = buildZcodeSessionFile(msgs, 'T', HEADER)
+    const { entries } = parseOutput(out)
+    const a = entries[1] as { message: { content: Array<Record<string, unknown>> } }
+    // 异常 text/reasoning 段被跳过，仅保留合法 text part
+    expect(a.message.content).toEqual([{ type: 'text', text: 'kept' }])
+    expect(out.degradations).toContain('text part 文本形态异常（number）跳过：message=m-asst')
+    expect(out.degradations).toContain('reasoning part 文本形态异常（number）跳过：message=m-asst')
+  })
+})
+
 // ── 重放锚（A1/V3）：产物经 taiji 现有消费链重放 ─────────────────────────────────────
 
 describe('applyEntry 重放锚（mapSessionEntries → convertPiHistory）', () => {

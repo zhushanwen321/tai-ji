@@ -1106,7 +1106,7 @@ function normalizeGroupEntry(x) {
 
 /**
  * 修复分组确定性校验（不信任 LLM 分组自觉；与 zcode 原生版同构）：
- *  ① 过滤无效组（issueIds 非活跃 id 的剔除，剔空的组丢弃）
+ *  ① 过滤无效组（issueIds 非活跃 id 的剔除 + 重复认领去重，剔空的组丢弃）
  *  ② 覆盖性兜底——未被认领的活跃问题独立成组（漏分 ≠ 漏修）
  *  ③ 组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）
  *  ④ 组 files 以组内 issue 的 files 聚合为准（aggregator 报的组 files 仅参考）
@@ -1124,14 +1124,17 @@ function reconcileGroups(rawGroups, activeEntries) {
     // 缺失/空分组 → 单组全包（退化 = 旧单 fixer 行为；单组无组对，下方合并循环天然 no-op）
     groups = [{ issueIds: [...activeIds], note: "" }];
   } else {
-    groups = rawGroups
-      .map((g) => {
-        const issueIds = g.issueIds.filter((id) => activeIds.has(id));
-        return issueIds.length > 0 ? { note: g.note || "", issueIds } : null;
-      })
-      .filter(Boolean);
+    groups = [];
+    // claimed 双职责：过滤阶段逐组去重（id 已被前组认领则从后组剔除，剔空组丢弃，
+    // 与 ② 漏分兜底对称）+ 兜底阶段漏分判定。重复认领不去重的话，同 id 两组在
+    // files 缺失时（空集恒不相交）③ 的相交合并不触发，两个并行 fixer 并发修同一 issue。
     const claimed = new Set();
-    for (const g of groups) for (const id of g.issueIds) claimed.add(id);
+    for (const g of rawGroups) {
+      const issueIds = g.issueIds.filter((id) => activeIds.has(id) && !claimed.has(id));
+      if (issueIds.length === 0) continue;
+      for (const id of issueIds) claimed.add(id);
+      groups.push({ note: g.note || "", issueIds });
+    }
     for (const id of activeIds) {
       if (!claimed.has(id)) groups.push({ issueIds: [id], note: "aggregator 漏分，兜底独立组" });
     }

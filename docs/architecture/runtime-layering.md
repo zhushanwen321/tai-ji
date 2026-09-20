@@ -79,7 +79,7 @@ packages/runtime/src/
 
 ### ④ node:fs 直用——基线债登记（非合规例外）
 
-services 层存量生产文件 value import `node:fs`（实测 45+ 处），与 C-comm-03 目标态存在长期差距——**是未收编的基线债，不是合规形态**。已显式列入清单的代表性文件：`background-task-reaper.ts`、`startup-reattach.ts`、`runtime-checkpoint.ts`、`rolling-restart.ts`（v8 heap 探针，os 只读同类）；2026-09-20 增补本分支新增三文件：`zcode-import/sqlite-access.ts`（db 路径 existsSync 预检）、`plan-state-extractor.ts`（session JSONL statSync/readFileSync，同 subagent/workflow-extractor 同族形态）、`gen-stats-store.ts`（stats 存储 existsSync/mkdirSync/readFileSync/readdirSync/rmSync + atomicWrite 落盘）——同属基线债扩容登记，随 ports 收编统一迁移，不构成新合规形态。判定理由与收编路线：新增 services 代码优先经 port 访问文件系统；存量随 ports 收编统一迁移；迁移完成前，本登记作为架构审查对该形态的豁免依据（防误报为「新增违规」）。逐文件裁决记录 git 可追溯。
+services 层存量生产文件 value import `node:fs`（实测 45+ 处），与 C-comm-03 目标态存在长期差距——**是未收编的基线债，不是合规形态**。已显式列入清单的代表性文件：`background-task-reaper.ts`、`startup-reattach.ts`、`runtime-checkpoint.ts`、`rolling-restart.ts`（v8 heap 探针，os 只读同类）；2026-09-20 增补本分支新增六文件：`zcode-import/sqlite-access.ts`（db 路径 existsSync 预检）、`plan-state-extractor.ts`（session JSONL statSync/readFileSync，同 subagent/workflow-extractor 同族形态）、`gen-stats-store.ts`（stats 存储 existsSync/mkdirSync/readFileSync/readdirSync/rmSync + atomicWrite 落盘）、`import-service.ts`（导入产物目录 mkdir + tmp 落盘 rename + 失败 unlink）、`import-source-external-file.ts`（外部文件扫描 existsSync/readdir + 字节级 copyFile）、`import-source-zcode.ts`（zcode 源存在性 existsSync + 转换产物 writeFile）——同属基线债扩容登记，随 ports 收编统一迁移，不构成新合规形态。判定理由与收编路线：新增 services 代码优先经 port 访问文件系统；存量随 ports 收编统一迁移；迁移完成前，本登记作为架构审查对该形态的豁免依据（防误报为「新增违规」）。逐文件裁决记录 git 可追溯。
 
 ---
 

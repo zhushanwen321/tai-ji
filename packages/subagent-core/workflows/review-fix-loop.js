@@ -1522,7 +1522,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "fix-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 (" + groupCalls[gi].description + ") — " + raw.error;
+        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 (" + groupCalls[gi].description + ") — " + raw.error
+          + "；部分组改动可能已留在工作区（未提交），恢复动作：git status 检查后手动 add+commit 或重跑 workflow";
         batchIndex = BATCHES.length + 1;
         break;
       }
@@ -1534,7 +1535,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "fix-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 结果无效 (" + groupCalls[gi].description + ")";
+        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 结果无效 (" + groupCalls[gi].description + ")"
+          + "；部分组改动可能已留在工作区（未提交），恢复动作：git status 检查后手动 add+commit 或重跑 workflow";
         batchIndex = BATCHES.length + 1;
         break;
       }

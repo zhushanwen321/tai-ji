@@ -95,7 +95,11 @@ function asFinite(v: unknown): number | undefined {
 }
 
 // ── T6 entry id 链：8-hex 递增计数器（'00000001' 起），parentId 顺序链（首条 null）──────
-// 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义（设计 F2）。
+// 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义——id 在 pi 侧仅作 opaque map
+// key / leaf 指针 / 相等比较（pi 0.84.4 dist/core/session-manager.js:681-682 与 :758-759，
+// _buildIndex/_appendEntry 均 byId.set(entry.id, entry) + leafId = entry.id，全库无
+// parseInt/形态校验类消费；pi 自身 id 生成 = randomUUID().slice(0,8)，同 8-hex 形态）。
+// 依据条目：docs/architecture/session-import-sources.md §5-I8。
 const ENTRY_ID_RADIX = 16
 const ENTRY_ID_WIDTH = 8
 

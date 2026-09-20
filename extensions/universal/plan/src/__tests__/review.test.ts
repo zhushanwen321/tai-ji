@@ -85,8 +85,8 @@ function setup(state?: PlanState) {
 
   if (state) sessions.set("test-session", state);
 
-  const exec = (params: Record<string, unknown>) =>
-    executeFn!("tc0", params, undefined, undefined, ctx);
+  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
+    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, sessions, ctx, controllers, exec };
 }
 
@@ -223,6 +223,50 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     expect(hungSignal).toBe(opts.signal);
     // select settled 后 controller 即弃（注册表不留已 settled 的条目）
     expect(controllers.has("test-session")).toBe(false);
+  });
+});
+
+describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8）", () => {
+  /** select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined */
+  function selectHonoringSignal(ctx: { ui: { select: unknown } }): void {
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+      (_title: string, _options: string[], opts: { signal?: AbortSignal }) =>
+        new Promise<string | undefined>((resolve) => {
+          if (opts.signal?.aborted) {
+            resolve(undefined);
+            return;
+          }
+          opts.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+        }),
+    );
+  }
+
+  it("submit-review 挂起窗口内 turn abort → PLAN_REVIEW_MARKER select 解散 → cancelled result（非批准）", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    selectHonoringSignal(ctx);
+
+    const turn = new AbortController();
+    const pending = exec({ action: "submit-review" }, turn.signal);
+    turn.abort();
+    const res = await pending;
+
+    expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
+    // A9 语义：取消 ≠ 批准，result 文本显式禁止实施
+    expect(res.content[0].text).toContain("NOT an approval");
+  });
+
+  it("execute 进入时 turn signal 已 abort → controller 即刻置 abort 态，select 首行短路解散", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    selectHonoringSignal(ctx);
+
+    const turn = new AbortController();
+    turn.abort();
+    const res = await exec({ action: "submit-review" }, turn.signal);
+
+    expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
   });
 });
 

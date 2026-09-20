@@ -103,6 +103,7 @@ export interface SessionImportSource {
 | I5 | **错误码复用优先**：现有清单（`import_source_missing/invalid_session/marker_filename/dir_unreadable/already_imported/target_conflict/copy_failed/project_invalid/db_path_forbidden`）覆盖「源缺失/会话无效/不可读/重复/写失败/dbPath 白名单外」语义时不得新增；错误信息必须携带恢复指引所需的上下文（如 schema 版本）。知情降级走 `ImportReply.warning: 'conversion_degraded'` 通道，不走 error | 错误码膨胀、renderer 文案映射失同步 |
 | I6 | **只读源数据**：对源系统（zcode 宿主库等）严格只读连接（sqlite `readOnly: true`；WAL 模式下只读不阻塞源运行）。taiji 自有写入只落在 sessions 目录与 sidecar | 破坏宿主 coding-agent 运行 |
 | I7 | **无法保真的内容显式降级**：源有而 pi 格式无对应的内容（二进制 artifact 引用、UI 事件等）——丢弃 + degradations 登记 + warning，**禁止伪造**（如为无摘要文本的源压缩记录伪造 pi compaction summary 会污染 LLM 上下文） | 导入产物携带伪造内容误导续聊 |
+| I8 | **自造 entry id 合法性**：pi 对 session 内 entry id **零格式语义解析**（消费点全为 opaque map key / leaf 指针 / 相等比较；pi 0.84.4 `dist/core/session-manager.js:681-682,758-759`——`_buildIndex`/`_appendEntry` 均 `byId.set(entry.id, entry)` + `leafId = entry.id`，自身 id 生成 = `randomUUID().slice(0,8)`）。导入源转换器据此可自造确定性 id 链（zcode 源：`zcode-import/converter.ts` EntryChain——8-hex 递增 + parentId 顺序链） | pi 未来版本若给 entry id 引入格式语义（时间戳编码/字典序排序等），自造 id 链产物语义漂移——pi 版本 bump 探针族重验覆盖（C-proc-08） |
 
 ## 6. zcode 源格式速查（探明事实沉淀）
 

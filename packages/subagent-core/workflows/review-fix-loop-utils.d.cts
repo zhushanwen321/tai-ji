@@ -165,6 +165,13 @@ export declare function findNeedsRedesign(
   maxFixAttempts: number,
 ): Array<{ issue_id: string; [key: string]: unknown }>;
 export declare function parseResult(raw: unknown): Record<string, unknown>;
+export declare function normalizeGroupEntry(
+  x: unknown,
+): { issueIds: string[]; id?: string; note?: string } | null;
+export declare function reconcileGroups(
+  rawGroups: Array<{ issueIds: string[]; id?: string; note?: string }> | undefined | null,
+  activeEntries: Array<{ id: string; files?: string[]; [key: string]: unknown }>,
+): Array<{ id: string; issueIds: string[]; files: string[]; note: string }>;
 export declare function normalizeAggregatorResult(raw: unknown): {
   must_fix: number;
   suggestion: number;

@@ -2473,6 +2473,26 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     const out = reconcileGroups([{ issueIds: ["MF-1", "GHOST"] }], entries);
     expect(out.some((g) => g.issueIds.includes("GHOST"))).toBe(false);
   });
+  it("重复认领去重：同 id 进两组且该 id files 为空（相交合并不触发）→ 后组剔空丢弃", () => {
+    // MF-4 files 为空：不去重时两组文件集 [src/a.ts] vs [] 恒不相交，③ 合并循环
+    // 不触发，MF-4 会被两个并行 fixer 认领并发修
+    const es = [
+      { id: "MF-1", files: ["src/a.ts"] },
+      { id: "MF-4", files: [] },
+    ];
+    const out = reconcileGroups([{ issueIds: ["MF-1", "MF-4"] }, { issueIds: ["MF-4"] }], es);
+    expect(out).toEqual([{ id: "G1", issueIds: ["MF-1", "MF-4"], files: ["src/a.ts"], note: "" }]);
+  });
+  it("重复认领部分去重：后组保留未认领 id，去重后文件仍相交 → 交给合并闭包", () => {
+    const es = [
+      { id: "MF-1", files: ["src/a.ts"] },
+      { id: "MF-2", files: ["src/a.ts", "src/b.ts"] },
+    ];
+    const out = reconcileGroups([{ issueIds: ["MF-1"] }, { issueIds: ["MF-1", "MF-2"] }], es);
+    expect(out).toEqual([
+      { id: "G1", issueIds: ["MF-1", "MF-2"], files: ["src/a.ts", "src/b.ts"], note: " (files overlap, defensively merged)" },
+    ]);
+  });
 });
 
 describe("buildAggregatorPrompt findings/groups（分组并行链路 prompt 段）", () => {

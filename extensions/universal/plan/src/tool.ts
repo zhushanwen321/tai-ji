@@ -226,10 +226,34 @@ function renderPlanResult(
       const body = fg("dim", `  ${details.reason}`);
       return new Text(header + body, 0, 0);
     }
+
+    // 兜底：旧版本持久化 entry 的 details 形态（如已删除的 list-template）不在
+    // 现版 PlanDetails 联合内——switch 落空返回 undefined 会让 pi TUI 渲染循环
+    // 对 undefined 调 .render() 直接 TypeError（pi-tui box.js render 无守卫）。
+    // 历史会话重开同样要渲染旧 entry，任意历史形态都必须产出组件。
+    default:
+      return new Text(firstContentText(result), 0, 0);
   }
 }
 
 // ── Action executors (one per switch case) ─────────────────────────
+
+/**
+ * 把 pi execute 的 turn abort 信号级联到挂起 select 的 controller（对齐同协议
+ * 家族 ask-user / scheduler 的 signal 透传）：turn abort（用户 stop / goal 取消 /
+ * compaction）时解散挂起的 submit-review / complete 对话框——select resolve
+ * undefined 走各处既有的 cancelled 分支，语义与 controllers registry 联动 abort
+ * 一致。controller 已 settled 后再 abort 是 no-op；listener 挂在 turn 生命周期
+ * 内的 signal 上且 once，无跨 turn 泄漏。
+ */
+function cascadeTurnAbort(controller: AbortController, signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    // 进入 execute 时 turn 已 abort：直接置 abort 态，select 首行短路 resolve undefined
+    controller.abort();
+    return;
+  }
+  signal?.addEventListener("abort", () => controller.abort(), { once: true });
+}
 
 /** Execute result envelope (shared shape returned by every action). */
 interface ActionResult {
@@ -409,6 +433,7 @@ async function executeSubmitReview(
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
+  signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
   // E6 双守卫：状态门优先于内容门（退出后任何动作都不该发生）。
   // 文本语义按 A9 真机事故收紧：旧文「Wrap up the current task directly」被 LLM
@@ -461,6 +486,7 @@ async function executeSubmitReview(
   // E10 生命周期钉死：每次发挂起 select 新建 controller（禁复用已 abort 的——
   // pi 对已 abort signal 短路立即 resolve undefined）
   const controller = freshAbortController(controllers, sessionId);
+  cascadeTurnAbort(controller, signal);
   const payload = JSON.stringify({ docs: state.docs } satisfies PlanReviewRequest);
   const choice = await ctx.ui.select(PLAN_REVIEW_MARKER, [payload], { signal: controller.signal });
   // select 已 settled，controller 即弃（注册表不留已 settled 的 controller）
@@ -496,7 +522,7 @@ async function executeSubmitReview(
   switch (response.decision) {
     case "approve":
       // approve → 走现状 complete 流程（执行方式 select 同样挂 signal）
-      return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers);
+      return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers, signal);
 
     case "revise": {
       // 显式 deliverAs: 'steer' 必须传——pi 的 sendUserMessage 在 isStreaming 时
@@ -627,6 +653,7 @@ async function resolveCompleteChoice(
   ctx: ExtensionContext,
   controllers: PlanAbortControllers,
   sessionId: string,
+  signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
   if (!ctx.hasUI) {
     return { kind: "mode", chosenMode: "develop" };
@@ -640,6 +667,7 @@ async function resolveCompleteChoice(
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
   // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
+  cascadeTurnAbort(controller, signal);
 
   let chosenLabel: string | undefined;
   if (isTaijiHost() && ctx.mode === "rpc") {
@@ -711,8 +739,9 @@ async function executeComplete(
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
+  signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
-  const choice = await resolveCompleteChoice(ctx, controllers, sessionId);
+  const choice = await resolveCompleteChoice(ctx, controllers, sessionId, signal);
   if (choice.kind === "cancelled") {
     return choice.result;
   }
@@ -797,7 +826,7 @@ export function registerPlanTool(
     async execute(
       _toolCallId: string,
       params: Record<string, unknown>,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<{ content: Array<{ type: "text"; text: string }>; details: PlanDetails }> {
@@ -818,10 +847,10 @@ export function registerPlanTool(
           return executeRegisterDoc(pi, params, state);
 
         case "submit-review":
-          return await executeSubmitReview(pi, ctx, state, sessions, sessionId, projectDir, controllers);
+          return await executeSubmitReview(pi, ctx, state, sessions, sessionId, projectDir, controllers, signal);
 
         case "complete":
-          return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir, controllers);
+          return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir, controllers, signal);
 
         case "abort":
           return executeAbort(pi, sessions, sessionId, ctx);

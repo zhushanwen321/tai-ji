@@ -40,6 +40,8 @@ import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
 
 import { detectGoalCapability, handlePlanComplete } from "../compact.js";
@@ -75,7 +77,8 @@ function setup() {
     ui: { select: vi.fn(), notify: vi.fn() },
   };
 
-  const exec = (params: Record<string, unknown>) => executeFn!("tc0", params, undefined, undefined, ctx);
+  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
+    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, sessions, controllers, ctx, exec };
 }
 
@@ -193,6 +196,60 @@ describe("registerPlanTool", () => {
     });
   });
 
+  // --- renderResult 兜底（MF-1-7 旧持久化 details 形态）---
+  describe("renderResult fallback for legacy details forms", () => {
+    /** mock theme：renderPlanResult 只消费 fg，直通便于断言纯文本 */
+    const renderTheme = {
+      fg: (_token: string, text: string) => text,
+    } as unknown as Theme;
+
+    /** 注册时捕获的 renderResult（真实签名 (result, options, theme)） */
+    function renderFn(pi: { registerTool: unknown }): (
+      result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+      options: unknown,
+      theme: Theme,
+    ) => { render: (width: number) => string[] } {
+      const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        renderResult: (
+          result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+          options: unknown,
+          theme: Theme,
+        ) => { render: (width: number) => string[] };
+      };
+      return tool.renderResult;
+    }
+
+    it("旧 action=list-template details（已删 action 的历史 entry）渲染不抛、回落 content 文本", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      // git 2ab33c46c 旧版形态：details.action="list-template" 不在现版 PlanDetails 联合内。
+      // 修复前 switch 落空返回 undefined → pi TUI 渲染循环对 undefined 调 .render() TypeError
+      const result = {
+        content: [{ type: "text", text: "Available templates: feature-plan, bugfix" }],
+        details: { action: "list-template", templates: ["feature-plan", "bugfix"] },
+      };
+
+      const component = render(result, { expanded: false }, renderTheme);
+
+      expect(component).toBeInstanceOf(Text);
+      expect(component.render(400).join("\n")).toContain("Available templates: feature-plan, bugfix");
+    });
+
+    it("任意未知 action 形态同样回落 content 文本（防御未来再删 action）", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      const result = {
+        content: [{ type: "text", text: "legacy entry" }],
+        details: { action: "create-template" },
+      };
+
+      const component = render(result, { expanded: false }, renderTheme);
+
+      expect(component).toBeInstanceOf(Text);
+      expect(component.render(400).join("\n")).toContain("legacy entry");
+    });
+  });
+
   // --- complete ---
   describe("complete", () => {
     beforeEach(() => {
@@ -226,6 +283,29 @@ describe("registerPlanTool", () => {
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Modify the plan first");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+    });
+
+    it("turn abort during the pending execution-method select dissolves the dialog → complete-cancelled (MF-1-8)", async () => {
+      const { exec, ctx, pi } = setup();
+      // select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：
+      // signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+        (_title: string, _labels: string[], opts: { signal?: AbortSignal }) =>
+          new Promise<string | undefined>((resolve) => {
+            if (opts.signal?.aborted) {
+              resolve(undefined);
+              return;
+            }
+            opts.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+          }),
+      );
+      const turn = new AbortController();
+      const pending = exec({ action: "complete" }, turn.signal);
+      turn.abort();
+      const res = await pending;
+      expect(res.details.action).toBe("complete-cancelled");
+      expect(res.details.reason).toBe("cancelled");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
