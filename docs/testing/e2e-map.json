@@ -189,14 +189,38 @@
       ],
       "layer": "L1",
       "assets": [
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/stores/plan-store.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-plan-drawer-sync.test.ts" },
-        { "kind": "spec", "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/stores/plan-store.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-plan-drawer-sync.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -762,6 +786,55 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+    },
+    {
+      "id": "E2E-PLUGINCONTRACT-01",
+      "summary": "verify-plugin-contract：插件 API 契约硬化脚本轨（CT-D2 命令链+复合键防劫持 / CT-D1 session 事件端到端+events 降级 / CT-D1b 激活订阅定向投递）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/**",
+        "packages/runtime/src/transport/**",
+        "resources/plugins/**",
+        "scripts/verify-plugin-contract.sh",
+        "scripts/bundle-extensions.mjs",
+        "scripts/prepare-builtin-plugins.sh"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-plugin-contract.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "bash scripts/verify-plugin-contract.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（2026-09-20 阶段6收尾裁决，impl-plan 残留风险 #5 闭环）：开发期按改动面手工跑（验收计划表回归项），不在 CI 门禁（真实 pi 子进程链路，CI 只跑 unit 轨同口径）；自含 pnpm install、隔离 TAIJI_AGENT_DATA_DIR、空载串行；CT-D1b 段 SDK API 未就位时 SKIP 不计失败（u5b 已落地转硬 PASS）；标记行协议与 exit code 一致；scope 含插件装载链两脚本（bundle-extensions 引擎副本重建 + prepare-builtin-plugins 插件装载前置，u6a 验收串联项）——链变更随契约脚本一并回归"
+    },
+    {
+      "id": "E2E-SAMPLING-01",
+      "summary": "render-sampling 渲染采样管道：真机渲染验收/基线采集共用管道（设计期工具，R3 归档 docs/testing/render-sampling.md）",
+      "scope": [
+        "scripts/render-sampling/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/cli.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/lib.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（人工预飞形态——管道冒烟需真机 CDP：node scripts/render-sampling/cli.mjs --cdp-port <端口> --sample <样本.md> --out <目录> --name <名>；改管道本身时按 docs/testing/render-sampling.md 预飞纪律人工跑通）",
+      "owner": "docs/testing",
+      "authority": "docs/testing/render-sampling.md",
+      "note": "R3 归档态（2026-09-20 收尾登记）：管道六环节 SSOT = render-sampling.md，脚本与文档同 commit 维护；场景脚本自写不进本目录；on-diff = 改管道本身时提醒预飞，无独立 CI 环节"
     }
   ]
 }
