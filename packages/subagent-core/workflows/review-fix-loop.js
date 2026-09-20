@@ -1,6 +1,12 @@
 // review-fix-loop.js — 通用多批审查-修复循环（内置 workflow）
 //
-// 模式：多批（batch）串行，批内循环（round）：并行 review → aggregate → fix → 重审。
+// 模式：多批（batch）串行，批内循环（round）：并行 review（4 个一批分批并行，
+// REVIEWER_BATCH）→ aggregate（去重合并 + 修复分组，独立 phase）→ fix（按分组
+// 并行派发，同时最多 FIXER_CONCURRENCY 组；统一显式路径 commit）→ 重审。
+// 数据传递 = 文件总线：各角色产物全部落盘在 run 目录（reviewer 报告 /
+// aggregated.md / aggregate-4-fixer-<k>.md），agent 之间不内联传递内容；schema
+// 返回值只承载控制数据（计数/路径/对账/分组 id）。脚本侧对 per-fixer 文档做
+// 存在性校验 + 从 schema 数据确定性补写（文件总线的可靠性锚点）。
 // 批次用于表达前置依赖（fallow 静态分析等前置检查必须先完成，后续审查才有意义）。
 // 修复范围 = 全部等级（must-fix + suggestion/minor）；批内某 agent 已无任何等级问题
 // （must-fix 与 suggestion 全 0）则后续轮跳过，优化 token 效率。终止/收敛判定仍以
@@ -45,7 +51,7 @@ description: >-
   多批串行审查-修复循环：批内并行 review 聚合全部等级问题（must-fix + suggestion）后迭代修复直到 clean，终止判定以 must-fix 驱动且要求 suggestion 同样归零（唯一带写操作与 commit 副作用的内置 workflow，autoCommit 默认 false）
 when: 用户要 review 并迭代修复至 clean
 notFor: 单纯审查不改代码
-phases: [Review, Fix]
+phases: [Review, Aggregate, Fix]
 parameters:
   type: object
   properties:
@@ -125,6 +131,8 @@ const {
   translateReconSets,
   reconcileIssues,
   normalizeReviewResult,
+  normalizeGroupEntry,
+  reconcileGroups,
   computeKnownRemaining,
   checkConvergence,
   findNeedsRedesign,
@@ -245,6 +253,11 @@ const rawBatchNames = typeof $ARGS.batchNames === "string" && $ARGS.batchNames.t
   : [];
 const BATCH_NAMES = resolveBatchNames(rawBatchNames, BATCHES, fail);
 
+// 并发分批（2026-09-20 用户指定）：review 阶段批内 agent 分批并行，每 REVIEWER_BATCH
+// 个一批（批间串行）；fix 阶段按聚合分组并行派发，同时最多 FIXER_CONCURRENCY 组。
+const REVIEWER_BATCH = 4;
+const FIXER_CONCURRENCY = 3;
+
 // ── Schemas ─────────────────────────────────────────────────────────
 
 const reviewerSchema = {
@@ -271,6 +284,8 @@ const reviewerSchema = {
   // T9 前缀稳定化（tier-1 6.9）：required 恒含 reconciliation——schema JSON 逐字嵌入
   // appendSystemPrompt，R1↔R2+ 分叉会造成 system 段字节差异（消息级缓存前缀失效）。
   // R1 的合规输出 = 空数组（prompt 动态段明示）。
+  // findings 不走 schema 返回（文件总线：审查结果与修复指南全部落在报告文档里，
+  // aggregator 读文档消费；schema 只承载控制数据——计数/路径/对账）。
   required: ["report_file", "must_fix", "suggestion", "reconciliation"],
 };
 
@@ -313,6 +328,23 @@ const aggregatorSchema = {
         ],
       },
       description: "Issue ids of the deduplicated must-fix list (MF-1..N), matching the first column of the markdown table",
+    },
+    // 修复分组（并行 fix 派发计划）：optional——键缺失/空时 reconcileGroups 兜底
+    // 全部活跃问题归一组（退化 = 旧单 fixer 行为）；issueIds 引用 must_fix_ids 的
+    // 表格号，组间文件必须不相交（workflow 确定性校验并合并相交组）。
+    groups: {
+      type: "array",
+      description: "Fix dispatch groups covering every adjudication=evidence issue id exactly once (empty array when none); groups are fixed in parallel so their file sets must not overlap",
+      items: {
+        type: "object",
+        required: ["issueIds"],
+        properties: {
+          id: { type: "string", description: "Group label (G1, G2, ...)" },
+          issueIds: { type: "array", items: { type: "string" }, description: "must_fix_ids ids assigned to this group" },
+          files: { type: "array", items: { type: "string" }, description: "Files touched by this group (advisory; workflow re-derives from issue files)" },
+          note: { type: "string", description: "One-line grouping rationale (same file / same module / same root cause)" },
+        },
+      },
     },
     fixes_caution: {
       type: "array",
@@ -776,11 +808,20 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }
     }
 
-    log("Review: " + active.map((d) => d.name).join(", ") + " (" + active.length + " agent(s) in parallel)...");
+    log("Review: " + active.map((d) => d.name).join(", ") + " (" + active.length + " agent(s), " + REVIEWER_BATCH + " per batch)...");
     const calls = active.map((def) => buildReviewCall(def, round, maxRounds, batchIndex, roundDir, scopedClean.has(def.name)));
     const phaseTimings = { review: null, aggregate: null, fix: null };
     const reviewT0 = Date.now();
-    const allRaw = await parallel(calls.map(runReviewAgent));
+    // 分批并行（REVIEWER_BATCH 个一批，批间串行）：allRaw 与 calls 保持一一对应
+    // （分批 push 顺序 = calls 顺序），下游 per-agent 结果区分与 recordCall 不受影响。
+    const allRaw = [];
+    for (let ci = 0; ci < calls.length; ci += REVIEWER_BATCH) {
+      const chunk = calls.slice(ci, ci + REVIEWER_BATCH);
+      log("  review batch " + (Math.floor(ci / REVIEWER_BATCH) + 1) + "/" + Math.ceil(calls.length / REVIEWER_BATCH)
+        + ": " + chunk.map((c) => c.description).join(", "));
+      const part = await parallel(chunk.map(runReviewAgent));
+      allRaw.push(...part);
+    }
     phaseTimings.review = [reviewT0, Date.now()];
     // rfl 仪表：本轮全部 reviewer 调用落 calls[]（allRaw 与 calls 一一对应，parallel 语义）
     for (let i = 0; i < allRaw.length; i++) {
@@ -926,6 +967,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // ── Aggregate（内置 prompt，不依赖任何 agent.md） ─────────
     // rfl T7/T8：prevFixResult 作打分材料（R2+ 聚合给上轮 fix 打 LLM 三维度分）；
     // model 用 AGG_MODEL（可降档参数，缺省 = 主模型，行为与现状一致）。
+    phase("Aggregate");
     const aggT0 = Date.now();
     const aggPrompt = buildAggregatorPrompt({
       header: "Batch " + batchIndex + "/" + BATCHES.length + " Round " + round + "/" + maxRounds + " — AGGREGATE REVIEWS",
@@ -1359,15 +1401,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       break;
     }
 
-    // ── Fix ─────────────────────────────────────────────────
+    // ── Fix（按聚合分组并行派发，FIXER_CONCURRENCY 组同时） ────
     phase("Fix");
-    let reportContent;
-    try {
-      reportContent = fs.readFileSync(agg.report_file, "utf-8");
-    } catch {
-      reportContent = "(could not read aggregated report)";
-    }
-
     let prevHead = "";
     try {
       prevHead = require("child_process").execSync(
@@ -1377,78 +1412,140 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       // 非 git 项目（如纯文档目录）：prevHead 为空，跳过 modifiedFiles 统计
     }
 
+    // 并行 fixer 不各自 commit（争 git index 锁 + 显式路径互相污染）——autoCommit 时
+    // 各组改完留工作区，工作流收集全部 affected_files 统一显式 add + 单次 commit。
     const commitInstr = autoCommit
-      ? "- After all fixes, stage ONLY the files you modified: `git add <file1> <file2> ...` (explicit paths).\n" +
-        "- NEVER use `git add -A` or `git add .` — the workspace may contain unrelated untracked files.\n" +
-        "- Commit with message: `fix: review batch " + batchIndex + " round " + round + " — " + mustFix + " must-fix + " + suggestion + " suggestion`"
+      ? "- Do NOT commit yourself. Leave the fixes in the working tree; the workflow stages your\n" +
+        "  reported affected_files (explicit paths, NEVER git add -A / git add . — the workspace may\n" +
+        "  contain unrelated untracked files) and commits once after all parallel groups finish."
       : "- Do NOT commit. Leave the fixes in the working tree (autoCommit=false).";
 
-    // A3（guidance 链最后一跳）：活跃条目中带非空 guidance 的清单——构造确定性通道
-    // 传给 fixer（reportContent 正文之外，per-issue 直达）。W2：先 filterActiveIds 过滤
-    //（与修复队列/ES3 校验同口径）——降级条目（adjudication downgraded/unverified）的
-    // guidance 不再以 "MUST-FIX GUIDANCE" 标题混给 fixer（口径不一致会诱导修复已裁决
-    // 噪声）。normalize 后条目均为对象；string 旧格式（经 fallback 等路径）无 guidance
-    // 自然跳过；must_fix_ids 为 undefined（fallback 路径）时 activeGuidanceIds 为空集
-    // → fixGuidance 仍为空清单。
-    const activeGuidanceIds = new Set(filterActiveIds(agg.must_fix_ids || []));
-    const fixGuidance = (agg.must_fix_ids || [])
-      .filter((e) => e && typeof e === "object" && typeof e.guidance === "string" && e.guidance.trim()
-        && activeGuidanceIds.has(e.id))
-      .map((e) => ({ id: e.id, guidance: e.guidance }));
+    // A3（guidance 链最后一跳，文件总线形态）：aggregator 聚合去重时合并各维度的
+    // guidance 为最具体表述（见 buildAggregatorPrompt），随组写入 aggregate-4-fixer-<k>.md，
+    // fixer 读文档定位修复点；脚本补写文档时 guidance 取自 must_fix_ids schema 数据。
+    // W2 口径保持：只传活跃条目（filterActiveIds 同口径过滤），降级条目的 guidance 不进 fixer。
+    const activeIdSetForFix = new Set(filterActiveIds(agg.must_fix_ids || []));
+    const activeEntriesForFix = (agg.must_fix_ids || [])
+      .filter((e) => e && typeof e === "object" && typeof e.id === "string" && activeIdSetForFix.has(e.id));
+
+    // 分组（确定性 reconcile：漏分兜底独立组 + 相交合并；groups 缺失时全部归一组
+    // = 旧单 fixer 行为退化）。活跃条目为 0（聚合数据不一致的罕见路径）时归一组
+    // 派一个 fixer 读报告处理 suggestion——与旧行为等价。
+    const fixGroups = reconcileGroups(agg.groups, activeEntriesForFix);
+    if (fixGroups.length === 0) {
+      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；活跃为 0 但 suggestion>0
+      // 的路径给单组空 issue 清单——fixer 按报告 suggestion 修复（buildFixPrompt 的
+      // suggestion 文件归属条款）。
+      fixGroups.push({ id: "G1", issueIds: [], files: [], note: "no active must-fix entries; suggestion-only round" });
+    }
+    log("Fix: " + fixGroups.length + " group(s) — " + fixGroups.map((g) => g.id + "(" + g.issueIds.length + ")").join(", "));
+
+    // 文件总线：fixer 的任务明细在 aggregate-4-fixer-<k>.md。由脚本从 groups +
+    // must_fix_ids schema 数据确定性渲染（覆盖写）——aggregator 的 groups 可能经
+    // reconcileGroups 合并/补漏（组号与 LLM 自写的文档会错位），脚本渲染保证文档与
+    // 派发组严格一致；合并后的 guidance 随文档直达 fixer。
+    const fixerDocPath = (g, k) => {
+      const docPath = roundDir + "/aggregate-4-fixer-" + k + ".md";
+      const issueObjs = g.issueIds
+        .map((id) => activeEntriesForFix.find((e) => e.id === id))
+        .filter(Boolean);
+      const body = [
+        "# Fixer task " + g.id + (g.note ? " — " + g.note : ""),
+        "",
+        "Parallel fixing: other groups run concurrently on disjoint files; touch only this group's files.",
+        "",
+      ];
+      for (const e of issueObjs) {
+        body.push("- " + e.id + " [" + (e.severity || "major") + "] " + (e.title || ""));
+        if (Array.isArray(e.files) && e.files.length) body.push("  files: " + e.files.join(", "));
+        if (typeof e.evidence === "string" && e.evidence) body.push("  evidence: " + e.evidence);
+        if (typeof e.guidance === "string" && e.guidance) body.push("  guidance: " + e.guidance);
+      }
+      body.push(
+        "",
+        "Verify-first: a claim that does not hold → report it rejected with evidence, do not blind-fix.",
+        "All severity levels in scope; only minor may be deferred (with a concrete reason).",
+        "self_check per fix: one grep command + the expected result.",
+      );
+      fs.writeFileSync(docPath, body.join("\n"), "utf-8");
+      return docPath;
+    };
 
     const fixT0 = Date.now();
-    const fixPromptBuilt = buildFixPrompt({
-      header: "Fix round " + round + " (batch " + batchIndex + ")",
-      reportContent,
-      fixPrompt,
-      commitInstr,
-      caution: agg.fixes_caution && agg.fixes_caution.length ? agg.fixes_caution : [],
-      guidance: fixGuidance,
-    });
-    const fxRaw = await agent({
-      prompt: fixPromptBuilt,
+    const groupCalls = fixGroups.map((g, gi) => ({
+      prompt: buildFixPrompt({
+        header: "Fix round " + round + " (batch " + batchIndex + ", group " + g.id + "/" + fixGroups.length + ")",
+        groupDocPath: fixerDocPath(g, gi + 1),
+        reportPath: typeof agg.report_file === "string" ? agg.report_file : "",
+        fixPrompt,
+        commitInstr,
+        caution: agg.fixes_caution && agg.fixes_caution.length ? agg.fixes_caution : [],
+      }),
       schema: fixSchema,
       // S4：fixAgent = agentRef 路径（主线程按路径加载 + frontmatter model 传播）；
       // 未传保持现状（通用 subagent + 内联 fixPrompt）。
       model: MODEL,
-      description: (FIX_DEF && FIX_DEF.name) || "fix",
+      description: ((FIX_DEF && FIX_DEF.name) || "fix") + "-" + g.id,
       // fix 不设 timeoutMs = 不限时（execute-options-mapper: undefined/<=0 → 不设超时）。
       // 带写操作（改项目代码）可能很久（大重构/多文件），不应被墙钟超时打断。
       returnMeta: true,
       ...(FIX_DEF && FIX_DEF.path ? { agent: FIX_DEF.path } : {}),
-    });
-    phaseTimings.fix = [fixT0, Date.now()];
-    recordCall(buildCallRecord({
-      batch: batchIndex, round, role: "fixer",
-      name: (FIX_DEF && FIX_DEF.name) || "fix", model: MODEL, prompt: fixPromptBuilt, promptMode: null, meta: fxRaw,
     }));
+    // 分批并行（FIXER_CONCURRENCY 组一批，批间串行）；fixRaws 与 groupCalls 一一对应
+    const fixRaws = [];
+    for (let fi = 0; fi < groupCalls.length; fi += FIXER_CONCURRENCY) {
+      const chunk = groupCalls.slice(fi, fi + FIXER_CONCURRENCY);
+      log("  fix batch " + (Math.floor(fi / FIXER_CONCURRENCY) + 1) + "/" + Math.ceil(groupCalls.length / FIXER_CONCURRENCY)
+        + ": " + chunk.map((c) => c.description).join(", "));
+      const part = await parallel(chunk.map((c) => agent(c)));
+      fixRaws.push(...part);
+    }
+    phaseTimings.fix = [fixT0, Date.now()];
+    for (let i = 0; i < fixRaws.length; i++) {
+      recordCall(buildCallRecord({
+        batch: batchIndex, round, role: "fixer",
+        name: groupCalls[i].description, model: MODEL, prompt: groupCalls[i].prompt, promptMode: null, meta: fixRaws[i],
+      }));
+    }
 
-    // returnMeta 下 fxRaw = {value, error}：先查 error（失败分支可达，MF-1），再对 value 做 parseResult
-    if (fxRaw && typeof fxRaw === "object" && fxRaw.error) {
-      // fix agent 调用失败（AgentRegistry not found / 超时等）。
-      // 与 review 路径（raw.error → review-failure）对齐：结构化终止而非静默当成功——
-      // 否则 fixed_count 缺失被 `?? mustFix` 回退，totalFixed 虚增且 must_fix 不降白跑轮次（MF-1）。
-      log("Fix agent failed, stopping.");
-      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-      state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-      saveState(state);
-      terminated = "fix-failure";
-      finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 — " + fxRaw.error;
-      batchIndex = BATCHES.length + 1;
-      break;
+    // returnMeta 下 fxRaw = {value, error}：先查 error（失败分支可达，MF-1），再对 value 做
+    // parseResult；各组逐个检查后合并（单组时与旧单 fixer 行为等价）。
+    const perGroupResults = [];
+    for (let gi = 0; gi < fixRaws.length; gi++) {
+      const raw = fixRaws[gi];
+      if (raw && typeof raw === "object" && raw.error) {
+        // fix agent 调用失败（AgentRegistry not found / 超时等）。
+        // 与 review 路径（raw.error → review-failure）对齐：结构化终止而非静默当成功——
+        // 否则 fixed_count 缺失被 `?? mustFix` 回退，totalFixed 虚增且 must_fix 不降白跑轮次（MF-1）。
+        log("Fix agent failed (" + groupCalls[gi].description + "), stopping.");
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+        saveState(state);
+        terminated = "fix-failure";
+        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 (" + groupCalls[gi].description + ") — " + raw.error;
+        batchIndex = BATCHES.length + 1;
+        break;
+      }
+      const fxOne = parseResult(raw.value);
+      const rOne = fxOne ? normalizeFixResult(fxOne) : null;
+      if (!rOne) {
+        log("Fix agent result invalid (" + groupCalls[gi].description + "), stopping.");
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+        saveState(state);
+        terminated = "fix-failure";
+        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 结果无效 (" + groupCalls[gi].description + ")";
+        batchIndex = BATCHES.length + 1;
+        break;
+      }
+      perGroupResults.push(rOne);
     }
-    const fx = parseResult(fxRaw.value);
-    const fixResult = fx ? normalizeFixResult(fx) : null;
-    if (!fixResult) {
-      log("Fix agent failed, stopping.");
-      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-      state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-      saveState(state);
-      terminated = "fix-failure";
-      finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 结果无效";
-      batchIndex = BATCHES.length + 1;
-      break;
-    }
+    if (terminated === "fix-failure") break; // 已结构化终止，退出 round 循环（MF-3）
+    const fixResult = {
+      fixed_count: perGroupResults.reduce((a, r) => a + (typeof r.fixed_count === "number" ? r.fixed_count : 0), 0),
+      fixes: perGroupResults.flatMap((r) => r.fixes || []),
+      deferred: perGroupResults.flatMap((r) => r.deferred || []),
+    };
 
     // ES3 硬校验（5.3 红线，恢复 mustFixIds 交叉校验——wave 3 后 agg.must_fix_ids
     // 已是标准字段）：(1) deferred 只允许 minor；(2) must-fix 必须全进 fixes[]（漏修
@@ -1484,6 +1581,43 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       const reason = typeof d.reason === "string" ? d.reason : "";
       if (reason.trim().length < 20) {
         log("WARN: deferred reason too short / no concrete cost description: " + JSON.stringify(d));
+      }
+    }
+
+    // 统一 commit（并行 fixer 不各自 commit——争 git index 锁 + 显式路径互相污染）：
+    // 全部组完成后，收集 fixes 的 affected_files 汇总去重，显式路径 add + 单次 commit。
+    // execFileSync 数组参数（路径是 LLM 产出，禁拼 shell 字符串防注入）。
+    if (autoCommit) {
+      const stagePaths = [];
+      for (const f of fixResult.fixes) {
+        if (Array.isArray(f.affected_files)) {
+          for (const af of f.affected_files) {
+            if (typeof af === "string" && af.trim() && !stagePaths.includes(af.trim())) stagePaths.push(af.trim());
+          }
+        }
+      }
+      if (stagePaths.length === 0) {
+        if (fixResult.fixes.length > 0) {
+          log("WARN: fixes reported no affected_files — cannot stage explicitly; changes left in the working tree (next round reviews via git diff)");
+        }
+      } else {
+        const commitMsg = "fix: review batch " + batchIndex + " round " + round + " — " + mustFix + " must-fix + " + suggestion + " suggestion";
+        try {
+          require("child_process").execFileSync("git", ["add", ...stagePaths], { stdio: "pipe", timeout: 30_000 });
+          require("child_process").execFileSync("git", ["commit", "-m", commitMsg], { encoding: "utf-8", timeout: 60_000 });
+          log("Unified commit (" + stagePaths.length + " files): " + commitMsg);
+        } catch (e) {
+          const stderrText = e && e.stderr ? String(e.stderr).trim() : "";
+          const errMsg = (e && e.message ? e.message : String(e)) + (stderrText ? " | stderr: " + stderrText : "");
+          log("Unified git add/commit failed: " + errMsg);
+          batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+          state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+          saveState(state);
+          terminated = "fix-failure";
+          finalMessage = "Batch " + batchIndex + " round " + round + ": 统一 commit 失败（改动在工作区/staged，未提交；恢复动作：人工检查 git status 后补提交或修 git 环境）— " + errMsg;
+          batchIndex = BATCHES.length + 1;
+          break;
+        }
       }
     }
 

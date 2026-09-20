@@ -425,7 +425,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       // m6：fix prompt 全等级修复文案（must-fix + minor 都修 / minor defer 需真实阻塞理由）+ 自检要求
       const fixPrompt = prompts[kinds.indexOf("fix")];
       expect(fixPrompt).toContain("Fix scope");
-      expect(fixPrompt).toContain("across severity levels");
+      expect(fixPrompt).toContain("all severity levels");
       expect(fixPrompt).toContain("Minor (suggestion) issues are in fix scope too");
       expect(fixPrompt).toContain("concrete blocker");
       expect(fixPrompt).toContain("self_check in each fixes[] entry MUST include");
@@ -482,7 +482,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(kinds.filter((k) => k === "aggregate").length).toBe(1);
       // fix prompt 携带全等级修复指令
       const fixPrompt = prompts[kinds.indexOf("fix")];
-      expect(fixPrompt).toContain("across severity levels");
+      expect(fixPrompt).toContain("all severity levels");
       expect(fixPrompt).toContain("Minor (suggestion) issues are in fix scope too");
     },
     RUN_TIMEOUT_MS,
@@ -1932,8 +1932,8 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
               must_fix_ids: [
                 { id: "MF-1", severity: "major", adjudication: "evidence",
                   files: ["src/a.ts"], evidence: "off-by-one", guidance: "fix the boundary check in parser" },
-                // W2：降级条目刻意带 guidance——修复前 fixGuidance 从 must_fix_ids 全量
-                // 提取，降级条目的 guidance 会以 MUST-FIX GUIDANCE 标题混给 fixer
+                // W2：降级条目刻意带 guidance——per-fixer 文档渲染与修复队列
+                //（filterActiveIds）同口径，降级条目的 guidance 不进 fixer 文档
                 { id: "MF-3", severity: "major", adjudication: "downgraded", note: "weak evidence at the time", guidance: "downgraded-noise guidance" },
               ],
               fixes_caution: [],
@@ -2002,19 +2002,26 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       const fixIdxs = kinds.map((k, i) => (k === "fix" ? i : -1)).filter((i) => i >= 0);
       expect(fixIdxs.length).toBe(3);
 
-      // A3 e2e：fix prompt 含 guidance 确定性通道（mock guidance 文本 + wrapUntrusted）
+      // A3 e2e（文件总线形态）：guidance 随 per-fixer 文档（aggregate-4-fixer-<k>.md，
+      // 工作流从 must_fix_ids 数据确定性渲染）直达 fixer——prompt 只给文档路径
       const fixPrompts = fixIdxs.map((i) => prompts[i]);
-      expect(fixPrompts[0]).toContain("MUST-FIX GUIDANCE (adjudicated, per-issue)");
-      expect(fixPrompts[0]).toContain('<untrusted source="must_fix_guidance">');
-      expect(fixPrompts[0]).toContain("- MF-1: fix the boundary check in parser");
-      // W2：降级条目（MF-3 downgraded）的 guidance 不进 MUST-FIX GUIDANCE 段——
-      // fixGuidance 与修复队列（filterActiveIds）同口径，不诱导修复已裁决噪声
-      //（reportContent 在此剧本不可读，prompt 中该文本唯一来源 = guidance 通道）
-      expect(fixPrompts[0]).not.toContain("downgraded-noise guidance");
+      const docOf = (fp: string): string => {
+        const m = fp.match(/(\S*aggregate-4-fixer-\d+\.md)/);
+        if (!m) throw new Error("fix prompt missing per-fixer doc path:\n" + fp.slice(0, 300));
+        return m[1]!;
+      };
+      expect(fixPrompts[0]).toContain("YOUR FIXER TASK DOCUMENT");
+      const doc0 = docOf(fixPrompts[0]);
+      const doc0Text = readFileSync(doc0, "utf-8");
+      expect(doc0Text).toContain("MF-1");
+      expect(doc0Text).toContain("guidance: fix the boundary check in parser");
+      // W2：降级条目（MF-3 downgraded）的 guidance 不进文档——修复队列
+      //（filterActiveIds）同口径渲染，不诱导修复已裁决噪声
+      expect(doc0Text).not.toContain("downgraded-noise guidance");
       // R2+（批 2 的 fix）同样生效
-      expect(fixPrompts[1]).toContain("- MF-3: patch the z guard");
-      // 无 guidance 条目的轮（agg3 无 guidance）→ 无该段（prompt 形状稳定）
-      expect(fixPrompts[2]).not.toContain("MUST-FIX GUIDANCE");
+      expect(readFileSync(docOf(fixPrompts[1]), "utf-8")).toContain("guidance: patch the z guard");
+      // 无 guidance 条目的轮（agg3 无 guidance）→ 文档无 guidance 行
+      expect(readFileSync(docOf(fixPrompts[2]), "utf-8")).not.toContain("guidance:");
     },
     RUN_TIMEOUT_MS,
   );
