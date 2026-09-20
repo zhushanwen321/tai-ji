@@ -68,6 +68,10 @@ composer 分发链（U02 重构）按「输入与发送」语义设计，命令�
 
 thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → 回执档位写 store）。
 
+> **[2026-09-20 局部改写]** §3.5 错误规格表的「切换 RPC reject → 无 toast」一行已由
+> `model-switch-live-provider-sync`（§3.4 错误规格表 / D7 提示分级）取代：键盘路径失败改为
+> **toast + 意图清理**，且新增「切换中」态（chip 转圈 + 禁用重复点击）。本文档其余部分未变。
+
 ## 3. 解决方案
 
 ### 3.1 终态（使用者视角）
@@ -183,14 +187,14 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 
 | 失败/边界 | 用户可见 | 内部行为 |
 |---|---|---|
-| 切换 RPC reject（网络/runtime 异常） | chip 保持旧值，无 toast | `catch` → `console.warn`（不写 store = 回执真值语义，既有 `switchModel`/`setThinkingLevel` 行为） |
+| 切换 RPC reject（网络/runtime 异常） | chip 保持旧值 + **toast（按错误码分文案）** | `catch` → 清意图目标 + `console.warn` 诊断 + 一次 toast（`modelSwitchToastKey` 单点映射）。**[2026-09-20 规格改写，由 model-switch-live-provider-sync §3.4/D7 取代]**：原规格「无 toast」被推翻——键盘循环是用户显式动作，失败必须闭环提示；且停止态切换现在会先 `ensureActive`（1–2s，15s 上界），失败形态包含分型错误码（`SESSION_ACTIVATE_*` / `MODEL_NOT_FOUND` / `PROVIDER_CREDENTIAL_MISSING` / `ENGINE_MODEL_MISSING`），静默失败会使用户反复按键。**每路径恰一个通知点**：键盘路径 = 本处；UI 路径（chip/popover）= 壳层包装 `onModelSelectUi`/`onThinkingSelectUi`（不 rethrow，故不经此处） |
 | `clipboard.writeText` reject（权限策略） | toast error「复制失败」 | catch 分支提示（键盘显式动作需闭环反馈，见决策 4） |
 | 最后一条 assistant 消息不存在（新 session 空流） | 无反应 | no-op，不弹 toast（避免空态噪音） |
 | 剪贴板覆盖（已接受代价，P0-20 登记） | ctrl+x 无条件覆盖用户剪贴板原内容（OS 全局态、无确认、无恢复通道） | pi 同语义（last-write-wins 覆盖式、无累积、量级极小） |
 | 最后一条 assistant 消息为错误消息 | 照常复制错误全文 + toast | 本项目错误以 assistant 消息入流（AGENTS.md 前端规范第 3 条），无法可靠区分「真回复」与「错误消息」（需内容判定，复杂度无收益）；pi 同语义（copy last assistant message 不挑内容） |
 | 复制内容为空串 | toast info 照常提示 | 写剪贴板空串无害 |
 | 模型/档位列表为空或单元素 | 无反应 | no-op（键已 preventDefault，无原生行为可泄漏） |
-| 已建态连按（RTT 内多按） | 每按前进一步（决策 8 意图目标续步），最终与逐次回执一致 | 每按一次 RPC（与 popover 连点同量级）；RPC reject 时清除意图目标回到真值起算；回执乱序最坏亚秒回跳由既有 state_changed 防抖快照收敛自愈（已核实既有机制，非新增） |
+| 已建态连按（RTT 内多按） | 每按前进一步（决策 8 意图目标续步），最终与逐次回执一致 | 每按一次 RPC（与 popover 连点同量级）；RPC reject 时清除意图目标回到真值起算并 toast 一次；回执乱序最坏亚秒回跳由既有 state_changed 防抖快照收敛自愈（已核实既有机制，非新增） |
 | 回执乱序（极小概率，runtime 双跳无串行队列） | chip 短暂回跳后自愈 | 既有 state_changed 防抖重拉收敛（影响面审第 2 轮核实的自愈闭环），不新增机制 |
 | toast 风暴（连按 ctrl+x） | 在列上限 5 条 + 4s 停留（既有限流） | 超限丢弃（`UI_TOAST_LIMITS` 既有机制） |
 
