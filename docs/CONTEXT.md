@@ -49,6 +49,9 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 ### 导入源（Import Source）
 session 导入统一入口的多 coding-agent 抽象：一个导入源负责「定位外部会话 → 校验 → 转换为合法 pi session JSONL」，实现 runtime 的 SessionImportSource SPI（`listCandidates` + `prepareImport`）；公共编排（互斥/去重/原子落盘/sidecar）由 ImportService 统一承担，导入完成广播由 handler 层在 reply 后发出。现役源：pi（外部 pi JSONL 原样复制）、zcode（宿主 SQLite 库转换）。导入产物落太极 sessions 目录后完全复用现有会话消费链（渲染/续聊/搜索），导入后续聊由 pi 引擎接管。**幂等键 = 产物 header.id**；**文件名不变量**：文件名剥 `.jsonl` 后最后 `_` 尾段 === header.id（源 id 含 `_` 须归一化）。扩展指南（新增源的步骤清单与不变量全集）：[docs/architecture/session-import-sources.md](architecture/session-import-sources.md)。
 
+### 消息投影（Message Projection）
+源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
+
 ### Agent Runtime
 taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命周期、协议翻译（pi stdin/stdout JSON RPC ↔ WebSocket）、session CRUD、配置持久化（provider/skill/agent）、model 查询。是 taiji 唯一的后端，所有业务逻辑和数据持久化都在这里。前端不直接和 pi 通信，前端不做业务决策。
 
