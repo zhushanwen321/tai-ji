@@ -222,6 +222,20 @@ export interface AckState {
   ackTurnStarted: boolean
   /** 30s 写盘自检定时器句柄（unref；session_start/shutdown 取消） */
   writeCheckTimer: ReturnType<typeof setTimeout> | null
+  /** 本次 ack 触发的任务 id（pending 在 message_start 即清空，30s 自检 / 边界通知仍需它拼去重键）；null = 本会话未发起过 ack */
+  taskId: string | null
+  /** 本次 ack 触发的任务名（如实通知文案插值；taskId 为兜底） */
+  taskName: string
+  /** 合成确认行正文（message_start 武装点与 sendMessage 共用，建任务期渲染一次缓存） */
+  ackText: string
+  /** 建任务期缓存的会话模型（武装点取覆写 provider/api；缺失 = 不注册覆写） */
+  model: SchedulerCurrentModel | undefined
+  /** 建任务期记录的会话文件路径（30s 自检 / 边界写盘判定的只读观测点；undefined = 记录时文件尚不存在） */
+  sessionFile: string | undefined
+  /** E6（注销抛错）后标记：下一个清理点重试一次注销 */
+  needsRetry: boolean
+  /** 可用性预计算结果缓存（每会话/每 provider 一次；providerId 随会话模型切换才失效） */
+  availability: { providerId: string; value: AckAvailability } | undefined
 }
 
 /**
