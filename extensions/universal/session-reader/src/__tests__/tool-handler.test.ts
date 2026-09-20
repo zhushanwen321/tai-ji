@@ -1040,7 +1040,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found（U9 统一错误面）', async () => {
+  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found + 完整 sa- id 重试指引（U9 统一错误面）', async () => {
     await makeFixtureSubagent(dir, 'sa-c8c8dfa8', {
       realSessionId: '019e6c96-dddd-eeee-ffff-0000000010a3',
     })
@@ -1048,6 +1048,10 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-c8c8' }, { agentDir: dir }),
     ).rejects.toThrow('zcode_record_not_found')
+    // 片段输入恢复路径在指引内可见（A4：ES2 原文案「用完整 sa- id 重试」的覆盖补全）
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-c8c8' }, { agentDir: dir }),
+    ).rejects.toThrow(/完整 sa- id（形如 `sa-xxxx`）后重试/)
   })
 
   it('sa-id 多 manifest 命中（数据异常）→ ES2 ambiguous（C4）', async () => {

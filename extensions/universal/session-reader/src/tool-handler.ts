@@ -43,7 +43,11 @@ import {
 import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
 import { readSessionHeaderIdSync } from './discovery/session-header.js'
 import { findZcodeEntryAnchor, type ZcodeAnchor } from './discovery/entry-anchor.js'
-import { listZcodeManifests, readZcodeManifest } from './discovery/zcode-manifest.js'
+import {
+  listZcodeManifests,
+  readZcodeManifest,
+  type ZcodeAnchorMissingReason,
+} from './discovery/zcode-manifest.js'
 import { assertZcodeDbPathAllowed, formatZcodeDbUnreadable } from './discovery/whitelist.js'
 import {
   buildFamilyFromFs,
@@ -305,10 +309,9 @@ async function resolveSaIdRoute(
 ): Promise<ResolveResult> {
   const zm = await readZcodeManifest(agentDir, session)
   if (zm.kind === 'anchor-missing') {
-    // 归因进结构化日志不进 LLM 可见面（§3.4）：readZcodeManifest 的三态信号不携带
-    // 缺失键名明细（U6 接口面），日志记 sa-id + kind（engineHandle 整体缺席 vs 缺键
-    // 的细分归因登记为已知偏差——细分需重读 manifest 自解析，walk 逻辑不重复实现）
-    logger.warn('zcode manifest anchor-missing', { saId: session })
+    // 归因进结构化日志不进 LLM 可见面（§3.4）：reason 逐键归因（missing-engineHandle /
+    // missing-sessionRef / missing-sessionId / missing-dbPath，见 zcode-manifest.ts）
+    logger.warn('zcode manifest anchor-missing', { saId: session, reason: zm.reason })
     throw err(formatZcodeAnchorMissing(session))
   }
   if (zm.kind === 'zcode') {
@@ -345,11 +348,17 @@ async function resolveSaIdRoute(
  * undefined）。判定与 entry-anchor.ts 的 zcodeAnchorOfEntry 双键判据同构，协议字面量
  * 同值（写侧 subagent-core record-entry.ts SUBAGENT_RECORD_CUSTOM_TYPE，漂移由
  * entry-anchor.test.ts 守卫）。
+ *
+ * engine 判别（D5，与 zcodeAnchorOfEntry 同口径）：`d.engine !== 'zcode'` 的记录
+ * （pi 形态——engine 缺省、sessionRef 无 dbPath）不是「zcode 锚不完整」，跳过不归因
+ * ——pi record 的 sessionRef 天然无 dbPath，误归因 missing-dbPath 会把「pi record 先于
+ * manifest settle 落盘」的正常窗口错报成 zcode_anchor_missing（旧版本产物指引不适用）；
+ * 正确归因 = undefined → 上层落 zcode_record_not_found。
  */
 async function classifyIncompleteEntryAnchor(
   candidateFiles: readonly string[],
   saId: string,
-): Promise<'missing-engineHandle' | 'missing-sessionRef' | 'missing-sessionId' | 'missing-dbPath' | undefined> {
+): Promise<ZcodeAnchorMissingReason | undefined> {
   for (const file of candidateFiles) {
     let content: string
     try {
@@ -363,6 +372,7 @@ async function classifyIncompleteEntryAnchor(
       if (typeof data !== 'object' || data === null) continue
       const d = data as Record<string, unknown>
       if (d.v !== 1 || d.id !== saId) continue
+      if (d.engine !== 'zcode') continue // pi 形态记录：非 zcode 锚残缺，跳过（D5 判别）
       const handle = d.engineHandle
       if (typeof handle !== 'object' || handle === null) return 'missing-engineHandle'
       const ref = (handle as Record<string, unknown>).sessionRef
@@ -527,7 +537,8 @@ function formatZcodeParamInvalid(id: string): string {
 function formatZcodeRecordNotFound(): string {
   return (
     `[zcode_record_not_found] 该 subagent 记录不可达（未落盘 / 已被 GC / 或不属于当前会话——兜底只在当前会话内）。` +
-    `\n👉 在它被派发的那个会话中读取；或用 session_read { action:"family" } 查其后代与关联；或换一个已完成的 subagent。`
+    `\n👉 在它被派发的那个会话中读取；或用 session_read { action:"family" } 查其后代与关联；或换一个已完成的 subagent；` +
+    `或确认输入为完整 sa- id（形如 \`sa-xxxx\`）后重试。`
   )
 }
 
@@ -555,7 +566,27 @@ function formatZcodeSchemaDrift(observed: string | undefined): string {
   )
 }
 
-/** 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 其余）。 */
+/**
+ * bun 驱动探测失败（§3.4 表第 8 行理论态）的 message：宿主既无 bun:sqlite 也无
+ * node:sqlite——zcode action 整体降级为本错误面（fail-fast + 日志），pi 链路不受影响。
+ * 错误码字面量为实施期命名（设计该行未定码名，形态对齐七码 `[zcode_*]` 惯例）。
+ */
+function formatZcodeHostUnsupported(detail: string): string {
+  return (
+    `[zcode_host_unsupported] 宿主运行时既无 bun:sqlite 也无 node:sqlite，zcode 会话读取不可用（理论态）。` +
+    `\n👉 无需 agent 动作——升级到 node≥22.13 或使用 bun 宿主即可恢复；pi 会话读取不受影响。` +
+    `\n(detail: ${detail})`
+  )
+}
+
+/**
+ * sqlite 驱动探测失败的消息特征（zcode-session-source sqlite-driver.ts 探测失败的
+ * 错误消息契约；该包不导出专用错误子类，reader 侧按消息特征单列识别——跨包漂移
+ * 由 zcode-session-source 的 sqlite-driver 源内字符串与本常量同步维护）。
+ */
+const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
+
+/** 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 其余）。 */
 function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
   if (e instanceof SqliteUnreadableError) {
     // attempted 链进 detail 不进指引正文（§3.4 可观测性：attempted 与 message 供日志/排障）
@@ -564,9 +595,16 @@ function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
   if (e instanceof ZcodeSchemaDriftError) {
     return formatZcodeSchemaDrift(e.observedVersion)
   }
+  const message = toErrorMessage(e)
+  // 驱动探测失败理论态单列（§3.4 第 8 行）：不与 schema 漂移混淆——指引动作不同
+  // （环境恢复 vs 升级 taiji）。fail-fast + 结构化日志（理论态触发即留痕）。
+  if (message.includes(SQLITE_DRIVER_UNSUPPORTED_MARK)) {
+    logger.warn('zcode sqlite driver unsupported in host runtime', { detail: message })
+    return formatZcodeHostUnsupported(message)
+  }
   // 其余查询期错误（data 列 JSON 非法等 schema 漂移域——sqlite-access 不静默跳过，
   // 映射权在消费侧）→ schema_drift 语义
-  return formatZcodeSchemaDrift(undefined) + `\n(detail: ${toErrorMessage(e)})`
+  return formatZcodeSchemaDrift(undefined) + `\n(detail: ${message})`
 }
 
 // ---------------------------------------------------------------------------
@@ -589,9 +627,11 @@ async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<P
     throw err(zcodeReadErrorMessage(e, agentDir))
   }
   try {
-    // 恢复成功不再是静默事件：结构化日志（恢复方式 + db 路径），不进 LLM 可见面
+    // 恢复成功不再是静默事件（§3.4 硬要求）：结构化日志（恢复方式 + db 路径），不进
+    // LLM 可见面。用 warn 而非 debug——L2/L3 是恢复降级路径，语义表 warn=内部降级与
+    // 失败（appendEntry 持久化）；debug 缺省 no-op 会让恢复成功重新变回静默事件。
     if (handle.via !== 'L1-direct') {
-      logger.debug('zcode session db recovered via recovery ladder', {
+      logger.warn('zcode session db recovered via recovery ladder', {
         dbPath: anchor.dbPath,
         via: handle.via,
       })

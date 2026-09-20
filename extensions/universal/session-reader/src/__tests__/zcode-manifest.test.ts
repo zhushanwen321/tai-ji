@@ -162,17 +162,31 @@ describe('readZcodeManifest 直读：失败信号（U9 错误码映射的归因�
     expect((await readZcodeManifest(agentDir, 'sa-abc')).kind).toBe('not-zcode')
   })
 
-  it('engineHandle 整体缺席 → anchor-missing（旧版本产物 / 孤儿 manifest）', async () => {
+  it('engineHandle 整体缺席 → anchor-missing + reason=missing-engineHandle（旧版本产物 / 孤儿 manifest）', async () => {
     writeManifest(
       'proj-a',
       'sa-abc.json',
       zcodeManifestJson({ id: 'sa-abc', engine: 'zcode', withEngineHandle: false }),
     )
 
-    expect((await readZcodeManifest(agentDir, 'sa-abc')).kind).toBe('anchor-missing')
+    const lookup = await readZcodeManifest(agentDir, 'sa-abc')
+    expect(lookup.kind).toBe('anchor-missing')
+    if (lookup.kind === 'anchor-missing') expect(lookup.reason).toBe('missing-engineHandle')
   })
 
-  it('sessionRef 缺 dbPath 键 → anchor-missing（部分回填的残余形态）', async () => {
+  it('sessionRef 整体缺席 → anchor-missing + reason=missing-sessionRef', async () => {
+    writeManifest(
+      'proj-a',
+      'sa-abc.json',
+      JSON.stringify({ id: 'sa-abc', rootSessionId: 'root-1', engine: 'zcode', engineHandle: { poolKey: 'shared' } }),
+    )
+
+    const lookup = await readZcodeManifest(agentDir, 'sa-abc')
+    expect(lookup.kind).toBe('anchor-missing')
+    if (lookup.kind === 'anchor-missing') expect(lookup.reason).toBe('missing-sessionRef')
+  })
+
+  it('sessionRef 缺 dbPath 键 → anchor-missing + reason=missing-dbPath（部分回填的残余形态）', async () => {
     // 手写 JSON：sessionRef 只有 sessionId 单键（zcodeManifestJson 的 ?? 兜底不适用此形态）
     writeManifest(
       'proj-a',
@@ -185,17 +199,21 @@ describe('readZcodeManifest 直读：失败信号（U9 错误码映射的归因�
       }),
     )
 
-    expect((await readZcodeManifest(agentDir, 'sa-abc')).kind).toBe('anchor-missing')
+    const lookup = await readZcodeManifest(agentDir, 'sa-abc')
+    expect(lookup.kind).toBe('anchor-missing')
+    if (lookup.kind === 'anchor-missing') expect(lookup.reason).toBe('missing-dbPath')
   })
 
-  it('sessionRef 键为空串 → anchor-missing（非空 string 才算锚）', async () => {
+  it('sessionRef 键为空串 → anchor-missing + reason=missing-sessionId（非空 string 才算锚）', async () => {
     writeManifest(
       'proj-a',
       'sa-abc.json',
       zcodeManifestJson({ id: 'sa-abc', sessionId: '', dbPath: DB_PATH }),
     )
 
-    expect((await readZcodeManifest(agentDir, 'sa-abc')).kind).toBe('anchor-missing')
+    const lookup = await readZcodeManifest(agentDir, 'sa-abc')
+    expect(lookup.kind).toBe('anchor-missing')
+    if (lookup.kind === 'anchor-missing') expect(lookup.reason).toBe('missing-sessionId')
   })
 
   it('subagents 根目录不存在 → not-zcode（不抛异常）', async () => {

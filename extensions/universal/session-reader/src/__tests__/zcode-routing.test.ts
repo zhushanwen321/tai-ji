@@ -199,6 +199,38 @@ function recordLine(entryId: string, saId: string, sessionRef: Record<string, st
   })
 }
 
+/**
+ * pi 形态的 subagent-record custom entry 行（回归 A1 instrument）：engine 键缺省 +
+ * sessionRef 无 dbPath——subagent-core record-entry.ts 的 pi 投影形态（engineHandle
+ * 可选、sessionRef 整体透传不枚举内部键；最小可信子集，跨包漂移由 entry-anchor.test 守卫）。
+ */
+function piRecordLine(entryId: string, saId: string): string {
+  return JSON.stringify({
+    type: 'custom',
+    customType: 'subagent-record',
+    id: entryId,
+    parentId: null,
+    data: {
+      v: 1,
+      id: saId,
+      agent: 'pi-agent',
+      task: 'pi task',
+      slug: 'pi-sub',
+      status: 'running',
+      mode: 'subagent',
+      startedAt: BASE_MS,
+      rootSessionId: ROOT_SESSION,
+      parentRecordId: null,
+      depth: 0,
+      turns: 0,
+      totalTokens: 0,
+      eventLog: [],
+      displayItems: [],
+      engineHandle: { sessionRef: { sessionId: SESS_A }, poolKey: 'shared' },
+    },
+  })
+}
+
 const HEADER_LINE = JSON.stringify({ type: 'session', id: 'main-session-1', cwd: '/proj' })
 const USER_LINE = JSON.stringify({
   type: 'message',
@@ -297,6 +329,36 @@ describe('变体 M：manifest 主路径（instrument：manifest 锚与 entry 锚
     expect(text).toContain('ZZQFIXTURE')
     expect(text).toContain('bash')
     expect(text).toContain('[custom:zcode-import:compaction]')
+    // A6 断言强化①：compaction custom entry 计数等式（fixture 恰 1 个压缩点）——
+    // 防「既不多」方向无防护（多插压缩点/重复渲染的实现在此失败）
+    expect((text.match(/\[custom:zcode-import:compaction\]/g) ?? []).length).toBe(1)
+    // A6 断言强化②：toolCall/toolResult 按 toolCallId 全配对（全文态 entries 直读——
+    // 摘要态 ToolResultSummaryEntry 不携带 toolCallId，无法配对）。converter 契约
+    // 「未完成 tool 整对丢弃防 dangling」在此以集合配对相等 + 双向 0 dangling 锚定。
+    const full = await handleSessionRead(
+      { action: 'detail', session: SA_M, turns: 'T000-T002', includeToolResult: true },
+      signals(),
+    )
+    const entries = (full.details as { entries: Array<Record<string, unknown>> }).entries
+    const callIds = new Set<string>()
+    const resultIds = new Set<string>()
+    for (const e of entries) {
+      const msg = e.message as { role?: unknown; content?: unknown; toolCallId?: unknown } | undefined
+      if (msg === undefined) continue
+      if (Array.isArray(msg.content)) {
+        for (const b of msg.content) {
+          if (b && typeof b === 'object' && (b as Record<string, unknown>).type === 'toolCall') {
+            const id = (b as Record<string, unknown>).id
+            if (typeof id === 'string') callIds.add(id)
+          }
+        }
+      }
+      if (msg.role === 'toolResult' && typeof msg.toolCallId === 'string') {
+        resultIds.add(msg.toolCallId)
+      }
+    }
+    expect(resultIds).toEqual(callIds) // 配对相等 = 无 toolCall 缺 result、无 result 悬空
+    expect(callIds.size).toBe(1) // fixture 恰 1 对（tc-1）——非平凡性锚（空集恒配对不构成证明）
   })
 
   it('search：ZZQFIXTURE 命中（canonical entries 走既有检索管线）', async () => {
@@ -363,6 +425,20 @@ describe('场景 5 八类失败（§3.4 表逐行 + 检查顺序三段递进）'
     writeLiveMainSession([recordLine('e1', 'sa-other-1', { sessionId: SESS_B, dbPath })])
     await expect(handleSessionRead({ action: 'result', session: SA_M }, signals())).rejects.toThrow(
       /zcode_record_not_found[\s\S]*派发的那个会话[\s\S]*family[\s\S]*换一个已完成/,
+    )
+  })
+
+  it('③b pi 形态 entry（engine 缺省、sessionRef 无 dbPath）在场 + manifest 缺位 → zcode_record_not_found（engine 判别防误归因 anchor_missing）', async () => {
+    // 回归 A1：pi record register() 先于 manifest settle 的窗口——manifest 缺位 +
+    // entry 为 pi 形态。pi record 不是「旧版本 zcode 产物」（导入对话框指引不适用），
+    // 必须落 zcode_record_not_found；误归因 missing-dbPath → zcode_anchor_missing 即红。
+    createZcodeDb(dbPath, '0.16.5', [sessBRows()])
+    writeLiveMainSession([piRecordLine('e-pi-1', SA_M)])
+    await expect(handleSessionRead({ action: 'result', session: SA_M }, signals())).rejects.toThrow(
+      /zcode_record_not_found/,
+    )
+    await expect(handleSessionRead({ action: 'result', session: SA_M }, signals())).rejects.not.toThrow(
+      /zcode_anchor_missing/,
     )
   })
 

@@ -41,18 +41,31 @@ export interface ZcodeManifestRecord extends ZcodeFamilyNode {
 }
 
 /**
+ * anchor-missing 的缺失键归因（§3.4：缺失键名进结构化日志——engineHandle 整体缺席 /
+ * 缺 sessionRef / 缺 sessionId / 缺 dbPath 归因不同：整体缺席多为旧版本产物，缺
+ * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写入面截断）。entry 兜底侧
+ * 的同构分类（tool-handler classifyIncompleteEntryAnchor）复用本类型单源。
+ */
+export type ZcodeAnchorMissingReason =
+  | 'missing-engineHandle'
+  | 'missing-sessionRef'
+  | 'missing-sessionId'
+  | 'missing-dbPath'
+
+/**
  * 定点直读的结果三态（discriminated result——错误码映射归路由单元 U9，本单元只给
  * 归因信号，§3.4 检查顺序第 0 段「定位链」）：
  * - `zcode`：engine==='zcode' ∧ sessionRef 双键齐 → 携带锚，继续 zcode 链（白名单闸 → 开库）；
  * - `not-zcode`：文件不存在 / 坏 JSON / `engine` 缺省或 `'pi'`（或非 string id）——
  *   该 sa-id 不是「zcode 单子」，交回调用方走今天的 pi 现路径（sessionFile + JSONL）；
  * - `anchor-missing`：engine==='zcode' 但 `engineHandle` 整体缺席或 `sessionRef` 缺键
- *   ——路由映射 `zcode_anchor_missing`（§3.4；缺失键名的归因由结构化日志承载）。
+ *   ——路由映射 `zcode_anchor_missing`（§3.4；缺失键名以 `reason` 逐键归因，由结构化
+ *   日志承载）。
  */
 export type ZcodeManifestLookup =
   | { kind: 'zcode'; anchor: ZcodeAnchor }
   | { kind: 'not-zcode' }
-  | { kind: 'anchor-missing' }
+  | { kind: 'anchor-missing'; reason: ZcodeAnchorMissingReason }
 
 /** manifest 顶层 JSON 的读取视图（守卫输入） */
 type ManifestJson = Record<string, unknown>
@@ -80,6 +93,19 @@ function zcodeAnchorOf(m: ManifestJson): ZcodeAnchor | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
   if (typeof dbPath !== 'string' || dbPath === '') return undefined
   return { sessionId, dbPath }
+}
+
+/**
+ * anchor-missing 的逐键归因（判定顺序与 zcodeAnchorOf 的键序一致——同一键序下
+ * 「首个不满足的键」即归因，两函数对同一 manifest 的 zcode/anchor-missing 判定互洽）。
+ */
+function zcodeAnchorMissingReason(m: ManifestJson): ZcodeAnchorMissingReason {
+  const handle = asObject(m.engineHandle)
+  if (!handle) return 'missing-engineHandle'
+  const ref = asObject(handle.sessionRef)
+  if (!ref) return 'missing-sessionRef'
+  if (typeof ref.sessionId !== 'string' || ref.sessionId === '') return 'missing-sessionId'
+  return 'missing-dbPath'
 }
 
 /** manifest 顶层富字段（旧 manifest 缺省 → undefined，不伪造） */
@@ -154,7 +180,7 @@ function parseManifestLookup(raw: string): ZcodeManifestLookup {
   const m = asObject(v)
   if (!m || !isZcodeEngine(m)) return { kind: 'not-zcode' } // engine 缺省 / 'pi' / 其他
   const anchor = zcodeAnchorOf(m)
-  if (!anchor) return { kind: 'anchor-missing' } // engineHandle 缺席 / sessionRef 缺键
+  if (!anchor) return { kind: 'anchor-missing', reason: zcodeAnchorMissingReason(m) } // 逐键归因
   return { kind: 'zcode', anchor }
 }
 
