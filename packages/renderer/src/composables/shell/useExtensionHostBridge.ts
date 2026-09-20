@@ -33,6 +33,7 @@ import { reactive, shallowReactive, shallowRef, watch } from 'vue'
 import {
   ContributionRegistry,
   createSessionScopedMap,
+  createSessionScopedMapFrom,
   EXTENSION_BRIDGE_TYPES,
   HeaderActionStore,
   InternalEventBus,
@@ -143,40 +144,13 @@ export function getExtensionBus(): InternalEventBus {
  * core 的 createSessionScopedMap 是 headless 纯 Map（刻意零 Vue 依赖）：外层 partitions 是
  * 普通 Map，computed 读路径 `get(sid)?.get(vid)` 在分区尚不存在时短路 undefined、零依赖建立，
  * 之后首个 viewUpdate 惰性建分区 + set 不触发 → 值永久 stale（panel.header 常挂组件时序直接命中）。
- * 本实现保持 SessionScopedMap 接口契约（core 零改动），外层 shallowReactive Map 的 get/set 被 Vue
- * 追踪：分区后建 → SET/ITERATE trigger → computed 重算。分区值仍由 init 工厂返回 reactive
- * 容器（in-place mutate 走 proxy set trap）——故外层用 shallowReactive（值已是 reactive，
- * 避免 reactive(Map) 的 deep unwrap 类型噪音与二次包装）。
+ * 实现复用 core 的接口骨架 createSessionScopedMapFrom（store 参数化形态）：外层传
+ * shallowReactive Map，get/set 被 Vue 追踪：分区后建 → SET/ITERATE trigger → computed 重算。
+ * 分区值仍由 init 工厂返回 reactive 容器（in-place mutate 走 proxy set trap）——故外层用
+ * shallowReactive（值已是 reactive，避免 reactive(Map) 的 deep unwrap 类型噪音与二次包装）。
  */
 function createReactiveSessionScopedMap<T>(init: () => T): SessionScopedMap<T> {
-  const partitions = shallowReactive(new Map<string, T>())
-
-  return {
-    get(sessionId: string): T | undefined {
-      return partitions.get(sessionId)
-    },
-    getOrDefault(sessionId: string): T {
-      let partition = partitions.get(sessionId)
-      if (!partition) {
-        partition = init()
-        partitions.set(sessionId, partition)
-      }
-      return partition
-    },
-    update(sessionId: string, fn: (t: T) => void): void {
-      const partition = this.getOrDefault(sessionId)
-      fn(partition)
-    },
-    cleanup(sessionId: string): void {
-      partitions.delete(sessionId)
-    },
-    has(sessionId: string): boolean {
-      return partitions.has(sessionId)
-    },
-    keys(): Iterable<string> {
-      return partitions.keys()
-    },
-  }
+  return createSessionScopedMapFrom(shallowReactive(new Map<string, T>()), init)
 }
 
 /**

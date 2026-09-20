@@ -9,7 +9,7 @@
  */
 export * from './types'
 export { InternalEventBus } from './internal-event-bus'
-export { createSessionScopedMap } from './utils/session-scoped-map'
+export { createSessionScopedMap, createSessionScopedMapFrom } from './utils/session-scoped-map'
 export type { SessionScopedMap } from './utils/session-scoped-map'
 export { MountPointRegistry } from './mount-point-registry'
 export type { MountPointHost } from './mount-point-registry'
