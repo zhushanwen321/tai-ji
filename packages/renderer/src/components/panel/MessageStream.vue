@@ -58,7 +58,7 @@
         :item-size="ESTIMATED_TURN_HEIGHT"
         :shift="isPrepend"
         :keep-mounted="pinnedIndexes"
-        :start-margin="showLoadMore && streamItems.length > 0 ? LOAD_MORE_RESERVED_HEIGHT : 0"
+        :start-margin="topBarReservedHeight"
         :scroll-ref="scrollEl ?? undefined"
         :key="props.sessionId"
         @scroll="onVirtuaScroll"
@@ -142,13 +142,19 @@
          条内文案 N = loadedTurns，「加载更早」走 [u6] 游标翻页通路（useLoadMoreHistory）。
          ref 供 dev-only 断言：实测高度 vs LOAD_MORE_RESERVED_HEIGHT 常量漂移检测（见 useConstantHeightAssert）。
          [D3] 留在 contentWrapEl wrapper 外：absolute 锚定 scrollEl
-         （nearest positioned ancestor），wrapper 永不得成为 containing block（见 wrapper 注释）。 -->
+         （nearest positioned ancestor），wrapper 永不得成为 containing block（见 wrapper 注释）。
+         [RD-1#4] 失败重试行（LoadMoreErrorBar）挂在本容器内：失败时多出一行，容器增高，
+         virta startMargin 同步增补（topBarReservedHeight），不与首条消息重叠。 -->
     <div
       v-if="showLoadMore && renderItems.length > 0"
-      ref="loadMoreEl"
-      class="absolute left-5 right-5 top-0 flex justify-center py-2"
+      class="absolute left-5 right-5 top-0 flex flex-col items-center"
     >
-      <TruncatedHistoryBar :loaded-turns="loadedTurns" :loading="loadingMore" @load="handleLoadMore" />
+      <div ref="loadMoreEl" class="flex w-full justify-center py-2">
+        <TruncatedHistoryBar :loaded-turns="loadedTurns" :loading="loadingMore" @load="handleLoadMore" />
+      </div>
+      <!-- [RD-1#4] 「加载更早」失败显形（loadMoreError）：可重试错误行。失败时 truncated
+           窗口不变 → showLoadMore 仍为 true，顶部条不消失，仅多出本行。 -->
+      <LoadMoreErrorBar v-if="loadMoreError" :loading="loadingMore" @retry="handleLoadMore" />
     </div>
     </div>
 
@@ -187,14 +193,13 @@ import { ChevronDown, Sparkles } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
-import { useSessionStore } from '@/stores/session'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 // [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store
 // 为空会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点，在此安装幂等单例。
 import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
-import { useToast } from '@/composables/useToast'
-// [u8-pi-respawn] 恢复提示条重试按钮的手动恢复 RPC（useSidebar.restoreSession 同源通道）。
-import { session as sessionApi } from '@/api'
+// [u8-pi-respawn] 恢复提示条重试按钮的手动恢复（crash-resilience D7 熔断后的用户出口）：
+// RPC + revive + toast 指引自本容器拆至 composables/panel/useSessionRespawnRetry.ts。
+import { useSessionRespawnRetry } from '@/composables/panel/useSessionRespawnRetry'
 import { getExecutingBash } from '@taiji/core'
 import { useVirtuaFollow } from '@/composables/panel/useVirtuaFollow'
 import { usePinBottomGuard } from '@/composables/panel/usePinBottomGuard'
@@ -209,6 +214,8 @@ import { useSubagentThinking } from '@/composables/panel/useSubagentThinking'
 import { Turn, SystemNotice, BashOutputBlock, TurnRail, ChatViewDepsKey, TruncatedHistoryBar } from '@taiji/ui'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import ForkNotice from './ForkNotice.vue'
+// [RD-1#4] 「加载更早」失败重试行（loadMoreError 的渲染位，截断顶部条容器内）
+import LoadMoreErrorBar from './LoadMoreErrorBar.vue'
 // 活动条（u6a / D7 展示统一）：compacting/bash/thinking 行的单一渲染位（原三处分散指示收编）。
 import ActivityStrip from './message-stream/ActivityStrip.vue'
 import SkillNoticeInline from './SkillNoticeInline.vue'
@@ -241,27 +248,18 @@ const { t } = useI18n()
 const chat = useChatStore()
 
 /** W4 H4 + cw wave w3 / IF8：加载更多历史 loading + isPrepend（virta :shift 信号）+ handler
- *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）。 */
-const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset } = useLoadMoreHistory(() => props.sessionId)
+ *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）
+ *  + [RD-1#4] loadMoreError（上次失败态 → 顶部条渲染可重试错误行 LoadMoreErrorBar）。 */
+const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight } =
+  useLoadMoreHistory(() => props.sessionId, () => streamItems.value.length)
+
+// [u8-pi-respawn] 恢复提示条重试（crash-resilience D7 熔断后的用户出口）——实现见
+// composables/panel/useSessionRespawnRetry.ts（会话生命周期关注点，自容器组件拆出）。
+const { onRespawnRetry } = useSessionRespawnRetry(() => props.sessionId)
 
 /** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns；无记录回落 0
  *  （showLoadMore 为 false 时条不渲染，值无关）。 */
 const loadedTurns = computed(() => chat.getHistoryWindow(props.sessionId)?.loadedTurns ?? 0)
-
-/**
- * [u8-pi-respawn] 恢复提示条（restoreFailed 形态）重试按钮 → 手动恢复（crash-resilience D7
- * 熔断后的用户出口）：显式 session.restore RPC + revive 复位 dead 态；成功后 runtime 推
- * session.restored，失败 toast 指引。
- */
-async function onRespawnRetry(): Promise<void> {
-  try {
-    await sessionApi.restoreSession(props.sessionId)
-    useSessionStore().revive(props.sessionId)
-  } catch (e) {
-    console.warn(`[MessageStream] manual respawn retry failed for session ${props.sessionId}:`, e)
-    useToast().error(t('panel.message.respawnRetryFailed'))
-  }
-}
 
 /** 当前 session 的消息（getMessages 兼容接口：内部 unwrap 内层 ShallowRef 容器，
  *  Map.get + 内层 .value 依赖均被 computed track，响应性不变）。 */

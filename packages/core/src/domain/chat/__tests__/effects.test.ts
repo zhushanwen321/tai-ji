@@ -24,7 +24,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { dispatchMessageEvent } from '../effects/registry'
+import { dispatchMessageEvent, __clearUnhandledFrameTypeWarnForTest } from '../effects/registry'
+import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import { makeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'
 import type { Message, PiBranchSummaryEntry, PiCompactionEntry, PiCustomMessageEntry, Segment, ServerMessage } from '@taiji/shared'
@@ -1166,5 +1167,54 @@ describe('dispatchMessageEvent — 单帧异常隔离与终态安全网（RD-1#5
     vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'm-2' }))
     expect(ctx.finalizeSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchMessageEvent 未注册 message.* 类型的 dev 观测（RD-1#9）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    __clearUnhandledFrameTypeWarnForTest()
+    __resetDevModeForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetDevModeForTesting()
+    __clearUnhandledFrameTypeWarnForTest()
+  })
+
+  it('dev 下未注册 type → console.warn 一次/类型（协议漂移可见），行为仍为 no-op 不抛错', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+
+    // 同一未知类型两次：去重后只 warn 一次（防刷屏）
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.future_frame', { x: 1 }))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.future_frame', { x: 2 }))).not.toThrow()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('unhandled frame type message.future_frame')
+
+    // no-op 语义不变：无消息副作用、不收口
+    expect(getMsgs(ctx)).toHaveLength(0)
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
+
+    // 另一类型独立计数（去重键 = 帧类型）
+    dispatchMessageEvent(ctx, SID, msg('message.another_unknown'))
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it('非 dev（未注入 provideDevMode，默认 false）→ 零 warn（生产零噪音）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.future_frame'))
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('已注册类型不触发 warn（不污染正常流的观测信号）', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(warn).not.toHaveBeenCalled()
   })
 })

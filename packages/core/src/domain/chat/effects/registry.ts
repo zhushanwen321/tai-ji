@@ -78,6 +78,7 @@ import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
+import { isDevMode } from '../../../platform/dev-mode'
 // [session-occupancy u4a] message_end(user) 三分支 ①（defer 分区 FIFO 匹配）与 ①③ 共用
 // helper 归位 effects/user-delivery.ts（机制独立成模块，u4b flush 确认驱动只扩展该文件）
 import { confirmDeferQueueEntry, extractUserContentText, removeQueuedTextFromSnapshot } from './user-delivery'
@@ -895,6 +896,26 @@ const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * [RD-1#9] 未注册 message.* 帧类型的 dev 观测去重集合（一次/类型 warn 防刷屏）。
+ *
+ * 与已登记的「坏 entry 静默丢弃」裁决不同类：未注册 type **无构造点守卫**，是 runtime
+ * 新增 message.* 帧而注册表漏接的协议漂移，旧实现零痕迹。dev 留痕、生产零开销（isDevMode 门）。
+ * 清理：__clearUnhandledFrameTypeWarnForTest（测试隔离）。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
+const warnedUnregisteredFrameTypes = new Set<string>()
+
+/** [RD-1#9] 未注册 type 的一次性 dev warn（观测补齐，no-op 行为不变）。 */
+function warnUnregisteredFrame(type: string, sessionId: string): void {
+  if (!isDevMode() || warnedUnregisteredFrameTypes.has(type)) return
+  warnedUnregisteredFrameTypes.add(type)
+  console.warn(`[effects] unhandled frame type ${type} (sid=${sessionId}) — no message effect registered; frame is a no-op (protocol drift or intentionally unhandled)`)
+}
+
+/** 测试专用：清空去重集合（对齐 platform/dev-mode __resetDevModeForTesting 模式）。 */
+export function __clearUnhandledFrameTypeWarnForTest(): void { warnedUnregisteredFrameTypes.clear() }
+
+/**
  * message.* 事件的单一入口（消除 double-dispatch）。
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
@@ -902,6 +923,7 @@ const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
  * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
+ * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。
  *
  * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
  * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
@@ -918,7 +940,7 @@ export function dispatchMessageEvent(
   // msg.payload 是 ServerMessageMap 的联合（含 SystemPromptSnapshot 等 interface 类型，
   // 无 string index signature）。handler 内部统一用 readString 等安全窄化（见上方注释），
   // 不依赖 index signature，故 cast 到 Record<string, unknown> 是安全的。
-  if (!handler) return
+  if (!handler) return warnUnregisteredFrame(msg.type, sessionId)
   const payload = msg.payload as Record<string, unknown>
   try {
     handler(ctx, sessionId, payload)
@@ -937,6 +959,8 @@ export function dispatchMessageEvent(
     try {
       ctx.finalizeSession(sessionId, reason, errorText)
     } catch (finalizeError) {
+      // best-effort 降级：安全网自身失败时放弃收口仅记录——不得让安全网成为新异常源
+      // （再抛会逆传到 events/coalescer 上游，把单帧故障放大成消费面崩溃）。
       console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
     }
   }

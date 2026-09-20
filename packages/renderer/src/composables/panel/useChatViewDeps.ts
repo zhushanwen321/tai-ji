@@ -95,10 +95,13 @@ export function useChatViewDeps(
       if (sid !== sessionId.value) return
       filePaths.value = collectFilePaths(nodes)
       localFiles.value = collectBasenames(nodes)
-    } catch {
+    } catch (e) {
       // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）。
       // 同样受代际守卫约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
       if (sid !== sessionId.value) return
+      // [RD-1#8] 降级本身正确，但须留痕：否则「路径链接化能力消失」零日志零标记，
+      // 排障时无法区分「session 无文件」与「file.search 失败」。
+      console.warn(`[useChatViewDeps] file whitelist load failed for session ${sid}; markdown 路径链接化降级为纯文本:`, e)
       filePaths.value = new Set()
       localFiles.value = new Set()
     }

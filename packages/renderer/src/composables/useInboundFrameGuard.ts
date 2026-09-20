@@ -12,6 +12,10 @@
  * - **恢复触发器（用户切走切回重试一次）**：watch panel focusedSessionId——用户切入
  *   终止阀生效中的 session 时调 core retryInboundDroppedSession 解除暂停，并经
  *   subscribeSession 重试一次订阅；未 tripped 的切换零动作。
+ * - **[RD-1#7] session 销毁清理挂点**：registerSessionCleanup(clearTripped)——trippedSessionIds
+ *   原先只在「切入且 retry 成功」时按 sid 删，session 删除/LRU 驱逐无回收路径，集合随
+ *   session 增删无界增长（每 session 至多 1 条，有界但不可回收）。注册后 deleteSession →
+ *   triggerSessionCleanups(sid) 统一回收；uninstall 时整体清空（teardown 语义）。
  *
  * 状态形态：模块级单例 ref（useCrashRecoveryNotice 同款邻域范式）——状态源在 core
  * ws-client（模块级单例），本 composable 只是其 renderer 投影 + 编排，非 per-instance
@@ -25,6 +29,7 @@ import type { InboundFrameDroppedInfo } from '@taiji/core'
 import { onInboundFrameDropped, retryInboundDroppedSession, subscribeSession } from '@taiji/core'
 import { reportRendererLog } from '../lib/ipc'
 import { usePanelStore } from '../stores/panel'
+import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 
 /** 终止阀生效中的 session 集合（只读投影；InboundFrameDroppedNotice / 面板消费）。 */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记）：终止阀 tripped 集合投影（状态源 = core ws-client 模块级单例；登记见 docs/architecture/data-source-registry.md §4 ⑧）
@@ -33,6 +38,7 @@ const trippedSessionIds = ref<ReadonlySet<string>>(new Set())
 let installed = false
 let unlistenFrameDropped: (() => void) | null = null
 let stopFocusWatch: (() => void) | null = null
+let unregisterSessionCleanup: (() => void) | null = null
 
 /**
  * 安装守卫消费编排（幂等）：丢帧上报 + 静态提示态 + 切走切回重试订阅。
@@ -67,6 +73,11 @@ export function installInboundFrameGuard(): void {
       void subscribeSession(cur)
     },
   )
+
+  // 3. [RD-1#7] session 销毁清理挂点：useSidebar.deleteSession → triggerSessionCleanups(sid)
+  //    → clearTripped(sid)。不注册则 trippedSessionIds 只增不清（集合无界增长），且已删
+  //    session 的静态提示态永不消失。返回的反注册函数在 uninstall 时调用（配对）。
+  unregisterSessionCleanup = registerSessionCleanup(clearTripped)
 }
 
 /** 卸载编排（App teardown 配对；测试隔离用）。 */
@@ -75,6 +86,11 @@ export function uninstallInboundFrameGuard(): void {
   unlistenFrameDropped = null
   stopFocusWatch?.()
   stopFocusWatch = null
+  // [RD-1#7] 反注册 session cleanup + 清空投影集合：卸载即全量解绑，残留的 tripped 态
+  // 会在重新 install 后（HMR / 测试）表现为「未丢帧却显示静态提示」的假阳性。
+  unregisterSessionCleanup?.()
+  unregisterSessionCleanup = null
+  trippedSessionIds.value = new Set()
   installed = false
 }
 
@@ -122,6 +138,9 @@ function clearTripped(sessionId: string): void {
 export function _resetInboundFrameGuardForTest(): void {
   unlistenFrameDropped?.()
   stopFocusWatch?.()
+  // [RD-1#7] 与 uninstall 对齐：反注册 session cleanup（否则下一例 install 时会重复注册）
+  unregisterSessionCleanup?.()
+  unregisterSessionCleanup = null
   trippedSessionIds.value = new Set()
   installed = false
   unlistenFrameDropped = null
