@@ -2,7 +2,8 @@
  * composer-density 纯状态机单测（设计 mode-system-composer-density §6.6 决策 D6）。
  *
  * 覆盖：三档阈值与边界归属（640/520）· 720 全展开 · 560 序 1–3 · 440 序 1–4（托盘聚合）·
- * 序 0 任意宽度不退化 · `»` 菜单仅有被收起项时才存在 · 托盘全无条目不渲染 · 纯函数契约。
+ * 序 0 任意宽度不退化 · `»` 菜单仅有被收起项时才存在 · 托盘全无条目不渲染 · 纯函数契约 ·
+ * **fit 轴**（方案 A：L1 精简+模型名截断 / L2 图标化 / L3 容量+指标进 `»`，归一与正交性）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-density.test.ts
  */
@@ -10,7 +11,9 @@ import { describe, expect, it } from 'vitest'
 import {
   COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH,
   COMPOSER_DENSITY_EXPANDED_MIN_WIDTH,
+  COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
   DEFAULT_COMPOSER_DENSITY_THRESHOLDS,
+  normalizeComposerFitLevel,
   resolveComposerDensity,
   resolveComposerDensityTier,
 } from '@/components/panel/composer-density'
@@ -25,6 +28,10 @@ describe('三档阈值与边界归属', () => {
       expandedMinWidth: 640,
       aggregatedBelowWidth: 520,
     })
+  })
+
+  it('fit 轴顶格 = 3（顶格后仍放不下即到 D6 允许的极限）', () => {
+    expect(COMPOSER_DENSITY_MAX_FIT_DEGRADATION).toBe(3)
   })
 
   it('640 归 expanded（`>=` 归高档）', () => {
@@ -254,5 +261,80 @@ describe('纯函数契约', () => {
     expect(layout.tier).toBe('expanded')
     expect(layout.slots.pluginToolbar).toBe('absent')
     expect(layout.slots.tray).toBe('expanded')
+  })
+})
+
+describe('fit 轴（方案 A「内容自适应」：溢出兜底第二轴）', () => {
+  it('fit 级 0（缺省）= 不施加 fit 退化：两组均为 full，fitLevel 原样带回', () => {
+    const layout = resolveComposerDensity(440)
+    expect(layout.fitLevel).toBe(0)
+    expect(layout.fit).toEqual({ capacityMetrics: 'full', modelThinking: 'full' })
+    expect(layout.appliedOrders).toEqual([1, 2, 4])
+  })
+
+  it('fit 级 1：容量+指标精简（只留百分比）、模型名截断；tier 分组不变', () => {
+    const layout = resolveComposerDensity(440, {}, {}, 1)
+    expect(layout.fitLevel).toBe(1)
+    expect(layout.fit).toEqual({ capacityMetrics: 'simplified', modelThinking: 'simplified' })
+    // tier 轴不受 fit 影响：仍是窄档合流 + 托盘聚合
+    expect(layout.slots.capacity).toBe('merged')
+    expect(layout.slots.model).toBe('merged')
+    expect(layout.slots.tray).toBe('aggregated')
+    // 退化序 = tier 序 + fit 序 5/6
+    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6])
+  })
+
+  it('fit 级 2：右簇四触发器图标化（modelThinking 仍可点，不收进菜单）', () => {
+    const layout = resolveComposerDensity(440, {}, {}, 2)
+    expect(layout.fit).toEqual({ capacityMetrics: 'iconic', modelThinking: 'iconic' })
+    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6, 7])
+  })
+
+  it('fit 级 3：容量+指标收进 `»`（overflowItems 追加 capacity/genStats，菜单可见）', () => {
+    const layout = resolveComposerDensity(440, {}, {}, 3)
+    expect(layout.fit).toEqual({ capacityMetrics: 'collapsed-to-menu', modelThinking: 'iconic' })
+    expect(layout.overflowMenuVisible).toBe(true)
+    expect(layout.overflowItems).toEqual(['capacity', 'genStats'])
+    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6, 7, 8])
+  })
+
+  it('fit 级 3 + 插件贡献：菜单条目 = 插件 toolbar + 容量/指标（共用同一个 `»`）', () => {
+    const layout = resolveComposerDensity(400, { pluginToolbarContributionCount: 1 }, {}, 3)
+    expect(layout.overflowItems).toEqual(['pluginToolbar', 'capacity', 'genStats'])
+    expect(layout.appliedOrders).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+  })
+
+  it('模型+档位永不收进菜单（切模型/切档位任何宽度可达）', () => {
+    for (const level of [0, 1, 2, 3]) {
+      expect(resolveComposerDensity(440, {}, {}, level).fit.modelThinking).not.toBe('collapsed-to-menu')
+    }
+  })
+
+  it('fit 级归一：非有限值 / 负值 → 0，越界（>3）→ 顶格 3，小数四舍五入', () => {
+    expect(resolveComposerDensity(440, {}, {}, Number.NaN).fitLevel).toBe(0)
+    expect(resolveComposerDensity(440, {}, {}, -2).fitLevel).toBe(0)
+    expect(resolveComposerDensity(440, {}, {}, 99).fitLevel).toBe(3)
+    expect(resolveComposerDensity(440, {}, {}, 2.4).fitLevel).toBe(2)
+    expect(normalizeComposerFitLevel(1.6)).toBe(2)
+    // +Infinity = 越界 → 顶格；NaN = 脏输入 → 不施加
+    expect(normalizeComposerFitLevel(Number.POSITIVE_INFINITY)).toBe(3)
+    expect(normalizeComposerFitLevel(Number.NaN)).toBe(0)
+  })
+
+  it('fit 轴与 tier 轴正交：全展开档同样可被 fit 收紧（长模型名等实宽超限场景）', () => {
+    const layout = resolveComposerDensity(720, {}, {}, 1)
+    expect(layout.tier).toBe('expanded')
+    expect(layout.slots.capacity).toBe('expanded')
+    expect(layout.fit.capacityMetrics).toBe('simplified')
+    expect(layout.fit.modelThinking).toBe('simplified')
+  })
+
+  it('fit 纯函数契约：同输入恒同输出且返回全新对象', () => {
+    const a = resolveComposerDensity(440, {}, {}, 2)
+    const b = resolveComposerDensity(440, {}, {}, 2)
+    expect(a).toEqual(b)
+    expect(a).not.toBe(b)
+    expect(a.fit).not.toBe(b.fit)
+    expect(a.appliedOrders).not.toBe(b.appliedOrders)
   })
 })

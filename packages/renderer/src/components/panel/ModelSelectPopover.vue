@@ -13,9 +13,13 @@
     <slot name="trigger">
       <PopoverTriggerButton
         :open="open"
-        :title="t('panel.modelSelect.switchModel')"
+        :variant="props.variant === 'icon' ? 'icon' : 'text'"
+        :show-chevron="props.variant !== 'icon'"
+        :title="props.variant === 'icon' ? currentName : t('panel.modelSelect.switchModel')"
       >
-        <span class="truncate">{{ currentName }}</span>
+        <!-- fit L2 图标态：只留图标，模型全名进 title / popover（信息不丢） -->
+        <Boxes v-if="props.variant === 'icon'" class="size-4" />
+        <span v-else class="truncate">{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
     <PopoverContent side="top" class="w-[220px] p-0">
@@ -32,6 +36,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Boxes } from '@lucide/vue'
 import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import type { ModelInfo } from '@/api'
 import type { ProviderId } from '@taiji/shared'
@@ -47,9 +52,15 @@ const props = withDefaults(defineProps<{
   selected?: string
   /** 限定展示的 provider 分组（ProviderPage 默认 pill 传 [p.id]，只列该供应商模型） */
   providerFilter?: ProviderId[]
+  /**
+   * 触发器形态（u6b fit 轴）：`text` = 模型名文本（默认）；`icon` = 纯图标
+   * （fit L2 图标化，模型全名进 title 与 popover）。调用方传 `#trigger` slot 时本 prop 无效。
+   */
+  variant?: 'text' | 'icon'
 }>(), {
   selected: '',
   providerFilter: undefined,
+  variant: 'text',
 })
 
 const { t } = useI18n()

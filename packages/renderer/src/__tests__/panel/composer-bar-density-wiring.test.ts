@@ -7,6 +7,8 @@
  *   窄档也不出聚合入口（不留死入口）。
  * - 观察者（形态）：底栏 `flex-nowrap`（永不换行）+ 三簇结构；形态以状态机输出为准（data-tier /
  *   data-slot-* 逐元素形态），档位切换时形态整组跟随。
+ * - **fit 轴**（方案 A）：实测「放不下」→ `data-fit` 逐级收紧（L2 即停 / 顶格 L3 容量+指标进 `»` /
+ *   变宽放松 / 同宽不抖）；V2 合流态无实心底、分组由发丝分隔表达。
  * - 构建者（白盒）：ResizeObserver 实测驱动档位（模拟容器宽度 400/560/700 → narrow/compact/expanded），
  *   阈值判据本体在 composer-density.test.ts（100% 覆盖），此处只证「实测 → 状态机 → DOM」链路导通。
  *
@@ -176,6 +178,47 @@ async function dispatchWidth(width: number): Promise<void> {
   await nextTick()
 }
 
+/** 等 fit 收敛回路跑完（rAF 链；happy-dom 有 rAF） */
+async function flushFitPasses(): Promise<void> {
+  for (let i = 0; i < 12; i += 1) {
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+      else setTimeout(resolve, 0)
+    })
+  }
+  await nextTick()
+}
+
+/**
+ * 打桩底栏几何并派发 RO：可用宽 + 左右两簇占宽（fit 回路据二者之和判「放不放得下」）。
+ * 右簇占宽按当前 `data-fit` 分级回落——模拟「形态收紧 → 需求宽下降」的真实收敛过程。
+ */
+async function dispatchFitGeometry(
+  avail: number,
+  left: number,
+  widthByFit: Record<string, number>,
+): Promise<void> {
+  const barEl = bar().element as HTMLElement
+  const leftEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="left"]')
+  const rightEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="right"]')
+  if (!leftEl || !rightEl) throw new Error('底栏两簇节点缺失：模板与 fit 回路不同步？')
+  Object.defineProperty(barEl, 'clientWidth', { value: avail, configurable: true })
+  vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: left } as DOMRect)
+  vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
+    () => ({ width: widthByFit[barEl.getAttribute('data-fit') ?? '0'] }) as DOMRect,
+  )
+  const observer = ManualResizeObserverStub.created()[0]
+  observer.dispatch([{ target: barEl, contentRect: { width: avail } as DOMRectReadOnly }])
+  await flushFitPasses()
+}
+
+/** 合流 chip 内的发丝分隔节点（V2：1px 竖线表达分组，替代原实心底） */
+function separatorsInBar(): number {
+  return bar()
+    .findAll('span[aria-hidden="true"]')
+    .filter((node) => node.classes().includes('w-px') && node.classes().includes('bg-border-strong')).length
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
@@ -331,5 +374,81 @@ describe('④ ResizeObserver 实测驱动档位与形态（模拟容器宽度变
     observer?.dispatch([{ contentRect: { width: 700 } as DOMRectReadOnly }])
     await nextTick()
     expect(document.querySelector('[data-testid="composer-bar"]')).toBeNull()
+  })
+})
+
+describe('⑤ fit 轴：实测放不下时逐级收紧右簇内容（方案 A 内容自适应）', () => {
+  it('V2 合流态视觉：无实心底，分组由发丝分隔表达（两个合流组各一条）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(400)
+    // 序 1 / 序 2 两组合流 → 各组内 1px 竖线分隔（替代原 bg-surface-2 实心 chip）
+    expect(separatorsInBar()).toBe(2)
+    const capacityChip = bar().find('[data-testid="composer-capacity-merged"]')
+    expect(capacityChip.classes()).not.toContain('bg-surface-2')
+  })
+
+  it('放得下 → 不施加 fit 退化（data-fit = 0，容量+指标留在底栏）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(560)
+    await dispatchFitGeometry(500, 80, 380)
+    expect(bar().attributes('data-fit')).toBe('0')
+    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
+  })
+
+  it('放不下 → 收紧到刚好放得下的那一级即停（不到顶）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(400)
+    // L0 需求 580 > 300；L1 380 > 300；L2 260 ≤ 300 → 停在 L2（右簇图标化）
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    // L2 未到 L3：容量+指标仍在底栏（只是图标化），`»` 里不出现收纳区
+    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
+    expect(bar().find('[data-testid="composer-overflow-capacity-metrics"]').exists()).toBe(false)
+  })
+
+  it('一直放不下 → 顶格 L3：容量+指标退出底栏、进 `»` 菜单（模型/档位仍在）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(400)
+    // 右簇恒 500：任何一级都放不下 → 顶格 L3
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 500, 2: 500, 3: 500 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    // 底栏：容量+指标组消失（腾出宽度）
+    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(false)
+    // `»` 菜单：即使插件零贡献，也因 fit L3 的收纳项而出现
+    const menu = bar().find('[data-testid="composer-overflow-menu"]')
+    expect(menu.exists()).toBe(true)
+    // 打开菜单：容量+指标整组收纳在内（详情浮层路径不变）
+    await menu.find('button').trigger('click')
+    expect(document.querySelector('[data-testid="composer-overflow-capacity-metrics"]')).not.toBeNull()
+    // 序 0 与序 2 仍在底栏（切模型任何宽度可达）
+    const addButton = bar().findAll('button').find((n) => n.attributes('title') === '添加内容（附件 / 命令）')
+    expect(addButton).toBeDefined()
+    const sendButton = bar().findAll('button').find((n) => n.attributes('title')?.includes('发送'))
+    expect(sendButton).toBeDefined()
+  })
+
+  it('变宽 → 逐级放松回 full（迟滞：只在更宽裕时降级，不来回抖）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(400)
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 500, 2: 500, 3: 500 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    // 容器大幅变宽 + 内容变窄 → 一路放松到 L0（600 仍属 compact：合流组回到底栏）
+    await dispatchFitGeometry(600, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-fit')).toBe('0')
+    expect(bar().attributes('data-tier')).toBe('compact')
+    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
+    // 收纳项消失 → 插件零贡献时 `»` 菜单一并消失（不留死入口）
+    expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(false)
+  })
+
+  it('同宽度下反复派发不抖（级数稳定）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchWidth(400)
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    for (let i = 0; i < 4; i += 1) {
+      await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    }
+    expect(bar().attributes('data-fit')).toBe('2')
   })
 })
