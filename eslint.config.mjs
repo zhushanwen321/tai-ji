@@ -28,6 +28,11 @@ export default [
       'apps/electron/resources/engines/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
       '.taiji-harness/**',
+      // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
+      // 草稿）：引擎生成的 .mjs 非项目源码，已被 .gitignore；.zcode/agents/ 是 tracked
+      // 子代理定义，不在排除范围
+      '.zcode/workflow-runs/**',
+      '.zcode/workflow-drafts/**',
       // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
       'playwright-report/**',
       'playwright/.cache/**',
