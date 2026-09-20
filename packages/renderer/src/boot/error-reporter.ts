@@ -15,6 +15,11 @@
  * **三件套自身零抛错**：任何环节（含发送失败 / pinia 未激活 / performance.memory
  * 缺失）一律静默降级——日志通道故障不得再炸 renderer（D2 的降级契约，错误捕获器
  * 自身成为新崩溃源是最坏形态）。
+ *
+ * **RD-3#8 上报通道自身兜底**：原上报全链静默（不写 console、无去重/上限），无 electronAPI
+ * 时通道整体消失、错误可整体蒸发。现 report ① 必写 console.error（console 留现场）② 入环形
+ * 缓冲（≤50，按 message 去重计数）③ 经 reportRendererLog 交付并按其返回的交付信号在通道恢复
+ * 后回放滞留条目（lib/ipc 侧配套：无 IPC / reject / 同步抛错均返 false 而非静默吞）。
  */
 import type { App } from 'vue'
 import type { RendererErrorSource, RendererLogPayload, RendererMemorySnapshot } from '@taiji/shared'
@@ -97,6 +102,59 @@ function toastVueError(): void {
   }
 }
 
+// ── RD-3#8 上报通道自身兜底：环形缓冲 + 按 message 去重计数 + 通道恢复回放 ──
+// 背景：原 report 全链静默——无 electronAPI / invoke reject 时错误整体蒸发，且 console 零
+// 留痕，renderer 崩溃前无现场。兜底仍守「三件套自身零抛错」契约：所有逻辑外包一层 try/catch。
+
+/** 环形缓冲上限：renderer 侧留存最近 N 条去重后错误（通道恢复回放 + 崩溃前取证）。 */
+const RING_BUFFER_MAX = 50
+
+/** 环形缓冲条目：按 message 去重（count 累计），delivered 标记是否已成功交付 main。 */
+interface BufferedError {
+  message: string
+  count: number
+  payload: RendererLogPayload
+  delivered: boolean
+}
+
+/** 环形缓冲（FIFO，超上限驱逐最旧）；模块级，跨 report 调用共享（resetModules 后重置）。 */
+const ringBuffer: BufferedError[] = []
+/** 回放在途守卫：避免并发 replayBuffer 重复交付同一条目。 */
+let replaying = false
+
+/** 入缓冲（按 message 去重计数）：同 message 已存在则累计 count + 刷新为最新 payload。 */
+function bufferError(payload: RendererLogPayload): BufferedError {
+  const existing = ringBuffer.find((e) => e.message === payload.message)
+  if (existing) {
+    existing.count += 1
+    existing.payload = payload
+    return existing
+  }
+  const entry: BufferedError = { message: payload.message, count: 1, payload, delivered: false }
+  ringBuffer.push(entry)
+  if (ringBuffer.length > RING_BUFFER_MAX) ringBuffer.shift()
+  return entry
+}
+
+/**
+ * 通道恢复回放：交付所有滞留的未交付条目（FIFO）。任一条目交付失败即停（通道又不可用），
+ * 剩余留待下次成功时再放。replaying 守卫防并发重入。零抛错（reportRendererLog 自身已容错）。
+ */
+async function replayBuffer(): Promise<void> {
+  if (replaying) return
+  replaying = true
+  try {
+    for (const entry of ringBuffer) {
+      if (entry.delivered) continue
+      const delivered = await reportRendererLog(entry.payload)
+      if (!delivered) break
+      entry.delivered = true
+    }
+  } finally {
+    replaying = false
+  }
+}
+
 function report(source: RendererErrorSource, err: unknown, vueInfo?: string): void {
   try {
     const message = formatMessage(err, vueInfo)
@@ -109,12 +167,23 @@ function report(source: RendererErrorSource, err: unknown, vueInfo?: string): vo
       ...(extractStack(err) !== undefined ? { stack: extractStack(err) } : {}),
       ...(readMemorySnapshot() !== undefined ? { memory: readMemorySnapshot() } : {}),
     }
-    // 经 api 门面（lib/ipc，B1 IPC 封装层惯例）上报：其内部全容错（无 IPC / invoke
-    // reject / 同步抛错均静默），这里不再重复包发送层
-    reportRendererLog(payload)
-  // eslint-disable-next-line taste/no-silent-catch -- 组装环节任何异常静默：错误捕获器自身零抛错是 D2 降级契约
-  } catch {
-    // no-op
+    // RD-3#8 ① console.error 显形：即便 IPC 通道消失（无 electronAPI / invoke reject），
+    // renderer 侧错误仍在 console 留现场（修复「全链静默、不写 console」）。
+    console.error(`[renderer-error] source=${source}:`, message, err)
+    // RD-3#8 ② 环形缓冲 + 按 message 去重计数：通道不可用期错误不丢，可回放 + 崩溃前取证。
+    const entry = bufferError(payload)
+    // RD-3#8 ③ 交付当前这条（同步调用 api，保持「每 report 一次同步上报」既有可观测行为）；
+    // 成功则标记 delivered 并回放此前滞留条目（通道恢复），失败则留缓冲待下次成功时回放。
+    void reportRendererLog(payload).then((delivered) => {
+      if (delivered) {
+        entry.delivered = true
+        void replayBuffer()
+      }
+    })
+  } catch (reportErr) {
+    // best-effort 兜底：连 message 组装都失败时退一条最小 console.error 留痕，不再递归上报
+    // （错误捕获器自身零抛错 = D2 降级契约，任何环节异常都不得成为新崩溃源）。
+    console.error('[renderer-error] report assembly failed', reportErr)
   }
 }
 

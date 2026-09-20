@@ -61,7 +61,12 @@ import type { Locale } from '@/i18n'
  */
 export function bootstrapSettingsCore(): void {
   provideSettingsTransport(createSettingsTransport())
-  void useSettings().init()
+  // RD-3#10：不 void 吞 rejection——init 失败（如 storage 配额错致主题停留默认）显式落
+  // console.error，且 settings-lifecycle.init 成功后才置 initialized（失败可重试，不再被守卫吞
+  // 为 no-op）。.catch 已处理 rejection，无需再包 try/catch。
+  useSettings().init().catch((e: unknown) => {
+    console.error('[settings] bootstrapSettingsCore init failed; settings degraded to defaults', e)
+  })
 }
 
 /**

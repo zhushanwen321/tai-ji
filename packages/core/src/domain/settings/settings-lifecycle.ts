@@ -55,38 +55,53 @@ let initialized = false
  */
 async function init(): Promise<void> {
   if (initialized) return
-  initialized = true
-
+  // fail-fast：transport 未注入时同步抛错（保持既有 reject 契约，供测试与调用方观察）——
+  // 在任何订阅注册前，抛错时无副作用、initialized 保持 false（可重试）。
   const transport = getSettingsTransport()
   const store = getSettingsStore()
 
-  unsubs.push(transport.onProviders((p, scopedModels) => {
+  // 订阅注册（同步，抢在 sendInitialState 首推前）。先入本地表，**成功才提交到模块级 unsubs**
+  // ——await 段（getSystem/setSystem）失败时回滚本地订阅，避免重试重复注册双 handler
+  // （RD-3#10：失败可重试，不再被 initialized 先置位吞为 no-op）。
+  const localUnsubs: Array<() => void> = []
+  localUnsubs.push(transport.onProviders((p, scopedModels) => {
     store.setProviders(p, scopedModels)
   }))
   // models 与 providers 同源（sendInitialState 同 step 推、provider 增删同广播），故常驻订阅
-  unsubs.push(transport.onModels((m) => { store.models.value = m }))
-  unsubs.push(transport.onSkills((s) => { store.skills.value = s }))
-  unsubs.push(transport.onAgents((a) => { store.agents.value = a }))
-  unsubs.push(transport.onSkillDirs((d) => { store.skillDirs.value = d }))
-  unsubs.push(transport.onAgentDirs((d) => { store.agentDirs.value = d }))
-  unsubs.push(transport.onExtensionDirs((d) => { store.extensionDirs.value = d }))
-  unsubs.push(transport.onDefaults((m) => { store.defaultModel.value = m }))
+  localUnsubs.push(transport.onModels((m) => { store.models.value = m }))
+  localUnsubs.push(transport.onSkills((s) => { store.skills.value = s }))
+  localUnsubs.push(transport.onAgents((a) => { store.agents.value = a }))
+  localUnsubs.push(transport.onSkillDirs((d) => { store.skillDirs.value = d }))
+  localUnsubs.push(transport.onAgentDirs((d) => { store.agentDirs.value = d }))
+  localUnsubs.push(transport.onExtensionDirs((d) => { store.extensionDirs.value = d }))
+  localUnsubs.push(transport.onDefaults((m) => { store.defaultModel.value = m }))
   // 系统提示词配置（FR-4，systemPrompt 广播 → store.systemPromptConfig 常驻同步）
-  unsubs.push(transport.onSystemPrompt((cfg, corrupted) => {
+  localUnsubs.push(transport.onSystemPrompt((cfg, corrupted) => {
     store.systemPromptConfig.value = { config: cfg, corrupted }
   }))
   // 终端配置（Phase 6，terminalConfig 广播 → store.terminalConfig 常驻同步）
-  unsubs.push(transport.onTerminalConfig((cfg, corrupted) => {
+  localUnsubs.push(transport.onTerminalConfig((cfg, corrupted) => {
     store.terminalConfig.value = { config: cfg, corrupted }
   }))
-  unsubs.push(transport.onExtensions((e) => { store.extensions.value = e }))
+  localUnsubs.push(transport.onExtensions((e) => { store.extensions.value = e }))
 
   // system 是纯前端偏好（storage），初始化时读并同步到 store
   // （setSystem 内部经 IF3 updateSystem 持久化，幂等写回）。
   // DOM 同步（applySystemToDom：theme→data-theme + themePreset→data-theme-preset +
   // locale→i18n）由壳侧（W4）承接，core 不做。
-  const system = await getSystem(getPlatform().storage)
-  await store.setSystem(system)
+  try {
+    const system = await getSystem(getPlatform().storage)
+    await store.setSystem(system)
+  } catch (e) {
+    // RD-3#10：读/写 system 失败（如 storage 配额错）→ 回滚本次已注册订阅 + 不置 initialized
+    // （保留可重试性），异常上抛供调用方（bootstrapSettingsCore）落日志显形。
+    localUnsubs.forEach((u) => u())
+    throw e
+  }
+
+  // 成功：提交订阅到模块级表 + 置幂等守卫（**仅此处置位**——失败路径不置位，重试不被吞）。
+  unsubs.push(...localUnsubs)
+  initialized = true
 
   // [W4 交接] 原 renderer 实现的 theme=system 时 watch(store.system.theme) + matchMedia
   // 监听（updateSystemThemeListener）不迁 core——壳侧 watch system.theme 挂/卸监听。

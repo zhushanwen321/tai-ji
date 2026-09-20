@@ -36,8 +36,10 @@ interface PermissionRequestState {
   pluginId: string
   /** 插件申请的权限列表 */
   permissions: string[]
-  /** 请求是否挂起（true=弹窗打开；RPC 回传成功/失败后置 false） */
+  /** 请求是否挂起（true=弹窗打开；RPC 回传成功后置 false；**失败不置 false**——见 RD-3#6） */
   pending: boolean
+  /** RD-3#6：approve/revoke 失败原因（成功/新请求到达时清空）。失败时弹窗保持打开供重试 */
+  error: string | null
 }
 
 /**
@@ -50,6 +52,7 @@ const state = reactive<PermissionRequestState>({
   pluginId: '',
   permissions: [],
   pending: false,
+  error: null,
 })
 
 /** bus / WS 订阅退订句柄（HMR/重复初始化幂等：先退订旧 handler）。 */
@@ -76,6 +79,8 @@ export function initPermissionRequest(app: App, bus: InternalEventBus): void {
     state.pluginId = e.request.pluginId
     state.permissions = e.request.permissions
     state.pending = true
+    // 新请求到达清掉上一次 approve/revoke 的失败态（旧 error 不污染新审批）
+    state.error = null
   })
 
   // 超时撤窗（timeout-plugin-service D3）：审批等待到期，runtime 取消本次激活并广播。
@@ -93,26 +98,31 @@ export function initPermissionRequest(app: App, bus: InternalEventBus): void {
 
   // 真实 transport：转发 WS 命令（plugin.approvePermissions / plugin.revokePermissions）。
   // 壳层归位至此（permission-transport.ts 契约由本 provide 兑现）；RPC 收口在 api/domains/plugin.ts。
-  // 回传成功/失败均置 pending=false 关闭弹窗，避免卡死（项目规则#3 状态重置）。
+  // RD-3#6：回传成功才置 pending=false 关窗；**失败保留弹窗 + error 态 + 可重试**（此前两路均
+  // pending=false，授权失败与成功同形，插件后续失败无归因、无重试）。
   const transport: PermissionTransport = {
     approve(pluginId: string, permissions: string[]): void {
       void pluginApi.approvePermissions(pluginId, permissions)
         .then(() => {
+          state.error = null
           state.pending = false
         })
         .catch((err: unknown) => {
-          console.warn('[permission] approvePermissions failed', err)
-          state.pending = false
+          // 失败不关窗：保留弹窗 + error 态，用户可再次点击批准重试（幂等重发）
+          console.warn('[permission] approvePermissions failed; keeping dialog open for retry', err)
+          state.error = err instanceof Error ? err.message : String(err)
         })
     },
     revoke(pluginId: string): void {
       void pluginApi.revokePermissions(pluginId)
         .then(() => {
+          state.error = null
           state.pending = false
         })
         .catch((err: unknown) => {
-          console.warn('[permission] revokePermissions failed', err)
-          state.pending = false
+          // 失败不关窗：保留弹窗 + error 态，用户可再次点击拒绝重试（幂等重发）
+          console.warn('[permission] revokePermissions failed; keeping dialog open for retry', err)
+          state.error = err instanceof Error ? err.message : String(err)
         })
     },
   }

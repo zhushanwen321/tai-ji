@@ -128,6 +128,9 @@ export default {
     itemRenderFailed: 'This item failed to render',
     itemRenderRetry: 'Retry',
     renderErrorToast: 'A rendering error occurred and has been logged',
+    // [RD-3#7] toast in-flight overflow collapse summary (UI consumer of droppedCount)
+    toastDropped: '{count} more notification(s) hidden',
+    toastDroppedDismiss: 'Dismiss collapsed-notification notice',
     startConversation: 'Start a conversation, or select a session from the left',
     scrollToBottom: 'Scroll to bottom',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
@@ -181,6 +184,7 @@ export default {
     pillStaged: 'Staged',
     pillDirty: 'Dirty',
     pillConflict: 'Conflict',
+    unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
     capacity: 'Context capacity',
@@ -205,6 +209,10 @@ export default {
     quotaFailParse: 'failed to parse quota response',
     quotaFailNotConfigured: 'no Workspace configured — set it in Settings and retry',
     quotaFailNoCredential: 'no usable credential found — check the quota query configuration in Settings',
+    // RT-7#7: credential file read failed (IO/lock error, not "no credential") — check files, don't re-enter keys
+    quotaFailCredentialUnavailable: 'failed to read credential file — check disk and file permissions, then retry',
+    // RT-7#4: unsupported credential form (! command prefix / undefined env reference)
+    quotaFailCredentialUnsupported: 'unsupported credential form — use a plain API Key instead',
     window5h: '5h',
     windowWeek: 'This week',
     windowMonth: 'This month',
@@ -334,6 +342,12 @@ export default {
     clear: 'Clear',
     kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
+    writeRpcFailed: 'Failed to send terminal command: {error}',
+    writeFailed: 'Terminal input may be lost: {message}',
+    queueDropped: 'Terminal write queue is full; dropped {count} oldest commands',
+    // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
+    spawnFailed: 'Failed to start terminal: {error}',
+    retry: 'Retry',
   },
   mermaid: {
     rendering: 'Rendering diagram…',

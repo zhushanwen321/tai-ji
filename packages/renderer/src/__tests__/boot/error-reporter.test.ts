@@ -216,4 +216,42 @@ describe('boot/error-reporter 三件套', () => {
     container = await mountWithErrorReporting()
     expectGoodChildAlive(container)
   })
+
+  it('RD-3#8 ① console.error 显形：捕获的错误必写 console（即便 IPC 正常也不静默）', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const container = await mountWithErrorReporting()
+      expectGoodChildAlive(container)
+      // 修复「report 全链静默、不写 console」：message 出现在 console.error 实参里
+      const loggedMessage = errorSpy.mock.calls.some((c) =>
+        c.some((arg) => typeof arg === 'string' && arg.includes('injected-render-boom')),
+      )
+      expect(loggedMessage).toBe(true)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('RD-3#8 ②③ 通道恢复回放：invoke reject 期错误滞留，通道恢复后被回放（不蒸发）', async () => {
+    const container = await mountWithErrorReporting() // mount 时 vue-error 已成功交付
+    expectGoodChildAlive(container)
+
+    // 通道 down：reportRendererLog invoke reject → 错误滞留环形缓冲（未交付）
+    reportMock.mockRejectedValue(new Error('main busy'))
+    dispatchWindowError(new Error('buffered-boom'), 'Uncaught Error: buffered-boom')
+    // 等待首次（失败）交付尝试完成
+    await vi.waitFor(() =>
+      expect(reportMock.mock.calls.filter((c) => (c[0] as RendererLogPayload).message === 'buffered-boom').length).toBe(1),
+    )
+
+    // 通道恢复：resolve。下一条错误成功交付 → 触发回放此前滞留的 buffered-boom
+    reportMock.mockResolvedValue(undefined)
+    dispatchWindowError(new Error('recovery-probe'), 'Uncaught Error: recovery-probe')
+    await vi.waitFor(() => {
+      const messages = reportMock.mock.calls.map((c) => (c[0] as RendererLogPayload).message)
+      // buffered-boom 至少出现 2 次：首次失败 + 回放成功（证明滞留条目被回放而非蒸发）
+      expect(messages.filter((m) => m === 'buffered-boom').length).toBeGreaterThanOrEqual(2)
+      expect(messages).toContain('recovery-probe')
+    })
+  })
 })
