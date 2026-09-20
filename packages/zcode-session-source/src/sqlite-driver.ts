@@ -32,11 +32,15 @@ export interface SqliteDb {
   close: () => void
 }
 
+/**
+ * open 选项：恒只读（readonly 语义 = 只开自己的 WAL read-mark slot）。
+ * 无 immutable 选项——immutable 开库只经 toSqliteFileUri 的 URI 形态生效（唯一正确
+ * 入口，recovery L2 门控「-wal 确认缺失才用」）；选项形态若静默不生效，调用方传了
+ * immutable 会拿到非 immutable 开库（F25 静默丢行形态），故不设该字段。
+ */
 export interface SqliteOpenOptions {
   /** 恒 true：本包只读打开（readonly 语义 = 只开自己的 WAL read-mark slot）。 */
   readOnly: true
-  /** immutable=1（sqlite URI）：仅当开库前确认 -wal 不存在时可用——有内容 -wal 下 immutable 静默丢行（F25）。 */
-  immutable?: boolean
 }
 
 /** 驱动适配器：id 用于结构化日志与断言（'node:sqlite' | 'bun:sqlite'）。 */

@@ -56,7 +56,12 @@ export async function readFirstJsonlLine(filePath: string): Promise<string | und
   try {
     return await readFirstLineViaHandle(fh)
   } finally {
-    await fh.close()
+    try {
+      await fh.close()
+    } catch {
+      // close 失败：首行数据已读取，finally 内抛错会替换已成功的返回值——
+      // 吞掉（best-effort，对齐 sync 形态语义）
+    }
   }
 }
 

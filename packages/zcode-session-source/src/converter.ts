@@ -509,6 +509,11 @@ function partStartTime(part: Record<string, unknown>): number | undefined {
 /**
  * 读单会话并转换为 NormalizedSession（zcode source 包对外主函数，D1）。
  *
+ * 契约面说明：现生产消费方（reader 扩展 / runtime 导入薄包装）均走
+ * openZcodeSessionDb + convertZcodeTranscript 组合形态（各自持有分相位错误映射），
+ * 本函数当前无生产调用方——保留导出是设计 §1.5 声明的对外主函数（未来第三源契约锚），
+ * 第二源落地前的契约面。
+ *
  * 开库走 sqlite-access 的 openZcodeSessionDb（存在性 → 四级恢复阶梯 → schema 已知集
  * 闸门）；返回值三键 {header, entries, degradations}（NormalizedSession，session-core
  * 类型强制）。db 行存在性在查询阶段复查（定位校验与会话读取间的竞态窗口）。

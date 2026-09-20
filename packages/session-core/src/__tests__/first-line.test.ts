@@ -1,19 +1,46 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import type { FileHandle } from 'node:fs/promises'
+import { tmpdir as osTmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { readFirstJsonlLine, readFirstJsonlLineSync } from '../first-line.js'
+
+// close 失败注入开关（vi.hoisted：vi.mock 工厂提升后仍可引用）。形态对齐
+// runtime import-service.test.ts 的 copyFile 失败注入——单次翻转，其余透传 actual。
+const closeFailureState = vi.hoisted(() => ({ failNext: false }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const fh = await actual.open(...args)
+      if (!closeFailureState.failNext) return fh
+      closeFailureState.failNext = false
+      // 包装句柄：read 委托真实句柄，close 先真实关闭（防 fd 泄漏）再抛错（EBADF 形态）
+      const failingClose = {
+        read: fh.read.bind(fh),
+        close: async () => {
+          await fh.close()
+          throw new Error('EBADF: bad file descriptor, close')
+        },
+      } as unknown as FileHandle
+      return failingClose
+    },
+  }
+})
 
 const dirs: string[] = []
 
 function makeTmpDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'session-core-first-line-'))
+  const dir = mkdtempSync(join(osTmpdir(), 'session-core-first-line-'))
   dirs.push(dir)
   return dir
 }
 
 afterEach(() => {
+  closeFailureState.failNext = false
   while (dirs.length > 0) {
     rmSync(dirs.pop() as string, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   }
@@ -77,5 +104,14 @@ describe('readFirstJsonlLine（sync + async 双形态）', () => {
 
     expect(() => readFirstJsonlLineSync(missing)).toThrowError()
     await expect(readFirstJsonlLine(missing)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('async 形态 close 失败不掩成功读取（finally 吞 close 错误，对齐 sync best-effort 语义）', async () => {
+    const dir = makeTmpDir()
+    const file = join(dir, 'close-fail.jsonl')
+    writeFileSync(file, '{"type":"session","id":"s1"}\n{"type":"message"}\n', 'utf8')
+
+    closeFailureState.failNext = true
+    await expect(readFirstJsonlLine(file)).resolves.toBe('{"type":"session","id":"s1"}')
   })
 })
