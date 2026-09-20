@@ -120,7 +120,9 @@ grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.tai
 
 打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。机制细节见 relay 模块（源码注释待后续批次补齐）。
 
-**同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。
+**同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
+
+**配套陷阱：mock/real 两轨共用同一份 renderer 产物，须分批构建**——两条轨都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 real 轨（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 轨，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
 
 ### 8. runtime 启动即退出："fatal: relay server init failed"
 
