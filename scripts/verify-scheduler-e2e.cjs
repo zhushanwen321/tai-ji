@@ -43,21 +43,36 @@
  *   单向帧只捕获不应答。S18/S20/S21 = 用户填表 / 改值后确认（断言裁定值生效）；
  *   S19 = 用户取消（断言任务未创建且无 toast）。
  *
+ * [u-e2e-adjust] 命令路径持久化证据轨改锚「确认轮（ack 合成轮）」：命令路径建任务后
+ * scheduler 自身注入一次零 token 本地合成轮（覆写会话当前 provider 的 streamSimple），
+ * 产出 stopReason='aborted' 的 assistant 消息 + `ack.confirm` 文案，从而打开 pi 的会话
+ * 落盘开关（session-manager `_persist`：已有 assistant 消息即把整批 fileEntries 写盘）——
+ * 这就是**正常路径**，故 e2e **不再自植入 flush 探针**（原 flushForJsonlEvidence 已退役，
+ * 见断言辅助节的 [u-e2e-adjust] 注释）。S18/S20/S21 断言「创建后会话 JSONL 出现 aborted
+ * assistant 行 + 确认文案（i18n `ack.confirm`，locale 由 makeFauxAgentDir 钉死 en-US）+
+ * op=upsert 已落盘」；S19 补负向断言（取消 ⇒ 无 assistant 行、JSONL 无 op=upsert）；
+ * S22 = 合成行字段（provider/model=会话模型、usage 全 0）+ 宿主不变量（model_change /
+ * thinking_level_change 不因创建新增 + auto-rename 不被合成轮触发）；S23 = 同会话连续两次
+ * 创建 ⇒ 确认轮恰 1 次。
+ *
  * 场景分类：
  *   A 类（必须自动化通过）：S1 once 回显（tool 直建 + 无确认帧）/ S2 recurring 回显 /
  *     S3 session 隔离 / S5 resume 重放 / S9 删 session 无残留 / S17 entry 增长 /
  *     S18 命令路径表单（带参预填 + 改值确认）/ S19 命令路径表单（取消）/
- *     S20 命令路径表单（无参默认草稿）/ S21 `/schedule` alias 等价
+ *     S20 命令路径表单（无参默认草稿）/ S21 `/schedule` alias 等价 /
+ *     S22 合成确认行字段 + 宿主不变量 / S23 连续两次创建 ⇒ 确认轮恰 1 次
  *   B 类（尽力自动化，跑不了标 followup）：S4/S6/S12/S14 实现；S7/S8/S10/S16 标 followup
  *   C 类（标 followup + 手工步骤）：S11 fork 隔离 / S13 延迟写入窗口 / S15 taiji 兼容
  *
  * 副作用隔离（design R-cleanup）：每场景独立 mkdtempSync 临时 cwd + session-dir +
- * agent-dir（faux 装配，settings/models/响应脚本预置）；cleanup 额外清理
+ * agent-dir（faux 装配：settings/models/ui-preferences 预置 + 响应脚本）；cleanup 额外清理
  * getLegacyStorePath(tempCwd) 推导的 ~/.pi/agent/scheduler/<segments>/ 整棵子树。
  *
  * 用法：
  *   node scripts/verify-scheduler-e2e.cjs              # 默认跑全部 A 类
- *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S21 / V / aclass / bclass / all）
+ *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S23 / V / aclass / bclass / all）
+ *   SCHED_E2E_DEBUG_JSONL=1 node scripts/verify-scheduler-e2e.cjs S18   # 打印落盘 JSONL 原始行（诊断）
+ *   SCHED_E2E_KEEP_TMP=1 node scripts/verify-scheduler-e2e.cjs S22      # 保留临时 agentDir（含扩展日志 logs/，诊断）
  *   SCHED_E2E_MODEL=faux/faux-1-b node scripts/verify-scheduler-e2e.cjs  # 覆盖测试模型（仅限 faux/ 演员）
  *
  * 退出码：0 = 全过；1 = 任一失败；2 = 脚本异常
@@ -81,6 +96,12 @@ const { spawn } = require('node:child_process')
 const TAG = '[SCHED-E2E]'
 const REPO_ROOT = path.resolve(__dirname, '..')
 const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'scheduler')
+/**
+ * rename-session 扩展（S22 显式 --extension 加载 + config.enabled=true）：
+ * 「宿主 auto-rename 不被合成轮触发」的判别力来源（first-stop 入口只在 stopReason==='stop'
+ * 触发，合成轮为 'aborted'）。缺省场景不加载它——避免多余事件 handler 影响既有断言面。
+ */
+const RENAME_SESSION_EXT_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'rename-session')
 /**
  * 统一提问表单请求的 select title marker（cjs 端口；SSOT =
  * packages/extension-protocol/src/extensions/ui-form/marker.ts，改动须同步）。
@@ -116,12 +137,24 @@ const MODEL = (() => {
 const FAUX_MODEL_ID = MODEL.includes('/') ? MODEL.slice(MODEL.indexOf('/') + 1).split(':')[0] : MODEL
 
 /**
- * 预置 faux agentDir（settings.json + models.json + 响应脚本）并返回 env 注入块。
+ * 预置 faux agentDir（settings.json + models.json + ui-preferences.json + 响应脚本）并返回 env 注入块。
  * settings/models 与 e2e real 轨 launch-app-real.ts 的 seedFauxDataDir 同款语义
  *（defaultProvider=faux 过 getDefaultModel 门禁 + models.json providers.faux 供
  * pi 模型解析；sanitize 对 apiKey+models 条目判定合法保留）。
+ *
+ * `TAIJI_AGENT_DATA_DIR` 指向同一临时目录并预置 `ui-preferences.json`（locale=en-US）：
+ * scheduler i18n 的 locale 读取器（`readUiLocale`）从 `<TAIJI_AGENT_DATA_DIR>/ui-preferences.json`
+ * 取值，env 缺失时回落 en-US。显式钉死 = 拒绝宿主 env 污染（否则确认文案会在 zh/en 间漂移，
+ * 而既有 notify 断言同样假定 en-US）。
+ *
+ * @param {Array<Object>} fauxSteps faux 响应步骤队列（写入 TAIJI_FAUX_SCRIPT 脚本）
+ * @param {{ autoRename?: boolean }} [options] autoRename=true 时预置 rename-session 的
+ *   **pi CLI 用户主开关**（`<agentDir>/config/rename-session-ext-config.json` 的
+ *   `enabled:true`-默认 false，llm-shared getConfigPath 推导）。仅供 S22 使用
+ *   （需同时经 extraExtensions 加载 rename-session 扩展）——使「合成轮不触发自动改名」
+ *   具备判别力。
  */
-function makeFauxAgentDir(tag, fauxSteps) {
+function makeFauxAgentDir(tag, fauxSteps, options = {}) {
   const agentDir = mkdtempSync(path.join(os.tmpdir(), `pi-sched-faux-${tag}.`))
   mkdirSync(agentDir, { recursive: true })
   writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({
@@ -136,15 +169,39 @@ function makeFauxAgentDir(tag, fauxSteps) {
         name: 'faux',
         api: 'faux',
         apiKey: 'not-needed',
+        // baseUrl 必需：pi 的自定义模型校验（provider-composer `applyModelsJson`）要求
+        // 「models.json 里定义 models 的 provider 必须有 baseUrl」。基座（faux 是
+        // extension-native provider，不在 pi builtins）仅在 provider 首次注册时提供
+        // model 默认值；ack 的覆写走 `pi.registerProvider('faux', {api,streamSimple})`
+        // 会先删 native 基座再校验，此时默认值只能来自 models.json —— 缺 baseUrl 会抛
+        // `Provider faux: "baseUrl" is required when defining custom models.` 使覆写
+        // 走 E1 降级（确认轮缺席）。faux 演员不耗网络，baseUrl 仅过校验（占位形态）。
+        baseUrl: 'http://127.0.0.1:1/faux',
         models: [{ id: FAUX_MODEL_ID, name: `Faux ${FAUX_MODEL_ID}`, input: ['text'], contextWindow: 128000, maxTokens: 16384 }],
       },
     },
   }, null, 2))
+  // locale 钉死（确认文案断言的确定性前提）：见上方 doc 注释。
+  writeFileSync(path.join(agentDir, 'ui-preferences.json'), JSON.stringify({ v: 1, locale: 'en-US' }, null, 2))
+  if (options.autoRename === true) {
+    const renameConfigDir = path.join(agentDir, 'config')
+    mkdirSync(renameConfigDir, { recursive: true })
+    // 只写用户主开关字段，其余（model/mode/maxTitleLength/thinkingLevel）由
+    // rename-session 的 normalizeRenameConfig 补默认（mode 默认 first-stop）。
+    writeFileSync(
+      path.join(renameConfigDir, 'rename-session-ext-config.json'),
+      JSON.stringify({ enabled: true }, null, 2),
+    )
+  }
   const scriptPath = path.join(agentDir, 'faux-responses.json')
   writeFileSync(scriptPath, JSON.stringify(fauxSteps))
   return {
     agentDir,
-    env: { PI_CODING_AGENT_DIR: agentDir, TAIJI_FAUX_SCRIPT: scriptPath },
+    env: {
+      PI_CODING_AGENT_DIR: agentDir,
+      TAIJI_FAUX_SCRIPT: scriptPath,
+      TAIJI_AGENT_DATA_DIR: agentDir,
+    },
   }
 }
 
@@ -424,14 +481,15 @@ function resolveTurnEndWaiter(msg, state) {
  * 返回 RPC 控制 API。
  *
  * @param {{ piBin: string, cwd: string, sessionDir: string, sessionFile?: string, label: string,
- *           fauxSteps: Array<Object>, uiActor?: UiActor }} opts
+ *           fauxSteps: Array<Object>, uiActor?: UiActor, extraExtensions?: string[],
+ *           autoRename?: boolean }} opts
  *   fauxSteps：faux 响应步骤队列（toolCall/text；模型路径必填——每 session 独立 agentDir
  *   + 独立响应脚本，S3/S5 等多进程场景互不串队）。命令路径（slash）不消费队列，可留空。
  *   uiActor：extension_ui_request 应答器。缺省 = 不回确认（schedule 表单请求记入
  *   unexpectedScheduleForms 并回 cancelled）；S18/S20/S21 注入用户裁定值确认、S19 注入取消。
  */
 function spawnSession(opts) {
-  const faux = makeFauxAgentDir(opts.label, opts.fauxSteps)
+  const faux = makeFauxAgentDir(opts.label, opts.fauxSteps, { autoRename: opts.autoRename === true })
   const args = [
     '--no-extensions',
     '--extension',
@@ -448,6 +506,10 @@ function spawnSession(opts) {
     MODEL,
     '--approve',
   ]
+  // 追加扩展（S22：rename-session）——`--no-extensions` 后逐个显式加载
+  for (const extra of opts.extraExtensions || []) {
+    args.push('--extension', extra)
+  }
   if (opts.sessionFile) {
     args.push('--session', opts.sessionFile) // resume 指定 session 文件
   }
@@ -606,11 +668,71 @@ function spawnSession(opts) {
     return sendRpc({ type: 'get_state' })
   }
 
+  /** get_state 响应的 data 域（model / sessionFile / sessionName / isStreaming）；失败 ⇒ null。 */
+  async function getStateData() {
+    const r = await getState()
+    return r && r.success && r.data ? r.data : null
+  }
+
+  /** 缓存中的 sessionFile 绝对路径（get_state 响应刷新；文件可能尚未创建）。 */
+  function getSessionFile() {
+    return state.sessionFileCache
+  }
+
+  /**
+   * 解析式读会话 JSONL（只反映**已落盘**内容，不含内存 fileEntries）：
+   * 文件不存在 / 读失败 ⇒ []（会话未落盘的正常形态）。
+   * @returns {unknown[]}
+   */
+  function readJsonlEntries() {
+    const f = state.sessionFileCache
+    if (!f || !existsSync(f)) return []
+    let raw
+    try {
+      raw = readFileSync(f, 'utf-8')
+    } catch (_) {
+      return []
+    }
+    /** @type {unknown[]} */
+    const out = []
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        out.push(JSON.parse(line))
+      } catch (_) {
+        /* 跳过 banner / 半行 */
+      }
+    }
+    return out
+  }
+
+  /**
+   * 轮询等会话 JSONL 满足 predicate（参数 = parsed entries）。
+   * 确认轮是**异步副作用**（命令路径 sendCommand 只等 prompt ack），故不可假定读时已落盘。
+   * @param {(entries: unknown[]) => boolean} predicate
+   * @returns {Promise<{ ok: boolean, entries: unknown[] }>}
+   */
+  async function waitForJsonlEntries(predicate, timeoutMs = 20000) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const entries = readJsonlEntries()
+      if (predicate(entries)) return { ok: true, entries }
+      await sleep(200)
+    }
+    return { ok: false, entries: readJsonlEntries() }
+  }
+
   function kill() {
     try {
       child.kill('SIGTERM')
     } catch (_) {
       /* noop */
+    }
+    // 诊断：SCHED_E2E_KEEP_TMP=1 保留临时 agentDir（含扩展文件日志 <agentDir>/logs/，
+    // 如 scheduler 的 ack 分诊警告），便于失败归因；常态删除（防泄漏）。
+    if (process.env.SCHED_E2E_KEEP_TMP === '1') {
+      console.log(`${TAG} [debug] keep tmp agentDir: ${faux.agentDir}`)
+      return
     }
     // faux agentDir（settings/models/响应脚本）随 session 生命周期清理；getJsonlSnippet
     // 读的是 sessionFileCache（session-dir 内），不受影响
@@ -674,6 +796,10 @@ function spawnSession(opts) {
     getEntries,
     getMessages,
     getState,
+    getStateData,
+    getSessionFile,
+    readJsonlEntries,
+    waitForJsonlEntries,
     kill,
     stderrTail,
     getJsonlSnippet,
@@ -804,6 +930,105 @@ function getScheduleFormRequests(captured) {
       id: typeof m.id === 'string' ? m.id : String(m.id),
       options: Array.isArray(m.options) ? m.options.map(String) : [],
     }))
+}
+
+/** 过滤 message entries（role 缺省 = 全部 message 行）。 */
+function getMessageEntries(entries, role) {
+  return (entries || []).filter(
+    (e) =>
+      e &&
+      e.type === 'message' &&
+      e.message &&
+      typeof e.message === 'object' &&
+      (role === undefined || e.message.role === role),
+  )
+}
+
+/** 过滤 assistant message entries（含 aborted 合成行——pi 会照常 append）。 */
+function getAssistantEntries(entries) {
+  return getMessageEntries(entries, 'assistant')
+}
+
+/** 数某类 entry 行数（宿主不变量：model_change / thinking_level_change / session_info 计数用）。 */
+function countEntryType(entries, type) {
+  return (entries || []).filter((e) => e && e.type === type).length
+}
+
+/** entry 类型分布摘要（failure 详情用）。 */
+function describeEntryTypeCounts(entries) {
+  const counts = new Map()
+  for (const e of entries || []) {
+    const t = e && typeof e.type === 'string' ? e.type : '?'
+    counts.set(t, (counts.get(t) || 0) + 1)
+  }
+  return [...counts.entries()].map(([t, n]) => `${t}:${n}`).join(',') || '(empty)'
+}
+
+/** assistant 行字段投影摘要（provider / model / stopReason / usage / 正文片段）。 */
+function describeAssistantEntry(entry) {
+  const m = entry && entry.message ? entry.message : {}
+  return `provider=${String(m.provider)} model=${String(m.model)} stopReason=${String(m.stopReason)} `
+    + `usage=${JSON.stringify(m.usage)} text=${JSON.stringify(messageToText(m).slice(0, 120))}`
+}
+
+/** usage（含 cost 各字段）是否全 0（合成行不变量：不污染 context 统计）。 */
+function isZeroUsage(usage) {
+  if (!usage || typeof usage !== 'object') return false
+  const cost = usage.cost && typeof usage.cost === 'object' ? usage.cost : {}
+  const nums = [
+    usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.totalTokens,
+    cost.input, cost.output, cost.cacheRead, cost.cacheWrite, cost.total,
+  ]
+  return nums.every((n) => n === 0)
+}
+
+/** 从 parsed JSONL entries 取已落盘的 scheduler entry（复用 getSchedulerEntries 语义）。 */
+function getPersistedSchedulerEntries(entries) {
+  return getSchedulerEntries(entries)
+}
+
+/**
+ * 确认轮断言包（S18/S20/S21/S22 共用）：会话 JSONL 的 aborted assistant 行 + 确认文案。
+ *
+ * 断言源 = pi 落盘后的 JSONL（非内存 get_entries）：合成轮的意义就是打开落盘开关，
+ * 断言必须落在磁盘产物上。文案权威源 = `extensions/universal/scheduler/src/i18n.ts`
+ * 的 `ack.confirm`（en-US 形：`Task saved: {name} ({schedule}).`）——locale 由
+ * makeFauxAgentDir 的 `TAIJI_AGENT_DATA_DIR/ui-preferences.json` 钉死 en-US。
+ *
+ * @param {unknown[]} entries parsed JSONL entries
+ * @param {{ name: string, schedule: string }} expected 文案插值（任务名 + formatSchedule 结果）
+ * @returns {{ ok: boolean, desc: string }}
+ */
+function checkAckConfirmLine(entries, expected) {
+  const assistants = getAssistantEntries(entries)
+  const aborted = assistants.filter((e) => e.message.stopReason === 'aborted')
+  const expectedText = `Task saved: ${expected.name} (${expected.schedule}).`
+  const matched = aborted.filter((e) => messageToText(e.message).includes(expectedText))
+  return {
+    ok: aborted.length >= 1 && matched.length >= 1,
+    desc: `abortedAssistantLines=${aborted.length} confirmTextExpected=${JSON.stringify(expectedText)} `
+      + `confirmTextMatched=${matched.length}`,
+  }
+}
+
+/** 轮询等会话空闲（get_state.isStreaming === false）；确认轮落盘早于 turn_end 收尾时用。 */
+async function waitUntilIdle(s, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const st = await s.getStateData()
+    if (st && st.isStreaming === false) return true
+    await sleep(200)
+  }
+  return false
+}
+
+/** env-gated 原始 JSONL 诊断转储（SCHED_E2E_DEBUG_JSONL=1；失败归因用，不进常态输出）。 */
+function debugDumpJsonl(label, entries) {
+  if (process.env.SCHED_E2E_DEBUG_JSONL !== '1') return
+  console.log(`${TAG} [debug] ${label}: ${(entries || []).length} entries`)
+  for (const e of entries || []) {
+    console.log(`${TAG} [debug]   ${JSON.stringify(e).slice(0, 900)}`)
+  }
 }
 
 // ── 场景定义 ──
@@ -1592,21 +1817,18 @@ function describeUpsertTask(task) {
 }
 
 /**
- * [取证] 命令路径 entry 的 JSONL 落盘探针（**仅取证，不属于被验收行为**）。
+ * [u-e2e-adjust] flush 探针退役（原 `flushForJsonlEvidence` 已删除）。
  *
- * pi `SessionManager._persist` 在会话尚无 assistant 消息时跳过写盘（0.84.4
- * dist/core/session-manager.js：`hasAssistant === false && flushed === false` → 不写），
- * 而命令路径（`/scheduler`）**不产生 turn** ⇒ scheduler entry 仅存于内存 fileEntries
- * （`get_entries` RPC 可见，磁盘 JSONL 无）。本探针在创建断言完成后补一个 faux turn
- * 触发 flush，使既有 entry 落盘，从而获得 `getJsonlSnippet()` 第二轨证据。
+ * 旧形态：命令路径（slash 命令不产生 turn）的 scheduler entry 只存于内存 fileEntries，
+ * 磁盘 JSONL 无证据 ⇒ 脚本在创建断言后自补一个 faux turn 触发 pi flush，并把探针当断言前提。
  *
- * 时序保证：调用点必须在 create + notify **之后**——探针不参与创建，也不把被测的
- * 命令路径改成 turn 路径（被测行为 = 探针之前发生的命令路径创建）。S19 取消路径
- * 无 entry 可落盘，不调用本探针。
+ * 现形态：命令路径建任务后 scheduler 自身注入一次零 token 本地合成轮
+ *（ack-turn：覆写会话当前 provider 的 streamSimple，产出 stopReason='aborted' 的 assistant
+ * 消息 + `ack.confirm` 文案）。这就是正常路径——pi 一旦看到 assistant 消息即把全部
+ * fileEntries 落盘（session-manager `_persist`）。探针因此既是多余副作用（多消费一次 faux
+ * 队列）又掩盖「确认轮没发生」的回归，故退役；断言改锚「创建后 JSONL 里出现 aborted
+ * assistant 行 + 确认文案 + op=upsert」（见 checkAckConfirmLine）。
  */
-async function flushForJsonlEvidence(s) {
-  return s.prompt('flush-probe')
-}
 
 /**
  * S18：命令路径表单——带参预填 + 用户改值确认。
@@ -1615,12 +1837,13 @@ async function flushForJsonlEvidence(s) {
  * extension_ui_request{select, title=UI_FORM_MARKER}（schedule 问题 initial 预填
  * kind=recurring / schedule=1h / prompt=confirm-draft-prompt）→ uiActor 以「用户裁定值」
  * 回 FormAnswers envelope（45m / user-edited-prompt）→ service.create 落库 + notify。
- * 断言三面（命令路径无 tool 调用 → 回显改读 notify 帧）：
+ * 断言四面（命令路径无 tool 调用 → 回显改读 notify 帧）：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，formQuestions[0] 为 schedule 问题且
  *      initial 是合法 ScheduleDraft、反映命令参数
  *   ② notify 帧文案：回显用户裁定值（45m + 改后 prompt 进自动任务名），notifyType=info
  *   ③ 落库形态：upsert entry 恰 1 条，task 字段 = 用户裁定值（非预填原值）
- *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
+ *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
+ *      + op=upsert 已落盘（无需 flush 探针）
  */
 async function runS18(piBin) {
   const ws = makeTempWorkspace('s18')
@@ -1648,13 +1871,19 @@ async function runS18(piBin) {
       kind: 'recurring', schedule: '1h', prompt: 'confirm-draft-prompt',
     })
     const notify = await s.waitForNotify(n => n.message.includes('user-edited-prompt'), 15000)
-    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
-    await flushForJsonlEvidence(s)
+    // ④ 确认轮（ack 合成轮）是异步副作用：等 JSONL 出现 aborted assistant 行（= 落盘已完成）
+    const ack = await s.waitForJsonlEntries(
+      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
+      20000,
+    )
+    debugDumpJsonl('S18', ack.entries)
 
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
+    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+      .filter((e) => e.data.op === 'upsert')
     s.kill()
 
     // ② notify 回显裁定值：45m 的下次运行 + 改后 prompt 进自动任务名。
@@ -1666,10 +1895,15 @@ async function runS18(piBin) {
     // ③ 落库 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
     const task = getSingleUpsertTask(upserts)
     const taskOk = isEditedValueTask(task)
-    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
-    const persisted = jsonl.includes('op=upsert')
+    // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
+    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US）
+    const ackLine = checkAckConfirmLine(ack.entries, {
+      name: 'user-edited-prompt', schedule: 'once in 45m',
+    })
 
-    const pass = exactlyOne && contract.ok && notifyEdited && notifyIsInfo && taskOk && persisted
+    const pass =
+      exactlyOne && contract.ok && notifyEdited && notifyIsInfo && taskOk && persisted && ackLine.ok
     return {
       name: 'S18',
       status: pass ? 'PASS' : 'FAIL',
@@ -1679,7 +1913,10 @@ async function runS18(piBin) {
         (notify ? ` type=${notify.notifyType} msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert task = edited values=${taskOk} ` +
         describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
+        `upserts=${upserts.length}; ` +
+        `ackTurn=${ack.ok ? 'reached-jsonl' : 'TIMEOUT'} ${ackLine.desc}; ` +
+        `persisted=${persisted} persistedUpserts=${persistedUpserts.length}; ` +
+        `jsonlTypes=[${describeEntryTypeCounts(ack.entries)}]; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -1691,10 +1928,12 @@ async function runS18(piBin) {
  *
  * `/scheduler 30m "cancel-path-task"` → 表单请求到达 → uiActor 回 cancelled
  * （pi resolve undefined → uiFormInteract 折叠 cancelled → 命令路径不 create、不 notify）。
- * 断言三面：
+ * 断言四面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select（交互确实发生）
  *   ② notify 帧数 = 0（取消不 toast）
  *   ③ 落库：零 scheduler entry（任务未创建）
+ *   ④ 负向（确认轮不启动）：无 assistant 消息新增 + 会话 JSONL 无 op=upsert
+ *      （取消 ⇒ 无创建 ⇒ 无合成轮；若出现即回归）
  */
 async function runS19(piBin) {
   const ws = makeTempWorkspace('s19')
@@ -1718,13 +1957,21 @@ async function runS19(piBin) {
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const notifies = s.getNotifies()
+    const jsonlEntries = s.readJsonlEntries()
+    const jsonl = s.getJsonlSnippet()
     s.kill()
 
     const oneInteraction = reqs.length === 1
     const noNotify = notifies.length === 0
     const noTaskPersisted = sched.length === 0
+    // ④ 负向：无确认轮（无 assistant 行）+ 无落盘任务 entry
+    const noAssistantLine =
+      getAssistantEntries(entries).length === 0 && getAssistantEntries(jsonlEntries).length === 0
+    const noJsonlUpsert =
+      !jsonl.includes('op=upsert') && getPersistedSchedulerEntries(jsonlEntries).length === 0
 
-    const pass = oneInteraction && noNotify && noTaskPersisted
+    const pass =
+      oneInteraction && noNotify && noTaskPersisted && noAssistantLine && noJsonlUpsert
     return {
       name: 'S19',
       status: pass ? 'PASS' : 'FAIL',
@@ -1732,7 +1979,11 @@ async function runS19(piBin) {
         `form select requests=${reqs.length} (expect 1); ` +
         `notify frames=${notifies.length} (expect 0 — 取消不 toast); ` +
         `scheduler entries=${sched.length} (expect 0 — 任务未创建); ` +
-        `opSeq=${JSON.stringify(getOpSequence(sched))}`,
+        `opSeq=${JSON.stringify(getOpSequence(sched))}; ` +
+        `assistantLines(mem)=${getAssistantEntries(entries).length} ` +
+        `assistantLines(jsonl)=${getAssistantEntries(jsonlEntries).length} (expect 0 — 无确认轮); ` +
+        `jsonlUpsert=${!noJsonlUpsert}; ` +
+        `jsonlTypes=[${describeEntryTypeCounts(jsonlEntries)}]; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -1748,7 +1999,8 @@ async function runS19(piBin) {
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 为默认草稿（kind/schedule/prompt）
  *   ② notify 帧文案：cron 表达式（0 9 * * *）与任务名回显
  *   ③ 落库形态：upsert entry 恰 1 条，task = cron 任务（cronExpression + prompt）
- *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
+ *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
+ *      + op=upsert 已落盘（无需 flush 探针）
  */
 async function runS20(piBin) {
   const ws = makeTempWorkspace('s20')
@@ -1775,12 +2027,18 @@ async function runS20(piBin) {
       kind: 'recurring', schedule: '0 9 * * *', prompt: '',
     })
     const notify = await s.waitForNotify(n => n.message.includes('daily-standup-reminder'), 15000)
-    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
-    await flushForJsonlEvidence(s)
+    // ④ 确认轮（异步副作用）：等 JSONL 出现 aborted assistant 行
+    const ack = await s.waitForJsonlEntries(
+      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
+      20000,
+    )
+    debugDumpJsonl('S20', ack.entries)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
+    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+      .filter((e) => e.data.op === 'upsert')
     s.kill()
 
     // 文案权威源 = i18n.ts EN_US['task.created']（u-p2b 词典渲染）；cron 表达式按
@@ -1795,10 +2053,15 @@ async function runS20(piBin) {
       && !!task.schedule
       && task.schedule.mode === 'cron'
       && task.schedule.cronExpression === '0 0 9 * * *'
-    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
-    const persisted = jsonl.includes('op=upsert')
+    // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
+    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US；cron 回显归一化形态）
+    const ackLine = checkAckConfirmLine(ack.entries, {
+      name: 'daily-standup-reminder', schedule: '0 0 9 * * *',
+    })
 
-    const pass = exactlyOne && contract.ok && notifyCron && taskOk && persisted
+    const pass =
+      exactlyOne && contract.ok && notifyCron && taskOk && persisted && ackLine.ok
     return {
       name: 'S20',
       status: pass ? 'PASS' : 'FAIL',
@@ -1807,7 +2070,10 @@ async function runS20(piBin) {
         `notify default-schedule echo=${notifyCron}` +
         (notify ? ` msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert cron task=${taskOk} ` + describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
+        `upserts=${upserts.length}; ` +
+        `ackTurn=${ack.ok ? 'reached-jsonl' : 'TIMEOUT'} ${ackLine.desc}; ` +
+        `persisted=${persisted} persistedUpserts=${persistedUpserts.length}; ` +
+        `jsonlTypes=[${describeEntryTypeCounts(ack.entries)}]; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -1822,7 +2088,8 @@ async function runS20(piBin) {
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 反映 alias 参数
  *   ② notify 帧文案：30m + alias-task 回显
  *   ③ 落库形态：upsert entry 恰 1 条，task = alias 参数值
- *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
+ *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
+ *      + op=upsert 已落盘（无需 flush 探针）
  */
 async function runS21(piBin) {
   const ws = makeTempWorkspace('s21')
@@ -1848,12 +2115,18 @@ async function runS21(piBin) {
       kind: 'recurring', schedule: '30m', prompt: 'alias-task',
     })
     const notify = await s.waitForNotify(n => n.message.includes('alias-task'), 15000)
-    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
-    await flushForJsonlEvidence(s)
+    // ④ 确认轮（异步副作用）：等 JSONL 出现 aborted assistant 行
+    const ack = await s.waitForJsonlEntries(
+      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
+      20000,
+    )
+    debugDumpJsonl('S21', ack.entries)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
+    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+      .filter((e) => e.data.op === 'upsert')
     s.kill()
 
     // 文案权威源 = i18n.ts EN_US['task.created']（u-p2b 词典渲染）。
@@ -1865,10 +2138,15 @@ async function runS21(piBin) {
       && !!task.schedule
       && task.schedule.mode === 'interval'
       && task.schedule.intervalMs === 30 * 60 * 1000
-    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
-    const persisted = jsonl.includes('op=upsert')
+    // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
+    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US）
+    const ackLine = checkAckConfirmLine(ack.entries, {
+      name: 'alias-task', schedule: 'every 30m',
+    })
 
-    const pass = exactlyOne && contract.ok && notifyEcho && taskOk && persisted
+    const pass =
+      exactlyOne && contract.ok && notifyEcho && taskOk && persisted && ackLine.ok
     return {
       name: 'S21',
       status: pass ? 'PASS' : 'FAIL',
@@ -1877,7 +2155,199 @@ async function runS21(piBin) {
         `notify alias echo=${notifyEcho}` +
         (notify ? ` msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert alias task=${taskOk} ` + describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
+        `upserts=${upserts.length}; ` +
+        `ackTurn=${ack.ok ? 'reached-jsonl' : 'TIMEOUT'} ${ackLine.desc}; ` +
+        `persisted=${persisted} persistedUpserts=${persistedUpserts.length}; ` +
+        `jsonlTypes=[${describeEntryTypeCounts(ack.entries)}]; jsonl=[${jsonl}]`,
+    }
+  } finally {
+    ws.cleanup()
+  }
+}
+
+/**
+ * S22：确认轮合成行字段 + 宿主不变量（可脚本化 S7①②）。
+ *
+ * 命令路径建 once 2h 任务（表单确认）→ 确认轮落盘后读会话 JSONL，断言：
+ *   ① assistant 行 stopReason='aborted'（合成轮的终止形态投影到落盘消息）
+ *   ② 该行 provider/model = **创建时会话模型**（get_state 动态取值的 model.provider /
+ *      model.id）。注意语义收敛：真实环境此断言区分「合成行用会话模型」vs「掉进 pi-ai
+ *      faux core（provider:'faux' 硬编码）」；e2e 演员本身就是 faux，故此处只能断言
+ *      「= 会话当前模型」（动态等值），并随 evidence 输出实际值供归因。
+ *   ③ usage 各字段全 0（含 cost 四字段 + totalTokens；否则污染 context 统计）
+ *   ④ model_change 条数 = 1 且与创建前（内存 fileEntries）相等（pi 会话初始化自身写 1 条，
+ *      合成轮不得新增）
+ *   ⑤ thinking_level_change 条数不因创建而变化
+ *   ⑥ 宿主 auto-rename（本场景显式加载 rename-session + config.enabled=true）不被合成轮
+ *      触发：无 session_info entry + sessionName 未变。判别力：rename 的 first-stop 入口
+ *      只在 stopReason==='stop' 触发，合成轮为 'aborted'；若回归为 stop，这里会变红。
+ *
+ * 断言失败信息把实际 JSONL 字段/计数值打进 evidence（可诊断性硬要求）。
+ */
+async function runS22(piBin) {
+  const ws = makeTempWorkspace('s22')
+  try {
+    const s = spawnSession({
+      piBin, cwd: ws.cwd, sessionDir: ws.sessionDir, label: 'S22',
+      fauxSteps: [{ text: 'ok' }],
+      autoRename: true,
+      extraExtensions: [RENAME_SESSION_EXT_PATH],
+      uiActor: (req) => {
+        const question = parseScheduleQuestion(req)
+        if (!question) return null
+        return scheduleFormAnswer(question, {
+          kind: 'once', schedule: '2h', prompt: 's22-host-invariant',
+        })
+      },
+    })
+    const ready = await s.waitReady()
+    if (!ready) return fail('S22', 'pi not ready / extension load failed: ' + s.stderrTail())
+
+    // ⑥ 前置正控（硬前提）：rename-session 已加载 + 开关为 ON（`/auto-rename status` 经
+    // notify 帧回显 `自动重命名会话：已开启 ✓`）。无此正控则「合成轮未触发改名」无判别力。
+    await s.sendCommand('/auto-rename status')
+    const renameStatus = await s.waitForNotify(n => n.message.includes('自动重命名会话'), 15000)
+    const renameSwitchOn = !!renameStatus && renameStatus.message.includes('已开启')
+
+    // 创建前基线（内存 fileEntries：会话初始化已 append 的宿主条目）
+    const stateBefore = await s.getStateData()
+    const entriesBefore = await s.getEntries()
+    const modelChangeBefore = countEntryType(entriesBefore, 'model_change')
+    const thinkingBefore = countEntryType(entriesBefore, 'thinking_level_change')
+    const nameBefore = stateBefore ? stateBefore.sessionName : undefined
+    const sessionModel = stateBefore && stateBefore.model ? stateBefore.model : null
+
+    await s.sendCommand('/scheduler 2h "s22-host-invariant"')
+    const reqs = await s.waitForFormRequest(15000)
+    await s.waitForNotify(n => n.message.includes('s22-host-invariant'), 15000)
+    const ack = await s.waitForJsonlEntries(
+      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
+      20000,
+    )
+    debugDumpJsonl('S22', ack.entries)
+    const stateAfter = await s.getStateData()
+    const nameAfter = stateAfter ? stateAfter.sessionName : undefined
+    s.kill()
+
+    const jsonlEntries = ack.entries
+    const assistants = getAssistantEntries(jsonlEntries)
+    const aborted = assistants.filter((e) => e.message.stopReason === 'aborted')
+    const line = aborted.length > 0 ? aborted[aborted.length - 1] : null
+
+    // ① 合成行终止形态
+    const stopOk = !!line && line.message.stopReason === 'aborted'
+    // ② provider/model = 创建时会话模型（动态等值）
+    const providerOk = !!line && !!sessionModel
+      && line.message.provider === sessionModel.provider
+      && line.message.model === sessionModel.id
+    // ③ usage 全 0
+    const usageOk = !!line && isZeroUsage(line.message.usage)
+    // ④⑤ 宿主不变量：条数与创建前一致（model_change 绝对值 = 1）
+    const modelChangeAfter = countEntryType(jsonlEntries, 'model_change')
+    const thinkingAfter = countEntryType(jsonlEntries, 'thinking_level_change')
+    const modelChangeOk = modelChangeAfter === 1 && modelChangeAfter === modelChangeBefore
+    const thinkingOk = thinkingAfter === thinkingBefore
+    // ⑥ auto-rename 未被合成轮触发
+    const sessionInfoCount = countEntryType(jsonlEntries, 'session_info')
+    const renameOk = sessionInfoCount === 0 && nameAfter === nameBefore
+    // 附加：确认文案（合成行的用户可见内容）
+    const ackLine = checkAckConfirmLine(jsonlEntries, {
+      name: 's22-host-invariant', schedule: 'once in 2h',
+    })
+
+    const pass = ack.ok && stopOk && providerOk && usageOk && modelChangeOk && thinkingOk
+      && renameOk && renameSwitchOn && ackLine.ok && reqs.length === 1
+    return {
+      name: 'S22',
+      status: pass ? 'PASS' : 'FAIL',
+      evidence:
+        `form select requests=${reqs.length} (expect 1); ` +
+        `ackTurn=${ack.ok ? 'reached-jsonl' : 'TIMEOUT'}; ` +
+        `①stopReason=aborted:${stopOk}; ` +
+        `②provider/model=sessionModel:${providerOk} (sessionModel=${sessionModel ? `${sessionModel.provider}/${sessionModel.id}` : '?'}; ` +
+        `line=${line ? describeAssistantEntry(line) : '(none)'}); ` +
+        `③usageAllZero:${usageOk}; ` +
+        `④model_change ${modelChangeBefore}(before)→${modelChangeAfter}(jsonl) ok=${modelChangeOk}; ` +
+        `⑤thinking_level_change ${thinkingBefore}→${thinkingAfter} ok=${thinkingOk}; ` +
+        `⑥autoRename switchOn=${renameSwitchOn} notTriggered=${renameOk} (status=${renameStatus ? JSON.stringify(renameStatus.message.slice(0, 60)) : '(none)'}; session_info=${sessionInfoCount} name ${JSON.stringify(nameBefore)}→${JSON.stringify(nameAfter)}); ` +
+        `confirmText:${ackLine.ok} ${ackLine.desc}; ` +
+        `assistantLines=${assistants.length} aborted=${aborted.length}; ` +
+        `jsonlTypes=[${describeEntryTypeCounts(jsonlEntries)}]; jsonl=[${s.getJsonlSnippet()}]`,
+    }
+  } finally {
+    ws.cleanup()
+  }
+}
+
+/**
+ * S23：同一会话连续两次创建 ⇒ 确认轮只发生 1 次。
+ *
+ * 第一任务创建触发确认轮（打开落盘开关 + ackState 记账）；第二任务创建时
+ * maybeStartAck 的落盘判据（已有 assistant 消息 ⇒ pi 已 flush）直接返回 ⇒ 不再注入合成轮。
+ * 断言：aborted assistant 行**恰好 1 条** + 两个任务的 op=upsert entry 都在 JSONL 里
+ * （第二个 upsert 直接 append 到已落盘的会话文件）。
+ */
+async function runS23(piBin) {
+  const ws = makeTempWorkspace('s23')
+  try {
+    let formIndex = 0
+    const s = spawnSession({
+      piBin, cwd: ws.cwd, sessionDir: ws.sessionDir, label: 'S23',
+      fauxSteps: [{ text: 'ok' }],
+      uiActor: (req) => {
+        const question = parseScheduleQuestion(req)
+        if (!question) return null
+        formIndex += 1
+        const spec = formIndex === 1
+          ? { kind: 'once', schedule: '3h', prompt: 's23-first-task' }
+          : { kind: 'once', schedule: '4h', prompt: 's23-second-task' }
+        return scheduleFormAnswer(question, spec)
+      },
+    })
+    const ready = await s.waitReady()
+    if (!ready) return fail('S23', 'pi not ready / extension load failed: ' + s.stderrTail())
+
+    // 第一次创建 → 确认轮落盘
+    await s.sendCommand('/scheduler 3h "s23-first-task"')
+    await s.waitForNotify(n => n.message.includes('s23-first-task'), 15000)
+    const ack1 = await s.waitForJsonlEntries(
+      es => getAssistantEntries(es).filter((e) => e.message.stopReason === 'aborted').length >= 1,
+      20000,
+    )
+    // JSONL 行落盘早于 turn_end 收尾：等会话空闲再发第二次命令（避免命令撞在 streaming 中）
+    const idle = await waitUntilIdle(s, 5000)
+
+    // 第二次创建（同一会话；此时已存在 assistant 消息 ⇒ 落盘判据命中，不再注入合成轮）
+    await s.sendCommand('/scheduler 4h "s23-second-task"')
+    await s.waitForNotify(n => n.message.includes('s23-second-task'), 15000)
+    const ack2 = await s.waitForJsonlEntries(
+      es => getSchedulerEntries(es).filter((e) => e.data.op === 'upsert').length >= 2,
+      20000,
+    )
+    debugDumpJsonl('S23', ack2.entries)
+    s.kill()
+
+    const jsonlEntries = ack2.entries
+    const aborted = getAssistantEntries(jsonlEntries).filter((e) => e.message.stopReason === 'aborted')
+    const upserts = getPersistedSchedulerEntries(jsonlEntries).filter((e) => e.data.op === 'upsert')
+    const prompts = upserts.map((e) => (e.data.task ? e.data.task.prompt : undefined))
+    const bothTasks = prompts.includes('s23-first-task') && prompts.includes('s23-second-task')
+    const exactlyOneAck = aborted.length === 1
+    const confirmOk = checkAckConfirmLine(jsonlEntries, {
+      name: 's23-first-task', schedule: 'once in 3h',
+    }).ok
+
+    const pass = ack1.ok && ack2.ok && idle && exactlyOneAck && bothTasks && confirmOk
+    return {
+      name: 'S23',
+      status: pass ? 'PASS' : 'FAIL',
+      evidence:
+        `creates=2 (formIndex=${formIndex}); ack1=${ack1.ok ? 'reached-jsonl' : 'TIMEOUT'} `
+        + `ack2(upserts>=2)=${ack2.ok ? 'reached-jsonl' : 'TIMEOUT'}; sessionIdle=${idle}; `
+        + `abortedAssistantLines=${aborted.length} (expect exactly 1); `
+        + `upserts=${upserts.length} prompts=${JSON.stringify(prompts)} bothTasks=${bothTasks}; `
+        + `firstConfirmText=${confirmOk}; `
+        + `jsonlTypes=[${describeEntryTypeCounts(jsonlEntries)}]; jsonl=[${s.getJsonlSnippet()}]`,
     }
   } finally {
     ws.cleanup()
@@ -2060,6 +2530,8 @@ const SCENARIOS = {
   S19: runS19,
   S20: runS20,
   S21: runS21,
+  S22: runS22,
+  S23: runS23,
   S4: runS4,
   S6: runS6,
   S12: runS12,
@@ -2073,7 +2545,7 @@ const SCENARIOS = {
   S16: followupS16,
 }
 
-const A_CLASS = ['S1', 'S2', 'S3', 'S5', 'S9', 'S17', 'S18', 'S19', 'S20', 'S21']
+const A_CLASS = ['S1', 'S2', 'S3', 'S5', 'S9', 'S17', 'S18', 'S19', 'S20', 'S21', 'S22', 'S23']
 const B_CLASS_IMPL = ['S4', 'S6', 'S12', 'S14']
 const B_CLASS_FOLLOWUP = ['S7', 'S8', 'S10', 'S16']
 const C_CLASS = ['S11', 'S13', 'S15']
@@ -2170,7 +2642,7 @@ async function main() {
   const toRun = selectScenarioList(arg)
   if (!toRun) {
     console.log(`${TAG} unknown scenario: ${arg}`)
-    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S21|aclass|bclass|all|v]`)
+    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S23|aclass|bclass|all|v]`)
     return 2
   }
 

@@ -626,7 +626,7 @@
     },
     {
       "id": "E2E-SCHED-01",
-      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S21 契约：模型路径直建 + /scheduler 命令表单，notify 帧 + session entry 双轨断言）",
+      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S23 契约：模型路径直建 + /scheduler 命令表单 + 命令路径确认轮持久化，notify 帧 + session JSONL 双轨断言）",
       "scope": [
         "extensions/universal/scheduler/**",
         "scripts/verify-scheduler-e2e.cjs"
@@ -643,7 +643,7 @@
       "run": "node scripts/verify-scheduler-e2e.cjs",
       "owner": "extensions/universal/scheduler",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "断言面在扩展写盘 entry 形态与工具 / 命令反馈（非模型智能），零 token（faux 轨凭证无关）。后触发反转形态：① 模型路径（schedule tool）直建，faux toolCall 步骤驱动，断言 tool result 回显 + customType='pi-scheduler:task' entry，且不得出现 UI_FORM_MARKER select 帧（S1/S2 回归守卫）；② 人侧路径（/scheduler 命令，/schedule 为 alias）异步打开统一提问表单（UI_FORM_MARKER select，options[0]={formQuestions,allowCancel}，schedule 问题 initial 预填 draft；回包 FormAnswers envelope，schedule value=JSON.stringify(ScheduleFormResult)），slash 命令不产生 turn，故断言源迁到 extension_ui_request{method:'notify'} 帧（文案 + notifyType）+ entry 双轨（S18 改值确认 / S19 取消无 toast / S20 无参默认草稿 / S21 alias 等价）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行。"
+      "note": "spawn 真实 pi 进程族，按 e2e 执行准则空载串行。[u-e2e-adjust] 命令路径持久化证据轨改锚「确认轮」：建任务后 scheduler 注入零 token 本地合成轮（覆写会话当前 provider 的 streamSimple，产出 stopReason=aborted 的 assistant 行 + ack.confirm 文案），这就是正常路径——打开 pi 会话落盘开关，flush 探针退役；S18/S19/S20/S21 改为断言会话 JSONL 的 aborted assistant 行 + 确认文案（locale 钉死 en-US）+ op=upsert 落盘（S19 为负向：无 assistant 行、无 upsert）；新增 S22（合成行字段：provider/model=会话模型、usage 全 0 + 宿主不变量：model_change/thinking_level_change 不因创建新增 + auto-rename 不被合成轮触发）与 S23（同会话连续两次创建 ⇒ 确认轮恰 1 次）。"
     },
     {
       "id": "E2E-BATCH-01",
