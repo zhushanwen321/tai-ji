@@ -840,6 +840,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 - ❌ 错误流（mock 永远成功；错误路径只能单测注入 `message.error`）
 - ❌ deleted fileChanges（只 modified/added/unmerged）
 - ✅ retry（仅当输入含 'retry' 关键词触发）
+- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局守卫取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
 
 ## 8. MOCK 模式测试
 
@@ -915,6 +916,7 @@ pnpm dev
 | E2E-CF-5：fileChanges 变更集卡 | `change-set-card` | 卡片可见，含文件路径 |
 | E2E-CF-6：retry（输入 retry） | retry 指示器 | 输入含 'retry' 触发重试指示 |
 | E2E-CF-7：session 隔离 | 两个 session 消息独立 | 切 session 消息不串扰 |
+| E2E-CF-8：markdown 表格列宽地板（`e2e/markdown-table-layout.spec.ts`，@p0-smoke） | 输入哨兵词 `md-table` → `block-text` 内 `table` 首列 | 首列 ≥ 4em（border-box）、表头单行不竖排、表格不撑爆 `.md-render` 宿主、长文本列仍正常折行 |
 
 ### 10.3 完整 E2E 示例代码（补 testid 前的文本锚点版）
 
@@ -1037,6 +1039,45 @@ test.describe('对话流 E2E', () => {
 | 11. fileChanges | （mock 推） | ChangeSetCard 出现（accumulating→ready，120ms×2） |
 | 12. complete | （mock 推） | `setStreaming(false)`；turn 复位完成态；usage 回填 |
 | 13. 终态断言 | （验证） | 收尾 summary「好的，我来处理这个请求」可见 |
+
+### 10.5 markdown 表格列宽地板（已落地 `e2e/markdown-table-layout.spec.ts`，@p0-smoke）
+
+**背景**：对话流表格 CSS 是 GitHub 四条声明（`display:block / overflow-x:auto / width:max-content / max-width:100%`）。自然宽超容器时 auto table layout 把所有列压向 min-content；拉丁文 min-content = 最长单词，CJK = 1 个汉字 → 短中文标签列被压成 1 字宽竖排（用户截图事故）。修复 = th/td `min-width:4em` 地板（`MarkdownRenderer.vue` + `UpdateButton.vue` 两宿主）。
+
+**为什么只能落 e2e**：断言是布局量（列宽 / 行数），jsdom 无 layout 引擎，vitest 测不了（TEST-STRATEGY 三视角之「观察者」形态 + 三态纪律 R1）。
+
+```typescript
+// 数据流：composer 发哨兵词 'md-table' → mock runSendStream 回复体换成复刻宽表
+// （TABLE_REPLY）→ Block text → MarkdownRenderer 渲染出 .md-render table
+await page.getByRole('textbox').click()
+await page.getByRole('textbox').pressSequentially('md-table')
+await page.getByRole('textbox').press('Enter')
+const table = page.locator('[data-testid="block-text"] table').last()
+await expect(table).toBeVisible({ timeout: 45_000 })
+// 必须等 complete 再测宽：流式中途行数不足，表的自然宽没到峰值，判定不稳
+await expect(page.locator('.stop-btn')).toHaveCount(0, { timeout: 45_000 })
+const m = await table.evaluate((t) => {
+  const th = t.querySelector('thead th') as HTMLElement
+  const host = t.closest('.md-render') as HTMLElement
+  const lines = (el: HTMLElement) => {
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    return r.getClientRects().length // Range clientRects 数量 = 行数
+  }
+  return {
+    fontSize: parseFloat(getComputedStyle(th).fontSize),
+    firstColW: th.getBoundingClientRect().width,
+    headerLines: lines(th),
+    tableScrollW: t.scrollWidth,
+    hostW: host.getBoundingClientRect().width,
+  }
+})
+expect(m.firstColW).toBeGreaterThanOrEqual(m.fontSize * 4 - 1) // 地板契约
+expect(m.headerLines).toBe(1)                                   // 表头不竖排
+expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿主
+```
+
+**失效形态**（无地板时实测，pane 588px）：首列 35.6px ≈ 1 字 + padding、表头 2 行（竖排）→ 断言红；有地板时 52px / 1 行 → 绿。
 
 ## 11. 覆盖缺口（漏测 backlog）
 
