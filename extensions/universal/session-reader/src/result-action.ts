@@ -107,7 +107,8 @@ interface ResultItem {
   session: string
   /** 反查到的真实 session id（header id，非 sa- 占位） */
   sessionId: string
-  /** session .jsonl 绝对路径（截断提示读原文件用） */
+  /** 内容源路径：pi = session .jsonl 绝对路径（截断提示 read 用）；zcode 路由 = 会话库
+   * .sqlite 绝对路径（二进制不可 read，截断提示只留 session_read 指针，见 formatResultTruncation） */
   sessionFile: string
   /** 全量正文字符数（截断前口径） */
   totalChars: number
@@ -122,16 +123,23 @@ interface ResultItem {
  * notifier.ts buildTruncationPointer 同模板的 X = **丢弃**字符数（total - kept）。
  * 两处措辞同构但口径相反（主 agent 会先后消费两种通知），统一字符串 = 行为变更，
  * 勿顺手改口径——读本行时先确认在消费哪一侧。
- * [C6] 英文去 emoji（对齐 notifier 指针行的纯英文形态，adversarial-review-fixes §3.4）。 */
+ * [C6] 英文去 emoji（对齐 notifier 指针行的纯英文形态，adversarial-review-fixes §3.4）。
+ *
+ * zcode 路由（zcodeRoute=true）下 sessionFile 是 sqlite 库路径，`read` 半边指针不可执行
+ * ——抑制之，只保留 `session_read {action:"detail"}` 可执行半边（错误 → 权威源 → 重试
+ * 闭环不破：权威源动作必须是 agent 真能执行的动作）。sessionFile 参数此形态下不进文案，
+ * 保留是为 pi/zcode 两路由签名同形。 */
 function formatResultTruncation(
   raw: string,
   sessionFile: string,
   limit: number,
   totalChars: number,
+  zcodeRoute: boolean,
 ): string {
+  const readHalf = zcodeRoute ? '' : `read ${sessionFile}, or `
   return (
     `\n\n[truncated ${limit} of ${totalChars} chars — ` +
-    `full text: read ${sessionFile}, or session_read { action:"detail", session:"${raw}" }]`
+    `full text: ${readHalf}session_read { action:"detail", session:"${raw}" }]`
   )
 }
 
@@ -217,7 +225,8 @@ export async function doResult(
       totalChars,
       truncated,
       text: truncated
-        ? text.slice(0, limit) + formatResultTruncation(id, resolved.fileName, limit, totalChars)
+        ? text.slice(0, limit) +
+          formatResultTruncation(id, resolved.fileName, limit, totalChars, resolved.zcodeAnchor !== undefined)
         : text,
     })
   }

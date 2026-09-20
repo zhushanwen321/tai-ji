@@ -1,7 +1,7 @@
 /**
  * zcode → canonical session 转换器（自 runtime services/session/zcode-import/converter.ts
- * 迁入改造，session-reader-shared-core 设计 §3.3 D1 + §5 Phase 2；runtime 侧旧文件待
- * 收口单元删除，本包为其唯一现行承载）。
+ * 迁入改造，session-reader-shared-core 设计 §3.3 D1 + §5 Phase 2；runtime 侧旧文件已
+ * 随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
  *
  * 输入 = 单会话全量行集（message 按 sequence、part 按 (message.sequence, part.sequence)
  * 联合序，sqlite-access.getSessionTranscript）；输出 = canonical `Entry[]`（session-core
@@ -521,7 +521,7 @@ function partStartTime(part: Record<string, unknown>): number | undefined {
  * 错误面（归消费侧，调用方按各自词表映射——reader → zcode_* / runtime 导入 → import_*）：
  * - db 文件不存在 / 恢复阶梯耗尽 → Error（sqlite-access 抛出，消息含路径与已尝试级别）
  * - schema 版本超出已知集 → ZcodeSchemaDriftError（观测版本在 observedVersion 字段）
- * - session 行不存在（zcode 侧 GC / 从未落库）→ Error，消息含 sessionId 与恢复动作
+ * - session 行不存在（zcode 侧 GC / 从未落库）→ Error，消息含 sessionId 与事实归因
  * - 行 data 列 JSON 非法（schema 漂移域）→ 原始 Error 上抛（sqlite-access 不静默跳过）
  */
 export async function readZcodeSession(dbPath: string, sessionId: string): Promise<NormalizedSession> {
@@ -530,7 +530,7 @@ export async function readZcodeSession(dbPath: string, sessionId: string): Promi
     const row = handle.db.getSessionRow(sessionId)
     if (!row) {
       throw new Error(
-        `该会话已不在 zcode 库中（sessionId=${sessionId}）：该 id 可能已被 zcode 侧回收或从未落库，请刷新候选列表后重试`,
+        `该会话已不在 zcode 库中（sessionId=${sessionId}）：该 id 可能已被 zcode 侧回收或从未落库`,
       )
     }
     const transcript = handle.db.getSessionTranscript(sessionId)

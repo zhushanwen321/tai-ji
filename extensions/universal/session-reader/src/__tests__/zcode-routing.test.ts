@@ -5,7 +5,12 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Check } from 'typebox/value'
 
-import { handleSessionRead, SQLITE_DRIVER_UNSUPPORTED_MARK, zcodeReadErrorMessage } from '../tool-handler.js'
+import {
+  handleSessionRead,
+  SQLITE_DRIVER_UNSUPPORTED_MARK,
+  ZCODE_DB_MISSING_MARK,
+  zcodeReadErrorMessage,
+} from '../tool-handler.js'
 import { SqliteUnreadableError } from '@zhushanwen/zcode-session-source'
 import sessionReaderExtension from '../index.js'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'
@@ -324,6 +329,17 @@ describe('变体 M：manifest 主路径（instrument：manifest 锚与 entry 锚
     expect(r.content[0]?.text).toBe('第二轮 ZBSENTINEL 收尾')
   })
 
+  it('result 截断指针：zcode 路由抑制 read 半边（库路径二进制不可 read），只留 session_read detail 可执行半边', async () => {
+    const r = await handleSessionRead({ action: 'result', session: SA_M, limit: 5 }, signals())
+    const text = r.content[0]?.text ?? ''
+    expect(text).toContain('[truncated 5 of')
+    // 可执行半边在场（错误 → 权威源 → 重试闭环）
+    expect(text).toContain(`session_read { action:"detail", session:"${SA_M}" }`)
+    // read 半边被抑制：不指库路径，也不出现 "full text: read" 形态
+    expect(text).not.toContain(dbPath)
+    expect(text).not.toContain('full text: read')
+  })
+
   it('detail：toolCall 全配对（bash）+ compaction custom entry 形态（渲染现状锚定）', async () => {
     const r = await handleSessionRead({ action: 'detail', session: SA_M, turns: 'T000-T002' }, signals())
     const text = r.content[0]?.text ?? ''
@@ -543,6 +559,35 @@ describe('驱动探测失败错误面：跨包契约 + L4 包装形态映射', (
     expect(msg).toContain('zcode_db_unreadable')
     expect(msg).toContain('L1-direct')
     expect(msg).not.toContain('zcode_host_unsupported')
+  })
+
+  it('跨包契约：ZCODE_DB_MISSING_MARK 子串在 zcode-session-source sqlite-access 源文内（漂移即红）', () => {
+    // 库文件缺失（openZcodeSessionDb 开头 existsSync 失败）无专用错误类型（抛普通
+    // Error），reader 按消息特征识别（SQLITE_DRIVER_UNSUPPORTED_MARK 契约测试同范式）：
+    // sqlite-access 源文措辞变更不再含 mark → db_unreadable 面死亡、TOCTOU 缺失误标
+    // schema_drift，红。
+    const source = readFileSync(
+      new URL('../../../../../packages/zcode-session-source/src/sqlite-access.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain(ZCODE_DB_MISSING_MARK)
+  })
+
+  it('TOCTOU 窗口：开库期库文件缺失普通 Error → db_unreadable 面（不误标 schema_drift，§3.4 第 4 行）', () => {
+    // 白名单闸 existsSync 通过后、openZcodeSessionDb 开库前文件被删的窗口：sqlite-access
+    // 抛普通 Error「db 文件不存在：<dbPath>」——落 db_unreadable（环境恢复指引），编程
+    // 错误兜底（schema_drift）只接真正的查询期 schema 漂移域。
+    const msg = zcodeReadErrorMessage(new Error(`db 文件不存在：/tmp/fixture/db.sqlite`), agentDir)
+    expect(msg).toContain('zcode_db_unreadable')
+    expect(msg).toContain('db 文件不存在：/tmp/fixture/db.sqlite')
+    expect(msg).toContain('👉')
+    expect(msg).not.toContain('zcode_schema_drift')
+  })
+
+  it('对照：不含缺失 mark 的普通 Error 仍落 schema_drift 兜底（编程错误域语义不扩）', () => {
+    const msg = zcodeReadErrorMessage(new Error('TypeError: cannot read properties of undefined'), agentDir)
+    expect(msg).toContain('zcode_schema_drift')
+    expect(msg).not.toContain('zcode_db_unreadable')
   })
 })
 

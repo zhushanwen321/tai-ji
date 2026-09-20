@@ -227,7 +227,7 @@ export type ResolveResult =
   | { kind: 'multi'; query: string; candidates: MatchedSession[] }
 
 // readSessionHeaderIdSync（同步读首行 header 取 id，resolveSessionId 形态①/②消费）
-// 在 discovery/session-header.ts（D5 单源，sync 4KB 版原样搬入）。
+// 在 discovery/session-header.ts（基座 readFirstJsonlLineSync 的谓词/降级薄包装，G2 单源）。
 
 /** ~ 前缀（home 目录简写），与 expandHome 配套避免 magic number。 */
 const HOME_TILDE_PREFIX = '~/'
@@ -298,7 +298,7 @@ async function resolveSessionId(
  * ③ pi 无命中（今天此处直接 ES2）→ entry 兜底（§3.5 第②层，仅 liveSessionDir 内，
  *   越界显式失败）：命中 → zcode 读链；未命中 → `zcode_record_not_found` + 👉
  *  （§3.4：sa-id 语境的统一错误面——F14 agent 唯一持有的 id 就是 sa-id，指引动作
- *   覆盖 ES2 原文案的全部恢复路径）。
+ *   覆盖除 find 指针外的全部恢复路径（find 按 §3.4 刻意不保留）。
  */
 async function resolveSaIdRoute(
   session: string,
@@ -589,7 +589,19 @@ function formatZcodeHostUnsupported(detail: string): string {
 export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
 
 /**
- * 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 其余）。
+ * 库文件缺失的消息特征（zcode-session-source sqlite-access.ts `openZcodeSessionDb`
+ * 开头 existsSync 失败抛普通 Error「db 文件不存在：<dbPath>」的消息契约锚点）。该包
+ * 不导出专用错误子类，reader 侧按消息特征单列识别——落 §3.4 第 4 行
+ * `zcode_db_unreadable`（不误标 schema_drift）。生产路径上白名单闸
+ * （assertZcodeDbPathAllowed 第 1 段）已先行拦掉绝大多数缺失，此处命中的是两段
+ * existsSync 之间的 TOCTOU 理论窗口（闸通过后开库前文件被删）。跨包漂移由
+ * zcode-routing.test.ts 的源文本契约测试守卫（SQLITE_DRIVER_UNSUPPORTED_MARK 同范式）。
+ * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
+ */
+export const ZCODE_DB_MISSING_MARK = 'db 文件不存在'
+
+/**
+ * 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 库缺失 / 其余）。
  * 导出面仅测试消费（L4 包装形态的映射契约直测，zcode-routing.test.ts）。
  */
 export function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
@@ -613,6 +625,12 @@ export function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
   if (message.includes(SQLITE_DRIVER_UNSUPPORTED_MARK)) {
     logger.warn('zcode sqlite driver unsupported in host runtime', { detail: message })
     return formatZcodeHostUnsupported(message)
+  }
+  // 库文件缺失（openZcodeSessionDb 开头 existsSync 失败的 TOCTOU 窗口，§3.4 第 4 行）
+  // 单列：落 db_unreadable（环境恢复指引），不与 schema 漂移混淆——归因与恢复动作不同
+  if (message.includes(ZCODE_DB_MISSING_MARK)) {
+    logger.warn('zcode session db missing at open (TOCTOU window)', { detail: message })
+    return formatZcodeDbUnreadable(dirname(agentDir), `（${message}）`)
   }
   // 其余查询期错误（data 列 JSON 非法等 schema 漂移域——sqlite-access 不静默跳过，
   // 映射权在消费侧）→ schema_drift 语义

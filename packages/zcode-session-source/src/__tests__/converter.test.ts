@@ -658,7 +658,7 @@ describe('normalizeZcodeSessionId（T1 header.id 归一化域）', () => {
     expect(zcodeCandidateKey('sess_a_b')).toBe(once) // 打标域与 header 域构造性一致
   })
 
-  it('后置条件失败 fail-fast（归一化后为空 / 非法字符），错误含原始 id 与恢复动作', () => {
+  it('后置条件失败 fail-fast（归一化后为空 / 非法字符），错误含原始 id 与事实归因', () => {
     expect(() => normalizeZcodeSessionId('sess_')).toThrow(/归一化后为空/)
     expect(() => normalizeZcodeSessionId('sess_空格 id')).toThrow(/非法字符/)
     // 错误面归消费侧（普通 Error，非私建错误码类）——消费方按各自词表映射
@@ -667,7 +667,7 @@ describe('normalizeZcodeSessionId（T1 header.id 归一化域）', () => {
       expect.unreachable()
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
-      expect((err as Error).message).toContain('请升级太极后重试')
+      expect((err as Error).message).toContain('超出已验证域')
     }
   })
 })

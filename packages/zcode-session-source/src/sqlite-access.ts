@@ -1,6 +1,6 @@
 /**
  * zcode 会话库只读访问层（自 runtime services/session/zcode-import/sqlite-access.ts
- * 迁入改造；runtime 侧旧文件待收口单元删除，本包为其唯一现行承载）。
+ * 迁入改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
  *
  * 访问模式（沿用既有先例）：
  * - 只读连接（readonly 语义 = WAL 只读不阻塞宿主写入）；转换/查询全程不写库；

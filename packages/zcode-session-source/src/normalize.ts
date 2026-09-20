@@ -1,6 +1,7 @@
 /**
  * zcode session id 归一化（自 runtime services/session/zcode-import/normalize.ts 迁入
- * 改造；runtime 侧旧文件待收口单元删除，本包为其唯一现行承载。设计 §1.5「id 归一化
+ * 改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载。
+ * 设计 §1.5「id 归一化
  * 收敛为基座/source 单点」——候选打标与转换 header 两个调用点 import 同源实现，
  * 各内联一份则单边漂移、打标失配即幂等失效）。
  *
@@ -30,7 +31,8 @@ const SESS_PREFIX = 'sess_'
  * ② 对①结果串全部 `_` → `-`
  * ③ 后置条件校验：非空 ∧ 不含 `_` ∧ 字符集/首尾合法，不满足 → fail-fast（防 id 值
  *    形态漂移静默打破文件名不变量——静默跳过或宽松放行会让落地文件被自家消费链误
- *    解析）。错误消息含原始 id 与恢复动作，供消费方透传给用户/agent。
+ *    解析）。错误消息只含现象 + 事实归因 + 原始 id；恢复指引归消费侧（契约④不私建
+ *    恢复话术），消费方按各自词表映射后自行组织。
  *
  * 候选域（排除 subagent_child 后）剥后为裸 uuid（v4），与 pi 自建 uuidv7 域版本位
  * 不相交不撞。
@@ -40,18 +42,18 @@ export function normalizeZcodeSessionId(raw: string): string {
   const replaced = stripped.replaceAll('_', '-')
   if (replaced.length === 0) {
     throw new Error(
-      `zcode 会话 id 归一化后为空（原始 id=「${raw}」）：该 id 形态超出已验证域（sess_<uuid>），请升级太极后重试`,
+      `zcode 会话 id 归一化后为空（原始 id=「${raw}」）：该 id 形态超出已验证域（sess_<uuid>）`,
     )
   }
   // 理论不可达（步骤②已全部替换），规格仍显式校验：未来改动②的替换规则时此条件拦截漏网
   if (replaced.includes('_')) {
     throw new Error(
-      `zcode 会话 id 归一化后仍含下划线（原始 id=「${raw}」→「${replaced}」）：破坏「文件名尾段 == header.id」不变量，拒绝导入`,
+      `zcode 会话 id 归一化后仍含下划线（原始 id=「${raw}」→「${replaced}」）：破坏「文件名尾段 == header.id」不变量`,
     )
   }
   if (!NORMALIZED_ID_RE.test(replaced)) {
     throw new Error(
-      `zcode 会话 id 归一化后含非法字符或首尾非字母数字（原始 id=「${raw}」→「${replaced}」，合法集 = 字母数字与「-」且首尾字母数字）：该 id 形态超出已验证域（sess_<uuid>），请升级太极后重试`,
+      `zcode 会话 id 归一化后含非法字符或首尾非字母数字（原始 id=「${raw}」→「${replaced}」，合法集 = 字母数字与「-」且首尾字母数字）：该 id 形态超出已验证域（sess_<uuid>）`,
     )
   }
   return replaced
