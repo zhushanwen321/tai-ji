@@ -82,6 +82,20 @@ describe('ModelSelectPopover 空态区分（P2）', () => {
     expect(bodyText).not.toContain('无匹配模型')
   })
 
+  it('ModelPickerPanel 抽取回归：搜索框 + provider 分组标题 + 列表项 testid（用户可见 DOM）', async () => {
+    getSettingsStore().models.value = OPENAI_MODELS
+    wrapper = mount(ModelSelectPopover, { props: { selected: 'openai/gpt-4o' } })
+    await flushPromises()
+
+    await openPopover()
+    expect(document.body.querySelector('[data-testid="model-picker-panel"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="model-picker-search"]')).not.toBeNull()
+    // provider 分组标题（providerName）
+    expect(document.body.textContent).toContain('OpenAI')
+    // 列表项 testid（默认前缀 model-picker-item）
+    expect(document.body.querySelector('[data-testid="model-picker-item-gpt-5"]')).not.toBeNull()
+  })
+
   it('providerFilter 限定分组：只展示指定 provider 的模型', async () => {
     getSettingsStore().models.value = [
       ...OPENAI_MODELS,

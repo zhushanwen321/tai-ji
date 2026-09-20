@@ -9,7 +9,11 @@ export default {
   commentPlaceholder: 'Optional, add a note…',
   // M1 ring 3: response not delivered while disconnected (send returned false); request kept for resubmission after reconnect
   responseNotDelivered: 'Reply not delivered. You can resubmit after the connection recovers',
-  // ── Schedule create confirm form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
+  // ── Schedule create form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
+  scheduleCreateFormTitle: 'New scheduled task',
+  scheduleCreateSubtitle: 'Runs only while this session is open.',
+  scheduleCreateSubmit: 'Create task',
+  scheduleCreateEscHint: 'Esc to cancel',
   scheduleCreateTimeLabel: 'Schedule',
   scheduleCreateModeLabel: 'Mode',
   scheduleCreateKindOnce: 'One-time',
@@ -33,7 +37,7 @@ export default {
   scheduleCreateNoModelsHint: 'Follows the session model (no candidate models)',
   scheduleCreateModelHint: 'The task runs on this model and the session model is restored afterwards',
   scheduleCreatePromptLabel: 'Prompt',
-  scheduleCreatePromptHint: 'agent drafted · {count} chars',
+  scheduleCreatePromptHint: 'Injected as a message · {count} chars',
   scheduleCreateAdvancedToggle: 'Advanced (name / expiry)',
   scheduleCreateNameLabel: 'Name',
   scheduleCreateNamePlaceholder: 'Auto-generated if empty',
@@ -42,10 +46,6 @@ export default {
   scheduleCreateExpires30d: '30 days',
   scheduleCreateExpiresNever: 'Never',
   scheduleCreateExpiresHint: 'Recurring tasks only',
-  scheduleCreateFootIncomplete: 'Complete the schedule and prompt to continue',
-  scheduleCreateSummaryOnce: 'One-time · {detail}',
-  scheduleCreateSummaryOnceNoTime: 'One-time · time not set',
-  scheduleCreateSummaryRecurring: 'Recurring · {detail}',
   scheduleCreateRelUnderMin: 'in less than a minute',
   scheduleCreateRelMinutes: 'in {n} min',
   scheduleCreateRelHours: 'in {h} h',
