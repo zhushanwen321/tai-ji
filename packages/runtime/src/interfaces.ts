@@ -44,6 +44,7 @@ import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'
 import type { IPiEngine, PiEventListener } from './services/ports/pi-engine.js'
 import type { IManagedSessionView } from './services/session/types.js'
+import type { OversizeAwareResult } from './services/session/session-records.js'
 import type { CatalogRefreshResult } from './services/provider-catalog-refresh.js'
 
 /**
@@ -181,8 +182,10 @@ export interface ISessionService {
   /**
    * 获取 session 派生的 subagent 列表（从主 session JSONL 的 subagent toolCall/toolResult 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 subagent 调用时返回空数组。
+   * [RT-4#8] 返回结构化结果：oversize=true（文件 >32MB 预检阈值）时 records 恒空——
+   * 「列表不可用」与「无 subagent」显式分形（reply 透传 oversize 供面板降级提示）。
    */
-  getSubagents(sessionId: string): Promise<SubagentRecord[]>
+  getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>>
   /**
    * 获取 subagent 的对话流历史（直读 subagent JSONL，复用 convertPiHistory 转换）。
    * subagentId 对应 SubagentRecord.subagentId，从 getSubagents 结果中查找 sessionFile 路径。
@@ -204,8 +207,9 @@ export interface ISessionService {
   /**
    * 获取 session 派生的 workflow 列表（从主 session JSONL 的 workflow-state-link 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
+   * [RT-4#8] 返回结构化结果：语义同 getSubagents（oversize=true 时列表不可用）。
    */
-  getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]>
+  getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>>
   /**
    * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，session.getPlanState
    * RPC 后端）。纯磁盘读取（主 session JSONL 最后一条 plan-state entry → scanPlanStateEntries
@@ -306,8 +310,11 @@ export interface ISessionService {
    * 经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
    */
   getSession(sessionId: string): IManagedSessionView | undefined
-  /** W10：取最近 inputTokens——usage 实例快照派生（唯一数据源 = get_session_stats，旧缓存直写已删）。 */
-  getInputTokens(sessionId: string): number
+  /**
+   * W10：取最近 inputTokens——usage 实例快照派生（唯一数据源 = get_session_stats，旧缓存直写已删）。
+   * [RT-4#7] 无快照返回 null（对齐 context.update 无值占位帧语义：字段缺失 = 无值，0 仅表真值）。
+   */
+  getInputTokens(sessionId: string): number | null
   /**
    * 处理 context.update（pi agent_end/turn_end 推 inputTokens + totalTokens）。session 级状态单一 owner：
    * W12 起事件只做 usage 实例失效（markDirty + 防抖重拉 get_session_stats），发布归
@@ -329,8 +336,11 @@ export interface ISessionService {
    * 瞬态 false / bus 未注入）曾丢的帧下轮触发必补发，稳态零帧。
    */
   reconcileRecordEntries(sessionId: string): void
-  /** W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。 */
-  getUsagePercent(sessionId: string): number
+  /**
+   * W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。
+   * [RT-4#7] 无快照返回 null（语义对齐 getInputTokens：无值 ≠ 0%）。
+   */
+  getUsagePercent(sessionId: string): number | null
   /** Get the underlying RpcClient for direct command sending (e.g., extension responses). */
   getRpcClient(sessionId: string): IRpcClient | undefined
 

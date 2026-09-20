@@ -587,10 +587,11 @@ const sessionImpl = {
    * Mock subagent 列表。
    * s3（E2E 默认激活 session）返回 fixture，其他 session 返回空——
    * 让 E2E 能验证「切 session 后列表刷新」（切到无数据 session 看空态，切回 s3 看列表）。
+   * [RT-4#8] 形态对齐 real（getSubagents 结构化返回；mock 恒非 oversize）。
    */
-  async getSubagents(sessionId: string): Promise<SubagentRecord[]> {
+  async getSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean }> {
     await sleep(TIMING.ack)
-    return sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : []
+    return { subagents: sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : [] }
   },
 
   /** Mock subagent 对话流历史（返回空数组，agent call 对话流由 getAgentCallHistory 覆盖） */
@@ -602,10 +603,11 @@ const sessionImpl = {
   /**
    * Mock workflow 列表。
    * s3 返回 fixture，其他 session 返回空——同 getSubagents 的区分逻辑。
+   * [RT-4#8] 形态对齐 real（结构化返回；mock 恒非 oversize）。
    */
-  async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> {
+  async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
     await sleep(TIMING.ack)
-    return sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : []
+    return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [] }
   },
 
   /** Mock agent call 对话流历史（返回空数组，drawer SubagentTab agentcall 分支加载不 throw 即可） */
@@ -1093,9 +1095,9 @@ const configImpl = {
     return []
   },
   // 远程模型目录按需刷新：mock 无网络层，空结果保持签名同构（facade 三元）。
-  async refreshProviderCatalogs(): Promise<{ refreshed: string[]; failed: Array<{ providerId: string; reason: string }> }> {
+  async refreshProviderCatalogs(): Promise<{ refreshed: string[]; failed: Array<{ providerId: string; reason: string }>; corrupt: Array<'own' | 'pi'>; persistFailed?: boolean }> {
     await sleep(TIMING.ack)
-    return { refreshed: [], failed: [] }
+    return { refreshed: [], failed: [], corrupt: [] }
   },
   // wave-env-check：env 检测。mock 读 process.env 同构（浏览器 mock 下多为未设置）。
   async checkEnvVars(names: string[]): Promise<Record<string, boolean>> {

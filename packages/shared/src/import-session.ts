@@ -81,8 +81,11 @@ export interface ImportCandidate {
   sourcePath: string
   /** 文件 mtime（ms），列表排序键（降序） */
   lastModified: number
-  /** 文件大小（bytes） */
-  size: number
+  /**
+   * 文件大小（bytes）。null = 大小未知（RT-5#10：zcode 源 bytes 聚合不可解时不再以 0
+   * 伪造「0 B」假数据）；pi/外部文件源恒为 statSync 实测值。
+   */
+  size: number | null
   /** 所属子目录名（目录 chip 分组用，与 dirs[].label 对应） */
   dirLabel: string
   /** 已在太极扫描集（默认 TTL 读，允许秒级 stale；导入校验另走 force 双检） */

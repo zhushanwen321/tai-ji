@@ -154,6 +154,10 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'terminal.alive': 'stream',
   'terminal.exit': 'stream',
   'terminal.ack': 'stream',
+  // write 失败错误信号（RT-8#10）：低频（每 PTY 生命周期至多一次）+ 需可靠送达（断连重连
+  // 经回放补见），stream 入 ring——与 terminal.alive/exit 同类，刻意不与 terminal.data 同为
+  // transient（transient 不入 ring，断连窗口内发出的失败信号会丢）。
+  'terminal.writeFailed': 'stream',
   'plugin:uiRequest': 'stream',
   'extension.ui_request': 'stream',
   'extension:widget': 'stream',

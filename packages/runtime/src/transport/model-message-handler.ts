@@ -229,9 +229,21 @@ export class ModelMessageHandler {
       : { models: [], success: false, error: outcome.error, results: [] })
   }
 
-  /** discover 凭据回查（链 2）：唯一通道（auth.json → models.json，ctx 构造必需注入）。 */
+  /**
+   * discover / test 凭据回查（链 2）：唯一通道（auth.json → models.json，ctx 构造必需注入）。
+   * RT-7#4：凭据形态不支持（`!` command / 引用未定义 env）时 throw 中文错误——两条
+   * 调用链的 .catch 会把它 reply 给前端（discover 链 success:false / test 链顶层 error），
+   * 且 discoverModelsFromApi / testProviderConnections 均不会被调用（禁止以形态标记串
+   * 作 Bearer 下发外部请求）。
+   */
   private async resolveProviderApiKey(providerId: string): Promise<string | undefined> {
     const resolved = await this.ctx.providerCredentialResolver.resolveProviderCredential(providerId)
-    return resolved?.key
+    if (resolved === undefined) return undefined
+    if ('unsupported' in resolved) {
+      throw new Error(resolved.unsupported === 'command'
+        ? `provider「${providerId}」的凭据是 command 形态（! 前缀），暂不支持发起模型发现/测试请求，请改用明文 API Key`
+        : `provider「${providerId}」的凭据引用了未定义的环境变量，无法解析出 API Key，请检查环境变量后重试`)
+    }
+    return resolved.key
   }
 }

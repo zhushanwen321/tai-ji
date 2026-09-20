@@ -547,9 +547,9 @@ export function getProvider(configStore: IConfigStore, providerId: string): { ap
  * - catalog provider：apiKey 归 auth.json (api_key overwrites oauth natively)
  * - custom provider：apiKey 写 models.json，清 auth.json oauth (I9 cleanup)
  *
- * 返回 catalog 落盘 flush promise 供调用方 await（无落盘路径返回 undefined——调用方
- * 条件 await 保持「无实际 await 分支时 setProvider 同步执行到底」的时序契约，
- * 同步调用方依赖此性质在调用后立即读到 upsert 结果）。
+ * 返回 auth.json 侧落盘 flush promise（catalog 写入 / custom 清理，RT-7#3 后两者均
+ * await 后再 upsert，失败上抛）供调用方 await；无落盘路径返回 undefined——调用方
+ * 条件 await 保持「无实际 await 分支时 setProvider 同步执行到底」的时序契约。
  */
 function applyProviderCredentials(
   merged: Record<string, unknown>,
@@ -580,17 +580,20 @@ function applyProviderCredentials(
           delete merged.apiKey
         })
     }
-    // custom provider or no authStorage: keep existing behavior (apiKey in models.json)
-    // I9: clear oauth credential before writing apiKey (fire-and-forget)
-    void authStorage?.remove(providerId).catch(err => {
-      console.warn(`[config-service] auth.json oauth cleanup failed for ${providerId} (I9 清理①):`, err)
-    })
+    // custom provider or no credentialWriter: keep existing behavior (apiKey in models.json)
+    // I9: clear oauth credential before writing apiKey.
+    // RT-7#3（MF-1 对称）：清理 await 后再 upsert（失败上抛，调用方 await → handler
+    // try-catch 转 sendError，不静默吞）。原因：凭据解析唯一通道（provider-credential-resolver）
+    // 的源优先级 auth.json 在前，fire-and-forget 时清理未落盘/失败会残留旧 oauth 条目，
+    // 后续解析仍读到已作废的 oauth access（「UI 显示已切 api_key、实际请求用旧 oauth」）。
+    // 与 catalog 分支 MF-1、deleteProvider/removeProviderByKind 的 cleanAuthCredential
+    // await 先例同语义（写入路径对齐删除路径）。
+    // M5-01 边界保持：catalog + 无 credentialWriter 时 apiKey 不落 models.json（宁丢不
+    // 写错位，生产恒注入 credentialWriter）；auth.json 清理仍执行（I9 语义不因写入通道
+    // 缺失而豁免——旧 oauth 条目清除与 apiKey 落哪里是两个独立决定）。
+    if (!isCatalogProvider(providerId)) merged.apiKey = apiKey
+    return authStorage?.remove(providerId)
   }
-  // M5-01（P0，pi-alignment 决策 1）：catalog provider 的 apiKey 只归 auth.json——上面
-  // delete merged.apiKey 后若此处无条件 re-add，apiKey 会双写进 models.json（G5 迁移
-  // 的安全动机被此路径持续回填）。仅非 catalog 分支写回；catalog + 无 credentialWriter 时
-  // apiKey 无处安放（凭据只允许落 auth.json 0600），宁丢不写错位（生产恒注入）。
-  if (apiKey !== undefined && apiKey.trim() !== '' && !isCatalogProvider(providerId)) merged.apiKey = apiKey
   return undefined
 }
 

@@ -20,6 +20,8 @@
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
 import type { QuotaFetchFailureReason } from './types.js'
 import { INFINITE_WIN, fetchQuotaJson, isRecord, normalizeCookieHeader } from './types.js'
+import { logger } from '../../infra/logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const PERCENT_SCALE = 100
@@ -74,18 +76,35 @@ interface MimoApiResponse {
 
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（code 判定、
- * data.monthUsage 解构）。字段缺失是合法业务态（→ no-subscription），
- * 字段类型漂移归 parse（防 `"401"` 等字符串 code 绕过 `!== 0` 判定产出错数据）。
+ * data.monthUsage 解构）。字段缺失是合法业务态，字段类型漂移归 parse
+ * （RT-7#5：guard 收到字段级——防 `"401"` 等字符串 code 绕过 `!== 0` 判定产出错数据）。
  * usage 与 detail 两端点信封同构（{code,message,data}），共用此 guard。
+ *
+ * RT-7#6：code=0（成功响应）时 data 必须在且是对象——原 `data === undefined` 放行会让
+ * buildMonthWindow 读 undefined 抛 TypeError，被 quota-service 误归 network（成因仅
+ * debug，打包态不可见）。code 非 0 = 在体错误响应（mapNonZeroCodeOutcome 域：
+ * 401/403 → unauthorized，其余 → no-subscription），data 可缺席。
  */
 function isMimoResponse(v: unknown): v is MimoApiResponse {
   if (!isRecord(v)) return false
   const o = v
   if (typeof o.code !== 'number') return false
-  if (o.data === undefined) return true
+  if (o.code !== 0 && o.data === undefined) return true
   if (!isRecord(o.data)) return false
   const d = o.data
-  if (d.monthUsage !== undefined && (typeof d.monthUsage !== 'object' || d.monthUsage === null)) return false
+  for (const group of [d.monthUsage, d.usage] as const) {
+    if (group === undefined) continue
+    if (!isRecord(group)) return false
+    if (group.percent !== undefined && typeof group.percent !== 'number') return false
+    if (group.items !== undefined) {
+      if (!Array.isArray(group.items)) return false
+      for (const item of group.items) {
+        if (!isRecord(item)) return false
+        if (item.used !== undefined && typeof item.used !== 'number') return false
+        if (item.limit !== undefined && typeof item.limit !== 'number') return false
+      }
+    }
+  }
   return true
 }
 
@@ -135,11 +154,14 @@ function mapNonZeroCodeOutcome(code: number): QuotaFetchOutcome {
 }
 
 /** month 窗口构建：percent 主数据 + detail 端点重置时间（detail 失败降级 resetSec=null，
- * 不影响用量主数据）。 */
+ * 不影响用量主数据）。RT-7#5：percent 缺失（平台未提供该窗口数据）→ pct=null
+ * （不可知，前端整行隐藏）——原 `?? 0` 会产 pct=0 假未用。 */
 function buildMonthWindow(usageData: MimoApiResponse['data'], detailResult: MimoEndpointResult): QuotaWindow {
   const monthResetSec = detailResult.ok ? extractPeriodResetSec(detailResult.data) : null
   const monthWin: QuotaWindow = {
-    pct: (usageData.monthUsage?.percent ?? 0) * PERCENT_SCALE,
+    pct: typeof usageData.monthUsage?.percent === 'number'
+      ? usageData.monthUsage.percent * PERCENT_SCALE
+      : null,
     resetSec: monthResetSec,
   }
   // token 绝对量：取 monthUsage.items[0]（CodexBar/Mimo-Usage 同款取法），used/limit
@@ -170,18 +192,25 @@ export const mimoFetcher: ProviderQuotaFetcher = {
       fetchTokenPlanEndpoint('quota:mimo', '/usage', cookie),
       fetchTokenPlanEndpoint('quota:mimo:detail', '/detail', cookie),
     ])
-    const usageResult = settleEndpoint(usageSettled)
-    const detailResult = settleEndpoint(detailSettled)
-    if (!usageResult.ok) return usageResult
-    // code 非 0 = 响应可解析但无订阅数据（在体凭证过期例外，见 mapNonZeroCodeOutcome）。
-    if (usageResult.data.code !== 0) return mapNonZeroCodeOutcome(usageResult.data.code)
+    // RT-7#6：归一化构造段异常（guard 放行后的形态漂移逃逸等）归 parse 非 network——
+    // 数据形态问题被归网络错误会误导排障方向（fetchQuotaJson 契约外异常同理只兜底网络段）。
+    try {
+      const usageResult = settleEndpoint(usageSettled)
+      const detailResult = settleEndpoint(detailSettled)
+      if (!usageResult.ok) return usageResult
+      // code 非 0 = 响应可解析但无订阅数据（在体凭证过期例外，见 mapNonZeroCodeOutcome）。
+      if (usageResult.data.code !== 0) return mapNonZeroCodeOutcome(usageResult.data.code)
 
-    return {
-      ok: true,
-      data: {
-        label: 'MiMo Coding',
-        wins: [INFINITE_WIN, INFINITE_WIN, buildMonthWindow(usageResult.data.data, detailResult)],
-      },
+      return {
+        ok: true,
+        data: {
+          label: 'MiMo Coding',
+          wins: [INFINITE_WIN, INFINITE_WIN, buildMonthWindow(usageResult.data.data, detailResult)],
+        },
+      }
+    } catch (err) {
+      logger.warn('[quota:mimo] normalize failed', { error: toErrorMessage(err) })
+      return { ok: false, reason: 'parse' }
     }
-  },
+  }
 }

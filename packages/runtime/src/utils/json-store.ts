@@ -12,6 +12,10 @@
  *
  * 归属：跨层共享叶子层 utils/（ADR 0035），是 fs-utils（atomicWrite）与 errors
  * （isEnoent）的直接组合，无业务语义。
+ *
+ * 并发模型（已裁决可接受风险）：read-modify-write 无跨进程锁——单用户桌面应用同一
+ * store 的跨进程并发写低频，tmp+rename 原子性保证读者不会看到半截文件；冲突窗口
+ * （最后写者赢）由 flush 前的指纹校验 + .conflict- 备份兜底。勿在此文件加锁。
  */
 
 import { copyFileSync, readFileSync, readdirSync, renameSync, rmSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs'
@@ -244,8 +248,11 @@ export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions)
 // ── 备份残留按龄回收（.conflict-/.corrupt- 家族） ─────────────────────
 
 /** ISO 压缩时间戳的后缀形态（`2026-09-18T000557123Z`：toISOString 去冒号/点号），
- *  捕获组 = 可解析回时间戳的文件名部分（判龄权威源）。 */
-const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt)-(\d{4}-\d{2}-\d{2}T\d{9}Z)$/
+ *  捕获组 = 可解析回时间戳的文件名部分（判龄权威源）。
+ *  家族成员：`.conflict-`（WriteBackCache 冲突备份）/ `.corrupt-`（损坏隔离）/
+ *  `.bak-migrate-`（provider-extras-migration 迁移前备份，RT-5#7——副本可含明文
+ *  apiKey，纳入回收后由 isCredentialBearingBackup 走 30 天凭据窗口）。 */
+const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt|bak-migrate)-(\d{4}-\d{2}-\d{2}T\d{9}Z)$/
 
 /** 备份保留窗口：conflict/corrupt 副本是人工恢复的取证文件，7 天内不删。 */
 // eslint-disable-next-line no-magic-numbers -- 备份保留窗口时长表达式（7 天，校准依据见上方 JSDoc）
@@ -291,8 +298,10 @@ function isCredentialBearingBackup(filePath: string, stem: string): boolean {
 /**
  * 按龄回收备份残留家族（`<path>.conflict-<ts>` / `<path>.corrupt-<ts>`）。
  *
- * 生产者：WriteBackCache flush 的外部冲突备份、quarantineCorruptFile 的损坏隔离。
- * 两者的保留价值都是「人工对比找回数据」的取证窗口——但没有任何消费方负责清理，
+ * 生产者：WriteBackCache flush 的外部冲突备份、quarantineCorruptFile 的损坏隔离、
+ * provider-extras-migration 的迁移前备份（`.bak-migrate-`，RT-5#7 纳入——含明文
+ * apiKey 的旧 models.json 副本不再永久驻留）。
+ * 三者的保留价值都是「人工对比找回数据」的取证窗口——但没有任何消费方负责清理，
  * 每次冲突/损坏都新增一个文件，数据目录无限堆积（磁盘垃圾 + 备份目录噪音）。
  * 与 cleanupTmpMigrateResidue 同款 best-effort 语义：单文件 stat/unlink 失败跳过
  * 不中断；目录不存在 no-op；误删防线 = 后缀正则严格匹配 ISO 压缩形态 + mtime 按龄闸。

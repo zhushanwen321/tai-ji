@@ -52,6 +52,10 @@
         <span v-if="!item.installed" class="text-neutral-dim">
           {{ t('settings.loadPaths.importFromAgents.notInstalled') }}
         </span>
+        <!-- RT-5#5：目录存在但不可读（EACCES 等）——「不可读」≠「未安装」，显形而非误导 -->
+        <span v-else-if="item.error === 'unreadable'" class="text-danger">
+          {{ t('settings.loadPaths.importFromAgents.unreadable') }}
+        </span>
         <span v-else class="text-neutral-mid">{{ countLabel(item) }}</span>
         <span v-if="isShared(item.dir)" class="text-neutral-dim">
           {{ t('settings.loadPaths.importFromAgents.sharedPoolActive') }}

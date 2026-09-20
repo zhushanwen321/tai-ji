@@ -533,11 +533,12 @@ function shortId(item: ImportCandidate): string {
   return item.sessionId.slice(0, IMPORT_SHORT_ID_LENGTH)
 }
 
-/** 文件大小人类可读（B/KB/MB，一位小数） */
+/** 文件大小人类可读（B/KB/MB，一位小数）；null = 大小未知（zcode 源 bytes 不可解，显示 —） */
 const BYTES_PER_KB = 1024
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 
-function formatSize(bytes: number): string {
+function formatSize(bytes: number | null): string {
+  if (bytes === null) return '—'
   if (bytes < BYTES_PER_KB) return `${bytes} B`
   if (bytes < BYTES_PER_MB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`
   return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`

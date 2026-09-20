@@ -94,4 +94,35 @@ describe('cleanupAgedBackupResidue · 凭据副本分流（RT-3 附带项）', (
     expect(existsSync(fresh)).toBe(true)
     expect(warnSpy).not.toHaveBeenCalled()
   })
+
+  // ── RT-5#7：provider-extras-migration 的 `.bak-migrate-` 备份纳入回收家族 ──
+  // 后缀形态 = `${path}.bak-migrate-<compactIso>`（与 conflict/corrupt 同构，判龄走文件名 ts）。
+  // 含明文 apiKey 的旧 models.json 副本此前不在 AGED_BACKUP_SUFFIX_RE 内 → 永久驻留。
+
+  it('RT-5#7：无凭据 .bak-migrate- 副本超 7 天按普通窗口回收', () => {
+    const migrateBackup = join(dir, `models.json.bak-migrate-${compactIso(8 * DAY)}`)
+    writeFileSync(migrateBackup, JSON.stringify({ providers: { x: { name: 'x' } } }), 'utf-8')
+
+    const removed = cleanupAgedBackupResidue([dir])
+
+    expect(removed).toBe(1)
+    expect(existsSync(migrateBackup)).toBe(false)
+  })
+
+  it('RT-5#7：含 apiKey 的 .bak-migrate- 副本走 30 天凭据窗口（7-30 天保留，超 30 天回收 + error）', () => {
+    const kept = join(dir, `models.json.bak-migrate-${compactIso(10 * DAY)}`)
+    writeFileSync(kept, JSON.stringify({ providers: { x: { apiKey: 'sk-plain' } } }), 'utf-8')
+
+    expect(cleanupAgedBackupResidue([dir])).toBe(0)
+    expect(existsSync(kept)).toBe(true)
+
+    const expired = join(dir, `models.json.bak-migrate-${compactIso(40 * DAY)}`)
+    writeFileSync(expired, JSON.stringify({ providers: { x: { apiKey: 'sk-plain' } } }), 'utf-8')
+
+    expect(cleanupAgedBackupResidue([dir])).toBe(1)
+    expect(existsSync(expired)).toBe(false)
+    const errMsg = errorSpy.mock.calls.map(c => String(c[0])).find(m => m.includes('credential-bearing backup'))
+    expect(errMsg).toBeDefined()
+    expect(errMsg).toContain(expired)
+  })
 })

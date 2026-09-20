@@ -34,8 +34,10 @@ interface ZhipuApiResponse {
 
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（success truthiness 判定、
- * data.level / data.limits 解构）。字段缺失是合法业务态（→ no-subscription），
- * 字段类型漂移归 parse（防 `data: "abc"` 等形态静默产出 INFINITE_WIN 错数据）。
+ * data.level / data.limits 解构）。字段缺失是合法业务态（→ no-subscription / 该窗口
+ * 不可知），字段类型漂移归 parse（RT-7#5：guard 收到字段级——防 `data: "abc"` 等形态
+ * 静默产出 INFINITE_WIN 错数据、防字符串数值被静默接受）。limits 条目的 type 是
+ * TOKENS_LIMIT 判定依据，缺失即拒（决策分支依赖字段）。
  */
 function isZhipuResponse(v: unknown): v is ZhipuApiResponse {
   if (!isRecord(v)) return false
@@ -45,7 +47,16 @@ function isZhipuResponse(v: unknown): v is ZhipuApiResponse {
   if (!isRecord(o.data)) return false
   const d = o.data
   if (d.level !== undefined && typeof d.level !== 'string') return false
-  if (d.limits !== undefined && !Array.isArray(d.limits)) return false
+  if (d.limits !== undefined) {
+    if (!Array.isArray(d.limits)) return false
+    for (const lim of d.limits) {
+      if (!isRecord(lim)) return false
+      if (typeof lim.type !== 'string') return false
+      if (lim.percentage !== undefined && typeof lim.percentage !== 'number') return false
+      if (lim.currentValue !== undefined && typeof lim.currentValue !== 'number') return false
+      if (lim.nextResetTime !== undefined && typeof lim.nextResetTime !== 'string') return false
+    }
+  }
   return true
 }
 
@@ -72,20 +83,22 @@ function resetSecFromEpoch(epochMsStr: string): number | null {
 /**
  * 5h 滚动窗口（TOKENS_LIMIT）：pct 直出（API 仅提供 percentage），
  * resetSec 双格式兜底（epoch ms 优先，"4h11m" 相对 label 兜底）。
+ * RT-7#5：TOKENS_LIMIT 条目缺失或其 percentage 缺失 → 该窗口不可知（INFINITE_WIN，
+ * pct:null 整行隐藏）——原 `percentage ?? 0` / 初值 0 会产 pct=0 假未用。
  */
 function buildWin5h(data: ZhipuApiData): QuotaWindow {
-  let tokensPct = 0
+  let tokensPct: number | undefined
   let resetSec: number | null = null
   for (const lim of data.limits ?? []) {
     if (lim.type === 'TOKENS_LIMIT') {
-      tokensPct = lim.percentage ?? 0
+      tokensPct = typeof lim.percentage === 'number' ? lim.percentage : undefined
       if (lim.nextResetTime) {
         resetSec = resetSecFromEpoch(lim.nextResetTime)
         if (resetSec === null) resetSec = parseResetSec(lim.nextResetTime)
       }
     }
   }
-  return { pct: tokensPct, resetSec }
+  return tokensPct === undefined ? INFINITE_WIN : { pct: tokensPct, resetSec }
 }
 
 export const zhipuFetcher: ProviderQuotaFetcher = {

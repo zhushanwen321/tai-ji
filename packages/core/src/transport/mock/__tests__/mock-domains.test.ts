@@ -174,12 +174,13 @@ describe('mock session domain', () => {
     const cmds = await session.getCommands('s1')
     expect(cmds.commands.length).toBeGreaterThan(0)
     expect((await session.getContext('s1')).usagePercent).toBeDefined()
-    expect((await session.getSubagents('s3')).length).toBeGreaterThan(0)
-    expect(await session.getSubagents('other')).toEqual([])
+    expect((await session.getSubagents('s3')).subagents.length).toBeGreaterThan(0)
+    // [RT-4#8] 结构化返回（records/oversize 语义同 real 域；mock 恒非 oversize）
+    expect(await session.getSubagents('other')).toEqual({ subagents: [], oversize: undefined })
     expect(await session.getSubagentHistory('s1', 'a1')).toEqual([])
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
-    expect((await session.getWorkflows('s3')).length).toBeGreaterThan(0)
-    expect(await session.getWorkflows('other')).toEqual([])
+    expect((await session.getWorkflows('s3')).workflows.length).toBeGreaterThan(0)
+    expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined })
     // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
     expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
@@ -350,7 +351,7 @@ describe('mock config domain', () => {
 
   it('空签名同构 stub：builtin/refresh/checkEnv/oauth/discover/detectSources', async () => {
     expect(await config.listBuiltinProviders()).toEqual([])
-    expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [] })
+    expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
     expect(await config.checkEnvVars(['PATH'])).toEqual({ PATH: true })
     expect(await config.oauthLogin('p')).toMatchObject({ started: false })
     expect(await config.oauthCancel('p')).toEqual({ cancelled: false })
