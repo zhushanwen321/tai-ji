@@ -70,10 +70,11 @@ export interface UiPort {
 // ── MessagingPort ────────────────────────────────────
 
 export interface MessagingPort {
-	/** 发送 custom message（goal-context 等） */
+	/**
+	 * 发送 custom message（goal-context 等）。实现侧固定 display:false +
+	 * triggerTurn:true（非 streaming 真实开轮，streaming 走 deliverAs 队列）。
+	 */
 	sendContextMessage(content: string, deliverAs: "steer" | "followUp", customType?: string): void;
-	/** 发送 user message（触发 AI 开始工作，FR-8.12） */
-	sendUserMessage(content: string, deliverAs: "steer" | "followUp"): void;
 }
 
 // ── SessionPort ──────────────────────────────────────

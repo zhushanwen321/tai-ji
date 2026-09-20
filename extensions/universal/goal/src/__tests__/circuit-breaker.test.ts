@@ -28,11 +28,13 @@ import { createGoalSession, type GoalSession } from "../session";
 // ── Fake pi / ctx（entries 数组可变，模拟 append-only 会话流）──
 
 interface RecordedCall {
-	kind: "appendState" | "appendHistory" | "notify" | "sendContext" | "sendUser";
+	kind: "appendState" | "appendHistory" | "notify" | "sendContext";
 	payload?: unknown;
 	text?: string;
 	level?: string;
 	content?: unknown;
+	customType?: unknown;
+	display?: unknown;
 }
 
 interface FakeHarness {
@@ -69,11 +71,8 @@ function makeHarness(): FakeHarness {
 			piCalls.push({ kind: customType === "goal-history" ? "appendHistory" : "appendState", payload: data });
 		},
 		sendMessage(message: unknown, options?: unknown): void {
-			const msg = message as { content?: unknown };
-			piCalls.push({ kind: "sendContext", content: msg.content, payload: options });
-		},
-		sendUserMessage(content: string | unknown[], _options?: unknown): void {
-			piCalls.push({ kind: "sendUser", content });
+			const msg = message as { content?: unknown; customType?: unknown; display?: unknown };
+			piCalls.push({ kind: "sendContext", content: msg.content, customType: msg.customType, display: msg.display, payload: options });
 		},
 	} as unknown as ExtensionAPI;
 
@@ -299,12 +298,17 @@ describe("/goal resume 恢复通道", () => {
 		expect(session.state!.continuationsSent).toBe(0); // 新激活周期
 		expect(session.state!.continuationCapNotified).toBe(false);
 		expect(session.state!.status).toBe("active");
-		const userSends = h.piCalls.filter((c) => c.kind === "sendUser");
-		expect(userSends).toHaveLength(1); // FR-8.12 触发 AI
+		// FR-8.12 触发 AI（custom message，非 user message）
+		const resumeSends = h.piCalls.filter((c) => c.kind === "sendContext");
+		expect(resumeSends).toHaveLength(1);
+		expect(resumeSends[0]?.customType).toBe("goal-context");
 
-		// 恢复后：下一次 agent_end 正常发 continuation（新周期额度）
+		// 恢复后：下一次 agent_end 正常发 continuation（新周期额度）。
+		// resume 触发消息同为 followUp custom message（改造后形态），按 [GOAL] 前缀
+		// 区分 continuation 本体（continuationPrompt 专属前缀）
 		await runTurn(h, session, { tokenDelta: 200 });
-		expect(followUpSends(h)).toHaveLength(1);
+		const continuations = followUpSends(h).filter((c) => String(c.content).includes("[GOAL]"));
+		expect(continuations).toHaveLength(1);
 	});
 
 	it("未封顶的普通 active goal → resume 提示无需恢复（原语义不变）", async () => {
@@ -315,7 +319,7 @@ describe("/goal resume 恢复通道", () => {
 		await handleGoalCommand(h.pi, session, "resume", h.ctx);
 
 		expect(notifyTexts(h).some((t) => t.includes("no need to resume"))).toBe(true);
-		expect(h.piCalls.filter((c) => c.kind === "sendUser")).toHaveLength(0);
+		expect(h.piCalls.filter((c) => c.kind === "sendContext")).toHaveLength(0);
 	});
 });
 
@@ -445,5 +449,35 @@ describe("MF-6③ timer 清理面：session_start / before_agent_start 取消旧
 		expect(session.continuationTimer).toBeNull();
 		vi.advanceTimersByTime(20_000);
 		expect(followUpSends(h)).toHaveLength(4);
+	});
+});
+
+// ── A8：退避通道激活（sendContextMessage 端口 triggerTurn 改造）──
+//
+// 设计 docs/design/send-user-message-to-custom-message.md §2.2 端口改造 + §3.1 A8：
+// 端口改造前 backoff timer 到期伪装用户消息投递；改造后
+// deliverContinuation 经端口发 custom message 且 options 含 triggerTurn: true——
+// 非 streaming idle 场景真实开轮（改造前 append 不开轮 = 死消息）。
+// isIdle=false 拦截见 MF-6①；封顶记账守卫见「主判据」describe；此处锁定到期
+// 发出路径的 options 契约与记账恰好 +1。
+describe("A8：退避 timer 到期 → triggerTurn: true 开轮发出", () => {
+	it("isIdle 守卫通过后发出：custom message 四要素齐备，记账恰好 +1", async () => {
+		const { h, session } = await enterBackoff();
+
+		vi.advanceTimersByTime(20_000); // 2×base 到期，isIdle 默认 true → 守卫放行
+
+		const sends = followUpSends(h);
+		expect(sends).toHaveLength(5); // 4 立即 + 1 到期发出
+		const fired = sends[4]!;
+		// message 形态：customType + display:false（custom message，非用户气泡）
+		expect(fired.customType).toBe("goal-context");
+		expect(fired.display).toBe(false);
+		// options：deliverAs + triggerTurn（A8 核心断言——退避通道真实开轮）
+		const opts = fired.payload as { deliverAs?: string; triggerTurn?: boolean };
+		expect(opts.deliverAs).toBe("followUp");
+		expect(opts.triggerTurn).toBe(true);
+		// budget 记账不重复触发：主判据只在实发时 +1，本次到期恰好一次
+		expect(session.state!.continuationsSent).toBe(5);
+		expect(session.continuationTimer).toBeNull(); // 无残留待发 timer
 	});
 });
