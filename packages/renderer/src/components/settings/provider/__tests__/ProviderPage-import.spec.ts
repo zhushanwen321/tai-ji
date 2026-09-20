@@ -283,4 +283,74 @@ describe('ProviderPage 导入入口', () => {
     expect(toasts.some((t) => t.type === 'info' && t.message.includes('2'))).toBe(true)
     expect(toasts.some((t) => t.type === 'info' && t.message.includes('Gamma'))).toBe(false)
   })
+
+  it('RD-4#12: apply 有失败项 → 保留 preview（弹窗不关，用户可回查失败条目）+ failedCount toast', async () => {
+    configMock.applyImportProviders.mockImplementationOnce(() =>
+      Promise.resolve({
+        result: {
+          source: 'claude',
+          imported: [
+            { id: 'openai', name: 'OpenAI', status: 'imported' },
+            { id: 'anthropic', name: 'Anthropic', status: 'failed', reason: 'network' },
+          ],
+          failedCount: 1,
+        },
+      }),
+    )
+
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    expect(confirmBtn).toBeTruthy()
+    confirmBtn!.click()
+    await flushPromises()
+
+    // RD-4#12：有失败项 → 不 resetImportState，preview 保留（弹窗不关，preview-provider-item 仍渲染）。
+    // 此前成功后立刻清空 preview，用户无法回查失败条目。
+    expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBeGreaterThan(0)
+    // failedCount>0 → error toast（reportImportSuccess 既有行为）
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+
+  it('RD-4#12: 全部成功（failedCount=0）→ reset 关闭弹窗（既有行为不变）', async () => {
+    // 默认 mock applyImportProviders 返回 failedCount:0
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    confirmBtn!.click()
+    await flushPromises()
+
+    // failedCount=0 → reset → 对话框关闭（preview-provider-item 消失）
+    expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBe(0)
+  })
+
+  it('RD-4#10: refreshProviderCatalogs 有 failed 项 → Picker 头部「目录可能过期」提示', async () => {
+    configMock.refreshProviderCatalogs.mockResolvedValueOnce({
+      refreshed: [],
+      failed: [{ providerId: 'openai', reason: 'timeout' }],
+    })
+    wrapper = mount(ProviderPage, { props: { providers: [] } })
+    await flushPromises()
+
+    // 协议侧 providerCatalogsRefreshed.failed 非空 → catalogsStale 置位 → 头部提示显形
+    expect(wrapper.find('[data-testid="provider-catalogs-stale"]').exists()).toBe(true)
+  })
+
+  it('RD-4#10: refreshProviderCatalogs reject → 同样标「目录可能过期」（离线不无痕迹）', async () => {
+    configMock.refreshProviderCatalogs.mockRejectedValueOnce(new Error('ws closed'))
+    wrapper = mount(ProviderPage, { props: { providers: [] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-catalogs-stale"]').exists()).toBe(true)
+  })
 })

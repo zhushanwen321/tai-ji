@@ -64,6 +64,8 @@ export default {
     title: 'Subagent Engine',
     label: 'Default engine',
     desc: 'Execution engine for subagent dispatch; takes effect after reopening the session',
+    loadErrorHint: 'Failed to load; showing defaults',
+    loadErrorRetry: 'Retry',
   },
   // ── SystemPrompt page (SystemPromptPage) ──
   systemPrompt: {
@@ -114,6 +116,8 @@ export default {
   provider: {
     add: 'Add Provider',
     listTitle: 'Providers',
+    // RD-4#10: stale hint when remote model catalog refresh fails/partially fails
+    catalogsStale: 'Catalog may be out of date',
     emptyTitle: 'No providers yet',
     emptyDesc: 'Add your first provider to connect AI models and start chatting.',
     defaultPill: 'Default',
@@ -521,6 +525,8 @@ export default {
   },
   // ── Extension page (ExtensionPage) ──
   extension: {
+    // RD-4#11: explicit note when getDataDir read fails (do not masquerade as the real path)
+    dataDirReadFailed: 'Failed to read the actual path; showing the default ~/.taiji',
     recommendedTitle: 'Recommended',
     installed: 'Installed',
     install: 'Install',
@@ -570,6 +576,8 @@ export default {
     currentVersion: 'Current version',
     checkUpdate: 'Check for updates',
     checking: 'Checking…',
+    // RD-4#5: manual "Check for updates" network failure surfaced (points to recovery; distinct from "up to date")
+    checkUpdateFailed: 'Network unreachable. Check your connection or go to the download page',
     upToDate: 'Up to date',
     newVersionAvailable: 'New version v{version} available',
     downloadAndInstall: 'Download and install',
@@ -583,6 +591,8 @@ export default {
     retry: 'Retry',
     unsupported: 'Auto-update is not supported on this platform',
     goToDownload: 'Go to download',
+    // RD-4#9: when the manual download escape hatch itself fails, surface a copyable URL
+    openFallbackFailed: 'Cannot open the download page. Please visit {url} manually',
     replacing: 'Replacing',
     restarting: 'Restarting',
     // ── Manual update channel (update-network-resilience D9, UpdateCheckCard collapsible) ──
@@ -681,7 +691,10 @@ export default {
     llmRetryEmptyAsZero: 'empty = 0',
     llmRetryTimeoutPlaceholder: 'empty = follow global',
     saved: 'Saved',
-    saveFailed: 'Save failed',
+    saveFailed: 'Save failed: {reason}',
+    // RD-4#8: persistent hint when onMounted config read fails (never render defaults as saved values)
+    loadErrorHint: 'Failed to load; showing defaults',
+    loadErrorRetry: 'Retry',
     shortcutTitle: 'Shortcuts',
     shortcutName: 'Command',
     shortcutKey: 'Shortcut',
@@ -705,6 +718,8 @@ export default {
   // ── Resource page (SettingsResourcePage) ──
   resource: {
     discovered: 'Discovered {label}',
+    // RD-4#11: explicit note when getDataDir read fails (do not masquerade as the real path)
+    dataDirReadFailed: 'Failed to read the actual path; showing the default ~/.taiji',
     refresh: 'Refresh',
     refreshing: 'Refreshing…',
     notFound: 'No {label} found',
@@ -746,6 +761,7 @@ export default {
       loading: 'Detecting...',
       detectError: 'Detection failed',
       notInstalled: 'Not installed',
+      unreadable: 'Directory unreadable',
       sharedPoolActive: 'Active via shared pool',
       importSelected: 'Import selected',
       skillCount: '{count} skills',
@@ -864,7 +880,10 @@ export default {
     defaultBaseBranchHint: 'Default base branch when creating worktrees',
     defaultBaseBranchPlaceholder: 'origin/main',
     saved: 'Worktree settings saved',
-    saveFailed: 'Save failed',
+    saveFailed: 'Save failed: {reason}',
+    // RD-4#7: front-end range/non-empty validation (inline error, no RPC on miss)
+    timeoutInvalid: 'Timeout must be a number between 1 and 3600',
+    baseBranchEmpty: 'Default base branch cannot be empty',
   },
   // ── Update proxy page (UpdatePage) ──
   update: {
@@ -1078,6 +1097,7 @@ export default {
     // ── Footnote ──
     footnote: 'Scope: assistant message usage accumulated, including compaction / summary usage. Cost is estimated from pi models.json rates; subscription providers show as 0 (displayed as —).',
     footnoteSkipped: 'Skipped {count} unparseable records',
+    footnoteFailedFiles: 'Excludes {count} session files that failed to read',
     // ── Isolate chip ──
     isolateClear: 'Clear isolation',
   },

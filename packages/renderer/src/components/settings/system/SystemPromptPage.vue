@@ -78,7 +78,7 @@
             <Button
               data-testid="system-prompt-replace-save"
               size="dense"
-              :disabled="!replaceDirty"
+              :disabled="!replaceDirty || saving"
               @click="saveReplace"
             >
               {{ t('settings.systemPrompt.save') }}
@@ -180,7 +180,7 @@
             <Button
               data-testid="system-prompt-append-save"
               size="dense"
-              :disabled="!appendDirty"
+              :disabled="!appendDirty || saving"
               @click="saveAppend"
             >
               {{ t('settings.systemPrompt.save') }}
@@ -244,6 +244,10 @@ const appendDirty = computed(
 /** 参考区展开态（默认折叠）。 */
 const showDefaultPrompt = ref(false)
 
+/** 保存 in-flight 标志（RD-4#7）：replace/append 两卡共用同一 config 写入，65s 窗口内防重复点击
+ *  （并发覆盖同一 config + 双 toast）。任一卡保存中两按钮均禁用。 */
+const saving = ref(false)
+
 /** 构造完整 SystemPromptConfig（schema v2：含 capability 段，保存时写回完整结构）。 */
 function buildConfig(): SystemPromptConfig {
   return {
@@ -291,23 +295,31 @@ function resetReplace(): void {
 
 /** 保存替换卡：以当前编辑态写回 config。 */
 async function saveReplace(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   try {
     await config.setSystemPrompt(buildConfig())
     snapshot()
     info(t('settings.systemPrompt.savedToast'))
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
+  } finally {
+    saving.value = false
   }
 }
 
 /** 保存追加卡：以当前编辑态写回 config。 */
 async function saveAppend(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   try {
     await config.setSystemPrompt(buildConfig())
     snapshot()
     info(t('settings.systemPrompt.savedToast'))
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
+  } finally {
+    saving.value = false
   }
 }
 

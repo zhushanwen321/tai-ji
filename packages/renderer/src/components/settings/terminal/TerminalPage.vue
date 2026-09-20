@@ -146,6 +146,7 @@
           <Button
             data-testid="terminal-save"
             size="dense"
+            :disabled="saving"
             @click="save"
           >
             {{ t('settings.terminal.save') }}
@@ -185,6 +186,10 @@ const scrollback = ref(1000)
 const cursorStyle = ref<TerminalConfig['cursorStyle']>('block')
 const bell = ref(false)
 
+/** 保存 in-flight 标志（RD-4#7）：整体保存为显式按钮触发，65s 窗口内防重复点击
+ *  （并发覆盖同一 config + 双 toast）。 */
+const saving = ref(false)
+
 /** 从本地编辑态组装 TerminalConfig。shellArgs 由逗号分隔串转为 string[]。 */
 function buildConfig(): TerminalConfig {
   return {
@@ -221,11 +226,15 @@ async function loadConfig(): Promise<void> {
 
 /** 整体保存终端配置。 */
 async function save(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   try {
     await config.setTerminalConfig(buildConfig())
     info(t('settings.terminal.savedToast'))
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
+  } finally {
+    saving.value = false
   }
 }
 

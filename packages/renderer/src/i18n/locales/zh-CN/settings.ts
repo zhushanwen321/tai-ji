@@ -64,6 +64,8 @@ export default {
     title: '子代理引擎',
     label: '默认引擎',
     desc: '派发子代理任务时使用的执行引擎；更改后需重新打开会话生效',
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
   },
   // ── SystemPrompt 页（SystemPromptPage）──
   systemPrompt: {
@@ -114,6 +116,8 @@ export default {
   provider: {
     add: '添加供应商',
     listTitle: '供应商列表',
+    // RD-4#10：远程模型目录刷新失败/部分失败时的陈旧提示（离线时列表陈旧无痕迹）
+    catalogsStale: '目录可能过期',
     emptyTitle: '还没有供应商',
     emptyDesc: '添加第一个供应商，连接 AI 模型开始对话。',
     defaultPill: '默认供应商',
@@ -520,6 +524,8 @@ export default {
   },
   // ── Extension 页（ExtensionPage）──
   extension: {
+    // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
+    dataDirReadFailed: '实际路径读取失败，显示的是默认路径 ~/.taiji',
     recommendedTitle: '推荐扩展',
     installed: '已安装',
     install: '安装',
@@ -569,6 +575,8 @@ export default {
     currentVersion: '当前版本',
     checkUpdate: '检查更新',
     checking: '检查中…',
+    // RD-4#5：手动「检查更新」网络失败显形文案（指向恢复动作；与「已是最新版」区分）
+    checkUpdateFailed: '网络不可达，请检查连接或前往下载页',
     upToDate: '已是最新版本',
     newVersionAvailable: '发现新版本 v{version}',
     downloadAndInstall: '下载并安装',
@@ -582,6 +590,8 @@ export default {
     retry: '重试',
     unsupported: '当前平台不支持自动更新',
     goToDownload: '前往下载',
+    // RD-4#9：手动下载逃生通道自身失败时，把 URL 直接可复制地给出
+    openFallbackFailed: '无法打开下载页，请手动访问 {url}',
     replacing: '替换中',
     restarting: '即将重启',
     // ── 手动升级通道（update-network-resilience D9，UpdateCheckCard 折叠区）──
@@ -680,7 +690,10 @@ export default {
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
     saved: '已保存',
-    saveFailed: '保存失败',
+    saveFailed: '保存失败：{reason}',
+    // RD-4#8：onMounted 读配置失败时的常驻提示（禁止把默认值当已存值渲染）
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
     shortcutTitle: '快捷键',
     shortcutName: '命令',
     shortcutKey: '快捷键',
@@ -704,6 +717,8 @@ export default {
   // ── 资源页（SettingsResourcePage）──
   resource: {
     discovered: '已发现的 {label}',
+    // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
+    dataDirReadFailed: '实际路径读取失败，显示的是默认路径 ~/.taiji',
     refresh: '刷新',
     refreshing: '刷新中…',
     notFound: '未发现 {label}',
@@ -745,6 +760,7 @@ export default {
       loading: '检测中...',
       detectError: '检测失败',
       notInstalled: '未安装',
+      unreadable: '目录不可读',
       sharedPoolActive: '已通过共享池生效',
       importSelected: '导入选中',
       skillCount: '{count} 个 skill',
@@ -863,7 +879,10 @@ export default {
     defaultBaseBranchHint: '创建 worktree 时的默认基础分支',
     defaultBaseBranchPlaceholder: 'origin/main',
     saved: 'Worktree 配置已保存',
-    saveFailed: '保存失败',
+    saveFailed: '保存失败：{reason}',
+    // RD-4#7：前端范围/非空校验（命中即 inline error 不发 RPC，避免无谓往返 + 后端才炸）
+    timeoutInvalid: '超时时间必须是 1 到 3600 之间的数字',
+    baseBranchEmpty: '默认基分支不能为空',
   },
   // ── 更新代理页（UpdatePage）──
   update: {
@@ -1077,6 +1096,7 @@ export default {
     // ── 脚注 ──
     footnote: '统计口径：assistant 消息 usage 逐条累加，含 compaction / summary 用量；费用为 pi models.json 费率估算值，订阅制 provider 记为 0（显示为 —）。',
     footnoteSkipped: '跳过 {count} 行无法解析的记录',
+    footnoteFailedFiles: '不含 {count} 个读取失败的会话文件',
     // ── 单看 chip ──
     isolateClear: '清除单看',
   },

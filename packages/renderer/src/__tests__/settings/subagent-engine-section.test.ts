@@ -114,12 +114,33 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('disk write failed'))).toBe(true)
   })
 
-  it('RPC 失败兜底 [pi]（选择器仍可用，不白屏）', async () => {
+  it('RPC 失败 → loadError 显形：控件禁用 + 顶部常驻提示（RD-4#8，不再 best-effort 冒充已存值）', async () => {
     sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
     const wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid=subagent-engine-section]').exists()).toBe(true)
+    // 默认 'pi' 仍占位渲染，但明确标注为默认值（控件禁用，禁止当已存值操作）
     expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('pi')
+    // RD-4#8：读取失败常驻提示 + 重试入口
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('读取失败')
+    // Select 禁用（loadError 时不可操作）
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
+  })
+
+  it('RD-4#8：重试成功后清除 loadError + 控件恢复可用', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
+    const wrapper = mountSection()
+    await flushPromises()
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+
+    // 重试：mock 改成功
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })
+    await wrapper.find('[data-testid=subagent-engine-load-retry]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(false)
   })
 })

@@ -60,22 +60,45 @@ const t = i18n.global.t
 let refCount = 0
 
 /**
+ * 订阅退订句柄（模块级，对齐 useRollingRestartStatus 的 unsubscribe/subScope 形态）。
+ * 仅首个消费者（refCount===1）创建；但触发最终退订（refCount 归 0）的可能是任意一个
+ * 消费者的 onScopeDispose，故句柄必须模块级共享——若做成 subscribeProgress 闭包内的局部
+ * const，第 2/3 消费者早退分支下的闭包永不赋值，末位 dispose 时取到的是 TDZ/undefined。
+ */
+let offProgress: (() => void) | null = null
+let offError: (() => void) | null = null
+
+/**
  * 订阅 main 进程的进度 + 错误推送（引用计数管理生命周期）。
  * 首个消费者订阅，后续消费者只增计数；最后一个消费者 dispose 时退订。
  * onScopeDispose 注册在每个调用 useAppUpdate 的组件作用域上，随该作用域卸载而清理。
  */
 function subscribeProgress(): void {
   refCount++
-  if (refCount !== 1) return  // 已有订阅，只增计数
-  // 首次订阅
-  const offProgress = onUpdateProgress((p) => {
+  // 先无条件注册 onScopeDispose（含第 2/3 消费者）：每个消费者卸载都要减计数。
+  // 旧写法在 `refCount !== 1` 时早退 return，导致第 2/3 消费者（UpdateButton/Sidebar/UpdateCheckCard）
+  // 永不注册 onScopeDispose → refCount 只减不到 0，offProgress/offError 永不执行（订阅泄漏，
+  // main 推送回调悬空）。修正顺序 = 先挂 dispose，再按 refCount===1 决定是否注册监听。
+  onScopeDispose(() => {
+    refCount--
+    if (refCount === 0) {
+      offProgress?.()
+      offError?.()
+      offProgress = null
+      offError = null
+    }
+  })
+  // 已有订阅（第 2/3 消费者）→ 只增计数，不重复注册 listener
+  if (refCount !== 1) return
+  // 首次订阅：注册进度 + 错误推送，句柄提至模块级供末位 dispose 退订
+  offProgress = onUpdateProgress((p) => {
     // stage 映射 state：downloading/replacing（restarting 由 performInstall resolve 后置）
     if (p.stage === 'downloading' || p.stage === 'replacing') {
       updateState.state = p.stage
     }
     updateState.percent = p.percent
   })
-  const offError = onUpdateError((e) => {
+  offError = onUpdateError((e) => {
     // onUpdateError 为 SSOT：优先处理错误信息
     if (e.errorCode === UNSUPPORTED_ERROR_CODE) {
       updateState.state = 'unsupported'
@@ -92,7 +115,8 @@ function subscribeProgress(): void {
       console.info('[useAppUpdate] stale release detected, auto re-checking:', e.message)
       const { info: toastInfo } = useToast()
       toastInfo(t('sidebar.update.staleRelease'))
-      void checkForUpdate(true)
+      // STALE 自动重查是后台恢复动作（非用户点击）→ source='auto'，失败保持静默（RD-4#5）
+      void checkForUpdate(true, 'auto')
     } else {
       updateState.state = 'error'
       updateState.errorMessage = e.message
@@ -104,13 +128,6 @@ function subscribeProgress(): void {
       toastError(e.message)
     }
     updateFlags.errorHandled = true
-  })
-  onScopeDispose(() => {
-    refCount--
-    if (refCount === 0) {
-      offProgress()
-      offError()
-    }
   })
 }
 
@@ -152,4 +169,6 @@ export function _resetForTest(): void {
   resetUpdateStateForTest()
   resetCheckForTest()
   refCount = 0
+  offProgress = null
+  offError = null
 }

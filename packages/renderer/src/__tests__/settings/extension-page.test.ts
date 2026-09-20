@@ -47,6 +47,13 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   config: { detectSources: async () => [] },
 }))
 
+// RD-4#11：ExtensionPage onMounted 读 getDataDir——mock 该域以便注入「读取失败」路径
+const settingsDomainMock = vi.hoisted(() => ({
+  getDataDir: vi.fn(() => Promise.resolve('~/.taiji-dev')),
+  chooseDirectory: vi.fn(() => Promise.resolve(null)),
+}))
+vi.mock('@/api/domains/settings', () => settingsDomainMock)
+
 import ExtensionPage from '@/components/settings/extension/ExtensionPage.vue'
 import { useToast } from '@/composables/useToast'
 
@@ -331,5 +338,30 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
     expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('write failed'))).toBe(true)
     expect(document.body.querySelector('[data-testid="load-paths-save-error"]')).not.toBeNull()
     expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
+  })
+})
+
+// ── RD-4#11 · getDataDir 读取失败显形（不伪装真实路径）──
+//
+// 链路：ExtensionPage onMounted → getDataDir() reject → catch 置位 dataDirReadFailed →
+// 页面常驻「实际路径读取失败，显示的是默认路径 ~/.taiji」标注（此前无 try/catch，静默回落
+// 写死 ~/.taiji，dev 实例路径误导排查）。
+describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
+  it('getDataDir reject → 常驻标注（不伪装真实路径）', async () => {
+    settingsDomainMock.getDataDir.mockRejectedValueOnce(new Error('ipc down'))
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    const note = document.body.querySelector('[data-testid="extension-datadir-read-failed"]')
+    expect(note).not.toBeNull()
+    expect(note!.textContent).toContain('读取失败')
+  })
+
+  it('getDataDir 成功 → 无标注', async () => {
+    settingsDomainMock.getDataDir.mockResolvedValueOnce('~/.taiji-dev')
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="extension-datadir-read-failed"]')).toBeNull()
   })
 })

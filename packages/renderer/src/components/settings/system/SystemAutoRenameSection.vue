@@ -1,18 +1,34 @@
 <template>
   <GroupCard :title="t('settings.system.autoRenameSession')">
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+    <div
+      v-if="loadError"
+      data-testid="auto-rename-load-error"
+      class="flex items-center gap-2 px-2.5 pt-2 pb-1 text-[11px] text-warn"
+    >
+      <AlertTriangle class="size-3.5 shrink-0" />
+      <span>{{ t('settings.system.loadErrorHint') }}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-5 px-1.5 text-[11px] text-accent"
+        data-testid="auto-rename-load-retry"
+        @click="loadConfig"
+      >{{ t('settings.system.loadErrorRetry') }}</Button>
+    </div>
     <div class="px-2.5 pt-1 pb-2">
       <SettingRow :label="t('settings.system.autoRenameSession')" :desc="t('settings.system.autoRenameDesc')">
         <Switch
           data-testid="setting-auto-rename-session"
           :model-value="autoRenameEnabled"
-          :disabled="togglingAutoRename"
+          :disabled="togglingAutoRename || loadError"
           @update:model-value="onSaveAutoRename"
         />
       </SettingRow>
       <SettingRow :label="t('settings.system.renameMode')" :desc="t('settings.system.renameModeHint')">
         <Select
           :model-value="renameMode"
-          :disabled="savingRenameMode"
+          :disabled="savingRenameMode || loadError"
           @update:model-value="onRenameModeChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-mode">
@@ -28,7 +44,7 @@
       <SettingRow :label="t('settings.system.renameModel')" :desc="t('settings.system.renameModelHint')">
         <Select
           :model-value="selectedValue"
-          :disabled="!autoRenameEnabled || savingRenameModel"
+          :disabled="!autoRenameEnabled || savingRenameModel || loadError"
           @update:model-value="onRenameModelChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-model">
@@ -56,7 +72,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { AlertTriangle } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
@@ -125,28 +143,40 @@ const selectedValue = computed(() => toSelectValue(renameModel.value))
 /** 当前 ref 不在可选列表时返回该 ref（渲染 disabled 兜底项），否则 null。 */
 const staleRef = computed(() => staleModelRef(renameModel.value, availableValues.value))
 
-onMounted(async () => {
+/** RD-4#8：读配置失败标志——置位时控件禁用 + 顶部常驻提示，禁止把默认值当已存值渲染。 */
+const loadError = ref(false)
+
+async function loadConfig(): Promise<void> {
+  // 三个字段独立加载（任一失败不阻塞其余），但任一失败即置 loadError——默认值明确标注为
+  // 默认而非已存（此前每段 console.warn 后按默认值渲染，开关显「开」冒充已存值，误显的
+  // 默认值会随用户操作直接落盘）。
+  let failed = false
   try {
     const res = await getAutoRenameEnabled()
     autoRenameEnabled.value = res.enabled
   } catch (e) {
-    // best-effort：加载失败保持默认 true（开关仍可操作，保存时重新校验），不打扰用户
     console.warn('[SystemAutoRenameSection] failed to load auto-rename state:', e)
+    failed = true
   }
   try {
     const res = await getRenameModel()
     renameModel.value = res.model
   } catch (e) {
-    // best-effort：拉取失败保持未设置（''），不阻塞页面
     console.warn('[SystemAutoRenameSection] failed to load rename model:', e)
+    failed = true
   }
   try {
     const res = await getRenameMode()
     renameMode.value = res.mode
   } catch (e) {
-    // best-effort：拉取失败保持默认 first-stop（零行为迁移），不阻塞页面
     console.warn('[SystemAutoRenameSection] failed to load rename mode:', e)
+    failed = true
   }
+  loadError.value = failed
+}
+
+onMounted(() => {
+  void loadConfig()
 })
 
 async function onSaveAutoRename(enabled: boolean): Promise<void> {
@@ -157,9 +187,9 @@ async function onSaveAutoRename(enabled: boolean): Promise<void> {
   try {
     await setAutoRenameEnabled(enabled)
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     autoRenameEnabled.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     togglingAutoRename.value = false
   }
@@ -176,9 +206,9 @@ async function onRenameModelChange(value: unknown): Promise<void> {
     const reply = await setRenameModel(next)
     renameModel.value = reply.model
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     renameModel.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     savingRenameModel.value = false
   }
@@ -204,9 +234,9 @@ async function onRenameModeChange(value: unknown): Promise<void> {
         ? t('settings.system.renameModeSwitchedAutoDisabled')
         : t('settings.system.renameModeSwitched'),
     )
-  } catch (_e) {
+  } catch (e) {
     renameMode.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     savingRenameMode.value = false
   }
