@@ -734,6 +734,29 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+    },
+    {
+      "id": "E2E-MODELS-02",
+      "summary": "provider-live-sync 真机链：运行中新增/删除 provider·模型·凭据 → 可直接切换（真实 pi 进程 + 本地 mock LLM，零外网）",
+      "scope": [
+        "extensions/universal/provider-live-sync/**",
+        "packages/runtime/src/services/session/session-model-control.ts",
+        "packages/runtime/src/transport/model-message-handler.ts",
+        "packages/runtime/src/services/provider-config-helper.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-provider-live-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "node scripts/verify-provider-live-sync.mjs",
+      "owner": "extensions/universal/provider-live-sync",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "faux 轨：真实 pi 二进制 + 真实扩展 + 本地 mock LLM（OpenAI chat-completions 流式，随机端口）——零 token 零外网；断言基线（新增前 Model not found）/ 新增后可直接切换 + get_state 真生效 / model_change 落 JSONL / 删除生效且其它模型无塌陷 / 扩展日志。验收结果与测试时序陷阱见 .tmp/tech-design/acceptance/pi-live-provider-e2e-RESULTS.md（设计过程档案）"
     }
   ]
 }

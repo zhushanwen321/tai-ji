@@ -41,6 +41,7 @@ import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
+import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from './session-model-guards.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
 import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, resolveLaunchPresetOptions } from './launch-params.js'
@@ -394,10 +395,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 模型控制域（S6 迁出至 session-model-control.ts）：deps 窄注入——session 定位经
     // lifecycle 只读面、实例失效经 projection、trace 补拉经 traceSync（全部既有公有面）。
     this.modelControl = new SessionModelControl({
-      pm: this.pm,
       getSession: (sessionId) => this.lifecycle.get(sessionId),
       getReplicatedStates: (sessionId) => this.projection.getReplicatedStates(sessionId),
       syncTraceEntries: (sessionId, trigger) => this.traceSync.syncTraceEntries(sessionId, trigger),
+      // U2：停止态/回收态切换先经 ensureActive 拉活或 join 同一 in-flight；
+      // 上界 15s（`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` 可调，≤0 = 不限时逃生门）。
+      ensureActive: (sessionId) => this.ensureActive(sessionId),
+      activateTimeoutMs: resolveActivateTimeoutMs(process.env),
+      // `Model not found` 三型分型的两判（configService 晚期注入 → 闭包内每次调用动态读；
+      // 未注入 / listProviders 抛错时 fail-open，宁可落双因文案也不误报更「确定」的码）。
+      isModelRegistered: (provider, modelId) => isModelInRegistry(this.configService, provider, modelId),
+      hasProviderCredential: (provider) => providerHasCredential(this.configService, provider),
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。

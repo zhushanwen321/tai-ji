@@ -425,6 +425,17 @@ export default {
     selectSession: 'Select a session from the left',
     taskFailed: 'Task creation failed: {error}',
     sendFailed: 'Failed to send message: {error}',
+    // ── U4 model/thinking switch failures (model-switch-live-provider-sync §3.4) ──
+    // 5 new codes + general; the 4 pass-through codes fall back to `general`
+    // (toast shows the backend message).
+    modelSwitch: {
+      general: 'Switch failed: {error}',
+      sessionActivateFailed: 'Could not restore the session — reopen it from the sidebar',
+      sessionActivateTimeout: 'Session restore timed out — please retry shortly',
+      modelNotFound: 'This model no longer exists — please pick another',
+      providerCredentialMissing: 'This provider has no credential — add the API key in Settings',
+      engineModelMissing: 'The engine has not picked up this model yet: retry in a couple of seconds if you just changed the config; if it keeps failing, check the provider config in Settings',
+    },
   },
   ambiguous: {
     title: '「{basename}」 has {count} matches, choose a file to open',

@@ -273,3 +273,31 @@ describe('sanitizeInvalidProviders', () => {
     expect(second.repaired).toEqual([])
   })
 })
+
+describe('U6③ 存量自愈：id 缺失/non-string 模型项（写侧同口径）', () => {
+  it('id 缺失（undefined）的模型项被清洗剔除，provider 其余模型保留（pi 可加载）', () => {
+    writeModelsFixture({
+      keep: {
+        baseUrl: 'https://api.example.com',
+        models: [{ id: 'good-1' }, { name: 'no-id-model' }],
+      },
+    })
+    sanitizeInvalidProviders()
+    // outcome 形状 = { removed, repaired, staleGatewayMarkers }（无 changed 字段）；
+    // 变更效果以盘上内容为准（U6③ 的判别位：id 缺失项被剔除）
+    const models = (readModelsProviders().keep as { models: Array<Record<string, unknown>> }).models
+    expect(models.map((m) => m.id)).toEqual(['good-1'])
+  })
+
+  it('可强转 id（number）被就地写回字符串形式（不丢条目，与写侧同口径）', () => {
+    writeModelsFixture({
+      keep: {
+        baseUrl: 'https://api.example.com',
+        models: [{ id: 456 }],
+      },
+    })
+    sanitizeInvalidProviders()
+    const models = (readModelsProviders().keep as { models: Array<Record<string, unknown>> }).models
+    expect(models).toEqual([{ id: '456' }])
+  })
+})
