@@ -43,7 +43,7 @@ export default {
   retry: '重试',
   toastImported: '已导入「{name}」到 {project} · 可继续对话',
   toastWarnSidecar: '项目归属写入失败：请在侧边栏手动将该会话归类到项目',
-  toastWarnDropped: '已跳过 {count} 条 zcode 运行时注入消息',
+  toastWarnDropped: '已跳过 {count} 条 zcode 消息',
   toastWarnUnclassified: '{count} 条无法分类的 zcode 消息已跳过',
   toastUnclassifiedSample: '首条样本 {messageId}：{preview}',
   freshBadge: '导入',

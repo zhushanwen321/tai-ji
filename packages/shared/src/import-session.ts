@@ -73,7 +73,7 @@ export interface ImportDegradation {
     | 'dropped_redundant'    // L1：内容已由 tool 通道保留的运行时注入（background_* / subagent_* 族），丢弃无损
     | 'dropped_transient'    // L2：无对话语义的瞬态/注入形态（todo 提醒 / system_reminder / timeline 等），非 L1/L3/L4 的丢弃类全量归入
     | 'truncated_output'     // L3：tool part serialization.truncated=true，保留截断版 output（保真损失）
-    | 'compaction_unlinked'  // L3：compact_summary 与 compaction part 关联断裂（summaryMessageId 悬空），退 custom entry（保真损失）
+    | 'compaction_unlinked'  // L3：compact_summary 与 compaction part 关联断裂（summaryMessageId 悬空）；摘要宿主降级路径 = 现状通道（宿主 user entry + compaction part 的 custom entry），合并路径悬空指针 part 补发 custom entry（保真损失）
     | 'unclassified'         // L4：semantics.kind / source / origin 超出闭集，丢弃 + 独立告警（G3 未知不静默）
   /** zcode semantics.kind 原值（L4 未分类时必有；L1/L2 聚合档按 (kind, source) 维度携带） */
   kind?: string
@@ -82,8 +82,8 @@ export interface ImportDegradation {
   /** 该 (code, kind, source) 维度的聚合计数 */
   count: number
   /**
-   * 定位样本（仅 `unclassified` 携带，便于用户反馈/维护者定位）：
-   * messageId + 文本前 80 字。
+   * 定位样本（unclassified 必带，便于用户反馈/维护者定位；part 级诊断记录可
+   * 携带 sample 便于日志定位，明细不入 wire）：messageId + 文本前 80 字。
    */
   sample?: {
     messageId: string

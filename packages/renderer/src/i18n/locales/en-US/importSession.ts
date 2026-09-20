@@ -44,7 +44,7 @@ export default {
   retry: 'Retry',
   toastImported: 'Imported "{name}" to {project} · continue chatting',
   toastWarnSidecar: 'Project assignment failed: reassign the session to a project manually in the sidebar',
-  toastWarnDropped: 'Skipped {count} zcode runtime-injected messages',
+  toastWarnDropped: 'Skipped {count} zcode messages',
   toastWarnUnclassified: 'Skipped {count} unclassified zcode messages',
   toastUnclassifiedSample: 'First sample {messageId}: {preview}',
   freshBadge: 'Imported',
