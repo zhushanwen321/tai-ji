@@ -124,9 +124,9 @@
         <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update）；landing 同上隐藏 -->
         <ContextCapacityPopover v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" />
         <!-- 模型（spec §2b：click 出模型切换 popover） -->
-        <ModelSelectPopover :selected="currentModelId" @select="onModelSelect" />
+        <ModelSelectPopover :selected="currentModelId" :switching="isSwitching" @select="onModelSelect" />
         <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集——non-reasoning 只 off） -->
-        <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" @select="onThinkingSelect" />
+        <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" :switching="isSwitching" @select="onThinkingSelect" />
 
         <!-- 发送位四态（u6b / D6 表「发送位」列）：staging（fork/handoff，含 streaming 中）→
              staging send / stop（turn 活跃 dispatching|generating；settling 单独）→ ■ stop /
@@ -271,6 +271,16 @@ const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 
 const sessionIdRef = computed(() => props.sessionId)
 
+/**
+ * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
+ * 但读条件必须判 `sessionId` 等值——split 面板/切 session 后不得残留旧面板的「切换中」，
+ * 也不得误禁新 session 的 chip；语义③ = **任一在飞即禁全部模型/档位 chip**（防两条
+ * 切换 RPC 并发 → 回执乱序与 `session.modelId` 双写竞争），故两个 chip 共用同一布尔。
+ */
+const isSwitching = computed(
+  () => switching.value !== null && switching.value.sessionId === sessionIdRef.value,
+)
+
 // [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
 const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
 const {
@@ -334,6 +344,7 @@ const {
   currentThinkingLevel,
   currentThinkingLevelMap,
   currentSupportedLevels,
+  switching,
   onModelSelect,
   onThinkingSelect,
   handleArrowUp,

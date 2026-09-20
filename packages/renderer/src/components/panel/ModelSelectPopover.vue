@@ -4,7 +4,7 @@
     click 触发，所有 provider 平铺同一列表，按分组标题分隔；顶部搜索过滤。
     点选即切换当前 session 模型。
   -->
-  <Popover v-model:open="open">
+  <Popover v-model:open="canOpen">
     <!-- 默认 trigger（PopoverTriggerButton）。调用方可传 #trigger slot 自定义触发器
          （如 ProviderPage 默认 pill），此时调用方需自行包 <PopoverTrigger as-child>。 -->
     <slot name="trigger">
@@ -12,6 +12,8 @@
         :open="open"
         :title="t('panel.modelSelect.switchModel')"
       >
+        <!-- U4：切换中显示转圈（停止态切模型要先 ensureActive 拉活，1–2s 可见反馈） -->
+        <LoaderCircle v-if="switching" class="size-[13px] shrink-0 animate-spin" />
         <span class="truncate">{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
@@ -60,7 +62,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check } from '@lucide/vue'
+import { Check, LoaderCircle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
@@ -78,14 +80,26 @@ const props = withDefaults(defineProps<{
   selected?: string
   /** 限定展示的 provider 分组（ProviderPage 默认 pill 传 [p.id]，只列该供应商模型） */
   providerFilter?: ProviderId[]
+  /**
+   * U4「切换中」：true 时 trigger 显示转圈并**忽略开合与点选**（禁用重复点击；并发两条
+   * model.switch 在飞会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
+   * sessionId 等值后传入（本组件不感知 session）。
+   */
+  switching?: boolean
 }>(), {
   selected: '',
   providerFilter: undefined,
+  switching: false,
 })
 
 const { t } = useI18n()
 const settingsStore = getSettingsStore()
 const open = ref(false)
+// U4：切换中禁止开合（内联处理，避免侵入 ui 包 PopoverTriggerButton 的 props 面）
+const canOpen = computed({
+  get: () => open.value,
+  set: (v: boolean) => { open.value = props.switching ? false : v },
+})
 const query = ref('')
 
 /**

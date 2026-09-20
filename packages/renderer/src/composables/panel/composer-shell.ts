@@ -23,7 +23,7 @@
 import { computed, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitFork, Upload } from '@lucide/vue'
-import type { Segment, Message } from '@taiji/shared'
+import type { ProviderId, Segment, Message } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
 import {
   useComposerModelThinking,
@@ -65,6 +65,7 @@ import { useCompactQueue } from './useCompactQueue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
 import { useComposerShortcutActions } from './composer-shortcut-actions'
+import { modelSwitchErrorMessage, modelSwitchToastKey } from './model-switch-toast'
 import { useForkModeChannel } from './useForkModeChannel'
 import { useHandoffModeChannel } from './useHandoffModeChannel'
 import { handleImagePaste } from './useImageAttachment'
@@ -194,6 +195,7 @@ export function useComposerShell(params: ComposerShellParams) {
     currentThinkingLevelMap,
     currentSupportedLevels,
     localThinkingLevel,
+    switching,
     onModelSelect,
     onThinkingSelect,
     enterStagingMode,
@@ -456,6 +458,34 @@ export function useComposerShell(params: ComposerShellParams) {
   const enabledModels = computed(() => (settingsStore.models?.value ?? []).filter((m) => m.enabled !== false))
   /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
   const isStaging = computed(() => staging.activeStaging.value !== null)
+  /**
+   * UI 路径的统一通知包装（U4，model-switch-live-provider-sync §3.4 / D7）：
+   * 点 composer 的模型 chip / popover 或档位 chip / popover → 失败按 `error.code` 映射 toast。
+   *
+   * 三条纪律：
+   * - **不外抛**：壳层只给 `Composer.vue` 的模板绑定这件包装（不传给键盘循环），不 rethrow
+   *   既避免 Vue 事件处理器把 rejection 记成「Unhandled error」，也避免与 shortcut 路径叠加成双 toast
+   *   （键盘循环收**原始** core 函数，其内联 catch 需要 rejection 来做意图清理并自行 toast）。
+   * - **不通向 landing/staging**：core 的 landing/staging 分支不发 RPC、不 reject，包装天然 no-op。
+   * - **文案单点**：code→i18n key 映射在 `model-switch-toast.ts`，与 shortcut 路径共用。
+   */
+  async function onModelSelectUi(payload: { modelId: string; provider: ProviderId }): Promise<void> {
+    try {
+      await onModelSelect(payload)
+    } catch (err) {
+      toastError(t(modelSwitchToastKey(err), { error: modelSwitchErrorMessage(err) }))
+    }
+  }
+
+  /** 档位 UI 路径包装（与 onModelSelectUi 同款；自动对齐走 core 内部，不经此处、只记日志）。 */
+  async function onThinkingSelectUi(level: string): Promise<void> {
+    try {
+      await onThinkingSelect(level)
+    } catch (err) {
+      toastError(t(modelSwitchToastKey(err), { error: modelSwitchErrorMessage(err) }))
+    }
+  }
+
   const shortcutActions = useComposerShortcutActions({
     cmdOpen,
     sessionId: sessionIdRef,
@@ -464,6 +494,9 @@ export function useComposerShell(params: ComposerShellParams) {
     currentThinkingLevel,
     currentSupportedLevels,
     enabledModels,
+    // 刻意传**原始** core 函数（非 onModelSelectUi 包装）：键盘循环的内联 catch 需要
+    // rejection 到达才能清 `modelIntent`/`thinkingIntent`（意图清理是功能必需），
+    // 并由它自己 toast（每条路径恰一个通知点，U4）。
     onModelSelect,
     onThinkingSelect,
     getMessages: (sid: string) => chatStore.getMessages(sid),
@@ -475,14 +508,20 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   return {
-    // model-thinking
+    // model-thinking（onModelSelect/onThinkingSelect 对外 = **UI 包装版**：模板绑定用；
+    // 键盘循环在 shortcutActions 内部拿原始函数，见上方组装处注释）
     currentModelId,
     currentThinkingLevel,
     currentThinkingLevelMap,
     currentSupportedLevels,
     localThinkingLevel,
-    onModelSelect,
-    onThinkingSelect,
+    /**
+     * 「切换中」只读真值（U4）：`{ kind, sessionId, target } | null`。
+     * 消费侧（Composer.vue）**必须判 sessionId 等值**再显示/禁用（切走 session 后不得残留旧面板态）。
+     */
+    switching,
+    onModelSelect: onModelSelectUi,
+    onThinkingSelect: onThinkingSelectUi,
     enterStagingMode,
     exitStagingMode,
     getStagingConfig,

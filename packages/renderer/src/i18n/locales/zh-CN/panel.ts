@@ -415,6 +415,17 @@ export default {
     selectSession: '选择左侧会话开始',
     taskFailed: '任务创建失败：{error}',
     sendFailed: '消息发送失败：{error}',
+    // ── U4 模型/档位切换失败（model-switch-live-provider-sync §3.4 错误规格表）──
+    // 5 个新码 + general；4 个既有透传码（SESSION_NOT_FOUND / MODEL_NOT_CONFIGURED /
+    // RESTORE_FAILED / BUILTIN_EXTENSIONS_MISSING）走 general（toast 文本含后端 message）。
+    modelSwitch: {
+      general: '切换失败：{error}',
+      sessionActivateFailed: '会话无法恢复，请在侧栏重新打开',
+      sessionActivateTimeout: '会话恢复超时，请稍后重试',
+      modelNotFound: '该模型已不存在，请重新选择',
+      providerCredentialMissing: '该 provider 未配置凭据，请到设置填写 API Key',
+      engineModelMissing: '引擎未识别该模型：若刚改过配置，请稍等两秒重试；若持续失败，请到设置页检查 provider 配置',
+    },
   },
   ambiguous: {
     title: '「{basename}」有 {count} 个匹配，选择要打开的文件',

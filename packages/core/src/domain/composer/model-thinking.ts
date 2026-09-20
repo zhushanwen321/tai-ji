@@ -125,6 +125,12 @@ export function useComposerModelThinking(
   /** 当前模型档位可用集（supportedLevels，U6 切源；下发未接通时 undefined → 归一默认五档） */
   currentSupportedLevels: ComputedRef<string[] | undefined>
   localThinkingLevel: Ref<string | undefined>
+  /**
+   * 「切换中」只读真值（U4）：null = 空闲；非 null = 该 session 的该目标正在切。
+   * 消费侧（composer chip / popover）据此禁用重复点击并显示转圈；**读条件必须判
+   * `sessionId` 等值**（切走 session 后不得残留旧面板态）。
+   */
+  switching: Ref<{ kind: 'model' | 'thinking'; sessionId: string; target: string } | null>
   onModelSelect: (payload: { modelId: string; provider: ProviderId }) => Promise<void>
   onThinkingSelect: (level: string) => Promise<void>
   /** Staging Mode：进入暂存态（快照当前模型/thinking） */
@@ -189,6 +195,22 @@ export function useComposerModelThinking(
   const inFlightCallIds = new Set<number>()
 
   /**
+   * 「切换中」只读真值（U4，model-switch-live-provider-sync）：停止态切换要 1–2s（先
+   * ensureActive 拉活再 set RPC），期间 chip 需呈「切换中 + 禁用重复点击」。
+   *
+   * 为什么放在 core 而不是壳层新建一个 ref：RPC 生命周期事实**只有 core 知道**——壳层
+   * 自建第三份瞬态状态会与 `armed`（5s 保险丝，语义不同）和本文件 in-flight 计数产生
+   * 同步义务（清除时机三处必须一致，否则出现「chip 一直转」或「转一下停」）。
+   * 这里与 `inFlightCallIds` 同点设立/撤销：RPC 前设、`finally` 清（覆盖 15s
+   * SESSION_ACTIVATE_TIMEOUT 与 WS backstop），换绑/删除 session 由既有 `watch(sessionId)`
+   * 清 armed 的同一处一并清（见下方 watch）。
+   *
+   * 形态：`{ kind, sessionId, target }`——`kind` 区分模型/档位（两条路径的 chip 都要转），
+   * `sessionId` 供消费侧判等（切走 session 后不得残留旧面板态）。
+   */
+  const switching = ref<{ kind: 'model' | 'thinking'; sessionId: string; target: string } | null>(null)
+
+  /**
    * [u3·D3 规则 6「换绑清」] panel 换绑 session 瞬间清 armed——无论 callId 归属：
    * 切模型意图绑定发起时的 session，换绑即作废全部未消费意图。
    * 必须注册在 useThinkingLevelSync 的 sync watch 之前：同一 flush 内 watch job 按
@@ -197,6 +219,9 @@ export function useComposerModelThinking(
    */
   watch(sessionId, () => {
     armed.value = null
+    // 换绑即作废「切换中」（与 armed 同刻清）：该状态绑定发起时的 session，
+    // 换绑后旧面板不得再显示「切换中」。
+    switching.value = null
   })
 
   /**
@@ -365,6 +390,7 @@ export function useComposerModelThinking(
     // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
     armed.value = { modelId: targetModelId, at: Date.now(), callId }
     inFlightCallIds.add(callId)
+    switching.value = { kind: 'model', sessionId: sessionId.value, target: targetModelId }
     try {
       await switchModel(sessionId.value, payload.provider, payload.modelId)
       // [D4] lastUsedModel 写入（仅显式选模型，staging 试选不写——入口已在上方 staging return）。
@@ -386,6 +412,9 @@ export function useComposerModelThinking(
       // [u3·E10] in-flight 撤销必须留在 finally（晚于 flush）：回包触发的 watch 消费发生在
       // 计数仍 >0 的豁免窗内，规则 1 不误杀慢 RPC（>5s 回包仍正常匹配消费）
       inFlightCallIds.delete(callId)
+      // U4：「切换中」与 in-flight 同刻撤销（成功、失败、超时三路都经这里——
+      // SESSION_ACTIVATE_TIMEOUT 也走 catch/finally，不会悬挂）。
+      if (switching.value?.kind === 'model') switching.value = null
     }
   }
 
@@ -447,7 +476,13 @@ export function useComposerModelThinking(
       return
     }
     // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
-    await applyThinkingLevel(sessionId.value, level)
+    switching.value = { kind: 'thinking', sessionId: sessionId.value, target: level }
+    try {
+      await applyThinkingLevel(sessionId.value, level)
+    } finally {
+      // U4：档位路径同款撤销（激活超时 / 钳制读回失败 / 成功 三路都经 finally）。
+      if (switching.value?.kind === 'thinking') switching.value = null
+    }
   }
 
   /**
@@ -489,6 +524,8 @@ export function useComposerModelThinking(
     currentThinkingLevelMap,
     currentSupportedLevels,
     localThinkingLevel,
+    /** 「切换中」只读真值（U4）：null = 空闲；非 null = 该 session 的该目标正在切（chip 禁用/转圈）。 */
+    switching,
     onModelSelect,
     onThinkingSelect,
     enterStagingMode,
