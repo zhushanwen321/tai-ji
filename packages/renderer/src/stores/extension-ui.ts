@@ -18,7 +18,7 @@
  * - hasPendingBlockingOverlay / hasPendingDialog: 非响应式 getter，供 derivedStatus
  *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 统一表单 overlay：
  *   form 键，见函数注释）
- * - applyRecords / addRequest / removeRequest: 不可变 Map 写（new Map(...).set(...)）
+ * - applyRecords / addRequest / removeRequest / retainOnly: 不可变 Map 写（new Map(...).set(...)）
  * - clearSession: deleteSession 精确释放分区（防泄漏）
  * - clearAllPending: runtime 重连全局清理（R3/T5）
  *
@@ -117,6 +117,28 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     applyRecords(sessionId, prev.filter((r) => r.requestId !== requestId))
   }
 
+  /**
+   * 快照差集剔除（只保留 requestId ∈ keepIds 的条目）。不可变写。
+   *
+   * 落点语义（设计 scheduler-trigger-inversion §6.2 采用项④，v6.1 口径）：renderer 侧僵尸
+   * 表单修剪的**主算法**——`getPendingRequests` 应答落 store 前以最新快照为准调用本方法，
+   * 不在快照中的条目（含已完成 / 待决交互）一律从该 session 分区移除。
+   *
+   * 关键：keepIds 为空集合同样执行剔除（清空分区）——调用方把本调用放在 fetch 的
+   * `.then` 顶层（循环之外），空快照（`[]`）时循环体不执行但剔除照常发生，这是覆盖
+   * 「pi 进程被 idle reaper 回收 → runtime 定向清 pending，而 renderer 屏上仍留僵尸表单」
+   * 主路径的结构性保证（提交走 respond 不经快照入口，僵尸条目在下次快照落地即消失）。
+   *
+   * 分区为空 / 无条目需剔除时 no-op（避免无谓 Map 替换触发响应式重算）。
+   */
+  function retainOnly(sessionId: string, keepIds: ReadonlySet<string>): void {
+    const prev = getRequestsBySession(sessionId)
+    if (prev.length === 0) return
+    const next = prev.filter((r) => keepIds.has(r.requestId))
+    if (next.length === prev.length) return
+    applyRecords(sessionId, next)
+  }
+
   /** 清除指定 session 的 pending 分区（deleteSession 调，防泄漏，对齐 subagent.ts:171） */
   function clearSession(sessionId: string): void {
     partition.clear(sessionId)
@@ -140,6 +162,7 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     applyRecords,
     addRequest,
     removeRequest,
+    retainOnly,
     clearSession,
     clearAllPending,
   }

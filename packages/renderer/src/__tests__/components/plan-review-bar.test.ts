@@ -181,6 +181,9 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     const sidRef = computed(() => SID)
     const scope = effectScope()
     scope.run(() => useExtensionUI(sidRef, formFilter))
+    // 先让第二个实例的 getPendingRequests 快照落地（空快照 no-op）再发帧——真实链路 WS
+    // 有序（快照应答与 ui-request 广播同连接、先发先处理），帧与应答不存在倒置时序。
+    await flushAsync()
     emitPlanReviewRequest('pr-1')
     mockBus.emit({
       kind: 'ui-request',

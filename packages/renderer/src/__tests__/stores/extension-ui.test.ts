@@ -5,6 +5,7 @@
  * - hasPendingBlockingOverlay / hasPendingDialog 查询（核心：derivedStatus 入口）
  * - addRequest requestId dedup（迁移自 useExtensionUI push 去重）
  * - removeRequest（respond/cancel/timeout 出队）
+ * - retainOnly 快照差集剔除（renderer 僵尸表单修剪主算法，§6.2 采用项④ v6.1）
  * - clearSession（deleteSession 分区释放）
  * - clearAllPending（runtime 重连全局清理）
  * - recordsOf 响应式视图（组件订阅自动更新）
@@ -127,6 +128,64 @@ describe('useExtensionUIStore — removeRequest', () => {
     expect(store.getRequestsBySession('sess-A')).toEqual([])
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
     expect(store.hasPendingDialog('sess-A')).toBe(false)
+  })
+})
+
+describe('useExtensionUIStore — retainOnly 快照差集剔除（§6.2 采用项④ v6.1 主算法）', () => {
+  it('keepIds 空集 → 清空分区（空快照路径，僵尸表单剔除）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r2' }))
+
+    // 空快照（[]）→ keepIds 空集：分区中不在快照内的条目全部移除
+    store.retainOnly('sess-A', new Set<string>())
+
+    expect(store.getRequestsBySession('sess-A')).toEqual([])
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+  })
+
+  it('keepIds 部分命中 → 仅保留命中项，其余剔除', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r2' }))
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r3' }))
+
+    store.retainOnly('sess-A', new Set(['r1', 'r3']))
+
+    expect(store.getRequestsBySession('sess-A').map((r) => r.requestId)).toEqual(['r1', 'r3'])
+  })
+
+  it('分区不存在 / 无需剔除 → no-op（不抛、不误建分区）', () => {
+    const store = useExtensionUIStore()
+    expect(() => store.retainOnly('never', new Set<string>())).not.toThrow()
+    expect(store.getRequestsBySession('never')).toEqual([])
+
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.retainOnly('sess-A', new Set(['r1']))
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+  })
+
+  it('只动指定分区，不影响其他 session', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.addRequest('sess-B', makeForm({ sessionId: 'sess-B', requestId: 'r2' }))
+
+    store.retainOnly('sess-A', new Set<string>())
+
+    expect(store.getRequestsBySession('sess-A')).toEqual([])
+    expect(store.getRequestsBySession('sess-B').map((r) => r.requestId)).toEqual(['r2'])
+  })
+
+  it('响应式视图 recordsOf 随剔除更新', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r2' }))
+    const records = store.recordsOf('sess-A')
+    expect(records.value).toHaveLength(2)
+
+    store.retainOnly('sess-A', new Set(['r2']))
+
+    expect(records.value.map((r) => r.requestId)).toEqual(['r2'])
   })
 })
 
