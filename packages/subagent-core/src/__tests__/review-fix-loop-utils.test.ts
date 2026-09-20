@@ -63,6 +63,10 @@ import {
   translateReconSets,
   collectAffectedFiles,
   planUnifiedCommit,
+  REVIEWER_BATCH,
+  planReviewerOrder,
+  parseDiffStats,
+  countDiffPackages,
 } from "../../workflows/review-fix-loop-utils.cjs";
 
 /** 测试用 fail：与 workflow 内 fail() 同语义（抛错终止） */
@@ -2598,5 +2602,112 @@ describe("planUnifiedCommit（统一 commit 计划：存在性过滤 + '--' 分�
     );
     expect(plan.stagePaths).toEqual([]);
     expect(plan.skippedPaths).toEqual(["ghost/a.ts", "ghost/b.ts"]);
+  });
+});
+
+// ── 批内调度（planReviewerOrder + diff 形态探测；2026-09-20 实测排名驱动）──
+describe("countDiffPackages（包口径：extensions 3 段 / packages+apps 2 段 / 其余 1 段）", () => {
+  it("三类目录各按口径归并，distinct 计数", () => {
+    expect(countDiffPackages([
+      "extensions/universal/goal/src/a.ts",
+      "extensions/universal/goal/src/b.ts",       // 同包 → 1
+      "extensions/universal/ask-user/src/c.ts",   // 异包 → +1
+      "packages/runtime/src/x.ts",
+      "packages/runtime/test/y.ts",               // 同包 → 1
+      "packages/shared/src/z.ts",                 // +1
+      "apps/electron/main/t.ts",                  // +1
+      "AGENTS.md",                                // 根级 → 1 段
+      "docs/architecture/a.md",                   // 未知目录首段 → 1 段（与根级不同 key）
+    ])).toBe(7);
+  });
+  it("空/畸形输入 → 0，不炸", () => {
+    expect(countDiffPackages([])).toBe(0);
+    expect(countDiffPackages(null)).toBe(0);
+    expect(countDiffPackages(["", "  "])).toBe(0);
+  });
+});
+
+describe("parseDiffStats（git diff --numstat 输出解析）", () => {
+  it("常规行：文件收集 + 行数求和 + 包计数", () => {
+    const stats = parseDiffStats(
+      "10\t2\tpackages/runtime/src/a.ts\n3\t1\tpackages/runtime/src/b.ts\n0\t5\textensions/universal/goal/src/c.ts\n",
+    );
+    expect(stats.files).toHaveLength(3);
+    expect(stats.churnLines).toBe(21);
+    expect(stats.pkgCount).toBe(2);
+  });
+  it("二进制行（- -）计入文件不计行数；垃圾行跳过；空输入安全", () => {
+    const stats = parseDiffStats("-\t-\tassets/icon.png\nnot a numstat line\n\n1\t1\tREADME.md");
+    expect(stats.files).toEqual(["assets/icon.png", "README.md"]);
+    expect(stats.churnLines).toBe(2);
+    expect(parseDiffStats("").files).toEqual([]);
+    expect(parseDiffStats(null).churnLines).toBe(0);
+  });
+  it("含空格路径（第三列到行尾）整段保留", () => {
+    expect(parseDiffStats("1\t1\tmy file with spaces.md").files).toEqual(["my file with spaces.md"]);
+  });
+});
+
+describe("planReviewerOrder（固定 3 + 动态 1 双批调度）", () => {
+  const ALL = [
+    "review-electron-build", "review-arch-boundary", "review-type-safety", "review-business-logic",
+    "review-test-coverage", "review-data-governance", "review-monorepo-impact", "review-extension-api",
+  ].map((name) => ({ name }));
+  const names = (arr: { name: string }[]) => arr.map((d) => d.name);
+
+  it("不变量：order 恰好包含全部输入各一次（乱序输入不丢不重）", () => {
+    for (const diffStats of [null, { pkgCount: 9, churnLines: 2000 }, { pkgCount: 2, churnLines: 6000 }]) {
+      const plan = planReviewerOrder(ALL, diffStats);
+      expect(plan.order).toHaveLength(ALL.length);
+      expect(new Set(plan.order).size).toBe(ALL.length);
+      expect(plan.order.every((it) => ALL.includes(it))).toBe(true);
+    }
+  });
+  it("慢批 = 固定慢池 3 + 动态位；快批 = 固定快池 3 + 动态位", () => {
+    const plan = planReviewerOrder(ALL, { pkgCount: 2, churnLines: 6000 });
+    expect(names(plan.slowBatch)).toEqual([
+      "review-extension-api", "review-data-governance", "review-arch-boundary", "review-business-logic",
+    ]);
+    expect(names(plan.fastBatch)).toEqual([
+      "review-electron-build", "review-type-safety", "review-test-coverage", "review-monorepo-impact",
+    ]);
+  });
+  it("跨包铺开（pkg 9/5 > churn 2000/3000）→ monorepo-impact 占慢批动态位", () => {
+    const plan = planReviewerOrder(ALL, { pkgCount: 9, churnLines: 2000 });
+    expect(names(plan.slowBatch)).toEqual([
+      "review-extension-api", "review-data-governance", "review-arch-boundary", "review-monorepo-impact",
+    ]);
+    expect(names(plan.fastBatch)).toContain("review-business-logic");
+  });
+  it("diffStats=null（非 git-diff/探测失败）→ 漂移者按默认池序（business 占慢批动态位）", () => {
+    const plan = planReviewerOrder(ALL, null);
+    expect(names(plan.slowBatch)).toContain("review-business-logic");
+    expect(names(plan.slowBatch)).not.toContain("review-monorepo-impact");
+    expect(plan.note).toContain("默认池序");
+  });
+  it("裁剪轮子集：固定池在场成员仍占慢批，漂移者补动态位，不足 4 的批如实短", () => {
+    const subset = ALL.filter((d) =>
+      ["review-arch-boundary", "review-extension-api", "review-business-logic", "review-type-safety", "review-test-coverage"].includes(d.name),
+    );
+    const plan = planReviewerOrder(subset, { pkgCount: 2, churnLines: 100 });
+    expect(names(plan.slowBatch)).toEqual([
+      "review-extension-api", "review-arch-boundary", "review-business-logic",
+    ]);
+    expect(names(plan.fastBatch)).toEqual(["review-type-safety", "review-test-coverage"]);
+    expect(names(plan.order)).toEqual([
+      "review-extension-api", "review-arch-boundary", "review-business-logic",
+      "review-type-safety", "review-test-coverage",
+    ]);
+  });
+  it("非 8 维自定义名单：全部 unknown → 原序直排（退化无副作用）", () => {
+    const custom = [{ name: "reviewer" }, { name: "doc-reviewer" }];
+    const plan = planReviewerOrder(custom, { pkgCount: 9, churnLines: 9000 });
+    expect(names(plan.order)).toEqual(["reviewer", "doc-reviewer"]);
+  });
+  it("双漂移打平（分数相等）→ 池序 business-logic 在前", () => {
+    // pkg 5/5 = 1.0 与 churn 3000/3000 = 1.0 恰好打平
+    const plan = planReviewerOrder(ALL, { pkgCount: 5, churnLines: 3000 });
+    expect(names(plan.slowBatch)).toContain("review-business-logic");
+    expect(names(plan.slowBatch)).not.toContain("review-monorepo-impact");
   });
 });

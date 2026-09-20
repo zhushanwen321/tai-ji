@@ -1728,6 +1728,106 @@ function planUnifiedCommit(fixes, counters, exists) {
   };
 }
 
+// ── 批内调度（2026-09-20 实测 5 轮排名驱动，对齐 zcode 原生版同构实现）──────
+// REVIEWER_BATCH 切批下慢者同批可省 review 墙钟（实测 ~18%），但精确排名每轮漂移、
+// 只有分组稳定（5 轮实测：慢组恒前 4、快组恒后段）。调度形态 = 慢批固定 3 + 动态 1 /
+// 快批固定 3 + 动态 1：
+//  - 固定慢池（5 轮恒前 4）：extension-api / data-governance / arch-boundary
+//  - 固定快池（5 轮恒后段）：electron-build / type-safety / test-coverage
+//  - 漂移池（耗时随 diff 形态变）：monorepo-impact（跨包铺开时慢）/ business-logic
+//    （大 diff 深推演时慢）——按当轮 diff 形态打分，分高（预期更慢）者占慢批动态位
+// 池关键词按 name 子串匹配（pi 版 name=review-<dim>、zcode 版 name=<dim>，子串两栖）。
+const REVIEWER_BATCH = 4;
+const SLOW_POOL = ["extension-api", "data-governance", "arch-boundary"];
+const FAST_POOL = ["electron-build", "type-safety", "test-coverage"];
+const DRIFTER_POOL = ["business-logic", "monorepo-impact"];
+// 漂移者慢档归一化锚点（未标定初值：来源 = 实测慢场景的结构性判断；回调数据 = 后续
+// 真实 run 的报告 mtime 重建耗时 × 当轮 diff 形态，趋势稳定后收敛阈值）。分数 >=1
+// 即达慢档；两分数直接比较决定谁进慢批动态位。
+const SLOW_PKG_THRESHOLD = 5; // diff 触及 >=5 个包 → monorepo-impact 达慢档
+const SLOW_CHURN_THRESHOLD = 3000; // diff 变更 >=3000 行 → business-logic 达慢档
+
+/** 漂移者慢分：monorepo=跨包数/包锚点、business=变更行数/行数锚点；diffStats 缺失 → 0。 */
+function drifterSlowScore(name, diffStats) {
+  if (!diffStats) return 0;
+  if (name.includes("monorepo-impact")) return diffStats.pkgCount / SLOW_PKG_THRESHOLD;
+  if (name.includes("business-logic")) return diffStats.churnLines / SLOW_CHURN_THRESHOLD;
+  return 0;
+}
+
+/**
+ * 批内调度纯函数：items（带 name 的 agent def 数组）→ 重排数组 + 分批计划。
+ *  - 不变量：order 恰好包含 items 的全部元素各一次（池关键词互不为子串，无重复归类）
+ *  - 慢批 = 固定慢池(≤3) + 慢分最高漂移者；快批 = 固定快池(≤3) + 其余漂移者；
+ *    未知 agent（自定义 reviewer）先补动态位空缺、余者按原序追加尾部（裁剪轮
+ *    /非 8 维名单自然退化，不做特殊分支）
+ *  - 漂移者同分保持池序（stable sort：business-logic 在前——4 并发实测它中游
+ *    偏慢更常见，diffStats 缺失时的默认序即它占慢批动态位）；批切分交调用方 REVIEWER_BATCH 循环，order 前 4 即慢批
+ * @param items [{name, ...}]（pi 版 agent def / zcode 版 dim）
+ * @param diffStats {pkgCount, churnLines} | null（git-diff 探测结果；null = 默认序）
+ * @returns { order, slowBatch, fastBatch, note }
+ */
+function planReviewerOrder(items, diffStats) {
+  const inPool = (keys) => keys.flatMap((k) => items.filter((it) => typeof it.name === "string" && it.name.includes(k)));
+  const slow = inPool(SLOW_POOL);
+  const fast = inPool(FAST_POOL);
+  const drifters = inPool(DRIFTER_POOL);
+  const matched = new Set([...slow, ...fast, ...drifters]);
+  const sortedDrifters = [...drifters].sort(
+    (a, b) => drifterSlowScore(b.name, diffStats) - drifterSlowScore(a.name, diffStats),
+  );
+  const batch1 = slow.slice(0, 3);
+  const batch2 = fast.slice(0, 3);
+  const tail = [...sortedDrifters, ...items.filter((it) => !matched.has(it)), ...slow.slice(3), ...fast.slice(3)];
+  batch1.push(...tail.splice(0, Math.max(0, REVIEWER_BATCH - batch1.length)));
+  batch2.push(...tail.splice(0, Math.max(0, REVIEWER_BATCH - batch2.length)));
+  const slowDrifter = batch1.find((it) => DRIFTER_POOL.some((k) => it.name.includes(k))) || null;
+  const note = diffStats
+    ? "pkg=" + diffStats.pkgCount + "/" + SLOW_PKG_THRESHOLD
+      + " churn=" + diffStats.churnLines + "/" + SLOW_CHURN_THRESHOLD
+      + " → " + (slowDrifter ? slowDrifter.name + " 进慢批动态位" : "无漂移者在场")
+    : "无 diff 形态数据（非 git-diff/探测失败），漂移者按默认池序";
+  return { order: [...batch1, ...batch2, ...tail], slowBatch: [...batch1], fastBatch: [...batch2], note };
+}
+
+/**
+ * diff 形态探测纯函数：git diff --numstat 输出 → { files, churnLines, pkgCount }。
+ * 二进制行（- - path）计入 files（包计数有效）不计行数；不匹配的行跳过；重命名
+ * 花括号路径按字面计数（包级粒度下归一化误差可忽略）。
+ */
+function parseDiffStats(numstatOut) {
+  const files = [];
+  let churnLines = 0;
+  for (const line of String(numstatOut || "").split("\n")) {
+    const m = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/);
+    if (!m) continue;
+    const path = m[3].trim();
+    if (!path) continue;
+    files.push(path);
+    const add = Number(m[1]);
+    const del = Number(m[2]);
+    if (Number.isFinite(add) && Number.isFinite(del)) churnLines += add + del;
+  }
+  return { files, churnLines, pkgCount: countDiffPackages(files) };
+}
+
+/**
+ * diff 触及的 workspace 包计数（monorepo-impact 慢分数据源）：包口径对齐仓内拓扑
+ * ——extensions/<group>/<pkg> 取 3 段、packages/<pkg> 与 apps/<app> 取 2 段、
+ * 其余（根级/未知目录）取 1 段；distinct key 计数。
+ */
+function countDiffPackages(files) {
+  const pkgs = new Set();
+  for (const f of files || []) {
+    if (typeof f !== "string" || !f.trim()) continue;
+    const seg = f.trim().split("/").filter(Boolean);
+    if (seg[0] === "extensions" && seg.length >= 3) pkgs.add(seg.slice(0, 3).join("/"));
+    else if ((seg[0] === "packages" || seg[0] === "apps") && seg.length >= 2) pkgs.add(seg.slice(0, 2).join("/"));
+    else pkgs.add(seg[0]);
+  }
+  return pkgs.size;
+}
+
 module.exports = {
   TARGET_TYPES,
   VALID_ARG_KEYS,
@@ -1782,4 +1882,8 @@ module.exports = {
   resolveBatchTerminated,
   collectAffectedFiles,
   planUnifiedCommit,
+  REVIEWER_BATCH,
+  planReviewerOrder,
+  parseDiffStats,
+  countDiffPackages,
 };

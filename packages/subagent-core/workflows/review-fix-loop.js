@@ -157,6 +157,9 @@ const {
   resolveBatchTerminated,
   collectAffectedFiles,
   planUnifiedCommit,
+  REVIEWER_BATCH,
+  planReviewerOrder,
+  parseDiffStats,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
 
 // 白名单校验：未知参数名（防 batchX 拼错如 batchl）→ 报错
@@ -256,8 +259,8 @@ const rawBatchNames = typeof $ARGS.batchNames === "string" && $ARGS.batchNames.t
 const BATCH_NAMES = resolveBatchNames(rawBatchNames, BATCHES, fail);
 
 // 并发分批（2026-09-20 用户指定）：review 阶段批内 agent 分批并行，每 REVIEWER_BATCH
-// 个一批（批间串行）；fix 阶段按聚合分组并行派发，同时最多 FIXER_CONCURRENCY 组。
-const REVIEWER_BATCH = 4;
+// 个一批（批间串行，常量 SSOT = utils——批内调度 planReviewerOrder 按它补动态位）；
+// fix 阶段按聚合分组并行派发，同时最多 FIXER_CONCURRENCY 组。
 const FIXER_CONCURRENCY = 3;
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -679,6 +682,20 @@ function buildScopedReviewCall(base, def, header, round, max, roundDir, batchInd
   };
 }
 
+// git diff --numstat → diff 形态（planReviewerOrder 漂移者打分数据源）。探测失败
+// 返回 null 降级默认池序——调度优化不携带终止语义，探测本身也不该炸 run。
+function probeDiffStats(baseRef) {
+  try {
+    const out = require("child_process").execSync(
+      "git diff --numstat " + baseRef + "...HEAD",
+      { encoding: "utf-8", timeout: 10_000 },
+    );
+    return parseDiffStats(out);
+  } catch {
+    return null;
+  }
+}
+
 function buildReviewCall(def, round, max, batchIndex, roundDir, scoped) {
   const header = "Batch " + batchIndex + " Round " + round + "/" + max + " — " + BATCH_NAMES[batchIndex - 1];
   const prevBatchesHint = batchIndex > 1
@@ -808,6 +825,17 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         batchClean = true;
         break;
       }
+    }
+
+    // 批内调度（2026-09-20 实测 5 轮排名驱动）：慢批固定 3 + 动态 1 / 快批固定 3 +
+    // 动态 1（见 utils planReviewerOrder）。重排 active 本体——下游 calls/recordCall/
+    // 报告路径全部按派发序走，一一对应保持；每轮探测当轮 diff 形态（fix 后 diff 会
+    // 变），探测失败/非 git-diff 场景降级默认池序。
+    if (targetType === "git-diff") {
+      const plan = planReviewerOrder(active, probeDiffStats(lockedBase.base));
+      active = plan.order;
+      log("  dispatch plan: slow=[" + plan.slowBatch.map((d) => d.name).join(", ")
+        + "] fast=[" + plan.fastBatch.map((d) => d.name).join(", ") + "] (" + plan.note + ")");
     }
 
     log("Review: " + active.map((d) => d.name).join(", ") + " (" + active.length + " agent(s), " + REVIEWER_BATCH + " per batch)...");

@@ -281,6 +281,18 @@ export declare function planUnifiedCommit(
 
 export declare const TARGET_TYPES: string[];
 export declare const VALID_ARG_KEYS: Set<string>;
+export declare const REVIEWER_BATCH: number;
+export interface DiffStats {
+  files: string[];
+  churnLines: number;
+  pkgCount: number;
+}
+export declare function planReviewerOrder<T extends { name: string }>(
+  items: T[],
+  diffStats: { pkgCount: number; churnLines: number } | null,
+): { order: T[]; slowBatch: T[]; fastBatch: T[]; note: string };
+export declare function parseDiffStats(numstatOut: string | null | undefined): DiffStats;
+export declare function countDiffPackages(files?: string[] | null): number;
 export declare const ROUND_CONTEXT_MARKER: string;
 export declare function buildR1ReviewPrompt(args: {
   header?: string;
