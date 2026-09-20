@@ -132,4 +132,36 @@ describe('run-send-stream 关键词触发帧', () => {
     expect((req?.payload as { method?: string }).method).toBe('select')
     expect(((req?.payload as { options?: string[] }).options ?? []).length).toBe(3)
   })
+
+  it("含 'md-table'：text_delta 拼回 markdown 宽表（列宽地板 e2e 守卫数据源）", async () => {
+    const h = makeHarness()
+    await runSendStream('s1', 'md-table', h.deps)
+    const text = h.emitted
+      .filter((m) => m.type === 'message.text_delta')
+      .map((m) => (m.payload as { delta: string }).delta)
+      .join('')
+    // 表头 + 分隔行 + 数据行齐全（GFM 表格三要素，缺一 markdown-it 不建表）
+    expect(text).toContain('| 维度 | pi | zcode | 风险 |')
+    expect(text).toContain('| --- | --- | --- | --- |')
+    expect(text).toContain('| 报告目录 |')
+    expect(text).toContain('| 参数面 |')
+    // 管道行数 = 表头 + 分隔 + 2 数据行（trim 后的守卫数据源，勿加行——每 CJK 字一个
+    //   text_delta 帧 ×70ms，行数直接决定 L1 smoke 用例耗时）
+    expect(text.split('\n').filter((l) => l.startsWith('|')).length).toBe(4)
+    // 哨兵词只换回复体：生命周期其余帧不变（complete 含 usage 回填）
+    expect(types(h.emitted)).toContain('message.complete')
+    const complete = h.emitted.find((m) => m.type === 'message.complete')
+    expect((complete?.payload as { usage?: { totalTokens: number } }).usage).toMatchObject({ totalTokens: 1922 })
+  })
+
+  it("不含哨兵词：回复体仍是固定前缀（md-table 分支不污染普通输入）", async () => {
+    const h = makeHarness()
+    await runSendStream('s1', '普通输入', h.deps)
+    const text = h.emitted
+      .filter((m) => m.type === 'message.text_delta')
+      .map((m) => (m.payload as { delta: string }).delta)
+      .join('')
+    expect(text).toContain('好的，我来处理这个请求。（mock 模拟回复）')
+    expect(text).not.toContain('| 维度 |')
+  })
 })
