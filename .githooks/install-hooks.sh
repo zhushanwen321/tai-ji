@@ -566,6 +566,29 @@ if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix
 fi
 
 # ============================================================================
+# 2h. zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5）
+#     scripts/check-bun-driver.mjs：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
+#     生产宿主唯一可用 sqlite 驱动（bun 下 import('node:sqlite') 失败，P-bun-host
+#     实测）。ext 常规 vitest 跑 node 只覆盖 node:sqlite 路径——bun 驱动路径是
+#     F4「本地绿产品挂」陷阱的同构盲区，同一断言集必须在 bun 运行时再跑一遍。
+#     fail-open 仅限 bun 缺失场景（输出安装指引后放行，bun 趟由 CI 承担）；
+#     测试失败必红，无放行分支。--require-bun（CI 用）把缺失翻转为红。
+#     注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底；
+#     AGENTS.md SKIP_* 清单登记成本见其清单注释）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^scripts/check-bun-driver\.mjs$"; then
+    print_section "[zcode-session-source bun 驱动双跑]"
+
+    if ! node scripts/check-bun-driver.mjs; then
+        echo -e "${RED}[ERROR] bun 趟未通过——bun:sqlite 驱动路径（生产宿主实际路径）有断言未过，按上方明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] bun 驱动双跑检查通过${NC}"
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 
