@@ -8,7 +8,9 @@
  * 整条不产 entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息
  * 内部按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
  * T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
- * T4 tool output 三形态 / T5 其余 part / T6 entry id 递增链。
+ * T4 tool output 三形态 / T5 其余 part / T6 entry id 递增链；③ compact_summary 合并——
+ * D2 完整规格（三路关联判据 + 单条 compaction entry + firstKeptEntryId 三级锚悬空门 +
+ * 1:N 最早联合序锚 + 孤儿二分），关联在发射前预扫描趟建立。
  *
  * 排序锚（C1 探针结论，2026-09-19 宿主库只读抽样）：3 个 interactive 会话（1534/1852/29
  * parts）在 ORDER BY message.sequence, part.sequence 联合序下，携带 time 字段的 part
@@ -151,6 +153,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function asFinite(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
+
+/** 非空字符串守卫（空串不作为有效指针参与解析——与 projection asNonEmptyString 同语义）。 */
+function asNonEmptyString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
 // ── T6 entry id 链：8-hex 递增计数器（'00000001' 起），parentId 顺序链（首条 null）──────
 // 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义——id 在 pi 侧仅作 opaque map
 // key / leaf 指针 / 相等比较（pi 0.84.4 dist/core/session-manager.js:681-682 与 :758-759，
@@ -171,6 +178,63 @@ class EntryChain {
     this.lastId = id
     return { id, parentId }
   }
+
+  /** 最后一条已发射 entry 的 id（无则 null）——D2 firstKeptEntryId ② 级锚（紧邻前驱）。 */
+  last(): string | null {
+    return this.lastId
+  }
+
+  /**
+   * 下一个 id 预览（不推进计数器）。compaction entry 的 ③ 级锚 = 其自身 id，而 id 由
+   * 发射时才生成、firstKeptEntryId 又必须在发射前进入 payload——peek 让两者解耦，
+   * next() 产出的 id 与 peek 结果严格一致（同一确定性公式）。
+   */
+  peek(): string {
+    return (this.counter + 1).toString(ENTRY_ID_RADIX).padStart(ENTRY_ID_WIDTH, '0')
+  }
+}
+
+// ── D2 compaction 关联（设计 §6-D2 / §4.2 关联字段）──────────────────────────────────
+
+/**
+ * compact_summary 消息的摘要正文（data.summary.body）。不可用（缺失/非串/空串）→ undefined，
+ * 即「不伪造」：调用方退化为现状通道并计 compaction_unlinked（P-4 降级路径）。
+ */
+function summaryBodyOf(data: Record<string, unknown>): string | undefined {
+  const summary = isRecord(data.summary) ? data.summary : undefined
+  return asNonEmptyString(summary?.body)
+}
+
+/**
+ * compaction part 是否携带 timelineStatus——磁盘顶层形态（U0 考古 §2：存量 507/986 条在
+ * part 顶层）与 asar schema 的 metadata 包装形态（projection.isTimelineOnlyMessage 的读取
+ * 通道）取并集。为什么并集：D2 判据③（zcode 自家 compact-summary 判据）只应对「两处皆无」
+ * 的 part 生效——若只查 metadata 通道，U0 的 195 条孤儿（全部携带顶层 timelineStatus）会被
+ * 误关联进合并，孤儿比例归零与考古矛盾。
+ */
+function partHasTimelineStatus(part: Record<string, unknown>): boolean {
+  if (typeof part.timelineStatus === 'string') return true
+  const metadata = isRecord(part.metadata) ? part.metadata : undefined
+  return typeof metadata?.timelineStatus === 'string'
+}
+
+/**
+ * D2 firstKeptEntryId 三级锚解析（⛔ 悬空门：任何情况不发射悬空 id——P-1 实证悬空锚会把
+ * 压缩点之前的历史全部静默截断）：
+ * ① tail_start_id 经 messageId→entryId 映射命中——映射表只登记已发射 entry，命中即非悬空；
+ * ② 未命中 → 紧邻前驱（保留全部历史，与摘要冗余但无损——「宁多保留不丢历史」保守方向）；
+ * ③ compaction entry 是首条 entry（无前驱）→ 其自身 id。
+ * 集成路径上 session_info 恒先于消息发射，② 级恒可用，③ 级仅规格完备性防御；独立导出
+ * 是为让 ③ 路径可单测（buildZcodeSessionFile 公共面构造不出「无前驱 entry」的输入）。
+ */
+export function resolveFirstKeptEntryId(
+  tier1: string | undefined,
+  lastEmittedId: string | null,
+  ownId: string,
+): string {
+  if (tier1 !== undefined) return tier1
+  if (lastEmittedId !== null) return lastEmittedId
+  return ownId
 }
 
 /** assistant 切段累积器（T3）：一个 step 循环段 = 一条 pi assistant entry。 */
@@ -296,11 +360,69 @@ export function buildZcodeSessionFile(
     return id
   }
 
-  // messageId → entryId 映射表（设计 §6-D2）：U4 解析 compaction 的 firstKeptEntryId 时，
-  // tail_start_id（zcode messageId）在此查 entry id。首条 wins——「保留起点」锚语义 = 该
-  // 消息的首条 entry（多段 assistant 消息以其最早段为起点）。U3 仅搭建登记、无读取方
-  // （U4 在同一转换趟内续写消费），禁删。
+  // messageId → entryId 映射表（设计 §6-D2）：D2 合并的 firstKeptEntryId ① 级锚在发射趟
+  // 内消费——compaction part 的 tail_start_id（zcode messageId）在此查 entry id。首条
+  // wins——「保留起点」锚语义 = 该消息的首条 entry（多段 assistant 消息以其最早段为起点）。
   const messageIdToEntryId = new Map<string, string>()
+
+  // ── D2 关联预扫描（§6-D2 三路关联判据 + 1:N + 孤儿二分）────────────────────────────
+  // 两趟结构的两个原因：① 判据①（summaryMessageId）的解析目标是「行集内存在即可」的任意
+  // 消息，而合并发射发生在目标消息的处理位次——关联关系必须先于发射趟建立；② 防双发要求在
+  // 指针 part 的宿主消息处理时就知道该 part 已被合并（U0 考古 §6：指针宿主 = timeline_event /
+  // 无 semantics，多为分类器丢弃类——宿主丢弃时 part 不再流经 part 级通道，无从回头抑制）。
+  const policies = messages.map((msg) => classifyMessage(msg.data, msg.parts))
+  const messageIds = new Set(messages.map((msg) => msg.id))
+  // 可合并 = compactSummary 策略 ∧ summary.body 可用；不可用 → 降级路径（现状通道），
+  // 关联 part 不登记、随宿主走现状 custom 通道——断链降级责任在摘要宿主，不在指针 part。
+  const mergeable = new Set<string>()
+  messages.forEach((msg, i) => {
+    if (policies[i] === 'compactSummary' && summaryBodyOf(msg.data) !== undefined) mergeable.add(msg.id)
+  })
+  // 关联 part 登记处：key = 摘要宿主消息 id；value 按 (message.sequence, part.sequence)
+  // 联合序插入（本循环即联合序，首插 = 最早）——1:N 的锚/tokensBefore/details 取 value[0]。
+  const linkedParts = new Map<string, Array<Record<string, unknown>>>()
+  const pushLinked = (summaryId: string, part: Record<string, unknown>): void => {
+    const list = linkedParts.get(summaryId)
+    if (list !== undefined) list.push(part)
+    else linkedParts.set(summaryId, [part])
+  }
+  // part 级处置分类（按 part 对象身份查——part 级发射点 handleNonTextPart 只持有 part 引用）：
+  //   merged   = 已并入某摘要宿主的 compaction entry（防双发：不再发 custom entry）；
+  //   dangling = summaryMessageId 指向的消息不在行集（schema 漂移信号 → custom + compaction_unlinked）。
+  // 未登记 = 正常孤儿（走现状 custom 通道不计降级）或宿主被丢弃（随宿主消失，已被丢弃决策接受）。
+  const compactionDisposition = new WeakMap<Record<string, unknown>, 'merged' | 'dangling'>()
+  messages.forEach((msg, i) => {
+    const semantics = isRecord(msg.data.semantics) ? msg.data.semantics : undefined
+    for (const part of msg.parts) {
+      if (part.type !== 'compaction') continue
+      const summaryId = asNonEmptyString(part.summaryMessageId)
+      if (summaryId !== undefined) {
+        // ①（最高优先）：目标「行集内存在即可」，不限定 semantics.kind——U0 §7：指针目标
+        // 167/479 是 legacy 无 semantics user 消息，限定 kind 会把 legacy 会话全量误判断链
+        if (!messageIds.has(summaryId)) {
+          compactionDisposition.set(part, 'dangling')
+        } else if (mergeable.has(summaryId)) {
+          compactionDisposition.set(part, 'merged')
+          pushLinked(summaryId, part)
+        }
+        continue
+      }
+      // ②：宿主消息即 compact_summary（U0 §7：312 条 = 宿主 [compaction+text] 双 part 本体形态）
+      if (semantics?.kind === 'compact_summary' && mergeable.has(msg.id)) {
+        compactionDisposition.set(part, 'merged')
+        pushLinked(msg.id, part)
+        continue
+      }
+      // ③：zcode 自家判据（user 消息含无 timelineStatus 的 compaction part）。必须限定宿主
+      // 策略为 compactSummary——否则关联落在一个不发射 compaction entry 的宿主上，part 被
+      // 防双发抑制却无处合并 = 静默丢失。
+      if (msg.data.role === 'user' && !partHasTimelineStatus(part) && mergeable.has(msg.id)) {
+        compactionDisposition.set(part, 'merged')
+        pushLinked(msg.id, part)
+        continue
+      }
+    }
+  })
 
   // 消息级丢弃聚合组（L1/L2/L4）：按 (code, kind, source) 维度 count 累加，插入序 = 首遇序（确定性）。
   const dropGroups = new Map<string, ImportDegradation>()
@@ -328,11 +450,12 @@ export function buildZcodeSessionFile(
     pushDegradation(degradations, `header.timestamp 不可解（${header.timestamp}），时间戳退原串/缺省：不伪造 1970`)
   }
 
-  for (const msg of messages) {
+  for (const [msgIndex, msg] of messages.entries()) {
     const data = msg.data
     // 分派以投影分类结果为准（§7.3 映射表）——role 不再是分派依据（D1：显隐与 zcode GUI
-    // 同源，合成消息/隐藏注入不再冒充用户消息；无标记未知 role 由分类器兜底链裁决落点）
-    const policy = classifyMessage(data, msg.parts)
+    // 同源，合成消息/隐藏注入不再冒充用户消息；无标记未知 role 由分类器兜底链裁决落点）。
+    // 分类结果已在 D2 预扫描趟计算（关联判据需要全行集策略视图），此处复用。
+    const policy = policies[msgIndex]
     const time = isRecord(data.time) ? data.time : {}
     const createdMs = asFinite(time.created) ?? fallbackMs
     // entry 时间戳不可解时退 header 原串（保真 > 伪造）；message.timestamp（ms）缺省键
@@ -345,16 +468,49 @@ export function buildZcodeSessionFile(
 
     switch (policy) {
       case 'realUserInput':
-        convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations)
+        convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations, compactionDisposition)
         break
       case 'visibleAssistant':
-        convertAssistantMessage(msg, data, createdMs, createdIso, emitForMessage, degradations)
+        convertAssistantMessage(msg, data, createdMs, createdIso, emitForMessage, degradations, compactionDisposition)
         break
-      case 'compactSummary':
-        // U3 维持 U2 桥接后的现状（D2 合并落 compaction entry 归 U4 同文件续写）：
-        // compact_summary 消息现状走 user entry + 宿主 compaction part 现状发 custom entry。
-        convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations)
+      case 'compactSummary': {
+        // D2 合并（§6-D2）：compact_summary 宿主消息与其关联 compaction part 合并为单条 pi
+        // compaction entry（替换 U3 现状的 user entry + custom 通道——失败模式 C：摘要以 user
+        // 消息形态进上下文却无压缩语义）。summary 不可用 → 不伪造，整条退化为现状形态。
+        const body = summaryBodyOf(data)
+        if (body === undefined) {
+          convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations, compactionDisposition)
+          degradations.push({ code: 'compaction_unlinked', count: 1, ...degradationMeta(data) })
+          break
+        }
+        // 合并发射：每个 compactSummary 消息至多一条 compaction entry。1:N 关联 part 合流，
+        // 锚/tokensBefore/details 取联合序最早 part（首插 = 最早，见预扫描 linkedParts 注释；
+        // 取偏晚锚会静默偏移续聊上下文——设计 §6-D2 否决）。宿主 text part 随合并被消费
+        // （摘要正文走 summary 字段，P-4：312/312 宿主 data.summary.body 齐备）。
+        const anchor = linkedParts.get(msg.id)?.[0]
+        const tokensBefore = anchor !== undefined ? asFinite(anchor.preCompactTokenCount) : undefined
+        const anchorMs = anchor !== undefined ? partStartTime(anchor) : undefined
+        const tsMs = anchorMs ?? createdMs
+        // ① 级锚发射前解析：messageIdToEntryId 只登记已发射 entry，命中即非悬空（⛔ 悬空门）
+        const tailId = anchor !== undefined ? asNonEmptyString(anchor.tail_start_id) : undefined
+        const tier1 = tailId !== undefined ? messageIdToEntryId.get(tailId) : undefined
+        // ③ 级锚需要自身 id、payload 又必须先于发射组装——peek() 预览不推进计数器
+        const ownId = chain.peek()
+        emitForMessage('compaction', tsMs !== undefined ? new Date(tsMs).toISOString() : createdIso, {
+          summary: body,
+          firstKeptEntryId: resolveFirstKeptEntryId(tier1, chain.last(), ownId),
+          ...(tokensBefore !== undefined && { tokensBefore }),
+          ...(anchor !== undefined && { details: anchor }),
+        })
+        // 合并路径不迭代 part（不产 user entry / custom entry），宿主自带的悬空指针 part
+        // 在此显式登记漂移信号（流式路径的同一判定在 handleNonTextPart，弱映射表共享）
+        for (const part of msg.parts) {
+          if (part.type === 'compaction' && compactionDisposition.get(part) === 'dangling') {
+            degradations.push({ code: 'compaction_unlinked', count: 1, ...degradationMeta(data) })
+          }
+        }
         break
+      }
       case 'providerContextOnly':
       case 'hiddenSynthetic':
       case 'timelineOnly':
@@ -390,6 +546,7 @@ function convertUserMessage(
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
+  compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
   const content: Array<Record<string, unknown>> = []
   for (const part of msg.parts) {
@@ -403,7 +560,7 @@ function convertUserMessage(
       pushDegradation(degradations, `user 消息 file part 丢弃（zcode-artifact 引用无法搬运，D6）：message=${msg.id}`, msg.id)
       continue
     }
-    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations)
+    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations, compactionDisposition)
   }
   // T2 时间双轨：entry.timestamp = ISO(ms)、message.timestamp = ms；ms 不可解时缺省键（RT-5#8）
   emitEntry('message', createdIso, {
@@ -422,6 +579,7 @@ function convertAssistantMessage(
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
+  compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
   const providerId = typeof data.providerId === 'string' ? data.providerId : undefined
   const modelId = typeof data.modelId === 'string' ? data.modelId : undefined
@@ -483,7 +641,7 @@ function convertAssistantMessage(
       convertToolPart(part, msg, segment, degradations)
       continue
     }
-    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations)
+    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations, compactionDisposition)
   }
   // 消息结束边界：未收口且有内容则闭合（T3c 尾段 → stop 保底；无 step-finish 即无 usage）
   closeSegment(undefined, undefined)
@@ -553,8 +711,9 @@ function convertToolPart(
 
 /**
  * T5：text 以外的通用 part 分派（user/assistant 消息内同语义）。
- * compaction → custom entry 降级标记（不伪造 summary，D5）；timeline/step-* 不产出；
- * 未知 type 跳过 + 降级登记（前向兼容）。
+ * compaction 按 D2 处置分类分流：merged（已并入摘要宿主的 compaction entry）不再发 custom
+ * （防双发）；dangling（指针悬空）发 custom + compaction_unlinked 降级；未登记 = 正常孤儿，
+ * 维持现状 custom 通道不计降级。timeline/step-* 不产出；未知 type 跳过 + 降级登记（前向兼容）。
  */
 function handleNonTextPart(
   part: Record<string, unknown>,
@@ -563,10 +722,18 @@ function handleNonTextPart(
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
+  compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
   const type = part.type
   if (type === 'compaction') {
-    // zcode compaction 无摘要文本：pi compaction 强依赖 summary（渲染为压缩系统消息），
+    const disposition = compactionDisposition.get(part)
+    if (disposition === 'merged') return // 已并入摘要宿主的 compaction entry——防双发
+    if (disposition === 'dangling') {
+      // 悬空指针 = summaryMessageId 指向的消息不在行集（schema 漂移信号，L3 有诊断价值）：
+      // 现状 custom 通道保留边界元数据 + compaction_unlinked 降级（sample 仅 unclassified 携带）
+      degradations.push({ code: 'compaction_unlinked', count: 1, ...degradationMeta(msg.data) })
+    }
+    // 正常孤儿 / 悬空指针共同落点：pi compaction 强依赖 summary（渲染为压缩系统消息），
     // 伪造摘要 = 污染上下文（D5）。custom 不进 LLM 上下文、GUI 跳过（F4），无损保留元信息
     const tsMs = partStartTime(part) ?? createdMs
     emitEntry('custom', tsMs !== undefined ? new Date(tsMs).toISOString() : createdIso, {

@@ -327,7 +327,7 @@ describe('§3.4 映射全表（厨房水槽行集 → 产物行）', () => {
     expect(a.message.usage).toMatchObject({ input: 40, output: 20, totalTokens: 60, cost: { total: 0.2 } })
   })
 
-  it('T5 compaction → custom entry（customType/data 原样，不伪造 summary）；未实现 D2 合并无 compaction entry', () => {
+  it('T5 compaction 正常孤儿（assistant 宿主三路判据均未命中）→ custom entry（customType/data 原样，不伪造 summary）；无 compaction entry', () => {
     const custom = entries[8] as { customType: string; data: Record<string, unknown>; timestamp: string }
     expect(custom.customType).toBe('zcode-import:compaction')
     expect(custom.data).toMatchObject({ type: 'compaction', auto: true, preCompactTokenCount: 160000 })
@@ -457,35 +457,38 @@ describe('消息投影分派：六策略落点 + unclassified', () => {
     ])
   })
 
-  it('compactSummary 维持 U2 桥接后现状（D2 合并落点归 U4 续写）：user entry + compaction part custom entry', () => {
+  it('compactSummary → D2 合并落 compaction entry（判据③关联宿主 part）；summary.body 缺失退化为现状 + compaction_unlinked', () => {
     const compactionPart = part({ type: 'compaction', auto: true, trigger: 'auto', preCompactTokenCount: 90000 })
     const msgs: ZcodeMessageInput[] = [
-      // 旧数据形态（§4.2 实证 167 条）：role=user + data.summary，宿主 compaction part
+      // 旧数据形态（§4.2 实证 167 条）：role=user + data.summary，宿主 compaction part——
+      // 判据③（user 消息含无 timelineStatus 的 compaction part）关联 → 合并为单条 compaction entry
       {
         id: 'm-old',
         data: { role: 'user', summary: { body: '旧摘要' }, time: { created: 1000 } },
         parts: [textPart('旧摘要正文'), compactionPart],
       },
-      // 新数据形态：semantics.kind='compact_summary'
+      // 新数据形态：semantics.kind='compact_summary' 但无 data.summary.body → 不可合并（不伪造），
+      // 退化为现状 user entry + 计 compaction_unlinked
       userMessage('m-new', [], { semantics: { kind: 'compact_summary', origin: 'system', uiVisibility: 'hidden', transcriptVisibility: 'hidden' } }, 2000),
     ]
     const out = buildZcodeSessionFile(msgs, 'T', HEADER)
     const { entries } = parseOutput(out)
-    // 注意时序：user 消息内 compaction part 的 custom entry 在 parts 循环中发射，
-    // 先于循环后发射的 user entry（assistant 消息则相反——见厨房水槽 T5 用例）
+    // m-old：合并路径不产 user entry / custom entry——摘要宿主与关联 part 合为单条 compaction entry
     expect(entries.map((e) => [e.type, (e.message as { role?: string } | undefined)?.role])).toEqual([
       ['session_info', undefined],
-      ['custom', undefined], // m-old 宿主 compaction part → 现状 custom entry 通道保持原样
-      ['message', 'user'], // m-old：现状走 user entry（text part 保留——摘要冒充用户气泡由 U4 纠正）
-      ['message', 'user'], // m-new：同现状落点
+      ['compaction', undefined], // m-old 合并产物
+      ['message', 'user'], // m-new 退化路径（零 text part → 空 content，现状形态）
     ])
-    expect((entries[2] as { message: { content: Array<Record<string, unknown>> } }).message.content).toEqual([
-      { type: 'text', text: '旧摘要正文' },
-    ])
-    expect(entries[1]).toMatchObject({ customType: 'zcode-import:compaction', data: { preCompactTokenCount: 90000 } })
-    // 未实现 D2 合并：无 compaction entry 产出
-    expect(entries.some((e) => e.type === 'compaction')).toBe(false)
-    expect(out.degradations).toEqual([])
+    const merged = entries[1] as { summary: string; firstKeptEntryId: string; tokensBefore: number; details: Record<string, unknown>; timestamp: string }
+    expect(merged.summary).toBe('旧摘要')
+    expect(merged.tokensBefore).toBe(90000)
+    expect(merged.details).toEqual(compactionPart)
+    // ① 级锚缺 tail_start_id → ② 级紧邻前驱 = session_info 的 entry id（首条 entry 场景）
+    expect(merged.firstKeptEntryId).toBe('00000001')
+    expect(merged.timestamp).toBe(new Date(1000).toISOString())
+    // m-new 退化：user entry 空内容（现状形态）+ compaction_unlinked（L3，宿主 kind 注解）
+    expect((entries[2] as { message: { content: unknown[] } }).message.content).toEqual([])
+    expect(out.degradations).toEqual([{ code: 'compaction_unlinked', kind: 'compact_summary', count: 1 }])
   })
 
   it('unclassified → 丢弃 + L4 独立码 + sample 携带 messageId 与文本前 80 字（G3 未知不静默不猜）', () => {
