@@ -46,12 +46,69 @@ export type ImportSourceKind = 'pi' | 'zcode'
 
 /**
  * 导入成功 reply 的可选警示字面量（走成功通道而非 error envelope，r4-INFO：
- * 文件已落地不回滚，renderer 降级 toast）：
+ * 文件已落地不回滚，renderer 降级 toast）。多码并存时单字段取值优先序：
+ * `sidecar_failed` > `conversion_unclassified` > `conversion_degraded`
+ * （需用户动作者优先显形，zcode-import-message-projection 设计 §7.4）：
  * - `sidecar_failed`：sidecar 写失败（readback 不符），toast 引导手动归类。
  * - `conversion_degraded`：源转换存在知情降级（zcode→pi 映射的降级决策非空，
  *   如部分 part 形态跳过），toast 知情提示，无需动作。
+ * - `conversion_unclassified`：存在超出闭集无法分类的 zcode 消息（已丢弃，L4），
+ *   toast 引导升级 taiji 后重导或向维护者反馈 sample——「没看懂需上报」与上面的
+ *   「搬不动的知情降级」用户动作不同，故分码显形（设计 §6-D4）。
  */
-export type ImportWarning = 'sidecar_failed' | 'conversion_degraded'
+export type ImportWarning = 'sidecar_failed' | 'conversion_degraded' | 'conversion_unclassified'
+
+/**
+ * 结构化降级记录（zcode→pi 转换的信息损失按性质分档，D4 四档显形，
+ * zcode-import-message-projection 设计 §7.4；wire 契约只承载类型，全量明细走
+ * runtime 日志不入 reply）。档位与 code 对应：
+ * - L1 冗余丢弃 → `dropped_redundant`
+ * - L2 无语义丢弃 → `dropped_transient`
+ * - L3 保真损失 → `truncated_output` / `compaction_unlinked`
+ * - L4 未知/漂移 → `unclassified`（同时升 `conversion_unclassified` warning 码）
+ */
+export interface ImportDegradation {
+  /** 降级码（五值闭集，语义见各行） */
+  code:
+    | 'dropped_redundant'    // L1：内容已由 tool 通道保留的运行时注入（background_* / subagent_* 族），丢弃无损
+    | 'dropped_transient'    // L2：无对话语义的瞬态/注入形态（todo 提醒 / system_reminder / timeline 等），非 L1/L3/L4 的丢弃类全量归入
+    | 'truncated_output'     // L3：tool part serialization.truncated=true，保留截断版 output（保真损失）
+    | 'compaction_unlinked'  // L3：compact_summary 与 compaction part 关联断裂（summaryMessageId 悬空），退 custom entry（保真损失）
+    | 'unclassified'         // L4：semantics.kind / source / origin 超出闭集，丢弃 + 独立告警（G3 未知不静默）
+  /** zcode semantics.kind 原值（L4 未分类时必有；L1/L2 聚合档按 (kind, source) 维度携带） */
+  kind?: string
+  /** metadata.source / source 原值（同上，L4 未分类时必有） */
+  source?: string
+  /** 该 (code, kind, source) 维度的聚合计数 */
+  count: number
+  /**
+   * 定位样本（仅 `unclassified` 携带，便于用户反馈/维护者定位）：
+   * messageId + 文本前 80 字。
+   */
+  sample?: {
+    messageId: string
+    preview: string
+  }
+  /** zcode schema_migration.app_version（回归定位锚，按可得性携带） */
+  zcodeSchemaVersion?: string
+}
+
+/**
+ * 降级摘要（`ImportReply.degradationSummary` 的载荷，toast 计数/sample 的最小
+ * 契约通道，设计 §7.4）：仅在 warning 含 conversion_* 时携带；全量明细（含 L3
+ * 截断明细）走 runtime 日志不入 wire。不设 truncatedCount——L3（截断保留）在
+ * toast 上无对应分句，避免契约面搭车无消费字段。
+ */
+export interface ImportDegradationSummary {
+  /** L1+L2 聚合（dropped_redundant + dropped_transient 的 count 总和）——toast 汇总分句数据源 */
+  droppedCount: number
+  /** L4 聚合；本次导入无 unclassified 降级时为 null */
+  unclassified: {
+    count: number
+    /** 首条 unclassified 的定位样本 */
+    firstSample?: ImportDegradation['sample']
+  } | null
+}
 
 /** 候选列表请求（`session.importCandidates` payload） */
 export interface ImportCandidatesRequest {
@@ -149,6 +206,12 @@ export interface ImportReply {
   targetPath: string
   /** 可选警示（字面量语义见 ImportWarning 块注释）：文件已落地不回滚，renderer 降级 toast */
   warning?: ImportWarning
+  /**
+   * 降级摘要（载荷见 ImportDegradationSummary）：仅 warning 含 conversion_* 时携带
+   * （sidecar_failed 优先胜出时不携带——该轮降级计数只走 runtime 日志，§7.4 已接受）；
+   * 全量明细走 runtime 日志不入 wire。
+   */
+  degradationSummary?: ImportDegradationSummary
 }
 
 /**

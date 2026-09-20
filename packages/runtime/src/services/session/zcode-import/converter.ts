@@ -17,6 +17,8 @@
  * convertPiHistory → replayEntries(applyEntry)）重放——converter.test 以此为可证伪断言。
  */
 
+import type { ImportDegradation } from '@taiji/shared'
+
 import { ImportServiceError } from '../import-source.js'
 import type { ZcodeReadonlyDb, ZcodeTranscriptMessageRow } from './sqlite-access.js'
 
@@ -39,10 +41,33 @@ export interface ZcodeMessageInput {
   parts: Array<Record<string, unknown>>
 }
 
-/** 转换产物：JSONL 全文（每行含尾随 '\n'）+ 保真度降级明细（D6/D7）。 */
+/** 转换产物：JSONL 全文（每行含尾随 '\n'）+ 保真度降级明细（D6/D7，结构化记录）。 */
 export interface ZcodeConversionOutput {
   content: string
-  degradations: string[]
+  degradations: ImportDegradation[]
+}
+
+// ── [U2 桥接] 结构化降级登记（D4 类型收窄的临时适配，U3 行为重构时重写此段）────────────
+// 既有字符串 push 点原样包成 ImportDegradation：文本存 sample.preview（截 80 字，保
+// 测试/日志可读），登记点消息 id 存 sample.messageId；kind/source/zcodeSchemaVersion
+// 暂缺省（U3 按分类器结果补齐）。code 暂归规则：现行登记点全部是丢弃/形态异常类 →
+// 'dropped_transient'（truncated_output / compaction_unlinked / unclassified 三档的
+// 登记点 U3/U4 引入分类器与 compaction 合并时才出现）。每次登记独立一条 count=1，
+// 聚合归编排层（import-service）；U3 重构为 (kind, source) 聚合计数后本桥接删除。
+const DEGRADATION_PREVIEW_MAX = 80
+
+function pushDegradation(
+  degradations: ImportDegradation[],
+  text: string,
+  messageId?: string,
+): void {
+  degradations.push({
+    code: 'dropped_transient',
+    count: 1,
+    ...(messageId !== undefined && {
+      sample: { messageId, preview: text.slice(0, DEGRADATION_PREVIEW_MAX) },
+    }),
+  })
 }
 
 // ── T3b 工具名映射（§3.4）：zcode 首字母大写 → taiji 渲染判定层的全小写匹配域 ──────────
@@ -138,7 +163,7 @@ function newSegment(): AssistantSegment {
 function usageFromStepFinish(
   partData: Record<string, unknown>,
   msgId: string,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): Record<string, unknown> | undefined {
   const tokens = partData.tokens
   if (!isRecord(tokens)) return undefined
@@ -160,7 +185,7 @@ function usageFromStepFinish(
     ...(costTotal !== undefined && { cost: { total: costTotal } }),
   }
   if (Object.keys(usage).length === 0) {
-    degradations.push(`step-finish tokens/cost 分量全部不可解，整条 usage 不写：message=${msgId}`)
+    pushDegradation(degradations, `step-finish tokens/cost 分量全部不可解，整条 usage 不写：message=${msgId}`, msgId)
     return undefined
   }
   return usage
@@ -180,7 +205,7 @@ function toolResultShape(
   state: Record<string, unknown>,
   partData: Record<string, unknown>,
   msgId: string,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): { content: Array<Record<string, unknown>>; details?: Record<string, unknown>; isError: boolean } {
   const status = state.status
   const output = state.output
@@ -202,8 +227,10 @@ function toolResultShape(
   if (isRecord(output)) {
     return { content: [], details: output, isError: false }
   }
-  degradations.push(
+  pushDegradation(
+    degradations,
     `tool「${String(partData.tool)}」output 形态超出已验证域（typeof ${typeof output}），跳过输出：message=${msgId}`,
+    msgId,
   )
   return { content: [], isError: false }
 }
@@ -222,7 +249,7 @@ export function buildZcodeSessionFile(
   title: string,
   header: ZcodeImportHeader,
 ): ZcodeConversionOutput {
-  const degradations: string[] = []
+  const degradations: ImportDegradation[] = []
   const lines: string[] = []
 
   const chain = new EntryChain()
@@ -242,7 +269,7 @@ export function buildZcodeSessionFile(
   const headerMs = Date.parse(header.timestamp)
   const fallbackMs = Number.isFinite(headerMs) ? headerMs : undefined
   if (fallbackMs === undefined) {
-    degradations.push(`header.timestamp 不可解（${header.timestamp}），时间戳退原串/缺省：不伪造 1970`)
+    pushDegradation(degradations, `header.timestamp 不可解（${header.timestamp}），时间戳退原串/缺省：不伪造 1970`)
   }
 
   for (const msg of messages) {
@@ -262,7 +289,7 @@ export function buildZcodeSessionFile(
       continue
     }
     // 前向兼容：zcode 未来新增 role 不炸导入（§3.4 未知 type 同款语义）
-    degradations.push(`未知 message role「${String(role)}」跳过：message=${msg.id}`)
+    pushDegradation(degradations, `未知 message role「${String(role)}」跳过：message=${msg.id}`, msg.id)
   }
 
   return { content: lines.map((l) => `${l}\n`).join(''), degradations }
@@ -274,7 +301,7 @@ function convertUserMessage(
   createdMs: number | undefined,
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): void {
   const content: Array<Record<string, unknown>> = []
   for (const part of msg.parts) {
@@ -285,7 +312,7 @@ function convertUserMessage(
     }
     if (type === 'file') {
       // D6：zcode-artifact:// 私有协议引用，太极无法解析（artifact 二进制在 zcode 私有存储）
-      degradations.push(`user 消息 file part 丢弃（zcode-artifact 引用无法搬运，D6）：message=${msg.id}`)
+      pushDegradation(degradations, `user 消息 file part 丢弃（zcode-artifact 引用无法搬运，D6）：message=${msg.id}`, msg.id)
       continue
     }
     handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations)
@@ -306,7 +333,7 @@ function convertAssistantMessage(
   createdMs: number | undefined,
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): void {
   const providerId = typeof data.providerId === 'string' ? data.providerId : undefined
   const modelId = typeof data.modelId === 'string' ? data.modelId : undefined
@@ -358,7 +385,7 @@ function convertAssistantMessage(
       if (segment.startMs === undefined) segment.startMs = partStartTime(part)
       const thinking = part.text
       if (typeof thinking !== 'string') {
-        degradations.push(`reasoning part 文本形态异常（${typeof thinking}）跳过：message=${msg.id}`)
+        pushDegradation(degradations, `reasoning part 文本形态异常（${typeof thinking}）跳过：message=${msg.id}`, msg.id)
         continue
       }
       segment.content.push({ type: 'thinking', thinking })
@@ -379,21 +406,23 @@ function convertToolPart(
   part: Record<string, unknown>,
   msg: ZcodeMessageInput,
   segment: AssistantSegment,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): void {
   const callId = part.callID
   const toolName = part.tool
   const state = part.state
   if (typeof callId !== 'string' || typeof toolName !== 'string' || !isRecord(state)) {
-    degradations.push(`tool part 结构异常（callID/tool/state 形态）整对丢弃：message=${msg.id}`)
+    pushDegradation(degradations, `tool part 结构异常（callID/tool/state 形态）整对丢弃：message=${msg.id}`, msg.id)
     return
   }
   const status = state.status
   if (status !== 'completed' && status !== 'error') {
     // running/pending/未知 status：整对丢弃（不产 toolCall 也不产 toolResult）——dangling
     // toolCall 会破坏续聊请求形态（F5/F7）；未知 status 无从构造结果，同款处理
-    degradations.push(
+    pushDegradation(
+      degradations,
       `未完成 tool（status=${String(status)}）整对丢弃（D7，防 dangling toolCall）：callID=${callId} tool=${toolName}`,
+      msg.id,
     )
     return
   }
@@ -404,8 +433,10 @@ function convertToolPart(
   } else if (isRecord(state.input)) {
     args = state.input
   } else {
-    degradations.push(
+    pushDegradation(
+      degradations,
       `tool「${toolName}」input 形态超出已验证域（typeof ${typeof state.input}），按空入参转换：callID=${callId}`,
+      msg.id,
     )
   }
   const mappedName = mapToolName(toolName)
@@ -433,7 +464,7 @@ function handleNonTextPart(
   createdMs: number | undefined,
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): void {
   const type = part.type
   if (type === 'compaction') {
@@ -449,7 +480,7 @@ function handleNonTextPart(
   if (type === 'timeline') {
     return // 纯 UI 事件，无对话语义（D6）
   }
-  degradations.push(`未知 part type「${String(type)}」跳过（前向兼容）：message=${msg.id}`)
+  pushDegradation(degradations, `未知 part type「${String(type)}」跳过（前向兼容）：message=${msg.id}`, msg.id)
 }
 
 /** text part → content text part（文本非 string 形态登记降级并跳过）。 */
@@ -457,11 +488,11 @@ function pushTextPart(
   part: Record<string, unknown>,
   content: Array<Record<string, unknown>>,
   msgId: string,
-  degradations: string[],
+  degradations: ImportDegradation[],
 ): void {
   const text = part.text
   if (typeof text !== 'string') {
-    degradations.push(`text part 文本形态异常（${typeof text}）跳过：message=${msgId}`)
+    pushDegradation(degradations, `text part 文本形态异常（${typeof text}）跳过：message=${msgId}`, msgId)
     return
   }
   content.push({ type: 'text', text })

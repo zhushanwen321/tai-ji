@@ -303,11 +303,15 @@ describe('§3.4 映射全表（厨房水槽行集 → 产物行）', () => {
   })
 
   it('D6/D7/未知 part：degradations 登记（file 丢弃 / running tool 整对丢弃 / 未知 type 跳过）', () => {
+    // [U2 暂适配] 结构化断言（U3 整体重写时按 L1/L2 分档扩充）：现行登记点全部
+    // dropped_transient，按 sample.messageId / sample.preview 保持原字符串断言语义
     expect(out.degradations).toHaveLength(3)
-    expect(out.degradations[0]).toContain('file part')
-    expect(out.degradations[1]).toContain('status=running')
-    expect(out.degradations[1]).toContain('call_5')
-    expect(out.degradations[2]).toContain('hologram')
+    expect(out.degradations.every((d) => d.code === 'dropped_transient')).toBe(true)
+    expect(out.degradations.map((d) => d.sample?.messageId)).toEqual(['m1', 'm2', 'm2'])
+    expect(out.degradations[0]?.sample?.preview).toContain('file part')
+    expect(out.degradations[1]?.sample?.preview).toContain('status=running')
+    expect(out.degradations[1]?.sample?.preview).toContain('call_5')
+    expect(out.degradations[2]?.sample?.preview).toContain('hologram')
     // D7 整对丢弃：产物中无 call_5 的 toolCall 与 toolResult
     expect(out.content).not.toContain('"call_5"')
   })
@@ -398,7 +402,7 @@ describe('切段与 T3c 边界', () => {
     const { entries } = parseOutput(out)
     const a = entries[1] as { message: Record<string, unknown> }
     expect(a.message).not.toHaveProperty('usage')
-    expect(out.degradations.some((d) => d.includes('整条 usage 不写'))).toBe(true)
+    expect(out.degradations.some((d) => d.sample?.preview.includes('整条 usage 不写'))).toBe(true)
   })
 
   it('T4 object 形态：completed+object output → details（content 留空数组）——前向防御分支', () => {
@@ -427,14 +431,14 @@ describe('切段与 T3c 边界', () => {
     const { entries } = parseOutput(out)
     const tr = entries[2] as { message: { content: unknown[] } }
     expect(tr.message.content).toEqual([])
-    expect(out.degradations.join('\n')).toContain('typeof number')
+    expect(out.degradations.some((d) => d.sample?.preview.includes('typeof number'))).toBe(true)
   })
 
   it('未知 message role → 跳过消息 + 降级登记（前向兼容不炸导入）', () => {
     const msgs = [{ id: 'm-x', data: { role: 'system', time: { created: 1 } }, parts: [textPart('x')] }]
     const out = buildZcodeSessionFile(msgs, 'T', HEADER)
     expect(parseOutput(out).entries).toHaveLength(1) // 仅 session_info
-    expect(out.degradations[0]).toContain('system')
+    expect(out.degradations[0]?.sample?.preview).toContain('system')
   })
 
   it('message.data.time.created 缺失 → 回落 header.timestamp（确定性兜底，无 Date.now）', () => {
@@ -458,8 +462,12 @@ describe('切段与 T3c 边界', () => {
     expect(user.timestamp).toBe('not-a-timestamp')
     // message.timestamp（ms）缺省键——undefined ≠ 0（0 = 1970 假测量值）
     expect(user.message).not.toHaveProperty('timestamp')
-    // 降级登记一次（显形）
-    expect(out.degradations.some((d) => d.includes('header.timestamp 不可解'))).toBe(true)
+    // 降级登记一次（显形）。[U2 暂适配] session 级登记无消息 id → 桥接形态为单条
+    // dropped_transient 且无 sample（U3 重构后按 code 分档断言）；本场景仅此一条降级，
+    // 长度 + 形态即唯一指认「header.timestamp 不可解」这条登记
+    expect(out.degradations).toHaveLength(1)
+    expect(out.degradations[0]?.code).toBe('dropped_transient')
+    expect(out.degradations[0]?.sample).toBeUndefined()
     // assistant 段有自身 time 锚（2500）时不受 header 不可解影响——段级时间仍真实
     const assistant = entries[2] as { timestamp: string; message: { timestamp: number } }
     expect(assistant.timestamp).toBe(new Date(2500).toISOString())
@@ -491,10 +499,11 @@ describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning
     expect(a.message.content).toEqual([{ type: 'text', text: 'before' }])
     expect(out.content).not.toContain('"call_a"')
     expect(out.content).not.toContain('"call_b"')
-    const structDegradations = out.degradations.filter((d) => d.includes('tool part 结构异常'))
+    const structDegradations = out.degradations.filter((d) => d.sample?.preview.includes('tool part 结构异常'))
     expect(structDegradations).toHaveLength(4)
     for (const d of structDegradations) {
-      expect(d).toContain('（callID/tool/state 形态）整对丢弃：message=m-asst')
+      expect(d.sample?.preview).toContain('（callID/tool/state 形态）整对丢弃：message=m-asst')
+      expect(d.sample?.messageId).toBe('m-asst')
     }
   })
 
@@ -513,8 +522,8 @@ describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning
     const a = entries[1] as { message: { content: Array<Record<string, unknown>> } }
     // 异常 text/reasoning 段被跳过，仅保留合法 text part
     expect(a.message.content).toEqual([{ type: 'text', text: 'kept' }])
-    expect(out.degradations).toContain('text part 文本形态异常（number）跳过：message=m-asst')
-    expect(out.degradations).toContain('reasoning part 文本形态异常（number）跳过：message=m-asst')
+    expect(out.degradations.some((d) => d.sample?.preview.includes('text part 文本形态异常（number）'))).toBe(true)
+    expect(out.degradations.some((d) => d.sample?.preview.includes('reasoning part 文本形态异常（number）'))).toBe(true)
   })
 })
 

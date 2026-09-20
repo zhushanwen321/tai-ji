@@ -147,7 +147,11 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 有 semantics：timeline_event → timelineOnly；real_user ∧ 非synthetic ∧ 非model-only → realUserInput；
   assistant_response ∧ ui+transcript 均 visible → visibleAssistant；providerVisibility visible → providerContextOnly；
   fork_notice → timelineOnly；agent_runtime ∨ ui/transcript hidden → hiddenSynthetic
-无 semantics 逐级兜底：model-only → providerContextOnly；timeline 形态 → timelineOnly；
+无 semantics 逐级兜底：model-only → providerContextOnly；
+  timeline 形态（timeline part / message.source∨metadata.source==='fork' / forkContext / 带
+  timelineStatus∨summaryMessageId 的 compaction part）→ timelineOnly；
+  messageSource==='fork'（独立分支，覆盖 semantics.source / part 级 source 通道——漏掉会穿透成
+  realUserInput，即合成消息冒充用户气泡在 fork 来源复发）→ timelineOnly；
   已知 source ∨ 遗留文本特征 → providerContextOnly；synthetic → hiddenSynthetic；按 role 收口
 ```
 
@@ -162,7 +166,7 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 - **`compact_summary` 消息**：`role:'user'`，`data.summary = {title, body}`（全库 312/312 有 `body`——**这是真实摘要，不是伪造**，I7 的「禁伪造」不适用于它），其 `text` part 带 `synthetic:true` 而**消息级 `synthetic` 缺省**。
 - **关联键 `compaction.summaryMessageId`** → 指向 `compact_summary` 消息的 `messageId`（实测 4 条 compaction part 中 2 条携带，精确命中）。比 `semantics.kind` 更可靠——旧版数据没有 kind，但有这个链接。
 - 关联判据三取一（优先序降序）：① `summaryMessageId` 指向的消息；② `semantics.kind === 'compact_summary'`；③ user 消息含**无 `metadata.timelineStatus`** 的 compaction part（zcode 自家 `isZCodeCompactSummaryMessage` 判据）。
-- **pi 落点 = `compaction` entry**：`summary ← data.summary.body`、`tokensBefore ← part.preCompactTokenCount`、`details ← compaction part` 原样、`firstKeptEntryId ← tail_start_id` 经 messageId→entryId 映射解析。
+- **pi 落点 = `compaction` entry**：`summary ← data.summary.body`、`tokensBefore ← part.preCompactTokenCount`、`details ← compaction part` 原样、`firstKeptEntryId ← tail_start_id` 经 messageId→entryId 映射解析。**`tail_start_id` 是遗留字段警示**：asar 现行 schema（`.strict()`，仅 `auto/reason/summaryMessageId/metadata`）与代码零引用，磁盘 791/986 条存量携带——新数据是否继续写入无现行代码证据，实施时按设计文档 §11-1 做字段考古选定最终锚（失效由下述降级路径覆盖）。
 - **`firstKeptEntryId` 是不可悬空的运行时断言**（pi 0.84.4 `buildContextEntries` 实测）：悬空/空串/缺省 → 压缩点之前的全部 entry 被静默丢弃。不可解时按「① tail_start_id 映射 → ② 紧邻前驱已发射 entry id（保留全部历史，冗余但无损）→ ③ 首条 entry 取自身 id」降级；三路都走不通才退化为 `custom` entry + 降级登记。
 
 ## 7. 测试要求
@@ -178,5 +182,5 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 
 - 本文件与实现同步演进：SPI/不变量变更须同 commit 更新本文与 `docs/CONTEXT.md` 术语。
 - 源格式漂移（如 zcode schema 升级）：新探明的事实回填 §6；reader/转换器按结构化错误暴露漂移（`import_invalid_session` + 版本信息），不静默吞。
-- **枚举漂移的构建期拦截**：§6.1 的闭集（kind 12 / origin 5 / source 12 / metadata.source 17 / part type 12）在 `zcode-import/semantics.ts` 落为冻结常量，由 parity 测试把期望值逐段写死（同 `host-db-suffix-parity.test.ts` 纪律：SSOT 改错即红）。zcode 升级新增枚举值时**测试先红**，人再补映射与降级档位——不允许运行时静默按 `role` 兜底（那正是合成消息冒充用户消息的形态）。
+- **枚举漂移的构建期拦截**：§6.1 的闭集中有判定职责消费方的四族（kind 12 / origin 5 / source 12 / metadata.source 17）在 `zcode-import/semantics.ts` 落为冻结常量，由 parity 测试把期望值逐段写死（同 `host-db-suffix-parity.test.ts` 纪律：SSOT 改错即红）；part type 12 的登记职责在本文件 §6.1 速查层（未知 part type 的前向兼容由转换器既有「跳过 + 降级登记」覆盖，不设无消费方常量）。zcode 升级新增枚举值时**测试先红**，人再补映射与降级档位——不允许运行时静默按 `role` 兜底（那正是合成消息冒充用户消息的形态）。
 - 符号删除/改名时跑 `node scripts/check-doc-symbol-drift.mjs`（pre-commit 按 docs/architecture/ 路径触发）。
