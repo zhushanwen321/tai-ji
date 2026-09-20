@@ -90,6 +90,8 @@ vi.mock('@/composables/useExtensionUI', () => ({
     cancel: vi.fn(),
   }),
   formFilter: () => true,
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  planReviewFilter: () => true,
 }))
 
 const MessageStreamStub = defineComponent({

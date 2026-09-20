@@ -325,15 +325,20 @@ describe('评论草稿：per-session 隔离与清理链', () => {
   it('cleanup 链：triggerSessionCleanups(A) → A 分区重置（草稿/view 清空），B 保留', async () => {
     const host = mountHost('A')
     await settle()
-    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
+    // 草稿先于 view 建立会被 §3.5 enter 翻转清兜底清掉（null→active = 新审阅轮；本文件
+    // 首拉是受控 deferred、用例不 resolve → 分区 view 恒 null），真机时序是审阅态（view
+    // 就绪）下才产生草稿——先帧后草稿对齐真机序列（参照 plan-store.test.ts 同类用例）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC] }))
+    await settle()
+    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
     await settle()
     expect(host.plan.drafts.value.length).toBe(1)
 
     host.sidRef.value = 'B'
     await settle()
-    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     dispatchPlanState('B', planStateOf('B', { docs: [DOC], reviewState: 'awaiting' }))
+    await settle()
+    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     await settle()
 
     // useSidebar.deleteSession 销毁 session A 的编排入口
