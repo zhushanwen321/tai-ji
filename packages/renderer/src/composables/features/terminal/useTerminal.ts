@@ -52,6 +52,8 @@ import * as events from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { terminalApi } from '@taiji/core/transport/api/domains/terminal'
+import { useToast } from '@/composables/useToast'
+import i18n from '@/i18n'
 
 /** 命令式输出 buffer（D-6.2）：append-only 非响应式 chunk 数组 + 单调版本号。 */
 export interface TerminalBuffer {
@@ -196,6 +198,12 @@ function isTerminalAliveMsg(msg: ServerMessage): msg is ServerMessage<'terminal.
 function isTerminalExitMsg(msg: ServerMessage): msg is ServerMessage<'terminal.exit'> {
   return msg.type === 'terminal.exit'
 }
+function isTerminalWriteFailedMsg(msg: ServerMessage): msg is ServerMessage<'terminal.writeFailed'> {
+  return msg.type === 'terminal.writeFailed'
+}
+
+/** i18n.global.t 的类型窄化 cast（先例：useConnection.ts 同款）。 */
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
 
 /**
  * 建立 sid 的模块级 terminal.* 订阅（幂等）。时机：spawn（RPC 前）与 attach——
@@ -218,6 +226,12 @@ function ensureTerminalSubscription(sid: string): void {
         s.ptyAlive = false
       })
       useTerminalWriteQueueStore().markExited(sid)
+    } else if (isTerminalWriteFailedMsg(msg)) {
+      // RT-8#10/RD-5#4：runtime PTY write 失败（进程已死/管道关闭）——输入字节已丢，
+      // toast 告知用户（runtime 每 PTY 生命周期至多发一次，无刷屏面）。与 write-queue
+      // store 的 writeRpcFailed 分层：那边管 RPC 通道故障，这边管 PTY 管道故障。
+      console.warn(`[terminal] write 失败（输入可能丢失）: sid=${sid}`, msg.payload.message)
+      useToast().warning(t('panel.terminal.writeFailed', { message: msg.payload.message }))
     }
   })
   subscriptionUnsubs.set(sid, unsub)
@@ -415,7 +429,16 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
       s.cols = cols
       s.rows = rows
     })
-    await terminalApi.spawn({ sessionId: sid, cwd, cols, rows })
+    // RD-5#2：spawn 是 PTY 起不起来的权威点——await 无 catch 时失败既无日志也不显形
+    // （调用方 void 丢弃 → 裸 reject + 用户看到空白终端）。此处留痕后 rethrow：反馈
+    // 职责归调用方（TerminalView 渲染 inline 错误条 + 重试，复用 useFileTree error 态范式），
+    // 本层不吞（吞了调用方无从分辨成功/失败）。
+    try {
+      await terminalApi.spawn({ sessionId: sid, cwd, cols, rows })
+    } catch (e: unknown) {
+      console.warn(`[terminal] spawn RPC 失败: sid=${sid}`, e)
+      throw e
+    }
     // 注：ptyAlive 由 terminal.alive 广播置位（异步），这里不等
   }
 
@@ -423,7 +446,11 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   function writeToTerminal(data: string): void {
     const sid = sessionIdRef.value
     if (!sid) return
-    void terminalApi.write(sid, data)
+    // RD-5#4：fire-and-forget 必须留痕——击键流不 toast（PTY 死亡时 runtime 会广播
+    // terminal.writeFailed 走上面的 toast 显示链），这里只 warn 保证 unhandled 不裸奔
+    terminalApi.write(sid, data).catch((e: unknown) => {
+      console.warn(`[terminal] write RPC 失败: sid=${sid}`, e)
+    })
   }
 
   /** 调整尺寸（xterm fit addon 触发）。 */
@@ -434,14 +461,18 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
       s.cols = cols
       s.rows = rows
     })
-    void terminalApi.resize(sid, cols, rows)
+    terminalApi.resize(sid, cols, rows).catch((e: unknown) => {
+      console.warn(`[terminal] resize RPC 失败: sid=${sid} cols=${cols} rows=${rows}`, e)
+    })
   }
 
   /** kill PTY（工具栏 kill 按钮）。 */
   function killTerminal(): void {
     const sid = sessionIdRef.value
     if (!sid) return
-    void terminalApi.kill(sid)
+    terminalApi.kill(sid).catch((e: unknown) => {
+      console.warn(`[terminal] kill RPC 失败: sid=${sid}`, e)
+    })
   }
 
   /** 清屏（TerminalView clear 按钮）：重置当前 sid 分区 buffer + 通知监听器（Fix-3）。 */
@@ -458,7 +489,9 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     // 幂等补订阅：切回 mount 时若 PTY 早已 alive（分区 ptyAlive=true），
     // 订阅可能已在旧实例清理外存活（模块级）——此处确保窗口覆盖
     ensureTerminalSubscription(sid)
-    void terminalApi.attach(sid)
+    terminalApi.attach(sid).catch((e: unknown) => {
+      console.warn(`[terminal] attach RPC 失败: sid=${sid}`, e)
+    })
   }
 
   return {

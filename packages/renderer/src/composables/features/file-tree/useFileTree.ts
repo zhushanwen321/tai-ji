@@ -92,9 +92,16 @@ export function useFileTree() {
     store.setNodeState(sessionId, '', { status: 'loaded' })
 
     // overlay：先到后挂载（T2.6）——file.tree 先到则树渲染，overlay 后到更新；反之 overlay 缓存等树
-    if (overlayResult.status === 'fulfilled' && overlayResult.value.isRepo) {
+    if (overlayResult.status === 'fulfilled') {
       // T2.7 git.status 失败 → overlay 空，树仍渲染（allSettled fulfilled 但 isRepo=false 时跳过）
-      store.setGitOverlay(sessionId, overlayResult.value.files)
+      if (overlayResult.value.isRepo) {
+        store.setGitOverlay(sessionId, overlayResult.value.files)
+      }
+    } else {
+      // RD-5#3：git.status rejected（非仓库 / 越界 / 超时 / 断连）——降级为无 overlay（角标
+      // 不显示）本身正确，但此前该分支不进任何语句、零留痕，「角标缺失」与「git 挂了」
+      // 不可分（红线 1）。树仍渲染，用户可开 git 抽屉手动刷新恢复。
+      console.warn(`[fileTree] git.status overlay 拉取失败，角标降级为不显示: sid=${sessionId}`, overlayResult.reason)
     }
   }
 
