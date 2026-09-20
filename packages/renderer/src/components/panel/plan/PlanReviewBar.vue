@@ -6,12 +6,17 @@
     isActive=false 整体不渲染（分支④）——退出后挂起请求缓存残留（abort 不发撤回帧，已接受
     代价）由本门兜住不外显。挂载位 = PlanModeBar 行内右区（原主面板底部独立行已随
     PlanModeBar 合并拆除；hairline 由宿主行 border-b 承担，本组件只做行内内容布局）。
+    行内布局契约（F-R2-2 窄窗反重叠）：右区 = grow + flex-wrap + min-w-0（basis 走
+    max-content）——窄窗一行放不下时右区整体换行到宿主行第二行（行内再 flex-wrap 兜底
+    极窄窗），左区 shrink-0 优先保全。禁止改回 flex-1：basis 0% 使换行判定的假想主尺寸
+    恒 0、宿主行 flex-wrap 永不触发，min-w-0 收缩后 justify-end 内容左溢覆盖左区
+    （r2-s10 验收事故形态：右区按键矩形覆盖左区文字/退出，pointer 拦截三键全不可点）。
     props/emits 无位置耦合，保留独立可测形态（exit 事件归宿主退出确认 Popover）。
   -->
   <div
     v-if="mode"
     data-testid="plan-review-bar"
-    class="flex min-w-0 flex-1 items-center justify-end gap-2"
+    class="flex min-w-0 grow flex-wrap items-center justify-end gap-2"
   >
     <!-- 分支① 全功能三键（isActive 且有挂起请求；正常时序 reviewState=awaiting 同真） -->
     <template v-if="mode === 'ready'">

@@ -16,6 +16,8 @@
  *   且草稿清空；取消不发；degraded 右区退出按钮（PlanReviewBar exit 事件）复用本确认层
  * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
  * - 右区四分支：ready 三键 / revising / degraded / 隐藏（仅左区）
+ * - 窄窗换行策略（F-R2-2）：右区 grow+flex-wrap 反重叠契约 + 左区退出 shrink-0
+ *   （jsdom 无布局，class 断言守卫策略不被改回 flex-1 收缩形态）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
  * - 挂载位：Panel 内 plan-mode-bar 行位于 .composer-band 之前（composer 正上方）
@@ -391,6 +393,28 @@ describe('右区四分支（PlanReviewBar 情境渲染，宿主行内）', () =>
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
+  })
+})
+
+describe('窄窗换行策略（F-R2-2 反重叠回归守卫）', () => {
+  it('右区 = grow + flex-wrap（basis max-content）：窄窗放不下整体换行而非收缩覆盖左区', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+
+    // 宿主行 flex-wrap：右区一行放不下时下移第二行。jsdom 无布局，断言通道 = 策略类
+    // （换行触发链：右区 basis=max-content → 假想主尺寸为真实内容宽 → 宿主行换行判定成立）
+    expect(wrapper.find('[data-testid="plan-mode-bar"]').classes()).toContain('flex-wrap')
+    // 右区策略类：grow（basis 走 max-content）+ flex-wrap（自身行内再折，兜极窄窗）。
+    // 回归形态 = flex-1（basis 0% → 假想主尺寸恒 0 → 宿主行换行永不触发）+ min-w-0
+    // 收缩后 justify-end 内容左溢覆盖左区（r2-s10 验收事故：右区按键矩形与左区文字/
+    // 退出交叉，pointer 拦截请求解释/提交修订/退出全不可点）
+    const reviewBar = wrapper.find('[data-testid="plan-review-bar"]')
+    expect(reviewBar.classes()).toContain('grow')
+    expect(reviewBar.classes()).toContain('flex-wrap')
+    expect(reviewBar.classes()).not.toContain('flex-1')
+    // 左区优先保全：退出按钮 shrink-0（任何宽度下不收缩，pointer 可达）
+    expect(wrapper.find('[data-testid="plan-mode-bar-exit"]').classes()).toContain('shrink-0')
   })
 })
 

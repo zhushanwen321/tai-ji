@@ -11,6 +11,9 @@
     条 setup 内 usePlanState → syncFocus）随组件迁移到本组件（承接清单②）。
     视觉 = text-xs / text-neutral-dim / 无填充背景 / border-b hairline，比内容安静。
   -->
+  <!-- 行级 flex-wrap 承载「一行两区」窄窗契约（F-R2-2）：右区（PlanReviewBar，basis =
+       max-content）一行放不下时整体换行到第二行，左区 shrink-0 优先保全——删 wrap 会
+       退回右区收缩、justify-end 内容左溢覆盖左区的事故形态（策略实装见 PlanReviewBar）-->
   <div
     v-if="isActive"
     data-testid="plan-mode-bar"
