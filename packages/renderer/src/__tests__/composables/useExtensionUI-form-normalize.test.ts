@@ -1,17 +1,17 @@
 /**
- * useExtensionUI 统一表单判定矩阵 + legacy 归一双路径单测（ui-presentation-protocol u4，
- * 设计 D5/D7；取代旧 useExtensionUI-schedule-create.test.ts 的分流面职责）。
+ * useExtensionUI 统一表单判定矩阵 + view-ready 帧双路径消费单测（ui-presentation-protocol
+ * u4 / MF-1-5 归一上移后形态）。
  *
  * 锁定：
- * - formFilter 判定矩阵：只认 form 键（新 form 帧原生携带 / legacy 帧经归一附加；
- *   裸 askUser / scheduleCreate / 无标记均不命中——判定面收敛 G2）
- * - normalizeFormRequest 纯函数矩阵：type 推断（有 options → choice（multiSelect→multi）、
- *   无 options → text）、legacy 键保留、幂等透传
- * - legacy 双路径（D7 挂点①②）：
- *   · bus 路径——legacy scheduler 帧（scheduleCreate + draft 直挂）经 bus 归一入 store，
- *     respond 扁平 FormResult JSON 回包；
- *   · pending 路径——legacy askUser 帧（runtime {...r,...r.payload} 解包无 form 键）
- *     经挂点②归一后放行（respawn / 切回 session 恢复路径，漏挂则 pi select 永久挂起）
+ * - formFilter 判定矩阵：只认 form 键（全部表单族帧由 runtime event-adapter marker 分支
+ *   统一产出 form:true；裸 askUser / scheduleCreate / 无标记均不命中——判定面收敛 G2）
+ * - C4 契约（归一上移 runtime 后）：本层只消费 view-ready 帧——裸 legacy 键帧（假设性
+ *   旧 runtime 产物）不放行入 store
+ * - 双路径消费（原 D7 挂点①②位置，归一已删只留入队）：
+ *   · bus 路径——runtime 产出的 scheduleCreate 源帧（form + scheduleCreate + draft 直挂）
+ *     入 store，respond 扁平 FormResult JSON 回包；
+ *   · pending 路径——runtime {...r,...r.payload} 解包的 view-ready 帧（form:true 原生
+ *     携带）直接入 store（respawn / 切回 session 恢复路径）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useExtensionUI-form-normalize.test.ts
  */
@@ -41,13 +41,12 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 import {
   useExtensionUI,
   formFilter,
-  normalizeFormRequest,
   __resetExtensionBusSubscriptionForTesting,
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
-import type { ScheduleDraft, FormQuestion } from '@zhushanwen/extension-protocol'
+import type { ScheduleDraft } from '@zhushanwen/extension-protocol'
 
 const draft: ScheduleDraft = {
   kind: 'recurring',
@@ -57,8 +56,36 @@ const draft: ScheduleDraft = {
   currentModel: 'm-1',
 }
 
-/** legacy askUser 帧原始形状（ASK_USER_MARKER 广播；无 form 键） */
+/** runtime event-adapter ASK_USER_MARKER 分支产出形状（legacy 归一上移后：form + type 推断映射） */
 function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    requestId,
+    pluginId: 'p',
+    kind: 'select',
+    method: 'select',
+    title: 't',
+    form: true,
+    formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
+    allowCancel: true,
+    ...overrides,
+  }
+}
+
+/** runtime event-adapter SCHEDULE_CREATE_MARKER 分支产出形状（源键保留分流应答形状） */
+function mkScheduleCreateReq(requestId: string): Record<string, unknown> {
+  return {
+    requestId,
+    pluginId: '',
+    kind: 'select',
+    method: 'select',
+    form: true,
+    scheduleCreate: true,
+    scheduleDraft: draft,
+  }
+}
+
+/** 假设性旧 runtime 产物：裸 legacy 键帧（无 form 键——归一上移后 runtime 不再产出） */
+function mkBareLegacyAskUserReq(requestId: string): Record<string, unknown> {
   return {
     requestId,
     pluginId: 'p',
@@ -67,20 +94,6 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     title: 't',
     askUser: true,
     askUserQuestions: [{ header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
-    allowCancel: true,
-    ...overrides,
-  }
-}
-
-/** legacy scheduler 帧原始形状（SCHEDULE_CREATE_MARKER 广播；无 form 键） */
-function mkScheduleCreateReq(requestId: string): Record<string, unknown> {
-  return {
-    requestId,
-    pluginId: '',
-    kind: 'select',
-    method: 'select',
-    scheduleCreate: true,
-    scheduleDraft: draft,
   }
 }
 
@@ -126,15 +139,15 @@ beforeEach(() => {
 // ── formFilter 判定矩阵（G2 收敛终态：只认 form 键）──────────────────────
 
 describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () => {
-  it('form:true → 放行；裸 askUser / scheduleCreate / 无标记 → 不命中', () => {
+  it('form:true → 放行；裸 legacy 键 / 无标记 → 不命中', () => {
     expect(formFilter(mkFormReq('r1') as never as ExtensionUIRequest)).toBe(true)
-    // 裸 legacy 键（未经归一的原始帧）不命中——formFilter 与 legacy 判定面解耦
-    expect(formFilter(mkAskUserReq('r2') as never as ExtensionUIRequest)).toBe(false)
-    expect(formFilter(mkScheduleCreateReq('r3') as never as ExtensionUIRequest)).toBe(false)
+    expect(formFilter(mkAskUserReq('r2') as never as ExtensionUIRequest)).toBe(true)
+    // 裸 legacy 键（无 form 键——归一上移后 runtime 不再产出，假设性畸形帧）不命中
+    expect(formFilter(mkBareLegacyAskUserReq('r3') as never as ExtensionUIRequest)).toBe(false)
     expect(formFilter(mkPlainSelectReq('r4') as never as ExtensionUIRequest)).toBe(false)
   })
 
-  it('legacy 帧（bus 路径）入 store 后恒带 form 键——formFilter 对 store 记录命中', () => {
+  it('表单族帧（bus 路径）入 store 后恒带 form 键——formFilter 对 store 记录命中', () => {
     const { dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask'))
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
@@ -142,67 +155,29 @@ describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () =>
     const records = useExtensionUIStore().getRequestsBySession('sessionA')
     expect(records).toHaveLength(2)
     for (const r of records) {
-      expect(formFilter(r)).toBe(true) // 归一附加 form 后统一命中
+      expect(formFilter(r)).toBe(true) // runtime 产出的 view-ready 帧原生带 form 键
     }
     dispose()
   })
 })
 
-// ── normalizeFormRequest 纯函数矩阵（D7 归一层 type 推断）─────────────────
+// ── C4 契约（归一上移 runtime：只消费 view-ready 帧）─────────────────────
 
-describe('normalizeFormRequest 归一矩阵', () => {
-  it('legacy askUser 帧 → 附加 form + formQuestions（有 options → choice，multiSelect → multi）', () => {
-    const out = normalizeFormRequest(mkAskUserReq('r1', {
-      askUserQuestions: [{ header: 'db', question: 'q?', multiSelect: true, options: [{ label: 'PG' }] }],
-    }))
-    expect(out.form).toBe(true)
-    expect(out.formQuestions).toEqual([
-      { type: 'choice', header: 'db', question: 'q?', options: [{ label: 'PG' }], multi: true },
-    ])
-    // legacy 键保留（归一是附加不是替换）
-    expect(out.askUser).toBe(true)
-  })
+describe('C4 契约（renderer 只消费 view-ready 帧）', () => {
+  it('裸 legacy 键帧（无 form 键，假设性旧 runtime 产物）→ C4 不放行不入 store', () => {
+    const { dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
-  it('legacy askUser 帧（无 options 纯文本题）→ text 推断', () => {
-    const out = normalizeFormRequest(mkAskUserReq('r2', {
-      askUserQuestions: [{ header: 'note', question: '补充说明', context: 'ctx' }],
-    }))
-    expect(out.form).toBe(true)
-    expect(out.formQuestions).toEqual([
-      { type: 'text', header: 'note', question: '补充说明', context: 'ctx' },
-    ])
-  })
+    emitBusUIRequest('sessionA', mkBareLegacyAskUserReq('r-bare'))
 
-  it('legacy askUser 帧（askUserQuestions 非数组）→ formQuestions = []（不静默丢帧，空表单可取消）', () => {
-    const out = normalizeFormRequest(mkAskUserReq('r3', { askUserQuestions: undefined }))
-    expect(out.form).toBe(true)
-    expect(out.formQuestions).toEqual([])
-  })
-
-  it('legacy scheduleCreate 帧 → 附加 form，保留 scheduleCreate/scheduleDraft 原键（draft 直挂源）', () => {
-    const out = normalizeFormRequest(mkScheduleCreateReq('r4'))
-    expect(out.form).toBe(true)
-    expect(out.scheduleCreate).toBe(true)
-    expect(out.scheduleDraft).toEqual(draft)
-    expect(out.formQuestions).toBeUndefined() // scheduler 源不走 questions，FormOverlay 按 draft 分流
-  })
-
-  it('新 form 帧（已带 form 键）→ 幂等透传不重写', () => {
-    const req = mkFormReq('r5')
-    const out = normalizeFormRequest(req)
-    expect(out).toBe(req) // 同引用返回（幂等）
-  })
-
-  it('无标记普通帧 → 原样透传（不附加 form）', () => {
-    const out = normalizeFormRequest(mkPlainSelectReq('r6'))
-    expect(out.form).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(0)
+    dispose()
   })
 })
 
-// ── legacy 双路径（D7 挂点① bus / 挂点② pending）─────────────────────────
+// ── 双路径消费（bus / pending——归一层已删，view-ready 帧直接入队）─────────
 
-describe('legacy bus 路径（挂点①：C4 判定之前归一）', () => {
-  it('legacy scheduler 帧（draft 直挂）经 bus → store 记录 form+scheduleCreate 双键、draft 保真', () => {
+describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', () => {
+  it('scheduleCreate 源帧（draft 直挂）→ store 记录 form+scheduleCreate 双键、draft 保真', () => {
     const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
@@ -218,7 +193,7 @@ describe('legacy bus 路径（挂点①：C4 判定之前归一）', () => {
     dispose()
   })
 
-  it('legacy scheduler 帧 respond → 扁平 FormResult JSON 回传（今日 ScheduleCreateOverlay 路径等价）', async () => {
+  it('scheduleCreate 源帧 respond → 扁平 FormResult JSON 回传（今日 ScheduleCreateOverlay 路径等价）', async () => {
     const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
@@ -240,7 +215,7 @@ describe('legacy bus 路径（挂点①：C4 判定之前归一）', () => {
     dispose()
   })
 
-  it('双源并存排序：askUser 与 scheduleCreate 并存 → 先到先渲染、respond 后接管', () => {
+  it('双源并存排序：askUser 源与 scheduleCreate 源并存 → 先到先渲染、respond 后接管', () => {
     const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask'))
@@ -256,11 +231,10 @@ describe('legacy bus 路径（挂点①：C4 判定之前归一）', () => {
   })
 })
 
-describe('legacy pending 路径（挂点②：addRequest 之前归一——respawn / 切回恢复）', () => {
-  it('pending 拉取返回 legacy askUser 帧（无 form 键）→ 归一后放行入 store（respawn 恢复）', async () => {
+describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧直接入队——respawn / 切回恢复）', () => {
+  it('pending 拉取返回 askUser 源帧（runtime 已归一带 form 键）→ 放行入 store（respawn 恢复）', async () => {
     // respawn 场景：pi 挂起 select → 引擎崩溃 → respawn 完成 → renderer 重新订阅拉取
-    // pending——runtime {...r,...r.payload} 解包保留原始键、无 form 键，漏挂点②则旧帧
-    // 不弹、pi select 永久挂起
+    // pending——runtime marker 分支产出的 payload 自带 form:true，pending 解包帧直接入队
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkAskUserReq('r-recover') as never as ExtensionUIRequest,
     ])
@@ -270,14 +244,11 @@ describe('legacy pending 路径（挂点②：addRequest 之前归一——respa
     await nextTick()
 
     expect(result.currentFormRequest.value?.requestId).toBe('r-recover')
-    // 归一附加 form + formQuestions 推断（choice 形态）
     expect(result.currentFormRequest.value?.form).toBe(true)
-    const questions = result.currentFormRequest.value?.formQuestions as FormQuestion[]
-    expect(questions[0]).toMatchObject({ type: 'choice', header: 'db', options: [{ label: 'Postgres' }] })
     dispose()
   })
 
-  it('pending 拉取返回 legacy scheduler 帧 → 同样归一放行（draft 保真）', async () => {
+  it('pending 拉取返回 scheduler 源帧 → 同样放行（draft 保真）', async () => {
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkScheduleCreateReq('r-sc-recover') as never as ExtensionUIRequest,
     ])
@@ -292,23 +263,9 @@ describe('legacy pending 路径（挂点②：addRequest 之前归一——respa
     dispose()
   })
 
-  it('pending 返回新 form 帧 → 归一幂等透传（无重复附加）', async () => {
-    vi.mocked(getPendingRequests).mockResolvedValue([
-      mkFormReq('r-new') as never as ExtensionUIRequest,
-    ])
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
-
-    await nextTick()
-    await nextTick()
-
-    expect(result.currentFormRequest.value?.requestId).toBe('r-new')
-    expect(result.currentFormRequest.value?.form).toBe(true)
-    dispose()
-  })
-
-  it('pending 返回无标记普通帧 → 不命中 overlay 队列（挂点②只归一不扩 C4 语义）', async () => {
+  it('pending 返回无标记普通帧 → 不命中 overlay 队列（C4 语义不扩）', async () => {
     // 原行为保真：pending 全量入 store（dialog 类供 hasPendingDialog 等消费面查询），
-    // 归一不附加 form → currentFormRequest 不命中
+    // currentFormRequest 只认 form 键
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkPlainSelectReq('r-plain') as never as ExtensionUIRequest,
     ])

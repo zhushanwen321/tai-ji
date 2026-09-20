@@ -1,7 +1,7 @@
 /**
  * scheduler 创建确认的 TUI 组件（ScheduleCreateComponent，pi-tui Component）。
  *
- * 交互形态 = .tmp/tui-schedule-demo.mjs（demo v2，多 tab 表单）转正，状态机范式
+ * 交互形态 = 多 tab 表单 demo v2 转正（demo 不入库，转正后以本文件为准），状态机范式
  * 对齐 ask-user 的 AskUserComponent（confirmed 不变式 / autoConfirmIfAnswered /
  * pendingCancel 两段取消）：
  *

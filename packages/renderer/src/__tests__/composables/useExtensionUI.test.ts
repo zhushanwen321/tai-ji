@@ -3,7 +3,7 @@
  *
  * 订阅模型改造（IF2）：onUIRequest(WS) 移除 → 模块级 refCount bus 'ui-request' 订阅。
  * 用例覆盖（T1-T10）：
- * - T1/T2: bus 事件入队（askUser=true）与非 askUser 负向分流（C4）
+ * - T1/T2: bus 事件入队（form=true，runtime marker 分支产出形状）与无标记负向分流（C4）
  * - T3: per-sessionId 分区隔离（U1 bus 版）
  * - T4: 按 requestId 精确 respond/cancel（U2 bus 版）
  * - T6: getPendingRequests 保留 RPC 路径（C3，U3/TC4 bus 版）
@@ -61,7 +61,8 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
   return { result, dispose: () => scope.stop() }
 }
 
-// ── 测试数据构造 helper（DialogRequest 形状，索引签名含 askUser 扩展字段）──
+// ── 测试数据构造 helper（DialogRequest 形状——runtime event-adapter ASK_USER_MARKER
+//    分支产出的 view-ready 帧：legacy 归一上移 runtime 后 form 键原生携带）──
 function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}) {
   return {
     requestId,
@@ -69,8 +70,8 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     kind: 'select' as const,
     method: 'select',
     title: 't',
-    askUser: true,
-    askUserQuestions: [{ header: 'q', question: 'q?', options: [] }],
+    form: true,
+    formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],
     allowCancel: true,
     ...overrides,
   }
@@ -94,7 +95,7 @@ beforeEach(() => {
 })
 
 describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
-  it('T1: bus ui-request 事件（askUser=true）入 store，字段完整（legacy 帧归一附加 form 键）', () => {
+  it('T1: bus ui-request 事件（form=true）入 store，字段完整（view-ready 帧直入）', () => {
     const { currentFormRequest } = useExtensionUI(ref('sessionA'))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r1'))
@@ -102,9 +103,9 @@ describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
     expect(currentFormRequest.value?.requestId).toBe('r1')
     expect(currentFormRequest.value?.sessionId).toBe('sessionA')
     expect(currentFormRequest.value?.method).toBe('select')
-    // legacy 键保留（D7 归一是附加不是替换）+ form 键附加（判定面统一）
-    expect(currentFormRequest.value?.askUser).toBe(true)
+    // form 键 + formQuestions（runtime marker 分支产出形状）
     expect(currentFormRequest.value?.form).toBe(true)
+    expect(currentFormRequest.value?.formQuestions).toEqual([{ type: 'text', header: 'q', question: 'q?' }])
     expect(currentFormRequest.value?.allowCancel).toBe(true)
     expect(currentFormRequest.value?.title).toBe('t')
     expect(typeof currentFormRequest.value?.receivedAt).toBe('number')
@@ -254,7 +255,7 @@ describe('useExtensionUI T8 filter 第二道闸语义', () => {
 
     emitBusUIRequest('shared', mkAskUserReq('r-ask'))
 
-    // formFilter 放行（legacy askUser 帧归一附加 form 后命中 form 键）
+    // formFilter 放行（runtime 产出的 view-ready 帧原生带 form 键）
     expect(formPanel.currentFormRequest.value?.requestId).toBe('r-ask')
 
     // store 只有一条（formFilter 实例写入）

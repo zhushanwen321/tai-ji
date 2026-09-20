@@ -9,6 +9,9 @@
  * ui 原语走包内相对导入（不经顶层 barrel，防自引用环）。三态（landing/锁定/历史）逻辑 + emit 契约（select/
  * update:presetOpen）逐字迁移（CT-4，不做功能改动）。
  *
+ * landing 态 chip 底色（设计文档 pi-launch-presets.md §5.1「颜色即状态」）：默认模式中性底（text-neutral-mid + 邻位 chip
+ * 同款 hover 反馈），非默认模式 accent 底（props.accent，判据由 renderer 侧算好传入）。
+ *
  * 三态（由 props.sessionId + props.launchPresetId 派生）：
  * 1. landing 态（sessionId=null）：Popover 可展开，列预设（PopoverListItem 项 + selected
  *    单选语义）+ 描述 + 「设为默认」Checkbox。回显 = launch-config 解析输出
@@ -41,7 +44,7 @@
  *
  * 范式参考：DirSelectPopover/BranchSelectPopover（Popover + PopoverListItem 项，selected 单选语义）。
  */
-import { computed, onMounted, ref, watch, nextTick } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Lock, SlidersHorizontal } from '@lucide/vue'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：new-task 组件经顶层 barrel
@@ -65,6 +68,24 @@ const props = defineProps<{
    * 组件只声明 + emit update，不读 flow（flow 耦合在 Landing.vue）。
    */
   presetOpen: boolean
+  /** 显式三档退化密度（§7.4：模式名 → 短名 → 仅图标）；不传 = 实测自适应（无 RO 环境如 jsdom 回落 full） */
+  density?: 'full' | 'short' | 'icon'
+  /** 模式全名文案（renderer 侧提供，ui 不耦合 i18n）；缺省回落 deps.presets 解析名（既有接入零改动） */
+  modeName?: string
+  /** 短名档文案（renderer 侧提供）；缺省 = 全名去「模式」尾缀（无尾缀保持全名，由 truncate 收窄） */
+  shortName?: string
+  /** 信任标记判据（renderer 侧按 `replace.enabled && 文案非空` 计算）；缺省 false = 不渲染标记 */
+  hasReplacePrompt?: boolean
+  /** 信任标记文案（renderer 侧 i18n）：文本/短名档 = 内嵌后缀；纯图标档 = 角标 tooltip；空文案不渲染 */
+  replaceHint?: string
+  /**
+   * 强调底档（设计 §5.1：「颜色即状态」）：真值 = 当前生效模式为**非默认模式**（默认档中性底，
+   * 与 landing 首行邻位 chip 同弱反馈；非默认档保留 accent 底）。
+   * 判据由 renderer 侧计算传入（`displayPreset.id !== (defaultPresetId || builtin:full)`，
+   * 注意 `||` 而非 `??`——store 未加载时 defaultPresetId 为 `''`，`'' ?? x` 仍是 `''` 会误判非默认）；
+   * 缺省 false = 中性底（恒亮 accent 不携带信息，且与对话态 PresetChip 只在非默认模式渲染的语义冲突）。
+   */
+  accent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -161,6 +182,53 @@ const selectedPresetName = computed(() => {
   return presets.value.find((p) => p.id === id)?.name ?? id
 })
 
+// ── u4a 三档退化 + 信任标记（设计 §7.4 landing 首行 / §7.1 信任处置）──
+/**
+ * 全名文案（文本档 chip 文本 + 窄档 a11y 名 / title）。props 优先（renderer 侧文案，
+ * 保持 ui 包与 i18n 解耦）；缺省回落 deps.presets 解析出的模式名（既有接入零改动）。
+ */
+const displayName = computed(() => props.modeName ?? selectedPresetName.value)
+/** 短名收窄下限（字符数）：去尾缀后过短（如仅剩个别字）则保留全名，避免短名无信息 */
+const MIN_SHORT_NAME_LENGTH = 2
+/** 短名档文案（中档显示）：props 优先；缺省 = 全名去「模式」尾缀（无尾缀保持全名，由 truncate 收窄） */
+const shortName = computed(() => {
+  if (props.shortName) return props.shortName
+  const name = displayName.value
+  const stripped = name.replace(/模式$/, '')
+  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
+})
+/**
+ * 信任标记判据（设计 §7.1）：`replace.enabled && 文案非空` 由 renderer 侧计算经
+ * `hasReplacePrompt` 传入；「文案非空」同样是判据的一部分（空文案不渲染空后缀/空 tooltip）。
+ * 跨档不丢：文本/短名档 = chip 内小后缀；纯图标档 = 右上角警示色角标（见模板）。
+ */
+const hasReplace = computed(
+  () => props.hasReplacePrompt === true && (props.replaceHint ?? '').trim().length > 0,
+)
+/** 内部实测自适应档（无显式 density 时生效）；无 RO 环境（jsdom）恒 full */
+const autoDensity = ref<'full' | 'short' | 'icon'>('full')
+/** 生效密度档（显式 prop 优先，否则实测自适应） */
+const chipDensity = computed<'full' | 'short' | 'icon'>(() => props.density ?? autoDensity.value)
+/** chip 显示名（短名档用短名，其余用全名） */
+const chipLabel = computed(() => (chipDensity.value === 'short' ? shortName.value : displayName.value))
+/** 三档统一的 a11y 名（纯图标档的可见信息全在此；含信任标记文案） */
+const ariaLabel = computed(() =>
+  hasReplace.value ? `${displayName.value} · ${props.replaceHint ?? ''}` : displayName.value,
+)
+/** 自适应阈值（px）：≤ ICON 仅图标；≤ SHORT 短名；否则全名。实测驱动，阈值仅作档位边界 */
+const ICON_TIER_MAX_WIDTH = 52
+const SHORT_TIER_MAX_WIDTH = 116
+/** 模板 ref 取其宿主 DOM（Button 根是 reka Primitive 渲染的 <button>） */
+interface ElementHost { $el?: HTMLElement }
+const chipRootRef = ref<ElementHost | null>(null)
+let chipResizeObserver: ResizeObserver | null = null
+/** 按实测宽度落档（三档退化自适应） */
+function applyMeasuredWidth(width: number): void {
+  if (width <= ICON_TIER_MAX_WIDTH) autoDensity.value = 'icon'
+  else if (width <= SHORT_TIER_MAX_WIDTH) autoDensity.value = 'short'
+  else autoDensity.value = 'full'
+}
+
 /**
  * popover 列表区空态文案（S-RN-2）：
  * - loadError 有值 → 复用 noPresets（i18n key 不可改；错误详情已在壳层 loadPresets console.warn）
@@ -188,8 +256,24 @@ const isDefaultChecked = computed(() => {
 // 视图，loadPresets 写 deps 侧 store（presets/defaultPresetId）后自动重算（P5①）。
 // emit select 仍只在用户真实点击时发出（onSelectPreset），显式选择链路不变。
 onMounted(async () => {
+  // u4 三档退化自适应（显式 density / 无 RO 环境跳过）：观察 chip 自身宽度落档
+  if (props.density === undefined && typeof ResizeObserver !== 'undefined') {
+    const el = chipRootRef.value?.$el
+    if (el) {
+      chipResizeObserver = new ResizeObserver((entries) => {
+        const width = entries[0]?.contentRect.width
+        if (typeof width === 'number') applyMeasuredWidth(width)
+      })
+      chipResizeObserver.observe(el)
+    }
+  }
   if (!isLanding.value) return // 锁定/历史态无需拉数据（只读展示，预设名从 launchPresetId 查）
   await loadPresets()
+})
+
+onBeforeUnmount(() => {
+  chipResizeObserver?.disconnect()
+  chipResizeObserver = null
 })
 
 // FR-16：键盘快捷键 Cmd+Shift+P → 打开 PresetSelectChip Popover
@@ -229,15 +313,40 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
   <Popover v-if="isLanding" :open="presetOpen" @update:open="$emit('update:presetOpen', $event)">
     <PopoverTrigger as-child>
       <Button
+        ref="chipRootRef"
         data-testid="chip-preset"
         variant="ghost"
-        class="h-auto gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
-        :class="{ '!text-accent': displayPresetId && displayPresetId === defaultPresetId }"
+        class="relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5"
+        :class="
+          accent
+            ? 'bg-accent-soft text-accent hover:bg-accent-soft'
+            : 'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+        "
+        :aria-label="ariaLabel"
+        :title="chipDensity === 'icon' ? displayName : undefined"
       >
         <SlidersHorizontal class="shrink-0" />
-        <span class="font-mono">{{ selectedPresetName }}</span>
+        <span
+          v-if="chipDensity !== 'icon'"
+          class="min-w-0 truncate font-mono"
+          :class="chipDensity === 'short' && 'max-w-[48px]'"
+        >{{ chipLabel }}</span>
+        <!-- 信任标记（文本/短名档）：chip 内小后缀 -->
+        <span
+          v-if="hasReplace && chipDensity !== 'icon'"
+          class="shrink-0 text-[10px] text-warn"
+        >{{ replaceHint }}</span>
+        <!-- 信任标记（纯图标档）：右上角警示色角标 + tooltip（accent 底不参与）；刻意不用 accent 描边 -->
+        <span
+          v-if="hasReplace && chipDensity === 'icon'"
+          data-testid="preset-chip-replace-badge"
+          class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-warn ring-1 ring-bg-input"
+          :title="replaceHint"
+          aria-hidden="true"
+        />
         <ChevronDown
-          class="ml-px size-[9px] shrink-0 transition-transform duration-200"
+          v-if="chipDensity !== 'icon'"
+          class="ml-px shrink-0 transition-transform duration-200"
           :class="presetOpen && 'rotate-180'"
         />
       </Button>

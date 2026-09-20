@@ -115,10 +115,10 @@ describe('event-adapter: marker 未命中不走 bridge 分支（P-10）', () => 
     expect(findBridgeUi(events)).toBeUndefined()
     const extUi = events.find(e => e.kind === 'extension-ui')
     expect(extUi).toBeDefined()
-    // ask-user 载荷带 questions 透传（前端路由 AskUserOverlay）
+    // ask-user 载荷经 legacy 归一上移产出统一表单帧（form + type 推断映射的 formQuestions）
     const payloadFields = extUi && 'payload' in extUi ? extUi.payload as Record<string, unknown> : {}
-    expect(Array.isArray(payloadFields.askUserQuestions)).toBe(true)
-    expect(payloadFields.askUser).toBe(true)
+    expect(payloadFields.form).toBe(true)
+    expect(Array.isArray(payloadFields.formQuestions)).toBe(true)
   })
 
   it('SESSION_MANAGER_MARKER → session-manager-ui kind，不产 bridge-ui', () => {

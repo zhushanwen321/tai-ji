@@ -33,6 +33,10 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   'TAIJI_AGENT_API_KEY',
   'TAIJI_SUBAGENT_RELAY_SESSION_ID',
   'TAIJI_SUBAGENT_RELAY_RECORD_ID',
+  // 预设回落事实（env 名 SSOT = shared PRESET_FALLBACK_ENV_KEYS）：「本进程本次运行」
+  // 事实只对 runtime 直接 spawn 的 pi 成立，引擎一跳继承会造成子 agent pi 假披露
+  'TAIJI_PRESET_FALLBACK_FROM',
+  'TAIJI_PRESET_FALLBACK_TO',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

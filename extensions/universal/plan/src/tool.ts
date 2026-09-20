@@ -32,7 +32,6 @@ const logger = getLogger("pi-plan");
 // ── Action types ───────────────────────────────────────────────────
 
 export const PLAN_ACTIONS = [
-  "list-template",
   "select-template",
   "complete",
   "abort",
@@ -54,15 +53,9 @@ export function validateAction(action: string): action is PlanAction {
 
 // ── Details types ──────────────────────────────────────────────────
 
-interface ListTemplateDetails {
-  action: "list-template";
-  templates: Array<{ name: string; path: string }>;
-}
-
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
-  content: string;
 }
 
 interface CompleteDetails {
@@ -108,7 +101,6 @@ interface ReviewErrorDetails {
 }
 
 type PlanDetails =
-  | ListTemplateDetails
   | SelectTemplateDetails
   | CompleteDetails
   | CompleteCancelledDetails
@@ -123,30 +115,6 @@ type PlanDetails =
 function restoreFullToolSet(pi: ExtensionAPI): void {
   const allToolNames = pi.getAllTools().map((t: { name: string }) => t.name);
   pi.setActiveTools(allToolNames);
-}
-
-/** Compact template list for TUI display. Two-column, max 5 lines. */
-function formatTemplateList(templates: Array<{ name: string }>): string {
-  const names = templates.map((t) => t.name);
-  if (names.length === 0) return "No templates available.";
-
-  const MAX_DISPLAY = 8;
-  const HALF = 2;
-  const truncated = names.length > MAX_DISPLAY;
-  const display = names.slice(0, MAX_DISPLAY);
-
-  // Two-column layout
-  const half = Math.ceil(display.length / HALF);
-  const col1 = display.slice(0, half);
-  const col2 = display.slice(half);
-  const lines: string[] = [];
-  for (let i = 0; i < half; i++) {
-    const right = col2[i] ? `    ${half + i + 1} ${col2[i]}` : "";
-    lines.push(`  ${i + 1} ${col1[i] ?? ""}` + right);
-  }
-
-  if (truncated) lines.push(`  ... ${names.length - MAX_DISPLAY} more`);
-  return lines.join("\n");
 }
 
 /** Relative path from project dir */
@@ -165,6 +133,12 @@ function relativePath(fullPath: string, projectDir: string): string {
  * （C-proc-09），pi 子进程 env 里恒不可见，照抄即分流静默失效且诱导实施者
  * 动 deny list 造成安全回归。每次调用时读（不可模块加载时缓存——测试与
  * 运行中 env 都可能变化）。
+ *
+ * [双语义耦合登记，2026-09-20 R1] 本 env 名义语义是扩展日志开关
+ * （extension-logger 见之落盘 INFO，恒注入点 packages/pi-rpc/src/env.ts），本函数
+ * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
+ * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
+ * env 并纳入恒注入，不得沿用本名。
  */
 function isTaijiHost(): boolean {
   return process.env.TAIJI_AGENT_EXT_LOG === "1";
@@ -208,13 +182,6 @@ function renderPlanResult(
   const NL = "\n";
 
   switch (details.action) {
-    case "list-template": {
-      const header = fg("accent", `${details.templates.length} 个模板可用`) + NL;
-      const body = formatTemplateList(details.templates) + NL;
-      const hint = fg("dim", "→ plan(select-template, templateName='xxx')");
-      return new Text(header + body + hint, 0, 0);
-    }
-
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
@@ -259,10 +226,34 @@ function renderPlanResult(
       const body = fg("dim", `  ${details.reason}`);
       return new Text(header + body, 0, 0);
     }
+
+    // 兜底：旧版本持久化 entry 的 details 形态（如已删除的 list-template）不在
+    // 现版 PlanDetails 联合内——switch 落空返回 undefined 会让 pi TUI 渲染循环
+    // 对 undefined 调 .render() 直接 TypeError（pi-tui box.js render 无守卫）。
+    // 历史会话重开同样要渲染旧 entry，任意历史形态都必须产出组件。
+    default:
+      return new Text(firstContentText(result), 0, 0);
   }
 }
 
 // ── Action executors (one per switch case) ─────────────────────────
+
+/**
+ * 把 pi execute 的 turn abort 信号级联到挂起 select 的 controller（对齐同协议
+ * 家族 ask-user / scheduler 的 signal 透传）：turn abort（用户 stop / goal 取消 /
+ * compaction）时解散挂起的 submit-review / complete 对话框——select resolve
+ * undefined 走各处既有的 cancelled 分支，语义与 controllers registry 联动 abort
+ * 一致。controller 已 settled 后再 abort 是 no-op；listener 挂在 turn 生命周期
+ * 内的 signal 上且 once，无跨 turn 泄漏。
+ */
+function cascadeTurnAbort(controller: AbortController, signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    // 进入 execute 时 turn 已 abort：直接置 abort 态，select 首行短路 resolve undefined
+    controller.abort();
+    return;
+  }
+  signal?.addEventListener("abort", () => controller.abort(), { once: true });
+}
 
 /** Execute result envelope (shared shape returned by every action). */
 interface ActionResult {
@@ -270,32 +261,48 @@ interface ActionResult {
   details: PlanDetails;
 }
 
-function executeListTemplate(): ActionResult {
-  const templates = listTemplates();
-  return {
-    content: [{ type: "text" as const, text: `${templates.length} templates available` }],
-    details: { action: "list-template", templates },
-  };
-}
-
+/**
+ * select-template（D7）：三源合并视图解析 + content 携带胜者文件全文。
+ * - 合并视图与注入段同源：两轨都以 ctx.cwd 为 projectRoot 调 listTemplates
+ *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
+ *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
+ * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
+ *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
+ * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。
+ * - --template 直传防御：模板已由用户指定并全文内嵌注入，select-template 是
+ *   画蛇添足——报错不带三源清单（直传文件不在清单里，清单会误导改选内置
+ *   模板、偏离用户意图）。
+ */
 function executeSelectTemplate(
   pi: ExtensionAPI,
   params: Record<string, unknown>,
   state: PlanState,
+  projectDir: string,
 ): ActionResult {
   const templateName = params.templateName as string;
   if (!templateName) {
     throw new Error("templateName is required for select-template");
   }
-  const content = loadTemplate(templateName);
-  if (!content) {
-    throw new Error(`Template not found: ${templateName}`);
+  if (state.templateProvidedPath !== undefined) {
+    throw new Error("template was provided via --template, write the plan following the file above");
+  }
+  const templates = listTemplates({ projectRoot: projectDir });
+  const winner = templates.find((t) => t.name === templateName);
+  if (!winner) {
+    throw new Error(`Template not found: ${templateName}. Available: ${templates.map((t) => t.name).join(", ")}`);
+  }
+  const content = loadTemplate(templateName, { projectRoot: projectDir });
+  if (content === null) {
+    throw new Error(`Template not readable: ${winner.path}`);
   }
   state.templateName = templateName;
   persistPlanState(pi, state);
   return {
-    content: [{ type: "text" as const, text: `Template selected: ${templateName}` }],
-    details: { action: "select-template", templateName, content },
+    content: [{
+      type: "text" as const,
+      text: `Template selected: ${templateName} (${winner.path}). Write the plan following the template's chapter structure below.\n\n<template>\n${content}\n</template>`,
+    }],
+    details: { action: "select-template", templateName },
   };
 }
 
@@ -339,6 +346,14 @@ function executeRegisterDoc(
   const fileName = typeof params.fileName === "string" ? params.fileName.trim() : "";
   if (!fileName) {
     throw new Error("fileName is required for register-doc (e.g. plan(action='register-doc', fileName='design.md'))");
+  }
+  // 穿越守卫：fileName 必须是 plan 目录内的纯文件名（absPath = join(planDir, fileName)，
+  // 放开分隔符/'..' 可把 plan 目录外任意可读文件挂进用户审阅界面——PlanDocsPanel 文档
+  // tab 按 absPath 直读渲染）。参数形态错误 throw 带纠正样例（同上方缺参分支风格）。
+  if (fileName.includes("/") || fileName.includes("\\") || fileName === "." || fileName === "..") {
+    throw new Error(
+      "fileName must be a plain file name inside the plan directory — path separators and '.'/'..' segments are not allowed (e.g. plan(action='register-doc', fileName='design.md'))",
+    );
   }
   const sourceSkill = typeof params.sourceSkill === "string" ? params.sourceSkill.trim() : "";
 
@@ -418,6 +433,7 @@ async function executeSubmitReview(
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
+  signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
   // E6 双守卫：状态门优先于内容门（退出后任何动作都不该发生）。
   // 文本语义按 A9 真机事故收紧：旧文「Wrap up the current task directly」被 LLM
@@ -470,6 +486,7 @@ async function executeSubmitReview(
   // E10 生命周期钉死：每次发挂起 select 新建 controller（禁复用已 abort 的——
   // pi 对已 abort signal 短路立即 resolve undefined）
   const controller = freshAbortController(controllers, sessionId);
+  cascadeTurnAbort(controller, signal);
   const payload = JSON.stringify({ docs: state.docs } satisfies PlanReviewRequest);
   const choice = await ctx.ui.select(PLAN_REVIEW_MARKER, [payload], { signal: controller.signal });
   // select 已 settled，controller 即弃（注册表不留已 settled 的 controller）
@@ -484,6 +501,21 @@ async function executeSubmitReview(
     return reviewErrorResult(
       "cancelled",
       "The review was cancelled — the user dismissed the approval dialog or exited plan mode. This is NOT an approval. Do not implement any changes. Stop the review loop: briefly tell the user you have stopped, then wait for further user instructions.",
+    );
+  }
+
+  // echo 检测（同 uiFormInteract 先例 extension-protocol ui-form/helpers）：旧 taiji
+  // 宿主不识别 PLAN_REVIEW_MARKER 时 select 降级普通单选项，用户点选回显 payload 本身。
+  // 收包与发送 payload 逐字节相等 = 确定性识别该不支持组合；判定必须先于 parse
+  //（payload 是合法 JSON，parse 会成功但形状守卫必败）——否则 bad-response 分支引导
+  // 重挂 → 宿主同样回显 → 重复弹错循环。命中返回升级指引，不引导重挂。
+  if (choice === payload) {
+    logger.warn("plan: submit-review select echoed the request payload (host does not understand PLAN_REVIEW_MARKER)");
+    return reviewErrorResult(
+      "bad-response",
+      "The taiji host does not understand the plan review marker (taiji is older than this extension). " +
+      "Do NOT call submit-review again — the review dialog will fail the same way. " +
+      "Tell the user to upgrade taiji (or pin the plan extension version) and wait for their instructions.",
     );
   }
 
@@ -505,7 +537,7 @@ async function executeSubmitReview(
   switch (response.decision) {
     case "approve":
       // approve → 走现状 complete 流程（执行方式 select 同样挂 signal）
-      return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers);
+      return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers, signal);
 
     case "revise": {
       // 显式 deliverAs: 'steer' 必须传——pi 的 sendUserMessage 在 isStreaming 时
@@ -636,6 +668,7 @@ async function resolveCompleteChoice(
   ctx: ExtensionContext,
   controllers: PlanAbortControllers,
   sessionId: string,
+  signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
   if (!ctx.hasUI) {
     return { kind: "mode", chosenMode: "develop" };
@@ -649,6 +682,7 @@ async function resolveCompleteChoice(
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
   // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
+  cascadeTurnAbort(controller, signal);
 
   let chosenLabel: string | undefined;
   if (isTaijiHost() && ctx.mode === "rpc") {
@@ -663,9 +697,12 @@ async function resolveCompleteChoice(
       allowOther: false,
     };
     // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
-    // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）
+    // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）。
+    // select 必须 .bind(ctx.ui)（对齐 ask-user / scheduler 同协议形态）：callMarkerRpc 先
+    // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖
+    // （pi 实装锚点：dist/modes/rpc/rpc-mode.js:84（0.84.4）——select 为箭头函数闭包）。
     const form = await uiFormInteract(
-      { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select } },
+      { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select.bind(ctx.ui) } },
       [question],
       { signal: controller.signal },
     );
@@ -717,8 +754,9 @@ async function executeComplete(
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
+  signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
-  const choice = await resolveCompleteChoice(ctx, controllers, sessionId);
+  const choice = await resolveCompleteChoice(ctx, controllers, sessionId, signal);
   if (choice.kind === "cancelled") {
     return choice.result;
   }
@@ -760,7 +798,7 @@ export function registerPlanTool(
     description:
       "Manages plan mode lifecycle (template selection, document registration, review, state transitions). " +
       "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
-      "Actions: list-template, select-template, register-doc, submit-review, complete, abort.",
+      "Actions: select-template, register-doc, submit-review, complete, abort.",
     parameters: Type.Object({
       action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
@@ -775,7 +813,7 @@ export function registerPlanTool(
     promptSnippet:
       "## When to use this tool vs the bash tool\n" +
       "Use 'plan' tool ONLY for plan mode state management:\n" +
-      "- list-template / select-template — template operations\n" +
+      "- select-template — template selection\n" +
       "- register-doc — register a produced document (call after writing each deliverable; re-call after revisions to bump its version)\n" +
       "- submit-review — all documents done, request user review\n" +
       "- complete — user approved plan, exit plan mode\n" +
@@ -803,7 +841,7 @@ export function registerPlanTool(
     async execute(
       _toolCallId: string,
       params: Record<string, unknown>,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<{ content: Array<{ type: "text"; text: string }>; details: PlanDetails }> {
@@ -817,20 +855,17 @@ export function registerPlanTool(
       const projectDir = ctx.cwd;
 
       switch (action) {
-        case "list-template":
-          return executeListTemplate();
-
         case "select-template":
-          return executeSelectTemplate(pi, params, state);
+          return executeSelectTemplate(pi, params, state, projectDir);
 
         case "register-doc":
           return executeRegisterDoc(pi, params, state);
 
         case "submit-review":
-          return await executeSubmitReview(pi, ctx, state, sessions, sessionId, projectDir, controllers);
+          return await executeSubmitReview(pi, ctx, state, sessions, sessionId, projectDir, controllers, signal);
 
         case "complete":
-          return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir, controllers);
+          return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir, controllers, signal);
 
         case "abort":
           return executeAbort(pi, sessions, sessionId, ctx);

@@ -10,8 +10,10 @@
  *  - PlanStateView 字段与 plan-state entry schema 一致：四必填 + 三 optional——
  *    optional 性是 D4 向后兼容契约（旧 entry 无新字段，前端逐字段判存在降级），
  *    optional 改必填 = 旧 session 重开派生 View 缺字段编译红，本测试机器拦截
- *  - PlanDocMeta 四字段（与 @zhushanwen/extension-protocol core/types 同形，
- *    shared 最底层包不能反向依赖，漂移由本测试 + 双端注释互指守卫）
+ *  - PlanDocMeta 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 跨包同形：
+ *    devDependency 引对侧做编译期 AssertExact 双向断言（单侧改字段即红），
+ *    另保留字面量绝对锚点断言防两侧同步漂移。devDep 不构成运行时反向依赖
+ *    （shared 是 private 包不发布；import type 编译期剥除，vitest 运行期零加载）
  *
  * 模式与 gen-stats.test.ts 一致（本目录在 tsconfig include:["src"] 内——编译期断言
  * 经 tsc --noEmit 机器强制，非仅编辑器期提示）：
@@ -33,6 +35,8 @@ import type {
   PlanStateView,
   PlanDocMeta,
 } from '../protocol'
+// 对侧同形契约源：跨包断言的另一半（devDependency，仅类型消费）
+import type { PlanDocMeta as ProtocolPlanDocMeta } from '@zhushanwen/extension-protocol'
 
 // ── 编译期类型断言辅助（同 gen-stats.test.ts / protocol-seq.test.ts 模式）──
 
@@ -78,11 +82,17 @@ type _Assert_View_docs_optional = AssertExact<PlanStateView['docs'], PlanDocMeta
 type _Assert_View_reviewState_optional = AssertExact<PlanStateView['reviewState'], 'awaiting' | 'revising' | undefined>
 
 // ── PlanDocMeta 四字段（与 extension-protocol core/types PlanDocMeta 同形）──
+// 字面量断言是绝对锚点（防两侧同步漂移）；跨包 AssertExact 是相对断言
+// （单侧改字段/改类型/改 optional 性即红——extension-protocol 侧漂移在此拦截）。
 type _Assert_Doc_keys = AssertExact<keyof PlanDocMeta, 'fileName' | 'absPath' | 'sourceSkill' | 'version'>
 type _Assert_Doc_fileName = AssertExact<PlanDocMeta['fileName'], string>
 type _Assert_Doc_absPath = AssertExact<PlanDocMeta['absPath'], string>
 type _Assert_Doc_sourceSkill = AssertExact<PlanDocMeta['sourceSkill'], string>
 type _Assert_Doc_version = AssertExact<PlanDocMeta['version'], number>
+// 本体 AssertExact 抓必填字段增删/类型改名；optional 字段漂移（一侧多出 `x?: T`）
+// 不破坏 interface 双向 extends，须由 keyof 联合精确相等兜住
+type _Assert_Doc_cross_package = AssertExact<PlanDocMeta, ProtocolPlanDocMeta>
+type _Assert_Doc_cross_package_keys = AssertExact<keyof PlanDocMeta, keyof ProtocolPlanDocMeta>
 
 // ── 编译期强制执行点（AssertExtends/AssertExact 须经泛型约束消费才被 tsc 机器强制）──
 const _enforceTrue = <T extends true>(_v?: T): true => true
@@ -108,6 +118,8 @@ const _planProtocolAssertsEnforced = [
   _enforceTrue<_Assert_Doc_absPath>(),
   _enforceTrue<_Assert_Doc_sourceSkill>(),
   _enforceTrue<_Assert_Doc_version>(),
+  _enforceTrue<_Assert_Doc_cross_package>(),
+  _enforceTrue<_Assert_Doc_cross_package_keys>(),
 ]
 void _planProtocolAssertsEnforced
 

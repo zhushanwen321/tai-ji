@@ -7,7 +7,8 @@
  *  - 新 RPC session.getGenStats 在 ClientMessageType 联合 + ClientMessageMap + ReplyPayloadMap
  *    三处登记，reply = session.stats_update payload 同形（payload 消费型）
  *  - GenStatsSpeed / GenStatsCacheRatio / GenStatsFrame 字段与 gen-stats.ts 类型逐字一致
- *    （speed 4 字段、cacheRatio 2 字段均 number|null；sessionId 必填、model 可选）
+ *    （speed 4 字段、cacheRatio current/day 均 number|null + currentMiss 可选归因；
+ *    sessionId 必填、model 可选）
  *  - null 编码纪律（D4）：null = 无数据，0 = 真实测量值，两者运行时可区分
  *
  * 模式与 protocol-seq.test.ts 一致（本目录在 tsconfig include:["src"] 内——编译期断言
@@ -28,7 +29,12 @@ import type {
   ServerMessageUnion,
   ReplyPayloadMap,
 } from '../protocol'
-import type { GenStatsSpeed, GenStatsCacheRatio, GenStatsFrame } from '../gen-stats'
+import type {
+  GenStatsSpeed,
+  GenStatsCacheRatio,
+  GenStatsCacheMiss,
+  GenStatsFrame,
+} from '../gen-stats'
 
 // ── 编译期类型断言辅助（同 protocol.test.ts / protocol-seq.test.ts 模式）──
 // AssertHasKey/AssertExtends：条件类型求值为 true，仅在编译期校验「key 存在 / 子类型关系成立」；
@@ -62,9 +68,13 @@ type _Assert_Speed_day = AssertExact<GenStatsSpeed['day'], number | null>
 type _Assert_Speed_d7 = AssertExact<GenStatsSpeed['d7'], number | null>
 type _Assert_Speed_d30 = AssertExact<GenStatsSpeed['d30'], number | null>
 
-type _Assert_Cache_keys = AssertExact<keyof GenStatsCacheRatio, 'current' | 'day'>
+type _Assert_Cache_keys = AssertExact<keyof GenStatsCacheRatio, 'current' | 'day' | 'currentMiss'>
 type _Assert_Cache_current = AssertExact<GenStatsCacheRatio['current'], number | null>
 type _Assert_Cache_day = AssertExact<GenStatsCacheRatio['day'], number | null>
+type _Assert_Cache_currentMiss = AssertExact<
+  GenStatsCacheRatio['currentMiss'],
+  GenStatsCacheMiss | undefined
+>
 
 type _Assert_Frame_keys = AssertExact<keyof GenStatsFrame, 'sessionId' | 'speed' | 'cacheRatio' | 'model'>
 type _Assert_Frame_sessionId = AssertExact<GenStatsFrame['sessionId'], string>
@@ -92,6 +102,7 @@ const _genStatsProtocolAssertsEnforced = [
   _enforceTrue<_Assert_Cache_keys>(),
   _enforceTrue<_Assert_Cache_current>(),
   _enforceTrue<_Assert_Cache_day>(),
+  _enforceTrue<_Assert_Cache_currentMiss>(),
   _enforceTrue<_Assert_Frame_keys>(),
   _enforceTrue<_Assert_Frame_sessionId>(),
   _enforceTrue<_Assert_Frame_speed>(),

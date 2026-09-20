@@ -3,7 +3,7 @@
     划选评论浮条（plan 模式重设计 u1-docs-panel，设计 §3.1 步骤 5 / D6 / G3）。
     职责：监听 target 容器内的文字划选 → 浮条「评论」→ 编辑态（划选引文 + 评语输入）→
     emit submit 交父组件写 planStore 草稿（D6：草稿状态源归 store，本组件不持评论数据）。
-    浮条定位照用户验收 demo（.tmp/plan-mode-demo/index.html sel-pop）：选区上方居中，
+    浮条定位照用户验收 demo 的 sel-pop 形态（验收 demo 不入库）：选区上方居中，
     越界钳制在视口内。fixed + Teleport body——drawer 容器 overflow hidden 会裁剪溢出，
     Teleport 后浮层脱离文档流不受裁剪。
     revising 态（disabled）：浮条照常出现、「评论」按钮禁用 + title 提示（§3.1 失败路径

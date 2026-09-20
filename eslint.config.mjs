@@ -28,6 +28,11 @@ export default [
       'apps/electron/resources/engines/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
       '.taiji-harness/**',
+      // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
+      // 草稿）：引擎生成的 .mjs 非项目源码，已被 .gitignore；.zcode/agents/ 是 tracked
+      // 子代理定义，不在排除范围
+      '.zcode/workflow-runs/**',
+      '.zcode/workflow-drafts/**',
       // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
       'playwright-report/**',
       'playwright/.cache/**',
@@ -182,6 +187,16 @@ export default [
   // 拆分需重新设计写者注册与 flush 生命周期，属独立重构任务；与 protocol.ts override 同型。
   {
     files: ['packages/runtime/src/infra/logger.ts'],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
+  // [HISTORICAL] session-records.ts 是 record 域唯一聚合中心（W18 派生缓存族 + 磁盘读侧/
+  // 动作/引擎配置，冷热同源共用同一份 scan 派生代码——拆开会造成派生逻辑双份）。
+  // 2026-09-19 reload-closeout D2 送达水位机制入列（发布门换基线 + 对账两腿 + 定时器）
+  // 时代码行越过 500。与 event-adapter 等 override 同型，拆分属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/session-records.ts'],
     rules: {
       'max-lines': 'off',
     },

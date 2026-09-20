@@ -4,9 +4,13 @@
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary } from '@taiji/shared'
+import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
+// zcode 会话库白名单（MF-3-1 wire 帧加固）：值 import——校验在 transport 边界执行，
+// allowlist 推导是 zcode-import 域的路径知识（宿主库/隔离库同文件 SSOT）。
+import { zcodeImportDbAllowlist } from '../services/session/zcode-import/sqlite-access.js'
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
 // 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'
@@ -795,9 +799,11 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImportCandidates(msg: Extract<ClientMessage, { type: 'session.importCandidates' }>, ws: WsType): Promise<void> {
-    // 导入 pi 会话（import-session D5/u3）：候选列表（对话框打开/搜索/切目录，renderer
-    // debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply 类型
-    // SSOT = shared import-session.ts，此处只透传不做字段裁剪。
+    // 导入会话（import-session D5/u3 + 多源 §3.7）：候选列表（对话框打开/搜索/切目录，
+    // renderer debounce 250ms）。reply 与 request 同名（u0b protocol 登记），payload/reply
+    // 类型 SSOT = shared import-session.ts，此处只透传不做字段裁剪——payload.source
+    //（含 sessionId/dbPath）随 payload 整体透传，路由在 ImportService 的 source 注册表内，
+    // handler 对源零分支（缺省不传 = pi，存量调用行为不变）。
     const candidatesSvc = this.ctx.importService
     if (!candidatesSvc) {
       // importService 未注入（理论不可达——组合根必传），防御性报错（对齐 handoffService 惯例）。
@@ -819,12 +825,31 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionImport(msg: Extract<ClientMessage, { type: 'session.import' }>, ws: WsType): Promise<void> {
-    // 执行导入（D5）：互斥/校验/原子复制/sidecar/缓存失效全在 service（U2），handler 只
-    // 负责 reply 与广播。warning（sidecar_failed）是成功 reply 的可选字段（r4-INFO，
-    // 非 error envelope），随 result 原样透传。
+    // 执行导入（D5 + 多源 §3.7）：互斥/校验/原子落地/sidecar/缓存失效全在 service 编排层
+    //（按 payload.source 路由到对应 SessionImportSource，缺省 'pi'），handler 只负责 reply
+    // 与广播；payload（含 source/sessionId/dbPath）整体透传不做字段裁剪。warning
+    //（sidecar_failed / conversion_degraded）是成功 reply 的可选字段（r4-INFO，非 error
+    // envelope），随 result 原样透传。
     const importSvc = this.ctx.importService
     if (!importSvc) {
       return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)
+    }
+    // wire 帧 dbPath 白名单（MF-3-1 加固）：dbPath 在 wire 上是任意 WS 客户端可写字段，
+    // 仅放行 zcodeImportDbAllowlist(dataDir) 封闭集合（隔离库/宿主库）；缺省 undefined =
+    // source 侧动态推导，放行。校验在 transport 边界执行（不可信面收口），与源无关——
+    // pi 源不消费 dbPath，带值即异常请求同拦。测试 fixture 库注入走 source deps 进程内
+    // 通道（构造注入 getHostDbPath），不经 wire，不受本校验影响。
+    const wireDbPath = msg.payload.dbPath
+    if (wireDbPath !== undefined) {
+      // typeof 守卫先于集合成员判定：wire 帧类型标注 string，但 JSON 层可写任意形态
+      if (typeof wireDbPath !== 'string' || !zcodeImportDbAllowlist(getDataDir()).includes(wireDbPath)) {
+        return this.ctx.sendError(
+          ws,
+          'import_db_path_forbidden',
+          'dbPath 不在允许的会话库路径集合内：请缺省不传（runtime 动态推导宿主库）后重试',
+          msg.id,
+        )
+      }
     }
     try {
       const result = await importSvc.importSession(msg.payload)

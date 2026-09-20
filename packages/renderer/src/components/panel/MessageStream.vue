@@ -14,6 +14,13 @@
     应用层只持领域语义（useVirtuaFollow 状态机 / streaming pin / rail jump / 瞬时块定位）。
   -->
   <div class="relative flex min-h-0 flex-1 flex-col">
+    <!-- [u5 mode-declaration-row] 模式声明行：锚在流顶**滚动容器之外**（不随滚动消失）。
+         数据 = session.launchPresetId + preset store 派生（零新 entry 类型 / 0 token）；
+         E7 三态降级在 ModeDeclarationRow 内（未加载/加载失败 → 不渲染）。 -->
+    <div class="shrink-0 px-5 pt-2">
+      <ModeDeclarationRow :session-id="sessionId" />
+    </div>
+
     <div
       ref="scrollEl"
       class="message-stream relative flex-1 overflow-y-auto px-5 pt-[var(--message-stream-pad-top)] pb-[8px]"
@@ -171,6 +178,11 @@ import { Button } from '@/components/ui/button'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import ModeDeclarationRow from './ModeDeclarationRow.vue'
+// [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store 为空
+// 会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点（AppShell 仅在 connected 后渲染），
+// 在此安装幂等单例（重连不重复 / 失败下一次 connected 补拉）。
+import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'
 // [u8-pi-respawn] 恢复提示条重试按钮的手动恢复 RPC（useSidebar.restoreSession 同源通道）。
 import { session as sessionApi } from '@/api'
@@ -210,6 +222,9 @@ import {
 const props = defineProps<{
   sessionId: string
 }>()
+
+// [u5] 安装 preset 首次 connected 自动加载（幂等；detached 单例 watch，不随本组件卸载停止）。
+installPresetAutoLoad()
 
 const { t } = useI18n()
 const chat = useChatStore()

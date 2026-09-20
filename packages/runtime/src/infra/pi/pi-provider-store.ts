@@ -11,8 +11,9 @@
 // 空壳 provider 合并 models 修复而非删除（对齐 config-service 的 builtinModelsById 先例）。
 import builtinData from '../../generated/builtin-providers.json'
 import { deriveEnabled, getMergedCatalogModels, isCatalogProvider } from '../../services/provider-catalog.js'
-// U6③：id 规则与写侧共享同一谓词单点（services 层既有导出面，infra 已有同向 import 先例）
-import { normalizeModelIdOrReject } from '../../services/provider-config-helper.js'
+// U6③：id 规则与写侧共享同一谓词单点（分层说明见 provider-model-item.ts 头注释；
+// 守卫白名单登记同 provider-catalog 纯函数先例）
+import { normalizeModelIdOrReject } from '../../services/provider-model-item.js'
 // 链 3（凭据读路径收口，D3）：infra 层只 type-only import 接口，不 value import 实现
 // （C-comm-03；实现在 services/auth，由组合根经模块级 init setter 注入）。
 import type { IProviderCredentialResolver } from '../../services/ports/provider-credential-resolver.js'

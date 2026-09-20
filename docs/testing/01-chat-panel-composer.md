@@ -206,7 +206,7 @@ test.describe('新建任务 E2E', () => {
     // 若点 .first()（sample-project），与预填 cwd 相同 → selectWorkspace 走 noop 分支
     //（useNewTaskFlow：cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
     // 故点 .nth(1)（第 2 个，fixtureSessions 去 cwd 重后 = taiji，s1/s2/s5 的 cwd
-    // /Users/dev/Code/taiji 末段）。
+    // ~/Code/taiji 末段）。
     await page.getByTestId('chip-directory').click()
     await expect(page.getByTestId('dir-select-popover')).toBeVisible({ timeout: 5_000 })
     // 点第 2 个工作区（非预填的 sample-project）
@@ -315,6 +315,52 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 触发/可见条件 |
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
+| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged`）；本表不重复登记，避免两处漂移 |
+| `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
+| `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
+
+### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
+
+> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
+
+**底栏三簇 + 按序退化 + 溢出菜单**：
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行） |
+| `composer-overflow-menu` | Composer.vue | 序 3 生效且有被收起项（零贡献插件 toolbar 时不渲染，不留死入口） |
+| `composer-capacity-merged` / `composer-model-merged` | Composer.vue | 序 1 / 序 2 合流态（`density.slots.* === 'merged'`） |
+
+**任务托盘（built-in 四件 + 协议 widget 区）**：
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
+| `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
+| `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
+| `tray-aggregate-button` | 序 4 生效（`<520px`）且托盘有条目（`hasTrayItems`）；聚合入口 = 层叠图标 + 运行数 |
+| `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
+| `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
+| `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
+| `tray-native-panel` | 面板容器（`data-kind` = 面板类型；`data-pinned` = pin 态） |
+| `tray-panel-tabs` / `tray-panel-tab-{running|ended}` / `tray-panel-tab-count-{bucket}` | 分桶筛选槽（进行中 / 已结束两桶） |
+| `tray-bash-row` / `tray-subagent-row` / `tray-workflow-row` | 各面板行（行内操作仅 pin 态） |
+| `tray-widget-button` / `tray-widget-panel` / `tray-widget-panel-progress-fill` | 协议 widget 区条目与面板（todo / goal） |
+
+**模式可见性（chip + 声明行）**：
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `chip-preset` | `@taiji/ui` PresetSelectChip.vue（landing） | landing 首行第三 chip（有选中 id 才渲染） |
+| `chip-preset-locked` | `@taiji/ui` PresetSelectChip.vue | 已建 session 的锁定态（landing chip 只读分支） |
+| `preset-chip` | PresetChip.vue（对话态只读 chip） | 仅**非默认模式**渲染（判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`；**用 `||` 不用 `??`**——store 未加载时空串会让 `??` 穿透）；**E7 三态同声明行口径**：模式列表未加载 / 加载失败时不渲染（避免闪裸 `custom:xxxx`） |
+| `preset-chip-replace-badge` | PresetChip.vue | 模式 `replace` 启用且文案非空 **且** chip 退化为纯图标档（文本/短名档改为 chip 内后缀，无独立 testid） |
+| `preset-chip-popover` | PresetChip.vue | hover chip 弹出（模式详情 + 锁定说明 + 新建会话出口） |
+| `mode-declaration-row` | ModeDeclarationRow.vue | 非默认模式在消息流顶部渲染一条派生声明行（零新 entry 类型；三态降级：未加载 / 已加载缺 id / 加载失败） |
+
+**退役（testid 已删，源码零命中）**：`fork-group-*` 全族——侧栏 ForkGroup 聚合容器已退役（不聚合），两项独家能力已迁走：分支未读角标合流进既有 `session-unread-dot`、分支软停止迁入通用行菜单项 `session-stop-item`。详见 [02-panels-sidebar.md](./02-panels-sidebar.md) 的会话列表 testid 登记。
+
+> **[u7 已落地]** 第 4 件「子会话」已随 u7 落地：`useTrayCounts` 的 `TrayBuiltinKind = TrayTaskKind | 'session'`（`session` 不并入 `TrayTaskKind`/`TRAY_BUCKETS`，走独立面板 `packages/renderer/src/components/panel/tray/TraySessionPanel.vue`）；`use-composer-bar-density` 的 `hasTrayItems` 由四件 + widget 区共同派生，序 4 聚合面板内分段展示含 session 类别。
 
 **CommandPopover / ComposerInput 目前没有 data-testid**。E2E 查询靠：
 - 命令项：`page.getByRole('button', { name: '/commit' })`（命令名作 button text）

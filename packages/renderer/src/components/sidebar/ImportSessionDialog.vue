@@ -2,9 +2,32 @@
   <Dialog :open="props.open" @update:open="onOpenChange">
     <DialogContent class="sm:max-w-[620px]" data-testid="import-session-dialog">
       <DialogHeader>
-        <DialogTitle>{{ t('importSession.dialogTitle') }}</DialogTitle>
-        <DialogDescription>{{ t('importSession.description') }}</DialogDescription>
+        <DialogTitle>
+          {{ phase === 'source' ? t('importSession.pickSourceTitle') : t(activeTitleKey) }}
+        </DialogTitle>
+        <DialogDescription>
+          {{ phase === 'source' ? t('importSession.pickSourceDescription') : t(activeDescriptionKey) }}
+        </DialogDescription>
       </DialogHeader>
+
+      <!-- 阶段一：来源选择视图（ImportSourcePicker，设计 §3.1 两选项 + 来源说明；
+           选定即进入阶段二拉取该源候选） -->
+      <ImportSourcePicker v-if="phase === 'source'" @pick="chooseSource" />
+
+      <template v-else>
+      <!-- 返回重选来源（设计 §3.1「左上角可返回重选」；视图切回阶段一，候选数据保留） -->
+      <div class="flex items-center">
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid="import-back-btn"
+          class="h-7 shrink-0 gap-1 rounded-md px-2 text-xs text-neutral-mid hover:text-neutral-fg"
+          @click="backToSource"
+        >
+          <ArrowLeft class="size-3.5" />
+          {{ t('importSession.backToSource') }}
+        </Button>
+      </div>
 
       <!-- 搜索：名称 / Session ID / 短 ID / 绝对路径。'/' 或 '~' 开头切路径模式（D5 S7：
            renderer 切形态，runtime 无分支——sourcePath includes 匹配天然覆盖）。
@@ -70,8 +93,10 @@
           </PopoverContent>
         </Popover>
         <!-- 「选择其他目录」（V8）：切扫描根重拉；虚线边框区分于筛选态 chip。
-             自定义根时 title 展示根路径（观察者可见当前扫描位置） -->
+             自定义根时 title 展示根路径（观察者可见当前扫描位置）。
+             仅 pi 源显示——rootDir 是 pi 目录扫描概念，zcode 源换根 out-of-scope -->
         <Button
+          v-if="source === 'pi'"
           variant="ghost"
           size="sm"
           data-testid="import-choose-dir-btn"
@@ -141,7 +166,7 @@
           <div v-else-if="loadFailed" class="flex flex-col items-center gap-2 px-2 py-8">
             <!-- 识别码按码展示恢复指引（V6 dir_unreadable 可达）；表外/未识别码走通用失败 + 重试 -->
             <p data-testid="import-load-error" class="px-4 text-center text-sm text-neutral-mid">
-              {{ loadErrorCode ? t(`importSession.errors.${loadErrorCode}`) : t('importSession.loadFailed') }}
+              {{ loadErrorCode ? errorText(loadErrorCode) : t('importSession.loadFailed') }}
             </p>
             <Button variant="ghost" size="sm" data-testid="import-retry-btn" @click="fetchCandidates">
               {{ t('importSession.retry') }}
@@ -222,35 +247,41 @@
         </div>
       </ScrollArea>
 
-      <!-- 导入失败：内联恢复指引（error envelope code → 文案映射，不弹系统对话框） -->
+      <!-- 导入失败：内联恢复指引（error envelope code → 文案映射，不弹系统对话框；
+           zcode 源对部分码走特化文案，见 errorText） -->
       <p v-if="importErrorCode" data-testid="import-error" class="text-xs text-danger">
-        {{ t(`importSession.errors.${importErrorCode}`) }}
+        {{ errorText(importErrorCode) }}
       </p>
+      </template>
 
-      <!-- 底部：导入目标 project（默认当前活跃）+ 取消 / 导入 -->
+      <!-- 底部：阶段二 = 导入目标 project（默认当前活跃）+ 取消 / 导入；阶段一 = 仅取消
+           （导入动作在选定来源前无意义；关闭另有右上 X / Esc / 遮罩三通道） -->
       <div class="flex items-center gap-2">
-        <span class="shrink-0 text-sm text-neutral-mid">{{ t('importSession.importTo') }}</span>
-        <Select v-model="selectedProjectId">
-          <SelectTrigger class="h-8 w-[180px] px-2 text-xs" data-testid="import-project-select">
-            <!-- SelectValue 自动 label 依赖 optionsSet（SelectItem 渲染时注册），初始未打开
-                 下拉时为空——slot 覆盖为自算名，保证「默认当前激活 project」打开即可见 -->
-            <SelectValue>{{ selectedProjectName }}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="p in projectStore.recentProjects"
-              :key="p.id"
-              :value="p.id"
-            >
-              {{ p.name || t('importSession.defaultProjectName') }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <template v-if="phase === 'list'">
+          <span class="shrink-0 text-sm text-neutral-mid">{{ t('importSession.importTo') }}</span>
+          <Select v-model="selectedProjectId">
+            <SelectTrigger class="h-8 w-[180px] px-2 text-xs" data-testid="import-project-select">
+              <!-- SelectValue 自动 label 依赖 optionsSet（SelectItem 渲染时注册），初始未打开
+                   下拉时为空——slot 覆盖为自算名，保证「默认当前激活 project」打开即可见 -->
+              <SelectValue>{{ selectedProjectName }}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="p in projectStore.recentProjects"
+                :key="p.id"
+                :value="p.id"
+              >
+                {{ p.name || t('importSession.defaultProjectName') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </template>
         <div class="ml-auto flex items-center gap-2">
           <Button variant="ghost" size="sm" data-testid="import-cancel-btn" @click="onCancel">
             {{ t('importSession.cancel') }}
           </Button>
           <Button
+            v-if="phase === 'list'"
             size="sm"
             :disabled="!canConfirm"
             data-testid="import-confirm-btn"
@@ -267,7 +298,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, ChevronDown, Search, FileText } from '@lucide/vue'
+import { Folder, ChevronDown, Search, FileText, ArrowLeft } from '@lucide/vue'
+import ImportSourcePicker from '@/components/sidebar/ImportSourcePicker.vue'
 import {
   Dialog,
   DialogContent,
@@ -293,7 +325,7 @@ import {
   type ImportSessionImportedPayload,
 } from '@/composables/features/sidebar/useImportSession'
 import { useProjectStore } from '@/stores/project'
-import type { ImportCandidate } from '@taiji/shared'
+import type { ImportCandidate, ImportSourceKind } from '@taiji/shared'
 
 const props = defineProps<{
   open: boolean
@@ -310,6 +342,8 @@ const projectStore = useProjectStore()
 const {
   open: dialogOpen,
   query,
+  source,
+  selectSource,
   dirs,
   total,
   loading,
@@ -337,6 +371,52 @@ const {
 
 const idleChipClass = 'border-border text-neutral-mid hover:text-neutral-fg'
 
+/**
+ * 两阶段视图态（设计 §3.7 GUI：同一对话框内切换视图态，不叠弹框）：
+ * 'source' = 阶段一来源选择；'list' = 阶段二当前源候选列表（结构两源同构）。
+ */
+type ImportPhase = 'source' | 'list'
+const phase = ref<ImportPhase>('source')
+
+/** 选定来源：进入阶段二（composable 侧按需拉取该源候选） */
+function chooseSource(kind: ImportSourceKind): void {
+  selectSource(kind)
+  phase.value = 'list'
+}
+
+/** 返回重选来源（阶段二左上入口；候选数据保留，重进同源不重拉） */
+function backToSource(): void {
+  phase.value = 'source'
+}
+
+/** 阶段二标题/描述按源取（pi = 现有 dialogTitle/description，zcode 同构专属文案） */
+const activeTitleKey = computed(() =>
+  source.value === 'zcode' ? 'importSession.zcodeDialogTitle' : 'importSession.dialogTitle',
+)
+const activeDescriptionKey = computed(() =>
+  source.value === 'zcode' ? 'importSession.zcodeDescription' : 'importSession.description',
+)
+
+/**
+ * zcode 源特化恢复指引的错误码（设计 §3.6，与 pi 同码不同义）：未装库 / 会话不在库或
+ * schema 漂移——pi 文案里的「选择其他目录」对 zcode 是死路指引；目标位置冲突——zcode 库内
+ * 会话无「原始文件名」可选（罕见，换目标 project 不影响本错误），指引联系反馈。
+ * 其余码（already_imported / copy_failed 等）两源恢复动作一致，共用通用文案。
+ */
+const ZCODE_ERROR_KEYS: ReadonlySet<string> = new Set([
+  'import_source_missing',
+  'import_invalid_session',
+  'import_target_conflict',
+])
+
+/** 错误码 → 恢复指引起文案（zcode 源对特化码走 errorsZcode，其余回落通用清单） */
+function errorText(code: string): string {
+  if (source.value === 'zcode' && ZCODE_ERROR_KEYS.has(code)) {
+    return t(`importSession.errorsZcode.${code}`)
+  }
+  return t(`importSession.errors.${code}`)
+}
+
 /** 骨架屏占位行数（demo §4 加载骨架 3 行） */
 const SKELETON_ROWS = 3
 
@@ -363,12 +443,17 @@ function selectDir(value: string): void {
   dirMenuOpen.value = false
 }
 
-// prop → composable：父层打开时重置状态并首拉；关闭时同步收起 + 取消 pending debounce
+// prop → composable：父层打开时重置状态（含回缺省 pi 源 + 视图回到阶段一来源选择）；
+// 关闭时同步收起 + 取消 pending debounce
 watch(
   () => props.open,
   (isOpen) => {
-    if (isOpen) resetForOpen()
-    else close()
+    if (isOpen) {
+      resetForOpen()
+      phase.value = 'source'
+    } else {
+      close()
+    }
   },
   { immediate: true },
 )

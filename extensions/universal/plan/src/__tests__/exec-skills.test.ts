@@ -190,6 +190,34 @@ describe("对照表② overrides-disable 复刻", () => {
     expect(isEnabledByOverrides(filePath, [], baseDir)).toBe(true); // 无 overrides 恒启用
     expect(isEnabledByOverrides(filePath, ["!other"], baseDir)).toBe(true);
   });
+
+  // globToRegExp 未测分支（minimatch 子集重实现，与 pi 求值的偏差域）：? 单字符 /
+  // [...] 字符类（含取反）/ 未闭合 ] 字面量 / 正则元字符转义——经公开入口锁语义，
+  // 任一分支回归即红（false = 禁用命中，true = 默认启用未命中）。
+  it("isEnabledByOverrides 单元：? / 字符类 / 取反 / 未闭合 ] / 元字符转义分支", () => {
+    const baseDir = join(world.root, "base");
+    const filePath = join(baseDir, "skills", "dev-flow", "SKILL.md");
+    // ? = 单字符且不跨 /：dev-flo? 命中 w；dev-flow? 差一字符不命中；skills?dev 不跨 / 不命中
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-flo?/SKILL.md"], baseDir)).toBe(false);
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-flow?/SKILL.md"], baseDir)).toBe(true);
+    expect(isEnabledByOverrides(filePath, ["!skills?dev-flow/SKILL.md"], baseDir)).toBe(true);
+    // 字符类：[a-z] 命中 d；[0-9] 未命中
+    expect(isEnabledByOverrides(filePath, ["!skills/[a-z]ev-flow/SKILL.md"], baseDir)).toBe(false);
+    expect(isEnabledByOverrides(filePath, ["!skills/[0-9]ev-flow/SKILL.md"], baseDir)).toBe(true);
+    // 取反类：[!a-z] 排除小写字母 → d 不命中；[!0-9] 排除数字 → d 命中
+    expect(isEnabledByOverrides(filePath, ["!skills/[!a-z]ev-flow/SKILL.md"], baseDir)).toBe(true);
+    expect(isEnabledByOverrides(filePath, ["!skills/[!0-9]ev-flow/SKILL.md"], baseDir)).toBe(false);
+    // 未闭合 ]：[ 按字面量处理（不吞后续段），dev-flow 目录无 [ → 不命中
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-flow[/SKILL.md"], baseDir)).toBe(true);
+    // 字符类单字：dev-fl[o]w 命中（fl 后是 o）；dev-fl[w]w 不命中（fl 后非 w）
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-fl[o]w/SKILL.md"], baseDir)).toBe(false);
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-fl[w]w/SKILL.md"], baseDir)).toBe(true);
+    // 正则元字符转义：. 与 $ 不提前终止/锚定匹配——dev.flow（字面点）不命中 dev-flow，
+    // dev-flow$（字面 $）不命中；若未转义 . 会通配命中、$ 会锚定改变语义
+    expect(isEnabledByOverrides(filePath, ["!skills/dev.flow/SKILL.md"], baseDir)).toBe(true);
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-flow$/SKILL.md"], baseDir)).toBe(true);
+    expect(isEnabledByOverrides(filePath, ["!skills/dev-flow/SKILL.md"], baseDir)).toBe(false);
+  });
 });
 
 describe("对照表④ trusted 门", () => {

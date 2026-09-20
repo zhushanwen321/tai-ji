@@ -1016,6 +1016,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [reload-closeout D2] 送达水位对账腿入口（agent_settled 触发，interpreter 经组合根
+   * 注入）。实现迁 session-records.ts——重跑同一条 fetch→merge→publish 管线，发布门 =
+   * 已发布快照水位（守卫/发布门处曾丢的帧补发；扫描域门与 inflight 合并见该模块）。
+   */
+  reconcileRecordEntries(sessionId: string): void {
+    return this.records.reconcileRecordEntries(sessionId)
+  }
+
+  /**
    * 确保会话活跃;不存在则自动 restore。
    *
    * 并发语义（crash-resilience D7-③，u8 join 改造）：[HISTORICAL] 原对并发调用直接

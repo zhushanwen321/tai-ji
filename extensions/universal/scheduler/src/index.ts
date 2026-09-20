@@ -162,7 +162,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     description:
       'Create a scheduled task that fires a message at intervals or cron schedule. ' +
       'The call first opens a confirmation form pre-filled with your draft (time/model/prompt); ' +
-      'the task is created only after the user confirms it. Only initiate when the user asks ' +
+      'the task is created only after the user confirms it. In headless (non-interactive) ' +
+      'sessions there is no form: the task is created directly from the parameters and the ' +
+      'result notes it was not user-confirmed. Only initiate when the user asks ' +
       'for a scheduled task. If the user cancels the form, the task is NOT created — do not ' +
       'assume a configuration and do not retry.',
     parameters: ScheduleParams,

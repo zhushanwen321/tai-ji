@@ -71,7 +71,13 @@ function mountMd(props: Record<string, unknown>, depsOverrides: Partial<ChatView
       provide: mockChatProvide(depsOverrides),
       stubs: {
         MermaidRenderer: true,
-        AmbiguousFilePopover: { name: 'AmbiguousFilePopover', render: () => null },
+        // props 声明使 findComponent().props('open'/'candidates') 可断言（③路歧义浮层联动）
+        AmbiguousFilePopover: {
+          name: 'AmbiguousFilePopover',
+          props: ['open', 'basename', 'candidates', 'anchorEl'],
+          emits: ['update:open', 'select'],
+          render: () => null,
+        },
       },
     },
   })
@@ -555,5 +561,97 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
     const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 'ghost' }, { openDrawer, sessionCwdOf })
     expect(clicks[0]?.defaultPrevented).toBe(true)
     expect(openDrawer).not.toHaveBeenCalled()
+  })
+})
+
+// ── ①②③路事件委托路由（复制按钮 / 文件路径 / 歧义 basename——D4 ④路之外的三路
+//    存量行为；因 onClick 重构拆具名函数而成为本 diff 新增行，此处钉住用户可见行为）──
+describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous）', () => {
+  /** 挂载渲染任意 html text 段并收集冒泡 click 事件（供 defaultPrevented 断言） */
+  async function mountWithHtml(html: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
+    const renderMarkdown = vi.fn().mockResolvedValue([{ type: 'text', content: html }])
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, ...depsOverrides })
+    await flushRaf()
+    const clicks: Event[] = []
+    wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
+    return { wrapper, clicks }
+  }
+
+  /** stub navigator.clipboard（测试环境无真实剪贴板） */
+  function stubClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    return writeText
+  }
+
+  it('① 复制按钮 data-code 合法 → preventDefault + 剪贴板写入 + is-copied 反馈态', async () => {
+    const writeText = stubClipboard()
+    const { wrapper, clicks } = await mountWithHtml('<button class="md-codeblock__copy" data-code="Y29kZQ==">copy</button>')
+    await wrapper.find('button.md-codeblock__copy').trigger('click')
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(writeText).toHaveBeenCalledWith('code')
+    expect(wrapper.find('button.md-codeblock__copy').classes()).toContain('is-copied')
+  })
+
+  it('① base64 解码失败 → 不写剪贴板但反馈态保留（反馈态是唯一出口）', async () => {
+    const writeText = stubClipboard()
+    const { wrapper, clicks } = await mountWithHtml('<button class="md-codeblock__copy" data-code="!!illegal!!">copy</button>')
+    await wrapper.find('button.md-codeblock__copy').trigger('click')
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(writeText).not.toHaveBeenCalled()
+    expect(wrapper.find('button.md-codeblock__copy').classes()).toContain('is-copied')
+  })
+
+  it('② .md-filepath 带 data-path → onFileClick + openDrawer("detail")（base64 解码路径）', async () => {
+    const onFileClick = vi.fn()
+    const openDrawer = vi.fn()
+    const b64 = btoa('/docs/readme.md')
+    const { wrapper, clicks } = await mountWithHtml(`<a class="md-filepath" data-path="${b64}">/docs/readme.md</a>`, {}, { onFileClick, openDrawer })
+    await wrapper.find('a.md-filepath').trigger('click')
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(onFileClick).toHaveBeenCalledWith('/docs/readme.md')
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/docs/readme.md' })
+  })
+
+  it('② data-path 缺失 → fallback textContent 仍打开（sanitize 降级路径的兜底）', async () => {
+    const onFileClick = vi.fn()
+    const openDrawer = vi.fn()
+    const { wrapper } = await mountWithHtml('<a class="md-filepath">src/a.ts</a>', {}, { onFileClick, openDrawer })
+    await wrapper.find('a.md-filepath').trigger('click')
+    expect(onFileClick).toHaveBeenCalledWith('src/a.ts')
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: 'src/a.ts' })
+  })
+
+  it('③ .md-ambiguous → preventDefault + 浮层 open + 经 deps 加载候选并按 basename 过滤', async () => {
+    const loadFileCandidates = vi.fn().mockResolvedValue([
+      { path: 'a/foo.ts', name: 'foo.ts', type: 'file' },
+      { path: 'b/foo.ts', name: 'foo.ts', type: 'file' },
+      { path: 'c/bar.ts', name: 'bar.ts', type: 'file' },
+    ])
+    const { wrapper, clicks } = await mountWithHtml('<a class="md-ambiguous">foo.ts</a>', { sessionId: 's1' }, { loadFileCandidates })
+    await wrapper.find('a.md-ambiguous').trigger('click')
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    await nextTick()
+    await nextTick()
+    expect(loadFileCandidates).toHaveBeenCalledWith('s1', 'foo.ts')
+    const popover = wrapper.findComponent({ name: 'AmbiguousFilePopover' })
+    expect(popover.props('open')).toBe(true)
+    expect(popover.props('basename')).toBe('foo.ts')
+    expect(popover.props('candidates')).toHaveLength(2)
+  })
+
+  it('③ 浮层 select → onFileClick + openDrawer("detail") + 浮层关闭', async () => {
+    const onFileClick = vi.fn()
+    const openDrawer = vi.fn()
+    const loadFileCandidates = vi.fn().mockResolvedValue([{ path: 'a/foo.ts', name: 'foo.ts', type: 'file' }])
+    const { wrapper } = await mountWithHtml('<a class="md-ambiguous">foo.ts</a>', { sessionId: 's1' }, { onFileClick, openDrawer, loadFileCandidates })
+    await wrapper.find('a.md-ambiguous').trigger('click')
+    await nextTick()
+    const popover = wrapper.findComponent({ name: 'AmbiguousFilePopover' })
+    popover.vm.$emit('select', 'a/foo.ts')
+    await nextTick()
+    expect(onFileClick).toHaveBeenCalledWith('a/foo.ts')
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: 'a/foo.ts' })
+    expect(wrapper.findComponent({ name: 'AmbiguousFilePopover' }).props('open')).toBe(false)
   })
 })

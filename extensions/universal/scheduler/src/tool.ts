@@ -12,6 +12,7 @@ import { getLogger } from '@zhushanwen/pi-extension-logger'
 import { ScheduleCreateComponent, type ThemeLike } from './create-form-component.js'
 import { parseSchedule } from './parsing.js'
 import type { SchedulerService, ServiceResult } from './service.js'
+import type { AddOptions } from './types.js'
 
 const logger = getLogger('scheduler')
 
@@ -125,6 +126,128 @@ function throwProtocolMismatch(): never {
 }
 
 /**
+ * 步骤 1 预校验（§3.5）：prompt 空 / schedule 非法 → 不发起交互直接 throw
+ *（错误可自修复：修正参数后重调 schedule）。
+ */
+function assertValidScheduleParams(prompt: string, scheduleInput: string): void {
+  if (!prompt || prompt.trim() === '') {
+    throw new Error('Invalid parameters: prompt must not be empty. Fix the parameters and call schedule again.')
+  }
+  if (!parseSchedule(scheduleInput)) {
+    throw new Error(
+      `Invalid parameters: unrecognized schedule "${scheduleInput}". ` +
+      'Use duration (5m/2h/1d) or cron expression (*/10 * * * *). Fix the parameters and call schedule again.',
+    )
+  }
+}
+
+/**
+ * 步骤 2 headless 直通创建（D4 分支 1）：mode 非 tui 非 rpc = 无交互通道 → 参数直接
+ * 创建 + 附注「未经确认」，不禁用工具（创建无确认也能用，脚本化场景不因确认门失效）。
+ */
+async function createHeadlessResult(
+  service: SchedulerService,
+  prompt: string,
+  scheduleInput: string,
+  options: AddOptions,
+) {
+  const result = await service.create(prompt, scheduleInput, options)
+  const toolResult = toToolResult(result)
+  toolResult.content[0]!.text += UNCONFIRMED_NOTICE
+  return toolResult
+}
+
+/** 步骤 3 交互分支（TUI）：挂 ScheduleCreateComponent（ctx.ui.custom）；
+ * abort → comp.cancel()（once 监听，挂起期间收到 abort 归 null）。 */
+async function interactScheduleFormTui(
+  ctx: ExtensionContext,
+  draft: ScheduleDraft,
+  signal: AbortSignal | undefined,
+): Promise<ScheduleFormResult | null | undefined> {
+  return ctx.ui.custom<ScheduleFormResult | null>((tui, theme, _kb, done) => {
+    // theme as ThemeLike（ask-user runTuiInteraction 同款）：pi Theme.fg 参数是
+    // ThemeColor 字面量联合，窄于 ThemeLike.fg(token: string)，结构上不可直接赋值；
+    // 运行时组件仅调 theme.inverse（真实 Theme 在场），断言安全。
+    const comp = new ScheduleCreateComponent(draft, tui, theme as ThemeLike, done)
+    signal?.addEventListener('abort', () => comp.cancel(), { once: true })
+    return comp
+  })
+}
+
+/**
+ * 步骤 3 交互分支（rpc）：uiFormInteract（select + UI_FORM_MARKER 通道，ScheduleQuestion
+ * 单问整表单，draft 经 initial 预填——统一表单协议 u6 迁移）+ FormAnswers envelope 解包。
+ * cancelled | timeout → 返回 null（调用方统一走取消语义 D5）。
+ */
+async function interactScheduleFormRpc(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  draft: ScheduleDraft,
+  signal: AbortSignal | undefined,
+): Promise<ScheduleFormResult | null | undefined> {
+  // GuiContext 最小子集（ask-user runRpcInteraction 同款）：ExtensionContext.ui.custom
+  // 的复杂泛型与 GuiContext 简化签名不兼容，直接传会类型冲突。
+  const guiCtx = {
+    mode: ctx.mode,
+    hasUI: ctx.hasUI,
+    ui: { select: ctx.ui.select.bind(ctx.ui) },
+  }
+  const interacted = await uiFormInteract(
+    guiCtx,
+    [{ type: 'schedule', question: SCHEDULE_FORM_QUESTION, initial: draft }],
+    {
+      signal,
+      log: (msg, detail) => logger.warn(msg, detail),
+    },
+  )
+  if (!interacted.ok) {
+    if (interacted.reason === 'channel-error') {
+      // §3.5 第一行：RPC 通道不可用 → 禁用本会话 schedule 工具 + throw
+      //（echo 检测命中态附带升级指引 message，一并透出给用户）
+      disableScheduleTool(pi)
+      const echoHint = interacted.message ? `${interacted.message} ` : ''
+      throw new Error(
+        'schedule requires an interactive channel, which is unavailable. ' +
+        `${echoHint}` +
+        'The tool has been disabled for this session. Execute the immediate parts of the ' +
+        'user\'s instructions directly — do not create scheduled tasks and do not retry.',
+      )
+    }
+    if (interacted.reason === 'non-json') {
+      // §3.5 第二行：回包形状非法 = 协议版本错配类故障
+      throwProtocolMismatch()
+    }
+    // cancelled | timeout：rpc 模式 GUI 用户取消 resolve undefined，与超时不可区分
+    //（signal 未 abort 折叠 timeout），语义同为「未确认」→ null。
+    return null
+  }
+  // FormAnswers envelope 解包（D2 回包契约）：schedule 单问表单恰一键，value =
+  // flat ScheduleFormResult JSON（FormOverlay schedule 渲染器提交形态）。回包判别
+  // 职责在本包（D3：isScheduleFormResult 从 scheduler-create 模块导出复用）。
+  return parseScheduleFormAnswerValue(interacted.answers[SCHEDULE_FORM_QUESTION])
+}
+
+/** 回包 value（FormAnswers 单键的 JSON 字符串）→ ScheduleFormResult；形状非法 → throw
+ *（与 uiFormInteract 的 non-json 态同折叠同文案）。 */
+function parseScheduleFormAnswerValue(rawResult: unknown): ScheduleFormResult {
+  if (typeof rawResult !== 'string') throwProtocolMismatch()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawResult)
+  } catch {
+    throwProtocolMismatch()
+  }
+  if (!isScheduleFormResult(parsed)) {
+    logger.warn('schedule form answer value is not a ScheduleFormResult', {
+      key: SCHEDULE_FORM_QUESTION,
+      valueHead: rawResult.slice(0, RESPONSE_PREVIEW_LENGTH),
+    })
+    throwProtocolMismatch()
+  }
+  return parsed
+}
+
+/**
  * schedule tool handler（execute 流：预校验 → headless 分支 → abort 早退 → 交互 →
  * abort 兜底检查 → 取消 → 确认创建；设计 §5 U2 中 abort 检查先于交互）。
  *
@@ -144,25 +267,11 @@ export async function handleSchedule(
 ) {
   const { prompt, schedule: scheduleInput, kind, name, expires, model } = params
 
-  // 步骤 1 预校验（§3.5）：prompt 空 / schedule 非法 → 不发起交互直接 throw
-  //（错误可自修复：修正参数后重调 schedule）
-  if (!prompt || prompt.trim() === '') {
-    throw new Error('Invalid parameters: prompt must not be empty. Fix the parameters and call schedule again.')
-  }
-  if (!parseSchedule(scheduleInput)) {
-    throw new Error(
-      `Invalid parameters: unrecognized schedule "${scheduleInput}". ` +
-      'Use duration (5m/2h/1d) or cron expression (*/10 * * * *). Fix the parameters and call schedule again.',
-    )
-  }
+  // 步骤 1 预校验（§3.5，assertValidScheduleParams）
+  assertValidScheduleParams(prompt, scheduleInput)
 
-  // 步骤 2 headless 分支（D4）：mode 非 tui 非 rpc = 无交互通道 → 参数直接创建 +
-  // 附注「未经确认」，不禁用工具（创建无确认也能用，脚本化场景不因确认门失效）
   if (ctx.mode !== 'tui' && ctx.mode !== 'rpc') {
-    const result = await service.create(prompt, scheduleInput, { kind, name, expires, model })
-    const toolResult = toToolResult(result)
-    toolResult.content[0]!.text += UNCONFIRMED_NOTICE
-    return toolResult
+    return createHeadlessResult(service, prompt, scheduleInput, { kind, name, expires, model })
   }
 
   // abort 早退（设计 §5 U2：abort 检查先于交互）：signal 已 aborted 时 TUI 分支的
@@ -173,77 +282,11 @@ export async function handleSchedule(
     return cancelledCreateResult()
   }
 
-  // 步骤 3 交互分支：TUI 挂 ScheduleCreateComponent（ctx.ui.custom）；
-  // rpc 走 uiFormInteract（select + UI_FORM_MARKER 通道，ScheduleQuestion 单问整表单，
-  // draft 经 initial 预填——统一表单协议 u6 迁移）
+  // 步骤 3 交互分支：TUI 挂 ScheduleCreateComponent / rpc 走 uiFormInteract（见各 helper）
   const draft = buildDraft(params, ctx)
-  let formResult: ScheduleFormResult | null | undefined
-  if (ctx.mode === 'tui') {
-    formResult = await ctx.ui.custom<ScheduleFormResult | null>((tui, theme, _kb, done) => {
-      // theme as ThemeLike（ask-user runTuiInteraction 同款）：pi Theme.fg 参数是
-      // ThemeColor 字面量联合，窄于 ThemeLike.fg(token: string)，结构上不可直接赋值；
-      // 运行时组件仅调 theme.inverse（真实 Theme 在场），断言安全。
-      const comp = new ScheduleCreateComponent(draft, tui, theme as ThemeLike, done)
-      signal?.addEventListener('abort', () => comp.cancel(), { once: true })
-      return comp
-    })
-  } else {
-    // GuiContext 最小子集（ask-user runRpcInteraction 同款）：ExtensionContext.ui.custom
-    // 的复杂泛型与 GuiContext 简化签名不兼容，直接传会类型冲突。
-    const guiCtx = {
-      mode: ctx.mode,
-      hasUI: ctx.hasUI,
-      ui: { select: ctx.ui.select.bind(ctx.ui) },
-    }
-    const interacted = await uiFormInteract(
-      guiCtx,
-      [{ type: 'schedule', question: SCHEDULE_FORM_QUESTION, initial: draft }],
-      {
-        signal,
-        log: (msg, detail) => logger.warn(msg, detail),
-      },
-    )
-    if (!interacted.ok) {
-      if (interacted.reason === 'channel-error') {
-        // §3.5 第一行：RPC 通道不可用 → 禁用本会话 schedule 工具 + throw
-        //（echo 检测命中态附带升级指引 message，一并透出给用户）
-        disableScheduleTool(pi)
-        const echoHint = interacted.message ? `${interacted.message} ` : ''
-        throw new Error(
-          'schedule requires an interactive channel, which is unavailable. ' +
-          `${echoHint}` +
-          'The tool has been disabled for this session. Execute the immediate parts of the ' +
-          'user\'s instructions directly — do not create scheduled tasks and do not retry.',
-        )
-      }
-      if (interacted.reason === 'non-json') {
-        // §3.5 第二行：回包形状非法 = 协议版本错配类故障
-        throwProtocolMismatch()
-      }
-      // cancelled | timeout → 取消路径（D5）。rpc 模式 GUI 用户取消 resolve undefined，
-      // 与超时不可区分（signal 未 abort 折叠 timeout），语义同为「未确认」。
-      return cancelledCreateResult()
-    }
-    // FormAnswers envelope 解包（D2 回包契约）：schedule 单问表单恰一键，value =
-    // flat ScheduleFormResult JSON（FormOverlay schedule 渲染器提交形态）。回包判别
-    // 职责在本包（D3：isScheduleFormResult 从 scheduler-create 模块导出复用）。
-    const rawResult: unknown = interacted.answers[SCHEDULE_FORM_QUESTION]
-    if (typeof rawResult !== 'string') throwProtocolMismatch()
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(rawResult)
-    } catch {
-      throwProtocolMismatch()
-    }
-    if (!isScheduleFormResult(parsed)) {
-      logger.warn('schedule form answer value is not a ScheduleFormResult', {
-        key: SCHEDULE_FORM_QUESTION,
-        valueHead: rawResult.slice(0, RESPONSE_PREVIEW_LENGTH),
-      })
-      throwProtocolMismatch()
-    }
-    formResult = parsed
-  }
+  const formResult: ScheduleFormResult | null | undefined = ctx.mode === 'tui'
+    ? await interactScheduleFormTui(ctx, draft, signal)
+    : await interactScheduleFormRpc(pi, ctx, draft, signal)
 
   // 步骤 4 abort 检查：agent 被外部终止（goal 取消 / session 切换）→ cancelled 语义
   //（同取消路径：非错误正常返回；TUI 分支 abort 已由 comp.cancel() 归 null）
@@ -251,7 +294,8 @@ export async function handleSchedule(
     return cancelledCreateResult()
   }
 
-  // 步骤 5 取消路径（D5）：TUI 用户取消 null / abort undefined → cancelled result
+  // 步骤 5 取消路径（D5）：TUI 用户取消 null / abort undefined / rpc cancelled|timeout
+  // → cancelled result
   if (formResult == null) {
     return cancelledCreateResult()
   }

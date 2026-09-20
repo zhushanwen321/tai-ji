@@ -187,7 +187,7 @@ describe('EventInterpreter · watchdog ping 探测机制（ADR-0047）', () => {
       'req-ask-1',
       sessionId,
       'select',
-      expect.objectContaining({ askUser: true, sessionId }),
+      expect.objectContaining({ form: true, sessionId }),
     )
   })
 

@@ -1,6 +1,6 @@
 /**
  * Plan store —— plan 模式重设计 u1-store：per-session 的 PlanStateView + 评论草稿状态源
- * （设计 .tmp/tech-design/plan-mode-redesign.md §3.3-D1⑥ 冷启动首拉 / D6 评论生命周期）。
+ * （设计 plan-mode-redesign §3.3-D1⑥ 冷启动首拉 / D6 评论生命周期）。
  *
  * 职责：
  * - 分区：per-session Map 分区走 useSessionScopedState 工厂（ADR-0049 Map 分区派）。

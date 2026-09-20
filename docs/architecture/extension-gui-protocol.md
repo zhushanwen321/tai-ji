@@ -585,7 +585,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 原 ask-user 定制富交互（`askUserInteract` + `ASK_USER_MARKER` + AskUserOverlay）已升级为**统一提问表单协议（ui-form）**：ask-user / scheduler / plan 三方提问收口为一个协议、一个渲染器。权威描述（问题类型/答案格式/回包四态表/完整调用示例/内置消费方）见 [gui-protocol-guide.md §3.4](../extensions/gui-protocol-guide.md)，要点：
 
 - **交互入口**：`uiFormInteract(ctx, form, opts?): Promise<UiFormInteractResult>`（`packages/extension-protocol/src/extensions/ui-form/helpers.ts`），marker = `UI_FORM_MARKER`，复用 select 双向通道（传输核 `callMarkerRpc`）。不走 `details.__gui__`——那是单向渲染通道，无法承载双向交互；select 是 pi 原生双向通道，复用它获得队列/超时/abort 能力。
-- **问题集**：`FormQuestion` 判别联合（`choice` / `text` / `schedule`），wire 帧 `form: true` + `formQuestions`；legacy `askUser: true` + `askUserQuestions` 帧由 renderer `normalizeFormRequest` 双挂点归一进同一渲染器（版本偏斜窗口期现状，随 D7 窗口末清理）。
+- **问题集**：`FormQuestion` 判别联合（`choice` / `text` / `schedule`），wire 帧 `form: true` + `formQuestions`；legacy `ASK_USER_MARKER` 帧由 runtime event-adapter 分支直接归一为同款 `form: true` + `formQuestions` 帧（type 推断映射，scheduleCreate 源保留源键分流应答形状）进同一渲染器（版本偏斜窗口期现状，随 D7 窗口末清理）。
 - **渲染面**：`FormOverlay`（`packages/renderer/src/components/extension/form/`，三渲染器 ChoiceQuestion / TextQuestion / ScheduleForm），Panel.vue inline 覆盖 composer 位置（多问 = 多 tab，单问 = 单视图）。
 - **回包四态判别**（返回判别联合，不抛错）：`ok` / `cancelled` / `timeout` / `channel-error` / `non-json`；channel-error 含 echo 检测（旧宿主 × 新扩展组合的确定性识别，message 携带升级指引）。
 - **答案解码**：choice/text 部分与旧 `AskUserAnswers` 逐字兼容，`getAskUserAnswer` / `getAskUserOther` 解码零改动。

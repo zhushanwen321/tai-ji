@@ -343,6 +343,12 @@ export interface ISessionService {
    * 数据缓存——entry 扫描（get_entries 重拉）是派生缓存唯一数据写路径。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void
+  /**
+   * [reload-closeout D2]：送达水位对账入口（agent_settled 腿；interpreter 经组合根注入）。
+   * 重跑 fetch→merge→publish 管线，发布门 = 已发布快照水位——守卫/发布门处（hasSession
+   * 瞬态 false / bus 未注入）曾丢的帧下轮触发必补发，稳态零帧。
+   */
+  reconcileRecordEntries(sessionId: string): void
   /** W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。 */
   getUsagePercent(sessionId: string): number
   /** Get the underlying RpcClient for direct command sending (e.g., extension responses). */

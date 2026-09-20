@@ -85,8 +85,8 @@ function setup(state?: PlanState) {
 
   if (state) sessions.set("test-session", state);
 
-  const exec = (params: Record<string, unknown>) =>
-    executeFn!("tc0", params, undefined, undefined, ctx);
+  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
+    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, sessions, ctx, controllers, exec };
 }
 
@@ -131,6 +131,17 @@ describe("register-doc（D10）", () => {
   it("throws when fileName is missing (programming error)", async () => {
     const { exec } = setup(activeStateWithDocs());
     await expect(exec({ action: "register-doc" })).rejects.toThrow("fileName is required");
+  });
+
+  it("rejects path traversal in fileName — absPath 不得逃出 plan 目录", async () => {
+    const { exec, pi } = setup(activeStateWithDocs());
+    for (const bad of ["../secret.md", "sub/dir.md", "back\\slash.md", "..", "."]) {
+      await expect(exec({ action: "register-doc", fileName: bad })).rejects.toThrow(
+        "fileName must be a plain file name inside the plan directory",
+      );
+    }
+    // 全部拒绝：零状态写入（throw 先于 persistPlanState）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
   it("returns an error result when plan mode is not active (前置条件用 result 错误)", async () => {
@@ -212,6 +223,50 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     expect(hungSignal).toBe(opts.signal);
     // select settled 后 controller 即弃（注册表不留已 settled 的条目）
     expect(controllers.has("test-session")).toBe(false);
+  });
+});
+
+describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8）", () => {
+  /** select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined */
+  function selectHonoringSignal(ctx: { ui: { select: unknown } }): void {
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+      (_title: string, _options: string[], opts: { signal?: AbortSignal }) =>
+        new Promise<string | undefined>((resolve) => {
+          if (opts.signal?.aborted) {
+            resolve(undefined);
+            return;
+          }
+          opts.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+        }),
+    );
+  }
+
+  it("submit-review 挂起窗口内 turn abort → PLAN_REVIEW_MARKER select 解散 → cancelled result（非批准）", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    selectHonoringSignal(ctx);
+
+    const turn = new AbortController();
+    const pending = exec({ action: "submit-review" }, turn.signal);
+    turn.abort();
+    const res = await pending;
+
+    expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
+    // A9 语义：取消 ≠ 批准，result 文本显式禁止实施
+    expect(res.content[0].text).toContain("NOT an approval");
+  });
+
+  it("execute 进入时 turn signal 已 abort → controller 即刻置 abort 态，select 首行短路解散", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    selectHonoringSignal(ctx);
+
+    const turn = new AbortController();
+    turn.abort();
+    const res = await exec({ action: "submit-review" }, turn.signal);
+
+    expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
   });
 });
 
@@ -367,6 +422,23 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it("echo 回显（旧 taiji 宿主不识别 PLAN_REVIEW_MARKER）→ 升级指引错误，不引导重挂（MF-1-9）", async () => {
+    const { exec, ctx, pi } = setupTaiji();
+    // 宿主把 marker select 降级普通单选项：用户点选回显 payload 自身（合法 JSON，
+    // parse 会成功但形状守卫必败——echo 判定必须先于 parse，否则重挂 → 再回显循环）
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_title: string, options: string[]) => options[0],
+    );
+
+    const res = await exec({ action: "submit-review" });
+
+    expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
+    expect(res.content[0].text).toContain("upgrade taiji");
+    // 不引导重挂：重挂会同样回显，形成重复弹错循环
+    expect(res.content[0].text).not.toContain("re-hang");
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("dismissed select (undefined) → cancelled result: not an approval, stop the review loop", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
@@ -388,9 +460,9 @@ describe("三 decision 消费（taiji 形态）", () => {
 });
 
 describe("submit-review 的 PLAN_ACTIONS 面", () => {
-  it("action list contains exactly the six actions", () => {
+  it("action list contains exactly the five actions (list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "list-template", "register-doc", "select-template", "submit-review"],
+      ["abort", "complete", "register-doc", "select-template", "submit-review"],
     );
   });
 });

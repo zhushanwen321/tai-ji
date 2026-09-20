@@ -165,6 +165,13 @@ export declare function findNeedsRedesign(
   maxFixAttempts: number,
 ): Array<{ issue_id: string; [key: string]: unknown }>;
 export declare function parseResult(raw: unknown): Record<string, unknown>;
+export declare function normalizeGroupEntry(
+  x: unknown,
+): { issueIds: string[]; id?: string; note?: string } | null;
+export declare function reconcileGroups(
+  rawGroups: Array<{ issueIds: string[]; id?: string; note?: string }> | undefined | null,
+  activeEntries: Array<{ id: string; files?: string[]; [key: string]: unknown }>,
+): Array<{ id: string; issueIds: string[]; files: string[]; note: string }>;
 export declare function normalizeAggregatorResult(raw: unknown): {
   must_fix: number;
   suggestion: number;
@@ -257,9 +264,35 @@ export declare function resolveBatchTerminated(
   batchClean: boolean,
   terminated: string | undefined,
 ): string | undefined;
+export declare function collectAffectedFiles(
+  fixes?: Array<{ affected_files?: unknown; [key: string]: unknown } | null> | null,
+): string[];
+export declare function planUnifiedCommit(
+  fixes?: Array<{ affected_files?: unknown; [key: string]: unknown } | null> | null,
+  counters: { batchIndex: number; round: number; mustFix: number; suggestion: number },
+  exists: (p: string) => boolean,
+): {
+  stagePaths: string[];
+  skippedPaths: string[];
+  addArgs: string[];
+  commitArgs: string[];
+  commitMsg: string;
+};
 
 export declare const TARGET_TYPES: string[];
 export declare const VALID_ARG_KEYS: Set<string>;
+export declare const REVIEWER_BATCH: number;
+export interface DiffStats {
+  files: string[];
+  churnLines: number;
+  pkgCount: number;
+}
+export declare function planReviewerOrder<T extends { name: string }>(
+  items: T[],
+  diffStats: { pkgCount: number; churnLines: number } | null,
+): { order: T[]; slowBatch: T[]; fastBatch: T[]; note: string };
+export declare function parseDiffStats(numstatOut: string | null | undefined): DiffStats;
+export declare function countDiffPackages(files?: string[] | null): number;
 export declare const ROUND_CONTEXT_MARKER: string;
 export declare function buildR1ReviewPrompt(args: {
   header?: string;

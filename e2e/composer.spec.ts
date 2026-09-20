@@ -9,6 +9,8 @@
  * - E2E-CF-1: composer 渲染（输入区可见）+ 工具条左簇任务托盘挂载（D1）
  * - E2E-CF-4: + 菜单只剩「附件」「命令」（# 文件改走 inline，@ 引用废弃）
  * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项；托盘同判据隐藏（D1）
+ * - E2E-CF-6: 非默认模式会话（launchPresetId='builtin:session-dispatch'）→ 只读模式 chip +
+ *   流顶声明行（u4/u5 已落地，本用例为回归断言——见下方用例注释）
  *
  * [2026-09-16 composer-task-tray] 工具条结构断言复核：托盘插在 `+ 添加` 菜单之后、
  * composer.toolbar 挂载点之前（设计 D1），不改变本 spec 原有断言面（输入区 / + 菜单 portal
@@ -59,6 +61,24 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
     // 不含「文件」（改走 inline）和「引用」（@ 废弃）
     expect(await menu.getByRole('button', { name: /文件/ }).count()).toBe(0)
     expect(await menu.getByRole('button', { name: /引用/ }).count()).toBe(0)
+  })
+
+  /**
+   * [u4/u5 已落地：回归断言] u4（mode-visibility-chip，edc77ccf4）/ u5（mode-declaration-row，
+   * 43c74c438）均已落地，两条 testid 在 DOM 存在，本用例为回归防线。
+   *
+   * 数据依赖：mock fixture s3（「API 性能优化」）带 launchPresetId='builtin:session-dispatch'，
+   * 且 mock preset 域返回内置模式目录（含 builtin:full / builtin:session-dispatch）——
+   * 二者缺一都会让「非默认模式」派生判据落到「未加载不渲染 / 模式已删除」分支。
+   * 判据（设计 D5）：渲染 ⇔ session.launchPresetId !== presetStore.defaultPresetId（mock 下
+   * defaultPresetId='builtin:full'）→ s3 满足；默认模式会话的反向断言由 u4/u5 单测覆盖。
+   */
+  test('E2E-CF-6: 非默认模式会话渲染只读模式 chip + 流顶声明行', async ({ page }) => {
+    await activateSession(page)
+    // composer meta 行只读模式 chip（带锁，不可切换）
+    await expect(page.getByTestId('preset-chip')).toBeVisible({ timeout: 5_000 })
+    // 对话流首屏声明行（renderer 派生行，零 token；锚在流顶，不随滚动消失）
+    await expect(page.getByTestId('mode-declaration-row')).toBeVisible({ timeout: 5_000 })
   })
 
   test('E2E-CF-5: landing 态 + 菜单也是 附件/命令 两项（守门随 file 入口移除）', async ({ page }) => {

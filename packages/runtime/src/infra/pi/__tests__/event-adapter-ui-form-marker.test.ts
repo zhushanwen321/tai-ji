@@ -8,7 +8,8 @@
  *   混合数组仅保留合法项；全不合法 / 非 JSON / formQuestions 非数组 → 降级普通 select
  * - kind 双事件断言：extension-ui kind（watchdog 暂停 + server 跟踪 + pending 缓存的编排
  *   入口，interpreter 路由 onExtensionUIRequest）+ message kind（前端广播帧）成对且字段一致
- * - 既有 marker 分支无回归（D7：ASK_USER / SCHEDULE_CREATE 分支原样保留零改动）
+ * - 既有 marker 分支无回归（legacy 归一上移：ASK_USER / SCHEDULE_CREATE 分支同样产出
+ *   form:true 统一表单帧——askUser 源 type 推断映射、scheduleCreate 源保留键分流应答形状）
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-ui-form-marker.test.ts
  */
@@ -212,31 +213,41 @@ describe('EventAdapter form 帧的 pending 缓存编排入口（interpreter 路�
   })
 })
 
-// ── 既有 marker 分支回归（D7：legacy 窗口原样保留，u2 只增分支不改分支）──────────────
+// ── 既有 marker 分支回归（legacy→form 归一上移 runtime：marker 命中即产 form 帧）──────────
 
-describe('EventAdapter 既有 marker 分支回归（UI_FORM 分支加员后）', () => {
-  it('ASK_USER_MARKER 富交互分流照常（askUser:true + questions 透传，无 form 字段）', () => {
-    const questions = [{ header: 'db', question: '选哪个?', options: [{ label: 'PG' }] }]
+describe('EventAdapter 既有 marker 分支回归（legacy 归一上移后）', () => {
+  it('ASK_USER_MARKER → form:true 统一表单帧：questions 经 type 推断映射（有 options → choice、multiSelect → multi）', () => {
+    const questions = [
+      { header: 'db', question: '选哪个?', multiSelect: true, options: [{ label: 'PG' }] },
+      { header: 'note', question: '备注?', context: 'ctx' },
+    ]
     const events = translate(
       selectEvent({ title: ASK_USER_MARKER, options: [JSON.stringify({ questions, allowCancel: true })] }),
       SID,
     )
     const payload = broadcastPayload(events)
-    expect(payload?.['askUser']).toBe(true)
-    expect(payload?.['askUserQuestions']).toEqual(questions)
-    expect(payload?.['form']).toBeUndefined()
-    expect(payload?.['formQuestions']).toBeUndefined()
+    expect(payload?.['form']).toBe(true)
+    expect(payload?.['formQuestions']).toEqual([
+      { type: 'choice', header: 'db', question: '选哪个?', options: [{ label: 'PG' }], multi: true },
+      { type: 'text', header: 'note', question: '备注?', context: 'ctx' },
+    ])
+    // legacy 键不再透传（归一在 runtime 单点完成，renderer 只消费 view-ready 帧）
+    expect(payload?.['askUser']).toBeUndefined()
+    expect(payload?.['askUserQuestions']).toBeUndefined()
+    expect(payload?.['allowCancel']).toBe(true)
   })
 
-  it('SCHEDULE_CREATE_MARKER 创建确认分流照常（scheduleCreate:true + draft 透传，无 form 字段）', () => {
+  it('SCHEDULE_CREATE_MARKER → form:true + 源键保留（scheduleCreate/scheduleDraft——FormOverlay 按挂载源分流应答形状）', () => {
     const draft = { kind: 'once', schedule: '0 0 9 19 9 *', prompt: '提醒我喝水', models: ['m1'] }
     const events = translate(
       selectEvent({ title: SCHEDULE_CREATE_MARKER, options: [JSON.stringify(draft)] }),
       SID,
     )
     const payload = broadcastPayload(events)
+    expect(payload?.['form']).toBe(true)
     expect(payload?.['scheduleCreate']).toBe(true)
     expect(payload?.['scheduleDraft']).toEqual(draft)
-    expect(payload?.['form']).toBeUndefined()
+    // scheduler 源不走 questions 面（FormOverlay 按 draft 分流）
+    expect(payload?.['formQuestions']).toBeUndefined()
   })
 })

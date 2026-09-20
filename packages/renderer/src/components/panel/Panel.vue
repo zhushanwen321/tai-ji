@@ -49,13 +49,23 @@
     <!-- conversation 有消息 → 对话流。flow 残留免疫（G2）：conversation 判据只看 sessionId，
          无论 flow 单例因何残留活跃态，有会话 panel 恒走本分支，landing 判据读不到它。 -->
     <MessageStream v-else-if="streamSessionId" :session-id="streamSessionId" />
-    <!-- conversation 无消息 → 空对话态（含「turn 活跃 + 无消息」边界组合，§5 检查点吸收） -->
+    <!-- conversation 无消息 → 空对话态（含「turn 活跃 + 无消息」边界组合，§5 检查点吸收）。
+         [u5 mode-declaration-row] 声明行挂载点与有消息分支同锚（面板内容区顶部，即 MessageStream
+         的流顶位置）：**空会话同样渲染**——可见性由 ModeDeclarationRow 自判（非默认模式 + presets
+         已加载，E7 三态在组件内，否则渲染为空），故默认模式/未加载时空会话形态不变。
+         空态文案在声明行之下的剩余空间居中（不改变有消息分支布局）。
+         设计依据：`mode-system-composer-density` §6.5 D5 + §7.4。 -->
     <div
       v-else-if="panelView.kind === 'conversation'"
-      class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center"
+      class="flex min-h-0 flex-1 flex-col"
     >
-      <MessageSquare class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.panel.startConversation') }}</p>
+      <div class="shrink-0 px-5 pt-2">
+        <ModeDeclarationRow :session-id="conversationSessionId!" />
+      </div>
+      <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
+        <MessageSquare class="size-6 text-neutral-dim opacity-40" />
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.panel.startConversation') }}</p>
+      </div>
     </div>
     <!-- landing：仅无 session 且 flow 活跃（新建任务流程唯一承接场景；Landing 内嵌 composer 卡片） -->
     <Landing
@@ -136,6 +146,7 @@ import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
 import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft } from '@zhushanwen/extension-protocol'
 import MessageStream from './MessageStream.vue'
+import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'
@@ -183,6 +194,12 @@ const { panelView, hasMessages, currentFormRequest: currentOverlayRequest, respo
 const streamSessionId = computed<string | null>(() => {
   const v = panelView.value
   return v.kind === 'conversation' && hasMessages.value ? v.sessionId : null
+})
+/** conversation 分支（含有消息 MessageStream / 无消息空对话态）的 session id（派生恒非空；
+ *  收窄供模板 string prop）——空会话声明行与 MessageStream 同源挂载点。 */
+const conversationSessionId = computed<string | null>(() => {
+  const v = panelView.value
+  return v.kind === 'conversation' ? v.sessionId : null
 })
 /** trace 分支的 session id（派生恒非空；收窄同上） */
 const traceSessionId = computed<string | null>(() =>

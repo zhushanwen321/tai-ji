@@ -440,8 +440,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       if (m.role !== 'assistant' || m.status !== 'streaming') return m
       changed = true
       // 终态字段 patch 单源（S4-A6）：
-      // usage/error/content 只作用于末位 assistant，见 terminalMessagePatch 注释
-      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload })
+      // usage/error/content/endedAt 只作用于末位 assistant，见 terminalMessagePatch 注释
+      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt: Date.now() })
     })
     if (changed) commitMessages(messages, sid, next)
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收口：错误信息必须以纯 error
@@ -450,9 +450,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
     if (isErrorStop && !changed) {
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
+      // 同帧气泡：开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
@@ -485,10 +487,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'error', errorText)
     // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },
@@ -503,10 +506,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'stream_error', streamErrContent)
     // 无前置 streaming entity 时需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },

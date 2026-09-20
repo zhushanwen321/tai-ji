@@ -6,6 +6,7 @@ import {
   PI_THINKING_LEVELS,
   isPiLaunchPreset,
   type PiLaunchPreset,
+  type PresetPromptConfig,
   type PresetExportPayload,
   type ToolMode,
   type ExtensionMode,
@@ -22,12 +23,13 @@ describe('pi-preset 常量', () => {
     expect(BUILTIN_PRESET_IDS.FULL).toBe('builtin:full')
     expect(BUILTIN_PRESET_IDS.ORCHESTRATOR).toBe('builtin:orchestrator')
     expect(BUILTIN_PRESET_IDS.READONLY).toBe('builtin:readonly')
+    expect(BUILTIN_PRESET_IDS.SESSION_DISPATCH).toBe('builtin:session-dispatch')
   })
 })
 
 describe('DEFAULT_PRESETS', () => {
-  it('含 3 个内置预设', () => {
-    expect(DEFAULT_PRESETS.length).toBe(3)
+  it('含 4 个内置预设', () => {
+    expect(DEFAULT_PRESETS.length).toBe(4)
   })
 
   it('所有预设 builtin=true 且 order 不重复', () => {
@@ -52,6 +54,60 @@ describe('DEFAULT_PRESETS', () => {
     const ro = DEFAULT_PRESETS.find(p => p.id === 'builtin:readonly')!
     expect(ro.toolMode).toBe('allowlist')
     expect(ro.allowedTools).toEqual(['read', 'grep', 'find', 'ls'])
+  })
+
+  // ── 内置「调度模式」（模式提示词面首次内置条目）──
+
+  it('SESSION_DISPATCH 预设存在且形状正确（order=3 / allowlist 12 项 / denylist subagent-workflow）', () => {
+    const dispatch = DEFAULT_PRESETS.find(p => p.id === 'builtin:session-dispatch')!
+    expect(dispatch).toBeDefined()
+    expect(dispatch.id).toBe(BUILTIN_PRESET_IDS.SESSION_DISPATCH)
+    expect(dispatch.name).toBe('调度模式')
+    expect(dispatch.description).toBe('主 Agent 只做拆解与派发，执行由独立会话完成')
+    expect(dispatch.builtin).toBe(true)
+    // order 必须是 3：mergePresets 按 (order, id) 复合键排序，同序会退化为 id 字符串比较
+    expect(dispatch.order).toBe(3)
+    expect(dispatch.toolMode).toBe('allowlist')
+    expect(dispatch.allowedTools).toHaveLength(12)
+    expect(dispatch.allowedTools).toEqual([
+      'read', 'grep', 'find', 'ls',
+      'create_managed_session', 'send_to_session', 'read_session_history',
+      'list_my_sessions', 'get_session_status', 'abort_session',
+      'ask_user', 'todo',
+    ])
+    expect(dispatch.extensionMode).toBe('denylist')
+    expect(dispatch.deniedExtensions).toContain('@zhushanwen/pi-subagent-workflow')
+  })
+
+  it('SESSION_DISPATCH 预置 append 提示词（enabled=true 且文案非空）', () => {
+    const dispatch = DEFAULT_PRESETS.find(p => p.id === BUILTIN_PRESET_IDS.SESSION_DISPATCH)!
+    expect(dispatch.prompt).toBeDefined()
+    expect(dispatch.prompt!.append).toBeDefined()
+    expect(dispatch.prompt!.append!.enabled).toBe(true)
+    expect(typeof dispatch.prompt!.append!.prompt).toBe('string')
+    expect(dispatch.prompt!.append!.prompt.length).toBeGreaterThan(0)
+    // 预置文案含调度者语义关键词（防误删成空壳）
+    expect(dispatch.prompt!.append!.prompt).toContain('调度')
+    expect(dispatch.prompt!.append!.prompt).toContain('create_managed_session')
+    // replace 段不预置（仅 append）
+    expect(dispatch.prompt!.replace).toBeUndefined()
+  })
+
+  it('DEFAULT_PRESETS 按 order 排序后的显示序 = 全工具 → Orchestrator → 只读 → 调度', () => {
+    const sorted = [...DEFAULT_PRESETS].sort((a, b) =>
+      a.order !== b.order ? a.order - b.order : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    )
+    expect(sorted.map(p => p.id)).toEqual([
+      'builtin:full',
+      'builtin:orchestrator',
+      'builtin:readonly',
+      'builtin:session-dispatch',
+    ])
+  })
+
+  it('只有 SESSION_DISPATCH 预置 prompt，其余内置条目不设置 prompt', () => {
+    const withPrompt = DEFAULT_PRESETS.filter(p => p.prompt !== undefined)
+    expect(withPrompt.map(p => p.id)).toEqual([BUILTIN_PRESET_IDS.SESSION_DISPATCH])
   })
 
   // 测试增强 #1：toolMode 合规性——allowlist 须有非空 allowedTools，denylist 须有非空 deniedTools。
@@ -219,6 +275,12 @@ const _exportPayload: PresetExportPayload = {
   defaultPresetId: 'builtin:full',
   version: 1,
 }
+// 编译时类型检查：PresetPromptConfig 两段可选（与全局 SystemPromptConfig 同形）
+const _promptEmpty: PresetPromptConfig = {}
+const _promptAppendOnly: PresetPromptConfig = { append: { enabled: true, prompt: 'x' } }
+const _presetWithPrompt: PiLaunchPreset = { ..._minimalPreset, prompt: _promptAppendOnly }
+void _promptEmpty
+void _presetWithPrompt
 // version 是 number（非字面量 1，因导出 payload 不锁死字面量，便于未来迁移）
 const _versionOnly: PresetExportPayload = { presets: [], version: 2 }
 // 不应包含 usage 字段（编译时无法直接断言 absence，但赋值会报错——

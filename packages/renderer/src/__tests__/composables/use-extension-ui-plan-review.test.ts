@@ -84,14 +84,15 @@ function mkPlanReviewReq(requestId: string): Record<string, unknown> {
 }
 
 function mkAskUserReq(requestId: string): Record<string, unknown> {
+  // runtime ASK_USER_MARKER 分支产出的 view-ready 帧形状（legacy 归一上移 runtime）
   return {
     requestId,
     pluginId: 'p',
     kind: 'select',
     method: 'select',
     title: 't',
-    askUser: true,
-    askUserQuestions: [{ header: 'q', question: 'q?', options: [] }],
+    form: true,
+    formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],
     allowCancel: true,
   }
 }

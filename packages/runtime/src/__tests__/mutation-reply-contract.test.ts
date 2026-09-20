@@ -184,6 +184,24 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'excluded',
     rationale: '实体生命周期（交接创建新 session，与 session.create 同族）：reply message.status ack，完成经 session.handoffComplete 独立广播；新 session 生效配置经 D6 继承链承接，非 mutation 回执语义',
   },
+  {
+    type: 'session.abortPlan',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（投影链唯一承载，abort 前后无 mutation 生效值概念）',
+  },
+  {
+    type: 'session.forceQuit',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（强制退出 session 进程，与 session.abortPlan 同族）：reply void ack，状态经独立广播通道推回，无 mutation 生效值概念',
+  },
+  {
+    type: 'session.abortHandoff',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（取消进行中的 handoff：runtime client.abort + 清 listener/timer/inflight）：reply message.status ack（与 message.abort 同模式），无配置状态生效值概念',
+  },
 ]
 
 // ── protocol.ts 静态扫描（提取三个区段 + 候选 mutation 谓词）────────────────
@@ -223,7 +241,7 @@ const MUTATION_DOMAINS = ['session', 'model', 'preset'] as const
  */
 const MUTATION_VERB_PREFIXES = [
   'set', 'rename', 'switch', 'create', 'update', 'delete', 'remove', 'recordUsage', 'import',
-  'fork', 'handoff', 'clear', 'reset', 'toggle', 'enable', 'disable', 'add',
+  'fork', 'handoff', 'clear', 'reset', 'toggle', 'enable', 'disable', 'add', 'abort', 'force',
 ] as const
 
 /** 判断 ClientMessageType 字面量是否为候选 mutation（域内 + 改值动词形态开头） */

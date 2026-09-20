@@ -4,7 +4,8 @@
  *
  * 对每个 staged 包做两层校验：
  *  1. 文件结构：index.js 存在、无 .ts 残留（R3：extension-resolver fallback 顺序
- *     index.ts 优先于 index.js，残留 .ts 会旁路 bundle）、pi-permission 含 2 wasm。
+ *     index.ts 优先于 index.js，残留 .ts 会旁路 bundle）、pi-permission 含 2 wasm、
+ *     per-package 特殊资产目录存在且非空（PACKAGE_ASSET_DIRS，MF-1-6）。
  *  2. dry-run import：dynamic import() 加载 index.js，捕获加载期错误
  *     （Cannot find module / SyntaxError / import 解析失败）。
  *
@@ -48,6 +49,19 @@ const EXTERNAL_PREFIXES = ["@earendil-works/", "@mariozechner/", "typebox", "@si
 
 /** pi manifest 资源字段：声明引用非 JS bundle 内容，bundle 时须已整体拷贝（M6a-04） */
 const MANIFEST_RESOURCE_FIELDS = ["agents", "skills", "workflows"];
+
+/**
+ * per-package 特殊资产目录表（MF-1-6）：bundle-extensions.mjs 专项拷贝、不走 pi
+ * manifest 三字段的资产目录（checkManifest 探测不到），verify 侧投影对齐——目录
+ * 缺失/为空即红。当前条目与 bundle-extensions.mjs 的 TEMPLATES_DIR_PACKAGES 一一
+ * 对应（键为 staged 目录名 pi-<short>，bundle 侧常量用 short 名）：plan 的
+ * templates/ 是 list-template / select-template 数据源，缺失 = 打包版模板发现恒空
+ *（templates.ts scanTemplateDir 对缺失目录防御性返回空清单、listTemplates 仅 warn
+ * 不 throw 的静默失效，postbuild 必须在此拦截）。
+ */
+const PACKAGE_ASSET_DIRS = {
+	"pi-plan": ["templates"],
+};
 
 /**
  * 校验 staged package.json 的 pi manifest 引用（M6a-09 + M6a-04）。
@@ -94,6 +108,27 @@ function checkManifest(pkgDir) {
 			if (!existsSync(join(pkgDir, rel))) {
 				failures.push(`pi.${field} 引用缺失: ${ref}（bundle 未拷贝该资源）`);
 			}
+		}
+	}
+	return failures;
+}
+
+/**
+ * per-package 特殊资产目录校验（MF-1-6）：PACKAGE_ASSET_DIRS 登记的目录必须存在
+ * 且非空——空目录与缺失同罪（scanTemplateDir 对空目录同样静默返回空清单）。
+ * 返回失败原因数组（空 = 通过）。
+ */
+async function checkPackageAssetDirs(pkgDirName, pkgDir) {
+	const failures = [];
+	for (const dir of PACKAGE_ASSET_DIRS[pkgDirName] ?? []) {
+		const dirPath = join(pkgDir, dir);
+		if (!existsSync(dirPath)) {
+			failures.push(`特殊资产目录缺失: ${dir}/（bundle 专项拷贝回归，运行时静默失效）`);
+			continue;
+		}
+		const entries = await readdir(dirPath);
+		if (entries.length === 0) {
+			failures.push(`特殊资产目录为空: ${dir}/（空目录与缺失同罪，扫描侧静默返回空清单）`);
 		}
 	}
 	return failures;
@@ -188,7 +223,7 @@ function assertPackageSetMatchesSSOT(pkgDirs) {
  * 返回 { status: "verified" | "skipped" | "failed", ... }——与原 main 内联逻辑的
  * failed/skipped/verified 三分类一一对应，每包至多一个结论（前序校验失败即短路）。
  */
-async function verifyPackage(pkgDir) {
+async function verifyPackage(pkgDirName, pkgDir) {
 	const indexJs = join(pkgDir, "index.js");
 
 	// 文件级校验 1：index.js 存在
@@ -213,6 +248,14 @@ async function verifyPackage(pkgDir) {
 		return { status: "failed", reason: manifestFailures.join("; ") };
 	}
 
+	// per-package 特殊资产目录（MF-1-6）：templates/ 等 bundle 专项拷贝资产不经
+	// manifest 三字段声明（resource-discovery 不扫它，见 bundle-extensions.mjs 常量
+	// 注释），缺失/为空在此拦截——运行时 scanTemplateDir 静默降级不会报错
+	const assetFailures = await checkPackageAssetDirs(pkgDirName, pkgDir);
+	if (assetFailures.length > 0) {
+		return { status: "failed", reason: assetFailures.join("; ") };
+	}
+
 	// dry-run import：加载 index.js，捕获依赖缺失 / 语法错误
 	try {
 		await import(pathToFileURL(indexJs).href);
@@ -232,7 +275,7 @@ async function verifyAllPackages(pkgDirs) {
 	const skipped = [];
 	const failed = [];
 	for (const pkg of pkgDirs) {
-		const outcome = await verifyPackage(join(STAGED, pkg));
+		const outcome = await verifyPackage(pkg, join(STAGED, pkg));
 		if (outcome.status === "verified") {
 			verified.push(pkg);
 		} else if (outcome.status === "skipped") {

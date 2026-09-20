@@ -1,4 +1,39 @@
 export default {
+  // 模式 chip（u4 mode-visibility-chip；对话态只读 chip + hover popover）
+  presetChip: {
+    ariaLabel: '模式：{name}',
+    replaceHint: '含替换提示词',
+    lockNote: '模式在创建时确定，本会话内不能更换；模式定义可在设置页编辑（下次启动采用新定义）',
+    newSession: '新建会话以使用其他模式',
+    toolSurface: '工具面',
+    extensionSurface: '扩展面',
+    promptSegments: '提示词段数',
+    builtin: '内置',
+    deleted: '模式已删除（{id}）',
+    // F1 回落披露（设计 `mode-system-composer-density` §7.5 E4）：两态文案
+    // 严格区分——未回落只预告后果，已回落才声称「本次」。禁在未重启窗口内声称已用全工具。
+    deletedFallbackPending: '会话重启后将回落全工具',
+    deletedFellBack: '本次以全工具模式启动',
+    unknownSurface: '—',
+    toolAll: '全部工具',
+    toolNone: '无工具',
+    extAll: '全部扩展',
+    extNone: '无扩展',
+    allowCount: '允许 {count} 项',
+    denyCount: '禁用 {count} 项',
+    promptCount: '{count} 段',
+  },
+  // 模式声明行（u5 mode-declaration-row；消息流顶部的派生行，零新 entry 类型）
+  modeDeclaration: {
+    label: '模式：{name}',
+    toolChip: '工具 · {surface}',
+    promptChip: '提示词 · {count} 段',
+    deleted: '模式已删除（{id}）',
+    // F1 回落披露（设计 §7.5 E4）：与 panel.presetChip 同口径，两态文案区分（未回落只预告）。
+    deletedFallbackPending: '会话重启后将回落全工具',
+    deletedFellBack: '本次以全工具模式启动',
+    newSession: '新建会话',
+  },
   header: {
     toggleSidebarExpand: '展开侧栏',
     toggleSidebarCollapse: '收起侧栏',
@@ -107,8 +142,9 @@ export default {
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
     toolCount: '工具 ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（TurnMeta.vue，设计 §2.1/§2.4）
-    generatedChars: '已生成 {chars} 字符',
+    // [u3 remove-turn-progress-bar] TurnMeta 已生成 token 数（TurnMeta.vue，设计 §2.1/§2.4；
+    // 2026-09 口径改 token：整 turn 全部 LLM 调用的 usage.outputTokens 之和，不估算）
+    generatedTokens: '已生成 {tokens} tokens',
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',

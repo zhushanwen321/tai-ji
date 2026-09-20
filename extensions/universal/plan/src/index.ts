@@ -5,11 +5,15 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
 import { type PlanAbortControllers, type PlanSessionMap, reconstructPlanState } from "./state.js";
 import { PLAN_MODE_TOOLS, registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
+
+const logger = getLogger("pi-plan");
 
 /**
  * D9 引导文案（约 50 token）：仅在 taiji 宿主注入，驱使 AI 在合适时机「建议」
@@ -52,9 +56,10 @@ export default function planExtension(pi: ExtensionAPI) {
       // E3：审批 select 挂起期间 session 关闭/崩溃 → select 随 pi 进程消亡。
       // 本 hook 跑在 pi 懒重生之后（taiji 冷启动不拉 pi 进程——用户重开 session
       // 发首条消息时 pi 才重生、hook 才跑），此时冷启动扫描已恢复 reviewState=
-      // awaiting 但挂起 select 不复存在 → steer 提醒 agent 重调 submit-review
-      // 重新挂起（恢复动作全部在 extension 侧，前端不造失败信号链）。
-      if (state.reviewState === "awaiting" && !abortControllers.has(sessionId)) {
+      // awaiting 但挂起 select 不复存在（上方 delete 已清残留 controller，pi 重生
+      // 后不可能有存活的 select）→ steer 提醒 agent 重调 submit-review 重新挂起
+      // （恢复动作全部在 extension 侧，前端不造失败信号链）。
+      if (state.reviewState === "awaiting") {
         pi.sendUserMessage(
           "[PLAN MODE] A previous review request was interrupted (session restarted). " +
           "The registered documents are still waiting for user approval. " +
@@ -78,10 +83,18 @@ export default function planExtension(pi: ExtensionAPI) {
       return { systemPrompt: event.systemPrompt + PLAN_MODE_SUGGESTION_PROMPT };
     } catch (error) {
       const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      // 尽力写入 stderr 即可——注入失败只损失一句引导，不值得中断 agent loop
-      try { process.stderr.write(`[pi-plan] before_agent_start injection failed: ${msg}\n`); } catch (finalErr) {
-        // 完全静默：两层兜底都失败时无处可写（system-prompt extension 同款形态）
-        void finalErr;
+      // 注入失败只损失一句引导，不值得中断 agent loop——先走 extension-logger 落盘
+      // （~/.pi/agent/logs/ 文件通道，诊断可见）；logger 自身抛错才降级 stderr
+      // （system-prompt logHookFailure 同款形态：logger 首选、stderr 内层兜底）
+      try {
+        logger.warn("plan: before_agent_start injection failed", { error: msg });
+      } catch (nestedErr) {
+        try {
+          process.stderr.write(`[pi-plan] before_agent_start injection log also failed: ${String(nestedErr)}\n`);
+        } catch (finalErr) {
+          // 完全静默：两层兜底都失败时无处可写
+          void finalErr;
+        }
       }
       return undefined;
     }

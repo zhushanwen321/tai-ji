@@ -146,13 +146,35 @@ function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
   // handleScriptError / handleWorkerExit / 预算终止 / time_limited / [OR-2] rebuild
   // 失败收敛——均经 finalizeRun）都经 handlers 调用链消费本视图——消息面终态在此
   // 统一收口；abortRun / terminateRunningRuns 两个 lifecycle 自有终态路径另行显式 dispose。
-  const depsWithTerminalCleanup: LifecycleDeps = {
-    ...deps,
-    onRunDone: (doneRun: WorkflowRun): void => {
+  //
+  // 视图必须经 Object.create 原型链承载、禁止 object spread：Interface 层注入的
+  // eventBus 是现读 getter（D3——每次属性访问重取当前 pi.events，reload 重跑 factory
+  // 后自动路由新 pi），spread 会对 getter 求值一次并快照成静态值。run 启动于 pi
+  // reload 前、完成于 reload 后时，经旧 pi 的写路径（历史形态：finalizeRun 的
+  // pending:unregister emit，被 assertActive 拒绝、注销事件静默丢失；现行形态：
+  // pending:register emit / appendEntry 直落同理）静默丢副作用（幽灵 pending 条目，
+  // skill-reload e2e 实证——unregister 侧已由直落 + 调用时解析注入根治，reload
+  // closeout D4）。原型链视图把 getter 留在原型上，属性访问仍逐次现读；spread 形态下
+  // 未来 deps 新增任何 getter 都会复发同族快照缺陷，故在构造层面排除。
+  //
+  // onRunDone 覆盖必须走 Object.defineProperty（DefineOwnProperty 语义）、禁止普通
+  // 赋值（Set 语义）：生产装配 lazyDeps（workflow-events.ts）的全部成员都是
+  // getter-only accessor（含 onRunDone），普通赋值沿原型链命中同名无 setter 的
+  // accessor → 严格模式抛 TypeError（Bun/JSC「Attempted to assign to readonly
+  // property.」/ V8「Cannot set property ... which has only a getter」），run 派发
+  // 即炸（skill-reload e2e 复验实证，2026-09-19）。defineProperty 在视图上定义
+  // 自身数据属性，不查原型 setter，两种原型形态（数据属性/getter-only）均合法；
+  // eventBus 等其余成员仍走原型链现读，D3 语义不变。
+  const depsWithTerminalCleanup: LifecycleDeps = Object.create(deps);
+  Object.defineProperty(depsWithTerminalCleanup, "onRunDone", {
+    value: (doneRun: WorkflowRun): void => {
       disposeSignalAbortListener(run);
       deps.onRunDone?.(doneRun);
     },
-  };
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
   // 自引用——worker-message-pump rebuildRuntime 需要 handlers 参数（handlers 引用自身）
   const handlers: WorkerHandlers = {
     async onMessage(raw: unknown): Promise<void> {
@@ -461,8 +483,8 @@ export interface TerminateRunningRunsOptions {
  *
  * per-run 行为：`state.error = reason` → `finalizeRun(run, deps, "failed",
  * {notifyDone: options?.notifyDone ?? false})`（transition("done","failed") 内部先
- * releaseRuntime，A4 → save best-effort → `eventBus.emit("pending:unregister",
- * {reason:"failed"})`）。
+ * releaseRuntime，A4 → save best-effort → pending:unregister 直落 appendEntry
+ * （status 经 mapReasonToStatus 映射）→ onRunDone）。
  *
  * **缺省不调 deps.onRunDone**（经 finalizeRun 的 notifyDone 承载，D5-②）：
  * 对齐 session_start 恢复先例（index.ts kill-9 恢复只发

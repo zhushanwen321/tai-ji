@@ -13,6 +13,13 @@ export interface PlanState {
   planFilePath: string;
   requirement: string;
   templateName: string;
+  /**
+   * --template 直传标记（D7 select-template 防御的判定信号）：直传进入时 =
+   * 展开后模板文件绝对路径；模板流程进入缺失。templateName 字段两流程共用
+   * （直传存 basename / 选中存模板名），单看它无法区分「已直传」与「已选中」，
+   * 故独立持久化直传事实——重启经 entry 恢复，reset 时随退出失效。
+   */
+  templateProvidedPath?: string;
   /** 挂载技能名清单（--skills 解析产物；模板流程为空数组——挂载声明，reset 时随退出失效） */
   skills: string[];
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
@@ -37,6 +44,23 @@ export const DEFAULT_PLAN_STATE: PlanState = {
 
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
+
+/**
+ * requirement 长度封顶（64KB）：session.planState 帧在 runtime 出站守卫（outbound-frame-registry）
+ * 按「requirement 有界」归入不登记 LARGE_FIELD_REGISTRY 的标量/小列表类——超 32MB 的未登记帧
+ * 会被整帧丢弃（前端 plan 面板缺失）。本封顶把该隐含前提变为代码保障（进入写侧 + entry 重建
+ * 读侧双点）。截断只影响 state/entry/帧；进入提示词仍携带全文直达模型（message content 通路
+ * 有既有注册表登记兜底）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 64KB = 64 * 1024 字节换算常数（同 event-journal.ts 32KB 先例）
+export const MAX_PLAN_REQUIREMENT_LENGTH = 64 * 1024;
+
+/** requirement 封顶：超长截断 + 省略标记（含被省略字符数），短文本原样返回 */
+export function capPlanRequirement(requirement: string): string {
+  if (requirement.length <= MAX_PLAN_REQUIREMENT_LENGTH) return requirement;
+  const omitted = requirement.length - MAX_PLAN_REQUIREMENT_LENGTH;
+  return `${requirement.slice(0, MAX_PLAN_REQUIREMENT_LENGTH)}\n[requirement truncated: ${omitted} characters omitted]`;
+}
 
 /**
  * docs 快照指纹：fileName:version 按登记序拼接。register-doc 任何形态（新增 /
@@ -99,6 +123,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     planFilePath: state.planFilePath,
     requirement: state.requirement,
     templateName: state.templateName,
+    templateProvidedPath: state.templateProvidedPath,
     skills: state.skills,
     docs: state.docs,
     reviewState: state.reviewState,
@@ -125,6 +150,7 @@ export function resetPlanState(
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
+  delete state.templateProvidedPath;
   state.skills = [];
   delete state.reviewState;
   // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
@@ -172,11 +198,41 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
+/** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的
+ * 超长文本在重建时同样封顶（读侧防御，保证派生 plan 帧恒有界） */
+function readRequirement(data: Partial<PlanState>): string {
+  return typeof data.requirement === "string" ? capPlanRequirement(data.requirement) : "";
+}
+
 /** 快照指纹白名单式读取：非 string（含缺失）按无既往提交处理（D4 字段级降级） */
 function readDocsFingerprint(data: Partial<PlanState>): string | undefined {
   return typeof data.lastSubmitReviewDocsFingerprint === "string"
     ? data.lastSubmitReviewDocsFingerprint
     : undefined;
+}
+
+/** 直传标记白名单式读取：非 string（含缺失）按模板流程处理（D4 字段级降级） */
+function readTemplateProvidedPath(data: Partial<PlanState>): string | undefined {
+  return typeof data.templateProvidedPath === "string" ? data.templateProvidedPath : undefined;
+}
+
+/**
+ * 单条 plan-state entry 数据的逐字段应用（调用方已过 isPlanStateEntry 门，data 为
+ * 非空对象；`?? {}` 仅为 data?: T 的类型 shim）。
+ */
+function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefined): void {
+  // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）；
+  // 新字段缺失（旧 entry）归一为空清单/无值（D4 字段级降级）
+  const entryData = data ?? {};
+  state.isActive = entryData.isActive ?? false;
+  state.planFilePath = entryData.planFilePath ?? "";
+  state.requirement = readRequirement(entryData);
+  state.templateName = entryData.templateName ?? "";
+  state.templateProvidedPath = readTemplateProvidedPath(entryData);
+  state.skills = readSkills(entryData);
+  state.docs = readDocs(entryData);
+  state.reviewState = readReviewState(entryData);
+  state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
@@ -187,17 +243,7 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
     // entries[i] 是复杂表达式（TS 不收窄），守卫移到 const 变量上
     const entry = entries[i];
     if (!isPlanStateEntry(entry)) continue;
-    const data = entry.data;
-    // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）；
-    // 新字段缺失（旧 entry）归一为空清单/无值（D4 字段级降级）
-    state.isActive = data?.isActive ?? false;
-    state.planFilePath = data?.planFilePath ?? "";
-    state.requirement = data?.requirement ?? "";
-    state.templateName = data?.templateName ?? "";
-    state.skills = readSkills(data ?? {});
-    state.docs = readDocs(data ?? {});
-    state.reviewState = readReviewState(data ?? {});
-    state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(data ?? {});
+    applyPlanStateEntry(state, entry.data);
     break;
   }
 

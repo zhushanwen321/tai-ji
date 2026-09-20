@@ -1,6 +1,6 @@
 /**
  * plan 模式 i18n（plan 模式重设计 u1-banner：M1 横幅 + 审批条）。
- * 文案基线 = 用户验收 demo（.tmp/plan-mode-demo/index.html M1 横幅 / 底部审批条）。
+ * 文案基线 = 用户验收 demo 的 M1 横幅 / 底部审批条（验收 demo 不入库）。
  */
 export default {
   banner: {

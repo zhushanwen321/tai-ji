@@ -6,7 +6,7 @@
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
-import type { ProviderId } from '@taiji/shared'
+import type { ProviderId, ImportSourceKind } from '@taiji/shared'
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
@@ -207,6 +207,40 @@ describe('mock session domain', () => {
     const cand = await session.importCandidates({} as never)
     expect(cand.total).toBe(0)
     await expect(session.importSession({} as never)).rejects.toMatchObject({ code: 'import_source_missing' })
+  })
+
+  it('importCandidates/importSession source 路由（sess-session-import u-foundation）：zcode sess_ 形态候选 + 归一化 reply；缺省/pi 空集，未知 source 两侧同构抛 import_source_missing', async () => {
+    // zcode 分支：sessionId 带 sess_ 前缀（原始源 id 形态）+ dirLabel = basename(cwd)
+    // + sourcePath 为 db 路径结构占位（候选间共享同源，不参与 zcode query 匹配）
+    const zc = await session.importCandidates({ source: 'zcode' })
+    expect(zc.items.length).toBeGreaterThan(0)
+    expect(zc.total).toBe(zc.items.length)
+    for (const item of zc.items) {
+      expect(item.sessionId).toMatch(/^sess_[0-9a-f-]{36}$/)
+      expect(item.dirLabel).toBe(item.cwd.split('/').pop())
+      expect(item.sourcePath).toBe(zc.items[0].sourcePath)
+    }
+    // lastModified 降序（契约排序键）+ dirs 按 dirLabel 聚合 count
+    const times = zc.items.map((i) => i.lastModified)
+    expect([...times].sort((a, b) => b - a)).toEqual(times)
+    for (const d of zc.dirs) {
+      expect(d.count).toBe(zc.items.filter((i) => i.dirLabel === d.label).length)
+    }
+    // zcode import 固定 reply：reply.sessionId = T1 归一化形态（剥 sess_ 前缀 + '_'→'-'，
+    // 与侧边栏/扫描集同域——非请求传入的原始 sess_ 形态）
+    const first = zc.items[0]
+    const imported = await session.importSession({ source: 'zcode', sessionId: first.sessionId, sourcePath: first.sourcePath, projectId: 'p1' })
+    expect(imported.sessionId).not.toMatch(/^sess_/)
+    expect(imported.sessionId).not.toContain('_')
+    expect(imported.targetPath).toContain(imported.sessionId)
+    // 缺省（向后兼容）/ 显式 pi：pi 分支空候选集（mock 无外部目录可扫）
+    const emptyReply = { total: 0, items: [], dirs: [] }
+    expect(await session.importCandidates({})).toEqual(emptyReply)
+    expect(await session.importCandidates({ source: 'pi' })).toEqual(emptyReply)
+    // 类型外未知 source（JS 调用方运行时值）：importCandidates 与 importSession 同构抛
+    // import_source_missing（对齐 real 侧 resolveSource 缺项行为）
+    await expect(session.importCandidates({ source: 'ghost' as ImportSourceKind })).rejects.toMatchObject({ code: 'import_source_missing' })
+    await expect(session.importSession({ sourcePath: '/x.jsonl', projectId: 'p1' })).rejects.toMatchObject({ code: 'import_source_missing' })
   })
 
   it('setMockE2E(true)：cwd 注入时 e2eTestSession 并入 list / switch / restore 放行；cwd 空串不注入', async () => {
@@ -525,18 +559,26 @@ describe('mock workspace / quota / project / preset domain', () => {
     await expect(project.save(state)).resolves.toBeUndefined()
   })
 
-  it('preset：CRUD + default', async () => {
-    expect(await preset.list()).toEqual([])
+  it('preset：内置目录非空 + CRUD + default', async () => {
+    // [u7a] 由「返回空列表」收口为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
+    // 会话的 chip / 声明行永远落不到正常分支（见 mock/index.ts 的 mockPresets 注释）。
+    const builtins = await preset.list()
+    expect(builtins.map((x) => x.id)).toEqual([
+      'builtin:full',
+      'builtin:orchestrator',
+      'builtin:readonly',
+      'builtin:session-dispatch',
+    ])
     expect(await preset.getDefault()).toBe('builtin:full')
     const p = { id: 'p1', name: 'n', tools: [] } as never
     const created = await preset.create(p)
     expect(created.id).toBe('p1')
-    expect((await preset.list())).toHaveLength(1)
+    expect((await preset.list())).toHaveLength(builtins.length + 1)
     await preset.setDefault('p1')
     await preset.update({ ...created, name: 'n2' } as never)
-    expect((await preset.list())[0]?.name).toBe('n2')
+    expect((await preset.list()).find((x) => x.id === 'p1')?.name).toBe('n2')
     await preset.remove('p1')
-    expect(await preset.list()).toEqual([])
+    expect((await preset.list()).map((x) => x.id)).toEqual(builtins.map((x) => x.id))
   })
 })
 

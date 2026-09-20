@@ -36,11 +36,18 @@ vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
 }));
 
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
 
 import { detectGoalCapability, handlePlanComplete } from "../compact.js";
 import { detectExecSkills } from "../exec-skills.js";
 import { DEFAULT_PLAN_STATE } from "../state.js";
+import { loadTemplate } from "../templates.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
 
@@ -70,7 +77,8 @@ function setup() {
     ui: { select: vi.fn(), notify: vi.fn() },
   };
 
-  const exec = (params: Record<string, unknown>) => executeFn!("tc0", params, undefined, undefined, ctx);
+  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
+    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, sessions, controllers, ctx, exec };
 }
 
@@ -81,28 +89,14 @@ describe("registerPlanTool", () => {
     expect((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0].name).toBe("plan");
   });
 
-  // --- list-template ---
-  describe("list-template", () => {
-    it("returns template list", async () => {
-      const { exec } = setup();
-      const res = await exec({ action: "list-template" });
-      expect(res.content[0].type).toBe("text");
-      expect(res.details.action).toBe("list-template");
-      expect(Array.isArray(res.details.templates)).toBe(true);
-    });
-
-    it("returns exactly the 5 builtin templates with no source field (D3 / V4)", async () => {
-      const { exec } = setup();
-      const res = await exec({ action: "list-template" });
-      const templates = res.details.templates as Array<{ name: string; source?: string; path: string }>;
-      expect(templates.map((t) => t.name).sort()).toEqual(
-        ["feature-plan", "bugfix-plan", "refactor-plan", "research-plan", "implementation-plan"].sort(),
-      );
-      for (const t of templates) {
-        expect(t.source).toBeUndefined();
-        expect(t).toEqual({ name: t.name, path: t.path });
-      }
-    });
+  it("tool description and promptSnippet no longer mention list-template (D1 删链不留兼容通道)", () => {
+    const { pi } = setup();
+    const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      description: string;
+      promptSnippet: string;
+    };
+    expect(tool.description).not.toContain("list-template");
+    expect(tool.promptSnippet).not.toContain("list-template");
   });
 
   // --- select-template ---
@@ -112,19 +106,18 @@ describe("registerPlanTool", () => {
       await expect(exec({ action: "select-template" })).rejects.toThrow("templateName is required");
     });
 
-    it("throws when template does not exist", async () => {
+    it("throws when template does not exist — error carries the available name list (D7 自愈闭环)", async () => {
       const { exec } = setup();
-      await expect(exec({ action: "select-template", templateName: "nonexistent" })).rejects.toThrow("Template not found");
+      // 内置 5 名恒在清单（外部源只增名不删内置名），断言清单形态而非全集
+      await expect(exec({ action: "select-template", templateName: "nonexistent" })).rejects.toThrow(
+        /Template not found: nonexistent\. Available: .*feature-plan/,
+      );
     });
 
     it("sets templateName and persists (D6：无 phase 写入)", async () => {
       const { exec, pi, sessions } = setup();
-      // Use a builtin template name — find one first
-      const listRes = await exec({ action: "list-template" });
-      const templates = listRes.details.templates as { name: string }[];
-      if (templates.length === 0) return; // no builtin templates available
-
-      const name = templates[0].name;
+      // 内置模板名直接断言（templates.test.ts 覆盖清单内容，这里只测选中与持久化）
+      const name = "feature-plan";
       const res = await exec({ action: "select-template", templateName: name });
       expect(res.details.templateName).toBe(name);
       expect(res.details.action).toBe("select-template");
@@ -132,17 +125,128 @@ describe("registerPlanTool", () => {
       const state = sessions.get("test-session") as { templateName?: string; isActive?: boolean };
       expect(state?.templateName).toBe(name);
     });
+
+    it("content carries the winner file's full text and details has no content field (D7 全文通道唯一化)", async () => {
+      const { exec } = setup();
+      const res = await exec({ action: "select-template", templateName: "feature-plan" });
+      const text = res.content[0].text;
+      // 全文到达模型可见通道（对照 loadTemplate 的胜者内容，运行机用户级遮蔽时同样成立）
+      const winnerContent = loadTemplate("feature-plan");
+      expect(winnerContent).not.toBeNull();
+      expect(text).toContain(`<template>\n${winnerContent}\n</template>`);
+      // details 收窄：仅 action + templateName，全文不再双份持久化
+      expect(res.details).toEqual({ action: "select-template", templateName: "feature-plan" });
+    });
+
+    it("resolves from the merged view: project-level .agents/plans template is selectable (D7 合并视图)", async () => {
+      // tmp 自建项目根 + 项目级模板（fs-guard 红线：写删目标 mkdtempSync 自建自删）
+      const projectRoot = fs.mkdtempSync(join(tmpdir(), "plan-tool-v2b-"));
+      const projectTemplateDir = join(projectRoot, ".agents", "plans");
+      fs.mkdirSync(projectTemplateDir, { recursive: true });
+      fs.writeFileSync(join(projectTemplateDir, "v2b-project-only.md"), "# project-owned skeleton\n");
+      try {
+        const { exec, ctx } = setup();
+        ctx.cwd = projectRoot;
+        const res = await exec({ action: "select-template", templateName: "v2b-project-only" });
+        expect(res.content[0].text).toContain("# project-owned skeleton");
+        expect(res.details).toEqual({ action: "select-template", templateName: "v2b-project-only" });
+      } finally {
+        fs.rmSync(projectRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    });
+
+    it("--template 直传防御：报错指向已注入全文，不带三源清单 (D7)", async () => {
+      const { exec, pi, sessions } = setup();
+      sessions.set("test-session", {
+        ...DEFAULT_PLAN_STATE,
+        isActive: true,
+        planFilePath: "/tmp/test-project/.taiji-harness/retro/plan.md",
+        requirement: "retro",
+        templateName: "retro-template",
+        templateProvidedPath: "/tmp/test-project/docs/retro-template.md",
+      });
+      const error = await exec({ action: "select-template", templateName: "retro-template" }).then(
+        () => new Error("expected rejection"),
+        (e: Error) => e,
+      );
+      expect(error.message).toContain("template was provided via --template");
+      // 不带三源清单：直传文件不在清单里，清单会误导模型改选内置模板
+      expect(error.message).not.toContain("Available:");
+      // 防御分支不产生任何状态写入（throw 先于 persistPlanState）
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+    });
   });
 
-  // --- removed action (D3) ---
-  describe("create-template removal", () => {
+  // --- removed actions (D1 / D3) ---
+  describe("removed action rejections", () => {
+    it("rejects plan(action='list-template') as an unknown action with the 5-action list (D1)", async () => {
+      const { exec } = setup();
+      await expect(exec({ action: "list-template" })).rejects.toThrow(
+        "Unknown plan action: list-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
+      );
+    });
+
     it("rejects plan(action='create-template') as an unknown action (D3 / V4)", async () => {
       const { exec } = setup();
       await expect(
         exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
       ).rejects.toThrow(
-        "Unknown plan action: create-template. Valid actions: list-template, select-template, complete, abort, register-doc, submit-review",
+        "Unknown plan action: create-template. Valid actions: select-template, complete, abort, register-doc, submit-review",
       );
+    });
+  });
+
+  // --- renderResult 兜底（MF-1-7 旧持久化 details 形态）---
+  describe("renderResult fallback for legacy details forms", () => {
+    /** mock theme：renderPlanResult 只消费 fg，直通便于断言纯文本 */
+    const renderTheme = {
+      fg: (_token: string, text: string) => text,
+    } as unknown as Theme;
+
+    /** 注册时捕获的 renderResult（真实签名 (result, options, theme)） */
+    function renderFn(pi: { registerTool: unknown }): (
+      result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+      options: unknown,
+      theme: Theme,
+    ) => { render: (width: number) => string[] } {
+      const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        renderResult: (
+          result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+          options: unknown,
+          theme: Theme,
+        ) => { render: (width: number) => string[] };
+      };
+      return tool.renderResult;
+    }
+
+    it("旧 action=list-template details（已删 action 的历史 entry）渲染不抛、回落 content 文本", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      // git 2ab33c46c 旧版形态：details.action="list-template" 不在现版 PlanDetails 联合内。
+      // 修复前 switch 落空返回 undefined → pi TUI 渲染循环对 undefined 调 .render() TypeError
+      const result = {
+        content: [{ type: "text", text: "Available templates: feature-plan, bugfix" }],
+        details: { action: "list-template", templates: ["feature-plan", "bugfix"] },
+      };
+
+      const component = render(result, { expanded: false }, renderTheme);
+
+      expect(component).toBeInstanceOf(Text);
+      expect(component.render(400).join("\n")).toContain("Available templates: feature-plan, bugfix");
+    });
+
+    it("任意未知 action 形态同样回落 content 文本（防御未来再删 action）", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      const result = {
+        content: [{ type: "text", text: "legacy entry" }],
+        details: { action: "create-template" },
+      };
+
+      const component = render(result, { expanded: false }, renderTheme);
+
+      expect(component).toBeInstanceOf(Text);
+      expect(component.render(400).join("\n")).toContain("legacy entry");
     });
   });
 
@@ -179,6 +283,29 @@ describe("registerPlanTool", () => {
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Modify the plan first");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+    });
+
+    it("turn abort during the pending execution-method select dissolves the dialog → complete-cancelled (MF-1-8)", async () => {
+      const { exec, ctx, pi } = setup();
+      // select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：
+      // signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+        (_title: string, _labels: string[], opts: { signal?: AbortSignal }) =>
+          new Promise<string | undefined>((resolve) => {
+            if (opts.signal?.aborted) {
+              resolve(undefined);
+              return;
+            }
+            opts.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+          }),
+      );
+      const turn = new AbortController();
+      const pending = exec({ action: "complete" }, turn.signal);
+      turn.abort();
+      const res = await pending;
+      expect(res.details.action).toBe("complete-cancelled");
+      expect(res.details.reason).toBe("cancelled");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
@@ -455,8 +582,13 @@ describe("validateAction", () => {
   });
   it("rejects invalid", () => {
     expect(validateAction("bogus")).toBe(false);
+    expect(validateAction("list-template")).toBe(false);
   });
-  it("action list no longer contains create-template (D3)", () => {
+  it("action list contains exactly the five actions (list-template removed, D1)", () => {
+    expect([...PLAN_ACTIONS].sort()).toEqual(
+      ["abort", "complete", "register-doc", "select-template", "submit-review"],
+    );
     expect(PLAN_ACTIONS).not.toContain("create-template");
+    expect(PLAN_ACTIONS).not.toContain("list-template");
   });
 });
