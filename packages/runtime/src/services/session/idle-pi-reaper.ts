@@ -8,7 +8,7 @@
  *    命中则等待释放后走既有 restore（等待方永不抢跑）。占座区间只含有界步骤（判定 sync /
  *    detach sync / kill 硬上限 2s / 摘除 sync），释放由 reclaim 的 finally 保证。
  * 2. startIdlePiReaper —— 周期判定循环（D4：默认 5min 一拍，setInterval(...).unref()）。
- *    每拍枚举候选 session，逐个判定「空闲超阈值且七类豁免全不命中」→ 执行回收；一拍 N 个
+ *    每拍枚举候选 session，逐个判定「空闲超阈值且八类豁免全不命中」→ 执行回收；一拍 N 个
  *    回收合并为一次 broadcast（D3 第 7 步——避免 N 次 scanner 全量读盘 + 侧栏 N 次重渲染）。
  *
  * DI 形态照抄 reap-orphan-pi.ts：全部依赖经 options 注入，不 import 具体服务、不读
@@ -22,7 +22,7 @@
 import type { CrashJournalEvent } from '@taiji/shared'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 // D3 checkpoint 搭车刷新（crash-forensics §3.3 D3，u4）：本模块每拍本来就要遍历活跃
-// session 算 idleMs / 判七类豁免，顺带把这些量刷进 checkpoint——零新增定时器、零新增探测。
+// session 算 idleMs / 判八类豁免，顺带把这些量刷进 checkpoint——零新增定时器、零新增探测。
 import {
   getRuntimeCheckpointStore,
   type RuntimeCheckpointRefresh,
@@ -47,6 +47,14 @@ export const DEFAULT_IDLE_THRESHOLD_MS = 2 * 60 * 60 * 1000
 /** 查看豁免窗口默认值（D2 #6：30 分钟内被 switch 过的 session 不回收）。 */
 // eslint-disable-next-line no-magic-numbers -- 30min 查看豁免窗口（D2 #6 字面值）：30*60*1000 算式自文档化
 export const DEFAULT_VIEWED_WINDOW_MS = 30 * 60 * 1000
+
+/**
+ * 挂起 UI 请求豁免的计龄上界默认值（v6 第四案：默认 6h，远超「人填表」的分钟级交互）。
+ * 与 shared/constants 的 DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS 双源等值（装配经
+ * resolveReclaimConfig 传权威值），本地仅作 options 未传时的 fallback。
+ */
+// eslint-disable-next-line no-magic-numbers -- 6h 计龄上界（v6 第四案），校准依据见上方 JSDoc
+export const DEFAULT_FORM_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
 /**
  * ensureActive 等待占座释放的单轮观测超时（D6-2：等待超 5s 仅记 ERROR 观测——占座实现
@@ -137,9 +145,47 @@ interface SeatWaiter {
 // ── 判定循环 ──────────────────────────────────────────────────
 
 /**
- * 七类豁免信号源（D2 表，逐一对应；全部窄接口注入，实现由 u3 装配绑定具体服务）。
+ * 挂起 UI 请求的只读计龄投影（reaper 只需存在性 + 计龄，无需完整 payload）。
+ *
+ * 为什么是结构类型而非直接 import transport 层 PendingUIRequest：services 层不得依赖
+ * transport 层（分层方向单向）；装配侧把 `server.getPendingUiRequests(sid)` 的返回值
+ * （含 receivedAt）直接传入纯函数 `hasFreshPendingUiRequest`，结构性兼容。
+ */
+export interface PendingUiRequestSignal {
+  /** 请求到达 runtime 的时刻（epoch ms）——豁免计龄的唯一输入。 */
+  receivedAt: number
+}
+
+/**
+ * 挂起 UI 请求豁免的纯判定（v6 第四案 + r5 影响面 I-1）。
+ *
+ * 语义（写死）：存在 pending 且**最新**一条未超龄 → 命中豁免。
+ * - 计龄聚合必须是 `max(receivedAt)`（r5 影响面 suggestion）：若取 min/任一，同会话
+ *   「老僵尸（超龄）+ 新活请求（新鲜）」会被老僵尸连带判超龄 → 进程被回收时
+ *   clearForSession 连活请求一起清（静默失败）；取 max 则活请求仍保住进程。
+ * - 超龄 **视同无 pending**（不排空存储）：本函数只回答「是否保住进程」，不消费/移除
+ *   pending——超龄 pending 在进程存活期内仍可被重订阅捞回。
+ * - 上界 `pendingUiRequestMaxAgeMs` 由装配经 resolveReclaimConfig 注入，并与
+ *   idleThresholdMs 联动（FORM_MAX_AGE < IDLE 时豁免恒不命中 = 死代码，装配点 warn）。
+ */
+export function hasFreshPendingUiRequest(
+  pending: readonly PendingUiRequestSignal[],
+  nowMs: number,
+  pendingUiRequestMaxAgeMs: number,
+): boolean {
+  if (pending.length === 0) return false
+  // 逐项取 max（不用 Math.max(...spread)——pending 数量不受控时 spread 会打爆调用栈）
+  let newest = Number.NEGATIVE_INFINITY
+  for (const p of pending) {
+    if (p.receivedAt > newest) newest = p.receivedAt
+  }
+  return nowMs - newest < pendingUiRequestMaxAgeMs
+}
+
+/**
+ * 豁免信号源（D2 表 + v6 第四案新增 #8；全部窄接口注入，实现由装配绑定具体服务）。
  * 任一命中即本拍跳过该候选。不在此 import 具体服务——handoff inflight / delivery 排队
- * 等无公开访问器的信号由 u3 补访问器后接入（见实施计划 deviations）。
+ * 等无公开访问器的信号由装配补访问器后接入（见实施计划 deviations）。
  */
 export interface ReclaimExemptions {
   /** #1 occupancy 三维非 idle（turn ∈ dispatching/generating/settling，或 compacting，或 bash）。 */
@@ -156,12 +202,21 @@ export interface ReclaimExemptions {
   getLastViewedAt(sessionId: string): number | undefined
   /** #7 restore / 回收自身进行中（restoringSessions；回收自身由 reaper 自身 seat 覆盖）。 */
   isRestoring(sessionId: string): boolean
+  /**
+   * #8 存在**未超龄**的挂起 UI 请求（v6 第四案，scope = 全扩展：confirm/select/input/editor
+   * 全算，不按扩展白名单）。只读、reaper-only，不影响 busy 预检。
+   *
+   * 签名（r5 I-1 写死）：`(sid, maxAgeMs) => boolean`——上界参数由 reaper 经 ctx 传入
+   * （装配经 resolveReclaimConfig），保证「上界写在豁免判定内部」而不被阈值排序旁路；
+   * 实现侧只用 `hasFreshPendingUiRequest`（max 聚合）判超龄，超龄视同无 pending。
+   */
+  hasPendingUiRequest(sessionId: string, pendingUiRequestMaxAgeMs: number): boolean
 }
 
 export interface IdlePiReaperOptions {
   /** 与 reclaimManagedSession 共享的占座实例（判定跳过 + 占座互斥的同一状态）。 */
   seat: ReclaimSeat
-  /** 七类豁免信号源（D2 表）。 */
+  /** 八类豁免信号源（D2 表 + v6 第四案 #8）。 */
   exemptions: ReclaimExemptions
   /** 空闲信号读取（u1a：client.lastActivityAt；undefined = 无信号，宁漏不误杀）。 */
   getClientActivity(sessionId: string): number | undefined
@@ -183,6 +238,12 @@ export interface IdlePiReaperOptions {
   idleThresholdMs?: number
   /** 查看豁免窗口 ms，默认 DEFAULT_VIEWED_WINDOW_MS。 */
   viewedWindowMs?: number
+  /**
+   * 挂起 UI 请求豁免的计龄上界 ms（r5 I-1 写死字段名），默认 DEFAULT_FORM_MAX_AGE_MS
+   * （超龄视同无 pending）。装配经 resolveReclaimConfig 注入；与 idleThresholdMs 联动：
+   * 小于空闲阈值时豁免恒不命中（死代码，装配点 warn）。
+   */
+  pendingUiRequestMaxAgeMs?: number
   /** 时钟注入（测试 fake 空闲时长；缺省 Date.now）。 */
   now?: () => number
 }
@@ -219,6 +280,8 @@ export interface ReclaimSkipDistribution {
   recentlyViewed: number
   /** 豁免 #7 restore 进行中。 */
   restoring: number
+  /** 豁免 #8 存在未超龄的挂起 UI 请求（v6 第四案）。 */
+  pendingUiRequest: number
   /** reclaim 执行失败（编排内异常，单 session 失败不中断一拍）。 */
   reclaimFailed: number
 }
@@ -227,7 +290,7 @@ function emptyDistribution(): ReclaimSkipDistribution {
   return {
     noActivity: 0, belowThreshold: 0, seatHeld: 0, occupied: 0, backgroundTasks: 0,
     relayChildren: 0, handoff: 0, queuedDeliveries: 0, recentlyViewed: 0, restoring: 0,
-    reclaimFailed: 0,
+    pendingUiRequest: 0, reclaimFailed: 0,
   }
 }
 
@@ -280,6 +343,8 @@ interface ReapTickContext {
   exemptions: ReclaimExemptions
   idleThresholdMs: number
   viewedWindowMs: number
+  /** 挂起 UI 请求豁免的计龄上界（v6 第四案；在豁免判定内部经信号源参数传入）。 */
+  pendingUiRequestMaxAgeMs: number
   now: () => number
   /** 单拍跳过分布（D7 汇总日志的 skipped 字段）。 */
   dist: ReclaimSkipDistribution
@@ -325,6 +390,7 @@ function createReapTickContext(options: IdlePiReaperOptions): ReapTickContext {
     exemptions,
     idleThresholdMs: options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS,
     viewedWindowMs: options.viewedWindowMs ?? DEFAULT_VIEWED_WINDOW_MS,
+    pendingUiRequestMaxAgeMs: options.pendingUiRequestMaxAgeMs ?? DEFAULT_FORM_MAX_AGE_MS,
     now: options.now ?? Date.now,
     dist: emptyDistribution(),
     reclaimed: [],
@@ -360,7 +426,7 @@ async function reapTick(options: IdlePiReaperOptions): Promise<void> {
 }
 
 /**
- * 单候选的判定与回收（原循环体逐字迁移）：占座互斥 → 空闲信号 → 阈值 → 七类豁免 →
+ * 单候选的判定与回收（原循环体逐字迁移）：占座互斥 → 空闲信号 → 阈值 → 八类豁免 →
  * 回收执行；跳过时写 ctx.dist 对应项。顺序即日志分布的可归因顺序，不得重排。
  */
 async function reapCandidate(ctx: ReapTickContext, sid: string): Promise<void> {
@@ -393,7 +459,7 @@ async function reapCandidate(ctx: ReapTickContext, sid: string): Promise<void> {
 }
 
 /**
- * 七类豁免判定（D2 表序，任一命中即计数并返回 false；短路求值——顺序即日志分布的
+ * 八类豁免判定（D2 表序 + v6 第四案 #8，任一命中即计数并返回 false；短路求值——顺序即日志分布的
  * 可归因顺序，与拆分前逐字一致）。
  */
 function passesReclaimExemptions(ctx: ReapTickContext, sid: string): boolean {
@@ -425,6 +491,14 @@ function passesReclaimExemptions(ctx: ReapTickContext, sid: string): boolean {
   }
   if (ctx.exemptions.isRestoring(sid)) {
     ctx.dist.restoring++
+    return false
+  }
+  // 豁免 #8（v6 第四案）：存在未超龄的挂起 UI 请求即跳过——否则 2h 后进程被回收而 pending
+  // 存活 ⇒ 死表单被拉回、提交静默丢失。上界参数由 ctx 传入（阈值判定先于本函数，若做成
+  // 外部前置过滤会被结构性旁路）；实现（max 聚合 + 超龄视同无 pending）在
+  // hasFreshPendingUiRequest，只影响豁免判定、不排空 pending 存储。
+  if (ctx.exemptions.hasPendingUiRequest(sid, ctx.pendingUiRequestMaxAgeMs)) {
+    ctx.dist.pendingUiRequest++
     return false
   }
   return true

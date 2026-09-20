@@ -409,6 +409,63 @@ export class UserStoppedGate {
 /** 模块级单例（生产挂点与调用方共用；SessionService 构造时 configure）。 */
 export const userStoppedGate = new UserStoppedGate()
 
+/**
+ * 命令-only prompt 的 occupancy 收口窗口长度（CP6，scheduler-trigger-inversion §11 CP6）。
+ *
+ * 量级 = **控制面**（2s）：正常 turn 的 turn-start 在 prompt 回包后毫秒级到达，2s 是给
+ * 回包与事件回调之间的调度留量；**不是**给任务执行加的墙钟预算。
+ */
+export const OCCUPANCY_SETTLE_WINDOW_MS = 2_000
+
+/**
+ * 命令-only prompt 的 occupancy 收口窗口（CP6）。
+ *
+ * 背景（实测确认）：pi 对 `/` 开头文本先 `await _tryExecuteExtensionCommand`、再
+ * `preflightResult?.(true)`——纯命令（如 `/scheduler list`）不产任何 turn 事件；而 dispatcher 的
+ * `markSessionActive` 已在 `client.prompt` 前把 `occupancy.turn` 置 `dispatching` ⇒ 该维度
+ * 永远卡住（按钮变 stop、下一条消息被 busy 预检拒/转 steer 静默吞）。修法 = prompt resolve
+ * 后武装 2s 短窗：期间无任何 turn 事件则回落 idle。
+ *
+ * 幂等门：回调只在 `occupancy.turn === 'dispatching'` 时回落（不覆盖 agent_start/
+ * generating/settling）；`agent_start` / `turn_start` 到达即 cancel——「自派发以来未观察到
+ * 任何 turn 事件」由取消语义构造性保证，而非在回调里追状态。
+ *
+ * 为什么是模块级单例：窗口由 dispatcher（arm）与 interpreter（turn 事件 cancel）两类共用，
+ * 且 interpreter 按 session 构造（多实例）、dispatcher 单实例——单例是唯一无环通路
+ * （同 userStoppedGate 范式）。
+ */
+class OccupancySettleWindow {
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  /** 武装短窗（重复武装先取消旧窗）。onElapsed 在到期且未被 turn 事件取消时同步调用。 */
+  arm(sessionId: string, onElapsed: () => void): void {
+    this.cancel(sessionId)
+    const timer = setTimeout(() => {
+      this.timers.delete(sessionId)
+      onElapsed()
+    }, OCCUPANCY_SETTLE_WINDOW_MS)
+    // 控制面 timer 不阻塞进程退出（对齐 userStoppedGate / pi-respawn.armTimer 惯例）
+    timer.unref?.()
+    this.timers.set(sessionId, timer)
+  }
+
+  /** turn 事件到达 / session 清理：取消窗口（幂等）。 */
+  cancel(sessionId: string): void {
+    const timer = this.timers.get(sessionId)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.timers.delete(sessionId)
+  }
+
+  /** 测试辅助：重置全部窗口（跨用例隔离；生产不调用）。 */
+  resetForTest(): void {
+    for (const timer of this.timers.values()) clearTimeout(timer)
+    this.timers.clear()
+  }
+}
+
+/** 模块级单例（dispatcher 武装 / interpreter turn 事件取消共用）。 */
+export const occupancySettleWindow = new OccupancySettleWindow()
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/
  * sandbox 里的第三方代码可返回任意值，改写前必须 shape 守卫，畸形值丢弃改写保原值）。 */
@@ -861,6 +918,9 @@ export class EventInterpreter {
         // [R-09 简化] 原 turn-start 同步采 baseline 快照已删除——diffSnapshots 的 baseline
         // 参数是死参数（[HISTORICAL] dirty 漏报修复后输出只依赖 current），turn-start 采集
         // 是每 turn 一次的纯浪费（W18 前为 execSync 同步阻塞）。
+        // CP6：turn 事件到达 → 取消命令-only 收口窗口（幂等门的前半，
+        // 与下方 occupancy #2 同点——窗口不得覆盖真实 turn 状态）。
+        occupancySettleWindow.cancel(this.sessionId)
         this.currentMessageId = ev.messageId
         this.turnGen += 1
         this.turnFinalizing = false
@@ -1011,6 +1071,8 @@ export class EventInterpreter {
         // 时 no-op——正常会话（含显式投递开 turn）零额外开销（Map get 即返）。
         if (ev.eventType === 'agent_start') {
           userStoppedGate.noteAgentStart(this.sessionId)
+          // CP6：agent_start 到达 → 取消命令-only 收口窗口（幂等门的前半）。
+          occupancySettleWindow.cancel(this.sessionId)
         }
         // agent_start 等纯观测事件（无 WS 帧产出）
         this.opts.executeHooks?.('onPiEvent', { event: ev.eventType, ...ev.data }).catch(() => {})
