@@ -24,6 +24,7 @@
  * 运行：cd packages/runtime && npx vitest run test/switch-model.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { SESSION_NOT_FOUND } from '../src/utils/errors.js'
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -173,14 +174,19 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
     providerMocks.defaultModel.value = { provider: 'test-provider', modelId: 'test-model' }
   })
 
-  it('U2: session 不在 Map → throw Error（不静默返回 sessionId）', async () => {
+  it('U2: session 不在 Map → 先走 ensureActive（拉活/join）；恢复失败按既有码透传，不静默返回 sessionId', async () => {
+    // model-switch-live-provider-sync U2/D5：停止态不再 throw 'session not active' 早退，而是
+    // 先 ensureActive（拉起引擎或 join in-flight）。此处 session 文件不存在 → 激活阶段抛
+    // SESSION_NOT_FOUND（既有码原样透传，供前端引导「侧栏删除该会话记录」）。
     const { service } = createService()
     await expect(service.switchModel('nonexistent', 'provider' as ProviderId, 'model'))
-      .rejects.toThrow('session not active')
+      .rejects.toMatchObject({ code: SESSION_NOT_FOUND })
   })
 
-  it('U3: session 在 Map 但无 client → 不写缓存、不广播，返回 sessionId', async () => {
-    const { service, pm, broker, clientMap } = createService()
+  it('U2: session 已注册但 pi 进程已退出（死 client）→ 先 ensureActive 拉活再切（不再「返回 sessionId」假成功）', async () => {
+    // U2/D5 + 守卫：`getClient` 不过滤已死进程的旧形态被结构性消除——激活路径负责
+    // 「回收态/死 client → 拉起」，所以「无 client 就静默返回请求值」这一假成功分支已删。
+    const { service, pm, clientMap } = createService()
     // 1. 建立一个 session（会进 sessions Map 且挂 client）
     const seedState = { sessionId: 's1', sessionFile: '/fake/s1.jsonl' }
     const client = makeClient()
@@ -193,17 +199,13 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
     // 2. 模拟 pi 进程已退出：从 clientMap 移除，getClient 返回 undefined
     clientMap.delete('s1')
     vi.mocked(pm.getClient).mockReturnValue(undefined)
-    const beforeModelId = service.getSummary('s1')?.modelId
-    expect(beforeModelId).toBeDefined()
-    vi.mocked(broker.broadcast).mockClear()
 
-    // 3. switchModel 应 fail-skip：不写缓存、不广播
-    const returned = await service.switchModel('s1', 'new' as ProviderId, 'model')
-    expect(returned).toBe('s1')
-    // modelId 未被改写（未假装成功）
+    // 3. switchModel：激活路径会尝试 restore；该 session 无落盘文件（进程在首次保存前退出）→
+    //    激活失败显性化（SESSION_NOT_FOUND 既有码透传），且**不写缓存**（不假装成功）。
+    const beforeModelId = service.getSummary('s1')?.modelId
+    await expect(service.switchModel('s1', 'new' as ProviderId, 'model'))
+      .rejects.toMatchObject({ code: SESSION_NOT_FOUND })
     expect(service.getSummary('s1')?.modelId).toBe(beforeModelId)
-    // 未广播 session.state_changed（不广播假信号）
-    expect(findBroadcast(broker, 'session.state_changed')).toBeUndefined()
   })
 })
 

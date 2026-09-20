@@ -449,6 +449,21 @@ export const DEFAULT_PI_RECLAIM_IDLE_MS = 2 * 60 * 60 * 1000
 // eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D2 #6），校准依据见上方 JSDoc
 export const DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS = 30 * 60 * 1000
 
+// ── 会话激活上界（model-switch-live-provider-sync U2，D5 停止态走 ensureActive）──
+
+/**
+ * 停止态/回收态 session 的模型切换（先 `ensureActive` 拉活再切）在 **RPC 边界**的等待上界。
+ * `TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` env 覆盖，默认 15s。
+ *
+ * 语义（设计 §3.6「激活的等待上界」行）：超时只终止 RPC 等待并回
+ * `SESSION_ACTIVATE_TIMEOUT`（前端 toast 指引重试），**不取消后台恢复**——join 语义保留，
+ * 用户重试时 join 同一 in-flight。`≤0` = 不限时（逃生门，与 bash RPC 的 0=不限时同口径）。
+ * 正常路径 1–2s（respawn+attach 经验值），上界只对病态占座生效。
+ */
+export const TAIJI_SESSION_ACTIVATE_TIMEOUT_MS = 'TAIJI_SESSION_ACTIVATE_TIMEOUT_MS'
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（U2/D5），校准依据见上方 JSDoc
+export const DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS = 15 * 1000
+
 // ── 滚动重启计划内退出码（crash-forensics-and-watchdog §3.3 D5 ④，u7c）──
 
 /**

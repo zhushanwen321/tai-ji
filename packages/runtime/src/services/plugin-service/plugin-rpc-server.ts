@@ -55,6 +55,25 @@ export interface WorkerPort {
   postMessage(message: unknown): void
 }
 
+/**
+ * plugin 边界需降级的 **host 语义码**（设计 §3.4 表列出的字符串码 + 同族的会话激活码）。
+ *
+ * 为什么需要显式清单：plugin 域自有的校验码（`INVALID_KEY` / `INVALID_PLUGIN_ID` 等）是
+ * **字符串**且是既有对外契约（SDK 消费方与契约测试按字符串断言），不能一并降级；只有
+ * 会话/模型语义码需要在数值字段边界降为 `INTERNAL_ERROR` + message tag。
+ */
+const PLUGIN_DEGRADED_HOST_CODES: ReadonlySet<string> = new Set([
+  'SESSION_ACTIVATE_FAILED',
+  'SESSION_ACTIVATE_TIMEOUT',
+  'MODEL_NOT_FOUND',
+  'PROVIDER_CREDENTIAL_MISSING',
+  'ENGINE_MODEL_MISSING',
+  'SESSION_NOT_FOUND',
+  'MODEL_NOT_CONFIGURED',
+  'RESTORE_FAILED',
+  'BUILTIN_EXTENSIONS_MISSING',
+])
+
 export class PluginRpcServer {
   private methods = new Map<string, RpcMethodHandler>()
   private workers = new Map<string, WorkerPort>()
@@ -283,8 +302,27 @@ export class PluginRpcServer {
       console.error(`[plugin-rpc-server] notification handler error (${message.method}):`, errorMessage)
       return
     }
-    const code = (e as { code?: number })?.code ?? PluginRpcErrorCodes.INTERNAL_ERROR
-    worker.postMessage({ type: 'rpc', response: this.makeErrorResponse(message.id, code, errorMessage) })
+    // U3（设计 §3.4 plugin 通道注）：plugin JSON-RPC 的 `error.code` 是**数值**字段，而
+    // **会话/模型语义码**（§3.4 表列出的字符串码）不是数值——这类在 plugin 边界降为
+    // INTERNAL_ERROR（数值）并把语义码拼进 message（`[CODE] ...`），插件侧既可判错又不丢分型。
+    //
+    // 三条分支（保守：只降语义码，其余一律维持既有行为）：
+    //   ① 数值 code → 原样透传（JSON-RPC 既有码语义，如 -32601 method not found）；
+    //   ② §3.4 表列的 host 语义字符串码 → 降 INTERNAL_ERROR + `[CODE]` tag；
+    //   ③ 其余字符串码（plugin 域自有的 `INVALID_*` 校验码——既有对外契约，plugin SDK 消费方
+    //      与契约测试都按原样字符串断言）→ **原样透传**，不降级（F3 只要求处置语义码族）。
+    const rawCode = (e as { code?: unknown })?.code
+    const isHostSemanticCode = typeof rawCode === 'string' && PLUGIN_DEGRADED_HOST_CODES.has(rawCode)
+    // 数值 → 透传；host 语义码 → 降 INTERNAL_ERROR + tag；其余字符串码（plugin 域 INVALID_*）
+    // 按既有契约透传（字段类型注解为 number 属历史形态，此处显式 cast 并在本注释说明）；
+    // 无 code / 其他类型 → INTERNAL_ERROR 兜底。
+    const code = (typeof rawCode === 'number'
+      ? rawCode
+      : isHostSemanticCode
+        ? PluginRpcErrorCodes.INTERNAL_ERROR
+        : (rawCode ?? PluginRpcErrorCodes.INTERNAL_ERROR)) as number
+    const taggedMessage = isHostSemanticCode ? `[${String(rawCode)}] ${errorMessage}` : errorMessage
+    worker.postMessage({ type: 'rpc', response: this.makeErrorResponse(message.id, code, taggedMessage) })
   }
 
   dispose(): void {

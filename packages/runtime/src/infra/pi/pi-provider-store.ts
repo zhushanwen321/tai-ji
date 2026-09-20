@@ -11,6 +11,8 @@
 // 空壳 provider 合并 models 修复而非删除（对齐 config-service 的 builtinModelsById 先例）。
 import builtinData from '../../generated/builtin-providers.json'
 import { deriveEnabled, getMergedCatalogModels, isCatalogProvider } from '../../services/provider-catalog.js'
+// U6③：id 规则与写侧共享同一谓词单点（services 层既有导出面，infra 已有同向 import 先例）
+import { normalizeModelIdOrReject } from '../../services/provider-config-helper.js'
 // 链 3（凭据读路径收口，D3）：infra 层只 type-only import 接口，不 value import 实现
 // （C-comm-03；实现在 services/auth，由组合根经模块级 init setter 注入）。
 import type { IProviderCredentialResolver } from '../../services/ports/provider-credential-resolver.js'
@@ -586,9 +588,19 @@ function stripEmptyStringSchemaKeys(cfg: PiProviderConfig): string[] {
         return
       }
       const m = model as Record<string, unknown>
-      if (typeof m.id === 'string' && m.id.trim() === '') {
-        stripped.push(`models[${index}].id`)
-        return // 空 id 模型整条丢弃
+      // U6③（id 类毒化收口·存量自愈）：id 规则与写侧 translateModelSchemaFields 共用同一
+      // 谓词——旧实现只在「id 是 string 且 trim 空」时丢弃，**id 缺失（undefined/null/
+      // non-string）会原样保留** → 盘上存量条目对 pi 永久 `Invalid schema`（整文件拒载、
+      // 全部 provider 一起失效）且无任何自愈路径。改为同口径「可强转则强转、不可用才丢」。
+      const idCheck = normalizeModelIdOrReject(m)
+      if (!idCheck.ok) {
+        stripped.push(`models[${index}].${idCheck.reason === 'empty-string id' ? 'id' : 'id (missing/non-string)'}`)
+        return // 非法 id 模型整条丢弃（与写侧同口径）
+      }
+      if (idCheck.coerced) {
+        // 强转（number → string）也是写侧同口径的一部分：必须记变更，否则 hasSanitizeChanges
+        // 判无变化 → 不落盘（盘上留 non-string id，pi 仍会整文件拒载）。
+        stripped.push(`models[${index}].id (coerced)`)
       }
       for (const key of EMPTY_STRING_MODEL_KEYS) {
         const value = m[key]
