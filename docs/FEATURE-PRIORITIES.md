@@ -73,7 +73,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 自动更新 | 更新检查、下载、安装（update-e2e） |
 | 通知系统 | 桌面通知、pending-notifications 汇聚 |
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
-| session-reader | 通知链 session_read 指针解析、跨进程读 |
+| session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
@@ -115,7 +115,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
 | plan | universal | P2 | 面板能力 + 执行方式选择 |
-| session-reader | universal | P2 | 通知链依赖 |
+| session-reader | universal | P2 | 通知链依赖（2026-09-21 起覆盖 zcode 引擎 subagent 回读；挂掉后果不变，zcode 引擎自身 P2 封顶） |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |
 | todo | universal | P2 | 面板能力 |
