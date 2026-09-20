@@ -189,7 +189,7 @@ async function handleContinuation(
 	);
 
 	// pending 守卫：有活跃 background subagent/workflow 时不发 continuation。
-	// 靠 subagent/workflow 完成时 sendMessage({triggerTurn:true,deliverAs:"steer"}) 自然唤醒主 agent；
+	// 靠 subagent/workflow 完成时 sendMessage({triggerTurn:true}，缺省 deliverAs 即 steer) 自然唤醒主 agent；
 	// goal 抢先催会与异步任务完成通知叠加，形成“停不下来”的死循环——continuation 排入
 	// _followUpMessages 队列 → _handlePostAgentRun 的 hasQueuedMessages() 返回 true → agent.continue()
 	// 新 turn → 又 agent_end → 又 continuation。
