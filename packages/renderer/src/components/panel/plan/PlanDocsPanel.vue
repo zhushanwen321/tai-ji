@@ -110,6 +110,15 @@
           <p class="text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ t('plan.docs.notFound') }}</p>
           <p class="text-[length:var(--text-xs)] leading-relaxed text-neutral-dim">{{ t('plan.docs.notFoundHint') }}</p>
         </div>
+        <!-- [RD-2#4] 请求在途：加载行（切换即清正文，旧文档内容不残留） -->
+        <div
+          v-else-if="isLoading"
+          data-testid="plan-docs-loading"
+          class="flex items-center justify-center gap-1.5 py-6 text-[length:var(--text-xs)] text-neutral-dim"
+        >
+          <Loader2 class="size-3 animate-spin" aria-hidden="true" />
+          {{ t('plan.docs.loading') }}
+        </div>
         <MarkdownRenderer
           v-else-if="content !== null"
           data-testid="plan-docs-content"
@@ -178,7 +187,7 @@
  */
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X } from '@lucide/vue'
+import { Loader2, X } from '@lucide/vue'
 import { Button, MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
 import type { PlanDocMeta } from '@taiji/shared'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
@@ -251,6 +260,8 @@ const selectedDoc = computed<DocTabItem | null>(
 const bodyEl = ref<HTMLElement | null>(null)
 const content = ref<string | null>(null)
 const loadFailed = ref(false)
+/** [RD-2#4] 请求在途标记：切换/修订刷新即清正文进 loading 态（正文区渲染加载行，不残留旧文档） */
+const isLoading = ref(false)
 /** 防竞态标记：异步期间选中项已切走则丢弃本次结果（CommandDocPanel 同款） */
 let loadingPath: string | null = null
 
@@ -259,21 +270,28 @@ async function loadSelected(): Promise<void> {
   if (!doc) {
     content.value = null
     loadFailed.value = false
+    isLoading.value = false
     return
   }
   const path = doc.absPath
   if (loadingPath === path) return
   loadingPath = path
+  // [RD-2#4] 切换即同步清正文：请求期间头部/meta 已是新条目，残留上一文档内容 = 串内容误读
+  content.value = null
+  loadFailed.value = false
+  isLoading.value = true
   try {
     const result = await fileApi.read(path, props.sessionId ?? undefined)
     if (loadingPath !== path) return
     content.value = result.content
     loadFailed.value = false
+    isLoading.value = false
   } catch {
     // E2：文件不存在 / cwd 守门拒绝 → 占位错误态（条目不清，docs 保留）
     if (loadingPath !== path) return
     content.value = null
     loadFailed.value = true
+    isLoading.value = false
   } finally {
     if (loadingPath === path) loadingPath = null
   }

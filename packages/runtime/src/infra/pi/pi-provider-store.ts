@@ -242,12 +242,29 @@ function pickFirstModelProvider(
  */
 let credentialResolver: IProviderCredentialResolver | undefined
 
+/** RT-3#5：未注入一次性 warn 状态（(re)注入时重置——再次未注入可再报）。 */
+let warnedResolverMissing = false
+
+/**
+ * 取 resolver；未注入打一次性 warn（RT-3#5）：`resolver?.… ?? false` 使「未注入」与
+ * 「确无凭据」同值，装配序漂移会全量判无凭据且零告警。返回语义不变（组合根契约）。
+ */
+function credentialResolverOrWarn(context: string): IProviderCredentialResolver | undefined {
+  if (credentialResolver) return credentialResolver
+  if (!warnedResolverMissing) {
+    warnedResolverMissing = true
+    console.warn(`[provider-store] credential resolver not injected (context: ${context}) — all providers treated as credential-less, no default model will be resolved. Composition root must call initProviderCredentialResolver before any model lookup.`)
+  }
+  return undefined
+}
+
 /**
  * 注入凭据 resolver（生产 = 组合根装配期调用；测试可传 undefined 清空注入，用于断言
  * 「未注入 → 视为无凭据」的安全降级行为与装配序契约）。
  */
 export function initProviderCredentialResolver(resolver: IProviderCredentialResolver | undefined): void {
   credentialResolver = resolver
+  warnedResolverMissing = false
 }
 
 /**
@@ -427,8 +444,8 @@ function adjudicateCatalogOnlyDefault(
   const mergedCatalog = getMergedCatalogModels(defaultProvider)
   if (!mergedCatalog || mergedCatalog.models.length === 0) return null
   // 链 3（D3 收口）：凭据判定经唯一通道 sync 布尔版（auth.json → models.json 双源），
-  // 未注入 resolver 时视为无凭据（安全降级：不抛错、不误选，装配序由组合根保证）。
-  const hasCredential = credentialResolver?.hasProviderCredential(defaultProvider) ?? false
+  // 未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
+  const hasCredential = credentialResolverOrWarn('adjudicateCatalogOnlyDefault')?.hasProviderCredential(defaultProvider) ?? false
   if (!hasCredential || !isEnabled) return null
   // D5 态 3（never-seen）：pass-through——不判定有效性、不触发 auto-fix、不改写
   // settings.json，`--model` 直传 pi 由执行侧解析（模型确实不存在时 pi 报
@@ -463,9 +480,8 @@ function pickCredentialBackedCatalogProvider(): {
     models?: Array<{ id: string }>
   }>
   // 链 3（D3 收口）：遍历 39 个 builtin 候选用**批量形态**——auth.json / models.json 各单次
-  // 读盘（B3 先例：消除 N+1；逐个 hasProviderCredential 会对 auth.json 做 N 次同步读）。
-  // 未注入 resolver 时视为无凭据（安全降级：不抛错、不误选）。
-  const credentialBackedIds = credentialResolver?.listCredentialBackedProviderIds() ?? new Set<string>()
+  // 读盘（B3 先例：消除 N+1）。未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
+  const credentialBackedIds = credentialResolverOrWarn('pickCredentialBackedCatalogProvider')?.listCredentialBackedProviderIds() ?? new Set<string>()
   for (const bp of builtinProviders) {
     const hasCredential = credentialBackedIds.has(bp.id)
     // ES3：被 enabledModels 禁用的 catalog provider 不作 default 候选（避免返回用户已禁用的 provider）。

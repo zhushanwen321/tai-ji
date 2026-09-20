@@ -29,6 +29,8 @@ import type { PiMessage, RpcClient } from '../../src/infra/pi/rpc-client.js'
 
 let stdoutDataHandler: ((chunk: string | Buffer) => void) | null = null
 let procExitHandlers: Array<(code: number | null) => void> = []
+/** 捕获的 proc 'error' handler（RT-2#6 terminate 出口验证用）。 */
+let procErrorHandlers: Array<(err: Error) => void> = []
 /** 捕获的 stdin 'error' handler（RT-2#1 源头收口验证用）。 */
 let stdinErrorHandlers: Array<(err: Error) => void> = []
 
@@ -40,6 +42,7 @@ const fakeProc = {
   exitCode: null as number | null,
   on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
     if (event === 'exit') procExitHandlers.push(handler as (code: number | null) => void)
+    if (event === 'error') procErrorHandlers.push(handler as (err: Error) => void)
     return fakeProc
   }),
   off: vi.fn(),
@@ -149,6 +152,7 @@ export function resetRpcClientMock(): void {
   stdinWrites.length = 0
   stdoutDataHandler = null
   procExitHandlers = []
+  procErrorHandlers = []
   stdinErrorHandlers = []
   fakeProc.on.mockClear()
   fakeProc.stdin.write.mockClear()
@@ -181,6 +185,19 @@ export function emitPiLine(obj: Record<string, unknown>): void {
 export function emitStdinError(err: Error): void {
   if (stdinErrorHandlers.length === 0) throw new Error('stdin error handler not registered yet')
   stdinErrorHandlers.forEach((h) => h(err))
+}
+
+/** 把进程级 'error' 事件投递给 RpcClient 注册的 proc 'error' handler（RT-2#6 terminate 出口验证）。
+ * spawn ENOENT 等 error 事件无伴随 exit，驱动方式与 Node EventEmitter 多播一致。 */
+export function emitProcError(err: Error): void {
+  if (procErrorHandlers.length === 0) throw new Error('proc error handler not registered yet')
+  procErrorHandlers.forEach((h) => h(err))
+}
+
+/** 手动驱动 proc 'exit' 事件（RT-2#6 双出口幂等验证：error 先通知后 exit 再到场的形态）。 */
+export function emitProcExit(code: number | null): void {
+  if (procExitHandlers.length === 0) throw new Error('proc exit handler not registered yet')
+  procExitHandlers.forEach((h) => h(code))
 }
 
 /** kill 调用的信号序列（断言 stream error 后 SIGKILL 自愈强杀用）。 */

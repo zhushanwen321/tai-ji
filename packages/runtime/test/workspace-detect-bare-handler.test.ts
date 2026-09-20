@@ -217,4 +217,117 @@ describe('WorkspaceMessageHandler — workspace.detectBare RPC 贯穿（W2）', 
       payload: { isBare: false, wsRoot: '', barePath: '' },
     })
   })
+
+  it('DB-6（RT-1#2）: detector 拋错 → reply 附 degraded:true + hint，且 warn 留痕（降级不静默）', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { WorkspaceMessageHandler } = await import('../src/transport/workspace-message-handler.js')
+      const cap = {
+        replies: [] as Array<{ id: string | undefined; type: string; payload: Record<string, unknown> }>,
+      }
+      const workspaceService = {
+        list: vi.fn().mockReturnValue([]),
+        record: vi.fn(),
+        detectBare: vi.fn().mockRejectedValue(new Error('detector crash')),
+      }
+      const ctx = {
+        send: vi.fn(),
+        sendError: vi.fn(),
+        reply: vi.fn((_ws: unknown, id: string | undefined, type: string, payload: Record<string, unknown>) => {
+          cap.replies.push({ id, type, payload })
+        }),
+        workspaceService,
+      }
+      const handler = new WorkspaceMessageHandler(
+        ctx as unknown as ConstructorParameters<typeof WorkspaceMessageHandler>[0],
+      )
+      const msg = {
+        type: 'workspace.detectBare',
+        id: 'req-db6',
+        payload: { cwd: '/some/dir' },
+      } as unknown as ClientMessage
+
+      await handler.handleWorkspaceMessage(msg, {} as never)
+
+      // degraded 形态：isBare:false 是兜底值而非探测结果，前端可区分；hint 给恢复指引
+      expect(cap.replies[0]).toMatchObject({
+        type: 'workspace.bareDetected',
+        payload: { isBare: false, degraded: true, hint: expect.any(String) },
+      })
+      // 三径全 success 形态零日志的旧缺陷已修：拋错路径必留 warn
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('workspace.detectBare degraded'),
+        expect.any(Error),
+      )
+    } finally {
+      vi.mocked(console.warn).mockRestore()
+    }
+  })
+
+  it('DB-7（RT-1#2）: detectBare 无效 cwd → reply 附 degraded:true + hint + warn（与拋错路径同族）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { WorkspaceMessageHandler } = await import('../src/transport/workspace-message-handler.js')
+      const cap = {
+        replies: [] as Array<{ id: string | undefined; type: string; payload: Record<string, unknown> }>,
+      }
+      const ctx = {
+        send: vi.fn(),
+        sendError: vi.fn(),
+        reply: vi.fn((_ws: unknown, id: string | undefined, type: string, payload: Record<string, unknown>) => {
+          cap.replies.push({ id, type, payload })
+        }),
+        workspaceService: { list: vi.fn().mockReturnValue([]), record: vi.fn(), detectBare: vi.fn() },
+      }
+      const handler = new WorkspaceMessageHandler(
+        ctx as unknown as ConstructorParameters<typeof WorkspaceMessageHandler>[0],
+      )
+      const msg = { type: 'workspace.detectBare', id: 'req-db7', payload: { cwd: '  ' } } as unknown as ClientMessage
+
+      await handler.handleWorkspaceMessage(msg, {} as never)
+
+      expect(cap.replies[0]).toMatchObject({
+        type: 'workspace.bareDetected',
+        payload: { isBare: false, degraded: true, hint: expect.any(String) },
+      })
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid cwd payload'))
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('DB-8（RT-1#2）: workspace.record 无效 cwd → reply recentList 附 degraded:true + warn（第三径）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { WorkspaceMessageHandler } = await import('../src/transport/workspace-message-handler.js')
+      const cap = {
+        replies: [] as Array<{ id: string | undefined; type: string; payload: Record<string, unknown> }>,
+      }
+      const workspaceService = { list: vi.fn().mockReturnValue([{ path: '/x', lastOpenedAt: 0 }]), record: vi.fn() }
+      const ctx = {
+        send: vi.fn(),
+        sendError: vi.fn(),
+        reply: vi.fn((_ws: unknown, id: string | undefined, type: string, payload: Record<string, unknown>) => {
+          cap.replies.push({ id, type, payload })
+        }),
+        workspaceService,
+      }
+      const handler = new WorkspaceMessageHandler(
+        ctx as unknown as ConstructorParameters<typeof WorkspaceMessageHandler>[0],
+      )
+      const msg = { type: 'workspace.record', id: 'req-db8', payload: { cwd: '' } } as unknown as ClientMessage
+
+      await handler.handleWorkspaceMessage(msg, {} as never)
+
+      // record 未执行，仍 reply 当前列表（RPC 契约），但附 degraded 区分「记录成功」与「校验失败」
+      expect(workspaceService.record).not.toHaveBeenCalled()
+      expect(cap.replies[0]).toMatchObject({
+        type: 'workspace.recentList',
+        payload: { records: [{ path: '/x', lastOpenedAt: 0 }], degraded: true },
+      })
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('workspace.record degraded'))
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
 })

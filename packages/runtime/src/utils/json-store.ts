@@ -251,6 +251,43 @@ const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt)-(\d{4}-\d{2}-\d{2}T\d{9}Z)
 // eslint-disable-next-line no-magic-numbers -- 备份保留窗口时长表达式（7 天，校准依据见上方 JSDoc）
 export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
+/** 一天的毫秒数（保留窗口 → 天数的日志展示换算）。 */
+// eslint-disable-next-line no-magic-numbers -- 时间单位换算常量
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * 含明文凭据的备份副本保留窗口（RT-3 附带项，M8）：models.json 的 `.corrupt-` 隔离副本
+ * 可含明文 apiKey（pi-provider-store 损坏隔离产物）——它是凭据型配置丢失的唯一取证
+ * 副本，7 天过期即删会让「用户改好配置前副本先没了」。窗口延长到 30 天 + 回收前升
+ * error 日志（删除即不可恢复，必须显著可见）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 凭据副本保留窗口时长表达式（30 天，校准依据见上方 JSDoc）
+export const CREDENTIAL_BACKUP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+/** 凭据副本来源文件名（pi-provider-store 的 models.json；其余文件的副本不嗅探）。 */
+const CREDENTIAL_BACKUP_STEM = 'models.json'
+
+/** 内容嗅探尺寸上限：models.json 正常 KB 级，超此值属异常膨胀，保守按凭据副本处置不读。 */
+const CREDENTIAL_SNIFF_MAX_BYTES = 1_000_000
+
+/**
+ * 含明文凭据的备份副本判定（RT-3 附带项）。实现方式 = **来源文件名 + 内容嗅探**双层：
+ * 先按 stem（去 `.corrupt-/.conflict-<ts>` 后缀的原文件名）过滤出 models.json——其他
+ * 文件的副本零 IO 直接排除（不为嗅探引入任何额外读盘）；命中 stem 才读内容查 `"apiKey"`
+ * 键（models.json 体积小可全读，超尺寸/读失败保守视为凭据副本——误判方向是多留 30 天，
+ * 无数据损失风险）。纯路径判定会把不含 apiKey 的 models.json 副本也延长窗口（次优但
+ * 可接受）；纯内容判定会对所有副本做全读（性能不可接受）——双层是两者取舍。
+ */
+function isCredentialBearingBackup(filePath: string, stem: string): boolean {
+  if (stem !== CREDENTIAL_BACKUP_STEM) return false
+  try {
+    if (statSync(filePath).size > CREDENTIAL_SNIFF_MAX_BYTES) return true
+    return readFileSync(filePath, 'utf-8').includes('"apiKey"')
+  } catch {
+    return true
+  }
+}
+
 /**
  * 按龄回收备份残留家族（`<path>.conflict-<ts>` / `<path>.corrupt-<ts>`）。
  *
@@ -270,15 +307,25 @@ export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
  * @returns 实际删除的文件数
  */
 export function cleanupAgedBackupResidue(scanDirs: readonly string[], maxAgeMs = AGED_BACKUP_MAX_AGE_MS): number {
-  const cutoff = Date.now() - maxAgeMs
-  let removed = 0
+  const now = Date.now()
+  const stdCutoff = now - maxAgeMs
+  const credCutoff = now - CREDENTIAL_BACKUP_MAX_AGE_MS
+  const stats = { removed: 0, regularRemoved: 0 }
   const seenDirs = new Set<string>()
   for (const dir of scanDirs) {
     for (const scanDir of expandOneLevel(dir, seenDirs)) {
-      removed += removeAgedBackupsInDir(scanDir, cutoff)
+      removeAgedBackupsInDir(scanDir, stdCutoff, credCutoff, stats)
     }
   }
-  return removed
+  // RT-3 附带项：普通副本删除落一条 warn 记总数——取证窗口关闭是用户应知的动作
+  //（此前的 console.log 汇总在调用方，级别不足以留痕）。
+  if (stats.regularRemoved > 0) {
+    console.warn(
+      `[json-store] cleanupAgedBackupResidue: removed ${stats.regularRemoved} aged backup copy(ies) ` +
+      `(retention ${Math.round(maxAgeMs / MS_PER_DAY)}d) — forensic recovery window closed`,
+    )
+  }
+  return stats.removed
 }
 
 /** 展开「目录自身 + 一层子目录」（去重防交集目录重复扫）；不可读 no-op。 */
@@ -302,32 +349,48 @@ function expandOneLevel(dir: string, seen: Set<string>): string[] {
   return out
 }
 
-/** 清扫单目录内的超龄备份副本；目录不可读返回 0；单文件失败跳过不中断。
+/** 清扫单目录内的超龄备份副本；目录不可读直接返回；单文件失败跳过不中断。
  *  判龄权威源 = 文件名 ISO ts（备份创建时刻，quarantine/conflict 命名时生成）——
- *  mtime 会被拷贝/同步工具刷新，只能作解析失败时的回落。 */
-function removeAgedBackupsInDir(dir: string, cutoff: number): number {
+ *  mtime 会被拷贝/同步工具刷新，只能作解析失败时的回落。
+ *  RT-3 附带项：含明文 apiKey 的 models.json `.corrupt-` 副本走 30 天窗口 + 回收前
+ *  error 日志（凭据型取证副本，删除不可恢复）；普通副本 7 天窗口。 */
+interface BackupRemovalStats {
+  removed: number
+  regularRemoved: number
+}
+
+function removeAgedBackupsInDir(dir: string, stdCutoff: number, credCutoff: number, stats: BackupRemovalStats): void {
   let names: string[]
   try {
     names = readdirSync(dir)
   } catch {
-    return 0
+    return
   }
-  let removed = 0
   for (const name of names) {
     const match = AGED_BACKUP_SUFFIX_RE.exec(name)
     if (!match) continue
     const filePath = join(dir, name)
+    const stem = name.slice(0, match.index)
     try {
       const createdAt = parseIsoCompact(match[1]!) ?? statSync(filePath).mtimeMs
-      if (createdAt >= cutoff) continue // 取证窗口内保留
+      const credential = isCredentialBearingBackup(filePath, stem)
+      if (createdAt >= (credential ? credCutoff : stdCutoff)) continue // 取证窗口内保留
+      if (credential) {
+        console.error(
+          `[json-store] cleanupAgedBackupResidue: deleting credential-bearing backup (plaintext apiKey inside, ` +
+          `beyond ${Math.round((Date.now() - credCutoff) / MS_PER_DAY)}d retention): ${filePath} — ` +
+          `删除后该凭据副本不可恢复；如需找回 apiKey 请在此前从副本手动提取。`,
+        )
+      }
+      console.debug(`[json-store] cleanupAgedBackupResidue: removing ${filePath}`)
       unlinkSync(filePath)
-      removed++
+      stats.removed++
+      if (!credential) stats.regularRemoved++
     // eslint-disable-next-line taste/no-silent-catch -- best-effort: 单文件失败跳过，不阻断启动链
     } catch (e) {
       console.warn(`[json-store] cleanupAgedBackupResidue: failed to remove backup: ${filePath}`, e)
     }
   }
-  return removed
 }
 
 /** 压缩 ISO ts（`2026-09-18T000557123Z`）解析回 epoch ms；非法形态返回 undefined。 */

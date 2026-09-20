@@ -1015,6 +1015,12 @@ export interface SkillCacheInvalidatedPayload {
   scope: SkillCacheScope
   /** scope='project' 时携带变更的项目根；setSkillDirs 全局配置变更场景缺省（影响所有 cwd）。 */
   cwd?: string
+  /**
+   * partial=true：scope='global' 的降级补发形态——setSkillDirs 后 rebuildGlobal/通知链
+   * 失败，失效信号由失败分支补发（globalCache 可能仍是旧值，重拉结果以 runtime 当前缓存
+   * 为准）。可选字段，正常失效广播缺省；当前消费方只读 scope，字段向后兼容。
+   */
+  partial?: boolean
 }
 
 // ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
@@ -1709,9 +1715,17 @@ export interface ServerMessageMapBase {
   'session.migrateImage:result': { path: string }
   /** session.writeSegments:result：ack 型空 payload（atomic 写成功） */
   'session.writeSegments:result': Record<string, never>
-  'workspace.recentList': { records: RecentWorkspaceRecord[] }
-  /** workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。 */
-  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string }
+  /**
+   * degraded=true：本次 reply 是降级形态（入参 cwd 无效等校验失败），records 仍为当前
+   * 已记录列表（RPC 契约要求 pending Promise 必然 resolve）。可选字段，正常路径缺省。
+   */
+  'workspace.recentList': { records: RecentWorkspaceRecord[]; degraded?: boolean }
+  /**
+   * workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。
+   * degraded=true：探测降级形态（cwd 无效 / detector 抛错）——isBare:false 是兜底值而非
+   * 真实探测结果，hint 携带恢复指引。可选字段，真实探测路径缺省。
+   */
+  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string; degraded?: boolean; hint?: string }
   /** workspace.detected：workspace.detect 的三态 reply。 */
   'workspace.detected': {
     mode: 'bare-workspace' | 'plain-repo' | 'not-repo'

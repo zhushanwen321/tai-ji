@@ -82,7 +82,9 @@ export class ProcessManager implements IProcessManager {
     ensureRuntimeEngineRootsEnv(projectRoot)
   }
 
-  /** 获取或解析 pi 可执行文件路径（只执行一次） */
+  /**
+   * 获取或解析 pi 可执行文件路径（成功值缓存一次；失败不 pin，下次调用重新探测）。
+   */
   private getPiPath(): Promise<string> {
     if (this.piPath) return Promise.resolve(this.piPath)
     if (this.piPathPromise) return this.piPathPromise
@@ -95,6 +97,16 @@ export class ProcessManager implements IProcessManager {
         console.warn('[process-manager] pi not found in common locations, relying on PATH')
       }
       return resolved
+    })
+    // RT-2#5：失败复位（防御性，审查 D 裁决按防御深度实施而非恢复语义）——
+    // findPiExecutable 的唯一抛出点是 packaged 态内置二进制缺失（findPackagedPi，
+    // 确定性失败，重启前不会自愈），复位并不承诺「用户装好 pi 后无需重启」；它保证的是
+    // 若未来探测链新增瞬态失败源（如目录扫描的 stat EIO），失败不被 pin 成进程生命周期
+    // 内永久 rejected（与 getPiVersion 的失败负缓存同族口径：那边按 TTL 重试，这边
+    // 成功路径本就永久缓存，失败复位后下次调用重新探测）。catch 分支吞掉本衍生 promise
+    // 的 rejection（防 unhandled）——原始 rejection 仍由持有 this.piPathPromise 的调用方消费。
+    this.piPathPromise.catch(() => {
+      this.piPathPromise = null
     })
     return this.piPathPromise
   }

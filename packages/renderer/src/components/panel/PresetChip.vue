@@ -177,27 +177,36 @@ const promptSegmentCount = computed(() => {
   if (!p) return 0
   return [p.replace, p.append].filter((s) => s?.enabled && (s.prompt ?? '').trim().length > 0).length
 })
-/** 工具面摘要（toolMode + 名单数） */
+/** 工具面摘要（toolMode + 名单数）。[RD-2#6] allowlist/denylist 而名单未定义 = 面未知
+ * （unknownSurface 出口）——不得 ?? 0 伪装成「允许 0 项」（0=真值，D4 null=无数据）。 */
 const toolSurface = computed(() => {
   const p = preset.value
   if (!p) return t('panel.presetChip.unknownSurface')
   if (p.toolMode === 'all') return t('panel.presetChip.toolAll')
   if (p.toolMode === 'none') return t('panel.presetChip.toolNone')
   if (p.toolMode === 'allowlist') {
-    return t('panel.presetChip.allowCount', { count: p.allowedTools?.length ?? 0 })
+    return p.allowedTools != null
+      ? t('panel.presetChip.allowCount', { count: p.allowedTools.length })
+      : t('panel.presetChip.unknownSurface')
   }
-  return t('panel.presetChip.denyCount', { count: p.deniedTools?.length ?? 0 })
+  return p.deniedTools != null
+    ? t('panel.presetChip.denyCount', { count: p.deniedTools.length })
+    : t('panel.presetChip.unknownSurface')
 })
-/** 扩展面摘要（extensionMode + 名单数） */
+/** 扩展面摘要（extensionMode + 名单数；[RD-2#6] 名单未定义 → 面未知，同 toolSurface 口径） */
 const extensionSurface = computed(() => {
   const p = preset.value
   if (!p) return t('panel.presetChip.unknownSurface')
   if (p.extensionMode === 'all') return t('panel.presetChip.extAll')
   if (p.extensionMode === 'none') return t('panel.presetChip.extNone')
   if (p.extensionMode === 'allowlist') {
-    return t('panel.presetChip.allowCount', { count: p.allowedExtensions?.length ?? 0 })
+    return p.allowedExtensions != null
+      ? t('panel.presetChip.allowCount', { count: p.allowedExtensions.length })
+      : t('panel.presetChip.unknownSurface')
   }
-  return t('panel.presetChip.denyCount', { count: p.deniedExtensions?.length ?? 0 })
+  return p.deniedExtensions != null
+    ? t('panel.presetChip.denyCount', { count: p.deniedExtensions.length })
+    : t('panel.presetChip.unknownSurface')
 })
 
 /** 密度档下的显示名（短名档用去尾缀短名） */

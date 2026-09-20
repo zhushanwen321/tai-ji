@@ -223,6 +223,53 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     // E2 条目不清：tab 仍在、错误态不吞文档条目
     expect(wrapper.findAll('[data-testid="plan-docs-tab"]')).toHaveLength(3)
   })
+
+  it('[RD-2#4] tab 切换请求在途 → loading 行 + 旧正文不残留（头部已新条目，防串内容误读）', async () => {
+    // 第一份文档读完；第二份挂起在途
+    let resolveSecond!: (v: { content: string; truncated: boolean }) => void
+    readMock.mockImplementation((path: string) => {
+      if (path.endsWith('impl-plan.md')) return new Promise((r) => { resolveSecond = r })
+      return Promise.resolve({ content: 'body-of-design', truncated: false })
+    })
+    const wrapper = await mountPanel(viewOf())
+    expect(wrapper.find('.md-stub').text()).toContain('body-of-design')
+
+    // 切到第二个 tab：新 tab/头部已是新条目，正文必须同步清空进 loading（不残留旧文档内容）
+    const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
+    await tabs[1]!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.md-stub').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('body-of-design')
+    const loading = wrapper.find('[data-testid="plan-docs-loading"]')
+    expect(loading.exists()).toBe(true)
+    expect(loading.text()).toContain('加载中')
+
+    // 新文档到达 → loading 行被正文取代
+    resolveSecond({ content: 'body-of-impl', truncated: false })
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-docs-loading"]').exists()).toBe(false)
+    expect(wrapper.find('.md-stub').text()).toContain('body-of-impl')
+  })
+
+  it('[RD-2#4] 版本 bump（修订刷新）触发重拉 → 同样先进 loading，旧版本正文不残留', async () => {
+    readMock.mockResolvedValue({ content: 'v1 body', truncated: false })
+    const wrapper = await mountPanel(viewOf())
+    expect(wrapper.find('.md-stub').text()).toContain('v1 body')
+
+    let resolveV2!: (v: { content: string; truncated: boolean }) => void
+    readMock.mockReturnValue(new Promise((r) => { resolveV2 = r }))
+    const revised = structuredClone(viewOf())
+    revised.docs = revised.docs!.map((d) => (d.fileName === 'auth-token-renewal.design.md' ? { ...d, version: 2 } : d))
+    usePlanStore().applyFrame(SID, revised)
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('v1 body')
+    expect(wrapper.find('[data-testid="plan-docs-loading"]').exists()).toBe(true)
+
+    resolveV2({ content: 'v2 body', truncated: false })
+    await flushAsync()
+    expect(wrapper.find('.md-stub').text()).toContain('v2 body')
+  })
 })
 
 describe('PlanDocsPanel 修订刷新（G3）', () => {

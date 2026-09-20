@@ -14,7 +14,7 @@
 import { join } from 'node:path'
 import { JsonStore } from '../../utils/json-store.js'
 import type { IExtensionSettings } from '../../services/ports/extension-settings.js'
-import { updateSettingsFields, readSettings, invalidateSettingsCache, setSettingsPath } from './pi-settings-store.js'
+import { updateSettingsFields, readSettings } from './pi-settings-store.js'
 import { getPiAgentDir } from './pi-paths.js'
 
 const DISABLED_FILE = 'disabled-packages.json'
@@ -40,34 +40,16 @@ function createAutoUpgradeStore(path: string): JsonStore<AutoUpgradeRecord> {
 }
 
 /**
- * F6: disabled-packages.json 的单一读取入口（模块私有）。
- *
- * [HISTORICAL] 引入时 extension-resolver 也直接 readFileSync + JSON.parse 读同一文件，
- * 同进程两读路径有 split-brain 风险，故收敛到此处共享 JsonStore 的 ENOENT 容错 + 解析逻辑。
- * 现 resolver 已是纯发现层（不读 disabled），本函数仅本模块内部（PiExtensionSettings 的
- * getDisabled / setEnabled 等读取）使用。
- *
- * @param settingsDir pi agent 配置目录（disabled-packages.json 所在地）
- * @returns 禁用的 source 字符串数组（文件缺失/解析失败时返回 []）
- */
-function readDisabledPackages(settingsDir: string): string[] {
-  return createDisabledStore(join(settingsDir, DISABLED_FILE)).read().disabled
-}
-
-/**
- * auto-upgrade-packages.json 的单一读取入口（模块私有，仅本模块内部使用）。
- *
- * @param settingsDir pi agent 配置目录
- * @returns 启用自动升级的 source 字符串数组（文件缺失/解析失败时返回 []）
- */
-function readAutoUpgradePackages(settingsDir: string): string[] {
-  return createAutoUpgradeStore(join(settingsDir, AUTO_UPGRADE_FILE)).read().autoUpgrade
-}
-
-/**
  * IExtensionSettings 实现。
- * @param settingsDir pi agent 配置目录（<dataDir>/agent），settings.json + disabled-packages.json 所在地。
- *                    测试可注入临时目录；生产默认 getPiAgentDir()。
+ * @param settingsDir pi agent 配置目录（<dataDir>/agent），disabled-packages.json /
+ *                    auto-upgrade-packages.json 所在地（实例自有 store 的根）。
+ *                    生产默认 getPiAgentDir()；测试注入临时目录。
+ *
+ * [RT-3#12 去全局化] settings.json 域经 pi-settings-store 模块级单一所有者（D17），
+ * 本构造函数**不再**调用 setSettingsPath——模块级写入目标被最后构造者决定是机械缺陷
+ * （生产实参与 getSettingsPath() 同值，调用本是 no-op；副作用只在测试互相干扰）。
+ * 需要重定向 settings.json 的测试/组合根显式调用 setSettingsPath（全仓测试已是此惯例）。
+ * disabled/autoUpgrade 读取走实例字段 JsonStore（不再每次读新建 store，恢复指纹缓存语义）。
  */
 export class PiExtensionSettings implements IExtensionSettings {
   private readonly settingsDir: string
@@ -79,18 +61,14 @@ export class PiExtensionSettings implements IExtensionSettings {
     this.settingsDir = settingsDir
     this.disabledStore = createDisabledStore(join(settingsDir, DISABLED_FILE))
     this.autoUpgradeStore = createAutoUpgradeStore(join(settingsDir, AUTO_UPGRADE_FILE))
-    // 让 pi-settings-store 指向同一 settingsDir 的 settings.json，保证 model 域与
-    // extension 域在测试（注入临时目录）和生产（getPiAgentDir）都读写同一文件（D17 单一所有者）。
-    setSettingsPath(join(settingsDir, 'settings.json'))
   }
 
   // ── settings.json packages[] ──
 
   getPackages(): string[] {
-    // 经 pi-settings-store 读（带缓存）。注意：读的是 settings.json，不是 disabled。
-    // readSettings 来自 pi-settings-store，路径固定为 getSettingsPath()——测试需把 settingsDir
-    // 的 settings.json 放到对应位置（与原 ExtensionService 行为一致，原代码也读 getPiAgentDir()）。
-    invalidateSettingsCache()
+    // 经 pi-settings-store 读（JsonStore 指纹缓存：外部写方含 pi 子进程，任何改动在
+    // 下一次 read 的 stat 指纹失配中立即可见——RT-3#12 移除读前 invalidateSettingsCache，
+    // 该全局失效会绕空指纹缓存让每次读全量触盘，与缓存设计相悖且无正确性收益）。
     const settings = readSettings()
     return settings.packages ?? []
   }
@@ -118,12 +96,13 @@ export class PiExtensionSettings implements IExtensionSettings {
   // ── disabled-packages.json ──
 
   getDisabled(): string[] {
-    // F6: 经共享单一读取入口（本模块私有函数，杜绝分散直读文件）。
-    return readDisabledPackages(this.settingsDir)
+    // RT-3#12：走实例字段 store（read-through + 指纹缓存）——不再每次读新建 JsonStore
+    //（新建即无缓存，读侧指纹失效机制被绕空）。
+    return this.disabledStore.read().disabled
   }
 
   async setEnabled(source: string, enabled: boolean): Promise<void> {
-    const current = readDisabledPackages(this.settingsDir)
+    const current = this.disabledStore.read().disabled
     let next: string[]
     if (enabled) {
       next = current.filter(d => d !== source)
@@ -136,11 +115,11 @@ export class PiExtensionSettings implements IExtensionSettings {
   // ── auto-upgrade-packages.json ──
 
   getAutoUpgrade(): string[] {
-    return readAutoUpgradePackages(this.settingsDir)
+    return this.autoUpgradeStore.read().autoUpgrade
   }
 
   async setAutoUpgrade(source: string, autoUpgrade: boolean): Promise<void> {
-    const current = readAutoUpgradePackages(this.settingsDir)
+    const current = this.autoUpgradeStore.read().autoUpgrade
     let next: string[]
     if (autoUpgrade) {
       next = current.includes(source) ? current : [...current, source]

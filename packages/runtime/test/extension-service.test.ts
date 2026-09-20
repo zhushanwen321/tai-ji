@@ -6,6 +6,7 @@ import { ExtensionService, ExtensionInstallError } from '../src/services/extensi
 import { NpmGitInstaller } from '../src/infra/installers/npm-git-installer.js'
 import { ExtensionResolver } from '../src/infra/installers/extension-resolver.js'
 import { PiExtensionSettings } from '../src/infra/pi/pi-extension-settings.js'
+import { setSettingsPath } from '../src/infra/pi/pi-settings-store.js'
 import type { IConfigStore } from '../src/services/ports/config.js'
 
 import { installPackage, uninstallPackage, installDependencies, NpmInstallError } from '../src/infra/installers/npm-installer.js'
@@ -72,6 +73,9 @@ describe('ExtensionService', () => {
     fsFailState.failRenameMarker = ''
     // Create test directory structure
     testSettingsDir = mkdtempSync(join(tmpdir(), 'ext-service-test-'))
+    // RT-3#12：PiExtensionSettings 构造不再对齐全局 settings 路径（去全局化），
+    // 测试显式注入 setSettingsPath 指向 testSettingsDir（全仓测试惯例）。
+    setSettingsPath(join(testSettingsDir, 'settings.json'))
     writeFileSync(join(testSettingsDir, 'settings.json'), JSON.stringify({
       packages: ['npm:pi-ask-user'],
     }), 'utf-8')

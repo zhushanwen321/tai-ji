@@ -214,11 +214,17 @@ describe('PluginMessageHandler — plugin.install 三分支', () => {
 })
 
 describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
-  it('未知 type（不在分发表）→ 落空：无 service 调用、无 reply/error', async () => {
+  it('未知 type（不在分发表）→ sendError(handler_not_registered)：无 service 调用、无 reply（RT-1#6 显形）', async () => {
     const { replies, errors, handler, pluginService } = makeHandler()
     await expect(handler.handlePluginMessage(buildMsg('plugin.unknown.future', {}), WS)).resolves.toBeUndefined()
     expect(replies).toHaveLength(0)
-    expect(errors).toHaveLength(0)
+    // 落空不再静默（RT-1#6）：显式 error 信封让前端 pending Promise 立即失败，而非等到泛化超时。
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      id: 'm1',
+      code: 'handler_not_registered',
+      message: expect.stringContaining('plugin.unknown.future'),
+    })
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 

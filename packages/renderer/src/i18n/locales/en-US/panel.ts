@@ -237,6 +237,10 @@ export default {
     genStatsCacheMissColdStartNote: 'First request in this session — cache not established yet (expected miss)',
     genStatsCacheMissIdleNote: '{duration} idle since the last request — the provider cache expired (expected miss)',
     genStatsCacheMissCompactionNote: 'Prefix rebuilt after context compaction — this request must miss (expected)',
+    // [RD-2#6] idle-expiry without idleMs: unknown duration must not masquerade as a measured value (null=no data/0=real value, D4)
+    genStatsCacheMissIdleNoteUnknownDuration: 'Idle for an unknown duration since the last request — the provider cache expired (expected miss)',
+    // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
+    genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
   },
   sideDrawer: {
@@ -361,6 +365,10 @@ export default {
     builtin: 'Built-in',
     noDescription: 'No detailed description for this command',
     noDocBody: 'No documentation body for this skill',
+    // [RD-2#3] SKILL.md read failure (both guard paths rejected / IO error) — explicit failed state, distinct from empty body
+    loadFailed: 'Failed to read SKILL.md: ',
+    openDir: 'Open containing folder',
+    revealFailed: 'Failed to open the folder',
     path: 'Path',
     commandType: 'Extension command',
     builtinCommand: 'Built-in command',
@@ -526,11 +534,17 @@ export default {
     loading: 'Loading…',
     malformedLine: 'Unparseable entry (line {line})',
     malformedHint: 'JSONL line {line} is corrupted; open the session JSONL file to inspect',
+    // [RD-2#6] corrupted line without a line number (protocol/version drift defense): no line promise, no pointer to a nonexistent line
+    malformedLineUnknown: 'Unparseable entry (line unknown)',
+    malformedHintUnknownLine: 'JSONL contains a corrupted line (line number unknown)',
     inspectorBack: 'Back',
     inspectorCopy: 'Copy',
     inspectorCopied: 'Copied',
     inspectorSubtitle: 'From Trace view · full detail of the selected entry',
     inspectorRaw: 'Raw entry JSON',
+    // [RD-2#5] safeJson guard copy: unserializable (circular refs etc.) / over-limit truncation
+    rawJsonUnserializable: '(content could not be serialized for display)',
+    rawJsonTruncated: '…(content too large, truncated)',
     // usage right-side hints (disjoint buckets: cacheRead > input is the norm)
     usageUncached: 'uncached',
     usageCacheRead: 'cache hit',
@@ -539,5 +553,9 @@ export default {
     usageReasoning: 'subset of output',
     blockRedacted: '(thinking redacted, original text unavailable)',
     jumpToolResult: 'Jump to the paired TOOL row',
+  },
+  trayWidget: {
+    // [RD-2#8] third-party widget meta.progress with non-finite numbers (NaN/Infinity): no progress bar, show unavailable
+    progressUnavailable: 'No progress',
   },
 }

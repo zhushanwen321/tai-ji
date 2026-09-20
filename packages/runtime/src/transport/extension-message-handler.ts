@@ -62,7 +62,19 @@ export class ExtensionMessageHandler {
 
   async handleExtensionMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     const handler = this.routes[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与内部 routes 表漂移（漏登记）时，
+    // 前端 pending Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[extension-handler] no case handler for type "${msg.type}" — handles/routes 表漂移？`)
+      const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+        typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined,
+      )
+    }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
     // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。

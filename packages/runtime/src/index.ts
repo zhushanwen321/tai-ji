@@ -400,10 +400,11 @@ async function main(): Promise<void> {
     npmDir: getNpmDir(),
   })
   // IExtensionSettings port 的 infra 实现：经 pi-settings-store 统一读写 settings.json（D17）。
-  // 构造时对齐 settings 路径到 pi agent 目录，保证 model 域与 extension 域读写同一文件。
+  // RT-3#12：构造不再对齐全局 settings 路径（生产实参与 getSettingsPath() 同值，属 no-op
+  // 副作用）；settings.json 路径 = pi-settings-store 模块级单一所有者的默认值。
   const extensionSettings = new PiExtensionSettings(configStore.getPiAgentDir())
-  // ILlmRetrySettings port 的 infra 实现：settings.json retry 域读写（同 extensionSettings 注装模式）。
-  const llmRetrySettings = new PiRetrySettings(configStore.getPiAgentDir())
+  // ILlmRetrySettings port 的 infra 实现：settings.json retry 域读写（无参构造，同上）。
+  const llmRetrySettings = new PiRetrySettings()
   const extensionService = new ExtensionService({
     settingsDir: configStore.getPiAgentDir(),
     projectRoot: effectiveRoot,

@@ -229,6 +229,12 @@ export class RpcClient implements IPiEngine {
   private _exited = false
   private _killing = false
   /**
+   * exitCallbacks 多播是否已发（RT-2#6）：proc 'error' 与 'exit' 合并为单一 terminate
+   * 出口后，运行中 error 先通知、exit 随后到场的形态需要幂等守卫防双发（spawn 失败
+   * 形态只有 error 无 exit，本守卫不影响其必达）。
+   */
+  private _exitNotified = false
+  /**
    * 进程退出回调集合（多播）。
    *
    * 曾是单槽字段（exitCallback = cb）：第二个注册者会静默覆盖第一个——若覆盖
@@ -359,8 +365,8 @@ export class RpcClient implements IPiEngine {
    */
   private wireProcessHandlers(proc: ChildProcess): void {
     proc.on('error', (err) => {
-      console.error('[rpc] spawn error:', err)
-      this.rejectAll(new Error(`Failed to spawn pi: ${err.message}`))
+      console.error('[rpc] process error:', err)
+      this.terminateFromError(err)
     })
 
     proc.on('exit', (code) => {
@@ -374,9 +380,7 @@ export class RpcClient implements IPiEngine {
       if (!this._killing) {
         this.writeCrashLogIfNeeded(code)
         this.rejectAll(new Error(`pi process exited with code ${code}${this.formatStderrSuffix()}`))
-        for (const cb of this.exitCallbacks) {
-          cb(code, this.getStderrTail())
-        }
+        this.notifyExitOnce(code, this.getStderrTail())
       }
     })
 
@@ -471,6 +475,50 @@ export class RpcClient implements IPiEngine {
   }
 
   /**
+   * 进程级 'error' 的终止处置（RT-2#6）——与 exit 合并为单一 terminate 出口。
+   *
+   * 此前 error handler 只 rejectAll：spawn 失败（ENOENT 等）不 emit 'exit'，piSessionLog
+   * 的 fd 悬挂、exitCallbacks 永不触发（ProcessManager 会话表收不到死亡通知）。现补齐
+   * exit 处置链的全部收口（对齐批次 3 stdin stream error 的完整处置链口径：_exited 置位
+   * + rejectAll 必达）；运行中 error 后 exit 若仍到场，各步幂等（piSessionLog 已置 null /
+   * rejectAll 空表 no-op），exitCallbacks 通知由 notifyExitOnce 幂等守卫防双发。
+   * _killing 语义与 exit handler 对齐：主动 kill 流程不发死亡通知（kill() 的 onExit
+   * rejectAll 统一收口）。
+   */
+  private terminateFromError(err: Error): void {
+    this._exited = true
+    this.piSessionLog?.end()
+    this.piSessionLog = null
+    if (!this._killing) {
+      this.writeCrashLogIfNeeded(null)
+      // 错误消息保留 err.message 原文（Node spawn ENOENT 的 message 自带 'spawn ... ENOENT'，
+      // ProcessManager.createSession 的安装指引匹配（includes('spawn')/includes('ENOENT')）不依赖本前缀）
+      this.rejectAll(new Error(`pi process error: ${err.message}${this.formatStderrSuffix()}`))
+      this.notifyExitOnce(null, this.getStderrTail())
+    }
+  }
+
+  /**
+   * exitCallbacks 多播唯一出口（exit 与 process error 共用，RT-2#6）。幂等：第二次调用
+   * no-op（先发的通知生效）。逐回调隔离（对齐 ProcessManager RT-4#1 范式）：单回调异常
+   * 只降级日志，不阻断其余回调多播，也不让异常冒泡成 EventEmitter uncaughtException。
+   */
+  private notifyExitOnce(code: number | null, stderr: string): void {
+    if (this._exitNotified) return
+    this._exitNotified = true
+    for (const cb of this.exitCallbacks) {
+      try {
+        cb(code, stderr)
+      } catch (e) {
+        // 降级策略：逐回调隔离（对齐 ProcessManager RT-4#1 范式）——单回调异常只留痕，
+        // 其余回调多播必达（上层 onSessionExit 收敛链依赖通知），不向 EventEmitter 传播
+        // （handler 内抛错会升级为 uncaughtException 炸掉 runtime 主进程）。
+        console.error('[rpc] exit callback failed:', e)
+      }
+    }
+  }
+
+  /**
    * start 的启动确认窗口：等 STARTUP_DELAY_MS 确认进程没有立即退出；
    * 窗口内 exit / error 即 reject（消息含 stderr 尾部）。
    */
@@ -546,8 +594,18 @@ export class RpcClient implements IPiEngine {
       // 缓冲已关闭后 listeners 再空集（detach 形态）落回本行 else 直通丢弃 = 现状语义。
       this.earlyFrameBuffer.push(msg)
     } else {
+      // RT-2#3：per-listener 隔离——此前首个 listener（EventAdapter 翻译链）抛错会
+      // 中断循环：本帧对后续 listener（handoff 的 agent_end 探测）整帧丢失。降级策略
+      // 见循环内 catch 注释。
       for (const listener of this.listeners) {
-        listener(msg)
+        try {
+          listener(msg)
+        } catch (e) {
+          // 降级策略：per-listener 隔离（对齐 replayEarlyFrameBuffer 的 D5 范式）——
+          // 单 listener throw 只 console.error 留痕，循环继续投递其余 listener（多播必达），
+          // 不向 readline line handler 传播（传播会被记「stdout parse error」且丢帧）。
+          console.error('[rpc] listener threw on frame (isolated, continuing):', e)
+        }
       }
     }
   }
@@ -695,7 +753,8 @@ export class RpcClient implements IPiEngine {
   /**
    * Register a callback for when the pi process exits unexpectedly. stderr 为 pi 进程尾部输出。
    * 多播（可多订阅者，后注册者不再覆盖先注册者），返回 unsubscribe（与 onEvent 对称）。
-   * 每个进程 exit 恰好通知一次：proc.on('exit') 是唯一出口（stream error 只 kill 不通知）；
+   * 每个进程恰好通知一次：出口 = proc 'exit' 与 proc 'error'（RT-2#6 合并为单一 terminate
+   * 出口，notifyExitOnce 幂等防双发；stream error 只 kill 不通知，死亡通知仍由 exit 承载）；
    * _killing=true 的主动 kill 流程不通知，语义不变。
    */
   onExit(callback: (code: number | null, stderr: string) => void): () => void {
@@ -728,8 +787,9 @@ export class RpcClient implements IPiEngine {
    * 异常退出时把累计 stderr 全量落盘（D4/G4，file-lock-unification-and-reaper-sink
    * §3.2-D4 / U3-4）。
    *
-   * 触发条件：code≠0 且非主动 kill（调用点在 exit handler 的 !this._killing 分支内）。
-   * code=null（信号死亡，如管道断裂后的 SIGKILL）同属异常退出，落盘。
+   * 触发条件：code≠0 且非主动 kill（调用点在 exit handler 与 terminateFromError 的
+   * !this._killing 分支内；process error 路径传 code=null）。
+   * code=null（信号死亡 / spawn 失败的 process error，如管道断裂后的 SIGKILL）同属异常退出，落盘。
    * 正常退出（code=0）与主动 kill 流程不写。
    * 文件：<logsDir>/pi-crash-<date>-<sid>.log（logger.ts writePiCrashLog，复用 pi-*
    * 命名惯例，保留期清理自动覆盖）。
@@ -891,7 +951,17 @@ export class RpcClient implements IPiEngine {
     // COMPACT_RPC_TIMEOUT_MS（30min，shared SSOT）——不再与 bash 共用（300s 前科已由 D2 拆除），
     // renderer backstop 引同一常量 + RENDERER_RPC_MARGIN_MS（编译期对齐，恒不先于本层判死）。
     const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {}, COMPACT_RPC_TIMEOUT_MS)
-    return msg.data as unknown as PiCompactionResult
+    // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
+    // CompactionResult 对象（rpc-mode.js:419-421 success(id,"compact",result)），data
+    // 缺失/非对象 = 协议异常。pi 手动 compact 失败另有 compaction_end{errorMessage}
+    // 事件编排（dispatcher 零广播注释），不走本返回值——reject 让协议异常显形而非
+    // undefined 字段渗入消费方。
+    const data = msg.data as unknown
+    if (typeof data !== 'object' || data === null) {
+      console.warn('[rpc] compact: malformed response from pi (data is not an object). data=', msg.data)
+      throw new Error('[rpc] compact: malformed response from pi (data is not an object)')
+    }
+    return data as unknown as PiCompactionResult
   }
 
   /**
@@ -936,13 +1006,31 @@ export class RpcClient implements IPiEngine {
   async getCommands(): Promise<PiCommandInfo[]> {
     // L6：getCommands 是毫秒级操作，用 FAST_TIMEOUT_MS（10s）替代默认 60s，失败更快报错
     const msg = await this.sendCommand('get_commands', {}, FAST_TIMEOUT_MS)
+    // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi get_commands 恒返回
+    // commands 数组（可为空），缺失/非数组 = 协议异常。此前 `?? []` 把协议异常折成
+    // 空数组：session-state-projection 的 publishCommandsSnapshot 只挡 undefined，
+    // 空数组照发 session.commands → 命令面板静默清空，且「无命令」与「响应畸形」不可分。
+    const commands = msg.data?.commands
+    if (!Array.isArray(commands)) {
+      console.warn('[rpc] getCommands: malformed response from pi (data.commands is not an array). data=', msg.data)
+      throw new Error('[rpc] getCommands: malformed response from pi (data.commands is not an array)')
+    }
     // 透传 pi RpcSlashCommand 的完整结构（含 sourceInfo），消费方按需取用
-    return (msg.data?.commands as PiCommandInfo[]) ?? []
+    return commands as PiCommandInfo[]
   }
 
   async getSessionStats(): Promise<PiSessionStats> {
     const msg = await this.sendCommand('get_session_stats')
-    return (msg.data ?? {}) as PiSessionStats
+    // RT-2#4：形状守卫——pi get_session_stats 恒返回 stats 对象（tokens=null 是对象内
+    // 字段表达的合法无值态），data 缺失/非对象 = 协议异常。此前 `?? {}` 折空对象，
+    // 投影层读不到 contextUsage 被当「无值」处理，协议异常被永久掩盖。
+    // 抛错承接：fetchSessionStatsSnapshot 的失败语义 = 实例快照失败退避重试 + 保留旧值。
+    const data = msg.data as unknown
+    if (typeof data !== 'object' || data === null) {
+      console.warn('[rpc] getSessionStats: malformed response from pi (data is not an object). data=', msg.data)
+      throw new Error('[rpc] getSessionStats: malformed response from pi (data is not an object)')
+    }
+    return data as PiSessionStats
   }
 
   /** 切换 pi 进程到指定 session 文件（restore / fork 用）。 */

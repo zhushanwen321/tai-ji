@@ -529,11 +529,15 @@ export interface PiExtensionUiRequestEvent extends PiBaseMessage {
    * Request method — determines the UI interaction type.
    *
    * 交互式 dialog 方法（产生 extension.ui_request WS 帧，需前端回复）：confirm / select / input / editor
-   * Fire-and-forget 方法（独立 WS 帧，不等回复）：notify / setStatus / setWidget / set_editor_text / bridge:*
-   * notify 走 extension.notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧。
+   * Fire-and-forget 方法（独立 WS 帧，不等回复）：notify / setStatus / setWidget / set_editor_text / setTitle
+   * notify 走 extension.notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧；
+   * set_editor_text 走 extension:setEditorText。setTitle 宿主不实现（pi fire-and-forget，
+   * 丢弃无功能损失——event-adapter 落 default 分支 warn + noop，预决策只补类型不实现宿主）。
+   * 全集对照 pi rpc-mode.js createExtensionUIContext 的 output 调用点（RT-2#7 补全
+   * set_editor_text/setTitle——此前缺失使 `as string` 成为掩盖穷举缺口的必要转换）。
    * event-adapter.ts INTERACTIVE_UI_METHODS 只含 dialog 子集，与此类型保持同步。
    */
-  method: 'confirm' | 'select' | 'input' | 'notify' | 'editor' | 'setStatus' | 'setWidget'
+  method: 'confirm' | 'select' | 'input' | 'notify' | 'editor' | 'setStatus' | 'setWidget' | 'set_editor_text' | 'setTitle'
   /** Unique id for correlating the response back. */
   id?: string
   /** Display title (often used as tool name). */

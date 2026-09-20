@@ -235,6 +235,10 @@ export default {
     genStatsCacheMissColdStartNote: '会话首个请求，缓存尚未建立（预期内未命中）',
     genStatsCacheMissIdleNote: '距上次请求已空闲 {duration}，provider 缓存已过期（预期内未命中）',
     genStatsCacheMissCompactionNote: '上下文压缩后前缀重建，本次请求必然未命中（预期内）',
+    // [RD-2#6] idle-expiry 而 idleMs 缺失：时长未知不伪装成测量值（null=无数据/0=真值，D4）
+    genStatsCacheMissIdleNoteUnknownDuration: '距上次请求空闲时长未知，provider 缓存已过期（预期内未命中）',
+    // [RD-2#7] runtime 领先 renderer 的协议漂移（未知 reason）→ 通用文案兜底（default 分支 + warn）
+    genStatsCacheMissUnknown: '缓存未命中',
     genStatsNoData: '暂无数据',
   },
   sideDrawer: {
@@ -356,6 +360,10 @@ export default {
     builtin: '内置',
     noDescription: '该命令无详细描述',
     noDocBody: '该 skill 无文档正文',
+    // [RD-2#3] SKILL.md 读取失败（两路守门均拒绝/IO 异常）显式失败态，区别于「无文档正文」空态
+    loadFailed: 'SKILL.md 读取失败：',
+    openDir: '打开所在目录',
+    revealFailed: '打开目录失败',
     path: '路径',
     commandType: '扩展命令',
     builtinCommand: '内置命令',
@@ -519,11 +527,17 @@ export default {
     loading: '加载中…',
     malformedLine: '无法解析的 entry（第 {line} 行）',
     malformedHint: 'JSONL 第 {line} 行损坏；可在文件管理器中检查 session JSONL 文件',
+    // [RD-2#6] 损坏行无行号（协议/版本漂移防御）：不承诺行定位、不指引用户查不存在的行
+    malformedLineUnknown: '无法解析的 entry（行号未知）',
+    malformedHintUnknownLine: 'JSONL 存在损坏行（行号未知）',
     inspectorBack: '返回',
     inspectorCopy: '复制',
     inspectorCopied: '已复制',
     inspectorSubtitle: '来自 Trace 视图 · 选中 entry 的完整详情',
     inspectorRaw: '原始 entry JSON',
+    // [RD-2#5] safeJson 守卫文案：环形引用等不可序列化 / 超限截断
+    rawJsonUnserializable: '（内容无法序列化展示）',
+    rawJsonTruncated: '…（内容过大，已截断）',
     // usage 行尾弱标注（互斥桶语义：cacheRead > input 是缓存命中的常态）
     usageUncached: '未缓存',
     usageCacheRead: '缓存命中',
@@ -532,5 +546,9 @@ export default {
     usageReasoning: '含于 output',
     blockRedacted: '（thinking 已脱敏，原文不可见）',
     jumpToolResult: '跳到对应 TOOL 行',
+  },
+  trayWidget: {
+    // [RD-2#8] 第三方 widget meta.progress 数值非有限（NaN/Infinity）：不渲染进度条，显示无进度
+    progressUnavailable: '无进度',
   },
 }

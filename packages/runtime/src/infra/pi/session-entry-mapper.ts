@@ -32,9 +32,38 @@ export interface MappedSessionEntries {
   customDataEntries: PiSessionCustomEntry[]
 }
 
-/** ISO timestamp → ms；非字符串（缺失/畸形）兜底 Date.now()（与 mapEntriesToPiMessages 一致）。 */
-function toMs(timestamp: unknown): number {
-  return typeof timestamp === 'string' ? new Date(timestamp).getTime() : Date.now()
+/**
+ * ISO timestamp → ms；畸形处理（RT-3#6，M7）：
+ * - 非字符串（缺失/类型错）→ undefined；
+ * - `new Date(str).getTime()` 非有限值（无法解析的畸形串）→ undefined；
+ * - 两种情况各记一次 warn（按本次映射聚合，见 mapSessionEntries / applyEntryEndTimes）。
+ *
+ * 为什么禁用旧兜底 `Date.now()`：用当前时刻伪装原始时刻会让畸形数据不可追溯
+ * （排序/时长计算拿到的是「读取时刻」而非「发生时刻」），NaN 更会穿透到
+ * endedAt/时长计算并广播（且 NaN 进 liftHistoryToEntries 的 `new Date(NaN).toISOString()`
+ * 直接抛 RangeError）。undefined 语义 = 「该 entry 无可用时刻」——mapSessionEntries 侧
+ * 省略 timestamp 字段（消费侧 lift 的缺失兜底单点落定），applyEntryEndTimes 侧不回填
+ * （消费侧回退消息体 timestamp，与「缺席 entry」既有降级一致）。
+ */
+function toMs(timestamp: unknown): number | undefined {
+  if (typeof timestamp !== 'string') return undefined
+  const ms = new Date(timestamp).getTime()
+  return Number.isFinite(ms) ? ms : undefined
+}
+
+/** toMs 的畸形计数 + 聚合 warn（每次映射一条，畸形数据需人工修文件）。 */
+class MalformedTimestampTracker {
+  private count = 0
+
+  note(): void {
+    this.count++
+  }
+
+  warnIfAny(context: string): void {
+    if (this.count > 0) {
+      console.warn(`[session-entry-mapper] ${context}: ${this.count} entry/entries with missing or malformed timestamp — treated as absent (no fabricated time)`)
+    }
+  }
 }
 
 /**
@@ -60,10 +89,18 @@ function toMs(timestamp: unknown): number {
  */
 export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[]): void {
   const endTimeByEntryId = new Map<string, number>()
+  const malformed = new MalformedTimestampTracker()
   for (const entry of entries) {
     if (entry.type !== 'message' || typeof entry.id !== 'string') continue
-    endTimeByEntryId.set(entry.id, toMs(entry.timestamp))
+    const ms = toMs(entry.timestamp)
+    if (ms === undefined) {
+      // 畸形/缺失 timestamp：不回填（消费侧回退消息体 timestamp），计数显形（RT-3#6）
+      malformed.note()
+      continue
+    }
+    endTimeByEntryId.set(entry.id, ms)
   }
+  malformed.warnIfAny('applyEntryEndTimes')
   if (endTimeByEntryId.size === 0) return
   for (const msg of messages) {
     if (msg.role !== 'assistant' || msg.piEntryId === undefined) continue
@@ -94,6 +131,16 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
   const messages: unknown[] = []
   const entryIds: string[] = []
   const customDataEntries: PiSessionCustomEntry[] = []
+  const malformed = new MalformedTimestampTracker()
+
+  // RT-3#6：entry timestamp 畸形（非字符串/不可解析）→ 省略 timestamp 字段而非注入
+  // NaN/Date.now()（NaN 会打穿消费链，Date.now() 伪装原始时刻不可追溯）；缺失兜底由
+  // liftHistoryToEntries 的单点（typeof number ? : Date.now()）落定，语义同迁移前。
+  const entryTs = (timestamp: unknown): number | undefined => {
+    const ms = toMs(timestamp)
+    if (ms === undefined) malformed.note()
+    return ms
+  }
 
   for (const entry of entries) {
     switch (entry.type) {
@@ -104,11 +151,12 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
         break
       }
       case 'compaction': {
+        const ts = entryTs(entry.timestamp)
         messages.push({
           role: 'compactionSummary',
           summary: entry.summary,
           tokensBefore: entry.tokensBefore,
-          timestamp: toMs(entry.timestamp),
+          ...(ts !== undefined && { timestamp: ts }),
         })
         entryIds.push(entry.id)
         break
@@ -120,7 +168,7 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
         // 为什么覆写：extension 落 display:false 是 pi TUI 渲染语义；taiji 聊天流的定向
         // 气泡必须「重开后仍在」（关键规则 9），display:false 会被前端 display 过滤隐藏。
         // 仅 details 可解析时覆写（parse 与 live 广播同一解析器）——畸形时保持透传
-        // （false → 隐藏），与 live 侧 parse 失败不广播的降级行为对称。
+        //（false → 隐藏），与 live 侧 parse 失败不广播的降级行为对称。
         // 本 mapper 是 RPC（entry-tree-builder）与文件（session-history）两条 reload 路径的
         // 共享单点，覆写在此做即覆盖全部 reload 链路。
         const isDirectiveVisible = entry.customType === SUBAGENT_DIRECTIVE_CUSTOM_TYPE
@@ -130,6 +178,7 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
         let display = entry.display
         if (isCompleteNotify) display = false
         else if (isDirectiveVisible) display = true
+        const ts = entryTs(entry.timestamp)
         messages.push({
           role: 'custom',
           customType: entry.customType,
@@ -137,17 +186,18 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
           content: typeof entry.content === 'string' ? entry.content : '',
           details: entry.details,
           display,
-          timestamp: toMs(entry.timestamp),
+          ...(ts !== undefined && { timestamp: ts }),
         })
         entryIds.push(entry.id)
         break
       }
       case 'branch_summary': {
+        const ts = entryTs(entry.timestamp)
         messages.push({
           role: 'branchSummary',
           summary: entry.summary,
           fromId: entry.fromId,
-          timestamp: toMs(entry.timestamp),
+          ...(ts !== undefined && { timestamp: ts }),
         })
         entryIds.push(entry.id)
         break
@@ -163,6 +213,8 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
       }
     }
   }
+
+  malformed.warnIfAny('mapSessionEntries')
 
   return { messages, entryIds, customDataEntries }
 }

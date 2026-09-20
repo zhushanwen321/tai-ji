@@ -17,6 +17,7 @@ import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IPluginService, IExtensionService } from '../interfaces.js'
 import { buildDirConfigs, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS } from '../services/skill-dir-config.js'
 import { formatReplyOversizeMessage, appendReplyFrameJournal } from '../services/message-bus/outbound-frame-registry.js'
+import { warnIfBacklogged } from '../utils/backpressure-warn.js'
 import type { ErrorDetails } from './message-context.js'
 import { WS_OPEN } from './connection-manager.js'
 
@@ -92,7 +93,22 @@ export class ServerMessageBroker implements IMessageBroker {
   // ── IMessageBroker ──────────────────────────────────────────────
 
   send(ws: WsType, msg: ServerMessage): void {
-    if (ws.readyState === WS_OPEN) ws.send(JSON.stringify(msg))
+    if (ws.readyState !== WS_OPEN) return
+    let text: string
+    try {
+      text = JSON.stringify(msg)
+    // RT-1#8：send 是 sendError 的最后手段路径——序列化失败（循环引用等）若直抛，
+    // 异常沿调用方冒泡且 error envelope 无从发出（reply 同款守卫见下方 :168-174 形态）。
+    // 收口为 error envelope（新 envelope 是受控构造的纯字符串 payload，序列化不再失败，
+    // 结构上不会递归）。
+    } catch (e) {
+      console.error(`[broker] send serialization failed (type=${msg.type}) — sending error envelope instead:`, e)
+      this.sendError(ws, 'send_serialization_failed', 'send payload serialization failed')
+      return
+    }
+    // RT-1#7：发送侧背压观测（bufferedAmount 超阈值 warn，每 socket 每次越限一条）。
+    ws.send(text)
+    warnIfBacklogged(ws, 'send')
   }
 
   broadcast(msg: ServerMessage): void {
@@ -132,6 +148,8 @@ export class ServerMessageBroker implements IMessageBroker {
       } catch {
         // 单 client 已断连/异常，跳过继续广播给其余 client
       }
+      // RT-1#7：发送侧背压观测（ws.send 后 bufferedAmount 已计入本帧）。
+      warnIfBacklogged(ws, 'broadcast')
     }
   }
 
@@ -192,7 +210,11 @@ export class ServerMessageBroker implements IMessageBroker {
       // u1e（crash-forensics D1）：reply 告警档 → frame-truncated(warn-tier)。
       appendReplyFrameJournal('warn-tier', type, sid, bytes)
     }
-    if (ws.readyState === WS_OPEN) ws.send(text)
+    if (ws.readyState === WS_OPEN) {
+      ws.send(text)
+      // RT-1#7：发送侧背压观测（ws.send 后 bufferedAmount 已计入本帧）。
+      warnIfBacklogged(ws, 'reply')
+    }
   }
 
   // ── Shared payload builders ─────────────────────────────────────
@@ -280,12 +302,14 @@ export class ServerMessageBroker implements IMessageBroker {
    * 与 broadcastSkillList 区分：
    *   - broadcastSkillList = 全量列表推送到 settingsStore.skills（settings 弹窗用）
    *   - broadcastSkillCacheInvalidated = 失效信号给 landing composable（runtime 已重扫缓存，前端重拉即拿新值）
+   * partial（RT-1#9）：降级补发形态——global 重建/通知链失败时由失败分支补发，标注
+   * globalCache 可能仍是旧值（payload 字段语义见 shared SkillCacheInvalidatedPayload）。
    */
-  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string): void {
+  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void {
     const msg = {
       type: 'config.skillCacheInvalidated' as const,
       id: this.nextPushId(),
-      payload: { scope, cwd },
+      payload: { scope, cwd, partial },
     } satisfies ServerMessage<'config.skillCacheInvalidated'>
     this.broadcast(msg)
   }

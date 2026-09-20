@@ -25,14 +25,18 @@ import {
   readBindingSidecar,
   refreshScanDirCache,
   sessionMetaCache,
+  warnSidecarReadFailureOnce,
+  _resetSidecarWarnDedupForTest,
   type PersistBindingSidecarOpts,
 } from './session-binding-sidecar-io.js'
-export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar } from './session-binding-sidecar-io.js'
+export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest } from './session-binding-sidecar-io.js'
 // 残留清扫家族已拆出至 './session-residue-cleanup.ts'（max-lines 预算，先例同上）：
-// 本文件 isScannableSessionFile 消费 TMP_RESIDUE_MARKERS（候选侧过滤），cleanup* 两函数
-// 经 re-export 维持原导出路径（消费方 import 路径零改动）。
-import { TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
-export { cleanupMigrateResidues, cleanupTmpMigrateResidue, TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
+// 本文件 isScannableSessionFile 消费 isTmpResidueFileName（候选侧过滤，RT-3#10 起精确
+// 后缀形态判定，与清扫侧/导入拒绝侧三消费点同一谓词），cleanup* 两函数经 re-export
+// 维持原导出路径（消费方 import 路径零改动）。
+import { isTmpResidueFileName } from './session-residue-cleanup.js'
+import { createDegradedStats, logScanDegradedSummary, noteScanDegraded, type ScanDegradedStats } from './session-scan-degraded.js'
+export { cleanupMigrateResidues, cleanupTmpMigrateResidue, isTmpResidueFileName, TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
 
 // ── 类型定义 ─────────────────────────────────────────────────
 
@@ -166,7 +170,9 @@ export function readSessionEndMeta(filePath: string): SessionEndSidecarMeta | nu
       ...(typeof meta.reason === 'string' ? { reason: meta.reason } : {}),
       ...(typeof meta.timestamp === 'string' ? { timestamp: meta.timestamp } : {}),
     }
-  } catch {
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（无终态 sidecar，多数 session 常态）安静；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read/parse failed')
     return null
   }
 }
@@ -474,7 +480,10 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
       // outcome 非法：sidecar 损坏/篡改，与 sidecar 不存在等价 → fallthrough 到 JSONL 兜底。
       // （原来此处直接 return null，会丢失 JSONL 中可能存在的合法 session_end 终态。）
     }
-  } catch { void 0 /* no sidecar or invalid → fallback to JSONL */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（历史 session 无 sidecar）安静走 JSONL 兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read failed, falling back to JSONL')
+  }
 
   // fallback: 从 JSONL 读（历史 session / 无 sidecar / sidecar outcome 非法时的兼容路径）
   // findLastEntryField 的 predicate 只校验了 typeof，未校验值合法性——
@@ -760,7 +769,10 @@ export function extractHandedOff(filePath: string): string | undefined {
       return marker.handedOffTo
     }
     // handedOffTo 非字符串：sidecar 损坏，与 sidecar 不存在等价 → fallthrough 尾读兜底。
-  } catch { void 0 /* no sidecar or invalid → fallback to legacy JSONL marker */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（未交接）安静走尾读兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(filePath + '.handoff.json', e, 'handoff sidecar read failed, falling back to tail read')
+  }
 
   // fallback：存量旧 session 的 JSONL `handoff_marker` 尾读（W11 前写入的兼容路径）
   const tailEntries = readTailEntries(filePath)
@@ -920,13 +932,8 @@ export function invalidateSessionMetaCache(filePath: string): void {
 // [SSOT 指针] 新增绑定字段必经此处填充 ScannedSessionMeta——必须同步在
 // session-binding-fields.ts 的 BINDING_FIELDS 注册表登记（漏登记=编译错），
 // 回填入口适用性（hydrateBindingMeta 四入口矩阵）与 create 派生调用方清单均在该模块维护。
-/**
- * 扫描降级计数（RT-3#1，F5 留痕）：坏 header（id/cwd 缺失/空串）丢弃的条目数——
- * scanPiSessionsFromDisk 按轮汇总打点，让「侧栏少了会话」可归因。
- */
-interface ScanDegradedStats {
-  badHeader: number
-}
+// 扫描降级计数家族（ScanDegradedStats / noteScanDegraded / logScanDegradedSummary）已拆出
+// './session-scan-degraded.ts'（max-lines 预算，RT-3#2 扩展时拆出，先例同 residue-cleanup）。
 
 /**
  * 单个 session 文件的元数据提取（三读合一 + 缓存）。
@@ -968,11 +975,13 @@ function scanSessionMeta(filePath: string, degraded?: ScanDegradedStats): Scanne
   // miss：三读合一提取全部元数据
   const header = parseSessionHeader(filePath)
   if (!header) {
-    // 非 session 文件（首行不是 session header）：不缓存（下次仍尝试，开销小）
+    // 非 session 文件（首行不是 session header：异质 .jsonl / 截断 / 读取失败）：不缓存
+    // （下次仍尝试，开销小），但计数显形（RT-3#2——静默跳过 = 列表少一条零痕迹）。
+    if (degraded) noteScanDegraded(degraded, 'noHeader', filePath)
     return null
   }
   if (typeof header.id !== 'string' || header.id === '' || typeof header.cwd !== 'string' || header.cwd === '') {
-    if (degraded) degraded.badHeader++
+    if (degraded) noteScanDegraded(degraded, 'badHeader', filePath)
     console.warn(`[session-file-utils] session header missing/empty id or cwd, file skipped: ${filePath}`)
     return null
   }
@@ -1078,19 +1087,23 @@ export function scanPiSessions(opts?: ScanSessionsOptions): ScannedSessionMeta[]
  * 识别 session、不按文件名——残留文件内容是合法 session（同 sessionId），不过滤会产生
  * 同 id 双条目，且残留 mtime 更新、排序在前，findScannedSession 会命中残留路径 →
  * restore 附着错位文件。文件名过滤把「残留无害」从声明变成机制保证（候选侧与清扫侧
- * 同规则，TMP_RESIDUE_MARKERS）。
+ * 同规则，isTmpResidueFileName）。
+ *
+ * RT-3#10：判定从 `includes(marker)` 子串改为 isTmpResidueFileName 精确后缀形态——
+ * session id 中段含标记串的真实会话文件（`a.tmp-migrate-b.jsonl`，实测 fixture 验证）
+ * 曾被子串判定排除出列表且被清扫删除（数据丢失），精确形态只匹配真崩溃中间态。
  */
 export function isScannableSessionFile(name: string): boolean {
-  return name.endsWith('.jsonl') && !TMP_RESIDUE_MARKERS.some((marker) => name.includes(marker))
+  return name.endsWith('.jsonl') && !isTmpResidueFileName(name)
 }
 
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   if (!existsSync(sessionsDir)) return []
 
   const results: ScannedSessionMeta[] = []
-  // RT-3#1：坏 header 丢弃计数（degraded 显形）——scanSessionMeta 出口 fail-fast 计入，
-  // 扫描轮末汇总打点，单条坏文件「侧栏少一条」可归因（与 F5 留痕族先例同形）。
-  const degraded: ScanDegradedStats = { badHeader: 0 }
+  // RT-3#1/#2：降级丢弃计数（degraded 显形）——各失败点计入，扫描轮末汇总打点，
+  // 单条坏文件「侧栏少一条」可归因（结构与实现见 session-scan-degraded.ts）。
+  const degraded: ScanDegradedStats = createDegradedStats()
 
   let entries: string[]
   try {
@@ -1108,6 +1121,8 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
     try {
       stat = statSync(entryPath)
     } catch {
+      // RT-3#2：静默 continue → 计数显形（权限/竞态删除，该条目未收录）
+      noteScanDegraded(degraded, 'statFail', entryPath)
       continue
     }
 
@@ -1120,31 +1135,25 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
           try {
             const meta = scanSessionMeta(filePath, degraded)
             if (meta) results.push(meta)
-          // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entries
           } catch {
-            // skip
+            noteScanDegraded(degraded, 'scanFail', filePath)
           }
         }
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session subdirectory
       } catch {
-        // skip unreadable dir
+        // RT-3#2：子目录列举失败 = 整个 cwd 分组的会话未收录，必须显形
+        noteScanDegraded(degraded, 'dirFail', entryPath)
       }
     } else if (isScannableSessionFile(entry)) {
       try {
         const meta = scanSessionMeta(entryPath, degraded)
         if (meta) results.push(meta)
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entry
       } catch {
-        // skip
+        noteScanDegraded(degraded, 'scanFail', entryPath)
       }
     }
   }
 
-  if (degraded.badHeader > 0) {
-    console.warn(
-      `[session-file-utils] scanPiSessions: ${degraded.badHeader} session file(s) dropped due to bad header (missing/empty id or cwd) — check files above; fixing or removing the file restores it to the list`,
-    )
-  }
+  logScanDegradedSummary(degraded)
 
   results.sort((a, b) => b.lastModified - a.lastModified)
   return results

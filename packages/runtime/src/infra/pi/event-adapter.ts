@@ -900,7 +900,7 @@ function translatePlainDialogRequest(
   requestId: string,
   dialogMethod: ExtensionInteractMethod,
 ): PiTranslatedEvent[] {
-  const method = event.method as string
+  const method = event.method
   const rawOptions = Array.isArray(event.options) ? event.options : undefined
   const requestPayload = {
     sessionId: sid,
@@ -927,8 +927,8 @@ function translatePlainDialogRequest(
  * 经 BRIDGE_MARKER 识别进入 bridge-ui kind。
  */
 function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: string): PiTranslatedEvent[] {
-  const method = event.method as string
-  const dialogMethod = method as ExtensionInteractMethod
+  // 经 handleExtensionUIRequest 的 INTERACTIVE_UI_METHODS gate 收窄为 dialog 子集后进入
+  const dialogMethod = event.method as ExtensionInteractMethod
   const requestId = String(event.id ?? '')
 
   if (isMarkerSelect(event, SESSION_MANAGER_MARKER)) {
@@ -975,7 +975,7 @@ function isMarkerSelect(event: PiExtensionUiRequestEvent, marker: string): boole
 
 /** extension_ui_request — route by method (setStatus, setWidget, editor, etc.) */
 function handleExtensionUIRequest(event: PiExtensionUiRequestEvent, sid: string): PiTranslatedEvent[] {
-  const method = event.method as string
+  const method = event.method
 
   if (method === 'setStatus') return translateStatusRequest(event, sid)
 
@@ -988,10 +988,15 @@ function handleExtensionUIRequest(event: PiExtensionUiRequestEvent, sid: string)
 
   if (method === 'notify') return translateNotifyRequest(event, sid)
 
-  if (method && INTERACTIVE_UI_METHODS.has(method as ExtensionInteractMethod)) {
+  if (INTERACTIVE_UI_METHODS.has(method as ExtensionInteractMethod)) {
     return translateInteractiveRequest(event, sid)
   }
 
+  // RT-2#7：未知 method 不再静默 noop——pi 升级新增 method（尤其阻塞式交互）时无痕
+  // 丢弃会让 pi 侧 Promise 永挂、对话永无响应；warn 留痕让漂移可诊断（对照
+  // handleMessageUpdate default 分支的同款 warn）。已知落点：setTitle（宿主不实现，
+  // pi fire-and-forget 无损失，预决策只补类型与 warn）。
+  console.warn('[EventAdapter] Unhandled extension_ui_request method:', method)
   return [{ kind: 'noop' }]
 }
 
@@ -1716,8 +1721,30 @@ export class EventAdapter {
       // [u7b D5 例外] subagent 在途上报旁路：marker 帧就地消费（镜像 + ack），识别即吞掉
       //（不进翻译 → 结构性零前端广播；translate 的守卫分支为第二道防线）。
       if (this.consumeInflightReport(event, client)) return
-      // PiEventListener 的 event 是 unknown（pi 动态 JSON），断言为 PiEvent 联合翻译。
-      const events = translate(event as unknown as PiEvent, this.sessionId)
+      // RT-2#3：translate 与 interpret 同处隔离边界。此前 translate 在 try 外——pi 字段
+      // 漂移致 handler 直读炸掉（如 queue_update.steering 非数组、tool_execution_update
+      // partialResult.content 数组形态缺位）时异常逃逸进 rpc-client 的 stdout parse catch，
+      // 被误记「parse error」，且 listener 循环无隔离使本帧对后续 listener（handoff 的
+      // agent_end 探测）整帧丢失、无用户可见失败。现失败在 adapter 内显形为
+      // message.stream_error（content 带原因，前端 finalize 收口 + 文案可见），流继续。
+      let events: PiTranslatedEvent[]
+      try {
+        // PiEventListener 的 event 是 unknown（pi 动态 JSON），断言为 PiEvent 联合翻译。
+        events = translate(event as unknown as PiEvent, this.sessionId)
+      } catch (err) {
+        console.error(`[ADAPTER-FAIL] translate error (isolated; stream continues) sid=${this.sessionId}:`, err)
+        events = [{
+          kind: 'message',
+          message: {
+            type: 'message.stream_error',
+            payload: {
+              sessionId: this.sessionId,
+              content: `事件翻译失败，本帧已跳过：${err instanceof Error ? err.message : String(err)}`,
+              kind: 'adapter',
+            },
+          },
+        }]
+      }
       if (events.length === 0) return
       // interpret 同步执行（message/status WS 帧即时送出）；
       // 仅 tool-call-* 的 hook 改写异步（handler 内部 await），不阻塞本回调。

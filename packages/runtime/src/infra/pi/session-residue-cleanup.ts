@@ -35,6 +35,8 @@ export function cleanupMigrateResidues(filePath: string): void {
   }
   for (const name of names) {
     if (name.startsWith(prefix) && name.endsWith('.jsonl')) {
+      // 删除逐条 debug 留痕（RT-3#10）：session 级清扫是数据删除动作，文件名必须可见
+      console.debug(`[session-residue-cleanup] cleanupMigrateResidues: removing ${join(dir, name)}`)
       try { unlinkSync(join(dir, name)) } catch { void 0 }
     }
   }
@@ -55,6 +57,26 @@ const TMP_MIGRATE_RESIDUE_MAX_AGE_MS = 3_600_000
  * r1-S5 起导出：import-service 的导入拒绝校验消费同一常量（消灭双副本漂移面）。
  */
 export const TMP_RESIDUE_MARKERS = ['.tmp-migrate-', '.tmp-import-'] as const
+
+/**
+ * tmp 残留家族的精确文件名形态（RT-3#10）：`<原名>.tmp-(migrate|import)-<纯数字 ts>.jsonl`。
+ *
+ * 为什么不用 `name.includes(marker)` 子串判定：两类临时名的 marker 固定出现在 basename
+ * 之后、且后接毫秒时间戳数字再收 `.jsonl` 尾——session id 本身中段含标记串的真实会话
+ * 文件（实测 fixture：`a.tmp-migrate-b.jsonl`）会被子串判定误伤，既被 scanner 排除出
+ * 列表又被本清扫删除（数据丢失）。后缀正则锚定「标记 + 纯数字 ts + .jsonl 结尾」的
+ * 真实形态，真判定只对崩溃中间态成立。
+ *
+ * 消费方（三处同规则，禁再写第四份 includes）：候选侧 isScannableSessionFile
+ * （session-file-utils）、清扫侧 removeResiduesInDir（本文件）、导入拒绝侧
+ * import-source-external-file 的文件名校验。
+ */
+const TMP_RESIDUE_NAME_RE = /\.tmp-(?:migrate|import)-\d+\.jsonl$/
+
+/** tmp 残留家族的精确判定（形态见 TMP_RESIDUE_NAME_RE；三消费点统一走本谓词）。 */
+export function isTmpResidueFileName(name: string): boolean {
+  return TMP_RESIDUE_NAME_RE.test(name)
+}
 
 /**
  * [缓存治理 U9] 退役 model sidecar 残留后缀：`<session>.jsonl.model.json`
@@ -141,13 +163,17 @@ function removeResiduesInDir(dir: string, cutoff: number): number {
   }
   let removed = 0
   for (const name of names) {
-    const isTmpResidue = TMP_RESIDUE_MARKERS.some((marker) => name.includes(marker)) && name.endsWith('.jsonl')
+    // RT-3#10：tmp 家族走精确后缀形态判定（isTmpResidueFileName），不再 includes 子串——
+    // 中段含标记的真实会话文件（`a.tmp-migrate-b.jsonl`）曾既被收录排除又被这里删除。
+    const isTmpResidue = isTmpResidueFileName(name)
     const isSidecarResidue = name.endsWith(MODEL_SIDECAR_RESIDUE_SUFFIX)
     if (!isTmpResidue && !isSidecarResidue) continue
     const filePath = join(dir, name)
     try {
       // 仅 tmp 家族受按龄闸约束（防并发误删进行中的归一化/导入临时文件）；sidecar 家族全删。
       if (isTmpResidue && statSync(filePath).mtimeMs >= cutoff) continue
+      // 删除逐条 debug 留痕（RT-3#10）：目录级清扫是数据删除动作，文件名必须可见
+      console.debug(`[session-residue-cleanup] cleanupTmpMigrateResidue: removing ${filePath}`)
       unlinkSync(filePath)
       removed++
     // eslint-disable-next-line taste/no-silent-catch -- best-effort: 单文件失败跳过，不阻断启动链

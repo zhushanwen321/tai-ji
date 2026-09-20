@@ -326,7 +326,7 @@ export class RuntimeServer implements IMessageBroker {
       broadcast: (msg) => this.broker.broadcast(msg),
       broadcastProviderList: () => this.broker.broadcastProviderList(),
       broadcastSkillList: () => this.broker.broadcastSkillList(),
-      broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string) => this.broker.broadcastSkillCacheInvalidated(scope, cwd),
+      broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string, partial?: boolean) => this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial),
       broadcastAgentList: () => this.broker.broadcastAgentList(),
       broadcastSkillDirs: () => this.broker.broadcastSkillDirs(),
       broadcastAgentDirs: () => this.broker.broadcastAgentDirs(),
@@ -527,8 +527,9 @@ export class RuntimeServer implements IMessageBroker {
   /**
    * W2：暴露 broker 的 skill 缓存失效广播，供 index.ts 的 skillRegistry.onChange 回调调用
    * （skill 变动 → 广播 config.skillCacheInvalidated 让 landing composable 失效缓存重拉）。
+   * partial 透传（RT-1#9 降级补发标注）。
    */
-  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd) }
+  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial) }
   nextPushId(): string { return this.broker.nextPushId() }
 
   // ── Message routing ───────────────────────────────────────────
@@ -547,10 +548,22 @@ export class RuntimeServer implements IMessageBroker {
       }
     } catch (e) {
       const message = toErrorMessage(e)
-      const sessionId = ('sessionId' in msg.payload ? msg.payload.sessionId : undefined) as string | undefined
+      // RT-1#3：payload 可能缺省/为原始值（畸形帧已过 JSON.parse 层）——`'sessionId' in msg.payload`
+      // 在 undefined 上抛 TypeError，会替换掉原 handler 异常（catch 内二次抛）。可选链消除二次抛。
+      const sessionId = (msg.payload as { sessionId?: string } | undefined)?.sessionId
       // L4 增强：error 自带 code（如 MODEL_NOT_CONFIGURED）时透传，前端据此差异化引导；否则回退 handler_error。
       const code = (e as Error & { code?: string }).code ?? 'handler_error'
-      this.broker.sendError(ws, code, message, msg.id, sessionId ? { sessionId } : undefined)
+      try {
+        this.broker.sendError(ws, code, message, msg.id, sessionId ? { sessionId } : undefined)
+      } catch (envelopeError) {
+        // error envelope 发送自身失败（ws TOCTOU 已关闭等）：原 handler 异常不能随之丢失——
+        // 以 cause 保留上抛（Error options cause，仓内既有范式），由 connection-manager 兜底
+        // 漏斗打印 + 补发 sessionId 信封。
+        throw new Error(
+          `handler error envelope send failed (original: ${message}; envelope error: ${toErrorMessage(envelopeError)})`,
+          { cause: e },
+        )
+      }
     }
   }
 

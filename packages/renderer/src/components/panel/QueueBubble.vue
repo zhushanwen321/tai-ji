@@ -23,8 +23,8 @@
     data-testid="queue-bubble"
   >
     <div
-      v-for="(item, i) in visibleItems"
-      :key="i"
+      v-for="item in visibleItems"
+      :key="itemKey(item)"
       class="qb-item group flex items-center gap-1.5 py-0.5 text-[length:var(--text-xs)]"
       :title="item.type === 'defer' ? deferHint : undefined"
     >
@@ -103,6 +103,13 @@ interface FlatItem {
   text: string
   id: string
   chipCount: number
+  /**
+   * [RD-2#9] 构造期分配的稳定序号：steering/followUp 无 id（恒空串），直接拼 id 会重复
+   * key；裸 index key 在重排/中段删除时漂移致 DOM 复用错位。key = type + ':' + (id || seq)
+   * ——defer 行有 pi 侧稳定 id 优先用（删除同伴不再重挂载），无 id 家族用 type 域内序号
+   * （type 前缀消除跨类型 DOM 复用）。
+   */
+  seq: number
 }
 
 /** steering 优先于 followUp（对齐 pi 队列消费顺序）→ defer（未提交恒在最后，对齐「最后投递」
@@ -111,12 +118,13 @@ interface FlatItem {
  *  defer 行必须可见。 */
 const flatItems = computed<FlatItem[]>(() => {
   const list: FlatItem[] = []
+  let seq = 0
   const s = props.state
   if (s?.steering?.length) {
-    list.push(...s.steering.map((text) => ({ type: 'steering' as const, text: stripDeferMarker(text), id: '', chipCount: 0 })))
+    list.push(...s.steering.map((text) => ({ type: 'steering' as const, text: stripDeferMarker(text), id: '', chipCount: 0, seq: seq++ })))
   }
   if (s?.followUp?.length) {
-    list.push(...s.followUp.map((text) => ({ type: 'followUp' as const, text: stripDeferMarker(text), id: '', chipCount: 0 })))
+    list.push(...s.followUp.map((text) => ({ type: 'followUp' as const, text: stripDeferMarker(text), id: '', chipCount: 0, seq: seq++ })))
   }
   if (props.deferEntries.length) {
     list.push(...props.deferEntries.map((m) => ({
@@ -125,10 +133,16 @@ const flatItems = computed<FlatItem[]>(() => {
       id: m.id,
       // [defer segments 化] 富内容 +N 徽标计数 = 非 text 段数（逻辑自 PendingBubble.chipCount 迁移）
       chipCount: m.segments.filter((seg) => seg.type !== 'text').length,
+      seq: seq++,
     })))
   }
   return list
 })
+
+/** [RD-2#9] v-for 稳定 key（禁裸 index）：defer 用 pi 侧 id，steering/followUp 用构造期序号 */
+function itemKey(item: FlatItem): string {
+  return `${item.type}:${item.id || item.seq}`
+}
 
 function iconOf(type: FlatItem['type']) {
   if (type === 'steering') return Zap

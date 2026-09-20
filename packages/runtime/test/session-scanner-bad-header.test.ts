@@ -117,7 +117,8 @@ describe('RT-3#1: 坏 header（缺 id/cwd）不毒死会话列表', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session header missing/empty id or cwd'))
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(badPath))
       // degraded 计数显形：扫描轮末汇总打点
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('1 session file(s) dropped due to bad header'))
+      // RT-3#2：轮末汇总升级为全家族统一格式（badHeader=<n> 计数进 degraded 汇总行）
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('scanPiSessions degraded: badHeader=1'))
     } finally {
       warnSpy.mockRestore()
     }
@@ -133,7 +134,8 @@ describe('RT-3#1: 坏 header（缺 id/cwd）不毒死会话列表', () => {
       const groups = scanner.listPersistedSessions()
       const allIds = groups.flatMap((g) => g.sessions.map((s) => s.id))
       expect(allIds).toEqual(['good-session'])
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('1 session file(s) dropped due to bad header'))
+      // RT-3#2：轮末汇总升级为全家族统一格式（badHeader=<n> 计数进 degraded 汇总行）
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('scanPiSessions degraded: badHeader=1'))
     } finally {
       warnSpy.mockRestore()
     }

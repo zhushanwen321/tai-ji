@@ -17,6 +17,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
+import { isEnoent, toErrorMessage } from '../../utils/errors.js'
+import { quarantineCorruptFile } from '../../utils/json-store.js'
 import type { ScannedSessionMeta } from './session-file-utils.js'
 
 // ── W3 文件级 mtime+size 缓存（随骨架迁入：persistBindingSidecar 写后失效依赖它）──
@@ -128,14 +130,66 @@ export function persistBindingSidecar(
  * [消费方登记] 同 persistBindingSidecar——preset/project/agent 家族经
  * session-file-utils.ts re-export 消费，仅限 sidecar 家族模块消费（model 家族消费方
  * 已随缓存治理批 3 U8 退役删除）。
+ *
+ * RT-3#3 读侧显形：ENOENT = 「从未绑定」的正常态，保持安静；其余失败路径全部出声，
+ * 让「绑定损坏」与「从未绑定」可区分——
+ * - 读失败（EACCES/EIO 等非 ENOENT）→ warn 一次（路径+原因），按未绑定降级；
+ * - JSON parse 拒绝（文件损坏）→ warn + quarantineCorruptFile 隔离保取证副本——
+ *   binding sidecar 无 JSONL 兜底真源（与 meta/handoff sidecar 不同），损坏即用户
+ *   归属数据丢失，隔离副本是唯一恢复入口；
+ * - 守卫不过（合法 JSON 但字段形状不符）→ warn 一次（路径+原因）——可能是版本
+ *   演进产生的旧形态，不隔离（隔离会消灭旧形态的可恢复性）。
  */
+const warnedSidecarPaths = new Set<string>()
+
+/**
+ * sidecar 读侧降级 warn（每路径一次，防扫描热路径刷屏；条目数上界 = sidecar 文件数）。
+ * meta/handoff sidecar 的读侧分流（session-file-utils）复用同一去重集——同一文件的
+ * 降级只出声一次，不因扫描多轮重复。
+ */
+export function warnSidecarDegradedOnce(sidecarPath: string, reason: string): void {
+  if (warnedSidecarPaths.has(sidecarPath)) return
+  warnedSidecarPaths.add(sidecarPath)
+  console.warn(`[session-binding-sidecar-io] ${reason}: ${sidecarPath} — binding treated as absent (损坏≠未绑定，可从日志定位该路径)`)
+}
+
+/**
+ * 读侧 catch 的 ENOENT 分流单点（RT-3#3）：ENOENT = 「从未绑定/无记录」的正常态，
+ * 保持安静；其余失败 warn 一次（路径+原因）。meta/handoff sidecar 的 catch 消费。
+ */
+export function warnSidecarReadFailureOnce(sidecarPath: string, e: unknown, reason: string): void {
+  if (isEnoent(e)) return
+  warnSidecarDegradedOnce(sidecarPath, `${reason} (${toErrorMessage(e)})`)
+}
+
+/** 测试隔离用：清空 warn-once 去重集。 */
+export function _resetSidecarWarnDedupForTest(): void {
+  warnedSidecarPaths.clear()
+}
+
 export function readBindingSidecar<T>(sidecarPath: string, decode: (binding: unknown) => T | undefined): T | undefined {
+  let raw: string
   try {
-    const raw = readFileSync(sidecarPath, 'utf-8')
-    return decode(JSON.parse(raw))
-  } catch {
+    raw = readFileSync(sidecarPath, 'utf-8')
+  } catch (e) {
+    if (!isEnoent(e)) {
+      warnSidecarDegradedOnce(sidecarPath, `sidecar read failed (${toErrorMessage(e)})`)
+    }
     return undefined
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    warnSidecarDegradedOnce(sidecarPath, `sidecar JSON corrupt (${toErrorMessage(e)})`)
+    quarantineCorruptFile(sidecarPath, { tag: 'session-binding-sidecar-io', reason: 'sidecar JSON parse failed', cause: e })
+    return undefined
+  }
+  const decoded = decode(parsed)
+  if (decoded === undefined) {
+    warnSidecarDegradedOnce(sidecarPath, 'sidecar decoded shape rejected (guard failed)')
+  }
+  return decoded
 }
 
 // ── wave:perf-w26 目录列举层 TTL 缓存（随骨架迁入：骨架写后失效依赖它）──────────

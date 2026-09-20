@@ -51,7 +51,12 @@
       class="min-w-0 flex-1 truncate text-[length:var(--text-xs)]"
       :class="selected ? 'text-accent' : row.shadowed ? 'text-neutral-mid' : 'text-neutral-fg'"
     >
-      <template v-if="row.kind === 'MALFORMED'">{{ t('panel.trace.malformedLine', { line: row.lineNumber ?? 0 }) }}</template>
+      <!-- [RD-2#6] 损坏行行号未知（协议/版本漂移防御）：显示「行号未知」，不伪装成「第 0 行」 -->
+      <template v-if="row.kind === 'MALFORMED'">{{
+        malformedLine !== null
+          ? t('panel.trace.malformedLine', { line: malformedLine })
+          : t('panel.trace.malformedLineUnknown')
+      }}</template>
       <template v-else>{{ headline }}</template>
       <span v-if="suffix" data-testid="trace-suffix" class="ml-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ suffix }}</span>
     </span>
@@ -156,10 +161,18 @@ const suffix = computed(() => {
   }
 })
 
-/** 悬停提示：影子化 / 损坏行给排查线索（§3.1 失败路径恢复指引）。 */
+/** [RD-2#6] MALFORMED 行号：类型上可缺（协议/版本漂移防御）——null = 未知，
+ * 不以 ?? 0 伪装成「第 0 行」指引用户查不存在的行。 */
+const malformedLine = computed<number | null>(() =>
+  typeof props.row.lineNumber === 'number' ? props.row.lineNumber : null,
+)
+
+/** 悬停提示：影子化 / 损坏行给排查线索（§3.1 失败路径恢复指引；行号未知不承诺行定位）。 */
 const rowTitle = computed(() => {
   if (props.row.kind === 'MALFORMED') {
-    return t('panel.trace.malformedHint', { line: props.row.lineNumber ?? 0 })
+    return malformedLine.value !== null
+      ? t('panel.trace.malformedHint', { line: malformedLine.value })
+      : t('panel.trace.malformedHintUnknownLine')
   }
   if (props.row.shadowed) return t('panel.trace.shadowedHint')
   return ''

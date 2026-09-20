@@ -246,12 +246,24 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
     })
   })
 
-  it('未知 type → 查表落空：不发任何消息、不抛错（同原 switch 无 default 行为）', async () => {
+  it('未知 type → 查表落空：sendError(handler_not_registered)，不发 reply（RT-1#6 显形）', async () => {
     const { ctx, cap, handler } = makeHandler()
     await expect(handler.handleSessionMessage(msg('session.nonexistent', {}), WS)).resolves.toBeUndefined()
     expect(cap.replies).toHaveLength(0)
-    expect(cap.errors).toHaveLength(0)
+    // 落空不再静默（RT-1#6）：显式 error 信封让前端 pending Promise 立即失败，而非等到泛化超时。
+    expect(cap.errors).toHaveLength(1)
+    expect(cap.errors[0]).toMatchObject({
+      id: 'm1',
+      code: 'handler_not_registered',
+      message: expect.stringContaining('session.nonexistent'),
+    })
     expect(ctx.broadcast).not.toHaveBeenCalled()
     expect(ctx.broadcastSessionList).not.toHaveBeenCalled()
+  })
+
+  it('落空信封透传 payload.sessionId（session 隔离裁决：错误可归属）', async () => {
+    const { cap, handler } = makeHandler()
+    await handler.handleSessionMessage(msg('session.nonexistent', { sessionId: 's9' }), WS)
+    expect(cap.errors[0]?.details).toEqual({ sessionId: 's9' })
   })
 })
