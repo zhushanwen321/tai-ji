@@ -1757,7 +1757,9 @@ function drifterSlowScore(name, diffStats) {
 
 /**
  * 批内调度纯函数：items（带 name 的 agent def 数组）→ 重排数组 + 分批计划。
- *  - 不变量：order 恰好包含 items 的全部元素各一次（池关键词互不为子串，无重复归类）
+ *  - 不变量：每 item 单遍归类只入首个命中池（池优先序 SLOW → FAST → DRIFTER，
+ *    池内按关键词序），order 恒等于 items 的一个排列——name 命中多池/多关键词
+ *    （如自定义 review-extension-api-arch-boundary）也只归一次，不重复派发
  *  - 慢批 = 固定慢池(≤3) + 慢分最高漂移者；快批 = 固定快池(≤3) + 其余漂移者；
  *    未知 agent（自定义 reviewer）先补动态位空缺、余者按原序追加尾部（裁剪轮
  *    /非 8 维名单自然退化，不做特殊分支）
@@ -1768,17 +1770,32 @@ function drifterSlowScore(name, diffStats) {
  * @returns { order, slowBatch, fastBatch, note }
  */
 function planReviewerOrder(items, diffStats) {
-  const inPool = (keys) => keys.flatMap((k) => items.filter((it) => typeof it.name === "string" && it.name.includes(k)));
+  // 单遍归类：item 命中多池/多关键词时只归首个命中（先到先占——池处理序即优先序
+  // SLOW → FAST → DRIFTER，池内按关键词序），构造性保证 order 是 items 的排列，
+  // 同一 reviewer 不会被重复排进批次（双跑 = 双倍 token + 报告二次覆写）
+  const claimed = new Set();
+  const inPool = (keys) => {
+    const pool = [];
+    for (const k of keys) {
+      for (let i = 0; i < items.length; i++) {
+        if (claimed.has(i)) continue;
+        if (typeof items[i].name === "string" && items[i].name.includes(k)) {
+          claimed.add(i);
+          pool.push(items[i]);
+        }
+      }
+    }
+    return pool;
+  };
   const slow = inPool(SLOW_POOL);
   const fast = inPool(FAST_POOL);
   const drifters = inPool(DRIFTER_POOL);
-  const matched = new Set([...slow, ...fast, ...drifters]);
   const sortedDrifters = [...drifters].sort(
     (a, b) => drifterSlowScore(b.name, diffStats) - drifterSlowScore(a.name, diffStats),
   );
   const batch1 = slow.slice(0, 3);
   const batch2 = fast.slice(0, 3);
-  const tail = [...sortedDrifters, ...items.filter((it) => !matched.has(it)), ...slow.slice(3), ...fast.slice(3)];
+  const tail = [...sortedDrifters, ...items.filter((_, i) => !claimed.has(i)), ...slow.slice(3), ...fast.slice(3)];
   batch1.push(...tail.splice(0, Math.max(0, REVIEWER_BATCH - batch1.length)));
   batch2.push(...tail.splice(0, Math.max(0, REVIEWER_BATCH - batch2.length)));
   const slowDrifter = batch1.find((it) => DRIFTER_POOL.some((k) => it.name.includes(k))) || null;

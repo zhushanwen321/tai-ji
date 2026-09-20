@@ -49,10 +49,12 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 
 	/**
 	 * TC7 fixture（mirror 形态，同 MF-1-6 makeMirror）：守卫脚本复制进 <tmp>/scripts/
-	 * （REPO_ROOT 即 <tmp>），SSOT fixture 只含 permission 且 staged 同集——SSOT 集合断言
-	 * 恒过，wasm 缺失成为唯一红灯源。改造前 tmp 单包直接对仓库真实 19 包 SSOT 跑
-	 * verify-staged，必然在 SSOT 分支先行 exit 1，exitCode 断言 trivially pass、wasm
-	 * 分支从未触达（MF-2-3）。withWasm = 正向对照拷入 2 个真实 wasm。
+	 * （REPO_ROOT 即 <tmp>），SSOT fixture 只含 permission 且 staged 同集——SSOT 同集
+	 * 断言恒过。非 wasm 形态不拷 skills/（真实 package.json 声明 pi.skills=["./skills"]），
+	 * checkManifest 的 pi.skills 引用缺失与 wasm 缺失同时红灯（stderr 共 3 条失败），
+	 * wasm 分支由 stderr toContain 定位断言钉住；正向对照 withWasm 拷齐 skills + 2 wasm
+	 * → exit 0。改造前 tmp 单包直接对仓库真实 19 包 SSOT 跑 verify-staged，必然在 SSOT
+	 * 分支先行 exit 1，exitCode 断言 trivially pass、wasm 分支从未触达（MF-2-3）。
 	 */
 	function makePermissionMirror({ withWasm = false } = {}) {
 		const root = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-staged-"));

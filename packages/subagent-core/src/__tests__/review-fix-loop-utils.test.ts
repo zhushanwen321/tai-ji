@@ -2704,6 +2704,20 @@ describe("planReviewerOrder（固定 3 + 动态 1 双批调度）", () => {
     const plan = planReviewerOrder(custom, { pkgCount: 9, churnLines: 9000 });
     expect(names(plan.order)).toEqual(["reviewer", "doc-reviewer"]);
   });
+  it("单 item 命中多池关键词（自定义名含两个慢池关键词）→ 只归一次，order 是 items 的排列", () => {
+    const custom = [
+      { name: "review-extension-api-arch-boundary" },
+      { name: "review-business-logic" },
+      { name: "review-test-coverage" },
+    ];
+    const plan = planReviewerOrder(custom, { pkgCount: 2, churnLines: 100 });
+    expect(plan.order).toHaveLength(3);
+    for (const n of ["review-extension-api-arch-boundary", "review-business-logic", "review-test-coverage"]) {
+      expect(names(plan.order).filter((x) => x === n)).toHaveLength(1);
+    }
+    // 首个命中池优先序：extension-api（SLOW 首键）先占，多关键词名归慢批
+    expect(names(plan.slowBatch)).toContain("review-extension-api-arch-boundary");
+  });
   it("双漂移打平（分数相等）→ 池序 business-logic 在前", () => {
     // pkg 5/5 = 1.0 与 churn 3000/3000 = 1.0 恰好打平
     const plan = planReviewerOrder(ALL, { pkgCount: 5, churnLines: 3000 });
