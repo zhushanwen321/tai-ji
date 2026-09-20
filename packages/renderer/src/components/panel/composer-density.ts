@@ -1,7 +1,7 @@
 /**
  * composer-density.ts —— composer 底栏「三簇 + 按序退化 + 溢出兜底」密度状态机（决策 D6）。
  *
- * 设计来源：`.tmp/tech-design/mode-system-composer-density.md` §6.6（决策 D6）。本模块是该
+ * 设计来源：`mode-system-composer-density` §6.6（决策 D6）。本模块是该
  * 决策的**纯状态机落点**：把「某可用宽度下每个元素长什么样」从组件里剥出来，使该判断可在
  * 零渲染成本下被穷举单测，也让 Composer.vue（u6b 接线）只负责「形态 → DOM」的映射。
  *

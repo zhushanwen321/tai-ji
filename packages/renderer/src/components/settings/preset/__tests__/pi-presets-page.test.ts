@@ -1,7 +1,7 @@
 /**
  * PiPresetsPage 模式提示词「保存闸门」测试（F2 修复 · must-fix）。
  *
- * 设计依据 `.tmp/tech-design/mode-system-composer-density.md` §6.3 D3b / §7.5 E2（用户裁决 ③）：
+ * 设计依据 `mode-system-composer-density` §6.3 D3b / §7.5 E2（用户裁决 ③）：
  * 模式级「替换」启用后，保存必须二次确认（取消 = 改为仅追加），因为替换段会顶掉 pi 内置行为规范。
  *
  * 缺陷原状（F2）：确认闸只挂在替换卡入口 `onSaveReplace`，追加卡入口直接调写盘；而写盘 payload

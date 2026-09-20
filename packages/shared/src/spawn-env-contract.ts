@@ -220,7 +220,7 @@ export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
     ],
   },
   {
-    // F1b（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4 的 trace 披露面）：
+    // F1b（设计 `mode-system-composer-density` §7.5 E4 的 trace 披露面）：
     // 模式定义不可得、本次回落 builtin:full 启动的事实（原悬空 id + 回落目标），随 spawn
     // 出站 env 传到 pi 子进程，由 @zhushanwen/pi-system-prompt-trace 写入
     // `taiji:system-prompt` entry 的 presetFallback 字段。非回落路径写空串显式清除

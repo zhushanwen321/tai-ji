@@ -1,6 +1,6 @@
 /**
  * plan mode i18n (plan-mode redesign u1-banner: M1 banner + review bar).
- * Copy baseline = user-accepted demo (.tmp/plan-mode-demo/index.html M1 banner / bottom action bar).
+ * Copy baseline = user-accepted demo (M1 banner / bottom action bar; the demo itself is not checked in).
  */
 export default {
   banner: {

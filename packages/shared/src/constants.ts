@@ -308,7 +308,7 @@ export const ENGINE_LAUNCH_ENV_KEYS = {
 } as const
 
 /**
- * 模式回落事实 env 名 SSOT（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * 模式回落事实 env 名 SSOT（F1b，设计 `mode-system-composer-density`
  * §7.5 E4 的 trace 披露面）。
  *
  * 语义：restore / create / fork 解析模式时，sidecar 里的 presetId 定义不可得 → 本次已

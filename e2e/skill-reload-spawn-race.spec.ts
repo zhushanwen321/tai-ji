@@ -1,6 +1,6 @@
 /**
  * skill-reload SPAWN-RACE real E2E（S2 reload 撞 spawn 窗口竞态，
- * 设计 .tmp/tech-design/skill-reload-nondestructive.md §4 S2 + §3.3 D4/探针清单末行）。
+ * 设计 skill-reload-nondestructive §4 S2 + §3.3 D4/探针清单末行）。
  *
  * faux LLM 轨（L2.5，选型理由见 e2e-map.json E2E-SKILLRELOAD-03 note）。派发后台 workflow
  * run 后 <1s（setTimeout 控制）写项目 skill 触发 reload——命中「record 已建 / 引擎子进程

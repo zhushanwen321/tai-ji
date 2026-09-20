@@ -1,7 +1,7 @@
 /**
  * 模式提示词两通道 spawn options 回归锁（session-lifecycle 级）。
  *
- * 背景（设计文档 .tmp/tech-design/mode-system-composer-density.md §7.2）：
+ * 背景（设计文档 mode-system-composer-density §7.2）：
  * 模式提示词经 pi spawn options 的 `systemPrompt`（replace）与 `appendSystemPrompt`（append）
  * 两条通道下发。取值 helper（resolveEffectiveSystemPrompt / resolveAppendSystemPrompt）与
  * RpcClient argv 拼装各有单测，但**三条 spawn 路径**（create / restore / fork）是否真的把

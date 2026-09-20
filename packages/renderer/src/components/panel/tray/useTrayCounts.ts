@@ -33,7 +33,7 @@
  *   `parentAgentSessionId === 当前 sessionId`（agent 经 session-manager 派发的子会话），
  *   **零新协议**（不新增 RPC/订阅——子会话标记 live 从内存透传、reload 从 `.agent.json` 读）。
  *   进行中判据 = `SessionSummary.status === 'active'`（进程级真值）；行集按 `lastActiveAt` 倒序。
- *   说明：设计 `.tmp/tech-design/mode-system-composer-density.md` §6.7 D7 原文描述状态点与
+ *   说明：设计 `mode-system-composer-density` §6.7 D7 原文描述状态点与
  *   侧栏 `derivedStatus` 同源，但 agent 派发的子会话**通常未被 hydrate**（无消息分区）——
  *   `derivedStatus` 对 `status='active'` 且无消息会兜底 done，无法表达「运行中」；故托盘计数
  *   与状态点统一取进程级 `SessionSummary.status`（色语言仍复用 DOT_CLASS，见 TraySessionPanel）。

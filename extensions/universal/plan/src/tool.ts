@@ -181,7 +181,7 @@ function renderPlanResult(
   const fg = (token: ThemeColor, text: string) => theme.fg(token, text);
   const NL = "\n";
 
-	switch (details.action) {
+  switch (details.action) {
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
@@ -322,6 +322,14 @@ function executeRegisterDoc(
   const fileName = typeof params.fileName === "string" ? params.fileName.trim() : "";
   if (!fileName) {
     throw new Error("fileName is required for register-doc (e.g. plan(action='register-doc', fileName='design.md'))");
+  }
+  // 穿越守卫：fileName 必须是 plan 目录内的纯文件名（absPath = join(planDir, fileName)，
+  // 放开分隔符/'..' 可把 plan 目录外任意可读文件挂进用户审阅界面——PlanDocsPanel 文档
+  // tab 按 absPath 直读渲染）。参数形态错误 throw 带纠正样例（同上方缺参分支风格）。
+  if (fileName.includes("/") || fileName.includes("\\") || fileName === "." || fileName === "..") {
+    throw new Error(
+      "fileName must be a plain file name inside the plan directory — path separators and '.'/'..' segments are not allowed (e.g. plan(action='register-doc', fileName='design.md'))",
+    );
   }
   const sourceSkill = typeof params.sourceSkill === "string" ? params.sourceSkill.trim() : "";
 
@@ -648,7 +656,8 @@ async function resolveCompleteChoice(
     // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
     // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）。
     // select 必须 .bind(ctx.ui)（对齐 ask-user / scheduler 同协议形态）：callMarkerRpc 先
-    // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖。
+    // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖
+    // （pi 实装锚点：dist/modes/rpc/rpc-mode.js:84（0.84.4）——select 为箭头函数闭包）。
     const form = await uiFormInteract(
       { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select.bind(ctx.ui) } },
       [question],

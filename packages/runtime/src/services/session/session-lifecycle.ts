@@ -1013,7 +1013,7 @@ export class SessionLifecycle implements ISessionRegistry {
       parentAgentSessionId: target.parentAgentSessionId,
       handedOffTo: target.handedOffTo,
     }, 'restore')
-    // F1 披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：模式定义不可得
+    // F1 披露（设计 `mode-system-composer-density` §7.5 E4）：模式定义不可得
     // （fellBackFromPresetId 非空）时，本次 pi 确以 builtin:full 启动——把回落事实写到内存态，
     // 经 toSummary（buildSessionSummary 透传）随 session summary 到达 renderer，chip/声明行据此
     // 区分「已回落」（本次以全工具模式启动）与「未回落」（仅预告重启后回落）。
@@ -1116,7 +1116,7 @@ export class SessionLifecycle implements ISessionRegistry {
    * sidecar 不清理。target.launchPresetId undefined 时（历史 session 无 sidecar）用
    * 'builtin:full' 兜底（FR-10）。
    *
-   * F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：target.launchPresetId
+   * F1（设计 `mode-system-composer-density` §7.5 E4）：target.launchPresetId
    * 存在但定义不可得时，`getLaunchPresetOptions` 回落 builtin:full 并在 resolution 上附
    * `fellBackFromPresetId`——本函数原样上抛给 restoreSession 置披露位（不在此处写 summary，
    * 与 hydrateBindingMeta 回填同点）。

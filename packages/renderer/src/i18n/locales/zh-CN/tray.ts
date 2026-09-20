@@ -79,7 +79,7 @@ export default {
       title: '任务托盘 · {running} 项进行中',
     },
     /**
-     * 第 4 件「子会话」（u7，设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）。
+     * 第 4 件「子会话」（u7，设计 mode-system-composer-density §6.7 D7）。
      * 行状态文案与 TraySessionPanel 的进程级 status 映射一一对应（映射本体见
      * composables/logic/sessionStatus.ts 的 DISPLAY_STATUS）。
      */

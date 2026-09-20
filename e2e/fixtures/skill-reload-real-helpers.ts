@@ -1,8 +1,8 @@
 /**
  * skill-reload real 轨共享 helper（skill-reload-survival / -askuser / -spawn-race /
  * workflow-disconnect-recovery 四 spec 共用）。
- * 来源设计：.tmp/tech-design/skill-reload-nondestructive.md §4（S1/S1b/S2）+
- * .tmp/tech-design/reload-closeout-reliability.md §4（A1 断言升级 / A2）；faux LLM 轨
+ * 来源设计：skill-reload-nondestructive §4（S1/S1b/S2）+
+ * reload-closeout-reliability §4（A1 断言升级 / A2）；faux LLM 轨
  * 装配复用 launch-app-real（L2.5，凭证无关零 token——选型理由见 e2e-map.json E2E-SKILLRELOAD-* note）。
  *
  * ── 各断言的「样本来源」（全部 grep/读源码核实，非推断）──

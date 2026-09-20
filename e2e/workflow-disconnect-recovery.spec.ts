@@ -1,5 +1,5 @@
 /**
- * workflow 断连恢复语义 E2E（A2，设计 .tmp/tech-design/reload-closeout-reliability.md §4 A2）。
+ * workflow 断连恢复语义 E2E（A2，设计 reload-closeout-reliability §4 A2）。
  *
  * faux LLM 轨（L2.5，零 token）。场景：WS 断开期间 run 完成 → 重连 → 收敛。
  * 验证对象 = 传输兜底面回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish

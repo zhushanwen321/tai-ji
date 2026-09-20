@@ -78,7 +78,7 @@ export default {
       title: 'Task tray · {running} running',
     },
     /**
-     * Fourth entry "child sessions" (u7, design .tmp/tech-design/mode-system-composer-density.md §6.7 D7).
+     * Fourth entry "child sessions" (u7, design mode-system-composer-density §6.7 D7).
      * Row status copy mirrors TraySessionPanel's process-level status map (see DISPLAY_STATUS in
      * composables/logic/sessionStatus.ts).
      */

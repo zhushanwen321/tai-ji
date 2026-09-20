@@ -1,5 +1,5 @@
 /**
- * argv 日志脱敏共享纯函数单测（设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * argv 日志脱敏共享纯函数单测（设计 `mode-system-composer-density`
  * §7.2「argv 日志脱敏」+ §7.6 写入面 + 探针 P15）。
  *
  * 锁定：

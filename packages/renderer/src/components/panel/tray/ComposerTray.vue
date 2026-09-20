@@ -364,7 +364,7 @@ const builtinItems = computed<BuiltinItem[]>(() =>
   }),
 )
 
-/** 计数徽标值：session 件 = 子会话总数（设计 `.tmp/tech-design/mode-system-composer-density.md` §6.7 D7），其余件 = 进行中数 */
+/** 计数徽标值：session 件 = 子会话总数（设计 `mode-system-composer-density` §6.7 D7），其余件 = 进行中数 */
 function badgeCount(item: BuiltinItem): number {
   return item.kind === 'session' ? item.total : item.running
 }

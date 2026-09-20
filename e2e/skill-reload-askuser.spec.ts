@@ -1,6 +1,6 @@
 /**
  * skill-reload ASKUSER real E2E（S1b 双 session 并发放大 + ask_user 反向请求，
- * 设计 .tmp/tech-design/skill-reload-nondestructive.md §4 S1b）。
+ * 设计 skill-reload-nondestructive §4 S1b）。
  *
  * faux LLM 轨（L2.5，选型理由见 e2e-map.json E2E-SKILLRELOAD-02 note）。两个 session
  * （同一 mkdtemp 项目 cwd）各派一个会触发 ask_user 的后台 workflow run（faux 槽位演员：

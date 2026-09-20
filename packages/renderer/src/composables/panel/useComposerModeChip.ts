@@ -4,7 +4,7 @@ import { usePresetStore } from '@/stores/preset'
 import { BUILTIN_PRESET_IDS } from '@taiji/shared'
 
 /**
- * 对话态只读模式 chip 派生（u4，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * 对话态只读模式 chip 派生（u4，设计 `mode-system-composer-density`
  * §6.5 D5 / §7.5 E7）。从 Composer.vue 拆出（script 行数约束，先例 composer-focus-ring.ts /
  * useDeferQueueRows.ts；判据自原实现原样搬移，零行为改动）：
  *
@@ -14,7 +14,7 @@ import { BUILTIN_PRESET_IDS } from '@taiji/shared'
  * - 只读 chip 仅在**非默认模式**渲染，判据 = `launchPresetId !== (defaultPresetId || 'builtin:full')`。
  *   注意是 `||` 不是 `??`：`defaultPresetId` 为空串（store 未加载）时兜底 builtin:full。
  *
- * F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：`modeChipFallbackTo`
+ * F1（设计 `mode-system-composer-density` §7.5 E4）：`modeChipFallbackTo`
  * 透传 `SessionSummary.launchPresetFallbackTo`（非默认模式会话 restore 回落 builtin:full 的事实），
  * chip 据此区分「已回落（本次以全工具模式启动）」与「未回落（仅预告重启后回落）」——
  * 未回落态不得声称本次已用全工具。

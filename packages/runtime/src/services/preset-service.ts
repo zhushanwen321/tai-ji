@@ -176,7 +176,7 @@ export interface PresetResolution {
    */
   prompt?: PresetPromptConfig
   /**
-   * 模式回落事实（F1，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：
+   * 模式回落事实（F1，设计 `mode-system-composer-density` §7.5 E4）：
    * 请求的 presetId 定义不可得、本次 resolve 已回落 builtin:full 时，填原（悬空）presetId。
    *
    * 由 `resolveLaunchPresetOptions`（launch-params.ts）在 fallback 分支附加——**不是**

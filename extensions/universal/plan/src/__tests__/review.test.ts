@@ -133,6 +133,17 @@ describe("register-doc（D10）", () => {
     await expect(exec({ action: "register-doc" })).rejects.toThrow("fileName is required");
   });
 
+  it("rejects path traversal in fileName — absPath 不得逃出 plan 目录", async () => {
+    const { exec, pi } = setup(activeStateWithDocs());
+    for (const bad of ["../secret.md", "sub/dir.md", "back\\slash.md", "..", "."]) {
+      await expect(exec({ action: "register-doc", fileName: bad })).rejects.toThrow(
+        "fileName must be a plain file name inside the plan directory",
+      );
+    }
+    // 全部拒绝：零状态写入（throw 先于 persistPlanState）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
   it("returns an error result when plan mode is not active (前置条件用 result 错误)", async () => {
     const { exec } = setup();
     const res = await exec({ action: "register-doc", fileName: "design.md" });

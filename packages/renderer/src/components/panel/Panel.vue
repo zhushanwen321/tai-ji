@@ -54,7 +54,7 @@
          的流顶位置）：**空会话同样渲染**——可见性由 ModeDeclarationRow 自判（非默认模式 + presets
          已加载，E7 三态在组件内，否则渲染为空），故默认模式/未加载时空会话形态不变。
          空态文案在声明行之下的剩余空间居中（不改变有消息分支布局）。
-         设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5 + §7.4。 -->
+         设计依据：`mode-system-composer-density` §6.5 D5 + §7.4。 -->
     <div
       v-else-if="panelView.kind === 'conversation'"
       class="flex min-h-0 flex-1 flex-col"

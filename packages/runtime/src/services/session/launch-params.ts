@@ -173,7 +173,7 @@ export async function resolveLaunchPresetOptions(
   if (!preset) {
     // 找不到 preset 时 fallback 到 builtin:full（设计文档 §4.3）。
     // 避免返回 undefined 让 session-lifecycle 退到无 tool/thinking args 的旧行为。
-    // F1（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：回落事实必须
+    // F1（设计 `mode-system-composer-density` §7.5 E4）：回落事实必须
     // 随 resolution 上抛——restore 路径据此向 renderer 披露「模式已删除，本次以全工具模式启动」。
     // 只报「已删除」不报后果即 E4 判定前提未达成。
     fellBackFromPresetId = presetId
@@ -190,7 +190,7 @@ export async function resolveLaunchPresetOptions(
 }
 
 /**
- * 模式回落事实 → pi 子进程出站 env（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * 模式回落事实 → pi 子进程出站 env（F1b，设计 `mode-system-composer-density`
  * §7.5 E4 的 trace 披露面）。
  *
  * `resolveLaunchPresetOptions` 检测到悬空 presetId 时在 resolution 上附

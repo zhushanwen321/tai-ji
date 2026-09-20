@@ -1,5 +1,5 @@
 /**
- * useComposerBarDensity —— composer 底栏密度接线（u6b / 设计 `.tmp/tech-design/mode-system-composer-density.md`
+ * useComposerBarDensity —— composer 底栏密度接线（u6b / 设计 `mode-system-composer-density`
  * §6.6 D6「实施期以 ResizeObserver 实测 `.composer-bar` 内容宽驱动档位，不硬编码 px 断点」的落实点）。
  *
  * 职责边界（与 `components/panel/composer-density.ts` 的分工）：

@@ -26,7 +26,7 @@ export const PRESET_FALLBACK_ENV_KEYS = {
 } as const;
 
 /**
- * 模式回落事实（F1b，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4
+ * 模式回落事实（F1b，设计 `mode-system-composer-density` §7.5 E4
  * 的 trace 披露面）。
  *
  * 语义 = 本次 pi 进程启动时，sidecar 里的模式定义已不可得，runtime 已回落

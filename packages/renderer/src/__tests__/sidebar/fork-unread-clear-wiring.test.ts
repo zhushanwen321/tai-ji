@@ -1,7 +1,7 @@
 /**
  * R5 最后一跳闭合测试：core select 链 step 4 → `sessionEntry.clearUnread` 的端到端接线。
  *
- * 背景（设计 `.tmp/tech-design/mode-system-composer-density.md` §8.2 S9 ②）：后台完成或被停止
+ * 背景（设计 `mode-system-composer-density` §8.2 S9 ②）：后台完成或被停止
  * 时未读点亮起，且**点开后消失**。fork-group.test.ts 的 R5 只做纯函数级断言（直接调
  * `clearSessionUnread`，注释自述「清除点在编排层，组件层只 emit select，无法从 DOM 观测清除
  * 动作本身」）——「点开（select）→ 清未读」这一跳无自动回归防线。本文件在 useSidebar 集成层

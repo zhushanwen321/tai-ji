@@ -11,7 +11,7 @@ let warnedNoResizeObserver = false
 /**
  * PresetChip —— 「模式」（PiLaunchPreset）chip（u4 mode-visibility-chip）。
  *
- * 设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5（可见性）+ §7.4（renderer 界面表）
+ * 设计依据：`mode-system-composer-density` §6.5 D5（可见性）+ §7.4（renderer 界面表）
  * + §7.1（信任处置：含替换提示词的标记跨档不丢）+ §7.5 E7（数据源三态降级）。
  *
  * 语义（只读形态 —— 对话态 composer `#meta-row`）：`[模式图标] 模式名 + 锁（lucide Lock）`；

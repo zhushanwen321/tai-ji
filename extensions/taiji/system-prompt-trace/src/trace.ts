@@ -73,7 +73,7 @@ export function createSystemPromptTrace(env: TraceEnv, stash: SwitchStash): Syst
 	let sessionStartReason: SessionStartEvent["reason"] | null = null;
 	let baseline: PromptBaseline | null = null;
 	let current: CurrentPrompt | null = null;
-	// F1b（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4 trace 披露面）：
+	// F1b（设计 `mode-system-composer-density` §7.5 E4 trace 披露面）：
 	// 本次 pi 进程的模式回落事实由 spawn 出站 env 携带，进程生命期内恒定，构造时读一次。
 	// 未回落 / 未注入 → undefined，entry 的 presetFallback 字段不出现（既有形状向后兼容）。
 	const presetFallback = env.getPresetFallback();

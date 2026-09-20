@@ -1,5 +1,5 @@
 /**
- * composer-density 纯状态机单测（设计 .tmp/tech-design/mode-system-composer-density.md §6.6 决策 D6）。
+ * composer-density 纯状态机单测（设计 mode-system-composer-density §6.6 决策 D6）。
  *
  * 覆盖：三档阈值与边界归属（640/520）· 720 全展开 · 560 序 1–3 · 440 序 1–4（托盘聚合）·
  * 序 0 任意宽度不退化 · `»` 菜单仅有被收起项时才存在 · 托盘全无条目不渲染 · 纯函数契约。

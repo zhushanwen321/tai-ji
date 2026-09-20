@@ -17,9 +17,11 @@ import { join } from 'node:path'
 
 /**
  * 宿主 HOME 下 zcode 会话库相对段（`~/.zcode/cli/db/db.sqlite`）。
- * 与 packages/zcode-subagent-cli/src/db-path.ts 的 ZCODE_HOST_DB_SUFFIX 同源同语义
- * （该常量 = `['.zcode', 'cli', 'db', 'db.sqlite']`）；不 import 引擎包故在此重声明
- * ——两侧漂移由 zcode 安装布局变更时共同暴露，引擎侧 allowlist 与本路径推导语义一致。
+ * 与 packages/zcode-subagent-cli/src/constants.ts 的 ZCODE_HOST_DB_SUFFIX（db-path.ts
+ * 消费）同源同语义（该常量 = `['.zcode', 'cli', 'db', 'db.sqlite']`）；不 import 引擎包
+ * 故在此重声明——三处字面量（另含 scripts/zcode-session-db-cleanup.mjs 脚本投影）
+ * 一致性由 packages/runtime/test/host-db-suffix-parity.test.ts 契约测试守卫（漂移
+ * 测试即红），引擎侧 allowlist 与本路径推导语义一致。
  */
 const HOST_DB_SUFFIX = ['.zcode', 'cli', 'db', 'db.sqlite'] as const
 

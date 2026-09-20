@@ -4,7 +4,7 @@
 //   ① rpc-client.ts spawn 日志（`[rpc] spawning pi:` 行）；
 //   ② reap-orphan-pi.ts 的 argv 摘要 → crash journal 的 `detailDigest`。
 //
-// 设计来源：`.tmp/tech-design/mode-system-composer-density.md` §7.2「argv 日志脱敏」、
+// 设计来源：`mode-system-composer-density` §7.2「argv 日志脱敏」、
 // §7.6 写入面（runtime 日志的两条 argv 回显）与探针 P15。只堵一条等于没堵——本函数是
 // 两处唯一的遮蔽实现，禁止调用点各自复制逻辑。
 //

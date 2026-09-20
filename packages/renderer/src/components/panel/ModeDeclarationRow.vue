@@ -2,7 +2,7 @@
 /**
  * ModeDeclarationRow —— 消息流顶部的「模式声明行」（u5 mode-declaration-row）。
  *
- * 设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5 选型①（派生行）+ §7.4「声明行」行
+ * 设计依据：`mode-system-composer-density` §6.5 D5 选型①（派生行）+ §7.4「声明行」行
  * + §7.5 错误规格 E7（三态降级）。
  *
  * 机制选型（D5 表候选①，零新机制）：

@@ -95,7 +95,7 @@ export interface SessionSummary {
    */
   launchPresetId?: string
   /**
-   * 模式回落事实（F1 披露，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：
+   * 模式回落事实（F1 披露，设计 `mode-system-composer-density` §7.5 E4）：
    * 该会话本次 restore 时锁定的模式定义已不可得，pi 实际以本 id（恒 `builtin:full`）启动
    * ——即「模式已删除，本次以全工具模式启动」。
    *

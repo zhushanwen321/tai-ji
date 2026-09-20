@@ -10,7 +10,7 @@ export default {
     promptSegments: '提示词段数',
     builtin: '内置',
     deleted: '模式已删除（{id}）',
-    // F1 回落披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：两态文案
+    // F1 回落披露（设计 `mode-system-composer-density` §7.5 E4）：两态文案
     // 严格区分——未回落只预告后果，已回落才声称「本次」。禁在未重启窗口内声称已用全工具。
     deletedFallbackPending: '会话重启后将回落全工具',
     deletedFellBack: '本次以全工具模式启动',

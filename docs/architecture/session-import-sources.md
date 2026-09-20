@@ -2,7 +2,7 @@
 
 > **定位**：session 导入统一入口的架构 SSOT + 新增导入源的操作指南。目标读者：要为一个新的 coding-agent（如 Claude Code / Codex / …）接入「导入会话」功能的开发者。读完本文即可动手，不需要先通读实现源码。
 >
-> 来源设计：`.tmp/tech-design/session-import-unified.md`（tech-design 过程产物，4 轮对抗审查收敛；实施后本文件与实现代码为现行权威，设计文档过期即弃）。
+> 来源设计：`session-import-unified`（tech-design 过程产物，4 轮对抗审查收敛；实施后本文件与实现代码为现行权威，设计文档过期即弃）。
 
 ## 1. 一句话架构
 

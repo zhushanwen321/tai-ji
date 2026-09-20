@@ -312,7 +312,7 @@ const replaceConfirmOpen = computed({
 })
 
 /** E2 判据：payload 含「启用 + 文案非空」的替换段，且相对已保存快照有变化（改写或此前未启用）。
- * 设计 `.tmp/tech-design/mode-system-composer-density.md` §6.3 D3b / §7.5 E2（用户裁决 ③）。 */
+ * 设计 `mode-system-composer-density` §6.3 D3b / §7.5 E2（用户裁决 ③）。 */
 function needsReplaceConfirm(id: string): boolean {
   const draft = promptDrafts[id]
   const saved = promptSaved[id]

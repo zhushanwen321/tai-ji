@@ -1,5 +1,5 @@
 /**
- * skill-reload SURVIVAL real E2E（S1 主场景，设计 .tmp/tech-design/skill-reload-nondestructive.md §4 S1）。
+ * skill-reload SURVIVAL real E2E（S1 主场景，设计 skill-reload-nondestructive §4 S1）。
  *
  * faux LLM 轨（L2.5，同 real 轨全族 2026-09-15 翻轨口径）：真实 Electron app + 真实 runtime +
  * 真实 pi 子进程 + 真实 watcher/reload/adoption 链路；LLM 轮次 faux 脚本化（workflow toolCall

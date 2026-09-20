@@ -198,7 +198,7 @@ describe('sidebar.update / settings.update 双语 keys 存在', () => {
   })
 })
 
-// ── landing 模式改名（D4，设计 `.tmp/tech-design/mode-system-composer-density.md` §6.4）──
+// ── landing 模式改名（D4，设计 `mode-system-composer-density` §6.4）──
 
 describe('landing 改名 D4：newTask.presetSelect 用户可见文案用「模式」', () => {
   it('zh-CN 标题 / 空态不做旧词，锁定 tooltip 用「以「{name}」创建」', async () => {

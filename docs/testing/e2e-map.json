@@ -277,7 +277,7 @@
       "run": "npx playwright test e2e/skill-reload-survival.spec.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（来源设计 .tmp/tech-design/skill-reload-nondestructive.md §4 S1 + impl-plan B5；执行属开发阶段空载串行，PR/merge/CI 门禁不跑）。layer 定 L2.5 非 L3 的裁决：被测对象是「编辑 skill → watcher → reload → adoption → 在飞 run 存活」机制链，非模型智能——LLM 轮次全部 faux 脚本化（workflow toolCall 确定性触发 + TAIJI_FAUX_TPS 长流式保持 run 在飞），零 token 凭证无关且消除真实 LLM 延迟抖动对「2s 面板窗口」断言的污染；同 real 轨全族 2026-09-15 翻轨口径。前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，与 mock bundle 同 outDir 分批构建，launch-app-real pre-flight 会 fail-fast 指路）。preserved 归因行走 extension-logger 文件通道，spec 内已设 TAIJI_AGENT_DEBUG=1。S5 收尾段以 session.delete 驱动真杀级联（runtime WS 无 new_session 面、pi RPC prompt('/new') 不执行内置命令，已核实）——设计 S5 的手工 /new 项归 B5b 真机手工段。renderer panel 候选源（A2 档2）改动面由 E2E-MOCK-01 / E2E-REAL-01 的 packages/renderer/src/** scope 承担，不在本 rule 重复登记。"
+      "note": "R2 归宿（来源设计 skill-reload-nondestructive §4 S1 + impl-plan B5；执行属开发阶段空载串行，PR/merge/CI 门禁不跑）。layer 定 L2.5 非 L3 的裁决：被测对象是「编辑 skill → watcher → reload → adoption → 在飞 run 存活」机制链，非模型智能——LLM 轮次全部 faux 脚本化（workflow toolCall 确定性触发 + TAIJI_FAUX_TPS 长流式保持 run 在飞），零 token 凭证无关且消除真实 LLM 延迟抖动对「2s 面板窗口」断言的污染；同 real 轨全族 2026-09-15 翻轨口径。前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，与 mock bundle 同 outDir 分批构建，launch-app-real pre-flight 会 fail-fast 指路）。preserved 归因行走 extension-logger 文件通道，spec 内已设 TAIJI_AGENT_DEBUG=1。S5 收尾段以 session.delete 驱动真杀级联（runtime WS 无 new_session 面、pi RPC prompt('/new') 不执行内置命令，已核实）——设计 S5 的手工 /new 项归 B5b 真机手工段。renderer panel 候选源（A2 档2）改动面由 E2E-MOCK-01 / E2E-REAL-01 的 packages/renderer/src/** scope 承担，不在本 rule 重复登记。"
     },
     {
       "id": "E2E-SKILLRELOAD-02",
@@ -366,7 +366,7 @@
       "run": "npx playwright test e2e/workflow-disconnect-recovery.spec.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 归宿（来源设计 .tmp/tech-design/reload-closeout-reliability.md §4 A2，reload-closeout-reliability 流水线 u3a 编写 / u3b 执行）。传输兜底面回归非水位证明：断连下 publish 正常完成推进水位、重连后 diff 恒空（水位结构性不触发），恢复只能来自既有传输兜底——恢复来源双断言 = session.subscribe reply.stateSnapshot 携带 done workflowUpdate last-value 回放帧（message-bus state topic 写快照 + subscribe 回放既有机制）+ session.getWorkflows 冷拉 RPC 终态记录（renderer WS 重连冷拉同款）。断连载体 = spec 自备 WS 客户端（与 renderer 同协议面：auth + subscribe + 回放消费）；不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经验证，不押注未验证工具行为），GUI 收敛以托盘 data-state idle 终态断言锚定。稳态 16s 窗断言无重复 done live 帧（A3 单测锁定结构属性的 e2e 面）。与 01/02/03 同 faux/L2.5 裁决与执行前置。scope 含 event-adapter.ts（record-reconcile 触发接线必经链）。"
+      "note": "R2 归宿（来源设计 reload-closeout-reliability §4 A2，reload-closeout-reliability 流水线 u3a 编写 / u3b 执行）。传输兜底面回归非水位证明：断连下 publish 正常完成推进水位、重连后 diff 恒空（水位结构性不触发），恢复只能来自既有传输兜底——恢复来源双断言 = session.subscribe reply.stateSnapshot 携带 done workflowUpdate last-value 回放帧（message-bus state topic 写快照 + subscribe 回放既有机制）+ session.getWorkflows 冷拉 RPC 终态记录（renderer WS 重连冷拉同款）。断连载体 = spec 自备 WS 客户端（与 renderer 同协议面：auth + subscribe + 回放消费）；不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经验证，不押注未验证工具行为），GUI 收敛以托盘 data-state idle 终态断言锚定。稳态 16s 窗断言无重复 done live 帧（A3 单测锁定结构属性的 e2e 面）。与 01/02/03 同 faux/L2.5 裁决与执行前置。scope 含 event-adapter.ts（record-reconcile 触发接线必经链）。"
     },
     {
       "id": "E2E-EQUIV-01",

@@ -1,5 +1,5 @@
 /**
- * F1 回落披露（设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）：
+ * F1 回落披露（设计 `mode-system-composer-density` §7.5 E4）：
  * session restore 时锁定的模式定义已不可得 → pi 回落 `builtin:full` 启动，**降级事实必须
  * 随 session 状态上抛**（renderer chip / 声明行据此披露「模式已删除，本次以全工具模式启动」）。
  *

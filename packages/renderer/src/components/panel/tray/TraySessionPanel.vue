@@ -1,6 +1,6 @@
 <!--
   TraySessionPanel —— composer 任务托盘第 4 件「子会话」面板（u7，调度模式的执行面入口）。
-  设计 `.tmp/tech-design/mode-system-composer-density.md` §6.7 决策 D7 + §7.4「底栏」行。
+  设计 `mode-system-composer-density` §6.7 决策 D7 + §7.4「底栏」行。
 
   ── 数据面（D7：native 直连，零新协议）──
   inject TRAY_COUNTS_KEY（外壳单例）：本面板**不自建 useTrayCounts 实例**（面板随 Popover

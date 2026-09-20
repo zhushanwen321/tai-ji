@@ -12,7 +12,7 @@
  * - 空会话 + 默认模式 / presets 未加载 / 加载失败 → 不存在（E7 三态反向语义）；
  * - 有消息 + 非默认模式 → 仍走 MessageStream 分支（既有布局与行为不变）。
  *
- * 设计依据：`.tmp/tech-design/mode-system-composer-density.md` §6.5 D5 + §7.4（声明行）
+ * 设计依据：`mode-system-composer-density` §6.5 D5 + §7.4（声明行）
  * + §7.5 E7（三态降级）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-empty-declaration.test.ts

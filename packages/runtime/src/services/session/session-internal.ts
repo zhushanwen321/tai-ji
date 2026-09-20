@@ -67,7 +67,7 @@ export interface ManagedSession extends IManagedSessionRecord {
    */
   launchPresetId?: string
   /**
-   * restore 回落事实的内存态持有（F1，设计 `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4）。
+   * restore 回落事实的内存态持有（F1，设计 `mode-system-composer-density` §7.5 E4）。
    *
    * 语义 = **本进程本次运行**的事实：restore 时 sidecar 里的 presetId 定义不可得
    * （`fellBackFromPresetId` 非空）→ 本次 pi 已回落 `builtin:full` 启动。

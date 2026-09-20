@@ -1,6 +1,6 @@
 /**
  * TraySessionPanel 组件测试（u7：第 4 件「子会话」面板，设计
- * `.tmp/tech-design/mode-system-composer-density.md` §6.7 D7 + §7.4「底栏」行）。
+ * `mode-system-composer-density` §6.7 D7 + §7.4「底栏」行）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：行渲染（label / cwd 末段 / 状态文案 / 段头摘要）、error 行显 danger 色、

@@ -10,7 +10,7 @@ export default {
     promptSegments: 'Prompt parts',
     builtin: 'Built-in',
     deleted: 'Mode deleted ({id})',
-    // F1 fallback disclosure (design `.tmp/tech-design/mode-system-composer-density.md` §7.5 E4):
+    // F1 fallback disclosure (design `mode-system-composer-density` §7.5 E4):
     // the two states are strictly distinct — pending only forecasts, fell-back may claim "this time".
     deletedFallbackPending: 'Falls back to all-tools on restart',
     deletedFellBack: 'Started with all-tools this time',

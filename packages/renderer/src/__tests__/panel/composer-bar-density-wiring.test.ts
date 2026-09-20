@@ -1,5 +1,5 @@
 /**
- * Composer 底栏密度接线测试（u6b / 设计 `.tmp/tech-design/mode-system-composer-density.md` D6 + §7.4「底栏」行）。
+ * Composer 底栏密度接线测试（u6b / 设计 `mode-system-composer-density` D6 + §7.4「底栏」行）。
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
  * - 使用者（黑盒）：① 窄档下托盘聚合成单入口（层叠图标 + 运行数）；② `»` 溢出菜单仅在确有被收起项

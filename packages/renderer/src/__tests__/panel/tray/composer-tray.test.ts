@@ -971,7 +971,7 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
   })
 })
 
-// ── ①b 第 4 件「子会话」（u7 / 设计 .tmp/tech-design/mode-system-composer-density.md §6.7 D7）──
+// ── ①b 第 4 件「子会话」（u7 / 设计 mode-system-composer-density §6.7 D7）──
 
 describe('ComposerTray 第 4 件「子会话」（u7）', () => {
   it('有子会话（进行中）→ data-kind="session" 按钮渲染 + 呼吸点 + 计数徽标 = 子会话总数', () => {

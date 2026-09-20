@@ -1,7 +1,7 @@
 /**
  * ModeDeclarationRow（u5 mode-declaration-row）单测。
  *
- * 覆盖设计 `.tmp/tech-design/mode-system-composer-density.md` §6.5 D5（派生行）+ §7.4「声明行」行
+ * 覆盖设计 `mode-system-composer-density` §6.5 D5（派生行）+ §7.4「声明行」行
  * + §7.5 E7（三态降级）的可执行条款：
  * ① 未加载（presets 空 + 无错误）→ 不渲染（不能当「已删除」）；
  * ② 已加载 + 非默认模式 → 渲染模式名 + 工具面/提示词段数两枚描边 chip；
