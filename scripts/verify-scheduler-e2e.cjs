@@ -1592,6 +1592,23 @@ function describeUpsertTask(task) {
 }
 
 /**
+ * [取证] 命令路径 entry 的 JSONL 落盘探针（**仅取证，不属于被验收行为**）。
+ *
+ * pi `SessionManager._persist` 在会话尚无 assistant 消息时跳过写盘（0.84.4
+ * dist/core/session-manager.js：`hasAssistant === false && flushed === false` → 不写），
+ * 而命令路径（`/scheduler`）**不产生 turn** ⇒ scheduler entry 仅存于内存 fileEntries
+ * （`get_entries` RPC 可见，磁盘 JSONL 无）。本探针在创建断言完成后补一个 faux turn
+ * 触发 flush，使既有 entry 落盘，从而获得 `getJsonlSnippet()` 第二轨证据。
+ *
+ * 时序保证：调用点必须在 create + notify **之后**——探针不参与创建，也不把被测的
+ * 命令路径改成 turn 路径（被测行为 = 探针之前发生的命令路径创建）。S19 取消路径
+ * 无 entry 可落盘，不调用本探针。
+ */
+async function flushForJsonlEvidence(s) {
+  return s.prompt('flush-probe')
+}
+
+/**
  * S18：命令路径表单——带参预填 + 用户改值确认。
  *
  * `/scheduler 1h "confirm-draft-prompt"` → 命令 handler 异步打开表单 →
@@ -1603,6 +1620,7 @@ function describeUpsertTask(task) {
  *      initial 是合法 ScheduleDraft、反映命令参数
  *   ② notify 帧文案：回显用户裁定值（45m + 改后 prompt 进自动任务名），notifyType=info
  *   ③ 落库形态：upsert entry 恰 1 条，task 字段 = 用户裁定值（非预填原值）
+ *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
  */
 async function runS18(piBin) {
   const ws = makeTempWorkspace('s18')
@@ -1630,22 +1648,28 @@ async function runS18(piBin) {
       kind: 'recurring', schedule: '1h', prompt: 'confirm-draft-prompt',
     })
     const notify = await s.waitForNotify(n => n.message.includes('user-edited-prompt'), 15000)
+    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
+    await flushForJsonlEvidence(s)
 
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
+    const jsonl = s.getJsonlSnippet()
     s.kill()
 
-    // ② notify 回显裁定值：45m 的下次运行 + 改后 prompt 进自动任务名
+    // ② notify 回显裁定值：45m 的下次运行 + 改后 prompt 进自动任务名。
+    // 文案权威源 = i18n.ts EN_US['task.created']（u-p2b 起 notify 走 renderResultText
+    // 词典渲染）= `Created {id}: {name} · {schedule} · next run {relative}`。
     const notifyEdited = !!notify
-      && /in\s+45m/.test(notify.message)
-      && notify.message.includes('Task "user-edited-prompt"')
+      && /^Created [0-9a-f]+: user-edited-prompt · once in 45m · next run in \d+m$/.test(notify.message)
     const notifyIsInfo = !!notify && notify.notifyType === 'info'
     // ③ 落库 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
     const task = getSingleUpsertTask(upserts)
     const taskOk = isEditedValueTask(task)
+    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
+    const persisted = jsonl.includes('op=upsert')
 
-    const pass = exactlyOne && contract.ok && notifyEdited && notifyIsInfo && taskOk
+    const pass = exactlyOne && contract.ok && notifyEdited && notifyIsInfo && taskOk && persisted
     return {
       name: 'S18',
       status: pass ? 'PASS' : 'FAIL',
@@ -1655,7 +1679,7 @@ async function runS18(piBin) {
         (notify ? ` type=${notify.notifyType} msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert task = edited values=${taskOk} ` +
         describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl=[${s.getJsonlSnippet()}]`,
+        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -1724,6 +1748,7 @@ async function runS19(piBin) {
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 为默认草稿（kind/schedule/prompt）
  *   ② notify 帧文案：cron 表达式（0 9 * * *）与任务名回显
  *   ③ 落库形态：upsert entry 恰 1 条，task = cron 任务（cronExpression + prompt）
+ *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
  */
 async function runS20(piBin) {
   const ws = makeTempWorkspace('s20')
@@ -1750,14 +1775,18 @@ async function runS20(piBin) {
       kind: 'recurring', schedule: '0 9 * * *', prompt: '',
     })
     const notify = await s.waitForNotify(n => n.message.includes('daily-standup-reminder'), 15000)
+    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
+    await flushForJsonlEvidence(s)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
+    const jsonl = s.getJsonlSnippet()
     s.kill()
 
+    // 文案权威源 = i18n.ts EN_US['task.created']（u-p2b 词典渲染）；cron 表达式按
+    // 创建端归一化后的 6 字段形态回显。
     const notifyCron = !!notify
-      && notify.message.includes('0 0 9 * * *')
-      && notify.message.includes('Task "daily-standup-reminder"')
+      && /^Created [0-9a-f]+: daily-standup-reminder · 0 0 9 \* \* \*/.test(notify.message)
     const task = getSingleUpsertTask(upserts)
     // 创建端把 5 字段 cron 归一化为 6 字段（秒位补 0）——entry 断言用归一化形态
     const taskOk = !!task
@@ -1766,8 +1795,10 @@ async function runS20(piBin) {
       && !!task.schedule
       && task.schedule.mode === 'cron'
       && task.schedule.cronExpression === '0 0 9 * * *'
+    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
+    const persisted = jsonl.includes('op=upsert')
 
-    const pass = exactlyOne && contract.ok && notifyCron && taskOk
+    const pass = exactlyOne && contract.ok && notifyCron && taskOk && persisted
     return {
       name: 'S20',
       status: pass ? 'PASS' : 'FAIL',
@@ -1776,7 +1807,7 @@ async function runS20(piBin) {
         `notify default-schedule echo=${notifyCron}` +
         (notify ? ` msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert cron task=${taskOk} ` + describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl=[${s.getJsonlSnippet()}]`,
+        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -1791,6 +1822,7 @@ async function runS20(piBin) {
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 反映 alias 参数
  *   ② notify 帧文案：30m + alias-task 回显
  *   ③ 落库形态：upsert entry 恰 1 条，task = alias 参数值
+ *   ④（取证轨）flush 探针后 entry 落 session JSONL（见 flushForJsonlEvidence）
  */
 async function runS21(piBin) {
   const ws = makeTempWorkspace('s21')
@@ -1816,22 +1848,27 @@ async function runS21(piBin) {
       kind: 'recurring', schedule: '30m', prompt: 'alias-task',
     })
     const notify = await s.waitForNotify(n => n.message.includes('alias-task'), 15000)
+    // [取证] 创建已完成（notify 已到）→ 补 faux turn 触发 pi flush（见探针注释）
+    await flushForJsonlEvidence(s)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
+    const jsonl = s.getJsonlSnippet()
     s.kill()
 
+    // 文案权威源 = i18n.ts EN_US['task.created']（u-p2b 词典渲染）。
     const notifyEcho = !!notify
-      && /every\s+30m/.test(notify.message)
-      && notify.message.includes('Task "alias-task"')
+      && /^Created [0-9a-f]+: alias-task · every 30m/.test(notify.message)
     const task = getSingleUpsertTask(upserts)
     const taskOk = !!task
       && task.prompt === 'alias-task'
       && !!task.schedule
       && task.schedule.mode === 'interval'
       && task.schedule.intervalMs === 30 * 60 * 1000
+    // 第三轨：flush 探针后 entry 应已落到 session JSONL（非仅内存 get_entries）
+    const persisted = jsonl.includes('op=upsert')
 
-    const pass = exactlyOne && contract.ok && notifyEcho && taskOk
+    const pass = exactlyOne && contract.ok && notifyEcho && taskOk && persisted
     return {
       name: 'S21',
       status: pass ? 'PASS' : 'FAIL',
@@ -1840,7 +1877,7 @@ async function runS21(piBin) {
         `notify alias echo=${notifyEcho}` +
         (notify ? ` msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert alias task=${taskOk} ` + describeUpsertTask(task) + '; ' +
-        `upserts=${upserts.length}; jsonl=[${s.getJsonlSnippet()}]`,
+        `upserts=${upserts.length}; jsonl persisted=${persisted}; jsonl=[${jsonl}]`,
     }
   } finally {
     ws.cleanup()
@@ -2002,7 +2039,10 @@ function printResult(r) {
             : r.status === 'PARTIAL'
               ? '🟡'
               : '?'
-  console.log(`${TAG} ${icon} ${r.name}: ${r.status}`)
+  console.log(
+    `${TAG} ${icon} ${r.name}: ${r.status}` +
+      (typeof r.elapsedMs === 'number' ? ` (${(r.elapsedMs / 1000).toFixed(1)}s)` : ''),
+  )
   console.log(`${TAG}    ${r.evidence}`)
   if (r.followup) console.log(`${TAG}    followup: ${r.followup}`)
 }
@@ -2138,8 +2178,10 @@ async function main() {
   for (const name of toRun) {
     console.log(`${TAG} ------------------------------------------------------------`)
     console.log(`${TAG} running ${name} ...`)
+    const t0 = Date.now()
     const r = await executeScenario(name, piBin)
     if (r) {
+      r.elapsedMs = Date.now() - t0
       results.push(r)
       printResult(r)
     }
