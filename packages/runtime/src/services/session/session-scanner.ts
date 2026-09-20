@@ -72,7 +72,10 @@ export class SessionScanner {
     const outcome = s.outcome
     return {
       id: s.id,
-      label: s.name ?? basename(s.cwd),
+      // RT-3#1 消费侧兜底：cwd 类型声明 string 但外部文件产物不保证——扫描出口已
+      // fail-fast 拦缺 id/cwd 条目，此处 ?? '' 是纵深第二层（basename(undefined)
+      // TypeError 会毒死整个列表组装，label 退化为空串优于整列消失）。
+      label: s.name ?? basename(s.cwd ?? ''),
       cwd: s.cwd,
       gitBranch: git?.branch,
       gitIsWorktree: git?.isWorktree,

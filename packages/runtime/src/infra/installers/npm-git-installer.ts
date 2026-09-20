@@ -9,7 +9,7 @@
  * installDependencies）；git clone 从 extension-service.ts 迁入（R3c2）。
  */
 import { execFileSync } from 'node:child_process'
-import type { IInstaller } from '../../services/ports/installer.js'
+import type { IInstaller, DepsInstallFailure } from '../../services/ports/installer.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import {
   installPackage,
@@ -62,8 +62,8 @@ export class NpmGitInstaller implements IInstaller {
     await uninstallPackage(name, nodeModulesDir)
   }
 
-  async installDeps(dir: string): Promise<void> {
-    await installDependencies(dir)
+  async installDeps(dir: string): Promise<{ failed: DepsInstallFailure[] }> {
+    return installDependencies(dir)
   }
 
   async installGit(url: string, destDir: string, timeout?: number): Promise<void> {

@@ -5,7 +5,7 @@
  *
  * 职责（编排，与 useSettings 同构——features 层是跨 api + stores 的唯一合法层）：
  * - loadPresets：并行拉 preset.list + preset.getDefault RPC，写 store（presets + defaultPresetId）。
- * - setDefault：乐观更新 store.defaultPresetId + 调 preset.setDefault RPC。
+ * - setDefault：乐观更新 store.defaultPresetId + 调 preset.setDefault RPC，失败回滚 + 成功后强拉权威值。
  * - create / update：乐观 upsert + 用 RPC reply 回写 store（runtime 可能补全 id/order 等字段），失败回滚。
  *
  * 不职责：
@@ -127,16 +127,24 @@ export function usePiPresets() {
   /**
    * 设置全局默认预设。
    *
-   * 乐观更新：立即写 store.defaultPresetId（UI 即时响应），随后发 RPC 持久化。
-   * RPC 失败时由调用方（chip）决定是否 toast 提示——本编排层不 toast（保持与
-   * store.setSkillDirs 同模式：只发请求 + 让广播/乐观更新覆盖）。
-   * preset 域无广播，故 RPC 失败时本地 state 与后端可能短暂不一致——preset 设置是
-   * 低频操作且单点写入（仅 setDefault 一个入口），不一致风险可接受；如需严格一致，
-   * 调用方可在 RPC 失败时重调 loadPresets 刷新。
+   * 乐观更新 + 失败回滚（RD-4#2，与 create/update/remove 同构）：
+   * 备份旧 defaultPresetId → 立即写 store（UI 即时响应）→ await RPC 持久化；
+   * RPC 失败回滚 store 后向上 throw（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
+   *
+   * 成功后 loadPresets() 强拉权威值：preset 域无广播（installPresetAutoLoad 仅首次 connected
+   * 拉一次），乐观镜像与后端的背离不会自行消除——强拉是唯一的对齐通道。loadPresets 内部
+   * allSettled 不会 reject；拉取失败走 store.loadError 既有错误态（页面有重试入口）。
    */
   async function setDefault(presetId: string): Promise<void> {
+    const previous = store.defaultPresetId
     store.setDefaultPresetId(presetId)
-    await presetApi.setDefault(presetId)
+    try {
+      await presetApi.setDefault(presetId)
+    } catch (e) {
+      store.setDefaultPresetId(previous)
+      throw e
+    }
+    await loadPresets()
   }
 
   /**

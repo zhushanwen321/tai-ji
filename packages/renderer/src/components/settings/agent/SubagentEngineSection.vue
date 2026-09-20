@@ -26,8 +26,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
 import { getSubagentEngineConfig, setSubagentDefaultEngine } from '@taiji/core/transport/api/domains/session'
+import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 // 引擎清单来自 runtime（extension engines.json 动态同步——未来新增引擎零改动出现在此）
 const engines = ref<string[]>([])
@@ -54,9 +56,11 @@ async function onEngineChange(value: unknown): Promise<void> {
   try {
     await setSubagentDefaultEngine(engineId)
     current.value = engineId
-  } catch (err) {
-    // 写失败保持现值（配置未变）；下次打开设置重新拉取对齐
-    console.error('[settings] setSubagentDefaultEngine failed:', err)
+  } catch (e) {
+    // RD-4#3 失败显形 + 回滚：current 仅在写成功后前进（Select 以 :model-value 受控于 current，
+    // reka-ui 非被动模式显示值恒跟随 props），故显示自动回滚旧值；此处补 toast 让失败可见
+    // （此前仅 console.error，用户以为已切换、子 agent 按未生效引擎跑）。文案透传 runtime 错误。
+    toastError(e instanceof Error ? e.message : String(e))
   }
 }
 </script>

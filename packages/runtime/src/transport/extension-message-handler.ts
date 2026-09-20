@@ -86,9 +86,23 @@ export class ExtensionMessageHandler {
       this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
       return this.ctx.sendError(ws, 'handler_error', `No active session for extension response: ${extSid}`, msg.id, { sessionId: extSid })
     }
-    client.sendExtensionUiResponse(requestId, extResult ?? null, method)
+    // M1/RT-1#4：sendRaw 返 false（pi 进程不在/已退出或 stdin 写失败）时该应答已无法
+    // 送达——rpc client 绑定当前进程，pi 重启后是全新 pending 表、旧 requestId 永不可
+    // 投递，runtime 侧没有重投通道，故选「立即终结」而非保留 pending：摘跟踪 + 带码
+    // error envelope 上行（无 msg.id 的 fire-and-forget，renderer 经 route-inbound D6b
+    // onSessionError 兜底进消息流 + toast，用户作答不再石沉大海）。
+    const delivered = client.sendExtensionUiResponse(requestId, extResult ?? null, method)
     this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
     this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+    if (!delivered) {
+      return this.ctx.sendError(
+        ws,
+        'extension_response_send_failed',
+        `Extension response for request ${requestId} was not delivered to pi (process not running or stdin write failed)`,
+        msg.id,
+        { sessionId: extSid, hint: '回复未送达 pi（进程不在或写入失败），该请求已终结；请检查会话状态后重试操作。' },
+      )
+    }
     return
   }
 

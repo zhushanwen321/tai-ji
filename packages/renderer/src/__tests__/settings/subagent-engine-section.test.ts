@@ -23,6 +23,7 @@ const sessionApiMock = vi.hoisted(() => ({
 vi.mock('@taiji/core/transport/api/domains/session', () => sessionApiMock)
 
 import SubagentEngineSection from '@/components/settings/agent/SubagentEngineSection.vue'
+import { useToast } from '@/composables/useToast'
 import zhCN from '@/i18n/locales/zh-CN/settings'
 
 function makeI18n() {
@@ -41,6 +42,8 @@ function mountSection() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // 清空全局 toasts（useToast 模块级单例，跨用例共享）
+  useToast().toasts.value = []
 })
 
 describe('SubagentEngineSection（U7 引擎选择器）', () => {
@@ -87,6 +90,28 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     await flushPromises()
 
     expect(sessionApiMock.setSubagentDefaultEngine).not.toHaveBeenCalled()
+  })
+
+  it('切换写失败 → 选中态回滚旧值 + toastError 显形（RD-4#3，不再仅 console）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+    })
+    sessionApiMock.setSubagentDefaultEngine.mockRejectedValueOnce(new Error('disk write failed'))
+    const { toasts } = useToast()
+
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'pi')
+    await flushPromises()
+
+    expect(sessionApiMock.setSubagentDefaultEngine).toHaveBeenCalledWith('pi')
+    // 回滚：Select 受控于 current（仅写成功后前进），触发器仍显示旧值 zcode
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).not.toContain('pi')
+    // 失败显形：error toast 携带 runtime 原始文案
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('disk write failed'))).toBe(true)
   })
 
   it('RPC 失败兜底 [pi]（选择器仍可用，不白屏）', async () => {

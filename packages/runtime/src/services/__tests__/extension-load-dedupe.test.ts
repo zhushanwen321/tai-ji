@@ -54,7 +54,7 @@ function createMockInstaller(): IInstaller {
   return {
     installNpm: vi.fn().mockResolvedValue(undefined),
     uninstallNpm: vi.fn().mockResolvedValue(undefined),
-    installDeps: vi.fn().mockResolvedValue(undefined),
+    installDeps: vi.fn().mockResolvedValue({ failed: [] }),
     installGit: vi.fn().mockResolvedValue(undefined),
     getLatestVersion: vi.fn().mockResolvedValue('1.0.0'),
   }

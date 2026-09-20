@@ -32,6 +32,7 @@
       kind="extension"
       :forced-dirs="forcedExtDirs"
       :dirs="extensionDirs"
+      :save-error="dirsSaveError"
       @update-dirs="onUpdateExtensionDirs"
     />
 
@@ -82,11 +83,15 @@ onMounted(async () => {
 })
 const forcedExtDirs = computed(() => [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'])
 
-/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。 */
+/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。
+ *  失败常驻态（RD-4#1）：置位 dirsSaveError → LoadPaths 回弹至最近落盘值 + 常驻红字；每次尝试起点复位。 */
+const dirsSaveError = ref(false)
 async function onUpdateExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {
+  dirsSaveError.value = false
   try {
     await settingsStore.setExtensionDirs(dirs)
   } catch (e) {
+    dirsSaveError.value = true
     toastError(e instanceof Error ? e.message : String(e))
   }
 }

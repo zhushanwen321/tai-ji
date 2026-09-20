@@ -35,6 +35,8 @@ import type { ExtensionInteractMethod } from '@taiji/shared'
 import { onGlobal } from '@taiji/core/transport/api'
 import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
+import i18n from '@/i18n'
+import { useToast } from '@/composables/useToast'
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
@@ -176,20 +178,45 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  * - sendPiResponse：复用 sendExtensionUIResponse（extension.ui_response，method 透传，
  *   runtime 按 method 构建 pi 响应格式，AC9）
  * - sendPluginResponse：发 plugin.uiResponse（runtime UiRequestQueue.handleResponse 消费，AC6）
- * - [G1] 双通道 respond 即删 requestIdSessions 表项（本函数与 createDialogRequestSource
+ * - 双通道返回 boolean（false = WS 非 OPEN 未送出）：DialogRequestQueue.respond 见 false
+ *   保留请求不出队（M1/RD-3#1——断连期应答不丢失，连接恢复后可重发，同 requestId 幂等），
+ *   未送达时本层 toast（队列 headless 无 UI，可见反馈归壳层）。
+ * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {
     sendPiResponse(sessionId, requestId, method, result) {
+      const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
+      if (!delivered) {
+        // 未送达：表项保留（请求仍在队列，撤窗反查仍需可用）+ 壳层 toast（队列 headless 无 UI）
+        notifyUiResponseNotDelivered(sessionId)
+        return false
+      }
       requestIdSessions.delete(requestId)
-      sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
+      return true
     },
     sendPluginResponse(requestId, result) {
+      const delivered = send({ type: 'plugin.uiResponse', payload: { requestId, result } })
+      if (!delivered) {
+        notifyUiResponseNotDelivered()
+        return false
+      }
       requestIdSessions.delete(requestId)
-      send({ type: 'plugin.uiResponse', payload: { requestId, result } })
+      return true
     },
   }
+}
+
+/**
+ * 「回复未送达」统一提示（M1 环 3）：sendPiResponse / sendPluginResponse 未送达（WS 非
+ * OPEN）时由壳层 toast，FormOverlay 侧 useExtensionUI.respond 共用。定义在本模块（叶子，
+ * 只依赖 core/ui/shared）——useExtensionUI → useExtensionHostBridge → 本模块，若反向
+ * import 会成环。
+ */
+export function notifyUiResponseNotDelivered(sessionId?: string): void {
+  const t = i18n.global.t as (key: string) => string
+  useToast().error(t('extensionUI.responseNotDelivered'), sessionId ? { sessionId } : undefined)
 }
 
 // ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收后降级/移除，非业务 API）──

@@ -23,7 +23,8 @@ import { InternalEventBus } from '@taiji/core'
 // ── mock extension api domain ──
 // onUIRequest 已移除（bus 订阅替代）；getPendingRequests/sendExtensionUIResponse 保留 RPC（C3）。
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn(),
+  // 返 true = 送达（M1 环 3 后 respond 消费 boolean；断连场景用例单独 mockReturnValue(false)）
+  sendExtensionUIResponse: vi.fn((): boolean => true),
   onNotify: () => () => {},
   // [B9 agentcall LRU 联动] stores/chat 新装配链（agentcall-lru-linkage → workflow store
   // → @/api）把 settings.ts 的 re-export `onExtensions = extensionDomain.onExtensions`
@@ -50,6 +51,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useToast } from '@/composables/useToast'
 
 /** 在独立 effectScope 内运行，模拟单 Panel 实例的完整生命周期 */
 function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
@@ -327,5 +329,45 @@ describe('useExtensionUI T10 requestId dedup 双通路（bus 帧 + 拉取）', (
     expect(r1Calls).toHaveLength(1)
 
     dispose()
+  })
+})
+
+describe('useExtensionUI T11 respond 未送达（M1 环 3 / RD-3#1 断连场景）', () => {
+  it('send 返 false → removeRequest 不被调用、请求保留、toast 提示；send 恢复 true 后重发送达并出队', () => {
+    const { respond, currentFormRequest } = useExtensionUI(ref('sessionA'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-drop'))
+
+    const store = useExtensionUIStore()
+    const removeSpy = vi.spyOn(store, 'removeRequest')
+
+    // 1. 断连期点提交：sendExtensionUIResponse 返 false（WS 非 OPEN 未送出）
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    respond('r-drop', true)
+
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-drop', 'select', true)
+    expect(removeSpy).not.toHaveBeenCalled() // 请求保留，不 remove
+    expect(currentFormRequest.value?.requestId).toBe('r-drop') // FormOverlay 保留展示
+    expect(store.getRequestsBySession('sessionA')).toHaveLength(1)
+    // 用户可见提示（toast error，M1 环 3 要求的显形出口）
+    const toast = useToast().toasts.value.find((t) => t.type === 'error')
+    expect(toast?.message).toBe('回复未送达，连接恢复后可重新提交')
+
+    // 2. 连接恢复（mock 恢复返 true）后用户再次提交：同 requestId 重投成功 → 出队
+    respond('r-drop', true)
+    expect(removeSpy).toHaveBeenCalledTimes(1)
+    expect(currentFormRequest.value).toBeUndefined()
+    expect(store.getRequestsBySession('sessionA')).toHaveLength(0)
+    removeSpy.mockRestore()
+  })
+
+  it('cancel 同样走未送达保留（respond(null) 等价路径）', () => {
+    const { cancel, currentFormRequest } = useExtensionUI(ref('sessionA'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-cancel'))
+
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    cancel('r-cancel')
+
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-cancel', 'select', null)
+    expect(currentFormRequest.value?.requestId).toBe('r-cancel')
   })
 })

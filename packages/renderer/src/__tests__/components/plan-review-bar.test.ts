@@ -44,7 +44,8 @@ vi.mock('@taiji/core/transport/api/domains/extension', () => ({
       if (cur.length === 0) uiTimeoutHandlers.delete(sid)
     }
   },
-  sendExtensionUIResponse: vi.fn(),
+  // 返 true = 送达（M1 环 3 后 respond 消费 boolean；「respond 后出队」用例依赖送达态）
+  sendExtensionUIResponse: vi.fn((): boolean => true),
   onNotify: () => () => {},
   onExtensions: vi.fn(),
   getPendingRequests: vi.fn().mockResolvedValue([]),

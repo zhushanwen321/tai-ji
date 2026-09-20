@@ -19,6 +19,7 @@
       :forced-dirs="forcedDirs"
       :dirs="dirs"
       :disabled="false"
+      :save-error="saveError"
       @update-dirs="onUpdateDirs"
     />
 
@@ -100,6 +101,8 @@ const props = defineProps<{
   items: SkillInfo[] | AgentInfo[]
   /** 加载路径配置（来自 settings store，ADR-0021 §1 discovery.json SSOT 视图） */
   dirs: SkillDirConfig[]
+  /** 路径保存失败常驻态（RD-4#1）：由 SettingsModal 的持久化 catch 置位，透传 LoadPaths */
+  saveError?: boolean
 }>()
 
 const emit = defineEmits<{

@@ -592,19 +592,27 @@ export class RpcClient implements IPiEngine {
    * 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer 泄漏 + 无用等待）。
    *
    * 注意：调用方自行保证 JSON 格式正确 + 换行符结尾。
+   *
+   * 返回 boolean（false = 未送达：pi 进程不在/已退出，或 stdin 写抛错——流已损坏）。
+   * 该应答在 pi 侧没有对应 RPC pending（pi 不回确认），无法以 reject 收口，false 是
+   * 唯一的失败信号——调用方必须消费它走可感知失败路径（终结请求 + 上行错误），
+   * 不允许静默丢弃；错误日志已在函数内留痕（经 logger.patchConsole tee 落 runtime 日志）。
    */
-  sendRaw(data: string): void {
+  sendRaw(data: string): boolean {
     if (!this.proc || this._exited) {
       console.error('[rpc] sendRaw failed: pi process is not running')
-      return
+      return false
     }
     const line = data.endsWith('\n') ? data : data + '\n'
     try {
       this.proc.stdin!.write(line)
-    // eslint-disable-next-line taste/no-silent-catch -- sendRaw 是 void fire-and-forget（pi 不回复 extension_ui_response），无调用方可传播错误；console.error 经 logger.patchConsole tee 到 runtime 日志文件（架构约定 #4）
     } catch (e) {
+      // 同步 write 抛错 = 流已销毁/半关闭（EPIPE 族），重抛只会炸掉 handler 链且无处可
+      // 恢复；false 返回值即失败传播通道，由调用方决定终结语义（no-silent-catch：非吞错）。
       console.error('[rpc] sendRaw write failed:', e)
+      return false
     }
+    return true
   }
 
   sendCommand(type: string, params: Record<string, unknown> = {}, timeout = CMD_TIMEOUT_MS, options?: SendCommandOptions): Promise<PiMessage> {
@@ -988,11 +996,15 @@ export class RpcClient implements IPiEngine {
    * [HISTORICAL] 旧 bridge 场景的 `{id, response}` 包裹分支（method===undefined 且
    * response 是对象）已删除：唯一调用方 bridge-handler 已全改 stringify+'select'，
    * 该形态无生产调用方。
+   *
+   * 返回 boolean（false = 未写进 pi stdin，透传 sendRaw 语义）：extension UI 应答
+   * 承载用户决策，false 时调用方必须终结该请求并上行带码错误（M1/RT-2#8——此前 void
+   * 吞掉写失败，用户点确认后应答静默丢失、pi 侧 Promise 永挂）。
    */
-  sendExtensionUiResponse(id: string, response: unknown, method?: string): void {
+  sendExtensionUiResponse(id: string, response: unknown, method?: string): boolean {
     // 判别与 payload 构造（pi-rpc commands：null > confirm > value 优先级 + 鸭子类型
     // 字段映射）——序列化陷阱与历史背景见公共包 commands.ts 头注。
-    this.sendRaw(JSON.stringify(buildExtensionUiResponsePayload(id, response, method)))
+    return this.sendRaw(JSON.stringify(buildExtensionUiResponsePayload(id, response, method)))
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────

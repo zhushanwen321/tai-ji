@@ -56,8 +56,9 @@ function makeRequest(overrides: Partial<DialogRequest> & { requestId: string; se
 function createHarness(sessionIdRef?: Ref<string | null>) {
   const source = new MockDialogRequestSource()
   const transport: UiResponseTransport = {
-    sendPiResponse: vi.fn(),
-    sendPluginResponse: vi.fn(),
+    // 返 true = 送达（M1 环 3 后 respond 消费 boolean；未送达保留请求用例单独改返值）
+    sendPiResponse: vi.fn((): boolean => true),
+    sendPluginResponse: vi.fn((): boolean => true),
   }
   const scope = effectScope()
   let queue!: DialogRequestQueue
@@ -247,6 +248,51 @@ describe('DialogRequestQueue', () => {
       // 迟到撤窗不产生第二次回传、不改变状态
       expect(transport.sendPluginResponse).toHaveBeenCalledTimes(1)
       expect(q.pendingCount.value).toBe(0)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  // ── M1 环 3（RD-3#1）：回传未送达保留请求 ──
+
+  it('TC-11 回传未送达（transport 返 false）→ 请求保留不出队；恢复后重投（返 true）出队（断连期应答不丢失）', () => {
+    const sid = ref<string | null>('A')
+    const { source, transport, scope, getQueue } = createHarness(sid)
+    try {
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      const q = getQueue()
+      expect(q.pendingCount.value).toBe(1)
+
+      // 断连期用户作答：transport 返 false（WS 非 OPEN）→ 不出队，弹窗保留供重发
+      vi.mocked(transport.sendPiResponse).mockReturnValueOnce(false)
+      q.respond('r1', true)
+      expect(transport.sendPiResponse).toHaveBeenCalledTimes(1)
+      expect(q.pendingCount.value).toBe(1)
+      expect(q.currentRequest.value?.requestId).toBe('r1')
+
+      // 连接恢复后再次 respond：同 requestId 重投送达 → 出队（重发幂等由 runtime/pi 侧 miss 忽略保证）
+      q.respond('r1', true)
+      expect(transport.sendPiResponse).toHaveBeenCalledTimes(2)
+      expect(q.pendingCount.value).toBe(0)
+      expect(q.currentRequest.value).toBeUndefined()
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-11b plugin 源未送达同样保留（sendPluginResponse 返 false）', () => {
+    const sid = ref<string | null>('A')
+    const { source, transport, scope, getQueue } = createHarness(sid)
+    try {
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r-p', source: 'plugin' })
+      const q = getQueue()
+      vi.mocked(transport.sendPluginResponse).mockReturnValueOnce(false)
+      q.respond('r-p', 'opt')
+      expect(q.pendingCount.value).toBe(1)
+
+      q.respond('r-p', 'opt')
+      expect(q.pendingCount.value).toBe(0)
+      expect(transport.sendPluginResponse).toHaveBeenCalledTimes(2)
     } finally {
       scope.stop()
     }

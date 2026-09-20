@@ -739,6 +739,7 @@ export default {
     systemTag: 'System',
     pathFormatError: 'Invalid path format (project: relative/absolute; global: absolute only)',
     priorityHint: 'Earlier entries have higher priority',
+    saveErrorHint: 'Not saved; showing the last saved value',
     // ── Import from other Agents (SourceImportSection, W1) ──
     importFromAgents: {
       title: 'Import from other Agents',

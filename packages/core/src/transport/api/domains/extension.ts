@@ -179,9 +179,13 @@ export function onNotify(sessionId: string, handler: (payload: { message: string
  *
  * method 必须透传：runtime 按 method 构建正确的 pi response 格式（pi 鸭子类型字段检测，
  * 发错字段静默返回默认值）。
+ *
+ * 返回 boolean（透传 ws-client.send：false = WS 非 OPEN 未送出）。应答承载用户决策，
+ * 调用方见 false 必须保留本地请求并提示可重发（M1/RD-3#1——此前 :void 吞掉 false，
+ * 断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂）。
  */
-export function sendExtensionUIResponse(sessionId: string, requestId: string, method: ExtensionInteractMethod, result: boolean | string | null): void {
-  send({
+export function sendExtensionUIResponse(sessionId: string, requestId: string, method: ExtensionInteractMethod, result: boolean | string | null): boolean {
+  return send({
     type: 'extension.ui_response',
     payload: { sessionId, requestId, method, result },
   })

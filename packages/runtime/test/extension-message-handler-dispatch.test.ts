@@ -85,7 +85,10 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
     })
 
     it('正常路径 → client.sendExtensionUiResponse(requestId, result, method) + 清理 pending；result undefined 时第二参为 null（?? null）', async () => {
-      const client = { sendExtensionUiResponse: vi.fn() }
+      // RT-2#8 契约：sendExtensionUiResponse 返 boolean（false=写 pi 失败），
+      // 正常路径 mock 返 true；false→sendError(extension_response_send_failed) 路径
+      // 由 extension-message-handler-ui-response.test.ts 覆盖
+      const client = { sendExtensionUiResponse: vi.fn().mockReturnValue(true) }
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue(client) })
       await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'confirm', result: true }), WS)
       expect(client.sendExtensionUiResponse).toHaveBeenCalledWith('r1', true, 'confirm')

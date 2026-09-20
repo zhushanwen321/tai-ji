@@ -108,6 +108,8 @@ describe('usePiPresets.loadPresets（TC-4）', () => {
 describe('usePiPresets.setDefault（TC-5）', () => {
   it('setDefault(id) → 乐观更新 store + 调 RPC', async () => {
     presetApiMock.setDefault.mockResolvedValueOnce(undefined)
+    presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValueOnce('builtin:readonly')
 
     const store = usePresetStore()
     const { setDefault } = usePiPresets()
@@ -115,6 +117,36 @@ describe('usePiPresets.setDefault（TC-5）', () => {
 
     expect(store.defaultPresetId).toBe('builtin:readonly')
     expect(presetApiMock.setDefault).toHaveBeenCalledWith('builtin:readonly')
+  })
+
+  it('setDefault 成功后强拉权威值：getDefault 回读覆盖乐观镜像（RD-4#2）', async () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    // 写成功，但权威回读返回旧值（模拟 runtime 规范化/拒绝场景）——强拉必须覆盖乐观镜像
+    presetApiMock.setDefault.mockResolvedValueOnce(undefined)
+    presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValueOnce('builtin:full')
+
+    const { setDefault } = usePiPresets()
+    await setDefault('builtin:readonly')
+
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+    expect(presetApiMock.getDefault).toHaveBeenCalledTimes(1)
+    expect(store.defaultPresetId).toBe('builtin:full')
+  })
+
+  it('setDefault RPC 失败 → 回滚 defaultPresetId 至旧值 + throw（RD-4#2，与 create 同构）', async () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    presetApiMock.setDefault.mockRejectedValueOnce(new Error('rpc failed'))
+
+    const { setDefault } = usePiPresets()
+    await expect(setDefault('builtin:readonly')).rejects.toThrow('rpc failed')
+
+    // 回滚：store 回到旧默认值，不再显示未落盘的新值
+    expect(store.defaultPresetId).toBe('builtin:full')
+    // 失败分支不触发强拉
+    expect(presetApiMock.list).not.toHaveBeenCalled()
   })
 })
 

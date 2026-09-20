@@ -35,6 +35,7 @@ import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
+import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 
@@ -274,13 +275,24 @@ export function useExtensionUI(
     return store.recordsOf(sid).value.filter(isPlanReviewRequest)
   })
 
-  /** 用户回复指定请求（按 requestId 精确定位，不假设队首） */
+  /**
+   * 用户回复指定请求（按 requestId 精确定位，不假设队首）。
+   *
+   * 未送达（sendExtensionUIResponse 返 false = WS 非 OPEN）→ 保留 store 请求不 remove
+   * （M1/RD-3#1：断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂）+ toast 提示；
+   * FormOverlay/审批条保留展示，连接恢复后用户可再次提交重投（同 requestId 幂等——
+   * runtime handler 与 pi rpc-mode 对已终结 requestId 均静默忽略重复应答）。
+   */
   function respond(requestId: string, result: boolean | string | null): void {
     const sid = sessionId.value
     if (!sid) return
     const target = store.getRequestsBySession(sid).find(r => r.requestId === requestId)
     if (!target) return
-    sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
+    const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
+    if (!delivered) {
+      notifyUiResponseNotDelivered(target.sessionId)
+      return
+    }
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)

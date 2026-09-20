@@ -47,6 +47,18 @@ export interface NpmInstallOptions {
   timeout?: number
 }
 
+/**
+ * installDependencies 失败清单条目（RT-8#4 失败聚合）。
+ * 与 services/ports/installer.ts 的 DepsInstallFailure 结构同构（port 拥有抽象形状，
+ * infra 实现之——同文件 NpmInstallError 与 port InstallerError 的关系同款）。
+ */
+export interface DepsInstallFailure {
+  /** 依赖名；package.json 解析失败时为 'package.json' */
+  name: string
+  /** 失败原因（toErrorMessage 归一化后的消息） */
+  error: string
+}
+
 export class NpmInstallError extends Error {
   readonly code: 'not_found' | 'network' | 'extract' | 'integrity'
 
@@ -619,19 +631,28 @@ export async function downloadPackageTarball(
 /**
  * 安装 projectDir 中 package.json 的所有 dependencies。
  * 用于 git clone 后安装依赖的场景。
+ *
+ * RT-8#4（F1 假成功）：失败聚合进返回值 failed[]，不再静默 return——调用方
+ * （extension-service）据 failed[] 拒绝按「已安装」登记。口径（审查 D）：
+ * - 无 package.json = 本无依赖，合法 no-op → 空清单（不是失败类）；
+ * - package.json 解析失败 → 单条 failed（name='package.json'）；
+ * - 单个依赖安装失败 → 逐条进 failed（仍继续装其余依赖）。
  */
 export async function installDependencies(
   projectDir: string,
   options?: NpmInstallOptions,
-): Promise<void> {
+): Promise<{ failed: DepsInstallFailure[] }> {
+  const failed: DepsInstallFailure[] = []
   const pkgJsonPath = join(projectDir, 'package.json')
-  if (!existsSync(pkgJsonPath)) return
+  if (!existsSync(pkgJsonPath)) return { failed }
 
   let pkg: { dependencies?: Record<string, string> }
   try {
     pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
-  } catch {
-    return
+  } catch (e) {
+    const error = toErrorMessage(e)
+    console.warn(`[npm-installer] Failed to parse ${pkgJsonPath}:`, error)
+    return { failed: [{ name: 'package.json', error }] }
   }
 
   const deps = pkg.dependencies ?? {}
@@ -641,12 +662,12 @@ export async function installDependencies(
   for (const [depName, depRange] of Object.entries(deps)) {
     try {
       await installPackageRecursive(`${depName}@${depRange}`, nodeModulesDir, options, installed)
-    } catch (e) {  
-      // 传递依赖安装失败不阻塞主包。仅记录错误继续安装其他依赖。
-      console.warn(
-        `[npm-installer] Failed to install dependency ${depName}:`,
-        toErrorMessage(e),
-      )
+    } catch (e) {
+      // 聚合进 failed[] 供调用方裁决（warn 后 resolve 但不带失败信号 = 假成功）。
+      const error = toErrorMessage(e)
+      console.warn(`[npm-installer] Failed to install dependency ${depName}:`, error)
+      failed.push({ name: depName, error })
     }
   }
+  return { failed }
 }

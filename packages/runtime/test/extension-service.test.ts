@@ -8,13 +8,14 @@ import { ExtensionResolver } from '../src/infra/installers/extension-resolver.js
 import { PiExtensionSettings } from '../src/infra/pi/pi-extension-settings.js'
 import type { IConfigStore } from '../src/services/ports/config.js'
 
-import { installPackage, uninstallPackage, NpmInstallError } from '../src/infra/installers/npm-installer.js'
+import { installPackage, uninstallPackage, installDependencies, NpmInstallError } from '../src/infra/installers/npm-installer.js'
 import { execFileSync } from 'node:child_process'
 
 vi.mock('../src/infra/installers/npm-installer.js', () => ({
   installPackage: vi.fn(),
   uninstallPackage: vi.fn(),
-  installDependencies: vi.fn(),
+  // RT-8#4：installDeps 返回 { failed } 失败聚合，默认无失败（用例可 override）
+  installDependencies: vi.fn(async () => ({ failed: [] })),
   NpmInstallError: class extends Error {
     code: 'not_found' | 'network' | 'extract' | 'integrity'
     constructor(code: 'not_found' | 'network' | 'extract' | 'integrity', message: string) {
@@ -58,6 +59,7 @@ vi.mock('node:fs', async (importOriginal) => {
 
 const mockedInstallPackage = vi.mocked(installPackage)
 const mockedUninstallPackage = vi.mocked(uninstallPackage)
+const mockedInstallDependencies = vi.mocked(installDependencies)
 const mockedExecFileSync = vi.mocked(execFileSync)
 
 describe('ExtensionService', () => {
@@ -611,6 +613,45 @@ describe('ExtensionService', () => {
 
       await expect(service.installGitRepository('https://github.com/nonexistent/repo.git'))
         .rejects.toThrow('git clone failed')
+    })
+
+    it('RT-8#4: 依赖安装失败（failed 非空）→ 抛 deps_failed（code+hint+清单），tempDir 回收，不进发现/登记', async () => {
+      // clone 成功且仓库根有 package.json（触发 installDeps 路径）
+      mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+        if (args?.[0] === 'clone') {
+          const targetDir = args[4] ?? ''
+          if (targetDir) {
+            mkdirSync(targetDir, { recursive: true })
+            writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
+              name: 'dep-repo',
+              dependencies: { 'some-dep': '^1.0.0' },
+            }), 'utf-8')
+          }
+        }
+        return ''
+      })
+      mockedInstallDependencies.mockResolvedValueOnce({
+        failed: [{ name: 'some-dep', error: 'network unreachable' }],
+      })
+
+      // 此前此处仅 warn 后继续（"Non-fatal"）→ 缺依赖扩展按「已安装」走完发现/登记，
+      // 以子进程崩溃形式延后暴露；现抛 deps_failed（ExtensionInstallError 透传范式，
+      // 消息层 sendInstallError 转 error envelope code/hint 到前端）
+      const err: unknown = await service.installGitRepository('https://github.com/user/dep-repo.git')
+        .then(
+          () => { throw new Error('expected installGitRepository to reject with deps_failed') },
+          (e) => e,
+        )
+      expect(err).toBeInstanceOf(ExtensionInstallError)
+      expect(err).toMatchObject({
+        code: 'deps_failed',
+        message: expect.stringMatching(/some-dep: network unreachable/),
+        hint: expect.stringMatching(/重试|retry/),
+      })
+
+      // tempDir 已回收（tmp 下无 ext-scan-* 残留半成品）
+      const tmpRoot = join(testSettingsDir, 'tmp')
+      expect(existsSync(tmpRoot) ? readdirSync(tmpRoot).filter(n => n.startsWith('ext-scan-')) : []).toEqual([])
     })
 
     it('discovers extensions from a cloned git repo', async () => {

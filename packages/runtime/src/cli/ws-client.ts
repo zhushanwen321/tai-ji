@@ -101,6 +101,26 @@ export async function rpc<T = Record<string, unknown>>(
           settled = true
           clearTimeout(timer)
           ws.close()
+          // RT-8#1（F1 假成功）：broker sendError 的 error envelope 复用请求 id
+          // （{ type:'error', id, payload:{ code, message, ... } }）。此前此处无条件
+          // resolve payload → set/delete-provider 失败仍打印 configured/deleted 且 exit 0，
+          // 读命令显示空列表。error 帧必须 reject（对齐 renderer 侧 pending.resolveEnvelope
+          // 的 envelope 语义：code 透传到 Error），经 index.ts 统一落 stderr + exit 1。
+          if (msg.type === 'error') {
+            const errPayload = (msg.payload ?? {}) as {
+              code?: string
+              message?: string
+              details?: { hint?: string }
+            }
+            const code = typeof errPayload.code === 'string' ? errPayload.code : 'unknown'
+            const hint = errPayload.details?.hint
+            const recovery = hint ?? 'fix the issue above and retry, or check taiji runtime logs'
+            reject(Object.assign(
+              new Error(`${errPayload.message ?? 'request failed'} (${code}) — ${recovery}`),
+              { code },
+            ))
+            return
+          }
           // 信封解包：线上帧是 { type, id, payload }，全部调用方按 payload 字段读取
           // （reply.providers / reply.models / reply.success …）。曾在此 resolve 整个信封，
           // 所有 CLI 读命令对真实 runtime 静默返回空（单测 mock rpc 未覆盖信封层故不可见，

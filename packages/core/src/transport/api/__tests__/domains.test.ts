@@ -294,13 +294,17 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('sendExtensionUIResponse 经 ws send fire-and-forget', () => {
+  it('sendExtensionUIResponse 经 ws send fire-and-forget，透传 boolean 送达结果（M1 环 3）', () => {
     mockWsSend.mockReturnValue(true)
-    extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')
+    expect(extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')).toBe(true)
     expect(mockWsSend).toHaveBeenCalledWith({
       type: 'extension.ui_response',
       payload: { sessionId: 's1', requestId: 'r1', method: 'select', result: 'opt-1' },
     })
+
+    // WS 非 OPEN：send 返 false → 透传 false（调用方据此保留请求 + 提示重发，不再 :void 吞掉）
+    mockWsSend.mockReturnValue(false)
+    expect(extension.sendExtensionUIResponse('s1', 'r2', 'confirm', false)).toBe(false)
   })
 })
 

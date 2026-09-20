@@ -921,6 +921,14 @@ export function invalidateSessionMetaCache(filePath: string): void {
 // session-binding-fields.ts 的 BINDING_FIELDS 注册表登记（漏登记=编译错），
 // 回填入口适用性（hydrateBindingMeta 四入口矩阵）与 create 派生调用方清单均在该模块维护。
 /**
+ * 扫描降级计数（RT-3#1，F5 留痕）：坏 header（id/cwd 缺失/空串）丢弃的条目数——
+ * scanPiSessionsFromDisk 按轮汇总打点，让「侧栏少了会话」可归因。
+ */
+interface ScanDegradedStats {
+  badHeader: number
+}
+
+/**
  * 单个 session 文件的元数据提取（三读合一 + 缓存）。
  *
  * 1. statSync 拿 mtimeMs + size，查缓存 (path, mtimeMs, size)
@@ -932,8 +940,16 @@ export function invalidateSessionMetaCache(filePath: string): void {
  * 现统一在此一次提取，scannedToSummary 从 meta.outcome 取（INVAR-merge-2）。
  *
  * 文件删除/不可读（INVAR-cache-4）→ 清该 key 返回 null。
+ *
+ * RT-3#1：header 缺 id/cwd（非空字符串）→ fail-fast 返回 null + warn 带路径 + 计入
+ * degraded.badHeader。id/cwd 是消费链硬依赖（scannedToSummary 的 basename(cwd)、按
+ * cwd 分组键、restore 按 id 定位）——此前 parseSessionHeader 条件赋值不设字段、
+ * `as SessionHeader` 收口，异常发生在**消费**阶段（basename(undefined) TypeError），
+ * 扫描侧 catch 拦不住，一个坏文件毒死整个侧栏。出口收口对齐 import 侧
+ * parseHeaderFromFirstLine 的「id/cwd 均非空字符串才收录」同款清单（外部文件不修
+ * 本体，删/修文件后自动恢复收录）。与「非 session 文件」同不缓存（下次仍尝试）。
  */
-function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
+function scanSessionMeta(filePath: string, degraded?: ScanDegradedStats): ScannedSessionMeta | null {
   let fstat
   try {
     fstat = statSync(filePath)
@@ -953,6 +969,11 @@ function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
   const header = parseSessionHeader(filePath)
   if (!header) {
     // 非 session 文件（首行不是 session header）：不缓存（下次仍尝试，开销小）
+    return null
+  }
+  if (typeof header.id !== 'string' || header.id === '' || typeof header.cwd !== 'string' || header.cwd === '') {
+    if (degraded) degraded.badHeader++
+    console.warn(`[session-file-utils] session header missing/empty id or cwd, file skipped: ${filePath}`)
     return null
   }
   const name = extractSessionName(filePath)
@@ -1067,6 +1088,9 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   if (!existsSync(sessionsDir)) return []
 
   const results: ScannedSessionMeta[] = []
+  // RT-3#1：坏 header 丢弃计数（degraded 显形）——scanSessionMeta 出口 fail-fast 计入，
+  // 扫描轮末汇总打点，单条坏文件「侧栏少一条」可归因（与 F5 留痕族先例同形）。
+  const degraded: ScanDegradedStats = { badHeader: 0 }
 
   let entries: string[]
   try {
@@ -1094,7 +1118,7 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
         for (const file of files) {
           const filePath = join(entryPath, file)
           try {
-            const meta = scanSessionMeta(filePath)
+            const meta = scanSessionMeta(filePath, degraded)
             if (meta) results.push(meta)
           // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entries
           } catch {
@@ -1107,13 +1131,19 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
       }
     } else if (isScannableSessionFile(entry)) {
       try {
-        const meta = scanSessionMeta(entryPath)
+        const meta = scanSessionMeta(entryPath, degraded)
         if (meta) results.push(meta)
       // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entry
       } catch {
         // skip
       }
     }
+  }
+
+  if (degraded.badHeader > 0) {
+    console.warn(
+      `[session-file-utils] scanPiSessions: ${degraded.badHeader} session file(s) dropped due to bad header (missing/empty id or cwd) — check files above; fixing or removing the file restores it to the list`,
+    )
   }
 
   results.sort((a, b) => b.lastModified - a.lastModified)

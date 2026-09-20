@@ -77,6 +77,28 @@ describe('rpc', () => {
     expect(lastMockWs.send).toHaveBeenCalledTimes(1)
   })
 
+  it('RT-8#1: error envelope（type=error 复用请求 id）→ reject 带 code+message，不得 resolve', async () => {
+    const promise = rpc('config.deleteProvider', { providerId: 'ghost' })
+    lastMockWs.emit('open')
+    lastMockWs.emit('message', Buffer.from(JSON.stringify({ type: 'auth.result', payload: { ok: true } })))
+    const secondMsg = JSON.parse(String((lastMockWs.send as ReturnType<typeof vi.fn>).mock.calls[1][0]))
+    // broker sendError 的 wire 形状：{ type:'error', id, payload:{ code, message } }（同 id 复用）
+    lastMockWs.emit('message', Buffer.from(JSON.stringify({
+      type: 'error',
+      id: secondMsg.id,
+      payload: { code: 'PROVIDER_NOT_FOUND', message: 'Provider "ghost" not found' },
+    })))
+    // 此前此处 resolve {code,message} payload → 调用方按字段读 undefined → 假成功
+    const err = await promise.then(
+      () => { throw new Error('expected reject, got resolve') },
+      (e: Error & { code?: string }) => e,
+    )
+    expect(err.message).toContain('PROVIDER_NOT_FOUND')
+    expect(err.message).toContain('Provider "ghost" not found')
+    expect(err.code).toBe('PROVIDER_NOT_FOUND')
+    expect(lastMockWs.close).toHaveBeenCalled()
+  })
+
   it('rejects on timeout', async () => {
     // verify 5s timeout behavior
     await expect(

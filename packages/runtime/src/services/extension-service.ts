@@ -736,13 +736,22 @@ export class ExtensionService {
       throw new Error(`git clone failed: ${msg}`)
     }
 
-    // If package.json exists, install dependencies (经 IInstaller port)
+    // If package.json exists, install dependencies (经 IInstaller port).
+    // RT-8#4（F1 假成功）：failed 非空即抛 deps_failed，不继续发现/登记——缺依赖的
+    // 扩展以子进程崩溃形式延后暴露，比安装期显形更糟（ExtensionInstallError 透传
+    // 范式：code/hint 经消息层 error envelope 到前端）。
     if (existsSync(join(destInTemp, 'package.json'))) {
-      try {
-        await this.installer.installDeps(destInTemp)
-      } catch (e) {
-        log.warn(`[extension-service] npm install in git repo failed: ${toErrorMessage(e)}`)
-        // Non-fatal — some repos don't need deps to discover extensions
+      const { failed } = await this.installer.installDeps(destInTemp)
+      if (failed.length > 0) {
+        try { rmSync(tempDir, { recursive: true, force: true }) } catch (cleanupErr) {
+          log.warn('[extension-service] failed to cleanup temp dir:', cleanupErr)
+        }
+        const detail = failed.map(f => `${f.name}: ${f.error}`).join('; ')
+        throw new ExtensionInstallError(
+          'deps_failed',
+          `npm install in git repo failed — ${detail}`,
+          '依赖安装失败，请检查网络/registry 连通性或仓库 package.json，修复后重试安装。',
+        )
       }
     }
 

@@ -804,7 +804,16 @@ function applyCustomApiWritePolicy(
   merged.api = api
 }
 
-/** 防线② 模型级转译（translateModelSchemaFields）：传了才触碰 merged.models，整体替换。 */
+/**
+ * 防线② 模型级转译（translateModelSchemaFields）：传了才触碰 merged.models，整体替换。
+ *
+ * RT-5#2（M15）：本函数是导入路径的模型装配点（importer 传 models；setProvider 侧自行走
+ * mergeProviderModel 装配后不传 models），转译后追加 B-4b 校验型白名单（applyValidatedModelFields
+ * ——settings 路径同源），外部配置的畸形 cost/headers/reasoning/maxTokens 不再裸透传写盘：
+ * pi 0.84.4 ModelConfig.load 对 schema 违规**整表拒载**（node_modules dist core/model-config.js
+ * validateModelsConfig.Check 失败 → 空 providers Map + error），一条畸形模型毒死全部自定义
+ * provider。非法值 throw 由导入链 per-entry catch 折叠为该条 `status:'failed'` + reason。
+ */
 function applyModelsWritePolicy(
   merged: Record<string, unknown>,
   data: ProviderWritePolicyInput,
@@ -814,7 +823,16 @@ function applyModelsWritePolicy(
   const kept: Array<Record<string, unknown>> = []
   for (const raw of data.models) {
     const model = { ...raw }
-    if (translateModelSchemaFields(model, providerId)) kept.push(model)
+    // 缺 id 与空白 id 同口径（translateModelSchemaFields 只拦空白串形态）：pi 的 id 是
+    // 必填 minLength:1 字段，缺 id 条目写盘同样触发整表拒载——整条丢弃 + warn。
+    if (model.id === undefined || model.id === null) {
+      console.warn(`[config-service] dropped model without id for ${providerId}`)
+      continue
+    }
+    if (translateModelSchemaFields(model, providerId)) {
+      applyValidatedModelFields(model, model, String(model.id))
+      kept.push(model)
+    }
   }
   merged.models = kept
 }

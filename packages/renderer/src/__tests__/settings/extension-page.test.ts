@@ -17,6 +17,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ExtensionItem } from '@taiji/core'
+import {
+  getSettingsStore,
+  provideSettingsTransport,
+  __resetSettingsStoreForTesting,
+  __resetSettingsTransportForTesting,
+  type SettingsTransport,
+} from '@taiji/core'
+import type { SkillDirConfig } from '@taiji/shared'
 
 /** mock 捕获 extension.upgrade / setAutoUpgrade 调用。vi.hoisted 保证在 vi.mock 工厂执行前就绪。 */
 const extensionMock = vi.hoisted(() => ({
@@ -265,5 +273,63 @@ describe('ExtensionPage 操作成功 toast 反馈（W4 D11）', () => {
     await flushPromises()
     expect(extensionMock.upgrade).toHaveBeenCalledWith('my-tools')
     expect(toasts.value.some((t) => t.message === '扩展已升级' && t.type === 'info')).toBe(true)
+  })
+})
+
+// ── RD-4#1 · 扩展加载路径保存失败回弹（skill/agent 同族第三处：onUpdateExtensionDirs）──
+//
+// 链路：LoadPaths 勾选（乐观编辑）→ emit update-dirs → onUpdateExtensionDirs →
+// settingsStore.setExtensionDirs（transport）→ reject → catch 置位 dirsSaveError →
+// LoadPaths 回弹至最近落盘值 + 常驻红字。权威值源 = store.extensionDirs 广播镜像
+// （dirs 域无 getter RPC，镜像只被成功落盘后的广播写入）。
+describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
+  function stubTransportWithFailingSetExtensionDirs(): SettingsTransport {
+    const noopUnsub = (): void => {}
+    return {
+      listProviders: async () => ({ providers: [] }),
+      listModels: async () => [],
+      setProvider: async () => undefined,
+      setScopedModels: async () => [],
+      discoverModels: async () => ({ success: true, models: [] }),
+      setSkillDirs: async () => undefined,
+      setAgentDirs: async () => undefined,
+      setExtensionDirs: () => Promise.reject(new Error('write failed')),
+      onProviders: () => noopUnsub,
+      onModels: () => noopUnsub,
+      onSkills: () => noopUnsub,
+      onAgents: () => noopUnsub,
+      onExtensions: () => noopUnsub,
+      onSkillDirs: () => noopUnsub,
+      onAgentDirs: () => noopUnsub,
+      onExtensionDirs: () => noopUnsub,
+      onDefaults: () => noopUnsub,
+      onSystemPrompt: () => noopUnsub,
+      onTerminalConfig: () => noopUnsub,
+    }
+  }
+
+  it('勾选目录保存失败 → toast + 常驻红字 + 勾选态回弹至最近落盘值', async () => {
+    __resetSettingsStoreForTesting()
+    __resetSettingsTransportForTesting()
+    const persisted: SkillDirConfig[] = [{ path: '/persisted/exts', enabled: false, scope: 'global' }]
+    getSettingsStore().extensionDirs.value = persisted
+    provideSettingsTransport(stubTransportWithFailingSetExtensionDirs())
+
+    const { toasts } = useToast()
+    toasts.value = []
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    const checkbox = document.body.querySelector<HTMLElement>('[data-testid="dir-row"] button[role="checkbox"]')
+    expect(checkbox).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
+
+    // 用户勾选 → 持久化 reject
+    checkbox!.click()
+    await flushPromises()
+
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('write failed'))).toBe(true)
+    expect(document.body.querySelector('[data-testid="load-paths-save-error"]')).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
   })
 })

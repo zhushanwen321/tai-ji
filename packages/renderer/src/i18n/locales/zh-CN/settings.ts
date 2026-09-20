@@ -738,6 +738,7 @@ export default {
     systemTag: '系统',
     pathFormatError: '路径格式错误（项目允许相对/绝对；全局限绝对路径）',
     priorityHint: '靠前优先级更高',
+    saveErrorHint: '未保存，当前显示的是最近落盘值',
     // ── 从其他 Agent 导入（SourceImportSection，W1）──
     importFromAgents: {
       title: '从其他 Agent 导入',
