@@ -23,8 +23,8 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  * - workers: 1（Electron 多实例争抢 userData LOCK + 端口，强制串行；visual 也串行保证 baseline 稳定）
  *
  * smoke 子集圈定 SSOT = 本 project 的 grep 标签（@p0-smoke）；候选 = 覆盖「新建任务首条消息流 /
- * session 切换隔离 / composer slash / 侧栏核心交互 / 错误态收口」的现存用例，名单与归宿纪律见
- * docs/TEST-STRATEGY.md「e2e 资产归宿纪律」章节。
+ * session 切换隔离 / composer slash / 侧栏核心交互 / 错误态收口 / 对话流渲染布局」的现存用例，
+ * 名单与归宿纪律见 docs/TEST-STRATEGY.md「e2e 资产归宿纪律」章节。
  *
  * visual project 的 vite 由 e2e/visual/fixtures/visual-server.ts 的 worker-scoped fixture 管理
  *（复用 W1/W2 spawnVite 范式），不用全局 webServer——避免 visual 的 vite 依赖拖累 electron project。

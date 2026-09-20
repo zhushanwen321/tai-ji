@@ -255,7 +255,7 @@ pnpm dev
 
 # ── MOCK 轨：E2E 自动化 ──
 npx playwright test --project=electron           # 行为轨全量（visual/real 排除在外；裸跑不带 --project 会连 visual-chromium + electron-smoke 一起跑，smoke 用例随两个 project 各跑一遍）
-npx playwright test --project=electron-smoke     # P0 smoke 子集（9 条 @p0-smoke，CI e2e-behavior job 同款命令；圈定 SSOT = playwright.config.ts grep 标签，归宿纪律见根 TEST-STRATEGY.md「e2e 资产归宿纪律」）
+npx playwright test --project=electron-smoke     # P0 smoke 子集（10 条 @p0-smoke，CI e2e-behavior job 同款命令；圈定 SSOT = playwright.config.ts grep 标签，归宿纪律见根 TEST-STRATEGY.md「e2e 资产归宿纪律」）
 npx playwright test e2e/file-tree.spec.ts        # 单文件
 npx playwright test --grep "E2E-1"               # 按用例名
 npx playwright test --headed                     # 有头模式（看窗口）
