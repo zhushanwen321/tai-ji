@@ -279,7 +279,7 @@ interface ActionResult {
  * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
  * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
  * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
- * 用户随时可经底栏退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
+ * 用户随时可经 PlanModeBar 退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
  * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
  * 不走 sendUserMessage/steer 排队）。已在 plan 模式时幂等返回，不重复进入。
  */
@@ -756,7 +756,7 @@ async function resolveCompleteChoice(
   const execOptions = buildExecOptions(execSkills, detectGoalCapability());
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
-  // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
+  // approve 后的挂起窗口内用户点 PlanModeBar 退出（确认 Popover 后）必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
   cascadeTurnAbort(controller, signal);
 

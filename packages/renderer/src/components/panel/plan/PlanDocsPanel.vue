@@ -21,7 +21,7 @@
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.pendingActive') }}</p>
   </div>
   <!-- §3.2 矩阵 #2：isActive && docs 空 && agent 空闲 → pending 等待态 + 恢复入口提示
-       （交互语义 = 指引用户发消息，无独立按钮；恢复动作接线归 u-review-source-ui） -->
+       （交互语义 = 指引用户发消息，无独立按钮；恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作） -->
   <div
     v-else-if="pendingIdle"
     data-testid="plan-docs-pending-idle"

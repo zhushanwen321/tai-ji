@@ -262,7 +262,7 @@ function handleEnterPlanMode(
   args: string,
 ): void {
   // flag 解析 + 校验先行：--template / --skills 任一校验失败 fail-fast，
-  // 不产生任何进入动作（横幅不出现：不写 entry / 不限制工具 / 不注入提示词）
+  // 不产生任何进入动作（PlanModeBar 不出现：不写 entry / 不限制工具 / 不注入提示词）
   const parsed = parsePlanArgs(args);
 
   // 互斥 fail-fast（§3.1）：两 flag 同给先于一切值校验报错

@@ -57,7 +57,7 @@ export default {
     pendingActive: 'Exploring requirements and drafting the plan document…',
     pendingIdle: 'The agent has not made progress yet — send a message to continue',
     // Recovery-entry hint: interaction semantics = guide the user to send a message (no standalone button;
-    // recovery wiring lands with u-review-source-ui)
+    // recovery entry is copy-only guidance, landed with u-drawer-gate — no programmatic action)
     pendingIdleHint: 'Send any message in the composer to nudge the agent forward',
   },
   docs: {

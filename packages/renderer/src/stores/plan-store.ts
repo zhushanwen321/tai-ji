@@ -55,8 +55,8 @@ export type PlanStage =
 /**
  * 三步阶段推导（D1：推导不落盘）。
  * @param view session 分区内的 PlanStateView（null = 无 plan 状态）
- * @returns 阶段指示；isActive=false（退出/执行后）或无 view 时返回 null——横幅由 isActive
- *          驱动消失，阶段随横幅不外显。reviewState 优先于 docs 判定（③ 公式不含 docs 条件；
+ * @returns 阶段指示；isActive=false（退出/执行后）或无 view 时返回 null——PlanModeBar 由 isActive
+ *          驱动消失，阶段随 PlanModeBar 不外显。reviewState 优先于 docs 判定（③ 公式不含 docs 条件；
  *          isActive 门兜住 reset 终态矩阵之外的异常组合）。
  */
 export function derivePlanStage(view: PlanStateView | null): PlanStage | null {

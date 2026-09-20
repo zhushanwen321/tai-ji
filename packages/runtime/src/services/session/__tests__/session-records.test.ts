@@ -1006,7 +1006,7 @@ describe('plan-state 投影（D1③④）', () => {
 
   // [MF-1 回归] JSONL append-only 下 entry 不会消失，增量批（cursor delta）的
   // 「无 plan-state entry」= 本批无 plan 新信息，非「entry 被清空」——误判会把活跃 plan
-  // 的 GUI（横幅/审批条/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
+  // 的 GUI（PlanModeBar/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
   it('增量批无 plan-state entry：保持基线不 publish（非全量路径收敛语义不适用）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)

@@ -1,7 +1,7 @@
 /**
  * useExtensionUI planReview 分流单测 —— plan 模式重设计 u1-banner（设计 D5 marker select 通道）。
  *
- * 覆盖（impl-plan u1-banner 验收条款 C4 过滤器面）：
+ * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款 C4 过滤器面）：
  * - planReview 标记请求入 store（C4 放行），挂起状态按 requestId 可枚举（currentPlanReviewRequests）
  * - 非 form 非 planReview 的 dialog 原语仍不入 store（C4 负向不回归）
  * - planReviewFilter 实例与 formFilter 实例互斥（一请求只归一面；表单类行为无回归）

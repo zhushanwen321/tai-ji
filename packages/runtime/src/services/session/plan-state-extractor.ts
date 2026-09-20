@@ -149,7 +149,7 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
  *
  * 读取文件 → parseJsonl → scanPlanStateEntries（与实时增量拉取同一份派生代码）。
  *
- * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile:346-353 契约）：
+ * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile 契约）：
  * - 文件不存在（ENOENT）→ 「未激活」缺省 View（合法边界：pi session 文件延迟写入，文件
  *   都不存在必然无 plan-state entry；缺省形态对齐 extension DEFAULT_PLAN_STATE 的 View 域
  *   投影——isActive:false + 三 string 字段 null）。

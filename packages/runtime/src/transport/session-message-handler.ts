@@ -114,7 +114,7 @@ export class SessionMessageHandler {
     // wave:runtime-wiring：session.subscribe/unsubscribe RPC（IF6/IF7）。
     'session.subscribe', 'session.unsubscribe',
     'session.getSubagents', 'session.getSubagentHistory',
-    // plan 模式重设计（D1⑥/D5）：getPlanState 冷启动/切换首拉 + abortPlan 横幅退出命令。
+    // plan 模式重设计（D1⑥/D5）：getPlanState 冷启动/切换首拉 + abortPlan 退出命令（PlanModeBar 确认 Popover 后）。
     'session.getPlanState', 'session.abortPlan',
     // [U7] 子代理引擎配置（Settings 引擎选择器：动态列表 + defaultEngine 读写）
     'session.getSubagentEngineConfig', 'session.setSubagentDefaultEngine',
@@ -564,7 +564,7 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'session.workflowActionDone', { sessionId: msg.payload.sessionId, action: msg.payload.action, runId: msg.payload.runId })
   }
 
-  // ── plan 模式重设计（D1⑥ 冷启动首拉 + D5/E9 横幅退出命令）──
+  // ── plan 模式重设计（D1⑥ 冷启动首拉 + D5/E9 PlanModeBar 退出命令）──
 
   private async handleSessionGetPlanState(msg: Extract<ClientMessage, { type: 'session.getPlanState' }>, ws: WsType): Promise<void> {
     // D1⑥：冷启动/切换首拉（stateSnapshot 是 bus 内存态、pi exit 即清空——冷送达靠本 RPC，
@@ -584,7 +584,7 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionAbortPlan(msg: Extract<ClientMessage, { type: 'session.abortPlan' }>, ws: WsType): Promise<void> {
-    // D5/E9/E10：横幅「退出 ×」。① ensureActive 自动恢复 pi（join 语义，session-service.ts
+    // D5/E9/E10：PlanModeBar 退出按钮（确认 Popover 后）。① ensureActive 自动恢复 pi（join 语义，session-service.ts
     // ensureActive——崩溃恢复后懒重生未发生的窗口一步到位，不要求用户先发消息；恢复失败
     // → 下方 error envelope，前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：
     // `/` 前缀 prompt 被 pi 先行执行为 extension command、不产用户消息、streaming 中可用

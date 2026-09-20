@@ -1,7 +1,7 @@
 /**
  * usePlanState 单测 —— plan 模式重设计 u1-store 层 2（编排：订阅 / 首拉 / 视图透出）。
  *
- * 覆盖（impl-plan u1-store 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款）：
  * - 首拉 watch immediate：初始挂载即拉 + 切 session 再拉；RPC reject（reply success=false）
  *   走错误通路（分区 loadError）断言
  * - WS 帧驱动状态流转：awaiting → revising → 无值（reviewing → reviewing → writing）

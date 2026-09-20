@@ -2,7 +2,7 @@
  * PlanDocsPanel 组件单测 —— plan 模式重设计 u1-docs-panel（设计 §3.1 步骤 3-5 / G2 后半 +
  * G3 / D4 降级 / D10 空态 / E2 占位）。
  *
- * 覆盖（impl-plan u1-docs-panel 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-docs-panel（历史项目，未入库）验收条款）：
  * - L2 tab 渲染（多文档 tab 数、sourceSkill chip / version meta / ellipsis 截断）
  * - tab 切换渲染对应正文（file.read mock 参数带 sessionId 断言——cwd 守门契约）
  * - file.read 失败 → E2 占位错误态（条目不清，agent 可重新产出提示）
@@ -217,7 +217,7 @@ describe('PlanDocsPanel 态矩阵（plan-mode-ux-refactor §3.2：isActive && do
     expect(pending.exists()).toBe(true)
     expect(pending.text()).toContain('agent 暂未推进，可发消息继续')
     expect(pending.text()).toContain('在对话输入框发送任意消息')
-    // 恢复入口的交互语义 = 指引用户发消息，无独立按钮（动作接线归 u-review-source-ui）
+    // 恢复入口的交互语义 = 指引用户发消息，无独立按钮（恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作）
     expect(pending.find('button').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(false)
   })

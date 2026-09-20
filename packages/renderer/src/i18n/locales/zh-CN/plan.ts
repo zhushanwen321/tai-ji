@@ -54,7 +54,7 @@ export default {
     // 「已暂停」——误显后果轻，显式接受）
     pendingActive: '正在探索与撰写计划文档…',
     pendingIdle: 'agent 暂未推进，可发消息继续',
-    // 恢复入口提示：交互语义 = 指引用户发消息（无独立按钮；恢复动作接线归 u-review-source-ui）
+    // 恢复入口提示：交互语义 = 指引用户发消息（无独立按钮；恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作）
     pendingIdleHint: '在对话输入框发送任意消息，提醒 agent 继续推进',
   },
   docs: {

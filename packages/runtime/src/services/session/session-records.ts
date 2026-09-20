@@ -759,7 +759,7 @@ export class SessionRecords {
    * → scanPlanStateEntries）共用同一份派生代码（D1「派生代码唯一」不变量）。文件不存在、
    * 无 plan-state entry 等「从未进过 plan」形态归一为「未激活」缺省 View（INACTIVE_PLAN_STATE_VIEW，
    * 对齐 extension DEFAULT_PLAN_STATE——RPC reply 契约 planState 无 null 域，GUI 端
-   * isActive:false 即不渲染横幅）。
+   * isActive:false 即不渲染 PlanModeBar）。
    */
   async getPlanState(sessionId: string): Promise<PlanStateView> {
     // 路径解析消费方 force 旁路 TTL（与 getSubagents/getWorkflows 同理：刚落盘 session 的
@@ -919,7 +919,7 @@ function mergeWorkflowRecords(workflows: Map<string, WorkflowRunRecord>, records
  * JSONL append-only 下 entry 不会消失，「null = entry 被清空」的收敛只对全量重建路径
  * 合法（全集扫描即新真值）；增量批（cursor delta）的 null 仅表示本批无 plan 新信息
  * （subagent/workflow record entry 触发的重拉批必然不含 plan entry），必须保持基线，
- * 否则活跃 plan 的 GUI（横幅/审批条/产物面板）会被无关 record 增量重拉静默打回未激活。
+ * 否则活跃 plan 的 GUI（PlanModeBar/产物面板）会被无关 record 增量重拉静默打回未激活。
  * 派生非 null 恒写基线。发布与否由水位门判定（planStateDiffersFromPublished：基线归
  * null 的收敛 = 已发布 View ↔ null 的水位差异，自然触发缺省 View 收敛帧）。
  */

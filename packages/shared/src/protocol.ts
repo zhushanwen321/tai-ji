@@ -95,8 +95,8 @@ export type ClientMessageType =
   // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
   // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
   // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
-  // abortPlan：横幅「退出 ×」→ runtime 经 ensureActive 恢复后 client.prompt('/plan abort')
-  // 直发（绕 busy 预检，streaming 中可用）。
+  // abortPlan：PlanModeBar 左区退出按钮（确认 Popover 后）→ runtime 经 ensureActive 恢复后
+  // client.prompt('/plan abort') 直发（绕 busy 预检，streaming 中可用）。
   | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
@@ -442,7 +442,8 @@ export interface ClientMessageMap {
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
-  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 横幅退出命令，
+  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
+  // 退出命令（确认 Popover 后），
   // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
   'session.getPlanState': { sessionId: string }
   'session.abortPlan': { sessionId: string }
@@ -2407,7 +2408,7 @@ export interface ReplyPayloadMap {
   'session.abortHandoff': void    // reply message.status
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
-  // session.abortPlan：横幅退出 → runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
+  // session.abortPlan：PlanModeBar 退出（确认 Popover 后）→ runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
   // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
   // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
   'session.abortPlan': void       // reply message.status

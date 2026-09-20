@@ -4,7 +4,7 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 /**
  * 审阅态两值（D1）——awaiting = 文档就绪等审批；revising = 修订中；
  * 无值 = 进行中。approve 不设中间态：直接走 complete → resetPlanState 落
- * isActive=false，横幅消失由 isActive 驱动。
+ * isActive=false，PlanModeBar 消失由 isActive 驱动。
  */
 export type PlanReviewState = "awaiting" | "revising";
 
@@ -12,9 +12,10 @@ export type PlanReviewState = "awaiting" | "revising";
  * 降级态来源标记（plan-mode-ux-refactor §3.4）：reviewState='awaiting' 且无挂起 select
  * 时区分等待原因——'explain' = 用户请求解释后等 agent 解答完重新提交审批；'resubmit' =
  * 会话重启（E3）后 agent 尚未重新提交。写入点两处（tool.ts explain 分支 / index.ts E3
- * steer 重挂处），清除点两处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置
- * 组）——缺清除 = 跨 plan run 残留（C-U2 同型缺陷：bad-response 等罕见路径可渲染上一轮
- * 的来源文案）。字面量与 shared PlanStateView.reviewStateSource 严格一致。
+ * steer 重挂处），清除点三处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置
+ * 组 / submit-review 重挂起点重置）——缺清除 = 跨 plan run 残留（C-U2 同型缺陷：
+ * bad-response 等罕见路径可渲染上一轮的来源文案）。字面量与 shared
+ * PlanStateView.reviewStateSource 严格一致。
  */
 export type PlanReviewStateSource = "explain" | "resubmit";
 

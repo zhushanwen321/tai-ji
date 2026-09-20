@@ -110,7 +110,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // plan 模式状态投影（plan 模式重设计 D1⑤）：last-value 单例状态——断连重连 / 切回
   // session 经 stateSnapshot 'plan' key 回放恢复。**必须入 STATE_TYPE_KEY_MAP**：
   // state 类但未映射 typeKey 的消息会走「不写快照」分支（stateTypeKey 返回 null），
-  // 横幅/审批条在重连后将拿不到恢复帧（投影链六件套之一，缺则静默失效）。
+  // PlanModeBar/产物面板在重连后将拿不到恢复帧（投影链六件套之一，缺则静默失效）。
   'session.planState': 'state',
   // E 方案（subagent-realtime-channel §4.3）：relay tee 产出的 subagent entry 增量帧。
   // state 类但刻意不进 STATE_TYPE_KEY_MAP——增量 entry 流不是 last-value 语义（快照

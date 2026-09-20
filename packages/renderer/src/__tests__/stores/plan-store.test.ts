@@ -1,7 +1,7 @@
 /**
  * plan store 单测 —— plan 模式重设计 u1-store 层 1（状态与操作）。
  *
- * 覆盖（impl-plan u1-store 验收条款 + u-review-source-ui 增量）：
+ * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
  * - 三步阶段推导三元组（D1：① exploring / ② writing / ③ reviewing；isActive 门 + reviewState 优先）
  * - 首拉成功写分区 / 响应缺 planState 置空 / RPC 失败错误通路（分区 loadError，view 不被覆盖）
  * - WS 帧落地 updateFor 分区写（applyFrame + 清 loadError）
@@ -129,7 +129,7 @@ describe('derivePlanStage：三步阶段推导三元组', () => {
     expect(derivePlanStage({ ...BASE_VIEW, reviewState: 'awaiting' })).toBe('reviewing')
   })
 
-  it('isActive=false（退出/执行后 reset 终态）或无 view → null（横幅消失，阶段随横幅不外显）', () => {
+  it('isActive=false（退出/执行后 reset 终态）或无 view → null（无 plan 态呈现，阶段随之不外显）', () => {
     expect(derivePlanStage(null)).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false })).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false, docs: [DOC], reviewState: 'awaiting' })).toBeNull()

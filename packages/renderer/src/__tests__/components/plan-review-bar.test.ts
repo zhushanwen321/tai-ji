@@ -1,7 +1,7 @@
 /**
  * PlanReviewBar 组件单测 —— plan 模式重设计 u1-banner（审批条，设计 D5/G3/G4）。
  *
- * 覆盖（impl-plan u1-banner 验收条款 + u-review-source-ui 增量）：
+ * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
  * - 四分支显示公式逐分支 DOM 断言（含 isActive=false 整体不渲染）：
  *   ① isActive+挂起+awaiting → 三键全功能；② revising → 修订中禁用态；
  *   ③ awaiting 无挂起 → 降级态；④ isActive=false → 不渲染
