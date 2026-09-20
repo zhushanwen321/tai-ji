@@ -304,6 +304,12 @@ export class MessageDispatcher {
     // [A1 接线] activeSession.cwd 作 project 扫描基准（D7）——session 未托管（view 缺失）
     // 时 undefined = global-only 映射（宁缺毋错，不猜 cwd）。
     const injection = await this.injector.inject(client, promptText, activeSession?.cwd)
+    // [u5a 收口扩展 / #12] 手敲链扩展命令判定（requireCommand === undefined 时才补判；判据与
+    // 降级语义见 willExecuteAsExtensionCommand 注释）。注意用 injection.text（实际发往 pi 的
+    // 文本——注入器产物才是 pi 收到的）。命中则 prompt 后主动收口；未命中/探测失败 → 不收口，
+    // 等 agent_start/end 回流正常管理。
+    const closeOccupancyAfterSend =
+      requireCommand !== undefined || (await this.willExecuteAsExtensionCommand(client, injection.text))
     try {
       await client.prompt(injection.text, images)
       // [扩展命令 occupancy 收口] requireCommand 命中的写路径 = pi 扩展命令（P2 实测：同步
@@ -311,8 +317,10 @@ export class MessageDispatcher {
       // 置位的 isGenerating 若不在此收口将永不复位 → 会话假死 busy，后续写路径全被
       // rejectBusyPrecheck 以 busy 拒绝。'/' 开头 + requireCommand 命中双条件确保只收
       // 「确为扩展命令且 pi 已同步执行完毕」的 prompt；普通 turn 消息不带 requireCommand
-      // 参数、不经此分支。
-      if (requireCommand !== undefined && injection.text.startsWith('/') && activeSession) {
+      // 参数、不经此分支。[u5a 收口扩展 / #12] 手敲链同族：/ 开头且命令表命中（
+      // willExecuteAsExtensionCommand，source==='extension' 对齐 pi 判据）同样无 turn 回流，
+      // 同批收口——未命中（进模型）/探测失败则不收，turn 回流自愈。
+      if (closeOccupancyAfterSend && injection.text.startsWith('/') && activeSession) {
         applySessionOccupancyTransition(activeSession, this.messageBus, 'idle')
       }
     } catch (e) {
@@ -401,6 +409,39 @@ export class MessageDispatcher {
       }
     }
     return false
+  }
+
+  /**
+   * 判定「此 prompt 将被 pi 作为扩展命令同步执行（无 agent_start/end 回流）」。
+   *
+   * [u5a 收口扩展 / 残留风险 #12] pi 语义（agent-session.js 0.84.4 `_tryExecuteExtensionCommand`）：
+   * `/` 开头 prompt 首段命中 extensionRunner 注册表 → 同步执行并 return（无 turn）；未命中 →
+   * 透传进模型（正常 turn 回流）。requireCommand 链的收口（sendPrompt 内既有分支）只覆盖插件
+   * 写路径——手敲链（message.send，无 requireCommand）同样产生扩展命令 prompt，缺收口则
+   * occupancy 卡 dispatching（UI「思考中」永不复位；#12 实证：手敲 /schedule list pi 已执行、
+   * 零 LLM 调用，前端却永久转圈被误判为「漏进模型」）。
+   *
+   * 判据对齐 pi：命令名取 `/` 后首段（空格前），命中 getCommands 中 `source==='extension'`
+   * 条目——skill（`skill:x`）/ prompt template（source:'prompt'）会被 pi 展开进模型、有 turn
+   * 回流，source 过滤天然排除（`/skill:` 前缀显式短路只为免无谓 RPC）。
+   *
+   * best-effort 单次查询：RPC 失败按「否」处理（prompt 将进模型、turn 回流自愈收口语义），
+   * 不重试不拒发——手敲链语义是「发消息」，查询只为 occupancy 收口服务。
+   */
+  private async willExecuteAsExtensionCommand(client: IPiEngine, text: string): Promise<boolean> {
+    if (!text.startsWith('/') || text.startsWith('/skill:')) return false
+    const commandName = text.slice(1).split(' ', 1)[0] ?? ''
+    if (!commandName) return false
+    try {
+      const commands = await client.getCommands()
+      return commands.some((c) => c.name === commandName && c.source === 'extension')
+    } catch (e) {
+      console.warn(
+        '[message-dispatcher] extension-command probe failed (occupancy close skipped):',
+        toErrorMessage(e),
+      )
+      return false
+    }
   }
 
   /**

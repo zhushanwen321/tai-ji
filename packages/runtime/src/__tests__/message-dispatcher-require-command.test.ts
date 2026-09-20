@@ -11,7 +11,13 @@
  *   message.error（回执机制是唯一反馈面——send.rejected 会触发前端 defer 队列重投，
  *   插件写命令绝不能入用户队列）
  * - 命中（首次 / 重试窗口内恢复）：prompt 正常调用
- * - 无 requireCommand：行为不变（getCommands 零触达，既有路径回归）
+ * - 无 requireCommand 且非 `/` 开头：行为不变（getCommands 零触达，既有路径回归）
+ * - [u5a 收口扩展 / #12] 无 requireCommand 但 `/` 开头且命令表命中（source==='extension'）：
+ *   prompt 后主动收口（occupancy idle + isGenerating=false）——pi 扩展命令无 turn 回流，
+ *   不收口则 dispatching 永久卡死（手敲 /schedule list 实证：pi 已执行、零 LLM 调用，
+ *   前端「思考中」永不复位被误判为「漏进模型」）
+ * - [u5a 收口扩展 / #12] 未命中（进模型）/ 探测 RPC 失败 / source!=='extension'（skill:
+ *   等 pi 展开形态）：不收口，等 turn 回流正常管理
  * - reason 分类：hook 拦截 → 'hook-blocked'；非 busy prompt 失败 → 'error'
  *   （busy/compacting/bash 三态由 send-rejection 与 dispatcher 主单测覆盖）
  *
@@ -83,7 +89,7 @@ function makeHarness(opts: HarnessOptions = {}) {
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
   const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, injector)
   dispatcher.setSendMessageHook(hookMock)
-  return { dispatcher, calls, client, getCommands, broadcasts, hookMock }
+  return { dispatcher, calls, client, getCommands, broadcasts, hookMock, session }
 }
 
 /** 取广播中的唯一 send.rejected / message.error（无则 undefined）。 */
@@ -151,13 +157,54 @@ describe('requireCommand 原子校验（D6/u5a：restore 后、busy 预检前）
     expect(client.prompt).not.toHaveBeenCalled()
   })
 
-  it('无 requireCommand：行为不变——getCommands 零触达，直发成功', async () => {
+  it('无 requireCommand 且非 `/` 开头：行为不变——getCommands 零触达，直发成功', async () => {
     const h = makeHarness()
     const result = await h.dispatcher.sendMessage('s1', '普通消息')
 
     expect(result).toEqual({ blocked: false })
     expect(h.getCommands).not.toHaveBeenCalled()
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
+  })
+
+  // ── [u5a 收口扩展 / #12] 手敲链扩展命令 occupancy 收口 ──
+
+  it('手敲 `/` 开头且命令表命中（source=extension）：prompt 后收口（isGenerating=false + occupancy idle）', async () => {
+    const h = makeHarness({ commandQueue: [[{ name: 'schedule', source: 'extension' }]] })
+    const result = await h.dispatcher.sendMessage('s1', '/schedule list')
+
+    expect(result).toEqual({ blocked: false })
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.getCommands).toHaveBeenCalledTimes(1) // 手敲链单次探测，无重试不拒发
+    expect((h.session as unknown as { isGenerating: boolean }).isGenerating).toBe(false)
+    expect((h.session as unknown as { occupancy: { turn: string } }).occupancy.turn).toBe('idle')
+  })
+
+  it('手敲 `/` 开头但命令表未命中（进模型）：不收口，等 turn 回流', async () => {
+    const h = makeHarness({ commandQueue: [[]] })
+    const result = await h.dispatcher.sendMessage('s1', '/nonexistent foo')
+
+    expect(result).toEqual({ blocked: false })
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect((h.session as unknown as { isGenerating: boolean }).isGenerating).toBe(true) // dispatching flags 保持
+    expect((h.session as unknown as { occupancy: { turn: string } }).occupancy.turn).toBe('dispatching')
+  })
+
+  it('skill 形态（source=skill）不收口：pi 会展开进模型、有 turn 回流', async () => {
+    const h = makeHarness({ commandQueue: [[{ name: 'skill:xxx', source: 'skill' }]] })
+    const result = await h.dispatcher.sendMessage('s1', '/skill:xxx 正文')
+
+    expect(result).toEqual({ blocked: false })
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect((h.session as unknown as { occupancy: { turn: string } }).occupancy.turn).toBe('dispatching')
+  })
+
+  it('手敲链探测 RPC 失败：降级不收口（prompt 照发，turn 回流自愈），不拒发', async () => {
+    const h = makeHarness({ commandQueue: [new Error('transport dead')] })
+    const result = await h.dispatcher.sendMessage('s1', '/schedule list')
+
+    expect(result).toEqual({ blocked: false })
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect((h.session as unknown as { occupancy: { turn: string } }).occupancy.turn).toBe('dispatching')
   })
 
   it('未命中拒发不广播 send.rejected / message.error（回执机制是唯一反馈面，防 defer 队列误重投）', async () => {
