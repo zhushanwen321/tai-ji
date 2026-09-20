@@ -187,7 +187,7 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
     })
     await flushAsync()
 
-    // view=null → 横幅 isActive 门不渲染、错误不可见（C-U1 场景）；错误落本面板空态就近呈现
+    // view=null → PlanModeBar isActive 门不渲染、错误不可见（C-U1 场景）；错误落本面板空态就近呈现
     const err = wrapper.find('[data-testid="plan-docs-load-error"]')
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('rpc timeout')

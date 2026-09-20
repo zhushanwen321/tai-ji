@@ -229,7 +229,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     expect(host.plan.view.value?.reviewState).toBeUndefined()
   })
 
-  it('isActive=false 帧驱动横幅消失语义（stage → null）', async () => {
+  it('isActive=false 帧驱动 plan 态消失语义（stage → null）', async () => {
     const host = mountHost('A')
     await settle()
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
