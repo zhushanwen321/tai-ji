@@ -1,11 +1,13 @@
 // check-rfl-parity.mjs 行为测试（机器锁步守卫的自测：守卫本身退化为恒绿 = 无守卫）。
 //
 // 方法：脚本以子进程形态跑（node scripts/check-rfl-parity.mjs），用 PI_RFL / ZCODE_RFL
-// 环境变量指向 tmp 夹具，验证四种判定：
+// 环境变量指向 tmp 夹具，验证判定：
 //   ① 一致 → exit 0
 //   ② zcode 侧调度算法退化（去重丢失，pi 已修的 claimed 不变量在 zcode 缺失）→ exit 1
 //   ③ zcode 侧池常量漂移（关键词漏改）→ exit 1
 //   ④ pi 侧文件缺失 → exit 1（结构前提缺失不得静默通过）
+//   ⑤ zcode 缺失 → SKIP + exit 0；但**已累积的失败不得被 SKIP 吞掉**
+//      （fail-closed：无 zcode 的环境/CI 里仍需拦下 pi 侧退化）
 // 夹具直接从仓库内真实文件派生（读取后改写），因此断言的是「守卫能否抓住真实形态的漂移」，
 // 而不是「守卫能否处理人造玩具输入」。
 
@@ -174,6 +176,25 @@ describe("check-rfl-parity.mjs（双实现锁步守卫行为）", () => {
     const res = await runGuard({ PI_RFL: piCopy, ZCODE_RFL: join(dir, "absent-dwf.ts"), RFL_REQUIRE_ZCODE: "" });
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("SKIP");
+  });
+
+  // 【回归】当初的 SKIP 分支不看已累积的 failures，直接 exit 0 —— 在无 zcode 的环境
+  // （CI）里把 pi 侧去重不变量退化、结构标记缺失等失败全部吞掉，守卫退化为恒绿。
+  // 这条锁住 fail-closed 语义：SKIP 只豁免「双实现对账」，不豁免已发生的失败。
+  it("zcode 缺失 + pi 侧去重不变量退化 → 必须 exit 1（SKIP 不得吞掉已累积失败）", async () => {
+    const brokenPi = join(dir, "pi-degenerate.cjs");
+    writeFileSync(brokenPi, readFileSync(PI_UTILS, "utf8").replace(
+      "return { order: [...batch1, ...batch2, ...tail],",
+      "return { order: [...batch1, ...batch2, ...tail, ...batch1],",
+    ));
+    const res = await runGuard({ PI_RFL: brokenPi, ZCODE_RFL: join(dir, "absent-dwf.ts"), RFL_REQUIRE_ZCODE: "" });
+    expect(res.code, "无 zcode 环境必须仍拦截 pi 侧退化；实际输出：\n" + res.stdout + res.stderr).toBe(1);
+    expect(res.stderr + res.stdout).toContain("去重不变量退化");
+  });
+
+  it("zcode 缺失 + 正常 pi → 仍 SKIP exit 0（不因上面那条误报）", async () => {
+    const res = await runGuard({ PI_RFL: piCopy, ZCODE_RFL: join(dir, "absent-dwf.ts"), RFL_REQUIRE_ZCODE: "" });
+    expect(res.code).toBe(0);
   });
 
   it("zcode 侧文件缺失且强制 → exit 1（本地强制口径）", async () => {

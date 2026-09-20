@@ -52,9 +52,48 @@ function skip(reason) {
 if (!fs.existsSync(PI_RFL)) {
   fail("pi 侧镜像文件缺失：" + PI_RFL);
 }
+// pi 侧去重不变量：在 zcode 缺席判定**之前**检查——CI 等无 zcode 环境（守卫会 SKIP 双
+// 实现对账）仍需守住 pi 侧这一条，否则本步骤在 CI 退化为空跑（2026-09-20 接线时修正）。
+// 不变量：planReviewerOrder 的 order 恒为本次输入的排列（无重复、无遗漏）。
+// 语料就地定义（不引用下方的模块级常量）——此处位于 createRequire 之前，不能依赖
+// piApi 声明，否则撞 TDZ；用局部 createRequire + 直接 require 就够。
+if (failures.length === 0) {
+  const { createRequire: mkReq } = await import("node:module");
+  const invApi = mkReq(import.meta.url)(PI_RFL);
+  const invCorpus = [
+    { label: "全 8 维", keys: ["extension-api", "arch-boundary", "data-governance", "business-logic", "monorepo-impact", "electron-build", "type-safety", "test-coverage"] },
+    // 去重不变量靶子：单个 name 同时命中多个池关键词（曾致同一 reviewer 双跑）
+    { label: "多池关键词同串", keys: ["extension-api-arch-boundary"] },
+    { label: "单维", keys: ["extension-api"] },
+    { label: "空输入", keys: [] },
+  ];
+  for (const c of invCorpus) {
+    const items = c.keys.map((k) => ({ name: "review-" + k }));
+    let res;
+    try {
+      res = invApi.planReviewerOrder(items, null);
+    } catch (e) {
+      fail(`pi 侧 planReviewerOrder 抛错（不变量语料「${c.label}」）：${e.message}`);
+      continue;
+    }
+    const got = res.order.map((d) => d.name.replace(/^review-/, "").replace(/\.md$/, ""));
+    const expected = [...c.keys];
+    if ([...got].sort().join("|") !== [...expected].sort().join("|")) {
+      const dup = got.length !== new Set(got).size;
+      fail(`pi 侧 order 不是输入的排列（不变量语料「${c.label}」）${dup ? "——存在重复项（去重不变量退化）" : ""}\n`
+        + `      期望 ${expected.length} 项：${[...expected].sort().join("|")}\n`
+        + `      实际 ${got.length} 项：${[...got].sort().join("|")}`);
+    }
+  }
+}
 if (!fs.existsSync(ZCODE_RFL)) {
   if (REQUIRE_ZCODE) fail("zcode 侧镜像文件缺失（RFL_REQUIRE_ZCODE=1）：" + ZCODE_RFL);
-  else skip("zcode 原生版不在本机（" + ZCODE_RFL + "）——非 zcode 环境无需双实现对账");
+  // fail-closed：SKIP 只对「双实现对账」豁免。此前已累积的失败（pi 侧去重不变量 /
+  // 结构标记 / pi 侧模块加载）必须先报告——否则无 zcode 的环境（CI）里这些检查全部
+  // 被 skip 的 exit 0 吞掉，守卫退化为永远绿（2026-09-20 实测发现并修复）。
+  else if (failures.length === 0) {
+    skip("zcode 原生版不在本机（" + ZCODE_RFL + "）——pi 侧去重不变量已验证，双实现对账跳过");
+  }
 }
 if (failures.length > 0) report();
 
@@ -284,14 +323,15 @@ for (const c of CORPUS) {
     continue;
   }
 
-  // 不变量：order 恒为输入的排列（无重复、无遗漏）——两侧独立断言
-  for (const [side, res] of [["pi", piRes], ["zcode", zRes]]) {
-    const sorted = [...res.order].sort().join("|");
+  // 不变量：order 恒为输入的排列（无重复、无遗漏）——zcode 侧独立断言；
+  // pi 侧同一条已在 zcode 缺席判定之前先跑（无 zcode 环境也必须守），此处不重复。
+  {
+    const sorted = [...zRes.order].sort().join("|");
     const expect = [...expectedKeys].sort().join("|");
     if (sorted !== expect) {
-      const dup = res.order.length !== new Set(res.order).size;
-      fail(`${side} 侧 order 不是输入的排列（语料「${c.label}」）${dup ? "——存在重复项（去重不变量退化）" : ""}\n`
-        + `      期望 ${expectedKeys.length} 项：${expect}\n      实际 ${res.order.length} 项：${sorted}`);
+      const dup = zRes.order.length !== new Set(zRes.order).size;
+      fail(`zcode 侧 order 不是输入的排列（语料「${c.label}」）${dup ? "——存在重复项（去重不变量退化）" : ""}\n`
+        + `      期望 ${expectedKeys.length} 项：${expect}\n      实际 ${zRes.order.length} 项：${sorted}`);
     }
   }
 

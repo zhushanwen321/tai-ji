@@ -547,7 +547,8 @@ fi
 #     2026-09-20 比对证实该约定不可靠（调度去重修复只在 pi 侧、早退点台账守门
 #     只在 pi 侧），本守卫用同一语料跑两侧 planReviewerOrder 对账调度结果 + 池/
 #     阈值常量，并把「order 恒为输入排列」去重不变量双侧断言。zcode 文件不存在
-#     时 SKIP（非 zcode 环境无第二实现可比）。复用 SKIP_CODE_RULES_CHECK 开关。
+#     时跳过双实现对账，但 pi 侧去重不变量仍照跑（该失败不被 SKIP 吞掉）。
+#     复用 SKIP_CODE_RULES_CHECK 开关。
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix-loop|^scripts/check-rfl-parity\.mjs$"; then
