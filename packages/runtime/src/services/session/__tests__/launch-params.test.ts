@@ -113,9 +113,24 @@ describe('resolveExtensionPaths', () => {
     await expect(resolveExtensionPaths(ext)).rejects.toBe(err)
   })
 
-  it('其余意外错误降级空列表（旧版兼容：不阻断会话）', async () => {
-    const ext = { getExtensionPaths: vi.fn(async () => { throw new Error('flaky') }) } as unknown as IExtensionService
+  it('「无可装扩展」（resolve 出空列表）保持 no-op 返回 []（合法两态之一）', async () => {
+    const ext = { getExtensionPaths: vi.fn(async () => []) } as unknown as IExtensionService
     await expect(resolveExtensionPaths(ext)).resolves.toEqual([])
+  })
+
+  it('[RT-4#5] 装载器异常 rethrow（与 BUILTIN_MISSING 同族 fail-fast），消息带恢复指引', async () => {
+    const cause = new Error('EACCES: discovery dir unreadable')
+    const ext = { getExtensionPaths: vi.fn(async () => { throw cause }) } as unknown as IExtensionService
+    const rejection = await resolveExtensionPaths(ext).then(
+      () => { throw new Error('should reject') },
+      (e: unknown) => e,
+    )
+    // 不可与「无可装扩展」（上例 no-op []）同形：错误冒泡 + 原始异常保留 + 恢复指引内嵌
+    expect(rejection).toBeInstanceOf(Error)
+    const msg = (rejection as Error).message
+    expect(msg).toContain('extension loader failed')
+    expect(msg).toContain('recovery:')
+    expect((rejection as Error).cause).toBe(cause)
   })
 })
 

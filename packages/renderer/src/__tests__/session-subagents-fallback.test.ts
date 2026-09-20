@@ -68,7 +68,8 @@ vi.mock('@/lib/ipc', () => ({
 // mock sessionApi（subagent/workflow store 内部 import；getSubagents 首拉返回空，
 // getWorkflows 用 vi.fn() 由用例内 mockResolvedValueOnce 控制返回值）
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
-  getSubagents: vi.fn(async () => []),
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagents: vi.fn(async () => ({ subagents: [], oversize: false })),
   getSubagentHistory: vi.fn(async () => []),
   getWorkflows: vi.fn(),
   getAgentCallHistory: vi.fn(),
@@ -203,7 +204,8 @@ describe('session.subagents routeInbound 兜底', () => {
     expect(workflowStore.hasRunningWorkflow('sess-A')).toBe(true)
 
     // getWorkflows 返回 done（终态）
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValueOnce([makeWorkflow({ runId: 'w1', status: 'done' })])
+    // RT-4#8 起 API 返结构化形状 { workflows, oversize }（store 按此解构）
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValueOnce({ workflows: [makeWorkflow({ runId: 'w1', status: 'done' })], oversize: false })
 
     // 注入 A 的 workflowUpdate 终态信号
     const msg: ServerMessage = {

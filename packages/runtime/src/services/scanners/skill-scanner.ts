@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { ScannedSkillInfo } from '@taiji/shared'
 import { expandHome, inferSourceType, forEachScannedDir } from './scanner-base.js'
 import { extractFrontmatter } from '../../utils/frontmatter.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 const DESCRIPTION_MAX_LENGTH = 200
 const TRIGGER_MIN_LENGTH = 2
@@ -77,10 +78,28 @@ function formatFileSize(bytes: number): string {
  */
 export function loadSkillFromDir(rawDirPath: string): ScannedSkillInfo | null {
   const dirPath = expandHome(rawDirPath)
-  if (!existsSync(dirPath)) return null
+  // RT-8#11：目录本身不存在（已登记的 skill 路径被删/路径失效）此前静默 null——该 skill
+  // 从列表无声消失。warn-once 按路径去重（loadSkills 每次扫描都会重读）。
+  if (!existsSync(dirPath)) {
+    warnOnce(
+      `skill-dir:${dirPath}`,
+      `[skill-scanner] skill 目录不存在，该 skill 被跳过（不会出现在列表）: ${dirPath}。` +
+        '恢复动作：在设置中修正该 skill 路径，或重新安装该 skill',
+    )
+    return null
+  }
 
   const skillMdPath = join(dirPath, 'SKILL.md')
-  if (!existsSync(skillMdPath)) return null
+  // RT-8#11：同族——SKILL.md 缺失（半损坏/被删）此前静默 null。与下方 catch 共用
+  // `skill-md:` key：同一文件至多出声一次（无论走哪条降级路径）。
+  if (!existsSync(skillMdPath)) {
+    warnOnce(
+      `skill-md:${skillMdPath}`,
+      `[skill-scanner] SKILL.md 不存在，该 skill 被跳过（不会出现在列表）: ${skillMdPath}。` +
+        '恢复动作：补齐该文件，或在设置中移除这个已失效的 skill 路径',
+    )
+    return null
+  }
 
   try {
     const content = readFileSync(skillMdPath, 'utf-8')
@@ -102,7 +121,15 @@ export function loadSkillFromDir(rawDirPath: string): ScannedSkillInfo | null {
       tools: [],
       alreadyImported: false,
     }
-  } catch {
+  } catch (e: unknown) {
+    // RT-8#11：解析失败静默 null = 该 skill 从列表无声消失（半损坏 SKILL.md 零观测）。
+    // warn-once 按文件路径去重——loadSkills 每次扫描都会重读，逐次 warn 会刷屏。
+    warnOnce(
+      `skill-md:${skillMdPath}`,
+      `[skill-scanner] SKILL.md 读取/解析失败，该 skill 被跳过（不会出现在列表）: ${skillMdPath}。` +
+        '恢复动作：修复该文件的 YAML frontmatter 后重扫',
+      e,
+    )
     return null
   }
 }

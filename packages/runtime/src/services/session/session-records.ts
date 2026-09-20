@@ -122,11 +122,37 @@ export interface PublishedWorkflowRunState {
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
 type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
+/**
+ * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志。
+ * oversize=true（session 文件 >32MB 预检阈值）时 records 恒空数组——「列表不可用」
+ * 与「无记录」显式分形，transport reply 透传 oversize 供 renderer 面板显示降级提示。
+ */
+export interface OversizeAwareResult<T> {
+  records: T[]
+  oversize: boolean
+}
+
 /** workflow 增量信号形状（session.workflowUpdate payload.update；status/reason/步骤数任一变化一条）。 */
 interface WorkflowUpdateSignal {
   runId: string
   status: string
   reason?: string
+}
+
+/**
+ * [RT-4#9] 未知 customType warn 去重表（模块级：类型字符串有限集合，无清理必要）。
+ * 三道 customType 运行时字符串门（event-adapter 白名单 / 本模块早退门 / entry 扫描器）
+ * 扩容不同步时，本 warn 是失效链断链的唯一显形信号。
+ */
+const warnedCustomTypes = new Set<string>()
+
+function warnUnknownCustomTypeOnce(customType: string): void {
+  if (warnedCustomTypes.has(customType)) return
+  warnedCustomTypes.add(customType)
+  console.warn(
+    `[session-records] invalidateRecordEntries: unknown customType '${customType}' dropped —` +
+    ` if this is a new record family, extend the gate set here + event-adapter whitelist + entry scanners together`,
+  )
 }
 
 /**
@@ -260,11 +286,14 @@ export class SessionRecords {
   invalidateRecordEntries(sessionId: string, customType: string): void {
     // 第二道 customType 早退门（D1③）：与 event-adapter 白名单（第一道门）同批扩容——
     // 白名单放行而此处早退则 live 链静默 no-op（三道运行时字符串门之一，编译器不保护）。
+    // [RT-4#9] 未知 customType 落 warn 显形（按类型字符串去重防刷屏）：三道门扩容漏改时
+    // 该类型 record 的失效链静默断链，无日志不可排查——此前纯早退 = 永久静默丢弃。
     if (
       customType !== SUBAGENT_RECORD_CUSTOM_TYPE &&
       customType !== WORKFLOW_RECORD_CUSTOM_TYPE &&
       customType !== PLAN_STATE_CUSTOM_TYPE
     ) {
+      warnUnknownCustomTypeOnce(customType)
       return
     }
     const cache = this.recordEntriesCaches.get(sessionId)
@@ -551,18 +580,37 @@ export class SessionRecords {
     }
   }
 
-  async getSubagents(sessionId: string): Promise<SubagentRecord[]> {
+  /**
+   * [RT-4#8] oversize 降级每会话首见 warn：面板 retry / 切回反复拉取不刷屏（骨架
+   * extractWithPrecheck 的 warn 逐调用一条，此处收敛为每会话 + 每类别一次）。类别并集
+   * key（`sid:kind`）字符串量级 = 会话数 × 2，进程生命周期内无清理必要（非派生缓存）。
+   */
+  private readonly oversizeWarned = new Set<string>()
+
+  private warnOversizeOnce(sessionId: string, kind: 'subagents' | 'workflows'): void {
+    const key = `${sessionId}:${kind}`
+    if (this.oversizeWarned.has(key)) return
+    this.oversizeWarned.add(key)
+    console.warn(
+      `[session-service] ${kind} list unavailable: session file exceeds read precheck threshold (sid=${sessionId}) —` +
+      ` list RPC returns empty with oversize flag; panel shows degraded hint`,
+    )
+  }
+
+  async getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>> {
     // 找主 session 文件路径（scanSessions 扫 <agentDir>/sessions/，含 cwd-encoded 子目录）。
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（刚落盘 session 的
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return []
+    if (!target) return { records: [], oversize: false }
     // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空（extraction 骨架内
-    // console.warn 留痕）。oversize 正交标志在此解构时被丢弃、全仓无消费方——
-    // 「会话过大」侧栏降级提示的协议/UI 接线未实施（impl-plan 偏差登记），
-    // oversize 超限时 subagent 面板表现为空列表。
-    const { records } = extractSubagentsFromSessionFile(target.filePath)
-    return records
+    // console.warn 留痕）。[RT-4#8] oversize 标志随返回值透传（reply payload → renderer
+    // 面板「会话过大，列表不可用」降级提示），不再丢弃——此前「列表不可用」与「无
+    // subagent」同形（面板表现空列表）。每会话首见时补一条 warn（面板 retry 反复拉取
+    // 不刷屏；骨架 warn 逐调用一条，此处去重收敛）。
+    const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
+    if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
+    return { records, oversize }
   }
 
   /**
@@ -573,7 +621,9 @@ export class SessionRecords {
    */
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> {
     // 先从主 session 提取 subagent 列表，找到 sessionFile 路径
-    const subagents = await this.getSubagents(sessionId)
+    // （[RT-4#8] getSubagents 返回结构化结果，此处解构 records；oversize 时 records 恒空
+    // → find 落空 → 空历史返回，行为与改动前一致）
+    const { records: subagents } = await this.getSubagents(sessionId)
     const record = subagents.find((s) => s.subagentId === subagentId)
     if (!record) return { messages: [], truncated: false }
 
@@ -690,14 +740,15 @@ export class SessionRecords {
    * 获取 session 派生的 workflow 列表（从主 session JSONL 的 workflow-state-link 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
    */
-  async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> {
+  async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return []
-    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + 骨架 warn；
-    // oversize 标志同样在此丢弃、无消费方）。
-    const { records } = extractWorkflowsFromSessionFile(target.filePath)
-    return records
+    if (!target) return { records: [], oversize: false }
+    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + 骨架 warn）。
+    // [RT-4#8] oversize 标志透传（同 getSubagents，不再丢弃）。
+    const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
+    if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
+    return { records, oversize }
   }
 
   /**
@@ -742,7 +793,8 @@ export class SessionRecords {
   async getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string> {
     // 同 getAgentCallHistory：agent call 是 subagent，trace.sessionId 是 subagentId（sa-xxx），
     // 复用 record 查找（subagentId → record.sessionFile），不扫目录按 header.id 匹配。
-    const subagents = await this.getSubagents(sessionId)
+    // （[RT-4#8] getSubagents 结构化返回，此处解构 records；oversize 时 find 落空 → 空串）
+    const { records: subagents } = await this.getSubagents(sessionId)
     const record = subagents.find((s) => s.subagentId === agentCallSessionId)
     if (!record?.sessionFile) return ''
     if (!isStrictlyUnder(getPiAgentDir(), record.sessionFile)) return ''

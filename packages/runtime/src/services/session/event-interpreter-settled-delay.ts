@@ -18,6 +18,15 @@
 export const ABORT_STALL_CONVERGENCE_WINDOW_MS = 3_000
 
 /**
+ * [RT-4#2③] 收敛环 pendingSettled 卡死代数上限：窗满且被掐 turn 的 agent_settled 未到时
+ * 重挂窗累计代数，超上限强制清环（保留 userStopped 标记）。上限依据 = 被掐 turn 的 settled
+ * 正常 P95 ≤ 2s（P-2 探针门）≈ 单窗内；10 代（≈30s）远超正常收尾窗口仍未到 = pi 收尾挂死
+ * 或事件丢失，继续等无意义——该场景真兜底由 settling 期 ping 探测（ADR-0047）→
+ * onSilentAbort → forceQuit 全链承担。export 供测试跟随（SR6 SSOT 惯例）。
+ */
+export const ABORT_STALL_MAX_PENDING_GENERATIONS = 10
+
+/**
  * [V7 验收基建，实施期裁决保留（设计 §4.2 开关保留策略已登记偏离默认理由）] dev-only 事件流延迟注入开关。
  *
  * 环境变量 TAIJI_AGENT_DEV_SETTLING_DELAY_MS 设置为正数（毫秒）时生效：agent_settled 事件

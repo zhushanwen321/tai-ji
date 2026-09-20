@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, statSync, openSync, readSync, closeSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
-import { parseJsonl, readTailEntries } from '../../utils/jsonl.js'
+import { parseJsonlWarnOnMalformed, readTailEntries } from '../../utils/jsonl.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）。infra → services 依赖倒挂豁免（同
 // session-lifecycle.ts 的 R3 ports 倒挂惯例）：D5③ 消费方在本文件（infra/pi），共享
@@ -547,7 +547,9 @@ function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unkno
   }
   // ≤阈值：原全量读 fallback 保留（INVAR-tail-2: 尾读未命中，目标可能在文件头部）
   try {
-    scanEntriesReversed(parseJsonl(readFileSync(filePath, 'utf-8')), visit)
+    // RT-8#13：畸形行 dropCount 累计 + warn-once（附文件路径）——半截 JSONL 的字段
+    // 提取（session 名/outcome 等）静默降级不可观测
+    scanEntriesReversed(parseJsonlWarnOnMalformed(readFileSync(filePath, 'utf-8'), filePath), visit)
   } catch {
     return
   }

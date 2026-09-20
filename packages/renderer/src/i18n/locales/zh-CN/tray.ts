@@ -33,6 +33,9 @@ export default {
     loading: '加载中…',
     loadFailed: '加载失败（{error}）',
     retry: '重试',
+    /** oversize 降级态（subagent / workflow：session 文件过大列表不可用，RT-4#8） */
+    oversizeTitle: '会话过大，列表暂不可用',
+    oversizeHint: '该会话文件超出读取上限，子代理/工作流列表无法展示；会话本身可正常使用，记录仍可在对话流中查看',
     /** 当前桶为空时的提示（{name} = 四件标题） */
     empty: {
       running: '没有进行中的{name}',

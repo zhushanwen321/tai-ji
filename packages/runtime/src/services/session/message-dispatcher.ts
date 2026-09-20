@@ -1047,8 +1047,18 @@ export class MessageDispatcher {
       throw new Error(errMsg)
     }
 
-    // 事件驱动（M4）：不广播 session.compacting、不置 active.isCompacting——均由 interpreter 从
-    // compaction_start 事件驱动。dispatcher 只做 RPC 触发 + 失败复位。
+    // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi
+    // compaction_start 事件回流后由 interpreter 置位，事件往返窗内第二个 compact 的预检
+    // 仍读 false → 两连发双双通过 → 双 compaction 事件流）。事件回流时 interpreter 的
+    // 'compacting-start' 经原语全等去重幂等（不双写）。RPC 为同步等待压缩完成（pi 0.84.4
+    // agent-session.js:1468 compact() await 全程），finally 的 'compacting-end' 复位与
+    // compaction_end 事件三路对称复位语义保持。
+    if (active) {
+      applySessionOccupancyTransition(active, this.messageBus, 'compacting-start')
+    }
+
+    // 事件驱动（M4）：不广播 session.compacting——由 interpreter 从 compaction_start 事件驱动
+    // （置位例外见上方 [RT-4#10]：预检互斥窗口要求 dispatcher 侧先行）。dispatcher 做 RPC 触发 + 失败复位。
     try {
       await client.compact(customInstructions)
       console.log('[message-dispatcher] compact: complete, sessionId=' + sessionId + ', elapsed=' + (Date.now() - startTime) + 'ms')
@@ -1062,8 +1072,8 @@ export class MessageDispatcher {
       throw e
     } finally {
       // 兜底复位：interpreter 的 compaction_end 是复位主力（三路对称），此处防 transport 级失败时
-      // interpreter 未触发 compaction_end 导致 session 卡死。置位归 interpreter（compaction_start），
-      // dispatcher 不置 true，故此处只写 false（对 false 无害，幂等）。
+      // interpreter 未触发 compaction_end 导致 session 卡死。[RT-4#10] 置位移到预检后，本复位
+      // 从「对 false 幂等无害」变为真实复位路径（成功路径与 compaction_end 事件幂等去重）。
       if (active) {
         // occupancy #6 兜底（D2 迁移，'compacting-end' 行）：transport 级失败时 compaction_end
         //（#6）不到达，compacting 维度在此镜像复位（派生 isCompacting=false；对未置位场景幂等无害）。

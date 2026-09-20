@@ -40,6 +40,7 @@ import type { IProcessManager, IPiEngine, PiCommandInfo } from '../ports/pi-engi
 import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
+import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
@@ -1077,7 +1078,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 
   /** subagent 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getSubagents(sessionId: string): Promise<SubagentRecord[]> { return this.records.getSubagents(sessionId) }
+  async getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>> { return this.records.getSubagents(sessionId) }
   /** subagent 对话流历史（record.sessionFile 直读 + 非 pi 引擎降级链，实现迁 session-records.ts）。 */
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> { return this.records.getSubagentHistory(sessionId, subagentId) }
   /** [U7] 引擎配置视图（engines.json + config.json，实现迁 session-records.ts）。 */
@@ -1085,7 +1086,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> { return this.records.getWorkflows(sessionId) }
+  async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> { return this.records.getWorkflows(sessionId) }
 
   /**
    * plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，u1-rpc 补接线）：对称 getSubagents
@@ -1190,9 +1191,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 数据源）。旧 session.inputTokens 缓存直写（applyContextUpdate / fetchContext 回写，
    * 及已删除的外部 setter）已删，sessions Map 内字段退化为恒 0 的派生基线（types 必填
    * 字段，读点全部走本方法）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 把「无快照/陈旧」折成数值 0，与「上下文真空」
+   * 不可区分）。null 语义对齐 context.update 无值占位帧（publishContextNoValuePlaceholder，
+   * 字段缺失 = 无值而非 0 基线）；0 仅表真值。
    */
-  getInputTokens(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? 0
+  getInputTokens(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? null
   }
 
   /**
@@ -1237,9 +1242,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 旧实现按「缓存 inputTokens + resolver 窗口」本地重算（computeUsage），W10 起快照
    * 已持有 pi 侧按当前模型窗口算出的权威 percent，读点直接派生；dirty 期间返回上次
    * 快照（核心不变量 2 的 UI 语义）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 折叠「无值」与「真 0%」；语义对齐 getInputTokens）。
    */
-  getUsagePercent(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? 0
+  getUsagePercent(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? null
   }
 
   async destroyAll(): Promise<void> {

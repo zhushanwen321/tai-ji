@@ -52,6 +52,16 @@ export interface WorktreeCreateResult {
    * 不进 worktree.created WS 契约（§5.3-3：返回值补齐 repo 根，非破坏性变更）。
    */
   repoRoot: string
+  /**
+   * 实际用作创建基线的 ref（RT-8#8）：请求的 baseBranch 校验失败时 runtime 会 fallback
+   * 到本地 main——usedBaseRef 让调用方（transport → worktree.created envelope）可见实际
+   * 用了哪个 ref，静默偷换基线不再不可观测。
+   *
+   * 可选（对齐 WS 契约 `usedBaseRef?: string`）：WorktreeService 两个模式恒返回；标可选是
+   * 为 mock/旧实现形状留类型诚实的通道——transport 的条件展开（`...(usedBaseRef ? …)`）
+   * 需要能表达「无此字段」，否则旧形状实现被迫造假值。
+   */
+  usedBaseRef?: string
 }
 
 /** 分支列表结果。 */

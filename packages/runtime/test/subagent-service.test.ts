@@ -166,12 +166,13 @@ describe('SessionService.getSubagents', () => {
     )
 
     const subagents = await svc.getSubagents('main-sess-id')
-    expect(subagents).toHaveLength(1)
-    expect(subagents[0].subagentId).toBe('bg-test-1-111')
-    expect(subagents[0].agent).toBe('reviewer')
-    expect(subagents[0].slug).toBe('review-code')
-    expect(subagents[0].status).toBe('running')
-    expect(subagents[0].sessionFile).toBe(subagentFile)
+    expect(subagents.records).toHaveLength(1)
+    expect(subagents.oversize).toBe(false)
+    expect(subagents.records[0].subagentId).toBe('bg-test-1-111')
+    expect(subagents.records[0].agent).toBe('reviewer')
+    expect(subagents.records[0].slug).toBe('review-code')
+    expect(subagents.records[0].status).toBe('running')
+    expect(subagents.records[0].sessionFile).toBe(subagentFile)
   })
 
   it('returns empty array for unknown session', async () => {
@@ -182,7 +183,7 @@ describe('SessionService.getSubagents', () => {
     )
 
     const subagents = await svc.getSubagents('nonexistent-id')
-    expect(subagents).toHaveLength(0)
+    expect(subagents.records).toHaveLength(0)
   })
 })
 

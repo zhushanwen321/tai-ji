@@ -110,8 +110,8 @@ describe('U6: workflow store loadError（W2 / M1）', () => {
     const sid = 's1'
     const record1 = makeWorkflow('w1')
 
-    // 先成功加载一条数据
-    getWorkflowsMock.mockResolvedValueOnce([record1])
+    // 先成功加载一条数据（形状对齐 [RT-4#8] 结构化返回 { workflows, oversize }）
+    getWorkflowsMock.mockResolvedValueOnce({ workflows: [record1], oversize: false })
     await store.loadWorkflows(sid)
     expect(store.getRecordsBySession(sid)).toHaveLength(1)
 

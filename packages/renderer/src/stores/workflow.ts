@@ -51,9 +51,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /** 加载态（M1：loadWorkflows 在途时 true；per-session Map 分区，ADR-0049 派——
    * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
   const loadingBySession = ref(new Map<string, boolean>())
-  /** 加载错误（M1：失败时设该 sid 分区错误消息；缺省 null = 无错误；records 保留旧数据不清空。
+  /** 加载错误（M1：失败时设该 sid 分区错误消息；缺省 null = 无错误；records 保留旧数据不清空.
    * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
   const loadErrorBySession = ref(new Map<string, string | null>())
+  /**
+   * [RT-4#8] oversize 降级标志（per-session 分区，语义同 subagent store）：session 文件
+   * >32MB 时列表不可用（records 恒空），面板显示降级提示；置位时保留旧分区数据。
+   */
+  const oversizeBySession = ref(new Map<string, boolean>())
 
   /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
   function isLoadingOf(sessionId: string): boolean {
@@ -63,6 +68,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /** per-session 加载错误读取 */
   function loadErrorOf(sessionId: string): string | null {
     return loadErrorBySession.value.get(sessionId) ?? null
+  }
+
+  /** [RT-4#8] per-session oversize 降级读取（面板降级提示判据） */
+  function oversizeOf(sessionId: string): boolean {
+    return oversizeBySession.value.get(sessionId) ?? false
   }
 
   /**
@@ -129,6 +139,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     partition.clear(sessionId)
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
+    oversizeBySession.value.delete(sessionId)
   }
 
   // ── getters ──
@@ -153,10 +164,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadingBySession.value.set(sessionId, true)
     loadErrorBySession.value.delete(sessionId)
     try {
-      const records = await sessionApi.getWorkflows(sessionId)
+      // [RT-4#8] 结构化返回：oversize=true（文件 >32MB 列表不可用）置降级标志 + 保留旧
+      // 分区数据（不经 strike guard——不可用 ≠ 删空）；面板显示降级提示而非空列表。
+      const { workflows: records, oversize } = await sessionApi.getWorkflows(sessionId)
+      if (oversize) {
+        strikeGuard.reset(sessionId)
+        oversizeBySession.value.set(sessionId, true)
+        return
+      }
+      oversizeBySession.value.delete(sessionId)
       // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3，与 subagent.ts 同款）：
-      // strike 语义单源在 createEmptyResultStrikeGuard JSDoc（S4 A1），此处只判定 +
-      // 覆盖前清零。推送路径是权威数据，不经此守卫。
+      // strike 语义单源在 createEmptyResultStrikeGuard JSDoc（lib/partitioned-session-records），
+      // 此处只判定 + 覆盖前清零。推送路径是权威数据，不经此守卫。
       if (
         strikeGuard.shouldKeepExisting(sessionId, records.length, getRecordsBySession(sessionId).length)
       ) {
@@ -213,9 +232,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
+    // RD-3#12：先按当前分区键重置 strike 簿记（strike 仅在对非空分区连续空结果时残留，
+    // recordsBySession 键即残留 strike 键全集），再整表替换 + 清 loading/error/oversize 三
+    // facet（+ oversize），与 clearSession 全清对齐——否则残留 loading=true → spinner 永转 /
+    // 残留 error → 错误态卡死 / 残留 strike → 重新预置后首次空结果误判删空。顺带清在途 running
+    // 重试 timer（否则 500ms 后对已清空的 store 触发 loadWorkflows）。
+    for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
     partition.recordsBySession.value = new Map()
     // W3-2：清非响应式的 mainSessionAgentCalls（registerAgentCall 写入，deleteSession/clearWorkflows 调本函数清）
     mainSessionAgentCalls.clear()
+    loadingBySession.value = new Map()
+    loadErrorBySession.value = new Map()
+    oversizeBySession.value = new Map()
+    workflowReloadTimers.forEach((t) => clearTimeout(t))
+    workflowReloadTimers.clear()
   }
 
   /**
@@ -255,6 +285,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     recordsBySession: partition.recordsBySession,
     isLoadingOf,
     loadErrorOf,
+    oversizeOf,
     // getters
     workflowCount,
     // per-session 分区读写（ADR-0049 Map 分区派）

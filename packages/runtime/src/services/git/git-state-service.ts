@@ -78,8 +78,13 @@ export interface GitStateServiceOptions {
   notRepoTtlMs?: number
 }
 
-/** getStatus 成功聚合结果才缓存；null 哨兵 = 降级路径（非仓库/不可用/超时），调用方转 notRepoResult。 */
-type GetStatusOutcome = GitStatusResult | null
+/**
+ * getStatus 内部执行结果：result=null 且无 unavailableReason = 真非仓库（fallbackResult）；
+ * result=null + unavailableReason = git 探测失败（unavailableResult 携带真因）。
+ * 两种降级都不进 TTL 缓存（「缓存不因失败写入错误值」既有纪律——瞬态不可用被缓存
+ * 会把 isRepo:false 的错误值钉进窗口，git 恢复后最长 TTL 内仍误报）。
+ */
+type GetStatusOutcome = { result: GitStatusResult | null; unavailableReason?: string }
 
 export class GitStateService implements IGitStateService, IGitRepoObserver {
   private readonly executor: IGitExecutor
@@ -180,12 +185,14 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
 
     const entry: InflightGetStatus = { dead: false, promise: Promise.resolve(fallbackResult(sessionId)) }
     entry.promise = this.runGetStatus(sessionId, cwd).then((outcome) => {
-      // 降级路径（null 哨兵）不缓存；invalidate 判死的执行不回写（防旧值复活竞态）
-      if (outcome !== null && !entry.dead) {
+      // 降级路径（非仓库 / 不可用）不缓存；invalidate 判死的执行不回写（防旧值复活竞态）
+      if (outcome.result !== null && !entry.dead) {
         this.evictStatusCacheIfFull()
-        this.statusCache.set(key, { result: outcome, ts: Date.now() })
+        this.statusCache.set(key, { result: outcome.result, ts: Date.now() })
       }
-      return outcome ?? fallbackResult(sessionId)
+      return outcome.result ?? (outcome.unavailableReason !== undefined
+        ? unavailableResult(sessionId, outcome.unavailableReason)
+        : fallbackResult(sessionId))
     })
     this.inflightGetStatus.set(key, entry)
     // 完成/失败都离开去重表（后续调用走缓存或重新执行）；仅删除自己，防止误删 invalidate 后新发起的条目
@@ -213,7 +220,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
       )
       if (statusRes.exitCode !== 0) {
         this.maybeMarkNotRepo(cwd, statusRes)
-        return null
+        return { result: null }
       }
       const { branch, files } = parseGitStatus(statusRes.stdout)
       const { stagedCount, unstagedCount, hasConflict } = deriveCounts(files)
@@ -223,9 +230,14 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
         this.execGit(cwd, 'branch', ['--list', '--format=%(refname:short)'], STATUS_TIMEOUT_MS),
       ])
       // numstat/branch 是同一聚合查询的组成部分（非独立数据源）：任一 rejected（git 不可用/超时）
-      // 即整体降级——与 git-service.getStatus 现状「串行 await 任一异常 → catch 降级」行为等价
+      // 即整体降级——与 git-service.getStatus 现状「串行 await 任一异常 → catch 降级」行为等价。
+      // RT-8#5：降级携带 gitUnavailableReason（真因是 git 探测失败而非非仓库，前端据此
+      // 显示「Git 不可用」而非「非 git 仓库」）；result=null = 降级不进 TTL 缓存（既有纪律）
       if (numstatSettled.status === 'rejected' || branchSettled.status === 'rejected') {
-        return null
+        const reason = numstatSettled.status === 'rejected'
+          ? numstatSettled.reason
+          : (branchSettled as PromiseRejectedResult).reason
+        return { result: null, unavailableReason: executorErrorReason(reason) }
       }
       const numstatRes = numstatSettled.value
       const branchRes = branchSettled.value
@@ -264,29 +276,36 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
       }
 
       return {
-        sessionId,
-        isRepo: true,
-        branch,
-        branches,
-        stagedCount,
-        unstagedCount,
-        stats,
-        hasConflict,
-        files,
+        result: {
+          sessionId,
+          isRepo: true,
+          branch,
+          branches,
+          stagedCount,
+          unstagedCount,
+          stats,
+          hasConflict,
+          files,
+        },
       }
     } catch (e) {
       if (e instanceof GitExecutorError) {
-        // git 不可用 / 超时（executor 已知降级路径）→ 静默 null（与 git-service.getStatus catch 降级一致）
-        return null
+        // RT-8#5：git 不可用 / 超时（executor 已知降级路径）不再与「真非仓库」塌缩为同一
+        // fallbackResult——降级携带 gitUnavailableReason，前端显示「Git 不可用（原因）」
+        // 而非「非 git 仓库」（未装 git 的用户曾被引导按错方向自救）。瞬态失败不写负缓存
+        // （既有守卫：仅 exit 128 + 官方英文文案才负缓存为非仓库）也不进 TTL 缓存
+        // （「缓存不因失败写入错误值」纪律；git 恢复后下一次调用即拿到正确状态）。
+        return { result: null, unavailableReason: `${e.code}: ${e.message}` }
       }
       // W17 审查 Fix-1：未知异常（TypeError 等编程错误）不得无声吞成 isRepo:false——降级语义保持
       // （不 rethrow：rethrow 会改变 handler 行为链，降级 + 出声是「失败要出声」的最小正确实现），
-      // 但必须留痕供事后诊断（runtime 内 console 经 initLogger monkey-patch 落盘，非仅终端）
+      // 但必须留痕供事后诊断（runtime 内 console 经 initLogger monkey-patch 落盘，非仅终端）。
+      // RT-8#5：同样携带 reason——未知异常的 isRepo:false 也不是「真非仓库」。
       console.warn(
         `[git-state] getStatus 未知异常，降级 isRepo:false: sessionId=${sessionId} cwd=${cwd}`,
         e,
       )
-      return null
+      return { result: null, unavailableReason: e instanceof Error ? e.message : String(e) }
     }
   }
 
@@ -383,6 +402,21 @@ function fallbackResult(sessionId: string): GitStatusResult {
     hasConflict: false,
     files: [],
   }
+}
+
+/**
+ * git 探测失败（不可用/超时/未知异常）的降级结果（RT-8#5）：形状同 fallbackResult，但携带
+ * gitUnavailableReason——与「真非仓库」区分（仅 exit 128 + 官方英文文案才判非仓库，
+ * 见 maybeMarkNotRepo），前端据此显示「Git 不可用」而非「非 git 仓库」。
+ */
+function unavailableResult(sessionId: string, reason: string): GitStatusResult {
+  return { ...fallbackResult(sessionId), gitUnavailableReason: reason }
+}
+
+/** executor 异常 → 原因描述（GitExecutorError 带 code，其余取 message）。 */
+function executorErrorReason(e: unknown): string {
+  if (e instanceof GitExecutorError) return `${e.code}: ${e.message}`
+  return e instanceof Error ? e.message : String(e)
 }
 
 function statusCacheKey(sessionId: string, cwd: string): string {

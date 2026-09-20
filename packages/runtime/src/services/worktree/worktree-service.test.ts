@@ -177,8 +177,9 @@ describe('WorktreeService.create() bare-workspace', () => {
     const service = new WorktreeService(deps)
 
     const result = await service.create({ branch: 'feat/new-feature', workspaceHint: '/project' })
-    // repoRoot（缓存治理 1-6）：bare-workspace 模式 = workspace 根，供 transport 层失效键使用
-    expect(result).toEqual({ cwd: '/project/feat-new-feature', branch: 'feat/new-feature', repoRoot: '/project' })
+    // repoRoot（缓存治理 1-6）：bare-workspace 模式 = workspace 根，供 transport 层失效键使用；
+    // usedBaseRef（RT-8#8）：请求的 baseBranch 校验通过，原样返回
+    expect(result).toEqual({ cwd: '/project/feat-new-feature', branch: 'feat/new-feature', repoRoot: '/project', usedBaseRef: 'origin/main' })
     expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
       '/project/.bare',
       'worktree',
@@ -613,6 +614,37 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
     warnSpy.mockRestore()
   })
 
+  it('回滚不完整 → 原始 SETUP_FAILED 的 detail 带 cleanupHint + rollbackIncomplete（裁决 #10：清理指引随错误进 envelope，不停在 console）', async () => {
+    const setupScriptPath = '/project/.bare/custom-hooks/setup-worktree.sh'
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', setupScriptPath]),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree remove', { stdout: '', stderr: 'fatal: not a working tree', exitCode: 1 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'install failed' }))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const service = new WorktreeService(deps)
+
+    // 现场保留（不自动清理到干净态时）：清理指引必须随错误 detail 到达 transport 层
+    // （worktree-message-handler 把 detail 透到 error envelope 的 details 字段 → 前端可见）
+    const err = await service.create({ branch: 'feat/test', workspaceHint: '/project' }).then(
+      () => { throw new Error('expected reject') },
+      (e: unknown) => e as { code?: string; detail?: Record<string, unknown> },
+    )
+    expect(err.code).toBe('SETUP_FAILED')
+    expect(err.detail?.rollbackIncomplete).toBe(true)
+    expect(String(err.detail?.cleanupHint)).toContain('git -C /project/.bare worktree remove --force /project/feat-test')
+    // 原始失败因（exitCode/stderr）不被回滚信息覆盖
+    expect(err.detail?.exitCode).toBe(1)
+    expect(String(err.detail?.stderr)).toContain('install failed')
+    vi.restoreAllMocks()
+  })
+
   it('回滚后重试不被 WORKTREE_EXISTS 挡死', async () => {
     const bare = '/project/.bare'
     const setupScriptPath = `${bare}/custom-hooks/setup-worktree.sh`
@@ -674,7 +706,7 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
 
     // 重试：不再 WORKTREE_EXISTS，setup 第二次成功 → 创建成功
     const result = await service.create({ branch: 'feat/test', workspaceHint: '/project' })
-    expect(result).toEqual({ cwd: wtPath, branch: 'feat/test', repoRoot: '/project' })
+    expect(result).toEqual({ cwd: wtPath, branch: 'feat/test', repoRoot: '/project', usedBaseRef: 'origin/main' })
   })
 })
 

@@ -17,6 +17,7 @@ import semver from 'semver'
 import { extract as tarExtract } from 'tar'
 import { toErrorMessage } from '../../utils/errors.js'
 import { isUnderOrEqual } from '../../utils/path-utils.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 // ── 常量 ──────────────────────────────────────────────────────
 
@@ -644,7 +645,19 @@ export async function installDependencies(
 ): Promise<{ failed: DepsInstallFailure[] }> {
   const failed: DepsInstallFailure[] = []
   const pkgJsonPath = join(projectDir, 'package.json')
-  if (!existsSync(pkgJsonPath)) return { failed }
+  // RT-8#11：无 package.json 本身是合法 no-op（审查 D 对 RT-8#4 的口径：不是失败类，
+  // 不进 failed[]），但不该零留痕——clone 出的扩展目录没有 package.json 也可能是
+  // 「clone 不完整/空目录」，此前静默 return 让这种形态与「确实无依赖」不可区分。
+  // warn-once 按路径去重（同一扩展重装/升级不刷屏），恢复动作写进文案。
+  // 不加 degraded 标记：该形态非失败（见上），标记会让调用方把无依赖扩展误判为降级。
+  if (!existsSync(pkgJsonPath)) {
+    warnOnce(
+      `npm-install-deps:${pkgJsonPath}`,
+      `[npm-installer] ${projectDir} 无 package.json，按「无依赖」跳过依赖安装（未安装任何依赖）: ${pkgJsonPath}。` +
+        '恢复动作：若该扩展实际需要依赖，检查 clone 产物完整性（空目录/不完整 clone 会是此形态）或手动补齐 package.json 后重装',
+    )
+    return { failed }
+  }
 
   let pkg: { dependencies?: Record<string, string> }
   try {

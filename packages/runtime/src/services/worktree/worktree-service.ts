@@ -211,6 +211,14 @@ export class WorktreeService implements IWorktreeService {
     const local = localResult.exitCode === 0
       ? localResult.stdout.split('\n').map(b => b.trim()).filter(Boolean)
       : []
+    if (localResult.exitCode !== 0) {
+      // RT-8#8（核实后确认的窄可达面）：exec 抛 GitExecutorError（git 缺失/超时）走异常路径
+      // 传播，此分支只剩「git 命令本身失败」（健康仓库几乎不可达）——降级返 [] 保持，但留痕
+      //（空列表被当「无分支」不可观测）。恢复动作：直接跑 git branch 复核。
+      console.warn(
+        `[worktree-service] git branch --list 失败（本地分支按空列表返回）: exit=${localResult.exitCode} ${localResult.stderr.trim()}`,
+      )
+    }
 
     // 获取远程分支
     const remoteResult = await this.deps.gitExecutor.exec(repoDir, 'branch', [
@@ -221,6 +229,11 @@ export class WorktreeService implements IWorktreeService {
     const remote = remoteResult.exitCode === 0
       ? remoteResult.stdout.split('\n').map(b => b.trim()).filter(b => Boolean(b) && !b.endsWith('/HEAD'))
       : []
+    if (remoteResult.exitCode !== 0) {
+      console.warn(
+        `[worktree-service] git branch --remotes 失败（远程分支按空列表返回）: exit=${remoteResult.exitCode} ${remoteResult.stderr.trim()}`,
+      )
+    }
 
     return { local, remote, defaultBranch }
   }
@@ -287,7 +300,7 @@ export class WorktreeService implements IWorktreeService {
   }
 
   /** 目录名冲突检查：报 WORKTREE_EXISTS；半成品残留（缺 .git 入口）附手动清理指引（RT-8#6）。 */
-  private assertWorktreePathFree(newWtPath: string, dirName: string): void {
+  private assertWorktreePathFree(newWtPath: string, dirName: string, branch: string): void {
     if (!this.deps.fs.existsSync(newWtPath)) return
     // git worktree add 完成后 worktree 目录内必有 .git 入口（file，指向主仓元数据）；
     // 目录存在但入口缺失 = 非完整 worktree，疑似上次创建失败的半成品残留。此前一律报
@@ -298,9 +311,9 @@ export class WorktreeService implements IWorktreeService {
       'WORKTREE_EXISTS',
       halfFinished
         ? `目录已存在但不是完整 worktree（缺少 .git 入口，疑似上次创建失败的残留）: ${newWtPath}。` +
-          `请手动清理后重试：删除该目录，或执行 git worktree remove --force ${newWtPath}`
+          `请手动清理后重试：git worktree remove --force ${newWtPath} && git branch -D ${branch}`
         : `worktree 目录已存在: ${newWtPath}`,
-      { cwd: newWtPath, dirName, halfFinished },
+      { cwd: newWtPath, dirName, branch, halfFinished },
     )
   }
 
@@ -311,10 +324,15 @@ export class WorktreeService implements IWorktreeService {
    *    容忍子模块——该 worktree 是本次 create 全新产物，无用户数据可失）
    * ② git branch -D（worktree add -b 创建的新分支；能走到 setup 说明分支必为本流量新建，
    *    不删则重试 add -b 报「分支已存在」换一种方式挡死）
-   * 回滚逐步 try/catch：单步失败仅 warn（含手动清理命令），不得掩盖/替换原始 setup 错误
-   * （调用方 rollback 后原样 rethrow 原始错误）。
+   * 回滚逐步 try/catch：单步失败不掩盖/替换原始 setup 错误（调用方 rollback 后原样
+   * rethrow 原始错误）。
+   *
+   * @returns 回滚不完整的残留描述（含手动清理命令）；null = 回滚干净（世界已恢复到
+   *   create 调用前状态，无半成品）。调用方将残留写进原始错误的 detail.cleanupHint——
+   *   「保留现场 + 错误带清理指引」（审计裁决）：rollback 失败的现场留给用户排查/清理，
+   *   指引必须随错误进 error envelope（仅 console.warn 会丢）。
    */
-  private async rollbackCreatedWorktree(repoDir: string, wtPath: string, branch: string): Promise<void> {
+  private async rollbackCreatedWorktree(repoDir: string, wtPath: string, branch: string): Promise<string | null> {
     const failures: string[] = []
     try {
       const rm = await this.deps.gitExecutor.exec(repoDir, 'worktree', ['remove', '--force', '--force', wtPath])
@@ -328,13 +346,37 @@ export class WorktreeService implements IWorktreeService {
     } catch (e: unknown) {
       failures.push(`branch -D 异常: ${e instanceof Error ? e.message : String(e)}`)
     }
-    if (failures.length > 0) {
-      console.warn(
-        `[worktree-service] setup 失败后回滚不完整（半成品残留：worktree ${wtPath} / 分支 ${branch}）。` +
-          `手动清理：git -C ${repoDir} worktree remove --force ${wtPath} && git -C ${repoDir} branch -D ${branch}。` +
-          `未完成步骤: ${failures.join('; ')}`,
-      )
+    if (failures.length === 0) return null
+    const cleanupHint =
+      `git -C ${repoDir} worktree remove --force ${wtPath} && git -C ${repoDir} branch -D ${branch}`
+    console.warn(
+      `[worktree-service] setup 失败后回滚不完整（半成品残留：worktree ${wtPath} / 分支 ${branch}）。` +
+        `手动清理：${cleanupHint}。未完成步骤: ${failures.join('; ')}`,
+    )
+    return `${cleanupHint}（未完成步骤: ${failures.join('; ')}）`
+  }
+
+  /**
+   * setup 失败善后（RT-8#6 裁决补）：回滚 + 把回滚残留写进原始错误的 detail——
+   * - rollback 干净：世界已复原，原始错误原样 rethrow；
+   * - rollback 不完整：错误 detail 追加 `rollbackIncomplete: true` + `cleanupHint`（具体
+   *   手动清理命令），envelope 进前端 error 态可见。detail 为扁平对象追加（保留原
+   *   SETUP_FAILED 的 exitCode/stderr），code/message 不动（不掩盖原始失败因）。
+   */
+  private async rollbackAndRethrow(
+    repoDir: string,
+    wtPath: string,
+    branch: string,
+    setupError: unknown,
+  ): Promise<never> {
+    const residue = await this.rollbackCreatedWorktree(repoDir, wtPath, branch)
+    if (residue !== null) {
+      const err = setupError as { detail?: Record<string, unknown> }
+      if (err && typeof err === 'object') {
+        err.detail = { ...(typeof err.detail === 'object' && err.detail !== null ? err.detail : {}), rollbackIncomplete: true, cleanupHint: residue }
+      }
     }
+    throw setupError
   }
 
   /** bare-workspace 模式下创建 worktree。 */
@@ -350,14 +392,14 @@ export class WorktreeService implements IWorktreeService {
     // 目录名转换 + 冲突检查
     const dirName = branch.replace(/\//g, '-')
     const newWtPath = join(wsRoot, dirName)
-    this.assertWorktreePathFree(newWtPath, dirName)
+    this.assertWorktreePathFree(newWtPath, dirName, branch)
 
-    // base 解析
-    const baseRef = await this.resolveBaseRef(barePath, baseBranch, workspaceHint)
+    // base 解析（usedBaseRef 供返回——请求 ref 校验失败静默 fallback 的显形，RT-8#8）
+    const usedBaseRef = await this.resolveBaseRef(barePath, baseBranch, workspaceHint)
 
     // git worktree add
     const addResult = await this.deps.gitExecutor.exec(barePath, 'worktree', [
-      'add', '-b', branch, newWtPath, baseRef,
+      'add', '-b', branch, newWtPath, usedBaseRef,
     ])
     if (addResult.exitCode !== 0) {
       throw worktreeError(
@@ -369,16 +411,15 @@ export class WorktreeService implements IWorktreeService {
 
     // setup 脚本（可选，不存在跳过）—— 从 configService.getBareSetupScript() 读取脚本相对路径
     // 失败回滚（RT-8#6）：worktree add 已产生副作用（目录/元数据/新分支），setup 失败必须
-    // 逆序撤销，否则半成品残留且重试被 WORKTREE_EXISTS 挡死
+    // 逆序撤销，否则半成品残留且重试被 WORKTREE_EXISTS 挡死；回滚残留写进错误 detail
     const bareSetupScriptRel = this.deps.configService.getBareSetupScript()
     try {
       await this.runSetupScript(barePath, newWtPath, bareSetupScriptRel)
     } catch (setupError) {
-      await this.rollbackCreatedWorktree(barePath, newWtPath, branch)
-      throw setupError
+      await this.rollbackAndRethrow(barePath, newWtPath, branch, setupError)
     }
 
-    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
+    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot, usedBaseRef }
   }
 
   /** plain-repo 模式下创建 worktree。 */
@@ -400,7 +441,7 @@ export class WorktreeService implements IWorktreeService {
     if (locationMode === 'repo-dir') {
       // repo-dir 模式：在仓库目录下创建（传统 git worktree 行为）
       newWtPath = join(repoRoot, dirName)
-      this.assertWorktreePathFree(newWtPath, dirName)
+      this.assertWorktreePathFree(newWtPath, dirName, branch)
     } else {
       // dedicated-dir 模式（默认）：在专用目录 ~/worktrees/<repoName>/<branchDir> 下创建
       const worktreeRootDir = this.deps.configService.getWorktreeRootDir()
@@ -412,12 +453,12 @@ export class WorktreeService implements IWorktreeService {
       )
     }
 
-    // base 解析
-    const baseRef = await this.resolveBaseRef(repoRoot, baseBranch, workspaceHint)
+    // base 解析（usedBaseRef 供返回——请求 ref 校验失败静默 fallback 的显形，RT-8#8）
+    const usedBaseRef = await this.resolveBaseRef(repoRoot, baseBranch, workspaceHint)
 
     // git worktree add
     const addResult = await this.deps.gitExecutor.exec(repoRoot, 'worktree', [
-      'add', '-b', branch, newWtPath, baseRef,
+      'add', '-b', branch, newWtPath, usedBaseRef,
     ])
     if (addResult.exitCode !== 0) {
       throw worktreeError(
@@ -429,16 +470,15 @@ export class WorktreeService implements IWorktreeService {
 
     // setup 脚本（可选，不存在跳过）—— plain-repo 模式从 configService.getSetupScript() 读取脚本相对路径
     // 相对 repoRoot 解析（plain-repo 没有 barePath，仓库结构与传统 git 一致）
-    // 失败回滚（RT-8#6）：与 bare-workspace 模式同一 rollbackCreatedWorktree 兜底
+    // 失败回滚（RT-8#6）：与 bare-workspace 模式同一 rollbackAndRethrow 兜底
     const setupScriptRel = this.deps.configService.getSetupScript()
     try {
       await this.runSetupScript(repoRoot, newWtPath, setupScriptRel)
     } catch (setupError) {
-      await this.rollbackCreatedWorktree(repoRoot, newWtPath, branch)
-      throw setupError
+      await this.rollbackAndRethrow(repoRoot, newWtPath, branch, setupError)
     }
 
-    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
+    return { cwd: newWtPath, branch, repoRoot: detection.repoRoot, usedBaseRef }
   }
 
   /** 运行 setup 脚本（通用逻辑）。setupScriptRel 来自 configService（相对 cwd 解析）；不存在则跳过。 */
@@ -470,6 +510,10 @@ export class WorktreeService implements IWorktreeService {
    * - 'current'：用 gitInfoReader 读当前分支，读不到 fallback main
    * - 'origin/main'：用 gitExecutor rev-parse 验证远端 ref 存在，不存在 fallback 本地 main
    * - 其他字符串：作为具体分支名，用 gitExecutor rev-parse 验证存在性
+   *
+   * RT-8#8：fallback 不再静默——baseBranch 校验失败改用 LOCAL_MAIN 是「创建基线被偷换」，
+   * 新 worktree 会落在用户没选的基线上。warn 留痕 + 调用方把返回的 usedBaseRef 带回
+   * worktree.created envelope（前端可见实际用了哪个 ref）。
    */
   private async resolveBaseRef(
     repoDir: string,
@@ -478,11 +522,22 @@ export class WorktreeService implements IWorktreeService {
   ): Promise<string> {
     if (baseBranch === 'current') {
       const info = this.deps.gitInfoReader.readGitInfo(workspaceHint ?? process.cwd())
-      return info?.branch ?? LOCAL_MAIN
+      if (info?.branch) return info.branch
+      console.warn(
+        `[worktree-service] baseBranch='current' 读不到当前分支（gitInfoReader 返回空），fallback 用 ${LOCAL_MAIN}` +
+          `——新 worktree 将基于 ${LOCAL_MAIN} 而非当前分支。恢复动作：检查仓库 HEAD 状态后重试`,
+      )
+      return LOCAL_MAIN
     }
     // 验证 ref 存在
     const result = await this.deps.gitExecutor.exec(repoDir, 'rev-parse', ['--verify', baseBranch])
-    return result.exitCode === 0 ? baseBranch : LOCAL_MAIN
+    if (result.exitCode === 0) return baseBranch
+    console.warn(
+      `[worktree-service] base 分支 ${baseBranch} 不存在或校验失败（rev-parse exit=${result.exitCode}: ` +
+        `${result.stderr.trim()}），fallback 用 ${LOCAL_MAIN}——新 worktree 将基于 ${LOCAL_MAIN}。` +
+        `恢复动作：git fetch 后重试，或显式指定存在的 baseBranch`,
+    )
+    return LOCAL_MAIN
   }
 
   /**

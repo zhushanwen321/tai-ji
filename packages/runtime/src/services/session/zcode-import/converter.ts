@@ -86,14 +86,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function finiteMs(v: unknown, fallback: number): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
-}
-
 function asFinite(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
-
 // ── T6 entry id 链：8-hex 递增计数器（'00000001' 起），parentId 顺序链（首条 null）──────
 // 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义——id 在 pi 侧仅作 opaque map
 // key / leaf 指针 / 相等比较（pi 0.84.4 dist/core/session-manager.js:681-682 与 :758-759，
@@ -129,24 +124,46 @@ function newSegment(): AssistantSegment {
   return { content: [], toolResults: [], startMs: undefined }
 }
 
-/** step-finish 的 tokens/cost → pi Usage（字段映射表见 §3.4 T3：同名直通/total→totalTokens/…）。 */
-function usageFromStepFinish(partData: Record<string, unknown>): Record<string, unknown> | undefined {
+/**
+ * step-finish 的 tokens/cost → pi Usage（字段映射表见 §3.4 T3：同名直通/total→totalTokens/…）。
+ *
+ * RT-5#1 缺省语义：可解分量才写键——「无数据」写成测量值 0 会永久污染落盘用量/费用
+ * 统计（usage-stats 扫描聚合即读本产物；gen-stats 同款「禁 ?? 0」纪律：0 只允许作为
+ * 真实测量值出现）。全部分量不可解 → 整条 usage 不写 + degradations 显形计数。消费面
+ * 已核实对缺键安全：usage-stats 的 `!message?.usage` 存在性守卫、apply-entry-convert
+ * 的 isLooseRecord 均按「无数据」跳过。cost 是 number（zcode 形态）→ usage.cost.total
+ * （pi Usage.cost 是对象形态，直塞 number 产出非法类型）；cost 分量 zcode 不采集，缺省
+ * 不写 0。
+ */
+function usageFromStepFinish(
+  partData: Record<string, unknown>,
+  msgId: string,
+  degradations: string[],
+): Record<string, unknown> | undefined {
   const tokens = partData.tokens
   if (!isRecord(tokens)) return undefined
   const cache = isRecord(tokens.cache) ? tokens.cache : {}
-  // cost 是 number（zcode 形态）→ usage.cost.total，其余 cost 分量补 0（pi Usage.cost 是
-  // 对象形态，直塞 number 产出非法类型）
-  const costTotal = asFinite(partData.cost) ?? 0
+  const input = asFinite(tokens.input)
+  const output = asFinite(tokens.output)
+  const cacheRead = asFinite(cache.read)
+  const cacheWrite = asFinite(cache.write)
   const reasoning = asFinite(tokens.reasoning)
-  return {
-    input: asFinite(tokens.input) ?? 0,
-    output: asFinite(tokens.output) ?? 0,
-    cacheRead: asFinite(cache.read) ?? 0,
-    cacheWrite: asFinite(cache.write) ?? 0,
+  const totalTokens = asFinite(tokens.total)
+  const costTotal = asFinite(partData.cost)
+  const usage: Record<string, unknown> = {
+    ...(input !== undefined && { input }),
+    ...(output !== undefined && { output }),
+    ...(cacheRead !== undefined && { cacheRead }),
+    ...(cacheWrite !== undefined && { cacheWrite }),
     ...(reasoning !== undefined && { reasoning }),
-    totalTokens: asFinite(tokens.total) ?? 0,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
+    ...(totalTokens !== undefined && { totalTokens }),
+    ...(costTotal !== undefined && { cost: { total: costTotal } }),
   }
+  if (Object.keys(usage).length === 0) {
+    degradations.push(`step-finish tokens/cost 分量全部不可解，整条 usage 不写：message=${msgId}`)
+    return undefined
+  }
+  return usage
 }
 
 /**
@@ -218,22 +235,30 @@ export function buildZcodeSessionFile(
   lines.push(JSON.stringify({ type: 'session', version: 3, ...header }))
   emitEntry('session_info', header.timestamp, typeof title === 'string' && title.length > 0 ? { name: title } : {})
 
-  // 消息级时间兜底：message.data.time.created 缺失时回落 session 创建时刻（确定性，无 Date.now）
-  const fallbackMs = finiteMs(Date.parse(header.timestamp), 0)
+  // 消息级时间兜底：message.data.time.created 缺失时回落 session 创建时刻（确定性，无
+  // Date.now）。RT-5#8：header.timestamp 不可解（生产链路由 prepareImport 的
+  // Number.isFinite 守卫恒合法，此处防御直接构造坏 header 的输入）不以 0 兜底——0 会
+  // 产出 1970 假时间戳污染排序与按日统计；降级登记一次，各时间戳退 header 原串/缺省。
+  const headerMs = Date.parse(header.timestamp)
+  const fallbackMs = Number.isFinite(headerMs) ? headerMs : undefined
+  if (fallbackMs === undefined) {
+    degradations.push(`header.timestamp 不可解（${header.timestamp}），时间戳退原串/缺省：不伪造 1970`)
+  }
 
   for (const msg of messages) {
     const data = msg.data
     const role = data.role
     const time = isRecord(data.time) ? data.time : {}
-    const createdMs = finiteMs(time.created, fallbackMs)
-    const createdIso = new Date(createdMs).toISOString()
+    const createdMs = asFinite(time.created) ?? fallbackMs
+    // entry 时间戳不可解时退 header 原串（保真 > 伪造）；message.timestamp（ms）缺省键
+    const createdIso = createdMs !== undefined ? new Date(createdMs).toISOString() : header.timestamp
 
     if (role === 'user') {
       convertUserMessage(msg, createdMs, createdIso, emitEntry, degradations)
       continue
     }
     if (role === 'assistant') {
-      convertAssistantMessage(msg, data, createdMs, emitEntry, degradations)
+      convertAssistantMessage(msg, data, createdMs, createdIso, emitEntry, degradations)
       continue
     }
     // 前向兼容：zcode 未来新增 role 不炸导入（§3.4 未知 type 同款语义）
@@ -246,7 +271,7 @@ export function buildZcodeSessionFile(
 /** T2：user message → 一条 pi user entry（text part 逐条保留；file part 丢弃计降级）。 */
 function convertUserMessage(
   msg: ZcodeMessageInput,
-  createdMs: number,
+  createdMs: number | undefined,
   createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: string[],
@@ -263,11 +288,11 @@ function convertUserMessage(
       degradations.push(`user 消息 file part 丢弃（zcode-artifact 引用无法搬运，D6）：message=${msg.id}`)
       continue
     }
-    handleNonTextPart(part, msg, createdMs, emitEntry, degradations)
+    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations)
   }
-  // T2 时间双轨：entry.timestamp = ISO(ms)、message.timestamp = ms
+  // T2 时间双轨：entry.timestamp = ISO(ms)、message.timestamp = ms；ms 不可解时缺省键（RT-5#8）
   emitEntry('message', createdIso, {
-    message: { role: 'user', content, timestamp: createdMs },
+    message: { role: 'user', content, ...(createdMs !== undefined && { timestamp: createdMs }) },
   })
 }
 
@@ -278,7 +303,8 @@ function convertUserMessage(
 function convertAssistantMessage(
   msg: ZcodeMessageInput,
   data: Record<string, unknown>,
-  createdMs: number,
+  createdMs: number | undefined,
+  createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: string[],
 ): void {
@@ -291,11 +317,13 @@ function convertAssistantMessage(
     if (segment.content.length === 0) return
     // 段时间戳 = 段内首个携带 time.start 的 part ?? message.time.created（§3.4 T3 顶级补充）
     const tsMs = segment.startMs ?? createdMs
-    emitEntry('message', new Date(tsMs).toISOString(), {
+    // ms 全链不可解（段无 time 锚 + 消息时间不可解）退消息级 ISO 兜底（header 原串保真）
+    const tsIso = tsMs !== undefined ? new Date(tsMs).toISOString() : createdIso
+    emitEntry('message', tsIso, {
       message: {
         role: 'assistant',
         content: segment.content,
-        timestamp: tsMs,
+        ...(tsMs !== undefined && { timestamp: tsMs }),
         ...(providerId !== undefined && { provider: providerId }),
         ...(modelId !== undefined && { model: modelId }),
         ...(usage !== undefined && { usage }),
@@ -305,7 +333,7 @@ function convertAssistantMessage(
     for (const toolResult of segment.toolResults) {
       // timestamp 统一在闭口时注入：段内仅有 tool part 时 startMs 尚未落定（time 锚只在
       // text/reasoning part 上，C1 探针），避免 toolResult 与 assistant entry 时间戳分叉
-      emitEntry('message', new Date(tsMs).toISOString(), { message: { ...toolResult, timestamp: tsMs } })
+      emitEntry('message', tsIso, { message: { ...toolResult, ...(tsMs !== undefined && { timestamp: tsMs }) } })
     }
     segment = newSegment()
   }
@@ -318,7 +346,7 @@ function convertAssistantMessage(
       continue
     }
     if (type === 'step-finish') {
-      closeSegment(part.reason, usageFromStepFinish(part))
+      closeSegment(part.reason, usageFromStepFinish(part, msg.id, degradations))
       continue
     }
     if (type === 'text') {
@@ -340,7 +368,7 @@ function convertAssistantMessage(
       convertToolPart(part, msg, segment, degradations)
       continue
     }
-    handleNonTextPart(part, msg, createdMs, emitEntry, degradations)
+    handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations)
   }
   // 消息结束边界：未收口且有内容则闭合（T3c 尾段 → stop 保底；无 step-finish 即无 usage）
   closeSegment(undefined, undefined)
@@ -402,7 +430,8 @@ function convertToolPart(
 function handleNonTextPart(
   part: Record<string, unknown>,
   msg: ZcodeMessageInput,
-  createdMs: number,
+  createdMs: number | undefined,
+  createdIso: string,
   emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
   degradations: string[],
 ): void {
@@ -411,7 +440,7 @@ function handleNonTextPart(
     // zcode compaction 无摘要文本：pi compaction 强依赖 summary（渲染为压缩系统消息），
     // 伪造摘要 = 污染上下文（D5）。custom 不进 LLM 上下文、GUI 跳过（F4），无损保留元信息
     const tsMs = partStartTime(part) ?? createdMs
-    emitEntry('custom', new Date(tsMs).toISOString(), {
+    emitEntry('custom', tsMs !== undefined ? new Date(tsMs).toISOString() : createdIso, {
       customType: 'zcode-import:compaction',
       data: part,
     })

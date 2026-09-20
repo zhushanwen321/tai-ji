@@ -8,7 +8,8 @@
  *   - 连续 3 次失败（180s）→ 判定真卡死 → onSilentAbort
  *   - 连续 2 次失败（120s）→ 广播 message.stream_warn 一次（提示性，不中断）
  *   - ping 中途成功 → 清零失败计数 + warned 标志
- *   - turn 间（agent_end 后）不探测
+ *   - [RT-4#2②] ping 生命期 = turn-start → agent_settled：settling 期（agent_end →
+ *     agent_settled，pi post-run 收尾）持续探测，agent_settled 之后（真正 turn 间）不探测
  *   - onSilentAbort 触发后 ping 循环立即停止
  *
  * [红灯说明] 本测试针对尚未实现的 ping 机制。当前 EventInterpreter 仍是旧的「事件静默 +
@@ -80,7 +81,8 @@ function textDelta(sessionId: string): PiTranslatedEvent {
   }
 }
 
-/** 构造一个 agent_end turn-end 事件（turn 正常结束，停止 ping 探测）。 */
+/** 构造一个 agent_end turn-end 事件（[RT-4#2②] turn-end 不再停止 ping——settling 期持续探测，
+ * 停止点移至 agent_settled）。 */
 function turnEnd(sessionId: string, stopReason = 'end_turn'): PiTranslatedEvent {
   return {
     kind: 'turn-end',
@@ -157,15 +159,25 @@ describe('EventInterpreter · watchdog ping 探测机制（ADR-0047）', () => {
     expect(onSilentAbort).toHaveBeenCalledWith(expect.objectContaining({ sessionId }))
   })
 
-  // ── AC-3：turn 间（agent_end 后）不发起 ping 探测 ──────────────────────────
-  it('AC-3: agent_end 后（turn 间）推进 180s → pingPi 不被调用（turn 间不探测）', async () => {
+  // ── AC-3：turn 间（agent_settled 后）不发起 ping 探测 ──────────────────────
+  // [RT-4#2②] ping 生命期改 turn-start → agent_settled：agent_end（turn-end）后 settling 期
+  // 持续探测（pi 在 agent_end 后 finally 前挂死时有 no-progress 检测）；真正 turn 间
+  // （agent_settled 之后）才不探测。旧实现此处 turn-end 即停 = settling 期零探测（已修）。
+  it('AC-3: agent_end 后 settling 期持续探测；agent_settled 后（turn 间）推进 180s → pingPi 不被调用', async () => {
     interpreter.interpret([turnStart()])
-    interpreter.interpret([turnEnd(sessionId)]) // turn 结束 → 停止 ping 探测
+    interpreter.interpret([turnEnd(sessionId)]) // agent_end：settling 期开始，ping 不停
 
-    // turn 间推进 180s，不应发起任何 ping
+    // settling 期推进 180s：ping 持续探测（[RT-4#2②] 修复点——旧实现此处已停）
     await vi.advanceTimersByTimeAsync(180_000)
+    expect(pingPi).toHaveBeenCalled()
 
-    expect(pingPi).not.toHaveBeenCalled()
+    // agent_settled：turn 收尾完成 → 停止 ping（真正的 turn 间）
+    interpreter.interpret([{ kind: 'agent-settled' }])
+    const pingCountAfterSettled = pingPi.mock.calls.length
+
+    // turn 间推进 180s，不应再发起任何 ping
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(pingPi.mock.calls.length).toBe(pingCountAfterSettled)
     expect(onSilentAbort).not.toHaveBeenCalled()
   })
 

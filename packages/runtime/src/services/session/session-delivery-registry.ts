@@ -20,6 +20,8 @@ import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { classifyPromptRejection } from './message-dispatcher.js'
+import { toErrorMessage } from '../../utils/errors.js'
 
 /** 组合根注入的装配材料（全部窄签名，测试可 mock） */
 export interface SessionDeliveryDeps {
@@ -76,9 +78,10 @@ export function createSessionDeliveryRegistry(
   const handles = new Map<string, DeliveryHandle>()
 
   /**
-   * port 层投递原语：ensureActive → inject → prompt → notice → D7 置位副作用。
-   * 置位晚于 prompt 受理（成功才显示 working，与 dispatcher「先置位后 prompt」的差异是
-   * 内核 gate 语义的要求：置位晚于 gate 判定不构成矛盾——gate 只在投递前判）。
+   * port 层投递原语：ensureActive → inject → 置位 → prompt → notice → D7 副作用。
+   * [RT-4#10] 置位先于 prompt（与 sendPrompt 主链 markSessionActive 一致；原「置位晚于
+   * prompt 受理」在 RPC 往返窗内呈 idle 且迟到写入把 generating 回退一格）；prompt 失败
+   * 按 classifyPromptRejection 分型收口终态（不卡 dispatching）。
    *
    * [A2 MF-C] skill 注入（D-A2-1）：client.prompt 之前。三个消费方（landing 首发直投
    * sendDirect / session_manager send 工具的 agent 构造 prompt / completion-backflow
@@ -101,7 +104,31 @@ export function createSessionDeliveryRegistry(
     // [A1 接线] session cwd 作 project 扫描基准（D7）——session 视图缺失时 undefined =
     // global-only 映射（宁缺毋错，不猜 cwd）。
     const injection = await injector.inject(client, content, deps.getSession(sessionId)?.cwd)
-    await client.prompt(injection.text, undefined, streamingBehavior)
+    // [RT-4#10] 置位前移至 prompt 之前（原在 prompt 之后）：RPC 往返窗内对预检/回收豁免
+    // 呈 idle（TOCTOU 靠 pi 队列兜底），且「prompt 已受理、turn-start 已回流（generating）
+    // 后置位把 turn 回退一格 dispatching」投影失真。与 sendPrompt 主链的 markSessionActive
+    // （prompt 之前写 'dispatching'）状态机一致。
+    const session = deps.getSession(sessionId)
+    if (session) {
+      applySessionOccupancyTransition(session, deps.getMessageBus(), 'dispatching')
+    }
+    try {
+      await client.prompt(injection.text, undefined, streamingBehavior)
+    } catch (e) {
+      // [RT-4#10] 前移置位的失败收口（与 sendPrompt 的 handlePromptFailure 同构）：turn 已写
+      // 'dispatching'，prompt 抛错必须写终态，否则 occupancy 永卡 dispatching。按
+      // classifyPromptRejection 分型——pi busy 类 'processing' 拒绝 = pi 有 runtime 不知情
+      // 的 turn 在跑（'reject-processing' 反转 generating）；其余真失败 = 'reject-other' idle。
+      if (session) {
+        const rejection = classifyPromptRejection(toErrorMessage(e))
+        applySessionOccupancyTransition(
+          session,
+          deps.getMessageBus(),
+          rejection === 'processing' ? 'reject-processing' : 'reject-other',
+        )
+      }
+      throw e
+    }
     // [A2 D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败
     // throw 不发（调用方错误通路覆盖）。
     publishSkillNotices(deps.getMessageBus(), sessionId, content, injection.notices)
@@ -109,9 +136,9 @@ export function createSessionDeliveryRegistry(
     // [session-dead-structural-fixes D2 挂点迁移（u3b）] 原直写 isGenerating=true 是「只写布尔
     // 不写 occupancy」的第三个漂移写点（设计 §2.2 问题一），改调 'dispatching' 行——原语原子
     // 完成 isGenerating=true 派生 + turn='dispatching' 合并 + state 帧广播，与 sendPrompt 的
-    // markSessionActive（#1）同构（prompt 已受理、message_start 未到；turn-start 事件随后把
-    // 投影推进到 'generating'）。lastActiveAt 非 occupancy 维度，保持直写。
-    const session = deps.getSession(sessionId)
+    // markSessionActive（#1）同构。[RT-4#10] 置位已前移至 prompt 之前，此处只剩 lastActiveAt
+    // 与 recordWorkspace 两个非 occupancy 维度副作用（occupancy 写入保留为幂等冗余，防御
+    // session 视图在 prompt 窗口内才出现的形态）。
     if (session) {
       session.lastActiveAt = Date.now()
       applySessionOccupancyTransition(session, deps.getMessageBus(), 'dispatching')

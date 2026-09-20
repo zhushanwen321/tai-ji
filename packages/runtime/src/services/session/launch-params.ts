@@ -17,7 +17,7 @@ import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS, PRESET_FALLBACK_ENV_KEYS } from
 import type { IExtensionService, IConfigService } from '../../interfaces.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { PresetService, PresetResolution } from '../preset-service.js'
-import { BUILTIN_EXTENSIONS_MISSING } from '../../utils/errors.js'
+import { BUILTIN_EXTENSIONS_MISSING, toErrorMessage } from '../../utils/errors.js'
 
 /**
  * thinkingLevel 合法值集合（S-RT-5；W2 值域 SSOT 派生，A-03 修复）。
@@ -64,19 +64,28 @@ export function resolveSkillPaths(configStore: IConfigStore, cwd: string): strin
 /**
  * 收集有效的 extension 路径（经 ExtensionService）。cwd 用于解析相对的 discovery extension 目录。
  *
- * 打包产物断链（builtin staged 目录缺失）不可降级：rethrow 贯通 resolver 的
- * fail-fast（electron-build R3-S1）——吞掉会让无 presetId 的 session 启动路径
- * pi 无 --extension 静默启动（system-prompt 注入 / msg-id 映射无声失效），
- * 与 preset 路径（resolveLaunchPresetOptions 全链无 catch）语义对齐，错误冒泡到
- * session handler 可见。其余意外错误维持降级（旧版兼容：空列表不阻断会话）。
+ * [RT-4#5] 两态显式分流：
+ * - 「无可装扩展」：getExtensionPaths 正常 resolve 出空列表（合法 no-op），照常返回 []。
+ * - 「装载器异常」：读 discovery 目录 / settings 解析等抛错——与 builtin staged 断链
+ *   （BUILTIN_EXTENSIONS_MISSING）同族 fail-fast rethrow。此前 `console.warn + return []`
+ *   使「装载器异常」与「无可装扩展」同形，pi 无 --extension 静默启动（system-prompt
+ *   注入 / msg-id 映射无声失效），降级仅存磁盘日志、用户不可见。extension 装载是
+ *   两通路等价（live ≡ reload）的前提，属核心链——错误冒泡到 session handler 可见。
  */
 export async function resolveExtensionPaths(extensionService: IExtensionService, cwd?: string): Promise<string[]> {
   try {
     return await extensionService.getExtensionPaths(cwd)
   } catch (e) {
+    // builtin staged 断链自带结构化 code，原样贯通（既有 fail-fast 语义与 handler 消费面不变）
     if (typeof e === 'object' && e !== null && (e as NodeJS.ErrnoException).code === BUILTIN_EXTENSIONS_MISSING) throw e
-    console.warn('[session-service] getExtensionPaths failed:', e)
-    return []
+    // 其余装载器异常：包一层带恢复指引后 rethrow（与 BUILTIN_MISSING 同族，消息内嵌
+    // 恢复动作——检查数据目录可读性 / 禁用可疑扩展后重试）
+    throw new Error(
+      `[session-service] extension loader failed (session cannot start without extensions): ${toErrorMessage(e)}` +
+      ' — recovery: check readability of the extension discovery directories under the data dir' +
+      ' and the settings.json extension entries, then reopen the session',
+      { cause: e },
+    )
   }
 }
 

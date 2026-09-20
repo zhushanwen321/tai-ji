@@ -17,6 +17,8 @@
 export interface TerminalSessionState {
   ptyAlive: boolean
   pendingWrites: string[]
+  /** 队列满 drop-oldest 的累计丢弃数（RT-8/RD-3#5：丢弃须显形，per-session 累计）。 */
+  droppedCount: number
 }
 
 /** 写副作用注入点：调用方决定如何把命令写入终端（renderer 侧 = terminalApi.write） */
@@ -35,8 +37,10 @@ export interface TerminalWriteQueue {
   enqueueWrite(sid: string, cmd: string): void
   /** 查询 PTY 存活态（TerminalView 工具栏 kill 按钮 disabled 判断用）。 */
   isPtyAlive(sid: string): boolean
+  /** 查询该 session 的累计丢弃命令数（drop-oldest 计数，RD-3#5）。 */
+  droppedCountOf(sid: string): number
   /** session 销毁时清理（session 销毁编排点调：SessionCleanupHooks.clearTerminalQueue → 壳层
-   *  useTerminalWriteQueueStore().removeSession，[G1 / 2026-09-14 内存审计 §3.4] 接线）。 */
+   *   useTerminalWriteQueueStore().removeSession，[G1 / 2026-09-14 内存审计 §3.4] 接线）。 */
   removeSession(sid: string): void
 }
 
@@ -49,7 +53,21 @@ export interface TerminalWriteQueue {
 /** 待写命令队列容量上限（内存边界，NFR Issue #11 同族：PTY 长期不活时命令只入队不消费，无上限会无限累积）。超限丢弃最旧命令（drop-oldest：保留最新命令，最新代表最新意图） */
 export const MAX_PENDING_WRITES = 100
 
-export function createTerminalWriteQueue(writeFn: TerminalWriteFn): TerminalWriteQueue {
+/** 队列满丢弃的回调注入（RT-8/RD-3#5）：调用方拿 per-session 累计丢弃数做用户提示（toast）。 */
+export type TerminalDropNotifier = (sid: string, totalDropped: number) => void
+
+export interface TerminalWriteQueueOptions {
+  /**
+   * drop-oldest 通知（可选）：每次丢弃时回调，参数为该 session 的累计丢弃数。
+   * core 零 UI 依赖——显形（toast）由 renderer 兼容层注入。
+   */
+  onDrop?: TerminalDropNotifier
+}
+
+export function createTerminalWriteQueue(
+  writeFn: TerminalWriteFn,
+  opts?: TerminalWriteQueueOptions,
+): TerminalWriteQueue {
   /**
    * per-session 状态表（工厂实例内共享，跨组件共享语义由调用方持有实例保证）。
    *
@@ -73,7 +91,7 @@ export function createTerminalWriteQueue(writeFn: TerminalWriteFn): TerminalWrit
   function getOrCreate(sid: string): TerminalSessionState {
     let s = sessions.get(sid)
     if (!s) {
-      s = { ptyAlive: false, pendingWrites: [] }
+      s = { ptyAlive: false, pendingWrites: [], droppedCount: 0 }
       sessions.set(sid, s)
     }
     return s
@@ -100,8 +118,11 @@ export function createTerminalWriteQueue(writeFn: TerminalWriteFn): TerminalWrit
       writeFn(sid, cmd)
     } else {
       if (s.pendingWrites.length >= MAX_PENDING_WRITES) {
-        // 队列满：丢弃最旧命令（drop-oldest，保留最新）
+        // 队列满：丢弃最旧命令（drop-oldest，保留最新）+ 计数显形（RD-3#5：静默 shift
+        // = 用户点「在终端运行」零反馈，命令丢了不知道）——onDrop 由调用方注入做 toast
         s.pendingWrites.shift()
+        s.droppedCount += 1
+        opts?.onDrop?.(sid, s.droppedCount)
       }
       s.pendingWrites.push(cmd)
     }
@@ -111,9 +132,13 @@ export function createTerminalWriteQueue(writeFn: TerminalWriteFn): TerminalWrit
     return sessions.get(sid)?.ptyAlive ?? false
   }
 
+  function droppedCountOf(sid: string): number {
+    return sessions.get(sid)?.droppedCount ?? 0
+  }
+
   function removeSession(sid: string): void {
     sessions.delete(sid)
   }
 
-  return { markAlive, markExited, enqueueWrite, isPtyAlive, removeSession }
+  return { markAlive, markExited, enqueueWrite, isPtyAlive, droppedCountOf, removeSession }
 }
