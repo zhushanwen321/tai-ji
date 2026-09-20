@@ -271,6 +271,9 @@ function readDarwinLoginShell(): string {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
+      // C-proc-09 出站契约：不传 env = 隐式全量继承父环境（含 TAIJI_RUNTIME_TOKEN），
+      // 泄漏给 dscl 后代进程；只读查询仅需 PATH/HOME，白名单基座 + deny 兜底（RT-8#9）。
+      env: buildOutboundChildEnv({ parentEnv: process.env }),
     })
     // 输出形如 "UserShell: /bin/zsh"
     const match = out.match(/UserShell:\s*(\S+)/)

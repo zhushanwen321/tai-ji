@@ -52,7 +52,10 @@ function makeHandler(overrides: { setProvider?: ReturnType<typeof vi.fn>; delete
     // 返回形态对齐真实 configService.refreshProviderCatalogs（CatalogRefreshResult）。
     refreshProviderCatalogs: vi.fn().mockResolvedValue({ refreshed: [], failed: [] }),
     getProvider: vi.fn().mockReturnValue(undefined),
-    updateToolPermissions: vi.fn(),
+    // M4/RT-3#4：config.getProviders reply 携带 models.json 降级态标志
+    isModelsStoreCorrupted: vi.fn().mockReturnValue(false),
+    // M4/RT-7#1：updateToolPermissions 返回 {ok}（config.json 损坏降级态拒绝覆写）
+    updateToolPermissions: vi.fn().mockReturnValue({ ok: true }),
     loadSkills: vi.fn().mockReturnValue([]),
     scanSkills: vi.fn().mockReturnValue([]),
     upsertSkill: vi.fn(),

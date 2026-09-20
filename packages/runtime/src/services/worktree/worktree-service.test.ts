@@ -503,6 +503,14 @@ describe('WorktreeService setup 脚本', () => {
     const deps = createDeps({
       mode: 'bare-workspace',
       existingPaths: new Set(['/project/.bare', setupScriptPath]),
+      // RT-8#6 起 setup 失败会触发回滚（worktree remove + branch -D）——补成功回滚结果，
+      // 保持本用例聚焦「SETUP_FAILED 抛出」原意，回滚细节由 RT-8#6 专属 describe 覆盖
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree remove', { stdout: '', stderr: '', exitCode: 0 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
     })
     deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'install failed' }))
     const service = new WorktreeService(deps)
@@ -510,5 +518,198 @@ describe('WorktreeService setup 脚本', () => {
     await expect(
       service.create({ branch: 'feat/test', workspaceHint: '/project' }),
     ).rejects.toMatchObject({ code: 'SETUP_FAILED' })
+  })
+})
+
+// ── setup 失败回滚（RT-8#6 / 审计 F6-M16：半成品残留 + 重试被 WORKTREE_EXISTS 挡死）──
+
+describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
+  it('setup 失败后按创建逆序回滚：worktree remove --force + branch -D，原始 SETUP_FAILED 保留', async () => {
+    const setupScriptPath = '/project/.bare/custom-hooks/setup-worktree.sh'
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', setupScriptPath]),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree remove', { stdout: '', stderr: '', exitCode: 0 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'install failed' }))
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat/test', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({ code: 'SETUP_FAILED' }) // 原始错误不被掩盖
+    // 逆序 ①：移除 worktree 目录 + 主仓元数据（双重 --force 容忍子模块）
+    expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
+      '/project/.bare',
+      'worktree',
+      ['remove', '--force', '--force', '/project/feat-test'],
+    )
+    // 逆序 ②：删除本次 add -b 新建的分支（不删则重试报「分支已存在」）
+    expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
+      '/project/.bare',
+      'branch',
+      ['-D', 'feat/test'],
+    )
+  })
+
+  it('plain-repo 模式同一回滚（rollback 以 repoRoot 为 git 执行目录）', async () => {
+    const setupScriptPath = '/home/user/my-repo/custom-hooks/setup-worktree.sh'
+    const deps = createDeps({
+      mode: 'plain-repo',
+      existingPaths: new Set([setupScriptPath]),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree remove', { stdout: '', stderr: '', exitCode: 0 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'boom' }))
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat/test', locationMode: 'repo-dir', workspaceHint: '/home/user/my-repo/src' }),
+    ).rejects.toMatchObject({ code: 'SETUP_FAILED' })
+    expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
+      '/home/user/my-repo',
+      'worktree',
+      ['remove', '--force', '--force', '/home/user/my-repo/feat-test'],
+    )
+    expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
+      '/home/user/my-repo',
+      'branch',
+      ['-D', 'feat/test'],
+    )
+  })
+
+  it('回滚自身失败不掩盖原始错误：仍抛 SETUP_FAILED + warn 附手动清理指引', async () => {
+    const setupScriptPath = '/project/.bare/custom-hooks/setup-worktree.sh'
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', setupScriptPath]),
+      gitOverrides: {
+        execResults: new Map([
+          // worktree remove 失败（如元数据不完整时 git 拒删）→ 回滚不完整
+          ['worktree remove', { stdout: '', stderr: 'fatal: not a working tree', exitCode: 1 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'install failed' }))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat/test', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({ code: 'SETUP_FAILED', message: expect.stringContaining('setup 脚本失败') })
+
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(warned).toContain('回滚不完整')
+    expect(warned).toContain('git -C /project/.bare worktree remove --force /project/feat-test')
+    warnSpy.mockRestore()
+  })
+
+  it('回滚后重试不被 WORKTREE_EXISTS 挡死', async () => {
+    const bare = '/project/.bare'
+    const setupScriptPath = `${bare}/custom-hooks/setup-worktree.sh`
+    const wtPath = '/project/feat-test'
+    const gitEntry = `${wtPath}/.git`
+    // 状态化 mock：worktree add 把目录 + .git 入口写上「磁盘」，remove 撤销——
+    // 重试路径上 existsSync 结果随回滚真实变化，验证不再被早退检查挡死
+    const disk = new Set([bare, setupScriptPath])
+    const fs = {
+      existsSync: vi.fn((p: string) => disk.has(p)),
+      statSync: vi.fn((p: string) => {
+        if (!disk.has(p)) {
+          const e = new Error(`ENOENT: ${p}`) as NodeJS.ErrnoException
+          e.code = 'ENOENT'
+          throw e
+        }
+        return { isDirectory: () => true, isFile: () => false }
+      }),
+    }
+    const gitExec = vi.fn(async (_cwd: string, command: string, args?: string[]) => {
+      const key = `${command} ${(args ?? []).join(' ')}`.trim()
+      if (key.startsWith('worktree add')) {
+        disk.add(wtPath)
+        disk.add(gitEntry)
+        return { stdout: '', stderr: '', exitCode: 0 }
+      }
+      if (key.startsWith('worktree remove')) {
+        disk.delete(wtPath)
+        disk.delete(gitEntry)
+        return { stdout: '', stderr: '', exitCode: 0 }
+      }
+      if (key.startsWith('branch -D')) return { stdout: '', stderr: '', exitCode: 0 }
+      if (key.startsWith('rev-parse --verify')) return { stdout: 'abc', stderr: '', exitCode: 0 }
+      if (key.startsWith('rev-parse --abbrev-ref')) return { stdout: 'origin/main', stderr: '', exitCode: 0 }
+      return { stdout: '', stderr: `unknown: ${key}`, exitCode: 1 }
+    })
+    let setupAttempts = 0
+    const deps: WorktreeServiceDeps = {
+      gitExecutor: { exec: gitExec },
+      shellRunner: {
+        execute: vi.fn(async () => {
+          setupAttempts += 1
+          return setupAttempts === 1
+            ? { exitCode: 1, stdout: '', stderr: 'install failed' }
+            : { exitCode: 0, stdout: '', stderr: '' }
+        }),
+      },
+      gitInfoReader: mockGitInfoReader(),
+      configService: mockConfigService(),
+      fs,
+    }
+    const service = new WorktreeService(deps)
+
+    // 第一次：setup 失败 → 回滚（remove + branch -D 撤销磁盘副作用）
+    await expect(
+      service.create({ branch: 'feat/test', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({ code: 'SETUP_FAILED' })
+    expect(fs.existsSync(wtPath)).toBe(false) // 副作用已回滚
+
+    // 重试：不再 WORKTREE_EXISTS，setup 第二次成功 → 创建成功
+    const result = await service.create({ branch: 'feat/test', workspaceHint: '/project' })
+    expect(result).toEqual({ cwd: wtPath, branch: 'feat/test', repoRoot: '/project' })
+  })
+})
+
+// ── WORKTREE_EXISTS 半成品识别（RT-8#6）──
+
+describe('WorktreeService WORKTREE_EXISTS 半成品识别（RT-8#6）', () => {
+  it('目录存在但缺 .git 入口（半成品残留）→ 附手动清理指引', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/feat-x']), // 无 feat-x/.git
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({
+      code: 'WORKTREE_EXISTS',
+      message: expect.stringContaining('疑似上次创建失败的残留'),
+      detail: { halfFinished: true },
+    })
+  })
+
+  it('完整 worktree（.git 入口存在）→ 原有冲突语义不变', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/feat-x', '/project/feat-x/.git']),
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({
+      code: 'WORKTREE_EXISTS',
+      message: expect.not.stringContaining('残留'),
+      detail: { halfFinished: false },
+    })
   })
 })

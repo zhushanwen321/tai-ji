@@ -187,7 +187,17 @@ export class ExtensionMessageHandler {
       if (typeof tempDir !== 'string' || !Array.isArray(selected)) {
         return this.ctx.sendError(ws, 'invalid_payload', 'extension.finishInstall requires tempDir (string) and selected (string[])', msg.id)
       }
-      await ext.finishInstall(tempDir, selected)
+      const failures = await ext.finishInstall(tempDir, selected)
+      if (failures.length > 0) {
+        // RT-6#1 逐包隔离失败聚合上报：成功包已落盘（列表随刷新可见），失败清单经
+        // ExtensionInstallError 透传（code/hint），前端 catch 显示——不吞失败回假成功。
+        const names = failures.map((f) => f.dirName).join(', ')
+        throw new ExtensionInstallError(
+          'finish_partial_failed',
+          `Failed to install extension(s): ${names}`,
+          '部分扩展安装失败，已成功的扩展已保留、失败扩展的旧版本不受影响，可重试安装。',
+        )
+      }
       const extensions = await ext.scanExtensions()
       return this.ctx.reply(ws, msg.id, 'config.extensions', { extensions })
     } catch (e) {

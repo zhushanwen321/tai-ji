@@ -38,6 +38,7 @@ import type {
   RenameMode,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
+import type { SaveAppConfigResult } from './services/app-config-store.js'
 import type { DirScopes } from './services/skill-dir-config.js'
 import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'
@@ -421,7 +422,16 @@ export interface IConfigService {
   removeProviderByKind(providerId: string, kind: 'catalog' | 'custom'): Promise<{ removed: boolean; newDefault?: { provider: ProviderId; modelId: string } }>
   deleteProvider(providerId: string): Promise<{ removed: boolean; newDefault?: { provider: ProviderId; modelId: string } }>
   getProvider(providerId: string): { apiKey?: string; name?: string; type?: string; baseUrl?: string; models?: unknown[]; enabled?: boolean } | undefined
-  updateToolPermissions(permissions: Record<string, string>): void
+  /**
+   * models.json 是否处于损坏降级态（M4/RT-3#4）：原位文件已隔离、providers 读回空骨架。
+   * 随 config.providers RPC 下发 UI（字段名 corrupted）。
+   */
+  isModelsStoreCorrupted(): boolean
+  /**
+   * 写入工具权限（config.json.toolPermissions）。config.json 损坏降级态下拒绝空骨架覆写，
+   * 返回 {ok:false, code:'app_config_corrupted', error}（M4/RT-7#1）——RPC 层须透传 sendError。
+   */
+  updateToolPermissions(permissions: Record<string, string>): SaveAppConfigResult
   // ── Skill/Agent 加载路径（ADR-0021 §1 discovery.json v2 SSOT）──
   /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths）。写 discovery.json + 投影 settings.json。 */
   setSkillDirs(dirs: SkillDirConfig[]): void
@@ -513,24 +523,24 @@ export interface IConfigService {
   // ── Worktree config（git-cwt-anywhere）──
   /** 读取 worktree 根目录（config.json.worktreeRootDir），默认 '~/worktrees'。 */
   getWorktreeRootDir(): string
-  /** 写入 worktree 根目录到 config.json.worktreeRootDir。 */
-  setWorktreeRootDir(dir: string): void
+  /** 写入 worktree 根目录到 config.json.worktreeRootDir。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setWorktreeRootDir(dir: string): SaveAppConfigResult
   /** 读取 setup 脚本路径（config.json.setupScript），默认 'custom-hooks/setup-worktree.sh'。 */
   getSetupScript(): string
-  /** 写入 setup 脚本路径到 config.json.setupScript。 */
-  setSetupScript(script: string): void
+  /** 写入 setup 脚本路径到 config.json.setupScript。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setSetupScript(script: string): SaveAppConfigResult
   /** 读取 bare-workspace 初始化脚本路径（config.json.bareSetupScript），默认 'custom-hooks/setup-worktree.sh'。 */
   getBareSetupScript(): string
-  /** 写入 bare-workspace 初始化脚本路径到 config.json.bareSetupScript。 */
-  setBareSetupScript(script: string): void
+  /** 写入 bare-workspace 初始化脚本路径到 config.json.bareSetupScript。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setBareSetupScript(script: string): SaveAppConfigResult
   /** 读取 worktree 创建超时时间（config.json.worktreeTimeout），默认 60 秒。 */
   getTimeout(): number
-  /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。 */
-  setTimeout(timeout: number): void
+  /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setTimeout(timeout: number): SaveAppConfigResult
   /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
   getDefaultBaseBranch(): string
-  /** 写入默认基分支到 config.json.defaultBaseBranch。 */
-  setDefaultBaseBranch(baseBranch: string): void
+  /** 写入默认基分支到 config.json.defaultBaseBranch。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setDefaultBaseBranch(baseBranch: string): SaveAppConfigResult
   /** 读取是否启用 session 自动重命名（标志文件存在=开），默认 false。 */
   getAutoRenameEnabled(): boolean
   /** 设置 session 自动重命名开关（true 创建标志文件 / false 删除）。 */
@@ -583,7 +593,8 @@ export interface IExtensionService {
   uninstallExtension(name: string): Promise<void>
   installLocalDirectory(sourcePath: string): Promise<{ tempDir: string; candidates: import('@taiji/shared').ExtensionInfo[] }>
   installGitRepository(url: string): Promise<{ tempDir: string; candidates: import('@taiji/shared').ExtensionInfo[] }>
-  finishInstall(tempDir: string, selected: string[]): Promise<void>
+  /** 逐包隔离复制选中扩展到 extensions/（tmp+rename 原子换代）；返回失败清单（空 = 全部成功，非空时成功包已落盘、失败包旧版本保留）。 */
+  finishInstall(tempDir: string, selected: string[]): Promise<import('./services/extension-service.js').FinishInstallFailure[]>
   cancelInstall(tempDir: string): Promise<void>
 }
 

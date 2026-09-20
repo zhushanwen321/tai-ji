@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync, symlinkSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync, symlinkSync, readdirSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { ExtensionService, ExtensionInstallError } from '../src/services/extension-service.js'
@@ -31,6 +31,31 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(() => ''),
 }))
 
+// RT-6#1 失败路径注入（测试作用域开关，vi.hoisted 使 mock 工厂可引用）：
+// - cpSync：源路径含 fail-cp 标记时抛错（仅 cp 失败用例的 fixture 用该目录名）；
+// - renameSync：仅当 failRenameMarker 非空且 from 路径命中「marker + .tmp-」（原子
+//   换代「顶上」一步）时抛错，其余委托原实现——换代中断后的备份恢复
+//   （.old- → destDir）走原实现，才能断言恢复真实发生。
+const fsFailState = vi.hoisted(() => ({ failRenameMarker: '' }))
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const cpSyncMock: typeof actual.cpSync = (src, dest, opts) => {
+    if (String(src).includes('fail-cp')) {
+      throw new Error('simulated copy failure (disk full)')
+    }
+    return actual.cpSync(src, dest, opts)
+  }
+  const renameSyncMock: typeof actual.renameSync = (fromPath, toPath) => {
+    if (fsFailState.failRenameMarker !== ''
+      && String(fromPath).includes(fsFailState.failRenameMarker)
+      && String(fromPath).includes('.tmp-')) {
+      throw Object.assign(new Error('ENOTEMPTY: simulated rename failure'), { code: 'ENOTEMPTY' })
+    }
+    return actual.renameSync(fromPath, toPath)
+  }
+  return { ...actual, cpSync: vi.fn(cpSyncMock), renameSync: vi.fn(renameSyncMock) }
+})
+
 const mockedInstallPackage = vi.mocked(installPackage)
 const mockedUninstallPackage = vi.mocked(uninstallPackage)
 const mockedExecFileSync = vi.mocked(execFileSync)
@@ -41,6 +66,8 @@ describe('ExtensionService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // RT-6#1 注入开关复位（rename 失败用例内显式打开）
+    fsFailState.failRenameMarker = ''
     // Create test directory structure
     testSettingsDir = mkdtempSync(join(tmpdir(), 'ext-service-test-'))
     writeFileSync(join(testSettingsDir, 'settings.json'), JSON.stringify({
@@ -717,6 +744,80 @@ describe('ExtensionService', () => {
 
       await expect(service.finishInstall(tempDir, ['evil-link']))
         .rejects.toThrow('symlink')
+    })
+
+    // ── RT-6#1 原子换代失败路径（cp/rename 抛错 → 旧目录保留 + tmp 清理 + 失败聚合）──
+    // node:fs 部分替换：cpSync 对源路径含 fail-cp 标记时抛错；renameSync 对 from
+    // 路径含 .tmp- 标记（换代「顶上」一步）时抛错，其余全部委托原实现——
+    // 换代中断后的备份恢复（.old- → destDir）走原实现，才能断言恢复真实发生。
+    it('cpSync 失败：旧目录内容原样保留、tmp 被清理、单包失败不阻断其余包、失败聚合进返回清单', async () => {
+      const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-cp-fail')
+      for (const name of ['fail-cp', 'ok-ext']) {
+        const src = join(tempDir, name)
+        mkdirSync(src, { recursive: true })
+        writeFileSync(join(src, 'package.json'), JSON.stringify({
+          name: `pi-${name}`, version: '1.0.0', description: name, keywords: ['pi-package'],
+        }), 'utf-8')
+      }
+      // 预置旧版本 fail-cp（marker 断言旧内容不被先毁后写吞掉）
+      const extensionsDir = join(testSettingsDir, 'extensions')
+      const oldDir = join(extensionsDir, 'fail-cp')
+      mkdirSync(oldDir, { recursive: true })
+      writeFileSync(join(oldDir, 'old-version.txt'), 'v1-old-content', 'utf-8')
+
+      const failures = await service.finishInstall(tempDir, ['fail-cp', 'ok-ext'])
+
+      // 失败聚合进返回清单（仅 fail-cp，错误消息透传 mock 的异常文案）
+      expect(failures).toHaveLength(1)
+      expect(failures[0]!.dirName).toBe('fail-cp')
+      expect(failures[0]!.error).toContain('simulated copy failure')
+      // 旧目录内容原样保留（先毁后写缺陷的回归断言）
+      expect(readFileSync(join(extensionsDir, 'fail-cp', 'old-version.txt'), 'utf-8')).toBe('v1-old-content')
+      // tmp 半成品被清理，无 .tmp- / .old- 残留
+      expect(readdirSync(extensionsDir).some((e) => e.includes('.tmp-') || e.includes('.old-'))).toBe(false)
+      // 单包失败不阻断其余包：ok-ext 正常装入
+      expect(existsSync(join(extensionsDir, 'ok-ext', 'package.json'))).toBe(true)
+    })
+
+    it('renameSync 换代失败：备份恢复旧目录、tmp 被清理、失败聚合进返回清单', async () => {
+      const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-rename-fail')
+      const src = join(tempDir, 'ext-a')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), JSON.stringify({
+        name: 'pi-ext-a', version: '2.0.0', description: 'A', keywords: ['pi-package'],
+      }), 'utf-8')
+      // 预置旧版本 ext-a
+      const extensionsDir = join(testSettingsDir, 'extensions')
+      const oldDir = join(extensionsDir, 'ext-a')
+      mkdirSync(oldDir, { recursive: true })
+      writeFileSync(join(oldDir, 'old-version.txt'), 'v1-old-content', 'utf-8')
+      // 打开 rename 失败注入（仅 ext-a 的 tmp 换代一步抛错）
+      fsFailState.failRenameMarker = 'ext-a'
+
+      const failures = await service.finishInstall(tempDir, ['ext-a'])
+
+      expect(failures).toHaveLength(1)
+      expect(failures[0]!.dirName).toBe('ext-a')
+      expect(failures[0]!.error).toContain('ENOTEMPTY')
+      // 换代中断后旧版本经备份恢复（非半目录、非丢失）
+      expect(readFileSync(join(extensionsDir, 'ext-a', 'old-version.txt'), 'utf-8')).toBe('v1-old-content')
+      // tmp 与备份均被清理（恢复后备份已不在）
+      expect(readdirSync(extensionsDir).some((e) => e.includes('.tmp-') || e.includes('.old-'))).toBe(false)
+    })
+
+    it('全新安装（destDir 不存在）：tmp+rename 直装成功，返回空失败清单', async () => {
+      const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-fresh-atomic')
+      const src = join(tempDir, 'ext-fresh')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), JSON.stringify({
+        name: 'pi-ext-fresh', version: '1.0.0', description: 'F', keywords: ['pi-package'],
+      }), 'utf-8')
+
+      const failures = await service.finishInstall(tempDir, ['ext-fresh'])
+
+      expect(failures).toEqual([])
+      expect(existsSync(join(testSettingsDir, 'extensions', 'ext-fresh', 'package.json'))).toBe(true)
+      expect(readdirSync(join(testSettingsDir, 'extensions')).some((e) => e.includes('.tmp-'))).toBe(false)
     })
   })
 

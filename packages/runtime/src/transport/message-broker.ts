@@ -228,8 +228,11 @@ export class ServerMessageBroker implements IMessageBroker {
     // 两次读之间有写者落盘会让 config.providers.scopedModels 与 model.list 过滤结果
     // 互相矛盾一帧（review #4）。双参版聚合方法即为此引入（design D2 否决改单参签名）。
     const scopedModels = this.services.configService.getScopedModels()
+    // M4/RT-3#4：models.json 损坏降级态随 config.providers 下发 UI（与 config.getProviders
+    // reply 侧同标；model.list 不重复标——providers 帧是 settings 页的读取入口）
+    const corrupted = this.services.configService.isModelsStoreCorrupted()
     return [
-      { type: 'config.providers', id: this.nextPushId(), payload: { providers, scopedModels } },
+      { type: 'config.providers', id: this.nextPushId(), payload: { providers, scopedModels, corrupted } },
       { type: 'model.list', id: this.nextPushId(), payload: { models: this.services.modelService.aggregateModelsWithScoped(providers, scopedModels) } },
     ]
   }

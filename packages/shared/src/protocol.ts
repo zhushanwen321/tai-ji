@@ -1338,7 +1338,9 @@ export interface PlanStateView {
 
 export interface ServerMessageMapBase {
   // ── sendInitialState 推送 / domain 订阅（精确）──
-  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[] }
+  // corrupted = models.json 损坏降级态（原位文件已隔离为 .corrupt-* 副本，providers 为
+  // 空骨架）——UI 据此提示「配置已隔离可找回」而非「无任何 provider」（M4/RT-3#4）
+  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[]; corrupted?: boolean }
   // refreshed = 远程目录协商完成的 provider（304/404 也算完成）；failed 携带原因
   'config.providerCatalogsRefreshed': { refreshed: string[]; failed: Array<{ providerId: string; reason: string }> }
   'config.skills': { skills: SkillInfo[] }

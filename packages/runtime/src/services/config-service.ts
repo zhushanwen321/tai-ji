@@ -49,6 +49,7 @@ import {
   setTimeout as setTimeoutImpl,
   getDefaultBaseBranch as getDefaultBaseBranchImpl,
   setDefaultBaseBranch as setDefaultBaseBranchImpl,
+  type AppConfigAccessors,
 } from './worktree-config-helper.js'
 import {
   getAutoRenameEnabled as getAutoRenameEnabledImpl,
@@ -66,7 +67,8 @@ import {
   setSmartContextExcludedModels as setSmartContextExcludedModelsImpl,
   type SmartContextConfigSnapshot,
 } from './smart-context-config.js'
-import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl } from './app-config-store.js'
+import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl, type SaveAppConfigResult } from './app-config-store.js'
+import { isModelsStoreCorrupted as isModelsStoreCorruptedImpl } from '../infra/pi/pi-provider-store.js'
 import {
   getDefaultModel as getDefaultModelImpl,
   setDefaultModel as setDefaultModelImpl,
@@ -256,6 +258,16 @@ export class ConfigService implements IConfigService {
     return getProviderImpl(this.configStore, providerId)
   }
 
+  /**
+   * models.json 是否处于损坏降级态（M4/RT-3#4）：原位文件已被隔离移走、providers
+   * 读回空骨架、真实数据在 .corrupt 副本。随 config.providers RPC 下发 UI（字段名
+   * corrupted，与 system-prompt / terminal 一致）。直访 pi-provider-store 与
+   * quota-service / provider-importer 的 provider 级直访先例同模式（模块级单例存储）。
+   */
+  isModelsStoreCorrupted(): boolean {
+    return isModelsStoreCorruptedImpl()
+  }
+
   // ── Tool permissions (persisted to ~/.taiji/config.json) ───
 
   getPiAgentDir(): string {
@@ -270,14 +282,14 @@ export class ConfigService implements IConfigService {
     return loadAppConfigImpl(this.configStore.getConfigDir())
   }
 
-  private saveAppConfig(config: Record<string, unknown>): void {
-    saveAppConfigImpl(this.configStore.getConfigDir(), config)
+  private saveAppConfig(config: Record<string, unknown>): SaveAppConfigResult {
+    return saveAppConfigImpl(this.configStore.getConfigDir(), config)
   }
 
-  updateToolPermissions(permissions: Record<string, string>): void {
+  updateToolPermissions(permissions: Record<string, string>): SaveAppConfigResult {
     const config = this.loadAppConfig()
     config['toolPermissions'] = permissions
-    this.saveAppConfig(config)
+    return this.saveAppConfig(config)
   }
 
   // ── Worktree / rename-session / smart-context config ──────────────
@@ -285,7 +297,7 @@ export class ConfigService implements IConfigService {
   // smart-context 委托 smart-context-config（P1-7 名实拆分后各归其位）。
   // loadAppConfig / saveAppConfig 仍为 private，通过 appConfig() 暴露 accessors 注入。
 
-  private appConfig(): { load(): Record<string, unknown>; save(config: Record<string, unknown>): void } {
+  private appConfig(): AppConfigAccessors {
     return {
       load: () => this.loadAppConfig(),
       save: c => this.saveAppConfig(c),
@@ -296,40 +308,40 @@ export class ConfigService implements IConfigService {
     return getWorktreeRootDirImpl(this.appConfig())
   }
 
-  setWorktreeRootDir(dir: string): void {
-    setWorktreeRootDirImpl(this.appConfig(), dir)
+  setWorktreeRootDir(dir: string): SaveAppConfigResult {
+    return setWorktreeRootDirImpl(this.appConfig(), dir)
   }
 
   getSetupScript(): string {
     return getSetupScriptImpl(this.appConfig())
   }
 
-  setSetupScript(script: string): void {
-    setSetupScriptImpl(this.appConfig(), script)
+  setSetupScript(script: string): SaveAppConfigResult {
+    return setSetupScriptImpl(this.appConfig(), script)
   }
 
   getBareSetupScript(): string {
     return getBareSetupScriptImpl(this.appConfig())
   }
 
-  setBareSetupScript(script: string): void {
-    setBareSetupScriptImpl(this.appConfig(), script)
+  setBareSetupScript(script: string): SaveAppConfigResult {
+    return setBareSetupScriptImpl(this.appConfig(), script)
   }
 
   getTimeout(): number {
     return getTimeoutImpl(this.appConfig())
   }
 
-  setTimeout(timeout: number): void {
-    setTimeoutImpl(this.appConfig(), timeout)
+  setTimeout(timeout: number): SaveAppConfigResult {
+    return setTimeoutImpl(this.appConfig(), timeout)
   }
 
   getDefaultBaseBranch(): string {
     return getDefaultBaseBranchImpl(this.appConfig())
   }
 
-  setDefaultBaseBranch(baseBranch: string): void {
-    setDefaultBaseBranchImpl(this.appConfig(), baseBranch)
+  setDefaultBaseBranch(baseBranch: string): SaveAppConfigResult {
+    return setDefaultBaseBranchImpl(this.appConfig(), baseBranch)
   }
 
   /** 读取 auto-rename 开关（标志文件存在=开，默认 false）。不经 appConfig（独立标志文件，非 config.json 字段）。 */

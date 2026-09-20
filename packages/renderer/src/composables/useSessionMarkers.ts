@@ -27,15 +27,50 @@ const cache = shallowRef<Map<string, SessionMarker>>(new Map())
 // localStorage 存空对象 {} 时 new Map 是空 Map，size===0 恒成立，会导致每次查询都重新 parse。
 let hydrated = false
 
-// ── localStorage 读写 ──
+// ── 损坏保护（RD-1#2 / 审计 M4 族：损坏数据读回空骨架 → 全量覆写）──
+// localStorage 值解析失败时置 corrupt：此期间一切写盘被拒绝（mutateMarker early-return），
+// 防止以（可能不完整的）内存表 setItem 覆写原始损坏字符串——原始值保留在 localStorage
+// 供人工恢复。另一窗口经 storage 事件写入合法值（或删 key）即自动解除保护。
+let corrupt = false
+// warn 去重（防刷屏）：损坏发生与拒绝写各只提示一次，__resetCacheForTest 复位。
+let warnedCorrupt = false
+let warnedRefuseWrite = false
 
-function readAll(): Record<string, SessionMarker> {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) return {}
+function warnCorruptOnce(error: unknown): void {
+  if (warnedCorrupt) return
+  warnedCorrupt = true
+  console.warn(
+    `[session-markers] localStorage key '${STORAGE_KEY}' 值损坏（JSON 解析失败），未读/完成标记暂不可读，且写入已暂停以防覆写原始数据。` +
+      `恢复动作：DevTools 执行 localStorage.getItem('${STORAGE_KEY}') 检查并修复，或 localStorage.removeItem('${STORAGE_KEY}') 重置`,
+    error,
+  )
+}
+
+function warnRefuseWriteOnce(): void {
+  if (warnedRefuseWrite) return
+  warnedRefuseWrite = true
+  console.warn(
+    `[session-markers] 标记数据处于损坏保护中，本次标记变更不会写盘（防空表覆写）；恢复动作见上一条警告，另一窗口写入合法值后自动恢复`,
+  )
+}
+
+/**
+ * 解析并应用存储值（主读取 hydrate 与 storage 事件共用同一损坏方案）。
+ * 空值（null/''）= 合法空表；解析失败 = 保留 cache 旧值（不置空）+ 置 corrupt。
+ */
+function applyParsedMarkers(raw: string | null): void {
+  if (!raw) {
+    cache.value = new Map()
+    corrupt = false
+    return
+  }
   try {
-    return JSON.parse(raw) as Record<string, SessionMarker>
-  } catch {
-    return {}
+    const data = JSON.parse(raw) as Record<string, SessionMarker>
+    cache.value = new Map(Object.entries(data))
+    corrupt = false
+  } catch (error) {
+    corrupt = true
+    warnCorruptOnce(error)
   }
 }
 
@@ -48,17 +83,23 @@ function readAll(): Record<string, SessionMarker> {
 function ensureCache(): void {
   if (hydrated) return
   hydrated = true
-  cache.value = new Map(Object.entries(readAll()))
+  applyParsedMarkers(localStorage.getItem(STORAGE_KEY))
 }
 
 /**
  * 写路径统一（Q1-1）：ensureCache → 基于 cache 变异 → 替换 cache.value（触发响应式）→ 立即写盘。
- * 不再每次写 readAll（消除 localStorage.getItem + 全量 JSON.parse 的重复——此前写路径完全
- * 绕过内存缓存，5 个后台 session 同时完成 = 5 次全量 parse/stringify 跑在主线程）。
- * 写盘保持立即 setItem（不引入 idle 合并，验收口径 = readAll 重复消除）。
+ * hydrate 后写路径不再全量读回 localStorage（消除 getItem + 全量 JSON.parse 的重复——此前
+ * 每次写都绕过内存缓存，5 个后台 session 同时完成 = 5 次全量 parse/stringify 跑在主线程）。
+ * 写盘保持立即 setItem（不引入 idle 合并，验收口径 = 读盘重复消除）。
  */
 function mutateMarker(sid: string, mutate: (marker: SessionMarker) => void): void {
   ensureCache()
+  // 损坏保护（RD-1#2）：hydrate 失败（corrupt）时内存表不代表真实数据，拒绝写盘——
+  // 否则以空表 setItem 全量覆写，所有 session 的未读/完成标记不可逆丢失。
+  if (corrupt) {
+    warnRefuseWriteOnce()
+    return
+  }
   const marker: SessionMarker = { ...cache.value.get(sid) }
   mutate(marker)
   const next = new Map(cache.value)
@@ -76,13 +117,10 @@ function mutateMarker(sid: string, mutate: (marker: SessionMarker) => void): voi
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY) {
-      // 直接从事件 newValue 更新缓存，不重新 parse localStorage（避免竞态）
-      try {
-        const data = e.newValue ? JSON.parse(e.newValue) as Record<string, SessionMarker> : {}
-        cache.value = new Map(Object.entries(data))
-      } catch {
-        cache.value = new Map()
-      }
+      // 直接从事件 newValue 更新缓存，不重新 parse localStorage（避免竞态）；
+      // 损坏 newValue 与主读取（ensureCache）共用 applyParsedMarkers 同一方案：
+      // 解析失败保留旧 cache + 置 corrupt，合法值（含 null=另一窗口删 key）则替换并解除保护
+      applyParsedMarkers(e.newValue)
     }
   })
 }
@@ -150,6 +188,9 @@ export function __registerCleanupForTest(): void {
 export function __resetCacheForTest(): void {
   cache.value = new Map()
   hydrated = false
+  corrupt = false
+  warnedCorrupt = false
+  warnedRefuseWrite = false
 }
 
 /**

@@ -215,8 +215,11 @@ export interface QuarantineOptions {
  * 为什么是导出函数而非 JsonStore 私有方法：segments.json 等手写 read→parse 的
  * 落点不走 JsonStore，但面临同一条「失败 reset 覆盖」链——共享同一实现避免
  * 两处隔离行为漂移（integrity-hardening.md D1c 明确要求同模式覆盖）。
+ *
+ * @returns 隔离副本路径（调用方据此在「拒绝空骨架覆写」的错误消息里指明恢复入口）；
+ *          rename 失败返回 undefined（原文件保留原位，恢复入口即原路径）。
  */
-export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions): void {
+export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions): string | undefined {
   // ISO 时间戳压缩格式（去冒号/点号）：文件名安全且按字典序即按时间排序
   const ts = new Date().toISOString().replace(/[:.]/g, '')
   const quarantinePath = `${filePath}.corrupt-${ts}`
@@ -227,13 +230,14 @@ export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions)
       `[${opts.tag}] ${opts.reason}: ${filePath} — 文件损坏已隔离至 ${quarantinePath}，` +
       `本次以默认值继续。恢复指引：用编辑器对比 .corrupt 副本找回配置。原因: ${causeMsg}`,
     )
-  // eslint-disable-next-line taste/no-silent-catch -- 隔离失败不阻断读流程（仍返回默认值），只升级日志
+    return quarantinePath
   } catch (renameErr) {
     console.error(
       `[${opts.tag}] ${opts.reason}: ${filePath} — 损坏隔离失败（无法 rename 为 .corrupt 副本），` +
       `原文件保留原位，本次以默认值继续。请人工检查该文件。原因: ${causeMsg}; ` +
       `rename 失败: ${renameErr instanceof Error ? renameErr.message : renameErr}`,
     )
+    return undefined
   }
 }
 

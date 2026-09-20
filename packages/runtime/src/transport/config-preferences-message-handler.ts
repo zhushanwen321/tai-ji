@@ -4,7 +4,11 @@
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * 「Extracted from RuntimeServer to reduce file size」；本组 case 全部仅消费
- * ctx.configService + ctx.reply，无广播/sendError 耦合，迁移零行为变化）。
+ * ctx.configService + ctx.reply，迁移零行为变化）。
+ *
+ * [M4/RT-7#1] 写 case 的落盘失败（config.json 损坏降级态拒绝覆写 / IO 失败）按 D10
+ * 错误信封回复（code 透传 SaveAppConfigResult.code），不 reply 成功——对齐
+ * system-prompt-terminal-message-handler 的 set 失败形态。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage } from '@taiji/shared'
@@ -17,7 +21,8 @@ export class ConfigPreferencesMessageHandler {
   async handle(msg: ClientMessage, ws: WsType): Promise<boolean> {
     switch (msg.type) {
       case 'config.setWorktreeRootDir': {
-        this.ctx.configService.setWorktreeRootDir(msg.payload.dir)
+        const result = this.ctx.configService.setWorktreeRootDir(msg.payload.dir)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
         this.ctx.reply(ws, msg.id, 'config.worktreeRootDir', { dir: this.ctx.configService.getWorktreeRootDir() })
         return true
       }
@@ -26,7 +31,8 @@ export class ConfigPreferencesMessageHandler {
         return true
       }
       case 'config.setSetupScript': {
-        this.ctx.configService.setSetupScript(msg.payload.script)
+        const result = this.ctx.configService.setSetupScript(msg.payload.script)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
         this.ctx.reply(ws, msg.id, 'config.setupScript', { script: this.ctx.configService.getSetupScript() })
         return true
       }
@@ -35,7 +41,8 @@ export class ConfigPreferencesMessageHandler {
         return true
       }
       case 'config.setBareSetupScript': {
-        this.ctx.configService.setBareSetupScript(msg.payload.script)
+        const result = this.ctx.configService.setBareSetupScript(msg.payload.script)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
         this.ctx.reply(ws, msg.id, 'config.bareSetupScript', { script: this.ctx.configService.getBareSetupScript() })
         return true
       }
@@ -44,7 +51,8 @@ export class ConfigPreferencesMessageHandler {
         return true
       }
       case 'config.setTimeout': {
-        this.ctx.configService.setTimeout(msg.payload.timeout)
+        const result = this.ctx.configService.setTimeout(msg.payload.timeout)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
         this.ctx.reply(ws, msg.id, 'config.worktreeTimeout', { timeout: this.ctx.configService.getTimeout() })
         return true
       }
@@ -53,7 +61,8 @@ export class ConfigPreferencesMessageHandler {
         return true
       }
       case 'config.setDefaultBaseBranch': {
-        this.ctx.configService.setDefaultBaseBranch(msg.payload.baseBranch)
+        const result = this.ctx.configService.setDefaultBaseBranch(msg.payload.baseBranch)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
         this.ctx.reply(ws, msg.id, 'config.defaultBaseBranch', { baseBranch: this.ctx.configService.getDefaultBaseBranch() })
         return true
       }
@@ -64,5 +73,15 @@ export class ConfigPreferencesMessageHandler {
       default:
         return false
     }
+  }
+
+  /**
+   * set case 的落盘结果回包：成功返回 true（调用方继续 reply 读回值）；失败发 D10
+   * 错误信封并返回 false（调用方直接 return true 结束本 case，不 reply 成功）。
+   */
+  private replySaveResult(ws: WsType, msgId: string | undefined, result: { ok: boolean; code?: string; error?: string }): boolean {
+    if (result.ok) return true
+    this.ctx.sendError(ws, result.code ?? 'app_config_io_error', result.error ?? 'unknown error', msgId)
+    return false
   }
 }

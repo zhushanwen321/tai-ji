@@ -16,6 +16,7 @@ import crypto from 'node:crypto'
 import semver from 'semver'
 import { extract as tarExtract } from 'tar'
 import { toErrorMessage } from '../../utils/errors.js'
+import { isUnderOrEqual } from '../../utils/path-utils.js'
 
 // ── 常量 ──────────────────────────────────────────────────────
 
@@ -199,6 +200,67 @@ function encodePackageName(name: string): string {
   return name.startsWith('@') ? name.replace('/', '%2F') : name
 }
 
+// ── 包名校验（RT-8#3 路径穿越守卫）─────────────────────────────
+
+/**
+ * npm 包名白名单校验（RT-8#3）：name 可来自外部 clone 仓库 package.json 的
+ * 依赖名，未经校验 join(nodeModulesDir, name) 后 rmSync/renameSync 会写删
+ * node_modules 之外任意目录（`../../` 逃逸）。比 npm 官方
+ * validate-npm-package-name 从严：只认 [a-z0-9-._] 白名单子集 + scoped 恰好
+ * 一个 `/`，大写、空格、`~`、多段 `/`、`.`/`..` 段一律拒绝——安装场景从严
+ * 无副作用（registry 包名均小写 url-safe）。
+ */
+const NPM_NAME_SEGMENT_RE = /^[a-z0-9._-]+$/
+const NPM_NAME_MAX_LENGTH = 214
+
+export function validateNpmName(name: string): void {
+  const reject = (reason: string): never => {
+    // code 取 not_found：非法名在 registry 必然查无此包；消费方（ExtensionService
+    // 经 InstallerError 形状读 code）按「包不存在」处理，无需扩 code 契约
+    throw new NpmInstallError(
+      'not_found',
+      `Invalid package name "${name}": ${reason}. Path traversal outside node_modules is blocked. 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
+    )
+  }
+  if (name === '') reject('empty name')
+  if (name.length > NPM_NAME_MAX_LENGTH) reject(`longer than ${NPM_NAME_MAX_LENGTH} chars`)
+  if (name !== name.trim()) reject('leading/trailing whitespace')
+  if (name.startsWith('.') || name.startsWith('_')) reject('starts with "." or "_"')
+  if (name.startsWith('@')) {
+    const rest = name.slice(1)
+    const slash = rest.indexOf('/')
+    if (slash === -1) reject('scoped name missing "/"')
+    if (rest.indexOf('/', slash + 1) !== -1) reject('more than one "/" in scoped name')
+    const scope = rest.slice(0, slash)
+    const pkg = rest.slice(slash + 1)
+    if (scope === '') reject('empty scope')
+    if (pkg === '') reject('empty package part after scope')
+    if (scope === '.' || scope === '..') reject(`scope is "${scope}"`)
+    if (pkg === '.' || pkg === '..') reject(`package part is "${pkg}"`)
+    if (!NPM_NAME_SEGMENT_RE.test(scope)) reject('scope has characters outside [a-z0-9-._]')
+    if (!NPM_NAME_SEGMENT_RE.test(pkg)) reject('package part has characters outside [a-z0-9-._]')
+  } else {
+    if (name.includes('/')) reject('unscoped name contains "/"')
+    if (!NPM_NAME_SEGMENT_RE.test(name)) reject('has characters outside [a-z0-9-._]')
+  }
+}
+
+/**
+ * RT-8#3 双向守卫（第二向）：白名单通过后仍断言 join 结果受 nodeModulesDir
+ * 约束——纵深防线，覆盖白名单遗漏的组合逃逸形态。
+ */
+function guardedPackageDir(name: string, nodeModulesDir: string): string {
+  validateNpmName(name)
+  const pkgDir = join(nodeModulesDir, name)
+  if (!isUnderOrEqual(nodeModulesDir, pkgDir)) {
+    throw new NpmInstallError(
+      'not_found',
+      `Package dir "${pkgDir}" escapes node_modules "${nodeModulesDir}". 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
+    )
+  }
+  return pkgDir
+}
+
 function parseSpec(spec: string): { name: string; range?: string } {
   if (spec.startsWith('@')) {
     const lastAt = spec.indexOf('@', 1)
@@ -211,6 +273,8 @@ function parseSpec(spec: string): { name: string; range?: string } {
 }
 
 async function fetchMetadata(name: string, timeout?: number): Promise<PackageMetadata> {
+  // RT-8#3：name 进 registry URL 前先过白名单（覆盖 install/tarball/latest 三个入口）
+  validateNpmName(name)
   const registry = getRegistry()
   const url = `${registry}/${encodePackageName(name)}`
   return fetchJson<PackageMetadata>(url, timeout)
@@ -450,6 +514,7 @@ async function installPackageRecursive(
 
   mkdirSync(nodeModulesDir, { recursive: true })
 
+  // RT-8#3：name 经双向守卫后才进 join（后续 rmSync/renameSync 均以 pkgDir 为靶）
   const metadata = await fetchMetadata(name, options?.timeout)
   const version = resolveVersion(metadata, range)
   const manifest = metadata.versions[version]
@@ -459,7 +524,7 @@ async function installPackageRecursive(
   }
 
   // 目标目录（scoped 包需创建 @scope/ 子目录）
-  const pkgDir = join(nodeModulesDir, name)
+  const pkgDir = guardedPackageDir(name, nodeModulesDir)
 
   // 下载 + 解压（原子操作）
   await downloadAndExtract(manifest.dist.tarball, pkgDir, manifest.dist, name, options?.timeout)
@@ -513,7 +578,8 @@ export async function installPackage(
  * 从 node_modules 移除指定包。
  */
 export async function uninstallPackage(name: string, nodeModulesDir: string): Promise<void> {
-  const pkgDir = join(nodeModulesDir, name)
+  // RT-8#3：删除靶目录先过双向守卫，`../../` 形态在 rmSync 前被拒
+  const pkgDir = guardedPackageDir(name, nodeModulesDir)
   if (existsSync(pkgDir)) {
     rmSync(pkgDir, { recursive: true, force: true })
   }

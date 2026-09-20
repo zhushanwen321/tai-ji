@@ -81,6 +81,9 @@ export interface WorktreeServiceDeps {
 /** 主分支 fallback（origin/main ref 不存在时用本地 main）。 */
 const LOCAL_MAIN = 'main'
 
+/** 半成品判定：worktree 目录内 .git 入口（file，指向主仓 worktrees 元数据）。 */
+const WORKTREE_GIT_ENTRY = '.git'
+
 /** '~/…' 前缀的展开：slice 起始位置跳过 '~' 后与 $HOME 拼接。 */
 const HOME_PREFIX_SLICE_START = 2
 /** 目录名去重后缀的短 hash 长度（md5 前 N 位 hex，足以区分同 repo 冲突）。 */
@@ -283,6 +286,57 @@ export class WorktreeService implements IWorktreeService {
     return new WorkspaceDetector(fsAdapter, gitAdapter)
   }
 
+  /** 目录名冲突检查：报 WORKTREE_EXISTS；半成品残留（缺 .git 入口）附手动清理指引（RT-8#6）。 */
+  private assertWorktreePathFree(newWtPath: string, dirName: string): void {
+    if (!this.deps.fs.existsSync(newWtPath)) return
+    // git worktree add 完成后 worktree 目录内必有 .git 入口（file，指向主仓元数据）；
+    // 目录存在但入口缺失 = 非完整 worktree，疑似上次创建失败的半成品残留。此前一律报
+    // WORKTREE_EXISTS 会让重试被永久挡死（setup 失败已由 rollbackCreatedWorktree 兜底，
+    // 此分支覆盖其它残留来源——git add 中途被杀等），至少给出可行动的清理指引。
+    const halfFinished = !this.deps.fs.existsSync(join(newWtPath, WORKTREE_GIT_ENTRY))
+    throw worktreeError(
+      'WORKTREE_EXISTS',
+      halfFinished
+        ? `目录已存在但不是完整 worktree（缺少 .git 入口，疑似上次创建失败的残留）: ${newWtPath}。` +
+          `请手动清理后重试：删除该目录，或执行 git worktree remove --force ${newWtPath}`
+        : `worktree 目录已存在: ${newWtPath}`,
+      { cwd: newWtPath, dirName, halfFinished },
+    )
+  }
+
+  /**
+   * setup 失败回滚（RT-8#6 / 审计 F6-M16：成功副作用无配对回滚 → 半成品永久残留，
+   * 重试被 WORKTREE_EXISTS 挡死）。按创建逆序撤销 worktree add 已产生的副作用：
+   * ① git worktree remove --force（worktree 目录 + 主仓 worktrees 元数据；双重 --force
+   *    容忍子模块——该 worktree 是本次 create 全新产物，无用户数据可失）
+   * ② git branch -D（worktree add -b 创建的新分支；能走到 setup 说明分支必为本流量新建，
+   *    不删则重试 add -b 报「分支已存在」换一种方式挡死）
+   * 回滚逐步 try/catch：单步失败仅 warn（含手动清理命令），不得掩盖/替换原始 setup 错误
+   * （调用方 rollback 后原样 rethrow 原始错误）。
+   */
+  private async rollbackCreatedWorktree(repoDir: string, wtPath: string, branch: string): Promise<void> {
+    const failures: string[] = []
+    try {
+      const rm = await this.deps.gitExecutor.exec(repoDir, 'worktree', ['remove', '--force', '--force', wtPath])
+      if (rm.exitCode !== 0) failures.push(`worktree remove 失败: ${rm.stderr.trim()}`)
+    } catch (e: unknown) {
+      failures.push(`worktree remove 异常: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    try {
+      const br = await this.deps.gitExecutor.exec(repoDir, 'branch', ['-D', branch])
+      if (br.exitCode !== 0) failures.push(`branch -D 失败: ${br.stderr.trim()}`)
+    } catch (e: unknown) {
+      failures.push(`branch -D 异常: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    if (failures.length > 0) {
+      console.warn(
+        `[worktree-service] setup 失败后回滚不完整（半成品残留：worktree ${wtPath} / 分支 ${branch}）。` +
+          `手动清理：git -C ${repoDir} worktree remove --force ${wtPath} && git -C ${repoDir} branch -D ${branch}。` +
+          `未完成步骤: ${failures.join('; ')}`,
+      )
+    }
+  }
+
   /** bare-workspace 模式下创建 worktree。 */
   private async createBareWorktree(
     detection: WorkspaceDetectResult,
@@ -296,13 +350,7 @@ export class WorktreeService implements IWorktreeService {
     // 目录名转换 + 冲突检查
     const dirName = branch.replace(/\//g, '-')
     const newWtPath = join(wsRoot, dirName)
-    if (this.deps.fs.existsSync(newWtPath)) {
-      throw worktreeError(
-        'WORKTREE_EXISTS',
-        `worktree 目录已存在: ${newWtPath}`,
-        { cwd: newWtPath, dirName },
-      )
-    }
+    this.assertWorktreePathFree(newWtPath, dirName)
 
     // base 解析
     const baseRef = await this.resolveBaseRef(barePath, baseBranch, workspaceHint)
@@ -320,8 +368,15 @@ export class WorktreeService implements IWorktreeService {
     }
 
     // setup 脚本（可选，不存在跳过）—— 从 configService.getBareSetupScript() 读取脚本相对路径
+    // 失败回滚（RT-8#6）：worktree add 已产生副作用（目录/元数据/新分支），setup 失败必须
+    // 逆序撤销，否则半成品残留且重试被 WORKTREE_EXISTS 挡死
     const bareSetupScriptRel = this.deps.configService.getBareSetupScript()
-    await this.runSetupScript(barePath, newWtPath, bareSetupScriptRel)
+    try {
+      await this.runSetupScript(barePath, newWtPath, bareSetupScriptRel)
+    } catch (setupError) {
+      await this.rollbackCreatedWorktree(barePath, newWtPath, branch)
+      throw setupError
+    }
 
     return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
   }
@@ -345,13 +400,7 @@ export class WorktreeService implements IWorktreeService {
     if (locationMode === 'repo-dir') {
       // repo-dir 模式：在仓库目录下创建（传统 git worktree 行为）
       newWtPath = join(repoRoot, dirName)
-      if (this.deps.fs.existsSync(newWtPath)) {
-        throw worktreeError(
-          'WORKTREE_EXISTS',
-          `worktree 目录已存在: ${newWtPath}`,
-          { cwd: newWtPath, dirName },
-        )
-      }
+      this.assertWorktreePathFree(newWtPath, dirName)
     } else {
       // dedicated-dir 模式（默认）：在专用目录 ~/worktrees/<repoName>/<branchDir> 下创建
       const worktreeRootDir = this.deps.configService.getWorktreeRootDir()
@@ -380,8 +429,14 @@ export class WorktreeService implements IWorktreeService {
 
     // setup 脚本（可选，不存在跳过）—— plain-repo 模式从 configService.getSetupScript() 读取脚本相对路径
     // 相对 repoRoot 解析（plain-repo 没有 barePath，仓库结构与传统 git 一致）
+    // 失败回滚（RT-8#6）：与 bare-workspace 模式同一 rollbackCreatedWorktree 兜底
     const setupScriptRel = this.deps.configService.getSetupScript()
-    await this.runSetupScript(repoRoot, newWtPath, setupScriptRel)
+    try {
+      await this.runSetupScript(repoRoot, newWtPath, setupScriptRel)
+    } catch (setupError) {
+      await this.rollbackCreatedWorktree(repoRoot, newWtPath, branch)
+      throw setupError
+    }
 
     return { cwd: newWtPath, branch, repoRoot: detection.repoRoot }
   }

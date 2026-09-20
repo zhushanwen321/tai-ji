@@ -31,9 +31,13 @@ import type { IConfigStore } from './ports/config.js'
 import type { IExtensionService } from '../interfaces.js'
 import { logger } from '../infra/logger.js'
 import { atomicWrite } from '../utils/fs-utils.js'
+import { quarantineCorruptFile } from '../utils/json-store.js'
 
 /** JSON 序列化缩进（与 config-service.ts 共用约定）。 */
 const JSON_INDENT = 2
+
+/** 诊断日志里的损坏内容截断长度（对齐 provider-extras-store 的 SCHEMA_SNIPPET_MAX 家族形态）。 */
+const SCHEMA_SNIPPET_MAX = 120
 
 /**
  * 生成 atomicWrite 的唯一 tmp 后缀（时间戳 + 随机串），避免并发写入撞固定 .tmp 文件。
@@ -55,6 +59,26 @@ export class PresetGuardError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'PresetGuardError'
+  }
+}
+
+/**
+ * pi-presets.json 损坏降级态错误（M4/RT-7#2）。
+ *
+ * 触发场景：读盘解析失败（JSON 畸形 / 顶层非对象）已隔离保现场后，任一写方法
+ * （savePreset / deletePreset / setDefaultPresetId / recordUsage / importPresets）
+ * 拒绝以空骨架全量覆写时抛出。message 含被隔离副本路径与恢复指引；
+ * code 经 preset-message-handler 的 sendPresetError 透传为 error envelope code。
+ */
+export class PresetStoreCorruptedError extends Error {
+  readonly code = 'preset_store_corrupted'
+  constructor(presetPath: string, quarantinePath?: string) {
+    const copyRef = quarantinePath ?? `${presetPath}.corrupt-<ts>`
+    super(
+      `pi-presets.json 已损坏并被隔离（副本：${copyRef}），已拒绝本次写入以防空预设覆写。` +
+      '恢复指引：对比 .corrupt 副本找回原预设写回 pi-presets.json 后重试',
+    )
+    this.name = 'PresetStoreCorruptedError'
   }
 }
 
@@ -197,6 +221,14 @@ export class PresetService {
    */
   private presetFileCache: { mtimeMs: number; size: number; file: PiPresetsFile } | undefined
 
+  /**
+   * 损坏降级态（M4/RT-7#2）：读盘解析失败已隔离后置位（quarantinePath 供错误消息
+   * 指明取证副本入口）；原位文件恢复健康（成功解析出合法顶层对象）时清除。
+   * 置位期间 savePresetsFile 拒绝一切写入——空骨架 + 本次变更的全量覆写会把用户
+   * 全部自定义预设静默清空。
+   */
+  private corruptedState: { quarantinePath: string | undefined } | undefined
+
   constructor(
     private readonly configStore: IConfigStore,
     // extensionService 本 wave 不用，但 wave2 的 resolve 依赖它（getDiscoveredAndDisabled）。
@@ -217,10 +249,11 @@ export class PresetService {
   /**
    * 加载 pi-presets.json（容错，S-RT-2：带 mtime 缓存）。
    *
-   * 容错策略（与 config-service.loadAppConfig L216-232 对齐）：
-   *   - 文件不存在 → 空骨架兜底（presets: []）
-   *   - JSON 畸形 → 空骨架兜底 + console.warn（不抛错）
-   *   - 顶层非对象/presets 非数组 → 空骨架兜底 + console.warn
+   * 容错策略（M4/RT-7#2：损坏先隔离保现场，写侧拒绝空骨架覆写）：
+   *   - 文件不存在 → 空骨架兜底（presets: []），不触碰降级态
+   *   - JSON 畸形 / 顶层非对象 → quarantineCorruptFile 隔离 + 空骨架兜底 +
+   *     置 corruptedState（savePresetsFile 据此拒绝写入）
+   *   - presets 非数组 / 条目畸形 → 逐项折叠丢弃（既有语义，不算损坏）
    *
    * 缓存：statSync 拿 (mtimeMs, size)，命中缓存键则直接返回缓存 file（跳过 readFileSync + JSON.parse）；
    * miss 或 stat 失败则读盘解析并更新缓存。返回的 PiPresetsFile 是深拷贝，避免调用方 mutation 污染缓存。
@@ -251,16 +284,20 @@ export class PresetService {
    * 从磁盘读取并解析 pi-presets.json（容错，S-RT-2 抽出以便 loadPresetsFile 复用）。
    *
    * 主函数只留编排：读文件容错（readPresetsObject）→ presets 逐项 coerce →
-   * usage/defaultPresetId 透传兜底。
+   * usage/defaultPresetId 透传兜底。损坏（JSON 畸形 / 顶层非对象）由 readPresetsObject
+   * 隔离保现场，本函数置 corruptedState（写侧据此拒绝空骨架覆写，M4/RT-7#2）。
    */
   private parsePresetsFileFromDisk(path: string): PiPresetsFile {
     if (!existsSync(path)) {
       return { presets: [], version: 1 }
     }
-    const obj = readPresetsObject(path)
-    if (!obj) {
+    const read = readPresetsObject(path)
+    if (!read.obj) {
+      this.corruptedState = { quarantinePath: read.quarantinePath }
       return { presets: [], version: 1 }
     }
+    this.corruptedState = undefined
+    const obj = read.obj
     // 逐项类型守卫：只接受形似 PiLaunchPreset 的对象，丢弃畸形项（防御性，不抛错）。
     // W-RT-1：coercePreset 经 shared isPiLaunchPreset 做 toolMode/extensionMode 枚举白名单校验。
     const presets = coercePresetsArray(
@@ -293,15 +330,31 @@ export class PresetService {
   }
 
   /**
+   * 降级态守卫（M4/RT-7#2）：pi-presets.json 损坏隔离后拒绝一切写入语义。
+   * savePresetsFile 入口统一拦截实际落盘；deletePreset 另在方法入口拦截（骨架视图里
+   * 「预设不存在 → no-op 成功」是对降级态的谎言——被删项可能就在 .corrupt 副本里）。
+   */
+  private assertNotCorrupted(): void {
+    if (this.corruptedState) {
+      throw new PresetStoreCorruptedError(this.piPresetsPath(), this.corruptedState.quarantinePath)
+    }
+  }
+
+  /**
    * 保存 pi-presets.json（atomicWrite + 唯一 tmp 后缀，与 config-service.saveAppConfig 同模式）。
+   *
+   * [M4/RT-7#2] 损坏降级态下拒绝写入：读盘解析失败回空骨架后，任何 savePresetsFile
+   * 都会把「空 presets + 本次变更」全量覆写——用户全部自定义预设静默清空。抛
+   * PresetStoreCorruptedError（带 code），经 preset-message-handler 转 error envelope。
    *
    * S-RT-2：写盘后立即 invalidate 缓存（写后 mtime/size 必变，但显式清避免下一次读的 stat 比对冗余，
    * 且防止 atomicWrite 的 tmp rename 时序下读到旧 mtime 的极端竞态——下次 loadPresetsFile 会重新 stat + 读盘）。
    */
   private savePresetsFile(file: PiPresetsFile): void {
+    this.assertNotCorrupted()
+    const path = this.piPresetsPath()
     const cd = this.configStore.getConfigDir()
     if (!existsSync(cd)) mkdirSync(cd, { recursive: true })
-    const path = this.piPresetsPath()
     atomicWrite(path, JSON.stringify(file, null, JSON_INDENT), uniqueTmpSuffix())
     // S-RT-2：写盘后失效缓存。下次 loadPresetsFile 会重新 stat + 读盘拿到新内容。
     this.presetFileCache = undefined
@@ -448,6 +501,9 @@ export class PresetService {
     if (DEFAULT_PRESETS.some(p => p.id === presetId)) {
       throw new PresetGuardError(`cannot delete builtin preset '${presetId}'`)
     }
+    // 降级态守卫在方法入口而非 savePresetsFile：骨架视图里「条目不存在 → no-op 成功」
+    // 是对降级态的谎言（被删项可能就在 .corrupt 副本里），必须拒绝（M4/RT-7#2）
+    this.assertNotCorrupted()
     const file = this.loadPresetsFile()
     const before = file.presets.length
     file.presets = file.presets.filter(p => p.id !== presetId)
@@ -654,25 +710,33 @@ export class PresetService {
 // ── 内部 helpers ──────────────────────────────────────────────────
 
 /**
- * 读 pi-presets.json 原始内容并校验顶层形状（容错）。
+ * 读 pi-presets.json 原始内容并校验顶层形状（容错 + 损坏隔离）。
  *
- * 容错策略（与 config-service.loadAppConfig L216-232 对齐）：
- *   - JSON 畸形 → console.warn + undefined（调用方兜底空骨架，不抛错）
- *   - 顶层非对象/数组/null → console.warn + undefined
+ * 容错策略（M4/RT-7#2 升级：损坏不再只 warn 回 undefined，先隔离保现场）：
+ *   - JSON 畸形 / 顶层非对象 / null / 数组 → quarantineCorruptFile 隔离为
+ *     `<path>.corrupt-<ts>` + 返回 { obj: undefined, quarantinePath }——调用方
+ *     （parsePresetsFileFromDisk）置降级态，写侧拒绝以空骨架覆写
+ *   - 隔离 rename 失败（目录只读等）返回 quarantinePath: undefined，原文件保留原位
  */
-function readPresetsObject(path: string): Record<string, unknown> | undefined {
+function readPresetsObject(path: string): { obj: Record<string, unknown> | undefined; quarantinePath: string | undefined } {
   let raw: unknown
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'))
   } catch (e) {
-    console.warn(`[preset-service] pi-presets.json is not valid JSON, ignoring: ${stringifyError(e)}`)
-    return undefined
+    const quarantinePath = quarantineCorruptFile(path, { tag: 'preset-service', reason: 'parse failed', cause: e })
+    console.warn(`[preset-service] pi-presets.json is not valid JSON, quarantined: ${stringifyError(e)}`)
+    return { obj: undefined, quarantinePath }
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    console.warn('[preset-service] pi-presets.json top-level is not an object, ignoring')
-    return undefined
+    const quarantinePath = quarantineCorruptFile(path, {
+      tag: 'preset-service',
+      reason: 'top-level is not a JSON object',
+      cause: new Error(`unexpected shape: ${JSON.stringify(raw).slice(0, SCHEMA_SNIPPET_MAX)}`),
+    })
+    console.warn('[preset-service] pi-presets.json top-level is not an object, quarantined')
+    return { obj: undefined, quarantinePath }
   }
-  return raw as Record<string, unknown>
+  return { obj: raw as Record<string, unknown>, quarantinePath: undefined }
 }
 
 /** presets 数组逐项 coerce（coercePreset 校验失败的畸形项直接丢弃）。 */
