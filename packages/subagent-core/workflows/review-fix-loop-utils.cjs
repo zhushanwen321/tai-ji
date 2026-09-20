@@ -1167,17 +1167,19 @@ function reconcileGroups(rawGroups, activeEntries) {
   return groups.map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
 }
 
+/** 数字字段多键名归一（5.1→5.7 键名演进）：按序取首个 number 形态键，全缺省返回 fallback */
+function pickNumber(parsed, keys, fallback) {
+  for (const k of keys) {
+    if (typeof parsed[k] === "number") return parsed[k];
+  }
+  return fallback;
+}
+
 function normalizeAggregatorResult(raw) {
   const parsed = parseResult(raw);
   if (!parsed) return null;
-  const mustFix =
-    typeof parsed.must_fix === "number" ? parsed.must_fix :
-    typeof parsed.totalMustFix === "number" ? parsed.totalMustFix :
-    typeof parsed.mustFix === "number" ? parsed.mustFix : undefined;
-  const suggestion =
-    typeof parsed.suggestion === "number" ? parsed.suggestion :
-    typeof parsed.totalSuggestions === "number" ? parsed.totalSuggestions :
-    typeof parsed.suggestions === "number" ? parsed.suggestions : 0;
+  const mustFix = pickNumber(parsed, ["must_fix", "totalMustFix", "mustFix"], undefined);
+  const suggestion = pickNumber(parsed, ["suggestion", "totalSuggestions", "suggestions"], 0);
   if (typeof mustFix !== "number") return null;
   // 5.1/5.7 severity 结构化：must_fix_ids 支持 ["MF-1"]（旧）与 [{id, severity}]（新，
   // severity: critical/major/minor——converged 终止的「无 critical」判定数据源）。
