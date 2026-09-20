@@ -13,7 +13,6 @@ import { createAckNotifyDedup, planAckNotify, shouldNotifyUnpersisted } from '..
 import type { AckNotifyPlan } from '../ack-notify.js'
 import {
   ACK_CONFIRM_KEY,
-  ACK_NOT_PERSISTED_HINT_KEY,
   ACK_NOT_PERSISTED_KEY,
   dictionaryKeys,
   t,
@@ -165,7 +164,6 @@ describe('createAckNotifyDedup：同 key 只发一次', () => {
 const ACK_KEYS: readonly string[] = [
   ACK_CONFIRM_KEY,
   ACK_NOT_PERSISTED_KEY,
-  ACK_NOT_PERSISTED_HINT_KEY,
 ]
 
 /** 越界承诺词表：本机制只保证「写入会话文件」，不得声称存储级持久化。 */
@@ -199,14 +197,6 @@ describe('i18n：ack 文案 zh/en 双侧', () => {
     }
   })
 
-  it('ack.notPersistedHint 无参数即可渲染出非空文案', () => {
-    for (const locale of LOCALES) {
-      const text = t(ACK_NOT_PERSISTED_HINT_KEY, undefined, locale)
-      expect(text.length).toBeGreaterThan(0)
-      expect(text).not.toBe(ACK_NOT_PERSISTED_HINT_KEY)
-      expect(text).not.toContain('{')
-    }
-  })
 
   it('缺参时保留占位符原样（既有插值机制：不静默丢字段）', () => {
     expect(t(ACK_NOT_PERSISTED_KEY, undefined, 'zh-CN')).toContain('{name}')

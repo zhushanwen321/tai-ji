@@ -25,11 +25,11 @@ import { buildAckStreamSimple, computeAckAvailability } from './ack-provider.js'
 import type { SchedulerBackend } from './backend.js'
 import { ACK_CONFIRM_KEY } from './i18n.js'
 import type { SchedulerEntryLike } from './replay.js'
+import { TICK_INTERVAL_MS } from './runtime.js'
 import { ACK_CUSTOM_TYPE, ACK_CUSTOM_TYPE_PREFIX } from './types.js'
 import type { AckAvailability, AckFailureKind, AckState, SchedulerCurrentModel } from './types.js'
 
 /** 30s 写盘自检窗口（设计 §3.3 D5）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
-export const ACK_WRITE_CHECK_MS = 30_000
 
 /**
  * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），
@@ -40,6 +40,7 @@ export const ackState: AckState = {
   pending: null,
   window: null,
   ackTurnStarted: false,
+  ackStreamCalled: false,
   writeCheckTimer: null,
   taskId: null,
   taskName: '',
@@ -107,6 +108,7 @@ export function resetAckState(): void {
   ackState.pending = null
   ackState.window = null
   ackState.ackTurnStarted = false
+  ackState.ackStreamCalled = false
   ackState.taskId = null
   ackState.taskName = ''
   ackState.ackText = ''
@@ -161,7 +163,10 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         // e3-no-turn = 合成轮未启动 ⇒ honest-async 文案（同一如实键）。
         notifyHonest('e3-no-turn')
       }
-    }, ACK_WRITE_CHECK_MS)
+      // F1（一致性审查）：无论判定结果如何都必须清 pending——顶部去重守卫以 pending 为准，
+      // 残留会让本会话后续创建全部静默失效（既不 ack 也不通知），直到会话边界。
+      ackState.pending = null
+    }, TICK_INTERVAL_MS)
     timer.unref?.()
     ackState.writeCheckTimer = timer
   }
@@ -227,6 +232,12 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       if (sessionFile === undefined) return
       if (existsSync(sessionFile)) return
 
+      // ③ 非空闲（F2 修正：判据必须在记录上下文与可用性判定之前）：在跑的轮次必然产出
+      //    assistant 消息 ⇒ 自然打开落盘开关 ⇒ 任务照样落盘。此时若先判可用性并通知，
+      //    会在「忙 + 覆写不可用」组合下对**已落盘**的会话发"未写入"= 反向撒谎（D2/D8）。
+      //    故此处直接返回：不记录上下文、不通知、不武装定时器。
+      if (!isIdle) return
+
       // 记录本次触发上下文（message_start / 30s 自检 / 边界清理共享）。
       ackState.taskId = task.id
       ackState.taskName = task.name ?? task.id
@@ -256,10 +267,6 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         notifyHonest('e8-no-base')
         return
       }
-
-      // ⑤ 非空闲：在跑的轮次必然产出 assistant 消息 ⇒ 自然打开落盘开关（设计 D4/G4）。
-      //    此时注入合成轮反而可能吞掉用户消息，故什么都不做（含不武装定时器）。
-      if (!isIdle) return
 
       // ⑥ 注入触发器（triggerTurn 让 pi 为一个 custom 消息启动一轮）并武装自检。
       await deps.backend.sendMessage(
@@ -296,7 +303,11 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
             model,
             text: ackState.ackText,
             // 返回 stream 之前同步自撤（buildAckStreamSimple 契约）。
-            onCalled: () => selfUnregister(),
+            // ackStreamCalled 置位是 E2 归因的唯一信号（窗口开着却从未被调用 ⇒ 真实轮应答）。
+            onCalled: () => {
+              ackState.ackStreamCalled = true
+              selfUnregister()
+            },
           }),
         })
         ackState.window = { registered: true }
@@ -310,6 +321,15 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
     },
 
     handleTurnEnd() {
+      // E2 归因（一致性审查 F3）：窗口仍注册但我们的 streamSimple 从未被调用 ⇒ 本轮由真实
+      // provider 应答（覆写未生效）。语义 = 任务其实已落盘 ⇒ 不发失败通知，只留 warn 归因。
+      if (ackState.window?.registered === true && !ackState.ackStreamCalled) {
+        const failure: AckFailureKind = 'e2-not-hit'
+        deps.log.warn('ack override not hit (E2); real provider answered this turn', {
+          taskId: ackState.taskId,
+          notify: planAckNotify(failure).kind,
+        })
+      }
       // 安全网（幂等）：正常路径已在 streamSimple 调用点自撤；这里覆盖「覆写未被调用」。
       // 不取消 30s 定时器——它服务通知判定。
       selfUnregister()

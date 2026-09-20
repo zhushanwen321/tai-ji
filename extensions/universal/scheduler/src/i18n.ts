@@ -163,7 +163,6 @@ export const ACK_CONFIRM_KEY = 'ack.confirm'
 /** 落盘失败如实文案（同步与异步共用同一键）。插值参数：`{name}`。 */
 export const ACK_NOT_PERSISTED_KEY = 'ack.notPersisted'
 /** 恢复指引（可选展示，供 UI 复用；内容比 notPersisted 更偏操作步骤）。无插值参数。 */
-export const ACK_NOT_PERSISTED_HINT_KEY = 'ack.notPersistedHint'
 
 // ── 词典（zh-CN / en-US，文案表见设计 §7.5）──
 
@@ -201,7 +200,6 @@ const ZH_CN: Dictionary = {
   // 之类存储级承诺——ack.notPersisted 是失败面，confirm 是成功面，两者都不越界。
   'ack.confirm': '已保存任务：{name}（{schedule}）。',
   'ack.notPersisted': '已创建任务 {name}，但未写入会话文件。在本会话说一句话即可保存。',
-  'ack.notPersistedHint': '在本会话说任意一句话；或重启应用后重新创建。',
 
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': '定时任务',
@@ -245,7 +243,6 @@ const EN_US: Dictionary = {
   'ack.confirm': 'Task saved: {name} ({schedule}).',
   'ack.notPersisted':
     'Created task {name}, but it was not written to the session file. Say anything in this session to save it.',
-  'ack.notPersistedHint': 'Say anything in this session, or restart the app and create the task again.',
 
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': 'Scheduled tasks',

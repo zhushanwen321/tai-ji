@@ -19,11 +19,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ackState,
-  ACK_WRITE_CHECK_MS,
   createAckTurnController,
   resetAckState,
   type AckTurnDeps,
 } from '../ack-turn.js'
+import { TICK_INTERVAL_MS } from '../runtime.js'
 import type { SchedulerBackend } from '../backend.js'
 import type { SchedulerEntryLike } from '../replay.js'
 import {
@@ -311,7 +311,7 @@ describe('ack-turn 编排', () => {
     const a = makeHarness()
     await startAck(a.controller)
     expect(a.notifyCalls).toHaveLength(0)
-    vi.advanceTimersByTime(ACK_WRITE_CHECK_MS)
+    vi.advanceTimersByTime(TICK_INTERVAL_MS)
     expect(a.notifyCalls).toHaveLength(1)
     expect(a.notifyCalls[0]!.level).toBe('warning')
     expect(ackState.writeCheckTimer).toBeNull()
@@ -322,7 +322,7 @@ describe('ack-turn 编排', () => {
     const b = makeHarness()
     await startAck(b.controller)
     b.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
-    vi.advanceTimersByTime(ACK_WRITE_CHECK_MS)
+    vi.advanceTimersByTime(TICK_INTERVAL_MS)
     expect(b.notifyCalls).toHaveLength(0)
   })
 
@@ -390,5 +390,73 @@ describe('ack-turn 编排', () => {
 
     expect(h.notifyCalls).toHaveLength(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+// ── 阶段 4 修复的回归用例（一致性审查 F1/F2/F3）──
+
+describe('ack-turn 修复回归（一致性审查 F1/F2/F3）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    resetAckState()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    resetAckState()
+  })
+
+  it('F1：30s 自检后清 pending ⇒ 后续创建仍可再次触发 ack（不被顶部去重守卫永久挡死）', async () => {
+    const a = makeHarness({ builtinIds: new Set(['anthropic']) })
+    await a.controller.maybeStartAck({
+      task: TASK,
+      model: MODEL,
+      isIdle: true,
+      isToggleDisabled: false,
+    })
+    expect(a.captured.sent).toHaveLength(1)
+    expect(ackState.pending).not.toBeNull()
+
+    vi.advanceTimersByTime(TICK_INTERVAL_MS)
+    expect(a.notifyCalls).toHaveLength(1) // e3-no-turn 如实补发
+    expect(ackState.pending).toBeNull() // ← 修复点
+
+    await a.controller.maybeStartAck({
+      task: { ...TASK, id: 't2' },
+      model: MODEL,
+      isIdle: true,
+      isToggleDisabled: false,
+    })
+    expect(a.captured.sent).toHaveLength(2) // 第二次创建仍能触发
+  })
+
+  it('F2：!isIdle ⇒ 即使覆写不可用也不发如实文案（忙时轮次自然落盘，通知即反向撒谎）', async () => {
+    const a = makeHarness({ idle: false, builtinIds: new Set(), modelsJsonIds: new Set() })
+    await a.controller.maybeStartAck({
+      task: TASK,
+      model: MODEL,
+      isIdle: false,
+      isToggleDisabled: false,
+    })
+    expect(a.notifyCalls).toHaveLength(0)
+    expect(a.captured.sent).toHaveLength(0)
+    expect(ackState.taskId).toBeNull() // 未记录上下文 ⇒ 边界也不会误判写盘
+  })
+
+  it('F3：窗口注册但 streamSimple 未被调用 ⇒ turn_end 记 E2 归因 warn 且不发通知', () => {
+    const a = makeHarness({ builtinIds: new Set(['anthropic']) })
+    return a.controller
+      .maybeStartAck({ task: TASK, model: MODEL, isIdle: true, isToggleDisabled: false })
+      .then(() => {
+        a.controller.handleMessageStart({
+          role: 'custom',
+          customType: ACK_CUSTOM_TYPE,
+          content: 'x',
+        })
+        expect(a.captured.registered).toHaveLength(1)
+        a.controller.handleTurnEnd() // 未调用 streamSimple ⇒ E2 形态
+        expect(a.warns.join('|')).toContain('E2')
+        expect(a.notifyCalls).toHaveLength(0) // 真实轮已应答 ⇒ 不提示
+        expect(a.captured.unregistered).toEqual(['anthropic']) // 安全网注销仍生效
+      })
   })
 })

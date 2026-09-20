@@ -232,6 +232,8 @@ export interface AckState {
   model: SchedulerCurrentModel | undefined
   /** 建任务期记录的会话文件路径（30s 自检 / 边界写盘判定的只读观测点；undefined = 记录时文件尚不存在） */
   sessionFile: string | undefined
+  /** 我们的 streamSimple 是否被调用过（E2 归因唯一信号：窗口开着但从未被调用 ⇒ 真实 provider 应答了）*/
+  ackStreamCalled: boolean
   /** E6（注销抛错）后标记：下一个清理点重试一次注销 */
   needsRetry: boolean
   /** 可用性预计算结果缓存（每会话/每 provider 一次；providerId 随会话模型切换才失效） */

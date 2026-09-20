@@ -16,7 +16,8 @@ const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
 const RATE_LIMIT_PER_MINUTE = 6
-const TICK_INTERVAL_MS = 30_000
+// 导出：ack 写盘自检复用同一节奏常量（禁新造魔数），值 = tick 间隔。
+export const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
 // U4 dispatch 模型切换（设计 D3 修订版）：
