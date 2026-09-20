@@ -1,3 +1,5 @@
+import type { ProviderConfig } from '@earendil-works/pi-coding-agent'
+
 // ── 调度规格 ──
 
 export type ScheduleSpec =
@@ -158,3 +160,90 @@ export interface AddOptions {
   /** 任务执行模型（scoped model id，provider/model）；缺省 = 跟随会话当前模型 */
   model?: string
 }
+
+// ── ack 确认轮（零 token 本地合成轮）契约 ──
+//
+// ack 机制在命令路径创建任务后跑一次本地合成轮，打开 pi 的会话落盘开关（设计
+// scheduler-command-path-persistence §3.3 D3/D4）。以下类型是 backend 依赖反转面与编排
+// 之间的共享契约：类型放 types.ts（纯类型/常量，无运行时逻辑），供 PiSchedulerBackend
+// 与单测夹具共同消费。
+
+/**
+ * ack 触发器 custom message 的 customType 前缀：避让 dispatch 归属前缀 `pi-scheduler:`，
+ * 使 `message_start` 武装判别（startsWith）不会把 dispatch / 任务消息误识别为触发器。
+ */
+export const ACK_CUSTOM_TYPE_PREFIX = 'pi-scheduler-ack:'
+
+/**
+ * ack 触发器 customType 单点：派生自前缀，避免「startsWith 判别用前缀、写入/精确匹配用全串」
+ * 两处字面量漂移（改一处漏一处会让触发器永不被识别，功能静默失效）。
+ */
+export const ACK_CUSTOM_TYPE = `${ACK_CUSTOM_TYPE_PREFIX}ack`
+
+/** ack 可用性预计算结果（临界区外算好，武装点同步 registerProvider 无 await）。 */
+export type AckAvailability =
+  | { available: true }
+  | { available: false; reason: AckUnavailableReason }
+
+/**
+ * ack 不可用原因：`no-base` = 覆写会在注销时丢失基座的 provider（仅被其它扩展 native
+ * 重载注册过）；`toggle-disabled` = 显式禁用开关；`check-failed` = 基座判据导入/读取失败
+ * （fail-closed）。三者都走「不覆写 + 如实文案」路径。
+ */
+export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed'
+
+/**
+ * ack 失败分类（错误规格 E1–E8b）。仅少数形态需要用户可见提示，分类纯函数据此分发：
+ * `e1-register`（registerProvider 静默回退基座）、`e2-not-hit`（覆写未被调用）、
+ * `e3-no-turn`（合成轮未启动）、`e4-provider-error`（provider 抛错）、
+ * `e5-interrupted`（轮次被打断）、`e6-unregister`（注销抛错）、
+ * `e8-no-base`（无基座不可覆写）、`e8b-hybrid`（hybrid 形态）。
+ */
+export type AckFailureKind =
+  | 'e1-register'
+  | 'e2-not-hit'
+  | 'e3-no-turn'
+  | 'e4-provider-error'
+  | 'e5-interrupted'
+  | 'e6-unregister'
+  | 'e8-no-base'
+  | 'e8b-hybrid'
+
+/**
+ * ack 模块级编排状态（u-ack-turn 的单例状态域）。类型放此处而非编排模块，便于编排单测
+ * 构造夹具与跨模块引用；生命周期由 session_start / session_shutdown 跨代清理。
+ */
+export interface AckState {
+  /** 已注入的触发器（等待命中的 ack 轮）；null = 无待命触发器 */
+  pending: { taskId: string; sentAt: number } | null
+  /** 当前覆写窗口；`registered` = 覆写是否仍在 pi 注册表（one-shot 自撤后仍非 null 直到 turn_end 安全网） */
+  window: { registered: boolean } | null
+  /** ack 轮是否已启动（30s 写盘自检的判据之一：文件不存在且未启动才补发告警） */
+  ackTurnStarted: boolean
+  /** 30s 写盘自检定时器句柄（unref；session_start/shutdown 取消） */
+  writeCheckTimer: ReturnType<typeof setTimeout> | null
+}
+
+/**
+ * 会话当前模型的最小投影（`SchedulerBackend.getCurrentModel()` 返回值）。
+ *
+ * 只取 ack 合成轮所需三字段：`api`（registerProvider 覆写 config.api）、`provider`
+ * （覆写目标 provider id）、`id`（合成 assistant 行的 model 字段）。`api` 用
+ * `NonNullable<ProviderConfig['api']>`（= pi 的 `Api`）而非 `string`——覆写 config 的类型
+ * 就是 ProviderConfig，同一类型源避免下游为收窄做断言（禁 any / 免断言）。
+ */
+export interface SchedulerCurrentModel {
+  provider: string
+  api: NonNullable<ProviderConfig['api']>
+  id: string
+}
+
+/**
+ * `registerProvider` 的覆写 config 最小面：ack 合成轮只带 `api` + `streamSimple`，不带
+ * `models`（覆写不得改变 provider 的模型清单）。
+ *
+ * 不重定义字段——直接 Pick 自 pi 的 `ProviderConfig`，与 `pi.registerProvider` 的实参类型
+ * 同源，保证 `PiSchedulerBackend.registerProvider` 转发零转换；两字段均为可选（api 缺省 =
+ * 沿用基座 api）。
+ */
+export type SchedulerProviderOverride = Pick<ProviderConfig, 'api' | 'streamSimple'>
