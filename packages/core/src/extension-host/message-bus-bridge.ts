@@ -7,11 +7,13 @@
  * unsubscribe（防 listener 翻倍，项目规则#2）。
  *
  * 映射表（IF3）：
- *   9 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
+ *   12 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
  *     plugin-status-set-update；permissionRequest→plugin-permission-request；crashed→
  *     plugin-crashed；notification→plugin-notification；config→plugin-config-changed；
  *     messageDecoration→plugin-message-decoration；statusChange→plugin-status-change；
- *     uiRequest→ui-request
+ *     uiRequest→ui-request；viewUpdate→extension-widget；modalState→plugin:modalState；
+ *     headerActionUpdate→plugin:headerActionUpdate（后两成员为 plugin-header-action-modal-points
+ *     新增点位帧，消费端 = plugin-modal-slot / HeaderActionStore 经 InternalEventBus 订阅）
  *   5 个 extension 系：widget/widgetGui→extension-widget；status→extension-status；
  *     notify→extension-notify；ui_request→ui-request（与 plugin:uiRequest 归一）
  *
@@ -43,7 +45,7 @@
  * 例外（CT-D5 毒化隔离）：statusBarUpdate 的 items 内单条坏值跳过该条保留其余
  * （全坏才整包 error）——坏条目来自单个插件，不连坐其余插件的条目。
  */
-import type { InternalEvent, StatusBarEntry } from './types'
+import type { InternalEvent, StatusBarEntry, PluginModalClosedReason } from './types'
 import type { InternalEventBus } from './internal-event-bus'
 import type { PluginMessageSource, IncomingPluginMessage } from './plugin-message-source'
 
@@ -247,6 +249,74 @@ function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
   }
 }
 
+// ── plugin-header-action-modal-points 两帧守卫（AP-1/AP-2）────────────
+
+const MODAL_WIDTHS = new Set(['sm', 'md', 'lg'])
+
+const MODAL_CLOSED_REASONS = new Set(['dismissed', 'session-switched', 'host-overlay', 'replaced', 'plugin-gone'])
+
+/**
+ * plugin:modalState 解析守卫（AP-2 开合帧：runtime 仲裁结果的 S→C 全局广播，transient）。
+ * payload = { pluginId, modalId, sessionId, title?, width?, state:'open'|'closed', epoch, reason? }。
+ * sessionId 必带（AP-2 契约，payload 归属信息；缺 → null 守卫失败丢弃 + error）。
+ * epoch 必须为 ≥1 的安全整数（槽代数契约：正整数、按每次生效 open 严格递增，plugin-modal-slot 同款）。
+ * width/reason 越界置 undefined（宽容窄化，对齐 parseStatusBarItem 的 scope 处置）。
+ */
+export function parseModalState(msg: IncomingPluginMessage): InternalEvent | null {
+  const payload = asRecord(msg.payload)
+  if (!payload) return null
+  const pluginId = asString(payload.pluginId)
+  const modalId = asString(payload.modalId)
+  const sessionId = asString(payload.sessionId)
+  const epoch = payload.epoch
+  if (pluginId === null || modalId === null || sessionId === null) return null
+  if (payload.state !== 'open' && payload.state !== 'closed') return null
+  if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1) return null
+  return {
+    kind: 'plugin:modalState',
+    modalState: {
+      pluginId,
+      modalId,
+      sessionId,
+      title: asOptionalString(payload.title),
+      width: typeof payload.width === 'string' && MODAL_WIDTHS.has(payload.width)
+        ? (payload.width as 'sm' | 'md' | 'lg')
+        : undefined,
+      state: payload.state,
+      epoch,
+      reason: typeof payload.reason === 'string' && MODAL_CLOSED_REASONS.has(payload.reason)
+        ? (payload.reason as PluginModalClosedReason)
+        : undefined,
+    },
+  }
+}
+
+/**
+ * plugin:headerActionUpdate 解析守卫（AP-1 徽标更新帧）。
+ * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled? }。
+ * sessionId 必带（AP-1 契约：渲染端按 (sessionId, headerActionId) 写会话分区；
+ * 缺 → null 守卫失败丢弃 + error）。badge ≤4 字符的截断由渲染端承担，守卫存原文。
+ */
+export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEvent | null {
+  const payload = asRecord(msg.payload)
+  if (!payload) return null
+  const pluginId = asString(payload.pluginId)
+  const headerActionId = asString(payload.headerActionId)
+  const sessionId = asString(payload.sessionId)
+  if (pluginId === null || headerActionId === null || sessionId === null) return null
+  return {
+    kind: 'plugin:headerActionUpdate',
+    headerAction: {
+      pluginId,
+      headerActionId,
+      sessionId,
+      badge: asOptionalString(payload.badge),
+      tooltip: asOptionalString(payload.tooltip),
+      disabled: typeof payload.disabled === 'boolean' ? payload.disabled : undefined,
+    },
+  }
+}
+
 // ── 5 个 extension:* 窄化守卫（pluginId 一律 ''，wire 无该字段）──────
 
 function parseExtensionWidget(msg: IncomingPluginMessage): InternalEvent | null {
@@ -329,6 +399,8 @@ const PLUGIN_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEv
   'plugin:statusChange': parseStatusChange,
   'plugin:uiRequest': parseUiRequest,
   'plugin:viewUpdate': parseViewUpdate,
+  'plugin:modalState': parseModalState,
+  'plugin:headerActionUpdate': parseHeaderActionUpdate,
 }
 
 const EXTENSION_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEvent | null> = {

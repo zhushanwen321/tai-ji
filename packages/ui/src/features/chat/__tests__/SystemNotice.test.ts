@@ -1,5 +1,6 @@
 /**
- * SystemNotice.vue 组件测试（U2b 定向气泡渲染 + [system-notice-rendering-upgrade U3] 增强规格）。
+ * SystemNotice.vue 组件测试（U2b 定向气泡渲染 + [system-notice-rendering-upgrade U3] 增强规格
+ * + [notice-family-phrase-detail 2026-09-18 方案 A] 短语优先 + 悬停详情）。
  *
  * 覆盖：
  * - subagent-directive custom message（reload 形态：role system + customType + details +
@@ -8,14 +9,16 @@
  *   （消息不静默消失——「渲染过滤不丢消息」规则 9）
  * - respawn 提示条分支派发与降级（[u8-pi-respawn]）
  * - [U3] background-bash 结构化行三分支：details 命中（natural / timeout）/ parse null 兜底原文
- * - [U3] D3 增强规格：两端渐隐横线 / 主文案与 mono 主体分档 / meta 钉右拆段（tokens 从文案拆出）
+ * - [U3] D3 增强规格：两端渐隐横线 / 主文案分档 / meta 钉右拆段（tokens 从文案拆出）
+ * - [方案 A] 短语化：主体 = 终态短语（完成/失败/超时）+ 命令原文进悬停详情（HoverCard
+ *   portal 挂 body，mouseenter + open-delay 后可及）+ chip 退役 + 长 system 原文悬停全文
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/SystemNotice.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // mock vue-i18n 的 useI18n：自包含 t（UI 包的 vitest.setup mock 只回 key，本文件需断言真实文案
-// 形态——tokens 拆段 / 「后台」chip / 「已超时」复用键，口径见 helpers/i18n-mock）
+// 形态——短语义档 / exit meta / 悬停详情标题，口径见 helpers/i18n-mock）
 vi.mock('vue-i18n', async () => {
   const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
   return i18nMock({
@@ -23,8 +26,14 @@ vi.mock('vue-i18n', async () => {
     'panel.message.compactedTokens': '{tokens} tokens',
     'panel.message.branchCreated': '已创建分支（自 {from}）',
     'panel.message.branchCreatedNoFrom': '已创建分支',
-    'panel.message.bashBackgroundChip': '后台',
+    'panel.message.bashFinished': '后台命令已完成',
+    'panel.message.bashFinishedFailed': '后台命令执行失败',
+    'panel.message.bashTimedOut': '后台命令已超时',
     'panel.message.bashTimeout': '已超时',
+    'panel.message.bashCommandLabel': '完整命令',
+    'panel.message.noticeDetailLabel': '通知全文',
+    'common.copy': '复制',
+    'common.copied': '已复制',
     'panel.message.respawnRestored': '会话引擎已从崩溃中恢复。',
     'panel.message.respawnFailed': '引擎恢复失败，点此重试或新建会话',
     'panel.message.respawnFailedHint': '多次自动恢复未成功',
@@ -186,11 +195,11 @@ describe('SystemNotice respawn 提示条分支（u8-pi-respawn）', () => {
   })
 })
 
-// ── background-bash 结构化行（[system-notice-rendering-upgrade U3]，D1/D2）──────
+// ── background-bash 结构化行（[system-notice-rendering-upgrade U3] + 方案 A 短语化）──
 //
 // 生产端（base-tool-enhance notify.ts）在 sendMessage 附 details（taskId / command /
 // durationMs / endReason / exitCode），消费侧经 shared `parseBackgroundBashDetails`
-// 单点防御解析：命中 → 结构化行（命令 mono 主体 + 「后台」chip + exit/耗时钉右 meta）；
+// 单点防御解析：命中 → 终态短语主体 + exit/耗时钉右 meta + 命令原文悬停详情；
 // 解析 null（旧 session 无 details / 畸形载荷）→ 兜底原文行（Archive + content 原文，
 // 逐字节回到现状——content 给 LLM 接力的语义不受渲染形态影响）。
 
@@ -215,8 +224,19 @@ function bashMessage(over: Omit<Partial<Message>, 'details'> & { details?: unkno
   } as Message
 }
 
-describe('SystemNotice background-bash 结构化行（U3 / D2）', () => {
-  it('details 命中（natural / exit 0）→ 结构化行：SquareTerminal 图标 + 命令 mono 主体 + 「后台」chip + exit 0 · 耗时绿 meta；协议头不上屏', () => {
+/**
+ * 悬停详情打开（portal 挂 body，vue-test-utils 树外）：reka HoverCardTrigger 监听
+ * pointerenter/focus（非 mouseenter），触发后等 open-delay（组件 150ms）+ 余量，
+ * 再在 document 上查详情节点。afterEach 兑现清理（防 portal 残留）。
+ */
+async function openDetailAndQuery(wrapper: { find: (sel: string) => { trigger: (ev: string) => Promise<void> } }): Promise<Element | null> {
+  await wrapper.find('[data-testid="system-notice-body"]').trigger('pointerenter')
+  await new Promise((r) => setTimeout(r, 260))
+  return document.querySelector('[data-testid="system-notice-detail"]')
+}
+
+describe('SystemNotice background-bash 结构化行（U3 / D2 / 方案 A）', () => {
+  it('details 命中（natural / exit 0）→ 终态短语主体 + exit meta 绿档；命令不内联（悬停详情承载）', () => {
     const wrapper = mount(SystemNotice, { props: { message: bashMessage() } })
     const row = wrapper.find('.system-notice')
     expect(row.exists()).toBe(true)
@@ -226,21 +246,23 @@ describe('SystemNotice background-bash 结构化行（U3 / D2）', () => {
     expect(icon.classes()).toContain('size-[13px]')
     expect(icon.classes()).toContain('text-accent')
     expect(icon.attributes('stroke-width')).toBe('2.2')
-    // 命令 = mono 主体（details.command，非 content 原文）
+    // 主体 = 终态短语（方案 A：不再是命令原文 mono，命令移入悬停详情）
     const body = row.find('[data-testid="system-notice-text"]')
-    expect(body.text()).toBe('pnpm test --workspace extensions')
-    expect(body.classes()).toContain('font-mono')
-    // 「后台」chip
-    expect(row.find('[data-testid="system-notice-chip"]').text()).toBe('后台')
-    // 钉右 meta：exit 0 · 3m12s（秒级精度同 content 原文口径；成功绿）
+    expect(body.text()).toBe('后台命令已完成')
+    expect(body.classes()).not.toContain('font-mono')
+    expect(row.text()).not.toContain('pnpm test')
+    // chip 退役：短语已含「后台」语义
+    expect(row.find('[data-testid="system-notice-chip"]').exists()).toBe(false)
+    // 钉右 meta：exit 0 · 3m12s（成功绿）
     const meta = row.find('[data-testid="system-notice-meta"]')
     expect(meta.text()).toBe('exit 0 · 3m12s')
     expect(meta.classes()).toContain('text-success')
-    // content 是写给 LLM 的协议原文，不再上屏
+    // content 是写给 LLM 的协议原文，不上屏
     expect(row.text()).not.toContain('[background-bash]')
+    wrapper.unmount()
   })
 
-  it('exit ≠ 0（natural）→ 同结构行，meta 换 warn 色（语义色只随 exit 结果走）', () => {
+  it('exit ≠ 0（natural）→ 失败短语 + meta 换 warn 色（语义色只随 exit 结果走）', () => {
     const wrapper = mount(SystemNotice, {
       props: {
         message: bashMessage({
@@ -248,13 +270,14 @@ describe('SystemNotice background-bash 结构化行（U3 / D2）', () => {
         }),
       },
     })
+    expect(wrapper.find('[data-testid="system-notice-text"]').text()).toBe('后台命令执行失败')
     const meta = wrapper.find('[data-testid="system-notice-meta"]')
     expect(meta.text()).toBe('exit 1 · 5s')
     expect(meta.classes()).toContain('text-warn')
-    expect(wrapper.find('[data-testid="system-notice-chip"]').text()).toBe('后台')
+    wrapper.unmount()
   })
 
-  it('endReason=timeout → meta「已超时」（复用 bashTimeout 键，warn 色，不显 exit 段）', () => {
+  it('endReason=timeout → 超时终态短语，无 meta（终态结论进短语；耗时在详情 facts）', () => {
     const wrapper = mount(SystemNotice, {
       props: {
         message: bashMessage({
@@ -262,21 +285,20 @@ describe('SystemNotice background-bash 结构化行（U3 / D2）', () => {
         }),
       },
     })
-    const meta = wrapper.find('[data-testid="system-notice-meta"]')
-    expect(meta.text()).toBe('已超时')
-    expect(meta.classes()).toContain('text-warn')
-    expect(meta.text()).not.toContain('exit')
+    expect(wrapper.find('[data-testid="system-notice-text"]').text()).toBe('后台命令已超时')
+    expect(wrapper.find('[data-testid="system-notice-meta"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
-  it('解析 null（旧数据无 details）→ 兜底原文行逐字节回到现状（Archive 图标 + content 原文，无 chip / meta）', () => {
+  it('解析 null（旧数据无 details）→ 兜底原文行（Archive 图标 + content 原文，无 meta）', () => {
     const wrapper = mount(SystemNotice, { props: { message: bashMessage({ details: undefined }) } })
     const row = wrapper.find('.system-notice')
     expect(row.find('svg').classes()).toContain('lucide-archive')
     expect(row.find('[data-testid="system-notice-text"]').text()).toBe(
       '[background-bash] bt-3 finished (exit 0, 3m12s): pnpm test --workspace extensions',
     )
-    expect(row.find('[data-testid="system-notice-chip"]').exists()).toBe(false)
     expect(row.find('[data-testid="system-notice-meta"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('details 畸形（缺 command 必需字段）→ 同款兜底原文行，不抛错', () => {
@@ -286,9 +308,81 @@ describe('SystemNotice background-bash 结构化行（U3 / D2）', () => {
       },
     })
     const row = wrapper.find('.system-notice')
-    expect(row.find('[data-testid="system-notice-chip"]').exists()).toBe(false)
     expect(row.find('[data-testid="system-notice-text"]').text()).toContain('[background-bash]')
     expect(row.find('svg').classes()).toContain('lucide-archive')
+    wrapper.unmount()
+  })
+})
+
+// ── 悬停详情（[notice-family-phrase-detail 2026-09-18 方案 A]）──────────────
+//
+// 短语让出的无界载荷在 HoverCard 详情完整呈现：结构化行 = 命令原文 + facts（exit/耗时/终态）；
+// 自然语言行（兜底/branch 超阈值 40 字符）= 通知全文。portal 挂 body（document 查询），
+// 受控 open 由「有 detail 才打开」门控。
+
+describe('SystemNotice 悬停详情（方案 A）', () => {
+  afterEach(() => {
+    // portal 残留兑底清理（unmount 正常路径已移除，防御性兑底防串测）
+    document.querySelector('[data-testid="system-notice-detail"]')?.remove()
+  })
+
+  it('bash 行悬停 → 详情含完整命令 + facts（exit/耗时），可复制（clipboard 写入 + 反馈）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const wrapper = mount(SystemNotice, { props: { message: bashMessage() } })
+
+    const detail = await openDetailAndQuery(wrapper)
+    expect(detail).not.toBeNull()
+    expect(detail?.querySelector('[data-testid="system-notice-detail-body"]')?.textContent).toBe(
+      'pnpm test --workspace extensions',
+    )
+    expect(detail?.querySelector('[data-testid="system-notice-detail-facts"]')?.textContent).toContain('exit 0')
+    expect(detail?.textContent).toContain('3m12s')
+
+    // 复制按钮：写入剪贴板 + 文案切「已复制」
+    const copyBtn = detail?.querySelector<HTMLButtonElement>('[data-testid="system-notice-detail-copy"]')
+    copyBtn?.click()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(writeText).toHaveBeenCalledWith('pnpm test --workspace extensions')
+    expect(document.querySelector('[data-testid="system-notice-detail-copy"]')?.textContent).toContain('已复制')
+    wrapper.unmount()
+  })
+
+  it('长 system 原文（> 40 字符）→ 悬停全文详情；短文本不挂详情（行内已完整呈现）', async () => {
+    const long = '流式响应中断：远程主机强制关闭了一个现有连接（ECONNRESET），已自动重试 3 次仍失败，本轮回答可能不完整'
+    const wrapper = mount(SystemNotice, {
+      props: { message: { id: 'sys-l', role: 'system', content: long, status: 'complete', timestamp: NOW } as Message },
+    })
+    const detail = await openDetailAndQuery(wrapper)
+    expect(detail?.querySelector('[data-testid="system-notice-detail-body"]')?.textContent).toBe(long)
+    expect(detail?.textContent).toContain('通知全文')
+    wrapper.unmount()
+
+    const short = '连接已恢复'
+    const wrapper2 = mount(SystemNotice, {
+      props: { message: { id: 'sys-s', role: 'system', content: short, status: 'complete', timestamp: NOW } as Message },
+    })
+    const detail2 = await openDetailAndQuery(wrapper2)
+    expect(detail2).toBeNull()
+    wrapper2.unmount()
+  })
+
+  it('无 detail 的行：受控 open 恒 false，悬停不弹面板（族「静态无交互」判据的收窄例外外）', async () => {
+    const wrapper = mount(SystemNotice, {
+      props: {
+        message: {
+          id: 'sys-c',
+          role: 'system',
+          content: '',
+          status: 'complete',
+          timestamp: NOW,
+          compactionSummary: { summary: '已压缩', tokensBefore: 1000 },
+        } as Message,
+      },
+    })
+    const detail = await openDetailAndQuery(wrapper)
+    expect(detail).toBeNull()
+    wrapper.unmount()
   })
 })
 

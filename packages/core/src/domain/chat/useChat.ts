@@ -457,6 +457,24 @@ function handleSessionOccupancy(
   msg: ServerMessage<'session.occupancy'>,
 ): void {
   chat.setOccupancy(sid, { turn: msg.payload.turn, compacting: msg.payload.compacting, bash: msg.payload.bash })
+  // [u5a 收口扩展 / #12 对称腿] 权威帧兜底乐观态：三维全 idle 的权威投影到达 = runtime
+  // 确认无 turn 在途 —— 此时本地 pendingSend 乐观置位（send 前置，正常由 message_start
+  // 清）若仍在，说明该次发送走了「无 turn 回流」通路（pi 扩展命令同步执行：手敲
+  // `/schedule …` 等），message_start 永远不会来。权威帧在此清 optimistic pendingSend，
+  // 否则 isActive（isGenerating ∨ pendingSend 并集）永久 true → steer placeholder + abort
+  // 按钮卡死（与 runtime occupancy 卡 dispatching 同源的镜像缺陷，runtime 侧收口由
+  // message-dispatcher willExecuteAsExtensionCommand 补齐，本处补齐前端乐观腿）。
+  // 与 flush 判据同形（三维全 idle）防误清 bash/compacting 窗口；正常 turn 路径的 idle 帧
+  // 到达时 pendingSend 已被 message_start 清（幂等无副作用）；defer flush（下方既有块）
+  // 重投会重新 addPendingSend，时序安全（本函数同步，flush 走后续微任务/重投路径）。
+  if (
+    msg.payload.turn === 'idle'
+    && !msg.payload.compacting
+    && !msg.payload.bash
+    && chat.isPendingSend(sid)
+  ) {
+    chat.clearPendingSend(sid)
+  }
   if (
     msg.payload.turn === 'idle'
     && !msg.payload.compacting

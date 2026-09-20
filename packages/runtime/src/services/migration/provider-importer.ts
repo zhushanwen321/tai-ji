@@ -338,7 +338,7 @@ async function applyProviderEntry(
     const modelEntries = models?.map((m) => ({ ...m }))
     // 防线载体（设计 D1④）：source='import' 时 catalog 的 provider 级 api/baseUrl 一律剥除
     // （导入数据不是用户在 UI 显式设置的网关，不产生隐形网关）；空串转译同 settings 路径。
-    const { skipUpsert } = applyProviderWritePolicy(
+    const { skipUpsert, droppedModels } = applyProviderWritePolicy(
       merged,
       { name, baseUrl, apiKey, api, models: modelEntries },
       kind,
@@ -358,7 +358,16 @@ async function applyProviderEntry(
     }
     // as 断言约定见 applyProviderWritePolicy JSDoc「维护约定」（形状安全由载体字段族保证）
     upsertProvider(_sourceName, merged as PiProviderConfig)
-    return { id: _sourceName, name: _sourceName, status: 'imported' }
+    // U6②：写侧丢弃的非法模型项 surface 到结果 warnings（用户可见；静默丢弃违反 P0 契约）。
+    // 形态如：「已导入，但 2 个模型项因 id 非法被跳过：gpt-4 (dropped: …)、…」
+    return {
+      id: _sourceName,
+      name: _sourceName,
+      status: 'imported',
+      ...(droppedModels && droppedModels.length > 0
+        ? { warnings: [`${droppedModels.length} model(s) skipped (invalid id): ${droppedModels.join('; ')}`] }
+        : {}),
+    }
   } catch (e) {
     return {
       id: provider._sourceName,

@@ -10,6 +10,9 @@
 import builtinData from '../generated/builtin-providers.json'
 import { type ProviderInfo, type BuiltinProviderTemplate, type ProviderId } from '@taiji/shared'
 import { isCatalogProvider, deriveEnabled, getMergedCatalogModels } from './provider-catalog.js'
+// U6①：模型项 id 谓词（写侧与启动清洗侧共享单点，分层说明见该模块 JSDoc）
+import { normalizeModelIdOrReject } from './provider-model-item.js'
+export { normalizeModelIdOrReject }
 import type { IConfigStore, ConfigModelDefinition, ConfigProviderConfig, UpsertProviderResult } from './ports/config.js'
 import type { AuthStorage, CredentialWriter } from './auth/auth-storage.js'
 import type { TaijiProviderStore, ProviderExtras } from './provider-extras-store.js'
@@ -640,6 +643,15 @@ export interface ProviderWritePolicyResult {
   gatewayToClear?: boolean
   /** 无实质字段（pi 空壳判定八字段全缺）：调用方据此跳过 upsertProvider，不物化空壳条目。 */
   skipUpsert?: boolean
+  /**
+   * 被丢弃的非法模型项描述（U6②：「id 类毒化」的**可见性**承载）。
+   *
+   * 丢弃是有意行为（非法 id 条目落盘会让 pi 拒载**整个** models.json = 全部 provider 一起
+   * 失效）；但静默丢弃违反 P0「故障要响亮」契约——调用方据此把丢弃项surface 到用户可见
+   * 通道（import 路径 → `ProviderImportedItem.warnings`；settings 路径 → 既有 warn 日志）。
+   * 形态：`<id 或占位>（missing/non-string id）` 等人类可读描述。
+   */
+  droppedModels?: string[]
 }
 
 /** 防线② 空串判定：trim 后为空即同视空串（拦 CLI/脚本发的纯空白串 '  '）。 */
@@ -650,13 +662,15 @@ function isBlankString(v: string): boolean {
 /**
  * 防线② 模型级空串转译（pi ModelDefinitionSchema 的 minLength:1 字段集 =
  * id/name/api/baseUrl，node_modules 实装 model-config.js:137-140 核实）：
- * - `id` 是 pi 必需字段——trim 后空 → 整条模型丢弃（写空 id 与不写 id 同样让 pi 拒载整个文件）；
+ * - `id` 是 pi 必需字段——**缺失/空串/不可强转 → 整条模型丢弃**（U6①：既有实现只覆盖空串，
+ *   而「不写 id」同样让 pi 拒载整个文件——本函数 JSDoc 早写明了该意图，本次补完实现）；
  * - `name`/`api`/`baseUrl`——trim 后空 → 删键（空串无语义且 minLength 违规）。
  * 就地改写传入的 model 副本，返回 false 表示该模型不可写入。
  */
 function translateModelSchemaFields(model: Record<string, unknown>, providerId: string): boolean {
-  if (typeof model.id === 'string' && isBlankString(model.id)) {
-    console.warn(`[config-service] dropped model with empty-string id for ${providerId}`)
+  const idCheck = normalizeModelIdOrReject(model)
+  if (!idCheck.ok) {
+    console.warn(`[config-service] dropped model with ${idCheck.reason} for ${providerId}`)
     return false
   }
   for (const field of ['name', 'api', 'baseUrl'] as const) {
@@ -818,23 +832,33 @@ function applyModelsWritePolicy(
   merged: Record<string, unknown>,
   data: ProviderWritePolicyInput,
   providerId: string,
+  result: ProviderWritePolicyResult,
 ): void {
   if (data.models === undefined) return
   const kept: Array<Record<string, unknown>> = []
+  const dropped: string[] = []
   for (const raw of data.models) {
     const model = { ...raw }
-    // 缺 id 与空白 id 同口径（translateModelSchemaFields 只拦空白串形态）：pi 的 id 是
-    // 必填 minLength:1 字段，缺 id 条目写盘同样触发整表拒载——整条丢弃 + warn。
+    // U6②：丢弃项进可见性信号（描述 = 尽力取原 id 或占位 + 丢弃原因）
+    const rawId = (raw as Record<string, unknown>)?.id
+    const label = typeof rawId === 'string' && rawId !== '' ? rawId : '(no id)'
+    const droppedDesc = `${label} (dropped: invalid id — pi requires a non-empty model id)`
+    // 缺 id 与空白 id 同口径（normalizeModelIdOrReject 只拦空白串/非法形态）：pi 的 id 是
+    // 必填 minLength:1 字段，缺 id 条目写盘同样触发整表拒载——整条丢弃 + warn + 可见性信号。
     if (model.id === undefined || model.id === null) {
       console.warn(`[config-service] dropped model without id for ${providerId}`)
+      dropped.push(droppedDesc)
       continue
     }
     if (translateModelSchemaFields(model, providerId)) {
       applyValidatedModelFields(model, model, String(model.id))
       kept.push(model)
+    } else {
+      dropped.push(droppedDesc)
     }
   }
   merged.models = kept
+  if (dropped.length > 0) result.droppedModels = dropped
 }
 
 /**
@@ -881,7 +905,7 @@ export function applyProviderWritePolicy(
     applyCustomBaseUrlWritePolicy(merged, data, providerId)
   }
   applyApiWritePolicy(merged, data, kind, source, providerId)
-  applyModelsWritePolicy(merged, data, providerId)
+  applyModelsWritePolicy(merged, data, providerId, result)
 
   // ── 不物化空壳（防线③）：剥除/清除后八字段全缺 → 产出跳过 upsert 信号（对既有条目是
   //    no-op 而非删除——调用方跳过 upsert 即可，盘上旧条目保持原状，对齐 M5-01「宁丢不写错位」）──

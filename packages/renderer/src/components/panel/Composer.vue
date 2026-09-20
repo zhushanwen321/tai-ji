@@ -176,9 +176,9 @@
             :class="density.slots.model === 'merged' ? MODEL_MERGED_CHIP_CLASS : 'flex items-center gap-0'"
           >
             <!-- 模型（spec §2b：click 出模型切换 popover） -->
-            <ModelSelectPopover :selected="currentModelId" @select="onModelSelect" />
+            <ModelSelectPopover :selected="currentModelId" :switching="isSwitching" @select="onModelSelect" />
             <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集） -->
-            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" @select="onThinkingSelect" />
+            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" :switching="isSwitching" @select="onThinkingSelect" />
           </div>
 
           <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
@@ -314,10 +314,7 @@ const projectSkillsCwd = computed<string | null>(() => {
 })
 const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
-const isActive = computed(() => {
-  if (!props.sessionId) return false
-  return chatStore.isActive(props.sessionId)
-})
+const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
 
 /** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
@@ -330,6 +327,16 @@ const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 
 const sessionIdRef = computed(() => props.sessionId)
+
+/**
+ * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
+ * 但读条件必须判 `sessionId` 等值——split 面板/切 session 后不得残留旧面板的「切换中」，
+ * 也不得误禁新 session 的 chip；语义③ = **任一在飞即禁全部模型/档位 chip**（防两条
+ * 切换 RPC 并发 → 回执乱序与 `session.modelId` 双写竞争），故两个 chip 共用同一布尔。
+ */
+const isSwitching = computed(
+  () => switching.value !== null && switching.value.sessionId === sessionIdRef.value,
+)
 
 // [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
 const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
@@ -393,6 +400,7 @@ const {
   currentThinkingLevel,
   currentThinkingLevelMap,
   currentSupportedLevels,
+  switching,
   onModelSelect,
   onThinkingSelect,
   handleArrowUp,

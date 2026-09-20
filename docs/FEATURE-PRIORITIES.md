@@ -54,7 +54,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
-| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
+| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
@@ -111,6 +111,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |
 | msg-id-mapper | taiji | P1 | 挂了消息映射错乱 |
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
+| provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
 | plan | universal | P2 | 面板能力 + 执行方式选择 |

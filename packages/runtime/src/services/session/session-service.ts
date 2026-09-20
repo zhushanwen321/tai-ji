@@ -41,6 +41,7 @@ import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
+import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from './session-model-guards.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
 import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, resolveLaunchPresetOptions } from './launch-params.js'
@@ -50,6 +51,7 @@ import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
+import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
 // respawn（经 registerSession 汇聚）/ detach / reclaim 四类生命周期事件处增量维护。
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
@@ -213,6 +215,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 列表语义允许多方注册，既有注入方（PluginService）行为不变，逐个隔离异常。
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活回调列表（relay ②）。触发点 =
+   * transport 层 session.switch 成功分支（含自动 restore）经 notifySessionActivated。
+   * 追加式列表（D6a 同款）：显式禁单槽——setOnSessionCreated 单槽是反面教材（其注释已写
+   * 「二次调用会覆盖」），PluginService 的 didActivate 投递与未来其他消费方互不挤占。
+   */
+  private readonly onSessionActivatedHandlers: Array<(summary: SessionSummary) => void> = []
   /**
    * MessageBus 引用（组合根注入，wave:runtime-wiring）。
    *
@@ -394,10 +403,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 模型控制域（S6 迁出至 session-model-control.ts）：deps 窄注入——session 定位经
     // lifecycle 只读面、实例失效经 projection、trace 补拉经 traceSync（全部既有公有面）。
     this.modelControl = new SessionModelControl({
-      pm: this.pm,
       getSession: (sessionId) => this.lifecycle.get(sessionId),
       getReplicatedStates: (sessionId) => this.projection.getReplicatedStates(sessionId),
       syncTraceEntries: (sessionId, trigger) => this.traceSync.syncTraceEntries(sessionId, trigger),
+      // U2：停止态/回收态切换先经 ensureActive 拉活或 join 同一 in-flight；
+      // 上界 15s（`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` 可调，≤0 = 不限时逃生门）。
+      ensureActive: (sessionId) => this.ensureActive(sessionId),
+      activateTimeoutMs: resolveActivateTimeoutMs(process.env),
+      // `Model not found` 三型分型的两判（configService 晚期注入 → 闭包内每次调用动态读；
+      // 未注入 / listProviders 抛错时 fail-open，宁可落双因文案也不误报更「确定」的码）。
+      isModelRegistered: (provider, modelId) => isModelInRegistry(this.configService, provider, modelId),
+      hasProviderCredential: (provider) => providerHasCredential(this.configService, provider),
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。
@@ -578,6 +594,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
           sessionId,
           exitCode: code,
           detailDigest: buildCrashDetailDigest(code, stderr),
+          // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+          // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
+          // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+          // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
+          machinePiDigest: captureMachinePiDigest(),
         })
       })
       runDestroyStepIsolated('adapter.detach', sessionId, () => {
@@ -693,6 +714,30 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注入 session 激活回调（relay ③ 注册侧）。
+   * 追加式注册（D6a 同款，非覆盖）——禁改写为 setOnSessionCreated 式单槽。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void {
+    this.onSessionActivatedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 session.switch 成功分支，含自动 restore）。回调逐个隔离
+   * 异常（notifySessionCreated 同款 best-effort 降级），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void {
+    for (const handler of this.onSessionActivatedHandlers) {
+      try {
+        handler(summary)
+      } catch (e: unknown) {
+        // 降级策略（best-effort）：激活投递异常不阻断 switch 主流程，仅落日志供排查。
+        console.error(`[session-service] onSessionActivated listener error (sessionId=${summary.id}):`, e)
+      }
+    }
+  }
+
+  /**
    * U6（D2② 在线对账）：注入能力对账回调（组合根绑 modelService.reconcileModelCapabilities）。
    * session 附着路径（registerSession 的 onSessionRegistered 订阅,S3 前为 initializeManagedSession
    * 体内调用）fire-and-forget 调用——失败不阻断附着（内部降级：引擎不可用 / RPC 失败一律
@@ -804,7 +849,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.lifecycle.forkSession(srcSessionId, fromPiEntryId, includeFrom, label, opts)
   }
 
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid) }
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
   // [HISTORICAL] sendSubagentMessage（marker 半成品通道）已删除（composer 四符号设计 D2）：
   // base64 隐藏注释前缀在 extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标——定向消息改走 subagentAction(message/start)。

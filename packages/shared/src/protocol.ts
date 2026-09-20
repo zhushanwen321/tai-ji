@@ -136,6 +136,11 @@ export type ClientMessageType =
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
+  // plugin.dismissModal：宿主 UI 发起的 plugin modal 关闭上报（plugin-header-action-modal-points
+  // AP-2 关①；renderer PluginModalHost 经 useExtensionHostBridge 门面发送）。runtime 校验
+  // (pluginId, modalId, epoch) 三元组与当前槽匹配（陈旧 epoch → 忽略 + 日志）后广播
+  // plugin:modalState{closed, reason} + notify 插件 plugin.ui.modalClosed。
+  | 'plugin.dismissModal'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -329,6 +334,51 @@ export type BatchDeleteResult = {
  * package.json startupConfig.content / runtime rename-session-config.ts 镜像）。
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
+
+// ── plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）──
+
+/**
+ * plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集；
+ * 与 core extension-host/types.ts 同构别名——shared 不依赖 core，结构兼容即协议兼容）。
+ */
+export type PluginModalClosedReason =
+  | 'dismissed'
+  | 'session-switched'
+  | 'host-overlay'
+  | 'replaced'
+  | 'plugin-gone'
+
+/**
+ * plugin modal 开合帧载荷（AP-2；'plugin:modalState'，S→C 全局广播 transient 帧）。
+ * payload = 调用参数原文（可缺省）——title/width 的解析与 fallback 在 renderer
+ *（单一解析源，runtime 不读声明）；sessionId 必带（仅作 payload 归属信息，
+ * 路由键 = 全局广播）。epoch = 单调递增槽代数（同 (pluginId,modalId) 重复 open 与
+ * replaced 均递增）。
+ */
+export interface PluginModalStatePayload {
+  pluginId: string
+  modalId: string
+  sessionId: string
+  title?: string
+  width?: 'sm' | 'md' | 'lg'
+  state: 'open' | 'closed'
+  epoch: number
+  reason?: PluginModalClosedReason
+}
+
+/**
+ * headerAction 运行时更新帧载荷（AP-1；'plugin:headerActionUpdate'）。必带 sessionId
+ * ——渲染端按 (sessionId, headerActionId) 写对应会话分区；badge ≤4 字符的截断由
+ * 渲染端承担，帧面存原文（全文进 tooltip）。
+ */
+export interface HeaderActionUpdatePayload {
+  pluginId: string
+  headerActionId: string
+  sessionId: string
+  badge?: string
+  tooltip?: string
+  disabled?: boolean
+}
 
 // ── ClientMessage discriminated union ───────────────────────────
 
@@ -572,6 +622,16 @@ export interface ClientMessageMap {
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
+  // plugin.dismissModal：宿主侧关闭上报（AP-2 关①）。epoch = 渲染端所展示层的槽代数
+  //（陈旧 epoch 的 dismiss 被 runtime 忽略——「关闭在途→立即重开」序列下不误关新层）；
+  // reason 是 PluginModalClosedReason 闭集的宿主子集（实际由宿主发起的只有前三者，
+  // replaced/plugin-gone 由 runtime 侧产生；帧面按单点词表全集登记，越界值 runtime 拒收）。
+  'plugin.dismissModal': {
+    pluginId: string
+    modalId: string
+    epoch: number
+    reason: PluginModalClosedReason
+  }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -884,6 +944,16 @@ export type ServerMessageType =
   // 迟到批准对已删 pending noop 幂等（旧版前端未消费此帧时无异常回退，P-11）。
   | 'plugin:permissionRequestExpired'
   | 'plugin:viewUpdate'
+  // plugin:modalState：plugin modal 开合帧（plugin-header-action-modal-points AP-2）。
+  // runtime showModal/hideModal/dismissModal 仲裁后全局广播（槽与层都是全局单例，
+  // sessionId 仅作 payload 归属信息、不经 per-session 通道）；帧类 = transient/不入
+  // ring（经 broker 全局广播直发，不经 message-bus publish，重连重放不回放陈旧开/关；
+  // renderer 另以 lastEpoch 丢弃 epoch < lastEpoch 的乱序入帧兜底）。
+  | 'plugin:modalState'
+  // plugin:headerActionUpdate：headerAction 可变字段（badge/tooltip/disabled）下行帧
+  //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
+  // 经 broker 全局广播直发（同上不入 ring）。
+  | 'plugin:headerActionUpdate'
   | 'extension:widget' | 'extension:widgetGui' | 'extension:status' | 'extension:notify'
   | 'extension:setEditorText'
   | 'message.compactionSummary' | 'message.branchSummary'
@@ -1388,6 +1458,12 @@ export interface ServerMessageMapBase {
     guiTree: unknown[]
     updatedAt: number
   }
+  // plugin:modalState：plugin modal 开合帧（AP-2；runtime 仲裁后全局广播，transient 直发
+  // 不入 ring）。payload 契约见 PluginModalStatePayload（上方类型定义）。
+  'plugin:modalState': PluginModalStatePayload
+  // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
+  // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
+  'plugin:headerActionUpdate': HeaderActionUpdatePayload
   // plugin:uiRequest：plugin dialog 交互请求下行（runtime UiRequestQueue 广播回调生产，
   // payload 注入当前活跃 sessionId 后经 bus.publish 定向发布，无活跃 session 时回退全局广播）。
   // requestId 必带（前端 message-bus-bridge.parseUiRequest 缺失即丢弃整条）；method/title 等
@@ -2253,6 +2329,9 @@ export interface ReplyPayloadMap {
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
+  // plugin.dismissModal → reply 'pong' {}（fire-and-forget ack；关闭的权威反馈 =
+  // plugin:modalState{closed} 广播 + plugin.ui.modalClosed notify，不走本 reply）
+  'plugin.dismissModal': ServerMessageMap['pong']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']

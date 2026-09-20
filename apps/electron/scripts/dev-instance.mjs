@@ -146,8 +146,12 @@ function printBanner(p, env) {
 }
 
 function launch(env) {
-  // [F7] 前置链保持原 dev script 语义：bundle-extensions 恒重建 staged 引擎副本
+  // [F7] 前置链保持原 dev script 语义：bundle-extensions 恒重建 staged 引擎副本。
+  // prepare-builtin-plugins 同理恒重建：builtin 插件产物 index.js 是 gitignored 构建产物，
+  // 而 dev 态 supervisor 按 --builtin-plugins-dir 扫 repo 根 resources/plugins——
+  // 产物缺失 = 插件不被扫到（dev 装载链缺口，与 bundle-extensions 同动机的 fail-fast 前置）
   const pre = [
+    ['bash', [path.join(REPO_ROOT, 'scripts', 'prepare-builtin-plugins.sh')]],
     ['node', [path.join(REPO_ROOT, 'scripts', 'bundle-extensions.mjs')]],
     ['node', [path.join(APP_ROOT, 'scripts', 'electron-ensure.mjs')]],
   ]

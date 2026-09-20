@@ -44,6 +44,10 @@ export default {
     branch: '分支',
     gitStatus: 'Git 状态 · 打开侧栏',
     copySessionFile: '复制 session 文件路径',
+    // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
+    pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
+    pluginActionRestoring: '会话恢复中，暂无法判定',
+    pluginActionTemporarilyUnavailable: '暂不可用',
   },
   composer: {
     send: '发送',
@@ -91,11 +95,16 @@ export default {
     // 无「全部」语义（收起态复用 collapse，不另立键）
     blockScrollLines: '{from}–{to} / {total} 行',
     blockScrollExpandAll: '展开全部',
+    // 过程块（第三族）header 前缀与细节条：前缀是「块类型标记」，细节条是技术统计
     thinkingBlock: '思考',
+    subagent: '子代理',
+    metaLines: '{n} 行',
+    metaChars: '{n} 字符',
+    metaCharsK: '{n}K 字符',
     imagePlaceholder: '图片缓存已满',
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
     imageUnavailable: '图片不可用',
-    workflow: 'Workflow',
+    workflow: '工作流',
     copyMarkdown: '复制为 Markdown',
     forkAsk: 'fork 提问（在新分支追问，与主线隔离）',
     forkFailed: 'fork 后台失败：{error}',
@@ -150,8 +159,15 @@ export default {
     bashNoContext: '不进上下文',
     bashCancel: '取消',
     bashUnknownCommand: '(未知命令)',
-    // [system-notice-rendering-upgrade U3] background-bash 结构化行的「后台」chip（D2）
-    bashBackgroundChip: '后台',
+    // [notice-family-phrase-detail 2026-09-18 方案 A] background-bash 行短语化：主体只留终态短语
+    // （完成/失败/超时），命令原文移入悬停详情（HoverCard，只读 + 复制）；「后台」chip 随短语
+    // 语义并入退役（bashBackgroundChip 键已删）。bashCancelled/bashTimeout 仍由 BashOutputBlock 消费
+    bashFinished: '后台命令已完成',
+    bashFinishedFailed: '后台命令执行失败',
+    bashTimedOut: '后台命令已超时',
+    // [notice-family-phrase-detail] 悬停详情面板标题（SystemNotice 结构化行 + ActivityStrip 执行行共用）
+    bashCommandLabel: '完整命令',
+    noticeDetailLabel: '通知全文',
     // [system-notice-rendering-upgrade U3] 边界行拆主/从两段（D5，U6 消费）：计数主文案 +
     // 「已继续处理」从文案。值不带前导点——点号由消费侧按「有主文案才加」条件渲染
     // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
@@ -162,6 +178,9 @@ export default {
     turnTriggerBgNotifyFailed: '{count} 失败',
     // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
+    // [notice-family-phrase-detail 2026-09-18 方案 A] bash 执行行 elapsed meta——命令移入悬停
+    // 详情后，行内保留计时观察维持执行期可见性
+    executingBashElapsed: '已 {elapsed}',
     // 不写死阈值数字——阈值用户可调，写死会漂移）
   },
   git: {
@@ -472,6 +491,17 @@ export default {
     selectSession: '选择左侧会话开始',
     taskFailed: '任务创建失败：{error}',
     sendFailed: '消息发送失败：{error}',
+    // ── U4 模型/档位切换失败（model-switch-live-provider-sync §3.4 错误规格表）──
+    // 5 个新码 + general；4 个既有透传码（SESSION_NOT_FOUND / MODEL_NOT_CONFIGURED /
+    // RESTORE_FAILED / BUILTIN_EXTENSIONS_MISSING）走 general（toast 文本含后端 message）。
+    modelSwitch: {
+      general: '切换失败：{error}',
+      sessionActivateFailed: '会话无法恢复，请在侧栏重新打开',
+      sessionActivateTimeout: '会话恢复超时，请稍后重试',
+      modelNotFound: '该模型已不存在，请重新选择',
+      providerCredentialMissing: '该 provider 未配置凭据，请到设置填写 API Key',
+      engineModelMissing: '引擎未识别该模型：若刚改过配置，请稍等两秒重试；若持续失败，请到设置页检查 provider 配置',
+    },
   },
   ambiguous: {
     title: '「{basename}」有 {count} 个匹配，选择要打开的文件',

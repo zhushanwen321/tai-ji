@@ -10,6 +10,7 @@ import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@taiji/shared'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo, SendCommandOptions } from '../../services/ports/pi-engine.js'
 import { createPiSessionLog, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
+import { captureMachinePiSnapshotSection, collectUnifiedLogCorrelation } from '../crash-correlation.js'
 // pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/architecture/subagent-permanent-session-model.md
 // §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（超时分级 + 迟到响应丢弃）/
 // 早期帧缓冲 / 命令帧组装 / 杀链 / 出站 env 组装全部 import 自公共包——本文件保留
@@ -818,10 +819,45 @@ export class RpcClient implements IPiEngine {
         '',
       ].filter(Boolean).join('\n')
       writePiCrashLog(this.options.sessionId, `${header}${this.stderrChunks.join('\n')}`, context)
+      // D10：崩溃关联取证——①同步机器面 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
+      // 关联采样（±5s 窗内的 Electron 退出 / 兄弟 pi 死亡 / launchd 信号，fire-and-forget
+      // 完成后补写进同一 pi-crash log，append 语义）。两者内部均以 isPiCrashLogEnabled
+      // 为门（无 sink 不采样），且全捕获不向上抛——观测增强不得影响 exit 主流程。
+      this.appendCrashCorrelationEvidence()
     } catch (crashErr) {
       // best-effort：崩溃日志落盘失败不掩盖/干扰原始崩溃路径（exit code 已由上层消费），仅控制台留痕
       console.error('[rpc] write pi crash log failed:', crashErr)
     }
+  }
+
+  /**
+   * 崩溃关联取证补写（crash-forensics-and-watchdog §3.3 D10，crash-correlation.ts）。
+   *
+   * ①同步：机器面 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
+   * ②异步：统一日志关联采样（darwin-only，±5s 窗，log show 最多 10s）完成后追加写
+   * 同一 pi-crash log——写点在本方法返回后数秒，靠 writePiCrashLog 的 append 语义与
+   * createPiStreamWriter 惰性打开落盘（closeLogger 退出 flush 覆盖晚到的补写）。
+   * 全路径 best-effort：任何失败仅 console 出声（tee 进 runtime 主日志），不抛。
+   */
+  private appendCrashCorrelationEvidence(): void {
+    const sid = this.options.sessionId
+    try {
+      const snapshot = captureMachinePiSnapshotSection(process.pid)
+      if (snapshot) writePiCrashLog(sid, snapshot)
+    } catch (snapshotErr) {
+      // best-effort 降级：快照失败不影响 exit 主流程（exit code 已由上层消费），
+      // 仅 console 留痕（tee 进 runtime 主日志）——对齐 writePiCrashLog 失败处置先例
+      console.error('[rpc] machine pi snapshot failed:', snapshotErr)
+    }
+    void collectUnifiedLogCorrelation(Date.now())
+      .then((section) => {
+        if (section) writePiCrashLog(sid, section)
+      })
+      .catch((correlationErr: unknown) => {
+        // best-effort 降级策略：关联采样失败不影响 exit 主流程（exit code 已由上层消费），
+        // 仅 console 留痕（tee 进 runtime 主日志）——对齐 writePiCrashLog 失败处置先例
+        console.error('[rpc] unified log correlation failed:', correlationErr)
+      })
   }
 
   /** 将收集到的 pi stderr 格式化为可读后缀，附到错误消息末尾 */

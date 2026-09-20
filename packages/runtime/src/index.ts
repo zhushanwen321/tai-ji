@@ -675,6 +675,10 @@ async function main(): Promise<void> {
       // 调用发生在 session 创建后，引用恒就绪）。
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
+        // AP-4（U2）：plugin 订阅腿——custom entry 失效信号按 (sessionId, customType)
+        // 双匹配订阅注册表，命中者定向 notify 对应 Worker；无订阅者零开销。
+        // record 三族早退门在 invalidateRecordEntries 内部保留，本腿不受扰。
+        pluginService.notifyEntryInvalidation(sid, customType)
       },
       // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget）：重跑 record
       // 派生管线，发布门 = 已发布快照水位——守卫/发布门处丢的帧下轮触发必补发（回调

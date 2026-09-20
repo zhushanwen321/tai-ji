@@ -21,6 +21,7 @@
  * - onSessionExit：构造函数注册的进程退出回调
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { SESSION_NOT_FOUND } from '../src/utils/errors.js'
 import type { MockInstance } from 'vitest'
 import { tmpdir, homedir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -910,8 +911,13 @@ describe('SessionService · Facade', () => {
       expect(setup.service.getSummary(id)?.modelId).toBe('anthropic/claude-x')
     })
 
-    it('throws when session not in map (W1/L7: fail-fast，不再静默成功)', async () => {
-      await expect(setup.service.switchModel('ghost', 'p' as ProviderId, 'm')).rejects.toThrow('session not active')
+    it('session 不在 Map → 先 ensureActive（U2/D5）；该 session 无落盘文件 → 既有码 SESSION_NOT_FOUND 透传（fail-fast，不静默成功）', async () => {
+      // model-switch-live-provider-sync U2：停止态不再 throw 'session not active' 早退，
+      // 而是 ensureActive 拉活/join；ghost 无落盘 session 文件 → 激活阶段以既有码
+      // SESSION_NOT_FOUND 失败（前端据此引导「侧栏删除该会话记录」）。
+      await expect(setup.service.switchModel('ghost', 'p' as ProviderId, 'm')).rejects.toMatchObject({
+        code: SESSION_NOT_FOUND,
+      })
     })
 
     it('切换后广播 session.state_changed（payload 来自 modelId/thinkingLevel 快照，W12；usage 走 context.update，D1）', async () => {

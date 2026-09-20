@@ -1,60 +1,19 @@
-import { formatDuration, MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from './parsing.js'
-import type { ScheduleSpec, TaskKind } from './types.js'
+// 时间格式化器单源于 @zhushanwen/extension-protocol（U2 折叠器下沉：formatSchedule /
+// formatRelativeTime 与 composer widget、taiji plugin 管理面同源输出）。本文件保持既有
+// import 路径不变（re-export），仅保留扩展侧私有物（truncate / 任务 id 生成 / autoName）。
 
-/** 相对时间显示的"现在"判定窗口（±5s 内视为 now）。 */
-const NOW_THRESHOLD_MS = 5000
+export {
+  MS_PER_DAY,
+  MS_PER_HOUR,
+  MS_PER_MINUTE,
+  MS_PER_SECOND,
+  formatDuration,
+  formatRelativeTime,
+  formatSchedule,
+} from '@zhushanwen/extension-protocol'
+
 /** 省略号 "..." 的字符数（truncate 截断预留宽度）。 */
 const ELLIPSIS_LENGTH = 3
-
-/** Format ScheduleSpec to readable string. kind 区分 once/recurring（once 显示 'once in X' 而非误导性的 'every X'）。 */
-export function formatSchedule(spec: ScheduleSpec, kind?: TaskKind): string {
-  if (spec.mode === 'interval') {
-    return kind === 'once'
-      ? `once in ${formatDuration(spec.intervalMs)}`
-      : `every ${formatDuration(spec.intervalMs)}`
-  }
-  return spec.cronExpression
-}
-
-/**
- * 格式化时间戳为相对时间字符串。
- * 未来: "in 5m"
- * 过去: "5m ago"
- * 当前(+-5s): "now"
- *
- * now 可选参数：基准时间戳，默认 Date.now()。测试可传固定值快进/锁定，
- * 生产调用方无需传（参数可选，行为不变）。
- */
-export function formatRelativeTime(timestamp: number, now?: number): string {
-  const currentTime = now ?? Date.now()
-  const diff = timestamp - currentTime
-
-  // 5秒内视为"现在"
-  if (Math.abs(diff) < NOW_THRESHOLD_MS) return 'now'
-
-  const absDiff = Math.abs(diff)
-  const units: [string, number][] = [
-    ['d', MS_PER_DAY],
-    ['h', MS_PER_HOUR],
-    ['m', MS_PER_MINUTE],
-    ['s', MS_PER_SECOND],
-  ]
-
-  let formatted = ''
-  for (const [suffix, divisor] of units) {
-    if (absDiff >= divisor) {
-      const value = Math.floor(absDiff / divisor)
-      formatted = `${value}${suffix}`
-      break
-    }
-  }
-
-  if (!formatted) {
-    formatted = `${Math.round(absDiff / MS_PER_SECOND)}s`
-  }
-
-  return diff > 0 ? `in ${formatted}` : `${formatted} ago`
-}
 
 /**
  * 截断文本到指定长度，超出部分用 "..." 替代。
