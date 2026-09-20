@@ -1,7 +1,8 @@
+import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MockSchedulerBackend } from './mock-backend.js'
-import { executeScheduleCommand, registerScheduleCommand } from '../commands.js'
+import { registerScheduleCommand } from '../commands.js'
 import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
 
@@ -9,214 +10,205 @@ import { SchedulerService } from '../service.js'
 
 interface CommandOpts {
   description: string
-  handler: (args: string) => Promise<string>
+  handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>
   getArgumentCompletions: (prefix: string) => unknown
 }
 
-describe('/schedule command', () => {
+interface MockCtx {
+  ctx: ExtensionCommandContext
+  notify: ReturnType<typeof vi.fn>
+}
+
+function createMockPi(): { pi: unknown; commands: Map<string, CommandOpts> } {
+  const commands = new Map<string, CommandOpts>()
+  const pi = {
+    registerCommand: (name: string, opts: CommandOpts) => {
+      commands.set(name, opts)
+    },
+  }
+  return { pi, commands }
+}
+
+function createMockCtx(mode = 'rpc'): MockCtx {
+  const notify = vi.fn()
+  const ctx = { mode, hasUI: true, ui: { notify } } as unknown as ExtensionCommandContext
+  return { ctx, notify }
+}
+
+describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () => {
   let service: SchedulerService
+  let commands: Map<string, CommandOpts>
   let commandOpts: CommandOpts
+
+  function register(getService: () => SchedulerService | null = () => service): void {
+    const mockPi = createMockPi()
+    commands = mockPi.commands
+    registerScheduleCommand(mockPi.pi as never, getService)
+    commandOpts = commands.get('scheduler')!
+  }
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // 注册命令时把 opts 截获下来，后续直接调 handler / getArgumentCompletions。
-    const mockPi = {
-      registerCommand: (_name: string, opts: CommandOpts) => {
-        commandOpts = opts
-      },
-    }
     const backend = new MockSchedulerBackend()
-    service = new SchedulerService(
-      new SchedulerRuntime(backend),
-      () => backend.now(),
-    )
-    registerScheduleCommand(mockPi as never, () => service)
+    service = new SchedulerService(new SchedulerRuntime(backend), () => backend.now())
+    register()
+  })
+
+  // ── 注册：/scheduler + /schedule alias（同一 handler / 补全） ──
+
+  it('注册 /scheduler 与 /schedule alias，同一 handler 与补全', () => {
+    expect(commands.has('scheduler')).toBe(true)
+    expect(commands.has('schedule')).toBe(true)
+    const alias = commands.get('schedule')!
+    expect(alias.handler).toBe(commandOpts.handler)
+    expect(alias.getArgumentCompletions).toBe(commandOpts.getArgumentCompletions)
+    expect(commandOpts.description).toContain('scheduler')
   })
 
   // ── 子命令路由：list ──
 
-  it('list returns empty message when no tasks', async () => {
-    expect(await executeScheduleCommand(service, 'list')).toBe('No scheduled tasks.')
+  it('list：空列表 → notify info', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('list', ctx)
+    expect(notify).toHaveBeenCalledWith('No scheduled tasks.', 'info')
   })
 
-  it('list returns formatted task lines', async () => {
+  it('list：格式化任务行（含 schedule 与名称）', async () => {
     await service.create('check build', '5m')
-    const result = await executeScheduleCommand(service, 'list')
-    expect(result).toContain('check build')
-    expect(result).toContain('every 5m')
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('list', ctx)
+    expect(notify.mock.calls[0]![0]).toContain('check build')
+    expect(notify.mock.calls[0]![0]).toContain('every 5m')
+    expect(notify.mock.calls[0]![1]).toBe('info')
   })
 
-  it('list marks disabled tasks with ○', async () => {
+  it('list：disabled 任务标记 ○', async () => {
     const created = await service.create('paused task', '5m')
     await service.toggle(created.data!.task.id, false)
-    const result = await executeScheduleCommand(service, 'list')
-    expect(result).toContain('○')
-    expect(result).toContain('paused task')
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('list', ctx)
+    expect(notify.mock.calls[0]![0]).toContain('○')
   })
 
   // ── 子命令路由：on / off ──
 
-  it('off toggles task enabled to false', async () => {
+  it('off：停用任务（notify info）', async () => {
     const created = await service.create('test', '5m')
-    const result = await executeScheduleCommand(service, `off ${created.data!.task.id}`)
-    expect(result).toContain('disabled')
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler(`off ${created.data!.task.id}`, ctx)
     expect(service.runtime.getTask(created.data!.task.id)?.enabled).toBe(false)
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('disabled'), 'info')
   })
 
-  it('on toggles task enabled to true', async () => {
+  it('on：启用任务', async () => {
     const created = await service.create('test', '5m')
     await service.toggle(created.data!.task.id, false)
-    const result = await executeScheduleCommand(service, `on ${created.data!.task.id}`)
-    expect(result).toContain('enabled')
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler(`on ${created.data!.task.id}`, ctx)
     expect(service.runtime.getTask(created.data!.task.id)?.enabled).toBe(true)
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('enabled'), 'info')
   })
 
-  it('off with missing id returns usage', async () => {
-    expect(await executeScheduleCommand(service, 'off')).toBe('Usage: /schedule off <id>')
+  it('off/on 缺 id → usage + notify error', async () => {
+    for (const keyword of ['off', 'on']) {
+      const { ctx, notify } = createMockCtx()
+      await commandOpts.handler(keyword, ctx)
+      expect(notify).toHaveBeenCalledWith(`Usage: /scheduler ${keyword} <id>`, 'error')
+    }
   })
 
-  it('on with missing id returns usage', async () => {
-    expect(await executeScheduleCommand(service, 'on')).toBe('Usage: /schedule on <id>')
-  })
-
-  // TC5 command 侧：消息同源（service 产出 TASK_NOT_FOUND message）
-  it('off with unknown id returns not found', async () => {
-    expect(await executeScheduleCommand(service, 'off deadbeef')).toBe('Task deadbeef not found.')
+  it('off 未知 id → not found（service message 同源）', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('off deadbeef', ctx)
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
   })
 
   // ── 子命令路由：rm ──
 
-  it('rm deletes task', async () => {
+  it('rm：删除任务', async () => {
     const created = await service.create('test', '5m')
-    const result = await executeScheduleCommand(service, `rm ${created.data!.task.id}`)
-    expect(result).toContain('deleted')
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler(`rm ${created.data!.task.id}`, ctx)
     expect(service.runtime.getTask(created.data!.task.id)).toBeUndefined()
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('deleted'), 'info')
   })
 
-  it('rm with missing id returns usage', async () => {
-    expect(await executeScheduleCommand(service, 'rm')).toBe('Usage: /schedule rm <id>')
-  })
-
-  it('rm with unknown id returns not found', async () => {
-    expect(await executeScheduleCommand(service, 'rm deadbeef')).toBe('Task deadbeef not found.')
+  it('rm 缺 id → usage + error；未知 id → not found + error', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('rm', ctx)
+    expect(notify).toHaveBeenCalledWith('Usage: /scheduler rm <id>', 'error')
+    await commandOpts.handler('rm deadbeef', ctx)
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
   })
 
   // ── 子命令路由：run ──
 
-  it('run executes task', async () => {
-    // run 子命令的 dispatch 行为锚定 steer 直投路径
+  it('run：立即执行任务', async () => {
     const created = await service.create('test', '5m')
-    const result = await executeScheduleCommand(service, `run ${created.data!.task.id}`)
-    expect(result).toContain('executed')
-    // dispatchTask 更新 task 对象（同一引用），runCount 自增到 1。
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler(`run ${created.data!.task.id}`, ctx)
     expect(service.runtime.getTask(created.data!.task.id)?.runCount).toBe(1)
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('executed'), 'info')
   })
 
-  it('run with missing id returns usage', async () => {
-    expect(await executeScheduleCommand(service, 'run')).toBe('Usage: /schedule run <id>')
+  it('run 缺 id → usage + error；未知 id → not found + error', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('run', ctx)
+    expect(notify).toHaveBeenCalledWith('Usage: /scheduler run <id>', 'error')
+    await commandOpts.handler('run deadbeef', ctx)
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
   })
 
-  it('run with unknown id returns not found', async () => {
-    expect(await executeScheduleCommand(service, 'run deadbeef')).toBe('Task deadbeef not found.')
+  // ── notify severity 分级 ──
+
+  it('notify severity：成功 info / 失败 error（list 成功 vs 未知 id 失败）', async () => {
+    const ok = createMockCtx()
+    await commandOpts.handler('list', ok.ctx)
+    expect(ok.notify).toHaveBeenCalledWith(expect.any(String), 'info')
+
+    const bad = createMockCtx()
+    await commandOpts.handler('off deadbeef', bad.ctx)
+    expect(bad.notify).toHaveBeenCalledWith(expect.any(String), 'error')
   })
 
-  // ── 创建任务分支 ──
+  // ── 错误通道：service 未初始化 ──
 
-  it('creates interval task from /schedule 5m check build', async () => {
-    const result = await executeScheduleCommand(service, '5m check build')
-    expect(result).toContain('check build')
-    expect(result).toContain('every 5m')
-    expect(service.runtime.listTasks()).toHaveLength(1)
+  it('service null：rpc → notify error（throw 在 rpc 被静默丢弃，不能依赖）', async () => {
+    const mockPi = createMockPi()
+    registerScheduleCommand(mockPi.pi as never, () => null)
+    const { ctx, notify } = createMockCtx('rpc')
+    await mockPi.commands.get('scheduler')!.handler('list', ctx)
+    expect(notify).toHaveBeenCalledWith('Scheduler not initialized: session not started.', 'error')
   })
 
-  it('created interval task is recurring by default', async () => {
-    await executeScheduleCommand(service, '5m check build')
-    const task = service.runtime.listTasks()[0]!
-    expect(task.kind).toBe('recurring')
+  it('service null：json → 原样 throw（stderr 是唯一可见通道）', async () => {
+    const mockPi = createMockPi()
+    registerScheduleCommand(mockPi.pi as never, () => null)
+    const { ctx } = createMockCtx('json')
+    await expect(mockPi.commands.get('scheduler')!.handler('list', ctx))
+      .rejects.toThrow('Scheduler not initialized: session not started.')
   })
 
-  it('creates once task from /schedule once 10s remind', async () => {
-    const result = await executeScheduleCommand(service, 'once 10s remind me')
-    expect(result).toContain('remind me')
-    // once 显示为 'once in 10s'（非误导性的 'every 10s'）
-    expect(result).toContain('once in 10s')
-    expect(result).not.toContain('every 10s')
-    // once 任务 dispatch 后会被删除，但创建时尚未 dispatch
-    expect(service.runtime.listTasks()).toHaveLength(1)
-    const task = service.runtime.listTasks()[0]!
-    expect(task.kind).toBe('once')
-  })
+  // ── 原型链键不误路由 ──
 
-  // Quote-aware tokenizer 修复后，cron 'expr' 能正确提取整个表达式。
-  it('creates cron task from quoted expression', async () => {
-    const result = await executeScheduleCommand(service, "cron '*/10 * * * *' prompt")
-    expect(result).toContain('created')
-    expect(result).toContain('*/10 * * * *')
-    expect(service.runtime.listTasks()).toHaveLength(1)
-  })
-
-  it('creates cron task from double-quoted expression', async () => {
-    const result = await executeScheduleCommand(service, 'cron "0 9 * * 1-5" standup reminder')
-    expect(result).toContain('created')
-    expect(result).toContain('0 9 * * 1-5')
-    expect(service.runtime.listTasks()).toHaveLength(1)
-  })
-
-  // Unquoted multi-token cron still fails -- tokenizer cannot distinguish cron fields from prompt.
-  // Users should quote the cron expression or use the schedule tool (JSON params are unambiguous).
-  it('cron branch fails on unquoted multi-token expression (use quotes)', async () => {
-    const result = await executeScheduleCommand(service, 'cron */10 * * * * prompt')
-    expect(result).toMatch(/^Invalid schedule:/)
-    expect(result).toContain('*/10')
-  })
-
-  // ── 错误分支 ──
-
-  it('invalid schedule returns error message', async () => {
-    const result = await executeScheduleCommand(service, 'invalid-duration-str')
-    expect(result).toMatch(/invalid|usage/i)
-  })
-
-  it('schedule with no prompt returns usage', async () => {
-    const result = await executeScheduleCommand(service, '5m')
-    expect(result).toBe('Usage: /schedule <schedule> <prompt>')
-  })
-
-  it('treats prototype-chain key names as unknown (Map lookup, no Object.prototype hit)', async () => {
-    // 路由表用 Map 查找的语义锚：普通对象下标会把 "constructor"/"toString"/"__proto__"
-    // 解析到 Object.prototype（constructor 被当 handler 调用返回对象、__proto__ 直接 TypeError），
-    // 这里必须与其它未知子命令同走创建任务分支（无 schedule 输入 → usage 文案）。
+  it('constructor/toString/__proto__ 不被当子命令（Map 只查自身键）：json 模式落入创建分支 throw', async () => {
     for (const key of ['constructor', 'toString', '__proto__']) {
-      expect(await executeScheduleCommand(service, key)).toBe(
-        'Usage: /schedule <schedule> <prompt>',
-      )
+      const { ctx } = createMockCtx('json')
+      await expect(commandOpts.handler(key, ctx)).rejects.toThrow('No interactive channel')
     }
-  })
-
-  it('no args returns TUI not-implemented message', async () => {
-    const result = await executeScheduleCommand(service, '')
-    expect(result).toContain('not yet implemented')
-  })
-
-  it('returns error when service is null', async () => {
-    expect(await executeScheduleCommand(null, 'list')).toBe('Scheduler not initialized: session not started.')
   })
 
   // ── getArgumentCompletions ──
 
-  it('completes subcommands for empty prefix', () => {
+  it('补全：空前缀列子命令（list/on/off/rm/run），once/cron 直建补全已退役', () => {
     const completions = commandOpts.getArgumentCompletions('') as Array<{ label: string }>
     const labels = completions.map(c => c.label)
-    expect(labels).toContain('list')
-    expect(labels).toContain('on')
-    expect(labels).toContain('off')
-    expect(labels).toContain('rm')
-    expect(labels).toContain('run')
-    expect(labels).toContain('once')
-    expect(labels).toContain('cron')
+    expect(labels).toEqual(['list', 'on', 'off', 'rm', 'run'])
+    expect(labels).not.toContain('once')
+    expect(labels).not.toContain('cron')
   })
 
-  it('filters subcommands by prefix', () => {
+  it('补全：按前缀过滤子命令', () => {
     const completions = commandOpts.getArgumentCompletions('r') as Array<{ label: string }>
     const labels = completions.map(c => c.label)
     expect(labels).toContain('rm')
@@ -224,25 +216,19 @@ describe('/schedule command', () => {
     expect(labels).not.toContain('list')
   })
 
-  it('completes task ids after on/off/rm/run', async () => {
+  it('补全：on/off/rm/run 之后补全任务 id（description = name · schedule）', async () => {
     const created = await service.create('mytask', '5m')
     const task = created.data!.task
-    // 注意：路由要求 parts.length >= 2 才进 task-id 分支（'on ' 单 token 进子命令分支）。
-    // 当前实现对部分输入的 id 不做过滤，返回所有 task id。
     const completions = commandOpts.getArgumentCompletions(`on ${task.id.slice(0, 2)}`) as Array<{ label: string; description: string }>
-    const labels = completions.map(c => c.label)
-    expect(labels).toContain(task.id)
-    expect(completions.find(c => c.label === task.id)?.description).toContain('mytask')
+    const hit = completions.find(c => c.label === task.id)
+    expect(hit).toBeDefined()
+    expect(hit!.description).toContain('mytask')
+    expect(hit!.description).toContain('every 5m')
   })
 
-  it('returns null for completion when service missing and prefix has 2 tokens', () => {
-    const mockPi = {
-      registerCommand: (_name: string, opts: CommandOpts) => {
-        commandOpts = opts
-      },
-    }
-    registerScheduleCommand(mockPi as never, () => null)
-    // 2 个 token 才能跳过子命令分支、命中末尾 return null
-    expect(commandOpts.getArgumentCompletions('on abcdef12')).toBeNull()
+  it('补全：service 缺失且前缀 2 token → null', () => {
+    const mockPi = createMockPi()
+    registerScheduleCommand(mockPi.pi as never, () => null)
+    expect(mockPi.commands.get('scheduler')!.getArgumentCompletions('on abcdef12')).toBeNull()
   })
 })

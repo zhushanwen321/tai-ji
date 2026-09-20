@@ -1,6 +1,6 @@
 # scheduler
 
-定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。`schedule` tool 走「先确认后创建」：LLM 参数作为草稿预填确认表单，用户确认后才创建任务（headless 无交互通道时直通创建并附注，见「创建确认」）。任务随 owner session 持久化，resume 后继续触发。
+定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。创建入口两路：**人侧 `/scheduler` 命令打开创建表单**（表单异步打开，填表时长不受命令通道超时约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时必须先向用户澄清——见「创建方式」）。任务随 owner session 持久化，resume 后继续触发。
 
 ## 产品定位
 
@@ -55,23 +55,23 @@ session_start
 - fork 出的 session 重放时按 `ownerSessionFile` 过滤，不加载、不执行继承的任务副本（原 session resume 照常）
 - `session_shutdown` 停止 tick + 兜底执行延迟删除 cleanup（正常路径已由首个 turn_end 完成）——任务已 append 到 JSONL，无需额外写盘
 
-## /schedule 命令用法
+## /scheduler 命令用法
 
-注册为 `/schedule` 命令。无参数时返回 TUI 未实现提示（用 `/schedule list` 查看任务）；第一个参数匹配子命令关键词则走子命令分支，否则尝试创建任务。命令由用户直接键入，创建分支**直接创建**、不走确认表单——确认表单是 `schedule` tool 的 LLM 调用路径（见「创建确认」）。
+注册为 `/scheduler`（`/schedule` 保留为代码级 alias，行为与补全完全一致）。无参数 → 打开创建表单（空草稿，默认 `循环 + 每天 09:00`）；带参 `<schedule> <prompt>` → 打开预填表单；第一个参数匹配子命令关键词则走子命令分支。命令 handler **异步打开表单后立即返回**——用户在表单里停留多久都不会触发命令通道的 60s 超时（会话级提醒器不该因为「用户想了两分钟」而报错）。
 
 ### 子命令
 
 | 子命令 | 行为 |
 |--------|------|
-| `/schedule list` | 列出所有任务（id、名称、调度、下次执行时间） |
-| `/schedule on <id>` | 启用任务 |
-| `/schedule off <id>` | 停用任务（推荐临时暂停用 off，不用 rm） |
-| `/schedule rm <id>` | 删除任务 |
-| `/schedule run <id>` | 立即执行任务 |
-| `/schedule once <schedule> <prompt>` | 创建一次性提醒（kind=once） |
-| `/schedule cron <expression> <prompt>` | 创建 cron 任务 |
+| `/scheduler` | 打开创建表单（空草稿；默认循环 + 每天 09:00） |
+| `/scheduler <schedule> <prompt>` | 打开预填时间/提示词的创建表单（如 `/scheduler 5m 'check build'`） |
+| `/scheduler list` | 列出所有任务（id、名称、调度、下次执行时间） |
+| `/scheduler on <id>` | 启用任务 |
+| `/scheduler off <id>` | 停用任务（推荐临时暂停用 off，不用 rm） |
+| `/scheduler rm <id>` | 删除任务 |
+| `/scheduler run <id>` | 立即执行任务 |
 
-任务 id 由 8 位 hex 自动生成，`list` 后从输出中获取。
+一次性（once）与 cron 的形态由**表单内**选择/填写（执行模式切换 + 自定义 cron 输入），不再有 `once` / `cron` 关键字子命令。任务 id 由 8 位 hex 自动生成，`list` 后从输出中获取。
 
 ### 引号转义
 
@@ -80,11 +80,11 @@ session_start
 - 单引号 `'...'` 或双引号 `"..."` 内的内容作为一个 token，引号字符本身被剥离
 - 含空格的多词参数（cron 表达式、prompt）**必须加引号**，否则会被拆成多个 token
 
-例如 cron 表达式 `0 9 * * 1-5` 含空格，必须写成 `/schedule cron '0 9 * * 1-5' standup`；prompt `check build` 同理写成 `/schedule 5m 'check build'`。引号只包住含空格的那个参数本身，不要在外层再套引号（嵌套引号会拆出错误 token，导致 Invalid schedule）。
+例如 prompt `check build` 写成 `/scheduler 5m 'check build'`（预填表单的提示词字段）。引号只包住含空格的那个参数本身，不要在外层再套引号（嵌套引号会拆出错误 token）。
 
 ### 子命令补全
 
-输入 `/schedule ` 后 Tab 补全子命令关键词（list/on/off/rm/run/once/cron）；`on`/`off`/`rm`/`run` 之后补全当前任务 id。
+输入 `/scheduler ` 后 Tab 补全子命令关键词（list/on/off/rm/run）；`on`/`off`/`rm`/`run` 之后补全当前任务 id。
 
 ## schedule 语法
 
@@ -99,7 +99,7 @@ session_start
 | `h` / `hr` / `hour` / `hours` | 时 | 3,600,000 ms |
 | `d` / `day` / `days` | 天 | 86,400,000 ms |
 
-例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败：`schedule` tool 在预校验即报错（`Invalid parameters: unrecognized schedule "..."`，不发起确认表单，修正参数后重调）；`/schedule` 命令报 `Invalid schedule: "..."`。
+例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败：`schedule` tool 在预校验即报错（`Invalid parameters: unrecognized schedule "..."`，修正参数后重调）；`/scheduler` 命令在 `json`/`print` 模式带参直建时报 `Invalid schedule: "..."`（rpc/tui 模式则由表单提交后报错）。
 
 ### cron（时间点调度）
 
@@ -112,7 +112,7 @@ session_start
 
 ## 选项语义
 
-任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires` / `model`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。`schedule` 的参数是**确认表单的预填草稿**：调用先弹出预填表单，用户审阅（可修改）确认后才创建任务，创建以确认后的最终值为准（见「创建确认」）。下表为 `schedule` tool 的选项语义（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
+任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires` / `model`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。`schedule` 的参数即**创建参数**：调用直接创建任务，无确认表单（见「创建方式」）。下表为 `schedule` tool 的选项语义（`/scheduler` 表单的 once / cron 形态对应 kind / 自定义 cron）：
 
 | 选项 | 取值 | 语义 |
 |------|------|------|
@@ -121,47 +121,53 @@ session_start
 | `expires` | duration 字符串 / `never` | recurring 任务的过期时间：`now + duration`；`never` 永不过期；缺省 7 天。**once 任务忽略 expires 参数**（触发即删，传不传都不生效） |
 | `model` | scoped model id（`provider/model`） | 任务执行所用模型；缺省跟随会话当前模型 |
 
-## 创建确认
+## 创建方式（触发反转）
 
-`schedule` tool 的创建路径是「先确认后创建」六步流：预校验 → headless 直通 → 确认交互 → abort 兜底检查 → 取消判定 → 确认创建（交互前另有 abort 早退：signal 已中止时不发起表单，直接走取消语义）。仅在用户要求创建定时任务时发起确认。交互形态按会话模式分三路：
+两条路径，职责不同：
+
+**人侧 `/scheduler`**：打开创建表单（GUI 由 FormOverlay 的 ScheduleForm 渲染，TUI 由 `ScheduleCreateComponent`），用户在表单里自选模式/时间/模型/提示词后创建。命令 handler **异步打开表单后立即返回**——填表时长不受命令通道超时约束。模式矩阵：
 
 | 形态 | 会话模式 | 交互 |
 |------|---------|------|
-| GUI 表单 | rpc + GUI | 统一表单协议（`uiFormInteract` + marker select 通道）：前端 FormOverlay 弹出 schedule 表单，草稿（模式/时间/模型/提示词，附名称/过期高级选项与模型候选列表）经 initial 预填，打开即可一键确认 |
+| GUI 表单 | rpc | 统一表单协议（`uiFormInteract` + marker select 通道）：FormOverlay 弹出 schedule 表单，预填草稿经 initial 直传；命令立即返回，交互在回包窗口之外续跑 |
 | TUI 表单 | tui | `ctx.ui.custom` 挂 `ScheduleCreateComponent`：模式 → 时间 → 模型 → 提示词 → 提交 五 tab 逐项确认，两段 Esc 取消 |
-| headless 直通 | 非 tui/rpc（如 print） | 无交互通道：按参数直接创建，result 末尾附注 `(Created without user confirmation: this session has no interactive channel.)`，工具不禁用 |
+| 非交互 | json / print | 不做交互：带参 `<schedule> <prompt>` → 直建（成功看 session entry，`/scheduler list` 可验）。无参或带参失败（非法表达式 / 缺 prompt）→ **抛错**（该模式 `ctx.ui.notify` 是 no-op、handler 返回值被丢弃，stderr 是唯一可见通道） |
 
-确认后的创建以**用户在表单中裁定的最终值**为准（模式/时间/模型/提示词可改；GUI 另可改名称/过期，TUI 沿用草稿值）。**表单的确认按钮即用户的确认**：确认即创建生效，agent 不再在对话中二次确认，也不得禁用刚创建的任务。
+**模型侧 `schedule` tool**：直接创建（无确认表单、无 headless「未经确认」附注）。参数不完整时必须**先经 ask-user / 对话澄清**，禁止猜测频率后静默创建（`promptGuidelines` 硬性条目）。创建成功的 tool result 含任务 id 与后续运行时刻，模型应复述给用户以便核对/撤销。
 
-未确认的折叠语义（四态，任务均不创建）：
+表单通道/协议的失败折叠（命令路径）：
 
 | 态 | 触发 | 结果 |
 |----|------|------|
-| cancelled | 用户取消表单；agent 被外部终止（abort：goal 取消 / session 切换，交互前与交互中均覆盖） | 正常返回**非错误** result（`details: { cancelled: true }`），文案明示任务未创建、不假定配置、不重试（"The task was NOT created" / "do not retry"） |
-| timeout | 等待确认未决（GUI 用户取消与超时不可区分，同折叠为「未确认」） | 同 cancelled |
-| channel-error | RPC 交互通道不可用：select reject，或回包回显请求 payload（宿主不识别表单协议的旧组合） | **禁用本会话 `schedule` 工具**（`setActiveTools`）+ throw，防 LLM 反复重试 |
-| non-json | 回包形状非法（非协议 JSON / 非 ScheduleFormResult）= 协议版本错配 | throw（"protocol version mismatch"，提示不要重试、向用户报告），不禁用工具 |
+| cancelled | 用户取消表单 | 不创建、无 toast（取消不是错误） |
+| channel-error | RPC 交互通道不可用：select reject，或回包回显请求 payload（宿主不识别表单协议的旧组合） | `ctx.ui.notify(..., 'error')` 提示通道不可用 / 升级宿主；**本会话后续 `/scheduler` 直接给同样提示，不重复试探** |
+| non-json | 回包形状非法（非协议 JSON / 非 ScheduleFormResult）= 协议版本错配 | `ctx.ui.notify(..., 'error')` 提示协议版本错配 |
+| abort | `session_shutdown`（quit/reload/new/resume/fork）→ 命令路径自持 AbortController abort | 不创建、无 toast（taiji 内切换会话不触发，表单保留且仍有效） |
 
-取消/超时不是错误：标错会诱导 LLM 重试，故走正常返回。channel-error / non-json 仅存在于 rpc 分支（TUI 无 select 通道）。
+取消/超时不是错误：不创建、无 toast。命令路径的错误出口统一按 mode 分流——rpc / tui 走 `notify(..., 'error')`（pi 会把 handler 异常折成 renderer 不消费的 `extension.error`，throw 在 rpc 下静默丢弃）；json / print 一律 `rethrow`。
 
 ## 示例
 
-**recurring 间隔任务**（每 5 分钟检查构建）：
+**recurring 间隔任务**（`/scheduler` 打开预填表单，确认后创建）：
 
 ```
-/schedule 5m 'check build'
+/scheduler 5m 'check build'
 ```
 
-**一次性提醒**（10 秒后提醒）：
+**交互创建**（无参打开空表单，表单里选每天 09:00）：
 
 ```
-/schedule once 10s remind
+/scheduler
 ```
 
-**cron 任务**（工作日早 9 点站会）：
+**一次性提醒**：在 `/scheduler` 表单里把执行模式切到「一次性」并选时刻。
+
+**cron 任务**：在 `/scheduler` 表单里选自定义 cron 并填表达式（如 `0 9 * * 1-5`）。
+
+**非交互创建**（json/print 模式，无表单可开，带参直建）：
 
 ```
-/schedule cron '0 9 * * 1-5' standup
+pi -p "/scheduler 5m 'check build'"
 ```
 
 **立即执行**（schedule_control tool 调用：马上 dispatch 现有任务）：
@@ -170,7 +176,7 @@ session_start
 {"action": "run", "id": "<task-id>"}
 ```
 
-**永不过期**（`schedule` tool 调用：弹出确认表单并预填 `expires: "never"`，用户确认后创建长期 recurring 任务）：
+**永不过期**（`schedule` tool 调用：直接创建长期 recurring 任务）：
 
 ```json
 {"prompt": "monthly report", "schedule": "1d", "expires": "never"}
@@ -181,7 +187,7 @@ session_start
 | 限制/行为 | 值 | 说明 |
 |-----------|-----|------|
 | 任务上限 | **50**（`MAX_TASKS`） | 超过抛 `Task limit reached (50)`，需先删除任务 |
-| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/schedule run` 超限返回 not dispatched（disabled, rate-limited, or dispatch in flight）；tick 自动 dispatch 超限静默跳过 |
+| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/scheduler run` 超限返回 not dispatched（disabled, rate-limited, or dispatch in flight）；tick 自动 dispatch 超限静默跳过 |
 | tick 间隔 | **30s**（`TICK_INTERVAL_MS`） | 到期任务在下一个 tick 被 dispatch；实际触发时间可能比计划晚最多 30s |
 | 默认过期 | **7 天**（`DEFAULT_EXPIRY_MS`） | recurring 任务缺省 `expires` 时；`expires: 'never'` 关闭 |
 | once 任务 | 触发后自动删除 | 不参与后续调度 |
@@ -193,7 +199,7 @@ session_start
 | 延迟写入窗口 | 新 session 首 turn 内建任务后进程崩溃可能丢失 | pi 延迟写入：首条 assistant 消息前不 flush。窗口窄、概率极低、无恢复手段 |
 | 触发条件 | pi 进程需存活且 session 打开 | 电脑睡眠 / pi 进程未运行 = 不触发（非系统 cron，无后台守护） |
 
-错误语义（失败经 message 文案 / tool throw 承载，无错误码）：`schedule` tool 创建时参数预校验失败（prompt 空 / schedule 非法）→ 发起确认表单**前**直接 throw `Invalid parameters: ...`（修正参数后重调）；`/schedule` 命令创建时 schedule 解析失败 → `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`。确认交互的取消/超时不是错误（正常返回，任务不创建），通道失败/回包非法走 throw——四态语义见「创建确认」。
+错误语义（失败经 message 文案 / tool throw 承载，无错误码）：`schedule` tool 创建时参数预校验失败（prompt 空 / schedule 非法）→ 直接 throw `Invalid parameters: ...`（修正参数后重调）；`/scheduler` 命令 `json`/`print` 模式带参解析失败 → throw `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`。表单交互的取消/abort 不是错误（不创建、无 toast）；通道失败/回包非法在 rpc/tui 走 `notify(..., 'error')`、在 json/print 走 throw——见「创建方式」。
 
 ## 数据存储位置
 
@@ -254,7 +260,7 @@ npx vitest run src/__tests__/<file>.test.ts   # 单个文件
 - **依赖反转**：`SchedulerRuntime` 只依赖 `SchedulerBackend` 接口（`sendMessage` / `appendEntry` / `now`），不触碰 FS/pi。测试注入 `MockSchedulerBackend`（`src/__tests__/mock-backend.ts` 测试专用实现）实现零副作用测试
 - **纯函数**：`parseDuration` / `formatDuration` / `parseSchedule` / `computeNextRunAt` / `computeNextRuns`（`src/parsing.ts`）无副作用，可直接断言
 - **重放折叠**：custom entry 折叠协议（upsert / advance / toggle / delete，含 nextRunAt 重放恢复、fork owner 过滤）
-- **创建确认流**：`handleSchedule` 六步流分支（预校验 throw / headless 直通附注 / rpc 与 TUI 的确认与取消 / abort / channel-error 禁用工具 / non-json，`src/__tests__/tool-create-flow.test.ts`）
+- **直建流**：`handleSchedule` 预校验 / abort / 参数透传（`src/__tests__/tool-create-flow.test.ts`）；命令路径表单（无参 / 带参预填 / 取消 / 提交 / channel-error / non-json / echo / 模式矩阵 / 异步不阻塞 / json·print throw，`src/__tests__/commands-form.test.ts`）；交互生命周期（草稿构造 + AbortController 注册表，`src/__tests__/interaction.test.ts`）
 - **旧 store 导入**：rename `.imported` 原子收敛（单成功者、崩溃恢复）
 
-扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts` / `commands.ts`（tool 确认流与 /schedule 命令适配层）→ `create-form-component.ts`（TUI 创建确认表单组件，由 `tool.ts` 消费）→ `widget.ts`（状态栏 widget）→ `importer.ts`（旧 store 导入）。
+扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts`（tool 直建流）/ `commands.ts`（/scheduler 命令适配层）→ `interaction.ts`（表单交互 / 协议错配 / AbortController 生命周期）→ `create-form-component.ts`（TUI 创建表单组件，由 `interaction.ts` 消费）→ `widget.ts`（状态栏 widget）→ `importer.ts`（旧 store 导入）。
