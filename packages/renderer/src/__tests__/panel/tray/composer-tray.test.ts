@@ -462,6 +462,21 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
     expect(panelKeys()).toEqual([])
   })
 
+  it('浮层宽度钳制：400px 上限 + 视口钳制（窄视口不被裁）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource(SID))
+
+    await builtinButton('bash').trigger('pointerenter')
+    await advance(OPEN_MS)
+
+    // 基准宽 400px（设计 D8）；窄视口下收到 视口-16px（仓内 CommandPopover 同款钳制），
+    // min-w-0 解掉包装层 min-w-[240px] 在极窄视口下反过来压过 max-width 的优先级问题
+    const cls = panelLayerNode().className
+    expect(cls).toContain('w-[400px]')
+    expect(cls).toContain('max-w-[calc(100vw-16px)]')
+    expect(cls).toContain('min-w-0')
+  })
+
   it('指针离开浮层 → 240ms 后收起（浮层与 icon 同语义）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mountTray(makeWidgetSource(SID))
