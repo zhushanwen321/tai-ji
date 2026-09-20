@@ -349,11 +349,12 @@ async function resolveSaIdRoute(
  * 同值（写侧 subagent-core record-entry.ts SUBAGENT_RECORD_CUSTOM_TYPE，漂移由
  * entry-anchor.test.ts 守卫）。
  *
- * engine 判别（D5，与 zcodeAnchorOfEntry 同口径）：`d.engine !== 'zcode'` 的记录
+ * engine 判别（D5，本函数新增；entry-anchor 的锚查找无需同判别——pi 形态 sessionRef
+ * 缺 dbPath，zcodeAnchorOfEntry 双键判据天然不命中）：`d.engine !== 'zcode'` 的记录
  * （pi 形态——engine 缺省、sessionRef 无 dbPath）不是「zcode 锚不完整」，跳过不归因
- * ——pi record 的 sessionRef 天然无 dbPath，误归因 missing-dbPath 会把「pi record 先于
- * manifest settle 落盘」的正常窗口错报成 zcode_anchor_missing（旧版本产物指引不适用）；
- * 正确归因 = undefined → 上层落 zcode_record_not_found。
+ * ——误归因 missing-dbPath 会把「pi record 先于 manifest settle 落盘」的正常窗口错报成
+ * zcode_anchor_missing（旧版本产物指引不适用）；正确归因 = undefined → 上层落
+ * zcode_record_not_found。
  */
 async function classifyIncompleteEntryAnchor(
   candidateFiles: readonly string[],
@@ -582,13 +583,24 @@ function formatZcodeHostUnsupported(detail: string): string {
 /**
  * sqlite 驱动探测失败的消息特征（zcode-session-source sqlite-driver.ts 探测失败的
  * 错误消息契约；该包不导出专用错误子类，reader 侧按消息特征单列识别——跨包漂移
- * 由 zcode-session-source 的 sqlite-driver 源内字符串与本常量同步维护）。
+ * 由 zcode-routing.test.ts 的源文本契约测试守卫：sqlite-driver 源文不再含本子串即红）。
+ * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
  */
-const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
+export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
 
-/** 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 其余）。 */
-function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
+/**
+ * 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 其余）。
+ * 导出面仅测试消费（L4 包装形态的映射契约直测，zcode-routing.test.ts）。
+ */
+export function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
   if (e instanceof SqliteUnreadableError) {
+    // 生产路径上驱动探测错误恒经 recovery L4 包装（recovery.ts：last failure 以字符串
+    // 并入本错误 message，mark 随之存活）——instanceof 分支内先按 mark 二次判别，否则
+    // host_unsupported 面不可达（恒误映射 db_unreadable，指引动作指向错误恢复路径）。
+    if (e.message.includes(SQLITE_DRIVER_UNSUPPORTED_MARK)) {
+      logger.warn('zcode sqlite driver unsupported in host runtime', { detail: e.message })
+      return formatZcodeHostUnsupported(e.message)
+    }
     // attempted 链进 detail 不进指引正文（§3.4 可观测性：attempted 与 message 供日志/排障）
     return formatZcodeDbUnreadable(dirname(agentDir), `(attempted: ${e.attempted.join(' → ')})`)
   }

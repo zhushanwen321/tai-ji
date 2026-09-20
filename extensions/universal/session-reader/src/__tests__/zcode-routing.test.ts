@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Check } from 'typebox/value'
 
-import { handleSessionRead } from '../tool-handler.js'
+import { handleSessionRead, SQLITE_DRIVER_UNSUPPORTED_MARK, zcodeReadErrorMessage } from '../tool-handler.js'
+import { SqliteUnreadableError } from '@zhushanwen/zcode-session-source'
 import sessionReaderExtension from '../index.js'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 
@@ -500,6 +501,48 @@ describe('场景 5 八类失败（§3.4 表逐行 + 检查顺序三段递进）'
     await expect(handleSessionRead({ action: 'result', session: SA_M }, signals())).rejects.toThrow(
       /zcode_session_not_found[\s\S]*👉[\s\S]*原 sa-id[\s\S]*family/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 驱动探测失败的错误面契约（跨包漂移守卫 + L4 包装形态映射）
+// ---------------------------------------------------------------------------
+
+describe('驱动探测失败错误面：跨包契约 + L4 包装形态映射', () => {
+  it('跨包契约：SQLITE_DRIVER_UNSUPPORTED_MARK 子串在 zcode-session-source sqlite-driver 源文内（漂移即红）', () => {
+    // 驱动探测错误无专用错误类型（该包不导出子类），reader 按消息特征识别——mark 与
+    // sqlite-driver 源内错误字面量的绑定由本测试机器锚定（entry-anchor.test.ts 协议
+    // 字面量跨包漂移守卫同范式）：源文措辞变更不再含 mark → host_unsupported 面死亡，红。
+    const source = readFileSync(
+      new URL('../../../../../packages/zcode-session-source/src/sqlite-driver.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain(SQLITE_DRIVER_UNSUPPORTED_MARK)
+  })
+
+  it('L4 包装形态映射：SqliteUnreadableError（message 含 mark，last failure 并入）→ host_unsupported（R1 回归锚）', () => {
+    // 生产路径上驱动探测错误恒经 recovery L4 包装（last failure 以字符串并入
+    // SqliteUnreadableError.message，mark 随之存活）——直接构造该形态，锁定
+    // instanceof 分支内的二次判别（分支顺序错误 → 误落 db_unreadable，本用例红）。
+    const wrapped = new SqliteUnreadableError(
+      ['L1-direct', 'L2-immutable'],
+      'zcode session db unreadable (recovery ladder exhausted): /tmp/none.sqlite — ' +
+        `last failure: 当前 node 运行时${SQLITE_DRIVER_UNSUPPORTED_MARK}（需 >=22.13），且宿主非 bun 运行时`,
+    )
+    const msg = zcodeReadErrorMessage(wrapped, agentDir)
+    expect(msg).toContain('zcode_host_unsupported')
+    expect(msg).not.toContain('zcode_db_unreadable')
+  })
+
+  it('无 mark 的 SqliteUnreadableError 维持 db_unreadable 面（对照：attempted 链进 detail）', () => {
+    const plain = new SqliteUnreadableError(
+      ['L1-direct'],
+      'zcode session db unreadable (recovery ladder exhausted): /tmp/none.sqlite — last failure: file is not a database',
+    )
+    const msg = zcodeReadErrorMessage(plain, agentDir)
+    expect(msg).toContain('zcode_db_unreadable')
+    expect(msg).toContain('L1-direct')
+    expect(msg).not.toContain('zcode_host_unsupported')
   })
 })
 

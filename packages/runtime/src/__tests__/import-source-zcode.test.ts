@@ -38,6 +38,10 @@ import {
   openZcodeSessionDb,
   zcodeCandidateKey,
 } from '@zhushanwen/zcode-session-source'
+// 包内深路径直取（B1 只收敛 index 包面导出，recovery.ts 包内导出仍可用）：快照前缀与
+// recovery.ts 单源绑定——源内漂移时 mkdtemp 建目与计数判据同源漂移、断言显式红，消除
+// 自持基线硬编码的前缀漂移假绿面。
+import { SNAPSHOT_TMP_PREFIX } from '../../../zcode-session-source/src/recovery.ts'
 
 // C1 回归锚基建：openZcodeSessionDb 以 vi.fn 包装（默认透传真实现，既有用例行为
 // 不变）——dispose 契约用例以 mockImplementation 模拟 L3 命中形态（见该 describe 说明）。
@@ -455,11 +459,10 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
 })
 
 describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
-  // 断言基线自持有（B1 导出面收敛：recovery 内部件不经包面导出）——'taiji-zcode-snap-'
-  // 是 L3 快照目录固定前缀（SSOT = zcode-session-source recovery.ts，兼崩溃残留人工识别）
-  const snapshotTmpPrefix = 'taiji-zcode-snap-'
+  // 前缀 SSOT = zcode-session-source recovery.ts 的 SNAPSHOT_TMP_PREFIX（上方包内相对
+  // 路径 import 绑定；兼崩溃残留人工识别面）
   const countSnapshotDirs = () =>
-    readdirSync(tmpdir()).filter((n) => n.startsWith(snapshotTmpPrefix)).length
+    readdirSync(tmpdir()).filter((n) => n.startsWith(SNAPSHOT_TMP_PREFIX)).length
 
   let dbPath: string
 
@@ -482,7 +485,7 @@ describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
     const actual = await vi.importActual<typeof import('@zhushanwen/zcode-session-source')>('@zhushanwen/zcode-session-source')
     // 基线先于建目录取值（基线不得含本用例自建的快照目录——否则 dispose 删掉它后差分恒 -1）
     const snapshotsBefore = countSnapshotDirs()
-    const snapshotDir = mkdtempSync(join(tmpdir(), snapshotTmpPrefix))
+    const snapshotDir = mkdtempSync(join(tmpdir(), SNAPSHOT_TMP_PREFIX))
     expect(existsSync(snapshotDir)).toBe(true)
     vi.mocked(openZcodeSessionDb).mockImplementation(async () => {
       // 真连接保真（fixture 库真实可查），仅收尾替换为 L3 形态；快照目录只删一次
