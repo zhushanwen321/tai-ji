@@ -20,7 +20,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@zhushanwen/pi-ext-guards": "workspace:*"
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/session-core": "workspace:*"
   },
   "devDependencies": {
     "@zhushanwen/subagent-core": "workspace:*",

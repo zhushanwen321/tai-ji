@@ -205,6 +205,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import toErrorMessage/isRecord（src/tool-handler.ts、src/core/workflow.ts top-level import，ext-simplify-18 D1/D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/session-core",
+          "type": "package",
+          "reason": "代码层静态 import readFirstJsonlLine/readFirstJsonlLineSync/parseSessionFile/parseSessionContent 与类型 Entry/ParseResult/SessionHeader（src/discovery/session-header.ts、src/tool-handler.ts、src/search-across.ts、src/result-action.ts、src/discovery/workflows.ts、src/core/{family,turns,toolcall,tree,render}.ts 等 top-level import，session-reader-shared-core Phase 1 基座化），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

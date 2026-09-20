@@ -4,7 +4,7 @@
  * 分层约定（同 scheduler/cw-tool）：本文件零 pi 依赖——agentDir 作参数注入，
  * 不调用 getAgentDir()，可完全单测；pi 注册与 getAgentDir() 调用在 index.ts。
  *
- * 按 action 分发到 11 条路径，串联 M1 core（parser/tree/turns/render）+ M2 discovery
+ * 按 action 分发到 11 条路径，串联基座解析（session-core parse）+ M1 core（tree/turns/render）+ M2 discovery
  *（find/subagents）+ doctor 的环境判定与根表渲染（u8，discovery/env）。content 给 LLM
  * 读（人类可读摘要），details 供程序化消费/测试断言。
  *
@@ -41,7 +41,7 @@ import {
   type RecordManifest,
 } from './discovery/subagents.js'
 import { readRunSnapshot, resolveWorkflows } from './discovery/workflows.js'
-import { parseSessionFile, type Entry, type ParseResult } from './core/parser.js'
+import { parseSessionFile, type Entry, type ParseResult } from '@zhushanwen/session-core'
 import { parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
 import { buildTreeView } from './core/tree.js'
 import { segmentTurns } from './core/turns.js'
@@ -805,7 +805,7 @@ async function doOutline(
   // 覆盖 stats.totalBytes：render 用 parsedBytes（leaf entry JSON 字节和）近似，
   // 此处用 ParseResult.totalBytes（原始文件字节数，design §3.4 stats.totalBytes 语义）
   result.stats.totalBytes = totalBytes
-  // [D8d] skippedLines 同模式覆盖：parser 已检测坏行计数（render 签名不含 ParseResult 恒 0），
+  // [D8d] skippedLines 同模式覆盖：解析层（session-core parseSessionFile）已检测坏行计数（render 签名不含 ParseResult 恒 0），
   // 有检测必有报告——静默跳过行对调用方不可见 = 数据完整性缺口
   result.stats.skippedLines = skippedLines
   // E7 行渲染统一：行主体 = result.lines（renderOutline 渲染行），handler 只拼 stats 尾段

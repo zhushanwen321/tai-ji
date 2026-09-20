@@ -1,4 +1,4 @@
-import type { Entry } from './parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 
 /**
  * 家族索引与解析（design §3.3 D-7）。

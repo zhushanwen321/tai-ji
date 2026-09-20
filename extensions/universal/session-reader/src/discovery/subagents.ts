@@ -1,7 +1,7 @@
 import { readFile, readdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join, basename } from 'node:path'
-import type { Entry } from '../core/parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 import type { Family, SessionRef } from '../core/family.js'
 import { buildFamilyIndex, resolveFamily } from '../core/family.js'
 import { resolveSessionRoots, type SessionFileMeta } from './roots.js'

@@ -15,7 +15,7 @@
  *     可选 limit 参数（默认 8000 字符/条，超出截断 + 提示读原文件）。
  * 定位复用既有发现机制（sa-xxx manifest 反查 / uuid 片段 / 路径），不新造目录或文件。
  */
-import type { Entry, ParseResult } from './core/parser.js'
+import type { Entry, ParseResult } from '@zhushanwen/session-core'
 import { textBlockParts } from './core/render.js'
 import type { MatchedSession } from './discovery/find.js'
 import { listRecordManifests, type RecordManifest } from './discovery/subagents.js'
