@@ -1,11 +1,14 @@
 /**
- * zcode → pi session JSONL 转换器（U4，session-import-unified 设计 §3.4 权威映射表）。
+ * zcode → pi session JSONL 转换器。
  *
  * 输入 = 单会话全量行集（message 按 sequence、part 按 (message.sequence, part.sequence)
  * 联合序，sqlite-access.getSessionTranscript）；输出 = pi session JSONL 文本（首行 header +
- * entry 序列）。映射逐条实现：T1 header/session_info / T2 user / T3 assistant 按 step-finish
- * 切段 / T3b 工具名映射 / T3c stopReason 映射 / T4 tool output 三形态 / T5 其余 part /
- * T6 entry id 递增链。
+ * entry 序列）。两层映射：① 消息级投影分派——逐条消息先经 classifyMessage()（projection.ts
+ * 移植体）判定六策略之一（或 unclassified），按消息投影对齐设计 §7.3 映射表落点（三类丢弃
+ * 整条不产 entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息
+ * 内部按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
+ * T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
+ * T4 tool output 三形态 / T5 其余 part / T6 entry id 递增链。
  *
  * 排序锚（C1 探针结论，2026-09-19 宿主库只读抽样）：3 个 interactive 会话（1534/1852/29
  * parts）在 ORDER BY message.sequence, part.sequence 联合序下，携带 time 字段的 part
@@ -20,9 +23,10 @@
 import type { ImportDegradation } from '@taiji/shared'
 
 import { ImportServiceError } from '../import-source.js'
+import { classifyMessage } from './projection.js'
 import type { ZcodeReadonlyDb, ZcodeTranscriptMessageRow } from './sqlite-access.js'
 
-/** 目标 pi header（与 ImportArtifact.header 同构；由 U3 的 prepareImport 产出后传入）。 */
+/** 目标 pi header（与 ImportArtifact.header 同构；由 prepareImport 产出后传入）。 */
 export interface ZcodeImportHeader {
   id: string
   timestamp: string
@@ -47,13 +51,15 @@ export interface ZcodeConversionOutput {
   degradations: ImportDegradation[]
 }
 
-// ── [U2 桥接] 结构化降级登记（D4 类型收窄的临时适配，U3 行为重构时重写此段）────────────
-// 既有字符串 push 点原样包成 ImportDegradation：文本存 sample.preview（截 80 字，保
-// 测试/日志可读），登记点消息 id 存 sample.messageId；kind/source/zcodeSchemaVersion
-// 暂缺省（U3 按分类器结果补齐）。code 暂归规则：现行登记点全部是丢弃/形态异常类 →
-// 'dropped_transient'（truncated_output / compaction_unlinked / unclassified 三档的
-// 登记点 U3/U4 引入分类器与 compaction 合并时才出现）。每次登记独立一条 count=1，
-// 聚合归编排层（import-service）；U3 重构为 (kind, source) 聚合计数后本桥接删除。
+// ── 降级登记（D4 结构化分档，设计 §7.4）──────────────────────────────────────────────
+// 两条登记通道，按损失性质区分：
+// ① part 级诊断（pushDegradation）：消息内部局部损失（file part 丢弃、running tool 整对
+//    丢弃、malformed 形态跳过、usage 不可解等）——逐条独立 count=1 + sample（messageId
+//    定位源消息），code 恒 'dropped_transient'（这些不是消息级丢弃分档 L1/L2/L4——那由
+//    分类器在消息边界裁决，走 buildZcodeSessionFile 内的 recordDroppedMessage 聚合）。
+// ② 消息级丢弃聚合（recordDroppedMessage）：分类器判弃的三类策略 + unclassified，按
+//    (code, kind, source) 维度聚合计数（§7.4：count = 该维度聚合计数）；sample 仅
+//    unclassified 携带（保首条）。
 const DEGRADATION_PREVIEW_MAX = 80
 
 function pushDegradation(
@@ -68,6 +74,37 @@ function pushDegradation(
       sample: { messageId, preview: text.slice(0, DEGRADATION_PREVIEW_MAX) },
     }),
   })
+}
+
+/** 宿主消息的 (kind, source) 注解（ImportDegradation 的聚合维度；字符串才携带）。 */
+function degradationMeta(data: Record<string, unknown>): { kind?: string; source?: string } {
+  const semantics = isRecord(data.semantics) ? data.semantics : undefined
+  const kind = typeof semantics?.kind === 'string' ? semantics.kind : undefined
+  const metadata = isRecord(data.metadata) ? data.metadata : undefined
+  let source: string | undefined
+  if (typeof data.source === 'string') source = data.source
+  else if (typeof metadata?.source === 'string') source = metadata.source
+  return { ...(kind !== undefined && { kind }), ...(source !== undefined && { source }) }
+}
+
+// L1 判据（D3）：source 命中 background_*/subagent_* 前缀或 'subagent' 裸值 → 该消息内容在
+// 产物中已有 tool 通道的更完整副本（Agent toolCall/toolResult 对），丢弃冗余、重托管 = 上下文重复。
+function isToolPreservedSource(source: string): boolean {
+  return source.startsWith('background_') || source.startsWith('subagent_') || source === 'subagent'
+}
+
+/** 消息级丢弃的降级码：L1 冗余（tool 通道已保留）/ L2 无语义（非 L1/L3/L4 的丢弃类全量归入）。 */
+function droppedMessageCode(data: Record<string, unknown>): 'dropped_redundant' | 'dropped_transient' {
+  const { source } = degradationMeta(data)
+  return source !== undefined && isToolPreservedSource(source) ? 'dropped_redundant' : 'dropped_transient'
+}
+
+/** unclassified sample 的文本源：全部有效 text part 拼接（对齐分类器 textFromParts 语义）。 */
+function messageTextPreview(parts: ReadonlyArray<Record<string, unknown>>): string {
+  return parts
+    .filter((p) => p.type === 'text' && p.ignored !== true)
+    .map((p) => (typeof p.text === 'string' ? p.text : ''))
+    .join('')
 }
 
 // ── T3b 工具名映射（§3.4）：zcode 首字母大写 → taiji 渲染判定层的全小写匹配域 ──────────
@@ -253,9 +290,28 @@ export function buildZcodeSessionFile(
   const lines: string[] = []
 
   const chain = new EntryChain()
-  const emitEntry = (type: string, timestamp: string, rest: Record<string, unknown>): void => {
+  const emitEntry = (type: string, timestamp: string, rest: Record<string, unknown>): string => {
     const { id, parentId } = chain.next()
     lines.push(JSON.stringify({ type, id, parentId, timestamp, ...rest }))
+    return id
+  }
+
+  // messageId → entryId 映射表（设计 §6-D2）：U4 解析 compaction 的 firstKeptEntryId 时，
+  // tail_start_id（zcode messageId）在此查 entry id。首条 wins——「保留起点」锚语义 = 该
+  // 消息的首条 entry（多段 assistant 消息以其最早段为起点）。U3 仅搭建登记、无读取方
+  // （U4 在同一转换趟内续写消费），禁删。
+  const messageIdToEntryId = new Map<string, string>()
+
+  // 消息级丢弃聚合组（L1/L2/L4）：按 (code, kind, source) 维度 count 累加，插入序 = 首遇序（确定性）。
+  const dropGroups = new Map<string, ImportDegradation>()
+  const recordDroppedMessage = (degradation: ImportDegradation): void => {
+    const key = `${degradation.code}|${degradation.kind ?? ''}|${degradation.source ?? ''}`
+    const existing = dropGroups.get(key)
+    if (existing === undefined) {
+      dropGroups.set(key, { ...degradation })
+      return
+    }
+    existing.count += degradation.count
   }
 
   // T1：首行 header（version=3 = pi CURRENT_SESSION_VERSION）+ 第 2 行 session_info
@@ -274,23 +330,55 @@ export function buildZcodeSessionFile(
 
   for (const msg of messages) {
     const data = msg.data
-    const role = data.role
+    // 分派以投影分类结果为准（§7.3 映射表）——role 不再是分派依据（D1：显隐与 zcode GUI
+    // 同源，合成消息/隐藏注入不再冒充用户消息；无标记未知 role 由分类器兜底链裁决落点）
+    const policy = classifyMessage(data, msg.parts)
     const time = isRecord(data.time) ? data.time : {}
     const createdMs = asFinite(time.created) ?? fallbackMs
     // entry 时间戳不可解时退 header 原串（保真 > 伪造）；message.timestamp（ms）缺省键
     const createdIso = createdMs !== undefined ? new Date(createdMs).toISOString() : header.timestamp
+    // 每消息发射包装：entry 发射时登记 messageId → entryId（首条 wins）
+    const emitForMessage = (type: string, timestamp: string, rest: Record<string, unknown>): void => {
+      const entryId = emitEntry(type, timestamp, rest)
+      if (!messageIdToEntryId.has(msg.id)) messageIdToEntryId.set(msg.id, entryId)
+    }
 
-    if (role === 'user') {
-      convertUserMessage(msg, createdMs, createdIso, emitEntry, degradations)
-      continue
+    switch (policy) {
+      case 'realUserInput':
+        convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations)
+        break
+      case 'visibleAssistant':
+        convertAssistantMessage(msg, data, createdMs, createdIso, emitForMessage, degradations)
+        break
+      case 'compactSummary':
+        // U3 维持 U2 桥接后的现状（D2 合并落 compaction entry 归 U4 同文件续写）：
+        // compact_summary 消息现状走 user entry + 宿主 compaction part 现状发 custom entry。
+        convertUserMessage(msg, createdMs, createdIso, emitForMessage, degradations)
+        break
+      case 'providerContextOnly':
+      case 'hiddenSynthetic':
+      case 'timelineOnly':
+        // D3：整条丢弃不产 entry——内容已由 tool 通道保留（L1）或无对话语义（L2）
+        recordDroppedMessage({ code: droppedMessageCode(data), count: 1, ...degradationMeta(data) })
+        break
+      case 'unclassified':
+        // D4/L4：丢弃 + 独立告警码 + 首条 sample（messageId + 文本前 80 字）
+        recordDroppedMessage({
+          code: 'unclassified',
+          count: 1,
+          ...degradationMeta(data),
+          sample: { messageId: msg.id, preview: messageTextPreview(msg.parts).slice(0, DEGRADATION_PREVIEW_MAX) },
+        })
+        break
+      default: {
+        const exhaustive: never = policy
+        throw new Error(`未处理的投影策略：${String(exhaustive)}`)
+      }
     }
-    if (role === 'assistant') {
-      convertAssistantMessage(msg, data, createdMs, createdIso, emitEntry, degradations)
-      continue
-    }
-    // 前向兼容：zcode 未来新增 role 不炸导入（§3.4 未知 type 同款语义）
-    pushDegradation(degradations, `未知 message role「${String(role)}」跳过：message=${msg.id}`, msg.id)
   }
+
+  // 丢弃聚合组按首遇序并入（part 级诊断条目保持逐条在前的登记形态）
+  degradations.push(...dropGroups.values())
 
   return { content: lines.map((l) => `${l}\n`).join(''), degradations }
 }
@@ -442,6 +530,16 @@ function convertToolPart(
   const mappedName = mapToolName(toolName)
   segment.content.push({ type: 'toolCall', id: callId, name: mappedName, arguments: args })
   const shape = toolResultShape(state, part, msg.id, degradations)
+  // L3 保真损失（§7.4）：serialization.truncated=true → 截断版 output 原样保留进 toolResult
+  // （保真损失非消息丢弃），另登记结构化降级。wire 契约 ImportDegradation 无 tool/bytes 字段
+  // （U2 已收窄并提交）——按现有信息可用性记宿主消息 (kind, source)；tool 名可从产物 toolCall
+  // 流按 callID 回查，字节明细走 runtime 日志通道（§7.4「全量明细不入 wire」）。
+  const partMetadata = isRecord(state.metadata) ? state.metadata : undefined
+  const serialization =
+    partMetadata !== undefined && isRecord(partMetadata.serialization) ? partMetadata.serialization : undefined
+  if (serialization?.truncated === true) {
+    degradations.push({ code: 'truncated_output', count: 1, ...degradationMeta(msg.data) })
+  }
   // timestamp 由 closeSegment 统一注入（tool part 无 time 字段——C1 探针，与所属段共用段时间戳）
   segment.toolResults.push({
     role: 'toolResult',
