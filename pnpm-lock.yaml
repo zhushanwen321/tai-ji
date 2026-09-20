@@ -611,9 +611,15 @@ importers:
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
+      '@zhushanwen/pi-extension-logger':
+        specifier: workspace:*
+        version: link:../../shared/extension-logger
       '@zhushanwen/session-core':
         specifier: workspace:*
         version: link:../../../packages/session-core
+      '@zhushanwen/zcode-session-source':
+        specifier: workspace:*
+        version: link:../../../packages/zcode-session-source
       typebox:
         specifier: '*'
         version: 1.3.7

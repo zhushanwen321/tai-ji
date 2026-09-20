@@ -1026,28 +1026,28 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC9: sa-id 0 命中（可能 running）→ ES2（含 family 指引 + 完整 id 提示 + 👉）', async () => {
+  it('TC9: sa-id 0 命中（可能 running）→ zcode_record_not_found（U9：sa-id 语境统一错误面，含 family 指引 + 👉）', async () => {
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir }),
-    ).rejects.toThrow('无匹配 record')
+    ).rejects.toThrow('zcode_record_not_found')
     try {
       await handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
-      expect(msg).toContain('可能尚未落盘')
+      expect(msg).toContain('未落盘')
       expect(msg).toContain('action:"family"')
       expect(msg).toContain('👉')
     }
   })
 
-  it('TC10: sa-id 片段输入（精确相等不命中）→ ES2', async () => {
+  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found（U9 统一错误面）', async () => {
     await makeFixtureSubagent(dir, 'sa-c8c8dfa8', {
       realSessionId: '019e6c96-dddd-eeee-ffff-0000000010a3',
     })
-    // 片段 sa-c8c8 不等于完整 sa-c8c8dfa8 → 精确相等不命中 → ES2
+    // 片段 sa-c8c8 不等于完整 sa-c8c8dfa8 → 精确相等不命中（兜底亦未命中）
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-c8c8' }, { agentDir: dir }),
-    ).rejects.toThrow('无匹配 record')
+    ).rejects.toThrow('zcode_record_not_found')
   })
 
   it('sa-id 多 manifest 命中（数据异常）→ ES2 ambiguous（C4）', async () => {
@@ -1220,11 +1220,11 @@ describe.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：subagent sa-id（w2 TC1
     ).rejects.toThrow('session 文件不存在')
   })
 
-  it('TC18: 不存在 sa-id → ES2（场景 4，可能 running 指引）', async () => {
+  it('TC18: 不存在 sa-id → zcode_record_not_found（场景 4，U9 统一错误面）', async () => {
     const fakeId = `sa-nonexist-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`
     await expect(
       handleSessionRead({ action: 'outline', session: fakeId }, { agentDir: REAL }),
-    ).rejects.toThrow('无匹配 record')
+    ).rejects.toThrow('zcode_record_not_found')
   })
 }, 60000)
 

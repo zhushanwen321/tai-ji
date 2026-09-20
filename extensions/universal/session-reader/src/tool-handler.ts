@@ -23,10 +23,17 @@
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync } from 'node:fs'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { join, isAbsolute } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
+import { getLogger } from '@zhushanwen/pi-extension-logger'
+import {
+  convertZcodeTranscript,
+  openZcodeSessionDb,
+  SqliteUnreadableError,
+  ZcodeSchemaDriftError,
+} from '@zhushanwen/zcode-session-source'
 import {
   findSessions,
   type MatchedSession,
@@ -35,13 +42,21 @@ import {
 } from './discovery/find.js'
 import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
 import { readSessionHeaderIdSync } from './discovery/session-header.js'
+import { findZcodeEntryAnchor, type ZcodeAnchor } from './discovery/entry-anchor.js'
+import { listZcodeManifests, readZcodeManifest } from './discovery/zcode-manifest.js'
+import { assertZcodeDbPathAllowed, formatZcodeDbUnreadable } from './discovery/whitelist.js'
 import {
   buildFamilyFromFs,
   listRecordManifests,
   type RecordManifest,
 } from './discovery/subagents.js'
 import { readRunSnapshot, resolveWorkflows } from './discovery/workflows.js'
-import { parseSessionFile, type Entry, type ParseResult } from '@zhushanwen/session-core'
+import {
+  parseSessionContent,
+  parseSessionFile,
+  type Entry,
+  type ParseResult,
+} from '@zhushanwen/session-core'
 import { parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
 import { buildTreeView } from './core/tree.js'
 import { segmentTurns } from './core/turns.js'
@@ -99,6 +114,12 @@ import { doDoctor, type SessionReadSignals } from './doctor.js'
 
 // SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
+
+// zcode 读链的结构化日志（「事后排查」通道：degradations 留痕 / L2-L3 恢复成功 /
+// anchor-missing 归因——§3.4 可观测性 + P2 降级隔离契约 F13，均不进 LLM 可见面）。
+// pi handle 由 index.ts 初始化时 setPiHandle 注入（appendEntry 通道）；未注入时
+// warn/error 降级文件日志，双开关缺省 no-op（纯 pi 独立用户零行为影响）。
+const logger = getLogger('session-reader')
 
 // ---------------------------------------------------------------------------
 // 公共类型（与 index.ts 的 TypeBox schema 对齐）
@@ -184,7 +205,21 @@ function shortCwd(cwd: string): string {
 // ---------------------------------------------------------------------------
 
 export type ResolveResult =
-  | { kind: 'ok'; sessionId: string; fileName: string }
+  | {
+      kind: 'ok'
+      sessionId: string
+      /**
+       * 内容源路径。pi = session .jsonl 绝对路径；zcode 路由命中 = 会话库 .sqlite
+       * 绝对路径（loadParsed 按 zcodeAnchor 分流，safeParse 不会以此路径开 JSONL）。
+       */
+      fileName: string
+      /**
+       * zcode 锚（U9 路由命中时在场）：内容加载走 zcode 读链（白名单闸 →
+       * openZcodeSessionDb → convertZcodeTranscript），pi 路径恒 undefined——
+       * 可选字段不改变既有消费方的 pi 行为（toEqual 语义下 undefined 键不可见）。
+       */
+      zcodeAnchor?: ZcodeAnchor
+    }
   | { kind: 'multi'; query: string; candidates: MatchedSession[] }
 
 // readSessionHeaderIdSync（同步读首行 header 取 id，resolveSessionId 形态①/②消费）
@@ -231,13 +266,149 @@ async function resolveSessionId(
     return resolveBySessionPath(session)
   }
 
-  // ② sa-id 前缀 → record manifest 精确反查
+  // ② sa-id 前缀 → zcode 路由（§3.5 定位链，U9）前置，pi 现路径零改动地在其中承接
   if (session.startsWith('sa-')) {
-    return resolveByRecordId(session, agentDir, prefetchedManifests)
+    return resolveSaIdRoute(session, agentDir, prefetchedManifests, action, liveSessionDir)
+  }
+
+  // §3.4 第 0 段：sess_ 形态 id 无第一梯队直读入口（agent 从不持有 sess id，F14；
+  // 且无 zcode 候选发现，D6）→ zcode_param_invalid。pi 的 session id 是 uuid（无
+  // sess_ 前缀），此检测只改变错误输入的错误面文案。
+  if (session.startsWith('sess_')) {
+    throw err(formatZcodeParamInvalid(session))
   }
 
   // ③ 其余：findSessions 透传 source/liveSessionDir 沿用 F1/F2
   return resolveByFragment(session, agentDir, source, liveSessionDir)
+}
+
+/**
+ * sa- 形态的路由前置（U9，design §3.5 三层定位链；**不加任何工具参数**，D4——
+ * 判别源 = manifest 自带 engine 字段）：
+ *
+ * ① zcode manifest 直读（`readZcodeManifest`，文件名由 sa-id 确定性推出，窄 walk
+ *   命中即止）：`{kind:'zcode'}` → zcode 读链；`{kind:'anchor-missing'}` →
+ *   `zcode_anchor_missing`。
+ * ② `{kind:'not-zcode'}` → **pi 现路径零改动承接**：pi manifest 有命中即走既有
+ *   `resolveByRecordId`（engine 缺省/'pi' 形态，行为与今天逐字节一致）。
+ * ③ pi 无命中（今天此处直接 ES2）→ entry 兜底（§3.5 第②层，仅 liveSessionDir 内，
+ *   越界显式失败）：命中 → zcode 读链；未命中 → `zcode_record_not_found` + 👉
+ *  （§3.4：sa-id 语境的统一错误面——F14 agent 唯一持有的 id 就是 sa-id，指引动作
+ *   覆盖 ES2 原文案的全部恢复路径）。
+ */
+async function resolveSaIdRoute(
+  session: string,
+  agentDir: string,
+  prefetchedManifests: RecordManifest[] | undefined,
+  action: SessionReadAction,
+  liveSessionDir: string | undefined,
+): Promise<ResolveResult> {
+  const zm = await readZcodeManifest(agentDir, session)
+  if (zm.kind === 'anchor-missing') {
+    // 归因进结构化日志不进 LLM 可见面（§3.4）：readZcodeManifest 的三态信号不携带
+    // 缺失键名明细（U6 接口面），日志记 sa-id + kind（engineHandle 整体缺席 vs 缺键
+    // 的细分归因登记为已知偏差——细分需重读 manifest 自解析，walk 逻辑不重复实现）
+    logger.warn('zcode manifest anchor-missing', { saId: session })
+    throw err(formatZcodeAnchorMissing(session))
+  }
+  if (zm.kind === 'zcode') {
+    return resolveZcodeRoute(session, zm.anchor, agentDir, action)
+  }
+  // not-zcode：pi manifest 命中 → 现路径（同一 manifests 传入，不二次扫描）
+  const manifests = prefetchedManifests ?? (await listRecordManifests(agentDir))
+  if (manifests.some((m) => m.id === session)) {
+    return resolveByRecordId(session, agentDir, manifests)
+  }
+  // entry 兜底（§3.5 第②层）：候选 = liveSessionDir 内主 session 文件（第一梯队
+  // 只在 liveSessionDir 内做，根内全扫不做——越界显式失败）
+  const candidates = await liveSessionCandidateFiles(agentDir, liveSessionDir)
+  const anchor = findZcodeEntryAnchor(candidates, session)
+  if (anchor === undefined) {
+    // 兜底失败的两类归因（§3.4 第 0 段，场景 5 ②）：候选里有该 sa-id 的 record entry
+    // 但锚不完整 → zcode_anchor_missing（缺失键名进结构化日志——engineHandle 整体
+    // 缺席/缺 sessionId/缺 dbPath 归因不同）；完全无该 sa-id → zcode_record_not_found。
+    // findZcodeEntryAnchor 契约是「锚或 not-found」不分归因，分类只在罕见失败路径补
+    // 一次形态判定。
+    const incomplete = await classifyIncompleteEntryAnchor(candidates, session)
+    if (incomplete !== undefined) {
+      logger.warn('zcode entry anchor incomplete', { saId: session, reason: incomplete })
+      throw err(formatZcodeAnchorMissing(session))
+    }
+    throw err(formatZcodeRecordNotFound())
+  }
+  return resolveZcodeRoute(session, anchor, agentDir, action)
+}
+
+/**
+ * 候选文件里该 sa-id 的 `subagent-record` entry 若「在场但锚不完整」，返回缺失归因
+ * （§3.4 zcode_anchor_missing 的 entry 形态触发 + 日志归因；记录完全不在场返回
+ * undefined）。判定与 entry-anchor.ts 的 zcodeAnchorOfEntry 双键判据同构，协议字面量
+ * 同值（写侧 subagent-core record-entry.ts SUBAGENT_RECORD_CUSTOM_TYPE，漂移由
+ * entry-anchor.test.ts 守卫）。
+ */
+async function classifyIncompleteEntryAnchor(
+  candidateFiles: readonly string[],
+  saId: string,
+): Promise<'missing-engineHandle' | 'missing-sessionRef' | 'missing-sessionId' | 'missing-dbPath' | undefined> {
+  for (const file of candidateFiles) {
+    let content: string
+    try {
+      content = await readFile(file, 'utf8')
+    } catch {
+      continue
+    }
+    for (const entry of parseSessionContent(content).entries) {
+      if (entry.type !== 'custom' || entry.customType !== 'subagent-record') continue
+      const data: unknown = entry.data
+      if (typeof data !== 'object' || data === null) continue
+      const d = data as Record<string, unknown>
+      if (d.v !== 1 || d.id !== saId) continue
+      const handle = d.engineHandle
+      if (typeof handle !== 'object' || handle === null) return 'missing-engineHandle'
+      const ref = (handle as Record<string, unknown>).sessionRef
+      if (typeof ref !== 'object' || ref === null) return 'missing-sessionRef'
+      const r = ref as Record<string, unknown>
+      if (typeof r.sessionId !== 'string' || r.sessionId === '') return 'missing-sessionId'
+      if (typeof r.dbPath !== 'string' || r.dbPath === '') return 'missing-dbPath'
+    }
+  }
+  return undefined
+}
+
+/** liveSessionDir 内的主 session 文件（entry 兜底候选；无 live 信号 → 空集=越界失败）。 */
+async function liveSessionCandidateFiles(
+  agentDir: string,
+  liveSessionDir: string | undefined,
+): Promise<string[]> {
+  if (liveSessionDir === undefined || liveSessionDir === '') return []
+  const roots = await resolveSessionRoots({ agentDir, liveSessionDir })
+  return roots.filter((r) => r.kind === 'live').flatMap((r) => r.files.map((f) => f.path))
+}
+
+/**
+ * zcode 锚 → ResolveResult（路由命中后的 action 分叉）：
+ * - family：以**发起 session（rootSessionId）**为家族视图入口——zcode 会话无 JSONL
+ *   文件，buildFamilyFromFs 的 byId 索引查不到锚 sessionId；zcode 节点按 rootSessionId
+ *   挂载（D5-1），rootSessionId 视图即「该 subagent 的后代与关联」（§3.4 指引语义）。
+ *   rootSessionId 取自 `listZcodeManifests` 枚举（readZcodeManifest 直读信号只携带锚，
+ *   不携带 rootSessionId——family 是低频 action，枚举一次可接受）。
+ * - 其余 action：sessionId = 锚会话 id、fileName = 锚库路径（内容源），zcodeAnchor
+ *   在场使 loadParsed 分流到 zcode 读链。
+ */
+async function resolveZcodeRoute(
+  saId: string,
+  anchor: ZcodeAnchor,
+  agentDir: string,
+  action: SessionReadAction,
+): Promise<ResolveResult> {
+  if (action === 'family') {
+    const zcodeNodes = await listZcodeManifests(agentDir)
+    const rootSessionId = zcodeNodes.find((n) => n.id === saId)?.rootSessionId
+    // 枚举未含该 id（直读命中与枚举之间 manifest 被迁移的极端窗口）→ 退回锚 sessionId，
+    // 后续 byId 查不到走既有 not-found 错误面（不静默伪造家族）
+    return { kind: 'ok', sessionId: rootSessionId ?? anchor.sessionId, fileName: '' }
+  }
+  return { kind: 'ok', sessionId: anchor.sessionId, fileName: anchor.dbPath, zcodeAnchor: anchor }
 }
 
 /** 形态①：绝对路径 / ~ 前缀 → 展开后读首行 header，sessionId=header 真实 id（文件名仅定位）。 */
@@ -337,6 +508,136 @@ function formatSaIdNotFound(saId: string): string {
     `\n👉 用 session_read { action:"family" } 查活跃/已完成的 subagent；` +
     `若是片段输入，请用完整 sa- id 或 action:"find" 重试。`
   )
+}
+
+// ---------------------------------------------------------------------------
+// zcode 错误面（U9，design §3.4 七码 + 👉 逐行；错误码标识入 message 供机器识别，
+// 形态对齐 §3.1 失败路径示例 `[zcode_db_path_forbidden] …`）
+// ---------------------------------------------------------------------------
+
+/** `zcode_param_invalid`：sess_ 形态 id（无第一梯队直读入口，F14/D6）。 */
+function formatZcodeParamInvalid(id: string): string {
+  return (
+    `[zcode_param_invalid] "${id}" 是 zcode 会话 id 形态，本工具不接受（第一梯队无 sess-id 直读入口）。` +
+    `\n👉 请使用 subagent 完成通知或 /subagents 面板里的 sa- id（形如 sa-xxx），换成完整 sa- id 重试。`
+  )
+}
+
+/** `zcode_record_not_found`：manifest 缺位/残缺 ∧ entry 兜底未命中（§3.4 第 0 段末）。 */
+function formatZcodeRecordNotFound(): string {
+  return (
+    `[zcode_record_not_found] 该 subagent 记录不可达（未落盘 / 已被 GC / 或不属于当前会话——兜底只在当前会话内）。` +
+    `\n👉 在它被派发的那个会话中读取；或用 session_read { action:"family" } 查其后代与关联；或换一个已完成的 subagent。`
+  )
+}
+
+/** `zcode_anchor_missing`：engine==='zcode' 但锚不完整（旧版本产物 / 部分回填残余）。 */
+function formatZcodeAnchorMissing(saId: string): string {
+  return (
+    `[zcode_anchor_missing] subagent "${saId}" 的记录缺少 zcode 引擎定位符。` +
+    `\n👉 会话可能由旧版本产出；用会话导入对话框导入后读取。`
+  )
+}
+
+/** `zcode_session_not_found`：锚可解析、库可开、schema 兼容，但库内无该 session 行。 */
+function formatZcodeSessionNotFound(): string {
+  return (
+    `[zcode_session_not_found] 该 zcode 会话不在库中（已被 zcode GC，或锚已更新到新 session——每轮锚会更新）。` +
+    `\n👉 用原 sa-id 重新发起读取；或用 session_read { action:"family" } 查其后代；或换一个已完成的 subagent。`
+  )
+}
+
+/** `zcode_schema_drift` 的 message（观测版本区分归因，§3.4）。 */
+function formatZcodeSchemaDrift(observed: string | undefined): string {
+  return (
+    `[zcode_schema_drift] zcode 会话库 schema 版本不兼容（observed: ${observed ?? 'unknown'}）。` +
+    `\n👉 升级 taiji 到新版本，或用会话导入对话框。`
+  )
+}
+
+/** 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 其余）。 */
+function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
+  if (e instanceof SqliteUnreadableError) {
+    // attempted 链进 detail 不进指引正文（§3.4 可观测性：attempted 与 message 供日志/排障）
+    return formatZcodeDbUnreadable(dirname(agentDir), `(attempted: ${e.attempted.join(' → ')})`)
+  }
+  if (e instanceof ZcodeSchemaDriftError) {
+    return formatZcodeSchemaDrift(e.observedVersion)
+  }
+  // 其余查询期错误（data 列 JSON 非法等 schema 漂移域——sqlite-access 不静默跳过，
+  // 映射权在消费侧）→ schema_drift 语义
+  return formatZcodeSchemaDrift(undefined) + `\n(detail: ${toErrorMessage(e)})`
+}
+
+// ---------------------------------------------------------------------------
+// zcode 读链（U9，design §3.5：白名单闸在开库前——dbPath 来自 session 数据不可信）
+// ---------------------------------------------------------------------------
+
+/**
+ * zcode 锚 → ParseResult（既有 turns/render 管线的统一内容入口）。
+ *
+ * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径闸
+ * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集闸门在
+ * openZcodeSessionDb 单点）。读库发生在 ext 进程内（§3.5 关键论断），不经 taiji。
+ */
+async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<ParseResult> {
+  assertZcodeDbPathAllowed(anchor.dbPath, agentDir)
+  let handle: Awaited<ReturnType<typeof openZcodeSessionDb>>
+  try {
+    handle = await openZcodeSessionDb(anchor.dbPath)
+  } catch (e) {
+    throw err(zcodeReadErrorMessage(e, agentDir))
+  }
+  try {
+    // 恢复成功不再是静默事件：结构化日志（恢复方式 + db 路径），不进 LLM 可见面
+    if (handle.via !== 'L1-direct') {
+      logger.debug('zcode session db recovered via recovery ladder', {
+        dbPath: anchor.dbPath,
+        via: handle.via,
+      })
+    }
+    const row = handle.db.getSessionRow(anchor.sessionId)
+    if (row === undefined) {
+      throw err(formatZcodeSessionNotFound())
+    }
+    const transcript = handle.db.getSessionTranscript(anchor.sessionId)
+    const normalized = convertZcodeTranscript(transcript, {
+      id: anchor.sessionId,
+      title: row.title,
+      timeCreated: row.timeCreated,
+    })
+    if (normalized.degradations.length > 0) {
+      // P2 契约（F13）：明细只进日志；压缩点以 custom entry 形态在 detail 可见
+      logger.warn('zcode session conversion degraded', {
+        sessionId: anchor.sessionId,
+        dbPath: anchor.dbPath,
+        degradations: normalized.degradations,
+      })
+    }
+    // ParseResult 形状对齐：zcode 库读无「文件字节/坏行」概念（strict Entry 树已由
+    // converter 保证），totalBytes/skippedLines 恒 0
+    return { entries: normalized.entries, totalBytes: 0, skippedLines: 0, lastLinePartial: false }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('[zcode_')) throw e // 本函数产出的错误面原样传播
+    throw err(zcodeReadErrorMessage(e, agentDir))
+  } finally {
+    handle.dispose()
+  }
+}
+
+/**
+ * 内容加载统一入口：zcode 路由命中 → zcode 读链（agentDir 供白名单派生，F11）；pi →
+ * 既有 safeParse（行为零改动）。各 do* 的 safeParse(resolved.fileName) 消费点统一换
+ * 此函数（pi 输出逐字节不变——zcodeAnchor 缺省即原路径）。
+ */
+async function loadParsed(
+  resolved: Extract<ResolveResult, { kind: 'ok' }>,
+  agentDir: string,
+): Promise<ParseResult> {
+  if (resolved.zcodeAnchor !== undefined) {
+    return loadZcodeParsed(resolved.zcodeAnchor, agentDir)
+  }
+  return safeParse(resolved.fileName)
 }
 
 /** ES2（SA_ID_AMBIGUOUS）：sa-id 多 manifest 命中（数据异常，record.id 应唯一）。 */
@@ -794,7 +1095,7 @@ async function doOutline(
     liveSessionDir,
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
-  const { entries, totalBytes, skippedLines } = await safeParse(resolved.fileName)
+  const { entries, totalBytes, skippedLines } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const opts: OutlineOptions = {
@@ -831,7 +1132,7 @@ async function doExpand(
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const turnIdx = parseTurnIndex(requireStr(params.turn, 'turn', 'expand'))
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const turn = turns.find((t) => t.index === turnIdx)
@@ -864,7 +1165,7 @@ async function doDetail(
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const range = parseTurnsRange(requireStr(params.turns, 'turns', 'detail'))
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const max = turns.length - 1
@@ -923,7 +1224,7 @@ async function doSearch(
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const scope = params.scope ?? 'all'
   const limit = params.limit ?? SEARCH_DEFAULT_LIMIT
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const regex = compilePattern(pattern)
@@ -970,7 +1271,7 @@ async function doExport(
     text = formatFamilyText(family)
     label = 'family'
   } else if (format === 'full') {
-    const { entries } = await safeParse(resolved.fileName)
+    const { entries } = await loadParsed(resolved, agentDir)
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const det = renderDetail(turns, {
@@ -987,7 +1288,7 @@ async function doExport(
       .join('\n')
     label = 'full'
   } else {
-    const { entries } = await safeParse(resolved.fileName)
+    const { entries } = await loadParsed(resolved, agentDir)
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const result = renderOutline(turns, tree, {
@@ -1054,7 +1355,7 @@ async function doExtract(
     liveSessionDir,
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   // extract 遍历全量 entry（含旁支/压缩历史），与 outline/expand/detail 的 leaf 视图不同：
   // 素材提取要全量（design §2.3 实测全量 519 toolCall / 26 user / 515 toolResult），
   // 用 leafPath 过滤会漏掉旁支素材。turn 标注是全量分段 index（含 compaction 周期 + 旁支
@@ -1357,18 +1658,41 @@ export async function handleSessionRead(
       return doExtract(params, agentDir, signals.liveSessionDir)
     case 'workflow':
       return doWorkflow(params, agentDir, signals.liveSessionDir)
-    case 'result':
+    case 'result': {
       // per-call 构造注入面（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
       // 直接 import——ext-simplify-04 E5）：resolveSessionId 包装把信号包中的
       // liveSessionDir 闭包进解析调用（ResultActionDeps 接口签名固定 5 参，包装保持
       // 同形、末位补传），result 的片段形态与 find/outline 消费同一 roots
       //（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
+      // U9 zcode 路由：deps.safeParse 只认 fileName 字符串，而 zcode 内容源是库——
+      // per-call Map 按 fileName（=锚库路径）携带锚，safeParse 包装分流到 zcode 读链
+      //（pi 路径 Map 未命中 → 原样 safeParse，行为零变化）。
+      const zcodeByFile = new Map<string, ZcodeAnchor>()
       return doResult(params, agentDir, {
-        resolveSessionId: (rawSession, action, ad, source, prefetchedManifests) =>
-          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, signals.liveSessionDir),
+        resolveSessionId: async (rawSession, action, ad, source, prefetchedManifests) => {
+          const resolved = await resolveSessionId(
+            rawSession,
+            action,
+            ad,
+            source,
+            prefetchedManifests,
+            signals.liveSessionDir,
+          )
+          if (resolved.kind === 'ok' && resolved.zcodeAnchor !== undefined) {
+            zcodeByFile.set(resolved.fileName, resolved.zcodeAnchor)
+          }
+          return resolved
+        },
         disambiguate,
-        safeParse,
+        safeParse: (fileName) => {
+          const anchor = zcodeByFile.get(fileName)
+          if (anchor !== undefined) {
+            return loadZcodeParsed(anchor, agentDir)
+          }
+          return safeParse(fileName)
+        },
       })
+    }
     case 'doctor':
       return doDoctor(params, signals)
     default: {
