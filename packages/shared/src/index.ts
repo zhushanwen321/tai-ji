@@ -5,6 +5,7 @@ export type {
   ReplyPayloadMap,
   BatchDeleteResult,
   RenameMode,
+  UiLocale,
   SystemPromptConfig,
   CommandSourceInfo,
   DefaultModelSource,

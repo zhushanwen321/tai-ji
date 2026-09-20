@@ -1,6 +1,6 @@
 /**
- * Workspace 偏好组 config.* message handler（worktree 目录/脚本/超时 + 默认基分支，
- * 10 条简单读写转发 case）。
+ * Workspace 偏好组 config.* message handler（worktree 目录/脚本/超时 + 默认基分支
+ * + UI 语言，11 条简单读写转发 case）。
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * 「Extracted from RuntimeServer to reduce file size」；本组 case 全部仅消费
@@ -12,6 +12,7 @@
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage } from '@taiji/shared'
+import { writeUiPreferences } from '../services/ui-preferences-helper.js'
 import type { SettingsHandlerContext } from './settings-message-handler.js'
 
 export class ConfigPreferencesMessageHandler {
@@ -68,6 +69,14 @@ export class ConfigPreferencesMessageHandler {
       }
       case 'config.getDefaultBaseBranch': {
         this.ctx.reply(ws, msg.id, 'config.defaultBaseBranch', { baseBranch: this.ctx.configService.getDefaultBaseBranch() })
+        return true
+      }
+      // u-locale-channel：写 <dataDir>/ui-preferences.json（tmp+rename 原子写，extension 侧只读热生效）。
+      // 无读回 RPC，成功只回 ack（config.uiLocaleSet）；写盘失败经 replySaveResult 走 D10 错误信封。
+      case 'config.setUiLocale': {
+        const result = writeUiPreferences(this.ctx.configService.getConfigDir(), msg.payload.locale)
+        if (!this.replySaveResult(ws, msg.id, result)) return true
+        this.ctx.reply(ws, msg.id, 'config.uiLocaleSet', {} as Record<string, never>)
         return true
       }
       default:
