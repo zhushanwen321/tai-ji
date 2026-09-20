@@ -55,6 +55,7 @@ export default {
     import_target_conflict: 'The target location is occupied by another session: check whether the source file was renamed or duplicated; import the session file with its original filename instead',
     import_copy_failed: 'Failed to copy the session file (disk space or permission issue): free up disk space or check permissions and retry',
     import_project_invalid: 'Target project is invalid: choose a project again and retry',
+    import_db_path_forbidden: 'Session library path is not allowed: reopen the source picker and retry with the default zcode session library',
     timeout: 'Request timed out: please retry',
     unknown: 'Import failed: please retry',
   },

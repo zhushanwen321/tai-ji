@@ -4,9 +4,13 @@
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView } from '@taiji/shared'
+import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
+// zcode 会话库白名单（MF-3-1 wire 帧加固）：值 import——校验在 transport 边界执行，
+// allowlist 推导是 zcode-import 域的路径知识（宿主库/隔离库同文件 SSOT）。
+import { zcodeImportDbAllowlist } from '../services/session/zcode-import/sqlite-access.js'
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
 // 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'
@@ -803,6 +807,23 @@ export class SessionMessageHandler {
     const importSvc = this.ctx.importService
     if (!importSvc) {
       return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)
+    }
+    // wire 帧 dbPath 白名单（MF-3-1 加固）：dbPath 在 wire 上是任意 WS 客户端可写字段，
+    // 仅放行 zcodeImportDbAllowlist(dataDir) 封闭集合（隔离库/宿主库）；缺省 undefined =
+    // source 侧动态推导，放行。校验在 transport 边界执行（不可信面收口），与源无关——
+    // pi 源不消费 dbPath，带值即异常请求同拦。测试 fixture 库注入走 source deps 进程内
+    // 通道（构造注入 getHostDbPath），不经 wire，不受本校验影响。
+    const wireDbPath = msg.payload.dbPath
+    if (wireDbPath !== undefined) {
+      // typeof 守卫先于集合成员判定：wire 帧类型标注 string，但 JSON 层可写任意形态
+      if (typeof wireDbPath !== 'string' || !zcodeImportDbAllowlist(getDataDir()).includes(wireDbPath)) {
+        return this.ctx.sendError(
+          ws,
+          'import_db_path_forbidden',
+          'dbPath 不在允许的会话库路径集合内：请缺省不传（runtime 动态推导宿主库）后重试',
+          msg.id,
+        )
+      }
     }
     try {
       const result = await importSvc.importSession(msg.payload)

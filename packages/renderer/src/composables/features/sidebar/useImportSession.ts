@@ -128,6 +128,7 @@ const FAILURE_CODES: ReadonlySet<string> = new Set([
   'import_target_conflict',
   'import_copy_failed',
   'import_project_invalid',
+  'import_db_path_forbidden',
   'timeout',
 ])
 

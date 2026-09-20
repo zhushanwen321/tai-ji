@@ -30,6 +30,16 @@ function extractSuffixSegments(file: string, constName: string): string[] {
   return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((s) => s[1])
 }
 
+/** 从文件文本抽取 `<fnName>` 函数体内首个 `join(...)` 实参的引号段序列（引号/空白归一）。 */
+function extractJoinSegments(file: string, fnName: string): string[] {
+  const text = readFileSync(resolve(REPO_ROOT, file), 'utf8')
+  const m = text.match(new RegExp(`function ${fnName}\\([^)]*\\)[\\s\\S]*?\\bjoin\\(([^)]*)\\)`))
+  if (!m) {
+    throw new Error(`${file} 未找到 ${fnName} 的 join 调用——函数改名或迁移后须同步本守卫`)
+  }
+  return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((s) => s[1])
+}
+
 describe('zcode 宿主库路径后缀三处字面量一致性', () => {
   it('① 权威源 constants.ts ZCODE_HOST_DB_SUFFIX 逐段等于权威值', () => {
     expect(extractSuffixSegments('packages/zcode-subagent-cli/src/constants.ts', 'ZCODE_HOST_DB_SUFFIX')).toEqual(
@@ -45,5 +55,22 @@ describe('zcode 宿主库路径后缀三处字面量一致性', () => {
 
   it('③ scripts/zcode-session-db-cleanup.mjs HOST_DB_SUFFIX 与权威源一致', () => {
     expect(extractSuffixSegments('scripts/zcode-session-db-cleanup.mjs', 'HOST_DB_SUFFIX')).toEqual(EXPECTED_SUFFIX)
+  })
+})
+
+/** 隔离库相对段（`<dataDir>/engines/zcode/session-db/db.sqlite`，引擎包与 runtime 各自 join）。 */
+const EXPECTED_ISOLATED_SEGMENTS = ['engines', 'zcode', 'session-db', 'db.sqlite']
+
+describe('zcode 隔离库路径段两处字面量一致性', () => {
+  it('引擎包 db-path.ts zcodeSessionDbPath 与权威段一致', () => {
+    expect(
+      extractJoinSegments('packages/zcode-subagent-cli/src/db-path.ts', 'zcodeSessionDbPath'),
+    ).toEqual(EXPECTED_ISOLATED_SEGMENTS)
+  })
+
+  it('runtime sqlite-access.ts zcodeIsolatedDbPath 与权威段一致', () => {
+    expect(
+      extractJoinSegments('packages/runtime/src/services/session/zcode-import/sqlite-access.ts', 'zcodeIsolatedDbPath'),
+    ).toEqual(EXPECTED_ISOLATED_SEGMENTS)
   })
 })

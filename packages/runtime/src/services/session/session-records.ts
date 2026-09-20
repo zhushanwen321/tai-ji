@@ -167,7 +167,9 @@ const JSON_INDENT = 2
 /**
  * [reload-closeout D2] 送达水位对账定时腿间隔（低频兜底；主路径 = agent_settled 腿秒级）。
  * 15s + 单轮耗时，对 G1「完成后 ≤30s 收敛」阈值留 2x 余量。稳态成本 = 每 15s 每「有
- * record 的 session」一次 get_entries(since) 空增量 RPC（pi 侧内存读非磁盘扫描，u0 已核）。
+ * record 的 session」一次 get_entries(since) 空增量 RPC（pi 侧内存读非磁盘扫描——pi 实装
+ * 锚点：dist/core/session-manager.js:982-984（0.84.4）getEntries 返回 `this.fileEntries.filter(...)`
+ * 内存过滤零磁盘 IO；调用链 dist/modes/rpc/rpc-mode.js:505-515 get_entries case）。
  */
 export const RECORD_RECONCILE_INTERVAL_MS = 15_000
 

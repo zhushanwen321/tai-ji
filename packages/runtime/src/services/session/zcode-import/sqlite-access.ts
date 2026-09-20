@@ -30,6 +30,31 @@ export function hostZcodeDbPath(): string {
   return join(homedir(), ...HOST_DB_SUFFIX)
 }
 
+/**
+ * zcode 隔离会话库绝对路径（runtime 侧投影：`<dataDir>/engines/zcode/session-db/db.sqlite`）。
+ * 与 packages/zcode-subagent-cli/src/db-path.ts 的 zcodeSessionDbPath 同布局（引擎 dataDir
+ * = TAIJI_AGENT_DATA_DIR = shared getDataDir()，同一目录两侧各自推导）；不 import 引擎包
+ * 故重声明，路径段字面量一致性由 test/host-db-suffix-parity.test.ts 守卫（漂移测试即红）。
+ * @param dataDir taiji 数据根（getDataDir() 产物）
+ */
+export function zcodeIsolatedDbPath(dataDir: string): string {
+  return join(dataDir, 'engines', 'zcode', 'session-db', 'db.sqlite')
+}
+
+/**
+ * zcode 会话库白名单集合（wire 帧 dbPath 的唯一放行来源，封闭集合）：
+ * `[隔离库（现役）, 宿主库（仅存量兼容）]`。与 zcode-subagent-cli db-path.ts 的
+ * zcodeDbPathAllowlist 同构——引擎侧守 record/handle 读取链，本侧守 session.import
+ * wire 帧（transport 层调用，见 session-message-handler）：wire 帧上的 dbPath 来自
+ * 不可信面（任意 WS 客户端），仅放行集合内精确绝对路径，其余拒绝
+ * （import_db_path_forbidden）——防白名单外任意文件被当会话库读取。集合形态
+ * （而非 `||` 列表）使未来第三个合法路径只需改本函数。
+ * @param dataDir taiji 数据根（getDataDir() 产物）
+ */
+export function zcodeImportDbAllowlist(dataDir: string): readonly string[] {
+  return [zcodeIsolatedDbPath(dataDir), hostZcodeDbPath()]
+}
+
 /** 候选/会话行的最小消费列（camelCase，source 层不再触 sqlite 原始 snake_case）。 */
 export interface ZcodeSessionRow {
   id: string

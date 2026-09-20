@@ -127,9 +127,10 @@ export interface ImportRequest {
    */
   sessionId?: string
   /**
-   * zcode 源库文件路径：缺省 = 宿主库路径动态推导（UI 暂不传，换根 out-of-scope）。
-   * 双重用途：①换根预留 ②测试 fixture 库注入通道——单测传 fixture db 路径，
-   * 不覆写 HOME、不 mock 动态推导。
+   * zcode 源库文件路径：缺省 = 宿主库路径动态推导（UI 不传）。wire 帧上该字段来自
+   * 不可信面，runtime transport 层做封闭集合校验：仅接受 `zcodeImportDbAllowlist(dataDir)`
+   * 集合（隔离库 / 宿主库），集合外拒绝 `import_db_path_forbidden`。测试 fixture 库注入
+   * 走 source deps 进程内通道（构造注入 getHostDbPath），不经 wire。
    */
   dbPath?: string
 }
@@ -166,4 +167,5 @@ export type ImportErrorCode =
   | 'import_target_conflict'    // existsSync(targetPath) 命中但 sessionId 不在 force 集合（同目标路径已被另一会话占用）
   | 'import_copy_failed'        // mkdir/copy/rename 抛错（磁盘满/目标权限）；tmp+rename 原子性保证失败无残留
   | 'import_project_invalid'    // projectId 不存在或为空串（空串会使 readback 假阳性——persistProjectBinding 空串语义是「删 sidecar 归默认」）
+  | 'import_db_path_forbidden'  // wire 帧 dbPath 不在 zcodeImportDbAllowlist 封闭集合（transport 层校验，防白名单外路径被当会话库读取；缺省不传 = 放行动态推导）
   | 'import_sidecar_failed'     // 仅作 warning 通道字面量（ImportReply.warning），非 error envelope code

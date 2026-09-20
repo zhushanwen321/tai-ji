@@ -54,6 +54,7 @@ export default {
     import_target_conflict: '目标位置已被另一会话占用：请检查源文件是否被手工改名或复制过，改用原始文件名的 session 文件导入',
     import_copy_failed: '复制会话文件失败（磁盘空间或权限问题）：请清理磁盘或检查权限后重试',
     import_project_invalid: '目标项目无效：请重新选择项目后重试',
+    import_db_path_forbidden: '会话库路径不被允许：请重开会话来源选择，使用默认 zcode 会话库后重试',
     timeout: '请求超时：请重试',
     unknown: '导入失败：请重试',
   },

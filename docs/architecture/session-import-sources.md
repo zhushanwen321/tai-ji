@@ -73,7 +73,7 @@ export interface SessionImportSource {
 | 归一化幂等键（§5-I2） | project sidecar 写入 + readback |
 | 降级明细收集（degradations） | tombstone 摘碑 / 扫描缓存失效 / reply 结果组装（reply 帧发送与广播归 handler 层） |
 
-**RPC 契约**（`packages/shared/src/import-session.ts`）：`ImportCandidatesRequest.source?` / `ImportRequest.source?`（缺省 `'pi'`，存量调用行为不变）+ `ImportRequest.sessionId?`（zcode 等以 id 定位会话的源必填）+ `dbPath?`（源数据路径注入：缺省动态推导宿主路径；**也是测试 fixture 注入通道**——单测传 fixture 库路径，不覆写 HOME 不 mock import）。
+**RPC 契约**（`packages/shared/src/import-session.ts`）：`ImportCandidatesRequest.source?` / `ImportRequest.source?`（缺省 `'pi'`，存量调用行为不变）+ `ImportRequest.sessionId?`（zcode 等以 id 定位会话的源必填）+ `dbPath?`（源数据路径：缺省动态推导宿主路径。wire 帧上该字段经 transport 层封闭集合校验——仅接受 `zcodeImportDbAllowlist(dataDir)` 集合（runtime 侧 sqlite-access.ts，与引擎包 zcodeDbPathAllowlist 同构），集合外拒绝 `import_db_path_forbidden`；测试 fixture 库注入走 source deps 进程内通道（构造注入 `getHostDbPath`），不经 wire）。
 
 ## 4. 新增一个导入源的步骤清单
 
@@ -100,7 +100,7 @@ export interface SessionImportSource {
 | I2 | **幂等键归一化**：`header.id` 与文件名尾段（剥 `.jsonl` 后 `lastIndexOf('_')+1` 起）必须相等且不含 `_`、非空、字符集 `字母数字/-` 首尾字母数字。zcode 归一化函数规格：①`sess_` 前缀剥**一次** ②对结果串全部 `_`→`-` ③后置条件校验，不满足 → `import_invalid_session` fail-fast（防源 id 形态漂移静默破不变量）。归一化函数**单点落源模块内**，候选打标与转换两处 import 同源 | 4 处 `lastIndexOf('_')` 消费点派生出错误 id：图片缓存误判孤儿（30 天误清）/删除级联 no-op 残留/session-reader 给 agent 建议不存在的 id |
 | I3 | **toolCall↔toolResult 配对完整**：assistant content 里的每个 toolCall part，其后必须有同 `toolCallId` 的 toolResult message entry。无结果的进行中工具调用**整对丢弃**并记 degradations（dangling toolCall 会破坏续聊时 pi 发给 LLM 的请求形态） | 续聊首请求可能被 API 拒绝 |
 | I4 | **工具名小写映射**：taiji 渲染判定层按全小写匹配工具名（`packages/ui/src/features/chat/block-icon.ts` 的 TOOL_ICON_MAP；`packages/core/src/domain/chat/apply-entry-convert.ts` 的 EDIT/WRITE_TOOL_NAMES）。源侧首字母大写名（zcode `Edit`/`Bash`）必须硬映射到小写；**未映射名保底原样输出**（走通用工具块渲染，不计降级） | edit/write 的 diff 卡片与文件变更列表失效、图标退化为通用 |
-| I5 | **错误码复用优先**：现有清单（`import_source_missing/invalid_session/marker_filename/dir_unreadable/already_imported/target_conflict/copy_failed/project_invalid`）覆盖「源缺失/会话无效/不可读/重复/写失败」语义时不得新增；错误信息必须携带恢复指引所需的上下文（如 schema 版本）。知情降级走 `ImportReply.warning: 'conversion_degraded'` 通道，不走 error | 错误码膨胀、renderer 文案映射失同步 |
+| I5 | **错误码复用优先**：现有清单（`import_source_missing/invalid_session/marker_filename/dir_unreadable/already_imported/target_conflict/copy_failed/project_invalid/db_path_forbidden`）覆盖「源缺失/会话无效/不可读/重复/写失败/dbPath 白名单外」语义时不得新增；错误信息必须携带恢复指引所需的上下文（如 schema 版本）。知情降级走 `ImportReply.warning: 'conversion_degraded'` 通道，不走 error | 错误码膨胀、renderer 文案映射失同步 |
 | I6 | **只读源数据**：对源系统（zcode 宿主库等）严格只读连接（sqlite `readOnly: true`；WAL 模式下只读不阻塞源运行）。taiji 自有写入只落在 sessions 目录与 sidecar | 破坏宿主 coding-agent 运行 |
 | I7 | **无法保真的内容显式降级**：源有而 pi 格式无对应的内容（二进制 artifact 引用、UI 事件等）——丢弃 + degradations 登记 + warning，**禁止伪造**（如为无摘要文本的源压缩记录伪造 pi compaction summary 会污染 LLM 上下文） | 导入产物携带伪造内容误导续聊 |
 
@@ -123,7 +123,7 @@ session(id sess_<uuid>, directory, title NOT NULL, task_type, time_created/time_
 
 ## 7. 测试要求
 
-- **fixture 源数据自建自删**：`mkdtempSync(join(tmpdir(), ...))`（sqlite fixture 建临时库；禁触碰真实宿主库——测试防线纪律见 AGENTS.md 测试节）。`dbPath`/路径参数是注入通道。
+- **fixture 源数据自建自删**：`mkdtempSync(join(tmpdir(), ...))`（sqlite fixture 建临时库；禁触碰真实宿主库——测试防线纪律见 AGENTS.md 测试节）。fixture 路径经 source deps 进程内注入（构造注入 `getHostDbPath`），不经 wire（wire 帧 dbPath 受 `zcodeImportDbAllowlist` 白名单约束）。
 - **converter 纯函数直测**：fixture 行集 → 输出行流，断言逐 entry 结构（含 usage/cost 对象形态、工具名映射、error 输出通道）。
 - **applyEntry 重放锚**（I1 的机器断言）：产物经 `replayEntries(applyEntry)` 重放无异常、消息序列/toolCall↔toolResult 全配对/usage 聚合符合预期。每个 fixture 会话都跑。
 - **不变量断言**（I2）：产物文件名剥 `.jsonl` 后 `lastIndexOf('_')` 尾段 === header.id；归一化函数后置条件边界（空串/含 `_`/非法字符）单独用例。
