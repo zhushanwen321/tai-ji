@@ -140,7 +140,9 @@ describe('PluginHostProcess', () => {
     expect(crashes[0].pluginIds).toContain('crash-test')
     // R3: disconnect 先于 exit 触发 crash（IPC channel 先断），error 为两事件之一
     expect(crashes[0].error).toMatch(/exit|disconnect/)
-    expect(host.getProcessHandleById(processId)!.status).toBe('crashed')
+    // RT-6#5：crash 收口即删 processes Map——崩溃进程不再作为幽灵条目滞留（对齐
+    // handleProcessCleanExit 的清理口径），只读反查路径不再命中已崩进程。
+    expect(host.getProcessHandleById(processId)).toBeUndefined()
   })
 
   // ── TC6: 崩溃检测（fatal_error 消息）─────────────────────────
@@ -159,7 +161,8 @@ describe('PluginHostProcess', () => {
 
     await waitFor(() => crashes.length >= 1)
     expect(crashes[0].error).toContain('mock fatal error')
-    expect(host.getProcessHandleById(processId)!.status).toBe('crashed')
+    // RT-6#5：crash 收口即删 processes Map（幽灵条目不再滞留，见 TC5 同款注释）
+    expect(host.getProcessHandleById(processId)).toBeUndefined()
   })
 
   // ── TC7: loadPlugin 超时清理 ─────────────────────────────────
@@ -284,7 +287,10 @@ describe('PluginHostProcess', () => {
     handle.postMessage({ type: 'fatalThenExit' })
 
     await waitFor(() => crashes.length >= 1)
-    expect(host.getProcessHandleById(processId)!.status).toBe('crashed')
+    // RT-6#5：crash 收口即删两处 Map（processes + processInstances）——旧 child 的监听
+    // 已在崩溃路径摘除，迟到 exit 无法再触碰任何 handle（M6a-03 语义由 removeAllListeners
+    // 承接，不再依赖 createProcess 的残留清理 lookup）。
+    expect(host.getProcessHandleById(processId)).toBeUndefined()
 
     // 2. 崩溃后重激活（crash 路径是插件系统明确支持的路径）→ 走 createProcess 重建
     const processId2 = await host.assignProcess('rebuild-test', 'sandbox')
