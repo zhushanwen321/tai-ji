@@ -10,7 +10,12 @@
  * - views.update 显式 sessionId 归属投递（payload.sessionId 直达 handleViewUpdate，
  *   ActiveSessionResolver 盖戳路径已删除——D1 被否④）
  * - sendMessage 回执映射逐 reason 值（{blocked,reason} → {accepted:false,reason}；成功 → {accepted:true}）
+ * - requireCommand 空串/全空白 → INVALID_REQUIRE_COMMAND 入口拒绝（B-F5）
  * - updateHeaderAction 校验 + plugin:headerActionUpdate 广播形状
+ * - B-F1：showModal title / updateHeaderAction badge·tooltip 超 4KB → INVALID_* 拒绝零广播
+ * - B-F2：广播出线未接线 → showModal 拒 MODAL_BROADCAST_NOT_WIRED、updateHeaderAction 回
+ *   {updated:false}（不假成功）；broadcastFn 缺失 warn-drop 同理（真实装配全链）
+ * - B-F4：deps.sessionService 缺失 → console.error 留痕 + {blocked:true, reason:'error'}
  * - hideModal 走与宿主 dismiss 相同的 closed 路径（owner 匹配 + dismissed）
  * - plugin-gone 槽清理（closeRuntimeModalForPlugin）
  *
@@ -66,14 +71,14 @@ async function dispatch(
   return lastResponse(port) as never
 }
 
-/** 捕获广播/notify 出线（wireRuntimeModalExits 注入面） */
+/** 捕获广播/notify 出线（wireRuntimeModalExits 注入面；broadcast 闭包回 true = 帧已发出） */
 function wireCapturingExits(overrides: { hasPendingUiRequest?: () => boolean } = {}) {
   const modalState: PluginModalStatePayload[] = []
   const headerAction: HeaderActionUpdatePayload[] = []
   const modalClosedNotifies: Array<{ workerId: string; payload: { modalId: string; reason: string } }> = []
   wireRuntimeModalExits({
-    broadcastModalState: (payload) => { modalState.push(payload) },
-    broadcastHeaderActionUpdate: (payload) => { headerAction.push(payload) },
+    broadcastModalState: (payload) => { modalState.push(payload); return true },
+    broadcastHeaderActionUpdate: (payload) => { headerAction.push(payload); return true },
     notifyModalClosed: (workerId, payload) => { modalClosedNotifies.push({ workerId, payload }) },
     hasPendingUiRequest: overrides.hasPendingUiRequest,
   })
@@ -358,6 +363,32 @@ describe('sendMessage 回执映射（D6/AP-4 两步之②）', () => {
     expect(resp.error).toBeUndefined()
     expect(resp.result).toEqual({ accepted: false, reason: 'error' })
   })
+
+  // ── B-F5：requireCommand present 但空串/全空白 → 入口结构化拒绝，不进 dispatcher 探测预算 ──
+  it.each(['', '   '])('requireCommand 空串/全空白（%j）→ INVALID_REQUIRE_COMMAND，deps.sendMessage 不触达', async (empty) => {
+    const sendMessage = vi.fn(async () => ({ blocked: false }))
+    const { rpc, port, sessionHandlers } = buildWithSender(sendMessage)
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.sessions.sendMessage', {
+      sessionId: 's1', role: 'user', content: '/schedule off a1b2c3d4', requireCommand: empty,
+    })
+
+    expect(resp.error?.code).toBe('INVALID_REQUIRE_COMMAND')
+    expect(resp.error?.message).toContain('requireCommand')
+    expect(sessionHandlers.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('requireCommand 缺省仍合法（B-F5 只拦 present 但空）', async () => {
+    const sendMessage = vi.fn(async () => ({ blocked: false }))
+    const { rpc, port } = buildWithSender(sendMessage)
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.sessions.sendMessage', {
+      sessionId: 's1', role: 'user', content: 'hello',
+    })
+
+    expect(resp.error).toBeUndefined()
+    expect(resp.result).toEqual({ accepted: true })
+  })
 })
 
 describe('updateHeaderAction 广播（AP-1）', () => {
@@ -407,6 +438,187 @@ describe('updateHeaderAction 广播（AP-1）', () => {
 
     expect(resp.error?.code).toBe('INVALID_DISABLED')
     expect(exits.headerAction).toHaveLength(0)
+  })
+
+  // ── B-F1：badge/tooltip ≤4KB（S3-W4 同口径）——超长展示文本不入广播帧 ──
+  const HEADER_TEXT_MAX_BYTES = 4 * 1024
+
+  it('B-F1 badge 超 4KB → INVALID_BADGE 拒绝，零广播', async () => {
+    const exits = wireCapturingExits()
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.updateHeaderAction', {
+      pluginId: 'p1', headerActionId: 'a', sessionId: 's1', badge: 'x'.repeat(HEADER_TEXT_MAX_BYTES + 1),
+    })
+
+    expect(resp.error?.code).toBe('INVALID_BADGE')
+    expect(exits.headerAction).toHaveLength(0)
+  })
+
+  it('B-F1 tooltip 超 4KB → INVALID_TOOLTIP 拒绝，零广播；4KB 内放行', async () => {
+    const exits = wireCapturingExits()
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.updateHeaderAction', {
+      pluginId: 'p1', headerActionId: 'a', sessionId: 's1', tooltip: 'x'.repeat(HEADER_TEXT_MAX_BYTES + 1),
+    })
+    expect(resp.error?.code).toBe('INVALID_TOOLTIP')
+    expect(exits.headerAction).toHaveLength(0)
+
+    const ok = await dispatch(rpc, port, 2, 'plugin.ui.updateHeaderAction', {
+      pluginId: 'p1', headerActionId: 'a', sessionId: 's1', tooltip: 'x'.repeat(HEADER_TEXT_MAX_BYTES),
+    })
+    expect(ok.error).toBeUndefined()
+    expect(ok.result).toEqual({ updated: true })
+    expect(exits.headerAction).toHaveLength(1)
+  })
+})
+
+describe('showModal title 限界（B-F1：S3-W4 同口径 ≤4KB）', () => {
+  it('title 超 4KB → INVALID_TITLE 拒绝，不开层不广播', async () => {
+    const exits = wireCapturingExits()
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.showModal', {
+      pluginId: 'p1', modalId: 'm1', sessionId: 's1', title: 'x'.repeat(4 * 1024 + 1),
+    })
+
+    expect(resp.error?.code).toBe('INVALID_TITLE')
+    expect(exits.modalState).toHaveLength(0)
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('title 4KB 内正常开层（payload 原文透传）', async () => {
+    const exits = wireCapturingExits()
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.showModal', {
+      pluginId: 'p1', modalId: 'm1', sessionId: 's1', title: 'x'.repeat(4 * 1024),
+    })
+
+    expect(resp.error).toBeUndefined()
+    expect(exits.modalState[0]).toMatchObject({ title: 'x'.repeat(4 * 1024), state: 'open' })
+  })
+})
+
+describe('B-F2：广播出线未接线/广播被丢弃时不假成功（ui-api handler 语义）', () => {
+  function buildUnwiredRpc() {
+    // beforeEach 已 resetRuntimeModalSlotForTest（exits = null）——刻意不 wire 任何出线
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+    return { rpc, port }
+  }
+
+  it('出线未接线：showModal → MODAL_BROADCAST_NOT_WIRED，不开层', async () => {
+    const { rpc, port } = buildUnwiredRpc()
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.showModal', { pluginId: 'p1', modalId: 'm1', sessionId: 's1' })
+
+    expect(resp.error?.code).toBe('MODAL_BROADCAST_NOT_WIRED')
+    expect(resp.error?.message).toContain('wiring gap')
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('出线未接线：updateHeaderAction → {updated:false}（不谎报渲染端已收到）', async () => {
+    const { rpc, port } = buildUnwiredRpc()
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.updateHeaderAction', { pluginId: 'p1', headerActionId: 'a', sessionId: 's1' })
+
+    expect(resp.error).toBeUndefined()
+    expect(resp.result).toEqual({ updated: false })
+  })
+
+  it('出线已接线但广播被丢弃（broadcastFn 缺失形态）→ showModal 报错且回滚槽；updateHeaderAction 回 {updated:false}', async () => {
+    wireRuntimeModalExits({
+      broadcastModalState: () => false,
+      broadcastHeaderActionUpdate: () => false,
+      notifyModalClosed: () => {},
+    })
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, minimalUiHandlers())
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.showModal', { pluginId: 'p1', modalId: 'm1', sessionId: 's1' })
+    expect(resp.error?.code).toBe('MODAL_BROADCAST_NOT_WIRED')
+    expect(getRuntimeModalSlot()).toBeNull() // 槽已回滚，不残留不可见层
+
+    const resp2 = await dispatch(rpc, port, 2, 'plugin.ui.updateHeaderAction', { pluginId: 'p1', headerActionId: 'a', sessionId: 's1' })
+    expect(resp2.result).toEqual({ updated: false })
+  })
+})
+
+describe('B-F2/B-F4：真实 PluginService 装配链（registerRpcMethods；deps 缺 broadcastFn 与 sessionService）', () => {
+  /**
+   * 生产装配全链（registerRpcMethods → registerAllRpcMethods → wireRuntimeModalExits），
+   * deps 刻意缺 broadcastFn / sessionService——装配缺陷的等价构造（statusline 全链
+   * 测试 harness 的缺省面变体）。configDir 落 tmp（fs-guard 白名单域）。
+   */
+  function buildBareWiredRpc(): { rpc: PluginRpcServer; port: ReturnType<typeof createMockPort> } {
+    const registryMock = {
+      getDescriptor: () => undefined,
+      getAllDescriptors: () => [],
+    }
+    const broker: IMessageBroker = { send: vi.fn(), broadcast: vi.fn(), sendError: vi.fn() }
+    const service = new PluginService(registryMock as never, broker, {
+      configDir: join(tmpdir(), 'bare-plugin-rpc-contract'),
+    })
+    ;(service as unknown as { registerRpcMethods(): void }).registerRpcMethods()
+    const rpc = (service as unknown as { rpcServer: PluginRpcServer }).rpcServer
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    return { rpc, port }
+  }
+
+  it('B-F2 全链：broadcastFn 缺失 → showModal 拒 MODAL_BROADCAST_NOT_WIRED，槽不残留', async () => {
+    const { rpc, port } = buildBareWiredRpc()
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.showModal', { pluginId: 'p1', modalId: 'm1', sessionId: 's1' })
+
+    expect(resp.error?.code).toBe('MODAL_BROADCAST_NOT_WIRED')
+    expect(getRuntimeModalSlot()).toBeNull()
+  })
+
+  it('B-F2 全链：broadcastFn 缺失 → updateHeaderAction 回 {updated:false}（装配缺陷不包装成成功）', async () => {
+    const { rpc, port } = buildBareWiredRpc()
+
+    const resp = await dispatch(rpc, port, 1, 'plugin.ui.updateHeaderAction', { pluginId: 'p1', headerActionId: 'a', sessionId: 's1' })
+
+    expect(resp.error).toBeUndefined()
+    expect(resp.result).toEqual({ updated: false })
+  })
+
+  it('B-F4 全链：sessionService 缺失 → console.error 留痕 + {accepted:false, reason:"error"} 回执', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { rpc, port } = buildBareWiredRpc()
+
+      const resp = await dispatch(rpc, port, 1, 'plugin.sessions.sendMessage', {
+        sessionId: 's1', role: 'user', content: '/schedule off a1b2c3d4', requireCommand: 'schedule',
+      })
+
+      expect(resp.error).toBeUndefined()
+      expect(resp.result).toEqual({ accepted: false, reason: 'error' })
+      // 宿主侧出声（装配缺陷可诊断），且指向恢复动作（wire sessionService）
+      expect(errSpy).toHaveBeenCalledTimes(1)
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('deps.sessionService missing'))
+    } finally {
+      errSpy.mockRestore()
+    }
   })
 })
 

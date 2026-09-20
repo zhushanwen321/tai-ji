@@ -88,7 +88,7 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       updateStatusBarItem: noopVoid,
       showModal: () => Promise.resolve({ opened: true, epoch: 1 }),
       hideModal: () => Promise.resolve({ closed: false }),
-      updateHeaderAction: noopVoid,
+      updateHeaderAction: () => Promise.resolve({ updated: true }),
       onModalClosed: () => mockDisposable,
     },
     agent: {

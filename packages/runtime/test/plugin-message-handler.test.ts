@@ -263,8 +263,9 @@ describe('PluginMessageHandler — plugin.dismissModal（AP-2 关①，u5b）', 
     const headerActionFrames: unknown[] = []
     const notifications: Array<{ workerId: string; payload: unknown }> = []
     wireRuntimeModalExits({
-      broadcastModalState: (payload) => { modalStateFrames.push(payload) },
-      broadcastHeaderActionUpdate: (payload) => { headerActionFrames.push(payload) },
+      // 回 true = 帧已发出（B-F2 后出线回传投递结果；void 形态会被 showModal 判为丢弃并回滚槽）
+      broadcastModalState: (payload) => { modalStateFrames.push(payload); return true },
+      broadcastHeaderActionUpdate: (payload) => { headerActionFrames.push(payload); return true },
       notifyModalClosed: (workerId, payload) => { notifications.push({ workerId, payload }) },
     })
     return { modalStateFrames, headerActionFrames, notifications }

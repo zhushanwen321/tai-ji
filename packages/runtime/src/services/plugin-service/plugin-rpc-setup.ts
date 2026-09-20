@@ -142,19 +142,24 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // 广播帧（plugin:modalState / plugin:headerActionUpdate）不经 message-bus publish，
   // 结构性不入 ring（transient；renderer 另以 lastEpoch 兜底乱序）。
   wireRuntimeModalExits({
+    // 两个 broadcast 回传是否真正发出（false = broadcastFn 缺失 warn 丢弃）——
+    // ui-api 据此拒绝「假成功」回执（B-F2：showModal 拒开层、updateHeaderAction 回
+    // {updated:false}），装配缺陷不再被包装成插件面的成功。
     broadcastModalState: (payload) => {
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:modalState', payload)
-      } else {
-        console.warn('[plugin-rpc-setup] plugin:modalState broadcast dropped: no broadcastFn configured')
+        return true
       }
+      console.warn('[plugin-rpc-setup] plugin:modalState broadcast dropped: no broadcastFn configured')
+      return false
     },
     broadcastHeaderActionUpdate: (payload) => {
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:headerActionUpdate', payload)
-      } else {
-        console.warn('[plugin-rpc-setup] plugin:headerActionUpdate broadcast dropped: no broadcastFn configured')
+        return true
       }
+      console.warn('[plugin-rpc-setup] plugin:headerActionUpdate broadcast dropped: no broadcastFn configured')
+      return false
     },
     notifyModalClosed: (workerId, payload) => {
       rpcServer.notify(workerId, PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, payload)
@@ -202,7 +207,16 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     // handler 层映射为 {accepted, reason}。role 在插件契约面保留（AP-4），runtime 管道
     // 仅支持 user prompt 语义（既有行为——旧实现同样丢弃 role）。
     sendMessage: async (sessionId: string, _role: string, content: string, requireCommand?: string) => {
-      if (!deps.sessionService) return { blocked: true, reason: 'error' as const }
+      if (!deps.sessionService) {
+        // B-F4：装配缺口必须出声（失败要出声）——宿主零日志时插件侧只会看到笼统的
+        // {blocked, reason:'error'}，无从分辨「会话问题」与「宿主没装配 sessionService」。
+        console.error(
+          `[plugin-rpc-setup] sendMessage deps.sessionService missing — host-side wiring gap `
+          + `(session='${sessionId}'); reporting {blocked:true, reason:'error'} to the plugin. `
+          + `Recovery: wire sessionService into PluginService deps.`,
+        )
+        return { blocked: true, reason: 'error' as const }
+      }
       return deps.sessionService.sendMessage(sessionId, content, undefined, undefined, requireCommand)
     },
     // S3-W2：session 生命周期事件注册表（registerCreate/registerDestroy 方法在此注册）

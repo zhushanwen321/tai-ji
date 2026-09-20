@@ -10,9 +10,9 @@
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
   - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置；
-    缺 tooltip 时提示「未加载扩展」不落声明 title（场景 12，插件侧业务态消费）
+    缺 tooltip 时提示「暂不可用」不落声明 title（场景 12，插件侧业务态消费）
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
-    禁静默 no-op
+    禁静默 no-op；宿主重判 registered（命令重注册）后置灰让位、按钮恢复可点
   - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
 -->
 <template>
@@ -73,8 +73,9 @@ function actionTestId(pluginId: string, actionId: string): string {
  *  unknown 态读它，registered/unregistered 判定写它——写入不触发重渲染（无循环）。 */
 const lastResolved = new Map<string, 'registered' | 'unregistered'>()
 
-/** 命令点击失败（E3 命令缺失）后的本地置灰集合（key 同上）。恢复途径 = connected 重放
- *  同步后命令重新可查，此时点击自然恢复（disabled 仅挡重复点击同一缺失命令）。 */
+/** 命令点击失败（E3 命令缺失）后的本地置灰集合（key 同上）。恢复途径 = 宿主可用性
+ *  重判为 registered（命令重注册回来，如 connected 重放同步）→ disabled 计算让位、
+ *  按钮恢复可点；切会话由下方 watch 清理（置灰期间按钮不可点，无「点击自愈」路径）。 */
 const commandMissing = ref(new Set<string>())
 
 const buttons = computed(() => {
@@ -94,17 +95,24 @@ const buttons = computed(() => {
     const effective = availability === 'unknown' ? lastResolved.get(`${sid}::${ha.commandId}`) : availability
     const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
     // 运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#38 镜像）直接灰置
-    // （插件侧业务态，如「调度器运行中不可配置」），宿主侧 E13/E3 判定与之 OR 合成
-    const disabled = effective === 'unregistered' || missing || entry?.disabled === true
+    // （插件侧业务态，如「调度器运行中不可配置」），宿主侧 E13/E3 判定与之 OR 合成。
+    // E3 让位规则（F5）：宿主已判 registered（命令重注册回来了）时 missing 不再置灰——
+    // 一次性派发失败让位于重注册事实；unknown 语境无法确认重注册，保持本地置灰原行为
+    // （executeCommand 返回 false ⟺ 注册表查无此命令 ⟹ 该失败只发生在非 registered 语境）
+    const disabled =
+      effective === 'unregistered'
+      || (missing && availability !== 'registered')
+      || entry?.disabled === true
 
     // tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
-    // ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点）
+    // ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点；
+    // F6 分叉——unregistered 用「未加载扩展」原 key，插件业务 disabled 用「暂不可用」泛化 key）
     // ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）
     const tooltipLines: string[] = []
     if (entry?.badge && entry.badge.length > BADGE_MAX_CHARS) tooltipLines.push(entry.badge)
     if (availability === 'unknown') tooltipLines.push(t('panel.header.pluginActionRestoring'))
     else if (effective === 'unregistered') tooltipLines.push(t('panel.header.pluginActionExtensionNotLoaded'))
-    else tooltipLines.push(entry?.tooltip ?? (entry?.disabled === true ? t('panel.header.pluginActionExtensionNotLoaded') : ha.title))
+    else tooltipLines.push(entry?.tooltip ?? (entry?.disabled === true ? t('panel.header.pluginActionTemporarilyUnavailable') : ha.title))
     const badge = entry?.badge ? entry.badge.slice(0, BADGE_MAX_CHARS) : ''
 
     return {

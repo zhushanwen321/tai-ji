@@ -12,6 +12,7 @@ export default {
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',
+    pluginActionTemporarilyUnavailable: '暂不可用',
   },
   composer: {
     send: '发送',

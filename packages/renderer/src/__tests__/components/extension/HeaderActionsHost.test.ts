@@ -7,8 +7,10 @@
  * - badge ≤4 字符宿主截断 + 全文进 tooltip（AP-1 徽标契约）
  * - E13 三态：registered 可点 / unregistered 灰置 / unknown 首次缺省可点 + 保持上次值
  * - 运行时镜像 entry.disabled：true 灰置（插件业务态）/ false / undefined 不灰置；
- *   disabled=true 缺 tooltip → 「本会话未加载所需扩展」（场景 12），插件显式 tooltip 优先
- * - E3 点击 → executeCommand(commandId)；命令缺失（返回 false）→ 本地置灰（禁静默 no-op）
+ *   disabled=true 缺 tooltip → 「暂不可用」泛化文案（场景 12，与 unregistered 的
+ *   「本会话未加载所需扩展」文案分叉），插件显式 tooltip 优先
+ * - E3 点击 → executeCommand(commandId)；命令缺失（返回 false）→ 本地置灰（禁静默 no-op）；
+ *   宿主重判 registered（命令重注册回来）→ 置灰让位、按钮恢复可点（F5）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/extension/HeaderActionsHost.test.ts
  */
@@ -145,7 +147,7 @@ describe('HeaderActionsHost', () => {
     expect(wrapper.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('3 个启用任务')
   })
 
-  it('运行时镜像 entry.disabled=true 且无 tooltip：灰置 + tooltip「本会话未加载所需扩展」（场景 12）', () => {
+  it('运行时镜像 entry.disabled=true 且无 tooltip：灰置 + tooltip「暂不可用」（场景 12，F6 泛化 key）', () => {
     const entry: HeaderActionEntry = {
       headerActionId: 'scheduler-manager.open',
       pluginId: 'scheduler-manager',
@@ -157,7 +159,21 @@ describe('HeaderActionsHost', () => {
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
     // 灰置按钮缺插件文案时落 disabled 态泛化提示，不得落到声明 title（误导可点语义）
-    expect(btn.attributes('title')).toBe('本会话未加载所需扩展')
+    expect(btn.attributes('title')).toBe('暂不可用')
+  })
+
+  it('F6 文案分叉：unregistered →「本会话未加载所需扩展」≠ 业务 disabled 缺 tooltip →「暂不可用」', () => {
+    const unregistered = mountHost(makeSource({ resolveCommandAvailability: () => 'unregistered' }))
+    expect(unregistered.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('本会话未加载所需扩展')
+
+    const businessDisabled: HeaderActionEntry = {
+      headerActionId: 'scheduler-manager.open',
+      pluginId: 'scheduler-manager',
+      disabled: true,
+      updatedAt: 1,
+    }
+    const disabledHost = mountHost(makeSource({ getRuntimeState: () => businessDisabled }))
+    expect(disabledHost.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('暂不可用')
   })
 
   it('运行时镜像 entry.disabled=true 且插件推了 tooltip：插件文案优先于泛化提示', () => {
@@ -201,13 +217,39 @@ describe('HeaderActionsHost', () => {
   })
 
   it('E3 命令缺失（executeCommand 返回 false）→ 按钮置灰，禁静默 no-op', async () => {
+    // 生产语境约束：executeCommand 返回 false ⟺ 注册表查无此命令 ⟹ availability 必为
+    // unknown/unregistered（bridge 两判定同源同步）。真实可达的失败语境 = unknown
+    // （会话命令分区为空），此处按 unknown 构造。
     const executeCommand = vi.fn(() => false)
-    const source = makeSource({ executeCommand })
+    const source = makeSource({
+      executeCommand,
+      resolveCommandAvailability: () => 'unknown',
+    })
     const wrapper = mountHost(source)
     const btn = () => wrapper.find('[data-testid=header-action-scheduler-manager-open]')
-    expect(btn().attributes('disabled')).toBeUndefined()
+    expect(btn().attributes('disabled')).toBeUndefined() // unknown 首次缺省可点
     await btn().trigger('click')
     expect(btn().attributes('disabled')).toBeDefined()
+  })
+
+  it('F5 E3 恢复：宿主重判 registered（命令重注册回来）→ missing 让位，按钮恢复可点', async () => {
+    const availability = ref<HeaderActionCommandAvailability>('unknown')
+    const source = makeSource({
+      executeCommand: vi.fn(() => false),
+      resolveCommandAvailability: () => availability.value,
+    })
+    const wrapper = mountHost(source)
+    const btn = () => wrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    // unknown 语境点击失败 → 本地置灰
+    await btn().trigger('click')
+    expect(btn().attributes('disabled')).toBeDefined()
+    // 命令重注册（宿主判 registered）→ 一次性失败让位于重注册事实
+    availability.value = 'registered'
+    await nextTick()
+    expect(btn().attributes('disabled')).toBeUndefined()
+    // 恢复后可正常再点击（executeCommand 收到命令 id）
+    await btn().trigger('click')
+    expect(source.executeCommand).toHaveBeenCalledWith('scheduler-manager.open')
   })
 
   it('无声明时整组件零 DOM（不挤压内置按钮）', () => {

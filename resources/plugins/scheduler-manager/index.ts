@@ -79,7 +79,10 @@ const SCHEDULE_COMMAND_NAME = 'schedule'
 
 /** 失效信号防抖合并窗口（ms）：风暴合并成一次重拉（对齐 session-records 先例量级） */
 const READ_DEBOUNCE_MS = 200
-/** E4 恢复窗口自动重试间隔/次数（2s × 5 = 10s 上界；到期停提示，等失效/激活信号再试） */
+/**
+ * E4 恢复窗口自动重试间隔/次数（2s × 5 = 10s 上界）。耗尽后停自动重试、提示升级为
+ * 「恢复超时」（含恢复动作）；失效/激活信号（scheduleRefresh）重置预算后可获得新一轮重试。
+ */
 const READ_RETRY_MS = 2_000
 const READ_RETRY_MAX = 5
 
@@ -303,10 +306,11 @@ function ensureMirror(api: Api, sessionId: string, sink: DisposableLike[]): Sess
   return mirror
 }
 
-/** 失效信号 → 防抖合并 → 一次重拉 */
+/** 失效信号 → 防抖合并 → 一次重拉。外部信号 = 会话侧新证据，重置恢复重试预算。 */
 function scheduleRefresh(api: Api, sessionId: string): void {
   const mirror = mirrors.get(sessionId)
   if (!mirror) return
+  mirror.retryCount = 0
   if (mirror.debounceTimer) clearTimeout(mirror.debounceTimer)
   mirror.debounceTimer = setTimeout(() => {
     mirror.debounceTimer = null
@@ -349,6 +353,10 @@ async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
       // E11 游标失效 → 丢弃累计全量重拉（自愈，用户无感）。全量（无 cursor）理论上
       // 不会再触发该错误；若触发按恢复窗口处理防循环。
       if (mirror.cursor !== undefined || mirror.entries.length > 0) {
+        // 自愈对用户无感，但必须对排查可见（pi 侧 entry 截断/会话重建的证据链入口）
+        console.warn(
+          `[scheduler-manager] cursor invalidated, full re-pull (session=${mirror.sessionId})`,
+        )
         mirror.entries = []
         mirror.cursor = undefined
         void refresh(api, mirror.sessionId)
@@ -388,9 +396,10 @@ async function handleReadFailure(api: Api, mirror: SessionMirror, e: unknown): P
   scheduleRetry(api, mirror)
 }
 
-/** 恢复窗口自动重试（有界：READ_RETRY_MAX 次后停提示，等失效/激活信号驱动） */
+/** 恢复窗口自动重试（有界：READ_RETRY_MAX 次后停自动重试，等失效/激活信号重置预算再试） */
 function scheduleRetry(api: Api, mirror: SessionMirror): void {
   if (mirror.retryTimer) return
+  if (mirror.retryCount >= READ_RETRY_MAX) return // 预算耗尽：不重置不清零（耗尽态必须稳定，提示才停在「恢复超时」）
   mirror.retryCount = 0
   const tick = (): void => {
     mirror.retryTimer = null
@@ -418,10 +427,14 @@ async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> 
   const failure = mirror.readFailure
   let tree: GuiComponent[]
   if (failure) {
+    // F4：重试预算耗尽（retryCount 停在 MAX，scheduleRetry 不再武装）→ 提示升级为含
+    // 恢复动作；重试进行中（预算内）保持原文案
     const line =
       failure.kind === 'unavailable'
         ? `会话不可用：${failure.reason} —— 请从侧栏重新打开该会话`
-        : '会话正在恢复，请稍候…'
+        : mirror.retryCount >= READ_RETRY_MAX
+          ? '会话恢复超时，请从侧栏重新打开该会话'
+          : '会话正在恢复，请稍候…'
     tree = [{ type: 'ansi-text', props: { lines: [line] } }]
   } else {
     const tasks = Array.from(foldTasks(mirror).values())
@@ -462,7 +475,15 @@ async function reevaluateCommandAvailability(api: Api, mirror: SessionMirror): P
     const commands = await api.sessions.getCommands(mirror.sessionId)
     mirror.commandDisabled = !commands.some((c) => c.name === SCHEDULE_COMMAND_NAME)
   } catch (e) {
-    if (!isSessionNotActive(e)) return // 其他查询错误：不动判定（保持上次值）
+    if (!isSessionNotActive(e)) {
+      // 其他查询错误：不动判定（保持上次值），但出声留诊断——静默 return 是排查黑洞
+      // （按钮灰置异常时无任何宿主侧痕迹可循）
+      console.warn(
+        `[scheduler-manager] getCommands failed (session=${mirror.sessionId}); keeping last availability:`,
+        toMessage(e),
+      )
+      return
+    }
     // SESSION_NOT_ACTIVE：commandDisabled 不变（null = 首次缺省可点；有值 = 保持）
   }
   await pushHeaderAction(api, mirror)
@@ -564,7 +585,8 @@ async function handleWrite(
       sessionId,
       wasRecovering
         ? `会话恢复失败：${msg} —— 请从侧栏手动打开该会话后再管理`
-        : `操作未生效：${msg}`,
+        // 与 busy 分支同形态：错误提示必须携带可执行的恢复动作（手敲子命令重试）
+        : `操作未生效：${msg}（可手敲 /schedule ${sub} ${parsed.id} 重试）`,
     )
   }
 }

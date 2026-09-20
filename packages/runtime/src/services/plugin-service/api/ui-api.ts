@@ -28,7 +28,10 @@
  *     + message ≤8KB（INVALID_MESSAGE）；
  *   - updateStatusBarItem 单条 text ≤4KB（INVALID_TEXT，D3 验收「1MB text 被拒」
  *     依此规则），坏条目在该入口被拒——其余插件条目与后续广播不受影响
- *     （D4 毒化隔离：拒绝该条而非整包）。
+ *     （D4 毒化隔离：拒绝该条而非整包）；
+ *   - showModal title 与 updateHeaderAction badge/tooltip 同口径 ≤4KB
+ *     （INVALID_TITLE / INVALID_BADGE / INVALID_TOOLTIP，code 按字段名推导），
+ *     超长展示文本不入广播帧。
  */
 
 import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'
@@ -54,6 +57,14 @@ const BYTES_PER_KB = 1024
 /** 对话框 title/message 等短文本上限：8KB（UTF-8 字节），防超长文本撑爆前端弹窗 */
 const UI_TEXT_MAX_KB = 8
 const UI_TEXT_MAX_BYTES = UI_TEXT_MAX_KB * BYTES_PER_KB
+
+/**
+ * modal title / headerAction badge·tooltip 上限：4KB（UTF-8 字节）。对齐
+ * updateStatusBarItem 的 S3-W4 口径（STATUSBAR_TEXT_MAX_BYTES 同量级），超长展示
+ * 文本在入口拒绝（INVALID_TITLE / INVALID_BADGE / INVALID_TOOLTIP），不入广播帧。
+ */
+const HEADER_TEXT_MAX_KB = 4
+const HEADER_TEXT_MAX_BYTES = HEADER_TEXT_MAX_KB * BYTES_PER_KB
 
 /** 时长换算基数（命名常量惯例对齐 subagent-core dialog-queue / session-runner） */
 const MS_PER_SECOND = 1_000
@@ -160,8 +171,13 @@ export interface RuntimeModalSlotEntry {
 
 /** 广播/notify 出线（装配侧经 wireRuntimeModalExits 注入；缺省时动作 warn 丢弃——装配缺陷可见，不静默）。 */
 export interface RuntimeModalExits {
-  broadcastModalState: (payload: PluginModalStatePayload) => void
-  broadcastHeaderActionUpdate: (payload: HeaderActionUpdatePayload) => void
+  /**
+   * 广播 modal 状态帧。返回是否真正发出：false = 出线已接线但 broadcastFn 缺失被
+   * warn 丢弃（装配缺陷）——调用方据此拒绝「假成功」回执（B-F2：不谎报 opened/updated）。
+   */
+  broadcastModalState: (payload: PluginModalStatePayload) => boolean
+  /** 广播 headerAction 更新帧。返回语义同 broadcastModalState（false = warn 丢弃）。 */
+  broadcastHeaderActionUpdate: (payload: HeaderActionUpdatePayload) => boolean
   notifyModalClosed: (workerId: string, payload: { modalId: string; reason: PluginModalClosedReason }) => void
   /** E10 判定：ui-request-queue 是否有待决插件对话框（showSelect/showConfirm/showInput pending 表非空）。 */
   hasPendingUiRequest?: () => boolean
@@ -448,7 +464,10 @@ export function registerUiRpcHandlers(
     const pluginId = asString(params.pluginId, 'pluginId')
     const modalId = asSafeKey(params.modalId, 'modalId')
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
-    const title = asOptionalString(params.title, 'title')
+    // title ≤4KB（S3-W4 同口径）：present 但超长 → INVALID_TITLE（B-F1：无上限的
+    // title 可被毒化刷屏，与 updateStatusBarItem text 限界同理由）
+    const title =
+      params.title === undefined ? undefined : asBoundedString(params.title, 'title', HEADER_TEXT_MAX_BYTES)
     if (params.width !== undefined && !(typeof params.width === 'string' && MODAL_WIDTHS.has(params.width))) {
       throw errorWithCode(
         `Invalid width ${JSON.stringify(params.width)}: expected one of 'sm' | 'md' | 'lg'.`,
@@ -457,7 +476,17 @@ export function registerUiRpcHandlers(
     }
     const width = params.width as 'sm' | 'md' | 'lg' | undefined
     const exits = runtimeModalExits
-    if (exits?.hasPendingUiRequest?.()) {
+    if (!exits) {
+      // B-F2 装配缺陷显式报错（SESSION_READ_NOT_WIRED 同口径）：广播出线未接线时开层
+      // 对 renderer 必然不可见——不建槽、不回 {opened:true} 假成功。
+      throw errorWithCode(
+        `showModal is not available: runtime broadcast exits are not wired (wireRuntimeModalExits was not `
+        + `called by the host assembly). The modal layer would never reach the renderer — this is a `
+        + `host-side wiring gap, not a plugin error; retrying will not help.`,
+        'MODAL_BROADCAST_NOT_WIRED',
+      )
+    }
+    if (exits.hasPendingUiRequest?.()) {
       // E10（AP-2 浮层规则②）：用户必须回应的系统层不被插件层压住。pi extension 的
       // select + UI_FORM_MARKER 表单族 pending 表在 pi 侧、runtime 无跟踪——不在本判定内（设计已登记）。
       throw errorWithCode(
@@ -471,7 +500,7 @@ export function registerUiRpcHandlers(
     console.log(`[ui-api] showModal (plugin=${pluginId}, modal=${modalId}, session=${sessionId}, worker=${ctx.workerId})`)
     const { epoch, replaced } = openRuntimeModalSlot({ pluginId, modalId, sessionId, title, width, workerId: ctx.workerId })
     if (replaced) closeRuntimeModalViaExits(replaced, 'replaced')
-    exits?.broadcastModalState({
+    const delivered = exits.broadcastModalState({
       pluginId,
       modalId,
       sessionId,
@@ -480,6 +509,17 @@ export function registerUiRpcHandlers(
       state: 'open',
       epoch,
     })
+    if (!delivered) {
+      // B-F2：出线已接线但 broadcastFn 缺失（warn-drop）——开帧对 renderer 不可见，
+      // 回滚槽并显式报错，不回 {opened:true} 假成功。
+      closeRuntimeModalSlot({ pluginId, modalId, epoch })
+      throw errorWithCode(
+        `showModal did not take effect: the modal-open broadcast was dropped (no broadcastFn configured `
+        + `on the host side). The modal would be invisible to the renderer — fix the runtime assembly `
+        + `(broadcastFn wiring) and retry.`,
+        'MODAL_BROADCAST_NOT_WIRED',
+      )
+    }
     return { opened: true, epoch }
   })
 
@@ -498,8 +538,11 @@ export function registerUiRpcHandlers(
     const headerActionId = asSafeKey(params.headerActionId, 'headerActionId')
     // E15：徽标是 per-session 语义（AP-1），缺/非法 sessionId 拒绝、不回落全局槽
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
-    const badge = asOptionalString(params.badge, 'badge')
-    const tooltip = asOptionalString(params.tooltip, 'tooltip')
+    // badge/tooltip ≤4KB（S3-W4 同口径，B-F1）：超长展示文本不入广播帧
+    const badge =
+      params.badge === undefined ? undefined : asBoundedString(params.badge, 'badge', HEADER_TEXT_MAX_BYTES)
+    const tooltip =
+      params.tooltip === undefined ? undefined : asBoundedString(params.tooltip, 'tooltip', HEADER_TEXT_MAX_BYTES)
     if (params.disabled !== undefined && typeof params.disabled !== 'boolean') {
       throw errorWithCode(
         `Invalid disabled: expected a boolean but received ${typeof params.disabled}.`,
@@ -507,15 +550,18 @@ export function registerUiRpcHandlers(
       )
     }
     // badge ≤4 字符的截断由渲染端承担（AP-1），帧面存原文
-    runtimeModalExits?.broadcastHeaderActionUpdate({
-      pluginId,
-      headerActionId,
-      sessionId,
-      ...(badge !== undefined && { badge }),
-      ...(tooltip !== undefined && { tooltip }),
-      ...(params.disabled !== undefined && { disabled: params.disabled }),
-    })
-    return { updated: true }
+    // B-F2：回执如实反映投递结果——出线未接线（optional-chain 跳过）或 broadcastFn
+    // 缺失被 warn 丢弃时回 {updated:false}，不让插件误以为渲染端已收到
+    const delivered =
+      runtimeModalExits?.broadcastHeaderActionUpdate({
+        pluginId,
+        headerActionId,
+        sessionId,
+        ...(badge !== undefined && { badge }),
+        ...(tooltip !== undefined && { tooltip }),
+        ...(params.disabled !== undefined && { disabled: params.disabled }),
+      }) ?? false
+    return { updated: delivered }
   })
 }
 
@@ -569,12 +615,17 @@ export function createUiApi(
   showInput(title: string, defaultValue?: string, opts?: UiDialogOptions): Promise<string | undefined>
   notify(level: 'info' | 'warn' | 'error', message: string): Promise<void>
   updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
-  /** AP-2：开层（sessionId 必填；有 pending 插件对话框时 reject MODAL_BLOCKED_BY_UI_REQUEST）。 */
+  /** AP-2：开层（sessionId 必填；有 pending 插件对话框时 reject MODAL_BLOCKED_BY_UI_REQUEST；
+   *  广播出线未接线/broadcastFn 缺失时 reject MODAL_BROADCAST_NOT_WIRED——不谎报 opened）。 */
   showModal(modalId: string, opts: { sessionId: string; title?: string; width?: 'sm' | 'md' | 'lg' }): Promise<{ opened: true; epoch: number }>
   /** AP-2 关③：插件自身关闭，走与宿主 dismiss 相同的 closed 路径（已关层 no-op）。 */
   hideModal(modalId: string): Promise<{ closed: boolean }>
-  /** AP-1：badge/tooltip/disabled 可变字段更新（sessionId 必填，徽标是 per-session 语义）。 */
-  updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<void>
+  /**
+   * AP-1：badge/tooltip/disabled 可变字段更新（sessionId 必填，徽标是 per-session 语义）。
+   * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（装配缺陷被丢弃），插件
+   * 可据此告警或走轮询兜底，不应把 false 当成功。
+   */
+  updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
   /** AP-2：modal 被关闭（宿主 dismiss / 切会话 / 宿主浮层 / replaced / plugin-gone）的定向通知订阅。 */
   onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
 } {
@@ -618,7 +669,7 @@ export function createUiApi(
     updateHeaderAction: (id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }) =>
       rpcClient
         .request('plugin.ui.updateHeaderAction', { pluginId, headerActionId: id, ...opts })
-        .then(() => {}),
+        .then(v => v as { updated: boolean }),
 
     onModalClosed: (handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable => {
       modalClosedHandlers.add(handler)

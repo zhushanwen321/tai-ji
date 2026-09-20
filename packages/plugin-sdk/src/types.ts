@@ -508,7 +508,8 @@ export interface Phase1AgentAPI {
     /**
      * [plugin-header-action-modal-points D6/u5b] 写路径回执：sessionId 必填（E15——缺省
      * 在 runtime 层拒绝 INVALID_SESSION_ID）；requireCommand 为写路径前置原子校验的命令名
-     * （restore 后、busy 预检前校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）。
+     * （restore 后、busy 预检前校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
+     * present 但空串/全空白在 runtime 入口拒绝（INVALID_REQUIRE_COMMAND）。
      * 回执 reason 词表：运行面分支只看 accepted，reason 是诊断/文案面。
      */
     sendMessage(params: {
@@ -797,14 +798,20 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
     /**
      * [AP-2/u5b] 开层：sessionId 必填（E15）；有 pending 插件对话框时 reject
-     * MODAL_BLOCKED_BY_UI_REQUEST（E10）。开层后应立即 views.update 推内容（首帧空白 =
-     * 一次 RPC 往返）。
+     * MODAL_BLOCKED_BY_UI_REQUEST（E10）；广播出线未接线/broadcastFn 缺失时 reject
+     * MODAL_BROADCAST_NOT_WIRED（装配缺陷显式报错，不谎报 opened）。开层后应立即
+     * views.update 推内容（首帧空白 = 一次 RPC 往返）。
      */
     showModal(modalId: string, opts: { sessionId: string; title?: string; width?: 'sm' | 'md' | 'lg' }): Promise<{ opened: true; epoch: number }>
     /** [AP-2/u5b] 插件自身关闭：走与宿主 dismiss 相同的 closed 路径；已关层 no-op。 */
     hideModal(modalId: string): Promise<{ closed: boolean }>
-    /** [AP-1/u5b] headerAction 可变字段更新：sessionId 必填（徽标是 per-session 语义）；badge ≤4 字符由宿主截断。 */
-    updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<void>
+    /**
+     * [AP-1/u5b] headerAction 可变字段更新：sessionId 必填（徽标是 per-session 语义）；
+     * badge ≤4 字符由宿主截断，badge/tooltip 超 4KB 拒绝（INVALID_BADGE / INVALID_TOOLTIP）。
+     * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（宿主装配缺陷被丢弃）——
+     * 插件可据此告警，不应把 false 当成功。
+     */
+    updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
     /** [AP-2/u5b] modal 被关闭（宿主 dismiss / 切会话 / 宿主浮层 / replaced / plugin-gone）的定向通知订阅。 */
     onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
   }

@@ -371,6 +371,16 @@ export function registerSessionRpcHandlers(
     const role = asString(params.role, 'role')
     const content = asString(params.content, 'content')
     const requireCommand = asOptionalString(params.requireCommand, 'requireCommand')
+    // B-F5：present 但空串/全空白 → INVALID_REQUIRE_COMMAND 入口拒绝。放行会让空命令名
+    // 进 dispatcher 的 requireCommand 原子校验（restore 后、busy 预检前的探测预算内必空转
+    // 拒绝）——纯插件侧参数 bug 在校验层显式报错，不消耗执行链路预算。
+    if (requireCommand !== undefined && requireCommand.trim() === '') {
+      throw errorWithCode(
+        `Invalid requireCommand ${JSON.stringify(requireCommand)}: it must be a non-empty command name `
+        + `(e.g. 'schedule'), or omit the field entirely.`,
+        'INVALID_REQUIRE_COMMAND',
+      )
+    }
     // 执行异常统一转回执（AP-4 修复，裁决方案①）：dispatcher 的 ensureActiveOrBroadcast
     // 在自身 try 外 rethrow（E4「会话恢复失败」等），插件侧回执契约是 {accepted, reason?}
     // 词表、不应要求插件 catch RPC 异常——异常在此收口为 {accepted:false, reason:'error'}，
@@ -536,7 +546,8 @@ export function createSessionApi(
   list(): Promise<SessionInfo[]>
   get(id: string): Promise<SessionInfo | undefined>
   getActive(): Promise<SessionInfo | undefined>
-  /** [D6/u5b] 写路径回执：sessionId 必填（E15）、requireCommand 可选；accepted=false 时 reason 为拒绝词表。 */
+  /** [D6/u5b] 写路径回执：sessionId 必填（E15）、requireCommand 可选但 present 即须非空
+   *  （空串/全空白拒绝 INVALID_REQUIRE_COMMAND）；accepted=false 时 reason 为拒绝词表。 */
   sendMessage(params: { sessionId: string; role: 'user' | 'system'; content: string; requireCommand?: string }): Promise<PluginSendReceipt>
   /** AP-4 条目镜像：live only 读 + customType 服务端过滤 + sinceEntryId 增量（无 client 抛 SESSION_NOT_ACTIVE）。 */
   readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>

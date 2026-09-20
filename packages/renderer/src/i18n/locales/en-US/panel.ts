@@ -12,6 +12,7 @@ export default {
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
+    pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
   },
   composer: {
     send: 'Send',
