@@ -44,7 +44,9 @@ export default {
   retry: 'Retry',
   toastImported: 'Imported "{name}" to {project} · continue chatting',
   toastWarnSidecar: 'Project assignment failed: reassign the session to a project manually in the sidebar',
-  toastWarnDegraded: 'Some content (e.g. screenshots) was not carried over by the import',
+  toastWarnDropped: 'Skipped {count} zcode runtime-injected messages',
+  toastWarnUnclassified: 'Skipped {count} unclassified zcode messages',
+  toastUnclassifiedSample: 'First sample {messageId}: {preview}',
   freshBadge: 'Imported',
   errors: {
     import_source_missing: 'Source file is missing or unreadable: confirm it has not been moved or deleted and retry, or use "Choose other directory" to relocate the sessions directory',
