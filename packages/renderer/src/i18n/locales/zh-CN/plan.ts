@@ -23,12 +23,36 @@ export default {
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
     waitingResubmit: '等待 agent 重新提交审批',
   },
+  // PlanModeBar 左区（plan-mode-ux-refactor u-plan-bar：状态带收敛后自持键族，与待清理的
+  // banner 键族解耦——u-closeout 删 banner 时本族不受影响）
+  modeBar: {
+    title: '计划模式',
+    skillsLabel: '技能',
+    stageExploring: '需求探索',
+    stageWriting: '文档撰写',
+    stageReviewing: '审阅确认',
+    // 阶段点 tooltip（各阶段含义）
+    stageExploringTip: 'agent 正在探索需求，尚未产出计划文档',
+    stageWritingTip: 'agent 正在撰写计划文档',
+    stageReviewingTip: '计划文档已产出，等待你审阅确认',
+    exit: '退出',
+    // E9：错误消息内嵌恢复动作（错误 → 恢复闭环），状态带保持原状
+    exitError: '退出失败：{message}。修复后重试退出，或手动在对话输入 /plan abort',
+  },
   drawer: {
     // plan tab（plan 模式重设计 u1-drawer-tab）：drawer「计划产物」tab。
     // key 落 plan 域文件——tab 语义属 plan 模式域，不并入 panel.sideDrawer
     tabPlan: '计划产物',
     noPlan: '暂无计划产物',
     planHint: '进入计划模式后，agent 产出的文档会显示在这里',
+    // pending 态矩阵（plan-mode-ux-refactor §3.2，u-drawer-gate）：isActive && docs 空期间
+    // 计划产物面板的两态。#1 与 derivePlanStage 的 exploring 语义对齐（中性进行时，不断言
+    // 具体动作）；#2 空闲等待态（isGenerating 惰性派生存在误显窗口，文案中性不断言
+    // 「已暂停」——误显后果轻，显式接受）
+    pendingActive: '正在探索与撰写计划文档…',
+    pendingIdle: 'agent 暂未推进，可发消息继续',
+    // 恢复入口提示：交互语义 = 指引用户发消息（无独立按钮；恢复动作接线归 u-review-source-ui）
+    pendingIdleHint: '在对话输入框发送任意消息，提醒 agent 继续推进',
   },
   docs: {
     // 文档面板（plan 模式重设计 u1-docs-panel：L2 文档 tab + meta + 正文）

@@ -23,12 +23,38 @@ export default {
     revising: 'The agent is revising docs based on your comments; versions update here when done',
     waitingResubmit: 'Waiting for the agent to resubmit for review',
   },
+  // PlanModeBar left zone (plan-mode-ux-refactor u-plan-bar: the merged bar owns its keys,
+  // decoupled from the banner family slated for cleanup — u-closeout can drop banner keys
+  // without touching this group)
+  modeBar: {
+    title: 'Plan Mode',
+    skillsLabel: 'Skills',
+    stageExploring: 'Explore',
+    stageWriting: 'Write docs',
+    stageReviewing: 'Review',
+    // Stage-dot tooltips (meaning of each stage)
+    stageExploringTip: 'The agent is exploring requirements; no plan document yet',
+    stageWritingTip: 'The agent is writing the plan document',
+    stageReviewingTip: 'Plan document ready — awaiting your review',
+    exit: 'Exit',
+    // E9: error message embeds the recovery action, the bar stays as-is
+    exitError: 'Exit failed: {message}. Fix the issue and retry, or type /plan abort in the conversation',
+  },
   drawer: {
     // plan tab (plan-mode redesign u1-drawer-tab): drawer "plan artifacts" tab.
     // Keys live in the plan domain file — tab semantics belong to plan mode, not panel.sideDrawer
     tabPlan: 'Plan Artifacts',
     noPlan: 'No plan artifacts yet',
     planHint: 'Documents produced by the agent appear here after entering plan mode',
+    // Pending-state matrix (plan-mode-ux-refactor §3.2, u-drawer-gate): two states while isActive && docs empty.
+    // #1 aligns with derivePlanStage's exploring semantics (neutral progressive, no specific action asserted);
+    // #2 idle-waiting (isGenerating lazy derivation has a brief mis-show window; copy stays neutral,
+    // never asserts "paused" — accepted explicitly)
+    pendingActive: 'Exploring requirements and drafting the plan document…',
+    pendingIdle: 'The agent has not made progress yet — send a message to continue',
+    // Recovery-entry hint: interaction semantics = guide the user to send a message (no standalone button;
+    // recovery wiring lands with u-review-source-ui)
+    pendingIdleHint: 'Send any message in the composer to nudge the agent forward',
   },
   docs: {
     // Docs panel (plan-mode redesign u1-docs-panel: L2 doc tabs + meta + body)

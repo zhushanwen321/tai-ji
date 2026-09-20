@@ -1,15 +1,40 @@
 <template>
   <!--
-    计划产物文档面板（plan 模式重设计 u1-docs-panel，设计 §3.1 步骤 3-5 / G2 后半 + G3）。
-    渲染决策链（D10/D4/D5 三裁决合流）：docItems 空（无 plan 状态 / docs 空 / 降级源缺失）
-    → 空态提示，不渲染主体；有产物即渲染 L2 tab + 正文——isActive 不参与渲染门（D5 终态
-    矩阵：产物 tab 由 docs.length 驱动、与 isActive 解耦，退出/执行后仍可回看）。
+    计划产物文档面板（plan 模式重设计 u1-docs-panel，设计 §3.1 步骤 3-5 / G2 后半 + G3；
+    态矩阵 plan-mode-ux-refactor §3.2）。渲染决策链（D10/D4/D5 三裁决合流 + §3.2 态矩阵）：
+    docs 非空即渲染 L2 tab + 正文——isActive 不参与产物渲染门（D5 终态矩阵：产物 tab 由
+    docs.length 驱动、与 isActive 解耦，退出/执行后仍可回看）；docs 空时按 isActive 与
+    agent 活跃信号分态：isActive && agent 活跃 → pending 进行时 #1；isActive && agent
+    空闲 → pending 等待态 #2（恢复出口，防 pending 自身成死胡同）；!isActive && 有
+    planFilePath → D4 降级单文件 #3（legacy 回看）；其余 → 空态 #4。
     正文 = file.read RPC（带 sessionId 走 cwd 守门，复用 CommandDocPanel 先例形态）+
     markdown 渲染；失败 → E2 占位错误态（条目不清，agent 可重新产出提示）。
     划选评论 = PlanCommentPopover（浮条/编辑器）→ 本组件写 planStore 草稿（D6）。
   -->
+  <!-- §3.2 矩阵 #1：isActive && docs 空 && agent 活跃（isGenerating）→ pending 进行时 -->
   <div
-    v-if="docItems.length === 0"
+    v-if="pendingGenerating"
+    data-testid="plan-docs-pending-active"
+    class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
+  >
+    <Loader2 class="size-3.5 animate-spin text-neutral-dim" aria-hidden="true" />
+    <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.pendingActive') }}</p>
+  </div>
+  <!-- §3.2 矩阵 #2：isActive && docs 空 && agent 空闲 → pending 等待态 + 恢复入口提示
+       （交互语义 = 指引用户发消息，无独立按钮；恢复动作接线归 u-review-source-ui） -->
+  <div
+    v-else-if="pendingIdle"
+    data-testid="plan-docs-pending-idle"
+    class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
+  >
+    <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.pendingIdle') }}</p>
+    <p class="text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim opacity-50">
+      {{ t('plan.drawer.pendingIdleHint') }}
+    </p>
+  </div>
+  <!-- §3.2 矩阵 #4：无 plan 状态 / !isActive 且无产物 → 空态（正常退出落此态） -->
+  <div
+    v-else-if="docItems.length === 0"
     data-testid="plan-docs-empty"
     class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
   >
@@ -182,8 +207,10 @@
  * （absPath 变化）同键承载，单一 watch 收口三种触发。loadingPath 标记防并发竞态
  * （CommandDocPanel 同款：异步期间切走丢弃旧结果）。
  *
- * D4 降级：旧 entry 无 docs 字段（或模板流程 docs 空）→ planFilePath 单文件条目
- * （fileName 取路径末段，无 chip/version）。
+ * D4 降级（§3.2 矩阵 #3）：旧 entry 无 docs 字段（或模板流程 docs 空）且 **!isActive** →
+ * planFilePath 单文件条目（fileName 取路径末段，无 chip/version）。isActive 期间不渲染
+ * 降级条目——enter 恒设 planFilePath，「上轮残留」与「本轮未创建」不可区分，条目可点即
+ * E2 假错误（已接受代价：isActive && docs=0 期间 legacy 条目暂不可回看，设计 §3.2 登记）。
  */
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -192,6 +219,7 @@ import { Button, MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
 import type { PlanDocMeta } from '@taiji/shared'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import * as fileApi from '@taiji/core/transport/api/domains/file'
+import { useChatStore } from '@/stores/chat'
 import { usePlanState } from '@/composables/use-plan-sync'
 import PlanCommentPopover from './PlanCommentPopover.vue'
 
@@ -223,8 +251,9 @@ function basename(p: string): string {
 }
 
 /**
- * 渲染决策链（D10/D4）：docs 非空 → 正常条目；docs 空且有 planFilePath → D4 降级单文件
- * （旧 entry 无 docs 字段与模板流程同形态）；两者皆无 → 空数组（空态）。
+ * 渲染决策链（D4 + §3.2 态矩阵）：docs 非空 → 正常条目；docs 空且 !isActive 且有
+ * planFilePath → D4 降级单文件（legacy 回看，isActive 门见头注释）；其余 → 空数组
+ * （pending #1/#2 或空态 #4，由 pending 计算属性分流）。
  */
 const docItems = computed<DocTabItem[]>(() => {
   const v = view.value
@@ -239,13 +268,31 @@ const docItems = computed<DocTabItem[]>(() => {
       degraded: false,
     }))
   }
-  if (v.planFilePath) {
+  if (!v.isActive && v.planFilePath) {
     return [
       { fileName: basename(v.planFilePath), absPath: v.planFilePath, sourceSkill: '', version: 0, degraded: true },
     ]
   }
   return []
 })
+
+// agent 活跃信号（§3.2 矩阵 #1/#2 判据）：chat store 的 isGenerating（per-session 惰性
+// 派生，仅反映 assistant streaming 实体）。computed 体内调用建立响应式依赖，翻转驱动
+// pending 两态切换
+const chatStore = useChatStore()
+const agentActive = computed(() => (props.sessionId !== null && chatStore.isGenerating(props.sessionId)))
+
+/**
+ * pending 态（§3.2 矩阵）：isActive && docs 空。判据不含 planFilePath 维度——
+ * activatePlanMode 每次进入恒设该字段，pending 期间该字段非空不代表产物已创建。
+ * docs 空时 reviewState 必无值（submit-review 前置 ≥1 doc，结构性成立），不引入第四维度。
+ */
+const pendingGenerating = computed(
+  () => view.value?.isActive === true && docItems.value.length === 0 && agentActive.value,
+)
+const pendingIdle = computed(
+  () => view.value?.isActive === true && docItems.value.length === 0 && !agentActive.value,
+)
 
 /** 修订中（reviewState=revising：tab 圆点 / meta 提示 / 评论按钮禁用） */
 const revising = computed(() => view.value?.reviewState === 'revising')
