@@ -630,9 +630,12 @@ async function executeSubmitReview(
     }
 
     case "explain": {
-      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态
-      // 「等待 agent 重新提交审批」，重挂靠 D2 提示词纪律驱动
+      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态。来源标记
+      // 'explain' 随后落盘（§3.4 降级两源）：renderer 渲染「已收到你的问题，agent
+      // 解答后会重新提交审批」分支，与崩溃恢复（'resubmit'）分支文案分开。
       pi.sendUserMessage(formatReviewComments("explain", response.comments), { deliverAs: "steer" });
+      state.reviewStateSource = "explain";
+      persistPlanState(pi, state);
       return {
         content: [{
           type: "text" as const,

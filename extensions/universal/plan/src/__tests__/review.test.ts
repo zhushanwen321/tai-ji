@@ -378,7 +378,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     );
   });
 
-  it("explain → same steer injection but reviewState stays awaiting (重挂靠提示词纪律)", async () => {
+  it("explain → same steer injection, reviewState stays awaiting + source='explain' persisted (降级两源 §3.4)", async () => {
     const { exec, ctx, pi } = setupTaiji();
     const comments = [{ quote: "third paragraph", comment: "why not use a queue here?" }];
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -397,6 +397,10 @@ describe("三 decision 消费（taiji 形态）", () => {
     const revisingEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
       .filter((c) => (c[1] as PlanState).reviewState === "revising");
     expect(revisingEntries).toHaveLength(0);
+    // 降级两源：explain 分支落 'explain' 标记（renderer 渲染「已收到你的问题」分支）
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.reviewState).toBe("awaiting");
+    expect(lastEntry.reviewStateSource).toBe("explain");
   });
 
   it("E5: unparseable select response → warn + re-hang prompt, nothing injected into the conversation", async () => {

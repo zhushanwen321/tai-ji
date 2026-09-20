@@ -109,8 +109,10 @@ export function activatePlanMode(
   state.templateProvidedPath = input.template?.absPath;
   state.skills = skills.map((s) => s.name);
   state.docs = [];
-  // 新轮次重置：reviewState 与指纹基线随进入失效（与 resetPlanState 对齐）
+  // 新轮次重置：reviewState、来源标记与指纹基线随进入失效（与 resetPlanState 对齐；
+  // reviewStateSource 残留会让新一轮降级态渲染上一轮来源文案——C-U2 同型残留）
   delete state.reviewState;
+  delete state.reviewStateSource;
   delete state.lastSubmitReviewDocsFingerprint;
 
   persistPlanState(pi, state);

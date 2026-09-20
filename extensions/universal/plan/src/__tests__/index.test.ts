@@ -36,6 +36,7 @@ function setup() {
     }),
     sendUserMessage: vi.fn(),
     setActiveTools: vi.fn(),
+    appendEntry: vi.fn(),
   } as unknown as ExtensionAPI;
 
   planExtension(pi);
@@ -85,6 +86,12 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
     expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("submit-review"), { deliverAs: "steer" });
+    // E3 重挂即落盘（§3.4 降级两源：该处曾只发 steer 不落盘——不落盘则 renderer 冷启动
+    // 扫描的 View 恒无 source、恒渲染通用文案）
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ isActive: true, reviewState: "awaiting", reviewStateSource: "resubmit" }),
+    );
   });
 
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
@@ -116,6 +123,8 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalled();
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    // 非 awaiting 不落盘：E3 source 标记只在 awaiting 重挂分支写
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
   it("inactive plan → no reminder, no tool restriction", async () => {

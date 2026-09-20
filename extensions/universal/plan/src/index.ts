@@ -9,7 +9,13 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { type PlanAbortControllers, type PlanSessionMap, PLAN_MODE_TOOLS, reconstructPlanState } from "./state.js";
+import {
+  type PlanAbortControllers,
+  type PlanSessionMap,
+  PLAN_MODE_TOOLS,
+  persistPlanState,
+  reconstructPlanState,
+} from "./state.js";
 import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -68,6 +74,11 @@ export default function planExtension(pi: ExtensionAPI) {
           "Call plan(action='submit-review') now to re-hang the review dialog.",
           { deliverAs: "steer" },
         );
+        // E3 重挂即落 'resubmit' 源标记 + persist（§3.4 降级两源：此处现只发 steer 不
+        // 落盘，renderer 冷启动扫描的 View 恒无 source、恒渲染通用文案；落盘后才能
+        // 渲染「会话已重启，尚未重新提交」分支）
+        state.reviewStateSource = "resubmit";
+        persistPlanState(pi, state);
       }
     }
   });

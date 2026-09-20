@@ -8,6 +8,16 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
  */
 export type PlanReviewState = "awaiting" | "revising";
 
+/**
+ * 降级态来源标记（plan-mode-ux-refactor §3.4）：reviewState='awaiting' 且无挂起 select
+ * 时区分等待原因——'explain' = 用户请求解释后等 agent 解答完重新提交审批；'resubmit' =
+ * 会话重启（E3）后 agent 尚未重新提交。写入点两处（tool.ts explain 分支 / index.ts E3
+ * steer 重挂处），清除点两处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置
+ * 组）——缺清除 = 跨 plan run 残留（C-U2 同型缺陷：bad-response 等罕见路径可渲染上一轮
+ * 的来源文案）。字面量与 shared PlanStateView.reviewStateSource 严格一致。
+ */
+export type PlanReviewStateSource = "explain" | "resubmit";
+
 export interface PlanState {
   isActive: boolean;
   planFilePath: string;
@@ -25,6 +35,8 @@ export interface PlanState {
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
   docs: PlanDocMeta[];
   reviewState?: PlanReviewState;
+  /** 降级态来源标记（见 PlanReviewStateSource）；仅 reviewState 有值时有语义，无值 = 来源未知 */
+  reviewStateSource?: PlanReviewStateSource;
   /**
    * 上次 submit-review 时的 docs 快照指纹（planDocsFingerprint 产物）。缺失 = 无既往
    * 提交（首次提交 / reset 后 / 旧版 entry 重挂），重提交无变化检测不警告；reset 随
@@ -123,8 +135,8 @@ export function getPlanState(
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
   // 派生扫描），两侧独立常量，勿改字面量。optional 字段（reviewState /
-  // lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化自然消失，旧 entry
-  // 消费方对该字段惰性（D4 向后兼容）。
+  // reviewStateSource / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化
+  // 自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
   pi.appendEntry("plan-state", {
     isActive: state.isActive,
     planFilePath: state.planFilePath,
@@ -134,6 +146,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     skills: state.skills,
     docs: state.docs,
     reviewState: state.reviewState,
+    reviewStateSource: state.reviewStateSource,
     lastSubmitReviewDocsFingerprint: state.lastSubmitReviewDocsFingerprint,
   });
 }
@@ -160,6 +173,9 @@ export function resetPlanState(
   delete state.templateProvidedPath;
   state.skills = [];
   delete state.reviewState;
+  // 来源标记与 reviewState 同生命周期随退出失效：残留 'explain' 会让下一轮经
+  // bad-response 等罕见路径渲染「已收到你的问题」而本轮无人提问（C-U2 同型残留）
+  delete state.reviewStateSource;
   // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
   // 首次 submit-review 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
   delete state.lastSubmitReviewDocsFingerprint;
@@ -205,6 +221,13 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
+/** reviewStateSource 值域守卫：'explain' | 'resubmit' 之外的值按无值处理（与 readReviewState 同风格） */
+function readReviewStateSource(data: Partial<PlanState>): PlanReviewStateSource | undefined {
+  return data.reviewStateSource === "explain" || data.reviewStateSource === "resubmit"
+    ? data.reviewStateSource
+    : undefined;
+}
+
 /** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的
  * 超长文本在重建时同样封顶（读侧防御，保证派生 plan 帧恒有界） */
 function readRequirement(data: Partial<PlanState>): string {
@@ -239,6 +262,7 @@ function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefi
   state.skills = readSkills(entryData);
   state.docs = readDocs(entryData);
   state.reviewState = readReviewState(entryData);
+  state.reviewStateSource = readReviewStateSource(entryData);
   state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 
