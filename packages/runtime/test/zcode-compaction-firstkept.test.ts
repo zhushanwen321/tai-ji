@@ -374,6 +374,48 @@ describe('U4 converter：孤儿二分（正常孤儿不计降级 / 悬空指针�
     expect(out.degradations).toEqual([{ code: 'compaction_unlinked', kind: 'user_prompt', count: 1 }])
   })
 
+  it('合并宿主 × 悬空指针（compactSummary + body 可用，宿主自带悬空 part）：compaction entry（②级锚）+ 悬空 part custom entry + 降级 三者齐备', () => {
+    // 宿主 summary.body 可用 → 走合并路径；其自带 part 携带悬空 summaryMessageId（判据①
+    // 指向不在行集）→ 处置 dangling，不参与合并（不登记 linkedParts）——合并 entry 锚退
+    // ② 级紧邻前驱；悬空 part 本体补发现状 custom entry（孤儿② 语义与指针宿主路径一致）
+    const danglingPart = zCompaction({ summaryMessageId: 'm-nowhere', time: { start: 2600, end: 2700 } })
+    const out = buildZcodeSessionFile(
+      [
+        zUser('u-real', [zText('真话')]),
+        zUser(
+          'c-host',
+          [danglingPart, zText('摘要正文（随合并被消费）')],
+          { semantics: U4_COMPACT_SUMMARY_SEMANTICS, summary: { body: '宿主摘要' } },
+          2500,
+        ),
+      ],
+      'T',
+      U4_HEADER,
+    )
+    const { entries } = u4Parse(out)
+    // 三产物①：compaction entry（摘要宿主合并照常发射，落在宿主位次）
+    expect(entries.map((e) => e.type)).toEqual(['session_info', 'message', 'compaction', 'custom'])
+    const compaction = u4CompactionEntries(entries)[0] as Record<string, unknown>
+    expect(compaction.summary).toBe('宿主摘要')
+    // ② 级锚：悬空 part 不登记合并 → 无锚 part → tail 解析不到 → 紧邻前驱 = u-real 的 entry
+    expect(compaction.firstKeptEntryId).toBe('00000002')
+    expect(new Set(entries.map((e) => e.id as string)).has(compaction.firstKeptEntryId as string)).toBe(true)
+    // 三产物②：悬空 part 的现状 custom entry（边界元数据原样透传，不吞）
+    expect(entries[3]).toMatchObject({
+      type: 'custom',
+      customType: 'zcode-import:compaction',
+      data: danglingPart,
+      timestamp: new Date(2600).toISOString(),
+    })
+    // 三产物③：compaction_unlinked 降级登记（L3，宿主 kind 注解）不吞
+    expect(out.degradations).toEqual([{ code: 'compaction_unlinked', kind: 'compact_summary', count: 1 }])
+    // 宿主 text part 随合并被消费：无 user entry 承载摘要正文
+    const userTexts = entries
+      .filter((e) => (e.message as { role?: string } | undefined)?.role === 'user')
+      .flatMap((e) => ((e.message as { content: Array<{ text?: string }> }).content).map((c) => c.text ?? ''))
+    expect(userTexts).toEqual(['真话'])
+  })
+
   it('正常孤儿宿主被丢弃时随宿主消失（零 entry；登记仅宿主自身 L2 丢弃，无 compaction_unlinked）', () => {
     const out = buildZcodeSessionFile(
       [zUser('o-dropped', [zCompaction({ timelineStatus: 'completed' })], { semantics: U4_TIMELINE_SEMANTICS })],

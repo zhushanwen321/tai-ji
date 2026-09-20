@@ -70,10 +70,12 @@ function inClosedSet(v: unknown, set: ReadonlySet<string>): boolean {
 
 /**
  * 消息来源四路回退（asar kN/messageSource）：data.source → metadata.source →
- * semantics.source → 首个携带 metadata.source 的 part。首尾两路不做非空过滤（asar 同款：
- * `??` 只跳过 null/undefined），中间两路经非空字符串守卫。注意：data.source 为空串时
- * 本函数返回空串（falsy），由闭集前置检查按未知值处理（asar 原函数空串 falsy 直接跳过
- * source 分支——空串在真实数据中不存在，§11-2 对拍报告核验节）。
+ * semantics.source → 首个携带 metadata.source 的 part。非空字符串守卫只挂第二路与第四路
+ * （asar bs 同款）；首路与第三路 semantics.source 裸取，`??` 只跳过 null/undefined
+ * （kN 函数体 2026-09-21 按对拍报告 §1 口径重提取核实：
+ * `e.source??bs(o?.source)??e.semantics?.source`——第三路无守卫，实现与其一致）。
+ * 注意：data.source 为空串时本函数返回空串（falsy），由闭集前置检查按未知值处理（asar
+ * 原函数空串 falsy 直接跳过 source 分支——空串在真实数据中不存在，§11-2 对拍报告核验节）。
  */
 function messageSource(
   data: Record<string, unknown>,

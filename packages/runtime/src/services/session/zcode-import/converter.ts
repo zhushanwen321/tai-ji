@@ -502,11 +502,14 @@ export function buildZcodeSessionFile(
           ...(tokensBefore !== undefined && { tokensBefore }),
           ...(anchor !== undefined && { details: anchor }),
         })
-        // 合并路径不迭代 part（不产 user entry / custom entry），宿主自带的悬空指针 part
-        // 在此显式登记漂移信号（流式路径的同一判定在 handleNonTextPart，弱映射表共享）
+        // 合并路径不产 user entry；宿主自带的悬空指针 part 补发现状 custom entry +
+        // compaction_unlinked 降级（§6-D2 孤儿② / §5.2：边界元数据留产物载体、漂移信号不吞）
+        // ——直接复用 handleNonTextPart 的 dangling 落点，与指针宿主路径同语义（弱映射表共享）。
+        // merged part 不入此循环：已被上方 compaction entry 消费（防双发；dangling 不是被
+        // 合并消费的 part，不受防双发抑制）
         for (const part of msg.parts) {
           if (part.type === 'compaction' && compactionDisposition.get(part) === 'dangling') {
-            degradations.push({ code: 'compaction_unlinked', count: 1, ...degradationMeta(data) })
+            handleNonTextPart(part, msg, createdMs, createdIso, emitForMessage, degradations, compactionDisposition)
           }
         }
         break
