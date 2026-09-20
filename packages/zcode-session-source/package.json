@@ -33,6 +33,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@zhushanwen/session-core": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*"
   },
   "devDependencies": {
