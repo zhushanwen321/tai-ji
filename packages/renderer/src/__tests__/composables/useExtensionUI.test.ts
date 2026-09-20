@@ -48,8 +48,9 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
   }
 })
 
-import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting, FRAME_STALE_MAX_AGE_MS } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'
 
@@ -199,6 +200,134 @@ describe('useExtensionUI T6 C3 保留 RPC 路径', () => {
   })
 })
 
+describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.2 采用项④ v6.1）', () => {
+  it('(a) runtime 清 pending → 空快照应答剔除该 session 分区旧交互条目（空快照也执行）', async () => {
+    // 快照恒为空（A 初始权威快照为空，B 亦空）
+    vi.mocked(getPendingRequests).mockResolvedValue([])
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+
+    // 初始订阅拉取空完成
+    await nextTick()
+    await nextTick()
+
+    // 模拟「屏上旧表单」：bus 实时帧入 A 分区（未重订阅时它保留在屏上——已声明缺口）
+    emitBusUIRequest('sessionA', mkAskUserReq('r-zombie'))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-zombie')
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
+
+    // 触发重订阅（切走再切回）：runtime 已清 pending ⇒ 下一次快照为空 []
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    // 空快照执行剔除（剔除逻辑在 for 循环之外）：僵尸条目从分区消失、overlay 收起
+    expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+    expect(useExtensionUIStore().hasPendingBlockingOverlay('sessionA')).toBe(false)
+
+    dispose()
+  })
+
+  it('(b) 快照非空但缺某条 → 差集剔除该条、其余保留（活请求仍可提交）', async () => {
+    // 初始快照为空（bus 帧先占屏）；重订阅前才把 r-live 置入权威快照
+    let snapshotA: ExtensionUIRequest[] = []
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? snapshotA : [],
+    )
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    await nextTick()
+    await nextTick()
+
+    emitBusUIRequest('sessionA', mkAskUserReq('r-zombie'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-live'))
+    expect(useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)).toEqual([
+      'r-zombie',
+      'r-live',
+    ])
+
+    // 重订阅：快照只含 r-live（r-zombie 已被 runtime 清）
+    snapshotA = [mkAskUserReq('r-live')] as never
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const ids = useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)
+    expect(ids).toEqual(['r-live'])
+    // 活请求仍在且可提交（respond 送达 + 出队）
+    expect(result.currentFormRequest.value?.requestId).toBe('r-live')
+    result.respond('r-live', true)
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-live', 'select', true)
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+
+    dispose()
+  })
+
+  it('(c) 快照中的条目保持原字段且不重复入队（差集 + dedup 幂等）', async () => {
+    let snapshotA: ExtensionUIRequest[] = []
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? snapshotA : [],
+    )
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    await nextTick()
+    await nextTick()
+
+    // bus 实时帧先入（带本地拍戳）
+    emitBusUIRequest('sessionA', mkAskUserReq('r-live', { title: 'bus-frame' }))
+    const before = useExtensionUIStore().getRequestsBySession('sessionA')[0]
+
+    // 重订阅：快照含同 requestId → 差集保留（不重复追加），且不覆盖已有记录
+    snapshotA = [mkAskUserReq('r-live')] as never
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const records = useExtensionUIStore().getRequestsBySession('sessionA')
+    expect(records).toHaveLength(1)
+    expect(records[0].requestId).toBe('r-live')
+    expect(records[0].title).toBe('bus-frame') // 活条目未被快照覆盖
+    expect(records[0].receivedAt).toBe(before.receivedAt)
+    expect(result.currentFormRequest.value?.requestId).toBe('r-live')
+
+    dispose()
+  })
+
+  it('(d) 帧入口兜底：携带超龄 receivedAt 的帧被丢弃（非主算法）', () => {
+    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // 超龄帧（超过本地兜底阈值）→ 不入 store
+    emitBusUIRequest(
+      'sessionA',
+      mkAskUserReq('r-old', { receivedAt: Date.now() - FRAME_STALE_MAX_AGE_MS - 1000 }),
+    )
+    expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+    expect(warnSpy).toHaveBeenCalled()
+
+    // 未超龄（阈值内）→ 正常入队
+    emitBusUIRequest('sessionA', mkAskUserReq('r-fresh', { receivedAt: Date.now() - 1000 }))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-fresh')
+
+    warnSpy.mockRestore()
+    dispose()
+  })
+})
+
 describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）', () => {
   it('AC-1: 同一实例 sessionId 从 A 切到 B 后 currentFormRequest 变 undefined', async () => {
     const sid = ref<string | null>('sessionA')
@@ -214,16 +343,26 @@ describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）',
     dispose()
   })
 
-  it('AC-2: 切回 A 后 pending 表单请求恢复显示（Map 分区保留）', async () => {
+  it('AC-2: 切回 A 后 pending 表单请求恢复显示（分区保留 + 快照权威再确认）', async () => {
+    // 快照按 session 分源：A 的 fetch 是权威 pending 集（含 r-a1），B 为空。
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? ([mkAskUserReq('r-a1')] as never) : [],
+    )
     const sid = ref<string | null>('sessionA')
     const { result, dispose } = runWithScope(() => useExtensionUI(sid))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
+
     sid.value = 'sessionB'
     await nextTick()
+
     expect(result.currentFormRequest.value).toBeUndefined()
+    // 切走不清 A 分区（分区语义；A 的修剪只由 A 自己的快照驱动）
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
 
     sid.value = 'sessionA'
+    await nextTick()
     await nextTick()
     expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
 
@@ -231,18 +370,28 @@ describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）',
   })
 
   it('T7b: 切走后旧 sid 迟到事件写旧分区（M1 事件 sid 语义），不污染新分区', async () => {
+    // 初始两 session 快照均为空；A 的权威快照在「切回」前才置入迟到请求（模拟 runtime pending）
+    const pendingBySession: Record<string, ExtensionUIRequest[]> = { sessionA: [], sessionB: [] }
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) => pendingBySession[s] ?? [])
     const sid = ref<string | null>('sessionA')
     const { result, dispose } = runWithScope(() => useExtensionUI(sid))
 
     sid.value = 'sessionB'
     await nextTick()
+    await nextTick()
 
     // 旧 sid 迟到事件（退订异步，或 runtime 重放）——事件 sid 仍是 A
     emitBusUIRequest('sessionA', mkAskUserReq('r-late-a'))
 
-    // B 分区不被污染；切回 A 能看到迟到事件
+    // B 分区不被污染；迟到事件写 A 分区（M1：事件自带归属）
     expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionB')).toEqual([])
+    expect(useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)).toEqual(['r-late-a'])
+
+    // 切回 A：快照（权威 pending 集）含该请求 → 差集保留、恢复显示
+    pendingBySession.sessionA = [mkAskUserReq('r-late-a')] as never
     sid.value = 'sessionA'
+    await nextTick()
     await nextTick()
     expect(result.currentFormRequest.value?.requestId).toBe('r-late-a')
 
