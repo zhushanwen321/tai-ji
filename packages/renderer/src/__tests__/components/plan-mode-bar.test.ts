@@ -232,7 +232,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
     expect(firstStep.classes()).toContain('text-accent')
     expect(firstStep.find('svg').exists()).toBe(false) // cur = 点，非对勾
 
-    usePlanStore().applyFrame(SID, viewOf({ docs: [{ path: '/p/plan.md', version: 1, commentCount: 0 }] }))
+    usePlanStore().applyFrame(SID, viewOf({ docs: [{ fileName: 'plan.md', absPath: '/p/plan.md', sourceSkill: '', version: 1 }] }))
     await nextTick()
     const firstAfter = stageEl.findAll('span').find((s) => s.text().includes('需求探索'))!
     expect(firstAfter.find('svg').exists()).toBe(true) // done = 对勾（同色系，去绿点）

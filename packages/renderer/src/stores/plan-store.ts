@@ -8,7 +8,7 @@
  *   消费同一张表；工厂 setup 时自动 registerSessionCleanup → useSidebar.deleteSession
  *   清理链，免 ADR-0049 例外登记。切走不清、切回恢复；session 销毁精确释放。
  * - 评论草稿（D6）：提交前是本 store 草稿（内存态，刷新丢失可接受——与 composer 草稿同
- *   语义），提交时由 u1-banner 审批条打包进 respond payload 注入对话流持久。加/删/清空
+ *   语义），提交时由 PlanReviewBar 审批条打包进 respond payload 注入对话流持久。加/删/清空
  *   只作用于当前焦点 session 分区（scoped.update 读 focusedSid 实时值，null sid 工厂内建 no-op）。
  * - 三步阶段指示（D1，推导不落盘，ext-simplify-06「可推导信息不落盘」延续）：
  *   ① 需求探索 = isActive && !docs.length；② 文档撰写 = isActive && docs.length ≥ 1 &&
@@ -41,7 +41,7 @@ export interface PlanReviewComment {
   comment: string
 }
 
-/** 三步阶段指示值（D1 推导三元组；与设计编号 ①②③ 一一对应，i18n 文案归 u1-banner）。 */
+/** 三步阶段指示值（D1 推导三元组；与设计编号 ①②③ 一一对应，i18n 文案归 PlanModeBar 状态带）。 */
 export type PlanStage =
   | 'exploring' // ① 需求探索
   | 'writing' // ② 文档撰写
@@ -71,7 +71,7 @@ interface PlanPartition {
   view: PlanStateView | null
   /** 评论草稿（D6：GUI 草稿，提交时打包进 respond payload；per-session 隔离） */
   drafts: PlanReviewComment[]
-  /** 首拉失败错误（AGENTS.md 规则 5 错误通路：分区级落错误供 u1-banner 呈现，不覆盖现有 view） */
+  /** 首拉失败错误（AGENTS.md 规则 5 错误通路：分区级落错误供 PlanModeBar / PlanDocsPanel 呈现，不覆盖现有 view） */
   loadError: string | null
   /**
    * 草稿回看请求（§3.5）：审批条评论计数可点 → requestDraftsReveal 递增序号并置
@@ -136,7 +136,7 @@ export const usePlanStore = defineStore('plan', () => {
    *
    * AGENTS.md 规则 5（sendCommand 后检查 reply success）：renderer 端 error envelope 由
    * core transport 层转为 command promise reject，本函数 catch 即「success=false」分支——
-   * 错误落分区 loadError（u1-banner 消费呈现），不覆盖现有 view（失败兜底显示，下次切入
+   * 错误落分区 loadError（PlanModeBar / PlanDocsPanel 消费呈现），不覆盖现有 view（失败兜底显示，下次切入
    * 重拉自愈，subagent loadSubagents M1 同款）。
    *
    * 响应空/无 planState = 无 plan 状态，分区 view 置空（协议 planState 必填，运行时仍防御
@@ -177,7 +177,7 @@ export const usePlanStore = defineStore('plan', () => {
     })
   }
 
-  /** 清空焦点分区评论草稿（提交成功后由 u1-banner 审批条调用）。 */
+  /** 清空焦点分区评论草稿（提交成功后由 PlanReviewBar 审批条调用）。 */
   function clearDraftComments(): void {
     scoped.update((p) => {
       p.drafts.length = 0
@@ -212,7 +212,7 @@ export const usePlanStore = defineStore('plan', () => {
   /** 焦点 session 的评论草稿（只读视图，操作走 add/remove/clear 三个 action 收口）。 */
   const draftComments: ComputedRef<PlanReviewComment[]> = computed(() => scoped.current.value.drafts)
 
-  /** 焦点 session 的首拉错误（null = 无错误；非空时 u1-banner 呈现错误态）。 */
+  /** 焦点 session 的首拉错误（null = 无错误；非空时由 PlanModeBar / PlanDocsPanel 呈现错误态）。 */
   const planLoadError: ComputedRef<string | null> = computed(() => scoped.current.value.loadError)
 
   /** 焦点分区回看请求序号（watch 源：递增即新请求）。 */

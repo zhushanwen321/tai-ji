@@ -7,7 +7,7 @@ export default {
     commentsCount: '{count} 条评论',
     requestExplanation: '请求进一步解释',
     submitRevise: '提交评论并要求修订',
-    confirmExecute: '确认，开始执行',
+    confirmExecute: '确认并执行',
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
     waitingResubmit: '等待 agent 重新提交审批',
     // §3.4 降级三分支（reviewStateSource 两源 + 旧 entry 缺省通用）：共用恢复入口指引 +

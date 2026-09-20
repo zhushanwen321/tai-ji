@@ -157,6 +157,8 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(true)
+    // §3.5 文案条款：approve 键文案「确认并执行」（防回归——曾被写为「确认，开始执行」）
+    expect(wrapper.find('[data-testid="plan-review-approve"]').text()).toContain('确认并执行')
     expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
   })
 
