@@ -275,6 +275,15 @@ export const FIRED_ENTRY_CUSTOM_TYPE = "smart-context:fired";
 /** 越档提醒注入的 custom message 类型（静默通道：只进 LLM 上下文，不进对话流）。 */
 export const THRESHOLD_REMINDER_CUSTOM_TYPE = "smart-context:threshold-reminder";
 
+/** 模型跨界通知注入的 custom message 类型（静默通道：不触发 turn，LLM 下轮自然可见）。 */
+export const SWITCH_NOTICE_CUSTOM_TYPE = "smart-context:switch-notice";
+
+/** downshift 建议压缩注入的 custom message 类型（静默通道：不触发 turn，用户继续对话时 LLM 自行决策）。 */
+export const DOWNSHIFT_NOTICE_CUSTOM_TYPE = "smart-context:downshift-notice";
+
+/** compact 完成/失败注入的 custom message 类型（用户可见系统消息 + 唤醒一轮消费压缩结果）。 */
+export const COMPACT_RESULT_CUSTOM_TYPE = "smart-context:compact-result";
+
 /** fired marker 的载荷形状（写入方 index.ts 与本文件推导函数共用的唯一定义点）。 */
 export interface FiredMarkerData {
 	/** 本次标记已提醒的档位（token 值）。 */
