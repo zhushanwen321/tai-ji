@@ -530,6 +530,10 @@ async function executeSubmitReview(
   // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复后冷启动扫描
   // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）。指纹快照同点更新：
   // 单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review 时的 docs」）
+  // §3.4 第 3 轮裁决：重挂起新 pending 前清上一轮 source——不变量 = source 只描述
+  // 当前降级等待的原因，此处即将挂起真审批，降级等待尚未发生（残留 'explain' 会让
+  // 崩溃恢复后的降级态渲染上一轮「已收到你的问题」文案，与 C-U2 同型残留）
+  delete state.reviewStateSource;
   state.reviewState = "awaiting";
   state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);

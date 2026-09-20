@@ -1339,8 +1339,8 @@ export interface PlanDocMeta {
  *
  * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
  * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
- * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件；
- * reviewStateSource 缺 → 降级态渲染通用文案）。
+ * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
+ * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
  * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
  * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。

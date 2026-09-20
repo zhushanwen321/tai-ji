@@ -1005,9 +1005,10 @@ function isInReconcileDomain(cache: RecordEntriesCache): boolean {
  * subagentRecordEquals 的 diff 先例）。null 与 View 恒不等（无 entry → 有 entry 是真变化，
  * 由 applyRecordEntries 分支显式处理，本函数只管 View vs View）。
  *
- * 结构固定（shared PlanStateView 七字段），逐字段比对而非 JSON.stringify（顺序无关、
+ * 结构固定（shared PlanStateView 八字段），逐字段比对而非 JSON.stringify（顺序无关、
  * 无序列化抖动）；optional 字段以 undefined === undefined 参与比对（两 View 同缺某
- * optional 字段 = 相等，单缺 = 不等——「无新字段区」的差异是真实显示差异，必须 publish）；
+ * optional 字段 = 相等，单缺 = 不等——「无新字段区」的差异是真实显示差异，必须 publish；
+ * 旧 entry 无 reviewStateSource，两 View 同缺 = 相等，天然兼容）；
  * skills/docs 数组逐元素比对（数组引用每轮重新派生，=== 引用比较对同值也判不等）。
  */
 function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
@@ -1016,6 +1017,7 @@ function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
   if (a.requirement !== b.requirement) return false
   if (a.templateName !== b.templateName) return false
   if (a.reviewState !== b.reviewState) return false
+  if (a.reviewStateSource !== b.reviewStateSource) return false
   if (!stringArrayEquals(a.skills, b.skills)) return false
   return planDocListEquals(a.docs, b.docs)
 }

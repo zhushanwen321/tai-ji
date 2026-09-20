@@ -464,6 +464,23 @@ describe("三 decision 消费（taiji 形态）", () => {
   });
 });
 
+describe("reviewStateSource 重挂起点重置（§3.4 第 3 轮裁决）", () => {
+  it("submit-review re-hang clears stale source before awaiting is persisted (不变量：source 只描述当前降级等待的原因)", async () => {
+    // 上一轮 explain 降级残留 source='explain'；本用例重提交（重挂起新 pending）
+    const { exec, pi } = setup({ ...activeStateWithDocs(), reviewStateSource: "explain" });
+
+    await exec({ action: "submit-review" });
+
+    // 挂起点落盘的 awaiting entry 不携带上一轮来源——残留会让崩溃恢复（E3）后的
+    // 降级态渲染上一轮「已收到你的问题」文案，而本轮无人提问（C-U2 同型残留）
+    const hangEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[1] as PlanState)
+      .find((e) => e.reviewState === "awaiting");
+    expect(hangEntry).toBeDefined();
+    expect(hangEntry!.reviewStateSource).toBeUndefined();
+  });
+});
+
 describe("submit-review 的 PLAN_ACTIONS 面", () => {
   it("action list contains exactly the six actions (enter added; list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
