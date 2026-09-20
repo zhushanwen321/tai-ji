@@ -97,8 +97,25 @@ export async function loadSqliteDriver(): Promise<SqliteDriver> {
     cachedDriver = {
       id: 'bun:sqlite',
       open(path, opts) {
-        // bun 选项名是全小写 readonly（与 node 的 readOnly 微异，F3）
-        return new Database(path, { readonly: opts.readOnly })
+        // bun 选项名是全小写 readonly（与 node 的 readOnly 微异，F3；拼错 bun 1.3.8
+        // 直接抛 TypeError，选项名已实测核真）。
+        const db = new Database(path, { readonly: opts.readOnly })
+        // get() 未命中 bun 返回 null（node 返回 undefined，bun 1.3.8 实测）——
+        // 公共子集语义对齐（P-api-parity 面）：统一归一为 undefined
+        const rawPrepare = db.prepare.bind(db)
+        return {
+          prepare(sql: string) {
+            const stmt = rawPrepare(sql)
+            return {
+              all: (...args: unknown[]) => stmt.all(...args),
+              get: (...args: unknown[]) => {
+                const row = stmt.get(...args)
+                return row === null ? undefined : row
+              },
+            }
+          },
+          close: () => db.close(),
+        }
       },
     }
   } else {

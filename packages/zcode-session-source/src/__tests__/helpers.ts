@@ -152,9 +152,21 @@ export async function buildFixtureDb(
     // 由 W2 测试自行 exec（fixture 不预设写者行为）。
     return { dbPath, sessions, messages, parts, schemaVersion, writer }
   }
-  writer.close()
+  checkpointAndClose(writer)
   if (opts.quiesce) quiesceDir(dir)
   return { dbPath, sessions, messages, parts, schemaVersion }
+}
+
+/**
+ * 双端落盘关闭：bun:sqlite 的 close() 不执行 checkpoint 也不删 -wal/-shm 附属
+ * 文件（bun 1.3.8 探针实证；node:sqlite close 自动 checkpoint+清理）——不显式
+ * checkpoint 就删附属 = 丢掉未落盘数据（W1 在 bun 腿下 db 主文件残缺的根因）。
+ * 所有「写连接关闭后库须数据完整」的 fixture 关闭点一律走本助手；W2 的写者
+ * 活跃态构造（close 前不留证）不适用。
+ */
+export function checkpointAndClose(writer: WritableConn): void {
+  writer.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  writer.close()
 }
 
 /** 删除目录内 -wal/-shm 附属文件（静息态化；clean close 后通常已无残留）。 */

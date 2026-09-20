@@ -14,6 +14,7 @@ import {
 } from '../sqlite-driver.ts'
 import {
   buildFixtureDb,
+  checkpointAndClose,
   defaultTranscriptSeeds,
   dirSnapshot,
   expectFileExists,
@@ -141,7 +142,7 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
       const writer = await openWritableSqlite(join(fx.root, 'w.sqlite'))
       writer.exec('CREATE TABLE t (a TEXT)')
       writer.prepare('INSERT INTO t VALUES (?)').run('v')
-      writer.close()
+      checkpointAndClose(writer) // bun:sqlite close 不 checkpoint（探针实证），须显式落盘
       const driver = await loadSqliteDriver()
       const db = driver.open(join(fx.root, 'w.sqlite'), { readOnly: true })
       try {

@@ -20,6 +20,7 @@ import {
 import { loadSqliteDriver, toSqliteFileUri } from '../sqlite-driver.ts'
 import {
   buildFixtureDb,
+  checkpointAndClose,
   defaultTranscriptSeeds,
   dirSnapshot,
   isBun,
@@ -43,7 +44,10 @@ async function buildWalLadderFixture(dir: string): Promise<{ dbPath: string; wal
     .run('s-wal-only', '/tmp/wal', 'WALROW-PROOF', 'interactive', 1, 2)
   const walSizeDuringWrite = statSync(`${fixture.dbPath}-wal`).size
   expect(walSizeDuringWrite).toBeGreaterThan(0) // 留证：这行确实只写进 -wal 未 checkpoint
-  writer.close() // clean close：checkpoint 完成、附属文件被删
+  // 落盘收尾：bun:sqlite close 不 checkpoint（探针实证），不显式 TRUNCATE 落盘
+  // 就删附属 = 丢掉 WALROW-PROOF 行、db 主文件残缺——「clean close」的双端正确
+  // 实现是显式 checkpoint + close（checkpoint 后数据在主文件，附属可安全删除）
+  checkpointAndClose(writer)
   quiesceDir(dir)
   expect(dirSnapshot(dir)).toEqual(['db.sqlite']) // 静息态前置确认
   return { dbPath: fixture.dbPath, walSizeDuringWrite }
@@ -56,8 +60,17 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
       const { dbPath } = await buildWalLadderFixture(fx.root)
       const driver = await loadSqliteDriver()
       if (isBun) {
-        // bun 特有断言（F22）：-wal 缺失直开必然 CANTOPEN，目录可写也失败
-        expect(() => driver.open(dbPath, { readOnly: true })).toThrow()
+        // bun 特有断言（F22）：-wal 缺失直开必然 CANTOPEN，目录可写也失败。
+        // bun:sqlite 打开同样是惰性的（CANTOPEN 在首查询抛，构造不抛——bun 1.3.8
+        // 实测），断言须含探测查询，与产品 tryOpen 的 open+probe 语义对齐
+        expect(() => {
+          const ro = driver.open(dbPath, { readOnly: true })
+          try {
+            ro.prepare('SELECT COUNT(*) AS c FROM sqlite_master').all()
+          } finally {
+            ro.close()
+          }
+        }).toThrow()
       } else {
         // node 侧不对称半边（F24）：直开成功且创建 -shm/-wal（close 后残留）——
         // 这是恢复阶梯要消除的宿主目录副作用面

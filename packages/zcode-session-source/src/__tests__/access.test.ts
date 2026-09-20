@@ -19,6 +19,7 @@ import {
 import { SqliteUnreadableError } from '../recovery.ts'
 import {
   buildFixtureDb,
+  checkpointAndClose,
   defaultTranscriptSeeds,
   isBun,
   makeFixtureDir,
@@ -29,6 +30,23 @@ import {
 const FIXTURE_DIR = 'zss-access-'
 
 async function makeReadyFixture(dir: string, schemaVersion?: string): Promise<FixtureDb> {
+  // quiesce: true——bun:sqlite close 不删附属（TRUNCATE 后 0 字节 wal 残留在盘），
+  // 不清则 existsSync(-wal) 为 true、bun 腿 L1 直开对 wal 在场库成功，双端「真静息」
+  // 构造失配（node close 自动清理所以 node 腿测不出该差异）
+  return buildFixtureDb(dir, defaultTranscriptSeeds(), {
+    quiesce: true,
+    ...(schemaVersion ? { schemaVersion } : {}),
+  })
+}
+
+/**
+ * 写-first 用例的 fixture 基座：建库后马上要再开写连接改库。**刻意不 quiesce**——
+ * bun 1.3.8 在 vitest 下对「附属文件被删的静息库」重新以写模式打开后首个写语句报
+ * disk I/O error（readonly-first 无此问题；变体矩阵实测，激活技巧 journal_mode/
+ * SELECT 摸底均不可绕过）。不 quiesce 时 0 字节 wal 残留在盘，消费链走 L1 直开
+ * （bun 对 wal 在场库正常工作，F22），本组用例均无 via 断言，双端语义不变。
+ */
+async function makeMutableFixture(dir: string, schemaVersion?: string): Promise<FixtureDb> {
   return buildFixtureDb(dir, defaultTranscriptSeeds(), schemaVersion ? { schemaVersion } : undefined)
 }
 
@@ -57,12 +75,12 @@ describe('行集查询（getSessionTranscript：session → message → part 三
   it('LEFT JOIN 保留无 part 的 message（parts 空数组）', async () => {
     const fx = makeFixtureDir(FIXTURE_DIR)
     try {
-      const fixture = await makeReadyFixture(fx.root)
+      const fixture = await makeMutableFixture(fx.root)
       const writer = await openWritableSqlite(fixture.dbPath)
       writer
         .prepare('INSERT INTO message (id, session_id, sequence, data) VALUES (?, ?, ?, ?)')
         .run('m9', 'sess_fix_a', 9, JSON.stringify({ role: 'assistant' }))
-      writer.close()
+      checkpointAndClose(writer) // bun:sqlite close 不 checkpoint（探针实证），须显式落盘
 
       const handle = await openZcodeSessionDb(fixture.dbPath)
       try {
@@ -81,12 +99,12 @@ describe('行集查询（getSessionTranscript：session → message → part 三
   it('data 列非法 JSON：抛错不静默（上下文带表与行标识）', async () => {
     const fx = makeFixtureDir(FIXTURE_DIR)
     try {
-      const fixture = await makeReadyFixture(fx.root)
+      const fixture = await makeMutableFixture(fx.root)
       const writer = await openWritableSqlite(fixture.dbPath)
       writer
         .prepare('INSERT INTO message (id, session_id, sequence, data) VALUES (?, ?, ?, ?)')
         .run('m-bad', 'sess_fix_a', 10, 'not-json')
-      writer.close()
+      checkpointAndClose(writer) // bun:sqlite close 不 checkpoint（探针实证），须显式落盘
 
       const handle = await openZcodeSessionDb(fixture.dbPath)
       try {
@@ -200,10 +218,10 @@ describe('schema 版本已知集闸门', () => {
   it('schema_migration 表缺失：编排入口直接抛 drift 且 observedVersion 为 undefined', async () => {
     const fx = makeFixtureDir(FIXTURE_DIR)
     try {
-      const fixture = await makeReadyFixture(fx.root)
+      const fixture = await makeMutableFixture(fx.root)
       const writer = await openWritableSqlite(fixture.dbPath)
       writer.exec('DROP TABLE schema_migration')
-      writer.close()
+      checkpointAndClose(writer) // bun:sqlite close 不 checkpoint（探针实证）——DROP 不落盘则表仍在主文件，drift 构造失效
 
       let caught: unknown
       try {
