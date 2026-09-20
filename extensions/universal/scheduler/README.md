@@ -146,6 +146,12 @@ session_start
 
 取消/超时不是错误：不创建、无 toast。命令路径的错误出口统一按 mode 分流——rpc / tui 走 `notify(..., 'error')`（pi 会把 handler 异常折成 renderer 不消费的 `extension.error`，throw 在 rpc 下静默丢弃）；json / print 一律 `rethrow`。
 
+### 文案与语言（L2 本地化）
+
+命令反馈（创建/列表/启停/删除/用法/错误提示）与 TUI widget 文本、托盘标题均由扩展侧词典（`src/i18n.ts`）按当前界面语言渲染；语言经 `<dataDir>/ui-preferences.json`（runtime 写、扩展只读，见 data-source-registry 登记行）就地读取，文件缺失/损坏回落 `en-US`。`/scheduler` 的 registerCommand.description 是注册期静态串、托盘标题随 widget 刷新（≤30s）跟进语言——两者切语言后不会立即热更（已接受滞后）。
+
+模型可见文案（`schedule` tool 的 `description` / `promptGuidelines` / tool result）**保持英文**，不经 L2 词典——两受众不串（本地化不得污染 tool result）。
+
 ## 示例
 
 **recurring 间隔任务**（`/scheduler` 打开预填表单，确认后创建）：
@@ -199,7 +205,7 @@ pi -p "/scheduler 5m 'check build'"
 | 延迟写入窗口 | 新 session 首 turn 内建任务后进程崩溃可能丢失 | pi 延迟写入：首条 assistant 消息前不 flush。窗口窄、概率极低、无恢复手段 |
 | 触发条件 | pi 进程需存活且 session 打开 | 电脑睡眠 / pi 进程未运行 = 不触发（非系统 cron，无后台守护） |
 
-错误语义（失败经 message 文案 / tool throw 承载，无错误码）：`schedule` tool 创建时参数预校验失败（prompt 空 / schedule 非法）→ 直接 throw `Invalid parameters: ...`（修正参数后重调）；`/scheduler` 命令 `json`/`print` 模式带参解析失败 → throw `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`。表单交互的取消/abort 不是错误（不创建、无 toast）；通道失败/回包非法在 rpc/tui 走 `notify(..., 'error')`、在 json/print 走 throw——见「创建方式」。
+错误语义（无错误码；双受众分派——`message` 英文回退供 tool result / `messageKey`+`params` 供命令层词典渲染，见「文案与语言」）：`schedule` tool 创建时参数预校验失败（prompt 空 / schedule 非法）→ 直接 throw `Invalid parameters: ...`（修正参数后重调）；`/scheduler` 命令 `json`/`print` 模式带参解析失败 → throw 词典文案（en: `Invalid schedule: "..."`）；`run`/`toggle`/`delete` 引用不存在的 id / `run` 时任务 disabled / rate-limited / 同任务在途 / 任务数超上限 → 命令层 toast 按词典本地化（en 示例：`Task <id> not found` / `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight)` / `Task limit reached (50) — delete one first`）。表单交互的取消/abort 不是错误（不创建、无 toast）；通道失败/回包非法在 rpc/tui 走 `notify(..., 'error')`、在 json/print 走 throw——见「创建方式」。
 
 ## 数据存储位置
 
@@ -263,4 +269,4 @@ npx vitest run src/__tests__/<file>.test.ts   # 单个文件
 - **直建流**：`handleSchedule` 预校验 / abort / 参数透传（`src/__tests__/tool-create-flow.test.ts`）；命令路径表单（无参 / 带参预填 / 取消 / 提交 / channel-error / non-json / echo / 模式矩阵 / 异步不阻塞 / json·print throw，`src/__tests__/commands-form.test.ts`）；交互生命周期（草稿构造 + AbortController 注册表，`src/__tests__/interaction.test.ts`）
 - **旧 store 导入**：rename `.imported` 原子收敛（单成功者、崩溃恢复）
 
-扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts`（tool 直建流）/ `commands.ts`（/scheduler 命令适配层）→ `interaction.ts`（表单交互 / 协议错配 / AbortController 生命周期）→ `create-form-component.ts`（TUI 创建表单组件，由 `interaction.ts` 消费）→ `widget.ts`（状态栏 widget）→ `importer.ts`（旧 store 导入）。
+扩展内部结构：`backend.ts`（后端抽象）→ `replay.ts`（custom entry 重放折叠）→ `runtime.ts`（调度核心）→ `service.ts`（业务入口）→ `tool.ts`（tool 直建流）/ `commands.ts`（/scheduler 命令适配层）→ `interaction.ts`（表单交互 / 协议错配 / AbortController 生命周期）→ `create-form-component.ts`（TUI 创建表单组件，由 `interaction.ts` 消费）→ `widget.ts`（双模状态栏 widget：GUI 结构化 meta + TUI 文本行）→ `i18n.ts`（L2 词典 / locale 读取 / 结果渲染）→ `importer.ts`（旧 store 导入）。

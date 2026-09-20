@@ -188,7 +188,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     expect(notify).not.toHaveBeenCalled()
   })
 
-  it('提交成功：以 FormResult 最终值创建 + notify info（含 next run）', async () => {
+  it('提交成功：以 FormResult 最终值创建 + notify info（词典渲染，含 next run）', async () => {
     const form = formResult({ kind: 'once', schedule: '0 9 19 9 *', prompt: 'edited', model: 'prov-b/m2' })
     const select = selectReturning(form)
     const { ctx, notify } = createCtx({ select })
@@ -196,7 +196,10 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'draft'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Task "edited"'), 'info')
+    // 词典模板 task.created：'Created {id}: {name} · {schedule} · next run {relative}'（非 result.message）
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Created'), 'info')
+    expect(notify.mock.calls[0]![0]).toContain('edited')
+    expect(notify.mock.calls[0]![0]).not.toContain('Task "edited"')
     const upsert = backend.appendedOps.find(op => op.op === 'upsert')
     expect(upsert && upsert.op === 'upsert' ? upsert.task.kind : undefined).toBe('once')
     expect(upsert && upsert.op === 'upsert' ? upsert.task.model : undefined).toBe('prov-b/m2')
@@ -227,7 +230,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'x'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('form is unavailable'), 'error')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Form channel unavailable'), 'error')
     expect(backend.appendedOps).toHaveLength(0)
 
     // 「本会话后续直接给提示」：select 不再被调用
@@ -235,7 +238,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'y'", next.ctx)
     await flush()
     expect(next.select).not.toHaveBeenCalled()
-    expect(next.notify).toHaveBeenCalledWith(expect.stringContaining('form is unavailable'), 'error')
+    expect(next.notify).toHaveBeenCalledWith(expect.stringContaining('Form channel unavailable'), 'error')
   })
 
   it('non-json（回包非法）→ notify error 协议版本错配文案', async () => {
@@ -245,7 +248,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'x'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('protocol version mismatch'), 'error')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Form protocol mismatch'), 'error')
     expect(backend.appendedOps).toHaveLength(0)
   })
 
@@ -256,7 +259,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'x'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('form is unavailable'), 'error')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Form channel unavailable'), 'error')
     expect(backend.appendedOps).toHaveLength(0)
   })
 
@@ -269,7 +272,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'x'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('protocol version mismatch'), 'error')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Form protocol mismatch'), 'error')
     expect(backend.appendedOps).toHaveLength(0)
   })
 
@@ -280,7 +283,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     await handler("5m 'x'", ctx)
     await flush()
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('protocol version mismatch'), 'error')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Form protocol mismatch'), 'error')
     expect(backend.appendedOps).toHaveLength(0)
   })
 
@@ -381,7 +384,7 @@ describe('/scheduler 命令 模式矩阵', () => {
   it('json / print：无参 → throw（notify 是 no-op，stderr 是唯一可见通道）', async () => {
     for (const mode of ['json', 'print']) {
       const { ctx } = createCtx({ mode })
-      await expect(handler('', ctx)).rejects.toThrow('No interactive channel')
+      await expect(handler('', ctx)).rejects.toThrow('No interactive form')
     }
     expect(backend.appendedOps).toHaveLength(0)
   })
@@ -391,7 +394,7 @@ describe('/scheduler 命令 模式矩阵', () => {
   it('json / print：缺 prompt → throw', async () => {
     for (const mode of ['json', 'print']) {
       const { ctx } = createCtx({ mode })
-      await expect(handler('5m', ctx)).rejects.toThrow('No interactive channel')
+      await expect(handler('5m', ctx)).rejects.toThrow('No interactive form')
     }
   })
 

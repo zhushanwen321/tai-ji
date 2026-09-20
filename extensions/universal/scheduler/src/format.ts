@@ -33,25 +33,18 @@ const RELATIVE_UNITS_ZH: readonly (readonly [string, number])[] = [
  * （r3→r4 已连漏 notify/widget 与 getArgumentCompletions 两处）。内部按 `spec.mode`
  * 显式分支 interval/cron——不靠 `intervalMs`/`cron` 空值推断。
  *
- * legacy 两参重载（@deprecated）为临时桥：`commands.ts` 的 getArgumentCompletions 调用
- * 属 u-p2b 领地（本单元不可触碰），接线前由本重载保留旧英文行为；u-p2b 传入 locale 后删除。
+ * 直接调用点三处（设计 §7.1）：`service.ts`（tool/L4 → 'en-US'）、`widget.ts`（TUI/L2 →
+ * 当前 locale）、`commands.ts` 的 `getArgumentCompletions`（补全菜单/L2 → 当前 locale）。
+ * u-p2b 已删除 u-p2a 遗留的两参 `@deprecated` 桥，locale 至此全线必填（无第二形态）。
  */
 export function formatSchedule(
   spec: ScheduleSpec,
   kind: TaskKind | undefined,
   locale: UiLocale,
-): string
-/** @deprecated u-p2b 接线前临时桥（commands.ts 调用点未传 locale）；接线后删除本重载。 */
-export function formatSchedule(spec: ScheduleSpec, kind?: TaskKind): string
-export function formatSchedule(
-  spec: ScheduleSpec,
-  kind: TaskKind | undefined,
-  locale?: UiLocale,
 ): string {
-  const resolved = locale ?? 'en-US'
   if (spec.mode === 'interval') {
-    const duration = formatDurationI18n(spec.intervalMs, resolved)
-    if (resolved === 'zh-CN') {
+    const duration = formatDurationI18n(spec.intervalMs, locale)
+    if (locale === 'zh-CN') {
       return kind === 'once' ? `${duration}后一次` : `每 ${duration}`
     }
     return kind === 'once' ? `once in ${duration}` : `every ${duration}`

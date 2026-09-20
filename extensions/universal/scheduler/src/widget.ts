@@ -18,18 +18,13 @@ import type { ScheduledTask } from './types.js'
 const WIDGET_NAME_MAX_WIDTH = 20
 
 /**
- * 渲染 TUI status bar widget（string[]，配合 SDK setWidget 第一重载）。
+ * TUI 文本行（locale 显式传入供测试；生产路径由 `buildSchedulerWidgetContent` 经
+ * `readUiLocale()` 解析后传入，再经 `setSchedulerWidget` 双模推送）。
  * 格式：[定时任务] 3 条 · check-build 4 分钟后 · [!] 1 条已逾期（en: [scheduler] 3 scheduled · …）
  *
- * 保持旧导出形态（无 locale 参数）：index.ts 的接线归 u-p2b——本单元只把文本入词典，
- * 语言经 `readUiLocale()` 就地解析。不接受 theme 参数：string[] 重载本身不提供 theme，
- * 着色交给 Pi 默认渲染。overdue 用 [!] 纯文本标记（统一去 emoji）。
+ * 不接受 theme 参数：string[] 重载本身不提供 theme，着色交给 Pi 默认渲染。
+ * overdue 用 [!] 纯文本标记（统一去 emoji）。
  */
-export function renderSchedulerWidget(tasks: ScheduledTask[]): string[] {
-  return renderSchedulerWidgetTui(tasks, readUiLocale())
-}
-
-/** TUI 文本行（locale 显式传入供测试；生产入口 `renderSchedulerWidget` 经 readUiLocale 解析）。 */
 export function renderSchedulerWidgetTui(tasks: ScheduledTask[], locale: UiLocale): string[] {
   if (tasks.length === 0) return []
 
@@ -120,8 +115,8 @@ export function buildSchedulerWidgetContent(
 }
 
 /**
- * 推送 scheduler widget（结构化 meta + TUI 双模）。index.ts 接线归 u-p2b——本单元提供
- * 该入口，调用方传 `ctx as GuiContext`（pi 的 ExtensionContext.ui.custom 与 GuiContext
+ * 推送 scheduler widget（结构化 meta + TUI 双模）。index.ts 经本入口接线（u-p2b），
+ * 调用方传 `ctx as GuiContext`（pi 的 ExtensionContext.ui.custom 与 GuiContext
  * 静态不完全兼容，先例见 todo/src/index.ts makeRefreshDisplay）。
  */
 export function setSchedulerWidget(ctx: GuiContext, tasks: ScheduledTask[]): void {

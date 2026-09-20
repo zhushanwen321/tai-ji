@@ -36,6 +36,14 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 // 与 index-session-start.test.ts 同款（MF-3）：mock 掉 importer，装配路径仍被调用、FS 副作用为零。
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
+// u-p2b 接线断言：index.ts 的 refreshWidget 必须走结构化/双模入口 `setSchedulerWidget`
+// （取代旧 `renderSchedulerWidget` TUI 单形态）——mock 捕获调用面（任务数组直传）。
+const { setSchedulerWidgetMock } = vi.hoisted(() => ({ setSchedulerWidgetMock: vi.fn() }))
+vi.mock('../widget.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../widget.js')>()
+  return { ...actual, setSchedulerWidget: setSchedulerWidgetMock }
+})
+
 // vi.mock factory 会被提升，跨模块共享状态必须经 vi.hoisted。
 const { isCtxStaleCaptures, runtimeInstances } = vi.hoisted(() => ({
   isCtxStaleCaptures: [] as Array<(() => boolean) | undefined>,
@@ -101,6 +109,7 @@ describe('G1: index.ts 代际接线（S9）', () => {
   beforeEach(() => {
     isCtxStaleCaptures.length = 0
     runtimeInstances.length = 0
+    setSchedulerWidgetMock.mockClear()
   })
 
   afterEach(() => {
@@ -119,6 +128,12 @@ describe('G1: index.ts 代际接线（S9）', () => {
     sessionStart!({ type: 'session_start', reason: 'startup' }, createFakeCtx('/test/gen-1.json'))
     expect(isCtxStaleCaptures[0]).toBeTypeOf('function')
     expect(isCtxStaleCaptures[0]!()).toBe(false) // 当前代未替换
+
+    // u-p2b：session_start 初始渲染经结构化/双模入口（旧 renderSchedulerWidget 已删）
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(1)
+    const [widgetCtx, widgetTasks] = setSchedulerWidgetMock.mock.calls[0]!
+    expect(widgetCtx).toBeTypeOf('object')
+    expect(widgetTasks).toEqual([]) // 无任务 → setSchedulerWidget 内部走清屏分支
 
     // 第 2 代（session 替换）：第 1 代自此 stale，第 2 代为当前代
     sessionStart!({ type: 'session_start', reason: 'new_session' }, createFakeCtx('/test/gen-2.json'))

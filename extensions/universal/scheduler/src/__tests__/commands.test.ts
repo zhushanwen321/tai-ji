@@ -1,8 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MockSchedulerBackend } from './mock-backend.js'
 import { registerScheduleCommand } from '../commands.js'
+import { readUiLocale, renderResult } from '../i18n.js'
 import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
 
@@ -62,15 +67,19 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     const alias = commands.get('schedule')!
     expect(alias.handler).toBe(commandOpts.handler)
     expect(alias.getArgumentCompletions).toBe(commandOpts.getArgumentCompletions)
-    expect(commandOpts.description).toContain('scheduler')
+    // description 走 L2 词典（注册期静态；u-p2b 接线，不再持英文常量）
+    expect(commandOpts.description).toBe(renderResult('command.description', {}, readUiLocale()))
+    expect(commandOpts.description).not.toBe('')
   })
 
   // ── 子命令路由：list ──
 
-  it('list：空列表 → notify info', async () => {
+  it('list：空列表 → notify info（词典渲染，非英文 message 回退）', async () => {
     const { ctx, notify } = createMockCtx()
     await commandOpts.handler('list', ctx)
-    expect(notify).toHaveBeenCalledWith('No scheduled tasks.', 'info')
+    expect(notify).toHaveBeenCalledWith('No scheduled tasks', 'info')
+    // 证伪英文回退串（service.message 带句点）→ 证明经 messageKey 词典通道
+    expect(notify.mock.calls[0]![0]).not.toBe('No scheduled tasks.')
   })
 
   it('list：格式化任务行（含 schedule 与名称）', async () => {
@@ -120,7 +129,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
   it('off 未知 id → not found（service message 同源）', async () => {
     const { ctx, notify } = createMockCtx()
     await commandOpts.handler('off deadbeef', ctx)
-    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found', 'error')
   })
 
   // ── 子命令路由：rm ──
@@ -138,7 +147,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     await commandOpts.handler('rm', ctx)
     expect(notify).toHaveBeenCalledWith('Usage: /scheduler rm <id>', 'error')
     await commandOpts.handler('rm deadbeef', ctx)
-    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found', 'error')
   })
 
   // ── 子命令路由：run ──
@@ -156,7 +165,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     await commandOpts.handler('run', ctx)
     expect(notify).toHaveBeenCalledWith('Usage: /scheduler run <id>', 'error')
     await commandOpts.handler('run deadbeef', ctx)
-    expect(notify).toHaveBeenCalledWith('Task deadbeef not found.', 'error')
+    expect(notify).toHaveBeenCalledWith('Task deadbeef not found', 'error')
   })
 
   // ── notify severity 分级 ──
@@ -194,7 +203,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
   it('constructor/toString/__proto__ 不被当子命令（Map 只查自身键）：json 模式落入创建分支 throw', async () => {
     for (const key of ['constructor', 'toString', '__proto__']) {
       const { ctx } = createMockCtx('json')
-      await expect(commandOpts.handler(key, ctx)).rejects.toThrow('No interactive channel')
+      await expect(commandOpts.handler(key, ctx)).rejects.toThrow('No interactive form')
     }
   })
 
@@ -230,5 +239,65 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     const mockPi = createMockPi()
     registerScheduleCommand(mockPi.pi as never, () => null)
     expect(mockPi.commands.get('scheduler')!.getArgumentCompletions('on abcdef12')).toBeNull()
+  })
+})
+
+// ── L2 词典渲染端到端（locale 通道 → notify / getArgumentCompletions）──
+// 写 `<dataDir>/ui-preferences.json` = zh-CN，验证「renderResult(messageKey, params, locale)」
+// 两处消费者（子命令 toast / 任务 id 补全 description）都跟随当前 locale（u-p2b 接线验收：
+// notify 走词典渲染 + getArgumentCompletions 传 locale）。
+describe('/scheduler L2 词典渲染（zh-CN locale 通道）', () => {
+  const original = process.env.TAIJI_AGENT_DATA_DIR
+  const dirs: string[] = []
+  let service: SchedulerService
+  let commandOpts: CommandOpts
+
+  afterEach(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    dirs.length = 0
+    if (original === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+    else process.env.TAIJI_AGENT_DATA_DIR = original
+  })
+
+  beforeEach(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sched-cmd-i18n-'))
+    dirs.push(dir)
+    writeFileSync(
+      join(dir, 'ui-preferences.json'),
+      JSON.stringify({ v: 1, locale: 'zh-CN', updatedAt: 0 }),
+    )
+    process.env.TAIJI_AGENT_DATA_DIR = dir
+
+    const backend = new MockSchedulerBackend()
+    service = new SchedulerService(new SchedulerRuntime(backend), () => backend.now())
+    const mockPi = createMockPi()
+    registerScheduleCommand(mockPi.pi as never, () => service)
+    commandOpts = mockPi.commands.get('scheduler')!
+  })
+
+  it('list 空列表：notify 走中文词典（非英文 message）', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('list', ctx)
+    expect(notify).toHaveBeenCalledWith('没有定时任务', 'info')
+    expect(notify.mock.calls[0]![0]).not.toBe('No scheduled tasks.')
+  })
+
+  it('off 缺 id：usage 走中文词典', async () => {
+    const { ctx, notify } = createMockCtx()
+    await commandOpts.handler('off', ctx)
+    expect(notify).toHaveBeenCalledWith('用法：/scheduler off <id>', 'error')
+  })
+
+  it('getArgumentCompletions 任务 id 补全：description 的 formatSchedule 传当前 locale', async () => {
+    const created = await service.create('mytask', '5m')
+    const task = created.data!.task
+    const completions = commandOpts.getArgumentCompletions(`on ${task.id.slice(0, 2)}`) as Array<{
+      label: string
+      description: string
+    }>
+    const hit = completions.find(c => c.label === task.id)
+    expect(hit).toBeDefined()
+    expect(hit!.description).toContain('每 5 分钟')
+    expect(hit!.description).not.toContain('every 5m')
   })
 })

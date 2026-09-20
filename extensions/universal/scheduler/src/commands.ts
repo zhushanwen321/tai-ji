@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-c
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 
 import { formatSchedule } from './format.js'
+import { readUiLocale, renderResult, renderResultText, type ServiceMessageParamsMap } from './i18n.js'
 import {
   openScheduleFormAsync,
   type ScheduleDraftSeed,
@@ -42,22 +43,10 @@ function tokenizeQuoted(input: string): string[] {
   return tokens
 }
 
-// ── 文案占位（待 u-p2a 词典接线）──
-// 本单元（u-sched-core）不建 i18n.ts（归 u-p2a，同波次并行），命令层自有串先以英文常量
-// 占位；u-p2a 词典落地后由 u-p2b 经 renderResult(messageKey, params, locale) 单入口接线。
-// `/scheduler` 的 registerCommand.description 是注册期静态串（切语言不热更 = 已接受滞后）。
-
-/** `/scheduler` 命令描述（GUI slash 浮层渲染；注册期静态）。 */
-const SCHEDULER_COMMAND_DESCRIPTION =
-  'Manage scheduled tasks. /scheduler opens the create form; /scheduler list shows tasks.'
-
-/** 非交互模式（json / print）无参 / 缺 prompt 的 throw 文案。 */
-const NO_INTERACTIVE_CHANNEL_MESSAGE =
-  'No interactive channel in this mode: pass a schedule and a prompt, ' +
-  'e.g. /scheduler 5m "check build", or create the task through the agent.'
-
-/** service 未初始化（session 未 start）的文案。 */
-const SCHEDULER_NOT_INITIALIZED_MESSAGE = 'Scheduler not initialized: session not started.'
+// ── 文案（L2 词典通道）──
+// 命令层自有串（usage / not-initialized / 无交互通道 / description）已入 i18n.ts 词典，
+// 经 `renderResult(messageKey, params, locale)` 单入口渲染（u-p2b 接线）。`/scheduler` 的
+// registerCommand.description 是注册期静态串（切语言不热更 = 已接受滞后，设计 §6.9）。
 
 /** 无参 `/scheduler`（打开表单路径）的默认预填时间：循环 + 每天 09:00。 */
 const DEFAULT_CREATE_SCHEDULE = '0 9 * * *'
@@ -65,14 +54,20 @@ const DEFAULT_CREATE_SCHEDULE = '0 9 * * *'
 /** 子命令 handler：统一返回 ServiceResult（notify severity 按 success 分流）。 */
 type SubcommandHandler = (service: SchedulerService, parts: string[]) => ServiceResult | Promise<ServiceResult>
 
-/** 用法错误（缺 id）的失败结果。 */
-function usage(message: string): ServiceResult {
-  return { success: false, message }
+/**
+ * 用法错误（缺 id）的失败结果（命令层自有串，走词典 messageKey 通道）。
+ * 不标注 `ServiceResult` 返回类型：保留 `messageKey` ↔ `params` 的相关性，由调用点
+ * （key 已是字面量）赋予具体形状后结构赋给 `ServiceResult`。
+ */
+function usage<K extends 'usage.toggle' | 'usage.rm' | 'usage.run'>(
+  key: K,
+  params: ServiceMessageParamsMap[K],
+) {
+  return { success: false, messageKey: key, params, message: renderResult(key, params, 'en-US') }
 }
 
 /**
- * on/off 共享：取 <id>，缺失返回 usage（文案与原 `${first}` 一致——handler 仅在
- * first === 'on' | 'off' 时被查表命中，keyword 即 first 的小写值）。
+ * on/off 共享：取 <id>，缺失返回 usage（keyword 即 first 的小写值，作为词典参数）。
  */
 async function handleToggleKeyword(
   service: SchedulerService,
@@ -80,7 +75,7 @@ async function handleToggleKeyword(
   keyword: 'on' | 'off',
 ): Promise<ServiceResult> {
   const id = parts[1]
-  if (!id) return usage(`Usage: /scheduler ${keyword} <id>`)
+  if (!id) return usage('usage.toggle', { keyword })
   return service.toggle(id, keyword === 'on')
 }
 
@@ -98,7 +93,7 @@ const SUBCOMMAND_HANDLERS: ReadonlyMap<string, SubcommandHandler> = new Map<stri
     'rm',
     (service, parts) => {
       const id = parts[1]
-      if (!id) return usage('Usage: /scheduler rm <id>')
+      if (!id) return usage('usage.rm', {})
       return service.delete(id)
     },
   ],
@@ -106,15 +101,15 @@ const SUBCOMMAND_HANDLERS: ReadonlyMap<string, SubcommandHandler> = new Map<stri
     'run',
     async (service, parts) => {
       const id = parts[1]
-      if (!id) return usage('Usage: /scheduler run <id>')
+      if (!id) return usage('usage.run', {})
       return service.run(id)
     },
   ],
 ])
 
-/** 子命令结果 → toast（severity 按 success 分 'error' / 'info'）。 */
+/** 子命令结果 → toast（severity 按 success 分 'error' / 'info'；文本经词典渲染）。 */
 function notifyResult(ctx: ExtensionCommandContext, result: ServiceResult): void {
-  ctx.ui.notify(result.message, result.success ? 'info' : 'error')
+  ctx.ui.notify(renderResultText(result, readUiLocale()), result.success ? 'info' : 'error')
 }
 
 /**
@@ -130,9 +125,11 @@ async function openFormOrDirectCreate(
   seed: ScheduleDraftSeed,
 ): Promise<void> {
   if (ctx.mode === 'json' || ctx.mode === 'print') {
-    if (seed.prompt.trim() === '') throw new Error(NO_INTERACTIVE_CHANNEL_MESSAGE)
+    const locale = readUiLocale()
+    if (seed.prompt.trim() === '') throw new Error(renderResult('no-interaction', {}, locale))
     const result = await service.create(seed.prompt, seed.schedule, { kind: seed.kind })
-    if (!result.success) throw new Error(result.message)
+    // 带参失败同样 throw（notify 是 no-op）——有 messageKey 走词典，未分类回落英文 message。
+    if (!result.success) throw new Error(renderResultText(result, locale))
     return
   }
   // rpc：异步打开（handler 不 await，规避 60s prompt RPC 窗口）；tui：就地渲染（可 await）。
@@ -198,9 +195,10 @@ export function registerScheduleCommand(
   const channelState: ScheduleFormChannelState = { unavailable: false }
 
   const commandOptions = {
-    description: SCHEDULER_COMMAND_DESCRIPTION,
+    description: renderResult('command.description', {}, readUiLocale()),
     getArgumentCompletions(prefix: string) {
       const service = getService()
+      const locale = readUiLocale()
       const trimmed = prefix.trimStart()
       const parts = trimmed.split(/\s+/).filter(Boolean)
       if (parts.length <= 1) {
@@ -213,14 +211,15 @@ export function registerScheduleCommand(
           { label: 'run', value: 'run ', description: 'Run a task now' },
         ].filter(opt => opt.label.startsWith(trimmed.toLowerCase()))
       }
-      // on/off/rm/run 后补全任务 id（description 的 formatSchedule 当前 locale 接线待 u-p2a——第三调用点）
+      // on/off/rm/run 后补全任务 id（description 的 formatSchedule 传当前 locale——第三调用点，
+      // 否则中文界面补全菜单中英混排）
       if (['on', 'off', 'rm', 'run'].includes(parts[0]!) && service) {
         const result = service.list()
         if (result.success && result.data) {
           return result.data.tasks.map(t => ({
             label: t.id,
             value: t.id,
-            description: `${t.name} · ${formatSchedule(t.schedule, t.kind)}`,
+            description: `${t.name} · ${formatSchedule(t.schedule, t.kind, locale)}`,
           }))
         }
       }
@@ -229,7 +228,7 @@ export function registerScheduleCommand(
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       try {
         const service = getService()
-        if (!service) throw new Error(SCHEDULER_NOT_INITIALIZED_MESSAGE)
+        if (!service) throw new Error(renderResult('command.notInitialized', {}, readUiLocale()))
         await executeScheduleCommand(service, args, ctx, channelState)
       } catch (err) {
         // json / print：notify 为 no-op，throw 是唯一可见通道 → 原样 rethrow（不被 catch 吞）。
