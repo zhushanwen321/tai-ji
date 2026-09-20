@@ -31,9 +31,7 @@
  * 产出一组中间事件），可变态由 EventInterpreter 持有。
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
-import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-// plan-state customType 常量单源在 plan-state-extractor（D1①：runtime 侧常量，shared 无此字面量）
-import { PLAN_STATE_CUSTOM_TYPE } from '../../services/session/plan-state-extractor.js'
+import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
 import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
@@ -797,7 +795,7 @@ function tryTranslatePlanReviewSelect(
     requestId,
     method: 'select',              // 仍是 select（复用 respond 回传通道）
     planReview: true,              // 标记 plan 审批富交互，前端据此路由到审批条（C4 过滤器）
-    planReviewDocs: planReviewData.docs, // PlanDocMeta[]（unknown[] 透传，保持 shared 依赖最小化同 askUserQuestions 先例）
+    // docs 不透传进帧：审批条文档清单由 usePlanState 投影链（session.planState）唯一承载
   }
   return [
     // ★ extension-ui kind 事件：interpreter 暂停 watchdog + server 跟踪请求 + 缓存 pending

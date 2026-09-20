@@ -1486,10 +1486,8 @@ export interface ServerMessageMapBase {
     scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
     // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
-    // planReviewDocs 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
-    // 前端消费时收窄为 PlanDocMeta[]。
+    // 审批条文档清单由 usePlanState 投影链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
-    planReviewDocs?: unknown[]
     // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
     // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），

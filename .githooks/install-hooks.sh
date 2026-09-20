@@ -945,6 +945,7 @@ fi
 # 架构约束登记检查（docs/constraints.json SSOT 的 machine enforcement 前置拦截）
 #   - check_pi_type_leak.py         C-comm-02：services/transport 禁 PiXxx 类型（allowlist=存量待治理）
 #   - check_services_infra_import.py C-comm-03：services 禁白名单外 infra value import
+#   - check_infra_services_import.py C-comm-01：infra 禁白名单外 services value import（三层单向补向）
 #   - check_shared_node_builtin.py  C-state-05：shared 禁 node: 内置 import
 #   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
@@ -955,7 +956,7 @@ fi
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     print_section "[架构约束登记检查]"
 
-    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py; do
+    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py; do
         CHECKER_PATH=".githooks/$CONSTRAINT_CHECKER"
         if [ ! -f "$CHECKER_PATH" ]; then
             echo -e "${YELLOW}[WARN] 找不到检查脚本 $CHECKER_PATH${NC}"
@@ -1057,6 +1058,34 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_RUNTIME_BUNDLE_CHECK" != "1" ]; the
     fi
 else
     echo -e "${YELLOW}[SKIP] Runtime Bundle 验证已跳过${NC}"
+fi
+
+# ============================================================================
+# core 域边界铁律 gate（C-state-04 machine enforcement 接线，2026-09-20 R1 评审补：
+# 此前 constraints.json 登记 enforcement=hook 但全仓零调用方，红灯不拦截提交——
+# 声明与磁盘事实漂移）。packages/core/src 有变更时触发：
+# scripts/check-domain-boundaries.sh（AC10 跨域 import + AC11 清空派；
+# AC10 存量基线与 AC11 allowlist 在脚本内登记，新增违规直接拦）。
+# 注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+DOMAIN_BOUNDARY_CHECKER="scripts/check-domain-boundaries.sh"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    if echo "$STAGED_FILES" | grep -q "^packages/core/src/"; then
+        print_section "[core 域边界铁律 gate]"
+        bash "$DOMAIN_BOUNDARY_CHECKER"
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] core 域边界检查失败（C-state-04）${NC}"
+            echo -e "${YELLOW}[INFO] AC10 跨域 import 经 '@taiji/core/domain/<域>' 公开 API；AC11 per-session 状态经 useSessionScopedState 分区${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] core/src 无变更，跳过域边界检查${NC}"
+    fi
 fi
 
 # ============================================================================

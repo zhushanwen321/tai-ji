@@ -13,7 +13,7 @@
  *
  * 运行：cd packages/ui && npx vitest run src/features/new-task
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import PresetSelectChip from '../PresetSelectChip.vue'
@@ -334,6 +334,136 @@ describe('PresetSelectChip 三档退化 + 信任标记跨档不丢（u4a）', ()
     expect(chip.attributes('aria-label')).toContain(MODE_NAME)
     expect(chip.attributes('aria-label')).toContain(REPLACE_HINT)
     expect(chip.attributes('title')).toBe(MODE_NAME)
+  })
+})
+
+/**
+ * 实测自适应 RO 回调链（u4a）：无显式 density 时 onMounted 经 ResizeObserver 观察 chip 自身
+ * 宽度落三档（applyMeasuredWidth：≤52 icon / ≤116 short / >116 full）。jsdom 无 RO，既有
+ * 用例全走显式 density 分支——本组 stub global.ResizeObserver 驱动真实回调链：
+ * RO 建立（observe 目标 = chip 根 button）→ 回调落档（含 52/116/117 边界值）→
+ * unmount disconnect，及显式 density 时跳过 RO 建立的短路分支。
+ */
+describe('PresetSelectChip 实测自适应（RO 回调链：建立 → 三档落档 → disconnect）', () => {
+  const MODE_NAME = '调度模式'
+  const SHORT_NAME = '调度'
+
+  /** 捕获型 RO stub：收集实例本体（回调 + observed 元素 + disconnect 计数）供断言 */
+  interface MockROInstance {
+    callback: ResizeObserverCallback
+    observed: Element[]
+    disconnectCalls: number
+  }
+  function stubResizeObserver(): MockROInstance[] {
+    const instances: MockROInstance[] = []
+    class MockResizeObserver implements MockROInstance {
+      observed: Element[] = []
+      disconnectCalls = 0
+      callback: ResizeObserverCallback
+      constructor(cb: ResizeObserverCallback) {
+        this.callback = cb
+        instances.push(this) // 收集实例本体：disconnect 计数须落在组件实际调用的同一对象上
+      }
+      observe(el: Element): void {
+        this.observed.push(el)
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        this.disconnectCalls++
+      }
+    }
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+    return instances
+  }
+
+  /** 触发捕获的 RO 回调（组件取 entries[0].contentRect.width 落档） */
+  function emitWidth(instances: MockROInstance[], width: number) {
+    const entry = { contentRect: { width } } as ResizeObserverEntry
+    instances[instances.length - 1]!.callback([entry], {} as ResizeObserver)
+  }
+
+  function mountAuto() {
+    const deps = makeDeps({
+      presets: ref(samplePresets()),
+      defaultPresetId: ref('custom:read-only'),
+    })
+    return mount(PresetSelectChip, {
+      props: {
+        sessionId: null,
+        launchPresetId: undefined,
+        presetOpen: false,
+        modeName: MODE_NAME,
+        shortName: SHORT_NAME,
+        // 不传 density：走 RO 实测自适应分支
+      },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('① 无显式 density：挂载建立 RO（observe chip 根 button）', async () => {
+    const instances = stubResizeObserver()
+    const wrapper = mountAuto()
+    await flushPromises()
+    expect(instances).toHaveLength(1)
+    // observe 目标 = chip 根 button（Button ref → $el）
+    const chipEl = wrapper.find('[data-testid="chip-preset"]').element
+    expect(instances[0]!.observed).toContain(chipEl)
+  })
+
+  it('② 回调落档三档边界：52→icon、116→short、117→full（阈值含边界语义）', async () => {
+    const instances = stubResizeObserver()
+    const wrapper = mountAuto()
+    await flushPromises()
+    const chip = () => wrapper.find('[data-testid="chip-preset"]')
+
+    // ≤52 → icon：纯图标（无文本 span），title = 全名
+    emitWidth(instances, 52)
+    await flushPromises()
+    expect(chip().find('span.font-mono').exists()).toBe(false)
+    expect(chip().attributes('title')).toBe(MODE_NAME)
+
+    // 53..116 → short：显示短名，title 已非 icon 档（清空）
+    emitWidth(instances, 116)
+    await flushPromises()
+    expect(chip().find('span.font-mono').text()).toBe(SHORT_NAME)
+    expect(chip().attributes('title')).toBeUndefined()
+
+    // >116（117 边界外一格）→ full：显示全名
+    emitWidth(instances, 117)
+    await flushPromises()
+    expect(chip().find('span.font-mono').text()).toBe(MODE_NAME)
+  })
+
+  it('③ unmount 断开观察（disconnect 恰一次）', async () => {
+    const instances = stubResizeObserver()
+    const wrapper = mountAuto()
+    await flushPromises()
+    expect(instances[0]!.disconnectCalls).toBe(0)
+    wrapper.unmount()
+    expect(instances[0]!.disconnectCalls).toBe(1)
+  })
+
+  it('④ 显式 density 时短路：不建立 RO（jsdom 外显式档也跳过实测）', async () => {
+    const instances = stubResizeObserver()
+    const deps = makeDeps({
+      presets: ref(samplePresets()),
+      defaultPresetId: ref('custom:read-only'),
+    })
+    mount(PresetSelectChip, {
+      props: {
+        sessionId: null,
+        launchPresetId: undefined,
+        presetOpen: false,
+        density: 'full',
+      },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+    await flushPromises()
+    expect(instances).toHaveLength(0)
   })
 })
 

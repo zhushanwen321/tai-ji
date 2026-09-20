@@ -120,7 +120,9 @@ export interface PiMainAgentSpawnOptions {
  *
  * pi 对两个 prompt flag 的值走同一解析函数（`resolvePromptInput`）：先
  * `existsSync(值)`（相对 pi 进程 cwd = 会话 cwd = 用户项目目录），命中即把**该文件内容**
- * 当提示词注入，否则当字面文本。后果：模式文案若恰等于项目内存在的相对路径
+ * 当提示词注入，否则当字面文本。
+ * （pi 实装锚点：dist/core/resource-loader.js:17-29（0.84.4）——existsSync 命中即
+ * readFileSync 全文注入。）后果：模式文案若恰等于项目内存在的相对路径
  * （`AGENTS.md` / `.env` / `config.json` 等），pi 会静默把文件全文当提示词（UI 显示
  * 用户文案、实际生效文件内容，且可能把含密钥文件送进上下文）。
  *

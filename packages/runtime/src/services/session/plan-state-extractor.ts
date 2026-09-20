@@ -19,19 +19,9 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
+import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
-import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
-
-/**
- * plan-state entry 的 customType 字面量（D1①，event-adapter 白名单 + 第二道门共用）。
- *
- * 定义在 runtime 侧而非 @taiji/shared：subagent/workflow 两常量在 shared 是因为 extension
- * 侧同用（跨包共享）；plan-state 字面量只有 runtime 侧消费（extension 侧自带字面量），且
- * shared 不在本单元领地——常量与派生扫描器同文件是 runtime 内单数据源的正确形态
- * （本文件 = plan 域唯一 runtime 模块，两道门的共同 import 源）。
- */
-export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 
 /** JSONL 中的 custom entry 结构（照 subagent-extractor JsonlCustomEntry 简化形态）。 */
 interface JsonlCustomEntry {

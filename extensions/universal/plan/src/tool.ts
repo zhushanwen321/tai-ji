@@ -133,6 +133,12 @@ function relativePath(fullPath: string, projectDir: string): string {
  * （C-proc-09），pi 子进程 env 里恒不可见，照抄即分流静默失效且诱导实施者
  * 动 deny list 造成安全回归。每次调用时读（不可模块加载时缓存——测试与
  * 运行中 env 都可能变化）。
+ *
+ * [双语义耦合登记，2026-09-20 R1] 本 env 名义语义是扩展日志开关
+ * （extension-logger 见之落盘 INFO，恒注入点 packages/pi-rpc/src/env.ts），本函数
+ * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
+ * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
+ * env 并纳入恒注入，不得沿用本名。
  */
 function isTaijiHost(): boolean {
   return process.env.TAIJI_AGENT_EXT_LOG === "1";
@@ -640,9 +646,11 @@ async function resolveCompleteChoice(
       allowOther: false,
     };
     // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
-    // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）
+    // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）。
+    // select 必须 .bind(ctx.ui)（对齐 ask-user / scheduler 同协议形态）：callMarkerRpc 先
+    // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖。
     const form = await uiFormInteract(
-      { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select } },
+      { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select.bind(ctx.ui) } },
       [question],
       { signal: controller.signal },
     );

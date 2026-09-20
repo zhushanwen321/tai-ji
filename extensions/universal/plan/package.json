@@ -19,11 +19,15 @@
   "license": "MIT",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
     "typebox": "*",
     "@earendil-works/pi-ai": "^0.84.4",
     "@zhushanwen/pi-goal": "workspace:*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
     "@earendil-works/pi-ai": {
       "optional": true
     },
@@ -36,6 +40,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@earendil-works/pi-tui": "^0.84.4",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   },

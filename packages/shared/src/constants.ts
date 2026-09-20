@@ -48,6 +48,17 @@ export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'su
 export const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
 export const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
 
+/**
+ * plan-state 自描述持久化 entry 的 customType（plan 模式重设计 D1①，runtime 侧消费值）。
+ *
+ * 权威源与 subagent/workflow 两常量同层登记：extension 侧（extensions/universal/plan）自带
+ * 同字面量、runtime 不 import extensions/ 源码，故此处为 runtime 侧唯一登记处（跨层消费方
+ * infra/event-adapter 与 services/plan-state-extractor 共用，禁止 infra import services 层
+ * 模块——分层依赖方向 infra → shared 合法、infra → services 违规）。extension 升级字面量时
+ * 必须同步此处。
+ */
+export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
+
 /** pi 支持的 provider api 标识全集（前后端共享 SSOT）。
  *  runtime 的 applyTypeTranslation 改为透传后，前端 Select 必须直接发送此集合内的终值。
  *  注意：pi 不支持 ollama；ollama 的前端适配在 W4 处理，runtime 不做别名翻译。 */

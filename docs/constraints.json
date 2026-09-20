@@ -547,6 +547,10 @@
       "enforcement": [
         {
           "type": "machine",
+          "hook": "check_infra_services_import.py"
+        },
+        {
+          "type": "machine",
           "hook": "check_no_service_cycle.py"
         },
         {

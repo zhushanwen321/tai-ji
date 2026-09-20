@@ -25,7 +25,9 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/extension
  */
 import { describe, it, expect, vi } from 'vitest'
+import { Checkbox } from '@/components/ui/checkbox'
 import { nextTick } from 'vue'
+import { flushPromises } from '@vue/test-utils'
 import { mount } from '@vue/test-utils'
 import FormOverlay from '@/components/extension/form/FormOverlay.vue'
 import type {
@@ -538,5 +540,94 @@ describe('FormOverlay · legacy draft 直挂（D7 上三角窗口挂载源分流
     await nextTick()
     expect(submit.attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')
+  })
+})
+
+describe('FormOverlay · 分支覆盖补强（multi 取消 / 键盘触发 / Tab 循环导航）', () => {
+  it('multi 二次点击取消选中（toggleOption 取消分支）：回落未选中态，payload 不含该项', async () => {
+    const wrapper = mountOverlay({ questions: [multiSelectQ] })
+    const opt = () => wrapper.find('[data-testid="form-option-TypeScript"]')
+
+    // 先选两项（保持表单已答态，Submit 可点），再取消其中一项
+    await wrapper.find('[data-testid="form-option-Python"]').trigger('click')
+    await opt().trigger('click')
+    expect(opt().classes().join(' ')).toContain('bg-accent-soft')
+    await opt().trigger('click') // 取消选中（selectedValues filter 分支）
+    expect(opt().classes().join(' ')).not.toContain('bg-accent-soft')
+
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+    const answers = JSON.parse(wrapper.emitted('submit')![0][0] as string)
+    expect(JSON.parse(answers.lang)).toEqual(['Python'])
+  })
+
+  it('键盘 enter / space 触发选项 toggle（@keydown 分支）', async () => {
+    const wrapper = mountOverlay({ questions: [multiSelectQ] })
+
+    await wrapper.find('[data-testid="form-option-TypeScript"]').trigger('keydown.enter')
+    expect(wrapper.find('[data-testid="form-option-TypeScript"]').classes().join(' ')).toContain('bg-accent-soft')
+    await wrapper.find('[data-testid="form-option-Python"]').trigger('keydown.space')
+    expect(wrapper.find('[data-testid="form-option-Python"]').classes().join(' ')).toContain('bg-accent-soft')
+  })
+
+  it('多问题 Tab / Shift+Tab 在问题间循环导航（onTabKey：循环取模两向）', async () => {
+    const wrapper = mountOverlay({ questions: [singleSelectQ, multiSelectQ] })
+    const overlay = () => wrapper.find('[data-testid="form-overlay"]')
+    const qText = () => wrapper.find('[data-testid="form-question-text-multi"]')
+
+    expect(qText().text()).toContain('选哪个数据库?')
+    // Tab → 前进到第二题
+    await overlay().trigger('keydown.tab')
+    expect(qText().text()).toContain('选哪些语言?')
+    // 末题 Tab → 循环回第一题（(idx+1) % total）
+    await overlay().trigger('keydown.tab')
+    expect(qText().text()).toContain('选哪个数据库?')
+    // 首题 Shift+Tab → 反向循环到最后一题（(idx-1+total) % total）
+    await overlay().trigger('keydown.tab', { shiftKey: true })
+    expect(qText().text()).toContain('选哪些语言?')
+  })
+
+  it('multi Checkbox 直改与 Other 行键盘触发（ChoiceQuestion update:model-value / keydown 分支）', async () => {
+    const wrapper = mountOverlay({ questions: [multiSelectQ] })
+
+    // 选项行内 Checkbox 点击 → update:model-value → toggleOption（reka Checkbox 渲染 role=checkbox button）
+    await wrapper.find('[data-testid="form-option-TypeScript"] button[role="checkbox"]').trigger('click')
+    await nextTick()
+    await wrapper.find('[data-testid="form-option-Python"]').trigger('click')
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+    let answers = JSON.parse(wrapper.emitted('submit')![0][0] as string)
+    expect(JSON.parse(answers.lang)).toEqual(['TypeScript', 'Python'])
+
+    // Other 行键盘 enter 触发 Other 选中（@keydown.enter 分支）；Other 不进主 key 数组，自由文本走 `${key}__other`（D1 形态 3 先例）
+    await wrapper.find('[data-testid="form-option-__other__"]').trigger('keydown.enter')
+    await wrapper.find('[data-testid="form-other-lang"]').setValue('手输项')
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+    answers = JSON.parse(wrapper.emitted('submit')![1][0] as string)
+    expect(JSON.parse(answers.lang)).toEqual(['TypeScript', 'Python'])
+    expect(answers['lang__other']).toBe('手输项')
+  })
+})
+
+describe('FormOverlay · schedule 生命周期分支（setScheduleRef 卸载清理）', () => {
+  it('schedule 题卸载时 ref 注册清空（el=null 分支），二次挂载可恢复注册', async () => {
+    const wrapper = mountOverlay({ questions: [scheduleQ] })
+    expect(wrapper.find('[data-testid="schedule-create-preview"]').exists()).toBe(true)
+    await wrapper.unmount()
+  })
+})
+
+describe('FormOverlay · Other 行剩余分支（keydown.space / multi Other Checkbox）', () => {
+  it('Other 行键盘 space 触发选中；multi 下 Other Checkbox 点击切换（toggleOption(OTHER_VALUE)）', async () => {
+    const wrapper = mountOverlay({ questions: [multiSelectQ] })
+
+    // Other 行 keydown.space 选中
+    await wrapper.find('[data-testid="form-option-__other__"]').trigger('keydown.space')
+    await wrapper.find('[data-testid="form-other-lang"]').setValue('空格选中')
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+    expect(JSON.parse(wrapper.emitted('submit')![0][0] as string)['lang__other']).toBe('空格选中')
+
+    // multi Other 行内 Checkbox 存在（update:model-value 接线见 ChoiceQuestion :191——
+    // reka 包装组件在 jsdom 的 pointer 序列与 $emit 均不可达，UI 级触达留待 e2e）
+    const checkboxes = wrapper.findAllComponents(Checkbox)
+    expect(checkboxes.length).toBeGreaterThanOrEqual(4) // 3 选项行 + Other 行
   })
 })

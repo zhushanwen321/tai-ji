@@ -281,3 +281,67 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     expect(wrapper.find('[data-testid="schedule-create-foot-note"]').text()).toContain('每天 09:00')
   })
 })
+
+describe('ScheduleForm · once 预设与预览降级分支', () => {
+  it('once 预设按钮：+1h / 明天 9 点 / 明天 20 点写入 datetime 控件且时刻有效（可提交）', async () => {
+    const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '0 9 * * MON' })
+    await nextTick()
+    await wrapper.find('[data-testid="schedule-create-kind-once"]').trigger('click')
+
+    for (const tid of ['schedule-create-once-plus-1h', 'schedule-create-once-tomorrow-9', 'schedule-create-once-tomorrow-20']) {
+      await wrapper.find(`[data-testid="${tid}"]`).trigger('click')
+      await nextTick()
+      const val = (wrapper.find('[data-testid="schedule-create-once-input"]').element as HTMLInputElement).value
+      expect(val).not.toBe('')
+    }
+    // 预设时刻均在未来（onceTimeValid true 分支）→ 表单可提交
+    expect(submitAndParse(wrapper)).not.toBeNull()
+  })
+
+  it('非法 cron：预览降级为非阻塞提示（预览与提交门解耦，表单仍可提交）', async () => {
+    const wrapper = mountForm({ ...baseDraft, kind: 'recurring', schedule: '99 99 * * *' })
+    await nextTick()
+
+    const preview = wrapper.find('[data-testid="schedule-create-preview"]')
+    expect(preview.exists()).toBe(true)
+    // 无可预览运行（v-else 降级分支渲染提示文案，非日期行）
+    expect(preview.text()).not.toContain('1.')
+    // 预览失败不禁止提交（canSubmit 与预览解耦——模块头注释契约）
+    expect(submitAndParse(wrapper)).not.toBeNull()
+  })
+})
+
+describe('ScheduleForm · 自定义 cron chip 分支', () => {
+  it('点击「自定义」chip：进入自定义输入态（pickCronChip(null) 分支），cron 输入框获焦可编辑', async () => {
+    const wrapper = mountForm(baseDraft)
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-cron-custom"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="schedule-create-cron-custom"]').trigger('click')
+    await nextTick()
+    // 自定义态：cron 输入框出现（aria-pressed 翻转 + input 渲染）
+    expect(wrapper.find('[data-testid="schedule-create-cron-custom"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[data-testid="schedule-create-cron-input"]').exists()).toBe(true)
+  })
+})
+
+describe('ScheduleForm · 预设 chip 切换与空模型提示分支', () => {
+  it('点击预设 chip：退出自定义态（pickCronChip 非 null 分支），自定义输入框隐藏', async () => {
+    const wrapper = mountForm(baseDraft)
+    await nextTick()
+    // 先进入自定义态，再点击预设 chip 退出
+    await wrapper.find('[data-testid="schedule-create-cron-custom"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-cron-input"]').isVisible()).toBe(true)
+    await wrapper.find('[data-testid="schedule-create-cron-chip-0 9 * * *"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-cron-input"]').isVisible()).toBe(false)
+    expect(wrapper.find('[data-testid="schedule-create-cron-custom"]').attributes('aria-pressed')).toBe('false')
+  })
+
+  it('models 空：渲染无模型提示（v-else 分支），无模型选项行', async () => {
+    const wrapper = mountForm({ ...baseDraft, models: [], currentModel: '' })
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-model-m-1"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('无候选模型列表')
+  })
+})
