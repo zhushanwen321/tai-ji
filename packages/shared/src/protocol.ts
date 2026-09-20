@@ -62,6 +62,12 @@ export interface CommandSourceInfo {
   baseDir?: string
 }
 
+/**
+ * UI 语言（renderer i18n 支持集）：跨进程 locale 通道的 wire 值域与磁盘值域 SSOT
+ *（u-locale-channel）。runtime 写 `<dataDir>/ui-preferences.json`，extension 侧就地读取热生效。
+ */
+export type UiLocale = 'zh-CN' | 'en-US'
+
 // ── ClientMessageType（保持向后兼容）──────────────────────────
 
 export type ClientMessageType =
@@ -162,6 +168,8 @@ export type ClientMessageType =
   | 'config.setSmartContextCompactModel'
   | 'config.setSmartContextThresholds'
   | 'config.setSmartContextExcludedModels'
+  // u-locale-channel：renderer 上报 UI 语言 → runtime 写 <dataDir>/ui-preferences.json（ack 型 reply）。
+  | 'config.setUiLocale'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
   | 'preset.create' | 'preset.update' | 'preset.delete'
   | 'preset.recordUsage' | 'preset.getUsage'
@@ -687,6 +695,11 @@ export interface ClientMessageMap {
   'config.setSmartContextThresholds': { thresholds: number[] }
   /** config.setSmartContextExcludedModels：设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重）。 */
   'config.setSmartContextExcludedModels': { models: string[] }
+  /**
+   * config.setUiLocale：上报 renderer UI 语言（跨进程 locale 通道，u-locale-channel）。
+   * runtime 原子写 `<dataDir>/ui-preferences.json`（{ v:1, locale, updatedAt }），extension 侧读取热生效。
+   */
+  'config.setUiLocale': { locale: UiLocale }
   // pi 启动预设域（设计文档 pi-launch-presets.md）。
   // preset.list：列出全部预设（内置 + 自定义）；preset.getDefault：读全局默认预设 id；
   // preset.setDefault：设全局默认预设（写入 pi-presets.json）。均按需 RPC，无 server-push 广播。
@@ -838,6 +851,8 @@ export type ServerMessageType =
   | 'config.skillDirs' | 'config.agentDirs' | 'config.extensionDirs'
   | 'config.skillCacheInvalidated'
   | 'config.systemPrompt'
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（u-locale-channel，payload 空）。
+  | 'config.uiLocaleSet'
   | 'model.list' | 'model.switched'
   // model:capabilityDrift：能力注册表在线对账漂移上报（U6，pi-boundary-reliability D2 ②）。
   // 全局诊断通道（无 sessionId 路由需求，消费方=设置页/composer 档位显示的自省入口）。
@@ -1425,6 +1440,8 @@ export interface ServerMessageMapBase {
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（无读回字段——写盘失败走错误信封）。
+  'config.uiLocaleSet': Record<string, never>
 
   // ── 协议级 reply / push（精确）──
   'pong': Record<string, never>
@@ -2310,6 +2327,8 @@ export interface ReplyPayloadMap {
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']
   'config.setSmartContextThresholds': ServerMessageMap['config.smartContextThresholds']
   'config.setSmartContextExcludedModels': ServerMessageMap['config.smartContextExcludedModels']
+  // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
+  'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。
   // 全部引用 ServerMessageMapBase 中登记的精确 payload 形状（W-SH-1 收紧，SSOT）。
   //  - preset.list / getDefault / getUsage / export / import

@@ -35,6 +35,7 @@ Resources/
 ~/.taiji/
 ├── config.json           # 运行时配置（API key 等）
 ├── config.toml           # pi 配置
+├── ui-preferences.json   # UI 语言（renderer 经 config.setUiLocale 写，extension 读取热生效）
 ├── runtime.port          # runtime 端口号（文本文件）
 ├── session-data/         # session 持久化数据
 ├── agent/logs/          # pi 日志（extension-logger 写 <agentDir>/logs/，agentDir = <dataDir>/agent）

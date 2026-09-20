@@ -22,9 +22,18 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/composables/features/model/useQuotaConfigure', () => ({
   useQuotaConfigure: vi.fn(),
 }))
-vi.mock('@/api', () => ({
-  config: { detectSources: vi.fn().mockResolvedValue([]) },
-}))
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      // 壳接线测试只关心语言推送 + detectSources，真实 config 域其余方法保留但不会被调用
+      setUiLocale: vi.fn().mockResolvedValue(undefined),
+      detectSources: vi.fn().mockResolvedValue([]),
+    },
+  }
+})
 vi.mock('../settings-transport-adapter', () => ({
   createSettingsTransport: vi.fn(() => ({})),
 }))
