@@ -65,7 +65,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
@@ -104,8 +104,8 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
       expect.stringMatching(/\.taiji-harness/),
       expect.objectContaining({ recursive: true }),
     );
-    // 提示词经 tool result 直返（不经 sendUserMessage 对话流注入——对本次调用的直接响应）
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    // 提示词经 tool result 直返（不经对话流消息注入——对本次调用的直接响应）
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(res.details.action).toBe("enter");
     expect(res.content[0].text).toContain("[PLAN MODE] Entered plan mode");
     expect(res.content[0].text).toContain("READ-ONLY");

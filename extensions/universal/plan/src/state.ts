@@ -49,6 +49,14 @@ export const DEFAULT_PLAN_STATE: PlanState = {
  */
 export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
 
+/**
+ * plan 包注入消息的 customType（pi.sendMessage custom message 注入的 8 处调用
+ * 统一使用）。命名对齐本包 entry customType 字面量 'plan-state' 的连字符风格
+ * （设计 §2.1 双命名范式决策：各包跟随所在包 entry 惯例，跨包不统一）。
+ * 放 state.ts（叶模块）理由同 PLAN_MODE_TOOLS。
+ */
+export const PLAN_CONTEXT_CUSTOM_TYPE = "plan-context";
+
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
 

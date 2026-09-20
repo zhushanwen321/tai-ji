@@ -1,7 +1,8 @@
 /**
  * 提醒与通知文案构造（D3/D4/D5/D13-12）。
  *
- * 全部为纯函数：文案 + 越档判定。注入由 src/index.ts 用 pi.sendUserMessage 执行。
+ * 全部为纯函数：文案 + 越档判定。注入由 src/index.ts / src/tool.ts 用 pi.sendMessage
+ * custom message 执行。
  * 措辞原则（目标 3）：提醒是数据投递不是指令——给三条件自查清单 + 明确的"可忽略"出口，
  * 避免 agent 见提醒就压缩。
  */

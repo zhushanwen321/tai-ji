@@ -61,7 +61,7 @@ export interface ActivatePlanModeInput {
   template?: { absPath: string; content: string };
 }
 
-/** 进入产物：状态引用 + 直达模型的 plan 模式提示词（两入口分别走 sendUserMessage / tool result 投递） */
+/** 进入产物：状态引用 + 直达模型的 plan 模式提示词（两入口分别走 sendMessage custom message / tool result 投递） */
 export interface ActivatePlanModeOutcome {
   state: PlanState;
   prompt: string;
@@ -72,7 +72,8 @@ export interface ActivatePlanModeOutcome {
  * tool 两入口收敛同一实现——状态建立 + 持久化 + widget + 工具收拢 + 提示词构造。
  *
  * 不做的事（留给调用方）：
- * - 提示词投递通道：slash 入口经 sendUserMessage（用户发起的对话流注入）；tool 入口经
+ * - 提示词投递通道：slash 入口经 sendMessage custom message（display:false——提示词
+ *   全文消费者是 LLM，用户感知走 plan widget 状态呈现；triggerTurn:true 开轮）；tool 入口经
  *   tool result content 直返（对本次 tool 调用的直接响应，agent 同轮即见——不赌 steer 排队）。
  * - flag 解析 / 模板文件读取 / 技能名归一：命令层与 tool 层各自的入参形态不同，前置已完成。
  *

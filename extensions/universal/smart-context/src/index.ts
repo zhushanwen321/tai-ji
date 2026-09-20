@@ -30,6 +30,8 @@ import {
 	getCurrentModelId,
 	isGatingActive,
 	loadSmartContextConfig,
+	SWITCH_NOTICE_CUSTOM_TYPE,
+	DOWNSHIFT_NOTICE_CUSTOM_TYPE,
 	THRESHOLD_REMINDER_CUSTOM_TYPE,
 	type EntryLike,
 } from "./pure.js";
@@ -210,9 +212,14 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 		if (config.enabled && nowExcluded !== wasExcluded) {
 			const notice = buildSwitchNotice(nowExcluded ? "unavailable" : "available", modelId);
 			debugLog(`switch notice: ${nowExcluded ? "unavailable" : "available"} (${modelId})`);
+			// 状态通知（非紧急）：triggerTurn:false 不唤醒轮次——LLM 在下一轮自然看到并自行
+			// 调整（compact 工具 execute 有运行时门控校验兜底），不为通知烧一整轮全量上下文。
 			// session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
 			guardStaleCtx(() => {
-				pi.sendUserMessage(notice, { deliverAs: "steer" });
+				pi.sendMessage(
+					{ customType: SWITCH_NOTICE_CUSTOM_TYPE, content: notice, display: false },
+					{ triggerTurn: false },
+				);
 			}, {
 				isCtxStale,
 				label: "smart-context:switch-notice",
@@ -230,9 +237,13 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 		);
 		if (downshift && isGatingActive(config, modelId)) {
 			debugLog("downshift notice fired");
-			// session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
+			// "建议"非紧急（同 S1 裁决）：triggerTurn:false 不唤醒轮次，用户继续对话时
+			// LLM 自行决策是否先压缩。session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
 			guardStaleCtx(() => {
-				pi.sendUserMessage(downshift, { deliverAs: "steer" });
+				pi.sendMessage(
+					{ customType: DOWNSHIFT_NOTICE_CUSTOM_TYPE, content: downshift, display: false },
+					{ triggerTurn: false },
+				);
 			}, {
 				isCtxStale,
 				label: "smart-context:downshift-notice",

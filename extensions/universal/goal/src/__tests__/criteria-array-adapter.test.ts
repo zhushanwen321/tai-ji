@@ -43,7 +43,6 @@ function makeFakePorts(): ServicePorts & {
 		} as UiPort,
 		messaging: {
 			sendContextMessage: () => {},
-			sendUserMessage: () => {},
 		},
 		session: {
 			getEntries: () => [],

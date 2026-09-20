@@ -8,7 +8,7 @@ import { activatePlanMode, resolveSkills } from "./enter.js";
 import type { SkillResolution } from "./enter.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { getPlanState, resetPlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState, resetPlanState } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
 
 /** /plan 参数解析产物：requirement = 最早 flag 标记前的自由文本；skills / templatePath 为 undefined = 未提供对应 flag */
@@ -150,13 +150,19 @@ export function registerPlanCommand(
         const harnessDir = path.join(projectDir, ".taiji-harness");
         const existingPlans = findExistingPlans(harnessDir);
         if (existingPlans.length > 0) {
-          pi.sendUserMessage(
-            `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
-            `Choose an option:\n` +
-            `  a) Continue existing plan\n` +
-            `  b) Implement existing plan\n` +
-            `  c) Create new plan\n` +
-            `  d) Cancel`,
+          pi.sendMessage(
+            {
+              customType: PLAN_CONTEXT_CUSTOM_TYPE,
+              content:
+                `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
+                `Choose an option:\n` +
+                `  a) Continue existing plan\n` +
+                `  b) Implement existing plan\n` +
+                `  c) Create new plan\n` +
+                `  d) Cancel`,
+              display: false,
+            },
+            { triggerTurn: true },
           );
           return;
         }
@@ -233,10 +239,16 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
   const problem = resolution.missing.length > 0
     ? `unknown skill(s): ${resolution.missing.join(", ")}`
     : "--skills was given but no skill names followed it";
-  pi.sendUserMessage(
-    `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
-    `Available skills:\n${available}\n\n` +
-    `Do NOT enter plan mode. Reply to the user listing the available skills and the corrected command, e.g. /plan <requirement> --skills <skill1>,<skill2>.`,
+  pi.sendMessage(
+    {
+      customType: PLAN_CONTEXT_CUSTOM_TYPE,
+      content:
+        `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
+        `Available skills:\n${available}\n\n` +
+        `Do NOT enter plan mode. Reply to the user listing the available skills and the corrected command, e.g. /plan <requirement> --skills <skill1>,<skill2>.`,
+      display: false,
+    },
+    { triggerTurn: true },
   );
 }
 
@@ -246,9 +258,15 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
  * 已带用法样例）。
  */
 function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
-  pi.sendUserMessage(
-    `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
-    `Do NOT enter plan mode. Reply to the user with the problem and the corrected command.`,
+  pi.sendMessage(
+    {
+      customType: PLAN_CONTEXT_CUSTOM_TYPE,
+      content:
+        `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
+        `Do NOT enter plan mode. Reply to the user with the problem and the corrected command.`,
+      display: false,
+    },
+    { triggerTurn: true },
   );
 }
 
@@ -312,7 +330,7 @@ function handleEnterPlanMode(
 
   const requirement = parsed.requirement;
   // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
-  // flag 解析/校验（上方）与提示词投递（下方 sendUserMessage 对话流注入）。
+  // flag 解析/校验（上方）与提示词投递（下方 sendMessage custom message 注入）。
   // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
   const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
     requirement,
@@ -323,6 +341,12 @@ function handleEnterPlanMode(
       : {}),
   });
 
-  // Inject plan mode prompt inline（sendUserMessage 对话流注入；tool 入口走 tool result）
-  pi.sendUserMessage(prompt);
+  // Inject plan mode prompt as custom message（display:false——提示词全文消费者是 LLM，
+  // 用户感知走 plan widget 状态呈现，不占用户气泡；triggerTurn:true 保留原开轮语义。
+  // 非 streaming 直调 _runAgentPrompt 跳过 prompt() 前置链，首轮 systemPrompt 叠加
+  // 差异已登记为可接受——设计 §1.1-⑥ / §2.2 P1。tool 入口走 tool result）
+  pi.sendMessage(
+    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: prompt, display: false },
+    { triggerTurn: true },
+  );
 }

@@ -25,7 +25,7 @@ import type { ExecSkill } from "./exec-skills.js";
 import { formatReviewComments } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -281,7 +281,8 @@ interface ActionResult {
  * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
  * 用户随时可经底栏退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
  * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
- * 不走 sendUserMessage/steer 排队）。已在 plan 模式时幂等返回，不重复进入。
+ * 不走对话流消息注入/steer 排队——slash 入口才经 sendMessage 注入）。已在 plan
+ * 模式时幂等返回，不重复进入。
  */
 function executeEnter(
   pi: ExtensionAPI,
@@ -609,12 +610,18 @@ async function executeSubmitReview(
       return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers, signal);
 
     case "revise": {
-      // 显式 deliverAs: 'steer' 必须传——pi 的 sendUserMessage 在 isStreaming 时
-      // 无 deliverAs 直接 throw；有 deliverAs 时 steer 排队至下一次 LLM 调用
-      // （pi 实装锚点：dist/core/agent-session.js:859-868（0.84.4）——isStreaming 分支
-      // 无 streamingBehavior :862 throw、steer 走 :868 _queueSteer；sendUserMessage
-      // 以 streamingBehavior=deliverAs 委托 prompt :1161/:1185）
-      pi.sendUserMessage(formatReviewComments("revise", response.comments), { deliverAs: "steer" });
+      // custom message 形态注入：streaming 时显式
+      // deliverAs:'steer' 排队至下一次 LLM 调用（pi 实装锚点：dist/core/agent-session.js
+      // :859-868（0.84.4）——isStreaming 分支 steer 走 :868 _queueSteer；sendMessage 缺省
+      // deliverAs 同为 steer，显式传保持排队语义自明）；非 streaming 由 triggerTurn:true 开轮
+      pi.sendMessage(
+        {
+          customType: PLAN_CONTEXT_CUSTOM_TYPE,
+          content: formatReviewComments("revise", response.comments),
+          display: false,
+        },
+        { deliverAs: "steer", triggerTurn: true },
+      );
       state.reviewState = "revising";
       persistPlanState(pi, state);
       return {
@@ -632,7 +639,14 @@ async function executeSubmitReview(
     case "explain": {
       // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态
       // 「等待 agent 重新提交审批」，重挂靠 D2 提示词纪律驱动
-      pi.sendUserMessage(formatReviewComments("explain", response.comments), { deliverAs: "steer" });
+      pi.sendMessage(
+        {
+          customType: PLAN_CONTEXT_CUSTOM_TYPE,
+          content: formatReviewComments("explain", response.comments),
+          display: false,
+        },
+        { deliverAs: "steer", triggerTurn: true },
+      );
       return {
         content: [{
           type: "text" as const,
