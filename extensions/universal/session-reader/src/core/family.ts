@@ -78,6 +78,74 @@ export interface FamilyIndex {
   fileStats: Map<string, { mtime: number; size: number }>
 }
 
+// ---- zcode 节点（design session-reader-shared-core §3.3 D5-1）----
+
+/**
+ * zcode subagent 节点的判据输入视图（discovery 层 zcode-manifest.ts 枚举产出，
+ * core 层零 IO 消费）。扁平化：dbPath 取自 manifest engineHandle.sessionRef.dbPath
+ * （zcode 锚），dbFileExists 由 discovery 枚举时 statSync 预计算——stat 只查存在性
+ * **不开库**（D5-1：静息态 CANTOPEN 会把活会话误判已 GC，且列表视图每节点开库的
+ * 成本不该付；库内 session 已被 zcode GC 的情形由 read 路径 zcode_session_not_found
+ * 权威承接，列表视图保持廉价是本判据的设计核心）。
+ */
+export interface ZcodeFamilyNode {
+  /** record id（= sa-id，manifest 文件名 stem）。作 SubagentRef.sessionId（pi 孤儿链同款：entry.id = manifest.id） */
+  id: string
+  /** subagent 的发起 session id（subagentsByRoot 挂载键，与 pi identity.data.rootSessionId 同语义） */
+  rootSessionId: string
+  /** slug 标签（discovery 组装时已兜底 m.slug ?? m.agentName ?? ''，与 pi 孤儿链同款） */
+  slug: string
+  /** agent 类型名 */
+  agentName?: string
+  task?: string
+  model?: string
+  status?: string
+  /** zcode 锚的库路径（engineHandle.sessionRef.dbPath；枚举谓词已保证非空 string） */
+  dbPath: string
+  /** 库文件存在性（discovery 枚举时 statSync 预计算；D5-1 第二判据的唯一输入） */
+  dbFileExists: boolean
+}
+
+/**
+ * zcode 节点 → subagentsByRoot（D5-1 判据落地）。
+ *
+ * 判据（两项、不开库）：**锚可解析 ∧ 库文件存在 → cleanedUp=false；缺一 → true**。
+ * 「锚可解析」在枚举层已构造性成立（listZcodeManifests 谓词 = engine==='zcode' ∧
+ * sessionRef 双键齐，未通过的记录不产出）——core 层只需消费 dbFileExists。
+ *
+ * 与 pi 节点**刻意不同构**（D5-1 显式声明）：pi 判据 = fileStats JSONL 文件存在性
+ * （buildSubagentsByRoot 的 !fileStats.has(ident.id)）；zcode 节点住在 SQLite 库里、
+ * 没有 JSONL 文件，「文件在不在」对它是无效判据。二者不互相回归。
+ */
+export function buildZcodeSubagentsByRoot(
+  nodes: readonly ZcodeFamilyNode[],
+): Map<string, SubagentRef[]> {
+  const byRoot = new Map<string, SubagentRef[]>()
+  for (const n of nodes) {
+    const ref: SubagentRef = {
+      // zcode 节点无 subagent session 文件，sessionId 用 record id（pi 孤儿链同款占位）
+      sessionId: n.id,
+      rootSessionId: n.rootSessionId,
+      slug: n.slug,
+      fileName: '', // 占位空串（family 路径不回填，与 pi 一致）
+      mtime: 0, // 无 JSONL 文件可 stat，恒 0（占位约定，见文件头注释）
+      sizeBytes: 0,
+      cwd: '',
+      // D5-1：锚可解析（枚举谓词已过）∧ 库文件存在 → false；缺一 → true（GC 语义）
+      cleanedUp: !n.dbFileExists,
+      task: n.task,
+      agentName: n.agentName,
+      model: n.model,
+      status: n.status,
+      // sessionFile 不设：zcode 无 session.jsonl（pi 孤儿保留 GC 路径，zcode 无路径可保留）
+    }
+    const list = byRoot.get(n.rootSessionId)
+    if (list) list.push(ref)
+    else byRoot.set(n.rootSessionId, [ref])
+  }
+  return byRoot
+}
+
 // ---- 类型守卫：从 unknown 的 entry.data 提取 subagent identity 字段 ----
 
 /**
@@ -225,6 +293,8 @@ function buildSubagentsByRoot(
  * - headers（type=session）→ byId + childrenOf（parentSession 文件路径反查父 sessionId）
  * - subagentIdentities（type=custom, customType=subagent-identity）→ subagentsByRoot
  * - fileStats 原样存入 index，供 cleanedUp 判断
+ * - zcodeNodes（可选，U6）→ zcode subagent 节点并入 subagentsByRoot（D5-1 判据，
+ *   与 pi 判据不同构；不传 = pi 行为逐字节不变——零涟漪）
  *
  * 坏数据容错：identity 缺 rootSessionId/slug 跳过；parentSession 反查不到父（父文件
  * 未被扫描到）该 entry 不进 childrenOf——均不报错，符合 pi 坏 session 容错（design §2）。
@@ -233,10 +303,19 @@ export function buildFamilyIndex(
   headers: Entry[],
   subagentIdentities: Entry[],
   fileStats: Map<string, { mtime: number; size: number }>,
+  zcodeNodes?: readonly ZcodeFamilyNode[],
 ): FamilyIndex {
   const byId = buildById(headers, fileStats)
   const childrenOf = buildChildrenOf(headers, byId)
   const subagentsByRoot = buildSubagentsByRoot(subagentIdentities, fileStats)
+  if (zcodeNodes !== undefined && zcodeNodes.length > 0) {
+    const zcodeByRoot = buildZcodeSubagentsByRoot(zcodeNodes)
+    for (const [rootId, refs] of zcodeByRoot) {
+      const existing = subagentsByRoot.get(rootId)
+      if (existing) existing.push(...refs)
+      else subagentsByRoot.set(rootId, refs)
+    }
+  }
   return { byId, childrenOf, subagentsByRoot, fileStats }
 }
 
