@@ -1,6 +1,7 @@
 {
   "name": "@zhushanwen/session-core",
   "version": "0.10.1",
+  "type": "module",
   "description": "Canonical session model and pure JSONL primitives shared by session readers and importers: Entry/ParseResult/SessionHeader/NormalizedSession, parse/serialize, first-line byte primitive, session id invariants. Zero runtime dependencies.",
   "main": "src/index.ts",
   "module": "src/index.ts",

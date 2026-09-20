@@ -1079,6 +1079,9 @@ importers:
       '@zhushanwen/pi-rpc':
         specifier: workspace:*
         version: link:../pi-rpc
+      '@zhushanwen/session-core':
+        specifier: workspace:*
+        version: link:../session-core
       '@zhushanwen/session-delivery':
         specifier: workspace:*
         version: link:../session-delivery
@@ -1088,6 +1091,9 @@ importers:
       '@zhushanwen/subagent-engine-sdk':
         specifier: workspace:*
         version: link:../subagent-engine-sdk
+      '@zhushanwen/zcode-session-source':
+        specifier: workspace:*
+        version: link:../zcode-session-source
       chokidar:
         specifier: ^4.0.1
         version: 4.0.3

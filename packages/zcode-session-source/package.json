@@ -1,6 +1,7 @@
 {
   "name": "@zhushanwen/zcode-session-source",
   "version": "0.1.0",
+  "type": "module",
   "description": "Read-only zcode session database source: bun/node dual sqlite driver with a four-level CANTOPEN recovery ladder, transcript row queries, and schema version gate",
   "main": "src/index.ts",
   "module": "src/index.ts",

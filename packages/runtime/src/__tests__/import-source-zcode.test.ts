@@ -19,7 +19,7 @@
  *   import_invalid_session
  * - prepareImport（T1 全量 header/fileName）：fileName 尾段 === header.id 不变量；
  *   write = U4 转换器落盘（空会话产物 = header + session_info 两行；转换明细测试在
- *   zcode-import/converter.test.ts——U4 领地）
+ *   packages/zcode-session-source/src/__tests__/converter.test.ts——U4 迁入后唯一承载）
  *
  * 夹具：node:sqlite 在 mkdtemp(tmpdir) 自建最小列集库（session/message/part +
  * schema_migration）。fixture 库注入通道：listCandidates 走构造依赖
@@ -33,11 +33,12 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
+import { normalizeZcodeSessionId, zcodeCandidateKey } from '@zhushanwen/zcode-session-source'
+
 import { getSessionsDir } from '../infra/pi/pi-paths.js'
 import { invalidateScanDirCache, scanPiSessions } from '../infra/pi/session-file-utils.js'
 import { ImportServiceError } from '../services/session/import-source.js'
 import { ZcodeImportSource } from '../services/session/import-source-zcode.js'
-import { normalizeZcodeSessionId, zcodeCandidateKey } from '../services/session/zcode-import/normalize.js'
 
 let fixturesRoot: string
 
@@ -147,21 +148,24 @@ describe('normalizeZcodeSessionId（T1 三步骤 + 后置条件 fail-fast）', (
     expect(normalizeZcodeSessionId('sess_subagent_agent_0198abcd')).toBe('subagent-agent-0198abcd')
   })
 
-  it('步骤③ 后置条件 fail-fast（import_invalid_session，message 带原 id）', () => {
+  it('步骤③ 后置条件 fail-fast（message 带原 id；错误码 import_invalid_session 映射由薄包装承接——下方 prepareImport 用例锁定）', () => {
     for (const raw of ['', 'sess_', '_', '-']) {
-      // eslint 参数循环内断言 message：空串/纯 sess_（剥后空）、'_'/'-'（字符集或首尾非法）
+      // eslint 参数循环内断言 message：空串/纯 sess_（剥后空）、'_'/'-'（字符集或首尾非法）。
+      // source 包错误面归消费侧（设计 §1.5 契约④）：normalize 抛普通 Error，本组只断言
+      // fail-fast + message；「后置条件不满足 → import_invalid_session」的映射断言在
+      // prepareImport describe（'sess_' 归一化为空 / 'sess_-badid-0001' 首字符非法两组）。
       try {
         normalizeZcodeSessionId(raw)
         expect.unreachable(`expected normalizeZcodeSessionId(${JSON.stringify(raw)}) to throw`)
       } catch (e) {
-        expect(codeOf(e)).toBe('import_invalid_session')
+        expect(e).toBeInstanceOf(Error)
         expect((e as Error).message).toContain(raw)
       }
     }
     // 首字符非法（- 开头）/ 尾字符非法（- 结尾）
-    expect(() => normalizeZcodeSessionId('sess_-abc')).toThrow(ImportServiceError)
-    expect(() => normalizeZcodeSessionId('sess_abc-')).toThrow(ImportServiceError)
-    expect(() => normalizeZcodeSessionId('sess_ab.c')).toThrow(ImportServiceError)
+    expect(() => normalizeZcodeSessionId('sess_-abc')).toThrow()
+    expect(() => normalizeZcodeSessionId('sess_abc-')).toThrow()
+    expect(() => normalizeZcodeSessionId('sess_ab.c')).toThrow()
   })
 
   it('单字符合法（首尾即唯一字符，字母数字均可）', () => {

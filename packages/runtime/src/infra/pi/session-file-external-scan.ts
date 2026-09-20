@@ -17,6 +17,10 @@
 import { open, readdir as readdirAsync, stat as statAsync } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
+// 首行字节原语（session-reader-shared-core 场景 6：runtime async 副本收敛基座单点，
+// 本模块原 readFirstLineViaHandle 删除——原注释「infra 层不能反向 import services 层抽
+// 共用」的分层阻塞随第三包（基座）出现而消解，见设计 §2.3 失败模式 B）。
+import { readFirstJsonlLine } from '@zhushanwen/session-core'
 import {
   SCAN_DIR_TTL_MS,
   isScannableSessionFile,
@@ -49,12 +53,6 @@ const SCAN_EXTERNAL_TTL_MS = SCAN_DIR_TTL_MS
 
 /** 分批让出事件循环的批大小（D3/MF-3：每批 100 个文件后 setImmediate 让出）。 */
 const SCAN_EXTERNAL_BATCH_SIZE = 100
-
-/**
- * header 首行读块大小（4KB）。与 parseSessionHeader / readFirstLineAsync 同策略：4KB 覆盖
- * 正常 header（cwd 长路径）；块读满仍无换行（首行超长）继续续读，等价于全量读首行语义。
- */
-const HEADER_CHUNK_BYTES = 4096
 
 /**
  * name 定位的块预算（尾块 / 头块各 64KB，D3 二次修订）。pi 侧 session_info 只经
@@ -237,8 +235,21 @@ async function extractExternalMeta(filePath: string): Promise<ExternalSessionMet
     return cached.meta
   }
 
-  // stat 成功但 open 抛错（stat/open 间隙文件被删或权限变化）时同样清 stale 缓存条目
-  //（与 stat 失败路径同语义，防陈旧 meta 留存）。
+  // 首行读取走基座字节原语（async，自开连接；原实现与 name 定位共用一个 fh——收敛基座后
+  // name 阶段单独开，miss 路径每文件多付一次 open，量级可忽略）。基座 IO 错误上抛 →
+  // 清 stale 缓存条目返回 null（与 stat 失败路径同语义，防陈旧 meta 留存）。
+  let firstLine: string | undefined
+  try {
+    firstLine = await readFirstJsonlLine(filePath)
+  } catch {
+    externalMetaCache.delete(filePath)
+    return null
+  }
+  if (firstLine === undefined) return null
+  const header = parseHeaderFromFirstLine(firstLine)
+  if (!header) return null
+
+  // name 三级定位独立开句柄（stat/open 间隙文件被删或权限变化 → 清 stale 缓存返回 null）
   let fh
   try {
     fh = await open(filePath, 'r')
@@ -248,21 +259,15 @@ async function extractExternalMeta(filePath: string): Promise<ExternalSessionMet
   }
   let meta: ExternalSessionMeta | null = null
   try {
-    const firstLine = await readFirstLineViaHandle(fh)
-    if (firstLine !== null) {
-      const header = parseHeaderFromFirstLine(firstLine)
-      if (header) {
-        const name = await extractNameThreeTier(fh, fstat.size)
-        meta = {
-          id: header.id,
-          filePath,
-          cwd: header.cwd,
-          timestamp: header.timestamp,
-          name,
-          lastModified: fstat.mtimeMs,
-          size: fstat.size,
-        }
-      }
+    const name = await extractNameThreeTier(fh, fstat.size)
+    meta = {
+      id: header.id,
+      filePath,
+      cwd: header.cwd,
+      timestamp: header.timestamp,
+      name,
+      lastModified: fstat.mtimeMs,
+      size: fstat.size,
     }
   } finally {
     await fh.close()
@@ -271,40 +276,6 @@ async function extractExternalMeta(filePath: string): Promise<ExternalSessionMet
     externalMetaCache.set(filePath, { mtimeMs: fstat.mtimeMs, size: fstat.size, meta })
   }
   return meta
-}
-
-/**
- * 异步读 JSONL 首行（4KB 块 + 超长首行续读）。
- *
- * 与 import-service.ts 的 readFirstLineAsync 同模式（本模块为 infra 层，不能反向 import
- * services 层抽共用；两处语义由 D3 二次修订锁定同步）。块内无换行且未读满（文件本身小于
- * 块）按无首行终止处理；块读满仍无换行（首行超长）继续续读——等价于全量读首行的语义。
- * 空文件返回 null。
- *
- * 跨块解码（r1-S2）：块以 Buffer 累积、检测换行时 Buffer.concat 后整体 toString——
- * 逐块 toString 会在多字节 UTF-8 字符（CJK）跨 4KB 块边界时拆出 U+FFFD。
- */
-async function readFirstLineViaHandle(fh: FileHandle): Promise<string | null> {
-  const buffer = Buffer.alloc(HEADER_CHUNK_BYTES)
-  const chunks: Buffer[] = []
-  for (;;) {
-    const { bytesRead } = await fh.read(buffer, 0, HEADER_CHUNK_BYTES, null)
-    if (bytesRead === 0) {
-      return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-    }
-    // 换行先在原始 Buffer 上定位（与 import-service 的 readFirstLineAsync 同步：避免逐块
-    // Buffer.concat 的 O(n²) 复制）；换行前内容才入 chunks，最终一次性 concat 解码
-    //（跨块 CJK 多字节字符仍完整）。
-    const nl = buffer.subarray(0, bytesRead).indexOf('\n'.charCodeAt(0))
-    if (nl >= 0) {
-      chunks.push(Buffer.from(buffer.subarray(0, nl)))
-      return Buffer.concat(chunks).toString('utf-8')
-    }
-    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
-    if (bytesRead < HEADER_CHUNK_BYTES) {
-      return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-    }
-  }
 }
 
 /**
