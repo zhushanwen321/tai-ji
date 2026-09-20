@@ -591,12 +591,14 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **ChangeSetCard**：去 border 改 `bg-surface` + 10px 圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
 - **PanelHeader**：去 `border-b`，用 `bg-elevated` 浮起分层
 - **goal/todo 回归对话流**（D3）：移除 tasks tab + `HIDDEN_TOOL_NAMES`，走 GuiComponent 统一渲染
-- **通知族二分**（2026-08-19 裁决，2026-09-13 自 design-system.md §2.5 并入）：对话流「非对话内容行」按**可交互性**二分，两形态不得混用——
+- **通知族二分**（2026-08-19 裁决，2026-09-13 自 design-system.md §2.5 并入；2026-09-18 方案 A 增补「主体有界 + 悬停详情」）：对话流「非对话内容行」按**可交互性**二分，两形态不得混用——
 
   | 形态 | 判据 | 样式 |
   |---|---|---|
   | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
-  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550 + 从文案 text-xs/mid + 居中 13px 图标（stroke 2.2，色=中性 / accent[background-bash 结构化行]）+ mono meta 钉右（text-2xs/500/tabular-nums/neutral-dim）+ py-1.5 + chip（mono text-3xs + `border-strong` 描边 + `rounded-[4px] px-1.5 leading-[1.8]`）；语义色落 meta：成功绿 / 失败 warn 两档（适用于 SystemNotice / 活动条行；后台任务边界行为族内例外——Turn.vue 的图标三态 + 状态点三色承载语义，meta 保持 neutral） |
+  | 横线分隔行 | 静态元信息（无点击交互入口；悬停只读详情为方案 A 唯一例外），如 SystemNotice / 活动条行 | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550（**恒为有界短语**）+ 居中 13px 图标（stroke 2.2，色=中性 / accent[background-bash 结构化行]）+ mono meta 钉右（text-2xs/500/tabular-nums/neutral-dim）+ py-1.5；语义色落 meta：成功绿 / 失败 warn 两档（后台任务边界行为族内例外——Turn.vue 的图标三态 + 状态点三色承载语义，meta 保持 neutral） |
+
+  **主体有界 + 悬停详情（2026-09-18 方案 A 裁决）**：横线分隔行主体只承载有界短语（i18n 文案 + 语义 meta）；无界载荷——background-bash 命令原文、超 40 字符的兑底 system 原文——一律移入 HoverCard 悬停详情（`bg-elevated + border-strong + shadow-2`，宽 `min(520px,85vw)`，mono 全文 + 事实片段 + 复制按钮；活动条 bash 执行行同构）。行内不再渲染命令/长文原文——长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩自此结构性杜绝，横线长度不随载荷波动；background-bash「后台」chip 随短语语义并入退役；活动条 bash 行以 elapsed mono meta（「已 Ns」）维持执行期观察。「静态无交互」判据收窄为「无点击交互入口」——悬停只读详情（+复制）为族内唯一例外。裁决背景：长命令（如 `cd … && timeout 1200 npx vitest run`）使两侧渐隐横线塌成残端/归零，与 trigger 行的仪式形态同屏不同相。
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
