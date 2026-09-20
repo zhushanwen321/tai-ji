@@ -884,6 +884,17 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
 }
 
 /**
+ * 终态帧 type 集合（收口在 handler 尾部执行的帧）：单帧异常安全网的裁决依据——
+ * 这些帧的 finalizeSession 调用若被异常截断，session 的 streaming 实体永不收口
+ * （isGenerating 恒 true，输入框永久禁用），必须在 dispatch 层补收口（RD-1#5）。
+ */
+const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
+  'message.complete',
+  'message.error',
+  'message.stream_error',
+])
+
+/**
  * message.* 事件的单一入口（消除 double-dispatch）。
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
@@ -891,6 +902,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
  * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
+ *
+ * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
+ * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
+ * 理由：非终态帧（delta/queue_update 等）半执行后下一帧自然继续，强行收口反而误杀
+ * 进行中的流；终态帧的收口是 handler 的最后一步，被截断 = 永久卡 streaming，且
+ * finalizeSession 幂等（handler 已收口则 no-op），补调安全。
  */
 export function dispatchMessageEvent(
   ctx: MessageEffectContext,
@@ -901,5 +918,26 @@ export function dispatchMessageEvent(
   // msg.payload 是 ServerMessageMap 的联合（含 SystemPromptSnapshot 等 interface 类型，
   // 无 string index signature）。handler 内部统一用 readString 等安全窄化（见上方注释），
   // 不依赖 index signature，故 cast 到 Record<string, unknown> 是安全的。
-  if (handler) handler(ctx, sessionId, msg.payload as Record<string, unknown>)
+  if (!handler) return
+  const payload = msg.payload as Record<string, unknown>
+  try {
+    handler(ctx, sessionId, payload)
+  } catch (e) {
+    console.error(`[effects] handler threw for ${msg.type} (sid=${sessionId}) — frame side effects may be partial:`, e)
+    if (!TERMINAL_FRAME_TYPES.has(msg.type)) return
+    // 终态帧安全网：按帧语义推导收口参数（complete 按 stopReason 区分 aborted/error；
+    // error/stream_error 帧尽量透传原始错误文本），finalizeSession 本身抛错则放弃收口
+    // 仅记录（不得让安全网成为新异常源）。
+    const reason: FinalizeReason = msg.type === 'message.complete'
+      ? (readString(payload, 'stopReason') === 'aborted' ? 'aborted' : 'error')
+      : msg.type === 'message.stream_error' ? 'stream_error' : 'error'
+    const errorText = msg.type === 'message.complete'
+      ? readString(payload, 'errorMessage')
+      : readString(payload, 'message') ?? readString(payload, 'content')
+    try {
+      ctx.finalizeSession(sessionId, reason, errorText)
+    } catch (finalizeError) {
+      console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
+    }
+  }
 }

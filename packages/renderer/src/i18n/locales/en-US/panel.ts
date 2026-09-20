@@ -124,6 +124,10 @@ export default {
     respawnRetryFailed: 'Recovery failed — try again later or create a new session',
     dispatching: 'Thinking…',
     railInProgress: 'in progress…',
+    // [RD-2#1 render error boundary] per-item failure placeholder row + retry; global render error toast
+    itemRenderFailed: 'This item failed to render',
+    itemRenderRetry: 'Retry',
+    renderErrorToast: 'A rendering error occurred and has been logged',
     startConversation: 'Start a conversation, or select a session from the left',
     scrollToBottom: 'Scroll to bottom',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
@@ -444,6 +448,8 @@ export default {
     preview: 'Preview',
     loadFailed: 'Failed to load image',
     noDiff: 'No diff content',
+    // [RD-2#2] shiki highlight failure degraded visibly (content still renders as plain text lines)
+    highlightFailed: 'Highlight failed — degraded to plain text',
     tabDiff: 'Diff',
     copyFileName: 'Copy file name',
     copyFilePath: 'Copy path',

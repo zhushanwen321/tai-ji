@@ -89,7 +89,15 @@ export function useSessionEvents(sessionIdRef: Ref<string | null | undefined>): 
     // 写入「消息所属 sid」分区，不污染新 sid 分区——从结构上消除 M1 竞态（ADR-0049）。
     unsub = events.on(sid, (msg) => {
       for (const reg of registrations) {
-        if (reg.types.has(msg.type)) reg.handler(msg, sid)
+        if (!reg.types.has(msg.type)) continue
+        try {
+          reg.handler(msg, sid)
+        } catch (e) {
+          // 逐 handler 隔离（RD-1#5，范式照抄 core transport/api/events.ts safeForEach）：
+          // 一个 handler 抛错不得中断同帧后续 registration 的分发（M4 同源语义）。
+          // best-effort 分发层：仅 warn 记录后继续遍历，不向 events 层重抛。
+          console.warn(`[useSessionEvents] handler threw for ${msg.type} (sid=${sid}), continuing dispatch:`, e)
+        }
       }
     })
   }

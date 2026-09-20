@@ -89,10 +89,16 @@ export function useChatViewDeps(
     }
     try {
       const nodes = await loadFileCandidates(sid)
+      // 代际守卫（ADR-0049 updateFor(capturedSid) 同源思路）：await 期间 sessionId 可能已切到
+      // 新 session——迟到的 file.search 结果属旧 session，写入会跨 session 串台（新 session 的
+      // markdown 路径按旧文件集判定链接化）。不等则整体丢弃，由新 session 自己的加载负责落位。
+      if (sid !== sessionId.value) return
       filePaths.value = collectFilePaths(nodes)
       localFiles.value = collectBasenames(nodes)
     } catch {
-      // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）
+      // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）。
+      // 同样受代际守卫约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
+      if (sid !== sessionId.value) return
       filePaths.value = new Set()
       localFiles.value = new Set()
     }

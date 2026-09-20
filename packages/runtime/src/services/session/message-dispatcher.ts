@@ -18,6 +18,7 @@
  * session 级 push 型,单通道走 bus 定向发布,broadcast 双写腿已收口)。
  */
 import type { IDispatcherSessionOps } from './session-internal.js'
+import { runDestroyStepIsolated } from './session-entry-removal.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
 import type { SendMessageHook, PendingBashResultData, IManagedSessionView, ForceQuitSource } from './types.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
@@ -526,13 +527,25 @@ export class MessageDispatcher {
   async forceQuit(sessionId: string): Promise<void> {
     const client = this.pm.getClient(sessionId)
     if (!client) {
-      // 不在活跃进程表（已退出 / 未 spawn）：无可杀对象，幂等成功。菜单入口对 dead/idle
+      // 不在活跃进程表（已退出 / 未 spawn）：无可杀对象。菜单入口对 dead/idle
       // 历史 session 隐藏，此分支是「菜单渲染后 session 恰好退出」的竞态兑底。
       // [U3 修复] 早退也须置 userStopped 标记：用户点「强制退出」的意图与进程死活无关
       // （与 K1 同源）——无 client 时 pi 可能已自行 spawn 恢复链（restore replay turn），
       // 缺标记会让后续 restore 的收敛环不设防，被杀的旧执行复活。
-      console.log(`[message-dispatcher] forceQuit: session ${sessionId} not active, nothing to kill (userStopped mark still set)`)
-      userStoppedGate.markUserStopped(sessionId, 'user_force_quit')
+      // [code-harden RT-4#1] 幂等成功仅限「无条目或占用已复位」：条目还在且 occupancy≠idle
+      // 时，占用态已卡死且事件源已断（无进程可再产生 agent_settled）——按「幂等成功」返回
+      // 是假成功（前端 isGenerating/turn 投影永久滞留），必须继续走 forceQuitSession 完整
+      // 收敛链（stopped 终态 + full-reset + session.exited + removeEntry）。
+      const session = this.svc.getSession(sessionId)
+      const occ = session?.occupancy ?? IDLE_SESSION_OCCUPANCY
+      const occupied = occ.turn !== 'idle' || occ.compacting || occ.bash
+      if (!session || !occupied) {
+        console.log(`[message-dispatcher] forceQuit: session ${sessionId} not active, nothing to kill (userStopped mark still set)`)
+        userStoppedGate.markUserStopped(sessionId, 'user_force_quit')
+        return
+      }
+      console.warn(`[message-dispatcher] forceQuit: session ${sessionId} has no live process but occupancy not idle (turn=${occ.turn}${occ.compacting ? ', compacting' : ''}${occ.bash ? ', bash' : ''}) — running convergence chain instead of idempotent success`)
+      await this.forceQuitSession(sessionId, 'User forced quit', '用户强制退出，进程已终止。重新打开该 session 即可恢复（历史完整）。', 'user_force_quit')
       return
     }
     // D5①（session-dead-structural-fixes）：kill 路径全量日志 K1——含调用源（kill_source）
@@ -555,29 +568,48 @@ export class MessageDispatcher {
    * 在编排开头置 userStopped 标记（宿主 = session-service.ts 模块级 Map，独立于
    * ManagedSession 生命周期——尾步 removeSessionEntry 删条目后标记仍可被 restore 读到）。
    * 标记驱动 restore-abort 收敛环：被杀的旧执行（notify replay / 补发腿）不得自动复活。
+   *
+   * [code-harden RT-4#1] 失败语义：编排体 try/finally——detach / destroy / persist 失败
+   * 降级为日志，不再阻断收敛；三步终态（full-reset / session.exited 广播 / removeEntry）
+   * 在 finally 中必达（占位投影复位 + 前端 dead 标记 + 条目摘除），任一步异常只落日志 +
+   * crash 台账（runDestroyStepIsolated，reason=destroy-chain-step-failed），不沿调用链上抛。
+   * 本链刻意不含 respawn.schedule / config.sessions（用户手动强杀结构性不触发自动恢复，
+   * 见 registerSessionExitHandler 注释——respawn 承诺只挂 onSessionExit 链）。
    */
   private async forceQuitSession(sessionId: string, outcomeReason: string, exitReason: string, source: ForceQuitSource): Promise<void> {
     userStoppedGate.markUserStopped(sessionId, source)
-    // 先 detach 再 destroy——destroySession 会删 processes/clientToId 条目，
-    // 之后再经 getSessionByClient 反查会拿 undefined。
-    this.svc.detachSession(sessionId)
-    await this.pm.destroySession(sessionId)
-    // stopped 终态须在 removeSessionEntry 前写（persistSessionOutcome 内部按 id 查
-    // sessions Map，条目删除后静默跳过）。
-    this.svc.persistSessionOutcome(sessionId, 'stopped', outcomeReason)
-    // occupancy #10（D2 迁移，forceQuit/abort 超时收敛腿）：进程被强杀后 agent_settled /
-    // compaction_end 永不到达，'full-reset' 行三维全复位 + 三布尔派生同步复位（结构上不再有
-    // 「只复位一边」）——session.exited 广播前发，且必须在 removeSessionEntry（内部
-    // bus.clearSession）之前，否则帧送空集合。
-    const exiting = this.svc.getSession(sessionId)
-    if (exiting) applySessionOccupancyTransition(exiting, this.messageBus, 'full-reset')
-    // session.exited 须在 removeSessionEntry 前发（其后 messageBus.clearSession 清空
-    // 订阅者集合，再发等于空投，前端一条也收不到）。code=null：强杀场景退出码未知，
-    // 与 shared 协议「被信号杀死无退出码」语义一致。前端 handleSessionExited 会把
-    // reason 作为 error 消息插入聊天流 + toast（与 pi 崩溃路径同一入口）。
-    const exitedMsg = { type: 'session.exited' as const, payload: { sessionId, code: null, reason: exitReason } }
-    this.messageBus?.publish(sessionId, exitedMsg)
-    this.svc.removeSessionEntry(sessionId)
+    try {
+      // 先 detach 再 destroy——destroySession 会删 processes/clientToId 条目，
+      // 之后再经 getSessionByClient 反查会拿 undefined。
+      this.svc.detachSession(sessionId)
+      await this.pm.destroySession(sessionId)
+      // stopped 终态须在 removeSessionEntry 前写（persistSessionOutcome 内部按 id 查
+      // sessions Map，条目删除后静默跳过）。
+      this.svc.persistSessionOutcome(sessionId, 'stopped', outcomeReason)
+    } catch (e: unknown) {
+      // detach/destroy/persist 失败只降级日志：收敛（终态三步）必须继续。
+      console.error(`[message-dispatcher] forceQuitSession pre-terminal steps failed (sessionId=${sessionId}):`, e)
+    } finally {
+      // occupancy #10（D2 迁移，forceQuit/abort 超时收敛腿）：进程被强杀后 agent_settled /
+      // compaction_end 永不到达，'full-reset' 行三维全复位 + 三布尔派生同步复位（结构上不再有
+      // 「只复位一边」）——session.exited 广播前发，且必须在 removeSessionEntry（内部
+      // bus.clearSession）之前，否则帧送空集合。
+      runDestroyStepIsolated('full-reset', sessionId, () => {
+        const exiting = this.svc.getSession(sessionId)
+        if (exiting) applySessionOccupancyTransition(exiting, this.messageBus, 'full-reset')
+      })
+      // session.exited 须在 removeSessionEntry 前发（其后 messageBus.clearSession 清空
+      // 订阅者集合，再发等于空投，前端一条也收不到）。code=null：强杀场景退出码未知，
+      // 与 shared 协议「被信号杀死无退出码」语义一致。前端 handleSessionExited 会把
+      // reason 作为 error 消息插入聊天流 + toast（与 pi 崩溃路径同一入口）。
+      runDestroyStepIsolated('session.exited', sessionId, () => {
+        const exitedMsg = { type: 'session.exited' as const, payload: { sessionId, code: null, reason: exitReason } }
+        this.messageBus?.publish(sessionId, exitedMsg)
+      })
+      runDestroyStepIsolated('removeSessionEntry', sessionId, () => {
+        this.svc.removeSessionEntry(sessionId)
+      })
+    }
   }
 
   /**

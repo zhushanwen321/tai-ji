@@ -101,6 +101,10 @@ export const CRASH_JOURNAL_KNOWN_REASONS = [
   'defer-limit',
   'inflight',
   'absent-report',
+  // runtime destroy 收敛链单步失败（session-entry-removal.ts，code-harden RT-4#1）
+  'destroy-chain-step-failed',
+  // checkpoint 持续写失败达连续阈值（runtime-checkpoint.ts，code-harden RT-4#6）
+  'checkpoint-write-failed',
 ] as const satisfies readonly CrashJournalReason[]
 
 /** 系统级内存压力子对象（schema memPressure 行，值单位 MB）。 */

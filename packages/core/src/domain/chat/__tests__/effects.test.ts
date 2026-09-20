@@ -22,7 +22,7 @@
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/effects.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { dispatchMessageEvent } from '../effects/registry'
 import { makeCtx, msg as serverMsg } from './helpers/fixtures'
@@ -1112,5 +1112,59 @@ describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异�
     // 腿 2（user 投递确认）在形态守卫处短路：确认计数零触碰
     expect(ctx.incrementInflight).not.toHaveBeenCalled()
     expect(ctx.decrementInflight).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchMessageEvent — 单帧异常隔离与终态安全网（RD-1#5）', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('非终态帧 handler 中途抛错：不逆传调用方 + console.error 记录半执行帧，后续帧继续处理', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    // message_start handler 的最后一步 clearPendingSend 抛错（前序副作用已完成：streaming 气泡已 commit）
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'm-1' }))).not.toThrow()
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    expect(String(errSpy.mock.calls[0]?.[0])).toContain('message.message_start')
+    // 半执行帧的前序副作用保留（streaming 气泡已落），不回滚不重放
+    expect(getMsgs(ctx)).toHaveLength(1)
+    expect(lastAssistant(ctx).status).toBe('streaming')
+    // 后续帧照常处理：text_delta 正常累积
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => {})
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'a' }))
+    expect(lastAssistant(ctx).content).toBe('a')
+  })
+
+  it('终态帧（message.error）异常截断收口：安全网按帧语义补 finalizeSession（error + 原始错误文本）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    const finalize = vi.mocked(ctx.finalizeSession)
+    // 首次 finalize（handler 内）抛错 → 安全网第二次调用成功
+    finalize.mockImplementationOnce(() => { throw new Error('finalize boom') })
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.error', { message: 'pi exploded' }))).not.toThrow()
+    expect(finalize).toHaveBeenCalledTimes(2)
+    expect(finalize).toHaveBeenLastCalledWith(SID, 'error', 'pi exploded')
+  })
+
+  it('终态帧（message.complete aborted）安全网保留 aborted 语义（不误标 error）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    const finalize = vi.mocked(ctx.finalizeSession)
+    finalize.mockImplementationOnce(() => { throw new Error('finalize boom') })
+    dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
+    expect(finalize).toHaveBeenLastCalledWith(SID, 'aborted', undefined)
+  })
+
+  it('非终态帧不触发安全网（delta 帧异常不收口进行中的流）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const initial: Message[] = [{ id: 'a1', role: 'assistant', content: '', status: 'streaming', timestamp: 0 }]
+    const ctx = makeCtx(initial)
+    // text_delta handler 经 updateStreamingAssistant 守卫不会自然抛错——用 ctx.messages 只读
+    // 视角注入异常帧：构造 handler 必经的抛错点（queueStates 代理）成本高，改用 message_start
+    // 同款注入：clearPendingSend 抛错 + 断言 finalizeSession 全程零调用
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'm-2' }))
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
   })
 })

@@ -220,8 +220,15 @@ export class ProcessManager implements IProcessManager {
       // 命名消歧：this.exitCallbacks 是 ProcessManager 的 Set<(sessionId, code, stderr) => void>
       // （上层多播，process-manager.ts:123），与 RpcClient.exitCallbacks（Set<(code, stderr) => void>）
       // 是不同类、不同签名的同名字段
+      // [code-harden RT-4#1] 逐回调隔离：单 listener 异常只降级日志，不阻断其余 listener
+      //（上层 onSessionExit 收敛链依赖多播必达，任一回调抛错曾会连坐整组通知丢失）。
       for (const cb of this.exitCallbacks) {
-        cb(currentId, code, stderr)
+        try {
+          cb(currentId, code, stderr)
+        // eslint-disable-next-line taste/no-silent-catch -- 逐回调隔离（RT-4#1）：单 listener 异常降级日志，多播其余 listener 必达
+        } catch (e) {
+          console.error(`[process-manager] session ${currentId} exit callback failed:`, toErrorMessage(e))
+        }
       }
     })
 

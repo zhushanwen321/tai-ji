@@ -31,6 +31,7 @@ const fakeProc = {
   stdin: {
     write: vi.fn(),
     once: vi.fn(),
+    on: vi.fn(), // RT-2#1：wireProcessHandlers 现注册 stdin 'error' listener
   },
   kill: vi.fn((_signal?: NodeJS.Signals | number) => {
     // kill 即死（mock 语义）：从 on.mock.calls 找 exit listener 微任务驱动，短路 grace 真实等待

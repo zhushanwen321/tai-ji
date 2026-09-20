@@ -8,6 +8,12 @@ export interface ElectronAPI {
   onRuntimePort(callback: (port: number) => void): () => void
   /** 监听 runtime 启动失败事件 */
   onRuntimeError(callback: (error: { message: string }) => void): () => void
+  /**
+   * 获取最近一次 runtime 启动失败原因（RD-3#2；null = 无已知失败，成功启动后清除）。
+   * onRuntimeError 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失），
+   * 连接编排 init 时经此拉取兜底——对齐「时序竞争必须主动拉取」既有规则。
+   */
+  getRuntimeStartError(): Promise<string | null>
   /** 监听 runtime 崩溃后重启中事件（supervisor 正在拉起新实例） */
   onRuntimeRestarting(callback: (payload: { attempt: number }) => void): () => void
   /** 监听 runtime 重启用尽事件（需用户手动重试） */
@@ -230,6 +236,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('runtime-error', handler)
     return () => ipcRenderer.removeListener('runtime-error', handler)
   },
+  // RD-3#2：启动失败真因拉取（boot 竞态兜底，main 侧 get-runtime-start-error 只读 handler）
+  getRuntimeStartError: () => ipcRenderer.invoke('get-runtime-start-error'),
   onRuntimeRestarting: (callback: (payload: { attempt: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { attempt: number }) => callback(payload)
     ipcRenderer.on('runtime-restarting', handler)

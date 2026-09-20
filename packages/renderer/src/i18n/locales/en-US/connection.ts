@@ -5,6 +5,7 @@ export default {
   reconnecting: 'Reconnecting…',
   restarting: 'Runtime restarting…',
   failed: 'Runtime unavailable after multiple retries',
+  errorCause: 'Cause: {message}',
   retry: 'Retry',
   runtimeExited: 'Session process exited: {reason}',
   sessionRequestFailed: 'Session request failed: {message}',

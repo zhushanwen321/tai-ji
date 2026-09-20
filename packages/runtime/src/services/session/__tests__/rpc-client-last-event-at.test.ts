@@ -42,6 +42,7 @@ const fakeProc = {
   stderr: { on: vi.fn() },
   stdin: {
     write: vi.fn(() => true),
+    on: vi.fn(),
     once: vi.fn(),
   },
   kill: vi.fn(),

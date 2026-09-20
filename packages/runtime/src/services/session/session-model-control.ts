@@ -12,8 +12,13 @@ import type { ProviderId } from '@taiji/shared'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import type { SessionReplicatedStates } from './session-state-projection.js'
-import { toErrorMessage } from '../../utils/errors.js'
+import { toErrorMessage, errorWithCode, SESSION_NOT_ACTIVE } from '../../utils/errors.js'
 import { logger } from '../../infra/logger.js'
+
+/** 无活跃 pi 进程时状态变更类 RPC 的统一错误（RT-4#4：fail-fast，禁止降级假成功）。 */
+function sessionNotActiveError(sessionId: string): Error & { code: string | number } {
+  return errorWithCode(`会话未活跃（${sessionId} 无活跃进程），重开后可重试`, SESSION_NOT_ACTIVE)
+}
 
 /**
  * SessionModelControl 装配依赖（窄注入，S5/D2 风格：原 Facade 字段/子模块直读的逐字等价面）。
@@ -55,7 +60,13 @@ export class SessionModelControl {
     if (!session) throw new Error('session not active')
     const newModelId = `${provider}/${modelId}`
     const client = this.deps.pm.getClient(sessionId)
-    if (!client) return sessionId // 无活跃 pi 进程：跳过缓存写和广播，不假装成功
+    if (!client) {
+      // [code-harden RT-4#4] 无活跃 pi 进程（回收/崩溃窗口）= 状态变更不可达：fail-fast
+      // 抛错（code=SESSION_NOT_ACTIVE，transport 全局 catch 透传 code + details.sessionId），
+      // 替代旧的 `return sessionId` 降级——那会被 transport 按「请求值」回 model.switched，
+      // UI 乐观确认一个未生效的档位（违 ADR-0065 禁乐观写），且旧路径全程零日志。
+      throw sessionNotActiveError(sessionId)
+    }
     try {
       await client.setModel(provider, modelId)
     } catch (e) {
@@ -139,10 +150,10 @@ export class SessionModelControl {
   async setThinkingLevel(sessionId: string, level: string): Promise<string> {
     const client = this.deps.pm.getClient(sessionId)
     if (!client) {
-      // 无活跃进程（理论不可达：调用方都在活跃 session 语境）——请求值兜底，行为同旧版
-      const session = this.deps.getSession(sessionId)
-      if (session) session.thinkingLevel = level
-      return level
+      // [code-harden RT-4#4] 无活跃进程 = 状态变更不可达：fail-fast 抛错（同 switchModel），
+      // 替代旧的「请求值直写 + return」——直写请求值会把未生效档位污染进双写缓存与
+      // state_changed fallback 投影（违 ADR-0065 禁乐观写）。
+      throw sessionNotActiveError(sessionId)
     }
     await client.setThinkingLevel(level)
     // session-trace（A33）：thinking_level_change 的 append 虽有事件但消费点在 pi 侧

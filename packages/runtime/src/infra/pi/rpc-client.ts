@@ -353,9 +353,9 @@ export class RpcClient implements IPiEngine {
   }
 
   /**
-   * start 的进程事件接线（error / exit / stdout JSONL 解析 / stdout+stderr stream error /
+   * start 的进程事件接线（error / exit / stdout JSONL 解析 / stdout+stdin+stderr stream error /
    * stderr 全量收集）。与提取前注册顺序一致：error → exit → readline line → stdout error
-   * → stderr data/error。
+   * → stdin error → stderr data/error。
    */
   private wireProcessHandlers(proc: ChildProcess): void {
     proc.on('error', (err) => {
@@ -416,6 +416,19 @@ export class RpcClient implements IPiEngine {
       this.killProcAfterStreamError('stdout')
     })
 
+    // RT-2#1：stdin 流错误与 stdout/stderr 同款源头收口。stdin 是 runtime → pi 的唯一
+    // 写入面（sendCommand / sendRaw）；pi 半关闭（写端已死）或崩溃后再写 stdin，流错误
+    // （EPIPE / ERR_STREAM_DESTROYED）异步 emit 到 stdin——写调用本身不抛，try/catch 接不住。
+    // 若无 listener 会升级为 uncaughtException，被 uncaught-policy log-continue 吞掉：
+    // _exited 不置位、pending 不 reject、自愈强杀不触发 → 后续每条 RPC 各挂满超时且
+    // 误归因「pi 无响应」。故必须在源头接线，不得依赖 uncaught-policy 兜底。
+    proc.stdin?.on('error', (err: NodeJS.ErrnoException) => {
+      console.error('[rpc] stdin stream error:', err)
+      this._exited = true
+      this.rejectAll(new Error(`pi stdin stream error: ${err.message}`))
+      this.killProcAfterStreamError('stdin')
+    })
+
     // 收集 stderr 用于错误诊断，同时转发到日志
     this.stderrChunks = []
     this.stderrTotalBytes = 0
@@ -448,7 +461,7 @@ export class RpcClient implements IPiEngine {
    * stream error 后 SIGKILL 加速进程死亡（W2，死亡通知唯一出口语义）——
    * 细节与降级理由见 wireProcessHandlers 内 stdout 段注释。
    */
-  private killProcAfterStreamError(stream: 'stdout' | 'stderr'): void {
+  private killProcAfterStreamError(stream: 'stdout' | 'stderr' | 'stdin'): void {
     try {
       this.proc?.kill('SIGKILL')
     } catch (e) {

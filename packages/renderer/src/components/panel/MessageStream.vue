@@ -50,10 +50,11 @@
            - :startMargin load-more 占位高度（virta getItemOffset 已含 startMargin，design §4.11）
            - :key=session 强制重建 Virtualizer，跨 session 测量缓存隔离（design §4.5）
            slot 内 item.kind 分支与 streamItems 对应（kind 全集四态：core 三态 turn/systemNotice/
-           bashExecution + u5 渲染层拼接的 skillNotice，:data 已从 renderItems 升为 streamItems）。 -->
+           bashExecution + u5 渲染层拼接的 skillNotice，:data 已从 renderItems 升为 streamItems
+           的前置求值投影 streamViewItems——1:1 同下标空间，RD-2#1）。 -->
       <Virtualizer
         ref="vlistRef"
-        :data="streamItems"
+        :data="streamViewItems"
         :item-size="ESTIMATED_TURN_HEIGHT"
         :shift="isPrepend"
         :keep-mounted="pinnedIndexes"
@@ -66,33 +67,42 @@
         <!-- slot 内容注意：禁止在 <template #default> 内放任何注释/文本节点！
              virtua 的 item key 提取要求 slot 返回恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），
              注释节点会让长度变 2 → fallback `_${index}` 索引 key（M5 stable-key 失效）。
-             各分支共用稳定 :key（非索引）：core 三态 turn/systemNotice/bashExecution 用 renderKey
-            （turn=首条消息 id，system=message.id）；u5 渲染层拼接的 skillNotice 用 notice 稳定 id。 -->
-        <template #default="{ item, index }">
-          <Turn
-            v-if="item.kind === 'turn'"
-            :key="renderKey(item)"
-            :turn="item.turn"
-            :session-id="sessionId"
-            :can-edit="!!item.turn.user && index === lastUserTurnIdx"
-            :is-session-active="isSessionActive"
-            :is-last-turn="item.turn === lastRenderTurn"
-            @edit-state-change="onEditStateChange($event)"
-          />
-          <BashOutputBlock
-            v-else-if="item.kind === 'bashExecution'"
-            :key="renderKey(item)"
-            :message="item.message"
-            :session-id="sessionId"
-          />
-          <!-- skill 注入提示行（u5）：紧跟锚点 turn 之后（interleaveSkillNoticeItems 拼接），
-               key 用 notice 稳定 id（n- 空间，与 t-/s- renderKey 空间区分）。 -->
-          <SkillNoticeInline
-            v-else-if="item.kind === 'skillNotice'"
-            :key="item.entry.id"
-            :entry="item.entry"
-          />
-          <SystemNotice v-else :key="renderKey(item)" :message="item.message" @respawn-retry="onRespawnRetry" />
+             slot 表达式已前置求值（streamViewItems，RD-2#1）：模板只消费算好的 plain object
+             字段，防止 item 形态异常炸掉整个列表 render 帧。
+             稳定 :key 挂在分支根 vnode 上（broken 行 / StreamItemBoundary）：turn/bash/system
+             用 renderKey（turn=首条消息 id，system=message.id）；skillNotice 用 notice 稳定 id；
+             StreamItemBoundary 兜子组件 render 抛错（单条占位，不炸整屏）。 -->
+        <template #default="{ item }">
+          <div
+            v-if="item.kind === 'broken'"
+            :key="item.key"
+            class="content-col flex min-w-0 items-center gap-2 py-1"
+            data-testid="stream-item-broken"
+          >
+            <span class="text-[length:var(--text-xs)] text-warn">{{ t('panel.message.itemRenderFailed') }}</span>
+          </div>
+          <StreamItemBoundary v-else :key="item.key" :preview="item.preview">
+            <Turn
+              v-if="item.kind === 'turn'"
+              :turn="item.turn"
+              :session-id="sessionId"
+              :can-edit="item.canEdit"
+              :is-session-active="isSessionActive"
+              :is-last-turn="item.isLastTurn"
+              @edit-state-change="onEditStateChange($event)"
+            />
+            <BashOutputBlock
+              v-else-if="item.kind === 'bashExecution'"
+              :message="item.message"
+              :session-id="sessionId"
+            />
+            <!-- skill 注入提示行（u5）：紧跟锚点 turn 之后（interleaveSkillNoticeItems 拼接） -->
+            <SkillNoticeInline
+              v-else-if="item.kind === 'skillNotice'"
+              :entry="item.entry"
+            />
+            <SystemNotice v-else-if="item.kind === 'systemNotice'" :message="item.message" @respawn-retry="onRespawnRetry" />
+          </StreamItemBoundary>
         </template>
       </Virtualizer>
 
@@ -179,9 +189,8 @@ import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
-// [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store 为空
-// 会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点（AppShell 仅在 connected 后渲染），
-// 在此安装幂等单例（重连不重复 / 失败下一次 connected 补拉）。
+// [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store
+// 为空会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点，在此安装幂等单例。
 import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'
 // [u8-pi-respawn] 恢复提示条重试按钮的手动恢复 RPC（useSidebar.restoreSession 同源通道）。
@@ -190,7 +199,7 @@ import { getExecutingBash } from '@taiji/core'
 import { useVirtuaFollow } from '@/composables/panel/useVirtuaFollow'
 import { usePinBottomGuard } from '@/composables/panel/usePinBottomGuard'
 import { useConstantHeightAssert } from '@/composables/panel/useConstantHeightAssert'
-import { toRenderItemsIncremental, createTurnRenderCache, renderKey } from '@/composables/logic/messageTurns'
+import { toRenderItemsIncremental, createTurnRenderCache } from '@/composables/logic/messageTurns'
 import type { TurnRenderCache } from '@/composables/logic/messageTurns'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSubagentThinking } from '@/composables/panel/useSubagentThinking'
@@ -203,6 +212,9 @@ import ForkNotice from './ForkNotice.vue'
 // 活动条（u6a / D7 展示统一）：compacting/bash/thinking 行的单一渲染位（原三处分散指示收编）。
 import ActivityStrip from './message-stream/ActivityStrip.vue'
 import SkillNoticeInline from './SkillNoticeInline.vue'
+// [RD-2#1] 单条渲染项错误边界 + slot 表达式前置求值视图模型（1:1 投影 streamItems）
+import StreamItemBoundary from './message-stream/StreamItemBoundary.vue'
+import { buildStreamViewItems } from './message-stream/stream-view-items'
 import { useSkillNoticeStreamItems } from '@/composables/panel/useSkillNoticeStream'
 import { useForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
@@ -211,9 +223,8 @@ import { useSessionActive } from '@/composables/panel/useSessionActive'
 import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageStreamFollowTriggers'
 import { useMessageStreamRail } from '@/composables/panel/useMessageStreamRail'
 import { useStreamingPin } from '@/composables/panel/useStreamingPin'
-// [u6a] COMPACTING/EXECUTING_BASH_NOTICE_HEIGHT 的消费点（ActivityStrip 行渲染 + dev 断言）
-// 已随指示行迁入 ActivityStrip；fork 基线参数随 D6 死路径清理删除（COMPACTING_NOTICE_HEIGHT
-// 不再被本文件消费）。ESTIMATED_TURN_HEIGHT / LOAD_MORE_RESERVED_HEIGHT 同源（virta 布局常量族）。
+// [u6a] 两常量的消费点已迁 ActivityStrip；ESTIMATED_TURN_HEIGHT / LOAD_MORE_RESERVED_HEIGHT
+// 同源（virta 布局常量族）。
 import {
   ESTIMATED_TURN_HEIGHT,
   LOAD_MORE_RESERVED_HEIGHT,
@@ -229,19 +240,18 @@ installPresetAutoLoad()
 const { t } = useI18n()
 const chat = useChatStore()
 
-/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading 状态 + isPrepend（virta :shift 信号）+ handler
+/** W4 H4 + cw wave w3 / IF8：加载更多历史 loading + isPrepend（virta :shift 信号）+ handler
  *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）。 */
 const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset } = useLoadMoreHistory(() => props.sessionId)
 
-/** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns（u4b session.history
- *  窗口契约；无记录（未 hydrate / 非截断）回落 0——showLoadMore 为 false 时条不渲染，值无关）。 */
+/** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns；无记录回落 0
+ *  （showLoadMore 为 false 时条不渲染，值无关）。 */
 const loadedTurns = computed(() => chat.getHistoryWindow(props.sessionId)?.loadedTurns ?? 0)
 
 /**
- * [u8-pi-respawn] 恢复提示条（restoreFailed 形态）重试按钮 → 手动恢复（crash-resilience
- * D7 熔断后的用户出口）。自动恢复链路已熔断不再续排，此处走显式 session.restore RPC
- * （useSidebar.restoreSession 同源通道）+ revive 复位 dead 态；成功后 runtime 推
- * session.restored（ring 回放/重订阅可见），失败 toast 指引。
+ * [u8-pi-respawn] 恢复提示条（restoreFailed 形态）重试按钮 → 手动恢复（crash-resilience D7
+ * 熔断后的用户出口）：显式 session.restore RPC + revive 复位 dead 态；成功后 runtime 推
+ * session.restored，失败 toast 指引。
  */
 async function onRespawnRetry(): Promise<void> {
   try {
@@ -253,23 +263,18 @@ async function onRespawnRetry(): Promise<void> {
   }
 }
 
-/** 当前 session 的消息（getMessages 兼容接口：W10 D-1 后 messages Map 的 value 是内层
- *  ShallowRef<Message[]> 容器，直接 .get() 会拿到 ref 而非数组——getMessages 内部
- *  unwrap（.value ?? []），Map.get + 内层 .value 依赖均被 computed track，响应性不变）。 */
+/** 当前 session 的消息（getMessages 兼容接口：内部 unwrap 内层 ShallowRef 容器，
+ *  Map.get + 内层 .value 依赖均被 computed track，响应性不变）。 */
 const currentMessages = computed(() => chat.getMessages(props.sessionId))
 
 /** session id（template 内多处引用：Turn :session-id / rail 等）。 */
 const sessionId = computed(() => props.sessionId)
 
-/** 执行中 bash 瞬时态（W1 fix-chat-flow-order D2）：bashStart 置 / bashResult·错误路径清，
- *  不进 messages（执行中反馈 ephemeral 通道；run 结束后 bashExecution entry 入流承担持久语义）。 */
+/** 执行中 bash 瞬时态（W1 D2）：bashStart 置 / bashResult·错误路径清，不进 messages（ephemeral 通道）。 */
 const executingBash = computed(() => getExecutingBash(props.sessionId))
 
-
-
 /** [W21 D-4] turn 派生增量缓存：经 useSessionScopedState 工厂按 session 分区持有（ADR-0049——
- *  <MessageStream> 无 :key、组件实例不随 session 销毁，实例级缓存会跨 session 残留上一会话的
- *  Message 引用；工厂随 useSidebar.deleteSession → triggerSessionCleanups 自动释放分区）。
+ *  组件实例不随 session 销毁，实例级缓存会跨 session 残留；工厂随 deleteSession 自动释放分区）。
  *  分区值是 shallowRef 包裹的 mutable 纯派生缓存：toRenderItemsIncremental 原地 mutate 更新，
  *  该 mutate 从不触发下游（renderItems 失效由 currentMessages/forceWorking 驱动），shallowRef
  *  只为满足工厂「init 返回 reactive 容器」契约且避免深代理缓存内的 Message 引用。 */
@@ -290,8 +295,9 @@ const renderItems = computed(() =>
 
 /** skill 注入提示 + streamItems 拼接（u5）：订阅/per-session 分区/toast 副作用与 interleave
  *  组装都在 useSkillNoticeStream.ts（useSkillNoticeStreamItems）。
- *  [索引一致性硬约束] streamItems 必须是 :data / lastUserTurnIdx / useStreamingPin / rail
- *  四处消费的同一数组基准——混用 renderItems 与 streamItems 两基准会错钉/错跳。 */
+ *  [索引一致性硬约束] streamItems 是 lastUserTurnIdx / useStreamingPin / rail 的基准；:data
+ *  消费其 1:1 投影 streamViewItems（下方，同长度同顺序）——混用 renderItems 与 streamItems
+ *  两基准会错钉/错跳，投影不换基准。 */
 const { streamItems } = useSkillNoticeStreamItems(sessionId, renderItems)
 
 /** 渲染项里最后一个 turn（streaming 滚动判定 + hasWorkingTurn 派生用）。 */
@@ -356,6 +362,12 @@ const lastUserTurnIdx = computed(() => {
   }
   return -1
 })
+
+// [RD-2#1] slot 表达式前置求值（canEdit/isLastTurn/key/preview 在此算好，模板零派生表达式；
+// 单项抛错降级 broken 占位行）：1:1 投影 streamItems，:data 与 pin/rail 两基准下标空间不变。
+const streamViewItems = computed(() =>
+  buildStreamViewItems(streamItems.value, lastUserTurnIdx.value, lastRenderTurn.value),
+)
 
 /**
  * editing 钉扎（SR5，B9）：编辑中的 turn 滚出视口会卸载丢失 UserBubble 的 draftText。

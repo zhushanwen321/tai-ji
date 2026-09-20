@@ -58,8 +58,12 @@ export class ModelMessageHandler {
     console.log(`[runtime] model.switch: sessionId=${sessionId}, provider=${provider}, modelId=${modelId}`)
     // C-pi-13 回执修型（U6）：reply 回传生效值——pi pattern 引擎可能把请求模型
     // 静默换成同族条目（事故 A 形态），switchModel 经 set→get_state 读回
-    // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状；
-    // 无 '/' 形态（无活跃进程早退等 fallback）按请求值回显（旧行为兜底）。
+    // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状。
+    // [code-harden RT-4#4] 无活跃进程的失败语义已收敛到 service：switchModel 抛
+    // errorWithCode(SESSION_NOT_ACTIVE)，由 server.ts handleMessage 的全局 catch 统一
+    // sendError（code 透传 + details.sessionId），不再有「按请求值回 model.switched」
+    // 的假成功路径；下方 slash === -1 分支退化为纯防御（readEffectiveModelId 的
+    // fallback 也恒为 'provider/id' 复合串）。
     const effectiveModel = await this.ctx.modelService.switchModel(sessionId, provider, modelId)
     const slash = effectiveModel.indexOf('/')
     this.ctx.reply(ws, msg.id, 'model.switched', {
@@ -93,7 +97,9 @@ export class ModelMessageHandler {
     // P3（final gate）：reply 生效值而非请求值——pi 会钳制模型族不支持的档位
     //（mimo 族 max → high；钳制后 effective ≠ previous 时 pi 仍必发
     // thinking_level_changed 事件，isChanging=false 仅「值未变」场景——PS-04），
-    // 回显请求值会污染前端 pending 确认
+    // 回显请求值会污染前端 pending 确认。
+    // [code-harden RT-4#4] 无活跃进程：setThinkingLevel 抛 errorWithCode(SESSION_NOT_ACTIVE)，
+    // 与 model.switch 同经 server.ts 全局 catch sendError（code + details.sessionId）。
     const effective = await this.ctx.modelService.setThinkingLevel(sid as string, level as string)
     this.ctx.reply(ws, msg.id, 'session.thinkingLevelSet', { sessionId: sid, level: effective })
     return true

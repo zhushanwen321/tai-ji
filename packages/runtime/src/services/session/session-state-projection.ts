@@ -336,12 +336,26 @@ export class SessionStateProjection {
     // W12：modelId / thinkingLevel 的 fetch 走带 state_changed 发布挂钩的包装（快照应用后
     // 组合投影）；usage / commands 的 fetch 各自带发布挂钩（fetchSessionStatsSnapshot /
     // fetchCommandsSnapshot），无需裸 fetchState。
+    // [code-harden RT-4#3] diagnosticLabel：实例身份进失败 warn 日志（字段域 + sessionId），
+    // 快照退避/耗尽不再零线索。
     const fetchStateForStateChanged = () => this.fetchStateSnapshotWithStatePublish(sessionId)
     const states: SessionReplicatedStates = {
-      thinkingLevel: new ReplicatedState(createThinkingLevelStateConfig(fetchStateForStateChanged)),
-      modelId: new ReplicatedState(createModelIdStateConfig(fetchStateForStateChanged)),
-      usage: new ReplicatedState(createUsageStateConfig(() => this.fetchSessionStatsSnapshot(sessionId))),
-      commands: new ReplicatedState(createCommandsStateConfig(() => this.fetchCommandsSnapshot(sessionId))),
+      thinkingLevel: new ReplicatedState({
+        ...createThinkingLevelStateConfig(fetchStateForStateChanged),
+        diagnosticLabel: `thinkingLevel(${sessionId})`,
+      }),
+      modelId: new ReplicatedState({
+        ...createModelIdStateConfig(fetchStateForStateChanged),
+        diagnosticLabel: `modelId(${sessionId})`,
+      }),
+      usage: new ReplicatedState({
+        ...createUsageStateConfig(() => this.fetchSessionStatsSnapshot(sessionId)),
+        diagnosticLabel: `usage(${sessionId})`,
+      }),
+      commands: new ReplicatedState({
+        ...createCommandsStateConfig(() => this.fetchCommandsSnapshot(sessionId)),
+        diagnosticLabel: `commands(${sessionId})`,
+      }),
     }
     this.replicatedStates.set(sessionId, states)
     states.thinkingLevel.refetch()

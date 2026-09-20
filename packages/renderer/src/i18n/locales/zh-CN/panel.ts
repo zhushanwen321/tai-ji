@@ -123,6 +123,10 @@ export default {
     respawnRetryFailed: '恢复失败，请稍后重试或新建会话',
     dispatching: '思考中…',
     railInProgress: '进行中…',
+    // [RD-2#1 渲染错误边界] 单条渲染失败占位行 + 重试入口；全局渲染异常上屏 toast
+    itemRenderFailed: '本条渲染失败',
+    itemRenderRetry: '重试',
+    renderErrorToast: '界面渲染出现异常，已记录日志',
     startConversation: '开始对话，或从左侧选择一个会话',
     scrollToBottom: '回到底部',
     // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
@@ -439,6 +443,8 @@ export default {
     preview: '预览',
     loadFailed: '无法加载图片',
     noDiff: '无差异内容',
+    // [RD-2#2] shiki 高亮失败显形降级（内容仍按原始行纯文本渲染）
+    highlightFailed: '高亮失败，已降级纯文本',
     tabDiff: '差异',
     copyFileName: '复制文件名',
     copyFilePath: '复制路径',

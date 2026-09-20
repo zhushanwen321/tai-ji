@@ -63,6 +63,8 @@ import type {
   PiCompactionEndEvent,
   PiAgentSettledEvent,
   PiEntryAppendedEvent,
+  PiAssistantMessageSubEvent,
+  PiToolcallEndSubEvent,
 } from './pi-protocol.js'
 
 // ── Sub-handler types ──────────────────────────────────────────────
@@ -116,14 +118,11 @@ const BASH_TOOL_NAME = 'bash'
 
 // ── Sub-handlers（纯函数：PiEvent → PiTranslatedEvent[]，无副作用）────────
 
-/** message_update.assistantMessageEvent 的 wire 局部形态（pi-protocol.ts PiMessageUpdateEvent 同源） */
-type PiMessageUpdateSub = {
-  type: string
-  delta?: string
-  content?: string
-  contentIndex?: number
-  toolCall?: { id?: string }
-}
+// [RT-2#2] assistantMessageEvent 的形状以 pi-protocol.ts 的 PiAssistantMessageSubEvent
+// 判别联合为单一声明（PiErrorSubEvent.error.errorMessage 承载人类可读错误文本）。
+// 曾在此维护摊平的本地 `PiMessageUpdateSub`（含 wire 上不存在的 `content?: string`），
+// `as` 转换使声明与 pi 实发形状的失配逃过类型检查——error 变体读 sub.content 恒
+// undefined，provider 真错文本（401/限流/上下文溢出）永不显形。
 
 /**
  * contentIndex 可选锚点：undefined 时不产字段（payload 形态稳定）。
@@ -149,10 +148,14 @@ function deltaUpdateMessage(
 
 /** message_update — streaming text/thinking deltas and stream errors */
 function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTranslatedEvent[] {
-  const sub = event.assistantMessageEvent as PiMessageUpdateSub | undefined
+  // wire 帧经 JSON 解析，assistantMessageEvent 运行时可能缺位——保留守卫，不用 as 断言
+  const sub: PiAssistantMessageSubEvent | undefined = event.assistantMessageEvent
   if (!sub) return [{ kind: 'noop' }]
 
-  switch (sub.type) {
+  // 判别收窄的 const 别名：union 已闭合（含 error），default 分支 sub 静态收窄为 never，
+  // 直接读 sub.type 触 TS2339——警告日志改引别名（运行时 pi 新增子类型仍落 default 分支）
+  const subType = sub.type
+  switch (subType) {
     case 'text_delta':
       return deltaUpdateMessage('message.text_delta', sid, sub.delta, sub.contentIndex)
     case 'thinking_start':
@@ -168,12 +171,16 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
     case 'toolcall_start': case 'toolcall_delta':
     case 'text_start': case 'text_end':
       return [{ kind: 'noop' }]
-    // FR-5: streaming error — surface as message.stream_error
-    // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）
+    // FR-5 / RT-2#2: streaming error — surface as message.stream_error
+    // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）。
+    // wire 真实字段 = {reason:'aborted'|'error', error:{errorMessage?}}（PiErrorSubEvent）：
+    // content 读 error.errorMessage（缺失回退 reason——中止场景无 errorMessage，仍可辨因）；
+    // kind 透传 reason，保留 aborted（用户中止）与 error（provider 真错）的语义区分，
+    // 禁止硬编码回 'error'（曾使所有 provider 真错文本永久不显形）。
     case 'error':
-      return [{ kind: 'message', message: { type: 'message.stream_error', payload: { sessionId: sid, content: sub.content ?? '', kind: 'error' } } }]
+      return [{ kind: 'message', message: { type: 'message.stream_error', payload: { sessionId: sid, content: sub.error?.errorMessage ?? sub.reason, kind: sub.reason } } }]
     default:
-      console.warn('[EventAdapter] Unhandled message_update sub-type:', sub.type)
+      console.warn('[EventAdapter] Unhandled message_update sub-type:', subType)
       return [{ kind: 'noop' }]
   }
 }
@@ -197,7 +204,7 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
  * 此处产出 tool-call-index 中间事件（toolCallId + contentIndex），interpreter 缓存后
  * 在 tool-call-start 到达时附到 tool_call_start WS 帧，前端按 contentIndex 有序插入。
  */
-function handleToolcallEnd(sub: PiMessageUpdateSub): PiTranslatedEvent[] {
+function handleToolcallEnd(sub: PiToolcallEndSubEvent): PiTranslatedEvent[] {
   const toolCallId = sub.toolCall?.id
   const contentIndex = sub.contentIndex
   if (toolCallId !== undefined && contentIndex !== undefined) {

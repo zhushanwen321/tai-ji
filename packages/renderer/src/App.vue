@@ -12,10 +12,17 @@
         <Loader2 class="size-4 animate-spin text-neutral-dim" />
         <span class="text-[12.5px] text-neutral-dim">{{ t('connection.restarting') }}</span>
       </template>
-      <!-- runtime 重启用尽，需手动重试 -->
+      <!-- runtime 重启用尽，需手动重试。runtimeStartError = 最近一次启动失败真因
+           （RD-3#2：binary 缺失/端口占用等，main 经 runtime-error 推送/拉取兜底到达；
+           通用 failed 文案保留为兜底，真因到达即补充显示） -->
       <template v-else-if="connectionState === 'failed'">
         <AlertCircle class="size-5 text-danger" />
         <span class="text-[12.5px] text-neutral-mid">{{ t('connection.failed') }}</span>
+        <span
+          v-if="runtimeStartError"
+          data-testid="runtime-error-cause"
+          class="max-w-[320px] text-center text-[11.5px] text-neutral-dim"
+        >{{ t('connection.errorCause', { message: runtimeStartError }) }}</span>
         <Button variant="default" size="sm" data-testid="runtime-retry-btn" @click="onRetry">
           {{ t('connection.retry') }}
         </Button>
@@ -41,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
@@ -63,6 +70,8 @@ import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSyn
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
 import { useMemoryPressure } from '@/composables/useMemoryPressure'
+import { onRuntimeError, getRuntimeStartError } from '@/lib/ipc'
+import { reportRuntimeStartError } from '@/boot/error-reporter'
 
 // 应用挂载（onMounted bootstrap 第 2 步）即提交连接编排（mock 模式 200ms 直进 connected；真 runtime 走端口发现）。
 // settings 域核心初始化（transport + 订阅注册）必须在 WS 连接前完成：
@@ -80,6 +89,28 @@ watch(locale, () => {
   document.title = t('app.title') + (isDevMode() ? ' - dev' : '')
 }, { immediate: true })
 const { state: connectionState, teardown, retryRuntime } = useConnection()
+// RD-3#2：runtime 启动失败真因（binary 缺失/端口占用等）。此前 main 发 runtime-error
+// 全仓零消费——启动失败用户只能干等 60s 后看到通用 failed，真因永不可见。
+// 挂点选 App.vue 而非 core 编排：① failed 屏（真因显示位）就在本组件；② 状态转移
+// （置 failed 短路徒劳重连）归 core use-connection（经 ConnectionPorts 消费同一事件），
+// 本组件只管显示 + 台账，两层各司其职。推送 + 拉取双通道：boot 竞态下 main whenReady
+// 发事件早于本组件挂载，webContents.send 静默丢失——拉取兜底对齐「时序竞争必须主动
+// 拉取」既有规则。connected 即清（陈旧真因不再显示）。
+const runtimeStartError = ref<string | null>(null)
+let removeRuntimeErrorListener: (() => void) | null = null
+
+/** 记录真因 + 落台账（幂等：同因去重；空消息丢弃）。状态转移归 core，本组件不置态 */
+function handleRuntimeStartError(message: string): void {
+  if (!message || runtimeStartError.value === message) return
+  runtimeStartError.value = message
+  reportRuntimeStartError(message)
+}
+removeRuntimeErrorListener = onRuntimeError((err) => handleRuntimeStartError(err?.message ?? ''))
+// 拉取兜底：推送可能早于上面的订阅安装（boot 竞态），挂载编排后主动问一次 main 侧
+// 最近一次启动失败原因（无 IPC / 无失败记录返回 null，no-op）
+void getRuntimeStartError().then((message) => {
+  if (message) handleRuntimeStartError(message)
+})
 // 启动编排（#1/#3）：连接建立后自动进 new-task landing（首次）或恢复最近 session。
 // 五步 bootstrap（onMounted）第 2 步 initConnection 提交连接编排——resolve = 编排已提交
 // 而非 connected（connectWs 异步握手不等待，D2 裁决②）；state==='connected' 是「连接成功」
@@ -137,6 +168,8 @@ onMounted(() => {
 //   避免新实例误判为「首次」再调 initApp（被守卫吞）导致 load 不刷新。
 watch(connectionState, (s) => {
   if (s === 'connected') {
+    // RD-3#2：连接成功即清除启动失败真因（陈旧原因不再出现在后续 failed 屏）
+    runtimeStartError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
     // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
@@ -154,6 +187,10 @@ function onRetry(): void {
 
 onBeforeUnmount(() => {
   teardown()
+  // RD-3#2：runtime-error 订阅随 App 卸载退订（与 setup 顶层安装配对，HMR/测试卸载后
+  // 重挂可再次安装，不留残留 listener）
+  removeRuntimeErrorListener?.()
+  removeRuntimeErrorListener = null
   // 入站守卫消费编排解绑（与 setup 顶层 installInboundFrameGuard 配对：HMR/测试卸载后
   // 重挂可再次安装；core 侧监听与 focus watch 不留残留）。
   uninstallInboundFrameGuard()

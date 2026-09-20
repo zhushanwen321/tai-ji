@@ -226,6 +226,7 @@ export type PiAssistantMessageSubEvent =
   | PiToolcallStartSubEvent
   | PiToolcallDeltaSubEvent
   | PiToolcallEndSubEvent
+  | PiErrorSubEvent
 
 export interface PiTextStartSubEvent {
   type: 'text_start'
@@ -298,6 +299,24 @@ export interface PiToolcallEndSubEvent {
     id: string
     name: string
     arguments: Record<string, unknown>
+  }
+}
+
+/**
+ * 流式错误/中止终结事件（code-harden RT-2#2）：wire 实发 `{type:'error', reason, error}`，
+ * 权威源 = @earendil-works/pi-ai 0.84.4 dist/types.d.ts AssistantMessageEvent 的 error 变体
+ * （`reason: 'aborted'|'error'`，`error` 是终态 AssistantMessage，人类可读文本在其
+ * `errorMessage` 字段）。RPC wire 的 toJsonEvent 只剥 `partial`，error 变体无 partial
+ * 不受影响。wire 上没有 `content` 字段——旧本地声明 `content?: string` 使恒 undefined
+ * 的读取被 as 转换掩盖，provider 真错文本（401/限流/上下文溢出）永不显形。
+ * `error?` 局部形态 = 仅登记 adapter 消费的 errorMessage（完整 AssistantMessage 见 pi-ai），
+ * 可选风格对齐 PiToolcallEndSubEvent.toolCall 的局部形态先例。
+ */
+export interface PiErrorSubEvent {
+  type: 'error'
+  reason: 'aborted' | 'error'
+  error?: {
+    errorMessage?: string
   }
 }
 

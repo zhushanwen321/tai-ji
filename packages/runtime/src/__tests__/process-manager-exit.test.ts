@@ -34,6 +34,8 @@ const fakeProc = {
   stdin: {
     write: vi.fn(() => true),
     once: vi.fn(),
+    // RT-2#1 起 rpc-client 在源头接线 stdin 流错误（stdin.on('error')），mock 面同步补齐
+    on: vi.fn(),
   },
   // 模拟真实进程：收到 SIGTERM/SIGKILL 后异步死亡（信号致死 → exit code null）。
   // 让 destroySession 的 kill() 快速收口（不必等 2s SIGKILL 兜底超时）。
@@ -162,5 +164,23 @@ describe('ProcessManager onExit 死亡通知', () => {
     emitProcExit(1)
 
     expect(exitEvents).toEqual([])
+  })
+
+  it('exit 回调逐个隔离：单 listener 抛错不阻断其余 listener（code-harden RT-4#1）', async () => {
+    const received: string[] = []
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // 上层多播：listener A 抛错（模拟收敛链异常）不得连坐 listener B 的死亡通知
+      pm.onSessionExit(() => { throw new Error('listener A exploded') })
+      pm.onSessionExit((sessionId) => { received.push(sessionId) })
+
+      await pm.createSession('s1', '/project')
+      emitProcExit(null)
+
+      expect(received).toEqual(['s1'])
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('exit callback failed'), expect.any(String))
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 })

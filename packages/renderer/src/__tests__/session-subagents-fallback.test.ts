@@ -59,6 +59,9 @@ vi.mock('@/lib/ipc', () => ({
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
+  // RD-3#2：启动失败真因消费端口（core use-connection init 会调用，mock 须补形状）
+  onRuntimeError: vi.fn(() => () => {}),
+  getRuntimeStartError: vi.fn(async () => null),
   restartRuntime: vi.fn(async () => {}),
 }))
 

@@ -29,6 +29,8 @@ import type { PiMessage, RpcClient } from '../../src/infra/pi/rpc-client.js'
 
 let stdoutDataHandler: ((chunk: string | Buffer) => void) | null = null
 let procExitHandlers: Array<(code: number | null) => void> = []
+/** 捕获的 stdin 'error' handler（RT-2#1 源头收口验证用）。 */
+let stdinErrorHandlers: Array<(err: Error) => void> = []
 
 /** 捕获的 stdin 写入行（sendCommand 驱动用）。 */
 const stdinWrites: string[] = []
@@ -57,6 +59,9 @@ const fakeProc = {
       return true
     }),
     once: vi.fn(),
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      if (event === 'error') stdinErrorHandlers.push(handler as (err: Error) => void)
+    }),
   },
   kill: vi.fn((_signal?: NodeJS.Signals | number) => {
     // kill 即死（mock 语义）：微任务内 emit exit 让 killPiProcess 的 grace 立即短路。
@@ -144,8 +149,10 @@ export function resetRpcClientMock(): void {
   stdinWrites.length = 0
   stdoutDataHandler = null
   procExitHandlers = []
+  stdinErrorHandlers = []
   fakeProc.on.mockClear()
   fakeProc.stdin.write.mockClear()
+  fakeProc.stdin.on.mockClear()
   fakeProc.kill.mockClear()
   fakeProc.exitCode = null
 }
@@ -167,6 +174,18 @@ export async function killAndDriveExit(client: RpcClient): Promise<void> {
 export function emitPiLine(obj: Record<string, unknown>): void {
   if (!stdoutDataHandler) throw new Error('stdout data handler not registered yet')
   stdoutDataHandler(JSON.stringify(obj) + '\n')
+}
+
+/** 把流错误投递给 RpcClient 注册的 stdin 'error' handler（RT-2#1 源头收口验证）。
+ * 流错误是异步 emit（write 同步不抛），与真实 EPIPE 触达路径一致。 */
+export function emitStdinError(err: Error): void {
+  if (stdinErrorHandlers.length === 0) throw new Error('stdin error handler not registered yet')
+  stdinErrorHandlers.forEach((h) => h(err))
+}
+
+/** kill 调用的信号序列（断言 stream error 后 SIGKILL 自愈强杀用）。 */
+export function killSignals(): Array<string | number | undefined> {
+  return fakeProc.kill.mock.calls.map((call) => call[0] as string | number | undefined)
 }
 
 /** 从 stdin 写入里解析出最后一条 JSON 对象（取 sendCommand 注册的 pending id 用）。 */

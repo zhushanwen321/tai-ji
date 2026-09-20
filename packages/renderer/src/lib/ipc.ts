@@ -52,6 +52,16 @@ export function onRuntimeError(cb: (error: { message: string }) => void): () => 
   return api?.onRuntimeError(cb) ?? (() => {})
 }
 
+/**
+ * 读取 main 侧最近一次 runtime 启动失败原因（RD-3#2；null = 无已知失败）。
+ * runtime-error 推送可能早于订阅安装（boot 竞态，webContents.send 静默丢失）——
+ * 连接编排 init / App 挂载时经此拉取兜底（对齐「时序竞争必须主动拉取」规则）。
+ * 无 IPC（web/mock）返回 null。
+ */
+export function getRuntimeStartError(): Promise<string | null> {
+  return api ? api.getRuntimeStartError() : Promise.resolve(null)
+}
+
 /** 监听 runtime 崩溃后重启中事件（supervisor 正在拉起新实例），返回取消函数 */
 export function onRuntimeRestarting(cb: (payload: { attempt: number }) => void): () => void {
   return api?.onRuntimeRestarting(cb) ?? (() => {})

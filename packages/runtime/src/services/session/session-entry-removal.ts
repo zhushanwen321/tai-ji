@@ -44,6 +44,7 @@
 import type { SessionSummary } from '@taiji/shared'
 // D1 台账（crash-forensics §3.3 D1）：deleted 事件唯一挂点 = 本链第 1 步。
 import { getCrashJournal } from '../../infra/crash-journal.js'
+import { toErrorMessage } from '../../utils/errors.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：detach 挂点 = 本链第 2 步。
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 // D5 在途镜像（crash-forensics §3.3 D5）：detach 同点位摘除 = 本链第 3 步。
@@ -90,12 +91,40 @@ export interface SessionEntryRemovalDeps {
   clearMessageBusSession: (sessionId: string) => void
 }
 
+/** 台账 detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
+const CRASH_DIGEST_MAX_CHARS = 2048
+
+/**
+ * 销毁收敛单步异常隔离（code-harden RT-4#1）：销毁链任一步抛错不得打断后续步骤——
+ * 销毁已完成的事实不变，其余旁路设施摘除 / 扇出 / 清理必须继续收敛（终态必达）。
+ * 失败逐步落 console.error + crash 台账（reason=destroy-chain-step-failed）供事后归因。
+ * 台账 append 自身 fire-and-forget（writer 契约不抛，crash-journal.ts），无需二次防护。
+ * 模块级函数形态：removeSessionEntry 编排链与 SessionService.onSessionExit 收敛链共用
+ * 同一隔离范式（两链是同一「销毁收敛」语义的两个入口，不各留一份实现）。
+ */
+export function runDestroyStepIsolated(step: string, sessionId: string, fn: () => void): void {
+  try {
+    fn()
+  } catch (e: unknown) {
+    console.error(`[session-service] destroy chain step failed (sessionId=${sessionId}, step=${step}):`, e)
+    getCrashJournal().append({
+      layer: 'runtime',
+      event: 'crash',
+      reason: 'destroy-chain-step-failed',
+      sessionId,
+      detailDigest: `step=${step}: ${toErrorMessage(e)}`.slice(0, CRASH_DIGEST_MAX_CHARS),
+    })
+  }
+}
+
 export class SessionEntryRemovalOrchestrator {
   constructor(private readonly deps: SessionEntryRemovalDeps) {}
 
   /**
    * 销毁收敛链本体：四路删除路径的唯一完成入口（覆盖面与顺序约束见文件头 SSOT 段）。
    * 步骤序列 = 迁移前 SessionService.removeSessionEntry 体内顺序逐字保持。
+   * 每步经 runDestroyStepIsolated 隔离（code-harden RT-4#1）：单步故障降级为日志 + 台账行，
+   * 不再让 toSummary / dispose 扇出等任一步的异常打断收敛或上抛成 uncaughtException。
    */
   remove(sessionId: string): void {
     // ── 第 1-4 步：「该 session 已不存在」的旁路设施摘除（台账/checkpoint/mirror/收敛环）──
@@ -103,7 +132,9 @@ export class SessionEntryRemovalOrchestrator {
     // 汇聚链（lifecycle.delete 主动删与 onSessionExit 异常退收殓的公共收口，注释自述即此
     // 语义）。不能挂 onSessionExit 链：用户主动删走 destroySession 先删进程表 → exit handler
     // 反查无条目静默返回，不经该链，挂错点事件永不产生（抑制语义，设计 D1 deleted 行）。
-    getCrashJournal().append({ layer: 'pi', event: 'deleted', sessionId })
+    runDestroyStepIsolated('crash-journal.deleted', sessionId, () => {
+      getCrashJournal().append({ layer: 'pi', event: 'deleted', sessionId })
+    })
     // D3 checkpoint（u4）detach 挂点（紧接上条台账行）：本汇聚链是「该 session 已不存在」
     // 的精确时点（主动删 / 进程退出 / forceQuit / restore 清场全覆盖），从活跃清单摘除
     // 条目。pi 意外崩死也走本点（先摘后 respawn 成功再经 onSessionRegistered 重新加入，
@@ -112,51 +143,60 @@ export class SessionEntryRemovalOrchestrator {
     // 注意：destroyAll（shutdown）刻意不经本点（lifecycle.clear 直调）——进程将亡时
     // checkpoint 必须保留原样：它正是下次 unclean 启动的恢复依据（契约 1 runtime 任何
     // 退出路径不删文件）。
-    try {
+    runDestroyStepIsolated('checkpoint.detach', sessionId, () => {
       getRuntimeCheckpointStore().removeSession(sessionId)
-    } catch (e: unknown) {
-      // best-effort 降级：旁路设施故障不得打断销毁收敛链（销毁已完成的事实不变）。
-      console.error(`[session-service] checkpoint detach removal failed (sessionId=${sessionId}):`, e)
-    }
+    })
     // D5 mirror（偏差 #20 接线）：detach 同点位摘除条目——「该 session 已不存在」的精确
     // 时点与 checkpoint 同语义（主动删 / 进程退出 / forceQuit / restore 清场全覆盖）。
     // pi 崩死路径先摘、respawn 成功经 onSessionRegistered 预置重建（新 reporting epoch）。
-    try {
+    runDestroyStepIsolated('mirror.detach', sessionId, () => {
       inflightMirror.dropSession(sessionId)
-    } catch (e: unknown) {
-      // best-effort 降级：旁路设施故障不得打断销毁收敛链（销毁已完成的事实不变）。
-      console.error(`[session-service] mirror detach removal failed (sessionId=${sessionId}):`, e)
-    }
+    })
     // D4：收敛环定时器清理（所有删除路径汇聚点：主动删 / 进程退出 / forceQuit / restore
     // 清场）。只停环不清标记——forceQuit（K1/K2）尾步经过本汇聚链，标记必须存活到后续
     // restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts 模块级
     // Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
-    userStoppedGate.disposeForEntryRemoval(sessionId)
+    runDestroyStepIsolated('userStoppedGate.disposeForEntryRemoval', sessionId, () => {
+      userStoppedGate.disposeForEntryRemoval(sessionId)
+    })
 
     // ── 第 5-9 步：Map 条目删除与删除回调扇出 ──
     // S3-W2：删除前缓存 summary（插件 didDestroy 通知需要 SessionInfo；删除后 Map 查不到）。
     // Map 无条目（防御路径）时构造最小形状——id 之外的字段无从得知，宁发少知不发错。
+    // toSummary 失败同样降级最小形状（宁发少知不发错；步骤 6 的条目删除不得被打断）。
     const session = this.deps.getSession(sessionId)
-    const destroyedSummary: SessionSummary = session
-      ? this.deps.toSummary(session)
-      : { id: sessionId, label: sessionId, cwd: '', status: 'dead', lastActiveAt: 0, modelId: '', tokenCount: 0 }
+    const minimalDestroyedSummary: SessionSummary = { id: sessionId, label: sessionId, cwd: '', status: 'dead', lastActiveAt: 0, modelId: '', tokenCount: 0 }
+    let destroyedSummary: SessionSummary = minimalDestroyedSummary
+    if (session) {
+      runDestroyStepIsolated('toSummary', sessionId, () => {
+        destroyedSummary = this.deps.toSummary(session)
+      })
+    }
     // 销毁 9 步的第 ② 步（设计 D2②）：委托 lifecycle 删 Map 条目——所有者执行，纯删除
     // 不发事件（其余步骤编排权在本编排器，体内顺序 = 迁移前行为等价的一部分）。
-    this.deps.removeEntry(sessionId)
+    runDestroyStepIsolated('lifecycle.removeEntry', sessionId, () => {
+      this.deps.removeEntry(sessionId)
+    })
     // u8（crash-resilience D7-② 取消语义）：本汇聚链是「该 session 已不存在」的精确时点
     // ——取消 pending 自动恢复 timer（5s 窗口内用户删除 session，若不取消，timer 触发会
     // 为已删 session spawn pi 再附着失败，空转 spawn+kill）。只清 timer 不清失败计数
     //（本汇聚链被 restoreSession 清场复用，清计数会破坏熔断——理由见 pi-respawn.cancel）。
     // 覆盖面：主动删 / onSessionExit 进程退出（先 cancel 后 schedule，顺序安全）/ forceQuit
     // / restore 清场全部删除路径。
-    this.deps.cancelRespawn(sessionId)
+    runDestroyStepIsolated('respawn.cancel', sessionId, () => {
+      this.deps.cancelRespawn(sessionId)
+    })
     // R4（idle-pi-reclamation D2 #6）：真删除是 lastViewedAt 条目的清理挂点——本汇聚链是
     // 「该 session 已不存在」的精确时点（与 respawn.cancel 同因同挂点）。回收态不清
     // （reclaimManagedSession 不经本汇聚链，回收态保留条目是 D2 #6 设计意图）。
-    this.deps.clearSessionViewed(sessionId)
+    runDestroyStepIsolated('clearSessionViewed', sessionId, () => {
+      this.deps.clearSessionViewed(sessionId)
+    })
     // R3：所有删除路径（lifecycle.delete 主动删 + onSessionExit 进程异常退）汇聚于此，
     // 触发 onSessionDelete 清 ReloadOrchestrator.pendingReload 残留。
-    this.deps.fireOnSessionDelete(sessionId)
+    runDestroyStepIsolated('onSessionDelete', sessionId, () => {
+      this.deps.fireOnSessionDelete(sessionId)
+    })
 
     // ── 第 10-11 步：销毁通知扇出与后台任务收殓 ──
     // S3-W2 + D6a：同一汇聚点触发回调列表（插件 didDestroy 投递 + 挂起 UI 请求清理等）。
@@ -181,7 +221,9 @@ export class SessionEntryRemovalOrchestrator {
     // background-task-sidebar D8③（u-runtime-rpc③）：watched 集合退订——session 销毁后
     // 该 sid 的 registry 不再参与 mtime 轮询/变更检测。与 reapSessionBackgroundTasks 同挂
     // 本汇聚链（主动删 / 进程退出 / forceQuit / restore 清场全覆盖，D8④ runtime 侧腿）。
-    this.deps.unwatchBackgroundTasks(sessionId)
+    runDestroyStepIsolated('backgroundTasks.unwatch', sessionId, () => {
+      this.deps.unwatchBackgroundTasks(sessionId)
+    })
 
     // ── 第 12-13 步：per-session 域状态销毁与 MessageBus 分区清理 ──
     // wave:perf-w20（D6-1）：session 删除 / pi 进程退出时清历史重建缓存 + lastLeafId
@@ -193,24 +235,34 @@ export class SessionEntryRemovalOrchestrator {
     // 「回收→恢复零重建」路径被显式放弃（证据：packages/runtime/src/__tests__/services/
     // idle-pi-reclaim-integration.test.ts 阶段 4）。S6 起清理随域迁入 historyReader
     //（onSessionDisposed 直调形态，traceSync/projection 同款）。
-    this.deps.disposeHistoryReader(sessionId)
+    runDestroyStepIsolated('historyReader.onSessionDisposed', sessionId, () => {
+      this.deps.disposeHistoryReader(sessionId)
+    })
     // session-trace（A33）：同汇聚点清 trace 增量腿基线与串行链（与 historyCache 同因——
     // 基线跨进程存活无意义；链已 settled，删 Map 条目只释放槽位）。S4：清理随域迁入
     // TraceSync（各域 onSessionDisposed 直调形态）。
-    this.deps.disposeTraceSync(sessionId)
+    runDestroyStepIsolated('traceSync.onSessionDisposed', sessionId, () => {
+      this.deps.disposeTraceSync(sessionId)
+    })
     // W7/W8 + W12：销毁 per-session 实例组与 state_changed diff 基线（与 historyCache.delete
     // 同汇聚点——主动删 + 进程退出）。dispose 停防抖/退避/周期兜底全部定时器。S5 起清理
     // 随域迁入 projection（onSessionDisposed 直调形态，traceSync 同款）。
-    this.deps.disposeProjection(sessionId)
+    runDestroyStepIsolated('projection.onSessionDisposed', sessionId, () => {
+      this.deps.disposeProjection(sessionId)
+    })
     // W18：销毁 record entry 派生缓存（同汇聚点）。停防抖定时器（在途 inflight 的拉取
     // 完成后 applyRecordEntries 的 hasSession 守卫拦住发布，不复活已清 bus 条目）。S6 起
     // 清理随域迁入 records（onSessionDisposed 直调形态，traceSync/projection 同款）。
-    this.deps.disposeRecords(sessionId)
+    runDestroyStepIsolated('records.onSessionDisposed', sessionId, () => {
+      this.deps.disposeRecords(sessionId)
+    })
     // wave:runtime-wiring（GAP1 决策）：session 销毁时清理 MessageBus 的该 session 状态
     // （ring buffer + state snapshot + 订阅者集合 + 反查表）。幂等（ES1：session 不存在 no-op）。
     // 不在 pi flush / turn 结束时清理——ring 容量 1000 会自然 FIFO 淘汰旧 turn delta，
     // turn 边界清理是阶段 2 的精细化策略（届时评估）。
-    this.deps.clearMessageBusSession(sessionId)
+    runDestroyStepIsolated('messageBus.clearSession', sessionId, () => {
+      this.deps.clearMessageBusSession(sessionId)
+    })
     // [B5 触发面收窄 2026-09-15] plugin sessionData 清理（tombstone + trash + 分区摘除）
     // 的历史挂点在本尾段，已迁出至 lifecycle.delete 真删除路径（session-lifecycle.ts delete
     // 内 B5 注释）。迁出理由与跨文件顺序约束见文件头 SSOT 段「B5 禁止挂回」。
