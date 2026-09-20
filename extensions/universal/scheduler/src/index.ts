@@ -4,6 +4,7 @@ import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
 import { importLegacyStore } from './importer.js'
+import { abortPendingScheduleForms } from './interaction.js'
 import { SchedulerRuntime, type SchedulerModelOps } from './runtime.js'
 import { SchedulerService } from './service.js'
 import {
@@ -133,6 +134,10 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   pi.on('agent_settled', () => service?.runtime.handleRunClosed())
 
   pi.on('session_shutdown', async () => {
+    // 命令路径挂起表单的收口（设计 §6.2 生命周期案 ①②③）：session_shutdown
+    //（reason ∈ quit/reload/new/resume/fork）→ abort 挂起的表单交互（不创建、不 toast）。
+    // taiji 内「切到另一会话」不触发本事件，表单保留且仍有效（有意行为）。
+    abortPendingScheduleForms()
     // append-only 模型无 persistSync（runtime 已按 op appendEntry 落盘到 owner session JSONL）；
     // widgetTimer 已移除（由 runtime.onAfterTick 替代）。仅停止 scheduler tick。
     if (service) {
@@ -149,10 +154,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     }
   })
 
-  // 注册 schedule tool
+  // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /scheduler 命令）。
   // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
-  // 转调 handleSchedule 六步流（预校验 → headless 分支 → 交互确认 → 取消 → 创建）。
-  // pi 转传供 channel-error 时禁用本会话 schedule 工具（setActiveTools）。
+  // 转调 handleSchedule 直建流（预校验 → abort 检查 → service.create）。
   // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
   // isError 被 agent-loop 丢弃）；getService() 未初始化异常穿透到这里，包装
   // 'Error: Scheduler not initialized' 格式（R3 格式保持）。
@@ -161,12 +165,11 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     label: 'Schedule',
     description:
       'Create a scheduled task that fires a message at intervals or cron schedule. ' +
-      'The call first opens a confirmation form pre-filled with your draft (time/model/prompt); ' +
-      'the task is created only after the user confirms it. In headless (non-interactive) ' +
-      'sessions there is no form: the task is created directly from the parameters and the ' +
-      'result notes it was not user-confirmed. Only initiate when the user asks ' +
-      'for a scheduled task. If the user cancels the form, the task is NOT created — do not ' +
-      'assume a configuration and do not retry.',
+      'The task is created immediately (no confirmation form). Call it only when the user ' +
+      'has already expressed the timing; if the timing or the reminder content is missing ' +
+      'or ambiguous, clarify with the user first — never guess a schedule. The task only ' +
+      'fires while this session stays open. The response includes the task id and next run ' +
+      'time(s); repeat them back to the user so the task is easy to verify or undo.',
     parameters: ScheduleParams,
     promptGuidelines: scheduleGuidelines,
     async execute(
@@ -174,10 +177,10 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       params: ScheduleParamsT,
       signal: AbortSignal | undefined,
       _onUpdate,
-      ctx: ExtensionContext,
+      _ctx: ExtensionContext,
     ) {
       try {
-        return await handleSchedule(pi, getService(), params, ctx, signal)
+        return await handleSchedule(getService(), params, signal)
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }
@@ -206,7 +209,8 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     },
   })
 
-  // 注册 /schedule command。传 getter 而非 service 实例：factory 执行时 service 还是 null。
+  // 注册 /scheduler 命令（/schedule 为 alias）。传 getter 而非 service 实例：factory 执行时
+  // service 还是 null。
   registerScheduleCommand(pi, () => service)
 
   /**

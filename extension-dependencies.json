@@ -166,7 +166,7 @@
         {
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
-          "reason": "代码层静态 import uiFormInteract/isScheduleFormResult/ScheduleDraft/ScheduleFormResult（src/tool.ts，创建确认走统一表单协议 ui-form）与 dateToOnceCron/onceCronToDate/ScheduleDraft/ScheduleFormResult（src/create-form-component.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import uiFormInteract/isScheduleFormResult/ScheduleDraft/ScheduleFormResult（src/interaction.ts，命令路径创建表单走统一表单协议 ui-form）与 dateToOnceCron/onceCronToDate/ScheduleDraft/ScheduleFormResult（src/create-form-component.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

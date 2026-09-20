@@ -169,9 +169,9 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 **代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
 
-### Schedule Create（schedule 创建确认，2026-09-18）
+### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
-`schedule` 工具创建路径的「先确认后创建」交互：agent 提交预填草稿，用户可视化确认/调整后任务才创建，取消 = 不创建（agent 收到明确 cancelled 语义，不猜测、不重试）。交互入口已收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传，打开即可一键确认），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，确认回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`。scheduler-create 模块现为共享资产层：草稿 `ScheduleDraft`（LLM 参数即预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
+调度任务的创建入口两路：**人侧 `/scheduler` 命令打开创建表单**（无参 = 空草稿、带参 `<schedule> <prompt>` = 预填；命令 handler 异步打开、立即返回，填表时长不受 prompt RPC 60s 窗口约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时要求模型先经 ask-user / 对话澄清）。交互入口收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`；`json` / `print` 模式无交互通道，带参直建、无参/失败一律 `throw`（stderr 是唯一可见通道）。scheduler-create 模块为共享资产层：草稿 `ScheduleDraft`（表单预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
 
 ### 计划模式（Plan Mode）
 
