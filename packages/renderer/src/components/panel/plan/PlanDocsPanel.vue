@@ -40,9 +40,9 @@
   >
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.noPlan') }}</p>
     <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('plan.drawer.planHint') }}</p>
-    <!-- 首拉失败（分区 loadError，u1-store 错误通路）：view 为空时横幅不渲染（isActive 门），
-         错误若只落横幅呈全面即静默降级（C-U1）——本面板空态就近呈现「错误 + 恢复指引」，
-         与 PlanModeBanner 错误行同款形态 -->
+    <!-- 首拉失败（分区 loadError，u1-store 错误通路）：view 为空时状态带不渲染（isActive 门），
+         错误若只落状态带呈全面即静默降级（C-U1）——本面板空态就近呈现「错误 + 恢复指引」，
+         与 PlanModeBar 状态带错误行同款形态 -->
     <p
       v-if="loadError"
       data-testid="plan-docs-load-error"
@@ -151,9 +151,11 @@
           :session-id="sessionId ?? undefined"
         />
       </template>
-      <!-- 评论草稿列表（D6：提交前 GUI 草稿，可多条可删除；提交打包由 PlanReviewBar 负责） -->
+      <!-- 评论草稿列表（D6：提交前 GUI 草稿，可多条可删除；提交打包由 PlanReviewBar 负责。
+           §3.5 草稿回看锚点：审批条评论计数点击 → 本面板消费 plan-store 回看请求滚动至此） -->
       <div
         v-if="drafts.length > 0"
+        ref="draftsEl"
         data-testid="plan-comment-drafts"
         class="mt-6 border-t border-border pt-3"
       >
@@ -212,7 +214,7 @@
  * 降级条目——enter 恒设 planFilePath，「上轮残留」与「本轮未创建」不可区分，条目可点即
  * E2 假错误（已接受代价：isActive && docs=0 期间 legacy 条目暂不可回看，设计 §3.2 登记）。
  */
-import { computed, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2, X } from '@lucide/vue'
 import { Button, MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
@@ -220,6 +222,7 @@ import type { PlanDocMeta } from '@taiji/shared'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import * as fileApi from '@taiji/core/transport/api/domains/file'
 import { useChatStore } from '@/stores/chat'
+import { usePlanStore } from '@/stores/plan-store'
 import { usePlanState } from '@/composables/use-plan-sync'
 import PlanCommentPopover from './PlanCommentPopover.vue'
 
@@ -358,4 +361,27 @@ watch(
   () => void loadSelected(),
   { immediate: true },
 )
+
+// ── 草稿回看消费（§3.5）：审批条评论计数点击 → 打开/聚焦 drawer 计划产物 tab 后滚动
+// 到草稿列表。openDrawerTab 由 PlanReviewBar 调用，本面板只消费 plan-store 的回看请求：
+// ① 已挂载时 watch seq 递增即时消费；② drawer 关闭时点击（本面板未挂载）由挂载钩子
+// 补消费——consumed 标记保证请求只消费一次，drawer 重开/重挂载不重复滚动。
+const planStore = usePlanStore()
+const draftsEl = ref<HTMLElement | null>(null)
+
+function consumeDraftsReveal(): void {
+  if (!planStore.draftsRevealPending) return
+  planStore.markDraftsRevealConsumed()
+  if (drafts.value.length === 0) return
+  // nextTick：请求同帧触发的 DOM 更新（tab 渲染/草稿列表）先落位再滚
+  void nextTick(() => {
+    draftsEl.value?.scrollIntoView({ block: 'start' })
+  })
+}
+
+watch(
+  () => planStore.draftsRevealSeq,
+  () => consumeDraftsReveal(),
+)
+onMounted(consumeDraftsReveal)
 </script>

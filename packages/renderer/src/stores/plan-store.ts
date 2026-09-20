@@ -73,6 +73,31 @@ interface PlanPartition {
   drafts: PlanReviewComment[]
   /** 首拉失败错误（AGENTS.md 规则 5 错误通路：分区级落错误供 u1-banner 呈现，不覆盖现有 view） */
   loadError: string | null
+  /**
+   * 草稿回看请求（§3.5）：审批条评论计数可点 → requestDraftsReveal 递增序号并置
+   * consumed=false；PlanDocsPanel 消费（滚动到草稿列表）后 markDraftsRevealConsumed。
+   * 请求先于消费方挂载到达的窗口（drawer 关闭时 PlanDocsPanel 未挂载）由 consumed
+   * 标记跨挂载保留——「未消费的回看请求」持久到消费为止，重复挂载不重滚。
+   */
+  draftsRevealSeq: number
+  draftsRevealConsumed: boolean
+}
+
+/**
+ * enter 翻转清兜底（§3.5）：sid 分区内 isActive 旧值 false→有 的翻转（新一轮 plan 进入）
+ * 清该 sid 残留草稿——新审阅轮 = 干净草稿区。覆盖 agent 自退 / 崩溃等绕过 GUI 确认的
+ * 路径（C-U2 退出路径变体：不兜底则同 session 再进 plan 时审批条显旧计数、误注入旧评论）。
+ *
+ * 设计禁令（§3.5 落点定死）：本兜底只允许挂在本 store 的分区写入共同出口（applyFrame 与
+ * loadPlanState 双路 updateFor 内、写 view 前对比旧值），**禁止改挂「组件 watch 焦点视图」
+ * 落点**——从非 plan session 切到审阅中的 plan session 时焦点视图 isActive 呈假「无→有」
+ * 翻转，会误清该 session 正在审阅的草稿。本函数按 sid 分区对比新旧 view，不读焦点实时值，
+ * WS 帧 / 首拉两条写路径天然同覆。
+ */
+function clearDraftsOnPlanEnter(p: PlanPartition, next: PlanStateView | null): void {
+  const wasActive = p.view?.isActive === true
+  const nowActive = next?.isActive === true
+  if (!wasActive && nowActive) p.drafts.length = 0
 }
 
 export const usePlanStore = defineStore('plan', () => {
@@ -83,7 +108,7 @@ export const usePlanStore = defineStore('plan', () => {
    */
   const focusedSid = ref<string | null>(null)
   const scoped = useSessionScopedState<PlanPartition>(focusedSid, () =>
-    reactive<PlanPartition>({ view: null, drafts: [], loadError: null }),
+    reactive<PlanPartition>({ view: null, drafts: [], loadError: null, draftsRevealSeq: 0, draftsRevealConsumed: true }),
   )
 
   // ── actions ──
@@ -100,6 +125,7 @@ export const usePlanStore = defineStore('plan', () => {
    */
   function applyFrame(sid: string, planState: PlanStateView): void {
     scoped.updateFor(sid, (p) => {
+      clearDraftsOnPlanEnter(p, planState)
       p.view = planState
       p.loadError = null
     })
@@ -122,6 +148,7 @@ export const usePlanStore = defineStore('plan', () => {
       const reply = await command('session.getPlanState', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
       const planState = reply?.planState ?? null
       scoped.updateFor(sessionId, (p) => {
+        clearDraftsOnPlanEnter(p, planState)
         p.view = planState
         p.loadError = null
       })
@@ -157,6 +184,23 @@ export const usePlanStore = defineStore('plan', () => {
     })
   }
 
+  // ── 草稿回看请求（§3.5：审批条评论计数可点 → drawer 计划产物 tab 滚动到草稿列表）──
+
+  /** 发一次回看请求（焦点分区：seq 递增 + consumed 复位；消费方 = PlanDocsPanel）。 */
+  function requestDraftsReveal(): void {
+    scoped.update((p) => {
+      p.draftsRevealSeq += 1
+      p.draftsRevealConsumed = false
+    })
+  }
+
+  /** 标记回看请求已消费（滚动完成或无可滚目标；防 drawer 重开/重挂载重复滚动）。 */
+  function markDraftsRevealConsumed(): void {
+    scoped.update((p) => {
+      p.draftsRevealConsumed = true
+    })
+  }
+
   // ── 焦点只读视图（派生量不落盘：阶段由 derivePlanStage 推导，docs 与 skills 两字段原样透出供降级判定——D4）──
 
   /** 焦点 session 的 PlanStateView（null = 无 plan 状态）。 */
@@ -171,6 +215,14 @@ export const usePlanStore = defineStore('plan', () => {
   /** 焦点 session 的首拉错误（null = 无错误；非空时 u1-banner 呈现错误态）。 */
   const planLoadError: ComputedRef<string | null> = computed(() => scoped.current.value.loadError)
 
+  /** 焦点分区回看请求序号（watch 源：递增即新请求）。 */
+  const draftsRevealSeq: ComputedRef<number> = computed(() => scoped.current.value.draftsRevealSeq)
+
+  /** 焦点分区是否存在未消费的回看请求（PlanDocsPanel 消费门）。 */
+  const draftsRevealPending: ComputedRef<boolean> = computed(
+    () => scoped.current.value.draftsRevealSeq > 0 && !scoped.current.value.draftsRevealConsumed,
+  )
+
   return {
     focusedSid,
     syncFocus,
@@ -179,9 +231,13 @@ export const usePlanStore = defineStore('plan', () => {
     addDraftComment,
     removeDraftComment,
     clearDraftComments,
+    requestDraftsReveal,
+    markDraftsRevealConsumed,
     planView,
     planStage,
     draftComments,
     planLoadError,
+    draftsRevealSeq,
+    draftsRevealPending,
   }
 })

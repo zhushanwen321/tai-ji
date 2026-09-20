@@ -15,6 +15,8 @@
  *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」钉死）
  * - 划选评论草稿（quote 捕获后经 Popover emit → 草稿新增 / 删除；浮条细节归 plan-comment-popover.test.ts）
  * - 修订刷新（G3）：version bump / reviewState 离开 revising → 重新 file.read
+ * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
+ *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
  *
  * mock 形态照 plan-mode-banner.test.ts（command spread actual 保真实 events 通道）+
  * command-doc-panel.test.ts（file.read mock + MarkdownRenderer 按名 stub + useChatViewDeps
@@ -421,5 +423,87 @@ describe('PlanDocsPanel 划选评论草稿（D6：quote 锚定、多条、可删
     const rest = wrapper.findAll('[data-testid="plan-comment-draft-item"]')
     expect(rest).toHaveLength(1)
     expect(rest[0]!.text()).toContain('quote-b')
+  })
+})
+
+// ── §3.5 草稿回看滚动消费（u-review-source-ui）──
+
+describe('PlanDocsPanel 草稿回看消费（§3.5：审批条计数点击 → 滚动到草稿列表）', () => {
+  let scrollIntoViewMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    // jsdom 未实现 scrollIntoView：直接替换原型方法捕获调用（用例内断言调用次数）
+    scrollIntoViewMock = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoViewMock as unknown as typeof Element.prototype.scrollIntoView
+  })
+
+  function primeDraftsWithView(store: ReturnType<typeof usePlanStore>): void {
+    // 先建立 isActive=true 旧 view 再加草稿——组件挂载首拉 resolve 后 true→true 不触发翻转清，
+    // 草稿保留（同时反向覆盖「首拉不误清审阅中草稿」）
+    store.applyFrame(SID, viewOf())
+    store.addDraftComment({ quote: '回看引文', comment: '回看评语' })
+  }
+
+  it('挂载补消费：drawer 关闭期间到达的回看请求（pending）→ 挂载后滚动到草稿列表并标记消费', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+    store.requestDraftsReveal()
+    expect(store.draftsRevealPending).toBe(true)
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="plan-comment-drafts"]').exists()).toBe(true)
+    expect(store.draftsRevealPending).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('已挂载 watch 消费：mount 后新回看请求 → 立即滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).not.toHaveBeenCalled()
+
+    store.requestDraftsReveal()
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('consumed 防重滚：请求消费一次后，drawer 重开（重挂载）不再滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+    store.requestDraftsReveal()
+
+    const first = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    first.unmount()
+
+    const second = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1) // 不重复滚动
+    second.unmount()
+  })
+
+  it('无草稿（drafts=0）：请求照常消费（标记 consumed）但不滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    store.applyFrame(SID, viewOf())
+    store.requestDraftsReveal()
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled()
+    expect(store.draftsRevealPending).toBe(false)
+    expect(wrapper.find('[data-testid="plan-comment-drafts"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

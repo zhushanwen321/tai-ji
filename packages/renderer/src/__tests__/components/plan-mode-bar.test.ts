@@ -1,7 +1,8 @@
 /**
- * PlanModeBar 组件单测 —— plan-mode-ux-refactor u-plan-bar（状态带合并，设计 §3.3 D1）。
+ * PlanModeBar 组件单测 —— plan-mode-ux-refactor u-plan-bar（状态带合并，设计 §3.3 D1）
+ * + u-review-source-ui（§3.5 退出确认 Popover / 退出清草稿）。
  *
- * 覆盖（impl-plan u-plan-bar 验收条款 + 验收计划 A1/A7 降级断言）：
+ * 覆盖（impl-plan u-plan-bar 验收条款 + u-review-source-ui 增量）：
  * - 承接清单① 常驻订阅：isActive=false 时组件常驻（无 DOM），planReview 请求仍入
  *   extensionUIStore（PlanModeBar setup 自持 useExtensionUI(planReviewFilter) 实例——
  *   右区 PlanReviewBar 此时未创建，本实例是唯一订阅面）；isActive 翻转 true 后右区
@@ -10,7 +11,10 @@
  *   组件自 PanelContainer 横幅/审批条迁移到 PlanModeBar）
  * - 左区渲染：模式名 + 三阶段点（tooltip 含义文案）+ 退出；skills 默认不渲染（有技能
  *   收进模式名 title）；hint 长句不再存在（组件无该文案挂点）
- * - 退出命令：click → command('session.abortPlan')；失败 → E9 错误行就近呈现
+ * - §3.5 退出确认 Popover：点退出只开确认层（不发 abortPlan）；分情境警示（revising =
+ *   「退出将中止修订」优先 / 有评论草稿 =「N 条评论草稿将丢弃」）；确认后才发 abortPlan
+ *   且草稿清空；取消不发；degraded 右区退出按钮（PlanReviewBar exit 事件）复用本确认层
+ * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
  * - 右区四分支：ready 三键 / revising / degraded / 隐藏（仅左区）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
@@ -19,11 +23,13 @@
  * mock 形态照抄 plan-review-bar.test.ts（command spread actual 保真实 events 通道 +
  * extension domain mock + 真实 InternalEventBus）；状态驱动用 store.applyFrame（真实 WS
  * 帧路径）。i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
+ * 退出确认层经 reka Popover Portal 渲染在 document.body（UpdateButton.test.ts 同款断言
+ * 形态）：mount attachTo document.body + 用例末尾统一 unmount（afterEach），禁 innerHTML 强删。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-mode-bar.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
@@ -115,11 +121,22 @@ function emitPlanReviewRequest(requestId = 'pr-1'): void {
   } as never)
 }
 
+/** 挂载注册表：reka Popover Portal 内容挂在 document.body，用例末尾统一 unmount 清理
+ *  （禁 document.body.innerHTML='' 强删——破坏 Vue 内部 vnode 引致 unmount 崩溃，UpdateButton 先例） */
+const mountedWrappers: VueWrapper[] = []
+
 async function mountBar(view: PlanStateView | null = viewOf()): Promise<VueWrapper> {
   commandMock.mockResolvedValue({ sessionId: SID, planState: view })
-  const wrapper = mount(PlanModeBar, { props: { sessionId: SID } })
+  const wrapper = mount(PlanModeBar, { props: { sessionId: SID }, attachTo: document.body })
+  mountedWrappers.push(wrapper)
   await flushAsync()
   return wrapper
+}
+
+/** 退出确认层（Popover Portal 在 document.body，wrapper.find 不可见）；null = 未打开 */
+function findExitConfirm(): DOMWrapper<Element> | null {
+  const el = document.body.querySelector('[data-testid="plan-mode-bar-exit-confirm"]')
+  return el ? new DOMWrapper(el) : null
 }
 
 async function flushAsync(): Promise<void> {
@@ -134,6 +151,13 @@ beforeEach(() => {
   setActivePinia(createPinia())
   commandMock.mockReset()
   mockBus = new InternalEventBus()
+})
+
+afterEach(() => {
+  while (mountedWrappers.length > 0) {
+    const w = mountedWrappers.pop()
+    w?.unmount()
+  }
 })
 
 describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
@@ -223,19 +247,108 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
     expect(wrapper.find('[data-testid="plan-mode-bar-title"]').attributes('title')).toContain('tech-design · dev-flow')
   })
 
-  it('退出按钮 click → session.abortPlan 命令发出', async () => {
+  it('退出按钮 click 只开确认层（§3.5 确认前置）：abortPlan 未发、确认层含标题与两键', async () => {
     const wrapper = await mountBar()
     await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
     await flushAsync()
 
-    const abortCall = commandMock.mock.calls.find((c) => c[0] === 'session.abortPlan')
-    expect(abortCall?.[1]).toEqual({ sessionId: SID })
+    const confirm = findExitConfirm()
+    expect(confirm).not.toBeNull()
+    expect(confirm!.text()).toContain('退出计划模式？')
+    expect(confirm!.find('[data-testid="plan-mode-bar-exit-cancel"]').exists()).toBe(true)
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
   })
 
-  it('退出命令失败 → E9 错误行就近呈现（内嵌恢复动作），状态带保持原状', async () => {
+  it('确认后才发 abortPlan（session.abortPlan 命令参数 {sessionId}）+ 确认层关闭', async () => {
+    const wrapper = await mountBar()
+    await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
+
+    await findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-confirm"]').trigger('click')
+    await flushAsync()
+
+    const abortCall = commandMock.mock.calls.find((c) => c[0] === 'session.abortPlan')
+    expect(abortCall?.[1]).toEqual({ sessionId: SID })
+    expect(findExitConfirm()).toBeNull()
+  })
+
+  it('取消 → 确认层关闭且 abortPlan 不发', async () => {
+    const wrapper = await mountBar()
+    await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+
+    await findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-cancel"]').trigger('click')
+    await flushAsync()
+
+    expect(findExitConfirm()).toBeNull()
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
+  })
+
+  it('revising 警示优先：「agent 正在修订文档，退出将中止修订」（GUI 草稿在 revise 提交时已清，警示指 agent 侧）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'revising' }))
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' }) // 残留草稿也不改判：revising 优先
+    await flushAsync()
+    await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+
+    const confirm = findExitConfirm()
+    expect(confirm!.find('[data-testid="plan-mode-bar-exit-warn-revising"]').text()).toContain('退出将中止修订')
+    expect(confirm!.find('[data-testid="plan-mode-bar-exit-warn-drafts"]').exists()).toBe(false)
+  })
+
+  it('ready 且有评论草稿 →「N 条评论草稿将丢弃」警示（计数随 drafts）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
+    usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
+    await flushAsync()
+    await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+
+    const warn = findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-warn-drafts"]')
+    expect(warn.exists()).toBe(true)
+    expect(warn.text()).toContain('2 条评论草稿将丢弃')
+    expect(findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-warn-revising"]').exists()).toBe(false)
+  })
+
+  it('确认退出即清草稿（§3.5）：drafts 2 条 → 确认后焦点分区草稿清空', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
+    usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
+    await flushAsync()
+    expect(usePlanStore().draftComments).toHaveLength(2)
+
+    await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+    await findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-confirm"]').trigger('click')
+    await flushAsync()
+
+    expect(usePlanStore().draftComments).toHaveLength(0)
+  })
+
+  it('degraded 右区退出按钮（PlanReviewBar exit 事件）复用同一确认层（确认守卫单入口）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="plan-review-degraded-exit"]').trigger('click')
+    await flushAsync()
+
+    expect(findExitConfirm()).not.toBeNull()
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
+
+    // 同一确认层确认后发 abortPlan
+    await findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-confirm"]').trigger('click')
+    await flushAsync()
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(true)
+  })
+
+  it('确认后退出命令失败 → E9 错误行就近呈现（内嵌恢复动作），状态带保持原状', async () => {
     const wrapper = await mountBar()
     commandMock.mockRejectedValueOnce(new Error('conn lost'))
     await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
+    await flushAsync()
+    await findExitConfirm()!.find('[data-testid="plan-mode-bar-exit-confirm"]').trigger('click')
     await flushAsync()
 
     const err = wrapper.find('[data-testid="plan-mode-bar-error"]')

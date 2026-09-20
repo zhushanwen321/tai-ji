@@ -50,22 +50,70 @@
         </span>
       </template>
     </span>
-    <!-- 退出（自 PlanModeBanner 迁移；D5：emit session.abortPlan WS 命令，E10：挂起 select
-         期退出联动在 extension 侧。确认 Popover 分情境警示归 u-review-source-ui 后续单元） -->
-    <Button
-      variant="ghost"
-      size="sm"
-      class="ml-auto shrink-0 gap-1 rounded-[var(--radius-sm)] px-[7px] py-[3px] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
-      data-testid="plan-mode-bar-exit"
-      :disabled="exiting"
-      @click="onExit"
-    >
-      {{ t('plan.modeBar.exit') }}
-      <X class="size-3" aria-hidden="true" />
-    </Button>
+    <!-- 退出（自 PlanModeBanner 迁移；D5：确认后 emit session.abortPlan WS 命令，E10：
+         挂起 select 期退出联动在 extension 侧）。§3.5 退出确认 Popover：确认前置 + 分情境
+         警示（revising = agent 侧修订将中止 / 有评论草稿 = 将丢弃，按序取首个命中）；
+         degraded 右区退出按钮经 PlanReviewBar exit 事件复用本 Popover（确认守卫单入口） -->
+    <Popover :open="exitConfirmOpen" @update:open="exitConfirmOpen = $event">
+      <PopoverTrigger as-child>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="ml-auto shrink-0 gap-1 rounded-[var(--radius-sm)] px-[7px] py-[3px] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+          data-testid="plan-mode-bar-exit"
+          :disabled="exiting"
+        >
+          {{ t('plan.modeBar.exit') }}
+          <X class="size-3" aria-hidden="true" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" :collision-padding="8" class="w-64 p-3">
+        <div data-testid="plan-mode-bar-exit-confirm" class="flex flex-col gap-2.5">
+          <p class="text-[length:var(--text-xs)] font-medium text-neutral-fg">
+            {{ t('plan.modeBar.exitConfirmTitle') }}
+          </p>
+          <!-- 警示行（分情境，可共存时按优先级取首个）：revising 优先（与审批条分支
+               竞态安全序一致——revising 态 GUI 草稿已在 revise 提交时清空，两警示语义互斥） -->
+          <p
+            v-if="reviewState === 'revising'"
+            data-testid="plan-mode-bar-exit-warn-revising"
+            class="text-[length:var(--text-2xs)] leading-relaxed text-warn"
+          >
+            {{ t('plan.modeBar.exitWarnRevising') }}
+          </p>
+          <p
+            v-else-if="drafts.length > 0"
+            data-testid="plan-mode-bar-exit-warn-drafts"
+            class="text-[length:var(--text-2xs)] leading-relaxed text-warn"
+          >
+            {{ t('plan.modeBar.exitWarnDrafts', { count: drafts.length }) }}
+          </p>
+          <div class="flex justify-end gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="plan-mode-bar-exit-cancel"
+              @click="exitConfirmOpen = false"
+            >
+              {{ t('plan.modeBar.exitCancel') }}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              data-testid="plan-mode-bar-exit-confirm"
+              :disabled="exiting"
+              @click="onExitConfirmed"
+            >
+              {{ t('plan.modeBar.exitConfirm') }}
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
     <!-- 右区（情境）：PlanReviewBar 子组件（四分支 ready/revising/degraded/隐藏逻辑原样
-         复用；isActive 门由本行根 v-if 保证，mode=null 时右区仅剩左区占位） -->
-    <PlanReviewBar :session-id="sessionId" />
+         复用；isActive 门由本行根 v-if 保证，mode=null 时右区仅剩左区占位）。exit 事件 =
+         degraded 退出按钮请求退出，复用本组件退出确认 Popover（§3.5 确认守卫单入口） -->
+    <PlanReviewBar :session-id="sessionId" @exit="exitConfirmOpen = true" />
     <!-- E9：退出命令失败（reply success=false → promise reject）——状态带保持原状，错误
          就近呈现且内嵌恢复动作（横幅错误通路同款迁移） -->
     <p
@@ -108,14 +156,17 @@
  * watch immediate → syncFocus 承接（新宿主 Panel.vue；use-plan-drawer-sync 依赖该
  * 注入，见其头注释）。多实例同值注入无互覆（设计已核实，恒单 Panel 下安全）。
  *
- * 退出链路（自横幅原样迁移）：command('session.abortPlan') → runtime ensureActive +
- * client.prompt('/plan abort')；reply 失败 = promise reject → E9 恢复指引就近呈现、
- * 状态带保持原状；成功后 isActive=false 由投影链广播驱动（本组件不本地改状态）。
+ * 退出链路（§3.5）：左区退出按钮 = 确认 Popover 触发器（分情境警示：revising 中警示
+ * agent 侧修订将中止 / 有评论草稿警示将丢弃，按序取首个命中），确认后清焦点分区草稿 +
+ * command('session.abortPlan') → runtime ensureActive + client.prompt('/plan abort')；
+ * degraded 右区退出按钮经 PlanReviewBar exit 事件复用本 Popover（确认守卫单入口）。
+ * reply 失败 = promise reject → E9 恢复指引就近呈现、状态带保持原状；成功后 isActive=false
+ * 由投影链广播驱动（本组件不本地改状态）。
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, SquareCheckBig, X } from '@lucide/vue'
-import { Button } from '@taiji/ui'
+import { Button, Popover, PopoverContent, PopoverTrigger } from '@taiji/ui'
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
 import { usePlanState } from '@/composables/use-plan-sync'
@@ -132,7 +183,8 @@ const { t } = useI18n()
 const sessionIdRef = computed(() => props.sessionId)
 
 // focusedSid 注入 + WS 订阅 + 首拉（承接清单②；视图透出 view/stage/loadError）
-const { view, stage, loadError } = usePlanState(sessionIdRef)
+// drafts = 焦点分区评论草稿（§3.5 退出确认草稿警示 + 确认退出即清的读取面）
+const { view, stage, loadError, drafts, clearDrafts } = usePlanState(sessionIdRef)
 
 // 常驻订阅（承接清单①）：isActive=false 期间 planReview 请求仍入 store 的兜底实例。
 // currentPlanReviewRequests/respond 由右区 PlanReviewBar 自持实例消费，本实例只承担
@@ -167,9 +219,24 @@ function stepStage(index: number): 'cur' | 'done' | 'todo' {
   return index < current ? 'done' : 'todo'
 }
 
-// ── 退出（E9 错误通路，自横幅迁移）──
+// ── 退出（§3.5 确认 Popover + E9 错误通路）──
 const exiting = ref(false)
 const exitError = ref<string | null>(null)
+/** 退出确认 Popover 开合（受控；degraded 右区退出按钮经 PlanReviewBar exit 事件置开） */
+const exitConfirmOpen = ref(false)
+
+const reviewState = computed(() => view.value?.reviewState)
+
+/**
+ * 确认退出（§3.5）：关确认层 → 清焦点分区评论草稿（退出即清，草稿生命周期随用户明确的
+ * 退出意图终结；与 enter 翻转清兜底互补——GUI 确认路径当场清，agent 自退等绕过路径由
+ * plan-store 分区写入层的翻转清兜底）→ 发 abortPlan。
+ */
+async function onExitConfirmed(): Promise<void> {
+  exitConfirmOpen.value = false
+  clearDrafts()
+  await onExit()
+}
 
 async function onExit(): Promise<void> {
   const sid = props.sessionId

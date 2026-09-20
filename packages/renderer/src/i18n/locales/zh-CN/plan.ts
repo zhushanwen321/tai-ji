@@ -5,7 +5,9 @@
 export default {
   banner: {
     title: '计划模式',
-    hint: '已激活，agent 只读取代码、产出文档，不修改源码',
+    // §3.5 文案修正：原「只读取代码……不修改源码」与 bash 在白名单内的实态有落差，
+    // 改准确描述（hint 长句已随 PlanModeBar 合并无渲染挂点，键族留待 u-closeout 清理）
+    hint: '已激活，agent 以只读纪律工作，不主动修改源码',
     skillsLabel: '技能',
     skillsUnspecified: '（未指定）',
     stageExploring: '需求探索',
@@ -22,6 +24,15 @@ export default {
     confirmExecute: '确认，开始执行',
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
     waitingResubmit: '等待 agent 重新提交审批',
+    // §3.4 降级三分支（reviewStateSource 两源 + 旧 entry 缺省通用）：共用恢复入口指引 +
+    // 退出按钮（无填充描边，不再是死胡同）；耗时显示不做（设计裁决）
+    degradedExplain: '已收到你的问题，agent 解答后会重新提交审批',
+    degradedResubmit: 'agent 会话已重启，尚未重新提交',
+    degradedRecoverHint: '在对话输入框发送任意消息，提醒 agent 重新提交审批',
+    degradedExit: '退出',
+    // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
+    reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
+    viewDrafts: '查看评论草稿',
   },
   // PlanModeBar 左区（plan-mode-ux-refactor u-plan-bar：状态带收敛后自持键族，与待清理的
   // banner 键族解耦——u-closeout 删 banner 时本族不受影响）
@@ -38,6 +49,13 @@ export default {
     exit: '退出',
     // E9：错误消息内嵌恢复动作（错误 → 恢复闭环），状态带保持原状
     exitError: '退出失败：{message}。修复后重试退出，或手动在对话输入 /plan abort',
+    // §3.5 退出确认 Popover（分情境警示）：revising = agent 侧修订将中止（GUI 草稿在
+    // revise 提交时已清，警示指 agent 侧）；有评论草稿 = 草稿将丢弃；两警示按序取首个命中
+    exitConfirmTitle: '退出计划模式？',
+    exitWarnRevising: 'agent 正在修订文档，退出将中止修订',
+    exitWarnDrafts: '{count} 条评论草稿将丢弃',
+    exitConfirm: '确认退出',
+    exitCancel: '取消',
   },
   drawer: {
     // plan tab（plan 模式重设计 u1-drawer-tab）：drawer「计划产物」tab。

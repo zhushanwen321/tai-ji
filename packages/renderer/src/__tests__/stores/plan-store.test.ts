@@ -1,12 +1,16 @@
 /**
  * plan store 单测 —— plan 模式重设计 u1-store 层 1（状态与操作）。
  *
- * 覆盖（impl-plan u1-store 验收条款）：
+ * 覆盖（impl-plan u1-store 验收条款 + u-review-source-ui 增量）：
  * - 三步阶段推导三元组（D1：① exploring / ② writing / ③ reviewing；isActive 门 + reviewState 优先）
  * - 首拉成功写分区 / 响应缺 planState 置空 / RPC 失败错误通路（分区 loadError，view 不被覆盖）
  * - WS 帧落地 updateFor 分区写（applyFrame + 清 loadError）
  * - 评论草稿只作用焦点分区（per-session 隔离、切回恢复、越界删除 no-op、null 焦点 no-op）
  * - cleanup 链（triggerSessionCleanups → 分区重置，其他 session 保留）
+ * - §3.5 enter 翻转清草稿（applyFrame 与 loadPlanState 双路 updateFor 出口：sid 分区内
+ *   isActive 旧值 无→有 翻转清该 sid 草稿；true→true / true→false / 失败路径不清；
+ *   切 session 焦点视图不误清——设计禁令的反向断言）
+ * - §3.5 草稿回看请求信号（requestDraftsReveal / markDraftsRevealConsumed / per-session 隔离）
  *
  * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
  * 的 mock 边界（spread actual 保真实 events 通道，只换 command）。
@@ -258,12 +262,14 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
 
   it('cleanup 链：triggerSessionCleanups → 该 session 分区重置，其他 session 保留', async () => {
     const { store, planView, draftComments } = usePlanRefs()
+    // 草稿先于 view 建立会被 §3.5 翻转清兜底清掉（null→active = 新审阅轮），真机时序
+    // 是审阅态（view 就绪）下才产生草稿——先 applyFrame 再 addDraft 对齐真机序列
     store.syncFocus('A')
-    store.addDraftComment(C1)
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
+    store.addDraftComment(C1)
     store.syncFocus('B')
-    store.addDraftComment(C2)
     store.applyFrame('B', { ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })
+    store.addDraftComment(C2)
 
     triggerSessionCleanups('A')
     await settle()
@@ -277,5 +283,122 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
     // B 分区不受 A 清理影响
     expect(draftComments.value).toEqual([C2])
     expect(planView.value?.reviewState).toBe('awaiting')
+  })
+})
+
+// ── §3.5 enter 翻转清草稿（分区写入共同出口，禁焦点视图落点）──
+
+describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区）', () => {
+  const C: PlanReviewComment = { quote: '上一轮残留引文', comment: '上一轮残留评语' }
+
+  it('WS 帧路径：sid 分区 isActive 无→有 翻转（applyFrame）→ 清该 sid 残留草稿', () => {
+    const { store, draftComments } = usePlanRefs()
+    // 退出态（isActive=false）残留草稿 = agent 自退/崩溃绕过 GUI 确认的路径
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+    expect(draftComments.value).toEqual([C])
+
+    // 同 sid 新一轮 plan 进入（false→true 翻转）→ 草稿清
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    expect(draftComments.value).toEqual([])
+  })
+
+  it('首拉路径：loadPlanState 冷启动返回 isActive=true → 同样触发翻转清（双路同覆）', async () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+
+    void store.loadPlanState('A')
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, isActive: true } })
+    await settle()
+
+    expect(draftComments.value).toEqual([])
+  })
+
+  it('true→true（审阅中的重复帧/首拉回放）不清：审阅中草稿安全', () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    store.addDraftComment(C)
+
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('true→false（退出/执行后）不清：草稿清走退出确认路径', () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    store.addDraftComment(C)
+
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('首拉失败（RPC reject）不清：view 不被覆盖，翻转无从发生', async () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+
+    void store.loadPlanState('A')
+    rejectLatestForSid('A', new Error('offline'))
+    await settle()
+
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('切 session 焦点视图不误清（设计禁令反向断言）：审阅中 A 的草稿在焦点切走切回后保留', async () => {
+    const { store, draftComments } = usePlanRefs()
+    // A 审阅中（isActive=true）且已有草稿——若误挂「焦点视图 watch」落点，
+    // 从无 view 的 B 切到 A 时焦点 isActive 呈假「无→有」翻转，会误清 A
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    store.addDraftComment(C)
+    expect(draftComments.value).toEqual([C])
+
+    // 焦点切到无 plan 状态的 B → 再切回 A：syncFocus 只动焦点指针，不写分区
+    store.syncFocus('B')
+    void store.loadPlanState('B') // B 侧首拉（返回 isActive=true 触发 B 的翻转清——只清 B 分区）
+    resolveForSid('B', { sessionId: 'B', planState: { ...BASE_VIEW, isActive: true } })
+    await settle()
+
+    store.syncFocus('A')
+    expect(draftComments.value).toEqual([C]) // A 草稿不误清
+  })
+})
+
+// ── §3.5 草稿回看请求信号 ──
+
+describe('草稿回看请求（requestDraftsReveal / markDraftsRevealConsumed）', () => {
+  it('请求递增 seq 并置 pending；消费标记复位 pending', () => {
+    const { store } = usePlanRefs()
+    store.syncFocus('A')
+    expect(store.draftsRevealSeq).toBe(0)
+    expect(store.draftsRevealPending).toBe(false)
+
+    store.requestDraftsReveal()
+    expect(store.draftsRevealSeq).toBe(1)
+    expect(store.draftsRevealPending).toBe(true)
+
+    store.markDraftsRevealConsumed()
+    expect(store.draftsRevealPending).toBe(false)
+
+    // 新请求：seq 再递增、pending 复位（drawer 重开后的第二次回看仍可消费）
+    store.requestDraftsReveal()
+    expect(store.draftsRevealSeq).toBe(2)
+    expect(store.draftsRevealPending).toBe(true)
+  })
+
+  it('per-session 隔离：A 的待消费请求不串 B 分区', () => {
+    const { store } = usePlanRefs()
+    store.syncFocus('A')
+    store.requestDraftsReveal()
+
+    store.syncFocus('B')
+    expect(store.draftsRevealSeq).toBe(0)
+    expect(store.draftsRevealPending).toBe(false)
   })
 })

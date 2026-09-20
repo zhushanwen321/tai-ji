@@ -1,11 +1,12 @@
 <template>
   <!--
-    审批条（plan 模式重设计 u1-banner，设计 D5 / G3 / G4；u-plan-bar 起挂 PlanModeBar 右区）。
+    审批条（plan 模式重设计 u1-banner，设计 D5 / G3 / G4；u-plan-bar 起挂 PlanModeBar 右区；
+    u-review-source-ui 起 degraded 分支按 reviewStateSource 三分 + 0 评论守卫 + 计数回看）。
     显示驱动公式（D5）：(reviewState ∈ {awaiting, revising} ∪ 挂起 planReview 请求) ∩ isActive。
     isActive=false 整体不渲染（分支④）——退出后挂起请求缓存残留（abort 不发撤回帧，已接受
     代价）由本门兜住不外显。挂载位 = PlanModeBar 行内右区（原主面板底部独立行已随
     PlanModeBar 合并拆除；hairline 由宿主行 border-b 承担，本组件只做行内内容布局）。
-    props/emits 无位置耦合，保留独立可测形态。
+    props/emits 无位置耦合，保留独立可测形态（exit 事件归宿主退出确认 Popover）。
   -->
   <div
     v-if="mode"
@@ -14,13 +15,19 @@
   >
     <!-- 分支① 全功能三键（isActive 且有挂起请求；正常时序 reviewState=awaiting 同真） -->
     <template v-if="mode === 'ready'">
-      <span
+      <!-- 评论计数可点（§3.5 草稿回看）：打开/聚焦 drawer 计划产物 tab + 滚动到草稿列表
+           （滚动消费在 PlanDocsPanel，经 plan-store 回看请求信号跨挂载补消费） -->
+      <Button
+        variant="ghost"
+        size="sm"
         data-testid="plan-review-summary"
-        class="flex items-center gap-1.5 text-[length:var(--text-2xs)] text-neutral-dim"
+        class="h-auto shrink-0 gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[length:var(--text-2xs)] text-neutral-dim hover:bg-surface-hover hover:text-neutral-mid"
+        :title="t('plan.reviewBar.viewDrafts')"
+        @click="onViewDrafts"
       >
         <MessageSquare class="size-3 text-warn" aria-hidden="true" />
         <span>{{ t('plan.reviewBar.commentsCount', { count: drafts.length }) }}</span>
-      </span>
+      </Button>
       <span class="flex-1" aria-hidden="true" />
       <Button
         variant="ghost"
@@ -31,11 +38,13 @@
       >
         {{ t('plan.reviewBar.requestExplanation') }}
       </Button>
+      <!-- 0 评论守卫（§3.5）：无草稿时禁用 + tooltip 说明（禁用态天然不可点，不设二次确认） -->
       <Button
         variant="secondary"
         size="sm"
         data-testid="plan-review-revise"
-        :disabled="submitting"
+        :disabled="submitting || drafts.length === 0"
+        :title="drafts.length === 0 ? t('plan.reviewBar.reviseEmptyDisabled') : undefined"
         @click="submit('revise')"
       >
         {{ t('plan.reviewBar.submitRevise') }}
@@ -65,14 +74,33 @@
       <span class="size-1.5 animate-pulse rounded-full bg-warn" aria-hidden="true" />
       {{ t('plan.reviewBar.revising') }}
     </div>
-    <!-- 分支③ 降级态（awaiting 无挂起：explain 后 / 崩溃恢复后，等待 agent 重调 submit-review） -->
+    <!-- 分支③ 降级态（awaiting 无挂起）三分支重写（plan-mode-ux-refactor §3.4）：
+         reviewStateSource 两源文案 + 旧 entry 缺省通用中性；三分支共用恢复入口指引
+         （「发任意消息提醒 agent」，复用既有会话输入语义，无独立按钮）+ 无填充描边
+         退出按钮（触发宿主 PlanModeBar 的退出确认 Popover，确认后才 abortPlan——
+         用户主动操作路径统一走 §3.5 确认守卫）；耗时显示不做（设计裁决） -->
     <div
       v-else
       data-testid="plan-review-degraded"
-      class="flex items-center gap-2 text-[length:var(--text-xs)] text-neutral-dim"
+      class="flex min-w-0 items-center justify-end gap-2 text-[length:var(--text-xs)] text-neutral-dim"
     >
-      <Hourglass class="size-3" aria-hidden="true" />
-      {{ t('plan.reviewBar.waitingResubmit') }}
+      <Hourglass class="size-3 shrink-0" aria-hidden="true" />
+      <span class="flex min-w-0 flex-col items-end leading-snug">
+        <span data-testid="plan-review-degraded-reason">{{ degradedReason }}</span>
+        <span
+          data-testid="plan-review-degraded-hint"
+          class="text-[length:var(--text-2xs)] text-neutral-dim opacity-70"
+        >{{ t('plan.reviewBar.degradedRecoverHint') }}</span>
+      </span>
+      <Button
+        variant="secondary"
+        size="sm"
+        data-testid="plan-review-degraded-exit"
+        class="shrink-0"
+        @click="emit('exit')"
+      >
+        {{ t('plan.reviewBar.degradedExit') }}
+      </Button>
     </div>
   </div>
 </template>
@@ -98,7 +126,9 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, Hourglass, MessageSquare } from '@lucide/vue'
 import { Button } from '@taiji/ui'
+import { openDrawerTab } from '@taiji/core/domain/drawer'
 import { usePlanState } from '@/composables/use-plan-sync'
+import { usePlanStore } from '@/stores/plan-store'
 import { useExtensionUI, planReviewFilter, type PlanReviewUIRequest } from '@/composables/useExtensionUI'
 
 /** PlanReviewResponse 本地同形（与 extension-protocol core/types 判别联合同构） */
@@ -112,11 +142,16 @@ const props = defineProps<{
   sessionId: string | null
 }>()
 
+/** exit = degraded 退出按钮请求退出（§3.5：确认守卫归宿主 PlanModeBar 的退出确认 Popover） */
+const emit = defineEmits<{ (e: 'exit'): void }>()
+
 const { t } = useI18n()
 
 const sessionIdRef = computed(() => props.sessionId)
 const { view, drafts, clearDrafts } = usePlanState(sessionIdRef)
 const { currentPlanReviewRequests, respond } = useExtensionUI(sessionIdRef, planReviewFilter)
+// 草稿回看请求信号（§3.5）：本组件只发请求，滚动消费在 drawer 侧 PlanDocsPanel
+const planStore = usePlanStore()
 
 const isActive = computed(() => view.value?.isActive === true)
 const reviewState = computed(() => view.value?.reviewState)
@@ -145,6 +180,29 @@ const mode = computed<BarMode | null>(() => {
 })
 
 const submitting = ref(false)
+
+/**
+ * 降级态主文案三分支（§3.4）：reviewStateSource==='explain' → 解答后重提；==='resubmit'
+ * → 会话重启（E3）尚未重提；缺省（旧 entry 无字段，LEGACY 形态）→ 通用中性「等待 agent
+ * 重新提交审批」，不猜测来源（D4 兼容契约：字段缺省 = 来源未知）。恢复入口与退出按钮
+ * 两态共有，在 template 分支外共用。
+ */
+const degradedReason = computed(() => {
+  const source = view.value?.reviewStateSource
+  if (source === 'explain') return t('plan.reviewBar.degradedExplain')
+  if (source === 'resubmit') return t('plan.reviewBar.degradedResubmit')
+  return t('plan.reviewBar.waitingResubmit')
+})
+
+/**
+ * 草稿回看（§3.5）：评论计数可点 → 打开/聚焦 drawer 计划产物 tab（openDrawerTab 既有
+ * core API）+ 发回看请求（plan-store 信号）；滚动到草稿列表由 PlanDocsPanel 消费——
+ * drawer 关闭时该面板未挂载，consumed 标记让请求跨挂载保留到消费为止。
+ */
+function onViewDrafts(): void {
+  openDrawerTab('plan')
+  planStore.requestDraftsReveal()
+}
 
 /**
  * 三键裁决回传（D5）：payload 序列化 JSON 经 respond（extension.ui_response）回 pi select
