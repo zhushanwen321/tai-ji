@@ -14,8 +14,10 @@
  *    转发 store action（只作用焦点分区）。
  *
  * 必须在组件 setup 同步调用（内部 useSessionEvents 有 getCurrentInstance 守卫）。
- * 消费方（u1-banner 横幅/审批条、u1-docs-panel）：传 panel store 的 focusedSessionId
- * （横幅/审批条只服务焦点 session 的显示语义，D1）。
+ * 消费方（plan-mode-ux-refactor u-plan-bar 起：PlanModeBar 常驻宿主 + 其右区 PlanReviewBar、
+ * u1-docs-panel 的 PlanDocsPanel）：传 panel store 的 focusedSessionId（plan 面只服务焦点
+ * session 的显示语义，D1）。focusedSid 注入义务原在横幅/审批条（已删/改挂），现由
+ * PlanModeBar setup 承接（新宿主 Panel.vue）。
  */
 import { computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'

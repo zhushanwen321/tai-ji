@@ -38,10 +38,8 @@
       @open-git="openDrawerTab('git')"
       @toggle-drawer="toggleDrawer()"
     />
-    <!-- M1 计划模式横幅（plan 模式重设计 u1-banner）：header 下、对话流之上的独立 flex 行，
-         覆盖位互斥定则（impl-plan §0 待验证检查点）——表单 overlay/Composer 都在 Panel 内部，
-         本行在 split-area 之外，天然不重叠。isActive=false 时组件内部 v-if 不渲染。 -->
-    <PlanModeBanner :session-id="panelSessionId" />
+    <!-- plan 模式状态带（PlanModeBar）与审批条已随 plan-mode-ux-refactor u-plan-bar 收敛到
+         Panel 内 composer 正上方一行（设计 §3.3 D1），本容器不再挂载。 -->
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
@@ -163,10 +161,6 @@
         </DrawerPanel>
       </div>
     </div>
-    <!-- 审批条（plan 模式重设计 u1-banner）：主面板底部独立行 = 终态位置（drawer 关闭时
-         审批操作仍可达，不随 drawer 显隐）。显示驱动公式在组件内（D5 四分支，isActive=false
-         不渲染 DOM）。 -->
-    <PlanReviewBar :session-id="panelSessionId" />
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项） -->
     <StatusBar :session-id="leaf.sessionId ?? null" />
@@ -199,8 +193,6 @@ import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
-import PlanModeBanner from '@/components/panel/plan/PlanModeBanner.vue'
-import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
 import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
@@ -305,8 +297,9 @@ bindDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSession
 const { isOpen: drawerOpen, activeTab: drawerTab, docked: drawerDocked } = useDrawerControl()
 
 // drawer「计划产物」tab 自动打开接线（plan 模式重设计 u1-drawer-tab）：plan 激活/首份产物
-// 边界经 ADR-0053 pendingOpen 语义打开 drawer（同宿主横幅/审批条的消费源 = planStore 焦点
-// 分区，本容器是三者的共同 setup 宿主）。
+// 边界经 ADR-0053 pendingOpen 语义打开 drawer（消费源 = planStore 焦点分区；focusedSid
+// 的注入方自 u-plan-bar 起为 Panel 内 PlanModeBar 的 setup——本容器与 PlanModeBar 共享
+// 同一 pinia store 单例，接线读焦点分区不依赖注入宿主同层）。
 usePlanDrawerSync()
 
 /** bashTask tab 选中态（D5①：selectedBackgroundTaskId undefined=未选中 → 不注入本面板，

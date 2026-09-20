@@ -1,15 +1,16 @@
 <template>
   <!--
-    审批条（plan 模式重设计 u1-banner，设计 D5 / G3 / G4）。
+    审批条（plan 模式重设计 u1-banner，设计 D5 / G3 / G4；u-plan-bar 起挂 PlanModeBar 右区）。
     显示驱动公式（D5）：(reviewState ∈ {awaiting, revising} ∪ 挂起 planReview 请求) ∩ isActive。
     isActive=false 整体不渲染（分支④）——退出后挂起请求缓存残留（abort 不发撤回帧，已接受
-    代价）由本门兜住不外显。视觉基线 = demo 底部审批条；挂载位 = 主面板底部独立行
-    （drawer 底部集成归 u1-drawer-tab 后续单元，本组件 props/emits 无位置耦合可移植）。
+    代价）由本门兜住不外显。挂载位 = PlanModeBar 行内右区（原主面板底部独立行已随
+    PlanModeBar 合并拆除；hairline 由宿主行 border-b 承担，本组件只做行内内容布局）。
+    props/emits 无位置耦合，保留独立可测形态。
   -->
   <div
     v-if="mode"
     data-testid="plan-review-bar"
-    class="flex shrink-0 items-center gap-2 border-t border-border px-3.5 py-2.5"
+    class="flex min-w-0 flex-1 items-center justify-end gap-2"
   >
     <!-- 分支① 全功能三键（isActive 且有挂起请求；正常时序 reviewState=awaiting 同真） -->
     <template v-if="mode === 'ready'">
@@ -78,13 +79,16 @@
 
 <script setup lang="ts">
 /**
- * PlanReviewBar —— 审批条（三键裁决 + 修订中/降级两非交互态）。
+ * PlanReviewBar —— 审批条（三键裁决 + 修订中/降级两非交互态），PlanModeBar 行内右区。
  *
  * 状态源：usePlanState（reviewState 驱动分支 + 评论草稿打包）+ useExtensionUI 的
  * planReviewFilter 实例（挂起请求按 requestId 枚举 + respond 回传，D5 marker select 通道）。
- * 组件常驻挂载（isActive=false 时 template 根 v-if 不渲染 DOM）——useExtensionUI 订阅与
- * getPendingRequests 拉取不随显隐销毁，planReview 请求到达时恒被入 store（挂起可枚举语义
- * 不依赖审批条当前是否可见）。
+ * 挂载与订阅分工（plan-mode-ux-refactor u-plan-bar，承接清单①）：宿主 PlanModeBar 组件
+ * 常驻挂载（isActive=false 时其 template 根 v-if 不渲染 DOM，本组件随之未创建）；
+ * isActive=false 期间的订阅存活由 PlanModeBar setup 自持的 useExtensionUI 实例兜底，
+ * 请求恒入 extensionUIStore（模块级 refCount 订阅 + store requestId dedup，双实例幂等）。
+ * isActive=true 后本组件创建，自持实例承担 getPendingRequests 快照补拉（晚订阅窗口）。
+ * 挂起可枚举语义不依赖审批条当前是否可见。
  *
  * 回传 payload = PlanReviewResponse（extension-protocol core/types 契约，本地同形——renderer
  * 不依赖 extension-protocol，与 plan-store 的 PlanReviewComment 同惯例）序列化 JSON 字符串，
