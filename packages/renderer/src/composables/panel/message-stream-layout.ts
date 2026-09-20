@@ -36,9 +36,11 @@ export const COMPACTING_NOTICE_HEIGHT = 32
  * executing bash 瞬时行占位高度（D3 增强规格后与 compacting 行同款新值）。
  * 强绑定 DOM：ActivityStrip bash 行（与 compacting 行共用同一行结构：`system-notice content-col
  * flex min-w-0 items-center gap-2 py-1.5` + 两条 `h-px flex-1` 渐变横线 + `size-[13px]` spinner +
- * `text-[length:var(--text-sm)] font-[550]` 主文案 + `font-mono text-[length:var(--text-xs)]` 命令，
- * 无 chip 分支）→ 计算值 = py-1.5(12px) + 主文案 text-sm×1.5(≈19.5px) ≈ 31.5 → 32px
- * （检查点 1 dev 断言实测校准位，±1px 容差）。
+ * `text-[length:var(--text-sm)] font-[550]` 主文案 + `font-mono text-[length:var(--text-2xs)]`
+ * elapsed meta（方案 A：命令在悬停详情，无 chip 分支））→ 计算值 = py-1.5(12px) + 主文案 text-sm×1.5(≈19.5px) ≈ 31.5 → 32px
+ * （检查点 1 dev 断言实测校准位，±1px 容差）。[notice-family-phrase-detail 2026-09-18
+ * 方案 A] 命令原文移入悬停详情后行内只剩短语 + elapsed mono meta（text-2xs 行高 ≤ 主文案，
+ * 高度不变）。
  * [U5] D3 规格升级三项（py-1→py-1.5 / text-xs→text-sm / icon 12→13px）同时改变行高：原值 24
  * 作废，`useConstantHeightAssert` 对 bash 行有断言绑定，与 COMPACTING 同批重测回写。
  * 改 padding/字号/icon 必须重测并同步（dev 断言会提醒）。

@@ -120,8 +120,17 @@ export default {
     bashNoContext: 'no context',
     bashCancel: 'Cancel',
     bashUnknownCommand: '(unknown command)',
-    // [system-notice-rendering-upgrade U3] "background" chip of the structured background-bash row (D2)
-    bashBackgroundChip: 'background',
+    // [notice-family-phrase-detail 2026-09-18 option A] background-bash row phrase-first: body
+    // keeps only the terminal phrase (finished/failed/timed out); the raw command moves into the
+    // hover detail (HoverCard, read-only + copy); the "background" chip is retired with its
+    // semantics absorbed into the phrase (bashBackgroundChip key deleted). bashCancelled/bashTimeout
+    // are still consumed by BashOutputBlock
+    bashFinished: 'Background command finished',
+    bashFinishedFailed: 'Background command failed',
+    bashTimedOut: 'Background command timed out',
+    // [notice-family-phrase-detail] hover-detail panel titles (shared by SystemNotice rows + ActivityStrip bash row)
+    bashCommandLabel: 'Command',
+    noticeDetailLabel: 'Full notice',
     // [system-notice-rendering-upgrade U3] boundary row splits into main/sub copies (D5, consumed by
     // U6): count main copy + "resumed" sub copy. No leading dot in the value — the separator is
     // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
@@ -133,6 +142,9 @@ export default {
     turnTriggerBgNotifyFailed: '{count} failed',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
+    // [notice-family-phrase-detail 2026-09-18 option A] executing-bash row elapsed meta — keeps an
+    // in-row observation of the run after the command moved to the hover detail
+    executingBashElapsed: '{elapsed} elapsed',
     // no hardcoded threshold — user-adjustable, a literal would drift)
   },
   git: {

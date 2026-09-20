@@ -119,8 +119,15 @@ export default {
     bashNoContext: '不进上下文',
     bashCancel: '取消',
     bashUnknownCommand: '(未知命令)',
-    // [system-notice-rendering-upgrade U3] background-bash 结构化行的「后台」chip（D2）
-    bashBackgroundChip: '后台',
+    // [notice-family-phrase-detail 2026-09-18 方案 A] background-bash 行短语化：主体只留终态短语
+    // （完成/失败/超时），命令原文移入悬停详情（HoverCard，只读 + 复制）；「后台」chip 随短语
+    // 语义并入退役（bashBackgroundChip 键已删）。bashCancelled/bashTimeout 仍由 BashOutputBlock 消费
+    bashFinished: '后台命令已完成',
+    bashFinishedFailed: '后台命令执行失败',
+    bashTimedOut: '后台命令已超时',
+    // [notice-family-phrase-detail] 悬停详情面板标题（SystemNotice 结构化行 + ActivityStrip 执行行共用）
+    bashCommandLabel: '完整命令',
+    noticeDetailLabel: '通知全文',
     // [system-notice-rendering-upgrade U3] 边界行拆主/从两段（D5，U6 消费）：计数主文案 +
     // 「已继续处理」从文案。值不带前导点——点号由消费侧按「有主文案才加」条件渲染
     // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
@@ -131,6 +138,9 @@ export default {
     turnTriggerBgNotifyFailed: '{count} 失败',
     // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
+    // [notice-family-phrase-detail 2026-09-18 方案 A] bash 执行行 elapsed meta——命令移入悬停
+    // 详情后，行内保留计时观察维持执行期可见性
+    executingBashElapsed: '已 {elapsed}',
     // 不写死阈值数字——阈值用户可调，写死会漂移）
   },
   git: {
