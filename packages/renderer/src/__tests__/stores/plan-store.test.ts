@@ -11,6 +11,8 @@
  *   isActive 旧值 无→有 翻转清该 sid 草稿；true→true / true→false / 失败路径不清；
  *   切 session 焦点视图不误清——设计禁令的反向断言）
  * - §3.5 草稿回看请求信号（requestDraftsReveal / markDraftsRevealConsumed / per-session 隔离）
+ * - 陈旧首拉守卫（F-R2-1）：首拉在途窗口内帧到达 → 迟到的空/失败 reply 整体丢弃
+ *   （不倒拨 view、不误写 loadError）；正常序（reply 先于帧）与新一轮重拉不受守卫误伤
  *
  * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
  * 的 mock 边界（spread actual 保真实 events 通道，只换 command）。
@@ -185,6 +187,115 @@ describe('loadPlanState：首拉与错误通路', () => {
     expect(planLoadError.value).toBe('session not found')
     // 失败不覆盖现有分区 view（subagent loadSubagents M1 同款）
     expect(planView.value?.docs?.length).toBe(1)
+  })
+})
+
+// ── 陈旧首拉守卫（F-R2-1：首拉空 reply 晚于 live 帧 → 丢弃，不倒拨热状态）──
+
+describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
+  it('归因场景：首拉在途 → 帧先达（view=active）→ 迟到的空 reply 丢弃，view 保持 active', async () => {
+    const { store, planView, planStage, planLoadError } = usePlanRefs()
+    store.syncFocus('A')
+    // 首拉发出（base rev 记录），reply 悬挂——模拟 runtime 冷腿慢（scanSessions 全目录重扫）
+    void store.loadPlanState('A')
+    // live 帧在请求在途窗口内到达（/plan 毫秒级落盘 entry → 300ms 防抖 → publish）
+    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
+    expect(planView.value?.isActive).toBe(true)
+
+    // 迟到的首拉 reply：冷读早于 entry 落盘 → 空（INACTIVE）
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+
+    // 守卫生效：view 不被倒拨回空（bar 90s 不显形的根因消除）
+    expect(planView.value?.isActive).toBe(true)
+    expect(planView.value?.docs?.length).toBe(1)
+    expect(planStage.value).toBe('writing')
+    expect(planLoadError.value).toBeNull()
+  })
+
+  it('失败分支同守卫：首拉在途窗口内帧到达 → 迟到的 reject 丢弃，不误写 loadError', async () => {
+    const { store, planView, planLoadError } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    store.applyFrame('A', { ...BASE_VIEW })
+
+    rejectLatestForSid('A', new Error('stale failure'))
+    await settle()
+
+    expect(planView.value?.isActive).toBe(true)
+    expect(planLoadError.value).toBeNull()
+  })
+
+  it('正常序不误伤：reply（空）先于帧到达 → 置空生效，随后帧照常写入', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value).toBeNull()
+
+    // 帧晚于 reply：applyFrame 不经守卫，live 权威照常落地
+    store.applyFrame('A', { ...BASE_VIEW })
+    expect(planView.value?.isActive).toBe(true)
+  })
+
+  it('新一轮重拉不受上轮丢弃误伤：帧失效请求 1 → 请求 2（新基准）reply 正常回填', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    // 请求 1：切会话首拉（空启动）
+    void store.loadPlanState('A')
+    // 在途窗口帧到达 → 请求 1 失效
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+
+    // 请求 2：切回重拉（新基准，晚于帧）
+    void store.loadPlanState('A')
+
+    // FIFO 到达序（对齐真机）：请求 1 的迟到空 reply 先到 → 丢弃
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value?.isActive).toBe(false) // 帧 view 未被倒拨
+
+    // 请求 2 的 reply 后到：新基准放行，正常回填
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
+    await settle()
+    expect(planView.value?.isActive).toBe(true)
+    expect(planView.value?.docs?.length).toBe(1)
+  })
+
+  it('cleanup 链同步清帧版本：session 销毁后重建分区，首拉回填不受残留版本影响', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    store.applyFrame('A', { ...BASE_VIEW })
+
+    triggerSessionCleanups('A')
+    await settle()
+
+    // 分区已重置；cleanup 前在途请求的版本表条目已随 cleanup 删除 → 迟到 reply 丢弃，
+    // 不写进已重置的分区
+    store.syncFocus('A')
+    expect(planView.value).toBeNull()
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value).toBeNull()
+
+    // 销毁后重新首拉：版本表已清（新基准），reply 正常回填
+    void store.loadPlanState('A')
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW } })
+    await settle()
+    expect(planView.value?.isActive).toBe(true)
   })
 })
 

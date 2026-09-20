@@ -16,7 +16,9 @@
  *   纯函数承载，分区不存阶段字段。
  *
  * 与 WS/RPC 的接线边界：本 store 只持状态与操作（applyFrame / loadPlanState），订阅与
- * 首拉触发编排归 composables/use-plan-sync.ts（usePlanState）。
+ * 首拉触发编排归 composables/use-plan-sync.ts（usePlanState）。首拉回填带陈旧守卫
+ * （per-sid 帧版本号）：live 帧在请求在途窗口内到达时，更早启动的冷读 reply 整体丢弃
+ * （冷回填不倒拨热状态，F-R2-1；见 frameRevs 注释）。
  *
  * stores 间依赖方向：无（不 import 其他 store）。焦点 sid 由 use-plan-sync 从 panel store
  * 读取后经 syncFocus 注入（跨 store 编排在 composable 层，useListSync 先例）。
@@ -31,7 +33,10 @@ import type { ComputedRef } from 'vue'
 import type { PlanStateView } from '@taiji/shared'
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
-import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import {
+  useSessionScopedState,
+  registerSessionCleanup,
+} from '@/composables/useSessionScopedState'
 
 /** 用户对某文档划选段落的一条评论（与 extension-protocol core/types PlanReviewComment 同形，见文件头说明）。 */
 export interface PlanReviewComment {
@@ -111,6 +116,29 @@ export const usePlanStore = defineStore('plan', () => {
     reactive<PlanPartition>({ view: null, drafts: [], loadError: null, draftsRevealSeq: 0, draftsRevealConsumed: true }),
   )
 
+  // ── 陈旧首拉守卫（F-R2-1，per-sid 帧版本号）──
+  /**
+   * 每次 applyFrame 递增的 per-sid 版本号。loadPlanState 发请求前记录基准，reply 到达时
+   * 版本已变 = 「请求在途窗口内该 session 收到过 live 帧」——reply 是更早启动的冷读
+   * （runtime 冷腿 = scanSessions(force) 全目录重扫 + 直读 JSONL，秒级抖动常见），而帧是
+   * live 权威（state topic last-value）；放行陈旧 reply 会把帧已写入的 view 倒拨回空
+   * （真机复现：新会话首条消息 /plan 毫秒级落盘 entry，首拉空 reply 晚于 live 帧到达，
+   * view 被抹回 null 后无再拉触发点 → bar 90s 不显形）。守卫语义 = 冷回填不得倒拨热状态，
+   * 不改变「切会话/冷启动主动拉取优先于依赖 broadcast」的架构语义（首拉仍是唯一冷路径，
+   * 只对「已确认更老」的 reply 丢弃）；无轮询、无重试、无定时器，比较是有界的等值判定。
+   * 失败分支同守卫：失效请求的 error envelope 同样不代表当前链路（帧已活，错误已过时）。
+   * 清理挂 sessionCleanup 链（useSidebar.deleteSession 统一编排，与分区同生命周期）。
+   */
+  const frameRevs = new Map<string, number>()
+  registerSessionCleanup((sid) => {
+    frameRevs.delete(sid)
+  })
+
+  /** 当前帧版本号（无帧历史 = 0）。 */
+  function frameRevOf(sid: string): number {
+    return frameRevs.get(sid) ?? 0
+  }
+
   // ── actions ──
 
   /** 焦点同步（use-plan-sync 在挂载/切换时点调用；草稿操作与新写入的 current 视图随之对齐）。 */
@@ -121,9 +149,11 @@ export const usePlanStore = defineStore('plan', () => {
   /**
    * WS 帧落地（session.planState 广播）：写「消息所属 sid」分区——内部 updateFor(capturedSid)，
    * 不读焦点实时值，切 session 的异步退订窗口内迟到帧只写旧 sid 分区（AGENTS.md 规则 8，
-   * 结构性消除竞态）。帧是 live 权威数据，落地同时清首拉错误（链路已活，错误已过时）。
+   * 结构性消除竞态）。帧是 live 权威数据，落地同时清首拉错误（链路已活，错误已过时）；
+   * 落地同时递增该 sid 帧版本号（陈旧首拉守卫的写侧，见 frameRevs 注释）。
    */
   function applyFrame(sid: string, planState: PlanStateView): void {
+    frameRevs.set(sid, frameRevOf(sid) + 1)
     scoped.updateFor(sid, (p) => {
       clearDraftsOnPlanEnter(p, planState)
       p.view = planState
@@ -141,11 +171,18 @@ export const usePlanStore = defineStore('plan', () => {
    *
    * 响应空/无 planState = 无 plan 状态，分区 view 置空（协议 planState 必填，运行时仍防御
    * 旧 runtime / mock 缺省——unknown 形状经 `?? null` 守卫收敛）。
+   *
+   * 陈旧 reply 丢弃（F-R2-1 守卫，读侧）：请求发出时记录该 sid 帧版本基准，reply 到达时
+   * 版本已变 = 在途窗口内收到过 live 帧 → 本 reply 是更早的冷读，整体丢弃（成功与失败
+   * 分支同守卫）。请求在途时新发起的 loadPlanState 以其发出时刻的版本为基准，不受本轮
+   * 丢弃影响（切回重拉场景：越晚发出的请求基准越新，reply 正常回填）。
    */
   async function loadPlanState(sessionId: string): Promise<void> {
     if (!sessionId) return
+    const baseRev = frameRevOf(sessionId)
     try {
       const reply = await command('session.getPlanState', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+      if (frameRevOf(sessionId) !== baseRev) return
       const planState = reply?.planState ?? null
       scoped.updateFor(sessionId, (p) => {
         clearDraftsOnPlanEnter(p, planState)
@@ -153,6 +190,7 @@ export const usePlanStore = defineStore('plan', () => {
         p.loadError = null
       })
     } catch (e) {
+      if (frameRevOf(sessionId) !== baseRev) return
       const msg = toErrorMessage(e)
       console.error('[plan-store] getPlanState failed:', e)
       scoped.updateFor(sessionId, (p) => {
