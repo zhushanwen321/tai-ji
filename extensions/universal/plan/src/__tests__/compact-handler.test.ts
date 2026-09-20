@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PlanState } from "../state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 // Mock fs before importing compact.ts (ESM namespace is not configurable)
 vi.mock("node:fs", () => ({
@@ -18,7 +19,7 @@ function makePi() {
   return {
     on: vi.fn(),
     appendEntry: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
   };
 }
 
@@ -70,10 +71,19 @@ afterEach(() => {
   Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, undefined);
 });
 
-/** 最近一次 steer 消息正文。 */
+/** 最近一次 sendMessage 的正文（P8 custom message 的 content 字段）。 */
 function lastSteer(pi: ReturnType<typeof makePi>): string {
-  const calls = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls;
-  return String(calls[calls.length - 1]?.[0]);
+  const calls = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+  const last = calls[calls.length - 1]?.[0] as { content?: string } | undefined;
+  return String(last?.content ?? "");
+}
+
+/** P8 执行通知断言形态：custom message 三要素 + streaming steer options（A6）。 */
+function executionNotice(content: unknown) {
+  return [
+    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content, display: false },
+    { deliverAs: "steer", triggerTurn: true },
+  ];
 }
 
 // --- handlePlanComplete tests ---
@@ -112,7 +122,7 @@ describe("handlePlanComplete", () => {
           "2. Step two",
         ],
       );
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Execute via /goal"), { deliverAs: "steer" });
+      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Execute via /goal")));
       expect(ctx.ui.notify).not.toHaveBeenCalled();
     });
 
@@ -124,7 +134,7 @@ describe("handlePlanComplete", () => {
 
       expect(goalInit).not.toHaveBeenCalled();
       // D10 develop 文案：复杂度自判（subagent 委派 + 当前会话逐步执行收口一句）
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Develop (auto-parallel)"), { deliverAs: "steer" });
+      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Develop (auto-parallel)")));
       expect(lastSteer(pi)).toContain("subagents");
       expect(lastSteer(pi)).toContain("current session");
     });
@@ -167,7 +177,7 @@ describe("handlePlanComplete", () => {
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 
       expect(outcome).toEqual({ started: true });
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Execute via /goal"), { deliverAs: "steer" });
+      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Execute via /goal")));
       expect(ctx.compact).not.toHaveBeenCalled();
       expect(ctx.ui.notify).not.toHaveBeenCalled();
     });
@@ -179,7 +189,7 @@ describe("handlePlanComplete", () => {
 
       expect(outcome).toBeUndefined();
       expect(goalInit).not.toHaveBeenCalled();
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("step by step"), { deliverAs: "steer" });
+      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("step by step")));
       expect(ctx.compact).not.toHaveBeenCalled();
     });
 
@@ -223,7 +233,7 @@ describe("handlePlanComplete", () => {
 
       handlePlanComplete(pi as never, ctx as never, makeActiveState(), "tree", "goal");
 
-      expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Execute via /goal"), { deliverAs: "steer" });
+      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Execute via /goal")));
       expect(ctx.compact).not.toHaveBeenCalled();
       expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("/tree"), "info");
     });

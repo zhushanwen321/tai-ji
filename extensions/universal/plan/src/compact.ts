@@ -7,7 +7,7 @@ import type { GoalInitFn } from "@zhushanwen/pi-goal";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import type { PlanSessionMap, PlanState } from "./state.js";
-import { getPlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
 
 const logger = getLogger("pi-plan");
 
@@ -291,7 +291,10 @@ function deliverExecutionNotice(
     `${modeHint}\n\n` +
     `Read the plan file and start implementing.`;
 
-  pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
+  pi.sendMessage(
+    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: executeMessage, display: false },
+    { deliverAs: "steer", triggerTurn: true },
+  );
   return outcome;
 }
 

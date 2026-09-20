@@ -12,6 +12,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { buildPlanSuccessCriteria, handlePlanComplete } from "../compact.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const fsMock = vi.mocked(await import("node:fs"));
 
@@ -19,7 +20,7 @@ function makePi() {
   return {
     on: vi.fn(),
     appendEntry: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
   };
 }
 
@@ -214,7 +215,10 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
     handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 
     expect(goalInitMock).not.toHaveBeenCalled();
-    // steer 仍发出（执行流程不因 goal 缺席中断）
-    expect(pi.sendUserMessage).toHaveBeenCalled();
+    // steer 仍发出（执行流程不因 goal 缺席中断）——custom message 三要素 + steer options（A6）
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: expect.any(String), display: false },
+      { deliverAs: "steer", triggerTurn: true },
+    );
   });
 });

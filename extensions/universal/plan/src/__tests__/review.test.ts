@@ -37,7 +37,7 @@ import { handlePlanComplete } from "../compact.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { PlanState } from "../state.js";
-import { DEFAULT_PLAN_STATE } from "../state.js";
+import { DEFAULT_PLAN_STATE, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 import { PLAN_ACTIONS, registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
@@ -68,7 +68,7 @@ function setup(state?: PlanState) {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
   registerPlanTool(pi, sessions, controllers);
@@ -368,8 +368,12 @@ describe("三 decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review" });
 
-    // 显式 deliverAs 断言：isStreaming 时无 deliverAs 会 throw（pi agent-session 实装）
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("第二节流程图"), { deliverAs: "steer" });
+    // custom message 三要素 + streaming steer options 断言（A6）：deliverAs:'steer' 排队至
+    // 下一次 LLM 调用，triggerTurn:true 覆盖非 streaming 窗口的开轮语义
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: expect.stringContaining("第二节流程图"), display: false },
+      { deliverAs: "steer", triggerTurn: true },
+    );
     expect(res.details.action).toBe("submit-review");
     // reviewState=revising 落 entry
     expect(pi.appendEntry).toHaveBeenCalledWith(
@@ -387,7 +391,10 @@ describe("三 decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review" });
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("queue here?"), { deliverAs: "steer" });
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: expect.stringContaining("queue here?"), display: false },
+      { deliverAs: "steer", triggerTurn: true },
+    );
     expect(res.details.action).toBe("submit-review");
     // 不改 reviewState：保持 awaiting
     expect(pi.appendEntry).toHaveBeenCalledWith(
@@ -408,7 +415,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
     expect(res.content[0].text).toContain("submit-review");
     // 垃圾数据不进流：没有任何 decision 注入
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("E5: shape-invalid response (unknown decision) is treated as parse failure too", async () => {
@@ -420,7 +427,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     const res = await exec({ action: "submit-review" });
 
     expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("echo 回显（旧 taiji 宿主不识别 PLAN_REVIEW_MARKER）→ 升级指引错误，不引导重挂（MF-1-9）", async () => {
@@ -437,7 +444,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.content[0].text).toContain("upgrade taiji");
     // 不引导重挂：重挂会同样回显，形成重复弹错循环
     expect(res.content[0].text).not.toContain("re-hang");
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("dismissed select (undefined) → cancelled result: not an approval, stop the review loop", async () => {
@@ -455,7 +462,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.content[0].text).toContain("Stop the review loop");
     expect(res.content[0].text).toContain("wait for further user instructions");
     // 未消费 decision、未重置状态
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { type PlanAbortControllers, type PlanSessionMap, PLAN_MODE_TOOLS, reconstructPlanState } from "./state.js";
+import { type PlanAbortControllers, type PlanSessionMap, PLAN_CONTEXT_CUSTOM_TYPE, PLAN_MODE_TOOLS, reconstructPlanState } from "./state.js";
 import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -62,11 +62,16 @@ export default function planExtension(pi: ExtensionAPI) {
       // 后不可能有存活的 select）→ steer 提醒 agent 重调 submit-review 重新挂起
       // （恢复动作全部在 extension 侧，前端不造失败信号链）。
       if (state.reviewState === "awaiting") {
-        pi.sendUserMessage(
-          "[PLAN MODE] A previous review request was interrupted (session restarted). " +
-          "The registered documents are still waiting for user approval. " +
-          "Call plan(action='submit-review') now to re-hang the review dialog.",
-          { deliverAs: "steer" },
+        pi.sendMessage(
+          {
+            customType: PLAN_CONTEXT_CUSTOM_TYPE,
+            content:
+              "[PLAN MODE] A previous review request was interrupted (session restarted). " +
+              "The registered documents are still waiting for user approval. " +
+              "Call plan(action='submit-review') now to re-hang the review dialog.",
+            display: false,
+          },
+          { deliverAs: "steer", triggerTurn: true },
         );
       }
     }

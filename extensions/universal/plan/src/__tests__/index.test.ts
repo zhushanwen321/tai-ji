@@ -23,6 +23,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import planExtension from "../index.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const captured: { controllers?: Map<string, AbortController> } = {};
 
@@ -34,7 +35,7 @@ function setup() {
     on: vi.fn((event: string, handler: Handler) => {
       handlers.set(event, handler);
     }),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     setActiveTools: vi.fn(),
   } as unknown as ExtensionAPI;
 
@@ -84,7 +85,15 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("submit-review"), { deliverAs: "steer" });
+    // custom message 三要素 + streaming steer options 断言（A6）
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("submit-review"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
   });
 
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
@@ -115,7 +124,7 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalled();
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("inactive plan → no reminder, no tool restriction", async () => {
@@ -125,7 +134,7 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 });
 
