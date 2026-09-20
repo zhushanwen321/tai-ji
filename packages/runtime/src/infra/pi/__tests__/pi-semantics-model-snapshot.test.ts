@@ -160,3 +160,19 @@ describe.skipIf(!PI_DIST || !PI_AI_DIST)('PS-43 · ModelConfig.load 的两种不
     expect(provider).not.toMatch(/Type\.Union\(\[Type\.String/)
   })
 })
+
+describe.skipIf(!PI_DIST || !PI_AI_DIST)('PS-41 附：setModel 的持久层面（model_change 落 session JSONL）', () => {
+  it('agent-session.setModel → sessionManager.appendModelChange(provider, modelId)（切模型必落 entry）', () => {
+    const src = readDist(PI_DIST!, 'core/agent-session.js')
+    const body = slice(src, 'async setModel(model, options = {})', 'async cycleModel')
+    expect(body).toContain('this.sessionManager.appendModelChange(model.provider, model.id)')
+  })
+
+  it('model_change entry 形状 = {type, id, parentId, timestamp, provider, modelId}', () => {
+    const src = readDist(PI_DIST!, 'core/session-manager.js')
+    const body = slice(src, 'appendModelChange(provider, modelId)', 'appendLabelChange')
+    expect(body).toContain('type: "model_change"')
+    expect(body).toContain('provider,')
+    expect(body).toContain('modelId,')
+  })
+})
