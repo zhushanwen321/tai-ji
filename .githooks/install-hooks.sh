@@ -589,6 +589,28 @@ if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^scripts/che
 fi
 
 # ============================================================================
+# 2h-2. P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）
+#     scripts/check-pbundle.mjs：builtin staged 产物内 sqlite 驱动探测代码必须保持
+#     「运行期解析」形态——spec 被静态化（esbuild 升级 / 驱动实现回改字面量）时
+#     bundle 成功但 staged 运行期 Cannot find module，比不拆更糟。触发面 = staged
+#     命中 staged 产物的两个源（reader 扩展 / zcode-session-source）或门脚本本体；
+#     CI invariants 免 staged 前提 --rebuild 全量兜底（D7 通则，与 2h 同一挂载理由）。
+#     --rebuild 先重建 staged（bundle-extensions <1s，防「检查的是滞后产物」）；
+#     不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/universal/session-reader/|^scripts/check-pbundle\.mjs$"; then
+    print_section "[P-bundle 门（staged 驱动 spec 运行期解析形态）]"
+
+    if ! node scripts/check-pbundle.mjs --rebuild; then
+        echo -e "${RED}[ERROR] P-bundle 门未通过——staged 产物内驱动 spec 被静态化，按上方 [FIX] 修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] P-bundle 门检查通过${NC}"
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 

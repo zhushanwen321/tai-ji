@@ -617,6 +617,16 @@ jobs:
       - name: Bun driver dual-run (zcode-session-source)
         run: node scripts/check-bun-driver.mjs --require-bun
 
+      # P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）：builtin staged
+      # 产物内 sqlite 驱动探测代码必须保持「运行期解析」形态——esbuild 升级 / 驱动
+      # 实现回改字面量会把 spec 静态化（bundle 成功但 staged 运行期 Cannot find
+      # module，比不拆更糟）。pre-commit 2h-2 段只在 staged 命中 reader 源 /
+      # zcode-session-source 时触发，CI 是免 staged 前提下的兜底覆盖面（D7 通则，
+      # 与 check-bun-driver 同一挂载理由）——CI 无 staged 产物，--rebuild 先重建
+      #（bundle-extensions <1s）再检查。
+      - name: P-bundle gate (staged driver spec runtime-resolved form)
+        run: node scripts/check-pbundle.mjs --rebuild
+
       # G2 CI vitest 目标非空守卫：解析本文件全部 `vitest run` 调用（含经 package.json
       # script 一层间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被
       # config exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test

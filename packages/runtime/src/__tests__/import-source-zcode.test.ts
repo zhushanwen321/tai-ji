@@ -27,13 +27,24 @@
  * prepareImport 走 request.dbPath——两条通道都永不触达真实宿主库（~/.zcode）。
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { normalizeZcodeSessionId, zcodeCandidateKey } from '@zhushanwen/zcode-session-source'
+import {
+  normalizeZcodeSessionId,
+  openZcodeSessionDb,
+  zcodeCandidateKey,
+} from '@zhushanwen/zcode-session-source'
+
+// C1 回归锚基建：openZcodeSessionDb 以 vi.fn 包装（默认透传真实现，既有用例行为
+// 不变）——dispose 契约用例以 mockImplementation 模拟 L3 命中形态（见该 describe 说明）。
+vi.mock('@zhushanwen/zcode-session-source', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@zhushanwen/zcode-session-source')>()
+  return { ...actual, openZcodeSessionDb: vi.fn((dbPath: string) => actual.openZcodeSessionDb(dbPath)) }
+})
 
 import { getSessionsDir } from '../infra/pi/pi-paths.js'
 import { invalidateScanDirCache, scanPiSessions } from '../infra/pi/session-file-utils.js'
@@ -52,15 +63,26 @@ interface SessionSeed {
   timeUpdated: number
 }
 
+/** fixture 库 message 行种子（id 需与 parts 的隐式 message_id `m-${i}` 形态对齐）。 */
+interface MessageSeed {
+  id: string
+  sessionId: string
+  sequence: number
+  /** message.data 列 JSON 字符串（converter 消费 role/time 字段）。 */
+  data: string
+}
+
 /**
  * 建最小列集 fixture 库（宿主 schema 0.16.5 的消费面子集：session 六列 + message/part
  * 存在性 + schema_migration）。parts 直挂 session_id（本单元的字节聚合只消费
- * part.session_id/part.data，message 形态是 U4 转换器的面）。
+ * part.session_id/part.data）；messages 缺省不插（getSessionTranscript LEFT JOIN 从
+ * message 侧起查，空表 = 空会话）；需要转换器消费行集时（compaction 降级明细）插入。
  */
 function buildFixtureDb(
   dbPath: string,
   sessions: SessionSeed[],
   parts: Array<{ sessionId: string; data: string }>,
+  messages: MessageSeed[] = [],
   opts?: { omitSessionTable?: boolean; schemaVersion?: string },
 ): void {
   const db = new DatabaseSync(dbPath)
@@ -80,6 +102,8 @@ function buildFixtureDb(
     }
     const insPart = db.prepare('INSERT INTO part (id, message_id, session_id, sequence, data) VALUES (?, ?, ?, ?, ?)')
     parts.forEach((p, i) => insPart.run(`p-${i}`, `m-${i}`, p.sessionId, i, p.data))
+    const insMsg = db.prepare('INSERT INTO message (id, session_id, sequence, data) VALUES (?, ?, ?, ?)')
+    for (const m of messages) insMsg.run(m.id, m.sessionId, m.sequence, m.data)
     db.exec(
       'CREATE TABLE schema_migration (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, app_version TEXT, time_applied INTEGER NOT NULL)',
     )
@@ -332,7 +356,7 @@ describe('ZcodeImportSource.listCandidates', () => {
 
   it('schema 漂移（session 表缺失）→ import_invalid_session，message 带 schema_migration 版本', async () => {
     const drifted = join(fixturesRoot, 'zc-drifted.sqlite')
-    buildFixtureDb(drifted, [], [], { omitSessionTable: true, schemaVersion: '9.9.9' })
+    buildFixtureDb(drifted, [], [], [], { omitSessionTable: true, schemaVersion: '9.9.9' })
     const source = makeSource(drifted)
     await expect(catchCode(() => source.listCandidates({}))).resolves.toBe('import_invalid_session')
     try {
@@ -385,6 +409,30 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
     expect(artifact.degradations).toEqual([])
   })
 
+  it('含 compaction part 的会话：write 后 degradations 恰 1 条（zcode-import:compaction 明细）——降级明细导入侧不丢失', async () => {
+    // C3 锁定：converter compaction 分支 push 降级明细（设计契约③，基线不 push）——
+    // runtime 导入侧经 artifact.degradations 承载，编排层 write 后聚合
+    // warning='conversion_degraded'（import-service 步骤 8；该聚合通道已由
+    // import-service.test.ts「degradations 非空 → reply.warning = conversion_degraded」
+    // stub 注入用例锁定，此处补 converter→artifact 段，两测试合并即全链）
+    const dbPath3 = join(fixturesRoot, 'zc-compaction.sqlite')
+    const sid = 'sess_0198cmp0-0000-0000-0000-00000000000c'
+    buildFixtureDb(
+      dbPath3,
+      [{ id: sid, title: 'Compacted', directory: '/tmp/zc-cmp-cwd', taskType: 'interactive', timeCreated: 1000, timeUpdated: 2000 }],
+      [
+        // part i=0 → 隐式 message_id 'm-0'（与下方 message 行 id 对齐）
+        { sessionId: sid, data: JSON.stringify({ type: 'compaction', auto: true, trigger: 'auto', preCompactTokenCount: 160000, time: { start: 3000, end: 3100 } }) },
+      ],
+      [{ id: 'm-0', sessionId: sid, sequence: 0, data: JSON.stringify({ role: 'assistant', time: { created: 1000, completed: 2000 } }) }],
+    )
+    const artifact = await makeSource(dbPath3).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: sid, dbPath: dbPath3 })
+    expect(artifact.degradations).toEqual([]) // prepareImport 时点恒空（转换在 write 闭包内）
+    await artifact.write(join(fixturesRoot, 'zc-compaction-tmp.jsonl'))
+    expect(artifact.degradations).toHaveLength(1)
+    expect(artifact.degradations[0]).toContain('zcode-import:compaction')
+  })
+
   it('sessionId 缺失 / 不在库中 → import_invalid_session', async () => {
     const source = makeSource(dbPath)
     await expect(catchCode(() => source.prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', dbPath })))
@@ -403,5 +451,68 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
     )
     await expect(catchCode(() => makeSource(dbPath2).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_', dbPath: dbPath2 })))
       .resolves.toBe('import_invalid_session')
+  })
+})
+
+describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
+  // 断言基线自持有（B1 导出面收敛：recovery 内部件不经包面导出）——'taiji-zcode-snap-'
+  // 是 L3 快照目录固定前缀（SSOT = zcode-session-source recovery.ts，兼崩溃残留人工识别）
+  const snapshotTmpPrefix = 'taiji-zcode-snap-'
+  const countSnapshotDirs = () =>
+    readdirSync(tmpdir()).filter((n) => n.startsWith(snapshotTmpPrefix)).length
+
+  let dbPath: string
+
+  beforeAll(() => {
+    dbPath = join(fixturesRoot, 'zc-dispose.sqlite')
+    buildFixtureDb(
+      dbPath,
+      [{ id: 'sess_0198disp0-0000-0000-0000-00000000000d', title: 'Dispose me', directory: '/tmp/zc-dispose-cwd', taskType: 'interactive', timeCreated: 1000, timeUpdated: 2000 }],
+      [],
+    )
+  })
+
+  it('各调用点 finally 走 handle.dispose 而非仅 db.close：L3 命中形态下快照目录清零', async () => {
+    // node 宿主 L1 直开恒成功（runtime 侧 F24），L3 全链无法自然命中——zcode-session-source
+    // recovery.test.ts 的 L3 成功用例也只能单级直调 openViaSnapshot。故以 stub handle 模拟
+    // L3 命中形态（via='L3-snapshot' + 真实快照目录，dispose = close + 删目录），锁定
+    // runtime 调用点「finally 必调 handle.dispose」契约（ZcodeSessionDbHandle.dispose =
+    // close + L3 快照目录清理）。修复前 openDb 只回传 handle.db、finally 只 db.close()，
+    // dispose 永不被调 → 快照目录残留 → 本用例红。
+    const actual = await vi.importActual<typeof import('@zhushanwen/zcode-session-source')>('@zhushanwen/zcode-session-source')
+    // 基线先于建目录取值（基线不得含本用例自建的快照目录——否则 dispose 删掉它后差分恒 -1）
+    const snapshotsBefore = countSnapshotDirs()
+    const snapshotDir = mkdtempSync(join(tmpdir(), snapshotTmpPrefix))
+    expect(existsSync(snapshotDir)).toBe(true)
+    vi.mocked(openZcodeSessionDb).mockImplementation(async () => {
+      // 真连接保真（fixture 库真实可查），仅收尾替换为 L3 形态；快照目录只删一次
+      //（首调 dispose 即删，后续 rmSync force=true 幂等）
+      const real = await actual.openZcodeSessionDb(dbPath)
+      return {
+        db: real.db,
+        via: 'L3-snapshot',
+        dispose() {
+          real.dispose()
+          rmSync(snapshotDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+        },
+      }
+    })
+    try {
+      const source = makeSource(dbPath)
+      await source.listCandidates({}) // 调用点①候选行查询 + ②字节聚合（独立短连接）
+      const artifact = await source.prepareImport({
+        sourcePath: '',
+        projectId: 'p',
+        source: 'zcode',
+        sessionId: 'sess_0198disp0-0000-0000-0000-00000000000d',
+        dbPath,
+      }) // 调用点③导入定位
+      await artifact.write(join(fixturesRoot, 'zc-dispose-tmp.jsonl')) // 调用点④write 转换
+    } finally {
+      // 恢复透传实现（既有用例不感知 L3 stub）
+      vi.mocked(openZcodeSessionDb).mockImplementation((p: string) => actual.openZcodeSessionDb(p))
+    }
+    expect(existsSync(snapshotDir)).toBe(false)
+    expect(countSnapshotDirs()).toBe(snapshotsBefore)
   })
 })

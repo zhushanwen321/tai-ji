@@ -100,13 +100,21 @@ function queryFailed(e: unknown): ImportServiceError {
   )
 }
 
+/** openDb 产物：查询面 + 幂等收尾（close + L3 快照目录清理——finally 必调 dispose）。 */
+interface OpenedZcodeDb {
+  db: ZcodeReadonlyDb
+  dispose: () => void
+}
+
 /** 打开只读连接（统一入口：存在性 → 四级恢复阶梯 → schema 已知集闸门）+ 阶梯日志。 */
-async function openDb(dbPath: string): Promise<ZcodeReadonlyDb> {
+async function openDb(dbPath: string): Promise<OpenedZcodeDb> {
   const handle = await openZcodeSessionDb(dbPath).catch((e: unknown) => {
     throw openFailed(e, dbPath)
   })
   logRecoveryLevel(handle.via, dbPath)
-  return handle.db
+  // 收尾必须回传 handle.dispose（close + L3 快照目录清理，幂等）——只回传 db 会把
+  // 收尾通道丢弃，阶梯落 L3 时每次导入在 tmpdir 泄漏一个 taiji-zcode-snap-* 目录
+  return { db: handle.db, dispose: handle.dispose }
 }
 
 /** zcode 源：宿主库（或 dbPath 注入的 fixture 库）只读候选列表 + 导入定位。 */
@@ -120,7 +128,7 @@ export class ZcodeImportSource implements SessionImportSource {
     // ImportRequest），默认根 = 构造注入的宿主库路径（组合根传 hostZcodeDbPath，测试传
     // fixture 库路径——与 pi 源 getRootDir 同注入模式）
     const dbPath = this.deps.getHostDbPath()
-    const db = await openDb(dbPath)
+    const { db, dispose } = await openDb(dbPath)
 
     // 全量候选行（不 SQL 截断）：query 过滤 / total / dirs 聚合需全集，与 pi 源语义同构
     //（SQL LIMIT 后再过滤会漏掉 N 页之外的搜索命中）；全表 4k 行毫秒级（§3.8）
@@ -130,7 +138,7 @@ export class ZcodeImportSource implements SessionImportSource {
     } catch (e) {
       throw queryFailed(e)
     } finally {
-      db.close()
+      dispose()
     }
 
     // alreadyImported 归一化域（§3.7）：扫描集是 header.id 域 = 归一化域，原始 sess_ 形态
@@ -191,13 +199,13 @@ export class ZcodeImportSource implements SessionImportSource {
   /** 返回页字节聚合（独立连接：候选行查询连接已关，聚合再开短连接；错误按查询失败映射）。 */
   private async byteSizesOf(dbPath: string, sessionIds: string[]): Promise<Map<string, number>> {
     if (sessionIds.length === 0) return new Map()
-    const db = await openDb(dbPath)
+    const { db, dispose } = await openDb(dbPath)
     try {
       return db.candidatesByteSize(sessionIds)
     } catch (e) {
       throw queryFailed(e)
     } finally {
-      db.close()
+      dispose()
     }
   }
 
@@ -220,14 +228,14 @@ export class ZcodeImportSource implements SessionImportSource {
     }
     const dbPath = request.dbPath ?? this.deps.getHostDbPath()
 
-    const db = await openDb(dbPath)
+    const { db, dispose } = await openDb(dbPath)
     let row: ZcodeSessionRow | undefined
     try {
       row = db.getSessionRow(sessionId)
     } catch (e) {
       throw queryFailed(e)
     } finally {
-      db.close()
+      dispose()
     }
     if (!row) {
       // stale 列表/库被清理（§3.6 ①）：刷新列表重选
@@ -256,24 +264,24 @@ export class ZcodeImportSource implements SessionImportSource {
       fileName: `${timestamp.replaceAll(':', '.')}_${normalizedId}.jsonl`,
       write: async (tmpPath) => {
         // 转换相位：惰性开只读连接（prepareImport 校验连接已关；去重拒绝路径 write 不被
-        // 调用，不持有连接），完成/失败都在 finally 内关闭
+        // 调用，不持有连接），完成/失败都在 finally 内 dispose（含 L3 快照目录清理）
         let out: NormalizedSession
-        let writeDb: ZcodeReadonlyDb
+        let writeHandle: OpenedZcodeDb
         try {
-          writeDb = await openDb(dbPath)
+          writeHandle = await openDb(dbPath)
         } catch (e) {
           throw e instanceof ImportServiceError ? e : openFailed(e, dbPath)
         }
         try {
           // 行存在性写入阶段复查（prepareImport 校验与会话写入间的竞态窗口，§3.6 ①）
-          const writeRow = writeDb.getSessionRow(sessionId)
+          const writeRow = writeHandle.db.getSessionRow(sessionId)
           if (!writeRow) {
             throw new ImportServiceError(
               'import_invalid_session',
               `该会话已不在 zcode 库中（sessionId=${sessionId}，写入阶段复查不存在），请刷新列表后重选`,
             )
           }
-          out = convertZcodeTranscript(writeDb.getSessionTranscript(sessionId), {
+          out = convertZcodeTranscript(writeHandle.db.getSessionTranscript(sessionId), {
             id: sessionId,
             title: writeRow.title,
             timeCreated: writeRow.timeCreated,
@@ -282,7 +290,7 @@ export class ZcodeImportSource implements SessionImportSource {
           // 语义化错误（会话消失）原样透传；查询/JSON 失败按 schema 漂移映射
           throw e instanceof ImportServiceError ? e : queryFailed(e)
         } finally {
-          writeDb.close()
+          writeHandle.dispose()
         }
         degradations.push(...out.degradations)
         // 序列化装配（首行 header 行不在 source 包产出——canonical 序列化契约）：
