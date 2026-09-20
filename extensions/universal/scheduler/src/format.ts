@@ -1,59 +1,111 @@
 import { formatDuration, MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from './parsing.js'
 import type { ScheduleSpec, TaskKind } from './types.js'
 
+/**
+ * 界面语言（L2 extension 侧文案语言，经 `<dataDir>/ui-preferences.json` 通道获取）。
+ * 定义在 format.ts：i18n.ts 依赖本模块的格式化器，类型反向定义会成环——i18n.ts 再导出。
+ */
+export type UiLocale = 'zh-CN' | 'en-US'
+
 /** 相对时间显示的"现在"判定窗口（±5s 内视为 now）。 */
 const NOW_THRESHOLD_MS = 5000
 /** 省略号 "..." 的字符数（truncate 截断预留宽度）。 */
 const ELLIPSIS_LENGTH = 3
 
-/** Format ScheduleSpec to readable string. kind 区分 once/recurring（once 显示 'once in X' 而非误导性的 'every X'）。 */
-export function formatSchedule(spec: ScheduleSpec, kind?: TaskKind): string {
+/** 相对时间的单位表（en 短后缀 / zh 全称；两格式化器共用的单一口径）。 */
+const RELATIVE_UNITS_EN: readonly (readonly [string, number])[] = [
+  ['d', MS_PER_DAY],
+  ['h', MS_PER_HOUR],
+  ['m', MS_PER_MINUTE],
+  ['s', MS_PER_SECOND],
+]
+const RELATIVE_UNITS_ZH: readonly (readonly [string, number])[] = [
+  ['天', MS_PER_DAY],
+  ['小时', MS_PER_HOUR],
+  ['分钟', MS_PER_MINUTE],
+  ['秒', MS_PER_SECOND],
+]
+
+/**
+ * Format ScheduleSpec to readable string. kind 区分 once/recurring（once 显示 'once in X' 而非误导性的 'every X'）。
+ *
+ * `locale` 必填、无默认值（设计 r4 M1）：漏传即编译报错，替代「人工枚举调用点」清单
+ * （r3→r4 已连漏 notify/widget 与 getArgumentCompletions 两处）。内部按 `spec.mode`
+ * 显式分支 interval/cron——不靠 `intervalMs`/`cron` 空值推断。
+ *
+ * legacy 两参重载（@deprecated）为临时桥：`commands.ts` 的 getArgumentCompletions 调用
+ * 属 u-p2b 领地（本单元不可触碰），接线前由本重载保留旧英文行为；u-p2b 传入 locale 后删除。
+ */
+export function formatSchedule(
+  spec: ScheduleSpec,
+  kind: TaskKind | undefined,
+  locale: UiLocale,
+): string
+/** @deprecated u-p2b 接线前临时桥（commands.ts 调用点未传 locale）；接线后删除本重载。 */
+export function formatSchedule(spec: ScheduleSpec, kind?: TaskKind): string
+export function formatSchedule(
+  spec: ScheduleSpec,
+  kind: TaskKind | undefined,
+  locale?: UiLocale,
+): string {
+  const resolved = locale ?? 'en-US'
   if (spec.mode === 'interval') {
-    return kind === 'once'
-      ? `once in ${formatDuration(spec.intervalMs)}`
-      : `every ${formatDuration(spec.intervalMs)}`
+    const duration = formatDurationI18n(spec.intervalMs, resolved)
+    if (resolved === 'zh-CN') {
+      return kind === 'once' ? `${duration}后一次` : `每 ${duration}`
+    }
+    return kind === 'once' ? `once in ${duration}` : `every ${duration}`
   }
   return spec.cronExpression
 }
 
+/** 时长格式化（zh 全称单位 / en 走 parsing.formatDuration 既有口径）。 */
+function formatDurationI18n(ms: number, locale: UiLocale): string {
+  if (locale !== 'zh-CN') return formatDuration(ms)
+  if (ms <= 0) return '0 秒'
+  for (const [suffix, divisor] of RELATIVE_UNITS_ZH) {
+    if (ms >= divisor && ms % divisor === 0) return `${ms / divisor} ${suffix}`
+  }
+  return `${Math.round(ms / MS_PER_SECOND)} 秒`
+}
+
 /**
  * 格式化时间戳为相对时间字符串。
- * 未来: "in 5m"
- * 过去: "5m ago"
- * 当前(+-5s): "now"
+ * en 未来: "in 5m" / 过去: "5m ago" / 当前(±5s): "now"
+ * zh 未来: "5 分钟后" / 过去: "5 分钟前" / 当前: "现在"
  *
- * now 可选参数：基准时间戳，默认 Date.now()。测试可传固定值快进/锁定，
- * 生产调用方无需传（参数可选，行为不变）。
+ * `locale` 必填、无默认值（设计 r4 M1：漏传即编译报错）。`now` 可选参数：基准时间戳，
+ * 默认 Date.now()。测试可传固定值快进/锁定。
  */
-export function formatRelativeTime(timestamp: number, now?: number): string {
+export function formatRelativeTime(timestamp: number, locale: UiLocale, now?: number): string {
   const currentTime = now ?? Date.now()
   const diff = timestamp - currentTime
+  const absDiff = Math.abs(diff)
 
   // 5秒内视为"现在"
-  if (Math.abs(diff) < NOW_THRESHOLD_MS) return 'now'
+  if (absDiff < NOW_THRESHOLD_MS) return locale === 'zh-CN' ? '现在' : 'now'
 
-  const absDiff = Math.abs(diff)
-  const units: [string, number][] = [
-    ['d', MS_PER_DAY],
-    ['h', MS_PER_HOUR],
-    ['m', MS_PER_MINUTE],
-    ['s', MS_PER_SECOND],
-  ]
-
-  let formatted = ''
-  for (const [suffix, divisor] of units) {
-    if (absDiff >= divisor) {
-      const value = Math.floor(absDiff / divisor)
-      formatted = `${value}${suffix}`
-      break
-    }
+  if (locale === 'zh-CN') {
+    const formatted = formatMagnitudeZh(absDiff)
+    return diff > 0 ? `${formatted}后` : `${formatted}前`
   }
 
-  if (!formatted) {
-    formatted = `${Math.round(absDiff / MS_PER_SECOND)}s`
-  }
-
+  const formatted = formatMagnitudeEn(absDiff)
   return diff > 0 ? `in ${formatted}` : `${formatted} ago`
+}
+
+function formatMagnitudeEn(absDiff: number): string {
+  for (const [suffix, divisor] of RELATIVE_UNITS_EN) {
+    if (absDiff >= divisor) return `${Math.floor(absDiff / divisor)}${suffix}`
+  }
+  return `${Math.round(absDiff / MS_PER_SECOND)}s`
+}
+
+function formatMagnitudeZh(absDiff: number): string {
+  for (const [suffix, divisor] of RELATIVE_UNITS_ZH) {
+    if (absDiff >= divisor) return `${Math.floor(absDiff / divisor)} ${suffix}`
+  }
+  return `${Math.round(absDiff / MS_PER_SECOND)} 秒`
 }
 
 /**

@@ -1,6 +1,8 @@
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 
 import { formatRelativeTime, formatSchedule } from './format.js'
+import { toTaskParams } from './i18n.js'
+import type { ServiceMessage, TaskListParams } from './i18n.js'
 import { computeNextRuns, parseSchedule } from './parsing.js'
 import type { SchedulerRuntime } from './runtime.js'
 import type { AddOptions, ScheduledTask } from './types.js'
@@ -8,26 +10,37 @@ import type { AddOptions, ScheduledTask } from './types.js'
 // recurring 预览行数（once 只回显 1 次）
 const PREVIEW_RUN_COUNT = 5
 
+// runtime 以普通 Error 抛任务上限（typed error `TaskLimitError` 归后续单元）——分类
+// 收敛在本单点（设计 §6.9「失败键赋值」），禁字符串匹配散落。括号内即 runtime MAX_TASKS。
+const TASK_LIMIT_RE = /^Task limit reached \((\d+)\)/
+
 // ── 结构化结果 ──
 
-// L1（ext-simplify-08）：errorCode 枚举与字段已删——W4 后失败通道收敛为 throw，
-// tool/command 两层均零消费方；失败语义由 message 文案承载。
-
-export interface ServiceResult<T = unknown> {
+/**
+ * 结构化结果（设计 §6.9「双受众」/ §7.1）：
+ * - `messageKey`：本地化键（语义 = 呈现层查词典，**非错误分类**；命名刻意避开刚被
+ *   ext-simplify-08 删除的 errorCode 族）。消费者 = commands / interaction 的 L2 呈现层。
+ * - `params`：locale-neutral 原始值，按 messageKey 判别（见 `i18n.ts` ServiceMessageParamsMap）。
+ * - `message`：英文回退（L4 tool result 正文 + 未分类异常），**不走词典**。
+ * 键或 params 缺失 = 未分类失败（不可达串 / toErrorMessage catch-all）→ L2 回落英文。
+ */
+export type ServiceResult<T = unknown> = {
   success: boolean
   message: string
   data?: T
-}
+} & (ServiceMessage | { messageKey?: undefined; params?: undefined })
+
+export type { ServiceMessageKey } from './i18n.js'
 
 // ── SchedulerService ──
 
 /**
  * tool 与 command 的唯一业务入口（IF-4 去双轨）：
  * 5 个动作单一实现，返回结构化 ServiceResult。
- * - 成功: { success: true, message, data }
- * - 失败: { success: false, message }
+ * - 成功: { success: true, messageKey, params, message, data }
+ * - 失败: { success: false, messageKey?, params?, message }
  *
- * message 为用户可读纯文本（tool 用作 content 文本、command 直接输出），
+ * message 为英文回退（tool result 正文 / 未知异常），locale 固定 'en-US'。
  * data 供 tool details（create: {task, nextRuns}；list: {tasks}）。
  */
 export class SchedulerService {
@@ -53,6 +66,8 @@ export class SchedulerService {
     if (!parsed) {
       return {
         success: false,
+        messageKey: 'schedule.invalid',
+        params: { input: scheduleInput },
         message: `Invalid schedule: "${scheduleInput}". Use duration (5m/2h/1d) or cron expression (*/10 * * * *).`,
       }
     }
@@ -61,8 +76,16 @@ export class SchedulerService {
     try {
       task = await this.runtime.addTask(prompt, parsed, options)
     } catch (err) {
-      // 失败归一 message 通道（L1）：任务上限 / 意外错误（正常路径不会到达——
-      // parseSchedule 已校验 cron 有效性）同样回传原始 message
+      // 失败归一（L1）：任务上限 / 意外错误（正常路径不会到达——parseSchedule 已校验 cron 有效性）
+      const limitMatch = err instanceof Error ? TASK_LIMIT_RE.exec(err.message) : null
+      if (limitMatch) {
+        return {
+          success: false,
+          messageKey: 'task.limit',
+          params: { max: Number(limitMatch[1]) },
+          message: toErrorMessage(err),
+        }
+      }
       return { success: false, message: toErrorMessage(err) }
     }
 
@@ -73,35 +96,48 @@ export class SchedulerService {
     // once 单行内联回显（只执行 1 次，编号列表会误导）；recurring 保持 5 行编号列表
     const runPreview =
       task.kind === 'once'
-        ? `Next run: ${formatRelativeTime(nextRuns[0]!, now)}`
+        ? `Next run: ${formatRelativeTime(nextRuns[0]!, 'en-US', now)}`
         : [
             'Next 5 runs:',
-            ...nextRuns.map((t, i) => `  ${i + 1}. ${formatRelativeTime(t, now)}`),
+            ...nextRuns.map((t, i) => `  ${i + 1}. ${formatRelativeTime(t, 'en-US', now)}`),
           ].join('\n')
     // 一行紧凑：name(id) + schedule(含 kind 信息) + expires。
     // 删冗余 Kind 行（formatSchedule 已含 once/every）；Expires 合并（默认 no-expires 显式）。
     const expiresLabel = task.expiresAt
-      ? `expires ${formatRelativeTime(task.expiresAt, now)}`
+      ? `expires ${formatRelativeTime(task.expiresAt, 'en-US', now)}`
       : 'no-expires'
     const message = [
-      `Task "${task.name}" (${task.id}) created. ${formatSchedule(task.schedule, task.kind)}, ${expiresLabel}`,
+      `Task "${task.name}" (${task.id}) created. ${formatSchedule(task.schedule, task.kind, 'en-US')}, ${expiresLabel}`,
       runPreview,
     ].join('\n')
 
-    return { success: true, message, data: { task, nextRuns } }
+    return {
+      success: true,
+      messageKey: 'task.created',
+      params: toTaskParams(task, now),
+      message,
+      data: { task, nextRuns },
+    }
   }
 
   list(): ServiceResult<{ tasks: ScheduledTask[] }> {
     const tasks = this.runtime.listTasks()
     if (tasks.length === 0) {
-      return { success: true, message: 'No scheduled tasks.', data: { tasks: [] } }
+      return {
+        success: true,
+        messageKey: 'task.list.empty',
+        params: {},
+        message: 'No scheduled tasks.',
+        data: { tasks: [] },
+      }
     }
     // 同 create：同一基准渲染全部相对时间，避免逐项读时钟的边界漂移
     const now = this.now()
     const message = tasks.map(t =>
-      `${t.enabled ? '●' : '○'} ${t.id} ${t.name} · ${formatSchedule(t.schedule, t.kind)} · ${formatRelativeTime(t.nextRunAt, now)}`
+      `${t.enabled ? '●' : '○'} ${t.id} ${t.name} · ${formatSchedule(t.schedule, t.kind, 'en-US')} · ${formatRelativeTime(t.nextRunAt, 'en-US', now)}`
     ).join('\n')
-    return { success: true, message, data: { tasks } }
+    const params: TaskListParams = { n: tasks.length, tasks: tasks.map(t => toTaskParams(t, now)), now }
+    return { success: true, messageKey: 'task.list', params, message, data: { tasks } }
   }
 
   async toggle(id: string | undefined, enabled: boolean | undefined): Promise<ServiceResult> {
@@ -113,9 +149,16 @@ export class SchedulerService {
     }
     const success = await this.runtime.toggleTask(id, enabled)
     if (!success) {
-      return { success: false, message: `Task ${id} not found.` }
+      return {
+        success: false,
+        messageKey: 'task.notFound',
+        params: { id },
+        message: `Task ${id} not found.`,
+      }
     }
-    return { success: true, message: `Task ${id} ${enabled ? 'enabled' : 'disabled'}.` }
+    return enabled
+      ? { success: true, messageKey: 'task.enabled', params: { id }, message: `Task ${id} enabled.` }
+      : { success: true, messageKey: 'task.disabled', params: { id }, message: `Task ${id} disabled.` }
   }
 
   delete(id: string | undefined): ServiceResult {
@@ -124,9 +167,14 @@ export class SchedulerService {
     }
     const success = this.runtime.deleteTask(id)
     if (!success) {
-      return { success: false, message: `Task ${id} not found.` }
+      return {
+        success: false,
+        messageKey: 'task.notFound',
+        params: { id },
+        message: `Task ${id} not found.`,
+      }
     }
-    return { success: true, message: `Task ${id} deleted.` }
+    return { success: true, messageKey: 'task.deleted', params: { id }, message: `Task ${id} deleted.` }
   }
 
   /**
@@ -140,15 +188,22 @@ export class SchedulerService {
       return { success: false, message: 'id is required for run.' }
     }
     if (!this.runtime.getTask(id)) {
-      return { success: false, message: `Task ${id} not found.` }
+      return {
+        success: false,
+        messageKey: 'task.notFound',
+        params: { id },
+        message: `Task ${id} not found.`,
+      }
     }
     const dispatched = await this.runtime.runTaskNow(id)
     if (!dispatched) {
       return {
         success: false,
+        messageKey: 'task.notDispatched',
+        params: { id },
         message: `Task ${id} not dispatched (disabled, rate-limited, or dispatch in flight).`,
       }
     }
-    return { success: true, message: `Task ${id} executed.` }
+    return { success: true, messageKey: 'task.executed', params: { id }, message: `Task ${id} executed.` }
   }
 }
