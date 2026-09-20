@@ -1,9 +1,13 @@
 import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from '@earendil-works/pi-coding-agent'
 import type { GuiContext } from '@zhushanwen/extension-protocol'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
+import { getLogger } from '@zhushanwen/pi-extension-logger'
 
+import { createAckTurnController, type AckTurnController } from './ack-turn.js'
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
+import { formatSchedule } from './format.js'
+import { readUiLocale, t } from './i18n.js'
 import { importLegacyStore } from './importer.js'
 import { abortPendingScheduleForms } from './interaction.js'
 import { SchedulerRuntime, type SchedulerModelOps } from './runtime.js'
@@ -36,6 +40,9 @@ import { setSchedulerWidget } from './widget.js'
 // STALE_CTX_MARKER 文案兜底（F2 catch 分诊）。
 let sessionGeneration = 0
 
+/** 包内既有 logger（ack 编排的日志面与其它模块同源）。 */
+const logger = getLogger('scheduler')
+
 /**
  * pi-scheduler extension factory。
  * 注册 schedule + schedule_control 两个 tool、/schedule command、session 事件。
@@ -53,6 +60,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   // （flush 必已发生），把跨 session 双导入窗口从「session 整个生命周期」缩回
   // 「session_start → 首个 turn_end」秒级。cleanup 幂等（importer.ts importFromFile），重复调用安全。
   let importCleanup: (() => void) | undefined
+  // ack 确认轮控制器（u-ack-turn）：per-session 实例（backend 每代新建），但状态住
+  // ack-turn 的模块级单例——新代构造后即接管并清理上一代残留。
+  let ackController: AckTurnController | null = null
 
   const getService = (): SchedulerService => {
     if (!service) throw new Error('Scheduler not initialized: session not started')
@@ -106,7 +116,37 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // W2：tick 后回调刷新 widget（替代独立 widgetTimer + setInterval，节奏对齐 TICK_INTERVAL_MS）
     runtime.onAfterTick(() => refreshWidget(ctx))
     runtime.startScheduler()
-    service = new SchedulerService(runtime, () => backend.now())
+
+    // ack 确认轮装配（u-ack-turn）：构造后立刻调 handleSessionBoundary——它是 session_start
+    // 与 session_shutdown 共用的边界清理，顺手做一次写盘判定并清掉上一代残留的 30s 定时器 /
+    // 覆写窗口（模块级单例跨代共享的结构性意义）。
+    ackController = createAckTurnController({
+      backend,
+      now: () => backend.now(),
+      log: logger,
+      render: (key, params) => t(key, params),
+      notify: (message, level) => ctx.ui.notify(message, level),
+    })
+    ackController.handleSessionBoundary()
+
+    service = new SchedulerService(runtime, () => backend.now(), (task) => {
+      // 创建汇聚点 → ack 触发器（fire-and-forget：回调不 await，失败仅日志面）。
+      // 唯一生产开关 TAIJI_SCHED_ACK_DISABLE 在此单点读取（fail-safe 方向：缺省不禁用）。
+      const controller = ackController
+      if (!controller) return
+      void controller
+        .maybeStartAck({
+          task: {
+            id: task.id,
+            name: task.name,
+            scheduleText: formatSchedule(task.schedule, task.kind, readUiLocale()),
+          },
+          model: backend.getCurrentModel(),
+          isIdle: backend.isIdle(),
+          isToggleDisabled: process.env.TAIJI_SCHED_ACK_DISABLE === '1',
+        })
+        .catch(err => logger.warn('ack turn failed', { error: toErrorMessage(err) }))
+    })
 
     // 注册 widget（SDK setWidget 第一重载：直接传 string[]）。初始渲染一次，
     // 后续随每次 tickScheduler 末尾的 onAfterTick 回调刷新（nextRunAt 倒计时 + task 状态）。
@@ -124,13 +164,21 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // U4 dispatch 模型切换恢复挂点（设计 D3 修订版）：状态机、恢复动作与 stale 代际守卫都在
     // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
     service?.runtime.handleTurnEnd(event?.turnIndex)
+    // ack 安全网注销（幂等）：正常路径已在 streamSimple 调用点自撤，这里覆盖「覆写未被调用」
+    // 的轮次（E2）。不取消 30s 定时器——它服务通知判定。
+    ackController?.handleTurnEnd()
   })
 
   // U4 dispatch 模型切换：归属状态机其余事件监听（P-MODEL-③④ 实测序态）。handler 只转发
   // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的窗口封口。
   pi.on('agent_start', () => service?.runtime.handleAgentStart())
   pi.on('turn_start', (event) => service?.runtime.handleTurnStart(event?.turnIndex))
-  pi.on('message_start', (event) => service?.runtime.handleMessageStart(event?.message))
+  pi.on('message_start', (event) => {
+    service?.runtime.handleMessageStart(event?.message)
+    // ack 触发器判别（u-ack-turn）：只有我们注入的 custom 消息（前缀 pi-scheduler-ack:）
+    // 才同步武装覆写；外来/assistant 消息一律忽略。
+    ackController?.handleMessageStart(event?.message)
+  })
   pi.on('agent_end', () => service?.runtime.handleRunClosed())
   pi.on('agent_settled', () => service?.runtime.handleRunClosed())
 
@@ -153,6 +201,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       // MF-2：cleanup 抛非 ENOENT 错误（如 EACCES）也必须复位，避免残留闭包
       importCleanup = undefined
     }
+    // ack 边界清理（u-ack-turn）：先做写盘判定再自撤覆写并全量清状态（含取消上一代 30s
+    // 定时器）—— session_start 与 session_shutdown 共用，跨代单例的结构性意义。
+    ackController?.handleSessionBoundary()
   })
 
   // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /scheduler 命令）。

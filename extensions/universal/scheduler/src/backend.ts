@@ -2,7 +2,12 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 
 import { replayFoldEntries, type SchedulerEntryLike } from './replay.js'
 import { TASK_ENTRY_TYPE } from './types.js'
-import type { ScheduledTask, SchedulerEntryOp } from './types.js'
+import type {
+  ScheduledTask,
+  SchedulerCurrentModel,
+  SchedulerEntryOp,
+  SchedulerProviderOverride,
+} from './types.js'
 
 // ── SchedulerBackend 接口 ──
 
@@ -52,6 +57,26 @@ export interface SchedulerBackend {
   appendEntry(op: SchedulerEntryOp): void
   getSessionFile(): string | undefined
   now(): number
+  /**
+   * 注册/覆盖 provider（ack 合成轮用）：转发 pi.registerProvider(providerId, config)。
+   * config 只带 api + streamSimple，不带 models（不改变模型清单）。失败语义由调用方
+   * try-catch 分诊（E1）；本方法不吞错。
+   */
+  registerProvider(providerId: string, config: SchedulerProviderOverride): void
+  /** 注销 provider（ack 覆写 one-shot 自撤 / turn_end 安全网用）：转发 pi.unregisterProvider。 */
+  unregisterProvider(providerId: string): void
+  /**
+   * 当前 session 的 entries 快照（只读）。归一为数组——底层 getter 可能返回任何 Iterable，
+   * 消费者（ack 武装判别 / 测试夹具）只面对单一形态。不触发任何写入（项目规则 #6）。
+   */
+  getEntries(): SchedulerEntryLike[]
+  /**
+   * 会话是否空闲（not streaming）。ack 编排据此决定是否介入：非空闲时运行中的轮次会自然
+   * 打开落盘闸门，本机制不应注入合成轮（设计 §3.3 D4 / G4）。
+   */
+  isIdle(): boolean
+  /** 会话当前模型的最小投影；无模型会话返回 undefined。ack 覆写目标与合成行字段来源。 */
+  getCurrentModel(): SchedulerCurrentModel | undefined
 }
 
 /**
@@ -64,6 +89,17 @@ export interface SchedulerBackendCtx {
     getEntries(): SchedulerEntryLike[] | Iterable<SchedulerEntryLike>
     getSessionFile(): string | undefined
   }
+  /**
+   * 会话是否空闲（not streaming）。真实 ExtensionContext 保证存在（SDK
+   * core/extensions/types.d.ts:232 `isIdle(): boolean`）；声明为可选只为让 duck-typed
+   * 最小 ctx（单测 / 新宿主）不必补全，缺失由 PiSchedulerBackend.isIdle() 以 fail-safe 兜底。
+   */
+  isIdle?(): boolean
+  /**
+   * 会话当前模型（真实 ExtensionContext.model: Model<any> | undefined，结构兼容此处最小投影）。
+   * 可选 = 无模型会话（ExtensionContext.model 本身可为 undefined）。
+   */
+  model?: SchedulerCurrentModel
 }
 
 // ── 生产实现 ──
@@ -77,9 +113,15 @@ export interface SchedulerBackendCtx {
  */
 export class PiSchedulerBackend implements SchedulerBackend {
   private ctx: SchedulerBackendCtx
-  private pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>
+  private pi: Pick<
+    ExtensionAPI,
+    'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'
+  >
 
-  constructor(ctx: SchedulerBackendCtx, pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>) {
+  constructor(
+    ctx: SchedulerBackendCtx,
+    pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'>,
+  ) {
     this.ctx = ctx
     this.pi = pi
   }
@@ -108,5 +150,37 @@ export class PiSchedulerBackend implements SchedulerBackend {
 
   now(): number {
     return Date.now()
+  }
+
+  registerProvider(providerId: string, config: SchedulerProviderOverride): void {
+    this.pi.registerProvider(providerId, config)
+  }
+
+  unregisterProvider(providerId: string): void {
+    this.pi.unregisterProvider(providerId)
+  }
+
+  /**
+   * 读当前 session 的 entries 并归一为数组。ctx.sessionManager.getEntries() 在 pi 实装返回
+   * SessionEntry[]，但契约允许任何 Iterable（见 SchedulerBackendCtx 注释）——Array.isArray
+   * 分流，对数组原样返回（loadTasks 侧已按数组契约消费，零额外拷贝），对其余 Iterable 展开。
+   */
+  getEntries(): SchedulerEntryLike[] {
+    const entries = this.ctx.sessionManager.getEntries()
+    return Array.isArray(entries) ? entries : [...entries]
+  }
+
+  /**
+   * 会话是否空闲。ctx.isIdle 缺失（最小 duck ctx）时保守返回 false（视作「有轮在跑」）：
+   * ack 机制的 fail-safe 方向是「不确定则不介入」——运行中的轮次会自然产出 assistant 消息、
+   * 打开会话落盘闸门（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
+   */
+  isIdle(): boolean {
+    return this.ctx.isIdle ? this.ctx.isIdle() : false
+  }
+
+  /** 会话当前模型的最小投影；ctx.model 缺失/undefined（无模型会话）时返回 undefined。 */
+  getCurrentModel(): SchedulerCurrentModel | undefined {
+    return this.ctx.model
   }
 }

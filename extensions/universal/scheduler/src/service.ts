@@ -44,7 +44,17 @@ export type { ServiceMessageKey } from './i18n.js'
  * data 供 tool details（create: {task, nextRuns}；list: {tasks}）。
  */
 export class SchedulerService {
-  constructor(public readonly runtime: SchedulerRuntime, private readonly now: () => number) {}
+  constructor(
+    public readonly runtime: SchedulerRuntime,
+    private readonly now: () => number,
+    /**
+     * 创建成功后的汇聚点回调（可选；u-ack-turn 接线）：addTask 成功且 nextRuns 算好后
+     * 调用一次。fire-and-forget —— create 不 await（触发是后台编排，不得阻塞用户可见的
+     * 创建反馈时延）；调用方（index.ts）自行 catch 回调内的异步失败。
+     * 既有调用点（interaction.ts / commands.ts / tool.ts）不传，行为不变。
+     */
+    private readonly onTaskCreated?: (task: ScheduledTask) => void,
+  ) {}
 
   /**
    * 创建任务。
@@ -110,6 +120,10 @@ export class SchedulerService {
       `Task "${task.name}" (${task.id}) created. ${formatSchedule(task.schedule, task.kind, 'en-US')}, ${expiresLabel}`,
       runPreview,
     ].join('\n')
+
+    // 创建汇聚点（u-ack-turn）：ack 确认轮触发。调用点在成功返回前、nextRuns 算好之后——
+    // 三个创建入口（tool / command / interaction）自然经此被覆盖，无需各自动手。
+    this.onTaskCreated?.(task)
 
     return {
       success: true,
