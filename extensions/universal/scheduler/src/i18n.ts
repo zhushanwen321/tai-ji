@@ -151,6 +151,20 @@ export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
   'form.protocolMismatch',
 ]
 
+// ── ack 文案键（u-ack-fallback 单点）──
+//
+// ack 文案**不经** ServiceMessage 通道（设计 §3.3 D5）：它不是服务结果——`ack.confirm` 是
+// 合成 assistant 行的正文，`ack.notPersisted*` 是同步/异步通知文案（一个键两阶段共用）。
+// 故不做 messageKey↔params 判别联合，只以键常量露出：ack-notify.ts 消费常量而非字面量，
+// 键名改动由编译期兜住（改词典键漏改消费侧曾是本仓高频漂移形态）。
+
+/** 合成确认行正文（合成 assistant 消息 body）。插值参数：`{name}`、`{schedule}`。 */
+export const ACK_CONFIRM_KEY = 'ack.confirm'
+/** 落盘失败如实文案（同步与异步共用同一键）。插值参数：`{name}`。 */
+export const ACK_NOT_PERSISTED_KEY = 'ack.notPersisted'
+/** 恢复指引（可选展示，供 UI 复用；内容比 notPersisted 更偏操作步骤）。无插值参数。 */
+export const ACK_NOT_PERSISTED_HINT_KEY = 'ack.notPersistedHint'
+
 // ── 词典（zh-CN / en-US，文案表见设计 §7.5）──
 
 type Dictionary = Record<string, string>
@@ -181,6 +195,13 @@ const ZH_CN: Dictionary = {
   'no-interaction': '当前模式无交互表单：请带参数创建，或让 agent 创建',
   'form.channelUnavailable': '表单通道不可用（宿主版本过旧）：请改用对话让 agent 创建',
   'form.protocolMismatch': '表单协议版本不匹配：请升级宿主或改用 agent 路径',
+
+  // ack 确认轮（合成确认行 + 落盘失败如实文案）
+  // 措辞边界：只承诺「写入会话文件」（本机制的唯一保证），不得写「已持久化 / 已保存到磁盘」
+  // 之类存储级承诺——ack.notPersisted 是失败面，confirm 是成功面，两者都不越界。
+  'ack.confirm': '已保存任务：{name}（{schedule}）。',
+  'ack.notPersisted': '已创建任务 {name}，但未写入会话文件。在本会话说一句话即可保存。',
+  'ack.notPersistedHint': '在本会话说任意一句话；或重启应用后重新创建。',
 
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': '定时任务',
@@ -219,6 +240,12 @@ const EN_US: Dictionary = {
   'no-interaction': 'No interactive form in this mode — pass arguments or ask the agent',
   'form.channelUnavailable': 'Form channel unavailable (host too old) — ask the agent instead',
   'form.protocolMismatch': 'Form protocol mismatch — upgrade the host or use the agent path',
+
+  // ack 确认轮（合成确认行 + 落盘失败如实文案）——措辞边界同 zh 侧
+  'ack.confirm': 'Task saved: {name} ({schedule}).',
+  'ack.notPersisted':
+    'Created task {name}, but it was not written to the session file. Say anything in this session to save it.',
+  'ack.notPersistedHint': 'Say anything in this session, or restart the app and create the task again.',
 
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': 'Scheduled tasks',
