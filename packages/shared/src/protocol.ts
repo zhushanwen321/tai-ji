@@ -1337,9 +1337,10 @@ export interface PlanDocMeta {
 /**
  * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
  *
- * 四个必填字段是 entry schema v1 原有字段；三个 optional 字段是 schema 扩展
+ * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
  * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
- * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件）。
+ * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件；
+ * reviewStateSource 缺 → 降级态渲染通用文案）。
  * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
  * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
@@ -1355,6 +1356,15 @@ export interface PlanStateView {
   docs?: PlanDocMeta[]
   /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
   reviewState?: 'awaiting' | 'revising'
+  /**
+   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
+   * 'explain' = 用户请求解释后等 agent 解答完重新提交审批；
+   * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
+   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
+   * 缺省 = 来源未知，渲染通用降级文案（两态共有的恢复入口 + 退出照给，不猜测来源）。
+   * 仅 reviewState 有值时有语义。
+   */
+  reviewStateSource?: 'explain' | 'resubmit'
 }
 
 export interface ServerMessageMapBase {
