@@ -79,8 +79,27 @@ export interface TaskListParams {
 /** 空参数占位（`task.list.empty`）。 */
 export type EmptyParams = Record<string, never>
 
+/**
+ * 命令层自有串参数（r4 S3 载体裁决）：与 service messageKey **同形 key + params**，
+ * 统一走同一 `renderResult` 单入口，**不引入第二套结果类型**（`CommandReply`）。
+ * 命令层自有输出（`Usage: …` / `Scheduler not initialized` / 无交互通道 / 表单通道错误 /
+ * `/scheduler` description）经 `ServiceResult.messageKey` 通道送达 notify（rpc/tui）或
+ * throw（json/print）——两受众（L2 toast / L4 tool result）不串。
+ */
+export interface CommandMessageParamsMap {
+  'usage.toggle': { keyword: 'on' | 'off' }
+  'usage.rm': EmptyParams
+  'usage.run': EmptyParams
+  'usage.create': EmptyParams
+  'command.notInitialized': EmptyParams
+  'command.description': EmptyParams
+  'no-interaction': EmptyParams
+  'form.channelUnavailable': EmptyParams
+  'form.protocolMismatch': EmptyParams
+}
+
 /** messageKey → params 形状映射（判别联合的单一登记处；新增键必须同步 RESULT_RENDERERS）。 */
-export interface ServiceMessageParamsMap {
+export interface ServiceMessageParamsMap extends CommandMessageParamsMap {
   'task.created': TaskParams
   'task.list': TaskListParams
   'task.list.empty': EmptyParams
@@ -120,6 +139,16 @@ export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
   'task.notDispatched',
   'task.limit',
   'schedule.invalid',
+  // 命令层自有串（u-p2b 接线，与上面 service 键同形、同通道）
+  'usage.toggle',
+  'usage.rm',
+  'usage.run',
+  'usage.create',
+  'command.notInitialized',
+  'command.description',
+  'no-interaction',
+  'form.channelUnavailable',
+  'form.protocolMismatch',
 ]
 
 // ── 词典（zh-CN / en-US，文案表见设计 §7.5）──
@@ -361,6 +390,16 @@ const RESULT_RENDERERS: ResultRendererMap = {
   'task.notDispatched': (params, locale) => t('task.notDispatched', { id: params.id }, locale),
   'task.limit': (params, locale) => t('task.limit', { max: params.max }, locale),
   'schedule.invalid': (params, locale) => t('schedule.invalid', { input: params.input }, locale),
+  // 命令层自有串（u-p2b 接线）
+  'usage.toggle': (params, locale) => t('usage.toggle', { keyword: params.keyword }, locale),
+  'usage.rm': (_params, locale) => t('usage.rm', undefined, locale),
+  'usage.run': (_params, locale) => t('usage.run', undefined, locale),
+  'usage.create': (_params, locale) => t('usage.create', undefined, locale),
+  'command.notInitialized': (_params, locale) => t('command.notInitialized', undefined, locale),
+  'command.description': (_params, locale) => t('command.description', undefined, locale),
+  'no-interaction': (_params, locale) => t('no-interaction', undefined, locale),
+  'form.channelUnavailable': (_params, locale) => t('form.channelUnavailable', undefined, locale),
+  'form.protocolMismatch': (_params, locale) => t('form.protocolMismatch', undefined, locale),
 }
 
 /** toast / 命令反馈渲染入口：按 messageKey 取渲染器，params 就地本地化（不携带英文串）。 */
@@ -370,4 +409,21 @@ export function renderResult<K extends ServiceMessageKey>(
   locale: UiLocale,
 ): string {
   return RESULT_RENDERERS[messageKey](params, locale)
+}
+
+/** ServiceResult 的最小可本地化形状（`service.ts` 的 `ServiceResult` 结构上满足）。 */
+export type LocalizableResult = { message: string } & (
+  | ServiceMessage
+  | { messageKey?: undefined; params?: undefined }
+)
+
+/**
+ * 结果 → L2 文本（commands / interaction 呈现层的单入口）：有 `messageKey` 走
+ * `renderResult` 词典渲染（含命令层自有串）；未分类失败（无 key，如 `service.ts` 的
+ * `id is required` / `toErrorMessage` catch-all）回落英文 `message`（设计 §6.9 已声明）。
+ * 两受众不串：L4 tool result 直接用 `message`，不经本函数。
+ */
+export function renderResultText(result: LocalizableResult, locale: UiLocale): string {
+  if (result.messageKey === undefined) return result.message
+  return renderResult(result.messageKey, result.params, locale)
 }

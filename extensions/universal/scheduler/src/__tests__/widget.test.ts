@@ -6,7 +6,6 @@ import {
   buildSchedulerWidgetContent,
   buildSchedulerWidgetGui,
   buildSchedulerWidgetItems,
-  renderSchedulerWidget,
   renderSchedulerWidgetTui,
   setSchedulerWidget,
 } from '../widget.js'
@@ -82,13 +81,6 @@ describe('renderSchedulerWidgetTui', () => {
     expect(result[0]).not.toContain('1 overdue')
     expect(result[0]).toContain('active')
     expect(result[0]).not.toContain('inactive')
-  })
-
-  // 生产入口（无 locale 参数）保持旧导出形态：经 readUiLocale() 解析（默认 en-US）
-  it('renderSchedulerWidget keeps legacy signature and renders via resolved locale', () => {
-    const result = renderSchedulerWidget([makeTask()])
-    expect(result).toHaveLength(1)
-    expect(result[0]).toContain('1 scheduled')
   })
 })
 

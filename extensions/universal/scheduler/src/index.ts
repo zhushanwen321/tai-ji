@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from '@earendil-works/pi-coding-agent'
+import type { GuiContext } from '@zhushanwen/extension-protocol'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 
 import { PiSchedulerBackend } from './backend.js'
@@ -17,7 +18,7 @@ import {
   ScheduleParams,
   type ScheduleParamsT,
 } from './tool.js'
-import { renderSchedulerWidget } from './widget.js'
+import { setSchedulerWidget } from './widget.js'
 
 // G1（代际检测，S9/R3-M1）：session 代际计数器。必须声明在模块级而非 factory 体内：
 // pi 每次 session 替换（newSession/fork/switchSession）都重跑 extension factory 函数体
@@ -214,13 +215,15 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   registerScheduleCommand(pi, () => service)
 
   /**
-   * 重新计算并推送 scheduler widget（string[] 重载）。
+   * 重新计算并推送 scheduler widget（双模：GUI 结构化 meta + TUI 文本行）。
    * 读外层 service 变量而非 getService()：session_start 尚未触发时刷新不应报错，直接跳过。
+   * `ctx as GuiContext`：pi 的 `ExtensionContext` 与协议包最小结构（mode/hasUI/ui.setWidget）
+   * 静态不完全兼容，先例见 todo/src/index.ts makeRefreshDisplay。
    */
   function refreshWidget(ctx: ExtensionContext): void {
     if (!service) return
     const result = service.list()
     if (!result.success || !result.data) return
-    ctx.ui.setWidget('scheduler', renderSchedulerWidget(result.data.tasks))
+    setSchedulerWidget(ctx as GuiContext, result.data.tasks)
   }
 }

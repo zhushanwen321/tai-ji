@@ -10,6 +10,7 @@ import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
 import { ScheduleCreateComponent, type ThemeLike } from './create-form-component.js'
+import { readUiLocale, renderResult, renderResultText } from './i18n.js'
 import type { SchedulerService } from './service.js'
 
 const logger = getLogger('scheduler')
@@ -28,26 +29,29 @@ export function abortPendingScheduleForms(): void {
   pendingFormControllers.clear()
 }
 
-// ── 文案占位（待 u-p2a 词典接线）──
-// 本单元（u-sched-core）不建 i18n.ts（归 u-p2a，同波次并行）——此处为英文占位常量，
-// u-p2a 词典落地后由 u-p2b 接线改为 t(key)（命令反馈文案归 L2 本地化通道）。
+// ── 文案（L2 词典通道，u-p2b 接线）──
+// 表单通道错误（channel-error / non-json 协议错配）不再持英文常量：错误对象携带
+// `messageKey`，命令路径 catch 经 `renderResult(messageKey, {}, locale)` 单入口渲染
+// （r4 S3 载体裁决；本文件不再有用户可见英文串）。
 
-/** 表单通道不可用（channel-error，宿主不识别 UI_FORM_MARKER）的提示。 */
-const FORM_CHANNEL_UNAVAILABLE_MESSAGE =
-  'The task form is unavailable (host version too old for the form protocol). ' +
-  'Create the task through the agent instead.'
+/** L2 词典错误：携带 messageKey，命令路径 catch 经 `renderResult` 渲染。 */
+abstract class LocalizedFormError extends Error {
+  abstract readonly messageKey: 'form.channelUnavailable' | 'form.protocolMismatch'
+}
 
-/** 回包形状非法 / 协议版本错配类故障的提示（文案收口 unchanged：与迁移前同串）。 */
-const PROTOCOL_MISMATCH_MESSAGE =
-  'schedule form response is not valid protocol JSON (extension/runtime protocol ' +
-  'version mismatch). Do not retry — report this to the user.'
+/** channel-error 异常（命令路径据此设定「本会话通道不可用」并提示；非工具禁用）。 */
+class FormChannelUnavailableError extends LocalizedFormError {
+  readonly messageKey = 'form.channelUnavailable' as const
+}
 
-/** channel-error 异常（供命令路径设定「本会话通道不可用」并提示；非工具禁用）。 */
-class FormChannelUnavailableError extends Error {
-  constructor(echoHint: string | undefined) {
-    super(echoHint ? `${FORM_CHANNEL_UNAVAILABLE_MESSAGE} ${echoHint}` : FORM_CHANNEL_UNAVAILABLE_MESSAGE)
-    this.name = 'FormChannelUnavailableError'
-  }
+/** non-json / 回包形状非法（协议版本错配）。 */
+class ProtocolMismatchError extends LocalizedFormError {
+  readonly messageKey = 'form.protocolMismatch' as const
+}
+
+/** 命令路径 catch 分流：错误携带词典 key 则本地化渲染，否则回落 toErrorMessage。 */
+function isLocalizedFormError(err: unknown): err is LocalizedFormError {
+  return err instanceof LocalizedFormError
 }
 
 // ── 草稿构造 ──
@@ -152,8 +156,9 @@ async function interactScheduleFormRpc(
   if (!interacted.ok) {
     if (interacted.reason === 'channel-error') {
       // 通道契约破坏：命令路径无工具可禁用 → 设会话状态 + 抛错（调用方提示升级/走 agent）。
-      // echo 命中态携带升级指引 message（旧宿主 × 新扩展的确定性识别），一并透出。
-      throw new FormChannelUnavailableError(interacted.message)
+      // echo 命中态的升级指引（协议层英文）不再拼接：词典 `form.channelUnavailable` 已含
+      // 「宿主版本过旧」语义，避免中文界面中英混排（设计 §7.5）。
+      throw new FormChannelUnavailableError()
     }
     if (interacted.reason === 'non-json') {
       throwProtocolMismatch()
@@ -192,9 +197,9 @@ const SCHEDULE_FORM_QUESTION = 'Confirm scheduled task'
 const RESPONSE_PREVIEW_LENGTH = 200
 
 /** 回包形状非法（envelope 键缺失 / value 非 JSON / 非 ScheduleFormResult）→ throw
- * （与 uiFormInteract 的 non-json 态同折叠同文案）。 */
+ *（与 uiFormInteract 的 non-json 态同折叠，词典 `form.protocolMismatch` 渲染）。 */
 function throwProtocolMismatch(): never {
-  throw new Error(PROTOCOL_MISMATCH_MESSAGE)
+  throw new ProtocolMismatchError()
 }
 
 /** 回包 value（FormAnswers 单键的 JSON 字符串）→ ScheduleFormResult；形状非法 → throw
@@ -237,7 +242,7 @@ export async function openScheduleFormAsync(
 ): Promise<void> {
   // channel-error 后本会话不再重复试探（直接给同一提示）。
   if (channelState.unavailable) {
-    ctx.ui.notify(FORM_CHANNEL_UNAVAILABLE_MESSAGE, 'error')
+    ctx.ui.notify(renderResult('form.channelUnavailable', {}, readUiLocale()), 'error')
     return
   }
 
@@ -256,11 +261,16 @@ export async function openScheduleFormAsync(
         expires: formResult.expires,
         model: formResult.model,
       })
-      ctx.ui.notify(result.message, result.success ? 'info' : 'error')
+      ctx.ui.notify(renderResultText(result, readUiLocale()), result.success ? 'info' : 'error')
     } catch (err) {
       if (err instanceof FormChannelUnavailableError) channelState.unavailable = true
       // rpc/tui 模式用户可见通道只有 ctx.ui.notify（throw 在 rpc 下被静默丢弃）。
-      ctx.ui.notify(toErrorMessage(err), 'error')
+      ctx.ui.notify(
+        isLocalizedFormError(err)
+          ? renderResult(err.messageKey, {}, readUiLocale())
+          : toErrorMessage(err),
+        'error',
+      )
     } finally {
       pendingFormControllers.delete(controller)
     }
