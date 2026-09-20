@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { getPlanState, persistPlanState, resetPlanState } from "./state.js";
+import { capPlanRequirement, getPlanState, persistPlanState, resetPlanState } from "./state.js";
 import { PLAN_MODE_TOOLS } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -358,7 +358,9 @@ function handleEnterPlanMode(
 
   state.isActive = true;
   state.planFilePath = planFilePath;
-  state.requirement = requirement;
+  // state/entry/plan 帧侧 requirement 64KB 封顶（帧有界前提）；下方 buildPlanModePrompt
+  // 仍用未封顶的本地 requirement 全文直达模型（该通路由 message content 注册表登记兜底）
+  state.requirement = capPlanRequirement(requirement);
   // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，
   // 复用既有字段既有值形态——D5）；模板流程进入时仍为空，等 select-template 写入。
   // 直传事实另落 templateProvidedPath（select-template 防御的判定信号——
@@ -367,7 +369,11 @@ function handleEnterPlanMode(
   state.templateProvidedPath = templateAbsPath;
   state.skills = resolved.map((s) => s.name);
   state.docs = [];
+  // 新轮次重置清单与 resetPlanState 对齐：reviewState 与指纹基线都随进入失效——
+  // entry 重建读到残留指纹（旧版/异常 entry 形态）时，不得把上一轮 docs 快照当
+  // 本轮「无变化」检测基线（首提即误报 unchanged）
   delete state.reviewState;
+  delete state.lastSubmitReviewDocsFingerprint;
 
   persistPlanState(pi, state);
   updatePlanWidget(ctx, state);

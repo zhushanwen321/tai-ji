@@ -2,9 +2,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  capPlanRequirement,
   DEFAULT_PLAN_STATE,
   freshAbortController,
   getPlanState,
+  MAX_PLAN_REQUIREMENT_LENGTH,
   persistPlanState,
   type PlanAbortControllers,
   type PlanSessionMap,
@@ -340,5 +342,49 @@ describe("freshAbortController（E10 生命周期）", () => {
     const second = freshAbortController(controllers, "s1");
     expect(second).not.toBe(first);
     expect(controllers.get("s1")).toBe(second);
+  });
+});
+
+describe("requirement 长度封顶（MF-1-3：session.planState 帧不登记 LARGE_FIELD_REGISTRY 的有界前提代码化）", () => {
+  it("capPlanRequirement: ≤64KB 原样返回；超长截断 + 省略标记（含被省略字符数）", () => {
+    const short = "重构 auth 模块";
+    expect(capPlanRequirement(short)).toBe(short);
+
+    // 恰好等于上限：不截断（边界含端）
+    const exact = "x".repeat(MAX_PLAN_REQUIREMENT_LENGTH);
+    expect(capPlanRequirement(exact)).toBe(exact);
+
+    const long = "y".repeat(MAX_PLAN_REQUIREMENT_LENGTH + 5000);
+    const capped = capPlanRequirement(long);
+    expect(capped).not.toBe(long);
+    expect(capped.length).toBeLessThan(long.length);
+    expect(capped.startsWith("y".repeat(MAX_PLAN_REQUIREMENT_LENGTH))).toBe(true);
+    expect(capped).toContain("5000 characters omitted");
+  });
+
+  it("重建读侧同样封顶：封顶前旧版 entry 的超长 requirement 不整段进内存态（派生帧恒有界）", () => {
+    const oversized = "z".repeat(MAX_PLAN_REQUIREMENT_LENGTH * 2);
+    const mockCtx = {
+      sessionManager: {
+        getEntries: () => [
+          { type: "custom", customType: "plan-state", data: { isActive: true, requirement: oversized } },
+        ],
+      },
+    } as unknown as ExtensionContext;
+
+    const state = reconstructPlanState(mockCtx);
+    expect(state.requirement.length).toBeLessThan(oversized.length);
+    expect(state.requirement).toContain("characters omitted");
+  });
+
+  it("非 string requirement（含缺失）仍归空串（白名单读取语义不变）", () => {
+    const mockCtx = {
+      sessionManager: {
+        getEntries: () => [
+          { type: "custom", customType: "plan-state", data: { isActive: false, requirement: 123 } },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(mockCtx).requirement).toBe("");
   });
 });

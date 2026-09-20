@@ -62,9 +62,9 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
    * 10min 被误挂「turn 超时」警示）；③ usePanelView 挂载判据（经 currentFormRequest
    * computed，同谓词）。
    *
-   * 判定键（ui-presentation-protocol D5 收敛）：form 键——新 form 帧原生携带、
-   * legacy askUser / scheduleCreate 帧经 useExtensionUI 归一层附加后统一命中
-   *（store 记录入队前必经归一，双挂点见 normalizeFormRequest 注释）。
+   * 判定键（ui-presentation-protocol D5 收敛）：form 键——全部表单族帧（新 form /
+   * legacy askUser / scheduleCreate marker）由 runtime event-adapter 分支统一产出
+   *（归一上移 runtime 后 store 记录原生带 form 键，renderer 无侧归一挂点）。
    *
    * 非响应式普通函数：供 derivedStatus computed 内调用，computed 通过其引用的响应式
    * requestsBySession 建立依赖（写入时不可变替换 ref，触发重算）。

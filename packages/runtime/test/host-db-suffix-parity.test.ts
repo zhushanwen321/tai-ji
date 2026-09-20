@@ -1,24 +1,36 @@
 /**
- * zcode 宿主库路径后缀三处字面量一致性守卫（commit 即红，替代「运行时共同暴露」）。
+ * zcode 会话库路径段常量同源守卫（MF-1-2 收编后形态）。
  *
- * `~/.zcode/cli/db/db.sqlite` 后缀 `['.zcode','cli','db','db.sqlite']` 在三处以数组
- * 字面量分层重声明（跨包零 import——分层约束下不允许运行时共享常量）：
- *   ① 权威源：packages/zcode-subagent-cli/src/constants.ts `ZCODE_HOST_DB_SUFFIX`；
- *   ② runtime 投影：sqlite-access.ts `HOST_DB_SUFFIX`（本目录，zcode-import 只读访问）；
- *   ③ 脚本投影：scripts/zcode-session-db-cleanup.mjs `HOST_DB_SUFFIX`（ESM 无 TS 构建链）。
- * 漂移原本要等 zcode 安装布局变更断链时才暴露，且报错形态是误导性的「未安装 zcode」；
- * 本测试文本抽取三处数组字面量逐段比对，把漂移提前为测试即红。
+ * 路径段 SSOT = `@zhushanwen/subagent-engine-sdk` zcode-db-paths.ts（跨侧契约根）：
+ * zcode-cli db-path.ts（引擎写侧）与 runtime sqlite-access.ts（import 读侧）import
+ * 同一常量，不再是各自重声明的同形字面量。本守卫四层：
+ *   ① 权威常量值独立展开断言（期望值逐段写死——SSOT 自身被改错时红）；
+ *   ② runtime 侧函数输出与权威常量 join 等价（同源引用的行为面断言）；
+ *   ③ 脚本投影文本比对：scripts/zcode-session-db-cleanup.mjs 为纯 ESM（无 TS 构建
+ *      链）无法 import SSOT，保留等价 JS 字面量——逐段比对权威常量；
+ *   ④ 重声明扫描：契约相关源码树内四段数组字面量只允许出现在 SSOT 与脚本投影
+ *      两处（任何包新增重声明即红——取代旧「三处文本互相比对」形态）。
+ *
+ * 引擎侧（zcode-cli）的值正确性由其自身测试的独立展开断言守卫
+ * （zcode-session-db-isolation.test.ts「路径单一来源」节），不在此重复。
  */
 
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { extname, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+import { ZCODE_HOST_DB_SUFFIX, ZCODE_ISOLATED_DB_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
+
+import { hostZcodeDbPath, zcodeIsolatedDbPath } from '../src/services/session/zcode-import/sqlite-access'
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
-/** 权威值（宿主 HOME 下 zcode 会话库相对段，`join(os.homedir(), ...suffix)`）。 */
-const EXPECTED_SUFFIX = ['.zcode', 'cli', 'db', 'db.sqlite']
+// ④ 重声明扫描的正则：`[` 锚定的四段数组字面量（引号风格/空白归一）。join 参数
+// 形态（测试的独立展开断言）非数组形态，刻意不命中——只拦「重声明常量」回归。
+const HOST_ARRAY_RE = /\[\s*['"]\.zcode['"]\s*,\s*['"]cli['"]\s*,\s*['"]db['"]\s*,\s*['"]db\.sqlite['"]/
+const ISOLATED_ARRAY_RE = /\[\s*['"]engines['"]\s*,\s*['"]zcode['"]\s*,\s*['"]session-db['"]\s*,\s*['"]db\.sqlite['"]/
 
 /** 从文件文本抽取 `<constName> = [ ... ]` 数组字面量的字符串段（引号/空白归一）。 */
 function extractSuffixSegments(file: string, constName: string): string[] {
@@ -40,37 +52,90 @@ function extractJoinSegments(file: string, fnName: string): string[] {
   return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((s) => s[1])
 }
 
-describe('zcode 宿主库路径后缀三处字面量一致性', () => {
-  it('① 权威源 constants.ts ZCODE_HOST_DB_SUFFIX 逐段等于权威值', () => {
-    expect(extractSuffixSegments('packages/zcode-subagent-cli/src/constants.ts', 'ZCODE_HOST_DB_SUFFIX')).toEqual(
-      EXPECTED_SUFFIX,
-    )
+describe('① 路径段 SSOT（engine-sdk zcode-db-paths）值独立展开断言', () => {
+  it('ZCODE_HOST_DB_SUFFIX = ~/.zcode/cli/db/db.sqlite 相对段（期望值逐段写死，SSOT 改错即红）', () => {
+    // 逐段断言（不用数组字面量期望值——本文件自身在 ④ 的扫描范围内）
+    expect(ZCODE_HOST_DB_SUFFIX.length).toBe(4)
+    expect(ZCODE_HOST_DB_SUFFIX[0]).toBe('.zcode')
+    expect(ZCODE_HOST_DB_SUFFIX[1]).toBe('cli')
+    expect(ZCODE_HOST_DB_SUFFIX[2]).toBe('db')
+    expect(ZCODE_HOST_DB_SUFFIX[3]).toBe('db.sqlite')
   })
 
-  it('② runtime sqlite-access.ts HOST_DB_SUFFIX 与权威源一致', () => {
-    expect(
-      extractSuffixSegments('packages/runtime/src/services/session/zcode-import/sqlite-access.ts', 'HOST_DB_SUFFIX'),
-    ).toEqual(EXPECTED_SUFFIX)
-  })
-
-  it('③ scripts/zcode-session-db-cleanup.mjs HOST_DB_SUFFIX 与权威源一致', () => {
-    expect(extractSuffixSegments('scripts/zcode-session-db-cleanup.mjs', 'HOST_DB_SUFFIX')).toEqual(EXPECTED_SUFFIX)
+  it('ZCODE_ISOLATED_DB_SEGMENTS = engines/zcode/session-db/db.sqlite 相对段', () => {
+    expect(ZCODE_ISOLATED_DB_SEGMENTS.length).toBe(4)
+    expect(ZCODE_ISOLATED_DB_SEGMENTS[0]).toBe('engines')
+    expect(ZCODE_ISOLATED_DB_SEGMENTS[1]).toBe('zcode')
+    expect(ZCODE_ISOLATED_DB_SEGMENTS[2]).toBe('session-db')
+    expect(ZCODE_ISOLATED_DB_SEGMENTS[3]).toBe('db.sqlite')
   })
 })
 
-/** 隔离库相对段（`<dataDir>/engines/zcode/session-db/db.sqlite`，引擎包与 runtime 各自 join）。 */
-const EXPECTED_ISOLATED_SEGMENTS = ['engines', 'zcode', 'session-db', 'db.sqlite']
-
-describe('zcode 隔离库路径段两处字面量一致性', () => {
-  it('引擎包 db-path.ts zcodeSessionDbPath 与权威段一致', () => {
-    expect(
-      extractJoinSegments('packages/zcode-subagent-cli/src/db-path.ts', 'zcodeSessionDbPath'),
-    ).toEqual(EXPECTED_ISOLATED_SEGMENTS)
+describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用行为面）', () => {
+  it('zcodeIsolatedDbPath(dataDir) = join(dataDir, ...ZCODE_ISOLATED_DB_SEGMENTS)', () => {
+    expect(zcodeIsolatedDbPath('/data-root')).toBe(join('/data-root', ...ZCODE_ISOLATED_DB_SEGMENTS))
   })
 
-  it('runtime sqlite-access.ts zcodeIsolatedDbPath 与权威段一致', () => {
-    expect(
-      extractJoinSegments('packages/runtime/src/services/session/zcode-import/sqlite-access.ts', 'zcodeIsolatedDbPath'),
-    ).toEqual(EXPECTED_ISOLATED_SEGMENTS)
+  it('hostZcodeDbPath() = join(homedir(), ...ZCODE_HOST_DB_SUFFIX)', () => {
+    expect(hostZcodeDbPath()).toBe(join(homedir(), ...ZCODE_HOST_DB_SUFFIX))
+  })
+})
+
+describe('③ 脚本投影（zcode-session-db-cleanup.mjs，纯 ESM 无法 import SSOT）文本比对', () => {
+  it('HOST_DB_SUFFIX 与 SSOT 逐段一致', () => {
+    expect(extractSuffixSegments('scripts/zcode-session-db-cleanup.mjs', 'HOST_DB_SUFFIX')).toEqual([
+      ...ZCODE_HOST_DB_SUFFIX,
+    ])
+  })
+
+  it('zcodeSessionDbPathJs 的 join 段与 SSOT 逐段一致', () => {
+    expect(extractJoinSegments('scripts/zcode-session-db-cleanup.mjs', 'zcodeSessionDbPathJs')).toEqual([
+      ...ZCODE_ISOLATED_DB_SEGMENTS,
+    ])
+  })
+})
+
+describe('④ 重声明扫描：四段数组字面量只允许 SSOT 与脚本投影两处', () => {
+  /** 契约相关源码树（两侧消费面 + 宿主侧大包 + 脚本目录）内扫描四段数组字面量的命中文件。 */
+  function scanRedeclarations(): string[] {
+    const roots = [
+      'packages/runtime/src',
+      'packages/runtime/test',
+      'packages/zcode-subagent-cli/src',
+      'packages/subagent-core/src',
+      'packages/subagent-engine-sdk/src',
+      'scripts',
+    ]
+    const exts = new Set(['.ts', '.mts', '.cts', '.mjs'])
+    const hits: string[] = []
+    const walk = (absDir: string, relDir: string) => {
+      let entries: string[]
+      try {
+        entries = readdirSync(absDir)
+      } catch {
+        return // 目录不存在（root 集合里某包调整结构时该 root 静默缺席，白名单断言会捕获误配）
+      }
+      for (const e of entries) {
+        if (e === 'node_modules' || e === 'dist' || e === '__snapshots__' || e === 'test-results') continue
+        const abs = join(absDir, e)
+        const rel = `${relDir}/${e}`
+        if (statSync(abs).isDirectory()) {
+          walk(abs, rel)
+          continue
+        }
+        if (!exts.has(extname(e)) || e.endsWith('.d.ts')) continue
+        const text = readFileSync(abs, 'utf8')
+        if (HOST_ARRAY_RE.test(text) || ISOLATED_ARRAY_RE.test(text)) hits.push(rel)
+      }
+    }
+    for (const r of roots) walk(resolve(REPO_ROOT, r), r)
+    return hits.sort()
+  }
+
+  it('命中集合恰为 [SSOT, 脚本投影]（任何包重声明四段字面量即红）', () => {
+    expect(scanRedeclarations()).toEqual([
+      'packages/subagent-engine-sdk/src/zcode-db-paths.ts',
+      'scripts/zcode-session-db-cleanup.mjs',
+    ])
   })
 })

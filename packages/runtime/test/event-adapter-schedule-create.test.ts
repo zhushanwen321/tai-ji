@@ -5,7 +5,8 @@
  * - 合法 draft → 翻译为 extension.ui_request 帧（scheduleCreate: true + scheduleDraft 字段保真）
  *   + extension-ui kind 事件（watchdog 暂停 + pending 跟踪，S4）
  * - 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（S2 同款兜底）
- * - 既有三 marker 分支回归：SESSION_MANAGER / BRIDGE / ASK_USER 翻译行为不变（只增分支不改分支）
+ * - 既有三 marker 分支回归：SESSION_MANAGER / BRIDGE 不变；ASK_USER 随 legacy 归一上移
+ *   产出 form:true 统一表单帧（questions 经 type 推断映射）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -63,10 +64,11 @@ describe('event-adapter: schedule-create SCHEDULE_CREATE_MARKER 检测（第 4 m
     const extUi = findExtensionUi(results)
     expect(extUi).toBeDefined()
 
-    // message 帧：extension.ui_request + scheduleCreate=true + scheduleDraft 透传
+    // message 帧：extension.ui_request + form=true（legacy 归一上移）+ scheduleCreate=true + scheduleDraft 透传
     const msg = findMessage(results)
     expect(msg).toBeDefined()
     expect(msg!.message.type).toBe('extension.ui_request')
+    expect(msg!.message.payload.form).toBe(true)
     expect(msg!.message.payload.scheduleCreate).toBe(true)
     expect(msg!.message.payload.method).toBe('select')
     expect(msg!.message.payload.requestId).toBe('req-sched')
@@ -264,7 +266,7 @@ describe('event-adapter: 既有 marker 分支回归（U5 改动后行为不变�
     expect(bridgeUi!.method).toBe('bridge:malformed')
   })
 
-  it('ASK_USER_MARKER 合法 questions → askUser=true + questions 透传 + extension-ui kind', () => {
+  it('ASK_USER_MARKER 合法 questions → form=true 统一表单帧（type 推断映射）+ extension-ui kind', () => {
     const questions = [{ header: 'db', question: '选哪个?', options: [{ label: 'PG' }] }]
     const payload = JSON.stringify({ questions, allowCancel: false })
     const event = makeSelectEvent(ASK_USER_MARKER, [payload], 'req-ask')
@@ -276,23 +278,29 @@ describe('event-adapter: 既有 marker 分支回归（U5 改动后行为不变�
     const msg = findMessage(results)
     expect(msg).toBeDefined()
     expect(msg!.message.type).toBe('extension.ui_request')
-    expect(msg!.message.payload.askUser).toBe(true)
-    expect(msg!.message.payload.askUserQuestions).toEqual(questions)
+    // legacy 归一上移：marker 命中即产 form:true 统一表单帧（有 options → choice）
+    expect(msg!.message.payload.form).toBe(true)
+    expect(msg!.message.payload.formQuestions).toEqual([
+      { type: 'choice', header: 'db', question: '选哪个?', options: [{ label: 'PG' }] },
+    ])
     expect(msg!.message.payload.allowCancel).toBe(false)
     expect(msg!.message.payload.options).toBeUndefined()
-    // ask-user 专有字段与 schedule-create 互不串扰
+    // legacy 键不再透传（归一在 runtime 单点完成）
+    expect(msg!.message.payload.askUser).toBeUndefined()
+    expect(msg!.message.payload.askUserQuestions).toBeUndefined()
+    // 与 schedule-create 源键互不串扰
     expect(msg!.message.payload.scheduleCreate).toBeUndefined()
     expect(msg!.message.payload.scheduleDraft).toBeUndefined()
   })
 
-  it('ASK_USER_MARKER 非法 JSON → 降级普通 select（askUser 缺省）', () => {
+  it('ASK_USER_MARKER 非法 JSON → 降级普通 select（form 缺省）', () => {
     const event = makeSelectEvent(ASK_USER_MARKER, ['not-valid-json{'], 'req-ask-bad')
 
     const results = translate(event, 'sess-1')
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.payload.askUser).toBeUndefined()
+    expect(msg!.message.payload.form).toBeUndefined()
     expect(msg!.message.payload.options).toEqual(['not-valid-json{'])
     expect(msg!.message.payload.scheduleCreate).toBeUndefined()
   })

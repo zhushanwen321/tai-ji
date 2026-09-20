@@ -1678,6 +1678,56 @@ function resolveBatchTerminated(batchClean, terminated) {
   return !batchClean ? "max-rounds" : terminated;
 }
 
+/**
+ * fixes[].affected_files 收集归一（统一 commit 的 stagePaths 与 state.fixImpactFiles
+ * 两处同构消费，共用本入口）：string 校验 + trim + 空串过滤 + 去重
+ *（"src/a.ts" 与 " src/a.ts " 是同一路径，trim 后以规范化形态去重）。
+ */
+function collectAffectedFiles(fixes) {
+  const out = [];
+  for (const f of fixes || []) {
+    if (!f || !Array.isArray(f.affected_files)) continue;
+    for (const af of f.affected_files) {
+      if (typeof af !== "string") continue;
+      const t = af.trim();
+      if (t && !out.includes(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
+/**
+ * 统一 commit 计划（MF-1-1 抽测：stagePaths 收集 + git add/commit argv 构造收敛为
+ * 可测纯函数）：
+ *  - stagePaths 经 exists 存在性过滤——fixer 误报/文件已删除的路径不再炸整次
+ *    git add（pathspec did not match 的真实失败形态曾在本仓兑现过），skippedPaths
+ *    供调用方逐条 WARN
+ *  - addArgs 带 "--" 分隔符——LLM 产出的 "-" 前缀路径防被解释为 git 选项
+ *  - 计划层不兜底其余 add 失败形态（git index 锁争用等），仍由调用方分类为
+ *    fix-failure 结构化终止（终止语义由 e2e 场景守护）
+ * @param fixes fixResult.fixes（affected_files 源）
+ * @param counters {batchIndex, round, mustFix, suggestion}
+ * @param exists 存在性判定注入（脚本侧传 fs.existsSync——注入保持纯函数可测）
+ */
+function planUnifiedCommit(fixes, counters, exists) {
+  const candidates = collectAffectedFiles(fixes);
+  const stagePaths = [];
+  const skippedPaths = [];
+  for (const p of candidates) {
+    if (exists(p)) stagePaths.push(p);
+    else skippedPaths.push(p);
+  }
+  const commitMsg = "fix: review batch " + counters.batchIndex + " round " + counters.round
+    + " — " + counters.mustFix + " must-fix + " + counters.suggestion + " suggestion";
+  return {
+    stagePaths,
+    skippedPaths,
+    addArgs: ["add", "--", ...stagePaths],
+    commitArgs: ["commit", "-m", commitMsg],
+    commitMsg,
+  };
+}
+
 module.exports = {
   TARGET_TYPES,
   VALID_ARG_KEYS,
@@ -1730,4 +1780,6 @@ module.exports = {
   shouldSkipAgent,
   updateStuckState,
   resolveBatchTerminated,
+  collectAffectedFiles,
+  planUnifiedCommit,
 };

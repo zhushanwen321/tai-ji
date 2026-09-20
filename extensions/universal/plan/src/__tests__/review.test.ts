@@ -422,6 +422,23 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it("echo 回显（旧 taiji 宿主不识别 PLAN_REVIEW_MARKER）→ 升级指引错误，不引导重挂（MF-1-9）", async () => {
+    const { exec, ctx, pi } = setupTaiji();
+    // 宿主把 marker select 降级普通单选项：用户点选回显 payload 自身（合法 JSON，
+    // parse 会成功但形状守卫必败——echo 判定必须先于 parse，否则重挂 → 再回显循环）
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_title: string, options: string[]) => options[0],
+    );
+
+    const res = await exec({ action: "submit-review" });
+
+    expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
+    expect(res.content[0].text).toContain("upgrade taiji");
+    // 不引导重挂：重挂会同样回显，形成重复弹错循环
+    expect(res.content[0].text).not.toContain("re-hang");
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("dismissed select (undefined) → cancelled result: not an approval, stop the review loop", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);

@@ -7,38 +7,30 @@
  * - close 失败吞错（WAL 并发读下只读连接 close 失败不影响已读结果）。
  *
  * 本模块不 import 引擎包（zcode-subagent-cli 不是 runtime 依赖，runtime 内自建访问）；
- * 宿主库路径常量与引擎包 db-path.ts 的 ZCODE_HOST_DB_SUFFIX 同语义、在此重声明
- * （见下方 HOST_DB_SUFFIX 注释）。
+ * 路径段常量与引擎侧 db-path.ts 同源自 @zhushanwen/subagent-engine-sdk 的
+ * zcode-db-paths.ts（跨侧契约根，两侧 import 同一常量——非各自重声明）。
  */
 
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-/**
- * 宿主 HOME 下 zcode 会话库相对段（`~/.zcode/cli/db/db.sqlite`）。
- * 与 packages/zcode-subagent-cli/src/constants.ts 的 ZCODE_HOST_DB_SUFFIX（db-path.ts
- * 消费）同源同语义（该常量 = `['.zcode', 'cli', 'db', 'db.sqlite']`）；不 import 引擎包
- * 故在此重声明——三处字面量（另含 scripts/zcode-session-db-cleanup.mjs 脚本投影）
- * 一致性由 packages/runtime/test/host-db-suffix-parity.test.ts 契约测试守卫（漂移
- * 测试即红），引擎侧 allowlist 与本路径推导语义一致。
- */
-const HOST_DB_SUFFIX = ['.zcode', 'cli', 'db', 'db.sqlite'] as const
+import { ZCODE_HOST_DB_SUFFIX, ZCODE_ISOLATED_DB_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 
 /** 宿主库默认路径（运行时动态推导，禁硬编码绝对路径——组合根注入给 source 的默认值）。 */
 export function hostZcodeDbPath(): string {
-  return join(homedir(), ...HOST_DB_SUFFIX)
+  return join(homedir(), ...ZCODE_HOST_DB_SUFFIX)
 }
 
 /**
  * zcode 隔离会话库绝对路径（runtime 侧投影：`<dataDir>/engines/zcode/session-db/db.sqlite`）。
  * 与 packages/zcode-subagent-cli/src/db-path.ts 的 zcodeSessionDbPath 同布局（引擎 dataDir
- * = TAIJI_AGENT_DATA_DIR = shared getDataDir()，同一目录两侧各自推导）；不 import 引擎包
- * 故重声明，路径段字面量一致性由 test/host-db-suffix-parity.test.ts 守卫（漂移测试即红）。
+ * = TAIJI_AGENT_DATA_DIR = shared getDataDir()，同一目录两侧各自推导），路径段常量同源
+ * （ZCODE_ISOLATED_DB_SEGMENTS）。
  * @param dataDir taiji 数据根（getDataDir() 产物）
  */
 export function zcodeIsolatedDbPath(dataDir: string): string {
-  return join(dataDir, 'engines', 'zcode', 'session-db', 'db.sqlite')
+  return join(dataDir, ...ZCODE_ISOLATED_DB_SEGMENTS)
 }
 
 /**

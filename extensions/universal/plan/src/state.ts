@@ -46,6 +46,23 @@ export const DEFAULT_PLAN_STATE: PlanState = {
 export type PlanSessionMap = Map<string, PlanState>;
 
 /**
+ * requirement 长度封顶（64KB）：session.planState 帧在 runtime 出站守卫（outbound-frame-registry）
+ * 按「requirement 有界」归入不登记 LARGE_FIELD_REGISTRY 的标量/小列表类——超 32MB 的未登记帧
+ * 会被整帧丢弃（前端 plan 面板缺失）。本封顶把该隐含前提变为代码保障（进入写侧 + entry 重建
+ * 读侧双点）。截断只影响 state/entry/帧；进入提示词仍携带全文直达模型（message content 通路
+ * 有既有注册表登记兜底）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 64KB = 64 * 1024 字节换算常数（同 event-journal.ts 32KB 先例）
+export const MAX_PLAN_REQUIREMENT_LENGTH = 64 * 1024;
+
+/** requirement 封顶：超长截断 + 省略标记（含被省略字符数），短文本原样返回 */
+export function capPlanRequirement(requirement: string): string {
+  if (requirement.length <= MAX_PLAN_REQUIREMENT_LENGTH) return requirement;
+  const omitted = requirement.length - MAX_PLAN_REQUIREMENT_LENGTH;
+  return `${requirement.slice(0, MAX_PLAN_REQUIREMENT_LENGTH)}\n[requirement truncated: ${omitted} characters omitted]`;
+}
+
+/**
  * docs 快照指纹：fileName:version 按登记序拼接。register-doc 任何形态（新增 /
  * 同名原位 version+1）都会改变指纹 ⇒「与上次 submit-review 快照相同 ⇔ 期间无任何
  * register-doc」。空 docs 的指纹是空串，但 submit-review 的 no-docs 守卫先行拦截，
@@ -181,6 +198,12 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
+/** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的
+ * 超长文本在重建时同样封顶（读侧防御，保证派生 plan 帧恒有界） */
+function readRequirement(data: Partial<PlanState>): string {
+  return typeof data.requirement === "string" ? capPlanRequirement(data.requirement) : "";
+}
+
 /** 快照指纹白名单式读取：非 string（含缺失）按无既往提交处理（D4 字段级降级） */
 function readDocsFingerprint(data: Partial<PlanState>): string | undefined {
   return typeof data.lastSubmitReviewDocsFingerprint === "string"
@@ -203,7 +226,7 @@ function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefi
   const entryData = data ?? {};
   state.isActive = entryData.isActive ?? false;
   state.planFilePath = entryData.planFilePath ?? "";
-  state.requirement = entryData.requirement ?? "";
+  state.requirement = readRequirement(entryData);
   state.templateName = entryData.templateName ?? "";
   state.templateProvidedPath = readTemplateProvidedPath(entryData);
   state.skills = readSkills(entryData);

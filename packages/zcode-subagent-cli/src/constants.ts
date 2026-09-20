@@ -8,8 +8,9 @@
 // （home-appserver 池/锁/pidfile/派生上限/凭据引导/probe 冒烟/漂移降级码）。
 // 引擎只走 app-server RPC，spawn env 不覆写 HOME（共享宿主 ~/.zcode/）；会话库
 // 随 2026-09 会话库隔离设计独立于宿主库（隔离路径契约见 db-path.ts 的
-// zcodeSessionDbPath/zcodeDbPathAllowlist，下方 ZCODE_HOST_DB_SUFFIX 降级为存量
-// 兼容锚点）。
+// zcodeSessionDbPath/zcodeDbPathAllowlist；路径段常量 SSOT 已收编至
+// @zhushanwen/subagent-engine-sdk zcode-db-paths.ts，本文件不再持有
+// ZCODE_HOST_DB_SUFFIX——引擎包与 runtime 读侧同源 import）。
 
 /** zcode 引擎的 registry key。 */
 export const ZCODE_ENGINE_ID = "zcode";
@@ -50,15 +51,6 @@ export const ZCODE_V2_CONFIG_PATH_SUFFIX = [".zcode", "v2", "config.json"] as co
  * 时的进程级缺省），与 create 条件携带正交——依赖成立，常量随 D4 结论保留。
  */
 export const ZCODE_FALLBACK_DEFAULT_MODEL = "builtin:bigmodel-coding-plan/GLM-5.3";
-
-/**
- * 宿主 HOME 下 zcode 会话 db 的相对位置（绝对路径 = join(os.homedir(), ...suffix)，
- * 仅由 db-path.hostZcodeDbPath 消费）。2026-09 会话库隔离后定位降级为「存量兼容
- * 锚点」：新 handle.dbPath 恒为隔离库路径（db-path.zcodeSessionDbPath），读侧白名单
- * （db-path.zcodeDbPathAllowlist 第二项）仅放行「共享 HOME 时代」record 已落盘的
- * 宿主绝对路径；旧池时代 records 的相对 dbPath 仍按 poolKey 锚定兼容。
- */
-export const ZCODE_HOST_DB_SUFFIX = [".zcode", "cli", "db", "db.sqlite"] as const;
 
 /** 杀链 grace 窗口：SIGTERM 后等这么久再 SIGKILL（zsub 同构 5s；实测 SIGTERM→exit 仅 103ms）。 */
 export const ZCODE_KILL_GRACE_MS = 5_000;

@@ -8,8 +8,8 @@
  * 本模块保留的 AskUserQuestion / AskUserAnswers 是 ask-user 的 LLM 入参契约与
  * TUI/解码消费形态：FormAnswers 的 choice/text 部分与 AskUserAnswers 逐字兼容
  * （键位规则与多选序列化一致），解码 helper（getAskUserAnswer/getAskUserOther）
- * 消费本类型。legacy 帧（ASK_USER_MARKER → {askUser, askUserQuestions}）在
- * renderer 入口归一层转 FormQuestion（D7 兼容窗口），随窗口末清理退役。
+ * 消费本类型。legacy 帧（ASK_USER_MARKER）由 runtime event-adapter 分支归一转
+ * FormQuestion（D7 兼容窗口，归一层在 runtime 侧），随窗口末清理退役。
  */
 
 /**

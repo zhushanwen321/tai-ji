@@ -264,6 +264,20 @@ export declare function resolveBatchTerminated(
   batchClean: boolean,
   terminated: string | undefined,
 ): string | undefined;
+export declare function collectAffectedFiles(
+  fixes?: Array<{ affected_files?: unknown; [key: string]: unknown } | null> | null,
+): string[];
+export declare function planUnifiedCommit(
+  fixes?: Array<{ affected_files?: unknown; [key: string]: unknown } | null> | null,
+  counters: { batchIndex: number; round: number; mustFix: number; suggestion: number },
+  exists: (p: string) => boolean,
+): {
+  stagePaths: string[];
+  skippedPaths: string[];
+  addArgs: string[];
+  commitArgs: string[];
+  commitMsg: string;
+};
 
 export declare const TARGET_TYPES: string[];
 export declare const VALID_ARG_KEYS: Set<string>;

@@ -50,7 +50,7 @@ export function getAskUserOther(
 
 /**
  * 类型守卫：验证 unknown 是否为合法的 AskUserQuestion。
- * 用于前端从 runtime 透传的 askUserQuestions（unknown[]）中安全收窄。
+ * 供 legacy 帧消费方（runtime marker 分支侧形状参照 / 扩展自测）收窄 unknown[] 用。
  */
 export function isAskUserQuestion(value: unknown): value is AskUserQuestion {
   if (typeof value !== 'object' || value === null) return false

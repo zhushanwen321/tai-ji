@@ -19,7 +19,8 @@
  * 已知限制：parallel 的 review 调用顺序不保证——剧本不依赖具体 agent 顺序
  * （E2E-2 只断言调用总数，R1 中先到者 dirty 后到者 clean 均可）。
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -353,6 +354,20 @@ afterEach(() => {
 
 const RUN_TIMEOUT_MS = 60_000;
 const RUN_ID = () => "rfl-e2e-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
+
+/**
+ * MF-1-1 临时 git 仓：统一 commit 块（autoCommit）的 e2e 载体。仓内 config 写死
+ * user.name/email（不依赖宿主全局 git 配置——CI 环境可能缺失）。worker 未显式传
+ * cwd（WorkerHost 的 new Worker 默认继承主进程 cwd）——测试主线程 process.chdir(repo)
+ * 后再 runAndWait，脚本内 execFileSync("git", ...) 即作用于本仓。
+ */
+function makeTmpGitRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), "rfl-e2e-git-"));
+  execFileSync("git", ["init", "-q"], { cwd: repo, timeout: 10_000 });
+  execFileSync("git", ["config", "user.email", "rfl-e2e@test.local"], { cwd: repo, timeout: 10_000 });
+  execFileSync("git", ["config", "user.name", "rfl-e2e"], { cwd: repo, timeout: 10_000 });
+  return repo;
+}
 
 describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () => {
   it("sanity: chain 经本文件基础设施可跑（helper 自检）", async () => {
@@ -1021,6 +1036,232 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       // schema 驱动（minLength:1 + pattern '\\S'）：chokepoint 不发明约束
       expect(r2.error).toContain("target");
       expect(r2.error).toContain("Read the workflow script file");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  // ── MF-1-1：统一 commit 块（autoCommit）e2e——真实 tmp git 仓 ──────────
+
+  it(
+    "MF-1-1a: autoCommit=true 统一 commit——staged ≡ 去重后存在路径、message 格式、误报路径过滤",
+    async () => {
+      const repo = makeTmpGitRepo();
+      // mock fixer 声称触碰的文件（真实落盘两个）；affected_files 含重复/空白/空串/误报
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+      writeFileSync(join(repo, "src", "b.ts"), "export const b = 2;\n", "utf-8");
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            () => ({ report_file: "/tmp/mf11a-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+            () => ({
+              report_file: "/tmp/mf11a-r2.md", must_fix: 0, suggestion: 0,
+              reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
+            }),
+          ],
+          aggregate: () => ({
+            report_file: "/tmp/mf11a-agg.md", must_fix: 1, suggestion: 0,
+            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+          }),
+          fix: () => ({
+            fixed_count: 1,
+            fixes: [{
+              issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced",
+              // 重复 + 尾随空白 + 空串/纯空白 + 误报（磁盘不存在）——staged 收敛为两个存在文件
+              affected_files: ["src/a.ts", " src/a.ts ", "", "   ", "src/b.ts", "ghost/missing.ts"],
+            }],
+            deferred: [],
+          }),
+        });
+        const deps = makeDeps(runner);
+        const result = await runAndWait(
+          wf("review-fix-loop"),
+          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
+          deps, undefined, RUN_TIMEOUT_MS,
+        );
+
+        expect(result.reason).toBe("completed");
+        expect(result.error).toBeUndefined();
+        const outcome = assertScriptOutcome(result.scriptResult);
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.totalFixed).toBe(1);
+
+        // commit message 格式（batch/round/计数插值，与 planUnifiedCommit 单测同锚）
+        const subject = execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000 }).trim();
+        expect(subject).toBe("fix: review batch 1 round 1 — 1 must-fix + 0 suggestion");
+        // staged 集合 ≡ 去重后存在的 affected_files（误报路径被过滤，未炸整次 git add）
+        const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000 })
+          .split("\n").map((s) => s.trim()).filter(Boolean).sort();
+        expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
+        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观察面）
+        const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+          fixImpactFiles: string[];
+        };
+        expect(st.fixImpactFiles).toEqual(["src/a.ts", "src/b.ts", "ghost/missing.ts"]);
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ fix-failure 结构化终止 + state.json 落盘",
+    async () => {
+      const repo = makeTmpGitRepo();
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+      // 预置 index.lock：模拟并行进程持锁（统一 commit 设计注释点名的真实风险形态——
+      // 计划层（planUnifiedCommit）只过滤不存在路径，锁争用仍须走 fix-failure 分类）
+      writeFileSync(join(repo, ".git", "index.lock"), "", "utf-8");
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            () => ({ report_file: "/tmp/mf11b-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+          ],
+          aggregate: () => ({
+            report_file: "/tmp/mf11b-agg.md", must_fix: 1, suggestion: 0,
+            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+          }),
+          fix: () => ({
+            fixed_count: 1,
+            fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
+            deferred: [],
+          }),
+        });
+        const deps = makeDeps(runner);
+        const result = await runAndWait(
+          wf("review-fix-loop"),
+          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
+          deps, undefined, RUN_TIMEOUT_MS,
+        );
+
+        expect(result.reason).toBe("completed"); // 结构化终止而非抛错
+        expect(result.error).toBeUndefined();
+        const outcome = assertScriptOutcome(result.scriptResult);
+        // git add 抛错 → terminated='fix-failure'（结构化终止语义）
+        expect(outcome.terminated).toBe("fix-failure");
+        expect(outcome.message).toContain("[UNRESOLVED]");
+        expect(outcome.message).toContain("统一 commit 失败");
+        expect(outcome.message).toContain("git status"); // 恢复动作指引
+        // 终止路径 saveState 已落盘（断点恢复依据）
+        expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
+        // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）
+        let revParseErr = "";
+        try {
+          execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000 });
+        } catch (e) {
+          revParseErr = String(e);
+        }
+        expect(revParseErr).toContain("unknown revision");
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  // ── MF-1-12：多分组并行派发编排（非退化 k=2 形态） ─────────────────────
+
+  it(
+    "MF-1-12: groups=2 并行派发——fix 调用 2 次（组后缀 description）、per-fixer 文档 ×2 落盘、合并计数 + ES3 全 id 覆盖",
+    async () => {
+      let fixN = 0;
+      const runner = makeScenarioRunner({
+        review: [
+          // R1：2 must-fix（G1/G2 各一条）
+          () => ({ report_file: "/tmp/mf112-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
+          // R2：全 clean（两组修复经对账清账）
+          () => ({
+            report_file: "/tmp/mf112-r2.md", must_fix: 0, suggestion: 0,
+            reconciliation: [
+              { prev_id: "MF-1", status: "fixed", evidence: "read confirmed" },
+              { prev_id: "MF-2", status: "fixed", evidence: "read confirmed" },
+            ],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/mf112-agg.md", must_fix: 2, suggestion: 0,
+          must_fix_ids: [
+            { id: "MF-1", severity: "major", adjudication: "evidence", files: ["src/a.ts"] },
+            { id: "MF-2", severity: "major", adjudication: "evidence", files: ["src/b.ts"] },
+          ],
+          // 两组文件集不相交（相交会被 reconcileGroups 防御性合并回单组）
+          groups: [
+            { id: "G1", issueIds: ["MF-1"], files: ["src/a.ts"] },
+            { id: "G2", issueIds: ["MF-2"], files: ["src/b.ts"] },
+          ],
+          fixes_caution: [],
+        }),
+        fix: () => {
+          fixN++;
+          // 按调用序分流（parallel 起跑顺序不定，但两组结果集对称——合并断言不受影响）
+          return fixN === 1
+            ? {
+              fixed_count: 1,
+              fixes: [{ issue_id: "MF-1", description: "fix g1", self_check: "grep: 1 hit", affected_files: ["src/a.ts"] }],
+              deferred: [],
+            }
+            : {
+              fixed_count: 1,
+              fixes: [{ issue_id: "MF-2", description: "fix g2", self_check: "grep: 1 hit", affected_files: ["src/b.ts"] }],
+              deferred: [],
+            };
+        },
+      });
+      const deps = makeDeps(runner);
+      const result = await runAndWait(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
+        deps, undefined, RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      // ③ ES3 校验输入含全部 id：must-fix 全进合并 fixes[]（漏修 → fix-failure，到不了 clean）
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.totalFixed).toBe(2);
+
+      // ① fix agent 被调用 2 次（两组各一）
+      const { kinds, prompts } = runner.stats();
+      const fixIdxs = kinds.map((k, i) => (k === "fix" ? i : -1)).filter((i) => i >= 0);
+      expect(fixIdxs.length).toBe(2);
+      const fixPrompts = fixIdxs.map((i) => prompts[i]!);
+      // fix prompt header 带组标识（group G1/2 · group G2/2），两组各占其一
+      const groupTags = fixPrompts.map((p) => (p.includes("group G1/2") ? "G1" : p.includes("group G2/2") ? "G2" : "?"));
+      expect(groupTags.sort()).toEqual(["G1", "G2"]);
+
+      // ② 两份 aggregate-4-fixer-{1,2}.md 落盘且各含本组 issue 行（不含他组）
+      const docOf = (fp: string): string => {
+        const m = fp.match(/(\S*aggregate-4-fixer-\d+\.md)/);
+        if (!m) throw new Error("fix prompt missing per-fixer doc path:\n" + fp.slice(0, 300));
+        return m[1]!;
+      };
+      const docs = fixPrompts.map(docOf);
+      expect(docs).toHaveLength(2);
+      expect(new Set(docs).size).toBe(2); // 两份不同文档（G1/G2 各一份）
+      const docTexts = docs.map((d) => readFileSync(d, "utf-8"));
+      expect(docTexts.some((t) => t.includes("MF-1") && !t.includes("MF-2"))).toBe(true);
+      expect(docTexts.some((t) => t.includes("MF-2") && !t.includes("MF-1"))).toBe(true);
+
+      // ③ 合并 fixResult：fixed_count = 两组之和、fixes 覆盖全部 id
+      // ① 组后缀 description（role=fixer 的 calls name）：fix-G1 / fix-G2
+      const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+        fixResults: Array<{ fixed_count: number; fixes: Array<{ issue_id: string }> }>;
+        calls: Array<{ role: string; name: string }>;
+      };
+      expect(st.fixResults).toHaveLength(1);
+      expect(st.fixResults[0]!.fixed_count).toBe(2);
+      expect(st.fixResults[0]!.fixes.map((f) => f.issue_id).sort()).toEqual(["MF-1", "MF-2"]);
+      const fixerNames = st.calls.filter((c) => c.role === "fixer").map((c) => c.name).sort();
+      expect(fixerNames).toEqual(["fix-G1", "fix-G2"]);
     },
     RUN_TIMEOUT_MS,
   );

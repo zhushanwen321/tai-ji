@@ -504,6 +504,21 @@ async function executeSubmitReview(
     );
   }
 
+  // echo 检测（同 uiFormInteract 先例 extension-protocol ui-form/helpers）：旧 taiji
+  // 宿主不识别 PLAN_REVIEW_MARKER 时 select 降级普通单选项，用户点选回显 payload 本身。
+  // 收包与发送 payload 逐字节相等 = 确定性识别该不支持组合；判定必须先于 parse
+  //（payload 是合法 JSON，parse 会成功但形状守卫必败）——否则 bad-response 分支引导
+  // 重挂 → 宿主同样回显 → 重复弹错循环。命中返回升级指引，不引导重挂。
+  if (choice === payload) {
+    logger.warn("plan: submit-review select echoed the request payload (host does not understand PLAN_REVIEW_MARKER)");
+    return reviewErrorResult(
+      "bad-response",
+      "The taiji host does not understand the plan review marker (taiji is older than this extension). " +
+      "Do NOT call submit-review again — the review dialog will fail the same way. " +
+      "Tell the user to upgrade taiji (or pin the plan extension version) and wait for their instructions.",
+    );
+  }
+
   let response: PlanReviewResponse;
   try {
     response = parsePlanReviewResponse(choice);

@@ -19,6 +19,7 @@ import {
   type PiPresetsFile,
 } from '@taiji/shared'
 import { PresetService, PresetGuardError } from '../src/services/preset-service.js'
+import { logger } from '../src/infra/logger.js'
 import type { DiscoveredExtension } from '../src/services/ports/installer.js'
 
 /**
@@ -489,7 +490,7 @@ describe('PresetService · wave 2 resolve', () => {
   })
 
   it('非法/超限段不进入 resolution：直改盘合计超限 → resolve 拿到折叠后值（append 已丢）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     writeFileSync(
       piPresetsPath(),
       JSON.stringify({
@@ -846,7 +847,7 @@ describe('PresetService · 模式提示词校验', () => {
   })
 
   it('读路段级折叠：两段各 16000（各不超段限、合计 32000）→ 保留 preset，丢 append、留 replace，issues 记合计与丢弃项', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     writeFileSync(
       piPresetsPath(),
       JSON.stringify({
@@ -884,7 +885,7 @@ describe('PresetService · 模式提示词校验', () => {
   })
 
   it('读路段级折叠：单段超段限（16001）→ 只丢该段，preset 与另一段保留', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     writeFileSync(
       piPresetsPath(),
       JSON.stringify({
@@ -916,7 +917,7 @@ describe('PresetService · 模式提示词校验', () => {
   })
 
   it('读路段级折叠：prompt 形状非法 → 丢 prompt 字段，preset 整条保留', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     writeFileSync(
       piPresetsPath(),
       JSON.stringify({
@@ -943,7 +944,7 @@ describe('PresetService · 模式提示词校验', () => {
   })
 
   it('读路段级折叠：容器无任何可识别段（{foo:1}）→ 仍丢弃 prompt，但产出 issue + warn（可观测）', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     writeFileSync(
       piPresetsPath(),
       JSON.stringify({
@@ -975,6 +976,48 @@ describe('PresetService · 模式提示词校验', () => {
     expect(warnText).toContain('foo')
     // 值不进日志（值可能是用户提示词正文）
     expect(warnText).not.toContain('SECRET_VALUE')
+    warnSpy.mockRestore()
+  })
+
+  it('读路字段级折叠：数组型可选字段形状非法 → 只丢该字段，preset 整条保留 + warn 可观测', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-array-fold',
+            name: 'array-fold',
+            builtin: false,
+            order: 1,
+            toolMode: 'allowlist',
+            extensionMode: 'denylist',
+            // 脏数据：字符串形态（下游 `?? []` 不设防）与混合类型数组
+            allowedTools: 'read',
+            deniedTools: ['read', 42],
+            allowedExtensions: 'pi-goal',
+            deniedExtensions: ['@zhushanwen/pi-goal'],
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-array-fold')
+    // 不整条丢：preset 仍在
+    expect(folded).toBeDefined()
+    // 非法字段被丢弃，合法数组原样保留
+    expect(folded!.allowedTools).toBeUndefined()
+    expect(folded!.deniedTools).toBeUndefined()
+    expect(folded!.allowedExtensions).toBeUndefined()
+    expect(folded!.deniedExtensions).toEqual(['@zhushanwen/pi-goal'])
+    // 可观测：一条 warn 记录全部被折叠字段（字段级与提示词段级合并为一次调用）
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('allowedTools')
+    expect(warnText).toContain('deniedTools')
+    expect(warnText).toContain('allowedExtensions')
     warnSpy.mockRestore()
   })
 

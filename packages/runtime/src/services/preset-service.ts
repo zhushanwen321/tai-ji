@@ -21,6 +21,7 @@ import {
   BUILTIN_PRESET_IDS,
   DEFAULT_PRESETS,
   SYSTEM_PROMPT_MAX_LENGTH,
+  isPiLaunchPreset,
   type PiLaunchPreset,
   type PiPresetsFile,
   type PresetPromptConfig,
@@ -28,27 +29,11 @@ import {
 } from '@taiji/shared'
 import type { IConfigStore } from './ports/config.js'
 import type { IExtensionService } from '../interfaces.js'
+import { logger } from '../infra/logger.js'
 import { atomicWrite } from '../utils/fs-utils.js'
 
 /** JSON 序列化缩进（与 config-service.ts 共用约定）。 */
 const JSON_INDENT = 2
-
-/**
- * ToolMode 合法枚举白名单（W-RT-1）。
- *
- * shared 层 pi-preset.ts 的 TOOL_MODES 未导出（私有），此处本地定义副本保持模块自洽。
- * 用于 coercePreset 校验脏数据（如导入文件里 toolMode: "DROP TABLE"），不在白名单
- * 的 preset 被丢弃（防御性，与 loadPresetsFile 容错范式一致）。
- */
-const VALID_TOOL_MODES = ['all', 'allowlist', 'denylist', 'none'] as const
-
-/**
- * ExtensionMode 合法枚举白名单（W-RT-1）。
- *
- * shared 层 pi-preset.ts 的 EXTENSION_MODES 未导出（私有），此处本地定义副本。
- * 用途同 VALID_TOOL_MODES。
- */
-const VALID_EXTENSION_MODES = ['all', 'allowlist', 'denylist', 'none'] as const
 
 /**
  * 生成 atomicWrite 的唯一 tmp 后缀（时间戳 + 随机串），避免并发写入撞固定 .tmp 文件。
@@ -277,7 +262,7 @@ export class PresetService {
       return { presets: [], version: 1 }
     }
     // 逐项类型守卫：只接受形似 PiLaunchPreset 的对象，丢弃畸形项（防御性，不抛错）。
-    // W-RT-1：coercePreset 内含 toolMode/extensionMode 枚举白名单校验。
+    // W-RT-1：coercePreset 经 shared isPiLaunchPreset 做 toolMode/extensionMode 枚举白名单校验。
     const presets = coercePresetsArray(
       Array.isArray(obj['presets']) ? obj['presets'] as unknown[] : [],
     )
@@ -810,48 +795,57 @@ function coercePresetPromptSegment(
 }
 
 /**
+ * 数组型可选字段清单（coercePreset 字段级折叠用）。
+ *
+ * 下游 resolveToolArgs / resolveExtensionPaths 的 `?? []` 只兜 undefined——字符串等
+ * 形态脏数据会原样透传（applyPresetMode 对 string 做 includes = 子串误匹配），故读路折叠。
+ */
+const STRING_ARRAY_FIELDS = ['allowedTools', 'deniedTools', 'allowedExtensions', 'deniedExtensions'] as const
+
+/**
+ * 数组型可选字段折叠（与 coercePresetPrompt 段级折叠同策略）：
+ * 值非「string 数组」→ 丢弃该字段 + 记 issue，不丢整个 preset。
+ */
+function coercePresetStringArrayFields(preset: PiLaunchPreset, issues: string[]): void {
+  for (const field of STRING_ARRAY_FIELDS) {
+    const value = preset[field]
+    if (value === undefined) continue
+    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+      delete preset[field]
+      issues.push(`字段 ${field} 形状非法（须 string[]），已丢弃该字段`)
+    }
+  }
+}
+
+/**
  * 把磁盘读到的 raw（unknown）尝试 coerce 成 PiLaunchPreset。
  * 不通过返回 undefined（loadPresetsFile 会丢弃）。
  *
- * 必须有 id(string) + name(string) + builtin(boolean) + order(number) + toolMode + extensionMode。
+ * 必填契约（id/name/builtin/order + toolMode/extensionMode 枚举白名单）由 shared
+ * isPiLaunchPreset 单点守卫（W-RT-1 收编：本文件旧 VALID_TOOL_MODES /
+ * VALID_EXTENSION_MODES 双轨白名单已删，白名单 SSOT = shared pi-preset.ts）。
+ * 脏数据（如导入文件里 toolMode: "DROP TABLE"）不在白名单 → 返回 undefined，preset
+ * 被丢弃，避免 resolveToolArgs/resolveExtensionPaths 的 switch 落空。
  *
- * W-RT-1：额外校验 toolMode/extensionMode 必须在枚举白名单内（VALID_TOOL_MODES /
- * VALID_EXTENSION_MODES）。脏数据（如导入文件里 toolMode: "DROP TABLE"）不在白名单 →
- * 返回 undefined，preset 被丢弃，避免 resolveToolArgs/resolveExtensionPaths 的 switch 落空。
- *
- * 模式提示词是**段级折叠**（非整条丢弃）：畸形/超限只丢该段 + warn（issues），不丢整个 preset。
+ * 可选字段是**字段级/段级折叠**（非整条丢弃）：数组型字段（allowedTools 等）非
+ * string[] 只丢该字段；模式提示词畸形/超限只丢该段。均记 issue + warn，不丢整个 preset。
  * 整条拒绝只发生在写路/导入路（validatePresetPrompt）。
  */
 function coercePreset(raw: unknown): PiLaunchPreset | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
-  const r = raw as Record<string, unknown>
-  const toolMode = r['toolMode']
-  const extensionMode = r['extensionMode']
-  if (
-    typeof r['id'] !== 'string' ||
-    typeof r['name'] !== 'string' ||
-    typeof r['builtin'] !== 'boolean' ||
-    typeof r['order'] !== 'number' ||
-    typeof toolMode !== 'string' ||
-    typeof extensionMode !== 'string' ||
-    // W-RT-1：枚举白名单校验——脏数据（非合法 mode 值）丢弃
-    !(VALID_TOOL_MODES as readonly string[]).includes(toolMode) ||
-    !(VALID_EXTENSION_MODES as readonly string[]).includes(extensionMode)
-  ) {
-    return undefined
-  }
-  // 必填字段已验证，其余字段直接透传（PiLaunchPreset 的可选字段保持 unknown→具体类型由调用方信任）
-  // 双重断言：先 unknown 再 PiLaunchPreset（r 是 Record<string, unknown>，直接断言 TS 报不重叠）。
-  const preset = { ...(r as unknown as PiLaunchPreset) }
+  if (!isPiLaunchPreset(raw)) return undefined
+  // 守卫已把 raw narrow 到 PiLaunchPreset，直接浅拷贝（无需双重断言）。
+  // 可选字段此刻未经校验（isPiLaunchPreset 只保证必填契约），下方逐项折叠。
+  const preset: PiLaunchPreset = { ...raw }
+  const issues: string[] = []
+  coercePresetStringArrayFields(preset, issues)
   // 模式提示词段级折叠：畸形/超限只丢该段 + warn，不丢整个 preset。
-  const { value: prompt, issues } = coercePresetPrompt(r['prompt'])
+  const { value: prompt, issues: promptIssues } = coercePresetPrompt(raw.prompt)
+  issues.push(...promptIssues)
   if (issues.length > 0) {
-    console.warn(
-      `[preset-service] preset '${preset.id}' 模式提示词段级折叠：${issues.join('；')}`,
-    )
+    logger.warn(`[preset-service] preset '${preset.id}' 读路折叠：${issues.join('；')}`)
   }
   if (prompt === undefined) {
-    // raw 可能带畸形 prompt（已在上面 spread 进来的非对象/超限值），必须显式移除。
+    // raw 可能带畸形 prompt（已 spread 进来的非对象/超限值），必须显式移除。
     delete preset.prompt
   } else {
     preset.prompt = prompt

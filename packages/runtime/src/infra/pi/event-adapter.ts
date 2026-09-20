@@ -701,12 +701,42 @@ function translateBridgeSelect(
 }
 
 /**
+ * legacy AskUserQuestion → FormQuestion type 推断映射（ui-presentation-protocol D2 逐项对齐；
+ * 归一层自 renderer normalizeFormRequest 上移至此——marker 命中即产出 view-ready 帧）：
+ * 有 options → choice（multiSelect → multi 重命名）；无 options → text。
+ * 纯形状映射不做验证——非法项原样透传，消费端复核守卫（Panel formQuestions 的
+ * isFormQuestion 过滤）收窄。
+ */
+function toFormQuestion(q: unknown): unknown {
+  if (typeof q !== 'object' || q === null) return q
+  const o = q as Record<string, unknown>
+  if (Array.isArray(o.options)) {
+    return {
+      type: 'choice',
+      ...(o.header !== undefined ? { header: o.header } : {}),
+      question: o.question,
+      ...(o.context !== undefined ? { context: o.context } : {}),
+      options: o.options,
+      ...(o.multiSelect !== undefined ? { multi: o.multiSelect } : {}),
+      ...(o.allowOther !== undefined ? { allowOther: o.allowOther } : {}),
+    }
+  }
+  return {
+    type: 'text',
+    ...(o.header !== undefined ? { header: o.header } : {}),
+    question: o.question,
+    ...(o.context !== undefined ? { context: o.context } : {}),
+  }
+}
+
+/**
  * ask-user 富交互请求检测：select title 为 ASK_USER_MARKER → options[0] 是 JSON payload
  * （旧版 npm ask-user 扩展的 askUserInteract 序列化的 { questions, allowCancel }——本仓
  * helper 已随统一表单协议退役，此分支仅服务版本偏斜窗口的旧扩展）。
- * 检测成功后透传 questions 等字段，前端 legacy 归一层（normalizeFormRequest）
- * 按 askUser 源渲染 FormOverlay；检测失败（非合法 JSON / questions 空）返回 undefined，
- * 由调用方降级为普通 select。
+ * 检测成功直接产出 form:true 统一表单帧（legacy→form 归一层落点——原 renderer
+ * normalizeFormRequest 双挂点上移，同链路两端一处归一），questions 经 toFormQuestion
+ * type 推断映射进 formQuestions，前端 FormOverlay 按 questions 源渲染；
+ * 检测失败（非合法 JSON / questions 空）返回 undefined，由调用方降级为普通 select。
  */
 function tryTranslateAskUserSelect(
   event: PiExtensionUiRequestEvent,
@@ -722,8 +752,8 @@ function tryTranslateAskUserSelect(
     sessionId: sid,
     requestId,
     method: 'select',              // 仍是 select（复用回传通道）
-    askUser: true,                 // 标记 ask-user 富交互，前端归一层据此渲染 FormOverlay
-    askUserQuestions: askUserData.questions,
+    form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
+    formQuestions: askUserData.questions.map(toFormQuestion), // AskUserQuestion → FormQuestion type 推断
     allowCancel: askUserData.allowCancel ?? true,
   }
   return [
@@ -739,8 +769,9 @@ function tryTranslateAskUserSelect(
  * select title 为 SCHEDULE_CREATE_MARKER → options[0] 是 JSON payload
  * （旧版 npm scheduler 扩展的 scheduleCreateInteract 序列化的 ScheduleDraft——本仓
  * helper 已随统一表单协议退役，此分支仅服务版本偏斜窗口的旧扩展）。
- * 检测成功后透传 scheduleDraft（isScheduleDraft 守卫收窄），前端 legacy 归一层
- * （normalizeFormRequest）按 scheduleCreate 源渲染 FormOverlay；
+ * 检测成功产出 form:true 统一表单帧（legacy 归一上移同 ask-user 分支），
+ * scheduleDraft 经 isScheduleDraft 守卫收窄透传，scheduleCreate/scheduleDraft 源键
+ * 保留——FormOverlay 按挂载源键分流应答形状（draft 源 = 扁平 FormResult JSON）；
  * 检测失败（非合法 JSON / draft 缺字段）返回 undefined，由调用方降级为普通 select
  * （与 ask-user 分支同款兜底，S2）。
  */
@@ -758,7 +789,8 @@ function tryTranslateScheduleCreateSelect(
     sessionId: sid,
     requestId,
     method: 'select',              // 仍是 select（复用回传通道）
-    scheduleCreate: true,          // 标记 schedule 创建确认，前端归一层据此渲染 FormOverlay（scheduleCreate 源）
+    form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
+    scheduleCreate: true,          // 挂载源分流键（FormOverlay 据此走 draft 源：扁平 FormResult 应答）
     scheduleDraft: draft,          // 守卫收窄后的草稿对象透传（前端无需再 JSON.parse）
   }
   return [
@@ -772,10 +804,9 @@ function tryTranslateScheduleCreateSelect(
 /**
  * plan 审批请求检测（plan 模式重设计 D5）：select title 为 PLAN_REVIEW_MARKER → options[0]
  * 是 PlanReviewRequest JSON（extension-protocol 契约 { docs: PlanDocMeta[] }）。
- * 检测成功广播 extension.ui_request 带 planReview: true 标记（与 askUser: true 同构分流——
+ * 检测成功广播 extension.ui_request 带 planReview: true 标记（与 form: true 同构分流——
  * 前端 C4 过滤器识别后路由审批条三键 + 行内评论，不得落入 CompanionBand 渲染 marker
- * 控制符 title）；挂起请求由前端 respond 回传（select 挂起不超时语义同 ask-user，:728-730
- * 注释）。SUBAGENT_INFLIGHT 是唯一不广播例外（文件头 D5 例外登记），plan-review 走
+ * 控制符 title）；挂起请求由前端 respond 回传（select 挂起不超时语义同 ask-user 分支注释）。SUBAGENT_INFLIGHT 是唯一不广播例外（文件头 D5 例外登记），plan-review 走
  * ask-user 广播家族。检测失败（非合法 JSON / docs 缺失）返回 undefined 降级普通 select，
  * 与 ask-user 降级边界同构；docs 守卫只判数组不判非空（extension 侧 E6 守卫保证非空才发
  * select，空数组仍可路由审批条——比降级乱码 title 好）。
@@ -809,7 +840,7 @@ function tryTranslatePlanReviewSelect(
  * 统一提问表单请求检测（ui-presentation-protocol D2 末条）：select title 为
  * UI_FORM_MARKER → options[0] 是 JSON payload（uiFormInteract helper 序列化的
  * { formQuestions, allowCancel }）。
- * 检测成功广播 extension.ui_request 带 form: true 标记（与 askUser: true 同构分流——
+ * 检测成功广播 extension.ui_request 带 form: true 标记（与 planReview: true 同构分流——
  * 前端 C4 过滤器识别后路由 FormOverlay 类型渲染器）。
  *
  * 消费端守卫失败策略与 ask-user 分支的「整体判否」不同：isFormQuestion **逐项过滤**，

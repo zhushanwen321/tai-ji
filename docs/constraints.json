@@ -1149,7 +1149,7 @@
     },
     {
       "id": "C-ext-09",
-      "summary": "错误处理两层：内部实现可 throw；execute 是 API 边界必须 catch 返回 { isError: true } + err.message（不含堆栈）；禁错误成功模式",
+      "summary": "错误处理 throw 范式：内部实现与 execute 直接 throw，pi 统一置 isError:true；禁止 catch 后返回 { isError: true }（返回值 isError 被 pi 丢弃 = 错误标成功）；错误消息不含堆栈；禁错误成功模式",
       "scope": [
         "extensions/**"
       ],

@@ -24,6 +24,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { parsePlanArgs, registerPlanCommand, resolveTemplateFile } from "../command.js";
+import { MAX_PLAN_REQUIREMENT_LENGTH } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -193,6 +194,45 @@ describe("registerPlanCommand", () => {
       "/tmp/test-project/.taiji-harness/untitled",
       { recursive: true },
     );
+  });
+
+  it("超长 requirement 进入：state/entry 按 64KB 封顶，提示词仍携带全文（MF-1-3）", async () => {
+    const huge = "x".repeat(MAX_PLAN_REQUIREMENT_LENGTH + 10000);
+    await handler(huge, ctx);
+
+    // entry（plan 帧数据源）封顶 + 省略标记
+    const entry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1] as { requirement: string };
+    expect(entry.requirement.length).toBeLessThan(huge.length);
+    expect(entry.requirement).toContain("characters omitted");
+    // 进入提示词携带全文直达模型（该通路由 message content 注册表登记兜底，不在此封顶）
+    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt.length).toBeGreaterThan(MAX_PLAN_REQUIREMENT_LENGTH);
+  });
+
+  it("进入新 plan 轮次清掉 entry 重建残留的指纹基线（重置清单与 resetPlanState 对齐，MF-1-4）", async () => {
+    // 旧版/异常 entry 形态：isActive=false 但指纹残留——重建进内存态后，新轮次进入
+    // 不得把它当「无变化」检测基线（否则首次 submit-review 误报 unchanged）
+    const staleCtx = {
+      ...ctx,
+      sessionManager: {
+        getSessionId: () => "test-session",
+        getEntries: () => [
+          {
+            type: "custom",
+            customType: "plan-state",
+            data: { isActive: false, lastSubmitReviewDocsFingerprint: "design.md:1" },
+          },
+        ],
+      },
+    } as unknown as ExtensionContext;
+
+    await handler("second round feature", staleCtx);
+
+    const entry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as {
+      lastSubmitReviewDocsFingerprint?: string;
+    };
+    expect(entry.lastSubmitReviewDocsFingerprint).toBeUndefined();
+    expect(entry.isActive).toBe(true);
   });
 
   it("shows status when active with no args", async () => {

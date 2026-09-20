@@ -61,6 +61,8 @@ import {
   updateStuckState,
   resolveBatchTerminated,
   translateReconSets,
+  collectAffectedFiles,
+  planUnifiedCommit,
 } from "../../workflows/review-fix-loop-utils.cjs";
 
 /** 测试用 fail：与 workflow 内 fail() 同语义（抛错终止） */
@@ -2536,5 +2538,65 @@ describe("buildAggregatorPrompt findings/groups（分组并行链路 prompt 段�
     expect(p2).toContain("reuse its id verbatim");
     expect(p2).toContain("MF-2-<seq>");
     expect(p2).toContain('<untrusted source="prev_titles">');
+  });
+});
+
+// ── MF-1-1：统一 commit 计划（autoCommit 路径抽测） ──────────────────
+
+describe("collectAffectedFiles（affected_files 收集归一：stagePaths/fixImpactFiles 共用）", () => {
+  it("trim + 去重 + 空串过滤：跨 fixes 条目汇总，'src/a.ts' 与 ' src/a.ts ' 是同一路径", () => {
+    const fixes = [
+      { issue_id: "MF-1", affected_files: ["src/a.ts", " src/a.ts ", "src/b.ts", "", "   "] },
+      { issue_id: "MF-2", affected_files: ["src/a.ts"] },
+    ];
+    expect(collectAffectedFiles(fixes)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+  it("畸形输入容错：非 string 元素/非数组 affected_files/条目缺失 → 跳过", () => {
+    const fixes = [
+      { issue_id: "MF-1", affected_files: [42, null, undefined, "src/a.ts"] },
+      { issue_id: "MF-2", affected_files: "src/b.ts" },
+      { issue_id: "MF-3" },
+      null,
+    ];
+    expect(collectAffectedFiles(fixes)).toEqual(["src/a.ts"]);
+    expect(collectAffectedFiles(undefined)).toEqual([]);
+    expect(collectAffectedFiles([])).toEqual([]);
+  });
+});
+
+describe("planUnifiedCommit（统一 commit 计划：存在性过滤 + '--' 分隔符 argv）", () => {
+  const counters = { batchIndex: 1, round: 2, mustFix: 3, suggestion: 4 };
+  it("存在性过滤：存在的进 stagePaths、不存在的进 skippedPaths（fixer 误报不炸整次 git add）", () => {
+    const plan = planUnifiedCommit(
+      [{ issue_id: "MF-1", affected_files: ["src/a.ts", "ghost/missing.ts"] }],
+      counters,
+      (p: string) => p === "src/a.ts",
+    );
+    expect(plan.stagePaths).toEqual(["src/a.ts"]);
+    expect(plan.skippedPaths).toEqual(["ghost/missing.ts"]);
+  });
+  it("git add argv 带 '--' 分隔符：'-' 前缀路径（LLM 产出）不被解释为 git 选项", () => {
+    const plan = planUnifiedCommit(
+      [{ issue_id: "MF-1", affected_files: ["-rf", "src/a.ts"] }],
+      counters,
+      () => true,
+    );
+    expect(plan.addArgs).toEqual(["add", "--", "-rf", "src/a.ts"]);
+  });
+  it("commit argv + message 格式与计数插值", () => {
+    const plan = planUnifiedCommit([], { batchIndex: 2, round: 1, mustFix: 5, suggestion: 2 }, () => true);
+    expect(plan.commitMsg).toBe("fix: review batch 2 round 1 — 5 must-fix + 2 suggestion");
+    expect(plan.commitArgs).toEqual(["commit", "-m", plan.commitMsg]);
+    expect(plan.stagePaths).toEqual([]);
+    expect(plan.addArgs).toEqual(["add", "--"]);
+  });
+  it("全部路径被过滤（全误报）→ stagePaths 空：调用方走 no-storable-files 分支不 commit", () => {
+    const plan = planUnifiedCommit(
+      [{ issue_id: "MF-1", affected_files: ["ghost/a.ts", "ghost/b.ts"] }],
+      counters,
+      () => false,
+    );
+    expect(plan.stagePaths).toEqual([]);
+    expect(plan.skippedPaths).toEqual(["ghost/a.ts", "ghost/b.ts"]);
   });
 });

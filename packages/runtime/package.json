@@ -21,6 +21,7 @@
     "@zhushanwen/pi-file-lock": "workspace:*",
     "@zhushanwen/pi-rpc": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "taiji-plugin-sdk": "workspace:*",
     "chokidar": "^4.0.1",
     "fast-glob": "^3.3.3",

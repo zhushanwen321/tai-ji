@@ -27,8 +27,9 @@
  * filter 读同一份 store 分区。默认 formFilter（统一表单 form 键，Panel inline 渲染面）；
  * dialog 请求（非标记类）已由 CompanionBand 消费 bus 直连（wave1 起），不再经 store。
  *
- * legacy 归一（ui-presentation-protocol D7，双挂点见 normalizeFormRequest 注释）：
- * 旧 askUser / scheduleCreate 帧在入 store 前附加 form 键，五族判定面统一按 form 键命中。
+ * legacy 归一已上移 runtime（ui-presentation-protocol D7 收口，MF-1-5）：旧 askUser /
+ * scheduleCreate marker 帧由 runtime event-adapter 分支直接产出 form:true 统一表单帧
+ * （askUser 源含 type 推断映射），本层只消费 view-ready 帧、不再有 renderer 侧归一挂点。
  */
 import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
@@ -42,9 +43,9 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
 
 /**
  * 统一表单 overlay 请求过滤器（Panel inline 渲染用）：form 键（终态判定面，D5 收敛）。
- * 新 form 帧原生携带 form:true；legacy askUser / scheduleCreate 帧经 normalizeFormRequest
- * 归一附加 form 后同样命中。普通 dialog 请求仍由 CompanionBand 消费 bus 直连
- * （extension-host-dialog C4 对称排除，零重叠契约）。
+ * 全部表单族帧（新 form marker / legacy askUser / scheduleCreate marker）由 runtime
+ * event-adapter marker 分支统一产出 form:true。普通 dialog 请求仍由 CompanionBand 消费
+ * bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
 
@@ -72,81 +73,6 @@ export function isPlanReviewRequest(req: ExtensionUIRequest): req is PlanReviewU
 
 /** planReview 审批请求过滤器（审批条用；与 formFilter 互斥——一个请求只归一面） */
 export const planReviewFilter: UIRequestFilter = (req) => isPlanReviewRequest(req)
-
-// ── legacy 帧归一（ui-presentation-protocol D7 兼容机制，上三角窗口） ──
-
-/** normalizeFormRequest 输入形状：新旧帧键并集（窗口期 legacy 键保留，D7）。
- *  索引签名兼容 DialogRequest（bus 帧）与 ExtensionUIRequest（pending 帧）两种载体。 */
-interface FormNormalizable {
-  /** 新统一表单帧标记（runtime event-adapter UI_FORM_MARKER 分支原生携带） */
-  form?: true
-  formQuestions?: unknown[]
-  /** legacy ask-user 帧键（ASK_USER_MARKER；窗口末随归一层退役删除） */
-  askUser?: unknown
-  askUserQuestions?: unknown
-  /** legacy scheduler 帧键（SCHEDULE_CREATE_MARKER；同上） */
-  scheduleCreate?: unknown
-  [key: string]: unknown
-}
-
-/**
- * AskUserQuestion → FormQuestion type 推断映射（D2 逐项对齐）：
- * 有 options → choice（multiSelect → multi 重命名）；无 options → text。
- * 纯形状映射不做验证——非法项原样透传，消费端复核守卫（isFormQuestion 过滤）收窄。
- */
-function toFormQuestion(q: unknown): unknown {
-  if (typeof q !== 'object' || q === null) return q
-  const o = q as Record<string, unknown>
-  if (Array.isArray(o.options)) {
-    return {
-      type: 'choice',
-      ...(o.header !== undefined ? { header: o.header } : {}),
-      question: o.question,
-      ...(o.context !== undefined ? { context: o.context } : {}),
-      options: o.options,
-      ...(o.multiSelect !== undefined ? { multi: o.multiSelect } : {}),
-      ...(o.allowOther !== undefined ? { allowOther: o.allowOther } : {}),
-    }
-  }
-  return {
-    type: 'text',
-    ...(o.header !== undefined ? { header: o.header } : {}),
-    question: o.question,
-    ...(o.context !== undefined ? { context: o.context } : {}),
-  }
-}
-
-/**
- * legacy 帧归一（D7 兼容机制落点，独立函数双挂点）：
- * - legacy askUser 帧 → 附加 form:true + formQuestions（type 推断映射）；
- * - legacy scheduleCreate 帧 → 附加 form:true（保留 scheduleCreate/scheduleDraft 原键——
- *   FormOverlay 按挂载源键分流应答形状：draft 源 = 扁平 FormResult JSON）；
- * - 已带 form 键 / 无 legacy 标记 → 原样透传（幂等）。
- *
- * 双挂点（漏任一则旧帧在窗口内丢帧、pi select 永久挂起）：
- * ① bus handler 内 C4 判定之前——C4 窗口键集合以原始帧键放行
- *   （form ∨ planReview ∨ askUser ∨ scheduleCreate）；
- * ② pending 拉取响应循环 store.addRequest 之前——pending 帧经 runtime
- *   `{...r, ...r.payload}` 解包（extension-timeout-manager getPendingRequests）保留
- *   原始键、无 form 键，且**不经 toExtensionUIRequest**（切回 session / respawn 恢复路径）。
- * 窗口末（新 marker 版三包 npm 发布 + 一个大版本后）归一层与 legacy 键整体退役删除。
- */
-export function normalizeFormRequest<T extends FormNormalizable>(req: T): T & { form?: true; formQuestions?: unknown[] } {
-  if (req.form === true) return req
-  if (req.askUser === true) {
-    return {
-      ...req,
-      form: true,
-      formQuestions: Array.isArray(req.askUserQuestions)
-        ? req.askUserQuestions.map(toFormQuestion)
-        : [],
-    }
-  }
-  if (req.scheduleCreate === true) {
-    return { ...req, form: true }
-  }
-  return req
-}
 
 // ── 模块级 refCount bus 订阅（项目规则 #2：多实例共享单次注册，防事件处理翻倍） ──
 // split 双 panel 多实例各自订阅同一 bus 事件，若每实例直接 bus.on 则同一事件被 N 个
@@ -213,14 +139,14 @@ function pickFormFields(
   }
 }
 
-/** legacy 键搬运窗口内保留（D7 归一层依赖 + FormOverlay draft 直挂源分流；替换式剥离
- *  会断 ScheduleForm 直挂 draft 链），窗口末随归一层删——formFilter 只认 form 键 */
+/** scheduleCreate 源键搬运（窗口内保留——FormOverlay 按挂载源键分流应答形状：draft 源 =
+ *  扁平 FormResult JSON，替换式剥离会断 ScheduleForm 直挂 draft 链）；askUser 源键已随
+ *  归一层上移 runtime 退役（ask-user marker 帧直接产 formQuestions），窗口末 schedule
+ *  源键同批退役——formFilter 只认 form 键 */
 function pickLegacyFields(
   request: DialogRequest,
-): Partial<Pick<ExtensionUIRequest, 'askUser' | 'askUserQuestions' | 'scheduleCreate' | 'scheduleDraft'>> {
+): Partial<Pick<ExtensionUIRequest, 'scheduleCreate' | 'scheduleDraft'>> {
   return {
-    ...(request.askUser !== undefined ? { askUser: request.askUser as boolean } : {}),
-    ...(request.askUserQuestions !== undefined ? { askUserQuestions: request.askUserQuestions as unknown[] } : {}),
     ...(request.scheduleCreate !== undefined ? { scheduleCreate: request.scheduleCreate as boolean } : {}),
     ...(request.scheduleDraft !== undefined ? { scheduleDraft: request.scheduleDraft } : {}),
   }
@@ -280,12 +206,12 @@ export function useExtensionUI(
           console.warn('[useExtensionUI] ui-request 事件缺少 sessionId，跳过入队:', e.request.requestId)
           return
         }
-        // 归一挂点①（D7）：C4 判定之前——legacy askUser / scheduleCreate 帧附加 form 后
-        // 与新 form 帧统一走 form 判定面；C4 窗口键集合以原始帧键放行（归一保留原键，
-        // 四键集合在新旧帧上都命中，窗口末 legacy 键随归一层删）
-        const raw = normalizeFormRequest(e.request)
+        // C4 分流（form / planReview 两标记放行）：runtime event-adapter 的 marker 分支
+        //（form / ask-user / schedule-create）已统一产出 form:true 帧——legacy 归一上移
+        // runtime（原 D7 双挂点收口），本层只消费 view-ready 帧
+        const raw = e.request
         const isPlanReview = raw.planReview === true
-        if (raw.form !== true && raw.askUser !== true && raw.scheduleCreate !== true && !isPlanReview) return // C4：窗口键集合放行
+        if (raw.form !== true && !isPlanReview) return // C4：富交互标记放行
         const adapted = toExtensionUIRequest(eventSid, raw)
         if (filter && !filter(adapted)) return // filter 第二道闸
         store.addRequest(eventSid, adapted)
@@ -299,10 +225,10 @@ export function useExtensionUI(
         // sid（参数）——只写旧 sid 分区，不读 sessionId.value。即使此响应在 session 切换后到达，
         // 也只写入旧 sid 的 Map 分区，不会污染新 sid。Map 分区已结构性隔离 stale 响应。
         for (const req of pendingRequests) {
-          // 归一挂点②（D7）：pending 帧经 runtime {...r,...r.payload} 解包保留原始键、
-          // 无 form 键且不经 toExtensionUIRequest——legacy 帧由此路径归一（漏挂则切回
-          // session / respawn 后旧帧不弹、pi select 永久挂起）；新 form 帧归一幂等透传
-          store.addRequest(sid, normalizeFormRequest({ ...req, receivedAt: req.receivedAt ?? Date.now() }))
+          // pending 帧经 runtime {...r,...r.payload} 解包——payload 即 marker 分支产出的
+          // view-ready 帧（form:true 原生携带，legacy 归一已在 runtime 侧完成），直接入
+          // store；该路径不经 toExtensionUIRequest（切回 session / respawn 恢复路径）
+          store.addRequest(sid, { ...req, receivedAt: req.receivedAt ?? Date.now() })
         }
       })
       .catch((err) => {
@@ -323,9 +249,9 @@ export function useExtensionUI(
   // 读 sessionId.value 建立响应式依赖，sid 变化时重算读新分区。
   /**
    * 队列中第一个统一表单 overlay 请求（form 键，Panel inline 渲染用）；无则 undefined。
-   * form 键 = 终态判定面（D5 收敛）：新 form 帧原生携带、legacy askUser / scheduleCreate
-   * 帧经归一层附加。消费方（usePanelView/Panel）按挂载源键分流 FormOverlay 的
-   * questions / draft props。
+   * form 键 = 终态判定面（D5 收敛）：全部表单族帧（form / legacy askUser /
+   * scheduleCreate marker）由 runtime event-adapter 分支统一产出。消费方
+   *（usePanelView/Panel）按挂载源键分流 FormOverlay 的 questions / draft props。
    */
   const currentFormRequest = computed(() => {
     const sid = sessionId.value

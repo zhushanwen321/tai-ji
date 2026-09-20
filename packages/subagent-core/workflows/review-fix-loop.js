@@ -155,6 +155,8 @@ const {
   shouldSkipAgent,
   updateStuckState,
   resolveBatchTerminated,
+  collectAffectedFiles,
+  planUnifiedCommit,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
 
 // 白名单校验：未知参数名（防 batchX 拼错如 batchl）→ 报错
@@ -1588,26 +1590,23 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     // 统一 commit（并行 fixer 不各自 commit——争 git index 锁 + 显式路径互相污染）：
     // 全部组完成后，收集 fixes 的 affected_files 汇总去重，显式路径 add + 单次 commit。
-    // execFileSync 数组参数（路径是 LLM 产出，禁拼 shell 字符串防注入）。
+    // execFileSync 数组参数（路径是 LLM 产出，禁拼 shell 字符串防注入）；计划构造
+    //（trim/去重/空串过滤/存在性过滤/"--" 分隔符 argv/失败外的 message 格式）在
+    // planUnifiedCommit 可测纯函数（MF-1-1 抽测——本块曾零测试覆盖且真实运行失败过）。
     if (autoCommit) {
-      const stagePaths = [];
-      for (const f of fixResult.fixes) {
-        if (Array.isArray(f.affected_files)) {
-          for (const af of f.affected_files) {
-            if (typeof af === "string" && af.trim() && !stagePaths.includes(af.trim())) stagePaths.push(af.trim());
-          }
-        }
+      const commitPlan = planUnifiedCommit(fixResult.fixes, { batchIndex, round, mustFix, suggestion }, fs.existsSync);
+      for (const p of commitPlan.skippedPaths) {
+        log("WARN: affected_file 不存在，跳过 staging（fixer 误报或文件已删除）: " + p);
       }
-      if (stagePaths.length === 0) {
+      if (commitPlan.stagePaths.length === 0) {
         if (fixResult.fixes.length > 0) {
-          log("WARN: fixes reported no affected_files — cannot stage explicitly; changes left in the working tree (next round reviews via git diff)");
+          log("WARN: fixes reported no storable affected_files — cannot stage explicitly; changes left in the working tree (next round reviews via git diff)");
         }
       } else {
-        const commitMsg = "fix: review batch " + batchIndex + " round " + round + " — " + mustFix + " must-fix + " + suggestion + " suggestion";
         try {
-          require("child_process").execFileSync("git", ["add", ...stagePaths], { stdio: "pipe", timeout: 30_000 });
-          require("child_process").execFileSync("git", ["commit", "-m", commitMsg], { encoding: "utf-8", timeout: 60_000 });
-          log("Unified commit (" + stagePaths.length + " files): " + commitMsg);
+          require("child_process").execFileSync("git", commitPlan.addArgs, { stdio: "pipe", timeout: 30_000 });
+          require("child_process").execFileSync("git", commitPlan.commitArgs, { encoding: "utf-8", timeout: 60_000 });
+          log("Unified commit (" + commitPlan.stagePaths.length + " files): " + commitPlan.commitMsg);
         } catch (e) {
           const stderrText = e && e.stderr ? String(e.stderr).trim() : "";
           const errMsg = (e && e.message ? e.message : String(e)) + (stderrText ? " | stderr: " + stderrText : "");
@@ -1624,15 +1623,9 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     }
 
     // affected_files 并入 state.fixImpactFiles（5.3/5.5）：recheck scope = modifiedFiles ∪ fixImpactFiles
-    const impactFiles = [];
-    for (const f of fixResult.fixes) {
-      if (Array.isArray(f.affected_files)) {
-        for (const af of f.affected_files) {
-          if (typeof af === "string" && af.trim() && !impactFiles.includes(af.trim())) impactFiles.push(af.trim());
-        }
-      }
-    }
-    state.fixImpactFiles = impactFiles;
+    //（收集归一与统一 commit 的 stagePaths 同构——collectAffectedFiles 单一实现；此处
+    // 不过滤存在性：impact 语义是"fixer 声称触碰过"，误报路径也应进 recheck 观察面）
+    state.fixImpactFiles = collectAffectedFiles(fixResult.fixes);
 
     // m4: 先初始化容器——aggregator JSON 无效走 parseAggregatedMd 回退时 agg 无
     // must_fix_ids → R1 初始化跳过 → state.issues undefined；此处初始化保证 deferred

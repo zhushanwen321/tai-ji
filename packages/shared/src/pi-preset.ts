@@ -276,6 +276,9 @@ const EXTENSION_MODES: readonly ExtensionMode[] = ['all', 'allowlist', 'denylist
  * 校验 6 个必填字段的类型 + toolMode/extensionMode 的字面量约束。
  * 可选字段（description/allowedTools/deniedTools/modelOverride/thinkingLevel 等）不强制校验——
  * 消费方按需在取用时再 narrow，只保证必填字段契约。
+ *
+ * 消费面：runtime preset-service 的 coercePreset（磁盘读路）用它做必填 + 枚举白名单的
+ * 单点守卫（枚举白名单 SSOT 在此，runtime 侧不再自持副本）。
  */
 export function isPiLaunchPreset(value: unknown): value is PiLaunchPreset {
   if (!value || typeof value !== 'object') return false

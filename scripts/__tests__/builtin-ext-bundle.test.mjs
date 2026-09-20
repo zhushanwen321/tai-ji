@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync, mkdtempSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -206,5 +206,99 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 			"utf8",
 		);
 		expect(runVerify(), "checkManifest 应报「pi.extensions 含非字符串项」").not.toBe(0);
+	});
+});
+
+/**
+ * verify-staged per-package 特殊资产目录校验测试（MF-1-6）。
+ *
+ * plan 的 templates/ 由 bundle-extensions.mjs 专项拷贝（TEMPLATES_DIR_PACKAGES），
+ * 不走 pi manifest 三字段——checkManifest 探测不到，缺失 = 打包版 list-template
+ * 恒 0 / select-template 恒 null 的静默失效（templates.ts scanTemplateDir 防御性
+ * 返回空清单、listTemplates 仅 warn）。PACKAGE_ASSET_DIRS 是唯一 postbuild 拦截面。
+ *
+ * 构造模式（tmp mirror × spawnSync，同 check-guide-contract-projection 惯例）：
+ * 守卫脚本复制进 <tmp>/scripts/（REPO_ROOT 即 <tmp>，SSOT mandatory-extensions.json
+ * 落 fixture），staged 给全量最小合法包集（每包 index.js + pi.extensions 指向它）
+ * ——SSOT 集合断言与 manifest 校验恒通过，templates 缺失成为唯一红灯源；并对
+ * stderr 断言定位原因，防「其它校验先行 exit 1」的假绿。
+ */
+describe("verify-staged per-package asset dirs (MF-1-6)", () => {
+	const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
+
+	/**
+	 * 组装 tmp mirror。planTemplates 三形态：undefined = 不建 templates/（缺失）、
+	 * "empty" = 空目录、nonempty = 含一个 .md（正向对照）。
+	 */
+	function makeMirror({ planTemplates } = {}) {
+		const root = mkdtempSync(join(tmpdir(), "verify-staged-assets-"));
+		mkdirSync(join(root, "scripts"), { recursive: true });
+		copyFileSync(VERIFY_SRC, join(root, "scripts/verify-staged-extensions.mjs"));
+		// SSOT fixture：最小两包集，不含 permission（绕开 wasm 专项校验的无关面）
+		mkdirSync(join(root, "packages/shared/src"), { recursive: true });
+		writeFileSync(
+			join(root, "packages/shared/src/mandatory-extensions.json"),
+			JSON.stringify([
+				{ name: "@zhushanwen/pi-plan", description: "fixture", tier: "feature" },
+				{ name: "@zhushanwen/pi-ask-user", description: "fixture", tier: "feature" },
+			]),
+			"utf8",
+		);
+		const scoped = join(root, "staged/@zhushanwen");
+		for (const pkgDirName of ["pi-plan", "pi-ask-user"]) {
+			const pkgDir = join(scoped, pkgDirName);
+			mkdirSync(pkgDir, { recursive: true });
+			writeFileSync(join(pkgDir, "index.js"), "export default {};\n", "utf8");
+			writeFileSync(
+				join(pkgDir, "package.json"),
+				JSON.stringify({ name: `@zhushanwen/${pkgDirName}`, pi: { extensions: ["./index.js"] } }),
+				"utf8",
+			);
+		}
+		if (planTemplates === "empty") {
+			mkdirSync(join(scoped, "pi-plan/templates"));
+		} else if (planTemplates === "nonempty") {
+			mkdirSync(join(scoped, "pi-plan/templates"));
+			writeFileSync(join(scoped, "pi-plan/templates/feature-plan.md"), "# plan\n", "utf8");
+		}
+		const run = () =>
+			spawnSync(
+				process.execPath,
+				[join(root, "scripts/verify-staged-extensions.mjs"), "--staged-dir", scoped],
+				{ encoding: "utf8" },
+			);
+		return { run, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) };
+	}
+
+	it("pi-plan 缺 templates/ → exit 1 + stderr 定位 templates（缺失形态）", () => {
+		const fx = makeMirror();
+		try {
+			const r = fx.run();
+			expect(r.status, "缺 templates/ 必须 fail-fast").toBe(1);
+			expect(r.stderr, "失败原因定位到 templates（非 SSOT/manifest 假绿）").toContain("templates");
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("pi-plan templates/ 空目录 → exit 1 + stderr 定位 templates（空与缺失同罪）", () => {
+		const fx = makeMirror({ planTemplates: "empty" });
+		try {
+			const r = fx.run();
+			expect(r.status, "空 templates/ 必须 fail-fast").toBe(1);
+			expect(r.stderr, "失败原因定位到 templates").toContain("templates");
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("pi-plan templates/ 非空 → exit 0（正向对照：资产齐备不误报）", () => {
+		const fx = makeMirror({ planTemplates: "nonempty" });
+		try {
+			const r = fx.run();
+			expect(r.status, "资产齐备应通过").toBe(0);
+		} finally {
+			fx.cleanup();
+		}
 	});
 });
