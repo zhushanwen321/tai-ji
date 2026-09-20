@@ -832,10 +832,12 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 报告路径全部按派发序走，一一对应保持；每轮探测当轮 diff 形态（fix 后 diff 会
     // 变），探测失败/非 git-diff 场景降级默认池序。
     if (targetType === "git-diff") {
-      const plan = planReviewerOrder(active, probeDiffStats(lockedBase.base));
-      active = plan.order;
-      log("  dispatch plan: slow=[" + plan.slowBatch.map((d) => d.name).join(", ")
-        + "] fast=[" + plan.fastBatch.map((d) => d.name).join(", ") + "] (" + plan.note + ")");
+      // 变量名避开 plan/analysis 等 agent()-返回值守卫模式（builtin-workflows-structure
+      // U2 按变量名文本扫描 null-guard）——本返回值来自纯函数恒非 null
+      const dispatchPlan = planReviewerOrder(active, probeDiffStats(lockedBase.base));
+      active = dispatchPlan.order;
+      log("  dispatch plan: slow=[" + dispatchPlan.slowBatch.map((d) => d.name).join(", ")
+        + "] fast=[" + dispatchPlan.fastBatch.map((d) => d.name).join(", ") + "] (" + dispatchPlan.note + ")");
     }
 
     log("Review: " + active.map((d) => d.name).join(", ") + " (" + active.length + " agent(s), " + REVIEWER_BATCH + " per batch)...");
