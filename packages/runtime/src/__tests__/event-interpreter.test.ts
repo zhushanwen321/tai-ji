@@ -18,7 +18,7 @@
  * 运行：npx vitest run src/__tests__/event-interpreter.test.ts
  */
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { EventInterpreter } from '../services/session/event-interpreter.js'
+import { EventInterpreter, OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../services/session/event-interpreter.js'
 import type { GenStatsSample, PiTranslatedEvent, SessionOccupancyTransition } from '../services/session/types.js'
 import type { ServerMessage } from '@taiji/shared'
 
@@ -580,5 +580,53 @@ describe('agent-settled V7 dev-only 延迟注入（session-dead-structural-fixes
     expect(() => interp.dispose()).not.toThrow()
     interp.interpret([{ kind: 'agent-settled' }])
     expect(onOccupancyTransition).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * CP6：turn 事件到达即取消命令-only 收口窗口（scheduler-trigger-inversion §11 CP6）。
+ *
+ * 这里锁 interpreter 侧的接线：`turn-start`（handleTurnLifecycleEvent）与 `hook{agent_start}`
+ * （handleMetaEvent）两个挂点必须调用 occupancySettleWindow.cancel——窗口由 dispatcher 武装。
+ * 取消用「回调不再触发」行为级断言（而非内部 Map 断言）。
+ */
+describe('EventInterpreter × CP6 短窗取消接线', () => {
+  afterEach(() => {
+    occupancySettleWindow.resetForTest()
+    vi.useRealTimers()
+  })
+
+  it('turn-start 到达 → 取消窗口（到期不再回调）', () => {
+    vi.useFakeTimers()
+    occupancySettleWindow.resetForTest()
+    const onElapsed = vi.fn()
+    occupancySettleWindow.arm('s1', onElapsed)
+    const { interp } = makeInterpreter()
+    interp.interpret([{ kind: 'turn-start', messageId: 'm1' }])
+    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS * 2)
+    expect(onElapsed).not.toHaveBeenCalled()
+  })
+
+  it('hook{agent_start} 到达 → 取消窗口（到期不再回调）', () => {
+    vi.useFakeTimers()
+    occupancySettleWindow.resetForTest()
+    const onElapsed = vi.fn()
+    occupancySettleWindow.arm('s1', onElapsed)
+    const { interp } = makeInterpreter()
+    interp.interpret([{ kind: 'hook', eventType: 'agent_start', data: {} }])
+    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS * 2)
+    expect(onElapsed).not.toHaveBeenCalled()
+  })
+
+  it('无 turn 事件（命令-only）→ 窗口如期回调（对照组：取消不是无条件）', () => {
+    vi.useFakeTimers()
+    occupancySettleWindow.resetForTest()
+    const onElapsed = vi.fn()
+    occupancySettleWindow.arm('s1', onElapsed)
+    const { interp } = makeInterpreter()
+    // 无关事件（非 turn）不取消
+    interp.interpret([{ kind: 'hook', eventType: 'tool_execution_start', data: {} }])
+    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS)
+    expect(onElapsed).toHaveBeenCalledTimes(1)
   })
 })

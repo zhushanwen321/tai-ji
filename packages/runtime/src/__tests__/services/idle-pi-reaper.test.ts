@@ -17,9 +17,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   ReclaimSeat,
   startIdlePiReaper,
+  hasFreshPendingUiRequest,
   DEFAULT_REAP_TICK_MS,
   DEFAULT_IDLE_THRESHOLD_MS,
   DEFAULT_VIEWED_WINDOW_MS,
+  DEFAULT_FORM_MAX_AGE_MS,
   type IdlePiReaperOptions,
   type IdlePiReaperHandle,
   type ReclaimSkipDistribution,
@@ -29,6 +31,7 @@ import {
   DEFAULT_PI_RECLAIM_TICK_MS,
   DEFAULT_PI_RECLAIM_IDLE_MS,
   DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
 } from '@taiji/shared'
 
 // ── fake 装置 ─────────────────────────────────────────────────
@@ -43,6 +46,8 @@ interface FakeSessionState {
   handoff?: boolean
   queued?: boolean
   restoring?: boolean
+  /** 挂起 UI 请求（v6 第四案）；receivedAt 用于计龄上界判定。 */
+  pendingUi?: Array<{ receivedAt: number }>
 }
 
 interface Harness {
@@ -80,6 +85,9 @@ function makeHarness(seedStates: Record<string, FakeSessionState> = {}): Harness
       hasQueuedDeliveries: (sid) => h.states.get(sid)?.queued ?? false,
       getLastViewedAt: (sid) => h.states.get(sid)?.viewedAt,
       isRestoring: (sid) => h.states.get(sid)?.restoring ?? false,
+      // 生产语义直引（与组合根同一纯函数）：max(receivedAt) 聚合 + 超龄视同无 pending
+      hasPendingUiRequest: (sid, maxAgeMs) =>
+        hasFreshPendingUiRequest(h.states.get(sid)?.pendingUi ?? [], h.nowMs, maxAgeMs),
     },
     getClientActivity: (sid) => h.states.get(sid)?.activityAt,
     listCandidateSessionIds: () => Array.from(h.states.keys()),
@@ -213,6 +221,98 @@ describe('空闲回收 reaper 判定矩阵（idle-pi-reclamation D2/D4/D7）', (
     await handle.runOnce()
     expect(harness.reclaimCalls).toEqual([])
     expect(lastSummary(harness).skipped.restoring).toBe(1)
+  })
+
+  it('豁免 #8 存在未超龄挂起 UI 请求：命中即跳过且分布 pendingUiRequest 计入（V13(d) 豁免生效）', async () => {
+    // receivedAt 距 now = 上界 - 1ms（未超龄）
+    harness = makeHarness({
+      's-form': idleBeyondThreshold({ pendingUi: [{ receivedAt: 1_000_000 - DEFAULT_FORM_MAX_AGE_MS + 1 }] }, 1_000_000),
+    })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    expect(harness.reclaimCalls).toEqual([])
+    const skipped = lastSummary(harness).skipped
+    expect(skipped.pendingUiRequest).toBe(1)
+    // 未命中其余豁免的计数仍为 0（分布可归因）
+    expect(skipped.occupied).toBe(0)
+  })
+
+  it('豁免 #8 边界：elapsed 恰等于上界不豁免（严格 < 语义），上界内一毫秒则豁免', async () => {
+    // 恰好等于上界 → 不豁免（r5 I-1 判定式用 `<`）
+    harness = makeHarness({
+      's-form': idleBeyondThreshold({ pendingUi: [{ receivedAt: 1_000_000 - DEFAULT_FORM_MAX_AGE_MS }] }, 1_000_000),
+    })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    expect(harness.reclaimCalls).toEqual(['s-form'])
+    expect(lastSummary(harness).skipped.pendingUiRequest).toBe(0)
+    handle.stop()
+
+    // 上界内一毫秒 → 豁免
+    const h2 = makeHarness({
+      's-form': idleBeyondThreshold({ pendingUi: [{ receivedAt: 1_000_000 - DEFAULT_FORM_MAX_AGE_MS + 1 }] }, 1_000_000),
+    })
+    const handle2 = startIdlePiReaper(h2.options)
+    try {
+      await handle2.runOnce()
+      expect(h2.reclaimCalls).toEqual([])
+    } finally {
+      handle2.stop()
+    }
+  })
+
+  it('豁免 #8 计龄取 max(receivedAt)：老僵尸（超龄）+ 新活请求（新鲜）→ 仍豁免（r5 I-1 must-fix）', async () => {
+    harness = makeHarness({
+      's-form': idleBeyondThreshold({
+        pendingUi: [
+          { receivedAt: 1_000_000 - DEFAULT_FORM_MAX_AGE_MS - 60_000 }, // 老僵尸（超龄）
+          { receivedAt: 1_000_000 - 1_000 }, // 新活请求（新鲜）
+        ],
+      }, 1_000_000),
+    })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    // 若用 min/任一 → 被老僵尸连带判超龄 → 进程被回收时连活请求一起清（静默失败）
+    expect(harness.reclaimCalls).toEqual([])
+    expect(lastSummary(harness).skipped.pendingUiRequest).toBe(1)
+  })
+
+  it('豁免 #8 上界不排空 pending 存储（边界语义：超龄 ≠ 丢弃，仍可被重订阅捞回）', async () => {
+    const pending = [{ receivedAt: 1_000_000 - DEFAULT_FORM_MAX_AGE_MS - 1 }]
+    harness = makeHarness({ 's-form': idleBeyondThreshold({ pendingUi: pending }, 1_000_000) })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    // 超龄 → 进程被回收，但 reaper 不触碰 pending 存储（读数闭包仍原样返回）
+    expect(harness.reclaimCalls).toEqual(['s-form'])
+    expect(harness.states.get('s-form')!.pendingUi).toEqual(pending)
+  })
+
+  it('豁免 #8 不误伤：无挂起 UI 请求的 session 照常回收（反向用例）', async () => {
+    harness = makeHarness({ 's-plain': idleBeyondThreshold({}, 1_000_000) })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    expect(harness.reclaimCalls).toEqual(['s-plain'])
+    expect(lastSummary(harness).skipped.pendingUiRequest).toBe(0)
+  })
+
+  it('豁免 #8 未命中时分布字段为 0（语义明确：0 = 本拍无未超龄 pending）', async () => {
+    harness = makeHarness({ 's-none': idleBeyondThreshold({ pendingUi: [] }, 1_000_000) })
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    expect(harness.reclaimCalls).toEqual(['s-none'])
+    expect(lastSummary(harness).skipped.pendingUiRequest).toBe(0)
+  })
+
+  it('豁免 #8 上界可经 options.pendingUiRequestMaxAgeMs 收窄（真机缩短阈值形态）', async () => {
+    harness = makeHarness({
+      's-form': idleBeyondThreshold({ pendingUi: [{ receivedAt: 1_000_000 - 5_000 }] }, 1_000_000),
+    })
+    harness.options.pendingUiRequestMaxAgeMs = 3_000
+    handle = startIdlePiReaper(harness.options)
+    await handle.runOnce()
+    // elapsed=5000 > 收窄后的 3000 → 视同无 pending → 回收
+    expect(harness.reclaimCalls).toEqual(['s-form'])
+    expect(lastSummary(harness).skipped.pendingUiRequest).toBe(0)
   })
 
   it('占座中的 session 跳过且不触发任何豁免查询（seat 检查短路在最前）', async () => {
@@ -399,9 +499,43 @@ describe('ReclaimSeat 占座原语（D6-2）', () => {
  * 陈旧。本守卫逐对断言相等：任一侧单独改动即红，强迫同步两源。
  */
 describe('默认值双源等值守卫', () => {
-  it('reaper 兜底默认值与 shared 权威默认值逐对相等（TICK / IDLE / VIEWED_WINDOW 三对）', () => {
+  it('reaper 兜底默认值与 shared 权威默认值逐对相等（TICK / IDLE / VIEWED_WINDOW / FORM_MAX_AGE 四对）', () => {
     expect(DEFAULT_REAP_TICK_MS).toBe(DEFAULT_PI_RECLAIM_TICK_MS)
     expect(DEFAULT_IDLE_THRESHOLD_MS).toBe(DEFAULT_PI_RECLAIM_IDLE_MS)
     expect(DEFAULT_VIEWED_WINDOW_MS).toBe(DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS)
+    expect(DEFAULT_FORM_MAX_AGE_MS).toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+  })
+})
+
+// ── 挂起 UI 请求豁免纯判定（r5 I-1）────────────────────
+
+/**
+ * `hasFreshPendingUiRequest` 是组合根豁免闭包与 reaper 单测共用的纯函数（生产语义单点）。
+ * 这里直接锁「max 聚合 / 严格 < / 超龄视同无 pending / 不修改入参」四个不变量。
+ */
+describe('hasFreshPendingUiRequest（挂起 UI 请求豁免判定纯函数）', () => {
+  const MAX = 6 * 60 * 60 * 1000
+  const NOW = 10_000_000
+
+  it('无 pending → false；未超龄（含边界内一毫秒）→ true；恰等上界/超龄 → false（严格 <）', () => {
+    expect(hasFreshPendingUiRequest([], NOW, MAX)).toBe(false)
+    expect(hasFreshPendingUiRequest([{ receivedAt: NOW - MAX + 1 }], NOW, MAX)).toBe(true)
+    expect(hasFreshPendingUiRequest([{ receivedAt: NOW - MAX }], NOW, MAX)).toBe(false)
+    expect(hasFreshPendingUiRequest([{ receivedAt: NOW - MAX - 1 }], NOW, MAX)).toBe(false)
+  })
+
+  it('计龄取 max(receivedAt)：老僵尸 + 新活请求 → true（不得被老僵尸连带误判）', () => {
+    const pending = [
+      { receivedAt: NOW - MAX - 1 }, // 老僵尸
+      { receivedAt: NOW - 10 }, // 新活请求
+    ]
+    expect(hasFreshPendingUiRequest(pending, NOW, MAX)).toBe(true)
+  })
+
+  it('全部超龄 → false（视同无 pending）；且不修改入参（不排空存储）', () => {
+    const pending = [{ receivedAt: NOW - MAX - 1 }, { receivedAt: NOW - MAX - 2 }]
+    const snapshot = JSON.stringify(pending)
+    expect(hasFreshPendingUiRequest(pending, NOW, MAX)).toBe(false)
+    expect(JSON.stringify(pending)).toBe(snapshot)
   })
 })

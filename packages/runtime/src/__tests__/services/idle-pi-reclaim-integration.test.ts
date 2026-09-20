@@ -320,6 +320,7 @@ describe.skipIf(!FAUX_PI_READY)(
             hasQueuedDeliveries: () => false,
             getLastViewedAt: () => undefined,
             isRestoring: () => false,
+            hasPendingUiRequest: () => false,
           },
           getClientActivity: (target) => pm.getClient(target)?.lastActivityAt,
           listCandidateSessionIds: () => [sid],

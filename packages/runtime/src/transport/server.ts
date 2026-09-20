@@ -34,6 +34,7 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
+import type { PendingUIRequest } from '../services/extension-timeout-manager.js'
 import { ConnectionManager } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
 import { BridgeHandler } from './bridge-handler.js'
@@ -583,6 +584,18 @@ export class RuntimeServer implements IMessageBroker {
 
   clearExtensionTimeoutsForSession(sessionId: string): void {
     this.extensionTimeoutMgr.clearForSession(sessionId)
+  }
+
+  /**
+   * 只读拉取该 session 的挂起 UI 请求快照（reaper-only，v6 第四案挂起表单豁免）。
+   *
+   * 与上方三个写口同族的薄委托（不暴露 manager 本体，不提供任何变更能力）；内部调
+   * ExtensionTimeoutManager.getPendingRequests——该方法本就是非破坏性只读快照
+   * （不消费/不移除），故 reaper 判定不会影响 pending 生命周期，也不影响 busy 预检。
+   * scope = 全扩展（confirm/select/input/editor 全在内，不按扩展过滤）。
+   */
+  getPendingUiRequests(sessionId: string): PendingUIRequest[] {
+    return this.extensionTimeoutMgr.getPendingRequests(sessionId)
   }
 
   async handleBridgeRequest(sessionId: string, requestId: string, method: string, data: Record<string, unknown>): Promise<void> {
