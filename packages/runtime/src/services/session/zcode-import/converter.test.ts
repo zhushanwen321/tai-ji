@@ -6,11 +6,13 @@
  *
  * 三层断言：
  * 1. 纯函数直测：内存行集（不建真库）→ 产物行逐条断言（映射表即验收标准）
- * 2. 重放锚（A1/V3）：产物经 mapSessionEntries → convertPiHistory（= runtime 现有
+ * 2. 重放锚：产物经 mapSessionEntries → convertPiHistory（= runtime 现有
  *    replayEntries(applyEntry) 消费链，F4）重放无异常 + 消息序列/角色/toolCall 配对/
  *    usage 聚合断言——「合法 pi session」的可证伪定义
- * 3. 端到端（A2/V6）：fixture sqlite 库（mkdtemp 自建自删）→ prepareImport + write 产物
+ * 3. 端到端：fixture sqlite 库（mkdtemp 自建自删）→ prepareImport + write 产物
  *    → 重放断言 + degradations 装配 + 文件名不变量
+ *
+ * 本文件是单测层，不承担真机验收（设计验收场景的回归面之一，不计入验收）。
  *
  * C1/C2 宿主库探针结论记录在 converter.ts 对应实现注释（头注 / T4 实现处），此处不重复。
  */
@@ -745,7 +747,7 @@ describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning
   })
 })
 
-// ── 重放锚（A1/V3）：产物经 taiji 现有消费链重放 ─────────────────────────────────────
+// ── 重放锚：产物经 taiji 现有消费链重放 ─────────────────────────────────────
 
 describe('applyEntry 重放锚（mapSessionEntries → convertPiHistory）', () => {
   const out = buildZcodeSessionFile(kitchenSinkMessages(), 'Sink', HEADER)
@@ -790,7 +792,7 @@ describe('applyEntry 重放锚（mapSessionEntries → convertPiHistory）', () 
   })
 })
 
-// ── 端到端（A2/V6）：fixture sqlite 库 → prepareImport + write ──────────────────────
+// ── 端到端：fixture sqlite 库 → prepareImport + write ──────────────────────────────
 
 describe('端到端：fixture 库 → ZcodeImportSource.prepareImport + write', () => {
   let fixturesRoot: string

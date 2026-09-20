@@ -95,7 +95,12 @@ function isToolPreservedSource(source: string): boolean {
   return source.startsWith('background_') || source.startsWith('subagent_') || source === 'subagent'
 }
 
-/** 消息级丢弃的降级码：L1 冗余（tool 通道已保留）/ L2 无语义（非 L1/L3/L4 的丢弃类全量归入）。 */
+/**
+ * 消息级丢弃的降级码：L1 冗余（tool 通道已保留）/ L2 无语义（非 L1/L3/L4 的丢弃类全量归入）。
+ * 分档只消费顶层 data.source / legacy metadata.source 两路——semantics.source / part 级
+ * source 等前向通道缺省时粗化落 L2（设计 §7.3 表按策略列档位、本判据按 D4 source 前缀，
+ * 两者口径差有意为之：同一丢弃均计入 droppedCount，无 wire 语义差）。
+ */
 function droppedMessageCode(data: Record<string, unknown>): 'dropped_redundant' | 'dropped_transient' {
   const { source } = degradationMeta(data)
   return source !== undefined && isToolPreservedSource(source) ? 'dropped_redundant' : 'dropped_transient'

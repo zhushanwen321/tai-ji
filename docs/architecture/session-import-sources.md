@@ -161,11 +161,11 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 
 ### 6.2 压缩记录与摘要的关联（`compaction` part 无摘要文本，摘要在平行消息里）
 
-`compaction` part 自身**只带元信息**（`auto`/`reason`/`summaryMessageId`/`metadata`），摘要文本在**平行的 `compact_summary` 消息**里：
+`compaction` part 的 asar schema 声明（`.strict()`）仅 `auto`/`reason`/`summaryMessageId`/`metadata` 四字段——**schema ≠ 磁盘事实**（考古实测磁盘字段 21 种，见下条 `tail_start_id` 警示），摘要文本在**平行的 `compact_summary` 消息**里：
 
 - **`compact_summary` 消息**：`role:'user'`，`data.summary = {title, body}`（全库 312/312 有 `body`——**这是真实摘要，不是伪造**，I7 的「禁伪造」不适用于它），其 `text` part 带 `synthetic:true` 而**消息级 `synthetic` 缺省**。
 - **关联键 `compaction.summaryMessageId`** → 指向 `compact_summary` 消息的 `messageId`（实测 4 条 compaction part 中 2 条携带，精确命中）。比 `semantics.kind` 更可靠——旧版数据没有 kind，但有这个链接。
-- 关联判据三取一（优先序降序）：① `summaryMessageId` 指向的消息；② `semantics.kind === 'compact_summary'`；③ user 消息含**无 `metadata.timelineStatus`** 的 compaction part（zcode 自家 `isZCodeCompactSummaryMessage` 判据）。
+- 关联判据三取一（优先序降序）：① `summaryMessageId` 指向的消息；② `semantics.kind === 'compact_summary'`；③ user 消息含**无 `timelineStatus`** 的 compaction part（zcode 自家 `isZCodeCompactSummaryMessage` 判据；`timelineStatus` 按 **part 顶层 ∪ part.metadata 包装** 双形态取并集——磁盘 507/986 条在顶层，只查 metadata 通道会误吞孤儿）。
 - **pi 落点 = `compaction` entry**：`summary ← data.summary.body`、`tokensBefore ← part.preCompactTokenCount`、`details ← compaction part` 原样、`firstKeptEntryId ← tail_start_id` 经 messageId→entryId 映射解析。**`tail_start_id` 是遗留字段警示**：asar 现行 schema（`.strict()`，仅 `auto/reason/summaryMessageId/metadata`）与代码零引用，磁盘 791/986 条存量携带——新数据是否继续写入无现行代码证据，实施时按设计文档 §11-1 做字段考古选定最终锚（失效由下述降级路径覆盖）。
 - **`firstKeptEntryId` 是不可悬空的运行时断言**（pi 0.84.4 `buildContextEntries` 实测）：悬空/空串/缺省 → 压缩点之前的全部 entry 被静默丢弃。不可解时按「① tail_start_id 映射 → ② 紧邻前驱已发射 entry id（保留全部历史，冗余但无损）→ ③ 首条 entry 取自身 id」降级；三路都走不通才退化为 `custom` entry + 降级登记。
 
@@ -176,7 +176,7 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 - **applyEntry 重放锚**（I1 的机器断言）：产物经 `replayEntries(applyEntry)` 重放无异常、消息序列/toolCall↔toolResult 全配对/usage 聚合符合预期。每个 fixture 会话都跑。
 - **不变量断言**（I2）：产物文件名剥 `.jsonl` 后 `lastIndexOf('_')` 尾段 === header.id；归一化函数后置条件边界（空串/含 `_`/非法字符）单独用例。
 - **编排层回归**：pi 源现有测试族（import-service / scan-external / session-message-handler-import / dialog）全绿——重构编排层不破坏 pi 行为。
-- **真机验收**：按设计文档 §4 场景（V1-V7）由 dev-flow 验收计划承接，开发阶段按改动面执行（`node scripts/select-affected-e2e.mjs --base <ref>` 圈定既有 e2e 子集）。
+- **真机验收**：由实施期验收计划承接（场景清单以当轮设计文档的验收章节为准，不在本文件固化编号），开发阶段按改动面执行（`node scripts/select-affected-e2e.mjs --base <ref>` 圈定既有 e2e 子集）。
 
 ## 8. 维护
 
