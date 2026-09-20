@@ -17,6 +17,14 @@
  * MarkdownRenderer 渲染出 .md-render table。
  *
  * 运行：npx playwright test e2e/markdown-table-layout.spec.ts --project=electron-smoke
+ *
+ * ⚠️ agent bash / Electron 宿主内运行时先 `env -u ELECTRON_RUN_AS_NODE`：该变量透传会让
+ * electron 二进制退化成裸 node，报 `Electron: bad option: --remote-debugging-port=0`——
+ * 与代码无关，排障记录见 docs/TROUBLESHOOTING.md（electron 轨在 agent bash 里全灭条目）。
+ *
+ * ⚠️ mock 轨要求 renderer 产物是 mock bundle（构建期 VITE_MOCK=true）。若刚跑过 real 轨，
+ * 先 `VITE_E2E=true VITE_MOCK=true pnpm run build:e2e` 重建；launchApp 的 pre-flight 会
+ * 检出错误形态并 fail-fast（见 e2e/fixtures/launch-app.ts assertMockRendererBundle）。
  */
 import { test, expect } from './fixtures/launch-app'
 
