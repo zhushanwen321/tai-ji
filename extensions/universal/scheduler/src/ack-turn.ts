@@ -20,24 +20,29 @@
 
 import { existsSync } from 'node:fs'
 
-import { createAckNotifyDedup, planAckNotify, shouldNotifyUnpersisted } from './ack-notify.js'
+import { createAckNotifyDedup, shouldNotifyUnpersisted } from './ack-notify.js'
 import { buildAckStreamSimple, computeAckAvailability } from './ack-provider.js'
 import type { SchedulerBackend } from './backend.js'
-import { ACK_CONFIRM_KEY } from './i18n.js'
+import { ACK_CONFIRM_KEY, ACK_NOT_PERSISTED_KEY } from './i18n.js'
 import type { SchedulerEntryLike } from './replay.js'
 import { TICK_INTERVAL_MS } from './runtime.js'
 import { ACK_CUSTOM_TYPE, ACK_CUSTOM_TYPE_PREFIX } from './types.js'
-import type { AckAvailability, AckFailureKind, AckState, SchedulerCurrentModel } from './types.js'
+import type {
+  AckAvailability,
+  AckNotifyReason,
+  AckState,
+  SchedulerCurrentModel,
+} from './types.js'
 
 /** 30s 写盘自检窗口（设计 §3.3 D7）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
 
 /**
  * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），
- * 保证跨代共享同一引用。availability 承载「每会话一次」的可用性预计算——武装点的同步
- * registerProvider 不能再 await 判据，故必须在建任务期算好并缓存。
+ * 保证跨代共享同一引用。availability 承载建任务期的可用性判定结果，供同会话重复创建复用
+ * （省重复读 models.json 与动态 import）。
  */
 export const ackState: AckState = {
-  pending: null,
+  pending: false,
   window: null,
   ackTurnStarted: false,
   ackStreamCalled: false,
@@ -47,18 +52,15 @@ export const ackState: AckState = {
   ackText: '',
   model: undefined,
   sessionFile: undefined,
-  needsRetry: false,
   availability: undefined,
 }
 
-/** 通知去重（模块级，跨 controller 代共享；resetAckState 全清——跨会话隔离）。 */
+/** 通知去重（模块级；resetAckState 全清——跨会话隔离）。 */
 const notifyDedup = createAckNotifyDedup()
 
 /** 编排依赖（注入面；backend 为 per-session 实例，状态经模块级单例跨代共享）。 */
 export interface AckTurnDeps {
   backend: SchedulerBackend
-  /** 时间源（测试可注入固定值）；缺省 Date.now()。 */
-  now?: () => number
   log: {
     warn(msg: string, meta?: Record<string, unknown>): void
     debug(msg: string, meta?: Record<string, unknown>): void
@@ -105,7 +107,7 @@ export function resetAckState(): void {
     clearTimeout(ackState.writeCheckTimer)
     ackState.writeCheckTimer = null
   }
-  ackState.pending = null
+  ackState.pending = false
   ackState.window = null
   ackState.ackTurnStarted = false
   ackState.ackStreamCalled = false
@@ -114,29 +116,25 @@ export function resetAckState(): void {
   ackState.ackText = ''
   ackState.model = undefined
   ackState.sessionFile = undefined
-  ackState.needsRetry = false
   ackState.availability = undefined
   notifyDedup.clear()
 }
 
 /** 构造 ack 编排控制器（backend 装配点注入；状态仍是模块级单例）。 */
 export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
-  const now = deps.now ?? (() => Date.now())
-
   /** 通知去重键：同 session 同 task 只发一次（sessionFile 缺失时以字面量占位）。 */
   function dedupKey(): string {
     return `${ackState.sessionFile ?? 'no-file'}:${ackState.taskId ?? 'no-task'}`
   }
 
   /**
-   * 如实通知（warning + dedup）。计划由 planAckNotify 分类决定；本函数只消费
-   * honest-sync / honest-async 两类（none 直接跳过）。
+   * 如实通知（warning + dedup）。`reason` 只进 debug 日志（两种可通知形态共用同一条文案
+   * 与同一级别）；调用点传入它是为了「为什么在此处发」可读——时机差异不在类型里。
    */
-  function notifyHonest(failure: AckFailureKind): void {
-    const plan = planAckNotify(failure)
-    if (plan.kind === 'none') return
+  function notifyHonest(reason: AckNotifyReason): void {
     if (!notifyDedup.shouldNotify(dedupKey())) return
-    deps.notify(deps.render(plan.messageKey, { name: ackState.taskName }), plan.level)
+    deps.log.debug('ack unpersisted notice', { reason })
+    deps.notify(deps.render(ACK_NOT_PERSISTED_KEY, { name: ackState.taskName }), 'warning')
   }
 
   function cancelWriteCheck(): void {
@@ -165,62 +163,58 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       }
       // F1（一致性审查）：无论判定结果如何都必须清 pending——顶部去重守卫以 pending 为准，
       // 残留会让本会话后续创建全部静默失效（既不 ack 也不通知），直到会话边界。
-      ackState.pending = null
+      ackState.pending = false
     }, TICK_INTERVAL_MS)
     timer.unref?.()
     ackState.writeCheckTimer = timer
   }
 
   /**
-   * one-shot 自撤（幂等）。成功 ⇒ window 清空、needsRetry 复位；抛错（E6）⇒ 保留
-   * window + 置 needsRetry，由下一个清理点（turn_end / session 边界）重试一次。
+   * one-shot 自撤（幂等）。成功 ⇒ 清空窗口；抛错（E6）⇒ 保留窗口，由下一个清理点
+   * （turn_end / session 边界）重试一次。窗口自足（携带 providerId），不必回读会话模型。
    */
   function selfUnregister(): void {
-    if (!ackState.window?.registered) return
-    const providerId = ackState.model?.provider
-    if (providerId === undefined) {
-      // 防御性兜底：window 非空必然经过 registerProvider（model.provider 存在），
-      // 但若状态被外部污染，清空比让 window 卡死阻止后续 ack 更符合 fail-safe 方向。
-      ackState.window = null
-      return
-    }
+    const window = ackState.window
+    if (window === null) return
+    // 先摘窗口再注销：即使注销抛错，也不会把同一窗口重复注销；失败时回填以允许重试。
+    ackState.window = null
     try {
-      deps.backend.unregisterProvider(providerId)
-      ackState.window = null
-      ackState.needsRetry = false
+      deps.backend.unregisterProvider(window.providerId)
     } catch (err) {
-      ackState.needsRetry = true
+      ackState.window = window
       deps.log.warn('ack unregister failed (E6); will retry at next cleanup point', {
-        provider: providerId,
+        provider: window.providerId,
         error: err instanceof Error ? err.message : String(err),
       })
     }
   }
 
   /**
-   * 可用性预计算（每会话/每 provider 缓存一次）：武装点同步 registerProvider 不能再
-   * await，故这里算好存 ackState.availability。
+   * 可用性判定（建任务期算一次，同会话重复创建直接复用缓存）。
+   * 收益 = 省重复读 models.json 与动态 import；武装点不读它（只取 ackState.model）。
    */
   async function getAvailability(
     providerId: string,
     isToggleDisabled: boolean,
   ): Promise<AckAvailability> {
     const cached = ackState.availability
-    if (cached && cached.providerId === providerId) return cached.value
+    if (cached && cached.providerId === providerId && cached.isToggleDisabled === isToggleDisabled) {
+      return cached.value
+    }
     const value = await computeAckAvailability({
       providerId,
       isToggleDisabled: () => isToggleDisabled,
       loadBuiltinProviderIds: deps.loadBuiltinProviderIds,
       loadModelsJsonProviderIds: deps.loadModelsJsonProviderIds,
     })
-    ackState.availability = { providerId, value }
+    ackState.availability = { providerId, isToggleDisabled, value }
     return value
   }
 
   return {
     async maybeStartAck(input) {
       // ① 去重：待命触发器或覆写窗口在场 ⇒ 本会话已有 ack 在途，不再注入。
-      if (ackState.pending !== null || ackState.window !== null) return
+      if (ackState.pending || ackState.window !== null) return
 
       const { task, model, isIdle, isToggleDisabled } = input
 
@@ -273,7 +267,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         { customType: ACK_CUSTOM_TYPE, content: ackState.ackText, display: false },
         { triggerTurn: true },
       )
-      ackState.pending = { taskId: task.id, sentAt: now() }
+      ackState.pending = true
       armWriteCheck()
     },
 
@@ -286,7 +280,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
       // 触发器已到达 ⇒ 本轮首次模型请求即将发起，此处同步注册覆写即可赶在真实请求
       // 之前。临界区内禁 await——model 与可用性都在建任务期缓存好。
-      ackState.pending = null
+      ackState.pending = false
       ackState.ackTurnStarted = true
 
       const model = ackState.model
@@ -310,7 +304,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
             },
           }),
         })
-        ackState.window = { registered: true }
+        ackState.window = { providerId: model.provider }
       } catch (err) {
         // E1：注册失败等价「无覆写」（pi 回退基座）。不置 window。
         deps.log.warn(
@@ -322,12 +316,11 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
     handleTurnEnd() {
       // E2 归因（一致性审查 F3）：窗口仍注册但我们的 streamSimple 从未被调用 ⇒ 本轮由真实
-      // provider 应答（覆写未生效）。语义 = 任务其实已落盘 ⇒ 不发失败通知，只留 warn 归因。
-      if (ackState.window?.registered === true && !ackState.ackStreamCalled) {
-        const failure: AckFailureKind = 'e2-not-hit'
+      // provider 应答（覆写未生效）。语义 = 任务其实已落盘 ⇒ 不发失败通知（E2 不在
+      // AckNotifyReason 里），只留 warn 归因。
+      if (ackState.window !== null && !ackState.ackStreamCalled) {
         deps.log.warn('ack override not hit (E2); real provider answered this turn', {
           taskId: ackState.taskId,
-          notify: planAckNotify(failure).kind,
         })
       }
       // 安全网（幂等）：正常路径已在 streamSimple 调用点自撤；这里覆盖「覆写未被调用」。

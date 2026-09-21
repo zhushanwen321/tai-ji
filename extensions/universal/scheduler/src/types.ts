@@ -193,36 +193,37 @@ export type AckAvailability =
 export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed'
 
 /**
- * ack 失败分类（错误规格 E1–E8b）。仅少数形态需要用户可见提示，分类纯函数据此分发：
- * `e1-register`（registerProvider 静默回退基座）、`e2-not-hit`（覆写未被调用）、
- * `e3-no-turn`（合成轮未启动）、`e4-provider-error`（provider 抛错）、
- * `e5-interrupted`（轮次被打断）、`e6-unregister`（注销抛错）、
- * `e8-no-base`（无基座不可覆写）、`e8b-hybrid`（hybrid 形态）。
+ * 会送达用户的 ack 失败形态（仅此两种；其余形态一律不通知）。
+ *
+ * 设计错误规格表 E1–E8b 中只有这两个形态该让用户看见：
+ * - `e8-no-base`：覆写不可用在开窗之前即确定（无基座 / 显式禁用）⇒ 创建时同步如实告知；
+ * - `e3-no-turn`：合成轮未启动，30s 自检确认文件确实不存在后异步补发。
+ *
+ * 其余形态（e1-register / e2-not-hit / e4-provider-error / e5-interrupted /
+ * e6-unregister / e8b-hybrid）**不发用户通知**——它们都意味着真实轮已应答或与落盘无关，
+ * 发「未写入」即反向撒谎；可观测性由日志面承担（字符串标签，不实体化为类型成员）。
+ * 把「可通知」收窄成类型本身，反向撒谎禁令就成了编译期约束：调用点无法传入不通知的形态。
+ * 错误语义的完整 SSOT = 设计 scheduler-command-path-persistence §3.4。
  */
-export type AckFailureKind =
-  | 'e1-register'
-  | 'e2-not-hit'
-  | 'e3-no-turn'
-  | 'e4-provider-error'
-  | 'e5-interrupted'
-  | 'e6-unregister'
-  | 'e8-no-base'
-  | 'e8b-hybrid'
+export type AckNotifyReason = 'e3-no-turn' | 'e8-no-base'
 
 /**
  * ack 模块级编排状态（u-ack-turn 的单例状态域）。类型放此处而非编排模块，便于编排单测
  * 构造夹具与跨模块引用；生命周期由 session_start / session_shutdown 跨代清理。
  */
 export interface AckState {
-  /** 已注入的触发器（等待命中的 ack 轮）；null = 无待命触发器 */
-  pending: { taskId: string; sentAt: number } | null
-  /** 当前覆写窗口；`registered` = 覆写是否仍在 pi 注册表（one-shot 自撤后仍非 null 直到 turn_end 安全网） */
-  window: { registered: boolean } | null
+  /** 已注入的触发器在途（等待命中的 ack 轮）；false = 无待命触发器 */
+  pending: boolean
+  /**
+   * 当前覆写窗口；非 null = 覆写仍在 pi 注册表。携带 providerId 使自撤点自足（不必
+   * 回读会话模型）；one-shot 自撤成功后即置 null，注销抛错（E6）时保留以便下一清理点重试。
+   */
+  window: { providerId: string } | null
   /** ack 轮是否已启动（30s 写盘自检的判据之一：文件不存在且未启动才补发告警） */
   ackTurnStarted: boolean
   /** 30s 写盘自检定时器句柄（unref；session_start/shutdown 取消） */
   writeCheckTimer: ReturnType<typeof setTimeout> | null
-  /** 本次 ack 触发的任务 id（pending 在 message_start 即清空，30s 自检 / 边界通知仍需它拼去重键）；null = 本会话未发起过 ack */
+  /** 本次 ack 触发的任务 id（30s 自检 / 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收口 */
   taskId: string | null
   /** 本次 ack 触发的任务名（如实通知文案插值；taskId 为兜底） */
   taskName: string
@@ -234,10 +235,14 @@ export interface AckState {
   sessionFile: string | undefined
   /** 我们的 streamSimple 是否被调用过（E2 归因唯一信号：窗口开着但从未被调用 ⇒ 真实 provider 应答了）*/
   ackStreamCalled: boolean
-  /** E6（注销抛错）后标记：下一个清理点重试一次注销 */
-  needsRetry: boolean
-  /** 可用性预计算结果缓存（每会话/每 provider 一次；providerId 随会话模型切换才失效） */
-  availability: { providerId: string; value: AckAvailability } | undefined
+  /**
+   * 可用性判据缓存（建任务期算一次，同会话重复创建直接复用）。缓存键 = providerId +
+   * isToggleDisabled（判据的两个输入；env 开关进程内不可变，带上只为键完整）。
+   * 真实收益 = 省重复读 models.json 与动态 import；武装点并不读它（武装点只取 model）。
+   */
+  availability:
+    | { providerId: string; isToggleDisabled: boolean; value: AckAvailability }
+    | undefined
 }
 
 /**

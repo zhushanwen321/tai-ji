@@ -162,7 +162,6 @@ export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
 export const ACK_CONFIRM_KEY = 'ack.confirm'
 /** 落盘失败如实文案（同步与异步共用同一键）。插值参数：`{name}`。 */
 export const ACK_NOT_PERSISTED_KEY = 'ack.notPersisted'
-/** 恢复指引（可选展示，供 UI 复用；内容比 notPersisted 更偏操作步骤）。无插值参数。 */
 
 // ── 词典（zh-CN / en-US，文案表见设计 §7.5）──
 
