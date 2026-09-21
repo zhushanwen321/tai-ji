@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_PROTOCOL_SCHEMAS, FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS } from "../protocol/schema.ts";
 import { REVERSE_CHANNELS } from "../protocol/reverse-channels.ts";
 import { PROTOCOL_METHODS } from "../protocol/methods.ts";
+import { AGENT_EVENT_TYPE_NAMES } from "../protocol/contract-types.ts";
 
 const ajv = new Ajv({ strict: false });
 
@@ -40,12 +41,19 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
     expect(err({ id: 1, error: { code: "boom", message: "m", recovery: "r" } })).toBe(false);
   });
 
-  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 限 9 种", () => {
+  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 词表由 AGENT_EVENT_TYPE_NAMES 派生", () => {
     const validate = ajv.compile(ENGINE_PROTOCOL_SCHEMAS.notification);
     expect(validate({
       method: "event",
       params: { runId: "r1", seq: 1, event: { type: "text_delta", delta: "x" } },
     })).toBe(true);
+    // 词表逐值通过（C3：schema enum 从词表派生，新增变体自动跟随，无需改本测试）
+    for (const eventType of AGENT_EVENT_TYPE_NAMES) {
+      expect(validate({
+        method: "event",
+        params: { runId: "r1", seq: 1, event: { type: eventType } },
+      }), `event.type "${eventType}" should validate`).toBe(true);
+    }
     // activity 活性信号变体（无载荷字段，仅 type）
     expect(validate({
       method: "event",

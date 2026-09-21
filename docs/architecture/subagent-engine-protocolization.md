@@ -347,7 +347,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **被否**：「未握手时返回保守能力位」——击穿反例：pi 缺省路径的 `conversation:true` / `maxTurns` /
 `worktree` 会被 `capability-gate` 全部拒掉（G3/G5 首轮即破）。
 
-**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（8 种）逐字序列化；journal 落盘仍在 core。
+**事件与背压**：`event.params.event` 即 `AgentEvent` 逐字序列化（事件词表 SSOT = SDK `AGENT_EVENT_TYPE_NAMES`，本文档不复制枚举）；journal 落盘仍在 core。
 **默认关闭事件合并**（`TAIJI_ENGINE_EVENT_COALESCE=0`）——A1 要求「事件逐字段等价」，
 合并（16ms/4KB）与逐字段等价不可兼得。合并开关保留，启用需另立验收（量级/恢复/重审）后方可默认开。
 **stdout/stderr 分工**：stdout 独占 NDJSON（行解析器 + 背压：core 读得慢时靠 OS 管道背压，不做无界缓存）；
@@ -359,6 +359,44 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 **版本协商**：`ENGINE_PROTOCOL_VERSION = 1`（core 支持 `>=1 <2`）；越界 → `engine_protocol_mismatch`
 （含双方版本 + 升级指引），该引擎标记不可用，不影响其他引擎与宿主。
+
+**协议演进宪法**（D11；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
+
+*字段归属三分判据（新增 wire 字段按决策树依序裁决；存量不搬家不重判，判据只约束新增）*：
+① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段声明携带的约束面——
+轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；② 描述「任务是什么」(what) 还是
+「在什么环境跑/怎么跑」(where/how)？what → `task`（预算/验收类约束 = 任务自带语义归 task，
+宿主偏好参数走③）；③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，
+设计期以两引擎实装逐一对照验证恒等）；不能（推导会分叉）→ `run.params.ctx`（存疑即视为会分叉，
+取 ctx 保守侧）。**判据 4（双写禁令，绝对条款）**：同一语义不得在 task 与 ctx 各挂一份，
+取值源必须唯一（机器锁钉 wire 类型；`port-contract.ts` 的进程内合回形态不在此列）。
+**判据 5（能力绑定）**：字段有效性依赖能力位时双向注释互指（先例 `streamMode` ↔
+`eventGranularity`），宿主据此派发前预检。逐字段存量结论表登记在
+`contract-types.ts` `AgentCallOpts` 注释。
+
+*演进政策三条*：① **additive 面**——新增可选字段 / 事件变体 / 方法 / 通道不 bump 版本，
+纪律 = 旧端对新成员忽略或 no-op 安全落空（reducer default 分支、未知字段丢弃）；
+② **删除面 = 同批切换**——读写端同 commit 族、全程无「写新读旧」窗口 + ADR 登记，
+单仓同步部署协议（两引擎同仓同发布）下删除的唯一合法形态；③ **major bump 触发**——
+删除无法同批协调时（第三方引擎独立发布节奏出现），core 支持区间平移 `[1,2)→[2,3)`。
+
+*深载荷专属 schema 判据与反向通道关联键总纲*：深载荷配专属 schema 需满足任一——①该载荷
+经历过键切换/搬家事故（消费方需结构化报错路径防静默失效，先例 `runSessionParamsSchema`）；
+②载荷跨信任边界（第三方引擎独立开发，双侧不再共享编译期）。反向通道关联键：
+`runId` = 渲染与事件路由键（event 通知/streamDelta/handleReady/askUser），
+`recordId` = record 镜像键（childSpawned/childStateChanged）；新增通道按消费方选键。
+
+*编译期机器锁（零运行时；执行点 = pre-commit SDK typecheck 按路径触发段 + CI typecheck job SDK 步）*：
+- **C3 事件词表 SSOT**——SDK `AGENT_EVENT_TYPE_NAMES` 运行时词表常量 ↔ `AgentEvent["type"]`
+  联合经 `AssertMutuallyAssignable` 双向锁（任一侧漂移 typecheck 红）；schema enum 与
+  测试断言从词表派生。新增事件变体义务 = ①union 加成员 ②词表加名 ③schema enum 与测试自动跟随
+  ④双侧 reducer default no-op 确认——前三机器锁，末一人判。
+- **C4 task/ctx 双写禁令锁**——`keyof AgentCallOpts & keyof RunContextParams` 与 `never`
+  双向可赋值断言（人为加同名键即红；异名同义双写由判据 4 成文 + CR 人判兜底）。
+- **C2 能力位扩展约定**——`EngineCapabilities` 新增轴一律**可选键**（缺省语义 = 该轴最弱档，
+  逐轴注释写死），存量 11 位 required 不动；closure 测试断言拆两条（存量 11 键逐一必填 +
+  可选新增键缺省构造编译通过）；消费新轴的 core 代码必须处理缺省不得 `!` 断言；
+  manifest 解析器已 additive 友好（未知键忽略 + warn），零改动。
 
 **错误码**
 

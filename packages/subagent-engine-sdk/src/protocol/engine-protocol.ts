@@ -10,17 +10,17 @@
 // engine_protocol_mismatch（含双方版本 + 升级指引），该引擎标记不可用，
 // 不影响其他引擎与宿主。
 //
-// [v1.x 增量语义（chat-domain 设计 §3.2 D1-A/§3.3）][H1 后历史叙述——run.params.chat
-// 已随 U6 删除，现唯一会话形态键 = run.params.resume；[modeless 波2] 协议 task 的
-// conversation 键已删（core 侧 deprecated 参数不再上 wire，resume 键携带全部会话
-// 形态）]：chat 域增量曾以**可选载荷/可选参数**形态向后兼容，major 不 bump、不引入
-// minor 协商位：
-//   - 新 core × 旧引擎：会话形态请求（resume 续聊）被 conversation gate
-//     同步拒（manifest 无 gate 位，
-//     A6 方向——engine_capability_unsupported + 升级引擎包指引）；run 域零影响；
-//   事件变体增量同政策（例：activity 活性信号变体）：新变体以可选载荷形态进
-//   union，旧宿主 runtime 对其 no-op（reducer default 分支安全落空 / journal
-//   豁免面不感知），协议版本维持 1、不 bump。
+// 演进政策三条（协议演进宪法 D11；权威源 docs/architecture/subagent-engine-protocolization.md
+// §3.3「协议演进宪法」小节，本头注是其投影）：
+//   ① additive 面——新增可选字段 / 事件变体 / 方法 / 通道不 bump 版本。纪律 =
+//      旧端对新成员忽略或 no-op 安全落空（reducer default 分支、未知字段丢弃）。
+//      同步义务：事件变体新增 = union 加成员 + AGENT_EVENT_TYPE_NAMES 词表加名
+//      （contract-types.ts 双向编译期锁，schema enum 与测试断言自动派生）；字段 /
+//      方法 / 通道的新增成员同步义务分别由各自契约文件的互证机制承载。
+//   ② 删除面 = 同批切换——读写端同 commit 族、全程无「写新读旧」窗口 + ADR 登记。
+//      单仓同步部署协议（两引擎同仓同发布）下，这是删除的唯一合法形态。
+//   ③ major bump 触发——删除无法同批协调时（第三方引擎独立发布节奏出现），
+//      core 支持区间平移 [1,2)→[2,3)（单点改 SUPPORTED_PROTOCOL_RANGE）。
 //
 // [H1 双键过渡（chat-run 统一，docs/architecture/subagent-chat-run-unification.md §3.3
 // D3 + §5 U1 行）][H1 U6 已切换]：run.params.resume 曾与原 run.params.chat 载荷

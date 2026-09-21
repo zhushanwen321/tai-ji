@@ -1904,6 +1904,34 @@ else
 fi
 
 # ============================================================================
+# subagent-engine-sdk typecheck（协议演进宪法 D11 机器锁的执行点，workflow-architecture-redesign P7）
+#   staged 命中 packages/subagent-engine-sdk/** 时触发：pnpm --filter
+#   @zhushanwen/subagent-engine-sdk run typecheck（tsc --noEmit）。
+#   D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁全部是
+#   SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）——无本执行点
+#   则锁为纸面（CI typecheck job 此前只覆盖 frontend/runtime/shared/extensions，
+#   「8 种」事件词表文档漂移无守卫存活至今即实证）。守卫路径自身变更不触发
+#   （typecheck 断言在 SDK 包内自持，由 SDK staged 必然连带触发）。
+#   触发面用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SDK_TYPECHECK_STAGED=$(git diff --cached --name-only -- packages/subagent-engine-sdk/)
+if echo "$SDK_TYPECHECK_STAGED" | grep -q "^packages/subagent-engine-sdk/"; then
+    print_section "[subagent-engine-sdk typecheck]"
+    if ! (cd packages/subagent-engine-sdk && npx tsc --noEmit 2>&1); then
+        echo ""
+        echo -e "${RED}[ERROR] subagent-engine-sdk typecheck 失败——协议演进宪法编译期锁（C3 词表 / C4 双写禁令 / C2 必填）检出漂移${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-engine-sdk/src/protocol/contract-types.ts（AGENT_EVENT_TYPE_NAMES 双向锁）+ src/__tests__/contract-closure.test.ts（C3/C4/C2 const 锚点）；按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-engine-sdk typecheck 通过（协议宪法编译期锁在案）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 SDK 变更，跳过 subagent-engine-sdk typecheck${NC}"
+fi
+
+# ============================================================================
 # 全部通过
 # ============================================================================
 
@@ -1999,6 +2027,7 @@ echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本
 echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
 echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
 echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
+echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk typecheck（SDK 变更时触发：协议演进宪法 D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

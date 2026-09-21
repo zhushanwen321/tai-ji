@@ -51,6 +51,9 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ### ADR-0068 扩展消息注入形态：custom message 首选（2026-09-21）
 pi extension 向 LLM 注入提示词/通知消息统一走 `pi.sendMessage()` custom message 形态（`display` 控制用户可见性、不伪装用户消息归属）；`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息——提示词类内容伪装用户消息的形态已在四包改造中清除（smart-context/goal/structured-output/plan，merge accb67c37）。关键语义两条：① custom message 经 pi `convertToLlm` 无条件转 LLM user 消息，对 LLM 与 user message 无差别，形态迁移不损失模型可见性；② `sendMessage(triggerTurn:true)` 非 streaming 时直调 `_runAgentPrompt`，跳过 `prompt()` 主路径前置链（compaction 检查 / before_agent_start 事件 / systemPrompt 叠加 / pending nextTurn 消费）——依赖 per-turn 注入的需求不得走该通道。约定载体 [extension-conventions.md](../extensions/extension-conventions.md)「Event handler 消息注入」。
 
+### ADR-0071 协议演进宪法：字段归属判据 + 演进政策 + 编译期机器锁（2026-09-21）
+subagent 引擎协议（`packages/subagent-engine-sdk/src/protocol/`）的演进纪律三件套：① 字段归属三分判据——新增 wire 字段按决策树裁决（引擎不消费即任务能正确完成 → 宿主自持；what → task；环境值引擎可恒等推导 → 不上协议、会分叉 → ctx；存疑取 ctx 保守侧），配双写禁令绝对条款（同一语义不得 task 与 ctx 各挂一份）与能力绑定双向互指（streamMode ↔ eventGranularity）；② 演进政策三条——additive 不 bump 版本（旧端对新成员忽略/no-op 安全落空）、删除面 = 同批切换（读写端同 commit 族、无「写新读旧」窗口 + ADR 登记，单仓同步部署协议下删除的唯一合法形态）、删除无法同批协调时 major bump 区间平移 `[1,2)→[2,3)`；③ 编译期机器锁（零运行时）——事件词表 SSOT `AGENT_EVENT_TYPE_NAMES` ↔ `AgentEvent["type"]` 双向断言、`keyof AgentCallOpts & keyof RunContextParams` = never 双写禁令锁、`EngineCapabilities` 新增轴一律可选键（缺省 = 最弱档），执行点 = pre-commit SDK typecheck 按路径触发 + CI typecheck job SDK 步（无门禁执行点则锁为纸面）。判据 1-5 是宿主→引擎字段归属判据，不适用于引擎→宿主上报（引擎→宿主新增帧/事件按宪法 C3 义务与关联键总纲写）。权威源 [subagent-engine-protocolization.md](../architecture/subagent-engine-protocolization.md) §3.3「协议演进宪法」。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）

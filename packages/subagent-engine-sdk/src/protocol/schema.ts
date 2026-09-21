@@ -11,9 +11,17 @@
 // 帧级 schema 只定形状骨架（id/method/params/result/error 的存在性与类型）——
 // 帧校验的目的是行解析器快速拒格式坏帧，不做深校验（深校验成本高于收益，坏载荷
 // 由消费方结构化报错）。
+//
+// 深载荷配专属 schema 的判据（协议演进宪法 D11 成文；权威源
+// docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」）——
+// 满足任一方配专属 schema（本文件深载荷片段家族的唯一准入条件）：
+//   ① 该载荷经历过键切换/搬家事故（消费方需结构化报错路径防静默失效，
+//      先例 runSessionParamsSchema）；
+//   ② 载荷跨信任边界（第三方引擎独立开发，双侧不再共享编译期）。
 
 import { REVERSE_CHANNELS } from "./reverse-channels.ts";
 import { PROTOCOL_METHODS } from "./methods.ts";
+import { AGENT_EVENT_TYPE_NAMES } from "./contract-types.ts";
 
 /** 任意 JSON 值（draft-07 空约束）。 */
 const ANY_JSON = {} as const;
@@ -94,17 +102,9 @@ export const notificationFrameSchema = {
           properties: {
             type: {
               type: "string",
-              enum: [
-                "tool_start",
-                "tool_end",
-                "text_delta",
-                "thinking_delta",
-                "turn_end",
-                "message_end",
-                "compaction",
-                "activity",
-                "error",
-              ],
+              // 协议演进宪法 C3：词表 SSOT 派生（AGENT_EVENT_TYPE_NAMES），不手写枚举
+              // ——union/词表漂移由 contract-types.ts 双向锁拦截，本 enum 自动跟随。
+              enum: [...AGENT_EVENT_TYPE_NAMES],
             },
           },
         },

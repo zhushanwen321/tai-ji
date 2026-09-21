@@ -14,6 +14,15 @@
 // 杀进程 + 在途 run 失败）；人机交互类走 ack 两阶段——先回 {ack:true}，结果异步到达
 // （R9-2：已 ack 的等待不计入任何 in-flight 超时；ADR-0047 静默 ≠ 卡死）；
 // 未实现的交互能力回 {unsupported:true}（引擎自行降级，不重试）。
+//
+// 反向通道关联键总纲（协议演进宪法 D11 成文；权威源
+// docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」）：
+//   - runId = 渲染与事件路由键（event 通知 / host/streamDelta / host/handleReady /
+//     host/askUser——载荷含 runId 的通道均归此类）；
+//   - recordId = record 镜像键（host/childSpawned / host/childStateChanged——
+//     core 侧镜像数据源按 record 归属）；
+//   新增通道按消费方选键（渲染/事件路由 → runId；record 镜像 → recordId），并在
+//   载荷类型注释点名消费方。
 
 import type { ReverseRequestTimeoutClass } from "./engine-protocol.ts";
 import type { UiRequest, UiResponse } from "../ui-types.ts";

@@ -117,6 +117,30 @@ export type AgentEvent =
   | { type: "activity" }
   | { type: "error"; message: string };
 
+/**
+ * 事件类型名联合（词表 SSOT 的类型面；AGENT_EVENT_TYPE_NAMES 常量数组与之同源，
+ * 双向一致性由 AssertMutuallyAssignable 编译期锁 + contract-closure 测试 const 锚点
+ * 断言共同承载——任一侧漂移 typecheck 红）。协议演进宪法 C3（权威源
+ * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」）：
+ * schema enum（schema.ts）与测试断言从词表派生，新增事件变体义务 = ①本 union 加
+ * 成员 ②词表加名 ③schema enum 与测试自动跟随 ④双侧 reducer default no-op 确认
+ * ——前三机器锁，末一人判。
+ */
+export type AgentEventType = AgentEvent["type"];
+
+/** 事件类型名全集（运行时顺序化枚举；文档不复制此枚举，一律引用本常量）。 */
+export const AGENT_EVENT_TYPE_NAMES = [
+  "tool_start",
+  "tool_end",
+  "text_delta",
+  "thinking_delta",
+  "turn_end",
+  "message_end",
+  "compaction",
+  "activity",
+  "error",
+] as const satisfies readonly AgentEventType[];
+
 // ============================================================
 // handle / read 视图
 // ============================================================
@@ -208,7 +232,11 @@ export interface EngineCapabilities {
   conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
-  /** 粗粒度引擎：GUI 显示降级为阶段态。 */
+  /**
+   * 粗粒度引擎：GUI 显示降级为阶段态。判据⑤能力绑定双向互指：本位的实际生效
+   * 以 run.params.ctx.streamMode 请求为对端（引擎按本位能力执行请求；对端注释见
+   * methods.ts RunContextParams.streamMode）——宿主据此派发前预检而非发出后静默失效。
+   */
   eventGranularity: "stream" | "coarse";
   /** emulated = worktree 隔离（无 OS sandbox 的引擎用文件写维度隔离补齐）。 */
   sandbox: "native" | "emulated" | "none";
@@ -320,15 +348,34 @@ export interface ModelCatalogEntry {
  * 单次 agent 调用的任务声明——引擎面子集（协议 run.params.task；core 全量
  * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费面）。
  *
- * 字段裁决（对照 core orchestration/models/types.ts AgentCallOpts，2026-09-09）：
- * - 入选 = 引擎消费面：任务语义（prompt/schema/thinkingLevel/skill/skillPath/agent/persona 注入）、
- *   轮次预算（maxTurns/graceTurns/idleTimeoutMs）、隔离与权限（worktree/
- *   fork/forkSource/denyTools/permissionMode）、诊断（description/scene）；
- * - 排除并改挂 run.params.ctx（协议层已单列，task 内双写会分叉）：model（→ctx.model）、
- *   cwd（→ctx.cwd）、engineFallback（→ctx.engineFallback）；
- * - 排除（宿主侧消费，无引擎语义）：engine（路由决策已完成，收到的引擎即选中值）、
- *   timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、returnMeta
- *   （core 注释明确「dropped at the pi boundary」，非引擎消费）。
+ * 字段归属判据（协议演进宪法 D11 成文，权威源
+ * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」；
+ * 本注释是判据与存量结论的投影，新增字段按决策树依序裁决后在此登记）：
+ *   ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段
+ *      声明携带的约束面——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
+ *   ② 描述「任务是什么」(what) 还是「在什么环境跑/怎么跑」(where/how)？
+ *      what → task（预算/验收类约束 = 任务自带语义归 task，宿主偏好参数走③）；
+ *   ③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，设计期
+ *      以两引擎实装逐一对照验证恒等）；不能（推导会分叉）→ run.params.ctx
+ *      （存疑即视为会分叉，取 ctx 保守侧）；
+ *   ④ 【绝对条款】双写禁令——同一语义不得在 task 与 ctx 各挂一份，取值源必须唯一
+ *      （机器锁见 contract-closure.test.ts 的 keyof 交集 = never 断言；禁令钉 wire
+ *      类型，port-contract.ts 的进程内合回形态不在此列）；
+ *   ⑤ 能力绑定——字段有效性依赖能力位时双向注释互指（先例 streamMode ↔
+ *      eventGranularity），宿主据此派发前预检。存量不搬家不重判：判据只约束新增。
+ *
+ * 存量字段结论表（判据 1-3 回判与现状一致）：
+ *   - 判据② task（任务语义）：prompt / schema / thinkingLevel / scene /
+ *     maxTurns / graceTurns / idleTimeoutMs / skill / skillPath / agent /
+ *     appendSystemPrompt；
+ *   - 判据② task（隔离与权限随任务声明）：worktree / fork / forkSource /
+ *     denyTools / permissionMode；
+ *   - 判据② task（诊断元数据）：description；
+ *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd / engineFallback
+ *     （对照 core orchestration/models/types.ts AgentCallOpts，协议层单列）；
+ *   - 判据① 宿主自持不上协议：engine（路由决策已完成，收到的引擎即选中值）、
+ *     timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、
+ *     returnMeta（core 注释明确「dropped at the pi boundary」，非引擎消费）。
  *
  * W2 实装 EngineClient run 帧时以本类型为 params.task；core 侧全量 → 子集的方向性
  * 收窄（多余字段宿主自持不透传）不构成类型漂移（断言方向见 contract-closure 测试样板）。

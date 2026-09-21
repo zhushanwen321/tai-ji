@@ -94,6 +94,11 @@ jobs:
       - name: TypeCheck - shared
         run: pnpm --filter @taiji/shared run typecheck
 
+      # 协议演进宪法 D11 机器锁执行点：C3 事件词表 / C4 双写禁令 / C2 能力位必填
+      # 全部是 SDK 包内编译期断言，缺本步则锁为纸面（与 pre-commit SDK typecheck 段同口径）。
+      - name: TypeCheck - subagent-engine-sdk
+        run: pnpm --filter @zhushanwen/subagent-engine-sdk run typecheck
+
       - name: TypeCheck - pi extensions
         run: pnpm extensions:typecheck
 
