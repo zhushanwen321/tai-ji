@@ -73,7 +73,7 @@ export class UsageStatsService {
   private readonly sessionsDir: string
 
   /** @data-owner #16 派生缓存：per-file 分片，(mtimeMs, size) 双键失效（登记表主表 #16）。
-   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5） */
+   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯） */
   private readonly shards = new Map<string, FileShard>()
 
   constructor(sessionsDir: string = getSessionsDir()) {

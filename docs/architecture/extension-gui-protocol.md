@@ -1194,7 +1194,7 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 
 ### v1.1 字段扩展（2026-09-16）
 
-**变更**（全部 additive，`PROTOCOL_VERSION` 不变；来源设计 `docs/design/composer-task-tray.md` D4/D5）：
+**变更**（全部 additive，`PROTOCOL_VERSION` 不变；来源设计已删除，git 可追溯）：
 1. `WidgetMeta` 加 `icon?`（lucide key 或自定义形状 `{ paths }`）与 `badge?`（extension 全权格式化的短文本，宿主超长 truncate 至 6）——见 §3.5；形状归 extension、风格由宿主锁死（线宽/颜色/尺寸固定）
 2. 协议包新增 `validateWidgetIconPaths`（paths 白名单：字符集 + 条数 ≤8 / 单条 ≤512 / 总长 ≤2048），不抛异常返回判定对象，宿主据 `!valid` 落兜底 icon + warn——见 §3.5
 3. `tab-bar` 加 `sections?`（与 `tabs` 等长的分段子树容器），缺省维持纯展示；active 归宿主本地、后续推送不重置用户选择——见 §3.2

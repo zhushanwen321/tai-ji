@@ -1,6 +1,6 @@
 <!--
   TrayNativePanel —— composer 任务托盘的 built-in 三件面板（bash / subagent / workflow）。
-  设计 docs/design/composer-task-tray.md §3.3 D2/D8/D9 + §3.4 + §3.5。
+  设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D8/D9 + §3.4 + §3.5。
   props / emits / 尺寸契约与形态说明见 <script setup> 顶部块注释（消费方必读，u-tray-shell）。
 -->
 <!-- split-justified: built-in 三件面板同一语义域（分桶 tab + 行渲染 + 行内操作 + 行点击归宿） -->

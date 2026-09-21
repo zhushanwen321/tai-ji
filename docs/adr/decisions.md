@@ -48,6 +48,9 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ### ADR-0044 系统提示词双路
 替换走 pi 原生 `--system-prompt` CLI 核心段替换（runtime spawn 链透传，仅新会话生效）；追加走 builtin 扩展 `extensions/taiji/system-prompt` 的 before_agent_start hook 每轮读 `<dataDir>/system-prompt.json`（热生效）。配置全局一份，runtime 与 pi 内扩展读同一文件。登记 C-pi-09。
 
+### ADR-0068 扩展消息注入形态：custom message 首选（2026-09-21）
+pi extension 向 LLM 注入提示词/通知消息统一走 `pi.sendMessage()` custom message 形态（`display` 控制用户可见性、不伪装用户消息归属）；`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息——提示词类内容伪装用户消息的形态已在四包改造中清除（smart-context/goal/structured-output/plan，merge accb67c37）。关键语义两条：① custom message 经 pi `convertToLlm` 无条件转 LLM user 消息，对 LLM 与 user message 无差别，形态迁移不损失模型可见性；② `sendMessage(triggerTurn:true)` 非 streaming 时直调 `_runAgentPrompt`，跳过 `prompt()` 主路径前置链（compaction 检查 / before_agent_start 事件 / systemPrompt 叠加 / pending nextTurn 消费）——依赖 per-turn 注入的需求不得走该通道。约定载体 [extension-conventions.md](../extensions/extension-conventions.md)「Event handler 消息注入」。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
@@ -98,6 +101,9 @@ plan 模式重设计（GUI 投影 + skill 挂载 + 文档审阅闭环）的全�
 
 ### ADR-0047 watchdog 用进程健康探测
 pi 卡死检测用「进程健康探测」（每 60s ping get_state）替代「事件静默时长」——静默 ≠ 卡死（ask_user 等待/慢工具都会静默），连续 2 次失败广播 WARN、3 次（180s）才 onSilentAbort。实装 `event-interpreter-ping.ts`（PingProbe）。与「runtime watchdog 滚动重启」（默认不武装，TAIJI_RUNTIME_WATCHDOG_ARMED）是两套机制。登记 C-comm-09。
+
+### ADR-0069 内存活性治理审计裁决（2026-09-14，维持不治为默认）
+全仓内存活性审计后的用户裁决：登记不治点位「维持不治」是默认，翻案需新实测压力数据（原审计文档 docs/design/memory-leak-remediation.md 已删除、git 可追溯，各点位量级锚与重审条件见其 §2.5；裁决注释已写入各源码处）。不治 8 项：sessionMetaCache / externalMetaCache / notRepoCache / usage-stats shards（语料有界）、pi-respawn 熔断计数（熔断语义优先）、clearedSessions tombstone（有意无界防迟到写）、executingBash 断连残留（两害相权残留更轻）、session-file-utils 32MB 全量读（协议合法载荷有硬上界）。已治理面：G2 活性无界组（openPiStreams close 摘除、ws-client sweepExpiredInFlightSubscribes 挂重连路径）与 G4 杂项组（prematureTimeoutIds/deferFlushFailureCounts 纳入 disposeSession、skill-registry projectWatchers LRU(8)、ImportSessionDialog close 清扫描结果、quota fetch body cancel）。系统性防护（纯加状态不接线清理打回）已并入 ADR-0049 checklist。
 
 ### ADR-0018 extension 安装临时目录
 Collection 安装先完整落 `tmp/ext-scan-{timestamp}/`（clone/cp + npm install），用户确认后拷入正式目录——取消/失败只清理临时目录，不污染 extensions/。

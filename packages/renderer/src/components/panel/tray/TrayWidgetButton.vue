@@ -1,6 +1,6 @@
 <!--
   TrayWidgetButton —— composer 任务托盘（Widget Tray）的协议 widget 条目按钮
-  （设计 docs/design/composer-task-tray.md §3.1 场景 B + §3.3 D3/D4/D7 + §3.5 错误规格）。
+  （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.1 场景 B + §3.3 D3/D4/D7 + §3.5 错误规格）。
 
   ── 契约（供 u-tray-shell 消费）──
   props.viewId: string —— widget key（= ViewHostStore viewId，extension 调 setWidget 的第一个

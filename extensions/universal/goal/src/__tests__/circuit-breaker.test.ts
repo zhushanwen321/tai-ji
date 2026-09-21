@@ -454,7 +454,8 @@ describe("MF-6③ timer 清理面：session_start / before_agent_start 取消旧
 
 // ── A8：退避通道激活（sendContextMessage 端口 triggerTurn 改造）──
 //
-// 设计 docs/design/send-user-message-to-custom-message.md §2.2 端口改造 + §3.1 A8：
+// 设计 docs/design/send-user-message-to-custom-message.md（已删除，git 可追溯；决策见 ADR-0068）
+// §2.2 端口改造 + §3.1 A8：
 // 端口改造前 backoff timer 到期伪装用户消息投递；改造后
 // deliverContinuation 经端口发 custom message 且 options 含 triggerTurn: true——
 // 非 streaming idle 场景真实开轮（改造前 append 不开轮 = 死消息）。

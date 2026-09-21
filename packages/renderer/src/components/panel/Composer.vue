@@ -125,7 +125,7 @@
         <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ 任务托盘（序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
         <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
           <AddMenuPopover @select="onAddSelect" />
-          <!-- 任务托盘（设计 docs/design/composer-task-tray.md D1：`+` 之后、composer.toolbar 之前）。
+          <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
                aggregated = 序 4：托盘整体收为单入口（层叠图标 + 运行数）→ 面板内分段展示。
                @update:has-items = 托盘三态上抛（托盘数据面唯一实例在外壳，Composer 不建第二份）。 -->

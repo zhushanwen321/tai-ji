@@ -104,7 +104,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
    */
   private readonly statusCache = new Map<string, { result: GitStatusResult; ts: number }>()
   /** cwd → 判定为非仓库的时刻（ms）。
-   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5） */
+   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯） */
   private readonly notRepoCache = new Map<string, number>()
 
   constructor(opts: GitStateServiceOptions) {

@@ -1,6 +1,6 @@
 /**
  * Composer 任务托盘（tray）—— built-in 四件面板文案
- * （bash / subagent / workflow / session；设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格）。
+ * （bash / subagent / workflow / session；设计 docs/design/composer-task-tray.md §3.3 D2/D9 + §3.5 错误规格，已删除 git 可追溯）。
  *
  * 命名空间形态：本模块 default export 只含 tray 子树，由 aggregator（locales/zh-CN.ts）
  * 展开并入 panel 命名空间（`panel: { ...panel, ...tray }`）——运行时 key 前缀 =

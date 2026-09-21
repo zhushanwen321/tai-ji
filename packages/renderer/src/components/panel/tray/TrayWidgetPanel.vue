@@ -1,6 +1,6 @@
 <!--
   TrayWidgetPanel —— composer 任务托盘（Widget Tray）的协议 widget 面板
-  （设计 docs/design/composer-task-tray.md §3.1 场景 B + §3.3 D3/D5/D7 + §3.4 终态数据流）。
+  （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.1 场景 B + §3.3 D3/D5/D7 + §3.4 终态数据流）。
 
   ── 契约（供 u-tray-shell 消费）──
   props.viewId: string —— widget key（= ViewHostStore viewId）；面板 head 标题兜底

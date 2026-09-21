@@ -1,6 +1,6 @@
 /**
  * useTrayCounts —— composer 任务托盘（Widget Tray）built-in 三件的数据面
- * （设计 docs/design/composer-task-tray.md §3.3 D2/D13 + §3.4 终态数据流）。
+ * （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D13 + §3.4 终态数据流）。
  *
  * 职责三件：
  * - **三件计数与分桶**：bash / subagent / workflow 的「进行中 / 已结束」两视图行集与

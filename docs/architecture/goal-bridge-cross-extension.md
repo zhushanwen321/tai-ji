@@ -1,6 +1,6 @@
 # goal 桥跨扩展通道修复（pi 0.84.4：pi API 对象挂载 → globalThis slot）
 
-> **状态：实施中（2026-09-14 用户裁决：桥修复照做；暂缓的仅 tdflow 重构——plan 包存废待其落地时再裁，落地前 plan 维持现状，桥修好是当下正确形态）**。关联登记 `docs/design/tdflow-two-phase-workflow.md` §五（其「已执行搁置」小节已随本裁决撤销，仅保留「待 tdflow 落地时裁决」部分）。
+> **状态：实施中（2026-09-14 用户裁决：桥修复照做；暂缓的仅 tdflow 重构——plan 包存废待其落地时再裁，落地前 plan 维持现状，桥修好是当下正确形态）**。原关联登记 tdflow 两阶段工作流设想文档已废弃删除（git 可追溯）。
 
 > **一句话结论**：goal→plan 的 `__goalInit` 编程式接口因「pi 0.84.4 为每个扩展创建独立 ExtensionAPI 对象」而在运行时恒不可达；本设计将暴露通道从「挂 pi API 对象」迁移到 `globalThis[Symbol.for]` 进程级 slot 直挂函数（C-ext-06 既有惯例形态，仓内单向/单例 slot 十余处现役同款裸挂），桥在独立 pi 与 taiji 桌面双形态恢复可达——`GoalInitFn` 签名与 plan 侧 D2 五值失败出口设计零变更。
 

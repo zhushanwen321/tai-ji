@@ -1,5 +1,5 @@
 /**
- * ComposerTray 外壳测试（u-tray-shell，设计 docs/design/composer-task-tray.md
+ * ComposerTray 外壳测试（u-tray-shell，设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
  * §3.3 D1/D6/D7/D8/D9/D12 + §3.1 场景 A/C + §3.4 终态数据流）。
  *
  * 三视角（TEST-STRATEGY §3）：

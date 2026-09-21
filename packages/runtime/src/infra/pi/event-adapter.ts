@@ -12,8 +12,8 @@
  * [D5 例外登记，u7b] subagent 在途上报（marker = SUBAGENT_INFLIGHT_MARKER）是本文件唯一的
  * 显式副作用例外：帧在 **EventAdapter 监听器旁路**就地消费（写 inflight-mirror + 经注入的
  * client 回 INFLIGHT_REPORT_ACK，见 consumeInflightReport），translate() 保持无副作用——
- * 仅保留一条守卫分支（marker 帧恒不产出前端广播）。设计依据 docs/design/
- * crash-forensics-and-watchdog.md §3.3 D5「extension 聚合上报」+「marker 路由不得广播前端」
+ * 仅保留一条守卫分支（marker 帧恒不产出前端广播）。设计依据
+ * docs/architecture/crash-forensics-and-watchdog.md §3.3 D5「extension 聚合上报」+「marker 路由不得广播前端」
  *（[HISTORICAL] 广播前端 → 前端无人应答 runtime 内部消费的 select → pending 泄漏，
  * session-manager 分支同类教训）。
  *
