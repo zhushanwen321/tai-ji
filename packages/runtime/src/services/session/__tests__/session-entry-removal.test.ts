@@ -27,9 +27,11 @@ vi.mock('../../../infra/crash-journal.js', () => ({
   getCrashJournal: () => ({ append: (e: CrashJournalEvent) => { journalAppends.push(e) } }),
 }))
 
-vi.mock('../../background-task-reaper.js', () => ({
-  reapSessionBackgroundTasks: vi.fn(async () => undefined),
-}))
+vi.mock('../background-task-reaper.js', () => {
+  return {
+    reapSessionBackgroundTasks: vi.fn(async () => undefined),
+  }
+})
 
 vi.mock('../../../infra/pi/pi-paths.js', () => ({
   getPiAgentDir: () => '/mock/pi-agent-dir',
@@ -83,6 +85,11 @@ describe('SessionEntryRemovalOrchestrator 销毁链单步隔离（RT-4#1）', ()
   beforeEach(() => {
     journalAppends.length = 0
     vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('mock 门禁：reaper 必须被 vi.mock 拦截（hermetic 前提，防路径写错静默失效）', async () => {
+    const reaperModule = await import('../background-task-reaper.js')
+    expect(vi.isMockFunction(reaperModule.reapSessionBackgroundTasks)).toBe(true)
   })
 
   it('dispose 抛错：该步降级日志+台账，后续步骤继续收敛（removeEntry / 其余 dispose / bus 清理必达）', () => {
