@@ -35,13 +35,12 @@ import type {
 
 /**
  * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎面子集 + 协议 ctx 还原字段（model/
- * cwd/schemaEnv——SDK 契约把它们从 task 移到 run.params.ctx，进程内接口合回单对象；
+ * cwd——SDK 契约把它们从 task 移到 run.params.ctx，进程内接口合回单对象；
  * server.ts 做 ctx→task 还原，与 core RemoteEngine.toSdkTaskSubset 镜像）。
  */
 export type EngineAgentCallOpts = SdkAgentCallOpts & {
   model?: string;
   cwd?: string;
-  schemaEnv?: string;
 };
 
 /**
@@ -82,7 +81,6 @@ export interface RunContext {
   onEvent?: (event: AgentEvent) => void;
   ctxModel?: EngineCtxModel;
   stream?: EngineStream;
-  schemaEnv?: string;
   engineFallback?: { from: string; reason: string };
   /**
    * [F6] 根 session id（协议 run.params.ctx.sessionRootId 的进程内还原）——pi 引擎

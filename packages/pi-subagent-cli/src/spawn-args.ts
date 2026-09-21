@@ -8,8 +8,9 @@
 // 的实现本体已上移 @zhushanwen/pi-rpc spawn-args 模块（主/从两侧模板单源，设计
 // subagent-permanent-session-model §3.3.2）——本文件按「先并存后切换」完成切换：
 // re-export 保持既有导入面（index.ts / spawn-runner / __tests__ 零改动），包内
-// 不再保留同型私有实现（S7 grep 无双轨）。本地保留的是非同型面：schemaEnv
-// bridge（pi-subagent-cli 特有）、环境信息块、SdkEvent 翻译纯函数。
+// 不再保留同型私有实现（S7 grep 无双轨）。本地保留的是非同型面：schema env
+// 注入桥（pi-subagent-cli 特有，[D1] 输入源 = wire task.schema 的派生值）、
+// 环境信息块、SdkEvent 翻译纯函数。
 
 import { execFile } from "node:child_process";
 
@@ -74,22 +75,25 @@ export function buildSpawnArgs(
   });
 }
 
-// ── schemaEnv bridge（D-A6） ──
+// ── schema env 注入桥（D-A6；[D1] 输入源 = task.schema 派生值） ──
 
 /**
- * 将 schemaEnv 注入 childEnv。
+ * 将 PI_WORKFLOW_SCHEMA env 值注入 childEnv。
+ *
+ * [D1 schema 传输归位] 入参 = 调用方从 wire task.schema 派生的 JSON 字符串
+ * （JSON.stringify 本体），不再接收宿主传输态 env 值；注入实现不变。
  *
  * [SO-DATA-4] 注入前按 UTF-8 字节长度校验，超 SCHEMA_ENV_MAX_BYTES（256KiB）
  * fail-fast 拒绝：env 值过大叠加全量继承的 process.env 可能触发 execve 的 E2BIG。
  *
- * @throws Error schemaEnv 序列化后超过 SCHEMA_ENV_MAX_BYTES
+ * @throws Error schema JSON 派生值超过 SCHEMA_ENV_MAX_BYTES
  */
 export function applySchemaEnvToChildEnv(
   childEnv: Record<string, string | undefined>,
-  schemaEnv?: string,
+  schemaJson?: string,
 ): void {
-  if (schemaEnv) {
-    const sizeBytes = Buffer.byteLength(schemaEnv, "utf8");
+  if (schemaJson) {
+    const sizeBytes = Buffer.byteLength(schemaJson, "utf8");
     if (sizeBytes > SCHEMA_ENV_MAX_BYTES) {
       throw new Error(
         `[subagent-workflow] schema env too large: ${sizeBytes} bytes exceeds the ${SCHEMA_ENV_MAX_BYTES}-byte limit for ${SCHEMA_ENV_VAR}. ` +
@@ -97,7 +101,7 @@ export function applySchemaEnvToChildEnv(
           "Recovery: simplify the schema (drop verbose descriptions/examples, use $defs instead of inline repetition) or split it across multiple smaller agent() calls, then retry.",
       );
     }
-    childEnv[SCHEMA_ENV_VAR] = schemaEnv;
+    childEnv[SCHEMA_ENV_VAR] = schemaJson;
   }
 }
 

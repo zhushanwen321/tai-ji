@@ -43,7 +43,7 @@ describe("formatSchemaInstruction", () => {
     expect(out).toContain("follow this schema's own additionalProperties declaration");
   });
 
-  // ── schema 序列化（compact：与 schemaEnv 复用同串，IF7 #13）───────
+  // ── schema 序列化（compact）───────
 
   it("embeds the schema as compact JSON inside a fenced block", () => {
     const schema: Record<string, unknown> = {
@@ -61,7 +61,7 @@ describe("formatSchemaInstruction", () => {
     const out = formatSchemaInstruction({ type: "object" });
     // 完整结构快照——任何指令措辞/顺序/序列化漂移都会被捕获。
     // [HISTORICAL] runner task 后缀双重注入删除后，本函数迁至 resolver 成为唯一
-    // 文案源；JSON 从 pretty（indent=2）改为 compact（与 schemaEnv 同串复用）。
+    // 文案源；JSON 从 pretty（indent=2）改为 compact。
     expect(out).toBe(
       [
         "## MANDATORY: Structured Output Requirement",

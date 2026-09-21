@@ -289,3 +289,23 @@ describe("run.params.ctx 增量字段（Option C sessionDir：宿主权威 subag
     expect(run.ctx.sessionDir).toBeUndefined();
   });
 });
+
+describe("schema 载体统一（D1：schema 跨进程只经 wire task.schema 单字段）", () => {
+  /** keyof 判定形态 true/false（编译期可锁），供下方退役断言复用。 */
+  type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
+
+  it("RunContextParams 不含 schemaEnv 键（编译期锁——重新引入该字段即编译红）", () => {
+    const retired: AssertMutuallyAssignable<HasKey<RunContextParams, "schemaEnv">, false> = true;
+    expect(retired).toBe(true);
+  });
+
+  it("schema 本体经 task.schema 承载、ctx 不出现 schemaEnv 键（运行时帧形态）", () => {
+    const run: RunParams = {
+      runId: "run-1",
+      task: { prompt: "do", schema: { type: "object" } },
+      ctx: { cwd: "/tmp" },
+    };
+    expect(run.task.schema).toEqual({ type: "object" });
+    expect("schemaEnv" in run.ctx).toBe(false);
+  });
+});

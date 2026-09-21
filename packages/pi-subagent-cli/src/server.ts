@@ -281,7 +281,6 @@ export class EngineProtocolServer {
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
-      ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
       // [F6] 根 session id 还原（relay 归属键 SESSION_ID 权威源；undefined 不挂键）
       ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),

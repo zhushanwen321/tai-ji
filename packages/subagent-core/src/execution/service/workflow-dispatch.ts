@@ -555,7 +555,6 @@ function workflowCallToExecuteOptions(opts: AgentCallOpts): ExecuteOptions {
     ...present(opts.skillPath, (skillPath) => ({ skillPath })),
     ...present(opts.appendSystemPrompt, (appendSystemPrompt) => ({ appendSystemPrompt })),
     ...present(opts.schema, (schema) => ({ schema })),
-    ...present(opts.schemaEnv, (schemaEnv) => ({ schemaEnv })),
     ...present(opts.maxTurns, (maxTurns) => ({ maxTurns })),
     ...present(opts.graceTurns, (graceTurns) => ({ graceTurns })),
     ...present(opts.fork, (fork) => ({ fork })),

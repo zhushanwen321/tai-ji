@@ -787,7 +787,8 @@ function dispatchAgentCall(
         : undefined,
   };
 
-  // BL-1：解析 skill/schema → skillPath / schemaEnv / appendSystemPrompt。
+  // BL-1：解析 skill/schema → skillPath / appendSystemPrompt（schema 本体经 wire
+  // task.schema 送达引擎，PI_WORKFLOW_SCHEMA 由引擎侧派生——H1 schema 传输归位）。
   // M2 修正后 resolveAgentOpts 单参数，只处理 schema SO 指令（内容直传）+ skill。
   // agent ref 处理（systemPrompt/model/thinkingLevel）交 resolveIdentity（经
   // getAgentConfig + resolveModel 完整覆盖），消除双重注入与 model 层级混乱。

@@ -298,7 +298,9 @@ function buildRunIdentityParams(
 function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<SpawnRunParams> {
   return {
     ...(task.thinkingLevel !== undefined ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.schemaEnv !== undefined ? { schemaEnv: task.schemaEnv } : {}),
+    // [D1 schema 传输归位] schema 本体经 wire task.schema 单字段透传（env 字符串
+    // 不再跨层——PI_WORKFLOW_SCHEMA 值由 spawn-runner 从本体派生）
+    ...(task.schema !== undefined ? { schema: task.schema } : {}),
     ...(task.maxTurns !== undefined ? { maxTurns: task.maxTurns } : {}),
     ...(task.graceTurns !== undefined ? { graceTurns: task.graceTurns } : {}),
     ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),

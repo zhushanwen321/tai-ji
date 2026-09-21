@@ -325,7 +325,7 @@ export interface ModelCatalogEntry {
  *   轮次预算（maxTurns/graceTurns/idleTimeoutMs）、隔离与权限（worktree/
  *   fork/forkSource/denyTools/permissionMode）、诊断（description/scene）；
  * - 排除并改挂 run.params.ctx（协议层已单列，task 内双写会分叉）：model（→ctx.model）、
- *   schemaEnv（→ctx.schemaEnv）、cwd（→ctx.cwd）、engineFallback（→ctx.engineFallback）；
+ *   cwd（→ctx.cwd）、engineFallback（→ctx.engineFallback）；
  * - 排除（宿主侧消费，无引擎语义）：engine（路由决策已完成，收到的引擎即选中值）、
  *   timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、returnMeta
  *   （core 注释明确「dropped at the pi boundary」，非引擎消费）。

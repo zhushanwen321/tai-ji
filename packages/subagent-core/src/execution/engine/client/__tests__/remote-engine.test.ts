@@ -194,18 +194,16 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/schemaEnv/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
-      schemaEnv: "ctx-schema-env",
       engineFallback: { from: "pi", reason: "probe-failed" },
     });
     const task = {
       prompt: "do things",
       model: "zai/glm-4.6",
       cwd: "/tmp/w2-cwd",
-      schemaEnv: "task-schema-env",
       engine: "pi",
       timeoutMs: 1_000,
       returnMeta: true,
@@ -214,22 +212,23 @@ describe("RemoteEngine run 帧映射", () => {
       worktree: true,
     };
     const result = await engine.run(task, ctx);
-    // 宿主自持字段（engine/timeoutMs/returnMeta）与双写字段（model/schemaEnv/cwd）不进 task 帧
+    // 宿主自持字段（engine/timeoutMs/returnMeta）与双写字段（model/cwd）不进 task 帧
     const wire = extractRunParams(events);
     expect(wire.task).toMatchObject({ prompt: "do things", maxTurns: 5, description: "desc-x", worktree: true });
     expect(wire.task).not.toHaveProperty("model");
     expect(wire.task).not.toHaveProperty("engine");
     expect(wire.task).not.toHaveProperty("timeoutMs");
     expect(wire.task).not.toHaveProperty("returnMeta");
-    expect(wire.task).not.toHaveProperty("schemaEnv");
     expect(wire.task).not.toHaveProperty("cwd");
     expect(wire.ctx).toMatchObject({
       cwd: "/tmp/w2-cwd",
       model: "zai/glm-4.6",
-      schemaEnv: "ctx-schema-env", // ctx 优先于 task（协议层单列，不双写）
       ctxModel: "zai/glm-5.1",
       engineFallback: { from: "pi", reason: "probe-failed" },
     });
+    // H1：schemaEnv wire 字段退役——schema 本体只经 task.schema 承载，ctx 不得重现该键
+    expect(wire.task).not.toHaveProperty("schemaEnv");
+    expect(wire.ctx).not.toHaveProperty("schemaEnv");
     expect(wire.ctx).not.toHaveProperty("streamMode"); // 无 stream → 缺省（JSON 序列化丢 undefined 键）
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(result.handle.data.engineId).toBe("fake");

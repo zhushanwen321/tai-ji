@@ -327,13 +327,12 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       method: "run",
       params: {
         runId: "run-1",
-        task: { prompt: "做点什么", denyTools: ["bash"] },
+        task: { prompt: "做点什么", denyTools: ["bash"], schema: { type: "object" } },
         ctx: {
-              cwd: "/w",
+          cwd: "/w",
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          schemaEnv: "SCHEMA_ENV=1",
           engineFallback: { from: "pi", reason: "manifest" },
         },
       },
@@ -355,11 +354,18 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
     expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
 
-    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传）+ RunContext 断言
-    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1", cwd: "/w" });
+    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传——schema 本体在 task，
+    // D1 后 wire 不再有 schemaEnv 通道）+ RunContext 断言
+    expect(captured?.task).toEqual({
+      prompt: "做点什么",
+      denyTools: ["bash"],
+      schema: { type: "object" },
+      model: "prov/m1",
+      cwd: "/w",
+    });
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
-    expect(captured?.ctx.schemaEnv).toBe("SCHEMA_ENV=1");
+    expect(captured?.ctx).not.toHaveProperty("schemaEnv");
     expect(captured?.ctx.engineFallback).toEqual({ from: "pi", reason: "manifest" });
     expect(captured?.ctx.stream).toBeDefined();
     expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);

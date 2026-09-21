@@ -76,14 +76,6 @@ export interface RunContext {
    */
   stream?: SubagentStream;
   /**
-   * [P1 pi 回填透传] 调用方已持有的 schema 激活预编码值（AgentCallOpts.schemaEnv 直传
-   * 形态）。生产路径中 resolveAgentOpts 恒耦合产出 schema+schemaEnv（值 = JSON.stringify
-   * (schema)），引擎从 task.schema 派生即可逐字节等值；解耦形态（有 schemaEnv 无
-   * schema）生产不可达、仅见于直构调用，派生无源——本字段是其唯一透交通道。
-   * 引擎在 task.schema 存在时忽略此值（派生优先，设计 §3.3.5 删字段去向）。
-   */
-  schemaEnv?: string;
-  /**
    * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
    * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
    * pi 引擎另经 ExecuteOptions 投影进 record）。

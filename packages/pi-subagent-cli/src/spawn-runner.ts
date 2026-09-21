@@ -134,8 +134,12 @@ export interface SpawnRunParams {
   sessionDir: string;
   /** spawn cwd。 */
   cwd: string;
-  /** schema env JSON 字符串（PI_WORKFLOW_SCHEMA 注入）。 */
-  schemaEnv?: string;
+  /**
+   * [D1 schema 传输归位] 结构化产出 schema 本体（wire task.schema 单字段承载）。
+   * PI_WORKFLOW_SCHEMA env 值由引擎侧从本字段派生（buildChildEnv 内
+   * JSON.stringify），schema 不再以传输态 env 字符串跨层。
+   */
+  schema?: Record<string, unknown>;
   /** hard turn limit。 */
   maxTurns?: number;
   /** soft limit 后宽限轮数（默认 2）。 */
@@ -164,10 +168,16 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
   sessionId: string | undefined;
 }
 
-/** 子进程 env 组装（deny 剥除 + schemaEnv 注入 + relay 归属键重写）。 */
+/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
 function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   const extras: Record<string, string | undefined> = {};
-  applySchemaEnvToChildEnv(extras, params.schemaEnv);
+  // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
+  // 按数据流最短路径就地派生（JSON.stringify 本体），注入实现沿用
+  // applySchemaEnvToChildEnv（含 E2BIG 上限校验）。
+  applySchemaEnvToChildEnv(
+    extras,
+    params.schema !== undefined ? JSON.stringify(params.schema) : undefined,
+  );
   const childEnv = buildOutboundChildEnv({ parentEnv: process.env, extras });
   // relay 归属键重写（W8/H12）：SESSION_ID/RECORD_ID 在 ENGINE_ENV_DENY_LIST，
   // buildOutboundChildEnv 的 deny 在 extras 之后执行——经 extras 注入会被剥掉
@@ -421,7 +431,9 @@ export async function runSpawnOnce(
           : `pi child exited with code ${exitCode}`,
       sessionId: identity.sessionId ?? "",
       sessionFile: identity.sessionFile,
-      ...(params.schemaEnv !== undefined ? { schemaExpected: true } : {}),
+      // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
+      // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
+      ...(params.schema !== undefined ? { schemaExpected: true } : {}),
     });
     return { ...outcome, sessionId: identity.sessionId };
   } finally {

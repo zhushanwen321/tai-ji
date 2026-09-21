@@ -66,8 +66,6 @@ export interface RunContextParams {
   cwd?: string;
   /** 请求模型 ref（未传 = 引擎缺省模型）。 */
   model?: string;
-  /** 结构化输出 schema 的 env 注入形态（schemaEnv 降级通道）。 */
-  schemaEnv?: string;
   /** 上下文模型 ref（与 run 模型分离的 ctx 模型）。 */
   ctxModel?: string;
   /** fallback 留痕（引擎回填 outcome.engineFallback 的种子）。 */

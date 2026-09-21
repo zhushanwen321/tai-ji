@@ -287,6 +287,8 @@ describe("PiEngine.run（一次性任务形态）", () => {
     const deltas: string[] = [];
     const pools: string[] = [];
     const signal = new AbortController().signal;
+    // [D1] schema 以本体形态透传（wire task.schema 单字段承载）
+    const fullFieldsSchema = { type: "object", properties: { result: { type: "string" } } };
 
     const runP = engine.run(
       {
@@ -294,7 +296,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
         description: "desc-agent",
         model: "fallback/provider",
         thinkingLevel: "high",
-        schemaEnv: "{}",
+        schema: fullFieldsSchema,
         maxTurns: 5,
         graceTurns: 1,
         skillPath: "/skills/x",
@@ -320,7 +322,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
       agentName: "desc-agent",
       model: "prov/m1",
       thinkingLevel: "high",
-      schemaEnv: "{}",
+      schema: fullFieldsSchema,
       maxTurns: 5,
       graceTurns: 1,
       skillPaths: ["/skills/x"],
@@ -384,6 +386,34 @@ describe("PiEngine.run（一次性任务形态）", () => {
     });
     expect(outcome.error).toBeUndefined();
     expect(outcome.failureKind).toBeUndefined();
+  });
+
+  it("[D1] task.schema 本体直通 SpawnRunParams.schema（env 字符串字段已退役，不跨层）", async () => {
+    const { engine, captured } = makeEngine();
+    const schema = {
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"],
+    } as Record<string, unknown>;
+    const runP = engine.run({ prompt: "structured", schema }, { taskId: "run-schema" });
+    // schema 以本体（对象引用）透传——派生 env 是 spawn-runner 的职责，引擎适配层
+    // 不预序列化（PI_WORKFLOW_SCHEMA 值 = spawn 期 JSON.stringify 本体，逐字节
+    // 等值断言见 run-spawn-once.integration 的真实 spawn 链用例）
+    expect(captured[0]!.params.schema).toEqual(schema);
+    // 负向断言：传输态 env 字符串字段已退役（防字段名复活）
+    expect(captured[0]!.params).not.toHaveProperty("schemaEnv");
+    await settleRun(captured[0]!, spawnRunResult());
+    const { outcome } = await runP;
+    expect(outcome.error).toBeUndefined();
+  });
+
+  it("[D1] task.schema 缺省 → SpawnRunParams 不挂键（无 schema run 零行为变化）", async () => {
+    const { engine, captured } = makeEngine();
+    const runP = engine.run(baseTask, baseCtx);
+    expect(captured[0]!.params).not.toHaveProperty("schema");
+    await settleRun(captured[0]!, spawnRunResult());
+    const { outcome } = await runP;
+    expect(outcome.error).toBeUndefined();
   });
 
   it("agentName 回落链 description → agent → workflow-agent；失败结果分诊透传", async () => {

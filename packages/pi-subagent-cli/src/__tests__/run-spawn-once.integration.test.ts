@@ -11,6 +11,10 @@
 //   - message_end stopReason=aborted → record.lastError → success=false（stale 分诊）；
 //   - abort signal → SIGTERM → 128+signal 折算退出码；
 //   - spawn 失败（relay node 不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
+//   - [D1] schema 派生注入：params.schema → 孙进程 env PI_WORKFLOW_SCHEMA
+//     逐字节等值（JSON.stringify 本体）+ 无 schema 声明不注入；
+//   - [F-1] schemaExpected 判定源 = task.schema 声明形态（无 structured-output
+//     产出 → success=false + schema_deterministic 归因）；
 //   - 轮终语义（[modeless 波2] 唯一形态，原 chatMode 分支统一）：agent_end 轮收敛
 //     不 kill、agent_settled resolve（exit 0）+ 杀链收割（每轮一进程，续聊 = 新
 //     run + resume）；
@@ -92,6 +96,15 @@ rl.on("line", (line) => {
   if (mode === "stop-aborted") {
     send({ type: "message_end", message: { stopReason: "aborted", errorMessage: "aborted by user" } });
     send({ type: "agent_end", willRetry: false, reason: "aborted" });
+    send({ type: "agent_settled" });
+    return;
+  }
+  if (mode === "echo-schema-env") {
+    // [D1] 派生注入验收：回显子进程实际收到的 PI_WORKFLOW_SCHEMA env 值（未注入
+    // 时回显哨兵），经 text_delta 送达断言面
+    send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: process.env.PI_WORKFLOW_SCHEMA ?? "<env-absent>" } });
+    send({ type: "message_end", message: { stopReason: "stop" } });
+    send({ type: "agent_end", willRetry: false, reason: "end_turn" });
     send({ type: "agent_settled" });
     return;
   }
@@ -280,6 +293,62 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
         sessionId: "hdr-sess",
         sessionFile: result.sessionFile,
       });
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D1] params.schema → 子进程 env PI_WORKFLOW_SCHEMA = JSON.stringify 本体（逐字节等值）", async () => {
+    // 真实 spawn 链验收：schema 本体 → buildChildEnv 派生 → execve env → 孙进程
+    // 可读值，全链单次 JSON.stringify、无二次转写/包装——与旧宿主侧预序列化值
+    // 逐字节等值。
+    const schema = {
+      type: "object",
+      properties: {
+        answer: { type: "number" },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      required: ["answer"],
+      additionalProperties: false,
+    };
+    const h = await makeHarness("echo-schema-env");
+    try {
+      const result = await runSpawnOnce(baseParams(h, { schema }), callbacksOf(h));
+      // 本用例不断言 success：schema 声明 + fake pi 无 structured-output 调用 →
+      // F-1 守卫按设计翻成 false（专测见下方 schemaExpected 用例）；此处只验
+      // 回显值（content = 孙进程读到的 env 原值）逐字节等于 JSON.stringify(schema)
+      expect(result.content).toBe(JSON.stringify(schema));
+      expect(result.content).not.toContain("<env-absent>");
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D1] 无 schema run：PI_WORKFLOW_SCHEMA 不注入子进程 env", async () => {
+    const h = await makeHarness("echo-schema-env");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(result.success).toBe(true);
+      // schema 声明缺省 → 不注入（哨兵回显证明 env 键未挂）
+      expect(result.content).toBe("<env-absent>");
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[F-1] schemaExpected 判定源 = task.schema 声明形态：声明存在且无 structured-output 产出 → 静默成功被拦截", async () => {
+    // 判定信号 = params.schema 声明（与 env 注入值解耦）：声明存在 → 守卫武装，
+    // run 正常结束（exit 0）但无 parsedOutput → 不得静默 success。反面（schema
+    // 缺省 → success 保持 true）由上方 rpc 模式成功流用例覆盖（该 run 无 schema）。
+    const h = await makeHarness("success");
+    try {
+      const result = await runSpawnOnce(
+        baseParams(h, { schema: { type: "object", properties: { answer: { type: "number" } } } }),
+        callbacksOf(h),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Structured output failed deterministically:");
+      expect(result.failureKind).toBe("schema_deterministic");
     } finally {
       restoreHarness(h);
     }

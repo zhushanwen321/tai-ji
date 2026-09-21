@@ -190,8 +190,10 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * 协议 run 映射。task 收窄为引擎面子集（model/schemaEnv/cwd/engineFallback 改挂
-   * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决）；事件经 run 作用域
+   * 协议 run 映射。task 收窄为引擎面子集（model/cwd/engineFallback 改挂
+   * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
+   * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
+   * 传输归位）；事件经 run 作用域
    * 路由分发（event 通知 / streamDelta / poolResolved / handleReady）；abort → cancel
    * 帧 + 收敛杀链兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS，超时杀链）。运行中失败
    * 不 reject——合成 error outcome + 正常
@@ -320,7 +322,6 @@ interface WireRunParams {
   ctx: {
     cwd?: string;
     model: string | undefined;
-    schemaEnv: string | undefined;
     ctxModel: string | undefined;
     engineFallback: RunContext["engineFallback"];
     streamMode: "stream" | undefined;
@@ -379,7 +380,6 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       // 改变无 worktree/无显式 cwd 任务的落点。
       ...(task.cwd !== undefined ? { cwd: task.cwd } : {}),
       model: task.model,
-      schemaEnv: ctx.schemaEnv ?? task.schemaEnv,
       ctxModel: ctxModelRef,
       engineFallback: ctx.engineFallback,
       streamMode: ctx.stream !== undefined ? ("stream" as const) : undefined,
