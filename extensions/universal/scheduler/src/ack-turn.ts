@@ -25,7 +25,6 @@ import { buildAckStreamSimple, computeAckAvailability } from './ack-provider.js'
 import type { SchedulerBackend } from './backend.js'
 import { ACK_CONFIRM_KEY, ACK_NOT_PERSISTED_KEY } from './i18n.js'
 import type { SchedulerEntryLike } from './replay.js'
-import { TICK_INTERVAL_MS } from './runtime.js'
 import { ACK_CUSTOM_TYPE, ACK_CUSTOM_TYPE_PREFIX } from './types.js'
 import type {
   AckAvailability,
@@ -42,11 +41,9 @@ import type {
  * （省重复读 models.json 与动态 import）。
  */
 export const ackState: AckState = {
-  pending: false,
   window: null,
   ackTurnStarted: false,
   ackStreamCalled: false,
-  writeCheckTimer: null,
   taskId: null,
   taskName: '',
   ackText: '',
@@ -92,22 +89,17 @@ export interface AckTurnController {
   }): Promise<void>
   /** 触发器 message_start ⇒ 同步武装覆写（临界区内禁 await）。 */
   handleMessageStart(message: unknown): void
-  /** turn_end 安全网注销（幂等；不取消 30s 定时器——它服务通知判定）。 */
+  /** turn_end 安全网注销（幂等）。 */
   handleTurnEnd(): void
   /** session_start / session_shutdown 共用：先做一次写盘判定，再自撤并全量清理。 */
   handleSessionBoundary(): void
 }
 
 /**
- * 全量清理模块级状态（session_start 与 session_shutdown 都调）：取消定时器、清
- * pending/window/ackTurnStarted/记录上下文/可用性缓存与通知去重。幂等。
+ * 全量清理模块级状态（session_start 与 session_shutdown 都调）：清 window /
+ * ackTurnStarted / 记录上下文 / 可用性缓存与通知去重。幂等。
  */
 export function resetAckState(): void {
-  if (ackState.writeCheckTimer !== null) {
-    clearTimeout(ackState.writeCheckTimer)
-    ackState.writeCheckTimer = null
-  }
-  ackState.pending = false
   ackState.window = null
   ackState.ackTurnStarted = false
   ackState.ackStreamCalled = false
@@ -135,38 +127,6 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
     if (!notifyDedup.shouldNotify(dedupKey())) return
     deps.log.debug('ack unpersisted notice', { reason })
     deps.notify(deps.render(ACK_NOT_PERSISTED_KEY, { name: ackState.taskName }), 'warning')
-  }
-
-  function cancelWriteCheck(): void {
-    if (ackState.writeCheckTimer === null) return
-    clearTimeout(ackState.writeCheckTimer)
-    ackState.writeCheckTimer = null
-  }
-
-  /**
-   * 30s 写盘自检：只有「会话文件不存在 **且** ack 轮从未启动」才判确实未落盘
-   * （防慢速真实轮跨过 30s 才落盘时误报，见 ack-notify.shouldNotifyUnpersisted）。
-   * 不重置 ackState——会话可能继续使用。
-   */
-  function armWriteCheck(): void {
-    cancelWriteCheck()
-    const timer = setTimeout(() => {
-      ackState.writeCheckTimer = null
-      const sessionFileExists =
-        ackState.sessionFile !== undefined && existsSync(ackState.sessionFile)
-      if (shouldNotifyUnpersisted({ sessionFileExists, ackTurnStarted: ackState.ackTurnStarted })) {
-        deps.log.debug('ack write check: session file still missing after ack trigger', {
-          taskId: ackState.taskId,
-        })
-        // e3-no-turn = 合成轮未启动 ⇒ honest-async 文案（同一如实键）。
-        notifyHonest('e3-no-turn')
-      }
-      // F1（一致性审查）：无论判定结果如何都必须清 pending——顶部去重守卫以 pending 为准，
-      // 残留会让本会话后续创建全部静默失效（既不 ack 也不通知），直到会话边界。
-      ackState.pending = false
-    }, TICK_INTERVAL_MS)
-    timer.unref?.()
-    ackState.writeCheckTimer = timer
   }
 
   /**
@@ -213,8 +173,11 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
   return {
     async maybeStartAck(input) {
-      // ① 去重：待命触发器或覆写窗口在场 ⇒ 本会话已有 ack 在途，不再注入。
-      if (ackState.pending || ackState.window !== null) return
+      // ① 去重：覆写窗口在场 ⇒ 本会话已有一个 ack 轮武装过，不再注入第二个。
+      //    只判 window 不判「待命触发器」：若上一次注入的触发器静默未启动轮次（E3：
+      //    sendMessage 返回 void 且 rejection 只到宿主），窗口不会置位，此时下一次创建
+      //    应当能重试而不是被永久挡住。
+      if (ackState.window !== null) return
 
       const { task, model, isIdle, isToggleDisabled } = input
 
@@ -262,13 +225,13 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         return
       }
 
-      // ⑥ 注入触发器（triggerTurn 让 pi 为一个 custom 消息启动一轮）并武装自检。
+      // ⑥ 注入触发器（triggerTurn 让 pi 为一个 custom 消息启动一轮）。
+      //    成功信号 = 触发器的 message_start（本扩展可观测）；失败信号只到宿主
+      //    （extension_error，扩展收不到），故落盘与否的兜底判定放在 session 边界。
       await deps.backend.sendMessage(
         { customType: ACK_CUSTOM_TYPE, content: ackState.ackText, display: false },
         { triggerTurn: true },
       )
-      ackState.pending = true
-      armWriteCheck()
     },
 
     handleMessageStart(message) {
@@ -280,7 +243,6 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
       // 触发器已到达 ⇒ 本轮首次模型请求即将发起，此处同步注册覆写即可赶在真实请求
       // 之前。临界区内禁 await——model 与可用性都在建任务期缓存好。
-      ackState.pending = false
       ackState.ackTurnStarted = true
 
       const model = ackState.model
