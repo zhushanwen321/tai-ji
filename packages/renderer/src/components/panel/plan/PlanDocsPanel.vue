@@ -213,6 +213,9 @@
  * planFilePath 单文件条目（fileName 取路径末段，无 chip/version）。isActive 期间不渲染
  * 降级条目——enter 恒设 planFilePath，「上轮残留」与「本轮未创建」不可区分，条目可点即
  * E2 假错误（已接受代价：isActive && docs=0 期间 legacy 条目暂不可回看，设计 §3.2 登记）。
+ * [P3-7 登记] 本分支对新写入不可达（legacy-only）：resetPlanState 恒清 planFilePath，
+ * 现行版本产出的 entry 在 !isActive 时恒无该字段——仅封顶机制上线前的历史 entry 可达，
+ * 保留为 D4 兼容读，勿误当活路径扩展。
  */
 import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

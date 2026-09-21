@@ -420,9 +420,10 @@ describe('useExtensionUI T9 模块级 refCount 注册/注销（项目规则 #2�
     const sid = ref<string | null>('shared')
     const insts = [1, 2, 3].map(() => runWithScope(() => useExtensionUI(sid)))
 
-    // 3 实例订阅 → bus.on 只被调 1 次（refCount 首个注册）
-    expect(onSpy).toHaveBeenCalledTimes(1)
-    expect(onSpy.mock.calls[0][0]).toBe('ui-request')
+    // 3 实例订阅 → ui-request 通道 bus.on 只被调 1 次（refCount 首个注册）；
+    // 另 1 次是 P2-2 失效链的模块级单订阅（'requests-invalidated'，永驻不随实例 dispose）
+    expect(onSpy).toHaveBeenCalledTimes(2)
+    expect(onSpy.mock.calls.map((c) => c[0]).sort()).toEqual(['requests-invalidated', 'ui-request'])
 
     // 分发仍工作（3 实例都收到 → store 去重后 1 条）
     emitBusUIRequest('shared', mkAskUserReq('r1'))

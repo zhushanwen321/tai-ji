@@ -5,17 +5,19 @@
 export default {
   reviewBar: {
     commentsCount: '{count} comments',
-    requestExplanation: 'Request explanation',
     submitRevise: 'Submit comments for revision',
     confirmExecute: 'Approve and execute',
+    // 2026-09-21 two-button + dismiss adjudication: explain removed; dismiss stops the turn
+    // and closes the prompt while keeping the plan intact
+    ignore: 'Dismiss',
+    ignoreTip: 'Stop the agent and close this prompt; the plan is kept unchanged',
+    ignoreError: 'Dismiss failed: {message}. The agent may be unresponsive — retry, or exit plan mode via the left-zone exit button',
     revising: 'The agent is revising docs based on your comments; versions update here when done',
     waitingResubmit: 'Waiting for the agent to resubmit for review',
-    // §3.4 degraded three-way split (reviewStateSource two sources + legacy-entry generic): shared
-    // recovery hint + exit button (outline, no longer a dead end); no elapsed-time display (design decision)
-    degradedExplain: 'Your question was received; the agent will resubmit for review after answering',
+    // §3.4 degraded state (single source + legacy-entry generic): shared recovery hint;
+    // exit entry collapsed into the left-zone exit button
     degradedResubmit: 'The agent session restarted and has not resubmitted yet',
     degradedRecoverHint: 'Send any message in the composer to remind the agent to resubmit',
-    degradedExit: 'Exit',
     // §3.5 guard & review: tooltip while "Submit comments for revision" is disabled at 0 drafts;
     // comment count is clickable (review drafts)
     reviseEmptyDisabled: 'Select text in the doc to add comments first, then submit for revision',

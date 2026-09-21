@@ -130,6 +130,30 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
     busUnsub = null
   }
   busHandlers.clear()
+  if (invalidatedUnsub) {
+    invalidatedUnsub()
+    invalidatedUnsub = null
+  }
+}
+
+// ── 挂起请求失效广播订阅（P2-2 失效链，模块级单订阅永驻）──
+// runtime 在非 respond 路径终结挂起（abort turn / 退出 plan / 回收 / session 销毁）时
+// 广播 extension:requestsInvalidated → core bridge 归一为 'requests-invalidated' 事件。
+// 收到即按帧逐条 removeRequest：审批条/表单随之消失，消除「僵尸 ready 点击静默无效」
+// 残留。store.removeRequest 按 requestId 精确移除且幂等，多实例/重复帧无副作用。
+type RequestsInvalidatedEvent = Extract<InternalEvent, { kind: 'requests-invalidated' }>
+let invalidatedUnsub: (() => void) | null = null
+
+function ensureInvalidatedSubscription(): void {
+  if (invalidatedUnsub) return
+  const bus = getExtensionBus()
+  invalidatedUnsub = bus.on('requests-invalidated', (e: RequestsInvalidatedEvent) => {
+    if (!e.sessionId) return
+    const store = useExtensionUIStore()
+    for (const requestId of e.requestIds) {
+      store.removeRequest(e.sessionId, requestId)
+    }
+  })
 }
 
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
@@ -205,6 +229,8 @@ export function useExtensionUI(
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   const store = useExtensionUIStore()
+  // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
+  ensureInvalidatedSubscription()
 
   let unsubFns: Array<() => void> = []
 

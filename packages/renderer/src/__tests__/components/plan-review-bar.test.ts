@@ -1,17 +1,19 @@
 /**
  * PlanReviewBar 组件单测 —— plan 模式重设计 u1-banner（审批条，设计 D5/G3/G4）。
  *
- * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
+ * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款；2026-09-21 两键+忽略裁决增量）：
  * - 四分支显示公式逐分支 DOM 断言（含 isActive=false 整体不渲染）：
- *   ① isActive+挂起+awaiting → 三键全功能；② revising → 修订中禁用态；
+ *   ① isActive+挂起+awaiting → 两键 + 忽略全功能；② revising → 修订中禁用态；
  *   ③ awaiting 无挂起 → 降级态；④ isActive=false → 不渲染
- * - 降级三分支（§3.4 reviewStateSource）：explain / resubmit / 旧 entry 缺省通用
- *   （fixture LEGACY_AWAITING_PLAN_STATE_VIEW 驱动）——三分支共用恢复入口指引 + 退出按钮
- * - 三键 respond payload 形状断言（PlanReviewResponse 判别联合：approve 无 comments；
- *   revise/explain 打包评论草稿快照；提交后草稿清空——D6）
+ * - 降级态文案（§3.4 精简单源）：resubmit / 旧 entry 缺省（含 legacy 'explain' 存量值
+ *   归通用文案，fixture LEGACY_AWAITING_PLAN_STATE_VIEW 驱动）——共用恢复入口指引；
+ *   退出入口收敛到左区（右区退出按钮已删，问题 5）
+ * - 两键 respond payload 形状断言（PlanReviewResponse 判别联合：approve 无 comments；
+ *   revise 打包评论草稿快照；提交后草稿清空——D6）+ 忽略键（message.abort 同通道）
  * - 挂起请求枚举消费（useExtensionUI planReviewFilter 实例，requestId 精确回传）
+ *   + P2-2 失效帧消费（requests-invalidated → store 移除 → 审批条消失）
  * - §3.5：0 评论时「提交评论修订」禁用 + tooltip；评论计数可点 → openDrawerTab('plan') +
- *   plan-store 回看请求递增；degraded 退出按钮 emit('exit')（确认守卫归宿主 Popover）
+ *   plan-store 回看请求递增
  *
  * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus）+ plan-store.test.ts
  * （spread actual 保真实 events 通道只换 command）；i18n 经 vitest-i18n-setup 全局 mock。
@@ -33,6 +35,13 @@ const openDrawerTabMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
   return { ...actual, openDrawerTab: openDrawerTabMock }
+})
+
+// ── mock ⓪½：chat domain（忽略键的 message.abort 通道；spread actual 防 import 链断）──
+const chatAbortMock = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/chat')>()
+  return { ...actual, abort: chatAbortMock }
 })
 
 // ── mock ①：command（plan-store 首拉 RPC）——spread actual 保真实 events 通道 ──
@@ -156,9 +165,10 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(true)
     // §3.5 文案条款：approve 键文案「确认并执行」（防回归——曾被写为「确认，开始执行」）
     expect(wrapper.find('[data-testid="plan-review-approve"]').text()).toContain('确认并执行')
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').text()).toContain('忽略')
     expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
   })
 
@@ -171,7 +181,7 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     expect(wrapper.find('[data-testid="plan-review-revising"]').text()).toContain('正在根据评论修订')
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(false)
   })
 
   it('分支③ awaiting 无挂起 → 降级态「等待 agent 重新提交审批」，无三键', async () => {
@@ -214,7 +224,7 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
   })
 })
 
-describe('PlanReviewBar 三键 respond payload（PlanReviewResponse 判别联合）', () => {
+describe('PlanReviewBar 两键 respond payload（PlanReviewResponse 判别联合）', () => {
   it('approve → payload 仅 { decision: "approve" }（结构上无 comments 键），requestId 精确回传', async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
     emitPlanReviewRequest('pr-1')
@@ -280,21 +290,25 @@ describe('PlanReviewBar 三键 respond payload（PlanReviewResponse 判别联合
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('explain → { decision: "explain", comments }（不改 reviewState 的解释请求，同款打包）', async () => {
+  it('忽略 → message.abort 同通道停 turn（不走 respond，不注入 decision payload）', async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
-    usePlanStore().addDraftComment({ quote: '为什么不用方案 B', comment: '给出取舍依据' })
+    await wrapper.find('[data-testid="plan-review-ignore"]').trigger('click')
     await flushAsync()
 
-    await wrapper.find('[data-testid="plan-review-explain"]').trigger('click')
-
-    const result = JSON.parse(vi.mocked(sendExtensionUIResponse).mock.calls[0]![3] as string)
-    expect(result).toEqual({
-      decision: 'explain',
-      comments: [{ quote: '为什么不用方案 B', comment: '给出取舍依据' }],
-    })
+    // 忽略 = chat.abort(sessionId)：turn abort 级联解散挂起 select（extension 侧 cancelled
+    // 语义，A9 取消 ≠ 批准），runtime 失效链摘除挂起并广播 → 审批条消失
+    expect(chatAbortMock).toHaveBeenCalledTimes(1)
+    expect(chatAbortMock).toHaveBeenCalledWith(SID)
+    expect(vi.mocked(sendExtensionUIResponse)).not.toHaveBeenCalled()
+    // 失败通路：abort reject → 错误就近呈现，审批条保持原状可重试（失败要出声）
+    chatAbortMock.mockRejectedValueOnce(new Error('pi is stuck'))
+    await wrapper.find('[data-testid="plan-review-ignore"]').trigger('click')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-ignore-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-ignore-error"]').text()).toContain('忽略失败')
   })
 
   it('respond 后挂起请求出队 → 审批条转降级态（awaiting 无挂起）', async () => {
@@ -311,22 +325,8 @@ describe('PlanReviewBar 三键 respond payload（PlanReviewResponse 判别联合
   })
 })
 
-describe('PlanReviewBar 降级三分支（§3.4 reviewStateSource）', () => {
-  it("explain 源 →「已收到你的问题，agent 解答后会重新提交审批」+ 恢复入口 + 退出按钮", async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting', reviewStateSource: 'explain' }))
-    await flushAsync()
-
-    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
-    expect(reason.exists()).toBe(true)
-    expect(reason.text()).toContain('已收到你的问题')
-    expect(reason.text()).toContain('解答后会重新提交审批')
-    // 恢复入口：指引发消息（复用既有会话输入语义），非独立按钮
-    expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').text()).toContain('发送任意消息')
-    // 无填充描边退出按钮存在（不再是死胡同）
-    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
-  })
-
-  it("resubmit 源（E3 崩溃恢复）→「agent 会话已重启，尚未重新提交」+ 恢复入口 + 退出按钮", async () => {
+describe('PlanReviewBar 降级态（§3.4 精简单源）', () => {
+  it("resubmit 源（E3 崩溃恢复）→「agent 会话已重启，尚未重新提交」+ 恢复入口", async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting', reviewStateSource: 'resubmit' }))
     await flushAsync()
 
@@ -334,10 +334,11 @@ describe('PlanReviewBar 降级三分支（§3.4 reviewStateSource）', () => {
     expect(reason.text()).toContain('会话已重启')
     expect(reason.text()).toContain('尚未重新提交')
     expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+    // 退出入口收敛：右区无退出按钮（问题 5 去重，唯一入口 = 左区常驻退出）
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(false)
   })
 
-  it('旧 entry 缺省（fixture LEGACY_AWAITING_PLAN_STATE_VIEW 无 reviewStateSource）→ 通用中性文案，恢复入口与退出照给', async () => {
+  it("旧 entry 缺省（fixture LEGACY_AWAITING_PLAN_STATE_VIEW 无 reviewStateSource）与 legacy 'explain' 存量值 → 通用中性文案", async () => {
     // fixture 驱动：升级前落盘形态（字段缺省 = 来源未知，不猜测来源）
     const wrapper = await mountBar({ ...LEGACY_AWAITING_PLAN_STATE_VIEW })
     await flushAsync()
@@ -345,22 +346,31 @@ describe('PlanReviewBar 降级三分支（§3.4 reviewStateSource）', () => {
     const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
     expect(reason.exists()).toBe(true)
     expect(reason.text()).toContain('等待 agent 重新提交审批')
-    // 不猜测来源：两源文案都不出现
-    expect(reason.text()).not.toContain('已收到你的问题')
+    // 不猜测来源：resubmit 文案不出现
     expect(reason.text()).not.toContain('会话已重启')
     expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(false)
+
+    // legacy 'explain' 存量值（explain 交互已删）：经 shared 值域收窄归缺省 → 通用文案
+    const legacyExplain = await mountBar(viewOf({ reviewState: 'awaiting', reviewStateSource: 'explain' as never }))
+    await flushAsync()
+    expect(legacyExplain.find('[data-testid="plan-review-degraded-reason"]').text()).toContain('等待 agent 重新提交审批')
   })
 
-  it('degraded 退出按钮 → emit("exit")（确认守卫归宿主 PlanModeBar 退出确认 Popover，本组件不直发 abortPlan）', async () => {
+  it('P2-2 失效帧：requests-invalidated → 挂起请求出 store，审批条 ready 态随之消失', async () => {
     const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
+
+    // runtime 失效链广播（abort/退出/回收等非 respond 终结）→ 逐条移除 → ready 门关闭；
+    // awaiting 无挂起落 degraded（退出后 isActive 翻转才整体不渲染——isActive 门职责）
+    mockBus.emit({ kind: 'requests-invalidated', sessionId: SID, requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
     await flushAsync()
 
-    await wrapper.find('[data-testid="plan-review-degraded-exit"]').trigger('click')
-    await flushAsync()
-
-    expect(wrapper.findComponent(PlanReviewBar).emitted('exit')).toHaveLength(1)
-    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 })
 

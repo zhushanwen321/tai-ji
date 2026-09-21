@@ -56,7 +56,7 @@
     <!-- 退出（D5：确认后 emit session.abortPlan WS 命令，E10：
          挂起 select 期退出联动在 extension 侧）。§3.5 退出确认 Popover：确认前置 + 分情境
          警示（revising = agent 侧修订将中止 / 有评论草稿 = 将丢弃，按序取首个命中）；
-         degraded 右区退出按钮经 PlanReviewBar exit 事件复用本 Popover（确认守卫单入口） -->
+         2026-09-21 精简后本按钮是退出唯一入口（degraded 态不再另设右区退出） -->
     <Popover :open="exitConfirmOpen" @update:open="exitConfirmOpen = $event">
       <PopoverTrigger as-child>
         <Button
@@ -114,9 +114,10 @@
       </PopoverContent>
     </Popover>
     <!-- 右区（情境）：PlanReviewBar 子组件（四分支 ready/revising/degraded/隐藏逻辑原样
-         复用；isActive 门由本行根 v-if 保证，mode=null 时右区仅剩左区占位）。exit 事件 =
-         degraded 退出按钮请求退出，复用本组件退出确认 Popover（§3.5 确认守卫单入口） -->
-    <PlanReviewBar :session-id="sessionId" @exit="exitConfirmOpen = true" />
+         复用；isActive 门由本行根 v-if 保证，mode=null 时右区仅剩左区占位）。
+         2026-09-21 精简：原 degraded 右区退出按钮删除（与左区退出两键同屏，问题 5 去重），
+         退出唯一入口 = 左区退出按钮（常驻），exit 事件链随之拆除 -->
+    <PlanReviewBar :session-id="sessionId" />
     <!-- E9：退出命令失败（reply success=false → promise reject）——状态带保持原状，错误
          就近呈现且内嵌恢复动作（横幅错误通路同款迁移） -->
     <p
@@ -161,7 +162,7 @@
  * 退出链路（§3.5）：左区退出按钮 = 确认 Popover 触发器（分情境警示：revising 中警示
  * agent 侧修订将中止 / 有评论草稿警示将丢弃，按序取首个命中），确认后清焦点分区草稿 +
  * command('session.abortPlan') → runtime ensureActive + client.prompt('/plan abort')；
- * degraded 右区退出按钮经 PlanReviewBar exit 事件复用本 Popover（确认守卫单入口）。
+ * 退出唯一入口 = 本按钮（原 degraded 右区退出按钮已删，问题 5 去重）。
  * reply 失败 = promise reject → E9 恢复指引就近呈现、状态带保持原状；成功后 isActive=false
  * 由投影链广播驱动（本组件不本地改状态）。
  */
@@ -224,20 +225,20 @@ function stepStage(index: number): 'cur' | 'done' | 'todo' {
 // ── 退出（§3.5 确认 Popover + E9 错误通路）──
 const exiting = ref(false)
 const exitError = ref<string | null>(null)
-/** 退出确认 Popover 开合（受控；degraded 右区退出按钮经 PlanReviewBar exit 事件置开） */
+/** 退出确认 Popover 开合（受控） */
 const exitConfirmOpen = ref(false)
 
 const reviewState = computed(() => view.value?.reviewState)
 
 /**
- * 确认退出（§3.5）：关确认层 → 清焦点分区评论草稿（退出即清，草稿生命周期随用户明确的
- * 退出意图终结；与 enter 翻转清兜底互补——GUI 确认路径当场清，agent 自退等绕过路径由
- * plan-store 分区写入层的翻转清兜底）→ 发 abortPlan。
+ * 确认退出（§3.5）：关确认层 → 发 abortPlan → 命令成功后才清焦点分区评论草稿
+ * （P2-4 顺序修复：原实现先清草稿后发命令，命令失败时草稿已不可恢复；现失败保留
+ * 草稿供重试。agent 自退等绕过路径由 plan-store 分区写入层的翻转清兜底）。
  */
 async function onExitConfirmed(): Promise<void> {
   exitConfirmOpen.value = false
-  clearDrafts()
   await onExit()
+  if (!exitError.value) clearDrafts()
 }
 
 async function onExit(): Promise<void> {

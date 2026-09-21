@@ -3,7 +3,8 @@
  * 设计 §3.1 步骤②：drawer 自动打开「计划产物」tab）。
  *
  * ADR-0053 per-session pendingOpen 语义（事件驱动的打开 ≠ 直开）在本接线的落地形态：
- * - 触发边界（仅同 session 内的状态翻转）：docs 0→1（首份产物就绪）。docs 1→n 不触发——
+ * - 触发边界（仅同 session 内的状态翻转）：docs 0→n（首份产物就绪；P3-5 由 ===1 放宽为
+ *   >0——两份 register-doc 落进投影防抖同窗的 0→2 批量跳变同样开窗）。docs n→n+1 不触发——
  *   tab 已在，L2 文档清单由 u1-docs-panel 响应式驱动，无需重开 drawer。isActive 翻转
  *   不开窗（设计 plan-mode-ux-refactor §3.2：激活即开窗时 docs 尚空，drawer 只能呈现
  *   pending/降级占位——「激活即空弹」P-C 已随该设计删除，首份产物就绪才是有内容的
@@ -59,8 +60,10 @@ export function usePlanDrawerSync(): void {
       // 切 session（含切走/切回）：只更新基线不打开（pendingOpen 语义：非焦点不直开、
       // 切回无新翻转不重发）
       if (!cur.sid || cur.sid !== prev.sid) return
-      const firstDoc = prev.docsCount === 0 && cur.docsCount === 1
-      if (!firstDoc) return
+      // 首份产物边界 = prev 0 且 cur > 0（P3-5：原判式 ===1 会漏掉两份 register-doc 落进
+      // runtime 投影 300ms 防抖同窗的 0→2 批量跳变）
+      const firstDocs = prev.docsCount === 0 && cur.docsCount > 0
+      if (!firstDocs) return
       // 已开不重发：drawer 打开中不动用户当前 tab
       if (isOpen.value) return
       openDrawerTab('plan')

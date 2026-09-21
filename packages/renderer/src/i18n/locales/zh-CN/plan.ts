@@ -5,17 +5,17 @@
 export default {
   reviewBar: {
     commentsCount: '{count} 条评论',
-    requestExplanation: '请求进一步解释',
     submitRevise: '提交评论并要求修订',
     confirmExecute: '确认并执行',
+    // 2026-09-21 两键+忽略裁决：解释键删除；忽略 = 停止 agent turn 并关闭本次提问
+    ignore: '忽略',
+    ignoreTip: '停止 agent 并关闭本次提问，计划保持不变',
+    ignoreError: '忽略失败：{message}。agent 可能已停止响应，可重试或用左区退出按钮退出计划模式',
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
     waitingResubmit: '等待 agent 重新提交审批',
-    // §3.4 降级三分支（reviewStateSource 两源 + 旧 entry 缺省通用）：共用恢复入口指引 +
-    // 退出按钮（无填充描边，不再是死胡同）；耗时显示不做（设计裁决）
-    degradedExplain: '已收到你的问题，agent 解答后会重新提交审批',
+    // §3.4 降级态（精简单源 + 旧 entry 缺省通用）：共用恢复入口指引；退出入口收敛到左区
     degradedResubmit: 'agent 会话已重启，尚未重新提交',
     degradedRecoverHint: '在对话输入框发送任意消息，提醒 agent 重新提交审批',
-    degradedExit: '退出',
     // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
     reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
     viewDrafts: '查看评论草稿',
