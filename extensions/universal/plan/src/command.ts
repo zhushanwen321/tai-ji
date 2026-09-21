@@ -144,11 +144,11 @@ export function registerPlanCommand(
         return;
       }
 
-      // Reentry: check for existing plan files in .taiji-harness/
+      // Reentry: check for existing plan files in .tmp/plans/
       if (!state.isActive && !trimmed) {
         const projectDir = ctx.cwd;
-        const harnessDir = path.join(projectDir, ".taiji-harness");
-        const existingPlans = findExistingPlans(harnessDir);
+        const plansDir = path.join(projectDir, ".tmp", "plans");
+        const existingPlans = findExistingPlans(plansDir);
         if (existingPlans.length > 0) {
           pi.sendUserMessage(
             `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
@@ -211,15 +211,15 @@ function handleStatus(
   );
 }
 
-/** Find existing plan.md files in .taiji-harness/ subdirectories */
-function findExistingPlans(harnessDir: string): string[] {
+/** Find existing plan.md files in .tmp/plans/ subdirectories */
+function findExistingPlans(plansDir: string): string[] {
   try {
-    return fs.readdirSync(harnessDir)
+    return fs.readdirSync(plansDir)
       .filter((f) => {
-        const subDir = path.join(harnessDir, f);
+        const subDir = path.join(plansDir, f);
         return fs.statSync(subDir).isDirectory() && fs.existsSync(path.join(subDir, "plan.md"));
       })
-      .map((f) => path.join(harnessDir, f, "plan.md"));
+      .map((f) => path.join(plansDir, f, "plan.md"));
   } catch {
     return [];
   }

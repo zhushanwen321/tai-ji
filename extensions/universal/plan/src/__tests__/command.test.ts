@@ -160,7 +160,7 @@ describe("registerPlanCommand", () => {
     await handler("Implement User Auth", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.taiji-harness/implement-user-auth",
+      "/tmp/test-project/.tmp/plans/implement-user-auth",
       { recursive: true },
     );
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
@@ -168,7 +168,7 @@ describe("registerPlanCommand", () => {
     expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Implement User Auth"));
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      planFilePath: "/tmp/test-project/.taiji-harness/implement-user-auth/plan.md",
+      planFilePath: "/tmp/test-project/.tmp/plans/implement-user-auth/plan.md",
       requirement: "Implement User Auth",
       templateName: "",
       skills: [],
@@ -181,7 +181,7 @@ describe("registerPlanCommand", () => {
     await handler("Fix bug #123: 中文标题!", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringContaining("/.taiji-harness/fix-bug-123"),
+      expect.stringContaining("/.tmp/plans/fix-bug-123"),
       { recursive: true },
     );
   });
@@ -191,7 +191,7 @@ describe("registerPlanCommand", () => {
     await handler("", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.taiji-harness/untitled",
+      "/tmp/test-project/.tmp/plans/untitled",
       { recursive: true },
     );
   });

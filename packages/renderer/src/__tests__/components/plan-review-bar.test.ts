@@ -85,7 +85,7 @@ const SID = 'sess-bar'
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
     ...overrides,

@@ -77,15 +77,15 @@ import { usePlanStore } from '@/stores/plan-store'
 const SID = 'sess-docs'
 
 const DOCS: PlanDocMeta[] = [
-  { fileName: 'auth-token-renewal.design.md', absPath: '/data/A/.taiji-harness/auth/design.md', sourceSkill: 'tech-design', version: 1 },
-  { fileName: 'auth-token-renewal.impl-plan.md', absPath: '/data/A/.taiji-harness/auth/impl-plan.md', sourceSkill: 'dev-flow', version: 1 },
-  { fileName: 'design-review.report.md', absPath: '/data/A/.taiji-harness/auth/review.report.md', sourceSkill: '', version: 2 },
+  { fileName: 'auth-token-renewal.design.md', absPath: '/data/A/.tmp/plans/auth/design.md', sourceSkill: 'tech-design', version: 1 },
+  { fileName: 'auth-token-renewal.impl-plan.md', absPath: '/data/A/.tmp/plans/auth/impl-plan.md', sourceSkill: 'dev-flow', version: 1 },
+  { fileName: 'design-review.report.md', absPath: '/data/A/.tmp/plans/auth/review.report.md', sourceSkill: '', version: 2 },
 ]
 
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
     skills: ['tech-design', 'dev-flow'],
@@ -257,7 +257,7 @@ describe('PlanDocsPanel 旧 schema 降级（D4，§3.2 矩阵 #3：!isActive 门
     expect(tabs[0]!.find('[data-testid="plan-docs-tab-version"]').exists()).toBe(false)
     // 正文仍经 file.read 读取（absPath = planFilePath）
     await flushAsync()
-    expect(readMock).toHaveBeenCalledWith('/data/A/.taiji-harness/auth/plan.md', SID)
+    expect(readMock).toHaveBeenCalledWith('/data/A/.tmp/plans/auth/plan.md', SID)
   })
 
   it('isActive 期间不渲染 legacy 降级条目（!isActive 门：条目可点即 E2 假错误）', async () => {
@@ -283,7 +283,7 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     const wrapper = await mountPanel(viewOf())
     expect(readMock).toHaveBeenCalledTimes(1)
     // cwd 守门契约：sessionId 入参（fileApi.read(path, sid)）
-    expect(readMock).toHaveBeenCalledWith('/data/A/.taiji-harness/auth/design.md', SID)
+    expect(readMock).toHaveBeenCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
     expect(wrapper.find('.md-stub').text()).toContain('设计文档正文')
   })
 
@@ -296,8 +296,8 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     await tabs[1]!.trigger('click')
     await flushAsync()
 
-    expect(readMock).toHaveBeenLastCalledWith('/data/A/.taiji-harness/auth/impl-plan.md', SID)
-    expect(wrapper.find('.md-stub').text()).toContain('body-of:/data/A/.taiji-harness/auth/impl-plan.md')
+    expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/impl-plan.md', SID)
+    expect(wrapper.find('.md-stub').text()).toContain('body-of:/data/A/.tmp/plans/auth/impl-plan.md')
     // 选中态（aria-selected）随切换
     expect(tabs[1]!.attributes('aria-selected')).toBe('true')
   })
@@ -372,7 +372,7 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     await flushAsync()
 
     expect(readMock).toHaveBeenCalledTimes(2)
-    expect(readMock).toHaveBeenLastCalledWith('/data/A/.taiji-harness/auth/design.md', SID)
+    expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
   })
 
   it('reviewState 离开 revising → 重新 file.read（修订收尾刷新）', async () => {

@@ -99,9 +99,9 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     expect(pi.setActiveTools).toHaveBeenCalledWith(PLAN_MODE_TOOLS);
     // 状态持久化 isActive=true（投影链驱动 GUI 显形的锚点）
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: true }));
-    // plan 目录创建（.taiji-harness/<slug>，slug 由 requirement 派生）
+    // plan 目录创建（.tmp/plans/<slug>，slug 由 requirement 派生）
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringMatching(/\.taiji-harness/),
+      expect.stringMatching(/\.tmp[/\\]plans[/\\]/),
       expect.objectContaining({ recursive: true }),
     );
     // 提示词经 tool result 直返（不经 sendUserMessage 对话流注入——对本次调用的直接响应）

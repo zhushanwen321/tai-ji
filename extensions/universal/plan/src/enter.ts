@@ -95,7 +95,7 @@ export function activatePlanMode(
     ? requirement.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, MAX_SLUG_LENGTH)
     : "untitled";
 
-  const planDir = path.join(projectDir, ".taiji-harness", slug);
+  const planDir = path.join(projectDir, ".tmp", "plans", slug);
   fs.mkdirSync(planDir, { recursive: true });
   const planFilePath = path.join(planDir, "plan.md");
 

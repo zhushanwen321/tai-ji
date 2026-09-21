@@ -211,7 +211,7 @@ describe("E1 fail-fast via /plan handler", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
     // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
-    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.taiji-harness/auth", { recursive: true });
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({

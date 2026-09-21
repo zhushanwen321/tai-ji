@@ -201,8 +201,8 @@
  *
  * 状态源：usePlanState（u1-store 组件消费接口——view/docs/评论草稿），本组件只做呈现与
  * file.read 拉取编排，不持 plan 状态。正文加载复用 CommandDocPanel 先例形态：file.read
- * 带 sessionId 走 cwd 守门（plan 产物在 session cwd 的 .taiji-harness/ 下），失败按 E2
- * 落占位错误态——不做无 sessionId 白名单降级（.taiji-harness 不在白名单内，二次必失败）。
+ * 带 sessionId 走 cwd 守门（plan 产物在 session cwd 的 .tmp/plans/ 下），失败按 E2
+ * 落占位错误态——不做无 sessionId 白名单降级（.tmp 不在白名单内，二次必失败）。
  *
  * 修订刷新（G3）：刷新键 = 选中文档 absPath + version + reviewState 组合——agent 修订重
  * 登记（version bump）或 reviewState 离开 revising 时键变化 → 重新 file.read；tab 切换

@@ -161,7 +161,7 @@ describe("registerPlanTool", () => {
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
         isActive: true,
-        planFilePath: "/tmp/test-project/.taiji-harness/retro/plan.md",
+        planFilePath: "/tmp/test-project/.tmp/plans/retro/plan.md",
         requirement: "retro",
         templateName: "retro-template",
         templateProvidedPath: "/tmp/test-project/docs/retro-template.md",

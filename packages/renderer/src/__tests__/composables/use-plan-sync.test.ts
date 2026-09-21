@@ -42,7 +42,7 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
 
 const DOC: PlanDocMeta = {
   fileName: 'design.md',
-  absPath: '/data/A/.taiji-harness/auth/design.md',
+  absPath: '/data/A/.tmp/plans/auth/design.md',
   sourceSkill: 'tech-design',
   version: 1,
 }
@@ -51,7 +51,7 @@ const DOC: PlanDocMeta = {
 function planStateOf(sid: string, overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: `/data/${sid}/.taiji-harness/auth/plan.md`,
+    planFilePath: `/data/${sid}/.tmp/plans/auth/plan.md`,
     requirement: '重构 auth 模块',
     templateName: 'default',
     ...overrides,

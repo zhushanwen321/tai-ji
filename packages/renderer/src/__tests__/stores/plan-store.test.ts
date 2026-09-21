@@ -49,14 +49,14 @@ import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 
 const BASE_VIEW: PlanStateView = {
   isActive: true,
-  planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+  planFilePath: '/data/A/.tmp/plans/auth/plan.md',
   requirement: '重构 auth 模块',
   templateName: 'default',
 }
 
 const DOC: PlanDocMeta = {
   fileName: 'design.md',
-  absPath: '/data/A/.taiji-harness/auth/design.md',
+  absPath: '/data/A/.tmp/plans/auth/design.md',
   sourceSkill: 'tech-design',
   version: 1,
 }

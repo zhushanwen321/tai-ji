@@ -46,14 +46,14 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 function activeStateWithDocs(): PlanState {
   const doc: PlanDocMeta = {
     fileName: "design.md",
-    absPath: "/tmp/test-project/.taiji-harness/auth/design.md",
+    absPath: "/tmp/test-project/.tmp/plans/auth/design.md",
     sourceSkill: "tech-design",
     version: 1,
   };
   return {
     ...DEFAULT_PLAN_STATE,
     isActive: true,
-    planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+    planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     requirement: "refactor auth",
     skills: ["tech-design"],
     docs: [doc],
@@ -116,7 +116,7 @@ describe("register-doc（D10）", () => {
       expect.objectContaining({
         docs: [
           expect.objectContaining({ fileName: "design.md", version: 1 }),
-          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.taiji-harness/auth/impl-plan.md", version: 1 }),
+          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.tmp/plans/auth/impl-plan.md", version: 1 }),
         ],
       }),
     );
@@ -169,7 +169,7 @@ describe("submit-review E6 双守卫", () => {
     const { exec, ctx } = setup({
       ...DEFAULT_PLAN_STATE,
       isActive: true,
-      planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+      planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     });
     const res = await exec({ action: "submit-review" });
     expect(res.details).toEqual({ action: "review-error", reason: "no-docs" });

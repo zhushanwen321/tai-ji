@@ -48,7 +48,7 @@ describe("PlanState", () => {
           {
             type: "custom",
             customType: "plan-state",
-            data: { isActive: true, phase: "writing", planFilePath: ".taiji-harness/test/plan.md", requirement: "test", templateName: "feature-plan" },
+            data: { isActive: true, phase: "writing", planFilePath: ".tmp/plans/test/plan.md", requirement: "test", templateName: "feature-plan" },
           },
         ],
       },
@@ -65,7 +65,7 @@ describe("State persistence", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      planFilePath: ".taiji-harness/test/plan.md",
+      planFilePath: ".tmp/plans/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
       skills: ["tech-design"],
@@ -80,7 +80,7 @@ describe("State persistence", () => {
     // （JSON 序列化自然消失——D4）
     expect(mockPi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      planFilePath: ".taiji-harness/test/plan.md",
+      planFilePath: ".tmp/plans/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
       skills: ["tech-design"],
@@ -109,7 +109,7 @@ describe("State persistence", () => {
             customType: "plan-state",
             data: {
               isActive: true,
-              planFilePath: ".taiji-harness/auth/plan.md",
+              planFilePath: ".tmp/plans/auth/plan.md",
               requirement: "auth",
               templateName: "",
               skills: ["tech-design", "dev-flow"],
@@ -140,7 +140,7 @@ describe("State persistence", () => {
             data: {
               isActive: true,
               phase: "brainstorming",
-              planFilePath: ".taiji-harness/legacy/plan.md",
+              planFilePath: ".tmp/plans/legacy/plan.md",
               requirement: "legacy",
               templateName: "feature-plan",
             },
@@ -151,7 +151,7 @@ describe("State persistence", () => {
 
     const state = reconstructPlanState(mockCtx);
     expect(state.isActive).toBe(true);
-    expect(state.planFilePath).toBe(".taiji-harness/legacy/plan.md");
+    expect(state.planFilePath).toBe(".tmp/plans/legacy/plan.md");
     // 新字段降级为空清单/无值（前端据此显示「（未指定）」+ 单文件形态）
     expect(state.skills).toEqual([]);
     expect(state.docs).toEqual([]);
@@ -198,7 +198,7 @@ describe("State persistence", () => {
             data: {
               isActive: true,
               phase: "brainstorming",
-              planFilePath: ".taiji-harness/legacy/plan.md",
+              planFilePath: ".tmp/plans/legacy/plan.md",
               requirement: "legacy",
               templateName: "feature-plan",
             },
@@ -216,7 +216,7 @@ describe("State persistence", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      planFilePath: ".taiji-harness/auth/plan.md",
+      planFilePath: ".tmp/plans/auth/plan.md",
       requirement: "auth",
       templateName: "",
       skills: [],
@@ -254,7 +254,7 @@ describe("State persistence", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      planFilePath: ".taiji-harness/auth/plan.md",
+      planFilePath: ".tmp/plans/auth/plan.md",
       requirement: "auth",
       templateName: "",
       skills: [],
@@ -306,7 +306,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     } as unknown as ExtensionContext;
     sessions.set("session-1", {
       isActive: true,
-      planFilePath: ".taiji-harness/auth/plan.md",
+      planFilePath: ".tmp/plans/auth/plan.md",
       requirement: "refactor auth",
       templateName: "feature-plan",
       skills: ["tech-design", "dev-flow"],
