@@ -30,6 +30,7 @@ import { nextTick } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import { mount } from '@vue/test-utils'
 import FormOverlay from '@/components/extension/form/FormOverlay.vue'
+import DateTimePicker from '@/components/extension/form/DateTimePicker.vue'
 import type {
   ChoiceQuestion,
   TextQuestion,
@@ -64,6 +65,11 @@ const freeTextQ: TextQuestion = {
   type: 'text',
   header: 'note',
   question: '补充说明',
+}
+
+/** 经 DateTimePicker 组件边界发 v-model 值（picker 内部交互在 DateTimePicker.test.ts 覆盖） */
+function setOnceValue(wrapper: ReturnType<typeof mountOverlay>, value: string): void {
+  wrapper.findComponent(DateTimePicker).vm.$emit('update:modelValue', value)
 }
 
 const scheduleDraft: ScheduleDraft = {
@@ -477,7 +483,7 @@ describe('FormOverlay · schedule 渲染器与 Submit 门委托', () => {
       }
       const wrapper = mountOverlay({ questions: [onceQ] })
       await wrapper.find('[data-testid="schedule-create-kind-once"]').trigger('click')
-      await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:05')
+      setOnceValue(wrapper, '2030-01-01T09:05')
       await nextTick()
       expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeUndefined()
 
@@ -538,11 +544,11 @@ describe('FormOverlay · legacy draft 直挂（D7 上三角窗口挂载源分流
     })
     await nextTick()
 
-    // 还原失败退默认下一整点 → 可提交；手输过去时刻 → 门关
+    // 还原失败退默认下一整点 → 可提交；过去时刻 → 门关
     const submit = wrapper.find('[data-testid="form-submit"]')
     expect(submit.attributes('disabled')).toBeUndefined()
     await wrapper.find('[data-testid="schedule-create-kind-once"]').trigger('click')
-    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2020-01-01T09:00')
+    setOnceValue(wrapper, '2020-01-01T09:00')
     await nextTick()
     expect(submit.attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')

@@ -48,9 +48,6 @@ function tokenizeQuoted(input: string): string[] {
 // 经 `renderResult(messageKey, params, locale)` 单入口渲染（u-p2b 接线）。`/schedule` 的
 // registerCommand.description 是注册期静态串（切语言不热更 = 已接受滞后，设计 §6.9）。
 
-/** 无参 `/schedule`（打开表单路径）的默认预填时间：循环 + 每天 09:00。 */
-const DEFAULT_CREATE_SCHEDULE = '0 9 * * *'
-
 /** 子命令 handler：统一返回 ServiceResult（notify severity 按 success 分流）。 */
 type SubcommandHandler = (service: SchedulerService, parts: string[]) => ServiceResult | Promise<ServiceResult>
 
@@ -152,9 +149,11 @@ export async function executeScheduleCommand(
 ): Promise<void> {
   const trimmed = args.trim()
   if (!trimmed) {
+    // 无参 = 空草稿，默认单次（用户裁决 2026-09-21）：schedule 置空由表单端派生初值
+    //（GUI/TUI 均经 onceCronToDate 还原失败 → 下一整点 / 首个一次性预设）
     await openFormOrDirectCreate(service, ctx, channelState, {
-      kind: 'recurring',
-      schedule: DEFAULT_CREATE_SCHEDULE,
+      kind: 'once',
+      schedule: '',
       prompt: '',
     })
     return

@@ -81,21 +81,21 @@ describe('buildDraft / collectModelIds（Draft.models 注入 P-SCOPED）', () =>
     expect(draft.currentModel).toBe('prov-s/scoped-m')
   })
 
-  it('buildDraft：seed 的 kind 缺省 recurring、可选字段按存在性透传（缺省不写键）', () => {
+  it('buildDraft：seed 的 kind 缺省 once（默认单次裁决）、可选字段按存在性透传（缺省不写键）', () => {
     const ctx = createMockCtx()
 
     expect(buildDraft(SEED, ctx)).toEqual({
-      kind: 'recurring',
+      kind: 'once',
       schedule: '5m',
       prompt: 'agent draft',
       models: [],
     })
 
     const full = buildDraft(
-      { ...SEED, kind: 'once', name: 'n', expires: 'never', model: 'prov-a/m1' },
+      { ...SEED, kind: 'recurring', name: 'n', expires: 'never', model: 'prov-a/m1' },
       ctx,
     )
-    expect(full).toMatchObject({ kind: 'once', name: 'n', expires: 'never', model: 'prov-a/m1' })
+    expect(full).toMatchObject({ kind: 'recurring', name: 'n', expires: 'never', model: 'prov-a/m1' })
   })
 
   it('collectModelIds：无 scoped 且无可用模型 → 空列表（表单跟随会话当前模型）', () => {

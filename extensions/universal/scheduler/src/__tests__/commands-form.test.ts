@@ -139,7 +139,7 @@ describe('/schedule 命令 表单路径（rpc）', () => {
     handler = registerHandler(() => service)
   })
 
-  it('无参：打开表单，draft = 循环 + 0 9 * * * + 空 prompt + models 注入', async () => {
+  it('无参：打开表单，draft = 单次 + 空时刻 + 空 prompt + models 注入（默认单次裁决）', async () => {
     const select = selectReturning(undefined)
     const getAvailable = vi.fn(() => [stubModel('prov-a', 'm1')])
     const { ctx } = createCtx({ select, getAvailable, model: stubModel('prov-a', 'm1') })
@@ -158,8 +158,8 @@ describe('/schedule 命令 表单路径（rpc）', () => {
     expect(payload.allowCancel).toBe(true)
 
     const draft = capturedDraft(select)
-    expect(draft.kind).toBe('recurring')
-    expect(draft.schedule).toBe('0 9 * * *')
+    expect(draft.kind).toBe('once')
+    expect(draft.schedule).toBe('')
     expect(draft.prompt).toBe('')
     expect(draft.models).toEqual(['prov-a/m1'])
     expect(draft.currentModel).toBe('prov-a/m1')

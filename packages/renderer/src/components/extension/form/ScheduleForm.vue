@@ -16,6 +16,9 @@
  * onceCronToDate 还原——两 helper 收口 @zhushanwen/extension-protocol（GUI/TUI 共用）。
  * 下次运行预览为纯前端轻量计算（后端 croner 的子集），预览失败仅显示非阻塞警示、
  * 不禁止提交（表达式由创建端 parseSchedule/croner 验证）。
+ * once 时刻选择 = DateTimePicker 自绘组件（原生 datetime-local 的弹出日历是 OS 渲染，
+ * 不跟 6 主题）；默认模式 = 单次（kind 缺省与无 draft 均落 once，draft.kind 显式
+ * recurring 才落循环视图，还原成功的 once 草稿直接呈现 once 视图）。
  * 文案全走 i18n（extensionUI.scheduleCreate* 段）；星期名按当前 locale 经 Intl 输出。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -25,6 +28,8 @@ import ModelPickerPanel, { type ModelPickerGroup } from '@/components/panel/Mode
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import DateTimePicker from './DateTimePicker.vue'
+import { minutesFromNow, nextFullHour, pad2, toLocalInput, tomorrowAtHour } from './datetime-local'
 import {
   dateToOnceCron,
   onceCronToDate,
@@ -54,7 +59,8 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 
 // ── 表单状态（draft 驱动初值；新请求 → 壳按问题对象换引用，watch 重置）──
-const kind = ref<ScheduleKind>('recurring')
+/** 默认单次（用户裁决 2026-09-21：打开即勾选「单次」）；draft.kind 显式 recurring 才落循环视图 */
+const kind = ref<ScheduleKind>('once')
 const cronText = ref('0 9 * * *')
 const isCustomCron = ref(false)
 const onceLocal = ref('')   // datetime-local 输入值（本地墙钟 yyyy-MM-ddTHH:mm）
@@ -97,14 +103,8 @@ function pickCronChip(chip: { cron: string } | null): void {
   cronText.value = chip.cron
 }
 
-// ── once 时刻换算（datetime-local 值 ↔ Date，本地墙钟语义与折叠单点一致）──
-/** 时间字段两位补零（no-magic-numbers：目标宽度具名） */
-const TIME_FIELD_WIDTH = 2
-const pad2 = (n: number): string => String(n).padStart(TIME_FIELD_WIDTH, '0')
-
-function toLocalInput(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
-}
+// ── once 时刻换算：pad2/toLocalInput 收口 datetime-local.ts（与 DateTimePicker 共用，
+//    本地墙钟语义与折叠单点一致）──
 
 const onceDate = computed<Date | null>(() => {
   if (!onceLocal.value) return null
@@ -125,22 +125,17 @@ function onceTimeValid(d: Date | null): d is Date {
 }
 
 function setOnceByMinutes(mins: number): void {
-  onceLocal.value = toLocalInput(new Date(Date.now() + mins * MS_PER_MINUTE))
+  onceLocal.value = toLocalInput(minutesFromNow(mins))
 }
 function setOnceTomorrowAt(hour: number): void {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  d.setHours(hour, 0, 0, 0)
-  onceLocal.value = toLocalInput(d)
+  onceLocal.value = toLocalInput(tomorrowAtHour(hour))
 }
 
 function switchKind(next: ScheduleKind): void {
   kind.value = next
-  // 切 once 且尚无时刻 → 默认下一个整点（demo 同款初值）
+  // 切 once 且尚无时刻 → 默认下一个整点（与 DateTimePicker 无基座初值同语义，单点 nextFullHour）
   if (next === 'once' && !onceLocal.value) {
-    const d = new Date(Date.now() + MS_PER_HOUR)
-    d.setMinutes(0, 0)
-    onceLocal.value = toLocalInput(d)
+    onceLocal.value = toLocalInput(nextFullHour())
   }
 }
 
@@ -200,10 +195,15 @@ function initFromDraft(): void {
   const d = props.question.initial
   initPromptNameAndExpires(d)
   initModelSelection(d)
-  if (d?.kind === 'once') {
-    restoreOnceSchedule(d.schedule)
+  if (d === undefined || d.kind === 'once') {
+    // 无 draft 或单次草稿：kind 落 once（默认模式，视图与草稿一致——还原成功的 once 草稿
+    // 直接呈现 once 视图，不再藏于 recurring 视图待手动切换）
+    kind.value = 'once'
+    if (d) restoreOnceSchedule(d.schedule)
+    else onceLocal.value = toLocalInput(nextFullHour())
   } else {
-    restoreRecurringSchedule(d?.schedule)
+    kind.value = 'recurring'
+    restoreRecurringSchedule(d.schedule)
   }
 }
 watch(() => props.question, initFromDraft, { immediate: true })
@@ -369,16 +369,9 @@ defineExpose({ canSubmit, submit })
           </div>
         </template>
 
-        <!-- once：datetime 控件 + 快捷 chips -->
+        <!-- once：自绘时刻选择器（自绘月历 + HH/mm 双段，6 主题 token 跟随）+ 快捷 chips -->
         <template v-else>
-          <div class="flex flex-wrap items-center gap-1.5">
-            <Input
-              v-model="onceLocal"
-              type="datetime-local"
-              data-testid="schedule-create-once-input"
-              class="h-7 w-52 text-[length:var(--text-xs)]"
-            />
-          </div>
+          <DateTimePicker v-model="onceLocal" />
           <div class="flex flex-wrap gap-1.5">
             <Button variant="ghost" data-testid="schedule-create-once-plus-1h" class="rounded-sm border border-border-strong px-2.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid transition-colors hover:text-neutral-fg" @click="setOnceByMinutes(60)">{{ t('extensionUI.scheduleCreateOncePlus1h') }}</Button>
             <Button variant="ghost" data-testid="schedule-create-once-tomorrow-9" class="rounded-sm border border-border-strong px-2.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid transition-colors hover:text-neutral-fg" @click="setOnceTomorrowAt(9)">{{ t('extensionUI.scheduleCreateOnceTomorrow9') }}</Button>

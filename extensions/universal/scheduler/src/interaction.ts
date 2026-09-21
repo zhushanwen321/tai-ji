@@ -92,11 +92,12 @@ export function collectModelIds(ctx: ExtensionContext): string[] {
   return ctx.modelRegistry.getAvailable().map(m => modelRef(m))
 }
 
-/** 组装表单预填草稿（seed = 工具参数或命令参数；models/currentModel 由 ctx 注入）。 */
+/** 组装表单预填草稿（seed = 工具参数或命令参数；models/currentModel 由 ctx 注入）。
+ *  kind 缺省回落单次（默认单次裁决 2026-09-21）。 */
 export function buildDraft(seed: ScheduleDraftSeed, ctx: ExtensionContext): ScheduleDraft {
   const currentModel = ctx.model ? modelRef(ctx.model) : undefined
   return {
-    kind: seed.kind ?? 'recurring',
+    kind: seed.kind ?? 'once',
     schedule: seed.schedule,
     ...(seed.model !== undefined && { model: seed.model }),
     prompt: seed.prompt,
