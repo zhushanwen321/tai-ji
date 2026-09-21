@@ -167,9 +167,80 @@ function textFromParts(parts: ReadonlyArray<Record<string, unknown>>): string {
 }
 
 // ── 主判定（顺序即语义，逐段对照设计 §7.2 伪代码 / asar Ss 函数体）───────────────────
+// classifyMessage 按判定阶段拆为三个私有判定器（闭集前置 / semantics 六分支 / 无 semantics
+// 兜底链）——拆分只为满足复杂度门禁，各判定器内部的分支顺序与 asar 原序逐段一致，不改判。
+
+/**
+ * 闭集检查前置（D4）：未知 kind / origin / source 即显形，不进入任何语义分支。
+ * 值域 = 12 kind ∪ 5 origin ∪ (12 source ∪ 17 legacy source)。
+ */
+function isUnclassifiedByClosedSets(
+  semantics: Record<string, unknown> | undefined,
+  src: unknown,
+): boolean {
+  if (semantics && !inClosedSet(semantics.kind, SEMANTICS_KIND_SET)) return true
+  if (semantics && !inClosedSet(semantics.origin, SEMANTICS_ORIGIN_SET)) return true
+  return (
+    src !== undefined &&
+    !(typeof src === 'string' && (MESSAGE_SOURCE_SET.has(src) || LEGACY_METADATA_SOURCE_SET.has(src)))
+  )
+}
+
+/**
+ * ② 有 semantics 的六分支判定（顺序 = asar 函数体原序）。全部落空返回 undefined——
+ * 调用方继续走 ③ 兜底链（「semantics 存在但六分支全落空」的形态由此穿透）。
+ */
+function classifyBySemanticsBranches(
+  semantics: Record<string, unknown>,
+  data: Record<string, unknown>,
+): ProjectionPolicy | undefined {
+  if (semantics.kind === 'timeline_event') return 'timelineOnly'
+  if (semantics.origin === 'real_user' && data.synthetic !== true && data.visibility !== MODEL_ONLY) {
+    return 'realUserInput'
+  }
+  if (
+    data.role === 'assistant' &&
+    semantics.kind === 'assistant_response' &&
+    semantics.uiVisibility === 'visible' &&
+    semantics.transcriptVisibility === 'visible'
+  ) {
+    return 'visibleAssistant'
+  }
+  if (semantics.providerVisibility === 'visible') return 'providerContextOnly'
+  if (semantics.kind === 'fork_notice') return 'timelineOnly'
+  if (
+    semantics.origin === 'agent_runtime' ||
+    semantics.uiVisibility === 'hidden' ||
+    semantics.transcriptVisibility === 'hidden'
+  ) {
+    return 'hiddenSynthetic'
+  }
+  return undefined
+}
+
+/** ③ 无 semantics（或六分支全落空穿透）的旧数据逐级兜底（顺序 = asar 函数体原序）。 */
+function classifyLegacyFallback(
+  data: Record<string, unknown>,
+  parts: ReadonlyArray<Record<string, unknown>>,
+  src: unknown,
+): ProjectionPolicy {
+  if (data.visibility === MODEL_ONLY || hasModelOnlyPart(parts)) return 'providerContextOnly'
+  if (isTimelineOnlyMessage(data, parts)) return 'timelineOnly'
+  // fork 独立分支（asar `r === Uf`，与设计 §7.2 同位）：isTimelineOnlyMessage 只查
+  // message.source / metadata.source 两通道的 fork 值，semantics.source / part 级 source
+  // 通道由本分支捕获，漏掉会穿透到 realUserInput（失败模式 A 在 fork 来源复发）。
+  if (src === FORK) return 'timelineOnly'
+  if (typeof src === 'string' && LEGACY_METADATA_SOURCE_SET.has(src)) return 'providerContextOnly'
+  if (hasLegacyReminderText(parts)) return 'providerContextOnly'
+  if (isSyntheticMessage(data, parts) && hasLegacyNotifyText(parts)) return 'providerContextOnly'
+  if (isSyntheticMessage(data, parts)) return 'hiddenSynthetic'
+  return data.role === 'assistant' ? 'visibleAssistant' : 'realUserInput'
+}
 
 /**
  * 单条消息的投影策略判定（zcode getConversationMessageProjectionPolicy 移植体）。
+ * 判定序：闭集前置（D4）→ ① compactSummary 特判 → ② semantics 六分支 → ③ 兜底链；
+ * src 在判定前一次性求值（messageSource 纯函数，求值点提前不影响判定顺序与结果）。
  *
  * @param data  message.data 已解析 JSON（含 role / semantics / visibility / source /
  *              synthetic / metadata / summary 等，外部宽形态）
@@ -182,59 +253,20 @@ export function classifyMessage(
   parts: ReadonlyArray<Record<string, unknown>>,
 ): ProjectionPolicy {
   const semantics = asRecord(data.semantics)
-
-  // 闭集检查前置（D4）：未知 kind / origin / source 即显形，不进入下方任何分支。
-  // 值域 = 12 kind ∪ 5 origin ∪ (12 source ∪ 17 legacy source)。
-  if (semantics && !inClosedSet(semantics.kind, SEMANTICS_KIND_SET)) return 'unclassified'
-  if (semantics && !inClosedSet(semantics.origin, SEMANTICS_ORIGIN_SET)) return 'unclassified'
   const src = messageSource(data, parts)
-  if (
-    src !== undefined &&
-    !(typeof src === 'string' && (MESSAGE_SOURCE_SET.has(src) || LEGACY_METADATA_SOURCE_SET.has(src)))
-  ) {
-    return 'unclassified'
-  }
+
+  if (isUnclassifiedByClosedSets(semantics, src)) return 'unclassified'
 
   // ① 压缩摘要特判（先于一切语义分支与兜底链）：现行数据带 semantics.kind，旧版数据只有
   //    data.summary 字段（§4.2 实证：167 条旧版摘要消息 role=user 且 summary 字段齐备）。
   //    返回 'compactSummary'（taiji 落点，D2）——asar 原函数此分支返回 providerContextOnly。
   if (semantics?.kind === 'compact_summary' || data.summary !== undefined) return 'compactSummary'
 
-  // ② 有 semantics：六分支（顺序 = asar 函数体原序）
+  // ② 有 semantics：六分支；全落空穿透到 ③
   if (semantics) {
-    if (semantics.kind === 'timeline_event') return 'timelineOnly'
-    if (semantics.origin === 'real_user' && data.synthetic !== true && data.visibility !== MODEL_ONLY) {
-      return 'realUserInput'
-    }
-    if (
-      data.role === 'assistant' &&
-      semantics.kind === 'assistant_response' &&
-      semantics.uiVisibility === 'visible' &&
-      semantics.transcriptVisibility === 'visible'
-    ) {
-      return 'visibleAssistant'
-    }
-    if (semantics.providerVisibility === 'visible') return 'providerContextOnly'
-    if (semantics.kind === 'fork_notice') return 'timelineOnly'
-    if (
-      semantics.origin === 'agent_runtime' ||
-      semantics.uiVisibility === 'hidden' ||
-      semantics.transcriptVisibility === 'hidden'
-    ) {
-      return 'hiddenSynthetic'
-    }
+    const bySemantics = classifyBySemanticsBranches(semantics, data)
+    if (bySemantics !== undefined) return bySemantics
   }
 
-  // ③ 无 semantics 的旧数据逐级兜底（顺序 = asar 函数体原序）
-  if (data.visibility === MODEL_ONLY || hasModelOnlyPart(parts)) return 'providerContextOnly'
-  if (isTimelineOnlyMessage(data, parts)) return 'timelineOnly'
-  // fork 独立分支（asar `r === Uf`，与设计 §7.2 同位）：isTimelineOnlyMessage 只查
-  // message.source / metadata.source 两通道的 fork 值，semantics.source / part 级 source
-  // 通道由本分支捕获，漏掉会穿透到 realUserInput（失败模式 A 在 fork 来源复发）。
-  if (src === FORK) return 'timelineOnly'
-  if (typeof src === 'string' && LEGACY_METADATA_SOURCE_SET.has(src)) return 'providerContextOnly'
-  if (hasLegacyReminderText(parts)) return 'providerContextOnly'
-  if (isSyntheticMessage(data, parts) && hasLegacyNotifyText(parts)) return 'providerContextOnly'
-  if (isSyntheticMessage(data, parts)) return 'hiddenSynthetic'
-  return data.role === 'assistant' ? 'visibleAssistant' : 'realUserInput'
+  return classifyLegacyFallback(data, parts, src)
 }
