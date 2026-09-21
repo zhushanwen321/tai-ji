@@ -84,9 +84,9 @@ function buildDegradationSummary(degradations: readonly ImportDegradation[]): Im
     unclassified:
       first !== undefined
         ? {
-            count: unclassified.reduce((sum, d) => sum + d.count, 0),
-            ...(first.sample !== undefined && { firstSample: first.sample }),
-          }
+          count: unclassified.reduce((sum, d) => sum + d.count, 0),
+          ...(first.sample !== undefined && { firstSample: first.sample }),
+        }
         : null,
   }
 }
