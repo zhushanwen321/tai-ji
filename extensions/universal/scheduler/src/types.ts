@@ -212,18 +212,14 @@ export type AckNotifyReason = 'e3-no-turn' | 'e8-no-base'
  * 构造夹具与跨模块引用；生命周期由 session_start / session_shutdown 跨代清理。
  */
 export interface AckState {
-  /** 已注入的触发器在途（等待命中的 ack 轮）；false = 无待命触发器 */
-  pending: boolean
   /**
    * 当前覆写窗口；非 null = 覆写仍在 pi 注册表。携带 providerId 使自撤点自足（不必
    * 回读会话模型）；one-shot 自撤成功后即置 null，注销抛错（E6）时保留以便下一清理点重试。
    */
   window: { providerId: string } | null
-  /** ack 轮是否已启动（30s 写盘自检的判据之一：文件不存在且未启动才补发告警） */
+  /** ack 轮是否已启动（session 边界写盘判定的判据之一：文件不存在且未启动才补发告警） */
   ackTurnStarted: boolean
-  /** 30s 写盘自检定时器句柄（unref；session_start/shutdown 取消） */
-  writeCheckTimer: ReturnType<typeof setTimeout> | null
-  /** 本次 ack 触发的任务 id（30s 自检 / 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收口 */
+  /** 本次 ack 触发的任务 id（session 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收口 */
   taskId: string | null
   /** 本次 ack 触发的任务名（如实通知文案插值；taskId 为兜底） */
   taskName: string
@@ -231,7 +227,7 @@ export interface AckState {
   ackText: string
   /** 建任务期缓存的会话模型（武装点取覆写 provider/api；缺失 = 不注册覆写） */
   model: SchedulerCurrentModel | undefined
-  /** 建任务期记录的会话文件路径（30s 自检 / 边界写盘判定的只读观测点；undefined = 记录时文件尚不存在） */
+  /** 建任务期记录的会话文件路径（session 边界写盘判定的只读观测点；undefined = 记录时文件尚不存在） */
   sessionFile: string | undefined
   /** 我们的 streamSimple 是否被调用过（E2 归因唯一信号：窗口开着但从未被调用 ⇒ 真实 provider 应答了）*/
   ackStreamCalled: boolean

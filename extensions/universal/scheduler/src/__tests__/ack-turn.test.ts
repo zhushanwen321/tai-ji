@@ -23,7 +23,6 @@ import {
   resetAckState,
   type AckTurnDeps,
 } from '../ack-turn.js'
-import { TICK_INTERVAL_MS } from '../runtime.js'
 import type { SchedulerBackend } from '../backend.js'
 import type { SchedulerEntryLike } from '../replay.js'
 import {
@@ -200,13 +199,12 @@ describe('ack-turn 编排', () => {
     h.controller.handleMessageStart({ role: 'user', customType: ACK_CUSTOM_TYPE })
     h.controller.handleMessageStart({ role: 'custom', customType: 'pi-scheduler:dispatched' })
     expect(h.captured.registered).toHaveLength(0)
-    // 中间态未被污染：未命中不改 pending / ackTurnStarted。
-    expect(ackState.pending).toBe(true)
+    // 中间态未被污染：未命中不武装窗口、不置 ackTurnStarted。
+    expect(ackState.window).toBeNull()
     expect(ackState.ackTurnStarted).toBe(false)
 
     h.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
     expect(h.captured.registered).toHaveLength(1)
-    expect(ackState.pending).toBe(false)
     expect(ackState.ackTurnStarted).toBe(true)
   })
 
@@ -302,27 +300,41 @@ describe('ack-turn 编排', () => {
     expect(h.warns.some(msg => msg.includes('no current model'))).toBe(true)
   })
 
-  // ── 6. E3 30s 写盘自检 ──
+// ── 6. E3 落盘兜底判定（session 边界，无定时器）──
 
-  it('30s 自检：未启动 ack 轮且文件不存在 ⇒ 补发通知；ack 轮已启动 ⇒ 不通知（防慢速轮误报）', async () => {
-    // 分支 A：maybeStartAck 后不触发 message_start。
-    const a = makeHarness()
-    await startAck(a.controller)
-    expect(a.notifyCalls).toHaveLength(0)
-    vi.advanceTimersByTime(TICK_INTERVAL_MS)
-    expect(a.notifyCalls).toHaveLength(1)
-    expect(a.notifyCalls[0]!.level).toBe('warning')
-    expect(ackState.writeCheckTimer).toBeNull()
+it('session 边界：未启动 ack 轮且文件不存在 ⇒ 补发通知；ack 轮已启动 ⇒ 不通知（防慢速轮误报）', async () => {
+  // 分支 A：maybeStartAck 后触发器从未启动轮次（message_start 未到达）⇒ 边界判定未落盘。
+  const a = makeHarness()
+  await startAck(a.controller)
+  expect(a.notifyCalls).toHaveLength(0)
+  a.controller.handleSessionBoundary()
+  expect(a.notifyCalls).toHaveLength(1)
+  expect(a.notifyCalls[0]!.level).toBe('warning')
 
-    resetAckState()
+  resetAckState()
 
-    // 分支 B：ack 轮已启动（message_start 命中）但文件仍未落盘 ⇒ 不通知。
-    const b = makeHarness()
-    await startAck(b.controller)
-    b.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
-    vi.advanceTimersByTime(TICK_INTERVAL_MS)
-    expect(b.notifyCalls).toHaveLength(0)
+  // 分支 B：ack 轮已启动（message_start 命中）但文件仍未落盘 ⇒ 不通知（30s 不是写盘期限，
+  // 慢速真实轮可能跨过它；此语义原由定时器判据承担，现由边界判据原样承担）。
+  const b = makeHarness()
+  await startAck(b.controller)
+  b.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
+  b.controller.handleSessionBoundary()
+  expect(b.notifyCalls).toHaveLength(0)
+})
+
+it('E3 后同会话再次创建可重试（无定时器清 pending，守卫只认 window）', async () => {
+  const h = makeHarness({ builtinIds: new Set(['anthropic']) })
+  await startAck(h.controller)
+  expect(h.captured.sent).toHaveLength(1)
+  // 触发器未启动轮次 ⇒ window 从未置位 ⇒ 守卫不挡，下一次创建重新注入。
+  await h.controller.maybeStartAck({
+    task: { ...TASK, id: 't2' },
+    model: MODEL,
+    isIdle: true,
+    isToggleDisabled: false,
   })
+  expect(h.captured.sent).toHaveLength(2)
+})
 
   // ── 7. E6 注销失败重试 ──
 
@@ -359,10 +371,9 @@ describe('ack-turn 编排', () => {
 
   // ── 8. session 边界 ──
 
-  it('handleSessionBoundary：先写盘判定（未落盘发通知）再全量清理并取消定时器', async () => {
+  it('handleSessionBoundary：先写盘判定（未落盘发通知）再全量清理', async () => {
     const h = makeHarness()
     await startAck(h.controller)
-    expect(vi.getTimerCount()).toBe(1)
 
     h.controller.handleSessionBoundary()
 
@@ -370,11 +381,10 @@ describe('ack-turn 编排', () => {
     expect(h.notifyCalls).toHaveLength(1)
     expect(h.notifyCalls[0]!.level).toBe('warning')
     // ② 全量清理。
-    expect(ackState.pending).toBe(false)
     expect(ackState.window).toBeNull()
     expect(ackState.ackTurnStarted).toBe(false)
     expect(ackState.taskId).toBeNull()
-    // ③ 定时器已取消。
+    // ③ 无任何在途定时器（机制不持有 timer）。
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -384,13 +394,14 @@ describe('ack-turn 编排', () => {
     h.controller.handleSessionBoundary()
 
     expect(h.notifyCalls).toHaveLength(0)
+    // 反向断言：整个流程不创建任何定时器。
     expect(vi.getTimerCount()).toBe(0)
   })
 })
 
-// ── 阶段 4 修复的回归用例（一致性审查 F1/F2/F3）──
+// ── 回归用例（一致性审查 F2/F3 + 去定时器后的守卫语义）──
 
-describe('ack-turn 修复回归（一致性审查 F1/F2/F3）', () => {
+describe('ack-turn 守卫与归因回归', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     resetAckState()
@@ -400,28 +411,16 @@ describe('ack-turn 修复回归（一致性审查 F1/F2/F3）', () => {
     resetAckState()
   })
 
-  it('F1：30s 自检后清 pending ⇒ 后续创建仍可再次触发 ack（不被顶部去重守卫永久挡死）', async () => {
-    const a = makeHarness({ builtinIds: new Set(['anthropic']) })
-    await a.controller.maybeStartAck({
-      task: TASK,
-      model: MODEL,
-      isIdle: true,
-      isToggleDisabled: false,
-    })
-    expect(a.captured.sent).toHaveLength(1)
-    expect(ackState.pending).toBe(true)
+  it('window 在场时不再注入第二个触发器（同会话连续创建）', async () => {
+    const h = makeHarness({ builtinIds: new Set(['anthropic']) })
+    await startAck(h.controller)
+    h.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
+    expect(h.captured.sent).toHaveLength(1)
 
-    vi.advanceTimersByTime(TICK_INTERVAL_MS)
-    expect(a.notifyCalls).toHaveLength(1) // e3-no-turn 如实补发
-    expect(ackState.pending).toBe(false) // ← 修复点
-
-    await a.controller.maybeStartAck({
-      task: { ...TASK, id: 't2' },
-      model: MODEL,
-      isIdle: true,
-      isToggleDisabled: false,
-    })
-    expect(a.captured.sent).toHaveLength(2) // 第二次创建仍能触发
+    // 窗口已武装 ⇒ 第二次创建不注入（合成轮尚未产出 assistant，落盘判据仍开着）。
+    await startAck(h.controller, {})
+    expect(h.captured.sent).toHaveLength(1)
+    expect(h.captured.registered).toHaveLength(1)
   })
 
   it('F2：!isIdle ⇒ 即使覆写不可用也不发如实文案（忙时轮次自然落盘，通知即反向撒谎）', async () => {
