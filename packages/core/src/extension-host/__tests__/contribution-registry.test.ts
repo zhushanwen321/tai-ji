@@ -101,7 +101,7 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'scheduler'])
     expect(builtinContributions[0].contributes.statusBarItems).toHaveLength(1)
     expect(builtinContributions[1].contributes.slashCommands).toHaveLength(2)
-    expect(builtinContributions[2].contributes.slashCommands).toHaveLength(2) // scheduler + schedule alias
+    expect(builtinContributions[2].contributes.slashCommands).toHaveLength(1) // 发现面单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
     // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
@@ -262,8 +262,8 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
   it('TC-5g: filter 按 pluginId/type 过滤；无 filter 返回全部', () => {
     const { registry } = setup()
     registry.registerBuiltin()
-    expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo', 'scheduler', 'schedule'])
+    expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo', 'schedule'])
     expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    expect(registry.getContributions()).toHaveLength(5) // 1 statusline + 2 tasks + 2 scheduler slashCommands（「后台命令」view 已退役）
+    expect(registry.getContributions()).toHaveLength(4) // 1 statusline + 2 tasks + 1 scheduler slashCommand（「后台命令」view 已退役）
   })
 })

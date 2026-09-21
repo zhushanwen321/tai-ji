@@ -8,9 +8,11 @@
  *   statusBarItems 文本为空串——实际内容由 runtime plugin:statusBarUpdate 广播填充
  * - tasks（goal/todo，s5 落地 plugin 实体）：
  *   slashCommands 声明（goal/todo，name 不含前导 /，对齐 s1 schema v2 形状），执行仍由 pi extension 承担（§8 边界）
- * - scheduler（scheduler/schedule alias）：
- *   slashCommands 声明——landing 态无 session，pi 真源为空，slash 列表「声明即显示」
- *   （ADR-0050）；description 对齐 pi.registerCommand 注册期静态串（i18n.ts 中文词条）
+ * - scheduler：
+ *   slashCommands 声明（发现面只展示 schedule——pi 侧 scheduler/schedule 同 handler，
+ *   landing 声明按用户裁决单条展示；手输 /scheduler 在 session 内照样命中 pi handler）
+ *   ——landing 态无 session，pi 真源为空，slash 列表「声明即显示」（ADR-0050）；
+ *   description 对齐 pi.registerCommand 注册期静态串（i18n.ts 中文词条）
  *
  * 曾声明的 base-tool-enhance「后台命令」sidebar.tab view 已随该 native 视图退役
  * （composer-task-tray D10：托盘承接后台命令观察面，Plugins tab 的 plugin sidebar
@@ -45,11 +47,12 @@ export const builtinContributions: BuiltinContribution[] = [
     // scheduler 的 slashCommands 静态声明：landing 态无 session → pi 真源为空，slash 列表
     // 「声明即显示」（ADR-0050）——/scheduler 命令路径创建本就是 landing 场景。description
     // 对齐 pi.registerCommand 注册期静态串（scheduler 包 i18n.ts 的 command.description
-    // 中文词条）；schedule 为 alias（pi 侧同一 handler）。执行仍由 pi extension 承担（声明与执行分离）。
+    // 中文词条）。pi 侧 scheduler/schedule 同 handler：发现面按用户裁决只展示 schedule
+    // 单条（手输 /scheduler 在 session 建立后照样命中 pi handler）。执行仍由 pi extension
+    // 承担（声明与执行分离）。
     pluginId: 'scheduler',
     contributes: {
       slashCommands: [
-        { name: 'scheduler', description: '新建定时任务（打开表单）' },
         { name: 'schedule', description: '新建定时任务（打开表单）' },
       ],
     },
