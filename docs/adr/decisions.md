@@ -155,6 +155,9 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0067 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
 
+### ADR-0070 scheduler widget 推送减频与帧双职责显式接管（2026-09-21 设计裁决）
+widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（稳定字段 id/name/schedule/enabled/nextRunAt/locale 序列化对比，不变不推；倒计时等时间投影经 `TreeItem.when` 可选字段下放 renderer 每分钟本地倒数——时间流逝不是状态变化，不得触发推送）。widget 帧曾意外承载的两个隐藏职责显式接管：①**空闲保活心跳**（入站全帧 touch `lastActivityAt`，30s 帧掩护下 scheduler 会话永不 idle）→ 显式化为「有任务且距上次推送 >10min」的保活底线帧（方案不变量：保活间隔 ≪ idle 回收阈值 ≥3 倍余量；空任务不发——pi 清屏帧同样 touch 心跳，空任务保活 = 空会话永不回收）；②**reload 恢复时机**（renderer widget 纯帧驱动无恢复链路）→ runtime per-session 帧缓存 + `sendInitialState` 补发段（清屏 = 清缓存）。设计文档 `.tmp/tech-design/scheduler-widget-push.md`（过程产物），实施落点 = scheduler extension（指纹/保活/when）+ extension-protocol（TreeItem.when）+ runtime（帧缓存/补发段）+ renderer（when 倒数渲染）。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。
