@@ -50,6 +50,14 @@ function emptyShard(fileStat: { mtimeMs: number; size: number }): FileShard {
   return { mtimeMs: fileStat.mtimeMs, size: fileStat.size, rows: [], skippedLines: 0, cwd: null, failed: true }
 }
 
+/** getStats 逐文件聚合的累计口径（aggregateFiles 输出，拼装进 UsageStatsResult）。 */
+interface UsageFileAggregate {
+  rows: UsageRow[]
+  skippedLines: number
+  sessionCount: number
+  failedFiles: number
+}
+
 /**
  * 收集单个目录层内可扫描的 .jsonl 文件路径（仅普通文件）。
  *
@@ -95,18 +103,32 @@ export class UsageStatsService {
    */
   async getStats(): Promise<UsageStatsResult> {
     const scannedAt = Date.now()
-    const allRows: UsageRow[] = []
-    let skippedLines = 0
-    let sessionCount = 0
-    let failedFiles = 0
 
-    let entries: Dirent[]
+    const entries = await this.readRootEntries()
+    if (entries === null) {
+      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0, failedFiles: 0 }
+    }
+
+    // 根层 + 一层 encodeCwd 子目录（只下钻一层，孙目录不进）
+    const jsonlPaths = await this.collectJsonlPaths(entries)
+    // 收集当前磁盘文件路径，用于清理已删除文件的分片
+    const currentPaths = new Set<string>()
+    const agg = await this.aggregateFiles(jsonlPaths, currentPaths)
+    this.pruneDeletedShards(currentPaths)
+
+    return { ...agg, scannedAt }
+  }
+
+  /**
+   * 根层 readdir；不可读时 warn 留痕（含恢复动作）并返回 null，调用方返回空结果
+   * （sessionCount=0 + rows 空，UI 至少显示空态而非崩溃）。
+   */
+  private async readRootEntries(): Promise<Dirent[] | null> {
     try {
-      entries = await readdir(this.sessionsDir, { withFileTypes: true })
+      return await readdir(this.sessionsDir, { withFileTypes: true })
     } catch (e) {
       // ENOENT（首启未产生 session 目录）= 合法空态；其他错误（EACCES 等）= 全量数据点
-      // 不可读——warn 留痕（含恢复动作），返回空结果但不伪装成「无用量」之外的任何形态
-      //（sessionCount=0 + rows 空，UI 至少显示空态而非崩溃）。
+      // 不可读——warn 留痕，但不伪装成「无用量」之外的任何形态
       if (!isEnoent(e)) {
         console.warn(
           `[usage-stats] session 目录不可读，用量统计返回空（实际用量不可见）: ${this.sessionsDir}。` +
@@ -114,10 +136,12 @@ export class UsageStatsService {
           e,
         )
       }
-      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0, failedFiles: 0 }
+      return null
     }
+  }
 
-    // 根层 + 一层 encodeCwd 子目录（只下钻一层，孙目录不进）
+  /** 根层 + 一层 encodeCwd 子目录的 .jsonl 路径清单（§11.12：两层即够——pi 只写一层）。 */
+  private async collectJsonlPaths(entries: Dirent[]): Promise<string[]> {
     const jsonlPaths = collectScannableJsonlPaths(this.sessionsDir, entries)
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
@@ -139,9 +163,21 @@ export class UsageStatsService {
       }
       jsonlPaths.push(...collectScannableJsonlPaths(subDir, subEntries))
     }
+    return jsonlPaths
+  }
 
-    // 收集当前磁盘文件路径，用于清理已删除文件的分片
-    const currentPaths = new Set<string>()
+  /**
+   * 逐文件聚合：(mtimeMs, size) 双键命中（D9）→ 直接用分片；变化/新增 → 重读并回写分片。
+   * currentPaths 记录磁盘现存文件（pruneDeletedShards 的清理依据）。
+   */
+  private async aggregateFiles(
+    jsonlPaths: string[],
+    currentPaths: Set<string>,
+  ): Promise<UsageFileAggregate> {
+    const rows: UsageRow[] = []
+    let skippedLines = 0
+    let sessionCount = 0
+    let failedFiles = 0
 
     for (const filePath of jsonlPaths) {
       let fileStat
@@ -156,10 +192,9 @@ export class UsageStatsService {
       currentPaths.add(filePath)
       const cached = this.shards.get(filePath)
 
-      // (mtimeMs, size) 双键比对（D9）
       if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
         // 未变文件：直接用分片
-        allRows.push(...cached.rows)
+        rows.push(...cached.rows)
         skippedLines += cached.skippedLines
         if (cached.failed) failedFiles++
         sessionCount++
@@ -169,20 +204,22 @@ export class UsageStatsService {
       // 变化/新增文件：重读
       const shard = await this.scanFile(filePath, fileStat)
       this.shards.set(filePath, shard)
-      allRows.push(...shard.rows)
+      rows.push(...shard.rows)
       skippedLines += shard.skippedLines
       if (shard.failed) failedFiles++
       sessionCount++
     }
 
-    // 清理已删除文件的分片
+    return { rows, skippedLines, sessionCount, failedFiles }
+  }
+
+  /** 清理已删除文件的分片（磁盘上不再存在的路径对应分片丢弃）。 */
+  private pruneDeletedShards(currentPaths: Set<string>): void {
     for (const key of this.shards.keys()) {
       if (!currentPaths.has(key)) {
         this.shards.delete(key)
       }
     }
-
-    return { rows: allRows, scannedAt, sessionCount, skippedLines, failedFiles }
   }
 
   /**

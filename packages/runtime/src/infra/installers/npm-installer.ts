@@ -226,36 +226,47 @@ function encodePackageName(name: string): string {
 const NPM_NAME_SEGMENT_RE = /^[a-z0-9._-]+$/
 const NPM_NAME_MAX_LENGTH = 214
 
+/**
+ * 拒绝并抛 NpmInstallError。code 取 not_found：非法名在 registry 必然查无此包；
+ * 消费方（ExtensionService 经 InstallerError 形状读 code）按「包不存在」处理，
+ * 无需扩 code 契约。
+ */
+function rejectNpmName(name: string, reason: string): never {
+  throw new NpmInstallError(
+    'not_found',
+    `Invalid package name "${name}": ${reason}. Path traversal outside node_modules is blocked. 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
+  )
+}
+
 export function validateNpmName(name: string): void {
-  const reject = (reason: string): never => {
-    // code 取 not_found：非法名在 registry 必然查无此包；消费方（ExtensionService
-    // 经 InstallerError 形状读 code）按「包不存在」处理，无需扩 code 契约
-    throw new NpmInstallError(
-      'not_found',
-      `Invalid package name "${name}": ${reason}. Path traversal outside node_modules is blocked. 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
-    )
-  }
-  if (name === '') reject('empty name')
-  if (name.length > NPM_NAME_MAX_LENGTH) reject(`longer than ${NPM_NAME_MAX_LENGTH} chars`)
-  if (name !== name.trim()) reject('leading/trailing whitespace')
-  if (name.startsWith('.') || name.startsWith('_')) reject('starts with "." or "_"')
-  if (name.startsWith('@')) {
-    const rest = name.slice(1)
-    const slash = rest.indexOf('/')
-    if (slash === -1) reject('scoped name missing "/"')
-    if (rest.indexOf('/', slash + 1) !== -1) reject('more than one "/" in scoped name')
-    const scope = rest.slice(0, slash)
-    const pkg = rest.slice(slash + 1)
-    if (scope === '') reject('empty scope')
-    if (pkg === '') reject('empty package part after scope')
-    if (scope === '.' || scope === '..') reject(`scope is "${scope}"`)
-    if (pkg === '.' || pkg === '..') reject(`package part is "${pkg}"`)
-    if (!NPM_NAME_SEGMENT_RE.test(scope)) reject('scope has characters outside [a-z0-9-._]')
-    if (!NPM_NAME_SEGMENT_RE.test(pkg)) reject('package part has characters outside [a-z0-9-._]')
-  } else {
-    if (name.includes('/')) reject('unscoped name contains "/"')
-    if (!NPM_NAME_SEGMENT_RE.test(name)) reject('has characters outside [a-z0-9-._]')
-  }
+  if (name === '') rejectNpmName(name, 'empty name')
+  if (name.length > NPM_NAME_MAX_LENGTH) rejectNpmName(name, `longer than ${NPM_NAME_MAX_LENGTH} chars`)
+  if (name !== name.trim()) rejectNpmName(name, 'leading/trailing whitespace')
+  if (name.startsWith('.') || name.startsWith('_')) rejectNpmName(name, 'starts with "." or "_"')
+  if (name.startsWith('@')) validateScopedNpmName(name)
+  else validateUnscopedNpmName(name)
+}
+
+/** scoped 包名（@scope/pkg）段规则：恰好一个 `/`，scope 与包段各自过白名单。 */
+function validateScopedNpmName(name: string): void {
+  const rest = name.slice(1)
+  const slash = rest.indexOf('/')
+  if (slash === -1) rejectNpmName(name, 'scoped name missing "/"')
+  if (rest.indexOf('/', slash + 1) !== -1) rejectNpmName(name, 'more than one "/" in scoped name')
+  const scope = rest.slice(0, slash)
+  const pkg = rest.slice(slash + 1)
+  if (scope === '') rejectNpmName(name, 'empty scope')
+  if (pkg === '') rejectNpmName(name, 'empty package part after scope')
+  if (scope === '.' || scope === '..') rejectNpmName(name, `scope is "${scope}"`)
+  if (pkg === '.' || pkg === '..') rejectNpmName(name, `package part is "${pkg}"`)
+  if (!NPM_NAME_SEGMENT_RE.test(scope)) rejectNpmName(name, 'scope has characters outside [a-z0-9-._]')
+  if (!NPM_NAME_SEGMENT_RE.test(pkg)) rejectNpmName(name, 'package part has characters outside [a-z0-9-._]')
+}
+
+/** 非 scoped 包名段规则：不含 `/` 且整体过白名单。 */
+function validateUnscopedNpmName(name: string): void {
+  if (name.includes('/')) rejectNpmName(name, 'unscoped name contains "/"')
+  if (!NPM_NAME_SEGMENT_RE.test(name)) rejectNpmName(name, 'has characters outside [a-z0-9-._]')
 }
 
 /**
