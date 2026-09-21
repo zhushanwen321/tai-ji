@@ -188,7 +188,123 @@ export function createPiHostServices(): HostServices {
         engines: engineRoots(),
       };
     },
+
+    // [D2 扩展加载显式化] 孙进程扩展路径集（per-host 常量，双形态解析见
+    // resolveGrandchildExtensionPaths 注释）。每次调用现解析（P-C2 惰性求值：
+    // configureCore 只挂函数引用，取值发生在 core run 派发期）。
+    extensionPaths(): string[] {
+      return resolveGrandchildExtensionPaths(process.argv);
+    },
   };
+}
+
+// ── [D2 扩展加载显式化] 孙进程扩展白名单注入源（双形态） ──
+
+/**
+ * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
+ * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
+ * 可能注册工具/注入提示词，孙进程的工具面与 system prompt 行为不可控。
+ *
+ * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
+ * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例）。
+ */
+const GRANDCHILD_EXTENSION_PKG_SEGMENTS = "@zhushanwen/pi-structured-output";
+
+/**
+ * 孙进程扩展路径集解析（设计 D2 双形态；argv 与 peerDep 解析器经参数注入，纯函数
+ * 可测——HostServices 方法闭包传 process.argv）：
+ *   1. taiji 宿主形态：主 pi 进程 argv 的 `--extension` 全量值 = runtime
+ *      extension-service 经 spawn argv 下发的 staged 集——按白名单收窄。该形态
+ *      判据 = argv 有 `--extension`（taiji spawn 恒带）。
+ *   2. 独立 pi 形态（npm 安装、无 taiji runtime）：从包自身 optional peerDep 解析
+ *      structured-output sibling 路径（安装了即解析、未安装则空）。
+ * 双源皆空 = 空数组（不炸；带 schema run 的 fail-fast 属 H3 断言，非本通道职责）。
+ */
+export function resolveGrandchildExtensionPaths(
+  argv: readonly string[],
+  resolvePeer: () => string | undefined = resolveStructuredOutputPeer,
+): string[] {
+  const stagedAll = collectExtensionFlagValues(argv);
+  const whitelisted = stagedAll.filter(isGrandchildExtensionPath);
+  if (whitelisted.length > 0) return whitelisted;
+  const peer = resolvePeer();
+  return peer !== undefined ? [peer] : [];
+}
+
+/** 路径是否命中孙进程扩展白名单：路径段序列包含 `<scope>/<pkg>` 连续两段
+ *  （目录形态 `.../@zhushanwen/pi-structured-output` 与入口文件形态
+ *  `.../@zhushanwen/pi-structured-output/index.js` 都命中；末尾越界段取
+ *  undefined 不等，天然界内）。 */
+function isGrandchildExtensionPath(p: string): boolean {
+  const segs = p.split(/[\\/]/).filter((s) => s.length > 0);
+  const wanted = GRANDCHILD_EXTENSION_PKG_SEGMENTS.split("/");
+  return segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w));
+}
+
+/**
+ * 独立形态回退源：optional peerDep sibling 解析（package.json 锚点 → 包根目录）。
+ * 解析失败（未安装 / 布局异常）= undefined，不炸——空集回退。
+ */
+function resolveStructuredOutputPeer(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    return dirname(require.resolve(`${GRANDCHILD_EXTENSION_PKG_SEGMENTS}/package.json`));
+  } catch (err) {
+    getLogger("pi-host").debug(
+      "[pi-host] structured-output optional peerDep 未解析（独立形态未安装，孙进程扩展集回退空）",
+      { reason: toErrorMessage(err) },
+    );
+    return undefined;
+  }
+}
+
+/**
+ * 从 argv 提取 `--extension` / `-e` 的全部值（等号与空格两种形式；自旧
+ * mirrorMainProcessFlags 的解析规则精简迁移——该镜像机制已废弃，此处只取
+ * extension 值，布尔镜像面不再透传）。
+ *
+ * 有值 flag 表（跳过其他 flag 的值时不误吃）与 MF-7a 判定（`--extension` 后跟
+ * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见旧测试族
+ * （spawn-args.test.ts 历史，git 可追溯）。
+ */
+const ARGV_VALUED_FLAGS = new Set<string>([
+  "--extension", "-e",
+  "--skill",
+  // g4-allow: argv 有值 flag 解析词表（跳过非 extension flag 的值防误吃），非模型引用拼装
+  "--model", "--system-prompt", "--append-system-prompt", // g4-allow: 同上——解析词表成员，非拼装
+  "--tools", "-t", "--exclude-tools", "-xt",
+  "--fork", "--session-dir", "--mode",
+  "--thinking", "--models",
+]);
+
+/** argv 中 flag 起始索引：argv[0]=runtime，argv[1]=binary 路径。 */
+const ARGV_FLAG_START = 2;
+
+function collectExtensionFlagValues(argv: readonly string[]): string[] {
+  const values: string[] = [];
+  const flagArgs = argv.length > ARGV_FLAG_START ? argv.slice(ARGV_FLAG_START) : [];
+  for (let i = 0; i < flagArgs.length; i++) {
+    const tok = flagArgs[i];
+    const eqMatch = /^(--extension|-e)=(.*)$/.exec(tok);
+    if (eqMatch !== null) {
+      if (eqMatch[2]) values.push(eqMatch[2]);
+      continue;
+    }
+    if (tok === "--extension" || tok === "-e") {
+      const next = flagArgs[i + 1];
+      // 单 `-` 开头的合法路径不是 flag（原 MF-7a）；`--` 开头是真 flag，不吃值
+      if (next !== undefined && !next.startsWith("--") && next.length > 0) {
+        values.push(next);
+        i++;
+      }
+      continue;
+    }
+    if (ARGV_VALUED_FLAGS.has(tok)) {
+      i++;
+      continue;
+    }
+  }
+  return values;
 }
 
 /**

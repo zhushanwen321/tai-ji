@@ -86,6 +86,14 @@ export interface RunContextParams {
    * 未知字段，undefined 不上 wire。
    */
   sessionDir?: string;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（pi 引擎侧逐项拼
+   * `--extension` argv）。per-host 常量而非 per-run 变量，故落 ctx。宿主侧来源
+   * 双形态：taiji 宿主 = extension-service 下发的白名单收窄集（经 pi-host 注入）；
+   * 独立 pi = subagent-workflow 自身 optional peerDep 解析回退。additive 可选：
+   * 旧引擎忽略未知字段，undefined 不上 wire。
+   */
+  extensionPaths?: string[];
 }
 
 // ============================================================

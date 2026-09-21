@@ -108,6 +108,15 @@ rl.on("line", (line) => {
     send({ type: "agent_settled" });
     return;
   }
+  if (mode === "echo-argv") {
+    // [D2 扩展加载显式化] 验收：回显孙进程 argv（JSON 数组），断言 --extension 与
+    // 基座 --no-extensions 的真实 execve 形态
+    send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: JSON.stringify(process.argv) } });
+    send({ type: "message_end", message: { stopReason: "stop" } });
+    send({ type: "agent_end", willRetry: false, reason: "end_turn" });
+    send({ type: "agent_settled" });
+    return;
+  }
   // success / header 共用的完整事件流（含 invalid 行与 ui request 管道）
   process.stdout.write("this line is not json\\n");
   send({ nope: 1 });
@@ -331,6 +340,41 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.success).toBe(true);
       // schema 声明缺省 → 不注入（哨兵回显证明 env 键未挂）
       expect(result.content).toBe("<env-absent>");
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D2] extensionPaths → 孙进程 argv 含 --extension <structured-output 路径> + 基座 --no-extensions（真实 spawn 链）", async () => {
+    // 真实 spawn 链验收（协议化后 argv 镜像机制废弃的显式替代通道）：ctx 还原 →
+    // SpawnRunParams.extensionPaths → buildSpawnArgs → execve argv，孙进程可读。
+    const extPath = "/staged/resources/extensions/@zhushanwen/pi-structured-output";
+    const h = await makeHarness("echo-argv");
+    try {
+      const result = await runSpawnOnce(
+        baseParams(h, { extensionPaths: [extPath] }),
+        callbacksOf(h),
+      );
+      const argv: string[] = JSON.parse(result.content ?? "[]");
+      expect(argv).toContain("--no-extensions");
+      const extIdx = argv.indexOf("--extension");
+      expect(extIdx).toBeGreaterThanOrEqual(0);
+      expect(argv[extIdx + 1]).toBe(extPath);
+      // 旧镜像机制的面不再透传（--approve/--no-context-files 属主进程 flag，非孙进程固有）
+      expect(argv).not.toContain("--approve");
+      expect(argv).not.toContain("--no-context-files");
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D2] extensionPaths 缺省 → 孙进程 argv 不含 --extension（基座 --no-extensions 仍在）", async () => {
+    const h = await makeHarness("echo-argv");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      const argv: string[] = JSON.parse(result.content ?? "[]");
+      expect(argv).not.toContain("--extension");
+      expect(argv).toContain("--no-extensions");
     } finally {
       restoreHarness(h);
     }

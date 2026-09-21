@@ -17,15 +17,14 @@ import { execFile } from "node:child_process";
 import { buildOutboundChildEnv, getLogger } from "@zhushanwen/subagent-engine-sdk";
 
 import {
+  appendExtensionArgs,
   asThinkingLevel,
   buildPiSubagentSpawnArgs,
   parseSpawnModelRef,
-  type PiMirrorFlags,
   type SpawnModelRef,
   type ThinkingLevel,
 } from "@zhushanwen/pi-rpc";
 
-import type { MirrorFlags } from "./argv-mirror.ts";
 import { SCHEMA_ENV_MAX_BYTES, SCHEMA_ENV_VAR } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
 import type { SdkEvent } from "./spawn-event-adapter.ts";
@@ -55,14 +54,16 @@ export function buildSpawnArgs(
     sessionFile?: string;
     forkSource: string | undefined;
     skillPaths: string[] | undefined;
-    /** 镜像自主进程 argv 的 flag（--no-extensions/--approve/--extension/--no-context-files）。 */
-    mirrorFlags?: MirrorFlags;
+    /**
+     * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（wire ctx.extensionPaths
+     * 的引擎侧消费）——逐项拼 `--extension` argv。取代已废弃的 argv 镜像机制
+     * （mirrorMainProcessFlags：协议化后引擎进程 argv 恒无扩展 flag，镜像恒空）。
+     * undefined / 空数组 = 不拼任何 --extension。
+     */
+    extensionPaths?: string[];
   },
 ): string[] {
-  // MirrorFlags（argv-mirror 解析结果）与 PiMirrorFlags 结构同形（TS 结构化类型），
-  // 直传无需转换——字段集与语义见 pi-rpc spawn-args.ts PiMirrorFlags 注释。
-  const mirrorFlags: PiMirrorFlags | undefined = params.mirrorFlags;
-  return buildPiSubagentSpawnArgs({
+  const args = buildPiSubagentSpawnArgs({
     modelRef: params.modelRef,
     thinkingLevel: params.thinkingLevel,
     agentTools: params.agentTools,
@@ -71,8 +72,15 @@ export function buildSpawnArgs(
     ...(params.sessionFile !== undefined ? { sessionFile: params.sessionFile } : {}),
     forkSource: params.forkSource,
     skillPaths: params.skillPaths,
-    ...(mirrorFlags !== undefined ? { mirrorFlags } : {}),
   });
+  // 孙进程扩展加载显式化（设计 D2）：① -ne 禁 settings 清单 discovery——子代理的
+  // 扩展面唯一源 = 下方显式白名单（pi 官方语义「-ne 下显式 -e 仍生效」，与 taiji
+  // 主 pi 基座形态一致；同时是 runtime 孤儿收殓的 argv 主判别位）；② --extension
+  // 逐项拼白名单路径（pi 公开承诺的加载通道，设计 D2 被否项 b：路径列表不走 env，
+  // 与出站 env 白名单机制解耦）。
+  args.push("--no-extensions");
+  appendExtensionArgs(args, params.extensionPaths);
+  return args;
 }
 
 // ── schema env 注入桥（D-A6；[D1] 输入源 = task.schema 派生值） ──

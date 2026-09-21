@@ -27,6 +27,7 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import { getHostServices } from "../../../core/host-services.ts";
 import { getSubagentSessionDir } from "../../assembly/path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
@@ -329,6 +330,9 @@ interface WireRunParams {
     /** [Option C] 恒有值（宿主注入 ?? 同源 env 推导）——与 sessionRootId 的
      * "undefined 不上 wire" 不同，本字段派生恒产出字符串。 */
     sessionDir: string;
+    /** [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（HostServices 端口取值；
+     * 宿主未实现端口 = undefined 不上 wire）。 */
+    extensionPaths?: string[];
   };
   resume?: NonNullable<RunContext["resume"]>;
 }
@@ -361,6 +365,16 @@ function deriveHostSubagentSessionDir(): string {
 }
 
 /**
+ * [D2 扩展加载显式化] HostServices.extensionPaths 端口取值（每次 run 现取——
+ * P-C2 惰性求值，扫描/注册期早于 configureCore 的坑不在此复现：buildRunParams
+ * 只在 run 派发时执行）。返回 wire 展开形态（undefined = 端口缺席，不挂键）。
+ */
+function hostExtensionPaths(): { extensionPaths: string[] } | undefined {
+  const paths = getHostServices().extensionPaths?.();
+  return paths !== undefined ? { extensionPaths: paths } : undefined;
+}
+
+/**
  * run 帧 wire 载荷构建。协议 ctx 承载（RunContext 字段映射表）：cwd 取任务声明值
  * （有值才上 wire——缺省不上，引擎侧回退自身进程 cwd；worktree 隔离路径由
  * taskSpecWithModel 合流后必有值）；ctxModel 投影 canonical 词形（provider/id，
@@ -390,6 +404,11 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       // 缺省同源 env 推导（deriveHostSubagentSessionDir）——恒有值恒上 wire，引擎
       // 据此组装 --session-dir 不自推导（引擎本地推导降级 [LEGACY] fallback）。
       sessionDir: ctx.sessionDir ?? deriveHostSubagentSessionDir(),
+      // [D2 扩展加载显式化] 孙进程扩展路径集走 HostServices 端口（per-host 常量，
+      // 不经 per-run 载荷）：pi 壳双形态注入（taiji 宿主 argv 白名单 / 独立 peerDep
+      // 回退）。端口缺席（zsw 壳 / 未配置）= undefined 不上 wire（协议 additive）；
+      // 在场时空数组也上 wire（显式「无扩展」，引擎侧不拼 --extension）。
+      ...(hostExtensionPaths() ?? {}),
     },
     ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
   };

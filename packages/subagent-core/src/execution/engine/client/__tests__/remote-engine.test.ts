@@ -26,6 +26,7 @@ import {
   _resetHostUiRequestEndpointForTest,
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
+import { configureCore, resetCoreForTests } from "../../../../core/host-services.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -72,6 +73,8 @@ afterEach(() => {
   vi.useRealTimers();
   // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
   _resetHostUiRequestEndpointForTest();
+  // [D2] extensionPaths 注入用例 configureCore 的宿主配置，用例后复位防串扰
+  resetCoreForTests();
 });
 
 interface Fixture {
@@ -305,6 +308,43 @@ describe("RemoteEngine run 帧映射", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("[D2] HostServices.extensionPaths 端口 → wire ctx.extensionPaths 逐字保真；端口缺席 → 无该键；空数组显式上 wire", async () => {
+    // 正向：宿主端口在场（pi 壳双形态注入源）→ wire ctx 逐字保真（pi 引擎侧逐项
+    // 拼 --extension）
+    configureCore({
+      dataRoot: () => dataDir,
+      log: () => {},
+      extensionPaths: () => ["/staged/@zhushanwen/pi-structured-output"],
+    });
+    const withPaths = makeEngine();
+    const { ctx: ctxP, events: eventsP } = makeCtx();
+    await withPaths.engine.run({ prompt: "p" }, ctxP);
+    expect(extractRunParams(eventsP).ctx.extensionPaths).toEqual([
+      "/staged/@zhushanwen/pi-structured-output",
+    ]);
+    await withPaths.cleanup();
+
+    // 空数组 = 显式「无扩展」声明——上 wire（区别于端口缺席的键不存在）
+    configureCore({
+      dataRoot: () => dataDir,
+      log: () => {},
+      extensionPaths: () => [],
+    });
+    const emptyPaths = makeEngine();
+    const { ctx: ctxE, events: eventsE } = makeCtx();
+    await emptyPaths.engine.run({ prompt: "p" }, ctxE);
+    expect(extractRunParams(eventsE).ctx.extensionPaths).toEqual([]);
+    await emptyPaths.cleanup();
+
+    // 负向：端口缺席（宿主未实现 / 未 configureCore）→ wire ctx 不出现该键
+    resetCoreForTests();
+    const bare = makeEngine();
+    const { ctx: ctxB, events: eventsB } = makeCtx();
+    await bare.engine.run({ prompt: "p" }, ctxB);
+    expect(extractRunParams(eventsB).ctx).not.toHaveProperty("extensionPaths");
+    await bare.cleanup();
   });
 
   it("handleReady → RunContext 回调（运行中句柄回填；[池抽象降级] poolResolved 通道已退役）", async () => {

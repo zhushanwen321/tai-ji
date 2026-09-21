@@ -41,7 +41,6 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 import { killPiProcess } from "@zhushanwen/pi-rpc";
 
-import { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 import { registerActiveChild } from "./active-children.ts";
 import { PI_KILL_GRACE_MS } from "./constants.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
@@ -156,8 +155,13 @@ export interface SpawnRunParams {
   agentTools?: string[];
   /** fork 源 session 文件（--fork）。 */
   forkSource?: string;
-  /** 镜像 flag 覆盖（缺省自动镜像主进程 argv）。 */
-  mirrorFlags?: MirrorFlags;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（协议 ctx.extensionPaths
+   * 还原）——spawn-args 逐项拼 `--extension`。argv 镜像机制（mirrorMainProcessFlags）
+   * 已废弃：引擎进程由 core spawn（argv 恒无 flag），镜像前提「从主 pi 进程 spawn」
+   * 不存在。缺省 = 不拼 --extension。
+   */
+  extensionPaths?: string[];
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
 }
@@ -329,7 +333,7 @@ export async function runSpawnOnce(
       sessionFile: params.resumeSessionFile,
       forkSource: params.forkSource,
       skillPaths: params.skillPaths,
-      mirrorFlags: params.mirrorFlags ?? mirrorMainProcessFlags(process.argv),
+      extensionPaths: params.extensionPaths,
     });
     const invocation = getPiInvocation(args);
     const child = spawnEngineChild({

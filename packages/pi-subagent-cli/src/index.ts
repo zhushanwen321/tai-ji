@@ -32,7 +32,6 @@ export {
 export { parseChannel, type ParsedChannel } from "./ui-channels.ts";
 export { createUiRequestQueue, type UiRequestQueueDeps } from "./ui-request-queue.ts";
 export { parseSpawnLine, deriveSessionFilePath, findSessionFileByHeaderId } from "./spawn-event-adapter.ts";
-export { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 export { createTurnLimiter, WRAP_UP_HINT } from "./turn-limiter.ts";
 export {
   performGetStateHandshake,

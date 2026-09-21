@@ -94,6 +94,13 @@ export interface RunContext {
    * [LEGACY] fallback（独立运行/测试形态）。
    */
   sessionDir?: string;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（协议 run.params.ctx.extensionPaths
+   * 的进程内还原）——pi 引擎侧逐项拼 `--extension` argv，取代已废弃的 argv 镜像
+   * 机制（镜像前提「引擎进程从主 pi 进程 spawn」已不存在，协议化后引擎进程 argv
+   * 恒无扩展 flag）。additive 可选：宿主缺省不传。
+   */
+  extensionPaths?: string[];
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议面）。 */
   onChildSpawned?: (child: { pid: number | undefined; killed: boolean }) => void;

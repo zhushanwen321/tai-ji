@@ -48,7 +48,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
 import { createDelivery } from "@zhushanwen/session-delivery";
 
-import { createPiHostServices, createPiNotifyDomainPorts } from "../pi-host.ts";
+import { createPiHostServices, createPiNotifyDomainPorts, resolveGrandchildExtensionPaths } from "../pi-host.ts";
 
 beforeEach(() => {
   vi.mocked(getAgentDir).mockClear();
@@ -193,6 +193,79 @@ describe("createPiHostServices.log（桥接 pi-extension-logger）", () => {
     expect(fake.error).toHaveBeenCalledWith("e-msg", { reason: "x" });
     expect(vi.mocked(getLogger)).toHaveBeenNthCalledWith(1, "comp-a");
     expect(vi.mocked(getLogger)).toHaveBeenNthCalledWith(2, "comp-b");
+  });
+});
+
+describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths（[D2] 双形态注入源）", () => {
+  const argvSaved = process.argv;
+
+  function withArgv(argv: string[], fn: () => void): void {
+    process.argv = argv;
+    try {
+      fn();
+    } finally {
+      process.argv = argvSaved;
+    }
+  }
+
+  it("宿主形态：主进程 argv --extension 全量（extension-service 下发集）→ 白名单收窄仅 structured-output", () => {
+    // taiji 宿主形态：runtime spawn 主 pi 时 --extension = getExtensionPaths 全量 staged 集
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc", "--no-extensions", "--approve",
+      "--extension", "/staged/resources/extensions/@zhushanwen/pi-subagent-workflow",
+      "--extension=/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      "--extension", "/staged/resources/extensions/@zhushanwen/pi-goal",
+      "--extension", "/staged/resources/extensions/@zhushanwen/pi-structured-output/index.js",
+    ];
+    expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+      "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      "/staged/resources/extensions/@zhushanwen/pi-structured-output/index.js",
+    ]);
+  });
+
+  it("宿主形态解析不误吃其他 flag 值（--skill 值被跳过、真 flag 不吃值、单 - 路径是值）", () => {
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--skill", "@zhushanwen/pi-structured-output-skill-lookalike",
+      "--extension", "--approve", // 后跟真 flag 不吃值
+      "--extension", "-weird-dir/@zhushanwen/pi-structured-output", // 单 - 开头路径是值（原 MF-7a）
+      "some positional prompt",
+    ];
+    expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+      "-weird-dir/@zhushanwen/pi-structured-output",
+    ]);
+  });
+
+  it("独立形态：argv 无 --extension → optional peerDep sibling 解析回退（resolvePeer 命中）", () => {
+    expect(resolveGrandchildExtensionPaths(["node", "/pi", "--mode", "rpc"], () => "/npm/node_modules/@zhushanwen/pi-structured-output")).toEqual([
+      "/npm/node_modules/@zhushanwen/pi-structured-output",
+    ]);
+  });
+
+  it("独立形态真实解析链：workspace 布局下 peerDep sibling 可解析（createRequire 实测命中包根）", () => {
+    withArgv(["node", "/pi", "--mode", "rpc"], () => {
+      const paths = createPiHostServices().extensionPaths?.();
+      expect(paths).toHaveLength(1);
+      // workspace 布局下 pnpm symlink 解析到源目录（目录名 structured-output，
+      // 无 @zhushanwen 段——npm 安装形态则命中 node_modules/@zhushanwen/… 布局）
+      expect(paths![0]).toMatch(/structured-output$/);
+    });
+  });
+
+  it("双源皆空（argv 无 --extension + peerDep 未安装）→ 空数组不炸", () => {
+    expect(resolveGrandchildExtensionPaths(["node", "/pi", "--mode", "rpc"], () => undefined)).toEqual([]);
+  });
+
+  it("惰性求值：每次调用现解析（argv 变更后结果跟随，configureCore 只挂函数引用）", () => {
+    const host = createPiHostServices();
+    withArgv(["node", "/pi", "--mode", "rpc"], () => {
+      expect(host.extensionPaths?.()).not.toContain("/staged/x");
+    });
+    withArgv(["node", "/pi", "--extension", "/staged/@zhushanwen/pi-structured-output"], () => {
+      expect(host.extensionPaths?.()).toEqual(["/staged/@zhushanwen/pi-structured-output"]);
+    });
   });
 });
 
