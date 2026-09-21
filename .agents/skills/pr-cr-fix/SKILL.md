@@ -235,6 +235,14 @@ node <zsw-cli> workflow --workflow <repo>/.agents/skills/pr-cr-fix/workflows/pr-
 
 **断点恢复语义摘要**：恢复最小单位 = step（done/skipped 一律跳过；failed/in_progress 整体重跑）；resume 入口六道守卫依次执行——state 存在性与版本 / repo 一致 / 分支一致 / 活性双通道（引擎 state 主通道 + pid 降级，未知值视为 running）/ 工作区干净（`.review/` 除外）/ HEAD 外部变更需显式 `--allow-external-changes`；`--skip-steps` 命中的未完成 step 落 `skippedSteps` 披露；全 step done 且 HEAD 未变时幂等回放同一终态，HEAD 已变则 fail-fast 指引起新 run。cr-fix 重跑 = loop 整体重跑（fix commit 已进 git 历史，重跑面向当前 diff，已修复问题不再报出，通常 1-2 轮收敛）。
 
+**环境阻塞降级：zsw 引擎模型契约漂移时的手工全链**——zsw run 在任意 agent 步（典型 `failedStep=changeset`）以 error 签名 `Provider Registry 中不存在 Model: builtin:*` 失败时，走本降级路由（2026-09-21 实证根因，勿重新排查：ZCode 桌面端套餐切换后 `builtin:bigmodel-*-plan` entitlement 从 appserver Provider Registry 退役，而 zsw 引擎侧模型校验仍读陈旧 v2 config 快照 + 硬编码兜底 `ZCODE_FALLBACK_DEFAULT_MODEL`——引擎校验空间与注册表活空间漂移，任何 v2 内模型均被注册表拒绝；v2 内自定义 UUID provider 亦不可用：session/create 缺 reasoning level 且宿主不暴露 effort 透传；裸 zcode CLI `-p` 与 launcher patch 均正常——故障面收敛在 zsw 引擎↔appserver 的模型契约，修复归属 zcode-plugin-workspace 仓，本仓不动）。降级执行体 = 主 agent 手工全链：
+
+1. 确定性门禁照旧主 agent 直跑：阶段 1.1（`--skip-tests`）→ Gate-1a.5 changeset 自动分类 → 1.4 skill-yaml → 1.3 pr-submit → constraints → 1.6 coverage-gate → 1.5 metrics-gate（顺序同正常流程，命令不变）。
+2. 阶段 2 用 zcode 原生 saved workflow `review-fix-loop` 承接（`CreateWorkflow` `saved: { name: "review-fix-loop", args: { base: "main", autoCommit: true, reviewers: [8 维 agent .md 绝对路径数组] } }`，reviewers 取值同上文宿主路由 batch1）——并行 review / 聚合分组 / 并行 fix / 对账重审由该 workflow 内建，主 agent 只消费终态与报告（`reportDir` 默认 `.tmp/review-fix-loop`）。
+3. code-simplify 按 `agents/simplify-apply.md` 固化契约派发（发起前向用户披露 apply/report 档位，同正常流程披露义务）。
+4. 3a 终局三门 + 3b push 授权照旧。丢失面（主 agent 人工承接）：zsw 断点恢复 / gate 修复子循环自动重试 / 结构化终态披露——各 gate 失败恢复表仍适用，轮次上限照技能正文执行。
+5. zsw 通路修复后可弃降级回归路径 2：原 run state 在 `.review/pr-workflow/<runId>/`（`cat .review/pr-workflow/latest` 取 runId），HEAD 未变时带 `--runId` resume 从断点续跑。
+
 **门禁语义映射声明（相对路径 1/3 手工流程的四处收紧/承接，均非降级）**：
 
 1. **修复范围收紧**：嵌套 review-fix-loop 修复全部等级（must-fix + suggestion）且 clean 判定要求 suggestion 同为 0——严于路径 3「SUGGESTION 顺手修、INFO 忽略」。
@@ -429,6 +437,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 | Gate-3a pre-merge FAIL | 按 `failed_step` 重派 worker 修复后从 3a ① 重跑 |
 | 阶段 3b push 冲突 | `git fetch && git rebase` 后重试；重写历史后重审未解决的 review 线程 |
 | （zcode 路径 2）pr-lifecycle failed（任意 failedStep） | 一律先读 scriptResult 的 `error`（内含恢复指引）与 `resumeCommand`；暴毙无通知时 `cat .review/pr-workflow/latest` 拿 runId 续跑（详见路径 2 终态映射表） |
+| （zcode 路径 2）pr-lifecycle failed 且 error 签名 `Provider Registry 中不存在 Model: builtin:*` | zsw 引擎模型契约漂移（ZCode 套餐切换类环境变化），非本仓问题、resume 无效——按路径 2「环境阻塞降级」走手工全链；zsw 修复后带 `--runId` resume（HEAD 未变时守卫放行） |
 
 ## 本 skill 目录结构
 
