@@ -3,7 +3,9 @@
  *
  * 职责：维护每个 session 的环形缓冲（streamRing，仅 stream 类）+ 状态快照（stateSnapshot，
  * 仅 state 类）+ 订阅者集合（subscribers）。publish 按 topicOf(type) 三分类分流：
- * - state 类：分配 seq、写快照（同 key 覆盖）、不入 ring——last-value 语义，重连由快照恢复；
+ * - state 类：分配 seq、写快照（同 typeKey 覆盖；typeKey 出处两形态 = 静态映射
+ *   STATE_TYPE_KEY_MAP / 载荷派生 STATE_TYPE_KEY_PAYLOAD_DERIVED，widget 帧走后者）、
+ *   不入 ring——last-value 语义，重连由快照恢复；
  * - stream 类：分配 seq、入 O(1) 环形缓冲（覆盖写）——可按 seq 回放；
  * - transient 类：不分配 seq、不入 ring、不写快照，直传订阅者——高频瞬时流（delta / terminal 输出），
  *   丢失可接受（routeInbound 对无 seq 消息直接 dispatch，core/coordination/subscription-state.ts evalSeqGap 分支 3）。
@@ -98,9 +100,9 @@ export type TopicKind = 'state' | 'stream' | 'transient'
  * 是唯一不产生行为回归的默认——fallback 到 transient 会静默丢消息（不可回放），fallback 到
  * state 需要快照键。新增消息类型忘记入表时走 stream 最安全。
  *
- * 导出（RT-1#5）：TOPIC_TABLE / STATE_TYPE_KEY_MAP / STATE_NO_KEY_TOPICS 供守卫测试
- * 遍历断言「state 类 ⊆ STATE_TYPE_KEY_MAP ∪ 例外清单」——新增 state 类型漏登记在测试期
- * 即红，不再依赖注释自认风险。
+ * 导出（RT-1#5）：TOPIC_TABLE / STATE_TYPE_KEY_MAP / STATE_TYPE_KEY_PAYLOAD_DERIVED /
+ * STATE_NO_KEY_TOPICS 供守卫测试遍历断言「state 类 ⊆ 静态映射 ∪ 派生登记 ∪ 例外清单」
+ * ——新增 state 类型漏登记在测试期即红，不再依赖注释自认风险。
  */
 export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // ── state 类：分配 seq、写快照（同 typeKey 覆盖）、不入 ring ──
@@ -123,6 +125,16 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // occupancy（session-occupancy-send-closure P3）：占用三维快照。state topic last-value——
   // 断连重连 / 切回 session 经 stateSnapshot 回放恢复（G4），不依赖广播时序。
   'session.occupancy': 'state',
+  // widget 两类型 state 类化（scheduler-widget-push D3）：widget 显示面是覆盖式 last-value
+  // （消费端只关心每 (session, widgetKey) 最后一帧）——分配 seq、写 stateSnapshot（typeKey
+  // 从 payload.widgetKey 派生，见 STATE_TYPE_KEY_PAYLOAD_DERIVED）、不入 ring、照常广播
+  // live 订阅者。效果：widget 帧退出对话 ring（不再被对话帧冲刷，容量全部留给对话帧），
+  // 重订阅（reload / 断连重连 / 切回）经 subscribe 应答的 stateSnapshot 段构造性恢复，
+  // 不再依赖「上一帧还在 ring 内」的概率。清屏帧（gui:null）同为 last-value 覆盖快照
+  // 槽位，回放时 renderer 删条目——清屏语义保留。受影响 widget 枚举 = scheduler / todo /
+  // goal / plan 四方（同经 widget 通道，同批获得保证性恢复）。
+  'extension:widget': 'state',
+  'extension:widgetGui': 'state',
   // ── stream 类：分配 seq、入 ring（O(1) 覆盖写）──
   'message.message_start': 'stream',
   'message.complete': 'stream',
@@ -160,8 +172,6 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'terminal.writeFailed': 'stream',
   'plugin:uiRequest': 'stream',
   'extension.ui_request': 'stream',
-  'extension:widget': 'stream',
-  'extension:widgetGui': 'stream',
   'extension:status': 'stream',
   'extension:notify': 'stream',
   // extension:* 全族（event-adapter.ts setEditorText → session 级 push 型，W06-M1 补录）
@@ -211,6 +221,10 @@ export function topicOf(type: string): TopicKind {
  * 例外清单机器可读化（RT-1#5）：STATE_NO_KEY_TOPICS 是上述例外的显式白名单——守卫测试
  * 断言「state 类 ⊆ STATE_TYPE_KEY_MAP keys ∪ STATE_NO_KEY_TOPICS」，运行时 warn 同以
  * 它豁免。新增例外必须进本清单（并在此处补登记理由），否则守卫测试即红。
+ *
+ * typeKey 出处第二形态（scheduler-widget-push D3）：静态查表之外，state 类 type 还可登记
+ * 进 STATE_TYPE_KEY_PAYLOAD_DERIVED（type → 从 payload 派生 key 的函数表）——守卫断言
+ * 相应扩展为「静态 key 或派生登记」两形态（例外白名单仍是第三形态）。
  */
 export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   'session.commands': 'commands',
@@ -228,6 +242,38 @@ export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
 }
 
 /**
+ * state topic 的载荷派生 typeKey 登记表（RT-1#5 第二形态，scheduler-widget-push D3）。
+ *
+ * 静态表 STATE_TYPE_KEY_MAP 覆盖「type → 固定 key」形态；本表覆盖「type → 从 payload
+ * 派生 key」形态——widget 帧的快照去重粒度是 (session, widgetKey) 而非 type 全局单值
+ * （同 session 多个 widget 并存，静态 key 会让不同 widget 互相覆盖）。派生函数返回
+ * null 表示「本帧无可用 key」→ 走 state-no-key 同款处理：不入快照 + warn 一次，
+ * live 行为不变（widgetKey 缺失/空串是协议异常数据——event-adapter 已把缺失翻译为
+ * 空串，按 falsy 判定回落，见 :575）。
+ *
+ * 与 STATE_TYPE_KEY_MAP / STATE_NO_KEY_TOPICS 同为 RT-1#5 守卫断言对象：state 类 type
+ * 必须三居其一（静态映射 / 派生登记 / 例外白名单），守卫测试见
+ * __tests__/state-type-key-map-guard.test.ts。
+ */
+export const STATE_TYPE_KEY_PAYLOAD_DERIVED: Readonly<Record<string, (payload: unknown) => string | null>> = {
+  'extension:widgetGui': (payload) => widgetTypeKeyFromPayload('widgetGui', payload),
+  'extension:widget': (payload) => widgetTypeKeyFromPayload('widget', payload),
+}
+
+/**
+ * 从 payload.widgetKey 派生 widget 帧的 typeKey（`widgetGui:<widgetKey>` / `widget:<widgetKey>`，
+ * 键空间 = per (session, widgetKey)，键集有界 = 已知 widget key 集合）。widgetKey 缺失或
+ * 空串（falsy 判定）→ null 回落。
+ */
+function widgetTypeKeyFromPayload(prefix: string, payload: unknown): string | null {
+  const widgetKey = typeof payload === 'object' && payload !== null
+    ? (payload as { widgetKey?: unknown }).widgetKey
+    : undefined
+  if (!widgetKey) return null
+  return `${prefix}:${String(widgetKey)}`
+}
+
+/**
  * state-no-key 例外白名单（RT-1#5 机器可读化）：登记为 state 类但刻意不映射 typeKey
  * 的类型全集（逐条理由见 STATE_TYPE_KEY_MAP 上方「例外登记」注释块）。
  * 守卫测试与运行时 warn 共用——例外之外任何 state 类型缺 typeKey 映射 = 漂移。
@@ -238,27 +284,37 @@ export const STATE_NO_KEY_TOPICS: ReadonlySet<string> = new Set(['session.subage
 const warnedStateNoKeyTypes = new Set<string>()
 
 /**
- * RT-1#5 运行时纵深：state 类未映射 typeKey 且不在例外白名单时 warn 一次——该形态下
+ * RT-1#5 运行时纵深：state 类无 typeKey 出处且不在例外白名单时 warn 一次——该形态下
  * 快照静默不写、重连投影失效，此前零日志。守卫测试已把漏登记挡在提交期，这里覆盖
- * 「测试期之后发生的漂移」（热载/运行期表变更等）。
+ * 「测试期之后发生的漂移」（热载/运行期表变更等）。null 的两种成因文案区分：
+ * 派生登记 type 的 key 缺失（widgetKey 缺失/空串，本帧数据异常、仅丢该帧快照）vs
+ * 静态映射漂移（漏登记，该类型重连投影持续失效）。
  */
 function warnStateNoKeyOnce(type: string): void {
   if (STATE_NO_KEY_TOPICS.has(type) || warnedStateNoKeyTypes.has(type)) return
   warnedStateNoKeyTypes.add(type)
+  const payloadDerivedMiss = type in STATE_TYPE_KEY_PAYLOAD_DERIVED
   console.warn(
-    `[message-bus] state topic "${type}" has no STATE_TYPE_KEY_MAP entry — snapshot skipped, reconnect projection lost for this type (add mapping in message-bus.ts or register as state-no-key exception)`,
+    payloadDerivedMiss
+      ? `[message-bus] state topic "${type}" payload-derived typeKey unavailable (derivation source missing/empty in payload, e.g. widgetKey) — snapshot skipped for this frame, live broadcast unchanged (warn once per type)`
+      : `[message-bus] state topic "${type}" has no STATE_TYPE_KEY_MAP entry — snapshot skipped, reconnect projection lost for this type (add mapping in message-bus.ts or register as state-no-key exception)`,
   )
 }
 
 /**
  * 把 ServerMessage.type 映射到 stateSnapshot 的 typeKey——同 typeKey 的新消息覆盖旧（状态去重语义）。
- * 返回 null 表示该消息不是 state topic。
+ * 返回 null 表示该消息不写快照（非 state topic，或 state topic 无 key 出处——两形态均由
+ * 调用方走 state-no-key 处理）。解析顺序 = 静态表 → 载荷派生表（scheduler-widget-push D3）。
  *
  * @param message 待判定消息
- * @returns typeKey（写入 stateSnapshot 的 key）或 null（非 state topic）
+ * @returns typeKey（写入 stateSnapshot 的 key）或 null（不写快照）
  */
 function stateTypeKey(message: ServerMessage): string | null {
-  return STATE_TYPE_KEY_MAP[message.type] ?? null
+  const staticKey = STATE_TYPE_KEY_MAP[message.type]
+  if (staticKey !== undefined) return staticKey
+  const deriver = STATE_TYPE_KEY_PAYLOAD_DERIVED[message.type]
+  if (deriver !== undefined) return deriver(message.payload)
+  return null
 }
 
 /**
@@ -606,8 +662,10 @@ export class MessageBus implements IMessageBus {
    * B7：stateSnapshot 写入 + 字节记账（**仅观测**，超预算 warn 不驱逐）。
    *
    * 覆盖式当前值口径：同 typeKey set 替换时按新值重计（差值语义），非累计求和——
-   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（7 个，plan 模式
-   * 重设计 D1⑤ 加员 'plan' 后），每次重算总和 O(7)。该 warn 同时作为回收态 state 快照的
+   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合规模 = 静态表 keys
+   * （固定 7 个）+ 派生 keys（widget 帧按/widgetKey 增长，有界 = 已知 widget key 集合
+   * ——scheduler/todo/goal/plan 四方），每次重算总和 O(集合规模)。该 warn 同时作为
+   * 回收态 state 快照的
    * 跟进信号（回收态 ring 驻留
    * 已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
    */
