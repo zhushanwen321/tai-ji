@@ -78,9 +78,9 @@ const mockState = {
 const currentRef = ref(mockState)
 const useTerminalMock = {
   current: currentRef,
-  // 真实契约返回 Promise<void>（useTerminalSpawnFeedback 会对返回值直调 .catch），
-  // 默认 vi.fn() 返回 undefined 会产生 unhandled rejection——与 spawn-error 测试同形态
-  spawnTerminal: vi.fn(() => Promise.resolve()),
+  // 类型契约：UseTerminalReturn.spawnTerminal 返回 Promise（spawn-feedback 链 .catch），
+  // 裸 vi.fn() 返回 undefined 会抛 TypeError 且成为 Unhandled Rejection
+  spawnTerminal: vi.fn(async () => {}),
   writeToTerminal: vi.fn(),
   resizeTerminal: vi.fn(),
   killTerminal: vi.fn(),
