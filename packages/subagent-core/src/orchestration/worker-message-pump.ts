@@ -395,8 +395,10 @@ export async function finalizeRun(
 // - manifest-write → persistTerminalProjection（[P1b-2] 实装）：manifest/.state 落
 //   outcome/errorCode（run 域）；record 域既有写入面 = settleWorkflowRecord（settle
 //   链收口，record 的 outcome 字段接线归后继批次）；
-// - notify / registry-project / kill-run-topology / journal-cleanup-eligible → 后继
-//   单元消费（P4/Q2/Q3），本批执行点预留（无操作）。
+// - 其余输出动作 = 声明性语义映射（执行体各居其位，不在本段）：notify =
+//   finalizeRun 既有 onRunDone 链、registry-project = run-registry 投影侧、
+//   kill-run-topology = remote-engine D9-2、journal-cleanup-eligible = prune 资格
+//   自然兑现。
 //
 // 活体态：liveRunStates（模块级 Map）是本进程内的状态缓存，miss 时 fold journal
 // （scan + 逐事件 transition 不传 ctx——run-events.ts fold 契约）。terminal 后删除
@@ -568,6 +570,8 @@ async function appendTransition(
  * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
  * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
  * 注册表单元附着（run-events.ts 转移表注释的词表边界）。
+ * [D5 诊断引用落账] stderrTeePath（失败终局）取自事件 journal 最后一帧带该字段的
+ * ask-settled（lastStderrTeePathFromJournal——事件流投影，见其注释）。
  *
  * 目录解析复用 journal 同源（resolveRunEventJournal——生产推导
  * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入一次覆盖
@@ -605,6 +609,9 @@ async function persistTerminalProjection(
   }
   const errorCode: RunErrorCode | undefined =
     trigger.type === "run-settled" ? trigger.errorCode : undefined;
+  // [D5 诊断引用落账] 失败终局才投影取证指针（成功/cancelled 不写——字段语义与
+  // AskSettledEvent.stderrTeePath 同一失败伴随纪律）。
+  const stderrTeePath = outcome === "failed" ? await lastStderrTeePathFromJournal(run.runId) : undefined;
   const settledAt = Date.now();
   try {
     await writeRunTerminalManifest(dir, {
@@ -612,6 +619,7 @@ async function persistTerminalProjection(
       workflowName: run.spec.scriptName,
       outcome,
       ...(errorCode !== undefined ? { errorCode } : {}),
+      ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
       settledAt,
     });
   } catch (err) {
@@ -629,6 +637,33 @@ async function persistTerminalProjection(
     runEventLogger.error(
       `run terminal .state projection not persisted (runId=${run.runId}) — prune eligibility unaffected (manifest is the single-source anchor)`,
     );
+  }
+}
+
+/**
+ * [D5 诊断引用落账] manifest 终局诊断引用（stderrTeePath）的取值源：事件 journal
+ * 中最后一帧携带 stderrTeePath 的 ask-settled（事件流投影——D6「权威在事件流」
+ * 同款推导纪律：ask 级取证指针已随 ask-settled 落账（dispatchAskSettled 填充），
+ * 终局投影从事件流读回，不引入第二写点、不扩 run-settled 载荷）。journal 读取
+ * 失败（IO 异常）降级为 undefined 并 error 留痕——取证引用缺失不阻断终局投影
+ * （manifest 的 outcome/errorCode 权威面独立于本字段）。
+ */
+async function lastStderrTeePathFromJournal(runId: string): Promise<string | undefined> {
+  try {
+    const { journal } = resolveRunEventJournal();
+    const events = await journal.scan(runId);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i];
+      if (event.type === "ask-settled" && event.stderrTeePath !== undefined) {
+        return event.stderrTeePath;
+      }
+    }
+    return undefined;
+  } catch (err) {
+    runEventLogger.error(
+      `run terminal manifest stderrTeePath derivation failed (runId=${runId}): ${toErrorMessage(err)}`,
+    );
+    return undefined;
   }
 }
 
@@ -744,19 +779,24 @@ export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentNam
 }
 
 /** `ask-settled` 落账（引擎终态应答：call.result；attempt = call.attempts 终局尝试
- *  序号；signal abort = ask 粒度 cancelled——run 中止连带在途 ask 终止，D5 词表）。 */
+ *  序号；signal abort = ask 粒度 cancelled——run 中止连带在途 ask 终止，D5 词表）。
+ *  [D5 诊断引用落账] 失败时从 result.stderrTeePath 填充取证文件指针（产出链 =
+ *  引擎终态应答 AgentOutcome.stderrTeePath → outcomeToWorkflowResult → call.result，
+ *  上报判据见 SDK AgentOutcome.stderrTeePath 注释；成功/cancelled 不带）。 */
 export function dispatchAskSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
   if (!result) return; // AgentCall 状态机前置保证 done ⟹ result；防御性静默
   const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "completed" : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
+  const stderrTeePath = outcome === "failed" ? result.stderrTeePath : undefined;
   void dispatchRunTrigger(run, {
     type: "ask-settled",
     taskIndex: call.id,
     attempt: call.attempts,
     outcome,
     ...(errorCode !== undefined ? { errorCode } : {}),
+    ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
     durationMs: result.durationMs ?? 0,
     ts: Date.now(),
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));

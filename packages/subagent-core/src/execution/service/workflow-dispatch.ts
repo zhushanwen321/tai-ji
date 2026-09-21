@@ -566,6 +566,9 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     sessionId: outcome.sessionId,
     sessionFile: outcome.sessionFile,
     worktreePath: outcome.worktreePath,
+    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
+    // → dispatchAskSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
+    ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
     toolCalls: outcome.toolCalls,
   };
 }

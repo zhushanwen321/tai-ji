@@ -385,6 +385,9 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
     ...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
+    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
+    // 判据见 AgentOutcome.stderrTeePath 注释）。
+    ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

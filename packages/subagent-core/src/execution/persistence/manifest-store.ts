@@ -305,6 +305,15 @@ export interface RunTerminalManifest {
   /** 失败终局的结构化编码（completed/cancelled 缺省；abandon 路径的
    *  interrupted_abandoned 由 Q2 注册表单元附着，词表边界见 run-events.ts）。 */
   errorCode?: RunErrorCode;
+  /**
+   * [D5 诊断引用落账] 失败终局的子进程 stderr tee 文件绝对路径（成功/cancelled
+   * 缺省）。取值 = 事件 journal 中最后一帧带 stderrTeePath 的 ask-settled（事件流
+   * 投影，D6「权威在事件流」同款推导纪律——写侧在 persistTerminalProjection，
+   * 本类型只定磁盘形状）。旧 manifest 无此字段（undefined = 无取证指针，读侧
+   * 守卫归一，不炸）；仅诊断引用——文件受引擎侧轮转/过期清理管辖，读侧不得假设
+   * 其永存。
+   */
+  stderrTeePath?: string;
   /** 终局墙钟时间（epoch ms）。 */
   settledAt: number;
 }
@@ -337,7 +346,8 @@ function isRunTerminalManifest(value: unknown): value is RunTerminalManifest {
     typeof v.outcome === "string" &&
     RUN_TERMINAL_MANIFEST_OUTCOMES.has(v.outcome) &&
     typeof v.settledAt === "number" &&
-    (v.errorCode === undefined || typeof v.errorCode === "string")
+    (v.errorCode === undefined || typeof v.errorCode === "string") &&
+    (v.stderrTeePath === undefined || typeof v.stderrTeePath === "string")
   );
 }
 
@@ -358,7 +368,8 @@ export async function writeRunTerminalManifest(
 /**
  * 读 run 级终局投影。文件不存在 / JSON 损坏 / 形状不合法（含旧 manifest——无
  * outcome 字段的存量形态）一律返回 null（未终局语义，消费方按「无投影」处理，
- * 不炸）；errorCode 非法值由 isRunTerminalManifest 整体拒绝（同 null 降级）。
+ * 不炸）；errorCode / stderrTeePath 非法值由 isRunTerminalManifest 整体拒绝
+ * （同 null 降级）；两字段缺省（旧 manifest）= undefined 合法通过（读侧兼容）。
  */
 export async function readRunTerminalManifest(
   dir: string,

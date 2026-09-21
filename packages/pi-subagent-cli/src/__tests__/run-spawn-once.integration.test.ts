@@ -298,6 +298,44 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
+  it("[D5 诊断引用落账] 失败（exit 3）→ 终态应答携带 stderrTeePath 且 tee 文件存在（S2 引擎段）", async () => {
+    const h = await makeHarness("exit-3");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("pi child exited with code 3");
+      // 失败伴随路径：载荷含 tee 路径（<dataDir>/logs/pi-task-stderr-<pid>.log 形态）
+      expect(result.stderrTeePath).toBeDefined();
+      expect(result.stderrTeePath).toMatch(/[/\\]logs[/\\]pi-task-stderr-\d+\.log$/);
+      // 文件真实存在且内容为子进程 stderr 产出（懒打开 + close flush 在 run resolve
+      // 之后异步收敛——waitFor 等待，对齐上方成功用例的 tee 断言时序）
+      await waitFor(() => {
+        try {
+          return (
+            fs.existsSync(result.stderrTeePath!) &&
+            fs.readFileSync(result.stderrTeePath!, "utf8").includes("fake-pi stderr boot")
+          );
+        } catch {
+          return false;
+        }
+      });
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D5 诊断引用落账] 成功 → 终态应答不带 stderrTeePath（tee 存在也不报）", async () => {
+    const h = await makeHarness("success");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.stderrTeePath).toBeUndefined();
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
   it("header 模式（json mode）：header 行身份落位 + 握手同值去重", async () => {
     const h = await makeHarness("header");
     try {

@@ -390,6 +390,8 @@ export const RUN_TRANSITIONS: readonly TransitionRule[] = [
   { from: "dispatched", on: "ask-dispatched", next: "running", outputs: ["journal-append"] },
   { from: "dispatched", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "dispatched", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
+  // 声明性行——kill 执行链在 remote-engine D9-2（run-events 层零 IO/零进程依赖，
+  // 不投递本事件；本行只裁决「该态下 watchdog 触发应发生什么」）。
   { from: "dispatched", on: "watchdog-fired", next: "dispatched", outputs: ["kill-run-topology"] },
   { from: "dispatched", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
@@ -402,15 +404,19 @@ export const RUN_TRANSITIONS: readonly TransitionRule[] = [
   { from: "running", on: "ask-settled", guard: "adjudicate-now", next: "settling", outputs: ["journal-append"] },
   { from: "running", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "running", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-  // watchdog-fired 只输出 kill 动作、不迁态：kill 后在途 ask 经崩溃收编路径发
-  // ask-settled(failed)，状态变化仍由事件证据驱动（「settling = 无在途 ask」
-  // 不变量不被 kill 时序破坏）。
+  // 声明性行——kill 执行链在 remote-engine D9-2（run-events 层零 IO/零进程依赖，
+  // 不投递本事件）。状态语义：watchdog-fired 只输出 kill 动作、不迁态——被 kill
+  // 的在途 ask 的事件证据（ask-settled(failed)）随后到达时才驱动转移，状态变化
+  // 仍由事件证据驱动（「settling = 无在途 ask」不变量不被 kill 时序破坏：kill 是
+  // 外因，收编以终局帧为准）。
   { from: "running", on: "watchdog-fired", next: "running", outputs: ["kill-run-topology"] },
   { from: "running", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
   // ── settling：终局判定中（只等 run-settled / cancel / host-died / 迟到的 kill）──
   { from: "settling", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "settling", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
+  // 声明性行——kill 执行链在 remote-engine D9-2（run-events 层零 IO/零进程依赖，
+  // 不投递本事件）。
   { from: "settling", on: "watchdog-fired", next: "settling", outputs: ["kill-run-topology"] },
   { from: "settling", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
