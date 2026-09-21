@@ -8,6 +8,10 @@ import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
 import { isMissingFsError } from "./fs-error.ts";
 import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
+// 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
+//（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
+import type { RunErrorCode, RunOutcome } from "../../orchestration/run-events.ts";
+import { ALL_RUN_OUTCOMES } from "../../orchestration/run-events.ts";
 
 const logger = getLogger("subagents");
 
@@ -64,6 +68,15 @@ export interface ManifestRecord {
   task?: string;
   slug?: string;
   model?: string;
+  /**
+   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。record 域的
+   * 投影能力面：record 终态写入链（markFinalized 族）接线归后继批次（Q2/P3 领地），
+   * 本批只交付字段与读侧兼容。undefined = 未投影/旧 manifest（isValidManifest 不查
+   * 可选字段，读侧守卫归一，不炸）。
+   */
+  outcome?: RunOutcome;
+  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（见 outcome 注释的接线归属）。 */
+  errorCode?: RunErrorCode;
 }
 
 /** JSON.stringify 缩进空格数（no-magic-numbers 合规）。 */
@@ -264,4 +277,100 @@ export class ManifestStore {
 
     return deleted;
   }
+}
+
+// ============================================================
+// run 级终局投影（[P1b-2 / D5-④] manifest-write 输出动作的落点）
+// ============================================================
+//
+// ManifestRecord 是 record（ask）域持久面——一个 workflow run 对应多条 record
+//（每 ask 一条，origin="workflow" + parentRunId），run 自身无 record。run 级
+// outcome 硬套 ManifestRecord 全形会把 record 必填身份字段（rootSessionId 等）
+// 填成假数据，故 run 终局投影用同族轻量载体 RunTerminalManifest，落点与 run
+// store / journal 同目录（<workflow-state>/<runId>.json）：
+// - 文件名 = <runId>.json（不命中 run state 保留清理的 wf-*.jsonl glob——终局
+//   持久权威永不随缓存裁剪）；
+// - 「已终局」单源锚定 = 本文件的 outcome 非空（D5 清理规则①）：保留清理的
+//   资格判定读它，缺失/无 outcome = 活跃或 interrupted（D9-1：interrupted 非
+//   终局，Q2 放弃窗终局化时写本形态 manifest 后才获清理资格）。
+
+/** run 级终局投影 manifest（`<workflow-state>/<runId>.json`）。 */
+export interface RunTerminalManifest {
+  /** runId（文件名同 stem；generateRunId 的 wf-<ts>-<rand> 产物）。 */
+  id: string;
+  /** 脚本身份名（RunSpec.scriptName，终局诊断的最低身份数据）。 */
+  workflowName: string;
+  /** 终局形态——非空即「已终局」（D5 清理规则①单源锚定）。 */
+  outcome: RunOutcome;
+  /** 失败终局的结构化编码（completed/cancelled 缺省；abandon 路径的
+   *  interrupted_abandoned 由 Q2 注册表单元附着，词表边界见 run-events.ts）。 */
+  errorCode?: RunErrorCode;
+  /** 终局墙钟时间（epoch ms）。 */
+  settledAt: number;
+}
+
+/**
+ * runId 白名单：与 run-events.ts journal 写读的 RUN_ID_PATTERN 同源同值（该侧
+ * 未导出——manifest 文件名同样由 runId 直接拼出，路径穿越防线必须两处各自在位；
+ * 漂移信号 = 任一侧收紧/放宽未同步，两处测试各自钉住）。
+ */
+const RUN_TERMINAL_MANIFEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+function assertValidRunTerminalManifestId(runId: string): void {
+  if (!RUN_TERMINAL_MANIFEST_ID_PATTERN.test(runId)) {
+    throw new Error(
+      `非法 runId ${JSON.stringify(runId)}：run 终局投影 manifest 文件名只接受字母数字开头、字符集 [A-Za-z0-9_-]、长度 ≤128 的 runId（防路径穿越）。runId 应来自 lifecycle.ts 的 generateRunId；收到非法值时检查调用方的 runId 传递链。`,
+    );
+  }
+}
+
+/** 终局形态词表集合（运行时守卫；词表 SSOT = run-events ALL_RUN_OUTCOMES）。 */
+const RUN_TERMINAL_MANIFEST_OUTCOMES: ReadonlySet<string> = new Set(ALL_RUN_OUTCOMES);
+
+/** 读侧最小形状校验：id/workflowName/outcome/settledAt 必填且类型合法。 */
+function isRunTerminalManifest(value: unknown): value is RunTerminalManifest {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.workflowName === "string" &&
+    typeof v.outcome === "string" &&
+    RUN_TERMINAL_MANIFEST_OUTCOMES.has(v.outcome) &&
+    typeof v.settledAt === "number" &&
+    (v.errorCode === undefined || typeof v.errorCode === "string")
+  );
+}
+
+/**
+ * 写 run 级终局投影（原子写：tmp → fsync → rename，shared/atomic-write 统一原语；
+ * 父目录缺失递归创建——manifest-write 执行点可能先于 run state 文件落盘）。
+ * 写失败原样上抛，降级策略归调用方（pump 执行点 = error 留痕不阻断终局 coda）。
+ */
+export async function writeRunTerminalManifest(
+  dir: string,
+  manifest: RunTerminalManifest,
+): Promise<void> {
+  assertValidRunTerminalManifestId(manifest.id);
+  const filePath = path.join(dir, `${manifest.id}.json`);
+  await writeAtomicFile(filePath, JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+}
+
+/**
+ * 读 run 级终局投影。文件不存在 / JSON 损坏 / 形状不合法（含旧 manifest——无
+ * outcome 字段的存量形态）一律返回 null（未终局语义，消费方按「无投影」处理，
+ * 不炸）；errorCode 非法值由 isRunTerminalManifest 整体拒绝（同 null 降级）。
+ */
+export async function readRunTerminalManifest(
+  dir: string,
+  runId: string,
+): Promise<RunTerminalManifest | null> {
+  assertValidRunTerminalManifestId(runId);
+  const filePath = path.join(dir, `${runId}.json`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fsPromises.readFile(filePath, "utf-8"));
+  } catch {
+    return null; // ENOENT（未终局/已清理）或损坏 JSON——均按「无投影」降级。
+  }
+  return isRunTerminalManifest(parsed) ? parsed : null;
 }

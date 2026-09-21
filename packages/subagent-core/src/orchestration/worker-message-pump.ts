@@ -68,6 +68,17 @@ import { RunRuntime } from "./models/run-runtime.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type { AgentCallOpts, AgentResult, DoneReason, ExecutionTraceNode } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
+// [P1b-2] manifest-write 输出动作的写入面（D5 终局投影）：manifest 落
+// <workflow-state>/<runId>.json、.state 收条落 <runId>.jsonl.state（state-marker
+// 同族写函数）。execution/persistence 不回指 orchestration（manifest-store 的
+// run-events 依赖是纯 type import），无循环。
+import { join } from "node:path";
+
+import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
+// writeRunStateProjection 是 run 域（workflow run）.state 投影的独立原语（与
+// record 域 writeSettledState 分立——R1 写面守卫按域分立语义，store 外直调
+// record 域七名原语被 scripts/check-record-write-surface.mjs 拦截）。
+import { writeRunStateProjection } from "../execution/persistence/state-marker.ts";
 import type { WorkerHandle } from "./worker-handle.ts";
 import { toErrorMessage } from "../core/error-message.ts";
 // [P1b-1] settle 链收口（execution service 三处直写点删除后的单点）+ journal 目录
@@ -380,9 +391,9 @@ export async function finalizeRun(
 // 是输出动作的执行归属点：
 // - journal-append → RunEventJournal.append（触发事件属 journal 词表时 = 事件本体；
 //   控制事件触发的终局转移 = 调用侧合成 run-settled，见 journalEventOf）；
-// - manifest-write → 既有写入面：run 域 = finalizeRun coda 的 store.save（WorkflowRun
-//   快照 done+reason 现状权威）、record 域 = settleWorkflowRecord（settle 链收口）——
-//   manifest/.state 的 outcome/errorCode 字段扩展待 P1b-2；
+// - manifest-write → persistTerminalProjection（[P1b-2] 实装）：manifest/.state 落
+//   outcome/errorCode（run 域）；record 域既有写入面 = settleWorkflowRecord（settle
+//   链收口，record 的 outcome 字段接线归后继批次）；
 // - notify / registry-project / kill-run-topology / journal-cleanup-eligible → 后继
 //   单元消费（P4/Q2/Q3），本批执行点预留（无操作）。
 //
@@ -526,7 +537,87 @@ async function appendTransition(
     const { journal } = resolveRunEventJournal();
     await journal.append(run.runId, journalEventOf(trigger));
   }
+  // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）+ .state（<runId>.jsonl.state）
+  // 落 outcome/errorCode（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
+  if (outputs.includes("manifest-write")) {
+    const projectionDir = resolveRunEventJournal().dir;
+    if (projectionDir === "") {
+      // 测试防线（与 no-op journal 同族）：vitest 无注入时禁写真实目录——同步 warn
+      // 后跳过，不进入 async 调用（await 边沿会把终局 coda 尾链推出既有测试的
+      // flushMicrotasks 固定 tick 窗口，无注入测试的时序须与 P1b-1 基线逐位同构）。
+      runEventLogger.warn(
+        "run terminal projection skipped: vitest env without setRunEventJournalDirForTest(dir) — " +
+          "manifest/.state not written (prevents writes to the real workflow-state dir)",
+      );
+    } else {
+      await persistTerminalProjection(run, next, trigger, projectionDir);
+    }
+  }
   return { state: next, outputs };
+}
+
+/**
+ * manifest-write 输出动作的执行面（[P1b-2] D5 终态投影）：
+ * - manifest = `<workflow-state>/<runId>.json`（RunTerminalManifest——「已终局」
+ *   单源锚定 = outcome 非空，保留清理资格判定与 Q2 放弃窗终局化的共同读面）；
+ * - .state = `<workflow-state>/<runId>.jsonl.state`（writeRunStateProjection——
+ *   run 域 .state 投影专用原语，与 record 域 writeSettledState 分立（R1 写面
+ *   守卫按域分立语义），挂 run state 文件 stem）。
+ *
+ * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
+ * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
+ * 注册表单元附着（run-events.ts 转移表注释的词表边界）。
+ *
+ * 目录解析复用 journal 同源（resolveRunEventJournal——生产推导
+ * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入一次覆盖
+ * journal/manifest/.state 三面）；vitest 无注入防线（dir=""）下跳过写入并 warn
+ * 留痕（禁触真实数据目录红线，与 no-op journal 同一防线语义）。
+ *
+ * 失败处置 = error 留痕不抛（对齐 journal 侧「取证面失败不阻断 coda」：终局
+ * coda 的权威推进不因投影 IO 中断；manifest 缺失的下游语义 = prune 保守不裁）。
+ */
+async function persistTerminalProjection(
+  run: WorkflowRun,
+  state: RunState,
+  trigger: TransitionTrigger,
+  dir: string,
+): Promise<void> {
+  const outcome = state.outcome;
+  if (outcome === undefined) {
+    // transition 构造性保证 terminal ⟹ outcome（run-events.ts）；缺省 = 编程错误，
+    // 防御性留痕后跳过（不写半截投影）。
+    runEventLogger.error(
+      `manifest-write output on non-terminal state (runId=${run.runId}) — skipping projection (check RUN_TRANSITIONS terminal rows)`,
+    );
+    return;
+  }
+  const errorCode: RunErrorCode | undefined =
+    trigger.type === "run-settled" ? trigger.errorCode : undefined;
+  const settledAt = Date.now();
+  try {
+    await writeRunTerminalManifest(dir, {
+      id: run.runId,
+      workflowName: run.spec.scriptName,
+      outcome,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+      settledAt,
+    });
+  } catch (err) {
+    runEventLogger.error(
+      `run terminal manifest write failed (runId=${run.runId}): ${toErrorMessage(err)}`,
+    );
+  }
+  const stateOk = writeRunStateProjection(join(dir, `${run.runId}.jsonl`), {
+    endedAt: settledAt,
+    outcome,
+    ...(errorCode !== undefined ? { errorCode } : {}),
+  });
+  if (!stateOk) {
+    // writeRunStateProjection 内部已 error 留痕（含恢复指引）；此处补终局上下文便于归因。
+    runEventLogger.error(
+      `run terminal .state projection not persisted (runId=${run.runId}) — prune eligibility unaffected (manifest is the single-source anchor)`,
+    );
+  }
 }
 
 /**
@@ -673,8 +764,9 @@ async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason):
 // 与 run 状态机（上方接线段）的关系：ask-settled 事件面由 pump call 完成链投递
 //（dispatchAskSettled——taskIndex/attempt 取 callId/call.attempts 单源），record
 // 终态化是同一 ask 终局的投影面（ExecutionRecord 两态机 CAS——D5 范围边界明示
-// record 域状态机收敛 out-of-scope，tryTransition 保留）。manifest/.state 的
-// outcome/errorCode 字段扩展待 P1b-2。
+// record 域状态机收敛 out-of-scope，tryTransition 保留）。run 域的 manifest/.state
+// outcome 投影已随 [P1b-2] 实装（persistTerminalProjection）；record 域的
+// ManifestRecord.outcome 字段传参接线归后继批次（record 终态链所在领地）。
 
 /** settleWorkflowRecord 的既有写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
  *  经调用方闭包回指——pump 不反向依赖 execution service 聚合）。 */

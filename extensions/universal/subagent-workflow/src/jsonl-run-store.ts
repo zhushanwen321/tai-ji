@@ -85,9 +85,10 @@ import {
   SNAPSHOT_VERSION,
   fromRunSnapshot,
   toRunSnapshot,
-  pruneStateFilesBeyondCap,
   type RunSnapshot,
 } from "@zhushanwen/subagent-core";
+// [P1b-2] run 终局投影 manifest 读面（保留清理资格判定的单源锚定，barrel 导出）
+import { readRunTerminalManifest } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Workflow-record self-describing entry (W17, D4) ─────────
@@ -215,12 +216,23 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
   }
 }
 
-// ── State file retention (OR-5 ⑥b, default-on) ───────────────
+// ── State file retention (OR-5 ⑥b default-on → [P1b-2] 终局资格感知) ─────────
 //
-// 裁剪主体单源消费 core pruneStateFilesBeyondCap（S4-A7 收口：本地曾有一份逐段
-// 同构的私有实现，retention 语义双份各自演化是漂移隐患）；日志注入本模块
-// logger + [subagent-workflow] tag，错误字符串化用 ext-guards toErrorMessage——
-// 行为与收口前一致（差异仅经 core 单源演化时两宿主同步）。
+// [P1b-2 / D5 清理规则] 裁剪资格判定改造：原 cap-only 裁剪（mtime 升序、活跃与
+// 终局同裁）升级为「已终局才可裁」——「已终局」单源锚定 = run 终局投影 manifest
+// （<workflow-state>/<runId>.json，core manifest-store 写入）的 outcome 非空；
+// manifest 缺失/无 outcome = 活跃或 interrupted（D9-1：interrupted 非终局，Q2
+// 放弃窗终局化写 manifest 后才获资格），一律不裁。已终局计入 cap 与 TTL 双限
+// （TTL 缺省 30 天 mtime，测试期经 env 调低）。journal 文件
+// （<runId>.events.jsonl）从候选排除——清理执行归 Q2（journal-cleanup-eligible），
+// 本面只保证活跃/interrupted 的 journal 不被 glob 误裁（P1a 引入 journal 后原
+// wf-*.jsonl glob 恒命中的隐患在此修复）；run 终局投影 manifest（.json 结尾）
+// 结构性不在候选，终局持久权威永不随缓存裁剪。
+//
+// 与 core pruneStateFilesBeyondCap（S4-A7 收口单源）的关系：资格过滤在 core 单源
+// 无参数通道，本模块本地实现同款 retention 纪律（glob 命中才删 / mtime 升序 /
+// 任何失败不抛），cap 缺省值仍单源消费 core DEFAULT_STATE_MAX_RUNS；Q2 接 journal
+// 清理时收口回 core 单源。
 
 // ── JsonlRunStore ────────────────────────────────────────────
 
@@ -256,6 +268,49 @@ export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
 function getEnvStateMaxRuns(): number | undefined {
   const raw = process.env[STATE_MAX_RUNS_ENV];
   if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+/**
+ * 已终局 state 文件的 mtime TTL 缺省值（[P1b-2 / D5 清理规则②]：run cap +
+ * 30 天 mtime TTL，两者同限已终局）。30 天 = 设计字面缺省保留期
+ * （换算因子具名对齐 core session-file-gc 的 TTL_MS 先例）。
+ */
+const TTL_DAYS = 30;
+const HOURS_PER_DAY = 24;
+const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const MS_PER_SECOND = 1000;
+export const DEFAULT_STATE_TTL_MS =
+  TTL_DAYS * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
+
+/** state 文件后缀（<runId>.jsonl；glob 判定的字面单源）。 */
+const STATE_FILE_SUFFIX = ".jsonl";
+
+/** journal 文件后缀（<runId>.events.jsonl）——glob 命中但清理执行归 Q2
+ *  （journal-cleanup-eligible），本面只做资格保护（活跃/interrupted 的 journal
+ *  永不裁，已终局的也不在本面删）。 */
+const JOURNAL_FILE_SUFFIX = ".events.jsonl";
+
+/**
+ * 已终局 state 文件 TTL 的 env 通道（[P1b-2]；测试期调低用，形态对齐
+ * {@link STATE_MAX_RUNS_ENV}）：
+ * - 未设/空 → 缺省 {@link DEFAULT_STATE_TTL_MS}（默认开）；
+ * - 有限正数 → TTL = env 值（测试期调低通道）；
+ * - 非法值（非有限数/≤0）→ undefined = 不按 TTL 裁（显式 opt-out，对齐 cap
+ *   通道「意图不明不动磁盘」哲学）。
+ *
+ * TAIJI_ 前缀理由同 STATE_MAX_RUNS_ENV（pi 进程内读的配置 env，桌面 spawn 链
+ * ENV_WHITELIST_PREFIXES 过滤，PI_ 前缀会被静默丢弃）。
+ */
+export const STATE_TTL_MS_ENV = "TAIJI_SUBAGENT_STATE_TTL_MS";
+
+/** 解析已终局 TTL；env 未设/空 → 缺省，显式非法/≤0 → undefined（不按 TTL 裁）。 */
+function getEnvStateTtlMs(): number | undefined {
+  const raw = process.env[STATE_TTL_MS_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_STATE_TTL_MS;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
@@ -522,20 +577,15 @@ export class JsonlRunStore {
           this.lastEntryAppendAt.set(runId, now);
         }
       }
-      // OR-5 ⑥b 磁盘保留清理（默认开）：新 run state 文件首写成功后触发（rollbackFirstWrite
-      // 即 save() 冷路径传入的 isFirstWrite——「本实例首次写该 runId」≈ 新文件落盘时刻，
-      // 每个 run 只清一次，热路径 flush 不重复扫描目录）。prune 内部吞错不抛，
-      // 在串行链上 await：save 返回即清理已定，测试可同步断言目录终态。
+      // OR-5 ⑥b 磁盘保留清理（默认开 → [P1b-2] 终局资格感知）：新 run state 文件
+      // 首写成功后触发（rollbackFirstWrite 即 save() 冷路径传入的 isFirstWrite——
+      // 「本实例首次写该 runId」≈ 新文件落盘时刻，每个 run 只清一次，热路径 flush
+      // 不重复扫描目录）。prune 内部吞错不抛，在串行链上 await：save 返回即清理
+      // 已定，测试可同步断言目录终态。
       if (rollbackFirstWrite) {
         const maxRuns = getEnvStateMaxRuns();
         if (maxRuns !== undefined) {
-          // 单源裁剪（core pruneStateFilesBeyondCap），注入本扩展 logger tag 与
-          // toErrorMessage（行为与本地实现收口前一致）
-          await pruneStateFilesBeyondCap(this.stateDir, maxRuns, {
-            warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
-            debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
-            toMsg: toErrorMessage,
-          });
+          await this.pruneStateFilesBeyondTerminalEligibility(this.stateDir, maxRuns);
         }
       }
       for (const s of settlers) s.resolve();
@@ -549,6 +599,76 @@ export class JsonlRunStore {
         this.writtenOnce.delete(runId);
       }
       for (const s of settlers) s.reject(err);
+    }
+  }
+
+  /**
+   * [P1b-2 / D5 清理规则] 资格感知的保留清理（retention 纪律对齐 core
+   * pruneStateFilesBeyondCap：glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛）。
+   *
+   * 资格判定：「已终局」单源锚定 = run 终局投影 manifest（<runId>.json）的
+   * outcome 非空；manifest 缺失/损坏/无 outcome = 活跃或 interrupted——一律不裁
+   * （D9-1：interrupted 非终局；Q2 放弃窗终局化写 manifest 后才获资格）。
+   * 已终局计入 cap（mtime 升序裁最旧到 cap）与 TTL（mtime 超期即裁，缺省 30 天，
+   * STATE_TTL_MS_ENV 测试期可调低）双限；裁剪执行只删 state 文件，同 stem 的
+   * journal 留给 Q2 的 journal-cleanup-eligible。
+   */
+  private async pruneStateFilesBeyondTerminalEligibility(stateDir: string, cap: number): Promise<void> {
+    let names: string[];
+    try {
+      names = await fs.promises.readdir(stateDir);
+    } catch (err) {
+      if (!isEnoentError(err)) {
+        logger.warn(`[subagent-workflow] state retention: readdir ${stateDir} failed: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+    // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.events.jsonl）。
+    const stateNames = names.filter(
+      (n) => n.startsWith("wf-") && n.endsWith(STATE_FILE_SUFFIX) && !n.endsWith(JOURNAL_FILE_SUFFIX),
+    );
+    if (stateNames.length === 0) return;
+
+    const now = Date.now();
+    const ttlMs = getEnvStateTtlMs();
+    const eligible: Array<{ full: string; mtimeMs: number }> = [];
+    for (const name of stateNames) {
+      const runId = name.slice(0, -STATE_FILE_SUFFIX.length);
+      const manifest = await readRunTerminalManifest(stateDir, runId);
+      if (manifest === null) continue; // 活跃 / interrupted / 未终局——一律保护
+      const full = path.join(stateDir, name);
+      try {
+        eligible.push({ full, mtimeMs: (await fs.promises.stat(full)).mtimeMs });
+      } catch (err) {
+        // stat 失败（并发删除等）跳过该文件，不阻断本轮（对齐 core 单源降级语义）；
+        // debug 留痕满足 no-silent-catch（清理是旁路维护，debug 量级即可）。
+        logger.debug(
+          `[subagent-workflow] state retention: stat failed, skipped ${full}: ${toErrorMessage(err)}`,
+        );
+      }
+    }
+    if (eligible.length === 0) return;
+
+    const victims = new Set<string>();
+    if (ttlMs !== undefined) {
+      for (const e of eligible) {
+        if (now - e.mtimeMs > ttlMs) victims.add(e.full);
+      }
+    }
+    const survivors = eligible
+      .filter((e) => !victims.has(e.full))
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const e of survivors.slice(0, Math.max(0, survivors.length - cap))) {
+      victims.add(e.full);
+    }
+    for (const full of victims) {
+      try {
+        await fs.promises.unlink(full);
+        logger.debug(`[subagent-workflow] state retention: pruned terminal run state ${full}`);
+      } catch (err) {
+        if (isEnoentError(err)) continue; // 并发删除已达成目标
+        logger.warn(`[subagent-workflow] state retention: failed to delete ${full}: ${toErrorMessage(err)}`);
+      }
     }
   }
 

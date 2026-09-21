@@ -47,6 +47,9 @@ import * as fs from "node:fs";
 import { getLogger } from "../../core/logger.ts";
 
 import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../assembly/types.ts";
+// 类型面依赖（D5 终局投影词表单源）——run-events 不回指 execution 层，无循环；
+// ALL_RUN_OUTCOMES 是值导入（读侧 outcome 守卫的词表集合，SSOT 单源不复制）。
+import { ALL_RUN_OUTCOMES, type RunErrorCode, type RunOutcome } from "../../orchestration/run-events.ts";
 
 const logger = getLogger("subagents");
 
@@ -116,6 +119,14 @@ export interface StateMarker {
   /** idle = 收口时间（新格式）；cancelled 的精确结束时间（重建判定消费）；
    *  finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
   endedAt?: number;
+  /**
+   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。仅新格式
+   * 写入面（writeSettledState）携带；旧 `.state`（存量三值形态）无此字段 →
+   * undefined（读守卫归一，不炸）。finalized/cancelled 旧值分支不投影本字段。
+   */
+  outcome?: RunOutcome;
+  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（outcome=failed 时有意义）。 */
+  errorCode?: RunErrorCode;
 }
 
 /** sidecar stat 戳（结构对齐 record-store 的 Stamp——缓存校验用，避免跨模块类型耦合）。 */
@@ -163,19 +174,59 @@ export function writeCancelledState(sessionFile: string, endedAt: number): boole
  * 分支 → buildRecord 单规则映射 idle + stopReason）已随 U3 切换，live ≡ reload
  * 构造性成立。
  *
+ * [P1b-2 / D5] payload 扩展 outcome/errorCode（终局投影字段，向后兼容——缺省
+ * undefined 不写字段，存量调用方零变化）。run 域消费 = worker-message-pump 的
+ * manifest-write 输出动作（workflow-state/<runId>.jsonl 的 sidecar）；record 域
+ * 终态链（markSettled）的传参接线归后继批次。
+ *
  * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
  *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义）。
  * @param endedAt 收口时间（收条精度；调用方传 Date.now()）。
+ * @param outcome run 终局形态（[P1b-2 / D5] 终局投影；undefined = 不投影）。
+ * @param errorCode 失败终局的结构化编码（undefined = 不投影）。
  * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
  */
 export function writeSettledState(
   sessionFile: string,
-  payload: { stopReason?: StopReason; endedAt?: number },
+  payload: { stopReason?: StopReason; endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
 ): boolean {
   return writeStateMarker(sessionFile, {
     status: "idle",
     ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
     ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
+    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
+    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
+  });
+}
+
+/**
+ * [P1b-2 / D5] run 域（workflow run）终局 `.state` 投影专用写入原语。
+ *
+ * 与 record 域 {@link writeSettledState} 分立（R1 写面守卫按域分立语义）：
+ * writeSettledState 是 record 持久化写面七名原语之一（store 外直调被
+ * scripts/check-record-write-surface.mjs R1 拦截——record 写面唯一入口 =
+ * RecordStore markSettled 意图原语）；本函数服务 workflow run 域的终局投影
+ * （消费方 = worker-message-pump 的 manifest-write 输出动作，sidecar 落
+ * `<workflow-state>/<runId>.jsonl.state`），不在 record 写面收敛谱系内。
+ *
+ * 内部复用模块私有 writeStateMarker（响亮重试 + 旧名清理与 record 域同源），
+ * 载荷 = idle 收条 + [P1b-2 / D5] 终局投影字段。stopReason 缺位：run 域的
+ * DoneReason（budget_limited/time_limited）不在 StopReason 词表，不硬造映射
+ * （诊断文本由 run-settled 事件的 reason 与 journal 承载）。
+ *
+ * @param sessionFile sidecar 基底路径（run 域 = `<stateDir>/<runId>.jsonl`）。
+ * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕，处置归
+ *          调用方留痕归因；prune 资格不受影响——manifest 是单源锚定）。
+ */
+export function writeRunStateProjection(
+  sessionFile: string,
+  payload: { endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
+): boolean {
+  return writeStateMarker(sessionFile, {
+    status: "idle",
+    ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
+    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
+    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
   });
 }
 
@@ -265,11 +316,15 @@ function readNewStateMarker(sessionFile: string): StateMarker | undefined {
     const parsed = JSON.parse(raw) as Partial<StateMarker>;
     // 新格式收条（§3.2.4）：{status:"idle", reason?=stopReason, endedAt?}——可选域
     // 类型守卫归一（非法/缺省 → undefined，重建面按「无则」兜底，见 buildRecord）。
+    // [P1b-2 / D5] outcome/errorCode 同款守卫归一：outcome 需落 ALL_RUN_OUTCOMES
+    // 词表（词表外/缺省 → undefined = 不投影，旧 .state 存量形态零迁移）。
     if (parsed.status === "idle") {
       return {
         status: "idle",
         ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
         ...(typeof parsed.endedAt === "number" ? { endedAt: parsed.endedAt } : {}),
+        ...(isRunOutcome(parsed.outcome) ? { outcome: parsed.outcome } : {}),
+        ...(typeof parsed.errorCode === "string" ? { errorCode: parsed.errorCode } : {}),
       };
     }
     if (parsed.status === "cancelled") {
@@ -646,6 +701,11 @@ function normalizeOptionalBindingFields(
 /** string 守卫（非法/缺省 → undefined）。 */
 function strOrUndefined(v: string | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+/** [P1b-2 / D5] run 终局形态守卫（词表成员判定；词表外/缺省 → 不投影）。 */
+function isRunOutcome(v: unknown): v is RunOutcome {
+  return typeof v === "string" && (ALL_RUN_OUTCOMES as readonly string[]).includes(v);
 }
 
 /**

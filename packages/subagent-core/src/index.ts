@@ -505,6 +505,15 @@ export {
   pruneStateFilesBeyondCap,
 } from "./orchestration/file-run-store.ts";
 
+// run 级终局投影 manifest（[P1b-2 / D5]）：壳 jsonl-run-store 的保留清理资格判定
+// 消费（「已终局」单源锚定 = outcome 非空）——生产源码只从 barrel 消费 core 符号
+//（全仓零深路径 import 先例），不进 barrel 无法接线。
+export {
+  readRunTerminalManifest,
+  writeRunTerminalManifest,
+  type RunTerminalManifest,
+} from "./execution/persistence/manifest-store.ts";
+
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
 // 可读）、live 字段 strip、更高版本跳过（宿主侧 warn 可见性自决）。
