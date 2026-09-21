@@ -404,6 +404,9 @@ export class WorkflowDispatch {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
       // finalizeRecord；adopt 豁免——workflow record 不保持纳管态交监督器）。
+      // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收口：deps.finalizeFailed
+      // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
+      // ask-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
       const failed = await this.deps.finalizeFailed(record, err);
       return noteIfWorkflowNoProgressFired(mapToWorkflowAgentResult(failed), noProgress);
     } finally {

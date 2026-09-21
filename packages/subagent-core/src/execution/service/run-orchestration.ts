@@ -61,7 +61,10 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
-import { project, tryTransition } from "../persistence/execution-record.ts";
+import { project } from "../persistence/execution-record.ts";
+// [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
+// 迁入；execution/service → orchestration import 为既有先例方向——file-run-store）。
+import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -725,16 +728,13 @@ export class RunOrchestration {
     // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
     // idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。自带 CAS
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
+    // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
+    // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
+    // 的唯一剩余处）；ask-settled/run-settled 事件面由同文件状态机接线段承载。
     if (record.origin === "workflow") {
-      if (!aborted && result.success) {
-        if (tryTransition(record, "closed", "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", "gc");
-        }
-      } else {
-        if (tryTransition(record, "closed", aborted ? "cancelled" : "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", aborted ? "cancelled" : "gc");
-        }
-      }
+      await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
+        finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),
+      });
       return;
     }
     // CAS 前置 + 簿记之间无 await（单线程同步段原子——cancel/dispose 抢先判定可靠）。
