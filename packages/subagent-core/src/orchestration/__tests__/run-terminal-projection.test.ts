@@ -16,20 +16,24 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dispatchRunCreated,
   dispatchRunTrigger,
+  finalizeRun,
   setRunEventJournalDirForTest,
 } from "../worker-message-pump.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
 import { readStateMarker } from "../../execution/persistence/state-marker.ts";
+import { AgentCall } from "../models/agent-call.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Budget } from "../models/budget.ts";
 import { Trace } from "../models/trace.ts";
+import type { AgentResult, ExecutionTraceNode } from "../models/types.ts";
+import type { LifecycleDeps } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 
 let projectionDir: string;
@@ -223,5 +227,77 @@ describe("投影与 journal 共存（同目录不同文件）", () => {
     expect(names).toContain(`${run.runId}.events.jsonl`);
     expect(names).toContain(`${run.runId}.jsonl.state`);
     expect(names).toContain(`${run.runId}.json`);
+  });
+});
+
+// ── 5. 生产链（finalizeRun → dispatchFinalRunSettle 构造 errorCode → 投影） ──
+
+/** deps mock（形态对齐 worker-message-pump-run-events.test.ts）。 */
+function makeDeps(): LifecycleDeps {
+  return {
+    store: { save: vi.fn(async () => {}) },
+    workerHost: { start: vi.fn(() => ({ postMessage: vi.fn() })) },
+    runner: { run: vi.fn(async () => ({}) as AgentResult) },
+    runs: new Map(),
+    appendEntry: vi.fn(),
+    eventBus: { emit: vi.fn() },
+    onRunDone: vi.fn(),
+    log: vi.fn(),
+  } as unknown as LifecycleDeps;
+}
+
+/** 构造已终局的 AgentCall（markRunning → markDone，对齐 executeAgentCall finalize 形态）。 */
+function makeSettledCall(callId: number, result: AgentResult): AgentCall {
+  const node: ExecutionTraceNode = {
+    stepIndex: callId,
+    agent: "reviewer",
+    task: "p",
+    model: "test-model",
+    status: "running",
+    startedAt: new Date().toISOString(),
+  };
+  const call = new AgentCall(callId, { prompt: "p" }, node);
+  call.markRunning();
+  call.markDone(result);
+  return call;
+}
+
+describe("生产链 errorCode 投影（finalizeRun 构造 → manifest/.state，S2 死亡可诊断）", () => {
+  it("engine_crashed 终局 → manifest{outcome:failed, errorCode:engine_crashed}（journal 终帧同源）", async () => {
+    const run = makeRun("wf-prod-ec");
+    await dispatchRunCreated(run);
+    run.state.calls.set(0, makeSettledCall(0, {
+      content: "",
+      error: "engine_crashed: engine process exited unexpectedly: signal SIGKILL. stderr tail: fake",
+      durationMs: 21_000,
+      toolCalls: [],
+    }));
+    run.state.error =
+      "Workflow failed after 3 retries: ask-1 failed after retries: engine_crashed: engine process exited unexpectedly: signal SIGKILL";
+    const deps = makeDeps();
+
+    const ok = await finalizeRun(run, deps, "failed", { context: "test" });
+    expect(ok).toBe(true);
+
+    const manifest = await readRunTerminalManifest(projectionDir, run.runId);
+    expect(manifest).toMatchObject({ id: run.runId, outcome: "failed", errorCode: "engine_crashed" });
+    const marker = readStateMarker(path.join(projectionDir, `${run.runId}.jsonl`));
+    expect(marker).toMatchObject({ status: "idle", outcome: "failed", errorCode: "engine_crashed" });
+    // journal 终局帧与 manifest 同源（同一 run-settled 载荷）
+    const events = await createRunEventJournal(projectionDir).scan(run.runId);
+    expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "failed", errorCode: "engine_crashed" });
+  });
+
+  it("budget_limited / time_limited 终局 → manifest 落对应 run 级终局码", async () => {
+    for (const reason of ["budget_limited", "time_limited"] as const) {
+      const run = makeRun(`wf-prod-${reason}`);
+      await dispatchRunCreated(run);
+      const deps = makeDeps();
+
+      await finalizeRun(run, deps, reason, { context: "test" });
+
+      const manifest = await readRunTerminalManifest(projectionDir, run.runId);
+      expect(manifest).toMatchObject({ outcome: "failed", errorCode: reason });
+    }
   });
 });

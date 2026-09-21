@@ -29,10 +29,11 @@ import {
   setRunEventJournalDirForTest,
 } from "../worker-message-pump.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
-import type { AgentResult } from "../models/types.ts";
+import type { AgentResult, ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
@@ -102,6 +103,23 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
     // eslint-disable-next-line no-await-in-loop -- 排空微任务队列的固定 tick 循环，非逐项等待
     await Promise.resolve();
   }
+}
+
+/** 构造已终局的 AgentCall（markRunning → markDone——对齐 executeAgentCall 的 finalize 形态，
+ *  同 stderr-tee-diagnostic-reference.test.ts 助手）。 */
+function makeSettledCall(callId: number, result: AgentResult): AgentCall {
+  const node: ExecutionTraceNode = {
+    stepIndex: callId,
+    agent: "reviewer",
+    task: "p",
+    model: "test-model",
+    status: "running",
+    startedAt: new Date().toISOString(),
+  };
+  const call = new AgentCall(callId, { prompt: "p" }, node);
+  call.markRunning();
+  call.markDone(result);
+  return call;
 }
 
 // ── 1. finalizeRun = run-settled 终态单写点 ──────────────────
@@ -288,5 +306,188 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
     ).rejects.toThrow(/非法 run 状态转移/);
     // fail-fast 不落任何帧（事件在 run-created 落账前到达 = 接线错误，可归因）
     expect(await scanRunEvents("wf-ev-noseed")).toHaveLength(0);
+  });
+});
+
+// ── 4. finalizeRun 的 run-settled errorCode 构造（S2 死亡可诊断） ──
+
+describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunErrorCode 单点映射）", () => {
+  it("failed + 失败 call 带 engine_crashed 协议码前缀 → errorCode=engine_crashed（S2 引擎崩溃族）", async () => {
+    const run = makeRealRun("wf-ev-ec");
+    await dispatchRunCreated(run);
+    // 错误文本 `<code>: <detail>` 前缀 = SDK EngineSdkError 的跨面契约形态
+    // （AgentOutcome.error 与协议 error 帧共用；engine crash 族经此存活进 run 域）。
+    run.state.calls.set(0, makeSettledCall(0, {
+      content: "",
+      error:
+        "engine_crashed: engine process exited unexpectedly: signal SIGKILL. stderr tail: fake engine ready",
+      durationMs: 21_000,
+      toolCalls: [],
+    }));
+    run.state.error =
+      "Workflow failed after 3 retries: ask-1 failed after retries: engine_crashed: engine process exited unexpectedly: signal SIGKILL";
+    const deps = makeDeps();
+
+    await finalizeRun(run, deps, "failed", { context: "test" });
+
+    const events = await scanRunEvents("wf-ev-ec");
+    expect(events.at(-1)).toMatchObject({
+      type: "run-settled",
+      outcome: "failed",
+      errorCode: "engine_crashed",
+    });
+  });
+
+  it("budget_limited → errorCode=budget_limited；time_limited → time_limited（run 级终局码恒等映射）", async () => {
+    for (const reason of ["budget_limited", "time_limited"] as const) {
+      const run = makeRealRun(`wf-ev-${reason}`);
+      await dispatchRunCreated(run);
+      const deps = makeDeps();
+
+      await finalizeRun(run, deps, reason, { context: "test" });
+
+      const events = await scanRunEvents(`wf-ev-${reason}`);
+      expect(events.at(-1)).toMatchObject({
+        type: "run-settled",
+        outcome: "failed",
+        errorCode: reason,
+      });
+    }
+  });
+
+  it("failed + failureKind（无协议码前缀）→ failureKind 落码（ask 级分诊标签兜底）", async () => {
+    const run = makeRealRun("wf-ev-kind");
+    await dispatchRunCreated(run);
+    run.state.calls.set(0, makeSettledCall(0, {
+      content: "",
+      error: "pi child exited with code 3",
+      failureKind: "unknown",
+      durationMs: 3_000,
+      toolCalls: [],
+    }));
+    const deps = makeDeps();
+
+    await finalizeRun(run, deps, "failed", { context: "test" });
+
+    const events = await scanRunEvents("wf-ev-kind");
+    expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "failed", errorCode: "unknown" });
+  });
+
+  it("failed 无失败 call（脚本自身错误终局）→ 保守 unknown（诊断全文在 reason）", async () => {
+    const run = makeRealRun("wf-ev-script");
+    await dispatchRunCreated(run);
+    run.state.error = "Workflow failed: script threw TypeError";
+    const deps = makeDeps();
+
+    await finalizeRun(run, deps, "failed", { context: "test" });
+
+    const events = await scanRunEvents("wf-ev-script");
+    expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "failed", errorCode: "unknown" });
+  });
+
+  it("completed 与 aborted（cancel 合成 cancelled）→ 无 errorCode 键（成功/取消不带码）", async () => {
+    const runDone = makeRealRun("wf-ev-ok2");
+    await dispatchRunCreated(runDone);
+    await finalizeRun(runDone, makeDeps(), "completed", { context: "test" });
+    const doneEvents = await scanRunEvents("wf-ev-ok2");
+    expect(doneEvents.at(-1)).toMatchObject({ type: "run-settled", outcome: "completed" });
+    expect(doneEvents.at(-1)).not.toHaveProperty("errorCode");
+
+    const runAbort = makeRealRun("wf-ev-abort");
+    await dispatchRunCreated(runAbort);
+    await finalizeRun(runAbort, makeDeps(), "aborted", { context: "abortRun" });
+    const abortEvents = await scanRunEvents("wf-ev-abort");
+    expect(abortEvents.at(-1)).toMatchObject({ type: "run-settled", outcome: "cancelled" });
+    expect(abortEvents.at(-1)).not.toHaveProperty("errorCode");
+  });
+});
+
+// ── 5. dispatchAgentCall 重试轨迹（ask-retrying 帧补投 + 静默反向） ──
+
+describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", () => {
+  it("两次失败后成功 → journal dispatched→retrying{attempt:1}→retrying{attempt:2}→settled{attempt:3}（backoffMs 实测 = 退避调度值）", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = makeRealRun("wf-ev-retry");
+      await dispatchRunCreated(run);
+      const deps = makeDeps();
+      deps.runner.run = vi
+        .fn()
+        .mockResolvedValueOnce({
+          content: "",
+          error: "engine_crashed: engine process exited unexpectedly: signal SIGKILL",
+          durationMs: 5,
+          toolCalls: [],
+        })
+        .mockResolvedValueOnce({
+          content: "",
+          error: "transient provider flake",
+          durationMs: 5,
+          toolCalls: [],
+        })
+        .mockResolvedValue({ content: "ok", durationMs: 5, toolCalls: [] });
+      const handlers: WorkerHandlers = {
+        onMessage: vi.fn(async () => {}),
+        onError: vi.fn(async () => {}),
+        onExit: vi.fn(async () => {}),
+      };
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 2, opts: { prompt: "p" } },
+        deps,
+        handlers,
+      );
+      await flushMicrotasks(); // attempt 1 失败（mock 立即 resolve）
+      await vi.advanceTimersByTimeAsync(1000); // 首退避（BACKOFF 1000ms）→ attempt 2
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(2000); // 次退避（BACKOFF 2000ms）→ attempt 3 成功
+      await flushMicrotasks(); // ask-settled 投递链落账
+
+      expect(run.state.status).toBe("running"); // call 成功不触发终局
+      // 静默反向（D7）：重试窗口零终局通知（journal 事件落账 ≠ 通知）
+      expect(deps.onRunDone).not.toHaveBeenCalled();
+      const events = await scanRunEvents("wf-ev-retry");
+      expect(events.map((e) => e.type)).toEqual([
+        "run-created",
+        "ask-dispatched",
+        "ask-retrying",
+        "ask-retrying",
+        "ask-settled",
+      ]);
+      expect(events[2]).toMatchObject({ type: "ask-retrying", taskIndex: 2, attempt: 1, backoffMs: 1000 });
+      expect(events[3]).toMatchObject({ type: "ask-retrying", taskIndex: 2, attempt: 2, backoffMs: 2000 });
+      // reason 摘要：首退避帧携带失败文案（engine 码前缀保留）
+      expect((events[2] as { reason?: string }).reason).toContain("engine_crashed");
+      expect(events[4]).toMatchObject({ type: "ask-settled", taskIndex: 2, attempt: 3, outcome: "completed" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("非重试终局（stale_context 不重试）→ 零 ask-retrying 帧（构造性零假帧）", async () => {
+    const run = makeRealRun("wf-ev-noretry");
+    await dispatchRunCreated(run);
+    const deps = makeDeps();
+    deps.runner.run = vi.fn(async () =>
+      ({ content: "", error: "stale context", failureKind: "stale_context", durationMs: 1, toolCalls: [] }) as AgentResult,
+    );
+    const handlers: WorkerHandlers = {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    };
+
+    await handleWorkerMessage(
+      run,
+      { type: "agent-call", callId: 4, opts: { prompt: "p" } },
+      deps,
+      handlers,
+    );
+    await flushMicrotasks();
+
+    const events = await scanRunEvents("wf-ev-noretry");
+    expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "ask-settled"]);
+    expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 });

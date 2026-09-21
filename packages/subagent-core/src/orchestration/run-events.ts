@@ -25,10 +25,17 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { EngineProtocolErrorCode } from "@zhushanwen/subagent-engine-sdk";
+// 引擎协议码运行时 guard（SDK 权威词表，RunErrorCode engine 家族收窄用——自造匹配
+// 逻辑会与 SDK 词表演进漂移）。
+import {
+  isEngineErrorPassthroughCode,
+  isEngineProtocolErrorCode,
+  type EngineProtocolErrorCode,
+} from "@zhushanwen/subagent-engine-sdk";
 
 import { getLogger } from "../core/logger.ts";
-import type { AgentFailureKind } from "./models/types.ts";
+import type { AgentFailureKind, DoneReason } from "./models/types.ts";
+import type { WorkflowRun } from "./models/workflow-run.ts";
 
 // ── 终态双维度（D5-1）────────────────────────────────────────
 
@@ -63,12 +70,84 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * （interrupted 超放弃窗 → terminal(failed) 的 manifest errorCode，D5 转移表
  * interrupted × abandon-elapsed 行）——不描述进程怎么死的，描述「为什么此刻
  * 被判终局」，故为独立字面量成员而非复用任一既有族。
+ *
+ * budget_limited / time_limited 是 run 级终局码（dispatchFinalRunSettle 生产：
+ * DoneReason 同名字面量恒等映射）——与 interrupted_abandoned 同族：不描述引擎
+ * /agent 怎么失败，描述「为什么此刻被判终局」（harness 系统层裁决）。不复用
+ * 既有族的依据：engine_ 前缀有「引擎自报」契约（SDK error-codes.ts 透传面，
+ * 预算/时限耗尽是宿主侧裁决非引擎上报，借用即伪造自报）；AgentFailureKind
+ * 是 ask 级失败分诊三态（预算耗尽不是 ask 失败形态）；"unknown" 语义 = 分类
+ * 不出来，而这两族死因是确定已知的。
  */
 export type RunErrorCode =
   | EngineProtocolErrorCode
   | `engine_${string}`
   | AgentFailureKind
+  | "budget_limited"
+  | "time_limited"
   | "interrupted_abandoned";
+
+// ── DoneReason → RunErrorCode 映射（词表语义的同位归属：映射的每个分支都引用
+// 上方词表收录依据；唯一消费方 = worker-message-pump 的 dispatchFinalRunSettle，
+// 与 extension helpers 的 mapDoneReasonToOutcome 同族——同一个 DoneReason 判别）──
+
+/**
+ * DoneReason → RunErrorCode 的单点映射。
+ *
+ * - completed/aborted：成功与取消（cancel-requested 控制事件合成路径）不带码
+ *   （RunSettledEvent.errorCode 字段语义「失败时才有」）；
+ * - budget_limited/time_limited：run 级终局码恒等映射（同名字面量，上方注释载
+ *   收录依据）；
+ * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐 extension
+ *   mapDoneReasonToOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
+ *   launcher 参数校验在 run 创建前返回，防误分组而已）。
+ */
+export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
+  switch (doneReason) {
+    case "completed":
+    case "aborted":
+      return undefined;
+    case "budget_limited":
+      return "budget_limited";
+    case "time_limited":
+      return "time_limited";
+    case "failed":
+    case "invalid_args":
+      return extractFailedRunErrorCode(run);
+  }
+}
+
+/**
+ * failed 族的因提取：扫描最后一个失败 call 的 result（终局因的时序近似——多 ask
+ * run 下脚本可能吞掉早先失败后自身错误终局，与 stderrTeePath 诊断引用「最后一帧」
+ * 的取值纪律同一取舍；单 ask 失败即主流终局场景精确）。
+ *
+ * 优先级：① 引擎协议码——AgentResult.error 文本的 `<code>: <detail>` 前缀格式是
+ * SDK 跨面契约（EngineSdkError message 恒为该形态，AgentOutcome.error 与协议
+ * error 帧共用），前缀命中 SDK 固定词表（engine_crashed 等）或 engine_ 透传面
+ * 才落码（guard 收窄防普通错误文案误判）；② failureKind（ask 级分诊标签）；
+ * ③ "unknown"（保守可诊断成员，诊断全文仍在 reason/trace 面）。
+ */
+function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
+  let lastError: string | undefined;
+  let lastFailureKind: AgentFailureKind | undefined;
+  for (const call of run.state.calls.values()) {
+    const result = call.result;
+    if (result !== undefined && result.error !== undefined) {
+      lastError = result.error;
+      lastFailureKind = result.failureKind;
+    }
+  }
+  if (lastError !== undefined) {
+    const sep = lastError.indexOf(": ");
+    if (sep > 0) {
+      const code = lastError.slice(0, sep);
+      if (isEngineProtocolErrorCode(code)) return code;
+      if (isEngineErrorPassthroughCode(code)) return code as `engine_${string}`;
+    }
+  }
+  return lastFailureKind ?? "unknown";
+}
 
 // ── 事件词表（D5-2，恰好 7 个）──────────────────────────────
 
