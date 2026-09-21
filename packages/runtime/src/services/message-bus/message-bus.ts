@@ -663,11 +663,10 @@ export class MessageBus implements IMessageBus {
    *
    * 覆盖式当前值口径：同 typeKey set 替换时按新值重计（差值语义），非累计求和——
    * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合规模 = 静态表 keys
-   * （固定 7 个）+ 派生 keys（widget 帧按/widgetKey 增长，有界 = 已知 widget key 集合
-   * ——scheduler/todo/goal/plan 四方），每次重算总和 O(集合规模)。该 warn 同时作为
-   * 回收态 state 快照的
-   * 跟进信号（回收态 ring 驻留
-   * 已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
+   * （固定 7 个）+ 派生 keys（widget 帧按 widgetKey 增长，有界 = 已知 widget key
+   * 集合——scheduler/todo/goal/plan 四方），每次重算总和 O(集合规模)。该 warn 同时
+   * 作为回收态 state 快照的跟进信号（回收态 ring 驻留已有界、state 快照不受帽的
+   * P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
    */
   private setStateSnapshotEntry(
     state: SessionBusState,
