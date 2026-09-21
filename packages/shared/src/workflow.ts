@@ -65,7 +65,19 @@ export interface WorkflowAgentCall {
   turns?: number
   /** failed 状态的错误文本（trace.error 或 trace.result.error） */
   error?: string
+  /**
+   * [P3/D6] 该 ask 最近一次事件边沿的墙钟时间（epoch ms；RunSnapshot.state.calls[]
+   * 按 id 关联合并，事件 journal fold 投影）。可缺省——旧快照无此字段，消费侧缺省
+   * 渲染（时长槽/停滞判定省略）。
+   */
+  lastProgressAt?: number
 }
+
+/**
+ * [P3/D6] run 终局形态（RunSnapshot.state.outcome，事件 journal fold 投影）。
+ * 与 status/reason（DoneReason）正交——「run 自身怎么死的」维度（harness 系统层）。
+ */
+export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled'
 
 /**
  * 单条 workflow run 记录（列表项 + 详情数据）。
@@ -76,7 +88,8 @@ export interface WorkflowAgentCall {
  * - status/reason：RunSnapshot.state（state.status / state.reason）
  * - startedAt/completedAt：RunSnapshot.meta
  * - usedTokens/totalCallCount：RunSnapshot.state.budget
- * - agentCalls：RunSnapshot.state.trace[] 逐项映射
+ * - agentCalls：RunSnapshot.state.trace[] 逐项映射（[P3/D6] 并按 id 合并 state.calls[]
+ *   的 lastProgressAt 投影字段）
  * - stateFilePath：主 session JSONL 的 workflow-state-link.data.path
  */
 export interface WorkflowRunRecord {
@@ -104,4 +117,14 @@ export interface WorkflowRunRecord {
   agentCalls: WorkflowAgentCall[]
   /** workflow-state JSONL 绝对路径（workflow-state-link.data.path） */
   stateFilePath: string
+  /**
+   * [P3/D6] run 级 health（RunSnapshot.state.health，事件 journal fold 投影）。
+   * 仅 lastProgressAt 单字段；stalledSince 由消费侧 lastProgressAt + 阈值推导。
+   * 可缺省——旧快照无此字段，消费侧按 unknown 处理（不判定停滞）。
+   */
+  health?: { lastProgressAt: number }
+  /** [P3/D6] 终局形态（state.outcome；仅终局后快照携带）。 */
+  outcome?: WorkflowRunOutcome
+  /** [P3/D6] 终局结构化错误码（state.errorCode，failed 终局携带）。 */
+  errorCode?: string
 }

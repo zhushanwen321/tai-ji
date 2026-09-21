@@ -196,6 +196,12 @@
                 </div>
                 <span class="shrink-0">{{ t('panel.tray.agentsLabel', { done: completedAgentCount(record), total: record.agentCalls.length }) }}</span>
                 <span v-if="record.startedAt" class="shrink-0">· {{ workflowElapsed(record) }}</span>
+                <!-- [P3/D6] run 级 health 停滞信号（stalledSince 消费侧推导；旧快照 health 缺省不判定） -->
+                <span
+                  v-if="workflowStalledSince(record) !== null"
+                  data-testid="tray-workflow-stalled"
+                  class="shrink-0 text-warn"
+                >· {{ t('panel.tray.stalledNoProgress', { duration: workflowStallDuration(record) }) }}</span>
               </div>
             </div>
           </template>
@@ -266,6 +272,7 @@ import { cn } from '@/lib/utils'
 import { getState } from '@taiji/core/transport/ws-client'
 import { getDrawerControlState, openDrawerTab, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
 import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
+import { deriveStalledSince } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import TrayConfirmButton from '@/components/panel/tray/TrayConfirmButton.vue'
@@ -444,11 +451,22 @@ function workflowElapsed(record: WorkflowRunRecord): string {
   return formatSeconds(Math.floor((end - start) / MS_PER_SECOND))
 }
 
+// ── [P3/D6] run 级 health 停滞信号（推导纯函数单源在 stores/workflow；now 由上方 tick 驱动）──
+function workflowStalledSince(record: WorkflowRunRecord): number | null {
+  return deriveStalledSince(record, now.value)
+}
+function workflowStallDuration(record: WorkflowRunRecord): string {
+  const since = workflowStalledSince(record)
+  const ageMs = since === null ? 0 : now.value - since
+  return formatSeconds(Math.floor(ageMs / MS_PER_SECOND))
+}
+
 // ── running bash 行实时计时（1s tick；仅驱动 elapsedLabel 重算，测试用 fake timers）──
-// tick 仅在有可见 live bash 行时挂载（subagent / workflow 面板恒无消费者，bash 面板无
-// running 行 / 停在已结束桶时同样无）——面板随 Popover 开合反复挂载且 split mode 下多实例
-// 并存，各实例独立 gate：live 行出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush
-// 先于渲染，回调内先同步 now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。
+// tick 仅在有可见 live 行时挂载（bash 面板无 running 行 / 停在已结束桶时同样无；
+// [P3/D6] workflow 面板新增消费者 = 停滞信号随 now 重算）——面板随 Popover 开合反复
+// 挂载且 split mode 下多实例并存，各实例独立 gate：live 行出现即建、消失即撤，空闲
+// 实例零 interval。watch 为 pre flush 先于渲染，回调内先同步 now 再建 timer，切桶回来
+// 首帧耗时即准确（与常驻 tick 行为一致）。
 const NOW_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
@@ -456,7 +474,12 @@ let tickTimer: ReturnType<typeof setInterval> | null = null
 const hasLiveBashRow = computed(() =>
   props.kind === 'bash' && bashRows.value.some((entry) => !isEnded(entry)),
 )
-watch(hasLiveBashRow, (live) => {
+/** [P3/D6] 当前可见 workflow 行中存在 running 行（停滞信号推导的 now 消费者） */
+const hasLiveWorkflowRow = computed(() =>
+  props.kind === 'workflow' && workflowRows.value.some((record) => record.status === 'running'),
+)
+const hasLiveRow = computed(() => hasLiveBashRow.value || hasLiveWorkflowRow.value)
+watch(hasLiveRow, (live) => {
   if (tickTimer !== null) {
     clearInterval(tickTimer)
     tickTimer = null

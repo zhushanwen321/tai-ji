@@ -34,7 +34,7 @@ import type { PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSubagentStore } from '@/stores/subagent'
-import { useWorkflowStore } from '@/stores/workflow'
+import { useWorkflowStore, WORKFLOW_STALL_THRESHOLD_MS } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
@@ -383,6 +383,26 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     // running 行有 spinner，done 行无（状态点替代）
     expect(rows[0].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(true)
     expect(rows[1].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(false)
+  })
+
+  it('workflow [P3/D6]：health 停滞超阈值 → tray-workflow-stalled 指示（无进展 + 时长）；旧快照 health 缺省不判定', async () => {
+    const stale = T(WORKFLOW_STALL_THRESHOLD_MS + 120_000)
+    trayState.workflowRunning = [
+      makeWorkflow({ runId: 'wf-1', status: 'running', health: { lastProgressAt: stale } }),
+    ]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    // tick gate 含 workflow running 行 → now.value = FIXED_NOW，停滞判定确定性成立
+    const stalled = wrapper.find('[data-testid="tray-workflow-stalled"]')
+    expect(stalled.exists()).toBe(true)
+    expect(stalled.text()).toContain(zhTray.tray.stalledNoProgress.split('{duration}')[0]!.trim())
+    expect(stalled.text()).toContain('17m') // 15min 阈值 + 2min = 停滞 17m
+
+    // 旧快照 additive 读：health 缺省 → 不判定停滞（无指示、不炸）
+    trayState.workflowRunning = [makeWorkflow({ runId: 'wf-2', status: 'running' })]
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tray-workflow-stalled"]').exists()).toBe(false)
   })
 })
 
@@ -878,7 +898,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('subagent / workflow 面板即使有 running 行也零 interval（elapsedLabel 仅 bash 分支消费）', async () => {
+  it('subagent 面板有 running 行零 interval；workflow 面板 running 行建 tick（[P3/D6] 停滞信号为 now 消费者）、无 running 行撤 tick', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
     wrapper = mountPanel('subagent')
     await flushPromises()
@@ -886,10 +906,16 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     expect(vi.getTimerCount()).toBe(0)
     wrapper.unmount()
 
+    // [P3/D6] workflow running 行是停滞信号推导的 now 消费者 → tick 建立（原「恒零
+    // interval」契约随消费面变更：workflowElapsed 不需要 now，停滞指示需要）
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
     wrapper = mountPanel('workflow')
     await flushPromises()
     expect(wrapper.findAll('[data-testid="tray-workflow-row"]')).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(1)
+    // running 行收口 → tick 撤销（gate 语义与 bash 面板同构）
+    trayState.workflowRunning = []
+    await flushPromises()
     expect(vi.getTimerCount()).toBe(0)
     wrapper.unmount()
   })

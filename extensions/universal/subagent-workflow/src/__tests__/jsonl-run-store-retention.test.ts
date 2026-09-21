@@ -169,7 +169,7 @@ describe("workflow-state 保留清理（[P1b-2] 终局资格感知）", () => {
     // 写 manifest 后才获资格）。mtime 钉成最旧：资格保护与新旧无关。
     fs.mkdirSync(stateDir, { recursive: true });
     const interruptedId = runIdAt(0);
-    fs.writeFileSync(path.join(stateDir, `${interruptedId}.events.jsonl`), "{}\n", "utf-8");
+    fs.writeFileSync(path.join(stateDir, `${interruptedId}.events.jsonl`), `${JSON.stringify({ type: "run-created", runId: interruptedId, workflowName: "t", argsSummary: "{}", ts: 1719500000000 })}\n`, "utf-8");
     await store.save(makeRunningRun(interruptedId));
     pinMtime(stateFile(stateDir, interruptedId), 0, base);
 
@@ -227,7 +227,7 @@ describe("workflow-state 保留清理（[P1b-2] 终局资格感知）", () => {
 
     const oldId = runIdAt(0);
     await markTerminal(stateDir, oldId, "failed");
-    fs.writeFileSync(path.join(stateDir, `${oldId}.events.jsonl`), "{}\n", "utf-8");
+    fs.writeFileSync(path.join(stateDir, `${oldId}.events.jsonl`), `${JSON.stringify({ type: "run-created", runId: oldId, workflowName: "t", argsSummary: "{}", ts: 1719500000000 })}\n`, "utf-8");
     await store.save(makeRunningRun(oldId));
 
     // 新 run 进场触发 prune：已终局 1 个 > cap=1 → oldId 的 state 被裁

@@ -56,6 +56,7 @@ export default {
     abort: 'Stop',
     abortConfirm: 'Confirm stop?',
     workflowOpFailed: 'Workflow action failed: {msg}',
+    stalledNoProgress: 'no progress {duration}',
     /** Row summary units and labels */
     agentsLabel: '{done}/{total}',
     turnsUnit: 'turns',

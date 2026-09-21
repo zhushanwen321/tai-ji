@@ -35,6 +35,7 @@ import type {
 import { Trace } from "./models/trace.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 import type { WorkflowRunMeta } from "./models/workflow-run.ts";
+import type { RunErrorCode, RunOutcome, WorkflowRunEvent } from "./run-events.ts";
 
 /**
  * 快照格式版本（D4 裁决①：字符串相等比较，无大小序）。
@@ -42,6 +43,14 @@ import type { WorkflowRunMeta } from "./models/workflow-run.ts";
  * 版本历史（沿用 pi jsonl-run-store 口径）：
  * - wf-run-v1：status 三态（含 paused）、meta 含 pausedAt（pi 旧格式，读路径拒绝）。
  * - wf-run-v2（当前）：status 两态（running/done）、meta 无 pausedAt。
+ *
+ * [P3/D6] additive 字段策略：v2 基线上新增的可选字段（CallSnapshot.startedAt /
+ * lastProgressAt、state.health / outcome / errorCode）**不 bump 版本**——bump 会让
+ * extractor 版本守卫把存量历史 run 快照整条跳过（历史 run 从 UI 消失，D6 明示代价），
+ * 故走「纯 additive 读」：旧读侧对新字段天然跳过（未知字段容忍），旧快照对新读侧
+ * 缺字段按缺省渲染（消费侧 lastProgressAt 缺 → 时长槽省略、health 缺 → unknown）。
+ * 未来真需格式重构 bump 时，须按 D6-1 显式登记「升级后历史 run 从 UI 消失」代价与
+ * 迁移方案。
  *
  * 升级格式时 bump 此常量——旧版本快照经 fromRunSnapshot 返回 undefined，由
  * 宿主 store 层决定跳过可见性（FileRunStore warn / pi 静默）。
@@ -62,16 +71,36 @@ interface BudgetSnapshot {
  * AgentCall 实例的可序列化投影。traceNode 整体落盘（节点引用不可序列化，
  * 落盘值拷贝；重水合后 D-10「引用共享」由 fromRunSnapshot 的 trace 回链尽力
  * 恢复——Trace.fromArray 注释先例）。
+ *
+ * [P3/D6] startedAt / lastProgressAt 两字段由事件 journal fold 投影填充
+ * （{@link projectRunEvents}——单一推导点），不在 AgentCall 聚合上维护：
+ * 「快照 + 事件流双写时快照必然漂移、权威必须在事件流」（D5 证据）。两字段
+ * additive（可缺省——旧快照无此字段，消费侧缺省渲染），epoch ms 口径与
+ * EventEnvelope.ts 同源。
  */
 interface CallSnapshot {
   id: number;
   opts: AgentCallOpts;
   status: "pending" | "running" | "done";
   attempts: number;
+  /** [P3/D6] 该 ask 首个派发/执行事件的墙钟时间（epoch ms）——「每 ask 已执行时长」槽的起点。 */
+  startedAt?: number;
+  /** [P3/D6] 该 ask 最近一次事件边沿（dispatched/executing/retrying/settled）的墙钟时间（epoch ms）。 */
+  lastProgressAt?: number;
   result?: AgentResult;
   sessionId?: string;
   sessionFile?: string;
   traceNode: ExecutionTraceNode;
+}
+
+/**
+ * run 级 health 投影（[P3/D6]）。**仅 lastProgressAt 单字段存储**——stalledSince
+ * 由消费侧 lastProgressAt + 阈值推导（不落快照）；consecutiveFailures 不引入
+ * （D6：全文无消费方，需求出现再加）。
+ */
+interface RunHealthSnapshot {
+  /** run 最近任意事件边沿（含 run-created/armed/ask 族/run-settled）的墙钟时间（epoch ms）。 */
+  lastProgressAt: number;
 }
 
 /**
@@ -93,6 +122,19 @@ export interface RunSnapshot {
     errorLogs: WorkerLogEntry[];
     error?: string;
     scriptResult?: unknown;
+    /**
+     * [P3/D6] run 级 health 投影（fold 填充，可缺省——旧快照无此字段）。
+     * 权威源 = 事件 journal；stalledSince 由消费侧推导，不落快照（D6）。
+     */
+    health?: RunHealthSnapshot;
+    /**
+     * [P3/D6] 终局形态（run-settled fold 填充；仅终局后快照携带）。
+     * 与 status/reason（DoneReason 六因）正交——「run 自身怎么死的」维度
+     * （RunOutcome 三态），语义边界见 run-events.ts ALL_RUN_OUTCOMES 注释。
+     */
+    outcome?: RunOutcome;
+    /** [P3/D6] 终局结构化错误码（failed 终局携带；词表 = RunErrorCode）。 */
+    errorCode?: RunErrorCode;
   };
   meta: WorkflowRunMeta;
 }
@@ -148,6 +190,92 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
       scriptResult: run.state.scriptResult,
     },
     meta: run.meta,
+  };
+}
+
+// ── 事件 journal fold 投影（[P3/D6] 单一推导点）──────────────
+
+/**
+ * 从事件 journal fold 投影快照的 additive 字段（[P3/D6] 唯一推导点）。
+ *
+ * 为什么是纯函数 + 调用方传入事件：本 codec 零 IO（模块头注），journal scan 归
+ * 宿主 store 层（pi JsonlRunStore flush 时读同目录 `<runId>.events.jsonl` 后调
+ * 本函数）。权威在事件流（D5 证据：「快照 + 事件流双写时快照必然漂移」）——
+ * 每次 flush 重 fold（幂等：输出只由 (snap, events) 决定），不增量缓存。
+ *
+ * fold 规则（词表 = run-events.ts D5 七事件）：
+ * - `ask-dispatched` / `ask-executing`：按 taskIndex 关联 calls[] 条目（id 同源
+ *   D-10），startedAt ??= ts（首边沿即起点——executing 兜底覆盖 journal 缺
+ *   dispatched 帧的历史分段）；lastProgressAt = ts；
+ * - `ask-retrying` / `ask-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
+ * - `run-created` / `armed`：仅推进 run 级 health.lastProgressAt；
+ * - `run-settled`：health 推进 + 终局投影（state.outcome / errorCode 落快照）；
+ * - taskIndex 无关联条目（journal 与快照代际错位）：per-call 跳过、health 照常
+ *   推进（run 级进展是事实）——坏数据失效模式 = 缺省渲染，不炸不丢 run；
+ * - ts 单调防御：lastProgressAt 取 max（乱序帧不回拨进度时钟）。
+ *
+ * 不碰的字段：status / attempts / result / trace 等聚合权威字段原样透传——
+ * calls 三态直读（D6：消费面按既有三态直读，不做词表转换），fold 只补事件侧
+ * 派生字段。
+ *
+ * @param snap 基线快照（toRunSnapshot 产物；其新字段缺省 undefined）
+ * @param events journal scan 产出（写入序；坏行已被 scan 侧跳过）
+ * @returns 新快照对象（浅拷贝分层克隆——输入不被修改，flush 侧可安全覆写）
+ */
+export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRunEvent[]): RunSnapshot {
+  const callsById = new Map<number, CallSnapshot>();
+  const calls = snap.state.calls.map((c) => {
+    const clone: CallSnapshot = { ...c };
+    callsById.set(clone.id, clone);
+    return clone;
+  });
+
+  let lastProgressAt = snap.state.health?.lastProgressAt;
+  let outcome = snap.state.outcome;
+  let errorCode = snap.state.errorCode;
+
+  const advanceCall = (taskIndex: number, ts: number, startIfFirst: boolean): void => {
+    const call = callsById.get(taskIndex);
+    if (call === undefined) return; // 代际错位：per-call 跳过（health 照常推进）
+    if (startIfFirst && call.startedAt === undefined) call.startedAt = ts;
+    call.lastProgressAt = call.lastProgressAt === undefined || call.lastProgressAt < ts
+      ? ts
+      : call.lastProgressAt;
+  };
+
+  for (const event of events) {
+    lastProgressAt = lastProgressAt === undefined || lastProgressAt < event.ts
+      ? event.ts
+      : lastProgressAt;
+    switch (event.type) {
+      case "ask-dispatched":
+      case "ask-executing":
+        advanceCall(event.taskIndex, event.ts, true);
+        break;
+      case "ask-retrying":
+      case "ask-settled":
+        advanceCall(event.taskIndex, event.ts, false);
+        break;
+      case "run-settled":
+        outcome = event.outcome;
+        if (event.errorCode !== undefined) errorCode = event.errorCode;
+        break;
+      case "run-created":
+      case "armed":
+        // 仅推进 run 级 health（无 per-call 语义）
+        break;
+    }
+  }
+
+  return {
+    ...snap,
+    state: {
+      ...snap.state,
+      calls,
+      ...(lastProgressAt !== undefined ? { health: { lastProgressAt } } : {}),
+      ...(outcome !== undefined ? { outcome } : {}),
+      ...(errorCode !== undefined ? { errorCode } : {}),
+    },
   };
 }
 

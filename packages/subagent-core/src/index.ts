@@ -517,12 +517,23 @@ export {
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
 // 可读）、live 字段 strip、更高版本跳过（宿主侧 warn 可见性自决）。
+// [P3/D6] projectRunEvents = 事件 journal fold 投影的唯一推导点（宿主 store
+// flush 时消费——pi 壳 jsonl-run-store.ts；additive 字段策略见函数注释）。
 export {
   fromRunSnapshot,
+  projectRunEvents,
   SNAPSHOT_VERSION,
   toRunSnapshot,
   type RunSnapshot,
 } from "./orchestration/run-snapshot.ts";
+
+// [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
+// 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
+export {
+  createRunEventJournal,
+  type RunEventJournal,
+  type WorkflowRunEvent,
+} from "./orchestration/run-events.ts";
 
 // run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
 // 投影（runSummary 双投影分叉收口）。
