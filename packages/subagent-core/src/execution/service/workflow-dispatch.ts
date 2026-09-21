@@ -33,6 +33,10 @@ import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
+// [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
+// import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
+// assembly/orchestration 内部）不 import execution/service，无循环。
+import { dispatchRunArmedReceipt } from "../../orchestration/worker-message-pump.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
@@ -352,6 +356,14 @@ export class WorkflowDispatch {
       // 内构 stream 同样经本包裹——refresh 与 widget flush 在同一 onDelta 调用点）。
       const journalOnEvent = journal.onEvent;
       const observedEvent = (event: AgentEvent): void => {
+        // [D3 协议版 P6] armed 回执消费落账：引擎武装回执经宿主 run 事件路由到达本
+        // 编排点，投递 dispatchRunArmedReceipt 落 run 事件 journal（dispatched/running
+        // 自环行；run 聚合不出 orchestration 层——runId 键入口）。宿主等待门
+        // （remote-engine）之外的第二消费面 = journal 取证通道。非 workflow origin
+        // record 无 parentRunId（chat 域无 run journal），回执不落账。
+        if (event.type === "armed" && record.parentRunId !== undefined) {
+          dispatchRunArmedReceipt(record.parentRunId, event);
+        }
         // [H2 A3 修复] live reducer 喂入恢复：W3 删 inproc pi 引擎时，原
         // engines/pi/session-runner.ts agentEvent 出口的 updateFromEvent(record, event)
         // 一并消失，协议化 service 侧未重建——record.turns/totalTokens 在 live 通路

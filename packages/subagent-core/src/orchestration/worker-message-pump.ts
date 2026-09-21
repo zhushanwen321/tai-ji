@@ -65,6 +65,7 @@ import {
   type WorkflowRunEvent,
 } from "./run-events.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
+import type { RunSpec } from "./models/run-spec.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type { AgentCallOpts, AgentResult, DoneReason, ExecutionTraceNode } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
@@ -518,7 +519,7 @@ function journalEventOf(trigger: TransitionTrigger): WorkflowRunEvent {
 }
 
 async function appendTransition(
-  run: WorkflowRun,
+  run: RunDispatchSource,
   state: RunState,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
@@ -577,7 +578,7 @@ async function appendTransition(
  * coda 的权威推进不因投影 IO 中断；manifest 缺失的下游语义 = prune 保守不裁）。
  */
 async function persistTerminalProjection(
-  run: WorkflowRun,
+  run: RunDispatchSource,
   state: RunState,
   trigger: TransitionTrigger,
   dir: string,
@@ -588,6 +589,17 @@ async function persistTerminalProjection(
     // 防御性留痕后跳过（不写半截投影）。
     runEventLogger.error(
       `manifest-write output on non-terminal state (runId=${run.runId}) — skipping projection (check RUN_TRANSITIONS terminal rows)`,
+    );
+    return;
+  }
+  if (run.spec === undefined) {
+    // spec 缺省 = runId 键投递（RunDispatchSource 无 spec 形态，现役唯一生产者
+    // dispatchRunArmedReceipt 只投 armed 自环——非 terminal 行，构不到此处）。终局
+    // 投影的 workflowName 载荷源只有 run.spec，缺省不伪造空名落 manifest（manifest
+    // 是「已终局」单源锚定，写坏即污染 prune 资格判定）——error 留痕后跳过，与上方
+    // non-terminal 防御同款。
+    runEventLogger.error(
+      `manifest-write output on a spec-less run dispatch source (runId=${run.runId}) — skipping projection (runId-keyed dispatch must not carry terminal events; check the caller)`,
     );
     return;
   }
@@ -621,6 +633,20 @@ async function persistTerminalProjection(
 }
 
 /**
+ * dispatchRunTrigger 的投递源投影面：WorkflowRun 聚合根结构满足（runId + spec 公有
+ * 字段，存量调用方零改动）。[P6] armed 回执的 runId 键投递
+ * （{@link dispatchRunArmedReceipt}——run 聚合不出 orchestration 层）只带 runId；
+ * spec 缺省形态下 terminal 投影无 workflowName 载荷源（persistTerminalProjection
+ * 守卫跳过）——现役唯一 runId 键生产者只投 armed 自环（非 terminal 行），结构性
+ * 不可达。
+ */
+export interface RunDispatchSource {
+  runId: string;
+  /** terminal 投影（manifest workflowName）的载荷源；runId 键投递（armed 回执）可缺省。 */
+  spec?: RunSpec;
+}
+
+/**
  * run 事件投递唯一入口（单写者纪律：journal 的全部写入经本函数；引擎/worker 不落账，
  * D5「单写者 = 宿主侧唯一编排点」）。裁决 = transition 纯函数；表外转移抛
  * IllegalTransitionError 由调用方分类处置（让位 = 并发终局后的预期迟到事件）。
@@ -633,7 +659,7 @@ async function persistTerminalProjection(
  * run-created 落账前到达是接线错误，靠引导静默补齐会掩盖时序倒置。
  */
 export function dispatchRunTrigger(
-  run: WorkflowRun,
+  run: RunDispatchSource,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
 ): Promise<TransitionResult> {
@@ -641,13 +667,28 @@ export function dispatchRunTrigger(
 }
 
 async function dispatchRunTriggerInner(
-  run: WorkflowRun,
+  run: RunDispatchSource,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
 ): Promise<TransitionResult> {
   let state = liveRunStates.get(run.runId);
   if (state === undefined) state = await foldRunState(run.runId);
   return appendTransition(run, state, trigger, ctx);
+}
+
+/**
+ * [D3 协议版 P6] armed 回执落账投递（runId 键入口）：引擎 armed 事件在宿主的消费点
+ * 是 workflow-dispatch 的 ask 派发链（observedEvent——record 域），而 run 聚合不出
+ * orchestration 层，故收窄 dispatchRunTrigger 的投递面为本入口（同队列同转移表同
+ * journal，单写者纪律不破）。armed 落 dispatched/running 的自环行（D3 回执窗口横跨
+ * engine 预备段与执行段——每次 schema ask 的回执各一帧，自环语义允许多帧）。
+ * IllegalTransitionError 让位语义同 dispatchRunTrigger（并发终局后的迟到回执 = debug）。
+ */
+export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
+  void dispatchRunTrigger(
+    { runId },
+    { type: "armed", frame, ts: Date.now() },
+  ).catch((err: unknown) => reportDispatchFailure(runId, err));
 }
 
 /**

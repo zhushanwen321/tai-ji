@@ -70,6 +70,10 @@ import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+// [D3 协议版 P6] armed 消费落账端到端用例：journal 注入面（orchestration/pump 公共
+// 测试钩子）+ journal 读回（run-events 唯一实装）。
+import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
+import { createRunEventJournal, type WorkflowRunEvent } from "../../orchestration/run-events.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
 
@@ -693,5 +697,53 @@ describe("settled-watchdog 原语守护（自 SAR full-chain 测试迁移）", (
     });
     expect(hasSettledWatchdog("sa-env-off")).toBe(false);
     expect(fired).toEqual([]);
+  });
+});
+
+// ============================================================
+// 8. [D3 协议版 P6] armed 回执消费落账（observedEvent 拦截 → runId 键投递 → journal）
+// ============================================================
+
+describe("armed 回执经 observedEvent 落 run 事件 journal（[D3 协议版 P6] 生产链端到端）", () => {
+  it("fake 引擎 armed 帧进 observedEvent → dispatchRunArmedReceipt → journal 落账（frame 载荷逐字直通）", async () => {
+    const { service, store, fake } = makeHarness();
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-armed-journal-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      // journal 首帧播种（生产 = lifecycle.runWorkflow 的 dispatchRunCreated 正点；
+      // 此处以 runId 键投递带全载荷的 run-created 等价播种——非 aggregate 路径的
+      // 测试构造面）。播种后 fold 出 dispatched，armed 命中 dispatched 自环行。
+      await dispatchRunTrigger(
+        { runId: "wf-armed-e2e" },
+        { type: "run-created", runId: "wf-armed-e2e", workflowName: "review-fix-loop", argsSummary: "{}", ts: Date.now() },
+      );
+
+      const pending = service.executeWorkflowAgent(baseOpts(), "wf-armed-e2e");
+      await flush();
+      const run = soleRun(fake);
+      // record.parentRunId 贯穿（拦截点的路由键源）
+      expect(runningRecord(store).parentRunId).toBe("wf-armed-e2e");
+
+      // 引擎 armed 回执（协议 armed 事件对象）经 ctx.onEvent = observedEvent 进入拦截点
+      const armedFrame = {
+        type: "armed",
+        schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+        extensionPkg: "@zhushanwen/pi-structured-output",
+      } as const;
+      run.emitEvent(armedFrame);
+      run.settle({ content: "done" });
+      await pending;
+      // 投递队列是微任务链，settle 收尾后再排空一轮（journal append 在队内同步完成）
+      await flush();
+
+      const events = await createRunEventJournal(journalDir).scan("wf-armed-e2e");
+      expect(events.map((e) => e.type)).toEqual(["run-created", "armed"]);
+      const armed = events[1] as Extract<WorkflowRunEvent, { type: "armed" }>;
+      expect(armed.frame).toEqual(armedFrame);
+      expect(typeof armed.ts).toBe("number");
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });
