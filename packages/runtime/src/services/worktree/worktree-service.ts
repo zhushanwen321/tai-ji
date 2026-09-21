@@ -238,30 +238,51 @@ export class WorktreeService implements IWorktreeService {
       })
       return result
     } catch (e) {
-      const err = e as { code?: string; detail?: Record<string, unknown> }
-      const detail = err?.detail && typeof err.detail === 'object' ? err.detail : {}
-      logger.error('[worktree-service] worktree create failed', {
-        ...logCtx,
-        // 原始 code 保真（GitExecutorError 的 timeout/git_unavailable 等逃逸码也落盘，
-        // 不进 union 但在日志里可判别真实失败层）
-        code: err?.code ?? 'worktree_failed',
-        error: e instanceof Error ? e.message : String(e),
-        exitCode: typeof detail['exitCode'] === 'number' ? detail['exitCode'] : null,
-        // stderr 只落尾部（根因在末尾）；完整版随 error envelope 进前端 error 态
-        stderr: typeof detail['stderr'] === 'string'
-          ? (detail['stderr'] as string).slice(-STDERR_LOG_TAIL_LENGTH)
-          : null,
-        // setup 执行层失败（超时/脚本缺失）经 runSetupScript 包装成 SETUP_FAILED 后由此显形
-        timeout: detail['timeout'] === true,
-        // 仅 setup 失败路径发生过回滚：clean = 世界已复原；incomplete = 半成品残留（detail 带 cleanupHint）
-        rollback: err?.code === 'SETUP_FAILED'
-          ? detail['rollbackIncomplete'] === true ? 'incomplete' : 'clean'
-          : null,
-        cleanupHint: typeof detail['cleanupHint'] === 'string' ? detail['cleanupHint'] : null,
-        durationMs: Date.now() - startedAt,
-      })
+      this.logCreateFailure(logCtx, e, startedAt)
       throw e
     }
+  }
+
+  /**
+   * 创建失败的错误日志载荷组装（原 create catch 内联体迁移）：原始 code 保真 +
+   * detail 字段提取（exitCode / stderr 尾部 / timeout / 回滚结局 / cleanupHint）。
+   * 只组装日志，不改写也不吞掉原始错误（调用方 rethrow 原值）。
+   */
+  private logCreateFailure(
+    logCtx: { branch: string; baseBranch: string; locationMode: string | null; workspaceHint: string | null },
+    e: unknown,
+    startedAt: number,
+  ): void {
+    const err = e as { code?: string; detail?: Record<string, unknown> }
+    const detail = err?.detail && typeof err.detail === 'object' ? err.detail : {}
+    logger.error('[worktree-service] worktree create failed', {
+      ...logCtx,
+      // 原始 code 保真（GitExecutorError 的 timeout/git_unavailable 等逃逸码也落盘，
+      // 不进 union 但在日志里可判别真实失败层）
+      code: err?.code ?? 'worktree_failed',
+      error: e instanceof Error ? e.message : String(e),
+      exitCode: typeof detail['exitCode'] === 'number' ? detail['exitCode'] : null,
+      // stderr 只落尾部（根因在末尾）；完整版随 error envelope 进前端 error 态
+      stderr: typeof detail['stderr'] === 'string'
+        ? (detail['stderr'] as string).slice(-STDERR_LOG_TAIL_LENGTH)
+        : null,
+      // setup 执行层失败（超时/脚本缺失）经 runSetupScript 包装成 SETUP_FAILED 后由此显形
+      timeout: detail['timeout'] === true,
+      // 仅 setup 失败路径发生过回滚：clean = 世界已复原；incomplete = 半成品残留（detail 带 cleanupHint）
+      rollback: this.describeRollbackOutcome(err, detail),
+      cleanupHint: typeof detail['cleanupHint'] === 'string' ? detail['cleanupHint'] : null,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  /** 回滚结局分类：非 SETUP_FAILED 未走到回滚（null）；rollbackIncomplete=true → incomplete（半成品残留），否则 clean。 */
+  private describeRollbackOutcome(
+    err: { code?: string } | undefined,
+    detail: Record<string, unknown>,
+  ): 'clean' | 'incomplete' | null {
+    return err?.code === 'SETUP_FAILED'
+      ? detail['rollbackIncomplete'] === true ? 'incomplete' : 'clean'
+      : null
   }
 
   /**
