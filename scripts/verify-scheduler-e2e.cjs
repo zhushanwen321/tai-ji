@@ -71,8 +71,9 @@
  * 用法：
  *   node scripts/verify-scheduler-e2e.cjs              # 默认跑全部 A 类
  *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S23 / V / aclass / bclass / all）
- *   SCHED_E2E_DEBUG_JSONL=1 node scripts/verify-scheduler-e2e.cjs S18   # 打印落盘 JSONL 原始行（诊断）
- *   SCHED_E2E_KEEP_TMP=1 node scripts/verify-scheduler-e2e.cjs S22      # 保留临时 agentDir（含扩展日志 logs/，诊断）
+ *   诊断：场景 FAIL 时自动 dump 该场景落盘 JSONL entries（无 env 开关）
+ *   SCHED_E2E_KEEP_TMP=1 node scripts/verify-scheduler-e2e.cjs S22      # 保留临时 agentDir（含扩展日志
+ *     <agentDir>/logs/，自动注入 TAIJI_AGENT_DEBUG=1；会话 JSONL 属 sessionDir、不被保留）
  *   SCHED_E2E_MODEL=faux/faux-1-b node scripts/verify-scheduler-e2e.cjs  # 覆盖测试模型（仅限 faux/ 演员）
  *
  * 退出码：0 = 全过；1 = 任一失败；2 = 脚本异常
@@ -519,6 +520,8 @@ function spawnSession(opts) {
     env: {
       ...process.env,
       PI_SKIP_VERSION_CHECK: '1',
+      // 诊断：保留临时 agentDir 时打开 pi debug 日志，使 <agentDir>/logs/ 真有内容可取
+      ...(process.env.SCHED_E2E_KEEP_TMP === '1' ? { TAIJI_AGENT_DEBUG: '1' } : {}),
       ...faux.env,
     },
   })
@@ -674,11 +677,6 @@ function spawnSession(opts) {
     return r && r.success && r.data ? r.data : null
   }
 
-  /** 缓存中的 sessionFile 绝对路径（get_state 响应刷新；文件可能尚未创建）。 */
-  function getSessionFile() {
-    return state.sessionFileCache
-  }
-
   /**
    * 解析式读会话 JSONL（只反映**已落盘**内容，不含内存 fileEntries）：
    * 文件不存在 / 读失败 ⇒ []（会话未落盘的正常形态）。
@@ -710,9 +708,10 @@ function spawnSession(opts) {
    * 轮询等会话 JSONL 满足 predicate（参数 = parsed entries）。
    * 确认轮是**异步副作用**（命令路径 sendCommand 只等 prompt ack），故不可假定读时已落盘。
    * @param {(entries: unknown[]) => boolean} predicate
+   * @param {number} timeoutMs 必填（调用方显式给预算，无隐式默认）
    * @returns {Promise<{ ok: boolean, entries: unknown[] }>}
    */
-  async function waitForJsonlEntries(predicate, timeoutMs = 20000) {
+  async function waitForJsonlEntries(predicate, timeoutMs) {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       const entries = readJsonlEntries()
@@ -729,7 +728,8 @@ function spawnSession(opts) {
       /* noop */
     }
     // 诊断：SCHED_E2E_KEEP_TMP=1 保留临时 agentDir（含扩展文件日志 <agentDir>/logs/，
-    // 如 scheduler 的 ack 分诊警告），便于失败归因；常态删除（防泄漏）。
+    // 如 scheduler 的 ack 分诊警告；spawn env 已注入 TAIJI_AGENT_DEBUG=1），便于失败归因；
+    // 会话 JSONL 属 sessionDir、不被此处保留。常态删除（防泄漏）。
     if (process.env.SCHED_E2E_KEEP_TMP === '1') {
       console.log(`${TAG} [debug] keep tmp agentDir: ${faux.agentDir}`)
       return
@@ -797,7 +797,6 @@ function spawnSession(opts) {
     getMessages,
     getState,
     getStateData,
-    getSessionFile,
     readJsonlEntries,
     waitForJsonlEntries,
     kill,
@@ -932,21 +931,21 @@ function getScheduleFormRequests(captured) {
     }))
 }
 
-/** 过滤 message entries（role 缺省 = 全部 message 行）。 */
-function getMessageEntries(entries, role) {
+/** 过滤 assistant message entries（含 aborted 合成行——pi 会照常 append）。 */
+function getAssistantEntries(entries) {
   return (entries || []).filter(
     (e) =>
       e &&
       e.type === 'message' &&
       e.message &&
       typeof e.message === 'object' &&
-      (role === undefined || e.message.role === role),
+      e.message.role === 'assistant',
   )
 }
 
-/** 过滤 assistant message entries（含 aborted 合成行——pi 会照常 append）。 */
-function getAssistantEntries(entries) {
-  return getMessageEntries(entries, 'assistant')
+/** 会话 entries 中是否存在 aborted assistant 行（= 命令路径确认轮已落盘的判据）。 */
+function hasAbortedAssistant(entries) {
+  return getAssistantEntries(entries).some((e) => e.message.stopReason === 'aborted')
 }
 
 /** 数某类 entry 行数（宿主不变量：model_change / thinking_level_change / session_info 计数用）。 */
@@ -982,13 +981,8 @@ function isZeroUsage(usage) {
   return nums.every((n) => n === 0)
 }
 
-/** 从 parsed JSONL entries 取已落盘的 scheduler entry（复用 getSchedulerEntries 语义）。 */
-function getPersistedSchedulerEntries(entries) {
-  return getSchedulerEntries(entries)
-}
-
 /**
- * 确认轮断言包（S18/S20/S21/S22 共用）：会话 JSONL 的 aborted assistant 行 + 确认文案。
+ * 确认轮断言包（S18/S20/S21/S22/S23 共用）：会话 JSONL 的 aborted assistant 行 + 确认文案。
  *
  * 断言源 = pi 落盘后的 JSONL（非内存 get_entries）：合成轮的意义就是打开落盘开关，
  * 断言必须落在磁盘产物上。文案权威源 = `extensions/universal/scheduler/src/i18n.ts`
@@ -1012,7 +1006,7 @@ function checkAckConfirmLine(entries, expected) {
 }
 
 /** 轮询等会话空闲（get_state.isStreaming === false）；确认轮落盘早于 turn_end 收尾时用。 */
-async function waitUntilIdle(s, timeoutMs = 5000) {
+async function waitUntilIdle(s, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const st = await s.getStateData()
@@ -1022,9 +1016,8 @@ async function waitUntilIdle(s, timeoutMs = 5000) {
   return false
 }
 
-/** env-gated 原始 JSONL 诊断转储（SCHED_E2E_DEBUG_JSONL=1；失败归因用，不进常态输出）。 */
+/** 原始 JSONL 诊断转储（场景 FAIL 时由 main 无条件调用；失败归因用，不进常态输出）。 */
 function debugDumpJsonl(label, entries) {
-  if (process.env.SCHED_E2E_DEBUG_JSONL !== '1') return
   console.log(`${TAG} [debug] ${label}: ${(entries || []).length} entries`)
   for (const e of entries || []) {
     console.log(`${TAG} [debug]   ${JSON.stringify(e).slice(0, 900)}`)
@@ -1872,17 +1865,14 @@ async function runS18(piBin) {
     })
     const notify = await s.waitForNotify(n => n.message.includes('user-edited-prompt'), 15000)
     // ④ 确认轮（ack 合成轮）是异步副作用：等 JSONL 出现 aborted assistant 行（= 落盘已完成）
-    const ack = await s.waitForJsonlEntries(
-      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
-      20000,
-    )
-    debugDumpJsonl('S18', ack.entries)
+    const ack = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
 
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
-    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+    // entries 来自落盘 JSONL（ack.entries = waitForJsonlEntries 读到的磁盘快照）
+    const persistedUpserts = getSchedulerEntries(ack.entries)
       .filter((e) => e.data.op === 'upsert')
     s.kill()
 
@@ -1896,7 +1886,7 @@ async function runS18(piBin) {
     const task = getSingleUpsertTask(upserts)
     const taskOk = isEditedValueTask(task)
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
-    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    const persisted = persistedUpserts.length === 1
     // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US）
     const ackLine = checkAckConfirmLine(ack.entries, {
       name: 'user-edited-prompt', schedule: 'once in 45m',
@@ -1907,6 +1897,7 @@ async function runS18(piBin) {
     return {
       name: 'S18',
       status: pass ? 'PASS' : 'FAIL',
+      debugEntries: ack.entries,
       evidence:
         `form select requests=${reqs.length} (expect 1); request draft=${contract.desc}; ` +
         `notify edited values=${notifyEdited}` +
@@ -1967,8 +1958,9 @@ async function runS19(piBin) {
     // ④ 负向：无确认轮（无 assistant 行）+ 无落盘任务 entry
     const noAssistantLine =
       getAssistantEntries(entries).length === 0 && getAssistantEntries(jsonlEntries).length === 0
-    const noJsonlUpsert =
-      !jsonl.includes('op=upsert') && getPersistedSchedulerEntries(jsonlEntries).length === 0
+    // entries 来自落盘 JSONL（jsonlEntries = readJsonlEntries 的磁盘快照）；
+    // 内存 fileEntries vs 磁盘 JSONL 的独立双轨保留在上方 noAssistantLine
+    const noJsonlUpsert = getSchedulerEntries(jsonlEntries).length === 0
 
     const pass =
       oneInteraction && noNotify && noTaskPersisted && noAssistantLine && noJsonlUpsert
@@ -2028,16 +2020,13 @@ async function runS20(piBin) {
     })
     const notify = await s.waitForNotify(n => n.message.includes('daily-standup-reminder'), 15000)
     // ④ 确认轮（异步副作用）：等 JSONL 出现 aborted assistant 行
-    const ack = await s.waitForJsonlEntries(
-      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
-      20000,
-    )
-    debugDumpJsonl('S20', ack.entries)
+    const ack = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
-    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+    // entries 来自落盘 JSONL（ack.entries = waitForJsonlEntries 读到的磁盘快照）
+    const persistedUpserts = getSchedulerEntries(ack.entries)
       .filter((e) => e.data.op === 'upsert')
     s.kill()
 
@@ -2054,7 +2043,7 @@ async function runS20(piBin) {
       && task.schedule.mode === 'cron'
       && task.schedule.cronExpression === '0 0 9 * * *'
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
-    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    const persisted = persistedUpserts.length === 1
     // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US；cron 回显归一化形态）
     const ackLine = checkAckConfirmLine(ack.entries, {
       name: 'daily-standup-reminder', schedule: '0 0 9 * * *',
@@ -2065,6 +2054,7 @@ async function runS20(piBin) {
     return {
       name: 'S20',
       status: pass ? 'PASS' : 'FAIL',
+      debugEntries: ack.entries,
       evidence:
         `form select requests=${reqs.length} (expect 1); request draft=${contract.desc}; ` +
         `notify default-schedule echo=${notifyCron}` +
@@ -2116,16 +2106,13 @@ async function runS21(piBin) {
     })
     const notify = await s.waitForNotify(n => n.message.includes('alias-task'), 15000)
     // ④ 确认轮（异步副作用）：等 JSONL 出现 aborted assistant 行
-    const ack = await s.waitForJsonlEntries(
-      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
-      20000,
-    )
-    debugDumpJsonl('S21', ack.entries)
+    const ack = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
     const entries = await s.getEntries()
     const sched = getSchedulerEntries(entries)
     const upserts = sched.filter((e) => e.data.op === 'upsert')
     const jsonl = s.getJsonlSnippet()
-    const persistedUpserts = getPersistedSchedulerEntries(ack.entries)
+    // entries 来自落盘 JSONL（ack.entries = waitForJsonlEntries 读到的磁盘快照）
+    const persistedUpserts = getSchedulerEntries(ack.entries)
       .filter((e) => e.data.op === 'upsert')
     s.kill()
 
@@ -2139,7 +2126,7 @@ async function runS21(piBin) {
       && task.schedule.mode === 'interval'
       && task.schedule.intervalMs === 30 * 60 * 1000
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
-    const persisted = jsonl.includes('op=upsert') && persistedUpserts.length === 1
+    const persisted = persistedUpserts.length === 1
     // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US）
     const ackLine = checkAckConfirmLine(ack.entries, {
       name: 'alias-task', schedule: 'every 30m',
@@ -2150,6 +2137,7 @@ async function runS21(piBin) {
     return {
       name: 'S21',
       status: pass ? 'PASS' : 'FAIL',
+      debugEntries: ack.entries,
       evidence:
         `form select requests=${reqs.length} (expect 1); request draft=${contract.desc}; ` +
         `notify alias echo=${notifyEcho}` +
@@ -2220,11 +2208,7 @@ async function runS22(piBin) {
     await s.sendCommand('/scheduler 2h "s22-host-invariant"')
     const reqs = await s.waitForFormRequest(15000)
     await s.waitForNotify(n => n.message.includes('s22-host-invariant'), 15000)
-    const ack = await s.waitForJsonlEntries(
-      es => getAssistantEntries(es).some((e) => e.message.stopReason === 'aborted'),
-      20000,
-    )
-    debugDumpJsonl('S22', ack.entries)
+    const ack = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
     const stateAfter = await s.getStateData()
     const nameAfter = stateAfter ? stateAfter.sessionName : undefined
     s.kill()
@@ -2240,6 +2224,8 @@ async function runS22(piBin) {
     const providerOk = !!line && !!sessionModel
       && line.message.provider === sessionModel.provider
       && line.message.model === sessionModel.id
+    // ② api = 创建时会话模型 api（S7④ 要求合成行含 api 字段）
+    const apiOk = !!line && !!sessionModel && line.message.api === sessionModel.api
     // ③ usage 全 0
     const usageOk = !!line && isZeroUsage(line.message.usage)
     // ④⑤ 宿主不变量：条数与创建前一致（model_change 绝对值 = 1）
@@ -2255,17 +2241,19 @@ async function runS22(piBin) {
       name: 's22-host-invariant', schedule: 'once in 2h',
     })
 
-    const pass = ack.ok && stopOk && providerOk && usageOk && modelChangeOk && thinkingOk
+    const pass = ack.ok && stopOk && providerOk && apiOk && usageOk && modelChangeOk && thinkingOk
       && renameOk && renameSwitchOn && ackLine.ok && reqs.length === 1
     return {
       name: 'S22',
       status: pass ? 'PASS' : 'FAIL',
+      debugEntries: jsonlEntries,
       evidence:
         `form select requests=${reqs.length} (expect 1); ` +
         `ackTurn=${ack.ok ? 'reached-jsonl' : 'TIMEOUT'}; ` +
         `①stopReason=aborted:${stopOk}; ` +
         `②provider/model=sessionModel:${providerOk} (sessionModel=${sessionModel ? `${sessionModel.provider}/${sessionModel.id}` : '?'}; ` +
         `line=${line ? describeAssistantEntry(line) : '(none)'}); ` +
+        `②api=sessionModel.api:${apiOk}; ` +
         `③usageAllZero:${usageOk}; ` +
         `④model_change ${modelChangeBefore}(before)→${modelChangeAfter}(jsonl) ok=${modelChangeOk}; ` +
         `⑤thinking_level_change ${thinkingBefore}→${thinkingAfter} ok=${thinkingOk}; ` +
@@ -2310,10 +2298,7 @@ async function runS23(piBin) {
     // 第一次创建 → 确认轮落盘
     await s.sendCommand('/scheduler 3h "s23-first-task"')
     await s.waitForNotify(n => n.message.includes('s23-first-task'), 15000)
-    const ack1 = await s.waitForJsonlEntries(
-      es => getAssistantEntries(es).filter((e) => e.message.stopReason === 'aborted').length >= 1,
-      20000,
-    )
+    const ack1 = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
     // JSONL 行落盘早于 turn_end 收尾：等会话空闲再发第二次命令（避免命令撞在 streaming 中）
     const idle = await waitUntilIdle(s, 5000)
 
@@ -2324,12 +2309,12 @@ async function runS23(piBin) {
       es => getSchedulerEntries(es).filter((e) => e.data.op === 'upsert').length >= 2,
       20000,
     )
-    debugDumpJsonl('S23', ack2.entries)
     s.kill()
 
     const jsonlEntries = ack2.entries
     const aborted = getAssistantEntries(jsonlEntries).filter((e) => e.message.stopReason === 'aborted')
-    const upserts = getPersistedSchedulerEntries(jsonlEntries).filter((e) => e.data.op === 'upsert')
+    // entries 来自落盘 JSONL（jsonlEntries = ack2.entries 的磁盘快照）
+    const upserts = getSchedulerEntries(jsonlEntries).filter((e) => e.data.op === 'upsert')
     const prompts = upserts.map((e) => (e.data.task ? e.data.task.prompt : undefined))
     const bothTasks = prompts.includes('s23-first-task') && prompts.includes('s23-second-task')
     const exactlyOneAck = aborted.length === 1
@@ -2341,6 +2326,7 @@ async function runS23(piBin) {
     return {
       name: 'S23',
       status: pass ? 'PASS' : 'FAIL',
+      debugEntries: jsonlEntries,
       evidence:
         `creates=2 (formIndex=${formIndex}); ack1=${ack1.ok ? 'reached-jsonl' : 'TIMEOUT'} `
         + `ack2(upserts>=2)=${ack2.ok ? 'reached-jsonl' : 'TIMEOUT'}; sessionIdle=${idle}; `
@@ -2656,6 +2642,8 @@ async function main() {
       r.elapsedMs = Date.now() - t0
       results.push(r)
       printResult(r)
+      // 失败归因：无条件 dump 该场景落盘 entries（原先靠 SCHED_E2E_DEBUG_JSONL env 门）
+      if (r.status === 'FAIL') debugDumpJsonl(r.name, r.debugEntries)
     }
   }
 
