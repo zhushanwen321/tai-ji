@@ -729,6 +729,24 @@ export class SchedulerRuntime {
   }
 
   /**
+   * agent_settled：封口 run 窗口（同 handleRunClosed）+ awaiting-restore 的即时兑现。
+   * settled = run 完全落定（无 retry/compaction/queued continuation；pi 实装
+   * agent-session.js _emitAgentSettled 先置 _isAgentRunActive=false 再 emit），正是
+   * awaiting-restore 推迟恢复所等的「真空闲」时刻——挂上后恢复延迟从「最长 1 tick
+   * （30s）」收敛到事件即时。只挂 settled 不挂 agent_end：end 后仍可能有自动续跑
+   * turn，此时切回会把续跑 turn 的模型换掉（P-MODEL-② 同族形态）。
+   * 不动 in-flight（turn_end 丢失的归属异常归 tick 对账——2 tick 强制开放既有兜底）；
+   * settled 与用户新 run 交错（isIdle false）不动作留给 tick，兜底语义不变。
+   */
+  handleRunSettled(): void {
+    if (this.isCtxStale?.()) return
+    this.handleRunClosed()
+    const ps = this.pendingModelSwitch
+    if (ps?.phase !== 'awaiting-restore' || !this.modelOps?.isIdle()) return
+    void this.restoreExpectedModel('agent-settled')
+  }
+
+  /**
    * ERR-2 fallback（ext-simplify-17 B3 抽取）：cron 表达式失效 → 停用任务并记录失败原因
    * （toggle enable 重算与 dispatch 成功推进两处共用）。禁止 `?? now()` 类 fallback
    * （会使 nextRunAt=now，下个 tick 立即重算 → 死循环）；nextRunAt 保留原值——

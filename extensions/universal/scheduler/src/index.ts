@@ -169,7 +169,8 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   })
 
   // U4 dispatch 模型切换：归属状态机其余事件监听（P-MODEL-③④ 实测序态）。handler 只转发
-  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的窗口封口。
+  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的
+  // 窗口封口 + awaiting-restore 模型恢复的即时兑现（区别于 agent_end 的纯封口）。
   pi.on('agent_start', () => service?.runtime.handleAgentStart())
   pi.on('turn_start', (event) => service?.runtime.handleTurnStart(event?.turnIndex))
   pi.on('message_start', (event) => {
@@ -179,7 +180,10 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     ackController?.handleMessageStart(event?.message)
   })
   pi.on('agent_end', () => service?.runtime.handleRunClosed())
-  pi.on('agent_settled', () => service?.runtime.handleRunClosed())
+  // agent_settled 除封口外兼作 awaiting-restore 模型恢复的即时兑现挂点（不与 agent_end
+  // 共用：end 后仍可能有自动续跑 turn，此时切回会把续跑 turn 的模型换掉，见
+  // runtime.handleRunSettled 注释）
+  pi.on('agent_settled', () => service?.runtime.handleRunSettled())
 
   pi.on('session_shutdown', async () => {
     // 命令路径挂起表单的收口（设计 §6.2 生命周期案 ①②③）：session_shutdown
