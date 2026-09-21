@@ -150,6 +150,7 @@ export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './suba
 // 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
   ImportSourceKind, ImportWarning, ImportErrorCode,
+  ImportDegradation, ImportDegradationSummary,
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'

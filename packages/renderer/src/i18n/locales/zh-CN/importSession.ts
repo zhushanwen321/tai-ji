@@ -43,7 +43,9 @@ export default {
   retry: '重试',
   toastImported: '已导入「{name}」到 {project} · 可继续对话',
   toastWarnSidecar: '项目归属写入失败：请在侧边栏手动将该会话归类到项目',
-  toastWarnDegraded: '部分内容（如截图）未随导入迁移',
+  toastWarnDropped: '已跳过 {count} 条 zcode 消息',
+  toastWarnUnclassified: '{count} 条无法分类的 zcode 消息已跳过',
+  toastUnclassifiedSample: '首条样本 {messageId}：{preview}',
   freshBadge: '导入',
   errors: {
     import_source_missing: '源文件不存在或不可读：请确认文件未被移动或删除后重试，或用「选择其他目录」重新定位 sessions 目录',

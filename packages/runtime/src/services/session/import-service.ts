@@ -23,6 +23,8 @@ import { dirname, join, resolve as pathResolve } from 'node:path'
 import type {
   ImportCandidatesReply,
   ImportCandidatesRequest,
+  ImportDegradation,
+  ImportDegradationSummary,
   ImportReply,
   ImportRequest,
   ImportSourceKind,
@@ -64,6 +66,30 @@ const TMP_IMPORT_MARKER = '.tmp-import-'
 
 /** source 缺省值（§3.7 向后兼容）：存量 renderer 调用不传 = 走 pi，行为不变。 */
 const DEFAULT_SOURCE: ImportSourceKind = 'pi'
+
+/**
+ * 降级摘要组装（D4，设计 §7.4）：droppedCount = L1+L2（dropped_redundant +
+ * dropped_transient）count 聚合；unclassified = L4 count 聚合 + 首条定位样本（无则
+ * null）。truncated_output / compaction_unlinked（L3 保真损失族）不进 summary——toast
+ * 无对应分句，显形走 runtime 日志明细通道（§7.4「不设 truncatedCount」裁决）。
+ */
+function buildDegradationSummary(degradations: readonly ImportDegradation[]): ImportDegradationSummary {
+  const droppedCount = degradations
+    .filter((d) => d.code === 'dropped_redundant' || d.code === 'dropped_transient')
+    .reduce((sum, d) => sum + d.count, 0)
+  const unclassified = degradations.filter((d) => d.code === 'unclassified')
+  const first = unclassified[0]
+  return {
+    droppedCount,
+    unclassified:
+      first !== undefined
+        ? {
+            count: unclassified.reduce((sum, d) => sum + d.count, 0),
+            ...(first.sample !== undefined && { firstSample: first.sample }),
+          }
+        : null,
+  }
+}
 
 /**
  * 全局单条导入互斥（D4/r4 修订）：单条 Promise 链一次只执行一条导入，无键选择无回收问题。
@@ -176,17 +202,25 @@ export class ImportService {
     //    插件对新 session 的合法 set 会被 tombstone 误杀）。导入失败路径不至此，碑保留。
     clearSessionDataTombstone(artifact.header.id)
 
-    // 8. warning 聚合（r4-INFO 单字段）：sidecar_failed 需用户动作（手动归类）优先于
-    //    conversion_degraded（知情提示，无需动作）；degradations 明细无论如何日志留痕
-    //    （D6：reply 只带单字面量，明细不进契约面）。
-    if (artifact.degradations.length > 0) {
-      console.warn(`[runtime] session.import conversion degraded (source=${source.kind}):`, artifact.degradations)
+    // 8. warning 聚合（r4-INFO 单字段 + D4 结构化降级）：优先序 sidecar_failed >
+    //    conversion_unclassified > conversion_degraded——sidecar 失败需用户手动归类
+    //    （动作不可延迟）优先显形；unclassified（L4 未知消息，需上报/重导）优先于
+    //    degraded（知情提示，无需动作）。代价 = 同轮并存时被遮蔽码的计数不进 toast、
+    //    仅日志可见（设计 §7.4 已接受，恢复动作 = 查当日 runtime 日志或删除后重导）。
+    //    degradations 明细无论如何结构化日志留痕（全量明细不入 wire，D6）。
+    const degradations = artifact.degradations
+    if (degradations.length > 0) {
+      console.warn(`[runtime] session.import conversion degraded (source=${source.kind}):`, degradations)
     }
     const reply: ImportReply = { sessionId: artifact.header.id, targetPath }
     if (!sidecarVerified) {
       reply.warning = 'sidecar_failed'
-    } else if (artifact.degradations.length > 0) {
+    } else if (degradations.some((d) => d.code === 'unclassified')) {
+      reply.warning = 'conversion_unclassified'
+      reply.degradationSummary = buildDegradationSummary(degradations)
+    } else if (degradations.length > 0) {
       reply.warning = 'conversion_degraded'
+      reply.degradationSummary = buildDegradationSummary(degradations)
     }
     return reply
   }

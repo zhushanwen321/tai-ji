@@ -457,3 +457,9 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
+
+### 18. 导入的 zcode 会话续聊时反复出现 `replicated-state usage snapshot fetch failed (attempt=N/4): usage.input undefined` WARN（2026-09-21 导入投影验收发现，已知降级形态）
+
+- **症状**：在导入的 zcode 会话里续聊，runtime 日志重复该 WARN（4 次重试后 backoff 保底）。
+- **机制**：zcode 宿主库的 message/part 不携带 pi 原生 usage 字段，导入产物相应缺 usage 数据 → replicated-state 的 usage snapshot 统计取不到 `usage.input`。辅助功能（token 用量统计）按分级契约降级，核心续聊链路不受影响（消息收发/上下文构造正常）。
+- **处置建议**：非故障，勿按错误排查。若要消除需导入转换器为 assistant entry 补造 usage 数据——属 part 层映射范畴（本投影设计范围外），待有真实统计需求时再评估；先确认 WARN 时间点前后的消息收发正常即可排除其他问题。

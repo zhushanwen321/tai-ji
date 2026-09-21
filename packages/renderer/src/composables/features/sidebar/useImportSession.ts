@@ -21,6 +21,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type {
   ImportCandidate,
   ImportCandidateDir,
+  ImportDegradationSummary,
   ImportErrorCode,
   ImportRequest,
   ImportSourceKind,
@@ -146,6 +147,8 @@ export interface ImportSessionImportedPayload {
   targetPath: string
   /** sidecar 写失败降级标记（文件已落地不回滚，消费方可选提示） */
   warning?: ImportWarning
+  /** 降级摘要（仅 warning 含 conversion_* 时携带；载荷契约见 shared ImportDegradationSummary） */
+  degradationSummary?: ImportDegradationSummary
 }
 
 export interface UseImportSessionOptions {
@@ -407,7 +410,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
             projectId: selectedProjectId.value,
           }
       const reply = await sessionApi.importSession(request)
-      notifyImportResult(candidate, reply.warning)
+      notifyImportResult(candidate, reply.warning, reply.degradationSummary)
       options.onImported?.({
         sessionId: reply.sessionId,
         // name/dirLabel 均空（顶层文件无目录名）时回退短 ID——与 toast 显示名回退口径一致
@@ -415,6 +418,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
         projectName: selectedProjectName.value,
         targetPath: reply.targetPath,
         warning: reply.warning,
+        degradationSummary: reply.degradationSummary,
       })
       close()
     } catch (e) {
@@ -429,16 +433,41 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
   /**
    * 导入结果 toast（V1/V9 验收依赖）。文案骨架 = 设计 §3.1「已导入「<名称>」到
    * <project> · 可继续对话」；显示名回退短 ID（目录编码名对用户不可读，toast 又有
-   * 单行宽度约束）。预警（V9 死 cwd + sidecar 降级 + zcode 转换知情降级）追加在
-   * 同一条消息里用分号分隔——一次导入一个结果块，拆多条 toast 会竞态闪烁；有预警
-   * 走 warning 通道（8s 停留，给用户足够阅读时间），否则 info（4s 命令回显节奏）。
+   * 单行宽度约束）。预警追加在同一条消息里用分号分隔——一次导入一个结果块，拆多条
+   * toast 会竞态闪烁；有预警走 warning 通道（8s 停留，给用户足够阅读时间），否则
+   * info（4s 命令回显节奏）。
+   *
+   * 降级分句（zcode-import-message-projection §7.4，按 warning 码分支消费
+   * degradationSummary）：sidecar_failed 保持既有文案——sidecar 胜出时 summary 不
+   * 挂载，该轮降级计数只走 runtime 日志（设计已接受）；conversion_unclassified →
+   * L4 计数行 + 首条 sample（定位/上报用，firstSample 可缺席）；conversion_degraded
+   * → L1/L2 一行计数汇总（droppedCount；= 0 即仅 L3 截断族，设计无 toast 分句、
+   * 显形走 runtime 日志，不显「已跳过 0 条」）。
    */
-  function notifyImportResult(candidate: ImportCandidate, warning: ImportWarning | undefined): void {
+  function notifyImportResult(
+    candidate: ImportCandidate,
+    warning: ImportWarning | undefined,
+    summary: ImportDegradationSummary | undefined,
+  ): void {
     const name = candidate.name || candidate.sessionId.slice(0, IMPORT_SHORT_ID_LENGTH)
     const parts = [t('importSession.toastImported', { name, project: selectedProjectName.value })]
     if (!candidate.cwdExists) parts.push(t('importSession.cwdMissing'))
-    if (warning === 'sidecar_failed') parts.push(t('importSession.toastWarnSidecar'))
-    if (warning === 'conversion_degraded') parts.push(t('importSession.toastWarnDegraded'))
+    if (warning === 'sidecar_failed') {
+      parts.push(t('importSession.toastWarnSidecar'))
+    } else if (warning === 'conversion_unclassified' && summary?.unclassified) {
+      const { count, firstSample } = summary.unclassified
+      parts.push(t('importSession.toastWarnUnclassified', { count }))
+      if (firstSample) {
+        parts.push(
+          t('importSession.toastUnclassifiedSample', {
+            messageId: firstSample.messageId,
+            preview: firstSample.preview,
+          }),
+        )
+      }
+    } else if (warning === 'conversion_degraded' && summary && summary.droppedCount > 0) {
+      parts.push(t('importSession.toastWarnDropped', { count: summary.droppedCount }))
+    }
     if (parts.length > 1) toast.warning(parts.join('; '))
     else toast.info(parts[0])
   }
