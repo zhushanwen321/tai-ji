@@ -3,7 +3,8 @@
 // 覆盖（impl-plan §2.2 必写死条目）：
 //   同步成员形态映射（capabilities 直读 / listModels 三态 / validateModel 三态与
 //   成员不实现）/ run 帧映射（task 子集收窄 + ctx 承载）/ RunContext 反向通道映射 /
-//   abort → cancel + 收敛杀链兜底窗（窗口内收敛与超时杀链两路 + 兜底窗量级常量锚）/
+//   abort → cancel + 收敛兜底窗（窗口内收敛、超时本地合成终态 + [D9-2] run 拓扑杀
+//   半径/零拓扑降级两路 + 兜底窗量级常量锚）/
 //   read dataDir 必填 / 运行中失败合成 outcome vs prepare 期失败 reject 的分界。
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -24,6 +25,7 @@ import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
   _resetHostUiRequestEndpointForTest,
   setHostUiRequestEndpoint,
@@ -401,7 +403,7 @@ describe("abort 分级（cancel 帧 + 收敛杀链兜底窗）", () => {
     expect(CANCEL_SETTLE_KILL_CHAIN_GRACE_MS).toBe(30_000);
   });
 
-  it("cancel 未收敛（注入短兜底窗）→ 杀链 → run 合成 abort 终态（不 reject，EnginePort 契约）", async () => {
+  it("[D9-2] cancel 未收敛（注入短兜底窗）→ 本地合成 abort 终态（不 reject）+ 零拓扑降级 stall 出声不杀（引擎宿主存活）", async () => {
     const controller = new AbortController();
     const { engine, client, cleanup } = makeEngine(
       undefined,
@@ -412,12 +414,71 @@ describe("abort 分级（cancel 帧 + 收敛杀链兜底窗）", () => {
     const runPromise = engine.run({ prompt: "p" }, ctx);
     await waitForReady(client); // abort 抢在连接完成前会打断握手重建循环——先等 ready
     const enginePid = client.enginePid!;
+    // 该 run 无 per-run 进程拓扑（镜像零目标——zcode 常驻 app-server 的恒定形态）。
+    // spy 目标 = core logger（remote-engine.ts 的留痕载体），非 SDK logger。
+    const warnSpy = vi.spyOn(coreGetLogger("remote-engine"), "warn");
     controller.abort();
-    const result = await runPromise; // 注入 500ms 兜底窗超时 → 杀链 → 合成终态
+    const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态（record 必须收尾）
     expect(result.outcome.error).toContain("engine_run_failed");
     expect(result.outcome.error).toContain("aborted before terminal answer");
     expect(result.outcome.exitCode).toBeNull();
-    await waitForTrue(() => isProcessAlive(enginePid) === false); // 杀链已执行
+    // [D9-2] 降级出声：无 run 级杀目标 → 不组杀引擎，stall 语义 warn（通知通道 = workflow-stall）
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no run-scoped child process to kill"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stall"));
+    warnSpy.mockRestore();
+    expect(client.currentState).toBe("ready"); // 引擎宿主存活（组杀退役）
+    expect(isProcessAlive(enginePid)).toBe(true);
+    await cleanup();
+  }, 20_000);
+
+  it("[D9-2] run 拓扑杀半径：cancel 未收敛 → 仅该 run 的引擎孙进程被杀，同引擎邻接 run 与其孙进程存活、引擎宿主存活", async () => {
+    const controller = new AbortController();
+    // 每 run 各 spawn 一个孙进程（recordId "@runId" = per-run 归账锚）后长 delay
+    // 不应答——run A 在收敛窗超时（300ms）后被宿主强制收尾 + 拓扑杀，run B（不
+    // abort）随后正常应答，三者存活面构成半径断言。
+    const { engine, client, cleanup } = makeEngine(
+      undefined,
+      {
+        args: [
+          FAKE_ENGINE,
+          "--run-actions",
+          JSON.stringify([{ op: "spawnGrandchild", recordId: "@runId" }, { op: "delay", ms: 1200 }]),
+        ],
+      },
+      { cancelSettleGraceMs: 300 },
+    );
+    const { ctx: ctxA } = makeCtx({ signal: controller.signal });
+    ctxA.taskId = "run-a";
+    const runA = engine.run({ prompt: "wedged" }, ctxA);
+    const { ctx: ctxB } = makeCtx();
+    ctxB.taskId = "run-b";
+    const runB = engine.run({ prompt: "healthy" }, ctxB);
+
+    // 两路孙进程均已上报镜像（childSpawned 反向通道落账 = 杀目标的确定性同步点）
+    await waitForTrue(() => client.mirror.snapshot().filter((e) => e.state === "running").length >= 2);
+    const childA = client.mirror.snapshot().find((e) => e.recordId === "run-a");
+    const childB = client.mirror.snapshot().find((e) => e.recordId === "run-b");
+    expect(childA).toBeDefined();
+    expect(childB).toBeDefined();
+    await waitForReady(client);
+    const enginePid = client.enginePid!;
+
+    controller.abort();
+    const resultA = await runA; // 收敛窗超时 → 本地合成 abort 终态 + run 拓扑杀
+    expect(resultA.outcome.error).toContain("aborted before terminal answer");
+    expect(resultA.outcome.exitCode).toBeNull();
+
+    // 半径断言①：目标 run 的孙进程被杀（真实 SIGTERM → 进程消亡）
+    await waitForTrue(() => isProcessAlive(childA!.pid) === false);
+    // 半径断言②：邻接 run 正常完成（真实结果，非 engine_crashed 连带）
+    const resultB = await runB;
+    expect(resultB.outcome.error).toBeUndefined();
+    expect(resultB.outcome.content).toBe("fake-content-run-b");
+    // 半径断言③：邻接 run 的孙进程存活
+    expect(isProcessAlive(childB!.pid)).toBe(true);
+    // 半径断言④：引擎宿主存活（组杀退役）
+    expect(client.currentState).toBe("ready");
+    expect(isProcessAlive(enginePid)).toBe(true);
     await cleanup();
   }, 20_000);
 });

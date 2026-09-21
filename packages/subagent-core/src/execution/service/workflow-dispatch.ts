@@ -325,7 +325,8 @@ export class WorkflowDispatch {
    *   ⑤ no-progress 守护（arm/disarm 键 = record.id（D4）；双刷新源 = journal.onEvent
    *      包装 ∪ stream.onDelta 包装；fire 后失败结果追注恢复指引——M3 语义逐项复刻）；
    *   ⑥ mergeRunSignals（timeoutMs + 守护 abort + 外部 signal 合流）；
-   *   ⑦ spawned-children 注册（dispose killAll 收割兜底，键 = record.id）。
+   *   ⑦ spawned-children 注册（dispose killAll 收割兜底，键 = record.id——[D9-2] ③
+   *      dispose 豁免保留组杀，全调用面裁决登记见 remote-engine killRunTopology 注释块）。
    * 池 = DefaultConcurrencyPool 共享（acquirePoolOrFinalize 同链，D3）；成功收口 =
    * settleOneShotOutcome 顶部 D7 origin 分支（closed/gc 立即终态化）。stream 实参
    * 缺省时自构 createBackgroundStream（设计 D2「streaming 由 service 派发路径既有
@@ -412,7 +413,9 @@ export class WorkflowDispatch {
           ? { sessionRootId: this.sessionRootId }
           : {}),
         // ⑦ D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 记账（cancel
-        // SIGTERM / dispose killAll 收割兜底，键 = record.id）
+        // SIGTERM / dispose killAll 收割兜底，键 = record.id——[D9-2] 裁决：cancel
+        // 收敛兜底走 run 拓扑杀（mirror recordId 锚定），dispose 豁免保留组杀，
+        // 登记见 remote-engine killRunTopology 注释块）
         onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
@@ -476,23 +479,28 @@ interface WorkflowNoProgressGuard {
  * arm workflow 派发路径 no-progress 守护（复用 settled-watchdog 原语，不新造第二套
  * 计时器）。fire 回调契约：timer 同步上下文内只做 warn + AbortController.abort()
  * （abort 幂等不抛）；真正终止由 abort 经 mergedSignal → RemoteEngine
- * wireAbortSignal 阶梯（cancel 帧 → 收敛窗 → killAll）承载。onSettleTimeout 与
- * onMidTimeout 同体（workflow 域无 agent_end 交棒点，同体保证未来接交棒语义不变）。
+ * wireAbortSignal 阶梯（cancel 帧 → 收敛窗 → [D9-2] run 拓扑杀——只杀该 run 的引擎
+ * 孙进程，引擎宿主与同引擎其他并发 run 不动；无 per-run 进程拓扑的引擎（zcode 常驻
+ * app-server）降级为 stall 出声不杀，裁决登记见 remote-engine killRunTopology 注释块）
+ * 承载。onSettleTimeout 与 onMidTimeout 同体（workflow 域无 agent_end 交棒点，同体
+ * 保证未来接交棒语义不变）。
  */
 function armWorkflowNoProgressWatchdog(recordId: string): WorkflowNoProgressGuard {
   const controller = new AbortController();
   let fired = false;
   const fire = (info: SettledWatchdogFireInfo): void => {
     fired = true;
-    // 恢复指引闭环（错误 → 权威源 → 重试）：killAll 组杀连带面在此显式出声——
-    // 引擎对 cancel 帧 >收敛窗无响应时组杀引擎 CLI，同引擎其余并发 run 会以
-    // engine_crashed 失败终态化（失败结果照回脚本、executeAgentCall 重试通道仍在）。
+    // 恢复指引闭环（错误 → 权威源 → 重试）：杀半径在此显式出声——[D9-2] 收窄后
+    // 引擎对 cancel 帧 >收敛窗无响应时只杀该 run 的引擎孙进程（run 拓扑），引擎
+    // 宿主与其上其他并发 run 存活（旧组杀连带面已退役）；无 per-run 进程拓扑的
+    // 引擎（zcode）不杀，stall 信号由 workflow-stall 通知通道出声。
     logger.warn(
       `[subagents] workflow no-progress watchdog (${info.phase}) fired for ${recordId}: ` +
         `no valid protocol event for ${info.waitedMs / MS_PER_SECOND / SECONDS_PER_MINUTE} min after run dispatched — ` +
-        `aborting run (cancel frame → settle grace window → killAll if the engine does not settle). ` +
-        `Note: a killAll group-kills the engine CLI process, so other concurrent runs on the same ` +
-        `engine may end as engine_crashed (they still get a failure result and retry). ` +
+        `aborting run (cancel frame → settle grace window → run-scoped process-tree kill only if the engine does not settle). ` +
+        `The kill radius is this run's child processes only: the engine host and other concurrent runs on the ` +
+        `same engine survive (D9-2); engines without a per-run process topology (e.g. zcode) degrade to a ` +
+        `stall notice via the workflow-stall channel — no kill. ` +
         `Recovery: check state with subagents action:'list' includeFinished:true (add includeWorkflow:true to also see workflow-dispatched subagents), then re-dispatch the workflow.`,
     );
     controller.abort();

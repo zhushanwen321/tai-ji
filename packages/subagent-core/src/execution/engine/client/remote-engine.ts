@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import {
   EngineSdkError,
+  killPidChain,
   type AgentCallOpts as SdkAgentCallOpts,
   type AgentOutcome as SdkAgentOutcome,
   type EngineHandleData as SdkEngineHandleData,
@@ -84,7 +85,9 @@ function matchCatalogEntry(
 const logger = getLogger("remote-engine");
 
 /**
- * cancel 后 run 应答收敛的杀链兜底窗（超时触发 EngineClient.killAll 组杀常驻引擎）。
+ * cancel 后 run 应答收敛的兜底窗（超时 = 本地合成 abort 终态收尾 record + [D9-2]
+ * run 拓扑杀——只杀该 run 的引擎孙进程，引擎宿主与其上其他并发 run 存活；组杀
+ * 引擎的旧路径已退役，全调用面裁决见 killRunTopology 注释块）。
  *
  * 量级校准依据（全局超时原则：兜底窗按被保护对象粒度校准——本窗保护的是
  * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制面单请求）：pi 引擎 cancel
@@ -324,7 +327,8 @@ export class RemoteEngine implements EnginePort {
    * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
    * 传输归位）；事件经 run 作用域
    * 路由分发（event 通知 / streamDelta / poolResolved / handleReady）；abort → cancel
-   * 帧 + 收敛杀链兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS，超时杀链）。运行中失败
+   * 帧 + 收敛兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS；窗满 = 本地合成终态 +
+   * [D9-2] run 拓扑杀，引擎宿主不动）。运行中失败
    * 不 reject——合成 error outcome + 正常
    * handle 返回（EnginePort 契约：record 必须收尾）；run 帧发出前的失败（连接/握手）
    * reject。childSpawned/childStateChanged 镜像归 EngineClient（协议形态无
@@ -364,7 +368,8 @@ export class RemoteEngine implements EnginePort {
 
     const unregister = this.opts.client.registerRunRoute(runId, route);
 
-    // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ 杀链兜底。
+    // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ [D9-2]
+    // run 拓扑杀 + 本地合成终态（引擎宿主不动，裁决登记见 killRunTopology 注释块）。
     const abort = wireAbortSignal(
       this.opts.client,
       runId,
@@ -379,8 +384,8 @@ export class RemoteEngine implements EnginePort {
         handle: SdkEngineHandleData;
         outcome: SdkAgentOutcome;
       }>;
-      const wireResult = armedGate !== undefined
-        ? await awaitRunOrArmedTimeout(runRequest, armedGate, () => {
+      const armedSettled = armedGate !== undefined
+        ? awaitRunOrArmedTimeout(runRequest, armedGate, () => {
           // 窗满 fail-fast（EnginePort 契约：运行中失败不 reject——合成 outcome +
           // 正常 handle）。best-effort cancel 先行：孙进程可能已在烧 token，宿主
           // 侧失败不等于引擎侧自停（cancel 受理失败由杀链兜底窗承接）。
@@ -396,7 +401,17 @@ export class RemoteEngine implements EnginePort {
             outcome: armedReceiptTimeoutOutcome(this.id, runId),
           };
         })
-        : await runRequest;
+        : runRequest;
+      // [D9-2] 收敛窗合流：引擎应答先到正常返回；窗满先到 = 本地合成 abort 终态 +
+      // run 拓扑杀（wireAbortSignal 窗满回调），晚到的引擎应答由 settled 守卫吞掉。
+      const wireResult = await awaitRunOrForceSettle(
+        armedSettled,
+        abort,
+        () => ({
+          handle: this.synthesizeHandle(),
+          outcome: abortedRunOutcome(this.id, runId, undefined),
+        }),
+      );
       return { handle: { data: wireResult.handle }, outcome: wireResult.outcome };
     } catch (err) {
       if (abort.isCancelSent()) {
@@ -582,16 +597,87 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
   };
 }
 
-/** abort 接线的运行态句柄（isCancelSent 供 run catch 分支分诊；dispose 归 finally）。 */
+// ============================================================
+// [D9-2 杀伤半径收窄] cancel 收敛兜底的 run 拓扑杀 + 全调用面裁决登记
+// ============================================================
+
+/**
+ * [D9-2 调用面裁决登记（grep 锚：D9-2）] `EngineClient.killAll`（组杀引擎 CLI）
+ * 全调用面逐处判定——本文件只承载①②的收窄后路径；③④及其余引擎级故障面保留
+ * 组杀（豁免理由与判定一致，面本体在 engine-client.ts 既有注释）：
+ *
+ * | # | 调用面 | 位置 | 判定 |
+ * |---|--------|------|------|
+ * | ① | watchdog no-progress（workflow-dispatch fire → abort → 本阶梯） | wireAbortSignal 收敛窗 | **收窄**到 run 进程拓扑（killRunTopology）——杀半径只及该 run 的引擎孙进程，引擎宿主与同引擎其他并发 run 存活 |
+ * | ② | cancel 收敛兜底（外部 abort → cancel 帧 → 收敛窗超时） | 同上（与①共享同一代码路径） | **同案收窄**到 run 拓扑——cancel 语义是停这一个 run，组杀引擎是无辜面 |
+ * | ③ | dispose（宿主停机 / 引擎退役语义） | engine-client.ts dispose | **保留组杀 + 豁免**：停机时引擎本就该全灭，无「无辜并发 run」要保护 |
+ * | ④ | stdout-wedge 自愈（引擎级 stdout 腿楔死恢复） | engine-client.ts killEngineForStdoutWedge | **保留组杀 + 豁免**：卡死定位在引擎级而非 run 级，本就无 run 级目标 |
+ * | — | 引擎自报故障杀链（data-plane 反向请求 10s 未答判引擎故障） | engine-client.ts failEngine | **保留组杀 + 豁免**（同④族）：故障定位在引擎级（引擎反向通道楔死），无 run 级目标；D9-2 四处枚举外的第五调用面，实施期 grep 枚举补登记 |
+ *
+ * 收窄后语义（①②共享）：收敛窗超时 = 宿主放弃等待引擎应答——本地合成 abort
+ * 终态收尾 record（EnginePort 契约「record 必须收尾」；晚到的引擎应答由 settled
+ * 守卫吞掉，形态同 armed 等待门），同时 best-effort 杀该 run 的引擎孙进程
+ * （mirror 中 recordId 锚定的活子进程，SDK killPidChain 单 pid 杀链）。zcode 等
+ * 常驻 app-server 引擎无 per-run 子进程（镜像零目标）→ 降级为 stall 出声不杀
+ * （ADR-0047 静默 ≠ 卡死；stall 通知通道 = P4 workflow-stall informational 通知，
+ * 由 subagent-workflow 扩展的 journal 尾帧扫描承载，core 不另开第二通知面）。
+ */
+
+/** run 拓扑杀的拓扑锚：一次性 run = runId；续聊 run 的引擎子进程以 resume.recordId 归账（pi 引擎 childSpawned 帧的关联键）。 */
+function runTopologyKey(ctx: RunContext): string {
+  return ctx.resume?.recordId ?? ctx.taskId;
+}
+
+/**
+ * [D9-2 ①②] 收敛窗超时的 run 拓扑杀：只杀该 run 在镜像中的活子进程（SIGTERM →
+ * 5s → SIGKILL 升级，SDK killPidChain），引擎宿主进程不动、其他 run 的子进程不动。
+ *
+ * 零目标分支 = 无 per-run 进程拓扑引擎的降级出口（zcode 常驻 app-server 恒落此；
+ * pi 引擎孙进程未 spawn / 已退出的窄窗同理）——不杀任何进程，warn 出声降级语义：
+ * 组杀引擎是被 D9-2 明令禁止的无辜面，stall 信号由 P4 workflow-stall 通道承载。
+ */
+function killRunTopology(client: EngineClient, ctx: RunContext, reason: string): void {
+  const topologyKey = runTopologyKey(ctx);
+  const live = client.mirror
+    .snapshot()
+    .filter((e) => e.recordId === topologyKey && e.state === "running" && !e.killed);
+  if (live.length === 0) {
+    logger.warn(
+      `[remote-engine] cancel did not settle within grace for run ${ctx.taskId}; ` +
+        `no run-scoped child process to kill for topology '${topologyKey}' — ` +
+        `engine host left untouched (group kill is forbidden for run-scoped recovery, D9-2). ` +
+        `The run is stalled, not stopped: a stall notice is owned by the workflow-stall ` +
+        `notification channel; the host-side record has been force-settled as aborted.`,
+    );
+    return;
+  }
+  logger.warn(
+    `[remote-engine] cancel did not settle within grace for run ${ctx.taskId}; ` +
+      `killing ${live.length} run-scoped child process(es) (pids: ${live.map((e) => e.pid).join(",")}) — ` +
+      `engine host and other concurrent runs are untouched (${reason})`,
+  );
+  for (const entry of live) {
+    killPidChain(entry.pid, { note: `run ${ctx.taskId} topology child` });
+  }
+}
+
+/**
+ * abort 接线的运行态句柄（isCancelSent 供 run catch 分支分诊；dispose 归 finally；
+ * onForceSettle 供 run 请求在收敛窗超时时本地合成终态——EnginePort「record 必须收尾」
+ * 契约的兑现点，晚到的引擎应答由调用方 settled 守卫吞掉）。
+ */
 interface AbortWiring {
   isCancelSent(): boolean;
+  /** 收敛窗超时回调登记（窗满 = run 请求尚未应答 → 本地合成 abort 终态 + run 拓扑杀）。 */
+  onForceSettle(cb: () => void): void;
   dispose(): void;
 }
 
 /**
  * abort 分级接线：cancel 帧 → 等收敛（graceMs，缺省 CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）
- * → 杀链兜底。signal 已 aborted 则立即进入收敛窗口；dispose 在 run 终态（finally）
- * 标记 settled 并清理 timer / listener。
+ * → 收敛窗超时 = run 拓扑杀（[D9-2] 只杀该 run 的引擎孙进程，引擎宿主不动——全调用面
+ * 裁决见 killRunTopology 注释块）+ 本地合成终态回调。signal 已 aborted 则立即进入收敛
+ * 窗口；dispose 在 run 终态（finally）标记 settled 并清理 timer / listener。
  */
 function wireAbortSignal(
   client: EngineClient,
@@ -602,16 +688,18 @@ function wireAbortSignal(
   let cancelSent = false;
   let settled = false;
   let settleTimer: NodeJS.Timeout | undefined;
+  let forceSettle: (() => void) | undefined;
   const onAbort = (): void => {
     if (cancelSent || settled) return;
     cancelSent = true;
     void client.cancelRun(runId, "abort").catch(() => {
-      // 受理失败由收敛窗口兜底（进程死 → run 请求 reject → 合成终态）。
+      // 受理失败由收敛窗口兜底（本地合成终态 + run 拓扑杀）。
     });
     settleTimer = setTimeout(() => {
-      if (!settled) {
-        void client.killAll(`cancel did not settle within grace for run ${runId}`);
-      }
+      if (settled) return;
+      settled = true;
+      killRunTopology(client, ctx, `cancel did not settle within grace for run ${runId}`);
+      forceSettle?.();
     }, graceMs);
   };
   if (ctx.signal !== undefined) {
@@ -620,12 +708,42 @@ function wireAbortSignal(
   }
   return {
     isCancelSent: () => cancelSent,
+    onForceSettle: (cb) => {
+      forceSettle = cb;
+    },
     dispose: () => {
       settled = true;
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       if (ctx.signal !== undefined) ctx.signal.removeEventListener("abort", onAbort);
     },
   };
+}
+
+/**
+ * run 请求与收敛窗的合流（形态同 awaitRunOrArmedTimeout）：引擎应答先到 → 正常返回；
+ * 收敛窗超时先到 → 本地合成 abort 终态（EnginePort「record 必须收尾」契约）。败者
+ * 后续 settle 一律吞掉（settled 守卫 + run 请求的 then 链恒有 handler，无 unhandled
+ * rejection）。
+ */
+function awaitRunOrForceSettle<T>(
+  runRequest: Promise<T>,
+  wiring: AbortWiring,
+  synthesizeOnForceSettle: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const settle = (settleFn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      wiring.dispose();
+      settleFn();
+    };
+    wiring.onForceSettle(() => settle(() => resolve(synthesizeOnForceSettle())));
+    runRequest.then(
+      (value) => settle(() => resolve(value)),
+      (err) => settle(() => reject(err)),
+    );
+  });
 }
 
 /** abort 期合成 outcome（exitCode null = 被信号杀死，杀链判据）。 */
