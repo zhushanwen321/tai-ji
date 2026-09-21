@@ -185,6 +185,7 @@ describe("契约类型运行时形状冒烟（字段可选项漂移时在构造�
       { type: "compaction" },
       { type: "activity" },
       { type: "error", message: "boom" },
+      { type: "armed", schemaEnvVar: "PI_WORKFLOW_SCHEMA", extensionPkg: "@zhushanwen/pi-structured-output" },
     ];
     expect(events.map((e) => e.type)).toEqual([...AGENT_EVENT_TYPE_NAMES]);
   });

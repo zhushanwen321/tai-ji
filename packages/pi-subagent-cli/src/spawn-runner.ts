@@ -484,6 +484,21 @@ export async function runSpawnOnce(
     registerActiveChild(params.recordId, child);
     reportChildSpawned(child, params.recordId, callbacks);
 
+    // [D3 协议版 P6] 武装回执上报：武装断言（本函数上方）通过 + 孙进程 spawn 成功
+    //（spawnEngineChild 同步抛错即失败，成功返回 = 「孙进程启动确认」的最强可得
+    // 形态——断言③已按 P-C1 核实退化，扩展加载破坏由 pi exit(1) 通路承接）。
+    // 协议版上报 = 宿主的独立信号源（监控信号不与施控同源）：宿主等待窗据此判定
+    // 武装链路活性，防「断言代码自身失效/被绕过」的自证盲区。仅 schema 任务上报
+    // （本包是 native 引擎，capability 分流已由断言前置；无 schema 任务无武装面，
+    // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），落账归 run 事件 journal。
+    if (params.schema !== undefined) {
+      callbacks.onEvent({
+        type: "armed",
+        schemaEnvVar: SCHEMA_ENV_VAR,
+        extensionPkg: SCHEMA_ENFORCEMENT_EXTENSION_PKG,
+      });
+    }
+
     // 4. UI 请求队列（host/askUser 两阶段等待体注入）
     const enqueueUi = createUiRequestQueue(child, {
       ...(callbacks.askUser !== undefined ? { uiRequestHandler: callbacks.askUser } : {}),

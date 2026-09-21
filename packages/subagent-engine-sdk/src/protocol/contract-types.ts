@@ -99,12 +99,19 @@ export interface Turn {
 }
 
 /**
- * 引擎事件（9 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
+ * 引擎事件（10 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
  * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
+ *
+ * armed = [D3 协议版 P6] schema 强制武装确认回执：引擎在启动期武装断言通过 +
+ * 孙进程 spawn 成功后上报一次（仅 native 引擎、仅 schema 任务；emulated 引擎无
+ * 孙进程 env/扩展依赖，「武装」概念不适用，恒不上报）。宿主是独立信号源（引擎
+ * 自查断言之外的第二道防线——监控信号不与施控同源）：native schema 任务的 run
+ * 在等待窗（宿主侧常量）内未收到本事件即 fail-fast。载荷 = 已核验的武装事实
+ * （env 变量名 + 必备扩展包名），经宿主落 run 事件 journal（RunArmedEvent.frame）。
  */
 export type AgentEvent =
   | { type: "tool_start"; toolName: string; args?: unknown }
@@ -115,7 +122,8 @@ export type AgentEvent =
   | { type: "message_end"; usage?: AgentUsage; error?: string }
   | { type: "compaction" }
   | { type: "activity" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "armed"; schemaEnvVar: string; extensionPkg: string };
 
 /**
  * 事件类型名联合（词表 SSOT 的类型面；AGENT_EVENT_TYPE_NAMES 常量数组与之同源，
@@ -139,6 +147,7 @@ export const AGENT_EVENT_TYPE_NAMES = [
   "compaction",
   "activity",
   "error",
+  "armed",
 ] as const satisfies readonly AgentEventType[];
 
 // ============================================================

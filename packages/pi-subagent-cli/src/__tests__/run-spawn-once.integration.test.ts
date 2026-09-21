@@ -443,6 +443,40 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
+  it("[D3 协议版] 武装回执上报：断言通过 + 孙进程 spawn 成功后 onEvent 收到 armed（先于翻译事件）；无 schema 任务零上报", async () => {
+    // 协议版上报 = 宿主独立信号源（引擎自查断言之外的第二道防线）：上报时机 =
+    // assertSchemaEnforcementArmed 通过（spawn 前拦截即零上报——上方用例已断言
+    // h.events 为空）+ spawnEngineChild 成功返回（「孙进程启动确认」的最强可得形态）。
+    const schema = { type: "object", properties: { answer: { type: "number" } } };
+    const h = await makeHarness("success");
+    try {
+      await runSpawnOnce(
+        baseParams(h, { schema, extensionPaths: [ARMED_EXTENSION_PATH] }),
+        callbacksOf(h),
+      );
+      // armed 恰一帧、载荷 = 已核验的武装事实（env 变量名 + 必备扩展包名）
+      const armed = h.events.filter((e) => e.type === "armed");
+      expect(armed).toEqual([
+        { type: "armed", schemaEnvVar: "PI_WORKFLOW_SCHEMA", extensionPkg: "@zhushanwen/pi-structured-output" },
+      ]);
+      // 时序：armed 先于孙进程 stdout 翻译事件（spawn 后即报，pump 事件必晚于它）
+      expect(h.events[0].type).toBe("armed");
+      expect(h.events.length).toBeGreaterThan(1);
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D3 协议版] 无 schema 任务不上报 armed（武装概念不适用，宿主等待门只在 schema 任务生效）", async () => {
+    const h = await makeHarness("success");
+    try {
+      await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(h.events.some((e) => e.type === "armed")).toBe(false);
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
   it("[F-1 回归] schemaExpected 信号源 = task.schema 声明形态（非 env 同源）：env 污染 + 无声明 → 守卫不武装", async () => {
     // H3 判定源回归（H1 归位后的消费面守卫）：PI_WORKFLOW_SCHEMA 不在引擎 env
     // deny list——引擎进程 env 被污染时该键会随继承实际到达孙进程（回显非哨兵可证），

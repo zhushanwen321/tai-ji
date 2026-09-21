@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient } from "../engine-client.ts";
 import {
+  ARMED_RECEIPT_TIMEOUT_ENV,
+  ARMED_RECEIPT_TIMEOUT_MS,
   CANCEL_SETTLE_KILL_CHAIN_GRACE_MS,
   RemoteEngine,
   type RemoteEngineManifestSnapshot,
@@ -549,4 +551,120 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
     expect(echo.message).toContain('"confirmed":true');
     await cleanup();
   });
+});
+
+// ── [D3 协议版 P6] armed 回执等待门（宿主独立信号源；引擎侧自查断言之外的第二道
+//    防线——监控信号不与施控同源）。fake 引擎经 argv 通道驱动：--caps-override 模拟
+//    native 应答（schemaEnforcement 非 gate 位，不触发 gate 拒），--run-actions 播放
+//    armed / delay 动作。等待窗经 env 调短（量级常量锚定用例持有缺省值）。
+
+const ARMED_EVENT = {
+  type: "armed",
+  schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+  extensionPkg: "@zhushanwen/pi-structured-output",
+} as const;
+
+function makeNativeEngineActions(
+  manifestCaps: Partial<RemoteEngineManifestSnapshot["capabilities"]> = {},
+  runActions: ReadonlyArray<Record<string, unknown>>,
+) {
+  return makeEngine(
+    { capabilities: { ...FAKE_MATCHED_CAPS, schemaEnforcement: "native", ...manifestCaps } },
+    {
+      args: [
+        FAKE_ENGINE,
+        "--caps-override",
+        JSON.stringify({ schemaEnforcement: "native" }),
+        "--run-actions",
+        JSON.stringify(runActions),
+      ],
+    },
+  );
+}
+
+describe("armed 回执等待门（[D3 协议版 P6]）", () => {
+  it("常量锚：等待窗缺省 10s + env 通道名（量级按启动期回执校准，env 供测试/排障覆盖）", () => {
+    expect(ARMED_RECEIPT_TIMEOUT_MS).toBe(10_000);
+    expect(ARMED_RECEIPT_TIMEOUT_ENV).toBe("TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS");
+  });
+
+  it("native + schema 任务：窗内收到 armed → run 正常收敛，armed 事件照常转发 ctx.onEvent", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "8000";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "emit", event: ARMED_EVENT },
+    ]);
+    const { ctx, events } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+      expect(events.some((e) => (e as { type?: string }).type === "armed")).toBe(true);
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("native + schema 任务：窗满无回执 → 合成失败 outcome fail-fast（不 reject），错误含双形态恢复指引 + 旧引擎支", async () => {
+    // 等待窗（500ms）< 引擎 run 应答时延（5s delay）：fail-fast 返回发生在 run 应答
+    // 之前 = 「秒级失败」时序的直接证明（G1：断链 run 不得烧完整时长）。
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "500";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 5000 },
+    ]);
+    const { ctx } = makeCtx();
+    try {
+      const startedAt = Date.now();
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(Date.now() - startedAt).toBeLessThan(4000); // 远小于 5s 应答时延
+      const error = result.outcome.error ?? "";
+      expect(error).toContain("[schema-arming]");
+      expect(error).toContain("armed receipt");
+      // 双形态恢复指引（对齐 H3 文案语义）+ 协议版新增的旧引擎支
+      expect(error).toContain("extension-service");
+      expect(error).toContain("install @zhushanwen/pi-structured-output (peerDependency)");
+      expect(error).toContain("schema-less workflow");
+      expect(error).toContain("engine package too old");
+      // cancel 帧已发（合成失败不等于引擎自停）+ exitCode null = cancel/杀链终态族
+      expect(result.outcome.exitCode).toBeNull();
+      expect(result.handle.data.v).toBe(1);
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("emulated 引擎豁免：schema 任务、窗满无回执也不 fail-fast（run 照常收敛）", async () => {
+    // 缺省 manifest/应答 = emulated；run 应答时延（1.2s）> 等待窗（400ms）——若门
+    // 未豁免必合成失败，本用例断言成功即豁免的构造性证明。
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, cleanup } = makeEngine(undefined, {
+      args: [FAKE_ENGINE, "--run-actions", JSON.stringify([{ op: "delay", ms: 1200 }])],
+    });
+    const { ctx } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("native + 无 schema 任务豁免：不建门，无回执不 fail-fast（H1 判据 = task.schema 声明形态）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 1200 },
+    ]);
+    const { ctx } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p" }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
 });

@@ -28,6 +28,7 @@ import {
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
 import { getHostServices } from "../../../core/host-services.ts";
+import { getLogger } from "../../../core/logger.ts";
 import { getSubagentSessionDir } from "../../assembly/path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
@@ -80,6 +81,8 @@ function matchCatalogEntry(
   );
 }
 
+const logger = getLogger("remote-engine");
+
 /**
  * cancel 后 run 应答收敛的杀链兜底窗（超时触发 EngineClient.killAll 组杀常驻引擎）。
  *
@@ -93,6 +96,131 @@ function matchCatalogEntry(
  * 量级对 cancel 帧往返正确），两窗语义自此分离。
  */
 export const CANCEL_SETTLE_KILL_CHAIN_GRACE_MS = 30_000;
+
+/**
+ * [D3 协议版 P6] armed 回执等待窗缺省值：native 引擎 + schema 任务的 run 在本窗内
+ * 未收到引擎 armed 回执 → run fail-fast（合成失败 outcome，错误含双形态恢复指引）。
+ *
+ * 量级依据：armed 在引擎侧是 spawn 成功后立即上报（启动期，非执行期）——正常链路
+ * 到达耗时 = 引擎进程 spawn + 一帧 IPC，秒级以内；10s 覆盖慢宿主/慢磁盘的裕量，
+ * 远小于「schema 链路断掉烧完整 run」的沉没成本（G1 的保险丝语义）。用户通道：
+ * env 覆盖（测试调短窗 + 排障调长窗），TAIJI_SUBAGENT_* 前缀（ENV_WHITELIST_PREFIXES
+ * 白名单——PI_ 前缀在桌面 spawn 链被静默丢弃的教训，见 settled-watchdog 同款注记）。
+ */
+export const ARMED_RECEIPT_TIMEOUT_MS = 10_000;
+
+/** armed 回执等待窗的 env 覆盖通道（>0 毫秒数生效；未设/非法 = 缺省 10s）。 */
+export const ARMED_RECEIPT_TIMEOUT_ENV = "TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS";
+
+/**
+ * 等待窗解析（每次 run 现读，不缓存——测试逐用例改 env 零串扰；非法值 warn 回落
+ * 缺省，对齐 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的 LC-7 教训：非法回落必须可见）。
+ */
+function resolveArmedReceiptTimeoutMs(): number {
+  const raw = process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+  if (raw === undefined || raw.trim() === "") return ARMED_RECEIPT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn(
+      `[remote-engine] ${ARMED_RECEIPT_TIMEOUT_ENV}="${raw}" is invalid (expected a positive millisecond number) — ` +
+        `falling back to the default armed-receipt window (${ARMED_RECEIPT_TIMEOUT_MS}ms). ` +
+        `Recovery: set a plain ms value (e.g. 500 for tests) or unset the env.`,
+    );
+    return ARMED_RECEIPT_TIMEOUT_MS;
+  }
+  return parsed;
+}
+
+// ============================================================
+// [D3 协议版 P6] armed 回执等待门（宿主等待侧）
+// ============================================================
+
+/**
+ * armed 回执等待门：native 引擎 + schema 任务的 run 派发后开窗计时，引擎 armed
+ * 事件到达（经 run 事件路由）即收窗；窗满未到 → onTimeout 回调（调用方合成失败
+ * outcome + best-effort cancel）。emulated 引擎 / 无 schema 任务豁免（不建门——
+ * 「武装」概念仅对有孙进程 env/扩展依赖的 native 引擎成立，D3 分流判据 =
+ * capabilities.schemaEnforcement；任务形态判据复用 H1 的 task.schema 声明形态，
+ * 与引擎自查断言同源不同侧）。
+ *
+ * 为什么是「监控信号不与施控同源」：引擎侧武装断言（pi-subagent-cli）是引擎自查，
+ * 断言代码自身失效/被绕过时自查恒绿——宿主侧独立等待窗是第二道防线（F-1 同源
+ * 缴械教训的结构性应用）。
+ */
+interface ArmedReceiptGate {
+  /** run 事件路由喂入点（armed 到达即收窗；其余事件无操作）。 */
+  observe(event: unknown): void;
+  /** 窗满回调（构造后登记——回调需要 run 上下文合成失败 outcome）。 */
+  onTimeout(onFire: () => void): void;
+  /** 收窗（run 终态 settle / 超时触发后调用；幂等）。 */
+  dispose(): void;
+}
+
+function armArmedReceiptGate(
+  capabilities: EngineCapabilities,
+  task: AgentCallOpts,
+): ArmedReceiptGate | undefined {
+  // emulated 豁免（zcode 及 schema-emulation 登记域：引擎侧消费 wire task.schema，
+  // 无武装面，宿主不期待回执、不 fail-fast——D3 防 emulated 误伤）。
+  if (capabilities.schemaEnforcement !== "native") return undefined;
+  // 无 schema 任务豁免（H1 判据：task.schema 声明形态；无声明 = 无武装面）。
+  if (task.schema === undefined) return undefined;
+  let armed = false;
+  let onFire: (() => void) | undefined;
+  const timer = setTimeout(() => {
+    if (!armed) onFire?.();
+  }, resolveArmedReceiptTimeoutMs());
+  return {
+    observe: (event) => {
+      if (armed) return;
+      if (!isArmedEventFrame(event)) return;
+      armed = true;
+      clearTimeout(timer);
+    },
+    onTimeout: (cb) => {
+      onFire = cb;
+    },
+    dispose: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
+/** 运行时 guard：事件帧是否 armed 回执（wire 载荷 unknown，按 type 窄化，无 any）。 */
+function isArmedEventFrame(event: unknown): boolean {
+  return (
+    typeof event === "object" &&
+    event !== null &&
+    (event as { type?: unknown }).type === "armed"
+  );
+}
+
+/**
+ * run 请求与 armed 等待门的合流：run 应答先到 → 正常收门返回；窗满先到 → 合流
+ * resolve 为调用方合成的失败结果（fail-fast，EnginePort 契约「运行中失败不 reject
+ * ——合成 outcome + 正常 handle」）。败者后续 settle 一律吞掉（settled 守卫 +
+ * run 请求的 then 链恒有 handler，无 unhandled rejection）。
+ */
+function awaitRunOrArmedTimeout<T>(
+  runRequest: Promise<T>,
+  gate: ArmedReceiptGate,
+  synthesizeOnTimeout: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const settle = (settleFn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      gate.dispose();
+      settleFn();
+    };
+    runRequest.then(
+      (value) => settle(() => resolve(value)),
+      (err) => settle(() => reject(err)),
+    );
+    gate.onTimeout(() => settle(() => resolve(synthesizeOnTimeout())));
+  });
+}
 
 /**
  * cli 形态 EnginePort。构造同步、不 throw（缺包/坏包不在构造期报——descriptor
@@ -221,7 +349,20 @@ export class RemoteEngine implements EnginePort {
     const runId = ctx.taskId;
     const runParams = buildRunParams(task, ctx, runId);
 
-    const unregister = this.opts.client.registerRunRoute(runId, buildRunRouteHandlers(ctx));
+    // [D3 协议版 P6] armed 回执等待门（native + schema 任务专属；emulated / 无
+    // schema 豁免 = undefined）：事件路由包裹 observe——armed 到达即收窗，窗满未到
+    // 由合流等待器合成失败 outcome（下方 awaitRunOrArmedTimeout）。
+    const armedGate = armArmedReceiptGate(this.opts.manifest.capabilities, task);
+    const route = buildRunRouteHandlers(ctx);
+    if (armedGate !== undefined) {
+      const forwardEvent = route.onEvent;
+      route.onEvent = (event) => {
+        armedGate.observe(event);
+        forwardEvent?.(event);
+      };
+    }
+
+    const unregister = this.opts.client.registerRunRoute(runId, route);
 
     // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ 杀链兜底。
     const abort = wireAbortSignal(
@@ -234,11 +375,29 @@ export class RemoteEngine implements EnginePort {
     try {
       // wire 载荷收窄（帧 result unknown → 协议 RunResult 形态）；SDK → core 结构
       // 兼容由 implements EnginePort 在 typecheck 期互证。
-      const result = (await this.opts.client.request("run", runParams)) as {
+      const runRequest = this.opts.client.request("run", runParams) as Promise<{
         handle: SdkEngineHandleData;
         outcome: SdkAgentOutcome;
-      };
-      return { handle: { data: result.handle }, outcome: result.outcome };
+      }>;
+      const wireResult = armedGate !== undefined
+        ? await awaitRunOrArmedTimeout(runRequest, armedGate, () => {
+          // 窗满 fail-fast（EnginePort 契约：运行中失败不 reject——合成 outcome +
+          // 正常 handle）。best-effort cancel 先行：孙进程可能已在烧 token，宿主
+          // 侧失败不等于引擎侧自停（cancel 受理失败由杀链兜底窗承接）。
+          void this.opts.client.cancelRun(runId, "armed receipt timeout").catch(() => {
+            // cancel 受理失败不阻断 fail-fast（杀链兜底窗是既有的第二道回收）。
+          });
+          logger.warn(
+            `[remote-engine] armed receipt not received within ${resolveArmedReceiptTimeoutMs()}ms ` +
+              `for run ${runId} (native engine, schema task) — failing the run fast`,
+          );
+          return {
+            handle: this.synthesizeHandle(),
+            outcome: armedReceiptTimeoutOutcome(this.id, runId),
+          };
+        })
+        : await runRequest;
+      return { handle: { data: wireResult.handle }, outcome: wireResult.outcome };
     } catch (err) {
       if (abort.isCancelSent()) {
         // cancel 后未收敛（杀链已杀）或引擎在 abort 期间报错：合成 abort 终态，不 reject
@@ -486,6 +645,32 @@ function transientRunOutcome(engineId: string, err: unknown): SdkAgentOutcome {
   return {
     content: "",
     error: err instanceof Error ? err.message : String(err),
+    exitCode: null,
+    engineId,
+  };
+}
+
+/**
+ * [D3 协议版 P6] armed 回执窗满合成 outcome。文案语义对齐引擎侧武装断言（H3）双形态
+ * 恢复指引；差异点 = 本侧是宿主独立信号（引擎自查之外的监控面），失败含义多一支：
+ * 「引擎版本过旧不上报回执」。exitCode null = cancel/杀链终态族（被信号杀死判据）。
+ */
+function armedReceiptTimeoutOutcome(engineId: string, runId: string): SdkAgentOutcome {
+  return {
+    content: "",
+    error:
+      `[schema-arming] engine_run_failed: no armed receipt from native engine within the ` +
+      `wait window for a schema task (run ${runId}) — the run was failed fast because ` +
+      `continuing could complete with an unvalidated structured output. Either the arming ` +
+      `chain is broken (schema env / grandchild extension never reached the pi grandchild), ` +
+      `or the engine does not report armed receipts (engine package too old to speak the ` +
+      `armed event). Recovery — taiji host form: check the runtime extension-service ` +
+      `diagnostics for the grandchild extension whitelist staging of ` +
+      `@zhushanwen/pi-structured-output. Recovery — standalone pi form: install ` +
+      `@zhushanwen/pi-structured-output (peerDependency) or use a schema-less workflow ` +
+      `instead (drop the schema from the agent call). If engine-side arming assertions pass ` +
+      `but no receipt arrives, upgrade or reinstall the engine package ` +
+      `(@zhushanwen/pi-subagent-cli).`,
     exitCode: null,
     engineId,
   };
