@@ -26,6 +26,15 @@ import type { ImportDegradation } from '@taiji/shared'
 
 import { ImportServiceError } from '../import-source.js'
 import { classifyMessage } from './projection.js'
+import {
+  asFinite,
+  asNonEmptyString,
+  isRecord,
+  mapStopReason,
+  unsealedStopReason,
+  usageFromStepFinish,
+  zeroUsage,
+} from './assistant-mapping.js'
 import type { ZcodeReadonlyDb, ZcodeTranscriptMessageRow } from './sqlite-access.js'
 
 /** 目标 pi header（与 ImportArtifact.header 同构；由 prepareImport 产出后传入）。 */
@@ -131,75 +140,10 @@ function mapToolName(zcodeTool: string): string {
   return TOOL_NAME_MAP[zcodeTool] ?? zcodeTool
 }
 
-// ── T3c stopReason 映射（§3.4）：zcode finish 实测全域 → pi StopReason 封闭枚举 ─────────
-// 尾段（消息结束未收口）/ other / undefined / 未知取值 → 'stop' 保底：taiji 渲染链对
-// message 级 stopReason 零消费（设计已核实），stop 是 pi 恢复语义的安全终态。
-const STOP_REASON_MAP: Readonly<Record<string, string>> = Object.freeze({
-  'tool-calls': 'toolUse',
-  stop: 'stop',
-  completed: 'stop',
-  length: 'length',
-  interrupted: 'aborted',
-  failed: 'error',
-  stream_recovery_discarded: 'error',
-  start_plan_admission_retry_discarded: 'error',
-})
+// T3c stopReason / usage 映射与共享守卫（isRecord / asFinite / asNonEmptyString）在
+// assistant-mapping.ts（字段映射域，2026-09-21 毒消息事故后拆出：mapStopReason /
+// unsealedStopReason（取消轮 error 优先）/ zeroUsage（pi 读面不变量门）/ usageFromStepFinish）。
 
-function mapStopReason(zcodeFinish: unknown): string {
-  return typeof zcodeFinish === 'string' ? (STOP_REASON_MAP[zcodeFinish] ?? 'stop') : 'stop'
-}
-
-/**
- * 未收口段（无 step-finish 闭合）的 stopReason：消息级 data.error 优先（T3c 事故补强，
- * 2026-09-21 毒消息事故——取消轮无 step-finish，finish 兜底把它伪装成 'stop'，而 pi
- * 0.84.4 读面对「非 aborted/error 的 assistant」裸读 usage：stats 聚合 agent-session.js
- * :2678（reading 'input'）、turn 前上下文扫描 :2721（reading 'totalTokens'）、overflow
- * 检查 usage.input——伪 stop + 无 usage 导入后续聊即崩）。turnResult cancelled →
- * 'aborted'（pi 语义 = 用户中止），其余 error 家族 → 'error'；两态 pi 守卫均跳过。
- * 段自身有 step-finish 收口时不走本函数（见 closeSegment）。
- */
-function unsealedStopReason(data: Record<string, unknown>): string {
-  const error = isRecord(data.error) ? data.error : undefined
-  if (error === undefined) return 'stop'
-  const errData = isRecord(error.data) ? error.data : undefined
-  const turnResult = typeof errData?.turnResult === 'string' ? errData.turnResult : undefined
-  if (turnResult === 'cancelled') return 'aborted'
-  return 'error'
-}
-
-/**
- * 产物不变量门（A3）：assistant entry 恒带 usage 对象——pi 读面三处裸读（见
- * unsealedStopReason 注释）以「stopReason 非 aborted/error ⇒ usage 在场」为隐式前提
- * （pi 原生写侧连错误轮都写全零 usage；全零 = pi 的「无测量数据」合法编码，守卫按
- * 无效跳过、零贡献进统计）。step-finish 缺席（取消轮）或 tokens 不可解时零值兜底；
- * 不进降级通道——这是期望内的忠实映射（非正常收口已由 stopReason 显形），非异常。
- */
-function zeroUsage(): Record<string, unknown> {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    reasoning: 0,
-    totalTokens: 0,
-    cost: { total: 0 },
-  }
-}
-
-// ── 小型运行时守卫（输入是外部宽形态 JSON，禁 any，malformed 降级不抛错）────────────────
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function asFinite(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
-}
-
-/** 非空字符串守卫（空串不作为有效指针参与解析——与 projection asNonEmptyString 同语义）。 */
-function asNonEmptyString(v: unknown): string | undefined {
-  return typeof v === 'string' && v.length > 0 ? v : undefined
-}
 // ── T6 entry id 链：8-hex 递增计数器（'00000001' 起），parentId 顺序链（首条 null）──────
 // 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义——id 在 pi 侧仅作 opaque map
 // key / leaf 指针 / 相等比较（pi 0.84.4 dist/core/session-manager.js:681-682 与 :758-759，
@@ -292,47 +236,8 @@ function newSegment(): AssistantSegment {
   return { content: [], toolResults: [], startMs: undefined }
 }
 
-/**
- * step-finish 的 tokens/cost → pi Usage（字段映射表见 §3.4 T3：同名直通/total→totalTokens/…）。
- *
- * RT-5#1 缺省语义：可解分量才写键——「无数据」写成测量值 0 会永久污染落盘用量/费用
- * 统计（usage-stats 扫描聚合即读本产物；gen-stats 同款「禁 ?? 0」纪律：0 只允许作为
- * 真实测量值出现）。全部分量不可解 → 整条 usage 不写 + degradations 显形计数。消费面
- * 已核实对缺键安全：usage-stats 的 `!message?.usage` 存在性守卫、apply-entry-convert
- * 的 isLooseRecord 均按「无数据」跳过。cost 是 number（zcode 形态）→ usage.cost.total
- * （pi Usage.cost 是对象形态，直塞 number 产出非法类型）；cost 分量 zcode 不采集，缺省
- * 不写 0。
- */
-function usageFromStepFinish(
-  partData: Record<string, unknown>,
-  msgId: string,
-  degradations: ImportDegradation[],
-): Record<string, unknown> | undefined {
-  const tokens = partData.tokens
-  if (!isRecord(tokens)) return undefined
-  const cache = isRecord(tokens.cache) ? tokens.cache : {}
-  const input = asFinite(tokens.input)
-  const output = asFinite(tokens.output)
-  const cacheRead = asFinite(cache.read)
-  const cacheWrite = asFinite(cache.write)
-  const reasoning = asFinite(tokens.reasoning)
-  const totalTokens = asFinite(tokens.total)
-  const costTotal = asFinite(partData.cost)
-  const usage: Record<string, unknown> = {
-    ...(input !== undefined && { input }),
-    ...(output !== undefined && { output }),
-    ...(cacheRead !== undefined && { cacheRead }),
-    ...(cacheWrite !== undefined && { cacheWrite }),
-    ...(reasoning !== undefined && { reasoning }),
-    ...(totalTokens !== undefined && { totalTokens }),
-    ...(costTotal !== undefined && { cost: { total: costTotal } }),
-  }
-  if (Object.keys(usage).length === 0) {
-    pushDegradation(degradations, `step-finish tokens/cost 分量全部不可解，整条 usage 不写：message=${msgId}`, msgId)
-    return undefined
-  }
-  return usage
-}
+// usageFromStepFinish（step-finish tokens → pi usage + 不可解 degradation 文本）在
+// assistant-mapping.ts——字段映射域，签名与判据见其头注（RT-5#1 缺省语义不变）。
 
 /**
  * T4：tool part 的 state.output → pi toolResult 的 content/details 三形态。
@@ -667,7 +572,9 @@ function convertAssistantMessage(
       continue
     }
     if (type === 'step-finish') {
-      closeSegment(part.reason, usageFromStepFinish(part, msg.id, degradations))
+      const { usage, degradation } = usageFromStepFinish(part)
+      if (degradation !== undefined) pushDegradation(degradations, `${degradation}：message=${msg.id}`, msg.id)
+      closeSegment(part.reason, usage)
       continue
     }
     if (type === 'text') {
