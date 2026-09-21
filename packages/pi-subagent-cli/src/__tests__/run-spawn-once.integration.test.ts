@@ -15,6 +15,9 @@
 //     逐字节等值（JSON.stringify 本体）+ 无 schema 声明不注入；
 //   - [F-1] schemaExpected 判定源 = task.schema 声明形态（无 structured-output
 //     产出 → success=false + schema_deterministic 归因）；
+//   - [D3 止血版] 武装断言：native + schema 任务 + structured-output 缺席 →
+//     spawn 前 fail-fast（零 spawn）+ 双形态恢复指引；schemaExpected 信号源 =
+//     声明形态非 env 同源（env 污染 + 无声明 → 守卫不武装）；
 //   - 轮终语义（[modeless 波2] 唯一形态，原 chatMode 分支统一）：agent_end 轮收敛
 //     不 kill、agent_settled resolve（exit 0）+ 杀链收割（每轮一进程，续聊 = 新
 //     run + resume）；
@@ -40,6 +43,13 @@ import {
 } from "../spawn-runner.ts";
 import { resetAllEpipeFailures } from "../stdin-writer.ts";
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
+
+/**
+ * [D3] 武装态 schema 任务的扩展路径：native + schema run 必须携带 structured-output
+ * 路径（命中武装断言②的 `<scope>/<pkg>` 段判据），否则 runSpawnOnce 在 spawn 前
+ * fail-fast。fake pi 不真加载扩展，路径无需存在。
+ */
+const ARMED_EXTENSION_PATH = "/staged/resources/extensions/@zhushanwen/pi-structured-output";
 
 /** fake pi 脚本：stdin JSONL 命令 → stdout JSONL 事件（pi rpc mode 行为模拟）。 */
 const FAKE_PI_SCRIPT = `
@@ -322,7 +332,12 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     };
     const h = await makeHarness("echo-schema-env");
     try {
-      const result = await runSpawnOnce(baseParams(h, { schema }), callbacksOf(h));
+      // [D3] 武装态 run：schema 任务须带 structured-output 扩展路径，否则武装断言
+      // 在 spawn 前拦截（专测见下方武装断言用例），回显链路走不到
+      const result = await runSpawnOnce(
+        baseParams(h, { schema, extensionPaths: [ARMED_EXTENSION_PATH] }),
+        callbacksOf(h),
+      );
       // 本用例不断言 success：schema 声明 + fake pi 无 structured-output 调用 →
       // F-1 守卫按设计翻成 false（专测见下方 schemaExpected 用例）；此处只验
       // 回显值（content = 孙进程读到的 env 原值）逐字节等于 JSON.stringify(schema)
@@ -384,16 +399,66 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     // 判定信号 = params.schema 声明（与 env 注入值解耦）：声明存在 → 守卫武装，
     // run 正常结束（exit 0）但无 parsedOutput → 不得静默 success。反面（schema
     // 缺省 → success 保持 true）由上方 rpc 模式成功流用例覆盖（该 run 无 schema）。
+    // [D3] 武装态 run：schema 任务须带 structured-output 扩展路径（武装断言放行）。
     const h = await makeHarness("success");
     try {
       const result = await runSpawnOnce(
-        baseParams(h, { schema: { type: "object", properties: { answer: { type: "number" } } } }),
+        baseParams(h, { schema: { type: "object", properties: { answer: { type: "number" } } }, extensionPaths: [ARMED_EXTENSION_PATH] }),
         callbacksOf(h),
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain("Structured output failed deterministically:");
       expect(result.failureKind).toBe("schema_deterministic");
     } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D3] 武装断言接线：native + schema 任务 + structured-output 缺席 → spawn 前 fail-fast（零 spawn + 双形态恢复指引）", async () => {
+    const h = await makeHarness("success");
+    try {
+      let err: unknown;
+      try {
+        // 无 extensionPaths = 断言②命中场景（taiji 形态注入源置空 / 独立形态未装
+        // peerDep 的同构失败面——引擎侧两者都是「--extension 无 structured-output」）
+        await runSpawnOnce(
+          baseParams(h, { schema: { type: "object", properties: { answer: { type: "number" } } } }),
+          callbacksOf(h),
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(Error);
+      const msg = err instanceof Error ? err.message : "";
+      expect(msg).toContain("[schema-arming]");
+      // 双形态恢复指引（D2 行为变更声明）：taiji 宿主形态 + 独立形态文案都在
+      expect(msg).toContain("extension-service");
+      expect(msg).toContain("install @zhushanwen/pi-structured-output (peerDependency)");
+      expect(msg).toContain("schema-less workflow");
+      // 秒级 fail-fast 的接线证明：断言在孙进程 spawn 前抛出——零子进程、零事件
+      expect(h.childSpawned).toEqual([]);
+      expect(h.events).toEqual([]);
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[F-1 回归] schemaExpected 信号源 = task.schema 声明形态（非 env 同源）：env 污染 + 无声明 → 守卫不武装", async () => {
+    // H3 判定源回归（H1 归位后的消费面守卫）：PI_WORKFLOW_SCHEMA 不在引擎 env
+    // deny list——引擎进程 env 被污染时该键会随继承实际到达孙进程（回显非哨兵可证），
+    // 但 schemaExpected 只认 params.schema 声明形态：env 在、声明缺 → 守卫不武装，
+    // 静默成功不被拦截。若判定源回归 env 同源，本用例翻红。
+    const h = await makeHarness("echo-schema-env");
+    const polluted = JSON.stringify({ type: "object" });
+    process.env.PI_WORKFLOW_SCHEMA = polluted;
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      // env 事实存在：污染值已实际到达孙进程（回显非哨兵）
+      expect(result.content).toBe(polluted);
+      // 守卫信号源是声明形态：无声明 → schemaExpected 不置位 → 静默成功保持
+      expect(result.success).toBe(true);
+    } finally {
+      delete process.env.PI_WORKFLOW_SCHEMA;
       restoreHarness(h);
     }
   }, 15_000);
