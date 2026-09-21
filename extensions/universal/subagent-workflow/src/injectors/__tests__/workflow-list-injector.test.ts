@@ -262,7 +262,7 @@ describe("workflow-list-injector session 级缓存", () => {
 		expect(r?.systemPrompt).not.toContain("chain");
 	});
 
-	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，不注入）", async () => {
+	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，注入 D4-2 空态段）", async () => {
 		spies.discoverResources.mockResolvedValue([]);
 		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
@@ -270,8 +270,13 @@ describe("workflow-list-injector session 级缓存", () => {
 		const r1 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		const r2 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
-		expect(r1).toBeUndefined();
-		expect(r2).toBeUndefined();
+		// 空发现不再整段消失：注入空态段（agent 可区分「功能关闭」与「确实没有」）
+		expect(r1?.systemPrompt).toContain("<available_workflows>");
+		expect(r1?.systemPrompt).toContain("(none discovered; roots: ");
+		// roots 含 workspaceRoot 推导的约定根（findWorkspaceRoot mock 固定 "/ws"）
+		expect(r1?.systemPrompt).toContain("/ws/.pi/workflows");
+		// 缓存复用：两次注入逐字节一致（KV-cache 契约）
+		expect(r2?.systemPrompt).toBe(r1?.systemPrompt);
 	});
 
 	it("session_start 发现异常不阻断（fail-safe，缓存保持 null，before_agent_start fallback）", async () => {

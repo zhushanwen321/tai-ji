@@ -12,10 +12,10 @@
  * - 三 handler 自管缓存生命周期（不耦合 index.ts session 逻辑）：
  *   session_start（含 reload）发现+覆盖缓存（刷新节奏对齐 pi skill，fail-safe 异常
  *   不阻断、缓存保持 null）；before_agent_start 读缓存渲染注入、miss（session_start
- *   未触发/缓存被清）则 fallback 重新发现+赋值，空列表/空注入不返回 systemPrompt，
- *   任何异常被吞掉（记日志）不阻断 agent turn；session_shutdown 清缓存。
- *   pi 支持 async handler，同一 event 多 handler 链式（前者返回的 systemPrompt 作
- *   后者输入）。
+ *   未触发/缓存被清）则 fallback 重新发现+赋值，空发现渲染空态段（D4-2：(none
+ *   discovered; roots: ...)，不再整段消失），任何异常被吞掉（记日志）不阻断
+ *   agent turn；session_shutdown 清缓存。pi 支持 async handler，同一 event 多
+ *   handler 链式（前者返回的 systemPrompt 作后者输入）。
  *
  * 两实例的真差异经 config 参数化承载：kind（发现种类 + discoveryRoots 宿主槽位）/
  * parse（单文件内容 → entry；workflow 侧 description 截断内聚于其 parse）/ format
@@ -37,6 +37,9 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { getHostServices } from "@zhushanwen/subagent-core";
@@ -44,6 +47,7 @@ import { getHostServices } from "@zhushanwen/subagent-core";
 import {
 	discoverResources,
 	findWorkspaceRoot,
+	formatEmptyResourceList,
 	getCachedParsed,
 	sortByCodepoint,
 } from "@zhushanwen/subagent-core";
@@ -72,7 +76,7 @@ export interface ResourceListInjectorConfig<TEntry extends ResourceListEntry> {
 	assemble?: (workspaceRoot: string) => Promise<TEntry[]>;
 	/** 单文件内容 → entry；null = 跳过该文件（无有效 frontmatter/meta）。assemble 覆写时不需要。 */
 	parse?(content: string): TEntry | null;
-	/** entry 列表 → 注入段；空列表返回空串（不注入）。 */
+	/** entry 列表 → 注入段；返回空串 = 空发现（工厂接管渲染 D4-2 空态段）。 */
 	format(entries: TEntry[]): string;
 	/** workflow 侧真差异：包含 .pi/workflows/.tmp/（workflow-script generate 产物）。 */
 	includeTmp?: boolean;
@@ -93,16 +97,54 @@ function singularKind(kind: "agents" | "workflows"): string {
 	return kind === "agents" ? "agent" : "workflow";
 }
 
+/**
+ * 空态注入（D4-2）渲染的发现根清单：宿主注入根（discoveryRoots 槽，现取——
+ * 实例隔离语义同 discover）+ core 约定根推导（homedir/workspaceRoot join）。
+ *
+ * 与 core buildScanTargets 的约定根集合对齐（下方 4 个 join 字面须与彼处
+ * 同步改）；TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非
+ * agent 自救面。清单是给 agent 的提示信息：顺序无优先级契约，保序去重由
+ * 渲染函数保证（同 turn 重建字节稳定，KV-cache 契约）。
+ */
+function discoveryRootDirs(
+	workspaceRoot: string,
+	kind: "agents" | "workflows",
+	includeTmp: boolean,
+): string[] {
+	const hostRoots = getHostServices().discoveryRoots?.()?.[kind] ?? [];
+	const roots = hostRoots.map((root) => root.dir);
+	roots.push(join(homedir(), ".agents", kind));
+	roots.push(join(workspaceRoot, ".pi", kind));
+	if (includeTmp) roots.push(join(workspaceRoot, ".pi", kind, ".tmp"));
+	roots.push(join(workspaceRoot, ".agents", kind));
+	return roots;
+}
+
 export function createResourceListInjector<TEntry extends ResourceListEntry>(
 	config: ResourceListInjectorConfig<TEntry>,
 ): ResourceListInjector<TEntry> {
 	let entriesCache: TEntry[] | null = null;
 	let injectionCache: string | null = null;
 
-	/** 缓存唯一写点：数据与渲染缓存同步更新（null 清空两者）。 */
-	function setCache(entries: TEntry[] | null): void {
+	/**
+	 * 缓存唯一写点：数据与渲染缓存同步更新（null 清空两者，此时 workspaceRoot
+	 * 不消费）。空发现（format 返回空串——core formatXxxList 空列表的判据契约）
+	 * 不再让注入段整段消失，改渲染空态段（D4-2）：agent 可区分「功能关闭」与
+	 * 「确实没有」，roots 清单供自救。非空路径 format 输出原样缓存（逐字节零变更）。
+	 */
+	function setCache(entries: TEntry[] | null, workspaceRoot: string): void {
 		entriesCache = entries;
-		injectionCache = entries !== null ? config.format(entries) : null;
+		if (entries === null) {
+			injectionCache = null;
+			return;
+		}
+		const rendered = config.format(entries);
+		injectionCache = rendered !== ""
+			? rendered
+			: formatEmptyResourceList(
+					config.kind,
+					discoveryRootDirs(workspaceRoot, config.kind, config.includeTmp === true),
+				);
 	}
 
 	/**
@@ -164,7 +206,8 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 			"session_start",
 			async (_event: SessionStartEvent, ctx: ExtensionContext): Promise<void> => {
 				try {
-					setCache(await discover(findWorkspaceRoot(ctx.cwd)));
+					const workspaceRoot = findWorkspaceRoot(ctx.cwd);
+					setCache(await discover(workspaceRoot), workspaceRoot);
 				} catch (err) {
 					// fail-safe：发现异常不阻断 session，缓存保持 null（before_agent_start 会 fallback）
 					logger.error(`${config.logTag} session_start discover failed`, {
@@ -183,9 +226,11 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 				try {
 					// 读缓存；miss（session_start 未触发/缓存被清）则 fallback 重新发现+赋值
 					if (entriesCache === null) {
-						setCache(await discover(findWorkspaceRoot(ctx.cwd)));
+						const workspaceRoot = findWorkspaceRoot(ctx.cwd);
+						setCache(await discover(workspaceRoot), workspaceRoot);
 					}
-					// injectionCache 与 entriesCache 不变量同步（setCache 保证），直接复用
+					// injectionCache 与 entriesCache 不变量同步（setCache 保证），直接复用；
+					// 空串仅出现在「空发现且 roots 清单为空」的退化态（约定根恒在，实际不可达）
 					const injection = injectionCache;
 					if (!injection) return;
 					return { systemPrompt: event.systemPrompt + injection };
@@ -200,7 +245,8 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 		pi.on(
 			"session_shutdown",
 			(_event: SessionShutdownEvent, _ctx: ExtensionContext): void => {
-				setCache(null);
+				// 清缓存：null 分支不消费 workspaceRoot（空态渲染仅在发现路径发生）
+				setCache(null, "");
 			},
 		);
 	}

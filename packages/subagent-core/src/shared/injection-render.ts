@@ -16,6 +16,9 @@
 //   「内置优先保留」两段式）；models 段无预算参数，完整渲染永不截（设计钉死）；
 // - format 内部先排后截：pi 调用链数据已排时重排幂等，不破坏「pi 现调用
 //   形态下输出逐字节等价」（CA2 快照验收前提）。
+// - 空态显式化（D4-2）：subagents/workflows 两段新增空发现态渲染
+//   formatEmptyResourceList（(none discovered; roots: ...)）——条目 format
+//   函数空列表仍返回空串（判据契约），空态接管在工厂层（resource-list-injector）。
 // 设计锚点：红线 5（ModelEntry 守卫）与红线 7（分段条目预算），见上方差异定约。
 
 import { escapeXml, renderXmlSection } from "./xml-injection.ts";
@@ -183,7 +186,8 @@ export function formatAgentList(
  * 将 workflow 列表格式化为 XML 注入段。
  *
  * 与 formatAgentList 同约：先按 name 码点序排序再渲染截尾；空列表返回空串
- * （不注入）；截断时追加宿主注入的兜底指引行（缺省不追加）。
+ * （空态接管见 formatEmptyResourceList——调用方以空串为判据切换空态渲染）；
+ * 截断时追加宿主注入的兜底指引行（缺省不追加）。
  */
 export function formatWorkflowList(
   workflows: WorkflowEntry[],
@@ -210,6 +214,31 @@ export function formatWorkflowList(
 /** 码点序比较（显式契约，禁 localeCompare——同 sortByCodepoint 注释） */
 function compareByCodepoint(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * 空发现态注入段（D4-2 空注入显式化）：零条目时渲染
+ * `(none discovered; roots: ...)`——注入段不再整段消失，agent 可区分
+ * 「功能关闭」（注入段缺席）与「确实没有」（空态段在场），并拿根清单自救。
+ *
+ * - kind → tag 映射与 formatAgentList/formatWorkflowList 的段标签一致
+ *   （本函数是 subagents/workflows 两段共用的空态形态，供工厂层在
+ *   format 返回空串时接管；models 段无文件发现根概念，不参与）；
+ * - roots 每项 escapeXml（路径含 XML 特殊字符会破坏注入段结构），
+ *   保序去重（同 turn 重建字节稳定，KV-cache 契约）；
+ * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号。
+ */
+export function formatEmptyResourceList(
+  kind: "agents" | "workflows",
+  roots: string[],
+): string {
+  const unique = [...new Set(roots)];
+  if (unique.length === 0) return "";
+  const tag = kind === "agents" ? "available_subagents" : "available_workflows";
+  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
+  // agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
+  const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
+  return [`\n\n<${tag}>`, line, `</${tag}>`].join("\n");
 }
 
 /**

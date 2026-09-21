@@ -596,9 +596,11 @@ export { normalizeWorkflowRef } from "./shared/agent-ref.ts";
 // （除 id/name 外全字段 optional，红线 5 守卫不抛不渲垃圾）、分段条目预算
 // （码点序排 + 截尾 + 宿主注入兜底指引；models 段无预算永不截，红线 7）、
 // guide 文案宿主注入（core 不内嵌平台文案）。summarizeDescription 随
-// WorkflowEntry 链导出（zsw 侧同口径消费）。
+// WorkflowEntry 链导出（zsw 侧同口径消费）。formatEmptyResourceList 为
+// subagents/workflows 两段的空发现态渲染（D4-2 空注入显式化）。
 export {
   formatAgentList,
+  formatEmptyResourceList,
   formatModelList,
   formatWorkflowList,
   sortByCodepoint,

@@ -11,6 +11,8 @@
 // - 分段条目预算（红线 7）：码点序 + 截尾 + 兜底指引行、预算边界（恰好 15/10
 //   不截）、先排后截（乱序输入）、models 段无预算完整渲染；
 // - guide 宿主注入（渲染源码无内嵌平台文案）；
+// - 空态显式（D4-2）：formatEmptyResourceList 形态/转义/去重/空 roots +
+//   既有三 format 空列表返空串判据契约不变；
 // - summarizeDescription / sortByCodepoint / barrel 逐名探针。
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -20,6 +22,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	formatAgentList,
+	formatEmptyResourceList,
 	formatModelList,
 	formatWorkflowList,
 	sortByCodepoint,
@@ -377,6 +380,53 @@ describe("per-section entry budget (red-line 7)", () => {
 });
 
 // ============================================================
+// 空态显式（D4-2 空注入显式化）：零条目时空发现态渲染
+// ============================================================
+
+describe("empty-state explicit rendering (D4-2)", () => {
+	it("workflows 零条目：渲染 (none discovered; roots: ...) 且外层仍是 <available_workflows> 标签形态（逐字节）", () => {
+		const out = formatEmptyResourceList("workflows", [
+			"/home/u/.pi/agent/workflows",
+			"/ws/.pi/workflows",
+		]);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				"  (none discovered; roots: /home/u/.pi/agent/workflows, /ws/.pi/workflows)\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("agents kind：标签映射为 <available_subagents>（两段共用空态形态）", () => {
+		const out = formatEmptyResourceList("agents", ["/ws/.agents/agents"]);
+		expect(out).toContain("<available_subagents>");
+		expect(out).toContain("</available_subagents>");
+		expect(out).toContain("(none discovered; roots: /ws/.agents/agents)");
+	});
+
+	it("roots 每项 escapeXml（路径含 XML 特殊字符不破坏注入段）", () => {
+		const out = formatEmptyResourceList("workflows", ["/a&b<c>/w"]);
+		expect(out).toContain("roots: /a&amp;b&lt;c&gt;/w");
+	});
+
+	it("重复 roots 保序去重（同 turn 重建字节稳定，KV-cache 契约）", () => {
+		const out = formatEmptyResourceList("workflows", ["/r1", "/r2", "/r1"]);
+		expect(out).toContain("roots: /r1, /r2)");
+		expect(out.match(/\/r1/g)).toHaveLength(1);
+	});
+
+	it("空 roots 返回空串（无清单可渲染时不注入，防空括号垃圾）", () => {
+		expect(formatEmptyResourceList("workflows", [])).toBe("");
+		expect(formatEmptyResourceList("agents", [])).toBe("");
+	});
+
+	it("既有三 format 空列表仍返回空串（空态接管在工厂层，判据契约不变）", () => {
+		expect(formatAgentList([], agentOpts)).toBe("");
+		expect(formatWorkflowList([], workflowOpts)).toBe("");
+		expect(formatModelList([], { guide: MODEL_GUIDE })).toBe("");
+	});
+});
+
+// ============================================================
 // 码点序契约（禁 localeCompare——跨环境字节一致）
 // ============================================================
 
@@ -488,6 +538,7 @@ describe("barrel exports probe", () => {
 	it("值导出逐名可达（typeof function）", () => {
 		const valueExports = [
 			"formatAgentList",
+			"formatEmptyResourceList",
 			"formatWorkflowList",
 			"formatModelList",
 			"sortByCodepoint",
