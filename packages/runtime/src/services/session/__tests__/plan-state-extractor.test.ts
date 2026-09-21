@@ -151,10 +151,10 @@ describe('scanPlanStateEntries：派生', () => {
     expect(view.docs).toEqual([{ fileName: 'good.md', absPath: '/x/good.md', sourceSkill: 's', version: 1 }])
   })
 
-  it('reviewStateSource 透传（降级两源，plan-mode-ux-refactor §3.4）：合法字面量挂键', () => {
-    const explain = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'explain' }), 'e1')])!
-    expect(explain.reviewState).toBe('awaiting')
-    expect(explain.reviewStateSource).toBe('explain')
+  it("reviewStateSource 透传：'resubmit' 挂键；旧 'explain' 存量值归无值（explain 交互已删，与 extension 读侧白名单对齐）", () => {
+    const legacyExplain = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'explain' }), 'e1')])!
+    expect(legacyExplain.reviewState).toBe('awaiting')
+    expect('reviewStateSource' in legacyExplain).toBe(false)
     const resubmit = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'resubmit' }), 'e2')])!
     expect(resubmit.reviewStateSource).toBe('resubmit')
   })

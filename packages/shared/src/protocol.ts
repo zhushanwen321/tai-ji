@@ -1359,13 +1359,12 @@ export interface PlanStateView {
   reviewState?: 'awaiting' | 'revising'
   /**
    * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
-   * 'explain' = 用户请求解释后等 agent 解答完重新提交审批；
    * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
    * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
-   * 缺省 = 来源未知，渲染通用降级文案（两态共有的恢复入口 + 退出照给，不猜测来源）。
+   * 缺省 = 来源未知，渲染通用降级文案（恢复入口 + 退出照给，不猜测来源）。
    * 仅 reviewState 有值时有语义。
    */
-  reviewStateSource?: 'explain' | 'resubmit'
+  reviewStateSource?: 'resubmit'
 }
 
 export interface ServerMessageMapBase {
@@ -1504,6 +1503,10 @@ export interface ServerMessageMapBase {
   'extension:status': { sessionId: string; statusKey: string; text: string; textRaw?: string }
   // extension notify（pi fire-and-forget 通知，前端渲染为 toast）
   'extension:notify': { sessionId: string; message: string; level: 'info' | 'warn' | 'error' }
+  // 挂起 UI 请求失效广播（P2-2 失效链）：abort turn / 退出 plan / 回收等非 respond 路径
+  // 摘除 runtime pending 缓存时推给 renderer——renderer 按帧移除本屏对应请求（审批条/
+  // 表单），消除「僵尸 ready 审批条点击静默无效」的残留窗口
+  'extension:requestsInvalidated': { sessionId: string; requestIds: string[]; reason: string }
   // extension.ui_request：交互对话框请求（select/confirm/input/editor + ask-user 富交互）。
   // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
   // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），

@@ -84,7 +84,8 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   const view: PlanStateView = {
     isActive: d.isActive === true,
     planFilePath: normalizeNonEmptyString(d.planFilePath),
-    requirement: normalizeNonEmptyString(d.requirement),
+    // 64KB 与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
+    requirement: normalizeNonEmptyString(d.requirement, 64 * 1024),
     templateName: normalizeNonEmptyString(d.templateName),
   }
   applyOptionalPlanFields(view, d)
@@ -95,9 +96,21 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
  * string 字段读取 + 空串归一 null（parsePlanStateEntry 三个必填 string 字段共用）：
  * entry 域「无文件/无需求」的历史形态是空串，View 域归一为 null 单一表达
  * （shared PlanStateView 的 `string | null` 值域），消费方判式单一（`=== null` 即「无」）。
+ * capTo 参数：requirement 传封顶上限（P3-8 读侧对齐——封顶机制上线前写入的超长 entry
+ * 在派生处同样截断，保证 plan 帧恒有界；新写入恒已在 extension 写侧封顶，本防御只服务
+ * 存量旧 entry）。
  */
-function normalizeNonEmptyString(v: unknown): string | null {
-  return typeof v === 'string' && v !== '' ? v : null
+function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
+  if (typeof v !== 'string' || v === '') return null
+  if (capTo !== undefined && v.length > capTo) {
+    const omitted = v.length - capTo
+    console.warn(
+      `[plan-state-extractor] requirement entry over cap (${v.length} > ${capTo} chars), ` +
+      `truncating in derived view (${omitted} characters omitted)`,
+    )
+    return v.slice(0, capTo)
+  }
+  return v
 }
 
 /**
@@ -116,7 +129,9 @@ function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>
   if (d.reviewState === 'awaiting' || d.reviewState === 'revising') {
     view.reviewState = d.reviewState
   }
-  if (d.reviewStateSource === 'explain' || d.reviewStateSource === 'resubmit') {
+  // 只认 'resubmit'：旧 entry 的 'explain' 存量值归无值（explain 交互已删，与 extension
+  // 读侧 readReviewStateSource 白名单对齐——renderer 缺省分支渲染通用文案）
+  if (d.reviewStateSource === 'resubmit') {
     view.reviewStateSource = d.reviewStateSource
   }
 }

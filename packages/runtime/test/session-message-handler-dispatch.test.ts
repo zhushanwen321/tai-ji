@@ -55,6 +55,7 @@ function makeHandler(overrides: Record<string, ReturnType<typeof vi.fn>> = {}, c
     sessionService,
     nextPushId: vi.fn().mockReturnValue('push-1'),
     broadcastSessionList: vi.fn(),
+    invalidatePendingUiRequests: vi.fn(),
     ...ctxExtras,
   }
   const handler = new SessionMessageHandler(ctx as unknown as ConstructorParameters<typeof SessionMessageHandler>[0])
@@ -192,6 +193,7 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
       await handler.handleSessionMessage(msg('message.abort', { sessionId: 's1' }), WS)
       expect(ctx.sessionService.abort).toHaveBeenCalledWith('s1')
       expect(cap.replies[0]).toMatchObject({ id: 'm1', type: 'message.status', payload: { sessionId: 's1', status: 'aborted' } })
+      expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith('s1', 'turn-aborted')
       expect(cap.errors).toHaveLength(0)
     })
 

@@ -88,6 +88,8 @@ export interface SessionHandlerContext extends MessageHandlerContext {
   broadcastSessionList(): void
   /** 广播一条 ServerMessage 给所有连接（FR-12：fork 后广播 session.forkNotice）。 */
   broadcast(msg: ServerMessage): void
+  /** 摘除 session 挂起 UI 请求并广播失效帧（P2-2 失效链；server.invalidatePendingUiRequests 薄委托） */
+  invalidatePendingUiRequests(sessionId: string, reason: string): void
 }
 
 /**
@@ -601,6 +603,10 @@ export class SessionMessageHandler {
     try {
       const client = await this.ctx.sessionService.ensureActive(sessionId)
       await client.prompt('/plan abort')
+      // P2-2 失效链：/plan abort → extension controller.abort() 解散挂起审批 select，
+      // 响应永不可达——摘除 runtime pending + 广播失效帧（审批挂起中退出后重进 plan，
+      // 僵尸 ready 审批条不再出现）。退出结果经投影链 session.planState 广播推回。
+      this.ctx.invalidatePendingUiRequests(sessionId, 'plan-aborted')
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
     } catch (e) {
       const errMsg = toErrorMessage(e)
@@ -910,6 +916,10 @@ export class SessionMessageHandler {
     // 与 message.send/steer/follow_up 对称，走 message.status 回复。
     const abortSid = msg.payload.sessionId
     await this.ctx.sessionService.abort(abortSid)
+    // P2-2 失效链：turn abort 级联解散挂起交互（审批 select / 执行方式 form / ask-user），
+    // 响应永不可达——摘除 runtime pending 缓存 + 广播失效帧，renderer 移除本屏请求
+    //（「忽略」按钮的审批条消失即由本链驱动）。
+    this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: abortSid, status: 'aborted' })
   }
 

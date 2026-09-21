@@ -1045,9 +1045,11 @@ async function main(): Promise<void> {
       clearPendingReload: (s) => reloadOrchestrator.clearPending(s),
       // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
       // 在 reclaimManagedSession 内挂代际校验通过后的成功分支——并发的取消分支不调，
-      // 新进程的活请求不被误清。clearExtensionTimeoutsForSession 为既有公开写口
-      // （与 register/clear 同族），不新增 server 能力。
-      clearPendingUiRequests: (s) => server.clearExtensionTimeoutsForSession(s),
+      // 新进程的活请求不被误清。P2-2 失效链：clear → invalidate 升级（摘除 + 广播失效帧，
+      // renderer 同步移除屏上挂起），语义与 server D6a 汇聚清理点一致。
+      clearPendingUiRequests: (s) => {
+        server.invalidatePendingUiRequests(s, 'reclaimed')
+      },
       // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收≠
       // 销毁（不走 removeSessionEntry），只驱逐缓存；驱逐后重激活走单次全量重建
       //（P7 张力四要素显式登记的代价）。

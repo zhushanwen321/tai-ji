@@ -11,8 +11,8 @@
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, SkillCacheScope } from '@taiji/shared'
-import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, ServerMessageType, SkillCacheScope } from '@taiji/shared'
+import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService } from '../interfaces.js'
 
@@ -34,7 +34,7 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
-import type { PendingUIRequest } from '../services/extension-timeout-manager.js'
+import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
 import { BridgeHandler } from './bridge-handler.js'
@@ -239,6 +239,9 @@ export class RuntimeServer implements IMessageBroker {
     // 既有直接调用点已随之移除。setOnSessionDestroyed 是追加式注册，PluginService 后续
     // 注册的 didDestroy 投递不受影响。
     this.sessionService.setOnSessionDestroyed((summary) => {
+      // P2-2 失效链：摘除 + 广播（原 clearForSession 只清不广播——renderer 屏上的挂起
+      // 审批条/表单不知道请求已死）。覆盖主动删 / 进程退出 / restore 清场全部销毁路径。
+      this.invalidatePendingUiRequests(summary.id, 'session-destroyed')
       this.clearExtensionTimeoutsForSession(summary.id)
     })
     this.configService = config
@@ -346,6 +349,9 @@ export class RuntimeServer implements IMessageBroker {
       nextPushId: () => this.broker.nextPushId(),
       broadcastSessionList: () => this.broker.broadcastSessionList(),
       broadcast: (msg) => this.broker.broadcast(msg),
+      invalidatePendingUiRequests: (sid: string, reason: string) => {
+        this.invalidatePendingUiRequests(sid, reason)
+      },
     })
     this.extensionHandler = new ExtensionMessageHandler({
       ...messaging,
@@ -584,6 +590,24 @@ export class RuntimeServer implements IMessageBroker {
 
   clearExtensionTimeoutsForSession(sessionId: string): void {
     this.extensionTimeoutMgr.clearForSession(sessionId)
+  }
+
+  /**
+   * 摘除 session 的全部挂起 UI 请求并广播失效帧（P2-2 失效链单一出口）。
+   *
+   * 非 respond 方式终结挂起（abort turn / 退出 plan / 回收 / session 销毁）时调用：
+   * 摘除 runtime pending 缓存 + 广播 extension:requestsInvalidated，renderer 移除本屏
+   * 对应审批条/表单。返回被摘清单（空清单不广播——常态 abort 无挂起，帧无意义）。
+   */
+  invalidatePendingUiRequests(sessionId: string, reason: string): PendingUIRequestResolved[] {
+    const invalidated = this.extensionTimeoutMgr.invalidatePendingForSession(sessionId)
+    if (invalidated.length > 0) {
+      this.broker.broadcast({
+        type: EXTENSION_EVENTS.REQUESTS_INVALIDATED as ServerMessageType,
+        payload: { sessionId, requestIds: invalidated.map((r) => r.requestId), reason },
+      })
+    }
+    return invalidated
   }
 
   /**

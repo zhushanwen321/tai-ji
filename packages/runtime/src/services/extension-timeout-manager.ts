@@ -173,6 +173,24 @@ export class ExtensionTimeoutManager {
   }
 
   /**
+   * 摘除指定 session 的全部挂起请求并返回清单（P2-2 失效链的唯一摘除口）。
+   *
+   * 非 respond 方式终结挂起请求（abort turn / 退出 plan / 回收）时，select 已随
+   * controller.abort 解散、响应永不可达——保留缓存只会让 renderer 渲染「僵尸 ready
+   * 审批条/表单」（点击后响应发到死 id 被 pi 静默丢弃）。摘除后由调用方广播失效帧，
+   * renderer 据此移除本屏请求。与 clearForSession 的区别：本方法返回被摘清单供广播，
+   * 且只清 pendingRequests（不动 bridgeRequestIds——bridge 请求由内部通道应答，不走
+   * 用户 respond，无僵尸点击问题）。
+   */
+  invalidatePendingForSession(sessionId: string): PendingUIRequestResolved[] {
+    const sessionCache = this.pendingRequests.get(sessionId)
+    if (!sessionCache || sessionCache.size === 0) return []
+    const invalidated = Array.from(sessionCache.values()).map(r => ({ ...r, ...r.payload }))
+    this.pendingRequests.delete(sessionId)
+    return invalidated
+  }
+
+  /**
    * 获取指定 session 的所有 pending 请求（非破坏性只读快照）。
    *
    * 用于方案2 的 session 级状态快照模型：pending UI 请求是 session 固有状态，
