@@ -279,7 +279,7 @@ interface ActionResult {
  * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
  * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
  * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
- * 用户随时可经底栏退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
+ * 用户随时可经 PlanModeBar 退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
  * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
  * 不走对话流消息注入/steer 排队——slash 入口才经 sendMessage 注入）。已在 plan
  * 模式时幂等返回，不重复进入。
@@ -531,6 +531,10 @@ async function executeSubmitReview(
   // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复后冷启动扫描
   // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）。指纹快照同点更新：
   // 单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review 时的 docs」）
+  // §3.4 第 3 轮裁决：重挂起新 pending 前清上一轮 source——不变量 = source 只描述
+  // 当前降级等待的原因，此处即将挂起真审批，降级等待尚未发生（残留 'explain' 会让
+  // 崩溃恢复后的降级态渲染上一轮「已收到你的问题」文案，与 C-U2 同型残留）
+  delete state.reviewStateSource;
   state.reviewState = "awaiting";
   state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);
@@ -637,8 +641,10 @@ async function executeSubmitReview(
     }
 
     case "explain": {
-      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态
-      // 「等待 agent 重新提交审批」，重挂靠 D2 提示词纪律驱动
+      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态。来源标记
+      // 'explain' 随后落盘（§3.4 降级两源）：renderer 渲染「已收到你的问题，agent
+      // 解答后会重新提交审批」分支，与崩溃恢复（'resubmit'）分支文案分开。
+      // 注入通道 = custom message（custom-message swap 后的隐形注入形态）。
       pi.sendMessage(
         {
           customType: PLAN_CONTEXT_CUSTOM_TYPE,
@@ -647,6 +653,8 @@ async function executeSubmitReview(
         },
         { deliverAs: "steer", triggerTurn: true },
       );
+      state.reviewStateSource = "explain";
+      persistPlanState(pi, state);
       return {
         content: [{
           type: "text" as const,
@@ -763,7 +771,7 @@ async function resolveCompleteChoice(
   const execOptions = buildExecOptions(execSkills, detectGoalCapability());
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
-  // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
+  // approve 后的挂起窗口内用户点 PlanModeBar 退出（确认 Popover 后）必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
   cascadeTurnAbort(controller, signal);
 

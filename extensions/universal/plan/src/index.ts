@@ -9,7 +9,14 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { type PlanAbortControllers, type PlanSessionMap, PLAN_CONTEXT_CUSTOM_TYPE, PLAN_MODE_TOOLS, reconstructPlanState } from "./state.js";
+import {
+  type PlanAbortControllers,
+  type PlanSessionMap,
+  PLAN_CONTEXT_CUSTOM_TYPE,
+  PLAN_MODE_TOOLS,
+  persistPlanState,
+  reconstructPlanState,
+} from "./state.js";
 import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -18,7 +25,7 @@ const logger = getLogger("pi-plan");
 /**
  * D9 引导文案（约 60 token）：仅在 taiji 宿主注入。plan 模式是只读子集（读代码、产
  * 文档、不改源码），进入它不是危险操作——agent 可在合适时机**自行进入**（plan-mode-
- * agent-enter U1 后 enter 是 tool action，无需用户确认；用户随时可经 GUI 底栏退出）。
+ * agent-enter U1 后 enter 是 tool action，无需用户确认；用户随时可经 PlanModeBar 退出）。
  */
 const PLAN_MODE_SUGGESTION_PROMPT =
   "\n\n" +
@@ -73,6 +80,11 @@ export default function planExtension(pi: ExtensionAPI) {
           },
           { deliverAs: "steer", triggerTurn: true },
         );
+        // E3 重挂即落 'resubmit' 源标记 + persist（§3.4 降级两源：此处原只发 steer 不
+        // 落盘，renderer 冷启动扫描的 View 恒无 source、恒渲染通用文案；落盘后才能
+        // 渲染「会话已重启，尚未重新提交」分支）
+        state.reviewStateSource = "resubmit";
+        persistPlanState(pi, state);
       }
     }
   });

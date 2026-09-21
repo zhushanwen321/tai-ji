@@ -11,8 +11,8 @@
  *
  * schema 兼容（D4）：entry data 无版本字段（版本号字段 + 迁移逻辑已被 D1 明文否决），新旧
  * schema 靠**字段级 optional 判存在**消解——旧 entry（仅四必填字段）派生出无新字段区的
- * PlanStateView，新字段（skills/docs/reviewState）逐字段守卫透传，不做 v 守卫（与
- * subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
+ * PlanStateView，新字段（skills/docs/reviewState/reviewStateSource）逐字段守卫透传，不做
+ * v 守卫（与 subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
  *
  * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
  * entry data 按防御式逐字段守卫消费。
@@ -69,7 +69,7 @@ export function scanPlanStateEntries(entries: unknown[]): PlanStateView | null {
  * data 返回 null）。字段映射规则：
  * - 四必填字段：isActive 严格 `=== true`（其他形态归 false——View 契约是 boolean，防御
  *   extension 侧异常写入）；三个 string 字段空串归一 null（normalizeNonEmptyString）。
- * - 三 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
+ * - 四 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
  *   显式 undefined——「旧 entry 派生出无新字段区」的字面语义），下沉到
  *   applyOptionalPlanFields（守卫判定顺序与拆分前逐一等价）。
  */
@@ -102,7 +102,9 @@ function normalizeNonEmptyString(v: unknown): string | null {
 
 /**
  * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
- * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量。
+ * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量、
+ * reviewStateSource 限两字面量（降级两源标记，plan-mode-ux-refactor §3.4——漏透传 =
+ * 字段在派生处静默丢弃、renderer 恒渲染通用降级文案）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {
   if (isStringArray(d.skills)) {
@@ -113,6 +115,9 @@ function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>
   }
   if (d.reviewState === 'awaiting' || d.reviewState === 'revising') {
     view.reviewState = d.reviewState
+  }
+  if (d.reviewStateSource === 'explain' || d.reviewStateSource === 'resubmit') {
+    view.reviewStateSource = d.reviewStateSource
   }
 }
 
@@ -144,7 +149,7 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
  *
  * 读取文件 → parseJsonl → scanPlanStateEntries（与实时增量拉取同一份派生代码）。
  *
- * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile:346-353 契约）：
+ * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile 契约）：
  * - 文件不存在（ENOENT）→ 「未激活」缺省 View（合法边界：pi session 文件延迟写入，文件
  *   都不存在必然无 plan-state entry；缺省形态对齐 extension DEFAULT_PLAN_STATE 的 View 域
  *   投影——isActive:false + 三 string 字段 null）。

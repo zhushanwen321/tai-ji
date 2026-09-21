@@ -185,7 +185,7 @@ describe("E1 fail-fast via /plan handler", () => {
   it("unknown skill: fail-fast — no entry, no tool restriction, reply lists available skills", async () => {
     await handler("重构 auth --skills tech-desig", ctx);
 
-    // 不进入计划模式：不落 plan-state entry、不限制工具（E1：横幅不出现）
+    // 不进入计划模式：不落 plan-state entry、不限制工具（E1：PlanModeBar 不出现）
     expect(pi.appendEntry).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
 
@@ -223,7 +223,7 @@ describe("E1 fail-fast via /plan handler", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
     // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
-    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.taiji-harness/auth", { recursive: true });
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({

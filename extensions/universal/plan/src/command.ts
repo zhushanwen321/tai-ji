@@ -144,11 +144,11 @@ export function registerPlanCommand(
         return;
       }
 
-      // Reentry: check for existing plan files in .taiji-harness/
+      // Reentry: check for existing plan files in .tmp/plans/
       if (!state.isActive && !trimmed) {
         const projectDir = ctx.cwd;
-        const harnessDir = path.join(projectDir, ".taiji-harness");
-        const existingPlans = findExistingPlans(harnessDir);
+        const plansDir = path.join(projectDir, ".tmp", "plans");
+        const existingPlans = findExistingPlans(plansDir);
         if (existingPlans.length > 0) {
           pi.sendMessage(
             {
@@ -217,15 +217,15 @@ function handleStatus(
   );
 }
 
-/** Find existing plan.md files in .taiji-harness/ subdirectories */
-function findExistingPlans(harnessDir: string): string[] {
+/** Find existing plan.md files in .tmp/plans/ subdirectories */
+function findExistingPlans(plansDir: string): string[] {
   try {
-    return fs.readdirSync(harnessDir)
+    return fs.readdirSync(plansDir)
       .filter((f) => {
-        const subDir = path.join(harnessDir, f);
+        const subDir = path.join(plansDir, f);
         return fs.statSync(subDir).isDirectory() && fs.existsSync(path.join(subDir, "plan.md"));
       })
-      .map((f) => path.join(harnessDir, f, "plan.md"));
+      .map((f) => path.join(plansDir, f, "plan.md"));
   } catch {
     return [];
   }
@@ -280,7 +280,7 @@ function handleEnterPlanMode(
   args: string,
 ): void {
   // flag 解析 + 校验先行：--template / --skills 任一校验失败 fail-fast，
-  // 不产生任何进入动作（横幅不出现：不写 entry / 不限制工具 / 不注入提示词）
+  // 不产生任何进入动作（PlanModeBar 不出现：不写 entry / 不限制工具 / 不注入提示词）
   const parsed = parsePlanArgs(args);
 
   // 互斥 fail-fast（§3.1）：两 flag 同给先于一切值校验报错

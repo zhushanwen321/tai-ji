@@ -24,6 +24,7 @@ describe("PlanState", () => {
     expect(DEFAULT_PLAN_STATE.skills).toEqual([]);
     expect(DEFAULT_PLAN_STATE.docs).toEqual([]);
     expect(DEFAULT_PLAN_STATE.reviewState).toBeUndefined();
+    expect(DEFAULT_PLAN_STATE.reviewStateSource).toBeUndefined();
   });
 
   it("getPlanState returns cached state if exists", () => {
@@ -47,7 +48,7 @@ describe("PlanState", () => {
           {
             type: "custom",
             customType: "plan-state",
-            data: { isActive: true, phase: "writing", planFilePath: ".taiji-harness/test/plan.md", requirement: "test", templateName: "feature-plan" },
+            data: { isActive: true, phase: "writing", planFilePath: ".tmp/plans/test/plan.md", requirement: "test", templateName: "feature-plan" },
           },
         ],
       },
@@ -60,11 +61,11 @@ describe("PlanState", () => {
 });
 
 describe("State persistence", () => {
-  it("persistPlanState calls appendEntry with all eight fields (no phase field — D6)", () => {
+  it("persistPlanState calls appendEntry with the full schema (no phase field — D6)", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      planFilePath: ".taiji-harness/test/plan.md",
+      planFilePath: ".tmp/plans/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
       skills: ["tech-design"],
@@ -74,16 +75,18 @@ describe("State persistence", () => {
 
     persistPlanState(mockPi, state);
 
-    // 精确匹配：新写的 plan-state entry 为八字段 schema（D1：四现状 + skills/docs/reviewState
-    // + lastSubmitReviewDocsFingerprint）；无既往提交时指纹字段为 undefined（JSON 序列化自然消失）
+    // 精确匹配：新写的 plan-state entry 为全字段 schema（D1：四现状 + skills/docs/reviewState
+    // + reviewStateSource + lastSubmitReviewDocsFingerprint）；无值 optional 字段为 undefined
+    // （JSON 序列化自然消失——D4）
     expect(mockPi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      planFilePath: ".taiji-harness/test/plan.md",
+      planFilePath: ".tmp/plans/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
       skills: ["tech-design"],
       docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 }],
       reviewState: "awaiting",
+      reviewStateSource: undefined,
       lastSubmitReviewDocsFingerprint: undefined,
     });
   });
@@ -106,7 +109,7 @@ describe("State persistence", () => {
             customType: "plan-state",
             data: {
               isActive: true,
-              planFilePath: ".taiji-harness/auth/plan.md",
+              planFilePath: ".tmp/plans/auth/plan.md",
               requirement: "auth",
               templateName: "",
               skills: ["tech-design", "dev-flow"],
@@ -137,7 +140,7 @@ describe("State persistence", () => {
             data: {
               isActive: true,
               phase: "brainstorming",
-              planFilePath: ".taiji-harness/legacy/plan.md",
+              planFilePath: ".tmp/plans/legacy/plan.md",
               requirement: "legacy",
               templateName: "feature-plan",
             },
@@ -148,7 +151,7 @@ describe("State persistence", () => {
 
     const state = reconstructPlanState(mockCtx);
     expect(state.isActive).toBe(true);
-    expect(state.planFilePath).toBe(".taiji-harness/legacy/plan.md");
+    expect(state.planFilePath).toBe(".tmp/plans/legacy/plan.md");
     // 新字段降级为空清单/无值（前端据此显示「（未指定）」+ 单文件形态）
     expect(state.skills).toEqual([]);
     expect(state.docs).toEqual([]);
@@ -195,7 +198,7 @@ describe("State persistence", () => {
             data: {
               isActive: true,
               phase: "brainstorming",
-              planFilePath: ".taiji-harness/legacy/plan.md",
+              planFilePath: ".tmp/plans/legacy/plan.md",
               requirement: "legacy",
               templateName: "feature-plan",
             },
@@ -205,7 +208,7 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
 
     const state = reconstructPlanState(mockCtx);
-    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "reviewState", "skills", "templateName", "templateProvidedPath"]);
+    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "reviewState", "reviewStateSource", "skills", "templateName", "templateProvidedPath"]);
     expect(state.isActive).toBe(true);
   });
 
@@ -213,7 +216,7 @@ describe("State persistence", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      planFilePath: ".taiji-harness/auth/plan.md",
+      planFilePath: ".tmp/plans/auth/plan.md",
       requirement: "auth",
       templateName: "",
       skills: [],
@@ -246,6 +249,53 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(badCtx).lastSubmitReviewDocsFingerprint).toBeUndefined();
   });
+
+  it("reviewStateSource persists and reconstructs (§3.4 降级两源)；旧 entry 无字段 / 非法值按无值处理（D4 兼容读）", () => {
+    const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
+    const state: PlanState = {
+      isActive: true,
+      planFilePath: ".tmp/plans/auth/plan.md",
+      requirement: "auth",
+      templateName: "",
+      skills: [],
+      docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+      reviewState: "awaiting",
+      reviewStateSource: "explain",
+    };
+
+    persistPlanState(mockPi, state);
+
+    // 持久化 entry 走冷启动重建：explain 等待态跨重开可恢复（E3 重挂同款受益）
+    const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const reopenCtx = {
+      sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(reopenCtx).reviewStateSource).toBe("explain");
+
+    // 旧 entry（升级前落盘）无该字段：reviewState 有值但无来源 → 无值（renderer 渲染通用降级文案）
+    const legacyCtx = {
+      sessionManager: {
+        getEntries: () => [
+          {
+            type: "custom",
+            customType: "plan-state",
+            data: { isActive: true, planFilePath: "/p/plan.md", requirement: "r", templateName: "", reviewState: "awaiting" },
+          },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(legacyCtx).reviewStateSource).toBeUndefined();
+
+    // 值域守卫：非 'explain' | 'resubmit' 的垃圾值按无值处理（与 readReviewState 同风格）
+    const badCtx = {
+      sessionManager: {
+        getEntries: () => [
+          { type: "custom", customType: "plan-state", data: { ...persisted, reviewStateSource: "bogus" } },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(badCtx).reviewStateSource).toBeUndefined();
+  });
 });
 
 describe("resetPlanState 终态矩阵（D5/E10）", () => {
@@ -256,7 +306,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     } as unknown as ExtensionContext;
     sessions.set("session-1", {
       isActive: true,
-      planFilePath: ".taiji-harness/auth/plan.md",
+      planFilePath: ".tmp/plans/auth/plan.md",
       requirement: "refactor auth",
       templateName: "feature-plan",
       skills: ["tech-design", "dev-flow"],
@@ -328,6 +378,20 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     // 保留的 docs 不作为下一轮检测基线，reset 后首次 submit-review 不警告
     expect(state.lastSubmitReviewDocsFingerprint).toBeUndefined();
     expect(state.docs).toHaveLength(1);
+  });
+  it("reviewStateSource is cleared on reset (跨 plan run 残留防护，C-U2 同型缺陷)", () => {
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
+    const active = sessions.get("session-1");
+    if (!active) throw new Error("setupActiveSession must seed session-1");
+    active.reviewStateSource = "explain";
+
+    const state = resetPlanState(mockPi, sessions, "session-1", mockCtx);
+
+    // 来源标记与 reviewState 同生命周期随退出失效；reset entry 落盘同样无该键
+    // （undefined JSON 序列化自然消失——D4）
+    expect(state.reviewStateSource).toBeUndefined();
+    const lastEntry = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.reviewStateSource).toBeUndefined();
   });
 });
 

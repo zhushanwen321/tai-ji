@@ -18,6 +18,7 @@
 | ④ 等待 | 「渲染完成」判定信号 | 图片加载完成 = `img.naturalWidth > 0`（`complete` 属性加载失败时也为 true，不能作信号；0x0 = 失败） | `waitForRenderSettled` |
 | ⑤ 采样 | DOM 形态 + 截图 | 与基线同构的元素序列 JSON（tag/class/rect/text/img natural）+ 计算样式抽查 | `sampleDomShape` |
 | ⑥ 落盘 | 统一命名 | `<name>-dom.json` / `<name>-console.log` / `<name>-fullpage.png` | `saveArtifacts` |
+| 附：窗口 resize | Electron 窄窗验收的视口调整与恢复 | `setViewportSize` 在 Electron CDP 页面常不生效，fallback CDP `Browser.setWindowBounds`（外框 = 目标内容区 + 实测边框余量） | `resizeViewport` / `restoreViewport` |
 
 ## 使用
 
@@ -35,8 +36,8 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 
 | 资产 | 覆盖环节 | 说明 | 最近验证 |
 |------|---------|------|---------|
-| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 | 共享函数库 + 关键选择器/信号常量 | 2026-09-19 建立（自 markdown HTML 支持验收脚本提炼；首次真机复用待下轮验收） |
-| `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 同上 |
+| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport` | 2026-09-21 plan-mode-ux 验收轮 2-3 真机复用（r2 踩出 r3 复用后沉淀） |
+| `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 2026-09-19 建立 |
 
 ## 已知坑
 
@@ -45,6 +46,8 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 - **CDP 端口禁硬编码**：按 worktree hash 派生，多实例（`--data-dir` 隔离）互不相同。
 - **真实数据目录禁区**：测试与采样禁触 `~/.taiji`（fs-guard 防线）；隔离目录用 `dev-instance.mjs --data-dir ~/.taiji-dev/<suffix>`。
 - **console 抓取先挂**：`captureConsole` 必须在触发渲染的操作前挂上，否则丢启动期告警。
+- **pointer 可达性测量的禁用键伪影**（2026-09-21 plan-mode-ux 验收）：`elementFromPoint` 会穿透 `pointer-events: none` 的元素——disabled 按钮的中心命中返回祖先容器，测出来「不可达」是伪影非缺陷；几何断言须先排除 disabled 键（只报 disabled 事实），或把「命中祖先」视为该点无遮挡。
+- **agent 会话依赖的临时文件会被系统清理**：验收会话的计划文档落 `/private/tmp/` 时，隔轮验收可能遇「文档不存在或已删除」空态（macOS tmp 清理），划选类断言无文本可选——跨轮复用同一会话前先确认注册路径文件存活，必要时从留存副本补回。
 
 ## closeout 纪律（dev-flow 验收收尾执行）
 

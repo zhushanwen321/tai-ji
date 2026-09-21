@@ -1,13 +1,17 @@
 /**
  * PlanReviewBar 组件单测 —— plan 模式重设计 u1-banner（审批条，设计 D5/G3/G4）。
  *
- * 覆盖（impl-plan u1-banner 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
  * - 四分支显示公式逐分支 DOM 断言（含 isActive=false 整体不渲染）：
  *   ① isActive+挂起+awaiting → 三键全功能；② revising → 修订中禁用态；
- *   ③ awaiting 无挂起 → 降级态「等待 agent 重新提交审批」；④ isActive=false → 不渲染
+ *   ③ awaiting 无挂起 → 降级态；④ isActive=false → 不渲染
+ * - 降级三分支（§3.4 reviewStateSource）：explain / resubmit / 旧 entry 缺省通用
+ *   （fixture LEGACY_AWAITING_PLAN_STATE_VIEW 驱动）——三分支共用恢复入口指引 + 退出按钮
  * - 三键 respond payload 形状断言（PlanReviewResponse 判别联合：approve 无 comments；
  *   revise/explain 打包评论草稿快照；提交后草稿清空——D6）
  * - 挂起请求枚举消费（useExtensionUI planReviewFilter 实例，requestId 精确回传）
+ * - §3.5：0 评论时「提交评论修订」禁用 + tooltip；评论计数可点 → openDrawerTab('plan') +
+ *   plan-store 回看请求递增；degraded 退出按钮 emit('exit')（确认守卫归宿主 Popover）
  *
  * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus）+ plan-store.test.ts
  * （spread actual 保真实 events 通道只换 command）；i18n 经 vitest-i18n-setup 全局 mock。
@@ -21,6 +25,15 @@ import { effectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
+import { LEGACY_AWAITING_PLAN_STATE_VIEW } from '@taiji/shared/__tests__/fixtures/plan-state-entries'
+
+// ── mock ⓪：drawer domain（§3.5 草稿回看 openDrawerTab）——spread actual：import 链
+// （useExtensionUI → chat store → agentcall-lru-linkage）还消费 bindViewedVidPanels 等导出 ──
+const openDrawerTabMock = vi.hoisted(() => vi.fn())
+vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
+  return { ...actual, openDrawerTab: openDrawerTabMock }
+})
 
 // ── mock ①：command（plan-store 首拉 RPC）——spread actual 保真实 events 通道 ──
 const commandMock = vi.hoisted(() => vi.fn())
@@ -72,7 +85,7 @@ const SID = 'sess-bar'
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
     ...overrides,
@@ -115,6 +128,7 @@ beforeEach(() => {
   __resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   commandMock.mockReset()
+  openDrawerTabMock.mockReset()
   mockBus = new InternalEventBus()
   uiTimeoutHandlers.clear()
   vi.mocked(sendExtensionUIResponse).mockClear()
@@ -143,6 +157,8 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(true)
+    // §3.5 文案条款：approve 键文案「确认并执行」（防回归——曾被写为「确认，开始执行」）
+    expect(wrapper.find('[data-testid="plan-review-approve"]').text()).toContain('确认并执行')
     expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
   })
 
@@ -292,5 +308,91 @@ describe('PlanReviewBar 三键 respond payload（PlanReviewResponse 判别联合
 
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
+  })
+})
+
+describe('PlanReviewBar 降级三分支（§3.4 reviewStateSource）', () => {
+  it("explain 源 →「已收到你的问题，agent 解答后会重新提交审批」+ 恢复入口 + 退出按钮", async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting', reviewStateSource: 'explain' }))
+    await flushAsync()
+
+    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toContain('已收到你的问题')
+    expect(reason.text()).toContain('解答后会重新提交审批')
+    // 恢复入口：指引发消息（复用既有会话输入语义），非独立按钮
+    expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').text()).toContain('发送任意消息')
+    // 无填充描边退出按钮存在（不再是死胡同）
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+  })
+
+  it("resubmit 源（E3 崩溃恢复）→「agent 会话已重启，尚未重新提交」+ 恢复入口 + 退出按钮", async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting', reviewStateSource: 'resubmit' }))
+    await flushAsync()
+
+    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
+    expect(reason.text()).toContain('会话已重启')
+    expect(reason.text()).toContain('尚未重新提交')
+    expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+  })
+
+  it('旧 entry 缺省（fixture LEGACY_AWAITING_PLAN_STATE_VIEW 无 reviewStateSource）→ 通用中性文案，恢复入口与退出照给', async () => {
+    // fixture 驱动：升级前落盘形态（字段缺省 = 来源未知，不猜测来源）
+    const wrapper = await mountBar({ ...LEGACY_AWAITING_PLAN_STATE_VIEW })
+    await flushAsync()
+
+    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toContain('等待 agent 重新提交审批')
+    // 不猜测来源：两源文案都不出现
+    expect(reason.text()).not.toContain('已收到你的问题')
+    expect(reason.text()).not.toContain('会话已重启')
+    expect(wrapper.find('[data-testid="plan-review-degraded-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(true)
+  })
+
+  it('degraded 退出按钮 → emit("exit")（确认守卫归宿主 PlanModeBar 退出确认 Popover，本组件不直发 abortPlan）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    await flushAsync()
+
+    await wrapper.find('[data-testid="plan-review-degraded-exit"]').trigger('click')
+    await flushAsync()
+
+    expect(wrapper.findComponent(PlanReviewBar).emitted('exit')).toHaveLength(1)
+    expect(commandMock.mock.calls.some((c) => c[0] === 'session.abortPlan')).toBe(false)
+  })
+})
+
+describe('PlanReviewBar §3.5 守卫与回看', () => {
+  it('0 评论：「提交评论修订」禁用 + tooltip 说明；加草稿后恢复可用', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+
+    const revise = wrapper.find('[data-testid="plan-review-revise"]')
+    expect(revise.attributes('disabled')).toBeDefined()
+    expect(revise.attributes('title')).toContain('先在文档中划选添加评论')
+
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
+
+    const reviseAfter = wrapper.find('[data-testid="plan-review-revise"]')
+    expect(reviseAfter.attributes('disabled')).toBeUndefined()
+    expect(reviseAfter.attributes('title')).toBeUndefined()
+  })
+
+  it('评论计数可点 → openDrawerTab("plan") 打开/聚焦计划产物 tab + plan-store 回看请求递增', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+
+    expect(usePlanStore().draftsRevealSeq).toBe(0)
+    await wrapper.find('[data-testid="plan-review-summary"]').trigger('click')
+    await flushAsync()
+
+    expect(openDrawerTabMock).toHaveBeenCalledWith('plan')
+    expect(usePlanStore().draftsRevealSeq).toBe(1)
+    expect(usePlanStore().draftsRevealPending).toBe(true)
   })
 })

@@ -46,14 +46,14 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 function activeStateWithDocs(): PlanState {
   const doc: PlanDocMeta = {
     fileName: "design.md",
-    absPath: "/tmp/test-project/.taiji-harness/auth/design.md",
+    absPath: "/tmp/test-project/.tmp/plans/auth/design.md",
     sourceSkill: "tech-design",
     version: 1,
   };
   return {
     ...DEFAULT_PLAN_STATE,
     isActive: true,
-    planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+    planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     requirement: "refactor auth",
     skills: ["tech-design"],
     docs: [doc],
@@ -116,7 +116,7 @@ describe("register-doc（D10）", () => {
       expect.objectContaining({
         docs: [
           expect.objectContaining({ fileName: "design.md", version: 1 }),
-          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.taiji-harness/auth/impl-plan.md", version: 1 }),
+          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.tmp/plans/auth/impl-plan.md", version: 1 }),
         ],
       }),
     );
@@ -169,7 +169,7 @@ describe("submit-review E6 双守卫", () => {
     const { exec, ctx } = setup({
       ...DEFAULT_PLAN_STATE,
       isActive: true,
-      planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+      planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     });
     const res = await exec({ action: "submit-review" });
     expect(res.details).toEqual({ action: "review-error", reason: "no-docs" });
@@ -382,7 +382,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     );
   });
 
-  it("explain → same steer injection but reviewState stays awaiting (重挂靠提示词纪律)", async () => {
+  it("explain → same steer injection, reviewState stays awaiting + source='explain' persisted (降级两源 §3.4)", async () => {
     const { exec, ctx, pi } = setupTaiji();
     const comments = [{ quote: "third paragraph", comment: "why not use a queue here?" }];
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -404,6 +404,10 @@ describe("三 decision 消费（taiji 形态）", () => {
     const revisingEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
       .filter((c) => (c[1] as PlanState).reviewState === "revising");
     expect(revisingEntries).toHaveLength(0);
+    // 降级两源：explain 分支落 'explain' 标记（renderer 渲染「已收到你的问题」分支）
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.reviewState).toBe("awaiting");
+    expect(lastEntry.reviewStateSource).toBe("explain");
   });
 
   it("E5: unparseable select response → warn + re-hang prompt, nothing injected into the conversation", async () => {
@@ -464,6 +468,23 @@ describe("三 decision 消费（taiji 形态）", () => {
     // 未消费 decision、未重置状态
     expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviewStateSource 重挂起点重置（§3.4 第 3 轮裁决）", () => {
+  it("submit-review re-hang clears stale source before awaiting is persisted (不变量：source 只描述当前降级等待的原因)", async () => {
+    // 上一轮 explain 降级残留 source='explain'；本用例重提交（重挂起新 pending）
+    const { exec, pi } = setup({ ...activeStateWithDocs(), reviewStateSource: "explain" });
+
+    await exec({ action: "submit-review" });
+
+    // 挂起点落盘的 awaiting entry 不携带上一轮来源——残留会让崩溃恢复（E3）后的
+    // 降级态渲染上一轮「已收到你的问题」文案，而本轮无人提问（C-U2 同型残留）
+    const hangEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[1] as PlanState)
+      .find((e) => e.reviewState === "awaiting");
+    expect(hangEntry).toBeDefined();
+    expect(hangEntry!.reviewStateSource).toBeUndefined();
   });
 });
 

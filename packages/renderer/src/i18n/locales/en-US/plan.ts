@@ -1,20 +1,8 @@
 /**
- * plan mode i18n (plan-mode redesign u1-banner: M1 banner + review bar).
- * Copy baseline = user-accepted demo (M1 banner / bottom action bar; the demo itself is not checked in).
+ * Plan mode i18n: modeBar status bar + reviewBar + drawer plan-artifacts tab + docs panel
+ * + selection comments.
  */
 export default {
-  banner: {
-    title: 'Plan Mode',
-    hint: ' active — the agent reads code and writes docs only, never modifies source',
-    skillsLabel: 'Skills',
-    skillsUnspecified: '(unspecified)',
-    stageExploring: 'Explore',
-    stageWriting: 'Write docs',
-    stageReviewing: 'Review',
-    exit: 'Exit',
-    // E9: error message embeds the recovery action, banner stays as-is
-    exitError: 'Exit failed: {message}. Fix the issue and retry, or type /plan abort in the conversation',
-  },
   reviewBar: {
     commentsCount: '{count} comments',
     requestExplanation: 'Request explanation',
@@ -22,6 +10,39 @@ export default {
     confirmExecute: 'Approve and execute',
     revising: 'The agent is revising docs based on your comments; versions update here when done',
     waitingResubmit: 'Waiting for the agent to resubmit for review',
+    // §3.4 degraded three-way split (reviewStateSource two sources + legacy-entry generic): shared
+    // recovery hint + exit button (outline, no longer a dead end); no elapsed-time display (design decision)
+    degradedExplain: 'Your question was received; the agent will resubmit for review after answering',
+    degradedResubmit: 'The agent session restarted and has not resubmitted yet',
+    degradedRecoverHint: 'Send any message in the composer to remind the agent to resubmit',
+    degradedExit: 'Exit',
+    // §3.5 guard & review: tooltip while "Submit comments for revision" is disabled at 0 drafts;
+    // comment count is clickable (review drafts)
+    reviseEmptyDisabled: 'Select text in the doc to add comments first, then submit for revision',
+    viewDrafts: 'Review comment drafts',
+  },
+  // PlanModeBar left zone (plan-mode-ux-refactor u-plan-bar: the merged bar owns its keys)
+  modeBar: {
+    title: 'Plan Mode',
+    skillsLabel: 'Skills',
+    stageExploring: 'Explore',
+    stageWriting: 'Write docs',
+    stageReviewing: 'Review',
+    // Stage-dot tooltips (meaning of each stage)
+    stageExploringTip: 'The agent is exploring requirements; no plan document yet',
+    stageWritingTip: 'The agent is writing the plan document',
+    stageReviewingTip: 'Plan document ready — awaiting your review',
+    exit: 'Exit',
+    // E9: error message embeds the recovery action, the bar stays as-is
+    exitError: 'Exit failed: {message}. Fix the issue and retry, or type /plan abort in the conversation',
+    // §3.5 exit-confirm Popover (context-aware warnings): revising = the agent-side revision will be
+    // aborted (GUI drafts were already cleared at revise submit); with drafts = they will be discarded;
+    // first matching warning wins
+    exitConfirmTitle: 'Exit plan mode?',
+    exitWarnRevising: 'The agent is revising docs — exiting will abort the revision',
+    exitWarnDrafts: '{count} comment drafts will be discarded',
+    exitConfirm: 'Confirm exit',
+    exitCancel: 'Cancel',
   },
   drawer: {
     // plan tab (plan-mode redesign u1-drawer-tab): drawer "plan artifacts" tab.
@@ -29,6 +50,15 @@ export default {
     tabPlan: 'Plan Artifacts',
     noPlan: 'No plan artifacts yet',
     planHint: 'Documents produced by the agent appear here after entering plan mode',
+    // Pending-state matrix (plan-mode-ux-refactor §3.2, u-drawer-gate): two states while isActive && docs empty.
+    // #1 aligns with derivePlanStage's exploring semantics (neutral progressive, no specific action asserted);
+    // #2 idle-waiting (isGenerating lazy derivation has a brief mis-show window; copy stays neutral,
+    // never asserts "paused" — accepted explicitly)
+    pendingActive: 'Exploring requirements and drafting the plan document…',
+    pendingIdle: 'The agent has not made progress yet — send a message to continue',
+    // Recovery-entry hint: interaction semantics = guide the user to send a message (no standalone button;
+    // recovery entry is copy-only guidance, landed with u-drawer-gate — no programmatic action)
+    pendingIdleHint: 'Send any message in the composer to nudge the agent forward',
   },
   docs: {
     // Docs panel (plan-mode redesign u1-docs-panel: L2 doc tabs + meta + body)

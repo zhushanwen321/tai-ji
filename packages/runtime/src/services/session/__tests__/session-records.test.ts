@@ -915,6 +915,34 @@ describe('plan-state 投影（D1③④）', () => {
     expect((planMsgs[2]![1] as { payload: { planState: { docs: Array<{ version: number }> } } }).payload.planState.docs[0]!.version).toBe(2)
   })
 
+  // §3.4 四触点第 3 层（发布水位）：仅 reviewStateSource 变化（其余七字段全等）必须
+  // publish——漏比对会把 source 变化判「无变化」而抑制 session.planState 广播，
+  // renderer live 更新唯一通道是 WS 帧，帧被抑制即恒渲染旧降级文案（第 3 轮审查 P1）。
+  it('仅 reviewStateSource 变化（其余七字段全等）→ 恰好 publish 一帧 session.planState', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // 首拉基线：awaiting 且无 source（旧 entry 形态，undefined 缺省）
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 同值新 entry 仅追加 reviewStateSource（explain 分支落盘后的重放形态）
+    const sourced = { ...fullPlanData('awaiting'), reviewStateSource: 'explain' }
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(sourced, 'e2')], leafId: 'e2' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(2)
+    expect((planMsgs[1]![1] as { payload: { planState: { reviewStateSource?: string } } }).payload.planState.reviewStateSource).toBe('explain')
+  })
+
   it('reset entry：isActive=false 且 docs 保留仍 publish（产物 tab 回看驱动，与 isActive 解耦）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
@@ -978,7 +1006,7 @@ describe('plan-state 投影（D1③④）', () => {
 
   // [MF-1 回归] JSONL append-only 下 entry 不会消失，增量批（cursor delta）的
   // 「无 plan-state entry」= 本批无 plan 新信息，非「entry 被清空」——误判会把活跃 plan
-  // 的 GUI（横幅/审批条/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
+  // 的 GUI（PlanModeBar/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
   it('增量批无 plan-state entry：保持基线不 publish（非全量路径收敛语义不适用）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)

@@ -24,9 +24,9 @@ afterEach(() => {
 });
 
 /**
- * 注入段项目级源锚点回归锁（U1）：planFilePath = <projectRoot>/.taiji-harness/
- * <slug>/plan.md 三层深——旧实现两级上溯逆推得 <projectRoot>/.taiji-harness（差
- * 一层），注入段恒扫 .taiji-harness/.agents/plans（几乎恒不存在）→ 项目级模板
+ * 注入段项目级源锚点回归锁（U1）：planFilePath = <projectRoot>/.tmp/plans/
+ * <slug>/plan.md（slug 目录嵌套）——从 planFilePath 逆推项目级源曾因层级差致
+ * 注入段扫浅层 .agents/plans（几乎恒不存在）→ 项目级模板
  * 投放（G2）从注入清单完全消失，而 select-template 侧用 listTemplates({
  * projectRoot: ctx.cwd }) 正确（两轨不同源）。本组用例按真实层级构造
  * planFilePath，锁死「注入段项目级源 = PlanPromptInput.projectRoot 的
@@ -43,7 +43,7 @@ describe("注入段项目级模板源锚点 = PlanPromptInput.projectRoot（ctx.
 
     const prompt = buildPlanModePrompt({
       requirement: "integrate project-level template source",
-      planFilePath: join(projectRoot, ".taiji-harness", "some-slug", "plan.md"),
+      planFilePath: join(projectRoot, ".tmp", "plans", "some-slug", "plan.md"),
       projectRoot,
       skills: [],
     });
@@ -54,16 +54,16 @@ describe("注入段项目级模板源锚点 = PlanPromptInput.projectRoot（ctx.
     expect(prompt).toContain(`<location>${templatePath}</location>`);
   });
 
-  it("planDir 逆推层级（<projectRoot>/.taiji-harness/.agents/plans）不是项目级源——放在那里的模板不进清单", () => {
+  it("planDir 逆推层级（<projectRoot>/.tmp/plans/.agents/plans）不是项目级源——放在那里的模板不进清单", () => {
     const projectRoot = mkTmpDir("plan-prompt-trap-");
     const trapName = `trap-tpl-${randomUUID().slice(0, 8)}`;
-    const trapDir = join(projectRoot, ".taiji-harness", ".agents", "plans");
+    const trapDir = join(projectRoot, ".tmp", "plans", ".agents", "plans");
     fs.mkdirSync(trapDir, { recursive: true });
     fs.writeFileSync(join(trapDir, `${trapName}.md`), "# wrong anchor\n");
 
     const prompt = buildPlanModePrompt({
       requirement: "wrong anchor must not surface",
-      planFilePath: join(projectRoot, ".taiji-harness", "some-slug", "plan.md"),
+      planFilePath: join(projectRoot, ".tmp", "plans", "some-slug", "plan.md"),
       projectRoot,
       skills: [],
     });

@@ -95,8 +95,8 @@ export type ClientMessageType =
   // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
   // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
   // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
-  // abortPlan：横幅「退出 ×」→ runtime 经 ensureActive 恢复后 client.prompt('/plan abort')
-  // 直发（绕 busy 预检，streaming 中可用）。
+  // abortPlan：PlanModeBar 左区退出按钮（确认 Popover 后）→ runtime 经 ensureActive 恢复后
+  // client.prompt('/plan abort') 直发（绕 busy 预检，streaming 中可用）。
   | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
@@ -442,7 +442,8 @@ export interface ClientMessageMap {
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
-  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 横幅退出命令，
+  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
+  // 退出命令（确认 Popover 后），
   // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
   'session.getPlanState': { sessionId: string }
   'session.abortPlan': { sessionId: string }
@@ -1337,9 +1338,10 @@ export interface PlanDocMeta {
 /**
  * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
  *
- * 四个必填字段是 entry schema v1 原有字段；三个 optional 字段是 schema 扩展
+ * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
  * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
- * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件）。
+ * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
+ * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
  * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
  * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
@@ -1355,6 +1357,15 @@ export interface PlanStateView {
   docs?: PlanDocMeta[]
   /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
   reviewState?: 'awaiting' | 'revising'
+  /**
+   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
+   * 'explain' = 用户请求解释后等 agent 解答完重新提交审批；
+   * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
+   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
+   * 缺省 = 来源未知，渲染通用降级文案（两态共有的恢复入口 + 退出照给，不猜测来源）。
+   * 仅 reviewState 有值时有语义。
+   */
+  reviewStateSource?: 'explain' | 'resubmit'
 }
 
 export interface ServerMessageMapBase {
@@ -2397,7 +2408,7 @@ export interface ReplyPayloadMap {
   'session.abortHandoff': void    // reply message.status
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
-  // session.abortPlan：横幅退出 → runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
+  // session.abortPlan：PlanModeBar 退出（确认 Popover 后）→ runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
   // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
   // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
   'session.abortPlan': void       // reply message.status

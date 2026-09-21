@@ -1,7 +1,7 @@
 /**
  * usePlanState 单测 —— plan 模式重设计 u1-store 层 2（编排：订阅 / 首拉 / 视图透出）。
  *
- * 覆盖（impl-plan u1-store 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款）：
  * - 首拉 watch immediate：初始挂载即拉 + 切 session 再拉；RPC reject（reply success=false）
  *   走错误通路（分区 loadError）断言
  * - WS 帧驱动状态流转：awaiting → revising → 无值（reviewing → reviewing → writing）
@@ -42,7 +42,7 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
 
 const DOC: PlanDocMeta = {
   fileName: 'design.md',
-  absPath: '/data/A/.taiji-harness/auth/design.md',
+  absPath: '/data/A/.tmp/plans/auth/design.md',
   sourceSkill: 'tech-design',
   version: 1,
 }
@@ -51,7 +51,7 @@ const DOC: PlanDocMeta = {
 function planStateOf(sid: string, overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: `/data/${sid}/.taiji-harness/auth/plan.md`,
+    planFilePath: `/data/${sid}/.tmp/plans/auth/plan.md`,
     requirement: '重构 auth 模块',
     templateName: 'default',
     ...overrides,
@@ -229,7 +229,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     expect(host.plan.view.value?.reviewState).toBeUndefined()
   })
 
-  it('isActive=false 帧驱动横幅消失语义（stage → null）', async () => {
+  it('isActive=false 帧驱动 plan 态消失语义（stage → null）', async () => {
     const host = mountHost('A')
     await settle()
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
@@ -325,15 +325,20 @@ describe('评论草稿：per-session 隔离与清理链', () => {
   it('cleanup 链：triggerSessionCleanups(A) → A 分区重置（草稿/view 清空），B 保留', async () => {
     const host = mountHost('A')
     await settle()
-    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
+    // 草稿先于 view 建立会被 §3.5 enter 翻转清兜底清掉（null→active = 新审阅轮；本文件
+    // 首拉是受控 deferred、用例不 resolve → 分区 view 恒 null），真机时序是审阅态（view
+    // 就绪）下才产生草稿——先帧后草稿对齐真机序列（参照 plan-store.test.ts 同类用例）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC] }))
+    await settle()
+    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
     await settle()
     expect(host.plan.drafts.value.length).toBe(1)
 
     host.sidRef.value = 'B'
     await settle()
-    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     dispatchPlanState('B', planStateOf('B', { docs: [DOC], reviewState: 'awaiting' }))
+    await settle()
+    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     await settle()
 
     // useSidebar.deleteSession 销毁 session A 的编排入口
