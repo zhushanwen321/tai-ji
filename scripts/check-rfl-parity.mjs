@@ -118,6 +118,47 @@ for (const m of MARKERS) {
 }
 
 /* ── 抽取 zcode 侧的纯函数片段（.dwf.ts 不能被 Node 直接 import：宿主全局 + 顶层 await）── */
+/** 行注释跳过：返回换行后下标（无换行则串末）。 */
+function skipLineComment(src, i) {
+  const nl = src.indexOf("\n", i);
+  return nl < 0 ? src.length : nl + 1;
+}
+
+/** 块注释跳过：返回注释结束标记（星+斜线）后的下标；未闭合则串末。 */
+function skipBlockComment(src, i) {
+  const end = src.indexOf("*/", i + 2);
+  return end < 0 ? src.length : end + 2;
+}
+
+/** 模板串插值 `${...}`：从插值首个字符起按花括号配平跳过（不解析其内部字符串，够用），返回配对 `}` 后下标。 */
+function skipTemplateInterpolation(src, j) {
+  let d = 1;
+  while (j < src.length && d > 0) {
+    if (src[j] === "{") d++;
+    else if (src[j] === "}") d--;
+    j++;
+  }
+  return j;
+}
+
+/** 字符串/模板串字面量跳过（含转义与 `${...}` 插值），返回闭合引号后下标。 */
+function skipQuoted(src, i, quote) {
+  i++;
+  while (i < src.length) {
+    if (src[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (src[i] === quote) return i + 1;
+    if (quote === "`" && src[i] === "$" && src[i + 1] === "{") {
+      i = skipTemplateInterpolation(src, i + 2);
+      continue;
+    }
+    i++;
+  }
+  return i;
+}
+
 /**
  * 从 open 处的 `{` 起做花括号配平扫描，跳过字符串 / 模板串 / 行注释 / 块注释内的花括号。
  * 返回配对 `}` 的下标；不配平返回 -1。
@@ -128,50 +169,60 @@ function scanBalancedBraces(src, open) {
   while (i < src.length) {
     const ch = src[i];
     const next = src[i + 1];
-    if (ch === "/" && next === "/") {
-      const nl = src.indexOf("\n", i);
-      i = nl < 0 ? src.length : nl + 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      const endc = src.indexOf("*/", i + 2);
-      i = endc < 0 ? src.length : endc + 2;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
+    if (ch === "/" && next === "/") i = skipLineComment(src, i);
+    else if (ch === "/" && next === "*") i = skipBlockComment(src, i);
+    else if (ch === '"' || ch === "'" || ch === "`") i = skipQuoted(src, i, ch);
+    else if (ch === "{") {
+      depth++;
       i++;
-      while (i < src.length) {
-        if (src[i] === "\\") {
-          i += 2;
-          continue;
-        }
-        if (src[i] === quote) {
-          i++;
-          break;
-        }
-        // 模板串插值 ${...}：递归按花括号配平跳过（不解析其内部字符串，够用）
-        if (quote === "`" && src[i] === "$" && src[i + 1] === "{") {
-          let d = 1;
-          let j = i + 2;
-          while (j < src.length && d > 0) {
-            if (src[j] === "{") d++;
-            else if (src[j] === "}") d--;
-            j++;
-          }
-          i = j;
-          continue;
-        }
-        i++;
-      }
-      continue;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+      i++;
+    } else {
+      i++;
     }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
+  }
+  return -1;
+}
+
+/** 参数列表闭合括号定位：从 open（首个 `(`）起做括号配平，返回配对 `)` 下标；不配平返回 -1。 */
+function findMatchingParen(src, open) {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") {
       depth--;
       if (depth === 0) return i;
     }
-    i++;
+  }
+  return -1;
+}
+
+/**
+ * 函数体左花括号定位（从 from = 参数闭合括号起扫）：
+ * 先扫过签名自带的成对花括号（返回类型标注 `): { order: T[]; ... } {` 的内联对象类型
+ * 自成一对），内联类型闭合后首个 `{` 即函数体；未定位返回 -1。
+ */
+function findFunctionBodyOpen(src, from) {
+  let sigDepth = 0;
+  let seenSigBrace = false;
+  for (let i = from; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "{") {
+      if (sigDepth === 0) {
+        seenSigBrace = true;
+        sigDepth = 1;
+        continue;
+      }
+      sigDepth++;
+    } else if (ch === "}") {
+      if (sigDepth > 0) {
+        sigDepth--;
+        if (sigDepth === 0 && seenSigBrace) return src.indexOf("{", i + 1);
+      }
+    }
   }
   return -1;
 }
@@ -194,54 +245,13 @@ function extractZcodeScheduler() {
   const constBlock = zcodeSrc.slice(constStart, fnStart);
   // 函数体配平：先参数括号配平（泛型里的 `{ name: string }` 与解构参数都含花括号——
   // 直接从签名后的第一个 `{` 起算会被泛型对象类型提前配对，这是实测踩过的坑），
-  // 再从参数列表闭合括号之后找函数体的 `{`，与 review-fix-loop-script.test.ts 的
+  // 再从参数列表闭合括号之后定位函数体 `{`，与 review-fix-loop-script.test.ts 的
   // extractFn 同法。
   const paramOpen = zcodeSrc.indexOf("(", fnStart);
   if (paramOpen < 0) throw new Error("抽取失败：planReviewerOrder 无参数列表");
-  let parenDepth = 0;
-  let paramClose = -1;
-  for (let i = paramOpen; i < zcodeSrc.length; i++) {
-    const ch = zcodeSrc[i];
-    if (ch === "(") parenDepth++;
-    else if (ch === ")") {
-      parenDepth--;
-      if (parenDepth === 0) {
-        paramClose = i;
-        break;
-      }
-    }
-  }
+  const paramClose = findMatchingParen(zcodeSrc, paramOpen);
   if (paramClose < 0) throw new Error("抽取失败：planReviewerOrder 参数括号不配平");
-  // 函数体扫描起点：参数闭合后，先扫过签名自带的成对花括号（返回类型标注
-  // `): { order: T[]; ... } {` 的内联对象类型自成一对），再进函数体。等价做法是把
-  // 函数体左花括号定位为「参数闭合后、首个 depth 归零的 `{`之后」的那一个。
-  let sigDepth = 0;
-  let open = -1;
-  let insideSigBrace = false;
-  for (let i = paramClose; i < zcodeSrc.length; i++) {
-    const ch = zcodeSrc[i];
-    if (ch === "{") {
-      if (sigDepth === 0) {
-        insideSigBrace = true;
-        sigDepth = 1;
-        // 记录「第一个 depth=1 的左括号」，待其归零后，下一个左括号即函数体
-        continue;
-      }
-      sigDepth++;
-    } else if (ch === "}") {
-      if (sigDepth > 0) {
-        sigDepth--;
-        if (sigDepth === 0 && insideSigBrace) {
-          // 签名内联对象类型已闭合：函数体的 `{` 是参数闭合后第一个「depth=0 的 `{`」
-          const bodyOpen = zcodeSrc.indexOf("{", i + 1);
-          if (bodyOpen >= 0) {
-            open = bodyOpen;
-            break;
-          }
-        }
-      }
-    }
-  }
+  const open = findFunctionBodyOpen(zcodeSrc, paramClose);
   if (open < 0) throw new Error("抽取失败：planReviewerOrder 函数体未定位");
   const close = scanBalancedBraces(zcodeSrc, open);
   if (close < 0) throw new Error("抽取失败：planReviewerOrder 花括号不配平");

@@ -1809,6 +1809,49 @@ function describeUpsertTask(task) {
     + `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'})`
 }
 
+/** 落库 task 是否 = S20 默认草稿提交值（recurring + cron 模式 + 6 字段归一化表达式）。 */
+function isDefaultDraftCronTask(task) {
+  return !!task
+    && task.prompt === 'daily-standup-reminder'
+    && task.kind === 'recurring'
+    && !!task.schedule
+    && task.schedule.mode === 'cron'
+    && task.schedule.cronExpression === '0 0 9 * * *'
+}
+
+/**
+ * S22 创建前基线：会话名 / 会话模型 / 宿主条目计数（model_change / thinking_level_change）。
+ * ④⑤ 宿主不变量断言的对照组——合成轮不得改变这些计数。
+ */
+async function s22CollectBaseline(s) {
+  const stateBefore = await s.getStateData()
+  const entriesBefore = await s.getEntries()
+  return {
+    name: stateBefore ? stateBefore.sessionName : undefined,
+    sessionModel: stateBefore && stateBefore.model ? stateBefore.model : null,
+    modelChangeCount: countEntryType(entriesBefore, 'model_change'),
+    thinkingCount: countEntryType(entriesBefore, 'thinking_level_change'),
+  }
+}
+
+/**
+ * S22 ①②③ 断言组：合成 assistant 行的字段不变量（语义收敛说明见 runS22 文档注释）。
+ *   ① stopReason='aborted'；② provider/model/api = 创建时会话模型；③ usage 各字段全 0。
+ * usage 断言只依赖 line 本身（不要求 sessionModel 在场），与原内联形态一致。
+ */
+function s22SyntheticLineChecks(line, sessionModel) {
+  const hasLine = !!line
+  const hasModel = hasLine && !!sessionModel
+  return {
+    stopOk: hasLine && line.message.stopReason === 'aborted',
+    providerOk: hasModel
+      && line.message.provider === sessionModel.provider
+      && line.message.model === sessionModel.id,
+    apiOk: hasModel && line.message.api === sessionModel.api,
+    usageOk: hasLine && isZeroUsage(line.message.usage),
+  }
+}
+
 /**
  * [u-e2e-adjust] flush 探针退役（原 `flushForJsonlEvidence` 已删除）。
  *
@@ -2036,12 +2079,7 @@ async function runS20(piBin) {
       && /^Created [0-9a-f]+: daily-standup-reminder · 0 0 9 \* \* \*/.test(notify.message)
     const task = getSingleUpsertTask(upserts)
     // 创建端把 5 字段 cron 归一化为 6 字段（秒位补 0）——entry 断言用归一化形态
-    const taskOk = !!task
-      && task.prompt === 'daily-standup-reminder'
-      && task.kind === 'recurring'
-      && !!task.schedule
-      && task.schedule.mode === 'cron'
-      && task.schedule.cronExpression === '0 0 9 * * *'
+    const taskOk = isDefaultDraftCronTask(task)
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
     const persisted = persistedUpserts.length === 1
     // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US；cron 回显归一化形态）
@@ -2198,12 +2236,10 @@ async function runS22(piBin) {
     const renameSwitchOn = !!renameStatus && renameStatus.message.includes('已开启')
 
     // 创建前基线（内存 fileEntries：会话初始化已 append 的宿主条目）
-    const stateBefore = await s.getStateData()
-    const entriesBefore = await s.getEntries()
-    const modelChangeBefore = countEntryType(entriesBefore, 'model_change')
-    const thinkingBefore = countEntryType(entriesBefore, 'thinking_level_change')
-    const nameBefore = stateBefore ? stateBefore.sessionName : undefined
-    const sessionModel = stateBefore && stateBefore.model ? stateBefore.model : null
+    const {
+      name: nameBefore, sessionModel,
+      modelChangeCount: modelChangeBefore, thinkingCount: thinkingBefore,
+    } = await s22CollectBaseline(s)
 
     await s.sendCommand('/scheduler 2h "s22-host-invariant"')
     const reqs = await s.waitForFormRequest(15000)
@@ -2218,16 +2254,8 @@ async function runS22(piBin) {
     const aborted = assistants.filter((e) => e.message.stopReason === 'aborted')
     const line = aborted.length > 0 ? aborted[aborted.length - 1] : null
 
-    // ① 合成行终止形态
-    const stopOk = !!line && line.message.stopReason === 'aborted'
-    // ② provider/model = 创建时会话模型（动态等值）
-    const providerOk = !!line && !!sessionModel
-      && line.message.provider === sessionModel.provider
-      && line.message.model === sessionModel.id
-    // ② api = 创建时会话模型 api（S7④ 要求合成行含 api 字段）
-    const apiOk = !!line && !!sessionModel && line.message.api === sessionModel.api
-    // ③ usage 全 0
-    const usageOk = !!line && isZeroUsage(line.message.usage)
+    // ①②③ 合成行字段不变量：终止形态 / provider·model·api=会话模型 / usage 全 0
+    const { stopOk, providerOk, apiOk, usageOk } = s22SyntheticLineChecks(line, sessionModel)
     // ④⑤ 宿主不变量：条数与创建前一致（model_change 绝对值 = 1）
     const modelChangeAfter = countEntryType(jsonlEntries, 'model_change')
     const thinkingAfter = countEntryType(jsonlEntries, 'thinking_level_change')
@@ -2241,8 +2269,10 @@ async function runS22(piBin) {
       name: 's22-host-invariant', schedule: 'once in 2h',
     })
 
-    const pass = ack.ok && stopOk && providerOk && apiOk && usageOk && modelChangeOk && thinkingOk
-      && renameOk && renameSwitchOn && ackLine.ok && reqs.length === 1
+    const pass = [
+      ack.ok, stopOk, providerOk, apiOk, usageOk,
+      modelChangeOk, thinkingOk, renameOk, renameSwitchOn, ackLine.ok, reqs.length === 1,
+    ].every(Boolean)
     return {
       name: 'S22',
       status: pass ? 'PASS' : 'FAIL',
