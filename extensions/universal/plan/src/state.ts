@@ -1,5 +1,12 @@
+import { readdirSync, rmdirSync } from "node:fs";
+import { dirname } from "node:path";
+
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
+const logger = getLogger("pi-plan");
 
 /**
  * 审阅态两值（D1）——awaiting = 文档就绪等审批；revising = 修订中；
@@ -10,14 +17,13 @@ export type PlanReviewState = "awaiting" | "revising";
 
 /**
  * 降级态来源标记（plan-mode-ux-refactor §3.4）：reviewState='awaiting' 且无挂起 select
- * 时区分等待原因——'explain' = 用户请求解释后等 agent 解答完重新提交审批；'resubmit' =
- * 会话重启（E3）后 agent 尚未重新提交。写入点两处（tool.ts explain 分支 / index.ts E3
- * steer 重挂处），清除点三处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置
- * 组 / submit-review 重挂起点重置）——缺清除 = 跨 plan run 残留（C-U2 同型缺陷：
- * bad-response 等罕见路径可渲染上一轮的来源文案）。字面量与 shared
+ * 时区分等待原因——'resubmit' = 会话重启（E3）后 agent 尚未重新提交。写入点 =
+ * index.ts E3 steer 重挂处；清除点三处（resetPlanState 终态清理组 / activatePlanMode
+ * 新轮次重置组 / submit-review 重挂起点重置）——缺清除 = 跨 plan run 残留（C-U2 同型
+ * 缺陷：bad-response 等罕见路径可渲染上一轮的来源文案）。字面量与 shared
  * PlanStateView.reviewStateSource 严格一致。
  */
-export type PlanReviewStateSource = "explain" | "resubmit";
+export type PlanReviewStateSource = "resubmit";
 
 export interface PlanState {
   isActive: boolean;
@@ -168,6 +174,20 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
  * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首拉仍恢复
  * docs 显示，至下次 /plan 同 slug 覆写。
  */
+/** 空 slug 目录清理（状态审查 P3-10）：enter 即 mkdir，未产任何文档即退出会留空目录残盘。
+ * 仅删「真正为空」的 slug 目录——目录里有任何残留文件（含未登记杂文件）一律保留（保守，
+ * 不做递归删除）；目录不存在 / 非空 / 不可读均降级跳过（warn 留痕），清理失败不影响退出主流程。
+ */
+function removeEmptyPlanDir(planFilePath: string): void {
+  if (!planFilePath) return;
+  try {
+    const dir = dirname(planFilePath);
+    if (readdirSync(dir).length === 0) rmdirSync(dir);
+  } catch (error) {
+    logger.warn("plan: empty plan dir cleanup skipped", { error: toErrorMessage(error) });
+  }
+}
+
 export function resetPlanState(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
@@ -176,6 +196,8 @@ export function resetPlanState(
 ): PlanState {
   const state = getPlanState(sessions, sessionId, ctx);
   state.isActive = false;
+  // 空目录清理必须在 planFilePath 清空之前（路径是唯一的目录推导来源）
+  removeEmptyPlanDir(state.planFilePath);
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
@@ -230,11 +252,11 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
-/** reviewStateSource 值域守卫：'explain' | 'resubmit' 之外的值按无值处理（与 readReviewState 同风格） */
+/** reviewStateSource 值域守卫：域外值按无值处理（与 readReviewState 同风格）。
+ * 旧版 entry 的 'explain' 存量值同样归无值——explain 交互已删（2026-09-21 审批两键
+ * 收敛），renderer 缺省分支据此渲染通用文案，无需为存量值保留枚举成员。 */
 function readReviewStateSource(data: Partial<PlanState>): PlanReviewStateSource | undefined {
-  return data.reviewStateSource === "explain" || data.reviewStateSource === "resubmit"
-    ? data.reviewStateSource
-    : undefined;
+  return data.reviewStateSource === "resubmit" ? data.reviewStateSource : undefined;
 }
 
 /** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的

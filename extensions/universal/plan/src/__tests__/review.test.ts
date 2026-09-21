@@ -331,24 +331,30 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
   });
 });
 
-describe("三 decision 消费（taiji 形态）", () => {
+describe("decision 消费（taiji 形态）", () => {
   function setupTaiji() {
     vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
     return setupActive();
   }
 
-  it("approve → walks the existing complete flow (execution-method form), resets state keeping docs", async () => {
+  it("approve → clears reviewState before exec-choice, walks the complete flow, resets state keeping docs", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(JSON.stringify({ decision: "approve" }))
-      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Develop (auto-parallel)" }));
+      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Execute" }));
 
     const res = await exec({ action: "submit-review" });
 
     expect(ctx.ui.select).toHaveBeenCalledTimes(2);
     expect(res.details.action).toBe("complete");
-    expect(res.details.execMode).toBe("develop");
+    expect(res.details.execMode).toBe("execute");
     expect(handlePlanComplete).toHaveBeenCalled();
+    // P2-3：approve 消费审批后、exec-choice 挂起前先清 reviewState 落盘——
+    // 「awaiting 无挂起」窗口不得误导渲染降级态
+    const stateEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[1] as PlanState)
+      .filter((e) => e.isActive === true);
+    expect(stateEntries.at(-1)?.reviewState).toBeUndefined();
     // reset 终态矩阵经 resetPlanState 落盘：isActive=false + docs 保留
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
@@ -380,34 +386,6 @@ describe("三 decision 消费（taiji 形态）", () => {
       "plan-state",
       expect.objectContaining({ reviewState: "revising", isActive: true }),
     );
-  });
-
-  it("explain → same steer injection, reviewState stays awaiting + source='explain' persisted (降级两源 §3.4)", async () => {
-    const { exec, ctx, pi } = setupTaiji();
-    const comments = [{ quote: "third paragraph", comment: "why not use a queue here?" }];
-    (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      JSON.stringify({ decision: "explain", comments }),
-    );
-
-    const res = await exec({ action: "submit-review" });
-
-    expect(pi.sendMessage).toHaveBeenCalledWith(
-      { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: expect.stringContaining("queue here?"), display: false },
-      { deliverAs: "steer", triggerTurn: true },
-    );
-    expect(res.details.action).toBe("submit-review");
-    // 不改 reviewState：保持 awaiting
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "plan-state",
-      expect.objectContaining({ reviewState: "awaiting" }),
-    );
-    const revisingEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c) => (c[1] as PlanState).reviewState === "revising");
-    expect(revisingEntries).toHaveLength(0);
-    // 降级两源：explain 分支落 'explain' 标记（renderer 渲染「已收到你的问题」分支）
-    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
-    expect(lastEntry.reviewState).toBe("awaiting");
-    expect(lastEntry.reviewStateSource).toBe("explain");
   });
 
   it("E5: unparseable select response → warn + re-hang prompt, nothing injected into the conversation", async () => {
@@ -473,8 +451,8 @@ describe("三 decision 消费（taiji 形态）", () => {
 
 describe("reviewStateSource 重挂起点重置（§3.4 第 3 轮裁决）", () => {
   it("submit-review re-hang clears stale source before awaiting is persisted (不变量：source 只描述当前降级等待的原因)", async () => {
-    // 上一轮 explain 降级残留 source='explain'；本用例重提交（重挂起新 pending）
-    const { exec, pi } = setup({ ...activeStateWithDocs(), reviewStateSource: "explain" });
+    // 上一轮 E3 重挂残留 source='resubmit'；本用例重提交（重挂起新 pending）
+    const { exec, pi } = setup({ ...activeStateWithDocs(), reviewStateSource: "resubmit" });
 
     await exec({ action: "submit-review" });
 

@@ -1,5 +1,9 @@
+import { mkdtempSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   capPlanRequirement,
@@ -250,7 +254,7 @@ describe("State persistence", () => {
     expect(reconstructPlanState(badCtx).lastSubmitReviewDocsFingerprint).toBeUndefined();
   });
 
-  it("reviewStateSource persists and reconstructs (§3.4 降级两源)；旧 entry 无字段 / 非法值按无值处理（D4 兼容读）", () => {
+  it("reviewStateSource persists and reconstructs；旧 entry 无字段 / 非法值 / 旧 'explain' 存量值按无值处理（D4 兼容读）", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
@@ -260,17 +264,17 @@ describe("State persistence", () => {
       skills: [],
       docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
       reviewState: "awaiting",
-      reviewStateSource: "explain",
+      reviewStateSource: "resubmit",
     };
 
     persistPlanState(mockPi, state);
 
-    // 持久化 entry 走冷启动重建：explain 等待态跨重开可恢复（E3 重挂同款受益）
+    // 持久化 entry 走冷启动重建：resubmit 等待态跨重开可恢复（E3 重挂同款受益）
     const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1];
     const reopenCtx = {
       sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
     } as unknown as ExtensionContext;
-    expect(reconstructPlanState(reopenCtx).reviewStateSource).toBe("explain");
+    expect(reconstructPlanState(reopenCtx).reviewStateSource).toBe("resubmit");
 
     // 旧 entry（升级前落盘）无该字段：reviewState 有值但无来源 → 无值（renderer 渲染通用降级文案）
     const legacyCtx = {
@@ -286,7 +290,17 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(legacyCtx).reviewStateSource).toBeUndefined();
 
-    // 值域守卫：非 'explain' | 'resubmit' 的垃圾值按无值处理（与 readReviewState 同风格）
+    // 旧版 'explain' 存量值（explain 交互已删）与垃圾值一并按无值处理（值域守卫白名单只认 'resubmit'）
+    const explainCtx = {
+      sessionManager: {
+        getEntries: () => [
+          { type: "custom", customType: "plan-state", data: { ...persisted, reviewStateSource: "explain" } },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(reconstructPlanState(explainCtx).reviewStateSource).toBeUndefined();
+
+    // 值域守卫：'resubmit' 之外的垃圾值按无值处理（与 readReviewState 同风格）
     const badCtx = {
       sessionManager: {
         getEntries: () => [
@@ -383,7 +397,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     const { sessions, mockCtx, mockPi } = setupActiveSession();
     const active = sessions.get("session-1");
     if (!active) throw new Error("setupActiveSession must seed session-1");
-    active.reviewStateSource = "explain";
+    active.reviewStateSource = "resubmit";
 
     const state = resetPlanState(mockPi, sessions, "session-1", mockCtx);
 
@@ -392,6 +406,52 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     expect(state.reviewStateSource).toBeUndefined();
     const lastEntry = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
     expect(lastEntry.reviewStateSource).toBeUndefined();
+  });
+
+  describe("空 slug 目录清理（P3-10）", () => {
+    const tmpRoots: string[] = [];
+
+    function makePlanRoot(withFile: boolean): string {
+      const root = mkdtempSync(join(tmpdir(), "plan-state-test-"));
+      tmpRoots.push(root);
+      const slugDir = join(root, "my-slug");
+      mkdirSync(slugDir);
+      if (withFile) writeFileSync(join(slugDir, "notes.txt"), "leftover");
+      return join(slugDir, "plan.md");
+    }
+
+    afterEach(() => {
+      while (tmpRoots.length > 0) {
+        const root = tmpRoots.pop();
+        if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    });
+
+    it("未产文档即退出：空 slug 目录随 reset 删除", () => {
+      const planFilePath = makePlanRoot(false);
+      const slugDir = join(planFilePath, "..");
+      const sessions: PlanSessionMap = new Map();
+      const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
+      sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
+      const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
+
+      resetPlanState(mockPi, sessions, "s1", mockCtx);
+
+      expect(existsSync(slugDir)).toBe(false);
+    });
+
+    it("目录有残留文件：保留不删（保守，不做递归删除）", () => {
+      const planFilePath = makePlanRoot(true);
+      const slugDir = join(planFilePath, "..");
+      const sessions: PlanSessionMap = new Map();
+      const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
+      sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
+      const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
+
+      resetPlanState(mockPi, sessions, "s1", mockCtx);
+
+      expect(existsSync(slugDir)).toBe(true);
+    });
   });
 });
 

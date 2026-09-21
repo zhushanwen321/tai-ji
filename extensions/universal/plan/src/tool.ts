@@ -17,11 +17,12 @@ import type {
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
-import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
+import { GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
 import type { GoalBridgeOutcome } from "./compact.js";
 import { activatePlanMode, resolveSkills } from "./enter.js";
 import { detectExecSkills } from "./exec-skills.js";
 import type { ExecSkill } from "./exec-skills.js";
+import { t } from "./i18n.js";
 import { formatReviewComments } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
@@ -458,7 +459,7 @@ export function isPlanReviewResponse(value: unknown): value is PlanReviewRespons
   if (typeof value !== "object" || value === null || !("decision" in value)) return false;
   const decision = value.decision;
   if (decision === "approve") return true;
-  if (decision === "revise" || decision === "explain") {
+  if (decision === "revise") {
     if (!("comments" in value) || !Array.isArray(value.comments)) return false;
     return value.comments.every((c) => {
       if (typeof c !== "object" || c === null) return false;
@@ -493,7 +494,7 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
  *   （重提交无变化检测基线，text/gui 两分支共用；快照缺失 = 无既往提交不警告）。
  * - 宿主分流：taiji（TAIJI_AGENT_EXT_LOG=1）发 PLAN_REVIEW_MARKER select；
  *   独立 pi 返回 E8 文本软门。
- * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按三 decision 消费。
+ * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按 decision 消费。
  */
 async function executeSubmitReview(
   pi: ExtensionAPI,
@@ -528,12 +529,11 @@ async function executeSubmitReview(
     state.lastSubmitReviewDocsFingerprint !== undefined &&
     state.lastSubmitReviewDocsFingerprint === fingerprint;
 
-  // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复后冷启动扫描
-  // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）。指纹快照同点更新：
-  // 单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review 时的 docs」）
-  // §3.4 第 3 轮裁决：重挂起新 pending 前清上一轮 source——不变量 = source 只描述
-  // 当前降级等待的原因，此处即将挂起真审批，降级等待尚未发生（残留 'explain' 会让
-  // 崩溃恢复后的降级态渲染上一轮「已收到你的问题」文案，与 C-U2 同型残留）
+  // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复 E3 依赖此持久态）。
+  // 指纹快照同点更新：单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review
+  // 时的 docs」）。重挂起新 pending 前清上一轮 source——不变量 = source 只描述当前降级
+  // 等待的原因，此处即将挂起真审批，降级等待尚未发生（残留 'resubmit' 会在降级态渲染
+  // 上一轮「会话已重启」文案，与 C-U2 同型残留）
   delete state.reviewStateSource;
   state.reviewState = "awaiting";
   state.lastSubmitReviewDocsFingerprint = fingerprint;
@@ -640,41 +640,22 @@ async function executeSubmitReview(
       };
     }
 
-    case "explain": {
-      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态。来源标记
-      // 'explain' 随后落盘（§3.4 降级两源）：renderer 渲染「已收到你的问题，agent
-      // 解答后会重新提交审批」分支，与崩溃恢复（'resubmit'）分支文案分开。
-      // 注入通道 = custom message（custom-message swap 后的隐形注入形态）。
-      pi.sendMessage(
-        {
-          customType: PLAN_CONTEXT_CUSTOM_TYPE,
-          content: formatReviewComments("explain", response.comments),
-          display: false,
-        },
-        { deliverAs: "steer", triggerTurn: true },
-      );
-      state.reviewStateSource = "explain";
-      persistPlanState(pi, state);
-      return {
-        content: [{
-          type: "text" as const,
-          text: withUnchangedWarning(
-            `User requested further explanation with ${response.comments.length} comment(s) — injected into the conversation. Answer them, then call plan(action='submit-review') again to re-hang the review.`,
-            unchangedResubmit,
-          ),
-        }],
-        details: submitReviewDetails("gui", state.docs.length, unchangedResubmit),
-      };
+    default: {
+      // 判别联合穷尽性守卫：isPlanReviewResponse 已收窄 decision 值域，此处不可达；
+      // 编码期新增 decision 漏改 switch 会被 never 断言在编译期拦截
+      const unreachable: never = response;
+      throw new Error(`plan: unhandled review decision: ${JSON.stringify(unreachable)}`);
     }
   }
 }
 
 /**
- * 执行方式选项（D10 v2）：内置 Develop（subagent / single-agent 收口——按任务复杂度
- * 内部切换，不暴露给开发者）+ 检测到的 plan-exec skill 项（label `Execute via skill:
- * <name>`，mode `skill:<name>`，skillDir 随选项携带）+ goal 档（tryGoalInit 真实
- * 副作用，保留独立选项）。动态构造：skill 项随 complete 时检测产出，label→mode
- * 映射随选项集携带（`skill:<name>` 动态项不进静态表）。
+ * 执行方式选项（2026-09-21 用户裁决重排）：选项集 = 检测到的 plan-exec skills
+ * （root 序前 2 个，label `用技能「name」执行`）+ 普通执行（execute 档——compact 侧
+ * 整合 goal 桥与 auto-parallel subagent，见 deliverExecutionNotice）+ 暂不执行
+ * （留在 plan mode）。四段固定结构，UI 文案经 i18n（ui-preferences locale 通道）。
+ * 动态构造：skill 项随 complete 时检测产出，label→mode 映射随选项集携带
+ * （`skill:<name>` 动态项不进静态表）。
  */
 interface ExecOption {
   label: string;
@@ -684,47 +665,53 @@ interface ExecOption {
   skillDir?: string;
 }
 
-const DEVELOP_OPTION: ExecOption = {
-  label: "Develop (auto-parallel)",
-  mode: "develop",
-  description:
-    "Auto-parallel by complexity: delegate independent tasks to subagents, execute small or tightly-coupled steps in this session.",
-};
+/** skill 选项上限（用户裁决：第一/第二两个 skill 排位；检测再多不进选项） */
+const MAX_SKILL_OPTIONS = 2;
 
-/** Build execution options: Develop + detected plan-exec skills + goal tier (capability-filtered). */
-function buildExecOptions(execSkills: ExecSkill[], goalAvailable: boolean): ExecOption[] {
-  const options: ExecOption[] = [DEVELOP_OPTION];
-  for (const skill of execSkills) {
-    options.push({
-      label: `Execute via skill: ${skill.name}`,
-      mode: `skill:${skill.name}`,
-      description: skill.description,
-      skillDir: skill.skillDir,
-    });
-  }
-  if (goalAvailable) {
-    options.push({ label: "Goal-driven execution (/goal)", mode: "goal" });
-  }
+/** Build execution options: up to 2 detected plan-exec skills + execute + not-now. */
+function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
+  const options: ExecOption[] = execSkills.slice(0, MAX_SKILL_OPTIONS).map((skill) => ({
+    label: t("exec.viaSkill", { name: skill.name }),
+    mode: `skill:${skill.name}`,
+    description: skill.description ?? t("exec.viaSkillDesc", { name: skill.name }),
+    skillDir: skill.skillDir,
+  }));
+  options.push({
+    label: t("exec.execute"),
+    mode: "execute",
+    description: t("exec.executeDesc"),
+  });
+  options.push({
+    label: t("exec.later"),
+    mode: "later",
+    description: t("exec.laterDesc"),
+  });
   return options;
 }
 
-/** 对话框尾部的两个"留在 plan mode"选项（complete-cancelled 路径） */
-const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
-
-/** GUI form 单 choice 问题的 answers key（协议 fallback 规则 key = header ?? question） */
-const EXEC_QUESTION_KEY = "Execution method";
+/**
+ * 「暂不执行」档的 mode 值（选项集内的固定成员，label 经 i18n；选中即 complete-cancelled，
+ * 留在 plan mode——原 CANCEL_OPTIONS 英文双选项的收敛形态）。
+ */
+const LATER_MODE = "later";
 
 /** Outcome of the complete-action execution-method prompt. */
 type CompleteChoiceOutcome =
   | { kind: "cancelled"; result: ActionResult }
   | { kind: "mode"; chosenMode: string; skillDir?: string };
 
-/** complete-cancelled result（用户取消 / 留在 plan mode 两选项，reason = 点选 label 或 cancelled） */
+/** complete-cancelled result（用户选暂不执行 / 通道取消，reason = 点选 label 或 cancelled） */
 function cancelledByUserResult(choice: string | undefined): ActionResult {
+  // 文案按取消来源分情境（状态审查 P2-3）：choice 非空 = 用户在选项里主动点「暂不执行」，
+  // 留在 plan mode 是用户意图；choice 空 = select 被 abort 联动解散（用户点了 PlanModeBar
+  // 退出 / turn 中止）——此时 plan mode 已退出，旧文「Staying in plan mode」与已 reset 的
+  // 状态双向矛盾（LLM 按 plan mode 行事，后续每个 plan 调用吃 inactive 错误才自纠）
+  const text =
+    choice === undefined
+      ? "Plan mode was exited while the execution-method prompt was pending. The plan has NOT been dispatched for execution — do not implement any changes. Briefly tell the user you have stopped, then wait for further user instructions."
+      : `User chose: ${choice}. Staying in plan mode. The plan has NOT been dispatched for execution.`;
   return {
-    content: [
-      { type: "text" as const, text: `User chose: ${choice ?? "cancelled"}. Staying in plan mode.` },
-    ],
+    content: [{ type: "text" as const, text }],
     details: { action: "complete-cancelled", reason: choice ?? "cancelled" },
   };
 }
@@ -744,16 +731,18 @@ function cancelledByChannelResult(reason: string, message?: string): ActionResul
 }
 
 /**
- * Prompt the user for an execution method（D4 三路分流 + D10 v2 选项集）：
- * 1. `!ctx.hasUI`（print/json headless，noOp UI）→ 默认 develop，不进任何 select——
+ * Prompt the user for an execution method（D4 三路分流 + 2026-09-21 选项集重排）：
+ * 1. `!ctx.hasUI`（print/json headless，noOp UI）→ 默认 execute，不进任何 select——
  *    替换失效的 `typeof ctx.ui.select` 软门（noOp 的 select 是返回 undefined 的函数，
  *    函数存在性不可判形态，pi runner.js 实码）；
  * 2. taiji rpc 宿主（TAIJI_AGENT_EXT_LOG=1 且 mode==='rpc'）→ uiFormInteract 单
  *    choice 问题（FormOverlay 单视图）；mode 收紧 rpc = helper 的 RPC-only 契约 +
  *    TUI 保留原生 select（D8）——env 异常置位的 TUI 落回第 3 路而非 throw；
- * 3. else（TUI / 独立 pi）→ pi 原生 plain select（现状行为逐字保留）。
+ * 3. else（TUI / 独立 pi）→ pi 原生 plain select。
  * 四态折叠：cancelled/timeout → cancelled result；channel-error/non-json → 同折
  * cancelled result + 通道失败说明（plan 是流程对话，通道故障不炸 turn 也不默认执行）。
+ * UI 文案（question/header/选项 label）经 i18n；answers key = header（协议 fallback
+ * 规则 key = header ?? question），header 与读取同源 t() 生成，本地化不破坏取值。
  */
 async function resolveCompleteChoice(
   ctx: ExtensionContext,
@@ -762,13 +751,13 @@ async function resolveCompleteChoice(
   signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
   if (!ctx.hasUI) {
-    return { kind: "mode", chosenMode: "develop" };
+    return { kind: "mode", chosenMode: "execute" };
   }
 
-  // D10：complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
+  // complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
   // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillDir 随 outcome 流转
   const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
-  const execOptions = buildExecOptions(execSkills, detectGoalCapability());
+  const execOptions = buildExecOptions(execSkills);
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
   // approve 后的挂起窗口内用户点 PlanModeBar 退出（确认 Popover 后）必须可达（abort → resolve undefined → cancelled）
@@ -777,14 +766,12 @@ async function resolveCompleteChoice(
 
   let chosenLabel: string | undefined;
   if (isTaijiHost() && ctx.mode === "rpc") {
+    const questionHeader = t("exec.header");
     const question: ChoiceQuestion = {
       type: "choice",
-      header: EXEC_QUESTION_KEY,
-      question: "Plan is ready. Choose the execution method:",
-      options: [
-        ...execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
-        ...CANCEL_OPTIONS.map((label) => ({ label })),
-      ],
+      header: questionHeader,
+      question: t("exec.question"),
+      options: execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
       allowOther: false,
     };
     // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
@@ -804,20 +791,23 @@ async function resolveCompleteChoice(
       }
       return { kind: "cancelled", result: cancelledByChannelResult(form.reason, form.message) };
     }
-    chosenLabel = form.answers[EXEC_QUESTION_KEY];
+    chosenLabel = form.answers[questionHeader];
   } else {
-    const labels = [...execOptions.map((opt) => opt.label), ...CANCEL_OPTIONS];
-    chosenLabel = await ctx.ui.select("Plan is ready. Choose execution method:", labels, { signal: controller.signal });
+    const labels = execOptions.map((opt) => opt.label);
+    chosenLabel = await ctx.ui.select(t("exec.question"), labels, { signal: controller.signal });
     controllers.delete(sessionId);
   }
 
-  if (!chosenLabel || CANCEL_OPTIONS.includes(chosenLabel)) {
-    return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
+  if (!chosenLabel) {
+    return { kind: "cancelled", result: cancelledByUserResult(undefined) };
   }
   const option = execOptions.find((opt) => opt.label === chosenLabel);
   if (!option) {
     // 选项集与 labels 同源构造，选中的 label 必在集内——找不到即编码 bug，fail-fast
     throw new Error(`plan: unknown execution choice label: ${chosenLabel}`);
+  }
+  if (option.mode === LATER_MODE) {
+    return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
   }
   return { kind: "mode", chosenMode: option.mode, skillDir: option.skillDir };
 }
@@ -831,8 +821,8 @@ function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome 
   const base = `Plan approved. File: ${displayPath}`;
   if (goalOutcome === undefined) return base;
   return goalOutcome.started
-    ? `${base}\nGoal execution started via /goal.`
-    : `${base}\nGoal execution was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
+    ? `${base}\nGoal tracking started via /goal.`
+    : `${base}\nGoal tracking was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
 }
 
 /** complete action: prompt for execution mode, restore tools, reset state. */
@@ -847,6 +837,13 @@ async function executeComplete(
   controllers: PlanAbortControllers,
   signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
+  // approve 已消费挂起审批，执行方式选择挂起前清 reviewState 并落盘（状态审查 P2-3）：
+  // 否则「awaiting 无挂起」窗口会让右区误导渲染降级态「等待 agent 重新提交审批」
+  // （实际在等执行方式选择）。清后审批条 shouldRender=false 即消失，右区只剩 form。
+  delete state.reviewState;
+  delete state.reviewStateSource;
+  persistPlanState(pi, state);
+
   const choice = await resolveCompleteChoice(ctx, controllers, sessionId, signal);
   if (choice.kind === "cancelled") {
     return choice.result;

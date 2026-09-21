@@ -279,11 +279,14 @@ describe("registerPlanTool", () => {
       expect(parameters.properties.isolation.enum).not.toContain("tree");
     });
 
-    it("does not advance when user cancels", async () => {
+    it("does not advance when user picks Not now", async () => {
       const { exec, ctx, pi } = setup();
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Modify the plan first");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Not now");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
+      expect(res.details.reason).toBe("Not now");
+      // 用户主动暂不执行：留在 plan mode 是用户意图（区别于 abort 联动取消的文案）
+      expect(res.content[0].text).toContain("Staying in plan mode");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
@@ -312,78 +315,65 @@ describe("registerPlanTool", () => {
 
     it("resets state and restores tools on execute", async () => {
       const { exec, ctx, pi } = setup();
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Develop (auto-parallel)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete");
-      expect(res.details.execMode).toBe("develop");
+      expect(res.details.execMode).toBe("execute");
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
       expect(handlePlanComplete).toHaveBeenCalled();
       expect(res.details.planFilePath).toBeDefined();
     });
 
-    it("dialog options exclude the goal tier when the bridge is unavailable", async () => {
+    it("dialog options = skills (max 2) + Execute + Not now, goal bridge availability irrelevant (选项集重排)", async () => {
       const { exec, ctx } = setup();
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Develop (auto-parallel)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       await exec({ action: "complete" });
       const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-      expect(options).not.toContain("Goal-driven execution (/goal)");
       expect(options).toEqual([
-        "Develop (auto-parallel)",
-        "Modify the plan first",
-        "Save for later",
+        "Execute",
+        "Not now",
       ]);
     });
 
-    it("dialog options include the goal tier when the bridge is reachable (mocked goalInit slot world)", async () => {
+    it("execute choice maps to execMode execute (goal + auto-parallel 整合档)", async () => {
       const { exec, ctx } = setup();
-      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       const res = await exec({ action: "complete" });
-      const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-      expect(options).toEqual([
-        "Develop (auto-parallel)",
-        "Goal-driven execution (/goal)",
-        "Modify the plan first",
-        "Save for later",
-      ]);
-      expect(res.details.execMode).toBe("goal"); // 选项集构造携带的 label→mode 映射（D10）
+      expect(res.details.execMode).toBe("execute");
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
     });
 
-    it("maps the Develop choice to execMode develop (subagent/single-agent 收口，D10)", async () => {
-      const { exec, ctx } = setup();
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Develop (auto-parallel)");
-      const res = await exec({ action: "complete" });
-      expect(res.details.execMode).toBe("develop");
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "develop", undefined);
-    });
-
-    it("headless (!hasUI) defaults to develop without any select (D4 三路分流第 1 路)", async () => {
+    it("headless (!hasUI) defaults to execute without any select (D4 三路分流第 1 路)", async () => {
       const { exec, ctx, pi } = setup();
       ctx.hasUI = false;
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete");
-      expect(res.details.execMode).toBe("develop");
+      expect(res.details.execMode).toBe("execute");
       expect(ctx.ui.select).not.toHaveBeenCalled(); // 不进任何 select（noOp 软门修复）
       expect(detectExecSkills).not.toHaveBeenCalled(); // 选择已预定，跳过 skill 扫描
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "develop", undefined);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
     });
 
-    it("detected plan-exec skill appears as an option and its choice maps to skill:<name> with skillDir (D10)", async () => {
+    it("detected plan-exec skills lead the option set (first + second) and map to skill:<name> with skillDir (D10 重排)", async () => {
       const { exec, ctx } = setup();
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
+      const secondPath = "/tmp/fixtures/skills/pr-cr-fix/SKILL.md";
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir: skillEntryPath, skillPath: skillEntryPath },
+        { name: "pr-cr-fix", description: "PR lifecycle.", skillDir: secondPath, skillPath: secondPath },
+        { name: "third", description: "Beyond the cap.", skillDir: "/tmp/x", skillPath: "/tmp/x" },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute via skill: dev-flow");
       const res = await exec({ action: "complete" });
 
       const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
+      // skill 前置（用户裁决：第一/第二排位），第 3 个起截断；Execute/Not now 固定收尾
       expect(options).toEqual([
-        "Develop (auto-parallel)",
         "Execute via skill: dev-flow",
-        "Modify the plan first",
-        "Save for later",
+        "Execute via skill: pr-cr-fix",
+        "Execute",
+        "Not now",
       ]);
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("skill:dev-flow");
@@ -394,41 +384,39 @@ describe("registerPlanTool", () => {
     it("empty detection set leaves no skill options (空集不误伤选项集)", async () => {
       const { exec, ctx } = setup();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Develop (auto-parallel)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       await exec({ action: "complete" });
       const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
       expect(options.some((label) => label.startsWith("Execute via skill:"))).toBe(false);
     });
 
-    it("direct tier carries the goal outcome into result content and details (D2)", async () => {
+    it("execute tier carries the goal outcome into result content and details (整合档 D2)", async () => {
       const { exec, ctx } = setup();
-      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: false, reason: "no-steps" });
       const res = await exec({ action: "complete", isolation: "direct" });
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "goal", undefined);
-      expect(res.content[0].text).toContain("Goal execution was not started (no-steps)");
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      expect(res.content[0].text).toContain("Goal tracking was not started (no-steps)");
       expect(res.content[0].text).toContain("Implementation Steps"); // 恢复动作
       expect(res.details.goalOutcome).toEqual({ started: false, reason: "no-steps" });
     });
 
     it("successful goal outcome appends the started line", async () => {
       const { exec, ctx } = setup();
-      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: true });
       const res = await exec({ action: "complete", isolation: "direct" });
-      expect(res.content[0].text).toContain("Goal execution started via /goal");
+      expect(res.content[0].text).toContain("Goal tracking started via /goal");
       expect(res.details.goalOutcome).toEqual({ started: true });
     });
 
     it("compact tier outcome is deferred (undefined): result keeps the plain approved line", async () => {
       const { exec, ctx } = setup();
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Develop (auto-parallel)");
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
       const res = await exec({ action: "complete", isolation: "compact" });
       expect(res.content[0].text).toMatch(/^Plan approved\. File: /);
-      expect(res.content[0].text).not.toContain("Goal execution");
+      expect(res.content[0].text).not.toContain("Goal tracking");
       expect(res.details.goalOutcome).toBeUndefined();
       expect(res.details.isolation).toBe("compact");
     });
@@ -462,22 +450,21 @@ describe("registerPlanTool", () => {
       return payload.formQuestions[0].options;
     }
 
-    it("sends a single choice question via UI_FORM_MARKER and maps the develop answer (无 tab 条单视图)", async () => {
+    it("sends a single choice question via UI_FORM_MARKER and maps the execute answer (无 tab 条单视图)", async () => {
       const { exec, ctx } = setupGui();
       (ctx.ui.select as ReturnType<typeof vi.fn>)
-        .mockResolvedValue(JSON.stringify({ "Execution method": "Develop (auto-parallel)" }));
+        .mockResolvedValue(JSON.stringify({ "Execution method": "Execute" }));
       const res = await exec({ action: "complete" });
 
       const title = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(title).toBe(UI_FORM_MARKER);
       const labels = formOptionLabels(ctx.ui.select as ReturnType<typeof vi.fn>).map((o) => o.label);
       expect(labels).toEqual([
-        "Develop (auto-parallel)",
-        "Modify the plan first",
-        "Save for later",
+        "Execute",
+        "Not now",
       ]);
       expect(res.details.action).toBe("complete");
-      expect(res.details.execMode).toBe("develop");
+      expect(res.details.execMode).toBe("execute");
     });
 
     it("skill option carries its description into the form and maps to skill:<name>", async () => {
@@ -497,19 +484,21 @@ describe("registerPlanTool", () => {
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
-    it("timeout via undefined resolve (signal not aborted) folds to complete-cancelled staying in plan mode (D4 四态折叠)", async () => {
+    it("timeout via undefined resolve (signal not aborted) folds to complete-cancelled with exit wording (D4 四态折叠)", async () => {
       // rpc 模式 GUI 用户取消 resolve undefined，与超时不可区分（signal 未 abort 折叠
-      // timeout，库层 callMarkerRpc 判别），消费层 cancelled‖timeout 同折后 reason='cancelled'
+      // timeout，库层 callMarkerRpc 判别），消费层 cancelled‖timeout 同折后 reason='cancelled'。
+      // choice 空 = abort 联动取消语义（P2-3）：文案不得声称「Staying in plan mode」
       const { exec, ctx, pi } = setupGui();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
       expect(res.details.reason).toBe("cancelled");
-      expect(res.content[0].text).toContain("Staying in plan mode");
+      expect(res.content[0].text).toContain("Plan mode was exited");
+      expect(res.content[0].text).not.toContain("Staying in plan mode");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("cancelled (abort via controllers registry during pending select) folds to complete-cancelled (D4 四态折叠)", async () => {
+    it("cancelled (abort via controllers registry during pending select) folds to complete-cancelled with exit wording (D4 四态折叠)", async () => {
       // 真实通道注入（command.ts handleAbort 同款 `controllers.get(sessionId)?.abort()`）：
       // 挂起窗口内 session abort → pi 实装 resolve undefined → 库层以 signal.aborted 判
       // reason='cancelled'（区别于上一例的 timeout 折叠源）
@@ -521,7 +510,7 @@ describe("registerPlanTool", () => {
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
       expect(res.details.reason).toBe("cancelled");
-      expect(res.content[0].text).toContain("Staying in plan mode");
+      expect(res.content[0].text).toContain("Plan mode was exited");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 

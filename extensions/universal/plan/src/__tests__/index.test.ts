@@ -103,6 +103,36 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     );
   });
 
+  it("revising + no live select → steers the agent to continue the revision (P1-1：revising 崩溃恢复缺口)", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: ["tech-design"],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
+        reviewState: "revising",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("revision"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    // revising 恢复不落 source 标记（'resubmit' 只描述 awaiting 降级等待；revising 由
+    // steer triggerTurn 立即开轮接续，恢复期间显示的 revising 是真实进行中）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
     const { handlers } = setup();
     const ctx = makeCtx([]);

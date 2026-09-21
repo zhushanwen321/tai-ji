@@ -198,8 +198,8 @@ export interface PlanReviewRequest {
   docs: PlanDocMeta[]
 }
 
-/** 审批三键裁决。revise/explain 携带评论、approve 不携带（结构上不可混带）。 */
-export type PlanReviewDecision = 'approve' | 'revise' | 'explain'
+/** 审批两键裁决。revise 携带评论、approve 不携带（结构上不可混带）。 */
+export type PlanReviewDecision = 'approve' | 'revise'
 
 /** 用户对某文档划选段落的一条评论：quote 是划选引文（agent 定位段落用），comment 是评语。 */
 export interface PlanReviewComment {
@@ -208,12 +208,10 @@ export interface PlanReviewComment {
 }
 
 /**
- * 审批条 respond 回传（判别联合：approve 无评论字段，revise/explain 必带评论数组）。
+ * 审批条 respond 回传（判别联合：approve 无评论字段，revise 必带评论数组）。
  * extension 消费：approve → 走现状 complete 执行方式 select；revise → 评论清单以
- * 显式 deliverAs:'steer' 注入 + reviewState=revising；explain → 同款注入但不改 reviewState，
- * 重挂审批靠提示词纪律驱动 agent 重调 submit-review。
+ * 显式 deliverAs:'steer' 注入 + reviewState=revising。
  */
 export type PlanReviewResponse =
   | { decision: 'approve' }
   | { decision: 'revise'; comments: PlanReviewComment[] }
-  | { decision: 'explain'; comments: PlanReviewComment[] }
