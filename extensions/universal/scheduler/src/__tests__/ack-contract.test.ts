@@ -235,11 +235,9 @@ describe('ack 契约常量与类型', () => {
     expect(notifyReasons).toHaveLength(2)
 
     const state: AckState = {
-      pending: true,
       window: { providerId: 'anthropic' },
       ackTurnStarted: false,
       ackStreamCalled: false,
-      writeCheckTimer: null,
       taskId: 't1',
       taskName: 'backup',
       ackText: 'saved',
@@ -247,7 +245,9 @@ describe('ack 契约常量与类型', () => {
       sessionFile: '/s.json',
       availability: { providerId: 'anthropic', isToggleDisabled: false, value: { available: true } },
     }
-    expect(state.pending).toBe(true)
     expect(state.window).toEqual({ providerId: 'anthropic' })
+    // 反向锚定：已删除的字段不得复活（定时器与 pending 均在 v6.3 移除）。
+    expect(Object.keys(state)).not.toContain('pending')
+    expect(Object.keys(state)).not.toContain('writeCheckTimer')
   })
 })
