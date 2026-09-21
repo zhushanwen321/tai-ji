@@ -12,6 +12,8 @@
 //    完成回调时)——taskIndex = callId 单源、attempt = call.attempts。
 // 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删，测试红线：
 //    不触真实数据目录）。
+// 5. [Q2] run-created 正点接线（P1b-1 引导补投已删除）：正点发射无双帧 + 无首帧时
+//    事件触发表外转移 fail-fast（不静默补齐）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -20,6 +22,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  dispatchRunCreated,
+  dispatchRunTrigger,
   finalizeRun,
   handleWorkerMessage,
   setRunEventJournalDirForTest,
@@ -103,21 +107,23 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
 // ── 1. finalizeRun = run-settled 终态单写点 ──────────────────
 
 describe("finalizeRun 落 run-settled（终态单写点）", () => {
-  it("completed → journal 终帧 run-settled(completed)（含 created 引导首帧）", async () => {
+  it("completed → journal 终帧 run-settled(completed)（正点 run-created 首帧）", async () => {
     const run = makeRealRun("wf-ev-1");
     const deps = makeDeps();
+    await dispatchRunCreated(run); // [Q2] 正点发射（P1b-1 created 引导已删除）
 
     const ok = await finalizeRun(run, deps, "completed", { context: "test" });
 
     expect(ok).toBe(true);
     const events = await scanRunEvents("wf-ev-1");
-    // 零 ask run：created 引导补投 run-created + run-settled
+    // 零 ask run：正点 run-created + run-settled
     expect(events.map((e) => e.type)).toEqual(["run-created", "run-settled"]);
     expect(events[1]).toMatchObject({ type: "run-settled", outcome: "completed" });
   });
 
   it("failed → run-settled(failed)，reason 承载诊断文本", async () => {
     const run = makeRealRun("wf-ev-2");
+    await dispatchRunCreated(run);
     run.state.error = "Workflow failed after 3 retries: boom";
     const deps = makeDeps();
 
@@ -133,6 +139,7 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
 
   it("aborted → cancel-requested 控制事件 → 合成 run-settled(cancelled)（控制事件本身不落 journal）", async () => {
     const run = makeRealRun("wf-ev-3");
+    await dispatchRunCreated(run);
     const deps = makeDeps();
 
     await finalizeRun(run, deps, "aborted", { context: "abortRun" });
@@ -144,6 +151,7 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
 
   it("budget_limited（六因）→ outcome 映射 failed", async () => {
     const run = makeRealRun("wf-ev-4");
+    await dispatchRunCreated(run);
     const deps = makeDeps();
 
     await finalizeRun(run, deps, "budget_limited", { context: "test" });
@@ -170,6 +178,7 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
 describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
   it("agent-call 派发 → ask-dispatched；完成 → ask-settled(completed, attempt=1)", async () => {
     const run = makeRealRun("wf-ev-6");
+    await dispatchRunCreated(run);
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () =>
       ({ content: "ok", durationMs: 7, toolCalls: [] }) as AgentResult,
@@ -201,6 +210,7 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
   });
   it("终局后再到达的 call 完成 → stale 守卫拦截，journal 零追加（terminal 后停止 append）", async () => {
     const run = makeRealRun("wf-ev-7");
+    await dispatchRunCreated(run);
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () => {
       // runner 执行窗内 run 被终态化（模拟 abort 竞态）
@@ -225,5 +235,58 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
     // 终局帧存在（runner 内抢先 finalizeRun 不发生——本用例只 transition 不 finalize，
     // journal 无 run-settled；核心断言 = 无 ask-settled 迟到帧）
     expect(events.some((e) => e.type === "ask-settled")).toBe(false);
+  });
+});
+
+// ── 3. run-created 正点接线（[Q2] P1b-1 引导补投已删除） ─────
+
+describe("run-created 正点接线（无双帧 + 引导退役）", () => {
+  it("正点发射后后续触发不补投：journal 恰好一帧 run-created；重复发射 = 表外转移 fail-fast", async () => {
+    const run = makeRealRun("wf-ev-dual");
+    await dispatchRunCreated(run);
+
+    // 正点后的 ask 事件照常落账（fold 出 dispatched，ask-dispatched 合法转移）
+    const deps = makeDeps();
+    deps.runner.run = vi.fn(async () =>
+      ({ content: "ok", durationMs: 1, toolCalls: [] }) as AgentResult,
+    );
+    const handlers: WorkerHandlers = {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    };
+    await handleWorkerMessage(
+      run,
+      { type: "agent-call", callId: 1, opts: { prompt: "p" } },
+      deps,
+      handlers,
+    );
+    await flushMicrotasks();
+
+    const events = await scanRunEvents("wf-ev-dual");
+    // 双帧不存在：run-created 恰好一帧（正点），后续触发零补投
+    expect(events.filter((e) => e.type === "run-created")).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "run-created", workflowName: "test-wf" });
+    expect(events.slice(1).map((e) => e.type)).toEqual(["ask-dispatched", "ask-settled"]);
+
+    // 正点重复发射 = 表外转移 fail-fast（ask 全链后 fold 停在 running——无论哪个
+    // 非 created 态，run-created 均无表行，双帧构造性排除）
+    await expect(dispatchRunCreated(run)).rejects.toThrow(/不接受事件 run-created/);
+  });
+
+  it("引导补投已退役：journal 无 run-created 帧时事件触发表外转移 fail-fast（不静默补齐）", async () => {
+    const run = makeRealRun("wf-ev-noseed");
+
+    await expect(
+      dispatchRunTrigger(run, {
+        type: "ask-dispatched",
+        taskIndex: 1,
+        agentName: "a",
+        attempt: 1,
+        ts: Date.now(),
+      }),
+    ).rejects.toThrow(/非法 run 状态转移/);
+    // fail-fast 不落任何帧（事件在 run-created 落账前到达 = 接线错误，可归因）
+    expect(await scanRunEvents("wf-ev-noseed")).toHaveLength(0);
   });
 });

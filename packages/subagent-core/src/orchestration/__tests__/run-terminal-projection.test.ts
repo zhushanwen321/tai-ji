@@ -18,7 +18,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  dispatchRunTrigger,
+  setRunEventJournalDirForTest,
+} from "../worker-message-pump.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
 import { readStateMarker } from "../../execution/persistence/state-marker.ts";
@@ -75,6 +79,7 @@ function makeRun(runId: string): WorkflowRun {
 describe("终态写读三形态（验收 a：manifest/.state 经真实转移链）", () => {
   it("成功 = completed：run-settled(completed) → manifest + .state 双面落 outcome", async () => {
     const run = makeRun("wf-proj-ok");
+    await dispatchRunCreated(run); // [Q2] 正点发射（P1b-1 created 引导已删除）
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "completed",
@@ -97,6 +102,7 @@ describe("终态写读三形态（验收 a：manifest/.state 经真实转移链�
 
   it("失败 = failed + errorCode：run-settled(failed, engine_crashed) → 双面落 errorCode", async () => {
     const run = makeRun("wf-proj-fail");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "failed",
@@ -115,6 +121,7 @@ describe("终态写读三形态（验收 a：manifest/.state 经真实转移链�
 
   it("取消 = cancelled：cancel-requested 控制事件合成路径（无 errorCode 键）", async () => {
     const run = makeRun("wf-proj-cancel");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "ask-dispatched",
       taskIndex: 1,
@@ -139,6 +146,7 @@ describe("终态写读三形态（验收 a：manifest/.state 经真实转移链�
 describe("errorCode 只溯源 run-settled 载荷", () => {
   it("completed 终局带 errorCode 载荷位但无值 → 投影不落 errorCode 键", async () => {
     const run = makeRun("wf-proj-ok-noerr");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "completed",
@@ -155,6 +163,7 @@ describe("errorCode 只溯源 run-settled 载荷", () => {
 describe("投影时机（终局前的中间态零投影）", () => {
   it("run-created / ask 链中间态不写 manifest；终局转移后恰一次", async () => {
     const run = makeRun("wf-proj-timing");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "ask-dispatched",
       taskIndex: 1,
@@ -194,6 +203,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
 describe("投影与 journal 共存（同目录不同文件）", () => {
   it("终局后 journal 含 run-settled 帧 + manifest/.state 落投影（互不干扰）", async () => {
     const run = makeRun("wf-proj-coexist");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "failed",

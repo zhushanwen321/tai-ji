@@ -24,6 +24,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  dispatchRunCreated,
   dispatchRunTrigger,
   setRunEventJournalDirForTest,
 } from "../worker-message-pump.ts";
@@ -166,25 +167,21 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
     expect(final).toMatchObject({ outcome: "completed", artifactsDir: journalDir });
   });
 
-  it("created 引导：无 run-created 前史时首个编排触发自动补投（载荷同源 run.spec）", async () => {
+  it("[Q2] created 引导已退役：无 run-created 前史时首个编排触发表外转移 fail-fast（不静默补齐）", async () => {
     const run = makeRun("wf-seq-bootstrap");
 
-    await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
-      taskIndex: 7,
-      agentName: "fixer",
-      attempt: 1,
-      ts: Date.now(),
-    });
+    await expect(
+      dispatchRunTrigger(run, {
+        type: "ask-dispatched",
+        taskIndex: 7,
+        agentName: "fixer",
+        attempt: 1,
+        ts: Date.now(),
+      }),
+    ).rejects.toThrow(/非法 run 状态转移/);
 
-    const events = await scanRunEvents(journalDir, run.runId);
-    expect(events[0]?.type).toBe("run-created");
-    expect(events[0]).toMatchObject({
-      runId: "wf-seq-bootstrap",
-      workflowName: "review-fix-loop",
-      model: "test-model",
-    });
-    expect(events[1]?.type).toBe("ask-dispatched");
+    // fail-fast 不落任何帧（run-created 唯一落点 = dispatchRunCreated 正点）
+    expect(await scanRunEvents(journalDir, run.runId)).toHaveLength(0);
   });
 });
 
@@ -193,6 +190,7 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
 describe("终态写读三形态（验收 b：journal 侧）", () => {
   it("成功 = completed", async () => {
     const run = makeRun("wf-term-ok");
+    await dispatchRunCreated(run); // [Q2] 正点发射（引导已删）
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "completed",
@@ -206,6 +204,7 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
 
   it("失败 = failed + errorCode", async () => {
     const run = makeRun("wf-term-fail");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "failed",
@@ -225,6 +224,7 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
 
   it("取消 = cancelled（经 cancel-requested 控制事件合成 run-settled；控制事件本身不落 journal）", async () => {
     const run = makeRun("wf-term-cancel");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "ask-dispatched",
       taskIndex: 1,
@@ -246,6 +246,7 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
 describe("terminal 后追加让位（终局纪律守卫）", () => {
   it("终局后投递任何事件 → IllegalTransitionError，journal 帧数不变", async () => {
     const run = makeRun("wf-term-guard");
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "completed",
@@ -253,7 +254,7 @@ describe("terminal 后追加让位（终局纪律守卫）", () => {
       ts: Date.now(),
     });
     const before = await scanRunEvents(journalDir, run.runId);
-    expect(before).toHaveLength(2); // run-created(引导) + run-settled
+    expect(before).toHaveLength(2); // run-created(正点) + run-settled
 
     await expect(
       dispatchRunTrigger(run, {
@@ -277,6 +278,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
   it("终帧停 running 的 journal：重置活体缓存后投 run-settled 续推至 terminal", async () => {
     const runId = "wf-fold-1";
     const run = makeRun(runId);
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "ask-dispatched",
       taskIndex: 1,
@@ -315,6 +317,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
   it("已 terminal 的 journal：重置后投递 fail-fast（fold 终帧落 terminal 的守卫）", async () => {
     const runId = "wf-fold-2";
     const run = makeRun(runId);
+    await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
       outcome: "completed",

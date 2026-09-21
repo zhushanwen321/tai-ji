@@ -25,6 +25,10 @@ import { join } from "node:path";
 
 import { getHostServices } from "../core/host-services.ts";
 import { getLogger } from "../core/logger.ts";
+// [Q2/D5 清理规则] 已终局资格的单源锚定读面（manifest outcome 非空）。方向
+// orchestration → execution/persistence 为既有先例（worker-message-pump →
+// writeRunTerminalManifest）；manifest-store 不回指 orchestration，无环。
+import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import type { RunStore } from "./models/ports.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
@@ -102,6 +106,12 @@ function isEnoentError(err: unknown): boolean {
 // retention 语义（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛）双份各自演化是
 // 漂移隐患——现在两宿主消费同一实现，日志与错误字符串化经 deps 注入（宿主各自的
 // logger tag / error 工具保持自治，行为差异仅 log tag 文案）。
+//
+// [Q2 收口注记] 生产消费链已切换到下方资格感知单源 pruneTerminalRunFiles（D5 清理
+// 规则①②：manifest 资格 + cap + TTL + journal 同删）；本函数现为 cap-only 通用
+// 原语，生产零调用（唯一历史消费 jsonl-run-store 的本地资格感知实现同批收口），
+// 保留 = FileRunStore.pruneStateFilesBeyondCap 公共方法面与 file-run-store-prune
+// 测试仍消费其语义。后续清理轮若仍无生产消费方，随方法一并退役。
 
 /** pruneStateFilesBeyondCap 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
 export interface PruneStateDeps {
@@ -164,6 +174,150 @@ export async function pruneStateFilesBeyondCap(
       deps.warn(`state retention: failed to delete ${victim.full}: ${deps.toMsg(err)}`);
     }
   }
+}
+
+// ── 已终局 run 的磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]）────────
+//
+// D5 清理规则落地（生产单源，pi 宿主 jsonl-run-store 的 P1b-2 本地实现收口于此）：
+// ① 「已终局」单源锚定 = run 终局投影 manifest（<stateDir>/<runId>.json）的
+//    outcome 非空——manifest 缺失/损坏/无 outcome = 活跃或 interrupted（interrupted
+//    非终局，abandon 终局化写 manifest 后才获资格），一律不裁；
+// ② cap + TTL 双限同限已终局：资格者计入 cap（mtime 升序裁最旧）与 TTL（mtime
+//    超期即裁）；mtime 判定锚 = state 文件（run 磁盘足迹的主投影文件）——journal
+//    作为同 stem 附属随 run 成对裁剪，不单独计时；
+// ③ 裁剪执行按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
+//    删）——已终局 run 过保留期后 journal 降级为可清诊断证据（D5 权威性分层）；
+//    manifest（.json 结尾）结构性不在候选，终局持久权威永不随裁（清理后投影回落
+//    manifest 终局面，drawer 投影不消失）；
+// ④ 任何失败不抛（辅助清理降级不拖垮持久化主链）：readdir 失败静默放弃本轮，
+//    manifest 读取按「无资格」降级，单文件 unlink 失败 warn 留证后继续。
+//
+// TTL 常量与 env 通道自 pi 宿主 jsonl-run-store 迁入（[P1b-2] 引入、[Q2] 单源化）：
+// 两宿主共用同一缺省保留期与测试期调低通道。
+
+/** 已终局 state 文件的 mtime TTL 缺省值（D5 清理规则②：run cap + 30 天 mtime TTL，两者同限已终局）。 */
+export const DEFAULT_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * 已终局 run 的 mtime TTL env 通道（测试期调低用，形态对齐 cap 通道）：
+ * - 未设/空 → 缺省 {@link DEFAULT_STATE_TTL_MS}（默认开）；
+ * - 有限正数 → TTL = env 值（测试期调低通道）；
+ * - 非法值（非有限数/≤0）→ undefined = 不按 TTL 裁（显式 opt-out，对齐 cap
+ *   通道「意图不明不动磁盘」哲学）。
+ */
+export const STATE_TTL_MS_ENV = "TAIJI_SUBAGENT_STATE_TTL_MS";
+
+/** 解析已终局 TTL；env 未设/空 → 缺省，显式非法/≤0 → undefined（不按 TTL 裁）。 */
+export function resolveStateTtlMs(): number | undefined {
+  const raw = process.env[STATE_TTL_MS_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_STATE_TTL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+/** journal 文件后缀（<runId>.events.jsonl）——glob 同族但作为 run 附属成对裁剪，不单独计时。 */
+const JOURNAL_FILE_SUFFIX = ".events.jsonl";
+
+/** pruneTerminalRunFiles 的可调项。 */
+export interface PruneTerminalRunFilesOptions {
+  /** run 上限（已终局计入，mtime 升序裁最旧到 cap）。 */
+  cap: number;
+  /** 已终局 mtime TTL（ms）；undefined = 不按 TTL 裁。缺省经 {@link resolveStateTtlMs}。 */
+  ttlMs?: number;
+}
+
+/** pruneTerminalRunFiles 的执行结果（宿主日志/健康面用）。 */
+export interface PruneTerminalRunFilesResult {
+  /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
+  scanned: number;
+  /** 资格合格（manifest outcome 非空）的 run 数。 */
+  eligible: number;
+  /** 本次裁剪的 run 数（state 文件计数；journal 同删不计入）。 */
+  pruned: number;
+}
+
+/**
+ * 把 state 目录内「已终局且超限」的 run 磁盘足迹（state + journal）裁剪掉
+ * （[Q2 / D5 清理规则①②] 生产单源——资格感知语义见上方段落注释）。
+ *
+ * 与 {@link pruneStateFilesBeyondCap} 的关系：同一 retention 纪律族（glob 命中才删 /
+ * mtime 升序裁最旧 / 任何失败不抛），差异在资格过滤（manifest outcome 单源锚定）
+ * 与清理对象（run 粒度成对删 state + journal）。cap 解析（env 通道）归调用方
+ * （pi 宿主 getEnvStateMaxRuns / FileRunStore 方法各自持有 env 通道）。
+ */
+export async function pruneTerminalRunFiles(
+  stateDir: string,
+  options: PruneTerminalRunFilesOptions,
+  deps: PruneStateDeps,
+): Promise<PruneTerminalRunFilesResult> {
+  const result: PruneTerminalRunFilesResult = { scanned: 0, eligible: 0, pruned: 0 };
+  let names: string[];
+  try {
+    names = await readdir(stateDir);
+  } catch (err) {
+    if (!isEnoentError(err)) {
+      deps.warn(`state retention: readdir ${stateDir} failed: ${deps.toMsg(err)}`);
+    }
+    return result;
+  }
+  // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.events.jsonl——附属，不单独候选）
+  const stateNames = names.filter(
+    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(JOURNAL_FILE_SUFFIX),
+  );
+  result.scanned = stateNames.length;
+  if (stateNames.length === 0) return result;
+
+  const now = Date.now();
+  const ttlMs = options.ttlMs ?? resolveStateTtlMs();
+  const eligible: Array<{ runId: string; stateFull: string; mtimeMs: number }> = [];
+  for (const name of stateNames) {
+    const runId = name.slice(0, -".jsonl".length);
+    // 资格判定（D5 规则①单源锚定）：manifest 读失败/缺失 = 无资格（活跃/interrupted
+    // /未终局保护——宁保留不误裁，误裁活跃 run 是不可恢复事故方向）
+    const manifest = await readRunTerminalManifest(stateDir, runId);
+    if (manifest === null) continue;
+    result.eligible += 1;
+    const stateFull = join(stateDir, name);
+    try {
+      eligible.push({ runId, stateFull, mtimeMs: (await stat(stateFull)).mtimeMs });
+    } catch (err) {
+      // stat 失败（并发删除等）跳过该 run，不阻断本轮（debug——清理是旁路维护）
+      deps.debug(`state retention: stat failed, skipped ${stateFull}: ${deps.toMsg(err)}`);
+    }
+  }
+  if (eligible.length === 0) return result;
+
+  const victims = new Set<string>();
+  if (ttlMs !== undefined) {
+    for (const e of eligible) {
+      if (now - e.mtimeMs > ttlMs) victims.add(e.runId);
+    }
+  }
+  const survivors = eligible
+    .filter((e) => !victims.has(e.runId))
+    .sort((a, b) => a.mtimeMs - b.mtimeMs);
+  for (const e of survivors.slice(0, Math.max(0, survivors.length - options.cap))) {
+    victims.add(e.runId);
+  }
+
+  for (const runId of victims) {
+    const stateFull = join(stateDir, `${runId}.jsonl`);
+    const journalFull = join(stateDir, `${runId}${JOURNAL_FILE_SUFFIX}`);
+    let prunedState = false;
+    for (const full of [stateFull, journalFull]) {
+      try {
+        await unlink(full);
+        prunedState ||= full === stateFull;
+      } catch (err) {
+        if (isEnoentError(err)) continue; // 并发删除已达成目标 / journal 本就不存在
+        deps.warn(`state retention: failed to delete ${full}: ${deps.toMsg(err)}`);
+      }
+    }
+    if (prunedState) result.pruned += 1;
+    deps.debug(`state retention: pruned terminal run files for ${runId} (state + journal)`);
+  }
+  return result;
 }
 
 // ── FileRunStore ────────────────────────────────────────────

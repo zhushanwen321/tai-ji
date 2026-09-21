@@ -59,13 +59,16 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  *   产出侧 classifyFailureKind 词表，经 orchestration/models/types.ts re-export）。
  *
  * unknown 是合法成员：分类不出来的失败照记事件（词表漂移的失效模式 = 保守
- * 可诊断，不是拒记）。注册表投影的 interrupted_abandoned（interrupted 超放弃窗
- * 终局化）属注册表单元词表，届时按需并入，此处不预铺。
+ * 可诊断，不是拒记）。interrupted_abandoned 是注册表投影单元的终局化编码
+ * （interrupted 超放弃窗 → terminal(failed) 的 manifest errorCode，D5 转移表
+ * interrupted × abandon-elapsed 行）——不描述进程怎么死的，描述「为什么此刻
+ * 被判终局」，故为独立字面量成员而非复用任一既有族。
  */
 export type RunErrorCode =
   | EngineProtocolErrorCode
   | `engine_${string}`
-  | AgentFailureKind;
+  | AgentFailureKind
+  | "interrupted_abandoned";
 
 // ── 事件词表（D5-2，恰好 7 个）──────────────────────────────
 

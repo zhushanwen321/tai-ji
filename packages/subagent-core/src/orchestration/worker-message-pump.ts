@@ -627,11 +627,10 @@ async function persistTerminalProjection(
  * per-run 投递队列串行化（并发事件链的活体态读取竞态防线——事件 journal 序 =
  * 调用序）。
  *
- * created 引导（P1b-1 过渡语义）：run-created 的生产落账正点 = 宿主派发点
- * lifecycle.runWorkflow（Q2 单元领地，本批不可触）——接线前由本入口在首个触发点补投
- * （载荷 runId/scriptName/args/model 全部同源自 run.spec，journal 首帧形态与正点
- * 一致）。正点接线后 journal 有 run-created 帧、fold 出 dispatched，本分支自然短路
- * （届时删除本引导，不产生双帧——正点先落则 created 态不会到达此处）。
+ * run-created 无引导补投（Q2 正点接线后的终态）：journal 首帧唯一落点 =
+ * {@link dispatchRunCreated}（lifecycle.runWorkflow 宿主派发点调用）。事件到达时
+ * fold 出 created（journal 无 run-created 帧）⟹ 表外转移 fail-fast——事件在
+ * run-created 落账前到达是接线错误，靠引导静默补齐会掩盖时序倒置。
  */
 export function dispatchRunTrigger(
   run: WorkflowRun,
@@ -648,19 +647,26 @@ async function dispatchRunTriggerInner(
 ): Promise<TransitionResult> {
   let state = liveRunStates.get(run.runId);
   if (state === undefined) state = await foldRunState(run.runId);
-  if (state.lifecycle === "created" && trigger.type !== "run-created") {
-    state = (
-      await appendTransition(run, state, {
-        type: "run-created",
-        runId: run.runId,
-        workflowName: run.spec.scriptName,
-        argsSummary: summarizeRunArgs(run.spec.args),
-        ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
-        ts: Date.now(),
-      })
-    ).state;
-  }
   return appendTransition(run, state, trigger, ctx);
+}
+
+/**
+ * `run-created` 正点发射（journal 首帧，Q2 接线后的终态；P1b-1 的 created 引导
+ * 补投分支已随正点接线删除——正点先落则后续触发 fold 出 dispatched，created 态
+ * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点
+ * （创建期校验通过 + run 装配完成之后）；载荷 runId/scriptName/args/model 全部
+ * 同源自 run.spec。重复调用 = dispatched × run-created 表外转移 fail-fast
+ * （IllegalTransitionError），构造性排除双帧。
+ */
+export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
+  return dispatchRunTrigger(run, {
+    type: "run-created",
+    runId: run.runId,
+    workflowName: run.spec.scriptName,
+    argsSummary: summarizeRunArgs(run.spec.args),
+    ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
+    ts: Date.now(),
+  });
 }
 
 function summarizeRunArgs(args: Record<string, unknown>): string {

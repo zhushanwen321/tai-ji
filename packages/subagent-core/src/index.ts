@@ -496,13 +496,23 @@ export type {
 // LifecycleDeps.store 用；pi 壳继续用 session 锚定的 JsonlRunStore。
 // DEFAULT_* 两常量：壳 jsonl-run-store.ts 生产消费（D3 判定进 barrel），
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
-// pruneStateFilesBeyondCap：磁盘 retention 裁剪单源（S4-A7）——壳 jsonl-run-store
-// 的同构私有实现已删，改 import 本函数并注入自身 logger tag / toErrorMessage。
+// pruneStateFilesBeyondCap：cap-only 通用裁剪原语（S4-A7；[Q2] 注记——生产链已切
+// pruneTerminalRunFiles，本函数保留为 FileRunStore 公共方法面与通用原语）。
+// pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
+// manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
+// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
+// pi 宿主 jsonl-run-store 的 retention 维护轮生产消费（barrel 先例同上）。
 export {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
   DEFAULT_STATE_MAX_RUNS,
+  DEFAULT_STATE_TTL_MS,
+  STATE_TTL_MS_ENV,
   FileRunStore,
   pruneStateFilesBeyondCap,
+  pruneTerminalRunFiles,
+  resolveStateTtlMs,
+  type PruneTerminalRunFilesOptions,
+  type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
 
 // run 级终局投影 manifest（[P1b-2 / D5]）：壳 jsonl-run-store 的保留清理资格判定
@@ -534,6 +544,23 @@ export {
   type RunEventJournal,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
+
+// [Q2/D9-1] run 注册表（D5 状态机投影面）：journal fold 投影（活跃/终局/
+// interrupted——mtime 启发式退役后的结构判据）+ interrupted 放弃窗终局化
+// （D5 清理规则③：abandon 写 manifest 后 journal 获清理资格）。pi 宿主
+// jsonl-run-store 的 retention 维护轮生产消费（H4 偏差先例同构：extensions 生产
+// 源码只从 barrel 消费 core 符号，不进 barrel 无法接线）。
+export {
+  abandonElapsedInterruptedRuns,
+  projectRunRegistryEvents,
+  projectRunRegistryState,
+  resolveRunAbandonWindowMs,
+  DEFAULT_RUN_ABANDON_WINDOW_MS,
+  RUN_ABANDON_WINDOW_MS_ENV,
+  type RunRegistryPhase,
+  type RunRegistryProjection,
+  type RunProjectionOptions,
+} from "./orchestration/run-registry.ts";
 
 // run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
 // 投影（runSummary 双投影分叉收口）。

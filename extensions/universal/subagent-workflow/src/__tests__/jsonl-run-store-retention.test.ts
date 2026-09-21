@@ -1,16 +1,19 @@
 // src/__tests__/jsonl-run-store-retention.test.ts
 //
-// workflow-state 磁盘保留清理（OR-5 ⑥b 默认开 → [P1b-2] 终局资格感知）。
+// workflow-state 磁盘保留维护（OR-5 ⑥b 默认开 → [P1b-2] 终局资格感知 → [Q2]
+// core 单源收口 + abandon 终局化接线）。
 //
-// 锁定的语义（D5 清理规则①②）：
+// 锁定的语义（D5 清理规则①②③，判定/执行单源在 core
+// pruneTerminalRunFiles / abandonElapsedInterruptedRuns，本面锁触发点与宿主行为）：
 // - 「已终局」单源锚定 = run 终局投影 manifest（<runId>.json）的 outcome 非空；
 //   manifest 缺失 = 活跃或 interrupted（D9-1：interrupted 非终局）——一律不裁；
 // - 已终局计入 cap（TAIJI_SUBAGENT_STATE_MAX_RUNS，mtime 升序裁最旧）与 TTL
 //   （TAIJI_SUBAGENT_STATE_TTL_MS，缺省 30 天，测试期调低）双限；
 // - opt-out：cap 或 TTL 的显式非法值 → 对应机制不生效（cap 非法 = 整轮不清理，
 //   用户意图不明时不动磁盘）；
-// - journal（<runId>.events.jsonl）与 run 终局投影 manifest（<runId>.json）永不
-//   被本面裁剪（journal 清理归 Q2；manifest 是终局持久权威）；
+// - [Q2] 已终局 run 的 journal（<runId>.events.jsonl）随 state 成对裁剪
+//   （abandon 终局化写 manifest 后获资格）；活跃/interrupted 的 journal 永不裁；
+//   run 终局投影 manifest（<runId>.json）永不裁（终局持久权威，drawer 投影不消失）；
 // - glob 外文件（非 wf- 前缀 / 非 .jsonl）与父目录 session JSONL 永不误删；
 // - 单个删除失败（unlink 目录 → EPERM，非 ENOENT）logger.warn 留证不抛，
 //   save 主链路不受影响。
@@ -41,13 +44,13 @@ import type { RunSpec } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { writeRunTerminalManifest } from "@zhushanwen/subagent-core";
-// DEFAULT_STATE_MAX_RUNS 仅测试消费符号（D3 标准不进 barrel），深路径直取
-import { DEFAULT_STATE_MAX_RUNS } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
+// DEFAULT_STATE_MAX_RUNS / STATE_TTL_MS_ENV 仅测试消费符号（D3 标准不进 barrel），
+// 深路径直取（[Q2] TTL env 常量已自本包迁入 core 单源）
 import {
-  JsonlRunStore,
-  STATE_MAX_RUNS_ENV,
+  DEFAULT_STATE_MAX_RUNS,
   STATE_TTL_MS_ENV,
-} from "../jsonl-run-store.ts";
+} from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
+import { JsonlRunStore, STATE_MAX_RUNS_ENV } from "../jsonl-run-store.ts";
 
 function makeSpec(): RunSpec {
   return {
@@ -221,7 +224,7 @@ describe("workflow-state 保留清理（[P1b-2] 终局资格感知）", () => {
     await store.dispose();
   });
 
-  it("journal 保护：已终局 run 的 journal 不随本面裁剪（清理执行归 Q2）", async () => {
+  it("journal 清理执行（[Q2] 落地）：已终局 run 的 state 被裁时同 stem journal 成对删", async () => {
     process.env[STATE_MAX_RUNS_ENV] = "1";
     const store = new JsonlRunStore({ sessionDir: tmpDir });
 
@@ -230,14 +233,16 @@ describe("workflow-state 保留清理（[P1b-2] 终局资格感知）", () => {
     fs.writeFileSync(path.join(stateDir, `${oldId}.events.jsonl`), `${JSON.stringify({ type: "run-created", runId: oldId, workflowName: "t", argsSummary: "{}", ts: 1719500000000 })}\n`, "utf-8");
     await store.save(makeRunningRun(oldId));
 
-    // 新 run 进场触发 prune：已终局 1 个 > cap=1 → oldId 的 state 被裁
+    // 新 run 进场触发 prune：已终局 1 个 > cap=1 → oldId 的 state + journal 成对裁
     const newId = runIdAt(1);
     await markTerminal(stateDir, newId);
     await store.save(makeRunningRun(newId));
 
     expect(fs.existsSync(stateFile(stateDir, oldId))).toBe(false);
-    // journal 留给 Q2 的 journal-cleanup-eligible（本面不删）
-    expect(fs.existsSync(path.join(stateDir, `${oldId}.events.jsonl`))).toBe(true);
+    // [Q2] journal-cleanup-eligible 已兑现：manifest 非空的 run 过限即 journal 同删
+    expect(fs.existsSync(path.join(stateDir, `${oldId}.events.jsonl`))).toBe(false);
+    // manifest 终局持久权威永不随裁
+    expect(fs.existsSync(path.join(stateDir, `${oldId}.json`))).toBe(true);
     await store.dispose();
   });
 
