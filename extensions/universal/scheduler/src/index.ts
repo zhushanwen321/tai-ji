@@ -7,6 +7,7 @@ import { createAckTurnController, type AckTurnController } from './ack-turn.js'
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
 import { formatSchedule } from './format.js'
+import { MS_PER_MINUTE } from './parsing.js'
 import { readUiLocale, t } from './i18n.js'
 import { importLegacyStore } from './importer.js'
 import { abortPendingScheduleForms } from './interaction.js'
@@ -22,7 +23,8 @@ import {
   ScheduleParams,
   type ScheduleParamsT,
 } from './tool.js'
-import { setSchedulerWidget } from './widget.js'
+import { computeTasksFingerprint, setSchedulerWidget } from './widget.js'
+import type { ScheduledTask } from './types.js'
 
 // G1（代际检测，S9/R3-M1）：session 代际计数器。必须声明在模块级而非 factory 体内：
 // pi 每次 session 替换（newSession/fork/switchSession）都重跑 extension factory 函数体
@@ -44,6 +46,21 @@ let sessionGeneration = 0
 const logger = getLogger('scheduler')
 
 /**
+ * D2 保活底线帧间隔（10min）：任务集静态期间每 ≥10min 强制推一帧（内容与上一帧相同，
+ * 纯粹为维持 rpc-client 入站全帧 touch `_lastActivityAt` 的心跳），防 idle reaper
+ * （DEFAULT_PI_RECLAIM_IDLE_MS，生产 2h，5min 一拍、严格大于判定）回收挂有定时任务的
+ * 会话——定时任务跨空闲期不停摆（G3）。
+ *
+ * **方案不变量：保活间隔 ≪ idle 回收阈值，须维持 ≥3 倍余量。** 生产 10min vs 2h = 12 倍；
+ * 保活帧实际到达受 tick（TICK_INTERVAL_MS=30s）驱动波动（+0~30s），余量须覆盖 tick 波动
+ * 与 reaper 拍相位。未来调整本值、idle 阈值或 tick 间隔任一侧，须重验 ≥3 倍余量并重跑
+ * C-场景（真机加速验收的加速值也须 ≥3 倍保活间隔，防零余量竞态随机误回收）。
+ */
+/** 保活间隔的分钟数（语义单位，避免裸魔数；乘 MS_PER_MINUTE 得毫秒间隔）。 */
+const WIDGET_KEEPALIVE_MINUTES = 10
+const WIDGET_KEEPALIVE_INTERVAL_MS = WIDGET_KEEPALIVE_MINUTES * MS_PER_MINUTE
+
+/**
  * pi-scheduler extension factory。
  * 注册 schedule + schedule_control 两个 tool、/schedule command、session 事件。
  *
@@ -63,6 +80,13 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   // ack 确认轮控制器（u-ack-turn）：per-session 实例（backend 每代新建），但状态住
   // ack-turn 的模块级单例——新代构造后即接管并清理上一代残留。
   let ackController: AckTurnController | null = null
+  // D1 指纹跳推 + D2 保活底线帧的推送状态（scheduler widget 推送修正设计 D1-b/D2）。
+  // **必须声明在 factory 闭包内（extension 实例态），禁模块级**：模块级跨 session 残留会让
+  // 新会话继承旧会话的指纹/时间戳——session_start 的首帧（含清屏帧）被跳推，widget 面板
+  // 空窗；模块级 vs 闭包级的语义差异在本包有实证（见上方 sessionGeneration 注释）。
+  // 生命周期：session_start 装配新会话实例时重置（refreshWidgetState 调用点）。
+  let lastWidgetFingerprint: string | null = null
+  let lastWidgetPushedAt = 0
 
   const getService = (): SchedulerService => {
     if (!service) throw new Error('Scheduler not initialized: session not started')
@@ -148,7 +172,11 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     })
 
     // 注册 widget（SDK setWidget 第一重载：直接传 string[]）。初始渲染一次，
-    // 后续随每次 tickScheduler 末尾的 onAfterTick 回调刷新（nextRunAt 倒计时 + task 状态）。
+    // 后续随每次 tickScheduler 末尾的 onAfterTick 回调刷新（推送频率由指纹跳推 +
+    // 保活底线帧判定，见 refreshWidget）。
+    // 新会话实例起点重置推送状态：首帧（含空任务清屏帧）必推，不继承前代指纹/时间戳。
+    lastWidgetFingerprint = null
+    lastWidgetPushedAt = 0
     refreshWidget(ctx)
   })
 
@@ -273,11 +301,45 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
    * 读外层 service 变量而非 getService()：session_start 尚未触发时刷新不应报错，直接跳过。
    * `ctx as GuiContext`：pi 的 `ExtensionContext` 与协议包最小结构（mode/hasUI/ui.setWidget）
    * 静态不完全兼容，先例见 todo/src/index.ts makeRefreshDisplay。
+   *
+   * 推送频率判定（scheduler widget 推送修正设计 D1-b / D2）：
+   * - D1 指纹跳推：任务集稳定指纹（computeTasksFingerprint，字段集含 kind/locale）与上次
+   *   实际推送相同且保活未到期 → 跳过推送。时间流逝不是状态变化，任务集不变期间零推送
+   *   （rpc/tui 两模式同效——判定在 setWidgetDual 之前）。
+   * - D2 保活底线帧：有任务（任务集非空，含全部 disabled——任务存在即调度意图，re-enable
+   *   后须可执行）且距上次实际推送超过 WIDGET_KEEPALIVE_INTERVAL_MS → 强制推一帧（内容
+   *   与上帧相同，纯粹为维持心跳防 idle reaper 回收）。空任务集不发保活帧：清屏后任务集
+   *   保持空 → 无帧 → 会话按 idle 规则正常回收（保活与任务存在性绑定）。
+   * - fail-open：指纹计算异常即推送（宁可多推不可漏显，设计 §3.1 失败路径）。
    */
   function refreshWidget(ctx: ExtensionContext): void {
     if (!service) return
     const result = service.list()
     if (!result.success || !result.data) return
-    setSchedulerWidget(ctx as GuiContext, result.data.tasks)
+    const tasks: ScheduledTask[] = result.data.tasks
+    const locale = readUiLocale()
+
+    let fingerprint: string
+    try {
+      fingerprint = computeTasksFingerprint(tasks, locale)
+    } catch (err) {
+      // fail-open（辅助显示面的降级 ≠ 吞错）：指纹异常说明序列化路径有 bug，跳推判定不可信
+      // → 直接推送保显示正确；缓存失效（null）使下一帧也必推，保活计时照常刷新。
+      logger.warn('widget fingerprint computation failed, pushing anyway', { error: toErrorMessage(err) })
+      lastWidgetFingerprint = null
+      lastWidgetPushedAt = Date.now()
+      setSchedulerWidget(ctx as GuiContext, tasks)
+      return
+    }
+
+    const nowMs = Date.now()
+    // D2 双条件：任务存在（含 disabled）+ 距上次实际推送超时。跳推不刷新 lastWidgetPushedAt
+    // ——保活计时只从「实际推送」起算。
+    const keepaliveDue = tasks.length > 0 && nowMs - lastWidgetPushedAt >= WIDGET_KEEPALIVE_INTERVAL_MS
+    if (fingerprint === lastWidgetFingerprint && !keepaliveDue) return
+
+    setSchedulerWidget(ctx as GuiContext, tasks)
+    lastWidgetFingerprint = fingerprint
+    lastWidgetPushedAt = nowMs
   }
 }
