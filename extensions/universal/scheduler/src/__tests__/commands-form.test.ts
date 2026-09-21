@@ -116,7 +116,7 @@ function registerHandler(getService: () => SchedulerService | null): CommandOpts
     },
   }
   registerScheduleCommand(pi as never, getService)
-  return commands.get('scheduler')!.handler
+  return commands.get('schedule')!.handler
 }
 
 /** 让已 fire-and-forget 的 rpc 续跑（run）settle：0ms macrotask 在所有待决微任务之后。 */
@@ -126,7 +126,7 @@ function flush(): Promise<void> {
 
 // ── rpc：打开表单（无参 / 带参预填） ──
 
-describe('/scheduler 命令 表单路径（rpc）', () => {
+describe('/schedule 命令 表单路径（rpc）', () => {
   let handler: CommandOpts['handler']
   let service: SchedulerService
   let backend: MockSchedulerBackend
@@ -165,7 +165,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
     expect(draft.currentModel).toBe('prov-a/m1')
   })
 
-  it('带参：/scheduler <spec> <prompt> 预填 draft（引号内空格保留）', async () => {
+  it('带参：/schedule <spec> <prompt> 预填 draft（引号内空格保留）', async () => {
     const select = selectReturning(undefined)
     const { ctx } = createCtx({ select })
 
@@ -221,7 +221,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
 
   // ── 三条错误分支（从 tool-create-flow.test.ts 迁入，覆盖不丢） ──
 
-  it('channel-error（select reject）→ notify error + 后续 /scheduler 不重复试探', async () => {
+  it('channel-error（select reject）→ notify error + 后续 /schedule 不重复试探', async () => {
     const select = vi.fn(async () => {
       throw new Error('channel down')
     })
@@ -313,7 +313,7 @@ describe('/scheduler 命令 表单路径（rpc）', () => {
 
 // ── 模式矩阵 ──
 
-describe('/scheduler 命令 模式矩阵', () => {
+describe('/schedule 命令 模式矩阵', () => {
   let handler: CommandOpts['handler']
   let service: SchedulerService
   let backend: MockSchedulerBackend

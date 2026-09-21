@@ -65,7 +65,7 @@ function assertValidScheduleParams(prompt: string, scheduleInput: string): void 
  * schedule tool handler（直建流：预校验 → abort 检查 → service.create）。
  *
  * 触发反转（设计 §6.1 D1）：不再有确认门，也不再有 headless 附注——模型路径无论会话模式
- * 一律直建；人侧表单入口在 `/scheduler` 命令（interaction.ts 的 openScheduleFormAsync）。
+ * 一律直建；人侧表单入口在 `/schedule` 命令（interaction.ts 的 openScheduleFormAsync）。
  *
  * 业务失败 → throw（pi 只对 execute throw 置 isError:true——W4）；abort → cancelled result
  * （正常返回，不 throw）。service 未初始化等初始化异常不在此 catch——穿透到 index.ts execute

@@ -179,12 +179,12 @@ describe('pi-scheduler SDK contract', () => {
     ).rejects.toThrow('Task deadbeef not found.')
   })
 
-  it('registerCommand 注册了 /scheduler 与 /schedule（alias）双命令', () => {
+  it('registerCommand 只注册 /schedule 单命令（scheduler 已废弃）', () => {
     const { pi, commands } = createMockPi()
     schedulerExtension(pi)
     const names = commands.map(c => c.name)
-    expect(names).toContain('scheduler')
     expect(names).toContain('schedule')
+    expect(names).not.toContain('scheduler')
   })
 
   // MF-1（R2）装配链路：session_start → importLegacyStore 返回延迟删除 cleanup；

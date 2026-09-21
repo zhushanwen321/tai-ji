@@ -40,7 +40,7 @@ function createMockCtx(mode = 'rpc'): MockCtx {
   return { ctx, notify }
 }
 
-describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () => {
+describe('/schedule command（子命令路由 + 补全 + 错误通道）', () => {
   let service: SchedulerService
   let commands: Map<string, CommandOpts>
   let commandOpts: CommandOpts
@@ -49,7 +49,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     const mockPi = createMockPi()
     commands = mockPi.commands
     registerScheduleCommand(mockPi.pi as never, getService)
-    commandOpts = commands.get('scheduler')!
+    commandOpts = commands.get('schedule')!
   }
 
   beforeEach(() => {
@@ -59,14 +59,14 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     register()
   })
 
-  // ── 注册：/scheduler + /schedule alias（同一 handler / 补全） ──
+  // ── 注册：/schedule 单命令（scheduler 旧名已废弃，不注册） ──
 
-  it('注册 /scheduler 与 /schedule alias，同一 handler 与补全', () => {
-    expect(commands.has('scheduler')).toBe(true)
+  it('注册 /schedule 单命令（无 scheduler 旧名）', () => {
     expect(commands.has('schedule')).toBe(true)
-    const alias = commands.get('schedule')!
-    expect(alias.handler).toBe(commandOpts.handler)
-    expect(alias.getArgumentCompletions).toBe(commandOpts.getArgumentCompletions)
+    expect(commands.has('scheduler')).toBe(false)
+    const opts = commands.get('schedule')!
+    expect(opts.handler).toBe(commandOpts.handler)
+    expect(opts.getArgumentCompletions).toBe(commandOpts.getArgumentCompletions)
     // description 走 L2 词典（注册期静态；u-p2b 接线，不再持英文常量）
     expect(commandOpts.description).toBe(renderResult('command.description', {}, readUiLocale()))
     expect(commandOpts.description).not.toBe('')
@@ -122,7 +122,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     for (const keyword of ['off', 'on']) {
       const { ctx, notify } = createMockCtx()
       await commandOpts.handler(keyword, ctx)
-      expect(notify).toHaveBeenCalledWith(`Usage: /scheduler ${keyword} <id>`, 'error')
+      expect(notify).toHaveBeenCalledWith(`Usage: /schedule ${keyword} <id>`, 'error')
     }
   })
 
@@ -145,7 +145,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
   it('rm 缺 id → usage + error；未知 id → not found + error', async () => {
     const { ctx, notify } = createMockCtx()
     await commandOpts.handler('rm', ctx)
-    expect(notify).toHaveBeenCalledWith('Usage: /scheduler rm <id>', 'error')
+    expect(notify).toHaveBeenCalledWith('Usage: /schedule rm <id>', 'error')
     await commandOpts.handler('rm deadbeef', ctx)
     expect(notify).toHaveBeenCalledWith('Task deadbeef not found', 'error')
   })
@@ -163,7 +163,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
   it('run 缺 id → usage + error；未知 id → not found + error', async () => {
     const { ctx, notify } = createMockCtx()
     await commandOpts.handler('run', ctx)
-    expect(notify).toHaveBeenCalledWith('Usage: /scheduler run <id>', 'error')
+    expect(notify).toHaveBeenCalledWith('Usage: /schedule run <id>', 'error')
     await commandOpts.handler('run deadbeef', ctx)
     expect(notify).toHaveBeenCalledWith('Task deadbeef not found', 'error')
   })
@@ -186,7 +186,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     const mockPi = createMockPi()
     registerScheduleCommand(mockPi.pi as never, () => null)
     const { ctx, notify } = createMockCtx('rpc')
-    await mockPi.commands.get('scheduler')!.handler('list', ctx)
+    await mockPi.commands.get('schedule')!.handler('list', ctx)
     expect(notify).toHaveBeenCalledWith('Scheduler not initialized: session not started.', 'error')
   })
 
@@ -194,7 +194,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
     const mockPi = createMockPi()
     registerScheduleCommand(mockPi.pi as never, () => null)
     const { ctx } = createMockCtx('json')
-    await expect(mockPi.commands.get('scheduler')!.handler('list', ctx))
+    await expect(mockPi.commands.get('schedule')!.handler('list', ctx))
       .rejects.toThrow('Scheduler not initialized: session not started.')
   })
 
@@ -238,7 +238,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
   it('补全：service 缺失且前缀 2 token → null', () => {
     const mockPi = createMockPi()
     registerScheduleCommand(mockPi.pi as never, () => null)
-    expect(mockPi.commands.get('scheduler')!.getArgumentCompletions('on abcdef12')).toBeNull()
+    expect(mockPi.commands.get('schedule')!.getArgumentCompletions('on abcdef12')).toBeNull()
   })
 })
 
@@ -246,7 +246,7 @@ describe('/scheduler command（子命令路由 + 补全 + 错误通道）', () =
 // 写 `<dataDir>/ui-preferences.json` = zh-CN，验证「renderResult(messageKey, params, locale)」
 // 两处消费者（子命令 toast / 任务 id 补全 description）都跟随当前 locale（u-p2b 接线验收：
 // notify 走词典渲染 + getArgumentCompletions 传 locale）。
-describe('/scheduler L2 词典渲染（zh-CN locale 通道）', () => {
+describe('/schedule L2 词典渲染（zh-CN locale 通道）', () => {
   const original = process.env.TAIJI_AGENT_DATA_DIR
   const dirs: string[] = []
   let service: SchedulerService
@@ -272,7 +272,7 @@ describe('/scheduler L2 词典渲染（zh-CN locale 通道）', () => {
     service = new SchedulerService(new SchedulerRuntime(backend), () => backend.now())
     const mockPi = createMockPi()
     registerScheduleCommand(mockPi.pi as never, () => service)
-    commandOpts = mockPi.commands.get('scheduler')!
+    commandOpts = mockPi.commands.get('schedule')!
   })
 
   it('list 空列表：notify 走中文词典（非英文 message）', async () => {
@@ -285,7 +285,7 @@ describe('/scheduler L2 词典渲染（zh-CN locale 通道）', () => {
   it('off 缺 id：usage 走中文词典', async () => {
     const { ctx, notify } = createMockCtx()
     await commandOpts.handler('off', ctx)
-    expect(notify).toHaveBeenCalledWith('用法：/scheduler off <id>', 'error')
+    expect(notify).toHaveBeenCalledWith('用法：/schedule off <id>', 'error')
   })
 
   it('getArgumentCompletions 任务 id 补全：description 的 formatSchedule 传当前 locale', async () => {

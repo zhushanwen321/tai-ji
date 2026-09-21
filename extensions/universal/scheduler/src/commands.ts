@@ -45,10 +45,10 @@ function tokenizeQuoted(input: string): string[] {
 
 // ── 文案（L2 词典通道）──
 // 命令层自有串（usage / not-initialized / 无交互通道 / description）已入 i18n.ts 词典，
-// 经 `renderResult(messageKey, params, locale)` 单入口渲染（u-p2b 接线）。`/scheduler` 的
+// 经 `renderResult(messageKey, params, locale)` 单入口渲染（u-p2b 接线）。`/schedule` 的
 // registerCommand.description 是注册期静态串（切语言不热更 = 已接受滞后，设计 §6.9）。
 
-/** 无参 `/scheduler`（打开表单路径）的默认预填时间：循环 + 每天 09:00。 */
+/** 无参 `/schedule`（打开表单路径）的默认预填时间：循环 + 每天 09:00。 */
 const DEFAULT_CREATE_SCHEDULE = '0 9 * * *'
 
 /** 子命令 handler：统一返回 ServiceResult（notify severity 按 success 分流）。 */
@@ -137,7 +137,7 @@ async function openFormOrDirectCreate(
 }
 
 /**
- * Core logic for the `/scheduler` command. Extracted for testability (handler returns
+ * Core logic for the `/schedule` command. Extracted for testability (handler returns
  * void per SDK contract; tests call this function directly with a mock ctx to assert
  * form-open / direct-create / throw behavior).
  *
@@ -178,7 +178,7 @@ export async function executeScheduleCommand(
 }
 
 /**
- * 注册 `/scheduler` 命令（`/schedule` 保留为代码级 alias，同一 handler / 补全）。
+ * 注册 `/schedule` 命令。
  *
  * service 通过 getter 获取：registerScheduleCommand 在 factory 顶层调用，此时 session_start
  * 尚未触发、service 还是 null。getArgumentCompletions / handler 真正执行时才读 service 当前值。
@@ -202,7 +202,7 @@ export function registerScheduleCommand(
       const trimmed = prefix.trimStart()
       const parts = trimmed.split(/\s+/).filter(Boolean)
       if (parts.length <= 1) {
-        // 子命令补全（once/cron 直建补全已随触发反转退役：创建统一走 /scheduler <spec> <prompt> 打开表单）
+        // 子命令补全（once/cron 直建补全已随触发反转退役：创建统一走 /schedule <spec> <prompt> 打开表单）
         return [
           { label: 'list', value: 'list', description: 'Show all scheduled tasks' },
           { label: 'on', value: 'on ', description: 'Enable a task' },
@@ -238,7 +238,5 @@ export function registerScheduleCommand(
     },
   }
 
-  pi.registerCommand('scheduler', commandOptions)
-  // /schedule 保留为 alias（同一 handler / 补全），供已发布的 npm 使用者平滑迁移。
   pi.registerCommand('schedule', commandOptions)
 }

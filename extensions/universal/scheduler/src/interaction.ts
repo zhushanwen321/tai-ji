@@ -69,7 +69,7 @@ export interface ScheduleDraftSeed {
 /** 命令路径通道状态（注册闭包持有 = 本会话粒度）。 */
 export interface ScheduleFormChannelState {
   /**
-   * 本会话已检测到表单通道不可用（channel-error）→ 后续 `/scheduler` 直接给提示、
+   * 本会话已检测到表单通道不可用（channel-error）→ 后续 `/schedule` 直接给提示、
    * 不重复试探（设计 §6.1 步骤 8「本会话后续直接给提示」）。
    */
   unavailable: boolean

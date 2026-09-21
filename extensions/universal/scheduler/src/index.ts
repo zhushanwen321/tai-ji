@@ -209,7 +209,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     ackController?.handleSessionBoundary()
   })
 
-  // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /scheduler 命令）。
+  // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /schedule 命令）。
   // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
   // 转调 handleSchedule 直建流（预校验 → abort 检查 → service.create）。
   // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
@@ -264,7 +264,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     },
   })
 
-  // 注册 /scheduler 命令（/schedule 为 alias）。传 getter 而非 service 实例：factory 执行时
+  // 注册 /schedule 命令。传 getter 而非 service 实例：factory 执行时
   // service 还是 null。
   registerScheduleCommand(pi, () => service)
 

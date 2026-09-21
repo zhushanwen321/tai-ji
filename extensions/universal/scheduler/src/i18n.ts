@@ -83,7 +83,7 @@ export type EmptyParams = Record<string, never>
  * 命令层自有串参数（r4 S3 载体裁决）：与 service messageKey **同形 key + params**，
  * 统一走同一 `renderResult` 单入口，**不引入第二套结果类型**（`CommandReply`）。
  * 命令层自有输出（`Usage: …` / `Scheduler not initialized` / 无交互通道 / 表单通道错误 /
- * `/scheduler` description）经 `ServiceResult.messageKey` 通道送达 notify（rpc/tui）或
+ * `/schedule` description）经 `ServiceResult.messageKey` 通道送达 notify（rpc/tui）或
  * throw（json/print）——两受众（L2 toast / L4 tool result）不串。
  */
 export interface CommandMessageParamsMap {
@@ -182,10 +182,10 @@ const ZH_CN: Dictionary = {
   'schedule.invalid': '无法解析的时间表达式：{input}',
 
   // 命令层自有串（u-p2b 接线）
-  'usage.toggle': '用法：/scheduler {keyword} <id>',
-  'usage.rm': '用法：/scheduler rm <id>',
-  'usage.run': '用法：/scheduler run <id>',
-  'usage.create': '用法：/scheduler <时间> <提示词>',
+  'usage.toggle': '用法：/schedule {keyword} <id>',
+  'usage.rm': '用法：/schedule rm <id>',
+  'usage.run': '用法：/schedule run <id>',
+  'usage.create': '用法：/schedule <时间> <提示词>',
   'command.notInitialized': '调度器未初始化：会话尚未启动',
   'command.description': '新建定时任务（打开表单）',
 
@@ -226,10 +226,10 @@ const EN_US: Dictionary = {
   'schedule.invalid': 'Invalid schedule: {input}',
 
   // 命令层自有串（u-p2b 接线）
-  'usage.toggle': 'Usage: /scheduler {keyword} <id>',
-  'usage.rm': 'Usage: /scheduler rm <id>',
-  'usage.run': 'Usage: /scheduler run <id>',
-  'usage.create': 'Usage: /scheduler <schedule> <prompt>',
+  'usage.toggle': 'Usage: /schedule {keyword} <id>',
+  'usage.rm': 'Usage: /schedule rm <id>',
+  'usage.run': 'Usage: /schedule run <id>',
+  'usage.create': 'Usage: /schedule <schedule> <prompt>',
   'command.notInitialized': 'Scheduler not initialized: session not started.',
   'command.description': 'Create a scheduled task (opens form)',
 
