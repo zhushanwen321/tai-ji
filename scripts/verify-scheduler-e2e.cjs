@@ -24,7 +24,7 @@
  *      result 回显 + customType='pi-scheduler:task' entry。该路径**不得**出现
  *      UI_FORM_MARKER select 帧（S1/S2 断言 unexpectedScheduleForms 为空——缺省 uiActor
  *      不确认表单并记录非预期请求）。
- *   ② 人侧路径（`/scheduler` 命令，`/schedule` 保留为 alias）：命令 handler **异步打开**
+ *   ② 人侧路径（`/schedule` 命令，唯一注册名）：命令 handler **异步打开**
  *      创建表单（不 await，规避 prompt RPC 的 60s 回包窗口）。表单经统一提问表单协议送达：
  *      UI_FORM_MARKER select，options[0] 携 {formQuestions, allowCancel}，schedule 问题
  *      initial 预填 draft；应答回 FormAnswers envelope = {key: flat ScheduleFormResult JSON}，
@@ -59,7 +59,7 @@
  *   A 类（必须自动化通过）：S1 once 回显（tool 直建 + 无确认帧）/ S2 recurring 回显 /
  *     S3 session 隔离 / S5 resume 重放 / S9 删 session 无残留 / S17 entry 增长 /
  *     S18 命令路径表单（带参预填 + 改值确认）/ S19 命令路径表单（取消）/
- *     S20 命令路径表单（无参默认草稿）/ S21 `/schedule` alias 等价 /
+ *     S20 命令路径表单（无参默认草稿）/ S21 `/schedule` 命令路径表单（预填原值确认基线）/
  *     S22 合成确认行字段 + 宿主不变量 / S23 连续两次创建 ⇒ 确认轮恰 1 次
  *   B 类（尽力自动化，跑不了标 followup）：S4/S6/S12/S14 实现；S7/S8/S10/S16 标 followup
  *   C 类（标 followup + 手工步骤）：S11 fork 隔离 / S13 延迟写入窗口 / S15 taiji 兼容
@@ -106,7 +106,7 @@ const RENAME_SESSION_EXT_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 
 /**
  * 统一提问表单请求的 select title marker（cjs 端口；SSOT =
  * packages/extension-protocol/src/extensions/ui-form/marker.ts，改动须同步）。
- * scheduler 人侧创建表单（`/scheduler` 命令路径，异步打开）走本通道：
+ * scheduler 人侧创建表单（`/schedule` 命令路径，异步打开）走本通道：
  * options[0] = {formQuestions, allowCancel}。NUL 前缀与 ask-user / session-manager marker 同规范。
  */
 const UI_FORM_MARKER = '\x00TAIJI_UI_FORM'
@@ -617,7 +617,7 @@ function spawnSession(opts) {
   }
 
   /**
-   * 发 slash 命令 prompt（`/scheduler ...`）并**只等 ack**（命令路径）。
+   * 发 slash 命令 prompt（`/schedule ...`）并**只等 ack**（命令路径）。
    * pi 的 `/` 分支在 prompt 内执行扩展命令且不产生 turn 事件（无 turn_end），
    * 故不能复用 prompt() 的回合等待；表单帧 / notify 帧由后续轮询捕获。
    */
@@ -1809,8 +1809,8 @@ function describeUpsertTask(task) {
     + `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'})`
 }
 
-/** 落库 task 是否 = S20 默认草稿提交值（recurring + cron 模式 + 6 字段归一化表达式）。 */
-function isDefaultDraftCronTask(task) {
+/** 落库 task 是否 = S20 表单提交值（用户裁定 recurring + 6 字段归一化 cron）。 */
+function isSubmittedCronTask(task) {
   return !!task
     && task.prompt === 'daily-standup-reminder'
     && task.kind === 'recurring'
@@ -1869,7 +1869,7 @@ function s22SyntheticLineChecks(line, sessionModel) {
 /**
  * S18：命令路径表单——带参预填 + 用户改值确认。
  *
- * `/scheduler 1h "confirm-draft-prompt"` → 命令 handler 异步打开表单 →
+ * `/schedule 1h "confirm-draft-prompt"` → 命令 handler 异步打开表单 →
  * extension_ui_request{select, title=UI_FORM_MARKER}（schedule 问题 initial 预填
  * kind=recurring / schedule=1h / prompt=confirm-draft-prompt）→ uiActor 以「用户裁定值」
  * 回 FormAnswers envelope（45m / user-edited-prompt）→ service.create 落库 + notify。
@@ -1900,7 +1900,7 @@ async function runS18(piBin) {
     const ready = await s.waitReady()
     if (!ready) return fail('S18', 'pi not ready / extension load failed: ' + s.stderrTail())
 
-    await s.sendCommand('/scheduler 1h "confirm-draft-prompt"')
+    await s.sendCommand('/schedule 1h "confirm-draft-prompt"')
     const reqs = await s.waitForFormRequest(15000)
     const exactlyOne = reqs.length === 1
     const contract = checkScheduleFormDraftContract(reqs, {
@@ -1960,7 +1960,7 @@ async function runS18(piBin) {
 /**
  * S19：命令路径表单——取消路径（取消不是错误：不创建、无 toast）。
  *
- * `/scheduler 30m "cancel-path-task"` → 表单请求到达 → uiActor 回 cancelled
+ * `/schedule 30m "cancel-path-task"` → 表单请求到达 → uiActor 回 cancelled
  * （pi resolve undefined → uiFormInteract 折叠 cancelled → 命令路径不 create、不 notify）。
  * 断言四面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select（交互确实发生）
@@ -1983,7 +1983,7 @@ async function runS19(piBin) {
     const ready = await s.waitReady()
     if (!ready) return fail('S19', 'pi not ready / extension load failed: ' + s.stderrTail())
 
-    await s.sendCommand('/scheduler 30m "cancel-path-task"')
+    await s.sendCommand('/schedule 30m "cancel-path-task"')
     const reqs = await s.waitForFormRequest(15000)
     // 取消路径无 toast —— 留出落库 / 通知的结算窗口后再断言
     await sleep(2000)
@@ -2028,11 +2028,13 @@ async function runS19(piBin) {
 /**
  * S20：命令路径表单——无参默认草稿 + 提交。
  *
- * `/scheduler`（无参）→ 表单预填默认值（kind=recurring / schedule=0 9 * * * /
- * prompt=''，设计 §6.2）→ uiActor 以「用户补完的提示词」提交 → 落库 + notify。
+ * `/schedule`（无参）→ 表单预填默认草稿（kind=once / schedule='' / prompt=''；
+ * 默认单次为现行契约，schedule 置空由表单端派生初值，见
+ * extensions/universal/scheduler/src/commands.ts 无参分支）→ uiActor 把任务改为
+ * recurring 每天 09:00 后提交 → 落库 + notify。
  * 断言三面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 为默认草稿（kind/schedule/prompt）
- *   ② notify 帧文案：cron 表达式（0 9 * * *）与任务名回显
+ *   ② notify 帧文案：提交的 cron 表达式（0 9 * * *）与任务名回显
  *   ③ 落库形态：upsert entry 恰 1 条，task = cron 任务（cronExpression + prompt）
  *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
  *      + op=upsert 已落盘（无需 flush 探针）
@@ -2046,7 +2048,7 @@ async function runS20(piBin) {
       uiActor: (req) => {
         const question = parseScheduleQuestion(req)
         if (!question) return null
-        // 用户在默认草稿上只补提示词（时间保持表单默认的每天 09:00）
+        // 默认草稿为 once/空串；用户在表单里改成 recurring 每天 09:00 后提交
         return scheduleFormAnswer(question, {
           kind: 'recurring', schedule: '0 9 * * *', prompt: 'daily-standup-reminder',
         })
@@ -2055,11 +2057,11 @@ async function runS20(piBin) {
     const ready = await s.waitReady()
     if (!ready) return fail('S20', 'pi not ready / extension load failed: ' + s.stderrTail())
 
-    await s.sendCommand('/scheduler')
+    await s.sendCommand('/schedule')
     const reqs = await s.waitForFormRequest(15000)
     const exactlyOne = reqs.length === 1
     const contract = checkScheduleFormDraftContract(reqs, {
-      kind: 'recurring', schedule: '0 9 * * *', prompt: '',
+      kind: 'once', schedule: '', prompt: '',
     })
     const notify = await s.waitForNotify(n => n.message.includes('daily-standup-reminder'), 15000)
     // ④ 确认轮（异步副作用）：等 JSONL 出现 aborted assistant 行
@@ -2079,7 +2081,7 @@ async function runS20(piBin) {
       && /^Created [0-9a-f]+: daily-standup-reminder · 0 0 9 \* \* \*/.test(notify.message)
     const task = getSingleUpsertTask(upserts)
     // 创建端把 5 字段 cron 归一化为 6 字段（秒位补 0）——entry 断言用归一化形态
-    const taskOk = isDefaultDraftCronTask(task)
+    const taskOk = isSubmittedCronTask(task)
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
     const persisted = persistedUpserts.length === 1
     // ④ 确认行：aborted assistant 行 + i18n ack.confirm 文案（en-US；cron 回显归一化形态）
@@ -2095,7 +2097,7 @@ async function runS20(piBin) {
       debugEntries: ack.entries,
       evidence:
         `form select requests=${reqs.length} (expect 1); request draft=${contract.desc}; ` +
-        `notify default-schedule echo=${notifyCron}` +
+        `notify submitted cron echo=${notifyCron}` +
         (notify ? ` msg=${JSON.stringify(notify.message.slice(0, 140))}` : ' (no notify)') + '; ' +
         `upsert cron task=${taskOk} ` + describeUpsertTask(task) + '; ' +
         `upserts=${upserts.length}; ` +
@@ -2109,13 +2111,14 @@ async function runS20(piBin) {
 }
 
 /**
- * S21：`/schedule` alias 等价（V6 旧命令兼容）。
+ * S21：`/schedule` 命令路径表单——预填原值确认基线。
  *
- * `/schedule 30m "alias-task"` 与 `/scheduler` 同一 handler：表单请求帧契约 +
- * 提交后落库 + notify 与主命令同形。断言三面：
- *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 反映 alias 参数
+ * `/schedule 30m "alias-task"`：表单请求帧契约 + 提交后落库 + notify，
+ * 与其它命令路径用例（S18/S20）同形；uiActor 按命令参数原值应答（不改动预填）。
+ * 断言三面：
+ *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 反映命令参数
  *   ② notify 帧文案：30m + alias-task 回显
- *   ③ 落库形态：upsert entry 恰 1 条，task = alias 参数值
+ *   ③ 落库形态：upsert entry 恰 1 条，task = 命令参数值
  *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
  *      + op=upsert 已落盘（无需 flush 探针）
  */
@@ -2241,7 +2244,7 @@ async function runS22(piBin) {
       modelChangeCount: modelChangeBefore, thinkingCount: thinkingBefore,
     } = await s22CollectBaseline(s)
 
-    await s.sendCommand('/scheduler 2h "s22-host-invariant"')
+    await s.sendCommand('/schedule 2h "s22-host-invariant"')
     const reqs = await s.waitForFormRequest(15000)
     await s.waitForNotify(n => n.message.includes('s22-host-invariant'), 15000)
     const ack = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
@@ -2326,14 +2329,14 @@ async function runS23(piBin) {
     if (!ready) return fail('S23', 'pi not ready / extension load failed: ' + s.stderrTail())
 
     // 第一次创建 → 确认轮落盘
-    await s.sendCommand('/scheduler 3h "s23-first-task"')
+    await s.sendCommand('/schedule 3h "s23-first-task"')
     await s.waitForNotify(n => n.message.includes('s23-first-task'), 15000)
     const ack1 = await s.waitForJsonlEntries(hasAbortedAssistant, 20000)
     // JSONL 行落盘早于 turn_end 收尾：等会话空闲再发第二次命令（避免命令撞在 streaming 中）
     const idle = await waitUntilIdle(s, 5000)
 
     // 第二次创建（同一会话；此时已存在 assistant 消息 ⇒ 落盘判据命中，不再注入合成轮）
-    await s.sendCommand('/scheduler 4h "s23-second-task"')
+    await s.sendCommand('/schedule 4h "s23-second-task"')
     await s.waitForNotify(n => n.message.includes('s23-second-task'), 15000)
     const ack2 = await s.waitForJsonlEntries(
       es => getSchedulerEntries(es).filter((e) => e.data.op === 'upsert').length >= 2,
