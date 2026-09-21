@@ -846,5 +846,34 @@
    "note": "消费面：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
   },
   "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-41",
+  "claim": "pi 读面对 assistant 消息的 usage 无守卫：getSessionStats 对每条 assistant 裸调 addUsageToTotals(usage)（读 .input），turn 前上下文扫描对 stopReason 非 aborted/error 的 assistant 裸调 calculateContextTokens(usage)（读 .totalTokens）——「终态 stopReason + 无 usage 键」的 assistant entry 会让会话恢复后续聊即崩、stats 恒败。pi 原生写侧连错误轮都写全零 usage（全零 = 无测量数据的合法编码，守卫按无效跳过），zcode 导入产物必须遵守同一不变量（converter zeroUsage 兜底 + unsealedStopReason 把取消/失败轮映射 aborted/error）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/agent-session.js",
+    "symbol": "getSessionStats / addUsageToTotals",
+    "note": ":2678 assistant 分支裸传 assistantMsg.usage（toolResult 分支 :2668 有 if (message.usage) 守卫）；无 usage → Cannot read properties of undefined (reading 'input')——get_session_stats RPC 恒败即此形态"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/agent-session.js",
+    "symbol": "threshold compaction context scan",
+    "note": ":2721 calculateContextTokens(assistant.usage) 仅跳过 stopReason aborted/error，其余裸读 .totalTokens——turn 开始即抛（2026-09-21 毒消息事故：zcode 取消轮导入为伪 stop + 无 usage，续聊 25ms 内死于 reading 'totalTokens'）"
+   },
+   {
+    "pkg": "pi-agent-core",
+    "distPath": "dist/harness/compaction/compaction.js",
+    "symbol": "getAssistantUsage / calculateContextTokens",
+    "note": ":92 usage.totalTokens || input+output+cacheRead+cacheWrite；getAssistantUsage 跳过 aborted/error/零 usage——pi 自己的守卫面（对照：agent-session 两处未守卫）"
+   }
+  ],
+  "guard": {
+   "type": "probe",
+   "test": "packages/runtime/src/services/session/zcode-import/pi-reader-invariant.test.ts"
+  },
+  "verifiedWith": "0.84.4"
  }
 ]

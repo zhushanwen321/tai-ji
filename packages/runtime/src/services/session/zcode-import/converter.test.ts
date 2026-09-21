@@ -544,7 +544,7 @@ describe('消息投影分派：六策略落点 + unclassified', () => {
 // ── 边界细分：切段/尾段/T3c/usage 缺失/空段 ────────────────────────────────────────
 
 describe('切段与 T3c 边界', () => {
-  it('尾段未收口有内容则闭合：stopReason=stop 保底、无 usage', () => {
+  it('尾段未收口有内容则闭合：无 error 证据 → stop 保底 + 零 usage 兜底（不变量门）', () => {
     const msgs = [
       assistantMessage([
         stepStart(),
@@ -553,10 +553,11 @@ describe('切段与 T3c 边界', () => {
       ]),
     ]
     const { entries } = parseOutput(buildZcodeSessionFile(msgs, 'T', HEADER))
-    const assistant = entries[1] as { message: { stopReason: string; content: Array<{ type: string }>; timestamp: number } }
+    const assistant = entries[1] as { message: { stopReason: string; usage?: Record<string, unknown>; content: Array<{ type: string }>; timestamp: number } }
     expect(entries).toHaveLength(2) // session_info + assistant
     expect(assistant.message.stopReason).toBe('stop')
-    expect(assistant.message).not.toHaveProperty('usage')
+    // 2026-09-21 毒消息事故后新契约：assistant 恒带 usage（pi 读面裸读，缺键即崩续聊）
+    expect(assistant.message.usage).toMatchObject({ totalTokens: 0 })
     expect(assistant.message.timestamp).toBe(2500)
   })
 
@@ -617,15 +618,16 @@ describe('切段与 T3c 边界', () => {
     expect(a.message.usage).not.toHaveProperty('totalTokens')
   })
 
-  it('RT-5#1：tokens 分量全部不可解 → 整条 usage 不写 + part 级降级登记', () => {
+  it('RT-5#1：tokens 分量全部不可解 → 零 usage 兜底（不变量门）+ part 级降级登记', () => {
     const msgs = [
-      // tokens 是 record 但无任何可解分量；cost 也缺失 → usage 整条跳过
+      // tokens 是 record 但无任何可解分量；cost 也缺失 → 真实 usage 无从映射
       assistantMessage([stepStart(), textPart('x', 2500), stepFinish('stop', { cache: {} })]),
     ]
     const out = buildZcodeSessionFile(msgs, 'T', HEADER)
     const { entries } = parseOutput(out)
     const a = entries[1] as { message: Record<string, unknown> }
-    expect(a.message).not.toHaveProperty('usage')
+    // 2026-09-21 毒消息事故后新契约：不可解不等于可缺键——零值兜底（pi 读面裸读）
+    expect(a.message.usage).toMatchObject({ totalTokens: 0 })
     // 本 fixture 唯一损失即该登记：结构化形态（code + count + sample 定位源消息）
     expect(out.degradations).toHaveLength(1)
     expect(out.degradations[0]).toMatchObject({ code: 'dropped_transient', count: 1, sample: { messageId: 'm-asst' } })
@@ -886,5 +888,102 @@ describe('端到端：fixture 库 → ZcodeImportSource.prepareImport + write', 
     const source = new ZcodeImportSource({ getHostDbPath: () => dbPath })
     const artifact = await source.prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId, dbPath })
     await expect(artifact.write(join(fixturesRoot, 'drift-tmp.jsonl'))).rejects.toThrow('读取 zcode 会话库失败')
+  })
+})
+
+// ── T3c 事故回归（2026-09-21 毒消息）：取消/失败轮的 stopReason 语义与 usage 不变量 ─────
+// 事故链：zcode 取消轮（data.error.turnResult=cancelled、无 step-finish part）→ 旧实现
+// 尾段 'stop' 保底且不带 usage → pi 读面对「非 aborted/error 的 assistant」裸读 usage
+// （stats 聚合 agent-session.js:2678 / turn 前上下文扫描 :2721）→ 导入后续聊即崩。
+// pi dist 真实加载的不变量断言在同目录 pi-reader-invariant.test.ts（PS-41 探针）。
+describe('T3c cancelled/error turn regression (poison-message incident)', () => {
+  const CANCELLED_ERROR = {
+    name: 'AiSdkModelAdapterError',
+    data: { message: 'Model request was cancelled.', code: 'model_request_cancelled', turnResult: 'cancelled' },
+  }
+
+  function assistantOf(msgs: ZcodeMessageInput[]): Array<{ message: { stopReason?: string; usage?: Record<string, unknown> } }> {
+    const { entries } = parseOutput(buildZcodeSessionFile(msgs, 'T', HEADER))
+    return entries.filter(
+      (e) => (e as { message?: { role?: string } }).message?.role === 'assistant',
+    ) as Array<{ message: { stopReason?: string; usage?: Record<string, unknown> } }>
+  }
+
+  it('取消轮（无 step-finish + data.error.cancelled）→ aborted + 零 usage（不变量门兜底）', () => {
+    const msgs = [
+      assistantMessage(
+        [stepStart(), reasoningPart('半截思考', 2100)],
+        { error: CANCELLED_ERROR, providerId: 'account:p', modelId: 'GLM-5.3' },
+      ),
+    ]
+    const [a] = assistantOf(msgs)
+    expect(a).toBeDefined()
+    expect(a.message.stopReason).toBe('aborted')
+    expect(a.message.usage).toEqual({
+      input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, cost: { total: 0 },
+    })
+  })
+
+  it('失败轮（data.error 无 turnResult）→ error', () => {
+    const msgs = [
+      assistantMessage([stepStart(), textPart('部分输出', 2200)], {
+        error: { name: 'AiSdkModelAdapterError', data: { code: 'model_error' } },
+      }),
+    ]
+    const [a] = assistantOf(msgs)
+    expect(a.message.stopReason).toBe('error')
+    expect(a.message.usage).toBeDefined()
+  })
+
+  it('已收口段保留 finish 语义；仅未收口尾段吃 error 覆盖', () => {
+    const msgs = [
+      assistantMessage(
+        [
+          stepStart(),
+          textPart('第一步完成', 2100),
+          stepFinish('stop', { input: 100, output: 20, total: 120 }, 0),
+          reasoningPart('尾段思考', 2600),
+        ],
+        { error: CANCELLED_ERROR },
+      ),
+    ]
+    const asst = assistantOf(msgs)
+    expect(asst).toHaveLength(2)
+    expect(asst[0].message.stopReason).toBe('stop')
+    expect(asst[0].message.usage).toMatchObject({ input: 100, totalTokens: 120 })
+    expect(asst[1].message.stopReason).toBe('aborted')
+    expect(asst[1].message.usage).toMatchObject({ totalTokens: 0 })
+  })
+
+  it('step-finish tokens 全分量不可解 → 降级登记 + 零 usage 兜底，finish 语义保留', () => {
+    const msgs = [assistantMessage([stepStart(), textPart('x', 2100), stepFinish('stop', { input: 'NaN' })])]
+    const out = buildZcodeSessionFile(msgs, 'T', HEADER)
+    const [a] = assistantOf(msgs)
+    expect(a.message.stopReason).toBe('stop')
+    expect(a.message.usage).toMatchObject({ totalTokens: 0 })
+    expect(
+      out.degradations.some((d) => d.code === 'dropped_transient' && d.sample?.messageId === 'm-asst'),
+    ).toBe(true)
+  })
+
+  it('未知 finish 值（有收口）→ stop 保底 + 真实 usage 直通', () => {
+    const msgs = [
+      assistantMessage([stepStart(), textPart('x', 2100), stepFinish('mystery-finish', { input: 5, output: 5, total: 10 })]),
+    ]
+    const [a] = assistantOf(msgs)
+    expect(a.message.stopReason).toBe('stop')
+    expect(a.message.usage).toMatchObject({ totalTokens: 10 })
+  })
+
+  it('无 error 证据的未收口尾段 → stop 保底 + 零 usage（不变量门独立于 error 覆盖生效）', () => {
+    const msgs = [assistantMessage([textPart('半截', 2100)])]
+    const [a] = assistantOf(msgs)
+    expect(a.message.stopReason).toBe('stop')
+    expect(a.message.usage).toMatchObject({ totalTokens: 0 })
+  })
+
+  it('step-start-only 取消消息（无内容 part）→ 不产 assistant entry（空段丢弃，行为钉住）', () => {
+    const msgs = [assistantMessage([stepStart()], { error: CANCELLED_ERROR })]
+    expect(assistantOf(msgs)).toHaveLength(0)
   })
 })

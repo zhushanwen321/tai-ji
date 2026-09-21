@@ -149,6 +149,43 @@ function mapStopReason(zcodeFinish: unknown): string {
   return typeof zcodeFinish === 'string' ? (STOP_REASON_MAP[zcodeFinish] ?? 'stop') : 'stop'
 }
 
+/**
+ * 未收口段（无 step-finish 闭合）的 stopReason：消息级 data.error 优先（T3c 事故补强，
+ * 2026-09-21 毒消息事故——取消轮无 step-finish，finish 兜底把它伪装成 'stop'，而 pi
+ * 0.84.4 读面对「非 aborted/error 的 assistant」裸读 usage：stats 聚合 agent-session.js
+ * :2678（reading 'input'）、turn 前上下文扫描 :2721（reading 'totalTokens'）、overflow
+ * 检查 usage.input——伪 stop + 无 usage 导入后续聊即崩）。turnResult cancelled →
+ * 'aborted'（pi 语义 = 用户中止），其余 error 家族 → 'error'；两态 pi 守卫均跳过。
+ * 段自身有 step-finish 收口时不走本函数（见 closeSegment）。
+ */
+function unsealedStopReason(data: Record<string, unknown>): string {
+  const error = isRecord(data.error) ? data.error : undefined
+  if (error === undefined) return 'stop'
+  const errData = isRecord(error.data) ? error.data : undefined
+  const turnResult = typeof errData?.turnResult === 'string' ? errData.turnResult : undefined
+  if (turnResult === 'cancelled') return 'aborted'
+  return 'error'
+}
+
+/**
+ * 产物不变量门（A3）：assistant entry 恒带 usage 对象——pi 读面三处裸读（见
+ * unsealedStopReason 注释）以「stopReason 非 aborted/error ⇒ usage 在场」为隐式前提
+ * （pi 原生写侧连错误轮都写全零 usage；全零 = pi 的「无测量数据」合法编码，守卫按
+ * 无效跳过、零贡献进统计）。step-finish 缺席（取消轮）或 tokens 不可解时零值兜底；
+ * 不进降级通道——这是期望内的忠实映射（非正常收口已由 stopReason 显形），非异常。
+ */
+function zeroUsage(): Record<string, unknown> {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 0,
+    totalTokens: 0,
+    cost: { total: 0 },
+  }
+}
+
 // ── 小型运行时守卫（输入是外部宽形态 JSON，禁 any，malformed 降级不抛错）────────────────
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -396,7 +433,7 @@ export function buildZcodeSessionFile(
   //   dangling = summaryMessageId 指向的消息不在行集（schema 漂移信号 → custom + compaction_unlinked）。
   // 未登记 = 正常孤儿（走现状 custom 通道不计降级）或宿主被丢弃（随宿主消失，已被丢弃决策接受）。
   const compactionDisposition = new WeakMap<Record<string, unknown>, 'merged' | 'dangling'>()
-  messages.forEach((msg, i) => {
+  messages.forEach((msg) => {
     const semantics = isRecord(msg.data.semantics) ? msg.data.semantics : undefined
     for (const part of msg.parts) {
       if (part.type !== 'compaction') continue
@@ -607,8 +644,11 @@ function convertAssistantMessage(
         ...(tsMs !== undefined && { timestamp: tsMs }),
         ...(providerId !== undefined && { provider: providerId }),
         ...(modelId !== undefined && { model: modelId }),
-        ...(usage !== undefined && { usage }),
-        stopReason: mapStopReason(finishReason),
+        // 产物不变量门：usage 恒在场（缺 → 零值兜底，zeroUsage 注释）
+        usage: usage ?? zeroUsage(),
+        // 段有 step-finish 收口 → 采信其 finish；未收口段（取消/失败尾段）→ 消息级
+        // data.error 优先，无 error 证据才 'stop' 保底（T3c 事故补强）
+        stopReason: finishReason !== undefined ? mapStopReason(finishReason) : unsealedStopReason(data),
       },
     })
     for (const toolResult of segment.toolResults) {
@@ -651,7 +691,8 @@ function convertAssistantMessage(
     }
     handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations, compactionDisposition)
   }
-  // 消息结束边界：未收口且有内容则闭合（T3c 尾段 → stop 保底；无 step-finish 即无 usage）
+  // 消息结束边界：未收口且有内容则闭合（尾段 stopReason 走 data.error 优先的
+  // unsealedStopReason；usage 无源则零值兜底——取消/失败轮的标准落点）
   closeSegment(undefined, undefined)
 }
 

@@ -157,6 +157,8 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 
 **策略 → pi entry 落点**：`realUserInput` → `message` role=user；`visibleAssistant` → `message` role=assistant + toolResult；`compactSummary` → `compaction` entry（见 §6.2）；`providerContextOnly`/`hiddenSynthetic`/`timelineOnly` → 丢弃 + 降级计数；闭集外的 kind/source → 丢弃 + `conversion_unclassified` 独立告警（不 fail-fast、不静默按 role 兜底）。
 
+**assistant 产物的 pi 读面不变量（2026-09-21 毒消息事故后 [HISTORICAL] 强制）**：① 每条 assistant entry **恒带 usage 对象**（step-finish tokens 可解 → 真实值；缺失/不可解 → 全零兜底）——pi 0.84.4 读面无守卫（pi-semantics PS-41：stats 聚合 `agent-session.js:2678` 读 `.input`、turn 前上下文扫描 `:2721` 读 `.totalTokens`），缺键即「导入后 stats 恒败 / 续聊即死」（排障见 TROUBLESHOOTING §20）；② 未收口段（无 step-finish 闭合——典型 = zcode 取消轮，消息级 `data.error.turnResult='cancelled'`）的 stopReason 由消息级 error 裁决：cancelled → `aborted`（pi 语义 = 用户中止）、其余 error 家族 → `error`——段自身的 step-finish finish 仅在收口时采信；③ 空内容段不产 entry（step-start-only 取消消息自然消失，行为由测试钉住）。
+
 **实测分布（全库，0.16.5）**：user 消息约 3.3 万条，真人 `user_prompt` 约 1.1 万，**合成消息约 2.2 万（67%）**——`todo_reminder` 2.4 万 / `background_notification` 6.1 千 / `system_reminder` 1.9 千 / `subagent_notification` 391 / `fork_notice` 15。assistant 消息 32.3 万条（`assistant_response` 25.1 万 + 无 kind 6.7 万 + `timeline_event` 4.5 千）。
 
 ### 6.2 压缩记录与摘要的关联（`compaction` part 无摘要文本，摘要在平行消息里）
