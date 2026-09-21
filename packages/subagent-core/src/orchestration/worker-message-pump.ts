@@ -646,7 +646,10 @@ async function persistTerminalProjection(
  * 同款推导纪律：ask 级取证指针已随 ask-settled 落账（dispatchAskSettled 填充），
  * 终局投影从事件流读回，不引入第二写点、不扩 run-settled 载荷）。journal 读取
  * 失败（IO 异常）降级为 undefined 并 error 留痕——取证引用缺失不阻断终局投影
- * （manifest 的 outcome/errorCode 权威面独立于本字段）。
+ * （manifest 的 outcome/errorCode 权威面独立于本字段）。多 ask run 下的取值是
+ * 「最后一帧带路径」的时序近似而非归因权威：脚本吞掉早先 ask 失败后自身错误
+ * 终局时，本字段可能指向与终局无关的 ask 的 tee（结构性精确不可得——run-settled
+ * 载荷无 ask 关联键，词表边界见 D5 表）；单 ask 失败（主流场景）精确。
  */
 async function lastStderrTeePathFromJournal(runId: string): Promise<string | undefined> {
   try {

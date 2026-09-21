@@ -29,7 +29,7 @@
  *
  * 写语义：每次 spawn 全量重算并覆盖写（同目录 tmp + rename 原子替换），不 append——
  * 覆盖写天然清理已禁用 extension 的历史值；并发 spawn 各写各的全量集（tmp 名含
- * pid/时戳/序号不互撞），mandatory 18 包恒传保证最小集稳定（§11.11）。写入失败不阻断
+ * pid/时戳/序号不互撞），mandatory builtin 恒传保证最小集稳定（§11.11）。写入失败不阻断
  * spawn：console.error 出声后返回（宁漏不崩——reap 侧对清单缺失本就跳过收殓，
  * fail-safe 方向 = 宁漏不误杀）。
  *

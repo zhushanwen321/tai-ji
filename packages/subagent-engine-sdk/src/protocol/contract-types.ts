@@ -345,9 +345,11 @@ export interface AgentOutcome {
    * 承载形态选 run 终态应答（本类型）的字段扩展而非 AgentEvent 词表变体，判据：
    * ① 失败伴随路径的语义本就是终态诊断引用，与终态应答同帧（引擎应答 failed /
    *    进程异常退出路径才上报；成功不报）；
-   * ② 一 run 一应答，宿主按构造与 ask 一一对应——事件通道按 record 键无 callId
-   *    归属，并行 ask 下无法消歧到具体 ask（宿主 ask-settled 载荷的填充源是
-   *    call.result，与终态应答同链，单源直达）；
+   * ② 一 run 一应答，宿主按构造与 ask 一一对应——事件通道虽经 runId 路由具备
+   *    run 级归属面（2026-09-22 定向复审更正：event 通知帧 params required
+   *    ["runId","seq","event"]，runId=taskId 即 ask 粒度），但终态诊断引用与终态
+   *    应答同帧单源直达（outcome → outcomeToWorkflowResult → call.result →
+   *    ask-settled 载荷），经事件通道中转反而多一跳；
    * ③ additive 可选字段向后兼容（不支持的引擎不设值 = 零行为差；旧宿主未知字段
    *    容忍），不触发事件词表 C3 四步义务（词表/schema enum 零改动）。
    * 仅诊断引用——文件受引擎侧尺寸轮转与过期清理管辖，读侧不得假设其永存。

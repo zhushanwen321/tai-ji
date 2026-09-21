@@ -323,7 +323,7 @@ describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
     expect(readdirSync).not.toHaveBeenCalled()
   })
 
-  it('argv 含 -nc 短形式 → 同样跳过 global 注入（与 argv-mirror 两种形式一致）', () => {
+  it('argv 含 -nc 短形式 → 同样跳过 global 注入（pi CLI 等价短形式，守卫两种形式都命中）', () => {
     setupFs({
       config: `{"append": {"enabled": true, "prompt": "APPEND-TEXT"}, ${CAP_OFF}}`,
       globalEntries: ['AGENTS.md'],

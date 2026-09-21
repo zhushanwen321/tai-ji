@@ -9,9 +9,11 @@
  *   但无 --no-extensions）/ 带 --no-extensions 但值不在清单——三者都不匹配。
  * - 清单 fail-safe（V10④）：清单缺失/读不到/坏 JSON/非字符串数组 → 跳过收殓 + warn
  *   日志（宁漏不误杀）；真实读路径用 mkdtemp 自建自删（fs-guard 白名单内）。
- * - 收殓范围扩大（设计 §6.12）：孤儿 subagent/relay（mirrorFlags 镜像主进程 staged
- *   --extension + --no-extensions）ppid=1 被收；活跃 subagent ppid=主 pi pid 不收；
- *   两轮时序 = 第一轮 ppid≠1 不收 → reparent 后第二轮 ppid=1 收。
+ * - 收殓范围扩大（设计 §6.12）：孤儿 subagent/relay（引擎 CLI 直 spawn，argv 由
+ *   pi-subagent-cli buildSpawnArgs 构造——恒定 --no-extensions 基座 + --extension
+ *   白名单集，staged 值登记进 spawn-markers 清单）ppid=1 被收；活跃 subagent
+ *   ppid=父进程活值（引擎 CLI / relay 受托 runtime）不收；两轮时序 = 第一轮
+ *   ppid≠1 不收 → reparent 后第二轮 ppid=1 收。
  * - 编排时序：SIGTERM → 宽限 → 探活（signal 0）→ 仍活才 SIGKILL；SIGTERM 即 ESRCH
  *   按「已回收」计且不等待宽限；枚举失败 / Windows 降级 unsupported 不抛。
  *
@@ -54,7 +56,7 @@ function piCmd(extensionPath: string): string {
   return `/opt/pi/pi --mode rpc --no-extensions --approve --extension ${extensionPath}`
 }
 
-/** 孤儿 subagent 的 mirror argv（session-runner mirrorFlags 镜像主进程 staged 注入段，形态与主 pi 同）。 */
+/** 孤儿 subagent 的 argv（引擎 CLI 直 spawn 形态：buildSpawnArgs 恒定 --no-extensions 基座 + --extension/--skill 注入段，与主 pi 同判据形态）。 */
 function subagentMirrorCmd(extensionPath: string): string {
   return `/opt/pi/pi --mode rpc --no-extensions --approve --extension ${extensionPath} --skill /Users/tester/Code/taiji/extensions/universal/subagent-workflow`
 }
@@ -198,14 +200,14 @@ describe('findOrphanPiRows（判据④：ppid=1 reparent 证据）', () => {
     expect(findOrphanPiRows(rows, [...MARKERS], OWN_PID)).toEqual([])
   })
 
-  it('收殓范围扩大（设计 §6.12）：孤儿 subagent mirror argv（staged --extension + --skill）ppid=1 被收', () => {
+  it('收殓范围扩大（设计 §6.12）：孤儿 subagent argv（--extension + --skill 白名单值）ppid=1 被收', () => {
     const rows = [row(401, 1, subagentMirrorCmd(MARKERS[0]))]
     expect(findOrphanPiRows(rows, [...MARKERS], OWN_PID).map(r => r.pid)).toEqual([401])
   })
 
-  it('两轮时序（V10③）：活跃 subagent（ppid=主 pi pid）第一轮不收 → 主 pi 死后 reparent ppid=1 第二轮收', () => {
+  it('两轮时序（V10③）：活跃 subagent（ppid=父进程活值）第一轮不收 → 父进程死后 reparent ppid=1 第二轮收', () => {
     const mainPiPid = 500
-    // 同一 subagent pid、同一 mirror argv，仅 ppid 随 reparent 变化
+    // 同一 subagent pid、同一 argv，仅 ppid 随 reparent 变化（现行父进程 = 引擎 CLI / relay 受托 runtime）
     const firstRound = [row(402, mainPiPid, subagentMirrorCmd(MARKERS[0]))]
     expect(findOrphanPiRows(firstRound, [...MARKERS], OWN_PID)).toEqual([])
     const secondRound = [row(402, 1, subagentMirrorCmd(MARKERS[0]))]
