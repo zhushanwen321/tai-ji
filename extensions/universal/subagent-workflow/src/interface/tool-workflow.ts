@@ -4,7 +4,7 @@
  * 合并原 tool-workflow.ts + tool-workflow-run.ts 为单 tool。
  *
  * Actions:
- * - run: registry.get → runWorkflow（直接启动，无需用户确认）
+ * - run: registry.getPath → runWorkflow（直接启动，无需用户确认）
  * - status: 列出 runs（deps.runs）
  * - abort: 调 abortRun
  *
@@ -35,6 +35,11 @@ import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { abortRun, runWorkflow } from "@zhushanwen/subagent-core";
 import type { RunStore } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
+// [D8 创建期拒单] 模型目录分类裁决 + 宿主注入的模型清单投影访问器（既有投影面：
+// session_start 把 ctx.modelRegistry 注入 ModelConfigService 单例——extension 零
+// runtime import，H2/P5 宿主注入同款先例）。
+import { assertModelInCatalog } from "@zhushanwen/subagent-core";
+import { getModelConfigService } from "@zhushanwen/subagent-core";
 // D9 closure：core args-meta 消费（reservedKeys 注入见下方 ARGS_META_OPTIONS）
 // MAX_TIMER_DELAY_MS：OR-1 消费（barrel 导出，深路径经 u-2c 删通配后 tsc 不可解析）
 import {
@@ -80,7 +85,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
 const WorkflowParams = Type.Object({
   action: StringEnum(WORKFLOW_ACTIONS, { description: "Workflow action to execute" }),
   name: Type.Optional(
-    Type.String({ description: "Workflow ref: builtin/saved workflow name from <available_workflows> (C5: run accepts names), or absolute path to the .js script (use <location>; run action)" }),
+    Type.String({ description: "Workflow ref: absolute path to the .js script — use the <location> value from <available_workflows> (bare names are rejected; run action)" }),
   ),
   slug: Type.Optional(
     Type.String({
@@ -270,7 +275,7 @@ export function registerWorkflowTool(
       "<available_workflows> (injected each turn). For parameter details, read the <location> " +
       "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
       "workflow-script generate for patterns already covered by available workflows.",
-      "run: pass the workflow ref as name — the listed <name> (builtin/saved workflow) or its <location> absolute .js path from <available_workflows> — then start in background (no user confirmation needed).",
+      "run: pass the workflow ref as name — ALWAYS the <location> absolute .js path from <available_workflows> (bare names are rejected with a not-found error listing locations).",
       "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
       "Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.",
       "Call shapes (JSON): " +
@@ -280,9 +285,9 @@ export function registerWorkflowTool(
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
-      "CRITICAL: For orchestration patterns, ALWAYS use action:run with an existing built-in " +
-      "name — NEVER use workflow-script action:generate to recreate patterns already covered " +
-      "by available workflows. workflow-script generate is ONLY for novel patterns.",
+      "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
+      "path of a listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
+      "already covered by available workflows. workflow-script generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowParams,
 
@@ -372,16 +377,14 @@ export async function actionRun(
   // 平铺事故更严重。m6：先 registry.getPath（动态参数集来源——schema 即 SSOT），
   // not_found 优先返回；平铺检测报错带 Correct 正例纠正。
   //
-  // C5③（convergence D-4 pi 半边）：name 解析先查内置/已保存 workflow 名
-  // （registry.get——内置 chain/parallel/map-reduce/scatter-gather/review-fix-loop 或
-  // 用户 project/user 级脚本名，按 tmp>project>user>npm 优先级合并）——内置名命中
-  // 直接用内置脚本；未命中再走 getPath（绝对路径，~/ 展开——normalizeRef 既有）。
-  // 严格超集：现有路径用法零变化（路径串不会撞 workflow 名——名字是简单标识符），
-  // 两者都未命中仍走原 not_found 报错（建议清单不变）。
-  let script = await deps.registry.get(name);
-  if (!script) {
-    script = await deps.registry.getPath(name);
-  }
+  // [D4-1 按名解析退役] name 解析 = 路径单通道（getPath：绝对路径 + ~/ 展开，
+  // normalizeRef 既有——相对路径/裸名一律 null → not_found 拒单，既有文案列全部
+  // 可用条目并附 location，失败一次即可按绝对路径自救）。原 registry.get（内置名 +
+  // 用户保存名）按名解析整体退役：派发终态形态 = 全路径（用户裁决 2026-09-21），
+  // P5 修复发现面后注册表会命中内置名让裸名「复活」——反向违反终态裁决，故机制
+  // 删除而非禁用。行为变更四要素：量级 = 裸名派发调用；旧行为 = registry.get 命中
+  // 即启动；新行为 = not_found 拒单（零 token 沉没）；恢复 = 按清单 location 重试。
+  const script = await deps.registry.getPath(name);
   // W4c：config-loader 的 toCachedMeta 对不可读/不存在文件返回 available:false 的
   // stub（非 undefined），仅判 !script 会绕过 not_found → 空 sourceCode 假启动
   //（W4b verifier 探针实测复现）。与下方 suggestions 分支的 wf.available 过滤口径对齐。
@@ -390,12 +393,10 @@ export async function actionRun(
  // 返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
     const all = await deps.registry.loadAll();
     const suggestions = formatAvailableWorkflowList(all);
-    // [按名解析自救指引] 摘要逐条附绝对路径 location：run 的 name 形参最贴近的
+    // [全路径自救指引] 摘要逐条附绝对路径 location：run 的 name 形参最贴近的
     // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
-    // 上下文）——模型按清单里的名字重试（8.6.0 实装 getPath-only 时代的实测失败
-    // 形态，2026-09-14 嵌套 subagent 现场）还是注定 throw；带上 location 后失败
-    // 一次即可按绝对路径自救。main 的 C5③ 按名解析（registry.get 内置/已保存名
-    // 优先）是主修复，本行是清单侧恢复指引闭环。
+    // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
+    // （D4-1），location 是唯一活路；同案文案见 launcher 嵌套调用拒单（core）。
     throw new Error(
       `Workflow '${name}' not found. Available (name — use the absolute location path as 'name' when the bare name is rejected):\n${suggestions || "  (none)"}`,
     );
@@ -433,6 +434,26 @@ export async function actionRun(
   // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链（判定与文案单点在
   // core shared/entry-guards；LLM 可据消息自纠：clamp 或省略走 unlimited 语义）。
   assertEntryTimeBudget(time);
+
+  // [D8 创建期拒单] 工具参数 model 是创建期唯一静态声明源（agent 资产 frontmatter
+  // model 随脚本 JS 动态求值不可静态解析——由派发期 isPiRoute 对称校验覆盖，
+  // 见 workflow-dispatch.resolveWorkflowIdentity）。查无 = run 创建失败（同步 throw，
+  // 零 spawn 零 token），错误列可用清单 + 分类修复指引（查无 vs provider 配置漂移）。
+  // 目录经宿主注入投影访问：session_start 已把 ctx.modelRegistry 注入
+  // ModelConfigService 单例；单例缺席（生产不可达——tool execute 前必有 session_start）
+  // 降级跳过 + warn 留痕，派发期 identity 解析仍是权威裁决。
+  if (params.model !== undefined) {
+    const modelService = getModelConfigService();
+    if (modelService === null) {
+      logger.warn(
+        "[tool-workflow] model catalog unavailable (model service not initialized) — creation-time model check skipped; dispatch-time identity resolution remains authoritative",
+      );
+    } else {
+      assertModelInCatalog(params.model, modelService.getModelRegistry(), {
+        source: "run-level model override",
+      });
+    }
+  }
 
  // 构建 RunSpec + 启动（m3：parameters 从 script.meta 拷贝——chokepoint 校验用；
  // 校验失败 → ArgsValidationError 直接 throw 给 pi（W4：err.message 含 §5.3 指引，

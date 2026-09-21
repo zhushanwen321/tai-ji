@@ -550,6 +550,12 @@ jobs:
       - name: pi sync derived anchors guard
         run: node scripts/check-pi-sync.mjs
 
+      # pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8，与 pre-commit
+      # 同源直调）：extensions/ agent 资产 frontmatter model 声明 vs 内置 provider 目录
+      # 快照 diff。CI 无 staged 上下文——脚本本身即全量扫描模式，PR 面等价拦截（D7 通则）。
+      - name: Model reference drift guard (D8)
+        run: node scripts/check-model-references.mjs
+
       # G3 思考档位差分探针（pi-boundary-reliability D7-G3「CI invariants 同步」）：
       # 能力注册表计算路径 vs pi-ai 同源函数直调逐模型比对——防 registry 自身漂移
       #（U6 删 resolveAvailableLevels 后探针改守卫 registry，见脚本头注）。

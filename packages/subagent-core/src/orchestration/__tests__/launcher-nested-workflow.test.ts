@@ -140,6 +140,8 @@ function makeDeps(opts: {
   if (opts.childRun) runs.set(MOCK_RUN_ID, opts.childRun);
   const registry = opts.registry ?? {
     getPath: vi.fn(async () => opts.script),
+    // not found 拒单文案现附可用清单（D4-1 嵌套调用同案补齐）——清单源 loadAll。
+    loadAll: vi.fn(async () => (opts.script ? [opts.script] : [])),
   };
   return {
     registry,
@@ -187,7 +189,11 @@ describe("executeNestedWorkflow", () => {
 
     const result = await executeNestedWorkflow("missing", {}, parent, deps);
 
-    expect(result.error).toBe("Workflow 'missing' not found");
+    // D4-1 嵌套调用拒单同案补齐：not found 附可用清单与 location 自救指引
+    //（与顶层 tool 拒单同文案族）。
+    expect(result.error).toContain("Workflow 'missing' not found");
+    expect(result.error).toContain("Available");
+    expect(result.error).toContain("(none)"); // registry 空态显式
     expect(result.content).toBe("");
     expect(runWorkflow).not.toHaveBeenCalled();
     // E8：早返回也走 finally——Step 2 注册的 listener 被移除（原实现泄漏）

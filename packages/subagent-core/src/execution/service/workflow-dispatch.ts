@@ -33,6 +33,9 @@ import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
+// [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
+// orchestration → shared 叶子方向，无环）。
+import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
@@ -219,7 +222,8 @@ export class WorkflowDispatch {
     const route = await this.routeWorkflowEngine(opts, agentConfig);
     // ② 预检（capability-gate 单点；AgentCallOpts 直传——TaskShapeForGate 是结构子集）
     assertTaskShapeSupported(route.engineId, route.engine.capabilities(), opts);
-    // ③ 非 pi 引擎 model 校验 + identity 解析（详见 resolveWorkflowIdentity）+
+    // ③ 引擎感知 model 校验（非 pi = validateModelForEngine；pi = D8 派发期对称
+    // 校验，详见 resolveWorkflowIdentity）+ identity 解析 +
     // record 引擎留痕盖章（详见 stampWorkflowEngineTrace）。
     const identity = await this.resolveWorkflowIdentity(route, opts, execOpts, agentConfig);
     this.stampWorkflowEngineTrace(route, execOpts);
@@ -256,10 +260,22 @@ export class WorkflowDispatch {
     return routed instanceof Promise ? await routed : routed;
   }
 
-  /** [executeWorkflowAgent 阶段拆分] 八步迁移③：非 pi 引擎 model 校验：经
-   *  resolveIdentityForEngine 内的 validateModelForEngine（与 chat 域 executeViaEngine
-   *  同一入口同一文案；model 源 = 显式 opts.model > agent frontmatter——u-h2 D2-1③
-   *  同款）。model 源非空时同步覆写 execOpts.model（record 留痕 + taskSpec 直传一致）。 */
+  /** [executeWorkflowAgent 阶段拆分] 八步迁移③：引擎感知的 model 校验 + identity 解析。
+   *
+   * 非 pi 引擎：经 resolveIdentityForEngine 内的 validateModelForEngine（与 chat 域
+   * executeViaEngine 同一入口同一文案；model 源 = 显式 opts.model > agent frontmatter
+   * ——u-h2 D2-1③ 同款）。model 源非空时同步覆写 execOpts.model（record 留痕 +
+   * taskSpec 直传一致）。
+   *
+   * [D8 派发期对称校验] pi 引擎：对称补齐目录校验——脚本内 agent({model}) 字面量与
+   * agent ref 的 frontmatter model 创建期不可静态可得（JS 动态求值），在此 identity
+   * 解析处（路由后、record 创建/池 acquire 前）经模型目录分类裁决：查无 → 同步抛错
+   * 附可用清单与漂移分类修复指引，该 ask 派发前失败（烧 token 上限 = run 创建开销 +
+   * 已完成 ask）。引擎感知在该点天然成立（isPiRoute 分流）；zcode 引擎 run 走
+   * validateModelForEngine 域（builtin:* 套餐族模型空间单独立设计），跳过目录校验
+   * 不误拒。identity 解析内部 resolveModel → assertCanonicalModelRef 仍是解析权威
+   * （孪生守卫等全量裁决在彼执行，本层只补分类化前置拒单）。
+   * 范围限定（用户裁决 2026-09-21）：仅 pi 引擎。 */
   private async resolveWorkflowIdentity(
     route: EngineRouteResult,
     opts: AgentCallOpts,
@@ -268,6 +284,14 @@ export class WorkflowDispatch {
   ): Promise<ResolvedIdentity> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     const engineModel = isPiRoute ? undefined : (opts.model ?? agentConfig?.model);
+    if (isPiRoute) {
+      const declaredModel = opts.model ?? agentConfig?.model;
+      if (declaredModel !== undefined) {
+        assertModelInCatalog(declaredModel, this.deps.getModelService().getModelRegistry(), {
+          source: "workflow agent call",
+        });
+      }
+    }
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(execOpts)
       : this.deps.resolveIdentityForEngine(

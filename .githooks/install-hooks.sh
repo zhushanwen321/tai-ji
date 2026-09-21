@@ -1932,6 +1932,29 @@ else
 fi
 
 # ============================================================================
+# pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8 机器守卫）
+#   scripts/check-model-references.mjs：extensions/ 内 agent 资产 frontmatter 的
+#   model 声明 vs pi 内置 provider 目录快照（builtin-providers.json）diff——provider
+#   配置漂移（pi 升级后 provider 退役/模型 id 下架）时引用漂移在提交期红，不等
+#   run 烧 token（G4）。触发面 = extensions 下 .md 资产 / 快照本体 / 守卫脚本自身；
+#   快照变更入触发面是关键——pi 升级重生成快照后，存量声明即时对账。
+#   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+MODEL_REF_STAGED=$(git diff --cached --name-only -- extensions/ packages/runtime/src/generated/builtin-providers.json scripts/check-model-references.mjs)
+if echo "$MODEL_REF_STAGED" | grep -qE "^extensions/.*\.md$|^packages/runtime/src/generated/builtin-providers\.json$|^scripts/check-model-references\.mjs$"; then
+    print_section "[pi 资产模型引用漂移守卫]"
+    if ! node scripts/check-model-references.mjs; then
+        echo -e "${RED}[ERROR] 模型引用漂移——资产声明的 provider/model 不在内置 provider 目录快照内${NC}"
+        echo -e "${YELLOW}[FIX] 按上方 ✗ 明细修正声明，或（pi 升级后目录漂移）执行 pnpm gen:builtin-providers 重生成快照并对账后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] pi 资产模型引用漂移守卫通过（D8 机器守卫在案）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 extensions .md / 快照变更，跳过模型引用漂移守卫${NC}"
+fi
+
+# ============================================================================
 # 全部通过
 # ============================================================================
 
@@ -2028,6 +2051,7 @@ echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更�
 echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
 echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
 echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk typecheck（SDK 变更时触发：协议演进宪法 D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填）"
+echo -e "  ${GREEN}[+]${NC} pi 资产模型引用漂移守卫（extensions .md / 快照变更时触发：D8 agent 资产 model 声明 vs builtin-providers 快照 diff）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

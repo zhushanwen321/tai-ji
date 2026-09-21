@@ -12,7 +12,7 @@
  * 会让 workflow 仍 running，资源泄漏）。
  *
  * 流程：
- * 1. registry.get(name) → WorkflowScript（未找到返回 failed）
+ * 1. registry.getPath(name) → WorkflowScript（未找到返回 failed；按名解析已退役 D4-1）
  * 2. script.validate（lint 检查）→ 失败抛错（不进 runWorkflow）
  * 3. script.toExecutable → 可执行源
  * 4. 构建 RunSpec + runWorkflow(spec, deps, signal)
@@ -112,6 +112,36 @@ function formatLintErrorSummary(lintResult: LintResult): string {
     .filter((f) => f.severity === "error")
     .map((f) => `L${f.line}: ${f.message}`)
     .join("; ");
+}
+
+/**
+ * 可用 workflow 清单（not found 拒单的自救指引段；D4-1 嵌套调用同案补齐——顶层
+ * tool 拒单 2026-09-14 已带清单，此处补齐 runAndWait / executeNestedWorkflow 两个
+ * 内层入口的同一缺口）。每项两行（name + description，缩进 location 绝对路径）——
+ * 与 extension 侧 tool-shared.formatAvailableWorkflowList 输出形态一致（按名解析
+ * 已退役，location 是唯一可派发形态；合并不跨层——本函数住 core，extension 版
+ * 依赖 Interface 层文件，层边界即复制边界）。
+ */
+function formatAvailableWorkflowRefs(all: readonly WorkflowScript[]): string {
+  return all
+    .filter((wf) => wf.available)
+    .map(
+      (wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`,
+    )
+    .join("\n");
+}
+
+/**
+ * not found 拒单文案单点（runAndWait / executeNestedWorkflow 共用）：清单来自
+ * registry.loadAll() 现扫快照——调用方最贴近的可行动面（脚本嵌套调用时注入面
+ * 不可达），失败一次即可按 location 自救。
+ */
+async function workflowNotFoundMessage(name: string, deps: LauncherDeps): Promise<string> {
+  const all = await deps.registry.loadAll();
+  return (
+    `Workflow '${name}' not found. Available (name — use the absolute location path as 'name' when the bare name is rejected):\n` +
+    `${formatAvailableWorkflowRefs(all) || "  (none)"}`
+  );
 }
 
 /**
@@ -215,7 +245,7 @@ async function pollRunToResult(
  *
  * **脚本未找到**：返回 reason=failed（不抛错——编程调用方据 reason 判断）。
  *
- * @param name workflow 脚本名（registry.get 查找）
+ * @param name workflow 脚本引用（getPath 查找——绝对路径 + ~/ 展开；未找到返回 failed 附可用清单）
  * @param args 调用参数（worker 内 $ARGS 访问）
  * @param deps LauncherDeps（LifecycleDeps + registry）
  * @param signal 外部 abort signal（可选）
@@ -237,13 +267,13 @@ export async function runAndWait(
   timeoutMs?: number,
   model?: string,
 ): Promise<WorkflowRunResult> {
-  // 1. registry 查找脚本（workflowRef = 绝对路径，S2 路径统一）
+  // 1. registry 查找脚本（workflowRef = 绝对路径，S2 路径统一；按名解析已退役 D4-1）
   const script = await deps.registry.getPath(name);
   if (!script) {
     return {
       status: "done",
       reason: "failed",
-      error: `Workflow '${name}' not found`,
+      error: await workflowNotFoundMessage(name, deps),
       runId: "",
     };
   }
@@ -426,7 +456,7 @@ function toNestedCallResult(
  * 流程（6 步，Step 2-6 的机制细节见各 helper）：
  * 1. 循环检测——name 已在 parentWorkflowChain 中则拒绝（防 A→B→A 死循环）
  * 2. signal 继承——子 run 响应父 run abort（inheritParentSignal）
- * 3. registry.get + lint——失败返回 error result（不抛错，让脚本 soft-fail）
+ * 3. registry.getPath + lint——失败返回 error result（不抛错，让脚本 soft-fail；not found 附可用清单）
  * 4. 构建 RunSpec（共享父 Budget 引用 + parentWorkflowChain 延长）+ runWorkflow
  * 5. pollRunToResult 轮询至 done（复用 runAndWait 的轮询逻辑）
  * 6. 结果转换（toNestedCallResult）
@@ -434,7 +464,7 @@ function toNestedCallResult(
  * 不走 runAndWait：runAndWait 内部构建 RunSpec 不支持 parentWorkflowChain 与 budget
  * 共享引用，故直接构建 spec + runWorkflow + pollRunToResult。
  *
- * @param name 子 workflow 脚本名（registry.get 查找）
+ * @param name 子 workflow 脚本引用（getPath 查找——绝对路径 + ~/ 展开；未找到返回 error result 附可用清单）
  * @param args 调用参数（子 worker 内 $ARGS 访问）
  * @param parentRun 发起嵌套调用的父 WorkflowRun（budget 共享 + 循环链源）
  * @param deps LauncherDeps（与 runAndWait 同一组依赖 + registry）
@@ -463,10 +493,11 @@ export async function executeNestedWorkflow(
   // （含 chokepoint ArgsValidationError）与 not found/lint 早返回均走 finally 移除
   // parentSignal listener——修复原 try 外 runWorkflow 的泄漏路径）。
   try {
-    // Step 3: registry 查找 + lint（失败返回 error result，不抛错）
+    // Step 3: registry 查找 + lint（失败返回 error result，不抛错；not found 附
+    // 可用清单与 location 指引——D4-1 嵌套调用拒单同案补齐，脚本可据清单自救）
     const script = await deps.registry.getPath(name);
     if (!script) {
-      return { content: "", error: `Workflow '${name}' not found` };
+      return { content: "", error: await workflowNotFoundMessage(name, deps) };
     }
     const lintResult = script.validate();
     if (!lintResult.valid) {

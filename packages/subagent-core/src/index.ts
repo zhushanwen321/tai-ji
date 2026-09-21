@@ -243,6 +243,20 @@ export {
   setModelConfigService,
 } from "./execution/assembly/model-config-service.ts";
 
+// ModelCatalog：pi 引擎模型目录（D8 两层挂点的共享裁决面——workflow tool 创建期
+// 拒单 + workflow-dispatch 派发期对称校验同源消费；extensions 源文件只从 barrel
+// 消费 core 符号，不进 barrel 无法接线，H4 formatEmptyResourceList 同构先例）。
+export {
+  assertModelInCatalog,
+  resolveModelInCatalog,
+  type ModelCatalogEntry,
+  type ModelCatalogMiss,
+  type ModelCatalogMissClassification,
+  type ModelCatalogOptions,
+  type ModelCatalogResolution,
+  type ModelCatalogSource,
+} from "./orchestration/model-catalog.ts";
+
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
   bindNotifyLedgerHost,
