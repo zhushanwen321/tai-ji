@@ -23,6 +23,9 @@ import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
 
+// 与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
+const MAX_PLAN_REQUIREMENT_CHARS = 65_536
+
 /** JSONL 中的 custom entry 结构（照 subagent-extractor JsonlCustomEntry 简化形态）。 */
 interface JsonlCustomEntry {
   type: string
@@ -84,8 +87,8 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   const view: PlanStateView = {
     isActive: d.isActive === true,
     planFilePath: normalizeNonEmptyString(d.planFilePath),
-    // 64KB 与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
-    requirement: normalizeNonEmptyString(d.requirement, 64 * 1024),
+    // 与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
+    requirement: normalizeNonEmptyString(d.requirement, MAX_PLAN_REQUIREMENT_CHARS),
     templateName: normalizeNonEmptyString(d.templateName),
   }
   applyOptionalPlanFields(view, d)

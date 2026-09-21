@@ -195,8 +195,8 @@ export async function pruneStateFilesBeyondCap(
 // TTL 常量与 env 通道自 pi 宿主 jsonl-run-store 迁入（[P1b-2] 引入、[Q2] 单源化）：
 // 两宿主共用同一缺省保留期与测试期调低通道。
 
-/** 已终局 state 文件的 mtime TTL 缺省值（D5 清理规则②：run cap + 30 天 mtime TTL，两者同限已终局）。 */
-export const DEFAULT_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** 已终局 state 文件的 mtime TTL 缺省值 = 2_592_000_000ms（30 天；D5 清理规则②：run cap + 30 天 mtime TTL，两者同限已终局）。 */
+export const DEFAULT_STATE_TTL_MS = 2_592_000_000;
 
 /**
  * 已终局 run 的 mtime TTL env 通道（测试期调低用，形态对齐 cap 通道）：

@@ -25,7 +25,6 @@
 // 写面）；零时钟依赖进纯函数（now/windowMs 显式传参）。
 
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
 
 import { getLogger } from "../core/logger.ts";
 import {
@@ -175,8 +174,8 @@ export async function projectRunRegistryState(
 
 // ── interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-elapsed 行）──
 
-/** 放弃窗缺省值：7 天（D5 设计字面——任务级长跑 run 的保守放弃界）。 */
-export const DEFAULT_RUN_ABANDON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** 放弃窗缺省值：7 天 = 604_800_000ms（D5 设计字面——任务级长跑 run 的保守放弃界）。 */
+export const DEFAULT_RUN_ABANDON_WINDOW_MS = 604_800_000;
 
 /**
  * 放弃窗 env 通道（测试期调低用；TAIJI_ 前缀理由对齐 STATE_TTL_MS_ENV——pi 进程
