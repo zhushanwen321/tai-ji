@@ -14,9 +14,10 @@
 
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 
 // ── hoisted mocks（vi.mock 工厂 hoisting 不能引用外部 let/const） ──
 
@@ -42,6 +43,25 @@ vi.mock("@earendil-works/pi-coding-agent", () => piCodingAgentMock);
 vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/pi-pending-notifications", () => pendingNotificationsMock);
 vi.mock("@zhushanwen/session-delivery", () => sessionDeliveryMock);
+
+// 端到端用例（P5 staged 入扫描面）隔离真实用户目录：resource-discovery 用 homedir()
+// 推导 user-agents 根（~/.agents/workflows），不 mock 会让「内置条目存在/两次一致」
+// 断言依赖本机用户资产状态（resource-discovery.test.ts 同款手法）。
+const mockHomeDir = vi.hoisted(() => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  return fs.mkdtempSync(path.join(os.tmpdir(), "pihost-p5-home-"));
+});
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => mockHomeDir };
+});
+
+import { discoverResources } from "@zhushanwen/subagent-core";
+// clearFileCache 仅测试消费（barrel 收窄面外）——测试深路径经 vitest alias 正则
+// 重写到 core src 物理路径（B-2/D3 既有先例形态；specifier 不含 src/ 段）
+import { clearFileCache } from "@zhushanwen/subagent-core/shared/resource-discovery.ts";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
@@ -69,10 +89,22 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
   // skill-discovery.ts resolveSkillPath（join(getAgentDir(), "skills") +
   // join(getAgentDir(), "npm/node_modules")）。根列表按优先级低→高排列（D2）。
   const AGENT_DIR = "/fake/agent-dir";
+  const argvSaved = process.argv;
 
   function stubAgentDir(): void {
     vi.mocked(getAgentDir).mockReturnValue(AGENT_DIR);
   }
+
+  beforeEach(() => {
+    // 独立 pi 形态基线（argv 无 --extension）：P5 扫描根修正后 npm/npm-dev 根的
+    // 指向随形态分流——本 describe 全部锚定独立态推导，runner argv 形态不构成
+    // 契约，显式钉死防漂移（taiji 态断言见下方专属 describe）。
+    process.argv = ["node", "/pi", "--mode", "rpc"];
+  });
+
+  afterEach(() => {
+    process.argv = argvSaved;
+  });
 
   it("agents 四根：user-pi → npm → npm-dev → core 包父目录（C5⑥，source npm 追加末位）", () => {
     stubAgentDir();
@@ -104,15 +136,31 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
     expect(existsSync(join(coreRoot!.dir, "subagent-core", "agents"))).toBe(true);
   });
 
-  it("workflows 三根：与 agents 同构，末级目录名切换为 workflows", () => {
+  it("workflows 四根：与 agents 同构，末级目录名切换为 workflows，第 4 根 core 包父目录（P5 staged 副本入扫描面）", () => {
     stubAgentDir();
     const roots = createPiHostServices().discoveryRoots?.().workflows;
+
+    const require = createRequire(import.meta.url);
+    const anchor = require.resolve("@zhushanwen/subagent-core/workflows/README.md");
+    const coreParent = dirname(dirname(dirname(anchor)));
 
     expect(roots).toEqual([
       { dir: join(AGENT_DIR, "workflows"), source: "user-pi" },
       { dir: join(AGENT_DIR, "npm", "node_modules"), source: "npm" },
       { dir: join(AGENT_DIR, "extensions"), source: "npm-dev" },
+      // P5：workflows kind 的「刻意不注入」禁区拆除——内置 workflow 随 core 包入
+      // 扫描面（P-C6 裁决见 pi-host.ts 注释）
+      { dir: coreParent, source: "npm" },
     ]);
+  });
+
+  it("workflows 第 4 根下 subagent-core/workflows/ 存在内置 workflow 脚本（可派发前提）", () => {
+    stubAgentDir();
+    const roots = createPiHostServices().discoveryRoots?.().workflows;
+    const coreRoot = roots?.[3];
+
+    expect(coreRoot?.source).toBe("npm");
+    expect(existsSync(join(coreRoot!.dir, "subagent-core", "workflows"))).toBe(true);
   });
 
   it("skills 两根：user-pi + npm，无 npm-dev（对齐 skill-discovery 现状）", () => {
@@ -134,6 +182,78 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
 
     expect(second?.[0].dir).toBe(join(secondCallDir, "agents"));
     expect(first?.[0].dir).not.toBe(second?.[0].dir);
+  });
+});
+
+describe("createPiHostServices.discoveryRoots（P5 D4-2 扫描根修正：taiji 态形态感知）", () => {
+  const AGENT_DIR = "/fake/data-dir/agent";
+  const argvSaved = process.argv;
+
+  function stubAgentDir(): void {
+    vi.mocked(getAgentDir).mockReturnValue(AGENT_DIR);
+  }
+
+  afterEach(() => {
+    process.argv = argvSaved;
+  });
+
+  /** taiji 宿主注入态 argv（runtime spawn 主 pi 恒带 --extension staged 全量集）。 */
+  function withTaijiArgv(fn: () => void): void {
+    process.argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--extension", "/staged/resources/extensions/@zhushanwen/pi-subagent-workflow",
+    ];
+    fn();
+  }
+
+  it("taiji 态：npm/npm-dev 根改指 agentDir 父目录（= dataDir，实际安装目录）", () => {
+    stubAgentDir();
+    withTaijiArgv(() => {
+      const roots = createPiHostServices().discoveryRoots?.();
+      const installBase = dirname(AGENT_DIR); // /fake/data-dir
+
+      // agents kind
+      expect(roots?.agents).toEqual([
+        { dir: join(AGENT_DIR, "agents"), source: "user-pi" },
+        { dir: join(installBase, "npm", "node_modules"), source: "npm" },
+        { dir: join(installBase, "extensions"), source: "npm-dev" },
+        expect.objectContaining({ source: "npm" }), // core 根（锚点解析，见独立态用例）
+      ]);
+      // workflows kind（core 根注入同理）
+      expect(roots?.workflows?.slice(0, 3)).toEqual([
+        { dir: join(AGENT_DIR, "workflows"), source: "user-pi" },
+        { dir: join(installBase, "npm", "node_modules"), source: "npm" },
+        { dir: join(installBase, "extensions"), source: "npm-dev" },
+      ]);
+    });
+  });
+
+  it("独立态：npm/npm-dev 根保留 getAgentDir() 派生的 pi 语义根（现状不变）", () => {
+    stubAgentDir();
+    process.argv = ["node", "/pi", "--mode", "rpc"];
+    const roots = createPiHostServices().discoveryRoots?.();
+
+    expect(roots?.agents?.slice(0, 3)).toEqual([
+      { dir: join(AGENT_DIR, "agents"), source: "user-pi" },
+      { dir: join(AGENT_DIR, "npm", "node_modules"), source: "npm" },
+      { dir: join(AGENT_DIR, "extensions"), source: "npm-dev" },
+    ]);
+    expect(roots?.workflows?.slice(0, 3)).toEqual([
+      { dir: join(AGENT_DIR, "workflows"), source: "user-pi" },
+      { dir: join(AGENT_DIR, "npm", "node_modules"), source: "npm" },
+      { dir: join(AGENT_DIR, "extensions"), source: "npm-dev" },
+    ]);
+  });
+
+  it("user-pi 根两形态同指 agentDir（taiji 态布局迁移不动 user 级语义）", () => {
+    stubAgentDir();
+    withTaijiArgv(() => {
+      expect(createPiHostServices().discoveryRoots?.().workflows?.[0]).toEqual({
+        dir: join(AGENT_DIR, "workflows"),
+        source: "user-pi",
+      });
+    });
   });
 });
 
@@ -316,4 +436,89 @@ describe("createPiNotifyDomainPorts.createDelivery（透传 session-delivery）"
     expect(vi.mocked(createDelivery).mock.calls[0][1]).toBe(fakeConfig);
     expect(result).toBe(fakeHandle);
   });
+});
+
+// ──────────────────────────────────────────────────────────────
+// P5 staged workflows 入扫描面（端到端）：taiji 态 roots → discoverResources
+// 验收条款 b：location 可派发（<location> = 真实存在的脚本路径）+ 同环境两次
+// 扫描 location 形态确定（P-C6 裁决「实际路径直渲染」的稳定性构造性证据）。
+// ──────────────────────────────────────────────────────────────
+
+describe("P5 staged workflows 入扫描面（端到端）", () => {
+  const AGENT_DIR = "/fake/data-dir/agent";
+  const argvSaved = process.argv;
+  let ws: string;
+
+  function taijiWorkflowsRoots(): ReturnType<NonNullable<ReturnType<typeof createPiHostServices>["discoveryRoots"]>["workflows"]> {
+    vi.mocked(getAgentDir).mockReturnValue(AGENT_DIR);
+    process.argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--extension", "/staged/resources/extensions/@zhushanwen/pi-subagent-workflow",
+    ];
+    return createPiHostServices().discoveryRoots?.().workflows ?? [];
+  }
+
+  beforeEach(() => {
+    ws = mkdtempSync(join(tmpdir(), "pihost-p5-ws-"));
+  });
+
+  afterEach(() => {
+    process.argv = argvSaved;
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    clearFileCache();
+  });
+
+  it("内置 workflow 条目被发现且 path 指向真实存在的脚本（location 可派发）", async () => {
+    const discovered = await discoverResources({
+      kind: "workflows",
+      workspaceRoot: ws,
+      hostRoots: taijiWorkflowsRoots(),
+      includeTmp: true,
+    });
+
+    const builtin = discovered.filter((r) => r.path.includes("subagent-core/workflows"));
+    expect(builtin.length).toBeGreaterThan(0);
+    for (const r of builtin) {
+      expect(r.available).toBe(true);
+      // <location> 渲染源 = r.path——可派发 = 文件真实存在
+      expect(existsSync(r.path)).toBe(true);
+      expect(r.path.endsWith(".js")).toBe(true);
+    }
+    // 内置代表脚本（review-fix-loop = workflow 域核心脚本）在扫描面内
+    expect(builtin.some((r) => r.path.endsWith("review-fix-loop.js"))).toBe(true);
+  });
+
+  it("同环境两次扫描（含缓存清空重建）location 形态确定（字节稳定断言）", async () => {
+    const scan = (): Promise<ReturnType<typeof discoverResources>> =>
+      discoverResources({
+        kind: "workflows",
+        workspaceRoot: ws,
+        hostRoots: taijiWorkflowsRoots(),
+        includeTmp: true,
+      });
+
+    const first = await scan();
+    clearFileCache(); // 强制重建（不走 mtime/workspaceRoot 缓存——重建路径也确定）
+    const second = await scan();
+
+    // readdir 枚举序无契约（discoverResources 返回按扫描插入序）——确定性断言
+    // 以 path 排序投影比较（条目集合与形态稳定，序不在契约内）
+    const sorted = (rs: Awaited<ReturnType<typeof discoverResources>>) =>
+      rs.map((r) => ({ path: r.path, source: r.source, available: r.available })).sort((a, b) => (a.path < b.path ? -1 : 1));
+    expect(sorted(second)).toEqual(sorted(first));
+    const builtinPaths = first
+      .filter((r) => r.path.includes("subagent-core/workflows"))
+      .map((r) => r.path)
+      .sort();
+    // 同环境两次扫描的 <location> 渲染源逐字节一致（staged 路径在 session 内不变——
+    // KV-cache 契约的构造性证据，P-C6 裁决「实际路径直渲染」的稳定性前提）
+    expect(
+      second.filter((r) => r.path.includes("subagent-core/workflows")).map((r) => r.path).sort(),
+    ).toEqual(builtinPaths);
+  });
+});
+
+afterAll(() => {
+  rmSync(mockHomeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });

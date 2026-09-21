@@ -53,6 +53,13 @@ export interface DiscoveredResource {
   source: ResourceSource;
   /** 是否可用（manifest 校验失败的包整体标 false） */
   available: boolean;
+  /**
+   * 不可用原因（P5 D4-3 invalid 具名上报的数据通道）：available=false 时由发现层
+   * 填充（如 manifest 声明路径不存在），消费方（resource-list-injector）据此渲染
+   * `invalid: [{path, reason}]` 形态的上报，损坏资源不再静默跳过。available=true
+   * 时恒缺席。
+   */
+  reason?: string;
 }
 
 /** 资源来源层级 */
@@ -431,8 +438,14 @@ async function processPackage(
       const absPath = resolve(pkgDir, relPath);
       const fileStat = await stat(absPath).catch(() => null);
       if (!fileStat) {
-        // manifest 声明的路径不存在 → 记录失败占位（路径存在性校验）
-        results.push({ path: absPath, source: "npm", available: false });
+        // manifest 声明的路径不存在 → 记录失败占位（路径存在性校验），
+        // reason 具名（P5 D4-3：消费方渲染 invalid 上报，不再静默）
+        results.push({
+          path: absPath,
+          source: "npm",
+          available: false,
+          reason: "manifest declared path not found",
+        });
         continue;
       }
 

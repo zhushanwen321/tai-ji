@@ -608,11 +608,14 @@ export {
 } from "./shared/injection-render.ts";
 export type {
   AgentEntry,
+  InvalidResource,
   ModelEntry,
   WorkflowEntry,
 } from "./shared/injection-render.ts";
 // [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions /
 // ModelReasoningInfo 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
+// InvalidResource 随 P5 D4-3 入公共面（workflow-list-injector 经 barrel 消费——
+// extensions 源文件只从 barrel 消费 core 符号，H4 formatEmptyResourceList 同款先例）。
 
 // ── 原语（U6a）────────────────────────────────────────────────
 // atomic-write：tmp+rename 原子写单一实现（统一 tmp 命名 `.tmp.<pid>.<seq>-<rand>`、

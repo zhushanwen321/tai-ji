@@ -662,6 +662,9 @@ describe("manifestCache（async readPackageManifest）", () => {
     expect(ext2).toHaveLength(1);
     expect(path.basename(ext2[0]?.path ?? "")).toBe("gone.md");
     expect(ext2[0]?.available).toBe(false);
+    // P5 D4-3 invalid 具名上报：占位条目带发现层具名 reason（消费方据此渲染
+    // invalid 行，损坏资源不再静默）
+    expect(ext2[0]?.reason).toBe("manifest declared path not found");
   });
 
   // ── 失败/边缘路径（原 resource-discovery-manifest-cache.test.ts 迁编，impl-plan

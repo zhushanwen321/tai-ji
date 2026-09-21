@@ -18,7 +18,11 @@
 //     project/workspace 根不在壳侧提供——core 消费方按 workspaceRoot 自行推导
 //     （u0-data-discovery 波次接注入消费）。C5⑥ 起 agents kind 追加第 4 根：
 //     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现面，见
-//     corePackageNpmRoot 注释。
+//     corePackageNpmRoot 注释。[P5 D4-2] agents/workflows 的 npm/npm-dev 两根
+//     形态感知（taiji 态指 agentDir 父目录 = 实际安装目录，独立态保留 agentDir
+//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描面）——
+//     见 agentDirKindRoots 注释。skills/engines 的同构 npm 槽错位不在 P5 范围
+//     （D4 发现层 = agents/workflows 注入面；skills 另有「刻意不补」既有决策）。
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
 //     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
@@ -81,28 +85,40 @@ function corePackageNpmRoot(): string | undefined {
 
 /** agents/workflows 共享的 agentDir 派生根（末级目录名由 kind 决定）。
  *  顺序与 source 标签逐项对齐 resource-discovery.ts buildScanTargets 的
- *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。 */
+ *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。
+ *
+ *  [P5 D4-2 扫描根修正] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
+ *  实际安装目录（agentDir 的父目录——taiji 布局迁移后 npm/extensions 是 agentDir
+ *  的 sibling，对齐 runtime pi-paths.ts getNpmDir/getExtensionsDir 的推导），独立
+ *  pi 形态保留 getAgentDir() 派生的 pi 语义根（现状即正确）。 */
 function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   const agentDir = getAgentDir();
+  // taiji 态 npm/extensions 布局 = agentDir 的 sibling（<dataDir>/npm、
+  // <dataDir>/extensions，agentDir = <dataDir>/agent）；旧 agentDir 直拼形态在
+  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现面恒空的
+  // 病灶根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
+  // 本扩展时 argv 同样有 --extension，npm 槽根指到不存在的 <agentDir> 父目录 →
+  // 扫描静默空（损失 = 罕见场景的 npm 安装位发现；agentDir/npm 本就非 pi 官方布局）。
+  const installBase = isTaijiHostInjected() ? dirname(agentDir) : agentDir;
   const roots: DiscoveryRoot[] = [
     // 1. user .pi/agent/<kind>/
     { dir: join(agentDir, kind), source: "user-pi" },
-    // 2. npm global: agentDir/npm/node_modules/*/<pkg>/
-    { dir: join(agentDir, "npm", "node_modules"), source: "npm" },
-    // 3. npm dev symlink: agentDir/extensions/*/<pkg>/
-    { dir: join(agentDir, "extensions"), source: "npm-dev" },
+    // 2. npm global: <installBase>/npm/node_modules/*/<pkg>/
+    { dir: join(installBase, "npm", "node_modules"), source: "npm" },
+    // 3. npm dev symlink: <installBase>/extensions/*/<pkg>/
+    { dir: join(installBase, "extensions"), source: "npm-dev" },
   ];
-  // 4. core 包根（C5⑥，仅 agents kind）：追加在既有 npm 根之后——同标签多根依注入
-  //    序扫描 + last-writer-wins，core（随本包依赖分发的新模板）遮蔽同 agentDir 内
-  //    旧版残留副本；序位仍在 user 级之上、npm-dev/project 级之下（红线 1）。
-  //    workflows kind 刻意不注入：<available_workflows> 的 <location> 是 CA2 快照
-  //    不豁免面（红线 8 豁免仅限 10 内置 agent 角色路径前缀），注入会翻转内置
-  //    workflow 的胜出路径。
-  if (kind === "agents") {
-    const coreNpmRoot = corePackageNpmRoot();
-    if (coreNpmRoot !== undefined) {
-      roots.push({ dir: coreNpmRoot, source: "npm" });
-    }
+  // 4. core 包根（C5⑥ + P5）：agents/workflows 两 kind 都追加在既有 npm 根之后——
+  //    同标签多根依注入序扫描 + last-writer-wins，core（随本包依赖分发的新模板）
+  //    遮蔽同安装位内旧版残留副本；序位仍在 user 级之上、project 级之下（红线 1）。
+  //    [P5] workflows kind 的「刻意不注入」禁区拆除：原顾虑 = <available_workflows>
+  //    的 <location> 是 CA2 快照不豁免面（红线 8 豁免仅限 agent 角色路径前缀）。
+  //    P-C6 实施期核查裁决：CA2 锚定测试为 fixture 输入驱动（不消费运行时路径），
+  //    turn 间字节稳定由工厂渲染缓存 + 码点序构造性保证——staged 绝对路径渲染
+  //    <location> 不破坏快照稳定性，内置 workflow 因此可列出、路径可派发。
+  const coreNpmRoot = corePackageNpmRoot();
+  if (coreNpmRoot !== undefined) {
+    roots.push({ dir: coreNpmRoot, source: "npm" });
   }
   return roots;
 }
@@ -279,6 +295,17 @@ const ARGV_VALUED_FLAGS = new Set<string>([
 
 /** argv 中 flag 起始索引：argv[0]=runtime，argv[1]=binary 路径。 */
 const ARGV_FLAG_START = 2;
+
+/**
+ * taiji 宿主注入态判据（P5 D4-2 扫描根修正；形态判据复用 H2 先例）：主 pi 进程
+ * argv 含 --extension/-e 值即 taiji spawn（runtime 恒带 staged 全量集下发的
+ * --extension；独立 pi 经 settings 清单加载扩展，argv 无该 flag）。
+ * 与 resolveGrandchildExtensionPaths 的白名单收窄是两个决策——此处只做形态判定
+ * （决定扫描根指向），不做白名单（白名单只约束孙进程扩展集）。
+ */
+function isTaijiHostInjected(argv: readonly string[] = process.argv): boolean {
+  return collectExtensionFlagValues(argv).length > 0;
+}
 
 function collectExtensionFlagValues(argv: readonly string[]): string[] {
   const values: string[] = [];

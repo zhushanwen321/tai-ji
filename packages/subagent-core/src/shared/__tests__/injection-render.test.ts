@@ -427,6 +427,70 @@ describe("empty-state explicit rendering (D4-2)", () => {
 });
 
 // ============================================================
+// invalid 具名上报（D4-3 / P5）：损坏 workflow 不静默跳过
+// ============================================================
+
+describe("invalid named reporting (D4-3/P5)", () => {
+	const invalids = [
+		{ path: "/ws/.pi/workflows/broken.js", reason: "no valid resource metadata" },
+	];
+
+	it("非空条目 + invalids：条目行后、闭合标签前渲染 invalid 元素（逐字节）", () => {
+		const out = formatWorkflowList(
+			[{ name: "chain", description: "三步链", path: "/abs/chain.js" }],
+			{ guide: WORKFLOW_GUIDE, invalids },
+		);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				`${WORKFLOW_GUIDE}\n` +
+				"  <workflow><name>chain</name><description>三步链</description><location>/abs/chain.js</location></workflow>\n" +
+				"  <invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("invalid path/reason 逐字段 escapeXml（错误消息含特殊字符不破坏注入段）", () => {
+		const out = formatWorkflowList(
+			[{ name: "chain", description: "d", path: "/abs/chain.js" }],
+			{
+				guide: WORKFLOW_GUIDE,
+				invalids: [{ path: "/a&b<c>.js", reason: 'EACCES: "permission" & denied' }],
+			},
+		);
+		expect(out).toContain(
+			"<invalid><path>/a&amp;b&lt;c&gt;.js</path><reason>EACCES: &quot;permission&quot; &amp; denied</reason></invalid>",
+		);
+	});
+
+	it("不传 invalids / 空数组：输出与既有形态逐字节一致（CA2 锚定面零影响）", () => {
+		const entries = [{ name: "chain", description: "d", path: "/abs/chain.js" }];
+		const baseline = formatWorkflowList(entries, workflowOpts);
+		expect(formatWorkflowList(entries, { guide: WORKFLOW_GUIDE })).toBe(baseline);
+		expect(formatWorkflowList(entries, { guide: WORKFLOW_GUIDE, invalids: [] })).toBe(baseline);
+	});
+
+	it("空列表 + invalids 非空仍返回空串（invalid 随空态段渲染的分流契约）", () => {
+		expect(formatWorkflowList([], { guide: WORKFLOW_GUIDE, invalids })).toBe("");
+	});
+
+	it("formatEmptyResourceList invalids：空态行后追加具名上报行（逐字节）", () => {
+		const out = formatEmptyResourceList("workflows", ["/ws/.pi/workflows"], invalids);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				"  (none discovered; roots: /ws/.pi/workflows)\n" +
+				"  <invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("formatEmptyResourceList 无 invalids 缺省参数：输出与既有形态逐字节一致", () => {
+		expect(formatEmptyResourceList("workflows", ["/r"])).toBe(
+			formatEmptyResourceList("workflows", ["/r"], []),
+		);
+	});
+});
+
+// ============================================================
 // 码点序契约（禁 localeCompare——跨环境字节一致）
 // ============================================================
 

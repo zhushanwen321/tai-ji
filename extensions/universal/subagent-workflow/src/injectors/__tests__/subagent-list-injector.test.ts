@@ -346,8 +346,10 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
 		const { discoverAllAgents } = await import("../subagent-list-injector");
-		const agents = await discoverAllAgents("/ws");
-		expect(agents.map((a) => a.name)).toEqual(["alpha", "worker", "zeta"]);
+		const result = await discoverAllAgents("/ws");
+		// P5 D4-3：discover 返回 { entries, invalids }——agents 走 assemble 路径，invalids 恒空
+		expect(result.invalids).toEqual([]);
+		expect(result.entries.map((a) => a.name)).toEqual(["alpha", "worker", "zeta"]);
 	});
 
 	it("重建（两次发现）输出与渲染结果逐字节一致——目录不变时 session_start/fallback/resume 任意重建等价", async () => {
@@ -371,8 +373,8 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 		const first = await discoverAllAgents("/ws");
 		const second = await discoverAllAgents("/ws");
 		expect(second).toEqual(first);
-		expect(formatAgentList(second, { guide: SUBAGENT_LIST_GUIDE })).toBe(
-			formatAgentList(first, { guide: SUBAGENT_LIST_GUIDE }),
+		expect(formatAgentList(second.entries, { guide: SUBAGENT_LIST_GUIDE })).toBe(
+			formatAgentList(first.entries, { guide: SUBAGENT_LIST_GUIDE }),
 		);
 	});
 });

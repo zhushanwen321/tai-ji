@@ -41,6 +41,17 @@ export interface WorkflowEntry {
 	path: string;
 }
 
+/**
+ * 发现失败但具名上报的资源条目（P5 D4-3 invalid 具名上报）——损坏文件不再静默
+ * 跳过，字段形态对照 zcode ListSavedWorkflows 的 `invalid: [{path, reason}]`。
+ * path = 发现层拿到的绝对路径（文件可能存在但 meta 无效，也可能 manifest 声明
+ * 而实际缺失）；reason = 人类可读的失败原因（发现层/解析层填充）。
+ */
+export interface InvalidResource {
+	path: string;
+	reason: string;
+}
+
 /** reasoning 对象形态（zsw 投影的档位结构）；渲染面仅按 truthy 消费，字段值不进输出 */
 export interface ModelReasoningInfo {
 	variants?: unknown[];
@@ -141,6 +152,18 @@ function applyEntryBudget<T>(
 }
 
 /**
+ * invalid 具名上报行（P5 D4-3）：每条渲染为段内 XML 元素（与条目元素形态一致，
+ * 两空格缩进对齐），path/reason 逐字段 escapeXml（路径与错误消息含 XML 特殊字符
+ * 会破坏注入段结构）。条目段与空态段共用本原语（两处的 invalid 行形态逐字一致）。
+ */
+function invalidResourceLines(invalids: readonly InvalidResource[]): string[] {
+  return invalids.map(
+    (inv) =>
+      `  <invalid><path>${escapeXml(inv.path)}</path><reason>${escapeXml(inv.reason)}</reason></invalid>`,
+  );
+}
+
+/**
  * 将 agent 列表格式化为 XML 注入段。
  *
  * 内部先按 name 码点序排序再渲染截断（超预算截尾语义依赖码点序；pi 调用链
@@ -182,33 +205,49 @@ export function formatAgentList(
   });
 }
 
+/** workflow 段渲染选项：通用条目段选项 + invalid 具名上报（P5 D4-3，workflow 域职责——
+ *  agents 段装配链无 invalid 产出面，不引入死参数）。 */
+export interface WorkflowListFormatOptions extends ListFormatOptions {
+	/**
+	 * 损坏 workflow 具名上报：非空时在条目行后、闭合标签前渲染 invalid 元素行
+	 * （escapeXml，形态 `invalid: [{path, reason}]` 的注入段投影）。缺省/空数组
+	 * 零渲染（CA2 字节锚定不受影响——不传即与既有输出逐字节一致）。条目为空时
+	 * 本参数不消费（返回空串，invalid 随空态段渲染——见 formatEmptyResourceList）。
+	 */
+	invalids?: readonly InvalidResource[];
+}
+
 /**
  * 将 workflow 列表格式化为 XML 注入段。
  *
  * 与 formatAgentList 同约：先按 name 码点序排序再渲染截尾；空列表返回空串
  * （空态接管见 formatEmptyResourceList——调用方以空串为判据切换空态渲染）；
- * 截断时追加宿主注入的兜底指引行（缺省不追加）。
+ * 截断时追加宿主注入的兜底指引行（缺省不追加）；invalids 非空时段内追加
+ * invalid 具名上报行（P5 D4-3，损坏文件不静默）。
  */
 export function formatWorkflowList(
-  workflows: WorkflowEntry[],
-  opts: ListFormatOptions,
+	workflows: WorkflowEntry[],
+	opts: WorkflowListFormatOptions,
 ): string {
-  if (workflows.length === 0) return "";
+	if (workflows.length === 0) return "";
 
-  const sorted = sortByCodepoint(workflows, (w) => w.name);
-  const { kept, truncated } = applyEntryBudget(sorted, opts.maxEntries);
+	const sorted = sortByCodepoint(workflows, (w) => w.name);
+	const { kept, truncated } = applyEntryBudget(sorted, opts.maxEntries);
 
-  const items = kept.map((wf) =>
-    `  <workflow><name>${escapeXml(wf.name)}</name><description>${escapeXml(wf.description)}</description><location>${escapeXml(wf.path)}</location></workflow>`,
-  );
-  if (truncated && opts.truncationNotice !== undefined) {
-    items.push(opts.truncationNotice);
-  }
-  return renderXmlSection({
-    tag: "available_workflows",
-    guide: opts.guide,
-    items,
-  });
+	const items = kept.map((wf) =>
+		`  <workflow><name>${escapeXml(wf.name)}</name><description>${escapeXml(wf.description)}</description><location>${escapeXml(wf.path)}</location></workflow>`,
+	);
+	if (truncated && opts.truncationNotice !== undefined) {
+		items.push(opts.truncationNotice);
+	}
+	if (opts.invalids !== undefined && opts.invalids.length > 0) {
+		items.push(...invalidResourceLines(opts.invalids));
+	}
+	return renderXmlSection({
+		tag: "available_workflows",
+		guide: opts.guide,
+		items,
+	});
 }
 
 /** 码点序比较（显式契约，禁 localeCompare——同 sortByCodepoint 注释） */
@@ -226,19 +265,24 @@ function compareByCodepoint(a: string, b: string): number {
  *   format 返回空串时接管；models 段无文件发现根概念，不参与）；
  * - roots 每项 escapeXml（路径含 XML 特殊字符会破坏注入段结构），
  *   保序去重（同 turn 重建字节稳定，KV-cache 契约）；
- * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号。
+ * - invalids（P5 D4-3）：非空时在空态行后追加 invalid 具名上报行——
+ *   「条目为零」与「存在损坏文件」两个事实同段呈现（衔接点：空态文本
+ *   附近，与条目段的 invalid 行形态逐字一致，共用 invalidResourceLines）；
+ * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号
+ *   （约定根恒在生产不可达，纯防御分支——invalid 同随不渲染）。
  */
 export function formatEmptyResourceList(
-  kind: "agents" | "workflows",
-  roots: string[],
+	kind: "agents" | "workflows",
+	roots: string[],
+	invalids: readonly InvalidResource[] = [],
 ): string {
-  const unique = [...new Set(roots)];
-  if (unique.length === 0) return "";
-  const tag = kind === "agents" ? "available_subagents" : "available_workflows";
-  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
-  // agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
-  const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
-  return [`\n\n<${tag}>`, line, `</${tag}>`].join("\n");
+	const unique = [...new Set(roots)];
+	if (unique.length === 0) return "";
+	const tag = kind === "agents" ? "available_subagents" : "available_workflows";
+	// 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
+	// agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
+	const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
+	return [`\n\n<${tag}>`, line, ...invalidResourceLines(invalids), `</${tag}>`].join("\n");
 }
 
 /**
