@@ -91,7 +91,6 @@ function makeHarness(options: HarnessOptions = {}) {
     appendEntry() {},
     getSessionFile: () =>
       'sessionFile' in options ? options.sessionFile : MISSING_SESSION_FILE,
-    now: () => 1_000,
     registerProvider(providerId, config) {
       captured.registered.push({ providerId, config })
     },
@@ -111,7 +110,6 @@ function makeHarness(options: HarnessOptions = {}) {
   const warns: string[] = []
   const deps: AckTurnDeps = {
     backend,
-    now: () => 1_000,
     log: {
       warn: (msg: string) => warns.push(msg),
       debug: (msg: string) => warns.push(msg),
@@ -180,7 +178,7 @@ describe('ack-turn 编排', () => {
     expect(h.captured.registered).toHaveLength(1)
     expect(h.captured.registered[0]!.providerId).toBe('anthropic')
     expect(h.captured.registered[0]!.config.api).toBe('anthropic-messages')
-    expect(ackState.window).toEqual({ registered: true })
+    expect(ackState.window).toEqual({ providerId: 'anthropic' })
 
     // 我们的 streamSimple 被调用 ⇒ 返回 stream 之前同步注销。
     invokeStreamSimple(h.captured)
@@ -203,12 +201,12 @@ describe('ack-turn 编排', () => {
     h.controller.handleMessageStart({ role: 'custom', customType: 'pi-scheduler:dispatched' })
     expect(h.captured.registered).toHaveLength(0)
     // 中间态未被污染：未命中不改 pending / ackTurnStarted。
-    expect(ackState.pending).not.toBeNull()
+    expect(ackState.pending).toBe(true)
     expect(ackState.ackTurnStarted).toBe(false)
 
     h.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
     expect(h.captured.registered).toHaveLength(1)
-    expect(ackState.pending).toBeNull()
+    expect(ackState.pending).toBe(false)
     expect(ackState.ackTurnStarted).toBe(true)
   })
 
@@ -328,20 +326,18 @@ describe('ack-turn 编排', () => {
 
   // ── 7. E6 注销失败重试 ──
 
-  it('E6：首次注销失败保留 window + needsRetry，turn_end 重试成功 ⇒ 清空', async () => {
+  it('E6：首次注销失败保留 window，turn_end 重试成功 ⇒ 清空', async () => {
     const h = makeHarness({ unregisterFailures: 1 })
     await startAck(h.controller)
     h.controller.handleMessageStart({ role: 'custom', customType: ACK_CUSTOM_TYPE })
 
     invokeStreamSimple(h.captured)
     expect(h.captured.unregistered).toEqual([])
-    expect(ackState.window).toEqual({ registered: true })
-    expect(ackState.needsRetry).toBe(true)
+    expect(ackState.window).toEqual({ providerId: 'anthropic' })
 
     h.controller.handleTurnEnd()
     expect(h.captured.unregistered).toEqual(['anthropic'])
     expect(ackState.window).toBeNull()
-    expect(ackState.needsRetry).toBe(false)
 
     // 幂等：再调不再注销。
     h.controller.handleTurnEnd()
@@ -357,8 +353,7 @@ describe('ack-turn 编排', () => {
     h.controller.handleTurnEnd()
 
     expect(h.captured.unregistered).toEqual([])
-    expect(ackState.window).toEqual({ registered: true })
-    expect(ackState.needsRetry).toBe(true)
+    expect(ackState.window).toEqual({ providerId: 'anthropic' })
     expect(h.warns.filter(msg => msg.includes('ack unregister failed')).length).toBe(2)
   })
 
@@ -375,7 +370,7 @@ describe('ack-turn 编排', () => {
     expect(h.notifyCalls).toHaveLength(1)
     expect(h.notifyCalls[0]!.level).toBe('warning')
     // ② 全量清理。
-    expect(ackState.pending).toBeNull()
+    expect(ackState.pending).toBe(false)
     expect(ackState.window).toBeNull()
     expect(ackState.ackTurnStarted).toBe(false)
     expect(ackState.taskId).toBeNull()
@@ -414,11 +409,11 @@ describe('ack-turn 修复回归（一致性审查 F1/F2/F3）', () => {
       isToggleDisabled: false,
     })
     expect(a.captured.sent).toHaveLength(1)
-    expect(ackState.pending).not.toBeNull()
+    expect(ackState.pending).toBe(true)
 
     vi.advanceTimersByTime(TICK_INTERVAL_MS)
     expect(a.notifyCalls).toHaveLength(1) // e3-no-turn 如实补发
-    expect(ackState.pending).toBeNull() // ← 修复点
+    expect(ackState.pending).toBe(false) // ← 修复点
 
     await a.controller.maybeStartAck({
       task: { ...TASK, id: 't2' },

@@ -1,10 +1,10 @@
 // ack 契约面测试（dev-flow u-foundation 单元）。
 //
 // 本单元只交付「依赖反转契约面」，不含 ack 业务逻辑，故测试只证明三件事：
-//   1. SchedulerBackend 扩面（registerProvider/unregisterProvider/getEntries/isIdle/
-//      getCurrentModel）后可被纯对象夹具实现 —— 类型闭合（satisfies 编译期 + 运行期断言）；
-//   2. PiSchedulerBackend 对 pi / ctx 的转发与归一语义（含 Iterable 归一、缺字段兜底）；
-//   3. ack 契约常量值锚定（防后续单元依赖字符串时不发现改动）。
+//   1. SchedulerBackend 扩面（registerProvider/unregisterProvider/getEntries）后可被纯对象
+//      夹具实现（isIdle/getCurrentModel 是 PiSchedulerBackend 类方法、非接口成员）；
+//   2. PiSchedulerBackend 对 pi / ctx 的转发语义（含缺字段兜底）；
+//   3. ack 契约常量/判别值锚定（防后续单元依赖字符串时不发现改动）。
 //
 // 不 mock pi：夹具是手写最小假对象；本套件零 FS，不触碰任何真实数据目录。
 
@@ -18,7 +18,7 @@ import {
   ACK_CUSTOM_TYPE,
   ACK_CUSTOM_TYPE_PREFIX,
   type AckAvailability,
-  type AckFailureKind,
+  type AckNotifyReason,
   type AckState,
   type SchedulerCurrentModel,
   type SchedulerProviderOverride,
@@ -27,8 +27,12 @@ import {
 // ── 1. 扩面可被纯对象夹具实现（类型闭合）──
 
 /**
- * 纯对象夹具：只实现既有 4 方法 + 本次新增 5 方法。
- * `satisfies SchedulerBackend` 是契约闭合的编译期证据——接口少一个方法或签名不匹配即红。
+ * 纯对象夹具：只实现接口成员（sendMessage/appendEntry/getSessionFile/now +
+ * registerProvider/unregisterProvider/getEntries）。
+ * `satisfies SchedulerBackend` 的**编译期**效力以「测试被 typecheck」为前提——
+ * `extensions/tsconfig.json` 的 exclude 覆盖全部测试目录，常态 `extensions:typecheck`
+ * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约闭合证据）；当前至少保证
+ * 运行期结构契约。
  */
 function createFixtureBackend(): SchedulerBackend {
   const entries: SchedulerEntryLike[] = [{ type: 'custom', customType: 'fixture', data: {} }]
@@ -149,24 +153,6 @@ describe('PiSchedulerBackend ack 扩面转发', () => {
     expect(unregisterCalls).toEqual(['prov'])
   })
 
-  it('getEntries 将 Iterable（Set）输入归一为数组', () => {
-    const { pi } = createFakePi()
-    const first: SchedulerEntryLike = { type: 'custom', customType: 'a' }
-    const second: SchedulerEntryLike = { type: 'message' }
-    const ctx: SchedulerBackendCtx = {
-      sessionManager: {
-        getEntries: () => new Set([first, second]),
-        getSessionFile: () => '/s.json',
-      },
-    }
-    const backend = new PiSchedulerBackend(ctx, pi)
-
-    const entries = backend.getEntries()
-
-    expect(Array.isArray(entries)).toBe(true)
-    expect(entries).toEqual([first, second])
-  })
-
   it('getEntries 对数组输入原样返回（不复制）', () => {
     const { pi } = createFakePi()
     const entries: SchedulerEntryLike[] = [{ type: 'custom', customType: 'a' }]
@@ -230,7 +216,7 @@ describe('ack 契约常量与类型', () => {
     expect(ACK_CUSTOM_TYPE.startsWith(ACK_CUSTOM_TYPE_PREFIX)).toBe(true)
   })
 
-  it('AckAvailability / AckFailureKind / AckState 判别值可构造', () => {
+  it('AckAvailability / AckNotifyReason / AckState 判别值可构造', () => {
     const unavailable: AckAvailability[] = [
       { available: false, reason: 'no-base' },
       { available: false, reason: 'toggle-disabled' },
@@ -243,25 +229,25 @@ describe('ack 契约常量与类型', () => {
     ])
     expect<AckAvailability>({ available: true }).toEqual({ available: true })
 
-    const failures: AckFailureKind[] = [
-      'e1-register',
-      'e2-not-hit',
-      'e3-no-turn',
-      'e4-provider-error',
-      'e5-interrupted',
-      'e6-unregister',
-      'e8-no-base',
-      'e8b-hybrid',
-    ]
-    expect(failures).toHaveLength(8)
+    // 可通知形态只有两种：其余 E 形态（e1/e2/e4/e5/e6/e8b）不发用户通知——真实轮已
+    // 应答或与落盘无关，提示即反向撒谎（设计 §3.4）；它们在日志面用字符串标签。
+    const notifyReasons: AckNotifyReason[] = ['e3-no-turn', 'e8-no-base']
+    expect(notifyReasons).toHaveLength(2)
 
     const state: AckState = {
-      pending: { taskId: 't1', sentAt: 123 },
-      window: { registered: false },
+      pending: true,
+      window: { providerId: 'anthropic' },
       ackTurnStarted: false,
+      ackStreamCalled: false,
       writeCheckTimer: null,
+      taskId: 't1',
+      taskName: 'backup',
+      ackText: 'saved',
+      model: { provider: 'anthropic', api: 'anthropic-messages', id: 'claude-x' },
+      sessionFile: '/s.json',
+      availability: { providerId: 'anthropic', isToggleDisabled: false, value: { available: true } },
     }
-    expect(state.pending?.taskId).toBe('t1')
-    expect(state.window).toEqual({ registered: false })
+    expect(state.pending).toBe(true)
+    expect(state.window).toEqual({ providerId: 'anthropic' })
   })
 })

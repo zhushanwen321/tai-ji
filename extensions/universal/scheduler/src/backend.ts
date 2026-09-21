@@ -66,17 +66,10 @@ export interface SchedulerBackend {
   /** 注销 provider（ack 覆写 one-shot 自撤 / turn_end 安全网用）：转发 pi.unregisterProvider。 */
   unregisterProvider(providerId: string): void
   /**
-   * 当前 session 的 entries 快照（只读）。归一为数组——底层 getter 可能返回任何 Iterable，
-   * 消费者（ack 武装判别 / 测试夹具）只面对单一形态。不触发任何写入（项目规则 #6）。
+   * 当前 session 的 entries 快照（只读；pi 实装返回 `SessionEntry[]`）。
+   * 不触发任何写入（项目规则 #6）。
    */
   getEntries(): SchedulerEntryLike[]
-  /**
-   * 会话是否空闲（not streaming）。ack 编排据此决定是否介入：非空闲时运行中的轮次会自然
-   * 打开落盘闸门，本机制不应注入合成轮（设计 §3.3 D4 / G4）。
-   */
-  isIdle(): boolean
-  /** 会话当前模型的最小投影；无模型会话返回 undefined。ack 覆写目标与合成行字段来源。 */
-  getCurrentModel(): SchedulerCurrentModel | undefined
 }
 
 /**
@@ -86,13 +79,14 @@ export interface SchedulerBackend {
  */
 export interface SchedulerBackendCtx {
   sessionManager: {
-    getEntries(): SchedulerEntryLike[] | Iterable<SchedulerEntryLike>
+    getEntries(): SchedulerEntryLike[]
     getSessionFile(): string | undefined
   }
   /**
    * 会话是否空闲（not streaming）。真实 ExtensionContext 保证存在（SDK
    * core/extensions/types.d.ts:232 `isIdle(): boolean`）；声明为可选只为让 duck-typed
-   * 最小 ctx（单测 / 新宿主）不必补全，缺失由 PiSchedulerBackend.isIdle() 以 fail-safe 兜底。
+   * 最小 ctx（单测 / 新宿主）不必补全，缺失由 PiSchedulerBackend.isIdle() 以 fail-safe 兜底
+   * （视作「有轮在跑」⇒ ack 不介入——失败方向是少做事，不是多做错事）。
    */
   isIdle?(): boolean
   /**
@@ -160,26 +154,27 @@ export class PiSchedulerBackend implements SchedulerBackend {
     this.pi.unregisterProvider(providerId)
   }
 
-  /**
-   * 读当前 session 的 entries 并归一为数组。ctx.sessionManager.getEntries() 在 pi 实装返回
-   * SessionEntry[]，但契约允许任何 Iterable（见 SchedulerBackendCtx 注释）——Array.isArray
-   * 分流，对数组原样返回（loadTasks 侧已按数组契约消费，零额外拷贝），对其余 Iterable 展开。
-   */
+  /** 读当前 session 的 entries 快照（pi 实装返回数组，原样透传，零拷贝）。 */
   getEntries(): SchedulerEntryLike[] {
-    const entries = this.ctx.sessionManager.getEntries()
-    return Array.isArray(entries) ? entries : [...entries]
+    return this.ctx.sessionManager.getEntries()
   }
 
   /**
-   * 会话是否空闲。ctx.isIdle 缺失（最小 duck ctx）时保守返回 false（视作「有轮在跑」）：
-   * ack 机制的 fail-safe 方向是「不确定则不介入」——运行中的轮次会自然产出 assistant 消息、
-   * 打开会话落盘闸门（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
+   * 会话是否空闲（**类方法，非 SchedulerBackend 接口成员**——唯一消费者是装配点
+   * index.ts 经具体类调用；放接口会逼每个替身实现一个用不到的成员）。
+   *
+   * ctx.isIdle 缺失（最小 duck ctx）时保守返回 false（视作「有轮在跑」）：ack 机制的
+   * fail-safe 方向是「不确定则不介入」——运行中的轮次会自然产出 assistant 消息、打开会话
+   * 落盘闸门（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
    */
   isIdle(): boolean {
     return this.ctx.isIdle ? this.ctx.isIdle() : false
   }
 
-  /** 会话当前模型的最小投影；ctx.model 缺失/undefined（无模型会话）时返回 undefined。 */
+  /**
+   * 会话当前模型的最小投影（**类方法，非接口成员**，理由同 isIdle）；ctx.model 缺失/
+   * undefined（无模型会话）时返回 undefined。
+   */
   getCurrentModel(): SchedulerCurrentModel | undefined {
     return this.ctx.model
   }

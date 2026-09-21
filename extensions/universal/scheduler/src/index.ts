@@ -122,7 +122,6 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // 覆写窗口（模块级单例跨代共享的结构性意义）。
     ackController = createAckTurnController({
       backend,
-      now: () => backend.now(),
       log: logger,
       render: (key, params) => t(key, params),
       notify: (message, level) => ctx.ui.notify(message, level),
