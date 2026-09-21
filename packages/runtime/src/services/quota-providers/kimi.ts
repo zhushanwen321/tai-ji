@@ -7,7 +7,7 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isRecord } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord } from './types.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const PERCENT_SCALE = 100
@@ -34,6 +34,32 @@ interface KimiApiResponse {
   usage?: KimiUsage
 }
 
+/** limits[].detail 形态：limit/remaining 可选 number、resetTime 可选 string（5h 窗口字段）。 */
+function isKimiLimitDetail(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return (
+    isOptionalField(v.limit, 'number') &&
+    isOptionalField(v.remaining, 'number') &&
+    isOptionalField(v.resetTime, 'string')
+  )
+}
+
+/** limits[] 条目形态：detail 缺失合法（该条目无 5h 窗口数据）。 */
+function isKimiLimitEntry(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return v.detail === undefined || isKimiLimitDetail(v.detail)
+}
+
+/** usage 形态（week 窗口字段）。 */
+function isKimiUsage(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return (
+    isOptionalField(v.limit, 'number') &&
+    isOptionalField(v.used, 'number') &&
+    isOptionalField(v.resetTime, 'string')
+  )
+}
+
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（limits 数组迭代判定、
  * usage 对象解构）。字段缺失是合法业务态（→ no-subscription / 该窗口不可知），字段
@@ -45,23 +71,9 @@ function isKimiResponse(v: unknown): v is KimiApiResponse {
   const o = v
   if (o.limits !== undefined) {
     if (!Array.isArray(o.limits)) return false
-    for (const lim of o.limits) {
-      if (!isRecord(lim)) return false
-      const d = lim.detail
-      if (d === undefined) continue
-      if (!isRecord(d)) return false
-      if (d.limit !== undefined && typeof d.limit !== 'number') return false
-      if (d.remaining !== undefined && typeof d.remaining !== 'number') return false
-      if (d.resetTime !== undefined && typeof d.resetTime !== 'string') return false
-    }
+    if (!o.limits.every(isKimiLimitEntry)) return false
   }
-  if (o.usage !== undefined) {
-    if (!isRecord(o.usage)) return false
-    const u = o.usage
-    if (u.limit !== undefined && typeof u.limit !== 'number') return false
-    if (u.used !== undefined && typeof u.used !== 'number') return false
-    if (u.resetTime !== undefined && typeof u.resetTime !== 'string') return false
-  }
+  if (o.usage !== undefined && !isKimiUsage(o.usage)) return false
   return true
 }
 

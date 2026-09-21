@@ -7,7 +7,7 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isRecord } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord } from './types.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const SEC_PER_DAY = 86400
@@ -32,6 +32,17 @@ interface ZhipuApiResponse {
   data?: ZhipuApiData
 }
 
+/** limits[] 条目形态：type 必在且为 string（TOKENS_LIMIT 判定依据），数值/时间字段可选。 */
+function isZhipuLimitEntry(lim: unknown): boolean {
+  if (!isRecord(lim)) return false
+  if (typeof lim.type !== 'string') return false
+  return (
+    isOptionalField(lim.percentage, 'number') &&
+    isOptionalField(lim.currentValue, 'number') &&
+    isOptionalField(lim.nextResetTime, 'string')
+  )
+}
+
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（success truthiness 判定、
  * data.level / data.limits 解构）。字段缺失是合法业务态（→ no-subscription / 该窗口
@@ -42,20 +53,14 @@ interface ZhipuApiResponse {
 function isZhipuResponse(v: unknown): v is ZhipuApiResponse {
   if (!isRecord(v)) return false
   const o = v
-  if (o.success !== undefined && typeof o.success !== 'boolean') return false
+  if (!isOptionalField(o.success, 'boolean')) return false
   if (o.data === undefined) return true
   if (!isRecord(o.data)) return false
   const d = o.data
-  if (d.level !== undefined && typeof d.level !== 'string') return false
+  if (!isOptionalField(d.level, 'string')) return false
   if (d.limits !== undefined) {
     if (!Array.isArray(d.limits)) return false
-    for (const lim of d.limits) {
-      if (!isRecord(lim)) return false
-      if (typeof lim.type !== 'string') return false
-      if (lim.percentage !== undefined && typeof lim.percentage !== 'number') return false
-      if (lim.currentValue !== undefined && typeof lim.currentValue !== 'number') return false
-      if (lim.nextResetTime !== undefined && typeof lim.nextResetTime !== 'string') return false
-    }
+    if (!d.limits.every(isZhipuLimitEntry)) return false
   }
   return true
 }
