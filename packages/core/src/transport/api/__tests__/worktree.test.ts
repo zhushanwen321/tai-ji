@@ -23,7 +23,9 @@ describe('worktree 域 RPC 封装', () => {
     mockCommand.mockResolvedValue(reply)
     const params = { branch: 'feat-x', baseBranch: 'main', workspaceHint: 'dev' }
     const r = await worktreeApi.create(params)
-    expect(mockCommand).toHaveBeenCalledWith('worktree.create', params, RPC_BACKSTOP_TIMEOUT_MS)
+    // create 是长任务（git add + setup 脚本 + 失败回滚），显式传长任务校准超时 600s
+    // 而非控制面 65s 兜底——详见 domains/worktree.ts 的 WORKTREE_CREATE_RPC_TIMEOUT_MS 注释
+    expect(mockCommand).toHaveBeenCalledWith('worktree.create', params, 600_000)
     expect(r).toEqual(reply)
   })
 

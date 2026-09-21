@@ -34,9 +34,11 @@ import {
 } from './workspace-detector.js'
 import type { WorktreeErrorCode } from '@taiji/shared'
 import { INVALID_BRANCH_REGEX } from '@taiji/shared'
-import type { IShellRunner } from '../ports/shell-runner.js'
+import type { IShellRunner, ShellRunnerResult } from '../ports/shell-runner.js'
+import { ShellRunnerError } from '../ports/shell-runner.js'
 import type { IGitExecutor } from '../ports/git-executor.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
+import { logger } from '../../infra/logger.js'
 import type {
   IWorktreeService,
   WorktreeCreateParams,
@@ -75,6 +77,18 @@ export interface WorktreeServiceDeps {
     existsSync: (path: string) => boolean
     /** statSync 用于区分文件/目录（existsSync 无法区分）。ENOENT 时应抛 Error 并设 code='ENOENT'。 */
     statSync: (path: string) => { isDirectory: () => boolean; isFile: () => boolean }
+    /**
+     * 读 bare 仓库主 config（探测 extensions.worktreeConfig 是否开启——config.worktree
+     * 只有该扩展启用才被 git 读取，未开启时写了也是空气）。ENOENT 等读取失败由实现抛，调用方容错。
+     */
+    readFileSync: (path: string, encoding: 'utf8') => string
+    /**
+     * 写 per-worktree config.worktree（core.bare=false）：git worktree add 不生成该文件，
+     * bare 仓库 .bare/config 的 core.bare=true 会被 worktree 继承，导致 worktree 内 git
+     * 全废（git status 报「该操作必须在一个工作区中运行」，实测 git 2.52 复现）——
+     * git-cwt 同款补齐，taiji 自建的 worktree 必须自己写。
+     */
+    writeFileSync: (path: string, data: string) => void
   }
 }
 
@@ -90,6 +104,18 @@ const HOME_PREFIX_SLICE_START = 2
 const DIR_HASH_SUFFIX_LENGTH = 6
 /** 秒 → 毫秒换算系数（setup 脚本 timeout 从秒读到毫秒）。 */
 const MS_PER_SECOND = 1000
+/**
+ * git worktree add/remove 的执行超时（ms）。git-executor 默认 8000ms 是给 status/diff 这类
+ * 轻查询校准的量级；worktree add/remove 是**整树 checkout/删除**（大仓库或带 node_modules
+ * 的 remove 可达数十秒），8s 会被误杀成 GIT_FAILED——按被保护对象的粒度重新校准。
+ */
+const WORKTREE_GIT_TIMEOUT_MS = 60_000
+/**
+ * 失败日志里 stderr 的落盘长度帽（保留**尾部**——错误原因在输出末尾，如 pnpm 的
+ * Failure reason 块）。对齐 crash-journal detailDigest 的 2KB 帽；完整 stderr 已随
+ * error envelope 进前端 error 态，日志只需可 grep 的根因尾部。
+ */
+const STDERR_LOG_TAIL_LENGTH = 2048
 
 /**
  * 非法分支名规则（SSOT: @taiji/shared INVALID_BRANCH_REGEX，前端 + runtime 共用）。
@@ -162,30 +188,80 @@ export class WorktreeService implements IWorktreeService {
     }
   }
 
+  /**
+   * 创建 worktree（全链路唯一入口）。
+   *
+   * 可观测性（RT-8 后续补强）：成败两侧结构化落盘——成功 info 一条（结果字段 + durationMs），
+   * 失败 error 一条（code/error/exitCode/stderr 尾部/回滚结局 + durationMs）。此前成败零日志，
+   * 故障（如 setup 脚本 lockfile 漂移）在所有日志文件里零痕迹，只能靠 UI 弹窗截图口口相传。
+   * 落点 = runtime 主日志（~/.taiji/logs/runtime-<date>.log），未 initLogger 时自动 no-op。
+   */
   async create(params: WorktreeCreateParams): Promise<WorktreeCreateResult> {
+    const startedAt = Date.now()
     const { branch, baseBranch: rawBaseBranch, locationMode, workspaceHint } = params
     const baseBranch = rawBaseBranch ?? this.deps.configService.getDefaultBaseBranch()
-
-    // 0. 分支名校验（安全边界，防 Windows 路径遍历）。前端校验只是 UX，runtime 必须独立校验。
-    if (INVALID_BRANCH_REGEX.test(branch)) {
-      throw worktreeError('INVALID_BRANCH', `非法分支名: ${branch}`)
+    // 成败两条日志的共享上下文字段（请求侧事实，与结果无关）
+    const logCtx = {
+      branch,
+      baseBranch,
+      locationMode: locationMode ?? null,
+      workspaceHint: workspaceHint ?? null,
     }
 
-    // 1. 检测三态
-    const detector = this.createDetector()
-    const detection = await detector.detect(workspaceHint ?? process.cwd())
+    try {
+      // 0. 分支名校验（安全边界，防 Windows 路径遍历）。前端校验只是 UX，runtime 必须独立校验。
+      if (INVALID_BRANCH_REGEX.test(branch)) {
+        throw worktreeError('INVALID_BRANCH', `非法分支名: ${branch}`)
+      }
 
-    if (detection.mode === 'not-repo') {
-      throw worktreeError('NOT_GIT_REPO', '当前目录既不是 .bare workspace 也不是 git 仓库，无法创建 worktree')
+      // 1. 检测三态
+      const detector = this.createDetector()
+      const detection = await detector.detect(workspaceHint ?? process.cwd())
+
+      if (detection.mode === 'not-repo') {
+        throw worktreeError('NOT_GIT_REPO', '当前目录既不是 .bare workspace 也不是 git 仓库，无法创建 worktree')
+      }
+
+      // 2. 按模式分支处理
+      const result = detection.mode === 'bare-workspace'
+        ? await this.createBareWorktree(detection, branch, baseBranch, locationMode, workspaceHint)
+        : await this.createPlainRepoWorktree(detection, branch, baseBranch, locationMode, workspaceHint)
+
+      logger.info('[worktree-service] worktree created', {
+        ...logCtx,
+        mode: detection.mode,
+        repoRoot: result.repoRoot,
+        cwd: result.cwd,
+        // RT-8#8：请求 base 校验失败 fallback 时可见实际基线（与 worktree.created envelope 同源）
+        usedBaseRef: result.usedBaseRef ?? null,
+        durationMs: Date.now() - startedAt,
+      })
+      return result
+    } catch (e) {
+      const err = e as { code?: string; detail?: Record<string, unknown> }
+      const detail = err?.detail && typeof err.detail === 'object' ? err.detail : {}
+      logger.error('[worktree-service] worktree create failed', {
+        ...logCtx,
+        // 原始 code 保真（GitExecutorError 的 timeout/git_unavailable 等逃逸码也落盘，
+        // 不进 union 但在日志里可判别真实失败层）
+        code: err?.code ?? 'worktree_failed',
+        error: e instanceof Error ? e.message : String(e),
+        exitCode: typeof detail['exitCode'] === 'number' ? detail['exitCode'] : null,
+        // stderr 只落尾部（根因在末尾）；完整版随 error envelope 进前端 error 态
+        stderr: typeof detail['stderr'] === 'string'
+          ? (detail['stderr'] as string).slice(-STDERR_LOG_TAIL_LENGTH)
+          : null,
+        // setup 执行层失败（超时/脚本缺失）经 runSetupScript 包装成 SETUP_FAILED 后由此显形
+        timeout: detail['timeout'] === true,
+        // 仅 setup 失败路径发生过回滚：clean = 世界已复原；incomplete = 半成品残留（detail 带 cleanupHint）
+        rollback: err?.code === 'SETUP_FAILED'
+          ? detail['rollbackIncomplete'] === true ? 'incomplete' : 'clean'
+          : null,
+        cleanupHint: typeof detail['cleanupHint'] === 'string' ? detail['cleanupHint'] : null,
+        durationMs: Date.now() - startedAt,
+      })
+      throw e
     }
-
-    // 2. 按模式分支处理
-    if (detection.mode === 'bare-workspace') {
-      return this.createBareWorktree(detection, branch, baseBranch, locationMode, workspaceHint)
-    }
-
-    // mode === 'plain-repo'
-    return this.createPlainRepoWorktree(detection, branch, baseBranch, locationMode, workspaceHint)
   }
 
   /**
@@ -335,13 +411,14 @@ export class WorktreeService implements IWorktreeService {
   private async rollbackCreatedWorktree(repoDir: string, wtPath: string, branch: string): Promise<string | null> {
     const failures: string[] = []
     try {
-      const rm = await this.deps.gitExecutor.exec(repoDir, 'worktree', ['remove', '--force', '--force', wtPath])
+      // timeoutMs 显式传：remove 是整树删除（含 node_modules 时可达数十秒），8s 默认值不够
+      const rm = await this.deps.gitExecutor.exec(repoDir, 'worktree', ['remove', '--force', '--force', wtPath], { timeoutMs: WORKTREE_GIT_TIMEOUT_MS })
       if (rm.exitCode !== 0) failures.push(`worktree remove 失败: ${rm.stderr.trim()}`)
     } catch (e: unknown) {
       failures.push(`worktree remove 异常: ${e instanceof Error ? e.message : String(e)}`)
     }
     try {
-      const br = await this.deps.gitExecutor.exec(repoDir, 'branch', ['-D', branch])
+      const br = await this.deps.gitExecutor.exec(repoDir, 'branch', ['-D', branch], { timeoutMs: WORKTREE_GIT_TIMEOUT_MS })
       if (br.exitCode !== 0) failures.push(`branch -D 失败: ${br.stderr.trim()}`)
     } catch (e: unknown) {
       failures.push(`branch -D 异常: ${e instanceof Error ? e.message : String(e)}`)
@@ -349,10 +426,14 @@ export class WorktreeService implements IWorktreeService {
     if (failures.length === 0) return null
     const cleanupHint =
       `git -C ${repoDir} worktree remove --force ${wtPath} && git -C ${repoDir} branch -D ${branch}`
-    console.warn(
-      `[worktree-service] setup 失败后回滚不完整（半成品残留：worktree ${wtPath} / 分支 ${branch}）。` +
-        `手动清理：${cleanupHint}。未完成步骤: ${failures.join('; ')}`,
-    )
+    // 结构化留痕（原 console.warn 无 meta、不可断言）：半成品残留 + 具体清理命令 + 未完成步骤
+    logger.warn('[worktree-service] setup 失败后回滚不完整，半成品残留', {
+      branch,
+      repoDir,
+      worktreePath: wtPath,
+      cleanupHint,
+      failures,
+    })
     return `${cleanupHint}（未完成步骤: ${failures.join('; ')}）`
   }
 
@@ -395,12 +476,16 @@ export class WorktreeService implements IWorktreeService {
     this.assertWorktreePathFree(newWtPath, dirName, branch)
 
     // base 解析（usedBaseRef 供返回——请求 ref 校验失败静默 fallback 的显形，RT-8#8）
-    const usedBaseRef = await this.resolveBaseRef(barePath, baseBranch, workspaceHint)
+    const usedBaseRef = await this.resolveBaseRef(barePath, branch, baseBranch, workspaceHint)
 
-    // git worktree add
-    const addResult = await this.deps.gitExecutor.exec(barePath, 'worktree', [
-      'add', '-b', branch, newWtPath, usedBaseRef,
-    ])
+    // git worktree add。timeoutMs 显式传：add 是整树 checkout，超过 git-executor 8s
+    // 轻查询默认值会被误杀成 GIT_FAILED（量级按被保护对象校准）
+    const addResult = await this.deps.gitExecutor.exec(
+      barePath,
+      'worktree',
+      ['add', '-b', branch, newWtPath, usedBaseRef],
+      { timeoutMs: WORKTREE_GIT_TIMEOUT_MS },
+    )
     if (addResult.exitCode !== 0) {
       throw worktreeError(
         'GIT_FAILED',
@@ -408,6 +493,9 @@ export class WorktreeService implements IWorktreeService {
         { exitCode: addResult.exitCode, stderr: addResult.stderr },
       )
     }
+
+    // per-worktree config 补齐（先于 setup：setup 脚本内的 git 操作同样受益）
+    this.ensureWorktreeUsable(barePath, newWtPath, dirName, branch)
 
     // setup 脚本（可选，不存在跳过）—— 从 configService.getBareSetupScript() 读取脚本相对路径
     // 失败回滚（RT-8#6）：worktree add 已产生副作用（目录/元数据/新分支），setup 失败必须
@@ -454,12 +542,15 @@ export class WorktreeService implements IWorktreeService {
     }
 
     // base 解析（usedBaseRef 供返回——请求 ref 校验失败静默 fallback 的显形，RT-8#8）
-    const usedBaseRef = await this.resolveBaseRef(repoRoot, baseBranch, workspaceHint)
+    const usedBaseRef = await this.resolveBaseRef(repoRoot, branch, baseBranch, workspaceHint)
 
-    // git worktree add
-    const addResult = await this.deps.gitExecutor.exec(repoRoot, 'worktree', [
-      'add', '-b', branch, newWtPath, usedBaseRef,
-    ])
+    // git worktree add。timeoutMs 显式传：同 bare 模式（整树 checkout，8s 默认值不够）
+    const addResult = await this.deps.gitExecutor.exec(
+      repoRoot,
+      'worktree',
+      ['add', '-b', branch, newWtPath, usedBaseRef],
+      { timeoutMs: WORKTREE_GIT_TIMEOUT_MS },
+    )
     if (addResult.exitCode !== 0) {
       throw worktreeError(
         'GIT_FAILED',
@@ -487,14 +578,35 @@ export class WorktreeService implements IWorktreeService {
     // 默认 'custom-hooks/setup-worktree.sh'（与原 bare-workspace 工作流一致）
     const setupScriptPath = join(cwd, setupScriptRel)
     if (this.deps.fs.existsSync(setupScriptPath)) {
-      // 超时从 configService.getTimeout() 读（默认 60s，setup 脚本一般很快；用户可调到 120s 给 pnpm install 留余量）
+      // 超时从 configService.getTimeout() 读（默认 300s——monorepo pnpm install +
+      // 首次 Electron/pi 二进制下载是分钟级，60s 默认值会误杀冷安装；上限 3600s）
       const timeoutMs = this.deps.configService.getTimeout() * MS_PER_SECOND
-      const result = await this.deps.shellRunner.execute({
-        scriptPath: setupScriptPath,
-        args: [worktreePath],
-        cwd: worktreePath,
-        timeout: timeoutMs,
-      })
+      let result: ShellRunnerResult
+      try {
+        result = await this.deps.shellRunner.execute({
+          scriptPath: setupScriptPath,
+          args: [worktreePath],
+          cwd: worktreePath,
+          timeout: timeoutMs,
+        })
+      } catch (e) {
+        // ShellRunnerError（timeout / not_found）是「执行层失败」而非脚本业务失败。原样逃逸有两个
+        // 问题：① handler 的 GIT_ERROR_CODE_MAP 会把 code='timeout' 误映射成 GIT_FAILED——用户
+        // 看到「git 失败」实际是 setup 卡住，排查方向被指错；② 前端拿不到 SETUP 语义、无法分流。
+        // 统一包装成 SETUP_FAILED，detail 用 timeout/scriptMissing 区分形态；rollback 路径不变
+        // （调用方 catch 到的仍是同一种 SETUP_FAILED 错误形状）。
+        const isTimeout = e instanceof ShellRunnerError && e.code === 'timeout'
+        const isMissing = e instanceof ShellRunnerError && e.code === 'not_found'
+        const rawMessage = e instanceof Error ? e.message : String(e)
+        if (isTimeout) {
+          throw worktreeError('SETUP_FAILED', `setup 脚本执行超时（${timeoutMs}ms）`, { timeout: true, timeoutMs })
+        }
+        throw worktreeError(
+          'SETUP_FAILED',
+          `setup 脚本执行失败: ${rawMessage}`,
+          isMissing ? { scriptMissing: true } : { executionError: rawMessage },
+        )
+      }
       if (result.exitCode !== 0) {
         throw worktreeError(
           'SETUP_FAILED',
@@ -517,27 +629,90 @@ export class WorktreeService implements IWorktreeService {
    */
   private async resolveBaseRef(
     repoDir: string,
+    branch: string,
     baseBranch: string,
     workspaceHint?: string,
   ): Promise<string> {
     if (baseBranch === 'current') {
       const info = this.deps.gitInfoReader.readGitInfo(workspaceHint ?? process.cwd())
       if (info?.branch) return info.branch
-      console.warn(
-        `[worktree-service] baseBranch='current' 读不到当前分支（gitInfoReader 返回空），fallback 用 ${LOCAL_MAIN}` +
-          `——新 worktree 将基于 ${LOCAL_MAIN} 而非当前分支。恢复动作：检查仓库 HEAD 状态后重试`,
-      )
+      logger.warn('[worktree-service] base 解析 fallback：current 读不到，改用本地 main', {
+        branch,
+        repoDir,
+        requestedBaseBranch: baseBranch,
+        fallback: LOCAL_MAIN,
+        reason: 'gitInfoReader 返回空',
+        impact: '新 worktree 基于本地 main 而非当前分支',
+      })
       return LOCAL_MAIN
     }
     // 验证 ref 存在
     const result = await this.deps.gitExecutor.exec(repoDir, 'rev-parse', ['--verify', baseBranch])
     if (result.exitCode === 0) return baseBranch
-    console.warn(
-      `[worktree-service] base 分支 ${baseBranch} 不存在或校验失败（rev-parse exit=${result.exitCode}: ` +
-        `${result.stderr.trim()}），fallback 用 ${LOCAL_MAIN}——新 worktree 将基于 ${LOCAL_MAIN}。` +
-        `恢复动作：git fetch 后重试，或显式指定存在的 baseBranch`,
-    )
+    logger.warn('[worktree-service] base 解析 fallback：请求 ref 校验失败，改用本地 main', {
+      branch,
+      repoDir,
+      requestedBaseBranch: baseBranch,
+      fallback: LOCAL_MAIN,
+      revParseExit: result.exitCode,
+      revParseStderr: result.stderr.trim(),
+      impact: '新 worktree 基于本地 main 而非请求的 base（创建基线被偷换）',
+    })
     return LOCAL_MAIN
+  }
+
+  /**
+   * 补齐 per-worktree git config，让新 worktree 内的 git 可用（bare-workspace 模式专属）。
+   *
+   * 根因（实测 git 2.52 复现）：`git worktree add` 不生成 `config.worktree`，bare 仓库
+   * `.bare/config` 的 `core.bare=true` 被 worktree 继承——worktree 内 `git status` 直接报
+   * 「致命错误：该操作必须在一个工作区中运行」，`--is-bare-repository` 返回 true，后续
+   * agent/UI/用户终端在该 worktree 里做任何 git 操作全部失败。git-cwt 靠写 config.worktree
+   * （core.bare=false + hooksPath）绕过；taiji 自建的 worktree 必须同款补齐，否则每个 app
+   * 创建的 worktree 都带这个先天缺陷。
+   *
+   * 两步（产物形态与 git-cwt 对齐，探针实测有效）：
+   * ① `<barePath>/worktrees/<dirName>/config.worktree` 写 `[core] bare=false`；`.githooks`
+   *    存在时补 `hooksPath`（bare 仓默认 hooks 目录不可用，不写则 commit 不过项目钩子）；
+   * ② `extensions.worktreeConfig` 未在 `.bare/config` 出现时追加开启——config.worktree
+   *    只有该扩展启用才被 git 读取（未开启时①写了也是空气）。键已存在（含 false）不覆盖。
+   *
+   * best-effort：任一步失败只 warn 不抛——worktree 已创建成功，让 create 失败会触发回滚、
+   * 把一个「基本可用仅 git 元数据缺失」的 worktree 删掉，代价大于收益；失败现场进日志。
+   */
+  private ensureWorktreeUsable(barePath: string, wtPath: string, dirName: string, branch: string): void {
+    // ① per-worktree config.worktree（git per-worktree 元数据目录 = <bare>/worktrees/<目标目录名>）
+    try {
+      const hooksPath = join(wtPath, '.githooks')
+      const lines = ['[core]', '\tbare = false']
+      if (this.deps.fs.existsSync(hooksPath)) {
+        lines.push(`\thooksPath = ${hooksPath}`)
+      }
+      this.deps.fs.writeFileSync(join(barePath, 'worktrees', dirName, 'config.worktree'), `${lines.join('\n')}\n`)
+    } catch (e) {
+      logger.warn('[worktree-service] config.worktree 写入失败，worktree 内 git 可能不可用', {
+        branch,
+        barePath,
+        worktreePath: wtPath,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+    // ② extensions.worktreeConfig 开启（config.worktree 的生效前提；git-cwt 同样会开启）
+    const configPath = join(barePath, 'config')
+    if (!this.deps.fs.existsSync(configPath)) return
+    try {
+      const current = this.deps.fs.readFileSync(configPath, 'utf8')
+      // 键已存在（true/false 均算用户已有配置）→ 不覆盖，尊重用户设置
+      if (!/^\s*worktreeConfig\s*=/m.test(current)) {
+        this.deps.fs.writeFileSync(configPath, `${current.replace(/\s*$/, '')}\n\n[extensions]\n\tworktreeConfig = true\n`)
+      }
+    } catch (e) {
+      logger.warn('[worktree-service] extensions.worktreeConfig 开启失败，config.worktree 可能不被 git 读取', {
+        branch,
+        barePath,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
   }
 
   /**
