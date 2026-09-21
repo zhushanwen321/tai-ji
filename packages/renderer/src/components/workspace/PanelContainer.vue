@@ -39,7 +39,7 @@
       @toggle-drawer="toggleDrawer()"
     />
     <!-- plan 模式状态带（PlanModeBar）与审批条已随 plan-mode-ux-refactor u-plan-bar 收敛到
-         Panel 内 composer 正上方一行（设计 §3.3 D1），本容器不再挂载。 -->
+         Panel 内 composer 下方一行（设计 §3.3 D1），本容器不再挂载。 -->
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做

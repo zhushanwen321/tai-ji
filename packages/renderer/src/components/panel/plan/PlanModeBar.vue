@@ -1,7 +1,7 @@
 <template>
   <!--
     PlanModeBar —— 计划模式状态带（plan-mode-ux-refactor u-plan-bar，设计 §3.3 D1）。
-    挂载位 = Panel 内 composer 正上方一行（.composer-band 之前）；审阅动作由右区
+    挂载位 = Panel 内 composer 下方一行（.composer-band 之后，窗口底部）；审阅动作由右区
     PlanReviewBar 承载（D1 chrome 收敛为单行）。
     组件常驻挂载（Panel 无条件挂载本组件，isActive=false 时 template 根 v-if 不渲染
     DOM）——setup 内 useExtensionUI(planReviewFilter) 订阅与 getPendingRequests 拉取
@@ -9,7 +9,7 @@
     消费面：C4 分流把 planReview 排除出 CompanionBand 原始 dialog，无二通道；订阅宿主
     若组件级 v-if，挂起请求无人枚举 → agent 永挂）。focusedSid 注入义务（原横幅/审批
     条 setup 内 usePlanState → syncFocus）随组件迁移到本组件（承接清单②）。
-    视觉 = text-xs / text-neutral-dim / 无填充背景 / border-b hairline，比内容安静。
+    视觉 = text-xs / text-neutral-dim / 无填充背景 / border-t hairline，比内容安静。
   -->
   <!-- 行级 flex-wrap 承载「一行两区」窄窗契约（F-R2-2）：右区（PlanReviewBar，basis =
        max-content）一行放不下时整体换行到第二行，左区 shrink-0 优先保全——删 wrap 会
@@ -17,7 +17,7 @@
   <div
     v-if="isActive"
     data-testid="plan-mode-bar"
-    class="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border px-5 py-1.5 text-xs text-neutral-dim"
+    class="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border px-5 pb-3 pt-1.5 text-xs text-neutral-dim"
   >
     <!-- 左区（常驻，isActive 即渲染）：模式名 + 三阶段点（done 对勾/同色系，去绿）+ 退出 -->
     <span
@@ -70,7 +70,7 @@
           <X class="size-3" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" :collision-padding="8" class="w-64 p-3">
+      <PopoverContent side="top" align="end" :collision-padding="8" class="w-64 p-3">
         <div data-testid="plan-mode-bar-exit-confirm" class="flex flex-col gap-2.5">
           <p class="text-[length:var(--text-xs)] font-medium text-neutral-fg">
             {{ t('plan.modeBar.exitConfirmTitle') }}

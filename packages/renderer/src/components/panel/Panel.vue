@@ -85,12 +85,6 @@
       <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.panel.selectSession') }}</p>
     </div>
 
-    <!-- 计划模式状态带（plan-mode-ux-refactor u-plan-bar，设计 §3.3 D1）：composer 正上方
-         一行（左区常驻模式态 + 右区情境审批条 PlanReviewBar），自 PanelContainer 顶部横幅 +
-         底部审批条两处挂载收敛而来。组件常驻挂载（无组件级 v-if，承接清单①：isActive=false
-         时其 template 根 v-if 不渲染 DOM，订阅不随显隐销毁），与 composer 相邻但不同槽位
-         （不动 composer-bar 密度逻辑）。 -->
-    <PlanModeBar :session-id="sessionId" />
     <!-- ④ composer companion zone（③ progress-zone 已删——真实任务态未接入，state 恒 null
          自隐藏死代码）。git 状态已移入 SideDrawer git tab（原 zone ⑤ 摘牌），此带仅 composer。
          统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
@@ -143,6 +137,11 @@
            无 session 空态不挂。 -->
       <Composer v-else-if="showPanelComposer" :session-id="sessionId" />
     </div>
+    <!-- 计划模式状态带（plan-mode-ux-refactor u-plan-bar，设计 §3.3 D1）：composer 下方
+         一行（左区常驻模式态 + 右区情境审批条 PlanReviewBar）。组件常驻挂载（无组件级
+         v-if，承接清单①：isActive=false 时其 template 根 v-if 不渲染 DOM，订阅不随显隐
+         销毁），与 composer 相邻但不同槽位（不动 composer-bar 密度逻辑）。 -->
+    <PlanModeBar :session-id="sessionId" />
   </section>
 </template>
 

@@ -99,7 +99,7 @@ const SID = 'sess-mode-bar'
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
     ...overrides,
@@ -460,8 +460,8 @@ describe('场景 7（A7 降级 L1，DOM 存在性）', () => {
   })
 })
 
-describe('挂载位：Panel 内 composer 正上方（.composer-band 之前）', () => {
-  it('isActive=true 时 plan-mode-bar 行是 section 子级且位于 composer-band 之前', async () => {
+describe('挂载位：Panel 内 composer 下方（.composer-band 之后）', () => {
+  it('isActive=true 时 plan-mode-bar 行是 section 子级且位于 composer-band 之后', async () => {
     commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf() })
     const wrapper = mount(Panel, {
       props: { panelId: 'p1', sessionId: SID, sessionDir: '/tmp/proj' },
@@ -487,7 +487,7 @@ describe('挂载位：Panel 内 composer 正上方（.composer-band 之前）', 
     const bandIdx = children.indexOf(bandEl)
     expect(barIdx).toBeGreaterThan(-1)
     expect(bandIdx).toBeGreaterThan(-1)
-    expect(barIdx).toBeLessThan(bandIdx)
+    expect(barIdx).toBeGreaterThan(bandIdx)
     wrapper.unmount()
   })
 })

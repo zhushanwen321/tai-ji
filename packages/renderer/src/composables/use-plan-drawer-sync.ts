@@ -26,7 +26,7 @@
  * 写入），本 composable 只读不写 store；drawer 控制态经 core 公开 API（openDrawerTab），
  * 与 useSessionTrace 的 drawer 联动同形态。
  *
- * 前置依赖：planStore.focusedSid 的注入方 = PlanModeBar（Panel 宿主内、composer 上方，
+ * 前置依赖：planStore.focusedSid 的注入方 = PlanModeBar（Panel 宿主内、composer 下方，
  * setup 内 usePlanState 的 watch immediate → syncFocus）。本接线自身不注入焦点——
  * 因此注入方必须与本接线的消费宿主（PanelContainer）同处一条单 Panel 宿主链
  * （PanelContainer 恒单 Panel），注入方脱离该宿主关系单独挂载时 sid 恒 null、永不触发。
