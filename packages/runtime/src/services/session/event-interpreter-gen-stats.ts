@@ -115,6 +115,8 @@ export class LlmWindowSampler {
     this.onGenStats(sessionId, {
       outputTokens: usage.outputTokens,
       durationMs: windowMs,
+      // composer-genstats-ttft D1 机械缺省（U1 越界补丁，计划 §5 登记）：ttft 采样归 U2 Wave2 覆写
+      ttftMs: null,
       model: usage.model,
       provider: usage.provider,
       input: usage.input,

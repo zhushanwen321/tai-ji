@@ -100,6 +100,7 @@ function readJson(p: string): unknown {
 const NORMAL_SAMPLE = {
   outputTokens: 100,
   durationMs: 2000,
+  ttftMs: null,
   model: 'mdl',
   provider: 'prov',
   input: 500,
@@ -148,7 +149,7 @@ describe('GenStatsService.recordSample（写 1 + bogus guard + 落盘）', () =>
   it('双丢弃（bogus + promptTotal≤0）：无落盘无广播；映射写 1 仍登记（D7②③）', () => {
     const { service, published } = makeService()
     service.recordSample('s1', {
-      outputTokens: 1000, durationMs: 50, model: 'mdl', provider: 'prov',
+      outputTokens: 1000, durationMs: 50, ttftMs: null, model: 'mdl', provider: 'prov',
       input: 0, cacheRead: null, cacheWrite: null,
     })
 
@@ -162,7 +163,7 @@ describe('GenStatsService.recordSample（写 1 + bogus guard + 落盘）', () =>
   it('promptTotal≤0 但速度样本合法：仅速度落盘 + 广播（命中率字段保持旧值）', () => {
     const { service, published } = makeService()
     service.recordSample('s1', {
-      outputTokens: 80, durationMs: 1500, model: 'mdl', provider: 'prov',
+      outputTokens: 80, durationMs: 1500, ttftMs: null, model: 'mdl', provider: 'prov',
       input: 0, cacheRead: null, cacheWrite: null,
     })
 
@@ -420,6 +421,7 @@ describe('GenStatsService.getSnapshotForSession（恢复腿降级链，D4）', (
       sessionId: 'sUnknown',
       speed: { current: null, day: null, d7: null, d30: null },
       cacheRatio: { current: null, day: null },
+      ttft: { current: null, day: null, d7: null, d30: null },
     })
     expect(frame.model).toBeUndefined()
   })
@@ -472,6 +474,7 @@ describe('EventInterpreter gen-stats 接线（D1/D2）', () => {
     expect(onGenStats).toHaveBeenCalledWith('s1', {
       outputTokens: 100,
       durationMs: 5_000,
+      ttftMs: null,
       model: 'mdl',
       provider: 'prov',
       input: 500,
@@ -697,6 +700,7 @@ describe('SessionMessageHandler session.getGenStats case', () => {
       sessionId: 's9',
       speed: { current: 50, day: 50, d7: null, d30: null },
       cacheRatio: { current: null, day: null },
+      ttft: { current: null, day: null, d7: null, d30: null },
       model: 'prov/mdl',
     }
     const getSnapshotForSession = vi.fn(async () => frame)

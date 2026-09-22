@@ -6,8 +6,9 @@
  *    （防 payload 漂移——漏登记会落 Record<string, unknown> 占位，消费侧被迫 as）
  *  - 新 RPC session.getGenStats 在 ClientMessageType 联合 + ClientMessageMap + ReplyPayloadMap
  *    三处登记，reply = session.stats_update payload 同形（payload 消费型）
- *  - GenStatsSpeed / GenStatsCacheRatio / GenStatsFrame 字段与 gen-stats.ts 类型逐字一致
- *    （speed 4 字段、cacheRatio 2 字段均 number|null；sessionId 必填、model 可选）
+ *  - GenStatsSpeed / GenStatsCacheRatio / GenStatsTtft / GenStatsFrame 字段与 gen-stats.ts
+ *    类型逐字一致（speed/ttft 各 4 字段、cacheRatio 2 字段均 number|null；sessionId 必填、
+ *    model 可选）
  *  - null 编码纪律（D4）：null = 无数据，0 = 真实测量值，两者运行时可区分
  *
  * 模式与 protocol-seq.test.ts 一致（本目录在 tsconfig include:["src"] 内——编译期断言
@@ -28,7 +29,7 @@ import type {
   ServerMessageUnion,
   ReplyPayloadMap,
 } from '../protocol'
-import type { GenStatsSpeed, GenStatsCacheRatio, GenStatsFrame } from '../gen-stats'
+import type { GenStatsSpeed, GenStatsCacheRatio, GenStatsTtft, GenStatsFrame } from '../gen-stats'
 
 // ── 编译期类型断言辅助（同 protocol.test.ts / protocol-seq.test.ts 模式）──
 // AssertHasKey/AssertExtends：条件类型求值为 true，仅在编译期校验「key 存在 / 子类型关系成立」；
@@ -52,7 +53,7 @@ type _Assert_Rpc_union = AssertExtends<'session.getGenStats', ClientMessageType>
 type _Assert_Rpc_map_key = AssertHasKey<ClientMessageMap, 'session.getGenStats'>
 type _Assert_Rpc_payload_exact = AssertExact<ClientMessageMap['session.getGenStats'], { sessionId: string }>
 type _Assert_Rpc_reply_key = AssertHasKey<ReplyPayloadMap, 'session.getGenStats'>
-// reply = session.stats_update payload 同形（D4：恢复腿，无任何数据时 speed/cacheRatio 全 null + model 缺省）
+// reply = session.stats_update payload 同形（D4：恢复腿，无任何数据时 speed/ttft/cacheRatio 全 null + model 缺省）
 type _Assert_Rpc_reply_shape = AssertExtends<ReplyPayloadMap['session.getGenStats'], GenStatsFrame>
 
 // ── 类型字段与设计 §3.4 逐字一致（键集合 + 字段类型均精确断言）──
@@ -66,10 +67,17 @@ type _Assert_Cache_keys = AssertExact<keyof GenStatsCacheRatio, 'current' | 'day
 type _Assert_Cache_current = AssertExact<GenStatsCacheRatio['current'], number | null>
 type _Assert_Cache_day = AssertExact<GenStatsCacheRatio['day'], number | null>
 
-type _Assert_Frame_keys = AssertExact<keyof GenStatsFrame, 'sessionId' | 'speed' | 'cacheRatio' | 'model'>
+type _Assert_Ttft_keys = AssertExact<keyof GenStatsTtft, 'current' | 'day' | 'd7' | 'd30'>
+type _Assert_Ttft_current = AssertExact<GenStatsTtft['current'], number | null>
+type _Assert_Ttft_day = AssertExact<GenStatsTtft['day'], number | null>
+type _Assert_Ttft_d7 = AssertExact<GenStatsTtft['d7'], number | null>
+type _Assert_Ttft_d30 = AssertExact<GenStatsTtft['d30'], number | null>
+
+type _Assert_Frame_keys = AssertExact<keyof GenStatsFrame, 'sessionId' | 'speed' | 'cacheRatio' | 'ttft' | 'model'>
 type _Assert_Frame_sessionId = AssertExact<GenStatsFrame['sessionId'], string>
 type _Assert_Frame_speed = AssertExact<GenStatsFrame['speed'], GenStatsSpeed>
 type _Assert_Frame_cacheRatio = AssertExact<GenStatsFrame['cacheRatio'], GenStatsCacheRatio>
+type _Assert_Frame_ttft = AssertExact<GenStatsFrame['ttft'], GenStatsTtft>
 type _Assert_Frame_model_optional = AssertExact<GenStatsFrame['model'], string | undefined>
 
 // ── 编译期强制执行点 ──
@@ -92,10 +100,16 @@ const _genStatsProtocolAssertsEnforced = [
   _enforceTrue<_Assert_Cache_keys>(),
   _enforceTrue<_Assert_Cache_current>(),
   _enforceTrue<_Assert_Cache_day>(),
+  _enforceTrue<_Assert_Ttft_keys>(),
+  _enforceTrue<_Assert_Ttft_current>(),
+  _enforceTrue<_Assert_Ttft_day>(),
+  _enforceTrue<_Assert_Ttft_d7>(),
+  _enforceTrue<_Assert_Ttft_d30>(),
   _enforceTrue<_Assert_Frame_keys>(),
   _enforceTrue<_Assert_Frame_sessionId>(),
   _enforceTrue<_Assert_Frame_speed>(),
   _enforceTrue<_Assert_Frame_cacheRatio>(),
+  _enforceTrue<_Assert_Frame_ttft>(),
   _enforceTrue<_Assert_Frame_model_optional>(),
 ]
 void _genStatsProtocolAssertsEnforced
@@ -111,6 +125,7 @@ describe('session.stats_update 帧登记', () => {
         sessionId: 's1',
         speed: { current: null, day: null, d7: null, d30: null },
         cacheRatio: { current: null, day: null },
+        ttft: { current: null, day: null, d7: null, d30: null },
       },
     }
     expect(msg.type).toBe('session.stats_update')
@@ -118,6 +133,7 @@ describe('session.stats_update 帧登记', () => {
     expect(msg.payload.speed.current).toBeNull()
     expect(msg.payload.speed.d30).toBeNull()
     expect(msg.payload.cacheRatio.day).toBeNull()
+    expect(msg.payload.ttft.d30).toBeNull()
     expect(msg.payload.model).toBeUndefined()
   })
 
@@ -129,12 +145,15 @@ describe('session.stats_update 帧登记', () => {
         sessionId: 's1',
         speed: { current: 0, day: 28.4, d7: 22, d30: 19 },
         cacheRatio: { current: 0, day: 87 },
+        ttft: { current: 820, day: 910, d7: 1050, d30: 980 },
         model: 'zai-coding-cn/glm-5.3',
       },
     }
     expect(msg.payload.speed.current).toBe(0)
     expect(msg.payload.cacheRatio.current).toBe(0)
     expect(msg.payload.speed.day).toBe(28.4)
+    expect(msg.payload.ttft.current).toBe(820)
+    expect(msg.payload.ttft.d30).toBe(980)
     expect(msg.payload.model).toBe('zai-coding-cn/glm-5.3')
   })
 
@@ -144,6 +163,12 @@ describe('session.stats_update 帧登记', () => {
     expect(noData.current === null).toBe(true)
     expect(measuredZero.current === null).toBe(false)
     expect(measuredZero.current === 0).toBe(true)
+    // ttft 同纪律（composer-genstats-ttft：无结算 ≠ 测得 0ms）
+    const ttftNoData: GenStatsTtft = { current: null, day: null, d7: null, d30: null }
+    const ttftMeasuredZero: GenStatsTtft = { current: 0, day: null, d7: null, d30: null }
+    expect(ttftNoData.day === null).toBe(true)
+    expect(ttftMeasuredZero.current === null).toBe(false)
+    expect(ttftMeasuredZero.current === 0).toBe(true)
   })
 
   it('ServerMessageUnion 判别联合形态含本帧且 payload 收窄', () => {
@@ -153,6 +178,7 @@ describe('session.stats_update 帧登记', () => {
         sessionId: 's1',
         speed: { current: 35, day: null, d7: null, d30: null },
         cacheRatio: { current: 91, day: 87 },
+        ttft: { current: 640, day: null, d7: null, d30: null },
         model: 'm',
       },
     }
@@ -179,16 +205,20 @@ describe('session.getGenStats RPC 登记', () => {
       sessionId: 's1',
       speed: { current: 35, day: 28, d7: 22, d30: 19 },
       cacheRatio: { current: 91, day: 87 },
+      ttft: { current: 1240, day: 1100, d7: 990, d30: 1020 },
       model: 'xiaomi-token-plan-cn/mimo-v2.5-pro',
     }
     expect(reply.model).toBe('xiaomi-token-plan-cn/mimo-v2.5-pro')
+    expect(reply.ttft.day).toBe(1100)
     // 无任何数据时：全 null + model 缺省（D4 恢复腿兜底形态）
     const empty: ReplyPayloadMap['session.getGenStats'] = {
       sessionId: 's1',
       speed: { current: null, day: null, d7: null, d30: null },
       cacheRatio: { current: null, day: null },
+      ttft: { current: null, day: null, d7: null, d30: null },
     }
     expect(empty.model).toBeUndefined()
     expect(empty.speed.current).toBeNull()
+    expect(empty.ttft.current).toBeNull()
   })
 })

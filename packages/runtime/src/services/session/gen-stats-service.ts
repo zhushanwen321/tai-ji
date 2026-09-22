@@ -325,6 +325,8 @@ export class GenStatsService {
       sessionId: sid,
       speed: { current: speedCurrent, ...aggregate.speed },
       cacheRatio: { current: cacheCurrent, ...aggregate.cacheRatio },
+      // composer-genstats-ttft D1 机械缺省（U1 越界补丁，计划 §5 登记）：ttft 聚合归 U3 Wave2 覆写
+      ttft: { current: null, day: null, d7: null, d30: null },
       ...(aggregate.model !== undefined ? { model: aggregate.model } : {}),
     }
   }
