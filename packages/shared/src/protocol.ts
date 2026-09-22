@@ -1297,8 +1297,8 @@ export interface BtwThreadInfo {
   vid: string
   /**
    * 回收提醒态（D1「回收前」提醒窗口，提前 1 拍置位；回收发生/用户续问后清）——
-   * badge 待处理的数据源（runtime 半边随本字段落地；renderer 消费半边后续批接线）。
-   * **可选字段防破坏既有消费**（缺省 = 无提醒；读方按 `=== true` 判定）。
+   * runtime 置位/清除 + renderer useBtwTabData.syncReclaimReminders 消费（badge 待处理
+   * 数据源，读方按 `=== true` 判定）。**可选字段防破坏既有消费**（缺省 = 无提醒）。
    */
   reclaimImminent?: boolean
 }

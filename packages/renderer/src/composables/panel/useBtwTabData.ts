@@ -186,9 +186,10 @@ function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
 //   ③ 回放对账路 = `markBtwStaleInteractiveFromReplay`（btw-replay 回放链联动，补快照修剪
 //   路的残余盲区：整机杀重启时本簿记与 runtime pending 同时清零、修剪差集恒空结构性不触发
 //   ——以 pi 会话文件中悬空的交互请求 toolCall 持久痕迹为信号源置位，只写提示不出账）。
-//   `expiredNoticeByVid` 的写方形态：置位 = ②差集支 + ③回放路 两函数；清除 = 新请求顶掉 +
-//   用户 dismiss。各写方互不清除他路产物（②首条版本保留语义见 invalidateBtwRequests 注释；
-//   ③同值幂等、不覆盖既有提示）。
+//   `expiredNoticeByVid` 的写方形态：置位 = ①事件路 invalidateBtwRequests + ②差集支 +
+//   ③回放路 三函数；清除 = 新请求顶掉 + 用户 dismiss。各写方互不清除他路产物（②首条版本
+//   保留语义见 invalidateBtwRequests 注释；③同值幂等；异值 reason 可被覆盖——簿记值，
+//   展示文案固定 i18n 不分支，行为等价）。
 // - 回收提醒清除支：setBtwReclaimReminder(vid, false) + 线内容增长即清（用户续问的
 //   renderer 可达信号，见 syncThreadWatchers）。
 // 无超时语义：本簿记不含任何墙钟（D8——pi 源 dialog 无超时，plugin 超时撤窗契约不套用）。
@@ -660,7 +661,8 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
 
 /**
  * 接线 drawer 面板的交互表面（BtwPanel setup 同步调用）：
- * - 失效行内提示读取/关闭（终态机失效支，badge 清 + 撤下 + 提示两路合并收口的提示半边）；
+ * - 失效行内提示读取/关闭（终态机失效支，badge 清 + 撤下 + 提示三路合并收口
+ *   （事件 / 快照对账 / 回放悬空）的提示半边）；
  * - 第四面状态区（setStatus/setWidget 的 per-session 源读 vid 分区；inject 缺失静默空态；
  *   toolbar/tab-bar 无 session 帧不在路由面——V4⑤ 结论）；
  * - 运行期错误边界：onErrorCaptured 绑定调用方组件实例（BtwPanel），Guard 子组件为全部

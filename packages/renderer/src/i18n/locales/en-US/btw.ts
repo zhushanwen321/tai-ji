@@ -40,7 +40,7 @@ export default {
   },
   // M3-c interaction loop (D8 degraded path: drawer inline confirm bar + expiry notice + fourth-surface status strip)
   interaction: {
-    // Terminal-state expiry notice (teardown + badge clear + this notice, two paths merged)
+    // Terminal-state expiry notice (teardown + badge clear + this notice, three paths merged: event / snapshot reconcile / replay dangling)
     expiredNotice: 'Request expired',
     dismissExpired: 'Got it',
     // Runtime error boundary (single-line failure = inline error + retry, never escapes the main panel)

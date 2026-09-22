@@ -33,7 +33,7 @@
  *
  * V5（附着语义）同步核实：restore 腿 resolveRestoreTarget → findScannedSession 只扫
  * `sessions/`，btw 线目录不在其扫描面 ⇒ restoreSession/getHistory 离线腿对 btw 线不通用，
- * 必须走本文件 attachProcess 自建编排（spawn → switch_session → assertPiSessionFile）。
+ * 必须走本文件 ensureProcess（附着编排实装）自建编排（spawn → switch_session → assertPiSessionFile）。
  * 悬空 tool-call 判「中断 turn」的失效支接线归 M3-c/M4-a（V5 残留项）。
  *
  * 关键红线呼应（AGENTS.md 关键规则）：
@@ -178,7 +178,7 @@ export interface BtwLineSpawnOptions {
 /** 组合根注入的依赖（全部窄接口；测试注入 fake）。 */
 export interface BtwServiceDeps {
   /**
-   * 线进程 spawn（组合根接 IProcessManager.createSession；key 见 attachProcess
+   * 线进程 spawn（组合根接 IProcessManager.createSession；key 见 ensureProcess
    * 的 tempKey 编排——日志文件名避冒号，rekey 后 pm 键 ≡ 注册 id = vid）。
    */
   processes: Pick<IProcessManager, 'createSession' | 'destroySession' | 'rekey' | 'getClient'>
@@ -548,7 +548,11 @@ export class BtwService {
 
   // ── 生命周期信号（闲置回收 / 交互豁免 / 活跃）──
 
-  /** 活跃信号（M2-b 消息入口 / UI 提交处调用；与 client.lastActivityAt 取 max 计闲置）。 */
+  /**
+   * 活跃信号（实装触发 = 本服务内部调用：ensureProcess 活跃/重附着路径与
+   * setPendingInteraction(false) 的终态应答支；闲置计时 = 本时间戳与
+   * client.lastActivityAt 取 max 兜底）。
+   */
   markActivity(vid: string): void {
     const rec = this.registry.get(vid)
     if (!rec) return
@@ -736,7 +740,8 @@ export class BtwService {
         continue
       }
       // 提前 1 拍提醒窗（D1「回收前」，实装窗口 = 阈值 − 扫描节拍）：置提醒态 + 驱动广播；
-      // 下一拍满阈值才真回收（badge 待处理呈现归 renderer 后续批，数据源 = reclaimImminent）。
+      // 下一拍满阈值才真回收（badge 待处理呈现已接线：renderer useBtwTabData
+      // setBtwReclaimReminder，数据源 = reclaimImminent）。
       if (!rec.reclaimImminent && idle >= this.idleThresholdMs - BTW_IDLE_TICK_MS) {
         rec.reclaimImminent = true
         this.fireWillReclaim(rec.vid)

@@ -136,7 +136,7 @@
              错误条 + 重试在 Guard 外恒可达。 -->
         <div v-if="selectedVid" class="flex shrink-0 flex-col gap-1.5 px-2 pb-1.5" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
-            <!-- 终态机失效支行内提示（badge 清 + 表单撤下 + 本提示，两路合并收口） -->
+            <!-- 终态机失效支行内提示（badge 清 + 表单撤下 + 本提示，三路合并收口：事件 / 快照对账 / 回放悬空） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
               <TriangleAlert class="size-3 shrink-0" />
               <span>{{ t('btw.interaction.expiredNotice') }}</span>

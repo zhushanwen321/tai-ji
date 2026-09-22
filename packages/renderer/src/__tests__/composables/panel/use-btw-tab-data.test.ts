@@ -368,7 +368,7 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
   })
 })
 
-describe('失效支单入口（两路合并收口：事件路薄委托 + 快照修剪路共用 invalidateBtwRequests）', () => {
+describe('失效支单入口（两路写入收口：事件路薄委托 + 快照修剪路共用 invalidateBtwRequests）', () => {
   /** 经真实 bus 入账一条挂起 dialog 族请求（confirm——簿记五类之一） */
   function seedPending(vid: string, requestId: string): void {
     ensureBtwPendingBookkeeping()

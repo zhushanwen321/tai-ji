@@ -25,7 +25,8 @@
  *   不挂内存回收——btw 键非 `subagent:<mainSid>:` 前缀、不进 main 的 workflow 映射，构造性成立）；
  *   btw 分区被驱逐时其派生键**同驱**（D9③ 两半边：subagent 段以线 piSessionId 前缀匹配 +
  *   agentcall 段走 B9 同构回调 agentCallEvictionsOf（线 vid 形态透传，workflow 映射按线 vid
- *   挂名 ∖ viewedVids），统一入口 evictDerivedPartitions，两驱逐路径共用）
+ *   挂名 ∖ viewedVids）——当前无生产方按线 vid 挂名（D9③ no-opener），该半边为防御性预留，
+ *   统一入口 evictDerivedPartitions，两驱逐路径共用）
  * - agentcall:xxx 两段式虚拟 key 经注入回调联动驱逐（B9，memory-leak-remediation §3.3-B9）：
  *   主 session 被驱逐时由装配侧回调（agentCallEvictionsOf，workflow store 映射 ∖ viewedVids
  *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源钉死 panel 枚举
@@ -165,7 +166,8 @@ export interface LruEvictDeps {
    * [btw-question D9③/M2-c] 形参按**被驱逐 sid 原形态**透传：主会话 = mainSid；btw 分区
    * 被驱逐时 = 线 vid（`btw:<piSessionId>`）——workflow 映射按线 vid 挂名（D9「btw 线名下
    * 挂 btw vid」），装配侧同一回调零改动即可服务两形态（即设计「B9 同构回调：线派生枚举
-   * ∖ viewedVids」的执行面）。
+   * ∖ viewedVids」的执行面）。当前无生产方按线 vid 挂名（D9③ no-opener），该形态为
+   * 防御性预留。
    */
   agentCallEvictionsOf: (mainSid: string) => string[]
   /**
@@ -267,7 +269,8 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
  * （btw 键不进 isVirtualKey，但其派生键仍按 owner 段联动，防孤儿泄漏）。
  * agentcall 半边走 B9 回调 agentCallEvictionsOf（sid 原形态透传）：主会话按 mainSid、
  * btw 线按线 vid 查 workflow 映射（D9「btw 线名下挂 btw vid」），豁免 ∖ viewedVids 已在
- * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行面。
+ * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行面。当前无生产方按
+ * 线 vid 挂名（D9③ no-opener），该半边为防御性预留。
  *
  * 反向不变量（D5「主驱逐不联动清 btw 分区」）：主会话驱逐时 btw 键不命中
  * `subagent:<mainSid>:` 前缀、线名下 agentcall 不落 main 的 workflow 映射，构造性不动；

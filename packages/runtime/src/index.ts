@@ -987,7 +987,7 @@ async function main(): Promise<void> {
    * 1 拍窗口）与清除（onThreadStateChanged：回收发生/用户续问/进程亡/挂起交互置位）同发
    * 该主会话线列表 state 帧（typeKey 'btw'，双通道同 payload——共用 buildBtwThreadListPayload
    * 防漂移）。best-effort：失败留痕不打断回收主链（恢复通道 = btw.list RPC 拉取兜底）。
-   * renderer 消费半边（useBtwTabData setBtwReclaimReminder 接线）不在本轮，主 agent 排后续批。
+   * renderer 消费半边已接线（useBtwTabData setBtwReclaimReminder，数据源 reclaimImminent）。
    */
   const publishBtwThreadList = (vid: string): void => {
     const rec = btwService.getLine(vid)

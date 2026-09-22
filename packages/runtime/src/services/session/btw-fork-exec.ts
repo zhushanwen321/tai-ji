@@ -169,7 +169,7 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
  * 一次性 fork bootstrap：`pi --mode rpc --fork <源> --session-dir <线目录>` 起进程，
  * pi 在启动期同步完成 forkFrom 落盘（写 header + 逐条复制全树，V2 探针 A 实测 206ms），
  * 宿主轮询到**新增** .jsonl 即 SIGTERM 收掉 bootstrap（该进程不承载线——线进程由
- * attachProcess 另行惰性 spawn，避免污染进程表）。
+ * ensureProcess 另行惰性 spawn，避免污染进程表）。
  *
  * 失败语义（调用方按 D3 分支② 回落）：源缺失/空 → pi exit 1（不产空文件，V2 探针 D）；
  * 超时/异因退出 → throw（携带 stderr 尾，调用方 warn 后回落 no-source，pill 不静默）。

@@ -142,8 +142,10 @@ export function getSubagentSessionDir(mainCwd: string): string {
  * **目录即关联的持久载体**：`btw/<encodeCwd>/<mainSid>/` 三层布局编码「主会话 → btw 线」
  * 关联（无 sidecar 第二持久面）；不落 `sessions/` 扫描面 ⇒ SessionScanner 磁盘腿构造性
  * 不可见（G4 防线之一，与 active 腿 hidden:true 注册、历史腿不记工作区历史并列）。
- * 线会话文件由 pi 写入（fork 链路 / 首 flush 自建），宿主只读（扫描重建）与删
- *（主删级联 / 显式关线 / 启动孤儿补账——归 M4-a），零直写红线适用。
+ * 线会话文件由 pi 写入（fork 链路 / 首 flush 自建），宿主对线目录的写面 = 扫描重建
+ *（只读）+ 通用 outcome sidecar（`.jsonl.meta.json`，onSessionExit/persistSessionOutput
+ * 终态链对 btw 线同样生效；显式关线只删 .jsonl，sidecar 残留由主删级联 / 启动孤儿补账
+ * 兜底清理）+ 删（主删级联 / 显式关线 / 启动孤儿补账——归 M4-a），零直写红线适用。
  *
  * subagent 先例同构：`pi-paths.ts` subagents/ 独立目录（`getSubagentSessionDir`）。
  */
