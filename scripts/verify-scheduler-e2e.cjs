@@ -93,6 +93,16 @@ const {
 const path = require('node:path')
 const os = require('node:os')
 const { spawn } = require('node:child_process')
+// 判定器纯函数族（抽离自本脚本，无 IO/进程/时钟；单测
+// scripts/__tests__/verify-scheduler-e2e.test.mjs——判定器自错 = e2e 假绿/假红不可辨）
+const {
+  checkScheduleFormDraftContract,
+  describeEntryTypeCounts,
+  getScheduleQuestionFromRequest,
+  isDraftPayloadObject,
+  isScheduleDraftShape,
+  parseJsonlEntries,
+} = require('./lib/scheduler-e2e-judgers.cjs')
 
 const TAG = '[SCHED-E2E]'
 const REPO_ROOT = path.resolve(__dirname, '..')
@@ -327,26 +337,6 @@ function consumeStdoutChunk(text, state, captured, pending) {
  * @returns {{ cancelled: true } | { value: string } | null} 取消 / 确认（value=回传值）/
  *   null（不应答——select 挂起，语义与 taiji runtime 不超时等待同构）
  */
-
-/**
- * 从统一表单请求帧提取 schedule 问题（cjs 端口）：options[0] payload 的
- * formQuestions[0] 为 type='schedule'（initial 预填 draft）时返回该问题，否则 null。
- * payload 非法 JSON / 缺字段同样返回 null——调用方不应答（挂起暴露协议故障，
- * 不静默造回包）。
- * @param {{ options?: string[] }} request
- * @returns {{ type: 'schedule', header?: string, question: string, initial?: object } | null}
- */
-function getScheduleQuestionFromRequest(request) {
-  if (!request || !Array.isArray(request.options) || request.options.length < 1) return null
-  try {
-    const payload = JSON.parse(request.options[0])
-    const q = payload && Array.isArray(payload.formQuestions) ? payload.formQuestions[0] : null
-    if (q && q.type === 'schedule') return q
-  } catch (_) {
-    return null
-  }
-  return null
-}
 
 /**
  * 判定 extension_ui_request 帧是否为统一表单 schedule 请求（marker + 问题类型双条件）。
@@ -691,17 +681,7 @@ function spawnSession(opts) {
     } catch (_) {
       return []
     }
-    /** @type {unknown[]} */
-    const out = []
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue
-      try {
-        out.push(JSON.parse(line))
-      } catch (_) {
-        /* 跳过 banner / 半行 */
-      }
-    }
-    return out
+    return parseJsonlEntries(raw)
   }
 
   /**
@@ -873,43 +853,6 @@ function countNumberedRunLines(text) {
   return matches ? matches.length : 0
 }
 
-/** ScheduleDraft 顶层形状守卫：非 null 的普通对象（排除数组）。 */
-function isDraftPayloadObject(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-/** ScheduleDraft 可选字段守卫：undefined（未提供）或 string。 */
-function isOptionalString(v) {
-  return v === undefined || typeof v === 'string'
-}
-
-/** ScheduleDraft kind 字段守卫：'once' 或 'recurring'。 */
-function isScheduleDraftKind(kind) {
-  return kind === 'once' || kind === 'recurring'
-}
-
-/**
- * 对象是否为合法 ScheduleDraft 形状（cjs 端口；字段判定与
- * packages/extension-protocol/src/extensions/scheduler-create/helpers.ts 的
- * isScheduleDraft 一致，改动须同步）。驱动器用于断言请求帧 payload 的协议形状。
- * 判定顺序与端口源一致（顶层形状 → kind → 各字段），不可调换。
- * @param {unknown} value
- * @returns {boolean}
- */
-function isScheduleDraftShape(value) {
-  if (!isDraftPayloadObject(value)) return false
-  const d = value
-  return isScheduleDraftKind(d.kind)
-    && typeof d.schedule === 'string'
-    && isOptionalString(d.model)
-    && typeof d.prompt === 'string'
-    && isOptionalString(d.name)
-    && isOptionalString(d.expires)
-    && Array.isArray(d.models)
-    && d.models.every((m) => typeof m === 'string')
-    && isOptionalString(d.currentModel)
-}
-
 /**
  * 从 captured 提取统一表单 schedule 请求帧列表（命令路径表单的请求侧证据；模型路径下
  * 应为空——`schedule` tool 直建不再弹表单，回归守卫由场景断言 unexpectedScheduleForms）。
@@ -951,16 +894,6 @@ function hasAbortedAssistant(entries) {
 /** 数某类 entry 行数（宿主不变量：model_change / thinking_level_change / session_info 计数用）。 */
 function countEntryType(entries, type) {
   return (entries || []).filter((e) => e && e.type === type).length
-}
-
-/** entry 类型分布摘要（failure 详情用）。 */
-function describeEntryTypeCounts(entries) {
-  const counts = new Map()
-  for (const e of entries || []) {
-    const t = e && typeof e.type === 'string' ? e.type : '?'
-    counts.set(t, (counts.get(t) || 0) + 1)
-  }
-  return [...counts.entries()].map(([t, n]) => `${t}:${n}`).join(',') || '(empty)'
 }
 
 /** assistant 行字段投影摘要（provider / model / stopReason / usage / 正文片段）。 */
@@ -1762,31 +1695,6 @@ async function runS14(piBin) {
 }
 
 // ── A 类：命令路径创建表单场景（设计 §6.2 命令面 / §7.6 探针表 / §8.3 e2e 影响面）──
-
-/**
- * 命令路径表单请求帧契约校验：options[0] payload 的 formQuestions[0] 为 schedule 问题
- * 且 initial 是合法 ScheduleDraft，并可选校验预填值（expected.schedule / .prompt / .kind）。
- * 调用方另断言 reqs.length（各命令路径场景恒恰 1 次请求）。
- * @param {Array<{ id: string, options: string[] }>} reqs getScheduleFormRequests 产物
- * @param {{ schedule?: string, prompt?: string, kind?: string }} [expected] 预填值期望
- * @returns {{ ok: boolean, desc: string, draft: object | null }} ok=契约成立；
- *   desc=请求侧诊断（未取到 draft 时 '(none)'）；draft=解析到的 ScheduleDraft
- */
-function checkScheduleFormDraftContract(reqs, expected = {}) {
-  let desc = '(none)'
-  if (reqs.length < 1 || reqs[0].options.length < 1) return { ok: false, desc, draft: null }
-  const q = getScheduleQuestionFromRequest(reqs[0])
-  if (!q) return { ok: false, desc, draft: null }
-  const draft = q.initial
-  let ok = isScheduleDraftShape(draft)
-  if (ok && expected.schedule !== undefined) ok = draft.schedule === expected.schedule
-  if (ok && expected.prompt !== undefined) ok = draft.prompt === expected.prompt
-  if (ok && expected.kind !== undefined) ok = draft.kind === expected.kind
-  desc = isDraftPayloadObject(draft)
-    ? `kind=${draft.kind} schedule=${draft.schedule} prompt=${String(draft.prompt).slice(0, 40)} models=${Array.isArray(draft.models) ? draft.models.length : '?'}`
-    : '(none)'
-  return { ok, desc, draft: isDraftPayloadObject(draft) ? draft : null }
-}
 
 /** 恰 1 条 upsert entry 时取其 task 字段，否则 null。 */
 function getSingleUpsertTask(upserts) {
