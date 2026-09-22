@@ -26,10 +26,11 @@ export default {
     loadFailed: 'Failed to load thread list',
     createFailed: 'Failed to create a side thread',
   },
-  // composer btw entry button (btw-question D7, M3-b): resting title + count title when unread
+  // composer btw entry button (btw-question D7, M3-b): resting title + count hint when unread/pending
   button: {
     title: 'Side question',
     unreadTitle: '{count} unread side replies',
+    pendingTitle: '{count} side threads pending',
   },
   // fork pill three states (D3 source branches; data source = btw.create reply.forkState)
   pill: {

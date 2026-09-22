@@ -3,7 +3,8 @@
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：首屏按钮在左簇（title 文案）/ show-btw=false 与无 session 不出入口 /
- *   badge 计数 Σ（含 9+ 封顶与计数 title）/ 进视口即清、视口内不计、离开再计 / 点击开 drawer
+ *   badge 计数 Σ（含 9+ 封顶与计数 title）/ 待处理徽点两态（pending>0 显 + 计数 title、
+ *   双零不显、与计数角标同屏并列，U1）/ 进视口即清、视口内不计、离开再计 / 点击开 drawer
  *   btw tab / 切主会话 badge 归属各自主会话且切回恢复（D7③④，S10 单测面）
  * - 观察者（形态）：三档宽度（700/560/400）按钮常驻 + `+` 仍居左簇首位、发送位仍右锚
  *   （退化序登记 = 序 0 不退化，不破坏既有布局）
@@ -39,6 +40,10 @@ import { COMPOSER_BTW_BUTTON_DEGRADATION_ORDER } from '@/components/panel/tray/u
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { makeTrayCountsStub } from './tray/tray-counts-stub'
 import { useChatStore } from '@/stores/chat'
+import {
+  setBtwReclaimReminder,
+  __resetBtwPendingBookkeepingForTest,
+} from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 
 // ── tray 数据面替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
@@ -183,6 +188,17 @@ function badge(): ReturnType<VueWrapper['find']> {
   return wrapper.find('[data-testid="composer-btw-badge"]')
 }
 
+/** 待处理徽点（badge 两态的 pending 半边，U1） */
+function pendingDot(): ReturnType<VueWrapper['find']> {
+  if (!wrapper) throw new Error('composer not mounted')
+  return wrapper.find('[data-testid="composer-btw-pending"]')
+}
+
+function buttonTitle(): string | undefined {
+  if (!wrapper) throw new Error('composer not mounted')
+  return bar().find('[data-testid="composer-btw-button"]').attributes('title')
+}
+
 /** 拉取 promise 链 + watch 调度 + 渲染落地 */
 async function settle(): Promise<void> {
   await flushPromises()
@@ -207,6 +223,7 @@ beforeEach(() => {
   bindDrawerSessionId(boundSid)
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
+  __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记（含回收提醒集合）逐用例清零
 })
 
 afterEach(() => {
@@ -330,6 +347,62 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
     await w.setProps({ sessionId: SID })
     await settle()
     expect(badge().text()).toBe('1')
+  })
+})
+
+describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 裁决 U1 + D8 终态机）', () => {
+  it('双零（unread=0 且 pending=0）：计数角标与待处理徽点都不渲染，title 保持入口语义', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
+    mountComposer()
+    await settle()
+
+    // 用户可见 DOM：两态都不显（常态归零）
+    expect(badge().exists()).toBe(false)
+    expect(pendingDot().exists()).toBe(false)
+    expect(buttonTitle()).toBe('旁路提问')
+  })
+
+  it('pending>0：待处理徽点渲染 + title 换待处理计数文案（Σ per-line 待处理线数）；清除后归零不显', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    mountComposer()
+    await settle()
+    expect(pendingDot().exists()).toBe(false)
+
+    // 置位一条线（回收提醒 setter = D8 终态机第四行数据源）→ 徽点 + 计数 title
+    setBtwReclaimReminder('btw:t1', true)
+    await settle()
+    expect(pendingDot().exists()).toBe(true)
+    expect(buttonTitle()).toBe('1 条旁路线待处理')
+
+    // Σ per-line：第二条线也待处理 → 2
+    setBtwReclaimReminder('btw:t2', true)
+    await settle()
+    expect(buttonTitle()).toBe('2 条旁路线待处理')
+
+    // 清除支：提醒全清 → 双零不显、title 回入口语义
+    setBtwReclaimReminder('btw:t1', false)
+    setBtwReclaimReminder('btw:t2', false)
+    await settle()
+    expect(pendingDot().exists()).toBe(false)
+    expect(buttonTitle()).toBe('旁路提问')
+  })
+
+  it('两态并列：unread 计数角标（右上）与待处理徽点（右下）同屏共存；title 待处理优先', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
+    mountComposer()
+    await settle()
+    const chat = useChatStore()
+
+    // 先让消息增长落地（D8 回收提醒清除支 = 线内容增长即清；与置位同拍会被抢先清掉）
+    chat.setMessages('btw:t1', [msg('a1')])
+    await settle()
+    setBtwReclaimReminder('btw:t1', true)
+    await settle()
+
+    // 并列呈现：计数与徽点各自可见（drawer 关着也可见，U1 修的正是这个静默盲区）
+    expect(badge().text()).toBe('1')
+    expect(pendingDot().exists()).toBe(true)
+    expect(buttonTitle()).toBe('1 条旁路线待处理')
   })
 })
 

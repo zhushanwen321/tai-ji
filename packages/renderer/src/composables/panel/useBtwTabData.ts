@@ -178,16 +178,16 @@ function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
 const BTW_DIALOG_METHODS: readonly string[] = ['confirm', 'select', 'input', 'editor']
 
 /** btw 线挂起请求 id 集（reactive：badge/确认条在 computed/渲染内读取建立依赖） */
-// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表领地外——deviations 挂账待补登）：D8 挂起请求 id 簿记（非 GUI 数据本体，对照 extension-host-dialog requestIdSessions 先例）
+// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，**已落定非草稿**——data-source-registry §4 ⑧ 已落定（2026-09-22））：D8 挂起请求 id 簿记（非 GUI 数据本体，对照 extension-host-dialog requestIdSessions 先例）
 const pendingReqIdsByVid = reactive(new Map<string, Set<string>>())
 /** dialog 族渲染载荷 FIFO（requestId dedup；确认条按 receivedAt 与 store 族合并排序） */
-// taste:allow-no-data-owner W24-EX（同上，M3-c 行内豁免挂账）：dialog 族渲染载荷 FIFO（非 GUI 数据本体——GUI 呈现副本归确认条实例态）
+// taste:allow-no-data-owner W24-EX（同上，registry §4 ⑧ 已落定（2026-09-22））：dialog 族渲染载荷 FIFO（非 GUI 数据本体——GUI 呈现副本归确认条实例态）
 const dialogReqsByVid = reactive(new Map<string, DialogRequest[]>())
 /** 终态机失效支行内提示（vid → reason；展示文案固定 i18n，reason 仅簿记） */
-// taste:allow-no-data-owner W24-EX（同上，M3-c 行内豁免挂账）：失效行内提示布尔位簿记（文案在 i18n，此处仅标记）
+// taste:allow-no-data-owner W24-EX（同上，registry §4 ⑧ 已落定（2026-09-22））：失效行内提示布尔位簿记（文案在 i18n，此处仅标记）
 const expiredNoticeByVid = reactive(new Map<string, string>())
 /** 终态机第四行：回收提醒（非终态） */
-// taste:allow-no-data-owner W24-EX（同上，M3-c 行内豁免挂账）：回收提醒置位集合（D8 终态机第四行，非 GUI 数据本体）
+// taste:allow-no-data-owner W24-EX（同上，registry §4 ⑧ 已落定（2026-09-22））：回收提醒置位集合（D8 终态机第四行，非 GUI 数据本体）
 const reclaimReminderVids = reactive(new Set<string>())
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
@@ -455,11 +455,13 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
         threads.map((th) => th.vid),
       )
     } catch (e) {
+      // 降级可见留痕（STANDARDS §11 辅助面降级 + 静默丢弃必须登记）：console.warn 对齐
+      // btw-replay 同型失败形态（带会话 key 上下文），不抛不刷屏——composer 主链路不受
+      // 影响；恢复 = 下次触发面重拉
+      console.warn(`[useBtwTabData] btw.list failed for ${captured}:`, e)
       scoped.updateFor(captured, (s) => {
         if (s.loadSeq !== seq) return
         s.loading = false
-        // 降级可见留痕（STANDARDS §11 辅助面降级 + 静默丢弃必须登记）：通道失败只丢
-        // badge 数据，不抛不刷屏——composer 主链路不受影响；恢复 = 下次触发面重拉
         s.loadError = e instanceof Error ? e.message : String(e)
       })
     }
