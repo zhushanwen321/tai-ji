@@ -2,6 +2,8 @@ import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
+import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
+import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧本文件）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）。
 import { getMigrationGate, setBtwCascadeOps } from './services/session/session-lifecycle.js'
@@ -24,7 +26,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT, BUILTIN_PRESET_IDS } from '@taiji/shared'
+import { BASE_PORT, MAX_PORT, BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
@@ -581,6 +583,10 @@ async function main(): Promise<void> {
       fileChangeDiff,
       onExtensionUIRequest: (requestId, sid, method, payload) => {
         server.registerExtensionTimeout(sid, requestId, method, payload)
+        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线（sid=vid）的挂起交互请求 →
+        // setPendingInteraction(true)（豁免不计闲置）；解除 = 终态派生（respond/expired/失效
+        // 清空中转 pending 表 → BtwService.idleTick 经 hasPendingUiRequests 见空即解除）。
+        if (isBtwVirtualId(sid)) btwService.setPendingInteraction(sid, true)
       },
       // session-manager 请求路由：fire-and-forget 调 server.handleSessionManagerRequest
       //（由 SessionManagerHandler 异步处理并回写 pi response）。
@@ -976,6 +982,27 @@ async function main(): Promise<void> {
   // registerSession 走 SessionService 的 lifecycle 兼容委托（hidden:true 透传 = active
   // 腿防线）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
   // pm 同 effectiveRoot 锚点。
+  /**
+   * [BU3 / D1 回收提醒 runtime 半边] reclaimImminent 翻转广播：置位（onWillReclaim，提前
+   * 1 拍窗口）与清除（onThreadStateChanged：回收发生/用户续问/进程亡/挂起交互置位）同发
+   * 该主会话线列表 state 帧（typeKey 'btw'，双通道同 payload——共用 buildBtwThreadListPayload
+   * 防漂移）。best-effort：失败留痕不打断回收主链（恢复通道 = btw.list RPC 拉取兜底）。
+   * renderer 消费半边（useBtwTabData setBtwReclaimReminder 接线）不在本轮，主 agent 排后续批。
+   */
+  const publishBtwThreadList = (vid: string): void => {
+    const rec = btwService.getLine(vid)
+    if (!rec) return
+    try {
+      messageBus.publish(rec.mainSid, {
+        type: 'btw.list',
+        id: server.nextPushId(),
+        payload: buildBtwThreadListPayload(btwService, rec.mainSid),
+      })
+    } catch (e) {
+      // best-effort：提醒广播失败不打断回收主链（恢复通道 = btw.list RPC 拉取兜底），留痕可归因
+      console.error(`[btw] reclaim-reminder broadcast failed (vid=${vid}) — pull fallback via btw.list RPC remains available:`, e)
+    }
+  }
   const btwService = new BtwService({
     processes: pm,
     buildLineSpawnOptions: async (ctx) => {
@@ -1016,6 +1043,19 @@ async function main(): Promise<void> {
       sessionService.detachSession(vid)
       sessionService.removeSessionEntry(vid)
       clearRemovedSessionData(vid)
+    },
+    // [BU3 / D1 回收提醒] 提前 1 拍窗口置位 → 广播；清除侧同经 onThreadStateChanged 广播。
+    onWillReclaim: publishBtwThreadList,
+    onThreadStateChanged: publishBtwThreadList,
+    // [BU2 / D1 闲置豁免派生解除] 交互中转 pending 快照（respond/expired/失效三终态共同
+    // 落点；与上方主 idle reaper 豁免 #8 同款 server 薄委托先例）。
+    hasPendingUiRequests: (vid) => server.getPendingUiRequests(vid).length > 0,
+    // [BU5] 孤儿补账扫描降级闸：本轮 sessions 扫描不可信 → 补账跳过改下次启动重试。
+    isSessionScanDegraded: () => scanDegradedFlag.last,
+    // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；oracle 对账单测层见
+    // btw-contract-inject.test.ts，system-prompt-trace 对账/豁免结论见本轮 deviations）。
+    traceContractInjection: (t) => {
+      logger.info(`[btw] contract injection: vid=${t.vid} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
     },
   })
   // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。

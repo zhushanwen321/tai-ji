@@ -53,6 +53,27 @@ type BtwForkState = ServerMessageMap['btw.create']['forkState']
 export type BtwServiceFace = Pick<BtwService, 'createLine' | 'listLines' | 'closeLine' | 'getLine'>
 
 /**
+ * BtwThreadInfo 具名类型经 ServerMessageMap 索引访问取形（同上 BtwForkState 惯例）。
+ */
+export type BtwThreadInfo = ServerMessageMap['btw.list']['threads'][number]
+
+/**
+ * `btw.list` 载荷构造（M2-a 双通道同 payload 不变量的单一实现）：reply / publish 广播 /
+ * 组合根回收提醒广播（index.ts onWillReclaim · onThreadStateChanged）三处共用，防映射漂移
+ *（reclaimImminent 漏带 = D1 提醒态静默丢失）。threads 含 reclaimImminent（可选协议字段，
+ * 缺省语义 = 无提醒——本实现恒携带布尔值，读方 `=== true` 判定）。
+ */
+export function buildBtwThreadListPayload(
+  service: Pick<BtwServiceFace, 'listLines'>,
+  mainSid: string,
+): { mainSid: string; threads: BtwThreadInfo[] } {
+  return {
+    mainSid,
+    threads: service.listLines(mainSid).map(line => ({ vid: line.vid, reclaimImminent: line.reclaimImminent })),
+  }
+}
+
+/**
  * 组合根注入的 btw routing 依赖（server RuntimeServerOptionalServices.btw 的形状）。
  * cwd/主 turn 信号的解析留组合根（活跃表 + 扫描面都在 SessionService）——transport 层
  * 不直连 sessions 内部状态。
@@ -139,8 +160,7 @@ export class BtwMessageHandler {
         }
         // 纯 reply（不 publish）：注册表枚举是同步只读过滤（listLines 内无抛错面），
         // 异常兜底仍有 server handleMessage 的全局 catch → error envelope（ack 必回成立）。
-        const threads = this.ctx.btwService.listLines(mainSid).map(line => ({ vid: line.vid }))
-        return this.ctx.reply(ws, msg.id, 'btw.list', { mainSid, threads })
+        return this.ctx.reply(ws, msg.id, 'btw.list', buildBtwThreadListPayload(this.ctx.btwService, mainSid))
       }
 
       case 'btw.remove': {
@@ -181,9 +201,8 @@ export class BtwMessageHandler {
   private publishThreadList(mainSid: string): void {
     const bus = this.ctx.messageBus
     if (!bus) return
-    const threads = this.ctx.btwService.listLines(mainSid).map(line => ({ vid: line.vid }))
     try {
-      bus.publish(mainSid, { type: 'btw.list', id: this.ctx.nextPushId(), payload: { mainSid, threads } })
+      bus.publish(mainSid, { type: 'btw.list', id: this.ctx.nextPushId(), payload: buildBtwThreadListPayload(this.ctx.btwService, mainSid) })
     } catch (e) {
       // 广播 best-effort：console.error 留痕（可观测非静默）；失败不吞掉随后的 ack
       //（线列表恢复通道 = btw.list RPC 拉取兜底）。

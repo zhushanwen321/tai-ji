@@ -41,6 +41,7 @@ function lineRec(vid: string, mainSid: string): BtwLineRecord {
     createdAt: 1,
     lastActivityAt: 1,
     pendingInteraction: false,
+    reclaimImminent: false,
     contractRounds: 1,
   }
 }
@@ -112,7 +113,7 @@ describe('BtwMessageHandler · btw.create', () => {
     expect(publish).toHaveBeenCalledWith('main-1', {
       type: 'btw.list',
       id: 'push_t1',
-      payload: { mainSid: 'main-1', threads: [{ vid: 'btw:t1' }] },
+      payload: { mainSid: 'main-1', threads: [{ vid: 'btw:t1', reclaimImminent: false }] },
     })
     // ack 必回：reply 带 msg.id + forkState 映射（forked → full）
     expect(replyCalls(ctx)).toEqual([[
@@ -211,7 +212,7 @@ describe('BtwMessageHandler · btw.list', () => {
     expect(listLines).toHaveBeenCalledWith('main-1')
     expect(replyCalls(ctx)).toEqual([[
       ws, 'req-1', 'btw.list',
-      { mainSid: 'main-1', threads: [{ vid: 'btw:t1' }, { vid: 'btw:t2' }] },
+      { mainSid: 'main-1', threads: [{ vid: 'btw:t1', reclaimImminent: false }, { vid: 'btw:t2', reclaimImminent: false }] },
     ]])
     // M2-a 契约：list 是纯 RPC reply（state 快照由 create/remove 广播维护），不入 publish 面
     expect(publish).not.toHaveBeenCalled()
@@ -227,6 +228,21 @@ describe('BtwMessageHandler · btw.list', () => {
     expect(listLines).not.toHaveBeenCalled()
     expect(errorCalls(ctx)[0]?.[1]).toBe('btw_failed')
     expect(replyCalls(ctx)).toHaveLength(0)
+  })
+
+  it('[BU3] threads 携带 reclaimImminent（D1 回收提醒数据源：置位 true 透传、缺省 false 恒显）', async () => {
+    const { ctx, listLines } = mockCtx()
+    const imminent = lineRec('btw:t9', 'main-1')
+    imminent.reclaimImminent = true
+    listLines.mockReturnValue([imminent, lineRec('btw:t10', 'main-1')])
+    const handler = new BtwMessageHandler(ctx)
+
+    await handler.handleBtwMessage(msg('btw.list', { mainSid: 'main-1' }), mockWs())
+
+    expect(replyCalls(ctx)[0]?.[3]).toEqual({
+      mainSid: 'main-1',
+      threads: [{ vid: 'btw:t9', reclaimImminent: true }, { vid: 'btw:t10', reclaimImminent: false }],
+    })
   })
 })
 

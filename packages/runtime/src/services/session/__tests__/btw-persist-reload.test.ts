@@ -91,6 +91,23 @@ describe('启动孤儿补账（D5：主会话已不存在的线目录清理；�
     expect(svc.reconcileOrphanThreadDirs()).toBe(0)
   })
 
+  it('[BU5] 扫描降级（本轮 sessions 扫描不可信）→ 补账整轮跳过、零删除，改下次启动重试', () => {
+    // 降级表现：readdir EACCES/IO → 扫描腿显式返回空列表 → 冷主会话解析全部落空
+    h.deps.resolveMainSessionFile = vi.fn(() => undefined)
+    h.deps.isSessionScanDegraded = vi.fn(() => true)
+    const orphanA = seedThreadDir('main-missing-d3', 'linepi-d3')
+    const orphanB = seedThreadDir('main-missing-d4', 'linepi-d4')
+
+    const removed = svc.reconcileOrphanThreadDirs()
+
+    expect(removed).toBe(0)
+    expect(existsSync(orphanA)).toBe(true) // 降级角落零删除（rm -rf 不可逆面，裁决⑧不被摧毁）
+    expect(existsSync(orphanB)).toBe(true)
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('session scan degraded this round'))
+    // 判据仍先解析、闸在解析落空后（主在场且扫描降级时不受影响——闸不早于 resolve）
+    expect(h.deps.resolveMainSessionFile).toHaveBeenCalled()
+  })
+
   it('补账先于重建：reconcile → rebuild 后注册表只含在场主线的线（孤儿不入册）', () => {
     h.deps.resolveMainSessionFile = vi.fn((sid: string) => (sid === 'main-present-2' ? '/s/main-present-2.jsonl' : undefined))
     seedThreadDir('main-present-2', 'linepi-kept-2')

@@ -50,19 +50,23 @@ afterEach(() => {
 })
 
 describe('闲置回收（D1：30min destroy 进程、文件保留）', () => {
-  it('闲置 < 阈值不回收；≥ 阈值下一拍：提醒挂点 → destroy，注册表与文件保留', async () => {
+  it('提前 1 拍提醒窗（阈值−1 拍）置 reclaimImminent + 提醒挂点；满阈值 destroy、提醒清，注册表与文件保留', async () => {
     const { vid, file } = await createNoForkLine()
 
+    // D1「回收前」提醒窗 = 阈值 − 扫描节拍：29min 拍进入窗口（badge 置「待处理」，
+    // 数据源 = reclaimImminent；提醒挂点每回收周期恰一次）
     await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS - BTW_IDLE_TICK_MS)
-    expect(h.reclaimed).toEqual([])
-    expect(h.destroyed).toEqual([])
+    expect(h.reclaimed).toEqual([vid]) // 提醒在回收前触发（修复前 = 回收同拍才触发）
+    expect(svc.getLine(vid)!.reclaimImminent).toBe(true)
+    expect(h.destroyed).toEqual([]) // 本拍只提醒不回收
 
     await vi.advanceTimersByTimeAsync(BTW_IDLE_TICK_MS * 2)
-    expect(h.reclaimed).toEqual([vid]) // 回收前提醒挂点（badge 置「待处理」，D1）
+    expect(h.reclaimed).toEqual([vid]) // 不重复提醒
     expect(h.destroyed).toContain(vid)
 
     const rec = svc.getLine(vid)!
     expect(rec.client).toBeUndefined() // 进程已亡
+    expect(rec.reclaimImminent).toBe(false) // D1：回收发生 → 提醒清（清除支）
     expect(rec.sessionFilePath).toBe(file) // 文件保留（裁决⑧）
     expect(existsSync(file)).toBe(true)
   })
@@ -77,10 +81,12 @@ describe('闲置回收（D1：30min destroy 进程、文件保留）', () => {
 
     svc.setPendingInteraction(vid, false) // 终态解除 + 视为一次活跃
     await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS - BTW_IDLE_TICK_MS)
-    expect(h.reclaimed).toEqual([]) // 解除后仍从解除时刻重新计龄
+    expect(h.destroyed).toEqual([]) // 解除后仍从解除时刻重新计龄（29min 拍只进提醒窗）
+    expect(h.reclaimed).toEqual([vid])
 
     await vi.advanceTimersByTimeAsync(BTW_IDLE_TICK_MS * 2)
     expect(h.reclaimed).toEqual([vid])
+    expect(h.destroyed).toContain(vid)
   })
 
   it('markActivity 刷新空闲钟（消息活跃不被误回收）', async () => {
@@ -106,6 +112,90 @@ describe('闲置回收（D1：30min destroy 进程、文件保留）', () => {
     const { vid } = await createNoForkLine()
     await vi.advanceTimersByTimeAsync(60_000 + BTW_IDLE_TICK_MS * 2)
     expect(h.reclaimed).toEqual([vid])
+  })
+
+  it('[BU1] rebuildFromDisk → ensureProcess 拉起的线同样武装定时器：满 30min + tick → 提醒 + destroy（修复前该链从不 arm、永不回收）', async () => {
+    const file = writeSessionFile(getBtwThreadDir(CWD, MAIN_SID), 'sid-a1.jsonl', {
+      type: 'session', version: 3, id: 'sid-a1', timestamp: 't', cwd: CWD,
+    }, [])
+    const rebuilt = svc.rebuildFromDisk() // 启动链：只登记不 spawn、不 arm
+    expect(rebuilt).toHaveLength(1)
+    const rec = rebuilt[0]
+    h.state = { sessionId: rec.piSessionId, sessionFile: file }
+
+    await svc.ensureProcess(rec.vid) // 续问/重开附着口（本修复点：成功路径 armTimer）
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS + BTW_IDLE_TICK_MS)
+    expect(h.reclaimed).toContain(rec.vid)
+    expect(h.destroyed).toContain(rec.vid) // timer 已武装 → 回收真正发生
+    expect(svc.getLine(rec.vid)!.client).toBeUndefined()
+    expect(existsSync(file)).toBe(true) // 文件保留（裁决⑧）
+  })
+
+  it('[BU2] D1 闲置豁免派生通道：置位期间 idleTick 不 destroy；交互中转见空（respond/expired/失效）→ 派生解除后恢复回收', async () => {
+    const { vid } = await createNoForkLine()
+    let pending = true
+    h.deps.hasPendingUiRequests = vi.fn(() => pending)
+    svc.setPendingInteraction(vid, true) // 生产置位通道 = index.ts onExtensionUIRequest 推送（组合根接线）
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS * 2) // 2h 全程豁免（含已过阈值）
+    expect(h.destroyed).toEqual([])
+    expect(svc.getLine(vid)!.pendingInteraction).toBe(true)
+
+    pending = false // 终态（respond 移除 / expired·失效 invalidate）→ 中转 pending 表清空
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_TICK_MS) // 下一拍派生解除 + re-age，本拍不回收
+    expect(svc.getLine(vid)!.pendingInteraction).toBe(false)
+    expect(h.destroyed).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS + BTW_IDLE_TICK_MS)
+    expect(h.destroyed).toContain(vid) // 解除后恢复计龄并回收
+  })
+
+  it('[BU2] 进程亡结构解除：exited 分支清 pendingInteraction 与回收提醒（失效腿，tick 兜底）', async () => {
+    const { vid } = await createNoForkLine()
+    svc.setPendingInteraction(vid, true)
+    h.spawned[0].client.exited = true
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_TICK_MS * 2)
+
+    expect(svc.getLine(vid)!.pendingInteraction).toBe(false)
+    expect(svc.getLine(vid)!.client).toBeUndefined()
+    expect(h.reclaimed).toEqual([]) // 失效 ≠ 回收（不触发提醒）
+    expect(h.destroyed).toEqual([])
+  })
+
+  it('[BU3] 提醒窗广播驱动：置位经 onWillReclaim、清除经 onThreadStateChanged（回收发生）', async () => {
+    const onThreadStateChanged = vi.fn()
+    svc.dispose()
+    svc = new BtwService({ ...h.deps, onThreadStateChanged })
+    const { vid } = await createNoForkLine()
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS - BTW_IDLE_TICK_MS) // 29min 提醒窗
+    expect(h.reclaimed).toEqual([vid])
+    expect(svc.getLine(vid)!.reclaimImminent).toBe(true)
+    expect(onThreadStateChanged).not.toHaveBeenCalled() // 置位侧只走 onWillReclaim
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_TICK_MS) // 满阈值回收
+    expect(h.destroyed).toContain(vid)
+    expect(svc.getLine(vid)!.reclaimImminent).toBe(false)
+    expect(onThreadStateChanged).toHaveBeenCalledWith(vid) // 清除支广播驱动（协议数据源翻转）
+  })
+
+  it('[BU3] 用户续问（markActivity）清回收提醒并驱动清除广播（D1 提醒清除支）', async () => {
+    const onThreadStateChanged = vi.fn()
+    svc.dispose()
+    svc = new BtwService({ ...h.deps, onThreadStateChanged })
+    const { vid } = await createNoForkLine()
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS - BTW_IDLE_TICK_MS)
+    expect(svc.getLine(vid)!.reclaimImminent).toBe(true)
+
+    svc.markActivity(vid)
+    expect(svc.getLine(vid)!.reclaimImminent).toBe(false)
+    expect(onThreadStateChanged).toHaveBeenCalledWith(vid)
+
+    await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS - BTW_IDLE_TICK_MS) // 重新计龄未到阈值
+    expect(h.destroyed).toEqual([])
   })
 })
 
@@ -143,6 +233,16 @@ describe('reattach spawn 形态（自建附着编排；restore 离线腿不通�
     await vi.advanceTimersByTimeAsync(BTW_IDLE_RECLAIM_MS + BTW_IDLE_TICK_MS * 2)
 
     await expect(svc.ensureProcess(res.vid)).rejects.toMatchObject({ code: 'thread_file_missing' })
+  })
+
+  it('[D1] 重附着 = 旧轮挂起请求失效终态：pendingInteraction 结构解除（tick 未走到也不残留豁免）', async () => {
+    const { vid } = await createNoForkLine('sid-r9')
+    svc.setPendingInteraction(vid, true)
+    h.spawned[0].client.exited = true // 进程亡（挂起请求随之失效），tick 尚未走到
+
+    await svc.ensureProcess(vid) // 用户续问 → 重附着
+
+    expect(svc.getLine(vid)!.pendingInteraction).toBe(false)
   })
 
   it('未知线 → line_not_found', async () => {

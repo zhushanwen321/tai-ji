@@ -416,6 +416,12 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     }
   })
 
+  it('BtwThreadInfo 含可选 reclaimImminent（D1 回收提醒数据源；可选防破坏既有消费——BU3 runtime 半）', () => {
+    const block = extractBlock('export interface BtwThreadInfo {')
+    expect(block).toMatch(/vid: string/)
+    expect(block).toMatch(/reclaimImminent\?: boolean/)
+  })
+
   it('三帧在 ClientMessageMap / ServerMessageMapBase / ReplyPayloadMap 全登记（ack 必回）', () => {
     for (const frame of ['btw.create', 'btw.list', 'btw.remove']) {
       const pattern = new RegExp(`'${frame.replace('.', '\\.')}'`)
