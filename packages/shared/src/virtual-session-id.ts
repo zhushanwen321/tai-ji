@@ -24,6 +24,13 @@
 export const SUBAGENT_PREFIX = 'subagent:'
 
 /**
+ * INVAR-1.1 结构常量：`subagent:` 剥前缀后恰为 2 段（⇔ 全键恰好 2 冒号 3 段非空）。
+ * 结构校验（isSubagentVirtualId）与负例契约（`subagent:btw:<y>:<s>` 四段必拒，S-R4-2）
+ * 同锚于此值。
+ */
+const SUBAGENT_REST_SEGMENT_COUNT = 2
+
+/**
  * 构造三段式虚拟 session ID：`subagent:<mainSessionId>:<subagentId>`。
  *
  * 三段式提供主 session 命名空间，chat-lru 的 isVirtualKeyOf 据此按前缀联动清理。
@@ -71,7 +78,7 @@ export function subagentVirtualId(mainSessionId: string, subagentId: string): st
 export function isSubagentVirtualId(sessionId: string): boolean {
   if (!sessionId.startsWith(SUBAGENT_PREFIX)) return false
   const parts = sessionId.slice(SUBAGENT_PREFIX.length).split(':')
-  return parts.length === 2 && parts[0].length > 0 && parts[1].length > 0
+  return parts.length === SUBAGENT_REST_SEGMENT_COUNT && parts[0].length > 0 && parts[1].length > 0
 }
 
 /**
