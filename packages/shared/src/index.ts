@@ -154,7 +154,7 @@ export type {
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'
-// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式）——跨层协议级 key 约定 SSOT
+// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式 / btw 两段式）——跨层协议级 key 约定 SSOT
 export {
   SUBAGENT_PREFIX,
   subagentVirtualId,
@@ -165,6 +165,10 @@ export {
   agentCallVirtualId,
   isAgentCallVirtualId,
   extractAgentCallSessionId,
+  BTW_PREFIX,
+  btwVirtualId,
+  isBtwVirtualId,
+  extractBtwPiSessionId,
 } from './virtual-session-id'
 // Coding Plan 额度查询类型
 export type {
