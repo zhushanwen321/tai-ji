@@ -164,7 +164,10 @@ beforeEach(() => {
   __resetDialogRequestIdSessionsForTest()
   __resetBtwPendingBookkeepingForTest()
   extMock.sendExtensionUIResponse.mockReturnValue(true)
-  extMock.getPendingRequests.mockResolvedValue([])
+  // 快照镜像 store 现态（真实 runtime 缓存 pending 并在快照回填——切走切回不被僵尸修剪误伤）
+  extMock.getPendingRequests.mockImplementation(async (sid?: string) =>
+    sid ? useExtensionUIStore().getRequestsBySession(sid) : [],
+  )
   apiMock.list.mockResolvedValue([{ vid: VID }])
   apiMock.create.mockReset()
   apiMock.remove.mockReset()
@@ -472,5 +475,64 @@ describe('⑤ 运行期错误边界：btw 交互异常不外溢主面板', () =>
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('交互区异常，已隔离')
     expect(w.find('[data-testid="btw-interaction-retry"]').exists()).toBe(true)
+  })
+})
+
+describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢，终结即清（U2 修复）', () => {
+  it('切线再切回：已填草稿仍在输入框；应答送达终结后同 requestId 重建为空', async () => {
+    apiMock.list.mockResolvedValue([{ vid: 'btw:d7a' }, { vid: 'btw:d7b' }])
+    const w = mountPanel(MAIN)
+    await settle(w)
+    // 默认选中最新线 d7b → 切到 d7a（跨 vid 面）
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    emitUIRequest('btw:d7a', formFrame('r-d7', '草稿问题？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('半途草稿')
+    await nextTick()
+
+    // 切走（另一条线，active 变 null/异 vid）→ 切回：草稿仍在（提交态不丢）
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await nextTick()
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    const back = w.find('[data-testid="btw-form-text"]')
+    expect(back.exists()).toBe(true)
+    expect((back.element as HTMLInputElement).value).toBe('半途草稿')
+
+    // 终结（应答送达）→ 分键草稿清：同 requestId 重新入队时输入为空
+    await w.find('[data-testid="btw-form-submit"]').trigger('click')
+    await settle(w)
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+    emitUIRequest('btw:d7a', formFrame('r-d7', '草稿问题？'))
+    await settle(w)
+    const again = w.find('[data-testid="btw-form-text"]')
+    expect(again.exists()).toBe(true)
+    expect((again.element as HTMLInputElement).value).toBe('')
+  })
+
+  it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单 + 行内失效提示；重建为空', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('未提交草稿')
+    await nextTick()
+
+    // 切走期间失效（撤下 + 草稿终结清理）
+    emitInvalidated(VID, ['r-d7x'], 'turn-aborted')
+    await settle(w)
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
+
+    // 同 requestId 重建（簿记幂等重入）→ 输入为空（终结草稿不残留）
+    emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
+    await settle(w)
+    const again = w.find('[data-testid="btw-form-text"]')
+    expect(again.exists()).toBe(true)
+    expect((again.element as HTMLInputElement).value).toBe('')
+    // 新请求顶掉失效提示（入账支已清）
+    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 })

@@ -33,7 +33,7 @@
  * scheduleCreate marker 帧由 runtime event-adapter 分支直接产出 form:true 统一表单帧
  * （askUser 源含 type 推断映射），本层只消费 view-ready 帧、不再有 renderer 侧归一挂点。
  */
-import { computed, reactive, ref, watch, onScopeDispose, type Ref } from 'vue'
+import { computed, reactive, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
@@ -143,6 +143,7 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
     invalidatedUnsub()
     invalidatedUnsub = null
   }
+  btwBarDrafts.clear() // 草稿分键表随测试隔离清空（模块级跨用例残留防护）
 }
 
 // ── 挂起请求失效广播订阅（P2-2 失效链，模块级单订阅永驻）──
@@ -162,6 +163,8 @@ function ensureInvalidatedSubscription(): void {
     for (const requestId of e.requestIds) {
       store.removeRequest(e.sessionId, requestId)
     }
+    // D7⑤ 终结清理（失效支）：挂起终结后对应分键草稿即删（切走切回不丢 ≠ 终结后残留）
+    clearBtwBarDrafts(e.sessionId, e.requestIds)
   })
 }
 
@@ -304,7 +307,12 @@ export function useExtensionUI(
     // ——本修剪只在快照落地时生效，与「未重订阅的丢帧」同族缺口（§6.2 采用项②）。
     getPendingRequests(sid)
       .then((pendingRequests) => {
-        store.retainOnly(sid, new Set(pendingRequests.map((r) => r.requestId)))
+        const keepIds = new Set(pendingRequests.map((r) => r.requestId))
+        const beforeIds = store.getRequestsBySession(sid).map((r) => r.requestId)
+        store.retainOnly(sid, keepIds)
+        // D7⑤ 终结清理（快照修剪支）：被剔除的僵尸请求（重附着/回收后 runtime 已清）
+        // 对应分键草稿随之删除——快照剔除 = 失效语义的同族终结点（空集幂等）
+        clearBtwBarDrafts(sid, beforeIds.filter((id) => !keepIds.has(id)))
         // 补入快照条目（已在分区者由 addRequest requestId dedup 幂等跳过）。
         // M1 竞态修复：addRequest(sid, ...) 用订阅时捕获的 sid（参数）——只写旧 sid 分区，
         // 不读 sessionId.value。即使此响应在 session 切换后到达，也只写入旧 sid 的 Map
@@ -547,6 +555,17 @@ function scheduleResultJson(d: BtwScheduleDraft): string {
   return JSON.stringify(result)
 }
 
+/** 确认条草稿（四组提交态）——按 `${vid}:${requestId}` 分键保存（D7⑤ per-vid/表单实例双隔离） */
+type BtwBarDraft = { sel: Record<string, string[]>; text: Record<string, string>; planComment: string; dialogSelect: string; dialogText: string }
+
+const emptyBtwBarDraft = (): BtwBarDraft => ({ sel: {}, text: {}, planComment: '', dialogSelect: '', dialogText: '' })
+
+// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表领地外——deviations 挂账待补登）：
+// 确认条草稿分键表（用户输入暂存、终结即删，非 GUI 数据本体；D7⑤ 切走切回不丢的模块级载体）
+const btwBarDrafts = reactive(new Map<string, BtwBarDraft>())
+
+/** 终结清理：应答送达 / 失效 / 快照修剪三支共用（幂等） */
+function clearBtwBarDrafts(vid: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${vid}:${rid}`) }
 /**
  * 接线 drawer 内联确认条（BtwPanel setup 同步调用）。
  *
@@ -577,22 +596,36 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return cands.reduce((best, c) => (c.receivedAt < best.receivedAt ? c : best))
   })
 
-  // ── 表单实例态（按活动请求隔离：requestId 变更即重置——提交态 per-vid/表单实例隔离）──
-  const formSel = reactive<Record<string, string[]>>({})
-  const formText = reactive<Record<string, string>>({})
-  const planComment = ref('')
-  const dialogSelect = ref('')
-  const dialogText = ref('')
+  // ── 提交态草稿（D7⑤「挂起表单提交态 per-vid 隔离，切走切回不丢」，U2 修复）──
+  // 分键 = `${vid}:${requestId}`，模块级保存（组件卸载/切线/切主会话均不清）；
+  // 仅在请求终结时清：应答送达（respondActive 成功支）/ 失效（invalidated 订阅）/
+  // 快照差集修剪（subscribe retainOnly diff）。active 切换零清理——watch 只负责在
+  // 激活新分键时补建空草稿（幂等，不删旧键）。
+  const draftKeyOf = (a: BtwBarRequest | null, vid: string | null): string | null => a && vid ? `${vid}:${a.requestId}` : null
   watch(
-    () => active.value?.requestId ?? '',
-    () => {
-      for (const k of Object.keys(formSel)) delete formSel[k]
-      for (const k of Object.keys(formText)) delete formText[k]
-      planComment.value = ''
-      dialogSelect.value = ''
-      dialogText.value = ''
-    },
+    () => draftKeyOf(active.value, vidRef.value),
+    (key) => { if (key !== null && !btwBarDrafts.has(key)) btwBarDrafts.set(key, emptyBtwBarDraft()) },
+    { immediate: true },
   )
+  const curDraft = computed<BtwBarDraft | null>(() => {
+    const key = draftKeyOf(active.value, vidRef.value)
+    return key === null ? null : (btwBarDrafts.get(key) ?? null)
+  })
+  /** 模板绑定面（v-model 写入当前分键草稿；无活动请求时为只读空表，写入无副作用） */
+  const formSel = computed<Record<string, string[]>>(() => curDraft.value?.sel ?? {})
+  const formText = computed<Record<string, string>>(() => curDraft.value?.text ?? {})
+  const planComment = computed<string>({
+    get: () => curDraft.value?.planComment ?? '',
+    set: (v) => { if (curDraft.value) curDraft.value.planComment = v },
+  })
+  const dialogSelect = computed<string>({
+    get: () => curDraft.value?.dialogSelect ?? '',
+    set: (v) => { if (curDraft.value) curDraft.value.dialogSelect = v },
+  })
+  const dialogText = computed<string>({
+    get: () => curDraft.value?.dialogText ?? '',
+    set: (v) => { if (curDraft.value) curDraft.value.dialogText = v },
+  })
 
   const activeQuestions = computed<BtwBarFormQuestion[]>(() => {
     const a = active.value
@@ -601,16 +634,18 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
   })
 
   function toggleSelect(key: string, label: string, multi: boolean): void {
-    const cur = formSel[key] ?? []
+    const sel = curDraft.value?.sel
+    if (!sel) return
+    const cur = sel[key] ?? []
     if (multi) {
-      formSel[key] = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]
+      sel[key] = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]
     } else {
-      formSel[key] = [label]
+      sel[key] = [label]
     }
   }
 
   function isSelected(key: string, label: string): boolean {
-    return (formSel[key] ?? []).includes(label)
+    return (curDraft.value?.sel[key] ?? []).includes(label)
   }
 
   function draftValid(d: BtwScheduleDraft | null | undefined): boolean {
@@ -630,9 +665,10 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return qs.every((q) => {
       const key = questionKey(q)
       if (q.type === 'schedule') return draftValid(q.initial)
-      if (q.type === 'text') return (formText[`${key}__other`] ?? '').trim().length > 0
-      const sel = (formSel[key] ?? []).length > 0
-      const other = (formText[`${key}__other`] ?? '').trim().length > 0
+      const text = curDraft.value?.text ?? {}
+      if (q.type === 'text') return (text[`${key}__other`] ?? '').trim().length > 0
+      const sel = (curDraft.value?.sel[key] ?? []).length > 0
+      const other = (text[`${key}__other`] ?? '').trim().length > 0
       if ((q.options ?? []).length === 0) return other
       return sel || other
     })
@@ -653,16 +689,18 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return a.form?.allowCancel !== false
   })
 
-  /** 应答出口（三 kind 共用；送达才出账——未送达保持挂起可重试，D8 提交回路契约） */
+  /** 应答出口（三 kind 共用；送达才出账——未送达保持挂起可重试、草稿随挂起保留，D8 提交回路契约；
+   *  终结即清本请求草稿分键（D7⑤） */
   function respondActive(result: boolean | string | null): void {
     const a = active.value
     const vid = vidRef.value
     if (!a || !vid) return
-    if (a.kind === 'dialog') {
-      respondBtwDialog(vid, a.requestId, result)
-      return
+    const key = `${vid}:${a.requestId}`
+    if (a.kind === 'dialog') { if (respondBtwDialog(vid, a.requestId, result)) btwBarDrafts.delete(key); return }
+    if (ui.respond(a.requestId, result)) {
+      noteBtwRequestResolved(vid, a.requestId)
+      btwBarDrafts.delete(key)
     }
-    if (ui.respond(a.requestId, result)) noteBtwRequestResolved(vid, a.requestId)
   }
 
   /** 表单提交：按挂载源构造应答形状（draft 源 = 扁平 ScheduleFormResult；questions 源 = answers envelope） */
@@ -675,6 +713,8 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
       return
     }
     const answers: Record<string, string> = {}
+    const draftText = curDraft.value?.text ?? {}
+    const draftSel = curDraft.value?.sel ?? {}
     for (const q of activeQuestions.value) {
       const key = questionKey(q)
       if (q.type === 'schedule') {
@@ -683,15 +723,15 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
         continue
       }
       if (q.type === 'text') {
-        const t = formText[`${key}__other`] ?? ''
+        const t = draftText[`${key}__other`] ?? ''
         if (t.trim().length > 0) answers[`${key}__other`] = t
         continue
       }
-      const sel = formSel[key] ?? []
+      const sel = draftSel[key] ?? []
       if ((q.options ?? []).length > 0 && sel.length > 0) {
         answers[key] = q.multi === true ? JSON.stringify(sel) : sel[0]
       }
-      const other = formText[`${key}__other`] ?? ''
+      const other = draftText[`${key}__other`] ?? ''
       if (other.length > 0) answers[`${key}__other`] = other
     }
     respondActive(JSON.stringify(answers))
