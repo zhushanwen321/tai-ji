@@ -42,6 +42,10 @@ import { normalizeContent, segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RE
 import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import type { RetryState, QueueState, FinalizeReason } from './store-types'
 import { isDevMode } from '../../platform/dev-mode'
+// [btw-question D5/AU1] 查看态豁免源：drawer 域公开 barrel（AC10 包名单层放行；drawer
+// 域不回指 chat，无域间环）。装配进 LruEvictDeps.viewedVids——evictIfNeeded 入口对
+// viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency，查看中不落阈值驱逐。
+import { getViewedVids } from '@taiji/core/domain/drawer'
 
 /**
  * pendingBuffer 单项（m1 数据层，steer/follow-up 暂存）。
@@ -564,6 +568,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     },
     // [B9] agentcall 联动驱逐查询（renderer 装配注入；缺省空数组 = 不联动）
     options.agentCallEvictionsOf,
+    // [D5/AU1] 查看态豁免源（drawer control getViewedVids）：evictIfNeeded 入口对
+    // viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency → 查看中不落阈值驱逐
+    getViewedVids,
   )
   /** W3 H3：LRU 驱逐（阈值触发）/ 显式驱逐（带虚拟 key）/ [M7] 单虚拟 key 删除 */
   function evictIfNeeded(): void { lruEvictIfNeeded(lruEvictDeps) }

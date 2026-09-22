@@ -10,6 +10,12 @@
  *   刷新 recency 保护（lru-panel-exempt-fix），不在本模块的 isExempt 内判定——
  *   evictSessionWithVirtual 与 evictIfNeeded 共用 isExempt，若加 panel 检查会让
  *   deleteSession 流程中被删 session（必然还绑定 panel）被 exempt 拦截 → 内存泄漏
+ * - [btw-question D5/AU1] 查看中的 btw 线同款机制（lru-panel-exempt-fix 形态）：
+ *   evictIfNeeded 入口经 deps.viewedVids（= drawer control getViewedVids：panel 枚举 →
+ *   分区 isOpen/activeTab/选中 id 三分量）对**非虚拟**成员刷新 recency → 恒排保留区
+ *   不落阈值驱逐（「查看中不驱逐」）。同样不进 isExempt：btw 线正被查看时 deleteSession
+ *   级联 / 显式关线的 evictSessionWithVirtual 仍须能逐（删除唯一触发点，查看态拦截会
+ *   泄漏，理由与 panel 同款）；切走（viewed 清空）的线不刷新，照常参与阈值驱逐
  * - 驱逐用 delete key（与 disposeSession 一致，D13）
  * - subagent:xxx 三段式虚拟 key 按 owner 段前缀同步驱逐（M7 修复，AC-2；owner 段 = 主 sid
  *   或 btw 线 piSessionId，见 evictDerivedPartitions）
@@ -162,13 +168,28 @@ export interface LruEvictDeps {
    * ∖ viewedVids」的执行面）。
    */
   agentCallEvictionsOf: (mainSid: string) => string[]
+  /**
+   * [btw-question D5/AU1] 查询当前正在查看的 vid 集（= core drawer control getViewedVids：
+   * panel 枚举 → 各分区 isOpen + activeTab + 选中 id 三分量组合）。
+   *
+   * evictIfNeeded 入口对其中**非虚拟**成员刷新 recency（lru-panel-exempt-fix 同款 recency
+   * 保护形态，非 isExempt 豁免判据——值域三族中 subagent/agentcall 虚拟键本不进候选，
+   * 无需刷新；非虚拟成员 = 正在查看的 btw 线）→ 升序驱逐恒排保留区，「查看中不驱逐」。
+   * 显式路径 evictSessionWithVirtual 不读本字段（删除/关线不被查看态拦截，见文件头注释）。
+   *
+   * 装配：store.ts makeLruEvictDeps 生产构造点经 '@taiji/core/domain/drawer' 公开 barrel
+   * 直注真实源；未装配 / core 单测缺省空集 = 无查看保护（旧行为）。
+   */
+  viewedVids: () => Set<string>
 }
 
 /**
  * 检查并执行 LRU 驱逐。
  *
  * 统计可驱逐的 session（非虚拟 key + 非豁免），如果超过 LRU_MAX_SESSIONS，
- * 按最久未访问顺序驱逐超出的部分。驱逐时：
+ * 按最久未访问顺序驱逐超出的部分。步骤：
+ * 0. [D5/AU1] 查看态 recency 刷新（lru-panel-exempt-fix 同款）：viewed 集非虚拟成员
+ *    刷到最新 → 下方升序取最旧时恒在保留区（查看中的 btw 线不落阈值驱逐）
  * 1. deleteMessageKey（清 messages）
  * 2. deleteHydrated（清 hydrated，AC-8 切回重 hydrate）
  * 3. 同步驱逐关联派生键（evictDerivedPartitions：subagent 三段式按 owner 段前缀（AC-2，
@@ -178,6 +199,13 @@ export interface LruEvictDeps {
  * session 变为 streaming 状态）。
  */
 export function evictIfNeeded(deps: LruEvictDeps): void {
+  // [btw-question D5/AU1] 查看态 recency 刷新（lru-panel-exempt-fix 同款机制）：viewed 集
+  // 非虚拟成员（正在查看的 btw 线）刷到最新 → 排序后恒在保留区，构造性「查看中不驱逐」。
+  // 只刷非虚拟：subagent/agentcall 虚拟键被下方 isVirtualKey skip，本就不进候选。
+  // 切走（viewed 清空 = 关 drawer / 切 tab / panel 焦点离开）不刷新，旧 recency 照常逐。
+  for (const vid of deps.viewedVids()) {
+    if (!isVirtualKey(vid)) touchLru(vid)
+  }
   // 每次调用现读生效上限（默认 8 或 relief 压窗覆盖值，#28②）。
   const maxSessions = getLruMaxSessions()
   // 收集可驱逐的候选（有 messages + 非 virtual + 非豁免 + 有访问记录）
@@ -303,6 +331,10 @@ export function disposeLruEntry(sessionId: string): void {
  * [B9] agentCallEvictionsOf 可选注入（默认空数组 = 不联动）：renderer 装配点
  * （stores/chat.ts → composables/features/chat/agentcall-lru-linkage.ts）注入
  * workflow store 映射 ∖ viewedVids 的组合查询；core 单测 / 无装配环境保持旧行为。
+ *
+ * [D5/AU1] viewedVids 可选注入（默认空集 = 无查看保护，旧行为）：生产装配点 store.ts
+ * 直注 drawer control getViewedVids（包名公开 barrel，AC10 放行）；单测可注入假源或
+ * bind 真实 drawer 链（bindViewedVidPanels + setBtwView）。
  */
 export function makeLruEvictDeps(
   messages: { value: Map<string, unknown> },
@@ -311,6 +343,7 @@ export function makeLruEvictDeps(
   deleteStreamingFlag: (sid: string) => void,
   deleteChangeSetStatuses: (sid: string) => void,
   agentCallEvictionsOf: (mainSid: string) => string[] = () => [],
+  viewedVids: () => Set<string> = () => new Set(),
 ): LruEvictDeps {
   return {
     // [W7] getter 而非快照——deleteMessageKey/deleteHydrated 会替换 .value，
@@ -345,5 +378,6 @@ export function makeLruEvictDeps(
       }
     },
     agentCallEvictionsOf,
+    viewedVids,
   }
 }

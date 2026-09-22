@@ -6,6 +6,9 @@
  * - 「btw 驱逐同驱派生键」（B9 同构回调：线派生枚举 ∖ viewedVids）
  * - 主驱逐不动 btw 派生键（D5 不变量 / D9③「m7 前缀联动只匹配主会话名下键」）
  * - btw 键保持普通驱逐候选（不加 isVirtualKey 特例豁免）
+ * - [AU1] 查看中的 btw 线不被阈值驱逐（真实 drawer 链：bindViewedVidPanels + open btw tab
+ *   + setBtwView → getViewedVids → store 注入 → evictIfNeeded 入口 recency 刷新）+
+ *   反面「切走（viewed 清空）后可驱逐」
  *
  * 层次 = core store 级（createChatStore + effectScope，store.test.ts 范式）：hydrate /
  * 驱逐 / 回填全链真实跑；B9 回调经 ChatStoreOptions 注入（renderer 装配侧
@@ -19,11 +22,15 @@
  * 测试框架 vitest（禁止 node:test / tsx --test）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { effectScope } from 'vue'
+import { effectScope, ref } from 'vue'
 import type { Message } from '@taiji/shared'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
 import { isVirtualKey, isVirtualKeyOf, _resetLruForTest, _lruSizeForTest } from '../lru'
+// [AU1 D5] 查看态豁免真实链（同 core 包跨域测试引用；测试目录不受 AC10 收集）：
+// 分区键绑定 + panel 枚举绑定 + 选中写入，与生产 getViewedVids 组合同源。
+import { bindDrawerSessionId, bindViewedVidPanels, getViewedVids, drawerControl } from '../../drawer/control'
+import { openDrawerTab, setDrawerTab, _resetDrawerForTest } from '../../drawer/coordination'
 
 /** 构造最小 Message（内容参与 deep 断言，默认值不参与任何其他用例语义）。 */
 function msgOf(id: string, content: string): Message {
@@ -222,6 +229,80 @@ describe('btw 分区被驱逐时派生键同驱（D9③ 两半边：subagent 前
       expect(h.callbackCalls).toEqual(['btw:pi-2'])
       // 同驱路径同步清时序记录（防 sessionLastAccessed 慢增长）
       expect(_lruSizeForTest()).toBe(0)
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
+describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evictIfNeeded 入口 recency 刷新）', () => {
+  // 真实链：bind panel 枚举 + 分区键 → open btw tab + setBtwView → getViewedVids →
+  // store 装配默认注入（store.ts makeLruEvictDeps）→ evictIfNeeded 入口刷新 viewed recency。
+  // 与注入假源相比多验了 store.ts 生产装配点本身（端到端）。
+  beforeEach(() => {
+    _resetDrawerForTest()
+  })
+
+  afterEach(() => {
+    _resetDrawerForTest()
+    bindViewedVidPanels(ref([])) // 重绑空枚举（等价未绑定，后续用例 getViewedVids 空集）
+    bindDrawerSessionId(ref(null)) // 解绑分区键（null sid no-op 语义）
+  })
+
+  /** 建立查看态（生产链：BtwPanel 选中线 → setBtwView；panel 枚举 = 装配侧 bind） */
+  function startViewing(vid: string): void {
+    const sid = ref<string | null>('A')
+    bindDrawerSessionId(sid)
+    openDrawerTab('btw') // 写 A 分区 isOpen + activeTab='btw'
+    drawerControl.setBtwView(vid)
+    bindViewedVidPanels(ref<Array<string | null>>(['A']))
+  }
+
+  /** 构造 9 候选（> LRU_MAX=8）：viewed 线 touch 序最前（recency 最旧），f0..f7 较新 */
+  function seedNineCandidates(h: Harness): void {
+    // hydrate 置 hydrated 标记（面板在场语义），显式 touchLru 钉 recency 序最前
+    h.store.hydrate('btw:pi-view', [msgOf('v1', '查看中的旁路线')])
+    h.store.touchLru('btw:pi-view') // 最旧（无查看保护时必被逐）
+    for (let i = 0; i < 8; i++) {
+      h.store.setMessages(`f${i}`, [msgOf(`f${i}`, 'fill')])
+      h.store.touchLru(`f${i}`)
+    }
+  }
+
+  it('查看中的 btw 线不被阈值驱逐（入口刷新 recency 恒排保留区，逐次旧的 f0）', () => {
+    const h = makeHarness()
+    try {
+      seedNineCandidates(h)
+      startViewing('btw:pi-view')
+      expect(getViewedVids()).toEqual(new Set(['btw:pi-view'])) // 查看态三分量齐
+
+      h.store.evictIfNeeded() // 9 候选 > 8 → 无保护时最旧的 btw 线必被逐
+
+      // 查看保护生效：btw 分区与其 hydrated 标记存活（面板不空白）
+      expect(h.store.getMessages('btw:pi-view')).toEqual([msgOf('v1', '查看中的旁路线')])
+      expect(h.store.isHydrated('btw:pi-view')).toBe(true)
+      // 被逐的换成刷新后次旧的 f0；保留区尾部 f7 存活
+      expect(h.store.getMessages('f0')).toEqual([])
+      expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('反面：切走（viewed 清空）后同一 btw 线可被阈值驱逐', () => {
+    const h = makeHarness()
+    try {
+      seedNineCandidates(h)
+      startViewing('btw:pi-view')
+      setDrawerTab('terminal') // 切走 btw tab → 三分量破 → viewed 清空
+      expect(getViewedVids()).toEqual(new Set())
+
+      h.store.evictIfNeeded() // 无查看保护 → 最旧的 btw 线照常被逐
+
+      expect(h.store.getMessages('btw:pi-view')).toEqual([])
+      expect(h.store.isHydrated('btw:pi-view')).toBe(false) // 回填闸门重开（D5 可回填）
+      expect(h.store.getMessages('f0')).toEqual([msgOf('f0', 'fill')])
+      expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
     } finally {
       h.dispose()
     }

@@ -204,7 +204,8 @@ export function getViewedVids(): Set<string> {
       if (p.isOpen && p.activeTab === 'subagent' && p.selectedSubagentId) {
         viewed.add(p.selectedSubagentId)
       }
-      // btw 线查看豁免（D5：查看中不驱逐——btw 分区文件持久可回填，唯查看中的线不进候选）
+      // btw 线查看保护（D5：查看中不驱逐——本集经 chat store 注入 evictIfNeeded，入口刷新
+      // 该线 recency 恒排保留区，阈值驱逐不落选；未查看的线照常参与阈值驱逐，文件持久可回填）
       if (p.isOpen && p.activeTab === 'btw' && p.selectedBtwVid) {
         viewed.add(p.selectedBtwVid)
       }

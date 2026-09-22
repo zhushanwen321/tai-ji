@@ -49,7 +49,8 @@ export interface DrawerControlState {
    *  可选成员：默认控制态（core control.ts createDefaultControlState）无需初始化即可满足本接口。 */
   selectedBackgroundTaskId?: string
   /** btw tab 当前查看的旁路线 vid（`btw:<piSessionId>`，由 BtwPanel 选中线时写入）；undefined=未查看。
-   *  D5 chat-lru 豁免数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段三分量）；
+   *  D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段
+   *  三分量 → chat store 注入 evictIfNeeded，入口刷新该线 recency——查看中恒不落阈值驱逐）；
    *  切走/关 drawer 不清（D7④ 切回恢复面板语义），predicate 已含 isOpen/activeTab 双闸不泄漏豁免。
    *  可选成员：默认控制态零加员即可满足本接口（selectedBackgroundTaskId 同款先例）。 */
   selectedBtwVid?: string
