@@ -42,10 +42,14 @@ import type { ShellInputInstance } from './composer-shell'
 /** exactMatch 直发对候选项的最小结构要求（command-enter-exact-send D1 前置③读 name、禁选守卫读 selected） */
 type KeyboardItem = { name: string; selected?: boolean }
 
-/** D1 前置② activeElement 门：document.activeElement 在 composer 输入区内（$el = 输入区根
- *  contenteditable，单根组件契约，同 PresetChip ElementHost 先例）；无引用/未挂载 = false。 */
+/** D1 前置② activeElement 门：document.activeElement 在 composer 输入区内（识别源 =
+ *  ComposerInput expose 的 getInputElement——真实 contenteditable 输入根元素）；
+ *  无引用/未挂载/无 expose = false。[HISTORICAL] 勿改回读实例 $el：ui ComposerInput 模板
+ *  含 HTML 注释块，dev 构建保留注释 → subTree 根为 Fragment → $el 是注释节点
+ *  （nodeType 8），contains 恒 false，dev 全变体直发静默失效（W1 验收 F-1）；prod 剥离
+ *  注释才正常。expose 缺失即 fail-closed，禁止回退 $el（回退 = 同一 bug 复活）。 */
 function activeElementInInput(ref: Readonly<Ref<ShellInputInstance | null>> | undefined): boolean {
-  const root = (ref?.value as (ShellInputInstance & { $el?: Element }) | null | undefined)?.$el
+  const root = ref?.value?.getInputElement?.()
   if (!root) return false // fail-closed：缺省/未挂载不直发走现状插 chip（禁 fail-open）
   return root === document.activeElement || root.contains(document.activeElement)
 }

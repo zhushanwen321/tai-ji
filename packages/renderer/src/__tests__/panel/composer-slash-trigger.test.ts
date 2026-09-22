@@ -186,16 +186,17 @@ describe('CommandPopover slash query 过滤（U6-U8）', () => {
   }
 
   /** N-2c/N-2d 精确交叉前置（command-enter-exact-send D4）：造 composer 输入区
-   *  （contenteditable div）+ 显式 focus + shellInputRef 指向它——D1 前置② activeElement 门
-   *  的测试态通道：环境 activeElement 默认 body，缺 focus 或缺通道则门 fail-closed 进不了
-   *  直发分支（与 composer-keydown.test.ts setupExactChain 同款前置）。withShellRef=false =
+   *  （contenteditable div）+ 显式 focus + shellInputRef 的 getInputElement 指向它——
+   *  D1 前置② activeElement 门（F-1 后识别源 = expose 元素，非 $el）的测试态通道：
+   *  环境 activeElement 默认 body，缺 focus 或缺通道则门 fail-closed 进不了直发分支
+   *  （与 composer-keydown.test.ts setupExactChain 同款前置）。withShellRef=false =
    *  通道缺省降级态（focus 照做，证明拦截来自通道缺省而非焦点缺失）。 */
   async function mountPopoverExact(query: string, withShellRef = true): Promise<void> {
     const inputArea = document.createElement('div')
     inputArea.setAttribute('contenteditable', 'true')
     document.body.appendChild(inputArea)
     const shellInputRef = withShellRef
-      ? ref<ShellInputInstance | null>({ $el: inputArea } as unknown as ShellInputInstance)
+      ? ref<ShellInputInstance | null>({ getInputElement: () => inputArea } as unknown as ShellInputInstance)
       : undefined
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
