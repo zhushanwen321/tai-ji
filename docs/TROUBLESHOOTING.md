@@ -301,6 +301,16 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **正确做法**：真 bun 腿 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在守卫 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
 
+### 22. 测试防线被绕过：非 vitest-config 入口执行测试会写真实数据目录（2026-09-22 事故）
+
+**症状**：`~/.taiji/` 下出现测试命名的目录/文件（如 `attachments/att-store-*`——`attachment-store.test.ts` 的用例 sessionId 命名），而测试红线的双层防线（globalSetup 钉死 `TAIJI_AGENT_DATA_DIR` + fs-guard 白名单拦截）本应阻止一切真实目录写入。
+
+**根因**：防线挂在 vitest config（`taijiTestConfig` 工厂）上，**只对经 config 启动的 vitest 进程生效**。绕过形态：`bun test`（Bun 测试运行器自动把 `import from 'vitest'` 映射到 `bun:test`，完全不读 vitest.config）、或任何不经项目 config 的执行方式——此时无 env 钉死（dataDir 解析回真实 `~/.taiji`）、无 fs-guard（拦截不发生）。标准入口已复现验证有效：包目录 `pnpm vitest run` 写入被正确钉到 tmp。
+
+**恢复**：① 按测试命名模式识别垃圾条目（`att-store-*` 等用例 sessionId 命名、tmp 下 `logger-test-*`/`zcode-engine-*` 等本仓 fixture 前缀），核对条目内无用户数据后删除；② 会话数据核查：`agent/sessions/` 在事故时段的修改检查（本次事故会话区零触碰）。tmp 大量残留会让依赖 readdir 的用例超时（实测 21 万条目时 `countSnapshotDirs` 单次 >3.6s）。
+
+**防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 腿只走 `bunx --bun vitest`（守卫同口径）；禁止 `bun test` 执行本项目测试文件。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
