@@ -29,7 +29,7 @@ import {
 import { ArgsValidationError } from "../args-validator.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { projectRunRegistryState } from "../run-registry.ts";
-import { setRunEventJournalDirForTest } from "../worker-message-pump.ts";
+import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../worker-message-pump.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -304,6 +304,47 @@ describe("runWorkflow", () => {
       });
       expect(projection.phase).toBe("active");
       expect(projection.state.lifecycle).toBe("dispatched");
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  // 竞态锁（L4 A4 附带发现：8 跑 1 丢 6 帧）：run-created 入队必须先于
+  // workerHost.start——enqueueRunDispatch 同步入队 + 队列执行序 = 入队序，
+  // worker 首个 agent() 的 ask 帧必然排在 created 之后落账。
+  it("run-created 入队先于 worker.start：start 同步段内首 ask 到达 → journal 帧序 created 先行、零丢帧", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-race-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      const deps = makeDeps();
+      const spec = makeSpec();
+      // 模拟 worker 极快的竞态形态：workerHost.start 同步段内首个 agent() 的
+      // ask-dispatched 已到达宿主（修复前此帧在 created 态表外让位被吞）
+      vi.spyOn(deps.workerHost, "start").mockImplementation((startSpec: RunSpec) => {
+        const raceRunId = (startSpec.args as Record<string, unknown>)["_runId"];
+        if (typeof raceRunId === "string") {
+          void dispatchRunTrigger(
+            { runId: raceRunId },
+            { type: "ask-dispatched", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
+          ).catch(() => {});
+        }
+        return { postMessage: vi.fn(), terminate: vi.fn(async () => {}) };
+      });
+
+      const runId = await runWorkflow(spec, deps);
+
+      // cancel-requested 作队列尾哨兵：await 它 = 该 run 投递队列排空（ask 帧已落账）。
+      // 带完整 source（spec 含注入后的 _runId）——runId 键投递不携带 terminal 事件。
+      await dispatchRunTrigger(
+        { runId, spec },
+        { type: "cancel-requested", reason: "race-probe" },
+      );
+
+      // 修复前形态：ask-dispatched 先入队先执行 → created 态表外让位吞帧，
+      // journal 只剩 run-created；修复后帧序 created 先行、零丢帧
+      const events = await createRunEventJournal(journalDir).scan(runId);
+      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

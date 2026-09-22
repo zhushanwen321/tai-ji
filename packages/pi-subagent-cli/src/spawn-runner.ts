@@ -211,8 +211,26 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
  * 孙进程 schema 强制的唯一必备扩展包（P-C5 白名单起步组成）。与宿主注入侧
  * （subagent-workflow pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS`）是同一契约的
  * 两端：宿主决定注入什么，本断言验证引擎确实收到——扩白名单时两处同批扩。
+ *
+ * 本常量 = npm 布局包名（错误文案/恢复指引用）；匹配判据 =
+ * {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS}（与 pi-host 段集同批维护）。
  */
 const SCHEMA_ENFORCEMENT_EXTENSION_PKG = "@zhushanwen/pi-structured-output";
+
+/**
+ * 断言②匹配段集（契约两端与 pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS` 同判据，
+ * 扩白名单时两处同批扩）。两形态别名：
+ *   - `@zhushanwen/pi-structured-output`：npm staged 布局
+ *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
+ *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
+ *     （dev 下 taiji 宿主注入 ctx.extensionPaths 即源码目录——只认 npm 布局时
+ *     dev 真机恒判「未武装」秒级 fail-fast，schema 拦截链不可用）。
+ *     选型两段连续匹配（分组名 + 包目录名）防尾段同名误伤，登记见 pi-host 同名常量。
+ */
+const SCHEMA_ENFORCEMENT_EXTENSION_SEGS: readonly (readonly string[])[] = [
+  ["@zhushanwen", "pi-structured-output"],
+  ["universal", "structured-output"],
+];
 
 /** 武装断言的判定输入（纯函数面，测试直构）。 */
 export interface SchemaArmingInput {
@@ -276,15 +294,20 @@ export function assertSchemaEnforcementArmed(input: SchemaArmingInput): void {
 }
 
 /** argv 是否含指向 structured-output 包的 `--extension` 对：路径按 `/`|`\` 分段后
- * 做 `<scope>/<pkg>` 连续段匹配（目录形态 `.../@zhushanwen/pi-structured-output` 与
- * 入口文件形态 `.../index.js` 都命中；段必须精确，前缀相似目录不误判）。与 pi-host
- * 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
+ * 对 {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS} 任一段集做连续段匹配（npm staged 与
+ * dev 源码两布局、目录/入口文件两形态都命中；段必须精确，前缀相似目录不误判）。
+ * 与 pi-host 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
 function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
-  const wanted = SCHEMA_ENFORCEMENT_EXTENSION_PKG.split("/");
   for (let i = 0; i + 1 < spawnArgs.length; i++) {
     if (spawnArgs[i] !== "--extension") continue;
     const segs = (spawnArgs[i + 1] ?? "").split(/[\\/]/).filter((s) => s.length > 0);
-    if (segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w))) return true;
+    if (
+      SCHEMA_ENFORCEMENT_EXTENSION_SEGS.some((wanted) =>
+        segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w)),
+      )
+    ) {
+      return true;
+    }
   }
   return false;
 }

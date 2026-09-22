@@ -344,6 +344,34 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
     ]);
   });
 
+  it("宿主形态 dev 源码布局：extensions/universal/structured-output（目录与入口文件形态）命中收窄集", () => {
+    // dev 下 runtime extension-service 下发的是源码目录（无 @zhushanwen scope 段）——
+    // L4 A1 根因回归锁：白名单须识别 dev 源码布局别名段，否则孙进程扩展集恒空。
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc", "--no-extensions", "--approve",
+      "--extension", "/repo/extensions/universal/subagent-workflow",
+      "--extension", "/repo/extensions/universal/structured-output",
+      "--extension", "/repo/extensions/universal/structured-output/index.js",
+      "--extension", "/repo/extensions/taiji/system-prompt",
+    ];
+    expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+      "/repo/extensions/universal/structured-output",
+      "/repo/extensions/universal/structured-output/index.js",
+    ]);
+  });
+
+  it("宿主形态 dev 布局形似误报不命中（尾段同名前缀目录 / 同名异分组不误收）", () => {
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--extension", "/repo/extensions/universal/structured-output-lookalike",
+      "--extension", "/some/other/structured-output",
+      "--extension", "/repo/extensions/universal/structured-output-extra/index.js",
+    ];
+    expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([]);
+  });
+
   it("宿主形态解析不误吃其他 flag 值（--skill 值被跳过、真 flag 不吃值、单 - 路径是值）", () => {
     const argv = [
       "node", "/pi",

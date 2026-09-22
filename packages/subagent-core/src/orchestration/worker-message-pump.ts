@@ -738,10 +738,12 @@ export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
 /**
  * `run-created` 正点发射（journal 首帧，Q2 接线后的终态；P1b-1 的 created 引导
  * 补投分支已随正点接线删除——正点先落则后续触发 fold 出 dispatched，created 态
- * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点
- * （创建期校验通过 + run 装配完成之后）；载荷 runId/scriptName/args/model 全部
- * 同源自 run.spec。重复调用 = dispatched × run-created 表外转移 fail-fast
- * （IllegalTransitionError），构造性排除双帧。
+ * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点；
+ * 入队先于 worker 启动（enqueueRunDispatch 同步入队 + 队列执行序 = 入队序——
+ * worker 首个 agent() 的 ask 帧必然排在 created 之后，竞态丢帧结构性消除），
+ * 落账完成的 await 由调用方持有（「runWorkflow 返回 ⟹ 投影可查」）。载荷
+ * runId/scriptName/args/model 全部同源自 run.spec。重复调用 = dispatched ×
+ * run-created 表外转移 fail-fast（IllegalTransitionError），构造性排除双帧。
  */
 export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
   return dispatchRunTrigger(run, {

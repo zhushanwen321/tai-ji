@@ -24,6 +24,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  dispatchAskDispatched,
+  dispatchAskRetrying,
+  dispatchAskSettledFailed,
   dispatchRunCreated,
   dispatchRunTrigger,
   setRunEventJournalDirForTest,
@@ -338,5 +341,55 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     ).rejects.toThrow(/terminal/);
     const events = await scanRunEvents(journalDir, runId);
     expect(events).toHaveLength(2);
+  });
+});
+
+// ── 5. run 启动竞态回归（L4 A4 附带发现：8 跑 1 丢 6 帧的回归锁） ──────────
+
+describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失）", () => {
+  it("run-created 入队（不 await）后同步并发投递首 ask 链 ×20 轮 → 帧序 created 先行、零丢帧", async () => {
+    // 生产时序（lifecycle.runWorkflow 修复后形态）：created 入队先于 worker 启动，
+    // worker 首个 agent() 的 ask 事件在 created 落账完成前同步入队——per-run 队列
+    // 执行序 = 入队序，ask 帧必须全部落账。修复前形态（ask 先入队）在 created 态
+    // 表外转移被 yielded 吞，journal 永久缺帧。cancel-requested 作队列尾哨兵
+    // （await 它 = 该 run 队列排空 + terminal 自清理）。
+    for (let i = 0; i < 20; i++) {
+      const run = makeRun(`wf-race-${i}`);
+      const createdPromise = dispatchRunCreated(run);
+      dispatchAskDispatched(run, 0, "reviewer");
+      dispatchAskRetrying(run, 0, 1, 1000, "engine_run_failed: race probe");
+      dispatchAskSettledFailed(run, 0);
+      await dispatchRunTrigger(run, {
+        type: "cancel-requested",
+        reason: "race-probe",
+      });
+      await createdPromise;
+
+      const events = await scanRunEvents(journalDir, run.runId);
+      expect(events.map((e) => e.type), `round ${i}`).toEqual([
+        "run-created",
+        "ask-dispatched",
+        "ask-retrying",
+        "ask-settled",
+        "run-settled",
+      ]);
+    }
+  });
+
+  it("接线错误语义保持：ask 帧先于 created 入队（修复前的竞态形态直构）→ created 态表外让位不补齐", async () => {
+    // 反向锁：竞态修复靠入队序，不改让位语义——若未来有人回退 lifecycle 入队点，
+    // 本用例的让位行为（journal 缺 ask 帧）+ lifecycle 时序锁用例会双双红灯。
+    const run = makeRun("wf-race-inverted");
+    void dispatchRunTrigger(run, {
+      type: "ask-dispatched",
+      taskIndex: 0,
+      agentName: "reviewer",
+      attempt: 1,
+      ts: Date.now(),
+    }).catch(() => {});
+    await dispatchRunCreated(run);
+
+    const events = await scanRunEvents(journalDir, run.runId);
+    expect(events.map((e) => e.type)).toEqual(["run-created"]);
   });
 });

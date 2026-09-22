@@ -433,6 +433,29 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
+  it("[D2] extensionPaths dev 源码布局 → 真实 spawn 链 argv 透传 + 武装断言②放行（L4 A1 回归锁）", async () => {
+    // dev 下 taiji 宿主注入的 extensionPaths 是源码目录（无 @zhushanwen scope 段）。
+    // 断言②（schema 任务 + dev 布局路径）走完 spawn 链 = 放行证明；到达 F-1 守卫
+    // 翻 false（fake pi 无 structured-output 调用，同上方武装态用例的预期形态）。
+    const devExtPath = "/repo/extensions/universal/structured-output";
+    const h = await makeHarness("success");
+    try {
+      const result = await runSpawnOnce(
+        baseParams(h, {
+          schema: { type: "object", properties: { answer: { type: "number" } } },
+          extensionPaths: [devExtPath],
+        }),
+        callbacksOf(h),
+      );
+      // 武装断言未拦截（零 spawn 前抛错）→ run 走到 F-1 确定性守卫
+      expect(result.success).toBe(false);
+      expect(result.failureKind).toBe("schema_deterministic");
+      expect(h.childSpawned).toHaveLength(1);
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
   it("[F-1] schemaExpected 判定源 = task.schema 声明形态：声明存在且无 structured-output 产出 → 静默成功被拦截", async () => {
     // 判定信号 = params.schema 声明（与 env 注入值解耦）：声明存在 → 守卫武装，
     // run 正常结束（exit 0）但无 parsedOutput → 不得静默 success。反面（schema
