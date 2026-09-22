@@ -1,6 +1,6 @@
 /**
  * PS-42 探针：pi 扩展 UI 应答（extension_ui_response）只 resolve 扩展 Promise——不回灌对话、不开 turn
- * （D6 探针层；form-submit-busy-convergence 前提 1 / ADR-0072 分型的机器防线）。
+ * （设计 U7 / §4 e2e 探针检查点——form-submit-busy-convergence 前提 1 守卫）。
  *
  * 登记条目（docs/pi-semantics.json PS-42）：taiji 表单/对话应答回传 pi 只用于 resolve 扩展持有的
  * Promise，从不回灌对话、不开 turn——expectTurn 分型通路与 ADR-0072 桥接语义都锚在该前提上；
