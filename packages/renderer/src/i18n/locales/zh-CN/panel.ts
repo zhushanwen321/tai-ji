@@ -189,6 +189,13 @@ export default {
     genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
     genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
     genStatsNoData: '暂无数据',
+    // composer-genstats-ttft TTFT 触发器（U4）。p50 行 label 独立成键，不复用 genStatsDay
+    //（「今日均值」与 p50 中位数语义矛盾，设计 §3.1）；「本次」行 label/补句复用 genStatsCurrent 系（同语义）
+    genStatsTtftTitle: '首字延迟 TTFT',
+    genStatsTtftDay: '今日 p50（此模型）',
+    genStatsTtftD7: '近 7 天 p50',
+    genStatsTtftD30: '近 30 天 p50',
+    genStatsTtftNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（p50 中位数）；「请求发出 → 首个输出 token 到达」的延迟，按单次 LLM 请求计算，不含工具执行时间',
   },
   sideDrawer: {
     title: '侧边抽屉',
