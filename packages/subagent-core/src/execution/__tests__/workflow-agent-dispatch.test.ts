@@ -48,6 +48,7 @@ import { createNotifyHost } from "../notify/notify-host.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
+import { SAR_UNATTACHED_PARENT_RUN_ID } from "../assembly/subprocess-agent-runner.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
@@ -741,6 +742,73 @@ describe("armed 回执经 observedEvent 落 run 事件 journal（[D3 协议版 P
       const armed = events[1] as Extract<WorkflowRunEvent, { type: "armed" }>;
       expect(armed.frame).toEqual(armedFrame);
       expect(typeof armed.ts).toBe("number");
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  // [A1 修复循环第 2 轮] 真机失败签名锁定（dev 实例 wf-1790034646281-w7tp4f 实证）：
+  // 生产 subagent-workflow extension 的 lazyDeps 缺 workflowAgentDispatch 转发成员 →
+  // workflow tool 的 run action 以 lazyDeps 启动 run → pump dispatchAgentCall 回退
+  // deps.runner（SAR.run 占位 runId）→ record.parentRunId = "sar-unattached"（truthy
+  // 但非真实 run）→ armed 回执落账键错 → fold 出 created 态 → armed 表外转移
+  // IllegalTransitionError 让位。两条用例锁定该链路的 service 侧事实：
+  // 装配点值无关透传（不断）+ 占位键让位不污染真实 run journal（让位语义正确）。
+  // 上游修复（lazyDeps 补转发成员）在 extension 领地，修复后本组用例仍应恒绿。
+  it("SAR 直调占位路径：record 装配对 parentRunId 值无关透传（origin=workflow + 占位 runId）", async () => {
+    const { service, store, fake } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), SAR_UNATTACHED_PARENT_RUN_ID);
+    await flush();
+    // 装配点（createRecordForMode originFields spread）对任意 runId 实参原样落位——
+    // 真机 sa-d73db003 binding sidecar（origin=workflow + parentRunId=sar-unattached）
+    // 的内存面等价断言：缺口不在 record 装配，在上游 runId 实参来源。
+    const record = runningRecord(store);
+    expect(record.origin).toBe("workflow");
+    expect(record.parentRunId).toBe(SAR_UNATTACHED_PARENT_RUN_ID);
+    const run = soleRun(fake);
+    run.settle({ content: "done" });
+    await pending;
+  });
+
+  it("占位 runId 的 armed 回执让位（真机失败签名锁定）：fold 出 created → 非法转移让位，真实 run journal 零污染", async () => {
+    const { service, fake } = makeHarness();
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-armed-placeholder-"));
+    setRunEventJournalDirForTest(journalDir);
+    loggerMock.debug.mockClear();
+    try {
+      // 真实 run 的 journal 首帧已落（生产 = dispatchRunCreated 正点），fold 出 dispatched。
+      await dispatchRunTrigger(
+        { runId: "wf-real" },
+        { type: "run-created", runId: "wf-real", workflowName: "review-fix-loop", argsSummary: "{}", ts: Date.now() },
+      );
+
+      // 占位 runId 派发（生产 lazyDeps 缺口的 SAR 回退形态）+ 引擎 armed 回执进拦截点。
+      const pending = service.executeWorkflowAgent(baseOpts(), SAR_UNATTACHED_PARENT_RUN_ID);
+      await flush();
+      const run = soleRun(fake);
+      run.emitEvent({
+        type: "armed",
+        schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+        extensionPkg: "@zhushanwen/pi-structured-output",
+      } as const);
+      run.settle({ content: "done" });
+      await pending;
+      // 投递队列是微任务链，settle 收尾后再排空一轮（让位判定在队内完成）
+      await flush();
+
+      // 让位签名：IllegalTransitionError 走 debug 留痕（runId 键可见，与真机
+      // run-event-dispatch 日志行同文）。
+      expect(loggerMock.debug).toHaveBeenCalledWith(
+        expect.stringContaining(`run event dispatch yielded (runId=${SAR_UNATTACHED_PARENT_RUN_ID})`),
+      );
+      // 占位 runId 无 journal（scan ENOENT = 空流）→ 零落帧
+      await expect(
+        createRunEventJournal(journalDir).scan(SAR_UNATTACHED_PARENT_RUN_ID),
+      ).resolves.toEqual([]);
+      // 真实 run 的 journal 零污染（占位回执不串键落帧）
+      const realEvents = await createRunEventJournal(journalDir).scan("wf-real");
+      expect(realEvents.map((e) => e.type)).toEqual(["run-created"]);
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

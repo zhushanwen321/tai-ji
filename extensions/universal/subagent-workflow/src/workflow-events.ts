@@ -720,6 +720,12 @@ export function setupWorkflowDomain(
     get eventBus() { return createLazy(resolveDeps, "eventBus"); },
     get workerHost() { return createLazy(resolveDeps, "workerHost"); },
     get runner() { return createLazy(resolveDeps, "runner"); },
+    // [A1 修复循环 R3] workflowAgentDispatch 必须随 lazyDeps 转发：workflow tool 的
+    // run action 以 lazyDeps 为 deps 启动 run，漏本成员则 pump dispatchAgentCall 读到
+    // undefined 回退 deps.runner（SAR.run 占位 runId）→ record.parentRunId =
+    // "sar-unattached" → armed 回执落账键错 → fold 出 created 态 → IllegalTransitionError
+    // 让位，run journal 恒缺 armed 帧（真机 wf-1790034646281-w7tp4f 实证链，R2 裁决）。
+    get workflowAgentDispatch() { return createLazy(resolveDeps, "workflowAgentDispatch"); },
     // scheduleTimeBudget / onWorkflowCall / appendEntry 不可缺席（ports.ts D-12
     // regression fix 同族）：rebuildRuntime 重排 run 级墙钟预算计时器、worker 脚本
     // 嵌套 workflow() 调用、finalizeRun 的 pending:unregister 直落都经这三个成员
