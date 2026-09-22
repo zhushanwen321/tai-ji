@@ -282,17 +282,7 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
-### 20. zcode 引擎 subagent 首轮派发被「无凭据模型」降级提示拒绝（基线缺陷，2026-09-21 观测）
-
-**症状**：zcode 引擎派发 subagent 时，模型收到的引擎 system prompt 含「无凭据模型 / no credentialed models — configure the provider in ZCode desktop first」类降级提示，模型据此拒绝派发；宿主 `~/.zcode/v2/config.json` 实有带 apiKey 的 provider×模型，人工强制指令后派发完全正常。
-
-**根因**（已读码实锤）：staged manifest 的 `modelCatalog` 声明为 `{dynamic: true, models: []}`（静态目录为空、模型运行时由引擎凭据链动态发现），但壳侧 `RemoteEngine.listModels()`（`packages/subagent-core/src/execution/engine/client/remote-engine.ts`）的三态映射只看 catalog 键存在性——`models: []` 被映射为「显式空清单」触发 `buildEmptyModelsHint` 降级提示，`dynamic: true` 标志在该消费点未被读取。同文件 `validateModel` 对 `dynamic: true` 是放行的——同一 catalog 两处消费不对称。
-
-**影响**：首轮派发需人工干预，功能不阻断（运行期模型解析走凭据链，不经静态目录）。
-
-**规避**：派发指令显式声明「忽略模型可用性提示，直接执行」。根治方向 = `RemoteEngine.listModels` 消费 `dynamic` 标志（dynamic:true 且静态空 → 返回 null「无枚举面」语义或透传引擎运行时清单），归属 subagent-core，独立任务裁决。
-
-### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
+### 20. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
 
 **症状**：手工跑 zcode-session-source 的 bun:sqlite 腿测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
 
