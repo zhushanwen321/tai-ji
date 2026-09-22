@@ -36,14 +36,18 @@ import {
   invalidateBtwRequests,
   invalidateBtwStaleFromSnapshot,
   btwExpiredNoticeOf,
+  clearBtwExpiredNotice,
   firstBtwDialogReq,
+  markBtwStaleInteractiveFromReplay,
   BTW_EXPIRED_REASON_SNAPSHOT_PRUNED,
+  BTW_EXPIRED_REASON_REPLAY_DANGLING,
   __resetBtwPendingBookkeepingForTest,
 } from '@/composables/panel/useBtwTabData'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { dispatchGlobal, dispatchSession } from '@taiji/core/transport/api'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSubagentStore } from '@/stores/subagent'
+import { useExtensionUIStore } from '@/stores/extension-ui'
 import { subagentVirtualId } from '@taiji/shared'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useChatStore } from '@/stores/chat'
@@ -414,5 +418,92 @@ describe('失效支单入口（两路合并收口：事件路薄委托 + 快照�
     // 簿记已空 → 修剪差集为空 → 既有提示不被覆盖/清除
     invalidateBtwStaleFromSnapshot('btw:t3', new Set(), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
     expect(btwExpiredNoticeOf('btw:t3')).toBe('turn-aborted')
+  })
+})
+
+describe('回放对账路（markBtwStaleInteractiveFromReplay：持久层悬空交互请求 toolCall → 失效提示）', () => {
+  /**
+   * 回放投影音形的 assistant 消息（apply-entry-convert collectToolCallPart 构造形态）：
+   * 悬空 toolCall = 无 output 字段（fillHostToolCall 只对已闭合 toolCall 无条件回填
+   * `output: string`，空串也算闭合——V8 已接受面「悬空调用定格 completed 无产出」）。
+   * **红线（上轮教训）**：主用例禁止 seed 簿记伪造前提——整机杀重启后簿记恒为空。
+   */
+  function replayedAssistantMsg(id: string, toolName: string, closedOutput?: string): Message {
+    return {
+      id,
+      role: 'assistant',
+      content: '',
+      status: 'complete',
+      timestamp: 0,
+      toolCalls: [
+        {
+          id: `${id}-tc`,
+          toolName,
+          input: {},
+          status: 'completed',
+          startTime: 0,
+          ...(closedOutput !== undefined && { output: closedOutput }),
+        },
+      ],
+    }
+  }
+
+  /** 经真实 bus 入账一条挂起 dialog 族请求（存活挂起守卫的簿记半边） */
+  function seedPending(vid: string, requestId: string): void {
+    ensureBtwPendingBookkeeping()
+    getExtensionBus().emit({
+      kind: 'ui-request',
+      sessionId: vid,
+      request: { requestId, method: 'confirm', title: '允许执行？', message: 'm' },
+    } as never)
+  }
+
+  it('整机重启形态（红线）：簿记为空 + 投影含悬空 ask_user toolCall → 提示置位，无簿记出账', () => {
+    // 不 seedPending：模拟整机杀重启后首轮回放（模块簿记与 runtime pending 同时清零）
+    markBtwStaleInteractiveFromReplay('btw:replay-1', [
+      { id: 'u1', role: 'user', content: '帮我查下', status: 'complete', timestamp: 0 },
+      replayedAssistantMsg('a1', 'ask_user'),
+    ])
+
+    expect(btwExpiredNoticeOf('btw:replay-1')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
+    expect(isBtwPending('btw:replay-1')).toBe(false) // 只写提示不出账（簿记本来就没账可出）
+  })
+
+  it('名单窄而准：悬空普通工具（bash）不置提示；闭合的交互请求（output 已回填）不置提示', () => {
+    markBtwStaleInteractiveFromReplay('btw:replay-2', [replayedAssistantMsg('a2', 'bash')])
+    expect(btwExpiredNoticeOf('btw:replay-2')).toBeNull()
+
+    // 闭合 = output 有值（空串也算闭合——fillHostToolCall 无条件回填 string）
+    markBtwStaleInteractiveFromReplay('btw:replay-3', [replayedAssistantMsg('a3', 'ask_user', '')])
+    expect(btwExpiredNoticeOf('btw:replay-3')).toBeNull()
+  })
+
+  it('存活挂起守卫：簿记/store 族仍有该线挂起请求 = 请求尚待应答，悬空只是未闭合 → 不置提示', () => {
+    // 簿记半边：agent ask_user 提问帧已到达（dialog 族入簿记），用户此刻才打开线触发回放
+    seedPending('btw:replay-4', 'live-1')
+    markBtwStaleInteractiveFromReplay('btw:replay-4', [replayedAssistantMsg('a4', 'ask_user')])
+    expect(btwExpiredNoticeOf('btw:replay-4')).toBeNull()
+
+    // store 族半边（form/planReview 分区）同样短路
+    const store = useExtensionUIStore()
+    store.addRequest('btw:replay-5', {
+      sessionId: 'btw:replay-5',
+      requestId: 'live-form-1',
+      method: 'select',
+      form: true,
+    })
+    markBtwStaleInteractiveFromReplay('btw:replay-5', [replayedAssistantMsg('a5', 'schedule')])
+    expect(btwExpiredNoticeOf('btw:replay-5')).toBeNull()
+  })
+
+  it('幂等：重复回放重复置位同值不翻动；dismiss 后同痕迹重放仍可再置', () => {
+    const msgs = [replayedAssistantMsg('a6', 'plan')]
+    markBtwStaleInteractiveFromReplay('btw:replay-6', msgs)
+    expect(btwExpiredNoticeOf('btw:replay-6')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
+    clearBtwExpiredNotice('btw:replay-6')
+
+    // 用户 dismiss 后再次回放（同持久痕迹）→ 重新置位（痕迹仍在文件里，提示语义仍成立）
+    markBtwStaleInteractiveFromReplay('btw:replay-6', msgs)
+    expect(btwExpiredNoticeOf('btw:replay-6')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
   })
 })

@@ -40,6 +40,7 @@
 import { computed, defineComponent, inject, onErrorCaptured, onScopeDispose, reactive, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
+import type { Message } from '@taiji/shared'
 import { disposeLruEntry, isVirtualKeyOf } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
 import type { DialogRequest } from '@taiji/ui/extension-host'
@@ -177,12 +178,17 @@ function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
 // 出账（终态机清除支）：
 // - 应答：store 族经 useExtensionUI.respond 出队后由确认条调 noteBtwRequestResolved；
 //   dialog 族走 respondBtwDialog（送达才出队出账——未送达保持挂起可重试）；
-// - 撤回 / 失效：`invalidateBtwRequests` 单入口（两路写入合并收口，`expiredNoticeByVid`
-//   无第二写方形态）：① 事件路 = bus 'requests-invalidated'（runtime 非 respond 终结
-//   单一出口）订阅薄委托；② 快照修剪路 = `invalidateBtwStaleFromSnapshot`（useExtensionUI
-//   retainOnly 对账差集联动，补「runtime 进程死亡后 pending 内存表清零 → 空清单不广播
-//   失效帧」的结构性缺口——重启后遗留挂起在首次对账时转为行内已失效提示）。逐条出账
-//   + 行内提示置位 + dialog 渲染载荷同步撤下；
+// - 撤回 / 失效：`invalidateBtwRequests` 单入口（两路写入合并收口）：① 事件路 = bus
+//   'requests-invalidated'（runtime 非 respond 终结单一出口）订阅薄委托；② 快照修剪路 =
+//   `invalidateBtwStaleFromSnapshot`（useExtensionUI retainOnly 对账差集联动，补「runtime
+//   进程死亡后 pending 内存表清零 → 空清单不广播失效帧」的结构性缺口——重启后遗留挂起在
+//   首次对账时转为行内已失效提示）。逐条出账 + 行内提示置位 + dialog 渲染载荷同步撤下；
+//   ③ 回放对账路 = `markBtwStaleInteractiveFromReplay`（btw-replay 回放链联动，补快照修剪
+//   路的残余盲区：整机杀重启时本簿记与 runtime pending 同时清零、修剪差集恒空结构性不触发
+//   ——以 pi 会话文件中悬空的交互请求 toolCall 持久痕迹为信号源置位，只写提示不出账）。
+//   `expiredNoticeByVid` 的写方形态：置位 = ②差集支 + ③回放路 两函数；清除 = 新请求顶掉 +
+//   用户 dismiss。各写方互不清除他路产物（②首条版本保留语义见 invalidateBtwRequests 注释；
+//   ③同值幂等、不覆盖既有提示）。
 // - 回收提醒清除支：setBtwReclaimReminder(vid, false) + 线内容增长即清（用户续问的
 //   renderer 可达信号，见 syncThreadWatchers）。
 // 无超时语义：本簿记不含任何墙钟（D8——pi 源 dialog 无超时，plugin 超时撤窗契约不套用）。
@@ -251,6 +257,26 @@ export function ensureBtwPendingBookkeeping(): void {
  *  不按 reason 分支；语义 = runtime 重启后遗留挂起经首次快照对账确认失效） */
 export const BTW_EXPIRED_REASON_SNAPSHOT_PRUNED = 'snapshot-pruned'
 
+/** 回放对账路失效 reason（簿记值，展示同上；语义 = 回放投影检出悬空交互请求 toolCall
+ *  且该线无存活挂起——整机杀重启后首轮回放的确证失效信号，信号源 = pi 会话文件持久层） */
+export const BTW_EXPIRED_REASON_REPLAY_DANGLING = 'replay-dangling'
+
+/**
+ * 交互请求类工具名（回放对账路的悬空判定名单，窄而准——宁漏不误）。口径 = D8 请求范围
+ * 五类中「以本名工具 toolCall 持久化、且执行体阻塞等待用户应答」的子集：
+ * - `ask_user`：ask-user 富提问表单（extensions/universal/ask-user/src/index.ts registerTool）
+ * - `schedule`：scheduler 建单表单（extensions/universal/scheduler/src/index.ts registerTool，
+ *   interaction.ts 经 uiFormInteract 阻塞等应答）
+ * - `plan`：plan 模式生命周期（extensions/universal/plan/src/tool.ts registerTool，
+ *   submit-review 阻塞等用户审批）
+ * 刻意排除（按名不可辨识或非用户对话等待）：`schedule_control`（纯服务调用无 UI 阻塞）；
+ * session-manager 六工具（SESSION_MANAGER_MARKER 机器 RPC 通道，亚秒级非用户应答）；
+ * permission 审批与 confirm/input/editor 简单 dialog（挂在 bash/edit 等普通工具执行体或
+ * extension 内部调用上，悬空 toolCall 名不可辨识——误标普通工具即违名单窄而准）；
+ * plugin-bridge 动态插件工具（非 taiji 交互请求族）。
+ */
+const BTW_INTERACTIVE_REQUEST_TOOLS: ReadonlySet<string> = new Set(['ask_user', 'schedule', 'plan'])
+
 /**
  * 失效支单入口（两路写入合并收口，`expiredNoticeByVid` 单状态）：事件路订阅与快照修剪路
  * （`invalidateBtwStaleFromSnapshot`）都收口至此——逐条出账 + 行内提示置位 + dialog 渲染
@@ -293,6 +319,42 @@ export function invalidateBtwStaleFromSnapshot(
   const stale = [...ids].filter((id) => !keepIds.has(id))
   if (stale.length === 0) return
   invalidateBtwRequests(vid, stale, reason)
+}
+
+/**
+ * 回放对账路失效（失效支三路之三，btw-replay 回放链在定格投影落地时同步调用）：
+ * 扫描回放投影 messages 中的悬空交互请求 toolCall（`BTW_INTERACTIVE_REQUEST_TOOLS` 命名 +
+ * 无 toolResult 回填），检出即置行内「请求已失效」提示。
+ *
+ * 信号源 = pi 会话文件持久层（悬空 toolCall 是执行体被杀时留下的持久痕迹），不依赖任何
+ * 内存簿记跨进程存活——补快照修剪路（②）的结构性盲区：整机杀重启时本簿记与 runtime
+ * pending 同时清零、修剪差集恒空。悬空判定读投影不变量：回放投影中已闭合 toolCall 恒有
+ * `output: string`（fillHostToolCall 无条件回填，空串也算闭合），悬空者保持
+ * `output === undefined`（V8 已接受面「悬空调用定格 completed 无产出」的同一形态）。
+ *
+ * 存活挂起守卫（防误报）：该线仍有存活挂起请求（簿记 / store 族任一非空）= 悬空 toolCall
+ * 只是「尚未闭合」而非「已失效」——典型如 agent 经 ask_user 提问后用户才首次打开线、或
+ * LRU 驱逐后重开时请求仍在等待应答，此时提示失效会与可用表单同屏矛盾，跳过置位。
+ * 只写提示不出账：目标场景（重启后首轮回放）簿记恒空无可出账；有簿记的场景已被守卫短路
+ * 或由快照修剪路按 requestId 精确出账，本路不做簿记写。
+ *
+ * 幂等：`expiredNoticeByVid` Map.set 同值幂等，重复回放（驱逐重开）不重复弹；既有提示
+ * 不被本路清除（用户 dismiss / 新请求顶掉是仅有的清除支）。
+ */
+export function markBtwStaleInteractiveFromReplay(vid: string, messages: readonly Message[]): void {
+  let hasDangling = false
+  for (const m of messages) {
+    const tcs = m.toolCalls
+    if (!tcs) continue
+    if (tcs.some((tc) => tc.output === undefined && BTW_INTERACTIVE_REQUEST_TOOLS.has(tc.toolName))) {
+      hasDangling = true
+      break
+    }
+  }
+  if (!hasDangling) return
+  if (pendingReqIdsByVid.get(vid)?.size) return
+  if (useExtensionUIStore().getRequestsBySession(vid).length > 0) return
+  expiredNoticeByVid.set(vid, BTW_EXPIRED_REASON_REPLAY_DANGLING)
 }
 
 /** 应答送达后的出账（确认条在 respond 成功支调用；未送达不调——保持挂起可重试） */

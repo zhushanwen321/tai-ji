@@ -5,6 +5,8 @@
  * 经既有回放通路 `chatApi.getHistory(vid)`（session.history，runtime 侧 = getEntries →
  * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 投影）拉取快照，注入
  * chatStore 的 `btw:` 分区（store.hydrate，内部 mergeBaselineWithLive 保尾部 live 实体）。
+ * 回放落地时联动 D8 失效支回放对账（markBtwStaleInteractiveFromReplay：悬空交互请求
+ * toolCall → 行内失效提示，见 useBtwTabData）。
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。
  *
@@ -32,6 +34,7 @@ import {
 } from '@taiji/core'
 import type { ChatStoreInstance } from '@taiji/core'
 import { chat as chatApi } from '@/api'
+import { markBtwStaleInteractiveFromReplay } from '@/composables/panel/useBtwTabData'
 
 /**
  * 回放目标面（chat store 的四个回放编排方法）。窄化 Pick：与 core factory 产物、
@@ -73,6 +76,12 @@ export function setupBtwReplayWatch(store: BtwReplayTarget): void {
       }
       store.hydrate(vid, reply.messages, historyWindowFromReply(reply))
       store.clearHistoryError(vid)
+      // 回放即对账（D8 失效支回放路，与 btw-question A6b-②④ 整机重启验收对接）：定格投影
+      // 中的悬空交互请求 toolCall（执行体被杀的持久痕迹）→ 行内「请求已失效」提示。整机杀
+      // 重启后 renderer 簿记与 runtime pending 同时清零，快照修剪路差集恒空结构性不触发，
+      // 本路以 pi 会话文件为信号源补位；存活挂起守卫与幂等语义在目标函数内。截断窗口外的
+      // 更早悬空调用不在本投影内（getHistory 最近窗口）——提示属行内辅助，不追全量。
+      markBtwStaleInteractiveFromReplay(vid, reply.messages)
       // toolResult 图片落盘编排（fire-and-forget，headless 无 write port 时内部 no-op）。
       // 编排对齐 core useChat.hydrateHistory / use-session.reconcileFromReply 两通路同款三件
       // （Gate B A9③ 缺陷#2：历史注入通路漏挂图片落盘即旁路，此处照挂）。

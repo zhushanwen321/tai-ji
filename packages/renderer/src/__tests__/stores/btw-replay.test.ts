@@ -30,6 +30,11 @@ import {
 import { replayEntries } from '@taiji/core'
 import type { Message, PiEntry, PiMessageBody, PiMessageEntry } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
+import {
+  btwExpiredNoticeOf,
+  BTW_EXPIRED_REASON_REPLAY_DANGLING,
+  __resetBtwPendingBookkeepingForTest,
+} from '@/composables/panel/useBtwTabData'
 
 // ── @/api 门面局部 mock：只替换 chat.getHistory（回放数据源），其余域走 actual ──
 const getHistoryMock = vi.hoisted(() => vi.fn())
@@ -229,5 +234,66 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
     expect(assistant.toolCalls).toHaveLength(1)
     expect(assistant.toolCalls![0]!.status).toBe('completed')
     expect(assistant.toolCalls![0]!.output).toBeUndefined()
+  })
+})
+
+describe('回放即对账（D8 失效支回放路：悬空交互请求 toolCall → 行内失效提示，A6b-②④ 整机重启验收）', () => {
+  /**
+   * 整机杀重启后首轮回放的最小持久痕迹：user entry + 带 ask_user toolCall 的 assistant
+   * entry，无 toolResult entry——pi 会话文件中执行体被杀时留下的悬空形态。**簿记为空**
+   * （不 seed 任何 ui-request 簿记；beforeEach 亦清零失效提示 Map）——上轮测试红线：
+   * 禁止 seed 簿记伪造前提。
+   */
+  function danglingInteractiveEntries(toolName: string): PiEntry[] {
+    return [
+      msgEntry('e-u', { role: 'user', content: [{ type: 'text', text: '问一句' }], timestamp: 1000 }),
+      msgEntry(
+        'e-a',
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '需要确认' },
+            { type: 'toolCall', id: 'tc-ask', name: toolName, arguments: {} },
+          ],
+          timestamp: 2000,
+        },
+        'e-u',
+      ),
+    ]
+  }
+
+  beforeEach(() => {
+    __resetBtwPendingBookkeepingForTest() // 失效提示 Map + 挂起簿记逐用例清零（簿记为空前提）
+  })
+
+  afterEach(() => {
+    __resetBtwPendingBookkeepingForTest()
+  })
+
+  it('重开线回放检出悬空 ask_user toolCall → 失效提示置位（信号源 = 回放投影，非内存簿记）', async () => {
+    getHistoryMock.mockResolvedValue(reply(replayEntries(danglingInteractiveEntries('ask_user')).messages))
+
+    await openThread('btw:pi-dangle')
+
+    // 回放本体照常落地（提示不取代分区回填）
+    expect(store.isHydrated('btw:pi-dangle')).toBe(true)
+    expect(store.getMessages('btw:pi-dangle')).toHaveLength(2)
+    expect(btwExpiredNoticeOf('btw:pi-dangle')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
+  })
+
+  it('悬空普通工具（bash）不置提示（名单窄而准）；驱逐重开重放交互痕迹 → 提示置位', async () => {
+    getHistoryMock.mockResolvedValue(reply(replayEntries(danglingInteractiveEntries('bash')).messages))
+    await openThread('btw:pi-bash')
+    expect(btwExpiredNoticeOf('btw:pi-bash')).toBeNull()
+
+    // 驱逐重开（关 → 开重放，同 vid 换成交互痕迹投影）→ 提示置位
+    store.evictSessionWithVirtual('btw:pi-bash')
+    getHistoryMock.mockResolvedValue(reply(replayEntries(danglingInteractiveEntries('ask_user')).messages))
+    drawerControl.close()
+    await settle()
+    drawerControl.open('btw')
+    await settle()
+    expect(getHistoryMock).toHaveBeenCalledTimes(2)
+    expect(btwExpiredNoticeOf('btw:pi-bash')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
   })
 })
