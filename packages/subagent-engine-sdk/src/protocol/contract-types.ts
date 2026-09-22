@@ -14,8 +14,31 @@
 //   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
-// [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
-// docs/architecture/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
+// ==================== 字段归属判据 1-7（协议宪法·字段面；新增 wire 字段依序裁决，
+// 先到先定。条文全文 = engine-protocol.ts 头注；删改史与判据 why =
+// docs/adr/decisions.md ADR-0071） ====================
+// 1. 引擎不消费它，任务能否正确完成？能 → 宿主自持不上协议。
+// 2. 「任务是什么」（what→task）还是「在什么环境跑/怎么跑」（where/how→ctx）？
+// 3. 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议；不能（推导分叉）→ ctx。
+// 4. （绝对条款）同一语义不得 task/ctx 双写——wire 层同名键交集恒空（编译断言锁）。
+// 5. （能力绑定）字段有效性依赖能力位时双向回指（先例 streamMode↔eventGranularity）。
+// 6. （键三分类）advisory（忽略无语义影响，直接 additive）/ degradable（设计内静默
+//    降级：缺省最弱档 + 判据 5 回指 + 预检豁免）/ behavior（忽略会静默改变任务语义：
+//    必须绑定能力位 + 宿主派发前预检；先例 resume↔conversation gate、forkSource）。
+//    判别式：「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」
+// 7. （能力位消费点登记）每个能力位登记消费点与 wire 载体，执行通道缺失如实登记；
+//    未登记位 = 违宪（首个登记条目 = steer）。
+//
+// 演进政策（字段面）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
+// 能力位绑定三件齐）才进协议，无消费方不进协议；A 型同形改名默认 additive 双读 +
+// major 清除，B 型机制替换同批合法（对端同仓 + ADR 登记）——三条全文见
+// engine-protocol.ts 头注，minor 协商触发条件见 ADR-0071。
+//
+// 新轴五触点清单（新增能力位；触发需求前不落代码，C 型纪律）：①本文件
+// EngineCapabilities 加可选键 + 缺省最弱档注释；②core↔SDK 双向断言与存量必填保持绿；
+// ③core 两表各登各的（CONSERVATIVE_CAPABILITIES 保守缺省值 / CAPABILITY_ENUMS 值域，
+// 缺一即 undefined 透传 + gate 放行）；④gate 判据比较最弱档字面值（键集锁兜底）；
+// ⑤pi-host-binding 能力位快照同步登记。
 //
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出

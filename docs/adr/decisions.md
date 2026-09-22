@@ -51,6 +51,22 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ### ADR-0068 扩展消息注入形态：custom message 首选（2026-09-21）
 pi extension 向 LLM 注入提示词/通知消息统一走 `pi.sendMessage()` custom message 形态（`display` 控制用户可见性、不伪装用户消息归属）；`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息——提示词类内容伪装用户消息的形态已在四包改造中清除（smart-context/goal/structured-output/plan，merge accb67c37）。关键语义两条：① custom message 经 pi `convertToLlm` 无条件转 LLM user 消息，对 LLM 与 user message 无差别，形态迁移不损失模型可见性；② `sendMessage(triggerTurn:true)` 非 streaming 时直调 `_runAgentPrompt`，跳过 `prompt()` 主路径前置链（compaction 检查 / before_agent_start 事件 / systemPrompt 叠加 / pending nextTurn 消费）——依赖 per-turn 注入的需求不得走该通道。约定载体 [extension-conventions.md](../extensions/extension-conventions.md)「Event handler 消息注入」。
 
+### ADR-0071 引擎协议演进宪法：删改分类学与判据（2026-09-22）
+engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成文宪法。终态条文浓缩于协议四处头注（`packages/subagent-engine-sdk/src/protocol/` 的 engine-protocol.ts / contract-types.ts / reverse-channels.ts / schema.ts——头注只载终态纪律不载删改史）；**本条是 6 次历史破坏性删改与判据 why 的唯一入库权威载体**（协议目录系 fresh import、git 不可追溯，改写前的源码头注是唯一现场记录，随本条收编后同批改写为终态）。约束登记：C-proc-13（存量演进表述对齐）、C-proc-22/23/24（判据 6 行为键必配门 / 四张词表锁 / 宽容语义四行）。
+
+**6 次破坏性删改分类学**（三型纪律不同，不能一刀切 additive 也不能一刀切同批）：
+- **A 型同形改名**（1 项）：`run.params.chat` → `run.params.resume`（载荷同形仅键名泛化；架构权威 docs/architecture/subagent-chat-run-unification.md §3.3 D3/D5）。additive 替代（新增 resume 键 + 读端 `params.resume ?? params.chat` 双读 + 旧键 `@deprecated` + major 清除）成本趋零却走读写同批，且双读形态从未被实践——A 型但书由此立：同形改名默认 additive 双读，仅当双读引入语义纠缠时才允许同批。
+- **B 型机制替换**（2 项）：`interact` 控制面方法删除（续聊统一为新 run + resume 锚点；双轨 = 两套执行模型在 reducer/journal/conformance/能力门四面长期双维护，本身就是协议债）；`task.conversation` 键删除（per-run 模式开关语义消亡、职责并入 resume，双保留会造成「谁赢」的语义纠缠）。同批切换合法，条件 = 对端同仓 + ADR 登记（即本条）。
+- **C 型死成员清理**（3 项）：轮次相位反向通道（新增后从未被消费）、`host/poolResolved` 通道（poolKey 恒 'shared'、回调零信息量——池抽象降级，docs/architecture/zcode-engine-appserver-resident.md）、`host/permission` 通道骨架（双侧零实装占位，「未接线死通道」）。根因不在删除在**新增**——治理 = 新增门槛：无消费方不进协议、占位先行即违宪（与能力位「声明链路实际接通的能力」哲学同源）。
+
+**判据 1-7 证据锚点**（条文终态见 engine-protocol.ts 头注）：判据 1（引擎不消费→宿主自持）→ `task.idleTimeoutMs` 错位（六引擎映射全部不支持，实为宿主 idle GC 参数）；判据 2/3（what→task / 推导分叉→ctx）→ schemaEnv 三次搬家与 sessionRootId 事故补丁（文字判据靠人执行必然漏的两次实证）；判据 4（task/ctx 双写禁令）→ schemaEnv 双源事故——**H1b 收口未完成**：`packages/subagent-core/src/execution/engine/client/remote-engine.ts:382` 仍 `ctx.schemaEnv ?? task.schemaEnv`，禁令断言带豁免至收口；判据 5（能力位双向回指）→ 先例 streamMode↔eventGranularity；判据 6（键三分类 + behavior 键必配门）→ resume↔conversation gate（error-codes.ts `assertChatConversationSupported`）与 forkSource 注释双先例，判别式 =「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）；判据 7（能力位消费点/载体登记）→ steer 首个登记条目（capability-gate.ts 联合判据消费、pi-host-binding.ts 声明 unsupported，无独立 wire 执行通道——缺失如实登记，不设计）。
+
+**演进政策三条**：① additive 面——新增可选字段/事件变体/方法/反向通道不 bump 版本，旧端忽略或 no-op 安全落空；新增须过门槛：消费方 + 降级路径 + 能力位绑定三件齐才进协议，无消费方不进协议。② 删除面——A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」；B 型机制替换/语义收窄同批切换合法（条件 = 对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major。③ major bump——core 支持区间平移 `[1,2)→[2,3)`，遗留清单届时清理。存量不搬家（搬家本身是删改），遗留清单 = idleTimeoutMs（明确错位）/ scene、description（弱错位待核）/ schemaEnv（待 H1b 收口，未收口）/ steer 执行通道缺失；**重审触发条件** = 遗留清单 >5 项或任一错位引发实际派发事故 → 提前清理裁决，不等 major。
+
+**未知成员宽容语义四行**（与编译期词表锁互补的运行时半边；词表头注与 engine-development-guide.md 引擎实装义务落地随之推进）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（逐变体 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 `engine_method_unsupported`（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 `{unsupported:true}`（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。配套机器锁 = **四张词表锁**（事件/方法/通道/能力位键集统一为常量 SSOT 派生或键集互锁，编译期红灯堵 schema enum 缺值与缺键 undefined 透传洞）。
+
+**minor 协商触发条件（任一命中重开裁决；条件不到不加协商位）**：① 出现本仓之外发布的引擎适配层（第三方作者或独立 npm 分发/版本节奏）；② 单宿主需同时挂载跨协议代差引擎且无法同批升级；③ 出现「需宿主确认才可启用」的运行时可变能力（能力位从静态 manifest 变动态协商的真实需求）。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
