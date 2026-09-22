@@ -347,7 +347,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **被否**：「未握手时返回保守能力位」——击穿反例：pi 缺省路径的 `conversation:true` / `maxTurns` /
 `worktree` 会被 `capability-gate` 全部拒掉（G3/G5 首轮即破）。
 
-**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（8 种）逐字序列化；journal 落盘仍在 core。
+**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（9 种）逐字序列化；journal 落盘仍在 core。
 **默认关闭事件合并**（`TAIJI_ENGINE_EVENT_COALESCE=0`）——A1 要求「事件逐字段等价」，
 合并（16ms/4KB）与逐字段等价不可兼得。合并开关保留，启用需另立验收（量级/恢复/重审）后方可默认开。
 **stdout/stderr 分工**：stdout 独占 NDJSON（行解析器 + 背压：core 读得慢时靠 OS 管道背压，不做无界缓存）；

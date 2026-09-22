@@ -25,10 +25,9 @@ describe('core markers', () => {
     const responses: PlanReviewResponse[] = [
       { decision: 'approve' },
       { decision: 'revise', comments: [{ quote: '划选段落', comment: '这里要补充权衡' }] },
-      { decision: 'explain', comments: [{ quote: 'q', comment: '解释一下' }] },
     ]
     expect(request.docs[0]?.sourceSkill).toBe('tech-design')
-    expect(responses).toHaveLength(3)
+    expect(responses).toHaveLength(2)
     const meta: PlanDocMeta = { fileName: 'a.md', absPath: '/a.md', sourceSkill: '', version: 1 }
     expect(meta.version).toBe(1)
   })

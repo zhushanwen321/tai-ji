@@ -1,5 +1,5 @@
 /**
- * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13）。
+ * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、

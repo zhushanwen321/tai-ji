@@ -212,6 +212,22 @@ function warnUnhandledSessionFrame(type: string, sid: string): void {
   )
 }
 
+/** steer 拒绝日志的文本截断长度（前 60 字符足以辨识输入内容，防长文本刷屏） */
+const STEER_WARN_TEXT_PREVIEW_LEN = 60
+
+/**
+ * [form-hang-fix 埋点去留裁决：显症状类常驻日志] steer 早退是吞输入类静默失败
+ * （调用方 clearInput 已先行，早退返回不恢复即丢输入——历史上多次返工），拒绝路径
+ * 必须可观测：每早退一行 warn（sid + 原因 + 文本前 60 字符），不设 dev 门（与
+ * warnUnhandledSessionFrame 的观测性 warn 不同类：那是协议漂移探测，这是用户输入
+ * 丢失的症状记录）。
+ */
+function warnSteerNotConsumed(sid: string, reason: string, text: string): void {
+  console.warn(
+    `[useChat] steer input not consumed (sid=${sid}, reason=${reason}, text="${text.slice(0, STEER_WARN_TEXT_PREVIEW_LEN)}")`,
+  )
+}
+
 /**
  * 重置 useChat 模块级状态（仅供测试隔离）。
  *
@@ -857,6 +873,12 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * 发送消息：appendUser → 确保会话级订阅 → submitSegments（提取 + api.send）。
    *
+   * [form-hang-fix D2/B 策略返回信号] 返回值（Promise<boolean>）：true = 正常路径
+   * （含空输入早退——输入为空无丢失面，调用方无需恢复；含直发 RPC 失败——错误已 toast
+   * 消化且乐观气泡仍在对话流，恢复草稿会造成气泡 + 草稿双份）；false = B 策略转 steer
+   * 未消费（steer 早退/RPC 失败，内部已 toast）——调用方（sendActiveMessage）据此
+   * restoreSegments 恢复草稿。不 throw（W2「内部消化」契约不变）。
+   *
    * 流式状态由会话级订阅的事件驱动（message_start→true，complete/error→false），
    * 不依赖 send() 的 resolve 时机——避免 ack 早于首个 chunk 导致订阅被提前拆除。
    *
@@ -866,9 +888,9 @@ export function createUseChat(deps: UseChatDeps) {
    * 显式接收 sessionId：双 panel 下 Composer 各自有独立 sessionId（panel leaf 绑定），
    * send 目标由调用方传入，不读全局 session.activeId（否则 standby panel 发消息会串到 active panel）。
    */
-  async function send(sessionId: string, segments: Segment[]): Promise<void> {
+  async function send(sessionId: string, segments: Segment[]): Promise<boolean> {
     const sid = sessionId
-    if (segments.length === 0) return
+    if (segments.length === 0) return true
     // [session-dead 第三环] 用户重新发送 = 新一轮用户意图：清连续失败计数（否则上一 session
     // 卡死期累计的计数会让本轮失败立即命中阈值，timer 重投永不启动）
     deferFlushFailureCounts.delete(sid)
@@ -884,15 +906,17 @@ export function createUseChat(deps: UseChatDeps) {
     )
     if (subagentSeg) {
       await sendSubagentDirective(sid, segments, subagentSeg)
-      return
+      return true
     }
     const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim()) return
+    if (!promptText.trim()) return true
 
-    // [B 策略 D-001] busy 时自动转 steer（追加上下文，不打断当前回合）
+    // [B 策略 D-001] busy 时自动转 steer（追加上下文，不打断当前回合）。
+    // [form-hang-fix D2] 接住 steer false = 输入未被消费（早退/RPC 失败，内部已 toast）
+    // → send 返回 false 交调用方显式恢复（不 throw，维持 W2 契约）；同栈三早退不可达
+    //（空段/空文本已在上行 return、isActive 分支条件即 steer 守卫），唯 RPC 失败可达。
     if (chat.isActive(sid)) {
-      await steer(sid, segments)
-      return
+      return await steer(sid, segments)
     }
 
     // appendUser 返回生成的 user message id（u-<uuid>），作为 clientUuid 传给 submitSegments
@@ -917,6 +941,7 @@ export function createUseChat(deps: UseChatDeps) {
     try {
       // S4：复用上面算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
       await submitSegments(sid, segments, clientUuid, promptText)
+      return true
     } catch (e) {
       // [W2] 错误处理策略与 steer/followUp/abort 对齐：清 pendingSend + toast，不 throw。
       // 消费侧 Composer.onSend 已有 try/catch+toast 防御，此处不 throw 后 Composer 的 catch 不再触发；
@@ -928,6 +953,8 @@ export function createUseChat(deps: UseChatDeps) {
       chat.decrementInflight(sid, 1)
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))
+      // 直发 RPC 失败返回 true（false 语义仅属 B 策略，见函数头注释）
+      return true
     } finally {
       // [session-occupancy D2] 未决记录收口：RPC ack/reject 时 send.rejected 帧必然已处理
       // （WS FIFO：dispatcher 同步广播先于 reply），handler 已消费记录，此处删除防泄漏。
@@ -1001,18 +1028,32 @@ export function createUseChat(deps: UseChatDeps) {
    * 追加 steer：AI 执行中（isGenerating）时，把补充消息排入 steering 队列，
    * 当前回合工具调用结束后、下次 LLM 调用前投递，不打断当前回合。
    *
-   * [D2] 返回值契约（Promise<boolean>）：true = 提交成功或无事发生（早退路径无投递
-   * 动作、无错误，调用方无需恢复草稿）；false = RPC 失败（内部已 toast + 回滚 pending
-   * 暂存，不 throw）——调用方（send.ts routeSteer / submit.ts onSteer）据 false 恢复
-   * 草稿（restoreSegments），否则 clearInput 已清空的输入静默丢失。
+   * [D2 / form-hang-fix 契约收窄] 返回值（Promise<boolean>）：true = 真投递成功
+   * （pushPending + RPC resolve）；false = 输入未被消费（早退或 RPC 失败）——调用方
+   * （send.ts routeSteer / submit.ts onSteer / send 的 B 策略）据 false 恢复或保留
+   * 输入，否则 clearInput 已清空的输入静默丢失。原「true = 提交成功或无事发生」的
+   * 「无事发生」语义废除：早退同样是「输入未被消费」，与 RPC 失败同格处理（早退时
+   * 调用方的 clearInput 已先行，返回 true 会让调用方跳过恢复——吞输入面）。
+   * 早退各路径 warn 留痕（warnSteerNotConsumed，显症状类常驻日志）。
+   * 不 throw（W2 家族契约：错误内部消化——RPC 失败 toast + 回滚 pending 暂存）。
    *
    * 显式接收 sessionId：与 send 同理，per-panel 隔离，不读全局 activeId。
    */
   async function steer(sessionId: string, segments: Segment[]): Promise<boolean> {
     const sid = sessionId
-    if (segments.length === 0) return true
+    if (segments.length === 0) {
+      warnSteerNotConsumed(sid, 'empty segments', '')
+      return false
+    }
     const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim() || !chat.isActive(sid)) return true
+    if (!promptText.trim()) {
+      warnSteerNotConsumed(sid, 'blank prompt text', promptText)
+      return false
+    }
+    if (!chat.isActive(sid)) {
+      warnSteerNotConsumed(sid, 'session inactive', promptText)
+      return false
+    }
 
     // [steer-bubble u2] pending 暂存（**不进对话流**）：steer 提交先写 pendingBuffer 暂存
     // （store.pushPending），投递时经腿 1（queue_update drain 差集）/ 腿 2（message_end(user)

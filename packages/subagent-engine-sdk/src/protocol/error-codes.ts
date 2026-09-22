@@ -18,6 +18,14 @@
 //                               STDERR_TAIL_CHARS=400 字符）；重建最多 3 次退避 1s/2s/4s
 //   engine_probe_failed         probe 失败 → 既有 fallback 三守卫不变
 //   其余 engine_*               引擎在 error 帧原样给出 → core 透传，文案契约不变
+//
+// [登记非实装·透传面新码] engine_method_unsupported——未知成员宽容语义②（条文权威
+// = ADR-0071）：新宿主派本引擎未知的正向 method → 引擎回 error 帧本码，旧宿主经
+// isEngineErrorPassthroughCode 原样透传不崩。刻意不进下方 ENGINE_PROTOCOL_ERROR_CODES
+// 消费词表（该集是 core 消费集；C 型「无消费方不进协议」纪律——当前全仓零消费方，
+// 故只登记不实装）；引擎应答义务成文 =
+// docs/extensions/subagents/engine-development-guide.md（未知 method 必回本码 +
+// conformance 用例），实装随下一引擎适配层立项随批带上。
 
 /** 协议核心错误码（引擎 error 帧 + core 同步拦截共用的固定词表）。 */
 export const ENGINE_PROTOCOL_ERROR_CODES = [

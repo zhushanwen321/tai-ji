@@ -151,6 +151,26 @@ describe('scanPlanStateEntries：派生', () => {
     expect(view.docs).toEqual([{ fileName: 'good.md', absPath: '/x/good.md', sourceSkill: 's', version: 1 }])
   })
 
+  it("reviewStateSource 透传：'resubmit' 挂键；旧 'explain' 存量值归无值（explain 交互已删，与 extension 读侧白名单对齐）", () => {
+    const legacyExplain = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'explain' }), 'e1')])!
+    expect(legacyExplain.reviewState).toBe('awaiting')
+    expect('reviewStateSource' in legacyExplain).toBe(false)
+    const resubmit = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'resubmit' }), 'e2')])!
+    expect(resubmit.reviewStateSource).toBe('resubmit')
+  })
+
+  it('reviewStateSource 值域守卫：非法值不设键（漏守卫 = 垃圾值进 View，同 reviewState 防御式消费）', () => {
+    const view = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'bogus' }), 'e1')])!
+    expect('reviewStateSource' in view).toBe(false)
+  })
+
+  it('旧 entry（升级前落盘）无 reviewStateSource 键：透传后 View 无该键（缺省不占位——renderer 据此渲染通用降级文案）', () => {
+    // extendedData() 不含 reviewStateSource = reviewStateSource 引入前的完整写入面
+    const view = scanPlanStateEntries([planStateEntry(extendedData(), 'e1')])!
+    expect(view.reviewState).toBe('awaiting')
+    expect('reviewStateSource' in view).toBe(false)
+  })
+
   it('无 plan-state entry 返回 null（publish 侧跳过 / 冷路径归一缺省 View）', () => {
     expect(scanPlanStateEntries([{ type: 'message', id: 'e1' }, { type: 'custom', customType: 'other', data: {} }])).toBeNull()
   })

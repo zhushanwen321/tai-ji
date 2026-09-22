@@ -1,7 +1,7 @@
 /**
  * useImportSession close() 清扫描结果测试（[G4/u10] 2026-09-14 内存审计杂项组）。
  *
- * 锁定（docs/design/memory-leak-remediation.md §3.4 G4「ImportSessionDialog close() 清扫描结果」）：
+ * 锁定（内存审计 ADR-0069 G4「ImportSessionDialog close() 清扫描结果」；原文档已删除 git 可追溯）：
  *  - C1 关闭即清：items/dirs/total（候选全量快照，可达数百条对象）随 close 置空——
  *    对话框是全局单例 UI，无 session 生命周期兜底，不清则驻留到下次打开
  *  - C2 在途失效：close 后迟到的候选响应不回填（requestSeq++ 使 stale 写回守卫拦截）

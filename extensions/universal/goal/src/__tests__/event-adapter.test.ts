@@ -21,7 +21,7 @@ import { createGoalSession } from "../session";
 // ── Fake pi / ctx ────────────────────────────────────
 
 interface RecordedCall {
-	kind: "appendState" | "appendHistory" | "notify" | "sendContext" | "sendUser" | "setStatus" | "setWidget";
+	kind: "appendState" | "appendHistory" | "notify" | "sendContext" | "setStatus" | "setWidget";
 	payload?: unknown;
 	text?: string;
 	level?: string;
@@ -48,13 +48,6 @@ function makeFakePi(): { pi: ExtensionAPI; calls: RecordedCall[]; states: unknow
 				content: msg.content,
 				customType: msg.customType,
 				payload: _options,
-			});
-		},
-		sendUserMessage(content: string | unknown[], options?: unknown): void {
-			calls.push({
-				kind: "sendUser",
-				content: typeof content === "string" ? content : undefined,
-				payload: options,
 			});
 		},
 	} as unknown as ExtensionAPI;
@@ -119,8 +112,8 @@ describe("handleAgentEnd — FR-6.7 ESC 守卫", () => {
 		await handleAgentEnd(pi, session, ctx);
 		const all = allCalls(piCalls, ctxCalls);
 
-		// 不发 continuation（无 sendContext/sendUser）
-		expect(all.filter((c) => c.kind === "sendContext" || c.kind === "sendUser")).toHaveLength(0);
+		// 不发 continuation（无 sendContext custom message）
+		expect(all.filter((c) => c.kind === "sendContext")).toHaveLength(0);
 		// 不做 budget 检查（无 notify 关于 budget）
 		expect(all.filter((c) => c.kind === "notify")).toHaveLength(0);
 		// goal 保持 active（status 不变）

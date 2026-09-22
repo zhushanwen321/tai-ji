@@ -362,6 +362,7 @@ const COMMENT_DOC_REF_EXEMPT = new Map([
   ['*::docs/rpc.md', 'pi 上游仓（badlogic/pi-mono）协议文档 docs/rpc.md 参照，非本仓文件（同 PATH_REF_EXEMPT 的 pi 上游先例）'],
   ['packages/renderer/src/__tests__/composables/markdown-filepath.test.ts::docs/My', 'markdown 链接解析测试叙述中的空格切断反例（docs/My Document.md），非仓库路径引用'],
   ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
+  ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
 ])
 
 /**

@@ -38,6 +38,7 @@ import type {
   LlmRetryConfig,
   ScannedSkillInfo,
   ScannedAgentInfo,
+  UiLocale,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
@@ -1201,6 +1202,13 @@ const configImpl = {
   async setDefaultModel(provider: ProviderId, modelId: string) {
     await sleep(TIMING.ack)
     defaultsSub.broadcast(`${provider}/${modelId}`)
+  },
+  /**
+   * 上报 UI 语言（u-locale-channel 的 mock 轨对齐）：ack 即成功，**不落盘**——mock 无真实
+   * 数据目录也无 extension 读取方，仅保证门面同构（ConfigDomainParamsExact 编译期锁定）。
+   */
+  async setUiLocale(_locale: UiLocale): Promise<void> {
+    await sleep(TIMING.ack)
   },
   /**
    * 设置 scoped models 白名单（mock 对齐 runtime config.setScopedModels）。

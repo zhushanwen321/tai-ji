@@ -6,6 +6,7 @@ vi.mock("typebox", () => ({
     Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
     String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
     Optional: (schema: unknown) => schema,
+    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
   },
   Static: class {},
 }));
@@ -36,7 +37,7 @@ import { handlePlanComplete } from "../compact.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { PlanState } from "../state.js";
-import { DEFAULT_PLAN_STATE } from "../state.js";
+import { DEFAULT_PLAN_STATE, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 import { PLAN_ACTIONS, registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
@@ -45,14 +46,14 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 function activeStateWithDocs(): PlanState {
   const doc: PlanDocMeta = {
     fileName: "design.md",
-    absPath: "/tmp/test-project/.taiji-harness/auth/design.md",
+    absPath: "/tmp/test-project/.tmp/plans/auth/design.md",
     sourceSkill: "tech-design",
     version: 1,
   };
   return {
     ...DEFAULT_PLAN_STATE,
     isActive: true,
-    planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+    planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     requirement: "refactor auth",
     skills: ["tech-design"],
     docs: [doc],
@@ -67,7 +68,7 @@ function setup(state?: PlanState) {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
   registerPlanTool(pi, sessions, controllers);
@@ -115,7 +116,7 @@ describe("register-doc（D10）", () => {
       expect.objectContaining({
         docs: [
           expect.objectContaining({ fileName: "design.md", version: 1 }),
-          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.taiji-harness/auth/impl-plan.md", version: 1 }),
+          expect.objectContaining({ fileName: "impl-plan.md", absPath: "/tmp/test-project/.tmp/plans/auth/impl-plan.md", version: 1 }),
         ],
       }),
     );
@@ -168,7 +169,7 @@ describe("submit-review E6 双守卫", () => {
     const { exec, ctx } = setup({
       ...DEFAULT_PLAN_STATE,
       isActive: true,
-      planFilePath: "/tmp/test-project/.taiji-harness/auth/plan.md",
+      planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
     });
     const res = await exec({ action: "submit-review" });
     expect(res.details).toEqual({ action: "review-error", reason: "no-docs" });
@@ -330,24 +331,30 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
   });
 });
 
-describe("三 decision 消费（taiji 形态）", () => {
+describe("decision 消费（taiji 形态）", () => {
   function setupTaiji() {
     vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
     return setupActive();
   }
 
-  it("approve → walks the existing complete flow (execution-method form), resets state keeping docs", async () => {
+  it("approve → clears reviewState before exec-choice, walks the complete flow, resets state keeping docs", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(JSON.stringify({ decision: "approve" }))
-      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Develop (auto-parallel)" }));
+      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Execute" }));
 
     const res = await exec({ action: "submit-review" });
 
     expect(ctx.ui.select).toHaveBeenCalledTimes(2);
     expect(res.details.action).toBe("complete");
-    expect(res.details.execMode).toBe("develop");
+    expect(res.details.execMode).toBe("execute");
     expect(handlePlanComplete).toHaveBeenCalled();
+    // P2-3：approve 消费审批后、exec-choice 挂起前先清 reviewState 落盘——
+    // 「awaiting 无挂起」窗口不得误导渲染降级态
+    const stateEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[1] as PlanState)
+      .filter((e) => e.isActive === true);
+    expect(stateEntries.at(-1)?.reviewState).toBeUndefined();
     // reset 终态矩阵经 resetPlanState 落盘：isActive=false + docs 保留
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
@@ -367,35 +374,18 @@ describe("三 decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review" });
 
-    // 显式 deliverAs 断言：isStreaming 时无 deliverAs 会 throw（pi agent-session 实装）
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("第二节流程图"), { deliverAs: "steer" });
+    // custom message 三要素 + streaming steer options 断言（A6）：deliverAs:'steer' 排队至
+    // 下一次 LLM 调用，triggerTurn:true 覆盖非 streaming 窗口的开轮语义
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: expect.stringContaining("第二节流程图"), display: false },
+      { deliverAs: "steer", triggerTurn: true },
+    );
     expect(res.details.action).toBe("submit-review");
     // reviewState=revising 落 entry
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({ reviewState: "revising", isActive: true }),
     );
-  });
-
-  it("explain → same steer injection but reviewState stays awaiting (重挂靠提示词纪律)", async () => {
-    const { exec, ctx, pi } = setupTaiji();
-    const comments = [{ quote: "third paragraph", comment: "why not use a queue here?" }];
-    (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      JSON.stringify({ decision: "explain", comments }),
-    );
-
-    const res = await exec({ action: "submit-review" });
-
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("queue here?"), { deliverAs: "steer" });
-    expect(res.details.action).toBe("submit-review");
-    // 不改 reviewState：保持 awaiting
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "plan-state",
-      expect.objectContaining({ reviewState: "awaiting" }),
-    );
-    const revisingEntries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c) => (c[1] as PlanState).reviewState === "revising");
-    expect(revisingEntries).toHaveLength(0);
   });
 
   it("E5: unparseable select response → warn + re-hang prompt, nothing injected into the conversation", async () => {
@@ -407,7 +397,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
     expect(res.content[0].text).toContain("submit-review");
     // 垃圾数据不进流：没有任何 decision 注入
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("E5: shape-invalid response (unknown decision) is treated as parse failure too", async () => {
@@ -419,7 +409,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     const res = await exec({ action: "submit-review" });
 
     expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("echo 回显（旧 taiji 宿主不识别 PLAN_REVIEW_MARKER）→ 升级指引错误，不引导重挂（MF-1-9）", async () => {
@@ -436,7 +426,7 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.content[0].text).toContain("upgrade taiji");
     // 不引导重挂：重挂会同样回显，形成重复弹错循环
     expect(res.content[0].text).not.toContain("re-hang");
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("dismissed select (undefined) → cancelled result: not an approval, stop the review loop", async () => {
@@ -454,15 +444,32 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(res.content[0].text).toContain("Stop the review loop");
     expect(res.content[0].text).toContain("wait for further user instructions");
     // 未消费 decision、未重置状态
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 });
 
+describe("reviewStateSource 重挂起点重置（§3.4 第 3 轮裁决）", () => {
+  it("submit-review re-hang clears stale source before awaiting is persisted (不变量：source 只描述当前降级等待的原因)", async () => {
+    // 上一轮 E3 重挂残留 source='resubmit'；本用例重提交（重挂起新 pending）
+    const { exec, pi } = setup({ ...activeStateWithDocs(), reviewStateSource: "resubmit" });
+
+    await exec({ action: "submit-review" });
+
+    // 挂起点落盘的 awaiting entry 不携带上一轮来源——残留会让崩溃恢复（E3）后的
+    // 降级态渲染上一轮「已收到你的问题」文案，而本轮无人提问（C-U2 同型残留）
+    const hangEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[1] as PlanState)
+      .find((e) => e.reviewState === "awaiting");
+    expect(hangEntry).toBeDefined();
+    expect(hangEntry!.reviewStateSource).toBeUndefined();
+  });
+});
+
 describe("submit-review 的 PLAN_ACTIONS 面", () => {
-  it("action list contains exactly the five actions (list-template removed, D1)", () => {
+  it("action list contains exactly the six actions (enter added; list-template removed, D1)", () => {
     expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "register-doc", "select-template", "submit-review"],
+      ["abort", "complete", "enter", "register-doc", "select-template", "submit-review"],
     );
   });
 });

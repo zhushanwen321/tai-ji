@@ -16,7 +16,8 @@ const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
 const RATE_LIMIT_PER_MINUTE = 6
-const TICK_INTERVAL_MS = 30_000
+// 导出：ack 写盘自检复用同一节奏常量（禁新造魔数），值 = tick 间隔。
+export const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
 // U4 dispatch 模型切换（设计 D3 修订版）：
@@ -725,6 +726,24 @@ export class SchedulerRuntime {
     this.runWindowActive = false
     this.currentTurnIndex = -1
     this.dispatchedTurnIndex = null
+  }
+
+  /**
+   * agent_settled：封口 run 窗口（同 handleRunClosed）+ awaiting-restore 的即时兑现。
+   * settled = run 完全落定（无 retry/compaction/queued continuation；pi 实装
+   * agent-session.js _emitAgentSettled 先置 _isAgentRunActive=false 再 emit），正是
+   * awaiting-restore 推迟恢复所等的「真空闲」时刻——挂上后恢复延迟从「最长 1 tick
+   * （30s）」收敛到事件即时。只挂 settled 不挂 agent_end：end 后仍可能有自动续跑
+   * turn，此时切回会把续跑 turn 的模型换掉（P-MODEL-② 同族形态）。
+   * 不动 in-flight（turn_end 丢失的归属异常归 tick 对账——2 tick 强制开放既有兜底）；
+   * settled 与用户新 run 交错（isIdle false）不动作留给 tick，兜底语义不变。
+   */
+  handleRunSettled(): void {
+    if (this.isCtxStale?.()) return
+    this.handleRunClosed()
+    const ps = this.pendingModelSwitch
+    if (ps?.phase !== 'awaiting-restore' || !this.modelOps?.isIdle()) return
+    void this.restoreExpectedModel('agent-settled')
   }
 
   /**

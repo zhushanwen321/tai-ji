@@ -8,6 +8,8 @@
  * - 空评语不提交不关闭（demo save 语义）
  * - 取消 → 关闭不 emit
  * - revising 态（disabled）→ 浮条出现但「评论」按钮禁用 + title 提示
+ * - 视口四边钳制（F-R2-3）：右/左/下缘划选 → 浮条按估宽钳制、编辑态按 320×200
+ *   重钳，四边不出视口
  * - 选区不在 target 容器内 / 无效选区 → 浮条不出现（面板外划选不误触）
  * - 浮条态外部 mousedown → 关闭；编辑态外部 mousedown 不关（防误触丢评语）
  *
@@ -32,8 +34,13 @@ function q(selector: string): DOMWrapper<Element> | null {
   return el ? new DOMWrapper(el) : null
 }
 
-/** 构造 target 容器 + mock 划选（anchorNode 指向容器内段落，quote 为划选文本） */
-function mockSelection(target: HTMLElement, text: string): void {
+/** 构造 target 容器 + mock 划选（anchorNode 指向容器内段落，quote 为划选文本；
+ *  rect = 选区 boundingRect，钳制用例按边缘场景注入） */
+function mockSelection(
+  target: HTMLElement,
+  text: string,
+  rect: { left: number; top: number; width: number; height: number } = { left: 100, top: 200, width: 120, height: 20 },
+): void {
   const para = target.querySelector('p')!
   vi.spyOn(window, 'getSelection').mockReturnValue({
     isCollapsed: false,
@@ -48,7 +55,7 @@ function mockSelection(target: HTMLElement, text: string): void {
       startContainer: para,
       endContainer: para,
       commonAncestorContainer: para,
-      getBoundingClientRect: () => ({ left: 100, top: 200, width: 120, height: 20 }),
+      getBoundingClientRect: () => rect,
     }),
   } as unknown as Selection)
 }
@@ -185,6 +192,61 @@ describe('PlanCommentPopover 编辑与提交（quote 捕获 → 草稿 payload�
 
     expect(wrapper.findComponent(PlanCommentPopover).emitted('submit')).toBeUndefined()
     expect(q('[data-testid="plan-comment-popover"]')).toBeNull()
+    wrapper.unmount()
+  })
+})
+
+describe('PlanCommentPopover 视口四边钳制（F-R2-3）', () => {
+  it('右缘划选：浮条按估宽右钳制；切编辑态按 320×200 重钳，右/上不出视口', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1024)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(768)
+    const { wrapper, target } = mountPopover()
+    // 选区矩形右伸至 1100 > 视口 1024：锚点（水平中心）= 1040
+    mockSelection(target, '右缘引文', { left: 980, top: 200, width: 120, height: 20 })
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+
+    // 浮条态（估宽 100）：left 钳到 1024 - 100 - 8 = 916
+    expect(q('[data-testid="plan-comment-popover"]')!.attributes('style')).toContain('left: 916px')
+
+    await q('[data-testid="plan-comment-trigger"]')!.trigger('click')
+    await nextTick()
+    // 编辑态（320 宽）：left 重钳到 1024 - 320 - 8 = 696（原实现按浮条估宽钳 → 右侧
+    // 出视口的事故形态）；高 200：top raw = 200-200-2 = -2 → 钳到边距 8
+    const style = q('[data-testid="plan-comment-popover"]')!.attributes('style')
+    expect(style).toContain('left: 696px')
+    expect(style).toContain('top: 8px')
+    wrapper.unmount()
+  })
+
+  it('左缘划选：浮条/编辑态 left 均不小于视口边距', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1024)
+    const { wrapper, target } = mountPopover()
+    mockSelection(target, '左缘引文', { left: 2, top: 200, width: 20, height: 20 })
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    // 浮条态：raw = 12 - 50 = -38 → 钳到 8
+    expect(q('[data-testid="plan-comment-popover"]')!.attributes('style')).toContain('left: 8px')
+
+    await q('[data-testid="plan-comment-trigger"]')!.trigger('click')
+    await nextTick()
+    // 编辑态：raw = 12 - 160 = -148 → 仍钳到 8
+    expect(q('[data-testid="plan-comment-popover"]')!.attributes('style')).toContain('left: 8px')
+    wrapper.unmount()
+  })
+
+  it('下缘划选：编辑态底部钳制在视口内（top + 200 ≤ innerHeight - 边距）', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1024)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(768)
+    const { wrapper, target } = mountPopover()
+    // 选区顶 760，贴近视口底 768（drawer 内文档底部划选的钳制缺失场景）
+    mockSelection(target, '下缘引文', { left: 400, top: 760, width: 120, height: 20 })
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    await q('[data-testid="plan-comment-trigger"]')!.trigger('click')
+    await nextTick()
+    // 编辑态 top：raw = 760-200-2 = 558 ≤ maxY（768-200-8 = 560）；底边 558+200 = 758 ≤ 768-8
+    expect(q('[data-testid="plan-comment-popover"]')!.attributes('style')).toContain('top: 558px')
     wrapper.unmount()
   })
 })

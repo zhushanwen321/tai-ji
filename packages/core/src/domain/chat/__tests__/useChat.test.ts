@@ -223,7 +223,7 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('[D2] steer 返回值契约：失败 return false，成功 return true，早退 return true', async () => {
+  it('[D2 / form-hang-fix] steer 返回值契约：失败 false，成功 true，早退 false（输入未被消费）', async () => {
     const f = makeFixture()
     await f.useChat.send('s8d2', textToSegments('hi'))
     f.emit('s8d2', msg('s8d2', 'message.message_start', { messageId: 'a1' }))
@@ -232,8 +232,9 @@ describe('createUseChat factory 行为', () => {
     await expect(f.useChat.steer('s8d2', textToSegments('补充'))).resolves.toBe(false)
     // 成功：RPC resolve → true
     await expect(f.useChat.steer('s8d2', textToSegments('再补'))).resolves.toBe(true)
-    // 早退：空 segments → true（无投递动作非失败）
-    await expect(f.useChat.steer('s8d2', [])).resolves.toBe(true)
+    // 早退：空 segments → false（form-hang-fix 契约收窄——原「无事发生 return true」
+    // 语义废除，早退也是输入未被消费，调用方须恢复/保留）
+    await expect(f.useChat.steer('s8d2', [])).resolves.toBe(false)
     f.dispose()
   })
 
@@ -506,7 +507,9 @@ describe('send 定向分流（含 subagent 段）', () => {
         { type: 'subagent', subagentId: 'rec-x', slug: 'closed-one' },
         { type: 'text', text: '继续' },
       ]),
-    ).resolves.toBeUndefined()
+      // [form-hang-fix] send 契约 Promise<boolean>：定向分流内部消化 toast，返回 true
+      //（false 仅属 B 策略转 steer 未消费语义）
+    ).resolves.toBe(true)
     expect(f.toast.error).toHaveBeenCalledWith(
       'composable.subagentDirectiveFailed:{"msg":"subagent 已结束"}',
     )

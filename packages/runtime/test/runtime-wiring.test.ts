@@ -196,6 +196,7 @@ describe('wave:runtime-wiring · TC3/TC4/TC5 session.subscribe/unsubscribe RPC',
       nextPushId: () => 'push_test',
       broadcastSessionList: vi.fn(),
       broadcast: vi.fn(),
+      invalidatePendingUiRequests: vi.fn(),
     }
     const handler = new SessionMessageHandler(ctx)
     return { handler, ctx, reply, sendError, messageBus }

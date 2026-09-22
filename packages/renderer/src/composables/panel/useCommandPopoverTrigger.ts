@@ -11,6 +11,8 @@
  *   两 / 触发域正则互斥）。
  * - onAddSelect：+ 菜单打开 slash 浮层（不设触发态，防普通键误关）。
  * - onCmdSelect：选中后插 chip（slash/file/session/subagent），清过滤文本 + 复位触发态。
+ * - onSelectAndSend：命令名精确匹配直发（onCmdSelect 复用 + 同步直调 dispatchEnter 链，
+ *   command-enter-exact-send D2 钉死直调、禁合成事件）。
  * - pendingSlash watch：消费 SearchModal 经 commandStore 注入的 slash 请求。
  * - commandPopoverRef + cmdOpen：键盘路由（⏎/Esc）与 v-model:open 绑定。
  *
@@ -57,9 +59,22 @@ export interface CommandSelectPayload {
   slug?: string
 }
 
+/** exactMatch 直发通道 payload（通道缺口④，编译器强制）：select 字段面 + 原始 Enter 事件 */
+export interface CommandSelectAndSendPayload extends CommandSelectPayload {
+  /** 原始 Enter KeyboardEvent（window capture 已 preventDefault + stopPropagation 截断） */
+  originalEvent: KeyboardEvent
+}
+
 export function useCommandPopoverTrigger(
   inputRef: Readonly<Ref<ShellInputInstance | null>>,
   sessionId: Ref<string | null>,
+  /** [command-enter-exact-send D2 直调通道] composer Enter 分发链（useComposerKeydown 返回的
+   *  onKeydown——dispatchEnter 所在链体，composer-keydown.ts:140-151）。onSelectAndSend 同步
+   *  直调、传原事件：严禁合成/再派发 KeyboardEvent（合成事件经 window capture 时浮层已关会
+   *  早退放行 → 落到 ComposerInput 冒泡 → 二次 dispatchEnter → 双发）。缺省 undefined =
+   *  只插 chip 不直发（fail-closed，与 activeElement 门同向）。调用方须传晚绑定闭包
+   *  （本函数先于 useComposerKeydown 构建）。 */
+  onComposerKeydown?: (e: KeyboardEvent) => void,
 ): {
   cmdOpen: Ref<boolean>
   cmdType: Ref<CommandPopoverType>
@@ -76,6 +91,7 @@ export function useCommandPopoverTrigger(
   onSkillTrigger: (payload: { query: string } | null) => void
   onAddSelect: (type: 'attach' | 'image' | 'slash') => Promise<void>
   onCmdSelect: (payload: CommandSelectPayload) => void
+  onSelectAndSend: (payload: CommandSelectAndSendPayload) => void
 } {
   const { t } = useI18n()
   const commandStore = useCommandStore()
@@ -265,6 +281,14 @@ export function useCommandPopoverTrigger(
     }
   }
 
+  /** exactMatch 直发接线（U2，command-enter-exact-send D2）：onCmdSelect 复用（关浮层 + 清
+   *  五路触发态 + 清 query + 插 chip——先插后发，与用户手按二次 Enter 的前置态完全同链、发送链
+   *  零改动零分叉）→ 同步直调 dispatchEnter 链（原事件直接函数调用，零合成零 DOM 派发）。 */
+  function onSelectAndSend(payload: CommandSelectAndSendPayload): void {
+    onCmdSelect(payload)
+    onComposerKeydown?.(payload.originalEvent)
+  }
+
   return {
     cmdOpen,
     cmdType,
@@ -281,5 +305,6 @@ export function useCommandPopoverTrigger(
     onSkillTrigger,
     onAddSelect,
     onCmdSelect,
+    onSelectAndSend,
   }
 }

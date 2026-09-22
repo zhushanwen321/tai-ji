@@ -39,6 +39,7 @@ function mockContext(overrides?: Partial<SessionHandlerContext>): SessionHandler
     nextPushId: vi.fn(() => 'push-1'),
     broadcastSessionList: vi.fn(),
     broadcast: vi.fn(),
+    invalidatePendingUiRequests: vi.fn(),
     ...overrides,
   }
 }

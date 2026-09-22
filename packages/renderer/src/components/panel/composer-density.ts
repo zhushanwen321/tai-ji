@@ -7,10 +7,19 @@
  *
  * 输入 → 输出（唯一职责）：
  * - 输入 = 容器可用宽度（px）+ 可选能力标志（插件 toolbar 贡献数 / 托盘是否有条目）
- *   + 可选阈值覆盖；
+ *   + 可选阈值覆盖 + **fit 退化级**（见下）；
  * - 输出 = 每类元素的**呈现形态**。不产出 class 名 / 图标名 / 像素值等 DOM 细节——那些由
  *   消费方决定（如聚合入口的图标 = 层叠图标 + 运行数、溢出入口 = 省略号，是两个不同语义，
  *   不得共用图标；该约束属接线层，本模块不表达）。
+ *
+ * 两条正交轴（D6 修订 · 溢出兜底方案 A「内容自适应」）：
+ * - **tier 轴**（既有）：只按容器宽判「起始形态」——`>=640` expanded / `>=520` compact /
+ *   `<520` narrow，各自带序 1–4 的合流·合体·收纳·聚合。固定阈值判不出「内容是否放得下」
+ *   （模型名长短 / i18n / 缓存归因文案都会改变实宽），故引入第二条轴。
+ * - **fit 轴**（新增）：接线层实测「内容自然宽 > 可用宽」后逐级施加，直到放得下（或到顶）。
+ *   只作用于右簇（容量+指标 / 模型+档位）的**内容密度**，不动 tier 的分组与序 0 不退化：
+ *   L1 数值精简 + 模型名截断 · L2 四触发器图标化 · L3 容量+指标收进 `»`（模型+档位恒留底栏，
+ *   保证任何宽度都能切模型）。fit 级由调用方（接线层）测量后喂入，本模块只做「级 → 形态」映射。
  *
  * 硬约束（D6）：
  * 1. **永不换行** —— `allowsWrap` 恒 false，输出域里不存在「换行」这种形态；状态机只做
@@ -39,6 +48,22 @@ export const COMPOSER_DENSITY_EXPANDED_MIN_WIDTH = 640
 
 /** 序 4 门限：`width < 此值` → `narrow`（序 1–4）；`[此值, EXPANDED_MIN)` → `compact`（序 1–3）。 */
 export const COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH = 520
+
+/** fit 退化级命名常量（L0–L3；避免魔法数字散落在判据里） */
+export const COMPOSER_FIT_LEVEL_NONE = 0
+/** L1：数值精简 + 模型名截断 */
+export const COMPOSER_FIT_LEVEL_SIMPLIFY = 1
+/** L2：右簇四触发器图标化 */
+export const COMPOSER_FIT_LEVEL_ICONIFY = 2
+/** L3：容量+指标收进 `»`（顶格） */
+export const COMPOSER_FIT_LEVEL_OVERFLOW = 3
+
+
+/**
+ * fit 轴最大退化级（L3 顶格）。顶格后仍放不下 = 已到 D6 允许的极限（托盘面板固定 400px
+ * 本身就要求视口更宽），交由接线层的视觉兜底（图标 + `min-w-0`）与后续独立单元处理。
+ */
+export const COMPOSER_DENSITY_MAX_FIT_DEGRADATION: ComposerFitDegradationLevel = COMPOSER_FIT_LEVEL_OVERFLOW
 
 /** 三档阈值（可整体/部分覆盖：测试与未来调参入口）。 */
 export interface ComposerDensityThresholds {
@@ -75,12 +100,23 @@ export type ComposerElementForm =
 /**
  * 退化序（序 0 永不退化，故不入序集）：1 = 容量 + 生成指标合流 · 2 = 模型 + 推理档位合体 ·
  * 3 = 插件 toolbar 进 `»` · 4 = 托盘聚合。数值升序 = 应用先后（累计退化）。
+ *
+ * 序 5–8 为 **fit 轴**（溢出兜底方案 A）：tier 已判「起始形态」，接线层再实测「内容放不下」
+ * 时按本序继续收紧右簇内容密度——它们不改变 tier 的分组/聚合结论，只压内容。
  */
 export const COMPOSER_DEGRADATION_ORDER = {
   CAPACITY_METRICS_MERGE: 1,
   MODEL_THINKING_MERGE: 2,
   PLUGIN_TOOLBAR_OVERFLOW: 3,
   TRAY_AGGREGATION: 4,
+  /** fit 序 5（L1）：容量+指标只留百分比（速度数值/容量绝对值进 title 与浮层）。 */
+  CAPACITY_METRICS_SIMPLIFY: 5,
+  /** fit 序 6（L1）：模型名容器级截断收口（88px → 56px + 省略号）。 */
+  MODEL_NAME_SIMPLIFY: 6,
+  /** fit 序 7（L2）：右簇四触发器全部图标化（详情进 title / 浮层，交互路径不丢）。 */
+  RIGHT_CLUSTER_ICONIFY: 7,
+  /** fit 序 8（L3）：容量+指标收进 `»` 溢出菜单（模型+档位恒留底栏，切模型永可达）。 */
+  CAPACITY_METRICS_OVERFLOW: 8,
 } as const
 
 /** 退化序号（取值见 `COMPOSER_DEGRADATION_ORDER`）。 */
@@ -110,6 +146,27 @@ export interface ComposerDensitySlots {
 /** 槽位键（= `ComposerDensitySlots` 的键集，用于溢出菜单条目等集合型输出）。 */
 export type ComposerDensitySlotKey = keyof ComposerDensitySlots
 
+/**
+ * fit 退化级（方案 A 第二轴）：0 = 未触发（右簇保持 tier 自身形态），1 = 数值精简 + 模型名截断，
+ * 2 = 右簇图标化，3 = 容量+指标收进 `»`。由接线层实测溢出后逐级喂入，本模块只做映射。
+ */
+// eslint-disable-next-line no-magic-numbers -- 级数字面量即档位语义本身，命名常量见上一段（COMPOSER_FIT_LEVEL_*）
+export type ComposerFitDegradationLevel = 0 | 1 | 2 | 3
+
+/**
+ * fit 轴的逐组内容形态（与 `slots` 正交：`slots` 表达 tier 的分组/收纳，此处表达「同一分组内
+ * 显示多少信息」）。`full` = 不因溢出再收。
+ */
+export interface ComposerFitForms {
+  /** 容量 + 生成指标（序 1 组）：L3 时收进 `»` 溢出菜单（不再是底栏元素）。 */
+  readonly capacityMetrics: 'full' | 'simplified' | 'iconic' | 'collapsed-to-menu'
+  /**
+   * 模型 + 推理档位（序 2 组）：**永不 `collapsed-to-menu`** —— 切模型/切档位是底栏的
+   * 核心动作，任何宽度都保留可点入口（最坏退到图标）。
+   */
+  readonly modelThinking: 'full' | 'simplified' | 'iconic'
+}
+
 /** 可选能力标志（缺省 = 最保守假设：插件零贡献、托盘有面）。 */
 export interface ComposerDensityCapabilities {
   /**
@@ -124,20 +181,28 @@ export interface ComposerDensityCapabilities {
   readonly hasTrayItems?: boolean
 }
 
-/** 状态机输出：档位 + 逐元素形态 + 派生集合。 */
+/** 状态机输出：档位 + 逐元素形态 + fit 形态 + 派生集合。 */
 export interface ComposerDensityLayout {
   /** 命中的宽度档位。 */
   readonly tier: ComposerDensityTier
   /** 恒 false —— D6 硬约束「永不换行」（消费方据此上 `flex-nowrap`）。 */
   readonly allowsWrap: false
-  /** 逐元素呈现形态。 */
+  /** 逐元素呈现形态（tier 轴）。 */
   readonly slots: ComposerDensitySlots
-  /** 已生效的退化序（升序；由 `slots` 构造性派生，不含未生效的序）。 */
+  /**
+   * 已生效的退化序（升序）= tier 序（1–4，由 `slots` 派生）+ fit 序（5–8，由 `fitLevel` 派生）。
+   */
   readonly appliedOrders: readonly ComposerDegradationOrder[]
   /** `»` 溢出菜单是否存在——仅当确有被收起项（= `overflowItems` 非空）。 */
   readonly overflowMenuVisible: boolean
-  /** 被收进 `»` 溢出菜单的槽位（当前仅序 3 的 `pluginToolbar`）。 */
+  /** 被收进 `»` 溢出菜单的槽位（序 3 的 `pluginToolbar`；fit L3 追加 `capacity` / `genStats`）。 */
   readonly overflowItems: readonly ComposerDensitySlotKey[]
+  /**
+   * 生效的 fit 退化级（0–3；由入参归一后原样带回，供接线层与测试断言收敛结果）。
+   */
+  readonly fitLevel: ComposerFitDegradationLevel
+  /** fit 轴的逐组内容形态（右簇两组；见 `ComposerFitForms`）。 */
+  readonly fit: ComposerFitForms
 }
 
 /**
@@ -185,12 +250,19 @@ function resolveTrayForm(hasTrayItems: boolean, aggregatesTray: boolean): Compos
   return aggregatesTray ? 'aggregated' : 'expanded'
 }
 
-/** 溢出菜单条目：当前唯一来源 = 序 3 的插件 toolbar（有被收起项才有 `»`）。 */
-function resolveOverflowItems(pluginToolbar: ComposerDensitySlots['pluginToolbar']): ComposerDensitySlotKey[] {
-  return pluginToolbar === 'collapsed-to-menu' ? ['pluginToolbar'] : []
+/** 溢出菜单条目：序 3 的插件工具栏（有被收起项才有 `»`）+ fit L3 的容量/生成指标。 */
+function resolveOverflowItems(
+  pluginToolbar: ComposerDensitySlots['pluginToolbar'],
+  capacityMetrics: ComposerFitForms['capacityMetrics'],
+): ComposerDensitySlotKey[] {
+  const items: ComposerDensitySlotKey[] = []
+  if (pluginToolbar === 'collapsed-to-menu') items.push('pluginToolbar')
+  // fit L3：容量+指标整体收进菜单（底栏不再渲染），与插件 toolbar 共用同一个 `»` 入口
+  if (capacityMetrics === 'collapsed-to-menu') items.push('capacity', 'genStats')
+  return items
 }
 
-/** 已生效退化序由 slots 派生（保证 `appliedOrders` 与形态恒一致，不引入第二真源）。 */
+/** tier 序（1–4）由 slots 派生（保证 `appliedOrders` 与形态恒一致，不引入第二真源）；fit 序另见 `deriveFitOrders`。 */
 function deriveAppliedOrders(slots: ComposerDensitySlots): ComposerDegradationOrder[] {
   const appliedOrders: ComposerDegradationOrder[] = []
   if (slots.capacity === 'merged') {
@@ -208,20 +280,56 @@ function deriveAppliedOrders(slots: ComposerDensitySlots): ComposerDegradationOr
   return appliedOrders
 }
 
+/** fit 级归一：`NaN`（脏输入）→ 0；其余收敛到 `[0, MAX]`（`+Infinity` 视为越界 → 顶格）。 */
+export function normalizeComposerFitLevel(level: number): ComposerFitDegradationLevel {
+  if (Number.isNaN(level)) return COMPOSER_FIT_LEVEL_NONE
+  if (level <= COMPOSER_FIT_LEVEL_NONE) return COMPOSER_FIT_LEVEL_NONE
+  if (level >= COMPOSER_DENSITY_MAX_FIT_DEGRADATION) return COMPOSER_DENSITY_MAX_FIT_DEGRADATION
+  return Math.round(level) as ComposerFitDegradationLevel
+}
+
+/** fit 级 → 逐组内容形态（累计：级数越高收得越紧；L3 起容量+指标进 `»`）。 */
+function resolveFitForms(level: ComposerFitDegradationLevel): ComposerFitForms {
+  if (level >= COMPOSER_FIT_LEVEL_OVERFLOW) {
+    return { capacityMetrics: 'collapsed-to-menu', modelThinking: 'iconic' }
+  }
+  if (level === COMPOSER_FIT_LEVEL_ICONIFY) return { capacityMetrics: 'iconic', modelThinking: 'iconic' }
+  if (level === COMPOSER_FIT_LEVEL_SIMPLIFY) return { capacityMetrics: 'simplified', modelThinking: 'simplified' }
+  return { capacityMetrics: 'full', modelThinking: 'full' }
+}
+
+/** fit 序由 fit 级派生（与 `fit` 形态恒一致，不引入第二真源）。 */
+function deriveFitOrders(level: ComposerFitDegradationLevel): ComposerDegradationOrder[] {
+  const orders: ComposerDegradationOrder[] = []
+  if (level >= COMPOSER_FIT_LEVEL_SIMPLIFY) {
+    orders.push(
+      COMPOSER_DEGRADATION_ORDER.CAPACITY_METRICS_SIMPLIFY,
+      COMPOSER_DEGRADATION_ORDER.MODEL_NAME_SIMPLIFY,
+    )
+  }
+  if (level >= COMPOSER_FIT_LEVEL_ICONIFY) orders.push(COMPOSER_DEGRADATION_ORDER.RIGHT_CLUSTER_ICONIFY)
+  if (level >= COMPOSER_FIT_LEVEL_OVERFLOW) orders.push(COMPOSER_DEGRADATION_ORDER.CAPACITY_METRICS_OVERFLOW)
+  return orders
+}
+
 /**
- * 密度状态机：可用宽度 + 能力标志 → 逐元素形态。
+ * 密度状态机：可用宽度 + 能力标志 + fit 退化级 → 逐元素形态。
  *
  * @param availableWidth 容器可用宽度（px，由 ResizeObserver 实测 `.composer-bar` 内容宽）
  * @param capabilities 可选能力标志（缺省 = 插件零贡献 + 托盘有面）
  * @param thresholdOverrides 三档阈值的部分覆盖（缺省全用命名常量）
+ * @param fitDegradation fit 退化级（0–3；接线层实测溢出后逐级喂入，缺省 0 = 只按 tier 判）
  */
 export function resolveComposerDensity(
   availableWidth: number,
   capabilities: ComposerDensityCapabilities = {},
   thresholdOverrides: Partial<ComposerDensityThresholds> = {},
+  fitDegradation: number = 0,
 ): ComposerDensityLayout {
   const thresholds = resolveThresholds(thresholdOverrides)
   const tier = resolveComposerDensityTier(availableWidth, thresholds)
+  const fitLevel = normalizeComposerFitLevel(fitDegradation)
+  const fit = resolveFitForms(fitLevel)
 
   // 档位决定退化面：compact/narrow 用序 1–3；narrow 再用序 4（累计）。
   const mergesOrder1And2 = tier !== 'expanded'
@@ -245,8 +353,8 @@ export function resolveComposerDensity(
     tray: resolveTrayForm(hasTrayItems, aggregatesTray),
   }
 
-  const overflowItems = resolveOverflowItems(slots.pluginToolbar)
-  const appliedOrders = deriveAppliedOrders(slots)
+  const overflowItems = resolveOverflowItems(slots.pluginToolbar, fit.capacityMetrics)
+  const appliedOrders = [...deriveAppliedOrders(slots), ...deriveFitOrders(fitLevel)]
 
   return {
     tier,
@@ -255,5 +363,7 @@ export function resolveComposerDensity(
     appliedOrders,
     overflowMenuVisible: overflowItems.length > 0,
     overflowItems,
+    fitLevel,
+    fit,
   }
 }

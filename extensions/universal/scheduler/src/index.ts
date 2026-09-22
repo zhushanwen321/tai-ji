@@ -1,9 +1,16 @@
 import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from '@earendil-works/pi-coding-agent'
+import type { GuiContext } from '@zhushanwen/extension-protocol'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
+import { getLogger } from '@zhushanwen/pi-extension-logger'
 
+import { createAckTurnController, type AckTurnController } from './ack-turn.js'
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
+import { formatSchedule } from './format.js'
+import { MS_PER_MINUTE } from './parsing.js'
+import { readUiLocale, t } from './i18n.js'
 import { importLegacyStore } from './importer.js'
+import { abortPendingScheduleForms } from './interaction.js'
 import { SchedulerRuntime, type SchedulerModelOps } from './runtime.js'
 import { SchedulerService } from './service.js'
 import {
@@ -16,7 +23,8 @@ import {
   ScheduleParams,
   type ScheduleParamsT,
 } from './tool.js'
-import { renderSchedulerWidget } from './widget.js'
+import { computeTasksFingerprint, setSchedulerWidget } from './widget.js'
+import type { ScheduledTask } from './types.js'
 
 // G1（代际检测，S9/R3-M1）：session 代际计数器。必须声明在模块级而非 factory 体内：
 // pi 每次 session 替换（newSession/fork/switchSession）都重跑 extension factory 函数体
@@ -33,6 +41,24 @@ import { renderSchedulerWidget } from './widget.js'
 // fire session_shutdown（F1 stopScheduler 主防线，teardownCurrent）+ runtime 侧
 // STALE_CTX_MARKER 文案兜底（F2 catch 分诊）。
 let sessionGeneration = 0
+
+/** 包内既有 logger（ack 编排的日志面与其它模块同源）。 */
+const logger = getLogger('scheduler')
+
+/**
+ * D2 保活底线帧间隔（10min）：任务集静态期间每 ≥10min 强制推一帧（内容与上一帧相同，
+ * 纯粹为维持 rpc-client 入站全帧 touch `_lastActivityAt` 的心跳），防 idle reaper
+ * （DEFAULT_PI_RECLAIM_IDLE_MS，生产 2h，5min 一拍、严格大于判定）回收挂有定时任务的
+ * 会话——定时任务跨空闲期不停摆（G3）。
+ *
+ * **方案不变量：保活间隔 ≪ idle 回收阈值，须维持 ≥3 倍余量。** 生产 10min vs 2h = 12 倍；
+ * 保活帧实际到达受 tick（TICK_INTERVAL_MS=30s）驱动波动（+0~30s），余量须覆盖 tick 波动
+ * 与 reaper 拍相位。未来调整本值、idle 阈值或 tick 间隔任一侧，须重验 ≥3 倍余量并重跑
+ * C-场景（真机加速验收的加速值也须 ≥3 倍保活间隔，防零余量竞态随机误回收）。
+ */
+/** 保活间隔的分钟数（语义单位，避免裸魔数；乘 MS_PER_MINUTE 得毫秒间隔）。 */
+const WIDGET_KEEPALIVE_MINUTES = 10
+const WIDGET_KEEPALIVE_INTERVAL_MS = WIDGET_KEEPALIVE_MINUTES * MS_PER_MINUTE
 
 /**
  * pi-scheduler extension factory。
@@ -51,6 +77,16 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   // （flush 必已发生），把跨 session 双导入窗口从「session 整个生命周期」缩回
   // 「session_start → 首个 turn_end」秒级。cleanup 幂等（importer.ts importFromFile），重复调用安全。
   let importCleanup: (() => void) | undefined
+  // ack 确认轮控制器（u-ack-turn）：per-session 实例（backend 每代新建），但状态住
+  // ack-turn 的模块级单例——新代构造后即接管并清理上一代残留。
+  let ackController: AckTurnController | null = null
+  // D1 指纹跳推 + D2 保活底线帧的推送状态（scheduler widget 推送修正设计 D1-b/D2）。
+  // **必须声明在 factory 闭包内（extension 实例态），禁模块级**：模块级跨 session 残留会让
+  // 新会话继承旧会话的指纹/时间戳——session_start 的首帧（含清屏帧）被跳推，widget 面板
+  // 空窗；模块级 vs 闭包级的语义差异在本包有实证（见上方 sessionGeneration 注释）。
+  // 生命周期：session_start 装配新会话实例时重置（refreshWidgetState 调用点）。
+  let lastWidgetFingerprint: string | null = null
+  let lastWidgetPushedAt = 0
 
   const getService = (): SchedulerService => {
     if (!service) throw new Error('Scheduler not initialized: session not started')
@@ -104,10 +140,43 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // W2：tick 后回调刷新 widget（替代独立 widgetTimer + setInterval，节奏对齐 TICK_INTERVAL_MS）
     runtime.onAfterTick(() => refreshWidget(ctx))
     runtime.startScheduler()
-    service = new SchedulerService(runtime, () => backend.now())
+
+    // ack 确认轮装配（u-ack-turn）：构造后立刻调 handleSessionBoundary——它是 session_start
+    // 与 session_shutdown 共用的边界清理，顺手做一次写盘判定并清掉上一代残留的 30s 定时器 /
+    // 覆写窗口（模块级单例跨代共享的结构性意义）。
+    ackController = createAckTurnController({
+      backend,
+      log: logger,
+      render: (key, params) => t(key, params),
+      notify: (message, level) => ctx.ui.notify(message, level),
+    })
+    ackController.handleSessionBoundary()
+
+    service = new SchedulerService(runtime, () => backend.now(), (task) => {
+      // 创建汇聚点 → ack 触发器（fire-and-forget：回调不 await，失败仅日志面）。
+      // 唯一生产开关 TAIJI_SCHED_ACK_DISABLE 在此单点读取（fail-safe 方向：缺省不禁用）。
+      const controller = ackController
+      if (!controller) return
+      void controller
+        .maybeStartAck({
+          task: {
+            id: task.id,
+            name: task.name,
+            scheduleText: formatSchedule(task.schedule, task.kind, readUiLocale()),
+          },
+          model: backend.getCurrentModel(),
+          isIdle: backend.isIdle(),
+          isToggleDisabled: process.env.TAIJI_SCHED_ACK_DISABLE === '1',
+        })
+        .catch(err => logger.warn('ack turn failed', { error: toErrorMessage(err) }))
+    })
 
     // 注册 widget（SDK setWidget 第一重载：直接传 string[]）。初始渲染一次，
-    // 后续随每次 tickScheduler 末尾的 onAfterTick 回调刷新（nextRunAt 倒计时 + task 状态）。
+    // 后续随每次 tickScheduler 末尾的 onAfterTick 回调刷新（推送频率由指纹跳推 +
+    // 保活底线帧判定，见 refreshWidget）。
+    // 新会话实例起点重置推送状态：首帧（含空任务清屏帧）必推，不继承前代指纹/时间戳。
+    lastWidgetFingerprint = null
+    lastWidgetPushedAt = 0
     refreshWidget(ctx)
   })
 
@@ -122,17 +191,33 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // U4 dispatch 模型切换恢复挂点（设计 D3 修订版）：状态机、恢复动作与 stale 代际守卫都在
     // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
     service?.runtime.handleTurnEnd(event?.turnIndex)
+    // ack 安全网注销（幂等）：正常路径已在 streamSimple 调用点自撤，这里覆盖「覆写未被调用」
+    // 的轮次（E2）。不取消 30s 定时器——它服务通知判定。
+    ackController?.handleTurnEnd()
   })
 
   // U4 dispatch 模型切换：归属状态机其余事件监听（P-MODEL-③④ 实测序态）。handler 只转发
-  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的窗口封口。
+  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的
+  // 窗口封口 + awaiting-restore 模型恢复的即时兑现（区别于 agent_end 的纯封口）。
   pi.on('agent_start', () => service?.runtime.handleAgentStart())
   pi.on('turn_start', (event) => service?.runtime.handleTurnStart(event?.turnIndex))
-  pi.on('message_start', (event) => service?.runtime.handleMessageStart(event?.message))
+  pi.on('message_start', (event) => {
+    service?.runtime.handleMessageStart(event?.message)
+    // ack 触发器判别（u-ack-turn）：只有我们注入的 custom 消息（前缀 pi-scheduler-ack:）
+    // 才同步武装覆写；外来/assistant 消息一律忽略。
+    ackController?.handleMessageStart(event?.message)
+  })
   pi.on('agent_end', () => service?.runtime.handleRunClosed())
-  pi.on('agent_settled', () => service?.runtime.handleRunClosed())
+  // agent_settled 除封口外兼作 awaiting-restore 模型恢复的即时兑现挂点（不与 agent_end
+  // 共用：end 后仍可能有自动续跑 turn，此时切回会把续跑 turn 的模型换掉，见
+  // runtime.handleRunSettled 注释）
+  pi.on('agent_settled', () => service?.runtime.handleRunSettled())
 
   pi.on('session_shutdown', async () => {
+    // 命令路径挂起表单的收口（设计 §6.2 生命周期案 ①②③）：session_shutdown
+    //（reason ∈ quit/reload/new/resume/fork）→ abort 挂起的表单交互（不创建、不 toast）。
+    // taiji 内「切到另一会话」不触发本事件，表单保留且仍有效（有意行为）。
+    abortPendingScheduleForms()
     // append-only 模型无 persistSync（runtime 已按 op appendEntry 落盘到 owner session JSONL）；
     // widgetTimer 已移除（由 runtime.onAfterTick 替代）。仅停止 scheduler tick。
     if (service) {
@@ -147,12 +232,14 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       // MF-2：cleanup 抛非 ENOENT 错误（如 EACCES）也必须复位，避免残留闭包
       importCleanup = undefined
     }
+    // ack 边界清理（u-ack-turn）：先做写盘判定再自撤覆写并全量清状态（含取消上一代 30s
+    // 定时器）—— session_start 与 session_shutdown 共用，跨代单例的结构性意义。
+    ackController?.handleSessionBoundary()
   })
 
-  // 注册 schedule tool
+  // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /schedule 命令）。
   // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
-  // 转调 handleSchedule 六步流（预校验 → headless 分支 → 交互确认 → 取消 → 创建）。
-  // pi 转传供 channel-error 时禁用本会话 schedule 工具（setActiveTools）。
+  // 转调 handleSchedule 直建流（预校验 → abort 检查 → service.create）。
   // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
   // isError 被 agent-loop 丢弃）；getService() 未初始化异常穿透到这里，包装
   // 'Error: Scheduler not initialized' 格式（R3 格式保持）。
@@ -161,12 +248,11 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     label: 'Schedule',
     description:
       'Create a scheduled task that fires a message at intervals or cron schedule. ' +
-      'The call first opens a confirmation form pre-filled with your draft (time/model/prompt); ' +
-      'the task is created only after the user confirms it. In headless (non-interactive) ' +
-      'sessions there is no form: the task is created directly from the parameters and the ' +
-      'result notes it was not user-confirmed. Only initiate when the user asks ' +
-      'for a scheduled task. If the user cancels the form, the task is NOT created — do not ' +
-      'assume a configuration and do not retry.',
+      'The task is created immediately (no confirmation form). Call it only when the user ' +
+      'has already expressed the timing; if the timing or the reminder content is missing ' +
+      'or ambiguous, clarify with the user first — never guess a schedule. The task only ' +
+      'fires while this session stays open. The response includes the task id and next run ' +
+      'time(s); repeat them back to the user so the task is easy to verify or undo.',
     parameters: ScheduleParams,
     promptGuidelines: scheduleGuidelines,
     async execute(
@@ -174,10 +260,10 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       params: ScheduleParamsT,
       signal: AbortSignal | undefined,
       _onUpdate,
-      ctx: ExtensionContext,
+      _ctx: ExtensionContext,
     ) {
       try {
-        return await handleSchedule(pi, getService(), params, ctx, signal)
+        return await handleSchedule(getService(), params, signal)
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }
@@ -206,17 +292,54 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     },
   })
 
-  // 注册 /schedule command。传 getter 而非 service 实例：factory 执行时 service 还是 null。
+  // 注册 /schedule 命令。传 getter 而非 service 实例：factory 执行时
+  // service 还是 null。
   registerScheduleCommand(pi, () => service)
 
   /**
-   * 重新计算并推送 scheduler widget（string[] 重载）。
+   * 重新计算并推送 scheduler widget（双模：GUI 结构化 meta + TUI 文本行）。
    * 读外层 service 变量而非 getService()：session_start 尚未触发时刷新不应报错，直接跳过。
+   * `ctx as GuiContext`：pi 的 `ExtensionContext` 与协议包最小结构（mode/hasUI/ui.setWidget）
+   * 静态不完全兼容，先例见 todo/src/index.ts makeRefreshDisplay。
+   *
+   * 推送频率判定（scheduler widget 推送修正设计 D1-b / D2）：
+   * - D1 指纹跳推：任务集稳定指纹（computeTasksFingerprint，字段集含 kind/locale）与上次
+   *   实际推送相同且保活未到期 → 跳过推送。时间流逝不是状态变化，任务集不变期间零推送
+   *   （rpc/tui 两模式同效——判定在 setWidgetDual 之前）。
+   * - D2 保活底线帧：有任务（任务集非空，含全部 disabled——任务存在即调度意图，re-enable
+   *   后须可执行）且距上次实际推送超过 WIDGET_KEEPALIVE_INTERVAL_MS → 强制推一帧（内容
+   *   与上帧相同，纯粹为维持心跳防 idle reaper 回收）。空任务集不发保活帧：清屏后任务集
+   *   保持空 → 无帧 → 会话按 idle 规则正常回收（保活与任务存在性绑定）。
+   * - fail-open：指纹计算异常即推送（宁可多推不可漏显，设计 §3.1 失败路径）。
    */
   function refreshWidget(ctx: ExtensionContext): void {
     if (!service) return
     const result = service.list()
     if (!result.success || !result.data) return
-    ctx.ui.setWidget('scheduler', renderSchedulerWidget(result.data.tasks))
+    const tasks: ScheduledTask[] = result.data.tasks
+    const locale = readUiLocale()
+
+    let fingerprint: string
+    try {
+      fingerprint = computeTasksFingerprint(tasks, locale)
+    } catch (err) {
+      // fail-open（辅助显示面的降级 ≠ 吞错）：指纹异常说明序列化路径有 bug，跳推判定不可信
+      // → 直接推送保显示正确；缓存失效（null）使下一帧也必推，保活计时照常刷新。
+      logger.warn('widget fingerprint computation failed, pushing anyway', { error: toErrorMessage(err) })
+      lastWidgetFingerprint = null
+      lastWidgetPushedAt = Date.now()
+      setSchedulerWidget(ctx as GuiContext, tasks)
+      return
+    }
+
+    const nowMs = Date.now()
+    // D2 双条件：任务存在（含 disabled）+ 距上次实际推送超时。跳推不刷新 lastWidgetPushedAt
+    // ——保活计时只从「实际推送」起算。
+    const keepaliveDue = tasks.length > 0 && nowMs - lastWidgetPushedAt >= WIDGET_KEEPALIVE_INTERVAL_MS
+    if (fingerprint === lastWidgetFingerprint && !keepaliveDue) return
+
+    setSchedulerWidget(ctx as GuiContext, tasks)
+    lastWidgetFingerprint = fingerprint
+    lastWidgetPushedAt = nowMs
   }
 }

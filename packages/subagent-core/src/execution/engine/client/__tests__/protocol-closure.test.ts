@@ -45,6 +45,7 @@ import type {
   UiRequestHandler as CoreUiRequestHandler,
   UiResponse as CoreUiResponse,
 } from "../../../ui/dialog-queue.ts";
+import type { CAPABILITY_ENUMS, CONSERVATIVE_CAPABILITIES } from "../../engine-manifest.ts";
 
 // ── 引擎面契约类型（SDK SSOT ↔ core execution/engine/types.ts）──
 type _CoreSdkAgentEvent = AssertMutuallyAssignable<CoreAgentEvent, SdkAgentEvent>;
@@ -80,9 +81,31 @@ const _assertions: Array<true> = [
   true as _CoreSdkAgentCallOpts,
 ];
 
+// ── 能力位键集锁（U5 词表锁扩展：病灶 7「漏登 core 两表 → undefined 透传 → gate
+//    放行」的编译期堵截）──
+// engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
+//   A：CONSERVATIVE_CAPABILITIES（11 键，含 maxTurns:false）⟷ EngineCapabilities 全集（11=11）；
+//   B：CAPABILITY_ENUMS（10 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
+//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（10=10）。
+// 新增能力轴漏登任一表 = 此处编译红。直槽承载（不用 Array<true> 的 `true as _X` 槽：
+// 断言结果为 never 时该槽会被静默吞掉，直槽 `[_A, _B] = [true, true]` 令 never 显形）。
+type _CapConservativeKeys = AssertMutuallyAssignable<
+  keyof typeof CONSERVATIVE_CAPABILITIES,
+  keyof SdkEngineCapabilities
+>;
+type _CapEnumKeys = AssertMutuallyAssignable<
+  keyof typeof CAPABILITY_ENUMS,
+  Exclude<keyof SdkEngineCapabilities, "maxTurns">
+>;
+const _capKeyLocks: [_CapConservativeKeys, _CapEnumKeys] = [true, true];
+
 describe("协议契约类型双向可赋值（编译期断言的运行时锚）", () => {
   it("全部断言成立（漂移会在 tsc --noEmit 报 never → 本文件编译失败）", () => {
     expect(_assertions).toHaveLength(12);
     expect(_assertions.every((v) => v === true)).toBe(true);
+  });
+
+  it("能力位键集锁：11=11 与 10=10 双向互等成立（U5；漏登新轴 = typecheck 红指向本文件）", () => {
+    expect(_capKeyLocks).toEqual([true, true]);
   });
 });

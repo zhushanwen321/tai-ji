@@ -13,8 +13,8 @@
     （订阅/恢复腿/model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
-    <!-- 速度触发器 -->
-    <HoverCard>
+    <!-- 速度触发器（fit L1 起只留数值；fit L2 起只留图标） -->
+    <HoverCard v-if="props.variant !== 'iconic'">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
@@ -61,7 +61,7 @@
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 缓存命中率触发器 -->
+    <!-- 缓存命中率触发器：fit L1 起精简（归因态仍显成因文案，优先级高于精简）；fit L2 起只留图标 -->
     <HoverCard>
       <HoverCardTrigger as-child>
         <Button
@@ -69,12 +69,14 @@
           :class="
             cn(
               'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+              props.variant === 'iconic' && 'px-1.5',
               cacheTriggerClass,
             )
           "
-          :title="t('panel.context.genStatsCacheTitle')"
+          :title="cacheTitle"
         >
-          <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
+          <Gauge v-if="props.variant === 'iconic'" class="size-4 shrink-0" />
+          <span v-else class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
         </Button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -135,6 +137,7 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Gauge } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
@@ -149,6 +152,12 @@ import type { GenStatsCacheMiss } from '@taiji/shared'
 const props = defineProps<{
   sessionId?: string
   modelId?: string
+  /**
+   * 内容密度（u6b fit 轴）：`full` = 速度 + 缓存两个数值触发器（默认）；
+   * `simplified` = 速度只留数值（去 ` t/s` 单位），缓存不变；
+   * `iconic` = 速度触发器整体收起（数值进 title 与浮层），缓存触发器只留 Gauge 图标。
+   */
+  variant?: 'full' | 'simplified' | 'iconic'
 }>()
 
 const { t } = useI18n()
@@ -156,10 +165,11 @@ const { t } = useI18n()
 // 订阅（session.stats_update）/ 恢复腿（session.getGenStats）/ model 校验全在 composable 内
 const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, 'modelId'))
 
-// ── 速度触发器：current →「N t/s」，null →「—」 ──
+// ── 速度触发器：current →「N t/s」，null →「—」；fit L1 起去单位只留数值 ──
 const speedDisplay = computed(() => {
   const v = frame.value?.speed.current
-  return v == null ? '—' : `${v} t/s`
+  if (v == null) return '—'
+  return props.variant === 'simplified' ? String(v) : `${v} t/s`
 })
 
 /** 速度浮层四行（label + 聚合值；null → 浮层行显「—」）。note = label 的原生
@@ -212,6 +222,13 @@ const cacheBarClass = computed(() => {
   if (v >= CACHE_WARN_THRESHOLD) return 'bg-warn'
   return 'bg-danger'
 })
+
+/** 缓存触发器 title：图标态下标题必须自带档位/数值（文本被图标取代，信息不能丢） */
+const cacheTitle = computed(() =>
+  props.variant === 'iconic'
+    ? `${t('panel.context.genStatsCacheTitle')} · ${cacheDisplay.value}`
+    : t('panel.context.genStatsCacheTitle'),
+)
 
 /** 百分比统一显示：null →「—」，否则「N%」 */
 function cachePercentDisplay(v: number | null | undefined): string {

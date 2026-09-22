@@ -29,8 +29,12 @@ export type AppConfigAccessors = {
 const DEFAULT_WORKTREE_ROOT_DIR = '~/worktrees'
 /** 默认 setup 脚本相对路径（裸仓 / 普通仓共用同一默认）。 */
 const DEFAULT_SETUP_SCRIPT = 'custom-hooks/setup-worktree.sh'
-/** 默认 worktree 操作超时（秒）。 */
-const DEFAULT_TIMEOUT = 60
+/**
+ * 默认 worktree 操作超时（秒）。300s：setup 脚本的最坏形态是 monorepo pnpm install +
+ * 首次 Electron（~242MB）/ pi（~69MB）二进制下载——分钟级；旧默认 60s 会把冷安装误杀成
+ * SETUP_FAILED（缓存热时 6-12s，冷热两种形态都要覆盖）。上限 3600s 供慢网络调。
+ */
+const DEFAULT_TIMEOUT = 300
 /** 超时上限（秒）：与 setSystemPromptConfig 的窗口约束风格一致，防异常大值卡死 PTY。 */
 const TIMEOUT_MAX = 3600
 /** 默认 base branch（origin/main）。 */

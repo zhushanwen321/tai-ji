@@ -11,8 +11,8 @@
  *
  * schema 兼容（D4）：entry data 无版本字段（版本号字段 + 迁移逻辑已被 D1 明文否决），新旧
  * schema 靠**字段级 optional 判存在**消解——旧 entry（仅四必填字段）派生出无新字段区的
- * PlanStateView，新字段（skills/docs/reviewState）逐字段守卫透传，不做 v 守卫（与
- * subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
+ * PlanStateView，新字段（skills/docs/reviewState/reviewStateSource）逐字段守卫透传，不做
+ * v 守卫（与 subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
  *
  * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
  * entry data 按防御式逐字段守卫消费。
@@ -33,6 +33,16 @@ interface JsonlCustomEntry {
 /** MB 换算常数（oversize 降级 warn 文案的体积展示，对齐 workflow-extractor BYTES_PER_MB）。 */
 // eslint-disable-next-line no-magic-numbers -- 1MB = 1024 * 1024 bytes
 const BYTES_PER_MB = 1024 * 1024
+
+/**
+ * requirement 读侧封顶上限（64KB = 64 * 1024 字节）：与 extension 写侧
+ * MAX_PLAN_REQUIREMENT_LENGTH（extensions/universal/plan/src/state.ts）刻意同值——
+ * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
+ * 跨包对齐靠注释互指。数值用单字面量而非 64 * 1024 乘法形态：乘法操作数仍会被
+ * no-magic-numbers 逐个告警，本处以命名 + 注释承载换算语义，不加静默规则豁免
+ * （BYTES_PER_MB 的既有豁免注释不在此修复范围）。
+ */
+const MAX_PLAN_REQUIREMENT_LENGTH_BYTES = 65_536
 
 /**
  * 「未激活」缺省 View（无 entry / ENOENT / oversize 降级共用，对齐 extension
@@ -69,7 +79,7 @@ export function scanPlanStateEntries(entries: unknown[]): PlanStateView | null {
  * data 返回 null）。字段映射规则：
  * - 四必填字段：isActive 严格 `=== true`（其他形态归 false——View 契约是 boolean，防御
  *   extension 侧异常写入）；三个 string 字段空串归一 null（normalizeNonEmptyString）。
- * - 三 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
+ * - 四 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
  *   显式 undefined——「旧 entry 派生出无新字段区」的字面语义），下沉到
  *   applyOptionalPlanFields（守卫判定顺序与拆分前逐一等价）。
  */
@@ -84,7 +94,7 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   const view: PlanStateView = {
     isActive: d.isActive === true,
     planFilePath: normalizeNonEmptyString(d.planFilePath),
-    requirement: normalizeNonEmptyString(d.requirement),
+    requirement: normalizeNonEmptyString(d.requirement, MAX_PLAN_REQUIREMENT_LENGTH_BYTES),
     templateName: normalizeNonEmptyString(d.templateName),
   }
   applyOptionalPlanFields(view, d)
@@ -95,14 +105,28 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
  * string 字段读取 + 空串归一 null（parsePlanStateEntry 三个必填 string 字段共用）：
  * entry 域「无文件/无需求」的历史形态是空串，View 域归一为 null 单一表达
  * （shared PlanStateView 的 `string | null` 值域），消费方判式单一（`=== null` 即「无」）。
+ * capTo 参数：requirement 传封顶上限（P3-8 读侧对齐——封顶机制上线前写入的超长 entry
+ * 在派生处同样截断，保证 plan 帧恒有界；新写入恒已在 extension 写侧封顶，本防御只服务
+ * 存量旧 entry）。
  */
-function normalizeNonEmptyString(v: unknown): string | null {
-  return typeof v === 'string' && v !== '' ? v : null
+function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
+  if (typeof v !== 'string' || v === '') return null
+  if (capTo !== undefined && v.length > capTo) {
+    const omitted = v.length - capTo
+    console.warn(
+      `[plan-state-extractor] requirement entry over cap (${v.length} > ${capTo} chars), ` +
+      `truncating in derived view (${omitted} characters omitted)`,
+    )
+    return v.slice(0, capTo)
+  }
+  return v
 }
 
 /**
  * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
- * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量。
+ * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量、
+ * reviewStateSource 限两字面量（降级两源标记，plan-mode-ux-refactor §3.4——漏透传 =
+ * 字段在派生处静默丢弃、renderer 恒渲染通用降级文案）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {
   if (isStringArray(d.skills)) {
@@ -113,6 +137,11 @@ function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>
   }
   if (d.reviewState === 'awaiting' || d.reviewState === 'revising') {
     view.reviewState = d.reviewState
+  }
+  // 只认 'resubmit'：旧 entry 的 'explain' 存量值归无值（explain 交互已删，与 extension
+  // 读侧 readReviewStateSource 白名单对齐——renderer 缺省分支渲染通用文案）
+  if (d.reviewStateSource === 'resubmit') {
+    view.reviewStateSource = d.reviewStateSource
   }
 }
 
@@ -144,7 +173,7 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
  *
  * 读取文件 → parseJsonl → scanPlanStateEntries（与实时增量拉取同一份派生代码）。
  *
- * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile:346-353 契约）：
+ * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile 契约）：
  * - 文件不存在（ENOENT）→ 「未激活」缺省 View（合法边界：pi session 文件延迟写入，文件
  *   都不存在必然无 plan-state entry；缺省形态对齐 extension DEFAULT_PLAN_STATE 的 View 域
  *   投影——isActive:false + 三 string 字段 null）。

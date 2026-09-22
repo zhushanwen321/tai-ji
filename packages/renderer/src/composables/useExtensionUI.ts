@@ -20,7 +20,9 @@
  *   bus 直连，不经 store）
  * - 事件 sessionId 缺失（无 sid 的 ui-request）→ 跳过入 store（warn，C2）
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
- * - getPendingRequests（切回拉取）保留 RPC 路径（C3）
+ * - getPendingRequests（切回拉取）保留 RPC 路径（C3）；其应答落 store 前执行**快照差集剔除**
+ *   （renderer 侧僵尸表单修剪主算法，§6.2 采用项④ v6.1：不在快照中的旧条目一律移除，
+ *   空快照也执行；帧入口超龄过滤仅作兜底）
  *
  * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存全量 pending，
  * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
@@ -38,6 +40,7 @@ import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useChatStore } from '@/stores/chat'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -49,6 +52,23 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
  * bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
+
+/**
+ * 帧入口兜底超龄阈值（renderer 本地常量，非主算法）。
+ *
+ * 主算法 = `getPendingRequests` 快照差集剔除（见 subscribe 内 retainOnly 调用点），**不依赖
+ * 任何阈值**——renderer 拿不到 runtime 的 `TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS`（env 隔离），
+ * 且快照本身就是 runtime 权威 pending 集。本常量只作 `extension_ui_request` 逐帧入口的
+ * 兜底（设计 scheduler-trigger-inversion §6.2 采用项④ v6.1）：帧若携带陈旧 `receivedAt`
+ *（异常积压 / 未来 runtime 在广播帧上附带入队时间），超龄即丢弃，防极端积压污染 store。
+ * 量级对齐 runtime 侧上界默认 6h（人填表窗口远超 6h 已无意义）。
+ */
+const FRAME_STALE_MAX_AGE_HOURS = 6
+const MINUTES_PER_HOUR = 60
+const SECONDS_PER_MINUTE = 60
+const MS_PER_SECOND = 1000
+export const FRAME_STALE_MAX_AGE_MS =
+  FRAME_STALE_MAX_AGE_HOURS * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND
 
 // ── planReview 分流（plan 模式重设计 u1-banner，设计 D5 PLAN_REVIEW_MARKER select 通道）──
 
@@ -111,6 +131,38 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
     busUnsub = null
   }
   busHandlers.clear()
+  if (invalidatedUnsub) {
+    invalidatedUnsub()
+    invalidatedUnsub = null
+  }
+}
+
+// ── 挂起请求失效广播订阅（P2-2 失效链，模块级单订阅永驻）──
+// runtime 在非 respond 路径终结挂起（abort turn / 退出 plan / 回收 / session 销毁）时
+// 广播 extension:requestsInvalidated → core bridge 归一为 'requests-invalidated' 事件。
+// 收到即按帧逐条 removeRequest：审批条/表单随之消失，消除「僵尸 ready 点击静默无效」
+// 残留。store.removeRequest 按 requestId 精确移除且幂等，多实例/重复帧无副作用。
+type RequestsInvalidatedEvent = Extract<InternalEvent, { kind: 'requests-invalidated' }>
+let invalidatedUnsub: (() => void) | null = null
+
+function ensureInvalidatedSubscription(): void {
+  if (invalidatedUnsub) return
+  const bus = getExtensionBus()
+  invalidatedUnsub = bus.on('requests-invalidated', (e: RequestsInvalidatedEvent) => {
+    if (!e.sessionId) return
+    const store = useExtensionUIStore()
+    for (const requestId of e.requestIds) {
+      store.removeRequest(e.sessionId, requestId)
+    }
+    // D1 invalidated 锚点（form-hang-fix）：runtime 非 respond 终结（reclaimed / plan-aborted /
+    // turn-aborted / session-destroyed 四类触发源）均无后续 turn 预期，pendingSend 等
+    // message_start 必然空等——按帧 sid 收口。clearPendingSend 幂等，与 message_start /
+    // respond 锚点并发竞争无副作用。
+    // chatStore 此处**现取**而非 respond 侧的 setup 捕获：本订阅是模块级单例、生命周期跨
+    // Panel 实例（首个使用者挂上后永驻），setup 捕获会钉死首个实例的上下文；而事件到达
+    // 时点 pinia 必已 active（与上方 useExtensionUIStore() 同模式），现取安全。
+    useChatStore().clearPendingSend(e.sessionId)
+  })
 }
 
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
@@ -162,6 +214,9 @@ function pickLegacyFields(
  * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
+  // receivedAt：优先采信帧携带的数值（异常积压场景可判定超龄），缺失则由本层打戳
+  //（当前 runtime 广播帧不带该键，故常态恒为 Date.now()——兜底判定的输入面）。
+  const rawReceivedAt = request.receivedAt
   return {
     sessionId: sid,
     requestId: request.requestId,
@@ -172,7 +227,11 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
     // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
     ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
-    receivedAt: Date.now(),
+    // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
+    //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
+    // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
+    ...(typeof request.expectTurn === 'boolean' ? { expectTurn: request.expectTurn } : {}),
+    receivedAt: typeof rawReceivedAt === 'number' ? rawReceivedAt : Date.now(),
   }
 }
 
@@ -183,6 +242,11 @@ export function useExtensionUI(
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   const store = useExtensionUIStore()
+  // D1 分型锚点的 chatStore 取用（form-hang-fix）：setup 上下文捕获（对齐上方 extensionUIStore
+  // 模式），respond 事件回调经闭包引用——不在回调内重取。
+  const chatStore = useChatStore()
+  // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
+  ensureInvalidatedSubscription()
 
   let unsubFns: Array<() => void> = []
 
@@ -215,16 +279,43 @@ export function useExtensionUI(
         if (raw.form !== true && !isPlanReview) return // C4：富交互标记放行
         const adapted = toExtensionUIRequest(eventSid, raw)
         if (filter && !filter(adapted)) return // filter 第二道闸
+        // 兜底超龄过滤（非主算法）：主算法是 getPendingRequests 快照差集剔除（见下方 .then）；
+        // 此处只防「帧携带陈旧 receivedAt」的极端积压。常态帧收到即打戳（receivedAt ≈ now），
+        // 判定不命中故无行为差异。
+        if (Date.now() - (adapted.receivedAt ?? Date.now()) > FRAME_STALE_MAX_AGE_MS) {
+          console.warn(
+            '[useExtensionUI] 超龄 ui-request 帧已丢弃（兜底过滤，非快照差集主算法）:',
+            adapted.requestId,
+          )
+          return
+        }
         store.addRequest(eventSid, adapted)
       }),
     )
     // C3 保留：拉取 runtime 缓存的 pending 请求（切换 session 后重新订阅时，runtime 会推送缓存的请求）
     // 异步执行，不阻塞订阅建立
+    //
+    // 快照差集剔除（主算法，设计 §6.2 采用项④ v6.1）：
+    // 本应答是 runtime 权威 pending 集 —— 先按快照做差集剔除（不在快照中的旧条目一律从该
+    // session 分区移除），再补入快照新增条目。剔除调用在 for 循环**之外**（顶层），故空
+    // 快照 pendingRequests=[] 时循环体不执行、剔除仍执行（keepIds 空集 ⇒ 清空分区）——这是
+    // 覆盖「pi 进程被 idle reaper 回收 / 会话替换后 runtime 已清 pending，而 renderer 屏上仍
+    // 留僵尸表单 → 用户直接点提交 → 丢进已回收进程 = 静默失败」主路径的关键；本路径不依赖
+    // 任何阈值常量（renderer 拿不到 runtime 的 env 配置）。
+    //
+    // 安全性依据：快照应答与 ui-request 广播同走一条 WS 连接、按序处理——若某帧先于本应答
+    // 被 renderer 处理，则它早已进 runtime pending 缓存（快照必含它）；若帧后于本应答到达，
+    // 则它不在本次差集范围内，随后照常入队。
+    //
+    // 显式边界（已声明接受）：**未发生任何重订阅**（不切会话、不断线重连）时屏上僵尸表单仍在
+    // ——本修剪只在快照落地时生效，与「未重订阅的丢帧」同族缺口（§6.2 采用项②）。
     getPendingRequests(sid)
       .then((pendingRequests) => {
-        // 全量写入 store（不入库时 filter）。M1 竞态修复：addRequest(sid, ...) 用订阅时捕获的
-        // sid（参数）——只写旧 sid 分区，不读 sessionId.value。即使此响应在 session 切换后到达，
-        // 也只写入旧 sid 的 Map 分区，不会污染新 sid。Map 分区已结构性隔离 stale 响应。
+        store.retainOnly(sid, new Set(pendingRequests.map((r) => r.requestId)))
+        // 补入快照条目（已在分区者由 addRequest requestId dedup 幂等跳过）。
+        // M1 竞态修复：addRequest(sid, ...) 用订阅时捕获的 sid（参数）——只写旧 sid 分区，
+        // 不读 sessionId.value。即使此响应在 session 切换后到达，也只写入旧 sid 的 Map
+        // 分区，不会污染新 sid。Map 分区已结构性隔离 stale 响应。
         for (const req of pendingRequests) {
           // pending 帧经 runtime {...r,...r.payload} 解包——payload 即 marker 分支产出的
           // view-ready 帧（form:true 原生携带，legacy 归一已在 runtime 侧完成），直接入
@@ -296,6 +387,21 @@ export function useExtensionUI(
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
+    // D1 分型锚点（form-hang-fix）：cancel 型（result === null——Esc / 取消按钮 / cancel()
+    // 同链）送达后 pi 无后续 turn 事件预期，pendingSend 等 message_start 必然空等（假忙
+    // 窗口病灶）——送达即收口。提交型（result !== null）不清：pi 起 turn，pendingSend
+    // 桥接「respond 完成 → message_start 到达」窗口并由其正常清除（现状语义，不制造
+    // isActive=false 空窗）。判据严格按 result 是否 null——boolean 型按提交型处理。
+    if (result === null) {
+      chatStore.clearPendingSend(sid)
+    } else if (target.expectTurn === false) {
+      // D1 段 5 + D2 严格双条件（result ≠ null ∧ expectTurn === false）：提交型但源声明
+      // 无 turn 预期（命令 handler 内 select，message_start 永不来）→ 立即收尾，消除
+      // 30s 假忙。判定必须 `=== false` 显式判定——truthy 简化（`!expectTurn`）会把
+      // undefined（存量扩展/断链缺省）也当无 turn、误清 ask-user 桥接（D2 被否谱系）；
+      // true / undefined → 隐式 else，桥接照旧（缺省安全）。
+      chatStore.clearPendingSend(sid)
+    }
   }
 
   /** 用户取消（等价 respond(requestId, null)） */

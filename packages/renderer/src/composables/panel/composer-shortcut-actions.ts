@@ -1,5 +1,5 @@
 /**
- * composer-shortcut-actions.ts —— Composer 命令动作表（设计 docs/design/composer-pi-shortcuts.md
+ * composer-shortcut-actions.ts —— Composer 命令动作表（设计 docs/design/composer-pi-shortcuts.md——已删除，git 可追溯——
  * U1：pi TUI 四键位 shift+tab / ctrl+p / ctrl+shift+p / ctrl+x 的 GUI 通路）。
  *
  * 定位：与 pi 的「编辑器动作表」同构——composer 输入框聚焦时命令类键位先经本表匹配，命中

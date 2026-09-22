@@ -152,7 +152,7 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
 })
 
 // plan tab（plan 模式重设计 u1-drawer-tab）：tabs 加第 9 个 TabMeta（key='plan'，i18n key
-// 落 plan 域文件 plan.drawer.*，icon 与 PlanModeBanner 同源 SquareCheckBig）。内容面板由壳层
+// 落 plan 域文件 plan.drawer.*，icon 与 PlanModeBar 同源 SquareCheckBig）。内容面板由壳层
 // （PanelContainer）slot 注入空骨架（PlanDocsPanel 归 u1-docs-panel），本组件只负责 tab 元信息。
 describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
   it('plan tab 按钮 DOM 存在（9 tab 常驻，既有 8 tab 无回归）', () => {
@@ -170,7 +170,7 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
     expect(wrapper.find('[data-testid="drawer-tab-plan"]').attributes('title')).toBe('plan.drawer.tabPlan')
   })
 
-  it('plan tab icon 为 SquareCheckBig（与 PlanModeBanner 同源 icon 体系，svg 在按钮内渲染）', () => {
+  it('plan tab icon 为 SquareCheckBig（与 PlanModeBar 同源 icon 体系，svg 在按钮内渲染）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     // icon 经 <component :is> 渲染为 svg（lucide 组件根元素），存在性断言注册生效
     expect(wrapper.find('[data-testid="drawer-tab-plan"] svg').exists()).toBe(true)

@@ -62,6 +62,12 @@ export interface CommandSourceInfo {
   baseDir?: string
 }
 
+/**
+ * UI 语言（renderer i18n 支持集）：跨进程 locale 通道的 wire 值域与磁盘值域 SSOT
+ *（u-locale-channel）。runtime 写 `<dataDir>/ui-preferences.json`，extension 侧就地读取热生效。
+ */
+export type UiLocale = 'zh-CN' | 'en-US'
+
 // ── ClientMessageType（保持向后兼容）──────────────────────────
 
 export type ClientMessageType =
@@ -89,8 +95,8 @@ export type ClientMessageType =
   // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
   // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
   // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
-  // abortPlan：横幅「退出 ×」→ runtime 经 ensureActive 恢复后 client.prompt('/plan abort')
-  // 直发（绕 busy 预检，streaming 中可用）。
+  // abortPlan：PlanModeBar 左区退出按钮（确认 Popover 后）→ runtime 经 ensureActive 恢复后
+  // client.prompt('/plan abort') 直发（绕 busy 预检，streaming 中可用）。
   | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
@@ -167,6 +173,8 @@ export type ClientMessageType =
   | 'config.setSmartContextCompactModel'
   | 'config.setSmartContextThresholds'
   | 'config.setSmartContextExcludedModels'
+  // u-locale-channel：renderer 上报 UI 语言 → runtime 写 <dataDir>/ui-preferences.json（ack 型 reply）。
+  | 'config.setUiLocale'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
   | 'preset.create' | 'preset.update' | 'preset.delete'
   | 'preset.recordUsage' | 'preset.getUsage'
@@ -484,7 +492,8 @@ export interface ClientMessageMap {
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
-  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 横幅退出命令，
+  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
+  // 退出命令（确认 Popover 后），
   // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
   'session.getPlanState': { sessionId: string }
   'session.abortPlan': { sessionId: string }
@@ -747,6 +756,11 @@ export interface ClientMessageMap {
   'config.setSmartContextThresholds': { thresholds: number[] }
   /** config.setSmartContextExcludedModels：设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重）。 */
   'config.setSmartContextExcludedModels': { models: string[] }
+  /**
+   * config.setUiLocale：上报 renderer UI 语言（跨进程 locale 通道，u-locale-channel）。
+   * runtime 原子写 `<dataDir>/ui-preferences.json`（{ v:1, locale, updatedAt }），extension 侧读取热生效。
+   */
+  'config.setUiLocale': { locale: UiLocale }
   // pi 启动预设域（设计文档 pi-launch-presets.md）。
   // preset.list：列出全部预设（内置 + 自定义）；preset.getDefault：读全局默认预设 id；
   // preset.setDefault：设全局默认预设（写入 pi-presets.json）。均按需 RPC，无 server-push 广播。
@@ -898,6 +912,8 @@ export type ServerMessageType =
   | 'config.skillDirs' | 'config.agentDirs' | 'config.extensionDirs'
   | 'config.skillCacheInvalidated'
   | 'config.systemPrompt'
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（u-locale-channel，payload 空）。
+  | 'config.uiLocaleSet'
   | 'model.list' | 'model.switched'
   // model:capabilityDrift：能力注册表在线对账漂移上报（U6，pi-boundary-reliability D2 ②）。
   // 全局诊断通道（无 sessionId 路由需求，消费方=设置页/composer 档位显示的自省入口）。
@@ -1392,9 +1408,10 @@ export interface PlanDocMeta {
 /**
  * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
  *
- * 四个必填字段是 entry schema v1 原有字段；三个 optional 字段是 schema 扩展
+ * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
  * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
- * （skills 缺 → 横幅显示「（未指定）」；docs 缺 → 产物区显示 planFilePath 单文件）。
+ * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
+ * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
  * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
  * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
@@ -1410,6 +1427,14 @@ export interface PlanStateView {
   docs?: PlanDocMeta[]
   /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
   reviewState?: 'awaiting' | 'revising'
+  /**
+   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
+   * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
+   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
+   * 缺省 = 来源未知，渲染通用降级文案（恢复入口 + 退出照给，不猜测来源）。
+   * 仅 reviewState 有值时有语义。
+   */
+  reviewStateSource?: 'resubmit'
 }
 
 export interface ServerMessageMapBase {
@@ -1501,6 +1526,8 @@ export interface ServerMessageMapBase {
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（无读回字段——写盘失败走错误信封）。
+  'config.uiLocaleSet': Record<string, never>
 
   // ── 协议级 reply / push（精确）──
   'pong': Record<string, never>
@@ -1552,6 +1579,10 @@ export interface ServerMessageMapBase {
   'extension:status': { sessionId: string; statusKey: string; text: string; textRaw?: string }
   // extension notify（pi fire-and-forget 通知，前端渲染为 toast）
   'extension:notify': { sessionId: string; message: string; level: 'info' | 'warn' | 'error' }
+  // 挂起 UI 请求失效广播（P2-2 失效链）：abort turn / 退出 plan / 回收等非 respond 路径
+  // 摘除 runtime pending 缓存时推给 renderer——renderer 按帧移除本屏对应请求（审批条/
+  // 表单），消除「僵尸 ready 审批条点击静默无效」的残留窗口
+  'extension:requestsInvalidated': { sessionId: string; requestIds: string[]; reason: string }
   // extension.ui_request：交互对话框请求（select/confirm/input/editor + ask-user 富交互）。
   // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
   // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
@@ -2389,6 +2420,8 @@ export interface ReplyPayloadMap {
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']
   'config.setSmartContextThresholds': ServerMessageMap['config.smartContextThresholds']
   'config.setSmartContextExcludedModels': ServerMessageMap['config.smartContextExcludedModels']
+  // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
+  'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。
   // 全部引用 ServerMessageMapBase 中登记的精确 payload 形状（W-SH-1 收紧，SSOT）。
   //  - preset.list / getDefault / getUsage / export / import
@@ -2457,7 +2490,7 @@ export interface ReplyPayloadMap {
   'session.abortHandoff': void    // reply message.status
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
-  // session.abortPlan：横幅退出 → runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
+  // session.abortPlan：PlanModeBar 退出（确认 Popover 后）→ runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
   // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
   // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
   'session.abortPlan': void       // reply message.status

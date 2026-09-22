@@ -137,6 +137,11 @@
            无 session 空态不挂。 -->
       <Composer v-else-if="showPanelComposer" :session-id="sessionId" />
     </div>
+    <!-- 计划模式状态带（plan-mode-ux-refactor u-plan-bar，设计 §3.3 D1）：composer 下方
+         一行（左区常驻模式态 + 右区情境审批条 PlanReviewBar）。组件常驻挂载（无组件级
+         v-if，承接清单①：isActive=false 时其 template 根 v-if 不渲染 DOM，订阅不随显隐
+         销毁），与 composer 相邻但不同槽位（不动 composer-bar 密度逻辑）。 -->
+    <PlanModeBar :session-id="sessionId" />
   </section>
 </template>
 
@@ -148,6 +153,7 @@ import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft 
 import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
+import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'
 import Landing from '@/components/new-task/Landing.vue'

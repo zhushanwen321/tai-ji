@@ -9,7 +9,7 @@
  *
  * 状态变更调 service（createGoal / finalizeAndPersist）；
  * ports 桥接复用 adapters/ports.buildPorts（DRY：单一 ports 构造点）；
- * FR-8.12: set/resume 后 sendUserMessage 触发 AI。
+ * FR-8.12: set/resume 后经 messaging.sendContextMessage（followUp）触发 AI。
  *
  * adapters 层可 import Pi 类型（桥接 Pi 和 service）。
  */
@@ -184,16 +184,17 @@ function handleResume(pi: ExtensionAPI, session: GoalSession, ctx: ExtensionCont
 	persistState(session, ports);
 	updateWidget(session, ports.ui);
 
-	// FR-8.12 并行模式：resume 后触发 AI 继续
+	// FR-8.12 并行模式：resume 后触发 AI 继续（custom message + followUp，
+	// 非 streaming 时经端口 triggerTurn 开轮）
 	const blockerNote = state.lastBlockerReason
 		? `\n\nPrevious blocker: ${state.lastBlockerReason}. Try a different approach.`
 		: "";
 	const capNote = cappedActive
 		? "\n\nContinuation circuit breaker was reached — pursue the objective with concrete tool-backed progress."
 		: "";
-	pi.sendUserMessage(
+	ports.messaging.sendContextMessage(
 		`Goal resumed. Continuing toward the objective.${blockerNote}${capNote}\n\nObjective: ${state.objective}`,
-		{ deliverAs: "followUp" },
+		"followUp",
 	);
 }
 
@@ -347,7 +348,7 @@ function handleUpdate(
 
 /**
  * /goal <objective> 改为「提示词触发器」：不直接 createGoal，
- * 而是 sendUserMessage 引导 AI 调 goal_control create（slug 由 AI 生成）。
+ * 而是发 custom message（followUp）引导 AI 调 goal_control create（slug 由 AI 生成）。
  *
  * 这样 goal 创建的唯一路径是 goal_control toolcall（统一入口），
  * slug/objective/budget 都由 AI 在 toolcall 时决定。
@@ -400,6 +401,7 @@ function handleSet(
 		`\nRaw objective from user: ${objective.trim()}${budgetLine}`;
 
 	ctx.ui.notify(`Requesting goal start: ${objective.trim()}`, "info");
-	// FR-8.12: 触发 AI（followUp）—— AI 消化后调 goal_control create
-	pi.sendUserMessage(message, { deliverAs: "followUp" });
+	// FR-8.12: 触发 AI（custom message + followUp，非 streaming 时开轮）—— AI 消化后调 goal_control create
+	const ports = buildPorts(pi, ctx);
+	ports.messaging.sendContextMessage(message, "followUp");
 }

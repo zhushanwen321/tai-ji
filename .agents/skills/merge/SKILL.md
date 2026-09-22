@@ -35,8 +35,6 @@ description: >-
 
 **为什么不能在 feature worktree 操作**：阶段 2 起 feature 分支已合并，阶段 7 会删除 feature worktree；version bump / commit / tag / push 等写操作落在 feature worktree 会污染已合并分支、导致 main 实际未变更。详见阶段 7 的 [HISTORICAL] 说明。
 
-**事故背景**：阶段 4 `pnpm version patch` 因 bash 调用未自包含 `cd $WS_ROOT/main`，cwd reset 到 feature worktree，把 version bump 写进了 feature worktree 的 package.json（main worktree 未动），直到 `git branch --show-current` 检查才暴露。根因是旧版本文档误称"cwd 按调用持久"，AI 据此以为阶段 3 的 `cd main` 对后续调用仍有效。
-
 ```bash
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/init.sh <worktree-dir>
 ```
@@ -134,8 +132,6 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROO
 **为什么要清理**：dev-link 让 pi 通过 `TAIJI_EXTENSION_PATHS` 加载本地源码 extension。标准用法下 link 指向当前 worktree 自己的 `extensions/`，删 worktree 时该 worktree 内的 `.env.dev-extensions` 随之删除——不会残留。但存在**跨 worktree 残留**场景（用户在 main worktree 里 link 指向 feature worktree 测改动、手动编辑/复制 `.env.dev-extensions` 跨 worktree）：这些残留 link 在 feature worktree 删除后指向不存在的路径，下次 `pnpm dev` 时 pi 加载报 ENOENT。本阶段在删 worktree 前兜底清理所有这类残留。
 
 **输出语义**：无残留时输出「无残留 link」并 exit 0；有残留时逐个列出被移除的路径并 exit 0。两种情况都不阻塞后续阶段。
-
-> 历史背景：旧版阶段 1.5 标 `[OPTIONAL]` 且让在 workspace root 跑 `link-list.sh`——但 workspace root 不是 git repo，脚本 `git rev-parse --show-toplevel` 直接 exit 2，命令根本无法执行；且 AI 靠「记不记得用过 dev-link」决定是否跳过，残留风险高。现改为无条件执行 + 跨 worktree 精确清理。
 
 ### 阶段 2: PR CI + 合并
 

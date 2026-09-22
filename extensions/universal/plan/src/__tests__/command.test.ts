@@ -24,7 +24,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { parsePlanArgs, registerPlanCommand, resolveTemplateFile } from "../command.js";
-import { MAX_PLAN_REQUIREMENT_LENGTH } from "../state.js";
+import { MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -38,7 +38,7 @@ function createMocks() {
     }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
@@ -63,6 +63,11 @@ function createMocks() {
     controllers,
     getHandler: () => capturedHandler!,
   };
+}
+
+/** custom message 形态断言 helper（A2 三要素：customType/content/display + triggerTurn options；P1-P4 无 deliverAs） */
+function planContextMessage(content: unknown) {
+  return [{ customType: PLAN_CONTEXT_CUSTOM_TYPE, content, display: false }, { triggerTurn: true }];
 }
 
 describe("registerPlanCommand", () => {
@@ -160,15 +165,15 @@ describe("registerPlanCommand", () => {
     await handler("Implement User Auth", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.taiji-harness/implement-user-auth",
+      "/tmp/test-project/.tmp/plans/implement-user-auth",
       { recursive: true },
     );
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("[PLAN MODE]"));
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Implement User Auth"));
+    expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("[PLAN MODE]")));
+    expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("Implement User Auth")));
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      planFilePath: "/tmp/test-project/.taiji-harness/implement-user-auth/plan.md",
+      planFilePath: "/tmp/test-project/.tmp/plans/implement-user-auth/plan.md",
       requirement: "Implement User Auth",
       templateName: "",
       skills: [],
@@ -181,7 +186,7 @@ describe("registerPlanCommand", () => {
     await handler("Fix bug #123: 中文标题!", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringContaining("/.taiji-harness/fix-bug-123"),
+      expect.stringContaining("/.tmp/plans/fix-bug-123"),
       { recursive: true },
     );
   });
@@ -191,7 +196,7 @@ describe("registerPlanCommand", () => {
     await handler("", ctx);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.taiji-harness/untitled",
+      "/tmp/test-project/.tmp/plans/untitled",
       { recursive: true },
     );
   });
@@ -205,8 +210,8 @@ describe("registerPlanCommand", () => {
     expect(entry.requirement.length).toBeLessThan(huge.length);
     expect(entry.requirement).toContain("characters omitted");
     // 进入提示词携带全文直达模型（该通路由 message content 注册表登记兜底，不在此封顶）
-    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(prompt.length).toBeGreaterThan(MAX_PLAN_REQUIREMENT_LENGTH);
+    const payload = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { content: string };
+    expect(payload.content.length).toBeGreaterThan(MAX_PLAN_REQUIREMENT_LENGTH);
   });
 
   it("进入新 plan 轮次清掉 entry 重建残留的指纹基线（重置清单与 resetPlanState 对齐，MF-1-4）", async () => {
@@ -253,9 +258,18 @@ describe("registerPlanCommand", () => {
 
   // --- --template 直传（D5：校验 + 解析 + 最小进入）---
 
-  /** 取第一条 sendUserMessage 的文本（fail-fast 回复 / 进入提示词共用通道） */
+  /**
+   * 取第一条 sendMessage 的 content 文本（fail-fast 回复 / 进入提示词共用通道），
+   * 并断言 custom message 形态三要素（A2：customType/display + 无 deliverAs 时 triggerTurn）
+   */
   function sentMessage(): string {
-    return (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const calls = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const [payload, options] = calls[0] as [{ content: string }, Record<string, unknown>];
+    expect(payload.customType).toBe(PLAN_CONTEXT_CUSTOM_TYPE);
+    expect(payload.display).toBe(false);
+    expect(options).toEqual({ triggerTurn: true });
+    return payload.content;
   }
 
   describe("--template via /plan handler", () => {
@@ -270,7 +284,7 @@ describe("registerPlanCommand", () => {
       // 不进入计划模式（§3.1：不写 entry / 不限制工具 / 不注入计划提示词）
       expect(pi.appendEntry).not.toHaveBeenCalled();
       expect(pi.setActiveTools).not.toHaveBeenCalled();
-      expect(pi.sendUserMessage).toHaveBeenCalledOnce();
+      expect(pi.sendMessage).toHaveBeenCalledOnce();
       const message = sentMessage();
       expect(message).toContain("--template and --skills are mutually exclusive");
       expect(message).toContain("/plan <requirement> --skills a,b");

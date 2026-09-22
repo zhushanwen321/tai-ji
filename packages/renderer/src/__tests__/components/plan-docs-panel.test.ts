@@ -2,17 +2,23 @@
  * PlanDocsPanel 组件单测 —— plan 模式重设计 u1-docs-panel（设计 §3.1 步骤 3-5 / G2 后半 +
  * G3 / D4 降级 / D10 空态 / E2 占位）。
  *
- * 覆盖（impl-plan u1-docs-panel 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-docs-panel（历史项目，未入库）验收条款）：
  * - L2 tab 渲染（多文档 tab 数、sourceSkill chip / version meta / ellipsis 截断）
  * - tab 切换渲染对应正文（file.read mock 参数带 sessionId 断言——cwd 守门契约）
  * - file.read 失败 → E2 占位错误态（条目不清，agent 可重新产出提示）
- * - 旧 schema 降级（D4）：无 docs 字段 → planFilePath 单文件（fileName 取路径末段、无 chip/version）
+ * - 旧 schema 降级（D4，§3.2 矩阵 #3 加 !isActive 门）：!isActive 且无 docs 字段 →
+ *   planFilePath 单文件（fileName 取路径末段、无 chip/version）；读失败才报「文档不存在」
+ * - 态矩阵（§3.2，u-drawer-gate）：isActive && docs 空按 agent 活跃信号分态——#1 活跃
+ *   pending 进行时 / #2 空闲 pending 等待态 + 恢复入口提示（无独立按钮）/ isGenerating
+ *   两态切换；isActive && docs 空期间 legacy 降级条目不渲染（已接受代价）
  * - docs 空 / 无 plan 状态 → 空态不渲染主体（D10 联动；isActive=false 且 docs 空同场景——
  *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」钉死）
  * - 划选评论草稿（quote 捕获后经 Popover emit → 草稿新增 / 删除；浮条细节归 plan-comment-popover.test.ts）
  * - 修订刷新（G3）：version bump / reviewState 离开 revising → 重新 file.read
+ * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
+ *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
  *
- * mock 形态照 plan-mode-banner.test.ts（command spread actual 保真实 events 通道）+
+ * mock 形态照 plan-mode-bar.test.ts（command spread actual 保真实 events 通道）+
  * command-doc-panel.test.ts（file.read mock + MarkdownRenderer 按名 stub + useChatViewDeps
  * 装配器 mock）。状态驱动用 store.applyFrame（真实 WS 帧路径，不绕被测消费链）。
  * i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
@@ -38,6 +44,29 @@ vi.mock('@taiji/core/transport/api/domains/file', () => ({
   read: vi.fn((path: string, sessionId?: string) => readMock(path, sessionId)),
 }))
 
+// chat store mock（isGenerating per-session 派生信号——设计 §3.2 态矩阵 #1/#2 判据）。
+// useChatStore 返回窄接口照 panel-container-drawer-mode.test.ts 惯例；ref 内建照
+// use-plan-drawer-sync.test.ts drawer mock 形态（工厂内建 ref，测试经 chatMock.setGenerating
+// 翻转驱动组件 computed 响应式）。spread actual 保 re-export（LRU 常量等）不丢
+const chatMock = vi.hoisted(() => {
+  const state: { setGenerating: ((v: boolean) => void) | null } = { setGenerating: null }
+  return state
+})
+vi.mock('@/stores/chat', async (importActual) => {
+  const actual = await importActual<typeof import('@/stores/chat')>()
+  const { ref } = await import('vue')
+  const generating = ref(false)
+  chatMock.setGenerating = (v: boolean) => {
+    generating.value = v
+  }
+  return {
+    ...actual,
+    useChatStore: () => ({
+      isGenerating: () => generating.value,
+    }),
+  }
+})
+
 // MarkdownRenderer stub：ui 包 MarkdownRenderer 异步走 deps.renderMarkdown（shiki 在壳），
 // 单测内按名 stub 成同步渲染 content；useChatViewDeps 装配器 mock 照 command-doc-panel.test.ts
 vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
@@ -48,15 +77,15 @@ import { usePlanStore } from '@/stores/plan-store'
 const SID = 'sess-docs'
 
 const DOCS: PlanDocMeta[] = [
-  { fileName: 'auth-token-renewal.design.md', absPath: '/data/A/.taiji-harness/auth/design.md', sourceSkill: 'tech-design', version: 1 },
-  { fileName: 'auth-token-renewal.impl-plan.md', absPath: '/data/A/.taiji-harness/auth/impl-plan.md', sourceSkill: 'dev-flow', version: 1 },
-  { fileName: 'design-review.report.md', absPath: '/data/A/.taiji-harness/auth/review.report.md', sourceSkill: '', version: 2 },
+  { fileName: 'auth-token-renewal.design.md', absPath: '/data/A/.tmp/plans/auth/design.md', sourceSkill: 'tech-design', version: 1 },
+  { fileName: 'auth-token-renewal.impl-plan.md', absPath: '/data/A/.tmp/plans/auth/impl-plan.md', sourceSkill: 'dev-flow', version: 1 },
+  { fileName: 'design-review.report.md', absPath: '/data/A/.tmp/plans/auth/review.report.md', sourceSkill: '', version: 2 },
 ]
 
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
     isActive: true,
-    planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
     skills: ['tech-design', 'dev-flow'],
@@ -95,6 +124,7 @@ beforeEach(() => {
   commandMock.mockReset()
   readMock.mockReset()
   readMock.mockResolvedValue({ content: '# body', truncated: false })
+  chatMock.setGenerating?.(false)
 })
 
 describe('PlanDocsPanel L2 文档 tab 渲染', () => {
@@ -137,13 +167,7 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
     empty.unmount()
   })
 
-  it('docs 空数组且 planFilePath 空 → 空态不渲染主体', async () => {
-    const wrapper = await mountPanel(viewOf({ docs: [], planFilePath: '' }))
-    expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
-  })
-
-  it('isActive=false 且 docs 空 → 空态不渲染主体（退出且无产物）', async () => {
+  it('isActive=false 且 docs 空 → 空态不渲染主体（退出且无产物，§3.2 矩阵 #4）', async () => {
     const wrapper = await mountPanel(viewOf({ isActive: false, docs: [], planFilePath: '' }))
     expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
@@ -163,7 +187,7 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
     })
     await flushAsync()
 
-    // view=null → 横幅 isActive 门不渲染、错误不可见（C-U1 场景）；错误落本面板空态就近呈现
+    // view=null → PlanModeBar isActive 门不渲染、错误不可见（C-U1 场景）；错误落本面板空态就近呈现
     const err = wrapper.find('[data-testid="plan-docs-load-error"]')
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('rpc timeout')
@@ -173,9 +197,58 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
   })
 })
 
-describe('PlanDocsPanel 旧 schema 降级（D4）', () => {
-  it('旧 entry 无 docs 字段 → planFilePath 单文件条目：fileName 取路径末段、无 chip / version', async () => {
-    const wrapper = await mountPanel(viewOf({ docs: undefined }))
+describe('PlanDocsPanel 态矩阵（plan-mode-ux-refactor §3.2：isActive && docs 空分态）', () => {
+  it('#1 isActive && docs 空 && agent 活跃 → pending 进行时「正在探索与撰写计划文档…」，legacy 降级条目不渲染', async () => {
+    chatMock.setGenerating?.(true)
+    // planFilePath 有值（enter 恒设该字段）——pending 判据不含该维度，且 isActive && docs 空
+    // 期间不渲染 legacy 降级条目（同 slug 旧产物暂不可回看，设计 §3.2 已接受代价）
+    const wrapper = await mountPanel(viewOf({ docs: [] }))
+    const pending = wrapper.find('[data-testid="plan-docs-pending-active"]')
+    expect(pending.exists()).toBe(true)
+    expect(pending.text()).toContain('正在探索与撰写计划文档…')
+    expect(wrapper.find('[data-testid="plan-docs-tab"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
+  })
+
+  it('#2 isActive && docs 空 && agent 空闲 → 「agent 暂未推进」+ 恢复入口提示（文案提示位，无独立按钮）', async () => {
+    const wrapper = await mountPanel(viewOf({ docs: [] }))
+    const pending = wrapper.find('[data-testid="plan-docs-pending-idle"]')
+    expect(pending.exists()).toBe(true)
+    expect(pending.text()).toContain('agent 暂未推进，可发消息继续')
+    expect(pending.text()).toContain('在对话输入框发送任意消息')
+    // 恢复入口的交互语义 = 指引用户发消息，无独立按钮（恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作）
+    expect(pending.find('button').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(false)
+  })
+
+  it('isGenerating 两态切换驱动 #1/#2 互切（响应式渲染）', async () => {
+    chatMock.setGenerating?.(true)
+    const wrapper = await mountPanel(viewOf({ docs: [], planFilePath: '' }))
+    expect(wrapper.find('[data-testid="plan-docs-pending-active"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-docs-pending-idle"]').exists()).toBe(false)
+
+    chatMock.setGenerating?.(false)
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-pending-active"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-docs-pending-idle"]').exists()).toBe(true)
+
+    chatMock.setGenerating?.(true)
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-pending-active"]').exists()).toBe(true)
+  })
+
+  it('判据不含 planFilePath 维度：docs 空且 planFilePath 空同样落 pending（不落空态）', async () => {
+    const wrapper = await mountPanel(viewOf({ docs: [], planFilePath: '' }))
+    expect(wrapper.find('[data-testid="plan-docs-pending-idle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-docs-empty"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
+  })
+})
+
+describe('PlanDocsPanel 旧 schema 降级（D4，§3.2 矩阵 #3：!isActive 门）', () => {
+  it('!isActive 且旧 entry 无 docs 字段 → planFilePath 单文件条目：fileName 取路径末段、无 chip / version', async () => {
+    const wrapper = await mountPanel(viewOf({ docs: undefined, isActive: false }))
     const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
     expect(tabs).toHaveLength(1)
     expect(tabs[0]!.text()).toContain('plan.md')
@@ -184,7 +257,23 @@ describe('PlanDocsPanel 旧 schema 降级（D4）', () => {
     expect(tabs[0]!.find('[data-testid="plan-docs-tab-version"]').exists()).toBe(false)
     // 正文仍经 file.read 读取（absPath = planFilePath）
     await flushAsync()
-    expect(readMock).toHaveBeenCalledWith('/data/A/.taiji-harness/auth/plan.md', SID)
+    expect(readMock).toHaveBeenCalledWith('/data/A/.tmp/plans/auth/plan.md', SID)
+  })
+
+  it('isActive 期间不渲染 legacy 降级条目（!isActive 门：条目可点即 E2 假错误）', async () => {
+    const wrapper = await mountPanel(viewOf({ docs: undefined }))
+    expect(wrapper.findAll('[data-testid="plan-docs-tab"]')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="plan-docs-pending-idle"]').exists()).toBe(true)
+  })
+
+  it('#3 读失败才报「文档不存在」：降级条目 file.read 失败 → E2 占位错误态，条目不清', async () => {
+    readMock.mockRejectedValue(new Error('file not found'))
+    const wrapper = await mountPanel(viewOf({ docs: undefined, isActive: false }))
+    const err = wrapper.find('[data-testid="plan-docs-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('文档不存在或已删除')
+    // 条目不清：降级 tab 仍在（agent 可重新产出）
+    expect(wrapper.findAll('[data-testid="plan-docs-tab"]')).toHaveLength(1)
   })
 })
 
@@ -194,7 +283,7 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     const wrapper = await mountPanel(viewOf())
     expect(readMock).toHaveBeenCalledTimes(1)
     // cwd 守门契约：sessionId 入参（fileApi.read(path, sid)）
-    expect(readMock).toHaveBeenCalledWith('/data/A/.taiji-harness/auth/design.md', SID)
+    expect(readMock).toHaveBeenCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
     expect(wrapper.find('.md-stub').text()).toContain('设计文档正文')
   })
 
@@ -207,8 +296,8 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     await tabs[1]!.trigger('click')
     await flushAsync()
 
-    expect(readMock).toHaveBeenLastCalledWith('/data/A/.taiji-harness/auth/impl-plan.md', SID)
-    expect(wrapper.find('.md-stub').text()).toContain('body-of:/data/A/.taiji-harness/auth/impl-plan.md')
+    expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/impl-plan.md', SID)
+    expect(wrapper.find('.md-stub').text()).toContain('body-of:/data/A/.tmp/plans/auth/impl-plan.md')
     // 选中态（aria-selected）随切换
     expect(tabs[1]!.attributes('aria-selected')).toBe('true')
   })
@@ -283,7 +372,7 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     await flushAsync()
 
     expect(readMock).toHaveBeenCalledTimes(2)
-    expect(readMock).toHaveBeenLastCalledWith('/data/A/.taiji-harness/auth/design.md', SID)
+    expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
   })
 
   it('reviewState 离开 revising → 重新 file.read（修订收尾刷新）', async () => {
@@ -334,5 +423,87 @@ describe('PlanDocsPanel 划选评论草稿（D6：quote 锚定、多条、可删
     const rest = wrapper.findAll('[data-testid="plan-comment-draft-item"]')
     expect(rest).toHaveLength(1)
     expect(rest[0]!.text()).toContain('quote-b')
+  })
+})
+
+// ── §3.5 草稿回看滚动消费（u-review-source-ui）──
+
+describe('PlanDocsPanel 草稿回看消费（§3.5：审批条计数点击 → 滚动到草稿列表）', () => {
+  let scrollIntoViewMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    // jsdom 未实现 scrollIntoView：直接替换原型方法捕获调用（用例内断言调用次数）
+    scrollIntoViewMock = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoViewMock as unknown as typeof Element.prototype.scrollIntoView
+  })
+
+  function primeDraftsWithView(store: ReturnType<typeof usePlanStore>): void {
+    // 先建立 isActive=true 旧 view 再加草稿——组件挂载首拉 resolve 后 true→true 不触发翻转清，
+    // 草稿保留（同时反向覆盖「首拉不误清审阅中草稿」）
+    store.applyFrame(SID, viewOf())
+    store.addDraftComment({ quote: '回看引文', comment: '回看评语' })
+  }
+
+  it('挂载补消费：drawer 关闭期间到达的回看请求（pending）→ 挂载后滚动到草稿列表并标记消费', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+    store.requestDraftsReveal()
+    expect(store.draftsRevealPending).toBe(true)
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="plan-comment-drafts"]').exists()).toBe(true)
+    expect(store.draftsRevealPending).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('已挂载 watch 消费：mount 后新回看请求 → 立即滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).not.toHaveBeenCalled()
+
+    store.requestDraftsReveal()
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('consumed 防重滚：请求消费一次后，drawer 重开（重挂载）不再滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    primeDraftsWithView(store)
+    store.requestDraftsReveal()
+
+    const first = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    first.unmount()
+
+    const second = await mountPanel(viewOf())
+    await flushAsync()
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1) // 不重复滚动
+    second.unmount()
+  })
+
+  it('无草稿（drafts=0）：请求照常消费（标记 consumed）但不滚动', async () => {
+    const store = usePlanStore()
+    store.syncFocus(SID)
+    store.applyFrame(SID, viewOf())
+    store.requestDraftsReveal()
+
+    const wrapper = await mountPanel(viewOf())
+    await flushAsync()
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled()
+    expect(store.draftsRevealPending).toBe(false)
+    expect(wrapper.find('[data-testid="plan-comment-drafts"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

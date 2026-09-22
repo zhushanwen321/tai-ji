@@ -49,6 +49,9 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 ### 导入源（Import Source）
 session 导入统一入口的多 coding-agent 抽象：一个导入源负责「定位外部会话 → 校验 → 转换为合法 pi session JSONL」，实现 runtime 的 SessionImportSource SPI（`listCandidates` + `prepareImport`）；公共编排（互斥/去重/原子落盘/sidecar）由 ImportService 统一承担，导入完成广播由 handler 层在 reply 后发出。现役源：pi（外部 pi JSONL 原样复制）、zcode（宿主 SQLite 库转换）。导入产物落太极 sessions 目录后完全复用现有会话消费链（渲染/续聊/搜索），导入后续聊由 pi 引擎接管。**幂等键 = 产物 header.id**；**文件名不变量**：文件名剥 `.jsonl` 后最后 `_` 尾段 === header.id（源 id 含 `_` 须归一化）。扩展指南（新增源的步骤清单与不变量全集）：[docs/architecture/session-import-sources.md](architecture/session-import-sources.md)。
 
+### 消息投影（Message Projection）
+源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
+
 ### Agent Runtime
 taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命周期、协议翻译（pi stdin/stdout JSON RPC ↔ WebSocket）、session CRUD、配置持久化（provider/skill/agent）、model 查询。是 taiji 唯一的后端，所有业务逻辑和数据持久化都在这里。前端不直接和 pi 通信，前端不做业务决策。
 
@@ -169,9 +172,9 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 **代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
 
-### Schedule Create（schedule 创建确认，2026-09-18）
+### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
-`schedule` 工具创建路径的「先确认后创建」交互：agent 提交预填草稿，用户可视化确认/调整后任务才创建，取消 = 不创建（agent 收到明确 cancelled 语义，不猜测、不重试）。交互入口已收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传，打开即可一键确认），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，确认回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`。scheduler-create 模块现为共享资产层：草稿 `ScheduleDraft`（LLM 参数即预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
+调度任务的创建入口两路：**人侧 `/schedule` 命令打开创建表单**（无参 = 空草稿、带参 `<schedule> <prompt>` = 预填；命令 handler 异步打开、立即返回，填表时长不受 prompt RPC 60s 窗口约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时要求模型先经 ask-user / 对话澄清）。交互入口收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`；`json` / `print` 模式无交互通道，带参直建、无参/失败一律 `throw`（stderr 是唯一可见通道）。scheduler-create 模块为共享资产层：草稿 `ScheduleDraft`（表单预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
 
 ### 计划模式（Plan Mode）
 
@@ -181,7 +184,7 @@ pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--ski
 
 ### plan-state entry
 
-计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）/ `reviewStateSource`（D4 兼容态成因：`explain` 请求解释 | `resubmit` 会话重启待重提交 | 无值 正常，仅描述当前降级等待，submit-review 重挂起时清空；runtime 白名单透传 + 发布水位比较字段）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
@@ -317,6 +320,6 @@ composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 
 ### 任务托盘（Widget Tray）
-composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。窄窗口下底盘密度状态机可将整托盘聚合为「层叠图标 + 运行数」单入口（层叠图标 = 聚合入口，省略号 = 溢出菜单入口，两者不共用）。设计文档 `docs/design/composer-task-tray.md`。
+composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。窄窗口下底盘密度状态机可将整托盘聚合为「层叠图标 + 运行数」单入口（层叠图标 = 聚合入口，省略号 = 溢出菜单入口，两者不共用）。设计文档已删除（git 可追溯）。
 
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。

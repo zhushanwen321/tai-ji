@@ -3,6 +3,10 @@
 
   浮层形态契约（设计 §3.3 D8 + 固定高裁决 2026-09-16 + U3 热区修复）：
   - 锚定 icon 上方（side="top"）、宽 400px 由外壳给；
+  - [窄视口钳制] 追加 `max-w-[calc(100vw-16px)]`（仓内 CommandPopover / AmbiguousFilePopover
+    同款）：固定宽 400px 在视口 < ~416px 时右侧被裁（reka 碰撞位移也救不回一个比视口还宽的面板），
+    上限收到视口 −16px 后面板自身收窄即可完整落在视口内；`min-w-0` 解掉包装层 `min-w-[240px]`
+    在极窄视口下反过来压过 max-width 的优先级问题（min-width 在 CSS 里胜出）。
   - 内容区固定高 h-[340px]（小屏 max-h 60vh 兜底）：切内部 tab 容器不塌缩，hover 态指针不
     落空（面板收起的根因消除）；
   - 热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
@@ -19,7 +23,7 @@
     side="top"
     align="start"
     :side-offset="6"
-    class="w-[400px]"
+    class="w-[400px] min-w-0 max-w-[calc(100vw-16px)]"
     @interact-outside="emit('interactOutside', $event)"
     @open-auto-focus="emit('openAutoFocus', $event)"
   >

@@ -19,7 +19,7 @@
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
 import type { QuotaFetchFailureReason } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isRecord, normalizeCookieHeader } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord, normalizeCookieHeader } from './types.js'
 import { logger } from '../../infra/logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -74,6 +74,21 @@ interface MimoApiResponse {
   }
 }
 
+/** items[] 条目形态：used/limit 可选 number（token 绝对量字段）。 */
+function isMimoUsageItem(item: unknown): boolean {
+  if (!isRecord(item)) return false
+  return isOptionalField(item.used, 'number') && isOptionalField(item.limit, 'number')
+}
+
+/** usage 组形态（monthUsage / usage 同构）：percent 可选 number，items 可选数组。 */
+function isMimoUsageGroup(group: unknown): boolean {
+  if (!isRecord(group)) return false
+  if (!isOptionalField(group.percent, 'number')) return false
+  if (group.items === undefined) return true
+  if (!Array.isArray(group.items)) return false
+  return group.items.every(isMimoUsageItem)
+}
+
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（code 判定、
  * data.monthUsage 解构）。字段缺失是合法业务态，字段类型漂移归 parse
@@ -92,20 +107,10 @@ function isMimoResponse(v: unknown): v is MimoApiResponse {
   if (o.code !== 0 && o.data === undefined) return true
   if (!isRecord(o.data)) return false
   const d = o.data
-  for (const group of [d.monthUsage, d.usage] as const) {
-    if (group === undefined) continue
-    if (!isRecord(group)) return false
-    if (group.percent !== undefined && typeof group.percent !== 'number') return false
-    if (group.items !== undefined) {
-      if (!Array.isArray(group.items)) return false
-      for (const item of group.items) {
-        if (!isRecord(item)) return false
-        if (item.used !== undefined && typeof item.used !== 'number') return false
-        if (item.limit !== undefined && typeof item.limit !== 'number') return false
-      }
-    }
-  }
-  return true
+  return (
+    (d.monthUsage === undefined || isMimoUsageGroup(d.monthUsage)) &&
+    (d.usage === undefined || isMimoUsageGroup(d.usage))
+  )
 }
 
 /**

@@ -124,7 +124,7 @@ export function persistAndUpdate(
  * - goalInit slot（index.ts，跨扩展编程式入口）
  *
  * 注：/goal <objective> 命令路径已改为提示词触发器——不直接调本函数，
- * 而是 sendUserMessage 让 AI 调 goal_control create（slug + successCriteria 由 AI 生成）。
+ * 而是发 custom message 让 AI 调 goal_control create（slug + successCriteria 由 AI 生成）。
  *
  * @param slug AI 生成的短标识（optional，仅 widget 标题 + history 用）
  * @param successCriteria 成功标准（optional，由 AI 推导或外部传入；注入 prompt 指导完成验证）

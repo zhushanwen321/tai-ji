@@ -152,3 +152,64 @@ export async function saveArtifacts(outDir, name, { page, domShape, consoleLines
   if (consoleLines) writeFileSync(join(outDir, `${name}-console.log`), consoleLines.join('\n') + '\n')
   if (page) await page.screenshot({ path: join(outDir, `${name}-fullpage.png`), fullPage: true })
 }
+
+/**
+ * Electron 窗口/视口 resize（真机窄窗验收用）：page.setViewportSize 在 Electron CDP 页面
+ * 上常不生效（viewportSize()=null），先走 viewport 通道，未生效 fallback CDP
+ * Browser.setWindowBounds（外框 = 目标内容区 + 实测边框余量）。返回原尺寸与生效通道，
+ * 供 restoreViewport 成对恢复。
+ */
+export async function resizeViewport(page, width, height) {
+  const before = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  let applied = 'viewport'
+  try {
+    await page.setViewportSize({ width, height })
+  } catch {
+    applied = 'failed'
+  }
+  await page.waitForTimeout(800)
+  let now = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  if (applied === 'failed' || Math.abs(now.w - width) > 30) {
+    applied = 'windowBounds'
+    try {
+      const cdp = await page.context().newCDPSession(page)
+      const { windowId } = await cdp.send('Browser.getWindowForTarget')
+      const { bounds } = await cdp.send('Browser.getWindowForTarget', { windowId })
+      await cdp.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: {
+          width: width + (bounds.width - before.w),
+          height: height + (bounds.height - before.h),
+        },
+      })
+    } catch (e) {
+      applied = `failed: ${String(e).slice(0, 80)}`
+    }
+    await page.waitForTimeout(800)
+    now = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  }
+  return { ...before, applied, nowW: now.w }
+}
+
+/** 恢复 resizeViewport 前的内容区宽度（windowBounds/viewport 两条路都重试）。 */
+export async function restoreViewport(page, orig) {
+  try {
+    await page.setViewportSize({ width: orig.w, height: orig.h })
+  } catch { /* fallthrough 到 windowBounds */ }
+  await page.waitForTimeout(600)
+  let now = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  if (Math.abs(now.w - orig.w) > 30) {
+    try {
+      const cdp = await page.context().newCDPSession(page)
+      const { windowId } = await cdp.send('Browser.getWindowForTarget')
+      const { bounds } = await cdp.send('Browser.getWindowForTarget', { windowId })
+      await cdp.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: { width: bounds.width - ((orig.nowW ?? orig.w) - orig.w), height: bounds.height },
+      })
+    } catch { /* 调用方留证 */ }
+    await page.waitForTimeout(600)
+    now = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  }
+  return now
+}

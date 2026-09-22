@@ -43,6 +43,7 @@ import {
   REVERSE_CHANNELS,
   REVERSE_CHANNEL_TIMEOUT_CLASS,
   type HostChildStateChangedParams,
+  type ReverseChannel,
 } from "../protocol/reverse-channels.ts";
 import {
   ENGINE_ERROR_CODE_PREFIX,
@@ -138,8 +139,14 @@ describe("9 正向方法全集", () => {
     // 类型面锁死：params/result 映射表键集 = 方法全集（缺方法 = 编译失败）
     type _ParamsKeys = AssertMutuallyAssignable<keyof ProtocolParamsMap, ProtocolMethod>;
     type _ResultKeys = AssertMutuallyAssignable<keyof ProtocolResultMap, ProtocolMethod>;
-    const keyChecks: [_ParamsKeys, _ResultKeys] = [true, true];
-    expect(keyChecks).toEqual([true, true]);
+    // U5 词表锁：ProtocolMethod ⟷ PROTOCOL_METHODS 双向互等——`satisfies readonly
+    // ProtocolMethod[]` 只保常量 ⊆ union，union 加成员不动常量的反向缺口由本断言补上
+    type _MethodConstKeys = AssertMutuallyAssignable<
+      ProtocolMethod,
+      (typeof PROTOCOL_METHODS)[number]
+    >;
+    const keyChecks: [_ParamsKeys, _ResultKeys, _MethodConstKeys] = [true, true, true];
+    expect(keyChecks).toEqual([true, true, true]);
   });
 });
 
@@ -154,6 +161,15 @@ describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
       "host/childSpawned",
       "host/childStateChanged",
     ]);
+  });
+
+  it("ReverseChannel ⟷ REVERSE_CHANNELS 双向互等（U5 词表锁：补 satisfies 单向覆盖的反向缺口）", () => {
+    type _ChannelConstKeys = AssertMutuallyAssignable<
+      ReverseChannel,
+      (typeof REVERSE_CHANNELS)[number]
+    >;
+    const lock: [_ChannelConstKeys] = [true];
+    expect(lock).toEqual([true]);
   });
 
   it("二分：数据面 5 通道 10s 超时；人机交互 1 通道不设统一超时", () => {

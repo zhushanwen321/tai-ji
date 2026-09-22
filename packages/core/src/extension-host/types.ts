@@ -131,6 +131,7 @@ export type InternalEvent =
   | { kind: 'ui-request'; sessionId?: string; request: DialogRequest } // uiRequest + extension.ui_request 归一
   | { kind: 'extension-widget'; sessionId?: string; widget: WidgetPayload } // widget + widgetGui 归一
   | { kind: 'extension-notify'; sessionId?: string; notification: NotificationPayload }
+  | { kind: 'requests-invalidated'; sessionId?: string; requestIds: string[]; reason: string } // 挂起 UI 请求失效广播（P2-2）
   | { kind: 'session-destroyed'; sessionId: string }
   | { kind: 'plugin:modalState'; modalState: PluginModalStatePayload } // S→C 开合帧（AP-2，u4a bridge 接线）
   | { kind: 'plugin:headerActionUpdate'; headerAction: HeaderActionUpdatePayload } // S→C 徽标更新帧（AP-1，u4a bridge 接线）

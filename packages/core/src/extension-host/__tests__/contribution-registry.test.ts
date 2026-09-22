@@ -98,10 +98,13 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
 
   it('TC-5b: builtin 插件骨架与 manifest 声明一致', () => {
     // composer-task-tray D10：「后台命令」view 贡献随该 native 视图退役
-    // scheduler-manager 为 plugin-header-action-modal-points AP-1/AP-2 首消费者（u4b 登记）
-    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'scheduler-manager'])
+    // scheduler-manager 为 plugin-header-action-modal-points AP-1/AP-2 首消费者（u4b 登记）；
+    // scheduler 保留 /schedule slash 声明（ADR-0050：landing 态 pi 真源为空、声明即显示，
+    // 执行由 pi extension 承担——与 manager 的 GUI 管理面职责不重叠）
+    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'scheduler-manager', 'scheduler'])
     expect(builtinContributions[0].contributes.statusBarItems).toHaveLength(1)
     expect(builtinContributions[1].contributes.slashCommands).toHaveLength(2)
+    expect(builtinContributions[3].contributes.slashCommands).toHaveLength(1) // 发现面单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
     // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
@@ -274,10 +277,10 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
   it('TC-5g: filter 按 pluginId/type 过滤；无 filter 返回全部', () => {
     const { registry } = setup()
     registry.registerBuiltin()
-    expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo'])
+    expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo', 'schedule'])
     expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    // 1 statusline + 2 tasks slashCommands + scheduler-manager 6 条（AP-1/AP-2：1 headerAction + 1 modal + 4 commands）
-    expect(registry.getContributions()).toHaveLength(9)
+    // 1 statusline + 2 tasks slashCommands + scheduler-manager 6 条（AP-1/AP-2：1 headerAction + 1 modal + 4 commands）+ scheduler 1 条 slashCommand
+    expect(registry.getContributions()).toHaveLength(10)
   })
 })
 

@@ -4,7 +4,7 @@
   去 PENDING/N排队中 标签和计数 badge、去 chevron（不支持收起）、去 pulse-accent 闪烁动画。
   仅 border-b 与下方输入区分隔，融入 composer-box bg-input 背景。
   内容：每条一行，Zap（steer，accent）/ Clock（followup，info）/ Hourglass（defer，info）icon +
-  truncate 文本；多条显前 3 条 + 「+N」。
+  truncate 文本；多条按 3 行预算显示（≤3 条全显，>3 条显 2 条 + 「+N」汇总行）。
   [compact-defer-composer-queue u1] defer 行扩展：composer 侧 defer 队列展示统一收口——
   Hourglass icon + 占用分档 chip（deferChip，session 级单一值）+ truncate 文本 + 富内容
   +N 徽标（segments 非 text 段 >0）+ hover × 撤销（emit removeDefer，仅未提交条目——
@@ -162,8 +162,17 @@ function stripDeferMarker(text: string): string {
   return text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()
 }
 
-/** 前 3 条可见（v6 §8.5：多条显前 2-3 条 + 「+N」；溢出口径覆盖三组总和） */
-const VISIBLE_MAX = 3
-const visibleItems = computed(() => flatItems.value.slice(0, VISIBLE_MAX))
-const overflowCount = computed(() => Math.max(0, flatItems.value.length - VISIBLE_MAX))
+/**
+ * 行数预算：可见行 + 「+N」溢出行合计恒 ≤ 3 行（v6 §8.5「多条显前 2-3 条 + +N」的上界执行）。
+ * 旧实现固定显 3 条，条目再多就再多出一行溢出行把 composer 纵向撑高（底栏锚在底部，往上顶）。
+ * 现在：≤ 预算全显且无溢出行（常见形态零变化）；超预算时让位给 +N 汇总行，总行数仍为 3。
+ */
+const QUEUE_LINE_BUDGET = 3
+/** 有溢出时少显一行（把那行预算让给 +N 汇总），无溢出时全显 */
+const visibleCount = computed(() =>
+  flatItems.value.length > QUEUE_LINE_BUDGET ? QUEUE_LINE_BUDGET - 1 : flatItems.value.length,
+)
+const visibleItems = computed(() => flatItems.value.slice(0, visibleCount.value))
+/** 溢出口径仍覆盖三组总和（不重复计 defer 行：单一切片起点） */
+const overflowCount = computed(() => flatItems.value.length - visibleCount.value)
 </script>

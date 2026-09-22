@@ -23,6 +23,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import planExtension from "../index.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const captured: { controllers?: Map<string, AbortController> } = {};
 
@@ -34,8 +35,9 @@ function setup() {
     on: vi.fn((event: string, handler: Handler) => {
       handlers.set(event, handler);
     }),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
     setActiveTools: vi.fn(),
+    appendEntry: vi.fn(),
   } as unknown as ExtensionAPI;
 
   planExtension(pi);
@@ -84,7 +86,51 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("submit-review"), { deliverAs: "steer" });
+    // custom message 三要素 + streaming steer options 断言（A6）
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("submit-review"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    // E3 重挂即落盘（§3.4 降级两源：该处曾只发 steer 不落盘——不落盘则 renderer 冷启动
+    // 扫描的 View 恒无 source、恒渲染通用文案）
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ isActive: true, reviewState: "awaiting", reviewStateSource: "resubmit" }),
+    );
+  });
+
+  it("revising + no live select → steers the agent to continue the revision (P1-1：revising 崩溃恢复缺口)", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: ["tech-design"],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
+        reviewState: "revising",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("revision"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    // revising 恢复不落 source 标记（'resubmit' 只描述 awaiting 降级等待；revising 由
+    // steer triggerTurn 立即开轮接续，恢复期间显示的 revising 是真实进行中）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
@@ -115,7 +161,9 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalled();
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    // 非 awaiting 不落盘：E3 source 标记只在 awaiting 重挂分支写
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
   it("inactive plan → no reminder, no tool restriction", async () => {
@@ -125,7 +173,7 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -150,10 +198,11 @@ describe("before_agent_start hook（D9：taiji 形态引导注入）", () => {
     ) as { systemPrompt?: string } | undefined;
 
     expect(result?.systemPrompt).toContain(basePrompt);
-    expect(result?.systemPrompt).toContain("/plan");
-    expect(result?.systemPrompt).toContain("--skills");
-    // 未经确认不自行进入的约束在场
-    expect(result?.systemPrompt).toContain("Do NOT enter plan mode without the user's confirmation");
+    // agent 自助进入引导在场（enter action + 无需确认）
+    expect(result?.systemPrompt).toContain("plan(action='enter'");
+    expect(result?.systemPrompt).toContain("Do not ask for permission to enter");
+    // 旧的「建议 + 需确认」措辞已移除（enter 是 tool action，无需确认闸门）
+    expect(result?.systemPrompt).not.toContain("Do NOT enter plan mode without the user's confirmation");
   });
 
   it("注入失败（systemPrompt 读取抛错）→ logger.warn 落盘 + 返回 undefined，不阻塞 agent loop（MF-1-8）", () => {

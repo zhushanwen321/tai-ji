@@ -183,7 +183,7 @@
     },
     {
       "id": "E2E-MOCK-02",
-      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（横幅/审批条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
+      "summary": "plan GUI behavior 资产（R2 按改动面）：renderer plan 面单测（状态带/审阅条/文档面板/评论/store/sync）+ ui drawer scope 机制洞补齐",
       "scope": [
         "packages/ui/src/features/drawer/**",
         "packages/renderer/src/components/panel/plan/**",
@@ -199,7 +199,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/components/plan-mode-banner.test.ts"
+          "ref": "packages/renderer/src/__tests__/components/plan-mode-bar.test.ts"
         },
         {
           "kind": "spec",
@@ -228,7 +228,7 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-banner.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"
@@ -650,7 +650,7 @@
     },
     {
       "id": "E2E-SCHED-01",
-      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S19 契约，含 schedule-create 确认交互应答）",
+      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S23 契约：模型路径直建 + /scheduler 命令表单 + 命令路径确认轮持久化，notify 帧 + session JSONL 双轨断言）",
       "scope": [
         "extensions/universal/scheduler/**",
         "scripts/verify-scheduler-e2e.cjs"
@@ -667,7 +667,7 @@
       "run": "node scripts/verify-scheduler-e2e.cjs",
       "owner": "extensions/universal/scheduler",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。2026-09-18 U7 起驱动器具备 extension_ui_request→extension_ui_response 应答循环（schedule-create 确认/取消可配置 uiActor，S18 确认 / S19 取消；既有场景默认 auto-confirm）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行。[2026-09-19 ui-presentation-protocol u6] scheduler 创建确认迁统一表单协议：uiFormInteract + UI_FORM_MARKER（ScheduleQuestion 单问整表单），回包 FormAnswers envelope（schedule value = JSON.stringify(ScheduleFormResult)）；verify 脚本 marker 识别与 S18 确认 / S19 取消断言已随 form 契约改造，S1-S19 空载串行复验全绿（exit 0）"
+      "note": "spawn 真实 pi 进程族，按 e2e 执行准则空载串行。[u-e2e-adjust] 命令路径持久化证据轨改锚「确认轮」：建任务后 scheduler 注入零 token 本地合成轮（覆写会话当前 provider 的 streamSimple，产出 stopReason=aborted 的 assistant 行 + ack.confirm 文案），这就是正常路径——打开 pi 会话落盘开关，flush 探针退役；S18/S19/S20/S21 改为断言会话 JSONL 的 aborted assistant 行 + 确认文案（locale 钉死 en-US）+ op=upsert 落盘（S19 为负向：无 assistant 行、无 upsert）；新增 S22（合成行字段：provider/model=会话模型、usage 全 0 + 宿主不变量：model_change/thinking_level_change 不因创建新增 + auto-rename 不被合成轮触发）与 S23（同会话连续两次创建 ⇒ 确认轮恰 1 次）。"
     },
     {
       "id": "E2E-BATCH-01",
@@ -891,6 +891,26 @@
       "owner": "docs/testing",
       "authority": "docs/testing/render-sampling.md",
       "note": "R3 归档态（2026-09-20 收尾登记）：管道六环节 SSOT = render-sampling.md，脚本与文档同 commit 维护；场景脚本自写不进本目录；on-diff = 改管道本身时提醒预飞，无独立 CI 环节"
+    },
+    {
+      "id": "E2E-ZCODECLEANUP-01",
+      "summary": "zcode 引擎宿主库存量会话行清理工具（白名单清理 + --plan 确认 + --confirm-count 受控旁路）——单测轨覆盖（scripts/__tests__/zcode-session-db-cleanup.test.mjs），rule 按防漏登记门禁挂 watch",
+      "scope": [
+        "scripts/zcode-session-db-cleanup.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/zcode-session-db-cleanup.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node --test scripts/__tests__/zcode-session-db-cleanup.test.mjs",
+      "owner": "scripts",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "破坏性清理工具，真机执行由停机窗口流程承载（--plan 先行），不入 CI"
     }
   ]
 }

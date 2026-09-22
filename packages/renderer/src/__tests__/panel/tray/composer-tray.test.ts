@@ -1,5 +1,5 @@
 /**
- * ComposerTray 外壳测试（u-tray-shell，设计 docs/design/composer-task-tray.md
+ * ComposerTray 外壳测试（u-tray-shell，设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
  * §3.3 D1/D6/D7/D8/D9/D12 + §3.1 场景 A/C + §3.4 终态数据流）。
  *
  * 三视角（TEST-STRATEGY §3）：
@@ -460,6 +460,21 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
     expect(panelKeys()).toEqual(['native:bash'])
     await advance(1)
     expect(panelKeys()).toEqual([])
+  })
+
+  it('浮层宽度钳制：400px 上限 + 视口钳制（窄视口不被裁）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource(SID))
+
+    await builtinButton('bash').trigger('pointerenter')
+    await advance(OPEN_MS)
+
+    // 基准宽 400px（设计 D8）；窄视口下收到 视口-16px（仓内 CommandPopover 同款钳制），
+    // min-w-0 解掉包装层 min-w-[240px] 在极窄视口下反过来压过 max-width 的优先级问题
+    const cls = panelLayerNode().className
+    expect(cls).toContain('w-[400px]')
+    expect(cls).toContain('max-w-[calc(100vw-16px)]')
+    expect(cls).toContain('min-w-0')
   })
 
   it('指针离开浮层 → 240ms 后收起（浮层与 icon 同语义）', async () => {

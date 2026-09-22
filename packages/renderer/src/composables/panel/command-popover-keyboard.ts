@@ -36,8 +36,21 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useCompositionFlag } from './composition-flag'
+import { normalizedSlashName } from '@/components/panel/command-popover-symbols'
+import type { ShellInputInstance } from './composer-shell'
 
-export interface CommandPopoverKeyboardOpts<T> {
+/** exactMatch 直发对候选项的最小结构要求（command-enter-exact-send D1 前置③读 name、禁选守卫读 selected） */
+type KeyboardItem = { name: string; selected?: boolean }
+
+/** D1 前置② activeElement 门：document.activeElement 在 composer 输入区内（$el = 输入区根
+ *  contenteditable，单根组件契约，同 PresetChip ElementHost 先例）；无引用/未挂载 = false。 */
+function activeElementInInput(ref: Readonly<Ref<ShellInputInstance | null>> | undefined): boolean {
+  const root = (ref?.value as (ShellInputInstance & { $el?: Element }) | null | undefined)?.$el
+  if (!root) return false // fail-closed：缺省/未挂载不直发走现状插 chip（禁 fail-open）
+  return root === document.activeElement || root.contains(document.activeElement)
+}
+
+export interface CommandPopoverKeyboardOpts<T extends KeyboardItem> {
   /** 浮层 open 态：false 时全部键放行（Enter 正常发送契约） */
   open: () => boolean
   /** 当前候选列表（长度变化即触发 activeIndex 收敛） */
@@ -48,6 +61,20 @@ export interface CommandPopoverKeyboardOpts<T> {
   close: () => void
   /** 高亮重置键（open / type / query 变化即归零——沿用组件既有语义） */
   resetKeys: () => readonly unknown[]
+  /** 当前过滤 query（exactMatch 右值 `'/'+query`；accessor 形态同 command-popover-open-fetch.ts） */
+  query: () => string
+  /** 浮层路由类型（D1 前置① type==='slash' 路由门：五路共享键盘分支，仅 slash 路 `/`+query
+   *  形态成立——session 路 label 可以 `/` 开头，不加门会被 `#deploy` 误命中直发） */
+  type: () => 'file' | 'slash' | 'session' | 'subagent' | 'skill'
+  /** D1 前置② activeElement 门的输入区引用通道（Composer shellInputRef prop 一跳 + 本 accessor，
+   *  通道缺口③，accessor 形态同 query/type）。SearchModal 打开时 cmdOpen 残留面的误发防线；
+   *  缺省 = 不直发走现状插 chip（fail-closed 禁 fail-open） */
+  shellInputRef?: () => Readonly<Ref<ShellInputInstance | null>> | undefined
+  /** exactMatch 直发通道（D1 分流，仅 Enter 三重前置全过时调用；Tab 恒走 onSelect）。接线 =
+   *  插 chip 复用 onSelect 现链 + 同步直调 composer keydown 链（dispatchEnter 所在）——
+   *  严禁合成/再派发 KeyboardEvent（D2：原事件已被 window capture stopPropagation 截断，
+   *  合成事件会落到 ComposerInput 冒泡 → 二次 dispatchEnter → 双发） */
+  onSelectAndSend: (item: T, e: KeyboardEvent) => void
 }
 
 export interface CommandPopoverKeyboard {
@@ -59,7 +86,9 @@ export interface CommandPopoverKeyboard {
   handleKeydown: (e: KeyboardEvent) => boolean
 }
 
-export function useCommandPopoverKeyboard<T>(opts: CommandPopoverKeyboardOpts<T>): CommandPopoverKeyboard {
+export function useCommandPopoverKeyboard<T extends KeyboardItem>(
+  opts: CommandPopoverKeyboardOpts<T>,
+): CommandPopoverKeyboard {
   const activeIndex = ref(0)
   /** IME 组合态双保险的事件侧面（window capture compositionstart/end 维护，详见 composition-flag.ts） */
   const { composing: composingRef } = useCompositionFlag()
@@ -121,15 +150,32 @@ export function useCommandPopoverKeyboard<T>(opts: CommandPopoverKeyboardOpts<T>
       // 传播——这是「浮层 open 时 Enter 选中候选、绝不触发 composer onSend」的唯一防线
       // （composer-keydown 无 defaultPrevented 防御层：contenteditable Enter 分支恒先
       // preventDefault 再转发，防御层会拦死正常发送）。勿删。
-      // 边界：stopPropagation 不拦同节点上已注册的其他 listener——split mode 双浮层同时 open
-      // 时按注册序先到先得（设计 D2 边界声明①，已知限制）。
+      // [HISTORICAL] 边界：stopPropagation 不拦同节点上已注册的其他 listener——split mode 双浮层
+      // 同时 open 时按注册序先到先得（设计 D2 边界声明①）。split mode 已移除（2026-07-24 退化为
+      // 恒单 panel，见 stores/panel.ts 头注），双浮层场景不复存在；泛化命题（同节点其他 listener
+      // 不受 stopPropagation 影响）仍成立。
       if (composingRef.value || e.isComposing) return false // IME 双保险：组合中 Enter 是确认候选词，放行
       e.preventDefault()
       e.stopPropagation()
       // 空候选（空态行）：无项可选中，仅消费事件终止链路；**不**顺带关闭浮层（不改变 open
       // 状态）——避免用户下一次 Enter 在无浮层可感知的情况下意外发送（Escape 仍是显式关闭入口）。
       // 读点直取 list[activeIndex]：越界已由上方 sync watch 收敛（收敛点单一化），不再 Math.min 兜底。
-      if (len > 0) opts.onSelect(list[activeIndex.value])
+      if (len > 0) {
+        // exactMatch 键盘层闭包现算（裁死：不走 symbols 导出派生态），判定置于 len>0 内——
+        // 空候选分支先于判定，提到外面会读 list[activeIndex] 的 undefined。
+        const item = list[activeIndex.value]
+        // D1 分支序：type 门 → activeElement 门 → exactMatch（两侧 toLowerCase，与过滤
+        // normalizedSlashName(name).toLowerCase().includes(q) 对齐——`/COMPACT` 完整名同样直发）
+        const exactMatch =
+          opts.type() === 'slash' &&
+          activeElementInInput(opts.shellInputRef?.()) &&
+          normalizedSlashName(item.name).toLowerCase() === ('/' + opts.query()).toLowerCase()
+        // 分流：exactMatch 直发仅 Enter（命中后先查 item.selected 禁选守卫——已选 skill 降级
+        // 不直发，守卫语义单源在 CommandPopover.onSelect）；Tab 恒 onSelect 插 chip（补参通道
+        // 不因完整名关闭）
+        if (exactMatch && !item.selected && e.key === 'Enter') opts.onSelectAndSend(item, e)
+        else opts.onSelect(item)
+      }
       return true
     }
     if (e.key === 'Escape') {

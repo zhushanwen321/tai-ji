@@ -1,12 +1,18 @@
 /**
  * plan store 单测 —— plan 模式重设计 u1-store 层 1（状态与操作）。
  *
- * 覆盖（impl-plan u1-store 验收条款）：
+ * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
  * - 三步阶段推导三元组（D1：① exploring / ② writing / ③ reviewing；isActive 门 + reviewState 优先）
  * - 首拉成功写分区 / 响应缺 planState 置空 / RPC 失败错误通路（分区 loadError，view 不被覆盖）
  * - WS 帧落地 updateFor 分区写（applyFrame + 清 loadError）
  * - 评论草稿只作用焦点分区（per-session 隔离、切回恢复、越界删除 no-op、null 焦点 no-op）
  * - cleanup 链（triggerSessionCleanups → 分区重置，其他 session 保留）
+ * - §3.5 enter 翻转清草稿（applyFrame 与 loadPlanState 双路 updateFor 出口：sid 分区内
+ *   isActive 旧值 无→有 翻转清该 sid 草稿；true→true / true→false / 失败路径不清；
+ *   切 session 焦点视图不误清——设计禁令的反向断言）
+ * - §3.5 草稿回看请求信号（requestDraftsReveal / markDraftsRevealConsumed / per-session 隔离）
+ * - 陈旧首拉守卫（F-R2-1）：首拉在途窗口内帧到达 → 迟到的空/失败 reply 整体丢弃
+ *   （不倒拨 view、不误写 loadError）；正常序（reply 先于帧）与新一轮重拉不受守卫误伤
  *
  * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
  * 的 mock 边界（spread actual 保真实 events 通道，只换 command）。
@@ -43,14 +49,14 @@ import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 
 const BASE_VIEW: PlanStateView = {
   isActive: true,
-  planFilePath: '/data/A/.taiji-harness/auth/plan.md',
+  planFilePath: '/data/A/.tmp/plans/auth/plan.md',
   requirement: '重构 auth 模块',
   templateName: 'default',
 }
 
 const DOC: PlanDocMeta = {
   fileName: 'design.md',
-  absPath: '/data/A/.taiji-harness/auth/design.md',
+  absPath: '/data/A/.tmp/plans/auth/design.md',
   sourceSkill: 'tech-design',
   version: 1,
 }
@@ -123,7 +129,7 @@ describe('derivePlanStage：三步阶段推导三元组', () => {
     expect(derivePlanStage({ ...BASE_VIEW, reviewState: 'awaiting' })).toBe('reviewing')
   })
 
-  it('isActive=false（退出/执行后 reset 终态）或无 view → null（横幅消失，阶段随横幅不外显）', () => {
+  it('isActive=false（退出/执行后 reset 终态）或无 view → null（无 plan 态呈现，阶段随之不外显）', () => {
     expect(derivePlanStage(null)).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false })).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false, docs: [DOC], reviewState: 'awaiting' })).toBeNull()
@@ -181,6 +187,115 @@ describe('loadPlanState：首拉与错误通路', () => {
     expect(planLoadError.value).toBe('session not found')
     // 失败不覆盖现有分区 view（subagent loadSubagents M1 同款）
     expect(planView.value?.docs?.length).toBe(1)
+  })
+})
+
+// ── 陈旧首拉守卫（F-R2-1：首拉空 reply 晚于 live 帧 → 丢弃，不倒拨热状态）──
+
+describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
+  it('归因场景：首拉在途 → 帧先达（view=active）→ 迟到的空 reply 丢弃，view 保持 active', async () => {
+    const { store, planView, planStage, planLoadError } = usePlanRefs()
+    store.syncFocus('A')
+    // 首拉发出（base rev 记录），reply 悬挂——模拟 runtime 冷腿慢（scanSessions 全目录重扫）
+    void store.loadPlanState('A')
+    // live 帧在请求在途窗口内到达（/plan 毫秒级落盘 entry → 300ms 防抖 → publish）
+    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
+    expect(planView.value?.isActive).toBe(true)
+
+    // 迟到的首拉 reply：冷读早于 entry 落盘 → 空（INACTIVE）
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+
+    // 守卫生效：view 不被倒拨回空（bar 90s 不显形的根因消除）
+    expect(planView.value?.isActive).toBe(true)
+    expect(planView.value?.docs?.length).toBe(1)
+    expect(planStage.value).toBe('writing')
+    expect(planLoadError.value).toBeNull()
+  })
+
+  it('失败分支同守卫：首拉在途窗口内帧到达 → 迟到的 reject 丢弃，不误写 loadError', async () => {
+    const { store, planView, planLoadError } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    store.applyFrame('A', { ...BASE_VIEW })
+
+    rejectLatestForSid('A', new Error('stale failure'))
+    await settle()
+
+    expect(planView.value?.isActive).toBe(true)
+    expect(planLoadError.value).toBeNull()
+  })
+
+  it('正常序不误伤：reply（空）先于帧到达 → 置空生效，随后帧照常写入', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value).toBeNull()
+
+    // 帧晚于 reply：applyFrame 不经守卫，live 权威照常落地
+    store.applyFrame('A', { ...BASE_VIEW })
+    expect(planView.value?.isActive).toBe(true)
+  })
+
+  it('新一轮重拉不受上轮丢弃误伤：帧失效请求 1 → 请求 2（新基准）reply 正常回填', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    // 请求 1：切会话首拉（空启动）
+    void store.loadPlanState('A')
+    // 在途窗口帧到达 → 请求 1 失效
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+
+    // 请求 2：切回重拉（新基准，晚于帧）
+    void store.loadPlanState('A')
+
+    // FIFO 到达序（对齐真机）：请求 1 的迟到空 reply 先到 → 丢弃
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value?.isActive).toBe(false) // 帧 view 未被倒拨
+
+    // 请求 2 的 reply 后到：新基准放行，正常回填
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
+    await settle()
+    expect(planView.value?.isActive).toBe(true)
+    expect(planView.value?.docs?.length).toBe(1)
+  })
+
+  it('cleanup 链同步清帧版本：session 销毁后重建分区，首拉回填不受残留版本影响', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    void store.loadPlanState('A')
+    store.applyFrame('A', { ...BASE_VIEW })
+
+    triggerSessionCleanups('A')
+    await settle()
+
+    // 分区已重置；cleanup 前在途请求的版本表条目已随 cleanup 删除 → 迟到 reply 丢弃，
+    // 不写进已重置的分区
+    store.syncFocus('A')
+    expect(planView.value).toBeNull()
+    resolveForSid('A', {
+      sessionId: 'A',
+      planState: null,
+    } as unknown as { sessionId: string; planState: PlanStateView })
+    await settle()
+    expect(planView.value).toBeNull()
+
+    // 销毁后重新首拉：版本表已清（新基准），reply 正常回填
+    void store.loadPlanState('A')
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW } })
+    await settle()
+    expect(planView.value?.isActive).toBe(true)
   })
 })
 
@@ -258,12 +373,14 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
 
   it('cleanup 链：triggerSessionCleanups → 该 session 分区重置，其他 session 保留', async () => {
     const { store, planView, draftComments } = usePlanRefs()
+    // 草稿先于 view 建立会被 §3.5 翻转清兜底清掉（null→active = 新审阅轮），真机时序
+    // 是审阅态（view 就绪）下才产生草稿——先 applyFrame 再 addDraft 对齐真机序列
     store.syncFocus('A')
-    store.addDraftComment(C1)
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
+    store.addDraftComment(C1)
     store.syncFocus('B')
-    store.addDraftComment(C2)
     store.applyFrame('B', { ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })
+    store.addDraftComment(C2)
 
     triggerSessionCleanups('A')
     await settle()
@@ -277,5 +394,122 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
     // B 分区不受 A 清理影响
     expect(draftComments.value).toEqual([C2])
     expect(planView.value?.reviewState).toBe('awaiting')
+  })
+})
+
+// ── §3.5 enter 翻转清草稿（分区写入共同出口，禁焦点视图落点）──
+
+describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区）', () => {
+  const C: PlanReviewComment = { quote: '上一轮残留引文', comment: '上一轮残留评语' }
+
+  it('WS 帧路径：sid 分区 isActive 无→有 翻转（applyFrame）→ 清该 sid 残留草稿', () => {
+    const { store, draftComments } = usePlanRefs()
+    // 退出态（isActive=false）残留草稿 = agent 自退/崩溃绕过 GUI 确认的路径
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+    expect(draftComments.value).toEqual([C])
+
+    // 同 sid 新一轮 plan 进入（false→true 翻转）→ 草稿清
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    expect(draftComments.value).toEqual([])
+  })
+
+  it('首拉路径：loadPlanState 冷启动返回 isActive=true → 同样触发翻转清（双路同覆）', async () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+
+    void store.loadPlanState('A')
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, isActive: true } })
+    await settle()
+
+    expect(draftComments.value).toEqual([])
+  })
+
+  it('true→true（审阅中的重复帧/首拉回放）不清：审阅中草稿安全', () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    store.addDraftComment(C)
+
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('true→false（退出/执行后）不清：草稿清走退出确认路径', () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true })
+    store.addDraftComment(C)
+
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('首拉失败（RPC reject）不清：view 不被覆盖，翻转无从发生', async () => {
+    const { store, draftComments } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: false })
+    store.addDraftComment(C)
+
+    void store.loadPlanState('A')
+    rejectLatestForSid('A', new Error('offline'))
+    await settle()
+
+    expect(draftComments.value).toEqual([C])
+  })
+
+  it('切 session 焦点视图不误清（设计禁令反向断言）：审阅中 A 的草稿在焦点切走切回后保留', async () => {
+    const { store, draftComments } = usePlanRefs()
+    // A 审阅中（isActive=true）且已有草稿——若误挂「焦点视图 watch」落点，
+    // 从无 view 的 B 切到 A 时焦点 isActive 呈假「无→有」翻转，会误清 A
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    store.addDraftComment(C)
+    expect(draftComments.value).toEqual([C])
+
+    // 焦点切到无 plan 状态的 B → 再切回 A：syncFocus 只动焦点指针，不写分区
+    store.syncFocus('B')
+    void store.loadPlanState('B') // B 侧首拉（返回 isActive=true 触发 B 的翻转清——只清 B 分区）
+    resolveForSid('B', { sessionId: 'B', planState: { ...BASE_VIEW, isActive: true } })
+    await settle()
+
+    store.syncFocus('A')
+    expect(draftComments.value).toEqual([C]) // A 草稿不误清
+  })
+})
+
+// ── §3.5 草稿回看请求信号 ──
+
+describe('草稿回看请求（requestDraftsReveal / markDraftsRevealConsumed）', () => {
+  it('请求递增 seq 并置 pending；消费标记复位 pending', () => {
+    const { store } = usePlanRefs()
+    store.syncFocus('A')
+    expect(store.draftsRevealSeq).toBe(0)
+    expect(store.draftsRevealPending).toBe(false)
+
+    store.requestDraftsReveal()
+    expect(store.draftsRevealSeq).toBe(1)
+    expect(store.draftsRevealPending).toBe(true)
+
+    store.markDraftsRevealConsumed()
+    expect(store.draftsRevealPending).toBe(false)
+
+    // 新请求：seq 再递增、pending 复位（drawer 重开后的第二次回看仍可消费）
+    store.requestDraftsReveal()
+    expect(store.draftsRevealSeq).toBe(2)
+    expect(store.draftsRevealPending).toBe(true)
+  })
+
+  it('per-session 隔离：A 的待消费请求不串 B 分区', () => {
+    const { store } = usePlanRefs()
+    store.syncFocus('A')
+    store.requestDraftsReveal()
+
+    store.syncFocus('B')
+    expect(store.draftsRevealSeq).toBe(0)
+    expect(store.draftsRevealPending).toBe(false)
   })
 })

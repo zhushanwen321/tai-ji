@@ -27,8 +27,8 @@ export interface PlanPromptInput {
   /**
    * 项目级模板源锚点（设计 D2 锚定 = 命令层 ctx.cwd），注入段扫描
    * <projectRoot>/.agents/plans。显式传入而非从 planFilePath 逆推层级——
-   * planFilePath = <ctx.cwd>/.taiji-harness/<slug>/plan.md 三层深，层级逆推
-   * 曾差一层得 <ctx.cwd>/.taiji-harness 致项目级源恒扫空（U1），且与
+   * planFilePath = <ctx.cwd>/.tmp/plans/<slug>/plan.md（slug 目录嵌套），层级逆推
+   * 曾差层级致项目级源恒扫空（U1），且与
    * select-template 侧（listTemplates({ projectRoot: ctx.cwd })）同锚点双轨同源。
    */
   projectRoot: string;
@@ -83,7 +83,7 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
   // ② 产物纪律
   sections.push(
     `## Deliverable Discipline\n` +
-    `- Write every deliverable document into the plan directory (.taiji-harness/<slug>/), then register it: plan(action='register-doc', fileName='design.md', sourceSkill='<skill name or omit>').\n` +
+    `- Write every deliverable document into the plan directory (.tmp/plans/<slug>/), then register it: plan(action='register-doc', fileName='design.md', sourceSkill='<skill name or omit>').\n` +
     `- After revising a document, REWRITE the file and re-register it with plan(action='register-doc', fileName=...) again — the version is bumped so the UI refreshes its content.\n` +
     `- When ALL documents are done, call plan(action='submit-review') to request user review.\n` +
     `- After submit-review is consumed (whether an explanation or a revision request), finish responding for the current turn, then call plan(action='submit-review') again to re-hang the review — repeat until the user confirms execution.`,

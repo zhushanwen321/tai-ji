@@ -6,6 +6,13 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { WorktreeService, type WorktreeServiceDeps } from './worktree-service.js'
+import { ShellRunnerError } from '../ports/shell-runner.js'
+import { logger } from '../../infra/logger.js'
+
+// mock logger：断言结构化打点（成败/回滚/base fallback），且避免测试写真实日志文件
+vi.mock('../../infra/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}))
 
 // ── mock helpers ─────────────────────────────────────────────
 
@@ -33,7 +40,8 @@ function mockGitExecutor(overrides?: {
   const allResults = new Map([...defaultResults, ...(overrides?.execResults ?? [])])
 
   return {
-    exec: vi.fn(async (_cwd: string, command: string, args?: string[]) => {
+    // 第 4 参 opts（timeoutMs）：RT-8 后续 worktree add/remove 显式传 60s 超时，mock 需收得住
+    exec: vi.fn(async (_cwd: string, command: string, args?: string[], _opts?: { timeoutMs?: number }) => {
       const fullKey = `${command} ${(args ?? []).join(' ')}`.trim()
       // 精确匹配优先
       const exact = allResults.get(fullKey)
@@ -76,8 +84,12 @@ function mockConfigService(worktreeRootDir = '/home/user/worktrees') {
   }
 }
 
-/** 创建 mock fs。 */
-function mockFs(existingPaths = new Set<string>()) {
+/**
+ * 创建 mock fs。files = 内存盘（readFileSync/writeFileSync 的后备存储，config.worktree
+ * 补齐路径的写入断言用；测试里传入同一 Map 即可读回写入内容）。
+ */
+function mockFs(existingPaths = new Set<string>(), files?: Map<string, string>) {
+  const disk = files ?? new Map<string, string>()
   return {
     existsSync: vi.fn((p: string) => existingPaths.has(p)),
     statSync: vi.fn((p: string) => {
@@ -89,6 +101,18 @@ function mockFs(existingPaths = new Set<string>()) {
       // 测试中 existingPaths 里的路径默认当目录处理（.bare 等）
       return { isDirectory: () => true, isFile: () => false }
     }),
+    readFileSync: vi.fn((p: string, _encoding: 'utf8') => {
+      const content = disk.get(p)
+      if (content === undefined) {
+        const e = new Error(`ENOENT: ${p}`) as NodeJS.ErrnoException
+        e.code = 'ENOENT'
+        throw e
+      }
+      return content
+    }),
+    writeFileSync: vi.fn((p: string, data: string) => {
+      disk.set(p, data)
+    }),
   }
 }
 
@@ -98,6 +122,8 @@ function createDeps(options?: {
   existingPaths?: Set<string>
   gitOverrides?: Parameters<typeof mockGitExecutor>[0]
   worktreeRootDir?: string
+  /** config.worktree 补齐路径的内存盘（传入同一 Map 可读回写入内容） */
+  files?: Map<string, string>
 }) {
   const mode = options?.mode ?? 'bare-workspace'
   const existingPaths = options?.existingPaths ?? new Set<string>()
@@ -124,7 +150,7 @@ function createDeps(options?: {
     shellRunner: mockShellRunner(),
     gitInfoReader: mockGitInfoReader(),
     configService: mockConfigService(options?.worktreeRootDir),
-    fs: mockFs(existingPaths),
+    fs: mockFs(existingPaths, options?.files),
   } satisfies WorktreeServiceDeps
 }
 
@@ -184,6 +210,8 @@ describe('WorktreeService.create() bare-workspace', () => {
       '/project/.bare',
       'worktree',
       ['add', '-b', 'feat/new-feature', '/project/feat-new-feature', 'origin/main'],
+      // RT-8 后续：add 是整树 checkout，显式传 60s（不用 git-executor 8s 轻查询默认值）
+      { timeoutMs: 60_000 },
     )
   })
 
@@ -548,12 +576,15 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
       '/project/.bare',
       'worktree',
       ['remove', '--force', '--force', '/project/feat-test'],
+      // RT-8 后续：remove 是整树删除，同 add 显式传 60s
+      { timeoutMs: 60_000 },
     )
     // 逆序 ②：删除本次 add -b 新建的分支（不删则重试报「分支已存在」）
     expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
       '/project/.bare',
       'branch',
       ['-D', 'feat/test'],
+      { timeoutMs: 60_000 },
     )
   })
 
@@ -579,11 +610,13 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
       '/home/user/my-repo',
       'worktree',
       ['remove', '--force', '--force', '/home/user/my-repo/feat-test'],
+      { timeoutMs: 60_000 },
     )
     expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
       '/home/user/my-repo',
       'branch',
       ['-D', 'feat/test'],
+      { timeoutMs: 60_000 },
     )
   })
 
@@ -601,17 +634,23 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
       },
     })
     deps.shellRunner.execute = vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: 'install failed' }))
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const service = new WorktreeService(deps)
 
     await expect(
       service.create({ branch: 'feat/test', workspaceHint: '/project' }),
     ).rejects.toMatchObject({ code: 'SETUP_FAILED', message: expect.stringContaining('setup 脚本失败') })
 
-    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
-    expect(warned).toContain('回滚不完整')
-    expect(warned).toContain('git -C /project/.bare worktree remove --force /project/feat-test')
-    warnSpy.mockRestore()
+    // 留痕已升级为结构化 logger.warn（RT-8 后续：原 console.warn 无 meta、不可断言、
+    // 「仅 console.warn 会丢」正是当年把它请进 error detail 的动因）
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[worktree-service] setup 失败后回滚不完整，半成品残留',
+      expect.objectContaining({
+        branch: 'feat/test',
+        worktreePath: '/project/feat-test',
+        cleanupHint: expect.stringContaining('git -C /project/.bare worktree remove --force /project/feat-test'),
+        failures: expect.arrayContaining([expect.stringContaining('worktree remove 失败')]),
+      }),
+    )
   })
 
   it('回滚不完整 → 原始 SETUP_FAILED 的 detail 带 cleanupHint + rollbackIncomplete（裁决 #10：清理指引随错误进 envelope，不停在 console）', async () => {
@@ -663,6 +702,13 @@ describe('WorktreeService setup 失败回滚（RT-8#6）', () => {
         }
         return { isDirectory: () => true, isFile: () => false }
       }),
+      // config.worktree 补齐路径（ensureWorktreeUsable）：本用例不关注其内容，no-op 记录即可
+      readFileSync: vi.fn((_p: string, _encoding: 'utf8') => {
+        const e = new Error(`ENOENT: ${_p}`) as NodeJS.ErrnoException
+        e.code = 'ENOENT'
+        throw e
+      }),
+      writeFileSync: vi.fn(),
     }
     const gitExec = vi.fn(async (_cwd: string, command: string, args?: string[]) => {
       const key = `${command} ${(args ?? []).join(' ')}`.trim()
@@ -745,3 +791,317 @@ describe('WorktreeService WORKTREE_EXISTS 半成品识别（RT-8#6）', () => {
     })
   })
 })
+
+// ── git worktree add 失败（此前零覆盖：mock 恒定 exitCode 0）──
+
+describe('WorktreeService git worktree add 失败 → GIT_FAILED', () => {
+  it('bare-workspace 模式：add 非 0 → GIT_FAILED，detail 带 exitCode/stderr，不回滚（无已产生副作用）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree add', { stdout: '', stderr: "fatal: a branch named 'feat-x' already exists", exitCode: 1 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({
+      code: 'GIT_FAILED',
+      message: expect.stringContaining('git worktree add 失败'),
+      detail: { exitCode: 1, stderr: expect.stringContaining('already exists') },
+    })
+    // add 失败发生在副作用产生前：不应出现回滚命令
+    const removeCalls = deps.gitExecutor.exec.mock.calls.filter(
+      (c) => c[1] === 'worktree' && (c[2] as string[])?.includes('remove'),
+    )
+    expect(removeCalls).toHaveLength(0)
+  })
+
+  it('plain-repo 模式：add 非 0 → GIT_FAILED', async () => {
+    const deps = createDeps({
+      mode: 'plain-repo',
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree add', { stdout: '', stderr: 'fatal: invalid reference', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/home/user/my-repo' }),
+    ).rejects.toMatchObject({
+      code: 'GIT_FAILED',
+      detail: { exitCode: 128 },
+    })
+  })
+})
+
+// ── setup 执行层失败包装（RT-8 后续：timeout 不再被误映射成 GIT_FAILED）──
+
+describe('WorktreeService setup 执行层失败包装', () => {
+  /** 让回滚命令在 mock 里返回成功（默认 map 无 worktree remove/branch -D 条目 → 未知命令 exit 1） */
+  const rollbackOk = new Map([
+    ['worktree remove', { stdout: '', stderr: '', exitCode: 0 }],
+    ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+  ])
+
+  it('setup 超时 → SETUP_FAILED（detail.timeout=true + timeoutMs），并照常回滚', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/.bare/custom-hooks/setup-worktree.sh']),
+      gitOverrides: { execResults: rollbackOk },
+    })
+    deps.shellRunner.execute = vi.fn(async () => {
+      throw new ShellRunnerError('timeout', '脚本执行超时（60000ms）')
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_FAILED',
+      message: expect.stringContaining('超时'),
+      detail: { timeout: true, timeoutMs: 60_000 },
+    })
+    // 超时同样走回滚（worktree remove + branch -D），世界复原
+    expect(deps.gitExecutor.exec.mock.calls.some(
+      (c) => c[1] === 'worktree' && (c[2] as string[])?.includes('remove'),
+    )).toBe(true)
+  })
+
+  it('setup 脚本 ENOENT → SETUP_FAILED（detail.scriptMissing=true）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/.bare/custom-hooks/setup-worktree.sh']),
+      gitOverrides: { execResults: rollbackOk },
+    })
+    deps.shellRunner.execute = vi.fn(async () => {
+      throw new ShellRunnerError('not_found', '脚本不存在或不可执行: /x/setup.sh')
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_FAILED',
+      message: expect.stringContaining('setup 脚本执行失败'),
+      detail: { scriptMissing: true },
+    })
+  })
+})
+
+// ── per-worktree config 补齐（RT-8 后续：git worktree add 不生成 config.worktree）──
+
+describe('WorktreeService per-worktree config 补齐（bare 模式）', () => {
+  it('创建成功后写 config.worktree：core.bare=false；.githooks 存在时带 hooksPath', async () => {
+    const files = new Map<string, string>()
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/feat-x/.githooks']),
+      files,
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', workspaceHint: '/project' })
+
+    expect(files.get('/project/.bare/worktrees/feat-x/config.worktree')).toBe(
+      '[core]\n\tbare = false\n\thooksPath = /project/feat-x/.githooks\n',
+    )
+  })
+
+  it('.githooks 不存在 → 只写 core.bare=false（不写 hooksPath）', async () => {
+    const files = new Map<string, string>()
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      files,
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', workspaceHint: '/project' })
+
+    expect(files.get('/project/.bare/worktrees/feat-x/config.worktree')).toBe('[core]\n\tbare = false\n')
+  })
+
+  it('extensions.worktreeConfig 未开启 → 往 .bare/config 追加开启', async () => {
+    const files = new Map<string, string>([
+      ['/project/.bare/config', '[core]\n\tbare = true\n'],
+    ])
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/.bare/config']),
+      files,
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', workspaceHint: '/project' })
+
+    const config = files.get('/project/.bare/config') ?? ''
+    expect(config).toContain('[extensions]')
+    expect(config).toContain('worktreeConfig = true')
+  })
+
+  it('extensions.worktreeConfig 已开启 → 不追加（尊重用户配置）', async () => {
+    const original = '[core]\n\tbare = true\n\n[extensions]\n\tworktreeConfig = true\n'
+    const files = new Map<string, string>([['/project/.bare/config', original]])
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/.bare/config']),
+      files,
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', workspaceHint: '/project' })
+
+    expect(files.get('/project/.bare/config')).toBe(original)
+  })
+})
+
+// ── 成败结构化日志（RT-8 后续：成败两侧落盘，失败带 code/exitCode/stderr 尾部/回滚结局）──
+
+describe('WorktreeService 成败结构化日志', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('创建成功 → logger.info 一条（结果字段 + durationMs），无 error', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', baseBranch: 'origin/main', workspaceHint: '/project' })
+
+    expect(logger.info).toHaveBeenCalledTimes(1)
+    const [message, meta] = vi.mocked(logger.info).mock.calls[0] ?? []
+    expect(message).toBe('[worktree-service] worktree created')
+    expect(meta).toMatchObject({
+      branch: 'feat-x',
+      baseBranch: 'origin/main',
+      mode: 'bare-workspace',
+      repoRoot: '/project',
+      cwd: '/project/feat-x',
+      usedBaseRef: 'origin/main',
+    })
+    expect(typeof meta?.['durationMs']).toBe('number')
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  it('git add 失败 → logger.error 一条（code/exitCode/stderr；rollback=null——未到回滚路径）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree add', { stdout: '', stderr: 'fatal: branch exists', exitCode: 1 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({ code: 'GIT_FAILED' })
+
+    expect(logger.error).toHaveBeenCalledTimes(1)
+    const [message, meta] = vi.mocked(logger.error).mock.calls[0] ?? []
+    expect(message).toBe('[worktree-service] worktree create failed')
+    expect(meta).toMatchObject({
+      branch: 'feat-x',
+      code: 'GIT_FAILED',
+      error: expect.stringContaining('git worktree add 失败'),
+      exitCode: 1,
+      stderr: 'fatal: branch exists',
+      timeout: false,
+      rollback: null,
+      cleanupHint: null,
+    })
+    expect(typeof meta?.['durationMs']).toBe('number')
+    expect(logger.info).not.toHaveBeenCalled()
+  })
+
+  it('setup 失败且回滚干净 → logger.error 一条（rollback=clean）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare', '/project/.bare/custom-hooks/setup-worktree.sh']),
+      gitOverrides: {
+        execResults: new Map([
+          ['worktree remove', { stdout: '', stderr: '', exitCode: 0 }],
+          ['branch -D', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    deps.shellRunner.execute = vi.fn(async () => ({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'ERR_PNPM_OUTDATED_LOCKFILE',
+    }))
+    const service = new WorktreeService(deps)
+
+    await expect(
+      service.create({ branch: 'feat-x', workspaceHint: '/project' }),
+    ).rejects.toMatchObject({ code: 'SETUP_FAILED' })
+
+    const [, meta] = vi.mocked(logger.error).mock.calls[0] ?? []
+    expect(meta).toMatchObject({
+      code: 'SETUP_FAILED',
+      exitCode: 1,
+      stderr: 'ERR_PNPM_OUTDATED_LOCKFILE',
+      rollback: 'clean',
+    })
+  })
+})
+
+// ── git 命令超时校准（RT-8 后续：add/remove 是整树操作，8s 轻查询默认值不够）──
+
+describe('WorktreeService git 命令超时校准', () => {
+  it('worktree add 与回滚 remove/branch -D 显式传 60s timeoutMs', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+    })
+    const service = new WorktreeService(deps)
+
+    await service.create({ branch: 'feat-x', workspaceHint: '/project' })
+
+    const calls = deps.gitExecutor.exec.mock.calls
+    const addCall = calls.find((c) => c[1] === 'worktree' && (c[2] as string[])?.includes('add'))
+    expect(addCall?.[3]).toEqual({ timeoutMs: 60_000 })
+  })
+})
+
+// ── base 解析 fallback（RT-8#8 留痕升级为结构化 warn）──
+
+describe('WorktreeService base 解析 fallback', () => {
+  it('请求 ref 不存在 → fallback 本地 main + usedBaseRef 显形 + 结构化 warn', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --verify origin/gone', { stdout: '', stderr: 'unknown revision', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    const result = await service.create({ branch: 'feat-x', baseBranch: 'origin/gone', workspaceHint: '/project' })
+
+    expect(result.usedBaseRef).toBe('main')
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[worktree-service] base 解析 fallback：请求 ref 校验失败，改用本地 main',
+      expect.objectContaining({
+        branch: 'feat-x',
+        requestedBaseBranch: 'origin/gone',
+        fallback: 'main',
+      }),
+    )
+  })
+})
+

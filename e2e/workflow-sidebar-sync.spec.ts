@@ -2,7 +2,7 @@
  * Workflow 任务托盘同步 E2E —— Playwright + Electron + mock 轨。
  *
  * [改写 2026-09-16] 原断言面（侧栏 Flows/Agents tab 的 workflow-card / subagent-card /
- * workflow-detail）随侧栏任务 tab 退役（设计 docs/design/composer-task-tray.md D10/D11：
+ * workflow-detail）随侧栏任务 tab 退役（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D10/D11：
  * 任务观察入口唯一化收敛到 composer 任务托盘），本 spec 改挂托盘。文件名与登记 id 保留
  * （docs/testing/e2e-map.json E2E-MOCK-01 条目），语义从「侧栏列表同步」变为「托盘同步」。
  *

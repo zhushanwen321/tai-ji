@@ -48,6 +48,25 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ### ADR-0044 系统提示词双路
 替换走 pi 原生 `--system-prompt` CLI 核心段替换（runtime spawn 链透传，仅新会话生效）；追加走 builtin 扩展 `extensions/taiji/system-prompt` 的 before_agent_start hook 每轮读 `<dataDir>/system-prompt.json`（热生效）。配置全局一份，runtime 与 pi 内扩展读同一文件。登记 C-pi-09。
 
+### ADR-0068 扩展消息注入形态：custom message 首选（2026-09-21）
+pi extension 向 LLM 注入提示词/通知消息统一走 `pi.sendMessage()` custom message 形态（`display` 控制用户可见性、不伪装用户消息归属）；`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息——提示词类内容伪装用户消息的形态已在四包改造中清除（smart-context/goal/structured-output/plan，merge accb67c37）。关键语义两条：① custom message 经 pi `convertToLlm` 无条件转 LLM user 消息，对 LLM 与 user message 无差别，形态迁移不损失模型可见性；② `sendMessage(triggerTurn:true)` 非 streaming 时直调 `_runAgentPrompt`，跳过 `prompt()` 主路径前置链（compaction 检查 / before_agent_start 事件 / systemPrompt 叠加 / pending nextTurn 消费）——依赖 per-turn 注入的需求不得走该通道。约定载体 [extension-conventions.md](../extensions/extension-conventions.md)「Event handler 消息注入」。
+
+### ADR-0071 引擎协议演进宪法：删改分类学与判据（2026-09-22）
+engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成文宪法。终态条文浓缩于协议四处头注（`packages/subagent-engine-sdk/src/protocol/` 的 engine-protocol.ts / contract-types.ts / reverse-channels.ts / schema.ts——头注只载终态纪律不载删改史）；**本条是 6 次历史破坏性删改与判据 why 的唯一入库权威载体**（协议目录系 fresh import、git 不可追溯，改写前的源码头注是唯一现场记录，随本条收编后同批改写为终态）。约束登记：C-proc-13（存量演进表述对齐）、C-proc-22/23/24（判据 6 行为键必配门 / 四张词表锁 / 宽容语义四行）。
+
+**6 次破坏性删改分类学**（三型纪律不同，不能一刀切 additive 也不能一刀切同批）：
+- **A 型同形改名**（1 项）：`run.params.chat` → `run.params.resume`（载荷同形仅键名泛化；架构权威 docs/architecture/subagent-chat-run-unification.md §3.3 D3/D5）。additive 替代（新增 resume 键 + 读端 `params.resume ?? params.chat` 双读 + 旧键 `@deprecated` + major 清除）成本趋零却走读写同批，且双读形态从未被实践——A 型但书由此立：同形改名默认 additive 双读，仅当双读引入语义纠缠时才允许同批。
+- **B 型机制替换**（2 项）：`interact` 控制面方法删除（续聊统一为新 run + resume 锚点；双轨 = 两套执行模型在 reducer/journal/conformance/能力门四面长期双维护，本身就是协议债）；`task.conversation` 键删除（per-run 模式开关语义消亡、职责并入 resume，双保留会造成「谁赢」的语义纠缠）。同批切换合法，条件 = 对端同仓 + ADR 登记（即本条）。
+- **C 型死成员清理**（3 项）：轮次相位反向通道（新增后从未被消费）、`host/poolResolved` 通道（poolKey 恒 'shared'、回调零信息量——池抽象降级，docs/architecture/zcode-engine-appserver-resident.md）、`host/permission` 通道骨架（双侧零实装占位，「未接线死通道」）。根因不在删除在**新增**——治理 = 新增门槛：无消费方不进协议、占位先行即违宪（与能力位「声明链路实际接通的能力」哲学同源）。
+
+**判据 1-7 证据锚点**（条文终态见 engine-protocol.ts 头注）：判据 1（引擎不消费→宿主自持）→ `task.idleTimeoutMs` 错位（六引擎映射全部不支持，实为宿主 idle GC 参数）；判据 2/3（what→task / 推导分叉→ctx）→ schemaEnv 三次搬家与 sessionRootId 事故补丁（文字判据靠人执行必然漏的两次实证）；判据 4（task/ctx 双写禁令）→ schemaEnv 双源事故——**H1b 收口未完成**：`packages/subagent-core/src/execution/engine/client/remote-engine.ts:382` 仍 `ctx.schemaEnv ?? task.schemaEnv`——wire 层禁令断言现状纯 never、无豁免（AgentCallOpts 已单侧排除 schemaEnv，键集交集为空），双源现状登记于断言注释（wire-field-locks.test.ts）待收口回看；判据 5（能力位双向回指）→ 先例 streamMode↔eventGranularity；判据 6（键三分类 + behavior 键必配门）→ resume↔conversation gate（error-codes.ts `assertChatConversationSupported`）与 forkSource 注释双先例，判别式 =「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）；判据 7（能力位消费点/载体登记）→ steer 首个登记条目（capability-gate.ts 联合判据消费、pi-host-binding.ts 声明 unsupported，无独立 wire 执行通道——缺失如实登记，不设计）。
+
+**演进政策三条**：① additive 面——新增可选字段/事件变体/方法/反向通道不 bump 版本，旧端忽略或 no-op 安全落空；新增须过门槛：消费方 + 降级路径 + 能力位绑定三件齐才进协议，无消费方不进协议。② 删除面——A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」；B 型机制替换/语义收窄同批切换合法（条件 = 对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major。③ major bump——core 支持区间平移 `[1,2)→[2,3)`，遗留清单届时清理。存量不搬家（搬家本身是删改），遗留清单 = idleTimeoutMs（明确错位）/ scene、description（弱错位待核）/ schemaEnv（待 H1b 收口，未收口）/ steer 执行通道缺失；**重审触发条件** = 遗留清单 >5 项或任一错位引发实际派发事故 → 提前清理裁决，不等 major。
+
+**未知成员宽容语义四行**（与编译期词表锁互补的运行时半边；词表头注与 engine-development-guide.md 引擎实装义务落地随之推进）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（逐变体 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 `engine_method_unsupported`（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 `{unsupported:true}`（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。配套机器锁 = **四张词表锁**（事件/方法/通道/能力位键集统一为常量 SSOT 派生或键集互锁，编译期红灯堵 schema enum 缺值与缺键 undefined 透传洞）。
+
+**minor 协商触发条件（任一命中重开裁决；条件不到不加协商位）**：① 出现本仓之外发布的引擎适配层（第三方作者或独立 npm 分发/版本节奏）；② 单宿主需同时挂载跨协议代差引擎且无法同批升级；③ 出现「需宿主确认才可启用」的运行时可变能力（能力位从静态 manifest 变动态协商的真实需求）。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
@@ -99,6 +118,9 @@ plan 模式重设计（GUI 投影 + skill 挂载 + 文档审阅闭环）的全�
 ### ADR-0047 watchdog 用进程健康探测
 pi 卡死检测用「进程健康探测」（每 60s ping get_state）替代「事件静默时长」——静默 ≠ 卡死（ask_user 等待/慢工具都会静默），连续 2 次失败广播 WARN、3 次（180s）才 onSilentAbort。实装 `event-interpreter-ping.ts`（PingProbe）。与「runtime watchdog 滚动重启」（默认不武装，TAIJI_RUNTIME_WATCHDOG_ARMED）是两套机制。登记 C-comm-09。
 
+### ADR-0069 内存活性治理审计裁决（2026-09-14，维持不治为默认）
+全仓内存活性审计后的用户裁决：登记不治点位「维持不治」是默认，翻案需新实测压力数据（原审计文档 docs/design/memory-leak-remediation.md 已删除、git 可追溯，各点位量级锚与重审条件见其 §2.5；裁决注释已写入各源码处）。不治 8 项：sessionMetaCache / externalMetaCache / notRepoCache / usage-stats shards（语料有界）、pi-respawn 熔断计数（熔断语义优先）、clearedSessions tombstone（有意无界防迟到写）、executingBash 断连残留（两害相权残留更轻）、session-file-utils 32MB 全量读（协议合法载荷有硬上界）。已治理面：G2 活性无界组（openPiStreams close 摘除、ws-client sweepExpiredInFlightSubscribes 挂重连路径）与 G4 杂项组（prematureTimeoutIds/deferFlushFailureCounts 纳入 disposeSession、skill-registry projectWatchers LRU(8)、ImportSessionDialog close 清扫描结果、quota fetch body cancel）。系统性防护（纯加状态不接线清理打回）已并入 ADR-0049 checklist。
+
 ### ADR-0018 extension 安装临时目录
 Collection 安装先完整落 `tmp/ext-scan-{timestamp}/`（clone/cp + npm install），用户确认后拷入正式目录——取消/失败只清理临时目录，不污染 extensions/。
 
@@ -148,6 +170,12 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 
 ### ADR-0067 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
+
+### ADR-0070 scheduler widget 推送减频与帧双职责显式接管（2026-09-21 设计裁决）
+widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（稳定字段 id/name/schedule/kind/enabled/nextRunAt/locale 序列化对比，不变不推；维护不变量：指纹字段集 ⊇ widget 显示决定因素全集）。显示面**时间投影整体移除**（用户裁决全砍倒计时/时间投影）：widget 行文本只含任务名与静态调度描述，TUI 逾期标记、GUI status 逾期翻牌删除，TUI 最近任务选择按 nextRunAt 升序不用 now 过滤；连带清理 = widget 专用 i18n 词条 + widgetStatus 逾期分支（`formatRelativeTime` **保留**——`task.list`/`task.created`/`service.list` 命令层仍消费，`renderTaskLine` 拆分为 widget 静态变体 / 命令变体）；`task.list` 人侧渲染补执行状态摘要补偿失败可见性——widget 显示 = f(稳定字段, locale)，时间流逝不是状态变化，不得触发推送。widget 帧曾意外承载的两个隐藏职责显式接管：①**空闲保活心跳**（入站全帧 touch `lastActivityAt`，30s 帧掩护下 scheduler 会话永不 idle）→ 显式化为「有任务且距上次推送 >10min」的保活底线帧（方案不变量：保活间隔 ≪ idle 回收阈值 ≥3 倍余量；空任务不发——pi 清屏帧同样 touch 心跳，空任务保活 = 空会话永不回收）；②**reload 恢复时机**（现状靠 per-session ring 概率性回放，忙会话冲刷后失源）→ message-bus 中 `extension:widget`/`extension:widgetGui` 改登记 **state 类**（typeKey 载荷派生 per-widgetKey），重订阅经既有 stateSnapshot 段构造性恢复（清屏帧 gui:null 即 last-value；session 销毁随 bus.clearSession 清理；曾考虑 runtime 新建帧缓存 + sendInitialState 补发段，因与 stateSnapshot 重复建设且重连场景被 seqGate drop 而否决）。设计文档 `.tmp/tech-design/scheduler-widget-push.md`（过程产物），实施落点 = u1 extension 侧闭环（静态化+清理+跳推+保活，挂既有 onAfterTick）→ u2 runtime message-bus widget 帧 state 类化 → u3 回归面。
+
+### ADR-0072 pendingSend 分型清除锚点与 composer 发送布尔契约（2026-09-22 设计裁决）
+表单假忙修复的语义裁决：`isActive ≡ isGenerating ∨ pendingSend` 的 pendingSend 桥接清除收敛为**分型锚点**——ui_response 送达（delivered=true）后仅 cancel 型（result===null：Esc/取消按钮）即时清除；提交型（result≠null）不清，桥接「respond 完成 → message_start」窗口由 turn 事件正常清除；`requests-invalidated` 广播按 sid 清除（reclaimed/plan-aborted/turn-aborted/session-destroyed 四源）；30s timeout 纯兜底（可观测三要素：上界/自愈/warn——warn 为 dev 门内日志，生产包不可见，生产侧按「30s 内自行恢复」时序特征判定）。已知边界：无 turn 提交型（scheduler 表单——pi 提交后不起 turn，message_start 结构性不可达）每提交必命中 30s 兜底（假忙上界 30s 后自愈，与修复前行为一致）；提交型锚点判别需 request→extension 源元数据通路（现未打通——scheduler 与 ask-user 表单同走 select-form 通道，respond 侧不可区分；occ-idle 不可作锚——会破坏 ask-user 桥接制造 isActive=false 空窗），登记为后续候选。composer 发送布尔契约：`send()` 返回 true = 已投递或输入已可见保留（直发失败乐观气泡亦 true），false = 输入未消费须恢复（仅 B 策略专用）；steer 三早退（空段 / 空白文本 / session 非活跃——非 busy：busy 时 steer 是合法投递路径）返回 false 并 warn（60 字符截断），主链三个 clearInput-first 落点（routeSteer/sendActiveMessage/sendLandingFirstMessage；onSteer 死代码防御对齐为同范式第四落点）统一「快照空 + hasInput 短路不变量」（快照非空失败走 restoreSegments 恢复）。设计文档 `.tmp/tech-design/form-hang-fix.md`（过程产物），实施 = U1 respond 分型锚点 + invalidated 清除 / U2 steer 输入保留三落点。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 

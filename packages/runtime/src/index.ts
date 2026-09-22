@@ -143,7 +143,7 @@ import { TaijiProviderStore } from './services/provider-extras-store.js'
 import { initRelayServer, deinitRelayServer, getActiveRelayRegistry } from './infra/relay/relay-server.js'
 // u3b（idle-pi-reclamation D2/D4/D6）：空闲 pi 回收装配原语——ReclaimSeat 占座单例 +
 // startIdlePiReaper 周期判定循环（DI 形态，依赖在下方 wiring 段组装）。
-import { ReclaimSeat, startIdlePiReaper } from './services/session/idle-pi-reaper.js'
+import { ReclaimSeat, startIdlePiReaper, hasFreshPendingUiRequest } from './services/session/idle-pi-reaper.js'
 import type { IdlePiReaperHandle, ReclaimExemptions } from './services/session/idle-pi-reaper.js'
 import { reapSessionBackgroundTasks } from './services/session/background-task-reaper.js'
 import { toErrorMessage } from './utils/errors.js'
@@ -1025,6 +1025,12 @@ async function main(): Promise<void> {
     getLastViewedAt: (sid) => sessionService.getSessionLastViewedAt(sid),
     // #7 restore 进行中（回收自身占座由 reaper 经 seat 自查）。
     isRestoring: (sid) => sessionService.isSessionRestoring(sid),
+    // #8 存在未超龄的挂起 UI 请求（v6 第四案；只读、reaper-only，不影响 busy 预检）。
+    // 信号经 server.getPendingUiRequests（薄委托只读快照，r5 I-1 裁定新增）；scope = 全扩展
+    // （不按扩展过滤）。上界参数由 reaper 经 ctx 传入（装配经 resolveReclaimConfig），
+    // 判定实现 = hasFreshPendingUiRequest（max(receivedAt) 聚合 + 超龄视同无 pending）。
+    hasPendingUiRequest: (sid, maxAgeMs) =>
+      hasFreshPendingUiRequest(server.getPendingUiRequests(sid), Date.now(), maxAgeMs),
   }
 
   // 回收执行 = SessionService.reclaimSession → lifecycle 七步最小摘除编排（D3）。
@@ -1041,6 +1047,13 @@ async function main(): Promise<void> {
       },
       // pendingReload 定向清（D3 第 6 步，防御性 no-op）。
       clearPendingReload: (s) => reloadOrchestrator.clearPending(s),
+      // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
+      // 在 reclaimManagedSession 内挂代际校验通过后的成功分支——并发的取消分支不调，
+      // 新进程的活请求不被误清。P2-2 失效链：clear → invalidate 升级（摘除 + 广播失效帧，
+      // renderer 同步移除屏上挂起），语义与 server D6a 汇聚清理点一致。
+      clearPendingUiRequests: (s) => {
+        server.invalidatePendingUiRequests(s, 'reclaimed')
+      },
       // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收≠
       // 销毁（不走 removeSessionEntry），只驱逐缓存；驱逐后重激活走单次全量重建
       //（P7 张力四要素显式登记的代价）。

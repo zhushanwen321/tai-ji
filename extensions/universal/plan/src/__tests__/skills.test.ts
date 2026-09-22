@@ -16,7 +16,9 @@ import * as fs from "node:fs";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { parsePlanArgs, registerPlanCommand, resolveSkills } from "../command.js";
+import { parsePlanArgs, registerPlanCommand } from "../command.js";
+import { resolveSkills } from "../enter.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -147,7 +149,7 @@ describe("E1 fail-fast via /plan handler", () => {
       }),
       appendEntry: vi.fn(),
       setActiveTools: vi.fn(),
-      sendUserMessage: vi.fn(),
+      sendMessage: vi.fn(),
       getCommands: vi.fn(() => SKILL_COMMANDS),
       getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
     } as unknown as ExtensionAPI;
@@ -169,16 +171,27 @@ describe("E1 fail-fast via /plan handler", () => {
     handler = capturedHandler!;
   });
 
+  /** 取第一条 sendMessage 的 content 文本 + 断言 custom message 三要素（P1-P4：triggerTurn:true，无 deliverAs） */
+  function sentMessageContent(): string {
+    const calls = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const [payload, options] = calls[0] as [{ content: string }, Record<string, unknown>];
+    expect(payload.customType).toBe(PLAN_CONTEXT_CUSTOM_TYPE);
+    expect(payload.display).toBe(false);
+    expect(options).toEqual({ triggerTurn: true });
+    return payload.content;
+  }
+
   it("unknown skill: fail-fast — no entry, no tool restriction, reply lists available skills", async () => {
     await handler("重构 auth --skills tech-desig", ctx);
 
-    // 不进入计划模式：不落 plan-state entry、不限制工具（E1：横幅不出现）
+    // 不进入计划模式：不落 plan-state entry、不限制工具（E1：PlanModeBar 不出现）
     expect(pi.appendEntry).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
 
     // 回复列出可用技能清单与纠正命令（清单维持枚举原形态，可直接复制为 pi 命令）
-    expect(pi.sendUserMessage).toHaveBeenCalledOnce();
-    const message = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
+    const message = sentMessageContent();
     expect(message).toContain("tech-desig");
     expect(message).toContain("tech-design");
     expect(message).toContain("dev-flow");
@@ -195,14 +208,14 @@ describe("E1 fail-fast via /plan handler", () => {
       "plan-state",
       expect.objectContaining({ isActive: true, skills: ["tech-design"] }),
     );
-    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const prompt = sentMessageContent();
     expect(prompt).toContain("/skills/tech-design/SKILL.md");
   });
 
   it("flag with no value also fail-fasts", async () => {
     await handler("重构 auth --skills", ctx);
     expect(pi.appendEntry).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledOnce();
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
   });
 
   it("valid skills: enters plan mode, persists skills and injects skill paths in the prompt", async () => {
@@ -210,7 +223,7 @@ describe("E1 fail-fast via /plan handler", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
     // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
-    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.taiji-harness/auth", { recursive: true });
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({
@@ -219,7 +232,7 @@ describe("E1 fail-fast via /plan handler", () => {
         docs: [],
       }),
     );
-    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const prompt = sentMessageContent();
     // 技能指令段注入 SKILL.md 路径（AI 自行 read——D2①）
     expect(prompt).toContain("/skills/tech-design/SKILL.md");
     expect(prompt).toContain("/skills/code review/SKILL.md");
@@ -235,7 +248,7 @@ describe("E1 fail-fast via /plan handler", () => {
       "plan-state",
       expect.objectContaining({ isActive: true, skills: [] }),
     );
-    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const prompt = sentMessageContent();
     // 无技能指令段，回落模板流程段（v2b 注入形态：mock fs 空发现 → no-plans 分支
     // 自构章节骨架，无任何模板查询 action 指引）
     expect(prompt).not.toContain("Skill Workflow");

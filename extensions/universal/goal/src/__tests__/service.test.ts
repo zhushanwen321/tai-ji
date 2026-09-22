@@ -42,7 +42,6 @@ function makeFakePorts(): ServicePorts & {
 		},
 		messaging: {
 			sendContextMessage: () => {},
-			sendUserMessage: () => {},
 		},
 		session: {
 			getEntries: () => [],

@@ -16,6 +16,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import ScheduleForm from '@/components/extension/form/ScheduleForm.vue'
+import DateTimePicker from '@/components/extension/form/DateTimePicker.vue'
 import type { ScheduleDraft, ScheduleQuestion } from '@zhushanwen/extension-protocol'
 
 const baseDraft: ScheduleDraft = {
@@ -41,6 +42,20 @@ function submitAndParse(wrapper: ReturnType<typeof mountForm>): Record<string, u
   return json === null ? null : (JSON.parse(json) as Record<string, unknown>)
 }
 
+/** exposed canSubmit（壳 Submit 门委托的同一 computed） */
+function canSubmit(wrapper: ReturnType<typeof mountForm>): boolean {
+  return (wrapper.vm as unknown as { canSubmit: boolean }).canSubmit
+}
+
+/**
+ * 经 DateTimePicker 组件边界发 v-model 值（onceLocal 单一数据源）。picker 内部的
+ * 真实交互链（日历点选 / 双段编辑 / 步进）在 DateTimePicker.test.ts 覆盖，此处
+ * 只测 ScheduleForm 对值的消费（预览 / 提交门 / 回包折叠）。
+ */
+function setOnce(wrapper: ReturnType<typeof mountForm>, value: string): void {
+  wrapper.findComponent(DateTimePicker).vm.$emit('update:modelValue', value)
+}
+
 describe('ScheduleForm · §4-附 行为保真清单', () => {
   it('① kind once/recurring 切换：控件显隐互换', async () => {
     const wrapper = mountForm(baseDraft)
@@ -59,22 +74,18 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     expect(wrapper.find('[data-testid="schedule-create-cron-chip-0 9 * * *"]').exists()).toBe(true)
   })
 
-  it('② once 初值折叠/还原：还原时刻进 datetime 控件，提交 dateToOnceCron 折叠回同一 cron', async () => {
-    // 迁移保真注记：原 ScheduleCreateOverlay 对「还原成功」分支不切换 kind——初值视图仍
-    // recurring，还原时刻在后台进 onceLocal，用户切 once 后直接呈现（非默认下一整点）。
-    // 本用例按原行为断言（探针核验原组件同表现）；kind 初值切留属行为变更，不在迁移范围。
+  it('② once 初值折叠/还原：once 草稿直接呈现 once 视图，提交 dateToOnceCron 折叠回同一 cron', async () => {
+    // 行为变更（默认单次裁决）：还原成功的 once 草稿不再藏于 recurring 视图——kind 跟随
+    // draft.kind 直接呈现 once 视图（原迁移保真口径「还原成功不切 kind」随默认单次退役）。
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2030, 0, 1, 9, 0, 0, 0))
     try {
       const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '30 9 15 6 *' })
 
-      // 原行为：还原成功不切 kind，初值视图仍 recurring（默认 chip 选中）
-      expect(wrapper.find('[data-testid="schedule-create-cron-chip-0 9 * * *"]').exists()).toBe(true)
-
-      // 切到 once：还原时刻直接进 datetime 控件（onceCronToDate 单点还原）
-      await wrapper.find('[data-testid="schedule-create-kind-once"]').trigger('click')
-      const input = wrapper.find('[data-testid="schedule-create-once-input"]')
-      expect((input.element as HTMLInputElement).value).toBe('2030-06-15T09:30')
+      // once 视图直接呈现：触发框显示还原时刻（onceCronToDate 单点还原），cron chips 不存在
+      expect(wrapper.find('[data-testid="schedule-create-once-input"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="schedule-create-cron-chip-0 9 * * *"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="schedule-create-once-input"]').text()).toContain('2030-06-15 09:30')
 
       // 提交折叠回同一 once cron（dateToOnceCron 单点）
       const result = submitAndParse(wrapper)
@@ -132,29 +143,29 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
   it('⑤ once 已过时刻拦截：预览提示已过 + 提交门关闭，重选未来恢复（8e2a1b06f）', async () => {
     const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '0 9 * * MON' })
     // onceCronToDate 还原失败（周域非 *）→ 默认下一整点，可提交（预填草稿可直接确认）
-    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
+    expect(canSubmit(wrapper)).toBe(true)
 
-    // datetime-local 手输过去值：预览区已过警示 + 提交门关闭
-    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2020-01-01T09:00')
+    // picker 发过去值：预览区已过警示 + 提交门关闭
+    setOnce(wrapper, '2020-01-01T09:00')
     await nextTick()
     expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')
-    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(false)
+    expect(canSubmit(wrapper)).toBe(false)
     expect(submitAndParse(wrapper)).toBeNull()
 
     // 重选未来时刻 → 恢复可提交
-    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:00')
+    setOnce(wrapper, '2030-01-01T09:00')
     await nextTick()
-    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
+    expect(canSubmit(wrapper)).toBe(true)
   })
 
   it('⑤ once 未选时刻 = 未补全（区别于预览失败）：仍拦提交', async () => {
     const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '0 9 * * MON' })
-    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
+    expect(canSubmit(wrapper)).toBe(true)
 
-    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('')
+    setOnce(wrapper, '')
     await nextTick()
     expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('请选择执行时间')
-    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(false)
+    expect(canSubmit(wrapper)).toBe(false)
   })
 
   it('⑤-迁移: once 时刻停留至过期后提交 → 提交瞬间复核拦截（nowMs 表单时钟，8e2a1b06f）', async () => {
@@ -162,9 +173,9 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     vi.setSystemTime(new Date(2030, 0, 1, 9, 0, 0, 0))
     try {
       const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '0 9 * * MON' })
-      await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:05')
+      setOnce(wrapper, '2030-01-01T09:05')
       await nextTick()
-      expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
+      expect(canSubmit(wrapper)).toBe(true)
 
       // 时间流逝到 09:06（时刻已过）：无交互 → canSubmit 缓存仍 true，
       // submit() 的提交瞬间复核（刷新表单时钟）拦截——无回包
@@ -174,7 +185,7 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
 
       // 复核刷新驱动重算：canSubmit 转 false、预览区已过警示
       await nextTick()
-      expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(false)
+      expect(canSubmit(wrapper)).toBe(false)
       expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('所选时间已过')
     } finally {
       vi.useRealTimers()
@@ -182,29 +193,49 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
   })
 
   it('⑥ 模型三态：draft.model 优先 / 回退 currentModel / 再回退列表首项；空列表 hint + 当前会话标记', () => {
-    // draft.model 优先
+    // 三态经单行选框（D4）呈现：触发器显示选中 id
     const byModel = mountForm({ ...baseDraft, model: 'm-2' })
-    expect(byModel.find('[data-testid="schedule-create-model-m-2"]').attributes('aria-checked')).toBe('true')
+    expect(byModel.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-2')
 
     // 回退 currentModel
     const byCurrent = mountForm({ ...baseDraft, currentModel: 'm-2' })
-    expect(byCurrent.find('[data-testid="schedule-create-model-m-2"]').attributes('aria-checked')).toBe('true')
+    expect(byCurrent.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-2')
 
     // model 不在候选列表 → 回退列表首项
     const fallback = mountForm({ ...baseDraft, model: 'm-x' })
-    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').attributes('aria-checked')).toBe('true')
+    expect(fallback.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('m-1')
 
-    // 「当前会话」标记跟随 draft.currentModel
-    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').text()).toContain('当前会话')
+    // 「当前会话」标记跟随 draft.currentModel（触发器内）
+    expect(fallback.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('当前会话')
+    // 候选列表常挂（v-show），选中项高亮（ModelPickerPanel 选中态）
+    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').classes().join(' ')).toContain('bg-accent-soft')
 
     // 空候选列表 → hint（跟随会话当前模型），提交不携带 model
     const noModels = mountForm({ ...baseDraft, models: [], currentModel: undefined })
     expect(noModels.find('[data-testid="schedule-create-model-m-1"]').exists()).toBe(false)
+    expect(noModels.find('[data-testid="schedule-create-model-trigger"]').exists()).toBe(false)
     expect(noModels.text()).toContain('跟随会话当前模型')
     expect((noModels.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
     const result = submitAndParse(noModels)
     expect(result).toMatchObject({ kind: 'recurring' })
     expect(result!.model).toBeUndefined()
+  })
+
+  it('⑥-选框展开：点击触发器展开候选列表，点选切换选中并回包（用户可见 DOM）', async () => {
+    const wrapper = mountForm(baseDraft)
+    const trigger = () => wrapper.find('[data-testid="schedule-create-model-trigger"]')
+    expect(trigger().text()).toContain('m-1')
+
+    // 收起时列表常挂（v-show）不可见
+    expect(wrapper.find('[data-testid="schedule-create-model-m-2"]').isVisible()).toBe(false)
+    await trigger().trigger('click')
+    expect(trigger().attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('[data-testid="schedule-create-model-m-2"]').isVisible()).toBe(true)
+
+    // 点选另一模型 → 触发器文案跟随 + 回包携带新模型
+    await wrapper.find('[data-testid="schedule-create-model-m-2"]').trigger('click')
+    expect(trigger().text()).toContain('m-2')
+    expect(submitAndParse(wrapper)).toMatchObject({ model: 'm-2' })
   })
 
   it('⑦ prompt 预填 + name 留空可选：留空回包不含 name，填写则携带', async () => {
@@ -249,7 +280,18 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     expect(wrapper.find('[data-testid="schedule-create-expires-never"]').isVisible()).toBe(true)
   })
 
-  it('⑩ Esc 键 = cancelled（渲染器级键位，emit cancel；按钮取消由壳承担）', async () => {
+  it('⑩ Esc 键 = cancelled（document 级 capture：焦点在 body 也能取消）', async () => {
+    const wrapper = mountForm(baseDraft)
+
+    // 真实焦点路径：打开后不点击任何控件（焦点在 body）直接 Esc
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    expect(document.activeElement).toBe(document.body)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('⑩-补充：焦点在表单内时 Esc 同样取消（document capture 不丢子节点路径）', async () => {
     const wrapper = mountForm(baseDraft)
 
     await wrapper.find('[data-testid="schedule-create-preview"]').trigger('keydown', { key: 'Escape' })
@@ -277,22 +319,57 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
     const wrapper = mountForm(baseDraft)
 
     expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
-    // 摘要行给出可确认反馈（用户可见）
-    expect(wrapper.find('[data-testid="schedule-create-foot-note"]').text()).toContain('每天 09:00')
+    // Esc 提示（用户可见；foot 摘要行已退役，D5）
+    expect(wrapper.find('[data-testid="schedule-create-esc-hint"]').text()).toBe('Esc 取消')
+  })
+
+  it('提示词计数：非空时显示「将作为消息注入 · N 字」（D5 新文案）', () => {
+    const wrapper = mountForm(baseDraft)
+
+    expect(wrapper.find('[data-testid="schedule-create-prompt"]').element).toBeInstanceOf(HTMLTextAreaElement)
+    expect(wrapper.text()).toContain('将作为消息注入 · 9 字')
+  })
+})
+
+describe('ScheduleForm · 默认模式（默认单次裁决）', () => {
+  it('无 draft（initial 缺省）→ once 视图 + 下一整点初值；补 prompt 后可提交', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2030, 0, 1, 9, 0, 0, 0))
+    try {
+      const wrapper = mount(ScheduleForm, {
+        props: { question: { type: 'schedule', question: '确认创建定时任务' } },
+        attachTo: document.body,
+      })
+
+      // once 视图 + 下一整点初值（nextFullHour 单点），cron chips 不存在
+      expect(wrapper.find('[data-testid="schedule-create-once-input"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="schedule-create-cron-chip-0 9 * * *"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="schedule-create-once-input"]').text()).toContain('2030-01-01 10:00')
+      // prompt 未填 = 未补全（提交门正确拦截）；补齐后可提交
+      expect(canSubmit(wrapper)).toBe(false)
+      await wrapper.find('[data-testid="schedule-create-prompt"]').setValue('跑日报')
+      await nextTick()
+      expect(canSubmit(wrapper)).toBe(true)
+      // 提交折叠为一次性 cron（5 段 分 时 日 月 *）
+      expect(submitAndParse(wrapper)).toMatchObject({ kind: 'once', schedule: '0 10 1 1 *' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
 describe('ScheduleForm · once 预设与预览降级分支', () => {
-  it('once 预设按钮：+1h / 明天 9 点 / 明天 20 点写入 datetime 控件且时刻有效（可提交）', async () => {
+  it('once 预设按钮：+1h / 明天 9 点 / 明天 20 点写入时刻（picker 触发框联动）且均未来可提交', async () => {
     const wrapper = mountForm({ ...baseDraft, kind: 'once', schedule: '0 9 * * MON' })
     await nextTick()
-    await wrapper.find('[data-testid="schedule-create-kind-once"]').trigger('click')
-
+    // 默认单次：once 视图直接呈现（kind-once 按钮点击幂等，预设按钮不看模式态）
     for (const tid of ['schedule-create-once-plus-1h', 'schedule-create-once-tomorrow-9', 'schedule-create-once-tomorrow-20']) {
       await wrapper.find(`[data-testid="${tid}"]`).trigger('click')
       await nextTick()
-      const val = (wrapper.find('[data-testid="schedule-create-once-input"]').element as HTMLInputElement).value
-      expect(val).not.toBe('')
+      // picker 触发框文本跟随 onceLocal（用户可见联动；值形状由 DateTimePicker.test 覆盖）
+      const text = wrapper.find('[data-testid="schedule-create-once-input"]').text()
+      expect(text).not.toContain('请选择执行时间')
+      expect(wrapper.findComponent(DateTimePicker).props('modelValue')).not.toBe('')
     }
     // 预设时刻均在未来（onceTimeValid true 分支）→ 表单可提交
     expect(submitAndParse(wrapper)).not.toBeNull()

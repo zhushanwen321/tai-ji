@@ -1,5 +1,5 @@
 /**
- * TrayNativePanel 组件测试（u-tray-native，设计 docs/design/composer-task-tray.md
+ * TrayNativePanel 组件测试（u-tray-native，设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
  * §3.3 D2/D8/D9 + §3.5 错误规格）。
  *
  * 三视角（TEST-STRATEGY §3）：

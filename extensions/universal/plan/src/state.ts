@@ -1,12 +1,29 @@
+import { readdirSync, rmdirSync } from "node:fs";
+import { dirname } from "node:path";
+
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
+const logger = getLogger("pi-plan");
 
 /**
  * 审阅态两值（D1）——awaiting = 文档就绪等审批；revising = 修订中；
  * 无值 = 进行中。approve 不设中间态：直接走 complete → resetPlanState 落
- * isActive=false，横幅消失由 isActive 驱动。
+ * isActive=false，PlanModeBar 消失由 isActive 驱动。
  */
 export type PlanReviewState = "awaiting" | "revising";
+
+/**
+ * 降级态来源标记（plan-mode-ux-refactor §3.4）：reviewState='awaiting' 且无挂起 select
+ * 时区分等待原因——'resubmit' = 会话重启（E3）后 agent 尚未重新提交。写入点 =
+ * index.ts E3 steer 重挂处；清除点三处（resetPlanState 终态清理组 / activatePlanMode
+ * 新轮次重置组 / submit-review 重挂起点重置）——缺清除 = 跨 plan run 残留（C-U2 同型
+ * 缺陷：bad-response 等罕见路径可渲染上一轮的来源文案）。字面量与 shared
+ * PlanStateView.reviewStateSource 严格一致。
+ */
+export type PlanReviewStateSource = "resubmit";
 
 export interface PlanState {
   isActive: boolean;
@@ -25,6 +42,8 @@ export interface PlanState {
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
   docs: PlanDocMeta[];
   reviewState?: PlanReviewState;
+  /** 降级态来源标记（见 PlanReviewStateSource）；仅 reviewState 有值时有语义，无值 = 来源未知 */
+  reviewStateSource?: PlanReviewStateSource;
   /**
    * 上次 submit-review 时的 docs 快照指纹（planDocsFingerprint 产物）。缺失 = 无既往
    * 提交（首次提交 / reset 后 / 旧版 entry 重挂），重提交无变化检测不警告；reset 随
@@ -41,6 +60,21 @@ export const DEFAULT_PLAN_STATE: PlanState = {
   skills: [],
   docs: [],
 };
+
+/**
+ * 计划态工具白名单（进入计划模式三处共用——slash 命令 / plan(enter) tool / session_start
+ * 恢复；bash 在白名单内，文件写约束来自注入的计划模式提示词，见 pi-ext-021）。
+ * 放在 state.ts（叶模块）而非 tool.ts：enter.ts 与本常量互需会造成 enter↔tool 循环依赖。
+ */
+export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
+
+/**
+ * plan 包注入消息的 customType（pi.sendMessage custom message 注入的 8 处调用
+ * 统一使用）。命名对齐本包 entry customType 字面量 'plan-state' 的连字符风格
+ * （设计 §2.1 双命名范式决策：各包跟随所在包 entry 惯例，跨包不统一）。
+ * 放 state.ts（叶模块）理由同 PLAN_MODE_TOOLS。
+ */
+export const PLAN_CONTEXT_CUSTOM_TYPE = "plan-context";
 
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
@@ -116,8 +150,8 @@ export function getPlanState(
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
   // 派生扫描），两侧独立常量，勿改字面量。optional 字段（reviewState /
-  // lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化自然消失，旧 entry
-  // 消费方对该字段惰性（D4 向后兼容）。
+  // reviewStateSource / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化
+  // 自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
   pi.appendEntry("plan-state", {
     isActive: state.isActive,
     planFilePath: state.planFilePath,
@@ -127,6 +161,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     skills: state.skills,
     docs: state.docs,
     reviewState: state.reviewState,
+    reviewStateSource: state.reviewStateSource,
     lastSubmitReviewDocsFingerprint: state.lastSubmitReviewDocsFingerprint,
   });
 }
@@ -139,6 +174,20 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
  * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首拉仍恢复
  * docs 显示，至下次 /plan 同 slug 覆写。
  */
+/** 空 slug 目录清理（状态审查 P3-10）：enter 即 mkdir，未产任何文档即退出会留空目录残盘。
+ * 仅删「真正为空」的 slug 目录——目录里有任何残留文件（含未登记杂文件）一律保留（保守，
+ * 不做递归删除）；目录不存在 / 非空 / 不可读均降级跳过（warn 留痕），清理失败不影响退出主流程。
+ */
+function removeEmptyPlanDir(planFilePath: string): void {
+  if (!planFilePath) return;
+  try {
+    const dir = dirname(planFilePath);
+    if (readdirSync(dir).length === 0) rmdirSync(dir);
+  } catch (error) {
+    logger.warn("plan: empty plan dir cleanup skipped", { error: toErrorMessage(error) });
+  }
+}
+
 export function resetPlanState(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
@@ -147,12 +196,17 @@ export function resetPlanState(
 ): PlanState {
   const state = getPlanState(sessions, sessionId, ctx);
   state.isActive = false;
+  // 空目录清理必须在 planFilePath 清空之前（路径是唯一的目录推导来源）
+  removeEmptyPlanDir(state.planFilePath);
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
   delete state.templateProvidedPath;
   state.skills = [];
   delete state.reviewState;
+  // 来源标记与 reviewState 同生命周期随退出失效：残留 'explain' 会让下一轮经
+  // bad-response 等罕见路径渲染「已收到你的问题」而本轮无人提问（C-U2 同型残留）
+  delete state.reviewStateSource;
   // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
   // 首次 submit-review 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
   delete state.lastSubmitReviewDocsFingerprint;
@@ -198,6 +252,13 @@ function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined 
     : undefined;
 }
 
+/** reviewStateSource 值域守卫：域外值按无值处理（与 readReviewState 同风格）。
+ * 旧版 entry 的 'explain' 存量值同样归无值——explain 交互已删（2026-09-21 审批两键
+ * 收敛），renderer 缺省分支据此渲染通用文案，无需为存量值保留枚举成员。 */
+function readReviewStateSource(data: Partial<PlanState>): PlanReviewStateSource | undefined {
+  return data.reviewStateSource === "resubmit" ? data.reviewStateSource : undefined;
+}
+
 /** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的
  * 超长文本在重建时同样封顶（读侧防御，保证派生 plan 帧恒有界） */
 function readRequirement(data: Partial<PlanState>): string {
@@ -232,6 +293,7 @@ function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefi
   state.skills = readSkills(entryData);
   state.docs = readDocs(entryData);
   state.reviewState = readReviewState(entryData);
+  state.reviewStateSource = readReviewStateSource(entryData);
   state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 

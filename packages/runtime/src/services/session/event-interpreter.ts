@@ -409,6 +409,63 @@ export class UserStoppedGate {
 /** 模块级单例（生产挂点与调用方共用；SessionService 构造时 configure）。 */
 export const userStoppedGate = new UserStoppedGate()
 
+/**
+ * 命令-only prompt 的 occupancy 收口窗口长度（CP6，scheduler-trigger-inversion §11 CP6）。
+ *
+ * 量级 = **控制面**（2s）：正常 turn 的 turn-start 在 prompt 回包后毫秒级到达，2s 是给
+ * 回包与事件回调之间的调度留量；**不是**给任务执行加的墙钟预算。
+ */
+export const OCCUPANCY_SETTLE_WINDOW_MS = 2_000
+
+/**
+ * 命令-only prompt 的 occupancy 收口窗口（CP6）。
+ *
+ * 背景（实测确认）：pi 对 `/` 开头文本先 `await _tryExecuteExtensionCommand`、再
+ * `preflightResult?.(true)`——纯命令（如 `/schedule list`）不产任何 turn 事件；而 dispatcher 的
+ * `markSessionActive` 已在 `client.prompt` 前把 `occupancy.turn` 置 `dispatching` ⇒ 该维度
+ * 永远卡住（按钮变 stop、下一条消息被 busy 预检拒/转 steer 静默吞）。修法 = prompt resolve
+ * 后武装 2s 短窗：期间无任何 turn 事件则回落 idle。
+ *
+ * 幂等门：回调只在 `occupancy.turn === 'dispatching'` 时回落（不覆盖 agent_start/
+ * generating/settling）；`agent_start` / `turn_start` 到达即 cancel——「自派发以来未观察到
+ * 任何 turn 事件」由取消语义构造性保证，而非在回调里追状态。
+ *
+ * 为什么是模块级单例：窗口由 dispatcher（arm）与 interpreter（turn 事件 cancel）两类共用，
+ * 且 interpreter 按 session 构造（多实例）、dispatcher 单实例——单例是唯一无环通路
+ * （同 userStoppedGate 范式）。
+ */
+class OccupancySettleWindow {
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  /** 武装短窗（重复武装先取消旧窗）。onElapsed 在到期且未被 turn 事件取消时同步调用。 */
+  arm(sessionId: string, onElapsed: () => void): void {
+    this.cancel(sessionId)
+    const timer = setTimeout(() => {
+      this.timers.delete(sessionId)
+      onElapsed()
+    }, OCCUPANCY_SETTLE_WINDOW_MS)
+    // 控制面 timer 不阻塞进程退出（对齐 userStoppedGate / pi-respawn.armTimer 惯例）
+    timer.unref?.()
+    this.timers.set(sessionId, timer)
+  }
+
+  /** turn 事件到达 / session 清理：取消窗口（幂等）。 */
+  cancel(sessionId: string): void {
+    const timer = this.timers.get(sessionId)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.timers.delete(sessionId)
+  }
+
+  /** 测试辅助：重置全部窗口（跨用例隔离；生产不调用）。 */
+  resetForTest(): void {
+    for (const timer of this.timers.values()) clearTimeout(timer)
+    this.timers.clear()
+  }
+}
+
+/** 模块级单例（dispatcher 武装 / interpreter turn 事件取消共用）。 */
+export const occupancySettleWindow = new OccupancySettleWindow()
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/
  * sandbox 里的第三方代码可返回任意值，改写前必须 shape 守卫，畸形值丢弃改写保原值）。 */
@@ -596,42 +653,44 @@ const FILE_MUTATING_TOOLS = new Set(['write', 'edit', 'bash'])
  * [RT-4#9] PiTranslatedEvent.kind 编译期穷尽守卫：五段处理（handle 结构 case +
  * handleConversationEvent / handleTurnLifecycleEvent / handleRoutingEvent / handleMetaEvent）
  * 的 case 并集必须 == kind 全集（当前 23 个）。types.ts 新增 kind 而五段未接线时，
- * 本函数 switch 出现未覆盖分支 → `const _: never = ev` 编译红，接线遗漏在编译期显形
- * （此前仅靠人工核对，新增 kind = 该类型事件永久静默丢弃）。运行时兜底 =
- * handleMetaEvent default warn。
+ * 本登记表缺键 → `Record<PiTranslatedEvent['kind'], true>` 注解编译红（多键同理），
+ * 接线遗漏在编译期显形（此前仅靠人工核对，新增 kind = 该类型事件永久静默丢弃）。
+ * 运行时兜底 = handleMetaEvent default warn。
  *
- * 五段结构使单段函数的 default 分支收窄不到 never（TS 不知道前序段已消费哪些 kind），
- * 故穷尽检查集中在此全量 switch，一处收口。
+ * 穷尽检查一处收口：五段结构使单段函数的 default 分支收窄不到 never（TS 不知道前序段
+ * 已消费哪些 kind），故约束集中在本登记表——Record 注解对键集做全等检查，与全量
+ * switch + never 收窄等价，且把 kind 清单从控制流降为纯数据。
  */
+const HANDLED_EVENT_KINDS: Record<PiTranslatedEvent['kind'], true> = {
+  'message': true,
+  'noop': true,
+  'turn-start': true,
+  'tool-call-start': true,
+  'tool-call-index': true,
+  'tool-call-end': true,
+  'turn-end': true,
+  'turn-usage': true,
+  'status-set': true,
+  'status-broadcast': true,
+  'bridge-ui': true,
+  'extension-ui': true,
+  'session-manager-ui': true,
+  'thinking-level': true,
+  'session-renamed': true,
+  'hook': true,
+  'subagent-stream': true,
+  'record-entry-appended': true,
+  'compaction-start': true,
+  'agent-settled': true,
+  'compaction-end': true,
+  'trace-trigger': true,
+  'record-reconcile-trigger': true,
+}
+
 function assertTranslatedEventHandled(ev: PiTranslatedEvent): void {
-  switch (ev.kind) {
-    case 'message':
-    case 'noop':
-    case 'turn-start':
-    case 'tool-call-start':
-    case 'tool-call-index':
-    case 'tool-call-end':
-    case 'turn-end':
-    case 'turn-usage':
-    case 'status-set':
-    case 'status-broadcast':
-    case 'bridge-ui':
-    case 'extension-ui':
-    case 'session-manager-ui':
-    case 'thinking-level':
-    case 'session-renamed':
-    case 'hook':
-    case 'subagent-stream':
-    case 'record-entry-appended':
-    case 'compaction-start':
-    case 'agent-settled':
-    case 'compaction-end':
-    case 'trace-trigger':
-    case 'record-reconcile-trigger':
-      return
-  }
-  const _: never = ev
-  void _
+  // 运行时恒 no-op（登记表全键覆盖，属性读取无副作用；类型外 kind 的兜底 warn 在
+  // handleMetaEvent default）。函数存在仅为激活登记表的 Record 键集穷尽检查。
+  void HANDLED_EVENT_KINDS[ev.kind]
 }
 
 export class EventInterpreter {
@@ -743,47 +802,56 @@ export class EventInterpreter {
         }
         this.handle(ev)
       } catch (err: unknown) {
-        // B2（PR#86 review）：终态事件（turn-end）自身 handler 抛错时，onTurnFinalize 未执行 →
-        // isGenerating 永不复位（session 永久 busy，违反 AGENTS.md 规则 #3）。
-        // 兜底强制执行。onTurnFinalize 幂等（finalizeSession 幂等，见 chat.ts），重复调用无副作用。
-        if (ev.kind === 'turn-end') {
-          try {
-            // S4：传 ev.stopReason 而非 undefined——对齐正常路径（handleTurnEnd L352）。
-            // handleTurnEndSideEffects 在 stopReason undefined 时 outcome 走 'done' 分支，
-            // 对「handler 抛错」场景写 'done' 是错的；turn-end 事件本身携带 stopReason（types.ts L120）。
-            this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason)
-          } catch (finalizeErr) {
-            // best-effort: onTurnFinalize 本身就是 handle(ev) 抛错后的兜底，此处失败无更上层可传播，静默降级
-            console.debug('[event-interpreter] onTurnFinalize fallback failed:', finalizeErr)
-          }
-          // occupancy #3 兜底：handleTurnEnd 早段（send 帧 / onContextUpdate）抛错时
-          // settling 写入未达——与 onTurnFinalize 兜底同构，防 turn 卡 generating
-          // （session 永久占用投影，renderer 永走 steer/defer 路由）。
-          try {
-            this.opts.onOccupancyTransition?.('settling')
-          } catch (occErr) {
-            // best-effort：同上方 onTurnFinalize 兜底语义——已是 handle(ev) 抛错后的兜底，
-            // 失败无更上层可传播，落 debug 供诊断
-            console.debug('[event-interpreter] occupancy settling fallback failed:', occErr)
-          }
-        } else if (ev.kind === 'agent-settled') {
-          // [RT-4#2①] settled 处理链抛错逃逸（delayer 直通路径异常绕过 runAgentSettledEffects
-          // 内层 catch 的残余形态）→ 终态兜底：settling→idle 唯一边沿补写，防 occupancy 永久
-          // settling（幂等写，与 runAgentSettledEffects 的补写不冲突）。
-          try {
-            this.opts.onOccupancyTransition?.('idle')
-          } catch (occErr) {
-            // best-effort：同上方 turn-end 兜底语义——已是 handle(ev) 抛错后的兜底，
-            // 失败无更上层可传播，落 debug 供诊断
-            console.debug('[event-interpreter] occupancy idle fallback failed:', occErr)
-          }
-        }
-        console.error(
-          `[event-interpreter] handle event error (isolated; batch continues) sid=${this.sessionId} kind=${ev.kind}:`,
-          err,
-        )
+        this.handleIsolatedEventError(ev, err)
       }
     }
+  }
+
+  /**
+   * W1 单事件隔离的 catch 腿（原 interpret catch 内联体逐字迁移）：终态事件自身
+   * handler 抛错时的兜底副作用（防 isGenerating / occupancy 永久滞留）+ 统一错误
+   * 日志。只搬运不改执行顺序与日志文案。
+   */
+  private handleIsolatedEventError(ev: PiTranslatedEvent, err: unknown): void {
+    // B2（PR#86 review）：终态事件（turn-end）自身 handler 抛错时，onTurnFinalize 未执行 →
+    // isGenerating 永不复位（session 永久 busy，违反 AGENTS.md 规则 #3）。
+    // 兜底强制执行。onTurnFinalize 幂等（finalizeSession 幂等，见 chat.ts），重复调用无副作用。
+    if (ev.kind === 'turn-end') {
+      try {
+        // S4：传 ev.stopReason 而非 undefined——对齐正常路径（handleTurnEnd L352）。
+        // handleTurnEndSideEffects 在 stopReason undefined 时 outcome 走 'done' 分支，
+        // 对「handler 抛错」场景写 'done' 是错的；turn-end 事件本身携带 stopReason（types.ts L120）。
+        this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason)
+      } catch (finalizeErr) {
+        // best-effort: onTurnFinalize 本身就是 handle(ev) 抛错后的兜底，此处失败无更上层可传播，静默降级
+        console.debug('[event-interpreter] onTurnFinalize fallback failed:', finalizeErr)
+      }
+      // occupancy #3 兜底：handleTurnEnd 早段（send 帧 / onContextUpdate）抛错时
+      // settling 写入未达——与 onTurnFinalize 兜底同构，防 turn 卡 generating
+      // （session 永久占用投影，renderer 永走 steer/defer 路由）。
+      try {
+        this.opts.onOccupancyTransition?.('settling')
+      } catch (occErr) {
+        // best-effort：同上方 onTurnFinalize 兜底语义——已是 handle(ev) 抛错后的兜底，
+        // 失败无更上层可传播，落 debug 供诊断
+        console.debug('[event-interpreter] occupancy settling fallback failed:', occErr)
+      }
+    } else if (ev.kind === 'agent-settled') {
+      // [RT-4#2①] settled 处理链抛错逃逸（delayer 直通路径异常绕过 runAgentSettledEffects
+      // 内层 catch 的残余形态）→ 终态兜底：settling→idle 唯一边沿补写，防 occupancy 永久
+      // settling（幂等写，与 runAgentSettledEffects 的补写不冲突）。
+      try {
+        this.opts.onOccupancyTransition?.('idle')
+      } catch (occErr) {
+        // best-effort：同上方 turn-end 兜底语义——已是 handle(ev) 抛错后的兜底，
+        // 失败无更上层可传播，落 debug 供诊断
+        console.debug('[event-interpreter] occupancy idle fallback failed:', occErr)
+      }
+    }
+    console.error(
+      `[event-interpreter] handle event error (isolated; batch continues) sid=${this.sessionId} kind=${ev.kind}:`,
+      err,
+    )
   }
 
   /**
@@ -864,6 +932,9 @@ export class EventInterpreter {
         // [R-09 简化] 原 turn-start 同步采 baseline 快照已删除——diffSnapshots 的 baseline
         // 参数是死参数（[HISTORICAL] dirty 漏报修复后输出只依赖 current），turn-start 采集
         // 是每 turn 一次的纯浪费（W18 前为 execSync 同步阻塞）。
+        // CP6：turn 事件到达 → 取消命令-only 收口窗口（幂等门的前半，
+        // 与下方 occupancy #2 同点——窗口不得覆盖真实 turn 状态）。
+        occupancySettleWindow.cancel(this.sessionId)
         this.currentMessageId = ev.messageId
         this.turnGen += 1
         this.turnFinalizing = false
@@ -1014,6 +1085,8 @@ export class EventInterpreter {
         // 时 no-op——正常会话（含显式投递开 turn）零额外开销（Map get 即返）。
         if (ev.eventType === 'agent_start') {
           userStoppedGate.noteAgentStart(this.sessionId)
+          // CP6：agent_start 到达 → 取消命令-only 收口窗口（幂等门的前半）。
+          occupancySettleWindow.cancel(this.sessionId)
         }
         // agent_start 等纯观测事件（无 WS 帧产出）
         this.opts.executeHooks?.('onPiEvent', { event: ev.eventType, ...ev.data }).catch(() => {})

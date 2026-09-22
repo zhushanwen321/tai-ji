@@ -239,6 +239,15 @@ export interface ReclaimSessionDeps {
   /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
   clearPendingReload?(sessionId: string): void
   /**
+   * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
+   * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
+   * pm.hasClient(sessionId)` 为假）：并发 restore 的取消分支不调用，因此新进程的活请求
+   * 不会被清（pending 只由该进程的事件流写入，而新进程存在 ⇒ 代际校验必失败）。
+   * 装配绑 RuntimeServer.clearExtensionTimeoutsForSession（既有公开写口，薄委托到
+   * ExtensionTimeoutManager.clearForSession——不新增 server 能力）。
+   */
+  clearPendingUiRequests?(sessionId: string): void
+  /**
    * 驱逐该 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C：
    * 回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本）。装配绑
    * SessionService.evictHistoryRebuildCache → SessionHistoryReader.onSessionReclaimed。
@@ -1267,6 +1276,10 @@ export class SessionLifecycle implements ISessionRegistry {
       // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
       this.removeEntry(sessionId)
       deps.clearPendingReload?.(sessionId)
+      // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
+      // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
+      // 并发的取消分支不执行本步——新进程的活请求不被误清。
+      deps.clearPendingUiRequests?.(sessionId)
       // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收不是
       // 销毁，不走 removeSessionEntry 汇聚点，只驱逐缓存这一纯派生数据。挂代际校验
       // 通过后的成功路径（并发重建取消时新 session 无辜，不摘其缓存）；驱逐后重激活

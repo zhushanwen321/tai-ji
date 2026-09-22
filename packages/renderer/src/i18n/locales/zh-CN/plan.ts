@@ -1,27 +1,46 @@
 /**
- * plan 模式 i18n（plan 模式重设计 u1-banner：M1 横幅 + 审批条）。
- * 文案基线 = 用户验收 demo 的 M1 横幅 / 底部审批条（验收 demo 不入库）。
+ * plan 模式 i18n：modeBar 状态带 + reviewBar 审阅条 + drawer 计划产物 tab + docs 文档面板
+ * + comment 划选评论。
  */
 export default {
-  banner: {
+  reviewBar: {
+    commentsCount: '{count} 条评论',
+    submitRevise: '提交评论并要求修订',
+    confirmExecute: '确认并执行',
+    // 2026-09-21 两键+忽略裁决：解释键删除；忽略 = 停止 agent turn 并关闭本次提问
+    ignore: '忽略',
+    ignoreTip: '停止 agent 并关闭本次提问，计划保持不变',
+    ignoreError: '忽略失败：{message}。agent 可能已停止响应，可重试或用左区退出按钮退出计划模式',
+    revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
+    waitingResubmit: '等待 agent 重新提交审批',
+    // §3.4 降级态（精简单源 + 旧 entry 缺省通用）：共用恢复入口指引；退出入口收敛到左区
+    degradedResubmit: 'agent 会话已重启，尚未重新提交',
+    degradedRecoverHint: '在对话输入框发送任意消息，提醒 agent 重新提交审批',
+    // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
+    reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
+    viewDrafts: '查看评论草稿',
+  },
+  // PlanModeBar 左区（plan-mode-ux-refactor u-plan-bar：状态带收敛后自持键族）
+  modeBar: {
     title: '计划模式',
-    hint: '已激活，agent 只读取代码、产出文档，不修改源码',
     skillsLabel: '技能',
-    skillsUnspecified: '（未指定）',
     stageExploring: '需求探索',
     stageWriting: '文档撰写',
     stageReviewing: '审阅确认',
+    // 阶段点 tooltip（各阶段含义）
+    stageExploringTip: 'agent 正在探索需求，尚未产出计划文档',
+    stageWritingTip: 'agent 正在撰写计划文档',
+    stageReviewingTip: '计划文档已产出，等待你审阅确认',
     exit: '退出',
-    // E9：错误消息内嵌恢复动作（错误 → 恢复闭环），横幅保持原状
+    // E9：错误消息内嵌恢复动作（错误 → 恢复闭环），状态带保持原状
     exitError: '退出失败：{message}。修复后重试退出，或手动在对话输入 /plan abort',
-  },
-  reviewBar: {
-    commentsCount: '{count} 条评论',
-    requestExplanation: '请求进一步解释',
-    submitRevise: '提交评论并要求修订',
-    confirmExecute: '确认，开始执行',
-    revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
-    waitingResubmit: '等待 agent 重新提交审批',
+    // §3.5 退出确认 Popover（分情境警示）：revising = agent 侧修订将中止（GUI 草稿在
+    // revise 提交时已清，警示指 agent 侧）；有评论草稿 = 草稿将丢弃；两警示按序取首个命中
+    exitConfirmTitle: '退出计划模式？',
+    exitWarnRevising: 'agent 正在修订文档，退出将中止修订',
+    exitWarnDrafts: '{count} 条评论草稿将丢弃',
+    exitConfirm: '确认退出',
+    exitCancel: '取消',
   },
   drawer: {
     // plan tab（plan 模式重设计 u1-drawer-tab）：drawer「计划产物」tab。
@@ -29,6 +48,14 @@ export default {
     tabPlan: '计划产物',
     noPlan: '暂无计划产物',
     planHint: '进入计划模式后，agent 产出的文档会显示在这里',
+    // pending 态矩阵（plan-mode-ux-refactor §3.2，u-drawer-gate）：isActive && docs 空期间
+    // 计划产物面板的两态。#1 与 derivePlanStage 的 exploring 语义对齐（中性进行时，不断言
+    // 具体动作）；#2 空闲等待态（isGenerating 惰性派生存在误显窗口，文案中性不断言
+    // 「已暂停」——误显后果轻，显式接受）
+    pendingActive: '正在探索与撰写计划文档…',
+    pendingIdle: 'agent 暂未推进，可发消息继续',
+    // 恢复入口提示：交互语义 = 指引用户发消息（无独立按钮；恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作）
+    pendingIdleHint: '在对话输入框发送任意消息，提醒 agent 继续推进',
   },
   docs: {
     // 文档面板（plan 模式重设计 u1-docs-panel：L2 文档 tab + meta + 正文）

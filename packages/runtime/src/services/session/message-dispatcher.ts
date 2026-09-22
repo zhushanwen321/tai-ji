@@ -24,7 +24,7 @@ import type { SendMessageHook, PendingBashResultData, IManagedSessionView, Force
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
-import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
+import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, occupancySettleWindow, userStoppedGate } from './event-interpreter.js'
 import { LateBoundSkillSource, SkillInjector, type SkillNotice } from './skill-injector.js'
 import { publishSkillNotices as publishSkillNoticesShared } from './skill-notice-publisher.js'
 import { AbortLiveness } from './abort-liveness.js'
@@ -327,6 +327,13 @@ export class MessageDispatcher {
     } catch (e) {
       return this.handlePromptFailure(sessionId, activeSession, clientUuid, e)
     }
+    // CP6（scheduler-trigger-inversion §11 CP6）：prompt resolve 后武装 2s 短窗，
+    // 期间无任何 turn 事件（命令-only prompt）则回落 idle——否则 occupancy.turn 卡在
+    // dispatching（按钮残留 stop、下一条消息 busy 预检拒/转 steer）。幂等门与取消语义见
+    // EventInterpreter 的 OccupancySettleWindow（agent_start/turn_start 到达即取消）。
+    if (activeSession) {
+      this.armOccupancySettleWindow(sessionId)
+    }
     // [D6/D8] 发送成功后才发布 skillNotice：消息已真正入队，提示描述的注入形态才成立；
     // prompt 失败路径不发（handlePromptFailure 的 message.error 已覆盖用户可见错误）。
     this.publishSkillNotices(sessionId, promptText, injection.notices)
@@ -443,6 +450,25 @@ export class MessageDispatcher {
       )
       return false
     }
+  }
+
+  /**
+   * CP6：命令-only prompt 的 occupancy 收口窗口武装（prompt resolve 之后）。
+   *
+   * 回调幂等门（两重）：① 到期时重查活跃 session（恢复/重建后旧对象不得被回写）；
+   * ② 仅当 `turn === 'dispatching'` 才回落 idle——turn 事件已到达时窗口早被 cancel，
+   * 即使调度竞态晚到一步，turn 也不是 dispatching（不覆盖 generating/settling）。
+   * 真误判（活跃 turn 被短暂投影 idle）由 turn 事件自愈；pi 拒绝路径的纠偏仍由
+   * handlePromptFailure 的 `reject-processing`（消息进 defer 队列不丢）承担。
+   */
+  private armOccupancySettleWindow(sessionId: string): void {
+    occupancySettleWindow.arm(sessionId, () => {
+      const live = this.svc.getSession(sessionId)
+      if (!live) return
+      const occ = live.occupancy ?? IDLE_SESSION_OCCUPANCY
+      if (occ.turn !== 'dispatching') return
+      applySessionOccupancyTransition(live, this.messageBus, 'idle')
+    })
   }
 
   /**

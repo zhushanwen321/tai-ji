@@ -9,13 +9,15 @@
       <Button
         variant="ghost"
         class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
-        :title="t('panel.thinkingLevel.title')"
+        :class="props.iconOnly && 'px-1.5'"
+        :title="iconOnlyTitle"
       >
         <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
         <LoaderCircle v-if="switching" class="size-3 shrink-0 animate-spin" />
         <Brain v-else class="size-3 shrink-0" />
-        <span>{{ currentLabel }}</span>
+        <span v-if="!props.iconOnly">{{ currentLabel }}</span>
         <ChevronDown
+          v-if="!props.iconOnly"
           class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
           :class="open && 'rotate-180'"
         />
@@ -93,8 +95,19 @@ const props = withDefaults(
      * 读条件由调用方判 sessionId 等值后传入（本组件不感知 session）。
      */
     switching?: boolean
+    /**
+     * 纯图标态（u6b fit L2 图标化）：只留 Brain 图标，档位名进 title（点击仍出档位 popover，
+     * 交互路径不丢）。
+     */
+    iconOnly?: boolean
  }>(),
-  { level: undefined, levelMap: undefined, supportedLevels: undefined, switching: false },
+  {
+    level: undefined,
+    levelMap: undefined,
+    supportedLevels: undefined,
+    switching: false,
+    iconOnly: false,
+  },
 )
 
 const { t } = useI18n()
@@ -122,6 +135,11 @@ const availableOptions = computed<ThinkingLevelOption[]>(() => {
 
 const currentLabel = computed(
   () => props.level ? getDisplayLabel(level.value, props.levelMap, t) : t('panel.thinkingLevel.placeholder'),
+)
+
+/** 图标态 title：标题 + 当前档位（文本被图标取代，档位信息不能丢） */
+const iconOnlyTitle = computed(() =>
+  props.iconOnly ? `${t('panel.thinkingLevel.title')} · ${currentLabel.value}` : t('panel.thinkingLevel.title'),
 )
 
 function onSelect(opt: ThinkingLevelOption): void {

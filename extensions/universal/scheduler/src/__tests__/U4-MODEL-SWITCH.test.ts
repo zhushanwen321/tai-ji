@@ -4,7 +4,8 @@
  * 覆盖设计 §3.3 D3 的五块机制（探针 P-MODEL 修订后语义）：
  * - 切换：dispatchTaskInner 在 sendMessage 前 setModel（busy 亦生效——本层不做 idle 检查）
  * - 归属与恢复：message_start customType 前缀匹配 + run 窗口内 turnIndex 序态关联；
- *   turn_end(dispatchedTurnIndex) + isIdle 复核推迟；agent_end/agent_settled 封口 run 窗口
+ *   turn_end(dispatchedTurnIndex) + isIdle 复核推迟；agent_end 封口 run 窗口；
+ *   agent_settled 封口 + awaiting-restore 即时兑现（恢复延迟从最长 1 tick 收敛到事件即时）
  * - 互斥：切换在途时其他需切模型任务 skip + pending 留待下 tick 重试
  * - 串行化（MF-2）：turn_end 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
  *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
@@ -151,6 +152,86 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       ops.idle = true
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+    })
+
+    it('agent_settled 即时兑现：awaiting-restore + idle → 不等 tick 立即恢复', async () => {
+      task = await addModelTask('job', TASK_M)
+      await runtime.dispatchTask(task)
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 用户长 run 在途：turn_end 推迟为 awaiting-restore
+      ops.idle = false
+      injectDispatchTurn(0)
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // run 完全沉降（agent_settled）：立即恢复，无需推进 30s tick
+      ops.idle = true
+      runtime.handleRunSettled()
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+    })
+
+    it('agent_settled 与用户新 run 交错（非 idle）→ 不动作，tick 兜底仍兑现', async () => {
+      task = await addModelTask('job', TASK_M)
+      await runtime.dispatchTask(task)
+
+      ops.idle = false
+      injectDispatchTurn(0)
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // settled 事件处理时用户已开始新 run（isIdle false）：不能切（会把新 run 模型换掉）
+      runtime.handleRunSettled()
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 兜底不变：后续 tick 重入 idle 仍恢复
+      ops.idle = true
+      runtime.startScheduler()
+      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+    })
+
+    it('agent_end 纯封口不恢复（只有 settled 兑现）：awaiting-restore 态下 end 后仍不动作', async () => {
+      task = await addModelTask('job', TASK_M)
+      await runtime.dispatchTask(task)
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 构造 awaiting-restore：归属 turn_end 时非 idle（用户长 run 在途）→ 推迟
+      ops.idle = false
+      runtime.handleAgentStart()
+      runtime.handleTurnStart(0)
+      runtime.handleMessageStart(dispatchCustomMessage())
+      runtime.handleTurnEnd(0)
+      ops.idle = true
+      // run 末尾 agent_end：纯封口——end 后可能仍有自动续跑 turn（retry/compaction/
+      // queued continuation），此时切回会把续跑 turn 的模型换掉
+      runtime.handleRunClosed()
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 对照：同一状态下 agent_settled 立即兑现（a 段不动作 ≠ 状态机卡死）
+      runtime.handleRunSettled()
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+    })
+
+    it('in-flight 态（归属 turn_end 未到达）settled 不动作：归属异常归 tick 对账', async () => {
+      task = await addModelTask('job', TASK_M)
+      await runtime.dispatchTask(task)
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // in-flight + idle：settled 不动 in-flight（turn_end 丢失的强制开放归 2-tick 对账）
+      ops.idle = true
+      runtime.handleRunSettled()
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 归属 turn_end 到达后既有通道正常恢复
+      injectDispatchTurn(0)
+      await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
     })
 

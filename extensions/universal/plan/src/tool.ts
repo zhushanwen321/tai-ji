@@ -17,13 +17,16 @@ import type {
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
-import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
+import { GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
 import type { GoalBridgeOutcome } from "./compact.js";
+import { activatePlanMode, resolveSkills } from "./enter.js";
 import { detectExecSkills } from "./exec-skills.js";
 import type { ExecSkill } from "./exec-skills.js";
+import { t } from "./i18n.js";
 import { formatReviewComments } from "./prompts.js";
+import type { SkillRef } from "./prompts.js";
 import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, freshAbortController, getPlanState, planDocsFingerprint, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
@@ -32,6 +35,7 @@ const logger = getLogger("pi-plan");
 // ── Action types ───────────────────────────────────────────────────
 
 export const PLAN_ACTIONS = [
+  "enter",
   "select-template",
   "complete",
   "abort",
@@ -39,11 +43,8 @@ export const PLAN_ACTIONS = [
   "submit-review",
 ] as const;
 
-/**
- * 计划态工具白名单（进入计划模式与 session_start 恢复两处共用——bash 在白名单内，
- * 文件写约束来自注入的计划模式提示词，见 pi-ext-021）。
- */
-export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
+// PLAN_MODE_TOOLS 已迁至 state.ts（叶模块，避免 enter↔tool 循环依赖）；此处再导出保持兼容
+export { PLAN_MODE_TOOLS } from "./state.js";
 
 export type PlanAction = (typeof PLAN_ACTIONS)[number];
 
@@ -56,6 +57,12 @@ export function validateAction(action: string): action is PlanAction {
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
+}
+
+interface EnterDetails {
+  action: "enter";
+  requirement: string;
+  skills: string[];
 }
 
 interface CompleteDetails {
@@ -101,6 +108,7 @@ interface ReviewErrorDetails {
 }
 
 type PlanDetails =
+  | EnterDetails
   | SelectTemplateDetails
   | CompleteDetails
   | CompleteCancelledDetails
@@ -182,6 +190,13 @@ function renderPlanResult(
   const NL = "\n";
 
   switch (details.action) {
+    case "enter": {
+      const header = fg("success", `✓ 已进入计划模式`) + NL;
+      const skillsLine = details.skills.length > 0 ? fg("dim", `  技能: ${details.skills.join(" · ")}`) + NL : "";
+      const hint = fg("dim", "  只读规划：读代码、产文档，不改源码");
+      return new Text(header + skillsLine + hint, 0, 0);
+    }
+
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
@@ -259,6 +274,62 @@ function cascadeTurnAbort(controller: AbortController, signal: AbortSignal | und
 interface ActionResult {
   content: Array<{ type: "text"; text: string }>;
   details: PlanDetails;
+}
+
+/**
+ * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
+ * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
+ * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
+ * 用户随时可经 PlanModeBar 退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
+ * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
+ * 不走对话流消息注入/steer 排队——slash 入口才经 sendMessage 注入）。已在 plan
+ * 模式时幂等返回，不重复进入。
+ */
+function executeEnter(
+  pi: ExtensionAPI,
+  params: Record<string, unknown>,
+  state: PlanState,
+  sessions: PlanSessionMap,
+  sessionId: string,
+  ctx: ExtensionContext,
+): ActionResult {
+  if (state.isActive) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: "Already in plan mode. Continue: write each deliverable into the plan directory, register it via plan(action='register-doc'), then call plan(action='submit-review') when all are done.",
+      }],
+      details: { action: "enter", requirement: state.requirement, skills: state.skills },
+    };
+  }
+
+  const requirement = typeof params.requirement === "string" ? params.requirement.trim() : "";
+  // skills 可选（数组逐项 string 白名单）；缺失/空 = 不挂载技能走模板流程
+  const requestedSkills = Array.isArray(params.skills)
+    ? params.skills.filter((s): s is string => typeof s === "string")
+    : [];
+  let resolved: SkillRef[] = [];
+  if (requestedSkills.length > 0) {
+    const resolution = resolveSkills(pi, requestedSkills);
+    if (!resolution.ok) {
+      // 未知技能名 = 使用错误（同 executeSelectTemplate 错名先例 throw，带可用清单自愈）
+      throw new Error(
+        `Unknown skill(s): ${resolution.missing.join(", ")}. Available skills: ${resolution.available.join(", ") || "(none)"}. ` +
+        `Retry plan(action='enter') with valid skill names or omit the skills parameter.`,
+      );
+    }
+    resolved = resolution.resolved;
+  }
+
+  const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
+    requirement,
+    skills: resolved,
+    projectDir: ctx.cwd,
+  });
+  return {
+    content: [{ type: "text" as const, text: prompt }],
+    details: { action: "enter", requirement, skills: resolved.map((s) => s.name) },
+  };
 }
 
 /**
@@ -388,7 +459,7 @@ export function isPlanReviewResponse(value: unknown): value is PlanReviewRespons
   if (typeof value !== "object" || value === null || !("decision" in value)) return false;
   const decision = value.decision;
   if (decision === "approve") return true;
-  if (decision === "revise" || decision === "explain") {
+  if (decision === "revise") {
     if (!("comments" in value) || !Array.isArray(value.comments)) return false;
     return value.comments.every((c) => {
       if (typeof c !== "object" || c === null) return false;
@@ -423,7 +494,7 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
  *   （重提交无变化检测基线，text/gui 两分支共用；快照缺失 = 无既往提交不警告）。
  * - 宿主分流：taiji（TAIJI_AGENT_EXT_LOG=1）发 PLAN_REVIEW_MARKER select；
  *   独立 pi 返回 E8 文本软门。
- * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按三 decision 消费。
+ * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按 decision 消费。
  */
 async function executeSubmitReview(
   pi: ExtensionAPI,
@@ -458,9 +529,12 @@ async function executeSubmitReview(
     state.lastSubmitReviewDocsFingerprint !== undefined &&
     state.lastSubmitReviewDocsFingerprint === fingerprint;
 
-  // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复后冷启动扫描
-  // 恢复 awaiting，session_start hook 据此 steer 重挂——E3）。指纹快照同点更新：
-  // 单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review 时的 docs」）
+  // 挂起 select 前落 awaiting：select 挂起期间 entry 已持久（崩溃恢复 E3 依赖此持久态）。
+  // 指纹快照同点更新：单一记录点，text/gui 两检测分支共用（快照 = 「上次 submit-review
+  // 时的 docs」）。重挂起新 pending 前清上一轮 source——不变量 = source 只描述当前降级
+  // 等待的原因，此处即将挂起真审批，降级等待尚未发生（残留 'resubmit' 会在降级态渲染
+  // 上一轮「会话已重启」文案，与 C-U2 同型残留）
+  delete state.reviewStateSource;
   state.reviewState = "awaiting";
   state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);
@@ -540,12 +614,18 @@ async function executeSubmitReview(
       return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers, signal);
 
     case "revise": {
-      // 显式 deliverAs: 'steer' 必须传——pi 的 sendUserMessage 在 isStreaming 时
-      // 无 deliverAs 直接 throw；有 deliverAs 时 steer 排队至下一次 LLM 调用
-      // （pi 实装锚点：dist/core/agent-session.js:859-868（0.84.4）——isStreaming 分支
-      // 无 streamingBehavior :862 throw、steer 走 :868 _queueSteer；sendUserMessage
-      // 以 streamingBehavior=deliverAs 委托 prompt :1161/:1185）
-      pi.sendUserMessage(formatReviewComments("revise", response.comments), { deliverAs: "steer" });
+      // custom message 形态注入：streaming 时显式
+      // deliverAs:'steer' 排队至下一次 LLM 调用（pi 实装锚点：dist/core/agent-session.js
+      // :859-868（0.84.4）——isStreaming 分支 steer 走 :868 _queueSteer；sendMessage 缺省
+      // deliverAs 同为 steer，显式传保持排队语义自明）；非 streaming 由 triggerTurn:true 开轮
+      pi.sendMessage(
+        {
+          customType: PLAN_CONTEXT_CUSTOM_TYPE,
+          content: formatReviewComments("revise", response.comments),
+          display: false,
+        },
+        { deliverAs: "steer", triggerTurn: true },
+      );
       state.reviewState = "revising";
       persistPlanState(pi, state);
       return {
@@ -560,30 +640,22 @@ async function executeSubmitReview(
       };
     }
 
-    case "explain": {
-      // 同款注入但不改 reviewState（保持 awaiting）：前端显示降级态
-      // 「等待 agent 重新提交审批」，重挂靠 D2 提示词纪律驱动
-      pi.sendUserMessage(formatReviewComments("explain", response.comments), { deliverAs: "steer" });
-      return {
-        content: [{
-          type: "text" as const,
-          text: withUnchangedWarning(
-            `User requested further explanation with ${response.comments.length} comment(s) — injected into the conversation. Answer them, then call plan(action='submit-review') again to re-hang the review.`,
-            unchangedResubmit,
-          ),
-        }],
-        details: submitReviewDetails("gui", state.docs.length, unchangedResubmit),
-      };
+    default: {
+      // 判别联合穷尽性守卫：isPlanReviewResponse 已收窄 decision 值域，此处不可达；
+      // 编码期新增 decision 漏改 switch 会被 never 断言在编译期拦截
+      const unreachable: never = response;
+      throw new Error(`plan: unhandled review decision: ${JSON.stringify(unreachable)}`);
     }
   }
 }
 
 /**
- * 执行方式选项（D10 v2）：内置 Develop（subagent / single-agent 收口——按任务复杂度
- * 内部切换，不暴露给开发者）+ 检测到的 plan-exec skill 项（label `Execute via skill:
- * <name>`，mode `skill:<name>`，skillDir 随选项携带）+ goal 档（tryGoalInit 真实
- * 副作用，保留独立选项）。动态构造：skill 项随 complete 时检测产出，label→mode
- * 映射随选项集携带（`skill:<name>` 动态项不进静态表）。
+ * 执行方式选项（2026-09-21 用户裁决重排）：选项集 = 检测到的 plan-exec skills
+ * （root 序前 2 个，label `用技能「name」执行`）+ 普通执行（execute 档——compact 侧
+ * 整合 goal 桥与 auto-parallel subagent，见 deliverExecutionNotice）+ 暂不执行
+ * （留在 plan mode）。四段固定结构，UI 文案经 i18n（ui-preferences locale 通道）。
+ * 动态构造：skill 项随 complete 时检测产出，label→mode 映射随选项集携带
+ * （`skill:<name>` 动态项不进静态表）。
  */
 interface ExecOption {
   label: string;
@@ -593,47 +665,53 @@ interface ExecOption {
   skillDir?: string;
 }
 
-const DEVELOP_OPTION: ExecOption = {
-  label: "Develop (auto-parallel)",
-  mode: "develop",
-  description:
-    "Auto-parallel by complexity: delegate independent tasks to subagents, execute small or tightly-coupled steps in this session.",
-};
+/** skill 选项上限（用户裁决：第一/第二两个 skill 排位；检测再多不进选项） */
+const MAX_SKILL_OPTIONS = 2;
 
-/** Build execution options: Develop + detected plan-exec skills + goal tier (capability-filtered). */
-function buildExecOptions(execSkills: ExecSkill[], goalAvailable: boolean): ExecOption[] {
-  const options: ExecOption[] = [DEVELOP_OPTION];
-  for (const skill of execSkills) {
-    options.push({
-      label: `Execute via skill: ${skill.name}`,
-      mode: `skill:${skill.name}`,
-      description: skill.description,
-      skillDir: skill.skillDir,
-    });
-  }
-  if (goalAvailable) {
-    options.push({ label: "Goal-driven execution (/goal)", mode: "goal" });
-  }
+/** Build execution options: up to 2 detected plan-exec skills + execute + not-now. */
+function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
+  const options: ExecOption[] = execSkills.slice(0, MAX_SKILL_OPTIONS).map((skill) => ({
+    label: t("exec.viaSkill", { name: skill.name }),
+    mode: `skill:${skill.name}`,
+    description: skill.description ?? t("exec.viaSkillDesc", { name: skill.name }),
+    skillDir: skill.skillDir,
+  }));
+  options.push({
+    label: t("exec.execute"),
+    mode: "execute",
+    description: t("exec.executeDesc"),
+  });
+  options.push({
+    label: t("exec.later"),
+    mode: "later",
+    description: t("exec.laterDesc"),
+  });
   return options;
 }
 
-/** 对话框尾部的两个"留在 plan mode"选项（complete-cancelled 路径） */
-const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
-
-/** GUI form 单 choice 问题的 answers key（协议 fallback 规则 key = header ?? question） */
-const EXEC_QUESTION_KEY = "Execution method";
+/**
+ * 「暂不执行」档的 mode 值（选项集内的固定成员，label 经 i18n；选中即 complete-cancelled，
+ * 留在 plan mode——原 CANCEL_OPTIONS 英文双选项的收敛形态）。
+ */
+const LATER_MODE = "later";
 
 /** Outcome of the complete-action execution-method prompt. */
 type CompleteChoiceOutcome =
   | { kind: "cancelled"; result: ActionResult }
   | { kind: "mode"; chosenMode: string; skillDir?: string };
 
-/** complete-cancelled result（用户取消 / 留在 plan mode 两选项，reason = 点选 label 或 cancelled） */
+/** complete-cancelled result（用户选暂不执行 / 通道取消，reason = 点选 label 或 cancelled） */
 function cancelledByUserResult(choice: string | undefined): ActionResult {
+  // 文案按取消来源分情境（状态审查 P2-3）：choice 非空 = 用户在选项里主动点「暂不执行」，
+  // 留在 plan mode 是用户意图；choice 空 = select 被 abort 联动解散（用户点了 PlanModeBar
+  // 退出 / turn 中止）——此时 plan mode 已退出，旧文「Staying in plan mode」与已 reset 的
+  // 状态双向矛盾（LLM 按 plan mode 行事，后续每个 plan 调用吃 inactive 错误才自纠）
+  const text =
+    choice === undefined
+      ? "Plan mode was exited while the execution-method prompt was pending. The plan has NOT been dispatched for execution — do not implement any changes. Briefly tell the user you have stopped, then wait for further user instructions."
+      : `User chose: ${choice}. Staying in plan mode. The plan has NOT been dispatched for execution.`;
   return {
-    content: [
-      { type: "text" as const, text: `User chose: ${choice ?? "cancelled"}. Staying in plan mode.` },
-    ],
+    content: [{ type: "text" as const, text }],
     details: { action: "complete-cancelled", reason: choice ?? "cancelled" },
   };
 }
@@ -653,16 +731,18 @@ function cancelledByChannelResult(reason: string, message?: string): ActionResul
 }
 
 /**
- * Prompt the user for an execution method（D4 三路分流 + D10 v2 选项集）：
- * 1. `!ctx.hasUI`（print/json headless，noOp UI）→ 默认 develop，不进任何 select——
+ * Prompt the user for an execution method（D4 三路分流 + 2026-09-21 选项集重排）：
+ * 1. `!ctx.hasUI`（print/json headless，noOp UI）→ 默认 execute，不进任何 select——
  *    替换失效的 `typeof ctx.ui.select` 软门（noOp 的 select 是返回 undefined 的函数，
  *    函数存在性不可判形态，pi runner.js 实码）；
  * 2. taiji rpc 宿主（TAIJI_AGENT_EXT_LOG=1 且 mode==='rpc'）→ uiFormInteract 单
  *    choice 问题（FormOverlay 单视图）；mode 收紧 rpc = helper 的 RPC-only 契约 +
  *    TUI 保留原生 select（D8）——env 异常置位的 TUI 落回第 3 路而非 throw；
- * 3. else（TUI / 独立 pi）→ pi 原生 plain select（现状行为逐字保留）。
+ * 3. else（TUI / 独立 pi）→ pi 原生 plain select。
  * 四态折叠：cancelled/timeout → cancelled result；channel-error/non-json → 同折
  * cancelled result + 通道失败说明（plan 是流程对话，通道故障不炸 turn 也不默认执行）。
+ * UI 文案（question/header/选项 label）经 i18n；answers key = header（协议 fallback
+ * 规则 key = header ?? question），header 与读取同源 t() 生成，本地化不破坏取值。
  */
 async function resolveCompleteChoice(
   ctx: ExtensionContext,
@@ -671,29 +751,27 @@ async function resolveCompleteChoice(
   signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
   if (!ctx.hasUI) {
-    return { kind: "mode", chosenMode: "develop" };
+    return { kind: "mode", chosenMode: "execute" };
   }
 
-  // D10：complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
+  // complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
   // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillDir 随 outcome 流转
   const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
-  const execOptions = buildExecOptions(execSkills, detectGoalCapability());
+  const execOptions = buildExecOptions(execSkills);
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
-  // approve 后的挂起窗口内用户点横幅退出必须可达（abort → resolve undefined → cancelled）
+  // approve 后的挂起窗口内用户点 PlanModeBar 退出（确认 Popover 后）必须可达（abort → resolve undefined → cancelled）
   const controller = freshAbortController(controllers, sessionId);
   cascadeTurnAbort(controller, signal);
 
   let chosenLabel: string | undefined;
   if (isTaijiHost() && ctx.mode === "rpc") {
+    const questionHeader = t("exec.header");
     const question: ChoiceQuestion = {
       type: "choice",
-      header: EXEC_QUESTION_KEY,
-      question: "Plan is ready. Choose the execution method:",
-      options: [
-        ...execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
-        ...CANCEL_OPTIONS.map((label) => ({ label })),
-      ],
+      header: questionHeader,
+      question: t("exec.question"),
+      options: execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
       allowOther: false,
     };
     // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
@@ -713,20 +791,23 @@ async function resolveCompleteChoice(
       }
       return { kind: "cancelled", result: cancelledByChannelResult(form.reason, form.message) };
     }
-    chosenLabel = form.answers[EXEC_QUESTION_KEY];
+    chosenLabel = form.answers[questionHeader];
   } else {
-    const labels = [...execOptions.map((opt) => opt.label), ...CANCEL_OPTIONS];
-    chosenLabel = await ctx.ui.select("Plan is ready. Choose execution method:", labels, { signal: controller.signal });
+    const labels = execOptions.map((opt) => opt.label);
+    chosenLabel = await ctx.ui.select(t("exec.question"), labels, { signal: controller.signal });
     controllers.delete(sessionId);
   }
 
-  if (!chosenLabel || CANCEL_OPTIONS.includes(chosenLabel)) {
-    return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
+  if (!chosenLabel) {
+    return { kind: "cancelled", result: cancelledByUserResult(undefined) };
   }
   const option = execOptions.find((opt) => opt.label === chosenLabel);
   if (!option) {
     // 选项集与 labels 同源构造，选中的 label 必在集内——找不到即编码 bug，fail-fast
     throw new Error(`plan: unknown execution choice label: ${chosenLabel}`);
+  }
+  if (option.mode === LATER_MODE) {
+    return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
   }
   return { kind: "mode", chosenMode: option.mode, skillDir: option.skillDir };
 }
@@ -740,8 +821,8 @@ function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome 
   const base = `Plan approved. File: ${displayPath}`;
   if (goalOutcome === undefined) return base;
   return goalOutcome.started
-    ? `${base}\nGoal execution started via /goal.`
-    : `${base}\nGoal execution was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
+    ? `${base}\nGoal tracking started via /goal.`
+    : `${base}\nGoal tracking was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
 }
 
 /** complete action: prompt for execution mode, restore tools, reset state. */
@@ -756,6 +837,13 @@ async function executeComplete(
   controllers: PlanAbortControllers,
   signal: AbortSignal | undefined,
 ): Promise<ActionResult> {
+  // approve 已消费挂起审批，执行方式选择挂起前清 reviewState 并落盘（状态审查 P2-3）：
+  // 否则「awaiting 无挂起」窗口会让右区误导渲染降级态「等待 agent 重新提交审批」
+  // （实际在等执行方式选择）。清后审批条 shouldRender=false 即消失，右区只剩 form。
+  delete state.reviewState;
+  delete state.reviewStateSource;
+  persistPlanState(pi, state);
+
   const choice = await resolveCompleteChoice(ctx, controllers, sessionId, signal);
   if (choice.kind === "cancelled") {
     return choice.result;
@@ -796,11 +884,13 @@ export function registerPlanTool(
     name: "plan",
     label: "Plan Mode",
     description:
-      "Manages plan mode lifecycle (template selection, document registration, review, state transitions). " +
+      "Manages plan mode lifecycle (enter, template selection, document registration, review, state transitions). " +
       "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
-      "Actions: select-template, register-doc, submit-review, complete, abort.",
+      "Actions: enter, select-template, register-doc, submit-review, complete, abort.",
     parameters: Type.Object({
       action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
+      requirement: Type.Optional(Type.String({ description: "Plan requirement / task description (for enter)" })),
+      skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to mount (for enter; omit to use the template-discovery flow)" })),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
       fileName: Type.Optional(Type.String({ description: "Document file name to register (for register-doc, e.g. 'design.md')" })),
       sourceSkill: Type.Optional(Type.String({ description: "Name of the mounted skill that produced this document (for register-doc; omit in template flow)" })),
@@ -811,8 +901,14 @@ export function registerPlanTool(
       ),
     }),
     promptSnippet:
+      "## Entering plan mode\n" +
+      "For large-scale refactoring, cross-module changes, or other high-risk work, proactively enter plan mode yourself: " +
+      "plan(action='enter', requirement='<what the user wants>', skills=[...]). Plan mode is read-only for source code — " +
+      "you read code and write plan documents, then the user reviews before any implementation. No user confirmation is needed to enter.\n" +
+      "\n" +
       "## When to use this tool vs the bash tool\n" +
       "Use 'plan' tool ONLY for plan mode state management:\n" +
+      "- enter — enter plan mode (self-service; requirement + optional skills)\n" +
       "- select-template — template selection\n" +
       "- register-doc — register a produced document (call after writing each deliverable; re-call after revisions to bump its version)\n" +
       "- submit-review — all documents done, request user review\n" +
@@ -822,8 +918,8 @@ export function registerPlanTool(
       "Use the bash tool for ALL document content: writing files, updating chapters (e.g. cat heredoc).\n" +
       "\n" +
       "## End-to-end workflow example\n" +
-      "1. /plan 'add dark mode' — user enters plan mode\n" +
-      "2. AI explores codebase (read, grep, bash) — brainstorming\n" +
+      "1. plan(action='enter', requirement='add dark mode') — you (the agent) enter plan mode\n" +
+      "2. Explore codebase (read, grep, bash) — brainstorming\n" +
       "3. Write each document, then plan(action='register-doc', fileName='...') for it\n" +
       "4. plan(action='submit-review') — user reviews in the review UI or conversation\n" +
       "5. Address revision comments (rewrite + re-register), re-submit until approved\n" +
@@ -855,6 +951,9 @@ export function registerPlanTool(
       const projectDir = ctx.cwd;
 
       switch (action) {
+        case "enter":
+          return executeEnter(pi, params, state, sessions, sessionId, ctx);
+
         case "select-template":
           return executeSelectTemplate(pi, params, state, projectDir);
 

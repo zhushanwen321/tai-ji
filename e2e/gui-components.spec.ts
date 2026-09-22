@@ -12,7 +12,7 @@
  * （widgetGui 渲染链路改版），断言永挂。git 可追溯。
  *
  * [改写 2026-09-16 composer-task-tray] widgetGui 的渲染消费端由「对话流 WidgetArea pill」
- * 迁至「composer 任务托盘 widget 区」（设计 docs/design/composer-task-tray.md D3/D11；
+ * 迁至「composer 任务托盘 widget 区」（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D3/D11；
  * 托盘为 widget 唯一消费端，pill 组件与 `widget-area`/`widget-pill` testid 已退役）。
  * **本 spec 不再承载 widgetGui 消费端断言**，原因是 mock 轨不可达该链路：
  * mock 推帧走 `packages/core/src/transport/mock/index.ts` 的 `pushSession`

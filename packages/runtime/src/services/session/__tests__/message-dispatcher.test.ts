@@ -9,8 +9,11 @@
  * 预检读 occupancy 投影，settling 计为忙 → send.rejected{busy}。
  * 全部协作对象 fake 注入，不 spawn pi 进程。
  */
-import { describe, expect, it, vi } from 'vitest'
-import { MessageDispatcher } from '../message-dispatcher.js'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import {
+  MessageDispatcher,
+} from '../message-dispatcher.js'
+import { OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../event-interpreter.js'
 import type { SkillInjector, SkillNotice, SkillInjectionResult } from '../skill-injector.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
 import type { IPiEngine, IProcessManager } from '../../ports/pi-engine.js'
@@ -276,5 +279,94 @@ describe('MessageDispatcher busy 预检裁决（D2 settling 计忙，u3b）', ()
     expect(result).toEqual({ blocked: false })
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+  })
+})
+
+/**
+ * CP6：命令-only prompt 的 occupancy 收口（scheduler-trigger-inversion §11 CP6）。
+ *
+ * 前提已实测确认：pi 对 `/` 开头文本先执行命令 handler、纯命令不产 turn 事件；dispatcher
+ * 已在 prompt 前置 dispatching ⇒ 无收口则永远卡住。断言口径泛化（不限于 scheduler 场景）:
+ * 收口对**所有** prompt 生效。
+ */
+describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () => {
+  type OccTurn = 'idle' | 'dispatching' | 'generating' | 'settling'
+  interface FakeView {
+    [key: string]: unknown
+    id?: string
+    cwd?: string
+    occupancy: { turn: OccTurn; compacting: boolean; bash: boolean }
+    isGenerating?: boolean
+  }
+  const makeView = (): FakeView => ({ id: 's1', occupancy: { turn: 'idle', compacting: false, bash: false } })
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    occupancySettleWindow.resetForTest()
+  })
+  afterEach(() => {
+    occupancySettleWindow.resetForTest()
+    vi.useRealTimers()
+  })
+
+  it('prompt resolve 后无 turn 事件：2s 内回落 idle（命令-only 场景，维度与 scheduler 无关）', async () => {
+    const view: FakeView = { id: 's1', cwd: '/w/s1', occupancy: { turn: 'idle', compacting: false, bash: false } }
+    const h = makeHarness({ sessionByClient: view, sessionView: view })
+    const result = await h.dispatcher.sendMessage('s1', '/any-command')
+    expect(result).toEqual({ blocked: false })
+    // prompt resolve 后仍在 dispatching（窗口未到期）
+    expect(view.occupancy.turn).toBe('dispatching')
+    // 短窗到期 → 回落 idle（幂等门允许：turn === dispatching）
+    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
+    expect(view.occupancy.turn).toBe('idle')
+    // 前端可观察到 idle 帧（渲染按钮不复残留 stop）
+    const occFrames = h.published.filter((m) => m.type === 'session.occupancy')
+    expect(occFrames[occFrames.length - 1]?.payload).toEqual({
+      sessionId: 's1', turn: 'idle', compacting: false, bash: false,
+    })
+  })
+
+  it('短窗未到期（< 2s）：不提前回落（控制面量级，不给任务加预算）', async () => {
+    const view = makeView()
+    const h = makeHarness({ sessionByClient: view, sessionView: view })
+    await h.dispatcher.sendMessage('s1', '/slow-command')
+    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS - 1)
+    expect(view.occupancy.turn).toBe('dispatching')
+  })
+
+  it('期间有 turn 事件（agent_start/turn_start 到达即 cancel）：窗口取消，状态不被覆盖', async () => {
+    const view = makeView()
+    const h = makeHarness({ sessionByClient: view, sessionView: view })
+    await h.dispatcher.sendMessage('s1', '真实 turn 的 prompt')
+    expect(view.occupancy.turn).toBe('dispatching')
+    // interpreter 的 turn-start / agent_start 挂点即调此取消（与生产同一入口）
+    occupancySettleWindow.cancel('s1')
+    // turn 推进为 generating（真实状态）
+    view.occupancy = { turn: 'generating', compacting: false, bash: false }
+    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS * 3)
+    // 窗口已取消 → 不得回落 idle（不覆盖真实状态）
+    expect(view.occupancy.turn).toBe('generating')
+  })
+
+  it('幂等门（调度竞态兜底）：即使窗口未被取消，回调见 turn !== dispatching 也不覆盖', async () => {
+    const view = makeView()
+    const h = makeHarness({ sessionByClient: view, sessionView: view })
+    await h.dispatcher.sendMessage('s1', 'turn already generating')
+    // 模拟 "turn 事件已写状态但取消失败" 的竞态：只改状态不取消
+    view.occupancy = { turn: 'settling', compacting: false, bash: false }
+    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
+    expect(view.occupancy.turn).toBe('settling')
+    // 也未广播伪造 idle 帧
+    expect(h.published.filter((m) => m.type === 'session.occupancy')
+      .some((m) => (m.payload as { turn?: string }).turn === 'idle')).toBe(false)
+  })
+
+  it('session 已不在（回收/重建竞态）：回调静默 no-op，不报错', async () => {
+    const view = makeView()
+    const h = makeHarness({ sessionByClient: view, sessionView: undefined })
+    await h.dispatcher.sendMessage('s1', '/cmd')
+    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
+    // getSession undefined → 早退；原视图不被回写
+    expect(view.occupancy.turn).toBe('dispatching')
   })
 })

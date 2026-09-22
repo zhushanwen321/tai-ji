@@ -9,21 +9,30 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { type PlanAbortControllers, type PlanSessionMap, reconstructPlanState } from "./state.js";
-import { PLAN_MODE_TOOLS, registerPlanTool } from "./tool.js";
+import {
+  type PlanAbortControllers,
+  type PlanSessionMap,
+  PLAN_CONTEXT_CUSTOM_TYPE,
+  PLAN_MODE_TOOLS,
+  persistPlanState,
+  reconstructPlanState,
+} from "./state.js";
+import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
 
 /**
- * D9 引导文案（约 50 token）：仅在 taiji 宿主注入，驱使 AI 在合适时机「建议」
- * 进入计划模式而非自行进入（G6：把「AI 很少主动调用」从源头缓解）。
+ * D9 引导文案（约 60 token）：仅在 taiji 宿主注入。plan 模式是只读子集（读代码、产
+ * 文档、不改源码），进入它不是危险操作——agent 可在合适时机**自行进入**（plan-mode-
+ * agent-enter U1 后 enter 是 tool action，无需用户确认；用户随时可经 PlanModeBar 退出）。
  */
 const PLAN_MODE_SUGGESTION_PROMPT =
   "\n\n" +
   "When the user's request involves large-scale refactoring, cross-module changes, or other high-risk modifications, " +
-  "proactively suggest entering plan mode first (e.g. `/plan <requirement> --skills <relevant skills>`). " +
-  "Do NOT enter plan mode without the user's confirmation.";
+  "proactively enter plan mode yourself by calling plan(action='enter', requirement='<the task>', skills=[...relevant skills]). " +
+  "Plan mode is read-only for source code: you explore and write plan documents, then the user reviews before implementation. " +
+  "Do not ask for permission to enter — entering plan mode is safe and reversible (the user can exit anytime).";
 
 export default function planExtension(pi: ExtensionAPI) {
   // Per-session state cache — keyed by sessionId
@@ -53,19 +62,39 @@ export default function planExtension(pi: ExtensionAPI) {
     if (state.isActive) {
       pi.setActiveTools(PLAN_MODE_TOOLS);
 
-      // E3：审批 select 挂起期间 session 关闭/崩溃 → select 随 pi 进程消亡。
-      // 本 hook 跑在 pi 懒重生之后（taiji 冷启动不拉 pi 进程——用户重开 session
-      // 发首条消息时 pi 才重生、hook 才跑），此时冷启动扫描已恢复 reviewState=
-      // awaiting 但挂起 select 不复存在（上方 delete 已清残留 controller，pi 重生
-      // 后不可能有存活的 select）→ steer 提醒 agent 重调 submit-review 重新挂起
-      // （恢复动作全部在 extension 侧，前端不造失败信号链）。
-      if (state.reviewState === "awaiting") {
-        pi.sendUserMessage(
-          "[PLAN MODE] A previous review request was interrupted (session restarted). " +
-          "The registered documents are still waiting for user approval. " +
-          "Call plan(action='submit-review') now to re-hang the review dialog.",
-          { deliverAs: "steer" },
+      // E3：挂起交互点（审批 select / 执行方式 form）随 pi 进程消亡。本 hook 跑在
+      // pi 懒重生之后（taiji 冷启动不拉 pi 进程——用户重开 session 发首条消息时 pi
+      // 才重生、hook 才跑），此时冷启动扫描已恢复持久态但挂起交互不复存在（上方
+      // delete 已清残留 controller，pi 重生后不可能有存活的挂起）→ 按 reviewState
+      // 三态 steer 恢复（恢复动作全部在 extension 侧，前端不造失败信号链）：
+      // - awaiting：重调 submit-review 重挂审批；
+      // - revising：继续按评论修订并重新提交（P1-1：原实现只覆盖 awaiting，revising
+      //   崩溃后审批条恒显假「修订中」且无任何恢复指引）。
+      // 不覆盖「approve 后执行方式选择窗口中断」：该态（isActive + docs>0 + 无
+      // reviewState）与「探索期 pi 重生」在持久态上不可区分，steer「计划已批准」会
+      // 对正常探索期误报——防误报优先，该窗口中断由用户重发消息自然恢复。
+      if (state.reviewState === "awaiting" || state.reviewState === "revising") {
+        const revising = state.reviewState === "revising";
+        pi.sendMessage(
+          {
+            customType: PLAN_CONTEXT_CUSTOM_TYPE,
+            content: revising
+              ? "[PLAN MODE] A revision round was interrupted (session restarted). The user's revision comments were already injected — continue handling them: rewrite the documents, re-register each revised document via plan(action='register-doc'), then re-submit via plan(action='submit-review')."
+              : "[PLAN MODE] A previous review request was interrupted (session restarted). " +
+                "The registered documents are still waiting for user approval. " +
+                "Call plan(action='submit-review') now to re-hang the review dialog.",
+            display: false,
+          },
+          { deliverAs: "steer", triggerTurn: true },
         );
+        if (!revising) {
+          // E3 重挂即落 'resubmit' 源标记 + persist（此处原只发 steer 不落盘，renderer
+          // 冷启动扫描的 View 恒无 source、恒渲染通用文案；落盘后才能渲染「会话已重启，
+          // 尚未重新提交」分支）。无条件覆盖既有 source 为有意——「会话已重启」语义
+          // 优先成立（P3-9 登记；旧 entry 存量的其他 source 值一并被覆盖归一）。
+          state.reviewStateSource = "resubmit";
+          persistPlanState(pi, state);
+        }
       }
     }
   });

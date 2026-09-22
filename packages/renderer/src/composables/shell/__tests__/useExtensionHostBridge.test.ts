@@ -7,7 +7,7 @@
  *
  * 覆盖：TC1 plugin:uiRequest 前缀放行 / TC2 extension.ui_request 白名单放行（归一 kind=ui-request）/
  * TC3 extension.error 非白名单拒绝 / TC4 plugin:statusBarUpdate 前缀回归 /
- * TC5 白名单 5 项字面量 + 行为级验证（防与 core EXTENSION_HANDLERS 漂移）。
+ * TC5 白名单字面量 + 行为级验证（防与 core EXTENSION_HANDLERS 漂移；P2-2 起含 requestsInvalidated 共 6 项）。
  * M17 追加：TC7 VIEW_HOST_SOURCE_KEY provide 值的 getViewIds 纯透传
  * （extension:widgetGui 帧 → ViewHostStore → provide 枚举一致）。
  * M17 wave2 追加（D5：废弃 sidebar 动态 view 发现，getViews 纯静态）：
@@ -167,14 +167,16 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     expect(emitted[0]).toMatchObject({ kind: 'plugin-status-bar-update', items: [{ id: 'sb1', sessionId: 's1' }] })
   })
 
-  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 5 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
+  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 6 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
     // 字面量锁：EXTENSION_BRIDGE_TYPES 已是 core SSOT（派生自 EXTENSION_HANDLERS keys），
-    // 锁 5 项防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）
+    // 锁项数防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）。
+    // 第 6 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）
     expect(EXTENSION_BRIDGE_TYPES).toEqual([
       'extension:widget',
       'extension:widgetGui',
       'extension:status',
       'extension:notify',
+      'extension:requestsInvalidated',
       'extension.ui_request',
     ])
 
@@ -186,6 +188,7 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
       { type: 'extension:widgetGui', payload: { sessionId: 's1', widgetKey: 'w1', gui: ['g'] } },
       { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
       { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
+      { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
       { type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r1', method: 'select' } },
     ]
     for (const s of samples) {

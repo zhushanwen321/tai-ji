@@ -35,6 +35,7 @@ Resources/
 ~/.taiji/
 ├── config.json           # 运行时配置（API key 等）
 ├── config.toml           # pi 配置
+├── ui-preferences.json   # UI 语言（renderer 经 config.setUiLocale 写，extension 读取热生效）
 ├── runtime.port          # runtime 端口号（文本文件）
 ├── session-data/         # session 持久化数据
 ├── agent/logs/          # pi 日志（extension-logger 写 <agentDir>/logs/，agentDir = <dataDir>/agent）
@@ -284,6 +285,14 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
+### 20. 表单提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
+
+**现象**：scheduler 类表单提交（如「新建定时任务」）后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（该 warn 仅 dev 模式可见——收口日志为 dev 门内，生产包无此日志，生产侧按「30s 内自行恢复」的时序特征判定）。
+
+**判定**：提交后 pi 不起 turn 的表单类型（scheduler 型）属**预期兜底路径**，非挂死——pendingSend 桥接等不到 message_start（结构性不可达），由 30s timeout 设计内清除并留 warn（ADR-0072 已知边界）。30s 内自愈 = 正常；超 30s 不恢复或断连期外高频伴随其他异常，才升级排查。
+
+**排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
+
 
 ## 环境变量速查
 
@@ -456,3 +465,12 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
+
+### 20. 导入的 zcode 会话 usage 缺失两级症状：stats WARN（已知降级）与续聊即死（毒消息，2026-09-21 事故，已根治）
+
+- **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
+- **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
+- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无守卫（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
+- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
+- **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
+- **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。

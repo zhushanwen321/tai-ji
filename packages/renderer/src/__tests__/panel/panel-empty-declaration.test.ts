@@ -40,6 +40,8 @@ vi.mock('@/composables/useExtensionUI', () => ({
     respond: uiMock.respond,
     cancel: uiMock.cancel,
   }),
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
 }))
 
 /** 重子组件 stub（ModeDeclarationRow 保持真实——它是被测挂载点） */

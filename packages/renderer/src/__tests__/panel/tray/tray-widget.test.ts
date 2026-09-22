@@ -1,7 +1,7 @@
 /**
  * TrayWidgetButton / TrayWidgetPanel 组件 + widget 区依赖追踪测试（u-tray-widget）。
  *
- * 设计依据：docs/design/composer-task-tray.md §3.1 场景 B/C、§3.3 D3/D4/D6/D7、§3.4 终态
+ * 设计依据：docs/design/composer-task-tray.md（已删除，git 可追溯）§3.1 场景 B/C、§3.3 D3/D4/D6/D7、§3.4 终态
  * 数据流、§3.5 错误规格、§3.6 探针 P3/P6。
  *
  * 三视角（TEST-STRATEGY §3）：

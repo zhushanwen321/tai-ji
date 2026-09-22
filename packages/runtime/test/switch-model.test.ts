@@ -39,7 +39,6 @@ import type {
 } from '../src/interfaces.js'
 import type { IProcessManager, IPiEngine } from '../src/services/ports/pi-engine.js'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
-import { SESSION_NOT_ACTIVE } from '../src/utils/errors.js'
 
 // pi-provider-store: 控制默认 model 配置（测试主路径需要 model 已配置）
 const providerMocks = vi.hoisted(() => ({

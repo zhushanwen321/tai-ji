@@ -1,7 +1,7 @@
 // 公共 mock pi fixture（M5-T4 / M5-C2）
 //
 // 消除 characterization-hook.test.ts 与 structured-output.test.ts Workflow hook 组的
-// ~40 行×2 同构重复（on 收集回调 / emit 按注册顺序触发 / sendUserMessage+registerTool spy）。
+// ~40 行×2 同构重复（on 收集回调 / emit 按注册顺序触发 / sendMessage+registerTool spy）。
 // 无 .test. 后缀——vitest include 仅匹配 tests/**/*.test.ts，本文件不执行。
 //
 // loadExtension：设 process.env[PI_WORKFLOW_SCHEMA] + vi.resetModules + 动态 import
@@ -19,7 +19,9 @@ export const SCHEMA_ENV_NAME = "PI_WORKFLOW_SCHEMA";
 
 export function createMockPi() {
   const handlers = new Map<string, ((...args: unknown[]) => Promise<void> | void)[]>();
-  const sendUserMessage = vi.fn();
+  // sendMessage：custom message 投递通道（turn_end steer 经此发送；payload =
+  // {customType, content, display}，options = {deliverAs, triggerTurn}）。
+  const sendMessage = vi.fn();
   const appendEntry = vi.fn();
   // U2（D3 闸门）：事件 handler 的第二参数 ctx（ExtensionContext）。
   // pi 真实形态：shutdown/abort 存在于 ctx（ExtensionContextActions），不在 pi 顶层
@@ -37,7 +39,7 @@ export function createMockPi() {
     handlers.get(event)!.push(cb);
   });
   return {
-    sendUserMessage,
+    sendMessage,
     appendEntry,
     /** 断言入口：ctx.shutdown 的 spy（闸门 terminal 行为断言用）。 */
     ctx: handlerCtx,
@@ -54,7 +56,8 @@ export function createMockPi() {
 
 // 补齐 ExtensionAPI 全部成员——fixture 无 .test. 后缀会被 tsc 检查，而消费方 .test.ts
 // 被 tsconfig exclude（原版同构 mock 定义在 .test.ts 里从不被检查）。补齐方法均为未用
-// spy，行为零变化（现有用例只断言 sendUserMessage / on / emit）。
+// spy，行为零变化（现有用例只断言 sendMessage / on / emit；sendMessage 本身由
+// createMockPi 提供可断言 spy，此处不重复定义以免覆盖）。
 function toFullExtensionAPI(partial: ReturnType<typeof createMockPi>): ExtensionAPI {
   return {
     ...partial,
@@ -65,7 +68,10 @@ function toFullExtensionAPI(partial: ReturnType<typeof createMockPi>): Extension
     registerMessageRenderer: vi.fn(),
     registerEntryRenderer: vi.fn(),
     registerMarkdownTransformer: vi.fn(),
-    sendMessage: vi.fn(),
+    // sendUserMessage：src 已不调用（steer 改走 sendMessage custom message），仅作
+    // ExtensionAPI 必选成员补齐；sendMessage 不在此重复定义——createMockPi 的可断言
+    // spy 经 ...partial 透传。
+    sendUserMessage: vi.fn(),
     setSessionName: vi.fn(),
     getSessionName: vi.fn(),
     setLabel: vi.fn(),

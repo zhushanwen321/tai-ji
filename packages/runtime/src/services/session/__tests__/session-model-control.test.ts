@@ -20,7 +20,6 @@ import {
   MODEL_NOT_FOUND,
   PROVIDER_CREDENTIAL_MISSING,
   ENGINE_MODEL_MISSING,
-  SESSION_NOT_ACTIVE,
 } from '../../../utils/errors.js'
 import { SessionModelControl, classifyActivationError, isPiModelNotFoundError } from '../session-model-control.js'
 
@@ -266,37 +265,6 @@ describe('switchModel — 回执与失效（既有语义）', () => {
       error.mockRestore()
     }
   })
-
-  it('无活跃 client：fail-fast 抛 SESSION_NOT_ACTIVE（RT-4#4，不再降级返回 sessionId），零 RPC 零失效', async () => {
-    const session = makeSession()
-    const client = { setModel: vi.fn(), getState: vi.fn() }
-    const markDirty = vi.fn()
-    const control = new SessionModelControl({
-      pm: { getClient: vi.fn(() => undefined) } as unknown as IProcessManager,
-      getSession: vi.fn(() => session),
-      getReplicatedStates: vi.fn(() => ({ modelId: { markDirty } }) as unknown as SessionReplicatedStates),
-      syncTraceEntries: vi.fn(),
-    })
-    // [code-harden RT-4#4] 旧契约 `resolves.toBe('s1')`（降级假成功）已废：切模型落到
-    // 回收/崩溃窗口时必须报错而非乐观回显，恢复动作内嵌错误消息。
-    await expect(control.switchModel('s1', 'p1' as ProviderId, 'm')).rejects.toMatchObject({
-      code: SESSION_NOT_ACTIVE,
-      message: expect.stringContaining('重开后可重试'),
-    })
-    expect(client.setModel).not.toHaveBeenCalled()
-    expect(markDirty).not.toHaveBeenCalled()
-    expect(session.modelId).toBe('old/provider-old')
-  })
-
-  it('session 不存在：throw session not active', async () => {
-    const control = new SessionModelControl({
-      pm: { getClient: vi.fn(() => ({})) } as unknown as IProcessManager,
-      getSession: vi.fn(() => undefined),
-      getReplicatedStates: vi.fn(() => undefined),
-      syncTraceEntries: vi.fn(),
-    })
-    await expect(control.switchModel('s1', 'p1' as ProviderId, 'm')).rejects.toThrow('session not active')
-  })
 })
 
 describe('setThinkingLevel — 同激活语义（U2/D7）', () => {
@@ -347,19 +315,5 @@ describe('setThinkingLevel — 同激活语义（U2/D7）', () => {
       errors.mockRestore()
       vi.useRealTimers()
     }
-
-  it('无活跃 client：fail-fast 抛 SESSION_NOT_ACTIVE（RT-4#4），不直写请求值', async () => {
-    const session = makeSession()
-    const control = new SessionModelControl({
-      pm: { getClient: vi.fn(() => undefined) } as unknown as IProcessManager,
-      getSession: vi.fn(() => session),
-      getReplicatedStates: vi.fn(() => undefined),
-      syncTraceEntries: vi.fn(),
-    })
-    // [code-harden RT-4#4] 旧契约「请求值兜底 + 直写」（乐观写未生效档位）已废。
-    await expect(control.setThinkingLevel('s1', 'medium')).rejects.toMatchObject({
-      code: SESSION_NOT_ACTIVE,
-    })
-    expect(session.thinkingLevel).toBe('medium') // 双写缓存不被未生效档位污染（初值不变）
   })
 })

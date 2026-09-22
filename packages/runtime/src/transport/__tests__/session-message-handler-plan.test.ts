@@ -40,6 +40,7 @@ function mockContext(sessionService: ISessionService): SessionHandlerContext {
     nextPushId: vi.fn(() => 'push-1'),
     broadcastSessionList: vi.fn(),
     broadcast: vi.fn(),
+    invalidatePendingUiRequests: vi.fn(),
   }
 }
 
@@ -131,6 +132,9 @@ describe('SessionMessageHandler session.abortPlan', () => {
       sessionId: SID,
       status: 'sent',
     })
+    // P2-2 失效链：直发成功后摘除挂起 UI 请求并广播失效帧（审批 select 已随 abort 解散，
+    // 响应永不可达——runtime 缓存与 renderer 屏上残留同步清除）
+    expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith(SID, 'plan-aborted')
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
 

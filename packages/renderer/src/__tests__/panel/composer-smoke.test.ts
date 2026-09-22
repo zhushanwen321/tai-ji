@@ -96,6 +96,8 @@ vi.mock('@/composables/useExtensionUI', () => ({
     cancel: uiMock.cancel,
   }),
   formFilter: (req: { form?: boolean } | undefined) => req?.form === true,
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  planReviewFilter: (req: { planReview?: boolean } | undefined) => req?.planReview === true,
 }))
 
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
