@@ -18,7 +18,13 @@
  * （dist/modes/json-event.js toJsonAssistantMessageEvent 显式提升：return { ...deltaEvent,
  * id: toolCall.id, toolName: toolCall.name }），0.84.1 探针形态不再成立；下方真实 pi
  * 哨兵断言已同步更新。提取点仍为 toolcall_end 不前移（配对语义不变），mock 子集样本
- * 保留 0.84.1 历史形态（translate 对 start 的 noop 行为与 id 有无无关）。
+ * 保留 0.84.1 历史形态（composer-genstats-ttft 设计 §3.2 后 translate 对 start 产
+ * noop + llm-first-output 采样信号，与 id 有无无关）。
+ *
+ * [composer-genstats-ttft 设计 §3.2] message_update 首输出子类型（text_start /
+ * thinking_start / toolcall_start）追加产 llm-first-output（TTFT 首输出信号，单点收）：
+ * 原 noop / 既有 message.thinking_start 帧行为保留，仅追加事件——adapter 单事件
+ * 可产多 translated event。
  *
  * 双轨（TEST-STRATEGY.md §4）：
  * - 凭证无关子集（CI 可跑，无条件执行）：mock 事件**照抄探针抓包样本**（0.84.1 历史 wire
@@ -87,12 +93,18 @@ describe('W3 tool-call-index: translate 提取（真实 wire 形态 mock，凭�
     ])
   })
 
-  it('toolcall_start（0.84.1 历史 wire 形态：无 id、无顶层 message）不产出——noop', () => {
+  it('toolcall_start（0.84.1 历史 wire 形态：无 id、无顶层 message）noop 保留 + 追加 llm-first-output（设计 §3.2）', () => {
     // 旧 bug 回归锚：0.84.1 wire 上此事件拿不到 id（partial 被剥离；0.84.4 起增顶层
     // id/toolName，见头部契约漂移注释）；若实现退回从 event.message 提取，本用例与
-    // 上一用例的组合即复现「恒 undefined 生产死」。
+    // 上一用例的组合即复现「恒 undefined 生产死」——tool-call-index 仍不得从 start 产出。
+    // composer-genstats-ttft（设计 §3.2 首输出结算）：toolcall_start 追加 llm-first-output
+    //（纯 tool_call 响应无 text_start，本子类型是该形态唯一首输出信号）；原 noop 翻译
+    // 保留（无前端行为），仅追加采样信号。
     const events = translate(WIRE_TOOLCALL_START as unknown as PiEvent, 's')
-    expect(events).toEqual([{ kind: 'noop' }])
+    expect(events).toEqual([
+      { kind: 'noop' },
+      { kind: 'llm-first-output', sessionId: 's' },
+    ])
   })
 
   it('全链路：tool-call-index 锚点附到 tool_call_start WS 帧 entry.contentIndex', async () => {
