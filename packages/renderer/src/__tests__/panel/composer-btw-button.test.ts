@@ -45,6 +45,7 @@ import {
   __resetBtwPendingBookkeepingForTest,
 } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
+import { dispatchGlobal } from '@taiji/core/transport/api'
 
 // ── tray 数据面替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
@@ -383,6 +384,26 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
     setBtwReclaimReminder('btw:t1', false)
     setBtwReclaimReminder('btw:t2', false)
     await settle()
+    expect(pendingDot().exists()).toBe(false)
+    expect(buttonTitle()).toBe('旁路提问')
+  })
+
+  it('reclaimImminent 消费接线：拉取置位 → 徽点 + 计数 title 可见；state 帧广播翻转 false → 双双回落（用户可见 DOM）', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
+    mountComposer()
+    await settle()
+
+    // 使用者黑盒：数据源 = 拉取 reply 的 reclaimImminent（非直接 setter）→ badge 待处理态可见
+    expect(pendingDot().exists()).toBe(true)
+    expect(buttonTitle()).toBe('1 条旁路线待处理')
+
+    // runtime 回收提醒翻转广播（live 帧 global 通道路由）→ 集合清除 → badge 聚合回落
+    dispatchGlobal({
+      type: 'btw.list',
+      payload: { mainSid: SID, threads: [{ vid: 'btw:t1', reclaimImminent: false }] },
+    })
+    await settle()
+
     expect(pendingDot().exists()).toBe(false)
     expect(buttonTitle()).toBe('旁路提问')
   })

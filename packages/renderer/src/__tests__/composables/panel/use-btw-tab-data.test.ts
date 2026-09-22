@@ -26,7 +26,15 @@ import {
   openDrawerTab,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
-import { useBtwTabData, getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
+import {
+  useBtwTabData,
+  getBtwVirtualIdsByMain,
+  clearBtwVirtualKeyMapping,
+  disposeBtwLinePartitions,
+  isBtwPending,
+  __resetBtwPendingBookkeepingForTest,
+} from '@/composables/panel/useBtwTabData'
+import { dispatchGlobal, dispatchSession } from '@taiji/core/transport/api'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSubagentStore } from '@/stores/subagent'
 import { subagentVirtualId } from '@taiji/shared'
@@ -52,13 +60,14 @@ const Host = defineComponent({
   props: { sid: { type: String, default: null } },
   setup(props) {
     const sidRef = computed(() => props.sid as string | null)
-    const { state, totalUnread } = useBtwTabData(sidRef)
-    return { state, totalUnread }
+    const { state, totalUnread, totalPending } = useBtwTabData(sidRef)
+    return { state, totalUnread, totalPending }
   },
   template: `
     <div>
       <span data-testid="threads">{{ state.threads.length }}</span>
       <span data-testid="unread">{{ totalUnread }}</span>
+      <span data-testid="pending">{{ totalPending }}</span>
     </div>
   `,
 })
@@ -93,6 +102,7 @@ beforeEach(() => {
   bindDrawerSessionId(boundSid)
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
+  __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记（含回收提醒集合 + 广播订阅）逐用例清零
   clearBtwVirtualKeyMapping(SID_A)
   clearBtwVirtualKeyMapping(SID_B)
 })
@@ -181,6 +191,55 @@ describe('未读计数与视口清除（D8 终态表「未读」行）', () => {
     chat.setMessages('btw:t1', [msg('a1'), msg('a2'), msg('a3')])
     await settle(w)
     expect(text(w, 'unread')).toBe('1')
+  })
+})
+
+describe('回收提醒消费接线（D1 renderer 半边：reclaimImminent 两路解析点 → badge 待处理聚合）', () => {
+  it('拉取 reply 携带 reclaimImminent=true → 集合命中 + 待处理聚合计数用户可见；缺省线不计', async () => {
+    btwMock.list.mockResolvedValue([
+      { vid: 'btw:t1', reclaimImminent: true },
+      { vid: 'btw:t2' }, // 可选字段缺省 = 无提醒（防破坏既有消费）
+    ])
+    const w = mountHost(SID_A)
+    await settle(w)
+
+    expect(isBtwPending('btw:t1')).toBe(true) // 集合命中（白盒：reclaimReminderVids）
+    expect(isBtwPending('btw:t2')).toBe(false)
+    expect(text(w, 'pending')).toBe('1') // 用户可见：badge 待处理聚合（totalPending）
+    expect(text(w, 'threads')).toBe('2')
+  })
+
+  it('state 帧广播翻转 false（live 帧 payload 无 sessionId → global 通道路由）→ 集合清除、聚合计数回落', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
+    const w = mountHost(SID_A)
+    await settle(w)
+    expect(text(w, 'pending')).toBe('1')
+
+    // runtime onWillReclaim/onThreadStateChanged 置位/清除同发的 live 广播（双通道同 payload）
+    dispatchGlobal({
+      type: 'btw.list',
+      payload: { mainSid: SID_A, threads: [{ vid: 'btw:t1', reclaimImminent: false }] },
+    })
+    await settle(w)
+
+    expect(isBtwPending('btw:t1')).toBe(false) // 集合清除
+    expect(text(w, 'pending')).toBe('0') // 聚合回落（用户可见）
+  })
+
+  it('stateSnapshot 回放腿（session 通道，重连/切回按订阅 sid 分发）：广播置位 true → 集合命中、聚合计数上升', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }]) // 拉取时无提醒
+    const w = mountHost(SID_A)
+    await settle(w)
+    expect(text(w, 'pending')).toBe('0')
+
+    dispatchSession(SID_A, {
+      type: 'btw.list',
+      payload: { mainSid: SID_A, threads: [{ vid: 'btw:t1', reclaimImminent: true }] },
+    })
+    await settle(w)
+
+    expect(isBtwPending('btw:t1')).toBe(true)
+    expect(text(w, 'pending')).toBe('1') // 聚合上升（用户可见）
   })
 })
 

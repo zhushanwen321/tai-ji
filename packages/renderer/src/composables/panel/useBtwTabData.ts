@@ -9,8 +9,15 @@
  * - **主动拉取，不依赖广播**（broadcast 时序竞争规则，AGENTS 架构约定）：挂载 / 切会话
  *   立即 `btw.list { mainSid }`；抽屉开合、btw tab 切换、选中线变化也重拉（新建线入册 /
  *   关线剪枝 / 新线 vid 观察挂载）。M2-a 已把 `btw.list` 登记为 state last-value 广播，
- *   但本通道是 badge 挂点（composer 侧）的唯一数据源，刻意只走拉取——与 BtwPanel 各自
- *   拉取、双通道同一 payload 各自收敛（M3-a 遗留接线点②「badge 数据自取 btw.list」）。
+ *   线列表本体仍刻意只走拉取——与 BtwPanel 各自拉取、双通道同一 payload 各自收敛
+ *   （M3-a 遗留接线点②「badge 数据自取 btw.list」）。
+ * - **回收提醒消费接线（D1 renderer 半边）**：线列表 `reclaimImminent` 两路解析点
+ *   （① btw.list 拉取 reply ② state 帧 typeKey 'btw' 广播）均收敛到
+ *   `setBtwReclaimReminder(vid, !!imminent)`——true 置位 / false 清除，集合随广播自然翻转。
+ *   广播两投递路由：live 帧 payload 无 sessionId 键（双通道同 reply 形 `{ mainSid, threads }`）
+ *   → route-inbound 判无 sid 走 **global 通道**（簿记订阅 `onGlobalType('btw.list')`）；
+ *   重连/切回的 stateSnapshot('btw') 回放经 replay 按订阅 sid 走 **session 通道**
+ *   （useSessionEvents 实例订阅）。两路同帧形同式收敛，幂等可重入。
  * - **异步回写一律 `updateFor(capturedSid)`**（AGENTS 规则 8）：焦点切走后迟到响应只写
  *   旧分区；同分区旧响应用 loadSeq 丢弃（乱序守卫，BtwPanel 同款）。
  * - **未读计数**：per-线 watch chatStore 分区消息数增长（WS → routeInbound → chatStore
@@ -46,6 +53,8 @@ import {
   useDrawerControl,
 } from '@taiji/core/domain/drawer'
 import { btw } from '@/api'
+import { onGlobalType } from '@taiji/core/transport/api'
+import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import type { ServerMessageMap } from '@taiji/shared'
 import { STATUS_BAR_SOURCE_KEY, VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
@@ -158,8 +167,8 @@ function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
 //
 // 单一数据源 = `pendingReqIdsByVid`（btw 线的 D8 类挂起请求 requestId 集合）——模块级
 // 永驻 bus 订阅写入，不依赖任何组件挂载（drawer 关着 badge 也准确）；第四行「回收提醒」
-// = `reclaimReminderVids`（非终态，setter 置位/清除；runtime onWillReclaim 挂点广播
-// 接线前由导出 setter 承载，接线缺口登记于实施计划偏差表）。
+// = `reclaimReminderVids`（非终态，setter 置位/清除；数据源 = 线列表 `reclaimImminent`
+// 两路解析点：btw.list 拉取 reply + state 帧广播，见文件头「回收提醒消费接线」）。
 //
 // 入账：bus 'ui-request'（D8 请求范围 SSOT 五类——ask-user 富表单/scheduler 表单/plan
 // 审批为 form∪planReview 帧；权限审批（ctx.ui.select）与 confirm·input·editor 为
@@ -205,6 +214,12 @@ let bookkeepingUnsubs: Array<() => void> | null = null
 export function ensureBtwPendingBookkeeping(): void {
   if (bookkeepingUnsubs) return
   const bus = getExtensionBus()
+  // [D1 renderer 半边] state 帧 typeKey 'btw' 的 live 广播：payload 无 sessionId 键 →
+  // route-inbound 判无 sid 走 global 通道（onGlobalType 是本帧 live 面的唯一到达点）。
+  // stateSnapshot('btw') 回放腿走 session 通道，由 useBtwTabData 实例经 useSessionEvents 订阅。
+  const offThreadList = onGlobalType('btw.list', (msg) => {
+    syncReclaimReminders(msg.payload.threads)
+  })
   const offUiRequest = bus.on('ui-request', (e) => {
     const sid = e.sessionId
     if (!sid || !isBtwVirtualId(sid) || !isBtwDialogRequest(e)) return
@@ -238,7 +253,7 @@ export function ensureBtwPendingBookkeeping(): void {
       else dialogReqsByVid.delete(sid)
     }
   })
-  bookkeepingUnsubs = [offUiRequest, offInvalidated]
+  bookkeepingUnsubs = [offUiRequest, offInvalidated, offThreadList]
 }
 
 /** 应答送达后的出账（确认条在 respond 成功支调用；未送达不调——保持挂起可重试） */
@@ -257,10 +272,20 @@ export function isBtwPending(vid: string): boolean {
   return useExtensionUIStore().getRequestsBySession(vid).length > 0
 }
 
-/** 终态机第四行：回收提醒置位/清除（runtime 回收前挂点接线前由本 setter 承载） */
+/** 终态机第四行：回收提醒置位/清除（消费方 = 线列表 reclaimImminent 两路解析点） */
 export function setBtwReclaimReminder(vid: string, on: boolean): void {
   if (on) reclaimReminderVids.add(vid)
   else reclaimReminderVids.delete(vid)
+}
+
+/**
+ * 线列表 `reclaimImminent` → 回收提醒集合收敛（两路解析点共用单一实现，防映射漂移）：
+ * 对每条线 `setBtwReclaimReminder(vid, !!info.reclaimImminent)`——true 置位、false/缺省清除，
+ * 广播携带全量线列表 → 集合随每次帧自然翻转。只触帧内 vid（他主会话的提醒不受影响；
+ * 出册线的残留条目不进 badge 聚合——totalPending 分母 = 当前线列表）。
+ */
+function syncReclaimReminders(threads: BtwThreadInfo[]): void {
+  for (const th of threads) setBtwReclaimReminder(th.vid, th.reclaimImminent === true)
 }
 
 /** 失效行内提示读取（vid → 非空 reason；无提示 null） */
@@ -329,6 +354,13 @@ export interface UseBtwTabDataReturn {
  */
 export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
   ensureBtwPendingBookkeeping() // D8 终态机簿记：首个实例挂模块级永驻订阅
+  // 回收提醒 state 帧 session 通道腿（stateSnapshot('btw') 重连/切回回放）：live 帧走
+  // global 通道（簿记订阅），回放帧走本通道——同帧形同式收敛到回收提醒集合。
+  // 订阅/重订/卸载生命周期归 useSessionEvents（规则 2 防重复：本实例单条底层订阅 + type 路由）。
+  const onSessionMessage = useSessionEvents(sidRef)
+  onSessionMessage('btw.list', (msg) => {
+    syncReclaimReminders(msg.payload.threads)
+  })
   const chatStore = useChatStore()
 
   const scoped = useSessionScopedState<BtwTabState>(sidRef, () =>
@@ -449,6 +481,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
         }
       })
       if (!fresh) return // 旧响应：不触碰观察面与登记面（新响应各自负责）
+      syncReclaimReminders(threads)
       syncThreadWatchers(captured, threads)
       reconcileBtwVirtualKeys(
         captured,
@@ -499,7 +532,8 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
   )
 
   // ③ 抽屉活动重拉：新建线（面板侧 btw.create）入册 / 关线剪枝 / 新选中线挂观察。
-  //    只登记拉取触发面，不订阅广播（badge 通道以拉取为唯一数据源，见文件头）。
+  //    线列表数据只登记拉取触发面（badge 通道线列表以拉取为唯一数据源，见文件头）；
+  //    回收提醒 state 帧广播的订阅独立存在（global + session 双通道，见 setup 头部）。
   watch(
     () => {
       const drawer = getDrawerControlState()
