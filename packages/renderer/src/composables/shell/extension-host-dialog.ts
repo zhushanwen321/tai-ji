@@ -37,6 +37,7 @@ import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
+import { useChatStore } from '@/stores/chat'
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
@@ -184,10 +185,23 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  *   未送达时本层 toast（队列 headless 无 UI，可见反馈归壳层）。
  * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
+ * - D4a cancel 分型锚点（ADR-0072 通道覆盖缺口）：sendPiResponse 的 result === null
+ *   （Esc/取消按钮 → queue.cancel 唯一生产者）即 clearPendingSend——命令路径 plain dialog
+ *   （/permission、/session-pick）取消后无 message_start 可桥接，不清则假忙 30s 兜底窗。
+ *   判据在 delivered 之前（取消意图与 WS 送达无关）；仅 pi 源（plugin 源 dialog 命令无
+ *   addPendingSend 链）；提交型（result !== null）不清（D4b 另案）。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {
     sendPiResponse(sessionId, requestId, method, result) {
+      // D4a cancel 锚点：result === null = 用户取消（respond(requestId, null) 是该值唯一
+      // 生产者）。命令路径 dialog 取消后 pi 侧只 resolve Promise、无 turn 跟随，pendingSend
+      // 等 message_start 必然空等（30s 假忙窗）——送达前即收口。chatStore 现取（对齐
+      // useExtensionUI.ts:164 模块级回调先例：回调执行时 pinia 必已 active）；clearPendingSend
+      // 幂等，重复取消 / 与 message_start 并发均无副作用。
+      if (result === null) {
+        useChatStore().clearPendingSend(sessionId)
+      }
       const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
       if (!delivered) {
         // 未送达：表项保留（请求仍在队列，撤窗反查仍需可用）+ 壳层 toast（队列 headless 无 UI）
