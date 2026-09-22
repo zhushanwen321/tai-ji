@@ -227,6 +227,10 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
     // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
     ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
+    // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
+    //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
+    // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
+    ...(typeof request.expectTurn === 'boolean' ? { expectTurn: request.expectTurn } : {}),
     receivedAt: typeof rawReceivedAt === 'number' ? rawReceivedAt : Date.now(),
   }
 }
@@ -389,6 +393,13 @@ export function useExtensionUI(
     // 桥接「respond 完成 → message_start 到达」窗口并由其正常清除（现状语义，不制造
     // isActive=false 空窗）。判据严格按 result 是否 null——boolean 型按提交型处理。
     if (result === null) {
+      chatStore.clearPendingSend(sid)
+    } else if (target.expectTurn === false) {
+      // D1 段 5 + D2 严格双条件（result ≠ null ∧ expectTurn === false）：提交型但源声明
+      // 无 turn 预期（命令 handler 内 select，message_start 永不来）→ 立即收尾，消除
+      // 30s 假忙。判定必须 `=== false` 显式判定——truthy 简化（`!expectTurn`）会把
+      // undefined（存量扩展/断链缺省）也当无 turn、误清 ask-user 桥接（D2 被否谱系）；
+      // true / undefined → 隐式 else，桥接照旧（缺省安全）。
       chatStore.clearPendingSend(sid)
     }
   }

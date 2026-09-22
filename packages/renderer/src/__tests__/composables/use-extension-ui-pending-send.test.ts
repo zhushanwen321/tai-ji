@@ -11,6 +11,9 @@
  * - ④ requests-invalidated 广播到达：按帧 sid removeRequest + clearPendingSend
  *     （runtime 非 respond 终结：reclaimed / plan-aborted / turn-aborted /
  *     session-destroyed 四类触发源，均无后续 turn 预期）
+ * - ⑤ expectTurn 三态矩阵（form-submit-busy-convergence 场景 7）：{result null/非 null} ×
+ *     {expectTurn true/undefined/false} 6 格——null 恒清；非 null + true/undefined 不清
+ *     （undefined = 存量缺省桥接态，truthy 简化会误清）；非 null + false 清（D2 严格双条件）
  *
  * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus + extension domain mock）；
  * chatStore 经 vi.mock('@/stores/chat') 注入 spy（本文件只验证因果调用，不例化真实
@@ -71,7 +74,7 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
 }
 
 /** 统一表单请求（runtime marker 分支产出的 view-ready 帧形状，form 键原生携带） */
-function mkFormReq(requestId: string): Record<string, unknown> {
+function mkFormReq(requestId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     requestId,
     pluginId: 'p',
@@ -81,6 +84,7 @@ function mkFormReq(requestId: string): Record<string, unknown> {
     form: true,
     formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],
     allowCancel: true,
+    ...overrides,
   }
 }
 
@@ -157,6 +161,58 @@ describe('② 提交型（result≠null）不清——pendingSend 桥接 message
     expect(chatStoreMocks.clearPendingSend).not.toHaveBeenCalled()
     dispose()
   })
+})
+
+describe('⑤ expectTurn 三态矩阵（form-submit-busy-convergence 场景 7，6 格）', () => {
+  // 矩阵 = {result null / 非 null} × {expectTurn true / undefined / false}：
+  // - result=null → 清恒定（3 格，cancel 型语义不依赖 expectTurn）
+  // - result≠null + true/undefined → 不清（2 格，桥接 message_start 照旧；
+  //   undefined = 存量扩展缺省态，truthy 简化（!expectTurn）会把这两格误清——D2 被否谱系）
+  // - result≠null + false → 清（1 格，命令 handler 内 select 提交即收尾，消除 30s 假忙）
+  // result 非 null 格取表单 answers JSON string（提交型主流形态，对齐 ② 用例输入面）；
+  // 该输入面同时是 toExtensionUIRequest expectTurn 透传（D1 段 4）的因果断言——透传断
+  // 链时 false 格必然翻红。经 bus 帧入队（真实透传链），非直写 store。
+  const answers = JSON.stringify({ title: '任务' })
+  const matrix: Array<{
+    label: string
+    requestId: string
+    result: string | null
+    frameExpectTurn?: boolean
+    expectCleared: boolean
+  }> = [
+    { label: 'null × true', requestId: 'r-m1', result: null, frameExpectTurn: true, expectCleared: true },
+    { label: 'null × undefined', requestId: 'r-m2', result: null, frameExpectTurn: undefined, expectCleared: true },
+    { label: 'null × false', requestId: 'r-m3', result: null, frameExpectTurn: false, expectCleared: true },
+    { label: '非null × true', requestId: 'r-m4', result: answers, frameExpectTurn: true, expectCleared: false },
+    { label: '非null × undefined', requestId: 'r-m5', result: answers, frameExpectTurn: undefined, expectCleared: false },
+    { label: '非null × false', requestId: 'r-m6', result: answers, frameExpectTurn: false, expectCleared: true },
+  ]
+
+  it.each(matrix)(
+    '$label → clearPendingSend 调用 = $expectCleared',
+    ({ requestId, result, frameExpectTurn, expectCleared }) => {
+      const { result: ui, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+
+      // undefined 格省键（对齐 event-adapter 条件落键形态——帧上不出现该键）
+      emitBusUIRequest(
+        'sessionA',
+        mkFormReq(requestId, frameExpectTurn !== undefined ? { expectTurn: frameExpectTurn } : {}),
+      )
+      ui.respond(requestId, result)
+
+      // 主路径不回归：送达 + 出队对全部 6 格恒成立（分型只影响清除锚点）
+      expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', requestId, 'select', result)
+      expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+
+      if (expectCleared) {
+        expect(chatStoreMocks.clearPendingSend).toHaveBeenCalledTimes(1)
+        expect(chatStoreMocks.clearPendingSend).toHaveBeenCalledWith('sessionA')
+      } else {
+        expect(chatStoreMocks.clearPendingSend).not.toHaveBeenCalled()
+      }
+      dispose()
+    },
+  )
 })
 
 describe('③ delivered=false（WS 断连）不清——锚点只挂送达成功后（现状保留路径）', () => {
