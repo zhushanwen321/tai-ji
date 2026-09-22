@@ -85,6 +85,28 @@ export const EXPANDED_GROUP_CLASS = 'flex items-center gap-0'
 export const MERGED_CHIP_SEPARATOR_CLASS = 'h-3.5 w-px shrink-0 bg-border-strong'
 
 /**
+ * ── btw 按钮退化序登记（btw-question D7，M3-b）─────────────────────────────
+ *
+ * 左簇新增的 btw 旁路提问入口（`ComposerBtwButton.vue`，位次 = `+` 之后、任务托盘之前）
+ * 在 D6 退化序中的登记位 = **序 0（不退化）**，与 `+` / 发送位同档：
+ *
+ * - 徽标（badge）是后台回复的唯一通知载体（PRODUCT 原则 2「通知驱动，不打扰」），
+ *   任何宽度档都必须在场——隐藏即漏看；故不入序 1–4 的分组退化，也不入 fit 序 5–8 的
+ *   右簇收紧面。
+ * - 按钮形态不随 tier / fit 变化（纯 icon + 角标，无可压缩内容）→ **不设状态机槽位**
+ *   （`composer-density.ts` 是只读纯状态机，不感知 btw——本单元领地边界）；其宽度需求
+ *   计入左簇实测，fit 收敛回路（`CLUSTER_LEFT` ResizeObserver 观测）自动覆盖，溢出时由
+ *   右簇 fit 级让位。
+ * - 既有退化序 1–8 的语义与输出不因本按钮改变（守护用例：
+ *   `src/__tests__/panel/composer-btw-button.test.ts`「三档宽度常驻 + `+` 仍居首位」）。
+ *
+ * 值取 0 = 「序 0 不退化」档位语义面（与状态机 `COMPOSER_DEGRADATION_ORDER` 的 1–8
+ * 正交——那边是已生效退化序的集合，这边是新元素的登记位）；测试与后续单元引用此常量，
+ * 禁止在别处硬编码 0。
+ */
+export const COMPOSER_BTW_BUTTON_DEGRADATION_ORDER = 0
+
+/**
  * 序 2 组容器 class（合流态 × fit 态 → **单一** class）。
  *
  * 之所以是函数而非两段 class 拼接：`max-w-[88px]` 与 `max-w-[56px]` 同属 Tailwind 同一层，

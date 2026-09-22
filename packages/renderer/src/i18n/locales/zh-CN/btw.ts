@@ -25,6 +25,11 @@ export default {
     loadFailed: '线列表加载失败',
     createFailed: '创建旁路线失败',
   },
+  // composer btw 入口按钮（btw-question D7，M3-b）：常态 title + 有未读时的计数 title
+  button: {
+    title: '旁路提问',
+    unreadTitle: '{count} 条未读旁路回复',
+  },
   // fork pill 三态（D3 源状态三分支 → pill 口径；数据源 = btw.create reply.forkState）
   pill: {
     full: '已含主对话快照',

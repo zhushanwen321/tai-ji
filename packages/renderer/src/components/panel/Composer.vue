@@ -122,9 +122,16 @@
         :data-slot-tray="density.slots.tray"
         class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
       >
-        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ 任务托盘（序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
+        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ btw 旁路提问（序 0，退化序登记见
+             use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
+             （序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
         <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
           <AddMenuPopover @select="onAddSelect" />
+          <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
+               （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
+               无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
+               badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
+          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
                aggregated = 序 4：托盘整体收为单入口（层叠图标 + 运行数）→ 面板内分段展示。
@@ -283,6 +290,7 @@ import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/p
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
+import ComposerBtwButton from './tray/ComposerBtwButton.vue'
 import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
 import ContextCapacityPopover from './ContextCapacityPopover.vue'
@@ -318,8 +326,10 @@ const props = withDefaults(
   defineProps<{
     sessionId: string | null
     variant?: 'panel' | 'landing'
+    /** btw 入口实例开关（D7，M3-b）：false 不出按钮（drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口；不传默认 true，主 panel 零改动） */
+    showBtw?: boolean
   }>(),
-  { variant: 'panel' },
+  { variant: 'panel', showBtw: true },
 )
 
 const { t } = useI18n()
