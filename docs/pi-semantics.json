@@ -861,7 +861,7 @@
     "pkg": "pi-agent-core",
     "distPath": "dist/agent-loop.js",
     "symbol": "runLoop 内层循环 turn_start 发射点",
-    "note": ":109 —— if (lastCompletedTurn) 块内、prepareNextTurn 调用（:101）之后、steering 注入 for 循环（:114）与 streamAssistantResponse 调用（:122）之前——runLoop 体内唯一发射点；窗口构成四元组时序（prepare < turn_start < steering < stream）即设计 §3.2 [HISTORICAL] 修正后的现口径"
+    "note": ":109 —— if (lastCompletedTurn) 块内、prepareNextTurn 调用（:90）之后、steering 注入 for 循环（:114）与 streamAssistantResponse 调用（:122）之前——runLoop 体内唯一发射点；窗口构成四元组时序（prepare < turn_start < steering < stream）即设计 §3.2 [HISTORICAL] 修正后的现口径"
    }
   ],
   "guard": {

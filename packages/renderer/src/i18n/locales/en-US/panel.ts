@@ -194,7 +194,7 @@ export default {
     // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
     // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
     // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
-    genStatsTtftTitle: 'First token latency',
+    genStatsTtftTitle: 'First token latency (TTFT)',
     genStatsTtftDay: 'Today p50 (this model)',
     genStatsTtftD7: 'Last 7 days p50',
     genStatsTtftD30: 'Last 30 days p50',

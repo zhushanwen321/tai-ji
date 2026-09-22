@@ -25,14 +25,14 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 - `GenStatsTriggers.vue` 在现有速度触发器**左侧**插入 TTFT 触发器（组件内顺序：TTFT · 速度 · 缓存），沿用同一条 `v-if="sessionId"` landing 隐藏判据、同一套 HoverCard 结构。
 - 触发器文本：`ttftMs < 1000` → `820ms`；`≥ 1000` → `1.2s`（1 位小数，去尾 0）；null → `—`（灰）。等宽数字，不加图标。
 - 三档语义色（延迟反向指标）：`< 1500ms` success · `1500–3000ms` warn · `> 3000ms` danger；null 恒中性灰。阈值为**初值**（有 cacheRatio 三档色先例，无历史校准源），重审触发 = 用户反馈显示档位与体感系统性不符（同速度口径 D1 重审模式）。
-- 浮层（hover，与速度浮层同构）：head = 「首字延迟 TTFT」+ 模型名；2×2 四行 = 本次 / 今日 p50 / 近 7 天 p50 / 近 30 天 p50；无帧显「暂无数据」；底部口径 note。
+- 浮层（hover，与速度浮层同构）：head = 「首字延迟 TTFT」+ 模型名；2×2 四行 = 本次 / 今日 p50 / 近 7 天 p50 / 近 30 天 p50；无帧显「暂无数据」；**有帧但值全 null 时行值显 `—`（两态区分，同构速度浮层）**；底部口径 note。
 - i18n：zh/en 双侧新增 `panel.context.genStatsTtftTitle` / `genStatsTtftNote` / `genStatsTtftDay`（「今日 p50（此模型）」）/ `genStatsTtftD7` / `genStatsTtftD30`——**不复用** `genStatsDay`（「今日均值」与 p50 中位数语义矛盾）。
 - testid：`genstats-ttft-value`（触发器）、`genstats-ttft-popover`（浮层）。
 
 ### 3.2 锚点与采样（runtime）
 
 - **起算锚点 = pi `turn_start` 到达时刻**（runtime 本地时钟）。将 `turn_start` 移出 `NULL_EVENTS`，adapter 新增 handler 产出新中间事件 `{ kind: 'llm-request-start' }` → interpreter 挂 `LlmWindowSampler.onRequestStart()`：记 `requestStartedAt = Date.now()`，同步清 `ttftMs = null`、清 `firstOutputAt`（重锚清除不变量，与现有窗口锚一致——残留生命周期严格限本请求）。
-  - **窗口构成（pi 0.84.4 实装时序，agent-loop.js:101-109 核实）**：`turn_start` 在 `prepareNextTurn` **之后** emit——**原生 auto-compaction 运行在 `prepareNextTurn` 内、先于锚点，不含在窗口**；窗口内只剩：turn_start 后的 steering 注入段（通常毫秒级，计入并接受）+ extension `transformContext` 链 + HTTP 请求 + provider 排队 + 首 token。**不含**原生压缩、不含工具执行（工具后下一轮 turn_start 重新起算）。[HISTORICAL] 初稿「含 transformContext 内 compaction、压缩轮偏大」与实装时序相反，经三审 P0-11/P0-12 修正。
+  - **窗口构成（pi 0.84.4 实装时序，agent-loop.js:90-109 核实）**：`turn_start` 在 `prepareNextTurn` **之后** emit——**原生 auto-compaction 运行在 `prepareNextTurn` 内、先于锚点，不含在窗口**；窗口内只剩：turn_start 后的 steering 注入段（通常毫秒级，计入并接受）+ extension `transformContext` 链 + HTTP 请求 + provider 排队 + 首 token。**不含**原生压缩、不含工具执行（工具后下一轮 turn_start 重新起算）。[HISTORICAL] 初稿「含 transformContext 内 compaction、压缩轮偏大」与实装时序相反，经三审 P0-11/P0-12 修正。
   - **pi 语义依赖登记**：「`turn_start` 逐 LLM 请求 emit」与「`*_start` 先于 delta」两条是本指标前提，随 U2 落地登记进 `scripts/check-pi-semantics.mjs` 探针族（pi bump 门禁复验，防升级静默漂移）。
 - **首输出结算**：本请求窗口内首个输出信号到达 → `onFirstOutput()`（幂等 first-wins，已有 firstOutputAt 直接 return）→ `ttftMs = firstOutputAt - requestStartedAt`。信号来源（单点收，无 interpreter 兜底）：adapter 对 `text_start` / `thinking_start` / `toolcall_start` 三个子类型产 `{ kind: 'llm-first-output' }`（原 noop / 既有 `message.thinking_start` 帧行为保留，追加此内部事件——adapter 单事件可产多 translated event）。[HISTORICAL] 初稿另有 interpreter 侧 `text_delta`/`thinking_delta`/`tool-call-index` 三点兜底钩，存在理由「防 provider 缺 start 子类型」经简洁审 P0-22 证伪：pi-ai 0.84.4 全部流式 api 实现（openai / anthropic / google / bedrock / mistral / responses 全族）凡产 delta 必先产对应 `*_start`——兜底钩删除，高频快速路径零新增开销。
 - **interpreter 分发守卫**：新 kind 若漏注册 case 是**静默失败**（handle 分发无 default warn）——U2 落地时 `llm-request-start` / `llm-first-output` 未识别须 warn（既有结构无守卫则显式加），入 U2 验收条款。
