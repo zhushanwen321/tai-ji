@@ -413,28 +413,30 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
     expect(artifact.degradations).toEqual([])
   })
 
-  it('含 compaction part 的会话：write 后 degradations 恰 1 条（zcode-import:compaction 明细）——降级明细导入侧不丢失', async () => {
-    // C3 锁定：converter compaction 分支 push 降级明细（设计契约③，基线不 push）——
-    // runtime 导入侧经 artifact.degradations 承载，编排层 write 后聚合
-    // warning='conversion_degraded'（import-service 步骤 8；该聚合通道已由
-    // import-service.test.ts「degradations 非空 → reply.warning = conversion_degraded」
-    // stub 注入用例锁定，此处补 converter→artifact 段，两测试合并即全链）
+  it('含悬空 compaction 指针的会话：write 后 degradations 恰 1 条 compaction_unlinked——降级明细导入侧不丢失', async () => {
+    // C3 锁定（D2 语义适配）：converter 降级明细经 artifact.degradations 承载，编排层
+    // write 后聚合 warning='conversion_degraded'（import-service 步骤 8；该聚合通道已由
+    // import-service.test.ts stub 注入用例锁定，此处补 converter→artifact 段）。
+    // D2 孤儿二分：正常孤儿（无 summaryMessageId）走 custom 通道零降级；悬空指针
+    //（summaryMessageId 指向不在行集的消息）计 compaction_unlinked——取悬空形态验证
+    // 非空明细不丢失（宿主 user 消息可发射，part 流经 part 级通道）。
     const dbPath3 = join(fixturesRoot, 'zc-compaction.sqlite')
     const sid = 'sess_0198cmp0-0000-0000-0000-00000000000c'
     buildFixtureDb(
       dbPath3,
       [{ id: sid, title: 'Compacted', directory: '/tmp/zc-cmp-cwd', taskType: 'interactive', timeCreated: 1000, timeUpdated: 2000 }],
       [
-        // part i=0 → 隐式 message_id 'm-0'（与下方 message 行 id 对齐）
-        { sessionId: sid, data: JSON.stringify({ type: 'compaction', auto: true, trigger: 'auto', preCompactTokenCount: 160000, time: { start: 3000, end: 3100 } }) },
+        // part i=0 → 隐式 message_id 'm-0'（与下方 message 行 id 对齐）；悬空指针形态
+        { sessionId: sid, data: JSON.stringify({ type: 'compaction', summaryMessageId: 'm-nowhere', auto: true, trigger: 'auto', preCompactTokenCount: 160000, time: { start: 3000, end: 3100 } }) },
       ],
-      [{ id: 'm-0', sessionId: sid, sequence: 0, data: JSON.stringify({ role: 'assistant', time: { created: 1000, completed: 2000 } }) }],
+      // 宿主带 real_user semantics → 分类器②分支 b 判 realUserInput（part 级通道可达）；
+      // 无 semantics 时 compaction part 的 summaryMessageId 会被 isTimelineOnlyMessage 命中、宿主整条丢弃（dev U4 悬空用例同款 fixture 口径）
+      [{ id: 'm-0', sessionId: sid, sequence: 0, data: JSON.stringify({ role: 'user', time: { created: 1000 }, semantics: { kind: 'user_prompt', origin: 'real_user', uiVisibility: 'visible', transcriptVisibility: 'visible' } }) }],
     )
     const artifact = await makeSource(dbPath3).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: sid, dbPath: dbPath3 })
     expect(artifact.degradations).toEqual([]) // prepareImport 时点恒空（转换在 write 闭包内）
     await artifact.write(join(fixturesRoot, 'zc-compaction-tmp.jsonl'))
-    expect(artifact.degradations).toHaveLength(1)
-    expect(artifact.degradations[0]).toContain('zcode-import:compaction')
+    expect(artifact.degradations).toEqual([{ code: 'compaction_unlinked', kind: 'user_prompt', count: 1 }])
   })
 
   it('sessionId 缺失 / 不在库中 → import_invalid_session', async () => {
@@ -517,5 +519,8 @@ describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
     }
     expect(existsSync(snapshotDir)).toBe(false)
     expect(countSnapshotDirs()).toBe(snapshotsBefore)
-  })
+    // timeout 放宽（默认 5s 不够）：countSnapshotDirs 全量 readdir 用户 tmpdir，长期跑测
+    // 的机器上 mkdtemp 残留会堆积到十万条目级（实测 readdir 单次 >3s，本用例调两次）——
+    // 环境退化暴露的断言脆弱点，非被测行为变慢；快照目录清零判定语义不变。
+  }, 30000)
 })

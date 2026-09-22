@@ -53,6 +53,63 @@ export type ImportSourceKind = 'pi' | 'zcode'
  */
 export type ImportWarning = 'sidecar_failed' | 'conversion_degraded'
 
+/**
+ * 结构化降级记录（zcode→pi 转换的信息损失按性质分档，D4 四档显形，
+ * zcode-import-message-projection 设计 §7.4；wire 契约只承载类型，全量明细走
+ * runtime 日志不入 reply）。档位与 code 对应：
+ * - L1 冗余丢弃 → `dropped_redundant`
+ * - L2 无语义丢弃 → `dropped_transient`
+ * - L3 保真损失 → `truncated_output` / `compaction_unlinked`
+ * - L4 未知/漂移 → `unclassified`（升 `conversion_unclassified` warning 码——该字面量
+ *   随 runtime 导入链结构化接线登记进 ImportWarning，当前先承载类型定义）
+ *
+ * 与 `@zhushanwen/session-core` 的 `ImportDegradation` 结构等价（基座零依赖不反向
+ * import shared，两侧字段逐一同步，消费点类型检查拦截漂移）。
+ */
+export interface ImportDegradation {
+  /** 降级码（五值闭集，语义见接口块注释） */
+  code:
+    | 'dropped_redundant'    // L1：内容已由 tool 通道保留的运行时注入（background_* / subagent_* 族），丢弃无损
+    | 'dropped_transient'    // L2：无对话语义的瞬态/注入形态（todo 提醒 / system_reminder / timeline 等），非 L1/L3/L4 的丢弃类全量归入
+    | 'truncated_output'     // L3：tool part serialization.truncated=true，保留截断版 output（保真损失）
+    | 'compaction_unlinked'  // L3：compact_summary 与 compaction part 关联断裂（summaryMessageId 悬空）；摘要宿主降级路径 = 现状通道（宿主 user entry + compaction part 的 custom entry），合并路径悬空指针 part 补发 custom entry（保真损失）
+    | 'unclassified'         // L4：semantics.kind / source / origin 超出闭集，丢弃 + 独立告警（G3 未知不静默）
+  /** zcode semantics.kind 原值（L4 未分类时必有；L1/L2 聚合档按 (kind, source) 维度携带） */
+  kind?: string
+  /** metadata.source / source 原值（同上，L4 未分类时必有） */
+  source?: string
+  /** 该 (code, kind, source) 维度的聚合计数 */
+  count: number
+  /**
+   * 定位样本（unclassified 必带，便于用户反馈/维护者定位；part 级诊断记录可
+   * 携带 sample 便于日志定位，明细不入 wire）：messageId + 文本前 80 字。
+   */
+  sample?: {
+    messageId: string
+    preview: string
+  }
+  /** zcode schema_migration.app_version（回归定位锚，按可得性携带） */
+  zcodeSchemaVersion?: string
+}
+
+/**
+ * 降级摘要（`ImportReply.degradationSummary` 的载荷类型，toast 计数/sample 的最小
+ * 契约通道，设计 §7.4）：仅在 warning 含 conversion_* 时携带；全量明细（含 L3
+ * 截断明细）走 runtime 日志不入 wire。不设 truncatedCount——L3（截断保留）在
+ * toast 上无对应分句，避免契约面搭车无消费字段。字段随批 2 runtime 接线挂上
+ * ImportReply，当前先承载类型定义。
+ */
+export interface ImportDegradationSummary {
+  /** L1+L2 聚合（dropped_redundant + dropped_transient 的 count 总和）——toast 汇总分句数据源 */
+  droppedCount: number
+  /** L4 聚合；本次导入无 unclassified 降级时为 null */
+  unclassified: {
+    count: number
+    /** 首条 unclassified 的定位样本 */
+    firstSample?: ImportDegradation['sample']
+  } | null
+}
+
 /** 候选列表请求（`session.importCandidates` payload） */
 export interface ImportCandidatesRequest {
   /** 外部扫描根目录。缺省 = pi 全局 agent 目录下的 sessions（runtime 动态推导，禁止硬编码） */

@@ -14,6 +14,7 @@
 import type {
   ImportCandidatesReply,
   ImportCandidatesRequest,
+  ImportDegradation,
   ImportErrorCode,
   ImportRequest,
   ImportSourceKind,
@@ -55,11 +56,11 @@ export interface ImportArtifact {
   /** 把产物写到 tmpPath（编排层负责 mkdir/校验/rename/失败清理——原子性单点） */
   write(tmpPath: string): Promise<void>
   /**
-   * 保真度降级明细（artifact 级收集，设计 §3.5 D6/D7——如 zcode file part 丢弃、running
-   * tool 整对丢弃）：非空 → 编排层聚合 reply.warning='conversion_degraded' 并日志留痕。
-   * pi 源恒空数组（字节级复制无转换）。
+   * 保真度降级明细（artifact 级收集，结构化 ImportDegradation 五码闭集——如 zcode file
+   * part 丢弃、running tool 整对丢弃）：非空 → 编排层聚合 reply.warning='conversion_degraded'
+   * 并日志留痕。pi 源恒空数组（字节级复制无转换）。
    */
-  degradations: string[]
+  degradations: ImportDegradation[]
 }
 
 /**

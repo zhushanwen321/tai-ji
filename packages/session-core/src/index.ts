@@ -9,6 +9,7 @@
 
 export type {
   Entry,
+  ImportDegradation,
   NormalizedSession,
   ParseResult,
   SessionHeader,

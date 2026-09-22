@@ -548,7 +548,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
         write: async (tmpPath) => {
           writeFileSync(tmpPath, `${JSON.stringify({ type: 'session', version: 1, id: 'stub-deg-00001', cwd: '/tmp/stub-deg-cwd', timestamp: '2026-01-01T00:00:00.000Z' })}\n`)
         },
-        degradations: ['file part 丢弃（zcode-artifact:// 私有协议引用无法解析）'],
+        degradations: [{ code: 'dropped_transient', count: 1 }],
       }),
     }
     const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
@@ -581,7 +581,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
         write: async (tmpPath) => {
           writeFileSync(tmpPath, 'line\n')
         },
-        degradations: ['timeline part 丢弃（纯 UI 事件）'],
+        degradations: [{ code: 'dropped_transient', count: 1 }],
       }),
     }
     const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))

@@ -67,16 +67,51 @@ export interface SessionHeader {
 }
 
 /**
+ * 转换降级记录（zcode→canonical 转换的信息损失按性质分档）。
+ *
+ * 与 `@taiji/shared` 的 wire 契约类型 `ImportDegradation` 为结构等价声明：基座是零
+ * 依赖包（设计负面清单），不 import shared——两处定义字段逐一同步（code 五值闭集 /
+ * kind / source / count / sample / zcodeSchemaVersion），漂移由消费侧（runtime 导入
+ * 薄包装把本类型赋给 wire 契约类型）的类型检查拦截。档位语义：
+ * - `dropped_redundant`（L1）：内容已由 tool 通道保留的运行时注入丢弃，无损
+ * - `dropped_transient`（L2）：无对话语义的瞬态/注入形态丢弃 + part 级诊断登记
+ * - `truncated_output` / `compaction_unlinked`（L3）：保真损失
+ * - `unclassified`（L4）：超出闭集无法分类，丢弃 + 独立告警
+ */
+export interface ImportDegradation {
+  /** 降级码（五值闭集） */
+  code:
+    | 'dropped_redundant'
+    | 'dropped_transient'
+    | 'truncated_output'
+    | 'compaction_unlinked'
+    | 'unclassified'
+  /** zcode semantics.kind 原值（按可得性携带的聚合维度） */
+  kind?: string
+  /** metadata.source / source 原值（按可得性携带的聚合维度） */
+  source?: string
+  /** 该 (code, kind, source) 维度的聚合计数 */
+  count: number
+  /** 定位样本（unclassified 必带；part 级诊断可携带便于日志定位） */
+  sample?: {
+    messageId: string
+    preview: string
+  }
+  /** zcode schema_migration.app_version（回归定位锚，按可得性携带） */
+  zcodeSchemaVersion?: string
+}
+
+/**
  * source 包读取链的统一返回类型：`readZcodeSession(dbPath, sessionId)` 等具体读取
  * 函数产出本形状。
  * - header：canonical 化后的会话头（pi 侧 = 直读 JSONL 首行的 SessionHeader；zcode 侧
  *   由 converter 从库内 session 行构造——zcode 无 cwd 概念，缺省留空不伪造）。
  * - entries：严格 Entry 树（parentId 链完整，坏行/未知 part 不占位）。
- * - degradations：转换降级明细（pi 恒为 []——JSONL 直读无转换损失；zcode 侧由
- *   converter 在降级点 push，不静默丢弃）。
+ * - degradations：结构化降级明细（pi 恒为 []——JSONL 直读无转换损失；zcode 侧由
+ *   converter 在降级点登记，不静默丢弃）。
  */
 export interface NormalizedSession {
   header: SessionHeader
   entries: Entry[]
-  degradations: string[]
+  degradations: ImportDegradation[]
 }

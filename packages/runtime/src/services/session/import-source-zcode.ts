@@ -28,7 +28,7 @@
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import type { ImportCandidate, ImportCandidatesReply, ImportCandidatesRequest, ImportRequest } from '@taiji/shared'
+import type { ImportCandidate, ImportCandidatesReply, ImportCandidatesRequest, ImportDegradation, ImportRequest } from '@taiji/shared'
 import { serializeSession, type NormalizedSession } from '@zhushanwen/session-core'
 import {
   convertZcodeTranscript,
@@ -255,7 +255,7 @@ export class ZcodeImportSource implements SessionImportSource {
     const header = { id: normalizedId, timestamp, cwd: row.directory }
 
     // artifact 级降级明细（转换期 push，编排层 write 后读取聚合 warning）
-    const degradations: string[] = []
+    const degradations: ImportDegradation[] = []
 
     return {
       header,

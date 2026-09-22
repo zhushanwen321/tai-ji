@@ -153,6 +153,7 @@ export type {
   ImportSourceKind, ImportWarning, ImportErrorCode,
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
+  ImportDegradation, ImportDegradationSummary,
 } from './import-session'
 // 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式）——跨层协议级 key 约定 SSOT
 export {
