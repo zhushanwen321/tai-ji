@@ -74,7 +74,7 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 | S1 | 真机首显 | `TAIJI_DEV_BACKGROUND=1 pnpm dev` 连本实例，真实 session 发一条 prompt 至首个 token 可见 | composer 工具带 TTFT 触发器位于速度左侧且显示非 `—` 的 `Nms`/`N.Ns`；值 > 0 且 < 30000 |
 | S2 | 浮层四行 | hover TTFT 触发器 | 浮层出现：head 标题 + 模型名；四行（本次/今日/7天/30天）数值或 `—`；note 文案完整 |
 | S3 | 无数据 / landing | 新 session 未发消息；主 landing 页 | 未发时显 `—`；landing（无 session）整个 gen-stats 组不渲染（与速度同判据） |
-| S4 | 持久化恢复 | 发 1+ 条消息后重启 runtime，切入回该 session | 恢复腿 `session.getGenStats` 回填，TTFT 显示与重启前一致 |
+| S4 | 持久化恢复 | 发 1+ 条消息后重启 runtime，切入回该 session | 恢复腿 `session.getGenStats` 回填**聚合帧一致**（今日/7 天/30 天 p50 = 重启前值）；**触发器 current 显 `—` 直至新样本（内存槽态，与速度同构——speed 同重启同样显 `—`，非回归）**；下一轮请求后重新显示实测值 |
 | S5 | 分档语义色 | 单测覆盖阈值边界（1499/1500/3000/3001）+ 真机观察一次正常请求 | 边界用例 class 断言绿；真机正常请求呈 success 色（或与其实测值档位一致） |
 | S6 | 回归：速度/缓存不受扰 | 跑 gen-stats 既有全套单测 + 真机发消息观察速度/命中率触发器 | 既有用例全绿；速度/缓存显示行为与改前一致 |
 | S7 | 错误路径不产脏样本 | 单测：无锚 consume / 无输出信号即结束 / 异模型 current 残留 / **工具执行后下一轮重锚（TTFT 不含工具执行的契约钉）** | ttftMs=null 路径样本被 service 跳过，无 0 值污染；工具轮次间锚点重置、ttft 不跨轮；聚合与 current 均不受影响 |

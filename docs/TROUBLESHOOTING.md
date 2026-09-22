@@ -118,7 +118,7 @@ grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.tai
 
 ### 7. bash 工具里启动 Electron 二进制被静默降级纯 node 模式（ELECTRON_RUN_AS_NODE=1）
 
-打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。机制细节见 relay 模块（源码注释待后续批次补齐）。
+打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 relay 模块（源码注释待后续批次补齐）。
 
 ### 8. runtime 启动即退出："fatal: relay server init failed"
 

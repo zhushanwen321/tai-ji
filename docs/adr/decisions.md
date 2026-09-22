@@ -146,6 +146,9 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0067 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
 
+### ADR-0068 TTFT 首字延迟锚点与聚合口径
+锚点 = pi `turn_start`（移出 adapter NULL_EVENTS → 新中间事件 `llm-request-start`，逐 LLM 请求 emit；含 context transform/steering 注入段，**不含原生 auto-compaction**（prepareNextTurn 内、先于锚点）与工具执行）；首输出结算 = adapter 单点产 `llm-first-output`（text/thinking/toolcall start 三子类型），**interpreter 侧 delta/tool-call 兜底钩否决**（pi-ai 全部流式实现凡产 delta 必先产 `*_start`，兜底无服务对象且挂最高频路径）；聚合 = **p50 中位数**（延迟重尾，速度口径的加权均值不适用）；存储 = 独立 ttft 日文件单元素组，校验签名参数化（元组长度入参，默认 2 不降既有强度）。已否方案：B 锚 message_start（缺网络段系统性偏小）/ C 锚前端 dispatch（无工具循环锚）。pi 语义前提登记探针 PS-41/42（pi bump 门禁复验）。实装 `runtime/services/session/event-interpreter-gen-stats.ts` + `gen-stats-store.ts`；设计 SSOT `docs/design/composer-genstats-ttft.md`。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。

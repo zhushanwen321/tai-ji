@@ -252,7 +252,7 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 > **术语演进（2026-09 核对）**：旧「三区域」模型（Input Toolbar / Session Strip / Global Statusbar）已不成立——窗口底部的独立全局状态栏不存在，global scope 状态项并入 per-panel StatusBar 聚合；原 Input Toolbar 的职责由 composer 内置工具条承载（见下），plugin 另可经 `composer.toolbar` 挂载点贡献视图（ViewHost，`view-id="composer.toolbar"`）。
 
 ### Composer 工具条
-composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率）、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
+composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
 
 ### 任务托盘（Widget Tray）
 composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。
