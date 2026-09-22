@@ -186,10 +186,11 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
  * - D4a cancel 分型锚点（ADR-0072 通道覆盖缺口）：sendPiResponse 的 result === null
- *   （Esc/取消按钮 → queue.cancel 唯一生产者）即 clearPendingSend——命令路径 plain dialog
- *   （/permission、/session-pick）取消后无 message_start 可桥接，不清则假忙 30s 兜底窗。
- *   判据在 delivered 之前（取消意图与 WS 送达无关）；仅 pi 源（plugin 源 dialog 命令无
- *   addPendingSend 链）；提交型（result !== null）不清（D4b 另案）。
+ *   （取消按钮点击 → queue.cancel 唯一生产者；plain dialog 无 Esc 绑定——Esc 取消属
+ *   FormOverlay form 通路，见 useExtensionUI respond）即 clearPendingSend——命令路径
+ *   plain dialog（/permission 命令族）取消后无 message_start 可桥接，不清则假忙 30s
+ *   兜底窗。判据在 delivered 之前（取消意图与 WS 送达无关）；仅 pi 源（plugin 源
+ *   dialog 命令无 addPendingSend 链）；提交型（result !== null）不清（D4b 另案）。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {

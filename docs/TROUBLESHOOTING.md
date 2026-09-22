@@ -285,13 +285,13 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
-### 20. 表单提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
+### 20. 表单/命令提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
 
-**现象**：scheduler 类表单提交（如「新建定时任务」）后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（该 warn 仅 dev 模式可见——收口日志为 dev 门内，生产包无此日志，生产侧按「30s 内自行恢复」的时序特征判定）。
+**现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见）。
 
-**判定**：提交后 pi 不起 turn 的表单类型（scheduler 型）属**预期兜底路径**，非挂死——pendingSend 桥接等不到 message_start（结构性不可达），由 30s timeout 设计内清除并留 warn（ADR-0072 已知边界）。30s 内自愈 = 正常；超 30s 不恢复或断连期外高频伴随其他异常，才升级排查。
+**判定**：当前常态命中面 = plain dialog 提交面（/permission 命令族——pi select API 无元数据通道，提交后 pi 不起 turn，pendingSend 桥接等不到 message_start，由 30s timeout 设计内清除并留 warn；D4b 另案登记，ADR-0073）。30s 内自愈 = 正常；超 30s 不恢复或高频伴随其他异常，才升级排查。**scheduler 表单已不在命中面**（`expectTurn: false` 声明 → 提交即时收尾真机 91ms/48ms 两轮实测，ADR-0073）；ask-user/plan 表单提交后 turn 正常续接（桥接路径）。
 
-**排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
+**排障**：确认提交源类型——plain dialog 命令（band 弹窗）提交命中 30s 属预期；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常：pi 僵死/协议漂移/极端延迟），按 pi tee 日志与 ping 信号归因；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）。
 
 ### 21. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
 
@@ -302,6 +302,14 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 **排障**：按定位行 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当 `<port>` 是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
 
 
+
+### 22. dev 构建下组件实例 `$el` 是注释节点（模板首注释致 Fragment 根）
+
+**现象**：仅在 dev 构建出现的「取不到真实 DOM 元素」类失效——如组件实例 `$el` 为注释节点（nodeType 8），`root === activeElement` / `root.contains(...)` 恒 false；生产构建行为正常（vue 编译剥离模板注释），happy-dom 直挂测试也不暴露（测试态注释被剥离）。
+
+**判定**：Vue 模板顶部有 HTML 注释块时，dev 构建 subTree 根为 Fragment，`instance.$el` 解析为首子注释节点——**任何「实例 → 真实输入根元素」的取法禁止依赖 `$el`**。
+
+**排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
 ## 环境变量速查
 
