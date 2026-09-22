@@ -17,7 +17,7 @@
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/__tests__/steer-snapshot-short-circuit.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, ref } from 'vue'
 import { segmentsToPrompt } from '@taiji/shared'
 import type { Segment } from '@taiji/shared'
@@ -28,6 +28,11 @@ import type { BashCommandExtract, StagingConfig } from '../../types'
 
 const SEGMENTS: Segment[] = [{ type: 'text', text: 'hello' }]
 const DETACHED_DRAFT = '失联窗口的输入'
+
+/** console.warn 首参中含 key 的首行（拦截 warn 断言辅助；spy 类型宽化后参数显式收窄） */
+function warnLinesOf(spy: ReturnType<typeof vi.spyOn>, key: string): string | undefined {
+  return spy.mock.calls.map((c: unknown[]) => String(c[0])).find((s: string) => s.includes(key))
+}
 
 // spy = 真实签名 & vi.fn 能力（同 ../send.test.ts 斡旋模式：裸 vi.fn 推导 Mock<Procedure>
 // 无法赋给具体签名字段）
@@ -203,6 +208,59 @@ describe('sendLandingFirstMessage 短路不变量（C 条第三落点）', () =>
     expect(ctrl.draft).toBe(DETACHED_DRAFT)
     expect(spies.clearInput).not.toHaveBeenCalled()
     expect(spies.submitFirstMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('发送拦截常驻 warn（§5 埋点去留裁决：toast 给用户、warn 给日志）', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('routeStaging blocked（busy：有输入被 canSend 拦）→ warn 含 gate/route/reason/sid', async () => {
+    const { deps } = setupSendDeps({ sendRoute: 'direct', canSend: false, hasInput: true })
+    await useComposerSend(deps).onSend()
+    const line = warnLinesOf(warnSpy, 'send blocked')
+    expect(line).toContain('gate=staging-gate')
+    expect(line).toContain('route=direct')
+    expect(line).toContain('reason=busy')
+    expect(line).toContain('sid=s1')
+  })
+
+  it('routeStaging blocked（empty-input：无输入被拦）→ warn reason=empty-input', async () => {
+    const { deps } = setupSendDeps({ sendRoute: 'direct', canSend: false, hasInput: false })
+    await useComposerSend(deps).onSend()
+    const line = warnLinesOf(warnSpy, 'send blocked')
+    expect(line).toContain('gate=staging-gate')
+    expect(line).toContain('reason=empty-input')
+  })
+
+  it('routeSteer 拦截（steer 行空输入）→ warn 含 gate=steer-route/reason=empty-input', async () => {
+    const { deps } = setupSendDeps({ sendRoute: 'steer', canSend: false, hasInput: false })
+    await useComposerSend(deps).onSend()
+    const line = warnLinesOf(warnSpy, 'send blocked')
+    expect(line).toContain('gate=steer-route')
+    expect(line).toContain('route=steer')
+    expect(line).toContain('reason=empty-input')
+  })
+
+  it('routeSteer 拦截（isSending 双发锁）→ warn reason=double-send', async () => {
+    const { deps } = setupSendDeps({ sendRoute: 'steer', canSend: false, hasInput: true })
+    deps.isSending.value = true
+    await useComposerSend(deps).onSend()
+    const line = warnLinesOf(warnSpy, 'send blocked')
+    expect(line).toContain('gate=steer-route')
+    expect(line).toContain('reason=double-send')
+  })
+
+  it('正常路径无拦截 warn（false 反向：防误报噪音）', async () => {
+    const { deps } = setupSendDeps({ sendRoute: 'steer', canSend: false, hasInput: true })
+    await useComposerSend(deps).onSend()
+    expect(warnLinesOf(warnSpy, 'send blocked')).toBeUndefined()
   })
 })
 

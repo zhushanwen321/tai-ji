@@ -158,6 +158,9 @@ function ensureInvalidatedSubscription(): void {
     // turn-aborted / session-destroyed 四类触发源）均无后续 turn 预期，pendingSend 等
     // message_start 必然空等——按帧 sid 收口。clearPendingSend 幂等，与 message_start /
     // respond 锚点并发竞争无副作用。
+    // chatStore 此处**现取**而非 respond 侧的 setup 捕获：本订阅是模块级单例、生命周期跨
+    // Panel 实例（首个使用者挂上后永驻），setup 捕获会钉死首个实例的上下文；而事件到达
+    // 时点 pinia 必已 active（与上方 useExtensionUIStore() 同模式），现取安全。
     useChatStore().clearPendingSend(e.sessionId)
   })
 }

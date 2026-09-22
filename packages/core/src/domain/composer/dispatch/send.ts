@@ -153,11 +153,21 @@ export interface ComposerSendDeps {
 // ── 分流 helper（按优先级阶段提取，deps 显式传参，分支体与原内联实现逐字节一致）──
 
 /**
+ * [form-hang-fix 埋点去留裁决：显症状类常驻日志] 发送拦截（onSend 守卫拒绝）留痕——
+ * 吞输入类静默失败的可观测半边（toast 给用户、warn 给日志排障）。无 dev 门，与
+ * useChat.warnSteerNotConsumed 同形态；拦截原因是结构性的（busy/empty/double-send，
+ * 无用户长文本），不截断。
+ */
+function warnSendBlocked(gate: string, route: SendRoute, reason: string, sid: string | null): void {
+  console.warn(`[composer] send blocked (gate=${gate}, route=${route}, reason=${reason}, sid=${sid})`)
+}
+
+/**
  * staging 门 + 路由（priority 1-2）。
  * 返回：'blocked' = 守卫拦截（结束发送）；'handled' = staging.send 已消费（结束发送）；
  * 'pass' = 走后续普通链路。
  */
-async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handled' | 'pass'> {
+async function routeStaging(deps: ComposerSendDeps, route: SendRoute): Promise<'blocked' | 'handled' | 'pass'> {
   // staging 活跃时由 StagingAction 自管 allowsEmptySend（handoff 允许空，fork 不允许）；
   // 双发锁只看 isSending（staging 发送自身会置位），不拦 isActive——fork-ask 发给新建
   // session 对源 session 只读，streaming 中合法（handoff 的 streaming 拦截在
@@ -168,6 +178,12 @@ async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handle
     // [GUI 快修④] blocked 不再静默返回：点击/回车被守卫拦下时给用户可见反馈——
     // 有输入 = 占用中（双发/流式期），无输入 = 空输入。区分消息避免「点了没反应」。
     deps.toastError(deps.t(deps.hasInput.value ? 'panel.composer.sendBusy' : 'panel.composer.sendEmptyHint'))
+    warnSendBlocked(
+      'staging-gate',
+      route,
+      deps.hasInput.value ? 'busy' : 'empty-input',
+      deps.sessionIdRef.value,
+    )
     return 'blocked'
   }
   // staging 路由：经 useComposerStaging.send → activeStaging.send。仅在有活跃 staging 时取 staging config
@@ -203,6 +219,12 @@ async function routeSteer(deps: ComposerSendDeps, route: SendRoute): Promise<boo
   if (!deps.hasInput.value || deps.isSending.value) {
     // [GUI 快修④] steer 行的空输入/双发拦截不再静默吞掉（占用期点击发送无任何反馈）
     deps.toastError(deps.t(deps.hasInput.value ? 'panel.composer.sendBusy' : 'panel.composer.sendEmptyHint'))
+    warnSendBlocked(
+      'steer-route',
+      route,
+      deps.hasInput.value ? 'double-send' : 'empty-input',
+      deps.sessionIdRef.value,
+    )
     return true
   }
   const sid = deps.sessionIdRef.value
@@ -343,7 +365,8 @@ export function useComposerSend(deps: ComposerSendDeps): { onSend: () => Promise
     if (await routeSteer(deps, route)) return
     const text = deps.draft.value
     // staging 门 + canSend 守卫 + staging 路由：'blocked'/'handled' 均结束本次发送
-    if ((await routeStaging(deps)) !== 'pass') return
+    //（[form-hang-fix] route 透传供 blocked 分支的拦截 warn 记录当时路由）
+    if ((await routeStaging(deps, route)) !== 'pass') return
     // [D6] defer 路由（settling / compacting / bash，行 4/5/6）：占用期发送动作改为入队待重放
     // （flush 在 occupancy 全 idle 时由 useChat occupancy handler 统一触发——触发源不再绑定
     // session.compacted）。
