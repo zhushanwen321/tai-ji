@@ -2913,6 +2913,26 @@
           "agent": "review-business-logic"
         }
       ]
+    },
+    {
+      "id": "C-proc-25",
+      "summary": "同数据目录单 runtime 实例互斥：runtime 进程启动必须经 single-instance-guard 探活（<dataDir>/runtime-instance.json 与 supervisor runtime.port 双候选端口 TCP 探活），活实例在场即 fail-fast 拒绝启动（早于一切子进程 spawn）；listen 成功后原子写 runtime-instance.json 登记。禁止双 runtime 共享同一 TAIJI_AGENT_DATA_DIR 并行——第二实例 reattach 抢管他人 session + reaping orphan 杀幸存 subagent，退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent（2026-09-22 批量 subagent exit 143 事故形态）。验收/e2e/脚本起 runtime 必须用独立数据目录（mkdtemp / 实例目录），不得继承 prod 数据目录 env；单测守护 = packages/runtime/src/__tests__/infra/single-instance-guard.test.ts",
+      "scope": [
+        "packages/runtime/src/infra/single-instance-guard.ts",
+        "packages/runtime/src/index.ts"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
     }
   ]
 }

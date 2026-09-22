@@ -18,6 +18,7 @@ import { BASE_PORT, MAX_PORT } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
+import { probeSingleInstance, registerRuntimeInstance } from './infra/single-instance-guard.js'
 // u1b（crash-forensics-and-watchdog D1）runtime 台账单例。初始化是组合根职责（与
 // initLogger 同形态：模块级单例 + 未初始化 no-op）——不初始化则 getCrashJournal()
 // 恒返回 no-op，pi-respawn / message-bus 守卫 / session 生命周期的全部 runtime 侧
@@ -298,6 +299,20 @@ async function main(): Promise<void> {
   // 无法事后诊断 pi 发了什么事件。initLogger 后所有 console.* 自动 tee 到
   // <dataDir>/logs/runtime-YYYY-MM-DD.log。
   initLogger(getDataDir())
+
+  // 单实例互斥守卫（2026-09-22 双 runtime 事故根修）：同数据目录已有活实例则拒绝启动。
+  // 必须早于一切子进程 spawn / service 构造——此刻拒绝零清理负担；置于 initLogger 后
+  // 使拒绝报错落盘可见。守卫语义与判据见 single-instance-guard.ts 模块头注。
+  const guardProbe = await probeSingleInstance(getDataDir())
+  if (guardProbe.blocked && guardProbe.holder) {
+    const holder = guardProbe.holder
+    console.error('[runtime] fatal: data directory already served by a live runtime instance — refusing to start (dual runtime would reattach + destroy its sessions/subagents)')
+    console.error(`  data dir : ${getDataDir()}`)
+    console.error(`  live at  : 127.0.0.1:${holder.port} (source: ${holder.source}${holder.pid !== undefined ? `, pid ${holder.pid}` : ''})`)
+    console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
+    console.error('             for a second concurrent instance use a separate TAIJI_AGENT_DATA_DIR — dev/e2e/acceptance must NOT inherit the prod data dir')
+    process.exit(1)
+  }
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
@@ -1219,6 +1234,10 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   console.log('[runtime] ready')
+
+  // 单实例互斥守卫登记：listen 成功即写入本实例定位（下一轮启动 probe 的候选来源；
+  // supervisor 的 runtime.port 通道照旧由 Electron 侧写入，两通道并行）。
+  registerRuntimeInstance(getDataDir(), port)
 
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
   // 早建早发现权限问题（设计 §4.1）。fatal 语义：实例冲突（残留 socket 被活实例持有）

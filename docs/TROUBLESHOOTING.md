@@ -293,6 +293,15 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
 
+### 21. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
+
+**现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
+
+**判定**：同数据目录已有活 runtime 实例（单实例守卫，约束 C-proc-25）。守卫读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
+
+**排障**：按定位行 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当 `<port>` 是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
+
+
 
 ## 环境变量速查
 
