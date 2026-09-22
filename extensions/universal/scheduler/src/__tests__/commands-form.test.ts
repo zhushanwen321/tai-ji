@@ -152,10 +152,13 @@ describe('/schedule 命令 表单路径（rpc）', () => {
     const payload = JSON.parse(select.mock.calls[0]![1]![0]!) as {
       formQuestions: { type: string }[]
       allowCancel?: boolean
+      expectTurn?: boolean
     }
     expect(payload.formQuestions).toHaveLength(1)
     expect(payload.formQuestions[0]!.type).toBe('schedule')
     expect(payload.allowCancel).toBe(true)
+    // 命令路径声明无 turn（form-submit-busy-convergence D1 段 2）：显式 false 进 payload
+    expect(payload.expectTurn).toBe(false)
 
     const draft = capturedDraft(select)
     expect(draft.kind).toBe('once')

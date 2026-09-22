@@ -151,6 +151,8 @@ async function interactScheduleFormRpc(
     [{ type: 'schedule', question: SCHEDULE_FORM_QUESTION, initial: draft }],
     {
       signal,
+      // expectTurn:false——command handler 内 select（rpc `void run()`）提交后无 turn 跟随，respond 即收尾（D1 段 2）
+      expectTurn: false,
       log: (msg, detail) => logger.warn(msg, detail),
     },
   )
