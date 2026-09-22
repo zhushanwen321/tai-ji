@@ -8,9 +8,11 @@
  *
  * [u5b / D6] 路由判定（resolveSendRoute，sessionPhase → sendRoute）先于 canSend 守卫：
  * steer 路由（turn 活跃）恰在 canSend 的 isBusy 集内，守卫在前会把它拦死。steer 分支的
- * 终端是 deps.steer（useChat.steer：isActive 时并入 steering 队列；投影滞后窗口 isActive=false
- * 时内部静默 return——该窗口调用方回退走 direct 直发路径，本函数在 onSteer 式编排前以
- * sessionPhase 判定路由，迟到投影由 useChat.send 的 B 策略兜底，双通道自愈不丢输入）。
+ * 终端是 deps.steer（useChat.steer：isActive 时并入 steering 队列；投影滞后窗口
+ * isActive=false 时内部 return false（输入未消费，[form-hang-fix] 契约收窄——原静默
+ * return true 语义已废除）——该窗口调用方回退走 direct 直发路径，本函数在 onSteer 式
+ * 编排前以 sessionPhase 判定路由，迟到投影由 useChat.send 的 B 策略兜底，双通道自愈
+ * 不丢输入）。
  * defer 分支（settling / compacting / bash）泛化原 isCompacting 分支：`/`、`!` 前缀命令
  * 拒绝 toast 保留（命令无法延迟重放），普通文本入 defer 队列（occupancy 全 idle 时
  * useChat occupancy handler 触发 flush 投递）。
@@ -127,8 +129,11 @@ export interface ComposerSendDeps {
   /** landing 态选定的思考等级（undefined = 用户未操作，用 runtime 默认） */
   localThinkingLevel: Ref<string | undefined>
   // ── 普通 send / compact / steer ──
-  /** 普通发送（useChat 提供；isActive 时内部 B 策略转 steer——steer 路由投影滞后的自愈兜底） */
-  send: (sessionId: string, segments: Segment[]) => Promise<void>
+  /** 普通发送（useChat 提供；isActive 时内部 B 策略转 steer——steer 路由投影滞后的自愈兜底）。
+   *  [form-hang-fix D2] 返回 false = B 策略转 steer 未消费（steer 早退/RPC 失败，内部已
+   *  toast）——sendActiveMessage 据此 restoreSegments 恢复草稿；true = 正常路径（含直发
+   *  RPC 失败——已 toast 消化，无需恢复）。 */
+  send: (sessionId: string, segments: Segment[]) => Promise<boolean>
   /** 压缩上下文（useChat 提供） */
   compact: (sessionId: string, customInstructions?: string) => Promise<void>
   /** 追加 steer（useChat 提供；isActive 时并入 steering 队列）。D6 steer 路由终端。
@@ -204,9 +209,13 @@ async function routeSteer(deps: ComposerSendDeps, route: SendRoute): Promise<boo
   if (!sid) return true
   // clearInput 会清空 DOM，必须先快照 segments（onSend/submit 同范式）
   const segments = deps.inputRef.value?.getSegments() ?? []
+  // [form-hang-fix v3 失联格短路] 快照空且 hasInput=true（inputRef 失联而 draft 非空）：
+  // clearInput 清掉的输入无法经 restoreSegments([]) 恢复（恢复空 = 丢输入）——不
+  // clearInput、不调 steer，输入原地保留，结束本次发送。
+  if (segments.length === 0 && deps.hasInput.value) return true
   deps.clearInput()
-  // [D2] steer 内部 catch 不抛（toast + return false）——失败时输入已被 clearInput 清空，
-  // 据 false 恢复完整草稿（text + chips），否则用户输入静默丢失。
+  // [D2] steer 内部 catch 不抛（toast + return false）——失败/早退时输入已被 clearInput
+  // 清空，据 false 恢复完整草稿（text + chips），否则用户输入静默丢失。
   if (!(await deps.steer(sid, segments))) deps.restoreSegments(segments)
   return true
 }
@@ -251,6 +260,10 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
   // landing bash 分流：提取 !/!! 前缀（empty=空命令不提交；not-bash=走普通首发）
   const bashExtract = deps.composerBash.extractBashCommand(text)
   if (bashExtract.type === 'empty') return
+  // [form-hang-fix v3 失联格短路]（短路不变量第三落点）：快照空且 hasInput=true 时
+  // 不 clearInput——landing 态该格可达（routeStaging 非消费 pass 后 inputRef 失联而
+  // draft 非空），清掉后空 segments 提交 = 输入丢失，原地保留结束本次发送。
+  if (segments.length === 0 && deps.hasInput.value) return
   deps.clearInput()
   deps.isSending.value = true
   try {
@@ -285,10 +298,18 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
     await deps.compact(deps.sessionIdRef.value!, customInstructions)
     return
   }
+  // [form-hang-fix v3 失联格短路]（短路不变量第二落点，同 routeSteer）：快照空且
+  // hasInput=true 时不 clearInput——清掉后 send(sid, []) 空早退 = 输入丢失。
+  // （/compact 分支在上方不可达：快照空 ⇒ segmentsToPrompt 产物为空串，不命中前缀。）
+  if (segments.length === 0 && deps.hasInput.value) return
   deps.clearInput()
   deps.isSending.value = true
   try {
-    await deps.send(deps.sessionIdRef.value!, segments)
+    // [form-hang-fix D2] send false = B 策略转 steer 未消费（内部已 toast）→ 恢复草稿；
+    // 外层 catch（send throw 的防御层）语义不动。
+    if (!(await deps.send(deps.sessionIdRef.value!, segments))) {
+      deps.restoreSegments(segments)
+    }
   } catch (e) {
     deps.restoreSegments(segments)
     deps.toastError(deps.t('panel.panel.sendFailed', { error: toErrorMessage(e) }))
