@@ -33,13 +33,22 @@
  * scheduleCreate marker 帧由 runtime event-adapter 分支直接产出 form:true 统一表单帧
  * （askUser 源含 type 推断映射），本层只消费 view-ready 帧、不再有 renderer 侧归一挂点。
  */
-import { computed, watch, onScopeDispose, type Ref } from 'vue'
+import { computed, reactive, ref, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
+import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
+import i18n from '@/i18n'
+import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import {
+  ensureBtwPendingBookkeeping,
+  firstBtwDialogReq,
+  noteBtwRequestResolved,
+  respondBtwDialog,
+} from '@/composables/panel/useBtwTabData'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -357,20 +366,30 @@ export function useExtensionUI(
    * （M1/RD-3#1：断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂）+ toast 提示；
    * FormOverlay/审批条保留展示，连接恢复后用户可再次提交重投（同 requestId 幂等——
    * runtime handler 与 pi rpc-mode 对已终结 requestId 均静默忽略重复应答）。
+   *
+   * 返回值（D8 提交回路契约，btw-question M3-c）：true = 应答已送达并出队；false =
+   * 未送达（保持挂起可重试——「重试仅限投递失败态」）或请求已终结（应答丢弃 + 提示
+   * 失效，不静默）。消费方（btw 内联确认条）据此决定待处理簿记是否随应答解除。
    */
-  function respond(requestId: string, result: boolean | string | null): void {
+  function respond(requestId: string, result: boolean | string | null): boolean {
     const sid = sessionId.value
-    if (!sid) return
+    if (!sid) return false
     const target = store.getRequestsBySession(sid).find(r => r.requestId === requestId)
-    if (!target) return
+    if (!target) {
+      // 已终结 requestId 的应答丢弃并提示失效（D8：迟到提交不静默，toast 可见）
+      const t = i18n.global.t as (key: string) => string
+      useToast().error(t('extensionUI.requestExpired'), { sessionId: sid })
+      return false
+    }
     const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
     if (!delivered) {
       notifyUiResponseNotDelivered(target.sessionId)
-      return
+      return false
     }
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
+    return true
   }
 
   /** 用户取消（等价 respond(requestId, null)） */
@@ -383,5 +402,331 @@ export function useExtensionUI(
     currentPlanReviewRequests,
     respond,
     cancel,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M3-c 交互闭环：D8 降级路径 —— drawer 内联确认条编排（唯一形态）
+//
+// V4 核实③不成立（plan-store 单全局 focusedSid 焦点投影，第二 usePlanState 实例会把
+// 主审批条读分区抢走 → S9b 互不抢占被破坏；修复面在领地外 plan-store/use-plan-sync）
+// → 按设计 D8 降级路径：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 /
+// 权限审批 / confirm·input·editor 简单 dialog）统一由 drawer 内联确认条独立轻实现
+// 呈现，富表单降档（choice→选项按钮、text→单行输入、schedule→预填草稿一键确认、
+// plan→两键+单行意见、editor→单行输入），**不回退主视图模态面**；降档契约登记于
+// 实施计划偏差表。提交回路契约与降级态同源：走 D8 终态机表（上文簿记）；投递失败
+// 可重试（仅限未送达/未终结 requestId）；已终结 requestId 的应答丢弃并提示失效。
+//
+// 并发：本编排只读 vid 分区（store 分区 + 模块级簿记），主视图三模态面读主 sid 分区
+// ——两面同屏互不抢占、提交态按表单实例/vid 隔离（S9b）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 确认条当前活动请求（按 receivedAt 与 store 族/dialog 族合并排序取最早——多请求并发呈现有序） */
+export interface BtwBarRequest {
+  kind: 'form' | 'planReview' | 'dialog'
+  requestId: string
+  receivedAt: number
+  /** kind==='form'：完整表单请求（formQuestions / legacy scheduleCreate·scheduleDraft 源） */
+  form?: ExtensionUIRequest
+  /** kind==='dialog'：简单 dialog 载荷（含权限审批 select；ui 包 DialogRequest，非 core 同名类型） */
+  dialog?: UiDialogRequest
+}
+
+/** 降档表单选项（本地同形，renderer 不反向依赖 extension-protocol——PlanReviewComment 惯例） */
+export interface BtwBarOption {
+  label: string
+  description?: string
+}
+
+/** 降档 schedule 草稿（本地同形：ScheduleDraft 的消费面字段子集） */
+export interface BtwScheduleDraft {
+  kind: 'once' | 'recurring'
+  schedule: string
+  prompt: string
+  model?: string
+  name?: string
+  expires?: string
+}
+
+/** 降档表单问题（本地同形守卫收窄后的渲染面） */
+export interface BtwBarFormQuestion {
+  type: 'choice' | 'text' | 'schedule'
+  header?: string
+  question: string
+  options?: BtwBarOption[]
+  multi?: boolean
+  allowOther?: boolean
+  initial?: BtwScheduleDraft
+}
+
+/** schedule 草稿形状守卫（结构化收窄，禁 any；缺字段 = 不可降级确认，走取消支） */
+function toScheduleDraft(v: unknown): BtwScheduleDraft | null {
+  if (typeof v !== 'object' || v === null) return null
+  const d = v as Record<string, unknown>
+  if (d.kind !== 'once' && d.kind !== 'recurring') return null
+  if (typeof d.schedule !== 'string' || typeof d.prompt !== 'string') return null
+  return {
+    kind: d.kind,
+    schedule: d.schedule,
+    prompt: d.prompt,
+    ...(typeof d.model === 'string' ? { model: d.model } : {}),
+    ...(typeof d.name === 'string' ? { name: d.name } : {}),
+    ...(typeof d.expires === 'string' ? { expires: d.expires } : {}),
+  }
+}
+
+/** formQuestions 逐项归一（非法项剔除——runtime 侧 isFormQuestion 逐项过滤同策略） */
+function toBarQuestion(v: unknown): BtwBarFormQuestion | null {
+  if (typeof v !== 'object' || v === null) return null
+  const q = v as Record<string, unknown>
+  let kind: 'choice' | 'text' | 'schedule'
+  if (q.type === 'choice') kind = 'choice'
+  else if (q.type === 'text') kind = 'text'
+  else if (q.type === 'schedule') kind = 'schedule'
+  else return null
+  const header = typeof q.header === 'string' ? q.header : undefined
+  const question = typeof q.question === 'string' ? q.question : ''
+  if (header === undefined && question === '') return null
+  const base = { type: kind, ...(header !== undefined ? { header } : {}), question }
+  if (kind === 'schedule') {
+    const initial = toScheduleDraft(q.initial)
+    return { ...base, ...(initial !== null ? { initial } : {}) }
+  }
+  if (kind !== 'choice') return base
+  const options: BtwBarOption[] = []
+  if (Array.isArray(q.options)) {
+    for (const o of q.options) {
+      if (typeof o !== 'object' || o === null) continue
+      const rec = o as Record<string, unknown>
+      if (typeof rec.label !== 'string') continue
+      options.push({
+        label: rec.label,
+        ...(typeof rec.description === 'string' ? { description: rec.description } : {}),
+      })
+    }
+  }
+  return { ...base, options, multi: q.multi === true, allowOther: q.allowOther !== false }
+}
+
+/** 问题集派生（questions 源优先；legacy scheduleCreate·scheduleDraft 源包装单 schedule 问） */
+function questionsOf(req: ExtensionUIRequest): BtwBarFormQuestion[] {
+  const out: BtwBarFormQuestion[] = []
+  if (Array.isArray(req.formQuestions)) {
+    for (const q of req.formQuestions) {
+      const n = toBarQuestion(q)
+      if (n) out.push(n)
+    }
+  }
+  if (out.length > 0) return out
+  const draft = toScheduleDraft(
+    (req as { scheduleDraft?: unknown }).scheduleDraft,
+  )
+  if (req.scheduleCreate === true && draft) {
+    return [{ type: 'schedule', question: '', initial: draft }]
+  }
+  return []
+}
+
+/** answers key（与协议 askUserKey fallback 同规则：header ?? question） */
+function questionKey(q: BtwBarFormQuestion): string {
+  return q.header ?? q.question
+}
+
+/** schedule 降档提交体（预填草稿直接确认——FormOverlay「预填草稿视为有效」语义；once 的
+ *  draft.schedule 已是折叠一次性 cron（唯一时间来源），不再二次折叠）。 */
+function scheduleResultJson(d: BtwScheduleDraft): string {
+  const result: Record<string, unknown> = {
+    action: 'create',
+    kind: d.kind,
+    schedule: d.schedule,
+    prompt: d.prompt,
+  }
+  if (d.model !== undefined) result.model = d.model
+  if (d.name !== undefined) result.name = d.name
+  if (d.kind === 'recurring' && d.expires !== undefined) result.expires = d.expires
+  return JSON.stringify(result)
+}
+
+/**
+ * 接线 drawer 内联确认条（BtwPanel setup 同步调用）。
+ *
+ * 数据面三通道合并：store 族（form + planReview，useExtensionUI vid 分区）∪ dialog 族
+ * （模块级簿记 FIFO）——按 receivedAt 取最早呈现（并发有序），respond 后自然晋升下一条。
+ */
+export function useBtwInteraction(vidRef: Ref<string | null>) {
+  ensureBtwPendingBookkeeping()
+  const ui = useExtensionUI(vidRef, () => true)
+
+  const active = computed<BtwBarRequest | null>(() => {
+    const vid = vidRef.value
+    if (!vid) return null
+    const cands: BtwBarRequest[] = []
+    const form = ui.currentFormRequest.value
+    if (form) {
+      cands.push({ kind: 'form', requestId: form.requestId, receivedAt: form.receivedAt ?? 0, form })
+    }
+    const plan = ui.currentPlanReviewRequests.value[0]
+    if (plan) {
+      cands.push({ kind: 'planReview', requestId: plan.requestId, receivedAt: plan.receivedAt ?? 0 })
+    }
+    const dialog = firstBtwDialogReq(vid)
+    if (dialog) {
+      cands.push({ kind: 'dialog', requestId: dialog.requestId, receivedAt: dialog.receivedAt, dialog })
+    }
+    if (cands.length === 0) return null
+    return cands.reduce((best, c) => (c.receivedAt < best.receivedAt ? c : best))
+  })
+
+  // ── 表单实例态（按活动请求隔离：requestId 变更即重置——提交态 per-vid/表单实例隔离）──
+  const formSel = reactive<Record<string, string[]>>({})
+  const formText = reactive<Record<string, string>>({})
+  const planComment = ref('')
+  const dialogSelect = ref('')
+  const dialogText = ref('')
+  watch(
+    () => active.value?.requestId ?? '',
+    () => {
+      for (const k of Object.keys(formSel)) delete formSel[k]
+      for (const k of Object.keys(formText)) delete formText[k]
+      planComment.value = ''
+      dialogSelect.value = ''
+      dialogText.value = ''
+    },
+  )
+
+  const activeQuestions = computed<BtwBarFormQuestion[]>(() => {
+    const a = active.value
+    if (a?.kind !== 'form' || !a.form) return []
+    return questionsOf(a.form)
+  })
+
+  function toggleSelect(key: string, label: string, multi: boolean): void {
+    const cur = formSel[key] ?? []
+    if (multi) {
+      formSel[key] = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]
+    } else {
+      formSel[key] = [label]
+    }
+  }
+
+  function isSelected(key: string, label: string): boolean {
+    return (formSel[key] ?? []).includes(label)
+  }
+
+  function draftValid(d: BtwScheduleDraft | null | undefined): boolean {
+    return d !== null && d !== undefined && d.prompt.trim().length > 0
+  }
+
+  /** Submit 门（降档口径）：逐题可答判定（choice=选项或 Other；text=非空；schedule=草稿可用） */
+  const canSubmitForm = computed(() => {
+    const a = active.value
+    if (a?.kind !== 'form' || !a.form) return false
+    const qs = activeQuestions.value
+    if (qs.length === 0) return false
+    if (a.form.scheduleCreate === true) {
+      // legacy draft 源：无 questions，直接校验草稿
+      return draftValid(toScheduleDraft((a.form as { scheduleDraft?: unknown }).scheduleDraft))
+    }
+    return qs.every((q) => {
+      const key = questionKey(q)
+      if (q.type === 'schedule') return draftValid(q.initial)
+      if (q.type === 'text') return (formText[`${key}__other`] ?? '').trim().length > 0
+      const sel = (formSel[key] ?? []).length > 0
+      const other = (formText[`${key}__other`] ?? '').trim().length > 0
+      if ((q.options ?? []).length === 0) return other
+      return sel || other
+    })
+  })
+
+  /** 主按钮文案（含 schedule 题 =「创建任务」，FormOverlay 同口径；降档复用既有 key） */
+  const submitLabel = computed(() => {
+    const a = active.value
+    if (a?.kind !== 'form') return ''
+    const hasSchedule = activeQuestions.value.some((q) => q.type === 'schedule')
+    return hasSchedule ? 'schedule' : 'submit'
+  })
+
+  /** 取消键显隐（协议缺省 true；显式 false 隐藏——FormOverlay 同语义；dialog 恒显） */
+  const allowCancel = computed(() => {
+    const a = active.value
+    if (a?.kind !== 'form') return true
+    return a.form?.allowCancel !== false
+  })
+
+  /** 应答出口（三 kind 共用；送达才出账——未送达保持挂起可重试，D8 提交回路契约） */
+  function respondActive(result: boolean | string | null): void {
+    const a = active.value
+    const vid = vidRef.value
+    if (!a || !vid) return
+    if (a.kind === 'dialog') {
+      respondBtwDialog(vid, a.requestId, result)
+      return
+    }
+    if (ui.respond(a.requestId, result)) noteBtwRequestResolved(vid, a.requestId)
+  }
+
+  /** 表单提交：按挂载源构造应答形状（draft 源 = 扁平 ScheduleFormResult；questions 源 = answers envelope） */
+  function submitForm(): void {
+    const a = active.value
+    if (a?.kind !== 'form' || !a.form) return
+    if (a.form.scheduleCreate === true) {
+      const draft = toScheduleDraft((a.form as { scheduleDraft?: unknown }).scheduleDraft)
+      if (draft) respondActive(scheduleResultJson(draft))
+      return
+    }
+    const answers: Record<string, string> = {}
+    for (const q of activeQuestions.value) {
+      const key = questionKey(q)
+      if (q.type === 'schedule') {
+        if (!q.initial) return
+        answers[key] = scheduleResultJson(q.initial)
+        continue
+      }
+      if (q.type === 'text') {
+        const t = formText[`${key}__other`] ?? ''
+        if (t.trim().length > 0) answers[`${key}__other`] = t
+        continue
+      }
+      const sel = formSel[key] ?? []
+      if ((q.options ?? []).length > 0 && sel.length > 0) {
+        answers[key] = q.multi === true ? JSON.stringify(sel) : sel[0]
+      }
+      const other = formText[`${key}__other`] ?? ''
+      if (other.length > 0) answers[`${key}__other`] = other
+    }
+    respondActive(JSON.stringify(answers))
+  }
+
+  /** plan 审批降档回传（PlanReviewResponse 本地同形；revise 单行意见 = 降档契约登记面） */
+  function submitPlan(decision: 'approve' | 'revise'): void {
+    const payload =
+      decision === 'approve'
+        ? JSON.stringify({ decision: 'approve' })
+        : JSON.stringify({ decision: 'revise', comments: [{ quote: '', comment: planComment.value.trim() }] })
+    respondActive(payload)
+  }
+
+  function cancelActive(): void {
+    respondActive(null)
+  }
+
+  return {
+    active,
+    activeQuestions,
+    formSel,
+    formText,
+    planComment,
+    dialogSelect,
+    dialogText,
+    questionKey,
+    toggleSelect,
+    isSelected,
+    canSubmitForm,
+    submitLabel,
+    allowCancel,
+    respondActive,
+    submitForm,
+    submitPlan,
+    cancelActive,
   }
 }

@@ -36,4 +36,22 @@ export default {
     truncated: '快照截断（进行中 turn 未完整带入）',
     none: '无快照（源快照不可用）',
   },
+  // M3-c 交互闭环（D8 降级路径：drawer 内联确认条 + 失效提示 + 第四面状态区）
+  interaction: {
+    // 终态机失效支行内提示（撤下 + badge 清 + 本提示，两路合并收口）
+    expiredNotice: '请求已失效',
+    dismissExpired: '知道了',
+    // 运行期错误边界（单线失败 = 行内错误 + 可重试，不外溢主面板）
+    error: '交互区异常，已隔离',
+    // badge 待处理态 per-line 挂点 title
+    pendingLabel: '待处理',
+    // plan 审批降档标题 + 单行意见占位
+    planReviewTitle: '计划审批（简版）',
+    revisePlaceholder: '修改意见（单行）',
+    // 表单降档占位（choice Other / text / dialog input 共用）
+    otherPlaceholder: '其他答案…',
+    answerPlaceholder: '输入回答…',
+    // schedule 降档：无预填草稿时不可一键确认
+    scheduleNoDraft: '该表单缺少预填草稿，无法降级确认',
+  },
 }

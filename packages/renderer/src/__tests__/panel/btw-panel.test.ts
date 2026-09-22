@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import type { Ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import {
   bindDrawerSessionId,
   useDrawerControl,
@@ -82,6 +83,8 @@ async function settle(wrapper: Awaited<ReturnType<typeof mountPanel>>) {
 enableAutoUnmount(afterEach)
 
 beforeEach(() => {
+  // M3-c：BtwPanel 经 useBtwInteraction → useExtensionUI 消费 extensionUIStore（pinia 必需）
+  setActivePinia(createPinia())
   vi.resetAllMocks()
   boundSid = ref<string | null>(MAIN_A)
   bindDrawerSessionId(boundSid)

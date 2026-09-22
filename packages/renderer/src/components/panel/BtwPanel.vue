@@ -103,6 +103,13 @@
           :data-vid="thread.vid"
           @click="selectThread(thread.vid)"
         >
+          <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
+          <span
+            v-if="isBtwPending(thread.vid)"
+            class="size-1.5 shrink-0 rounded-full bg-warn"
+            data-testid="btw-thread-pending"
+            :title="t('btw.interaction.pendingLabel')"
+          />
           {{ shortVid(thread.vid) }}
         </Button>
       </div>
@@ -123,6 +130,95 @@
           :session-id="selectedVid"
           data-testid="btw-stream"
         />
+        <!-- M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
+             按 vid 路由本面板，主视图三模态面零浮出）。Guard 子组件包全部风险渲染——
+             异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，P2 隔离），
+             错误条 + 重试在 Guard 外恒可达。 -->
+        <div v-if="selectedVid" class="flex shrink-0 flex-col gap-1.5 px-2 pb-1.5" data-testid="btw-interaction">
+          <BtwInteractionGuard :key="interactionKey">
+            <!-- 终态机失效支行内提示（badge 清 + 表单撤下 + 本提示，两路合并收口） -->
+            <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
+              <TriangleAlert class="size-3 shrink-0" />
+              <span>{{ t('btw.interaction.expiredNotice') }}</span>
+              <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-request-expired-dismiss" @click="dismissExpired">{{ t('btw.interaction.dismissExpired') }}</Button>
+            </div>
+            <!-- 第四面状态区（非模态 extension GUI：setStatus/setWidget 的 per-session 源
+                 读 vid 分区，不落主视图 chrome；toolbar/tab-bar 无 session 帧不在路由面） -->
+            <div v-if="statusEntries.length > 0 || widgetLines.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-surface-hover px-2.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim" data-testid="btw-status-strip">
+              <span v-for="item in statusEntries" :key="item.id" class="flex items-center gap-1" :title="item.tooltip" data-testid="btw-status-item">
+                <i v-if="item.status" class="inline-block size-[5px] rounded-full" :class="statusDotClass(item.status)" />
+                {{ item.text }}
+              </span>
+              <span v-for="(line, i) in widgetLines" :key="`w-${i}`" class="font-mono" data-testid="btw-widget-line">{{ line }}</span>
+            </div>
+            <!-- 内联确认条（五类请求共用；kind 分派，降档形态见 useBtwInteraction 文件头） -->
+            <div v-if="active" class="overflow-hidden rounded-lg bg-bg-input" data-testid="btw-inline-confirm">
+              <!-- plan 审批降档：两键 + 单行意见 -->
+              <template v-if="active.kind === 'planReview'">
+                <div class="px-3.5 pt-2.5 text-[length:var(--text-xs)] font-medium text-neutral-fg">
+                  {{ t('btw.interaction.planReviewTitle') }}
+                </div>
+                <div class="flex items-center gap-2 px-3.5 pb-2.5 pt-2">
+                  <Input v-model="planComment" :placeholder="t('btw.interaction.revisePlaceholder')" class="h-8 text-[length:var(--text-xs)]" data-testid="btw-plan-comment" />
+                  <Button variant="ghost" size="sm" class="shrink-0" data-testid="btw-plan-revise" :disabled="!planComment.trim()" @click="submitPlan('revise')">{{ t('plan.reviewBar.submitRevise') }}</Button>
+                  <Button variant="default" size="sm" class="shrink-0" data-testid="btw-plan-approve" @click="submitPlan('approve')">{{ t('plan.reviewBar.confirmExecute') }}</Button>
+                </div>
+              </template>
+              <!-- 表单族降档（ask-user 富表单 / scheduler）：问题平铺 + 选项按钮 + 单行输入 -->
+              <template v-else-if="active.kind === 'form'">
+                <div class="flex flex-col gap-2.5 px-3.5 pb-1 pt-2.5">
+                  <div v-for="q in activeQuestions" :key="questionKey(q)" class="flex flex-col gap-1.5">
+                    <p class="text-[length:var(--text-xs)] font-medium text-neutral-fg">
+                      {{ q.question || q.header }}
+                    </p>
+                    <template v-if="q.type === 'choice'">
+                      <div class="flex flex-wrap gap-1.5">
+                        <Button v-for="opt in q.options ?? []" :key="opt.label" variant="secondary" size="sm" class="h-7 rounded px-2 text-[length:var(--text-2xs)]" :class="isSelected(questionKey(q), opt.label) ? 'bg-accent-soft text-neutral-fg' : 'text-neutral-mid'" data-testid="btw-form-option" :data-value="opt.label" @click="toggleSelect(questionKey(q), opt.label, q.multi === true)">{{ opt.label }}</Button>
+                      </div>
+                      <Input v-if="q.allowOther !== false" v-model="formText[questionKey(q) + '__other']" :placeholder="t('btw.interaction.otherPlaceholder')" class="h-8 text-[length:var(--text-xs)]" data-testid="btw-form-other" />
+                    </template>
+                    <Input v-else-if="q.type === 'text'" v-model="formText[questionKey(q) + '__other']" :placeholder="t('btw.interaction.answerPlaceholder')" class="h-8 text-[length:var(--text-xs)]" data-testid="btw-form-text" />
+                    <p v-else-if="!q.initial" class="text-[length:var(--text-2xs)] text-warn" data-testid="btw-schedule-nodraft">{{ t('btw.interaction.scheduleNoDraft') }}</p>
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 px-3.5 pb-2.5 pt-1.5">
+                  <Button v-if="allowCancel" variant="ghost" data-testid="btw-form-cancel" @click="cancelActive">{{ t('common.cancel') }}</Button>
+                  <Button variant="default" data-testid="btw-form-submit" :disabled="!canSubmitForm" @click="submitForm">{{ submitLabel === 'schedule' ? t('extensionUI.scheduleCreateSubmit') : t('common.submit') }}</Button>
+                </div>
+              </template>
+              <!-- 简单 dialog（confirm·input·editor；权限审批 select 同通道） -->
+              <template v-else-if="active.kind === 'dialog' && active.dialog">
+                <div v-if="active.dialog.title" class="px-3.5 pt-2.5 text-[length:var(--text-xs)] font-medium text-neutral-fg" data-testid="btw-dialog-title">{{ active.dialog.title }}</div>
+                <p v-if="active.dialog.message" class="px-3.5 pt-2 text-[length:var(--text-xs)] leading-1.5 text-neutral-mid" data-testid="btw-dialog-message">{{ active.dialog.message }}</p>
+                <div v-if="active.dialog.method === 'confirm'" class="flex justify-end gap-2 px-3.5 pb-2.5 pt-2">
+                  <Button variant="ghost" data-testid="btw-dialog-cancel" @click="cancelActive">{{ t('common.cancel') }}</Button>
+                  <Button variant="default" data-testid="btw-dialog-confirm" @click="respondActive(true)">{{ t('common.confirm') }}</Button>
+                </div>
+                <div v-else-if="active.dialog.method === 'select'" class="flex flex-col gap-1 px-3.5 pb-2.5 pt-2">
+                  <Button v-for="opt in active.dialog.options ?? []" :key="opt.value" variant="secondary" size="sm" class="h-7 justify-start rounded px-2 text-[length:var(--text-2xs)]" :class="dialogSelect === opt.value ? 'bg-accent-soft text-neutral-fg' : 'text-neutral-mid'" :data-testid="`btw-dialog-option-${opt.value}`" @click="dialogSelect = opt.value">{{ opt.label }}</Button>
+                  <div class="flex justify-end gap-2 pt-1.5">
+                    <Button variant="ghost" data-testid="btw-dialog-cancel" @click="cancelActive">{{ t('common.cancel') }}</Button>
+                    <Button variant="default" data-testid="btw-dialog-ok" :disabled="!dialogSelect" @click="respondActive(dialogSelect)">{{ t('common.confirm') }}</Button>
+                  </div>
+                </div>
+                <div v-else-if="active.dialog.method === 'input' || active.dialog.method === 'editor'" class="flex flex-col gap-2 px-3.5 pb-2.5 pt-2">
+                  <Input v-model="dialogText" :placeholder="t('btw.interaction.answerPlaceholder')" data-testid="btw-dialog-input" />
+                  <div class="flex justify-end gap-2">
+                    <Button variant="ghost" data-testid="btw-dialog-cancel" @click="cancelActive">{{ t('common.cancel') }}</Button>
+                    <Button variant="default" data-testid="btw-dialog-ok" @click="respondActive(dialogText)">{{ t('common.submit') }}</Button>
+                  </div>
+                </div>
+                <p v-else class="px-3.5 pb-2.5 pt-2 text-[length:var(--text-2xs)] text-neutral-dim" data-testid="btw-dialog-unknown">{{ active.dialog.method }}</p>
+              </template>
+            </div>
+          </BtwInteractionGuard>
+          <!-- 运行期错误边界（单线失败 = 行内错误 + 可重试，不外溢主面板） -->
+          <div v-if="interactionError" class="flex items-center gap-1.5 border-t border-hairline bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-interaction-error" role="alert">
+            <TriangleAlert class="size-3 shrink-0" />
+            <span>{{ t('btw.interaction.error') }}</span>
+            <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-interaction-retry" @click="retryInteraction">{{ t('common.retry') }}</Button>
+          </div>
+        </div>
         <Composer
           v-if="selectedVid"
           :session-id="selectedVid"
@@ -140,7 +236,10 @@ import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitFork, MessagesSquare, Plus, TriangleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { btw } from '@/api'
+import { isBtwPending, useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
+import { useBtwInteraction } from '@/composables/useExtensionUI'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { drawerControl, useDrawerControl, getBoundSessionId } from '@taiji/core/domain/drawer'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
@@ -301,4 +400,39 @@ const forkPillText = computed(() => {
   if (fs === 'truncated') return t('btw.pill.truncated')
   return t('btw.pill.full')
 })
+
+// ── M3-c 交互闭环（D8 降级路径：drawer 内联确认条唯一形态）────────────────
+const {
+  active,
+  activeQuestions,
+  formText,
+  planComment,
+  dialogSelect,
+  dialogText,
+  questionKey,
+  toggleSelect,
+  isSelected,
+  canSubmitForm,
+  submitLabel,
+  allowCancel,
+  respondActive,
+  submitForm,
+  submitPlan,
+  cancelActive,
+} = useBtwInteraction(selectedVid)
+
+// ── M3-c：失效提示 / 第四面状态区 / 运行期错误边界（编排下沉 useBtwPanelSurface，
+//    规则：全部风险渲染在 Guard slot 内求值，异常由 surface 注册的 onErrorCaptured 在
+//    本组件收口 return false 不外溢主面板；MessageStream/Composer 不在 Guard 内不受影响）──
+const {
+  expiredNotice,
+  dismissExpired,
+  statusEntries,
+  widgetLines,
+  statusDotClass,
+  interactionError,
+  interactionKey,
+  retryInteraction,
+  BtwInteractionGuard,
+} = useBtwPanelSurface(selectedVid)
 </script>

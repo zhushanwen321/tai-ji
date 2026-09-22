@@ -37,4 +37,22 @@ export default {
     truncated: 'Truncated snapshot (in-flight turn not fully carried over)',
     none: 'No snapshot (source snapshot unavailable)',
   },
+  // M3-c interaction loop (D8 degraded path: drawer inline confirm bar + expiry notice + fourth-surface status strip)
+  interaction: {
+    // Terminal-state expiry notice (teardown + badge clear + this notice, two paths merged)
+    expiredNotice: 'Request expired',
+    dismissExpired: 'Got it',
+    // Runtime error boundary (single-line failure = inline error + retry, never escapes the main panel)
+    error: 'Interaction area failed; isolated',
+    // Badge pending dot per-line anchor title
+    pendingLabel: 'Pending',
+    // Plan-review downgrade title + single-line comment placeholder
+    planReviewTitle: 'Plan review (simple)',
+    revisePlaceholder: 'Revision comment (one line)',
+    // Form-downgrade placeholders (choice Other / text / dialog input share)
+    otherPlaceholder: 'Other answer…',
+    answerPlaceholder: 'Type your answer…',
+    // Schedule downgrade: no prefilled draft → one-click confirm unavailable
+    scheduleNoDraft: 'This form has no prefilled draft; simple confirm unavailable',
+  },
 }
