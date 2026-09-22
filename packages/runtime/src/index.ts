@@ -1,5 +1,12 @@
 import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
+// BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
+import { BtwService } from './services/session/btw-service.js'
+// D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧本文件）。
+import { getMigrationGate } from './services/session/session-lifecycle.js'
+import { buildPresetClientOptions, buildPresetFallbackEnv, resolveAppendSystemPrompt, resolveEffectiveSystemPrompt } from './services/session/launch-params.js'
+import { findPiExecutable } from './infra/pi/find-pi-executable.js'
+import type { RpcClientOptions } from './infra/pi/rpc-client.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
 import { createCompletionBackflow } from './services/session/completion-backflow.js'
@@ -14,7 +21,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import { BASE_PORT, MAX_PORT, BUILTIN_PRESET_IDS } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
@@ -960,6 +967,57 @@ async function main(): Promise<void> {
   // 只有 S14 场景能发现。删除链侧保证只在 extras 条目确认清除后调用（防幽灵标记）。
   configService.setQuotaStateCleaner((providerId) => quotaService.clearProviderState(providerId))
 
+  // ── BtwService（btw-question D1/D2/D3 + B2 授权接线，M2-b）──
+  // 六项依赖按 BtwServiceDeps docstring 归位组合根：线进程复用同一 pm（出站 env 经
+  // rpc-client start → buildOutboundChildEnv 统一武装，C-proc-09，无新增进程创建点）；
+  // registerSession 走 SessionService 的 lifecycle 兼容委托（hidden:true 透传 = active
+  // 腿防线）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
+  // pm 同 effectiveRoot 锚点。
+  const btwService = new BtwService({
+    processes: pm,
+    buildLineSpawnOptions: async (ctx) => {
+      // D8-3 迁移门（与 create/restore 同约束）：provider 迁移完成前禁启动 pi。
+      await getMigrationGate()
+      // 线 launch 快照取主会话 preset（工具/权限面 = 主会话创建档；活跃/冷会话统一读
+      // 扫盘面——spawnRestoreClient 同源，sidecar 缺失回落 builtin:full = FR-10 兜底）。
+      const presetId = sessionService.findScannedSession(ctx.mainSid)?.launchPresetId
+        ?? BUILTIN_PRESET_IDS.FULL
+      const resolution = await sessionService.getLaunchPresetOptions(presetId, ctx.cwd)
+      // 组合形态逐字段对齐 lifecycle.spawnRestoreClient（线进程 = 附着态启动）：模型终态
+      // 随线会话文件 entry 恢复——pi CLI --model 恒优先 entry 恢复，拼 --model 会把 fork
+      // 快照里用户切换过的模型压回（P1 final gate V1⑤）。宽类型中转变量：BtwLineSpawnOptions
+      // 是最小结构面（3 键），对象字面量直返会触发 excess property check。
+      const options: RpcClientOptions = {
+        skillPaths: resolution?.skillPaths ?? sessionService.getSkillPaths(ctx.cwd),
+        extensionPaths: resolution?.extensionPaths ?? await sessionService.getExtensionPaths(ctx.cwd),
+        systemPrompt: resolveEffectiveSystemPrompt(resolution, sessionService.getReplaceSystemPrompt()),
+        appendSystemPrompt: resolveAppendSystemPrompt(resolution),
+        env: buildPresetFallbackEnv(resolution),
+        ...buildPresetClientOptions(resolution, undefined, undefined),
+        model: undefined,
+        inheritSessionModel: true,
+      }
+      return options
+    },
+    registerSession: (id, client, cwd, label, sessionFilePath, hidden) =>
+      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, hidden),
+    resolveMainSessionFile: (mainSid) =>
+      sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
+    resolvePiCommand: () => findPiExecutable(effectiveRoot),
+  })
+  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
+  sessionService.setBtwService(btwService)
+  /**
+   * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃腿携带主 turn
+   * 活跃信号（分支③ pill 增强）；扫盘腿（冷主会话）无可读占用态恒 false。
+   */
+  const resolveBtwMain = (mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined => {
+    const active = sessionService.getSession(mainSid)
+    if (active) return { cwd: active.cwd, mainTurnActive: active.isGenerating }
+    const scanned = sessionService.findScannedSession(mainSid)
+    return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
+  }
+
   const tServicesReady = performance.now()
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
@@ -991,6 +1049,9 @@ async function main(): Promise<void> {
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
+    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄面 + 主会话解析
+    // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
+    btw: { service: btwService, resolveMain: resolveBtwMain },
   })
 
   // ── u3b（idle-pi-reclamation）：空闲 pi 进程回收装配 ──
