@@ -39,6 +39,120 @@
 
 **稀缺位**：steer 仅 claude-code / codex 为 native，其余为 emulated（排队/打断重发/文本命令）或 unsupported（kimi 的 node-sdk 有 `Session.steer` 但 ACP 方法集无对应）；schemaEnforcement native 仅 claude-code（`--json-schema`）与 codex（`output_schema_strict`）。
 
+## 协议面不可达矩阵（六引擎 × engine-protocol v1）
+
+本矩阵汇总六份映射文档的「靶有源无」缺口与各节降级标注，列协议面各能力项在六引擎的可达性。汇总口径：**空格 = 支持**（原生或直接映射，该引擎文档未列为缺口）；⚠️ = 降级可用（emulated / 合成 / 词表折算 / 语义偏差，见括注）；❌ = 不可达（引擎无对应机制，宿主补齐或丢弃）。
+
+引擎多出的能力（源有靶无，协议面无承载）不在此表，见各文档 §9。
+
+### run 入参（run.params.task）
+
+| 协议字段 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| task.schema（结构化输出） | ✅ native | ✅ native | ⚠️ emulated | ⚠️ emulated | ❌ unsupported | ⚠️ emulated |
+| task.schemaEnv（env 降级通道） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| task.maxTurns | ✅ | ❌ 宿主计数 | ⚠️ 临时 agent steps | ❌ ACP 面不可达 | ❌ | ⚠️ 语义 = max_iterations（API 调用次数） |
+| task.graceTurns | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| task.idleTimeoutMs | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| task.denyTools | ✅ 直通 | ⚠️ config 变通，语义不对等 | ⚠️ 链路有效但字段 deprecated | ❌ | ⚠️ patch 间接 | ⚠️ 仅 toolset 粒度 |
+| task.thinkingLevel | ⚠️ 双轴词表 | ⚠️ effort 词表映射 | ⚠️ variant 部分承载 | ⚠️ off/on/effort 折算 | ⚠️ /think 前缀 + patch 双通道 | ⚠️ effort 词表，构造期注入 |
+| task.skill / skillPath | ⚠️ prompt 注入 emulated | ✅ UserInput::Skill | ⚠️ 不可 per-run 注入 | ⚠️ slash 文本触发 | ⚠️ message 注入 | ⚠️ emulated |
+| task.agent（.md 绝对路径） | ✅ 文件系统自扫描 | ⚠️ 读文件转内容注入 | ⚠️ 落盘约定目录改名 | ⚠️ --agent-file；ACP 面 prompt 兜底 | ⚠️ 注册 agentId 换算 | ⚠️ ephemeral 不落盘，resume 后需重注入 |
+
+**全部 ❌ 的通用行**：`schemaEnv`（无一家有 env 注入 schema 通道——native 引擎走主通道、emulated 引擎走 prompt 注入）、`graceTurns`、`idleTimeoutMs`（一律宿主侧职责）。
+
+### run 上下文（run.params.ctx）
+
+| 协议字段 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| ctx.cwd / ctx.model / ctx.streamMode | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ctx.ctxModel | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| ctx.sessionRootId | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| ctx.sessionDir | ❌ 引擎自管布局 | ❌ | ❌ 归 serve 数据目录 | ⚠️ KIMI_CODE_HOME 数据根粒度 | ❌ gateway 固定布局 | ❌ |
+
+**全部 ❌ 的通用行**：`ctxModel`（无一家有 ctx 模型分离概念）、`sessionRootId`（pi relay 专属键）。
+
+### 事件面（event 通知 9 种）
+
+| 协议事件 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| activity（周期活性） | ⚠️ 合成；纯 LLM 长流式期间无帧 | ⚠️ 合成（status/outputDelta） | ✅ server.heartbeat 10s | ⚠️ 合成 | ❌ 适配器周期自产 | ⚠️ 合成（内部 _touch） |
+| compaction | ⚠️ 消息流内边界，read 重建需处理 relink | ⚠️ 以 ContextCompaction item 为准（通知已 deprecated） | ✅ | ⚠️ 进度混入正文 chunk，需状态机区分 | ✅ | ⚠️ 引擎/ACP 双轨压缩，落盘形态不同 |
+| error（独立事件） | ⚠️ 从 result error_* 帧合成 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| turn 边界（turn_end） | ✅ | ✅ | ⚠️ 末端判定需自行合成 | ⚠️ ACP 不透传 step 边界，run 退化为单 turn | ⚠️ loop 内部概念，从 message 序列合成 | ✅ |
+
+### 反向通道（6 条）
+
+| 协议通道 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| host/childSpawned / childStateChanged | ⚠️ wait 链合成 | ❌ 不发 | ❌ 不发 | ⚠️ 合成 | ❌ | ⚠️ 合成（pid = 引擎进程） |
+| host/streamDelta | ⚠️ 从 text_delta 合成 | ⚠️ delta 双投 | ⚠️ SSE delta 双发 | ⚠️ chunk 双投 | ❌ 从 delta 事件合成 | ⚠️ 从 chunk 合成 |
+| host/log | ⚠️ 适配层桥接 | ⚠️ 适配层桥接 | ⚠️ 捕获 stdout/stderr 转译 | ⚠️ 适配层桥接 | ⚠️ 内部日志不回传 | ⚠️ stderr 行合成 |
+
+### UI 交互（host/askUser 的 UiRequest method）
+
+| 协议 method | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| confirm（工具审批） | ✅ can_use_tool | ✅ ServerRequest | ✅ permission.asked | ✅ request_permission | ✅ exec.approvals | ✅ request_permission |
+| select | ❌ can_use_tool 仅二元 | ⚠️ ServerRequest 映射 | ✅ question.v2 | ⚠️ elicitation form | ❌ | ❌ |
+| input / editor | ❌ | ⚠️ ServerRequest 映射 | ❌ | ⚠️ elicitation form | ❌ | ❌ |
+| notify / setStatus / setWidget / setTitle / set_editor_text | ❌ | ❌ | ❌ | ❌ {unsupported} | ❌ | ❌ |
+
+**全部 ❌ 的通用行**：fire-and-forget 五 method（notify/setStatus/setWidget/setTitle/set_editor_text）——六家引擎均无「宿主展示写入」反向推送形态，一律 `{unsupported:true}`。
+
+### 终态字段（AgentOutcome / usage）
+
+| 协议字段 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| AgentUsage.cost（单轮成本） | ⚠️ 仅累计级 total_cost_usd | ❌ 仅账户面估计 | ⚠️ 无价模型恒 0 | ❌ ACP 不可达 | ✅ | ❌ 无 wire 槽 |
+| usage 单消息增量（cacheWrite 等） | ✅ | ⚠️ last = 单轮非单消息 | ✅ | ❌ usage_update 仅 context 水位 | ✅ | ⚠️ session 累计，需差分 |
+| contextTokens | ✅ | ❌ 仅窗口容量/累计吞吐 | ⚠️ 不落盘，input+cache 近似 | ✅ usage_update 水位 | | |
+| AgentOutcomeUsage.turns | ⚠️ num_turns 按 user 消息计数，口径偏大 | | | ⚠️ turn ≈ taiji step | ❌ | ⚠️ max_iterations ≠ 用户轮 |
+| AgentOutcome.exitCode | ✅ 进程退出码 | | | | ❌ 常驻恒无 | ❌ 常驻形态无意义 |
+| AgentOutcome.failureKind | | | ✅ StructuredOutputError 可分诊 schema_deterministic | | ⚠️ 从 stopReason/errorMessage 合成 | |
+
+### 模型面
+
+| 协议方法 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|----------|------------|-------|----------|------|----------|--------|
+| listModels（模型枚举） | ❌ 无公开枚举，适配层自维护目录 | ✅ model/list | ✅ /config/providers | ✅ list_models | ✅ models | ✅ available_models |
+
+### 硬约束备注（不可映射为协议能力的引擎内置行为）
+
+- **openclaw**：无进程退出码语义（常驻）；run 应答是受理 ack 非终态，适配器须桥接 WS 终态事件才能 resolve run。
+- **hermes**：hardline 红线不可交互、不可配置绕过（任何 permissionMode 都不改变其行为），GUI 权限承诺须排除该层；工具结果恒字符串，ToolCallResult 结构化需二次 parse；并行工具配对依赖 tool_start/tool_end 不变量。
+- **kimi**：session 与 KIMI_CODE_HOME × workspace 双重绑定，resume 锚点必须携带数据根；permissionMode 的 plan 档有只读副作用。
+- **codex**：fork 产新 threadId（resume 锚点须切换）；正文 delta 与 completed 全文并存须按 itemId 去重。
+- **opencode**：permission ask 挂起会阻塞 run（必须 prompt_async + SSE，宿主不 reply = 永挂，须映射超时/杀链到 reply reject）；session 与创建时 directory 绑定，跨目录续聊必须带路由参数。
+- **claude-code**：每会话一进程，协议常驻端点语义（initialize/dispose/ping 多 run 复用）须适配层 wrapper 重构——接入形态最大结构差异。
+
+## 引擎多出能力面（engine-protocol v1 无承载位）
+
+六家引擎普遍携带协议 v1 没有的能力（各文档 §9「源有靶无」汇总）。这些能力**不阻塞接入**——适配器丢弃或仅诊断消费；下表是协议未来扩展的候选面，是否值得进协议按 [`../subagent-engine-protocolization.md`](../subagent-engine-protocolization.md) 的字段归属判据裁决，不在本表展开。
+
+✅ = 该引擎具备此能力面（括注为引擎侧具体形态）；空 = 无此面或未在映射文档中标记。
+
+| 能力域 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
+|--------|------------|-------|----------|------|----------|--------|
+| 内嵌 subagent / 多 agent 协作 | ✅ Task 后台任务事件族 | ✅ collab agents + thread/realtime | ✅ subtask part | ✅ subagent.spawned 等 5 类事件 | | ✅ delegate_task |
+| 计划 / todo 展示推送 | | ✅ turn/plan/updated | ✅ todo.updated | ✅ plan update | ✅ bus item/plan | ✅ AgentPlanUpdate |
+| 动态工具注册 + 宿主反呼 | | ✅ thread/start.dynamicTools + DynamicToolCall | | | | |
+| 运行时参数切换 | ✅ set_model / set_max_thinking_tokens | | | ✅ config_option_update / current_mode_update | | |
+| MCP 服务器管理与事件 | ✅ mcp_set_servers / reconnect / toggle / status 族 | | ✅ MCP / LSP / PTY 事件族 | | | ✅ NewSession.mcp_servers 动态注册 |
+| 多模态输入 | | | ✅ file part 输入 | | | ✅ image / resource blocks |
+| session 树治理（回滚/分叉/搜索） | ✅ rewind_files / --resume-session-at / --fork-session | ✅ archive/delete/rollback/revert/search 等 13 方法 | ✅ fork 树 / revert / 消息删除改写 | ✅ session/fork（UNSTABLE）/ session/list | | ✅ ForkSession + checkpoint 体系 |
+| 预算上限治理 | ✅ --max-budget-usd / --task-budget | | | | | |
+| 审批流增强 | ✅ permission_denials / fast_mode_state | ✅ guardian 自动审批（autoApprovalReview） | | ✅ mode 推送 | ✅ 结构化审批元数据 + 远程节点审批配置 | ✅ allow_once/session/always 五值细分 |
+| 结构化 diff / patch 面 | | ✅ turn/diff/updated | ✅ patch/snapshot parts + session.diff | ✅ ToolKind / diff content | ✅ bus item/patch | |
+| 多任务入口（shell/命令/手动压缩） | | | ✅ /shell /command /init /summarize | ✅ available_commands_update | | ✅ available_commands（9 个 slash） |
+| 平台生态面（渠道/cron/记忆/市场） | ✅ plugins / marketplace（--plugin-dir） | ✅ hooks / plugins / marketplace / skills 管理面 | ✅ share / provider OAuth | ✅ goal / cron / task 域 | ✅ 多渠道路由 + cron/heartbeat/web | ✅ send_message/kanban/cron + memory/session_search |
+
+三个跨引擎观察：
+
+1. **计划/todo 推送是六家共性缺口里最接近协议化的一条**——五家独立演化出了同构能力（plan/todo 状态推送），协议 9 事件无承载位；若 GUI 要呈现子代理任务清单，这是首选扩展候选。
+2. **动态工具注册 + 宿主反呼仅 codex 有**——协议反向面无「宿主执行引擎工具」通道，这是 codex 独有能力中唯一无法用「丢弃」无损处理的（丢弃即功能消失）。
+3. **session 树治理五家有、协议只有线性 resume/fork 锚点**——回滚/树形分叉/搜索在 subagent 场景多为宿主职责（taiji 自建 session 模型），维持丢弃是合理默认。
+
 ## ResumeAnchor.sessionRef 建议
 
 开放载体按引擎构成（详见各文档 §6）：
