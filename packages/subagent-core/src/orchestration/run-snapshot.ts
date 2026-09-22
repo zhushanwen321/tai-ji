@@ -206,7 +206,8 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
  * fold 规则（词表 = run-events.ts D5 七事件）：
  * - `ask-dispatched` / `ask-executing`：按 taskIndex 关联 calls[] 条目（id 同源
  *   D-10），startedAt ??= ts（首边沿即起点——executing 兜底覆盖 journal 缺
- *   dispatched 帧的历史分段）；lastProgressAt = ts；
+ *   dispatched 帧的历史分段；预留消费面——ask-executing 现无生产写入方，见
+ *   AskExecutingEvent 注释）；lastProgressAt = ts；
  * - `ask-retrying` / `ask-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
  * - `run-created` / `armed`：仅推进 run 级 health.lastProgressAt；
  * - `run-settled`：health 推进 + 终局投影（state.outcome / errorCode 落快照）；

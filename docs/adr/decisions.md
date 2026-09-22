@@ -57,6 +57,9 @@ subagent 引擎协议（`packages/subagent-engine-sdk/src/protocol/`）的演进
 ### ADR-0072 workflow run 显式状态机：转移表裁决 + 事件流权威投影（2026-09-21）
 workflow run 生命周期治理（`packages/subagent-core/src/orchestration/run-events.ts`）四件套：① `RunLifecycle` 6 态显式状态机（`created/dispatched/running/settling/terminal/interrupted`），`transition` 纯函数 + `RUN_TRANSITIONS` 转移表是唯一裁决面——表外转移 fail-fast（`IllegalTransitionError` 让位 + debug 留痕），禁止直写状态字段；约束由 API 形态结构性承载（对外只暴露 query + transition 唯一入口），非 grep 守卫型、不设独立约束登记。② 事件流 journal（`RunEventJournal`，`<agentDir>/workflow-state/<runId>.events.jsonl`）是 run 态权威投影源——注册表投影 = journal fold 四相（missing/active/terminal/interrupted），文件 mtime 推导退役；abandon 是终局化动作（中断的 run 留痕后归入 terminal 相），非静默丢失。③ 终局诊断引用（stderrTeePath）随 ask-settled 落账事件流、终局投影从事件流读回——不引入第二写点、不扩 run-settled 载荷。④ run 级恢复场景的杀伤半径收窄（D9-2）：watchdog no-progress 与 cancel 收敛兜底两类调用面从全量组杀 `killAll` 收窄为 `killRunTopology` 定点收割（只杀该 run 锚定的引擎孙进程，引擎宿主与同引擎并发 run 存活；零拓扑引擎降级为 stall 出声不杀——ADR-0047 静默 ≠ 卡死）；dispose（停机全灭）/ stdout-wedge（引擎级腿楔死）/ failEngine（引擎级故障，反向通道楔死）三调用面豁免保留组杀——故障定位在引擎级而非 run 级，本无 run 级目标。排障姿势见 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) §21。
 
+### ADR-0073 workflow 域四支柱平移与 schema 通道终态（2026-09-21）
+workflow/subagent 域对 pi 边界四支柱（ADR-0064）的同构落地与 schema 传输终态：① **确认式送达平移**——注册操作的终局通知必达，workflow run 成功/失败/取消一律出终局通知（持久账本 + 幂等键，C-ext-19 在 workflow 域的细化）；② **生效回执平移**——schema 强制武装回执：`armed` 事件是引擎自查断言之外的独立信号源（监控信号不与施控同源），宿主等待窗内未收到即 fail-fast；仅 native 引擎、仅 schema 任务上报，emulated 引擎恒不上报（契约义务权威源 [engine-development-guide](../extensions/subagents/engine-development-guide.md) §6 `armed` 行）；③ **契约显式化**——schema 跨进程只经 wire `task.schema` 单字段传输（env 预编码形态 `schemaEnv` 已退役，env 由引擎宿主从 task.schema 派生，resolver 产出侧负断言锁防回流）；扩展加载显式化（`ctx.extensionPaths` 白名单收窄落壳侧 pi-host，argv 镜像机制退役）。**schema 通道终态**：native schema 链保留直传（宿主对 parsedOutput 不做二次校验）、emulated 仿真为退出通道，由 `schemaEnforcement` 能力位声明分流。登记 C-ext-24 / C-ext-25 / C-ext-26。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）

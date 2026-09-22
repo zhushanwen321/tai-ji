@@ -174,14 +174,15 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | | `task: AgentCallOpts` | 必填 | 任务声明引擎面子集（下表） |
 | | `ctx: RunContextParams` | 必填 | 运行上下文（下表） |
 | | `resume?: RunResumeParams` | 可选 | **唯一会话形态键**（:110-113）——`recordId`（core 预建 record 关联键，引擎据此回填 handle.sessionRef 与 childSpawned/state 的 record 键）+ `resume?: ResumeAnchor`（冷续锚点；缺省 = 新 session）。additive 可选：旧引擎忽略未知字段，undefined 不上 wire |
-| `RunContextParams`（:63-91） | `cwd?` | 可选 | worktree 隔离时 = worktree 路径；缺省引擎回退自身进程 cwd |
+| `RunContextParams`（:63-97） | `cwd?` | 可选 | worktree 隔离时 = worktree 路径；缺省引擎回退自身进程 cwd |
 | | `model?` | 可选 | 请求模型 ref（未传 = 引擎缺省模型） |
-| | `schemaEnv?` | 可选 | schema 的 env 注入形态（降级通道）——**引擎自选消费**：pi 消费（`PI_WORKFLOW_SCHEMA`）、zcode 不消费只读 `task.schema`（引擎中立原则：resolver 产出双通道，设计 4 裁决；其 schemaEnforcement 升级的**武装回执部分已实施**——见 §6 `armed` 事件与宿主等待窗 fail-fast） |
+| | `schemaEnv?` | 已退役（H1） | wire 不携带——env 由 pi 引擎从 wire `task.schema` 派生注入孙进程（`spawn-args.ts` `applySchemaEnvToChildEnv`），resolver 产出侧负断言锁防回流；schemaEnforcement 升级的**武装回执部分已实施**——见 §6 `armed` 事件与宿主等待窗 fail-fast |
 | | `ctxModel?` / `engineFallback?` / `streamMode?` | 可选 | ctx 模型 ref；fallback 留痕：宿主在 ctx 传入 `{from, reason}` 种子，引擎回填进 outcome.engineFallback；事件粒度请求（按 `capabilities.eventGranularity` 实际能力执行） |
 | | `sessionRootId?` | 可选 | **relay 身份键权威源**——引擎据此重写子进程 relay 归属 env（SESSION_ID/RECORD_ID），不靠 env 继承（[architecture.md](architecture.md) §3） |
 | | `sessionDir?` | 可选 | 权威 subagent session 目录（宿主以 `getSubagentSessionDir` 推导，引擎不自推导；缺省走引擎内 legacy fallback） |
+| | `extensionPaths?` | 可选 | 孙进程显式加载的扩展路径集——宿主经 HostServices 端口现取上 wire，pi 引擎逐项拼 `--extension` argv（随 `--no-extensions` 禁 settings 清单 discovery）；undefined/空 = 不拼任何 `--extension`；per-host 常量故落 ctx 而非 task |
 
-`AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 23 字段——SDK 侧字段裁决注写的「22」已滞后——其中 model/schemaEnv/cwd 改挂 ctx 不双写，`engineFallback` 本就是 ctx 独有字段、从不在任务面，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
+`AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 23 字段——SDK 侧字段裁决注写的「22」已滞后——其中 model/cwd 改挂 ctx 不双写，`engineFallback` 本就是 ctx 独有字段、从不在任务面，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
 
 **resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, journalPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
 

@@ -42,8 +42,8 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 /**
  * run 终局形态词表（三态）。
  *
- * 与 DoneReason（completed/failed/aborted/budget_limited/time_limited，六因
- * 单维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness
+ * 与 DoneReason（completed/failed/aborted/invalid_args/budget_limited/
+ * time_limited，六因单维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness
  * 系统层）——脚本判定失败（review-failure）= outcome:completed + 脚本返回失败
  * 结论（业务层），两者处置路径不同（前者人工聚合报告，后者修环境重跑），必须
  * 分维度表达。aborted 在本词表命名为 cancelled（对齐 D5 词表；DoneReason 存量
@@ -214,7 +214,12 @@ export interface AskDispatchedEvent extends AskIdentity, EventEnvelope {
   type: "ask-dispatched";
 }
 
-/** `ask-executing`——引擎已开始执行该次尝试（派发 → 执行的分界帧）。 */
+/**
+ * `ask-executing`——引擎已开始执行该次尝试（派发 → 执行的分界帧）。
+ *
+ * 预留成员：现役链路无生产写入方（dispatched 帧已承载 ask 起点语义），词表/
+ * 转移表/投影消费设施为分界帧预留。
+ */
 export interface AskExecutingEvent extends AskIdentity, EventEnvelope {
   type: "ask-executing";
 }
@@ -291,8 +296,9 @@ export type WorkflowRunEvent =
 /**
  * run 事件 journal 的接口形态（append / scan）。
  *
- * 单写者约束（D5）：append 的唯一合法调用方 = core 进程 workflow-dispatch
- * （宿主侧唯一编排点）——引擎侧事件经既有 run 事件通道上报后由写者落账，
+ * 单写者约束（D5）：append 的唯一合法调用方 = worker-message-pump
+ * （dispatchRunTrigger 唯一投递入口 + appendTransition 单写点——journal 单写者
+ * 纪律的物理载体）——引擎侧事件经既有 run 事件通道上报后由写者落账，
  * 引擎不直接写 journal。类型层无法约束调用方，该约束由实装与守卫共同保证。
  */
 export interface RunEventJournal {
@@ -456,8 +462,8 @@ export interface TransitionRule {
  * journal fold 重放需要——fold 只见 journal 事件，控制事件不在流中）、
  * dispatched × cancel-requested（脚本预备段可取消）、dispatched/settling ×
  * watchdog-fired（kill 目标进程树在这两态仍存活）。interrupted 的恢复转移
- * （重跑/接管）属 D9-2 后续单元裁决，本期不铺——需要时按「先改设计 D5 表
- * 再补表行与穷尽单测」的流程增补。
+ * （重跑/接管）属 D9-1（注册表单元，interrupted 待恢复态归属）后续单元裁决，
+ * 本期不铺——需要时按「先改设计 D5 表再补表行与穷尽单测」的流程增补。
  */
 export const RUN_TRANSITIONS: readonly TransitionRule[] = [
   // ── created：创建落账前 ──

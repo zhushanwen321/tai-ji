@@ -160,7 +160,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 ```
 
 引擎与 core **同进程、同依赖树、同版本**；引擎通过 `EnginePort` 被调用，
-通过 `RunContext` 回调（onEvent / onHandleReady / onChildSpawned / stream / schemaEnv / ctxModel）
+通过 `RunContext` 回调（onEvent / onHandleReady / onChildSpawned / stream / ctxModel）
 与宿主交互（[池抽象降级 2026-09-13] onPoolResolved 与 RunContext.poolKey 已删——两引擎 poolKey 恒 `'shared'`，journal 落盘路径构造即终值）。
 
 ### 2.2 问题清单（每条都指向「分发形态」而非「抽象设计」）
@@ -281,7 +281,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 |------|------|------|------|
 | `initialize` | core→引擎 | 握手 | `{protocolVersion, hostInfo:{name,version,dataRoot}, engineConfig}` → `{protocolVersion, engineId, engineVersion, adapterVersion, capabilities, models?}`；**应答仅作诊断**（与 manifest 不一致 → warn 留痕，不参与判据，见下「同步成员清单」）；**`engineConfig` = L3 显式配置的 `engines.<id>.config`（`Record<string,string>`，缺省 `{}`）**，作为引擎自身配置入口透传（不放凭据）；版本越界 → `engine_protocol_mismatch`；能力位与 manifest 不符 → 按方向处理（见下「能力位」段） |
 | `probe` | core→引擎 | `probe` | `{force?}` → `ProbeReport` |
-| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, schemaEnv?, ctxModel?, engineFallback?, streamMode?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
+| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, ctxModel?, engineFallback?, streamMode?, sessionRootId?, sessionDir?, extensionPaths?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
 | `cancel` | core→引擎 | AbortSignal | `{runId, reason}`；引擎须在 3s 内收敛终态；超时 core 走杀链 |
 | `interact` | core→引擎 | `interact` | `{handle, action}` → `InteractResult` |
 | `read` | core→引擎 | `read` | `{handle, dataDir}` → `SessionView`（**`dataDir` 必填**：存量池时代相对 `dbPath` 需要它） |
@@ -306,7 +306,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `stream` | `host/streamDelta` | UI 实时刷新丢失 |
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
-| `ctxModel` / `schemaEnv` / `engineFallback` | `run.params.ctx` | model 兜底/结构化输出降级 |
+| `ctxModel` / `engineFallback` | `run.params.ctx` | model 兜底 / fallback 留痕丢失 |
+| `extensionPaths` | `run.params.ctx`（宿主 HostServices 端口注入；additive 可选，undefined 不上 wire） | 孙进程显式扩展加载缺失——pi 引擎不拼 `--extension` argv（undefined/空 = 不拼） |
 | `cwd` | `run.params.ctx.cwd`（有值才上 wire；server additive 还原进 `task.cwd`） | worktree 隔离失效——core 的 `taskSpecWithModel` 把 `WorktreeHandle.path` 合流进 cwd，引擎以 `task.cwd ?? process.cwd()` 决定子进程 spawn cwd；缺省不上 wire = 引擎回退自身进程 cwd（与无 worktree 任务现状一致） |
 
 **同步成员清单（`EnginePort` 的四个同步面，逐条给源——协议化后无同步源即锁死）**：

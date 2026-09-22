@@ -4,7 +4,7 @@
 // subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
 // gate / D7 成功收口 / adopt 豁免双点）。
 //
-// 锁六组面：
+// 锁以下组面：
 //   1. 注册面：record 带 origin:"workflow" + parentRunId；record 级
 //      pending:register/unregister 配对（D5：record 级照旧）。
 //   2. 池顺序（D3）：路由/预检失败先于池 acquire——零池占用 + 同步抛错 + 零孤儿 record。

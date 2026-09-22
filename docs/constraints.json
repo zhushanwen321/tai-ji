@@ -2846,6 +2846,74 @@
           "agent": "review-business-logic"
         }
       ]
+    },
+    {
+      "id": "C-ext-24",
+      "summary": "workflow 派发模型解析全路径形态：裸名（无路径分隔符的模型标识）不解析、解析失败为期望行为（同步拒单并列出清单，零 run 创建零 spawn），报错附全路径用法指引；pi 路由经 resolveModel→assertCanonicalModelRef 前置拒单（D4 终态决策，workflow-architecture-redesign）",
+      "scope": [
+        "extensions/universal/subagent-workflow/**",
+        "packages/subagent-core/src/execution/service/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "scripts/check-model-references.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-25",
+      "summary": "schema 跨进程只经 wire task.schema 单字段传输：env 预编码形态 schemaEnv 已退役（H1），env 由引擎宿主从 task.schema 派生（pi spawn-args 逐项构造）；resolver 产出侧负断言锁防回流（agent-opts-resolver-schema-prompt.test.ts「schemaEnv 键重现即回归」）；native 直传/emulated 仿真由 schemaEnforcement 能力位分流（D1 终态决策）",
+      "scope": [
+        "packages/subagent-core/src/execution/assembly/**",
+        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/pi-subagent-cli/src/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api",
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-26",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0072）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "scope": [
+        "extensions/universal/subagent-workflow/**",
+        "packages/subagent-core/src/orchestration/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21",
+        "adr/decisions.md#adr-0072-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api",
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
     }
   ]
 }
