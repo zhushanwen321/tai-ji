@@ -289,9 +289,9 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见）。
 
-**判定**：当前常态命中面 = plain dialog 提交面（/permission 命令族——pi select API 无元数据通道，提交后 pi 不起 turn，pendingSend 桥接等不到 message_start，由 30s timeout 设计内清除并留 warn；D4b 另案登记，ADR-0073）。30s 内自愈 = 正常；超 30s 不恢复或高频伴随其他异常，才升级排查。**scheduler 表单已不在命中面**（`expectTurn: false` 声明 → 提交即时收尾真机 91ms/48ms 两轮实测，ADR-0073）；ask-user/plan 表单提交后 turn 正常续接（桥接路径）。
+**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收口条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
 
-**排障**：确认提交源类型——plain dialog 命令（band 弹窗）提交命中 30s 属预期；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常：pi 僵死/协议漂移/极端延迟），按 pi tee 日志与 ping 信号归因；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）。
+**排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 
 ### 21. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
 
