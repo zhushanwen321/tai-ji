@@ -673,14 +673,18 @@ describe("renameSessionExtension", () => {
 		for (const lit of debugLiterals) {
 			expect(warnText(warnSpy)).not.toContain(lit);
 		}
-		// 「零调用」的精确口径：剔除既有 A1 日志（model not available / call failed，
-		// 非本轮 debug 契约、本用例数据 ok:true 不触发这两类）后，其余 warn 调用必须为 0。
+		// 「零调用」的精确口径：剔除常开 A1 日志（model not available / call failed /
+		// title empty——三者为设计内的无条件 warn，非 debug 契约；本用例组 2 空内容
+		// 触发 title empty 属预期留痕）后，其余 warn 调用必须为 0。
 		// 成功路径的 rename with model 已改为 debug-only，debug 关闭时同样不得出现。
 		const nonA1Calls = warnLines(warnSpy).filter(
 			(l) =>
 				!l.includes("model not available") &&
-				!l.includes("rename LLM call failed"),
+				!l.includes("rename LLM call failed") &&
+				!l.includes("title empty after clean"),
 		);
+		// 组 2 的空内容路径恰好触发一次 title empty warn（常开留痕的存在性锚点）
+		expect(warnLines(warnSpy).filter((l) => l.includes("title empty after clean"))).toHaveLength(1);
 		expect(nonA1Calls).toHaveLength(0);
 	});
 });
