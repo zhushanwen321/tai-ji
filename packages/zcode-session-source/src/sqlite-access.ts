@@ -227,7 +227,16 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
       for (const row of rows) {
         if (typeof row !== 'object' || row === null) continue
         const r = row as Record<string, unknown>
-        if (typeof r.sid === 'string' && typeof r.bytes === 'number') sizes.set(r.sid, r.bytes)
+        if (typeof r.sid !== 'string') continue
+        // RT-5#10：bytes 非 number（SUM 对全 NULL part.data 的组返回 NULL 等）不静默
+        // 丢弃——warn 留痕；消费端以 null 语义呈现「大小未知」，不回填 0 B 假数据
+        if (typeof r.bytes !== 'number') {
+          console.warn(
+            `[zcode-session-source] candidatesByteSize 行 bytes 非 number（实际 ${typeof r.bytes}），该会话大小未知：sessionId=${r.sid}`,
+          )
+          continue
+        }
+        sizes.set(r.sid, r.bytes)
       }
       return sizes
     },

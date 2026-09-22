@@ -163,7 +163,7 @@ export class ZcodeImportSource implements SessionImportSource {
       cwd: row.directory,
       sourcePath: dbPath,
       lastModified: row.timeUpdated,
-      size: 0, // 占位，返回页确定后统一回填（§3.8：字节聚合仅对返回页逐条）
+      size: null, // 占位，返回页确定后统一回填（§3.8：字节聚合仅对返回页逐条；不可解保持 null 不填 0）
       dirLabel: basename(row.directory),
       alreadyImported: isAlreadyImported(row),
       cwdExists: existsSync(row.directory),
@@ -177,10 +177,11 @@ export class ZcodeImportSource implements SessionImportSource {
     const limit = request.limit && request.limit > 0 ? request.limit : DEFAULT_CANDIDATE_LIMIT
     const items = filtered.slice(0, limit)
 
-    // size 真字节口径（§3.7）：仅对返回页（≤limit）逐条聚合，无 part 的会话记 0
+    // size 真字节口径（§3.7）：仅对返回页（≤limit）逐条聚合，无 part 的会话大小未知
+    //（null，不填 0——0 是「0 字节」的实测语义，RT-5#10）
     const byteSizes = await this.byteSizesOf(dbPath, items.map((i) => i.sessionId))
     for (const item of items) {
-      item.size = byteSizes.get(item.sessionId) ?? 0
+      item.size = byteSizes.get(item.sessionId) ?? null
     }
 
     // dirs：按 dirLabel 聚合自过滤前全集（chip 下拉，与搜索是两个独立操作——pi 源同构）
@@ -251,7 +252,17 @@ export class ZcodeImportSource implements SessionImportSource {
     } catch (e) {
       throw new ImportServiceError('import_invalid_session', toErrorMessage(e))
     }
-    const timestamp = new Date(row.timeCreated).toISOString()
+    // RT-5#8：timeCreated 不可解（zcode schema 漂移产出的 null/越界值）不让 RangeError
+    // 从 ISO 化裸抛，也不产出 1970 假时间戳——单条 B 类错误（import_invalid_session），
+    // 其余会话导入不受影响；converter 侧据此恒收到可解析的 ISO header（见其 RT-5#8 注释）
+    const createdMs = new Date(row.timeCreated).getTime()
+    if (!Number.isFinite(createdMs)) {
+      throw new ImportServiceError(
+        'import_invalid_session',
+        `该会话 timeCreated 字段无法解析（sessionId=${sessionId}，timeCreated=${JSON.stringify(row.timeCreated)}），已跳过该条，请升级太极后重试`,
+      )
+    }
+    const timestamp = new Date(createdMs).toISOString()
     const header = { id: normalizedId, timestamp, cwd: row.directory }
 
     // artifact 级降级明细（转换期 push，编排层 write 后读取聚合 warning）

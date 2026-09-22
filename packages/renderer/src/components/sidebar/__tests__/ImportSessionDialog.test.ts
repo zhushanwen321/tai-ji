@@ -9,7 +9,8 @@
  *  4. 已导入候选项禁用：徽标 + 行按钮 disabled + 选中后底部导入仍不可用
  *  5. 选目标 project：下拉默认当前活跃 project、可改、导入 payload 跟随
  *  6. 导入成功 emit('imported') + 结果 toast（u7：info 成功 / warning 预警合并——
- *     sidecar_failed / conversion_degraded 与死 cwd 追加同一条消息；显示名回退短 ID）
+ *     sidecar_failed / conversion_degraded（droppedCount 计数汇总）/ conversion_unclassified
+ *     （计数 + 首条 sample）与死 cwd 追加同一条消息；显示名回退短 ID）
  *  7. 错误内联恢复指引：error envelope code → i18n 文案（含恢复动作）可见，不弹系统对话框；
  *     zcode 源对特化码（未装库/会话不在库/目标冲突）走 errorsZcode 文案
  *  8. cwdExists=false 标注：「原目录不存在…」降级提示可见
@@ -1166,26 +1167,81 @@ describe('ImportSessionDialog（U5 验收）', () => {
       expect(wrapper!.emitted('update:open')).toBeUndefined()
     })
 
-    it('conversion_degraded warning：成功 toast 追加「部分内容未随导入迁移」知情提示（单条 warning）', async () => {
+    it('conversion_degraded warning：成功 toast 追加 droppedCount 计数汇总「已跳过 N 条」（单条 warning）', async () => {
       apiMocks.importSession.mockResolvedValueOnce({
         sessionId: '9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88',
         targetPath: '/mock/taiji/sessions/zcode-demo/9d5b3a1f.jsonl',
         warning: 'conversion_degraded',
+        degradationSummary: { droppedCount: 36, unclassified: null },
       })
       await mountDialogAtSource('zcode')
 
       await importViaRowButton(0)
 
-      // 使用者：一条 warning toast 同时含成功文案与知情降级提示
+      // 使用者：一条 warning toast 同时含成功文案与 L1/L2 计数汇总行
       expect(toastMocks.warning).toHaveBeenCalledTimes(1)
       const warned = toastMocks.warning.mock.calls[0][0] as string
       expect(warned).toContain('修复构建脚本')
-      expect(warned).toContain(zhCN.toastWarnDegraded)
+      expect(warned).toContain(zhCN.toastWarnDropped.replace('{count}', '36'))
       expect(toastMocks.info).not.toHaveBeenCalled()
       expect(toastMocks.error).not.toHaveBeenCalled()
-      // 构建者：emit payload 携带 warning
+      // 构建者：emit payload 携带 warning + degradationSummary（消费方可选消费）
       const imported = wrapper!.emitted('imported')!
-      expect(imported[0][0]).toMatchObject({ warning: 'conversion_degraded' })
+      expect(imported[0][0]).toMatchObject({
+        warning: 'conversion_degraded',
+        degradationSummary: { droppedCount: 36, unclassified: null },
+      })
+    })
+
+    it('conversion_unclassified warning：成功 toast 追加「N 条无法分类」计数 + 首条 sample（messageId + preview），单条 warning', async () => {
+      apiMocks.importSession.mockResolvedValueOnce({
+        sessionId: '9d5b3a1f-2e4c-4b8d-a6f0-7c1d9e2b4a88',
+        targetPath: '/mock/taiji/sessions/zcode-demo/9d5b3a1f.jsonl',
+        warning: 'conversion_unclassified',
+        degradationSummary: {
+          droppedCount: 0,
+          unclassified: {
+            count: 2,
+            firstSample: {
+              messageId: 'msg_unclassified_01',
+              preview: '未来版本引入的未知 kind 消息原文截断示例',
+            },
+          },
+        },
+      })
+      await mountDialogAtSource('zcode')
+
+      await importViaRowButton(0)
+
+      // 使用者：一条 warning toast 同时含成功文案、L4 计数行与首条定位样本（A3 数据源 =
+      // degradationSummary.unclassified——计数 + sample messageId 均可见，供升级重导/反馈）
+      expect(toastMocks.warning).toHaveBeenCalledTimes(1)
+      const warned = toastMocks.warning.mock.calls[0][0] as string
+      expect(warned).toContain('修复构建脚本')
+      expect(warned).toContain(zhCN.toastWarnUnclassified.replace('{count}', '2'))
+      expect(warned).toContain(
+        zhCN.toastUnclassifiedSample
+          .replace('{messageId}', 'msg_unclassified_01')
+          .replace('{preview}', '未来版本引入的未知 kind 消息原文截断示例'),
+      )
+      expect(warned.indexOf('可继续对话')).toBeLessThan(warned.indexOf('msg_unclassified_01'))
+      expect(toastMocks.info).not.toHaveBeenCalled()
+      expect(toastMocks.error).not.toHaveBeenCalled()
+      // 构建者：emit payload 携带 warning + degradationSummary
+      const imported = wrapper!.emitted('imported')!
+      expect(imported[0][0]).toMatchObject({
+        warning: 'conversion_unclassified',
+        degradationSummary: {
+          droppedCount: 0,
+          unclassified: {
+            count: 2,
+            firstSample: {
+              messageId: 'msg_unclassified_01',
+              preview: '未来版本引入的未知 kind 消息原文截断示例',
+            },
+          },
+        },
+      })
     })
   })
 

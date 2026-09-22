@@ -4,7 +4,9 @@
  * 锁定行为：
  * - 编排层 source 路由：缺省不传 source = 显式 'pi'（向后兼容，存量调用路径行为不变）；
  *   注册表缺项防御（import_source_missing）；degradations 非空 → warning
- *   conversion_degraded（stub source 注入）；sidecar_failed 优先级 + degradations 日志留痕
+ *   conversion_degraded + degradationSummary（stub source 注入，D4 结构化降级）；
+ *   warning 优先序 sidecar_failed > conversion_unclassified > conversion_degraded +
+ *   degradations 日志留痕
  * - listCandidates（pi source 语义，零回归）：字段面 / lastModified 降序 / total（过滤前）/
  *   dirs 聚合 / cwdExists 标注 / alreadyImported 打标（导入后立即翻转）/ query 匹配语义
  *   （name∪sessionId∪短ID∪sourcePath∪dirLabel，case-insensitive）/ rootDir 缺省 =
@@ -560,6 +562,8 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     expect(reply.sessionId).toBe('stub-deg-00001')
     expect(reply.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/stub-deg-cwd'), 'stub-deg.jsonl'))
     expect(existsSync(reply.targetPath)).toBe(true) // 落地成功（降级是知情提示，非失败）
+    // 降级摘要（§7.4）：L2 计 1 进 droppedCount；无 unclassified → null
+    expect(reply.degradationSummary).toEqual({ droppedCount: 1, unclassified: null })
     // degradations 日志留痕（D6）：只断言存在性——sidecar 等 best-effort 路径的 warn 与
     // 本日志共用 console 通道，次数/顺序不是契约
     expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
@@ -592,6 +596,103 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     // conversion_degraded（知情提示，无需动作）；degradations 明细经日志通道不丢失
     //（sidecar 写失败的 warn 同走 console，只断言 conversion degraded 调用存在）
     expect(reply.warning).toBe('sidecar_failed')
+    // summary 仅 warning 含 conversion_* 时携带（§7.4）：sidecar 胜出轮降级计数不入 wire
+    expect(reply.degradationSummary).toBeUndefined()
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('unclassified 与 conversion_degraded 并存 → conversion_unclassified 胜出（优先序），summary 按档聚合', async () => {
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-unc-00001', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/stub-unc-cwd' },
+        fileName: 'stub-unc.jsonl',
+        write: async (tmpPath) => {
+          writeFileSync(tmpPath, `${JSON.stringify({ type: 'session', version: 1, id: 'stub-unc-00001', cwd: '/tmp/stub-unc-cwd', timestamp: '2026-01-01T00:00:00.000Z' })}\n`)
+        },
+        degradations: [
+          { code: 'dropped_redundant', count: 2 },
+          { code: 'dropped_transient', count: 3 },
+          { code: 'truncated_output', count: 1 },
+          { code: 'compaction_unlinked', count: 1 },
+          { code: 'unclassified', count: 4, sample: { messageId: 'm-unk', preview: '未知消息原文前 80 字' } },
+          { code: 'unclassified', count: 1, sample: { messageId: 'm-unk-2', preview: '第二条' } },
+        ],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const reply = await svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })
+    // 优先序（§7.4）：unclassified（L4 未知需上报/重导）> conversion_degraded（知情提示）
+    expect(reply.warning).toBe('conversion_unclassified')
+    // summary 聚合：droppedCount = L1+L2（2+3=5）；unclassified.count 跨记录求和（4+1=5）、
+    // firstSample = 首条 unclassified 的 sample；truncated_output / compaction_unlinked（L3）
+    // 不进 summary（toast 无对应分句，§7.4 不设 truncatedCount）
+    expect(reply.degradationSummary).toEqual({
+      droppedCount: 5,
+      unclassified: { count: 5, firstSample: { messageId: 'm-unk', preview: '未知消息原文前 80 字' } },
+    })
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('unclassified 与 sidecar_failed 并存 → sidecar_failed 胜出（需动作警示最高优先），summary 不携带', async () => {
+    const cwd = '/tmp/stub-unc-sidecar-cwd'
+    const targetPath = join(getSessionsDir(), encodeCwd(cwd), 'stub-unc-sc.jsonl')
+    // 预置 sidecar 路径为目录：readback 不符 → sidecar_failed（同 sidecar 用例注入手法）
+    mkdirSync(join(getSessionsDir(), encodeCwd(cwd)), { recursive: true })
+    mkdirSync(`${targetPath}.project.json`)
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-unsc-0001', timestamp: '2026-01-01T00:00:00.000Z', cwd },
+        fileName: 'stub-unc-sc.jsonl',
+        write: async (tmpPath) => {
+          writeFileSync(tmpPath, 'line\n')
+        },
+        degradations: [{ code: 'unclassified', count: 2, sample: { messageId: 'm-u', preview: '未知' } }],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const reply = await svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })
+    // 优先序顶端：sidecar_failed 需用户手动归类（动作不可延迟）；代价 = 该轮 L4 计数
+    // 不进 wire（summary 仅 conversion_* 携带），仅 runtime 日志可见（§7.4 已接受）
+    expect(reply.warning).toBe('sidecar_failed')
+    expect(reply.degradationSummary).toBeUndefined()
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('仅 L3 降级（truncated_output/compaction_unlinked）→ conversion_degraded，summary 两字段空档（L3 不进 summary）', async () => {
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'stub-l3-000001', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/stub-l3-cwd' },
+        fileName: 'stub-l3.jsonl',
+        write: async (tmpPath) => {
+          writeFileSync(tmpPath, `${JSON.stringify({ type: 'session', version: 1, id: 'stub-l3-000001', cwd: '/tmp/stub-l3-cwd', timestamp: '2026-01-01T00:00:00.000Z' })}\n`)
+        },
+        degradations: [
+          { code: 'truncated_output', count: 2 },
+          { code: 'compaction_unlinked', count: 1 },
+        ],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const reply = await svc.importSession({ sourcePath: '/stub/unused', projectId: 'proj-1', source: 'pi' })
+    // L3 保真损失族仍属知情降级（conversion_degraded），但 droppedCount 只聚合 L1+L2、
+    // unclassified 无则 null——L3 显形走 runtime 日志明细通道（§7.4）
+    expect(reply.warning).toBe('conversion_degraded')
+    expect(reply.degradationSummary).toEqual({ droppedCount: 0, unclassified: null })
     expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('conversion degraded'))).toBe(true)
     warnSpy.mockRestore()
   })

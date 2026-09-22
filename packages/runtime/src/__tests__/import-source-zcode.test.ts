@@ -9,7 +9,7 @@
  * - query 匹配（§3.7 zcode 行为）：name ∪ sessionId ∪ directory ∪ dirLabel
  *   case-insensitive includes；sourcePath（db 路径结构占位）不参与匹配
  * - size 真字节口径（§3.7）：SUM(length(CAST(data AS BLOB)))——CJK 内容按 UTF-8 字节
- *   而非字符数（TEXT 直接 length() 低估）；无 part 会话记 0
+ *   而非字符数（TEXT 直接 length() 低估）；无 part 会话大小未知（null ≠ 0 假数据，RT-5#10）
  * - alreadyImported 归一化域（§3.7）：扫描集（header.id 域）命中判定的输入是 T1 归一化
  *   id 而非原始 sess_ 形态——预置归一化形态 id 命中、预置原始形态 id 不命中（失配对照）
  * - normalize（§3.4 T1 三步骤 + 后置条件 fail-fast）：剥前缀一次/无前缀/_→-/空串/
@@ -258,7 +258,7 @@ describe('ZcodeImportSource.listCandidates', () => {
 
     const side = reply.items[1]
     expect(side.cwdExists).toBe(true) // existingDir 真实存在
-    expect(side.size).toBe(0) // 无 part 会话记 0
+    expect(side.size).toBe(null) // 无 part 会话大小未知（null ≠ 0 假数据，RT-5#10）
     const oldest = reply.items[3]
     expect(oldest.cwd).toBe('/tmp/zc-proj-alpha')
     expect(oldest.cwdExists).toBe(false)
@@ -269,6 +269,41 @@ describe('ZcodeImportSource.listCandidates', () => {
       { label: basename(existingDir), count: 2 },
       { label: 'zc-proj-alpha', count: 2 },
     ])
+  })
+
+  it('RT-5#10：bytes 非 number（part.data 全 NULL 的组 SUM=NULL）→ warn 留痕 + size 保持 null（不显示 0 B）', async () => {
+    // 手搓可空 data 列的最小库（fixture builder 的 part.data NOT NULL，造不出 SUM=NULL）
+    const nullDataDb = join(fixturesRoot, 'zc-null-bytes.sqlite')
+    const db = new DatabaseSync(nullDataDb)
+    try {
+      db.exec('BEGIN')
+      db.exec(
+        'CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT NOT NULL, ' +
+          "task_type TEXT NOT NULL DEFAULT 'interactive', time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+      )
+      db.prepare('INSERT INTO session (id, directory, title, task_type, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('sess_0198nul0-0000-0000-0000-000000000009', '/tmp/zc-null-cwd', 'Null bytes', 'interactive', 1000, 2000)
+      db.exec('CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, sequence INTEGER, data TEXT)')
+      db.prepare('INSERT INTO part (id, message_id, session_id, sequence, data) VALUES (?, ?, ?, ?, ?)')
+        .run('p-null', 'm-1', 'sess_0198nul0-0000-0000-0000-000000000009', 0, null)
+      db.exec('CREATE TABLE schema_migration (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, app_version TEXT, time_applied INTEGER NOT NULL)')
+      db.prepare('INSERT INTO schema_migration (id, checksum, app_version, time_applied) VALUES (?, ?, ?, ?)').run('0001_seed', 'x', '0.16.5', 1)
+      db.exec('COMMIT')
+    } finally {
+      db.close()
+    }
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const reply = await makeSource(nullDataDb).listCandidates({})
+      expect(reply.items).toHaveLength(1)
+      expect(reply.items[0]!.size).toBe(null) // null = 大小未知，非 0 B 假数据
+      const warnMsg = warnSpy.mock.calls.map((c) => String(c[0])).find((m) => m.includes('bytes 非 number'))
+      expect(warnMsg).toBeDefined()
+      expect(warnMsg).toContain('sess_0198nul0-0000-0000-0000-000000000009')
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('query 匹配：name / sessionId / directory / dirLabel，case-insensitive；sourcePath（db 路径占位）不参与', async () => {
@@ -457,6 +492,22 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
     )
     await expect(catchCode(() => makeSource(dbPath2).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_', dbPath: dbPath2 })))
       .resolves.toBe('import_invalid_session')
+  })
+
+  it('RT-5#8：timeCreated 为 finite 但超出 Date 范围（越界大数）→ import_invalid_session 单条失败（不产 1970 / 不裸抛 RangeError）', async () => {
+    // asNumber 只拦非 finite；1e300 finite 但 getTime()=NaN——此前 new Date(NaN).toISOString()
+    // 裸抛 RangeError，现在收口为带字段名的 B 类错误，其余会话导入不受影响
+    const dbPath3 = join(fixturesRoot, 'zc-huge-ts.sqlite')
+    buildFixtureDb(
+      dbPath3,
+      [{ id: 'sess_0198huge0-0000-0000-0000-00000000000b', title: 'Huge ts', directory: '/tmp/zc-huge-cwd', taskType: 'interactive', timeCreated: 1e300, timeUpdated: 1000 }],
+      [],
+    )
+    const source = makeSource(dbPath3)
+    const code = await catchCode(() =>
+      source.prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_0198huge0-0000-0000-0000-00000000000b', dbPath: dbPath3 }),
+    )
+    expect(code).toBe('import_invalid_session')
   })
 })
 

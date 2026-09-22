@@ -46,12 +46,17 @@ export type ImportSourceKind = 'pi' | 'zcode'
 
 /**
  * 导入成功 reply 的可选警示字面量（走成功通道而非 error envelope，r4-INFO：
- * 文件已落地不回滚，renderer 降级 toast）：
+ * 文件已落地不回滚，renderer 降级 toast）。多码并存时单字段取值优先序：
+ * `sidecar_failed` > `conversion_unclassified` > `conversion_degraded`
+ * （需用户动作者优先显形，zcode-import-message-projection 设计 §7.4）：
  * - `sidecar_failed`：sidecar 写失败（readback 不符），toast 引导手动归类。
  * - `conversion_degraded`：源转换存在知情降级（zcode→pi 映射的降级决策非空，
  *   如部分 part 形态跳过），toast 知情提示，无需动作。
+ * - `conversion_unclassified`：存在超出闭集无法分类的 zcode 消息（已丢弃，L4），
+ *   toast 引导升级 taiji 后重导或向维护者反馈 sample——「没看懂需上报」与上面的
+ *   「搬不动的知情降级」用户动作不同，故分码显形（设计 §6-D4）。
  */
-export type ImportWarning = 'sidecar_failed' | 'conversion_degraded'
+export type ImportWarning = 'sidecar_failed' | 'conversion_degraded' | 'conversion_unclassified'
 
 /**
  * 结构化降级记录（zcode→pi 转换的信息损失按性质分档，D4 四档显形，
@@ -60,14 +65,13 @@ export type ImportWarning = 'sidecar_failed' | 'conversion_degraded'
  * - L1 冗余丢弃 → `dropped_redundant`
  * - L2 无语义丢弃 → `dropped_transient`
  * - L3 保真损失 → `truncated_output` / `compaction_unlinked`
- * - L4 未知/漂移 → `unclassified`（升 `conversion_unclassified` warning 码——该字面量
- *   随 runtime 导入链结构化接线登记进 ImportWarning，当前先承载类型定义）
+ * - L4 未知/漂移 → `unclassified`（同时升 `conversion_unclassified` warning 码）
  *
  * 与 `@zhushanwen/session-core` 的 `ImportDegradation` 结构等价（基座零依赖不反向
  * import shared，两侧字段逐一同步，消费点类型检查拦截漂移）。
  */
 export interface ImportDegradation {
-  /** 降级码（五值闭集，语义见接口块注释） */
+  /** 降级码（五值闭集，语义见各行） */
   code:
     | 'dropped_redundant'    // L1：内容已由 tool 通道保留的运行时注入（background_* / subagent_* 族），丢弃无损
     | 'dropped_transient'    // L2：无对话语义的瞬态/注入形态（todo 提醒 / system_reminder / timeline 等），非 L1/L3/L4 的丢弃类全量归入
@@ -93,11 +97,10 @@ export interface ImportDegradation {
 }
 
 /**
- * 降级摘要（`ImportReply.degradationSummary` 的载荷类型，toast 计数/sample 的最小
+ * 降级摘要（`ImportReply.degradationSummary` 的载荷，toast 计数/sample 的最小
  * 契约通道，设计 §7.4）：仅在 warning 含 conversion_* 时携带；全量明细（含 L3
  * 截断明细）走 runtime 日志不入 wire。不设 truncatedCount——L3（截断保留）在
- * toast 上无对应分句，避免契约面搭车无消费字段。字段随批 2 runtime 接线挂上
- * ImportReply，当前先承载类型定义。
+ * toast 上无对应分句，避免契约面搭车无消费字段。
  */
 export interface ImportDegradationSummary {
   /** L1+L2 聚合（dropped_redundant + dropped_transient 的 count 总和）——toast 汇总分句数据源 */
@@ -138,8 +141,11 @@ export interface ImportCandidate {
   sourcePath: string
   /** 文件 mtime（ms），列表排序键（降序） */
   lastModified: number
-  /** 文件大小（bytes） */
-  size: number
+  /**
+   * 文件大小（bytes）。null = 大小未知（RT-5#10：zcode 源 bytes 聚合不可解时不再以 0
+   * 伪造「0 B」假数据）；pi/外部文件源恒为 statSync 实测值。
+   */
+  size: number | null
   /** 所属子目录名（目录 chip 分组用，与 dirs[].label 对应） */
   dirLabel: string
   /** 已在太极扫描集（默认 TTL 读，允许秒级 stale；导入校验另走 force 双检） */
@@ -203,6 +209,12 @@ export interface ImportReply {
   targetPath: string
   /** 可选警示（字面量语义见 ImportWarning 块注释）：文件已落地不回滚，renderer 降级 toast */
   warning?: ImportWarning
+  /**
+   * 降级摘要（载荷见 ImportDegradationSummary）：仅 warning 含 conversion_* 时携带
+   * （sidecar_failed 优先胜出时不携带——该轮降级计数只走 runtime 日志，§7.4 已接受）；
+   * 全量明细走 runtime 日志不入 wire。
+   */
+  degradationSummary?: ImportDegradationSummary
 }
 
 /**
