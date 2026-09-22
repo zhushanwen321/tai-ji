@@ -271,6 +271,14 @@ export default {
     // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
     genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
+    // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
+    // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
+    // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
+    genStatsTtftTitle: 'First token latency (TTFT)',
+    genStatsTtftDay: 'Today p50 (this model)',
+    genStatsTtftD7: 'Last 7 days p50',
+    genStatsTtftD30: 'Last 30 days p50',
+    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (p50 median); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
   },
   sideDrawer: {
     title: 'Side drawer',

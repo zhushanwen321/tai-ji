@@ -94,6 +94,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
 | 视觉细节与动画 | 过渡动画、traffic light 布局数值 | 全体但纯视觉 |
+| 生成指标触发器（gen-stats） | composer 工具带速度 t/s · 缓存命中率 · TTFT 首字延迟三触发器 + 浮层 p50 聚合（`GenStatsTriggers` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
 | Mock 开发轨 | VITE_MOCK 拦截层 | 仅开发者 |
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。

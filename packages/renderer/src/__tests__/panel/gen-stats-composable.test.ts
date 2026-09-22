@@ -43,12 +43,13 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 
-/** 帧工厂：合法全量帧为基线，用例按需覆写 */
+/** 帧工厂：合法全量帧为基线（含 ttft，composer-genstats-ttft U4），用例按需覆写 */
 function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
   return {
     sessionId,
     speed: { current: 35, day: 28, d7: 22, d30: 19 },
     cacheRatio: { current: 91, day: 87 },
+    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
     model: 'm1',
     ...overrides,
   }
@@ -145,7 +146,7 @@ afterEach(() => {
 // ── 帧 handler（订阅 + model 校验兜底）──────────────────────
 
 describe('帧 handler：写入分区与 model 校验兜底', () => {
-  it('合法帧（model 与当前 modelId 匹配）→ 写入分区，current 反映帧内容', async () => {
+  it('合法帧（model 与当前 modelId 匹配）→ 写入分区，current 反映帧内容（含 ttft 透传，composer-genstats-ttft U4）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
@@ -156,6 +157,8 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.speed.current).toBe(35)
     expect(host.gen.current.value?.cacheRatio.current).toBe(91)
     expect(host.gen.current.value?.model).toBe('m1')
+    // useGenStats 零改动（帧本体直存分区）→ frame.ttft 随帧自动透传，null 编码不打折扣
+    expect(host.gen.current.value?.ttft).toEqual({ current: 820, day: 900, d7: 1100, d30: 1300 })
   })
 
   it('帧内 model 与当前 modelId 不匹配 → 丢弃（分区保持 null）', async () => {
