@@ -65,7 +65,8 @@
 //   - scene / description：弱错位待核（宿主消费为主，逐引擎核实 pi 侧是否消费再定）；
 //   - schemaEnv：待消亡——H1b 收口未完成（packages/subagent-core/src/execution/engine/
 //     client/remote-engine.ts:382 仍 `ctx.schemaEnv ?? task.schemaEnv` 双源，在飞不重复
-//     处理），收口后双写禁令的豁免随之摘除；
+//     处理）；wire 层禁令断言现状纯 never、无豁免（键集交集为空——AgentCallOpts 已
+//     单侧排除 schemaEnv），收口后仅回看断言注释（wire-field-locks.test.ts）；
 //   - steer：能力位无独立 wire 执行通道（判据 7 首个登记条目，只登记不设计）。
 // 重审触发条件（任一命中 → 提前清理裁决，不等 major bump）：遗留清单 >5 项，或任一
 // 错位引发实际派发事故。
