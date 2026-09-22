@@ -128,17 +128,68 @@ export interface Turn {
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
+ *
+ * 每个成员的 type 经 `EventName<"…">` 受词表约束（编译锁①，见下方词表节）。
  */
 export type AgentEvent =
-  | { type: "tool_start"; toolName: string; args?: unknown }
-  | { type: "tool_end"; toolName: string; args?: unknown; result?: ToolCallResult; isError?: boolean }
-  | { type: "text_delta"; delta: string }
-  | { type: "thinking_delta"; delta: string }
-  | { type: "turn_end"; summary?: string }
-  | { type: "message_end"; usage?: AgentUsage; error?: string }
-  | { type: "compaction" }
-  | { type: "activity" }
-  | { type: "error"; message: string };
+  | { type: EventName<"tool_start">; toolName: string; args?: unknown }
+  | { type: EventName<"tool_end">; toolName: string; args?: unknown; result?: ToolCallResult; isError?: boolean }
+  | { type: EventName<"text_delta">; delta: string }
+  | { type: EventName<"thinking_delta">; delta: string }
+  | { type: EventName<"turn_end">; summary?: string }
+  | { type: EventName<"message_end">; usage?: AgentUsage; error?: string }
+  | { type: EventName<"compaction"> }
+  | { type: EventName<"activity"> }
+  | { type: EventName<"error">; message: string };
+
+// ============================================================
+// 事件词表锁（AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES 同源互证）
+// ============================================================
+
+/**
+ * 事件类型词表（协议事件全集 9 种，运行时 SSOT）：schema 事件 `type.enum` 从本表
+ * 派生（schema.ts），测试取值遍历本表（protocol-schema.test.ts / contract-closure.test.ts）
+ * ——新增事件变体不再手写第三处。
+ *
+ * 每个成员必须带一行 `// noop-safe: <论证>`：未知成员宽容语义四行①（ADR-0071）的
+ * 逐变体登记——旧宿主 reducer 遇未知 event.type 走 default 分支零写入，标记后写
+ * 「本变体被丢弃时状态无损」的一行论证（no-op 安全性属运行时消费语义，不可静态
+ * 判定——守卫只查标记存在不查内容，落点 contract-closure.test.ts「noop-safe 标记守卫」）。
+ *
+ * 编译锁（漏改任一侧 typecheck 红，且错误指向漏点）：
+ *   ① union 侧——成员 type 必须经 `EventName<"x">` 取名（约束 = 本词表）：union 加
+ *      成员不登词表 → TS2344 直接落在漏改的成员行；
+ *   ② 词表侧——`satisfies readonly AgentEvent["type"][]`：词表加成员不加 union
+ *      → 错误直接落在词表漏改的成员行；
+ *   ③ 兜底——成员绕过 EventName 约束裸加字面量 → _EventVocabSyncLock 爆红。
+ * 新增事件变体 = 词表 + union 一处族两笔同改即全同步（schema enum 与测试断言自动
+ * 跟随），不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见文件头注）。
+ */
+export const AGENT_EVENT_TYPE_NAMES = [
+  "tool_start", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 tool 起始占位（显示降级），turn 结构不受损
+  "tool_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 result，turn 收口由 turn_end/message_end 承担
+  "text_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺正文增量，不产生半解析状态
+  "thinking_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺推理增量，不产生半解析状态
+  "turn_end", // noop-safe: 旧宿主 default 分支零写入——丢弃则该 turn 滞留进行态，journal 重放仍按序重建
+  "message_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 usage 聚合与闭合计量，已累积内容不回滚
+  "compaction", // noop-safe: 事件无载荷且现行 reducer 即直接 return——丢弃与处理零差异
+  "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
+  "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
+] as const satisfies readonly AgentEvent["type"][];
+
+/** 词表派生的事件名联合（编译锁②/③的词表侧源；schema enum 与测试取值同源）。 */
+export type AgentEventTypeName = (typeof AGENT_EVENT_TYPE_NAMES)[number];
+
+/**
+ * 词表约束的事件 type 字面量（编译锁①）：union 成员经 `EventName<"x">` 取名，
+ * 词表漏登时 typecheck 错误落在该成员行。类型恒等（解析为同一字面量），
+ * 结构与运行时语义零变化。
+ */
+type EventName<T extends AgentEventTypeName> = T;
+
+// 编译锁③（兜底）：union 成员绕过 EventName 约束裸加字面量 → 本断言赋值处爆红
+// （union ⊆ 词表 的精确落点由锁①承担，此处兜住绕过约束的裸写形态）。
+const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
 
 // ============================================================
 // handle / read 视图
