@@ -593,17 +593,24 @@ export class RuntimeServer implements IMessageBroker {
   }
 
   /**
-   * 摘除 session 的全部挂起 UI 请求并广播失效帧（P2-2 失效链单一出口）。
+   * 摘除 session 的全部挂起 UI 请求并推送失效帧（P2-2 失效链单一出口）。
    *
    * 非 respond 方式终结挂起（abort turn / 退出 plan / 回收 / session 销毁）时调用：
-   * 摘除 runtime pending 缓存 + 广播 extension:requestsInvalidated，renderer 移除本屏
-   * 对应审批条/表单。返回被摘清单（空清单不广播——常态 abort 无挂起，帧无意义）。
+   * 摘除 runtime pending 缓存 + 发布 extension:requestsInvalidated，renderer 移除本屏
+   * 对应审批条/表单。返回被摘清单（空清单不发布——常态 abort 无挂起，帧无意义）。
    */
   invalidatePendingUiRequests(sessionId: string, reason: string): PendingUIRequestResolved[] {
     const invalidated = this.extensionTimeoutMgr.invalidatePendingForSession(sessionId)
     if (invalidated.length > 0) {
-      this.broker.broadcast({
+      // wave:perf-w09 纪律收口（changeSetInvalidated R-08 同族先例）：payload 带 sessionId
+      // 的 session 级 push 型消息必须走 bus.publish——broker.broadcast 会触发哨兵误报
+      //（message-broker broadcast 的 session-scoped warn）且不占 seq 不入 ring，断连重连/
+      // 切回 session 无法回放。TOPIC_TABLE 登记 stream 档：分配 seq + 入 ring（一次性失效
+      // 信号、需可靠送达，session.restored 同款理由；renderer removeRequest 幂等，回放
+      // 重复帧无副作用）。
+      this.messageBus?.publish(sessionId, {
         type: EXTENSION_EVENTS.REQUESTS_INVALIDATED as ServerMessageType,
+        id: this.broker.nextPushId(),
         payload: { sessionId, requestIds: invalidated.map((r) => r.requestId), reason },
       })
     }
