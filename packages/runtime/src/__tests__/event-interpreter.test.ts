@@ -429,6 +429,241 @@ describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () =>
   })
 })
 
+// ── composer-genstats-ttft TTFT 采样锚点（U2，设计 §3.2 + 场景表 S7）──
+//
+// 锁定 LlmWindowSampler 双锚点扩展（requestStartedAt / firstOutputAt / ttftMs）：锚点重锚
+// 清除、first-wins 幂等、无输出信号即结束 ttftMs=null（无 0 污染）、工具轮重锚（TTFT
+// 不含工具执行的契约钉）、error turn 不产脏样本、consume 一次性语义 + 分发守卫 warn。
+describe('EventInterpreter composer-genstats-ttft TTFT 采样锚点（S7 契约）', () => {
+  function makeGenStatsInterpreter() {
+    const sent: ServerMessage[] = []
+    const onGenStats = vi.fn((_sessionId: string, _sample: GenStatsSample) => {})
+    const interp = new EventInterpreter('s1', { send: (m: ServerMessage) => { sent.push(m) }, onGenStats })
+    return { interp, sent, onGenStats }
+  }
+
+  function makeMessageEndFrame(role: string): ServerMessage {
+    return {
+      type: 'message.message_end',
+      payload: {
+        sessionId: 's1',
+        entry: { type: 'message', timestamp: new Date().toISOString(), message: { role } },
+      },
+    }
+  }
+
+  function makeTurnUsage(): PiTranslatedEvent {
+    return {
+      kind: 'turn-usage',
+      sessionId: 's1',
+      inputTokens: 10,
+      totalTokens: 120,
+      outputTokens: 80,
+      cacheRead: 20,
+      cacheWrite: 0,
+      input: 10,
+      model: 'test-model',
+      provider: 'test-provider',
+    }
+  }
+
+  function lastSample(onGenStats: ReturnType<typeof makeGenStatsInterpreter>['onGenStats']): GenStatsSample {
+    return onGenStats.mock.calls[onGenStats.mock.calls.length - 1][1]
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('T1 正常：request-start → first-output → usage → ttftMs = 首输出与锚点差（end/usage 后续推进不计入）', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(300) // 请求发出 → 首个输出 token（TTFT 主体段）
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    vi.advanceTimersByTime(70_000) // 后续流式 + 收尾（不计入 TTFT）
+    interp.interpret([{ kind: 'message', message: makeMessageEndFrame('assistant') }])
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    expect(lastSample(onGenStats).ttftMs).toBe(300)
+  })
+
+  it('T2 锚点重锚清除：上轮未消费 ttft 残留 → 新 request-start 重锚 → 只算新窗口（不含上轮）', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    // 上轮：锚点 + 首输出（ttft=300 结算），但 turn-usage 缺席（错误轮 / 合成对）→ 残留
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(300)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    // 下轮：request-start 重锚（清除不变量：清 ttftMs/firstOutputAt）→ 新窗口 500
+    vi.advanceTimersByTime(6_700) // t = 8000
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(500)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    expect(lastSample(onGenStats).ttftMs).toBe(500)
+  })
+
+  it('T3 first-wins 幂等：多首输出信号（text + thinking + toolcall 混合块）只取窗口首个', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(200)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }]) // thinking_start（首个信号）
+    vi.advanceTimersByTime(700)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }]) // text_start（后续信号）
+    vi.advanceTimersByTime(900)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }]) // toolcall_start
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    expect(lastSample(onGenStats).ttftMs).toBe(200) // 非 900 / 1800
+  })
+
+  it('T4 无输出信号即结束：锚点后直接 message_end + usage（错误 / 断连）→ ttftMs=null（无 0 污染）', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(9_000) // 长等待后断连——窗口内零输出信号
+    interp.interpret([{ kind: 'message', message: makeMessageEndFrame('assistant') }])
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    const sample = lastSample(onGenStats)
+    expect(sample.ttftMs).toBeNull() // 无值纪律：null 非 0
+    // 伴生字段照常（ttft 缺失不影响速度/命中率路径）
+    expect(sample.outputTokens).toBe(80)
+    expect(sample.cacheRead).toBe(20)
+  })
+
+  it('T5 无锚防御：输出信号先于锚点（runtime 中途启动 / 不可能序）→ 不产值、不污染后续窗口', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    // 孤儿信号：无锚点直接到达（§3.5 防御行）——不得记 firstOutputAt
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    interp.interpret([makeTurnUsage()])
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    expect(lastSample(onGenStats).ttftMs).toBeNull()
+
+    // 同一 interpreter 后续正常轮：孤儿信号不得劫持 first-wins（否则 ttft 偏大 4000）
+    vi.advanceTimersByTime(4_000) // t = 5000
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(250)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    interp.interpret([makeTurnUsage()])
+    expect(onGenStats).toHaveBeenCalledTimes(2)
+    expect(lastSample(onGenStats).ttftMs).toBe(250)
+  })
+
+  it('T6 工具轮重锚（S7 契约钉）：TTFT 不含工具执行——轮 2 只算本锚点窗口', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    // 轮 1：LLM 输出 tool_call（toolcall_start 首输出）→ turn_end（usage 到达）
+    interp.interpret([{ kind: 'turn-start', messageId: 'm1' }])
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(150)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    vi.advanceTimersByTime(350)
+    interp.interpret([{ kind: 'message', message: makeMessageEndFrame('assistant') }])
+    interp.interpret([makeTurnUsage()])
+    expect(lastSample(onGenStats).ttftMs).toBe(150)
+
+    // 工具执行 60s（不含在 TTFT）→ 轮 2：turn_start 重锚起算
+    vi.advanceTimersByTime(60_000) // t = 61500
+    interp.interpret([{ kind: 'turn-start', messageId: 'm2' }])
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(200)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    interp.interpret([{ kind: 'message', message: makeMessageEndFrame('assistant') }])
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(2)
+    // 轮 2 ttft = 200（本锚点窗口），非 60700（轮 1 锚点跨工具执行）
+    expect(lastSample(onGenStats).ttftMs).toBe(200)
+  })
+
+  it('T7 error turn 不产脏样本：锚点后流内 error（零输出信号）+ 真实 partial usage → ttftMs=null，速度字段不受扰', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, sent, onGenStats } = makeGenStatsInterpreter()
+
+    interp.interpret([{ kind: 'turn-start', messageId: 'm1' }])
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    // 流内 error：adapter 产 message.stream_error（无 llm-first-output），后续 partial
+    // message_end 携带真实 usage → turn-usage 到达（pi P3① 行为）
+    interp.interpret([{
+      kind: 'message',
+      message: { type: 'message.stream_error', payload: { sessionId: 's1', content: 'boom', kind: 'error' } },
+    }])
+    vi.advanceTimersByTime(8_000)
+    interp.interpret([{ kind: 'message', message: makeMessageEndFrame('assistant') }])
+    interp.interpret([makeTurnUsage()])
+
+    expect(onGenStats).toHaveBeenCalledTimes(1)
+    const sample = lastSample(onGenStats)
+    expect(sample.ttftMs).toBeNull() // 无输出信号 → null（禁 0）
+    expect(sample.durationMs).toBe(8_000) // 速度窗口照常（message_start→end 差）
+    expect(sent.some((m) => m.type === 'message.stream_error')).toBe(true)
+  })
+
+  it('T8 consume 一次性：ttftMs 读后置 null——缺新锚点的后续 usage 不得复用旧值', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { interp, onGenStats } = makeGenStatsInterpreter()
+
+    interp.interpret([{ kind: 'llm-request-start', sessionId: 's1' }])
+    vi.advanceTimersByTime(300)
+    interp.interpret([{ kind: 'llm-first-output', sessionId: 's1' }])
+    interp.interpret([makeTurnUsage()]) // 消费 ttft=300
+    interp.interpret([makeTurnUsage()]) // 缺新锚点的后续 usage（异常序）
+
+    expect(onGenStats).toHaveBeenCalledTimes(2)
+    expect(onGenStats.mock.calls[0][1].ttftMs).toBe(300)
+    expect(lastSample(onGenStats).ttftMs).toBeNull()
+  })
+
+  it('G1 分发守卫：未注册 case 的 kind 出声 warn（不静默丢弃）；既有 kind 零 warn', () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { interp } = makeGenStatsInterpreter()
+
+    // 既有 kind 全谱采样（各段分发命中）：不得触发守卫 warn
+    interp.interpret([
+      { kind: 'noop' },
+      { kind: 'turn-start', messageId: 'm1' },
+      { kind: 'llm-request-start', sessionId: 's1' },
+      { kind: 'llm-first-output', sessionId: 's1' },
+      { kind: 'trace-trigger', trigger: 'message_end' },
+      { kind: 'thinking-level', level: 'high' },
+      { kind: 'session-renamed', name: 'n' },
+      { kind: 'hook', eventType: 'agent_start', data: {} },
+      { kind: 'agent-settled' },
+    ])
+    expect(warnSpy).not.toHaveBeenCalled()
+
+    // 未识别 kind（新 kind 漏注册 case 的形态）：warn 出声
+    interp.interpret([{ kind: 'totally-unknown' } as unknown as PiTranslatedEvent])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('totally-unknown')
+  })
+})
+
 describe('agent-settled V7 dev-only 延迟注入（session-dead-structural-fixes U1）', () => {
   const ENV_KEY = 'TAIJI_AGENT_DEV_SETTLING_DELAY_MS'
 

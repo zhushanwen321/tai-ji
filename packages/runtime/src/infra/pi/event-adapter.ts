@@ -45,6 +45,7 @@ import type {
   PiMessageStartEvent,
   PiMessageUpdateEvent,
   PiMessageEndEvent,
+  PiTurnStartEvent,
   PiAgentEndEvent,
   PiToolExecutionStartEvent,
   PiToolExecutionUpdateEvent,
@@ -156,7 +157,13 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
     case 'text_delta':
       return deltaUpdateMessage('message.text_delta', sid, sub.delta, sub.contentIndex)
     case 'thinking_start':
-      return [{ kind: 'message', message: { type: 'message.thinking_start', payload: { sessionId: sid, ...contentIndexAnchor(sub.contentIndex) } } }]
+      // composer-genstats-ttft（设计 §3.2 首输出结算）：追加 llm-first-output——既有
+      // message.thinking_start 帧行为不变（单事件可产多 translated event，同 ask-user
+      // extension-ui + broadcast 成对模式）；reasoning 模型 thinking 流常先于 text 流到达。
+      return [
+        { kind: 'message', message: { type: 'message.thinking_start', payload: { sessionId: sid, ...contentIndexAnchor(sub.contentIndex) } } },
+        { kind: 'llm-first-output', sessionId: sid },
+      ]
     case 'thinking_delta':
       // 微项 1（wave:perf-w07）：contentIndex 透传对齐 text_delta——为 D-2 token coalescing（W12
       // DeltaBuffer 合帧）保住 thinking 块的有序插入锚点；renderer 现状 handler 未消费该字段，多余字段无害。
@@ -165,8 +172,14 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
       return [{ kind: 'message', message: { type: 'message.thinking_end', payload: { sessionId: sid } } }]
     case 'toolcall_end':
       return handleToolcallEnd(sub)
-    case 'toolcall_start': case 'toolcall_delta':
-    case 'text_start': case 'text_end':
+    case 'text_start':
+    case 'toolcall_start':
+      // composer-genstats-ttft（设计 §3.2）：原 noop 翻译保留（无前端行为），追加
+      // llm-first-output 首输出信号——纯 tool_call 响应无 text_start，toolcall_start 是
+      // 该形态下唯一首输出子类型。delta 子类型不产（否决表 E：pi-ai 全族流式实现凡产
+      // delta 必先产对应 *_start，interpreter 侧无兜底钩，PS-42 探针守卫）。
+      return [{ kind: 'noop' }, { kind: 'llm-first-output', sessionId: sid }]
+    case 'toolcall_delta': case 'text_end':
       return [{ kind: 'noop' }]
     // FR-5: streaming error — surface as message.stream_error
     // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）
@@ -420,6 +433,22 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
     stopReason,
     usage,
   }]
+}
+
+/**
+ * turn_start — LLM 请求起算锚点（composer-genstats-ttft，设计 §3.2）。
+ *
+ * pi 0.84.4 实装（agent-loop.js）：每轮 LLM 请求恰发一次 turn_start——首个请求在
+ * runAgentLoop / runAgentLoopContinue 入口（agent_start 后），工具循环后续轮在内层 while
+ * 的 prepareNextTurn 之后 emit（原生 auto-compaction 运行在 prepareNextTurn 内、先于本
+ * 事件，不含在 TTFT 窗口；工具执行亦不含——工具后下一轮 turn_start 重新起算）。
+ * [HISTORICAL] 原在 NULL_EVENTS 丢弃（速度窗口 D1 有意不采此锚点，防 TTFT 敏感度进速度
+ * 语义）；ttft 指标落地后移出，翻译为 llm-request-start 中间事件 → interpreter 挂
+ * LlmWindowSampler.onRequestStart()。语义前提（turn_start 逐请求 emit / *_start 先于
+ * delta）登记 PS-41 / PS-42 探针守卫（pi bump 门禁复验）。
+ */
+function handleTurnStart(_event: PiTurnStartEvent, sid: string): PiTranslatedEvent[] {
+  return [{ kind: 'llm-request-start', sessionId: sid }]
 }
 
 /**
@@ -1298,6 +1327,8 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 
 // ── Null-event types (lifecycle events not forwarded to frontend) ──
 // 注意：turn_end 不在此列——它经 handleTurnEndPi 提取 usage 触发 context.update（见 DISPATCHER）。
+// [composer-genstats-ttft] turn_start 已移出此列（原丢弃）——LLM 请求起算锚点，经
+// handleTurnStart 翻译为 llm-request-start（采样锚点，无前端行为）。
 // [W1 fix-chat-flow-order] agent_settled 移出此列（原「taiji 不消费——显式登记忽略」）：
 // bash entry 化（conversation-turn-attribution D2）需要它作「run 级联结束」信号——pi 在
 // _runAgentPrompt 的 finally 先 _flushPendingBashMessages()（agent-session.js:744-756）再
@@ -1321,7 +1352,6 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // 该事件正确流入本层，但 taiji 暂不做 live bash 流式 UI 消费（最终 output 经 bash RPC response
 // 全量到达）——显式登记为已知 no-op，防止落入 default 分支被误判为「事件丢失」。
 const NULL_EVENTS = new Set([
-  'turn_start',
   'extension_config', 'extension_ui_response', 'response',
   'bash_execution_update',
 ])
@@ -1362,6 +1392,8 @@ const DISPATCHER = new Map<string, Handler>()
   DISPATCHER.set('tool_execution_start', handleToolExecutionStart as Handler)
   DISPATCHER.set('tool_execution_end', handleToolExecutionEnd as Handler)
   DISPATCHER.set('agent_end', handleAgentEnd as Handler)
+  // [composer-genstats-ttft] turn_start：移出 NULL_EVENTS 后在此注册——采样锚点（无前端行为）
+  DISPATCHER.set('turn_start', handleTurnStart as Handler)
   DISPATCHER.set('turn_end', handleTurnEndPi as Handler)
   DISPATCHER.set('extension_ui_request', handleExtensionUIRequest as Handler)
   DISPATCHER.set('message_start', handleMessageStart as Handler)

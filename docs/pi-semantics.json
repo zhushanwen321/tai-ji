@@ -846,5 +846,81 @@
    "note": "消费面：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
   },
   "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-41",
+  "claim": "turn_start 逐 LLM 请求恰发一次（composer-genstats-ttft TTFT 起算锚点前提，设计 §3.2）：pi-agent-core runLoop 内层循环每轮迭代在 prepareNextTurn 之后 emit 一次 turn_start（原生 auto-compaction 运行在 prepareNextTurn 内、先于锚点——TTFT 窗口不含原生压缩；工具执行发生在上一轮 turn_end 之后——亦不含，工具后下一轮 turn_start 重新起算）；首个请求的 turn_start 由 runAgentLoop / runAgentLoopContinue 入口（agent_start 后、runLoop 调用前）emit；锚点后、streamAssistantResponse 前的 steering 注入段计入窗口（通常毫秒级，设计接受）。taiji 依赖面：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler.onRequestStart 重锚（清 ttftMs/firstOutputAt 重锚清除不变量）。pi 升级后若此前提漂移：TTFT 系统性偏大（锚点早于压缩）/ 偏小（晚于首输出）/ 恒 null（不再逐请求 emit）",
+  "piAnchor": [
+   {
+    "pkg": "pi-agent-core",
+    "distPath": "dist/agent-loop.js",
+    "symbol": "runAgentLoop / runAgentLoopContinue 入口 turn_start",
+    "note": ":50 与 :68 —— await emit({ type: \"agent_start\" }) 后、await runLoop(...) 前各恰一次 await emit({ type: \"turn_start\" })（首个 LLM 请求 + 重试续跑轮的锚点）"
+   },
+   {
+    "pkg": "pi-agent-core",
+    "distPath": "dist/agent-loop.js",
+    "symbol": "runLoop 内层循环 turn_start 发射点",
+    "note": ":109 —— if (lastCompletedTurn) 块内、prepareNextTurn 调用（:101）之后、steering 注入 for 循环（:114）与 streamAssistantResponse 调用（:122）之前——runLoop 体内唯一发射点；窗口构成四元组时序（prepare < turn_start < steering < stream）即设计 §3.2 [HISTORICAL] 修正后的现口径"
+   }
+  ],
+  "guard": {
+   "type": "probe",
+   "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-42",
+  "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 守卫）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型守卫，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块守卫）；③ 守卫分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
+  "piAnchor": [
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/openai-completions.js",
+    "symbol": "ensureTextBlock / ensureThinkingBlock / ensureToolCallBlock + blocks.push 三处",
+    "note": "ensure 工厂 :294-345；blocks.push(textBlock) :296 / (thinkingBlock) :306 / (block) :15038 邻域——每处 120 字符内紧跟 stream.push({ type: \"text_start\"|\"thinking_start\"|\"toolcall_start\" })；text_delta :405 前置 ensureTextBlock() :404、thinking_delta :434 前置 ensureThinkingBlock( :417；toolcall_delta 两站点：流式 :463 前置 ensureToolCallBlock( :422（~1255 字符，间夹 toolCall 字段修补）、finishBlock custom flush :269 操作既有块（创建点已钉）"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/openai-responses-shared.js",
+    "symbol": "createSlot / getSlot / pushToolCallDelta",
+    "note": "createSlot :343-409 三分支（reasoning→thinking_start :353 / message→text_start :362 / function_call+custom_tool_call→toolcall_start :381,:405）各播报；getSlot :329-332 类型不匹配返回 undefined；delta 站点 :487-535 均前置 getSlot(event.output_index, \"text\"|\"thinking\") + if (!slot) continue；toolcall_delta 经 pushToolCallDelta(slot) 助手 :333-340（slot 同源 getSlot/getOrCreateSlot，调用点 5 处）"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/anthropic-messages.js",
+    "symbol": "content_block_start / content_block_delta 分支",
+    "note": "start 分支 :412-458 四子型（text/thinking/redacted_thinking/tool_use）建块 output.content.push 后即播报对应 *_start；delta 分支 :459-496 每站点 blocks.findIndex((b) => b.index === event.index) 查块 + if (block && block.type === ...) 守卫（blocks = output.content :389，块只在 start 分支创建）"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/bedrock-converse-stream.js",
+    "symbol": "handleContentBlockStart / handleContentBlockDelta",
+    "note": "Start 处理器 :425-433 toolUse 块创建播报 toolcall_start :432；Delta 处理器 :434 起——text :444-452 if (!block) 建块播报 text_start :447 后 text_delta :451；toolcall :456 前置 block?.type === \"toolCall\" 守卫（块由 Start 处理器创建）；thinking :460-475 if (!thinkingBlock) 建块播报 thinking_start :467（redacted 二站点同分支）"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/google-generative-ai.js",
+    "symbol": "part.text 守卫分支 + functionCall toolcall 三连",
+    "note": ":80-91 if (!currentBlock) 建块分支按 isThinking 播报 thinking_start :84 / text_start :89；:92-111 同迭代 delta push（thinking_delta :96 / text_delta :106，距 start ~840/~1072 字符——间夹 heuristics 分支，窗口 1300）；:145-151 toolcall_start :147 → toolcall_delta :149 紧邻"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/mistral-conversations.js",
+    "symbol": "contentItems 守卫分支 + tool_calls 建块",
+    "note": "text（string item）:458-470 与 text item :497-509 两站点 if (!currentBlock || type !== \"text\") 建块播报 text_start :460/:500 后 text_delta :464/:504（~200 字符）；thinking :481-491 同款 :483→:487；toolcall :522-552 if (!block) 建块播报 toolcall_start :540 后 toolcall_delta :548（~474 字符，间夹 id/key 解析）"
+   },
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/api/openai-codex-responses.js",
+    "symbol": "processResponsesStream 委托（含 azure-openai-responses.js 同款）",
+    "note": "codex :14 import + :476/:1183 调用；azure-openai-responses.js :11 import + :92 调用——responses 系包装无独立流式实现，*_start 前提由 openai-responses-shared 单源承载；若 pi 升级引入独立实现，探针族闭合断言先红"
+   }
+  ],
+  "guard": {
+   "type": "probe",
+   "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
+  },
+  "verifiedWith": "0.84.4"
  }
 ]

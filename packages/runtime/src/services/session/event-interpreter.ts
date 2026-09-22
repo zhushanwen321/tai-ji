@@ -724,7 +724,10 @@ export class EventInterpreter {
     if (this.handleConversationEvent(ev)) return
     if (this.handleTurnLifecycleEvent(ev)) return
     if (this.handleRoutingEvent(ev)) return
-    this.handleMetaEvent(ev)
+    // 分发守卫（composer-genstats-ttft 设计 §3.5）：未注册 case 的 kind 此前是静默失败
+    //（五段分发无 default warn）——新 kind 漏分发会静默丢采样锚点等，出声可观测。
+    if (this.handleMetaEvent(ev)) return
+    console.warn(`[event-interpreter] unhandled translated event kind (dropped): ${String((ev as { kind?: string }).kind)}`)
   }
 
   /** 对话内容流事件的编排（原 handle 同名 case 逐字迁移）。命中返回 true。 */
@@ -801,6 +804,17 @@ export class EventInterpreter {
         // 整块跳过——组装与状态清理由 LlmWindowSampler.consume 承载（注释详见该处）。
         this.llmWindows.consume(ev.sessionId, ev)
         return true
+      case 'llm-request-start':
+        // composer-genstats-ttft（设计 §3.2）：pi turn_start 到达 → TTFT 请求锚点重锚
+        //（记 requestStartedAt + 清 ttftMs/firstOutputAt 重锚清除不变量，无前端行为）。
+        this.llmWindows.onRequestStart()
+        return true
+      case 'llm-first-output':
+        // composer-genstats-ttft（设计 §3.2）：本请求窗口首个输出信号（adapter 对
+        // text_start / thinking_start / toolcall_start 三子类型产出）→ 幂等 first-wins
+        // 结算 ttftMs（无锚防御在协作对象内）。
+        this.llmWindows.onFirstOutput()
+        return true
       case 'agent-settled':
         // [V7] 延迟编排入口：dev-only 开关生效时整体延迟处理（注入点在 settling→idle 转移
         // 处理之前）；未设开关 = 直通零开销。延迟 timer 与 disposed 短路在 AgentSettledDelayer。
@@ -858,22 +872,22 @@ export class EventInterpreter {
     }
   }
 
-  /** 元数据与观测 hook 回调事件的编排（原 handle 同名 case 逐字迁移）。 */
-  private handleMetaEvent(ev: PiTranslatedEvent): void {
+  /** 元数据与观测 hook 回调事件的编排（原 handle 同名 case 逐字迁移）。命中返回 true。 */
+  private handleMetaEvent(ev: PiTranslatedEvent): boolean {
     switch (ev.kind) {
       case 'thinking-level':
         // W7/W9 数据源治理：thinking_level_changed 只做失效——markDirty 置 dirty + 防抖重拉
         // get_state（唯一写路径），事件 payload 不再是 thinkingLevel 的数据源（session.thinkingLevelSet
         // WS 帧由 event-adapter 翻译直发，前端即时更新不依赖任何缓存回写）。
         this.opts.thinkingLevelState?.()?.markDirty()
-        return
+        return true
       case 'session-renamed':
         // PR #185 MF1：session_info_changed 的唯一编排动作 = onSessionRenamed 内存态回写
         //（组合根接 sessionService.setLabelCache，session.label 事件路径唯一写方）。
         // session.renamed 广播帧由 event-adapter 从事件 payload 直接转发（pi 权威源），
         // label 的 ReplicatedState 实例及 markDirty 失效接线已撤销（终态 = 事件直写）。
         this.opts.onSessionRenamed?.(this.sessionId, ev.name)
-        return
+        return true
       case 'hook':
         // D4 收敛环挂点：标记存活期内（收敛环活跃），非显式投递引发的 agent_start 一律
         // 再 abort（掐 notify replay 补发腿 / scheduler / auto-retry 开的 turn）。环未活跃
@@ -883,7 +897,9 @@ export class EventInterpreter {
         }
         // agent_start 等纯观测事件（无 WS 帧产出）
         this.opts.executeHooks?.('onPiEvent', { event: ev.eventType, ...ev.data }).catch(() => {})
-        return
+        return true
+      default:
+        return false
     }
   }
 
