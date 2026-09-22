@@ -19,6 +19,7 @@ vi.mock('node:path', () => ({
   dirname: vi.fn((p: string) => p.split('/').slice(0, -1).join('/')),
   basename: vi.fn((p: string) => p.split('/').pop() ?? ''),
   resolve: vi.fn((...args: string[]) => args.join('/')),
+  sep: '/',
 }))
 
 import { existsSync, readdirSync, statSync, readFileSync, realpathSync } from 'node:fs'

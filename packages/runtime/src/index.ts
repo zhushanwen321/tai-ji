@@ -148,6 +148,7 @@ import { ReclaimSeat, startIdlePiReaper, hasFreshPendingUiRequest } from './serv
 import type { IdlePiReaperHandle, ReclaimExemptions } from './services/session/idle-pi-reaper.js'
 import { reapSessionBackgroundTasks } from './services/session/background-task-reaper.js'
 import { toErrorMessage } from './utils/errors.js'
+import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // W8 宿主接线：runtime 协议客户端的自持引擎实例 dispose 钩子（idle 5min 复用的
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
@@ -289,6 +290,16 @@ function subscribeAgentSettledIn(
 async function main(): Promise<void> {
   const { port, projectRoot, builtinPluginsDir } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
+
+  // spawn 数据目录契约校验（缺省反转护栏）：必须在任何 getDataDir() 消费（含下方
+  // initLogger）之前——断言失败时连日志都不该写（日志目录本身就是要保护的对象）。
+  // 打包态必带显式数据目录（main 成对注入），裸跑/验证脚本走缺省落 dev 树不适用。
+  const contractViolation = spawnDataDirContractViolation(process.env)
+  if (contractViolation) {
+    console.error(contractViolation.join('\n'))
+    process.exit(1)
+  }
+
   // perf W29（D8-1）启动耗时分解探针（06 §5 m-7）：listen 前各段打点，
   // 输出进日志文件供 D8 价值评估（基线实测：getPiVersion 1.1-1.3s 主导 listen 延迟）。
   const tStart = performance.now()

@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const realFs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs')
 
-/** 真实用户数据目录（与 apps/electron/main 的打包态缺省一致，homedir 动态推导）。
+/** 真实用户数据目录（prod 形态钉死值 = 打包 main resolvePackagedDataDir 的 fallback，homedir 动态推导）。
  *  导出供 global-setup 第一道 fail-fast 复用（单一来源，防第二份字面量漂移）。 */
 export const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
 

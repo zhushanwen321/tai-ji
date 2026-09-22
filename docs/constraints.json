@@ -2933,6 +2933,31 @@
           "agent": "review-arch-boundary"
         }
       ]
+    },
+    {
+      "id": "C-proc-26",
+      "summary": "数据目录缺省反转（fail-safe default，2026-09-23）：getDataDir() 缺省 = ~/.taiji-dev，prod 数据目录（~/.taiji）只能被显式声明触达——打包 main 经 resolvePackagedDataDir 钉死（外部值仅 ~/.taiji 树内采信，与 dev 侧 resolveDevDataDir 镜像对称）并自置位 TAIJI_AGENT_PACKAGED=1，dev main 经 resolveDevDataDir（~/.taiji-dev 树内采信）；main spawn runtime 时 TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 组合根最早期（早于 initLogger）经 spawnDataDirContractViolation 交叉断言缺一即 fail-fast。第二支柱 prod 值准入守卫：getDataDir 内 assertNotLeakedProdDataDir——非 PACKAGED 进程持有 ~/.taiji 树值即 throw（堵「env 被污染 + 防线不在场」组合：bun test 等绕过 vitest config 的执行器恰逢宿主泄漏 ~/.taiji 值，globalSetup 脱钩与 fs-guard 双防线同时失守的 2026-09-22 事故残余形态），守卫挂在唯一入口不依赖任何 config 被加载。裸跑（手动 tsx / 验证脚本 / 探针）一律落缺省 dev 树。测试守护 = packages/shared __tests__/paths.test.ts（守卫矩阵 + 缺省字面断言）+ apps/electron/main test/packaged-data-dir.test.ts（行为矩阵）+ test/main-dev-datadir-pin.test.ts packaged describe（接线时序 + 自置位）+ packages/runtime src/utils/__tests__/runtime-env.test.ts（契约函数）；validate-runtime-bundle.sh 起 runtime 必须 mkdtemp 注入数据目录并剥 TAIJI_AGENT_PACKAGED",
+      "scope": [
+        "packages/shared/src/paths.ts",
+        "apps/electron/main/main.ts",
+        "apps/electron/main/utils/packaged-data-dir.ts",
+        "packages/runtime/src/utils/runtime-env.ts",
+        "packages/runtime/src/index.ts",
+        "scripts/validate-runtime-bundle.sh"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety",
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
     }
   ]
 }

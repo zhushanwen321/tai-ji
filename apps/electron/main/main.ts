@@ -84,6 +84,7 @@ import { startTriggerPatrol } from './diagnostics/trigger-patrol.js'
 import { expandLocalFilePath } from './utils/path.js'
 import { computeLocalFilePrefixes } from './utils/local-file-prefixes.js'
 import { resolveDevDataDir } from './utils/dev-data-dir.js'
+import { resolvePackagedDataDir } from './utils/packaged-data-dir.js'
 
 // ── PATH 修复（GUI 启动时补全用户级 bin 目录）──────────────────────
 // macOS LaunchServices 给 GUI 进程的 PATH 是最小值（/usr/bin:/bin:...），
@@ -124,8 +125,9 @@ process.on('uncaughtException', (err) => {
 // ── 路径 & 模式 ──────────────────────────────────────────────────
 const isDev = !app.isPackaged
 
-// getDataDir（shared SSOT）：读 TAIJI_AGENT_DATA_DIR，缺省 ~/.taiji。
-// dev 模式下方块会经 resolveDevDataDir 受控解析（树内采信 / 树外钉死 ~/.taiji-dev）。
+// getDataDir（shared SSOT）：读 TAIJI_AGENT_DATA_DIR，缺省 ~/.taiji-dev（缺省反转，
+// fail-safe default——见 shared/paths.ts [HISTORICAL]）。两形态经下方受控采信解析：
+// dev → resolveDevDataDir（~/.taiji-dev 树），打包 → resolvePackagedDataDir（~/.taiji 树）。
 
 // Dev 模式：自动隔离数据目录和端口，防止与 prod 实例冲突。
 // TAIJI_AGENT_DATA_DIR 受控采信（R-13 修复）：外部值仅当解析后位于 ~/.taiji-dev
@@ -143,6 +145,18 @@ if (isDev) {
   // 各实例用独立数据目录，userData 隔离随之成立——否则单实例锁互斥导致第二个 dev
   // 实例静默退出（subagent-drawer-blank 设计 §8.2 验收场景实测发现）。
   app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), '.taiji-dev'), 'electron'))
+} else {
+  // 打包态：数据目录钉死 ~/.taiji（外部注入值仅当 resolve 后位于 ~/.taiji 树内才
+  // 采信——与 dev 侧 resolveDevDataDir 树检查镜像对称，防宿主 shell 残留的 dev 值
+  // 使打包版写 dev 目录）。缺省反转（getDataDir 缺省已改 ~/.taiji-dev）后，这里是
+  // prod 数据目录的唯一权威钉死点；本赋值早于下方 initMainLogger / initCrashJournal
+  // 等一切 getDataDir() 消费者，并经 process-control spawn 显式透传给 runtime
+  // （TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 入口有交叉断言）。
+  process.env.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir(process.env, homedir())
+  // 自置位 PACKAGED=1：getDataDir 的 prod 值准入守卫（C-proc-26）要求持有 ~/.taiji
+  // 树值的进程声明 prod 形态——打包 main 自身后续的 getDataDir() 消费也走这条链。
+  // 出站侧不受影响：spawn 子进程经 buildSafeEnv/buildOutboundChildEnv 按需注入或剥除。
+  process.env.TAIJI_AGENT_PACKAGED = '1'
 }
 
 // ── main 日志落盘（D6-①）────────────────────────
