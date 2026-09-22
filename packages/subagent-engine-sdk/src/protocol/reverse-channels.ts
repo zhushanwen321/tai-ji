@@ -17,7 +17,9 @@
 // 应答约定：数据面类回 {ok:true}（REVERSE_REQUEST_TIMEOUT_MS=10s 未答 = 引擎故障 →
 // 杀进程 + 在途 run 失败）；人机交互类走 ack 两阶段——先回 {ack:true}，结果异步到达
 // （R9-2：已 ack 的等待不计入任何 in-flight 超时；ADR-0047 静默 ≠ 卡死）；
-// 未实现的交互能力回 {unsupported:true}（引擎自行降级，不重试）。
+// 未实现或宿主未知的通道回 {unsupported:true}——宽容语义③（条文权威 = ADR-0071）：
+// 宿主遇未知 host/* 通道（新引擎发旧宿主未实现的通道）一律回 {unsupported:true}，
+// 由 askUser 语境泛化到全通道；发送方引擎按自身降级路径走，不重试。
 
 import type { ReverseRequestTimeoutClass } from "./engine-protocol.ts";
 import type { UiRequest, UiResponse } from "../ui-types.ts";

@@ -40,6 +40,18 @@
 // 缺一即 undefined 透传 + gate 放行）；④gate 判据比较最弱档字面值（键集锁兜底）；
 // ⑤pi-host-binding 能力位快照同步登记。
 //
+// ==================== 未知成员宽容语义四行（运行时半边，与编译期词表锁互补；
+// 条文权威 = ADR-0071；本文件承载①④，②落 methods.ts 头注，③落 reverse-channels.ts
+// 头注）====================
+// ① 未知 event.type → 旧宿主 reducer default no-op 安全落空——逐变体 noop-safe:
+//    论证标记登在下方 AGENT_EVENT_TYPE_NAMES 词表成员行（U2 已实装，标记守卫 =
+//    contract-closure.test.ts「noop-safe 标记守卫」），此处只引用不复述论证内容。
+// ④ 未知可选键 → advisory 忽略（判据 6 第一档：忽略无语义影响，直接 additive）；
+//    behavior 键必有门（宿主派发前预检），不存在「无门依赖」的 behavior 键——与
+//    判据 6 呼应：宽容只覆盖 advisory/degradable，behavior 靠预检不靠容忍。
+// 引擎义务传导 = docs/extensions/subagents/engine-development-guide.md（②的应答义务
+// 条目）+ docs/constraints.json C-proc-24（scope/触发描述双登记）。
+//
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出
 // ——core 侧断言挂靠归 W2（本文件导出该类型助手供其复用），SDK 侧样板见

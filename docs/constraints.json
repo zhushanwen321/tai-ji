@@ -2893,11 +2893,12 @@
     },
     {
       "id": "C-proc-24",
-      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071",
+      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
       "scope": [
-        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/subagent-engine-sdk/src/**",
         "packages/subagent-core/src/execution/engine/__tests__/conformance/**",
-        "docs/extensions/subagents/engine-development-guide.md"
+        "docs/extensions/subagents/engine-development-guide.md",
+        "docs/architecture/engine-adaptation/**"
       ],
       "authority": [
         "adr/decisions.md#ADR-0071"
