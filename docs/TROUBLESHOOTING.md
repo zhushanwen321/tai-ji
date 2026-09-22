@@ -285,6 +285,14 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
+### 20. 表单提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
+
+**现象**：scheduler 类表单提交（如「新建定时任务」）后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning。
+
+**判定**：提交后 pi 不起 turn 的表单类型（scheduler 型）属**预期兜底路径**，非挂死——pendingSend 桥接等不到 message_start（结构性不可达），由 30s timeout 设计内清除并留 warn（ADR-0071 已知边界）。30s 内自愈 = 正常；超 30s 不恢复或断连期外高频伴随其他异常，才升级排查。
+
+**排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
+
 
 ## 环境变量速查
 
