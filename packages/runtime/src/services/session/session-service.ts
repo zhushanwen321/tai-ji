@@ -191,7 +191,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 模式，避免破坏现有测试构造点）；未注入时 btw vid fall through 既有 restore 链
    *（存量测试零变更，对 btw vid 的失败形态与注入前一致）。
    */
-  private btwService: Pick<BtwService, 'ensureProcess'> | null = null
+  /**
+   * btw 能力注入（组合根 setBtwService 晚于构造）。ensureProcess 必选（ensureActive 主链
+   * 必经）；getLine 可选（btw vid 离线尾读的线文件解析增强——缺失时 historyReader 的
+   * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）。
+   */
+  private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
   /**
    * U6：能力对账回调（组合根绑 modelService.reconcileModelCapabilities，附着路径调用）。
    */
@@ -414,9 +419,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。
+    // [btw-question 重载链修复] resolveBtwThreadFile：btw vid 离线尾读的线文件解析，查
+    // BtwService 注册表（rebuildFromDisk 启动重建的内存投影）。late-bound 闭包——btwService
+    // 在组合根晚于本构造（setBtwService 注入），未注入（存量测试构造）时 resolve 返回
+    // undefined → btw 尾读 warn 空页，主会话路径零影响。
     this.historyReader = new SessionHistoryReader({
       pm: this.pm,
       sessionStore: this.sessionStore,
+      resolveBtwThreadFile: (vid) => this.btwService?.getLine?.(vid)?.sessionFilePath,
     })
     // 状态投影域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
     // lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -686,7 +696,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * ensureActive 的 btw 分支依赖——窄面只取 ensureProcess（alive → markActivity 直返；
    * 回收/死亡 → spawn→switch→附着断言 reattach）。
    */
-  setBtwService(btwService: Pick<BtwService, 'ensureProcess'>): void {
+  setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
     this.btwService = btwService
   }
 

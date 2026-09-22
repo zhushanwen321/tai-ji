@@ -65,6 +65,12 @@ export function setupBtwReplayWatch(store: BtwReplayTarget): void {
     inflight.add(vid)
     try {
       const reply = await chatApi.getHistory(vid)
+      // 空历史可观测（G4 重载缺陷修复的 renderer 半边）：hydrate 层空历史与真实空线不可
+      // 区分，runtime 返回空 = 线从未 flush 或线文件缺失（异常态，runtime 侧同点另有含
+      // 期望路径的 warn）。轻量 console.warn，不做 UI 错误条——live 帧仍可填充分区。
+      if (reply.messages.length === 0) {
+        console.warn(`[btw-replay] empty history replayed for ${vid} — line has no persisted content (never flushed) or session file missing`)
+      }
       store.hydrate(vid, reply.messages, historyWindowFromReply(reply))
       store.clearHistoryError(vid)
       // toolResult 图片落盘编排（fire-and-forget，headless 无 write port 时内部 no-op）。
