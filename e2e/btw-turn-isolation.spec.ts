@@ -84,8 +84,13 @@ const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
 // ── 凭证门与播种（只读源 = 本机真实数据目录；写 = 临时 dataDir） ─────────────
 
-/** 本机 provider 凭证源目录（taiji 数据目录的 agent 子树，运行时动态推导）。 */
+/** 本机 provider 凭证源目录（taiji 数据目录的 agent 子树，运行时动态推导）。
+ * TAIJI_S7_CREDENTIAL_SOURCE 可覆盖：真实安装的凭证文件形态因版本/安装方式而异
+ * （auth.json/models.json 不必然在默认 agent 子树，如 dev 实例目录），覆盖值指向
+ * 含同名文件的 agent 目录即可，spec 只读该目录、写面仍恒为临时 dataDir。 */
 function sourceAgentDir(): string {
+  const override = process.env['TAIJI_S7_CREDENTIAL_SOURCE']
+  if (override && override.trim() !== '') return override
   return path.join(os.homedir(), '.taiji', 'agent')
 }
 
@@ -348,9 +353,10 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
 
     // ── 断言 ②③（持久面）：pi session JSONL 全文滚动检查 ──
     const agentDir = path.join(dataDir, 'agent')
+    // 会话文件落 sessions/<encodeCwd>/<sid>.jsonl 子目录（与 btw/<encodeCwd>/ 同构布局），
+    // 递归扫描——首版扁平 readdir 假设是该 spec 首次真执行（阶段 5 A7）暴露的资产 bug。
     const found = await waitUntil(
-      () => fs.existsSync(path.join(agentDir, 'sessions'))
-        && fs.readdirSync(path.join(agentDir, 'sessions')).some((f) => f.endsWith('.jsonl')),
+      () => listJsonlUnder(path.join(agentDir, 'sessions')).length > 0,
       JSONL_FLUSH_TIMEOUT_MS,
     )
     expect(found, `主会话 JSONL 应已落盘（${path.join(agentDir, 'sessions')}）`).toBe(true)
