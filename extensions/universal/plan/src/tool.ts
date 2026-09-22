@@ -621,7 +621,7 @@ async function executeSubmitReview(
       pi.sendMessage(
         {
           customType: PLAN_CONTEXT_CUSTOM_TYPE,
-          content: formatReviewComments("revise", response.comments),
+          content: formatReviewComments(response.comments),
           display: false,
         },
         { deliverAs: "steer", triggerTurn: true },

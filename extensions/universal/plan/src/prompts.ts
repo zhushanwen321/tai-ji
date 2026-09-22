@@ -65,7 +65,7 @@ const PHASE_D_SECTION =
  *    改为内嵌模板全文——文件内容直达模型，不赌自发 read。
  */
 export function buildPlanModePrompt(input: PlanPromptInput): string {
-  const sections: string[] = [`[PLAN MODE] Entered plan mode.\n\nRequirement: ${input.requirement || "(from conversation context)"}\nPlan directory documents root: ${input.planFilePath}`];
+  const sections: string[] = [`[PLAN MODE] Entered plan mode.\n\nRequirement: ${input.requirement || "(from conversation context)"}\nPlan manifest file: ${input.planFilePath}`];
 
   // ① 技能指令
   if (input.skills.length > 0) {
@@ -86,7 +86,7 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
     `- Write every deliverable document into the plan directory (.tmp/plans/<slug>/), then register it: plan(action='register-doc', fileName='design.md', sourceSkill='<skill name or omit>').\n` +
     `- After revising a document, REWRITE the file and re-register it with plan(action='register-doc', fileName=...) again — the version is bumped so the UI refreshes its content.\n` +
     `- When ALL documents are done, call plan(action='submit-review') to request user review.\n` +
-    `- After submit-review is consumed (whether an explanation or a revision request), finish responding for the current turn, then call plan(action='submit-review') again to re-hang the review — repeat until the user confirms execution.`,
+    `- After submit-review is consumed (a revision request), finish responding for the current turn, then call plan(action='submit-review') again to re-hang the review — repeat until the user confirms execution.`,
   );
 
   // ③ 只读纪律（现状 pi-ext-021 提示词保持）
@@ -131,13 +131,12 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
 }
 
 /**
- * revise/explain decision 的评论清单注入文本（D5 decision 消费）。
+ * revise decision 的评论清单注入文本（D5 decision 消费；explain 决策已删，
+ * PlanReviewDecision 收敛为 'approve' | 'revise'，approve 走 complete 流程不经本函数）。
  * 评论语义：quote 是用户划选引文（agent 定位段落用），comment 是评语。
  */
-export function formatReviewComments(decision: "revise" | "explain", comments: PlanReviewComment[]): string {
-  const header = decision === "revise"
-    ? `[PLAN REVIEW] The user submitted ${comments.length} comment(s) and requested document revision. For each comment: locate the quoted passage, apply the requested change, rewrite the file, then re-register it via plan(action='register-doc') — after ALL comments are addressed, call plan(action='submit-review') again to re-hang the review.`
-    : `[PLAN REVIEW] The user requested further explanation (${comments.length} comment(s)). Answer them in your reply — after answering, call plan(action='submit-review') again to re-hang the review.`;
+export function formatReviewComments(comments: PlanReviewComment[]): string {
+  const header = `[PLAN REVIEW] The user submitted ${comments.length} comment(s) and requested document revision. For each comment: locate the quoted passage, apply the requested change, rewrite the file, then re-register it via plan(action='register-doc') — after ALL comments are addressed, call plan(action='submit-review') again to re-hang the review.`;
 
   const lines = comments.map((c, i) => {
     const quote = c.quote.trim() || "(no selection)";

@@ -85,7 +85,12 @@ type _Assert_View_templateName = AssertExact<PlanStateView['templateName'], stri
 type _Assert_View_skills_optional = AssertExact<PlanStateView['skills'], string[] | undefined>
 type _Assert_View_docs_optional = AssertExact<PlanStateView['docs'], PlanDocMeta[] | undefined>
 type _Assert_View_reviewState_optional = AssertExact<PlanStateView['reviewState'], 'awaiting' | 'revising' | undefined>
-type _Assert_View_reviewStateSource_optional = AssertExact<PlanStateView['reviewStateSource'], 'explain' | 'resubmit' | undefined>
+type _Assert_View_reviewStateSource_optional = AssertExact<PlanStateView['reviewStateSource'], 'resubmit' | undefined>
+// 反向锚点：'explain' 交互已删，联合仅 'resubmit'（旧 entry 存量 'explain' 由 runtime 投影
+// 归无值）——若有人把 'explain' 加回联合，下方 @ts-expect-error 无错可压即编译红
+// @ts-expect-error reviewStateSource 不接受已删除的 'explain'
+const _rejectExplainSource: PlanStateView['reviewStateSource'] = 'explain'
+void _rejectExplainSource
 
 // ── PlanDocMeta 四字段（与 extension-protocol core/types PlanDocMeta 同形）──
 // 字面量断言是绝对锚点（防两侧同步漂移）；跨包 AssertExact 是相对断言
@@ -147,7 +152,7 @@ describe('session.planState 帧登记', () => {
           skills: ['tech-design', 'dev-flow'],
           docs: [{ fileName: 'design.md', absPath: '/tmp/design.md', sourceSkill: 'tech-design', version: 1 }],
           reviewState: 'awaiting',
-          reviewStateSource: 'explain',
+          reviewStateSource: 'resubmit',
         },
       },
     }
@@ -155,7 +160,7 @@ describe('session.planState 帧登记', () => {
     expect(msg.payload.planState.skills).toEqual(['tech-design', 'dev-flow'])
     expect(msg.payload.planState.docs?.[0]?.version).toBe(1)
     expect(msg.payload.planState.reviewState).toBe('awaiting')
-    expect(msg.payload.planState.reviewStateSource).toBe('explain')
+    expect(msg.payload.planState.reviewStateSource).toBe('resubmit')
   })
 
   it('旧 schema View（仅四字段，三扩展字段缺省）可构造——D4 向后兼容', () => {
