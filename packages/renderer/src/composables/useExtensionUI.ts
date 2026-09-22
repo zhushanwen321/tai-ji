@@ -40,6 +40,7 @@ import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useChatStore } from '@/stores/chat'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -153,6 +154,11 @@ function ensureInvalidatedSubscription(): void {
     for (const requestId of e.requestIds) {
       store.removeRequest(e.sessionId, requestId)
     }
+    // D1 invalidated 锚点（form-hang-fix）：runtime 非 respond 终结（reclaimed / plan-aborted /
+    // turn-aborted / session-destroyed 四类触发源）均无后续 turn 预期，pendingSend 等
+    // message_start 必然空等——按帧 sid 收口。clearPendingSend 幂等，与 message_start /
+    // respond 锚点并发竞争无副作用。
+    useChatStore().clearPendingSend(e.sessionId)
   })
 }
 
@@ -229,6 +235,9 @@ export function useExtensionUI(
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   const store = useExtensionUIStore()
+  // D1 分型锚点的 chatStore 取用（form-hang-fix）：setup 上下文捕获（对齐上方 extensionUIStore
+  // 模式），respond 事件回调经闭包引用——不在回调内重取。
+  const chatStore = useChatStore()
   // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
   ensureInvalidatedSubscription()
 
@@ -371,6 +380,14 @@ export function useExtensionUI(
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
+    // D1 分型锚点（form-hang-fix）：cancel 型（result === null——Esc / 取消按钮 / cancel()
+    // 同链）送达后 pi 无后续 turn 事件预期，pendingSend 等 message_start 必然空等（假忙
+    // 窗口病灶）——送达即收口。提交型（result !== null）不清：pi 起 turn，pendingSend
+    // 桥接「respond 完成 → message_start 到达」窗口并由其正常清除（现状语义，不制造
+    // isActive=false 空窗）。判据严格按 result 是否 null——boolean 型按提交型处理。
+    if (result === null) {
+      chatStore.clearPendingSend(sid)
+    }
   }
 
   /** 用户取消（等价 respond(requestId, null)） */
