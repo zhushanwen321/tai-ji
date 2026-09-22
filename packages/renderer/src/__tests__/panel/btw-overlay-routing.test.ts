@@ -536,3 +536,58 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 })
+
+describe('D8 失效支两路收口：快照修剪路（重启后遗留挂起首次对账 → 行内失效提示）', () => {
+  // 场景（A6b）：runtime 重启后 pending 内存表清零，进程死亡切面恒空清单不广播失效帧——
+  // 事件路结构性不可达；本地遗留挂起须由 retainOnly 对账差集（快照修剪路）补失效。
+  it('store 族遗留 + 快照空（runtime 重启）：重挂对账 → 条撤下 + 待处理清 + 行内「请求已失效」', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, formFrame('r-left', '遗留问题？'))
+    await settle(w)
+    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
+
+    extMock.getPendingRequests.mockResolvedValue([]) // 重启后权威快照为空
+    w.unmount() // 重挂 = 首次对账（subscribe retainOnly 差集；模块簿记跨挂载存活）
+    const w2 = mountPanel(MAIN)
+    await settle(w2)
+
+    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
+    const notice = w2.find('[data-testid="btw-request-expired"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('请求已失效')
+  })
+
+  it('dialog 族遗留（仅模块簿记，不经 store）+ 快照空：重挂对账 → 确认条撤下 + 行内失效提示', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, dialogFrame('r-left-dlg'))
+    await settle(w)
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
+
+    extMock.getPendingRequests.mockResolvedValue([])
+    w.unmount()
+    const w2 = mountPanel(MAIN)
+    await settle(w2)
+
+    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
+    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
+  })
+
+  it('正例保护：快照仍含的请求不置提示（镜像快照重挂 → 条与待处理保留、无失效提示）', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, formFrame('r-alive', '仍在处理的问题？'))
+    await settle(w)
+
+    w.unmount() // 快照 mock 保持镜像 store 现态 = runtime 存活且认识该请求
+    const w2 = mountPanel(MAIN)
+    await settle(w2)
+
+    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
+  })
+})

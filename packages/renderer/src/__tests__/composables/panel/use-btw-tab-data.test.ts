@@ -32,8 +32,15 @@ import {
   clearBtwVirtualKeyMapping,
   disposeBtwLinePartitions,
   isBtwPending,
+  ensureBtwPendingBookkeeping,
+  invalidateBtwRequests,
+  invalidateBtwStaleFromSnapshot,
+  btwExpiredNoticeOf,
+  firstBtwDialogReq,
+  BTW_EXPIRED_REASON_SNAPSHOT_PRUNED,
   __resetBtwPendingBookkeepingForTest,
 } from '@/composables/panel/useBtwTabData'
+import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { dispatchGlobal, dispatchSession } from '@taiji/core/transport/api'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSubagentStore } from '@/stores/subagent'
@@ -354,5 +361,58 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
 
     // 幂等：二次调用零动作不抛
     expect(() => disposeBtwLinePartitions(vid)).not.toThrow()
+  })
+})
+
+describe('失效支单入口（两路合并收口：事件路薄委托 + 快照修剪路共用 invalidateBtwRequests）', () => {
+  /** 经真实 bus 入账一条挂起 dialog 族请求（confirm——簿记五类之一） */
+  function seedPending(vid: string, requestId: string): void {
+    ensureBtwPendingBookkeeping()
+    getExtensionBus().emit({
+      kind: 'ui-request',
+      sessionId: vid,
+      request: { requestId, method: 'confirm', title: '允许执行？', message: 'm' },
+    } as never)
+  }
+
+  it('快照修剪路：簿记有、keepIds 无 → 失效提示置位 + 待处理出账 + dialog 载荷撤下', () => {
+    seedPending('btw:t1', 'r1')
+    expect(isBtwPending('btw:t1')).toBe(true)
+    expect(firstBtwDialogReq('btw:t1')).toBeDefined()
+
+    invalidateBtwStaleFromSnapshot('btw:t1', new Set(['other-id']), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
+
+    expect(btwExpiredNoticeOf('btw:t1')).toBe(BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
+    expect(isBtwPending('btw:t1')).toBe(false) // 挂起簿记出账（badge 待处理随之清）
+    expect(firstBtwDialogReq('btw:t1')).toBeUndefined() // dialog 渲染载荷同步撤下
+  })
+
+  it('正例保护：快照仍含的请求不置提示、保持挂起；未知 vid / 空簿记 no-op', () => {
+    seedPending('btw:t2', 'r2')
+
+    invalidateBtwStaleFromSnapshot('btw:t2', new Set(['r2']), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
+    expect(btwExpiredNoticeOf('btw:t2')).toBeNull() // 快照仍含 → 不置提示
+    expect(isBtwPending('btw:t2')).toBe(true)
+
+    // 未知 vid / 空簿记：no-op 不抛、无副作用
+    expect(() => invalidateBtwStaleFromSnapshot('btw:t-none', new Set(), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)).not.toThrow()
+    expect(() => invalidateBtwRequests('btw:t-none', ['x'], 'turn-aborted')).not.toThrow()
+    expect(btwExpiredNoticeOf('btw:t-none')).toBeNull()
+  })
+
+  it('事件路与修剪路同函数收口：invalidated 事件置位后，修剪差集空不覆盖既有提示', () => {
+    seedPending('btw:t3', 'r3')
+    getExtensionBus().emit({
+      kind: 'requests-invalidated',
+      sessionId: 'btw:t3',
+      requestIds: ['r3'],
+      reason: 'turn-aborted',
+    } as never)
+    expect(btwExpiredNoticeOf('btw:t3')).toBe('turn-aborted')
+    expect(isBtwPending('btw:t3')).toBe(false)
+
+    // 簿记已空 → 修剪差集为空 → 既有提示不被覆盖/清除
+    invalidateBtwStaleFromSnapshot('btw:t3', new Set(), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
+    expect(btwExpiredNoticeOf('btw:t3')).toBe('turn-aborted')
   })
 })

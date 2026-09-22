@@ -35,6 +35,7 @@
  */
 import { computed, reactive, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
+import { isBtwVirtualId } from '@taiji/shared'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
@@ -44,8 +45,10 @@ import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import {
+  BTW_EXPIRED_REASON_SNAPSHOT_PRUNED,
   ensureBtwPendingBookkeeping,
   firstBtwDialogReq,
+  invalidateBtwStaleFromSnapshot,
   noteBtwRequestResolved,
   respondBtwDialog,
 } from '@/composables/panel/useBtwTabData'
@@ -310,6 +313,14 @@ export function useExtensionUI(
         const keepIds = new Set(pendingRequests.map((r) => r.requestId))
         const beforeIds = store.getRequestsBySession(sid).map((r) => r.requestId)
         store.retainOnly(sid, keepIds)
+        // btw 修剪路失效（D8 失效支两路收口之一，与事件路同函数单入口）：runtime 重启后
+        // pending 内存表清零，进程死亡切面恒空清单不广播失效帧（server invalidate 单出口）——
+        // 本地挂起簿记有、权威快照无的 requestId 据本次对账差集补走失效支，遗留挂起转为
+        // 行内「请求已失效」提示。快照仍含的请求不动；主会话 sid 不入（isBtwVirtualId 守卫）；
+        // 触发面 = 本 retainOnly 调用点，不新增轮询。
+        if (isBtwVirtualId(sid)) {
+          invalidateBtwStaleFromSnapshot(sid, keepIds, BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
+        }
         // D7⑤ 终结清理（快照修剪支）：被剔除的僵尸请求（重附着/回收后 runtime 已清）
         // 对应分键草稿随之删除——快照剔除 = 失效语义的同族终结点（空集幂等）
         clearBtwBarDrafts(sid, beforeIds.filter((id) => !keepIds.has(id)))

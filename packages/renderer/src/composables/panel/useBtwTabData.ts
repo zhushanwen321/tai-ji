@@ -177,8 +177,12 @@ function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
 // 出账（终态机清除支）：
 // - 应答：store 族经 useExtensionUI.respond 出队后由确认条调 noteBtwRequestResolved；
 //   dialog 族走 respondBtwDialog（送达才出队出账——未送达保持挂起可重试）；
-// - 撤回 / 失效：bus 'requests-invalidated'（runtime 非 respond 终结单一出口）逐条出账
-//   + 行内提示置位（badge 清与提示两路合并收口）+ dialog 渲染载荷同步撤下；
+// - 撤回 / 失效：`invalidateBtwRequests` 单入口（两路写入合并收口，`expiredNoticeByVid`
+//   无第二写方形态）：① 事件路 = bus 'requests-invalidated'（runtime 非 respond 终结
+//   单一出口）订阅薄委托；② 快照修剪路 = `invalidateBtwStaleFromSnapshot`（useExtensionUI
+//   retainOnly 对账差集联动，补「runtime 进程死亡后 pending 内存表清零 → 空清单不广播
+//   失效帧」的结构性缺口——重启后遗留挂起在首次对账时转为行内已失效提示）。逐条出账
+//   + 行内提示置位 + dialog 渲染载荷同步撤下；
 // - 回收提醒清除支：setBtwReclaimReminder(vid, false) + 线内容增长即清（用户续问的
 //   renderer 可达信号，见 syncThreadWatchers）。
 // 无超时语义：本簿记不含任何墙钟（D8——pi 源 dialog 无超时，plugin 超时撤窗契约不套用）。
@@ -237,23 +241,58 @@ export function ensureBtwPendingBookkeeping(): void {
     dialogReqsByVid.set(sid, [...list, convertToDialogRequest(e)])
   })
   const offInvalidated = bus.on('requests-invalidated', (e) => {
-    const sid = e.sessionId
-    if (!sid || !isBtwVirtualId(sid)) return
-    const ids = pendingReqIdsByVid.get(sid)
-    if (!ids) return
-    const had = e.requestIds.some((id) => ids.has(id))
-    for (const id of e.requestIds) ids.delete(id)
-    if (ids.size === 0) pendingReqIdsByVid.delete(sid)
-    if (!had) return
-    expiredNoticeByVid.set(sid, e.reason)
-    const list = dialogReqsByVid.get(sid)
-    if (list) {
-      const next = list.filter((d) => !e.requestIds.includes(d.requestId))
-      if (next.length > 0) dialogReqsByVid.set(sid, next)
-      else dialogReqsByVid.delete(sid)
-    }
+    if (!e.sessionId || !isBtwVirtualId(e.sessionId)) return
+    invalidateBtwRequests(e.sessionId, e.requestIds, e.reason) // 事件路薄委托（失效支单入口）
   })
   bookkeepingUnsubs = [offUiRequest, offInvalidated, offThreadList]
+}
+
+/** 快照修剪路失效 reason（簿记值——展示文案固定 i18n `btw.interaction.expiredNotice`
+ *  不按 reason 分支；语义 = runtime 重启后遗留挂起经首次快照对账确认失效） */
+export const BTW_EXPIRED_REASON_SNAPSHOT_PRUNED = 'snapshot-pruned'
+
+/**
+ * 失效支单入口（两路写入合并收口，`expiredNoticeByVid` 单状态）：事件路订阅与快照修剪路
+ * （`invalidateBtwStaleFromSnapshot`）都收口至此——逐条出账 + 行内提示置位 + dialog 渲染
+ * 载荷撤下。`had` 守卫：requestIds 全部不在本簿记时零副作用（重复帧 / 剪枝差集为空均 no-op）。
+ */
+export function invalidateBtwRequests(
+  vid: string,
+  requestIds: readonly string[],
+  reason: string,
+): void {
+  const ids = pendingReqIdsByVid.get(vid)
+  if (!ids) return
+  const had = requestIds.some((id) => ids.has(id))
+  for (const id of requestIds) ids.delete(id)
+  if (ids.size === 0) pendingReqIdsByVid.delete(vid)
+  if (!had) return
+  expiredNoticeByVid.set(vid, reason)
+  const list = dialogReqsByVid.get(vid)
+  if (list) {
+    const next = list.filter((d) => !requestIds.includes(d.requestId))
+    if (next.length > 0) dialogReqsByVid.set(vid, next)
+    else dialogReqsByVid.delete(vid)
+  }
+}
+
+/**
+ * 快照修剪路失效（useExtensionUI subscribe 内 retainOnly 对账点联动，失效支两路之一）：
+ * 本地挂起簿记有、runtime 权威快照无的 requestId = 运行时已不认识该请求（重启后 pending
+ * 内存表清零、无失效帧可广播）→ 对差集走 `invalidateBtwRequests` 失效支。快照仍含的请求
+ * 不动（正例保护）；主会话 sid 由调用方 `isBtwVirtualId` 守卫不放行。触发面 = 现有
+ * retainOnly 调用点（BtwPanel 确认条订阅对账），不新增轮询。
+ */
+export function invalidateBtwStaleFromSnapshot(
+  vid: string,
+  keepIds: ReadonlySet<string>,
+  reason: string,
+): void {
+  const ids = pendingReqIdsByVid.get(vid)
+  if (!ids) return
+  const stale = [...ids].filter((id) => !keepIds.has(id))
+  if (stale.length === 0) return
+  invalidateBtwRequests(vid, stale, reason)
 }
 
 /** 应答送达后的出账（确认条在 respond 成功支调用；未送达不调——保持挂起可重试） */
