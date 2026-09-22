@@ -684,4 +684,15 @@ export default [
       'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
     },
   },
+  // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /
+  // usage 逐条目折叠同住，读路折叠只属读盘入口是文件头既有设计约束）。FR-14 usage 裸断言
+  // 补逐条目守卫（coerceUsage + isPresetUsageEntry）净增 ~23 行代码，统计行 508 > 500 微超
+  // 即提额（pi-provider-store RT-3#5 同型）。提额而非 off：保留 520 软上限告警，超限即再
+  // 暴露；再拆 usage 折叠独立文件会打碎 coerce 家族内聚，属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/preset-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
 ];

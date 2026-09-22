@@ -165,18 +165,30 @@ function ensureInvalidatedSubscription(): void {
   })
 }
 
+/** dialog level 白名单守卫（ExtensionUIRequest.level 契约面，三值）。 */
+function isDialogLevel(value: unknown): value is 'info' | 'warn' | 'error' {
+  return value === 'info' || value === 'warn' || value === 'error'
+}
+
+/** string[] 守卫（options 契约面）：数组且逐项 string。 */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
- *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约断言收窄。 */
+ *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约
+ *  运行时守卫收窄（isPlanReviewRequest 同范式）：畸形值（非 string / 非 string[] /
+ *  越界 level）按无值处理落缺键降级分支，不伪造类型流入渲染层。 */
 function pickDialogFields(
   request: DialogRequest,
 ): Partial<Pick<ExtensionUIRequest, 'title' | 'message' | 'options' | 'default' | 'level' | 'prefill'>> {
   return {
     ...(request.title !== undefined ? { title: request.title } : {}),
-    ...(request.message !== undefined ? { message: request.message as string } : {}),
-    ...(request.options !== undefined ? { options: request.options as string[] } : {}),
-    ...(request.default !== undefined ? { default: request.default as string } : {}),
-    ...(request.level !== undefined ? { level: request.level as 'info' | 'warn' | 'error' } : {}),
-    ...(request.prefill !== undefined ? { prefill: request.prefill as string } : {}),
+    ...(typeof request.message === 'string' ? { message: request.message } : {}),
+    ...(isStringArray(request.options) ? { options: request.options } : {}),
+    ...(typeof request.default === 'string' ? { default: request.default } : {}),
+    ...(isDialogLevel(request.level) ? { level: request.level } : {}),
+    ...(typeof request.prefill === 'string' ? { prefill: request.prefill } : {}),
   }
 }
 
