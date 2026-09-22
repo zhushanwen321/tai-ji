@@ -855,6 +855,9 @@ function tryTranslatePlanReviewSelect(
  * 剔除该项，不废掉整张表单；全不合法（含非 JSON / formQuestions 非数组 / 空数组）返回
  * undefined，由调用方降级普通 select（与既有 marker 守卫失败降级一致，对齐 :856-871
  * ask-user/schedule-create 的兜底模式）。
+ *
+ * expectTurn 源元数据条件落键透传（form-submit-busy-convergence D1 段 3）：本分支是
+ * 唯一活跃表单通路的单点；legacy 两分支（ask-user / schedule-create）不透传——见下方落键注释。
  */
 function tryTranslateFormSelect(
   event: PiExtensionUiRequestEvent,
@@ -862,7 +865,7 @@ function tryTranslateFormSelect(
   requestId: string,
   dialogMethod: ExtensionInteractMethod,
 ): PiTranslatedEvent[] | undefined {
-  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean } | undefined
+  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean; expectTurn?: boolean } | undefined
   const rawQuestions = formData?.formQuestions
   if (!Array.isArray(rawQuestions)) {
     return undefined
@@ -878,6 +881,13 @@ function tryTranslateFormSelect(
     form: true,                    // 标记统一表单富交互，前端据此路由到 FormOverlay（C4 过滤器）
     formQuestions: validQuestions, // 守卫过滤后的合法问题集透传（前端复核守卫收窄，设计 D2）
     allowCancel: formData?.allowCancel ?? true,
+    // expectTurn 条件落键（D1 段 3）：仅显式 false 落 expectTurn:false；undefined/缺省与
+    // 显式 true 皆省键（D2 `=== false` 判定下 true≡undefined 同走桥接，语义等价）——帧上
+    // 永不出现 undefined 值键，存量逐字段断言测试与 pending `{...r,...r.payload}` 解包无需
+    // 适配。严格 `=== false` 兼作类型守卫：非 boolean 不入帧（与 renderer 侧
+    // toExtensionUIRequest 的 typeof === 'boolean' 守卫对齐）。legacy 两分支不透传：旧 npm
+    // 扩展结构上不可能携带该键，透传是投机作用域（设计被否谱系），单点即唯一活跃通路。
+    ...(formData?.expectTurn === false ? { expectTurn: false } : {}),
   }
   return [
     // 与 ask-user 分支同构：extension-ui kind 事件使 EventInterpreter 暂停 watchdog，
