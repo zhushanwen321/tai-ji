@@ -41,22 +41,40 @@
  *      回落线由 pi 首 flush 自建；本服务只读 header / 轮询目录 / 删除走显式关线）。
  *   #19 超时默认原则：fork bootstrap 属「控制面单请求」量级 → 秒级有界（10s）；
  *      线任务执行（prompt）不经本服务，无墙钟超时。
- *   #12 打包约束：本文件只 spawn（经注入 piCommand），不拼 ESM 模块元数据 URL 类路径
- *      （该属性在 CJS bundle 下恒为 undefined——原文指回 AGENTS.md 关键规则 #12）；
- *      bootstrap 出站 env 经 buildOutboundChildEnv（C-proc-09）。
+ *   #12 打包约束：fork bootstrap spawn 段已随拆分迁 btw-fork-exec.ts（约束同迁保持：
+ *      只 spawn（经注入 piCommand）、不拼 ESM 模块元数据 URL 类路径——该属性在 CJS bundle
+ *      下恒为 undefined，原文指回 AGENTS.md 关键规则 #12；出站 env 经 buildOutboundChildEnv）。
+ *
+ * sibling 模块拆分（max-lines 同目录内聚拆分，2026-09-22；导出面 / 行为 / 既有测试零变更）：
+ *   · btw-error.ts —— BtwError / BtwErrorCode 词汇表（fork 腿与本体共抛，防反向依赖成环）
+ *   · btw-contract-inject.ts —— D9⑤ 契约文本 + trace 类型 + append 段组合器
+ *   · btw-fork-exec.ts —— session 文件 header 只读解析 + 源状态三分支判定 + fork bootstrap
+ *   · btw-orphan-reconcile.ts —— 启动孤儿补账（D5 / BU5 扫描降级闸）+ isInsideBtwRoot 谓词
+ *   迁出符号在下方「导出面保持」块原样 re-export，外部 import 路径零改动。
  */
-import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { basename, join, sep } from 'node:path'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { btwVirtualId } from '@taiji/shared'
-import { buildOutboundChildEnv } from '../../infra/spawn-env.js'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
-import { getBtwSessionsRoot, getBtwThreadDir, getPiAgentDir, isPiSessionId } from '../../infra/pi/pi-paths.js'
+import { getBtwSessionsRoot, getBtwThreadDir, isPiSessionId } from '../../infra/pi/pi-paths.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
 import { toErrorMessage } from '../../utils/errors.js'
+import { BtwError } from './btw-error.js'
+import { BTW_BEHAVIOR_CONTRACT, composeContractAppendPrompt } from './btw-contract-inject.js'
+import type { BtwContractInjectionTrace } from './btw-contract-inject.js'
+import { forkViaCliPi, inspectSourceState, readSessionHeader } from './btw-fork-exec.js'
+import type { BtwSessionHeader } from './btw-fork-exec.js'
+import { isInsideBtwRoot, reconcileOrphanThreadDirs as reconcileOrphanDirs } from './btw-orphan-reconcile.js'
+
+// ─ 导出面保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
+export { BTW_BEHAVIOR_CONTRACT, BtwError, composeContractAppendPrompt, forkViaCliPi, inspectSourceState, readSessionHeader }
+export type { BtwContractInjectionTrace, BtwSessionHeader }
+export { BTW_FORK_TIMEOUT_MS, hasDanglingToolCall } from './btw-fork-exec.js'
+export type { BtwSourceState, ForkViaCliRequest } from './btw-fork-exec.js'
+export type { BtwErrorCode } from './btw-error.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 常量与行为契约
+// 常量（闲置回收节拍；D9⑤ 行为契约文本已迁 btw-contract-inject.ts、fork 常量迁 btw-fork-exec.ts）
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MINUTE_MS = 60_000
@@ -71,29 +89,6 @@ export const BTW_IDLE_RECLAIM_MS = IDLE_RECLAIM_MINUTES * MINUTE_MS
 
 /** 闲置扫描节拍（单定时器扫全表，不 per-line 定时器；unref 不阻塞进程退出）。 */
 export const BTW_IDLE_TICK_MS = MINUTE_MS
-
-/**
- * fork bootstrap 就绪上限（控制面单请求量级，规则 #19）：实测双旗标 fork 落盘 206ms
- *（V2 探针 A），10s 覆盖慢机/冷缓存；超时 → 回落无 fork 分支（不静默：pill 标 no-source）。
- */
-export const BTW_FORK_TIMEOUT_MS = 10_000
-
-/** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制面内部采样间隔，规则 #19 秒级量级）。 */
-const FORK_POLL_INTERVAL_MS = 50
-
-/** fork 失败诊断保留的 stderr 尾行数。 */
-const STDERR_TAIL_LINES = 3
-
-/**
- * D9⑤ 行为契约（model-only 单条注入，UI 不可见，借鉴 zcode system_reminder 一句话版）：
- * 每线会话建立时注入一次（含分支②回落线与重附着轮）。
- * 载体子通道（①pi 侧 system-prompt 通道 / ②请求携带通道）随 V6 核实钉固；
- * 当前实现落 ① 的 spawn `--append-system-prompt` 组合（prompt 期注入、每建立一轮一次、
- * 不产生落盘 entry、不进对话流渲染），oracle = traceContractInjection 挂点记录。
- * 失败三支（设计 D9⑤）：能力缺失 → 放弃 + 登记；实现缺陷 → 修复；oracle 错位 → 修订复测。
- */
-export const BTW_BEHAVIOR_CONTRACT =
-  '父任务快照仅供背景；只回答本线新问题、不自动续主任务；仅本线明确要求时才改工作区'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 类型
@@ -162,15 +157,6 @@ export interface BtwCreateResult {
   mainSid: string
   snapshotKind: Exclude<BtwSnapshotKind, 'unknown'>
   sessionFilePath: string
-}
-
-/** 行为契约注入 trace 记录（D9⑤ oracle 挂点；V6 钉固载体后与 system-prompt-trace 对账）。 */
-export interface BtwContractInjectionTrace {
-  vid: string
-  /** 第几轮会话建立（create=1，每次 reattach +1）。 */
-  round: number
-  carrier: 'append-system-prompt'
-  contract: string
 }
 
 /**
@@ -262,208 +248,6 @@ export interface BtwLineSpawnContext {
   snapshotKind: Exclude<BtwSnapshotKind, 'unknown'>
 }
 
-/** btw 域错误（M2-b 按 code 映射恢复指引）。 */
-export type BtwErrorCode = 'fork_failed' | 'spawn_state_invalid' | 'state_mismatch' | 'line_not_found' | 'thread_file_missing'
-
-export class BtwError extends Error {
-  constructor(readonly code: BtwErrorCode, message: string) {
-    super(message)
-    this.name = 'BtwError'
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 纯函数 helper（fixture 可驱动，独立可测）
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** session 文件 header（首行 type:"session"）。 */
-export interface BtwSessionHeader {
-  id: string
-  cwd?: string
-  timestamp?: string
-}
-
-/**
- * 读线/源会话文件 header（宿主只读——规则 #6 零直写；读侧容忍首 flush 前文件缺失）。
- * 非法/缺失 throw（调用方按分支处置：源 → 回落；线文件 → line_not_found 系错误）。
- */
-export function readSessionHeader(sessionFile: string): BtwSessionHeader {
-  let raw: string
-  try {
-    raw = readFileSync(sessionFile, 'utf8')
-  } catch (e) {
-    throw new BtwError('spawn_state_invalid', `[btw] session file unreadable (${sessionFile}): ${toErrorMessage(e)}`)
-  }
-  const firstLine = raw.split('\n', 1)[0] ?? ''
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(firstLine)
-  } catch {
-    throw new BtwError('spawn_state_invalid', `[btw] session header unparsable: ${sessionFile}`)
-  }
-  const header = parsed as { type?: string; id?: unknown; cwd?: unknown; timestamp?: unknown }
-  if (header.type !== 'session' || typeof header.id !== 'string' || header.id.length === 0) {
-    throw new BtwError('spawn_state_invalid', `[btw] session header invalid (type/id): ${sessionFile}`)
-  }
-  return {
-    id: header.id,
-    cwd: typeof header.cwd === 'string' && header.cwd.length > 0 ? header.cwd : undefined,
-    timestamp: typeof header.timestamp === 'string' ? header.timestamp : undefined,
-  }
-}
-
-/** 源状态检查结果。 */
-export type BtwSourceState =
-  | { state: 'ok'; hasDanglingToolCall: boolean }
-  | { state: 'unavailable'; reason: 'unresolved' | 'missing' | 'unparsable' | 'empty' | 'io' }
-
-/**
- * 收集 entry 集中的悬空 tool-call（有 toolCall 无对应 toolResult）——分支③「源含
- * 进行中 turn 的已落盘部分」的文件级判定（P-fork-source）。形状容忍多代 pi 消息
- * 结构（content item `toolResult.toolCallId` / message role toolResult 的
- * `toolCallId` 字段），判定只影响 pill 标注不影响 fork 内容（fork 逐字节复制）。
- */
-export function hasDanglingToolCall(entries: readonly unknown[]): boolean {
-  const callIds = new Set<string>()
-  const resultIds = new Set<string>()
-  for (const raw of entries) {
-    if (typeof raw !== 'object' || raw === null) continue
-    const entry = raw as { type?: string; message?: { role?: string; toolCallId?: unknown; content?: unknown } }
-    if (entry.type !== 'message' || typeof entry.message !== 'object' || entry.message === null) continue
-    const message = entry.message
-    if (typeof message.toolCallId === 'string') resultIds.add(message.toolCallId)
-    if (!Array.isArray(message.content)) continue
-    for (const item of message.content) {
-      if (typeof item !== 'object' || item === null) continue
-      const part = item as { type?: string; id?: unknown; toolCallId?: unknown }
-      if (part.type === 'toolCall' && typeof part.id === 'string') callIds.add(part.id)
-      if (part.type === 'toolResult') {
-        const tid = typeof part.toolCallId === 'string' ? part.toolCallId : part.id
-        if (typeof tid === 'string') resultIds.add(tid)
-      }
-    }
-  }
-  for (const id of callIds) {
-    if (!resultIds.has(id)) return true
-  }
-  return false
-}
-
-/**
- * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 守卫——缺失/空/无 header
- * 即不可 fork——并**更严**一档：header-only（零非 header entry）也判不可用，构造性
- * 杜绝「空上下文线」击穿 G2；pi 对 header-only 会产出空快照文件，宿主前置拦截）。
- * 读侧容忍尾部半行（append 中读到未写完的行直接丢弃，不整文件判废）。
- */
-export function inspectSourceState(sourceFile: string | undefined): BtwSourceState {
-  if (!sourceFile) return { state: 'unavailable', reason: 'unresolved' }
-  let raw: string
-  try {
-    raw = readFileSync(sourceFile, 'utf8')
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return { state: 'unavailable', reason: 'missing' }
-    console.warn(`[btw] fork source read failed (${sourceFile}): ${toErrorMessage(e)}`)
-    return { state: 'unavailable', reason: 'io' }
-  }
-  const entries: unknown[] = []
-  let header: unknown
-  const lines = raw.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line || !line.trim()) continue
-    try {
-      const parsed = JSON.parse(line)
-      if ((parsed as { type?: string }).type === 'session' && header === undefined) header = parsed
-      else entries.push(parsed)
-    } catch {
-      // 尾部半行（并发 append 中）容忍丢弃；非尾部坏行不阻断（pi fork 自会整读复判）。
-      const isLastNonEmpty = lines.slice(i + 1).every(l => !l || !l.trim())
-      if (!isLastNonEmpty) console.warn(`[btw] fork source corrupt line ${i + 1} (${sourceFile}) — tolerated for inspection`)
-    }
-  }
-  if (header === undefined) return { state: 'unavailable', reason: 'unparsable' }
-  if (entries.length === 0) return { state: 'unavailable', reason: 'empty' }
-  return { state: 'ok', hasDanglingToolCall: hasDanglingToolCall(entries) }
-}
-
-/**
- * 行为契约 ⊕ spawn append 段组合（D9⑤ 载体 ①：`--append-system-prompt`）。
- * 每次会话建立调用一次——base（模式 append 段）与契约同线拼接，互不覆盖。
- */
-export function composeContractAppendPrompt(base: string | undefined): string {
-  const trimmed = base?.trim() ? base : undefined
-  return trimmed ? `${trimmed}\n${BTW_BEHAVIOR_CONTRACT}` : BTW_BEHAVIOR_CONTRACT
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// fork bootstrap（V2① 双旗标实测通道；导出供组合根/测试复用）
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface ForkViaCliRequest {
-  piCommand: string
-  sourceFile: string
-  threadDir: string
-  cwd: string
-  timeoutMs?: number
-}
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
-
-/**
- * 一次性 fork bootstrap：`pi --mode rpc --fork <源> --session-dir <线目录>` 起进程，
- * pi 在启动期同步完成 forkFrom 落盘（写 header + 逐条复制全树，V2 探针 A 实测 206ms），
- * 宿主轮询到**新增** .jsonl 即 SIGTERM 收掉 bootstrap（该进程不承载线——线进程由
- * attachProcess 另行惰性 spawn，避免污染进程表）。
- *
- * 失败语义（调用方按 D3 分支② 回落）：源缺失/空 → pi exit 1（不产空文件，V2 探针 D）；
- * 超时/异因退出 → throw（携带 stderr 尾，调用方 warn 后回落 no-source，pill 不静默）。
- * 出站 env 经 buildOutboundChildEnv（C-proc-09），PI_CODING_AGENT_DIR 与线进程同源隔离。
- */
-export async function forkViaCliPi(req: ForkViaCliRequest): Promise<string> {
-  const timeoutMs = req.timeoutMs ?? BTW_FORK_TIMEOUT_MS
-  const existing = new Set(existsSync(req.threadDir) ? readdirSync(req.threadDir).filter(f => f.endsWith('.jsonl')) : [])
-  const env = buildOutboundChildEnv({ parentEnv: process.env, extras: { PI_CODING_AGENT_DIR: getPiAgentDir() } })
-  const args = ['--mode', 'rpc', '--fork', req.sourceFile, '--session-dir', req.threadDir]
-  let spawnError: Error | undefined
-  let child
-  try {
-    child = spawn(req.piCommand, args, { cwd: req.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
-  } catch (e) {
-    // spawn 同步抛（参数面异常）：包成 fork_failed，调用方回落分支②。
-    throw new BtwError('fork_failed', `[btw] pi fork bootstrap spawn failed: ${toErrorMessage(e)}`)
-  }
-  child.stdout.on('data', () => {}) // bootstrap 进程 stdout 不消费（fork 后即收）
-  let stderr = ''
-  child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
-  // 'error' 必须监听并入 exited 汇合口：spawn 失败（ENOENT：pi 缺失 / cwd 死路径）只发
-  // error 不发 exit——漏听会 uncaughtException 崩 runtime 且轮询空等到超时（M1-b 实测教训）。
-  const exited = new Promise<number>(resolve => {
-    child.on('exit', code => resolve(code ?? -1))
-    child.on('error', (e: Error) => { spawnError = e; resolve(-1) })
-  })
-
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const files = existsSync(req.threadDir) ? readdirSync(req.threadDir).filter(f => f.endsWith('.jsonl') && !existing.has(f)) : []
-    if (files.length > 0) {
-      const file = join(req.threadDir, files[0])
-      child.kill('SIGTERM')
-      return file
-    }
-    if (await Promise.race([exited.then(() => true), sleep(FORK_POLL_INTERVAL_MS).then(() => false)])) {
-      const code = await exited
-      if (spawnError) throw new BtwError('fork_failed', `[btw] pi fork bootstrap spawn failed: ${spawnError.message} — source=${req.sourceFile}`)
-      const tail = stderr.trim().split('\n').slice(-STDERR_TAIL_LINES).join(' | ')
-      throw new BtwError('fork_failed', `[btw] pi fork bootstrap exited (code ${code}) — source=${req.sourceFile} stderr=${tail}`)
-    }
-    if (Date.now() > deadline) {
-      child.kill('SIGTERM')
-      throw new BtwError('fork_failed', `[btw] pi fork bootstrap timed out after ${timeoutMs}ms — source=${req.sourceFile}`)
-    }
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BtwService
 // ─────────────────────────────────────────────────────────────────────────────
@@ -506,68 +290,12 @@ export class BtwService {
   // ── 注册表重建（D5：启动目录扫描重建 + hidden 复原）──
 
   /**
-   * 启动孤儿补账（D5：清理「主会话已不存在」的线目录——崩溃恢复对齐「主删即删」；
-   * **非全量 GC**：主会话在场（活跃 ?? 扫盘可解析）的线一律保留——退出不删、闲置回收不删、
-   * 进程亡不删，关闭 drawer 不删）。
-   *
-   * 调用序（组合根）：**先本方法、后 rebuildFromDisk**——先清孤儿目录，重建只登记在场主线。
-   * 判据 = deps.resolveMainSessionFile(mainSid) 不可解析（主文件已 trash / 从未落盘——
-   * 分支线首 flush 前主会话无文件的形态重启后主/线同归于此，判定正确），**且本轮扫描可信**：
-   * 扫描腿降级（readdir EACCES/IO）会显式返回空列表、与「权威空」不可区分，冷主会话将全部
-   * 落空 ⇒ 若不设闸会把全部线目录误判「主已删」清空（BU5：rm -rf 不可逆，摧毁裁决⑧持久化）。
-   * 故 resolve 落空后先过 deps.isSessionScanDegraded 闸——降级即跳过整轮补账，warn 留痕、
-   * 改下次启动重试（[HISTORICAL] 原注释「扫描腿 best-effort 返回列表而非抛错 ⇒ 触发面 =
-   * 主确已删」论证不成立：返回空列表正是降级形态之一，与主确已删不可区分，故须旗标透出）。
-   * 非 pi 形态目录名跳过（junk 归 rebuild 的 warn 面，不代删）。
-   * 幂等 + best-effort：无根零动作；单目录 rm 失败 warn 不阻断启动（P2 降级隔离），
-   * 残留下次启动重试。
-   *
-   * @returns 本次清除的孤儿线目录数（启动日志/测试断言用）
+   * 启动孤儿补账——实装已抽 btw-orphan-reconcile.ts（同目录 sibling 拆分：判据 / BU5 扫描
+   * 降级闸 / 幂等语义随 doc 整段迁入，导出面与行为零变更）；本方法保留为组合根调用面
+   *（一行委托）。调用序不变：先本方法、后 rebuildFromDisk。
    */
   reconcileOrphanThreadDirs(): number {
-    const root = getBtwSessionsRoot()
-    if (!existsSync(root)) return 0
-    let removed = 0
-    let cwdDirs: string[]
-    try {
-      cwdDirs = readdirSync(root).filter(name => {
-        try { return statSync(join(root, name)).isDirectory() } catch { return false }
-      })
-    } catch (e) {
-      console.warn(`[btw] orphan reconcile: cannot read btw root (${root}): ${toErrorMessage(e)}`)
-      return 0
-    }
-    for (const enc of cwdDirs) {
-      const encDir = join(root, enc)
-      let sidDirs: string[]
-      try {
-        sidDirs = readdirSync(encDir).filter(name => {
-          try { return statSync(join(encDir, name)).isDirectory() } catch { return false }
-        })
-      } catch { continue }
-      for (const mainSid of sidDirs) {
-        if (!isPiSessionId(mainSid)) continue // junk 目录名归 rebuild warn 面，不代删
-        if (this.deps.resolveMainSessionFile(mainSid)) continue // 主在场 → 线保留
-        // BU5 扫描降级闸：主解析落空且本轮 sessions 扫描不可信（readdir 降级空列表）→
-        // 判定「主已删」不成立，跳过整轮补账改下次启动重试（首个不可解析候选即触发——
-        // 可解析候选只会 continue 不产生删除，故此处 removed 恒为 0，整轮回退无部分删除）。
-        if (this.deps.isSessionScanDegraded?.()) {
-          console.warn(`[btw] orphan reconcile: session scan degraded this round — deferring to next startup (mainSid=${mainSid})`)
-          return 0
-        }
-        const threadDir = join(encDir, mainSid)
-        try {
-          if (!this.isInsideBtwRoot(threadDir)) continue
-          rmSync(threadDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-          removed += 1
-          console.warn(`[btw] orphan reconcile: removed thread dir of missing main session (mainSid=${mainSid}, dir=${threadDir})`)
-        } catch (e) {
-          // best-effort：删孤儿目录失败不阻断启动（P2 降级隔离），残留下次启动重试，留痕可归因
-          console.warn(`[btw] orphan reconcile: remove failed (${threadDir}): ${toErrorMessage(e)}`)
-        }
-      }
-    }
-    return removed
+    return reconcileOrphanDirs(this.deps)
   }
 
   /**
@@ -864,7 +592,7 @@ export class BtwService {
     if (rec.client) await this.deps.processes.destroySession(vid).catch((e: unknown) => console.warn(`[btw] closeLine destroy failed (${vid}): ${toErrorMessage(e)}`))
     // 终结扇出（M4-a 单入口）：lifecycle 条目 / 总线分区 / 插件数据收尾——三路终结合一挂点。
     this.fireLineTerminated(vid)
-    if (opts?.deleteSessionFile && rec.sessionFilePath && this.isInsideBtwRoot(rec.sessionFilePath)) {
+    if (opts?.deleteSessionFile && rec.sessionFilePath && isInsideBtwRoot(rec.sessionFilePath)) {
       try {
         rmSync(rec.sessionFilePath, { force: true })
       } catch (e) {
@@ -896,7 +624,7 @@ export class BtwService {
     }
     try {
       const threadDir = getBtwThreadDir(cwd, mainSid)
-      if (this.isInsideBtwRoot(threadDir)) {
+      if (isInsideBtwRoot(threadDir)) {
         rmSync(threadDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
       }
     } catch (e) {
@@ -1014,11 +742,5 @@ export class BtwService {
         this.fireWillReclaim(rec.vid)
       }
     }
-  }
-
-  /** 路径安全：删除面必须位于 btw 根内（closeLine 防误删；M4-a 级联同用此守卫形态）。 */
-  private isInsideBtwRoot(target: string): boolean {
-    const root = getBtwSessionsRoot()
-    return target.startsWith(root + sep)
   }
 }
