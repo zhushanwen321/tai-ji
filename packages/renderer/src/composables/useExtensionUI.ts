@@ -560,7 +560,7 @@ type BtwBarDraft = { sel: Record<string, string[]>; text: Record<string, string>
 
 const emptyBtwBarDraft = (): BtwBarDraft => ({ sel: {}, text: {}, planComment: '', dialogSelect: '', dialogText: '' })
 
-// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表领地外——deviations 挂账待补登）：
+// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-vid 隔离的持久草稿本体）：
 // 确认条草稿分键表（用户输入暂存、终结即删，非 GUI 数据本体；D7⑤ 切走切回不丢的模块级载体）
 const btwBarDrafts = reactive(new Map<string, BtwBarDraft>())
 
