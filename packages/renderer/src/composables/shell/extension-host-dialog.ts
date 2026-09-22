@@ -185,8 +185,8 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  *   未送达时本层 toast（队列 headless 无 UI，可见反馈归壳层）。
  * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
- * - 通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 D4a cancel 先例 →
- *   ADR-0073 通路级收口）：sendPiResponse 应答终局无条件 clearPendingSend——cancel
+ * - 通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 cancel 型分型先例 →
+ *   ADR-0073 D4a 壳层锚点与通路级收口）：sendPiResponse 应答终局无条件 clearPendingSend——cancel
  *   （result === null，取消按钮 → queue.cancel 唯一生产者；plain dialog 无 Esc 绑定，
  *   Esc 取消属 FormOverlay form 通路）/ 提交（result !== null）/ WS 断连（!delivered）
  *   三型统一。plain dialog 通路默认值 = 无 turn 预期、应答终局即收尾，由生产者穷尽论证
@@ -194,8 +194,10 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  *   turn；turn 内源（approval tool_call 审批）pendingSend 恒空（message_start 在 tool
  *   执行前已清）——锚点对后者是空操作。清在 delivered 判定之前：断连期 turn 同样
  *   不可达，不清则该形态仍走 30s 兜底（「意图先于送达」的两通路相位分叉登记见
- *   ADR-0073）。已知失真：多步链悬挂期插发直发会被误清 → 假闲至链收口（自愈型），
- *   重审条件见 ADR-0073 收口条目。仅 pi 源（plugin 源 dialog 无 addPendingSend 链，
+ *   ADR-0073）。已知失真：多步链悬挂期插发直发会被误清（构造上无从区分直发与命令
+ *   链置位的 pendingSend）——实测 pi 命令 dispatch 即返（void run()），直发被并行
+ *   处理、message_start 即时到达覆盖，无可见假闲窗口（2026-09-23 验收 O-5）；
+ *   重审条件见 ADR-0072 收口条目。仅 pi 源（plugin 源 dialog 无 addPendingSend 链，
  *   sendPluginResponse 旁路不经此锚点）。
  */
 export function createUiResponseTransport(): UiResponseTransport {

@@ -9,6 +9,7 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 | **Electron 主进程** | 终端直接看 | 终端启动 `/Applications/TaiJi.app/Contents/MacOS/TaiJi` 或 `log show --process TaiJi` |
 | **Runtime** | 终端 `[runtime:out]` / `[runtime:err]` 前缀 + `~/.taiji-dev/logs/runtime-*.log` | 同主进程转发 + `~/.taiji/logs/runtime-*.log` |
 | **pi 子进程** | 终端 pi 自身输出 + `~/.taiji-dev/logs/pi-<date>-<sessionId>.jsonl` | `~/.taiji/logs/pi-<date>-<sessionId>.jsonl` + pi 日志目录 `~/.taiji/agent/logs/` |
+| **Renderer console** | `~/.taiji-dev/logs/renderer-console-<date>.log`（renderer 进程 warn/error 泛捕流，main 侧 console-message 监听落盘） | `~/.taiji/logs/renderer-console-<date>.log`（同左） |
 | **升级子系统** | `~/.taiji-dev/update/update-error.log`（JSONL 512KB×2 轮转；失败登记含 errorCode/rawCause/engine/releaseSource，成功登记 source-selection/source-failover/download-success） | `~/.taiji/update/update-error.log`（同左） |
 | **前端 DevTools** | Cmd+Option+I 打开 | 同左 |
 
@@ -287,11 +288,11 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 ### 20. 表单/命令提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
 
-**现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见）。
+**现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见；生产落 `renderer-console-<date>.log`（`<dataDir>/logs/`），无需 attach）。
 
 **判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收口条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
 
-**排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
+**排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 
 ### 21. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
 
