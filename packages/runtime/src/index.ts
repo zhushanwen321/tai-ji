@@ -287,18 +287,100 @@ function subscribeAgentSettledIn(
   }
 }
 
+/** spawn 数据目录契约校验（缺省反转护栏）：违规时打印全部违规项并 exit(1)。断言失败时连
+ *  日志都不该写（日志目录本身就是要保护的对象），故本守卫必须早于任何 getDataDir() 消费
+ *  （含 main 内的 initLogger）。打包态必带显式数据目录（main 成对注入），裸跑/验证脚本走
+ *  缺省落 dev 树不适用。 */
+function exitIfDataDirContractViolated(): void {
+  const contractViolation = spawnDataDirContractViolation(process.env)
+  if (contractViolation) {
+    console.error(contractViolation.join('\n'))
+    process.exit(1)
+  }
+}
+
+/** 单实例互斥守卫判定：同数据目录已有活实例则打印定位信息并拒绝启动（exit(1)）——双 runtime
+ *  会 reattach 并销毁对方 sessions/subagents。守卫语义与判据见 single-instance-guard.ts 模块头注。 */
+function exitIfInstanceConflict(guardProbe: Awaited<ReturnType<typeof probeSingleInstance>>): void {
+  if (guardProbe.blocked && guardProbe.holder) {
+    const holder = guardProbe.holder
+    console.error('[runtime] fatal: data directory already served by a live runtime instance — refusing to start (dual runtime would reattach + destroy its sessions/subagents)')
+    console.error(`  data dir : ${getDataDir()}`)
+    console.error(`  live at  : 127.0.0.1:${holder.port} (source: ${holder.source}${holder.pid !== undefined ? `, pid ${holder.pid}` : ''})`)
+    console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
+    console.error('             for a second concurrent instance use a separate TAIJI_AGENT_DATA_DIR — dev/e2e/acceptance must NOT inherit the prod data dir')
+    process.exit(1)
+  }
+}
+
+/** A1-2 迁移成功后的 models.json 清洗 + 写读错位自愈。仅迁移成功后执行（失败时寄生数据未出
+ *  models.json，sanitize 会物理删除空壳条目致寄生数据永久丢失，round 1 review DG#3；门控
+ *  返回值语义由 run-extras-migration.test.ts 守卫）。 */
+async function sanitizeProvidersAfterExtrasMigration(
+  extrasMigration: Awaited<ReturnType<typeof runProviderExtrasMigration>>,
+  providerExtrasStore: TaijiProviderStore,
+): Promise<void> {
+  if (!extrasMigration.ok) return
+  // 清洗 models.json：① 空串键剥除（pi minLength:1 全集）+ ② catalog 条目的 provider 级键处置
+  // （api 一律剥除 / baseUrl 按 extras 网关标记）→ 再做既有空壳判定/修复（设计 D2 顺序契约）。
+  // 历史背景：空壳 provider（五字段全缺）导致 bundled pi 0.80.3 严格校验时整个 models.json
+  // 加载失败（Model not found）。系统 pi 0.83 容错但 bundled 不容错，重装后必现；
+  // sanitize 让 taiji 自愈这种脏数据（如外部脚本写入的测试 fixture）。
+  // 标记读取经注入的同步原语（C-comm-03：infra/pi 层不 import services 实现，设计 D2 审查 R3-3）。
+  const sanitizeOutcome = sanitizeInvalidProviders({
+    getExtrasSync: (providerId) => providerExtrasStore.getExtrasSync(providerId),
+  })
+  // D2② 写读错位自愈（写序契约「先写 extras 标记、后写 models.json」的崩溃中间态 =
+  // 标记在、models.json 无 baseUrl 键）：清多余标记。锁内写在本 async 阶段执行，
+  // 不塞进同步清洗段。标记已被并发清除时短路不调 modify（modify 无内容 diff 守卫，
+  // 避免无谓写盘）。
+  for (const providerId of sanitizeOutcome.staleGatewayMarkers) {
+    if (providerExtrasStore.getExtrasSync(providerId)?.gatewayBaseUrl === undefined) continue
+    await providerExtrasStore.modify(providerId, current => {
+      const next = { ...current }
+      delete next.gatewayBaseUrl
+      return next
+    })
+  }
+}
+
+/** WS listen 失败的进程退出裁决：端口被占（EADDRINUSE）打可操作排查指引（指向恢复动作：
+ *  查占用 → 关实例 → 重启），其余错误原样打印；均快速失败 exit(1)。与 ConnectionManager.start
+ *  reject 的分工：传输层对 listen 失败（EADDRINUSE 等）只 reject（对齐 callback-server.ts 先例，
+ *  可被测试捕获/换端口重试，不杀进程）；进程退出决策归组合根，而非静默退出。 */
+function exitOnListenFailure(err: unknown, port: number): never {
+  const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
+  if (code === 'EADDRINUSE') {
+    console.error(`[runtime] fatal: 端口 ${port} 被占用（EADDRINUSE）——可能已有另一个 taiji 实例在运行。`)
+    console.error(`  排查: lsof -i :${port} 查看占用进程；关闭其他实例后重启。原始错误: ${toErrorMessage(err)}`)
+  } else {
+    console.error('[runtime] fatal: WS listen failed:', err)
+  }
+  process.exit(1)
+}
+
+/** E-2：relay socket server 初始化（listen 后、后台初始化前）。fatal 语义：实例冲突（残留
+ *  socket 被活实例持有）与 listen 失败都退出——覆盖/复用会劫持他人注册表。staged 脚本缺失
+ *  与执行器探针失败不在此层（getRelaySpawnEnv 降级为不注入 env，relay 整体不激活，回落现状）。 */
+async function initRelayServerOrExit(projectRoot: string, messageBus: MessageBus): Promise<void> {
+  try {
+    await initRelayServer({
+      projectRoot,
+      publish: (sid, msg) => messageBus.publish(sid, msg),
+    })
+  } catch (err) {
+    console.error('[runtime] fatal: relay server init failed:', err)
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   const { port, projectRoot, builtinPluginsDir } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
 
   // spawn 数据目录契约校验（缺省反转护栏）：必须在任何 getDataDir() 消费（含下方
   // initLogger）之前——断言失败时连日志都不该写（日志目录本身就是要保护的对象）。
-  // 打包态必带显式数据目录（main 成对注入），裸跑/验证脚本走缺省落 dev 树不适用。
-  const contractViolation = spawnDataDirContractViolation(process.env)
-  if (contractViolation) {
-    console.error(contractViolation.join('\n'))
-    process.exit(1)
-  }
+  exitIfDataDirContractViolated()
 
   // perf W29（D8-1）启动耗时分解探针（06 §5 m-7）：listen 前各段打点，
   // 输出进日志文件供 D8 价值评估（基线实测：getPiVersion 1.1-1.3s 主导 listen 延迟）。
@@ -315,15 +397,7 @@ async function main(): Promise<void> {
   // 必须早于一切子进程 spawn / service 构造——此刻拒绝零清理负担；置于 initLogger 后
   // 使拒绝报错落盘可见。守卫语义与判据见 single-instance-guard.ts 模块头注。
   const guardProbe = await probeSingleInstance(getDataDir())
-  if (guardProbe.blocked && guardProbe.holder) {
-    const holder = guardProbe.holder
-    console.error('[runtime] fatal: data directory already served by a live runtime instance — refusing to start (dual runtime would reattach + destroy its sessions/subagents)')
-    console.error(`  data dir : ${getDataDir()}`)
-    console.error(`  live at  : 127.0.0.1:${holder.port} (source: ${holder.source}${holder.pid !== undefined ? `, pid ${holder.pid}` : ''})`)
-    console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
-    console.error('             for a second concurrent instance use a separate TAIJI_AGENT_DATA_DIR — dev/e2e/acceptance must NOT inherit the prod data dir')
-    process.exit(1)
-  }
+  exitIfInstanceConflict(guardProbe)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
@@ -388,31 +462,10 @@ async function main(): Promise<void> {
   // providers.json。迁移失败不阻塞启动（warn + 下次重试，幂等），失败语义收在
   // run-extras-migration.ts 薄包装（返回值契约由其单测守卫）。
   const extrasMigration = await runProviderExtrasMigration(configStore, providerExtrasStore)
-  // 清洗 models.json：① 空串键剥除（pi minLength:1 全集）+ ② catalog 条目的 provider 级键处置
-  // （api 一律剥除 / baseUrl 按 extras 网关标记）→ 再做既有空壳判定/修复（设计 D2 顺序契约）。
-  // 历史背景：空壳 provider（五字段全缺）导致 bundled pi 0.80.3 严格校验时整个 models.json
-  // 加载失败（Model not found）。系统 pi 0.83 容错但 bundled 不容错，重装后必现；
-  // sanitize 让 taiji 自愈这种脏数据（如外部脚本写入的测试 fixture）。
-  // 仅迁移成功后执行（失败时寄生数据未出 models.json，sanitize 会物理删除空壳条目致
-  // 寄生数据永久丢失，round 1 review DG#3；门控返回值语义由 run-extras-migration.test.ts 守卫）。
-  if (extrasMigration.ok) {
-    // 标记读取经注入的同步原语（C-comm-03：infra/pi 层不 import services 实现，设计 D2 审查 R3-3）。
-    const sanitizeOutcome = sanitizeInvalidProviders({
-      getExtrasSync: (providerId) => providerExtrasStore.getExtrasSync(providerId),
-    })
-    // D2② 写读错位自愈（写序契约「先写 extras 标记、后写 models.json」的崩溃中间态 =
-    // 标记在、models.json 无 baseUrl 键）：清多余标记。锁内写在本 async 阶段执行，
-    // 不塞进同步清洗段。标记已被并发清除时短路不调 modify（modify 无内容 diff 守卫，
-    // 避免无谓写盘）。
-    for (const providerId of sanitizeOutcome.staleGatewayMarkers) {
-      if (providerExtrasStore.getExtrasSync(providerId)?.gatewayBaseUrl === undefined) continue
-      await providerExtrasStore.modify(providerId, current => {
-        const next = { ...current }
-        delete next.gatewayBaseUrl
-        return next
-      })
-    }
-  }
+  // 清洗 models.json：仅迁移成功后执行（失败时寄生数据未出 models.json，sanitize 会物理
+  // 删除空壳条目致寄生数据永久丢失，round 1 review DG#3；门控返回值语义由
+  // run-extras-migration.test.ts 守卫），清洗与写读错位自愈见 helper。
+  await sanitizeProvidersAfterExtrasMigration(extrasMigration, providerExtrasStore)
 
   const sessionStore = new PiSessionStore()
   const modelSource = new ModelApiDiscoverer()
@@ -1231,18 +1284,9 @@ async function main(): Promise<void> {
   try {
     await server.start()
   } catch (err) {
-    // 与 ConnectionManager.start reject 的分工：传输层对 listen 失败（EADDRINUSE 等）只
-    // reject（对齐 callback-server.ts 先例，可被测试捕获/换端口重试，不杀进程）；
-    // 进程退出决策归组合根——生产语义不变：端口被占即快速失败 exit(1)，但打可操作
-    // 排查指引（指向恢复动作：查占用 → 关实例 → 重启），而非静默退出。
-    const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
-    if (code === 'EADDRINUSE') {
-      console.error(`[runtime] fatal: 端口 ${port} 被占用（EADDRINUSE）——可能已有另一个 taiji 实例在运行。`)
-      console.error(`  排查: lsof -i :${port} 查看占用进程；关闭其他实例后重启。原始错误: ${toErrorMessage(err)}`)
-    } else {
-      console.error('[runtime] fatal: WS listen failed:', err)
-    }
-    process.exit(1)
+    // 与 ConnectionManager.start reject 的分工：传输层对 listen 失败只 reject（可被测试
+    // 捕获/换端口重试，不杀进程）；进程退出决策归组合根（见 exitOnListenFailure）。
+    exitOnListenFailure(err, port)
   }
   console.log('[runtime] ready')
 
@@ -1251,18 +1295,8 @@ async function main(): Promise<void> {
   registerRuntimeInstance(getDataDir(), port)
 
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
-  // 早建早发现权限问题（设计 §4.1）。fatal 语义：实例冲突（残留 socket 被活实例持有）
-  // 与 listen 失败都退出——覆盖/复用会劫持他人注册表。staged 脚本缺失与执行器探针
-  // 失败不在此层（getRelaySpawnEnv 降级为不注入 env，relay 整体不激活，回落现状）。
-  try {
-    await initRelayServer({
-      projectRoot: effectiveRoot,
-      publish: (sid, msg) => messageBus.publish(sid, msg),
-    })
-  } catch (err) {
-    console.error('[runtime] fatal: relay server init failed:', err)
-    process.exit(1)
-  }
+  // 早建早发现权限问题（设计 §4.1）。
+  await initRelayServerOrExit(effectiveRoot, messageBus)
   // ── u5b-runtime-forensics D6-②：内存水位定时器启动 ──────────────────
   // listen 成功后启动（依赖 sessionService/pm 均已装配）。activeSession 数含公共
   // session（getActiveSessionIds 全量 lifecycle 键），pi 进程数是 ProcessManager 托管

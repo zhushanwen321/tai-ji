@@ -133,12 +133,28 @@ export function useCommandPopoverKeyboard<T extends KeyboardItem>(
     const len = list.length
     const isEnterOrTab = e.key === 'Enter' || e.key === 'Tab'
     // 无候选（空态提示行）时方向键无项可移（(0 ± 1 + 0) % 0 = NaN）⇒ 放行；Enter/Tab 仍须消费
+    // （该守卫同时保证下方 ↑↓ helper 不会在 len === 0 时做 % 0 取模）
     if (len === 0 && !isEnterOrTab) return false
-    // 方向键必须同时截断传播（与下方 Enter/Tab 同款）：截断点即 window capture 主入口，
-    // 只 preventDefault 而不 stopPropagation 时事件继续到达 contenteditable 冒泡监听 →
-    // composer-keydown 的 handleBareArrowNav 二次消费（defaultPrevented 幂等守卫只挡
-    // activeIndex 二次变更，不挡 composer 的方向键导航）→ dom-core 单视觉行 at-edge →
-    // history setText 用上一条历史消息替换当前草稿。勿删。
+    // 方向键族（↑↓）：helper 返回 null 表示非方向键，交回下方 Enter/Tab、Esc 路由
+    const arrowHandled = handleArrowKey(e, len)
+    if (arrowHandled !== null) return arrowHandled
+    if (isEnterOrTab) return handleEnterOrTab(e, list)
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      opts.close()
+      return true
+    }
+    return false
+  }
+
+  /** 方向键分支族（承接 handleKeydown 的 ArrowDown/ArrowUp 两分支，语义逐条等价）：
+   *  ↑↓ 环形移动高亮并消费事件，返回 true；非方向键返回 null（交回主路由继续判定）。
+   *  方向键必须同时截断传播（与 Enter/Tab 同款）：截断点即 window capture 主入口，
+   *  只 preventDefault 而不 stopPropagation 时事件继续到达 contenteditable 冒泡监听 →
+   *  composer-keydown 的 handleBareArrowNav 二次消费（defaultPrevented 幂等守卫只挡
+   *  activeIndex 二次变更，不挡 composer 的方向键导航）→ dom-core 单视觉行 at-edge →
+   *  history setText 用上一条历史消息替换当前草稿。勿删。 */
+  function handleArrowKey(e: KeyboardEvent, len: number): boolean | null {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       e.stopPropagation()
@@ -151,46 +167,45 @@ export function useCommandPopoverKeyboard<T extends KeyboardItem>(
       activeIndex.value = (activeIndex.value - 1 + len) % len
       return true
     }
-    if (isEnterOrTab) {
-      // 时序契约（composer-chip-insertion-semantics 设计 D2）：本分支多经 window capture
-      // （onWindowKeydown）进入，消费 Enter/Tab 后必须 stopPropagation 截断事件向 target 的
-      // 传播——这是「浮层 open 时 Enter 选中候选、绝不触发 composer onSend」的唯一防线
-      // （composer-keydown 无 defaultPrevented 防御层：contenteditable Enter 分支恒先
-      // preventDefault 再转发，防御层会拦死正常发送）。勿删。
-      // [HISTORICAL] 边界：stopPropagation 不拦同节点上已注册的其他 listener——split mode 双浮层
-      // 同时 open 时按注册序先到先得（设计 D2 边界声明①）。split mode 已移除（2026-07-24 退化为
-      // 恒单 panel，见 stores/panel.ts 头注），双浮层场景不复存在；泛化命题（同节点其他 listener
-      // 不受 stopPropagation 影响）仍成立。
-      if (composingRef.value || e.isComposing) return false // IME 双保险：组合中 Enter 是确认候选词，放行
-      e.preventDefault()
-      e.stopPropagation()
-      // 空候选（空态行）：无项可选中，仅消费事件终止链路；**不**顺带关闭浮层（不改变 open
-      // 状态）——避免用户下一次 Enter 在无浮层可感知的情况下意外发送（Escape 仍是显式关闭入口）。
-      // 读点直取 list[activeIndex]：越界已由上方 sync watch 收敛（收敛点单一化），不再 Math.min 兜底。
-      if (len > 0) {
-        // exactMatch 键盘层闭包现算（裁死：不走 symbols 导出派生态），判定置于 len>0 内——
-        // 空候选分支先于判定，提到外面会读 list[activeIndex] 的 undefined。
-        const item = list[activeIndex.value]
-        // D1 分支序：type 门 → activeElement 门 → exactMatch（两侧 toLowerCase，与过滤
-        // normalizedSlashName(name).toLowerCase().includes(q) 对齐——`/COMPACT` 完整名同样直发）
-        const exactMatch =
-          opts.type() === 'slash' &&
-          activeElementInInput(opts.shellInputRef?.()) &&
-          normalizedSlashName(item.name).toLowerCase() === ('/' + opts.query()).toLowerCase()
-        // 分流：exactMatch 直发仅 Enter（命中后先查 item.selected 禁选守卫——已选 skill 降级
-        // 不直发，守卫语义单源在 CommandPopover.onSelect）；Tab 恒 onSelect 插 chip（补参通道
-        // 不因完整名关闭）
-        if (exactMatch && !item.selected && e.key === 'Enter') opts.onSelectAndSend(item, e)
-        else opts.onSelect(item)
-      }
-      return true
+    return null
+  }
+
+  /** Enter/Tab 分支族（承接 handleKeydown 的 isEnterOrTab 块，语义逐条等价）：IME 组合中
+   *  放行（返回 false，不消费）；否则消费事件并按候选选中/直发，恒返回 true。
+   *  时序契约（composer-chip-insertion-semantics 设计 D2）：本分支多经 window capture
+   *  （onWindowKeydown）进入，消费 Enter/Tab 后必须 stopPropagation 截断事件向 target 的
+   *  传播——这是「浮层 open 时 Enter 选中候选、绝不触发 composer onSend」的唯一防线
+   *  （composer-keydown 无 defaultPrevented 防御层：contenteditable Enter 分支恒先
+   *  preventDefault 再转发，防御层会拦死正常发送）。勿删。
+   *  [HISTORICAL] 边界：stopPropagation 不拦同节点上已注册的其他 listener——split mode 双浮层
+   *  同时 open 时按注册序先到先得（设计 D2 边界声明①）。split mode 已移除（2026-07-24 退化为
+   *  恒单 panel，见 stores/panel.ts 头注），双浮层场景不复存在；泛化命题（同节点其他 listener
+   *  不受 stopPropagation 影响）仍成立。 */
+  function handleEnterOrTab(e: KeyboardEvent, list: readonly T[]): boolean {
+    if (composingRef.value || e.isComposing) return false // IME 双保险：组合中 Enter 是确认候选词，放行
+    e.preventDefault()
+    e.stopPropagation()
+    // 空候选（空态行）：无项可选中，仅消费事件终止链路；**不**顺带关闭浮层（不改变 open
+    // 状态）——避免用户下一次 Enter 在无浮层可感知的情况下意外发送（Escape 仍是显式关闭入口）。
+    // 读点直取 list[activeIndex]：越界已由 sync watch 收敛（收敛点单一化），不再 Math.min 兜底。
+    const len = list.length
+    if (len > 0) {
+      // exactMatch 键盘层闭包现算（裁死：不走 symbols 导出派生态），判定置于 len>0 内——
+      // 空候选分支先于判定，提到外面会读 list[activeIndex] 的 undefined。
+      const item = list[activeIndex.value]
+      // D1 分支序：type 门 → activeElement 门 → exactMatch（两侧 toLowerCase，与过滤
+      // normalizedSlashName(name).toLowerCase().includes(q) 对齐——`/COMPACT` 完整名同样直发）
+      const exactMatch =
+        opts.type() === 'slash' &&
+        activeElementInInput(opts.shellInputRef?.()) &&
+        normalizedSlashName(item.name).toLowerCase() === ('/' + opts.query()).toLowerCase()
+      // 分流：exactMatch 直发仅 Enter（命中后先查 item.selected 禁选守卫——已选 skill 降级
+      // 不直发，守卫语义单源在 CommandPopover.onSelect）；Tab 恒 onSelect 插 chip（补参通道
+      // 不因完整名关闭）
+      if (exactMatch && !item.selected && e.key === 'Enter') opts.onSelectAndSend(item, e)
+      else opts.onSelect(item)
     }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      opts.close()
-      return true
-    }
-    return false
+    return true
   }
 
   /** window keydown capture 监听：键盘导航主入口（Composer 的 keydown 路由为兜底路），先于组件 keydown 保证稳定命中。 */
