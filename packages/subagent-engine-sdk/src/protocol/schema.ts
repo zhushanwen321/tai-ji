@@ -18,6 +18,15 @@
 // 版本，新增成员须过新增门槛（消费方 + 降级路径 + 能力位绑定），无消费方不进协议；
 // 判据全文 = engine-protocol.ts 头注，删改史与判据 why = docs/adr/decisions.md
 // ADR-0071。
+//
+// schema 定位声明（设计决策 D6 原文语义）：ENGINE_PROTOCOL_SCHEMAS = 测试 oracle +
+// conformance 契约源，不进运行时（前提 P2：运行时零消费，仅测试在用；运行时深校验
+// 成本高于收益，坏载荷由消费方结构化报错——见上文帧校验目的）。U2 落地后事件 enum
+// 已从 AGENT_EVENT_TYPE_NAMES 词表派生，oracle 与实现同源，漂移风险归零。
+//
+// fixture 派生登记：conformance fixture 从本 schema 派生（需求发生再接线）——纯登记，
+// 不落任何实现，遵守 C 型「无消费方不进协议」纪律；接线时以 ENGINE_PROTOCOL_SCHEMAS
+// 为唯一派生源，禁止另手写 fixture schema 面。
 
 import { AGENT_EVENT_TYPE_NAMES } from "./contract-types.ts";
 import { REVERSE_CHANNELS } from "./reverse-channels.ts";
