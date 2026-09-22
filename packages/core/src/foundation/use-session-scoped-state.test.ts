@@ -9,12 +9,18 @@
  * - 切 sid 后 current 切分区（不丢旧数据，切回恢复）
  * - null sid 返回默认实例不写 Map（防 null key 污染）
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
+ * - C-1 条件注册守卫三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
+ *   无 scope 时 cleanup 保留在注册表 = 前提 2）
+ * - C-1 census 静态锁（全仓非测试调用点清单 = 14 处实测快照，清单外新调用点即红）
  *
  * 运行：cd packages/core && npx vitest run src/foundation/use-session-scoped-state.test.ts
  * 禁止 node:test / tsx --test。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope, ref, nextTick } from 'vue'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   useSessionScopedState,
   registerSessionCleanup,
@@ -271,5 +277,138 @@ describe('W1 registerSessionCleanup / triggerSessionCleanups 注册机制', () =
     // （未卸载时 trigger 应移除 'doomed' 分区——见 W5 session-cleanup 集成测试）
     // 此处只验证 trigger 不抛错（反注册后注册表不含该 fn）
     expect(() => triggerSessionCleanups('doomed')).not.toThrow()
+  })
+})
+
+describe('C-1 条件注册守卫（console-noise-triage D1：if (getCurrentScope())）', () => {
+  it('分支 1（有 scope）：dispose 后自身 cleanup 已反注册，trigger 不再触达其分区', async () => {
+    const init = vi.fn(() => ({ v: 0 }))
+    const sid = ref<string | null>('guarded-with-scope')
+    const scope = effectScope()
+    let state!: ReturnType<typeof useSessionScopedState<{ v: number }>>
+    scope.run(() => {
+      state = useSessionScopedState<{ v: number }>(sid, init)
+    })
+    state.update((s) => { s.v = 42 })
+    expect(init).toHaveBeenCalledTimes(1)
+
+    scope.stop()
+    await nextTick()
+
+    triggerSessionCleanups('guarded-with-scope')
+    // 反注册成立的可观察判据（惰性 computed：分区重建只在读时发生，故先读后断言——
+    // 实测 scope.stop 后 version bump 仍驱动 current 重算）：cleanup 若仍留在注册表，
+    // 此处会删除分区 → 重访 current 触发第 2 次 init 且 v 回 0。
+    // 既有用例「卸载后其内部 cleanup 不再被 trigger 调用」只断言 trigger 不抛错，而
+    // trigger 对每个 fn 包 try/catch（该断言恒真、无判别力），registry 载重断言补于此。
+    const afterTrigger = state.current.value
+    expect(afterTrigger.v).toBe(42)
+    expect(init).toHaveBeenCalledTimes(1)
+  })
+
+  it('分支 2（无 scope，模块级单例形态）：不 warn、不抛错，且 cleanup 保留在注册表（前提 2）', () => {
+    const warnSpy = vi.spyOn(console, 'warn')
+    try {
+      const init = vi.fn(() => ({ v: 0 }))
+      const sid = ref<string | null>('guarded-no-scope')
+      let state!: ReturnType<typeof useSessionScopedState<{ v: number }>>
+      expect(() => {
+        state = useSessionScopedState<{ v: number }>(sid, init)
+        void state.current.value
+      }).not.toThrow()
+      // 条件注册构造性消除 Vue「no active effect scope」dev warn（守卫前此处必 warn）
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // 前提 2 载重：不挂 dispose → unregister 永不触发 → cleanup 留在注册表，
+      // 模块级单例靠 triggerSessionCleanups 清理而非 scope dispose
+      state.update((s) => { s.v = 42 })
+      triggerSessionCleanups('guarded-no-scope')
+      // 惰性 computed：cleanup 删除分区 + version bump 后，重算只在读时发生——先读后断言
+      const afterTrigger = state.current.value
+      expect(afterTrigger.v).toBe(0)
+      expect(init).toHaveBeenCalledTimes(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调用点即红）', () => {
+  // 仓库根：本文件位于 <repo>/packages/core/src/foundation/ 下
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
+  // 双形态锁模式：裸括号 `useSessionScopedState(` 与泛型 `useSessionScopedState<T>(`，
+  // 含空白变体（\s*）。10/14 调用点为泛型形态——只锁裸括号即击穿「即红」。
+  const CALL_PATTERN = /useSessionScopedState\s*[<(]/
+  // 计数用全局变体（非 g 的 match 只返回首个匹配，同行多调用会少计；g 版仅用于
+  // count、不用于 .test——g 标志的 lastIndex 状态会让重复 .test 结果交替翻转）
+  const CALL_PATTERN_G = new RegExp(CALL_PATTERN.source, 'g')
+  // 扫描产物目录 / 依赖目录（源码快照锁的盲区，与 census 无关）
+  const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-results'])
+
+  /**
+   * 实测快照（console-noise-triage §2 前提 3 census + C-1 实施期复测自校验，两期均 = 14）：
+   * 14 个文件各 1 处非测试调用点（泛型 10 / 裸括号 4）；含模块级 2 处
+   * （drawer/control.ts + useSessionTrace.ts，即 CDP 捕获的恒现 2 条 warn 源头）。
+   * 清单外出现新调用点（新文件，或已有文件内第 2 处）即红 → 审阅其 scope 上下文。
+   * 锁的是「误调用类」的入口边界：守卫后无 scope 误调用零运行时信号（观测损失已登记）。
+   */
+  const CENSUS_SNAPSHOT: Record<string, number> = {
+    'packages/core/src/domain/drawer/control.ts': 1,
+    'packages/dom-core/src/composer/input/history.ts': 1,
+    'packages/renderer/src/components/panel/MessageStream.vue': 1,
+    'packages/renderer/src/components/panel/tray/TrayNativePanel.vue': 1,
+    'packages/renderer/src/composables/features/file-tree/useGitStatus.ts': 1,
+    'packages/renderer/src/composables/features/model/useContextUsage.ts': 1,
+    'packages/renderer/src/composables/features/model/useGenStats.ts': 1,
+    'packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts': 1,
+    'packages/renderer/src/composables/features/trace/useSessionTrace.ts': 1,
+    'packages/renderer/src/composables/panel/composer-shell.ts': 1,
+    'packages/renderer/src/composables/panel/useCompactQueue.ts': 1,
+    'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
+    'packages/renderer/src/stores/plan-store.ts': 1,
+    'packages/ui/src/extension-host/dialog-request-queue.ts': 1,
+  }
+
+  /** 收集全仓非测试源码（.ts/.tsx/.vue）中的工厂调用点：path → 调用次数 */
+  function collectCallSites(): Record<string, number> {
+    const out: Record<string, number> = {}
+    const selfPath = fileURLToPath(import.meta.url)
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, entry.name)
+        if (entry.isDirectory()) {
+          if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+          walk(abs)
+          continue
+        }
+        if (!entry.isFile()) continue
+        if (!/\.(ts|tsx|vue)$/.test(entry.name)) continue
+        if (/\.(spec|test)\.(ts|tsx|vue)$/.test(entry.name)) continue // 测试文件
+        if (abs === selfPath) continue // 本测试文件
+        if (abs.includes(`${sep}__tests__${sep}`)) continue
+        const lines = readFileSync(abs, 'utf8').split('\n')
+        let count = 0
+        for (const line of lines) {
+          if (!CALL_PATTERN.test(line)) continue
+          // 工厂定义行非调用点（`export function useSessionScopedState<T>(` 同样命中锁模式）
+          if (line.includes('function useSessionScopedState')) continue
+          count += (line.match(CALL_PATTERN_G) ?? []).length
+        }
+        if (count > 0) out[relative(REPO_ROOT, abs)] = count
+      }
+    }
+    walk(REPO_ROOT)
+    return out
+  }
+
+  it('全仓非测试调用点清单 = 14 处实测快照（清单外新调用点即红）', () => {
+    expect(collectCallSites()).toEqual(CENSUS_SNAPSHOT)
+  })
+
+  it('锁模式自检：裸括号 / 泛型 / 空白变体双形态命中，import 引用不误报', () => {
+    expect(CALL_PATTERN.test('const s = useSessionScopedState(sid, init)')).toBe(true)
+    expect(CALL_PATTERN.test('const s = useSessionScopedState<Partition>(')).toBe(true)
+    expect(CALL_PATTERN.test('const s = useSessionScopedState <Partition>(')).toBe(true)
+    expect(CALL_PATTERN.test("import { useSessionScopedState } from './x'")).toBe(false)
   })
 })
