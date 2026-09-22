@@ -11,7 +11,15 @@
  *   evictSessionWithVirtual 与 evictIfNeeded 共用 isExempt，若加 panel 检查会让
  *   deleteSession 流程中被删 session（必然还绑定 panel）被 exempt 拦截 → 内存泄漏
  * - 驱逐用 delete key（与 disposeSession 一致，D13）
- * - subagent:xxx 三段式虚拟 key 按主 session 前缀同步驱逐（M7 修复，AC-2）
+ * - subagent:xxx 三段式虚拟 key 按 owner 段前缀同步驱逐（M7 修复，AC-2；owner 段 = 主 sid
+ *   或 btw 线 piSessionId，见 evictDerivedPartitions）
+ * - [btw-question D5/M2-c] btw 键（`btw:<piSessionId>`）保持**普通驱逐候选**——不加
+ *   isVirtualKey 特例豁免（线会话文件持久可回填，内存分区该逐就逐；豁免会把它变成
+ *   不可回收的常驻分区）；主会话驱逐**不**联动清 btw 分区（删除挂 deleteSession / 显式关线，
+ *   不挂内存回收——btw 键非 `subagent:<mainSid>:` 前缀、不进 main 的 workflow 映射，构造性成立）；
+ *   btw 分区被驱逐时其派生键**同驱**（D9③ 两半边：subagent 段以线 piSessionId 前缀匹配 +
+ *   agentcall 段走 B9 同构回调 agentCallEvictionsOf（线 vid 形态透传，workflow 映射按线 vid
+ *   挂名 ∖ viewedVids），统一入口 evictDerivedPartitions，两驱逐路径共用）
  * - agentcall:xxx 两段式虚拟 key 经注入回调联动驱逐（B9，memory-leak-remediation §3.3-B9）：
  *   主 session 被驱逐时由装配侧回调（agentCallEvictionsOf，workflow store 映射 ∖ viewedVids
  *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源钉死 panel 枚举
@@ -30,6 +38,9 @@
 // 相对路径直达定义处（mutations.ts）：经 '@taiji/core' barrel 回引会成环
 // （index re-export 本模块，本模块又 import index），ESM 序隐患
 import { deleteMessages } from './mutations'
+// [btw-question D2/D9③ M2-c] btw vid 结构判定与映射即 extract（shared 工厂 SSOT）：
+// 派生键 owner 段 = 线 piSessionId（vid 去 `btw:` 前缀），见 evictDerivedPartitions。
+import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 
 /**
  * LRU 保留阈值：最近 8 个 session（D6）。
@@ -92,6 +103,10 @@ export function touchLru(sessionId: string): void {
 
 /**
  * 判断 sessionId 是否为虚拟 key（subagent/agentcall 派生）。
+ *
+ * [btw-question D5] `btw:` 两段式**刻意不进**本判定——btw 键是普通驱逐候选
+ * （阈值照常参与、无虚拟 key 特例豁免）：线会话文件是唯一持久载体，分区被阈值驱逐后
+ * 重开经重载链回填（D5）。豁免只会让 btw 分区在内存里只增不减。
  */
 export function isVirtualKey(sessionId: string): boolean {
   return sessionId.startsWith('subagent:') || sessionId.startsWith('agentcall:')
@@ -140,6 +155,11 @@ export interface LruEvictDeps {
    * 两驱逐路径共用（evictIfNeeded 阈值路径 + evictSessionWithVirtual 显式路径）——
    * 显式路径消费方 deleteSession 会在 hooks.evictVirtualKeys 再全量清一次（含豁免 vid），
    * 双重调用幂等（deleteMessageKey 有 has 守卫）。
+   *
+   * [btw-question D9③/M2-c] 形参按**被驱逐 sid 原形态**透传：主会话 = mainSid；btw 分区
+   * 被驱逐时 = 线 vid（`btw:<piSessionId>`）——workflow 映射按线 vid 挂名（D9「btw 线名下
+   * 挂 btw vid」），装配侧同一回调零改动即可服务两形态（即设计「B9 同构回调：线派生枚举
+   * ∖ viewedVids」的执行面）。
    */
   agentCallEvictionsOf: (mainSid: string) => string[]
 }
@@ -151,7 +171,8 @@ export interface LruEvictDeps {
  * 按最久未访问顺序驱逐超出的部分。驱逐时：
  * 1. deleteMessageKey（清 messages）
  * 2. deleteHydrated（清 hydrated，AC-8 切回重 hydrate）
- * 3. 同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（AC-2，isVirtualKeyOf 仅匹配三段式）
+ * 3. 同步驱逐关联派生键（evictDerivedPartitions：subagent 三段式按 owner 段前缀（AC-2，
+ *    btw 线 owner = 线 piSessionId）+ agentcall 经 B9 回调（sid 形态透传））
  *
  * SR8 竞态防护：驱逐前对每个候选 double-check isExempt（防止驱逐决策后
  * session 变为 streaming 状态）。
@@ -186,19 +207,8 @@ export function evictIfNeeded(deps: LruEvictDeps): void {
     deps.deleteHydrated(sid)
     sessionLastAccessed.delete(sid)
 
-    // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，走下方 B9 回调）
-    // [Q1-9] 直接迭代 Map keys（免 [...keys()] 二次拷贝）：deleteMessageKey 是不可变替换
-    // （new Map + 赋 .value，旧 Map 不被 mutate），for...of 迭代器绑定取值时的 Map 对象，
-    // 循环内替换 .value 不影响迭代安全，行为与快照拷贝版一致。
-    for (const virtualKey of deps.messagesValue().keys()) {
-      if (isVirtualKeyOf(virtualKey, sid)) {
-        deps.deleteMessageKey(virtualKey)
-        sessionLastAccessed.delete(virtualKey)
-      }
-    }
-
-    // B9：联动释放该主 session 未查看的 agentcall 虚拟分区（豁免已在回调实现侧应用）
-    evictAgentCallPartitions(deps.agentCallEvictionsOf(sid), deps)
+    // 派生键同驱（AC-2 subagent 前缀 + B9 agentcall 回调；btw 线派生同入口，见 helper 头注释）
+    evictDerivedPartitions(sid, deps)
   }
 }
 
@@ -216,17 +226,38 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
   deps.deleteHydrated(sessionId)
   sessionLastAccessed.delete(sessionId)
 
-  // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，走下方 B9 回调）
-  // [Q1-9] 同 evictIfNeeded：直接迭代 keys，deleteMessageKey 不可变替换不影响迭代安全。
+  // 派生键同驱（两路径共用同一入口，与 evictIfNeeded 同构）
+  evictDerivedPartitions(sessionId, deps)
+}
+
+/**
+ * [AC-2 + D9③/M2-c] 派生键联动驱逐——主会话与 btw 线两形态共用，两驱逐路径
+ * （evictIfNeeded 阈值 / evictSessionWithVirtual 显式）统一走本入口。
+ *
+ * owner 段（btw-question D9③ 键中段位约定）：主会话 = sid 本身；btw 线 = 线 piSessionId
+ * （vid 去 `btw:` 前缀，映射即 extract）——`subagent:<owner>:*` 三段式前缀匹配与 AC-2 同构
+ * （btw 键不进 isVirtualKey，但其派生键仍按 owner 段联动，防孤儿泄漏）。
+ * agentcall 半边走 B9 回调 agentCallEvictionsOf（sid 原形态透传）：主会话按 mainSid、
+ * btw 线按线 vid 查 workflow 映射（D9「btw 线名下挂 btw vid」），豁免 ∖ viewedVids 已在
+ * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行面。
+ *
+ * 反向不变量（D5「主驱逐不联动清 btw 分区」）：主会话驱逐时 btw 键不命中
+ * `subagent:<mainSid>:` 前缀、线名下 agentcall 不落 main 的 workflow 映射，构造性不动；
+ * btw 分区的删除唯一触发点 = deleteSession 级联 / 显式关线，不挂内存回收。
+ *
+ * [Q1-9] 直接迭代 Map keys（免 [...keys()] 二次拷贝）：deleteMessageKey 是不可变替换
+ * （new Map + 赋 .value，旧 Map 不被 mutate），for...of 迭代器绑定取值时的 Map 对象，
+ * 循环内替换 .value 不影响迭代安全，行为与快照拷贝版一致。
+ */
+function evictDerivedPartitions(sid: string, deps: LruEvictDeps): void {
+  const owner = isBtwVirtualId(sid) ? extractBtwPiSessionId(sid) : sid
   for (const virtualKey of deps.messagesValue().keys()) {
-    if (isVirtualKeyOf(virtualKey, sessionId)) {
+    if (isVirtualKeyOf(virtualKey, owner)) {
       deps.deleteMessageKey(virtualKey)
       sessionLastAccessed.delete(virtualKey)
     }
   }
-
-  // B9：联动释放该主 session 未查看的 agentcall 虚拟分区（两路径共用，见 LruEvictDeps.agentCallEvictionsOf 注释）
-  evictAgentCallPartitions(deps.agentCallEvictionsOf(sessionId), deps)
+  evictAgentCallPartitions(deps.agentCallEvictionsOf(sid), deps)
 }
 
 /**
