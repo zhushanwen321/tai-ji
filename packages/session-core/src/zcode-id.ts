@@ -1,9 +1,10 @@
 /**
- * zcode 行 id → canonical entry id 归一化（设计 D1 最小例子：行 id 零填充为 8 位
- * 小写十六进制，如 10 → '0000000a'；与 pi 自身 id 形态 randomUUID().slice(0,8) 同为
- * 8-hex，pi 侧对 entry id 仅作 opaque map key 消费、无 parseInt/形态校验）。
+ * zcode 行 id 值域归一化：非负安全整数 → 8 位小写十六进制（10 → '0000000a'；与
+ * pi 自身 id 形态 randomUUID().slice(0,8) 同为 8-hex，pi 侧对 entry id 仅作
+ * opaque map key 消费、无 parseInt/形态校验）。
  *
- * canonical entry id 的parentId 顺序链（每条 entry 指向前一条）由 source 包的
+ * canonical entry id 由 source 包 converter 的产序计数器经本函数格式化生成，与
+ * zcode 库行 id 无对应关系；parentId 顺序链（每条 entry 指向前一条）同样由
  * converter 维护，本函数只负责单点 id 值域归一化。
  */
 
