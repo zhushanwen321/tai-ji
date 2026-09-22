@@ -981,6 +981,12 @@ export class SessionLifecycle implements ISessionRegistry {
       try {
         await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
       } catch (e: unknown) {
+        // best-effort 降级（非吞错）：走到本级联时主 session 本体已 trash/purge 完成，
+        // closeAllForMain 是删后辅助腿——上抛只会让已成功的 delete 报成失败返回，还连带跳过
+        // 后续 sessionData 清理与扫描缓存失效（侧栏残留更久），故错误不传播。可观测性：
+        // console.warn 级留痕（sessionId + 原始错误串，runtime 日志落盘可查）。后续路径：
+        // 本处不重试，漏删的线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底清理
+        // （启动时先于 WS listen 执行）——与本 try 前注释的 P2 降级隔离裁决一致。
         console.warn(`[session-lifecycle] btw cascade failed (sessionId=${sessionId}):`, toErrorMessage(e))
       }
     }
