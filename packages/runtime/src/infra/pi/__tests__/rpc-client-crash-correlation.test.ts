@@ -61,7 +61,7 @@ const fakeProc = {
   once: vi.fn(),
   stdout: stdoutStream,
   stderr: stderrStream,
-  stdin: { write: vi.fn(() => true), once: vi.fn() },
+  stdin: { write: vi.fn(() => true), on: vi.fn(), once: vi.fn() },
   kill: vi.fn((_signal?: NodeJS.Signals | number) => {
     queueMicrotask(() => {
       if (procExitHandlers.length === 0) return

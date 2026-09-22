@@ -842,23 +842,22 @@ function applyModelsWritePolicy(
   const dropped: string[] = []
   for (const raw of data.models) {
     const model = { ...raw }
-    // 缺 id 与空白 id 同口径（translateModelSchemaFields 只拦空白串形态）：pi 的 id 是
-    // 必填 minLength:1 字段，缺 id 条目写盘同样触发整表拒载——整条丢弃 + warn。
+    // U6②：丢弃项进可见性信号（描述 = 尽力取原 id 或占位 + 丢弃原因）
+    const rawId = (raw as Record<string, unknown>)?.id
+    const label = typeof rawId === 'string' && rawId !== '' ? rawId : '(no id)'
+    const droppedDesc = `${label} (dropped: invalid id — pi requires a non-empty model id)`
+    // 缺 id 与空白 id 同口径（normalizeModelIdOrReject 只拦空白串/非法形态）：pi 的 id 是
+    // 必填 minLength:1 字段，缺 id 条目写盘同样触发整表拒载——整条丢弃 + warn + 可见性信号。
     if (model.id === undefined || model.id === null) {
       console.warn(`[config-service] dropped model without id for ${providerId}`)
-      const rawId = (raw as Record<string, unknown>)?.id
-      const label = typeof rawId === 'string' && rawId !== '' ? rawId : '(no id)'
-      dropped.push(`${label} (dropped: missing id)`)
+      dropped.push(droppedDesc)
       continue
     }
     if (translateModelSchemaFields(model, providerId)) {
       applyValidatedModelFields(model, model, String(model.id))
       kept.push(model)
     } else {
-      // U6②：丢弃项进可见性信号（描述 = 尽力取原 id 或占位 + 丢弃原因）
-      const rawId = (raw as Record<string, unknown>)?.id
-      const label = typeof rawId === 'string' && rawId !== '' ? rawId : '(no id)'
-      dropped.push(`${label} (dropped: invalid id — pi requires a non-empty model id)`)
+      dropped.push(droppedDesc)
     }
   }
   merged.models = kept

@@ -9,8 +9,9 @@ import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
 // zcode 会话库白名单（MF-3-1 wire 帧加固）：值 import——校验在 transport 边界执行，
-// allowlist 推导是 zcode-import 域的路径知识（宿主库/隔离库同文件 SSOT）。
-import { zcodeImportDbAllowlist } from '../services/session/zcode-import/sqlite-access.js'
+// allowlist 推导是 zcode 库路径知识（宿主库/隔离库同文件 SSOT；session-reader-shared-core
+// U10 起唯一承载 = @zhushanwen/zcode-session-source）。
+import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
 // 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'

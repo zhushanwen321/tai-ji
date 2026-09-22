@@ -1,16 +1,48 @@
 /**
- * zcode → pi session JSONL 转换器。
+ * zcode → canonical session 转换器（自 runtime services/session/zcode-import/converter.ts
+ * 迁入改造，session-reader-shared-core 设计 §3.3 D1 + §5 Phase 2；runtime 侧旧文件已
+ * 随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
  *
  * 输入 = 单会话全量行集（message 按 sequence、part 按 (message.sequence, part.sequence)
- * 联合序，sqlite-access.getSessionTranscript）；输出 = pi session JSONL 文本（首行 header +
- * entry 序列）。两层映射：① 消息级投影分派——逐条消息先经 classifyMessage()（projection.ts
- * 移植体）判定六策略之一（或 unclassified），按消息投影对齐设计 §7.3 映射表落点（三类丢弃
- * 整条不产 entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息
- * 内部按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
- * T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
- * T4 tool output 三形态 / T5 其余 part / T6 entry id 递增链；③ compact_summary 合并——
- * D2 完整规格（三路关联判据 + 单条 compaction entry + firstKeptEntryId 三级锚悬空门 +
- * 1:N 最早联合序锚 + 孤儿二分），关联在发射前预扫描趟建立。
+ * 联合序，sqlite-access.getSessionTranscript）；输出 = canonical `Entry[]`（session-core
+ * 严格 Entry 模型，parentId 顺序链完整）。三层映射：
+ * ① 消息级投影分派——逐条消息先经 classifyMessage()（projection.ts，asar 移植体）判定
+ *    六策略之一（或 unclassified），按消息投影对齐设计 §7.3 映射表落点（三类丢弃整条不产
+ *    entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息内部
+ *    按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
+ *    T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
+ *    T4 tool output 三形态 / T5 其余 part / T6 entry id 递增链；③ compact_summary 合并——
+ *    D2 完整规格（三路关联判据 + 单条 compaction entry + firstKeptEntryId 三级锚悬空门 +
+ *    1:N 最早联合序锚 + 孤儿二分），关联在发射前预扫描趟建立（compaction.ts）。
+ *
+ * 来源注记：消息投影分派 / 结构化降级（ImportDegradation 五码闭集）/ compaction D2 全规格 /
+ * usage RT-5#1 缺省语义 / 时间戳 RT-5#8 不伪造 1970，均自 runtime zcode-import dev 演进版
+ * 移植（git 可追溯）；dev 版内部的降级通道（孤儿/悬空/summary 不可用 → custom +
+ * compaction_unlinked）随规格一并移植。
+ *
+ * 相对 dev 版的改造（canonical 契约，设计 D1「canonical 模型 = pi 形态的严格 Entry 树」）：
+ * - emitEntry 不再 stringify 落 JSONL 行，改产 Entry 对象（toCanonicalEntry 收口，键序仍按
+ *   `{type, id, parentId, timestamp, ...payload}` 构造——serializeSession 的字节契约
+ *   责任在构造方，导入侧薄包装拼 header 行 + serializeSession 即得与旧产物逐字节
+ *   兼容的 JSONL）；message 内 pi 透传字段（timestamp/provider/model/usage/stopReason、
+ *   toolResult 的 details/isError、session_info 的 name）是 canonical Entry 冻结接口外
+ *   的合法载荷字段——经宽形态构造 + 边界收口守卫承载，序列化原样落盘、reader 渲染链
+ *   可直接消费，不做有损裁剪。
+ * - entry id 生成收敛基座单点：normalizeZcodeRowId（8-hex 零填充，与 pi 自身
+ *   randomUUID().slice(0,8) 同形态；pi 侧对 entry id 仅作 opaque map key 消费）。
+ * - 对外主函数 readZcodeSession(dbPath, sessionId) → NormalizedSession
+ *   （{header, entries, degradations} 三键，形状由 session-core 类型强制）。
+ *   header 由库内 session 行构造：id 归一化（normalizeZcodeSessionId）、timestamp 取
+ *   session 创建时间、cwd 缺省留空——zcode 会话无 cwd 概念，不伪造（D1）。
+ *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配面：
+ *   导入薄包装 / reader 侧各自拼装）。
+ * - 时间不可解不伪造（RT-5#8）：session.timeCreated / message.time.created 不可解时
+ *   timestamp 键缺省（header.timestamp / entry.timestamp / message.timestamp 均可选），
+ *   降级登记一次，不以 0 产出 1970 假时间戳污染排序与按日统计。
+ * - 错误面归消费侧（§1.5 契约第 4 条）：session 行不存在、归一化失败、查询/JSON
+ *   解析失败均抛普通 Error 原样上抛——reader 侧映射 zcode_* 词表、runtime 导入侧
+ *   映射 import_* 词表，本包不私建错误码与恢复话术（dev 版的 convertZcodeSession
+ *   db 组合 + ImportServiceError 不移植）。
  *
  * 排序锚（C1 探针结论，2026-09-19 宿主库只读抽样）：3 个 interactive 会话（1534/1852/29
  * parts）在 ORDER BY message.sequence, part.sequence 联合序下，携带 time 字段的 part
@@ -18,15 +50,17 @@
  * 非降（3415 parts 零逆序）——联合 sequence 序即事件时序，转换器按输入数组序线性消费，
  * 无需二次按时间排序。
  *
- * 产物正确性锚（设计 §3.4 末）：产物必须能被 taiji 现有消费链（mapSessionEntries →
- * convertPiHistory → replayEntries(applyEntry)）重放——converter.test 以此为可证伪断言。
+ * 产物正确性锚（D1）：产物必须能被 pi entry 消费链重放（parentId 链完整 + toolCall
+ * 配对）——converter.test 以最小重放器 + parseSessionContent round-trip 为可证伪断言。
  */
 
-import type { ImportDegradation } from '@taiji/shared'
+import { normalizeZcodeRowId } from '@zhushanwen/session-core'
+import type { Entry, ImportDegradation, NormalizedSession, SessionHeader } from '@zhushanwen/session-core'
 
-import { ImportServiceError } from '../import-source.js'
-import { classifyMessage } from './projection.js'
-import { precomputeCompactionAssociation, resolveFirstKeptEntryId, summaryBodyOf } from './compaction.js'
+import { openZcodeSessionDb } from './sqlite-access.ts'
+import { normalizeZcodeSessionId } from './normalize.ts'
+import { classifyMessage } from './projection.ts'
+import { precomputeCompactionAssociation, resolveFirstKeptEntryId, summaryBodyOf } from './compaction.ts'
 import {
   asFinite,
   asNonEmptyString,
@@ -35,20 +69,12 @@ import {
   unsealedStopReason,
   usageFromStepFinish,
   zeroUsage,
-} from './assistant-mapping.js'
-import type { ProjectionPolicy } from './semantics.js'
-import type { ZcodeReadonlyDb, ZcodeTranscriptMessageRow } from './sqlite-access.js'
+} from './assistant-mapping.ts'
+import type { ProjectionPolicy } from './semantics.ts'
 
-// 公共面不变：resolveFirstKeptEntryId 实现已迁 compaction.ts，经再导出维持从本模块导入的
-// 既有路径（zcode-compaction-firstkept.test.ts 等）。
+// 公共面：resolveFirstKeptEntryId 实现在 compaction.ts，经再导出维持从本模块导入的
+// 既有路径（compaction-firstkept.test 等锚点；dev 版同款先例）。
 export { resolveFirstKeptEntryId }
-
-/** 目标 pi header（与 ImportArtifact.header 同构；由 prepareImport 产出后传入）。 */
-export interface ZcodeImportHeader {
-  id: string
-  timestamp: string
-  cwd: string
-}
 
 /**
  * 纯转换函数的 message 输入（内存行结构——测试直接构造，不建真库）。parts 元素 =
@@ -62,10 +88,13 @@ export interface ZcodeMessageInput {
   parts: Array<Record<string, unknown>>
 }
 
-/** 转换产物：JSONL 全文（每行含尾随 '\n'）+ 保真度降级明细（D6/D7，结构化记录）。 */
-export interface ZcodeConversionOutput {
-  content: string
-  degradations: ImportDegradation[]
+/** 纯转换函数的 session 行输入（ZcodeSessionRow 的消费列子集）。 */
+export interface ZcodeSessionInput {
+  /** 原始 session.id（`sess_<uuid>` 形态）——header.id 由 normalizeZcodeSessionId 归一化。 */
+  id: string
+  title: string
+  /** 毫秒时间戳（session.time_created）；header.timestamp = ISO 串、消息级时间兜底。 */
+  timeCreated: number
 }
 
 // ── 降级登记（D4 结构化分档，设计 §7.4）──────────────────────────────────────────────
@@ -73,7 +102,7 @@ export interface ZcodeConversionOutput {
 // ① part 级诊断（pushDegradation）：消息内部局部损失（file part 丢弃、running tool 整对
 //    丢弃、malformed 形态跳过、usage 不可解等）——逐条独立 count=1 + sample（messageId
 //    定位源消息），code 恒 'dropped_transient'（这些不是消息级丢弃分档 L1/L2/L4——那由
-//    分类器在消息边界裁决，走 buildZcodeSessionFile 内的 recordDroppedMessage 聚合）。
+//    分类器在消息边界裁决，走 convertZcodeTranscript 内的 recordDroppedMessage 聚合）。
 // ② 消息级丢弃聚合（recordDroppedMessage）：分类器判弃的三类策略 + unclassified，按
 //    (code, kind, source) 维度聚合计数（§7.4：count = 该维度聚合计数）；sample 仅
 //    unclassified 携带（保首条）。
@@ -146,26 +175,20 @@ function mapToolName(zcodeTool: string): string {
   return TOOL_NAME_MAP[zcodeTool] ?? zcodeTool
 }
 
-// T3c stopReason / usage 映射与共享守卫（isRecord / asFinite / asNonEmptyString）在
-// assistant-mapping.ts（字段映射域，2026-09-21 毒消息事故后拆出：mapStopReason /
-// unsealedStopReason（取消轮 error 优先）/ zeroUsage（pi 读面不变量门）/ usageFromStepFinish）。
-
 // ── T6 entry id 链：8-hex 递增计数器（'00000001' 起），parentId 顺序链（首条 null）──────
 // 确定性（可测试）、session 内唯一；pi 不解析 entry id 语义——id 在 pi 侧仅作 opaque map
 // key / leaf 指针 / 相等比较（pi 0.84.4 dist/core/session-manager.js:681-682 与 :758-759，
 // _buildIndex/_appendEntry 均 byId.set(entry.id, entry) + leafId = entry.id，全库无
 // parseInt/形态校验类消费；pi 自身 id 生成 = randomUUID().slice(0,8)，同 8-hex 形态）。
-// 依据条目：docs/architecture/session-import-sources.md §5-I8。
-const ENTRY_ID_RADIX = 16
-const ENTRY_ID_WIDTH = 8
-
+// 依据条目：docs/architecture/session-import-sources.md §5-I8；id 值域归一化收敛基座
+// 单点 normalizeZcodeRowId（D1 最小例子）。
 class EntryChain {
   private counter = 0
   private lastId: string | null = null
 
   next(): { id: string; parentId: string | null } {
     this.counter += 1
-    const id = this.counter.toString(ENTRY_ID_RADIX).padStart(ENTRY_ID_WIDTH, '0')
+    const id = normalizeZcodeRowId(this.counter)
     const parentId = this.lastId
     this.lastId = id
     return { id, parentId }
@@ -182,15 +205,40 @@ class EntryChain {
    * next() 产出的 id 与 peek 结果严格一致（同一确定性公式）。
    */
   peek(): string {
-    return (this.counter + 1).toString(ENTRY_ID_RADIX).padStart(ENTRY_ID_WIDTH, '0')
+    return normalizeZcodeRowId(this.counter + 1)
   }
 }
 
-// ── D2 compaction 关联（设计 §6-D2 / §4.2 关联字段）──────────────────────────────────
-// summaryBodyOf / resolveFirstKeptEntryId / 关联预扫描（compactionPartDisposition +
-// precomputeCompactionAssociation）在 compaction.ts——D2 关联域（2026-09-21 max-lines
-// 拆出，同 assistant-mapping.ts 先例）。resolveFirstKeptEntryId 在本文件尾部再导出，
-// 保持测试既有导入路径（converter.js 公共面）。
+// ── canonical Entry 边界收口（宽形态构造 → 严格模型）────────────────────────────────
+// 转换器自构造的 entry 行携带 canonical 冻结接口外的合法载荷字段（message.usage 等，
+// 见模块头注），全程以宽形态构造；唯一收口点在此——必填结构字段守卫不满足即抛
+// （converter 自产物违约 = 编程错误，fail-fast 优于让下游拿到结构坏 entry）。
+const MESSAGE_ROLES: ReadonlySet<string> = new Set(['user', 'assistant', 'toolResult'])
+
+function toCanonicalEntry(raw: Record<string, unknown>): Entry {
+  const type = raw.type
+  const id = raw.id
+  const parentId = raw.parentId
+  if (typeof type !== 'string' || type.length === 0) {
+    throw new Error(`converter 内部错误：entry 缺 type（${JSON.stringify(raw).slice(0, 120)}）`)
+  }
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error(`converter 内部错误：entry 缺 id（type=${type}）`)
+  }
+  if (parentId !== null && typeof parentId !== 'string') {
+    throw new Error(`converter 内部错误：entry parentId 非 string|null（type=${type}，id=${id}）`)
+  }
+  const message = raw.message
+  if (message !== undefined) {
+    if (!isRecord(message) || typeof message.role !== 'string' || !MESSAGE_ROLES.has(message.role)) {
+      throw new Error(`converter 内部错误：entry message.role 非法（type=${type}，id=${id}）`)
+    }
+  }
+  // 上方守卫已核验必填结构字段（type/id/parentId/message.role）；接口外载荷字段
+  // （message.usage 等，见模块头注）是合法产物，Record → Entry 的剩余差距仅为
+  // TS 无法从守卫推定的必填键存在性，两段断言收窄（守卫即运行时 guard）
+  return raw as unknown as Entry
+}
 
 /** assistant 切段累积器（T3）：一个 step 循环段 = 一条 pi assistant entry。 */
 interface AssistantSegment {
@@ -205,8 +253,9 @@ function newSegment(): AssistantSegment {
   return { content: [], toolResults: [], startMs: undefined }
 }
 
-// usageFromStepFinish（step-finish tokens → pi usage + 不可解 degradation 文本）在
-// assistant-mapping.ts——字段映射域，签名与判据见其头注（RT-5#1 缺省语义不变）。
+// T3c stopReason / usage 映射与共享守卫（isRecord / asFinite / asNonEmptyString）在
+// assistant-mapping.ts（字段映射域：mapStopReason / unsealedStopReason（取消轮 error 优先）/
+// zeroUsage（pi 读面不变量门）/ usageFromStepFinish——RT-5#1 缺省语义见其头注）。
 
 /**
  * T4：tool part 的 state.output → pi toolResult 的 content/details 三形态。
@@ -255,29 +304,46 @@ function toolResultShape(
 // ── 纯转换主体 ─────────────────────────────────────────────────────────────────────
 
 /**
- * 组装目标 JSONL 全文（纯函数，设计 §3.4 全表）。
+ * 把联合序排好的 message 行集转换为 canonical entries（纯函数，映射全表）。
  *
- * 结构（复杂度门禁拆分后）：本函数只保留装配骨架——T1 头两行 / 消息循环趟 / 聚合并入；
- * D2 关联预扫描 → precomputeCompactionAssociation，逐消息分派 → convertMessageByPolicy
- * （compactSummary 合并发射在 emitCompactSummary），拆分不改任何判定与发射顺序。
+ * 结构（复杂度门禁拆分后）：本函数只保留装配骨架——T1 session_info / 消息循环趟 /
+ * 聚合并入；D2 关联预扫描 → precomputeCompactionAssociation，逐消息分派 →
+ * convertMessageByPolicy（compactSummary 合并发射在 emitCompactSummary），拆分不改
+ * 任何判定与发射顺序。
  *
  * @param messages 联合序排好的 message 行集（含 parts）
- * @param title    session.title（T1：第 2 行 session_info.name）
- * @param header   目标 pi header（U3 prepareImport 产出）
+ * @param session  session 行消费列（header 来源：id 归一化 / timestamp = timeCreated ISO）
  */
-export function buildZcodeSessionFile(
+export function convertZcodeTranscript(
   messages: ZcodeMessageInput[],
-  title: string,
-  header: ZcodeImportHeader,
-): ZcodeConversionOutput {
+  session: ZcodeSessionInput,
+): NormalizedSession {
   const degradations: ImportDegradation[] = []
-  const lines: string[] = []
+  const entries: Entry[] = []
+
+  // RT-5#8：session.timeCreated 不可解（纯函数直接调用绕过 sqlite-access 行守卫时）不以 0
+  // 兜底——0 会产出 1970 假时间戳污染排序与按日统计。降级登记一次，header.timestamp /
+  // entry.timestamp / message.timestamp 键缺省（SessionHeader/Entry 字段均可选）。
+  const sessionCreatedMs = asFinite(session.timeCreated)
+  const headerTimestamp = sessionCreatedMs !== undefined ? new Date(sessionCreatedMs).toISOString() : undefined
+  if (sessionCreatedMs === undefined) {
+    pushDegradation(
+      degradations,
+      `session.timeCreated 不可解（${String(session.timeCreated)}），header/message 时间戳缺省：不伪造 1970`,
+    )
+  }
+  const header: SessionHeader = {
+    id: normalizeZcodeSessionId(session.id),
+    ...(headerTimestamp !== undefined && { timestamp: headerTimestamp }),
+  }
 
   const chain = new EntryChain()
-  const emitEntry = (type: string, timestamp: string, rest: Record<string, unknown>): string => {
+  const emitEntry = (type: string, timestamp: string | undefined, rest: Record<string, unknown>): string => {
     const { id, parentId } = chain.next()
-    lines.push(JSON.stringify({ type, id, parentId, timestamp, ...rest }))
-    return id
+    // 键序 = serializeSession 字节契约（pi appendMessage 同款）：{type, id, parentId, timestamp, ...payload}
+    const entry = toCanonicalEntry({ type, id, parentId, ...(timestamp !== undefined && { timestamp }), ...rest })
+    entries.push(entry)
+    return entry.id
   }
 
   // messageId → entryId 映射表（设计 §6-D2）：D2 合并的 firstKeptEntryId ① 级锚在发射趟
@@ -309,19 +375,9 @@ export function buildZcodeSessionFile(
     recordDroppedMessage,
   }
 
-  // T1：首行 header（version=3 = pi CURRENT_SESSION_VERSION）+ 第 2 行 session_info
-  lines.push(JSON.stringify({ type: 'session', version: 3, ...header }))
-  emitEntry('session_info', header.timestamp, typeof title === 'string' && title.length > 0 ? { name: title } : {})
-
-  // 消息级时间兜底：message.data.time.created 缺失时回落 session 创建时刻（确定性，无
-  // Date.now）。RT-5#8：header.timestamp 不可解（生产链路由 prepareImport 的
-  // Number.isFinite 守卫恒合法，此处防御直接构造坏 header 的输入）不以 0 兜底——0 会
-  // 产出 1970 假时间戳污染排序与按日统计；降级登记一次，各时间戳退 header 原串/缺省。
-  const headerMs = Date.parse(header.timestamp)
-  const fallbackMs = Number.isFinite(headerMs) ? headerMs : undefined
-  if (fallbackMs === undefined) {
-    pushDegradation(degradations, `header.timestamp 不可解（${header.timestamp}），时间戳退原串/缺省：不伪造 1970`)
-  }
+  // T1：session_info entry（name = session.title；空 title 不带 name 字段——可选语义）。
+  // 首行 header（{type:'session', version:3, ...header}）不在此产出（序列化装配面）。
+  emitEntry('session_info', headerTimestamp, typeof session.title === 'string' && session.title.length > 0 ? { name: session.title } : {})
 
   for (const [msgIndex, msg] of messages.entries()) {
     // 分派以投影分类结果为准（§7.3 映射表）——role 不再是分派依据（D1：显隐与 zcode GUI
@@ -329,11 +385,11 @@ export function buildZcodeSessionFile(
     // 分类结果已在 D2 预扫描趟计算（关联判据需要全行集策略视图），此处复用。
     const policy = policies[msgIndex]
     const time = isRecord(msg.data.time) ? msg.data.time : {}
-    const createdMs = asFinite(time.created) ?? fallbackMs
-    // entry 时间戳不可解时退 header 原串（保真 > 伪造）；message.timestamp（ms）缺省键
-    const createdIso = createdMs !== undefined ? new Date(createdMs).toISOString() : header.timestamp
+    const createdMs = asFinite(time.created) ?? sessionCreatedMs
+    // entry 时间戳不可解时退 header 时间形态（缺省键，保真 > 伪造）；message.timestamp（ms）缺省键
+    const createdIso = createdMs !== undefined ? new Date(createdMs).toISOString() : headerTimestamp
     // 每消息发射包装：entry 发射时登记 messageId → entryId（首条 wins）
-    const emitForMessage = (type: string, timestamp: string, rest: Record<string, unknown>): void => {
+    const emitForMessage = (type: string, timestamp: string | undefined, rest: Record<string, unknown>): void => {
       const entryId = emitEntry(type, timestamp, rest)
       if (!messageIdToEntryId.has(msg.id)) messageIdToEntryId.set(msg.id, entryId)
     }
@@ -344,7 +400,7 @@ export function buildZcodeSessionFile(
   // 丢弃聚合组按首遇序并入（part 级诊断条目保持逐条在前的登记形态）
   degradations.push(...dropGroups.values())
 
-  return { content: lines.map((l) => `${l}\n`).join(''), degradations }
+  return { header, entries, degradations }
 }
 
 /** 消息级分派依赖：发射趟的共享可变状态，拆分后经本对象传递（避免长参数列）。 */
@@ -358,16 +414,16 @@ interface MessageDispatchDeps {
 }
 
 /**
- * 单条消息的策略分派（§7.3 映射表，原 buildZcodeSessionFile switch 逐 case 搬入）：
- * 三类丢弃整条不产 entry + L1/L2 聚合降级（droppedMessageCode 分档）、unclassified 丢弃 +
- * 独立告警码、compactSummary 走 D2 合并发射（emitCompactSummary）。
+ * 单条消息的策略分派（§7.3 映射表）：三类丢弃整条不产 entry + L1/L2 聚合降级
+ * （droppedMessageCode 分档）、unclassified 丢弃 + 独立告警码、compactSummary 走
+ * D2 合并发射（emitCompactSummary）。
  */
 function convertMessageByPolicy(
   msg: ZcodeMessageInput,
   policy: ProjectionPolicy,
   createdMs: number | undefined,
-  createdIso: string,
-  emitForMessage: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
+  createdIso: string | undefined,
+  emitForMessage: (type: string, timestamp: string | undefined, rest: Record<string, unknown>) => void,
   deps: MessageDispatchDeps,
 ): void {
   switch (policy) {
@@ -404,15 +460,15 @@ function convertMessageByPolicy(
 
 /**
  * compactSummary 策略的 D2 合并发射（§6-D2）：compact_summary 宿主消息与其关联 compaction
- * part 合并为单条 pi compaction entry（替换 U3 现状的 user entry + custom 通道——失败模式
+ * part 合并为单条 pi compaction entry（替换旧版 user entry + custom 通道——失败模式
  * C：摘要以 user 消息形态进上下文却无压缩语义）。summary 不可用 → 不伪造，整条退化为现状
- * 形态。原 buildZcodeSessionFile 该 case 体逐行搬入（复杂度门禁拆分），判定与发射顺序不变。
+ * 形态。
  */
 function emitCompactSummary(
   msg: ZcodeMessageInput,
   createdMs: number | undefined,
-  createdIso: string,
-  emitForMessage: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
+  createdIso: string | undefined,
+  emitForMessage: (type: string, timestamp: string | undefined, rest: Record<string, unknown>) => void,
   deps: MessageDispatchDeps,
 ): void {
   const body = summaryBodyOf(msg.data)
@@ -461,8 +517,8 @@ function emitCompactSummary(
 function convertUserMessage(
   msg: ZcodeMessageInput,
   createdMs: number | undefined,
-  createdIso: string,
-  emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
+  createdIso: string | undefined,
+  emitEntry: (type: string, timestamp: string | undefined, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
   compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
@@ -494,8 +550,8 @@ function convertAssistantMessage(
   msg: ZcodeMessageInput,
   data: Record<string, unknown>,
   createdMs: number | undefined,
-  createdIso: string,
-  emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
+  createdIso: string | undefined,
+  emitEntry: (type: string, timestamp: string | undefined, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
   compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
@@ -508,7 +564,7 @@ function convertAssistantMessage(
     if (segment.content.length === 0) return
     // 段时间戳 = 段内首个携带 time.start 的 part ?? message.time.created（§3.4 T3 顶级补充）
     const tsMs = segment.startMs ?? createdMs
-    // ms 全链不可解（段无 time 锚 + 消息时间不可解）退消息级 ISO 兜底（header 原串保真）
+    // ms 全链不可解（段无 time 锚 + 消息时间不可解）退消息级时间形态（缺省键保真）
     const tsIso = tsMs !== undefined ? new Date(tsMs).toISOString() : createdIso
     emitEntry('message', tsIso, {
       message: {
@@ -595,8 +651,8 @@ function toolCallArguments(
 /**
  * L3 保真损失登记（§7.4）：serialization.truncated=true → 截断版 output 原样保留进
  * toolResult（保真损失非消息丢弃），另登记结构化降级。wire 契约 ImportDegradation 无
- * tool/bytes 字段（U2 已收窄并提交）——按现有信息可用性记宿主消息 (kind, source)；tool 名
- * 可从产物 toolCall 流按 callID 回查，字节明细走 runtime 日志通道（§7.4「全量明细不入 wire」）。
+ * tool/bytes 字段——按现有信息可用性记宿主消息 (kind, source)；tool 名可从产物 toolCall
+ * 流按 callID 回查，字节明细走 runtime 日志通道（§7.4「全量明细不入 wire」）。
  */
 function registerTruncatedOutput(
   state: Record<string, unknown>,
@@ -662,8 +718,8 @@ function handleNonTextPart(
   part: Record<string, unknown>,
   msg: ZcodeMessageInput,
   createdMs: number | undefined,
-  createdIso: string,
-  emitEntry: (type: string, timestamp: string, rest: Record<string, unknown>) => void,
+  createdIso: string | undefined,
+  emitEntry: (type: string, timestamp: string | undefined, rest: Record<string, unknown>) => void,
   degradations: ImportDegradation[],
   compactionDisposition: WeakMap<Record<string, unknown>, 'merged' | 'dangling'>,
 ): void {
@@ -711,27 +767,38 @@ function partStartTime(part: Record<string, unknown>): number | undefined {
   return isRecord(part.time) ? asFinite(part.time.start) : undefined
 }
 
-// ── db 读取 + 纯转换组合（write 闭包的数据源）────────────────────────────────────────
+// ── db 读取 + 纯转换组合（对外主入口）────────────────────────────────────────────
 
 /**
- * 读单会话全量行集并转换（sqlite-access 查询面 + 纯转换）。
+ * 读单会话并转换为 NormalizedSession（zcode source 包对外主函数，D1）。
  *
- * 错误语义（§3.6）：session 行在写入阶段复查不存在（prepareImport 校验与会话写入间的
- * 竞态窗口）→ import_invalid_session；查询/JSON 解析失败抛原始 Error，由调用方
- * （import-source-zcode write 闭包）按 schema 漂移映射 import_invalid_session。
+ * 契约面说明：现生产消费方（reader 扩展 / runtime 导入薄包装）均走
+ * openZcodeSessionDb + convertZcodeTranscript 组合形态（各自持有分相位错误映射），
+ * 本函数当前无生产调用方——保留导出是设计 §1.5 声明的对外主函数（未来第三源契约锚），
+ * 第二源落地前的契约面。
+ *
+ * 开库走 sqlite-access 的 openZcodeSessionDb（存在性 → 四级恢复阶梯 → schema 已知集
+ * 闸门）；返回值三键 {header, entries, degradations}（NormalizedSession，session-core
+ * 类型强制）。db 行存在性在查询阶段复查（定位校验与会话读取间的竞态窗口）。
+ *
+ * 错误面（归消费侧，调用方按各自词表映射——reader → zcode_* / runtime 导入 → import_*）：
+ * - db 文件不存在 / 恢复阶梯耗尽 → Error（sqlite-access 抛出，消息含路径与已尝试级别）
+ * - schema 版本超出已知集 → ZcodeSchemaDriftError（观测版本在 observedVersion 字段）
+ * - session 行不存在（zcode 侧 GC / 从未落库）→ Error，消息含 sessionId 与事实归因
+ * - 行 data 列 JSON 非法（schema 漂移域）→ 原始 Error 上抛（sqlite-access 不静默跳过）
  */
-export function convertZcodeSession(
-  db: ZcodeReadonlyDb,
-  sessionId: string,
-  header: ZcodeImportHeader,
-): ZcodeConversionOutput {
-  const row = db.getSessionRow(sessionId)
-  if (!row) {
-    throw new ImportServiceError(
-      'import_invalid_session',
-      `该会话已不在 zcode 库中（sessionId=${sessionId}，写入阶段复查不存在），请刷新列表后重选`,
-    )
+export async function readZcodeSession(dbPath: string, sessionId: string): Promise<NormalizedSession> {
+  const handle = await openZcodeSessionDb(dbPath)
+  try {
+    const row = handle.db.getSessionRow(sessionId)
+    if (!row) {
+      throw new Error(
+        `该会话已不在 zcode 库中（sessionId=${sessionId}）：该 id 可能已被 zcode 侧回收或从未落库`,
+      )
+    }
+    const transcript = handle.db.getSessionTranscript(sessionId)
+    return convertZcodeTranscript(transcript, { id: sessionId, title: row.title, timeCreated: row.timeCreated })
+  } finally {
+    handle.dispose()
   }
-  const transcript: ZcodeTranscriptMessageRow[] = db.getSessionTranscript(sessionId)
-  return buildZcodeSessionFile(transcript, row.title, header)
 }

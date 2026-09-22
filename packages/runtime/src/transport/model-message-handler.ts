@@ -60,14 +60,14 @@ export class ModelMessageHandler {
     // 静默换成同族条目（事故 A 形态），switchModel 经 set→get_state 读回
     // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状。
     // U2 后 switchModel 的激活前置语义（停止态/回收态先 ensureActive 拉活再切）：不存在
-    // 「无活跃进程 → 回 echo 请求值」的早退分支了——失败一律以分型错误 reject（SESSION_ACTIVATE_* /
-    // MODEL_NOT_FOUND / PROVIDER_CREDENTIAL_MISSING / ENGINE_MODEL_MISSING，见设计 §3.4），
-    // 成功则必为 pi `get_state` 回读的生效值。
-    // [code-harden RT-4#4] 无活跃进程的失败语义已收敛到 service：switchModel 抛
-    // errorWithCode(SESSION_NOT_ACTIVE)，由 server.ts handleMessage 的全局 catch 统一
-    // sendError（code 透传 + details.sessionId），不再有「按请求值回 model.switched」
-    // 的假成功路径；下方 slash === -1 分支退化为纯防御（readEffectiveModelId 的
-    // fallback 也恒为 'provider/id' 复合串）。
+    // 「无活跃进程 → 回 echo 请求值」的早退分支了——失败一律以分型错误 reject（激活阶段
+    // SESSION_ACTIVATE_FAILED / SESSION_NOT_FOUND / SESSION_ACTIVATE_TIMEOUT 透传或包装，
+    // set 阶段 MODEL_NOT_FOUND / PROVIDER_CREDENTIAL_MISSING / ENGINE_MODEL_MISSING，见
+    // 设计 §3.4），成功则必为 pi `get_state` 回读的生效值。失败经 server.ts handleMessage
+    // 的全局 catch 统一 sendError（code 透传 + details.sessionId），无「按请求值回
+    // model.switched」的假成功路径；下方 slash === -1 分支退化为纯防御——fallback 行为
+    // 仍为按请求值回显（旧行为兜底），但正常路径 readEffectiveModelId 的返回恒为
+    // 'provider/id' 复合串，该分支实际不可达。
     const effectiveModel = await this.ctx.modelService.switchModel(sessionId, provider, modelId)
     const slash = effectiveModel.indexOf('/')
     this.ctx.reply(ws, msg.id, 'model.switched', {

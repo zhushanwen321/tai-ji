@@ -1,5 +1,6 @@
 /**
  * 投影分类器逐路对拍测试（U1——设计 §7.2 分类器伪代码与 §4.2 判定树逐分支）。
+ * 来源注记：自 runtime zcode-import dev 演进版整文件移植（用例零改动，git 可追溯）。
  *
  * 用例与 §7.2 判定序一一对应（验收③覆盖证明，编号即下文 describe/it 前缀）：
  *   ⓪ 闭集检查前置（D4）：未知 kind / origin / source（含四路回退的 semantics.source
@@ -11,14 +12,14 @@
  *   ④ fork 四通道专项（message.source / metadata.source / semantics.source / part 级
  *      source）+ forkContext 通道 + 四路回退优先级交互。
  *
- * 期望值全部对照 asar 原函数（getConversationMessageProjectionPolicy，沙箱冒烟与 §11-2
- * 全量对拍核验，报告 .tmp/dev-flow/u1-asar-parity.md）人工推演，两处有意偏离
+ * 期望值全部对照 asar 原函数（getConversationMessageProjectionPolicy，沙箱冒烟与全量
+ * 对拍核验）人工推演，两处有意偏离
  * （compactSummary 落点 / unclassified 降级）单独成组。
  */
 
 import { describe, expect, it } from 'vitest'
 
-import { classifyMessage } from './projection.js'
+import { classifyMessage } from '../projection.ts'
 
 type MsgData = Record<string, unknown>
 type PartData = Record<string, unknown>

@@ -52,6 +52,9 @@ session 导入统一入口的多 coding-agent 抽象：一个导入源负责「�
 ### 消息投影（Message Projection）
 源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
+### 会话读取基座（session-core / zcode-session-source）
+session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
+
 ### Agent Runtime
 taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命周期、协议翻译（pi stdin/stdout JSON RPC ↔ WebSocket）、session CRUD、配置持久化（provider/skill/agent）、model 查询。是 taiji 唯一的后端，所有业务逻辑和数据持久化都在这里。前端不直接和 pi 通信，前端不做业务决策。
 

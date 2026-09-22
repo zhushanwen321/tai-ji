@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
 import { StringEnum } from '@earendil-works/pi-ai'
 import { Type } from 'typebox'
+import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 import type { SessionMetadataProvider } from './discovery/find.js'
 import { handleSessionRead, type SessionReadParams, type SessionReadSignals } from './tool-handler.js'
 import { createHashAutocompleteProvider } from './tui/hash-provider.js'
@@ -181,6 +182,9 @@ const registeredPis = new WeakSet<ExtensionAPI>()
 let currentCwdSessionDir: string | null = null
 
 export default function sessionReaderExtension(pi: ExtensionAPI): void {
+  // zcode 读链的结构化日志走「事后排查」通道（appendEntry，不进 LLM 上下文不显 TUI）：
+  // 最早期注入 pi handle——tool-handler 的 getLogger('session-reader') 由此生效（U9）。
+  setPiHandle(pi)
   // u11（design 2026-09-10 §6.6）：标题元数据走 pi 的 SessionManager.listAll(dir)——
   // session_info name 提取、首消息采集与并发解析由 pi 维护。注入范式同 §6.2 信号包：
   // pi 类型只在本层出现（SessionInfo 对发现层 SessionMetadataEntry 结构兼容，直接透传），

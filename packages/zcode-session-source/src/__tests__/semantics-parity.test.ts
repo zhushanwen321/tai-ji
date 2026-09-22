@@ -1,6 +1,8 @@
 /**
  * zcode 会话语义闭集写死锚（消息投影对齐设计 §6-D5，先例形态 =
  * host-db-suffix-parity.test.ts 的「SSOT 改错即红」）。
+ * 来源注记：自 runtime test/zcode-semantics-parity.test.ts dev 演进版整文件移植
+ * （用例零改动，git 可追溯）——SSOT 随实现迁入本包，锚随 SSOT 同址。
  *
  * 期望值逐段写死（不用数组字面量期望值做整体比对，逐成员独立断言）：semantics.ts 的
  * 五个闭集常量任何一个被改错 / 删值 / 改序（语义上无序，但写死形态连顺序漂移一起拦），
@@ -9,7 +11,8 @@
  * PROJECTION_POLICIES 成员的两类锚定来源（刻意区分，防误把它整体当 asar 返回域对拍）：
  *   - zcode 原生 5 值（realUserInput / visibleAssistant / providerContextOnly /
  *     hiddenSynthetic / timelineOnly）：对拍 asar getConversationMessageProjectionPolicy
- *     返回域（§11-2 全量对拍 0 非预期分歧，报告 .tmp/dev-flow/u1-asar-parity.md）；
+ *     返回域（asar 全量对拍 0 非预期分歧——对拍报告属 .tmp 工作流产物不入库，
+ *     实测口径以本文件期望值为准）；
  *   - compactSummary：taiji 特判落点，asar 同分支返回 providerContextOnly，taiji 侧改落
  *     compaction entry（设计 §6-D2 规格）——锚定 D2 规格，不对拍 asar；
  *   - unclassified 不在闭集：它是 D4 降级态而非投影策略，不参与策略 → entry 落点映射。
@@ -24,8 +27,8 @@ import {
   PROJECTION_POLICY_SET,
   SEMANTICS_KINDS,
   SEMANTICS_ORIGINS,
-} from '../src/services/session/zcode-import/semantics'
-import { classifyMessage } from '../src/services/session/zcode-import/projection'
+} from '../semantics.ts'
+import { classifyMessage } from '../projection.ts'
 
 describe('semantics.kind 闭集（12 值，逐成员写死）', () => {
   it('长度恒为 12（zcode 新增 kind 时此处红——登记新值 + 补落点映射 + 补降级档位）', () => {

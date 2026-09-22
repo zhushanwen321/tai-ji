@@ -5,7 +5,10 @@
  * 从 pi-config-bridge.ts 提取以控制文件行数（pi-config-bridge 已删除）。
  */
 
-import { existsSync, readFileSync, statSync, openSync, readSync, closeSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
+// 首行字节原语（session-reader-shared-core 场景 6：runtime sync 副本收敛基座单点，
+// 本文件 readFirstJsonlLine 改为其 sync 形态的薄包装，见该函数注释）。
+import { readFirstJsonlLineSync } from '@zhushanwen/session-core'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { parseJsonlWarnOnMalformed, readTailEntries } from '../../utils/jsonl.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
@@ -53,25 +56,12 @@ export interface SessionHeader {
 // ── 解析工具 ─────────────────────────────────────────────────
 
 /**
- * parseSessionHeader 的头部读块大小（4KB）。
- *
- * session header（type:"session"，含 cwd/parentSession/forkEntryId）固定在 JSONL 首行，
- * 4KB 覆盖正常 header（cwd 长路径 + 路径型字段）。JSONL 行内无换行：块内无换行且未读满
- * （文件本身 < 4KB 的单行文件）按无首行终止处理；块读满仍无换行（首行 > 4KB）回退
- * 全量读取首行——旧 readFileSync 全量读实现可解析任意长度首行，单纯截断会让超长首行
- * JSON.parse 失败 → session 从侧栏消失（W20 review Fix-4 等价性修复）。
- */
-const HEADER_READ_CHUNK_BYTES = 4096
-
-/** LF（'\n'）字节值——JSONL 行终止符，Buffer.indexOf 用字节比较。 */
-const NEWLINE_BYTE = 0x0a
-
-/**
  * 解析 session JSONL 首行的 session header。
  *
- * wave:perf-w20 微项 9：只读文件头部一小块（而非 readFileSync 全量读再 split('\n')[0]）。
+ * wave:perf-w20 微项 9：只读文件首行（而非 readFileSync 全量读再 split('\n')[0]）。
  * header 固定在首行，长 session 文件（数 MB）全量读只为取第一行是纯浪费；扫描器对每个
- * 候选文件调一次本函数，节省随文件数线性放大。
+ * 候选文件调一次本函数，节省随文件数线性放大。首行读取走基座字节原语（下方
+ * readFirstJsonlLine 薄包装）。
  */
 export function parseSessionHeader(filePath: string): SessionHeader | null {
   const firstLine = readFirstJsonlLine(filePath)
@@ -104,40 +94,20 @@ function isSessionHeaderEntry(entry: unknown): entry is Record<string, unknown> 
 /**
  * 读取 session JSONL 首行原文（trace 路径 A 补 header 用，design D4：RPC get_entries 不含 header）。
  *
- * 与 parseSessionHeader 共用首行读块（4KB 块 + 超长首行回退全量）；区别在本函数返回**原文**
- * 而非解析后的窄字段——trace 的 SESSION 行 inspector 需要 header 完整 JSON（含 version
- * 等未建模字段），解析归调用方（session-trace 模块，用 core parse 容错语义）。
+ * 基座字节原语 readFirstJsonlLineSync（@zhushanwen/session-core）的同步薄包装——首行读取
+ * 的唯一实现随 session-reader-shared-core 场景 6 收敛基座单点（本模块原 4KB 块 + 超长首行
+ * 回退全量的自有实现删除）；本文件只保留既有「任何失败都视为无 header」的降级语义：
+ * 基座对 IO 错误上抛（错误分类信息不丢失），本包装 catch 归 null（消费方零改动）。
+ *
+ * 与 parseSessionHeader 共用本入口；区别在调用方消费的是**原文**而非解析后的窄字段——
+ * trace 的 SESSION 行 inspector 需要 header 完整 JSON（含 version 等未建模字段），解析
+ * 归调用方（session-trace 模块，用 core parse 容错语义）。
  *
  * @returns 首行文本；文件不存在 / 打开读取失败 / 空文件 → null（不抛）
  */
 export function readFirstJsonlLine(filePath: string): string | null {
   try {
-    const fd = openSync(filePath, 'r')
-    let head: Buffer
-    let bytesRead = 0
-    try {
-      const chunk = Buffer.alloc(HEADER_READ_CHUNK_BYTES)
-      bytesRead = readSync(fd, chunk, 0, chunk.length, 0)
-      head = chunk.subarray(0, bytesRead)
-    } finally {
-      closeSync(fd)
-    }
-    const nlIndex = head.indexOf(NEWLINE_BYTE)
-    let firstLine: string
-    if (nlIndex !== -1) {
-      firstLine = head.subarray(0, nlIndex).toString('utf-8')
-    } else if (bytesRead >= HEADER_READ_CHUNK_BYTES) {
-      // 首行 > 4KB（4KB 块读满仍未见换行）：回退全量读取首行，与旧 readFileSync 全量读
-      // 实现严格等价（W20 review Fix-4——超长首行可解析，session 不从侧栏消失）。
-      // readFileSync 失败由外层 catch 返回 null，与打开/读取失败同错误面。
-      const content = readFileSync(filePath, 'utf-8')
-      const contentNl = content.indexOf('\n')
-      firstLine = contentNl === -1 ? content : content.slice(0, contentNl)
-    } else {
-      // 文件本身 < 4KB 且无换行（单行 JSONL）：head 即全量内容
-      firstLine = head.toString('utf-8')
-    }
-    return firstLine || null
+    return readFirstJsonlLineSync(filePath) ?? null
   } catch {
     return null
   }

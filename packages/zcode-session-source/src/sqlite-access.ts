@@ -1,14 +1,22 @@
 /**
- * zcode 会话库只读访问层（session-import-unified 设计 §3.3「sqlite 访问约定」/§3.7/§3.8）。
+ * zcode 会话库只读访问层（自 runtime services/session/zcode-import/sqlite-access.ts
+ * 迁入改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
  *
- * 访问模式复用 packages/zcode-subagent-cli/src/reader.ts 先例（§2.3「既有读取实现」）：
- * - node:sqlite DatabaseSync readOnly 连接（WAL 只读不阻塞 zcode 宿主写入，§3.8）；
- * - 转换/查询全程不写宿主库（G4 严格只读）；
+ * 访问模式（沿用既有先例）：
+ * - 只读连接（readonly 语义 = WAL 只读不阻塞宿主写入）；转换/查询全程不写库；
  * - close 失败吞错（WAL 并发读下只读连接 close 失败不影响已读结果）。
  *
- * 本模块不 import 引擎包（zcode-subagent-cli 不是 runtime 依赖，runtime 内自建访问）；
- * 路径段常量与引擎侧 db-path.ts 同源自 @zhushanwen/subagent-engine-sdk 的
- * zcode-db-paths.ts（跨侧契约根，两侧 import 同一常量——非各自重声明）。
+ * 相对 runtime 旧版的改造：
+ * - 驱动来自本包 sqlite-driver（D3 双驱动），不再固定 node:sqlite；
+ * - 开库统一走四级恢复阶梯（recovery.ts，设计 §3.5 单一规格）——runtime（node）
+ *   侧直开从来可用（F24），阶梯主要服务 bun 宿主侧的静息态 CANTOPEN；
+ * - schema 版本从「best-effort 诊断」升级为已知集闸门（KNOWN_ZCODE_SCHEMA_
+ *   VERSIONS，版本超出已知集抛 ZcodeSchemaDriftError——错误码词表属消费侧，
+ *   本包不私建 zcode_* 码）。
+ *
+ * 本模块不 import 引擎包（zcode-subagent-cli 不是依赖）；库路径段常量与引擎侧
+ * db-path.ts 同源自 @zhushanwen/subagent-engine-sdk 的 zcode-db-paths.ts（跨侧
+ * 契约根，两侧 import 同一常量——非各自重声明）。
  */
 
 import { existsSync } from 'node:fs'
@@ -17,34 +25,47 @@ import { join } from 'node:path'
 
 import { ZCODE_HOST_DB_SUFFIX, ZCODE_ISOLATED_DB_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 
-/** 宿主库默认路径（运行时动态推导，禁硬编码绝对路径——组合根注入给 source 的默认值）。 */
+import { openWithRecovery, type RecoveryLevel } from './recovery.ts'
+import type { SqliteDb } from './sqlite-driver.ts'
+
+/** 宿主库默认路径（运行时动态推导，禁硬编码绝对路径——组合根注入给消费方的默认值）。 */
 export function hostZcodeDbPath(): string {
   return join(homedir(), ...ZCODE_HOST_DB_SUFFIX)
 }
 
 /**
- * zcode 隔离会话库绝对路径（runtime 侧投影：`<dataDir>/engines/zcode/session-db/db.sqlite`）。
- * 与 packages/zcode-subagent-cli/src/db-path.ts 的 zcodeSessionDbPath 同布局（引擎 dataDir
- * = TAIJI_AGENT_DATA_DIR = shared getDataDir()，同一目录两侧各自推导），路径段常量同源
- * （ZCODE_ISOLATED_DB_SEGMENTS）。
- * @param dataDir taiji 数据根（getDataDir() 产物）
+ * zcode 隔离会话库绝对路径（`<dataDir>/engines/zcode/session-db/db.sqlite`）。
+ * 与引擎侧 zcodeSessionDbPath 同布局（引擎 dataDir = TAIJI_AGENT_DATA_DIR =
+ * shared getDataDir()，同一目录两侧各自推导），路径段常量同源（ZCODE_ISOLATED_DB_SEGMENTS）。
+ * @param dataDir taiji 数据根（getDataDir() 产物，由调用方传入——本包不做宿主路径推导）
  */
 export function zcodeIsolatedDbPath(dataDir: string): string {
   return join(dataDir, ...ZCODE_ISOLATED_DB_SEGMENTS)
 }
 
 /**
- * zcode 会话库白名单集合（wire 帧 dbPath 的唯一放行来源，封闭集合）：
- * `[隔离库（现役）, 宿主库（仅存量兼容）]`。与 zcode-subagent-cli db-path.ts 的
- * zcodeDbPathAllowlist 同构——引擎侧守 record/handle 读取链，本侧守 session.import
- * wire 帧（transport 层调用，见 session-message-handler）：wire 帧上的 dbPath 来自
- * 不可信面（任意 WS 客户端），仅放行集合内精确绝对路径，其余拒绝
- * （import_db_path_forbidden）——防白名单外任意文件被当会话库读取。集合形态
- * （而非 `||` 列表）使未来第三个合法路径只需改本函数。
- * @param dataDir taiji 数据根（getDataDir() 产物）
+ * zcode 会话库白名单集合（封闭集合）：`[隔离库（现役）, 宿主库（仅存量兼容）]`。
+ * 与引擎侧 zcodeDbPathAllowlist 同构——wire 帧 / session 数据里的 dbPath 来自
+ * 不可信面，仅放行集合内精确绝对路径。集合形态（而非 `||` 列表）使未来第三个
+ * 合法路径只需改本函数。
+ * @param dataDir taiji 数据根（getDataDir() 产物，由调用方传入）
  */
 export function zcodeImportDbAllowlist(dataDir: string): readonly string[] {
   return [zcodeIsolatedDbPath(dataDir), hostZcodeDbPath()]
+}
+
+/** schema 版本已知集（宿主 schema 0.16.5 消费面子集；版本超出即 drift 信号）。 */
+export const KNOWN_ZCODE_SCHEMA_VERSIONS: readonly string[] = ['0.16.5']
+
+/** schema 版本不认识（读 schema_migration 失败或版本超出已知集）。 */
+export class ZcodeSchemaDriftError extends Error {
+  /** 观测到的版本（表不可读时为 undefined——两种归因经此字段区分，不拆两个错误类）。 */
+  readonly observedVersion: string | undefined
+  constructor(observedVersion: string | undefined, message: string) {
+    super(message)
+    this.name = 'ZcodeSchemaDriftError'
+    this.observedVersion = observedVersion
+  }
 }
 
 /** 候选/会话行的最小消费列（camelCase，source 层不再触 sqlite 原始 snake_case）。 */
@@ -59,7 +80,7 @@ export interface ZcodeSessionRow {
 }
 
 /**
- * 单会话全量转换行集的 message 行（U4 转换器输入）。parts 元素 = part.data 已解析
+ * 单会话全量转换行集的 message 行（converter 输入）。parts 元素 = part.data 已解析
  * JSON 对象本体（不包 {sequence, data} 行壳——转换器把 parts 元素直接当 part 消费，
  * 包装壳会让 part.type 全体读成 undefined；part 序即数组序 = 联合序，sequence 冗余不导出）。
  */
@@ -70,41 +91,30 @@ export interface ZcodeTranscriptMessageRow {
   parts: Array<Record<string, unknown>>
 }
 
-/** node:sqlite 驱动的最小消费面（结构类型，禁 any；与 reader.ts 的 SqliteDb 同手法）。 */
-interface SqliteStatement {
-  all: (...args: unknown[]) => unknown[]
-  get: (...args: unknown[]) => unknown
-}
-
-interface SqliteDb {
-  prepare: (sql: string) => SqliteStatement
-  close: () => void
-}
-
 /** 只读查询面：候选行 / 单会话行 / 字节聚合 / schema 版本诊断。 */
 export interface ZcodeReadonlyDb {
   /**
-   * 候选会话行（D8：排除 subagent_child；time_updated 降序）。
+   * 候选会话行（排除 subagent_child；time_updated 降序）。
    * limit 可选：SQL 级截断。调用方需要全量语义（query 过滤 / total / dirs 聚合与
-   * pi 源同构）时不传——全表 4k 行毫秒级（§3.8），JS 侧再过滤后截断。
+   * pi 源同构）时不传——全表毫秒级，JS 侧再过滤后截断。
    */
   listCandidateSessions(opts?: { limit?: number }): ZcodeSessionRow[]
-  /** 按原始 id 取单行（prepareImport 校验用）；不存在返回 undefined。 */
+  /** 按原始 id 取单行（导入定位校验用）；不存在返回 undefined。 */
   getSessionRow(id: string): ZcodeSessionRow | undefined
   /**
-   * 单会话全量转换行集（U4 转换器输入）：message 按 sequence 升序，每条 message 的
+   * 单会话全量转换行集（converter 输入）：message 按 sequence 升序，每条 message 的
    * parts 按 (message.sequence, part.sequence) 联合序排好。LEFT JOIN 保留无 part 的
-   * message（parts 空数组）。data 列 JSON 解析失败抛 Error（调用方按 §3.6 ② schema
-   * 漂移映射 import_invalid_session）。
+   * message（parts 空数组）。data 列 JSON 解析失败抛 Error（调用方按 schema 漂移
+   * 映射消费侧错误码，本层不静默跳过——整行丢失会破坏切段配对）。
    */
   getSessionTranscript(sessionId: string): ZcodeTranscriptMessageRow[]
   /**
-   * 真字节口径的会话体量（§3.7）：SUM(length(CAST(part.data AS BLOB)))——TEXT 直接
-   * length() 返回字符数，CJK 内容会低估；GROUP BY session_id 走 part_session_idx。
-   * 无 part 的会话不在返回 Map 中（调用方按 0 处理）。
+   * 真字节口径的会话体量：SUM(length(CAST(part.data AS BLOB)))——TEXT 直接
+   * length() 返回字符数，CJK 内容会低估；GROUP BY session_id。无 part 的会话不在
+   * 返回 Map 中（调用方按 0 处理）。
    */
   candidatesByteSize(sessionIds: readonly string[]): Map<string, number>
-  /** best-effort 读 schema_migration 版本（查询失败的错误诊断用，失败返回 undefined）。 */
+  /** best-effort 读 schema_migration 版本（诊断用，失败返回 undefined）。 */
   readSchemaVersion(): string | undefined
   /** 关闭连接（吞错语义见模块头注；幂等无害——重复 close 由驱动抛错吞掉）。 */
   close(): void
@@ -136,8 +146,8 @@ function rowToSessionRow(row: unknown): ZcodeSessionRow {
 
 /**
  * message/part 行的 data 列（JSON 字符串）→ 已解析对象。非法 JSON / 非对象形态抛
- * Error（上下文带表与行标识）——上游（import-source-zcode write 闭包）按 §3.6 ②
- * schema 漂移映射 import_invalid_session，不在本层静默跳过（整行丢失会破坏切段配对）。
+ * Error（上下文带表与行标识）——不在本层静默跳过（整行丢失会破坏切段配对），
+ * 上游按 schema 漂移映射消费侧错误。
  */
 function parseRowData(raw: unknown, ctx: string): Record<string, unknown> {
   if (typeof raw !== 'string') {
@@ -158,7 +168,7 @@ function parseRowData(raw: unknown, ctx: string): Record<string, unknown> {
 function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
   return {
     listCandidateSessions(opts) {
-      // D8：subagent_child（内部子任务）不进候选域；task_type 有索引（§2.3）
+      // subagent_child（内部子任务）不进候选域；task_type 有索引
       const sql =
         'SELECT id, title, directory, task_type, time_created, time_updated FROM session ' +
         "WHERE task_type != 'subagent_child' ORDER BY time_updated DESC" +
@@ -173,9 +183,9 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
       return row === undefined ? undefined : rowToSessionRow(row)
     },
     getSessionTranscript(sessionId) {
-      // 联合序（C1 探针 2026-09-19 实测，见 converter.ts 头注）：ORDER BY m.sequence, p.sequence
-      // 与 part 自身 time.start 时序一致（3 个 interactive 会话 3415 parts 零逆序）。
-      // LEFT JOIN 保留无 part 的 message（pseq/pdata 为 NULL 的行）
+      // 联合序（runtime 2026-09-19 探针实测）：ORDER BY m.sequence, p.sequence
+      // 与 part 自身 time.start 时序一致。LEFT JOIN 保留无 part 的 message
+      //（pseq/pdata 为 NULL 的行）
       const rows = db
         .prepare(
           'SELECT m.id AS mid, m.sequence AS mseq, m.data AS mdata, p.sequence AS pseq, p.data AS pdata ' +
@@ -222,7 +232,7 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
         // 丢弃——warn 留痕；消费端以 null 语义呈现「大小未知」，不回填 0 B 假数据
         if (typeof r.bytes !== 'number') {
           console.warn(
-            `[zcode-import] candidatesByteSize 行 bytes 非 number（实际 ${typeof r.bytes}），该会话大小未知：sessionId=${r.sid}`,
+            `[zcode-session-source] candidatesByteSize 行 bytes 非 number（实际 ${typeof r.bytes}），该会话大小未知：sessionId=${r.sid}`,
           )
           continue
         }
@@ -248,7 +258,6 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
         db.close()
       } catch (err) {
         // [HISTORICAL] 只读连接 close 失败（WAL 并发读常见）不影响读取结果——吞掉继续
-        //（reader.ts 同款语义，§3.8「宿主库并发」）
         void err
       }
     },
@@ -256,26 +265,59 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
 }
 
 /**
- * 打开 zcode 会话库只读连接。dbPath 不存在直接抛（调用方映射 import_source_missing）；
- * 打开失败（权限/锁/驱动不可用）抛原始错误（调用方映射错误规格，§3.6）。
+ * schema 版本已知集闸门：读 schema_migration 最新版本，超出 KNOWN_ZCODE_SCHEMA_
+ * VERSIONS（或表不可读）→ ZcodeSchemaDriftError（observedVersion 区分「有版本但不
+ * 认识」与「表不可读」两种归因）。检查通过静默返回。
  */
-export async function openZcodeReadonlyDb(dbPath: string): Promise<ZcodeReadonlyDb> {
+export function assertKnownSchema(db: SqliteDb): void {
+  let observedVersion: string | undefined
+  try {
+    const row = db.prepare('SELECT app_version FROM schema_migration ORDER BY time_applied DESC LIMIT 1').get()
+    if (typeof row === 'object' && row !== null) {
+      const v = (row as Record<string, unknown>).app_version
+      if (typeof v === 'string' && v.length > 0) observedVersion = v
+    }
+  } catch {
+    throw new ZcodeSchemaDriftError(
+      undefined,
+      `zcode session db schema_migration unreadable (expected one of: ${KNOWN_ZCODE_SCHEMA_VERSIONS.join('/')})`,
+    )
+  }
+  if (observedVersion === undefined || !KNOWN_ZCODE_SCHEMA_VERSIONS.includes(observedVersion)) {
+    throw new ZcodeSchemaDriftError(
+      observedVersion,
+      `zcode session db schema version unknown: ${observedVersion ?? '(absent)'} ` +
+        `(known: ${KNOWN_ZCODE_SCHEMA_VERSIONS.join('/')})`,
+    )
+  }
+}
+
+/** openZcodeSessionDb 产物：查询面 + 实际命中的阶梯级别 + 统一收尾。 */
+export interface ZcodeSessionDbHandle {
+  db: ZcodeReadonlyDb
+  /** 实际命中的四级恢复阶梯级别（恢复成功非静默事件：调用方记结构化日志）。 */
+  via: RecoveryLevel
+  /** 幂等收尾：close + L3 快照目录清理。finally 必调。 */
+  dispose: () => void
+}
+
+/**
+ * 打开 zcode 会话库只读连接（编排入口：存在性检查 → 四级恢复阶梯 → schema 已知集
+ * 闸门）。dbPath 不存在直接抛 Error（调用方映射「库不存在」语义）；阶梯耗尽抛
+ * SqliteUnreadableError（attempted 含已尝试级别）；schema 超出已知集抛
+ * ZcodeSchemaDriftError。其余查询期错误原样上抛（驱动错误 / data 列 JSON 非法等），
+ * 调用方按消费侧错误规格映射。
+ */
+export async function openZcodeSessionDb(dbPath: string): Promise<ZcodeSessionDbHandle> {
   if (!existsSync(dbPath)) {
     throw new Error(`db 文件不存在：${dbPath}`)
   }
-  // [HISTORICAL] 动态 import 必须经变量间接：esbuild CJS 输出会把字面量
-  // import("node:sqlite") 规约成裸名 import("sqlite")（external 化 node builtin 时的
-  // 前缀剥离），而 Node 动态 import 裸名不走内置模块 fallback → ERR_MODULE_NOT_FOUND
-  // → taiji runtime bundle（tsup CJS）下恒失败（2026-08-25 P5 实测，reader.ts 同款坑）。
-  // 非字面量 specifier esbuild 无法静态分析，保留原样输出，node: 前缀运行时正确解析。
-  const sqliteModuleId = 'node:sqlite'
-  const sqliteMod = (await import(sqliteModuleId).catch(() => undefined)) as
-    | { DatabaseSync?: unknown }
-    | undefined
-  const DatabaseSyncCtor = sqliteMod?.DatabaseSync
-  if (typeof DatabaseSyncCtor !== 'function') {
-    throw new Error('当前 node 运行时不支持 node:sqlite（需 >=22.13）')
+  const opened = await openWithRecovery(dbPath)
+  try {
+    assertKnownSchema(opened.db)
+  } catch (err) {
+    opened.dispose()
+    throw err
   }
-  type DatabaseSyncLike = new (path: string, opts: { readOnly: boolean }) => SqliteDb
-  return wrapDb(new (DatabaseSyncCtor as DatabaseSyncLike)(dbPath, { readOnly: true }))
+  return { db: wrapDb(opened.db), via: opened.via, dispose: opened.dispose }
 }

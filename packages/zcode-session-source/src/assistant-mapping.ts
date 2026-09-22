@@ -1,8 +1,10 @@
 /**
  * zcode assistant → pi assistant 的字段映射域（converter 的无状态辅助层）：
  * T3c stopReason 映射（含取消/失败轮的 error 优先裁决）、step-finish tokens → pi usage、
- * 共享小型运行时守卫。纯函数、零 converter 依赖（防循环）；2026-09-21 毒消息事故后
- * 从 converter.ts 拆出（max-lines），行为零变化（测试仍锚在 converter 公共面）。
+ * 共享小型运行时守卫。纯函数、零 converter 依赖（防循环）。
+ * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
+ * git 可追溯），本包为现行唯一承载。原拆分背景（2026-09-21 毒消息事故后自 converter.ts
+ * 拆出，行为零变化，测试锚在 converter 公共面）见 git 历史。
  */
 
 const STOP_REASON_MAP: Readonly<Record<string, string>> = Object.freeze({

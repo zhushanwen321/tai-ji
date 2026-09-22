@@ -23,7 +23,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ZCODE_HOST_DB_SUFFIX, ZCODE_ISOLATED_DB_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 
-import { hostZcodeDbPath, zcodeIsolatedDbPath } from '../src/services/session/zcode-import/sqlite-access'
+import { hostZcodeDbPath, zcodeIsolatedDbPath } from '@zhushanwen/zcode-session-source'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 

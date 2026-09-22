@@ -88,9 +88,9 @@ import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
 import { ZcodeImportSource } from './services/session/import-source-zcode.js'
 import type { SessionImportSource } from './services/session/import-source.js'
-// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（sqlite-access 内重声明，与引擎包
-// db-path.ts 同语义；runtime 不依赖引擎包）
-import { hostZcodeDbPath } from './services/session/zcode-import/sqlite-access.js'
+// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（zcode-session-source 与引擎包
+// db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
+import { hostZcodeDbPath } from '@zhushanwen/zcode-session-source'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
 import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →

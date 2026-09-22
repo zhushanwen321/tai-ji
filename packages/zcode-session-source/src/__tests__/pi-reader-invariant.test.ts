@@ -1,5 +1,9 @@
 /**
  * zcode 导入产物的 pi 读面不变量锚（PS-44 探针，2026-09-21 毒消息事故回归）。
+ * 来源注记：自 runtime zcode-import dev 演进版移植（用例语义零改动，git 可追溯）；
+ * 产物构造适配本包 canonical 契约（convertZcodeTranscript + serializeSession + header 行
+ * 包内拼装），pi dist 定位改为包内轻量实现——不跨包 import runtime（跨包会成环，
+ * 手段自证先例见 converter.test 头注）。
  *
  * 事故链：zcode 取消轮导入后产物里出现「assistant、stopReason='stop'、无 usage」——
  * pi 0.84.4 读面对这种形态裸读崩溃：
@@ -11,18 +15,37 @@
  * buildContextEntries 则是真实 dist 调用——pi 解析器本身不校验 usage，守卫责任在
  * 产物写侧，即 converter 的不变量门）。
  *
- * 实装加载：locatePiCodingAgentDist 动态 import dist JS（firstkept 测试同款机制）；
- * dist 不可达 = 语义权威缺失，硬失败而非 skipIf。
+ * 实装加载：包内 locatePiCodingAgentDist 动态 import dist JS（cwd 上溯定位，与 runtime
+ * pi-semantics 探针族同款机制）；dist 不可达 = 语义权威缺失，硬失败而非 skipIf。
  *
- * 运行：cd packages/runtime && pnpm test -- pi-reader-invariant
  * 纯内存构造，零 fs 写（不触真实数据目录）。
  */
 import { describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { buildZcodeSessionFile, type ZcodeMessageInput } from './converter.js'
-import { locatePiCodingAgentDist } from '../../../infra/pi/__tests__/helpers/pi-semantics-probe.js'
+import { serializeSession } from '@zhushanwen/session-core'
+
+import { convertZcodeTranscript, type ZcodeMessageInput, type ZcodeSessionInput } from '../converter.ts'
+
+/**
+ * cwd 逐级上溯定位 node_modules/@earendil-works/pi-coding-agent/dist（config.js 哨兵；
+ * 最多上溯 6 级）。包内轻量版——runtime 探针族 locatePiDist 的同构实现，不跨包 import
+ * （zcode-session-source 反向 import runtime 会成环）。版本权威源约定见 AGENTS.md
+ * 「pi 语义断言的权威源 = node_modules 实装版」。
+ */
+function locatePiCodingAgentDist(): string | null {
+  let dir = process.cwd()
+  for (let i = 0; i < 6; i++) {
+    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
+    if (existsSync(join(candidate, 'config.js'))) return candidate
+    const parent = join(dir, '..')
+    if (parent === dir) break
+    dir = parent
+  }
+  return null
+}
 
 const PI_DIST = locatePiCodingAgentDist()
 if (!PI_DIST) {
@@ -59,20 +82,22 @@ function contextScanViolations(entries: ParsedEntry[]): ParsedEntry[] {
   )
 }
 
-const HEADER = Object.freeze({
-  id: '0198test-0000-0000-0000-00000000000b',
-  timestamp: '2026-01-02T03:04:05.000Z',
-  cwd: '/tmp/zc-conv-cwd',
-})
+const SESSION_INPUT: ZcodeSessionInput = {
+  id: 'sess_0198test-0000-0000-0000-00000000000b',
+  title: 'T',
+  timeCreated: Date.parse('2026-01-02T03:04:05.000Z'),
+}
+const NORMALIZED_ID = '0198test-0000-0000-0000-00000000000b'
+const NORMALIZED_TIMESTAMP = '2026-01-02T03:04:05.000Z'
 
 /** 事故现场复刻（修复前产物形态）：取消轮映射成的伪 stop + 无 usage assistant。 */
 const POISON_JSONL =
-  JSON.stringify({ type: 'session', id: '0198test-0000-0000-0000-00000000000b', timestamp: HEADER.timestamp, cwd: HEADER.cwd }) + '\n' +
+  JSON.stringify({ type: 'session', id: NORMALIZED_ID, timestamp: NORMALIZED_TIMESTAMP }) + '\n' +
   JSON.stringify({
     type: 'message',
     id: '00000001',
     parentId: null,
-    timestamp: HEADER.timestamp,
+    timestamp: NORMALIZED_TIMESTAMP,
     message: {
       role: 'assistant',
       content: [{ type: 'thinking', thinking: '半截思考（model_request_cancelled 流出）' }],
@@ -101,7 +126,9 @@ function convertedCancelledTurn(): string {
       ],
     },
   ]
-  return buildZcodeSessionFile(msgs, 'T', HEADER).content
+  const session = convertZcodeTranscript(msgs, SESSION_INPUT)
+  // 序列化装配面（converter 不产 header 行——首行在此拼装，导入薄包装同款形态）
+  return `${JSON.stringify({ type: 'session', version: 3, ...session.header })}\n${serializeSession(session.entries)}`
 }
 
 describe('pi reader invariant (PS-44): assistant entries must carry usage for unguarded pi reads', () => {
@@ -136,7 +163,10 @@ describe('pi reader invariant (PS-44): assistant entries must carry usage for un
         ],
       },
     ]
-    const entries = parseSessionEntries(buildZcodeSessionFile(msgs, 'T', HEADER).content) as ParsedEntry[]
+    const session = convertZcodeTranscript(msgs, SESSION_INPUT)
+    const entries = parseSessionEntries(
+      `${JSON.stringify({ type: 'session', version: 3, ...session.header })}\n${serializeSession(session.entries)}`,
+    ) as ParsedEntry[]
     expect(statsScanViolations(entries)).toHaveLength(0)
     expect(contextScanViolations(entries)).toHaveLength(0)
     expect(() => buildContextEntries(entries)).not.toThrow()

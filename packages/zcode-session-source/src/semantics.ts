@@ -1,11 +1,13 @@
 /**
  * zcode 会话语义闭集 SSOT（消息投影对齐设计 §4.2 值域表 + §6-D5）。
+ * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
+ * git 可追溯），本包为现行唯一承载。
  *
  * 五个值域全部是闭集：zcode 升级新增枚举值时，本文件是仓内唯一单点；parity 测试锚
- * （packages/runtime/test/zcode-semantics-parity.test.ts）把期望值逐段写死，SSOT 改错
- * 或 zcode 侧值域漂移均构建期红。值逐字取自设计 §4.2 值域表（源头 = ZCode app.asar
- * 内 getConversationMessageProjectionPolicy 及其配套 schema，本机 ZCode 3.14.x / 宿主库
- * schema_migration.app_version = 0.16.5 实证，见 .tmp/dev-flow/u1-asar-parity.md 对拍报告）。
+ * 把期望值逐段写死，SSOT 改错或 zcode 侧值域漂移均构建期红。值逐字取自设计 §4.2 值域表
+ * （源头 = ZCode app.asar 内 getConversationMessageProjectionPolicy 及其配套 schema，
+ * 本机 ZCode 3.14.x / 宿主库 schema_migration.app_version = 0.16.5 实证，见 asar 全量
+ * 对拍报告——.tmp 工作流产物不入库，实测口径以测试期望值为准）。
  *
  * 刻意不导出 PART_TYPES（设计 §6-D5 被否条目）：仓内无判定职责消费 part 类型闭集
  * （未知 part type 的前向兼容由 converter 既有「跳过 + 降级登记」覆盖），part 类型登记

@@ -947,7 +947,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/services/session/zcode-import/pi-reader-invariant.test.ts"
+      "test": "packages/zcode-session-source/src/__tests__/pi-reader-invariant.test.ts"
     },
     "verifiedWith": "0.84.4"
   },

@@ -293,6 +293,13 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
 
+### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
+
+**症状**：手工跑 zcode-session-source 的 bun:sqlite 腿测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
+
+**根因**：vitest 可执行文件的 shebang 是 node，`bunx` 默认按 shebang 用 node 启动它——进程内 `typeof Bun === 'undefined'`，D3 双驱动探测走 node 分支。`bunx` ≠ bun 运行时，必须显式 `--bun` 才把 vitest 本体跑在 bun 下。
+
+**正确做法**：真 bun 腿 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在守卫 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
 
 ## 环境变量速查
 

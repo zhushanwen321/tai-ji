@@ -605,6 +605,28 @@ jobs:
       - name: Vitest test-guard mount guard
         run: node scripts/check-vitest-guard.mjs
 
+      # zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5，
+      # 与 pre-commit 2h 段同源直调）：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
+      # 生产宿主唯一可用 sqlite 驱动——bun 趟只能在有 bun 的环境跑，本地开发者可无
+      # bun（check-bun-driver fail-open 放行），CI 是该路径的兜底覆盖面，故 --require-bun
+      # 把「bun 缺失」翻转为红。版本钉 1.3.8 = P-bun-host 实测版本（设计 D3 重审触发
+      # 条件：bun 大版本升级改变 sqlite 语义须重验探针门后同步此处）。
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+      - name: Bun driver dual-run (zcode-session-source)
+        run: node scripts/check-bun-driver.mjs --require-bun
+
+      # P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）：builtin staged
+      # 产物内 sqlite 驱动探测代码必须保持「运行期解析」形态——esbuild 升级 / 驱动
+      # 实现回改字面量会把 spec 静态化（bundle 成功但 staged 运行期 Cannot find
+      # module，比不拆更糟）。pre-commit 2h-2 段只在 staged 命中 reader 源 /
+      # zcode-session-source 时触发，CI 是免 staged 前提下的兜底覆盖面（D7 通则，
+      # 与 check-bun-driver 同一挂载理由）——CI 无 staged 产物，--rebuild 先重建
+      #（bundle-extensions <1s）再检查。
+      - name: P-bundle gate (staged driver spec runtime-resolved form)
+        run: node scripts/check-pbundle.mjs --rebuild
+
       # G2 CI vitest 目标非空守卫：解析本文件全部 `vitest run` 调用（含经 package.json
       # script 一层间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被
       # config exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test

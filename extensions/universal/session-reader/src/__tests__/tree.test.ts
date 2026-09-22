@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildTreeView } from '../core/tree.js'
-import type { Entry } from '../core/parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 
 /** 构造最小 Entry（tree.ts 只消费 type/id/parentId，其余字段省略） */
 function e(id: string, parentId: string | null): Entry {

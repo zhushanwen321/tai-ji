@@ -1,6 +1,8 @@
 /**
  * zcode 消息投影分类器（消息投影对齐设计 §6-D1 / §7.2——ZCode app.asar 内
  * `getConversationMessageProjectionPolicy`（minified 标识 `Ss`）的逐条移植体）。
+ * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
+ * git 可追溯），本包为现行唯一承载。
  *
  * 移植纪律：判定顺序即语义，禁止重排——设计 §6-D1 实证反例：`providerVisibility==='visible'`
  * 先于 `origin==='agent_runtime'` 判定，颠倒会把 background_notification 从
@@ -9,9 +11,10 @@
  *    compaction entry），asar 原函数同分支返回 'providerContextOnly'；
  * ② 闭集检查前置返回 'unclassified'（D4：未知枚举显形降级），asar 无此概念（未知值静默
  *    落入兜底链）。
- * 除此之外逐分支与 asar 等价（§11-2 对拍 0 分歧，报告 .tmp/dev-flow/u1-asar-parity.md）。
+ * 除此之外逐分支与 asar 等价（asar 全量对拍 0 分歧——对拍报告属 .tmp 工作流产物不入库，
+ * 实测口径以 projection.test 期望值为准）。
  *
- * asar 符号对照（移植时核对用，见对拍报告提取方式节）：Ss=本函数 / ur=asRecord /
+ * asar 符号对照（移植时核对用，提取方式见 dev 演进线记录）：Ss=本函数 / ur=asRecord /
  * bs=asNonEmptyString / kN=messageSource / xN=hasModelOnlyPart / _N=isTimelineOnlyMessage /
  * RN=hasSessionForkContext / IN=hasLegacyReminderText / CN=hasLegacyNotifyText / mx=textFromParts /
  * Nf='model-only' / Uf='fork' / vN=LEGACY_METADATA_SOURCE_SET。
@@ -26,14 +29,14 @@ import {
   SEMANTICS_KIND_SET,
   SEMANTICS_ORIGIN_SET,
   type ProjectionPolicy,
-} from './semantics.js'
+} from './semantics.ts'
 
 /** 顶层 visibility 的「仅模型可见」值（asar Nf）。 */
 const MODEL_ONLY = 'model-only'
 /** fork 来源值（asar Uf）：命中即 timelineOnly，独立于 legacy 17 值集合。 */
 const FORK = 'fork'
 
-// ── 遗留文本特征常量（asar 内为具名常量 + 字面量，此处逐字还原；§11-2 对拍校准）──────
+// ── 遗留文本特征常量（asar 内为具名常量 + 字面量，此处逐字还原；对拍校准）──────────────
 // 特征源：asar IN（hasLegacySystemReminderContextText）/ CN（hasLegacyNotificationContextText）
 // 的实现常量 gN/fN/hN/yN/bN/SN——精确特征集，非最小化近似。
 const GOAL_CONTINUATION_PREFIX = '<system-reminder source="goal-continuation">'
@@ -72,10 +75,10 @@ function inClosedSet(v: unknown, set: ReadonlySet<string>): boolean {
  * 消息来源四路回退（asar kN/messageSource）：data.source → metadata.source →
  * semantics.source → 首个携带 metadata.source 的 part。非空字符串守卫只挂第二路与第四路
  * （asar bs 同款）；首路与第三路 semantics.source 裸取，`??` 只跳过 null/undefined
- * （kN 函数体 2026-09-21 按对拍报告 §1 口径重提取核实：
+ * （kN 函数体 2026-09-21 按对拍口径重提取核实：
  * `e.source??bs(o?.source)??e.semantics?.source`——第三路无守卫，实现与其一致）。
  * 注意：data.source 为空串时本函数返回空串（falsy），由闭集前置检查按未知值处理（asar
- * 原函数空串 falsy 直接跳过 source 分支——空串在真实数据中不存在，§11-2 对拍报告核验节）。
+ * 原函数空串 falsy 直接跳过 source 分支——空串在真实数据中不存在，对拍报告核验节）。
  */
 function messageSource(
   data: Record<string, unknown>,
