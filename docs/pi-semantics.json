@@ -875,5 +875,22 @@
    "test": "packages/runtime/src/services/session/zcode-import/pi-reader-invariant.test.ts"
   },
   "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-42",
+  "claim": "rpc 模式扩展 UI 应答（extension_ui_response）只 resolve 扩展持有的 Promise 并在命令分派前退出——应答路径可达效应集（分派块 ∪ 模块内被调函数展开 ∪ 全部 resolve 应答回调体）不含对话回灌（prompt/sendMessage/sendUserMessage/steer/followUp/appendMessage/appendEntry 等 session 写入与续轮投递）、不开 turn（agent 轮次启动）、不进命令分派（handleCommand）、不发任何 stdout 帧（message/turn 事件串与 output() 全缺席）；这是 taiji ADR-0072 分型与 expectTurn 通路（form-submit-busy-convergence 前提 1：pi select 应答从不回灌对话、不开 turn）的 pi 侧承重语义——pi 升级若在此路径引入对话效应，D1 全链失锚且无显式信号，由本探针拦为红灯。探针断言语义非源码结构：按 wire 协议串定位分派、效应集做缺席断言、控制流只锁「分派前终止」（块尾 exit 或紧邻 else），不绑行号/处理函数名/代码形状，pi 重构形态变而语义不变不误报",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/modes/rpc/rpc-mode.js",
+    "symbol": "extension_ui_response 应答分派（handleInputLine 内 pendingExtensionRequests resolve 后 return）",
+    "note": ":614-626 —— `parsed.type === \"extension_ui_response\"` 分支：get → delete → pending.resolve(response) → return（早退，不落 :629 handleCommand）；resolve 回调体 :71-74（createDialogPromise，cleanup + Promise resolve）与 :178-187（editor，cancelled/value 分派 resolve）均零 output()/session 调用；select 请求面 :84 createDialogPromise（method: \"select\"）"
+   }
+  ],
+  "guard": {
+   "type": "probe",
+   "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-no-turn.test.ts"
+  },
+  "verifiedWith": "0.84.4"
  }
 ]
