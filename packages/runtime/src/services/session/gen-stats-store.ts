@@ -76,6 +76,12 @@ const MS_PER_SEC = 1000
 const PERCENT_SCALE = 100
 const MS_PER_DAY = 86_400_000
 
+/** 中位数奇偶判定模数：sorted.length % 2 === 1 → 奇数样本（单中位元素）——奇偶语义，非元组长度 */
+const MEDIAN_PARITY_MODULUS = 2
+
+/** 中位数折半因子：奇数样本中位下标 / 偶数样本双中位均值除数——折半语义，非元组长度 */
+const MEDIAN_HALVING_DIVISOR = 2
+
 /** 合法日 key 形状（YYYY-MM-DD；GC 的字典序比较依赖该规范形） */
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -158,9 +164,11 @@ export function aggregateCacheRatio(records: readonly CacheRatioRecord[]): numbe
 export function aggregateTtft(records: readonly TtftRecord[]): number | null {
   if (records.length === 0) return null
   const sorted = records.map((r) => r[0]).sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
+  const mid = Math.floor(sorted.length / MEDIAN_HALVING_DIVISOR)
   const median =
-    sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+    sorted.length % MEDIAN_PARITY_MODULUS === 1
+      ? sorted[mid]!
+      : (sorted[mid - 1]! + sorted[mid]!) / MEDIAN_HALVING_DIVISOR
   return Math.round(median)
 }
 
