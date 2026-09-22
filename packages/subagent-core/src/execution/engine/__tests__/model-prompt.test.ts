@@ -8,27 +8,32 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { EngineClient } from "../client/engine-client.ts";
+import { RemoteEngine } from "../client/remote-engine.ts";
 import type { EnginePort } from "../port.ts";
 import { clearEngines, registerEngine } from "../registry.ts";
 import { buildEngineModelsPromptAppend, buildSubagentEngineSection } from "../model-prompt.ts";
+
+/** 最小 capabilities 基线（fake 引擎与真实 RemoteEngine 构造共用）。 */
+const FAKE_CAPS = {
+  schemaEnforcement: "emulated",
+  steer: "unsupported",
+  conversation: "unsupported",
+  personaInjection: "prompt",
+  eventGranularity: "coarse",
+  sandbox: "none",
+  sessionRead: "outcome-only",
+  resume: "unsupported",
+  interrupt: "kill-only",
+  permissionMode: "ignored",
+  maxTurns: false,
+} as const;
 
 /** 最小 fake 引擎：仅 id + 可选 listModels（其余面 run/read 走不到，测试只触碰注入链）。 */
 function fakeEngine(id: string, models: Array<{ id: string; name?: string }> | null): EnginePort {
   return {
     id,
-    capabilities: () => ({
-      schemaEnforcement: "emulated",
-      steer: "unsupported",
-      conversation: "unsupported",
-      personaInjection: "prompt",
-      eventGranularity: "coarse",
-      sandbox: "none",
-      sessionRead: "outcome-only",
-      resume: "unsupported",
-      interrupt: "kill-only",
-      permissionMode: "ignored",
-      maxTurns: false,
-    }),
+    capabilities: () => ({ ...FAKE_CAPS }),
     probe: async () => ({ ok: true, engineVersion: "test", checks: [] }),
     run: async () => {
       throw new Error("not used in this test");
@@ -112,6 +117,41 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
       ].join("\n"),
     );
     expect(buildEngineModelsPromptAppend("empty")).toContain("<available_empty_models>");
+  });
+
+  it("dynamic:true 且静态目录空的 RemoteEngine → core-aligned 声明段（B1：静态空目录 ≠ 无模型）", () => {
+    // 真实 RemoteEngine（非 fake listModels）构造性证明「映射 → 注入」整链：
+    // manifest {dynamic:true, models:[]} 经 listModels 四态映射返回 null（无静态
+    // 枚举面）→ 走「与主 agent 模型体系一致」声明段，不注入「no credentialed
+    // models」误导文案（该文案会让模型错误拒绝派发，B1 缺陷根因）。
+    // EngineClient 构造纯内存无副作用（spawn 在 ensureConnected），listModels 只读
+    // manifest 注册期快照不触协议——无需连接，也无需清理。
+    const client = new EngineClient({
+      engineId: "dyn",
+      command: process.execPath,
+      args: [],
+      hostKind: "test",
+      dataDir: tmpRoot,
+      envPrefixes: [],
+    });
+    const dynEngine = new RemoteEngine({
+      engineId: "dyn",
+      client,
+      manifest: { capabilities: { ...FAKE_CAPS }, modelCatalog: { dynamic: true, models: [] } },
+      dataDir: tmpRoot,
+      hostKind: "test",
+    });
+    registerEngine("dyn", () => dynEngine);
+    const append = buildEngineModelsPromptAppend("dyn");
+    expect(append).toBe(
+      [
+        "<available_dyn_models>",
+        "engine 'dyn' uses the same model registry as the main agent — use ids from <available_provider_models> above",
+        "</available_dyn_models>",
+      ].join("\n"),
+    );
+    expect(append).not.toContain("no credentialed models");
+    expect(append).not.toContain("ZCode desktop");
   });
 
   it("未注册引擎 → 清单段不注入（警告归状态段负责，避免双份）", () => {
