@@ -22,7 +22,8 @@ import { InternalEventBus } from '@taiji/core'
 
 // ── mock extension api domain（WS/RPC 路径保留桩，范式同 useExtensionUI.test.ts）──
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn(),
+  // 返 true = 送达（M1 环 3 后 respond 消费 boolean）
+  sendExtensionUIResponse: vi.fn((): boolean => true),
   onNotify: () => () => {},
   onExtensions: vi.fn(),
   getPendingRequests: vi.fn().mockResolvedValue([]),

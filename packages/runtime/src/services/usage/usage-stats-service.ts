@@ -30,6 +30,11 @@ interface FileShard {
   rows: UsageRow[]
   skippedLines: number
   cwd: string | null
+  /**
+   * 读流/解析过程整体失败（RT-8#12）：文件存在（stat 成功、计入 sessionCount）但数据点
+   * 全缺——聚合偏低须可观测（failedFiles 计数），否则与「该 session 无用量」不可区分。
+   */
+  failed: boolean
 }
 
 /**
@@ -42,7 +47,7 @@ type ScanRowResult = UsageRow | 'skip' | null
 
 /** 空分片降级（scanFile 读流失败时返回）：mtime/size 键保留，文件未变更期间不重读。 */
 function emptyShard(fileStat: { mtimeMs: number; size: number }): FileShard {
-  return { mtimeMs: fileStat.mtimeMs, size: fileStat.size, rows: [], skippedLines: 0, cwd: null }
+  return { mtimeMs: fileStat.mtimeMs, size: fileStat.size, rows: [], skippedLines: 0, cwd: null, failed: true }
 }
 
 /**
@@ -93,13 +98,23 @@ export class UsageStatsService {
     const allRows: UsageRow[] = []
     let skippedLines = 0
     let sessionCount = 0
+    let failedFiles = 0
 
     let entries: Dirent[]
     try {
       entries = await readdir(this.sessionsDir, { withFileTypes: true })
-    } catch {
-      // 目录不存在或不可读 → 返回空结果
-      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0 }
+    } catch (e) {
+      // ENOENT（首启未产生 session 目录）= 合法空态；其他错误（EACCES 等）= 全量数据点
+      // 不可读——warn 留痕（含恢复动作），返回空结果但不伪装成「无用量」之外的任何形态
+      //（sessionCount=0 + rows 空，UI 至少显示空态而非崩溃）。
+      if (!isEnoent(e)) {
+        console.warn(
+          `[usage-stats] session 目录不可读，用量统计返回空（实际用量不可见）: ${this.sessionsDir}。` +
+            '恢复动作：检查目录读权限后刷新用量页',
+          e,
+        )
+      }
+      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0, failedFiles: 0 }
     }
 
     // 根层 + 一层 encodeCwd 子目录（只下钻一层，孙目录不进）
@@ -110,8 +125,16 @@ export class UsageStatsService {
       let subEntries: Dirent[]
       try {
         subEntries = await readdir(subDir, { withFileTypes: true })
-      } catch {
-        // 单个子目录不可读 → 跳过继续（与单文件读失败的容错语义一致）
+      } catch (e) {
+        // 单个子目录不可读 → 跳过继续（与单文件读失败的容错语义一致）——但留痕
+        //（RT-8#12：该目录下全部 session 的数据点静默缺失不可观测）。无法预知其中
+        // 文件数，不进 failedFiles 计数（那是文件级口径），warn 含路径。
+        if (!isEnoent(e)) {
+          console.warn(
+            `[usage-stats] session 子目录不可读，该目录用量未计入: ${subDir}。恢复动作：检查目录读权限`,
+            e,
+          )
+        }
         continue
       }
       jsonlPaths.push(...collectScannableJsonlPaths(subDir, subEntries))
@@ -125,6 +148,8 @@ export class UsageStatsService {
       try {
         fileStat = await stat(filePath)
       } catch {
+        // stat 失败（扫描间隙被删/权限）：文件级失败计数（RT-8#12）而非静默跳过
+        failedFiles++
         continue
       }
 
@@ -136,6 +161,7 @@ export class UsageStatsService {
         // 未变文件：直接用分片
         allRows.push(...cached.rows)
         skippedLines += cached.skippedLines
+        if (cached.failed) failedFiles++
         sessionCount++
         continue
       }
@@ -145,6 +171,7 @@ export class UsageStatsService {
       this.shards.set(filePath, shard)
       allRows.push(...shard.rows)
       skippedLines += shard.skippedLines
+      if (shard.failed) failedFiles++
       sessionCount++
     }
 
@@ -155,7 +182,7 @@ export class UsageStatsService {
       }
     }
 
-    return { rows: allRows, scannedAt, sessionCount, skippedLines }
+    return { rows: allRows, scannedAt, sessionCount, skippedLines, failedFiles }
   }
 
   /**
@@ -244,6 +271,7 @@ export class UsageStatsService {
       rows,
       skippedLines,
       cwd,
+      failed: false,
     }
   }
 
@@ -362,6 +390,11 @@ function extractMetrics(usage: Record<string, unknown>): UsageMetrics {
   const messages = 1
 
   return { input, output, cacheRead, cacheWrite, costUSD, messages }
+}
+
+/** Node fs 错误的 ENOENT 判定（合法空态 vs 真读取失败分流用）。 */
+function isEnoent(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'ENOENT'
 }
 /**
  * UTC timestamp → 本地时区 'YYYY-MM-DD'（D6）；非法/缺失 timestamp 返回 null（行级失败，计入 skippedLines）。

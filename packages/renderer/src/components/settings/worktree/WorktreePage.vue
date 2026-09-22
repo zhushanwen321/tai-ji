@@ -30,6 +30,7 @@
           <div class="flex items-center gap-2">
             <Input
               v-model="worktreeRootDir"
+              data-testid="worktree-root-dir-input"
               :placeholder="t('settings.worktree.worktreeRootDirPlaceholder')"
               class="h-8 w-[240px] text-[12px]"
               @blur="onSaveWorktreeRootDir"
@@ -88,14 +89,19 @@
             <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.timeout') }}</Label>
             <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.timeoutHint') }}</span>
           </div>
-          <Input
-            v-model.number="timeout"
-            type="number"
-            :placeholder="t('settings.worktree.timeoutPlaceholder')"
-            class="h-8 w-[120px] text-[12px]"
-            min="1"
-            @blur="onSaveTimeout"
-          />
+          <div class="flex flex-col items-end gap-1">
+            <Input
+              v-model.number="timeout"
+              type="number"
+              data-testid="worktree-timeout-input"
+              :placeholder="t('settings.worktree.timeoutPlaceholder')"
+              class="h-8 w-[120px] text-[12px]"
+              min="1"
+              max="3600"
+              @blur="onSaveTimeout"
+            />
+            <span v-if="timeoutError" data-testid="worktree-timeout-error" class="text-[11px] text-danger">{{ timeoutError }}</span>
+          </div>
         </div>
       </div>
     </GroupCard>
@@ -115,12 +121,16 @@
             <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.defaultBaseBranch') }}</Label>
             <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.defaultBaseBranchHint') }}</span>
           </div>
-          <Input
-            v-model="defaultBaseBranch"
-            :placeholder="t('settings.worktree.defaultBaseBranchPlaceholder')"
-            class="h-8 w-[200px] text-[12px]"
-            @blur="onSaveDefaultBaseBranch"
-          />
+          <div class="flex flex-col items-end gap-1">
+            <Input
+              v-model="defaultBaseBranch"
+              data-testid="worktree-base-branch-input"
+              :placeholder="t('settings.worktree.defaultBaseBranchPlaceholder')"
+              class="h-8 w-[200px] text-[12px]"
+              @blur="onSaveDefaultBaseBranch"
+            />
+            <span v-if="baseBranchError" data-testid="worktree-base-branch-error" class="text-[11px] text-danger">{{ baseBranchError }}</span>
+          </div>
         </div>
       </div>
     </GroupCard>
@@ -154,6 +164,9 @@ const { info: toastInfo, error: toastError } = useToast()
 /** worktree 创建超时默认值（秒） */
 const DEFAULT_TIMEOUT_SECONDS = 60
 
+/** RD-4#7：超时上限（对齐 runtime worktree-config-helper setTimeout 的 (0, 3600] 区间）。 */
+const TIMEOUT_MAX_SECONDS = 3600
+
 // ── 本地状态（乐观更新：先更新 UI，失败时回滚）──
 const worktreeRootDir = ref('')
 const setupScript = ref('')
@@ -167,6 +180,10 @@ let prevSetupScript = ''
 let prevBareSetupScript = ''
 let prevTimeout = DEFAULT_TIMEOUT_SECONDS
 let prevDefaultBaseBranch = 'origin/main'
+
+// ── RD-4#7：前端校验 inline error（命中即显形，不发 RPC）──
+const timeoutError = ref('')
+const baseBranchError = ref('')
 
 // ── 加载初始配置 ──
 onMounted(async () => {
@@ -217,10 +234,10 @@ async function onSaveWorktreeRootDir() {
   try {
     await setWorktreeRootDir(worktreeRootDir.value)
     toastInfo(t('settings.worktree.saved'))
-  } catch (_e) {
+  } catch (e) {
     worktreeRootDir.value = prev
     prevWorktreeRootDir = prev
-    toastError(t('settings.worktree.saveFailed'))
+    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   }
 }
 
@@ -231,10 +248,10 @@ async function onSaveSetupScript() {
   try {
     await setSetupScript(setupScript.value)
     toastInfo(t('settings.worktree.saved'))
-  } catch (_e) {
+  } catch (e) {
     setupScript.value = prev
     prevSetupScript = prev
-    toastError(t('settings.worktree.saveFailed'))
+    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   }
 }
 
@@ -245,38 +262,53 @@ async function onSaveBareSetupScript() {
   try {
     await setBareSetupScript(bareSetupScript.value)
     toastInfo(t('settings.worktree.saved'))
-  } catch (_e) {
+  } catch (e) {
     bareSetupScript.value = prev
     prevBareSetupScript = prev
-    toastError(t('settings.worktree.saveFailed'))
+    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   }
 }
 
 async function onSaveTimeout() {
+  timeoutError.value = ''
   if (timeout.value === prevTimeout) return
+  // RD-4#7：前端范围校验（对齐 runtime (0, 3600]），命中即 inline error 回滚，不发 RPC
+  if (!Number.isFinite(timeout.value) || timeout.value <= 0 || timeout.value > TIMEOUT_MAX_SECONDS) {
+    timeoutError.value = t('settings.worktree.timeoutInvalid')
+    timeout.value = prevTimeout
+    return
+  }
   const prev = prevTimeout
   prevTimeout = timeout.value
   try {
     await setWorktreeTimeout(timeout.value)
     toastInfo(t('settings.worktree.saved'))
-  } catch (_e) {
+  } catch (e) {
     timeout.value = prev
     prevTimeout = prev
-    toastError(t('settings.worktree.saveFailed'))
+    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   }
 }
 
 async function onSaveDefaultBaseBranch() {
+  baseBranchError.value = ''
   if (defaultBaseBranch.value === prevDefaultBaseBranch) return
+  // RD-4#7：前端非空校验（runtime setDefaultBaseBranch 不校验空串，直到 git 操作才炸），
+  // 命中即 inline error 回滚，不发 RPC
+  if (defaultBaseBranch.value.trim() === '') {
+    baseBranchError.value = t('settings.worktree.baseBranchEmpty')
+    defaultBaseBranch.value = prevDefaultBaseBranch
+    return
+  }
   const prev = prevDefaultBaseBranch
   prevDefaultBaseBranch = defaultBaseBranch.value
   try {
     await setDefaultBaseBranch(defaultBaseBranch.value)
     toastInfo(t('settings.worktree.saved'))
-  } catch (_e) {
+  } catch (e) {
     defaultBaseBranch.value = prev
     prevDefaultBaseBranch = prev
-    toastError(t('settings.worktree.saveFailed'))
+    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   }
 }
 

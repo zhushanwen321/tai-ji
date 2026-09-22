@@ -200,3 +200,35 @@ describe('delta-coalescer（D-2 token 合帧）', () => {
     expect(readPayload(dispatch.mock.calls[0][0]).delta).toBe('fresh')
   })
 })
+
+describe('delta-coalescer — 非 delta 帧 dispatch 隔离（RD-1#5）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('非 delta 帧 dispatch 抛错不逆传（enqueue 调用方不炸）+ console.warn 记录半执行帧', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const c = createMessageCoalescer()
+    const dispatch = vi.fn((m: ServerMessage) => {
+      if (m.type === 'message.complete') throw new Error('registry boom')
+    })
+    expect(() => c.enqueue('s9', msg('s9', 'message.complete', {}), dispatch)).not.toThrow()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('message.complete')
+  })
+
+  it('异常帧后合帧器功能不损坏：后续 delta 缓冲照常合帧 dispatch', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const c = createMessageCoalescer()
+    let failNextTerminal = true
+    const dispatch = vi.fn((m: ServerMessage) => {
+      if (m.type === 'message.complete' && failNextTerminal) throw new Error('registry boom')
+    })
+    c.enqueue('s10', msg('s10', 'message.complete', {}), dispatch) // 抛错被隔离
+    c.enqueue('s10', msg('s10', 'message.text_delta', { delta: 'x' }), dispatch)
+    await afterMicrotask()
+    // 两次调用：一次是被隔离的 complete，一次是正常合帧的 text_delta 合成帧
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(readPayload(dispatch.mock.calls[1]![0]).delta).toBe('x')
+  })
+})

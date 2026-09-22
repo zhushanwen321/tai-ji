@@ -32,8 +32,16 @@
       kind="extension"
       :forced-dirs="forcedExtDirs"
       :dirs="extensionDirs"
+      :save-error="dirsSaveError"
       @update-dirs="onUpdateExtensionDirs"
     />
+
+    <!-- RD-4#11：数据目录读取失败时的显式标注（默认路径非真实路径） -->
+    <p
+      v-if="dataDirReadFailed"
+      data-testid="extension-datadir-read-failed"
+      class="text-[11px] text-warn"
+    >{{ t('settings.extension.dataDirReadFailed') }}</p>
 
     <!-- 安装流（推荐扩展 + npm/dir/git 安装 + 候选内联展开） -->
     <ExtensionInstallFlow :extensions="extensions" />
@@ -76,17 +84,30 @@ const { t } = useI18n()
  * getDataDir 为 async（IPC），初始用 ~ 形式兑底，拉取完成后更新。
  */
 const dataDirDisplay = ref('~/.taiji')
+/** RD-4#11：getDataDir 读取失败标记——失败时显式标注默认路径，不伪装真实路径。 */
+const dataDirReadFailed = ref(false)
 onMounted(async () => {
-  const dir = await getDataDir()
-  if (dir) dataDirDisplay.value = dir
+  try {
+    const dir = await getDataDir()
+    if (dir) dataDirDisplay.value = dir
+  } catch (e) {
+    // RD-4#11：IPC reject 时不再静默回落写死 ~/.taiji。置位 dataDirReadFailed → 显式标注
+    // 「实际路径读取失败，显示的是默认路径」，避免误导排查。
+    console.warn('[ExtensionPage] getDataDir failed:', e)
+    dataDirReadFailed.value = true
+  }
 })
 const forcedExtDirs = computed(() => [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'])
 
-/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。 */
+/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。
+ *  失败常驻态（RD-4#1）：置位 dirsSaveError → LoadPaths 回弹至最近落盘值 + 常驻红字；每次尝试起点复位。 */
+const dirsSaveError = ref(false)
 async function onUpdateExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {
+  dirsSaveError.value = false
   try {
     await settingsStore.setExtensionDirs(dirs)
   } catch (e) {
+    dirsSaveError.value = true
     toastError(e instanceof Error ? e.message : String(e))
   }
 }

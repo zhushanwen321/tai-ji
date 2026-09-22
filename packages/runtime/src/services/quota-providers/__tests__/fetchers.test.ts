@@ -124,6 +124,46 @@ describe('kimiFetcher', () => {
       ])
     }
   })
+
+  // ── RT-7#5：缺窗口字段不产假值（100% 假耗尽 / 0% 假未用）──
+
+  it('5h 窗口 remaining 缺失（limit 在）→ INFINITE_WIN（不产 used=limit 的 100% 假耗尽）', async () => {
+    const out = await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: 100, resetTime: '2026-08-23T12:00:00.000Z' } }],
+      usage: { limit: 2000, used: 500 },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
+      // 未受影响的窗口照常
+      expect(out.data.wins[1]).toMatchObject({ pct: 25 })
+    }
+  })
+
+  it('week 窗口 used 缺失（limit 在）→ INFINITE_WIN（不产 pct=0 假未用）', async () => {
+    const out = await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: 100, remaining: 60 } }],
+      usage: { limit: 2000, resetTime: '2026-08-24T12:00:00.000Z' },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.data.wins[0]).toMatchObject({ pct: 40 })
+      expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
+    }
+  })
+
+  it('窗口字段类型漂移（字符串数值）→ parse（guard 收到字段级）', async () => {
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: '100', remaining: 60 } }],
+      usage: { limit: 2000, used: 500 },
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: 100, remaining: 60 } }],
+      usage: { limit: 2000, used: '500' },
+    })).toEqual({ ok: false, reason: 'parse' })
+    // limits 元素非对象（原 Array.isArray 只校容器不校元素）
+    expect(await fetchOk(kimiFetcher, { limits: ['x'], usage: { limit: 1, used: 0 } })).toEqual({ ok: false, reason: 'parse' })
+  })
 })
 
 describe('mimoFetcher', () => {
@@ -255,6 +295,54 @@ describe('mimoFetcher', () => {
       },
     })
   })
+
+  // ── RT-7#5：monthUsage.percent 缺失不产 pct=0 假未用 ──
+
+  it('monthUsage.percent 缺失 → pct:null（不可知），不产 0% 假未用', async () => {
+    const out = await fetchOk(mimoFetcher, {
+      code: 0,
+      message: 'ok',
+      data: { monthUsage: { items: [] }, usage: { percent: 0.1, items: [] } },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.data.wins[2]).toEqual({ pct: null, resetSec: null })
+  })
+
+  it('monthUsage 整体缺失（code=0）→ pct:null，不产 0% 假未用', async () => {
+    const out = await fetchOk(mimoFetcher, {
+      code: 0,
+      message: 'ok',
+      data: { usage: { percent: 0.1, items: [] } },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.data.wins[2]).toEqual({ pct: null, resetSec: null })
+  })
+
+  it('percent 类型漂移（字符串）→ parse（guard 字段级）', async () => {
+    expect(await fetchOk(mimoFetcher, {
+      code: 0,
+      message: 'ok',
+      data: { monthUsage: { percent: '0.25' as unknown as number, items: [] }, usage: { percent: 0.1, items: [] } },
+    })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  // ── RT-7#6：code=0 时 data 缺失不再放行（原放行 → buildMonthWindow 读 undefined
+  // 抛 TypeError → quota-service 误归 network）──
+
+  it('code=0 且 data 缺失 → parse（原误归 network）', async () => {
+    expect(await fetchOk(mimoFetcher, { code: 0, message: 'ok' })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  it('code=0 且 data 非对象 → parse', async () => {
+    expect(await fetchOk(mimoFetcher, { code: 0, message: 'ok', data: 'oops' })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  it('对照：code 非 0 的在体错误响应 data 可缺席（no-subscription 语义保持，上方 401/403 用例同理）', async () => {
+    expect(await fetchOk(mimoFetcher, { code: 2, message: 'no plan' })).toEqual({
+      ok: false,
+      reason: 'no-subscription',
+    })
+  })
 })
 
 describe('normalizeCookieHeader', () => {
@@ -355,6 +443,37 @@ describe('minimaxFetcher', () => {
       expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
     }
   })
+
+  // ── RT-7#5：remaining_percent 缺失不产 pct=100 假耗尽 ──
+
+  it('5h 窗口 remaining_percent 缺失（status=1）→ pct:null（不可知，resetSec 保留）', async () => {
+    const { current_interval_remaining_percent: _drop, ...partial } = generalModel
+    const out = await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...partial, current_weekly_remaining_percent: undefined }],
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.data.wins[0]).toEqual({ pct: null, resetSec: 1800 })
+      expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
+    }
+  })
+
+  it('数值字段类型漂移（字符串百分比 / 字符串 status）→ parse', async () => {
+    expect(await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...generalModel, current_interval_remaining_percent: '70' as unknown as number }],
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...generalModel, current_interval_status: '1' as unknown as number }],
+    })).toEqual({ ok: false, reason: 'parse' })
+    // model_remains 元素非对象
+    expect(await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: ['x'],
+    })).toEqual({ ok: false, reason: 'parse' })
+  })
 })
 
 describe('zhipuFetcher', () => {
@@ -432,6 +551,38 @@ describe('zhipuFetcher', () => {
       expect(out.data.label).toBe('Z.ai')
       expect(out.data.wins[0]).toEqual({ pct: 5, resetSec: 4 * 3600 + 11 * 60 })
     }
+  })
+
+  // ── RT-7#5：TOKENS_LIMIT 无 percentage / 无该条目 → 不产 pct=0 假未用 ──
+
+  it('TOKENS_LIMIT 条目 percentage 缺失 → INFINITE_WIN（pct:null 整行隐藏）', async () => {
+    const out = await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { limits: [{ type: 'TOKENS_LIMIT', nextResetTime: '4h' }] },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
+  })
+
+  it('无 TOKENS_LIMIT 条目（仅 OTHER）→ INFINITE_WIN（原 pct=0 假未用）', async () => {
+    const out = await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { level: 'Max', limits: [{ type: 'OTHER', percentage: 99 }] },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.data.label).toBe('Z.ai-Max')
+      expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
+    }
+  })
+
+  it('limits 元素类型漂移（非对象 / type 缺失 / 字符串 percentage）→ parse', async () => {
+    expect(await fetchOk(zhipuFetcher, { success: true, data: { limits: ['x'] } })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(zhipuFetcher, { success: true, data: { limits: [{ percentage: 5 }] } })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { limits: [{ type: 'TOKENS_LIMIT', percentage: '5' as unknown as number }] },
+    })).toEqual({ ok: false, reason: 'parse' })
   })
 })
 

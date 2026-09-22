@@ -34,6 +34,11 @@ export interface SourceDetectResult {
   agentCount?: number
   /** provider 数量（W1 不实现，留 undefined）。W2/W3 填充。 */
   providerCount?: number
+  /**
+   * 检测异常显形（RT-5#5）：目录存在但不可读（EACCES 等）时置 'unreadable'——
+   * 「不可读」≠「未安装」≠「0 个」，三态须可区分；此时计数字段缺省（不填 0 假数据）。
+   */
+  error?: 'unreadable'
 }
 
 // ══ W2（cw-2026-07-26-migration-other-agents）—— Provider 导入预览/结果 DTO ══

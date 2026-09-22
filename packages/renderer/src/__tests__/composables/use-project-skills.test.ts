@@ -106,16 +106,35 @@ describe('useProjectSkills (W4)', () => {
     })
   })
 
-  it('getProjectSkills 抛错 → projectSkills 为空数组，不崩（best-effort）', async () => {
+  it('getProjectSkills 抛错 → projectSkills 为空数组 + loadError 置位（RD-4#13 显形）', async () => {
     getProjectSkillsMock.mockRejectedValue(new Error('rpc fail'))
     const cwd = ref<string | null>('/proj-x')
 
-    const { projectSkills } = useProjectSkills(cwd)
+    const { projectSkills, loadError } = useProjectSkills(cwd)
 
     await vi.waitFor(() => expect(getProjectSkillsMock).toHaveBeenCalled())
     await vi.waitFor(() => {
       expect(projectSkills.value).toEqual([])
     })
+    // RD-4#13：失败不再仅 warn——loadError 置位供列表区插可重试提示
+    expect(loadError.value).toBe(true)
+  })
+
+  it('RD-4#13：retry() 重拉成功 → projectSkills 填充 + loadError 清除', async () => {
+    getProjectSkillsMock.mockRejectedValueOnce(new Error('rpc fail'))
+    const cwd = ref<string | null>('/proj-x')
+
+    const { projectSkills, loadError, retry } = useProjectSkills(cwd)
+    await vi.waitFor(() => expect(loadError.value).toBe(true))
+    expect(projectSkills.value).toEqual([])
+
+    // 重试：mock 改成功
+    getProjectSkillsMock.mockResolvedValueOnce(SKILLS_A)
+    retry()
+    await vi.waitFor(() => {
+      expect(projectSkills.value).toEqual(SKILLS_A)
+    })
+    expect(loadError.value).toBe(false)
   })
 })
 

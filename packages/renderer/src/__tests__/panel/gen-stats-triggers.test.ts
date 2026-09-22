@@ -17,7 +17,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import * as events from '@taiji/core/transport/api'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
-import type { GenStatsFrame, ServerMessage } from '@taiji/shared'
+import type { GenStatsCacheMiss, GenStatsFrame, ServerMessage } from '@taiji/shared'
 
 import GenStatsTriggers from '@/components/panel/GenStatsTriggers.vue'
 
@@ -192,6 +192,54 @@ describe('双触发器渲染（黑盒 DOM）', () => {
 
     expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('0%')
     expect(wrapper.find(`[title="${CACHE_TITLE}"]`).classes()).toContain('text-danger')
+  })
+
+  // ── [RD-2#6/#7] 假测量值治理 + 未知 reason 协议漂移兜底 ──
+  it('[RD-2#6] idle-expiry 无 idleMs → 说明行显「空闲时长未知」，不产「已空闲 1m」假测量值；触发器 label 仍为「空闲过期」', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 90, currentMiss: { reason: 'idle-expiry' } },
+      }),
+    })
+    await flushPromises()
+
+    // idleMs 缺失：时长未知分支文案，不以 ?? 0 伪装成「空闲 1m」（D4：null=无数据/0=真值）
+    const note = wrapper.find('[data-testid="genstats-cache-miss-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('空闲时长未知')
+    expect(note.text()).not.toContain('空闲 1m')
+    // label 不依赖 idleMs，照常显示成因
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('空闲过期')
+  })
+
+  it('[RD-2#7] 未知 reason（runtime 领先 renderer 的协议漂移）→ default 通用「缓存未命中」文案 + console.warn 留痕，不出现空白 chip', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        // 闭集联合外的 reason 只会来自 runtime 版本领先（TS2366 已拦编译期）——测试侧双断言注入
+        cacheRatio: {
+          current: 0,
+          day: 90,
+          currentMiss: { reason: 'server-eviction' as unknown as GenStatsCacheMiss['reason'] },
+        },
+      }),
+    })
+    await flushPromises()
+
+    // default 分支：通用文案兜底（缺省会 undefined → chip 空白）
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('缓存未命中')
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('server-eviction'))
+    // 未知 reason 不出归因说明行（该行只服务已知成因）
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').exists()).toBe(false)
+    warnSpy.mockRestore()
   })
 })
 

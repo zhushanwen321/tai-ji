@@ -12,6 +12,10 @@
  *
  * 归属：跨层共享叶子层 utils/（ADR 0035），是 fs-utils（atomicWrite）与 errors
  * （isEnoent）的直接组合，无业务语义。
+ *
+ * 并发模型（已裁决可接受风险）：read-modify-write 无跨进程锁——单用户桌面应用同一
+ * store 的跨进程并发写低频，tmp+rename 原子性保证读者不会看到半截文件；冲突窗口
+ * （最后写者赢）由 flush 前的指纹校验 + .conflict- 备份兜底。勿在此文件加锁。
  */
 
 import { copyFileSync, readFileSync, readdirSync, renameSync, rmSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs'
@@ -215,8 +219,11 @@ export interface QuarantineOptions {
  * 为什么是导出函数而非 JsonStore 私有方法：segments.json 等手写 read→parse 的
  * 落点不走 JsonStore，但面临同一条「失败 reset 覆盖」链——共享同一实现避免
  * 两处隔离行为漂移（integrity-hardening.md D1c 明确要求同模式覆盖）。
+ *
+ * @returns 隔离副本路径（调用方据此在「拒绝空骨架覆写」的错误消息里指明恢复入口）；
+ *          rename 失败返回 undefined（原文件保留原位，恢复入口即原路径）。
  */
-export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions): void {
+export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions): string | undefined {
   // ISO 时间戳压缩格式（去冒号/点号）：文件名安全且按字典序即按时间排序
   const ts = new Date().toISOString().replace(/[:.]/g, '')
   const quarantinePath = `${filePath}.corrupt-${ts}`
@@ -227,31 +234,74 @@ export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions)
       `[${opts.tag}] ${opts.reason}: ${filePath} — 文件损坏已隔离至 ${quarantinePath}，` +
       `本次以默认值继续。恢复指引：用编辑器对比 .corrupt 副本找回配置。原因: ${causeMsg}`,
     )
-  // eslint-disable-next-line taste/no-silent-catch -- 隔离失败不阻断读流程（仍返回默认值），只升级日志
+    return quarantinePath
   } catch (renameErr) {
     console.error(
       `[${opts.tag}] ${opts.reason}: ${filePath} — 损坏隔离失败（无法 rename 为 .corrupt 副本），` +
       `原文件保留原位，本次以默认值继续。请人工检查该文件。原因: ${causeMsg}; ` +
       `rename 失败: ${renameErr instanceof Error ? renameErr.message : renameErr}`,
     )
+    return undefined
   }
 }
 
 // ── 备份残留按龄回收（.conflict-/.corrupt- 家族） ─────────────────────
 
 /** ISO 压缩时间戳的后缀形态（`2026-09-18T000557123Z`：toISOString 去冒号/点号），
- *  捕获组 = 可解析回时间戳的文件名部分（判龄权威源）。 */
-const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt)-(\d{4}-\d{2}-\d{2}T\d{9}Z)$/
+ *  捕获组 = 可解析回时间戳的文件名部分（判龄权威源）。
+ *  家族成员：`.conflict-`（WriteBackCache 冲突备份）/ `.corrupt-`（损坏隔离）/
+ *  `.bak-migrate-`（provider-extras-migration 迁移前备份，RT-5#7——副本可含明文
+ *  apiKey，纳入回收后由 isCredentialBearingBackup 走 30 天凭据窗口）。 */
+const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt|bak-migrate)-(\d{4}-\d{2}-\d{2}T\d{9}Z)$/
 
 /** 备份保留窗口：conflict/corrupt 副本是人工恢复的取证文件，7 天内不删。 */
 // eslint-disable-next-line no-magic-numbers -- 备份保留窗口时长表达式（7 天，校准依据见上方 JSDoc）
 export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
+/** 一天的毫秒数（保留窗口 → 天数的日志展示换算）。 */
+// eslint-disable-next-line no-magic-numbers -- 时间单位换算常量
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * 含明文凭据的备份副本保留窗口（RT-3 附带项，M8）：models.json 的 `.corrupt-` 隔离副本
+ * 可含明文 apiKey（pi-provider-store 损坏隔离产物）——它是凭据型配置丢失的唯一取证
+ * 副本，7 天过期即删会让「用户改好配置前副本先没了」。窗口延长到 30 天 + 回收前升
+ * error 日志（删除即不可恢复，必须显著可见）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 凭据副本保留窗口时长表达式（30 天，校准依据见上方 JSDoc）
+export const CREDENTIAL_BACKUP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+/** 凭据副本来源文件名（pi-provider-store 的 models.json；其余文件的副本不嗅探）。 */
+const CREDENTIAL_BACKUP_STEM = 'models.json'
+
+/** 内容嗅探尺寸上限：models.json 正常 KB 级，超此值属异常膨胀，保守按凭据副本处置不读。 */
+const CREDENTIAL_SNIFF_MAX_BYTES = 1_000_000
+
+/**
+ * 含明文凭据的备份副本判定（RT-3 附带项）。实现方式 = **来源文件名 + 内容嗅探**双层：
+ * 先按 stem（去 `.corrupt-/.conflict-<ts>` 后缀的原文件名）过滤出 models.json——其他
+ * 文件的副本零 IO 直接排除（不为嗅探引入任何额外读盘）；命中 stem 才读内容查 `"apiKey"`
+ * 键（models.json 体积小可全读，超尺寸/读失败保守视为凭据副本——误判方向是多留 30 天，
+ * 无数据损失风险）。纯路径判定会把不含 apiKey 的 models.json 副本也延长窗口（次优但
+ * 可接受）；纯内容判定会对所有副本做全读（性能不可接受）——双层是两者取舍。
+ */
+function isCredentialBearingBackup(filePath: string, stem: string): boolean {
+  if (stem !== CREDENTIAL_BACKUP_STEM) return false
+  try {
+    if (statSync(filePath).size > CREDENTIAL_SNIFF_MAX_BYTES) return true
+    return readFileSync(filePath, 'utf-8').includes('"apiKey"')
+  } catch {
+    return true
+  }
+}
+
 /**
  * 按龄回收备份残留家族（`<path>.conflict-<ts>` / `<path>.corrupt-<ts>`）。
  *
- * 生产者：WriteBackCache flush 的外部冲突备份、quarantineCorruptFile 的损坏隔离。
- * 两者的保留价值都是「人工对比找回数据」的取证窗口——但没有任何消费方负责清理，
+ * 生产者：WriteBackCache flush 的外部冲突备份、quarantineCorruptFile 的损坏隔离、
+ * provider-extras-migration 的迁移前备份（`.bak-migrate-`，RT-5#7 纳入——含明文
+ * apiKey 的旧 models.json 副本不再永久驻留）。
+ * 三者的保留价值都是「人工对比找回数据」的取证窗口——但没有任何消费方负责清理，
  * 每次冲突/损坏都新增一个文件，数据目录无限堆积（磁盘垃圾 + 备份目录噪音）。
  * 与 cleanupTmpMigrateResidue 同款 best-effort 语义：单文件 stat/unlink 失败跳过
  * 不中断；目录不存在 no-op；误删防线 = 后缀正则严格匹配 ISO 压缩形态 + mtime 按龄闸。
@@ -266,15 +316,25 @@ export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
  * @returns 实际删除的文件数
  */
 export function cleanupAgedBackupResidue(scanDirs: readonly string[], maxAgeMs = AGED_BACKUP_MAX_AGE_MS): number {
-  const cutoff = Date.now() - maxAgeMs
-  let removed = 0
+  const now = Date.now()
+  const stdCutoff = now - maxAgeMs
+  const credCutoff = now - CREDENTIAL_BACKUP_MAX_AGE_MS
+  const stats = { removed: 0, regularRemoved: 0 }
   const seenDirs = new Set<string>()
   for (const dir of scanDirs) {
     for (const scanDir of expandOneLevel(dir, seenDirs)) {
-      removed += removeAgedBackupsInDir(scanDir, cutoff)
+      removeAgedBackupsInDir(scanDir, stdCutoff, credCutoff, stats)
     }
   }
-  return removed
+  // RT-3 附带项：普通副本删除落一条 warn 记总数——取证窗口关闭是用户应知的动作
+  //（此前的 console.log 汇总在调用方，级别不足以留痕）。
+  if (stats.regularRemoved > 0) {
+    console.warn(
+      `[json-store] cleanupAgedBackupResidue: removed ${stats.regularRemoved} aged backup copy(ies) ` +
+      `(retention ${Math.round(maxAgeMs / MS_PER_DAY)}d) — forensic recovery window closed`,
+    )
+  }
+  return stats.removed
 }
 
 /** 展开「目录自身 + 一层子目录」（去重防交集目录重复扫）；不可读 no-op。 */
@@ -298,32 +358,48 @@ function expandOneLevel(dir: string, seen: Set<string>): string[] {
   return out
 }
 
-/** 清扫单目录内的超龄备份副本；目录不可读返回 0；单文件失败跳过不中断。
+/** 清扫单目录内的超龄备份副本；目录不可读直接返回；单文件失败跳过不中断。
  *  判龄权威源 = 文件名 ISO ts（备份创建时刻，quarantine/conflict 命名时生成）——
- *  mtime 会被拷贝/同步工具刷新，只能作解析失败时的回落。 */
-function removeAgedBackupsInDir(dir: string, cutoff: number): number {
+ *  mtime 会被拷贝/同步工具刷新，只能作解析失败时的回落。
+ *  RT-3 附带项：含明文 apiKey 的 models.json `.corrupt-` 副本走 30 天窗口 + 回收前
+ *  error 日志（凭据型取证副本，删除不可恢复）；普通副本 7 天窗口。 */
+interface BackupRemovalStats {
+  removed: number
+  regularRemoved: number
+}
+
+function removeAgedBackupsInDir(dir: string, stdCutoff: number, credCutoff: number, stats: BackupRemovalStats): void {
   let names: string[]
   try {
     names = readdirSync(dir)
   } catch {
-    return 0
+    return
   }
-  let removed = 0
   for (const name of names) {
     const match = AGED_BACKUP_SUFFIX_RE.exec(name)
     if (!match) continue
     const filePath = join(dir, name)
+    const stem = name.slice(0, match.index)
     try {
       const createdAt = parseIsoCompact(match[1]!) ?? statSync(filePath).mtimeMs
-      if (createdAt >= cutoff) continue // 取证窗口内保留
+      const credential = isCredentialBearingBackup(filePath, stem)
+      if (createdAt >= (credential ? credCutoff : stdCutoff)) continue // 取证窗口内保留
+      if (credential) {
+        console.error(
+          `[json-store] cleanupAgedBackupResidue: deleting credential-bearing backup (plaintext apiKey inside, ` +
+          `beyond ${Math.round((Date.now() - credCutoff) / MS_PER_DAY)}d retention): ${filePath} — ` +
+          `删除后该凭据副本不可恢复；如需找回 apiKey 请在此前从副本手动提取。`,
+        )
+      }
+      console.debug(`[json-store] cleanupAgedBackupResidue: removing ${filePath}`)
       unlinkSync(filePath)
-      removed++
+      stats.removed++
+      if (!credential) stats.regularRemoved++
     // eslint-disable-next-line taste/no-silent-catch -- best-effort: 单文件失败跳过，不阻断启动链
     } catch (e) {
       console.warn(`[json-store] cleanupAgedBackupResidue: failed to remove backup: ${filePath}`, e)
     }
   }
-  return removed
 }
 
 /** 压缩 ISO ts（`2026-09-18T000557123Z`）解析回 epoch ms；非法形态返回 undefined。 */

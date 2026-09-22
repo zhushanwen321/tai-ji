@@ -32,6 +32,9 @@ export default {
     loading: 'Loading…',
     loadFailed: 'Failed to load ({error})',
     retry: 'Retry',
+    /** Oversize degraded state (subagent / workflow: session file too large for list, RT-4#8) */
+    oversizeTitle: 'Session too large, list unavailable',
+    oversizeHint: 'This session file exceeds the read limit, so the subagent/workflow list cannot be shown; the session itself keeps working and records remain visible in the conversation',
     /** Empty-bucket hint ({name} = kind title) */
     empty: {
       running: 'No {name} in progress',

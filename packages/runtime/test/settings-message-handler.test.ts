@@ -52,7 +52,10 @@ function makeHandler(overrides: { setProvider?: ReturnType<typeof vi.fn>; delete
     // 返回形态对齐真实 configService.refreshProviderCatalogs（CatalogRefreshResult）。
     refreshProviderCatalogs: vi.fn().mockResolvedValue({ refreshed: [], failed: [] }),
     getProvider: vi.fn().mockReturnValue(undefined),
-    updateToolPermissions: vi.fn(),
+    // M4/RT-3#4：config.getProviders reply 携带 models.json 降级态标志
+    isModelsStoreCorrupted: vi.fn().mockReturnValue(false),
+    // M4/RT-7#1：updateToolPermissions 返回 {ok}（config.json 损坏降级态拒绝覆写）
+    updateToolPermissions: vi.fn().mockReturnValue({ ok: true }),
     loadSkills: vi.fn().mockReturnValue([]),
     scanSkills: vi.fn().mockReturnValue([]),
     upsertSkill: vi.fn(),
@@ -230,6 +233,36 @@ describe('SettingsMessageHandler', () => {
       expect(replies[0]).toMatchObject({ type: 'config.skillDirs' })
       expect(ctx.broadcastSkillList).toHaveBeenCalledOnce()
       expect(ctx.broadcastSkillDirs).toHaveBeenCalledOnce()
+    })
+    it('config.setSkillDirs + rebuildGlobal 成功 → 失效广播仅 project（global 走 notifyGlobalChange 正常链，不重复补发）', async () => {
+      const { ctx, handler } = makeHandler()
+      await handler.handleSettingsMessage(msg('config.setSkillDirs', { dirs: ['/x'] }), WS)
+      // rebuildGlobal 是 fire-and-forget Promise 链，flush 微任务后断言
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(ctx.skillRegistry.rebuildGlobal).toHaveBeenCalledOnce()
+      expect(ctx.skillRegistry.invalidateAllProjects).toHaveBeenCalledOnce()
+      expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledTimes(1)
+      expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledWith('project')
+    })
+    it('config.setSkillDirs + rebuildGlobal 失败（RT-1#9）→ 补发 global 失效（partial:true）+ project 广播照发（通知对称）', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const { ctx, handler } = makeHandler()
+        ;(ctx.skillRegistry.rebuildGlobal as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('notify chain broken'))
+        await handler.handleSettingsMessage(msg('config.setSkillDirs', { dirs: ['/x'] }), WS)
+        await vi.waitFor(() => {
+          expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledTimes(2)
+        })
+        // 失败分支先补发 global（partial=true 标注降级），finally 再发 project——
+        // 修复前 global 失效广播随通知链一起丢失，前端 global 投影陈旧无信号。
+        const invalidations = (ctx.broadcastSkillCacheInvalidated as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, ...(undefined | boolean)[]]>
+        expect(invalidations[0]).toEqual(['global', undefined, true])
+        expect(invalidations[1]?.[0]).toBe('project')
+        // 失败留痕（旧实现已有，锚定不回退）
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('rebuildGlobal failed'), expect.any(Error))
+      } finally {
+        errorSpy.mockRestore()
+      }
     })
     it('config.setAgentDirs → 写 discovery + 广播 agent 列表 + 目录配置', async () => {
       const { ctx, handler } = makeHandler()

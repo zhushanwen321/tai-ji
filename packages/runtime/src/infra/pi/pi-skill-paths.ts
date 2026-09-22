@@ -23,6 +23,7 @@ import {
   getSkillPathScopes as getDiscoverySkillScopes,
   setSkillDirs as setDiscoverySkillDirs,
   readDiscovery,
+  writeDiscovery,
 } from './discovery-store.js'
 import { normalizeToHome } from '../../utils/path-utils.js'
 
@@ -32,6 +33,43 @@ import { normalizeToHome } from '../../utils/path-utils.js'
  */
 function syncSkillDirsToSettings(): void {
   updateSettingsFields('skills', s => { s.skills = getDiscoverySkillDirs() })
+}
+
+/**
+ * 两步写（discovery.json → settings.json 投影）+ 失败回滚（RT-3#8）。
+ *
+ * 为什么必须有：settings 投影走 updateSettingsFields（跨进程锁，锁超时/写盘失败可抛）；
+ * 先写 discovery 再投影，第二步失败会留下「discovery 已新、settings 仍旧」的分歧态，
+ * pi 读到的 skills 与 taiji 视图不一致（直到下次成功写）。回滚 = 把 discovery 恢复为
+ * 写前内容后原样上抛——旧值在内存中（readDiscovery），回滚成本一次小文件写，优于
+ * pending-reconcile 标记 + 启动重放方案（后者要新增持久化状态与重放入口，收益相同
+ * 成本更高）。回滚自身失败（极端：磁盘只读）仅 error 留痕，分歧态由下一次成功写
+ * 自愈（syncSkillDirsToSettings 恒从 discovery 派生）。
+ */
+function setDiscoverySkillDirsThenSync(dirs: SkillDirConfig[], context: string): void {
+  const previous = readDiscovery().skill
+  setDiscoverySkillDirs(dirs)
+  try {
+    syncSkillDirsToSettings()
+  } catch (e) {
+    try {
+      setSkillDirsRaw(previous)
+    } catch (rollbackErr) {
+      // 降级策略（best-effort）：回滚失败仅 error 留痕不掩盖原投影错误；分歧态由下一次
+      // 成功写自愈（syncSkillDirsToSettings 恒从 discovery 派生）。
+      console.error(
+        `[pi-skill-paths] ${context}: settings 投影失败且回滚 discovery 失败——discovery 与 settings.skills 处于分歧态，` +
+        `下次成功写入时自愈。rollback error:`,
+        rollbackErr instanceof Error ? rollbackErr.message : rollbackErr,
+      )
+    }
+    throw e
+  }
+}
+
+/** 把 ScopedPaths 形态原样写回 discovery.skill（回滚专用，不做 scope 重分派）。 */
+function setSkillDirsRaw(scoped: { projectPaths: string[]; globalPaths: string[] }): void {
+  writeDiscovery({ ...readDiscovery(), skill: { projectPaths: [...scoped.projectPaths], globalPaths: [...scoped.globalPaths] } })
 }
 
 /**
@@ -100,8 +138,7 @@ export function migrateSettingsSkillsToDiscovery(): void {
     enabled: true,
     scope: 'global' as const,
   }))
-  setDiscoverySkillDirs(normalized)
-  syncSkillDirsToSettings()
+  setDiscoverySkillDirsThenSync(normalized, 'migrateSettingsSkillsToDiscovery')
   console.log(`[provider-store] migrated ${legacy.length} legacy skill paths → ${normalized.length} container dirs in discovery.json`)
 }
 
@@ -115,8 +152,7 @@ export function getSkillPathScopes() {
 }
 
 export function setSkillPaths(dirs: SkillDirConfig[]): void {
-  setDiscoverySkillDirs(dirs)
-  syncSkillDirsToSettings()
+  setDiscoverySkillDirsThenSync(dirs, 'setSkillPaths')
 }
 
 /** 判定单路径 scope 归属（与 migrateDiscoveryV1ToV2 一致）：/ 或 ~ 开头 → global，其余 → project。 */

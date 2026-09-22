@@ -24,16 +24,17 @@ function mockCtx() {
     // ④b 用例：非偏好组消息经主 switch 命中未迁移的既有 case（getAutoRenameEnabled）所需 stub
     getAutoRenameEnabled: vi.fn(() => false),
     // 偏好组 10 case 转发所需 stub（worktree 目录 / setup 脚本 / 裸仓脚本 / 超时 / 默认基分支）
+    // 写 stub 返回 {ok:true}（M4/RT-7#1：setter 返回 {ok, code, error}，失败走 sendError）
     getWorktreeRootDir: vi.fn(() => '/wt'),
-    setWorktreeRootDir: vi.fn(),
+    setWorktreeRootDir: vi.fn().mockReturnValue({ ok: true }),
     getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
-    setSetupScript: vi.fn(),
+    setSetupScript: vi.fn().mockReturnValue({ ok: true }),
     getBareSetupScript: vi.fn(() => 'custom-hooks/bare-setup.sh'),
-    setBareSetupScript: vi.fn(),
+    setBareSetupScript: vi.fn().mockReturnValue({ ok: true }),
     getTimeout: vi.fn(() => 90),
-    setTimeout: vi.fn(),
+    setTimeout: vi.fn().mockReturnValue({ ok: true }),
     getDefaultBaseBranch: vi.fn(() => 'main'),
-    setDefaultBaseBranch: vi.fn(),
+    setDefaultBaseBranch: vi.fn().mockReturnValue({ ok: true }),
   }
   const ctx = {
     send: vi.fn(),

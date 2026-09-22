@@ -99,16 +99,22 @@ const label = computed(() =>
     : t('panel.modeDeclaration.deleted', { id: launchPresetId.value ?? '' }),
 )
 
-/** 工具面摘要（与 PresetChip 同口径；面摘要串 SSOT = panel.presetChip.*）。 */
+/** 工具面摘要（与 PresetChip 同口径；面摘要串 SSOT = panel.presetChip.*）。
+ *  [RD-2#6] allowlist/denylist 而名单未定义 = 面未知（unknownSurface 出口）——
+ *  不得 ?? 0 伪装成「允许 0 项」（0=真值，D4 null=无数据）。 */
 const toolSurface = computed(() => {
   const p = preset.value
   if (!p) return t('panel.presetChip.unknownSurface')
   if (p.toolMode === 'all') return t('panel.presetChip.toolAll')
   if (p.toolMode === 'none') return t('panel.presetChip.toolNone')
   if (p.toolMode === 'allowlist') {
-    return t('panel.presetChip.allowCount', { count: p.allowedTools?.length ?? 0 })
+    return p.allowedTools != null
+      ? t('panel.presetChip.allowCount', { count: p.allowedTools.length })
+      : t('panel.presetChip.unknownSurface')
   }
-  return t('panel.presetChip.denyCount', { count: p.deniedTools?.length ?? 0 })
+  return p.deniedTools != null
+    ? t('panel.presetChip.denyCount', { count: p.deniedTools.length })
+    : t('panel.presetChip.unknownSurface')
 })
 
 /** 启用的提示词段数（替换 + 追加；与 PresetChip 同口径）。 */

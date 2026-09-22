@@ -4,6 +4,7 @@ import type { ScanSourceType } from '@taiji/shared'
 // expandHome 的权威定义已收敛到 utils/path-utils.ts（R4）；re-export 供 scanner 调用方沿用。
 export { expandHome } from '../../utils/path-utils.js'
 import { expandHome } from '../../utils/path-utils.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 /**
  * Walk every subdirectory under the given scan sources (D6/D21).
@@ -15,9 +16,12 @@ import { expandHome } from '../../utils/path-utils.js'
  * callback — only the ~20-line traversal boilerplate is shared here.
  *
  * `continue` semantics map to `return` from `onDir`: a callback returns early to
- * skip the current directory. Unreadable sources/dirs are skipped silently
- * (matches each scanner's original per-dir try/catch behavior); callback-side
- * errors are the callback's own responsibility.
+ * skip the current directory. Unreadable sources/dirs are skipped — but no longer
+ * silently (RT-8#11): scan sources come from user-configured paths (UI
+ * `config.scanSkills` / `config.scanAgents` candidates), a configured directory
+ * that is missing/unreadable means "the defense never took effect" and must be
+ * observable. warn-once per source path keeps rescan hot paths from flooding;
+ * callback-side errors are the callback's own responsibility.
  */
 export function forEachScannedDir(
   sources: string[],
@@ -27,11 +31,24 @@ export function forEachScannedDir(
     const source = expandHome(rawSource)
     const sourceType = inferSourceType(rawSource)
 
-    if (!existsSync(source)) continue
+    if (!existsSync(source)) {
+      warnOnce(
+        `scan-source:${source}`,
+        `[scanner] 扫描源目录不存在，已跳过（该路径下无任何 skill/agent 会被发现）: ${source}。` +
+          '恢复动作：检查路径拼写，或创建该目录',
+      )
+      continue
+    }
     let names: string[]
     try {
       names = readdirSync(source)
-    } catch {
+    } catch (e: unknown) {
+      warnOnce(
+        `scan-source:${source}`,
+        `[scanner] 扫描源目录不可读，已跳过（该路径下无任何 skill/agent 会被发现）: ${source}。` +
+          '恢复动作：检查目录读权限',
+        e,
+      )
       continue
     }
 

@@ -100,6 +100,17 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [code-harden RT-3#5] pi-provider-store：resolver 未注入一次性 warn 显形（防装配序
+  // 漂移静默判全量 provider 无凭据）净增 10 行代码，508 > 500 微超即提额（先例：
+  // event-interpreter / engine-client 的「微超即提额，保留软上限告警」同型）。该文件
+  // 曾按 max-lines 拆出 pi-maintenance / pi-enabled-models / pi-skill-paths /
+  // pi-provider-repair（模块头注释），再拆属独立重构任务。
+  {
+    files: ['packages/runtime/src/infra/pi/pi-provider-store.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
   // 生命周期挂钩）：runtime index.ts 是进程组装 barrel，main 基线 501 行即超，本次 +41。
   // 拆分归独立重构单元（设计文档已删除，git 历史可追溯），

@@ -10,6 +10,10 @@
  *        复用同一强杀编排：persist stopped 带 'Abort failed (pi frozen...)' 诊断 reason +
  *        session.exited 用户文案。[W7] abort 超时不再无条件判死——阶梯全量用例见
  *        services/session/__tests__/message-dispatcher-abort-liveness.test.ts
+ * - FQ4（code-harden RT-4#1）: 编排中段抛错 → 终态三步（full-reset / session.exited /
+ *        removeEntry）finally 必达，异常不上抛
+ * - FQ5/FQ6（code-harden RT-4#1）: 无活跃进程分支按 occupancy 分型——≠idle 继续完整
+ *        收敛（不再「幂等成功」假成功）；=idle 保持幂等成功竞态兜底
  *
  * mock 模式参考 message-dispatcher-bash.test.ts 的 makeMocks。
  *
@@ -59,6 +63,8 @@ interface ForceQuitMocks {
   detachSessionFn: ReturnType<typeof vi.fn>
   persistOutcomeFn: ReturnType<typeof vi.fn>
   removeEntryFn: ReturnType<typeof vi.fn>
+  /** svc.getSession（FQ5/FQ6 注入 occupancy 用） */
+  svcGetSession: ReturnType<typeof vi.fn>
   broadcasts: ServerMessage[]
   callOrder: string[]
 }
@@ -87,13 +93,14 @@ function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
 
   // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 实际消费面），无强转。
   // ensureActive/getSession 不在 forceQuit/abort 收敛路径上，空 mock 即可。
+  const svcGetSession = vi.fn()
   const svc: IDispatcherSessionOps = {
     getSessionByClient: vi.fn(() => makeMockSession()),
     detachSession: detachSessionFn,
     persistSessionOutcome: persistOutcomeFn,
     removeSessionEntry: removeEntryFn,
     ensureActive: vi.fn(),
-    getSession: vi.fn(),
+    getSession: svcGetSession,
   }
 
   const pm = {
@@ -103,7 +110,7 @@ function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
 
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
   const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
-  return { dispatcher, destroySessionFn, detachSessionFn, persistOutcomeFn, removeEntryFn, broadcasts, callOrder }
+  return { dispatcher, destroySessionFn, detachSessionFn, persistOutcomeFn, removeEntryFn, svcGetSession, broadcasts, callOrder }
 }
 
 describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
@@ -129,6 +136,61 @@ describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
     await expect(m.dispatcher.forceQuit('s1')).resolves.toBeUndefined()
 
     expect(m.destroySessionFn).not.toHaveBeenCalled()
+    expect(m.persistOutcomeFn).not.toHaveBeenCalled()
+    expect(m.removeEntryFn).not.toHaveBeenCalled()
+    expect(m.broadcasts).toHaveLength(0)
+  })
+
+  it('FQ4: 编排中段抛错（destroy throw）→ 终态三步仍完成（full-reset + session.exited + removeEntry），不沿调用链上抛', async () => {
+    const m = makeMocks({ active: true })
+    ;(m.destroySessionFn as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('kill exploded'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      // [code-harden RT-4#1] destroy 失败只降级日志：full-reset / session.exited / removeEntry
+      // 在 finally 中必达，异常不再上抛成 uncaughtException 连坐全 runtime。
+      await expect(m.dispatcher.forceQuit('s1')).resolves.toBeUndefined()
+
+      expect(m.removeEntryFn).toHaveBeenCalledTimes(1)
+      const exited = findSessionExited(m.broadcasts)
+      expect(exited).toBeDefined()
+      expect(exited!.payload).toMatchObject({ sessionId: 's1', code: null })
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('forceQuitSession pre-terminal steps failed'), expect.any(Error))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('FQ5: 无活跃进程但 occupancy≠idle（条目还在、turn 卡 generating）→ 继续完整收敛而非「幂等成功」假成功', async () => {
+    // [code-harden RT-4#1] 旧行为：无 client 一律「幂等成功」返回——占用态卡死且事件源
+    // 已断（无进程可产生 agent_settled）时，isGenerating/turn 投影永久滞留。改为继续收敛。
+    const m = makeMocks({ active: false })
+    const stuckSession = { ...makeMockSession(), occupancy: { turn: 'generating', compacting: false, bash: false } }
+    ;(m.svcGetSession as ReturnType<typeof vi.fn>).mockReturnValue(stuckSession)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await m.dispatcher.forceQuit('s1')
+
+      // 完整收敛链：stopped 终态 + session.exited 广播 + removeEntry。
+      //（destroySession 仍被调用——生产侧对无进程条目幂等 no-op，编排统一走同一条链。）
+      expect(m.detachSessionFn).toHaveBeenCalledTimes(1)
+      expect(m.persistOutcomeFn).toHaveBeenCalledWith('s1', 'stopped', 'User forced quit')
+      expect(m.removeEntryFn).toHaveBeenCalledTimes(1)
+      expect(findSessionExited(m.broadcasts)).toBeDefined()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('occupancy not idle'))
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('FQ6: 无活跃进程且占用已复位（occupancy=idle）→ 保持幂等成功（真实竞态兜底不受影响）', async () => {
+    const m = makeMocks({ active: false })
+    const idleSession = { ...makeMockSession(), occupancy: { turn: 'idle', compacting: false, bash: false } }
+    ;(m.svcGetSession as ReturnType<typeof vi.fn>).mockReturnValue(idleSession)
+
+    await expect(m.dispatcher.forceQuit('s1')).resolves.toBeUndefined()
+
     expect(m.persistOutcomeFn).not.toHaveBeenCalled()
     expect(m.removeEntryFn).not.toHaveBeenCalled()
     expect(m.broadcasts).toHaveLength(0)

@@ -37,7 +37,8 @@ import type { ISessionStore } from '../ports/session.js'
 import { getHistoryTailFromFile, type HistoryWindowQuery, type HistoryWindowResult } from '../session-history.js'
 import { applyOrphanToolResults } from '../../infra/pi/message-converter.js'
 import { isEntryNotFoundError } from './trace-sync.js'
-import { toErrorMessage } from '../../utils/errors.js'
+import { isEnoent, toErrorMessage } from '../../utils/errors.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 /**
  * get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例）：entries 只消费
@@ -682,14 +683,30 @@ export class SessionHistoryReader {
  * （每条 user message 一条 entry）但统一走异步避免事件循环阻塞。
  */
 async function readSegmentsMetadataFile(sessionId: string): Promise<SegmentsMetadataFile | null> {
+  const filePath = join(getAttachmentsDir(sessionId), 'segments.json')
   try {
-    const filePath = join(getAttachmentsDir(sessionId), 'segments.json')
     if (!existsSync(filePath)) return null
     const raw = await readFile(filePath, 'utf-8')
     const parsed = JSON.parse(raw) as SegmentsMetadataFile
-    if (!parsed || !Array.isArray(parsed.entries)) return null
+    if (!parsed || !Array.isArray(parsed.entries)) {
+      // RT-5#6：结构损坏（合法 JSON 但 entries 非数组）显形——不留痕则「全降级占位文本」不可归因
+      warnOnce(
+        filePath,
+        `[history-rebuild-cache] segments.json sidecar 结构损坏（entries 非数组），本次全降级为占位文本：${filePath}`,
+      )
+      return null
+    }
     return parsed
-  } catch {
+  } catch (e) {
+    // RT-5#6：读失败不留痕则降级不可归因；ENOENT（existsSync 后 TOCTOU 删除窗口）保持
+    // 安静，其余（EACCES/半截 JSON 等）warn 一次（按路径去重）
+    if (!isEnoent(e)) {
+      warnOnce(
+        filePath,
+        `[history-rebuild-cache] segments.json sidecar 读/解析失败，本次全降级为占位文本：${filePath}`,
+        e instanceof Error ? e.message : e,
+      )
+    }
     return null
   }
 }

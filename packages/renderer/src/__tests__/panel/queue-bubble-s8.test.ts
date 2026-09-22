@@ -240,3 +240,39 @@ describe('QueueBubble S8 · defer 行（compact-defer-composer-queue u1）', () 
     expect(wrapper.text()).not.toContain('first')
   })
 })
+
+describe('QueueBubble 稳定 key（RD-2#9：重排/中段删除 index 漂移 → DOM 复用错位）', () => {
+  it('defer 中段删除 → 幸存 defer 行保持同一 DOM 元素（key=defer:id 稳定，无重挂载错位）', async () => {
+    const wrapper = mountQB({ state: undefined, deferEntries: [deferEntry('d1', 'one'), deferEntry('d2', 'two')] })
+    const d2ElBefore = wrapper.find('[data-testid="defer-cancel-d2"]').element
+    // 删除前一项 d1（中段删除）：d2 的行元素应原地保留（旧 index key 会把 d1 的 DOM 复用给 d2）
+    await wrapper.setProps({ deferEntries: [deferEntry('d2', 'two')] })
+    await nextTick()
+    const d2ElAfter = wrapper.find('[data-testid="defer-cancel-d2"]').element
+    expect(d2ElAfter).toBe(d2ElBefore)
+    wrapper.unmount()
+  })
+
+  it('跨类型重排（steering 消费 → followUp 顶替首位）→ 不同 type 不复用同一 DOM（type 域 key）', async () => {
+    const wrapper = mountQB({ state: { steering: ['a'], followUp: ['b'] } })
+    const rowBefore = wrapper.findAll('.qb-item')[0].element
+    // steering 被消费：followUp 行顶到首位；裸 index key（0→0）会原地复用 steering 行的 DOM
+    await wrapper.setProps({ state: { followUp: ['b'] } })
+    await nextTick()
+    const rowAfter = wrapper.findAll('.qb-item')[0].element
+    expect(rowAfter).not.toBe(rowBefore)
+    wrapper.unmount()
+  })
+
+  it('steering 同族追加（尾部增长）→ 既有行 DOM 保持（构造期 seq 在族内单调）', async () => {
+    const wrapper = mountQB({ state: { steering: ['a', 'b'] } })
+    const firstRowBefore = wrapper.findAll('.qb-item')[0].element
+    await wrapper.setProps({ state: { steering: ['a', 'b', 'c'] } })
+    await nextTick()
+    const rows = wrapper.findAll('.qb-item')
+    expect(rows).toHaveLength(3)
+    expect(rows[0].element).toBe(firstRowBefore)
+    expect(rows[2].text()).toContain('c')
+    wrapper.unmount()
+  })
+})

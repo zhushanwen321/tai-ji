@@ -39,6 +39,7 @@ import type {
 } from '../src/interfaces.js'
 import type { IProcessManager, IPiEngine } from '../src/services/ports/pi-engine.js'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
+import { SESSION_NOT_ACTIVE } from '../src/utils/errors.js'
 
 // pi-provider-store: 控制默认 model 配置（测试主路径需要 model 已配置）
 const providerMocks = vi.hoisted(() => ({
@@ -186,7 +187,7 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
   it('U2: session 已注册但 pi 进程已退出（死 client）→ 先 ensureActive 拉活再切（不再「返回 sessionId」假成功）', async () => {
     // U2/D5 + 守卫：`getClient` 不过滤已死进程的旧形态被结构性消除——激活路径负责
     // 「回收态/死 client → 拉起」，所以「无 client 就静默返回请求值」这一假成功分支已删。
-    const { service, pm, clientMap } = createService()
+    const { service, pm, broker, clientMap } = createService()
     // 1. 建立一个 session（会进 sessions Map 且挂 client）
     const seedState = { sessionId: 's1', sessionFile: '/fake/s1.jsonl' }
     const client = makeClient()
@@ -206,6 +207,8 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
     await expect(service.switchModel('s1', 'new' as ProviderId, 'model'))
       .rejects.toMatchObject({ code: SESSION_NOT_FOUND })
     expect(service.getSummary('s1')?.modelId).toBe(beforeModelId)
+    // 未广播 session.state_changed（失败不产生状态假信号）
+    expect(findBroadcast(broker, 'session.state_changed')).toBeUndefined()
   })
 })
 

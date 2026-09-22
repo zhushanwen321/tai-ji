@@ -19,7 +19,13 @@ export class ToolPermissionsMessageHandler {
   async handle(msg: ClientMessage, ws: WsType): Promise<boolean> {
     switch (msg.type) {
       case 'config.setToolPermissions': {
-        this.ctx.configService.updateToolPermissions(msg.payload.permissions)
+        const result = this.ctx.configService.updateToolPermissions(msg.payload.permissions)
+        if (!result.ok) {
+          // [M4/RT-7#1] config.json 损坏降级态拒绝空骨架覆写 / IO 失败：D10 错误信封
+          // 回复（code 透传），不 reply {saved:true} 假成功
+          this.ctx.sendError(ws, result.code ?? 'app_config_io_error', result.error ?? 'unknown error', msg.id)
+          return true
+        }
         this.ctx.reply(ws, msg.id, 'config.providerUpdated', { saved: true })
         return true
       }

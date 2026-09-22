@@ -65,6 +65,9 @@ interface TrayState {
   bashLoaded: boolean
   bashFetchFailed: boolean
   bashCorrupted: boolean
+  /** [RT-4#8] oversize 降级标志（subagent / workflow 面板降级态判据） */
+  subagentOversize: boolean
+  workflowOversize: boolean
 }
 
 function createTrayState(): TrayState {
@@ -82,6 +85,8 @@ function createTrayState(): TrayState {
     bashLoaded: true,
     bashFetchFailed: false,
     bashCorrupted: false,
+    subagentOversize: false,
+    workflowOversize: false,
   }
 }
 
@@ -105,6 +110,10 @@ const trayFixture: UseTrayCountsReturn = {
   errors: {
     subagent: computed(() => trayState.subagentError),
     workflow: computed(() => trayState.workflowError),
+  },
+  oversize: {
+    subagent: computed(() => trayState.subagentOversize),
+    workflow: computed(() => trayState.workflowOversize),
   },
   retry: retryMock,
 }
@@ -620,6 +629,34 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     await wrapper.find('[data-testid="tray-panel-retry"]').trigger('click')
     await flushPromises()
     expect(retryMock).toHaveBeenCalledWith('subagent')
+  })
+
+  it('[RT-4#8] oversize 降级态：显示「会话过大，列表暂不可用」+ 指引（与空列表分形，无 retry）', async () => {
+    trayState.subagentOversize = true
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    const oversize = wrapper.find('[data-testid="tray-panel-oversize"]')
+    expect(oversize.exists()).toBe(true)
+    expect(oversize.text()).toContain(zhTray.tray.oversizeTitle)
+    expect(oversize.text()).toContain(zhTray.tray.oversizeHint)
+    // 降级态非错误：无 retry 按钮（重试结果恒同）；不渲染列表 tab
+    expect(wrapper.find('[data-testid="tray-panel-retry"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
+  })
+
+  it('[RT-4#8] oversize 降级态：workflow 面板同款；error 优先级高于 oversize', async () => {
+    trayState.workflowOversize = true
+    trayState.workflowError = 'rpc-down'
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+    // 传输失败（可重试）优先于 oversize（数据降级）——error 分支在前
+    expect(wrapper.find('[data-testid="tray-panel-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tray-panel-oversize"]').exists()).toBe(false)
+
+    trayState.workflowError = null
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tray-panel-oversize"]').exists()).toBe(true)
   })
 
   it('加载态：在途且无数据显示加载文案（bash = 从未拉到过一次）', async () => {

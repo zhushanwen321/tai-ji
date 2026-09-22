@@ -975,7 +975,7 @@ export type ServerMessageType =
   | 'workspace.bareDetected'
   | 'workspace.detected'
   | 'worktree.created'
-  | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack'
+  | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack' | 'terminal.writeFailed'
   | 'config.terminalConfig'
   | 'config.retryConfig'
   | 'quota.fetch:result' | 'quota.getCached:result' | 'quota.configure:result' | 'quota.refresh:result'
@@ -1085,6 +1085,12 @@ export interface SkillCacheInvalidatedPayload {
   scope: SkillCacheScope
   /** scope='project' 时携带变更的项目根；setSkillDirs 全局配置变更场景缺省（影响所有 cwd）。 */
   cwd?: string
+  /**
+   * partial=true：scope='global' 的降级补发形态——setSkillDirs 后 rebuildGlobal/通知链
+   * 失败，失效信号由失败分支补发（globalCache 可能仍是旧值，重拉结果以 runtime 当前缓存
+   * 为准）。可选字段，正常失效广播缺省；当前消费方只读 scope，字段向后兼容。
+   */
+  partial?: boolean
 }
 
 // ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
@@ -1408,9 +1414,19 @@ export interface PlanStateView {
 
 export interface ServerMessageMapBase {
   // ── sendInitialState 推送 / domain 订阅（精确）──
-  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[] }
-  // refreshed = 远程目录协商完成的 provider（304/404 也算完成）；failed 携带原因
-  'config.providerCatalogsRefreshed': { refreshed: string[]; failed: Array<{ providerId: string; reason: string }> }
+  // corrupted = models.json 损坏降级态（原位文件已隔离为 .corrupt-* 副本，providers 为
+  // 空骨架）——UI 据此提示「配置已隔离可找回」而非「无任何 provider」（M4/RT-3#4）
+  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[]; corrupted?: boolean }
+  // refreshed = 远程目录协商完成的 provider（304/404 也算完成）；failed 携带原因。
+  // corrupt（RT-7#8）= 读到的损坏缓存源（'own' 自刷缓存 / 'pi' pi models-store，损坏
+  // fail-safe 回退空 entries 后单独回传，不折叠进「从未见过」）；persistFailed = 本次
+  // 刷新结果落盘失败（内存有效，下次进入页面重刷）。
+  'config.providerCatalogsRefreshed': {
+    refreshed: string[]
+    failed: Array<{ providerId: string; reason: string }>
+    corrupt?: Array<'own' | 'pi'>
+    persistFailed?: boolean
+  }
   'config.skills': { skills: SkillInfo[] }
   /**
    * skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
@@ -1603,8 +1619,12 @@ export interface ServerMessageMapBase {
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
-  // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）
-  'session.subagents': { sessionId: string; subagents: SubagentRecord[] }
+  // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）。
+  // oversize（RT-4#8）：session 文件超 runtime 读取预检阈值（>32MB）时列表不可用（subagents
+  // 恒空）——true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省
+  // false（mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
+  // source='oversize'。
+  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean }
   // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
   // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
   // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
@@ -1631,8 +1651,9 @@ export interface ServerMessageMapBase {
     subagentId: string
     entries: Array<import('./pi-entry').PiEntry | import('./pi-entry').PiToolCallEntryForm>
   }
-  // session.workflows：当前 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）
-  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[] }
+  // session.workflows：当前 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）。
+  // oversize（RT-4#8）：与 session.subagents 同款降级标志（文件 >32MB 时列表不可用，恒空数组）。
+  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean }
   // session.agentCallHistory：workflow 内 agent call 的对话流消息（runtime 按 trace[].sessionId 查找 JSONL）。
   // truncated：u4b（D5①）巨型 JSONL 超预检阈值后逆序窗口降级标志（optional，消费方按 false 处理）。
   'session.agentCallHistory': { sessionId: string; agentCallSessionId: string; messages: import('./message').Message[]; truncated?: boolean }
@@ -1783,9 +1804,17 @@ export interface ServerMessageMapBase {
   'session.migrateImage:result': { path: string }
   /** session.writeSegments:result：ack 型空 payload（atomic 写成功） */
   'session.writeSegments:result': Record<string, never>
-  'workspace.recentList': { records: RecentWorkspaceRecord[] }
-  /** workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。 */
-  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string }
+  /**
+   * degraded=true：本次 reply 是降级形态（入参 cwd 无效等校验失败），records 仍为当前
+   * 已记录列表（RPC 契约要求 pending Promise 必然 resolve）。可选字段，正常路径缺省。
+   */
+  'workspace.recentList': { records: RecentWorkspaceRecord[]; degraded?: boolean }
+  /**
+   * workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。
+   * degraded=true：探测降级形态（cwd 无效 / detector 抛错）——isBare:false 是兜底值而非
+   * 真实探测结果，hint 携带恢复指引。可选字段，真实探测路径缺省。
+   */
+  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string; degraded?: boolean; hint?: string }
   /** workspace.detected：workspace.detect 的三态 reply。 */
   'workspace.detected': {
     mode: 'bare-workspace' | 'plain-repo' | 'not-repo'
@@ -1794,14 +1823,19 @@ export interface ServerMessageMapBase {
     repoRoot: string
     defaultBranch: string
   }
-  /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。 */
-  'worktree.created': { cwd: string; branch: string }
+  /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。
+   *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
+   *  runtime 会 fallback 到本地 main——可选字段存在即「实际 ref ≠ 请求 ref」，前端可提示。 */
+  'worktree.created': { cwd: string; branch: string; usedBaseRef?: string }
   // terminal.data：PTY 输出流（高频广播，按 sessionId 路由到对应 panel 的 scrollback buffer）。
   'terminal.data': { sessionId: string; data: string }
   // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。PTY 销毁后 ptyMap 移除。
   'terminal.exit': { sessionId: string; exitCode: number }
   // terminal.alive：PTY 就绪信号（spawn 成功后发，renderer flush 写队列——联动 2 异步写时序）。
   'terminal.alive': { sessionId: string }
+  // terminal.writeFailed：PTY 写入失败（进程已退出/管道关闭，RT-8#10）。低频错误信号
+  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后 toast 提示输入可能丢失。
+  'terminal.writeFailed': { sessionId: string; message: string }
   // terminal.ack：spawn/write/resize/kill/attach 的通用 ack reply（空 payload，前端按 id 匹配）。
   'terminal.ack': Record<string, never>
   // config.terminalConfig：reply + broadcast + sendInitialState 三用（复刻 config.systemPrompt 范式）。

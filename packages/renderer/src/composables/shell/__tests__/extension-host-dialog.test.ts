@@ -17,15 +17,17 @@ import type { InternalEvent } from '@taiji/core'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 
 vi.mock('@taiji/core/transport/ws-client', () => ({
-  send: vi.fn(),
+  // 返 true = 送达（M1 环 3 后 transport 消费 boolean；断连场景用例单独 mockReturnValueOnce(false)）
+  send: vi.fn((): boolean => true),
 }))
 
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn(),
+  sendExtensionUIResponse: vi.fn((): boolean => true),
 }))
 
 import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
+import { useToast } from '@/composables/useToast'
 import {
   convertToDialogRequest,
   createDialogRequestSource,
@@ -243,7 +245,47 @@ describe('createUiResponseTransport（AC6/AC9）', () => {
     t.sendPiResponse('s1', 'r1', 'unknown-method', true)
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'input', true)
   })
+
+  it('TC9a: sendPiResponse 未送达（返 false）→ 返 false + 表项保留 + toast 提示；恢复后重发即删表项（M1 环 3）', () => {
+    const t = createUiResponseTransport()
+    deliverRequestForTransport('r-drop')
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    // 断连期：sendExtensionUIResponse 返 false → transport 返 false，反查表项保留（请求仍在队列）
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    expect(t.sendPiResponse('s1', 'r-drop', 'confirm', true)).toBe(false)
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+    expect(useToast().toasts.value.some((x) => x.type === 'error' && x.message.includes('回复未送达'))).toBe(true)
+
+    // 连接恢复：重发（同 requestId 幂等）送达 → 表项删除
+    expect(t.sendPiResponse('s1', 'r-drop', 'confirm', true)).toBe(true)
+    expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+  })
+
+  it('TC9b: sendPluginResponse 未送达（返 false）→ 返 false + 表项保留（M1 环 3）', () => {
+    const t = createUiResponseTransport()
+    deliverRequestForTransport('r-pdrop')
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    vi.mocked(send).mockReturnValueOnce(false)
+    expect(t.sendPluginResponse('r-pdrop', { value: 'x' })).toBe(false)
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    // 恢复后送达 → 删除
+    expect(t.sendPluginResponse('r-pdrop', { value: 'x' })).toBe(true)
+    expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+  })
 })
+
+/** TC9 用例投递：写入 requestIdSessions 反查表（复用 createDialogRequestSource 投递流） */
+function deliverRequestForTransport(requestId: string, sessionId = 's1'): void {
+  const bus = new InternalEventBus()
+  const source = createDialogRequestSource(bus)
+  const handler = vi.fn()
+  const unsub = source.onUiRequest(handler)
+  bus.emit({ kind: 'ui-request', sessionId, request: { requestId, pluginId: 'p1', kind: 'confirm' } })
+  unsub()
+}
 
 describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation §3.4）', () => {
   let bus: InternalEventBus

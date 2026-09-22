@@ -218,7 +218,10 @@ function cachePercentDisplay(v: number | null | undefined): string {
   return v == null ? '—' : `${v}%`
 }
 
-/** 归因 reason → 触发器短文案（i18n；三值均为「预期内 miss，非故障」语义） */
+/** 归因 reason → 触发器短文案（i18n；已知三值均为「预期内 miss，非故障」语义）。
+ *  [RD-2#7] default：TS2366 只拦编译期，runtime 领先 renderer 的版本漂移会送来未知
+ *  reason——落通用「缓存未命中」文案 + warn（缺省会让 cacheDisplay 为 undefined，
+ *  触发器 chip 空白且无日志）。 */
 function cacheMissLabel(reason: GenStatsCacheMiss['reason']): string {
   switch (reason) {
     case 'cold-start':
@@ -227,6 +230,9 @@ function cacheMissLabel(reason: GenStatsCacheMiss['reason']): string {
       return t('panel.context.genStatsCacheMissIdle')
     case 'context-rewrite':
       return t('panel.context.genStatsCacheMissCompaction')
+    default:
+      console.warn(`[gen-stats] 未知 cacheMiss reason：${String(reason)}（runtime 与 renderer 协议漂移？）`)
+      return t('panel.context.genStatsCacheMissUnknown')
   }
 }
 
@@ -239,16 +245,19 @@ function formatIdle(ms: number): string {
   return rest === 0 ? `${hours}h` : `${hours}h${rest}m`
 }
 
-/** 浮层归因说明行（无归因 → null，不出行；reason 穷尽分支，防御分支只接住未来新增值） */
+/** 浮层归因说明行（无归因 → null，不出行；reason 已知值穷尽，防御分支见 cacheMissLabel default） */
 const cacheMissNote = computed(() => {
   const miss = cacheMiss.value
   if (!miss) return null
   if (miss.reason === 'cold-start') return t('panel.context.genStatsCacheMissColdStartNote')
   if (miss.reason === 'idle-expiry') {
-    return t('panel.context.genStatsCacheMissIdleNote', { duration: formatIdle(miss.idleMs ?? 0) })
+    // [RD-2#6] idleMs 缺失 = 时长未知：不以 ?? 0 伪装成「空闲 1m」假测量值（D4：null=无数据/0=真值）
+    return miss.idleMs != null
+      ? t('panel.context.genStatsCacheMissIdleNote', { duration: formatIdle(miss.idleMs) })
+      : t('panel.context.genStatsCacheMissIdleNoteUnknownDuration')
   }
   if (miss.reason === 'context-rewrite') return t('panel.context.genStatsCacheMissCompactionNote')
-  // 防御：协议新增 reason 时不出说明行（触发器文案侧的穷尽 switch 会在编译期拦下）
+  // 防御：协议新增 reason 时不出说明行（触发器文案侧的 default 分支兜底 + warn）
   return null
 })
 

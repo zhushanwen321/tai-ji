@@ -1751,8 +1751,27 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
   log("=== Batch " + batchIndex + " (" + BATCH_NAMES[batchIndex - 1] + ") CLEAN ===");
 }
 
+/** 终态残留问题结构化清单（B2，与 zcode 原生版 remaining 字段对齐）：
+ *  status != fixed/deferred 即视为残留（与 message 里的残留 ID 同源口径）。
+ *  抽成函数是为了让 review-fix-loop-script.test.ts 的 extractFn 机制能直测；
+ *  返回统一 id/title/severity/status 四字段——消费方（主 agent / pr-lifecycle
+ *  consumeNestedResult）不需再正则拆 message 字符串。
+ * @param issues state.issues（{id: entry} 映射；可为 undefined，空态返回 []）
+ */
+function buildRemaining(issues) {
+  return Object.entries(issues || {})
+    .filter(([, i]) => i && i.status !== "fixed" && i.status !== "deferred")
+    .map(([id, i]) => ({ id, title: i.title || "", severity: i.severity || "unknown", status: i.status }));
+}
+
 log("\n=== Loop Complete ===");
 saveState(state);
+
+// B2（2026-09-20 与 zcode 原生版对齐）：终态残留问题的**结构化**清单——此前只把残留 ID
+// 拼进 message 字符串，调用方（主 agent / pr-lifecycle 的 consumeNestedResult）只能正则
+// 拆字符串；给出 id/title/severity/status 四字段后，「converged 却 remaining 非空」这类
+// 自相矛盾终态在消费侧可机器判定。残留口径 = status != fixed/deferred（与 message 同源）。
+const remaining = buildRemaining(state.issues);
 
 return {
   batches: BATCHES.length,
@@ -1761,6 +1780,8 @@ return {
   targetType,
   target,
   runDir: RUN_ROOT,
+  // B2：残留问题结构化清单（消费方可机器判定「converged 却 remaining 非空」类矛盾终态）
+  remaining,
   // 5.9 terminated 透出：非 clean 时 message 含终止原因 + 残留 ID 清单 + deferred 理由
   // （stuck/needs-redesign/converged/max-rounds/*-failure 均由 finalMessage 承载）。
   // 渲染层特判（launcher 对 terminated 非 clean 的视觉区分）留 TODO：当前 tool 结果

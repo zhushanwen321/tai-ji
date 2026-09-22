@@ -30,7 +30,8 @@ import type { Message } from '@taiji/shared'
 import { HISTORY_BUDGET, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import type { ISessionStore } from './ports/session.js'
 import { isEnoent } from '../utils/errors.js'
-import { parseJsonl } from '../utils/jsonl.js'
+import { parseJsonl, type JsonlParseOptions } from '../utils/jsonl.js'
+import { warnOnce } from '../utils/warn-once.js'
 import { applyEntryEndTimes, mapSessionEntries } from '../infra/pi/session-entry-mapper.js'
 import type { PiSessionEntry } from '../infra/pi/pi-protocol.js'
 import { forEachReversedLineChunk } from '../utils/history-reverse-read.js'
@@ -54,6 +55,29 @@ function filterObjectEntries(entries: unknown[]): PiSessionEntry[] {
   // 到 PiSessionEntry[] 的 cast（TS 认为充分重叠；谓词会收窄成 Record<string,unknown>[] 导致
   // 与 PiSessionEntry 联合不重叠报 TS2352）。
   return entries.filter((e) => typeof e === 'object' && e !== null) as PiSessionEntry[]
+}
+
+/**
+ * 畸形行 dropCount 观测（RT-8#13）：半截 JSONL 此前静默丢轮次（entry 级丢失无归因）。
+ * 累计后 report() warn-once（同文件跨次读只出声一次，防历史翻页刷屏）。
+ */
+function makeMalformedLineWatcher(filePath: string): { opts: JsonlParseOptions; report: () => void } {
+  let dropped = 0
+  return {
+    opts: {
+      onMalformedLine: () => {
+        dropped += 1
+      },
+    },
+    report: () => {
+      if (dropped === 0) return
+      warnOnce(
+        `jsonl:${filePath}`,
+        `[session-history] session 文件含 ${dropped} 行畸形 JSON（对应轮次/字段缺失，历史记录不完整）: ${filePath}。` +
+          '常见原因：pi 写入被中断（崩溃/磁盘满）产生的半截行',
+      )
+    },
+  }
 }
 
 /**
@@ -156,7 +180,10 @@ export async function getHistoryFromFilePath(filePath: string, sessionStore: ISe
   // 经共享转换单点（convertWindowEntries：mapper + port 翻译 + endedAt 回填），
   // filterObjectEntries 前置过滤非 object（parseJsonl 可能返回裸数字/字符串/null）
   // ——与①②档同一条链，避免全量读路径漏掉 entry 专属回填（如产出结束时刻）。
-  return { messages: convertWindowEntries(filterObjectEntries(parseJsonl(content)), sessionStore), truncated: false }
+  const malformed = makeMalformedLineWatcher(filePath)
+  const entries = parseJsonl(content, malformed.opts)
+  malformed.report()
+  return { messages: convertWindowEntries(filterObjectEntries(entries), sessionStore), truncated: false }
 }
 
 /**
@@ -324,13 +351,15 @@ function collectRecentTurnEntriesFromTail(
     confirmedOlderTurn: false,
     collecting: true,
   }
+  // RT-8#13：逆序分块 + 窗口二次 parse 两阶段共用一个畸形行 watcher（行级丢失累计一次）
+  const malformed = makeMalformedLineWatcher(filePath)
   const summary = forEachReversedLineChunk(
     filePath,
     // maxTotalBytes 显式注入 shared SSOT（工具自身零 shared 依赖，纯 IO 形态）
     { maxTotalBytes: READ_PRECHECK_MAX_BYTES },
     ({ lines }) => {
       for (let i = lines.length - 1; i >= 0; i--) {
-        const parsed = parseJsonl(lines[i])
+        const parsed = parseJsonl(lines[i], malformed.opts)
         if (!scan.cursorSeen) {
           // cursor 命中判定与 turn 判定共用同一 parse。命中行本身不收集（锚所在 turn
           // 已在 renderer 分区），并丢弃此前收集的更新侧——从下一行（更旧）即锚前区域。
@@ -373,7 +402,8 @@ function collectRecentTurnEntriesFromTail(
   const windowLines = lines.slice(startIdx)
   // 逐行 parse（turn 判定阶段已跳过畸形行的边界计数），窗口行二次 parse 换取收集期
   // 不驻留 parsed 对象图——行文本驻留（≤32MB 上限）远小于 parse 后对象图
-  const entries = filterObjectEntries(windowLines.flatMap((line) => parseJsonl(line)))
+  const entries = filterObjectEntries(windowLines.flatMap((line) => parseJsonl(line, malformed.opts)))
+  malformed.report()
   const loadedTurns = turnFlags.slice(startIdx).filter(Boolean).length
   return {
     entries,
@@ -425,13 +455,19 @@ export async function tailReadHistory(
   query?: HistoryWindowQuery,
 ): Promise<TailReadResult> {
   const emptyPage = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
-  // 规则 #6：文件不存在返回空数组（statSync 失败涵盖 ENOENT；打开期竞态由 collect 的
-  // openFailed 语义兜底，同样不抛）
+  // 规则 #6：文件不存在（ENOENT，pi 延迟落盘常态）空页 + warn；其余 stat 失败
+  //（EACCES/EIO 等）原样上抛——压成空页会把「读不了」伪装成「历史为空」假成功
+  //（RT-5#4，与上方 getHistoryFromFilePath 的 statSync 预检同款分级；打开期竞态由
+  // collect 的 openFailed 语义兜底，同样不抛）
   let fileSize: number
   try {
     fileSize = statSync(filePath).size
-  } catch {
-    return emptyPage
+  } catch (e) {
+    if (isEnoent(e)) {
+      console.warn(`[session-history] session file missing, returning empty window: ${filePath}`)
+      return emptyPage
+    }
+    throw e
   }
   if (fileSize === 0) return emptyPage
 

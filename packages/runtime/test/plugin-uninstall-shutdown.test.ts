@@ -130,7 +130,7 @@ describe('uninstallPlugin 四缺收口（F2）', () => {
     expect(registryMock.removeDescriptor).toHaveBeenCalledWith('uninstall-plugin')
   })
 
-  it('F2-②容错: installer.uninstall 抛错不中断内存清理（registry/activator 拆除仍完成）', async () => {
+  it('F2-②容错: installer.uninstall 抛错不中断内存清理（registry/activator 拆除仍完成），收口抛错（RT-6#6）', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const installer: IPluginInstaller = {
       install: vi.fn(),
@@ -140,7 +140,14 @@ describe('uninstallPlugin 四缺收口（F2）', () => {
     const { service, registryMock, reg } = createService({ descriptor, installer })
     const removeDescriptor = vi.spyOn(reg.activator, 'removeDescriptor')
 
-    await expect(service.uninstallPlugin('uninstall-plugin')).resolves.toBeDefined()
+    // RT-6#6：磁盘删除失败不再「只 log 仍回成功形状」——内存清理照旧完成后抛带 code 的
+    // 领域错误（否则残留目录重启后被 scan 扫回 = 卸载静默复活，用户零反馈）。
+    await expect(service.uninstallPlugin('uninstall-plugin')).rejects.toThrow(
+      /on-disk files could not be deleted.*rm -rf failed: EPERM/,
+    )
+    await service.uninstallPlugin('uninstall-plugin').catch((e: unknown) => {
+      expect((e as { code?: string }).code).toBe('PLUGIN_UNINSTALL_PARTIAL')
+    })
 
     // 磁盘删除失败仅记日志（toErrorMessage 已把 Error 归一为 message 字符串）
     expect(consoleError).toHaveBeenCalledWith(

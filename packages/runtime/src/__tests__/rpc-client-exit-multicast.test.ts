@@ -60,6 +60,7 @@ const fakeProc = {
   stdin: {
     write: vi.fn(() => true),
     once: vi.fn(),
+    on: vi.fn(), // RT-2#1 stdin 流错误源头接线（stdin.on('error')）
   },
   // 只记录调用，不自动 emit exit：exit 由测试手动 emit（断言「kill ≠ 通知」的中间态）
   kill: vi.fn(),

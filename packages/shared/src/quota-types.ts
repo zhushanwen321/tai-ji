@@ -42,6 +42,11 @@ export type QuotaAuthKind = 'api-key' | 'oauth' | 'cookie'
  * 未配置 workspace。不发任何 HTTP 请求，恢复指引指向「去 Settings 配置」而非检查凭证。
  * no-credential：凭证链解析不到任何凭证（D6，coding-plan-quota-config-ux §6.7）——runtime
  * 显式报失败而非静默返回缓存，恢复指引指向「填专属 Key 或改用 Provider 凭据」。
+ * credential-unavailable（RT-7#7）：凭证文件读盘/锁失败（IO 层异常）——与 no-credential
+ * （确实没有凭证）分流：报「读取失败」而非误导用户去填一个其实已存在的 Key，
+ * 恢复指引指向检查文件/锁（message 带具体路径）。
+ * credential-unsupported（RT-7#4）：凭据条目存在但形态不支持解析（`!` command 前缀 /
+ * 环境变量引用未定义）——resolver 返回 unsupported 判别结构，查询在发请求前拦截。
  */
 export type QuotaFetchFailureReason =
   | 'unauthorized'
@@ -50,6 +55,8 @@ export type QuotaFetchFailureReason =
   | 'parse'
   | 'not_configured'
   | 'no-credential'
+  | 'credential-unavailable'
+  | 'credential-unsupported'
 
 /**
  * 单次额度查询结果：成功带数据，失败带可区分 reason（不 throw）。

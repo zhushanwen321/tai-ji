@@ -29,6 +29,7 @@ const fakeProc = {
   stdin: {
     write: vi.fn(),
     once: vi.fn(),
+    on: vi.fn(), // RT-2#1：wireProcessHandlers 现注册 stdin 'error' listener
   },
   kill: vi.fn(),
   pid: 12345,

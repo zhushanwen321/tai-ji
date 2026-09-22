@@ -105,3 +105,88 @@ describe('TC5: importer applyImport 新建 provider 白名单守卫（边界1 / 
     expect(order).toEqual(['upsert', 'ensure'])
   })
 })
+
+/**
+ * RT-5#2（code-harden 审计批次 2 ⑤ / M15）：导入路径复用 settings 侧 B-4b 模型字段白名单。
+ *
+ * 修复前：applyModelsWritePolicy 只做空串转译（translateModelSchemaFields），外部 models
+ * 的畸形 cost 裸透传直写 models.json——pi 0.84.4 ModelConfig.load 对 schema 违规**整表拒载**
+ * （node_modules dist core/model-config.js：validateModelsConfig.Check 失败 → 空 providers Map），
+ * 一条畸形模型毒死全部自定义 provider。
+ * 修复后：导入路径经 applyValidatedModelFields/sanitizeModelCost 同一套校验，非法值由
+ * applyProviderEntry 的 per-entry catch 折叠为该条 status:'failed' + reason，不落盘。
+ */
+describe('RT-5#2: 导入路径模型字段白名单（非法 cost → 该条 failed，不落盘）', () => {
+  /** 带模型 cost 的 ParsedProvider fixture（覆盖 makeParsed 的 models）。 */
+  function parsedWithCost(sourceName: string, cost: unknown): ParsedProvider {
+    return {
+      ...makeParsed(sourceName),
+      models: [{ id: 'm1', name: 'M1', cost }],
+    } as unknown as ParsedProvider
+  }
+
+  it.each([
+    ['负数分量', { input: -1, output: 2, cacheRead: 0, cacheWrite: 0 }],
+    ['非数字分量', { input: '1', output: 2, cacheRead: 0, cacheWrite: 0 }],
+    ['缺 cost 分量', { input: 1, output: 2 }],
+    ['cost 非对象', 'not-an-object'],
+  ])('非法 cost（%s）→ status:failed + reason 含 cost，upsertProvider 不落盘', async (_label, badCost) => {
+    const importId = createPreview('pi', [parsedWithCost('bad-cost', badCost), makeParsed('good-entry')])
+    const out = await applyImport(importId, ['bad-cost', 'good-entry'])
+    expect('result' in out).toBe(true)
+    if (!('result' in out)) throw new Error('apply should succeed')
+    const bad = out.result.imported.find((i) => i.id === 'bad-cost')
+    expect(bad?.status).toBe('failed')
+    expect(bad?.reason).toContain('cost')
+    // 坏条目不写盘
+    expect(mockedUpsertProvider).not.toHaveBeenCalledWith('bad-cost', expect.anything())
+    // 同批合法条目照常导入
+    const good = out.result.imported.find((i) => i.id === 'good-entry')
+    expect(good?.status).toBe('imported')
+    expect(mockedUpsertProvider).toHaveBeenCalledWith('good-entry', expect.anything())
+  })
+
+  it('非法 reasoning（非布尔）→ status:failed + reason 含 reasoning', async () => {
+    const provider = {
+      ...makeParsed('bad-reasoning'),
+      models: [{ id: 'm1', name: 'M1', reasoning: 'yes' }],
+    } as unknown as ParsedProvider
+    const importId = createPreview('pi', [provider])
+    const out = await applyImport(importId, ['bad-reasoning'])
+    if (!('result' in out)) throw new Error('apply should succeed')
+    const item = out.result.imported.find((i) => i.id === 'bad-reasoning')
+    expect(item?.status).toBe('failed')
+    expect(item?.reason).toContain('reasoning')
+    expect(mockedUpsertProvider).not.toHaveBeenCalled()
+  })
+
+  it('合法 cost 四分量 → imported，写盘 cost 为白名单重建的四字段形态', async () => {
+    const importId = createPreview('pi', [parsedWithCost('valid-cost', { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0.25 })])
+    const out = await applyImport(importId, ['valid-cost'])
+    if (!('result' in out)) throw new Error('apply should succeed')
+    expect(out.result.imported.find((i) => i.id === 'valid-cost')?.status).toBe('imported')
+    expect(mockedUpsertProvider).toHaveBeenCalledTimes(1)
+    const [id, config] = mockedUpsertProvider.mock.calls[0] as [string, { models: Array<{ cost: Record<string, unknown> }> }]
+    expect(id).toBe('valid-cost')
+    expect(config.models[0].cost).toEqual({ input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0.25 })
+  })
+
+  it('缺 id 的模型条目 → 整条丢弃 + warn，不阻断同 provider 其余合法模型', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const provider = {
+        ...makeParsed('mixed-models'),
+        models: [{ name: 'no-id-model' }, { id: 'm2', name: 'M2' }],
+      } as unknown as ParsedProvider
+      const importId = createPreview('pi', [provider])
+      const out = await applyImport(importId, ['mixed-models'])
+      if (!('result' in out)) throw new Error('apply should succeed')
+      expect(out.result.imported.find((i) => i.id === 'mixed-models')?.status).toBe('imported')
+      const [, config] = mockedUpsertProvider.mock.calls[0] as [string, { models: Array<{ id: string }> }]
+      expect(config.models.map((m) => m.id)).toEqual(['m2'])
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped model without id'))
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})

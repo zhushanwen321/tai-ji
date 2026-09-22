@@ -133,6 +133,13 @@ export default {
     respawnRetryFailed: 'Recovery failed — try again later or create a new session',
     dispatching: 'Thinking…',
     railInProgress: 'in progress…',
+    // [RD-2#1 render error boundary] per-item failure placeholder row + retry; global render error toast
+    itemRenderFailed: 'This item failed to render',
+    itemRenderRetry: 'Retry',
+    renderErrorToast: 'A rendering error occurred and has been logged',
+    // [RD-3#7] toast in-flight overflow collapse summary (UI consumer of droppedCount)
+    toastDropped: '{count} more notification(s) hidden',
+    toastDroppedDismiss: 'Dismiss collapsed-notification notice',
     startConversation: 'Start a conversation, or select a session from the left',
     scrollToBottom: 'Scroll to bottom',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
@@ -198,6 +205,7 @@ export default {
     pillStaged: 'Staged',
     pillDirty: 'Dirty',
     pillConflict: 'Conflict',
+    unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
     capacity: 'Context capacity',
@@ -222,6 +230,10 @@ export default {
     quotaFailParse: 'failed to parse quota response',
     quotaFailNotConfigured: 'no Workspace configured — set it in Settings and retry',
     quotaFailNoCredential: 'no usable credential found — check the quota query configuration in Settings',
+    // RT-7#7: credential file read failed (IO/lock error, not "no credential") — check files, don't re-enter keys
+    quotaFailCredentialUnavailable: 'failed to read credential file — check disk and file permissions, then retry',
+    // RT-7#4: unsupported credential form (! command prefix / undefined env reference)
+    quotaFailCredentialUnsupported: 'unsupported credential form — use a plain API Key instead',
     window5h: '5h',
     windowWeek: 'This week',
     windowMonth: 'This month',
@@ -254,6 +266,10 @@ export default {
     genStatsCacheMissColdStartNote: 'First request in this session — cache not established yet (expected miss)',
     genStatsCacheMissIdleNote: '{duration} idle since the last request — the provider cache expired (expected miss)',
     genStatsCacheMissCompactionNote: 'Prefix rebuilt after context compaction — this request must miss (expected)',
+    // [RD-2#6] idle-expiry without idleMs: unknown duration must not masquerade as a measured value (null=no data/0=real value, D4)
+    genStatsCacheMissIdleNoteUnknownDuration: 'Idle for an unknown duration since the last request — the provider cache expired (expected miss)',
+    // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
+    genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
   },
   sideDrawer: {
@@ -347,6 +363,12 @@ export default {
     clear: 'Clear',
     kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
+    writeRpcFailed: 'Failed to send terminal command: {error}',
+    writeFailed: 'Terminal input may be lost: {message}',
+    queueDropped: 'Terminal write queue is full; dropped {count} oldest commands',
+    // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
+    spawnFailed: 'Failed to start terminal: {error}',
+    retry: 'Retry',
   },
   mermaid: {
     rendering: 'Rendering diagram…',
@@ -378,6 +400,10 @@ export default {
     builtin: 'Built-in',
     noDescription: 'No detailed description for this command',
     noDocBody: 'No documentation body for this skill',
+    // [RD-2#3] SKILL.md read failure (both guard paths rejected / IO error) — explicit failed state, distinct from empty body
+    loadFailed: 'Failed to read SKILL.md: ',
+    openDir: 'Open containing folder',
+    revealFailed: 'Failed to open the folder',
     path: 'Path',
     commandType: 'Extension command',
     builtinCommand: 'Built-in command',
@@ -465,6 +491,8 @@ export default {
     preview: 'Preview',
     loadFailed: 'Failed to load image',
     noDiff: 'No diff content',
+    // [RD-2#2] shiki highlight failure degraded visibly (content still renders as plain text lines)
+    highlightFailed: 'Highlight failed — degraded to plain text',
     tabDiff: 'Diff',
     copyFileName: 'Copy file name',
     copyFilePath: 'Copy path',
@@ -552,11 +580,17 @@ export default {
     loading: 'Loading…',
     malformedLine: 'Unparseable entry (line {line})',
     malformedHint: 'JSONL line {line} is corrupted; open the session JSONL file to inspect',
+    // [RD-2#6] corrupted line without a line number (protocol/version drift defense): no line promise, no pointer to a nonexistent line
+    malformedLineUnknown: 'Unparseable entry (line unknown)',
+    malformedHintUnknownLine: 'JSONL contains a corrupted line (line number unknown)',
     inspectorBack: 'Back',
     inspectorCopy: 'Copy',
     inspectorCopied: 'Copied',
     inspectorSubtitle: 'From Trace view · full detail of the selected entry',
     inspectorRaw: 'Raw entry JSON',
+    // [RD-2#5] safeJson guard copy: unserializable (circular refs etc.) / over-limit truncation
+    rawJsonUnserializable: '(content could not be serialized for display)',
+    rawJsonTruncated: '…(content too large, truncated)',
     // usage right-side hints (disjoint buckets: cacheRead > input is the norm)
     usageUncached: 'uncached',
     usageCacheRead: 'cache hit',
@@ -565,5 +599,9 @@ export default {
     usageReasoning: 'subset of output',
     blockRedacted: '(thinking redacted, original text unavailable)',
     jumpToolResult: 'Jump to the paired TOOL row',
+  },
+  trayWidget: {
+    // [RD-2#8] third-party widget meta.progress with non-finite numbers (NaN/Infinity): no progress bar, show unavailable
+    progressUnavailable: 'No progress',
   },
 }

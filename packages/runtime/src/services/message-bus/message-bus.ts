@@ -41,6 +41,7 @@ import {
   guardOutboundPushFrame,
 } from './outbound-frame-registry.js'
 import { getCrashJournal } from '../../infra/crash-journal.js'
+import { warnIfBacklogged } from '../../utils/backpressure-warn.js'
 // 组合根（index.ts）经本模块导入守卫默认值——省一条独立 import 行（index.ts max-lines 门禁），
 // 阈值 SSOT 仍在 outbound-frame-registry（shared 常量的 registry 出口）。
 export { DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS } from './outbound-frame-registry.js'
@@ -96,8 +97,12 @@ export type TopicKind = 'state' | 'stream' | 'transient'
  * **未入表类型的 fallback = 'stream'（R-07 裁决）**：与改造前语义一致（所有 publish 都入 ring），
  * 是唯一不产生行为回归的默认——fallback 到 transient 会静默丢消息（不可回放），fallback 到
  * state 需要快照键。新增消息类型忘记入表时走 stream 最安全。
+ *
+ * 导出（RT-1#5）：TOPIC_TABLE / STATE_TYPE_KEY_MAP / STATE_NO_KEY_TOPICS 供守卫测试
+ * 遍历断言「state 类 ⊆ STATE_TYPE_KEY_MAP ∪ 例外清单」——新增 state 类型漏登记在测试期
+ * 即红，不再依赖注释自认风险。
  */
-const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
+export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // ── state 类：分配 seq、写快照（同 typeKey 覆盖）、不入 ring ──
   'session.commands': 'state',
   'context.update': 'state',
@@ -149,6 +154,10 @@ const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'terminal.alive': 'stream',
   'terminal.exit': 'stream',
   'terminal.ack': 'stream',
+  // write 失败错误信号（RT-8#10）：低频（每 PTY 生命周期至多一次）+ 需可靠送达（断连重连
+  // 经回放补见），stream 入 ring——与 terminal.alive/exit 同类，刻意不与 terminal.data 同为
+  // transient（transient 不入 ring，断连窗口内发出的失败信号会丢）。
+  'terminal.writeFailed': 'stream',
   'plugin:uiRequest': 'stream',
   'extension.ui_request': 'stream',
   'extension:widget': 'stream',
@@ -198,8 +207,12 @@ export function topicOf(type: string): TopicKind {
  * ③对账不靠快照/ring：renderer reducer 按 entry id 幂等去重 + 重开 session 时经
  * fetchAndInject 拉全量快照（设计 subagent-realtime-channel §6.1-2「帧先于快照到达，
  * reducer 幂等去重」）。TOPIC_TABLE 该行上方注释与此同源。
+ *
+ * 例外清单机器可读化（RT-1#5）：STATE_NO_KEY_TOPICS 是上述例外的显式白名单——守卫测试
+ * 断言「state 类 ⊆ STATE_TYPE_KEY_MAP keys ∪ STATE_NO_KEY_TOPICS」，运行时 warn 同以
+ * 它豁免。新增例外必须进本清单（并在此处补登记理由），否则守卫测试即红。
  */
-const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
+export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   'session.commands': 'commands',
   'context.update': 'context',
   'session.subagents': 'subagents',
@@ -212,6 +225,29 @@ const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   // 时 subscribe 返回的 stateSnapshot 含此帧，renderer sessionPhase 从快照恢复（G4）。
   // 写快照/回放对 stateSnapshot Map 的任意 key 自动生效，无需其他登记点。
   'session.occupancy': 'occupancy',
+}
+
+/**
+ * state-no-key 例外白名单（RT-1#5 机器可读化）：登记为 state 类但刻意不映射 typeKey
+ * 的类型全集（逐条理由见 STATE_TYPE_KEY_MAP 上方「例外登记」注释块）。
+ * 守卫测试与运行时 warn 共用——例外之外任何 state 类型缺 typeKey 映射 = 漂移。
+ */
+export const STATE_NO_KEY_TOPICS: ReadonlySet<string> = new Set(['session.subagentEntriesAppended'])
+
+/** 已 warn 过的未映射 state 类型（每 type 一次，防高频消息刷屏）。 */
+const warnedStateNoKeyTypes = new Set<string>()
+
+/**
+ * RT-1#5 运行时纵深：state 类未映射 typeKey 且不在例外白名单时 warn 一次——该形态下
+ * 快照静默不写、重连投影失效，此前零日志。守卫测试已把漏登记挡在提交期，这里覆盖
+ * 「测试期之后发生的漂移」（热载/运行期表变更等）。
+ */
+function warnStateNoKeyOnce(type: string): void {
+  if (STATE_NO_KEY_TOPICS.has(type) || warnedStateNoKeyTypes.has(type)) return
+  warnedStateNoKeyTypes.add(type)
+  console.warn(
+    `[message-bus] state topic "${type}" has no STATE_TYPE_KEY_MAP entry — snapshot skipped, reconnect projection lost for this type (add mapping in message-bus.ts or register as state-no-key exception)`,
+  )
 }
 
 /**
@@ -374,6 +410,8 @@ export class MessageBus implements IMessageBus {
           const typeKey = stateTypeKey(truncated)
           if (typeKey !== null) {
             this.setStateSnapshotEntry(state, typeKey, truncated, truncatedBytes, sessionId)
+          } else {
+            warnStateNoKeyOnce(truncated.type)
           }
         } else {
           this.ringPush(state.streamRing, truncated, truncatedBytes)
@@ -401,9 +439,12 @@ export class MessageBus implements IMessageBus {
     }
     if (topic === 'state') {
       // state：写快照（同 typeKey 覆盖，状态去重语义），不入 ring。字节记账（B7）仅观测。
+      // typeKey 缺映射（例外白名单外的漂移）→ 快照跳写 + warn 显形（RT-1#5，此前静默）。
       const typeKey = stateTypeKey(message)
       if (typeKey !== null) {
         this.setStateSnapshotEntry(state, typeKey, message, bytes, sessionId)
+      } else {
+        warnStateNoKeyOnce(message.type)
       }
     } else {
       // stream：入 O(1) 环形缓冲（满则覆盖最旧 + B7 字节记账/超预算加速淘汰）。
@@ -613,6 +654,9 @@ export class MessageBus implements IMessageBus {
       if (ws.readyState !== 1) continue
       try {
         ws.send(payload)
+        // RT-1#7：发送侧背压观测（ws.send 后 bufferedAmount 已计入本帧；bufferedAmount
+        // 是 BusClient 的可选成员，mock 实现缺省时 helper 内部 no-op）。
+        warnIfBacklogged(ws, 'publish')
       } catch (e) {
         // ES4：单个 ws.send 抛错（连接已断 / 内部异常）不应影响其它订阅者或 publish 主流程。
         console.warn('[message-bus] ws.send failed during publish:', e)

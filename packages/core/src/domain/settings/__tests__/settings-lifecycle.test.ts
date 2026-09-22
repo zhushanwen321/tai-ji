@@ -289,6 +289,40 @@ describe('transport 未注入 fail-fast', () => {
   })
 })
 
+describe('RD-3#10: init 失败可重试（成功后才置 initialized，失败回滚订阅）', () => {
+  it('getSystem 抛错 → init reject + 订阅回滚 + initialized 不置位（换正常 storage 重试能重新注册）', async () => {
+    // 自定义 storage：get 抛错（模拟配额/读取失败——原 void init() + initialized 先置位下
+    // 此失败仅 rejection 且被守卫吞为 no-op，主题停留默认且不可恢复）。
+    providePlatform({
+      kind: 'mock',
+      storage: {
+        get: async () => { throw new Error('storage read failed') },
+        set: async () => {},
+        remove: async () => {},
+      },
+      webSocket: { create: () => ({}) as never },
+    })
+    const { transport, unsubs } = makeRecordingTransport()
+    provideSettingsTransport(transport)
+    const { init } = useSettings()
+
+    // 首次 init 失败（reject），订阅已注册但被回滚（unsub 被调）
+    await expect(init()).rejects.toThrow('storage read failed')
+    expect(transport.onProviders).toHaveBeenCalledTimes(1)
+    expect(unsubs.every((u) => vi.mocked(u).mock.calls.length >= 1)).toBe(true)
+
+    // 关键：initialized 未置位 → 换正常 storage 后重试真正重新注册（不被守卫吞为 no-op）
+    const storage2 = new InMemoryStorage()
+    providePlatform({ kind: 'mock', storage: storage2, webSocket: { create: () => ({}) as never } })
+    await init() // 重试成功
+    // onProviders 被调 2 次（首次失败回滚 + 重试注册）——证明失败可重试
+    expect(transport.onProviders).toHaveBeenCalledTimes(2)
+    // 重试成功后 initialized 置位：第三次 init 为 no-op（幂等守卫恢复）
+    await init()
+    expect(transport.onProviders).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('A4: onProviders 推送 scopedModels 时 store 更新', () => {
   it('A4: impl-token 存在（红阶段区分力守卫）', () => {
     expect(SCOPED_MODEL_CORE_TOKEN).toBe('scoped-model-core-v1')

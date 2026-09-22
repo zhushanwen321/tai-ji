@@ -40,6 +40,7 @@ import type { IProcessManager, IPiEngine, PiCommandInfo } from '../ports/pi-engi
 import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
+import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
 import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from './session-model-guards.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
@@ -80,7 +81,7 @@ import { SessionLifecycle } from './session-lifecycle.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
 // 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定面）。
-import { SessionEntryRemovalOrchestrator } from './session-entry-removal.js'
+import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
 // 空闲回收占座原语与等待观测超时（idle-pi-reclamation D6-2，u2）。type-only import：
 // Seat 实例由 u3 组合根创建后 setter 注入，本模块不持有创建权（不引入运行时依赖环）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
@@ -576,24 +577,34 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.pm.onSessionExit((sessionId, code, stderr) => {
       const session = this.lifecycle.get(sessionId)
       if (!session) return
+      // [code-harden RT-4#1] 本回调体改为「前置段 try + 终态段 finally 必达」结构：
+      // 台账/detach 等前置步失败只降级日志；三步终态（session.exited 广播 / full-reset /
+      // removeEntry）与 stopped 终态 / config.sessions / respawn.schedule 收尾在 finally
+      // 中继续收敛——任一步异常不再让终态记录/列表广播/自动恢复承诺丢失、异常上抛成
+      // uncaughtException 连坐全 runtime。逐步隔离复用 runDestroyStepIsolated（与
+      // removeSessionEntry 编排链同一范式：日志 + crash 台账 reason=destroy-chain-step-failed）。
       // D1 台账（crash-forensics §3.3 D1 写入点矩阵「pi crash」行）：onSessionExit 链是 pi
       // 意外死亡的唯一通知路径（intentional destroy 被 process-manager 进程表守卫拦截不经
       // 此链），在此记 crash 与既有 session.exited 推送同点双写。stderr 为 rpc-client 透传的
       // 尾部 10 行摘要（getStderrTail 同源形态）；exitCode=null 表达信号致死（回调链不携带
       // signal 名，digest 兜底行注明形态）。fire-and-forget，不阻塞死亡清理链。
-      getCrashJournal().append({
-        layer: 'pi',
-        event: 'crash',
-        sessionId,
-        exitCode: code,
-        detailDigest: buildCrashDetailDigest(code, stderr),
-        // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
-        // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
-        // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
-        // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
-        machinePiDigest: captureMachinePiDigest(),
+      runDestroyStepIsolated('crash-journal.crash', sessionId, () => {
+        getCrashJournal().append({
+          layer: 'pi',
+          event: 'crash',
+          sessionId,
+          exitCode: code,
+          detailDigest: buildCrashDetailDigest(code, stderr),
+          // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+          // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
+          // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+          // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
+          machinePiDigest: captureMachinePiDigest(),
+        })
       })
-      session.adapter.detach()
+      runDestroyStepIsolated('adapter.detach', sessionId, () => {
+        session.adapter.detach()
+      })
 
       // 构建人类可读的退出原因（含 stderr 尾部，诊断价值 > 敏感性风险，本地工具场景）
       const reason = stderr
@@ -605,50 +616,60 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // clearSession 之后再 publish 等于送空集合，订阅 renderer 一条也收不到（进程退出标记
       // dead + toast 丢失）。wave:perf-w09（D1-2）：broadcast 腿已删，publish 是唯一通道
       //（renderer 全量订阅覆盖 list 内全部 session，见 useSessionStreamSync）。
-      const exitedMsg: ServerMessage = { type: 'session.exited', payload: { sessionId, code, reason } }
-      this.messageBus?.publish(sessionId, exitedMsg)
-
       // occupancy #10（session-dead-structural-fixes D2 挂点迁移，u3b；失败路径进程异常退出腿）：
       // 占用中 pi 死亡时 agent_settled / compaction_end 永不会发出（二者只从 pi run/compact
       // finally 触发），'full-reset' 行兜底——turn/compacting/bash 三维全复位 + 三布尔派生同步
       // 复位（结构上不再有「只复位一边」），否则重连 renderer 经 stateSnapshot 回放恢复的是
       // 永久的占用投影。须在 removeSessionEntry（内部 bus.clearSession）之前。
-      applySessionOccupancyTransition(session, this.messageBus, 'full-reset')
-
       // 注意：此处 session 是 delete 前缓存的引用，removeSessionEntry 后 Map 条目已删除
       // 统一经 removeSessionEntry（触发 onSessionDelete 清 pendingReload 等残留）
-      this.removeSessionEntry(sessionId)
-
-      // W4：进程异常退出写 stopped 终态（在 Map 条目删除后，直接用已取的 session 对象，
-      // 不走 persistSessionOutcome 的内部 get——删除后 get 返回 undefined）
-      if (session.sessionFilePath) {
-        // W2-5/W8：已有任意终态（done/error/stopped）则不覆盖。
-        // 正常 turn 完成时 handleTurnEndSideEffects 已写 'done'；随后 pi 进程正常退出触发本回调，
-        // 此处若再写 'stopped' 会覆盖已写入的 'done'。进程退出是正常结束的副作用，非用户中止。
-        // W8：abort 路径 dispatcher 已写 'stopped' + 原始 abort reason，随后进程退出触发本回调时，
-        // 若再次用「Process exited (code: N)」覆盖，会丢失 dispatcher 写入的原始 abort reason——
-        // 第一个终态优先（abort 是用户主动行为，reason 比 process exit 更具诊断价值）。
-        const existingOutcome = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
-        if (existingOutcome !== 'done' && existingOutcome !== 'error' && existingOutcome !== 'stopped') {
-          this.sessionStore.persistSessionEnd(
-            session.sessionFilePath,
-            'stopped',
-            `Process exited (code: ${code})`,
-          )
-        }
+      try {
+        const exitedMsg: ServerMessage = { type: 'session.exited', payload: { sessionId, code, reason } }
+        this.messageBus?.publish(sessionId, exitedMsg)
+        applySessionOccupancyTransition(session, this.messageBus, 'full-reset')
+      } catch (e: unknown) {
+        // 广播/occupancy 复位失败不得拦截 removeEntry 及后续收敛（终态必达，RT-4#1）
+        console.error(`[session-service] onSessionExit terminal broadcast failed (sessionId=${sessionId}):`, e)
       }
 
-      this.broker.broadcast({ type: 'config.sessions', payload: { groups: this.listPersistedSessions() } })
-      // session.exited（独立事件，区别于 message.error 的「单次消息失败」语义）：
-      // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
-      //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
+      try {
+        this.removeSessionEntry(sessionId)
 
-      // u8（crash-resilience D7-①②）：非主动退出 → 5s 延迟自动恢复。挂在本链（而非
-      // session.exited 消息生产点）是设计裁决：本链天然不含 forceQuitSession（dispatcher
-      // 手工编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 按
-      // processes.has 拦截）——用户手动强制退出的 session 构性不触发自动恢复（A7 反向验收）。
-      // 启动前守卫（active / restoringSessions in-flight / 熔断）在 schedule 内。
-      this.respawn.schedule(sessionId)
+        // W4：进程异常退出写 stopped 终态（在 Map 条目删除后，直接用已取的 session 对象，
+        // 不走 persistSessionOutcome 的内部 get——删除后 get 返回 undefined）
+        if (session.sessionFilePath) {
+          // W2-5/W8：已有任意终态（done/error/stopped）则不覆盖。
+          // 正常 turn 完成时 handleTurnEndSideEffects 已写 'done'；随后 pi 进程正常退出触发本回调，
+          // 此处若再写 'stopped' 会覆盖已写入的 'done'。进程退出是正常结束的副作用，非用户中止。
+          // W8：abort 路径 dispatcher 已写 'stopped' + 原始 abort reason，随后进程退出触发本回调时，
+          // 若再次用「Process exited (code: N)」覆盖，会丢失 dispatcher 写入的原始 abort reason——
+          // 第一个终态优先（abort 是用户主动行为，reason 比 process exit 更具诊断价值）。
+          const existingOutcome = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
+          if (existingOutcome !== 'done' && existingOutcome !== 'error' && existingOutcome !== 'stopped') {
+            this.sessionStore.persistSessionEnd(
+              session.sessionFilePath,
+              'stopped',
+              `Process exited (code: ${code})`,
+            )
+          }
+        }
+
+        this.broker.broadcast({ type: 'config.sessions', payload: { groups: this.listPersistedSessions() } })
+        // session.exited（独立事件，区别于 message.error 的「单次消息失败」语义）：
+        // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
+        //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
+
+        // u8（crash-resilience D7-①②）：非主动退出 → 5s 延迟自动恢复。挂在本链（而非
+        // session.exited 消息生产点）是设计裁决：本链天然不含 forceQuitSession（dispatcher
+        // 手工编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 按
+        // processes.has 拦截）——用户手动强制退出的 session 构性不触发自动恢复（A7 反向验收）。
+        // 启动前守卫（active / restoringSessions in-flight / 熔断）在 schedule 内。
+        this.respawn.schedule(sessionId)
+      } catch (e: unknown) {
+        // 收敛尾段（removeEntry / stopped 终态 / 列表广播 / respawn 承诺）失败显形：
+        // 不得静默吞掉，也不得沿 pm 回调多播上抛（RT-4#1）。
+        console.error(`[session-service] onSessionExit convergence tail failed (sessionId=${sessionId}):`, e)
+      }
     })
   }
 
@@ -1112,7 +1133,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 
   /** subagent 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getSubagents(sessionId: string): Promise<SubagentRecord[]> { return this.records.getSubagents(sessionId) }
+  async getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>> { return this.records.getSubagents(sessionId) }
   /** subagent 对话流历史（record.sessionFile 直读 + 非 pi 引擎降级链，实现迁 session-records.ts）。 */
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> { return this.records.getSubagentHistory(sessionId, subagentId) }
   /** [U7] 引擎配置视图（engines.json + config.json，实现迁 session-records.ts）。 */
@@ -1120,7 +1141,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> { return this.records.getWorkflows(sessionId) }
+  async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> { return this.records.getWorkflows(sessionId) }
 
   /**
    * plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，u1-rpc 补接线）：对称 getSubagents
@@ -1225,9 +1246,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 数据源）。旧 session.inputTokens 缓存直写（applyContextUpdate / fetchContext 回写，
    * 及已删除的外部 setter）已删，sessions Map 内字段退化为恒 0 的派生基线（types 必填
    * 字段，读点全部走本方法）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 把「无快照/陈旧」折成数值 0，与「上下文真空」
+   * 不可区分）。null 语义对齐 context.update 无值占位帧（publishContextNoValuePlaceholder，
+   * 字段缺失 = 无值而非 0 基线）；0 仅表真值。
    */
-  getInputTokens(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? 0
+  getInputTokens(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? null
   }
 
   /**
@@ -1272,9 +1297,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 旧实现按「缓存 inputTokens + resolver 窗口」本地重算（computeUsage），W10 起快照
    * 已持有 pi 侧按当前模型窗口算出的权威 percent，读点直接派生；dirty 期间返回上次
    * 快照（核心不变量 2 的 UI 语义）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 折叠「无值」与「真 0%」；语义对齐 getInputTokens）。
    */
-  getUsagePercent(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? 0
+  getUsagePercent(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? null
   }
 
   async destroyAll(): Promise<void> {

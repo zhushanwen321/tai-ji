@@ -7,6 +7,8 @@ export default {
   selectPlaceholder: 'Please select',
   additionalComment: 'Additional comment',
   commentPlaceholder: 'Optional, add a note…',
+  // M1 ring 3: response not delivered while disconnected (send returned false); request kept for resubmission after reconnect
+  responseNotDelivered: 'Reply not delivered. You can resubmit after the connection recovers',
   // ── Schedule create confirm form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
   scheduleCreateTimeLabel: 'Schedule',
   scheduleCreateModeLabel: 'Mode',

@@ -16,11 +16,13 @@
  * - 故本模块按降级路径自行展开 `$ENV_VAR` / `${ENV_VAR}`，与 pi 实装
  *   dist/core/resolve-config-value.js:123-129 resolveConfigValue 的模板分支同语义
  *   （pi auth-storage.js:213-216 读 auth.json 时经该函数解析）。
- * - command 配置值（`!` 前缀）首版不支持：**不执行 shell**（执行任意命令是副作用面），
- *   原样返回——`!` 前缀即「该形态」标记，消费方据此报「该凭据形态暂不支持」。
+ * - command 配置值（`!` 前缀）不支持：**不执行 shell**（执行任意命令是副作用面），
+ *   连同「env 引用未定义」一起返回 { unsupported } 判别结构（RT-7#4）——消费方据此
+ *   报「该凭据形态暂不支持」且禁止把形态标记当 key 下发外部请求（原样返回串作
+ *   Bearer 是以畸形凭据打外部 API）。命中即不降级低优先源（显式配置错误不掩盖）。
  */
 import type { IConfigStore } from '../ports/config.js'
-import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
+import type { IProviderCredentialResolver, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
 import type { AuthService } from './auth-service.js'
 import type { AuthStorage, Credential } from './auth-storage.js'
 
@@ -37,8 +39,12 @@ interface CredentialSource {
   hasSync(providerId: string): boolean
   /** 同步批量列出该源的 providerId（实现须单次读盘）。 */
   listIdsSync(): Set<string>
-  /** 异步取明文 key（未命中 / 不可解析 → undefined）。 */
-  readKey(providerId: string): Promise<string | undefined>
+  /**
+   * 异步取生效凭据：{ key } = 明文；{ unsupported } = 条目存在但形态不支持
+   * （对象判别——UnsupportedCredentialForm 若用裸字符串字面量会是 string 子类型，
+   * typeof 判别失效，'command' 会被当明文 key 透传）；undefined = 未命中。
+   */
+  readKey(providerId: string): Promise<{ key: string } | { unsupported: UnsupportedCredentialForm } | undefined>
 }
 
 /**
@@ -122,21 +128,24 @@ function resolveTemplate(template: string, env?: Record<string, string>): string
 
 /**
  * 配置值解析（pi resolve-config-value.js:123-129 resolveConfigValue 的简化版）：
- * command（`!`）不执行、原样返回（形态标记）；其余走模板展开。
+ * command（`!`）不执行、返 { unsupported: 'command' }（RT-7#4：不再原样返回——原样串作
+ * key 下发外部请求是消费方缺陷的温床，对象判别结构让类型系统强制分流）；模板展开
+ * undefined（任一 env 引用未定义）→ { unsupported: 'unresolved-env' }。其余返回明文。
  */
-function resolveCredentialValue(config: string, env?: Record<string, string>): string | undefined {
-  if (config.startsWith('!')) return config
-  return resolveTemplate(config, env)
+function resolveCredentialValue(config: string, env?: Record<string, string>): string | { unsupported: UnsupportedCredentialForm } {
+  if (config.startsWith('!')) return { unsupported: 'command' }
+  const resolved = resolveTemplate(config, env)
+  return resolved === undefined ? { unsupported: 'unresolved-env' } : resolved
 }
 
 /** auth.json 条目 → 生效明文（api_key 走配置值解析；oauth 取 access，pi 对 oauth 不做配置值解析）。 */
-function readAuthCredentialKey(credential: Credential): string | undefined {
+function readAuthCredentialKey(credential: Credential): { key: string } | { unsupported: UnsupportedCredentialForm } | undefined {
   if (credential.type === 'api_key') {
     if (typeof credential.key !== 'string' || credential.key === '') return undefined
-    return resolveCredentialValue(credential.key, credential.env)
+    return toReadKeyOutcome(resolveCredentialValue(credential.key, credential.env))
   }
   const access = credential.access
-  return typeof access === 'string' && access !== '' ? access : undefined
+  return typeof access === 'string' && access !== '' ? { key: access } : undefined
 }
 
 /** models.json apiKey 是否是可用的非空串（'' 是 schema 违规值，等同无凭据）。 */
@@ -156,6 +165,13 @@ function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialS
   }
 }
 
+/** 明文串 → readKey 出参形态（{ key } 包装；unsupported 透传）。 */
+function toReadKeyOutcome(
+  value: string | { unsupported: UnsupportedCredentialForm },
+): { key: string } | { unsupported: UnsupportedCredentialForm } {
+  return typeof value === 'string' ? { key: value } : value
+}
+
 function createModelsJsonSource(deps: ProviderCredentialResolverDeps): CredentialSource {
   return {
     id: 'models.json',
@@ -171,7 +187,7 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
     },
     readKey: async (providerId) => {
       const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
-      return isUsableApiKey(apiKey) ? resolveCredentialValue(apiKey) : undefined
+      return isUsableApiKey(apiKey) ? toReadKeyOutcome(resolveCredentialValue(apiKey)) : undefined
     },
   }
 }
@@ -201,10 +217,16 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
 
   async resolveProviderCredential(
     providerId: string,
-  ): Promise<{ key: string; source: CredentialSourceId } | undefined> {
+  ): Promise<ResolvedProviderCredential | undefined> {
     for (const source of this.sources) {
-      const key = await source.readKey(providerId)
-      if (key !== undefined) return { key, source: source.id }
+      const outcome = await source.readKey(providerId)
+      if (outcome === undefined) continue
+      // 形态不支持（command / unresolved-env）：立即返回判别结构，不降级读低优先源——
+      // 高优先源的显式配置错误（用户写了 !cmd / 引用未定义 env）若被低优先源静默接住，
+      // 用户以为生效的凭据与实际使用的凭据背离（D 类「显示 A、实际用 B」）。报错让
+      // 用户修配置比静默换源诚实。
+      if ('unsupported' in outcome) return outcome
+      return { key: outcome.key, source: source.id }
     }
     return undefined
   }

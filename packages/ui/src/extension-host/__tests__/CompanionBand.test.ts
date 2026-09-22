@@ -73,8 +73,9 @@ function makeRequest(overrides: Partial<DialogRequest> & { requestId: string; se
 
 function makeTransport(): UiResponseTransport {
   return {
-    sendPiResponse: vi.fn(),
-    sendPluginResponse: vi.fn(),
+    // 返 true = 送达（M1 环 3 后 DialogRequestQueue.respond 消费 boolean）
+    sendPiResponse: vi.fn((): boolean => true),
+    sendPluginResponse: vi.fn((): boolean => true),
   }
 }
 

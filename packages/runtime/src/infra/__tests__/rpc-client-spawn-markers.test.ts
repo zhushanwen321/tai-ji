@@ -47,7 +47,7 @@ const fakeProc = {
   removeListener: vi.fn(),
   stdout: { on: vi.fn(), resume: vi.fn(), destroy: vi.fn() },
   stderr: { on: vi.fn() },
-  stdin: { write: vi.fn(() => true), once: vi.fn() },
+  stdin: { write: vi.fn(() => true), on: vi.fn(), once: vi.fn() },
   // kill 即同步 emit exit：免去每用例 2s KILL_TIMEOUT 等待（exit handler 语义不变）
   kill: vi.fn(() => {
     for (const handler of [...procExitHandlers]) handler(0)

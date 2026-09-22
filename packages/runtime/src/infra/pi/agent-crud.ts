@@ -6,13 +6,38 @@
  */
 
 import { existsSync, readFileSync, readdirSync, mkdirSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { getAgentsDir } from './pi-paths.js'
+import { logger } from '../logger.js'
 // W1：按 discovered 目录推断 sourceType（claude/agents/pi/custom），
 // 让 loadAgents 不再恒 pi——否则 Settings Agent 页按 tab 过滤失效。
 import { inferSourceType } from '../../services/scanners/scanner-base.js'
 import type { ScanSourceType } from '@taiji/shared'
+
+/**
+ * RT-3#11 单段校验：name（用户可编辑的 agent.name||id，经
+ * resources-message-handler → config-service 链路进入）必须是纯文件名——
+ * basename 自等、非 `..`/`.`、不含任何路径分隔符。`../` 可越界写/删 agents
+ * 目录之外的任意 *.md，写删两侧对称守卫；fileName = name[.md] 由追加后缀
+ * 派生，不引入分隔符，故校验 name 即覆盖 join 的实际操作数。
+ */
+function assertSingleSegment(name: string): void {
+  if (
+    basename(name) !== name ||
+    name === '..' || name === '.' ||
+    name.includes('/') || name.includes('\\')
+  ) {
+    throw new Error(
+      `非法的 agent 名称（含路径片段，已拒绝）：${name}。👉 agent 名称必须是单段文件名（不含 /、\\、..），请修改 agent 名称后重试。`,
+    )
+  }
+}
+
+/** 非 ENOENT 的 fs 错误才值得留痕（目录/文件不存在属正常竞态，保持安静）。 */
+function isENOENT(e: unknown): boolean {
+  return (e as NodeJS.ErrnoException).code === 'ENOENT'
+}
 
 /** Agent 文件扫描结果（单目录版，保持向后兼容）。 */
 export interface AgentFileEntry {
@@ -39,7 +64,15 @@ export function listAgentFiles(dirs?: string[]): AgentFileEntry[] {
     let files: string[]
     try {
       files = readdirSync(rawDir).filter(f => f.endsWith('.md'))
-    } catch {
+    } catch (e) {
+      // RT-3#11 收口：目录读失败静默 continue → agent 从列表消失且零痕迹；
+      // ENOENT 是正常竞态保持安静，其余（权限等）留痕供排查
+      if (!isENOENT(e)) {
+        logger.warn('[agent-crud] failed to read agent directory, its agents are not listed', {
+          dir: rawDir,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
       continue
     }
     for (const file of files) {
@@ -51,9 +84,14 @@ export function listAgentFiles(dirs?: string[]): AgentFileEntry[] {
         // W1：用 discovered 目录推断 sourceType（如 ~/.claude/agents → 'claude'），
         // 透传到 loadAgents → AgentInfo.sourceType，供 Settings 按 tab 过滤。
         seen.set(name, { name, path: filePath, content, sourceType: inferSourceType(rawDir) })
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable agent files
-      } catch {
-        // skip unreadable files
+      } catch (e) {
+        // scanning: skip unreadable agent files（ENOENT 竞态保持安静，其余留痕）
+        if (!isENOENT(e)) {
+          logger.warn('[agent-crud] failed to read agent file, skipped from listing', {
+            file: filePath,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
       }
     }
   }
@@ -63,6 +101,7 @@ export function listAgentFiles(dirs?: string[]): AgentFileEntry[] {
 
 export function writeAgentFile(name: string, content: string): void {
   const agentsDir = getAgentsDir()
+  assertSingleSegment(name)
   if (!existsSync(agentsDir)) mkdirSync(agentsDir, { recursive: true })
   const fileName = name.endsWith('.md') ? name : `${name}.md`
   const filePath = join(agentsDir, fileName)
@@ -71,13 +110,22 @@ export function writeAgentFile(name: string, content: string): void {
 
 export function deleteAgentFile(name: string): boolean {
   const agentsDir = getAgentsDir()
+  assertSingleSegment(name)
   const fileName = name.endsWith('.md') ? name : `${name}.md`
   const filePath = join(agentsDir, fileName)
   if (!existsSync(filePath)) return false
   try {
     unlinkSync(filePath)
     return true
-  } catch {
+  } catch (e) {
+    // RT-3#11 收口：裸 return false 让删除失败与「不存在」不可区分；
+    // ENOENT 竞态安静返 false，其余留痕（含路径与原因）
+    if (!isENOENT(e)) {
+      logger.warn('[agent-crud] failed to delete agent file', {
+        file: filePath,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
     return false
   }
 }

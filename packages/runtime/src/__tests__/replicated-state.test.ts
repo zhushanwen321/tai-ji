@@ -49,7 +49,7 @@ function toWire(value: SessionState): SessionState {
 }
 
 function createState(
-  options: { fieldsNullSemantics?: FieldsNullSemantics; pollIntervalMs?: number } = {},
+  options: { fieldsNullSemantics?: FieldsNullSemantics; pollIntervalMs?: number; diagnosticLabel?: string } = {},
 ): { rs: ReplicatedState<SessionState>; fetch: FetchMock } {
   const fetch = vi.fn<() => Promise<SessionState>>()
   const rs = new ReplicatedState<SessionState>({
@@ -57,6 +57,7 @@ function createState(
     debounceMs: DEBOUNCE_MS,
     backoffSchedule: BACKOFF_SCHEDULE,
     pollIntervalMs: options.pollIntervalMs,
+    diagnosticLabel: options.diagnosticLabel,
     merge: ownerSnapshotMerge,
     fieldsNullSemantics: options.fieldsNullSemantics ?? { sessionName: 'explicit-null' },
   })
@@ -180,6 +181,88 @@ describe('ReplicatedState', () => {
       expect(fetch).toHaveBeenCalledTimes(5) // 耗尽后不再自动重试
       expect(rs.isDirty()).toBe(true)
       expect(rs.get()).toEqual({ sessionName: 'A' }) // 旧值始终保留
+    })
+  })
+
+  describe('失败可见性（code-harden RT-4#3）', () => {
+    it('连续失败：每次失败 warn（标签 + 尝试序号 + 分型），预算耗尽落一条终末 warn', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { rs, fetch } = createState({ diagnosticLabel: 'usage(s1)' })
+        await seedSnapshot(rs, fetch, { sessionName: 'A' })
+        fetch.mockRejectedValue(new Error('rpc down'))
+
+        rs.markDirty()
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS) // 首次尝试失败
+        await vi.advanceTimersByTimeAsync(1000 + 5000 + 15_000) // 三级退避全部失败（耗尽）
+
+        // 每次失败一条 warn：含实例标签、尝试序号、RPC 分型
+        const failureWarns = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('snapshot fetch failed'))
+        expect(failureWarns).toHaveLength(4) // 首次 + 3 次退避
+        expect(failureWarns[0]).toContain('usage(s1)')
+        expect(failureWarns[0]).toContain('attempt=1/4')
+        expect(failureWarns[0]).toContain('kind=rpc')
+        expect(failureWarns[3]).toContain('attempt=4/4')
+
+        // 预算耗尽：终末 warn 恰一条（重复耗尽不重复记）
+        let exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
+        expect(exhausted).toHaveLength(1)
+        expect(exhausted[0]).toContain('usage(s1)')
+        expect(exhausted[0]).toContain('after 4 attempts')
+        expect(exhausted[0]).toContain('dirty=true')
+
+        // 耗尽后再次失效仍失败：不再重复终末 warn
+        rs.markDirty()
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60_000)
+        exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
+        expect(exhausted).toHaveLength(1)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('wire 归一异常分型 kind=wire-schema；成功恢复后终末 warn 标志复位（新一轮耗尽再显形）', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { rs, fetch } = createState({
+          diagnosticLabel: 'thinkingLevel(s2)',
+          fieldsNullSemantics: { thinkingLevel: 'required' },
+        })
+        await seedSnapshot(rs, fetch, { thinkingLevel: 'high' })
+
+        // wire 协议异常（required 字段 key 缺失）：warn 分型 kind=wire-schema
+        fetch.mockResolvedValue({}) // thinkingLevel key 缺失
+        rs.markDirty()
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+        const wireWarn = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('kind=wire-schema'))
+        expect(wireWarn).toBeDefined()
+        expect(wireWarn).toContain('thinkingLevel(s2)')
+
+        // 恢复成功（dirty 清除）→ 重走全序列再次耗尽 → 终末 warn 再落一条（新一轮）
+        fetch.mockRejectedValue(new Error('rpc down again'))
+        rs.markDirty()
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1000 + 5000 + 15_000 + 60_000)
+        const exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
+        expect(exhausted).toHaveLength(1)
+        expect(exhausted[0]).toContain('thinkingLevel(s2)')
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('无 diagnosticLabel：warn 仍产生（缺省标签），不因配置缺失回到零日志', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { rs, fetch } = createState()
+        await seedSnapshot(rs, fetch, { sessionName: 'A' })
+        fetch.mockRejectedValue(new Error('down'))
+
+        rs.markDirty()
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+        expect(warn.mock.calls.map((c) => String(c[0])).some((s) => s.includes('unnamed-replicated-state'))).toBe(true)
+      } finally {
+        warn.mockRestore()
+      }
     })
   })
 

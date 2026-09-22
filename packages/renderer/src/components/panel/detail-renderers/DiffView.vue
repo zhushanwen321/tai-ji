@@ -32,6 +32,10 @@
 -->
 <template>
   <div v-if="parsed.hunks.length" class="diff-view w-max min-w-full bg-bg-input font-mono text-[length:var(--text-xs)] leading-[1.5]">
+    <!-- 高亮失败显形（RD-2#2）：内容仍按原始行纯文本渲染（+/- 语义色保留），不静默丢高亮 -->
+    <div v-if="renderFailed" class="px-2 py-0.5 text-neutral-dim" data-testid="diff-highlight-failed">
+      {{ t('panel.detail.highlightFailed') }}
+    </div>
     <div v-for="(hunk, hi) in parsed.hunks" :key="hi" class="diff-hunk">
       <!-- hunk 头：@@ -a,b +c,d @@ -->
       <div class="diff-hunk-header px-2 py-0.5 text-neutral-dim">
@@ -136,6 +140,10 @@ function onLineClick(line: { oldNo?: number; newNo?: number }): void {
 
 const parsed = ref<ParsedDiff>({ hunks: [] })
 
+/** 高亮失败显形（RD-2#2）：shiki 高亮环节抛错时置位，模板显式「高亮失败，已降级纯文本」
+ *  分支——内容仍按原始行渲染（+/- 语义色保留），用户可见降级而非静默丢高亮。 */
+const renderFailed = ref(false)
+
 /** 扩展 DiffLine：带高亮后的 html（shiki 拆行结果） */
 interface RenderedLine extends DiffLine {
   html: string
@@ -216,16 +224,41 @@ async function highlightHunk(hunk: DiffHunk, lang: string): Promise<RenderedLine
   return out
 }
 
+// 序号守卫（RD-2#2，范式照抄同目录 CodeBlock.vue：`const seq = ++renderSeq` + 每个 await 后
+// 比对）：patch 切换后旧异步循环不得向新 diff 的 renderedHunks 写入——行数相等即被
+// codeLines 采纳，旧文件正文会显示在新 patch 行号下（数据误读）。watch 源含 props.path：
+// path 变化（同名切换语言推断）也要重新高亮，且重启循环使旧循环的待写结果作废。
+let renderSeq = 0
+
 watch(
-  () => props.patch,
-  async (patch) => {
-    parsed.value = parseDiff(patch)
-    renderedHunks.value = parsed.value.hunks.map(() => [])
-    if (!parsed.value.hunks.length) return
-    const lang = extToLang(props.path ?? '')
-    // 逐 hunk 高亮（串行，避免并发触发多次 shiki 调用栈）
-    for (let i = 0; i < parsed.value.hunks.length; i++) {
-      renderedHunks.value[i] = await highlightHunk(parsed.value.hunks[i], lang)
+  () => [props.patch, props.path] as const,
+  async ([patch, path]) => {
+    const seq = ++renderSeq
+    renderFailed.value = false
+    // 局部快照：循环内一律读本帧解析结果（不回读 parsed.value——中途被下一次 watch 重写时
+    // hunks[i] 可能 undefined，旧实现会在 highlightHunk 处抛 TypeError 且无人 catch）
+    let hunks: DiffHunk[] = []
+    try {
+      parsed.value = parseDiff(patch)
+      hunks = parsed.value.hunks
+      renderedHunks.value = hunks.map(() => [])
+      if (!hunks.length) return
+      const lang = extToLang(path ?? '')
+      // 逐 hunk 高亮（串行，避免并发触发多次 shiki 调用栈）
+      for (let i = 0; i < hunks.length; i++) {
+        const hunk = hunks[i]
+        const rendered = await highlightHunk(hunk, lang)
+        // 序号守卫：await 期间 patch/path 已变 → 本循环整体作废，一个结果都不写入
+        if (seq !== renderSeq) return
+        renderedHunks.value[i] = rendered
+      }
+    } catch (e) {
+      if (seq !== renderSeq) return
+      // 降级显形：高亮失败置 renderFailed，模板显式提示；内容仍走 codeLines 的纯文本
+      // 分支（renderedHunks 停留空数组），不静默丢高亮。watch async 回调无人 catch，
+      // 此处是唯一兜位点。
+      console.warn(`[DiffView] highlight failed for ${props.path ?? '(unknown path)'}, degraded to plain text:`, e)
+      renderFailed.value = true
     }
   },
   { immediate: true },

@@ -55,7 +55,7 @@ export class BridgeHandler {
       switch (method) {
         // 同步工具 schema（塑形由 plugin-service 负责）
         case 'bridge:sync':
-          return this.sendBridgeSync(requestId, client)
+          return this.sendBridgeSync(requestId, sessionId, client)
         // 执行 bridge 工具（ADR-0012 契约）；请求对象构造是 transport↔service 边界编组
         // await 不可省：拒绝必须留在 try 内（外层 catch 回错误响应，行为与原内联一致）
         case 'bridge:tool_execute':
@@ -99,11 +99,26 @@ export class BridgeHandler {
     }
   }
 
-  /** 同步工具 schema 回包（塑形由 plugin-service 负责）：stringify+'select' 序列化契约。 */
-  private sendBridgeSync(requestId: string, client: IPiEngine): void {
-    const payload = this.pluginService?.getBridgeSyncPayload
-      ? this.pluginService.getBridgeSyncPayload()
-      : { tools: [], success: true }
+  /**
+   * 同步工具 schema 回包（塑形由 plugin-service 负责）：stringify+'select' 序列化契约。
+   *
+   * pluginService 未注入（RT-1#1，F1 假成功）：回 isError 载荷而非 `{tools:[],success:true}`
+   * ——空工具 + success:true 会被扩展侧 isBridgeSyncPayload 判定成功，sync 重试/Degraded
+   * 机制永不触发，插件工具链静默失效。生产组合根恒注入（index.ts 无条件构造 PluginService
+   * 并经 setServices 传入，先于 server.start），本分支只在装配缺口时可达：fail-fast +
+   * error 留痕（requestId/sessionId），扩展侧按形状不符进入重试→Degraded 既有链路。
+   */
+  private sendBridgeSync(requestId: string, sessionId: string, client: IPiEngine): void {
+    if (!this.pluginService?.getBridgeSyncPayload) {
+      console.error(`[bridge-handler] bridge:sync with plugin service unavailable (requestId=${requestId}, sessionId=${sessionId})`)
+      client.sendExtensionUiResponse(
+        requestId,
+        JSON.stringify({ content: 'Plugin system not available', isError: true }),
+        'select',
+      )
+      return
+    }
+    const payload = this.pluginService.getBridgeSyncPayload()
     client.sendExtensionUiResponse(requestId, JSON.stringify(payload), 'select')
   }
 
@@ -151,7 +166,16 @@ export class BridgeHandler {
     client.sendExtensionUiResponse(requestId, null)
   }
 
-  /** 拦截（before_agent_start 判定下沉 plugin-service）。 */
+  /**
+   * 拦截（before_agent_start 判定下沉 plugin-service）。
+   *
+   * pluginService 未注入（RT-1#1，F1 假成功）：回 isError 载荷而非 `{}` ——空对象会被
+   * 扩展侧 isBridgeInterceptResponse 判定「无注入」正常放行，拦截规则链静默失效且零
+   * 留痕。生产组合根恒注入（同 sendBridgeSync 注释），本分支只在装配缺口时可达：
+   * fail-fast + error 留痕（requestId/sessionId）；扩展侧对该形状 warn
+   * 「unexpected intercept response shape」后放行——转发失败不吃掉 prompt（既有语义），
+   * 双侧留痕让「拦截链为何没跑」可查。
+   */
   private async sendBridgeIntercept(
     requestId: string,
     sessionId: string,
@@ -160,9 +184,16 @@ export class BridgeHandler {
   ): Promise<void> {
     const eventName = data.eventName as string
     const eventData = (data.data as Record<string, unknown>) ?? {}
-    const result = this.pluginService?.handleBridgeIntercept
-      ? await this.pluginService.handleBridgeIntercept(eventName, eventData, sessionId)
-      : {}
+    if (!this.pluginService?.handleBridgeIntercept) {
+      console.error(`[bridge-handler] bridge:intercept with plugin service unavailable (requestId=${requestId}, sessionId=${sessionId}, event=${eventName})`)
+      client.sendExtensionUiResponse(
+        requestId,
+        JSON.stringify({ content: 'Plugin system not available', isError: true }),
+        'select',
+      )
+      return
+    }
+    const result = await this.pluginService.handleBridgeIntercept(eventName, eventData, sessionId)
     client.sendExtensionUiResponse(requestId, JSON.stringify(result), 'select')
   }
 

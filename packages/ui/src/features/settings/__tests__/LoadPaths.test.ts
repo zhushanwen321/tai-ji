@@ -169,4 +169,42 @@ describe('LoadPaths', () => {
     const payload = (wrapper.emitted('update-dirs')![0] as [SkillDirConfig[]])[0]
     expect(payload.some((d) => typeof d.enabled === 'boolean')).toBe(true)
   })
+
+  // ── RD-4#1 保存失败回弹：saveError 置位 → localDirs 回弹至最近落盘值（props.dirs）+ 常驻红字 ──
+  describe('saveError 保存失败常驻态（RD-4#1）', () => {
+    const persistedDirs = (): SkillDirConfig[] => [
+      { path: '/persisted/dir', enabled: false, scope: 'global' },
+    ]
+
+    it('saveError 置位 → 乐观编辑回弹至 props.dirs（最近落盘值）+ 常驻红字出现', async () => {
+      const wrapper = mountLoadPaths({ dirs: persistedDirs() })
+      // 用户勾选（LoadPaths 乐观编辑，emit 后父组件持久化）
+      const checkbox = wrapper.find('[data-testid="dir-row"] button[role="checkbox"]')
+      await checkbox.trigger('click')
+      expect(wrapper.emitted('update-dirs')).toBeTruthy()
+      expect(wrapper.find('[data-testid="load-paths-save-error"]').exists()).toBe(false)
+
+      // 父组件保存失败 → 置位 saveError
+      await wrapper.setProps({ saveError: true })
+
+      // 常驻红字（toast 之外的非瞬态失败标注）
+      expect(wrapper.find('[data-testid="load-paths-save-error"]').exists()).toBe(true)
+      // 回弹：勾选态回到最近落盘值（unchecked）
+      expect(checkbox.attributes('data-state')).toBe('unchecked')
+    })
+
+    it('saveError 复位（下次保存尝试起点）→ 常驻红字消失，后续编辑不受影响', async () => {
+      const wrapper = mountLoadPaths({ dirs: persistedDirs() })
+      await wrapper.setProps({ saveError: true })
+      expect(wrapper.find('[data-testid="load-paths-save-error"]').exists()).toBe(true)
+
+      await wrapper.setProps({ saveError: false })
+      expect(wrapper.find('[data-testid="load-paths-save-error"]').exists()).toBe(false)
+
+      // 复位后仍可正常编辑 + emit
+      const checkbox = wrapper.find('[data-testid="dir-row"] button[role="checkbox"]')
+      await checkbox.trigger('click')
+      expect(wrapper.emitted('update-dirs')).toBeTruthy()
+    })
+  })
 })

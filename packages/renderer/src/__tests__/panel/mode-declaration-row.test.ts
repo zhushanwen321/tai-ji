@@ -318,3 +318,23 @@ describe('MessageStream 挂载点（u5 条款 6）', () => {
     wrapper.unmount()
   })
 })
+
+describe('ModeDeclarationRow 工具面名单未定义 → 面未知（RD-2#6：不伪装「允许 0 项」）', () => {
+  it('allowlist 无 allowedTools → 工具 chip 显「工具 · —」，不显「允许 0 项」假计数', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([
+      FULL,
+      // 残缺模式：声明 allowlist 但名单字段缺失（旧数据/手工编辑）
+      { id: 'custom:broken', name: '残缺模式', builtin: false, order: 2, toolMode: 'allowlist', extensionMode: 'all' },
+    ])
+    presetStore.setDefaultPresetId('builtin:full')
+    setSession('s1', 'custom:broken')
+
+    const wrapper = mountRow('s1')
+    const toolChip = wrapper.find('[data-testid="mode-declaration-tool"]')
+    expect(toolChip.exists()).toBe(true)
+    expect(toolChip.text()).toBe('工具 · —')
+    expect(wrapper.text()).not.toContain('允许 0 项')
+    wrapper.unmount()
+  })
+})

@@ -57,7 +57,7 @@ const fakeProc = {
   stdout: stdoutStream,
   stderr: stderrStream,
   // write 显式 string 参数签名：0=不限时用例要从 calls 里取回请求 JSON 的 id
-  stdin: { write: vi.fn((_data: string) => true), once: vi.fn() },
+  stdin: { write: vi.fn((_data: string) => true), on: vi.fn(), once: vi.fn() },
   kill: vi.fn(),
   pid: 12345,
 }

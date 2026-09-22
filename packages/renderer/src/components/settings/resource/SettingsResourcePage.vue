@@ -19,8 +19,16 @@
       :forced-dirs="forcedDirs"
       :dirs="dirs"
       :disabled="false"
+      :save-error="saveError"
       @update-dirs="onUpdateDirs"
     />
+
+    <!-- RD-4#11：数据目录读取失败时的显式标注（默认路径非真实路径） -->
+    <p
+      v-if="dataDirReadFailed"
+      data-testid="resource-datadir-read-failed"
+      class="text-[11px] text-warn"
+    >{{ t('settings.resource.dataDirReadFailed') }}</p>
 
     <!-- 层 B · 资源只读预览 -->
     <section>
@@ -100,6 +108,8 @@ const props = defineProps<{
   items: SkillInfo[] | AgentInfo[]
   /** 加载路径配置（来自 settings store，ADR-0021 §1 discovery.json SSOT 视图） */
   dirs: SkillDirConfig[]
+  /** 路径保存失败常驻态（RD-4#1）：由 SettingsModal 的持久化 catch 置位，透传 LoadPaths */
+  saveError?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -115,9 +125,18 @@ const label = computed(() => (props.kind === 'skill' ? 'Skill' : 'Agent'))
 // 在 dev 下与实际扫描路径不一致、误导排查的问题。getDataDir 为 async（IPC），初始用默认值兜底，
 // 拉取完成后更新。
 const dataDirDisplay = ref('~/.taiji')
+/** RD-4#11：getDataDir 读取失败标记——失败时显式标注默认路径，不伪装真实路径（dev 实例误导排查）。 */
+const dataDirReadFailed = ref(false)
 onMounted(async () => {
-  const dir = await getDataDir()
-  if (dir) dataDirDisplay.value = dir
+  try {
+    const dir = await getDataDir()
+    if (dir) dataDirDisplay.value = dir
+  } catch (e) {
+    // RD-4#11：IPC reject 时不再静默回落写死 ~/.taiji。置位 dataDirReadFailed → 页面显式标注
+    // 「实际路径读取失败，显示的是默认路径」，避免把默认路径当成真实扫描路径误导排查。
+    console.warn('[SettingsResourcePage] getDataDir failed:', e)
+    dataDirReadFailed.value = true
+  }
 })
 const forcedDirs = computed(() =>
   props.kind === 'skill'

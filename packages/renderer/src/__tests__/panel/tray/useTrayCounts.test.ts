@@ -40,8 +40,9 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
 
 // ── mock：首拉 RPC（subagent/workflow 列表）──
 const apiMocks = vi.hoisted(() => ({
-  getSubagents: vi.fn<(sessionId: string) => Promise<SubagentRecord[]>>(),
-  getWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunRecord[]>>(),
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
+  getWorkflows: vi.fn<(sessionId: string) => Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }>>(),
 }))
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
@@ -118,8 +119,8 @@ function data(): UseTrayCountsReturn {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  apiMocks.getSubagents.mockResolvedValue([])
-  apiMocks.getWorkflows.mockResolvedValue([])
+  apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
+  apiMocks.getWorkflows.mockResolvedValue({ workflows: [], oversize: false })
   // reactive 容器：bash 分区面的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
   partitionState = reactive({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })
   tray = undefined
@@ -200,14 +201,16 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
 
   it('计数随 session 分区切换（各 session 独立，不串台）', async () => {
     // 首拉 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
-    apiMocks.getSubagents.mockImplementation(async (sid: string) =>
-      sid === SID2
-        ? [
-            makeSubagent({ subagentId: 'b-1', status: 'idle' }),
-            makeSubagent({ subagentId: 'b-2', status: 'idle' }),
-          ]
-        : [makeSubagent({ subagentId: 'a-1', status: 'running' })],
-    )
+    apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
+      subagents:
+        sid === SID2
+          ? [
+              makeSubagent({ subagentId: 'b-1', status: 'idle' }),
+              makeSubagent({ subagentId: 'b-2', status: 'idle' }),
+            ]
+          : [makeSubagent({ subagentId: 'a-1', status: 'running' })],
+      oversize: false,
+    }))
     const wrapper = mountHarness(SID)
     await vi.waitFor(() => expect(data().counts.value.subagent.running).toBe(1))
 

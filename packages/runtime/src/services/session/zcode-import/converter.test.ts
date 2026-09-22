@@ -251,7 +251,8 @@ describe('§3.4 映射全表（厨房水槽行集 → 产物行）', () => {
     expect(call1.id).toBe('call_1')
     expect(call1.arguments).toEqual({ file_path: '/a.ts', new_string: 'x' })
     // T3 usage：同名直通 / total→totalTokens / cache.read→cacheRead / cache.write→cacheWrite /
-    // reasoning 同名 / cost(number)→cost.total 其余分量 0
+    // reasoning 同名 / cost(number)→cost.total（RT-5#1：缺失分量键缺省不补 0，cost 分量
+    // zcode 不采集不伪造——0 只允许作为真实测量值）
     expect(a.message.usage).toEqual({
       input: 80,
       output: 20,
@@ -259,7 +260,7 @@ describe('§3.4 映射全表（厨房水槽行集 → 产物行）', () => {
       cacheWrite: 4,
       reasoning: 5,
       totalTokens: 100,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+      cost: { total: 0.5 },
     })
   })
 
@@ -363,7 +364,7 @@ describe('切段与 T3c 边界', () => {
     }
   })
 
-  it('step-finish 无 tokens → 无 usage 字段；无 cache/reasoning/cost 字段 → 分量补 0', () => {
+  it('step-finish 无 tokens → 无 usage 字段；缺失分量键缺省（RT-5#1 不补 0），显式 cost 0 是测量值保留', () => {
     const msgs = [
       assistantMessage([stepStart(), textPart('x', 2500), stepFinish('stop', { input: 3, output: 4 }, 0)]),
     ]
@@ -372,11 +373,32 @@ describe('切段与 T3c 边界', () => {
     expect(a.message.usage).toEqual({
       input: 3,
       output: 4,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { total: 0 },
     })
+  })
+
+  it('RT-5#1：usage 分量缺字段不写 0（键缺省）——tokens 缺 input 只写 output', () => {
+    const msgs = [
+      assistantMessage([stepStart(), textPart('x', 2500), stepFinish('stop', { output: 7 }, 0.2)]),
+    ]
+    const { entries } = parseOutput(buildZcodeSessionFile(msgs, 'T', HEADER))
+    const a = entries[1] as { message: { usage: Record<string, unknown> } }
+    // input/cacheRead/cacheWrite/totalTokens 缺 → 键不存在（≠ 0 假数据）；cost 只有单字段 total
+    expect(a.message.usage).toEqual({ output: 7, cost: { total: 0.2 } })
+    expect(a.message.usage).not.toHaveProperty('input')
+    expect(a.message.usage).not.toHaveProperty('totalTokens')
+  })
+
+  it('RT-5#1：tokens 分量全部不可解 → 整条 usage 不写 + degradations 显形计数', () => {
+    const msgs = [
+      // tokens 是 record 但无任何可解分量；cost 也缺失 → usage 整条跳过
+      assistantMessage([stepStart(), textPart('x', 2500), stepFinish('stop', { cache: {} })]),
+    ]
+    const out = buildZcodeSessionFile(msgs, 'T', HEADER)
+    const { entries } = parseOutput(out)
+    const a = entries[1] as { message: Record<string, unknown> }
+    expect(a.message).not.toHaveProperty('usage')
+    expect(out.degradations.some((d) => d.includes('整条 usage 不写'))).toBe(true)
   })
 
   it('T4 object 形态：completed+object output → details（content 留空数组）——前向防御分支', () => {
@@ -421,6 +443,27 @@ describe('切段与 T3c 边界', () => {
     const user = entries[1] as { timestamp: string; message: { timestamp: number } }
     expect(user.timestamp).toBe(HEADER.timestamp)
     expect(user.message.timestamp).toBe(Date.parse(HEADER.timestamp))
+  })
+
+  it('RT-5#8：header.timestamp 不可解 → 不伪造 1970（entry 退原串、message.timestamp 缺省、降级登记）', () => {
+    const badHeader = { ...HEADER, timestamp: 'not-a-timestamp' }
+    const msgs = [
+      { id: 'm-u', data: { role: 'user' }, parts: [textPart('no-time')] },
+      assistantMessage([stepStart(), textPart('x', 2500), stepFinish('stop', { input: 1 })], {}, 2000),
+    ]
+    const out = buildZcodeSessionFile(msgs, 'T', badHeader)
+    const { entries } = parseOutput(out)
+    const user = entries[1] as { timestamp: string; message: Record<string, unknown> }
+    // entry.timestamp 退 header 原串（保真），不产出 1970-01-01 假时间戳
+    expect(user.timestamp).toBe('not-a-timestamp')
+    // message.timestamp（ms）缺省键——undefined ≠ 0（0 = 1970 假测量值）
+    expect(user.message).not.toHaveProperty('timestamp')
+    // 降级登记一次（显形）
+    expect(out.degradations.some((d) => d.includes('header.timestamp 不可解'))).toBe(true)
+    // assistant 段有自身 time 锚（2500）时不受 header 不可解影响——段级时间仍真实
+    const assistant = entries[2] as { timestamp: string; message: { timestamp: number } }
+    expect(assistant.timestamp).toBe(new Date(2500).toISOString())
+    expect(assistant.message.timestamp).toBe(2500)
   })
 })
 

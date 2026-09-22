@@ -58,12 +58,15 @@ export class ModelMessageHandler {
     console.log(`[runtime] model.switch: sessionId=${sessionId}, provider=${provider}, modelId=${modelId}`)
     // C-pi-13 回执修型（U6）：reply 回传生效值——pi pattern 引擎可能把请求模型
     // 静默换成同族条目（事故 A 形态），switchModel 经 set→get_state 读回
-    // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状；
-    // 无 '/' 形态（无活跃进程早退等 fallback）按请求值回显（旧行为兜底）。
+    // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状。
     // U2 后 switchModel 的激活前置语义（停止态/回收态先 ensureActive 拉活再切）：不存在
     // 「无活跃进程 → 回 echo 请求值」的早退分支了——失败一律以分型错误 reject（SESSION_ACTIVATE_* /
     // MODEL_NOT_FOUND / PROVIDER_CREDENTIAL_MISSING / ENGINE_MODEL_MISSING，见设计 §3.4），
     // 成功则必为 pi `get_state` 回读的生效值。此处仅保留纯防御的 fallback（无 '/' 形态）。
+    // [code-harden RT-4#4] 无活跃进程的失败语义已收敛到 service：switchModel 抛
+    // errorWithCode(SESSION_NOT_ACTIVE)，由 server.ts handleMessage 的全局 catch 统一
+    // sendError（code 透传 + details.sessionId），不再有「按请求值回 model.switched」
+    // 的假成功路径。
     const effectiveModel = await this.ctx.modelService.switchModel(sessionId, provider, modelId)
     const slash = effectiveModel.indexOf('/')
     this.ctx.reply(ws, msg.id, 'model.switched', {
@@ -97,7 +100,9 @@ export class ModelMessageHandler {
     // P3（final gate）：reply 生效值而非请求值——pi 会钳制模型族不支持的档位
     //（mimo 族 max → high；钳制后 effective ≠ previous 时 pi 仍必发
     // thinking_level_changed 事件，isChanging=false 仅「值未变」场景——PS-04），
-    // 回显请求值会污染前端 pending 确认
+    // 回显请求值会污染前端 pending 确认。
+    // [code-harden RT-4#4] 无活跃进程：setThinkingLevel 抛 errorWithCode(SESSION_NOT_ACTIVE)，
+    // 与 model.switch 同经 server.ts 全局 catch sendError（code + details.sessionId）。
     const effective = await this.ctx.modelService.setThinkingLevel(sid as string, level as string)
     this.ctx.reply(ws, msg.id, 'session.thinkingLevelSet', { sessionId: sid, level: effective })
     return true
@@ -227,9 +232,21 @@ export class ModelMessageHandler {
       : { models: [], success: false, error: outcome.error, results: [] })
   }
 
-  /** discover 凭据回查（链 2）：唯一通道（auth.json → models.json，ctx 构造必需注入）。 */
+  /**
+   * discover / test 凭据回查（链 2）：唯一通道（auth.json → models.json，ctx 构造必需注入）。
+   * RT-7#4：凭据形态不支持（`!` command / 引用未定义 env）时 throw 中文错误——两条
+   * 调用链的 .catch 会把它 reply 给前端（discover 链 success:false / test 链顶层 error），
+   * 且 discoverModelsFromApi / testProviderConnections 均不会被调用（禁止以形态标记串
+   * 作 Bearer 下发外部请求）。
+   */
   private async resolveProviderApiKey(providerId: string): Promise<string | undefined> {
     const resolved = await this.ctx.providerCredentialResolver.resolveProviderCredential(providerId)
-    return resolved?.key
+    if (resolved === undefined) return undefined
+    if ('unsupported' in resolved) {
+      throw new Error(resolved.unsupported === 'command'
+        ? `provider「${providerId}」的凭据是 command 形态（! 前缀），暂不支持发起模型发现/测试请求，请改用明文 API Key`
+        : `provider「${providerId}」的凭据引用了未定义的环境变量，无法解析出 API Key，请检查环境变量后重试`)
+    }
+    return resolved.key
   }
 }

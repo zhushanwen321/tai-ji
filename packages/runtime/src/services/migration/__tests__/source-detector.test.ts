@@ -214,8 +214,10 @@ describe('detectSources 纯函数', () => {
     expect(results.every(r => r.skillCount === undefined)).toBe(true)
   })
 
-  it('readdirSync 抛异常时降级为 installed=false（不抛）', () => {
-    // claude skill 目录「存在」但 readdir 抛错（权限/IO 异常）→ 该源降级
+  it('readdirSync 抛异常时降级：installed=true + error=unreadable + 计数缺省（RT-5#5，不填 0）', () => {
+    // claude skill 目录「存在」但 readdir 抛错（权限/IO 异常）→「不可读」显形：
+    // 保留 installed=true（目录存在），计数字段缺省（0 是「已安装且为空」的实测语义），
+    // 与「未安装」「0 个」三态区分
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p) === CLAUDE_SKILLS || String(p) === CLAUDE_AGENTS)
     vi.mocked(fs.readdirSync).mockImplementation((() => {
       throw new Error('EACCES')
@@ -227,10 +229,16 @@ describe('detectSources 纯函数', () => {
     expect(() => detectSources(HOME)).not.toThrow()
     const results = detectSources(HOME)
     const claude = results.find(r => r.source === 'claude')!
-    // 两个目录都 existsSync=true 但 readdir 抛错 → detectClaude 内部 countSkillFiles 抛出被外层 try-catch 捕获
-    // 注意：countSkillFiles 内部已 catch readdir（返回 0），所以 claude 仍 installed=true，skillCount=0
+    // 两个目录都 existsSync=true 但顶层 readdir 抛错 → countSkillFiles/countAgentFiles 上抛
+    // 被 detect 层捕获 → error='unreadable'，计数缺省（非 0 假数据）
     expect(claude.installed).toBe(true)
-    expect(claude.skillCount).toBe(0)
+    expect(claude.skillCount).toBeUndefined()
+    expect(claude.agentCount).toBeUndefined()
+    expect(claude.error).toBe('unreadable')
+    // 其余源目录不存在 → 维持「未安装」三态（无 error 字段）
+    const codex = results.find(r => r.source === 'codex')!
+    expect(codex.installed).toBe(false)
+    expect(codex.error).toBeUndefined()
   })
 
   it('返回数组顺序为 claude / codex / pi / zcode', () => {

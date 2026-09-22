@@ -224,6 +224,8 @@
       <div class="mt-10 border-t border-[var(--hairline)] pt-3.5 text-[11px] leading-[1.8] text-[var(--neutral-dim)]">
         {{ t('settings.usage.footnote') }}
         <span v-if="data.skippedLines > 0" class="ml-2">{{ t('settings.usage.footnoteSkipped', { count: data.skippedLines }) }}</span>
+        <!-- RT-8#12：读取失败的 session 文件数据点不在统计内——聚合偏低须显形，与「无用量」区分 -->
+        <span v-if="failedFiles > 0" class="ml-2">{{ t('settings.usage.footnoteFailedFiles', { count: failedFiles }) }}</span>
       </div>
     </template>
   </div>
@@ -280,6 +282,9 @@ const formattedTime = computed(() => {
   const mm = String(d.getMinutes()).padStart(TIME_PAD_WIDTH, '0')
   return `${hh}:${mm}`
 })
+
+/** 读取失败的 session 文件数（RT-8#12）：旧 runtime 不带该字段（可选），缺省 0。 */
+const failedFiles = computed(() => data.value?.failedFiles ?? 0)
 
 async function fetchData(): Promise<void> {
   loading.value = true

@@ -78,23 +78,31 @@ export function getCatalogGeneratedAt(): number {
   return typeof v === 'number' ? v : 0
 }
 
-/** 解析单份缓存文件为 entries，任何损坏返回 {}（fail-safe）。 */
-function parseCacheFile(path: string): Record<string, OverlayEntry> {
+/** 缓存文件解析结果：corrupt = 文件存在但损坏（JSON/结构非法，fail-safe 回退空 entries）。 */
+type ParsedCacheFile = { entries: Record<string, OverlayEntry>; corrupt: boolean }
+
+/** 解析单份缓存文件为 entries。损坏时 warn（RT-7#8：损坏可见——原 `catch { return {} }`
+ * 零日志，「缓存损坏」被折叠进 never-seen，丢 D5 三态判据）并标记 corrupt。 */
+function parseCacheFile(path: string): ParsedCacheFile {
+  const markCorrupt = (): ParsedCacheFile => {
+    logger.warn('[provider-catalog-refresh] cache file corrupt, falling back to empty entries', { path })
+    return { entries: {}, corrupt: true }
+  }
   try {
-    if (!existsSync(path)) return {}
+    if (!existsSync(path)) return { entries: {}, corrupt: false }
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'))
-    if (typeof parsed !== 'object' || parsed === null) return {}
+    if (typeof parsed !== 'object' || parsed === null) return markCorrupt()
     // 自刷缓存带 version 包装；pi store 是顶层 providerId 分桶——两者取 entries 语义一致
     const entries = (parsed as { entries?: unknown }).entries ?? parsed
-    if (typeof entries !== 'object' || entries === null) return {}
+    if (typeof entries !== 'object' || entries === null) return markCorrupt()
     const out: Record<string, OverlayEntry> = {}
     for (const [id, entry] of Object.entries(entries as Record<string, unknown>)) {
       const e = entry as OverlayEntry
       if (Array.isArray(e?.models)) out[id] = { ...e, models: e.models.filter(m => m && typeof m.id === 'string') }
     }
-    return out
+    return { entries: out, corrupt: false }
   } catch {
-    return {}
+    return markCorrupt()
   }
 }
 
@@ -107,9 +115,16 @@ function mtimeOf(path: string): number {
   }
 }
 
+type OverlaySourceSnapshot = {
+  mtime: number
+  entries: Record<string, OverlayEntry>
+  /** 该缓存文件损坏（RT-7#8：refresh 结果回传 corrupt 的数据源）。 */
+  corrupt: boolean
+}
+
 type OverlaySnapshot = {
-  own: { mtime: number; entries: Record<string, OverlayEntry> }
-  pi: { mtime: number; entries: Record<string, OverlayEntry> }
+  own: OverlaySourceSnapshot
+  pi: OverlaySourceSnapshot
 }
 
 let overlaySnapshot: OverlaySnapshot | null = null
@@ -131,8 +146,8 @@ function loadOverlay(): OverlaySnapshot {
     return overlaySnapshot
   }
   const next: OverlaySnapshot = {
-    own: { mtime: ownMtime, entries: parseCacheFile(ownPath) },
-    pi: { mtime: piMtime, entries: parseCacheFile(piPath) },
+    own: { mtime: ownMtime, ...parseCacheFile(ownPath) },
+    pi: { mtime: piMtime, ...parseCacheFile(piPath) },
   }
   overlaySnapshot = next
   return next
@@ -193,6 +208,17 @@ export function getCatalogOverlayModels(providerId: string): OverlayModel[] {
 export type CatalogRefreshResult = {
   refreshed: string[]
   failed: Array<{ providerId: string; reason: string }>
+  /**
+   * RT-7#8：读到的损坏缓存源（'own' = 自刷缓存 / 'pi' = pi models-store）。损坏文件
+   * fail-safe 回退空 entries（三态判据退化为 never-seen），本字段使其单独可见而非
+   * 折叠进「从未见过」（丢 D5 三态判据）。空数组 = 无损坏。
+   */
+  corrupt: Array<'own' | 'pi'>
+  /**
+   * RT-7#8：本次刷新结果落盘失败（仅 warn 不再零回执——内存有效、下次进入页面重刷，
+   * UI 可提示持久化异常）。缺省 = 落盘成功或无落盘内容。
+   */
+  persistFailed?: boolean
 }
 
 /** 写自刷缓存（tmp + rename 原子替换；目录不存在则创建）。 */
@@ -287,25 +313,33 @@ async function refreshOneProvider(
  * 不影响其他 provider（allSettled），失败方保留原缓存条目。
  */
 export async function refreshProviderCatalogs(providerIds: string[]): Promise<CatalogRefreshResult> {
-  const { own } = loadOverlay()
+  const { own, pi } = loadOverlay()
   const entries: Record<string, OverlayEntry> = { ...own.entries }
   const refreshed: string[] = []
   const failed: CatalogRefreshResult['failed'] = []
+  // RT-7#8：损坏缓存源单独回传（不折叠进 never-seen）
+  const corrupt: CatalogRefreshResult['corrupt'] = [
+    ...(own.corrupt ? ['own' as const] : []),
+    ...(pi.corrupt ? ['pi' as const] : []),
+  ]
 
   await Promise.allSettled(
     providerIds.map(providerId => refreshOneProvider(providerId, entries, refreshed, failed)),
   )
 
+  let persistFailed: boolean | undefined
   if (refreshed.length > 0) {
     try {
       await persistOwnCache(entries)
     } catch (e) {
-      // 落盘失败不阻断 reply：本次内存外无持久化，下次进入页面重刷
+      // 落盘失败不阻断 reply：本次内存外无持久化，下次进入页面重刷（RT-7#8：仅 warn →
+      // 同时经结果 persistFailed 回传，消费方可提示持久化异常）
       logger.warn('[provider-catalog-refresh] persist overlay cache failed', {
         error: e instanceof Error ? e.message : String(e),
       })
+      persistFailed = true
     }
     overlaySnapshot = null // 失效内存缓存，合并展示立即读到新数据
   }
-  return { refreshed, failed }
+  return { refreshed, failed, corrupt, persistFailed }
 }

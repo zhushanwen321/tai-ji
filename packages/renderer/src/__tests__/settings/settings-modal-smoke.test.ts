@@ -90,6 +90,7 @@ import SettingsResourcePage from '@/components/settings/resource/SettingsResourc
 import { makeQuotaStateStub } from '../helpers/quota-state-stub'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
+import { getSettingsStore } from '@taiji/core'
 
 /** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空；可按用例覆写成员）。 */
 function stubTransport(overrides: Partial<SettingsTransport> = {}): SettingsTransport {
@@ -252,5 +253,62 @@ describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-m
     // 断言：error toast 已产生（非静默吞）
     expect(toasts.value.some((t) => t.type === 'error')).toBe(true)
     expect(toasts.value.some((t) => t.message.includes('network down'))).toBe(true)
+  })
+})
+
+describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 UI + LoadPaths 常驻错误态）', () => {
+  /**
+   * 权威值源说明：dirs 域无 getter RPC（协议仅 set + 成功后广播），store 的 *Dirs 镜像只被
+   * runtime 成功落盘后的广播写入，故镜像恒为「最近落盘值」。失败回弹 = LoadPaths 从该镜像
+   * 重拉（saveError 通道驱动），行为级断言即「勾选态回弹 + 常驻红字」。
+   */
+  function mountModalWithFailingSkillDirs(): ReturnType<typeof mount> {
+    providePlatform({
+      kind: 'mock',
+      storage: inMemoryStorage(),
+      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
+    })
+    provideSettingsTransport(stubTransport({ setSkillDirs: () => Promise.reject(new Error('disk full')) }))
+    return mount(SettingsModal, {
+      props: { open: true },
+      attachTo: document.body,
+      global: {
+        provide: {
+          [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
+          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+        },
+      },
+    })
+  }
+
+  it('skill 页勾选目录保存失败 → toast + 常驻红字 + 勾选态回弹至最近落盘值', async () => {
+    // store 镜像预置最近落盘值（enabled:false——广播镜像即磁盘态）
+    const persisted: SkillDirConfig[] = [{ path: '/persisted/skills', enabled: false, scope: 'global' }]
+    getSettingsStore().skillDirs.value = persisted
+
+    const { toasts } = useToast()
+    toasts.value = []
+
+    mountModalWithFailingSkillDirs()
+    await flushPromises()
+
+    // 切到 skill 菜单（SettingsResourcePage + LoadPaths 在该菜单下渲染）
+    const skillBtn = document.body.querySelector('[data-testid="settings-nav-skill"]')
+    expect(skillBtn).toBeTruthy()
+    skillBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    // 用户勾选目录（LoadPaths 乐观编辑 → emit → 持久化 RPC reject）
+    const checkbox = document.body.querySelector<HTMLElement>('[data-testid="dir-row"] button[role="checkbox"]')
+    expect(checkbox).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
+    checkbox!.click()
+    await flushPromises()
+
+    // 失败显形（三层）：error toast + 常驻红字 + 勾选态回弹（最近落盘值 enabled:false）
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('disk full'))).toBe(true)
+    expect(document.body.querySelector('[data-testid="load-paths-save-error"]')).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
   })
 })

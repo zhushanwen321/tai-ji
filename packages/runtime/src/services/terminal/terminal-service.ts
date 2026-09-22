@@ -75,8 +75,22 @@ function nextPushId(): string {
   return `terminal_push_${Date.now()}_${pushCounter}`
 }
 
+/**
+ * kill 的 SIGKILL 升级延迟（RT-8#10）。超时量级按被保护对象的粒度校准（AGENTS 架构约定
+ * #19）：这里是单个 PTY 进程的回收兜底——控制面/单对象粒级，秒级即可（对齐 shell-runner
+ * 的 ESCALATION_DELAY_MS=5s 惯例），不是任务级墙钟。SIGTERM 可被 shell trap 捕获/忽略，
+ * 无升级则 ignore trap 的 shell + 其子进程成为孤儿，fd 永久残留。
+ */
+const KILL_ESCALATION_MS = 5000
+
 export class TerminalService implements ITerminalService {
   private readonly ptyMap = new Map<string, pty.IPty>()
+  /**
+   * 已发过 terminal.writeFailed 的 sid（RT-8#10）。write 失败几乎总是「PTY 已死/管道关闭」，
+   * 之后每次击键都会再失败——若逐次 publish 会被击键流刷屏。每 PTY 生命周期至多报一次：
+   * spawn（新周期）与 onExit（周期结束）时清除。
+   */
+  private readonly writeFailedReported = new Set<string>()
 
   constructor(private deps: TerminalServiceDeps) {}
 
@@ -107,6 +121,7 @@ export class TerminalService implements ITerminalService {
     }
 
     this.ptyMap.set(sid, proc)
+    this.writeFailedReported.delete(sid)
 
     // PTY 输出 → 发布 terminal.data（transient 高频流：不占 seq 不入 ring）
     proc.onData((data) => {
@@ -121,6 +136,7 @@ export class TerminalService implements ITerminalService {
     proc.onExit(({ exitCode }) => {
       console.log(`[terminal] exit: sid=${sid} exitCode=${exitCode}`)
       this.ptyMap.delete(sid)
+      this.writeFailedReported.delete(sid)
       this.deps.publish(sid, {
         type: 'terminal.exit',
         id: nextPushId(),
@@ -142,8 +158,19 @@ export class TerminalService implements ITerminalService {
     try {
       proc.write(data)
     } catch (e) {
-      // best-effort：进程已退出/管道关闭时 write 失败属预期竞态，onExit 回调会清理，不传播给调用方
+      // 进程已退出/管道关闭时 write 失败属预期竞态，onExit 回调会清理——本地不抛
+      //（ack 语义保持：击键流不该被单个失败打断）。但输入字节已丢，必须让前端知道
+      //（RT-8#10）：每 PTY 生命周期 publish 一次 terminal.writeFailed（防击键流刷屏，
+      // spawn/onExit 清 writeFailedReported），renderer 收到后 toast「输入可能丢失」。
       console.error(`[terminal] write failed: sid=${sid}`, serializeError(e))
+      if (!this.writeFailedReported.has(sid)) {
+        this.writeFailedReported.add(sid)
+        this.deps.publish(sid, {
+          type: 'terminal.writeFailed',
+          id: nextPushId(),
+          payload: { sessionId: sid, message: toErrorMessage(e) },
+        })
+      }
     }
   }
 
@@ -164,10 +191,12 @@ export class TerminalService implements ITerminalService {
     try {
       proc.kill()
     } catch (e) {
-      // best-effort：重复 kill 或进程已退出时抛错，onExit 回调幂等清理 ptyMap + 广播 terminal.exit
+      // 重复 kill 或进程已退出时抛错，onExit 回调幂等清理 ptyMap + 广播 terminal.exit
       console.error(`[terminal] kill failed: sid=${sid}`, serializeError(e))
+      return
     }
-    // onExit 回调会清理 ptyMap + 广播 terminal.exit
+    // onExit 回调会清理 ptyMap + 广播 terminal.exit；SIGTERM 被忽略时升级兜底
+    this.scheduleKillEscalation(sid, proc, 'kill')
   }
 
   attach(_sid: string): void {
@@ -181,11 +210,47 @@ export class TerminalService implements ITerminalService {
     try {
       proc.kill()
     } catch (e) {
-      // best-effort：进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞 session 销毁
+      // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞 session 销毁
       console.error(`[terminal] destroyPty kill failed: sid=${sid}`, serializeError(e))
     }
     this.ptyMap.delete(sid)
     // session 销毁不广播 terminal.exit（前端已在 session.deleted 清理分区）
+    // SIGTERM 被忽略时仍需升级（fd 残留与 session 存亡无关）。此时 ptyMap 已删，
+    // 升级 timer 不能靠 map 判活——untracked 模式下进程已退出时 kill 会抛错被吞（无害），
+    // 误杀新 PTY 的风险不存在：destroyPty 是 session 销毁路径，同 sid 不会 re-spawn。
+    this.scheduleKillEscalation(sid, proc, 'destroyPty', { untracked: true })
+  }
+
+  /**
+   * kill 的 SIGKILL 升级兜底（RT-8#10）：SIGTERM 后 KILL_ESCALATION_MS 仍未退出
+   * （shell trap 捕获/忽略 SIGTERM、子进程不在同进程组）时强杀，防孤儿进程 + fd 残留。
+   * tracked 模式（用户 kill）：onExit 清理 ptyMap 后本 timer 自然 no-op——同 sid 重新
+   * spawn 了新 PTY 时 `ptyMap.get(sid) !== proc` 守卫防止误杀新 PTY。
+   */
+  private scheduleKillEscalation(
+    sid: string,
+    proc: pty.IPty,
+    label: string,
+    opts?: { untracked?: boolean },
+  ): void {
+    const timer = setTimeout(() => {
+      if (!opts?.untracked && this.ptyMap.get(sid) !== proc) return
+      try {
+        proc.kill('SIGKILL')
+        console.warn(
+          `[terminal] ${label}: SIGTERM 后 ${KILL_ESCALATION_MS}ms 未退出，已升级 SIGKILL: sid=${sid}`,
+        )
+      } catch (e) {
+        // SIGKILL 也失败（极罕见：进程已死时 node-pty 抛错属预期 no-op；真失败则子进程/fd
+        // 残留）——上报带恢复动作，不留静默断链
+        console.error(
+          `[terminal] ${label}: SIGKILL 升级失败，子进程/fd 可能残留（恢复动作：重启应用回收）: sid=${sid}`,
+          serializeError(e),
+        )
+      }
+    }, KILL_ESCALATION_MS)
+    // 兜底 timer 不得拖延 runtime 进程退出
+    timer.unref()
   }
 
   /**
@@ -271,6 +336,9 @@ function readDarwinLoginShell(): string {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
+      // C-proc-09 出站契约：不传 env = 隐式全量继承父环境（含 TAIJI_RUNTIME_TOKEN），
+      // 泄漏给 dscl 后代进程；只读查询仅需 PATH/HOME，白名单基座 + deny 兜底（RT-8#9）。
+      env: buildOutboundChildEnv({ parentEnv: process.env }),
     })
     // 输出形如 "UserShell: /bin/zsh"
     const match = out.match(/UserShell:\s*(\S+)/)

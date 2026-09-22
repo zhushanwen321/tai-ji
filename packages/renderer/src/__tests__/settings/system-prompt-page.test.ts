@@ -197,6 +197,28 @@ describe('SystemPromptPage 保存交互', () => {
     expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('保存失败'))).toBe(true)
   })
 
+  it('RD-4#7：保存 in-flight 期间保存按钮禁用（saving 守卫，防 65s 窗口重复点击并发覆盖）', async () => {
+    configMock.getSystemPrompt.mockResolvedValueOnce({ config: defaultConfig(), corrupted: false })
+    let resolveSave!: (v: { config: SystemPromptConfig; corrupted: boolean }) => void
+    configMock.setSystemPrompt.mockImplementationOnce(
+      () => new Promise((r) => { resolveSave = r }),
+    )
+
+    await openSystemPromptPage()
+
+    await $('[data-testid="system-prompt-replace-switch"]').trigger('click')
+    await $('[data-testid="system-prompt-replace-input"]').setValue('自定义提示词')
+    await $('[data-testid="system-prompt-replace-save"]').trigger('click')
+    await flushPromises()
+    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
+    // in-flight：保存按钮禁用（!replaceDirty || saving）
+    expect(($('[data-testid="system-prompt-replace-save"]').element as HTMLButtonElement).disabled).toBe(true)
+
+    resolveSave({ config: defaultConfig(), corrupted: false })
+    await flushPromises()
+    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
+  })
+
   it('修改后点「放弃」还原已保存快照，编辑态回退且保存按钮禁用', async () => {
     configMock.getSystemPrompt.mockResolvedValueOnce({
       config: {

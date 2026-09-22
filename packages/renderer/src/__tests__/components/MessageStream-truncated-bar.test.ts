@@ -12,6 +12,8 @@
  * ③ 点击「加载更早」→ 既有 loadMoreHistory 通路被调（mock useChat 断言；core 侧
  *   [u6] 游标翻页调用断言见 core __tests__/truncated-window.test.ts——原 getFullHistory
  *   全量通路已退役）
+ * ④ [RD-1#4] 加载更早失败 → 顶部条下方渲染「加载失败 + 重试」错误行（显形），
+ *   且顶部条不消失（truncated 窗口未变）；点击重试再次走 load-more 通路
  *
  * mock 边界对齐 MessageStream-kind.test.ts：virtua（happy-dom 无布局）、ChatViewDeps 装配器、
  * useChat 编排（showLoadMore 的 store→hasMoreHistory 派生链由 core truncated-window.test.ts
@@ -134,6 +136,13 @@ function mountStream() {
   })
 }
 
+/** 冲净微任务 + 一轮 DOM 更新（handleLoadMore 内 await loadMoreHistory + nextTick）。 */
+async function flushPromises(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   loadMoreHistoryMock.mockReset()
@@ -183,6 +192,49 @@ describe('MessageStream 截断顶部条（u4d）', () => {
     await wrapper.find('[data-testid="load-more-history"]').trigger('click')
     expect(loadMoreHistoryMock).toHaveBeenCalledTimes(1)
     expect(loadMoreHistoryMock).toHaveBeenCalledWith(SID)
+    wrapper.unmount()
+  })
+
+  it('必测④ [RD-1#4] 加载更早失败 → 错误行显形（「加载失败 + 重试」）+ 顶部条不消失 + 重试再走通路', async () => {
+    const store = useChatStore()
+    store.hydrate(SID, [makeMsg('m1')])
+    store.setHistoryWindow(SID, { truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
+    hasMoreMock.value = true
+    // core loadMoreHistory 的失败返回值（false = RPC 失败，窗口状态未变）
+    loadMoreHistoryMock.mockResolvedValue(false)
+
+    const wrapper = mountStream()
+    await wrapper.find('[data-testid="load-more-history"]').trigger('click')
+    await flushPromises()
+
+    // 失败显形：错误行渲染（旧实现仅 console.warn，用户侧「点了没反应」）
+    const errorBar = wrapper.find('[data-testid="load-more-error-bar"]')
+    expect(errorBar.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="load-more-error-text"]').text()).toBe('加载失败')
+    // truncated 窗口未变 → 顶部条仍在（失败 ≠ 已到头）
+    expect(wrapper.find('[data-testid="truncated-history-bar"]').exists()).toBe(true)
+
+    // 重试入口：再次走既有 load-more 通路
+    await wrapper.find('[data-testid="load-more-retry"]').trigger('click')
+    await flushPromises()
+    expect(loadMoreHistoryMock).toHaveBeenCalledTimes(2)
+    expect(loadMoreHistoryMock).toHaveBeenLastCalledWith(SID)
+    wrapper.unmount()
+  })
+
+  it('必测④ 反向 [RD-1#4] 加载成功 → 不渲染错误行（A 形态无回归）', async () => {
+    const store = useChatStore()
+    store.hydrate(SID, [makeMsg('m1')])
+    store.setHistoryWindow(SID, { truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
+    hasMoreMock.value = true
+    loadMoreHistoryMock.mockResolvedValue(true)
+
+    const wrapper = mountStream()
+    await wrapper.find('[data-testid="load-more-history"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="load-more-error-bar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="truncated-history-bar"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })

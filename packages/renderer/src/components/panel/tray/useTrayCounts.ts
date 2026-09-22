@@ -130,6 +130,14 @@ export interface UseTrayCountsReturn {
     subagent: ComputedRef<string | null>
     workflow: ComputedRef<string | null>
   }
+  /**
+   * [RT-4#8] oversize 降级标志（session 文件 >32MB 时该类列表不可用）——面板显示
+   * 「会话过大，列表不可用」降级提示（优先级低于 loading/error，高于空列表渲染）。
+   */
+  oversize: {
+    subagent: ComputedRef<boolean>
+    workflow: ComputedRef<boolean>
+  }
   /** 面板加载态（bash = 从未成功拉到过一次） */
   loading: {
     bash: ComputedRef<boolean>
@@ -291,6 +299,11 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
       // per-sid 分区读（ADR-0049）：split 模式 pane A 的加载失败不得遮蔽 pane B 面板
       subagent: computed(() => subagentStore.loadErrorOf(normalizedSid.value ?? '')),
       workflow: computed(() => workflowStore.loadErrorOf(normalizedSid.value ?? '')),
+    },
+    oversize: {
+      // [RT-4#8] per-sid 分区读（与 errors 同款透传，store 是标志 owner）
+      subagent: computed(() => subagentStore.oversizeOf(normalizedSid.value ?? '')),
+      workflow: computed(() => workflowStore.oversizeOf(normalizedSid.value ?? '')),
     },
     loading: {
       bash: computed(() => !backgroundTasks.current.value.loaded),

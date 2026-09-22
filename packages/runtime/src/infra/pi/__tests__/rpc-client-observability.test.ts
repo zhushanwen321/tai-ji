@@ -67,6 +67,7 @@ const fakeProc = {
   stderr: stderrStream,
   stdin: {
     write: vi.fn(() => true),
+    on: vi.fn(),
     once: vi.fn(),
   },
   kill: vi.fn((_signal?: NodeJS.Signals | number) => {

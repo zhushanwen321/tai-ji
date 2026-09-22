@@ -14,10 +14,11 @@
  * env 装配正确性）；markdown/incremental 渲染函数 mock 捕获 env 参数断言（不跑真管线）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { computed, defineComponent, h, inject, provide, nextTick, effectScope, ref, type EffectScope, type ComputedRef } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { ChatViewDepsKey, type ChatViewDeps } from '@taiji/ui'
+import type { FileNode } from '@taiji/shared'
 
 const mockRenderMarkdownSegments = vi.fn(async () => [{ type: 'text', content: '<p>x</p>' }])
 const mockRenderIncremental = vi.fn(async () => ({
@@ -77,8 +78,10 @@ vi.mock('@/composables/features/drawer/useSideDrawer', async (importOriginal) =>
 vi.mock('@/stores/fileTree', () => ({
   useFileTreeStore: () => ({ selectFile: vi.fn() }),
 }))
+// 共享可控 load mock（RD-1#1 迟到返回用例需要手控 resolve 时序；vi.hoisted 供 mock 工厂引用）
+const mockLoad = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/features/search/useFileSearch', () => ({
-  useFileSearch: () => ({ load: vi.fn().mockResolvedValue([]) }),
+  useFileSearch: () => ({ load: mockLoad }),
 }))
 vi.mock('@/composables/panel/useForkModeChannel', () => ({ triggerEnterForkMode: vi.fn() }))
 vi.mock('@/composables/panel/useHandoffModeChannel', () => ({ triggerEnterHandoffMode: vi.fn() }))
@@ -88,9 +91,17 @@ vi.mock('@/composables/useToast', () => ({
 
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 
+/** FileNode 便捷构造（collectFilePaths/collectBasenames 只消费 type/name/path） */
+function fileNode(name: string, path: string): FileNode {
+  return { type: 'file', name, path } as FileNode
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  // 共享 load mock 复位 + 默认空结果（既有用例依赖「load 恒成功返回空」行为）
+  mockLoad.mockReset()
+  mockLoad.mockResolvedValue([])
 })
 
 /** 装配器在组件 setup 外直调：effectScope 提供响应式上下文（onScopeDispose 等不告警），用完 stop */
@@ -213,5 +224,65 @@ describe('useChatViewDeps — sessionCwdOf deps 字段 + override 传值矩阵�
     await injected!.renderMarkdown('hello')
     expect((mockRenderMarkdownSegments.mock.calls[0]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
     wrapper.unmount()
+  })
+})
+
+describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file.search 不覆盖新 session）', () => {
+  it('A session 的 file.search 迟到返回，不覆盖 B session 已落位的白名单（跨 session 串台守卫）', async () => {
+    // s1 的 load 挂起（手控 resolve），s2 的 load 立即返回
+    let resolveS1!: (nodes: FileNode[]) => void
+    mockLoad.mockImplementation((sid: string) => {
+      if (sid === 's1') {
+        return new Promise<FileNode[]>((resolve) => { resolveS1 = resolve })
+      }
+      return Promise.resolve([fileNode('s2-file.ts', '/proj-b/s2-file.ts')])
+    })
+    const sid = ref('s1')
+    const deps = assemble(sid)
+    // 切到 s2：s2 白名单经 async 链落位
+    sid.value = 's2'
+    await flushPromises()
+    await deps.renderMarkdown('after-switch')
+    let env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
+    // s1 的 file.search 此时才迟到返回 → 必须被代际守卫丢弃，不得回写白名单
+    resolveS1([fileNode('s1-file.ts', '/proj-a/s1-file.ts')])
+    await flushPromises()
+    await deps.renderMarkdown('after-late')
+    env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
+    expect(env.filePaths.has('/proj-a/s1-file.ts')).toBe(false)
+  })
+
+  it('未切 session 时迟到返回正常落位（守卫不误杀同 session 的正常异步写入）', async () => {
+    let resolveS1!: (nodes: FileNode[]) => void
+    mockLoad.mockImplementation(() => new Promise<FileNode[]>((resolve) => { resolveS1 = resolve }))
+    const deps = assemble(ref('s1'))
+    await flushPromises() // 首订 load 已发起但未 resolve
+    resolveS1([fileNode('s1-file.ts', '/proj-a/s1-file.ts')])
+    await flushPromises()
+    await deps.renderMarkdown('after-late')
+    const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect([...env.filePaths]).toEqual(['/proj-a/s1-file.ts'])
+  })
+
+  it('A session 的 load 失败迟到发生，不清空 B session 已落位的白名单（catch 路径同受守卫约束）', async () => {
+    let rejectS1!: (e: unknown) => void
+    mockLoad.mockImplementation((sid: string) => {
+      if (sid === 's1') {
+        return new Promise<FileNode[]>((_resolve, reject) => { rejectS1 = reject })
+      }
+      return Promise.resolve([fileNode('s2-file.ts', '/proj-b/s2-file.ts')])
+    })
+    const sid = ref('s1')
+    const deps = assemble(sid)
+    sid.value = 's2'
+    await flushPromises()
+    // s1 的 load 迟到失败：不得把 s2 白名单清成空集
+    rejectS1(new Error('late failure'))
+    await flushPromises()
+    await deps.renderMarkdown('after-late-failure')
+    const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
   })
 })

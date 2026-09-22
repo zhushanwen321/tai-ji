@@ -232,6 +232,26 @@ describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
     // 提示词两段都启用 → 段数 2
     expect(popover.text()).toContain('2 段')
   })
+
+  it('[RD-2#6] allowlist 而名单未定义（allowedTools/allowedExtensions 缺省）→ 面摘要显「—」，不显「允许 0 项」假计数', () => {
+    const presetStore = usePresetStore()
+    presetStore.setPresets([
+      ...samplePresets(),
+      // 残缺模式：声明 allowlist 但名单字段缺失（旧数据/手工编辑）
+      { id: 'custom:broken', name: '残缺模式', builtin: false, order: 2, toolMode: 'allowlist', extensionMode: 'allowlist' },
+    ])
+    const wrapper = mountChip({ presetId: 'custom:broken' })
+    expect(wrapper.find('[data-testid="preset-chip"]').exists()).toBe(true)
+    const popover = wrapper.find('[data-testid="preset-chip-popover"]')
+    expect(popover.exists()).toBe(true)
+    // 两个面都走 unknownSurface（'—'）出口，不再 ?? 0 伪装成「允许 0 项」（0=真值，D4）
+    const dds = popover.findAll('dd')
+    expect(dds.length).toBeGreaterThanOrEqual(2)
+    expect(dds[0]!.text()).toBe('—')
+    expect(dds[1]!.text()).toBe('—')
+    expect(popover.text()).not.toContain('允许 0 项')
+    wrapper.unmount()
+  })
 })
 
 // ───────────────────────────────────────────────────────────────────────────

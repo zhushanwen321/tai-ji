@@ -11,7 +11,7 @@
  *   importOriginal 保留），withFileLockSync/atomicWrite 真实执行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, truncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
@@ -478,6 +478,31 @@ describe('onSessionDisposed', () => {
   })
 })
 
+describe('[RT-4#9] invalidateRecordEntries 未知 customType 早退门 warn 显形', () => {
+  it('非白名单 customType 早退 + warn（按类型去重一次），白名单不受影响', async () => {
+    vi.useFakeTimers()
+    const { records, client } = makeRecords()
+    const fire = registerSession(records)
+    fire('s1')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // 同一未知类型两次：warn 只落一次（去重）
+      records.invalidateRecordEntries('s1', 'future-record-kind')
+      records.invalidateRecordEntries('s1', 'future-record-kind')
+      const warns = warnSpy.mock.calls.filter((c) => String(c[0]).includes("unknown customType 'future-record-kind'"))
+      expect(warns).toHaveLength(1)
+
+      // 白名单类型不受影响：正常调度防抖拉取
+      records.invalidateRecordEntries('s1', 'subagent-record')
+      await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
+      expect(client.getEntries).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('磁盘读侧（scanSessions → extractor 真实执行）', () => {
   it('getSubagents：定位 session 文件后经 extractor 提取 record 列表', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'session-records-test-'))
@@ -487,13 +512,16 @@ describe('磁盘读侧（scanSessions → extractor 真实执行）', () => {
       sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath }]) } as unknown as ISessionStore,
     })
     const result = await records.getSubagents('s1')
-    expect(result).toHaveLength(1)
-    expect(result[0]).toEqual(expect.objectContaining({ subagentId: 'sa-1', status: 'running' }))
+    expect(result.records).toHaveLength(1)
+    // [RT-4#8] oversize 标志随结果透传（正常路径 false）
+    expect(result.oversize).toBe(false)
+    expect(result.records[0]).toEqual(expect.objectContaining({ subagentId: 'sa-1', status: 'running' }))
   })
 
   it('getSubagents：session 不在扫描结果返回 []', async () => {
     const { records } = makeRecords()
-    expect(await records.getSubagents('s-none')).toEqual([])
+    // [RT-4#8] 结构化返回（records + oversize）：无扫描命中 = 空列表且非 oversize
+    expect(await records.getSubagents('s-none')).toEqual({ records: [], oversize: false })
   })
 
   it('getWorkflows：定位 session 文件后提取 workflow 列表', async () => {
@@ -504,8 +532,38 @@ describe('磁盘读侧（scanSessions → extractor 真实执行）', () => {
       sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath }]) } as unknown as ISessionStore,
     })
     const result = await records.getWorkflows('s1')
-    expect(result).toHaveLength(1)
-    expect(result[0]).toEqual(expect.objectContaining({ runId: 'run-1', status: 'done' }))
+    expect(result.records).toHaveLength(1)
+    expect(result.oversize).toBe(false)
+    expect(result.records[0]).toEqual(expect.objectContaining({ runId: 'run-1', status: 'done' }))
+  })
+
+  it('[RT-4#8] oversize（文件 >32MB 预检阈值）：records 恒空 + oversize=true 透传 + 每会话一次 warn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-oversize-'))
+    const filePath = join(dir, 'huge-session.jsonl')
+    // 稀疏文件：写一字节后 truncate 到超阈值——stat.size 超限触发 extractor 预检降级，
+    // 磁盘实际占用极小（fixture 自建自删）
+    writeFileSync(filePath, '\n')
+    truncateSync(filePath, 33 * 1024 * 1024)
+    const { records } = makeRecords({
+      sessionStore: { scanSessions: vi.fn(() => [{ id: 's-big', filePath }]) } as unknown as ISessionStore,
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // 反复拉取（面板 retry 场景）：oversize 分形稳定 + warn 每会话只落一次
+      const first = await records.getSubagents('s-big')
+      const second = await records.getWorkflows('s-big')
+      await records.getSubagents('s-big')
+      expect(first).toEqual({ records: [], oversize: true })
+      expect(second).toEqual({ records: [], oversize: true })
+      // 每会话 + 每类别一次（去重 key = sid:kind）：3 次调用 2 条 warn（subagents 一次 + workflows 一次）
+      const dedupeWarns = warnSpy.mock.calls.filter((c) => String(c[0]).includes('list unavailable'))
+      expect(dedupeWarns).toHaveLength(2)
+    } finally {
+      warnSpy.mockRestore()
+      // teardown 递归删除补 maxRetries/retryDelay：与在途异步写竞争时 ENOTEMPTY 瞬态失败可重试
+      // （同文件 :962 范式；rm/rmSync 默认 maxRetries=0，一次瞬态失败即抛 → 满载 flake）
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 })
 

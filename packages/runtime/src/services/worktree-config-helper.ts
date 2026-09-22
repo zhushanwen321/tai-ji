@@ -11,13 +11,18 @@
  * mode）、smart-context-config.ts（smart-context 快照），共享 RMW 基建在
  * ext-config-rmw.ts。本文件回归文件名语义 = worktree 偏好单一职责。
  */
+import type { SaveAppConfigResult } from './app-config-store.js'
 
-/** app config.json 的 load/save 能力（ConfigService 注入，避免暴露其私有方法）。 */
+/**
+ * app config.json 的 load/save 能力（ConfigService 注入，避免暴露其私有方法）。
+ * save 结果携带 {ok, code, error}：config.json 损坏降级态下拒绝空骨架覆写（M4/RT-7#1），
+ * setter 必须把失败透传给 RPC 层（sendError），不得静默呈「已保存」。
+ */
 export type AppConfigAccessors = {
-  /** 读 app config.json（不存在 / 损坏返回 {}）。 */
+  /** 读 app config.json（不存在 / 损坏返回 {}——损坏已隔离，见 app-config-store）。 */
   load(): Record<string, unknown>
-  /** 全量覆写 app config.json。 */
-  save(config: Record<string, unknown>): void
+  /** 全量覆写 app config.json（降级态下拒绝写入并返回失败原因）。 */
+  save(config: Record<string, unknown>): SaveAppConfigResult
 }
 
 /** 默认 worktree 根目录（~/worktrees，与原 ConfigService 内联值一致）。 */
@@ -36,13 +41,13 @@ export function getWorktreeRootDir(app: AppConfigAccessors): string {
   return typeof val === 'string' ? val : DEFAULT_WORKTREE_ROOT_DIR
 }
 
-export function setWorktreeRootDir(app: AppConfigAccessors, dir: string): void {
+export function setWorktreeRootDir(app: AppConfigAccessors, dir: string): SaveAppConfigResult {
   if (!dir || !dir.trim()) {
     throw new Error('worktreeRootDir cannot be empty')
   }
   const config = app.load()
   config['worktreeRootDir'] = dir
-  app.save(config)
+  return app.save(config)
 }
 
 export function getSetupScript(app: AppConfigAccessors): string {
@@ -50,13 +55,13 @@ export function getSetupScript(app: AppConfigAccessors): string {
   return typeof val === 'string' ? val : DEFAULT_SETUP_SCRIPT
 }
 
-export function setSetupScript(app: AppConfigAccessors, dir: string): void {
+export function setSetupScript(app: AppConfigAccessors, dir: string): SaveAppConfigResult {
   if (dir.includes('..')) {
     throw new Error('setupScript path cannot contain ..')
   }
   const config = app.load()
   config['setupScript'] = dir
-  app.save(config)
+  return app.save(config)
 }
 
 export function getBareSetupScript(app: AppConfigAccessors): string {
@@ -64,7 +69,7 @@ export function getBareSetupScript(app: AppConfigAccessors): string {
   return typeof val === 'string' ? val : DEFAULT_SETUP_SCRIPT
 }
 
-export function setBareSetupScript(app: AppConfigAccessors, script: string): void {
+export function setBareSetupScript(app: AppConfigAccessors, script: string): SaveAppConfigResult {
   // 与 setSetupScript 同款防线：裸仓 setup 脚本与普通仓脚本同语义（经 shell 执行），
   // `..` 路径穿越风险面相同，校验与错误信息形态逐字对齐。
   if (script.includes('..')) {
@@ -72,7 +77,7 @@ export function setBareSetupScript(app: AppConfigAccessors, script: string): voi
   }
   const config = app.load()
   config['bareSetupScript'] = script
-  app.save(config)
+  return app.save(config)
 }
 
 export function getTimeout(app: AppConfigAccessors): number {
@@ -80,13 +85,13 @@ export function getTimeout(app: AppConfigAccessors): number {
   return typeof val === 'number' ? val : DEFAULT_TIMEOUT
 }
 
-export function setTimeout(app: AppConfigAccessors, timeout: number): void {
+export function setTimeout(app: AppConfigAccessors, timeout: number): SaveAppConfigResult {
   if (!Number.isFinite(timeout) || timeout <= 0 || timeout > TIMEOUT_MAX) {
     throw new Error(`timeout must be a positive number in (0, ${TIMEOUT_MAX}], got ${timeout}`)
   }
   const config = app.load()
   config['worktreeTimeout'] = timeout
-  app.save(config)
+  return app.save(config)
 }
 
 
@@ -95,8 +100,8 @@ export function getDefaultBaseBranch(app: AppConfigAccessors): string {
   return typeof val === 'string' ? val : DEFAULT_BASE_BRANCH
 }
 
-export function setDefaultBaseBranch(app: AppConfigAccessors, baseBranch: string): void {
+export function setDefaultBaseBranch(app: AppConfigAccessors, baseBranch: string): SaveAppConfigResult {
   const config = app.load()
   config['defaultBaseBranch'] = baseBranch
-  app.save(config)
+  return app.save(config)
 }

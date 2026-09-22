@@ -69,10 +69,14 @@ export interface DialogRequestSource {
 // ── DM2: UiResponseTransport（响应回传注入接口，壳提供实现，单测传 mock） ──
 
 export interface UiResponseTransport {
-  /** pi 源回传：method 必须透传（runtime 按 method 构建 pi 响应格式） */
-  sendPiResponse(sessionId: string, requestId: string, method: string, result: boolean | string | null): void
-  /** plugin 源回传（runtime UiRequestQueue.handleResponse 消费） */
-  sendPluginResponse(requestId: string, result: unknown): void
+  /**
+   * pi 源回传：method 必须透传（runtime 按 method 构建 pi 响应格式）。
+   * 返回 boolean（false = WS 非 OPEN 未送出）——respond 据此保留请求供连接恢复后重发
+   * （M1/RD-3#1：重发同 requestId 幂等，runtime/pi 两侧 pending miss 均静默忽略）。
+   */
+  sendPiResponse(sessionId: string, requestId: string, method: string, result: boolean | string | null): boolean
+  /** plugin 源回传（runtime UiRequestQueue.handleResponse 消费）。返回语义同 sendPiResponse。 */
+  sendPluginResponse(requestId: string, result: unknown): boolean
 }
 
 // ── DM1: RequestState（per-session 队列分区状态） ──
@@ -169,6 +173,10 @@ export function createDialogRequestQueue(
    * 用户回复指定请求：按 requestId 在当前 session 分区精确定位（不假设队首），
    * 按 source 路由回传通道；找不到 → 静默忽略（ERR1：迟到响应是正常时序，
    * uiRequestExpired 已出队但用户点击残留；旧 useExtensionUI 同语义）。
+   *
+   * 回传未送达（transport 返 false）→ 保留请求不出队（M1/RD-3#1）：断连期用户应答
+   * 丢失且弹窗消失 = pi 侧 Promise 永挂；保留后连接恢复可再次 respond 重投（同
+   * requestId 幂等）。未送达的提示由壳层 transport 实现负责（本队列 headless 无 UI）。
    */
   function respond(requestId: string, result: boolean | string | null): void {
     const sid = sessionIdRef.value
@@ -176,11 +184,10 @@ export function createDialogRequestQueue(
     const target = current.value.pending.find((r) => r.requestId === requestId)
     if (!target) return // ERR1 静默忽略（不抛错不警告，不发回传）
 
-    if (target.source === 'pi') {
-      transport.sendPiResponse(target.sessionId, target.requestId, target.method, result)
-    } else {
-      transport.sendPluginResponse(target.requestId, result)
-    }
+    const delivered = target.source === 'pi'
+      ? transport.sendPiResponse(target.sessionId, target.requestId, target.method, result)
+      : transport.sendPluginResponse(target.requestId, result)
+    if (!delivered) return // 保留请求（pending/responding 不动），供连接恢复后重发
     dequeueByRequestId(sid, requestId)
   }
 

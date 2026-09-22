@@ -54,6 +54,8 @@ function makeBroker(modelService: unknown, appInfo = { appVersion: '1.2.3', piVe
     sessionService: { listPersistedSessions: vi.fn(() => []) },
     configService: {
       listProviders: vi.fn(() => PROVIDERS),
+      // M4/RT-3#4：buildProviderListMsgs 读降级态标志（config.providers 帧新增字段）
+      isModelsStoreCorrupted: vi.fn(() => false),
       getScopedModels: vi.fn(() => []),
       loadSkills: vi.fn(() => []),
       loadAgents: vi.fn(() => []),

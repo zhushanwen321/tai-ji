@@ -7,6 +7,8 @@ export default {
   selectPlaceholder: '请选择',
   additionalComment: '附加评论',
   commentPlaceholder: '选填，补充说明…',
+  // M1 环 3：断连期应答未送达（send 返 false），请求保留待连接恢复后重发
+  responseNotDelivered: '回复未送达，连接恢复后可重新提交',
   // ── schedule 创建确认表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
   scheduleCreateTimeLabel: '执行时间',
   scheduleCreateModeLabel: '执行模式',

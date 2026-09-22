@@ -24,8 +24,10 @@ import i18n from '@/i18n'
 import {
   getRuntimePort,
   getRuntimePortOffset,
+  getRuntimeStartError,
   getRuntimeToken,
   onRuntimePort,
+  onRuntimeError,
   onRuntimeRestarting,
   onRuntimeFailed,
   restartRuntime,
@@ -47,6 +49,10 @@ const connectionPorts: ConnectionPorts = {
     onRuntimePort: (cb) => onRuntimePort(cb),
     onRuntimeRestarting: (cb) => onRuntimeRestarting(cb),
     onRuntimeFailed: (cb) => onRuntimeFailed(cb),
+    // RD-3#2：启动失败真因消费（core 编排负责置 failed 短路徒劳重连；真因显示/落台账
+    // 在壳层 App.vue 经 lib/ipc 直连，本装配点只负责端口注入）
+    onRuntimeError: (cb) => onRuntimeError(cb),
+    getRuntimeStartError,
     restartRuntime,
   },
   // DOM 端口：core 零 document，visibility 读/监听由壳实现

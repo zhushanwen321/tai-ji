@@ -88,9 +88,10 @@ export async function fetchQuotaJson<T>(
     if (!guard(data)) return { ok: false, reason: 'parse' }
     return { ok: true, data }
   } catch (err) {
-    // fetch 网络异常 / 超时 → network（架构约定 #4 落盘，禁止静默 catch）
+    // fetch 网络异常 / 超时 → network（架构约定 #4 落盘，禁止静默 catch）。
+    // RT-7#6：debug → warn——打包态日志级别 info 会过滤 debug，网络失败成因生产不可见。
     const msg = toErrorMessage(err)
-    logger.debug(`[${logTag}] fetch failed`, { error: msg })
+    logger.warn(`[${logTag}] fetch failed`, { error: msg })
     return { ok: false, reason: 'network' }
   }
 }

@@ -33,6 +33,7 @@ import { collectImagesFromMessages, persistImagesNewestFirst, disposeImageCacheF
 import { createMessageCoalescer } from './delta-coalescer'
 import { getExecutingBash } from './bash-effects'
 import { toErrorMessage } from '../../utils/error-message'
+import { isDevMode } from '../../platform/dev-mode'
 import type { EnsureStreamSubDeps, SessionStoreLike, SubmitQueuedEntryDeps, UseChatDeps } from './use-chat-types'
 
 // 类型契约原样迁 use-chat-types.ts（max-lines 行为保持抽取，纯类型零运行时）；
@@ -184,6 +185,34 @@ const DEFER_FLUSH_MAX_CONSECUTIVE_FAILURES = 5
 const deferFlushFailureCounts = new Map<string, number>()
 
 /**
+ * [RD-1#9] 已 warn 过的未列 session.* 帧类型（dev 去重防刷屏）。
+ *
+ * streamSubscribe 回调的 session.* switch default 对「有意 no-op」的帧（exited/restored/
+ * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅面）与「协议漂移」
+ * （runtime 新增而前端漏接）不可区分——去重后一次/类型，dev 下留痕、生产零开销。
+ * 清理：resetChatModuleStateForTest（测试隔离，与同文件其余模块级 Map 同模式）。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
+const warnedUnhandledSessionFrameTypes = new Set<string>()
+
+/**
+ * [RD-1#9] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
+ *
+ * 只对 session.* 前缀生效：app.info / config.* / plugin:* / rollingRestart:* 等全局帧经
+ * 同一 streamSubscribe 到达，本就由其他域消费，warn 会是误报。
+ */
+function warnUnhandledSessionFrame(type: string, sid: string): void {
+  if (!isDevMode()) return
+  if (!type.startsWith('session.')) return
+  if (warnedUnhandledSessionFrameTypes.has(type)) return
+  warnedUnhandledSessionFrameTypes.add(type)
+  console.warn(
+    `[useChat] unhandled session frame type ${type} (sid=${sid}) — no case in ensureStreamSubscription handler;` +
+      ` frame is a no-op here (consumed elsewhere by design, or protocol drift)`,
+  )
+}
+
+/**
  * 重置 useChat 模块级状态（仅供测试隔离）。
  *
  * 清 streamSubscriptions（逐个调 unsub 解除 WS 订阅 + 清 Map）+ resetSubscriptionStates
@@ -227,6 +256,9 @@ export function resetChatModuleStateForTest(): void {
   // 与 streamSubscriptions 同理——测试间不 reset 会泄漏到下一用例
   //（subscriptionStates 残留 → routeInbound gap 检测误判）。
   resetSubscriptionStates()
+  // [RD-1#9] 清未列 session.* 帧类型的 warn 去重集合（测试间不 reset 会让下一用例的
+  // 「一次/类型」断言因上一用例已 warn 过而静默失效）。
+  warnedUnhandledSessionFrameTypes.clear()
 }
 
 /**
@@ -633,8 +665,16 @@ export function ensureStreamSubscription(
         handleSessionThinkingLevelSet(sessionStore, msg)
         break
       }
-      default:
+      default: {
+        // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
+        // session.exited / restored / restoreFailed / commands / stats_update 等帧是
+        // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅面），但旧实现
+        // 零痕迹——协议漂移（runtime 新增 session.* 而前端漏接）在 dev 下不可见。
+        // Set 去重防刷屏；非 session.* 前缀（app.info / config.* / plugin:* 等全局帧
+        // 经同一 streamSubscribe 到达，本就由其他域消费）不 warn，避免误报噪音。
+        warnUnhandledSessionFrame(msg.type, sid)
         break
+      }
     }
   })
   streamSubscriptions.set(sid, unsub)
@@ -1246,15 +1286,23 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * 幂等：空页不写入（显式短路 + prependHistoryMut 空数组安全网）。RPC 失败不破坏
    * 现有消息（catch 吞错，与 hydrateHistory 的 markHistoryFailed 同策略），用户可重试。
+   *
+   * [RD-1#4] 失败显形：返回 false（原 void 签名）——失败时分区与 truncated 窗口均不变
+   * （「已到头」与「失败」在窗口状态上不可区分，旧签名让调用方只能静默复位 loading，
+   * 用户侧症状 = 「点了没反应、无失败提示」）。调用方（useLoadMoreHistory）据此落
+   * loadMoreError 态，由对话流顶部条渲染可重试错误行。
+   *
+   * @returns true = 本次翻页成功（含空页/到头语义，窗口状态已收敛）；
+   *          false = 失败（RPC 抛错 / 游标缺失），分区与窗口状态均未变，可重试。
    */
-  async function loadMoreHistory(sessionId: string): Promise<void> {
+  async function loadMoreHistory(sessionId: string): Promise<boolean> {
     try {
       const oldest = chat.getMessages(sessionId)[0]
       const cursor = oldest ? (oldest.piEntryId ?? oldest.id) : undefined
       if (cursor === undefined) {
         // 分区为空却请求翻页（理论不可达：truncated=true 时分区非空）——防御短路
         console.warn(`[useChat] loadMoreHistory skipped for session ${sessionId}: empty partition (no cursor anchor)`)
-        return
+        return false
       }
       const reply = await deps.chatApi.getHistory(sessionId, { cursor })
       // 空页（翻页到头）短路：分区不变，仅窗口状态收敛（下方统一写）
@@ -1270,9 +1318,12 @@ export function createUseChat(deps: UseChatDeps) {
           ? Math.max(prev?.totalTurnsEstimate ?? 0, page.totalTurnsEstimate)
           : page.totalTurnsEstimate,
       })
-    // eslint-disable-next-line taste/no-silent-catch -- 加载更多是 best-effort：失败不破坏现有消息，用户可重试。与 hydrateHistory markHistoryFailed 同策略。
+      return true
     } catch (e) {
+      // best-effort 降级：失败不破坏现有消息（分区与 truncated 窗口均不变），用户可重试；
+      // false 返回值让调用方显形（useLoadMoreHistory 落 loadMoreError，RD-1#4）。
       console.warn(`[useChat] loadMoreHistory failed for session ${sessionId}:`, e)
+      return false
     }
   }
 

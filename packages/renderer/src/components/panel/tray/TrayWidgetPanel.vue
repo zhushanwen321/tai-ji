@@ -54,7 +54,12 @@
         >
           {{ progressLabel }}
         </span>
-        <span class="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-surface-hover">
+        <!-- [RD-2#8] 数值非有限（NaN/Infinity，第三方 widget 脏数据）→ 不渲染 mini bar：
+             只挡 total<=0 时 NaN 会直写 style width:'NaN%' -->
+        <span
+          v-if="progressFinite"
+          class="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-surface-hover"
+        >
           <span
             data-testid="tray-widget-panel-progress-fill"
             class="block h-full rounded-full transition-[width] duration-300"
@@ -78,6 +83,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { GuiComponentRenderer } from '@taiji/ui/rendering-protocol'
 import { widgetToneDot } from '@/components/panel/tray/tray-tone'
@@ -90,6 +96,8 @@ const props = defineProps<{
   /** entry.guiTree（body 渲染源；空数组 → 整体零 DOM） */
   guiTree: GuiComponent[]
 }>()
+
+const { t } = useI18n()
 
 /** head 标题：meta.title（空串视为缺省）→ viewId（v1 旧 extension 与脏数据兜底） */
 const displayTitle = computed(() => {
@@ -109,20 +117,32 @@ const progressFillClass = computed(() => {
   return props.meta?.status === 'done' ? 'bg-success' : 'bg-accent'
 })
 
-/** 进度计数文本：extension 格式化值 ?? current/total（WidgetMeta.progress.label 契约） */
+/**
+ * [RD-2#8] 进度数值有限性闸：第三方 widget 的 meta.progress.current/total 非有限
+ * （NaN/Infinity）→ 无进度可画。ViewHostStore.narrowMeta 只校验 title 是 string，
+ * progress 深度字段由本消费端按可选处理——这里是协议指定的数值把关层，非纯纵深防御。
+ */
+const progressFinite = computed(() => {
+  const p = props.meta?.progress
+  if (!p) return false
+  return Number.isFinite(p.current) && Number.isFinite(p.total)
+})
+
+/** 进度计数文本：extension 格式化值 ?? current/total；数值非有限 → 「无进度」（WidgetMeta.progress.label 契约） */
 const progressLabel = computed(() => {
   const p = props.meta?.progress
   if (!p) return ''
-  return p.label ?? `${p.current}/${p.total}`
+  if (p.label !== undefined) return p.label
+  return progressFinite.value ? `${p.current}/${p.total}` : t('panel.trayWidget.progressUnavailable')
 })
 
 /** 百分比换算因子（no-magic-numbers 具名，承自已退役 widget 详情卡的 PCT_SCALE 模式） */
 const PCT_SCALE = 100
 
-/** 进度 fill 宽度（0-100 clamp；total<=0 防除零） */
+/** 进度 fill 宽度（0-100 clamp；total<=0 防除零；非有限 → 0%（bar 已隐藏，值仅防 NaN 直写 style） */
 const progressWidth = computed(() => {
   const p = props.meta?.progress
-  if (!p || p.total <= 0) return '0%'
+  if (!p || !progressFinite.value || p.total <= 0) return '0%'
   return `${Math.min(PCT_SCALE, Math.max(0, (p.current / p.total) * PCT_SCALE))}%`
 })
 </script>

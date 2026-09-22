@@ -498,7 +498,9 @@ describe('ImportService × B5 摘碑（memory-leak-remediation §3.2-B5 双路�
     const root = join(fixturesRoot, 'tomb-fail-root')
     mkdirSync(root, { recursive: true })
     const sid = 'imp-tomb-00002'
-    const src = join(root, 'x.tmp-import-residue.jsonl')
+    // RT-3#10：marker 拒绝改精确后缀形态（标记+纯数字 ts+.jsonl），fixture 用真实残留形态
+    //（import-service 编排层 tmp 名 = targetPath + '.tmp-import-' + Date.now()）
+    const src = join(root, 'x.jsonl.tmp-import-1770000000000.jsonl')
     writeSessionJsonl(src, sid, '/tmp/tomb-fail-cwd', 'TombFail')
 
     const store = makeTombstonedStore(join(fixturesRoot, 'tomb-fail-store'), sid)

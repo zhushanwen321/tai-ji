@@ -196,7 +196,19 @@ export class SessionMessageHandler {
 
   async handleSessionMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     const handler = this.routes[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与内部 routes 表漂移（漏登记）时，
+    // 前端 pending Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[session-handler] no case handler for type "${msg.type}" — handles/routes 表漂移？`)
+      const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+        typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined,
+      )
+    }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
     // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。
@@ -533,8 +545,10 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionGetSubagents(msg: Extract<ClientMessage, { type: 'session.getSubagents' }>, ws: WsType): Promise<void> {
-    const subagents = await this.ctx.sessionService.getSubagents(msg.payload.sessionId)
-    return this.ctx.reply(ws, msg.id, 'session.subagents', { sessionId: msg.payload.sessionId, subagents })
+    // [RT-4#8] oversize 透传：文件 >32MB 时 subagents 恒空 + oversize=true——renderer
+    // 面板据此显示「会话过大，列表不可用」降级提示（与「无 subagent」的空列表分形）。
+    const { records: subagents, oversize } = await this.ctx.sessionService.getSubagents(msg.payload.sessionId)
+    return this.ctx.reply(ws, msg.id, 'session.subagents', { sessionId: msg.payload.sessionId, subagents, oversize })
   }
 
   private async handleSessionGetSubagentHistory(msg: Extract<ClientMessage, { type: 'session.getSubagentHistory' }>, ws: WsType): Promise<void> {
@@ -555,8 +569,9 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionGetWorkflows(msg: Extract<ClientMessage, { type: 'session.getWorkflows' }>, ws: WsType): Promise<void> {
-    const workflows = await this.ctx.sessionService.getWorkflows(msg.payload.sessionId)
-    return this.ctx.reply(ws, msg.id, 'session.workflows', { sessionId: msg.payload.sessionId, workflows })
+    // [RT-4#8] oversize 透传：语义同 handleSessionGetSubagents。
+    const { records: workflows, oversize } = await this.ctx.sessionService.getWorkflows(msg.payload.sessionId)
+    return this.ctx.reply(ws, msg.id, 'session.workflows', { sessionId: msg.payload.sessionId, workflows, oversize })
   }
 
   private async handleSessionGetAgentCallHistory(msg: Extract<ClientMessage, { type: 'session.getAgentCallHistory' }>, ws: WsType): Promise<void> {

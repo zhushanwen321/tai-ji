@@ -79,7 +79,8 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
     expect(reportedId).toBe(processId)
     expect(pluginIds).toContain('live-disconnect')
     expect(String(error)).toMatch(/disconnect/i)
-    expect(host.getProcessHandleById(processId)!.status).toBe('crashed')
+    // RT-6#5：crash 收口即删 processes Map（幽灵条目不再滞留，与 clean-exit 清理对称）
+    expect(host.getProcessHandleById(processId)).toBeUndefined()
   }, 10_000)
 
   it('c) terminate 路径（pre-mark terminated 后 kill）：onCrash 仍不触发', async () => {

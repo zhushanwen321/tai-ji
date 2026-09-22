@@ -30,7 +30,7 @@ function mockContext(overrides?: Partial<WorktreeHandlerContext>): WorktreeHandl
     reply: vi.fn(),
     gitService: mockGitService() as unknown as IGitService,
     worktreeService: {
-      create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project' })),
+      create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project', usedBaseRef: 'origin/main' })),
       detect: vi.fn(async () => ({
         mode: 'bare-workspace' as const,
         wsRoot: '/project',
@@ -108,6 +108,8 @@ describe('WorktreeMessageHandler worktree.create', () => {
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
       cwd: '/project/feat-x',
       branch: 'feat/x',
+      // RT-8#8：create 返回 usedBaseRef → 透传给前端（请求 ref 校验失败 fallback 时可见）
+      usedBaseRef: 'origin/main',
     })
   })
 
@@ -152,6 +154,72 @@ describe('WorktreeMessageHandler worktree.create', () => {
       undefined,
     )
   })
+
+  it('git 层错误码（git_unavailable）映射为 GIT_FAILED，原始码进 details.originalCode', async () => {
+    const ctx = mockContext()
+    ctx.worktreeService.create = vi.fn(async () => {
+      throw Object.assign(new Error('git 不可用'), { code: 'git_unavailable' })
+    })
+    const handler = new WorktreeMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleWorktreeMessage(
+      msg('worktree.create', { branch: 'feat/test' }),
+      ws,
+    )
+
+    expect(ctx.sendError).toHaveBeenCalledWith(
+      ws,
+      'GIT_FAILED',
+      'git 不可用',
+      'msg-1',
+      { originalCode: 'git_unavailable' },
+    )
+  })
+
+  it('git 层错误码（timeout）映射为 GIT_FAILED 且保留原有 detail', async () => {
+    const ctx = mockContext()
+    ctx.worktreeService.create = vi.fn(async () => {
+      throw Object.assign(new Error('git 超时'), { code: 'timeout', detail: { cwd: '/x' } })
+    })
+    const handler = new WorktreeMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleWorktreeMessage(
+      msg('worktree.create', { branch: 'feat/test' }),
+      ws,
+    )
+
+    expect(ctx.sendError).toHaveBeenCalledWith(
+      ws,
+      'GIT_FAILED',
+      'git 超时',
+      'msg-1',
+      { originalCode: 'timeout', detail: { cwd: '/x' } },
+    )
+  })
+
+  it('union 外未知错误码归 worktree_failed，原始码进 details.code（不逃出 union）', async () => {
+    const ctx = mockContext()
+    ctx.worktreeService.create = vi.fn(async () => {
+      throw Object.assign(new Error('某种新错'), { code: 'SOME_FUTURE_CODE' })
+    })
+    const handler = new WorktreeMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleWorktreeMessage(
+      msg('worktree.create', { branch: 'feat/test' }),
+      ws,
+    )
+
+    expect(ctx.sendError).toHaveBeenCalledWith(
+      ws,
+      'worktree_failed',
+      '某种新错',
+      'msg-1',
+      { code: 'SOME_FUTURE_CODE' },
+    )
+  })
 })
 
 // ── worktree.create 写操作失效（perf 03 §5 检查点闭环，2026-08-17；失效键改 repo 根：缓存治理 1-6）──
@@ -168,7 +236,7 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
       worktreeService: {
         ...mockContext().worktreeService,
         // hint 指向深层子目录：create 内部 detect 解析出的 repo 根是 /project（≠ hint 原值）
-        create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project' })),
+        create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project', usedBaseRef: 'origin/main' })),
       },
     })
     const handler = new WorktreeMessageHandler(ctx)
@@ -186,6 +254,7 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
     expect(reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
       cwd: '/project/feat-x',
       branch: 'feat/x',
+      usedBaseRef: 'origin/main',
     })
     // 语义对齐 U2 六写操作：reply 前失效（前端收到 ack 后可能立即刷新 git zone）
     const invalidateOrder = gitService.invalidateStatusCache.mock.invocationCallOrder[0]
@@ -195,7 +264,7 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
     expect(invalidateOrder).toBeLessThan(replyOrder)
   })
 
-  it('WS 契约不变：repoRoot 仅供 runtime 内部失效，worktree.created payload 不携带', async () => {
+  it('WS 契约：repoRoot 仅供 runtime 内部失效，worktree.created payload 不携带（usedBaseRef 除外，RT-8#8）', async () => {
     const ctx = mockContext()
     const handler = new WorktreeMessageHandler(ctx)
     const ws = mockWs()
@@ -205,7 +274,32 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
       ws,
     )
 
-    // toHaveBeenCalledWith 深比较：payload 恰为 { cwd, branch }，多出 repoRoot 即失败
+    // toHaveBeenCalledWith 深比较：payload 恰为 { cwd, branch, usedBaseRef }，
+    // 多出 repoRoot（runtime 内部失效键）即失败
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
+      cwd: '/project/feat-x',
+      branch: 'feat/x',
+      usedBaseRef: 'origin/main',
+    })
+    const payload = (ctx.reply as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[3] as Record<string, unknown>
+    expect(Object.keys(payload ?? {}).sort()).toEqual(['branch', 'cwd', 'usedBaseRef'])
+  })
+
+  it('create 无 usedBaseRef（旧 service 形态）→ payload 不带该可选字段', async () => {
+    const ctx = mockContext({
+      worktreeService: {
+        ...mockContext().worktreeService,
+        create: vi.fn(async () => ({ cwd: '/project/feat-x', branch: 'feat/x', repoRoot: '/project' })),
+      },
+    })
+    const handler = new WorktreeMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleWorktreeMessage(
+      msg('worktree.create', { branch: 'feat/x', workspaceHint: '/project' }),
+      ws,
+    )
+
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
       cwd: '/project/feat-x',
       branch: 'feat/x',
@@ -258,6 +352,7 @@ describe('WorktreeMessageHandler worktree.create 写操作失效', () => {
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'worktree.created', {
       cwd: '/project/feat-x',
       branch: 'feat/x',
+      usedBaseRef: 'origin/main',
     })
   })
 })

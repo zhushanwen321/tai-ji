@@ -402,6 +402,42 @@ describe('useAppUpdate', () => {
     stop()
   })
 
+  // ── RD-4#9：逃生通道自身裸崩修复 ──
+  it('RD-4#9: openFallbackUrl IPC 失败 → toastError 带可复制 URL（不变 unhandledRejection）', async () => {
+    const release = makeRelease('0.9.0')
+    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: release, rateLimited: false })
+    updateIpcBridge.openUpdateFallbackUrl.mockRejectedValue(new Error('shell.openPath failed'))
+    toastFns.error.mockClear()
+    const { result, stop } = setupUseAppUpdate()
+    await result.checkForUpdate()
+    await result.openFallbackUrl()
+
+    // 逃生通道自身失败不再静默失灵：toast 报错并把 release.htmlUrl 直接可复制地给出
+    expect(toastFns.error).toHaveBeenCalledWith('无法打开下载页，请手动访问 ' + release.htmlUrl)
+    stop()
+  })
+
+  // ── RD-4#5：手动检查失败显形 / 自动检查保持静默 ──
+  it('RD-4#5: manual 检查网络失败 → state="error" + errorMessage（与「已是最新」可区分）', async () => {
+    updateIpcBridge.checkForUpdate.mockRejectedValue(new Error('network down'))
+    const { result, stop } = setupUseAppUpdate()
+    await result.checkForUpdate(true, 'manual')
+
+    expect(result.state.state).toBe('error')
+    expect(result.state.errorMessage).toBe('网络不可达，请检查连接或前往下载页')
+    stop()
+  })
+
+  it('RD-4#5: auto 检查网络失败 → 保持静默回退 idle（不打 error 态）', async () => {
+    updateIpcBridge.checkForUpdate.mockRejectedValue(new Error('network down'))
+    const { result, stop } = setupUseAppUpdate()
+    await result.checkForUpdate(false, 'auto')
+
+    expect(result.state.state).toBe('idle')
+    expect(result.state.errorMessage).toBe('')
+    stop()
+  })
+
   // ── performInstall（安装/重启阶段）──
   it('performInstall 乐观置 replacing（IPC 往返延迟内 state 立即变 replacing，堵二次点击竞态）', async () => {
     // updateInstall 返回 pending promise，调 performInstall 后同步检查 state
@@ -534,6 +570,58 @@ describe('useAppUpdate', () => {
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.8.46')
     stop()
+  })
+})
+
+// ── RD-4#4：订阅引用计数修正（第 2/3 消费者也注册 onScopeDispose，末位 dispose 才退订）──
+describe('useAppUpdate 订阅引用计数（RD-4#4）', () => {
+  it('多消费者：listener 只注册一次；首/中 dispose 不退订，末位 dispose 才退订', () => {
+    const scope1 = effectScope()
+    const scope2 = effectScope()
+    let r1: ReturnType<typeof useAppUpdate> | undefined
+    let r2: ReturnType<typeof useAppUpdate> | undefined
+    scope1.run(() => { r1 = useAppUpdate() })
+    scope2.run(() => { r2 = useAppUpdate() })
+
+    // 两个消费者读同一份 module-level state
+    expect(r1!.state).toBe(r2!.state)
+    // 旧 bug：第 2 消费者在 refCount!==1 时早退 return，永不注册 onScopeDispose。修正后
+    // listener 仍只注册一次（仅首个消费者），但每个消费者都挂了 onScopeDispose。
+    expect(updateIpcBridge.onUpdateProgress).toHaveBeenCalledTimes(1)
+    expect(updateIpcBridge.onUpdateError).toHaveBeenCalledTimes(1)
+
+    // 首个消费者 dispose → refCount 2→1（未归零），不退订：进度推送仍可达存活消费者
+    scope1.stop()
+    updateIpcBridge.fireProgress({ stage: 'downloading', percent: 42 })
+    expect(r2!.state.percent).toBe(42)
+
+    // 末位消费者 dispose → refCount 归零，退订：进度推送不再可达
+    scope2.stop()
+    updateIpcBridge.fireProgress({ stage: 'downloading', percent: 99 })
+    expect(r2!.state.percent).toBe(42)
+  })
+
+  it('三个消费者：第 3 个 dispose 后才真正退订（onUpdateError 亦只注册一次）', () => {
+    const scopes = [effectScope(), effectScope(), effectScope()]
+    const results = scopes.map((s) => {
+      let r: ReturnType<typeof useAppUpdate> | undefined
+      s.run(() => { r = useAppUpdate() })
+      return r!
+    })
+    expect(updateIpcBridge.onUpdateError).toHaveBeenCalledTimes(1)
+
+    scopes[0].stop()
+    scopes[1].stop()
+    // 还差一个存活：错误推送仍可达
+    updateIpcBridge.fireError({ stage: 'downloading', message: 'still alive' })
+    expect(results[2].state.state).toBe('error')
+    expect(results[2].state.errorMessage).toBe('still alive')
+
+    // 末位 dispose → 退订，错误推送不再可达
+    results[2].state.state = 'idle'
+    scopes[2].stop()
+    updateIpcBridge.fireError({ stage: 'downloading', message: 'after teardown' })
+    expect(results[2].state.state).toBe('idle')
   })
 })
 

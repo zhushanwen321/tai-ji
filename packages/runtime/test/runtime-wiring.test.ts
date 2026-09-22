@@ -547,8 +547,9 @@ describe('M2c: 组合根 providerCredentialResolver 装配接线（源码级 + q
   it('链 3 私有裸读 readAuthCredentials 已不存在（防回归：不得再出现裸读 auth.json）', () => {
     expect(providerStoreSource).not.toContain('readAuthCredentials')
     // 消费点改经注入的 resolver：单 provider 判定用 sync 布尔版 + 候选遍历用批量版（消除 N+1）
-    expect(providerStoreSource).toContain('credentialResolver?.hasProviderCredential(')
-    expect(providerStoreSource).toContain('credentialResolver?.listCredentialBackedProviderIds(')
+    // RT-3#5：消费点经 credentialResolverOrWarn（未注入一次性 warn 显形；返回注入的 resolver，语义不变）
+    expect(providerStoreSource).toContain("credentialResolverOrWarn('adjudicateCatalogOnlyDefault')?.hasProviderCredential(")
+    expect(providerStoreSource).toContain("credentialResolverOrWarn('pickCredentialBackedCatalogProvider')?.listCredentialBackedProviderIds(")
   })
 
   it('QuotaService 消费点（生产装配形态）：api-key 凭据经注入 resolver 解析并真实用于请求', async () => {

@@ -54,9 +54,13 @@ export async function listProviders(): Promise<{ providers: ProviderInfo[]; scop
 export async function refreshProviderCatalogs(): Promise<{
   refreshed: string[]
   failed: Array<{ providerId: string; reason: string }>
+  /** RT-7#8：读到的损坏缓存源（'own' 自刷缓存 / 'pi' pi models-store），空数组 = 无损坏。 */
+  corrupt?: Array<'own' | 'pi'>
+  /** RT-7#8：刷新结果落盘失败（内存有效，下次进入页面重刷）。 */
+  persistFailed?: boolean
 }> {
   const reply = await command('config.refreshProviderCatalogs', {}, RPC_BACKSTOP_TIMEOUT_MS)
-  return { refreshed: reply.refreshed, failed: reply.failed }
+  return { refreshed: reply.refreshed, failed: reply.failed, corrupt: reply.corrupt, persistFailed: reply.persistFailed }
 }
 
 export async function scanSkills(sources: string[]): Promise<ScannedSkillInfo[]> {

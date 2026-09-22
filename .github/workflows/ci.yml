@@ -618,6 +618,15 @@ jobs:
       - name: Hook script antipattern guard (G3)
         run: python3 .githooks/check_hook_exitcode_antipattern.py
 
+      # review-fix-loop 双实现锁步守卫：pi 内置版（packages/subagent-core/workflows/）与
+      # zcode 原生版（~/.zcode/workflows/*.dwf.ts，版本控制外）必须保持调度/常量一致。
+      # CI 环境无 zcode 副本，双实现对账自动跳过；但 pi 侧去重不变量（order 恒为输入
+      # 的排列）与结构标记在跳过判定之前照跑且失败不被吞——这是本仓库侧唯一防线：
+      # pre-commit 只在 staged paths 命中 review-fix-loop* 时触发，本步骤每次 CI 都覆盖。
+      # 接线口径与 install-hooks.sh 的 2g 段一致（同一脚本、同一判定）。
+      - name: review-fix-loop dual-implementation parity guard
+        run: node scripts/check-rfl-parity.mjs
+
   # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
   # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。
   # needs gate：lint/typecheck + 4 个 test job + 两个 E2E job（visual 像素轨 + behavior P0 smoke 轨）
