@@ -26,7 +26,10 @@ import {
   openDrawerTab,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
-import { useBtwTabData, getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping } from '@/composables/panel/useBtwTabData'
+import { useBtwTabData, getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
+import { useWorkflowStore } from '@/stores/workflow'
+import { useSubagentStore } from '@/stores/subagent'
+import { subagentVirtualId } from '@taiji/shared'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useChatStore } from '@/stores/chat'
 
@@ -215,5 +218,82 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
     chat.setMessages('btw:t2', [msg('b1'), msg('b2')])
     await settle(w)
     expect(text(w, 'unread')).toBe('0')
+  })
+})
+
+describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispose + 单入口直调）', () => {
+  it('关线重拉出册：线分区 + 派生 subagent 键同拍清、映射不留残留；他线/主分区不受误伤', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:line-x' }])
+    const w = mountHost(SID_A)
+    await settle(w)
+    expect(getBtwVirtualIdsByMain(SID_A)).toEqual(['btw:line-x'])
+
+    const chat = useChatStore()
+    chat.setMessages('btw:line-x', [msg('l1')])
+    // 派生键（D9③ 中段位约定：owner = 线 piSessionId，映射即 extract）
+    chat.setMessages(subagentVirtualId('line-x', 's1'), [msg('d1')])
+    chat.setMessages('btw:line-other', [msg('keep')]) // 他主名下线
+    chat.setMessages(SID_A, [msg('main')]) // 主分区
+
+    // 关线（btw.remove 同拍）→ 抽屉活动触发面重拉 → 权威列表空 → 出册同拍处置（单入口幂等）
+    btwMock.list.mockResolvedValue([])
+    openDrawerTab('btw')
+    await settle(w)
+
+    expect(chat.getMessages('btw:line-x')).toHaveLength(0) // 线分区清（P-cascade 前端腿）
+    expect(chat.getMessages(subagentVirtualId('line-x', 's1'))).toHaveLength(0) // 派生键清（D9④ 清派生键）
+    expect(getBtwVirtualIdsByMain(SID_A)).toEqual([]) // 映射不留空 set 残留（被删主迟到空拉取同口径）
+    expect(chat.getMessages('btw:line-other')).toHaveLength(1) // 非本主名下线不误伤
+    expect(chat.getMessages(SID_A)).toHaveLength(1) // 主分区不误伤
+  })
+
+  it('失效腿不清键：线列表不变（闲置回收/进程亡不改 registry）→ 无出册 → 分区保留（D9④）', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:line-alive' }])
+    const w = mountHost(SID_A)
+    await settle(w)
+    const chat = useChatStore()
+    chat.setMessages('btw:line-alive', [msg('keep')])
+    chat.setMessages(subagentVirtualId('line-alive', 's1'), [msg('d')])
+
+    openDrawerTab('btw') // 失效（回收）只杀进程——重拉线列表仍含该线
+    await settle(w)
+
+    expect(getBtwVirtualIdsByMain(SID_A)).toEqual(['btw:line-alive'])
+    expect(chat.getMessages('btw:line-alive')).toHaveLength(1) // 分区保留待重载链回填
+    expect(chat.getMessages(subagentVirtualId('line-alive', 's1'))).toHaveLength(1)
+  })
+
+  it('disposeBtwLinePartitions 单入口：agentcall（按线 vid 挂名）+ 两 store 记录分区 + 二次调用幂等', () => {
+    const chat = useChatStore()
+    const workflow = useWorkflowStore()
+    const subagent = useSubagentStore()
+    const vid = 'btw:line-y'
+    chat.setMessages(vid, [msg('l')])
+    chat.setMessages(subagentVirtualId('line-y', 's2'), [msg('d')])
+    chat.setMessages('agentcall:acs-y', [msg('ac')])
+    workflow.registerAgentCall(vid, 'agentcall:acs-y')
+    subagent.applyRecords(vid, [{
+      sessionFile: null, agent: 'a', slug: 's', task: 't', status: 'idle', subagentId: 's2',
+    }])
+    workflow.applyRecords(vid, [{
+      runId: 'r1', scriptName: 'w', status: 'running', startedAt: '2026-09-22T00:00:00.000Z',
+      agentCalls: [], stateFilePath: '/tmp/wf.jsonl',
+    }])
+    // 前置：seed 生效（防假绿）
+    expect(subagent.recordsOf(vid).value).toHaveLength(1)
+    expect(workflow.recordsOf(vid).value).toHaveLength(1)
+    expect(workflow.getAgentCallVirtualIdsByMain(vid)).toEqual(['agentcall:acs-y'])
+
+    disposeBtwLinePartitions(vid)
+
+    expect(chat.getMessages(vid)).toHaveLength(0)
+    expect(chat.getMessages(subagentVirtualId('line-y', 's2'))).toHaveLength(0)
+    expect(chat.getMessages('agentcall:acs-y')).toHaveLength(0) // D9 清理两半边·agentcall
+    expect(workflow.getAgentCallVirtualIdsByMain(vid)).toEqual([])
+    expect(subagent.recordsOf(vid).value).toHaveLength(0)
+    expect(workflow.recordsOf(vid).value).toHaveLength(0)
+
+    // 幂等：二次调用零动作不抛
+    expect(() => disposeBtwLinePartitions(vid)).not.toThrow()
   })
 })

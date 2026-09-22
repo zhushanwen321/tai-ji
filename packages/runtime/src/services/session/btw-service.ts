@@ -212,6 +212,15 @@ export interface BtwServiceDeps {
   traceContractInjection?(trace: BtwContractInjectionTrace): void
   /** 回收前提醒挂点（D1：回收前线 badge 置「待处理」；回收发生/用户续问后清——badge 清除归 M3-c）。 */
   onWillReclaim?(vid: string): void
+  /**
+   * [M4-a / D9④ 单入口终结扇出] 线终结（三路：deleteSession 级联 / deleteByCwd 批内直删 /
+   * btw.remove）后的 lifecycle 收尾：摘 sessions Map 条目 + detach adapter + 插件 sessionData
+   * 真删清理（组合根注入，镜像主会话 delete 的收尾序）。必要性：planned kill（destroySession
+   * 先删进程表）抑制 exit 回调——条目/总线分区/插件数据不自清；**失效腿（闲置回收/进程亡）
+   * 不经本回调**（线可重开，条目保留，D9④）。回调自身幂等（无条目零动作）；closeLine 对
+   * 已出册线也补发一次（防注册表先摘、条目后存在的残留形态）。
+   */
+  onLineTerminated?(vid: string): void
   /** 闲置阈值覆盖（V3 调档口；缺省 BTW_IDLE_RECLAIM_MS）。 */
   idleThresholdMs?: number
   /** 时钟注入（测试）。 */
@@ -468,6 +477,59 @@ export class BtwService {
   }
 
   // ── 注册表重建（D5：启动目录扫描重建 + hidden 复原）──
+
+  /**
+   * 启动孤儿补账（D5：清理「主会话已不存在」的线目录——崩溃恢复对齐「主删即删」；
+   * **非全量 GC**：主会话在场（活跃 ?? 扫盘可解析）的线一律保留——退出不删、闲置回收不删、
+   * 进程亡不删，关闭 drawer 不删）。
+   *
+   * 调用序（组合根）：**先本方法、后 rebuildFromDisk**——先清孤儿目录，重建只登记在场主线。
+   * 判据 = deps.resolveMainSessionFile(mainSid) 不可解析（主文件已 trash / 从未落盘——
+   * 分支线首 flush 前主会话无文件的形态重启后主/线同归于此，判定正确）。
+   * 非 pi 形态目录名跳过（junk 归 rebuild 的 warn 面，不代删）。
+   * 幂等 + best-effort：无根零动作；单目录 rm 失败 warn 不阻断启动（P2 降级隔离），
+   * 残留下次启动重试。已知 errs 方向：主文件瞬时不可读（扫描面异常）判孤儿会误删线目录——
+   * 扫描腿内部 best-effort 返回列表而非抛错，触发面 = 主确已删。
+   *
+   * @returns 本次清除的孤儿线目录数（启动日志/测试断言用）
+   */
+  reconcileOrphanThreadDirs(): number {
+    const root = getBtwSessionsRoot()
+    if (!existsSync(root)) return 0
+    let removed = 0
+    let cwdDirs: string[]
+    try {
+      cwdDirs = readdirSync(root).filter(name => {
+        try { return statSync(join(root, name)).isDirectory() } catch { return false }
+      })
+    } catch (e) {
+      console.warn(`[btw] orphan reconcile: cannot read btw root (${root}): ${toErrorMessage(e)}`)
+      return 0
+    }
+    for (const enc of cwdDirs) {
+      const encDir = join(root, enc)
+      let sidDirs: string[]
+      try {
+        sidDirs = readdirSync(encDir).filter(name => {
+          try { return statSync(join(encDir, name)).isDirectory() } catch { return false }
+        })
+      } catch { continue }
+      for (const mainSid of sidDirs) {
+        if (!isPiSessionId(mainSid)) continue // junk 目录名归 rebuild warn 面，不代删
+        if (this.deps.resolveMainSessionFile(mainSid)) continue // 主在场 → 线保留
+        const threadDir = join(encDir, mainSid)
+        try {
+          if (!this.isInsideBtwRoot(threadDir)) continue
+          rmSync(threadDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+          removed += 1
+          console.warn(`[btw] orphan reconcile: removed thread dir of missing main session (mainSid=${mainSid}, dir=${threadDir})`)
+        } catch (e) {
+          console.warn(`[btw] orphan reconcile: remove failed (${threadDir}): ${toErrorMessage(e)}`)
+        }
+      }
+    }
+    return removed
+  }
 
   /**
    * 启动扫描 `btw/<encodeCwd>/<mainSid>/*.jsonl` 重建注册表（裁决⑧：持久化 + 重启可复原）。
@@ -727,14 +789,26 @@ export class BtwService {
   }
 
   /**
-   * 关线（btw.remove 原语，单线销毁；主删级联的整目录删除归 M4-a）：
-   * 杀进程 + 注册表移除 +（可选）删线会话文件（路径限定 btw 根内，防误删面）。
+   * 关线（btw.remove 原语，单线销毁；**三路并发收敛的单入口**——btw.remove 直调、
+   * delete 对 btw vid 直删、主删级联 closeAllForMain 逐线转调，均落本方法）：
+   * 杀进程（派生 subagent/workflow 任务随 pi 进程亡——abort 幂等由 pm.destroySession
+   * 「Map 无条目静默跳过」保证）+ 注册表移除 +（可选）删线会话文件（路径限定 btw 根内，
+   * 防误删面）。未知线/并发双删返 false（调用方映射 line_not_found，幂等语义：
+   * 线已不在即视为删成）。**失效腿（闲置回收/进程亡）不走本方法**——不清注册表、
+   * 不删文件、不清派生键（线可重开，D9④）。
    */
   async closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean> {
     const rec = this.registry.get(vid)
-    if (!rec) return false
+    if (!rec) {
+      // 幂等完成面（M4-a）：注册表已无此线（并发双删 / 级联先行）仍补发一次终结扇出——
+      // lifecycle 条目可能残留（planned kill 不走 exit 链），回调自身幂等（无条目零动作）。
+      this.fireLineTerminated(vid)
+      return false
+    }
     this.registry.delete(vid)
     if (rec.client) await this.deps.processes.destroySession(vid).catch((e: unknown) => console.warn(`[btw] closeLine destroy failed (${vid}): ${toErrorMessage(e)}`))
+    // 终结扇出（M4-a 单入口）：lifecycle 条目 / 总线分区 / 插件数据收尾——三路终结合一挂点。
+    this.fireLineTerminated(vid)
     if (opts?.deleteSessionFile && rec.sessionFilePath && this.isInsideBtwRoot(rec.sessionFilePath)) {
       try {
         rmSync(rec.sessionFilePath, { force: true })
@@ -747,6 +821,33 @@ export class BtwService {
     return true
   }
 
+  /**
+   * 主删 / deleteByCwd 级联（D4 消费面① + D9④ 线终结）：关闭主会话名下全部线并删线目录。
+   *
+   * 三步序即并发收敛语义（D9④）：①**枚举先于注册表移除**（listLines 快照在循环前——
+   * 快照后并发关线只会让后续 closeLine 幂等返 false，不漏杀不重杀）→ ②逐线转调 closeLine
+   *（单入口；abort 幂等）→ ③按 cwd+mainSid 推导整目录删除（**不依赖注册表完备**——
+   * 不可解析文件的残留目录同样清；路径限定 btw 根内）。
+   * best-effort：逐段失败 warn 不上抛（调用方是删除主链，P2 降级隔离；漏删由启动孤儿补账兑底）。
+   */
+  async closeAllForMain(mainSid: string, cwd: string): Promise<void> {
+    for (const rec of this.listLines(mainSid)) {
+      try {
+        await this.closeLine(rec.vid)
+      } catch (e) {
+        console.warn(`[btw] closeAllForMain line close failed (${rec.vid}): ${toErrorMessage(e)}`)
+      }
+    }
+    try {
+      const threadDir = getBtwThreadDir(cwd, mainSid)
+      if (this.isInsideBtwRoot(threadDir)) {
+        rmSync(threadDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      }
+    } catch (e) {
+      console.warn(`[btw] closeAllForMain dir removal failed (mainSid=${mainSid}): ${toErrorMessage(e)}`)
+    }
+  }
+
   /** 停止闲置扫描定时器（shutdown / 测试收尾）。 */
   dispose(): void {
     if (this.timer !== null) {
@@ -756,6 +857,15 @@ export class BtwService {
   }
 
   // ── 内部 ──
+
+  /** 终结扇出（best-effort：扇出失败不阻断关线主链；回调内部各步自身隔离/幂等）。 */
+  private fireLineTerminated(vid: string): void {
+    try {
+      this.deps.onLineTerminated?.(vid)
+    } catch (e) {
+      console.warn(`[btw] onLineTerminated hook failed (${vid}): ${toErrorMessage(e)}`)
+    }
+  }
 
   /** 会话建立期 spawn options（不可协商不变量的唯一施加点）。 */
   private async buildEstablishOptions(ctx: BtwLineSpawnContext): Promise<BtwLineSpawnOptions> {

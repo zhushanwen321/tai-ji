@@ -3,7 +3,10 @@ import { SessionService } from './services/session/session-service.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧本文件）。
-import { getMigrationGate } from './services/session/session-lifecycle.js'
+// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）。
+import { getMigrationGate, setBtwCascadeOps } from './services/session/session-lifecycle.js'
+// [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
+import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
 import { buildPresetClientOptions, buildPresetFallbackEnv, resolveAppendSystemPrompt, resolveEffectiveSystemPrompt } from './services/session/launch-params.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import type { RpcClientOptions } from './infra/pi/rpc-client.js'
@@ -1004,9 +1007,31 @@ async function main(): Promise<void> {
     resolveMainSessionFile: (mainSid) =>
       sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
     resolvePiCommand: () => findPiExecutable(effectiveRoot),
+    // [M4-a / D9④ 单入口终结扇出] 线终结（级联 / 批内直删 / btw.remove 三路同经 closeLine）的
+    // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
+    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
+    // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效腿（闲置回收）不经过本回调。
+    onLineTerminated: (vid) => {
+      if (!sessionService.getSession(vid)) return
+      sessionService.detachSession(vid)
+      sessionService.removeSessionEntry(vid)
+      clearRemovedSessionData(vid)
+    },
   })
   // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
   sessionService.setBtwService(btwService)
+  // [M4-a / btw-question D4 消费面① + D9④ + D5] 级联接线 + 启动孤儿补账（M1-b 备忘清偿）：
+  // ① delete/deleteByCwd 的级联支线经模块槽注入（BtwService 两原语结构性满足窄接口）；
+  // ② 孤儿补账先于重建——先清「主会话已不存在」的线目录（崩溃恢复对齐主删即删；
+  //    退出/闲置回收不删），rebuildFromDisk 只登记在场主线（裁决⑧ 重启可复原）。
+  //    同步执行：纯 btw 根目录扫描 + 主解析（sessions/ 扫描 TTL 缓存，首次扫描本就即将发生），
+  //    须在 WS listen 前完成——首个 session.delete 到达时注册表/目录已对账。
+  setBtwCascadeOps(btwService)
+  const btwOrphansReconciled = btwService.reconcileOrphanThreadDirs()
+  const btwLinesRebuilt = btwService.rebuildFromDisk().length
+  if (btwOrphansReconciled > 0 || btwLinesRebuilt > 0) {
+    console.log(`[btw] startup reconcile: orphans removed=${btwOrphansReconciled}, lines rebuilt=${btwLinesRebuilt}`)
+  }
   /**
    * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃腿携带主 turn
    * 活跃信号（分支③ pill 增强）；扫盘腿（冷主会话）无可读占用态恒 false。
@@ -1167,6 +1192,10 @@ async function main(): Promise<void> {
     // 回收拍。timer 已 unref，此 stop 是显式收口双保险（先取消先例同上）。
     shutdownStep('stop-idle-reaper')
     idleReaperHandle?.stop()
+    // [M4-a / M2-b 备忘清偿] btw 闲置扫描定时器收口（timer 已 unref 不阻塞退出，此处显式
+    // stop 是与上方 idle-reaper 同款的收口双保险；shutdown 后不再有回收拍）。线会话文件
+    // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
+    btwService.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
     try {
       shutdownStep('flush-stores')
