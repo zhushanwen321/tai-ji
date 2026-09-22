@@ -4,7 +4,9 @@
  * 覆盖（u2 验收②）：聚合加权平均对已知样本断言（与 pi-statusline 口径一致，且区分
  * 加权 vs 算术平均）、bogus 50/100 阈值边界语义、GC 删过期日键（本地时区）、
  * safeModelFileName 单射（`a b`/`a_b`、大小写、超长截断）、null 语义（无样本 null、
- * 0 只作真实测量值）、文件损坏读→空+不抛（自愈）。
+ * 0 只作真实测量值）、文件损坏读→空+不抛（自愈）；TTFT（composer-genstats-ttft
+ * §3.3）：aggregateTtft p50（奇偶样本/空 null/单样本/重尾稳健）+ S8 校验双向
+ * （ttft 单元素组过校验不丢 + speed 单元素畸形仍丢）+ ttft 路径独立落盘。
  *
  * 数据目录红线（TEST-STRATEGY / fs-guard）：全部写删目标 = mkdtempSync(
  * join(tmpdir(), 'taiji-gen-stats-')) + TAIJI_AGENT_DATA_DIR env 注入，不触碰任何共享
@@ -19,22 +21,28 @@ import { dirname, join } from 'node:path'
 import {
   aggregateSpeed,
   aggregateCacheRatio,
+  aggregateTtft,
   isBogusSpeedSample,
   BOGUS_OUTPUT_THRESHOLD,
   BOGUS_DURATION_THRESHOLD_MS,
+  PAIR_RECORD_TUPLE_LENGTH,
   SPEED_RETENTION_DAYS,
   safeModelFileName,
   localDayKey,
   pruneExpiredDays,
   readDayRecords,
   writeDayRecords,
+  TTFT_RECORD_TUPLE_LENGTH,
   getGenStatsDir,
   getSpeedDir,
   getCacheRatioDir,
+  getTtftDir,
   speedFilePath,
   cacheRatioFilePath,
+  ttftFilePath,
   type SpeedRecord,
   type CacheRatioRecord,
+  type TtftRecord,
   type GenStatsDayRecords,
 } from '../gen-stats-store.js'
 
@@ -131,6 +139,36 @@ describe('aggregateCacheRatio（D6 加权 Σread÷ΣpromptTotal×100）', () => 
 
   it('四舍五入取整', () => {
     expect(aggregateCacheRatio([[1, 3]] as CacheRatioRecord[])).toBe(33)
+  })
+})
+
+describe('aggregateTtft（composer-genstats-ttft §3.3：p50 中位数，重尾稳健）', () => {
+  it('奇数样本取中位元素（乱序输入不敏感）', () => {
+    expect(aggregateTtft([[300], [100], [200]])).toBe(200)
+  })
+
+  it('偶数样本取双中位均值：[100,300,200,400] → (200+300)/2 = 250', () => {
+    expect(aggregateTtft([[100], [300], [200], [400]])).toBe(250)
+  })
+
+  it('偶数双中位均值四舍五入：[100,201] → 150.5 → 151', () => {
+    expect(aggregateTtft([[100], [201]])).toBe(151)
+  })
+
+  it('空记录 → null（无值纪律 D4，禁 0 充数）', () => {
+    expect(aggregateTtft([])).toBeNull()
+  })
+
+  it('单样本 → 原值（current 槽口径 = aggregateTtft([单条])）', () => {
+    expect(aggregateTtft([[820]])).toBe(820)
+  })
+
+  it('0 是合法真实测量值（非 null 充数）：[0,100] p50 = 50', () => {
+    expect(aggregateTtft([[0], [100]])).toBe(50)
+  })
+
+  it('重尾稳健：[100,110,120,9000] → p50=115（均值 2332 被偶发慢请求拉飞，否决方案 D 不用均值）', () => {
+    expect(aggregateTtft([[100], [110], [120], [9000]])).toBe(115)
   })
 })
 
@@ -326,19 +364,66 @@ describe('readDayRecords / writeDayRecords（同步原子写 + 损坏自愈，D3
   })
 })
 
+describe('S8 存储校验双向（元组长度参数化，composer-genstats-ttft §3.3）', () => {
+  it('ttft 单元素组经 readDayRecords(len=1) 全量保留（不被当畸形丢弃——不参数化则聚合恒空）', () => {
+    const p = ttftFilePath('prov', 'mdl')
+    writeDayRecords<TtftRecord>(p, { [localDayKey()]: [[820], [1000]] })
+    expect(readDayRecords<TtftRecord>(p, TTFT_RECORD_TUPLE_LENGTH)).toEqual({ [localDayKey()]: [[820], [1000]] })
+  })
+
+  it('ttft 文件按 len=1 读：二元组条目反成畸形被丢（长度不匹配即畸形，双向一致）', () => {
+    const p = ttftFilePath('prov', 'mdl')
+    writeRawFile(p, JSON.stringify({ [localDayKey()]: [[820], [1, 2], 'junk'] }))
+    expect(readDayRecords<TtftRecord>(p, TTFT_RECORD_TUPLE_LENGTH)).toEqual({ [localDayKey()]: [[820]] })
+  })
+
+  it('speed 默认校验强度不变：单元素畸形条目仍被丢、二元组合法保留（既有文件回归钉）', () => {
+    const p = speedPath()
+    writeRawFile(p, JSON.stringify({ [localDayKey()]: [[10, 1000], [5], 'junk'] }))
+    expect(readDayRecords(p)).toEqual({ [localDayKey()]: [[10, 1000]] })
+  })
+
+  it('长度常量锁值（PAIR=2 / TTFT=1；显式 2 与缺省等价）', () => {
+    expect(PAIR_RECORD_TUPLE_LENGTH).toBe(2)
+    expect(TTFT_RECORD_TUPLE_LENGTH).toBe(1)
+    const p = speedPath()
+    writeRawFile(p, JSON.stringify({ [localDayKey()]: [[10, 1000], [5]] }))
+    expect(readDayRecords(p, PAIR_RECORD_TUPLE_LENGTH)).toEqual({ [localDayKey()]: [[10, 1000]] })
+  })
+
+  it('ttft 路径独立落盘：与 speed / cache-ratio 三文件互不干扰 + 写后无 .tmp 残留', () => {
+    const p = ttftFilePath('prov', 'mdl')
+    writeDayRecords<TtftRecord>(p, { [localDayKey()]: [[300]] })
+    expect(readDayRecords<TtftRecord>(p, TTFT_RECORD_TUPLE_LENGTH)).toEqual({ [localDayKey()]: [[300]] })
+    expect(existsSync(speedPath('prov', 'mdl'))).toBe(false)
+    expect(existsSync(cacheRatioFilePath('prov', 'mdl'))).toBe(false)
+    expect(readdirSync(getTtftDir()).filter((f) => f.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('ttft 文件损坏自愈同款：JSON 截断 → 空 + 不抛；写后重建', () => {
+    const p = ttftFilePath('prov', 'mdl')
+    writeRawFile(p, '{corrupted')
+    expect(readDayRecords<TtftRecord>(p, TTFT_RECORD_TUPLE_LENGTH)).toEqual({})
+    writeDayRecords<TtftRecord>(p, { [localDayKey()]: [[42]] })
+    expect(readDayRecords<TtftRecord>(p, TTFT_RECORD_TUPLE_LENGTH)).toEqual({ [localDayKey()]: [[42]] })
+  })
+})
+
 describe('路径派生（getDataDir 动态推导，零硬编码）', () => {
   it('gen-stats 根目录 = <TAIJI_AGENT_DATA_DIR>/gen-stats', () => {
     expect(getGenStatsDir()).toBe(join(dataDir, 'gen-stats'))
   })
 
-  it('speed / cache-ratio 子目录', () => {
+  it('speed / cache-ratio / ttft 子目录', () => {
     expect(getSpeedDir()).toBe(join(dataDir, 'gen-stats', 'speed'))
     expect(getCacheRatioDir()).toBe(join(dataDir, 'gen-stats', 'cache-ratio'))
+    expect(getTtftDir()).toBe(join(dataDir, 'gen-stats', 'ttft'))
   })
 
-  it('文件路径 = <子目录>/<safeModelFileName>.json', () => {
+  it('文件路径 = <子目录>/<safeModelFileName>.json（含 ttft 同款布局）', () => {
     expect(speedFilePath('a', 'b')).toBe(join(getSpeedDir(), `${safeModelFileName('a', 'b')}.json`))
     expect(cacheRatioFilePath('a', 'b')).toBe(join(getCacheRatioDir(), `${safeModelFileName('a', 'b')}.json`))
+    expect(ttftFilePath('a', 'b')).toBe(join(getTtftDir(), `${safeModelFileName('a', 'b')}.json`))
   })
 
   it('env 参数注入优先于 process.env（路径随注入隔离）', () => {

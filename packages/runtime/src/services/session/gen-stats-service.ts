@@ -1,6 +1,7 @@
 /**
- * gen-stats-service.ts — Composer 生成指标（token 速度 + 缓存命中率）采样/帧合成/广播服务
- * （composer-gen-stats u3-wiring / P3）。
+ * gen-stats-service.ts — Composer 生成指标（token 速度 + 缓存命中率 + TTFT 首字延迟）
+ * 采样/帧合成/广播服务（composer-gen-stats u3-wiring / P3；TTFT 归属
+ * composer-genstats-ttft §3.3——逐字段独立判定，与 speed/cache 解耦）。
  *
  * 职责边界：存储算法 SSOT 在 gen-stats-store.ts（本文件只调用，不重实现聚合/文件名/GC）；
  * bogus 丢弃判定在本服务采样入口执行（store 只提供阈值常量 + 纯谓词，D7）；sid→modelKey
@@ -27,7 +28,7 @@
  *   0 只允许作为真实测量值出现。
  */
 
-import type { GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, ServerMessage } from '@taiji/shared'
+import type { GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, GenStatsTtft, ServerMessage } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
 import { getOrCreate } from '../../utils/collections.js'
@@ -36,15 +37,21 @@ import type { GenStatsSample } from './types.js'
 import {
   aggregateCacheRatio,
   aggregateSpeed,
+  aggregateTtft,
   cacheRatioFilePath,
   isBogusSpeedSample,
   localDayKey,
+  PAIR_RECORD_TUPLE_LENGTH,
   readDayRecords,
   speedFilePath,
+  TTFT_RECORD_TUPLE_LENGTH,
+  ttftFilePath,
   writeDayRecords,
   type CacheRatioRecord,
   type GenStatsDayRecords,
+  type GenStatsRecord,
   type SpeedRecord,
+  type TtftRecord,
 } from './gen-stats-store.js'
 
 /**
@@ -54,31 +61,36 @@ import {
 interface ModelAggregates {
   speed: Omit<GenStatsSpeed, 'current'>
   cacheRatio: Omit<GenStatsCacheRatio, 'current'>
+  ttft: Omit<GenStatsTtft, 'current'>
   model?: string
 }
 
 /**
- * per-session current 槽（会话视角 current 的权威源）：速度/命中率两槽独立、各自携带来源
+ * per-session current 槽（会话视角 current 的权威源）：速度/命中率/TTFT 三槽独立、各自携带来源
  * modelKey——单边无效样本只跳过该边（另一边保留上一条合法值），展示与否由 modelKey 匹配决定。
  */
 interface SessionCurrentEntry {
   speed?: { modelKey: string; record: SpeedRecord }
   cache?: { modelKey: string; record: CacheRatioRecord }
+  ttft?: { modelKey: string; record: TtftRecord }
 }
 
 /**
  * 本次采样刚落盘的日记录（persistSample → modelAggregates 传值，消「写后即读」冗余 IO）。
  * 字段缺省 = 该文件本次未写（guard 丢弃或写失败），聚合对应侧照旧读盘——
  * 写失败后帧内该侧值 = 盘上旧值，与重读行为一致（§3.5 容错语义不变）。
+ * 字段按文件族参数化（ttft 单元素组与 speed/cache 二元组不同形，composer-genstats-ttft §3.3）。
  */
 interface FreshDayRecords {
-  speed?: GenStatsDayRecords
-  cache?: GenStatsDayRecords
+  speed?: GenStatsDayRecords<SpeedRecord>
+  cache?: GenStatsDayRecords<CacheRatioRecord>
+  ttft?: GenStatsDayRecords<TtftRecord>
 }
 
 /** 模型聚合层全 null 形态（降级链④走尽 / 模型无记录；current 由 composeFrame 单独合并） */
 const NULL_SPEED_AGGREGATE: Omit<GenStatsSpeed, 'current'> = { day: null, d7: null, d30: null }
 const NULL_CACHE_AGGREGATE: Omit<GenStatsCacheRatio, 'current'> = { day: null }
+const NULL_TTFT_AGGREGATE: Omit<GenStatsTtft, 'current'> = { day: null, d7: null, d30: null }
 
 /** 滚动窗口天数（day/d7/d30，含当日；30 与 store SPEED_RETENTION_DAYS 的 GC 窗口对齐） */
 const WINDOW_DAYS = { day: 1, d7: 7, d30: 30 } as const
@@ -117,11 +129,27 @@ function buildCacheRecord(s: GenStatsSample): CacheRatioRecord | null {
   return [s.cacheRead ?? 0, promptTotal]
 }
 
-/** 窗口内（key >= cutoffDay）全部条目（YYYY-MM-DD 规范形字典序 = 时间序） */
-function entriesSince(records: GenStatsDayRecords, cutoffDay: string): Array<[number, number]> {
-  const out: Array<[number, number]> = []
+/**
+ * TTFT 样本有效性判定 + 组装（SSOT，同 buildSpeedRecord；逐字段独立判定，与 speed/cache
+ * 完全解耦——durationMs 缺失不影响 ttft 落盘，反之亦然）。ttftMs=null（无锚 / 窗口内无
+ * 输出信号即结束 / image 等无内容流形态）→ null 跳过；ttftMs=0 是合法真实测量，禁判丢弃
+ * （无值纪律：null=无数据，0 只允许为真实测量值）。
+ */
+function buildTtftRecord(s: GenStatsSample): TtftRecord | null {
+  if (s.ttftMs === null) return null
+  return [s.ttftMs]
+}
+
+/**
+ * 窗口内（key >= cutoffDay）全部条目（YYYY-MM-DD 规范形字典序 = 时间序）。
+ * T 进 T 出：调用点按文件族显式传 <SpeedRecord>/<CacheRatioRecord>/<TtftRecord>，
+ * 入参即 GenStatsDayRecords<T>——禁 as 联合窄化（composer-genstats-ttft §3.3 R2 修订段：
+ * as 会掩盖 ttft 单元素组类型冲突，原实现硬编码 Array<[number,number]> 即被改造）。
+ */
+function entriesSince<T extends GenStatsRecord>(records: GenStatsDayRecords<T>, cutoffDay: string): T[] {
+  const out: T[] = []
   for (const [key, entries] of Object.entries(records)) {
-    if (key >= cutoffDay) out.push(...(entries as Array<[number, number]>))
+    if (key >= cutoffDay) out.push(...entries)
   }
   return out
 }
@@ -206,10 +234,12 @@ export class GenStatsService {
   private updateSessionCurrent(sid: string, modelKey: string, s: GenStatsSample): void {
     const speedRecord = buildSpeedRecord(s)
     const cacheRecord = buildCacheRecord(s)
-    if (!speedRecord && !cacheRecord) return
+    const ttftRecord = buildTtftRecord(s)
+    if (!speedRecord && !cacheRecord && !ttftRecord) return
     const entry = getOrCreate(this.sessionCurrent, sid, (): SessionCurrentEntry => ({}))
     if (speedRecord) entry.speed = { modelKey, record: speedRecord }
     if (cacheRecord) entry.cache = { modelKey, record: cacheRecord }
+    if (ttftRecord) entry.ttft = { modelKey, record: ttftRecord }
   }
 
   /**
@@ -245,12 +275,27 @@ export class GenStatsService {
         logger.warn('[gen-stats] cache-ratio record write failed', { provider, model, error: toMessage(err) })
       }
     }
-    return fresh.speed || fresh.cache ? fresh : null
+
+    // ttft 逐字段独立判定（§3.3）：ttftMs != null 才写，与 speed/cache 判定互不干扰
+    const ttftRecord = buildTtftRecord(s)
+    if (ttftRecord) {
+      try {
+        fresh.ttft = this.appendRecord(ttftFilePath(provider, model), day, ttftRecord)
+      } catch (err) {
+        logger.warn('[gen-stats] ttft record write failed', { provider, model, error: toMessage(err) })
+      }
+    }
+    return fresh.speed || fresh.cache || fresh.ttft ? fresh : null
   }
 
-  /** read→append→write 单同步临界段（D8；writeDayRecords 内含 30 天 GC + tmp+rename 原子写）。 */
-  private appendRecord(filePath: string, day: string, entry: [number, number]): GenStatsDayRecords {
-    const records = readDayRecords(filePath)
+  /**
+   * read→append→write 单同步临界段（D8；writeDayRecords 内含 30 天 GC + tmp+rename 原子写）。
+   * T 进 T 出（entry 参数放宽至 GenStatsRecord 家族，§3.3 泛型化）：期望元组长度取自 entry
+   * 自身长度（元组类型的运行时自描）——ttft 单元素组按长度 1 校验，不会被默认二元组校验
+   * 当畸形丢弃（S8）；返回按 T 参数化的日记录，供 FreshDayRecords 家族化复用。禁 as 绕过。
+   */
+  private appendRecord<T extends GenStatsRecord>(filePath: string, day: string, entry: T): GenStatsDayRecords<T> {
+    const records = readDayRecords<T>(filePath, entry.length)
     const entries = records[day] ?? []
     entries.push(entry)
     records[day] = entries
@@ -321,12 +366,15 @@ export class GenStatsService {
       modelKey !== null && entry?.speed?.modelKey === modelKey ? aggregateSpeed([entry.speed.record]) : null
     const cacheCurrent =
       modelKey !== null && entry?.cache?.modelKey === modelKey ? aggregateCacheRatio([entry.cache.record]) : null
+    // ttft current = 本会话最近一次样本原值（单条 p50 = 原值取整，ttftMs 本为整数 ms 恒等）；
+    // modelKey 校验同 speed 槽（异模型残留 → null，无回落）
+    const ttftCurrent =
+      modelKey !== null && entry?.ttft?.modelKey === modelKey ? aggregateTtft([entry.ttft.record]) : null
     return {
       sessionId: sid,
       speed: { current: speedCurrent, ...aggregate.speed },
       cacheRatio: { current: cacheCurrent, ...aggregate.cacheRatio },
-      // composer-genstats-ttft D1 机械缺省（U1 越界补丁，计划 §5 登记）：ttft 聚合归 U3 Wave2 覆写
-      ttft: { current: null, day: null, d7: null, d30: null },
+      ttft: { current: ttftCurrent, ...aggregate.ttft },
       ...(aggregate.model !== undefined ? { model: aggregate.model } : {}),
     }
   }
@@ -347,20 +395,30 @@ export class GenStatsService {
    */
   private modelAggregates(modelKey: string | null, fresh?: FreshDayRecords): ModelAggregates {
     if (modelKey === null) {
-      return { speed: NULL_SPEED_AGGREGATE, cacheRatio: NULL_CACHE_AGGREGATE }
+      return { speed: NULL_SPEED_AGGREGATE, cacheRatio: NULL_CACHE_AGGREGATE, ttft: NULL_TTFT_AGGREGATE }
     }
     const { provider, model } = splitModelKey(modelKey)
     const now = new Date()
-    const speedRecords = fresh?.speed ?? readDayRecords(speedFilePath(provider, model))
-    const cacheRecords = fresh?.cache ?? readDayRecords(cacheRatioFilePath(provider, model))
+    // 读取按文件族显式传记录类型 + 期望元组长度（§3.3 参数化校验：二元组 2 / 单元素组 1）
+    const speedRecords =
+      fresh?.speed ?? readDayRecords<SpeedRecord>(speedFilePath(provider, model), PAIR_RECORD_TUPLE_LENGTH)
+    const cacheRecords =
+      fresh?.cache ?? readDayRecords<CacheRatioRecord>(cacheRatioFilePath(provider, model), PAIR_RECORD_TUPLE_LENGTH)
+    const ttftRecords =
+      fresh?.ttft ?? readDayRecords<TtftRecord>(ttftFilePath(provider, model), TTFT_RECORD_TUPLE_LENGTH)
     return {
       speed: {
-        day: aggregateSpeed(entriesSince(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
-        d7: aggregateSpeed(entriesSince(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7))),
-        d30: aggregateSpeed(entriesSince(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30))),
+        day: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
+        d7: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7))),
+        d30: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30))),
       },
       cacheRatio: {
-        day: aggregateCacheRatio(entriesSince(cacheRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
+        day: aggregateCacheRatio(entriesSince<CacheRatioRecord>(cacheRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
+      },
+      ttft: {
+        day: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
+        d7: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7))),
+        d30: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30))),
       },
       model: modelKey,
     }
