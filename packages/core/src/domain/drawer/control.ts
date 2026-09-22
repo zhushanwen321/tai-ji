@@ -117,6 +117,12 @@ export const drawerControl = {
     cur.selectedWorkflowName = workflowName
     cur.isOpen = true
   },
+  /** 登记当前查看的 btw 线 vid（btw-question D7/D5，M3-a）：BtwPanel 选中线时写入 vid、
+   *  清空选中/关线时传 undefined。纯字段写入（不切 tab 不开 drawer——面板本就挂在 btw tab
+   *  上，由 openDrawerTab('btw') 入口负责），消费方 = getViewedVids 的 btw 豁免分支。 */
+  setBtwView(vid: string | undefined): void {
+    controlState.current.value.selectedBtwVid = vid
+  },
 }
 
 /**
@@ -130,6 +136,7 @@ export function useDrawerControl(): {
   selectedSubagentId: ComputedRef<string | null>
   selectedWorkflowName: ComputedRef<string | null>
   enteredFrom: ComputedRef<'chat' | 'workflow' | null>
+  selectedBtwVid: ComputedRef<string | undefined>
   } {
   return {
     isOpen: computed(() => controlState.current.value.isOpen),
@@ -138,6 +145,7 @@ export function useDrawerControl(): {
     selectedSubagentId: computed(() => controlState.current.value.selectedSubagentId),
     selectedWorkflowName: computed(() => controlState.current.value.selectedWorkflowName),
     enteredFrom: computed(() => controlState.current.value.enteredFrom),
+    selectedBtwVid: computed(() => controlState.current.value.selectedBtwVid),
   }
 }
 
@@ -172,13 +180,15 @@ export function bindViewedVidPanels(source: ViewedPanelsSource): void {
 
 /**
  * [B9] 当前正在查看的 subagent/agentcall 虚拟 id 集（LRU 联动驱逐的豁免源）。
+ * [D5 btw-question M3-a] 同源扩含 btw 线：drawer 开在 btw tab 且正在查看某线时，
+ * 该线 vid 同样计入豁免（查看中不驱逐；btw 分区被驱逐时的派生键同驱归 M2-c）。
  *
  * 组合链（查询源钉死 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
- * drawer 分区 → 当前选中 vid。三分量同时满足才计入豁免：
+ * drawer 分区 → 当前选中 vid。每族三分量同时满足才计入豁免：
  * - isOpen：关闭 drawer 后焦点切走，分区应可驱逐（A6「关闭 drawer 后再切走，分区释放」）；
- * - activeTab === 'subagent'：drawer 开在其他 tab 时 SubagentTab 未挂载，不算正在查看
- *   （切回 subagent tab 会重挂 + immediate watch 重拉快照，白屏自愈路径不破坏）；
- * - selectedSubagentId 非空：实际选中的虚拟 id。
+ * - activeTab === 'subagent' / 'btw'：drawer 开在其他 tab 时对应面板未挂载，不算正在查看
+ *   （切回 tab 会重挂，白屏自愈路径不破坏）；
+ * - selectedSubagentId / selectedBtwVid 非空：实际选中的虚拟 id。
  *
  * [禁止] drawer 分区全枚举：曾开过 drawer 的 session 焦点切走后分区保留（isOpen/
  * selectedSubagentId 不被 LRU 清），全枚举会把全部历史 agentcall 分区永久豁免，
@@ -193,6 +203,10 @@ export function getViewedVids(): Set<string> {
     controlState.updateFor(sid, (p) => {
       if (p.isOpen && p.activeTab === 'subagent' && p.selectedSubagentId) {
         viewed.add(p.selectedSubagentId)
+      }
+      // btw 线查看豁免（D5：查看中不驱逐——btw 分区文件持久可回填，唯查看中的线不进候选）
+      if (p.isOpen && p.activeTab === 'btw' && p.selectedBtwVid) {
+        viewed.add(p.selectedBtwVid)
       }
     })
   }
