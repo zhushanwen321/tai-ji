@@ -71,8 +71,11 @@ export interface CommandPopoverKeyboardOpts<T extends KeyboardItem> {
    *  形态成立——session 路 label 可以 `/` 开头，不加门会被 `#deploy` 误命中直发） */
   type: () => 'file' | 'slash' | 'session' | 'subagent' | 'skill'
   /** D1 前置② activeElement 门的输入区引用通道（Composer shellInputRef prop 一跳 + 本 accessor，
-   *  通道缺口③，accessor 形态同 query/type）。SearchModal 打开时 cmdOpen 残留面的误发防线；
-   *  缺省 = 不直发走现状插 chip（fail-closed 禁 fail-open） */
+   *  通道缺口③，accessor 形态同 query/type）。SearchModal 残留面已由互斥设计源头消灭
+   *  （search-modal-popover-mutual-exclusion D1 watch：SM open 时 cmdOpen 置 false，浮层
+   *  capture 监听开门条件失效）；activeElement 门保留为 fail-closed 缺省语义的兜底门——
+   *  防未来新浮层/新入口回归时误发（非 SM 专项）；缺省 = 不直发走现状插 chip（fail-closed
+   *  禁 fail-open） */
   shellInputRef?: () => Readonly<Ref<ShellInputInstance | null>> | undefined
   /** exactMatch 直发通道（D1 分流，仅 Enter 三重前置全过时调用；Tab 恒走 onSelect）。接线 =
    *  插 chip 复用 onSelect 现链 + 同步直调 composer keydown 链（dispatchEnter 所在）——
