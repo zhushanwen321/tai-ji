@@ -46,7 +46,9 @@
 // ==================== 新轴五触点清单（新增能力位；触发需求前不落代码） ====================
 // ① SDK EngineCapabilities 加可选键 + 缺省最弱档注释；② core↔SDK 双向断言与存量必填
 // 断言保持绿；③ core 两表各登各的——CONSERVATIVE_CAPABILITIES 登保守缺省值、
-// CAPABILITY_ENUMS 登值域（缺一即回 undefined 透传 + gate 字面值判据放行）；
+// CAPABILITY_ENUMS 登值域（缺一即回 undefined 透传 + gate 字面值判据放行）；值域
+// 登记按轴型分道——enum 轴按字面登值域；boolean 轴走 maxTurns 先例：ENUMS 不登
+// （键集锁 B 的 Exclude 集合同步扩位）+ parseCapabilities boolean 专用解析分支；
 // ④ gate 判据比较最弱档字面值（能力位键集锁保证解析不产 undefined）；
 // ⑤ pi-host-binding 能力位快照（第四份手写词表）同步登记。
 //

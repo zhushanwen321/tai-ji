@@ -37,7 +37,8 @@
 // 新轴五触点清单（新增能力位；触发需求前不落代码，C 型纪律）：①本文件
 // EngineCapabilities 加可选键 + 缺省最弱档注释；②core↔SDK 双向断言与存量必填保持绿；
 // ③core 两表各登各的（CONSERVATIVE_CAPABILITIES 保守缺省值 / CAPABILITY_ENUMS 值域，
-// 缺一即 undefined 透传 + gate 放行）；④gate 判据比较最弱档字面值（键集锁兜底）；
+// 缺一即 undefined 透传 + gate 放行；boolean 轴例外走 maxTurns 先例：ENUMS 不登 +
+// 键集锁 B Exclude 扩位 + boolean 专用解析分支，详见 engine-protocol.ts 头注）；④gate 判据比较最弱档字面值（键集锁兜底）；
 // ⑤pi-host-binding 能力位快照同步登记。
 //
 // ==================== 未知成员宽容语义四行（运行时半边，与编译期词表锁互补；
@@ -174,8 +175,11 @@ export type AgentEvent =
  *   ② 词表侧——`satisfies readonly AgentEvent["type"][]`：词表加成员不加 union
  *      → 错误直接落在词表漏改的成员行；
  *   ③ 兜底——成员绕过 EventName 约束裸加字面量 → _EventVocabSyncLock 爆红。
- * 新增事件变体 = 词表 + union 一处族两笔同改即全同步（schema enum 与测试断言自动
- * 跟随），不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见文件头注）。
+ * 新增事件变体的同步面分两层，漏改任一处 typecheck 均红且精确指路（验收 A1 演练
+ * 实证）：协议面两笔（词表 + union）即协议面全同步——schema enum 与遍历型测试断言
+ * 自动跟随；同仓消费面另有两处编译期同步点——journal-replay reducer case（穷尽
+ * switch never 检查）与 contract-closure 构造冒烟（Record<AgentEventTypeName,…>
+ * 漏键爆红）。不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见头注）。
  */
 export const AGENT_EVENT_TYPE_NAMES = [
   "tool_start", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 tool 起始占位（显示降级），turn 结构不受损
@@ -294,7 +298,7 @@ export interface EngineCapabilities {
   conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
-  /** 粗粒度引擎：GUI 显示降级为阶段态。 */
+  /** 粗粒度引擎：GUI 显示降级为阶段态。判据 5 回指：被 streamMode 键消费（degradable 先例）。 */
   eventGranularity: "stream" | "coarse";
   /** emulated = worktree 隔离（无 OS sandbox 的引擎用文件写维度隔离补齐）。 */
   sandbox: "native" | "emulated" | "none";
