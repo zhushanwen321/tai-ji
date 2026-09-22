@@ -19,8 +19,8 @@
  *  - permission 额外含 tree-sitter-bash.wasm + web-tree-sitter.wasm（手动拷贝，与 index.js 同目录）
  *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/（内置 workflow
  *    脚本资产，u1-staged 起源在 packages/subagent-core/workflows/，见下方常量注释）
- *  - plan 额外含 templates/（内置计划模板 .md，list-template/select-template 数据源，
- *    见 TEMPLATES_DIR_PACKAGES 注释）
+ *  - plan 额外含 templates/（内置计划模板 .md，<available-plans> 清单注入与
+ *    select-template 数据源，见 TEMPLATES_DIR_PACKAGES 注释）
  *
  * external 边界权威源：0.84.1 pi binary virtualModules 实测（0.80.3 首测，2026-08-12
  * 随 pi 0.84.1 升级重测 10 包 get_state 加载全绿后更新；见
@@ -167,11 +167,13 @@ const SUBAGENT_CORE_WORKFLOWS_DIR = join(REPO_ROOT, "packages", "subagent-core",
 const WORKFLOW_DIR_PACKAGES = new Set(["subagent-workflow"]);
 
 /**
- * plan 的内置模板资产（PR #19 review MF-7）：templates/*.md 是 list-template /
- * select-template 的数据源。templates.ts 被 esbuild inline 进包根 index.js 后按同级
- * templates/ 定位（双形态探测见该文件 getBuiltinTemplateDir 注释），esbuild 只 bundle
- * JS，.md 资产必须在此整目录拷到 staged 包根。缺失后果：打包版 list-template 恒 0、
- * select-template 恒 null（静默失效，prompts.ts 仍在引导 agent 调 list-template）。
+ * plan 的内置模板资产：templates/*.md 是 <available-plans> 清单注入与 select-template
+ * 的数据源（prompts.ts 把 listTemplates 结果拼进提示词，agent 自选后调 select-template）。
+ * templates.ts 被 esbuild inline 进包根 index.js 后按同级 templates/ 定位（双形态探测
+ * 见该文件 getBuiltinTemplateDir 注释），esbuild 只 bundle JS，.md 资产必须在此整目录
+ * 拷到 staged 包根。缺失后果：打包版 templates/ 恒空（scanTemplateDir 防御性返回空、
+ * listTemplates 仅 warn 不 throw 的静默失效），<available-plans> 清单为空、agent 被引导
+ * 自行组织章节，内置模板能力整体丢失。
  * 不走 pi manifest 三字段（agents/skills/workflows）：templates 非 pi manifest 声明的
  * 资源目录，manifest 模式的 resource-discovery 不会扫它（与 relay/workflows 同理）。
  * 分发链与 relay 一致：bundle staged（此处）→ electron-builder extraResources 整目录携带。

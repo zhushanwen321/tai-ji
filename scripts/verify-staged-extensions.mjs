@@ -55,7 +55,8 @@ const MANIFEST_RESOURCE_FIELDS = ["agents", "skills", "workflows"];
  * manifest 三字段的资产目录（checkManifest 探测不到），verify 侧投影对齐——目录
  * 缺失/为空即红。当前条目与 bundle-extensions.mjs 的 TEMPLATES_DIR_PACKAGES 一一
  * 对应（键为 staged 目录名 pi-<short>，bundle 侧常量用 short 名）：plan 的
- * templates/ 是 list-template / select-template 数据源，缺失 = 打包版模板发现恒空
+ * templates/ 是 <available-plans> 清单注入与 select-template 数据源，缺失 = 打包版
+ * 模板发现恒空
  *（templates.ts scanTemplateDir 对缺失目录防御性返回空清单、listTemplates 仅 warn
  * 不 throw 的静默失效，postbuild 必须在此拦截）。
  */

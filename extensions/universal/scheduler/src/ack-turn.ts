@@ -7,7 +7,7 @@
 //
 // 生命周期（覆写只活在极小时间片，故无需互斥）：
 //   ① 建任务成功 ⇒ maybeStartAck：只读检查未落盘 + 空闲 + 可用，注入 custom 触发器
-//      （triggerTurn）并武装 30s 写盘自检；
+//      （triggerTurn）；写盘兜底判定收敛在 session 边界；
 //   ② 触发器的 message_start 到达（本轮首次模型请求之前，已按 pi-agent-core
 //      agent-loop 实装核实）⇒ 同步 registerProvider 覆写当前 provider 的 streamSimple；
 //   ③ 我们的 streamSimple 被调用 ⇒ 返回 stream 之前同步注销覆写（one-shot 自撤），
@@ -15,8 +15,8 @@
 //   ④ turn_end / session 边界 ⇒ 安全网注销（幂等）。
 //
 // 状态住模块级单例 ackState：pi 每次 session 替换都重跑 extension factory（index.ts
-// 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的定时器/覆写窗口会失去清理者；
-// 模块级单例跨代共享，新实例才能取消上一代定时器（本机制的结构性前提）。
+// 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的覆写窗口会失去清理者；模块级
+// 单例跨代共享，新实例才能注销上一代残留的覆写窗口（本机制的结构性前提）。
 
 import { existsSync } from 'node:fs'
 
@@ -32,8 +32,6 @@ import type {
   AckState,
   SchedulerCurrentModel,
 } from './types.js'
-
-/** 30s 写盘自检窗口（设计 §3.3 D7）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
 
 /**
  * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），
@@ -192,10 +190,10 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       // ③ 非空闲（F2 修正：判据必须在记录上下文与可用性判定之前）：在跑的轮次必然产出
       //    assistant 消息 ⇒ 自然打开落盘开关 ⇒ 任务照样落盘。此时若先判可用性并通知，
       //    会在「忙 + 覆写不可用」组合下对**已落盘**的会话发"未写入"= 反向撒谎（D2/D8）。
-      //    故此处直接返回：不记录上下文、不通知、不武装定时器。
+      //    故此处直接返回：不记录上下文、不通知。
       if (!isIdle) return
 
-      // 记录本次触发上下文（message_start / 30s 自检 / 边界清理共享）。
+      // 记录本次触发上下文（message_start 与 session 边界写盘判定共享）。
       ackState.taskId = task.id
       ackState.taskName = task.name ?? task.id
       ackState.sessionFile = sessionFile
@@ -212,7 +210,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         return
       }
 
-      // ④ 可用性预计算（不可用 ⇒ 同步如实通知，不开窗、不武装定时器）。
+      // ④ 可用性预计算（不可用 ⇒ 同步如实通知，不开窗）。
       const availability = await getAvailability(model.provider, isToggleDisabled)
       if (!availability.available) {
         // reason 只进日志（文案复用同一如实键，避免「文案分叉」）。
@@ -286,7 +284,6 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         })
       }
       // 安全网（幂等）：正常路径已在 streamSimple 调用点自撤；这里覆盖「覆写未被调用」。
-      // 不取消 30s 定时器——它服务通知判定。
       selfUnregister()
     },
 
@@ -307,7 +304,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       }
       // ② 覆写自撤（含 E6 重试一次）。
       selfUnregister()
-      // ③ 全量清理（含 30s 定时器与可用性缓存），供下一代复用同一单例。
+      // ③ 全量清理（覆写窗口引用、可用性缓存与通知去重），供下一代复用同一单例。
       resetAckState()
     },
   }

@@ -142,8 +142,8 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     runtime.startScheduler()
 
     // ack 确认轮装配（u-ack-turn）：构造后立刻调 handleSessionBoundary——它是 session_start
-    // 与 session_shutdown 共用的边界清理，顺手做一次写盘判定并清掉上一代残留的 30s 定时器 /
-    // 覆写窗口（模块级单例跨代共享的结构性意义）。
+    // 与 session_shutdown 共用的边界清理：做一次写盘判定并注销上一代残留的覆写窗口
+    // （模块级单例跨代共享的结构性意义）。
     ackController = createAckTurnController({
       backend,
       log: logger,
@@ -192,7 +192,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
     service?.runtime.handleTurnEnd(event?.turnIndex)
     // ack 安全网注销（幂等）：正常路径已在 streamSimple 调用点自撤，这里覆盖「覆写未被调用」
-    // 的轮次（E2）。不取消 30s 定时器——它服务通知判定。
+    // 的轮次（E2）。
     ackController?.handleTurnEnd()
   })
 
