@@ -68,17 +68,46 @@ export interface TerminalCtx {
 }
 
 /**
- * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
- * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
- * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
- * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
- *
- * 内部写序（D8 v7）：`.state` writeSync **先**（终态权威优先落）→ entry/archive →
- * manifest writeSync 后 → `.alive` 删除（release 出口①）。
+ * legacy 终态族的共用写序编排（D8 v7）：`.state` writeSync **先**（persist 失败 →
+ * 返回 false，零持久化副作用）→ binding usage 快照 → archive → 终态 manifest 后 →
+ * `.alive` 删除（release 出口①）。markFinalized / markCancelled 差异仅在 `.state`
+ * persist 注入与 warn 标签，编排规则单源于此。
  *
  * 失败语义（§3.4）：`.state` 重试耗尽仍未落 → 返回 false，**零持久化副作用**（不
  * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
  * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
+ */
+function legacyTerminalWrite(
+  record: ExecutionRecord,
+  persist: (sessionFile: string) => boolean,
+  label: string,
+  ctx: TerminalCtx,
+): boolean {
+  if (record.sessionFile !== undefined) {
+    if (!persist(record.sessionFile)) return false;
+    // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
+    // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
+    updateRecordBinding(record.sessionFile, {
+      totalTokens: record.totalTokens,
+      turns: record.turnCount,
+      endedAt: record.endedAt,
+    });
+  } else {
+    logger.warn(`[subagents] ${label}: no sessionFile anchor, .state face skipped`, {
+      detail: { id: record.id },
+    });
+  }
+  ctx.archive(record);
+  ctx.writeTerminalManifest(record);
+  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
+  return true;
+}
+
+/**
+ * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
+ * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
+ * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
+ * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
  *
  * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
  * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
@@ -89,24 +118,7 @@ export interface TerminalCtx {
  */
 export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
   const reason = closedReason ?? record.closedReason ?? "gc";
-  if (record.sessionFile !== undefined) {
-    if (!ctx.persistFinalized(record.sessionFile, reason)) return false;
-    // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
-    // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
-    updateRecordBinding(record.sessionFile, {
-      totalTokens: record.totalTokens,
-      turns: record.turnCount,
-      endedAt: record.endedAt,
-    });
-  } else {
-    logger.warn("[subagents] markFinalized: no sessionFile anchor, .state face skipped", {
-      detail: { id: record.id },
-    });
-  }
-  ctx.archive(record);
-  ctx.writeTerminalManifest(record);
-  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
-  return true;
+  return legacyTerminalWrite(record, (sessionFile) => ctx.persistFinalized(sessionFile, reason), "markFinalized", ctx);
 }
 
 /**
@@ -120,22 +132,12 @@ export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedR
  * @deprecated U5 退役（cancel 语义归 markSettled("interrupted") + 放弃轮标记）。
  */
 export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
-  if (record.sessionFile !== undefined) {
-    if (!ctx.persistCancelled(record.sessionFile, record.endedAt ?? Date.now())) return false;
-    updateRecordBinding(record.sessionFile, {
-      totalTokens: record.totalTokens,
-      turns: record.turnCount,
-      endedAt: record.endedAt,
-    });
-  } else {
-    logger.warn("[subagents] markCancelled: no sessionFile anchor, .state face skipped", {
-      detail: { id: record.id },
-    });
-  }
-  ctx.archive(record);
-  ctx.writeTerminalManifest(record);
-  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
-  return true;
+  return legacyTerminalWrite(
+    record,
+    (sessionFile) => ctx.persistCancelled(sessionFile, record.endedAt ?? Date.now()),
+    "markCancelled",
+    ctx,
+  );
 }
 
 // [collect 退役] 原 markBatchFinalizedImpl（sync 批终态统一写点）已随批机制整体删除。

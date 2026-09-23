@@ -352,6 +352,12 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     case "activity":
       return;
 
+    // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 contract-types）——监控
+    //    信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    双侧 reducer no-op 义务的 SDK 侧）
+    case "armed":
+      return;
+
     default: {
       // 穷尽性检查：新增 AgentEvent variant 时编译期报错
       const _exhaustive: never = event;

@@ -203,6 +203,39 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
     expect((deps.runs as Map<string, unknown>).size).toBe(0);
   });
 
+  it.each([
+    { field: "tokens", params: { tokens: -5 }, message: 'tokens budget -5 is negative. Retry with a positive "tokens", or omit it for unlimited.' },
+    { field: "time", params: { time: -1 }, message: 'time budget -1 ms is negative. Retry with a positive "time", or omit it for unlimited.' },
+  ] as const)(
+    "负值 fail-fast：$field 为负 → throw 拒绝（不再静默升格 unlimited），run 未启动",
+    async ({ params, message }) => {
+      const deps = makeDeps({
+        registry: {
+          get: vi.fn().mockResolvedValue(undefined),
+          getPath: vi.fn().mockResolvedValue(
+            makeScript({
+              type: "object",
+              properties: { task: { type: "string" } },
+              required: ["task"],
+            }),
+          ),
+        },
+      });
+      const tool = captureTool(deps, { isProcessing: false });
+      await expect(
+        tool.execute(
+          "id",
+          { action: "run", name: "/abs/demo-wf.js", args: { task: "do work" }, ...params },
+          undefined,
+          undefined,
+          {},
+        ),
+      ).rejects.toThrow(message);
+      // fail-fast 于 runWorkflow 之前：runs 无条目
+      expect((deps.runs as Map<string, unknown>).size).toBe(0);
+    },
+  );
+
   it("throw 后 reentry guard 经 finally 正常释放（成功路径回归）", async () => {
     // abort not_found throw 穿透 execute try/finally：guard 必须复位，否则后续命令全部 busy
     const guard: ReentryGuardRef = { isProcessing: false };

@@ -18,7 +18,11 @@
 //     project/workspace 根不在壳侧提供——core 消费方按 workspaceRoot 自行推导
 //     （u0-data-discovery 波次接注入消费）。C5⑥ 起 agents kind 追加第 4 根：
 //     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现面，见
-//     corePackageNpmRoot 注释。
+//     corePackageNpmRoot 注释。[P5 D4-2] agents/workflows 的 npm/npm-dev 两根
+//     形态感知（taiji 态指 agentDir 父目录 = 实际安装目录，独立态保留 agentDir
+//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描面）——
+//     见 agentDirKindRoots 注释。skills/engines 的同构 npm 槽错位不在 P5 范围
+//     （D4 发现层 = agents/workflows 注入面；skills 另有「刻意不补」既有决策）。
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
 //     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
@@ -81,28 +85,40 @@ function corePackageNpmRoot(): string | undefined {
 
 /** agents/workflows 共享的 agentDir 派生根（末级目录名由 kind 决定）。
  *  顺序与 source 标签逐项对齐 resource-discovery.ts buildScanTargets 的
- *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。 */
+ *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。
+ *
+ *  [P5 D4-2 扫描根修正] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
+ *  实际安装目录（agentDir 的父目录——taiji 布局迁移后 npm/extensions 是 agentDir
+ *  的 sibling，对齐 runtime pi-paths.ts getNpmDir/getExtensionsDir 的推导），独立
+ *  pi 形态保留 getAgentDir() 派生的 pi 语义根（现状即正确）。 */
 function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   const agentDir = getAgentDir();
+  // taiji 态 npm/extensions 布局 = agentDir 的 sibling（<dataDir>/npm、
+  // <dataDir>/extensions，agentDir = <dataDir>/agent）；旧 agentDir 直拼形态在
+  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现面恒空的
+  // 病灶根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
+  // 本扩展时 argv 同样有 --extension，npm 槽根指到不存在的 <agentDir> 父目录 →
+  // 扫描静默空（损失 = 罕见场景的 npm 安装位发现；agentDir/npm 本就非 pi 官方布局）。
+  const installBase = isTaijiHostInjected() ? dirname(agentDir) : agentDir;
   const roots: DiscoveryRoot[] = [
     // 1. user .pi/agent/<kind>/
     { dir: join(agentDir, kind), source: "user-pi" },
-    // 2. npm global: agentDir/npm/node_modules/*/<pkg>/
-    { dir: join(agentDir, "npm", "node_modules"), source: "npm" },
-    // 3. npm dev symlink: agentDir/extensions/*/<pkg>/
-    { dir: join(agentDir, "extensions"), source: "npm-dev" },
+    // 2. npm global: <installBase>/npm/node_modules/*/<pkg>/
+    { dir: join(installBase, "npm", "node_modules"), source: "npm" },
+    // 3. npm dev symlink: <installBase>/extensions/*/<pkg>/
+    { dir: join(installBase, "extensions"), source: "npm-dev" },
   ];
-  // 4. core 包根（C5⑥，仅 agents kind）：追加在既有 npm 根之后——同标签多根依注入
-  //    序扫描 + last-writer-wins，core（随本包依赖分发的新模板）遮蔽同 agentDir 内
-  //    旧版残留副本；序位仍在 user 级之上、npm-dev/project 级之下（红线 1）。
-  //    workflows kind 刻意不注入：<available_workflows> 的 <location> 是 CA2 快照
-  //    不豁免面（红线 8 豁免仅限 10 内置 agent 角色路径前缀），注入会翻转内置
-  //    workflow 的胜出路径。
-  if (kind === "agents") {
-    const coreNpmRoot = corePackageNpmRoot();
-    if (coreNpmRoot !== undefined) {
-      roots.push({ dir: coreNpmRoot, source: "npm" });
-    }
+  // 4. core 包根（C5⑥ + P5）：agents/workflows 两 kind 都追加在既有 npm 根之后——
+  //    同标签多根依注入序扫描 + last-writer-wins，core（随本包依赖分发的新模板）
+  //    遮蔽同安装位内旧版残留副本；序位仍在 user 级之上、project 级之下（红线 1）。
+  //    [P5] workflows kind 的「刻意不注入」禁区拆除：原顾虑 = <available_workflows>
+  //    的 <location> 是 CA2 快照不豁免面（红线 8 豁免仅限 agent 角色路径前缀）。
+  //    P-C6 实施期核查裁决：CA2 锚定测试为 fixture 输入驱动（不消费运行时路径），
+  //    turn 间字节稳定由工厂渲染缓存 + 码点序构造性保证——staged 绝对路径渲染
+  //    <location> 不破坏快照稳定性，内置 workflow 因此可列出、路径可派发。
+  const coreNpmRoot = corePackageNpmRoot();
+  if (coreNpmRoot !== undefined) {
+    roots.push({ dir: coreNpmRoot, source: "npm" });
   }
   return roots;
 }
@@ -188,7 +204,153 @@ export function createPiHostServices(): HostServices {
         engines: engineRoots(),
       };
     },
+
+    // [D2 扩展加载显式化] 孙进程扩展路径集（per-host 常量，双形态解析见
+    // resolveGrandchildExtensionPaths 注释）。每次调用现解析（P-C2 惰性求值：
+    // configureCore 只挂函数引用，取值发生在 core run 派发期）。
+    extensionPaths(): string[] {
+      return resolveGrandchildExtensionPaths(process.argv);
+    },
   };
+}
+
+// ── [D2 扩展加载显式化] 孙进程扩展白名单注入源（双形态） ──
+
+/**
+ * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
+ * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
+ * 可能注册工具/注入提示词，孙进程的工具面与 system prompt 行为不可控。
+ *
+ * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
+ * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
+ * spawn-runner.ts 断言②的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ *
+ * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名：
+ *   - `@zhushanwen/pi-structured-output`：npm staged 布局
+ *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
+ *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
+ *     （dev 下 runtime 下发的 --extension 是源码目录，无 @zhushanwen scope 段——
+ *     只认 npm 布局时孙进程扩展集恒空，schema 拦截链静默失效）。
+ *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
+ *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
+ *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
+ *     下发 / pi CLI flags），实际碰撞面可忽略。
+ */
+const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
+  ["@zhushanwen", "pi-structured-output"],
+  ["universal", "structured-output"],
+];
+
+/** npm 布局包名（peerDep 解析锚点与诊断文案用；匹配判据见上段集）。 */
+const GRANDCHILD_EXTENSION_NPM_PKG = "@zhushanwen/pi-structured-output";
+
+/**
+ * 孙进程扩展路径集解析（设计 D2 双形态；argv 与 peerDep 解析器经参数注入，纯函数
+ * 可测——HostServices 方法闭包传 process.argv）：
+ *   1. taiji 宿主形态：主 pi 进程 argv 的 `--extension` 全量值 = runtime
+ *      extension-service 经 spawn argv 下发的 staged 集——按白名单收窄。该形态
+ *      判据 = argv 有 `--extension`（taiji spawn 恒带）。
+ *   2. 独立 pi 形态（npm 安装、无 taiji runtime）：从包自身 optional peerDep 解析
+ *      structured-output sibling 路径（安装了即解析、未安装则空）。
+ * 双源皆空 = 空数组（不炸；带 schema run 的 fail-fast 属 H3 断言，非本通道职责）。
+ */
+export function resolveGrandchildExtensionPaths(
+  argv: readonly string[],
+  resolvePeer: () => string | undefined = resolveStructuredOutputPeer,
+): string[] {
+  const stagedAll = collectExtensionFlagValues(argv);
+  const whitelisted = stagedAll.filter(isGrandchildExtensionPath);
+  if (whitelisted.length > 0) return whitelisted;
+  const peer = resolvePeer();
+  return peer !== undefined ? [peer] : [];
+}
+
+/** 路径是否命中孙进程扩展白名单：路径段序列包含白名单任一段集的连续匹配
+ *  （目录形态与入口文件形态都命中——末尾越界段取 undefined 不等，天然界内；
+ *  前缀相似目录如 `pi-structured-output-lookalike` 因段值不等不误判）。 */
+function isGrandchildExtensionPath(p: string): boolean {
+  const segs = p.split(/[\\/]/).filter((s) => s.length > 0);
+  return GRANDCHILD_EXTENSION_PKG_SEGMENTS.some((wanted) =>
+    segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w)),
+  );
+}
+
+/**
+ * 独立形态回退源：optional peerDep sibling 解析（package.json 锚点 → 包根目录）。
+ * 解析失败（未安装 / 布局异常）= undefined，不炸——空集回退。
+ */
+function resolveStructuredOutputPeer(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    return dirname(require.resolve(`${GRANDCHILD_EXTENSION_NPM_PKG}/package.json`));
+  } catch (err) {
+    getLogger("pi-host").debug(
+      "[pi-host] structured-output optional peerDep 未解析（独立形态未安装，孙进程扩展集回退空）",
+      { reason: toErrorMessage(err) },
+    );
+    return undefined;
+  }
+}
+
+/**
+ * 从 argv 提取 `--extension` / `-e` 的全部值（等号与空格两种形式；自旧
+ * mirrorMainProcessFlags 的解析规则精简迁移——该镜像机制已废弃，此处只取
+ * extension 值，布尔镜像面不再透传）。
+ *
+ * 有值 flag 表（跳过其他 flag 的值时不误吃）与 MF-7a 判定（`--extension` 后跟
+ * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见 pi-host.test.ts
+ * 解析用例（--skill 值跳过 / 真 flag 不吃值 / 单 - 路径是值）；
+ * spawn-args.test.ts 历史族已随镜像退役换代。
+ */
+const ARGV_VALUED_FLAGS = new Set<string>([
+  "--extension", "-e",
+  "--skill",
+  // g4-allow: argv 有值 flag 解析词表（跳过非 extension flag 的值防误吃），非模型引用拼装
+  "--model", "--system-prompt", "--append-system-prompt", // g4-allow: 同上——解析词表成员，非拼装
+  "--tools", "-t", "--exclude-tools", "-xt",
+  "--fork", "--session-dir", "--mode",
+  "--thinking", "--models",
+]);
+
+/** argv 中 flag 起始索引：argv[0]=runtime，argv[1]=binary 路径。 */
+const ARGV_FLAG_START = 2;
+
+/**
+ * taiji 宿主注入态判据（P5 D4-2 扫描根修正；形态判据复用 H2 先例）：主 pi 进程
+ * argv 含 --extension/-e 值即 taiji spawn（runtime 恒带 staged 全量集下发的
+ * --extension；独立 pi 经 settings 清单加载扩展，argv 无该 flag）。
+ * 与 resolveGrandchildExtensionPaths 的白名单收窄是两个决策——此处只做形态判定
+ * （决定扫描根指向），不做白名单（白名单只约束孙进程扩展集）。
+ */
+function isTaijiHostInjected(argv: readonly string[] = process.argv): boolean {
+  return collectExtensionFlagValues(argv).length > 0;
+}
+
+function collectExtensionFlagValues(argv: readonly string[]): string[] {
+  const values: string[] = [];
+  const flagArgs = argv.length > ARGV_FLAG_START ? argv.slice(ARGV_FLAG_START) : [];
+  for (let i = 0; i < flagArgs.length; i++) {
+    const tok = flagArgs[i];
+    const eqMatch = /^(--extension|-e)=(.*)$/.exec(tok);
+    if (eqMatch !== null) {
+      if (eqMatch[2]) values.push(eqMatch[2]);
+      continue;
+    }
+    if (tok === "--extension" || tok === "-e") {
+      const next = flagArgs[i + 1];
+      // 单 `-` 开头的合法路径不是 flag（原 MF-7a）；`--` 开头是真 flag，不吃值
+      if (next !== undefined && !next.startsWith("--") && next.length > 0) {
+        values.push(next);
+        i++;
+      }
+      continue;
+    }
+    if (ARGV_VALUED_FLAGS.has(tok)) {
+      i++;
+      continue;
+    }
+  }
+  return values;
 }
 
 /**

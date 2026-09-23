@@ -25,6 +25,7 @@ import {
 	formatWorkflowList,
 	parseResourceMeta,
 	summarizeDescription,
+	type InvalidResource,
 	type WorkflowEntry,
 } from "@zhushanwen/subagent-core";
 
@@ -61,12 +62,15 @@ const injector = createResourceListInjector<WorkflowEntry>({
 	kind: "workflows",
 	logTag: "[workflow-list-injector]",
 	parse: parseWorkflowMeta,
-	format: (workflows) => formatWorkflowList(workflows, { guide: WORKFLOW_LIST_GUIDE }),
+	// invalids 透传 core 渲染（P5 D4-3 具名上报：条目段内 invalid 行；条目为零时
+	// 随工厂空态段呈现）。空数组不渲染（core 侧零字节变更）。
+	format: (workflows, invalids: readonly InvalidResource[]) =>
+		formatWorkflowList(workflows, {
+			guide: WORKFLOW_LIST_GUIDE,
+			...(invalids.length > 0 ? { invalids } : {}),
+		}),
 	includeTmp: true,
 });
-
-/** 用统一资源发现发现所有可用 workflow（includeTmp 覆盖 generate 产物；骨架与排序契约见工厂）。 */
-export const discoverAllWorkflows = injector.discover;
 
 /** 注册 session 生命周期 handler，注入 `<available_workflows>` 段（与 subagent 注入 handler 链式）。 */
 export const setupWorkflowListInjector = injector.setup;

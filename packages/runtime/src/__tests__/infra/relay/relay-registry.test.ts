@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as net from 'node:net'
 import { mkdtemp, mkdir, writeFile, readFile, rm, writeFile as writeFileAsync } from 'node:fs/promises'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initRelayServer, deinitRelayServer, isRelayServerActive, getActiveRelaySocketPath, getActiveRelayRegistry } from '../../../infra/relay/relay-server.js'
@@ -320,22 +320,33 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     agent.destroy()
   })
 
-  t('畸形 data 帧（缺 b64 / b64 非 string / null）→ 静默丢弃不炸服务，后续合法帧仍转发', async () => {
+  t('畸形 data 帧（缺 b64 / b64 非 string / null）→ 静默丢弃不炸服务，首帧 warn 显形，后续合法帧仍转发', async () => {
     // review round1 MUST_FIX：修复前 Buffer.from(undefined, 'base64') 在 readline 回调内
-    // 抛未捕获 TypeError 可击穿 relay 服务；修复后按 malformed 丢弃（不断连），连接存活
+    // 抛未捕获 TypeError 可击穿 relay 服务；修复后按 malformed 丢弃（不断连），连接存活。
+    // 加固轮补显形：首个畸形帧 warn（连接级去重），后续畸形帧只计数不再 warn。
     await startServer()
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
-    agent.send(validHandshake({ argv: [fakePi, 'echo'] }))
-    agent.send({ v: 1, kind: 'data', dir: 'down' })
-    agent.send({ v: 1, kind: 'data', dir: 'down', b64: 123 })
-    agent.send({ v: 1, kind: 'data', dir: 'down', b64: null })
-    agent.send({ v: 1, kind: 'data', dir: 'down', b64: Buffer.from('PING\n').toString('base64') })
-    await waitFor(() => agent.dataUp().some((b) => b.includes(Buffer.from('ECHO:PING'))), 30_000, 'echo round-trip after malformed frames')
-    // 畸形帧全部丢弃（未进 child stdin）：echo 只回合法帧那一次
-    expect(Buffer.concat(agent.dataUp()).toString('utf-8').match(/ECHO:/g)?.length).toBe(1)
-    // 连接未被断开（服务存活；畸形帧只丢帧不 reject）
-    expect(agent.closed).toBe(false)
+    // warn spy 挂在 startServer 之后（同断连即杀用例：spy 替换的是 logger patch 后的版本）
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      agent.send(validHandshake({ argv: [fakePi, 'echo'] }))
+      agent.send({ v: 1, kind: 'data', dir: 'down' })
+      agent.send({ v: 1, kind: 'data', dir: 'down', b64: 123 })
+      agent.send({ v: 1, kind: 'data', dir: 'down', b64: null })
+      agent.send({ v: 1, kind: 'data', dir: 'down', b64: Buffer.from('PING\n').toString('base64') })
+      await waitFor(() => agent.dataUp().some((b) => b.includes(Buffer.from('ECHO:PING'))), 30_000, 'echo round-trip after malformed frames')
+      // 畸形帧全部丢弃（未进 child stdin）：echo 只回合法帧那一次
+      expect(Buffer.concat(agent.dataUp()).toString('utf-8').match(/ECHO:/g)?.length).toBe(1)
+      // 连接未被断开（服务存活；畸形帧只丢帧不 reject）
+      expect(agent.closed).toBe(false)
+      // 数据阶段畸形帧显形：3 个畸形帧只首帧 1 条 warn（连接级去重防刷屏），含 recordId
+      const malformedWarns = warnSpy.mock.calls.filter(([msg]) => String(msg).includes('malformed data frame dropped'))
+      expect(malformedWarns).toHaveLength(1)
+      expect(String(malformedWarns[0]![0])).toContain('recordId=rec-1')
+    } finally {
+      warnSpy.mockRestore()
+    }
     agent.destroy()
   })
 
@@ -643,6 +654,25 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       await startServer()
       await waitFor(() => existsSync(marker), 30_000, 'orphan reaped by sweep')
       await waitFor(() => !existsSync(pidFile), 30_000, 'orphan pid file removed')
+    })
+
+    t('children 目录读不到（readdir 失败）→ warn 出声 + 不抛（本轮 sweep 跳过）', async () => {
+      // 权限位方案在 owner 运行下不可靠，用「目录被常规文件占位」构造 readdir ENOTDIR
+      await startServer()
+      const registry = getActiveRelayRegistry()!
+      const childrenPath = getRelayChildrenDir(dataDir)
+      rmSync(childrenPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      writeFileSync(childrenPath, 'occupied by regular file (readdir ENOTDIR)')
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await expect(registry.sweepOrphanChildren()).resolves.toBeUndefined()
+        expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('orphan sweep skipped'))).toBe(true)
+        expect(warnSpy.mock.calls.some(([, detail]) => String(detail).includes('ENOTDIR'))).toBe(true)
+      } finally {
+        warnSpy.mockRestore()
+        // 还原为空位（afterEach rm 递归清理 dataDir 时文件/目录皆可删，这里显式删防残留形态）
+        rmSync(childrenPath, { force: true })
+      }
     })
   })
 

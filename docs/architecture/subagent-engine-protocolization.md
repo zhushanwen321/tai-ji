@@ -160,7 +160,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 ```
 
 引擎与 core **同进程、同依赖树、同版本**；引擎通过 `EnginePort` 被调用，
-通过 `RunContext` 回调（onEvent / onHandleReady / onChildSpawned / stream / schemaEnv / ctxModel）
+通过 `RunContext` 回调（onEvent / onHandleReady / onChildSpawned / stream / ctxModel）
 与宿主交互（[池抽象降级 2026-09-13] onPoolResolved 与 RunContext.poolKey 已删——两引擎 poolKey 恒 `'shared'`，journal 落盘路径构造即终值）。
 
 ### 2.2 问题清单（每条都指向「分发形态」而非「抽象设计」）
@@ -281,7 +281,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 |------|------|------|------|
 | `initialize` | core→引擎 | 握手 | `{protocolVersion, hostInfo:{name,version,dataRoot}, engineConfig}` → `{protocolVersion, engineId, engineVersion, adapterVersion, capabilities, models?}`；**应答仅作诊断**（与 manifest 不一致 → warn 留痕，不参与判据，见下「同步成员清单」）；**`engineConfig` = L3 显式配置的 `engines.<id>.config`（`Record<string,string>`，缺省 `{}`）**，作为引擎自身配置入口透传（不放凭据）；版本越界 → `engine_protocol_mismatch`；能力位与 manifest 不符 → 按方向处理（见下「能力位」段） |
 | `probe` | core→引擎 | `probe` | `{force?}` → `ProbeReport` |
-| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, schemaEnv?, ctxModel?, engineFallback?, streamMode?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
+| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, ctxModel?, engineFallback?, streamMode?, sessionRootId?, sessionDir?, extensionPaths?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
 | `cancel` | core→引擎 | AbortSignal | `{runId, reason}`；引擎须在 3s 内收敛终态；超时 core 走杀链 |
 | `interact` | core→引擎 | `interact` | `{handle, action}` → `InteractResult` |
 | `read` | core→引擎 | `read` | `{handle, dataDir}` → `SessionView`（**`dataDir` 必填**：存量池时代相对 `dbPath` 需要它） |
@@ -306,7 +306,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `stream` | `host/streamDelta` | UI 实时刷新丢失 |
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
-| `ctxModel` / `schemaEnv` / `engineFallback` | `run.params.ctx` | model 兜底/结构化输出降级 |
+| `ctxModel` / `engineFallback` | `run.params.ctx` | model 兜底 / fallback 留痕丢失 |
+| `extensionPaths` | `run.params.ctx`（宿主 HostServices 端口注入；additive 可选，undefined 不上 wire） | 孙进程显式扩展加载缺失——pi 引擎不拼 `--extension` argv（undefined/空 = 不拼） |
 | `cwd` | `run.params.ctx.cwd`（有值才上 wire；server additive 还原进 `task.cwd`） | worktree 隔离失效——core 的 `taskSpecWithModel` 把 `WorktreeHandle.path` 合流进 cwd，引擎以 `task.cwd ?? process.cwd()` 决定子进程 spawn cwd；缺省不上 wire = 引擎回退自身进程 cwd（与无 worktree 任务现状一致） |
 
 **同步成员清单（`EnginePort` 的四个同步面，逐条给源——协议化后无同步源即锁死）**：
@@ -347,7 +348,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **被否**：「未握手时返回保守能力位」——击穿反例：pi 缺省路径的 `conversation:true` / `maxTurns` /
 `worktree` 会被 `capability-gate` 全部拒掉（G3/G5 首轮即破）。
 
-**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（9 种）逐字序列化；journal 落盘仍在 core。
+**事件与背压**：`event.params.event` 即 `AgentEvent` 逐字序列化（事件词表 SSOT = SDK `AGENT_EVENT_TYPE_NAMES`，本文档不复制枚举）；journal 落盘仍在 core。
 **默认关闭事件合并**（`TAIJI_ENGINE_EVENT_COALESCE=0`）——A1 要求「事件逐字段等价」，
 合并（16ms/4KB）与逐字段等价不可兼得。合并开关保留，启用需另立验收（量级/恢复/重审）后方可默认开。
 **stdout/stderr 分工**：stdout 独占 NDJSON（行解析器 + 背压：core 读得慢时靠 OS 管道背压，不做无界缓存）；
@@ -359,6 +360,44 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 **版本协商**：`ENGINE_PROTOCOL_VERSION = 1`（core 支持 `>=1 <2`）；越界 → `engine_protocol_mismatch`
 （含双方版本 + 升级指引），该引擎标记不可用，不影响其他引擎与宿主。
+
+**协议演进宪法**（条文权威 = 本节 + [ADR-0071](adr/decisions.md)；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
+
+*字段归属三分判据（新增 wire 字段按决策树依序裁决；存量不搬家不重判，判据只约束新增）*：
+① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段声明携带的约束面——
+轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；② 描述「任务是什么」(what) 还是
+「在什么环境跑/怎么跑」(where/how)？what → `task`（预算/验收类约束 = 任务自带语义归 task，
+宿主偏好参数走③）；③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，
+设计期以两引擎实装逐一对照验证恒等）；不能（推导会分叉）→ `run.params.ctx`（存疑即视为会分叉，
+取 ctx 保守侧）。**判据 4（双写禁令，绝对条款）**：同一语义不得在 task 与 ctx 各挂一份，
+取值源必须唯一（机器锁钉 wire 类型；`port-contract.ts` 的进程内合回形态不在此列）。
+**判据 5（能力绑定）**：字段有效性依赖能力位时双向注释互指（先例 `streamMode` ↔
+`eventGranularity`），宿主据此派发前预检。逐字段存量结论表登记在
+`contract-types.ts` `AgentCallOpts` 注释。
+
+*演进政策三条*：① **additive 面**——新增可选字段 / 事件变体 / 方法 / 通道不 bump 版本，
+纪律 = 旧端对新成员忽略或 no-op 安全落空（reducer default 分支、未知字段丢弃）；
+② **删除面 = 同批切换**——读写端同 commit 族、全程无「写新读旧」窗口 + ADR 登记，
+单仓同步部署协议（两引擎同仓同发布）下删除的唯一合法形态；③ **major bump 触发**——
+删除无法同批协调时（第三方引擎独立发布节奏出现），core 支持区间平移 `[1,2)→[2,3)`。
+
+*深载荷专属 schema 判据与反向通道关联键总纲*：深载荷配专属 schema 需满足任一——①该载荷
+经历过键切换/搬家事故（消费方需结构化报错路径防静默失效，先例 `runSessionParamsSchema`）；
+②载荷跨信任边界（第三方引擎独立开发，双侧不再共享编译期）。反向通道关联键：
+`runId` = 渲染与事件路由键（event 通知/streamDelta/handleReady/askUser），
+`recordId` = record 镜像键（childSpawned/childStateChanged）；新增通道按消费方选键。
+
+*编译期机器锁（零运行时；执行点 = pre-commit SDK typecheck 按路径触发段 + CI typecheck job SDK 步）*：
+- **C3 事件词表 SSOT**——SDK `AGENT_EVENT_TYPE_NAMES` 运行时词表常量 ↔ `AgentEvent["type"]`
+  联合经 `AssertMutuallyAssignable` 双向锁（任一侧漂移 typecheck 红）；schema enum 与
+  测试断言从词表派生。新增事件变体义务 = ①union 加成员 ②词表加名 ③schema enum 与测试自动跟随
+  ④双侧 reducer default no-op 确认——前三机器锁，末一人判。
+- **C4 task/ctx 双写禁令锁**——`keyof AgentCallOpts & keyof RunContextParams` 与 `never`
+  双向可赋值断言（人为加同名键即红；异名同义双写由判据 4 成文 + CR 人判兜底）。
+- **C2 能力位扩展约定**——`EngineCapabilities` 新增轴一律**可选键**（缺省语义 = 该轴最弱档，
+  逐轴注释写死），存量 11 位 required 不动；closure 测试断言拆两条（存量 11 键逐一必填 +
+  可选新增键缺省构造编译通过）；消费新轴的 core 代码必须处理缺省不得 `!` 断言；
+  manifest 解析器已 additive 友好（未知键忽略 + warn），零改动。
 
 **错误码**
 

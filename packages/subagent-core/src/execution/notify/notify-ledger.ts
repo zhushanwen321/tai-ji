@@ -173,6 +173,13 @@ export interface NotifyLedgerHost {
   onAgentSettled(handler: () => void): void;
   /** 单通道送达（pi.sendMessage({triggerTurn:true})）。 */
   sendDelivery(message: { customType: string; content: string; display: boolean; details?: unknown }): void;
+  /**
+   * [T4③] 不唤醒的 display 消息（abandon 对会话补显形）：pi.sendMessage 无
+   * triggerTurn——display:true 消息进会话可见，但不唤醒主 agent turn（notifyStall
+   * 同款形态）。可选：缺席（旧 host / 既有测试 mock）时放弃只走 entry + 日志留痕，
+   * 会话内无显形（行为与补显形之前一致）。生产 bind（session-lifecycle.ts）恒实现。
+   */
+  sendDisplayMessage?(message: { customType: string; content: string; display: boolean; details?: unknown }): void;
 }
 
 /** 账面一条通知（entry 持久形态 + 运行时投递状态）。 */
@@ -641,7 +648,12 @@ export function createNotifyLedger(
    *  warn 恢复指引。放弃后账面摘除（pending/waiting 计数归零、看门狗可停），同
    *  notifyId 被 record 幂等拒绝——「确认不可达」的止损上半场；通知内容本身仍可
    *  经 subagents action:"list" 手动核对（账本 entry 与 result 落盘不受影响）。
-   *  放弃不计入 watchdogReplays 桶（该桶口径 = 实际发生重投的条数）。 */
+   *  放弃不计入 watchdogReplays 桶（该桶口径 = 实际发生重投的条数）。
+   *  对会话补显形：abandoned 后经 sendDisplayMessage 补一条不唤醒的 display 消息
+   *  （customType = NOTIFY_ABANDONED_CUSTOM_TYPE——不在回执接受域
+   *  channelTypes 内，不会被误销账；display:true 无 triggerTurn = 会话可见不唤醒），
+   *  让主 agent/用户在会话里有「通知已放弃」的显形线索（此前只有 plain custom
+   *  entry + 日志，会话流里零痕迹）。host 未实现该方法（旧 mock）时跳过显形。 */
   function abandonItem(item: NotifyLedgerItem): void {
     host.appendLedgerEntry(NOTIFY_ABANDONED_CUSTOM_TYPE, { v: 1, notifyId: item.notifyId } satisfies NotifyAbandonedEntryData);
     items.delete(item.notifyId);
@@ -659,6 +671,15 @@ export function createNotifyLedger(
         `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts; verify manually via ${recoveryHint}`,
       { notifyId: item.notifyId, attempts: item.attempts },
     );
+    host.sendDisplayMessage?.({
+      customType: NOTIFY_ABANDONED_CUSTOM_TYPE,
+      content:
+        `Notification abandoned: "${itemLabel(item)}" received no receipt after ` +
+        `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts. ` +
+        `Verify manually via ${recoveryHint}. (notifyId: ${item.notifyId})`,
+      display: true,
+      details: { notifyId: item.notifyId, attempts: item.attempts, abandoned: true },
+    });
     maybeStopWatchdog();
   }
 

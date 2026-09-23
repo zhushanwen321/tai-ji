@@ -4,7 +4,7 @@
 // subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
 // gate / D7 成功收口 / adopt 豁免双点）。
 //
-// 锁六组面：
+// 锁以下组面：
 //   1. 注册面：record 带 origin:"workflow" + parentRunId；record 级
 //      pending:register/unregister 配对（D5：record 级照旧）。
 //   2. 池顺序（D3）：路由/预检失败先于池 acquire——零池占用 + 同步抛错 + 零孤儿 record。
@@ -48,6 +48,7 @@ import { createNotifyHost } from "../notify/notify-host.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
+import { SAR_UNATTACHED_PARENT_RUN_ID } from "../assembly/subprocess-agent-runner.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
@@ -70,6 +71,10 @@ import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+// [D3 协议版 P6] armed 消费落账端到端用例：journal 注入面（orchestration/pump 公共
+// 测试钩子）+ journal 读回（run-events 唯一实装）。
+import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
+import { createRunEventJournal, type WorkflowRunEvent } from "../../orchestration/run-events.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
 
@@ -693,5 +698,120 @@ describe("settled-watchdog 原语守护（自 SAR full-chain 测试迁移）", (
     });
     expect(hasSettledWatchdog("sa-env-off")).toBe(false);
     expect(fired).toEqual([]);
+  });
+});
+
+// ============================================================
+// 8. [D3 协议版 P6] armed 回执消费落账（observedEvent 拦截 → runId 键投递 → journal）
+// ============================================================
+
+describe("armed 回执经 observedEvent 落 run 事件 journal（[D3 协议版 P6] 生产链端到端）", () => {
+  it("fake 引擎 armed 帧进 observedEvent → dispatchRunArmedReceipt → journal 落账（frame 载荷逐字直通）", async () => {
+    const { service, store, fake } = makeHarness();
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-armed-journal-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      // journal 首帧播种（生产 = lifecycle.runWorkflow 的 dispatchRunCreated 正点；
+      // 此处以 runId 键投递带全载荷的 run-created 等价播种——非 aggregate 路径的
+      // 测试构造面）。播种后 fold 出 dispatched，armed 命中 dispatched 自环行。
+      await dispatchRunTrigger(
+        { runId: "wf-armed-e2e" },
+        { type: "run-created", runId: "wf-armed-e2e", workflowName: "review-fix-loop", argsSummary: "{}", ts: Date.now() },
+      );
+
+      const pending = service.executeWorkflowAgent(baseOpts(), "wf-armed-e2e");
+      await flush();
+      const run = soleRun(fake);
+      // record.parentRunId 贯穿（拦截点的路由键源）
+      expect(runningRecord(store).parentRunId).toBe("wf-armed-e2e");
+
+      // 引擎 armed 回执（协议 armed 事件对象）经 ctx.onEvent = observedEvent 进入拦截点
+      const armedFrame = {
+        type: "armed",
+        schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+        extensionPkg: "@zhushanwen/pi-structured-output",
+      } as const;
+      run.emitEvent(armedFrame);
+      run.settle({ content: "done" });
+      await pending;
+      // 投递队列是微任务链，settle 收尾后再排空一轮（journal append 在队内同步完成）
+      await flush();
+
+      const events = await createRunEventJournal(journalDir).scan("wf-armed-e2e");
+      expect(events.map((e) => e.type)).toEqual(["run-created", "armed"]);
+      const armed = events[1] as Extract<WorkflowRunEvent, { type: "armed" }>;
+      expect(armed.frame).toEqual(armedFrame);
+      expect(typeof armed.ts).toBe("number");
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  // [A1 修复循环第 2 轮] 真机失败签名锁定（dev 实例 wf-1790034646281-w7tp4f 实证）：
+  // 生产 subagent-workflow extension 的 lazyDeps 缺 workflowAgentDispatch 转发成员 →
+  // workflow tool 的 run action 以 lazyDeps 启动 run → pump dispatchAgentCall 回退
+  // deps.runner（SAR.run 占位 runId）→ record.parentRunId = "sar-unattached"（truthy
+  // 但非真实 run）→ armed 回执落账键错 → fold 出 created 态 → armed 表外转移
+  // IllegalTransitionError 让位。两条用例锁定该链路的 service 侧事实：
+  // 装配点值无关透传（不断）+ 占位键让位不污染真实 run journal（让位语义正确）。
+  // 上游修复（lazyDeps 补转发成员）在 extension 领地，修复后本组用例仍应恒绿。
+  it("SAR 直调占位路径：record 装配对 parentRunId 值无关透传（origin=workflow + 占位 runId）", async () => {
+    const { service, store, fake } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), SAR_UNATTACHED_PARENT_RUN_ID);
+    await flush();
+    // 装配点（createRecordForMode originFields spread）对任意 runId 实参原样落位——
+    // 真机 sa-d73db003 binding sidecar（origin=workflow + parentRunId=sar-unattached）
+    // 的内存面等价断言：缺口不在 record 装配，在上游 runId 实参来源。
+    const record = runningRecord(store);
+    expect(record.origin).toBe("workflow");
+    expect(record.parentRunId).toBe(SAR_UNATTACHED_PARENT_RUN_ID);
+    const run = soleRun(fake);
+    run.settle({ content: "done" });
+    await pending;
+  });
+
+  it("占位 runId 的 armed 回执让位（真机失败签名锁定）：fold 出 created → 非法转移让位，真实 run journal 零污染", async () => {
+    const { service, fake } = makeHarness();
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-armed-placeholder-"));
+    setRunEventJournalDirForTest(journalDir);
+    loggerMock.debug.mockClear();
+    try {
+      // 真实 run 的 journal 首帧已落（生产 = dispatchRunCreated 正点），fold 出 dispatched。
+      await dispatchRunTrigger(
+        { runId: "wf-real" },
+        { type: "run-created", runId: "wf-real", workflowName: "review-fix-loop", argsSummary: "{}", ts: Date.now() },
+      );
+
+      // 占位 runId 派发（生产 lazyDeps 缺口的 SAR 回退形态）+ 引擎 armed 回执进拦截点。
+      const pending = service.executeWorkflowAgent(baseOpts(), SAR_UNATTACHED_PARENT_RUN_ID);
+      await flush();
+      const run = soleRun(fake);
+      run.emitEvent({
+        type: "armed",
+        schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+        extensionPkg: "@zhushanwen/pi-structured-output",
+      } as const);
+      run.settle({ content: "done" });
+      await pending;
+      // 投递队列是微任务链，settle 收尾后再排空一轮（让位判定在队内完成）
+      await flush();
+
+      // 让位签名：IllegalTransitionError 走 debug 留痕（runId 键可见，与真机
+      // run-event-dispatch 日志行同文）。
+      expect(loggerMock.debug).toHaveBeenCalledWith(
+        expect.stringContaining(`run event dispatch yielded (runId=${SAR_UNATTACHED_PARENT_RUN_ID})`),
+      );
+      // 占位 runId 无 journal（scan ENOENT = 空流）→ 零落帧
+      await expect(
+        createRunEventJournal(journalDir).scan(SAR_UNATTACHED_PARENT_RUN_ID),
+      ).resolves.toEqual([]);
+      // 真实 run 的 journal 零污染（占位回执不串键落帧）
+      const realEvents = await createRunEventJournal(journalDir).scan("wf-real");
+      expect(realEvents.map((e) => e.type)).toEqual(["run-created"]);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });

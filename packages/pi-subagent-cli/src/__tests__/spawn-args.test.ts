@@ -6,8 +6,6 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { mirrorMainProcessFlags } from "../argv-mirror.ts";
-import { MAX_FORK_DEPTH } from "../spawn-args.ts";
 import { buildEnvBlock, buildSpawnArgs } from "../spawn-args.ts";
 
 describe("buildSpawnArgs", () => {
@@ -23,10 +21,11 @@ describe("buildSpawnArgs", () => {
     skillPaths: undefined,
   };
 
-  it("基础参数：--mode rpc --session-dir + --model provider/id，不含 -p 也不含 task（task 经 stdin 传）", () => {
+  it("基础参数：--mode rpc --session-dir + --model provider/id + --no-extensions 基座（孙进程扩展显式化），不含 -p 也不含 task（task 经 stdin 传）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).toEqual([
       "--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o",
+      "--no-extensions",
     ]);
   });
 
@@ -114,10 +113,11 @@ describe("buildSpawnArgs", () => {
         sessionDir: "/s",
         forkSource: "/parent.jsonl",
         skillPaths: ["/skills/x"],
+        extensionPaths: ["/staged/@zhushanwen/pi-structured-output"],
       },
     );
-    // 末尾应是最后一个 --skill 的路径（task 不再作为 positional arg 出现）
-    expect(args[args.length - 1]).toBe("/skills/x");
+    // 末尾应是最后一个 --extension 的路径（task 不再作为 positional arg 出现）
+    expect(args[args.length - 1]).toBe("/staged/@zhushanwen/pi-structured-output");
     expect(args).toContain("--fork");
     expect(args).toContain("--tools");
     expect(args).toContain("--skill");
@@ -149,67 +149,33 @@ describe("buildSpawnArgs", () => {
   });
 
   // ============================================================
-  // mirrorFlags 透传：子进程镜像主进程 extension/approve flag
+  // [D2 扩展加载显式化] extensionPaths 显式透传（取代已废弃的 argv 镜像机制）
   // ============================================================
 
-  it("mirrorFlags 透传：noExtensions+approve+noContextFiles+extensionPaths 全量 push（TC5）", () => {
+  it("extensionPaths 逐项拼 --extension（数组顺序保留）+ 基座 --no-extensions 共存", () => {
     const args = buildSpawnArgs({
       ...baseParams,
-      mirrorFlags: { noExtensions: true, approve: true, noContextFiles: true, extensionPaths: ["/e1", "/e2"] },
+      extensionPaths: ["/staged/@zhushanwen/pi-structured-output", "/other/ext"],
     });
+    // -ne 与显式 --extension 共存（pi 官方语义：-ne 禁 discovery，显式 -e 仍生效）
     expect(args).toContain("--no-extensions");
-    expect(args).toContain("--approve");
-    expect(args).toContain("--no-context-files");
     // 每个 extension 独立 token，顺序保留
     const extIdxs = args.map((a, i) => (a === "--extension" ? i : -1)).filter((i) => i >= 0);
     expect(extIdxs).toHaveLength(2);
-    expect(args[extIdxs[0] + 1]).toBe("/e1");
-    expect(args[extIdxs[1] + 1]).toBe("/e2");
+    expect(args[extIdxs[0] + 1]).toBe("/staged/@zhushanwen/pi-structured-output");
+    expect(args[extIdxs[1] + 1]).toBe("/other/ext");
   });
 
-  it("mirrorFlags 全 false/空 → 不追加任何目标 flag（TC6）", () => {
-    const args = buildSpawnArgs({
-      ...baseParams,
-      mirrorFlags: { noExtensions: false, approve: false, noContextFiles: false, extensionPaths: [] },
-    });
-    expect(args).not.toContain("--no-extensions");
-    expect(args).not.toContain("--approve");
+  it("extensionPaths 空数组 → 不拼 --extension（仍带 --no-extensions 基座）", () => {
+    const args = buildSpawnArgs({ ...baseParams, extensionPaths: [] });
     expect(args).not.toContain("--extension");
-    expect(args).not.toContain("--no-context-files");
-    // 仅基础参数
-    expect(args).toEqual(["--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o"]);
+    expect(args).toContain("--no-extensions");
   });
 
-  it("mirrorFlags undefined → 行为等同旧版（TC7）", () => {
+  it("extensionPaths undefined → 不拼 --extension（双源皆空的缺省形态）", () => {
     const args = buildSpawnArgs(baseParams);
-    expect(args).toEqual(["--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o"]);
     expect(args).not.toContain("--extension");
-    expect(args).not.toContain("--no-extensions");
-    expect(args).not.toContain("--approve");
-    expect(args).not.toContain("--no-context-files");
-  });
-
-  it("noContextFiles 镜像：主进程 argv 含 --no-context-files → 子进程 args 含该 flag", () => {
-    // 端到端链路断言：主 pi 进程以 --no-context-files 启动（用户 opt-out context files）
-    // → mirrorMainProcessFlags 解析 → buildSpawnArgs 产出同 flag 给每个 subagent。
-    // 缺此镜像时，--extension 镜像带入的 @zhushanwen/pi-system-prompt 检查子进程
-    // 自己的 argv（无 flag）→ 全局 AGENTS.md 注入在 subagent system prompt 照常生效，
-    // 用户 opt-out 被绕过。
-    const mainArgv = [
-      "bun", "/pi", "--mode", "rpc", "--no-context-files",
-      "--extension", "/staged/@zhushanwen/pi-system-prompt/index.js",
-    ];
-    const args = buildSpawnArgs({ ...baseParams, mirrorFlags: mirrorMainProcessFlags(mainArgv) });
-    expect(args).toContain("--no-context-files");
-    // extension 镜像照常（两者共存才构成完整契约）
-    const extIdx = args.indexOf("--extension");
-    expect(args[extIdx + 1]).toBe("/staged/@zhushanwen/pi-system-prompt/index.js");
-  });
-
-  it("noContextFiles 不镜像：主进程 argv 不含 flag → 子进程 args 不含（默认行为不变）", () => {
-    const mainArgv = ["bun", "/pi", "--mode", "rpc"];
-    const args = buildSpawnArgs({ ...baseParams, mirrorFlags: mirrorMainProcessFlags(mainArgv) });
-    expect(args).not.toContain("--no-context-files");
+    expect(args).toContain("--no-extensions");
   });
 
   // ============================================================
@@ -232,7 +198,7 @@ describe("buildSpawnArgs", () => {
   it("sessionFile undefined → 不含 --session（向后兼容）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("--session");
-    expect(args).toEqual(["--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o"]);
+    expect(args).toEqual(["--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o", "--no-extensions"]);
   });
 
   it("sessionFile + modelRef + thinkingLevel → 三者都进 args（resume 全参数）", () => {
@@ -249,100 +215,6 @@ describe("buildSpawnArgs", () => {
     const modelIdx = args.indexOf("--model");
     expect(modelIdx).toBeGreaterThan(-1);
     expect(args[modelIdx + 1]).toBe("openai/gpt-4o:high");
-  });
-});
-
-// ============================================================
-// mirrorMainProcessFlags：从主进程 argv 解析可镜像的 flag
-// ============================================================
-
-describe("mirrorMainProcessFlags", () => {
-  it("--extension 多次出现（空格分隔）+ 布尔 flag（TC1）", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--mode", "rpc", "--no-extensions", "--approve",
-      "--extension", "/a", "--extension", "/b",
-    ]);
-    expect(r).toEqual({ noExtensions: true, approve: true, extensionPaths: ["/a", "/b"], noContextFiles: false });
-  });
-
-  it("--extension=path 等号形式 + 短形式 -e/-ne/-a（TC2）", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--extension=/x", "-ne", "-a",
-    ]);
-    expect(r).toEqual({ noExtensions: true, approve: true, extensionPaths: ["/x"], noContextFiles: false });
-  });
-
-  it("混合形式（空格 + 等号），顺序保留（TC3）", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--extension", "/a", "--extension=/b", "--extension", "/c",
-    ]);
-    expect(r.extensionPaths).toEqual(["/a", "/b", "/c"]);
-    expect(r.noExtensions).toBe(false);
-    expect(r.approve).toBe(false);
-    expect(r.noContextFiles).toBe(false);
-  });
-
-  it("无目标 flag → 全空/全 false（向后兼容，TC4）", () => {
-    const r = mirrorMainProcessFlags(["bun", "/pi", "--mode", "rpc"]);
-    expect(r).toEqual({ noExtensions: false, approve: false, extensionPaths: [], noContextFiles: false });
-  });
-
-  it("--no-context-files 长形式解析 → noContextFiles: true", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--mode", "rpc", "--no-context-files",
-      "--extension", "/staged/@zhushanwen/pi-system-prompt/index.js",
-    ]);
-    expect(r.noContextFiles).toBe(true);
-    // 与 extension 镜像共存（实际 taiji 启动形态：两 flag 同时出现）
-    expect(r.extensionPaths).toEqual(["/staged/@zhushanwen/pi-system-prompt/index.js"]);
-    expect(r.noExtensions).toBe(false);
-    expect(r.approve).toBe(false);
-  });
-
-  it("-nc 短形式解析 → noContextFiles: true（pi CLI 等价短形式）", () => {
-    const r = mirrorMainProcessFlags(["bun", "/pi", "--mode", "rpc", "-nc"]);
-    expect(r.noContextFiles).toBe(true);
-  });
-
-  it("不误吃其他 flag 值与 positional 参数（TC8）", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--no-extensions", "--skill", "/sk", "some prompt text",
-    ]);
-    expect(r.noExtensions).toBe(true);
-    expect(r.extensionPaths).toEqual([]);
-    // --skill 的 /sk 不混入 extensionPaths；positional prompt 被忽略
-  });
-
-  it("空 argv / 仅前导两项 → 全空", () => {
-    expect(mirrorMainProcessFlags([])).toEqual({ noExtensions: false, approve: false, extensionPaths: [], noContextFiles: false });
-    expect(mirrorMainProcessFlags(["bun", "/pi"])).toEqual({
-      noExtensions: false, approve: false, extensionPaths: [], noContextFiles: false,
-    });
-  });
-
-  it("--extension 末尾无值 → 跳过（不越界、不误吃下一个 token）", () => {
-    const r = mirrorMainProcessFlags(["bun", "/pi", "--extension"]);
-    expect(r.extensionPaths).toEqual([]);
-  });
-
-  it("-e 短形式多次 + 等号混用", () => {
-    const r = mirrorMainProcessFlags(["bun", "/pi", "-e", "/a", "-e=/b", "-e", "/c"]);
-    expect(r.extensionPaths).toEqual(["/a", "/b", "/c"]);
-  });
-
-  // [MF-7a] flag 判定收窄为 startsWith("--")：单 - 开头的合法路径不被误判为 flag。
-  it("[MF-7a] - 开头的路径被当值镜像（不误判 flag）", () => {
-    const r = mirrorMainProcessFlags(["bun", "/pi", "--extension", "-weird-dir/ext.js"]);
-    expect(r.extensionPaths).toEqual(["-weird-dir/ext.js"]);
-  });
-
-  // [MF-7a] -- 开头的真 flag 仍正确跳过：--extension 后跟 --flag 时不吃值、不越界。
-  it("[MF-7a] --extension 后跟 -- 开头真 flag → 不吃值", () => {
-    const r = mirrorMainProcessFlags([
-      "bun", "/pi", "--extension", "--approve", "--extension", "/real.js",
-    ]);
-    expect(r.extensionPaths).toEqual(["/real.js"]);
-    expect(r.approve).toBe(true);
   });
 });
 
@@ -383,38 +255,9 @@ describe("buildEnvBlock", () => {
     expect(block).toContain("--- end environment ---");
   });
 
-  it("forkDepth > 0 → 含 Depth: N/<MAX>", async () => {
-    const block = await buildEnvBlock(tmpGitRepo, 3);
-    expect(block).toContain(`Depth: 3/${MAX_FORK_DEPTH}`);
-  });
-
-  it("forkDepth === 0 → 不含 depth 行", async () => {
-    const block = await buildEnvBlock(tmpGitRepo, 0);
-    expect(block).not.toContain("Depth:");
-  });
-
-  it("forkDepth undefined → 不含 depth 行", async () => {
+  it("深度参数已删除（wire ctx 无深度字段，深度恒 undefined）→ 恒不含 Depth 行", async () => {
     const block = await buildEnvBlock(tmpGitRepo);
     expect(block).not.toContain("Depth:");
-  });
-
-  // [M9] nestingDepth：取 max(forkDepth, nestingDepth) 展示更严约束。
-  it("forkDepth < nestingDepth → 展示 max（nestingDepth 更严）", async () => {
-    // forkDepth=1（最内 fork），nestingDepth=5（通用嵌套已深）→ 展示 5
-    const block = await buildEnvBlock(tmpGitRepo, 1, 5);
-    expect(block).toContain(`Depth: 5/${MAX_FORK_DEPTH}`);
-    expect(block).not.toContain(`Depth: 1/${MAX_FORK_DEPTH}`);
-  });
-
-  it("forkDepth > nestingDepth → 展示 max（forkDepth 更严）", async () => {
-    const block = await buildEnvBlock(tmpGitRepo, 7, 2);
-    expect(block).toContain(`Depth: 7/${MAX_FORK_DEPTH}`);
-  });
-
-  it("forkDepth=0 + nestingDepth>0 → 展示 nestingDepth（非 fork 嵌套也计入）", async () => {
-    // 非 fork 但有嵌套（如顶层 → 子 → 孙），nestingDepth=2 应展示
-    const block = await buildEnvBlock(tmpGitRepo, undefined, 2);
-    expect(block).toContain(`Depth: 2/${MAX_FORK_DEPTH}`);
   });
 
   it("git branch 存在 → 含 Git branch 行", async () => {

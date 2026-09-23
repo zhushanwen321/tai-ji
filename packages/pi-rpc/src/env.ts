@@ -11,10 +11,10 @@
 // env.ts 供引擎 CLI——独立 npm 发布需自包含），本包不复刻第三份。runtime 接线
 // 传 shared 版（C-proc-09 唯一构建点的过滤/deny 语义不变）。
 //
-// pi-subagent-cli 侧不消费本函数（其子进程 env 走 SDK buildEngineChildEnv 三层
-// 契约 + schemaEnv/relay 键，无 pi agent 目录隔离需求——PI_CODING_AGENT_DIR 全局
-// 一份，无隔离池；依据 = 原 subagent-engine-abstraction.md §3.3.9（已删，git
-// 可追溯），现行登记 constraints.json C-ext-15）。
+// pi-subagent-cli 侧不消费本函数（其子进程 env 走 SDK buildOutboundChildEnv + 引擎
+// 自 wire task.schema 就地派生注入的 PI_WORKFLOW_SCHEMA + relay 活跃时的归属键重写，
+// 无 pi agent 目录隔离需求——PI_CODING_AGENT_DIR 全局一份，无隔离池；现行登记
+// constraints.json C-ext-15）。
 
 /** 底层出站构建器形状（shared buildOutboundChildEnv / SDK 同形，DI 注入）。 */
 export type BuildChildEnvFn = (opts: {

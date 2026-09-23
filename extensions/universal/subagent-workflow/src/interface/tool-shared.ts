@@ -4,8 +4,11 @@
  * 抽取边界（findings g11a-F1/F2/F3）：
  * - `assertNotAborted` / `optionSlugSuffix` / `renderTextResult`：三处逐字重复的
  *   入口前置与渲染片段（同粒度小函数）。
- * - `buildRunSpecFromScript` / `formatAvailableWorkflowList`：RunSpec 组装字面量与
- *   「可用脚本清单」串——RunSpec 是 core 启动契约，两份字面量漏改即静默丢字段。
+ * - `buildRunSpecFromScript`：RunSpec 组装字面量——RunSpec 是 core 启动契约，
+ *   字面量漏改即静默丢字段。
+ *
+ * 「可用脚本清单」串不在本文件：已并入 core 单源
+ *（@zhushanwen/subagent-core 的 formatAvailableWorkflowRefs，经 barrel 消费）。
  *
  * **不**把 execute 包成 HOF：reentry-guard.ts 文件头已裁决（HOF 包装会破坏 union
  * 返回类型推断），本文件只放同粒度小函数，guard 的 check → try/finally release
@@ -91,19 +94,4 @@ export function buildRunSpecFromScript(
     model: opts.model,
     thinkingLevel: opts.thinkingLevel,
   };
-}
-
-/**
- * 「可用脚本清单」串（无可用项 → 空串，调用方自行补 `|| "  (none)"`）。
- *
- * 每项两行（name + description，缩进 location 绝对路径）——弱模型按清单里的名字
- * / 路径重试的自救主路径，两个 tool 的文案必须同源。
- */
-export function formatAvailableWorkflowList(all: readonly WorkflowScript[]): string {
-  return all
-    .filter((wf) => wf.available)
-    .map(
-      (wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`,
-    )
-    .join("\n");
 }

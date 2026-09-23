@@ -10,8 +10,9 @@
  *
  * 运行：cd packages/runtime && npx vitest run test/workflow-extractor-guards.test.ts
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { scanWorkflowEntries } from '../src/services/session/workflow-extractor.js'
+import { _resetWarnOnceForTest } from '../src/utils/warn-once.js'
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
 
 /** 最小合法快照（过 snapshot 层守卫 + deserializeRun + mapValidatedSnapshot）。 */
@@ -80,5 +81,52 @@ describe('workflow-record entry 层 snapshot 形态守卫（parseSelfDescribedWo
     ])
     // workflow-state-link 是 legacy 通道：文件不存在 → null 跳过；自描述 entry 是唯一产出
     expect(records.map((r) => r.runId)).toEqual(['run-ok'])
+  })
+})
+
+describe('snapshot 核心必填字段值级守卫（coreProjectionFieldIssue，经 mapValidatedSnapshot 两路共用）', () => {
+  it('scriptName 非非空 string / status 词表外 / startedAt 不可解析 → 该 run 跳过 + warn 留痕，同批合法 run 照常产出', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      _resetWarnOnceForTest()
+      const badCases = [
+        validSnapshot({ runId: 'run-bad-scriptname-empty', spec: { scriptName: '' } }),
+        validSnapshot({ runId: 'run-bad-scriptname-type', spec: { scriptName: 42 } }),
+        validSnapshot({
+          runId: 'run-bad-status-word',
+          state: { status: 'paused', budget: { usedTokens: 0, usedCost: 0 }, calls: [], trace: [] },
+        }),
+        validSnapshot({ runId: 'run-bad-startedat-garbage', meta: { startedAt: 'not-a-date' } }),
+        validSnapshot({ runId: 'run-bad-startedat-type', meta: { startedAt: 123 } }),
+      ]
+      for (const [i, bad] of badCases.entries()) {
+        const goodRunId = `run-good-${i}`
+        const records = scanWorkflowEntries([
+          recordEntry({ v: 1, snapshot: bad }),
+          recordEntry({ v: 1, snapshot: validSnapshot({ runId: goodRunId }) }),
+        ])
+        // 坏值 run 跳过（不产出谎报类型的 record），同批合法 run 不受影响
+        expect(records.map((r) => r.runId)).toEqual([goodRunId])
+      }
+      // 每个坏 run 出声一次（warnOnce 按 runId 去重；此处 runId 各异 → 5 条），消息含字段定位
+      const coreWarns = warnSpy.mock.calls.filter(([msg]) => String(msg).includes('core field invalid'))
+      expect(coreWarns).toHaveLength(badCases.length)
+      expect(String(coreWarns[0]![0])).toContain('spec.scriptName invalid')
+    } finally {
+      warnSpy.mockRestore()
+      _resetWarnOnceForTest()
+    }
+  })
+
+  it('合法核心字段不误伤（对照组）：非空 scriptName + 词表内 status + ISO startedAt 正常投影', () => {
+    _resetWarnOnceForTest()
+    try {
+      const records = scanWorkflowEntries([recordEntry({ v: 1, snapshot: validSnapshot() })])
+      expect(records).toHaveLength(1)
+      expect(records[0].scriptName).toBe('s')
+      expect(records[0].status).toBe('done')
+    } finally {
+      _resetWarnOnceForTest()
+    }
   })
 })

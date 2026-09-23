@@ -42,6 +42,19 @@
  * - dispose()：幂等（缓存自身 Promise）；刷全部 pending 批 + await 全部 in-flight
  *   链后返回。dispose 后 save 静默 no-op + debug 日志（session_shutdown 编排收尾）。
  *
+ * [P3/D6] 事件边沿 flush（快照投影增强）：
+ * - **fold 投影**：每次 flush 经 core `projectRunEvents` 从同目录事件 journal
+ *   （`<runId>.events.jsonl`，core pump 单写者落账）重放投影 additive 字段
+ *   （calls[].startedAt/lastProgressAt、run 级 health、终局 outcome/errorCode）——
+ *   权威在事件流，快照是投影；journal 读失败/为空降级为未富集快照。
+ * - **边沿触发**：fs.watch 感知 journal append → per-runId 防抖 1s 合并 → 走既有
+ *   串行链 flush（flush 时机从「agent 完成」加密到「事件边沿」）；活跃 run 引用
+ *   由 save() 保留（终局即删）。watcher 失败一次性降级（回落 pump save 链时机）。
+ * - **entry 通道节流不变**（P-C3 写放大控制）：workflow-record entry append 仍受
+ *   entryAppendMinIntervalMs（60s）约束——pi session JSONL append-only，边沿级
+ *   entry append 会复活 O(n²)；边沿 flush 落的是 state 文件（rewrite 覆盖写，
+ *   无累积）。写放大评估登记见实施报告。
+ *
  * 序列化策略（下沉收口 D4 后）：
  * - 快照投影/重水合/版本 guard 全部消费 core run-snapshot codec（toRunSnapshot/
  *   fromRunSnapshot）——字段演进单点（G2）；本 store 只保留 IO 策略（rewrite/
@@ -59,12 +72,12 @@
  * 里用户手动删除选中的单个顶层 session 文件（trash CLI → unlink fallback，
  * dist/modes/interactive/components/session-selector.js:539-550），非自动、
  * 不递归子目录。**推论：workflow-state state 文件无限累积，
- * 保留策略由本包自担**——磁盘侧保留默认开（OR-5 ⑥b）：每次新 run state 文件首写
- * 成功即按 mtime 裁剪到上限（未设 {@link STATE_MAX_RUNS_ENV} 时取
- * {@link DEFAULT_STATE_MAX_RUNS} 默认值，见 pruneStateFilesBeyondCap；显式非法值
- * 是 opt-out 通道）；内存侧由 evictDoneRunsBeyondCap 淘汰。W17 后 state 文件
- * 已降级为纯性能缓存（权威数据在 session JSONL 的 workflow-record entry），随 session
- * 文件被用户删除时一并消失。
+ * 保留策略由本包自担**——磁盘侧保留默认开（OR-5 ⑥b → [Q2] core 单源收口）：每次
+ * 新 run state 文件首写成功触发一轮 retention 维护（runRetentionSweep：interrupted
+ * 放弃窗终局化 + 已终局 run 足迹裁剪，判定与执行在 core
+ * pruneTerminalRunFiles / abandonElapsedInterruptedRuns）；内存侧由
+ * evictDoneRunsBeyondCap 淘汰。W17 后 state 文件已降级为纯性能缓存（权威数据在
+ * session JSONL 的 workflow-record entry），随 session 文件被用户删除时一并消失。
  */
 
 import * as fs from "node:fs";
@@ -83,10 +96,23 @@ import { getLogger } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
   SNAPSHOT_VERSION,
+  createRunEventJournal,
   fromRunSnapshot,
+  projectRunEvents,
   toRunSnapshot,
-  pruneStateFilesBeyondCap,
+  type RunEventJournal,
   type RunSnapshot,
+  type WorkflowRunEvent,
+} from "@zhushanwen/subagent-core";
+// [Q2 / D5 清理规则] retention 维护单源（core 消费，barrel 导出）：
+// - pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪（manifest 资格 + cap + TTL +
+//   journal 成对删）——本模块 P1b-2 的本地资格感知实现已收口于此；
+// - abandonElapsedInterruptedRuns：interrupted 放弃窗终局化（D5 规则③，无悬挂态）；
+// - resolveStateTtlMs：TTL env 解析单源（常量随迁 core）。
+import {
+  abandonElapsedInterruptedRuns,
+  pruneTerminalRunFiles,
+  resolveStateTtlMs,
 } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
@@ -209,18 +235,26 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
     const parsed: unknown = JSON.parse(lastLine);
     // D-5: undefined = old format / version mismatch / corrupt shape — skip silently
     return fromRunSnapshot(parsed) ?? null;
-  } catch {
-    // Corrupt/unreadable state file — skip (don't crash loadAll).
+  } catch (err) {
+    // Corrupt/unreadable state file — skip (don't crash loadAll)，降级语义保持；
+    // warn 留证（含文件路径与原因）防静默丢 run 无从归因。
+    logger.warn(
+      `[subagent-workflow] legacy state-link target unreadable, run skipped: ${filePath}: ${toErrorMessage(err)}`,
+    );
     return null;
   }
 }
 
-// ── State file retention (OR-5 ⑥b, default-on) ───────────────
+// ── State file retention (OR-5 ⑥b default-on → [Q2] core 单源收口) ─────────
 //
-// 裁剪主体单源消费 core pruneStateFilesBeyondCap（S4-A7 收口：本地曾有一份逐段
-// 同构的私有实现，retention 语义双份各自演化是漂移隐患）；日志注入本模块
-// logger + [subagent-workflow] tag，错误字符串化用 ext-guards toErrorMessage——
-// 行为与收口前一致（差异仅经 core 单源演化时两宿主同步）。
+// [Q2 / D5 清理规则] retention 维护已收口回 core 单源（P1b-2 的本地资格感知实现
+// 删除）：裁剪资格（manifest outcome 非空）、cap + TTL 双限、journal 成对裁剪
+// 全部在 core pruneTerminalRunFiles（file-run-store.ts）；interrupted 放弃窗终局化
+// （D5 规则③，无悬挂态）在 core abandonElapsedInterruptedRuns（run-registry.ts）。
+// 本面只保留触发点（新 run 首写的冷路径——每个新 run 进场做一轮完整 retention
+// 维护）与宿主侧 cap env 解析（getEnvStateMaxRuns——cap env 双实现为存量格局，
+// 与 core FileRunStore envName 通道同形）。TTL 常量/env 解析已随收口迁入 core
+// （resolveStateTtlMs 单源）。
 
 // ── JsonlRunStore ────────────────────────────────────────────
 
@@ -233,6 +267,17 @@ const logger = getLogger("subagents");
  * 模块私有：无外部消费方（构造参数 saveDebounceMs 可调窗口，测试经其注入）。
  */
 const DEFAULT_SAVE_DEBOUNCE_MS = 200;
+
+/**
+ * [P3/D6] 事件边沿 flush 的防抖窗口默认值（ms）。flush 时机从「agent 完成」
+ * 加密到「事件边沿」：journal append（同目录 `<runId>.events.jsonl`）经
+ * fs.watch 感知后按本窗口合并触发 flush，快照投影（calls[].startedAt /
+ * lastProgressAt、health、outcome/errorCode——projectRunEvents fold）在事件
+ * 落账后 ≤1s 内进入 state 文件（P-C3 写放大控制：固定窗口合并不重置 timer，
+ * 事件突发只落 1 次；超标上调通道 = 构造参数 eventEdgeDebounceMs）。
+ * 模块私有：无外部消费方（测试经构造参数注入小窗口）。
+ */
+const DEFAULT_EVENT_EDGE_DEBOUNCE_MS = 1000;
 
 /**
  * 磁盘保留清理的上限 env（OR-5 ⑥b 默认开）：workflow-state 目录内 run state
@@ -260,6 +305,10 @@ function getEnvStateMaxRuns(): number | undefined {
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
 }
+
+/** journal 文件后缀（<runId>.events.jsonl）——watcher 边沿判定的字面单源
+ *  （retention 裁剪判定在 core pruneTerminalRunFiles，journal 作为 run 附属成对裁）。 */
+const JOURNAL_FILE_SUFFIX = ".events.jsonl";
 
 /**
  * per-runId 去抖批。窗口内 N 次 save 合并：latestRun 保留最新聚合引用
@@ -291,6 +340,17 @@ interface JsonlRunStoreOptions {
    * （fake timers 推进）。
    */
   entryAppendMinIntervalMs?: number;
+  /**
+   * [P3/D6] 事件边沿 flush 防抖窗口（ms），默认 {@link DEFAULT_EVENT_EDGE_DEBOUNCE_MS}。
+   * P-C3 写放大超标时上调通道。测试经此注入小窗口（fake timers 推进）。
+   */
+  eventEdgeDebounceMs?: number;
+  /**
+   * [P3/D6] 是否开 journal 目录 watcher（fs.watch 边沿感知），默认 true。测试用：
+   * 防抖合并的确定性用例经 {@link JsonlRunStore.simulateJournalEdgeForTest} seam 驱动，
+   * 关掉真实 watcher 防双源竞争（seam 与真实事件各调度一次——设计内语义）。
+   */
+  watchJournalEdges?: boolean;
 }
 
 export class JsonlRunStore {
@@ -305,6 +365,27 @@ export class JsonlRunStore {
   private readonly saveDebounceMs: number;
   /** workflow-record entry append 节流最小间隔（ms），0 = 禁用。 */
   private readonly entryAppendMinIntervalMs: number;
+  /** [P3/D6] 事件边沿 flush 防抖窗口（ms）。 */
+  private readonly eventEdgeDebounceMs: number;
+  /**
+   * [P3/D6] 本实例活跃 run 的最新聚合引用（running 态才保留，终局即删）——
+   * 事件边沿触发的 flush 需要可序列化的 run 实例，而边沿源（journal append）
+   * 不经过 save()。有界性：条目数 = 本实例活跃 run 数，终局即回收。
+   */
+  private readonly activeRuns = new Map<string, WorkflowRun>();
+  /** [P3/D6] per-runId 事件边沿防抖 timer（固定窗口合并，语义对齐 pending 批）。 */
+  private readonly pendingEdgeFlushes = new Map<string, NodeJS.Timeout>();
+  /**
+   * [P3/D6] journal 目录 watcher（事件边沿感知）。惰性开（首次 doFlush 后目录
+   * 必存在）；失败一次性降级（watcherBroken = 边沿触发退役，flush 时机回落
+   * 「agent 完成」的 pump save 链——辅助功能降级不拖垮持久化主链）。
+   * persistent:false = 不钉住 extension 进程空转（对齐去抖 timer unref 纪律）。
+   */
+  private journalWatcher: fs.FSWatcher | undefined;
+  private journalWatcherBroken = false;
+  private readonly watchJournalEdges: boolean;
+  /** [P3/D6] journal 读面（fold 投影数据源；惰性单例，目录与 state 文件同源）。 */
+  private journal: RunEventJournal | undefined;
   /** per-runId 去抖批（热路径）。 */
   private readonly pending = new Map<string, PendingSaveBatch>();
   /** 本实例已至少成功发起过一次 flush 的 runId（冷/热路径判据）。 */
@@ -335,6 +416,8 @@ export class JsonlRunStore {
       0,
       opts.entryAppendMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS,
     );
+    this.eventEdgeDebounceMs = Math.max(0, opts.eventEdgeDebounceMs ?? DEFAULT_EVENT_EDGE_DEBOUNCE_MS);
+    this.watchJournalEdges = opts.watchJournalEdges ?? true;
   }
 
   /** State directory: <sessionDir>/workflow-state/ */
@@ -377,6 +460,13 @@ export class JsonlRunStore {
     }
 
     const runId = run.runId;
+    // [P3/D6] 活跃 run 引用保留（事件边沿 flush 的实例源）：running 态更新、
+    // 终局即删（有界性）。终局引用不保留——终局后的边沿无 flush 意义（快照已终态）。
+    if (run.state.status === "running") {
+      this.activeRuns.set(runId, run);
+    } else {
+      this.activeRuns.delete(runId);
+    }
     const isFirstWrite = !this.writtenOnce.has(runId);
     const isCold = isFirstWrite || run.state.status !== "running";
     if (isCold) {
@@ -487,13 +577,31 @@ export class JsonlRunStore {
         await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       } catch (err) {
         if (isEnoentError(err)) {
+          // resolve 语义保持（sessionDir 已删场景持久化无意义也无法完成），但按
+          // run 形态分通道留痕：终态快照未落盘是数据损失面（warn 可归因「session
+          // 目录被外部删除」）；running 中间态丢一拍等价崩溃语义（debug 即可，
+          // 日志携带 status 供读上下文归因）。
+          const msg = `state flush skipped, session dir missing (likely externally removed): runId=${runId} status=${run.state.status}`;
+          if (run.state.status !== "running") {
+            logger.warn(`[subagent-workflow] ${msg} (terminal snapshot NOT persisted)`);
+          } else {
+            logger.debug(`[subagent-workflow] ${msg}`);
+          }
           for (const s of settlers) s.resolve();
           return;
         }
         throw err;
       }
-      // serialize-at-flush：写 flush 时刻的最新聚合状态（latestRun 语义）
-      const snapshot = toRunSnapshot(run);
+      // serialize-at-flush：写 flush 时刻的最新聚合状态（latestRun 语义）。
+      // [P3/D6] fold 投影：journal 同目录（<stateDir>/<runId>.events.jsonl），每次
+      // flush 重读重 fold（幂等、单一推导点 projectRunEvents）——快照 additive 字段
+      // （calls[].startedAt/lastProgressAt、health、outcome/errorCode）由事件流派生，
+      // 权威在事件流（D5）。journal 读失败/为空 → 降级为未富集快照（辅助增强面，
+      // 不阻断持久化主链）。
+      this.ensureJournalWatcher();
+      const journalEvents = await this.readJournalEvents(runId);
+      const rawSnapshot = toRunSnapshot(run);
+      const snapshot = journalEvents.length > 0 ? projectRunEvents(rawSnapshot, journalEvents) : rawSnapshot;
       await fs.promises.writeFile(filePath, JSON.stringify(snapshot) + "\n", "utf8");
       // W17 [D4]：成功 flush 同步 append 自描述 workflow-record entry（同一份 snapshot，
       // entry 与 state 文件内容一致）。pi 文件是 workflow 数据持久化权威（loadAll 优先
@@ -522,21 +630,13 @@ export class JsonlRunStore {
           this.lastEntryAppendAt.set(runId, now);
         }
       }
-      // OR-5 ⑥b 磁盘保留清理（默认开）：新 run state 文件首写成功后触发（rollbackFirstWrite
-      // 即 save() 冷路径传入的 isFirstWrite——「本实例首次写该 runId」≈ 新文件落盘时刻，
-      // 每个 run 只清一次，热路径 flush 不重复扫描目录）。prune 内部吞错不抛，
-      // 在串行链上 await：save 返回即清理已定，测试可同步断言目录终态。
+      // OR-5 ⑥b 磁盘保留维护（默认开 → [Q2] core 单源收口 + abandon 接线）：新 run
+      // state 文件首写成功后触发（rollbackFirstWrite 即 save() 冷路径传入的
+      // isFirstWrite——「本实例首次写该 runId」≈ 新文件落盘时刻，每个 run 只清一次，
+      // 热路径 flush 不重复扫描目录）。两步维护内部吞错不抛，在串行链上 await：
+      // save 返回即维护已定，测试可同步断言目录终态。
       if (rollbackFirstWrite) {
-        const maxRuns = getEnvStateMaxRuns();
-        if (maxRuns !== undefined) {
-          // 单源裁剪（core pruneStateFilesBeyondCap），注入本扩展 logger tag 与
-          // toErrorMessage（行为与本地实现收口前一致）
-          await pruneStateFilesBeyondCap(this.stateDir, maxRuns, {
-            warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
-            debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
-            toMsg: toErrorMessage,
-          });
-        }
+        await this.runRetentionSweep();
       }
       for (const s of settlers) s.resolve();
     } catch (err) {
@@ -548,7 +648,148 @@ export class JsonlRunStore {
       if (rollbackFirstWrite) {
         this.writtenOnce.delete(runId);
       }
+      if (settlers.length === 0) {
+        // 边沿触发路径（事件边沿 flush / resendSnapshots 以空 settlers 入链）：
+        // 错误无 save() 调用方可 reject，enqueueFlush 链尾吞——此处 warn 留证防
+        // 静默丢失。settlers 非空时错误经 reject 传播，不重复留痕。
+        logger.warn(
+          `[subagent-workflow] state flush failed on caller-less flush (edge-triggered/resend, error otherwise swallowed): runId=${runId}: ${toErrorMessage(err)}`,
+        );
+      }
       for (const s of settlers) s.reject(err);
+    }
+  }
+
+  // ── [P3/D6] 事件边沿 flush（journal watcher + 防抖合并）──────────
+
+  /**
+   * journal 事件读取（fold 投影数据源）。经 core journal 单源（scan 的坏行容忍
+   * 与 warn 留证语义一致）；任何读错误降级为空流（flush 主链不因增强面中断——
+   * scan 自身只对非 ENOENT 读错误抛出，此处再兜一层防御）。
+   */
+  private async readJournalEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
+    try {
+      this.journal ??= createRunEventJournal(this.stateDir);
+      return await this.journal.scan(runId);
+    } catch (err) {
+      logger.warn(
+        `[subagent-workflow] journal scan failed, snapshot projected without events (runId=${runId}): ${toErrorMessage(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /** 惰性开 journal 目录 watcher（首次 doFlush 后目录必存在）；失败一次性降级。
+   *  disposed 后不开（in-flight 链的迟到 flush 不复活 watcher——dispose 已收尾关闭）。 */
+  private ensureJournalWatcher(): void {
+    if (!this.watchJournalEdges || this.disposed || this.journalWatcher || this.journalWatcherBroken) return;
+    try {
+      this.journalWatcher = fs.watch(this.stateDir, { persistent: false }, (_event, filename) => {
+        this.onJournalDirEvent(typeof filename === "string" ? filename : undefined);
+      });
+      this.journalWatcher.on("error", (err: unknown) => {
+        // 平台差异/目录被删等 watcher 级错误：降级退役（边沿触发 → pump save 链兜底）
+        this.journalWatcherBroken = true;
+        this.closeJournalWatcher();
+        logger.debug(
+          `[subagent-workflow] journal watcher error, event-edge flush degraded: ${toErrorMessage(err)}`,
+        );
+      });
+    } catch (err) {
+      this.journalWatcherBroken = true;
+      logger.debug(
+        `[subagent-workflow] journal watcher unavailable, event-edge flush degraded: ${toErrorMessage(err)}`,
+      );
+    }
+  }
+
+  /**
+   * watcher 回调：只认 journal 文件边沿（`.events.jsonl` 后缀——自身 `.jsonl`
+   * 覆写、manifest `.json`、`.state` 投影写入结构性排除，防自触发回环）。
+   * filename 缺失形态（部分平台 null）保守对全部活跃 run 调度——防抖窗口合并，
+   * 误调度代价 = 一次幂等 flush。
+   */
+  private onJournalDirEvent(filename: string | undefined): void {
+    if (this.disposed) return;
+    if (filename === undefined) {
+      for (const runId of this.activeRuns.keys()) this.scheduleEventEdgeFlush(runId);
+      return;
+    }
+    if (!filename.endsWith(JOURNAL_FILE_SUFFIX)) return;
+    const runId = filename.slice(0, -JOURNAL_FILE_SUFFIX.length);
+    if (!this.activeRuns.has(runId)) return; // 非本实例活跃 run（终局/跨实例）不触发
+    this.scheduleEventEdgeFlush(runId);
+  }
+
+  /**
+   * per-runId 固定窗口防抖调度（不重置 timer——事件突发只落 1 次 flush，
+   * 延迟有界 ≤eventEdgeDebounceMs，语义对齐 pending 批）。触发时以保留的活跃
+   * run 引用走既有串行链 flush（空 settlers——调用方无人 await，孤儿错误链尾吞）。
+   */
+  private scheduleEventEdgeFlush(runId: string): void {
+    if (this.pendingEdgeFlushes.has(runId)) return;
+    const timer = setTimeout(() => {
+      this.pendingEdgeFlushes.delete(runId);
+      if (this.disposed) return;
+      const run = this.activeRuns.get(runId);
+      if (!run || run.state.status !== "running") return;
+      this.enqueueFlush(runId, run, [], false).catch(() => {});
+    }, this.eventEdgeDebounceMs);
+    timer.unref();
+    this.pendingEdgeFlushes.set(runId, timer);
+  }
+
+  private closeJournalWatcher(): void {
+    this.journalWatcher?.close();
+    this.journalWatcher = undefined;
+  }
+
+  /**
+   * [测试通道] journal 边沿模拟：与 watcher 回调同一入口（onJournalDirEvent）——
+   * fake timers 下 fs.watch 的真实事件不受时钟控制，确定性测试经此 seam 驱动
+   * 同一调度链；真实 watcher 接线另有 real-timers 集成用例覆盖。
+   */
+  simulateJournalEdgeForTest(runId: string): void {
+    this.onJournalDirEvent(`${runId}${JOURNAL_FILE_SUFFIX}`);
+  }
+
+  /**
+   * [Q2 / D5 清理规则] 新 run 进场的 retention 维护轮（两步，core 单源消费）：
+   * 1. abandonElapsedInterruptedRuns——interrupted 超放弃窗终局化（写 manifest，
+   *    无悬挂态；活跃保护集 = 本实例 activeRuns）；abandon 成功的 run 随即获得
+   *    清理资格，同轮 prune 即可兑现裁剪；
+   * 2. pruneTerminalRunFiles——已终局 run 磁盘足迹裁剪（manifest 资格 + cap +
+   *    TTL + journal 成对删）。
+   *
+   * 全程吞错不抛（辅助维护降级不拖垮 save 主链——core 单源内部各自降级，本方法
+   * 再兜一层防接线面意外）；在冷路径串行链上 await：save 返回即维护已定。
+   */
+  private async runRetentionSweep(): Promise<void> {
+    const stateDir = this.stateDir;
+    const activeRunIds = new Set(this.activeRuns.keys());
+    try {
+      await abandonElapsedInterruptedRuns(stateDir, { activeRunIds });
+    } catch (err) {
+      logger.warn(
+        `[subagent-workflow] state retention: interrupted-abandon sweep failed: ${toErrorMessage(err)}`,
+      );
+    }
+    const maxRuns = getEnvStateMaxRuns();
+    if (maxRuns === undefined) return; // cap opt-out：显式非法值整轮不清理（既有语义）
+    try {
+      await pruneTerminalRunFiles(
+        stateDir,
+        { cap: maxRuns, ttlMs: resolveStateTtlMs() },
+        {
+          warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
+          debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
+          toMsg: (err: unknown) => toErrorMessage(err),
+        },
+      );
+    } catch (err) {
+      logger.warn(
+        `[subagent-workflow] state retention: terminal prune sweep failed: ${toErrorMessage(err)}`,
+      );
     }
   }
 
@@ -588,6 +829,12 @@ export class JsonlRunStore {
     // 在调用时同步执行到第一个 await，批收集发生在置位后的同一同步段，时序与
     // 折叠前的内联收集逐分支等值。
     this.disposed = true;
+    // [P3/D6] 事件边沿面收尾：清防抖 timer（挂起的边沿 flush 由下方 flushPendingSaves
+    // 的终批覆盖语义兜住——activeRuns 保留至 dispose 后不再更新，终态已由 pump save
+    // 或后续链 flush）+ 关 watcher（persistent:false 本不钉进程，主动关 = 纪律收尾）。
+    for (const timer of this.pendingEdgeFlushes.values()) clearTimeout(timer);
+    this.pendingEdgeFlushes.clear();
+    this.closeJournalWatcher();
     // 复用 flushPendingSaves（批收集循环与 await allSettled 与折叠前内联实现逐行等价；
     // flushPendingSaves 自身不动 disposed——dispose 语义仍由本方法的置位与缓存 Promise 承担）
     await this.flushPendingSaves();
@@ -681,8 +928,11 @@ export class JsonlRunStore {
         if (run) runs.push(run);
       }
     } catch (err) {
- // getEntries failed — return what we have (empty).
-      void err;
+      // getEntries failed — 返回已收集结果（空集降级语义保持），但必须 error 留痕：
+      // 静默空集会把 session 文件读故障伪装成「无 run 历史」，恢复无从下手。
+      logger.error(
+        `[subagent-workflow] loadAll: getEntries failed, returning empty run set (degraded). Recovery: check session file readability: ${toErrorMessage(err)}`,
+      );
     }
     return runs;
   }

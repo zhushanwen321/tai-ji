@@ -45,9 +45,8 @@ const DETAIL_LEN_PROBE_WIDTH = 9999;
 // ── [H2 W3] store record 的 live 进度投影（设计 D2：进度源从 node.live 切 store）──
 
 /**
- * running record 的实时进度投影——消费面七字段口径与旧 projectLiveProgress(node.live)
- * 逐字段对齐（totalTokens / 工具计数 / elapsedSeconds / turns / eventLog /
- * currentActivity / lastError）。
+ * running record 的实时进度投影（totalTokens / 工具计数 / elapsedSeconds / turns /
+ * eventLog / currentActivity / lastError）。
  */
 export interface LiveProgressView {
   totalTokens: number;
@@ -60,8 +59,7 @@ export interface LiveProgressView {
 }
 
 /**
- * SubagentRecord（store 查询投影）→ LiveProgressView。与旧路径
- * projectLiveProgress(node.live) 的字段等价性（构造性论证，S1 等价表依据）：
+ * SubagentRecord（store 查询投影）→ LiveProgressView。字段口径（S1 等价表）：
  *   - totalTokens / turns：recordToSubagent 直读 record.totalTokens / turnCount，同源；
  *   - toolCallCount：eventLog 里 tool_start 计数——getEventLog 对每个 toolCall 恰产
  *     一条 tool_start，与 getAllToolCalls(record).length 恒等；

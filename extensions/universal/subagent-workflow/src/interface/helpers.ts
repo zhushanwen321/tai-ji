@@ -4,8 +4,14 @@
  * notifyDone(pi, runId, run, notified) — run 完成时发 completion notification
  * （[u9 账本化] 经 core NotifyLedger 四步生命周期，C-ext-19；未 bind 降级直发）。
  *
+ * [D7 载荷扩展] 终局必达通知的不变量面：成功含结果摘要与产物指针、失败含
+ * errorCode 与证据指针、取消亦通知——载荷 outcome/errorCode/resultSummary/
+ * artifactsDir/eventsJournalPath（details 层，content 追加指针段）。
+ *
  * 层归属：Interface（依赖 Pi SDK + Engine WorkflowRun 模型）。
  */
+
+import { join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -16,11 +22,11 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 // getBoundNotifyLedger：core 通知账本消费入口（bindNotifyLedgerHost 在
 // session-lifecycle.ts session_start 装配；未 bind 时降级直发，见 notifyDone 注释）。
 import { boundedPrettySerialize, getBoundNotifyLedger } from "@zhushanwen/subagent-core";
+import type { DoneReason, WorkflowRun } from "@zhushanwen/subagent-core";
 
 // 模块级 logger（与 session-lifecycle.ts / index.ts 同 component 名）
 const logger = getLogger("subagents");
 
-import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
   guiComponent,
   type GuiContext,
@@ -34,6 +40,30 @@ import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 // ── 常量 ─────────────────────────────────────────────────────
 
 const MAX_RESULT_LENGTH = 8000;
+
+/** [D7] details.resultSummary 的截断上限（成功时的结果短摘要；全文摘要走 content
+ *  的 Script Result 段 bounded 8000，载荷字段是消费方可编程读取的短形态）。 */
+const MAX_RESULT_SUMMARY_LENGTH = 500;
+
+/** 写账失败 error 留痕的 content 摘要截断长度（诊断定位用，非消费契约）。 */
+const RECORD_FAIL_CONTENT_PREVIEW_LENGTH = 200;
+
+/** 毫秒/分钟换算（stall 阈值与文案展示共用，禁魔法数）。 */
+const MS_PER_MINUTE = 60_000;
+
+/** [D6-2] stall 阈值缺省（分钟）：20 分钟（对齐 zcode 语义）。 */
+const WORKFLOW_STALL_THRESHOLD_MINUTES = 20;
+
+/** [D7] run 事件 journal 的文件名形态（core run-events P1a 钉死：`<runId>.events.jsonl`
+ *  ——runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
+ *  core 未从 barrel 导出文件名推导，本地镜像 + 上述锚点注释（漂移信号 = journal
+ *  指针失效，core 命名变更时同批改）。 */
+const RUN_EVENTS_JOURNAL_SUFFIX = ".events.jsonl";
+
+/** [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）。 */
+function runEventsJournalPath(artifactsDir: string, runId: string): string {
+  return join(artifactsDir, `${runId}${RUN_EVENTS_JOURNAL_SUFFIX}`);
+}
 
 /**
  * notifyDone 账本幂等键前缀（u9 账本化，对齐 C-ext-19）。键形态
@@ -61,6 +91,55 @@ const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
 export const MAX_NOTIFIED_RUN_IDS = 1000;
 
 /**
+ * [D7] run 终局 outcome 三态（core run-events ALL_RUN_OUTCOMES 词表镜像——barrel
+ * 未导出该类型，本地封闭字面量联合 + 上方映射函数注释锚定；漂移信号 = journal
+ * run-settled 帧出现词表外值时 core 自有用例先红）。
+ */
+type RunOutcome = "completed" | "failed" | "cancelled";
+
+/**
+ * [D7] DoneReason 六因 → RunOutcome 三态。与 core worker-message-pump 的
+ * dispatchFinalRunSettle 同构映射（budget_limited/time_limited 是 run 怎么死的
+ * 系统层失败 = failed；aborted 经 cancel-requested 控制事件 = cancelled）。core
+ * 不能 import extension（workflow-state-root.ts 头注同款分层约束），双侧注释互指
+ * ——漂移信号 = 通知 outcome 与 journal run-settled 帧 outcome 不一致。
+ */
+function mapDoneReasonToOutcome(reason: DoneReason): RunOutcome {
+  switch (reason) {
+    case "completed":
+      return "completed";
+    case "failed":
+    case "budget_limited":
+    case "time_limited":
+    case "invalid_args":
+      return "failed";
+    case "aborted":
+      return "cancelled";
+  }
+}
+
+/**
+ * [D7] 失败终局的结构化码提取：最后一个失败 call 的 failureKind
+ * （AgentResult.failureKind，ask 级结构化词表）。与 core 的 run 级 errorCode 分工：
+ * journal/manifest 的 run-settled errorCode 由 core dispatchFinalRunSettle 的
+ * finalRunErrorCodeOf 单点生产（含 engine 协议码前缀提取，S2 死亡可诊断），本函数
+ * 只服务终局通知载荷（取 ask 级 failureKind 单源）；core 不能 import extension
+ * （workflow-state-root.ts 头注同款分层约束），通知码与 journal 码的词表同源性由
+ * 双侧消费 RunErrorCode/AgentFailureKind 词表保证。无 ask 级失败帧时缺省，载荷
+ * errorCode 缺省合法（reason 与 trace 承载诊断）。
+ */
+function extractFailureErrorCode(run: WorkflowRun): string | undefined {
+  let code: string | undefined;
+  for (const call of run.state.calls.values()) {
+    const result = call.result;
+    if (result !== undefined && result.error !== undefined && result.failureKind !== undefined) {
+      code = result.failureKind;
+    }
+  }
+  return code;
+}
+
+/**
  * notifyDone 的 details 结构（通过 pi.sendMessage 透传给前端）。
  *
  * 抽取为显式接口替代裸 Record<string, unknown>，明确 __gui__ 契约。
@@ -79,6 +158,33 @@ interface WorkflowNotifyDetails {
    * 文案（G4 字节锁定不受影响）。
    */
   notifyId: string;
+  /**
+   * [D7] 终局 outcome 三态（completed/failed/cancelled）——脚本层失败
+   * （review-failure = outcome:completed + 脚本返回失败结论）与 run 自身怎么死的
+   * （outcome:failed）在通知面可区分（D5 终态双维度语义）。
+   */
+  outcome: RunOutcome;
+  /**
+   * [D7] 失败时的结构化码（最后失败 ask 的 failureKind；无失败帧的 run 级死法
+   * 缺省——见 extractFailureErrorCode）。completed/cancelled 恒缺省。
+   */
+  errorCode?: string;
+  /**
+   * [D7] 成功时的结果短摘要（scriptResult bounded 截断；全文走 content 的
+   * Script Result 段）。
+   */
+  resultSummary?: string;
+  /**
+   * [D7] 产物目录指针：run 持久化产物所在目录绝对路径
+   * （`<sessionDir>/workflow-state`——journal/manifest/.state 同目录；调用方经
+   * onRunDone 桥注入，旧调用缺省 undefined）。
+   */
+  artifactsDir?: string;
+  /**
+   * [D7] 事件 journal 指针（`<artifactsDir>/wf-<runId>.events.jsonl`）——终局
+   * 证据的入口载荷（D5-3 诊断引用落账的消费面）。
+   */
+  eventsJournalPath?: string;
   __gui__?: GuiRenderResult;
 }
 
@@ -97,14 +203,20 @@ interface WorkflowNotifyDetails {
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
  * 同 runId 的重复收口回调拦截（跨 session_shutdown 等边界防重复）；标记在写账成功
- * （或账本幂等拒绝）后落下——record 抛（reload 窗口 appendEntry assertActive 等）
- * 不标记，异常由 finalizeRun 围栏接住后重复收口可重试，窗口内不永久丢通知；
- * 持久层幂等由账本 notifyId 承接（内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
+ * （或账本幂等拒绝）后落下。**已知丢失面（如实登记）**：record 抛（reload 窗口
+ * appendEntry assertActive 等）= 账本 entry 未写，而 notifyDone 的唯一调用点
+ * onRunDone 每终态恰好一次、recoverFromSession 无源可重放——该终局通知**永久丢失**，
+ * 仅 error 日志留痕（含 notifyId/content 摘要，供事后手工补偿）；根治需 pending-retry
+ * 结构（设计变更，本轮不建，见加固审查报告）。持久层幂等由账本 notifyId 承接
+ * （内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
  *
  * @param pi ExtensionAPI（仅降级路径直发用）
  * @param runId run 标识
  * @param run WorkflowRun 聚合根（读 spec.scriptName + state.status + trace + scriptResult）
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
+ * @param ctx GuiContext（GUI 协议渲染载荷；可选）
+ * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone
+ *   桥注入；缺省 undefined = 旧调用兼容，载荷与文案指针段双双省略）
  */
 export function notifyDone(
   pi: ExtensionAPI,
@@ -112,6 +224,7 @@ export function notifyDone(
   run: WorkflowRun,
   notifiedRunIds: Set<string>,
   ctx?: GuiContext,
+  artifactsDir?: string,
 ): void {
   if (notifiedRunIds.has(runId)) return;
 
@@ -151,6 +264,17 @@ export function notifyDone(
     parts.push(`[${node.stepIndex}] ${node.agent}: ${node.status}`);
   }
 
+  // [D7] 产物指针段（主 agent 可操作的下一步入口：结果/证据在哪）。artifactsDir
+  // 缺省（旧调用兼容）整段省略，content 字节与既有形态一致。
+  const eventsJournalPath =
+    artifactsDir !== undefined ? runEventsJournalPath(artifactsDir, runId) : undefined;
+  if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
+    parts.push("");
+    parts.push("--- Artifacts ---");
+    parts.push(`Artifacts dir: ${artifactsDir}`);
+    parts.push(`Events journal: ${eventsJournalPath}`);
+  }
+
   const content = parts.join("\n");
 
   // 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
@@ -162,7 +286,21 @@ export function notifyDone(
     reason: run.state.reason,
     traceLength: traceNodes.length,
     notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}${runId}`,
+    // [D7] 终局必达载荷：outcome 恒有（done ⟹ reason 有值，I2 不变式；防御缺省
+    // completed 兜底只在异常形态生效）；errorCode/resultSummary/指针按终局形态。
+    outcome: mapDoneReasonToOutcome(run.state.reason ?? "completed"),
   };
+  if (run.state.reason === "failed") {
+    const errorCode = extractFailureErrorCode(run);
+    if (errorCode !== undefined) details.errorCode = errorCode;
+  }
+  if (run.state.reason === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
+    details.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
+  }
+  if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
+    details.artifactsDir = artifactsDir;
+    details.eventsJournalPath = eventsJournalPath;
+  }
 
   // GUI 协议：RPC 模式下附加结构化渲染数据
   if (ctx && isGuiCapable(ctx)) {
@@ -190,13 +328,35 @@ export function notifyDone(
     // 去重窗口挤出或重启恢复后的重复收口，跳过投递）→ ②attemptDeliver（courier
     // 边沿 + isIdle 二次复查，③销账 ④重放在 ledger 内；送达通道经
     // deliveryCustomType 保持 "workflow-result"）。
-    // 内存去重标记在写账**成功后**才落下：record 抛（reload 窗口 appendEntry 命中
-    // assertActive 等）时不标记——异常由 finalizeRun 围栏接住（不崩），账面 entry 未写，
-    // 后续重复收口回调（adoption 快照重发等）可重试写账；提前标记会把「窗口内丢失」
-    // 变成永久丢失（去重阻断 + 账本无 entry 不可重放）。stale ctx 防御由装配层
-    // sendDelivery 内置（session-lifecycle.ts bindLedgerHostAndRecover），此处无需
-    // 重复包裹。
-    if (!ledger.record(details.notifyId, content, details, { deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE })) {
+    // 内存去重标记在写账**成功后**才落下。**已知丢失面（如实登记）**：record 抛
+    // （reload 窗口 appendEntry 命中 assertActive 等）= 账本 entry 未写——onRunDone
+    // 每终态恰好一次（无重复收口可重试）、账本无 entry 则 recoverFromSession 无源
+    // 可重放，该终局通知**永久丢失**；不提前标记只是给进程内的假想重复收口留重试
+    // 通道（防御形态，不改变丢失事实）。留痕与根治面见下方 catch 注释。
+    // stale ctx 防御由装配层 sendDelivery 内置（session-lifecycle.ts
+    // bindLedgerHostAndRecover），此处无需重复包裹。
+    let recorded: boolean;
+    try {
+      recorded = ledger.record(details.notifyId, content, details, {
+        deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE,
+      });
+    } catch (err) {
+      // 写账抛错 = 该终局通知丢失（账面 entry 未写，无重放源）。error 级留痕含
+      // notifyId 与 content 摘要，供事后按 run 手工补偿（从 run journal/manifest
+      // 读取终态）。根治需 pending-retry 结构（设计变更，本轮不建，见加固审查报告）；
+      // 原样上抛保持 finalizeRun 围栏的既有接住链路。
+      logger.error(
+        "workflow completion notice ledger record failed — this terminal notification is LOST (no ledger entry, no replay source); compensate manually from run artifacts",
+        {
+          runId,
+          notifyId: details.notifyId,
+          contentPreview: content.slice(0, RECORD_FAIL_CONTENT_PREVIEW_LENGTH),
+          reason: toErrorMessage(err),
+        },
+      );
+      throw err;
+    }
+    if (!recorded) {
       trackNotifiedRunId(notifiedRunIds, runId);
       return;
     }
@@ -212,10 +372,12 @@ export function notifyDone(
   // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection 崩 pi（E1 同机制）。
   // stale 静默降级（完成通知不投递，用户可从 session 历史 / 工具结果看到 workflow
   // 结果，判定见 stale-ctx-audit.md §4），非 stale 错误原样上抛（守卫不吞真实 bug）。
-  trackNotifiedRunId(notifiedRunIds, runId);
+  // 去重标记在实际发送**之后**落下：非 stale 瞬态发送失败（同步抛错上抛）后进程内
+  // 仍可重试（去重不阻断）；stale 分支由 onStale 补标记保持现语义——stale = 通知对
+  // 旧 session 已无意义，不重试。
   guardStaleCtx(
-    () =>
-      pi.sendMessage(
+    () => {
+      const sent = pi.sendMessage(
         {
           customType: WORKFLOW_RESULT_CUSTOM_TYPE,
           content,
@@ -223,14 +385,19 @@ export function notifyDone(
           details,
         },
         { triggerTurn: true },
-      ),
+      );
+      trackNotifiedRunId(notifiedRunIds, runId);
+      return sent;
+    },
     {
       label: "subagent-workflow:notifyDone",
-      onStale: (error) =>
+      onStale: (error) => {
+        trackNotifiedRunId(notifiedRunIds, runId);
         logger.warn("workflow completion notice delivery skipped (stale ctx)", {
           runId,
           error: toErrorMessage(error),
-        }),
+        });
+      },
     },
   );
 }
@@ -250,9 +417,10 @@ export function notifyDone(
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
  *   在降级形态下钉死）。
  *
- * 调用点：notifyDone 内部（写账成功/false 后）+ workflow-events onRunDone 回调
- * （notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口 record 抛等）时
- * 内外都不标记——去重不阻断，重复收口可重试写账（见 notifyDone 账本分支注释）。
+ * 调用点：notifyDone 内部（写账成功/false 后 + 降级直发受理后）+ workflow-events
+ * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
+ * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收口回调不被去重
+ * 阻断（防御形态；账本路径抛错的已知丢失面登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识
@@ -270,3 +438,70 @@ export function trackNotifiedRunId(
     notifiedRunIds.delete(oldest);
   }
 }
+
+/**
+ * [D6-2] stall informational 通知：run 长时间无进展时告诉主 agent「仍在运行、
+ * 无需干预、不自动终止」——「还在等 provider」与「死了」分开表达（对齐
+ * ADR-0047「静默 ≠ 卡死」）。
+ *
+ * 与 notifyDone（终局必达）的通道差异是有意为之：
+ * - **informational 语义**：不进 NotifyLedger（账本 = 必达 + triggerTurn 唤醒，
+ *   at-least-once 重放——stall 是可丢失的进展提示，进账本会把「提示」升格为
+ *   「必达打断」）；不传 triggerTurn（消息展示不唤醒主 agent turn）。
+ * - **送达通道为新 customType "workflow-stall"**：不复用 "workflow-result"——
+ *   runtime event-interpreter 按后者识别 run 完成驱动 W18 失效信号，stall 走
+ *   同通道会被误判为终局。
+ * - **恰好一次**由调用方承载（stallNotifiedRunIds Set，本函数不做去重——
+ *   与 notifyDone 的 notifiedRunIds 同型分工）。
+ *
+ * stale ctx 防御与 notifyDone 降级路径同款（guardStaleCtx：stale 静默降级 +
+ * warn 留痕；非 stale 错误原样上抛——调用方 tick 循环有兜底 catch）。
+ *
+ * @param pi ExtensionAPI（发送面）
+ * @param runId run 标识
+ * @param name 脚本名（文案）
+ * @param stalledMs 已无进展的毫秒数（文案展示分钟）
+ * @param lastProgressAt 最近进展时间戳 epoch ms（details 诊断面）
+ */
+export function notifyStall(
+  pi: ExtensionAPI,
+  runId: string,
+  name: string,
+  stalledMs: number,
+  lastProgressAt: number,
+): void {
+  const stalledMinutes = Math.max(1, Math.round(stalledMs / MS_PER_MINUTE));
+  const content =
+    `Workflow '${name}' (${runId}) has shown no progress for about ${stalledMinutes} minutes. ` +
+    "It is still running - no action is needed, and it will NOT be terminated automatically. " +
+    'Inspect it via the workflow tool (action:"status") if you want details.';
+  guardStaleCtx(
+    () =>
+      pi.sendMessage({
+        customType: WORKFLOW_STALL_CUSTOM_TYPE,
+        content,
+        display: true,
+        details: {
+          runId,
+          name,
+          stalledMs,
+          lastProgressAt,
+          thresholdMs: WORKFLOW_STALL_THRESHOLD_MS,
+        },
+      }),
+    {
+      label: "subagent-workflow:notifyStall",
+      onStale: (error) =>
+        logger.warn("workflow stall notice delivery skipped (stale ctx)", {
+          runId,
+          error: toErrorMessage(error),
+        }),
+    },
+  );
+}
+
+/** [D6-2] stall 阈值缺省：20 分钟（对齐 zcode 语义）。 */
+export const WORKFLOW_STALL_THRESHOLD_MS = WORKFLOW_STALL_THRESHOLD_MINUTES * MS_PER_MINUTE;
+
+/** [D6-2] stall 通知的送达 customType（新通道值——W18 失效信号互斥，见 notifyStall）。 */
+export const WORKFLOW_STALL_CUSTOM_TYPE = "workflow-stall";

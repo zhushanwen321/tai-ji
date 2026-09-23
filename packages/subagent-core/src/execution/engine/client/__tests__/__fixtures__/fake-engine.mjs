@@ -58,6 +58,13 @@ function runOutcomeAborted() {
   };
 }
 
+// "@runId" 记号：recordId 取当前 run 的 requestId（D9-2 半径断言的 per-run 归账锚）；
+// 其余值原样透传（各动作缺省值由调用点传入，存量用例不变）。
+function recordIdFor(action, requestId, fallback) {
+  if (action.recordId === "@runId") return requestId;
+  return action.recordId ?? fallback;
+}
+
 async function playRunActions(requestId) {
   for (const action of RUN_ACTIONS) {
     if (activeRun === null) return; // run 已被 cancel 收敛
@@ -79,12 +86,12 @@ async function playRunActions(requestId) {
         });
         break;
       case "childSpawned":
-        reverseRequest(`rev-child-${requestId}`, "host/childSpawned", { pid: action.pid, recordId: action.recordId ?? "rec-1" });
+        reverseRequest(`rev-child-${requestId}`, "host/childSpawned", { pid: action.pid, recordId: recordIdFor(action, requestId) });
         break;
       case "childStateChanged":
         reverseRequest(`rev-childst-${requestId}`, "host/childStateChanged", {
           pid: action.pid,
-          recordId: action.recordId ?? "rec-1",
+          recordId: recordIdFor(action, requestId),
           state: action.state ?? "exited",
           killed: action.killed ?? false,
           ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
@@ -116,12 +123,14 @@ async function playRunActions(requestId) {
       }
       case "spawnGrandchild": {
         // 同组后代（不 detached）：进程组收割断言对象。node 长眠进程。
+        // recordId 支持 "@runId" 记号 = 当前 run 的 requestId（D9-2 run 拓扑半径
+        // 断言：同引擎两 run 各自的孙进程按 runId 归账，杀半径只及目标 run）。
         const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
           detached: false,
           stdio: "ignore",
         });
         grandchild.unref();
-        reverseRequest(`rev-grand-${requestId}`, "host/childSpawned", { pid: grandchild.pid, recordId: action.recordId ?? "rec-grand" });
+        reverseRequest(`rev-grand-${requestId}`, "host/childSpawned", { pid: grandchild.pid, recordId: recordIdFor(action, requestId, "rec-grand") });
         break;
       }
       case "delay":

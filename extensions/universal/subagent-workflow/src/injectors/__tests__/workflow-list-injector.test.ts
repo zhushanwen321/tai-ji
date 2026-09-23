@@ -2,8 +2,9 @@
 //
 // 两类覆盖（与 subagent-list-injector.test.ts 对称）：
 // 1. 纯函数：summarizeDescription（截断）+ parseWorkflowMeta（meta 块解析）+
-//    formatWorkflowList（B2 注入段格式 + 引导语）。discoverAllWorkflows 依赖文件系统
-//    + resource-discovery，属集成层，此处聚焦可快速回归的格式化契约（TC5 回归保护）。
+//    formatWorkflowList（B2 注入段格式 + 引导语）。发现路径依赖文件系统
+//    + resource-discovery，属集成层（顺序契约经 injector handler 驱动），此处聚焦
+//    可快速回归的格式化契约（TC5 回归保护）。
 // 2. session 级缓存行为（TC1-TC4）：与 subagent 对称，mock shared/resource-discovery
 //    的 discoverResources + getCachedFileContent，mock pi.on 捕获三 handler 手动触发；
 //    模块级缓存靠 vi.resetModules + 动态 import 重置。
@@ -262,7 +263,7 @@ describe("workflow-list-injector session 级缓存", () => {
 		expect(r?.systemPrompt).not.toContain("chain");
 	});
 
-	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，不注入）", async () => {
+	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，注入 D4-2 空态段）", async () => {
 		spies.discoverResources.mockResolvedValue([]);
 		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
@@ -270,8 +271,13 @@ describe("workflow-list-injector session 级缓存", () => {
 		const r1 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		const r2 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
-		expect(r1).toBeUndefined();
-		expect(r2).toBeUndefined();
+		// 空发现不再整段消失：注入空态段（agent 可区分「功能关闭」与「确实没有」）
+		expect(r1?.systemPrompt).toContain("<available_workflows>");
+		expect(r1?.systemPrompt).toContain("(none discovered; roots: ");
+		// roots 含 workspaceRoot 推导的约定根（findWorkspaceRoot mock 固定 "/ws"）
+		expect(r1?.systemPrompt).toContain("/ws/.pi/workflows");
+		// 缓存复用：两次注入逐字节一致（KV-cache 契约）
+		expect(r2?.systemPrompt).toBe(r1?.systemPrompt);
 	});
 
 	it("session_start 发现异常不阻断（fail-safe，缓存保持 null，before_agent_start fallback）", async () => {
@@ -287,10 +293,29 @@ describe("workflow-list-injector session 级缓存", () => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// KV-cache 顺序契约：输出按 name 码点序，重建（两次发现）逐字节一致
+// KV-cache 顺序契约：注入段按 name 码点序，重建（两次发现）逐字节一致。
+// 经真实 injector 实例的 handler 驱动（工厂 discover 不再模块导出，顺序契约
+// 直接验证注入面——比裸 entries 断言更端到端）。
 // ──────────────────────────────────────────────────────────────
 
-describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
+/** 从注入段提取 <name> 条目出现序（码点序断言用）。 */
+function injectedNames(prompt?: string): string[] {
+	return [...(prompt ?? "").matchAll(/<name>(.*?)<\/name>/g)].map((m) => m[1]);
+}
+
+describe("workflow 注入段顺序契约（KV-cache）", () => {
+	let handlers: CapturedHandlers;
+
+	beforeEach(async () => {
+		// resetModules + 动态 import：拿 fresh 工厂实例（闭包缓存重置），setup 后经 handler 驱动
+		vi.resetModules();
+		spies.discoverResources.mockReset();
+		spies.getCachedFileContent.mockReset();
+		handlers = {};
+		const mod = await import("../workflow-list-injector");
+		mod.setupWorkflowListInjector(createMockPi(handlers));
+	});
+
 	it("输出按 name 码点序排序，与发现层返回顺序（readdir 枚举序）无关", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.pi/workflows/zeta.js": workflowJs("zeta", "z"),
@@ -304,12 +329,14 @@ describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
 		]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllWorkflows } = await import("../workflow-list-injector");
-		const workflows = await discoverAllWorkflows("/ws");
-		expect(workflows.map((w) => w.name)).toEqual(["alpha", "chain", "zeta"]);
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+		// P5 D4-3：无损坏文件时 invalids 恒空——条目段无 invalid 行
+		expect(r?.systemPrompt).not.toContain("<invalid>");
+		expect(injectedNames(r?.systemPrompt)).toEqual(["alpha", "chain", "zeta"]);
 	});
 
-	it("重建（两次发现顺序不同）输出与渲染结果逐字节一致", async () => {
+	it("重建（两次发现顺序不同）注入段逐字节一致", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.pi/workflows/b.js": workflowJs("beta", "b"),
 			"/ws/.pi/workflows/a.js": workflowJs("alpha", "a"),
@@ -325,12 +352,115 @@ describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
 			]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllWorkflows } = await import("../workflow-list-injector");
-		const first = await discoverAllWorkflows("/ws");
-		const second = await discoverAllWorkflows("/ws");
-		expect(second).toEqual(first);
-		expect(formatWorkflowList(second, { guide: WORKFLOW_LIST_GUIDE })).toBe(
-			formatWorkflowList(first, { guide: WORKFLOW_LIST_GUIDE }),
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const first = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 重建：shutdown 清缓存 → reload 重新发现（第二次发现顺序漂移）→ 渲染
+		handlers.sessionShutdown!({ type: "session_shutdown", reason: "quit" }, createMockCtx());
+		await handlers.sessionStart!({ type: "session_start", reason: "reload" }, createMockCtx());
+		const second = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 注入段（渲染产物）逐字节一致——强于原 entries 全等 + 渲染等价双断言
+		expect(second?.systemPrompt).toBe(first?.systemPrompt);
+	});
+});
+
+// ──────────────────────────────────────────────────────────────
+// invalid 具名上报（P5 D4-3）：三处原静默点（available=false 占位 / meta 解析
+// 失败 / 读失败）收敛为 invalids 收集，注入段具名呈现，损坏文件不再静默跳过。
+// ──────────────────────────────────────────────────────────────
+
+describe("workflow-list-injector invalid 具名上报（P5 D4-3）", () => {
+	let setupWorkflowListInjector: typeof import("../workflow-list-injector").setupWorkflowListInjector;
+	let handlers: CapturedHandlers;
+
+	beforeEach(async () => {
+		vi.resetModules();
+		spies.discoverResources.mockReset();
+		spies.getCachedFileContent.mockReset();
+		spies.discoverResources.mockResolvedValue([]);
+		spies.getCachedFileContent.mockReturnValue(null);
+		handlers = {};
+		const mod = await import("../workflow-list-injector");
+		setupWorkflowListInjector = mod.setupWorkflowListInjector;
+		setupWorkflowListInjector(createMockPi(handlers));
+	});
+
+	it("available=false 占位（manifest 声明路径缺失）→ invalid 具名（reason 来自发现层）", async () => {
+		spies.discoverResources.mockResolvedValue([
+			{
+				path: "/npm/pkg/missing.js",
+				source: "npm",
+				available: false,
+				reason: "manifest declared path not found",
+			},
+		]);
+
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		expect(r?.systemPrompt).toContain(
+			"<invalid><path>/npm/pkg/missing.js</path><reason>manifest declared path not found</reason></invalid>",
 		);
+	});
+
+	it("meta 解析失败（parse null）→ 具名 invalid 与正常条目同段（损坏不静默、可用不丢失）", async () => {
+		spies.discoverResources.mockResolvedValue([
+			workflowResource("/ws/.pi/workflows/broken.js"),
+			workflowResource("/ws/.pi/workflows/good.js"),
+		]);
+		spies.getCachedFileContent.mockImplementation((p: string) =>
+			p.endsWith("broken.js") ? "// no @pi-meta block" : workflowJs("good", "正常"),
+		);
+
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		expect(r?.systemPrompt).toContain(
+			"<invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>",
+		);
+		expect(r?.systemPrompt).toContain("<name>good</name>");
+	});
+
+	it("读失败（content 抛错）→ reason = 错误消息具名上报", async () => {
+		spies.discoverResources.mockResolvedValue([workflowResource("/ws/.pi/workflows/io.js")]);
+		spies.getCachedFileContent.mockImplementation((p: string) => {
+			if (p.endsWith("io.js")) throw new Error("EACCES: permission denied");
+			return null;
+		});
+
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		expect(r?.systemPrompt).toContain("<path>/ws/.pi/workflows/io.js</path>");
+		expect(r?.systemPrompt).toContain("EACCES: permission denied");
+	});
+
+	it("全部损坏（条目为零 + invalid 非空）→ 空态段 + invalid 行同段（roots 自救 + 具名上报衔接）", async () => {
+		spies.discoverResources.mockResolvedValue([workflowResource("/ws/.pi/workflows/broken.js")]);
+		spies.getCachedFileContent.mockReturnValue("// no @pi-meta block");
+
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		expect(r?.systemPrompt).toContain("<available_workflows>");
+		expect(r?.systemPrompt).toContain("(none discovered; roots: ");
+		expect(r?.systemPrompt).toContain(
+			"<invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>",
+		);
+	});
+
+	it("session_shutdown 清缓存后 invalid 状态一并清空（重新发现，无跨 session 泄漏）", async () => {
+		spies.discoverResources.mockResolvedValue([workflowResource("/ws/.pi/workflows/broken.js")]);
+		spies.getCachedFileContent.mockReturnValue("// no @pi-meta block");
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+
+		handlers.sessionShutdown!({ type: "session_shutdown", reason: "quit" }, createMockCtx());
+		spies.discoverResources.mockResolvedValue([]);
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 重新发现后无损坏文件 → 回纯空态段（无 invalid 行残留）
+		expect(r?.systemPrompt).toContain("(none discovered; roots: ");
+		expect(r?.systemPrompt).not.toContain("<invalid>");
 	});
 });

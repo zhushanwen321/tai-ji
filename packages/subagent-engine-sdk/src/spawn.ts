@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { getLogger } from "./logger.ts";
+import { killChain, safeKill } from "./kill-chain.ts";
 import type { buildEngineChildEnv } from "./env.ts";
 
 const logger = getLogger("engine-sdk/spawn");
@@ -32,9 +33,21 @@ export interface SpawnEngineChildOptions {
   /** 子进程 stdout/stderr 形态；缺省 'pipe'（协议帧走 stdout，stderr 走日志/轮转） */
   stdout?: "pipe" | "ignore" | "inherit";
   stderr?: "pipe" | "ignore" | "inherit";
-  /** AbortSignal 触发即 SIGTERM 杀子（缺省无） */
+  /**
+   * AbortSignal 触发即杀子（缺省无）。杀链 = SIGCONT 前置 + SIGTERM →
+   * ENGINE_ABORT_KILL_GRACE_MS grace → SIGKILL 完整阶梯（killChain 单源）——
+   * 裸 SIGTERM 单发对忽略/冻结/卡死的子进程永不收敛，run 悬挂至宿主回收层兜底。
+   */
   signal?: AbortSignal;
 }
+
+/**
+ * abort 杀链的 SIGTERM 优雅窗口（ms）。量级对齐 pi 引擎 PI_KILL_GRACE_MS 现状
+ * 校准值 30s（pi 子进程 trap SIGTERM 后 graceful shutdown 的实测量级，race-F4）；
+ * zcode abort 路径由「裸 SIGTERM 单发、永不升级」升级为同窗有界兜底（任务级正常
+ * 路径不加墙钟、回收层统一有界兜底口径）。
+ */
+export const ENGINE_ABORT_KILL_GRACE_MS = 30_000;
 
 /** 这些键出现即拒绝：spawn 形态是本原语的契约面，不允许调用方绕过硬编码值。 */
 const FORBIDDEN_OPTION_KEYS = ["detached", "stdio", "stdin", "windowsHide"] as const;
@@ -69,7 +82,15 @@ export function spawnEngineChild(opts: SpawnEngineChildOptions): ChildProcess {
     opts.signal.addEventListener(
       "abort",
       () => {
-        child.kill("SIGTERM");
+        // [SIGCONT 前置] 唤醒潜在 SIGSTOP 冻结形态——冻结进程对 SIGTERM 只排队不
+        // 处理，不先 SIGCONT 则 grace 窗内永远等不到退出（与 pi-rpc killPiProcess
+        // 同源的防御）；对未冻结进程是 no-op，对已退进程由 safeKill 幂等吞掉。
+        safeKill(child, "SIGCONT");
+        void killChain(child, {
+          graceMs: ENGINE_ABORT_KILL_GRACE_MS,
+          unrefTimers: true,
+          escalationNote: `engine child (pid ${child.pid ?? "unknown"}) abort`,
+        });
       },
       { once: true },
     );

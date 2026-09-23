@@ -22,7 +22,6 @@ import {
   type SpawnSessionHeader,
 } from "./spawn-event-adapter.ts";
 import type { SpawnRunCallbacks } from "./spawn-runner.ts";
-import { recordEpipeFailure } from "./stdin-writer.ts";
 
 const logger = getLogger("session-runner");
 
@@ -52,6 +51,12 @@ export interface RunEndState {
   childErrorMessage?: string;
   /** agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
   resolveChatRun?: (code: number) => void;
+  /**
+   * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled）。
+   * agent_settled 消费面随后按轮清零 record.turnCount（SP-9），收集面以本快照恢复
+   * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
+   */
+  settledTurnCount?: number;
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
@@ -306,11 +311,14 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       deps.runEnd.childErrorMessage = toErrorMessage(err);
       onClose(null, null);
     });
-    // stdin 异步 error（EPIPE 半面②）：计数留痕（热路径投递据此判死）。
-    // 判别经 pi-rpc isBrokenPipeError 单源（同步半面①在 stdin-writer writeStdinLine）。
+    // stdin 异步 error 监听器必挂：'error' 事件无监听即进程级 uncaught exception。
+    // 原 EPIPE 失败计数器（热路径投递判死的消费面）已随协议化删除，此处仅 debug
+    // 留痕；不能 warn——agent_settled 收割（killPiProcess）每次正常 run 都会断
+    // stdin 管道触发 EPIPE，属正常路径。判别经 pi-rpc isBrokenPipeError 单源
+    // （同步半面①在 stdin-writer writeStdinLine 的 EPIPE throw）。
     child.stdin?.on("error", (err) => {
       if (isBrokenPipeError(err)) {
-        recordEpipeFailure(deps.recordId);
+        logger.debug(`[session-runner] stdin EPIPE for ${deps.recordId} (expected on reap/exit; ignored)`);
       }
     });
   });

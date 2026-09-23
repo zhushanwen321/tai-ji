@@ -28,6 +28,7 @@ import { toErrorMessage } from '../../utils/errors.js'
 import {
   scanExternalSessions,
   parseHeaderFromFirstLine,
+  readFirstLineViaHandle,
   type ExternalSessionMeta,
 } from '../../infra/pi/session-file-external-scan.js'
 import { scanPiSessions, isTmpResidueFileName } from '../../infra/pi/session-file-utils.js'
@@ -38,9 +39,6 @@ const DEFAULT_CANDIDATE_LIMIT = 100
 
 /** uuid 短 ID 匹配长度（D5：uuid 前 6 位短 ID，与 30 字符 UI 惯例无关）。 */
 const SHORT_ID_LENGTH = 6
-
-/** header 首行读块大小（与 session-file-utils 的 parseSessionHeader 同策略：4KB 覆盖正常 header）。 */
-const HEADER_CHUNK_BYTES = 4096
 
 /**
  * dirLabel：候选文件相对 rootDir 的所属目录（D5：目录 chip 分组用）。顶层文件为 ''（非
@@ -60,37 +58,12 @@ function matchesQuery(item: ImportCandidate, query: string): boolean {
 
 /**
  * 异步读 JSONL 首行（r4-S2：不沿用 sync 原语，NFS 源的 sync 读会阻塞事件循环）。
- *
- * 与 parseSessionHeader 同策略：先读 4KB 块取首行；块内无换行且未读满（文件本身小于块）
- * 按无首行终止处理；块读满仍无换行（首行超长）继续续读——等价于回退全量读首行的语义。
- * 空文件返回 null。
- *
- * 跨块解码（r1-S2）：块以 Buffer 累积、检测换行时 Buffer.concat 后整体 toString——
- * 逐块 toString 会在多字节 UTF-8 字符（CJK）跨 4KB 块边界时拆出 U+FFFD，长中文路径的
- * header 首行会被静默损坏。
+ * 块读取与跨块解码单源 = infra 层 readFirstLineViaHandle；本函数只负责句柄开闭。
  */
 async function readFirstLineAsync(filePath: string): Promise<string | null> {
   const fh = await open(filePath, 'r')
   try {
-    const buffer = Buffer.alloc(HEADER_CHUNK_BYTES)
-    const chunks: Buffer[] = []
-    for (;;) {
-      const { bytesRead } = await fh.read(buffer, 0, HEADER_CHUNK_BYTES, null)
-      if (bytesRead === 0) {
-        return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-      }
-      // 换行先在原始 Buffer 上定位（r5-S4：避免逐块 Buffer.concat 的 O(n²) 复制——超长首行
-      // 续读多轮时，每轮 concat 全量重组）；换行前内容才入 chunks，最终一次性 concat 解码。
-      const nl = buffer.subarray(0, bytesRead).indexOf('\n'.charCodeAt(0))
-      if (nl >= 0) {
-        chunks.push(Buffer.from(buffer.subarray(0, nl)))
-        return Buffer.concat(chunks).toString('utf-8')
-      }
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
-      if (bytesRead < HEADER_CHUNK_BYTES) {
-        return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-      }
-    }
+    return await readFirstLineViaHandle(fh)
   } finally {
     await fh.close()
   }

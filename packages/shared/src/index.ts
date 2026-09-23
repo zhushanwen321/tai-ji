@@ -195,6 +195,7 @@ export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER,
 export type {
   WorkflowRunStatus,
   WorkflowDoneReason,
+  WorkflowRunOutcome,
   WorkflowAgentCall,
   WorkflowRunRecord,
 } from './workflow'

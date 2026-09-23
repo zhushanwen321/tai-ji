@@ -4,7 +4,7 @@
  *
  * BL-1：解析 workflow 脚本里 `agent({skill,schema})` 的 inline override，
  * 否则 pi 子进程只收到原始 prompt，没有 --append-system-prompt /
- * --skill / PI_WORKFLOW_SCHEMA。
+ * --skill / schema 本体。
  *
  * 职责范围（M2 修正）：仅处理 schema SO 指令（内容直传 appendSystemPrompt）+ skill。
  * agent ref 处理（systemPrompt/model/thinkingLevel）已移交 resolveIdentity（execution 层，
@@ -12,7 +12,9 @@
  *
  * 调用方：engine/worker-message-pump.ts dispatchAgentCall（每次 agent-call 消息）。
  * - skill → resolveSkillPath → skillPath（--skill）
- * - schema → 结构化输出指令内容直传 appendSystemPrompt（--append-system-prompt）+ schemaEnv（PI_WORKFLOW_SCHEMA）
+ * - schema → 结构化输出指令内容直传 appendSystemPrompt（--append-system-prompt）；
+ *   schema 本体经 wire task.schema 送达引擎，PI_WORKFLOW_SCHEMA env 值由引擎侧
+ *   从 task.schema 派生（H1 schema 传输归位——resolver 不再产出 env 预编码值）
  *
  * M2 bug 修正：旧实现把 schema 指令写成临时文件、push 文件路径（而非内容）给下游，
  * 下游 mapper/session-runner 把路径当文本拼进最终 append 文件，导致 schema 指令从未
@@ -83,10 +85,10 @@ function isObjectRootSchema(schema: unknown): schema is Record<string, unknown> 
  * [审查项#4] AP 告知：注入侧校验用 additionalProperties:false 收窄后的
  * parameters，模型自带 schema 外字段会被拒——不前置告知，拒绝显得凭空。
  *
- * JSON 序列化用 compact（stringifySchemaCached），与 schemaEnv 复用同串（IF7 #13）。
+ * JSON 序列化经 stringifySchemaCached（直调 JSON.stringify）——schema 全文嵌进 ASP，无缩进省 token。
  */
 export function formatSchemaInstruction(schema: Record<string, unknown>): string {
-  const schemaJson = stringifySchemaCached(schema, "compact");
+  const schemaJson = stringifySchemaCached(schema);
   // [U3] 根类型条件化：判定与 structured-output 的工具 parameters {value} 包装/解包
   // 同源（上方 isObjectRootSchema 本地副本）。object 根 arguments 即 data；非 object
   // 根参数层实为 {value} 包装——ASP 文案必须与工具 description 同语汇告知包装契约
@@ -129,11 +131,11 @@ export function formatSchemaInstruction(schema: Record<string, unknown>): string
 }
 
 /**
- * Resolve skill and schema into appendSystemPrompt (content array) + skillPath + schemaEnv.
+ * Resolve skill and schema into appendSystemPrompt (content array) + skillPath.
  *
  * - Skill name -> resolved SKILL.md dir path via --skill
  * - Schema JSON -> structured-output instruction string pushed into appendSystemPrompt
- *   (content, not file path) + PI_WORKFLOW_SCHEMA env
+ *   (content, not file path); PI_WORKFLOW_SCHEMA env 由引擎侧从 task.schema 派生（H1）
  *
  * Agent ref is intentionally NOT handled here — resolveIdentity (execution layer)
  * covers it via getAgentConfig + resolveModel. Handling agent here would cause
@@ -155,17 +157,13 @@ export function resolveAgentOpts(opts: AgentCallOpts): ResolveResult {
   }
 
   // Inject schema as structured-output instruction into appendSystemPrompt (content,
-  // not temp file) and set environment variable for conditional tool + hook activation.
+  // not temp file). PI_WORKFLOW_SCHEMA env 值由引擎侧从 task.schema 派生（H1 schema
+  // 传输归位），此处不再产出 env 预编码值。
   // M2 fix: previously wrote the instruction to a temp file and pushed the FILE PATH,
   // which got concatenated into the final append file as path garbage — the SO instruction
   // never reached the subprocess. Now the instruction content is pushed directly.
   if (opts.schema) {
-    // IF7(#13)：formatSchemaInstruction 与 schemaEnv 对同一 schema 对象引用共享
-    // WeakMap 缓存条目（compact stringify 整个 dispatch 只发生一次）
     appendSystemPrompt.push(formatSchemaInstruction(opts.schema));
-
-    // Set env var for structured-output extension to activate tool + hook
-    opts = { ...opts, schemaEnv: stringifySchemaCached(opts.schema, "compact") };
   }
 
   return {

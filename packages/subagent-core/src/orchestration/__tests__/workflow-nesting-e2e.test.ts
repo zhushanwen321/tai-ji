@@ -126,6 +126,8 @@ function makeDeps(opts: {
   if (opts.childRun) runs.set(MOCK_RUN_ID, opts.childRun);
   const registry = opts.registry ?? {
     getPath: vi.fn(async () => opts.script),
+    // not found 拒单文案现附可用清单（D4-1 嵌套调用同案补齐）——清单源 loadAll。
+    loadAll: vi.fn(async () => (opts.script ? [opts.script] : [])),
   };
   return {
     registry,

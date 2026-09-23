@@ -340,13 +340,13 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       method: "run",
       params: {
         runId: "run-1",
-        task: { prompt: "做点什么", denyTools: ["bash"] },
+        // [D1] schema 本体经 wire task.schema 单字段承载（ctx 侧 env 字符串已退役）
+        task: { prompt: "做点什么", denyTools: ["bash"], schema: { type: "object" } },
         ctx: {
               cwd: "/w",
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          schemaEnv: "PI_WORKFLOW_SCHEMA=1",
           engineFallback: { from: "zcode", reason: "manifest" },
           sessionRootId: "root-sess-9",
           sessionDir: "/host/agent-dir/subagents/--Users-x-proj--/sessions",
@@ -370,11 +370,19 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
     expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
 
-    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传）+ RunContext 断言
-    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1", cwd: "/w" });
+    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传——含 [D1] wire
+    // task.schema 本体直通）+ RunContext 断言
+    expect(captured?.task).toEqual({
+      prompt: "做点什么",
+      denyTools: ["bash"],
+      schema: { type: "object" },
+      model: "prov/m1",
+      cwd: "/w",
+    });
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
-    expect(captured?.ctx.schemaEnv).toBe("PI_WORKFLOW_SCHEMA=1");
+    // [D1] 负向断言：ctx 侧传输态 env 字符串字段已退役（防字段名复活）
+    expect("schemaEnv" in (captured?.ctx ?? {})).toBe(false);
     expect(captured?.ctx.engineFallback).toEqual({ from: "zcode", reason: "manifest" });
     expect(captured?.ctx.sessionRootId).toBe("root-sess-9");
     // [Option C 协议化] ctx.sessionDir 还原透传（宿主权威值，引擎不自推导）

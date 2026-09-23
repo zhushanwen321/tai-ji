@@ -43,8 +43,9 @@ describe("M2 append-content probe (design.json TC1)", () => {
     // model/thinkingLevel 未被修改（agent 处理移交，不在此提升层级）
     expect(result.opts.model).toBeUndefined();
     expect(result.opts.thinkingLevel).toBeUndefined();
-    // schemaEnv 设置（PI_WORKFLOW_SCHEMA 契约）
-    expect(result.opts.schemaEnv).toBe(JSON.stringify(opts.schema));
+    // H1：schemaEnv 预编码值退役——resolver 只产 schema 本体，env 由引擎侧派生
+    expect(result.opts.schema).toBe(opts.schema);
+    expect(result.opts).not.toHaveProperty("schemaEnv");
   });
 
   it("agent 存在不影响 appendSystemPrompt 内容（agent 正文结构性不泄漏）", () => {

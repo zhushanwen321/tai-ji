@@ -130,21 +130,33 @@ export class JournalWriter {
     return this.chain;
   }
 
-  /** run 终态后调用：flush 全部 + fsync 一次 + 关闭（幂等）。 */
+  /** run 终态后调用：flush 全部 + fsync 一次 + 关闭（幂等，不抛——见失败语义）。 */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     await this.flush();
     if (this.failed || !this.wrote) return;
-    // fsync 一次（§3.3.6）：进程崩溃后已 flush 的行不丢——record 读第②级的一致性依据
-    this.chain = this.chain.then(async () => {
-      const fh = await this.fs.open(this.opts.path, "r");
-      try {
-        await fh.sync();
-      } finally {
-        await fh.close();
-      }
-    });
+    // fsync 一次（§3.3.6）：进程崩溃后已 flush 的行不丢——record 读第②级的一致性依据。
+    // fsync 段与 writeChunk 同款 failed 收口（warn 留证 + 不上抛，不置 failed——数据已
+    // 落盘，只是 sync 保证级别受损，文件仍可作②级数据源）：close 不抛是 journal-wiring
+    // 的接线契约（调用点在 run 成功/失败收口与 finally 语义中，close 抛错会把成功 run
+    // 改写为 failed / 取代原始错误 / 劈叉 finally 返回值）。
+    this.chain = this.chain
+      .then(async () => {
+        const fh = await this.fs.open(this.opts.path, "r");
+        try {
+          await fh.sync();
+        } finally {
+          await fh.close();
+        }
+      })
+      .catch((err: unknown) => {
+        this.warn(
+          `[event-journal] fsync on close failed, journal for task ${this.opts.taskId} keeps ` +
+            `best-effort durability only (read falls back to lower tiers): ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     await this.chain;
   }
 

@@ -98,6 +98,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 | Message streaming | `message_start → text_delta×N → tool_execution_start/end → agent_end` | [STANDARDS.md](STANDARDS.md) §3.3 |
 | NewTaskFlow | 8 态：`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled` | `useNewTaskFlow.ts` |
 | Plugin 生命周期 | `UNLOADED → LOADING → ACTIVATING → ACTIVE → DEACTIVATING → UNLOADED`（+ CRASHED） | [CONTEXT.md](CONTEXT.md)「Plugin」词条 |
+| Workflow run 生命周期 | 6 态 `created → dispatched → running → settling → terminal/interrupted`，`RUN_TRANSITIONS` 显式转移表裁决、表外 fail-fast；事件流 journal（`<runId>.events.jsonl`）为权威投影源 | `subagent-core/src/orchestration/run-events.ts`（[subagents/architecture.md](extensions/subagents/architecture.md) §4） |
 
 ## 共享类型（shared）
 

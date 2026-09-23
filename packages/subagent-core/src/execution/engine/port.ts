@@ -16,6 +16,10 @@
 //     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
 //     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
 //     docs/architecture/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
+//   - [已删除 2026-09-23 oe-audit] RunContext.onChildSpawned?——ChildProcess 全句柄注册
+//     钩子零生产调用（引擎注册表只装 cli descriptor，RemoteEngine 不经协议传进程句柄；
+//     引擎侧唯一数据消费者只读 pid/killed 窄载荷），三处宿主侧死注册一并删除。生命周期
+//     谓词自 W6 起读协议镜像（childSpawned/childStateChanged，EngineClient）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
@@ -23,8 +27,6 @@
 //   read       —— session 历史读取（D6 三级降级链）；
 //   probe      —— 探针（D7：二进制存在/版本解析/干跑校验）。
 // capabilities() 同步无副作用——「调用前拒绝」（D11 处置三级）的判据。
-
-import type { ChildProcess } from "node:child_process";
 
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
@@ -76,14 +78,6 @@ export interface RunContext {
    */
   stream?: SubagentStream;
   /**
-   * [P1 pi 回填透传] 调用方已持有的 schema 激活预编码值（AgentCallOpts.schemaEnv 直传
-   * 形态）。生产路径中 resolveAgentOpts 恒耦合产出 schema+schemaEnv（值 = JSON.stringify
-   * (schema)），引擎从 task.schema 派生即可逐字节等值；解耦形态（有 schemaEnv 无
-   * schema）生产不可达、仅见于直构调用，派生无源——本字段是其唯一透交通道。
-   * 引擎在 task.schema 存在时忽略此值（派生优先，设计 §3.3.5 删字段去向）。
-   */
-  schemaEnv?: string;
-  /**
    * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
    * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
    * pi 引擎另经 ExecuteOptions 投影进 record）。
@@ -120,19 +114,6 @@ export interface RunContext {
    */
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /**
-   * [U0 D10] 引擎 spawn 的子进程句柄注册钩子（宿主终止链记账）。引擎在 spawn 成功后
-   * 同步回调（与 pi runSpawn 的 spawnedChildren.set 同构时机）；宿主据此把 child 注册进
-   * session-runner 的 spawnedChildren Map（cancel SIGTERM / dispose 收割兜底 / killAll
-   * 全量清理对非 pi 引擎 record 生效）。close/error 后由宿主按句守卫移除。可选：引擎
-   * 内部不 spawn 进程（如未来常驻 driver host 实现）时不调用，宿主记账自然为空。
-   *
-   * 边界声明（R1 D6）：本钩子只用于 per-record 一次性 spawn（一任务一进程模态）。
-   * 引擎持有的常驻进程（跨任务共享，如 app-server 常驻连接）不经本钩子注册、不进
-   * spawnedChildren Map——其生命周期完全归引擎 dispose 管理（防 per-record 重复
-   * SIGTERM / 单任务 abort 误杀共享进程）。
-   */
-  onChildSpawned?: (child: ChildProcess) => void;
-  /**
    * [W3 v1.x → H1 U6 终态] 会话形态参数（协议 run.params.resume 的 RunContext
    * 承载位，键已随 U6 键切换从 `chat` 泛化为 `resume`）：
    *   - recordId：core 预建 record 的关联键（引擎据此上报 childSpawned/childStateChanged
@@ -168,8 +149,11 @@ export interface EngineRunResult {
 // ============================================================
 
 /**
- * subagent 执行引擎的唯一契约点（D1）。实现方：PiEngine（回填）/ ZcodeEngine（P3）/
- * 未来各引擎适配器。上层（工具面/workflow 引擎/GUI）只消费中立类型，不感知引擎。
+ * subagent 执行引擎的唯一契约点（D1）。core 侧唯一实现 = RemoteEngine（cli 形态引擎的
+ * 宿主侧协议适配，engine/registry 只装 cli descriptor）——把本接口成员映射到
+ * EngineClient 协议请求；引擎进程内各引擎（pi-subagent-cli / zcode-subagent-cli）实现
+ * 各自本地 port-types 同构契约经协议暴露，与 core 契约的结构互证由 implements 关系在
+ * typecheck 期承载。上层（工具面/workflow 引擎/GUI）只消费中立类型，不感知引擎。
  *
  * 贯穿纪律（设计 §3.3.1）：宿主编排——引擎只当单 agent 执行器，六家原生多 agent 机制
  * 一律禁用不依赖。
