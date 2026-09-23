@@ -34,7 +34,7 @@ import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
 import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
-import { getActiveDeliveryRegistry } from './session-delivery-registry.js'
+import { getActiveDeliveryRegistry, type DeliverySubmitResult } from './session-delivery-registry.js'
 import type { DeliveryIntent } from '@zhushanwen/session-delivery'
 import { AbortLiveness } from './abort-liveness.js'
 import type { AbortSource } from './abort-liveness.js'
@@ -155,22 +155,26 @@ export class MessageDispatcher {
   }
 
   /**
-   * 用户消息发送入口（message.send RPC / plugin-service / handoff 通路）。
+   * 用户消息发送入口（message.send / delivery.submit RPC / plugin-service / handoff 通路）
+   * ——「入口 touch + BeforeSend hook + 内核提交」的唯一组合点，两条 RPC 入口共用同一
+   * veto/transform 面（tech-design must-fix ①：hook 不得旁路出第二个提交通道）。
    *
    * 返回 { blocked: true } 表示消息被 BeforeSend hook 拦截（已广播 message.error 错误气泡），
    * 调用方（session-message-handler）必须据此走 error envelope（带请求 id）让 renderer
    * pending.reject，不得 reply success（round7 must-fix #3：避免「composer 清空 + 错误气泡」矛盾态）。
    *
    * [投递所有权内核 u2] 三层职责（D1 单一所有者）：①入口同步 touch（idle 回收防误杀）
-   * ②BeforeSend hook 拦截（提交前，唯一 veto 面）③内核提交 `registry.submit()`
-   * （lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执）。busy 预检与 send.rejected 已退役
-   * ——排队取代拒绝（D5）：暂不可收时态（compacting / bash）由内核持有，settled 边沿/
-   * 对账器驱动投递，消息不再被拒回 renderer。
+   * ②BeforeSend hook 拦截（提交前，唯一 veto 面；受理阶段一次语义——内核投递执行点
+   * requeue/rebuild/adopt 可重入，重投不得重复过 hook，防 transform 双重改写）③内核提交
+   * `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执），受理回执经
+   * receipt 透出供 delivery.submit reply 使用。
+   * busy 预检与 send.rejected 已退役——排队取代拒绝（D5）：暂不可收时态（compacting / bash）
+   * 由内核持有，settled 边沿/对账器驱动投递，消息不再被拒回 renderer。
    *
    * rejected 返回值保留为类型完备（恒 undefined）——handler 的 message.status{rejected}
    * ack 分支自此不可达，protocol 条目退役归 u5。
    */
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> {
+  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult }> {
     // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
     // 出站交接（ensureActive/restore 600ms-3s + prompt）在注册表侧异步发生，若不入口
     // touch，「hook 执行中 + 交接在途」窗口内空闲回收判定会误回收在途 session。
@@ -185,28 +189,28 @@ export class MessageDispatcher {
     if (hookOutcome.blocked) {
       return { blocked: true }
     }
-    this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
-    return { blocked: false }
+    const receipt = this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
+    return { blocked: false, receipt }
   }
 
   /**
    * 内核提交（三路径共用）：取活动注册表（组合根装配的单例）→ `submit`（受理口径，
    * D9⑤：同步返回受理回执，不等送达）。
    *
-   * 装配缺失（无注册表 = 组合根未接线）：显式失败（message.error 广播 + blocked），
+   * 装配缺失（无注册表 = 组合根未接线）：显式失败（message.error 广播 + 返回 undefined），
    * 不静默丢消息（"失败要出声"）。
    */
   private submitToKernel(
     sessionId: string,
     content: string,
     opts: { images?: Array<{ data: string; mimeType: string }>; clientUuid?: string; intent?: DeliveryIntent },
-  ): void {
+  ): DeliverySubmitResult | undefined {
     const registry = getActiveDeliveryRegistry()
     if (!registry) {
       const errMsg = 'delivery registry not wired (composition root)'
       console.error(`[message-dispatcher] submit rejected: ${errMsg}, sid=${sessionId}`)
       this.messageBus?.publish(sessionId, { type: 'message.error', payload: { sessionId, message: `消息未发送：${errMsg}` } })
-      return
+      return undefined
     }
     const result = registry.submit(sessionId, {
       content,
@@ -217,6 +221,7 @@ export class MessageDispatcher {
     console.log(
       `[message-dispatcher] submitted to delivery kernel: sid=${sessionId}, id=${result.clientUuid}, lane=${result.lane}, state=${result.state}`,
     )
+    return result
   }
 
   /**

@@ -1013,9 +1013,23 @@ export class SessionMessageHandler {
     if (typeof sessionId !== 'string' || sessionId === '' || typeof content !== 'string' || typeof clientUuid !== 'string' || clientUuid === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.submit requires non-empty sessionId, content and clientUuid', msg.id, { sessionId })
     }
+    // 受理入口经 sessionService.sendMessage（「入口 touch + BeforeSend hook + 内核提交」的
+    // 唯一组合点）——hook 属受理阶段（用户意图 veto/transform，一次语义），挂在提交入口而非
+    // 内核投递执行点：deliverText 在 requeue/rebuild/adopt 下可重入，重投不得重复过 hook
+    // （防 transform 双重改写）。受理延迟上界因此含 hook 管线超时（与 message.send 路径一致）。
+    const outcome = await this.ctx.sessionService.sendMessage(sessionId, content, images, clientUuid)
+    if (outcome.blocked) {
+      // hook 否决：dispatcher 已广播 message.error（错误气泡），此处走 error envelope（带
+      // msg.id）让 renderer 回滚乐观气泡——与 message.send blocked 先例同构，不得 reply success。
+      return this.ctx.sendError(ws, 'message_blocked', 'Message blocked by plugin hook', msg.id, { sessionId })
+    }
+    const result = outcome.receipt
+    if (!result) {
+      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
     // 受理口径（D9⑤）：submit 同步返回（lane + 条目态），不等底层送达——内核 FIFO 无界，
-    // 正常路径无拒绝态（send.rejected 退役归 u5）。受理失败经 registry 侧广播 + 日志。
-    const result = registry.submit(sessionId, { content, images, clientUuid })
+    // 正常路径无拒绝态（send.rejected 退役归 u5；hook 否决发生在受理之前，不构成受理拒绝）。
+    // 受理失败经 registry 侧广播 + 日志。
     this.deliveryTopic.sync(sessionId)
     return this.ctx.reply(ws, msg.id, 'delivery.submit', {
       clientUuid: result.clientUuid,

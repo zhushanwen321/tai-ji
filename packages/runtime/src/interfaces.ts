@@ -44,6 +44,7 @@ import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'
 import type { IPiEngine, PiEventListener } from './services/ports/pi-engine.js'
 import type { IManagedSessionView } from './services/session/types.js'
+import type { DeliverySubmitResult } from './services/session/session-delivery-registry.js'
 import type { OversizeAwareResult } from './services/session/session-records.js'
 import type { CatalogRefreshResult } from './services/provider-catalog-refresh.js'
 
@@ -138,7 +139,8 @@ export interface ISessionService {
   /** 手动归类（D14 语义修正 2026-08-04）：写 session 归属 project sidecar（空 = 归回默认项目）。 */
   setProject(sessionId: string, projectId: string): Promise<void>
   /**
-   * 发送用户消息。
+   * 发送用户消息（message.send / delivery.submit 两条 RPC 共用的受理组合点：
+   * 入口 touch + BeforeSend hook + 内核提交）。
    *
    * images 透传给 pi prompt（message.send 的 images 字段，shared 形状 {data;base64;mimeType}）。
    * 类型组装（补 pi 私有 type:'image'）在 infra 层 RpcClient 内完成，本接口只暴露 shared 形状。
@@ -146,8 +148,10 @@ export interface ISessionService {
    *
    * clientUuid（session-occupancy-send-closure D2）：客户端幂等 id 透传给 dispatcher，
    * 拒绝广播（预检与 pi 转译两路）原样带回；正常路径不消费。
+   *
+   * receipt：内核受理回执（delivery.submit reply 消费；hook 否决或装配缺失时缺席）。
    */
-  sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }>
+  sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult }>
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：
   // 定向消息改走 subagentAction(message/start) 直达 subagent。
   abort(sessionId: string): Promise<void>

@@ -126,9 +126,19 @@ interface Harness {
   lastFrame: () => ServerMessage<'session.delivery'> | undefined
   frameUuids: () => string[]
   attachSubscriber: () => BusClient
+  /** sessionService.sendMessage 桩（受理入口组合点断言用，must-fix ①）。 */
+  sendMessageSpy: ReturnType<typeof vi.fn>
 }
 
-function makeHarness(opts: { session?: Partial<IManagedSessionView>; withRegistry?: boolean; withBus?: boolean } = {}): Harness {
+function makeHarness(
+  opts: {
+    session?: Partial<IManagedSessionView>
+    withRegistry?: boolean
+    withBus?: boolean
+    /** 覆盖 sessionService.sendMessage（hook 场景注入；缺省 = 委托注册表的直通桩）。 */
+    sendMessage?: SessionHandlerContext['sessionService']['sendMessage']
+  } = {},
+): Harness {
   const session = makeSession(opts.session)
   const promptCalls: unknown[][] = []
   const promptFn = vi.fn(async (...args: unknown[]) => {
@@ -156,6 +166,17 @@ function makeHarness(opts: { session?: Partial<IManagedSessionView>; withRegistr
   const registry = createSessionDeliveryRegistry(deps, injector)
   const handle = registry.getOrCreateDelivery(SID)
 
+  // sessionService.sendMessage 直通桩（must-fix ①：delivery.submit 受理入口经它走
+  // 「touch + BeforeSend hook + 内核提交」组合点；hook 语义在 dispatcher 测试覆盖，
+  // 此处缺省仅复刻组合点的内核提交腿，供既有受理/帧用例沿用）
+  const sendMessageSpy = vi.fn(
+    opts.sendMessage ??
+      (async (sid: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string) => {
+        const result = registry.submit(sid, { content, images, clientUuid })
+        return { blocked: false, receipt: result }
+      }),
+  )
+
   const replies: Harness['replies'] = []
   const errors: Harness['errors'] = []
   let pushSeq = 0
@@ -167,7 +188,7 @@ function makeHarness(opts: { session?: Partial<IManagedSessionView>; withRegistr
     sendError: vi.fn((_ws: unknown, code: string, message: string, id?: string, details?: Record<string, unknown>) => {
       errors.push({ code, message, id, details })
     }),
-    sessionService: {} as unknown as SessionHandlerContext['sessionService'],
+    sessionService: { sendMessage: sendMessageSpy } as unknown as SessionHandlerContext['sessionService'],
     nextPushId: vi.fn(() => {
       pushSeq += 1
       return `push-${pushSeq}`
@@ -192,6 +213,7 @@ function makeHarness(opts: { session?: Partial<IManagedSessionView>; withRegistr
     sent,
     replies,
     errors,
+    sendMessageSpy,
     flush: async () => {
       for (let i = 0; i < 40; i += 1) await Promise.resolve()
     },
@@ -329,6 +351,57 @@ describe('delivery.submit 受理 + 帧装配（D1/D5/D9②）', () => {
 
     expect(replyOf(h, 'delivery.submit')).toMatchObject({ lane: 'steer' })
     expect(frameEntries(h)[0]?.lane).toBe('steer')
+  })
+})
+
+// ── delivery.submit × BeforeSend hook（must-fix ①：受理入口接入组合点） ──
+
+describe('delivery.submit × BeforeSend hook（hook 属受理阶段：veto 不进内核 / 回执经组合点透传）', () => {
+  it('受理经 sessionService.sendMessage 组合点（payload 原样透传，不旁路第二个提交通道）', async () => {
+    const h = makeHarness()
+    subscribeLive(h)
+
+    await h.handler.handleSessionMessage(
+      msg('delivery.submit', { sessionId: SID, content: 'hello', clientUuid: UUID_A }),
+      WS,
+    )
+
+    expect(h.sendMessageSpy).toHaveBeenCalledWith(SID, 'hello', undefined, UUID_A)
+    expect(replyOf(h, 'delivery.submit')).toMatchObject({ clientUuid: UUID_A })
+  })
+
+  it('hook 否决 → error envelope（message_blocked，带请求 id）+ 零受理（帧无条目、无 reply）', async () => {
+    const h = makeHarness({
+      sendMessage: vi.fn(async () => ({ blocked: true })),
+    })
+    subscribeLive(h)
+
+    await h.handler.handleSessionMessage(
+      msg('delivery.submit', { sessionId: SID, content: '被拦的消息', clientUuid: UUID_A }, 'req-blocked'),
+      WS,
+    )
+
+    // dispatcher 契约：blocked 前已广播 message.error（错误气泡）；此处 error envelope
+    // 让 renderer 回滚乐观气泡（与 message.send blocked 先例同构）
+    expect(h.errors).toEqual([
+      { code: 'message_blocked', message: 'Message blocked by plugin hook', id: 'req-blocked', details: { sessionId: SID } },
+    ])
+    expect(replyOf(h, 'delivery.submit')).toBeUndefined()
+    expect(frameEntries(h)).toEqual([])
+  })
+
+  it('组合点无回执（装配异常）→ delivery_unsupported error envelope，不谎报受理', async () => {
+    const h = makeHarness({
+      sendMessage: vi.fn(async () => ({ blocked: false })),
+    })
+
+    await h.handler.handleSessionMessage(
+      msg('delivery.submit', { sessionId: SID, content: 'hello', clientUuid: UUID_A }),
+      WS,
+    )
+
+    expect(h.errors[0]?.code).toBe('delivery_unsupported')
+    expect(replyOf(h, 'delivery.submit')).toBeUndefined()
   })
 })
 
