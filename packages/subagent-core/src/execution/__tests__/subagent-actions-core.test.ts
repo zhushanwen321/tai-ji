@@ -154,9 +154,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 的引擎轴资格判据读 service.engineSupportsConversation
     //（stub 缺省放行 = pi 默认引擎语义；拒绝面专项见 conversation-continuation.test.ts）。
     engineSupportsConversation: vi.fn(() => true),
-    // [U2] startHandler 缺省 collect 解析读真实 config（偏差#3 接线）：stub 缺省 async
-    //（本文件不测 collect 语义，专项见 start-collect-guard.test.ts）。
-    getCollectSyncDefault: vi.fn(() => "async" as const),
     ...over,
   };
   return {
@@ -165,9 +162,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
     // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
     engineSupportsConversation: m.engineSupportsConversation,
-    // [U2 偏差#3 接线] startHandler 经平铺访问器读 config 缺省 collect（真实 service
-    // 为平铺方法 subagent-service.ts:1786，非 queries 聚合面成员），stub 须同构挂载。
-    getCollectSyncDefault: m.getCollectSyncDefault,
     queries: {
       findRecord: m.findRecord,
       lookupRecordAnyState: m.lookupRecordAnyState,
@@ -667,6 +661,23 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
+  it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagents 重派指引", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const wfRec = makeExecRecord({ id: "bg-wf", origin: "workflow" });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({ getRecordForAction: vi.fn(() => wfRec), deliverChatMessage }),
+        { subagentId: "bg-wf", text: "hi" },
+      ),
+    );
+    expect(err.errorName).toBe("Error");
+    expect(err.message).toContain("results are collected by the workflow run");
+    expect(err.message).toContain("Recovery: use action:'list' with includeWorkflow:true to inspect it.");
+    // [S3/core-U1] 重派指引（编排者裁定文案，逐字锁定）
+    expect(err.message).toContain("To get these results, re-dispatch via the subagents tool.");
+    expect(deliverChatMessage).not.toHaveBeenCalled();
+  });
+
   // [round2-notify-fix 合并注] 原「collect:'sync' 批成员硬拒续聊」回归锁随 modeless
   // 波1/波3 删除：chatMode/collectMode 字段消亡，sync 批成员批闭合即自动归档、通知走
   // 统一轮终形态（批缓冲路由面消亡），message 对任何归属内 record 直接续聊——被锁的
@@ -880,9 +891,63 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 3：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
+  it("[R5] 守卫 3：zcode 源 → fork 通道未接入文案（准确理由 + 行动语言，无 retention 误导文字）", async () => {
+    // zcode 形态：sessionFile 恒 undefined，历史在隔离 sqlite 会话库（engineHandle.sessionRef）。
+    // 旧链路下该形态落守卫 6 锚判据，文案「never started / retention expired」对 zcode 失实
+    // （历史不随 pi retention 回收，真实原因是 fork 通道未接入）——zcode 按引擎早分流给出准确理由。
+    const r = await errOf(() =>
+      forkFromHandler(
+        makeForkService(
+          makeRec({
+            id: "bg-1",
+            status: "idle",
+            engine: "zcode",
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ),
+        { sourceSubagentId: "bg-1" },
+      ),
+    );
+    expect(r.errorName).toBe("Error");
+    // 准确理由：通道未接入 + 历史在隔离会话库
+    expect(r.message).toContain("fork-from channel is not wired up yet");
+    expect(r.message).toContain("isolated sqlite session db");
+    // [G4] 不得复用 pi 的失实表述
+    expect(r.message).not.toContain("never started");
+    expect(r.message).not.toContain("retention expired");
+    // 行动语言：message 同 id 重开（历史摘要自动注入）或 start 全新子代理
+    expect(r.message).toContain("action:'message'");
+    expect(r.message).toContain("(prior-task summary auto-injected)");
+    expect(r.message).toContain("action:'start'");
+  });
+
+  it("[R5] 守卫 3 先于 worktree 守卫：zcode + worktree 源 → 仍是 zcode 通道文案（worktree 文案对 zcode 失实）", async () => {
+    // 分流位置在 worktree 守卫之前（设计 §5 W4：worktree 文案的「read its session file」
+    // 行动语言对 zcode 无意义——zcode 无 sessionFile 载体）
+    const r = await errOf(() =>
+      forkFromHandler(
+        makeForkService(
+          makeRec({
+            id: "bg-1",
+            status: "idle",
+            engine: "zcode",
+            worktree: true,
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ),
+        { sourceSubagentId: "bg-1" },
+      ),
+    );
+    expect(r.errorName).toBe("Error");
+    expect(r.message).toContain("fork-from channel is not wired up yet");
+    expect(r.message).not.toContain("worktree isolation");
+  });
+
+  it("守卫 4：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
     // [U4b/E2] 双宿主形态：宿主 A 持有中的 record（.alive = A 进程的活 pid 声明）被
-    // 宿主 B 冷查重建，B fork-from 该源时守卫 3 现查探针命中 → 拒绝（源仍在异进程
+    // 宿主 B 冷查重建，B fork-from 该源时守卫 4 现查探针命中 → 拒绝（源仍在异进程
     // 运行，接续会读到半截历史）。[U1/A4] self-pid 排除后「异进程」不能用本测试进程
     // pid 模拟，改恒活外部 pid 1（launchd/init：kill(1,0) → EPERM → isProcessAlive 判活）。
     const sessionFile = path.join(forkDir, "sess-foreign.jsonl");
@@ -902,7 +967,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 3 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
+  it("守卫 4 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
     // [U4] 锚可解析性要求源 sessionFile 真实在盘（isAnchorResolvable = existsSync）。
     const sessionFile = path.join(forkDir, "sess-live.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");

@@ -3,7 +3,7 @@
  *
  * 覆盖：
  *  - 首屏冒烟：DOM 含 switch / model Select / 3 档阈值 input / 排除容器（用户可见断言）。
- *  - 初始值：getSmartContextConfig 返回全量 → Switch 开 + 阈值 input 显示 K 值（200/400/600）。
+ *  - 初始值：getSmartContextConfig 返回全量 → Switch 开 + 阈值 input 显示 K 值（400/500/600）。
  *  - 开关交互：切 Switch → setSmartContextEnabled 以 false 被调。
  *  - 模型下拉：选项来自 settingsStore.models 且只含 apiKeySet provider 的模型；
  *    首项「跟随当前会话模型」；点选 → setSmartContextCompactModel 以 "provider/modelId" 被调。
@@ -74,13 +74,13 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
     expect(wrapper!.find('[data-testid="setting-smart-context-excluded"]').exists()).toBe(true)
   })
 
-  it('初始值：Switch 开 + 阈值 input 显示 K 值（200/400/600）', async () => {
+  it('初始值：Switch 开 + 阈值 input 显示 K 值（400/500/600）', async () => {
     await mountPage()
     const sw = wrapper!.find('[data-testid="setting-smart-context-switch"]')
     expect(sw.attributes('data-state')).toBe('checked')
     const t1 = wrapper!.find('[data-testid="setting-smart-context-threshold-1"]').element as HTMLInputElement
     const t3 = wrapper!.find('[data-testid="setting-smart-context-threshold-3"]').element as HTMLInputElement
-    expect(t1.value).toBe('200')
+    expect(t1.value).toBe('400')
     expect(t3.value).toBe('600')
   })
 
@@ -137,7 +137,7 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
     await t1.trigger('input')
     await t1.trigger('change')
     await flushPromises()
-    expect(settingsMock.setSmartContextThresholds).toHaveBeenCalledWith([300_000, 400_000, 600_000])
+    expect(settingsMock.setSmartContextThresholds).toHaveBeenCalledWith([300_000, 500_000, 600_000])
   })
 
   it('排除模型 tag 渲染 + 点 × 移除后 setSmartContextExcludedModels 收到剩余列表', async () => {
@@ -186,5 +186,31 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
     target!.click()
     await flushPromises()
     expect(settingsMock.setSmartContextExcludedModels).toHaveBeenCalledWith(['p1/m1'])
+  })
+
+  it('RD-4#8：getSmartContextConfig 读取失败 → 常驻提示 + Switch 禁用（不把默认值当已存值）', async () => {
+    settingsMock.getSmartContextConfig.mockRejectedValue(new Error('ws down'))
+    await mountPage()
+    // 顶部常驻提示 + 重试入口
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+    expect(wrapper!.text()).toContain('读取失败')
+    // Switch 禁用（loadError 时不可操作，禁止把默认「开」当已存值落盘）
+    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(true)
+  })
+
+  it('RD-4#8：重试成功后清除提示 + Switch 恢复可用', async () => {
+    settingsMock.getSmartContextConfig.mockRejectedValueOnce(new Error('ws down'))
+    await mountPage()
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+
+    // 重试：mock 改成功（resetSettingsApiMocks 的默认 resolved 值）
+    settingsMock.getSmartContextConfig.mockResolvedValue(smartContextFixture())
+    await wrapper!.find('[data-testid="smart-context-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(false)
+    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(false)
   })
 })

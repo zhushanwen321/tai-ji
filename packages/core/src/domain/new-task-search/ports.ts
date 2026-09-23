@@ -39,7 +39,10 @@ export interface SessionFlowPort {
 
 /** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。 */
 export interface ChatSendPort {
-  /** 普通发送（segments 结构化段；壳适配 useChat().send） */
+  /** 普通发送（segments 结构化段；壳适配 useChat().send）。
+   *  返回值随 useChat.send 契约（[u3b] Promise<void>——失败 toast 消化不 throw；
+   *  form-hang-fix 的 boolean 契约随 B 策略退役）。
+   *  flow 消费方（submitFirstMessage）不取返回值——send 成败属 session 错误通道（W2）。 */
   send(sessionId: string, segments: Segment[]): Promise<void>
   /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn） */
   sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void>

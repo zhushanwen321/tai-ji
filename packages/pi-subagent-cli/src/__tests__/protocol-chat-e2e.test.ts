@@ -193,11 +193,13 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
 
     // [H1 U5] 反向帧面收缩（收割后 = 首轮全程帧齐备）：全部反向帧 ∈ run 域 8 通道
     // 白名单（轮次相位通道已随协议退役——轮终 = agent_settled 的 run 应答本身，
-    // 无相位帧）
+    // 无相位帧）。host/log = cwd 传导修复后的预期日志：ctx.cwd=dataDir（tmpdir 非
+    // git repo）→ buildEnvBlock 的 git branch lookup 失败 fallback（设计内 warn）。
     expect([...new Set(host.reverseFrames.filter((f) => f.method !== "event").map((f) => f.method))].sort()).toEqual([
       "host/childSpawned",
       "host/childStateChanged",
       "host/handleReady",
+      "host/log",
       "host/streamDelta",
     ]);
 

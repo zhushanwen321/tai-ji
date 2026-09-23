@@ -72,7 +72,7 @@ describe("countSuccessfulAssistantReplies", () => {
 });
 
 // ────────────────────────────────────────────────────
-// countUserMessages（设计 rename-session-three-modes.md D2：first-prompt 模式首条判定——message_end(user) handler 内
+// countUserMessages（first-prompt 模式首条判定——message_end(user) handler 内
 // entries 计数 === 0 ⇔ 本条即 session 首条 user，探针 P1 实测该时点 entries 不含本条）
 // ────────────────────────────────────────────────────
 
@@ -242,7 +242,7 @@ describe("normalizeRenameConfig", () => {
 		expect(normalizeRenameConfig(cfg)).toEqual(cfg);
 	});
 
-	// ── mode 三值枚举（设计 rename-session-three-modes.md D1：normalize 逐字段校验回默认） ──
+	// ── mode 三值枚举（normalize 逐字段校验回默认） ──
 
 	it("mode 三个合法值（first-prompt/first-stop/agent-tool）→ 原样保留", () => {
 		for (const mode of ["first-prompt", "first-stop", "agent-tool"] as const) {
@@ -333,7 +333,7 @@ describe("normalizeRenameConfig", () => {
 });
 
 // ────────────────────────────────────────────────────
-// env 覆盖层删除负面（设计 rename-session-three-modes.md D6 / V8：PI_RENAME_* 四键已删，预置变量不得有任何幽灵效果）
+// env 覆盖层删除负面（PI_RENAME_* 四键已删，预置变量不得有任何幽灵效果）
 // ────────────────────────────────────────────────────
 
 describe("env 覆盖层删除负面（PI_RENAME_* 无效果）", () => {

@@ -234,38 +234,10 @@ describe("notifier golden — batch merge (60s window, two records)", () => {
     expect(capturedContent).toBe(
       'Subagent "w1" (batch-1) completed. Result:\nresult1\n\n---\n\nSubagent "w2" (batch-2) completed. Result:\nresult2',
     );
-    // details 结构（must-fix #13 / #6 锁死）：items 元素必须是 record 本体（顶层
-    // status/agent/id/result——bg-notify-render 的 extractBgNotifyRecord 按此读取），
-    // 拦截内核 items 规则回归（曾错装 payload 导致渲染降级默认样式）。
-    const details = capturedDetails as { batch: boolean; items: unknown[] };
-    expect(details.batch).toBe(true);
-    expect(details.items).toHaveLength(2);
-    expect(details.items[0]).toMatchObject({
-      id: "batch-1",
-      status: "closed",
-      agent: "w1",
-      result: "result1",
-      startedAt: 1,
-      endedAt: 2,
-    });
-    expect(details.items[1]).toMatchObject({
-      id: "batch-2",
-      status: "closed",
-      agent: "w2",
-      result: "result2",
-    });
-    // 端到端渲染锁（#6）：合批 details 直接喂 bg-notify-render 必须走批量分支成功渲染
-    // （非 undefined 兜底），两条 agent 均可见。
-    const { theme } = makeRenderTheme();
-    const comp = renderBgNotifyMessage(
-      { details: capturedDetails },
-      { expanded: false },
-      theme,
-    );
-    expect(comp).toBeDefined();
-    const joined = comp!.render(80).join("\n");
-    expect(joined).toContain("w1");
-    expect(joined).toContain("w2");
+    // [collect 退役] 原端到端渲染锁（details.batch/items 直接喂 bg-notify-render
+    // 必须走批量分支）随批量渲染分支删除——内核合批（无 ledger 降级形态）的
+    // {batch,items} details 现走 Pi 默认渲染兜底，内容可达性由上方 content join
+    // 断言承接。
 
     notifier.dispose();
   });

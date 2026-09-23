@@ -5,6 +5,8 @@ import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
 import { handleSchedule, handleScheduleControl } from '../tool.js'
 
+// handleSchedule 直建流签名（触发反转 D1）：(service, params, signal)——不再有交互分支，
+// 会话模式不参与。交互/表单路径覆盖见 commands-form.test.ts 与 interaction.test.ts。
 describe('schedule tool', () => {
   let service: SchedulerService
 
@@ -15,18 +17,18 @@ describe('schedule tool', () => {
   })
 
   it('creates task with duration', async () => {
-    const result = await handleSchedule(service, { prompt: 'check build', schedule: '5m' })
+    const result = await handleSchedule(service, { prompt: 'check build', schedule: '5m' }, undefined)
     expect(result.content[0]!.text).toContain('Task "check build"')
     const details = result.details as { task: { schedule: { mode: string; intervalMs: number } } }
     expect(details.task.schedule).toEqual({ mode: 'interval', intervalMs: 300000 })
   })
 
   // W4：业务失败 throw（pi 只对 execute throw 置 isError:true，返回值里的 isError
-  // 被 agent-loop 丢弃——错误轮曾被标成功）。
+  // 被 agent-loop 丢弃——错误轮曾被标成功）。预校验文案见 §3.5（可自修复重试）。
   it('invalid schedule throws with message (W4: pi 采信 throw)', async () => {
-    await expect(handleSchedule(service, { prompt: 'test', schedule: 'invalid' })).rejects.toThrow(
-      'Invalid schedule',
-    )
+    await expect(
+      handleSchedule(service, { prompt: 'test', schedule: 'invalid' }, undefined),
+    ).rejects.toThrow('unrecognized schedule')
   })
 })
 

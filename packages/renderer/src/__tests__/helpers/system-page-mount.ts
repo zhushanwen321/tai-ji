@@ -31,9 +31,7 @@ export function createSettingsApiMocks() {
     setSmartContextCompactModel: vi.fn(),
     setSmartContextThresholds: vi.fn(),
     setSmartContextExcludedModels: vi.fn(),
-    // streaming-idle Section（SystemPage 常驻 Section）在 mount 时消费，缺导出即 "No export defined"
-    getStreamingIdleTimeout: vi.fn(),
-    setStreamingIdleTimeout: vi.fn(),
+    // 消费方：SystemAutoRenameSection / SystemSmartContextSection（SystemPage mount 时消费，缺导出即 "No export defined"）
   }
 }
 
@@ -112,7 +110,7 @@ export function modelFixtures(): ModelInfo[] {
 }
 
 /** smart-context 默认提醒阈值档（绝对 token 数，与 extension DEFAULT_REMINDER_THRESHOLDS 一致）。 */
-const SMART_CONTEXT_DEFAULT_THRESHOLDS = [200_000, 400_000, 600_000] as const
+const SMART_CONTEXT_DEFAULT_THRESHOLDS = [400_000, 500_000, 600_000] as const
 
 /** smart-context 默认配置 fixture（与 extension 默认值一致）。 */
 export function smartContextFixture(excludedModels: string[] = []): {
@@ -158,6 +156,4 @@ export function resetSettingsApiMocks(m: SettingsApiMocks): void {
   m.setSmartContextCompactModel.mockResolvedValue({ model: '' })
   m.setSmartContextThresholds.mockResolvedValue({ thresholds: [...SMART_CONTEXT_DEFAULT_THRESHOLDS] })
   m.setSmartContextExcludedModels.mockResolvedValue({ models: [] })
-  m.getStreamingIdleTimeout.mockResolvedValue({ timeout: 300 })
-  m.setStreamingIdleTimeout.mockResolvedValue({ timeout: 300 })
 }

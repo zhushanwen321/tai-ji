@@ -66,7 +66,8 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   broadcast(msg: import('@taiji/shared').ServerMessage): void
   broadcastProviderList(): void
   broadcastSkillList(): void
-  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string): void
+  /** partial=true：降级补发形态（RT-1#9——rebuildGlobal 失败分支补发 global 失效时标注）。 */
+  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void
   broadcastAgentList(): void
   broadcastSkillDirs(): void
   broadcastAgentDirs(): void

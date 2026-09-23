@@ -32,8 +32,7 @@
 // 的崩溃 reason，含 stderr 尾部），不再依赖 turn 等待预算挂满才收割。
 // （onClose 由连接层保证在全部在途 request reject 之后触发。）
 //
-// turn 等待两 timer 状态机（P0-1 根修，设计权威源
-// docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D1/D2）：旧 300s 固定
+// turn 等待两 timer 状态机（P0-1 根修）：旧 300s 固定
 // 墙钟（timer 从 send 起跳、事件不刷新，T001 实测 21% 活跃任务被误杀）替换为——
 //   1. idle 主判定：本 turn 任何事件（session/event、telemetry stream.chunk/
 //      turn.terminal）刷新计时；连续静默达阈值判「执行已不可推进」（活跃事件流
@@ -706,7 +705,8 @@ export class SessionChannel {
    * session/resume 读通道（[U6 / §3.2.6 要点 3，P-1 探针实证]）：应答自带完整
    * 双向 messages 历史（user/assistant 全量、tokens、parts）——zcode 续聊选型的
    * 历史来源（读通道成立；原地 resume 续写被 -32031 卡死，写通道不可用）。错误
-   * 原样上抛（调用方决定降级形态——引擎侧 warn 后无历史前缀开新会话）。
+   * 原样上抛（调用方决定降级形态——引擎侧 warn 后注入锚失效声明段继续执行，
+   * run 不失败，[U3]）。
    * 经 conn.request 惰性启动连接（resume 是 run 的**首个**请求——调用时点连接
    * 可能尚未启动，与 readBestEffort 的「已死跳过」判据不同场景，不做 alive 守卫）。
    */

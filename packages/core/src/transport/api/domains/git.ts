@@ -1,5 +1,5 @@
 /**
- * Git 域 —— status/stage/unstage/commit（issues.md #1 / code-architecture §3.1）。
+ * Git 域 —— status/stage/unstage/commit。
  *
  * 三类形态：
  * - 请求-响应：status（→ 'git.status:result' 同步 reply，经 pending.resolve 消费）

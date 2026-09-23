@@ -359,7 +359,7 @@ export const FAUX_PI_READY: boolean = FAUX_PI_SKIP_REASON === null
  * ../fixtures/faux-llm-ext.ts 的同构类型——fixture 写 JSON 文件，extension 侧读并翻译成
  * faux 响应队列，两侧字段语义须同步）。步骤逐轮 shift 消费；队列耗尽 pi 报
  * "No more faux responses queued"（意外 turn 的天然 fail-fast 信号）。
- * 探针通道扩展（不经本类型）：scripts/probes/subagent-sync-collect 直接写 model-keyed
+ * 探针通道扩展（不经本类型；探针脚本已随 collect 退役删除、git 可追溯）：直接写 model-keyed
  * 对象形态 { "provider/id": ScriptedStep[] }（主/子进程共享脚本，按 --model 选队，
  * 见 faux-llm-ext.ts loadScript）——PiFixtureOptions.fauxResponses 恒为数组形态。
  */

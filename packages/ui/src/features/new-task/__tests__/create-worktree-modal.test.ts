@@ -103,3 +103,90 @@ describe('CreateWorktreeModal Enter 提交', () => {
     wrapper.unmount()
   })
 })
+
+describe('CreateWorktreeModal 仓库检测失败态（≠ not-repo）', () => {
+  it('detectWorkspace 抛错 → 显示检测失败态而非「不在仓库」，console.warn 留痕，依赖仓库的控件禁用', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const deps = makeDeps({
+        detectWorkspace: vi.fn(async () => {
+          throw new Error('detect boom')
+        }),
+      })
+      const wrapper = await mountModal(deps)
+      // 第三态：失败块渲染，not-repo 块不渲染（两态可区分，不误导用户换目录）
+      expect(document.querySelector('[data-testid="repo-detect-failed"]')).not.toBeNull()
+      expect(document.querySelector('[data-testid="repo-not-repo"]')).toBeNull()
+      // 检测失败留痕（warn），非静默
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('detectWorkspace failed'),
+        expect.any(Error),
+      )
+      // 依赖仓库语义的控件禁用（分支输入框），创建按钮因 baseBranch 空保持禁用
+      expect(bySel('[data-testid="worktree-branch-input"]').attributes('disabled')).toBeDefined()
+      expect(bySel('[data-testid="worktree-create-btn"]').attributes('disabled')).toBeDefined()
+      wrapper.unmount()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('CreateWorktreeModal success 时序契约（切换与创建成功同刻，不依赖定时器）', () => {
+  // [HISTORICAL] 旧链路 success emit 挂在 2s 展示定时器上且卸载即取消：用户在窗口内关
+  // modal（Esc/点外/切 session）→ 切换静默丢失。现契约：success 同步 emit，定时器只负责 close。
+  it('创建成功后 success 立即 emit（不等 2s），成功屏同步出现', async () => {
+    vi.useFakeTimers()
+    try {
+      const deps = makeDeps()
+      const wrapper = await mountModal(deps)
+      await bySel('[data-testid="worktree-branch-input"]').setValue('feat-a')
+      await bySel('form').trigger('submit')
+      await flushPromises()
+      // 未推进定时器：success 已同步送达（父层回灌 pendingCwd 的依据），成功屏已渲染
+      expect(wrapper.emitted('success')).toEqual([[{ cwd: '/Code/ws/feat-a' }]])
+      expect(wrapper.emitted('close')).toBeUndefined()
+      expect(document.querySelector('[data-testid="worktree-success"]')).not.toBeNull()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('成功屏展示窗（2s）后 emit close 恰一次，不重复 emit success', async () => {
+    vi.useFakeTimers()
+    try {
+      const deps = makeDeps()
+      const wrapper = await mountModal(deps)
+      await bySel('[data-testid="worktree-branch-input"]').setValue('feat-a')
+      await bySel('form').trigger('submit')
+      await flushPromises()
+      vi.advanceTimersByTime(1999)
+      expect(wrapper.emitted('close')).toBeUndefined()
+      vi.advanceTimersByTime(1)
+      expect(wrapper.emitted('close')).toHaveLength(1)
+      expect(wrapper.emitted('success')).toHaveLength(1)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('窗口内卸载（提前关）安全：success 已先期送达，卸载不补发不重复', async () => {
+    vi.useFakeTimers()
+    try {
+      const deps = makeDeps()
+      const wrapper = await mountModal(deps)
+      await bySel('[data-testid="worktree-branch-input"]').setValue('feat-a')
+      await bySel('form').trigger('submit')
+      await flushPromises()
+      expect(wrapper.emitted('success')).toHaveLength(1) // 切换已同步送达
+      // 卸载（模拟用户提前关 modal）：清掉的只是延迟 close 定时器；success 已在
+      // 创建成功同刻发出，不存在「卸载吞切换」面（切换不依赖后续任何事件）。
+      wrapper.unmount()
+      vi.advanceTimersByTime(5000) // 若定时器未清也不会有观察者——仅验证不抛错
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

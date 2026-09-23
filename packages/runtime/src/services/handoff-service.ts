@@ -386,7 +386,7 @@ export class HandoffService {
    * 1. 活跃内存实例优先——handoff 源必已 ensureActive（runHandoff 第 4 步），getSession
    *    命中 ManagedSession 实例；switchModel/setThinkingLevel 的 modelId/thinkingLevel
    *    直写 + ReplicatedState 收敛保证它是当前生效值；
-   * 2. 回落扫描 sidecar `.model.json` 值（findScannedSession，防御性兜底——内存实例
+   * 2. 回落扫描 meta 值（findScannedSession 反向读 JSONL 真源，防御性兜底——内存实例
    *    在 restore 播种空串等形态下字段级缺值时取扫描值）。
    * 字段级独立走链；两档皆缺（E9）→ undefined，调用方回落 create 的全局默认（现行为，不劣化）。
    */

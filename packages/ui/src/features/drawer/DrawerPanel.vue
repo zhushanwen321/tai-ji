@@ -103,7 +103,7 @@
 import { Comment, computed, useSlots } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BookOpen, Bot, FileText, GitBranch, Globe, Pin, PinOff, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
+import { BookOpen, Bot, FileText, GitBranch, Globe, Pin, PinOff, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import type { SideDrawerTab } from '@taiji/core/domain/drawer'
 
@@ -217,6 +217,18 @@ const tabs = computed<TabMeta[]>(() => {
       icon: SquareTerminal,
       emptyText: t('panel.sideDrawer.noBashTask'),
       emptyHint: t('panel.sideDrawer.bashTaskHint'),
+    },
+    // plan tab（plan 模式重设计 u1-drawer-tab G2）：计划产物（agent 按 skill 流程产出的
+    // 多文档审阅面）。内容由壳层（PanelContainer）经默认 slot v-if chain 注入空面板骨架
+    // （PlanDocsPanel 归 u1-docs-panel），延续留壳 slot 模式；自动打开经 ADR-0053
+    // per-session pendingOpen 语义（renderer 侧 usePlanDrawerSync 接线，本组件不感知）。
+    // i18n key 落 plan 域文件（plan.drawer.*）——tab 语义属 plan 模式域，不并入 panel.sideDrawer。
+    {
+      key: 'plan',
+      label: t('plan.drawer.tabPlan'),
+      icon: SquareCheckBig,
+      emptyText: t('plan.drawer.noPlan'),
+      emptyHint: t('plan.drawer.planHint'),
     },
   ]
   return base

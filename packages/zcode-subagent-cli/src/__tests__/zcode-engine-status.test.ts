@@ -1,5 +1,5 @@
-// zcode-engine-status.test.ts —— [P0-1 U3] 引擎终态 status 消费测试（设计权威源
-// docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D5、§5.2 F-3、§8 A4；
+// zcode-engine-status.test.ts —— [P0-1 U3] 引擎终态 status 消费测试（设计锚点
+// D5、F-3、A4；
 // ⛔P-Z2 门修正：真实 status 枚举 = ["success","interrupted","failed"]（app-server
 // dist schema f.enum 实证，无 "error"）——判据 failed 主 + error 容错，v1 的
 // `=== "error"` 对真实 failed 终态漏分流即假成功（探针 /tmp/pz2-probe 实锤）。

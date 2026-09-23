@@ -17,8 +17,7 @@
 // 满足本视图（W2 双向可赋值断言验证）。重放场景不需要 identity 字段（agent/model/
 // task 等只服务投影与持久化，reducer 不触碰），不搬 createRecord 全量 identity。
 //
-// 设计权威源：docs/architecture/subagent-engine-abstraction.md D6 + §3.3.6「重放等价性」
-// ——journal 重放与 live 通路共用同一 reducer（updateFromEvent 范式），不引入第二套
+// 设计决策（重放等价性）：journal 重放与 live 通路共用同一 reducer（updateFromEvent 范式），不引入第二套
 // 解析器；conformance C5 断言重放 turns 与 live 一致。
 //
 // CJS 多 entry 内联副本的实例分裂影响 = runningToolIndex WeakMap（按 record 实例

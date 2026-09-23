@@ -178,12 +178,13 @@ describe.skipIf(!PI_DIST || !INJECTOR_SRC)(
   () => {
     it('taiji block 模板行与 pi 模板同骨架（tag / References 行 / 分隔 / 闭合逐子串一致）', () => {
       // taiji 镜像（skill-injector.ts resolveSingleMarker）的模板变量名与 pi 不同
-      //（skillName/path/baseDir/body vs skill.name/skill.filePath/skill.baseDir/body），
+      //（cmd.name/path/baseDir/body vs skill.name/skill.filePath/skill.baseDir/body——
+      // D7 切源后映射条目 name 已是裸名，前缀剥除局部变量随 legacy 路径删除），
       // 骨架子串（结构定值部分）必须逐字一致——pi 改模板而 taiji 未跟时，本断言与
       // PS-27 dist 锚分别红（双侧锚定，单侧改动无处遁形）。
       expect(
         INJECTOR_SRC.includes(
-          'const block = `<skill name="${skillName}" location="${path}">\\nReferences are relative to ${baseDir}.\\n\\n${body}\\n</skill>`',
+          'const block = `<skill name="${cmd.name}" location="${path}">\\nReferences are relative to ${baseDir}.\\n\\n${body}\\n</skill>`',
         ),
         'PS-27 漂移：taiji 镜像 block 模板行改形（与 pi dist :995 骨架脱钩）——复核 skill-injector.ts 与 pi 实装模板的一致性（PS-24 golden diff 本地全量验证）',
       ).toBe(true)

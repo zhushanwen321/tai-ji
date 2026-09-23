@@ -9,7 +9,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 
 - `compact_context` 工具：agent 在「任务阶段性完成 && 压缩不影响后续 && 上下文超阈值」时自决调用
 - 双模式摘要生成：压缩模型 = 当前模型 → same-model 模式（KV 缓存命中，成本最低质量最高）；不同 → cross-model 模式（廉价模型 + 最小输入）
-- 3 档阈值提醒：越过档位时 agent 收到一次性提示（自行判断，不强制）
+- 3 档阈值提醒：越过档位时 agent 收到一次性提示（自行判断，不强制）。投递为静默注入——只进下一轮 LLM 上下文，不触发新 turn、不进对话流；同一档位不会重复提醒（已提醒档位随 session 持久化，reload / 重启后不丢）
 - 排除模型：命中列表的会话模型整体关闭本功能（回落 pi 原生压缩）
 - pi 内建自动压缩的触发线保留为最后防线，其压缩执行也走本扩展逻辑
 
@@ -23,7 +23,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 |---|---|---|---|
 | `enabled` | boolean | `true` | 总开关 |
 | `compactModel` | `{type:"ref", ref:string}` | `{type:"ref", ref:""}` | 压缩模型（完整 `provider/modelId`）。`ref` 为空 = 跟随当前会话模型（same-model 模式）；等于当前模型同样进 same-model 模式 |
-| `reminderThresholds` | `number[]` | `[200000, 400000, 600000]` | 3 档提醒阈值（token 绝对数，升序） |
+| `reminderThresholds` | `number[]` | `[400000, 500000, 600000]` | 3 档提醒阈值（token 绝对数，升序） |
 | `excludedModels` | `string[]` | `[]` | 排除模型列表，完整 `provider/modelId` 精准等值匹配（如 `"deepseek/deepseek-chat"`），不做前缀匹配 |
 
 ### 配置示例
@@ -32,7 +32,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 {
   "enabled": true,
   "compactModel": { "type": "ref", "ref": "xiaomi-token-plan-cn/mimo-v2.5" },
-  "reminderThresholds": [200000, 400000, 600000],
+  "reminderThresholds": [400000, 500000, 600000],
   "excludedModels": ["deepseek/deepseek-chat"]
 }
 ```

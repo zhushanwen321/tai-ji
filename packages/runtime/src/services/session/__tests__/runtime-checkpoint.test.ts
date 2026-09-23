@@ -18,7 +18,7 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/runtime-checkpoint.test.ts
  */
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   chmodSync,
   existsSync,
@@ -40,9 +40,12 @@ import {
 } from '@taiji/shared/paths'
 import {
   RuntimeCheckpointStore,
+  WRITE_FAILURE_LEDGER_THRESHOLD,
+  WRITE_FAILURE_WARN_INTERVAL_MS,
   getRuntimeCheckpointStore,
   initRuntimeCheckpointStore,
 } from '../runtime-checkpoint.js'
+import { logger } from '../../../infra/logger.js'
 
 // root 下 chmod 权限位不生效（写/rename 照常成功）——权限类用例在 root 环境跳过
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0
@@ -348,6 +351,87 @@ describe('runtime checkpoint 持续维护（D3 生命周期事件挂点的写入
     const h = makeHarness(runDir)
     h.store.upsertSession({ sessionId: 's-live', activityAt: T0 + 1 })
     expect(readSessions(runDir).map((s) => s.piSessionId)).toEqual(['s-live'])
+  })
+})
+
+describe('runtime checkpoint 写失败可见性（code-harden RT-4#6）', () => {
+  it.skipIf(isRoot)('首次写失败立即 warn（限流窗内不刷屏）；窗口过后再失败再 warn（携带连续次数与 last-success 时刻）', () => {
+    const h = makeHarness(runDir)
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      // 成功写盘：last-success 时刻更新、非 stale
+      h.store.upsertSession({ sessionId: 's1', activityAt: T0 })
+      expect(h.store.getLastSuccessfulWriteAt()).toBe(T0)
+      expect(h.store.isCheckpointStale()).toBe(false)
+
+      // 失败 1：立即 warn；失败 2（同窗口，now 未推进）：不新增 warn，但 stale 置位
+      chmodSync(runDir, 0o500)
+      h.store.upsertSession({ sessionId: 's2', activityAt: T0 + 1 })
+      h.store.upsertSession({ sessionId: 's3', activityAt: T0 + 2 })
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(h.store.isCheckpointStale()).toBe(true)
+      const firstWarn = String(warnSpy.mock.calls[0]?.[0])
+      expect(firstWarn).toContain('consecutive=1')
+      expect(firstWarn).toContain(new Date(T0).toISOString()) // lastSuccessfulWriteAt 如实携带
+
+      // 窗口（5min）过后再失败：再 warn 一条
+      h.setNow(T0 + WRITE_FAILURE_WARN_INTERVAL_MS + 1)
+      h.store.upsertSession({ sessionId: 's4', activityAt: T0 + 3 })
+      expect(warnSpy).toHaveBeenCalledTimes(2)
+      expect(String(warnSpy.mock.calls[1]?.[0])).toContain('consecutive=3')
+    } finally {
+      chmodSync(runDir, 0o700)
+      warnSpy.mockRestore()
+    }
+  })
+
+  it.skipIf(isRoot)('连续失败达阈值落台账事件（每轮连续失败期一次）；成功写盘复位后新一轮再落', () => {
+    const h = makeHarness(runDir)
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      h.store.upsertSession({ sessionId: 's0', activityAt: T0 }) // 成功基线
+      chmodSync(runDir, 0o500)
+      for (let i = 0; i < WRITE_FAILURE_LEDGER_THRESHOLD; i++) {
+        h.store.upsertSession({ sessionId: `s${i}`, activityAt: T0 + i })
+      }
+      const ledgerAt = (reason: string) => h.events.filter((e) => e.reason === reason)
+      expect(ledgerAt('checkpoint-write-failed')).toHaveLength(1)
+      expect(ledgerAt('checkpoint-write-failed')[0]).toMatchObject({
+        layer: 'runtime',
+        event: 'crash',
+        reason: 'checkpoint-write-failed',
+        detailPath: join(runDir, CHECKPOINT_FILENAME),
+      })
+
+      // 同一轮连续失败期内继续失败：不重复台账
+      h.store.upsertSession({ sessionId: 's-extra', activityAt: T0 })
+      expect(ledgerAt('checkpoint-write-failed')).toHaveLength(1)
+
+      // 成功写盘：清 stale、复位计数（新一轮失败可再落台账）
+      chmodSync(runDir, 0o700)
+      h.setNow(T0 + 10)
+      h.store.upsertSession({ sessionId: 's-ok', activityAt: T0 + 10 })
+      expect(h.store.isCheckpointStale()).toBe(false)
+      expect(h.store.getLastSuccessfulWriteAt()).toBe(T0 + 10)
+
+      chmodSync(runDir, 0o500)
+      for (let i = 0; i < WRITE_FAILURE_LEDGER_THRESHOLD; i++) {
+        h.store.upsertSession({ sessionId: `t${i}`, activityAt: T0 + i })
+      }
+      expect(ledgerAt('checkpoint-write-failed')).toHaveLength(2)
+    } finally {
+      chmodSync(runDir, 0o700)
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('成功写盘更新 last-success 时刻；从未写过时为 null（诊断导出面初始语义）', () => {
+    const h = makeHarness(runDir)
+    expect(h.store.getLastSuccessfulWriteAt()).toBeNull()
+    h.store.upsertSession({ sessionId: 's1', activityAt: T0 })
+    h.setNow(T0 + 7_777)
+    h.store.removeSession('s1')
+    expect(h.store.getLastSuccessfulWriteAt()).toBe(T0 + 7_777)
   })
 })
 

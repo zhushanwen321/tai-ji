@@ -13,7 +13,7 @@
  * - crash 残留自愈：过期 .lock 目录 + 残留 .tmp 后读写正常（round 1 review SUGGESTION）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmdirSync, utimesSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmdirSync, utimesSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TaijiProviderStore } from '../provider-extras-store.js'
@@ -362,11 +362,15 @@ describe('TaijiProviderStore', () => {
     //   不触发 onCompromised（该回调仅在「自己持锁期间」update 定时器（stale/2=15s）发现
     //   mtime 失效时触发——单测的锁持有窗口是同步代码，无法插入 15s 定时器推进，
     //   模拟需 15s 真实等待或重构注入 lockfile 依赖，性价比不成立，故不覆盖该分支）。
-    // - atomicWrite 的 tmp 是定长 `<path>.tmp`，rename 前崩溃即残留；后续写入覆写式自愈。
-    it('残留 .tmp + 过期 .lock 目录 → readAll 数据完好、modify 自愈正常、残留物清理', async () => {
+    // - atomicWrite 崩溃在 rename 前残留 tmp（RT-3#9 起默认 tmp 名含 pid+序号，名字唯一）
+    //   → 后续写入不再「覆写消费」旧 tmp（固定名时代的伪自愈）；孤儿 tmp 是惰性垃圾，
+    //   绝不污染正式文件读写，回收归启动期清扫家族（本用例锁定数据完好这一安全属性）。
+    it('残留 tmp + 过期 .lock 目录 → readAll 数据完好、modify 自愈正常、lock 残留清理', async () => {
       writeFileSync(file, JSON.stringify({ version: 1, providers: { legacy: { authMethod: 'api_key' } } }, null, 2), 'utf-8')
-      // atomicWrite 崩溃在 rename 前：半写 tmp 残留（内容必须是外部半写垃圾，不得污染正式文件）
-      writeFileSync(`${file}.tmp`, '{"version":1,"providers":{"half-written":{}}}', 'utf-8')
+      // atomicWrite 崩溃在 rename 前：半写 tmp 残留（内容必须是外部半写垃圾，不得污染正式文件）。
+      // 用真实孤儿形态（pid+序号名）模拟；另留一个旧版固定 `.tmp` 形态（历史残留）。
+      writeFileSync(`${file}.tmp_${process.pid}-7`, '{"version":1,"providers":{"half-written":{}}}', 'utf-8')
+      writeFileSync(`${file}.tmp`, '{"version":1,"providers":{"legacy-fixed-name":{}}}', 'utf-8')
       // proper-lockfile 持有进程 crash：.lock 目录残留，mtime 回拨 60s（> stale 30s 阈值）
       mkdirSync(`${file}.lock`)
       const staleTime = new Date(Date.now() - 60_000)
@@ -380,9 +384,10 @@ describe('TaijiProviderStore', () => {
 
       expect(store.getExtrasSync('legacy')).toEqual({ authMethod: 'api_key' })
       expect(store.getExtrasSync('new-entry')).toEqual({ quota: { enabled: true } })
-      // 残留物清理：.lock 目录被 unlock rmdir；.tmp 被本次 atomicWrite rename 消费
+      // 残留物清理：.lock 目录被 unlock rmdir；孤儿 tmp 不入正式文件（数据断言已覆盖），
+      // 亦不被本次写消费（名字唯一）——仍留盘等待启动期回收家族
       expect(existsSync(`${file}.lock`)).toBe(false)
-      expect(existsSync(`${file}.tmp`)).toBe(false)
+      expect(JSON.parse(readFileSync(file, 'utf-8')).providers['half-written']).toBeUndefined()
     })
 
     it('unlock 失败（持锁期间 .lock 目录被外部替换为普通文件）→ warn 可观测、modify 结果仍返回', async () => {

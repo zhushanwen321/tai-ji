@@ -2,9 +2,9 @@
  * useSessionDerivations —— session 派生状态轻量 composable（R2 features 层）。
  *
  * 重构动机（2026-07-02 架构返工 C3）：useSidebar 曾吞 5 个关注点
- * （session CRUD + 启动编排 initApp + 派生状态 derivedStatus/sessionDigest + 命令时序修补 +
- * 文件树预触发），8 个消费者各只用一部分。其中 derivedStatus / sessionDigest 是纯派生计算，
- * 被多个「只需派生状态、不需要 session CRUD 巨型闭包」的消费者（Sidebar/PanelContainer/Overview）共用。
+ * （session CRUD + 启动编排 initApp + 派生状态 derivedStatus + 命令时序修补 +
+ * 文件树预触发），8 个消费者各只用一部分。其中 derivedStatus 是纯派生计算，
+ * 被多个「只需派生状态、不需要 session CRUD 巨型闭包」的消费者（Sidebar/PanelContainer）共用。
  *
  * 本 composable 把派生职责从 useSidebar 抽离，让只用派生状态的消费者改依赖本轻量 composable，
  * 不再拉入 useSidebar 的 session CRUD 巨型闭包（消除不必要的依赖耦合）。
@@ -17,7 +17,6 @@
  */
 import { computed } from 'vue'
 import type { ComputedRef } from 'vue'
-import { normalizeContent } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -26,30 +25,18 @@ import { deriveStatus } from '@/composables/logic/sessionStatus'
 import type { DerivedStatus } from '@/types'
 
 /**
- * session 鸟瞰摘要（Overview 卡片用）。
- * - summary：末条 assistant 文本（content），无则空串（卡片不渲染摘要区）
- * - turnCount：user 消息数（回合 = user + 其后 assistant 序列）
- */
-export interface SessionDigest {
-  summary: string
-  turnCount: number
-}
-
-/**
  * computed 实例缓存（W3，ADR 侧栏性能优化）。
  *
- * 模块级 Map 缓存 derivedStatus / sessionDigest 的 ComputedRef 实例，同 id 复用，
+ * 模块级 Map 缓存 derivedStatus 的 ComputedRef 实例，同 id 复用，
  * 消除 Sidebar statusOf 每次 `derivedStatus(id).value` 新建 computed 立即丢弃的浪费
  * （原实现缓存机制完全失效，侧栏每次渲染 O(N×M)）。
  *
- * 缓存共享合理：所有 useSessionDerivations() 调用者（Sidebar/Overview）读同一 chat store，
+ * 缓存共享合理：所有 useSessionDerivations() 调用者（Sidebar）读同一 chat store，
  * session id 命名空间一致，Pinia store 是应用级单例。deleteSession 时调 invalidateStatusCache
  * 清理，避免已删 session 的 computed 残留（残留非泄漏——页面刷新全清，但显式清理更洁）。
  */
 // @data-owner #11 —— #11 session 活跃态的 renderer 派生缓存（per-session DerivedStatus computed 复用；失效经 invalidateStatusCache，非第二写方）
 const statusCache = new Map<string, ComputedRef<DerivedStatus>>()
-// @data-owner #7 —— #7 消息列表的 renderer 派生缓存（per-session SessionDigest computed 复用，非第二写方）
-const digestCache = new Map<string, ComputedRef<SessionDigest>>()
 
 export function useSessionDerivations() {
   const chat = useChatStore()
@@ -57,7 +44,7 @@ export function useSessionDerivations() {
   // 未访问 session 的终态（done/error/stopped）来自 runtime session_end 元数据。
   const session = useSessionStore()
   // RK3：subagent/workflow/extensionUI store 在 useSessionDerivations 外层闭包取（Pinia 单例引用稳定）。
-  // computed 体内实际调用 hasBackgroundWork/hasPendingAskUser，建立对各自 records Map 的响应式依赖。
+  // computed 体内实际调用 hasBackgroundWork/hasPendingBlockingOverlay，建立对各自 records Map 的响应式依赖。
   // 别名 hasSessionBackgroundWork：与 derivedStatus computed 体内同名局部变量解耦（避免 shadow）。
   const { hasBackgroundWork: hasSessionBackgroundWork } = useBackgroundWork()
   const extensionUIStore = useExtensionUIStore()
@@ -82,45 +69,21 @@ export function useSessionDerivations() {
         // hasBackgroundWork：主 turn 已结束但有 background subagent/workflow 仍在跑 → working 态。
         // 必须在 computed 体内读（建立对 recordsBySession 的响应式依赖，records 变化自动重算）。
         const hasBackgroundWork = hasSessionBackgroundWork(id)
-        // hasAskUserPending：ask-user 富交互请求 pending → waiting 态（T3）。
+        // hasFormOverlayPending：统一表单 overlay 请求 pending → waiting 态。
+        // 判定键 = form 键，权威口径见 stores/extension-ui.ts hasPendingBlockingOverlay
+        // 注释：新 form 帧原生携带、legacy askUser / scheduleCreate 帧经归一层附加后
+        // 统一命中（T3 + schedule-create U6 随判定键收敛自动联动）。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        const hasAskUserPending = extensionUIStore.hasPendingAskUser(id)
-        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasAskUserPending)
+        const hasFormOverlayPending = extensionUIStore.hasPendingBlockingOverlay(id)
+        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasFormOverlayPending)
       })
       statusCache.set(id, c)
     }
     return c
   }
 
-  /**
-   * 响应式派生指定 session 的鸟瞰摘要（Overview 卡片用）。
-   * - summary：末条 assistant 文本（content），无则空串（卡片不渲染摘要区）
-   * - turnCount：user 消息数（回合 = user + 其后 assistant 序列）
-   * [W3] 同 id 复用缓存的 ComputedRef（与 derivedStatus 同模式）。
-   */
-  function sessionDigest(id: string): ComputedRef<SessionDigest> {
-    let c = digestCache.get(id)
-    if (!c) {
-      c = computed(() => {
-        const msgs = chat.getMessages(id)
-        let lastAssistant = ''
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-          if (msgs[i].role === 'assistant') {
-            lastAssistant = normalizeContent(msgs[i].content)
-            break
-          }
-        }
-        const turnCount = msgs.filter((m) => m.role === 'user').length
-        return { summary: lastAssistant, turnCount }
-      })
-      digestCache.set(id, c)
-    }
-    return c
-  }
-
   return {
     derivedStatus,
-    sessionDigest,
     invalidateStatusCache,
   }
 }
@@ -132,9 +95,7 @@ export function useSessionDerivations() {
 export function invalidateStatusCache(sessionId?: string): void {
   if (sessionId) {
     statusCache.delete(sessionId)
-    digestCache.delete(sessionId)
   } else {
     statusCache.clear()
-    digestCache.clear()
   }
 }

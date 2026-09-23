@@ -5,7 +5,6 @@
 // - 既有语义回归（文案逐字）：tmp 不存在拒、目标已存在拒、运行中拒、
 //   两候选路径均无拒；
 // - 缺省目录 = pi 布局（相对 cwd resolve，pi 现两参调用形态行为不变）。
-// 设计权威源：docs/design/subagent-core-convergence.md §3.2 D-6。
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

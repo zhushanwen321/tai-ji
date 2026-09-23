@@ -200,6 +200,7 @@ const FAKE_PATHS = {
   selectConstraints: '/fake/select-constraints.mjs',
   coverageGate: '/fake/coverage-gate.py',
   metricsGate: '/fake/metrics-gate.py',
+  selectAffectedE2e: '/fake/select-affected-e2e.mjs',
 };
 
 function makeSteps(opts = {}) {
@@ -1644,6 +1645,47 @@ async function main() {
     assert.ok(withInject.length >= 1, '③ 应以 --test-result 注入值执行');
     assert.deepStrictEqual(withInject[0], ['bash', FAKE_PATHS.preMerge, '--test-result', 'PASS', '--base', 'main']);
     assert.strictEqual(readStateFile(t.root, RUN_ID_A).steps['final-gates'].outputs.premergeResult, 'PASS');
+  });
+
+  // e2e 影响面披露（非门禁）：3a 三道 gate 通过后把本次 diff 触及的 e2e 资产写进 run 日志。
+  // 两条断言分别钉住「成功时确实披露」与「脚本失败不阻塞 push」——后者是设计要点：披露
+  // 与 push 判定无关，混进门禁会污染终止语义（此为 SKILL 路径 1/3 已有、路径 2 缺失项）。
+  await test('final-gates：e2e 影响面披露在 3a 通过后写入日志（非门禁）', async () => {
+    const m = allGatesMocks({
+      scriptMocks: {
+        [FAKE_PATHS.selectAffectedE2e]: { code: 0, stdout: 'affected rules:\n  - rule-A → npm run e2e:a\n' },
+      },
+    });
+    const t = makeIo(Object.assign({ args: { runId: RUN_ID_A, _runId: 'wf-u3-e2e1' } }, m));
+    seedState(t.root, { status: 'running' });
+    seedReviewerAgent(t.root);
+    t.io.steps = gatesSteps(t.root);
+    const result = await lib.runPipeline(t.io);
+    assert.strictEqual(result.status, 'awaiting-push', `error=${result.error}`);
+    const logged = t.recorded.logs.join('\n');
+    assert.ok(logged.includes('e2e 影响面披露'), '披露标题应写入 run 日志');
+    assert.ok(logged.includes('rule-A'), '披露内容（受影响 rule 与运行命令）应写入日志');
+    // 调用形态：select-affected-e2e.mjs --base <base>
+    const e2eCalls = t.recorded.sh.filter((c) => c[1] === FAKE_PATHS.selectAffectedE2e);
+    assert.ok(e2eCalls.length >= 1, '应调用披露脚本');
+    assert.deepStrictEqual(e2eCalls[0], ['node', FAKE_PATHS.selectAffectedE2e, '--base', 'main']);
+  });
+
+  await test('final-gates：披露脚本失败（exit 1）→ 仅 WARN，不阻塞 push（非门禁语义）', async () => {
+    const m = allGatesMocks({
+      scriptMocks: {
+        [FAKE_PATHS.selectAffectedE2e]: { code: 1, stdout: '', stderr: 'boom: e2e-map 读取失败' },
+      },
+    });
+    const t = makeIo(Object.assign({ args: { runId: RUN_ID_A, _runId: 'wf-u3-e2e2' } }, m));
+    seedState(t.root, { status: 'running' });
+    seedReviewerAgent(t.root);
+    t.io.steps = gatesSteps(t.root);
+    const result = await lib.runPipeline(t.io);
+    assert.strictEqual(result.status, 'awaiting-push', `披露失败不得改变终态（error=${result.error}）`);
+    const logged = t.recorded.logs.join('\n');
+    assert.ok(logged.includes('WARN: select-affected-e2e.mjs exit 1'), '失败应留 WARN 痕迹');
+    assert.ok(logged.includes('boom'), 'WARN 应带脚本 stderr 便于排查');
   });
 
   await test('final-gates：收尾防线——三动作全过但工作区脏（.review/ 除外）→ failed', async () => {

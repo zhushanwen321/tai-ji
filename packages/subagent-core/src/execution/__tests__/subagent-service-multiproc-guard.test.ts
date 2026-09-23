@@ -36,18 +36,10 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { ResurrectDeniedError } from "../assembly/types.ts";
-import type { PiLike } from "../subagent-service.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-multiproc-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 function setup(): { agentDir: string; service: SubagentService; store: RecordStore } {

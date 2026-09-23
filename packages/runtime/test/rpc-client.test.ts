@@ -19,7 +19,9 @@ import { RpcTimeoutError, type RpcClient } from '../src/infra/pi/rpc-client.js'
 import {
   clearExitHandlers,
   emitPiLine,
+  emitStdinError,
   killAndDriveExit,
+  killSignals,
   lastWrittenJson,
   resetRpcClientMock,
 } from './helpers/rpc-client-mock'
@@ -268,6 +270,46 @@ describe('RpcClient W1', () => {
     emitPiLine({ type: 'response', id: sent.id, success: false, error: 'pi internal error' })
 
     await expect(p).rejects.toThrow('pi internal error')
+  })
+})
+
+// ── RT-2#1：stdin 流错误源头收口（同族 stdout/stderr 处置链）──────────
+
+describe('RpcClient stdin stream error 收口（RT-2#1）', () => {
+  let client: RpcClient
+
+  beforeEach(async () => {
+    resetRpcClientMock()
+
+    const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
+    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    await client.start()
+  })
+
+  afterEach(async () => {
+    try { await client.kill() } catch { /* noop */ }
+    clearExitHandlers()
+  })
+
+  it('stdin emit error → pending reject + _exited 置位 + SIGKILL 自愈强杀', async () => {
+    // 先注册一条 pending（挂起的 RPC，stream error 后必须被 reject 而非挂满超时）
+    const commandPromise = client.sendCommand('get_state')
+    await Promise.resolve()
+
+    emitStdinError(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+
+    // ① pending reject（消息含流名，可归因 stdin 而非「pi 无响应」）
+    await expect(commandPromise).rejects.toThrow(/stdin stream error/)
+    // ② _exited 置位（后续 sendRaw / isAlive 立即可见死亡态）
+    expect((client as unknown as { _exited: boolean })._exited).toBe(true)
+    // ③ 自愈强杀触发（SIGKILL 加速进程死亡，exit 为死亡通知唯一出口）
+    expect(killSignals()).toContain('SIGKILL')
+  })
+
+  it('stdin error 后 sendRaw 返回 false（失败语义源头可观测，不落 uncaught-policy log-continue）', () => {
+    emitStdinError(new Error('write after end'))
+
+    expect(client.sendRaw('{"type":"ping"}')).toBe(false)
   })
 })
 

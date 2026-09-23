@@ -9,7 +9,7 @@ vi.mock("../pure.js", async (importOriginal) => {
 	};
 });
 
-import { DEFAULT_SMART_CONTEXT_CONFIG, loadSmartContextConfig } from "../pure.js";
+import { DEFAULT_SMART_CONTEXT_CONFIG, COMPACT_RESULT_CUSTOM_TYPE, loadSmartContextConfig } from "../pure.js";
 import { registerCompactContextTool } from "../tool.js";
 import { countCompactions } from "../pure.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -39,7 +39,7 @@ function makePi(): { pi: ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn>;
 function makeCtx(compactImpl?: (options: CompactOpts) => void): ExtensionContext {
 	return {
 		model: { provider: "zai", id: "glm" },
-		getContextUsage: () => ({ tokens: 250_000, contextWindow: 1_000_000 }),
+		getContextUsage: () => ({ tokens: 450_000, contextWindow: 1_000_000 }),
 		sessionManager: { getEntries: () => [] },
 		compact: compactImpl ?? ((options: CompactOpts) => {
 			options.onComplete({
@@ -124,7 +124,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(pi.sendMessage.mock.calls[0][0].content).toContain("回退");
 	});
 
-	it("onError → 注入失败消息带重试指引", async () => {
+	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + triggerTurn:true）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi);
 		const ctx = makeCtx((options) => options.onError(new Error("Nothing to compact")));

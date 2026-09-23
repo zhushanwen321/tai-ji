@@ -89,7 +89,8 @@ beforeEach(() => {
   getCommandsMock.mockReset()
   getCommandsMock.mockResolvedValue({ sessionId: 's1', commands: [] })
   getSubagentsMock.mockReset()
-  getSubagentsMock.mockResolvedValue([])
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagentsMock.mockResolvedValue({ subagents: [], oversize: false })
   // useFileSearch mock 默认空候选（C 组真实 CommandPopover onMounted 会拉；用例内可 Once 覆盖）
   mockLoad.mockReset()
   mockLoad.mockResolvedValue([])
@@ -450,7 +451,7 @@ describe('CommandPopover subagent 候选（A 组，@ subagent 语义）', () => 
   })
 
   it('A4 浮层打开（false→true）触发 loadSubagents（getSubagents RPC 被调）', async () => {
-    getSubagentsMock.mockResolvedValueOnce(SUBAGENT_FIXTURE)
+    getSubagentsMock.mockResolvedValueOnce({ subagents: SUBAGENT_FIXTURE, oversize: false })
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
       props: { open: false, type: 'subagent', sessionId: 's1', query: '' },
@@ -497,17 +498,19 @@ describe('slash 浮层打开主动拉（SL 组）', () => {
       props: { open: false, type: 'slash', sessionId: 's1', query: '' },
     })
     await nextTick()
-    // 合并语义：useCommandSync 挂载即拉（dev-0.9.9 帧丢失兜底），先让它完成并清计数
+    // 合并语义：useCommandSync 挂载即拉（dev-0.9.9 帧丢失兜底），先让它完成并清计数。
+    // [ADR-0050 修订] fixture 用 extension 命令——panel slash 段过滤 skill 项（双入口消除），
+    // source='skill' 的回填不再出现在 DOM；本用例测试对象是拉取链路本身，与 skill 语义无关。
     await flushPromises()
     getCommandsMock.mockReset()
-    getCommandsMock.mockResolvedValueOnce({ sessionId: 's1', commands: [{ name: '/demo-skill', source: 'skill', description: '演示' }] })
+    getCommandsMock.mockResolvedValueOnce({ sessionId: 's1', commands: [{ name: '/demo-cmd', source: 'extension', description: '演示' }] })
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(getCommandsMock).toHaveBeenCalledTimes(1)
     expect(getCommandsMock).toHaveBeenCalledWith('s1')
     // 回填 commandStore 后浮层渲染新命令（用户可见 DOM）
     const rows = bodyRows()
-    expect(rows.some((r) => (r.textContent ?? '').includes('demo-skill'))).toBe(true)
+    expect(rows.some((r) => (r.textContent ?? '').includes('demo-cmd'))).toBe(true)
   })
 
   it('SL2 landing 态（无 sessionId）打开不拉 getCommands', async () => {
@@ -724,7 +727,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
   })
 
   it('C2 @ 选 subagent → 插 .mention-at chip（@slug + dataset.chipSubagentId）', async () => {
-    getSubagentsMock.mockResolvedValueOnce(SUBAGENT_FIXTURE)
+    getSubagentsMock.mockResolvedValueOnce({ subagents: SUBAGENT_FIXTURE, oversize: false })
     wrapper = mountRealComposer()
     await flushPromises()
     await typeInComposer(wrapper, '@build', 6)
@@ -743,7 +746,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
   })
 
   it('C3 @ 选「＋ 新建 subagent」→ 插占位 slug chip（@新任务，subagentId 空串）', async () => {
-    getSubagentsMock.mockResolvedValueOnce(SUBAGENT_FIXTURE)
+    getSubagentsMock.mockResolvedValueOnce({ subagents: SUBAGENT_FIXTURE, oversize: false })
     wrapper = mountRealComposer()
     await flushPromises()
     await typeInComposer(wrapper, '@', 1)

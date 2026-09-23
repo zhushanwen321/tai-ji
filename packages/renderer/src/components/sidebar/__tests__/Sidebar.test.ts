@@ -4,7 +4,7 @@
  * 验证第 5 plugin tab（本批次核心验收「tab 激活后渲染 plugin view」）：
  * - TC1: activeTab='plugins' + 有焦点 session → PluginViewContainer 挂载且
  *   sessionId 绑定焦点 session（L2 二级路由容器，内部 L2TabBar + ViewHost）
- * - TC2: activeTab='plugins' + 无焦点 session（Overview 态）→ sidebar-plugin-no-session 占位 DOM
+ * - TC2: activeTab='plugins' + 无焦点 session 态→ sidebar-plugin-no-session 占位 DOM
  * - TC3: activeTab='sessions'（非 plugins）→ 不挂 PluginViewContainer（回归）
  *
  * mock 策略对齐 sidebar-ondeletefolder.test.ts 先例（Sidebar.vue 整体 mount 依赖
@@ -29,7 +29,6 @@ const sidebarMocks = vi.hoisted(() => ({
   deleteFolder: vi.fn(),
   renameSession: vi.fn(),
   newSession: vi.fn(),
-  goOverview: vi.fn(),
   loadSessions: vi.fn(() => Promise.resolve()),
   syncSessionToPanel: vi.fn(),
   activeTab: null as unknown as Ref<string>,
@@ -96,13 +95,7 @@ vi.mock('@/stores/workflow', () => ({
     getRecordsBySession: () => [],
     isLoading: false,
     loadError: null,
-    workflowCount: () => 0,
-    getCurrentWorkflow: () => null,
-    selectWorkflow: vi.fn(),
-    backToWorkflowList: vi.fn(),
     loadWorkflows: vi.fn(() => Promise.resolve()),
-    selectAgentCall: vi.fn(() => Promise.resolve()),
-    backFromAgentCall: vi.fn(),
   }),
 }))
 vi.mock('@/stores/navigation', () => ({
@@ -121,10 +114,6 @@ vi.mock('@/composables/features/command/useCommandStore', () => ({
 vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => ({ abort: vi.fn() }) }))
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
-}))
-vi.mock('@/composables/features/chat/useListSync', () => ({ useListSync: vi.fn() }))
-vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => ({
-  useSidebarSubagentActions: () => ({ onSelectSubagent: vi.fn(), onCancelSubagent: vi.fn(), onRetrySubagents: vi.fn() }),
 }))
 vi.mock('@/composables/usePlatformShortcut', () => ({ usePlatformShortcut: () => ({ formatKbd: () => '⌘K' }) }))
 
@@ -159,7 +148,7 @@ describe('Sidebar plugins tab（MF-10 渲染 gate）', () => {
     wrapper.unmount()
   })
 
-  it('TC2: activeTab=plugins + 无焦点 session（Overview 态）→ sidebar-plugin-no-session 占位 DOM，不挂 PluginViewContainer', () => {
+  it('TC2: activeTab=plugins + 无焦点 session 态→ sidebar-plugin-no-session 占位 DOM，不挂 PluginViewContainer', () => {
     sidebarMocks.activeTab.value = 'plugins'
     const wrapper = shallowMount(Sidebar)
 

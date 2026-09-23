@@ -4,7 +4,9 @@
  * 锁定：message_end / agent_settled / entry_appended 三事件经 translate() 输出
  * **同时**含 main 侧 handler 产物（W21 实时 feed / W1 bash flush / W18 派生缓存失效）
  * **与** trace-trigger 中间事件（interpreter 调 onTraceSync 做追赶式 since 拉取），
- * 且 main 产物在前、trace-trigger 追加在后。
+ * 且 main 产物在前、trace-trigger 追加在后。[reload-closeout D2] 起 agent_settled
+ * 在 trace-trigger 之后**再**追加 record-reconcile-trigger（onRecordReconcile 送达
+ * 水位对账腿，只挂 agent_settled——run 级联结束边界信号）。
  *
  * 回归背景：本 PR merge 曾修「两组 DISPATCHER.set 叠加互相覆盖」bug（Map 后写覆盖
  * 前写，丢一组产物）。若退回单 handler 覆盖形态（丢 trace-trigger 追加），本文件
@@ -27,7 +29,7 @@ import type {
 const SID = 's-trace-trigger'
 
 describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回归锁）', () => {
-  it('组合注册不互相覆盖：三事件输出 main handler + trace-trigger 双产物', () => {
+  it('组合注册不互相覆盖：三事件输出 main handler + trace-trigger（agent_settled 另追加 record-reconcile-trigger）', () => {
     // message_end：main = W21 实时 feed（message.message_end entry 帧）
     const messageEnd = translate(
       {
@@ -49,9 +51,15 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     })
     expect(messageEnd[1]).toEqual({ kind: 'trace-trigger', trigger: 'message_end' })
 
-    // agent_settled：main = W1 bash flush 信号（agent-settled 中间事件）
+    // agent_settled：main = W1 bash flush 信号（agent-settled 中间事件）+ trace-trigger
+    // + record-reconcile-trigger（[reload-closeout D2] 送达水位对账腿第三层组合，只挂
+    // agent_settled——run 级联结束边界信号）
     const settled = translate({ type: 'agent_settled' } as PiAgentSettledEvent, SID)
-    expect(settled).toEqual([{ kind: 'agent-settled' }, { kind: 'trace-trigger', trigger: 'agent_settled' }])
+    expect(settled).toEqual([
+      { kind: 'agent-settled' },
+      { kind: 'trace-trigger', trigger: 'agent_settled' },
+      { kind: 'record-reconcile-trigger' },
+    ])
 
     // entry_appended：main = W18 派生缓存失效（record-entry-appended）
     const appended = translate(
@@ -95,6 +103,17 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     )
     expect(events).toEqual([
       { kind: 'record-entry-appended', customType: 'workflow-record' },
+      { kind: 'trace-trigger', trigger: 'entry_appended' },
+    ])
+  })
+
+  it('entry_appended 对 plan-state 同样双产物（plan 模式重设计 D1① 白名单第三员）', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 'plan-state' } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
+    expect(events).toEqual([
+      { kind: 'record-entry-appended', customType: 'plan-state' },
       { kind: 'trace-trigger', trigger: 'entry_appended' },
     ])
   })

@@ -1,5 +1,5 @@
 /**
- * window-factory render-process-gone 恢复链单测（crash-resilience u3-renderer-recovery）。
+ * window-factory render-process-gone 恢复链单测（u3-renderer-recovery）。
  *
  * 覆盖（验收：详情落盘 + 按窗口熔断自动 reload + 超限静态错误页 + 重试重置 + 多窗口隔离）：
  * - 详情落盘：main-logger（mock）收到含 windowId/reason/exitCode/detectedAt 的结构化 meta

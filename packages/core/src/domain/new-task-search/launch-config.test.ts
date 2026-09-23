@@ -7,7 +7,8 @@
  *   + KV 原值保留（resolve 纯函数无 KV 写点）
  * - D3 isFactoryFullPreset 出厂等价（含 P2b：modelOverride / noSkills / allowedExtensions
  *   三字段覆写翻转 + resolve 透传；数组比对语义：顺序敏感、undefined ≠ []）
- * - 穷尽守卫：比对键运行时枚举 vs D3 十字段清单（编译期由 satisfies 映射类型锁）
+ * - D3 对象扩展：prompt（模式提示词）覆写翻转 + 普通对象结构化比对（引用无关）
+ * - 穷尽守卫：比对键运行时枚举 vs D3 十一字段清单（编译期由 satisfies 映射类型锁）
  * - P5①：KV 延迟到达时 createLaunchConfigView 响应式重算（chip 脱离默认占位值）
  * - D1 ensureLaunchDataReady：已加载微任务内返回 / 未加载等待完成 / 单源失败不阻塞
  */
@@ -555,7 +556,22 @@ describe('isFactoryFullPreset · 出厂等价判定', () => {
     expect(isFactoryFullPreset(overwritten)).toBe(false)
   })
 
-  it('覆盖写其他非比对字段（name/order）不影响出厂判定（比对键只含 10 个生效字段）', () => {
+  it('prompt：覆写 append 段（模式提示词）→ 判定翻转 + resolve 透传 presetId=builtin:full', () => {
+    const overwritten: PiLaunchPreset = {
+      ...factoryFull(),
+      prompt: { append: { enabled: true, prompt: 'x' } },
+    }
+    expect(isFactoryFullPreset(overwritten)).toBe(false)
+    const cfg = resolveLaunchConfig(makeInput({ presets: [overwritten] }))
+    expect(cfg.presetId).toBe('builtin:full')
+  })
+
+  it('prompt：双侧都未配置（出厂 full 无 prompt）→ 仍判出厂等价', () => {
+    expect(isFactoryFullPreset(factoryFull())).toBe(true)
+    expect(isFactoryFullPreset({ ...factoryFull() })).toBe(true)
+  })
+
+  it('覆盖写其他非比对字段（name/order）不影响出厂判定（比对键只含 11 个生效字段）', () => {
     const renamed = { ...factoryFull(), name: '我的全工具', order: 99 }
     expect(isFactoryFullPreset(renamed)).toBe(true)
   })
@@ -585,8 +601,66 @@ describe('launchFieldEquals · 数组比对语义（P2b）', () => {
   })
 })
 
-describe('穷尽守卫 · 比对键 vs D3 十字段清单', () => {
-  it('PRESET_LAUNCH_KEYS 键集 = D3 声明的 10 个 launch 生效字段', () => {
+describe('launchFieldEquals · 普通对象比对语义（D3 对象扩展）', () => {
+  it('结构相同但引用不同 → 等价（结构化比对，非引用比较）', () => {
+    const a = { append: { enabled: true, prompt: 'x' } }
+    const b = { append: { enabled: true, prompt: 'x' } }
+    expect(a).not.toBe(b)
+    expect(launchFieldEquals(a, b)).toBe(true)
+    // 段级对象同样走结构比对
+    expect(launchFieldEquals(a.append, b.append)).toBe(true)
+  })
+
+  it('undefined vs 对象 → 不等价（从未配置 ≠ 显式配置）', () => {
+    const configured = { append: { enabled: true, prompt: 'x' } }
+    expect(launchFieldEquals(undefined, configured)).toBe(false)
+    expect(launchFieldEquals(configured, undefined)).toBe(false)
+  })
+
+  it('段级 enabled 翻转（replace true vs false）→ 不等价', () => {
+    expect(
+      launchFieldEquals(
+        { replace: { enabled: true, prompt: 'p' } },
+        { replace: { enabled: false, prompt: 'p' } },
+      ),
+    ).toBe(false)
+  })
+
+  it('段级 prompt 文本不同 → 不等价', () => {
+    expect(
+      launchFieldEquals(
+        { replace: { enabled: true, prompt: 'a' } },
+        { replace: { enabled: true, prompt: 'b' } },
+      ),
+    ).toBe(false)
+  })
+
+  it('键集合不同（缺键 vs 有键 / 同键集不同名）→ 不等价', () => {
+    expect(launchFieldEquals({}, { append: { enabled: true, prompt: 'x' } })).toBe(false)
+    expect(
+      launchFieldEquals(
+        { append: { enabled: true, prompt: 'x' } },
+        { replace: { enabled: true, prompt: 'x' } },
+      ),
+    ).toBe(false)
+  })
+
+  it('两段齐全结构相同 → 等价；少一段 → 不等价', () => {
+    const both = {
+      replace: { enabled: true, prompt: 'r' },
+      append: { enabled: false, prompt: 'a' },
+    }
+    expect(launchFieldEquals(both, { ...both })).toBe(true)
+    expect(launchFieldEquals(both, { replace: both.replace })).toBe(false)
+  })
+
+  it('空对象 vs 空对象 → 等价（键集合同为空）', () => {
+    expect(launchFieldEquals({}, {})).toBe(true)
+  })
+})
+
+describe('穷尽守卫 · 比对键 vs D3 十一字段清单', () => {
+  it('PRESET_LAUNCH_KEYS 键集 = D3 声明的 11 个 launch 生效字段', () => {
     expect(Object.keys(PRESET_LAUNCH_KEYS).sort()).toEqual(
       [
         'toolMode',
@@ -599,6 +673,7 @@ describe('穷尽守卫 · 比对键 vs D3 十字段清单', () => {
         'thinkingLevel',
         'noSkills',
         'noContextFiles',
+        'prompt',
       ].sort(),
     )
   })
@@ -621,6 +696,10 @@ describe('穷尽守卫 · 比对键 vs D3 十字段清单', () => {
       thinkingLevel: 'high',
       noSkills: true,
       noContextFiles: true,
+      prompt: {
+        replace: { enabled: true, prompt: 'r' },
+        append: { enabled: false, prompt: 'a' },
+      },
     }
     const presetKeys = Object.keys(fullShapePreset)
     for (const key of Object.keys(PRESET_LAUNCH_KEYS)) {

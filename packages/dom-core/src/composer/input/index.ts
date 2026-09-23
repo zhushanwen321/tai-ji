@@ -12,6 +12,8 @@
  * - useComposerHistory：历史导航状态机（getHistoryEntries 注入，per-session 经 useSessionScopedState）
  * - useComposerDragDrop：拖拽落位（pasteImage 注入）
  * - getSegmentsFromEl/findImageChipEl/findImageChipElById：DOM 辅助（外部消费）
+ * - removeActiveTokenText/ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES：活跃域 token 文本定位删除
+ *   （非光标锚定，search-modal-popover-mutual-exclusion D2b；useCommandPopoverTrigger 消费）
  *
  * deps 注入契约：所有跨域能力（IPC pasteImage / chatStore getHistoryEntries /
  * 图标渲染 renderIcon / i18n t）经 deps 回调注入，dom-core 零 renderer import、零 vue render
@@ -40,6 +42,14 @@ export {
   removeChipNode,
   CHIP_SPACER_ZWSP,
 } from './input-dom'
+
+// 活跃域 token 文本定位删除（外部消费：useCommandPopoverTrigger SM confirm 注入前清理，设计 D2b）
+export {
+  removeActiveTokenText,
+  ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES,
+  type ActiveTokenDomainType,
+  type RemoveActiveTokenTextOptions,
+} from './remove-active-token'
 
 // 类型（外部消费：壳层 ComposerInput 组装 deps、W3 dispatch 消费 ComposerInputInstance）
 export type {

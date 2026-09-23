@@ -459,9 +459,11 @@ describe('parsePiProviders', () => {
 
   // ══ W4 补充：分支覆盖缺口锚定 ══
 
-  // 锚定 `if (config.api && !PI_SUPPORTED_PROTOCOLS.has(config.api))` 的另一侧：
-  // api 字段缺失（undefined）时 provider 保留（不 skip），api 原样 undefined 透传。
-  it('W4-a: api 字段缺失的 provider → 保留进结果（不 skip），api 为 undefined', () => {
+  // RT-5#3：api 字段缺失（undefined）与未知协议同路 skip——pi 的 createProvider 直接
+  // `input.api.stream` 取流实现（pi-ai dist/models.js），无 api 的 provider 在 pi 运行时
+  // TypeError，放行只会导入不可用空壳（空壳防线③只核八字段挡不住）。
+  // 旧行为（保留 + api 透传 undefined）已废弃。
+  it('W4-a: api 字段缺失的 provider → skip + 顶层 warning（RT-5#3）', () => {
     writePiAgentFile('models.json', JSON.stringify({
       providers: {
         noapi: { name: 'NoApi', models: [{ id: 'm', name: 'M' }] },
@@ -471,13 +473,10 @@ describe('parsePiProviders', () => {
 
     const result = parsePiProviders(home)!
 
-    expect(result.providers).toHaveLength(2)
-    const noapi = result.providers.find((x) => x._sourceName === 'noapi')!
-    expect(noapi.api).toBeUndefined()
-    expect(noapi.name).toBe('NoApi')
+    expect(result.providers).toHaveLength(1)
+    expect(result.providers[0]!._sourceName).toBe('normal')
     expect(result.parseError).toBeUndefined()
-    // api 缺失不产生顶层 warnings（不属于丢弃场景）
-    expect(result.warnings).toBeUndefined()
+    expect(result.warnings!.some((w) => w.includes('noapi') && w.includes('missing protocol (api), skipped'))).toBe(true)
   })
 
   // 锚定 `authEntry?.key ?? configApiKey` 的 ?? 另一侧：auth entry 存在但无 key 字段

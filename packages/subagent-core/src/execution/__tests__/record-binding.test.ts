@@ -53,9 +53,9 @@ import {
 } from "../persistence/state-marker.ts";
 import type { RecordBinding } from "../persistence/state-marker.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 
 // 身份 env 清理（同 get-record-for-action-restart.test.ts：测试进程可能继承
@@ -462,14 +462,6 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
 // ============================================================
 // C. SubagentService 集成（写入点 + 跨重启全链）
 // ============================================================
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
 
 interface ServiceInternals {
   store: RecordStore;

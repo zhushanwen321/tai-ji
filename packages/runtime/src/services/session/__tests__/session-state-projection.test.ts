@@ -89,7 +89,6 @@ function makeEnv(opts: {
     fetchContext: opts.fetchContext ?? vi.fn(async () => null),
     persistSessionOutcome: vi.fn(),
     tryPersistProjectBinding: vi.fn(),
-    tryPersistModelBinding: vi.fn(),
   }
   const projection = new SessionStateProjection(deps)
   return { projection, deps, bus, publishSpy, client, sessions }
@@ -265,23 +264,20 @@ describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastCon
     expect(() => env.projection.applyContextUpdate('ghost', 1, 1)).not.toThrow()
   })
 
-  it('handleTurnUsageSideEffects：turn_end project/model sidecar 兜底；session 不存在时跳过', () => {
+  it('handleTurnUsageSideEffects：turn_end project sidecar 兜底；session 不存在时跳过', () => {
     const env = makeEnv({ session: makeSessionView({ id: 's1', isGenerating: false }) })
     env.projection.handleTurnUsageSideEffects('s1')
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
-    expect(env.deps.tryPersistModelBinding).toHaveBeenCalledTimes(1)
-    expect(env.deps.tryPersistModelBinding).toHaveBeenCalledWith(env.sessions.get('s1'))
+    expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledWith(env.sessions.get('s1'))
     env.projection.handleTurnUsageSideEffects('ghost')
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
-    expect(env.deps.tryPersistModelBinding).toHaveBeenCalledTimes(1)
   })
 
-  it('handleTurnEndSideEffects：isGenerating 复位 + sidecar 兜底（project/model 镜像）+ stopReason outcome 映射（error/aborted/其余→done）', () => {
+  it('handleTurnEndSideEffects：isGenerating 复位 + project sidecar 兜底 + stopReason outcome 映射（error/aborted/其余→done）', () => {
     const env = makeEnv({ session: makeSessionView({ id: 's1', isGenerating: true }) })
     env.projection.handleTurnEndSideEffects('s1')
     expect(env.sessions.get('s1')!.isGenerating).toBe(false)
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
-    expect(env.deps.tryPersistModelBinding).toHaveBeenCalledTimes(1)
     expect(env.deps.persistSessionOutcome).toHaveBeenCalledWith('s1', 'done')
 
     env.projection.handleTurnEndSideEffects('s1', 'error')
@@ -297,7 +293,6 @@ describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastCon
     // 只碰 isGenerating：不得写 session_end 终态 / sidecar（与 handleTurnEndSideEffects 的职责边界）
     expect(env.deps.persistSessionOutcome).not.toHaveBeenCalled()
     expect(env.deps.tryPersistProjectBinding).not.toHaveBeenCalled()
-    expect(env.deps.tryPersistModelBinding).not.toHaveBeenCalled()
 
     expect(() => env.projection.handleAgentSettledSideEffects('ghost')).not.toThrow()
   })

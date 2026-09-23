@@ -1,7 +1,7 @@
 // registry-fork-filter.test.ts —— [W6] 翻档 × fork 继承残留的读侧过滤契约 +
 // bash 跨 session 可见性显式断言（R4 一刀语义钉住）+ 偏差 #4 探针（goal 守卫口径）。
 //
-// 设计权威源：chat-domain-v1x-liveness-governance.md §3.2 D4（翻档三连带——读侧
+// 设计锚点：D4（翻档三连带——读侧
 // 过滤三口；分档常量已随 ext-simplify-12 删除，三类型 process 档成为无条件代码
 // 自然状态）+ 修订记录 v5-⑤（bash 跨 session 可见性一刀钉成显式选择）+ 验收 A9②
 // + impl-plan §5 偏差 #4（W4 交接：goal 守卫消费点未传基准，W6 实测裁决是否需

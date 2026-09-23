@@ -11,7 +11,7 @@
  *
  * 不持 UI 状态，纯 computed 派生（受控范式）。
  */
-import { computed } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
@@ -66,6 +66,20 @@ export interface UseQuotaDisplayReturn {
 export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDisplayReturn {
   const { t } = useI18n()
   const settingsStore = getSettingsStore()
+
+  /**
+   * RD-4#13：相对时间（「x 分钟前」）定时重算 tick（per-instance）。渲染期裸 Date.now() 且无
+   * 定时重算 → 长驻页永久陈旧。每 30s 推进 nowTick，formatLastFetch 读 nowTick.value 建立
+   * 响应式依赖，tick 变化驱动模板重算。scope dispose 清理定时器（对齐 autocheck 模式）。
+   */
+  const LAST_FETCH_TICK_MS = 30_000
+  const nowTick = ref(Date.now())
+  const lastFetchTimer: ReturnType<typeof setInterval> = setInterval(() => {
+    nowTick.value = Date.now()
+  }, LAST_FETCH_TICK_MS)
+  onScopeDispose(() => {
+    clearInterval(lastFetchTimer)
+  })
 
   /** 从受控 modelId 派生 providerId，命中 quota preset 且 enabled 才启用 coding-plan 区。 */
   const matchedProviderId = computed<string | null>(() => {
@@ -128,7 +142,9 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
 
   /** 格式化 lastFetchAt 为相对时间（i18n 化）。 */
   function formatLastFetch(ts: number): string {
-    const sec = Math.floor((Date.now() - ts) / MS_PER_SEC)
+    // RD-4#13：读 nowTick.value 建立响应式依赖——tick 每 30s 推进驱动模板重算相对时间，
+    // 替代渲染期裸 Date.now()（无定时重算 → 长驻页「x 分钟前」永久陈旧）。
+    const sec = Math.floor((nowTick.value - ts) / MS_PER_SEC)
     if (sec < SEC_PER_MIN) return t('panel.context.timeAgoNow')
     const m = Math.floor(sec / SEC_PER_MIN)
     if (m < MIN_PER_HOUR) return t('panel.context.timeAgoMinutes', { n: m })

@@ -19,8 +19,10 @@ import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
 import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
+import { probeSingleInstance, registerRuntimeInstance } from './infra/single-instance-guard.js'
 // u1b（crash-forensics-and-watchdog D1）runtime 台账单例。初始化是组合根职责（与
 // initLogger 同形态：模块级单例 + 未初始化 no-op）——不初始化则 getCrashJournal()
 // 恒返回 no-op，pi-respawn / message-bus 守卫 / session 生命周期的全部 runtime 侧
@@ -53,12 +55,19 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import { ExtensionService } from './services/extension-service.js'
 import { SkillRegistry } from './services/skill-registry.js'
+// [A1 接线] skill 注入映射源（D7 切源）：delivery registry 的 SkillInjector 与
+// dispatcher/records 共用 sessionService 的晚绑定源（见下方 bindSkillMappingSource）。
+import { SkillInjector } from './services/session/skill-injector.js'
 import { ReloadOrchestrator } from './services/session/reload-orchestrator.js'
 import { PluginRegistry } from './services/plugin-service/plugin-registry.js'
 import { PluginService } from './services/plugin-service/plugin-service.js'
 import { GitService } from './services/git-service.js'
 import { GitExecutor } from './infra/git-executor.js'
 import { GitStateService } from './services/git/git-state-service.js'
+import { initSharedRepoObserver, getSharedRepoObserver, bindSharedRepoObserverCallbacks } from './services/git/repo-observer.js'
+import { GitChangeTrigger } from './services/git/git-change-trigger.js'
+import { GitRepoResolver } from './infra/system/git-repo-resolver.js'
+import { GitHeadWatcher } from './infra/system/git-head-watcher.js'
 import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
@@ -81,6 +90,12 @@ import { FsExecutor } from './infra/fs-executor.js'
 import { RecentWorkspacesStore } from './services/workspace/recent-workspaces-store.js'
 import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
+import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
+import { ZcodeImportSource } from './services/session/import-source-zcode.js'
+import type { SessionImportSource } from './services/session/import-source.js'
+// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（sqlite-access 内重声明，与引擎包
+// db-path.ts 同语义；runtime 不依赖引擎包）
+import { hostZcodeDbPath } from './services/session/zcode-import/sqlite-access.js'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
 import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →
@@ -133,10 +148,11 @@ import { TaijiProviderStore } from './services/provider-extras-store.js'
 import { initRelayServer, deinitRelayServer, getActiveRelayRegistry } from './infra/relay/relay-server.js'
 // u3b（idle-pi-reclamation D2/D4/D6）：空闲 pi 回收装配原语——ReclaimSeat 占座单例 +
 // startIdlePiReaper 周期判定循环（DI 形态，依赖在下方 wiring 段组装）。
-import { ReclaimSeat, startIdlePiReaper } from './services/session/idle-pi-reaper.js'
+import { ReclaimSeat, startIdlePiReaper, hasFreshPendingUiRequest } from './services/session/idle-pi-reaper.js'
 import type { IdlePiReaperHandle, ReclaimExemptions } from './services/session/idle-pi-reaper.js'
 import { reapSessionBackgroundTasks } from './services/session/background-task-reaper.js'
 import { toErrorMessage } from './utils/errors.js'
+import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // W8 宿主接线：runtime 协议客户端的自持引擎实例 dispose 钩子（idle 5min 复用的
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
@@ -275,9 +291,106 @@ function subscribeAgentSettledIn(
   }
 }
 
+/** spawn 数据目录契约校验（缺省反转护栏）：违规时打印全部违规项并 exit(1)。断言失败时连
+ *  日志都不该写（日志目录本身就是要保护的对象），故本守卫必须早于任何 getDataDir() 消费
+ *  （含 main 内的 initLogger）。打包态必带显式数据目录（main 成对注入），裸跑/验证脚本走
+ *  缺省落 dev 树不适用。 */
+function exitIfDataDirContractViolated(): void {
+  const contractViolation = spawnDataDirContractViolation(process.env)
+  if (contractViolation) {
+    console.error(contractViolation.join('\n'))
+    process.exit(1)
+  }
+}
+
+/** 单实例互斥守卫判定：同数据目录已有活实例则打印定位信息并拒绝启动（exit(1)）——双 runtime
+ *  会 reattach 并销毁对方 sessions/subagents。守卫语义与判据见 single-instance-guard.ts 模块头注。 */
+function exitIfInstanceConflict(guardProbe: Awaited<ReturnType<typeof probeSingleInstance>>): void {
+  if (guardProbe.blocked && guardProbe.holder) {
+    const holder = guardProbe.holder
+    console.error('[runtime] fatal: data directory already served by a live runtime instance — refusing to start (dual runtime would reattach + destroy its sessions/subagents)')
+    console.error(`  data dir : ${getDataDir()}`)
+    console.error(`  live at  : 127.0.0.1:${holder.port} (source: ${holder.source}${holder.pid !== undefined ? `, pid ${holder.pid}` : ''})`)
+    if (holder.reachable) {
+      console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
+    } else {
+      // 预登记窗口拒绝：持有 pid 存活但端口尚未 listen——并发同启中，或 pid 复用误判（保守侧）。
+      console.error(`  recovery : holder pid ${holder.pid} is alive but not listening yet (concurrent startup in progress) — wait for it to finish starting and retry, or \`ps -p ${holder.pid}\` to identify it; if it is NOT a runtime process (pid reuse) remove runtime-instance.json and retry.`)
+    }
+    console.error('             for a second concurrent instance use a separate TAIJI_AGENT_DATA_DIR — dev/e2e/acceptance must NOT inherit the prod data dir')
+    process.exit(1)
+  }
+}
+
+/** A1-2 迁移成功后的 models.json 清洗 + 写读错位自愈。仅迁移成功后执行（失败时寄生数据未出
+ *  models.json，sanitize 会物理删除空壳条目致寄生数据永久丢失，round 1 review DG#3；门控
+ *  返回值语义由 run-extras-migration.test.ts 守卫）。 */
+async function sanitizeProvidersAfterExtrasMigration(
+  extrasMigration: Awaited<ReturnType<typeof runProviderExtrasMigration>>,
+  providerExtrasStore: TaijiProviderStore,
+): Promise<void> {
+  if (!extrasMigration.ok) return
+  // 清洗 models.json：① 空串键剥除（pi minLength:1 全集）+ ② catalog 条目的 provider 级键处置
+  // （api 一律剥除 / baseUrl 按 extras 网关标记）→ 再做既有空壳判定/修复（设计 D2 顺序契约）。
+  // 历史背景：空壳 provider（五字段全缺）导致 bundled pi 0.80.3 严格校验时整个 models.json
+  // 加载失败（Model not found）。系统 pi 0.83 容错但 bundled 不容错，重装后必现；
+  // sanitize 让 taiji 自愈这种脏数据（如外部脚本写入的测试 fixture）。
+  // 标记读取经注入的同步原语（C-comm-03：infra/pi 层不 import services 实现，设计 D2 审查 R3-3）。
+  const sanitizeOutcome = sanitizeInvalidProviders({
+    getExtrasSync: (providerId) => providerExtrasStore.getExtrasSync(providerId),
+  })
+  // D2② 写读错位自愈（写序契约「先写 extras 标记、后写 models.json」的崩溃中间态 =
+  // 标记在、models.json 无 baseUrl 键）：清多余标记。锁内写在本 async 阶段执行，
+  // 不塞进同步清洗段。标记已被并发清除时短路不调 modify（modify 无内容 diff 守卫，
+  // 避免无谓写盘）。
+  for (const providerId of sanitizeOutcome.staleGatewayMarkers) {
+    if (providerExtrasStore.getExtrasSync(providerId)?.gatewayBaseUrl === undefined) continue
+    await providerExtrasStore.modify(providerId, current => {
+      const next = { ...current }
+      delete next.gatewayBaseUrl
+      return next
+    })
+  }
+}
+
+/** WS listen 失败的进程退出裁决：端口被占（EADDRINUSE）打可操作排查指引（指向恢复动作：
+ *  查占用 → 关实例 → 重启），其余错误原样打印；均快速失败 exit(1)。与 ConnectionManager.start
+ *  reject 的分工：传输层对 listen 失败（EADDRINUSE 等）只 reject（对齐 callback-server.ts 先例，
+ *  可被测试捕获/换端口重试，不杀进程）；进程退出决策归组合根，而非静默退出。 */
+function exitOnListenFailure(err: unknown, port: number): never {
+  const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
+  if (code === 'EADDRINUSE') {
+    console.error(`[runtime] fatal: 端口 ${port} 被占用（EADDRINUSE）——可能已有另一个 taiji 实例在运行。`)
+    console.error(`  排查: lsof -i :${port} 查看占用进程；关闭其他实例后重启。原始错误: ${toErrorMessage(err)}`)
+  } else {
+    console.error('[runtime] fatal: WS listen failed:', err)
+  }
+  process.exit(1)
+}
+
+/** E-2：relay socket server 初始化（listen 后、后台初始化前）。fatal 语义：实例冲突（残留
+ *  socket 被活实例持有）与 listen 失败都退出——覆盖/复用会劫持他人注册表。staged 脚本缺失
+ *  与执行器探针失败不在此层（getRelaySpawnEnv 降级为不注入 env，relay 整体不激活，回落现状）。 */
+async function initRelayServerOrExit(projectRoot: string, messageBus: MessageBus): Promise<void> {
+  try {
+    await initRelayServer({
+      projectRoot,
+      publish: (sid, msg) => messageBus.publish(sid, msg),
+    })
+  } catch (err) {
+    console.error('[runtime] fatal: relay server init failed:', err)
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   const { port, projectRoot, builtinPluginsDir } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
+
+  // spawn 数据目录契约校验（缺省反转护栏）：必须在任何 getDataDir() 消费（含下方
+  // initLogger）之前——断言失败时连日志都不该写（日志目录本身就是要保护的对象）。
+  exitIfDataDirContractViolated()
+
   // perf W29（D8-1）启动耗时分解探针（06 §5 m-7）：listen 前各段打点，
   // 输出进日志文件供 D8 价值评估（基线实测：getPiVersion 1.1-1.3s 主导 listen 延迟）。
   const tStart = performance.now()
@@ -288,6 +401,17 @@ async function main(): Promise<void> {
   // 无法事后诊断 pi 发了什么事件。initLogger 后所有 console.* 自动 tee 到
   // <dataDir>/logs/runtime-YYYY-MM-DD.log。
   initLogger(getDataDir())
+
+  // 单实例互斥守卫（2026-09-22 双 runtime 事故根修）：同数据目录已有活实例则拒绝启动。
+  // 必须早于一切子进程 spawn / service 构造——此刻拒绝零清理负担；置于 initLogger 后
+  // 使拒绝报错落盘可见。守卫语义与判据见 single-instance-guard.ts 模块头注。
+  const guardProbe = await probeSingleInstance(getDataDir())
+  exitIfInstanceConflict(guardProbe)
+  // 预登记本实例（probe 通过即写、早于 listen）：并发同启同目录时，后到实例的 probe
+  // 读到本登记即因 pid 存活拒绝——漏防窗口从「probe→listen」（秒级）缩到单文件原子
+  // 写内。listen 成功后无需重复登记（登记内容不含 listen 结果）；写失败不阻塞（文件
+  // 非权威，supervisor runtime.port 通道并行）。
+  registerRuntimeInstance(getDataDir(), port)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
@@ -352,31 +476,10 @@ async function main(): Promise<void> {
   // providers.json。迁移失败不阻塞启动（warn + 下次重试，幂等），失败语义收在
   // run-extras-migration.ts 薄包装（返回值契约由其单测守卫）。
   const extrasMigration = await runProviderExtrasMigration(configStore, providerExtrasStore)
-  // 清洗 models.json：① 空串键剥除（pi minLength:1 全集）+ ② catalog 条目的 provider 级键处置
-  // （api 一律剥除 / baseUrl 按 extras 网关标记）→ 再做既有空壳判定/修复（设计 D2 顺序契约）。
-  // 历史背景：空壳 provider（五字段全缺）导致 bundled pi 0.80.3 严格校验时整个 models.json
-  // 加载失败（Model not found）。系统 pi 0.83 容错但 bundled 不容错，重装后必现；
-  // sanitize 让 taiji 自愈这种脏数据（如外部脚本写入的测试 fixture）。
-  // 仅迁移成功后执行（失败时寄生数据未出 models.json，sanitize 会物理删除空壳条目致
-  // 寄生数据永久丢失，round 1 review DG#3；门控返回值语义由 run-extras-migration.test.ts 守卫）。
-  if (extrasMigration.ok) {
-    // 标记读取经注入的同步原语（C-comm-03：infra/pi 层不 import services 实现，设计 D2 审查 R3-3）。
-    const sanitizeOutcome = sanitizeInvalidProviders({
-      getExtrasSync: (providerId) => providerExtrasStore.getExtrasSync(providerId),
-    })
-    // D2② 写读错位自愈（写序契约「先写 extras 标记、后写 models.json」的崩溃中间态 =
-    // 标记在、models.json 无 baseUrl 键）：清多余标记。锁内写在本 async 阶段执行，
-    // 不塞进同步清洗段。标记已被并发清除时短路不调 modify（modify 无内容 diff 守卫，
-    // 避免无谓写盘）。
-    for (const providerId of sanitizeOutcome.staleGatewayMarkers) {
-      if (providerExtrasStore.getExtrasSync(providerId)?.gatewayBaseUrl === undefined) continue
-      await providerExtrasStore.modify(providerId, current => {
-        const next = { ...current }
-        delete next.gatewayBaseUrl
-        return next
-      })
-    }
-  }
+  // 清洗 models.json：仅迁移成功后执行（失败时寄生数据未出 models.json，sanitize 会物理
+  // 删除空壳条目致寄生数据永久丢失，round 1 review DG#3；门控返回值语义由
+  // run-extras-migration.test.ts 守卫），清洗与写读错位自愈见 helper。
+  await sanitizeProvidersAfterExtrasMigration(extrasMigration, providerExtrasStore)
 
   const sessionStore = new PiSessionStore()
   const modelSource = new ModelApiDiscoverer()
@@ -390,10 +493,11 @@ async function main(): Promise<void> {
     npmDir: getNpmDir(),
   })
   // IExtensionSettings port 的 infra 实现：经 pi-settings-store 统一读写 settings.json（D17）。
-  // 构造时对齐 settings 路径到 pi agent 目录，保证 model 域与 extension 域读写同一文件。
+  // RT-3#12：构造不再对齐全局 settings 路径（生产实参与 getSettingsPath() 同值，属 no-op
+  // 副作用）；settings.json 路径 = pi-settings-store 模块级单一所有者的默认值。
   const extensionSettings = new PiExtensionSettings(configStore.getPiAgentDir())
-  // ILlmRetrySettings port 的 infra 实现：settings.json retry 域读写（同 extensionSettings 注装模式）。
-  const llmRetrySettings = new PiRetrySettings(configStore.getPiAgentDir())
+  // ILlmRetrySettings port 的 infra 实现：settings.json retry 域读写（无参构造，同上）。
+  const llmRetrySettings = new PiRetrySettings()
   const extensionService = new ExtensionService({
     settingsDir: configStore.getPiAgentDir(),
     projectRoot: effectiveRoot,
@@ -449,13 +553,19 @@ async function main(): Promise<void> {
   // ProjectStore：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)
-  // ImportService：外部 pi 会话导入（import-session U2）。projects 仅用于 importSession 的
-  // projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面；getRootDir 供
-  // listCandidates 的 rootDir 缺省（D5：pi 全局 sessions 经 getPiGlobalAgentDir 动态推导，
-  // 组合根合法 import infra 装配——services 层禁止 value import pi-maintenance，C-comm-03）。
+  // ImportService：导入编排层（session-import-unified 设计 §3.3）。projects 仅用于
+  // importSession 的 projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面。
+  // source 注册表（G2 可扩展）：pi 项的 rootDir 缺省 = pi 全局 sessions 经
+  // getPiGlobalAgentDir 动态推导（组合根合法 import infra 装配——services 层禁止 value
+  // import pi-maintenance，C-comm-03）；zcode 项的默认库 = 宿主库路径动态推导（注入模式
+  // 同 pi）；第三源接入 = 表加一项，编排层与 RPC 契约零改动。
+  const importSources = new Map<ImportSourceKind, SessionImportSource>([
+    ['pi', new ExternalFileImportSource({ getRootDir: () => join(getPiGlobalAgentDir(), 'sessions') })],
+    ['zcode', new ZcodeImportSource({ getHostDbPath: hostZcodeDbPath })],
+  ])
   const importService = new ImportService({
     projects: projectStore,
-    getRootDir: () => join(getPiGlobalAgentDir(), 'sessions'),
+    sources: importSources,
   })
   // S1-W4（D3）：built-in 插件目录显式注入（主进程 spawn 时传 --builtin-plugins-dir）。
   // 提供时 registry 只扫该目录、不做 cwd 探测（防用户 repo 预置目录冒充 built-in）；
@@ -489,8 +599,38 @@ async function main(): Promise<void> {
   // 在 fileChangeDiff 之前创建——W18 起 FileChangeDiffAdapter 的采集（snapshotStatus/numstat）
   // 委托 GitStateService；GitService（下方，依赖 sessionService）与 GitMessageHandler 的
   // 写操作失效共享同一实例（in-flight 单飞 + sessionId+cwd TTL 缓存 + 非仓库负缓存）。
+  // 缓存治理批 4 U10：先装配共享观测器单例（resolver 含 infra IO，services 层不得实例化——
+  // 组合根是唯一合法装配点），再注入 GitStateService。本服务实现 IGitRepoObserver 作为观测器
+  // service 面——下方 GitInfoReader 门面注入本服务，与 detectBareWorkspaceCached 模块门面共享
+  // 同一份缓存（不得注入其他实例，否则产生第二份镜像）。
+  // 缓存治理批 4 U11：观测器单例追加 HEAD watcher 联动回调——挂载集合跟随观测器缓存写入
+  // （onObservationSet → observe，任何读方把 cwd 带进缓存 watch 即自动跟上）、收缩跟随
+  // pruneCache（onPrune → forget，防死 cwd watcher 泄漏与重试循环）。触发器（最后一公里：
+  // 值变化判定 + leading 节流 + config.sessions 广播）与 watcher 的 watch/L2 兜底两路回调
+  // 都在上方依赖就绪后装配（server 在前、gitStateService 即下方一行，无延迟槽）。
   const gitExecutor = new GitExecutor()
-  const gitStateService = new GitStateService({ executor: gitExecutor })
+  // 先装配单例（无回调），再依次构造依赖它的 gitStateService → trigger → watcher，
+  // 最后后置绑定 watcher 联动回调——破「init ← watcher ← trigger ← gitStateService ← init」
+  // 的装配环；同步序列内无 readObservation 发生，回调绑定前的窗口不丢通知。
+  initSharedRepoObserver(new GitRepoResolver())
+  const gitStateService = new GitStateService({ executor: gitExecutor, repoObserver: getSharedRepoObserver() })
+  const gitChangeTrigger = new GitChangeTrigger({
+    observations: gitStateService,
+    pushSessionList: () => server.broadcastSessionList(),
+  })
+  const gitHeadWatcher = new GitHeadWatcher({
+    onGitEvent: (cwds) => gitChangeTrigger.refresh(cwds, 'watch'),
+    onFallbackTick: (cwds) => gitChangeTrigger.refresh(cwds, 'fallback'),
+  })
+  bindSharedRepoObserverCallbacks({
+    onObservationSet: (cwd, obs) => gitHeadWatcher.observe(cwd, obs),
+    // onPrune 收缩联动两面：watcher 挂载集合 + trigger 锚记忆（被驱逐 cwd 的
+    // lastPushedBranch 锚一并删除，防无界增长；重新进入观测走建锚路径）
+    onPrune: (removedCwds) => {
+      gitHeadWatcher.forget(removedCwds)
+      gitChangeTrigger.forget(removedCwds)
+    },
+  })
 
   const fileChangeDiff = new FileChangeDiffAdapter(gitStateService)
 
@@ -551,6 +691,11 @@ async function main(): Promise<void> {
       // 声明在下方（先于 sessionService 构造后）——createAdapter 仅在 session 创建后调用，
       // 引用恒就绪（与上方 sessionService 自引用闭包同模式）。
       onGenStats: (sid, sample) => genStatsService.recordSample(sid, sample),
+      // 归因降噪（2026-09-19）：成功 compaction → 标记上下文重写，紧随其后的命中率样本
+      // 若显示 0% 归因为 context-rewrite（预期内重建）；failed/aborted 不标记（见
+      // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
+      // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
+      onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
       // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
       // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
@@ -624,6 +769,13 @@ async function main(): Promise<void> {
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
       },
+      // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget）：重跑 record
+      // 派生管线，发布门 = 已发布快照水位——守卫/发布门处丢的帧下轮触发必补发（回调
+      // 内部自带扫描域门与 inflight 合并，不阻塞 interpret 批次；15s 定时腿为低频兜底，
+      // 在 SessionRecords 服务级单例 timer 内自持）。
+      onRecordReconcile: (sid) => {
+        sessionService.reconcileRecordEntries(sid)
+      },
       // W1（fix-chat-flow-order 探针 ②）：agent_settled（run 级联结束，晚于 pi finally 的
       // bash 落盘 flush）→ dispatcher 按序发布 per-session bash 待落列（D2 双分支延迟）。
       // sd-u5 起多播化：bash flush 是第一条腿（原单播语义不变），其后分发 agentSettledListeners
@@ -676,9 +828,9 @@ async function main(): Promise<void> {
     extensionService,
     configStore,
     sessionStore,
-    // IGitInfoReader：infra 实现（rev-parse 查询 + .git 文件判 worktree + 缓存），注入 session 摘要链。
+    // IGitInfoReader：infra 门面（同步读上方 gitStateService 内建的 repo 观测器缓存），注入 session 摘要链。
     // 与 GitExecutor 同为 git 域 infra，但语义不同（窄查询 vs 通用 exec）——故独立 port（services/ports/git-info.ts）。
-    new GitInfoReader(),
+    new GitInfoReader(gitStateService),
     workspaceService,
     // messageBus：注入 dispatcher 的 session 级事件通道（wave:perf-w09 D1-2 后单通道——
     // dispatcher 只依赖 publish 抽象，bus.publish 是唯一出口，broker 依赖已随接口收敛删除）。
@@ -698,7 +850,10 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
-  })
+  },
+  // [A1 接线] skill 注入映射源与 dispatcher/records 共源（sessionService.skillSource
+  // 晚绑定占位——下方 SkillRegistry 构造后 bind，三个注入挂点一份映射源，D7 单权威）。
+  new SkillInjector(sessionService.skillMappingSource))
   // u4（delivery-ownership-kernel D4②）：续跑判定装配——工具压缩（manual）掐断的活跃 turn
   // 在 compaction_end 判定后经内核 FIFO 追加续跑投递（与用户消息同通道，无第二 prompt 发起方）。
   // 投递出口 = sessionDelivery.submit（D1 单一判定源：lane 判定归内核，本模块不直连 pi）。
@@ -843,6 +998,10 @@ async function main(): Promise<void> {
     configDir,
     sessionService,
   })
+  // [A1 接线] skill 注入映射源绑真源（D7 切源收口）：dispatcher/records/delivery 三个
+  // SkillInjector 共享的 LateBoundSkillSource 在此绑定（构造顺序环的收口点，bind 先于
+  // server.start——生产不可达未绑定态；此处先于下方 reloadOrchestrator 的 onChange 绑定）。
+  sessionService.bindSkillMappingSource(skillRegistry)
 
   // TerminalService：drawer 集成终端的 PTY 生命周期管理（node-pty spawn + per-session 映射）。
   // 声明在生命周期挂钩之前（session 销毁回调引用它，TDZ 要求先声明）。
@@ -886,12 +1045,12 @@ async function main(): Promise<void> {
 
   // WorktreeService：编排 worktree 创建（bare-workspace / plain-repo 两种模式）。
   // 依赖全注入：GitExecutor（git 子命令）/ ShellRunner（setup 脚本，用 child_process.spawn）/
-  // GitInfoReader（当前分支查询）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
+  // GitInfoReader（当前分支查询，读共享观测器缓存）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
   // 经 server.setServices 注入到 WorktreeMessageHandler（worktree.create 路由）。
   const worktreeService = new WorktreeService({
     gitExecutor: new GitExecutor(),
     shellRunner: new ShellRunner({ spawn }),
-    gitInfoReader: new GitInfoReader(),
+    gitInfoReader: new GitInfoReader(gitStateService),
     configService,
     fs,
   })
@@ -953,7 +1112,8 @@ async function main(): Promise<void> {
     // sd-u5：sessionId 单例注册表（上方 createSessionDeliveryRegistry 装配）。
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
-    // 导入 pi 会话（import-session D5/U2）：session.importCandidates / session.import 路由。
+    // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
+    // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。
     importService,
     // composer-gen-stats（D4）：session.getGenStats 恢复腿 RPC（降级链 + 写 3 回填在 service 内部）。
     genStats: genStatsService,
@@ -990,6 +1150,12 @@ async function main(): Promise<void> {
     getLastViewedAt: (sid) => sessionService.getSessionLastViewedAt(sid),
     // #7 restore 进行中（回收自身占座由 reaper 经 seat 自查）。
     isRestoring: (sid) => sessionService.isSessionRestoring(sid),
+    // #8 存在未超龄的挂起 UI 请求（v6 第四案；只读、reaper-only，不影响 busy 预检）。
+    // 信号经 server.getPendingUiRequests（薄委托只读快照，r5 I-1 裁定新增）；scope = 全扩展
+    // （不按扩展过滤）。上界参数由 reaper 经 ctx 传入（装配经 resolveReclaimConfig），
+    // 判定实现 = hasFreshPendingUiRequest（max(receivedAt) 聚合 + 超龄视同无 pending）。
+    hasPendingUiRequest: (sid, maxAgeMs) =>
+      hasFreshPendingUiRequest(server.getPendingUiRequests(sid), Date.now(), maxAgeMs),
   }
 
   // 回收执行 = SessionService.reclaimSession → lifecycle 七步最小摘除编排（D3）。
@@ -1006,6 +1172,13 @@ async function main(): Promise<void> {
       },
       // pendingReload 定向清（D3 第 6 步，防御性 no-op）。
       clearPendingReload: (s) => reloadOrchestrator.clearPending(s),
+      // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
+      // 在 reclaimManagedSession 内挂代际校验通过后的成功分支——并发的取消分支不调，
+      // 新进程的活请求不被误清。P2-2 失效链：clear → invalidate 升级（摘除 + 广播失效帧，
+      // renderer 同步移除屏上挂起），语义与 server D6a 汇聚清理点一致。
+      clearPendingUiRequests: (s) => {
+        server.invalidatePendingUiRequests(s, 'reclaimed')
+      },
       // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收≠
       // 销毁（不走 removeSessionEntry），只驱逐缓存；驱逐后重激活走单次全量重建
       //（P7 张力四要素显式登记的代价）。
@@ -1070,6 +1243,11 @@ async function main(): Promise<void> {
       // R1：关闭 SkillRegistry 的 chokidar watcher（global + project），防句柄泄漏阻塞退出。
       shutdownStep('dispose-skill-registry')
       skillRegistry.dispose()
+      // 缓存治理批 4 U11：关 git HEAD watcher（fs.watch 句柄 + debounce/L1 重试/L2 兜底定时器），
+      // 同为「watch 资源收口防阻塞退出」语义；触发器的窗口收尾 timer 随之撤销。
+      shutdownStep('dispose-git-head-watcher')
+      gitHeadWatcher.dispose()
+      gitChangeTrigger?.dispose()
       // sd-u6：退订完成回流（settled / exit 两腿）
       shutdownStep('dispose-completion-backflow')
       completionBackflow.dispose()
@@ -1156,34 +1334,15 @@ async function main(): Promise<void> {
   try {
     await server.start()
   } catch (err) {
-    // 与 ConnectionManager.start reject 的分工：传输层对 listen 失败（EADDRINUSE 等）只
-    // reject（对齐 callback-server.ts 先例，可被测试捕获/换端口重试，不杀进程）；
-    // 进程退出决策归组合根——生产语义不变：端口被占即快速失败 exit(1)，但打可操作
-    // 排查指引（指向恢复动作：查占用 → 关实例 → 重启），而非静默退出。
-    const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
-    if (code === 'EADDRINUSE') {
-      console.error(`[runtime] fatal: 端口 ${port} 被占用（EADDRINUSE）——可能已有另一个 taiji 实例在运行。`)
-      console.error(`  排查: lsof -i :${port} 查看占用进程；关闭其他实例后重启。原始错误: ${toErrorMessage(err)}`)
-    } else {
-      console.error('[runtime] fatal: WS listen failed:', err)
-    }
-    process.exit(1)
+    // 与 ConnectionManager.start reject 的分工：传输层对 listen 失败只 reject（可被测试
+    // 捕获/换端口重试，不杀进程）；进程退出决策归组合根（见 exitOnListenFailure）。
+    exitOnListenFailure(err, port)
   }
   console.log('[runtime] ready')
 
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
-  // 早建早发现权限问题（设计 §4.1）。fatal 语义：实例冲突（残留 socket 被活实例持有）
-  // 与 listen 失败都退出——覆盖/复用会劫持他人注册表。staged 脚本缺失与执行器探针
-  // 失败不在此层（getRelaySpawnEnv 降级为不注入 env，relay 整体不激活，回落现状）。
-  try {
-    await initRelayServer({
-      projectRoot: effectiveRoot,
-      publish: (sid, msg) => messageBus.publish(sid, msg),
-    })
-  } catch (err) {
-    console.error('[runtime] fatal: relay server init failed:', err)
-    process.exit(1)
-  }
+  // 早建早发现权限问题（设计 §4.1）。
+  await initRelayServerOrExit(effectiveRoot, messageBus)
   // ── u5b-runtime-forensics D6-②：内存水位定时器启动 ──────────────────
   // listen 成功后启动（依赖 sessionService/pm 均已装配）。activeSession 数含公共
   // session（getActiveSessionIds 全量 lifecycle 键），pi 进程数是 ProcessManager 托管

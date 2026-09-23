@@ -65,6 +65,17 @@ export interface ConnectionPorts {
     onRuntimePort(cb: (port: number) => void): () => void
     onRuntimeRestarting(cb: () => void): () => void
     onRuntimeFailed(cb: () => void): () => void
+    /**
+     * 监听 runtime 启动失败（RD-3#2：main supervisor startAndNotify 失败 → runtime-error
+     * 推送，payload { message }）。失败后 main 不会自动重试——收到即停徒劳自动重连。
+     */
+    onRuntimeError(cb: (error: { message: string }) => void): () => void
+    /**
+     * 拉取最近一次启动失败原因（RD-3#2 boot 竞态兜底）：runtime-error 推送可能早于本
+     * 编排的监听安装（main whenReady 发事件时 renderer 尚未挂载，webContents.send 静默
+     * 丢失），init 时主动拉取对齐「时序竞争必须主动拉取」规则。null = 无已知失败。
+     */
+    getRuntimeStartError(): Promise<string | null>
     restartRuntime(): Promise<void>
   }
   visibility: {
@@ -108,6 +119,7 @@ let initialised = false
 let removeRuntimePortListener: (() => void) | null = null
 let removeRuntimeRestartingListener: (() => void) | null = null
 let removeRuntimeFailedListener: (() => void) | null = null
+let removeRuntimeErrorListener: (() => void) | null = null
 let removeStateWatch: (() => void) | null = null
 /** pre-auth 队列丢弃监听的取消函数（ws-client onQueueDrop 单槽；teardown 时调用；非空即已安装） */
 let removeQueueDropListener: (() => void) | null = null
@@ -351,6 +363,26 @@ export function useConnection() {
       setFailed()
     })
 
+    // RD-3#2：runtime 启动失败（boot 的 startAndNotify 失败——binary 缺失/端口占用等）。
+    // 失败后 main 不会自动重试，WS 对 fallback 端口的重试必不可能成功：收到推送即置
+    // failed（用户拿到重试入口），不再干等 60s 重连时长上限。connected 守卫防极端误伤：
+    // waitForHealth 超时但 runtime 实际存活时推送与活连接并存，不干扰已建立的连接。
+    removeRuntimeErrorListener = ports.ipc.onRuntimeError(() => {
+      if (getState().value !== 'connected') {
+        setFailed()
+      }
+    })
+
+    // 启动失败真因拉取（boot 竞态兜底）：推送早于本监听安装时（main whenReady 启动失败
+    // 先于 renderer 挂载——boot 失败的主形态），推送已丢，init 主动拉取一次。有失败记录
+    // 说明 runtime 已死且 main 不会自动拉起 → 直接置 failed 短路徒劳自动重连（真因显示
+    // 在连接屏 failed 分支，由壳层 App.vue 经 lib/ipc 拉取渲染；本编排只管状态转移）。
+    const startError = await ports.ipc.getRuntimeStartError()
+    if (startError) {
+      setFailed()
+      return
+    }
+
     // 尝试从主进程获取已知端口（S1-W1：连接前拉 token——auth 握手凭据经 IPC 下发）
     const knownPort = await ports.ipc.getRuntimePort()
     if (knownPort) {
@@ -385,6 +417,10 @@ export function useConnection() {
     if (removeRuntimeFailedListener) {
       removeRuntimeFailedListener()
       removeRuntimeFailedListener = null
+    }
+    if (removeRuntimeErrorListener) {
+      removeRuntimeErrorListener()
+      removeRuntimeErrorListener = null
     }
     if (removeStateWatch) {
       removeStateWatch()

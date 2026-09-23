@@ -4,14 +4,15 @@
  * 覆盖：
  * - records 初值空数组 + workflowCount
  * - loadWorkflows 成功写入 records + 失败清空
- * - clearWorkflows 清空 records + 退出侧边栏视图 2 + 清 agentcall 映射
- * - selectWorkflow / getViewingRunId / getCurrentWorkflow 视图 2（sidebar 内，非 overlay）
- * - backToWorkflowList 退出视图 2
+ * - clearWorkflows 清空 records + 清 agentcall 映射
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
  *
  * [HISTORICAL] overlay 相关用例（selectAgentCall/backFromAgentCall/isViewing/getViewingAgentCallId/
  * getActiveAgentCallVirtualId）已随 U7 overlay 移除删除。agent call 详情现走 drawer SubagentTab
  * （直接 getAgentCallHistory + setMessages + registerAgentCall），不经 store overlay 状态机。
+ * [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：sidebar 视图 2 用例（选中 runId / 读取当前
+ * workflow / 返回列表三支）随 Agents/Flows tab 删除——同批删除的还有 store 的 per-panel
+ * 选中状态与该三支读写函数（生产消费面全在退役面内）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/workflow.test.ts
  */
@@ -71,7 +72,7 @@ describe('workflow store', () => {
 
   it('loadWorkflows 成功写入该 sid 分区', async () => {
     const records = [makeRecord(), makeRecord({ runId: 'wf-test-002' })]
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue(records)
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: records, oversize: false })
 
     const store = useWorkflowStore()
     await store.loadWorkflows('sess-1')
@@ -89,42 +90,60 @@ describe('workflow store', () => {
 
     // M1 契约：失败不覆盖现有分区数据，设 loadError
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.loadError).toBe('rpc error')
+    expect(store.loadErrorOf('sess-1')).toBe('rpc error')
   })
 
-  it('clearWorkflows 清空所有分区 + 退出侧边栏视图 2 + 清 agentcall 映射', () => {
+  it('clearWorkflows 清空所有分区 + 清 agentcall 映射', () => {
     const store = useWorkflowStore()
-    store.selectWorkflow('panel-1', 'wf-001')
+    store.applyRecords('sess-1', [makeRecord()])
     // 登记 agentcall 映射（U7 MUST_FIX 1）
     store.registerAgentCall('sess-1', agentCallVirtualId('ac-1'))
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
+    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
     expect(store.getAgentCallVirtualIdsByMain('sess-1')).toContain(agentCallVirtualId('ac-1'))
 
     store.clearWorkflows()
 
     expect(store.getRecordsBySession('sess-1')).toEqual([])
-    expect(store.getViewingRunId('panel-1')).toBeNull()
     expect(store.getAgentCallVirtualIdsByMain('sess-1')).toEqual([])
   })
 
-  it('selectWorkflow + getViewingRunId + getCurrentWorkflow 视图 2（sidebar 内，非 overlay）', () => {
-    const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-001', scriptName: 'my-flow' })])
+  it('RD-3#12: clearWorkflows 补齐 loading/error/strike 三 facet（+ oversize），对齐 clearSession 全清', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const store = useWorkflowStore()
+      store.applyRecords('sess-1', [makeRecord({ runId: 'wf-a' })])
+      vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
+      await store.loadWorkflows('sess-1') // strike 1/2：保留分区
+      expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
 
-    store.selectWorkflow('panel-1', 'wf-001')
+      store.applyRecords('sess-2', [makeRecord({ runId: 'wf-b' })])
+      vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
+      await store.loadWorkflows('sess-2')
+      expect(store.oversizeOf('sess-2')).toBe(true)
 
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
-    expect(store.getCurrentWorkflow('panel-1', 'sess-1')?.scriptName).toBe('my-flow')
-  })
+      vi.mocked(sessionApi.getWorkflows).mockRejectedValue(new Error('boom'))
+      await store.loadWorkflows('sess-3')
+      expect(store.loadErrorOf('sess-3')).toBe('boom')
 
-  it('backToWorkflowList 退出视图 2', () => {
-    const store = useWorkflowStore()
-    store.selectWorkflow('panel-1', 'wf-001')
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
+      store.clearWorkflows()
 
-    store.backToWorkflowList('panel-1')
+      // 三 facet + oversize 全清（此前仅换 records Map，残留 loading/error/oversize/strike）
+      expect(store.getRecordsBySession('sess-1')).toEqual([])
+      expect(store.isLoadingOf('sess-1')).toBe(false)
+      expect(store.loadErrorOf('sess-3')).toBeNull()
+      expect(store.oversizeOf('sess-2')).toBe(false)
 
-    expect(store.getViewingRunId('panel-1')).toBeNull()
+      // strike 簿记已清：重新预置后首次空结果从 strike 1 重新计（保留分区）——漏清则残留 1 直接 2/2 误删空
+      store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+      vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
+      await store.loadWorkflows('sess-1')
+      expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('empty strike 1/2'), 'sess-1')
+    } finally {
+      warnSpy.mockRestore()
+      errorSpy.mockRestore()
+    }
   })
 })
 
@@ -148,7 +167,7 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
   })
 
   it('连续第 2 次 RPC 空 → 判真实删空，清分区（strike 1/2 保留 → 2/2 放行全程经 store 可达 + 接线 tag）', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
 
     const store = useWorkflowStore()
     store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
@@ -165,23 +184,46 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
       expect.stringContaining('clearing partition'),
       'sess-1',
     )
-    // 守卫不是错误态：不设 loadError
-    expect(store.loadError).toBeNull()
+    // 守卫不是错误态：不设 loadError（sid 必须与本用例一致，错 sid 走 ?? null 兜底恒真）
+    expect(store.loadErrorOf('sess-1')).toBeNull()
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {
     const store = useWorkflowStore()
     store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
 
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([]) // strike 1/2
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false }) // strike 1/2
     await store.loadWorkflows('sess-1')
     vi.mocked(sessionApi.getWorkflows).mockRejectedValue(new Error('network'))
     await store.loadWorkflows('sess-1') // catch → strike 重置
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([]) // 重新 strike 1/2，仍保留
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false }) // 重新 strike 1/2，仍保留
     await store.loadWorkflows('sess-1')
 
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
     expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-keep')
+  })
+
+  it('[RT-4#8] oversize=true：置降级标志 + 保留旧分区（不可用 ≠ 删空，不进 strike 守卫）', async () => {
+    const store = useWorkflowStore()
+    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
+
+    await store.loadWorkflows('sess-1')
+    await store.loadWorkflows('sess-1')
+    expect(store.oversizeOf('sess-1')).toBe(true)
+    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
+
+    // 恢复正常：标志清除 + 正常覆盖
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord({ runId: 'wf-new' })], oversize: false })
+    await store.loadWorkflows('sess-1')
+    expect(store.oversizeOf('sess-1')).toBe(false)
+    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-new')
+
+    // clearSession 释放 oversize 分区
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
+    await store.loadWorkflows('sess-1')
+    store.clearSession('sess-1')
+    expect(store.oversizeOf('sess-1')).toBe(false)
   })
 })
 
@@ -277,7 +319,7 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
     // strike 2/2 误判删空 → 分区保留断言红。
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useWorkflowStore()
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
 
     // 预置非空分区 → strike 1/2：空结果保留
     store.applyRecords('session-1', [makeRecord({ runId: 'wf-keep' })])
@@ -316,7 +358,7 @@ describe('workflow store — triggerWorkflowReload / W15 定时器防御性清�
   })
 
   it('running 信号：立即拉一次 + 500ms 延迟重试一次（workflow-state-link 延迟 flush 兜底）', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([makeRecord()])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
     store.triggerWorkflowReload('session-1', 'running')
@@ -331,7 +373,7 @@ describe('workflow store — triggerWorkflowReload / W15 定时器防御性清�
   })
 
   it('非 running 信号：只立即拉一次，不安排延迟重试', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([makeRecord()])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
     store.triggerWorkflowReload('session-1', 'done')
@@ -341,7 +383,7 @@ describe('workflow store — triggerWorkflowReload / W15 定时器防御性清�
   })
 
   it('同 sid 连续 running 信号去重：只保留最后一次重试 timer', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([makeRecord()])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
     store.triggerWorkflowReload('session-1', 'running')
@@ -353,7 +395,7 @@ describe('workflow store — triggerWorkflowReload / W15 定时器防御性清�
   })
 
   it('W15 兜底：store $dispose → 在途重试 timer 被清，不再触发 loadWorkflows', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([makeRecord()])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
     store.triggerWorkflowReload('session-1', 'running')

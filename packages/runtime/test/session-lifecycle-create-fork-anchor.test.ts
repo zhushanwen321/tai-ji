@@ -10,10 +10,10 @@
  * 见 session-lifecycle.ts persistCreateBindings 头注释）：pi 异常未返回 sessionFile
  * （undefined）时全部 sidecar persist 零调用。V9-④ 根修（2026-09-08）：pi 延迟写入
  * 窗口（路径有值、.jsonl 未 flush）preset/project/agent 三绑定以 skipJsonlExistsGuard
- * 放行守卫直接落盘（create 是 preset/agent 的唯一持久化时机），model 写点语义不变
- *（A5b）。
+ * 放行守卫直接落盘（create 是 preset/agent 的唯一持久化时机）。[缓存治理 U8a W4]
+ * model sidecar 写点已退役（断言对象消失 → 对应断言删除），持久层归 pi JSONL。
  *
- * Mock 策略：fs / session-fork / session-file-utils(persistModelBinding) / pi-paths 全
+ * Mock 策略：fs / session-fork / session-file-utils(cleanupMigrateResidues) / pi-paths 全
  * vi.mock（无真实文件 IO）；svc/pm/configStore/sessionStore 注入 vi.fn mock。
  * 复用 session-lifecycle-preset.test.ts 的 mock 范式。
  *
@@ -47,16 +47,15 @@ vi.mock('../src/services/session/session-fork.js', () => ({
   resolveEntryIdByTimestamp: forkMock.resolveEntryIdByTimestamp,
 }))
 
-// persistModelBinding 锚定 session-file-utils 路径 mock（与生产 import 锚点一致）
+// cleanupMigrateResidues 锚定 session-file-utils 路径 mock（与生产 import 锚点一致）；
+// persistModelBinding 随 U8a 写点退役不再被本文件消费（W4/W5 断言对象已删除）
 const sidecarMock = vi.hoisted(() => ({
-  persistModelBinding: vi.fn(),
   cleanupMigrateResidues: vi.fn(),
 }))
 vi.mock('../src/infra/pi/session-file-utils.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/session-file-utils.js')>()
   return {
     ...actual,
-    persistModelBinding: sidecarMock.persistModelBinding,
     cleanupMigrateResidues: sidecarMock.cleanupMigrateResidues,
   }
 })
@@ -211,7 +210,6 @@ describe('create 特征锚定（复杂度债务偿还 W3）', () => {
     expect(sessionStore.persistPresetBinding).not.toHaveBeenCalled()
     expect(sessionStore.persistProjectBinding).not.toHaveBeenCalled()
     expect(sessionStore.persistAgentBinding).not.toHaveBeenCalled()
-    expect(sidecarMock.persistModelBinding).not.toHaveBeenCalled()
     // 内存链路照常：refreshAll（scan 合并兜底）与创建通知不缺位
     expect(sessionStore.refreshAll).toHaveBeenCalled()
   })
@@ -245,9 +243,8 @@ describe('create 特征锚定（复杂度债务偿还 W3）', () => {
     expect(sessionStore.persistPresetBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'preset-1', { skipJsonlExistsGuard: true })
     expect(sessionStore.persistProjectBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'proj-1', { skipJsonlExistsGuard: true })
     expect(sessionStore.persistAgentBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'agent', 'pa-1', { skipJsonlExistsGuard: true })
-    // model 写点不带 flag（有 turn-end tryPersistModelBinding 补偿，语义不变）；
-    // 无 resolution / 无读回时生效值 undefined → `?? ''` 归一为空串
-    expect(sidecarMock.persistModelBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', '', '')
+    // [U8a W4] model 写点已退役——初始模型信息由 pi 对话落 JSONL + 扫描反向读提供，
+    // 此处不再断言任何 model sidecar 落盘。
   })
 
   it('A6: persistLabel=true → setSessionName RPC 持久化；缺省（display-only 派生名）不调 RPC', async () => {
@@ -344,7 +341,7 @@ describe('forkSession 特征锚定（复杂度债务偿还 W3）', () => {
 
   // ── D6 源生效值继承档（state-truth-sync C5 / ⛔ 探针 P4）──
   // 链 = `staging override > 源 session 当前生效值 > 源 preset > 全局默认`。
-  // 源真值读取 = 活跃内存实例 meta > sidecar .model.json 扫描值（resolveForkSourceEffectiveBinding）。
+  // 源真值读取 = 活跃内存实例 meta > 扫描 meta 反向读 JSONL 值（resolveForkSourceEffectiveBinding）。
   describe('D6 源生效值继承档（P4 三类源 + 继承档序）', () => {
     /** fork 一次并取 pi createSession options（第三参）。 */
     async function forkOnce(
@@ -367,7 +364,7 @@ describe('forkSession 特征锚定（复杂度债务偿还 W3）', () => {
       record.thinkingLevel = meta.thinkingLevel
     }
 
-    it('P4① 活跃源（内存实例有 meta）→ 继承 modelId + thinkingLevel（spawn options + sidecar + hydrate 三面）', async () => {
+    it('P4① 活跃源（内存实例有 meta）→ 继承 modelId + thinkingLevel（spawn options + hydrate 两面）', async () => {
       const env = makeEnv()
       mockSource(env.svc)
       await registerActiveSource(env, { modelId: 'mem/flash', thinkingLevel: 'high' })
@@ -377,23 +374,23 @@ describe('forkSession 特征锚定（复杂度债务偿还 W3）', () => {
       // pi spawn options（override 档产物）
       expect(opts.model).toBe('mem/flash')
       expect(opts.thinkingLevel).toBe('high')
-      // 目标 5 hydrate 持久化：sidecar .model.json 写点（attachForkedFile）+ 新 session meta
-      //（registerSession modelOverride 播种，与 staging override 路径同构）
-      expect(sidecarMock.persistModelBinding).toHaveBeenCalledWith('/fake/sessions/forked.jsonl', 'mem/flash', 'high')
+      // 目标 5 hydrate：新 session meta（registerSession modelOverride 播种，与 staging
+      // override 路径同构）。[U8a W5] sidecar 落盘断言已删——fork 继承持久层 = 产物 JSONL
+      // path 上的 model_change / assistant entry，反向读可见断言落
+      // session-lifecycle-gate.test.ts（真实 createForkedSessionFile 产物）。
       expect(env.lifecycle.get('forked-id')?.modelId).toBe('mem/flash')
       expect((env.lifecycle.get('forked-id') as unknown as { thinkingLevel?: string }).thinkingLevel).toBe('high')
     })
 
-    it('P4② pi 已退出源（sidecar .model.json 存在且新鲜）→ 继承 sidecar 值', async () => {
+    it('P4② pi 已退出源（扫描 meta 有值）→ 继承扫描值', async () => {
       const env = makeEnv()
-      // 无内存实例（源 pi 已退出/未恢复），source 来自 findScannedSession（含 .model.json 值）
+      // 无内存实例（源 pi 已退出/未恢复），source 来自 findScannedSession（反向读 JSONL 真值）
       mockSource(env.svc, { modelId: 'side/flash', thinkingLevel: 'medium' })
 
       const opts = await forkOnce(env)
 
       expect(opts.model).toBe('side/flash')
       expect(opts.thinkingLevel).toBe('medium')
-      expect(sidecarMock.persistModelBinding).toHaveBeenCalledWith('/fake/sessions/forked.jsonl', 'side/flash', 'medium')
     })
 
     it('P4③ 「切模→死→直接 fork」陈旧窗口源（sidecar 是旧值）→ 读到的就是旧值（D6 已接受代价，不修不挡）', async () => {
@@ -440,7 +437,7 @@ describe('forkSession 特征锚定（复杂度债务偿还 W3）', () => {
 
       const opts = await forkOnce(env)
 
-      // ''/undefined 不得以 nullish 检查漏网短路吞掉 sidecar 档（nonEmptyStr 归一）
+      // ''/undefined 不得以 nullish 检查漏网短路吞掉扫描 meta 档（nonEmptyStr 归一）
       expect(opts.model).toBe('side/flash')
       expect(opts.thinkingLevel).toBe('medium')
     })

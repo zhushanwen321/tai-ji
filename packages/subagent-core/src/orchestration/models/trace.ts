@@ -11,8 +11,6 @@
  * 在调用 update 前后负责（值对象只管数据形状，不管 IO）。
  *
  * 层归属：Engine。
- *
- * 参考：domain-models.md §6（字段/不变式）。
  */
 import type { AgentResult, ExecutionTraceNode, TracePatch } from "./types.ts";
 

@@ -3,8 +3,12 @@
     命令浮层（draft-composer-states §2d，四符号体系扩为四路共享容器：$ 文件 / # session /
     @ subagent / / 命令）。由 Composer 受控打开（v-model:open）。用 reka-ui Popover portal
     到 body，不受 composer-box 父容器 overflow/stacking context 限制（修复 D5 定位 bug）。
-    **anchor 是 slot 传入的 composer-box**：composer-box 内任何 focus 都算 inside，
-    不触发 onFocusOutside dismiss（修复 focus-outside 误关 bug）。
+    **anchor 是 slot 传入的 composer-box**：仅承担定位参考职责（side/align 对齐 +
+    宽度变量 --reka-popper-anchor-width 的锚源），不参与 focus-outside/pointerdown-outside
+    的 inside 判定——该判定只认 DismissableLayer 层链（isLayerExist 按
+    [data-dismissable-layer] closest 查 target 层 + DOM 序晚挂载层覆盖早层，anchor 无
+    此属性不在层链上）。焦点留在输入区打字不产生 focusin（焦点未转移），focusOutside
+    判定无从发生，浮层不因输入被 dismiss。
     键盘事件（↑↓ ⏎ Tab Esc）主入口 = 本组件经 command-popover-keyboard.ts 注册的 window
     capture 监听；Composer 在 ComposerInput keydown 时调 handleKeydown 为兜底路（见
     composer-keydown.ts），二者共用同一 handleKeydown——幂等守卫（e.defaultPrevented）在
@@ -26,8 +30,9 @@
     - 容器投影走 PopoverContent 默认 shadow-2（demo .cmd-pop box-shadow）
   -->
   <Popover v-model:open="controlledOpen">
-    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），DOM contains 成立 →
-         composer-box 内任何 focus 都算 inside，不触发 onFocusOutside dismiss -->
+    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），仅作定位/宽度锚源，
+         不参与 DismissableLayer inside 判定（见上方头注：isLayerExist 只认
+         [data-dismissable-layer] 层序） -->
     <PopoverAnchor as-child>
       <slot />
     </PopoverAnchor>
@@ -143,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, toRef, watch } from 'vue'
+import { computed, inject, onMounted, ref, toRef, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, FolderOpen, LoaderCircle, SearchX } from '@lucide/vue'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
@@ -157,6 +162,7 @@ import { useCommandPopoverOpenFetch } from './command-popover-open-fetch'
 import { useCommandSync } from '@/composables/panel/useCommandSync'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { useCommandPopoverKeyboard } from '@/composables/panel/command-popover-keyboard'
+import type { ShellInputInstance } from '@/composables/panel/composer-shell'
 import type { SkillInfo } from '@taiji/shared'
 import { useSessionStore } from '@/stores/session'
 import { useSubagentStore } from '@/stores/subagent'
@@ -173,38 +179,45 @@ const props = defineProps<{
   /** landing 态当前选定目录（Composer 传 flow.currentCwd；panel 态有 sessionId 不消费）。
    *  $ file 路 landing（无 sid）按 cwd 边沿拉候选（open-fetch D2/D3）；无 cwd 无候选源不弹。 */
   cwd?: string | null
-  /** composer 形态：landing（新建任务空态）vs panel（对话态）。ADR-0050：slash 命令源按 variant 分支。
-   *  landing 合并 globalSkills + projectSkills；panel 用 commandStore + compact。默认 'panel'。 */
+  /** composer 形态：landing（新建任务空态）vs panel（对话态）。ADR-0050 二次修订：slash
+   *  命令源按 variant 分支（landing = merged + skills 合并；panel = compact + merged，pi
+   *  真源 skill 项剔除后由 registry 源补入——换源保留）；skill 候选两态统一 taiji 源。默认 'panel'。 */
   variant?: ComposerVariant
   /** 过滤 query（输入区 / 或 # 后的内容，空串/缺省=不过滤；file 按 name+path 过滤，slash 按命令名过滤） */
   query?: string
   /** 已插入的 skill 名集合（多 skill 注入 D2 已选禁选数据面）：Composer 从当前 segments 取。
    *  命中项显示「已选」并禁选（同一 skill 不重复注入全文，防上下文浪费）。默认空。 */
   selectedSkillNames?: string[]
-  /** landing 态全局 skill（useGlobalSkills → skillRegistry globalCache，W4 FR-5）。默认空。 */
+  /** 全局 skill（useGlobalSkills → skillRegistry globalCache，W4 FR-5）。skill 段两态共用 +
+   *  panel slash 段 registry 源 skill 项（ADR-0050 二次修订换源保留）。默认空。 */
   globalSkills?: SkillInfo[]
-  /** landing 态当前 cwd 的项目 skill（useProjectSkills 按 cwd key 缓存，W3 ADR-0051）。默认空。 */
+  /** 当前 cwd 的项目 skill（useProjectSkills 按 cwd key 缓存，W3 ADR-0051；panel 态 cwd =
+ *   session cwd，landing 态 = flow.currentCwd——接线在 Composer）。skill 段两态共用 +
+ *   panel slash 段 registry 源 skill 项。默认空。 */
   projectSkills?: SkillInfo[]
+  /** composer 输入区实例引用（Composer shellInputRef prop 一跳，通道缺口③）：D1 前置② activeElement 门识别源，缺省 fail-closed 不直发 */
+  shellInputRef?: Readonly<Ref<ShellInputInstance | null>>
 }>()
+
+/** select / select-and-send 共用 payload 字段面（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
+interface CommandSelectEmit {
+  type: CmdType
+  name: string
+  icon?: string
+  description?: string
+  /** slash 路 skill 项标记（D3）：onCmdSelect 按「项类型」而非入口 type 分流到 skill 通路 */
+  isSkill?: boolean
+  location?: string
+  sessionId?: string
+  label?: string
+  subagentId?: string
+  slug?: string
+}
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  select: [payload: {
-    type: CmdType
-    name: string
-    icon?: string
-    description?: string
-    /** slash 路 skill 项标记（D3）：onCmdSelect 按「项类型」而非入口 type 分流到 skill 通路 */
-    isSkill?: boolean
-    /** skill 路：SKILL.md 绝对路径（可得时带上）；缺省时 runtime 经 get_commands 权威映射解析 */
-    location?: string
-    /** session 路（#）：选中 session 的 id + 显示 label */
-    sessionId?: string
-    label?: string
-    /** subagent 路（@）：record id + 短标签；「新建」项两字段空串 */
-    subagentId?: string
-    slug?: string
-  }]
+  select: [payload: CommandSelectEmit]
+  'select-and-send': [payload: CommandSelectEmit & { originalEvent: KeyboardEvent }]
 }>()
 
 /** 受控 open：双向同步 props.open ↔ emit update:open */
@@ -217,7 +230,7 @@ const { t } = useI18n()
 const commandStore = useCommandStore()
 const sessionIdRef = toRef(props, 'sessionId')
 
-/** panel 路 file 候选加载：挂载 / 切 session 拉取（store 缓存幂等，命中不重拉——ADR-0049）。
+/** panel 路 file 候选加载：挂载 / 切 session 现拉（无缓存，缓存治理 U1 1-3 退役——每次现跑 file.search）。
  *  触发时机是挂载 + sid 变化，与 open-fetch 的 open 边沿 landing cwd 路是 D2 双路数据源
  *  （panel 有 sid 走本路；原 command-popover-file-candidates.ts，u20 内联回本组件）。 */
 const { load: loadFileCandidates } = useFileSearch()
@@ -273,7 +286,8 @@ const variant = computed<ComposerVariant>(() => props.variant ?? 'panel')
 
 /** slash 命令源（W3 收编后：merged 源 = registry 声明 ∪ commandStore pi 真源，ADR-0050 按 variant 分支）。
  * landing：merged（无 session 真源时声明即显示——slice TC2）+ globalSkills ∪ projectSkills 合并。
- * panel：compact + merged（pi 真源存在性交叉校验）。
+ * panel：compact + merged（pi 真源 skill 项剔除）+ registry 源 skill 项补入（ADR-0050 二次修订
+ * 换源保留：pi 真源 skill 命令是滞后快照故剔除，skill 候选统一 registry 源）。
  * __ 前缀命令过滤（W5 内部命令不可见）；无注入源（独立使用/测试）时降级 pi-only（现状行为兼容）。 */
 const slashSource = inject(SLASH_COMMAND_SOURCE_KEY, null)
 const slashCommands = computed(() => {
@@ -283,15 +297,20 @@ const slashCommands = computed(() => {
   if (variant.value === 'landing') {
     return buildLandingSlashCandidates(merged, props.globalSkills ?? [], props.projectSkills ?? [])
   }
-  // panel 态：compact + merged（pi 真源存在性交叉校验），不并入 globalSkills；组装（含 D3
-  // location 回填）下沉 command-popover-symbols（≤300 行规范）
-  return buildPanelSlashCandidates(merged, piCmds, {
-    id: 'compact',
-    name: 'compact',
-    kind: 'builtin',
-    icon: 'compact',
-    description: t('panel.command.compactDesc'),
-  })
+  // panel 态：compact + merged（pi 真源 skill 项剔除）+ registry 源 skill 项（换源保留，
+  // ADR-0050 二次修订）；组装下沉 command-popover-symbols（≤300 行规范）
+  return buildPanelSlashCandidates(
+    merged,
+    {
+      id: 'compact',
+      name: 'compact',
+      kind: 'builtin',
+      icon: 'compact',
+      description: t('panel.command.compactDesc'),
+    },
+    props.globalSkills ?? [],
+    props.projectSkills ?? [],
+  )
 })
 
 /** slash 命令投递闭环（挂载/切 session 补拉 + session.commands 订阅；open 边沿拉取归
@@ -356,8 +375,9 @@ const items = computed<CmdItem[]>(() => {
     return buildSubagentCandidates(records, props.query ?? '', !!props.sessionId, t('panel.command.newSubagent'))
   }
   if (props.type === 'skill') {
-    // skill-only 候选（多 skill 注入 D1/D2）：分数据源 + query 过滤 + 已选标记（纯函数拆分）
-    return buildSkillCandidates(variant.value, props, props.sessionId ? commandStore.getCommands(props.sessionId) : [])
+    // skill-only 候选（多 skill 注入 D1/D2；ADR-0050 修订：两态统一 taiji 源 globalSkills ∪
+    // projectSkills，panel 不再消费 commandStore pi 快照）+ query 过滤 + 已选标记（纯函数拆分）
+    return buildSkillCandidates(props)
   }
   // slash 路（行首命令浮层）：query 过滤 + CmdItem 组装（纯函数拆分至 command-popover-symbols）。
   // selectedSkillNames 透传（S-2）：slash 路的 skill 项同样打 selected → 「已选」禁选，
@@ -376,11 +396,8 @@ function iconClass(item: { isSkill?: boolean }, isSelected: boolean): string {
   return item.isSkill ? 'text-reasoning' : 'text-neutral-dim'
 }
 
-function onSelect(item: CmdItem): void {
-  // 已选禁选守卫（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
-  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处守卫双路生效
-  if (item.selected) return
-  emit('select', {
+function toSelectPayload(item: CmdItem): CommandSelectEmit {
+  return {
     type: props.type,
     name: item.name,
     icon: item.icon,
@@ -391,7 +408,18 @@ function onSelect(item: CmdItem): void {
     label: item.label,
     subagentId: item.subagentId,
     slug: item.slug,
-  })
+  }
+}
+
+function onSelect(item: CmdItem): void {
+  // 已选禁选守卫（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
+  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处守卫双路生效
+  if (item.selected) return
+  emit('select', toSelectPayload(item))
+}
+
+function onSelectAndSend(item: CmdItem, e: KeyboardEvent): void {
+  emit('select-and-send', { ...toSelectPayload(item), originalEvent: e })
 }
 
 // ── 键盘路由（↑↓ ⏎ Tab Esc）+ activeIndex 收敛在 command-popover-keyboard.ts ──────────
@@ -401,6 +429,10 @@ const { activeIndex, handleKeydown } = useCommandPopoverKeyboard<CmdItem>({
   open: () => props.open,
   items: () => items.value,
   onSelect,
+  onSelectAndSend,
+  query: () => props.query ?? '',
+  type: () => props.type,
+  shellInputRef: () => props.shellInputRef,
   close: () => {
     controlledOpen.value = false
   },

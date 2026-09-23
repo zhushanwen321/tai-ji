@@ -1,5 +1,5 @@
 /**
- * relay 基建路径解析（E 方案，docs/architecture/subagent-realtime-channel.md §4.1/§4.2）。
+ * relay 基建路径解析。
  *
  * 为什么独立模块：socket / pid 文件 / staged 代理脚本三类路径被 relay-server（listen）、
  * relay-registry（spawn 兜底扫描）、relay-env（主 pi env 注入）三方消费，统一从

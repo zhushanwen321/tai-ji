@@ -32,8 +32,7 @@
  * - import 路径 `@/composables/panel/useThinkingLevelSync` → core 本域 `./thinking-level-sync`（batch2 已迁入）。
  * 函数签名 / 逻辑 byte-level 保持。
  *
- * [u3 记忆恢复 → U2a authored-only 收窄]（设计 model-thinking-level-memory.md + 其 U2a 回写，
- * 记忆表 = ./model-thinking-memory）：
+ * [u3 记忆恢复 → U2a authored-only 收窄]（记忆表 = ./model-thinking-memory）：
  * - armed 意图持有与设立：onModelSelect staging/已建分支设 {modelId, at, callId}（landing 分支
  *   不设——U2a 删除，landing 记忆档经 resolveLaunchConfig 解析链生效，armed 恢复通道在 landing
  *   结构性不存在，设计 state-truth-sync-architecture D5）；已建态走 try/catch——失败清/成功清
@@ -85,9 +84,9 @@ export interface ModelThinkingDeps {
   pendingPreset?: () => string | null | undefined
   /** landing 态记 pendingModel（壳层从 useNewTaskFlow().setPendingModel 取） */
   setPendingModel: (model: string) => void
-  /** 已建态切模型 RPC + 乐观更新编排（壳层从 useModel().switchModel 取） */
+  /** 已建态切模型 RPC 回执写编排（壳层从 useModel().switchModel 取） */
   switchModel: (sessionId: string, provider: ProviderId, modelId: string) => Promise<void>
-  /** 已建态设思考等级 RPC + 乐观更新（壳层从 useModel().setThinkingLevel 取） */
+  /** 已建态设思考等级 RPC 回执写（壳层从 useModel().setThinkingLevel 取） */
   setThinkingLevel: (sessionId: string, level: string) => Promise<void>
   /** 按 modelId 派生 thinkingLevelMap（透传给 useThinkingLevelSync，壳层从 settingsStore.providers 解析） */
   getThinkingLevelMap: (modelId: string) => Record<string, string | null> | undefined
@@ -195,6 +194,11 @@ export function useComposerModelThinking(
    * 必须注册在 useThinkingLevelSync 的 sync watch 之前：同一 flush 内 watch job 按
    * 注册序执行，若消费检查先跑，换绑到恰为 armed 目标模型的 session 会在作废前被
    * 消费（伪恢复，D3 被否①的换绑变体）。
+   *
+   * [AC11 豁免登记，2026-09-20 R1] armed 是会话级单值意图 token（非 per-session
+   * 分区态）：本 watch 是「换绑即整体作废」的安全侧语义，迁 useSessionScopedState
+   * 分区会改为「按 session 保留」，换绑回原 session 时已作废意图复活（行为回退）。
+   * 已登记 scripts/check-domain-boundaries.sh 的 AC11_WATCH_ALLOWLIST。
    */
   watch(sessionId, () => {
     armed.value = null
@@ -328,7 +332,7 @@ export function useComposerModelThinking(
 
   /**
    * 模型切换：staging 活跃时只写快照（不调 RPC，不改源 session）。
-   * session 已建走 deps 注入的编排（RPC + 乐观更新）；
+   * session 已建走 deps 注入的编排（RPC 回执写）；
    * landing 态（sid=null）session 尚未 create，记 pendingModel 供首发提交时经 resolve
    * 终值随 create 透传（D5）。
    *
@@ -363,7 +367,7 @@ export function useComposerModelThinking(
       recordLastUsed(targetModelId)
       return
     }
-    // 已建态：RPC + 乐观更新（编排逻辑归壳层 useModel，ADR-0028）
+    // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
     armed.value = { modelId: targetModelId, at: Date.now(), callId }
     inFlightCallIds.add(callId)
     try {
@@ -447,7 +451,7 @@ export function useComposerModelThinking(
       localThinkingLevel.value = level
       return
     }
-    // 已建态：RPC + 乐观更新（编排逻辑归壳层 useModel，ADR-0028）
+    // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
     await applyThinkingLevel(sessionId.value, level)
   }
 

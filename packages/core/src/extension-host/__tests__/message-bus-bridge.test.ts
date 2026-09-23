@@ -2,7 +2,8 @@
  * message-bus-bridge.test.ts —— MessageBusBridge 单测（AC8/FR5/ERR2/dispose/窄化抽查）。
  *
  * 覆盖：AC8（9 个 plugin:* 每个 type 都 emit 对应 InternalEvent，无零订阅）、
- * FR5（5 个 extension:* 收敛，widget/widgetGui 双映射 + ui_request 归一）、
+ * FR5（6 个 extension:* wire type 收敛，widget/widgetGui 双映射 + ui_request 归一 +
+ * requestsInvalidated 失效链透传与防御分支）、
  * ERR2（未知 type + 4 种 payload 解析失败 → error 事件）、dispose 防泄漏、
  * 窄化映射抽查（scope/sessionId 保留、alignment 默认、widgetGui gui:null、editor 兜底）。
  */
@@ -190,7 +191,7 @@ describe('MessageBusBridge', () => {
     })
   })
 
-  describe('FR5: 5 个 extension:* 收敛', () => {
+  describe('FR5: 6 个 extension:* wire type 收敛', () => {
     it('extension:widget → extension-widget（viewId=widgetKey、guiTree=lines）', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
@@ -245,19 +246,64 @@ describe('MessageBusBridge', () => {
       expect(e).toMatchObject({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r2', pluginId: '', kind: 'select', title: '选择', method: 'select', options: ['a', 'b'] } })
     })
 
-    it('5 个 extension:* 全部收敛，无零订阅', () => {
+    it('extension:requestsInvalidated → requests-invalidated（字段逐项透传，P2-2 失效链）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({
+        type: 'extension:requestsInvalidated',
+        payload: { sessionId: 's1', requestIds: ['req-1', 'req-2'], reason: 'session-closed' },
+      })
+      const e = emitted.find((x) => x.kind === 'requests-invalidated')
+      expect(e).toBeDefined()
+      // 整对象精确匹配：锁定 4 字段形状，多字段/少字段漂移都会红
+      expect(e).toEqual({ kind: 'requests-invalidated', sessionId: 's1', requestIds: ['req-1', 'req-2'], reason: 'session-closed' })
+      expect(emitted.some((x) => x.kind === 'error')).toBe(false)
+    })
+
+    it('extension:requestsInvalidated reason 缺省 → "unknown"', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['req-1'] } })
+      const e = emitted.find((x) => x.kind === 'requests-invalidated')
+      expect(e).toBeDefined()
+      expect(e).toMatchObject({ kind: 'requests-invalidated', requestIds: ['req-1'], reason: 'unknown' })
+    })
+
+    it('extension:requestsInvalidated requestIds 非数组 / 含非字符串元素 → error（防御分支，不产半成品事件）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: 'req-1' } })
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: ['ok', 42] } })
+      const errors = emitted.filter((x) => x.kind === 'error')
+      expect(errors).toHaveLength(2)
+      expect(errors.every((x) => (x as { source: string }).source === 'extension:requestsInvalidated')).toBe(true)
+      expect(emitted.some((x) => x.kind === 'requests-invalidated')).toBe(false)
+    })
+
+    it('extension:requestsInvalidated payload 非记录 → error', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: 'nope' })
+      const e = emitted.find((x) => x.kind === 'error')
+      expect(e).toBeDefined()
+      expect(e).toMatchObject({ kind: 'error', source: 'extension:requestsInvalidated' })
+      expect(emitted.some((x) => x.kind === 'requests-invalidated')).toBe(false)
+    })
+
+    it('6 个 extension:* wire type 全部收敛，无零订阅', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
       source.emit({ type: 'extension:widget', payload: { widgetKey: 'w', lines: [] } })
       source.emit({ type: 'extension:widgetGui', payload: { widgetKey: 'w', gui: null } })
       source.emit({ type: 'extension:status', payload: { text: 't' } })
       source.emit({ type: 'extension:notify', payload: { message: 'm' } })
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: ['r1'] } })
       source.emit({ type: 'extension.ui_request', payload: { requestId: 'r', method: 'input' } })
-      for (const kind of ['extension-widget', 'extension-status', 'extension-notify', 'ui-request']) {
+      for (const kind of ['extension-widget', 'extension-status', 'extension-notify', 'requests-invalidated', 'ui-request']) {
         expect(emitted.some((x) => x.kind === kind), `expected ${kind} emitted`).toBe(true)
       }
       expect(emitted.some((x) => x.kind === 'error')).toBe(false)
-      expect(emitted.length).toBe(5)
+      expect(emitted.length).toBe(6)
     })
   })
 

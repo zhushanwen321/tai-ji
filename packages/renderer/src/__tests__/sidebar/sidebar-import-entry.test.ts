@@ -30,14 +30,12 @@ import {
   chatComposableModule,
   commandStoreModule,
   fileTreeStoreModule,
-  listSyncModule,
   navigationStoreModule,
   panelStoreModule,
   platformShortcutModule,
   sessionDerivationsModule,
   sessionStoreModule,
   sidebarStoreModule,
-  sidebarSubagentActionsModule,
   subagentStoreModule,
   toastModule,
   useSidebarModule,
@@ -56,8 +54,6 @@ vi.mock('@/stores/navigation', () => navigationStoreModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/composables/features/chat/useChat', () => chatComposableModule())
 vi.mock('@/composables/features/chat/useSessionDerivations', () => sessionDerivationsModule())
-vi.mock('@/composables/features/chat/useListSync', () => listSyncModule())
-vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => sidebarSubagentActionsModule())
 vi.mock('@/composables/usePlatformShortcut', () => platformShortcutModule())
 // 注：原版此处另有 vi.mock('@/api/events', ...)——'@/api/events' 模块不存在（Sidebar 实际
 // import '@taiji/core/transport/api'，见 Sidebar.vue:248），该 mock 从未命中，已删除。

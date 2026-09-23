@@ -9,7 +9,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-write-queue.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const terminalApiMock = vi.hoisted(() => ({
@@ -20,10 +20,19 @@ vi.mock('@taiji/core/transport/api/domains/terminal', () => ({
 }))
 
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
+import { useToast } from '@/composables/useToast'
+import { MAX_PENDING_WRITES } from '@taiji/core/domain/drawer'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   terminalApiMock.write.mockClear()
+  // toast 模块级单例状态隔离（跨用例残留清理）
+  useToast().toasts.value = []
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('terminal-write-queue store（Phase 5 联动 2）', () => {
@@ -90,5 +99,51 @@ describe('terminal-write-queue store（Phase 5 联动 2）', () => {
     store.markAlive('s1')
     store.removeSession('s1')
     expect(store.isPtyAlive('s1')).toBe(false)
+  })
+
+  // ── RD-3#5：write 失败 catch + drop 计数显形（M2 renderer 端） ─────────
+
+  it('RD3-5-R1: write RPC 失败 catch → warn + error toast（不再裸奔成 unhandledrejection）', async () => {
+    terminalApiMock.write.mockRejectedValueOnce(new Error('ws closed'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = useTerminalWriteQueueStore()
+    store.markAlive('s1')
+    store.enqueueWrite('s1', 'boom')
+    // 等 catch 微任务链（write reject → .catch → toast）落地
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    const { toasts } = useToast()
+    expect(toasts.value).toHaveLength(1)
+    expect(toasts.value[0]!.type).toBe('error')
+    expect(toasts.value[0]!.message).toContain('ws closed')
+  })
+
+  it('RD3-5-R2: 队列满 drop-oldest → 聚合 toast（1s 窗口合并为一条，显示累计数）', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = useTerminalWriteQueueStore()
+    for (let i = 0; i < MAX_PENDING_WRITES + 3; i++) {
+      store.enqueueWrite('s1', `cmd-${i}`)
+    }
+    // 每次丢弃都留痕（console.warn）
+    expect(warnSpy).toHaveBeenCalledTimes(3)
+    // 聚合窗口内不发 toast（防连发刷屏）
+    expect(useToast().toasts.value).toHaveLength(0)
+    vi.advanceTimersByTime(1000)
+    const { toasts } = useToast()
+    expect(toasts.value).toHaveLength(1)
+    expect(toasts.value[0]!.type).toBe('warning')
+    expect(toasts.value[0]!.message).toContain('3')
+  })
+
+  it('RD3-5-R3: removeSession 清理未触发的聚合 toast timer', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = useTerminalWriteQueueStore()
+    for (let i = 0; i < MAX_PENDING_WRITES + 1; i++) {
+      store.enqueueWrite('s1', `cmd-${i}`)
+    }
+    store.removeSession('s1')
+    vi.advanceTimersByTime(5000)
+    expect(useToast().toasts.value).toHaveLength(0) // timer 已随 session 清理，不再 toast
   })
 })

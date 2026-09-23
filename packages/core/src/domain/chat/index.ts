@@ -15,7 +15,6 @@ export * from './readers'
 export * from './lru'
 export * from './changeset'
 export * from './handoff'
-export * from './timers'
 export * from './chunk-processor'
 export * from './bash-effects'
 export * from './effect-types'
@@ -30,19 +29,19 @@ export {
 } from './effects/user-delivery'
 export type { DeliveryFrameEntry, DeliverySubmitReply } from './api-port'
 export type { CompactQueueLike, CompactQueueEntrySnapshot } from './useChat'
-export { createChatStore, DEFAULT_STREAMING_IDLE_TIMEOUT_MS, STREAMING_IDLE_TIMEOUT_MIN_MS, STREAMING_IDLE_TIMEOUT_MAX_MS } from './store'
+export { createChatStore } from './store'
 
 export type { ChatStoreOptions } from './store'
 // [session-occupancy u5b] occupancy 投影类型（sessionPhase 数据源，P4 ActivityStrip/发送位消费）
 export type { SessionOccupancyState } from './store'
 export * from './derive-status'
 // [session-dead C1 方案一] turn 进展观测面（设计 §3.3 D6/D7：结构事件边界派生计时 + ask_user 豁免）
-export * from './turn-progress'
 export { createStreamingStateMachine, type StreamingStateMachineDeps } from './streaming-state-machine'
 export type { ChatStoreInstance, ChatStoreReaders, ChatStoreOps } from './store'
 // w5 chat-use-chat：useChat composable 迁移（createUseChat factory + ChatApiPort）
 // w6 chat-ui-and-shell：chat 域纯逻辑（turn 分组/摘要）迁入
 export * from './message-turns'
+export * from './turn-aggregates'
 export * from './summarize-turn'
 export * from './trace-window'
 

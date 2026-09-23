@@ -34,6 +34,13 @@ interface ManagedProcess {
 const EPHEMERAL_READY_TIMEOUT_MS = 5_000
 
 /**
+ * pi 版本探测失败的负缓存时长（缓存治理 1-7）：失败值 60s 内直接返 'unknown' 不再探测，
+ * 过期重试——瞬态失败（pi 缺失/PATH 未就绪/探测超时）不永久定罪，也避免 pi 缺失环境
+ * 每次调用都吃 5s 探测超时。对齐 GitStateService notRepoCache 先例；成功值仍永久缓存。
+ */
+const PI_VERSION_FAILURE_TTL_MS = 60_000
+
+/**
  * 给 promise 套一层超时（短命 pi 就绪等待专用）。
  *
  * 超时后底层 promise 仍可能 pending（switchSession 自身 SLOW_TIMEOUT_MS 120s）——
@@ -62,6 +69,8 @@ export class ProcessManager implements IProcessManager {
   private piPath: string | null = null
   private piPathPromise: Promise<string> | null = null
   private piVersionCache: string | null = null
+  /** 最近一次版本探测失败时刻（缓存治理 1-7：失败负缓存，成功后清空）。 */
+  private piVersionFailedAt: number | null = null
 
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
@@ -73,7 +82,9 @@ export class ProcessManager implements IProcessManager {
     ensureRuntimeEngineRootsEnv(projectRoot)
   }
 
-  /** 获取或解析 pi 可执行文件路径（只执行一次） */
+  /**
+   * 获取或解析 pi 可执行文件路径（成功值缓存一次；失败不 pin，下次调用重新探测）。
+   */
   private getPiPath(): Promise<string> {
     if (this.piPath) return Promise.resolve(this.piPath)
     if (this.piPathPromise) return this.piPathPromise
@@ -87,12 +98,34 @@ export class ProcessManager implements IProcessManager {
       }
       return resolved
     })
+    // RT-2#5：失败复位（防御性，审查 D 裁决按防御深度实施而非恢复语义）——
+    // findPiExecutable 的唯一抛出点是 packaged 态内置二进制缺失（findPackagedPi，
+    // 确定性失败，重启前不会自愈），复位并不承诺「用户装好 pi 后无需重启」；它保证的是
+    // 若未来探测链新增瞬态失败源（如目录扫描的 stat EIO），失败不被 pin 成进程生命周期
+    // 内永久 rejected（与 getPiVersion 的失败负缓存同族口径：那边按 TTL 重试，这边
+    // 成功路径本就永久缓存，失败复位后下次调用重新探测）。catch 分支吞掉本衍生 promise
+    // 的 rejection（防 unhandled）——原始 rejection 仍由持有 this.piPathPromise 的调用方消费。
+    this.piPathPromise.catch(() => {
+      this.piPathPromise = null
+    })
     return this.piPathPromise
   }
 
-  /** 探测 pi 版本（首次调用 execSync，后续读缓存）。失败返回 'unknown'。 */
+  /**
+   * 探测 pi 版本（首次调用 execSync，后续读缓存）。失败返回 'unknown'。
+   *
+   * 缓存语义（缓存治理 1-7）：成功值永久缓存；失败值只负缓存 PI_VERSION_FAILURE_TTL_MS——
+   * 窗口内直接返 'unknown' 不再探测，过期后重新探测（修复前失败值写死 piVersionCache
+   * 恒驻进程生命周期，pi 修好/装好后版本仍显示 unknown 的故障态固化）。
+   */
   async getPiVersion(): Promise<string> {
     if (this.piVersionCache) return this.piVersionCache
+    if (
+      this.piVersionFailedAt !== null
+      && Date.now() - this.piVersionFailedAt < PI_VERSION_FAILURE_TTL_MS
+    ) {
+      return 'unknown'
+    }
     try {
       const piPath = await this.getPiPath()
       const cmd = piPath !== 'pi' ? `"${piPath}" --version` : 'pi --version'
@@ -103,11 +136,13 @@ export class ProcessManager implements IProcessManager {
         env: buildOutboundChildEnv({ parentEnv: process.env }),
       }).trim()
       this.piVersionCache = version || 'unknown'
+      this.piVersionFailedAt = null
+      return this.piVersionCache
     } catch (e) {
       console.warn('[process-manager] failed to detect pi version:', e)
-      this.piVersionCache = 'unknown'
+      this.piVersionFailedAt = Date.now()
+      return 'unknown'
     }
-    return this.piVersionCache
   }
 
   /**
@@ -197,8 +232,15 @@ export class ProcessManager implements IProcessManager {
       // 命名消歧：this.exitCallbacks 是 ProcessManager 的 Set<(sessionId, code, stderr) => void>
       // （上层多播，process-manager.ts:123），与 RpcClient.exitCallbacks（Set<(code, stderr) => void>）
       // 是不同类、不同签名的同名字段
+      // [code-harden RT-4#1] 逐回调隔离：单 listener 异常只降级日志，不阻断其余 listener
+      //（上层 onSessionExit 收敛链依赖多播必达，任一回调抛错曾会连坐整组通知丢失）。
       for (const cb of this.exitCallbacks) {
-        cb(currentId, code, stderr)
+        try {
+          cb(currentId, code, stderr)
+        // eslint-disable-next-line taste/no-silent-catch -- 逐回调隔离（RT-4#1）：单 listener 异常降级日志，多播其余 listener 必达
+        } catch (e) {
+          console.error(`[process-manager] session ${currentId} exit callback failed:`, toErrorMessage(e))
+        }
       }
     })
 

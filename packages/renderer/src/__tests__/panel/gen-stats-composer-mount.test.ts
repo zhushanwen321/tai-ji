@@ -2,7 +2,7 @@
  * Composer 挂载点测试 —— composer-gen-stats u4 Gate A（挂载点 + DOM 顺序）。
  *
  * 验收：GenStatsTriggers 挂载于 Composer.vue composer-bar 的 ContextCapacityPopover 之前
- * （设计 docs/design/composer-gen-stats.md §3.1「位于上下文容量左侧」）。
+ * （位于上下文容量左侧）。
  *
  * 策略（照 composer-three-states.test.ts 既有 mock 模式）：
  * - Composer 真实渲染；GenStatsTriggers 不 stub（真渲染，含 title/触发器 DOM）；

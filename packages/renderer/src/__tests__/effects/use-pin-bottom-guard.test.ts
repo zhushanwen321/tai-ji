@@ -1,5 +1,5 @@
 /**
- * usePinBottomGuard 单测（chat-pin-bottom-fix §4.4 护栏⑦，U4-G 授权）。
+ * usePinBottomGuard 单测（§4.4 护栏⑦，U4-G 授权）。
  *
  * 覆盖 fake timers 可控的双采样时序与判读文案（§4.4⑦ spec 逐条）：
  * - 500ms 收敛窗口：窗口末首采，超阈值隔 200ms 复采，两次均超才 warn
@@ -89,7 +89,7 @@ describe('usePinBottomGuard（§4.4 护栏⑦ dev 断言）', () => {
     expect(msg).toContain('[pin-bottom-guard]')
     expect(msg).toContain('gap=20')
     expect(msg).toContain('dpr=1')
-    expect(msg).toContain('docs/design/chat-pin-bottom-fix.md')
+    expect(msg).toContain('复现与判读指引')
   })
 
   it('首采超、复采已收敛（合法瞬态）→ 静默不 warn', async () => {
@@ -202,7 +202,7 @@ describe('usePinBottomGuard（§4.4 护栏⑦ dev 断言）', () => {
     const msg = String(loopWarns()[0]?.[0])
     expect(msg).toContain('次数=61')
     expect(msg).toContain('P-no-loop')
-    expect(msg).toContain('docs/design/chat-pin-bottom-fix.md')
+    expect(msg).toContain('降级路径')
 
     for (let i = 0; i < 40; i += 1) api.followToBottom(true)
     expect(loopWarns()).toHaveLength(1) // 持续超限：沿触发不重复

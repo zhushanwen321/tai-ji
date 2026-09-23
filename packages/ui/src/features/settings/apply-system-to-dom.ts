@@ -17,6 +17,7 @@
  * SSR 守卫：typeof document === 'undefined' 时早返（不抛错），保证同构安全。
  */
 import type { SystemSettings } from '@taiji/core'
+import { DEFAULT_FONT_SCALES } from '@taiji/core'
 
 export interface ApplySystemToDomDeps {
   /** i18n 实例的 locale 切换函数（W4 壳注入）。缺省不切换 locale。 */
@@ -53,10 +54,12 @@ export function applySystemToDom(
   // fontSize：缺省 medium（D17，与 DEFAULT_SYSTEM 一致）。
   root.dataset.fontSize = s.fontSize ?? 'medium'
 
-  // fontScales：分区字号档位，缺省 medium（×1）。档位→倍率映射在 renderer style.css [data-fs-*] 规则。
-  root.dataset.fsSidebar = s.fontScales?.sidebar ?? 'medium'
-  root.dataset.fsChat = s.fontScales?.chat ?? 'medium'
-  root.dataset.fsDrawer = s.fontScales?.drawer ?? 'medium'
+  // fontScales：分区字号档位，逐区域回落 DEFAULT_FONT_SCALES（sidebar=large，其余 medium；
+  // SSOT 在 core，getSystem 浅合并可能产生部分缺省对象，不可假设区域 key 完整）。
+  // 档位→倍率映射在 renderer style.css [data-fs-*] 规则。
+  root.dataset.fsSidebar = s.fontScales?.sidebar ?? DEFAULT_FONT_SCALES.sidebar
+  root.dataset.fsChat = s.fontScales?.chat ?? DEFAULT_FONT_SCALES.chat
+  root.dataset.fsDrawer = s.fontScales?.drawer ?? DEFAULT_FONT_SCALES.drawer
 
   if (s.locale && deps?.setLocale) {
     deps.setLocale(s.locale)

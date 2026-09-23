@@ -5,7 +5,7 @@
  * 32KB/2000 行口径常量、re-export 链（background-task-service 经 output-tail.ts
  * 消费 protocol 实现的单一路径）与 lost 语义透传。
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run src/services/background-task
+ * 运行：cd packages/runtime && npx vitest run src/services/background-task
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'

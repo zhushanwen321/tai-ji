@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A7 场景：agent-tool 模式 —— rename_session 工具改名 + first-stop 对照（设计 rename-session-three-modes.md V3 / D3）。
+ * A7 场景：agent-tool 模式 —— rename_session 工具改名 + first-stop 对照。
  *
  * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：主进程队列
  * = rename_session toolCall（title=TOOL_TITLE）→ 简短确认文本；对照进程队列 = 纯文本回复

@@ -8,6 +8,12 @@ export interface ElectronAPI {
   onRuntimePort(callback: (port: number) => void): () => void
   /** 监听 runtime 启动失败事件 */
   onRuntimeError(callback: (error: { message: string }) => void): () => void
+  /**
+   * 获取最近一次 runtime 启动失败原因（RD-3#2；null = 无已知失败，成功启动后清除）。
+   * onRuntimeError 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失），
+   * 连接编排 init 时经此拉取兜底——对齐「时序竞争必须主动拉取」既有规则。
+   */
+  getRuntimeStartError(): Promise<string | null>
   /** 监听 runtime 崩溃后重启中事件（supervisor 正在拉起新实例） */
   onRuntimeRestarting(callback: (payload: { attempt: number }) => void): () => void
   /** 监听 runtime 重启用尽事件（需用户手动重试） */
@@ -185,7 +191,7 @@ export interface ElectronAPI {
    * @param kind 逻辑分类（成功/失败），用于跨平台失效时回落到对应默认；试听已知声音可不传
    */
   playSystemSound(name: string, kind?: 'success' | 'error'): Promise<{ audioData?: string; mimeType?: string }>
-  // ── renderer 错误上报（crash-resilience §3.3 D2）─────────────────
+  // ── renderer 错误上报（D2）─────────────────
   /**
    * 上报 renderer 全局错误（三件套：app.config.errorHandler / window error /
    * unhandledrejection 捕获后经此落盘 main 侧 renderer-error-<date>.log）。
@@ -194,7 +200,7 @@ export interface ElectronAPI {
    * 必须静默消化，日志通道故障不得再炸 renderer。
    */
   reportRendererLog(payload: RendererLogPayload): Promise<void>
-  // ── toolResult 图片落盘（crash-resilience §3.3 D6-⑨ / u7）─────────────────
+  // ── toolResult 图片落盘（D6-⑨ / u7）─────────────────
   /**
    * 委托 main 落盘 toolResult base64 图片（renderer 无 fs）。images 数组序 = 落盘序
    * （hydrate 批量为新→旧，live 单图为单元素）；main 幂等（sha256 命中跳过写）+ 单
@@ -202,7 +208,7 @@ export interface ElectronAPI {
    * 失败/畸形 payload 不 reject（main handler 零抛错，返回逐图 invalid/quota-full 结果）。
    */
   imageCacheWrite(payload: ImageCacheWritePayload): Promise<ImageCacheWriteResult>
-  // ── 验收调试口（crash-resilience A9②；无鉴权面，不进产品 UI）─────────────────
+  // ── 验收调试口（A9②；无鉴权面，不进产品 UI）─────────────────
   /**
    * 手动触发 main 侧 logs/ 保留期清理扫描一次（runLogRetentionNow，与 main-logger init
    * / 每日定时器同一函数）。**验收调试入口，仅 dev 调试用途，renderer 产品代码不得调用**。
@@ -230,6 +236,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('runtime-error', handler)
     return () => ipcRenderer.removeListener('runtime-error', handler)
   },
+  // RD-3#2：启动失败真因拉取（boot 竞态兜底，main 侧 get-runtime-start-error 只读 handler）
+  getRuntimeStartError: () => ipcRenderer.invoke('get-runtime-start-error'),
   onRuntimeRestarting: (callback: (payload: { attempt: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { attempt: number }) => callback(payload)
     ipcRenderer.on('runtime-restarting', handler)
@@ -349,11 +357,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 系统提示音 ──────────────────────────────────────────────
   listSystemSounds: () => ipcRenderer.invoke('sound:list'),
   playSystemSound: (name: string, kind?: 'success' | 'error') => ipcRenderer.invoke('sound:play', name, kind),
-  // ── renderer 错误上报（crash-resilience §3.3 D2；通道名经 shared SSOT 常量，禁字面量分叉）──
+  // ── renderer 错误上报（D2；通道名经 shared SSOT 常量，禁字面量分叉）──
   reportRendererLog: (payload: RendererLogPayload) => ipcRenderer.invoke(RENDERER_LOG, payload),
-  // ── toolResult 图片落盘（crash-resilience §3.3 D6-⑨；通道名经 shared SSOT 常量）──
+  // ── toolResult 图片落盘（D6-⑨；通道名经 shared SSOT 常量）──
   imageCacheWrite: (payload: ImageCacheWritePayload) => ipcRenderer.invoke(IMAGE_CACHE_WRITE, payload),
-  // ── 验收调试口（crash-resilience A9②；通道名经 shared SSOT 常量，不进产品 UI）──
+  // ── 验收调试口（A9②；通道名经 shared SSOT 常量，不进产品 UI）──
   debugRunLogRetention: () => ipcRenderer.invoke(DEBUG_RUN_LOG_RETENTION),
   // ── 诊断包导出（crash-forensics §3.3 D6；通道名经 shared SSOT 常量）──
   exportDiagnosticBundle: (payload?: DiagnosticExportBundlePayload) =>

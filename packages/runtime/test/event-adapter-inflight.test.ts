@@ -1,6 +1,6 @@
 /**
- * EventAdapter subagent 在途上报旁路单测（u7b，设计权威源 docs/design/
- * crash-forensics-and-watchdog.md §3.3 D5「extension 聚合上报」+「缺席与丢失的语义收敛」④）。
+ * EventAdapter subagent 在途上报旁路单测（u7b，设计权威源
+ * docs/architecture/crash-forensics-and-watchdog.md §3.3 D5「extension 聚合上报」+「缺席与丢失的语义收敛」④）。
  *
  * 覆盖（u7b 验收）：
  * - 合法帧 → 在途镜像绝对计数覆盖 + resolve INFLIGHT_REPORT_ACK（第三参

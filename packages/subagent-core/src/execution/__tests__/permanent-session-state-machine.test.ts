@@ -302,19 +302,49 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
     expect(binding?.recordId).toBe("bg-1");
   });
 
-  it("zcode 锚（无文件载体）：内存面照常重开，binding 面跳过（U6 会话库锚承接）", () => {
+  it("zcode 锚：内存面照常重开，binding 随锚键基底落盘（U6 会话库锚承接）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.status = "idle";
     store.register(rec);
-    const ref: TranscriptRef = {
-      engine: "zcode",
-      sessionId: "sess-abc",
-      dbPath: "/data/engines/zcode/session-db/db.sqlite",
-    };
+    // dbPath 对齐真实形态：zcode 锚的 binding 落 `<dbPath>.<sessionId>` 旁（session-db
+    // 目录由引擎创建，真实环境恒存在）——binding 写失败会被 markReopened 拒绝（epoch
+    // 硬要求），fixture 目录必须真实存在。
+    const zcodeDbDir = path.join(dir, "session-db");
+    fs.mkdirSync(zcodeDbDir, { recursive: true });
+    const dbPath = path.join(zcodeDbDir, "db.sqlite");
+    const ref: TranscriptRef = { engine: "zcode", sessionId: "sess-abc", dbPath };
     expect(store.markReopened(rec, ref)).toBe(true);
     expect(rec.epoch).toBe(1);
     expect(rec.transcriptRef).toEqual(ref);
+    expect(readRecordBinding(`${dbPath}.sess-abc`)?.epoch).toBe(1);
+  });
+
+  it("binding 写失败（新锚目录不存在）：拒绝重开 + 内存面回滚（epoch 随 binding 持久化是硬要求，防二次 reopen 击穿）", () => {
+    const store = newStore();
+    const rec = runningRecord();
+    rec.round = 3;
+    rec.stopReason = "interrupted";
+    rec.status = "idle";
+    store.register(rec);
+    // 失败注入：新锚落在不存在的子目录——writeRecordBinding 的 tmp 独占创建 ENOENT
+    //（warn 留痕不抛），markReopened 必须拒绝而非吞错续跑。
+    const badRef: TranscriptRef = {
+      engine: "pi",
+      sessionFile: path.join(sessionsDir, "no-such-dir", "reopened.jsonl"),
+    };
+    expect(store.markReopened(rec, badRef)).toBe(false);
+    // 内存面逐字段还原（record 保持重开前 idle 形态——拒绝面不留半重开状态）
+    expect(rec.transcriptRef).toBeUndefined();
+    expect(rec.round).toBe(3);
+    expect(rec.epoch).toBeUndefined();
+    expect(rec.stopReason).toBe("interrupted");
+    expect(rec.status).toBe("idle");
+    // 拒绝后 record 可重试：合法新锚重开成功（epoch 从重开前基线推进）
+    const goodRef: TranscriptRef = { engine: "pi", sessionFile: path.join(sessionsDir, "reopened.jsonl") };
+    expect(store.markReopened(rec, goodRef)).toBe(true);
+    expect(rec.epoch).toBe(1);
+    expect(readRecordBinding(goodRef.sessionFile!)?.epoch).toBe(1);
   });
 });
 
@@ -358,10 +388,10 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markArchived / markIdleEvicted 副作用矩阵（意愿位 + 写权声明）──────────
+// ── ⑤ markSettledOut / markIdleEvicted 副作用矩阵（写权声明 + 收口落账写面）──────────
 
-describe("markArchived / markIdleEvicted 副作用矩阵", () => {
-  it("markArchived：intent=archived + .alive release（release 出口①）+ entry 上报", () => {
+describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
+  it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
@@ -370,19 +400,19 @@ describe("markArchived / markIdleEvicted 副作用矩阵", () => {
       JSON.stringify({ pid: process.pid, id: "bg-1", startedAt: Date.now() }),
       "utf-8",
     );
-    expect(store.markArchived(rec)).toBe(true);
-    expect(rec.intent).toBe("archived");
+    expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    expect(store.getMutable("bg-1")).toBe(rec); // archived ≠ 内存回收（占用位不动）
+    expect(store.getMutable("bg-1")).toBe(rec); // 收口 ≠ 内存回收（占用位不动）
   });
 
-  it("markArchived 幂等：重复 close 无害（intent 恒 archived，release 静默）", () => {
+  it("markSettledOut 幂等：重复 close / dispose 重复调用无害（release 静默，恒 true）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
-    store.markArchived(rec);
-    expect(store.markArchived(rec)).toBe(true);
-    expect(rec.intent).toBe("archived");
+    store.markSettledOut(rec);
+    expect(store.markSettledOut(rec)).toBe(true);
+    expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
+    expect(store.getMutable("bg-1")).toBe(rec);
   });
 
   it("markIdleEvicted：内存移除 + manifest 投影 + .alive release 后（写序 archive 先 release 后）", () => {
@@ -402,22 +432,5 @@ describe("markArchived / markIdleEvicted 副作用矩阵", () => {
       fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
     ) as Record<string, unknown>;
     expect(manifest.status).toBe("running"); // 非终态化如实投影（磁盘仍可接管）
-  });
-
-  it("markIdleArchived（deprecated 别名）与 markIdleEvicted 写序全等", () => {
-    const recA = runningRecord();
-    const recB = runningRecord();
-    (recB as { id: string }).id = "bg-2";
-    const storeA = newStore();
-    const storeB = newStore();
-    storeA.register(recA);
-    storeB.register(recB);
-    storeA.markIdleArchived(recA);
-    storeB.markIdleEvicted(recB);
-    expect(storeA.getMutable("bg-1")).toBeUndefined();
-    expect(storeB.getMutable("bg-2")).toBeUndefined();
-    const manifestA = JSON.parse(fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8")) as Record<string, unknown>;
-    const manifestB = JSON.parse(fs.readFileSync(path.join(manifestDir, "bg-2.json"), "utf-8")) as Record<string, unknown>;
-    expect(manifestA.status).toBe(manifestB.status);
   });
 });

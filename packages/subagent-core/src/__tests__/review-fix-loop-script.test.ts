@@ -13,7 +13,7 @@
 //   - A11：model 缺省回退 "(default)"（请求时参数语义）
 //   - A12：promptMode=null（aggregator/fixer）必须保持 null，不被 || 误转 "full"
 import { execFile } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -292,6 +292,53 @@ describe("review-fix-loop.js 模块形态约束", () => {
   });
 });
 
+// ── B2：终态残留结构化清单（与 zcode 原生版 remaining 字段对齐） ──
+// 口径 = status != fixed/deferred；同源一致性由「与 message 残留 ID 同源」约束保证。
+describe("review-fix-loop.js buildRemaining（终态残留四字段清单）", () => {
+  function loadBuildRemaining() {
+    const src = [extractFn("buildRemaining"), "buildRemaining"].join("\n");
+    return vm.runInNewContext(src, {}) as (issues: unknown) => { id: string; title: string; severity: string; status: string }[];
+  }
+
+  it("issues 为 undefined/空：返回空数组（不抛错——state.issues 初始即 undefined）", () => {
+    const buildRemaining = loadBuildRemaining();
+    expect(buildRemaining(undefined)).toEqual([]);
+    expect(buildRemaining({})).toEqual([]);
+  });
+
+  it("残留口径：open/regressed 入选，fixed/deferred 被过滤（deferred 是显式挂起，不算残留）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({
+      "MF-1-1": { title: "still broken", severity: "major", status: "open" },
+      "MF-1-2": { title: "came back", severity: "critical", status: "regressed" },
+      "MF-1-3": { title: "done", severity: "major", status: "fixed" },
+      "MF-1-4": { title: "parked", severity: "minor", status: "deferred" },
+    });
+    expect(out.map((r) => r.id)).toEqual(["MF-1-1", "MF-1-2"]);
+    expect(out.map((r) => r.status)).toEqual(["open", "regressed"]);
+  });
+
+  it("字段兜底：缺失 title → 空串；缺失 severity → 'unknown'（消费侧不做 undefined 分支）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({ "MF-2-1": { status: "open" } });
+    expect(out).toEqual([{ id: "MF-2-1", title: "", severity: "unknown", status: "open" }]);
+  });
+
+  it("畸形条目（null/非对象）不崩溃、不入清单（state 脏数据不致终态渲染炸）", () => {
+    const buildRemaining = loadBuildRemaining();
+    const out = buildRemaining({ "MF-3-1": null, "MF-3-2": { status: "open", title: "ok", severity: "minor" } });
+    expect(out.map((r) => r.id)).toEqual(["MF-3-2"]);
+  });
+
+  it("顶层 return 确实透出 remaining 字段（防字段从返回体被移除）+ 清单由 buildRemaining 派生", () => {
+    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
+    // 字段透出：返回体必须含 remaining（且是 shorthand，值即 buildRemaining 调用结果）
+    expect(returnBlock).toContain("remaining,");
+    // 取值来源：声明行必须走 buildRemaining（改回内联对象字面量会被这条拦住）
+    expect(WORKFLOW_SOURCE).toContain("const remaining = buildRemaining(state.issues);");
+  });
+});
+
 // ── RX2-F2：fixAgent=fallow-scan 显式拒收（脚本顶层参数校验，非函数段） ──
 // 拒收逻辑位于脚本顶层（FIX_AGENT_RAW 解析后、resolveAgentDefs 前），函数段抽取法
 // 覆盖不到；改用 review-fix-loop-scriptpath-failfast.test.ts 同款「AsyncFunction 包装
@@ -374,5 +421,288 @@ describe("review-fix-loop.js fixAgent=fallow-scan 显式拒收（RX2-F2）", () 
     // 推进到批次解析才失败（缺批次参数）——证明拒收只对字面值 fallow-scan 触发
     expect(stderr).toContain("缺少批次参数");
     expect(stderr).not.toContain("内部保留字");
+  });
+});
+
+// ── MF-1-15：fixer 文件总线两段闭包补测（fixerDocPath 渲染 + groupCalls 派发组装）──
+// 两段都是 fix 轮内 const 声明的闭包（非 `function name(` 形态），上方 extractFn
+// 覆盖不到；改用 extractStatement 按「depth-0 `;`」语句边界截取——(g, k) 参数括号
+// 会在语句中途回到 depth 0，不能按「首次回到 0」截断，字符串/注释内的括号分号
+// 也必须跳过。渲染错位的后果是直接误导 fixer 派发（组号/条目/文档路径任一错位 =
+// fixer 修错文件或读不到任务文档），因此逐字节锁定文档内容与组/条目的严格一致，
+// 以及组 → 文档 → 调用的一一对应。
+describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲染与派发组装）", () => {
+  /** 从 marker 起截取完整语句（跳过字符串/模板串/行注释/块注释，depth-0 `;` 收口）。 */
+  function extractStatement(marker: string): string {
+    const start = WORKFLOW_SOURCE.indexOf(marker);
+    if (start < 0) {
+      throw new Error("extraction guard failed: " + marker + " not found — statement renamed/moved?");
+    }
+    let quote: string | null = null;
+    let depth = 0;
+    for (let i = start; i < WORKFLOW_SOURCE.length; i++) {
+      const c = WORKFLOW_SOURCE.charAt(i);
+      const next = WORKFLOW_SOURCE.charAt(i + 1);
+      if (quote !== null) {
+        if (c === "\\") { i++; continue; }
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+      if (c === "/" && next === "/") {
+        while (i < WORKFLOW_SOURCE.length && WORKFLOW_SOURCE.charAt(i) !== "\n") i++;
+        continue;
+      }
+      if (c === "/" && next === "*") {
+        i += 2;
+        while (i < WORKFLOW_SOURCE.length
+          && !(WORKFLOW_SOURCE.charAt(i) === "*" && WORKFLOW_SOURCE.charAt(i + 1) === "/")) i++;
+        i++;
+        continue;
+      }
+      if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+      if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+      if (c === ";" && depth === 0) return WORKFLOW_SOURCE.slice(start, i + 1);
+    }
+    throw new Error("extraction guard failed: no depth-0 ';' for " + marker);
+  }
+
+  /** fixerDocPath 消费的条目形状（agg.must_fix_ids schema 数据的渲染相关字段）。 */
+  interface FixerDocEntry {
+    id: string;
+    severity?: string;
+    title?: string;
+    files?: string[];
+    evidence?: string;
+    guidance?: string;
+  }
+
+  interface FixGroupLike {
+    id: string;
+    issueIds: string[];
+    note?: string;
+  }
+
+  const ENTRY_FULL: FixerDocEntry = {
+    id: "MF-1-15",
+    severity: "minor",
+    title: "workflow 文档渲染函数零测试",
+    files: ["workflows/review-fix-loop.js", "src/__tests__/review-fix-loop-script.test.ts"],
+    evidence: "grep fixerDocPath|groupCalls 在测试零命中",
+    guidance: "沿用同脚本既有源码提取模式补用例",
+  };
+
+  let roundDir = "";
+  beforeEach(() => {
+    roundDir = mkdtempSync(join(tmpdir(), "rfl-fixer-doc-"));
+  });
+  afterEach(() => {
+    rmSync(roundDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function loadFns(sandbox: Record<string, unknown>): {
+    fixerDocPath: (g: FixGroupLike, k: number) => string;
+    groupCalls: Array<Record<string, unknown>>;
+  } {
+    return vm.runInNewContext(
+      [
+        extractStatement("const fixerDocPath = "),
+        extractStatement("const groupCalls = "),
+        "({ fixerDocPath, groupCalls })",
+      ].join("\n"),
+      sandbox,
+    ) as { fixerDocPath: (g: FixGroupLike, k: number) => string; groupCalls: Array<Record<string, unknown>> };
+  }
+
+  /** fixerDocPath 沙箱：真实 fs + 临时 roundDir（产物落盘后 readFileSync 回读断言）。
+   *  groupCalls 语句与 fixerDocPath 一同求值（const 声明即执行 map）——文档渲染
+   *  用例注入空组 + 哨兵 buildFixPrompt（误派发即红），不静默。 */
+  function docSandbox(entries: readonly unknown[]): Record<string, unknown> {
+    return {
+      fs: { writeFileSync },
+      roundDir,
+      activeEntriesForFix: entries,
+      fixGroups: [],
+      buildFixPrompt: () => { throw new Error("buildFixPrompt must not run in doc-render cases"); },
+    };
+  }
+
+  describe("fixerDocPath（fixer 任务文档渲染）", () => {
+    it("路径格式 roundDir/aggregate-4-fixer-<k>.md + 内容与组/条目逐字节一致", () => {
+      const { fixerDocPath } = loadFns(docSandbox([ENTRY_FULL]));
+      const p = fixerDocPath({ id: "G8", issueIds: ["MF-1-15"], note: "单条独立：补测" }, 3);
+      expect(p).toBe(roundDir + "/aggregate-4-fixer-3.md");
+      expect(readFileSync(p, "utf-8")).toBe(
+        [
+          "# Fixer task G8 — 单条独立：补测",
+          "",
+          "Parallel fixing: other groups run concurrently on disjoint files; touch only this group's files.",
+          "",
+          "- MF-1-15 [minor] workflow 文档渲染函数零测试",
+          "  files: workflows/review-fix-loop.js, src/__tests__/review-fix-loop-script.test.ts",
+          "  evidence: grep fixerDocPath|groupCalls 在测试零命中",
+          "  guidance: 沿用同脚本既有源码提取模式补用例",
+          "",
+          "Verify-first: ledger entries were independently verified by the aggregator — presume they hold.",
+          "If reading the code convinces you a claim is a false positive, do NOT fix it: report it in",
+          "`disputed` with concrete counter-evidence (file:line + what the aggregator's verification",
+          "missed; empty or vague evidence is an ES3 violation). Disputed items do not abort the loop —",
+          "a human adjudicates them after the run. If you cannot rebut, fix it.",
+          "All severity levels in scope; only minor may be deferred (with a concrete reason).",
+          "self_check per fix: one grep command + the expected result.",
+        ].join("\n"),
+      );
+    });
+
+    it("note 缺失 → 标题裸组号；severity/title 缺省 → major + 空标题占位", () => {
+      const { fixerDocPath } = loadFns(docSandbox([{ id: "E-1" }]));
+      const body = readFileSync(fixerDocPath({ id: "G1", issueIds: ["E-1"] }, 1), "utf-8");
+      expect(body).toContain("# Fixer task G1\n");
+      // title 缺省渲染为空串占位（"] " 后跟空标题，e.severity || "major" 兜底）
+      expect(body).toContain("- E-1 [major] ");
+      expect(body).not.toContain("files:");
+    });
+
+    it("files 非数组/空数组省略；evidence/guidance 非字符串或空串省略", () => {
+      const { fixerDocPath } = loadFns(docSandbox([
+        { id: "E-1", severity: "critical", title: "t", files: [], evidence: "", guidance: 42 },
+      ]));
+      const body = readFileSync(fixerDocPath({ id: "G1", issueIds: ["E-1"] }, 1), "utf-8");
+      expect(body).toContain("- E-1 [critical] t");
+      expect(body).not.toContain("files:");
+      expect(body).not.toContain("evidence:");
+      expect(body).not.toContain("guidance:");
+    });
+
+    it("未知 issueId（activeEntriesForFix 查无）整条过滤；多条目按 issueIds 顺序渲染", () => {
+      const a: FixerDocEntry = { id: "A-1", severity: "major", title: "alpha" };
+      const b: FixerDocEntry = { id: "B-2", severity: "minor", title: "beta" };
+      const { fixerDocPath } = loadFns(docSandbox([a, b]));
+      const body = readFileSync(fixerDocPath({ id: "G2", issueIds: ["B-2", "GHOST", "A-1"] }, 1), "utf-8");
+      expect(body).not.toContain("GHOST");
+      expect(body.indexOf("- B-2 [minor] beta")).toBeGreaterThan(-1);
+      expect(body.indexOf("- B-2 [minor] beta")).toBeLessThan(body.indexOf("- A-1 [major] alpha"));
+    });
+
+    it("覆盖写：同 k 重复渲染同路径、以最后一次为准（确定性渲染覆盖陈旧文档）", () => {
+      const sandbox = docSandbox([{ id: "OLD-1", severity: "major", title: "stale" }]);
+      const { fixerDocPath } = loadFns(sandbox);
+      const p = fixerDocPath({ id: "G1", issueIds: ["OLD-1"] }, 1);
+      expect(readFileSync(p, "utf-8")).toContain("- OLD-1 [major] stale");
+      sandbox.activeEntriesForFix = [{ id: "NEW-1", severity: "major", title: "fresh" }];
+      expect(fixerDocPath({ id: "G1", issueIds: ["NEW-1"] }, 1)).toBe(p);
+      expect(readFileSync(p, "utf-8")).toContain("- NEW-1 [major] fresh");
+      expect(readFileSync(p, "utf-8")).not.toContain("OLD-1");
+    });
+  });
+
+  describe("groupCalls（fixer 派发调用组装）", () => {
+    const FIX_SCHEMA = { type: "object", marker: "fix-schema" };
+
+    function callsSandbox(opts: {
+      fixGroups: FixGroupLike[];
+      entries: readonly unknown[];
+      fixDef: { name?: string; path?: string } | null;
+      reportFile?: unknown;
+      fixesCaution?: unknown;
+    }): { sandbox: Record<string, unknown>; captured: Array<Record<string, unknown>> } {
+      const captured: Array<Record<string, unknown>> = [];
+      const sandbox: Record<string, unknown> = {
+        ...docSandbox(opts.entries),
+        fixGroups: opts.fixGroups,
+        round: 2,
+        batchIndex: 3,
+        agg: { report_file: opts.reportFile, fixes_caution: opts.fixesCaution },
+        fixPrompt: "FIX-INSTRUCTIONS",
+        commitInstr: "COMMIT-INSTR",
+        fixSchema: FIX_SCHEMA,
+        MODEL: "model/x",
+        FIX_DEF: opts.fixDef,
+        buildFixPrompt: (args: Record<string, unknown>) => {
+          captured.push(args);
+          return "PROMPT-" + captured.length;
+        },
+      };
+      return { sandbox, captured };
+    }
+
+    it("组→文档→调用一一对应：k 从 1 起、header 含 round/batch/组序、prompt 保序", () => {
+      const { sandbox, captured } = callsSandbox({
+        fixGroups: [
+          { id: "G1", issueIds: ["A-1"], note: "n1" },
+          { id: "G2", issueIds: ["B-2"] },
+        ],
+        entries: [
+          { id: "A-1", severity: "major", title: "alpha" },
+          { id: "B-2", severity: "minor", title: "beta" },
+        ],
+        fixDef: { name: "fxagent", path: "/agents/fx.md" },
+        reportFile: "agg.md",
+        fixesCaution: ["caution-1"],
+      });
+      const { groupCalls } = loadFns(sandbox);
+      expect(groupCalls).toHaveLength(2);
+      // map 保序：第 i 个调用的 prompt 来自第 i 次 buildFixPrompt
+      expect(groupCalls[0].prompt).toBe("PROMPT-1");
+      expect(groupCalls[1].prompt).toBe("PROMPT-2");
+      expect(captured[0].header).toBe("Fix round 2 (batch 3, group G1/2)");
+      expect(captured[1].header).toBe("Fix round 2 (batch 3, group G2/2)");
+      // groupDocPath = fixerDocPath(g, gi+1)：文档按 1 起编号落盘且内容对组不串
+      expect(captured[0].groupDocPath).toBe(roundDir + "/aggregate-4-fixer-1.md");
+      expect(captured[1].groupDocPath).toBe(roundDir + "/aggregate-4-fixer-2.md");
+      const doc1 = readFileSync(String(captured[0].groupDocPath), "utf-8");
+      const doc2 = readFileSync(String(captured[1].groupDocPath), "utf-8");
+      expect(doc1).toContain("# Fixer task G1 — n1");
+      expect(doc1).toContain("- A-1 [major] alpha");
+      expect(doc1).not.toContain("B-2");
+      expect(doc2).toContain("# Fixer task G2\n");
+      expect(doc2).toContain("- B-2 [minor] beta");
+      // 上下文透传：报告路径 / caution / fix 指令 / commit 纪律
+      expect(captured[0].reportPath).toBe("agg.md");
+      expect(captured[0].caution).toEqual(["caution-1"]);
+      expect(captured[0].fixPrompt).toBe("FIX-INSTRUCTIONS");
+      expect(captured[0].commitInstr).toBe("COMMIT-INSTR");
+    });
+
+    it("调用字段：schema 恒等 fixSchema、model=MODEL、returnMeta=true、agent=FIX_DEF.path", () => {
+      const { sandbox, captured } = callsSandbox({
+        fixGroups: [{ id: "G7", issueIds: ["A-1"] }],
+        entries: [{ id: "A-1", severity: "major", title: "alpha" }],
+        fixDef: { name: "fxagent", path: "/agents/fx.md" },
+      });
+      const { groupCalls } = loadFns(sandbox);
+      expect(groupCalls[0].schema).toBe(FIX_SCHEMA);
+      expect(groupCalls[0].model).toBe("model/x");
+      expect(groupCalls[0].returnMeta).toBe(true);
+      expect(groupCalls[0].agent).toBe("/agents/fx.md");
+      expect(groupCalls[0].description).toBe("fxagent-G7");
+      expect(captured).toHaveLength(1);
+    });
+
+    it("FIX_DEF=null → description 兜底 fix-<gid>，无 agent 键（通用 subagent 路径）", () => {
+      const { sandbox } = callsSandbox({
+        fixGroups: [{ id: "G1", issueIds: ["A-1"] }],
+        entries: [{ id: "A-1", severity: "major", title: "alpha" }],
+        fixDef: null,
+      });
+      const { groupCalls } = loadFns(sandbox);
+      expect(groupCalls[0].description).toBe("fix-G1");
+      expect(Object.prototype.hasOwnProperty.call(groupCalls[0], "agent")).toBe(false);
+    });
+
+    it("FIX_DEF 有 name 无 path → 无 agent 键；report_file 非字符串 → reportPath 空串；caution 空/缺失 → []", () => {
+      const { sandbox, captured } = callsSandbox({
+        fixGroups: [{ id: "G3", issueIds: ["A-1"] }],
+        entries: [{ id: "A-1", severity: "major", title: "alpha" }],
+        fixDef: { name: "named-only" },
+        reportFile: 42,
+        fixesCaution: [],
+      });
+      const { groupCalls } = loadFns(sandbox);
+      expect(groupCalls[0].description).toBe("named-only-G3");
+      expect(Object.prototype.hasOwnProperty.call(groupCalls[0], "agent")).toBe(false);
+      expect(captured[0].reportPath).toBe("");
+      expect(captured[0].caution).toEqual([]);
+    });
   });
 });

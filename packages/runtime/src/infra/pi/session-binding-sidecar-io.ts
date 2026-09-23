@@ -1,12 +1,12 @@
 /**
  * sidecar 家族公共 IO 骨架 + 扫描缓存治理状态（叶子模块）。
  *
- * 为什么存在：session-model-sidecar.ts（model 家族）自 session-file-utils.ts 拆出后
- * 反向复用 persistBindingSidecar / readBindingSidecar 骨架，曾构成两模块的函数级循环
- * 引用（ESM function 声明实例化期绑定，运行时无 TDZ 风险，但 PR fallow audit 按硬
- * 规则拦截循环依赖）。骨架与其私有闭包（sessionMetaCache / scanDirCache 家族）下沉
- * 为本叶子模块，依赖收敛为单向：session-file-utils → 本模块、session-model-sidecar →
- * 本模块（前者另依赖后者，两后继互不依赖）。
+ * 为什么存在：model sidecar 家族（原 session-model-sidecar.ts，缓存治理批 3 U8 随写点
+ * 退役整体删除）自 session-file-utils.ts 拆出后反向复用 persistBindingSidecar /
+ * readBindingSidecar 骨架，曾构成两模块的函数级循环引用（ESM function 声明实例化期绑定，
+ * 运行时无 TDZ 风险，但 PR fallow audit 按硬规则拦截循环依赖）。骨架与其私有闭包
+ * （sessionMetaCache / scanDirCache 家族）下沉为本叶子模块，依赖收敛为单向：
+ * session-file-utils → 本模块（model 家族删除后唯一消费方）。
  *
  * [type-only 反向引用登记] import type { ScannedSessionMeta } from
  * './session-file-utils.js'：缓存容器条目持有上层聚合类型，编译后引用消失、运行时
@@ -17,6 +17,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
+import { isEnoent, toErrorMessage } from '../../utils/errors.js'
+import { quarantineCorruptFile } from '../../utils/json-store.js'
 import type { ScannedSessionMeta } from './session-file-utils.js'
 
 // ── W3 文件级 mtime+size 缓存（随骨架迁入：persistBindingSidecar 写后失效依赖它）──
@@ -45,7 +47,7 @@ interface CachedSessionMeta {
 // persistHandoffSidecar / scanSessionMeta 等，均为 .get/.set/.delete 方法调用，绑定只读
 // 无碍）；对外语义维持原状——file-utils 不再转出，消费方仍经 _resetSessionMetaCacheForTest
 // / invalidateSessionMetaCache 治理函数触达。
-// 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5）
+// 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯）
 export const sessionMetaCache = new Map<string, CachedSessionMeta>()
 
 // ── sidecar 家族公共骨架（原 session-file-utils.ts，函数体逐字节不变迁入）────────
@@ -81,12 +83,13 @@ export interface PersistBindingSidecarOpts {
  * 故收敛为默认开。确需跳过时必须显式传 { invalidateScanDir: false } 并附注释说明理由。
  *
  * [消费方登记] preset/project/agent 家族在 session-file-utils.ts 消费（骨架原属该文件，
- * 经其 re-export 保持原 import 路径）；model 家族在 session-model-sidecar.ts 直接消费
- * 本模块。骨架随循环消除下沉至此，仅限 sidecar 家族模块消费，不作为公共 API。
+ * 经其 re-export 保持原 import 路径）；model 家族消费方（原 session-model-sidecar.ts）
+ * 已随缓存治理批 3 U8 退役删除。骨架随循环消除下沉至此，仅限 sidecar 家族模块消费，
+ * 不作为公共 API。
  */
 /**
  * sidecar 持久化形状（S12 序列化边界最小约束）：各家族 binding 的公共底座——
- * JSON.stringify 产出的对象（preset/project/agent/model 家族字段各异，由各自
+ * JSON.stringify 产出的对象（preset/project/agent 家族字段各异，由各自
  * 调用方类型进一步收窄；读侧经 readBindingSidecar 的 decode 守卫回调校验）。
  */
 export type PersistedSidecarBinding = Readonly<Record<string, unknown>>
@@ -125,16 +128,68 @@ export function persistBindingSidecar(
  * sidecar 不存在/损坏/守卫不过 → undefined（降级不抛错）。
  *
  * [消费方登记] 同 persistBindingSidecar——preset/project/agent 家族经
- * session-file-utils.ts re-export 消费，model 家族（'./session-model-sidecar.ts'）
- * 直接消费本模块，仅限 sidecar 家族模块消费。
+ * session-file-utils.ts re-export 消费，仅限 sidecar 家族模块消费（model 家族消费方
+ * 已随缓存治理批 3 U8 退役删除）。
+ *
+ * RT-3#3 读侧显形：ENOENT = 「从未绑定」的正常态，保持安静；其余失败路径全部出声，
+ * 让「绑定损坏」与「从未绑定」可区分——
+ * - 读失败（EACCES/EIO 等非 ENOENT）→ warn 一次（路径+原因），按未绑定降级；
+ * - JSON parse 拒绝（文件损坏）→ warn + quarantineCorruptFile 隔离保取证副本——
+ *   binding sidecar 无 JSONL 兜底真源（与 meta/handoff sidecar 不同），损坏即用户
+ *   归属数据丢失，隔离副本是唯一恢复入口；
+ * - 守卫不过（合法 JSON 但字段形状不符）→ warn 一次（路径+原因）——可能是版本
+ *   演进产生的旧形态，不隔离（隔离会消灭旧形态的可恢复性）。
  */
+const warnedSidecarPaths = new Set<string>()
+
+/**
+ * sidecar 读侧降级 warn（每路径一次，防扫描热路径刷屏；条目数上界 = sidecar 文件数）。
+ * meta/handoff sidecar 的读侧分流（session-file-utils）复用同一去重集——同一文件的
+ * 降级只出声一次，不因扫描多轮重复。
+ */
+export function warnSidecarDegradedOnce(sidecarPath: string, reason: string): void {
+  if (warnedSidecarPaths.has(sidecarPath)) return
+  warnedSidecarPaths.add(sidecarPath)
+  console.warn(`[session-binding-sidecar-io] ${reason}: ${sidecarPath} — binding treated as absent (损坏≠未绑定，可从日志定位该路径)`)
+}
+
+/**
+ * 读侧 catch 的 ENOENT 分流单点（RT-3#3）：ENOENT = 「从未绑定/无记录」的正常态，
+ * 保持安静；其余失败 warn 一次（路径+原因）。meta/handoff sidecar 的 catch 消费。
+ */
+export function warnSidecarReadFailureOnce(sidecarPath: string, e: unknown, reason: string): void {
+  if (isEnoent(e)) return
+  warnSidecarDegradedOnce(sidecarPath, `${reason} (${toErrorMessage(e)})`)
+}
+
+/** 测试隔离用：清空 warn-once 去重集。 */
+export function _resetSidecarWarnDedupForTest(): void {
+  warnedSidecarPaths.clear()
+}
+
 export function readBindingSidecar<T>(sidecarPath: string, decode: (binding: unknown) => T | undefined): T | undefined {
+  let raw: string
   try {
-    const raw = readFileSync(sidecarPath, 'utf-8')
-    return decode(JSON.parse(raw))
-  } catch {
+    raw = readFileSync(sidecarPath, 'utf-8')
+  } catch (e) {
+    if (!isEnoent(e)) {
+      warnSidecarDegradedOnce(sidecarPath, `sidecar read failed (${toErrorMessage(e)})`)
+    }
     return undefined
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    warnSidecarDegradedOnce(sidecarPath, `sidecar JSON corrupt (${toErrorMessage(e)})`)
+    quarantineCorruptFile(sidecarPath, { tag: 'session-binding-sidecar-io', reason: 'sidecar JSON parse failed', cause: e })
+    return undefined
+  }
+  const decoded = decode(parsed)
+  if (decoded === undefined) {
+    warnSidecarDegradedOnce(sidecarPath, 'sidecar decoded shape rejected (guard failed)')
+  }
+  return decoded
 }
 
 // ── wave:perf-w26 目录列举层 TTL 缓存（随骨架迁入：骨架写后失效依赖它）──────────

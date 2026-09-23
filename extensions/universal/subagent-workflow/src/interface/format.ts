@@ -2,7 +2,7 @@
 //
 // 纯格式化函数.零 Pi 依赖、零 runtime 依赖,可单测.
 //
-// 分隔符语义体系(tui-format.md §1,impeccable 审查裁定):
+// 分隔符语义体系(impeccable 审查裁定):
 //   `·` 同级并列字段/thinking 图标;`()` 元数据分组;`›` 工具;`>` 输出;`·` thinking.
 //   禁用 `│` 做 stats 分隔、`├─`/`└─` 做 eventLog 前缀.
 //
@@ -234,7 +234,7 @@ export function extractAgentName(args: unknown): string {
 /**
  * 格式化单条 eventLog 条目(带类型图标 + 着色,不含 `⎿` 前缀——前缀由调用方加).
  *
- * 标签语义(tui-conversation.md §7):
+ * 标签语义:
  *   tool:    tool_start/tool_end(尾部追加 ✓/✗)
  *   ── turn ──  turn_end(仅 expanded)
  *   error:   tool label + ✗

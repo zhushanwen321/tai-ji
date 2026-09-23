@@ -14,8 +14,44 @@
 //   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
-// [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
-// docs/architecture/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
+// ==================== 字段归属判据 1-7（协议宪法·字段面；新增 wire 字段依序裁决，
+// 先到先定。条文全文 = engine-protocol.ts 头注；删改史与判据 why =
+// docs/adr/decisions.md ADR-0071） ====================
+// 1. 引擎不消费它，任务能否正确完成？能 → 宿主自持不上协议。
+// 2. 「任务是什么」（what→task）还是「在什么环境跑/怎么跑」（where/how→ctx）？
+// 3. 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议；不能（推导分叉）→ ctx。
+// 4. （绝对条款）同一语义不得 task/ctx 双写——wire 层同名键交集恒空（编译断言锁）。
+// 5. （能力绑定）字段有效性依赖能力位时双向回指（先例 streamMode↔eventGranularity）。
+// 6. （键三分类）advisory（忽略无语义影响，直接 additive）/ degradable（设计内静默
+//    降级：缺省最弱档 + 判据 5 回指 + 预检豁免）/ behavior（忽略会静默改变任务语义：
+//    必须绑定能力位 + 宿主派发前预检；先例 resume↔conversation gate、forkSource）。
+//    判别式：「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」
+// 7. （能力位消费点登记）每个能力位登记消费点与 wire 载体，执行通道缺失如实登记；
+//    未登记位 = 违宪（首个登记条目 = steer）。
+//
+// 演进政策（字段面）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
+// 能力位绑定三件齐）才进协议，无消费方不进协议；A 型同形改名默认 additive 双读 +
+// major 清除，B 型机制替换同批合法（对端同仓 + ADR 登记）——三条全文见
+// engine-protocol.ts 头注，minor 协商触发条件见 ADR-0071。
+//
+// 新轴五触点清单（新增能力位；触发需求前不落代码，C 型纪律）：①本文件
+// EngineCapabilities 加可选键 + 缺省最弱档注释；②core↔SDK 双向断言与存量必填保持绿；
+// ③core 两表各登各的（CONSERVATIVE_CAPABILITIES 保守缺省值 / CAPABILITY_ENUMS 值域，
+// 缺一即 undefined 透传 + gate 放行；boolean 轴例外走 maxTurns 先例：ENUMS 不登 +
+// 键集锁 B Exclude 扩位 + boolean 专用解析分支，详见 engine-protocol.ts 头注）；④gate 判据比较最弱档字面值（键集锁兜底）；
+// ⑤pi-host-binding 能力位快照同步登记。
+//
+// ==================== 未知成员宽容语义四行（运行时半边，与编译期词表锁互补；
+// 条文权威 = ADR-0071；本文件承载①④，②落 methods.ts 头注，③落 reverse-channels.ts
+// 头注）====================
+// ① 未知 event.type → 旧宿主 reducer default no-op 安全落空——逐变体 noop-safe:
+//    论证标记登在下方 AGENT_EVENT_TYPE_NAMES 词表成员行（U2 已实装，标记守卫 =
+//    contract-closure.test.ts「noop-safe 标记守卫」），此处只引用不复述论证内容。
+// ④ 未知可选键 → advisory 忽略（判据 6 第一档：忽略无语义影响，直接 additive）；
+//    behavior 键必有门（宿主派发前预检），不存在「无门依赖」的 behavior 键——与
+//    判据 6 呼应：宽容只覆盖 advisory/degradable，behavior 靠预检不靠容忍。
+// 引擎义务传导 = docs/extensions/subagents/engine-development-guide.md（②的应答义务
+// 条目）+ docs/constraints.json C-proc-24（scope/触发描述双登记）。
 //
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出
@@ -105,17 +141,71 @@ export interface Turn {
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
+ *
+ * 每个成员的 type 经 `EventName<"…">` 受词表约束（编译锁①，见下方词表节）。
  */
 export type AgentEvent =
-  | { type: "tool_start"; toolName: string; args?: unknown }
-  | { type: "tool_end"; toolName: string; args?: unknown; result?: ToolCallResult; isError?: boolean }
-  | { type: "text_delta"; delta: string }
-  | { type: "thinking_delta"; delta: string }
-  | { type: "turn_end"; summary?: string }
-  | { type: "message_end"; usage?: AgentUsage; error?: string }
-  | { type: "compaction" }
-  | { type: "activity" }
-  | { type: "error"; message: string };
+  | { type: EventName<"tool_start">; toolName: string; args?: unknown }
+  | { type: EventName<"tool_end">; toolName: string; args?: unknown; result?: ToolCallResult; isError?: boolean }
+  | { type: EventName<"text_delta">; delta: string }
+  | { type: EventName<"thinking_delta">; delta: string }
+  | { type: EventName<"turn_end">; summary?: string }
+  | { type: EventName<"message_end">; usage?: AgentUsage; error?: string }
+  | { type: EventName<"compaction"> }
+  | { type: EventName<"activity"> }
+  | { type: EventName<"error">; message: string };
+
+// ============================================================
+// 事件词表锁（AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES 同源互证）
+// ============================================================
+
+/**
+ * 事件类型词表（协议事件全集 9 种，运行时 SSOT）：schema 事件 `type.enum` 从本表
+ * 派生（schema.ts），测试取值遍历本表（protocol-schema.test.ts / contract-closure.test.ts）
+ * ——新增事件变体不再手写第三处。
+ *
+ * 每个成员必须带一行 `// noop-safe: <论证>`：未知成员宽容语义四行①（ADR-0071）的
+ * 逐变体登记——旧宿主 reducer 遇未知 event.type 走 default 分支零写入，标记后写
+ * 「本变体被丢弃时状态无损」的一行论证（no-op 安全性属运行时消费语义，不可静态
+ * 判定——守卫只查标记存在不查内容，落点 contract-closure.test.ts「noop-safe 标记守卫」）。
+ *
+ * 编译锁（漏改任一侧 typecheck 红，且错误指向漏点）：
+ *   ① union 侧——成员 type 必须经 `EventName<"x">` 取名（约束 = 本词表）：union 加
+ *      成员不登词表 → TS2344 直接落在漏改的成员行；
+ *   ② 词表侧——`satisfies readonly AgentEvent["type"][]`：词表加成员不加 union
+ *      → 错误直接落在词表漏改的成员行；
+ *   ③ 兜底——成员绕过 EventName 约束裸加字面量 → _EventVocabSyncLock 爆红。
+ * 新增事件变体的同步面分两层，漏改任一处 typecheck 均红且精确指路（验收 A1 演练
+ * 实证）：协议面两笔（词表 + union）即协议面全同步——schema enum 与遍历型测试断言
+ * 自动跟随；同仓消费面另有两处编译期同步点——journal-replay reducer case（穷尽
+ * switch never 检查）与 contract-closure 构造冒烟（Record<AgentEventTypeName,…>
+ * 漏键爆红）。不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见头注）。
+ */
+export const AGENT_EVENT_TYPE_NAMES = [
+  "tool_start", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 tool 起始占位（显示降级），turn 结构不受损
+  "tool_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 result，turn 收口由 turn_end/message_end 承担
+  "text_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺正文增量，不产生半解析状态
+  "thinking_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺推理增量，不产生半解析状态
+  "turn_end", // noop-safe: 旧宿主 default 分支零写入——丢弃则该 turn 滞留进行态，journal 重放仍按序重建
+  "message_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 usage 聚合与闭合计量，已累积内容不回滚
+  "compaction", // noop-safe: 事件无载荷且现行 reducer 即直接 return——丢弃与处理零差异
+  "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
+  "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
+] as const satisfies readonly AgentEvent["type"][];
+
+/** 词表派生的事件名联合（编译锁②/③的词表侧源；schema enum 与测试取值同源）。 */
+export type AgentEventTypeName = (typeof AGENT_EVENT_TYPE_NAMES)[number];
+
+/**
+ * 词表约束的事件 type 字面量（编译锁①）：union 成员经 `EventName<"x">` 取名，
+ * 词表漏登时 typecheck 错误落在该成员行。类型恒等（解析为同一字面量），
+ * 结构与运行时语义零变化。
+ */
+type EventName<T extends AgentEventTypeName> = T;
+
+// 编译锁③（兜底）：union 成员绕过 EventName 约束裸加字面量 → 本断言赋值处爆红
+// （union ⊆ 词表 的精确落点由锁①承担，此处兜住绕过约束的裸写形态）。
+const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
 
 // ============================================================
 // handle / read 视图
@@ -208,7 +298,7 @@ export interface EngineCapabilities {
   conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
-  /** 粗粒度引擎：GUI 显示降级为阶段态。 */
+  /** 粗粒度引擎：GUI 显示降级为阶段态。判据 5 回指：被 streamMode 键消费（degradable 先例）。 */
   eventGranularity: "stream" | "coarse";
   /** emulated = worktree 隔离（无 OS sandbox 的引擎用文件写维度隔离补齐）。 */
   sandbox: "native" | "emulated" | "none";

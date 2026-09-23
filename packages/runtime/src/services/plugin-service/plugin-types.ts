@@ -8,8 +8,8 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 // Worker/AgentAPI/Bridge/Tool 等域类型已上收，此处仅 re-export 保持既有
 // `from './plugin-types.js'` 导入面不变；仅保留一个 runtime 专属内部类型
 // （IPluginServiceDeps，依赖 runtime 内部 service port，不进插件作者契约面）。
-// descriptor / rpc 域仍由本地子文件定义（./plugin-types/），hook 域经薄壳
-// hook-types.ts 指向 SDK——三者与 SDK 同构，为最小 diff 过渡形态。
+// descriptor / rpc 域亦经 SDK re-export（本地子文件已删）；hook 域经薄壳
+// hook-types.ts 指向 SDK——各域定义源唯一 = SDK。
 //
 // 分层标注（IF2）沿承 SDK 侧定义：
 // - @stable — Phase1AgentAPI 核心面 storage/notify/sessions、PermissionConstants、
@@ -35,10 +35,6 @@ export type {
   Disposable,
   PluginPermission,
   PluginState,
-  PermissionConstant,
-  BridgeState,
-  BridgeSyncRequest,
-  BridgeSyncResponse,
   BridgeToolExecuteRequest,
   ToolExecuteHandler,
   ToolRegistration,
@@ -47,7 +43,6 @@ export type {
   UiDialogOptions,
   HookEntry,
   Phase2AgentAPI,
-  PluginUIRequest,
 } from 'taiji-plugin-sdk'
 export { PermissionConstants } from 'taiji-plugin-sdk'
 
@@ -61,17 +56,17 @@ export type {
 } from '@zhushanwen/extension-protocol'
 
 // ── Descriptor / Manifest 域 ───────────────────────────────────────
-// 本地子文件定义（sync 时代的历史分层，未上收 SDK 通路）。
+// 定义源 = SDK（单源化后无本地副本）。
 export type {
   PluginSource,
   TaijiManifest,
   TaijiPackageJson,
   PluginDescriptor,
   PluginContributes,
-} from './plugin-types/descriptor-types.js'
+} from 'taiji-plugin-sdk'
 
 // ── RPC 线协议域 ──────────────────────────────────────────────────
-// 本地子文件定义。const 必须用 export-from 重导出。
+// 定义源 = SDK。const 必须用 export-from 重导出。
 export type {
   RpcRequest,
   RpcSuccessResponse,
@@ -79,9 +74,9 @@ export type {
   RpcResponse,
   RpcNotification,
   RpcMessage,
-} from './plugin-types/rpc-protocol.js'
-export { PluginRpcErrorCodes } from './plugin-types/rpc-protocol.js'
-export type { PluginRpcErrorCode } from './plugin-types/rpc-protocol.js'
+} from 'taiji-plugin-sdk'
+export { PluginRpcErrorCodes } from 'taiji-plugin-sdk'
+export type { PluginRpcErrorCode } from 'taiji-plugin-sdk'
 
 // ── Hook 域 ───────────────────────────────────────────────────────
 // 薄壳 hook-types.ts → SDK。
@@ -94,7 +89,6 @@ export type {
   HookInterceptor,
   HookObserver,
   HookResult,
-  HookBlockedResult,
   PiEventCallback,
 } from './plugin-types/hook-types.js'
 

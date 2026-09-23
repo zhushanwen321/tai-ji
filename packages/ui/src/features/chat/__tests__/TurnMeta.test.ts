@@ -9,12 +9,16 @@
  * 测试需 setActivePinia + 传 turnIndex/sessionId，chevron 展开态通过 store 预置 isExpanded(sid, idx) 驱动。
  *
  * [chat-flow-timestamp U2] TurnMeta 区间（设计 §3 A1/A2）：
- * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）
- * - A2 live 态：结束侧不定格 lastTs，以 `→` + panel.message.inProgress 文案结尾
+ * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（起止 = 整个 agent-turn 的
+ *   startedAt/endedAt，core deriveTurnAggregates 聚合值）
+ * - A2 live 态：结束侧不定格 endedAt，以 `→` + panel.message.inProgress 文案结尾
  *
- * [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1）：
- * - 三态渲染：工作中显示 / 完成态定格常驻（B1）/ chars=0 不渲染
- * - 数字 toLocaleString() 千分位（用户可见 DOM 断言，锚定 turn-meta-chars testid）
+ * 已生成 token 数（口径 = 本 turn 全部 LLM 调用的 output tokens 之和，真实 usage 优先）：
+ * - 三态渲染：工作中显示 / 完成态定格常驻（B1）/ tokens=0 不渲染
+ * - 数字 toLocaleString() 千分位（用户可见 DOM 断言，锚定 turn-meta-tokens testid）；全程无 `≈`
+ *   （只显示已上报的真实 usage，不做估算——用户裁决 A）
+ *
+ * 长时生成分级配色已删（2026-09，回归锚点见文件尾）：超长时长仍中性，不染 warn/danger。
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/TurnMeta.test.ts
  */
@@ -50,16 +54,14 @@ function mountMeta(props: {
   /** 是否在挂载前预置该 turn 为展开（store 写入），驱动 chevron rotate-90 */
   expanded?: boolean
   elapsed?: string
-  /** 已耗时秒数（组件必填 prop，驱动长时生成分级配色） */
-  elapsedSecs?: number
-  /** turn 首条 assistant 时刻 */
-  firstTs?: number
-  /** turn 末条 assistant 时刻 */
-  lastTs?: number
-  /** 是否正在流式生成 */
+  /** turn 起点时刻（整个 agent-turn 聚合） */
+  startedAt?: number
+  /** turn 终点时刻（最后一次产出结束） */
+  endedAt?: number
+  /** 本 turn 是否仍在产出（未定格） */
   isLive?: boolean
-  /** [u3] 已生成字符数（默认 0 不渲染） */
-  generatedChars?: number
+  /** 本 turn 已上报的真实生成 token 总量（默认 0 不渲染） */
+  generatedTokens?: number
 }) {
   const turn = props.turn ?? makeTurn()
   return mount(TurnMeta, {
@@ -70,11 +72,10 @@ function mountMeta(props: {
       thinkCount: props.thinkCount ?? 1,
       toolCount: props.toolCount ?? 1,
       elapsed: props.elapsed ?? '5s',
-      elapsedSecs: props.elapsedSecs ?? 0,
-      firstTs: props.firstTs ?? NOW,
-      lastTs: props.lastTs ?? NOW + 5000,
+      startedAt: props.startedAt ?? NOW,
+      endedAt: props.endedAt ?? NOW + 5000,
       isLive: props.isLive ?? false,
-      generatedChars: props.generatedChars ?? 0,
+      generatedTokens: props.generatedTokens ?? 0,
       turnIndex: turn.index,
       turnKey: turnStableId(turn),
       sessionId: SID,
@@ -192,7 +193,7 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     const turn = makeTurn()
     const toggleExpand = vi.fn()
     const wrapper = mount(TurnMeta, {
-      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', elapsedSecs: 5, firstTs: NOW, lastTs: NOW + 5000, isLive: false, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
+      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', startedAt: NOW, endedAt: NOW + 5000, isLive: false, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
       global: { provide: mockChatProvide({ toggleExpand }) },
     })
     await wrapper.find('.turn-meta').trigger('click')
@@ -232,55 +233,85 @@ describe('chat-flow-timestamp U2: TurnMeta 区间（A1/A2）', () => {
   const FIRST_TS = 1700000000000
   const LAST_TS = 1700000005000
 
-  it('A1 完成态（isLive=false）：.tm-range 文本 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）', () => {
-    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: false })
+  it('A1 完成态（isLive=false）：.tm-range 文本 `· HH:MM:SS → HH:MM:SS`（起止 = turn 聚合起止时刻）', () => {
+    const wrapper = mountMeta({ startedAt: FIRST_TS, endedAt: LAST_TS, isLive: false })
     const range = wrapper.find('.tm-range')
     expect(range.exists()).toBe(true)
     // 归一化空白后整串比对（模板换行在 condense 模式下空白处理不进断言语义）
     expect(range.text().replace(/\s+/g, ' ').trim()).toBe(`· ${clockOf(FIRST_TS)} → ${clockOf(LAST_TS)}`)
   })
 
-  it('A2 live 态（isLive=true）：.tm-range 以 → + panel.message.inProgress 文案结尾（结束侧不定格 lastTs）', () => {
-    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: true })
+  it('A2 live 态（isLive=true）：.tm-range 以 → + panel.message.inProgress 文案结尾（结束侧不定格 endedAt）', () => {
+    const wrapper = mountMeta({ startedAt: FIRST_TS, endedAt: LAST_TS, isLive: true })
     const range = wrapper.find('.tm-range')
     expect(range.exists()).toBe(true)
     const normalized = range.text().replace(/\s+/g, ' ').trim()
     // 测试环境 vue-i18n mock 的 t() 返回 key（vitest.setup.ts），断言口径同 W4TC1 'panel.message.worked'
     expect(normalized).toBe(`· ${clockOf(FIRST_TS)} → panel.message.inProgress`)
-    // live 态结束侧不定格：lastTs 本地时刻不应出现
+    // live 态结束侧不定格：endedAt 本地时刻不应出现
     expect(normalized).not.toContain(clockOf(LAST_TS))
   })
 })
 
 // ═════════════════════════════════════════════════════════
-// [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1，验收 A2/A3）
+// [u3 remove-turn-progress-bar → 2026-09 token 口径] TurnMeta 已生成 token 数（设计 §2.1，验收 A2/A3）
 //
-// 渲染契约：elapsed/时刻区间之后渲染 `· 已生成 X 字符`（v-if chars>0，B1 完成态定格
-// 常驻——完成态与工作态同构可见）；数字 toLocaleString()；样式跟随 tm-range 档。
-// 测试环境 vue-i18n mock 的 t() 返回 key + 命名参数替换/append（vitest.setup.ts），
-// 文案断言锚定格式化后的数字（用户可见 DOM 断言）。
+// 渲染契约：elapsed/时刻区间之后渲染 `· 已生成 X tokens`（v-if tokens>0，B1 完成态定格
+// 常驻——完成态与工作态同构可见）；数字 toLocaleString()；含估算时前缀 `≈`；样式跟随
+// tm-range 档。测试环境 vue-i18n mock 的 t() 返回 key + 命名参数替换/append
+// （vitest.setup.ts），文案断言锚定格式化后的数字（用户可见 DOM 断言）。
 // ═════════════════════════════════════════════════════════
-describe('u3 remove-turn-progress-bar: TurnMeta 已生成字符数', () => {
-  it('工作中显示：chars>0 渲染 [data-testid=turn-meta-chars]，数字经 toLocaleString 格式化', () => {
-    const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, generatedChars: 1234 })
-    const chars = wrapper.find('[data-testid="turn-meta-chars"]')
-    expect(chars.exists()).toBe(true)
+describe('u3 remove-turn-progress-bar: TurnMeta 已生成 token 数', () => {
+  it('工作中显示：tokens>0 渲染 [data-testid=turn-meta-tokens]，数字经 toLocaleString 格式化', () => {
+    const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, generatedTokens: 1234 })
+    const tokens = wrapper.find('[data-testid="turn-meta-tokens"]')
+    expect(tokens.exists()).toBe(true)
     // 数字千分位（用户可见断言，预期用同口径 toLocaleString 求得，不依赖测试环境 locale 假设）
-    expect(chars.text()).toContain((1234).toLocaleString())
+    expect(tokens.text()).toContain((1234).toLocaleString())
     // 样式跟随 tm-range 档：text-2xs + neutral-dim + mono
-    expect(chars.classes()).toContain('text-neutral-dim')
-    expect(chars.classes()).toContain('font-mono')
+    expect(tokens.classes()).toContain('text-neutral-dim')
+    expect(tokens.classes()).toContain('font-mono')
   })
 
-  it('完成态定格显示（B1 常驻）：非 working/非 streaming 态 chars>0 仍渲染', () => {
-    const wrapper = mountMeta({ isWorkingTurn: false, isStreaming: false, generatedChars: 207 })
-    const chars = wrapper.find('[data-testid="turn-meta-chars"]')
-    expect(chars.exists()).toBe(true)
-    expect(chars.text()).toContain('207')
+  it('完成态定格显示（B1 常驻）：非 working/非 streaming 态 tokens>0 仍渲染', () => {
+    const wrapper = mountMeta({ isWorkingTurn: false, isStreaming: false, generatedTokens: 207 })
+    const tokens = wrapper.find('[data-testid="turn-meta-tokens"]')
+    expect(tokens.exists()).toBe(true)
+    expect(tokens.text()).toContain('207')
   })
 
-  it('chars=0 不渲染（零内容 turn 不占行宽）', () => {
-    const wrapper = mountMeta({ generatedChars: 0 })
-    expect(wrapper.find('[data-testid="turn-meta-chars"]').exists()).toBe(false)
+  it('不显示近似值：数字不加 `≈`（只显示模型上报的真实值）', () => {
+    const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, generatedTokens: 122 })
+    const tokensText = wrapper.find('[data-testid="turn-meta-tokens"]').text()
+    expect(tokensText).toContain('122')
+    expect(tokensText).not.toContain('≈')
+  })
+
+  it('tokens=0 不渲染（零内容 turn 不占行宽）', () => {
+    const wrapper = mountMeta({ generatedTokens: 0 })
+    expect(wrapper.find('[data-testid="turn-meta-tokens"]').exists()).toBe(false)
+  })
+})
+
+// ═════════════════════════════════════════════════════════
+// 长时生成分级配色已删除（2026-09）
+//
+// 曾按 elapsedSecs ≥5min/≥30min 把 spinner + elapsed 染 warn/danger。时长改整 turn 墙钟
+// （含工具执行/等待）后该配色把「等构建 / 等子代理 / 等用户回答」都判成异常，已删——
+// 回归断言锚定「长时仍中性」，防重新引入。
+// ═════════════════════════════════════════════════════════
+describe('长时生成分级配色已删除（回归锚点）', () => {
+  const LONG_RUNS = ['6m 12s', '34m 50s']
+
+  it.each(LONG_RUNS)('超长时长 %s 仍用中性配色（无 text-warn / text-danger）', (elapsed) => {
+    const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, elapsed })
+    const elapsedEl = wrapper.find('.elapsed')
+    expect(elapsedEl.text()).toBe(elapsed)
+    expect(elapsedEl.classes()).toContain('text-neutral-fg')
+    expect(elapsedEl.classes().some((c) => c.includes('warn') || c.includes('danger'))).toBe(false)
+    const spinner = wrapper.find('.animate-spin')
+    expect(spinner.exists()).toBe(true)
+    expect(spinner.classes()).toContain('text-accent')
+    expect(spinner.classes().some((c) => c.includes('warn') || c.includes('danger'))).toBe(false)
   })
 })

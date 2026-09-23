@@ -11,10 +11,10 @@
  * - workspace.detectBare → 向后兼容别名，等价于 workspace.detect
  *
  * 写操作失效（perf 03 §5 worktree 检查点闭环，2026-08-17）：worktree.add 创建新分支，
- * 同 repo 各 cwd 的 getStatus branches 列表随之变化。worktree.create 成功后、reply 前对
- * 发起请求的 cwd（payload.workspaceHint，缺省与 service.detect 同用 process.cwd()）调
+ * 同 repo 各 cwd 的 getStatus branches 列表随之变化。worktree.create 成功后、reply 前以
+ * create 返回值携带的 repo 根（create 内部 detect 对发起起点的解析结果，缓存治理 1-6）调
  * gitService.invalidateStatusCache({ cwd })（内部即 GitStateService.invalidateByCwd，
- * 覆盖共享该 cwd 的所有 session）——语义对齐 git-message-handler U2 六写操作：成功后
+ * 覆盖共享该 repo 上下文的所有 session）——语义对齐 git-message-handler U2 六写操作：成功后
  * reply 前失效，失败路径不失效（状态未变）。gitService 为 null（server 未注入，仅测试
  * /防御场景）时跳过失效，成功 reply 行为不变。
  *
@@ -26,7 +26,7 @@
  * 错误码联合类型见 shared WorktreeEnvelopeCode（runtime ↔ renderer 契约 SSOT）。
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, WorktreeEnvelopeCode } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, WorktreeEnvelopeCode, WorktreeErrorCode } from '@taiji/shared'
 import type { MessageHandlerContext } from './message-context.js'
 import type { IWorktreeService } from '../services/ports/worktree-service.js'
 import type { IGitService } from '../interfaces.js'
@@ -47,6 +47,31 @@ interface CodedError {
   code?: string
   detail?: unknown
   message: string
+}
+
+/**
+ * envelope code 白名单（RT-8#7）：只有 WorktreeErrorCode 联合的六个业务码可透传——
+ * `err.code as WorktreeEnvelopeCode` 直传会让逃逸码（GitExecutorError 的
+ * git_unavailable/timeout、以及任何未来新增的错误源 code）流出 union，renderer 的
+ * code switch 静默失配只剩通用报错。
+ */
+const WORKTREE_BUSINESS_CODES: ReadonlySet<string> = new Set<WorktreeErrorCode>([
+  'NOT_GIT_REPO',
+  'NOT_BARE_REPO',
+  'WORKTREE_EXISTS',
+  'SETUP_FAILED',
+  'GIT_FAILED',
+  'INVALID_BRANCH',
+])
+
+/**
+ * GitExecutorError 的 code → worktree envelope code 映射（RT-8#7）：git 层失败
+ *（不可用/超时）归 GIT_FAILED，原始 code 进 details.originalCode 保真——不丢分类
+ * 信息，同时不出 union。
+ */
+const GIT_ERROR_CODE_MAP: Readonly<Record<string, WorktreeErrorCode>> = {
+  git_unavailable: 'GIT_FAILED',
+  timeout: 'GIT_FAILED',
 }
 
 export class WorktreeMessageHandler {
@@ -71,14 +96,24 @@ export class WorktreeMessageHandler {
         try {
           const result = await this.ctx.worktreeService.create({ branch, baseBranch, locationMode, workspaceHint })
           // perf 03 §5 worktree 检查点闭环（2026-08-17）：worktree.add 创建新分支，共享发起
-          // cwd 的 session 面板 branches 列表随之变化——按 cwd 失效（内部走 GitStateService
+          // repo 上下文的 session 面板 branches 列表随之变化——按 cwd 失效（内部走 GitStateService
           // invalidateByCwd，覆盖该 cwd 全部 session 缓存），不残留 2s TTL 陈旧窗口。必须在
           // reply 之前（前端收到 worktree.created 后可能立即刷新 git zone）；失败路径不失效
-          //（状态未变，对齐 U2 六写操作语义）。requestCwd 与 service.detect 起点同式
-          //（workspaceHint ?? process.cwd()），保证失效的 cwd 与实际操作的 repo 上下文一致。
-          const requestCwd = workspaceHint ?? process.cwd()
-          this.ctx.gitService?.invalidateStatusCache({ cwd: requestCwd })
-          return this.ctx.reply(ws, msg.id, 'worktree.created', result)
+          //（状态未变，对齐 U2 六写操作语义）。
+          //
+          // 失效键 = create 内部 detect 对同一发起起点解析出的 repo 根（缓存治理 1-6，取自
+          // service 返回值）：statusCache 的 session cwd 键是 repo/workspace 根，invalidateByCwd
+          // 按 cwd 精确后缀匹配——workspaceHint 指向深层子目录时用 hint 原值失效会与缓存键
+          // 错位、失效落空。从返回值取解析结果消除「靠同式解析约定对齐、无结构性保证」。
+          // repoRoot 仅供 runtime 内部失效使用，不进 worktree.created WS 契约——reply 挑字段。
+          this.ctx.gitService?.invalidateStatusCache({ cwd: result.repoRoot })
+          return this.ctx.reply(ws, msg.id, 'worktree.created', {
+            cwd: result.cwd,
+            branch: result.branch,
+            // RT-8#8：请求 baseBranch 校验失败 fallback 时可见实际基线（可选字段，
+            // 旧 renderer 忽略无碍）
+            ...(result.usedBaseRef ? { usedBaseRef: result.usedBaseRef } : {}),
+          })
         } catch (e) {
           return this.sendWorktreeError(ws, msg.id, e)
         }
@@ -119,22 +154,36 @@ export class WorktreeMessageHandler {
   }
 
   /**
-   * 统一 worktree 错误回复。
+   * 统一 worktree 错误回复（RT-8#7 白名单映射）。
    *
    * WorktreeService 的错误是 `Object.assign(new Error(msg), { code, detail })` 扁平模式，
-   * 没有 class 可供 sendHandlerError 的 instanceof 匹配。这里手动提取 code：
-   * - 有 code（NOT_BARE_REPO / NOT_GIT_REPO / WORKTREE_EXISTS / SETUP_FAILED / GIT_FAILED）→ 透传作 error.code
-   * - 无 code → 归为 'worktree_failed'
+   * 没有 class 可供 sendHandlerError 的 instanceof 匹配。code 分三类：
+   * - 六业务码（WORKTREE_BUSINESS_CODES）→ 原样透传（renderer switch 可分流）；
+   * - git 层 code（git_unavailable/timeout，GitExecutorError 逃逸）→ 归 GIT_FAILED，
+   *   原始 code 进 details.originalCode；
+   * - 其余未知 → 'worktree_failed'，原始 code（若有）进 details.code。
+   * 未映射 code 绝不直接 `as WorktreeEnvelopeCode` 逃出 union。
    *
    * detail 透传到 details 字段（前端按 code 分流：WORKTREE_EXISTS 走 exists 态，其余走 error 态）。
    */
   private sendWorktreeError(ws: WsType, id: string | undefined, e: unknown): void {
     const err = e as CodedError & Error
-    const code: WorktreeEnvelopeCode = (err && typeof err.code === 'string')
-      ? (err.code as WorktreeEnvelopeCode)
-      : 'worktree_failed'
+    const rawCode = (err && typeof err.code === 'string') ? err.code : undefined
     const message = (err && err.message) ? err.message : 'worktree 操作失败'
-    const details = (err && err.detail !== undefined) ? { detail: err.detail } : undefined
+    let code: WorktreeEnvelopeCode
+    let details: Record<string, unknown> | undefined
+    if (rawCode !== undefined && WORKTREE_BUSINESS_CODES.has(rawCode)) {
+      code = rawCode as WorktreeErrorCode
+    } else if (rawCode !== undefined && rawCode in GIT_ERROR_CODE_MAP) {
+      code = GIT_ERROR_CODE_MAP[rawCode] ?? 'worktree_failed'
+      details = { originalCode: rawCode }
+    } else {
+      code = 'worktree_failed'
+      if (rawCode !== undefined) details = { code: rawCode }
+    }
+    if (err && err.detail !== undefined) {
+      details = { ...(details ?? {}), detail: err.detail }
+    }
     this.ctx.sendError(ws, code, message, id, details)
   }
 }

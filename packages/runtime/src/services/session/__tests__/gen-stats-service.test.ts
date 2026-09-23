@@ -4,11 +4,13 @@
  * 覆盖（u3 验收①）：
  * - recordSample：bogus guard 丢弃（output>50 && duration<100 → 速度样本不落盘、命中率照常）、
  *   durationMs=null（无配对 turn-start）速度跳过、promptTotal≤0 不采命中率、
- *   映射写 1、扩展广播（同模型全部已知 session 逐 sid 发帧、payload 形状）；
+ *   映射写 1 + per-session current 槽、扩展广播（同模型全部已知 session 逐 sid 发帧，
+ *   聚合共享 / current 各自独立）；
  * - 映射三写一清：写 1（recordSample）/ 写 2（onModelSwitched 重登记+推帧）/ 写 3
- *   （getSnapshotForSession get_state 成功回填）/ 清（registerSessionCleanup + 销毁回调）；
- * - snapshot：model 恒回填（MF8，含无记录全 null 分支）/ modelKey=null 缺省 / 聚合窗口
- *   （day/d7/d30 滚动窗口、current=文件末条）；
+ *   （getSnapshotForSession get_state 成功回填）/ 清（registerSessionCleanup + 销毁回调，
+ *   映射与 per-session current 槽同清）；
+ * - frameFor：current=本会话样本（会话隔离 + 无回落 + 模型切换来回 + 迟到旧模型样本）/
+ *   聚合=模型全局（model 恒回填 MF8、无记录全 null、modelKey=null 缺省、day/d7/d30 滚动窗口）；
  * - getSnapshotForSession 降级链四分支：get_state 成功 → 内存映射 → replicated states
  *   缓存值 → 全 null；
  * - interpreter 接线（LLM 窗口口径 genstats-speed-llm-window D1/D3）：turn-start →
@@ -18,7 +20,7 @@
  * 数据目录红线（TEST-STRATEGY / fs-guard）：全部写删目标 = mkdtempSync(
  * join(tmpdir(), 'taiji-gen-stats-')) + TAIJI_AGENT_DATA_DIR env 注入，零共享推导路径触碰。
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run src/services/session/__tests__/gen-stats-service.test.ts
+ * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/gen-stats-service.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -178,7 +180,7 @@ describe('GenStatsService.recordSample（写 1 + bogus guard + 落盘）', () =>
 })
 
 describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
-  it('扩展广播：同模型多 session，采样后逐 sid 各发一帧（payload.sessionId 各自回填、帧体同值）', () => {
+  it('扩展广播：同模型多 session，采样后逐 sid 各发一帧（聚合共享、current 各取本会话槽）', () => {
     const { service, published } = makeOfflineService()
     service.recordSample('sA', { ...NORMAL_SAMPLE })
     expect(published).toHaveLength(1)
@@ -190,13 +192,60 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
     expect(published).toHaveLength(4) // sA 首采样 1 帧 + sB 切模型快照 1 帧 + sA 二次采样广播 2 帧
     const lastTwo = published.slice(-2)
     expect(lastTwo.map((p) => p.sid).sort()).toEqual(['sA', 'sB'])
+    const bySid = new Map(lastTwo.map((p) => [p.sid, p.msg.payload as GenStatsFrame]))
     for (const p of lastTwo) {
       expect(p.msg.type).toBe('session.stats_update')
       const payload = p.msg.payload as GenStatsFrame
       expect(payload.sessionId).toBe(p.sid)
-      expect(payload.speed.current).toBe(50) // 100 tokens / 2s = 50 t/s
       expect(payload.model).toBe('prov/mdl')
+      expect(payload.speed.day).toBe(50) // 聚合共享：(100+100)/(2000+2000)×1000
+      expect(payload.cacheRatio.day).toBe(33)
     }
+    // current 会话隔离：sA 取本会话样本；sB 无本会话样本 → null（无回落，读不到 sA 的值）
+    expect(bySid.get('sA')!.speed.current).toBe(50)
+    expect(bySid.get('sB')!.speed.current).toBeNull()
+    expect(bySid.get('sB')!.cacheRatio.current).toBeNull()
+  })
+
+  it('会话隔离：他 session 采样不覆盖本会话 current，聚合仍共享更新', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('sA', { ...NORMAL_SAMPLE })
+    service.onModelSwitched('sB', 'prov/mdl')
+    service.recordSample('sB', { ...NORMAL_SAMPLE, outputTokens: 400, durationMs: 4000 })
+
+    const frames = published.map((p) => p.msg.payload as GenStatsFrame)
+    const lastForA = [...frames].reverse().find((f) => f.sessionId === 'sA')!
+    const lastForB = [...frames].reverse().find((f) => f.sessionId === 'sB')!
+    expect(lastForA.speed.current).toBe(50) // sA 自己的样本未被 sB 覆盖
+    expect(lastForB.speed.current).toBe(100) // sB 自己的样本
+    // 聚合共享：sB 采样后两 session 的 day 同步更新（(100+400)/(2000+4000)×1000 = 83）
+    expect(lastForA.speed.day).toBe(83)
+    expect(lastForB.speed.day).toBe(83)
+  })
+
+  it('模型切换来回：切到无本会话样本模型 current=null；切回恢复本会话旧样本', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('s1', { ...NORMAL_SAMPLE })
+    service.onModelSwitched('s1', 'prov/mdl2')
+
+    const switched = published[1]!.msg.payload as GenStatsFrame
+    expect(switched.model).toBe('prov/mdl2')
+    expect(switched.speed.current).toBeNull()
+
+    service.onModelSwitched('s1', 'prov/mdl')
+    const back = published[2]!.msg.payload as GenStatsFrame
+    expect(back.speed.current).toBe(50)
+    expect(back.cacheRatio.current).toBe(33)
+  })
+
+  it('迟到旧模型样本：只进该 sid 的旧模型槽，不污染新模型 current', () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', { ...NORMAL_SAMPLE })
+    service.onModelSwitched('s1', 'prov/mdl2')
+    service.recordSample('s1', { ...NORMAL_SAMPLE }) // turn 中切模型后迟到的旧模型 usage
+
+    expect(service.frameFor('s1', 'prov/mdl2').speed.current).toBeNull()
+    expect(service.frameFor('s1', 'prov/mdl').speed.current).toBe(50)
   })
 
   it('写 2 onModelSwitched：重登记（旧模型清出）+ 推新模型快照帧（无记录 → 全 null + model 恒回填 MF8）', () => {
@@ -257,29 +306,48 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
 
     service.recordSample('s1', { ...NORMAL_SAMPLE })
     expect(service.sessionsOfModel('prov/mdl')).toEqual(['s1'])
+    expect(service.frameFor('s1', 'prov/mdl').speed.current).toBe(50)
     handler({ id: 's1' })
     expect(service.sessionsOfModel('prov/mdl')).toEqual([])
+    // per-session current 槽同清（无界增长封口；残留会让已删 session 重进时显脏值）
+    expect(service.frameFor('s1', 'prov/mdl').speed.current).toBeNull()
   })
 })
 
-describe('GenStatsService.snapshot（模型视角 + MF8 model 恒回填 + 滚动窗口）', () => {
-  it('有记录：current=文件末条、day/d7/d30=窗口加权聚合、model 恒回填', () => {
+describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合模型全局 + MF8 model 恒回填）', () => {
+  it('本会话样本驱动 current；day/d7/d30=窗口加权聚合；model 恒回填', () => {
     const { service } = makeOfflineService()
     service.recordSample('s1', { ...NORMAL_SAMPLE })
     service.recordSample('s1', { ...NORMAL_SAMPLE, outputTokens: 300, durationMs: 3000 })
 
-    const snap = service.snapshot('prov/mdl')
+    const snap = service.frameFor('s1', 'prov/mdl')
     expect(snap.model).toBe('prov/mdl')
-    // current = 末条 300/3s = 100 t/s；day = (100+300)/(2000+3000)×1000 = 80 t/s
+    // current = 本会话末条 300/3s = 100 t/s；day = (100+300)/(2000+3000)×1000 = 80 t/s
     expect(snap.speed).toEqual({ current: 100, day: 80, d7: 80, d30: 80 })
-    // 命中率：末条 300/900 = 33%；day 加权同值（两样本相同）
+    // 命中率：本会话末条 300/900 = 33%；day 加权同值（两样本相同）
     expect(snap.cacheRatio.current).toBe(33)
+    expect(snap.cacheRatio.day).toBe(33)
+    // 他会话视角：聚合同值、current 不共享（会话隔离）
+    const other = service.frameFor('s-other', 'prov/mdl')
+    expect(other.speed).toEqual({ current: null, day: 80, d7: 80, d30: 80 })
+  })
+
+  it('无回落钉：磁盘有该模型样本但本会话无槽（重启 / 他会话存量）→ current null，聚合照常', () => {
+    const { service } = makeOfflineService()
+    // 直写文件模拟「聚合存量」（重启后 runtime 内存槽清零，或样本来自其他会话）
+    writeDayRecords(speedFilePath('prov', 'mdl'), { [localDayKey()]: [[100, 2000]] })
+    writeDayRecords(cacheRatioFilePath('prov', 'mdl'), { [localDayKey()]: [[300, 900]] })
+
+    const snap = service.frameFor('s-fresh', 'prov/mdl')
+    expect(snap.speed.current).toBeNull()
+    expect(snap.cacheRatio.current).toBeNull()
+    expect(snap.speed.day).toBe(50)
     expect(snap.cacheRatio.day).toBe(33)
   })
 
   it('无记录模型：全 null 帧 + model 恒回填（MF8，场景 4⑥「无记录则—」分支可达）', () => {
     const { service } = makeOfflineService()
-    const snap = service.snapshot('other/model-x')
+    const snap = service.frameFor('s1', 'other/model-x')
     expect(snap.model).toBe('other/model-x')
     expect(snap.speed).toEqual({ current: null, day: null, d7: null, d30: null })
     expect(snap.cacheRatio).toEqual({ current: null, day: null })
@@ -287,7 +355,7 @@ describe('GenStatsService.snapshot（模型视角 + MF8 model 恒回填 + 滚动
 
   it('modelKey=null（降级链④走尽）：全 null 且 model 缺省', () => {
     const { service } = makeOfflineService()
-    const snap = service.snapshot(null)
+    const snap = service.frameFor('s1', null)
     expect(snap.model).toBeUndefined()
     expect(snap.speed).toEqual({ current: null, day: null, d7: null, d30: null })
     expect(snap.cacheRatio).toEqual({ current: null, day: null })
@@ -297,31 +365,174 @@ describe('GenStatsService.snapshot（模型视角 + MF8 model 恒回填 + 滚动
     const { service } = makeOfflineService()
     const now = new Date()
     const daysAgo = (n: number): string => localDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n))
-    // 今日 100/2s + 8 天前 300/3s：d7 不含 8 天前样本，d30 含。
-    // 键序按时间序（生产端日键逐日追加，插入序=时间序，末条=全局最近样本）
+    // 今日 100/2s + 8 天前 300/3s：d7 不含 8 天前样本，d30 含
     writeDayRecords(speedFilePath('prov', 'mdl'), {
       [daysAgo(8)]: [[300, 3000]],
       [daysAgo(0)]: [[100, 2000]],
     })
 
-    const snap = service.snapshot('prov/mdl')
-    expect(snap.speed.current).toBe(50) // 末条 = 今日样本（100/2s）
+    const snap = service.frameFor('s1', 'prov/mdl')
+    expect(snap.speed.current).toBeNull() // 直写文件无本会话槽 → 无回落
     expect(snap.speed.day).toBe(50)
     expect(snap.speed.d7).toBe(50)
     expect(snap.speed.d30).toBe(80) // (100+300)/(2000+3000)×1000
   })
 })
 
+// ── 缓存命中率归因降噪（2026-09-19 D-A）────────────────────────────────────────────────
+// 展示 0% 的样本在已知成因下附 currentMiss，UI 不再渲染裸 0%（shared GenStatsCacheMiss）。
+// 时间控制用 Date.now spy（不用 fake timers：localDayKey 走 new Date()，日键保持真实值）；
+// 测试状态文件级隔离，afterEach 统一 restoreAllMocks。
+
+/** 展示 0%（read=0，promptTotal=1000） */
+const ZERO_SAMPLE = { ...NORMAL_SAMPLE, input: 1000, cacheRead: 0, cacheWrite: 0 }
+/** 展示 90%（read=900，promptTotal=1000） */
+const HIT_SAMPLE_90 = { ...NORMAL_SAMPLE, input: 100, cacheRead: 900, cacheWrite: 0 }
+
+describe('GenStatsService 归因降噪（cacheRatio.currentMiss）', () => {
+  it('cold-start：本会话首条样本展示 0% → 归因（帧内下发，广播帧同源出口同带）', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBe(0)
+    expect(frame.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+    const broadcast = published.at(-1)!.msg.payload as GenStatsFrame
+    expect(broadcast.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('命中样本不带归因；随后的新 0% 样本会整槽替换旧注解', () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE) // 首条 0% → cold-start
+    service.recordSample('s1', HIT_SAMPLE_90)
+    // 命中样本：无归因（currentMiss 与「刺眼的 0」严格同域）
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+
+    // 非空闲、无 compaction 的 0%：未知成因 → 保留裸 0%（不降噪，清掉旧 cold-start 注解）
+    service.recordSample('s1', ZERO_SAMPLE)
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBe(0)
+    expect(frame.cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('idle-expiry：距上一次请求空闲 > 5min 的首个 0% → 归因 + 实际 idleMs', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 6 * 60_000) // 6 分钟
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 6 * 60_000,
+    })
+  })
+
+  it('idle 边界：空闲恰好 5min → 不归因；超 TTL 1ms → 归因（严格大于，基准 = 上一次请求）', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 5 * 60_000) // 恰好 TTL：不归因（严格大于）
+    service.recordSample('s1', ZERO_SAMPLE)
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+
+    now.mockReturnValue(1_000_000 + 2 * 5 * 60_000 + 1) // 距上一次请求 TTL+1ms → 归因
+    service.recordSample('s1', ZERO_SAMPLE)
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 5 * 60_000 + 1,
+    })
+  })
+
+  it('context-rewrite：markContextRewritten 后首个 0% → 归因；优先级高于空闲超时', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+    service.markContextRewritten('s1')
+
+    now.mockReturnValue(2_600_000) // 同时空闲超 TTL（1h）——前缀重写是结构性成因，优先
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toEqual({ reason: 'context-rewrite' })
+  })
+
+  it('context-rewrite 一次性：标记被紧随其后的样本消费（命中即消费），下一条 0% 不再归因', () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90)
+    service.markContextRewritten('s1')
+    service.recordSample('s1', HIT_SAMPLE_90) // 标记被本条消费（非 0%，无注解可附）
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    expect(service.frameFor('s1', 'prov/mdl').cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('provider 未上报 cache 字段（两字段全缺省）→ 不落盘不变槽（显示保留上一条，非 0%）', () => {
+    const { service, published } = makeOfflineService()
+    service.recordSample('s1', HIT_SAMPLE_90) // 首条：速度 + 命中率双落盘 + 广播
+    service.recordSample('s1', { ...HIT_SAMPLE_90, input: 5000, cacheRead: null, cacheWrite: null })
+
+    // 命中率文件不再写（无计量 ≠ 0% miss）；本条仍有合法速度样本 → 速度落盘 + 广播一帧
+    expect(readJson(cacheRatioFilePath('prov', 'mdl'))).toEqual({ [localDayKey()]: [[900, 1000]] })
+    const broadcast = published.at(-1)!.msg.payload as GenStatsFrame
+    expect(broadcast.cacheRatio.current).toBe(90) // 槽未被 null-null 样本改写
+    expect(broadcast.cacheRatio.currentMiss).toBeUndefined()
+  })
+
+  it('会话隔离：sA 的 idle 归因不污染 sB（sB 首条仍为 cold-start，idle 基准各自独立）', () => {
+    const now = vi.spyOn(Date, 'now')
+    now.mockReturnValue(1_000_000)
+    const { service } = makeOfflineService()
+    service.recordSample('sA', HIT_SAMPLE_90)
+
+    now.mockReturnValue(1_000_000 + 10 * 60_000) // 10 分钟后：sA 的 miss 返归因，sB 首条回 cold-start
+    service.recordSample('sA', ZERO_SAMPLE)
+    service.recordSample('sB', ZERO_SAMPLE)
+
+    expect(service.frameFor('sA', 'prov/mdl').cacheRatio.currentMiss).toEqual({
+      reason: 'idle-expiry',
+      idleMs: 10 * 60_000,
+    })
+    expect(service.frameFor('sB', 'prov/mdl').cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('恢复腿保留归因：getSnapshotForSession（RPC 帧）与 live 帧同带 currentMiss', async () => {
+    const { service } = makeOfflineService()
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    const frame = await service.getSnapshotForSession('s1')
+    expect(frame.model).toBe('prov/mdl')
+    expect(frame.cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
+  })
+
+  it('销毁清理：session 销毁后归因状态同清（frameFor 全空，无残留注解）', () => {
+    const { service, setOnSessionDestroyed } = makeOfflineService()
+    service.registerSessionCleanup()
+    const handler = setOnSessionDestroyed.mock.calls[0]![0] as (s: { id: string }) => void
+    service.recordSample('s1', ZERO_SAMPLE)
+
+    handler({ id: 's1' })
+    const frame = service.frameFor('s1', 'prov/mdl')
+    expect(frame.cacheRatio.current).toBeNull()
+    expect(frame.cacheRatio.currentMiss).toBeUndefined()
+  })
+})
+
 describe('GenStatsService.getSnapshotForSession（恢复腿降级链，D4）', () => {
-  it('① get_state 成功：解析 provider/id 复合 key + 写 3 回填 + 快照按该模型', async () => {
+  it('① get_state 成功：解析 provider/id 复合 key + 写 3 回填 + 帧 current=本会话样本', async () => {
     const { service, getClient } = makeService(async () => ({ model: { id: 'mdl', provider: 'prov' } }))
-    service.recordSample('sOther', { ...NORMAL_SAMPLE }) // prov/mdl 已有样本
+    service.recordSample('sOther', { ...NORMAL_SAMPLE }) // prov/mdl 已有样本（sOther 的）
 
     const frame = await service.getSnapshotForSession('sLive')
     expect(getClient).toHaveBeenCalledWith('sLive')
     expect(frame.sessionId).toBe('sLive')
     expect(frame.model).toBe('prov/mdl')
-    expect(frame.speed.current).toBe(50)
+    expect(frame.speed.current).toBeNull() // sLive 无本会话样本 → 无回落（sOther 的值不共享）
+    expect(frame.speed.day).toBe(50) // 聚合全局可见
     // 写 3：解析成功即登记，live 帧此后可达
     expect(service.sessionsOfModel('prov/mdl')).toContain('sLive')
   })
@@ -450,6 +661,26 @@ describe('EventInterpreter gen-stats 接线（D1/D2）', () => {
     })
     interp.interpret([TURN_USAGE_EVENT])
     expect(onContextUpdate).toHaveBeenCalledWith('s1', { inputTokens: 30, totalTokens: 30 })
+  })
+
+  it('compaction 成功 → onCompactionContextRewritten（归因降噪接线：上下文重写标记）', () => {
+    const onCompactionContextRewritten = vi.fn()
+    const interp = new EventInterpreter('s1', { send: () => {}, onCompactionContextRewritten })
+    interp.interpret([{ kind: 'compaction-end', reason: 'manual', aborted: false, result: { summary: 'S' } }])
+
+    expect(onCompactionContextRewritten).toHaveBeenCalledTimes(1)
+    expect(onCompactionContextRewritten).toHaveBeenCalledWith('s1')
+  })
+
+  it('compaction aborted（无 result）/ failed（errorMessage 真值）→ 不标记（上下文未变，不得误标）', () => {
+    const onCompactionContextRewritten = vi.fn()
+    const interp = new EventInterpreter('s1', { send: () => {}, onCompactionContextRewritten })
+    interp.interpret([
+      { kind: 'compaction-end', reason: 'threshold', aborted: true },
+      { kind: 'compaction-end', reason: 'manual', aborted: false, errorMessage: 'summarize failed' },
+    ])
+
+    expect(onCompactionContextRewritten).not.toHaveBeenCalled()
   })
 })
 

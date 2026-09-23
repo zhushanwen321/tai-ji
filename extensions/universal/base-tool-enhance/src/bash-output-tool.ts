@@ -32,6 +32,7 @@ const JSON_INDENT = 2;
 
 const BASH_OUTPUT_DESCRIPTION = [
 	"Fetch output and status of a background bash task started with bash {background:true}.",
+	"On-demand checks only: completion is auto-notified (steer wakes your next turn), so DO NOT bash sleep or call this tool in a wait loop.",
 	"Provide task_id to get task detail: state (running|killing|exited|orphaned), exitCode, reason, duration and tail output (last 2000 lines / 50KB).",
 	'reason "killed" means the task was terminated by the user from the UI — do not restart the command unless explicitly asked.',
 	'reason "orphaned" means the owner process died before the task finished — the task is no longer supervised.',

@@ -33,6 +33,12 @@ export interface UseTailScrollReturn {
 
 /** 滑入动画默认时长（对齐 --duration-fast；写死数值因 TS 侧无法读 CSS 变量） */
 const DEFAULT_SLIDE_DURATION = 120
+/**
+ * 尾行窗口行数（机制按 2 行窗口设计：settled 单行、sliding 双行；调用方以
+ * `tailLines(content, TAIL_WINDOW_LINES)` 取窗口）。消费方 = Block.vue（tool 尾行）与
+ * useThinkingCollapse（working 态尾行），统一此单源防两份手写常量漂移。
+ */
+export const TAIL_WINDOW_LINES = 2
 /** 倒数第二行下标偏移（尾 2 行窗口的上一行，换行判定用；具名避 no-magic-numbers） */
 const SECOND_LAST_OFFSET = 2
 

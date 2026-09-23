@@ -32,6 +32,16 @@ let rateLimitHintShown = false
 let renderToken = 0
 
 /**
+ * 检查触发源（RD-4#5）：区分用户主动点击（manual）与后台自动检查（auto）。
+ * manual = 设置页「检查更新」按钮 + error 态「重试」按钮；auto = 启动 30s 首查 / 60min 周期 /
+ * visibility 补查 / STALE 自动重查。仅 manual 失败置 error 态显形，auto 失败保持静默。
+ *
+ * 背景：旧签名 checkForUpdate(force=false) 无 source，且 force=true 同时被手动检查与 error 重试
+ * 使用——不能拿 force 当 manual 判据（审查 E 订正）。故显式加 source 参数。
+ */
+type CheckSource = 'manual' | 'auto'
+
+/**
  * 进入 checking 态前的状态守卫：记录本次检测前的稳定态（prevState）并按需置 checking。
  *
  * 防覆盖守卫：若已从 pending 恢复 available 态，联网检测不进入 checking 态
@@ -109,16 +119,26 @@ function resetToIdleAfterMiss(): void {
 }
 
 /**
- * 检测失败处理：不算升级流程错误（不打 error 态）。
- * 不设 errorMessage：idle 态 UpdateButton 隐藏，设了也看不到，且会残留到下次。
- * 失败信息仅 console.warn 便于诊断。
+ * 检测失败处理（RD-4#5）：区分触发源决定失败是否显形。
+ * - manual（用户点击「检查更新」/「重试」）：置 state='error' + errorMessage 指向恢复动作
+ *   （「网络不可达，请检查连接或前往下载页」）——失败与「已是最新版」（idle）必须可区分。
+ * - auto（周期/补查/STALE 重查）：保持既有静默 + 防覆盖守卫回退，不打扰用户。
+ * 两者都先做防陈旧丢弃（丢弃陈旧的失败结果）并 console.warn 便于诊断。
  */
-function handleCheckFailure(e: unknown, myToken: number): void {
+function handleCheckFailure(e: unknown, myToken: number, source: CheckSource): void {
   // 防陈旧：丢弃陈旧的失败结果
   if (myToken !== renderToken) return
-  // 防覆盖守卫：pendingRestored 时不回退 idle（见 resetToIdleAfterMiss 理由）
-  resetToIdleAfterMiss()
   console.warn('[useAppUpdate] checkForUpdate failed:', e)
+  if (source === 'manual') {
+    // 手动检查失败显形：errorMessage 指向恢复动作（检查连接 / 前往下载页）。
+    // errorSuggestion 留空——UpdateCheckCard 内已有常驻手动升级通道引导，不重复堆叠。
+    updateState.state = 'error'
+    updateState.errorMessage = t('settings.system.checkUpdateFailed')
+    updateState.errorSuggestion = ''
+  } else {
+    // 自动检查保持静默：防覆盖守卫 pendingRestored 时不回退 idle（见 resetToIdleAfterMiss 理由）
+    resetToIdleAfterMiss()
+  }
 }
 
 /**
@@ -126,8 +146,9 @@ function handleCheckFailure(e: unknown, myToken: number): void {
  * 无新版/失败 → state='idle'。
  *
  * @param force true 强制刷新缓存（默认走 1h 缓存）
+ * @param source 触发源（RD-4#5）：'manual' 失败置 error 态显形；'auto'（默认）失败静默回退。
  */
-export async function checkForUpdate(force = false): Promise<void> {
+export async function checkForUpdate(force = false, source: CheckSource = 'auto'): Promise<void> {
   const myToken = ++renderToken
   const prevState = beginCheckTransition()
   try {
@@ -146,7 +167,7 @@ export async function checkForUpdate(force = false): Promise<void> {
       resetToIdleAfterMiss()
     }
   } catch (e) {
-    handleCheckFailure(e, myToken)
+    handleCheckFailure(e, myToken, source)
   }
 }
 

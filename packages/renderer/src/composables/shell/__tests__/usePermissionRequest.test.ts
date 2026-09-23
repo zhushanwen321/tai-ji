@@ -87,7 +87,7 @@ describe('usePermissionRequest permissionRequest 闭环', () => {
     expect(approvePermissions).toHaveBeenCalledWith('p1', ['shell'])
   })
 
-  it('TC3: approve 失败（RPC reject）→ pending=false（错误路径重置，防状态卡死）', async () => {
+  it('TC3: approve 失败（RPC reject）→ 保留弹窗 + error 态，pending 保持 true（RD-3#6 可重试）', async () => {
     const { app, provided } = makeApp()
     initPermissionRequest(app as never, bus)
     const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as {
@@ -98,12 +98,20 @@ describe('usePermissionRequest permissionRequest 闭环', () => {
     const state = usePermissionRequest()
     expect(state.pending).toBe(true)
 
+    // RD-3#6：approve 失败不再关窗（此前 pending=false 与成功同形）——保留弹窗 + error 态
     approvePermissions.mockRejectedValue(new Error('rpc boom'))
     transport.approve('p1', ['shell'])
+    await vi.waitFor(() => expect(state.error).toBe('rpc boom'))
+    expect(state.pending).toBe(true)
+
+    // 可重试：再次点击批准，成功 → 关窗 + 清 error
+    approvePermissions.mockResolvedValue(undefined)
+    transport.approve('p1', ['shell'])
     await vi.waitFor(() => expect(state.pending).toBe(false))
+    expect(state.error).toBeNull()
   })
 
-  it('TC4: revoke 成功 + 失败 → pending=false', async () => {
+  it('TC4: revoke 成功关窗 + 清 error；失败保留弹窗 + error 态（RD-3#6）', async () => {
     const { app, provided } = makeApp()
     initPermissionRequest(app as never, bus)
     const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as {
@@ -113,18 +121,21 @@ describe('usePermissionRequest permissionRequest 闭环', () => {
     emitPermissionRequest(bus)
     const state = usePermissionRequest()
 
-    // 成功路径
+    // 成功路径 → 关窗 + error 清空
     revokePermissions.mockResolvedValue(undefined)
     transport.revoke('p1')
     await vi.waitFor(() => expect(state.pending).toBe(false))
+    expect(state.error).toBeNull()
     expect(revokePermissions).toHaveBeenCalledWith('p1')
 
-    // 失败路径（新请求触发 pending=true 后 revoke reject）
+    // 失败路径（新请求触发 pending=true + 清 error 后 revoke reject）→ 保留弹窗 + error 态
     emitPermissionRequest(bus)
     expect(state.pending).toBe(true)
+    expect(state.error).toBeNull()
     revokePermissions.mockRejectedValue(new Error('rpc boom'))
     transport.revoke('p1')
-    await vi.waitFor(() => expect(state.pending).toBe(false))
+    await vi.waitFor(() => expect(state.error).toBe('rpc boom'))
+    expect(state.pending).toBe(true)
   })
 
   it('TC5: 重复初始化幂等（HMR 防 listener 翻倍）：bus handler 数恒为 1', () => {

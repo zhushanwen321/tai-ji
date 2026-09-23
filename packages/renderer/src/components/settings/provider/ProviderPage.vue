@@ -11,14 +11,25 @@
         <h1 class="text-[20px] font-semibold tracking-[-0.01em] text-neutral-fg">{{ t('settings.menu.provider') }}</h1>
         <p class="mt-2 text-sm text-neutral-mid">{{ t('settings.menu.providerDesc') }}</p>
       </div>
-      <div class="flex shrink-0 gap-2">
-        <ProviderImportMenu :disabled="importState !== 'idle'" @select="onImportSelect" />
-        <!-- F2：入口聚合为「+ 添加供应商 ▾」菜单（内置模板（推荐）/ 自定义），自定义走 createAndExpand 原流程 -->
-        <ProviderTemplatePicker
-          :providers="builtinProviders"
-          @select="onTemplateSelect"
-          @custom="createAndExpand"
-        />
+      <div class="flex shrink-0 flex-col items-end gap-1.5">
+        <div class="flex shrink-0 gap-2">
+          <ProviderImportMenu :disabled="importState !== 'idle'" @select="onImportSelect" />
+          <!-- F2：入口聚合为「+ 添加供应商 ▾」菜单（内置模板（推荐）/ 自定义），自定义走 createAndExpand 原流程 -->
+          <ProviderTemplatePicker
+            :providers="builtinProviders"
+            @select="onTemplateSelect"
+            @custom="createAndExpand"
+          />
+        </div>
+        <!-- RD-4#10：远程模型目录刷新失败/部分失败 → 「目录可能过期」（离线时列表陈旧无痕迹） -->
+        <span
+          v-if="catalogsStale"
+          data-testid="provider-catalogs-stale"
+          class="flex items-center gap-1 text-[11px] text-warn"
+        >
+          <AlertTriangle class="size-3.5 shrink-0" />
+          {{ t('settings.provider.catalogsStale') }}
+        </span>
       </div>
     </header>
 
@@ -234,7 +245,8 @@
 <script setup lang="ts">
 import { computed, ref, provide, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Settings, Trash2 } from '@lucide/vue'
+import { AlertCircle, AlertTriangle, Settings, Trash2 } from '@lucide/vue'
+import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -290,6 +302,9 @@ const builtinProviders = ref<BuiltinProviderTemplate[]>([])
 const selectedTemplate = ref<BuiltinProviderTemplate | null>(null)
 const showQuickSetup = ref(false)
 
+// RD-4#10：远程模型目录陈旧标记（refreshProviderCatalogs failed[] / reject → 「目录可能过期」）
+const { catalogsStale, refreshCatalogs } = useProviderCatalogsStale()
+
 onMounted(async () => {
   try {
     builtinProviders.value = await config.listBuiltinProviders()
@@ -298,8 +313,9 @@ onMounted(async () => {
     toast.error(t('settings.provider.builtinTemplate.fetchFailed'))
   }
   // 远程模型目录按需刷新：不阻塞页面（先展示缓存/快照），结果经 config.providers
-  // 广播推回 store 自动更新。失败静默——离线/超时时列表保持原样。
-  config.refreshProviderCatalogs().catch(() => {})
+  // 广播推回 store 自动更新。RD-4#10 的陈旧判据（failed[] / transport reject）见
+  // composables/features/settings/useProviderCatalogsStale.ts。
+  await refreshCatalogs()
 })
 
 /** 选中内置模板 → 打开 QuickSetup（先刷新 OAuth presence + env 检测） */

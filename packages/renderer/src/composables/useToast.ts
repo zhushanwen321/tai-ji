@@ -7,7 +7,7 @@
  *   info('goal blocked', { sessionLabel: '修通知 · taiji' })
  *
  * ToastContainer 组件负责渲染，挂载点在 main-panel 内两分支：PanelContainer 的
- * main-area（chat 主区，右上角，不遮 drawer/composer）与 MainPanel（overview/settings
+ * main-area（chat 主区，右上角，不遮 drawer/composer）与 MainPanel（settings
  * view 兜底）。
  *
  * 在列上限（D7 S3-W4 限流与防毒化）：在列 toast 达到 UI_TOAST_LIMITS.MAX_IN_FLIGHT
@@ -140,5 +140,13 @@ export function useToast() {
     scheduleRemove(id, state.remainingMs)
   }
 
-  return { toasts, error, info, warning, remove, pause, resume, droppedCount }
+  /**
+   * RD-3#7：清零丢弃计数（ToastContainer 溢出摘要「还有 N 条」的关闭动作消费方）。
+   * 让 droppedCount 有 UI 消费出口——不再只 console.warn 无留痕。
+   */
+  function resetDropped(): void {
+    droppedCount.value = 0
+  }
+
+  return { toasts, error, info, warning, remove, pause, resume, droppedCount, resetDropped }
 }

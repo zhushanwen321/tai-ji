@@ -46,7 +46,7 @@ goal/
 ├── index.ts            # 入口 — re-export src/index.ts
 └── src/
     ├── index.ts        # 工厂入口（注册 command/tool/events + goalInit slot，全部委托 adapters）
-    ├── commands.ts     # /goal 命令参数解析（仅识别 --tokens flag）
+    ├── commands.ts     # /goal 命令参数解析（识别 --tokens / --criteria flag）
     ├── constants.ts    # 语义常量
     ├── ports.ts        # Pi 能力抽象（Persistence/Ui/Messaging/Session）
     ├── service.ts      # 协调层 — createGoal / finalizeAndPersist / applyEvent

@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+// [U1 sanitize] DOMPurify 需要 nodeName getter 在 Node.prototype 上（realm 安全缓存 getter
+// 依赖它）；happy-dom 把 nodeName 定义在各元素子类，DOMPurify 3.4.11 在 happy-dom 下把
+// 所有元素判为不允许标签（P1 探针实证）——markdown 管线测试族统一跑 jsdom。
 /**
  * markdown.ts fence 规则覆盖单测（W3，对话流 markdown 渲染增强）。
  *
@@ -393,17 +397,18 @@ describe('renderMarkdownSegments（text/mermaid 拆分）', () => {
   })
 })
 
-describe('table 横向滚动 wrapper', () => {
-  // markdown.ts table_open/close rule 覆盖：超宽表格自身 overflow-x:auto 滚动，不撑宽
-  // .md-render / detail-content（与 .md-codeblock 同策略：离散块自带滚动容器）。
-  it('table 被 .md-table-wrap 包裹（wrapper 紧包 table，默认 thead/tbody 保留）', async () => {
+describe('table 滚动 CSS 化（U1：.md-table-wrap wrapper 已删）', () => {
+  // [U1 行为变化] html:true + 表格滚动容器 CSS 化：table_open/close override 删除，
+  // 裸 <table> 直挂（滚动能力由两宿主 CSS 的 GitHub 全套四条声明提供，设计 §3.5 声明类别）
+  it('table 直出无 wrapper（默认 thead/tbody 保留）', async () => {
     const md = ['| 列1 | 列2 | 列3 |', '| --- | --- | --- |', '| a | b | c |'].join('\n')
     const html = await freshRender(md)
-    // wrapper 开：div.md-table-wrap 紧接 table（含空白容忍）
-    expect(html).toMatch(/<div class="md-table-wrap">\s*<table>/)
-    // wrapper 闭：table 先关、div 后关
-    expect(html).toMatch(/<\/table>\s*<\/div>/)
-    // 默认 render 链保留（thead/tbody/tr/th/td 未被 wrapper 覆盖破坏）
+    // wrapper 已删：无 .md-table-wrap 产出
+    expect(html).not.toContain('md-table-wrap')
+    // 裸 <table> 直出（DOM 往返后无多余包裹层）
+    expect(html).toMatch(/(^|>)<table>/)
+    expect(html).toMatch(/<\/table>/)
+    // 默认 render 链保留（thead/tbody/tr/th/td 完整）
     expect(html).toContain('<thead>')
     expect(html).toContain('<tbody>')
     expect(html).toContain('<td>')

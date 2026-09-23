@@ -1,7 +1,6 @@
 /**
  * session-start-once-guard.test.ts — u-audit-fix 探针实测（permission 侧）。
  *
- * 排查清单（docs/design/pi-session-start-handler-idempotency-audit.md §2 permission 行）
  * 判定「必须接入」：migrateLegacyConfig 写 agentDir 全局配置文件，属跨 session 副作用，
  * 已由 oncePerProcess 守卫收编原内联 once flag。本文件按清单探针验证点双派发实测：
  *   a) 双派发（同一 factory 闭包直接调 handler 两次）下 spy migrateLegacyConfig 调用 = 1；
@@ -10,7 +9,7 @@
  *   c) migrated warn 仅一条：构造性蕴含于 a——warn 在 migrateLegacyConfig 调用点内部
  *      （llm-shared migrate.ts "migrated" 分支），调用 = 1 ⟹ warn ≤ 1，不另设断言。
  * 反向断言（豁免项防误伤）：footer 注册为纯内存初始化（registry.register 同 id 覆盖），
- * 清单明令不包装——双派发仍每次执行（pending push ×2）。
+ * 不在包装范围——双派发仍每次执行（pending push ×2）。
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

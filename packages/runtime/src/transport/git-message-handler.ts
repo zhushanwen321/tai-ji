@@ -1,5 +1,5 @@
 /**
- * Git message handler —— 路由 git.* 消息（issues.md #1 / code-architecture §3.6/§4.1/§4.2）。
+ * Git message handler —— 路由 git.* 消息。
  *
  * 结构对称 extension-message-handler：handles 清单 + switch 内编译期类型收窄 + 领域逻辑。
  *

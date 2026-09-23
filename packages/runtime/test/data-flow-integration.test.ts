@@ -136,18 +136,35 @@ const waitForWs = () => new Promise<void>(r => setTimeout(r, 50))
 /** S1-W1：真实 WS 测试统一 token（ConnectionManager auth 握手，见 ws-listen-hardening.test.ts） */
 const TEST_WS_TOKEN = 'test-ws-token-data-flow'
 
-function connectClient(port: number): Promise<WebSocket> {
+function connectClient(port: number, opts?: { awaitExtensionsPush?: boolean }): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://localhost:${port}`)
+    // 127.0.0.1 显式直连（server 只绑 127.0.0.1）：禁写 ws://localhost——happy-eyeballs 对
+    // localhost 竞速 ::1，满载下与 [::1]:<port> 的 v6only 外部进程撞号时错连被 RST。
+    // 完整根因与实测复现见 server-extension.test.ts connectClient 注释。
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
     ws.on('open', () => {
       // S1-W1：首条消息 auth，等 auth.result ok 后连接才可用
       ws.send(JSON.stringify({ type: 'auth', payload: { token: TEST_WS_TOKEN } }))
     })
+    let authed = false
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(String(data))
         if (msg.type === 'auth.result' && msg.payload?.ok === true) {
-          setTimeout(() => resolve(ws), 100)
+          // 无 extension service 时 server 跳过 config.extensions 段（sendInitialState D7 可选段），
+          // 无推送即无「推送被误认成响应」竞态，auth.result 即 resolve（等不存在的推送会挂死）。
+          if (!opts?.awaitExtensionsPush) {
+            resolve(ws)
+            return
+          }
+          authed = true
+        }
+        // 有 extension service 时 initial state 的 config.extensions 段是 async fire-and-forget
+        //（scanExtensions().then(send)），固定 100ms 硬等压不住满载延迟；推送若晚于本用例
+        // waitForMessage('config.extensions') 注册会被误认成显式请求的响应（id 断言失败）。
+        // 等推送送达再 resolve（server 发送序保证 auth.result 先于推送段）——同 server-extension.test.ts。
+        if (authed && msg.type === 'config.extensions') {
+          resolve(ws)
         }
       } catch { /* skip */ }
     })
@@ -605,7 +622,7 @@ describe('DF-4: Extension 列表管理', () => {
       return s
     })
     server = started.instance
-    ws = await connectClient(started.port)
+    ws = await connectClient(started.port, { awaitExtensionsPush: true })
   })
 
   afterEach(async () => {
@@ -713,7 +730,7 @@ describe('DF-5: Extension 启用/禁用', () => {
       return s
     })
     server = started.instance
-    ws = await connectClient(started.port)
+    ws = await connectClient(started.port, { awaitExtensionsPush: true })
   })
 
   afterEach(async () => {

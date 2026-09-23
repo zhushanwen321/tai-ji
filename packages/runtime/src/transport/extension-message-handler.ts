@@ -3,9 +3,8 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType } from '@taiji/shared'
 import type { ISessionService, IExtensionService } from '../interfaces.js'
-import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
 import { ExtensionInstallError } from '../services/extension-service.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -17,19 +16,6 @@ export interface ExtensionHandlerContext extends MessageHandlerContext {
   sessionService: ISessionService
   extensionService: IExtensionService | undefined
   extensionTimeoutMgr: ExtensionTimeoutManager
-  /** push 消息 id 生成器（extension.ui_timeout 消息 id）。 */
-  nextPushId(): string
-  /**
-   * IMessageBus（wave:perf-w08 接入，wave:perf-w09 单通道化）：extension.ui_timeout 的
-   * 主发布通道（broadcast 依赖已随 D1-2 删双写移除）。由 server.setServices 装配。
-   */
-  messageBus?: IMessageBus
-  /**
-   * 全局广播兜底（server.setServices 注入 broker.broadcast 封装）：bus 未装配
-   * （测试构造 / 组合根装配顺序异常）时 extension.ui_timeout 回退此通道——保持
-   * 「消息不丢」兜底哲学，对齐 plugin-service publishViewUpdate 的 broadcastOrBroker 回退。
-   */
-  broadcast(msg: ServerMessage): void
 }
 
 /**
@@ -76,7 +62,19 @@ export class ExtensionMessageHandler {
 
   async handleExtensionMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     const handler = this.routes[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与内部 routes 表漂移（漏登记）时，
+    // 前端 pending Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[extension-handler] no case handler for type "${msg.type}" — handles/routes 表漂移？`)
+      const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+        typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined,
+      )
+    }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
     // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。
@@ -94,25 +92,29 @@ export class ExtensionMessageHandler {
       return
     }
 
-    // P2-6：超时后的迟到响应直接丢弃。runtime 超时已向 pi 发默认响应，
-    // 此处再发会导致 pi 双响应（pi 按 id 匹配第一个响应，第二个会被忽略——
-    // 但 runtime 不应依赖 pi 的容错，在自身层拦截）。
-    if (this.ctx.extensionTimeoutMgr.isTimedOut(requestId)) {
-      this.ctx.extensionTimeoutMgr.clearTimedOut(requestId)
-      this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
-      this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
-      return
-    }
-
     const client = this.ctx.sessionService.getRpcClient(extSid)
     if (!client) {
       this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
       this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
       return this.ctx.sendError(ws, 'handler_error', `No active session for extension response: ${extSid}`, msg.id, { sessionId: extSid })
     }
-    client.sendExtensionUiResponse(requestId, extResult ?? null, method)
+    // M1/RT-1#4：sendRaw 返 false（pi 进程不在/已退出或 stdin 写失败）时该应答已无法
+    // 送达——rpc client 绑定当前进程，pi 重启后是全新 pending 表、旧 requestId 永不可
+    // 投递，runtime 侧没有重投通道，故选「立即终结」而非保留 pending：摘跟踪 + 带码
+    // error envelope 上行（无 msg.id 的 fire-and-forget，renderer 经 route-inbound D6b
+    // onSessionError 兜底进消息流 + toast，用户作答不再石沉大海）。
+    const delivered = client.sendExtensionUiResponse(requestId, extResult ?? null, method)
     this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
     this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+    if (!delivered) {
+      return this.ctx.sendError(
+        ws,
+        'extension_response_send_failed',
+        `Extension response for request ${requestId} was not delivered to pi (process not running or stdin write failed)`,
+        msg.id,
+        { sessionId: extSid, hint: '回复未送达 pi（进程不在或写入失败），该请求已终结；请检查会话状态后重试操作。' },
+      )
+    }
     return
   }
 
@@ -211,7 +213,17 @@ export class ExtensionMessageHandler {
       if (typeof tempDir !== 'string' || !Array.isArray(selected)) {
         return this.ctx.sendError(ws, 'invalid_payload', 'extension.finishInstall requires tempDir (string) and selected (string[])', msg.id)
       }
-      await ext.finishInstall(tempDir, selected)
+      const failures = await ext.finishInstall(tempDir, selected)
+      if (failures.length > 0) {
+        // RT-6#1 逐包隔离失败聚合上报：成功包已落盘（列表随刷新可见），失败清单经
+        // ExtensionInstallError 透传（code/hint），前端 catch 显示——不吞失败回假成功。
+        const names = failures.map((f) => f.dirName).join(', ')
+        throw new ExtensionInstallError(
+          'finish_partial_failed',
+          `Failed to install extension(s): ${names}`,
+          '部分扩展安装失败，已成功的扩展已保留、失败扩展的旧版本不受影响，可重试安装。',
+        )
+      }
       const extensions = await ext.scanExtensions()
       return this.ctx.reply(ws, msg.id, 'config.extensions', { extensions })
     } catch (e) {
@@ -290,44 +302,6 @@ export class ExtensionMessageHandler {
       return undefined
     }
     return this.ctx.extensionService
-  }
-
-  /**
-   * 扩展 UI 请求超时后的响应编排：向 pi 进程发默认 extension_ui_response（confirm→false，
-   * 其余→cancelled），并广播 extension.ui_timeout 通知前端。
-   *
-   * pi 的 extension_ui_response 期望按 method 分的 3 种格式（rpc-types.ts:255-258）：
-   * - {id, value} 用于 select/input/editor
-   * - {id, confirmed} 用于 confirm
-   * - {id, cancelled:true} 用于取消
-   * pi 用鸭子类型字段检测解析（rpc-mode.ts:136-149），发错字段静默返回默认值。
-   *
-   * 超时后标记 requestId 为已超时（extensionTimeoutMgr.markTimedOut），
-   * 防止前端 race window 内迟到的 extension.ui_response 再发一次（双响应）。
-   */
-  handleExtensionTimeout(sessionId: string, requestId: string, method: string): void {
-    this.ctx.extensionTimeoutMgr.markTimedOut(requestId)
-    const client = this.ctx.sessionService.getRpcClient(sessionId)
-    if (client) {
-      client.sendExtensionUiResponse(requestId, method === 'confirm' ? false : null, method)
-    }
-    const timeoutMsg: ServerMessage = {
-      type: 'extension.ui_timeout',
-      id: this.ctx.nextPushId(),
-      payload: { sessionId, requestId },
-    }
-    // wave:perf-w09（02 文档 D1-2）：payload 恒含 sessionId（handleExtensionTimeout 的
-    // sessionId 参数）→ bus.publish 定向发布是主通道（extension.ui_timeout 归 stream 类：
-    // 分配 seq + 入 ring，重连可回放），不再盲广播——盲广播会推给未订阅该 sid 的连接，
-    // 且已订阅 renderer 靠 evalSeqGap（core/coordination/subscription-state.ts）drop
-    // 第二条的兼容负担随之消失。
-    // bus 未装配 → 回退 broker.broadcast 兜底（W09 review 修正：不能静默丢弃，对齐
-    // plugin-service 的「消息不丢」哲学；组合根恒装配 bus，此为防御路径）。
-    if (this.ctx.messageBus) {
-      this.ctx.messageBus.publish(sessionId, timeoutMsg)
-      return
-    }
-    this.ctx.broadcast(timeoutMsg)
   }
 
   /**

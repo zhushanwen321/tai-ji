@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, statSync, openSync, readSync, closeSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
-import { parseJsonl, readTailEntries } from '../../utils/jsonl.js'
+import { parseJsonlWarnOnMalformed, readTailEntries } from '../../utils/jsonl.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）。infra → services 依赖倒挂豁免（同
 // session-lifecycle.ts 的 R3 ports 倒挂惯例）：D5③ 消费方在本文件（infra/pi），共享
@@ -15,10 +15,6 @@ import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { forEachReversedLineChunk } from '../../utils/history-reverse-read.js'
 import { join, dirname, basename } from 'node:path'
 import { getSessionsDir } from './pi-paths.js'
-// model sidecar 家族（单向依赖：本文件经 scanSessionMeta 消费 readModelBinding；该家族
-// 与下方 preset/project/agent 家族共用的 IO 骨架已下沉 './session-binding-sidecar-io.ts'
-// 叶子模块，双方各自单向依赖叶子——原两模块函数级循环引用已消除）。
-import { readModelBinding, type ModelBindingFields } from './session-model-sidecar.js'
 // sidecar IO 骨架 + 扫描缓存治理状态（叶子模块）：骨架原属本文件，model sidecar 家族
 // 拆出后为消除 ⇄ 循环引用下沉；本文件 import 供 preset/project/agent 家族与缓存治理
 // 调用点使用，并 re-export 维持原导出路径（消费方 import 路径零改动）。
@@ -29,9 +25,18 @@ import {
   readBindingSidecar,
   refreshScanDirCache,
   sessionMetaCache,
+  warnSidecarReadFailureOnce,
+  _resetSidecarWarnDedupForTest,
   type PersistBindingSidecarOpts,
 } from './session-binding-sidecar-io.js'
-export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar } from './session-binding-sidecar-io.js'
+export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest } from './session-binding-sidecar-io.js'
+// 残留清扫家族已拆出至 './session-residue-cleanup.ts'（max-lines 预算，先例同上）：
+// 本文件 isScannableSessionFile 消费 isTmpResidueFileName（候选侧过滤，RT-3#10 起精确
+// 后缀形态判定，与清扫侧/导入拒绝侧三消费点同一谓词），cleanup* 两函数经 re-export
+// 维持原导出路径（消费方 import 路径零改动）。
+import { isTmpResidueFileName } from './session-residue-cleanup.js'
+import { createDegradedStats, logScanDegradedSummary, noteScanDegraded, type ScanDegradedStats } from './session-scan-degraded.js'
+export { cleanupMigrateResidues, cleanupTmpMigrateResidue, isTmpResidueFileName, TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
 
 // ── 类型定义 ─────────────────────────────────────────────────
 
@@ -165,7 +170,9 @@ export function readSessionEndMeta(filePath: string): SessionEndSidecarMeta | nu
       ...(typeof meta.reason === 'string' ? { reason: meta.reason } : {}),
       ...(typeof meta.timestamp === 'string' ? { timestamp: meta.timestamp } : {}),
     }
-  } catch {
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（无终态 sidecar，多数 session 常态）安静；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read/parse failed')
     return null
   }
 }
@@ -278,17 +285,6 @@ export function agentSidecarPath(filePath: string): string {
 export function projectSidecarPath(filePath: string): string {
   return filePath + '.project.json'
 }
-
-// model binding sidecar 家族（modelSidecarPath/persistModelBinding/readModelBinding +
-// ModelBindingFields 字段声明）已迁至 './session-model-sidecar.ts'（本文件 max-lines
-// 行数合规）；scanSessionMeta 第七读经该模块的 readModelBinding 供给。
-// [re-export 登记] persistModelBinding / readModelBinding 经本模块转出是 mock 链刚需：
-// restore 播种测试（session-lifecycle-restore-seeding.test.ts）以硬编码 factory 替换本模块
-// 并经 importActual 取「本模块导出的 persistModelBinding」委托真值落盘，session-lifecycle
-// 的写点 import 也锚定本模块路径——re-export 缺失会使 actual 侧拿到 undefined。
-// readModelBinding 转出（2026-09-04）：session-service tryPersistModelBinding（D1 写点③
-// 兜底）的「缺失才写」守卫消费，services 层 infra value import 白名单只认本模块。
-export { persistModelBinding, readModelBinding } from './session-model-sidecar.js'
 
 // persistBindingSidecar / readBindingSidecar 公共骨架已迁 './session-binding-sidecar-io.ts'
 // （model sidecar 家族拆出后为消除 ⇄ 循环引用下沉；骨架私有闭包 sessionMetaCache /
@@ -421,9 +417,6 @@ export function readAgentBinding(filePath: string): { spawnSource: 'user' | 'age
   })
 }
 
-// persistModelBinding / readModelBinding 已迁 './session-model-sidecar.ts'
-// （scanSessionMeta 第七读经该模块供给，指针注释见 projectSidecarPath 之后）。
-
 /**
  * 将 launch preset 绑定持久化到 sidecar `.preset.json`（设计文档 §4）。
  *
@@ -487,7 +480,10 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
       // outcome 非法：sidecar 损坏/篡改，与 sidecar 不存在等价 → fallthrough 到 JSONL 兜底。
       // （原来此处直接 return null，会丢失 JSONL 中可能存在的合法 session_end 终态。）
     }
-  } catch { void 0 /* no sidecar or invalid → fallback to JSONL */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（历史 session 无 sidecar）安静走 JSONL 兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read failed, falling back to JSONL')
+  }
 
   // fallback: 从 JSONL 读（历史 session / 无 sidecar / sidecar outcome 非法时的兼容路径）
   // findLastEntryField 的 predicate 只校验了 typeof，未校验值合法性——
@@ -500,49 +496,36 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
 }
 
 /**
- * 尾读 + 预检分流 + 逆序分块读，倒序找最后一条匹配 entry 的字段值（W2 共用骨架 + D5③）。
+ * 尾读 → stat 预检分流 → 倒序分块/全量倒序单遍扫描骨架（findLastEntryField 与
+ * extractLatestModelFromJsonl 共用）。visit 返回 true = 收集齐，停止扫描。
  *
  * 1. readTailEntries 尾读尾部块（offset=max(0,size-32KB)）
- * 2. 倒序找匹配 predicate 的 entry，命中返回 extract(entry)
- * 3. 尾读未命中（INVAR-tail-2 SR1）→ statSync 大小预检分流：
+ * 2. 尾读未命中/未收集齐（INVAR-tail-2 SR1）→ statSync 大小预检分流：
  *    - ≤ READ_PRECHECK_MAX_BYTES（小文件）：保留原全量 readFileSync + parseJsonl 倒序找
  *      fallback（行为逐字节不变——目标可能在文件头部，如早期命名推出的 session_info）
  *    - > READ_PRECHECK_MAX_BYTES（D5③，crash-resilience §3.3）：**删除全量读 fallback**，
- *      改 forEachReversedLineChunk 逆序分块扫（总读取量 ≤ 阈值），从尾向前找「最后一条
- *      含目标字段的行」命中即止——消除「每次 pi 退出（extractSessionOutcome）未命中尾窗
- *      就全量同步读巨文件」的退出侧内存尖峰恶性循环。上限内未命中（目标在更深历史区）
- *      返回 null：消费方（extractSessionOutcome/extractSessionName）对 null 的既有降级
- *      （outcome=null → idle、name=null）语义保持，非正确性回退
- * 4. 全程未命中 → 返回 null
+ *      改 forEachReversedLineChunk 逆序分块扫（总读取量 ≤ 阈值），从尾向前找命中即止——
+ *      消除「每次 pi 退出（extractSessionOutcome）未命中尾窗就全量同步读巨文件」的
+ *      退出侧内存尖峰恶性循环。上限内未命中（目标在更深历史区）返回未命中：消费方
+ *      （extractSessionOutcome/extractSessionName/extractLatestModelFromJsonl）对未命中
+ *      的既有降级语义保持，非正确性回退
  *
- * 错误对等（INVAR-tail-7）：ENOENT/EACCES/JSON parse 错误与原实现一致返回 null，不引入新 throw。
+ * 错误对等（INVAR-tail-7）：ENOENT/EACCES/JSON parse 错误与原实现一致不抛，直接返回，
+ * 由调用方按各自未命中默认值（null / undefined）处理。
  */
-function findLastEntryField<R>(
-  filePath: string,
-  predicate: (e: Record<string, unknown>) => boolean,
-  extract: (e: Record<string, unknown>) => R,
-): R | null {
+function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unknown>) => boolean): void {
   // 尾读阶段
   const tailEntries = readTailEntries(filePath)
-  if (tailEntries !== null) {
-    for (let i = tailEntries.length - 1; i >= 0; i--) {
-      const entry = tailEntries[i]
-      if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-        return extract(entry as Record<string, unknown>)
-      }
-    }
-  }
+  if (tailEntries !== null && scanEntriesReversed(tailEntries, visit)) return
   // D5③ 预检分流：超阈值禁全量读（原 fallback 的 readFileSync 全量同步读是崩溃收尾
   // 路径上的内存尖峰触发器），改逆序分块扫命中即止。
   let size = -1
   try {
     size = statSync(filePath).size
   } catch {
-    return null // 文件不存在/不可读：与原 readFileSync 抛错 → catch → null 等价（INVAR-tail-7）
+    return // 文件不存在/不可读：与原 readFileSync 抛错 → catch 等价（INVAR-tail-7）
   }
   if (size > READ_PRECHECK_MAX_BYTES) {
-    // 数组包装承载命中值（闭包内赋值，规避 TS 对泛型变量的 CFA 收窄误报）
-    const found: R[] = []
     forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
       // 块内倒序（文件尾方向优先）——「最后一条」= 更靠近文件尾的命中行
       for (let i = chunk.lines.length - 1; i >= 0; i--) {
@@ -555,28 +538,150 @@ function findLastEntryField<R>(
         } catch {
           continue // 损坏行跳过（parseJsonl 同语义；含块边界 UTF-8 残缺的污染行——见工具注释）
         }
-        if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-          found.push(extract(entry as Record<string, unknown>))
+        if (typeof entry === 'object' && entry !== null && visit(entry as Record<string, unknown>)) {
           return false // 命中即止（当前块内更早行不再交付）
         }
       }
     })
-    return found.length > 0 ? found[0] : null
+    return
   }
   // ≤阈值：原全量读 fallback 保留（INVAR-tail-2: 尾读未命中，目标可能在文件头部）
   try {
-    const content = readFileSync(filePath, 'utf-8')
-    const entries = parseJsonl(content)
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i]
-      if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-        return extract(entry as Record<string, unknown>)
-      }
-    }
+    // RT-8#13：畸形行 dropCount 累计 + warn-once（附文件路径）——半截 JSONL 的字段
+    // 提取（session 名/outcome 等）静默降级不可观测
+    scanEntriesReversed(parseJsonlWarnOnMalformed(readFileSync(filePath, 'utf-8'), filePath), visit)
   } catch {
-    return null
+    return
+  }
+}
+
+/**
+ * 尾读 + 预检分流 + 逆序分块读，倒序找最后一条匹配 entry 的字段值（W2 共用骨架 + D5③）。
+ *
+ * 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量倒序 / 超阈值
+ * forEachReversedLineChunk 逆序分块）见 scanJsonlFromTail；本条只承载「首个命中即止」
+ * 终止条件与未命中返回 null。
+ *
+ * 全程未命中 → null；错误对等（INVAR-tail-7）见 scanJsonlFromTail。
+ */
+function findLastEntryField<R>(
+  filePath: string,
+  predicate: (e: Record<string, unknown>) => boolean,
+  extract: (e: Record<string, unknown>) => R,
+): R | null {
+  const found: R[] = []
+  scanJsonlFromTail(filePath, (entry) => {
+    if (!predicate(entry)) return false
+    found.push(extract(entry))
+    return true
+  })
+  return found.length > 0 ? found[0] : null
+}
+
+// ── session 模型信息反向读（缓存治理批 3 U7，sidecar model 家族退役第一步）──
+
+/**
+ * pi 默认思考等级（pi 实装 dist/core/session-manager.js getSessionContextSettings 的
+ * thinkingLevel 初始值，0.84.4 实锚）。JSONL 无任何 thinking_level_change entry 时，
+ * 会话恢复后 pi 的实际生效值即此——反向读缺省对齐，显示与 pi 同源（G3）。
+ */
+const PI_DEFAULT_THINKING_LEVEL = 'off'
+
+/**
+ * provider/id 拼接为 'provider/modelId' 格式（model binding 的 modelId 形态，与
+ * restore-seeding readEffectiveModelFromState 对 get_state 读回值的拼法同构）。
+ * 字段非法（非 string / 空串）→ null：该 entry 视为不携带模型信息，扫描继续向前。
+ */
+function modelIdPairOf(provider: unknown, id: unknown): string | null {
+  if (typeof provider === 'string' && provider !== '' && typeof id === 'string' && id !== '') {
+    return `${provider}/${id}`
   }
   return null
+}
+
+/**
+ * 单 entry 的模型信息提取（extractLatestModelFromJsonl 的解析语义落点）。
+ *
+ * 对齐 pi 实装 getSessionContextSettings（dist/core/session-manager.js:148-160，0.84.4 实锚）：
+ * - model_change entry：provider / modelId 是 entry 顶级平铺字段（pi 唯一显式 setModel 写点）
+ * - assistant message entry：entry.type === 'message' 且 message.role === 'assistant'，
+ *   取 message.provider + message.model
+ */
+function modelEntryValueOf(entry: Record<string, unknown>): string | null {
+  if (entry.type === 'model_change') {
+    return modelIdPairOf(entry.provider, entry.modelId)
+  }
+  if (entry.type === 'message') {
+    const msg = entry.message
+    if (typeof msg === 'object' && msg !== null) {
+      const m = msg as Record<string, unknown>
+      if (m.role === 'assistant') {
+        return modelIdPairOf(m.provider, m.model)
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * entry 数组倒序扫（文件尾方向优先），逐个交给 collect；collect 返回 true（收集齐）即止。
+ * 返回是否提前止（true = 两个维度都在手）。
+ */
+function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unknown>) => boolean): boolean {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (typeof entry === 'object' && entry !== null && collect(entry as Record<string, unknown>)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * 反向读 session JSONL 提取最近生效的模型绑定（scanSessionMeta 第七读的数据源：U7 起由
+ * `.model.json` sidecar 切换为 JSONL 真源，U8 随 sidecar 模块退役改为本模块直调）。
+ *
+ * 解析语义对齐 pi 实装 getSessionContextSettings（见 modelEntryValueOf）；pi 恢复是沿当前
+ * 分支正序取最后一条（后写覆盖前写），反向读「从尾向前第一条」与之等价。modelId 与
+ * thinkingLevel 是 pi 侧两个独立跟踪的变量（单条 entry 只更新其一），各取物理尾方向第一条。
+ *
+ * 复用 scanJsonlFromTail 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量
+ * 倒序 / 超阈值 forEachReversedLineChunk 逆序分块，总读取量 ≤ 32MB 上限）：单值「命中即止」
+ * 签名承载不了双维度独立收集（只命中 model 即止会漏掉更早区域的 thinking_level_change；
+ * 分两次调用则尾读/分流成本 ×2）——经 visit 回调按同骨架单遍扫描，两维度都在手才提前止。
+ * 混合分支文件取物理尾第一条（§3.3.3 已知语义边界 1，显示用途与现状 sidecar 等价或更好）。
+ *
+ * 失效语义（数据流图 2 方案 A 成立的关键）：缓存键 = JSONL (mtimeMs, size)，pi append 后
+ * 必 miss → 重扫——反向读成本只在文件变化时发生一次。损坏行跳过继续扫（findLastEntryField
+ * 分块路径同语义）；全程无模型信息 → undefined（与「sidecar 不存在」现状语义一致）。
+ * thinkingLevel 无 entry → 返回 pi 默认 'off'（PI_DEFAULT_THINKING_LEVEL 注释）。
+ *
+ * @returns { modelId, thinkingLevel }；无 model_change /
+ *          assistant entry（含文件不存在/损坏）→ undefined
+ */
+export function extractLatestModelFromJsonl(filePath: string): { modelId: string; thinkingLevel: string } | undefined {
+  // 数组式单点对象承载命中值（闭包内赋值，规避 TS 对外层局部变量的 CFA 收窄误报）
+  const hits: { modelId: string | null; thinkingLevel: string | null } = { modelId: null, thinkingLevel: null }
+  const collect = (entry: Record<string, unknown>): boolean => {
+    if (hits.modelId === null) {
+      const modelId = modelEntryValueOf(entry)
+      if (modelId !== null) hits.modelId = modelId
+    }
+    if (hits.thinkingLevel === null
+      && entry.type === 'thinking_level_change'
+      && typeof entry.thinkingLevel === 'string') {
+      hits.thinkingLevel = entry.thinkingLevel
+    }
+    return hits.modelId !== null && hits.thinkingLevel !== null
+  }
+
+  // 单遍骨架扫描（scanJsonlFromTail）：model_change / assistant / thinking_level_change
+  // 都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口内；双维度集齐即
+  // 提前止（尾读阶段命中即不走 stat 分流）。
+  scanJsonlFromTail(filePath, collect)
+  // 组装：无模型信息 → undefined；thinkingLevel 无 entry → pi 默认 'off'
+  if (hits.modelId === null) return undefined
+  return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel ?? PI_DEFAULT_THINKING_LEVEL }
 }
 
 // ── 文件操作 ─────────────────────────────────────────────────
@@ -666,7 +771,10 @@ export function extractHandedOff(filePath: string): string | undefined {
       return marker.handedOffTo
     }
     // handedOffTo 非字符串：sidecar 损坏，与 sidecar 不存在等价 → fallthrough 尾读兜底。
-  } catch { void 0 /* no sidecar or invalid → fallback to legacy JSONL marker */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（未交接）安静走尾读兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(filePath + '.handoff.json', e, 'handoff sidecar read failed, falling back to tail read')
+  }
 
   // fallback：存量旧 session 的 JSONL `handoff_marker` 尾读（W11 前写入的兼容路径）
   const tailEntries = readTailEntries(filePath)
@@ -738,133 +846,28 @@ export function normalizeSessionFileInPlace(filePath: string, transformed: strin
   }
 }
 
-/**
- * 清扫该 session 文件的 `.tmp-migrate-*.jsonl` 残留（差距复审 suggestion 6）。
- *
- * 残留来源 = normalizeSessionFileInPlace 在 writeFileSync 与 renameSync 之间崩溃
- * （或回滚删除失败的极端场景）。残留不被 scanner 收录（isScannableSessionFile 排除，
- * 不会错位附着），但属永久磁盘垃圾，本函数在两个自然时机将其回收：
- * ① 附着前（normalizeInactiveSessionFileIfNeeded 顶部，restore / 非活跃 rename 共用）
- * ——此刻本会话无归一化在途（restore 已销毁同 id 会话），同 basename 的残留必然 stale；
- * ② delete 链（与 sidecar 四后缀清理同点）——session 已删，残留随之清走。
- *
- * best-effort：目录列举失败 / 单个删除失败静默跳过（不阻塞附着/删除主流程）；
- * 只删「basename 前缀精确匹配 + .jsonl 后缀」的文件，不碰其他 session 的文件。
- */
-export function cleanupMigrateResidues(filePath: string): void {
-  const dir = dirname(filePath)
-  const prefix = basename(filePath) + '.tmp-migrate-'
-  let names: string[]
-  try {
-    names = readdirSync(dir)
-  } catch {
-    return
-  }
-  for (const name of names) {
-    if (name.startsWith(prefix) && name.endsWith('.jsonl')) {
-      try { unlinkSync(join(dir, name)) } catch { void 0 }
-    }
-  }
-}
-
-/**
- * 残留默认过期阈值（1 小时）。为什么是 1h：归一化临时文件的 lifecycle 是毫秒级
- * （writeFileSync 后立即 renameSync），1h ≫ 生命周期，即使时钟精度/调度延迟极端放大
- * 也留足「不误删进行中临时文件」的余量；同时残留（磁盘垃圾）留 1h 无任何成本。
- */
-const TMP_MIGRATE_RESIDUE_MAX_AGE_MS = 3_600_000
-
-/**
- * 崩溃残留标记家族（import-session D1/r2-S1）：`.tmp-migrate-`（restore 归一化）与
- * `.tmp-import-`（导入 tmp+rename 复制）同规则——两类临时文件的 lifecycle 同为毫秒级
- * （写临时名后立即 rename），崩溃残留的形态与风险同构，清扫与扫描过滤按家族扩展。
- * isScannableSessionFile 的文件名过滤消费同一集合（候选侧与清扫侧同规则）。
- * r1-S5 起导出：import-service 的导入拒绝校验消费同一常量（消灭双副本漂移面）。
- */
-export const TMP_RESIDUE_MARKERS = ['.tmp-migrate-', '.tmp-import-'] as const
-
-/**
- * 启动期清扫 sessions 目录下的 `.tmp-migrate-*.jsonl` / `.tmp-import-*.jsonl` 崩溃残留
- * （W3 残留清理；import-session D1 扩展 `.tmp-import-` 家族）。
- *
- * cleanupMigrateResidues 只在「附着前 / delete 链」两个 session 级时机触发——若某
- * session 从此不再被 restore/删除，其残留永久留存（磁盘垃圾 + 排查困惑源）。本函数在
- * runtime 启动后台序列补上目录级兜底：一次性枚举整个 sessions 目录（含按 cwd 分组的
- * 子目录结构，与 scanPiSessionsFromDisk 同构）。
- *
- * 新鲜度阈值（maxAgeMs，默认 1 小时）：mtime 早于 now-maxAgeMs 才删——正在进行的
- * 归一化临时文件必然秒级新鲜（normalizeSessionFileInPlace 写后立即 rename），阈值内
- * 不删可防并发误删扩大 S3 交错窗口。1 小时 ≫ 归一化的毫秒级生命周期，即使时钟精度
- * /调度延迟极端放大也留足余量。
- *
- * 只删「标记家族（TMP_RESIDUE_MARKERS）任一命中 + `.jsonl` 后缀」的文件，其余零触碰；
- * 目录不存在 no-op。单个删除失败（权限等）跳过不中断（调用方接线在启动链，失败不得阻断启动）。
- *
- * @param sessionsDir sessions 根目录（getSessionsDir() 产出）
- * @param maxAgeMs    残留被认为是 stale 的最小年龄（ms）
- * @returns 实际删除的文件数，两前缀合计（诊断用）
- */
-export function cleanupTmpMigrateResidue(sessionsDir: string, maxAgeMs = TMP_MIGRATE_RESIDUE_MAX_AGE_MS): number {
-  if (!existsSync(sessionsDir)) return 0
-  // 与 scanPiSessionsFromDisk 同构的两层结构：根目录直接文件 + cwd 分组子目录
-  //（normalizeSessionFileInPlace 的临时文件写在 dirname(filePath)，即 session 所在层）。
-  const dirs = collectResidueScanDirs(sessionsDir)
-  if (dirs === null) return 0 // 根目录不可读：no-op（启动链兜底，失败不上抛）
-  const cutoff = Date.now() - maxAgeMs
-  let removed = 0
-  for (const dir of dirs) {
-    removed += removeStaleResiduesInDir(dir, cutoff)
-  }
-  return removed
-}
-
-/**
- * 枚举清扫目标目录：根目录 + 一层 cwd 分组子目录（与 scanPiSessionsFromDisk 同构）。
- * 根目录不可读返回 null（整体 no-op）；单项 stat 失败跳过（不影响其余子目录）。
- */
-function collectResidueScanDirs(sessionsDir: string): string[] | null {
-  const dirs: string[] = [sessionsDir]
-  try {
-    for (const name of readdirSync(sessionsDir)) {
-      const entryPath = join(sessionsDir, name)
-      try {
-        if (statSync(entryPath).isDirectory()) dirs.push(entryPath)
-      } catch { void 0 /* 单项 stat 失败跳过，不影响整体清扫 */ }
-    }
-  } catch {
-    return null
-  }
-  return dirs
-}
-
-/** 清扫单目录内过期的标记家族残留（`.tmp-migrate-` / `.tmp-import-` 命名 + `.jsonl` 后缀，
- * mtime 早于 cutoff 才删），返回删除数（两前缀合计）。目录不可读返回 0；
- * 单文件 stat/unlink 失败跳过不中断（启动链兜底语义）。 */
-function removeStaleResiduesInDir(dir: string, cutoff: number): number {
-  let names: string[]
-  try {
-    names = readdirSync(dir)
-  } catch {
-    return 0
-  }
-  let removed = 0
-  for (const name of names) {
-    if (!TMP_RESIDUE_MARKERS.some((marker) => name.includes(marker)) || !name.endsWith('.jsonl')) continue
-    const filePath = join(dir, name)
-    try {
-      if (statSync(filePath).mtimeMs < cutoff) {
-        unlinkSync(filePath)
-        removed++
-      }
-    // eslint-disable-next-line taste/no-silent-catch -- best-effort: 单文件失败跳过，不阻断启动链
-    } catch (e) {
-      console.warn(`[session-file-utils] cleanupTmpMigrateResidue: failed to remove residue: ${filePath}`, e)
-    }
-  }
-  return removed
-}
-
 // ── Session 扫描 ─────────────────────────────────────────────
+
+/**
+ * model binding 的扫描字段声明（ScannedSessionMeta extends 收编）。
+ *
+ * [缓存治理批 3 U8] 原 session-model-sidecar.ts 随 sidecar model 家族整体退役（W6 写点
+ * 删除后无消费方），字段声明迁回本文件与 ScannedSessionMeta 同文件；字段本身保留——
+ * 值源 = extractLatestModelFromJsonl 反向读 JSONL 真源（非 sidecar）。
+ */
+export interface ModelBindingFields {
+  /**
+   * 该 session 生效的模型 id。反向读 session JSONL（model_change / assistant
+   * entry 最近一条，JSONL 真源），'provider/modelId' 格式。undefined 表示无模型信息
+   * （历史 session path 上无任何模型 entry / 文件不存在）。
+   */
+  modelId?: string
+  /**
+   * 该 session 生效的思考等级。反向读 session JSONL（thinking_level_change
+   * 最近一条）；无 entry 时为 pi 默认 'off'。undefined 表示无模型信息（随 modelId）。
+   */
+  thinkingLevel?: string
+}
 
 /** scanPiSessions 返回的单条 session 元信息（持久化会话扫描结果）。 */
 export interface ScannedSessionMeta extends ModelBindingFields {
@@ -904,8 +907,8 @@ export interface ScannedSessionMeta extends ModelBindingFields {
    * 记录 spawn 该 session 的父 agent session。undefined = 非 agent 管理的普通 session。
    */
   parentAgentSessionId?: string
-  // modelId / thinkingLevel 字段声明随 model sidecar 家族迁至 './session-model-sidecar.ts'
-  // （ModelBindingFields，本接口 extends 收编）；BindingFieldKey 的 OptionalKeys 派生对
+  // modelId / thinkingLevel 字段声明 = 上方 ModelBindingFields（本接口 extends 收编，
+  // 值源为 extractLatestModelFromJsonl 反向读）；BindingFieldKey 的 OptionalKeys 派生对
   // extends 字段照常生效，session-binding-fields.ts 注册表不受影响。
 }
 
@@ -931,6 +934,9 @@ export function invalidateSessionMetaCache(filePath: string): void {
 // [SSOT 指针] 新增绑定字段必经此处填充 ScannedSessionMeta——必须同步在
 // session-binding-fields.ts 的 BINDING_FIELDS 注册表登记（漏登记=编译错），
 // 回填入口适用性（hydrateBindingMeta 四入口矩阵）与 create 派生调用方清单均在该模块维护。
+// 扫描降级计数家族（ScanDegradedStats / noteScanDegraded / logScanDegradedSummary）已拆出
+// './session-scan-degraded.ts'（max-lines 预算，RT-3#2 扩展时拆出，先例同 residue-cleanup）。
+
 /**
  * 单个 session 文件的元数据提取（三读合一 + 缓存）。
  *
@@ -943,8 +949,16 @@ export function invalidateSessionMetaCache(filePath: string): void {
  * 现统一在此一次提取，scannedToSummary 从 meta.outcome 取（INVAR-merge-2）。
  *
  * 文件删除/不可读（INVAR-cache-4）→ 清该 key 返回 null。
+ *
+ * RT-3#1：header 缺 id/cwd（非空字符串）→ fail-fast 返回 null + warn 带路径 + 计入
+ * degraded.badHeader。id/cwd 是消费链硬依赖（scannedToSummary 的 basename(cwd)、按
+ * cwd 分组键、restore 按 id 定位）——此前 parseSessionHeader 条件赋值不设字段、
+ * `as SessionHeader` 收口，异常发生在**消费**阶段（basename(undefined) TypeError），
+ * 扫描侧 catch 拦不住，一个坏文件毒死整个侧栏。出口收口对齐 import 侧
+ * parseHeaderFromFirstLine 的「id/cwd 均非空字符串才收录」同款清单（外部文件不修
+ * 本体，删/修文件后自动恢复收录）。与「非 session 文件」同不缓存（下次仍尝试）。
  */
-function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
+function scanSessionMeta(filePath: string, degraded?: ScanDegradedStats): ScannedSessionMeta | null {
   let fstat
   try {
     fstat = statSync(filePath)
@@ -963,7 +977,14 @@ function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
   // miss：三读合一提取全部元数据
   const header = parseSessionHeader(filePath)
   if (!header) {
-    // 非 session 文件（首行不是 session header）：不缓存（下次仍尝试，开销小）
+    // 非 session 文件（首行不是 session header：异质 .jsonl / 截断 / 读取失败）：不缓存
+    // （下次仍尝试，开销小），但计数显形（RT-3#2——静默跳过 = 列表少一条零痕迹）。
+    if (degraded) noteScanDegraded(degraded, 'noHeader', filePath)
+    return null
+  }
+  if (typeof header.id !== 'string' || header.id === '' || typeof header.cwd !== 'string' || header.cwd === '') {
+    if (degraded) noteScanDegraded(degraded, 'badHeader', filePath)
+    console.warn(`[session-file-utils] session header missing/empty id or cwd, file skipped: ${filePath}`)
     return null
   }
   const name = extractSessionName(filePath)
@@ -992,9 +1013,10 @@ function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
     projectId,
     spawnSource: agentBinding?.spawnSource,
     parentAgentSessionId: agentBinding?.parentAgentSessionId,
-    // 第七读：model binding sidecar（model binding，'./session-model-sidecar.ts'）——
-    // 无 sidecar 时返回 undefined，对象展开零字段，与逐字段 `?.` 赋 undefined 等价。
-    ...readModelBinding(filePath),
+    // 第七读：model binding（extractLatestModelFromJsonl 同模块直调——U8 起 sidecar
+    // 模块已退役，值源 = 反向读 JSONL 真源）。无模型信息时返回 undefined，对象展开
+    // 零字段，与逐字段 `?.` 赋 undefined 等价。
+    ...extractLatestModelFromJsonl(filePath),
   }
   sessionMetaCache.set(filePath, { mtimeMs: fstat.mtimeMs, size: fstat.size, meta })
   return meta
@@ -1067,16 +1089,23 @@ export function scanPiSessions(opts?: ScanSessionsOptions): ScannedSessionMeta[]
  * 识别 session、不按文件名——残留文件内容是合法 session（同 sessionId），不过滤会产生
  * 同 id 双条目，且残留 mtime 更新、排序在前，findScannedSession 会命中残留路径 →
  * restore 附着错位文件。文件名过滤把「残留无害」从声明变成机制保证（候选侧与清扫侧
- * 同规则，TMP_RESIDUE_MARKERS）。
+ * 同规则，isTmpResidueFileName）。
+ *
+ * RT-3#10：判定从 `includes(marker)` 子串改为 isTmpResidueFileName 精确后缀形态——
+ * session id 中段含标记串的真实会话文件（`a.tmp-migrate-b.jsonl`，实测 fixture 验证）
+ * 曾被子串判定排除出列表且被清扫删除（数据丢失），精确形态只匹配真崩溃中间态。
  */
 export function isScannableSessionFile(name: string): boolean {
-  return name.endsWith('.jsonl') && !TMP_RESIDUE_MARKERS.some((marker) => name.includes(marker))
+  return name.endsWith('.jsonl') && !isTmpResidueFileName(name)
 }
 
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   if (!existsSync(sessionsDir)) return []
 
   const results: ScannedSessionMeta[] = []
+  // RT-3#1/#2：降级丢弃计数（degraded 显形）——各失败点计入，扫描轮末汇总打点，
+  // 单条坏文件「侧栏少一条」可归因（结构与实现见 session-scan-degraded.ts）。
+  const degraded: ScanDegradedStats = createDegradedStats()
 
   let entries: string[]
   try {
@@ -1094,6 +1123,8 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
     try {
       stat = statSync(entryPath)
     } catch {
+      // RT-3#2：静默 continue → 计数显形（权限/竞态删除，该条目未收录）
+      noteScanDegraded(degraded, 'statFail', entryPath)
       continue
     }
 
@@ -1104,27 +1135,27 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
         for (const file of files) {
           const filePath = join(entryPath, file)
           try {
-            const meta = scanSessionMeta(filePath)
+            const meta = scanSessionMeta(filePath, degraded)
             if (meta) results.push(meta)
-          // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entries
           } catch {
-            // skip
+            noteScanDegraded(degraded, 'scanFail', filePath)
           }
         }
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session subdirectory
       } catch {
-        // skip unreadable dir
+        // RT-3#2：子目录列举失败 = 整个 cwd 分组的会话未收录，必须显形
+        noteScanDegraded(degraded, 'dirFail', entryPath)
       }
     } else if (isScannableSessionFile(entry)) {
       try {
-        const meta = scanSessionMeta(entryPath)
+        const meta = scanSessionMeta(entryPath, degraded)
         if (meta) results.push(meta)
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entry
       } catch {
-        // skip
+        noteScanDegraded(degraded, 'scanFail', entryPath)
       }
     }
   }
+
+  logScanDegradedSummary(degraded)
 
   results.sort((a, b) => b.lastModified - a.lastModified)
   return results

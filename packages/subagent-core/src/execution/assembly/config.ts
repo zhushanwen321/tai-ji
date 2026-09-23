@@ -9,11 +9,7 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 
-import type { CollectSyncConfig, SubagentsGlobalConfig } from "./types.ts";
-
-// 同步收集配置节类型 re-export（类型权威定义在 types.ts，避免 config → types 反向依赖成环；
-// 消费方从本模块 import 与从 types.ts import 等价，U1 foundation 契约）。
-export type { CollectSyncConfig };
+import type { SubagentsGlobalConfig } from "./types.ts";
 
 // 包内 execution 模块统一具名 logger（getLogger 缓存单例，见 notify-ledger.ts 同款）。
 const logger = getLogger("subagents");
@@ -37,25 +33,13 @@ export const DEFAULT_CONFIG: SubagentsGlobalConfig = {
   maxConcurrent: 6,
 };
 
-// 注意：DEFAULT_CONFIG 刻意不含 collectSync 键（与 defaultEngine/engineRouting 同风格）——
-// SW 包 package.json 的 pi.startupConfig 声明守护（startup-config-declaration.test.ts）
-// 断言与 DEFAULT_CONFIG 深相等，声明面只含既有键。collectSync 缺省语义由
-// DEFAULT_COLLECT_SYNC 承载，消费方以 `config.collectSync ?? DEFAULT_COLLECT_SYNC` 兜底
-// （loadGlobalConfig 文件缺失/坏 JSON 路径返回 {...DEFAULT_CONFIG} 同样无键）。
+// [collect 退役] 原 collectSync 配置节（DEFAULT_COLLECT_SYNC / sanitizeCollectSync）
+// 已随 sync 批机制整体删除——config.json 中残留的 collectSync 键读取时忽略（与
+// categories/fallback 等旧字段同判，零迁移）。
 
 /** 默认 maxConcurrent（DEFAULT_CONFIG 的镜像，sanitize 用）。 */
 const DEFAULT_MAX_CONCURRENT = 6;
 
-/**
- * 同步收集配置节权威默认值（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
- * 消费方：startHandler 缺省模式解析 / U3+U4 批通知预算（flush 时热读）。
- * 供守护测试断言（E5 各坏值回默认）。展开拷贝防调用方 mutate。
- */
-export const DEFAULT_COLLECT_SYNC: CollectSyncConfig = {
-  default: "async",
-  perItemChars: 4000,
-  totalChars: 24000,
-};
 // ============================================================
 // 路径
 // ============================================================
@@ -154,70 +138,19 @@ function errnoCodeOf(err: unknown): string | undefined {
 function sanitizeParsedConfig(parsed: Partial<SubagentsGlobalConfig>): SubagentsGlobalConfig {
   const defaultEngine = sanitizeDefaultEngine(parsed.defaultEngine);
   const engineRouting = sanitizeEngineRouting(parsed.engineRouting);
-  const collectSync = sanitizeCollectSync(parsed.collectSync);
   return {
     version: parsed.version ?? DEFAULT_CONFIG.version,
     maxConcurrent: sanitizeMaxConcurrent(parsed.maxConcurrent),
     ...(defaultEngine !== undefined ? { defaultEngine } : {}),
     ...(engineRouting !== undefined ? { engineRouting } : {}),
-    ...(collectSync !== undefined ? { collectSync } : {}),
   };
 }
 
-/** maxConcurrent 校验：正整数，否则默认（S5：委托 sanitizePositiveInt，正整数规则单点化）。 */
+/** maxConcurrent 校验：正整数，否则默认。 */
 function sanitizeMaxConcurrent(value: unknown): number {
-  return sanitizePositiveInt(value, DEFAULT_MAX_CONCURRENT);
-}
-
-/**
- * collectSync 节校验（E5：负数/非枚举/坏类型回默认，不炸启动；与 maxConcurrent 同判。
- * subagent-sync-collect 设计 §3.1.5 E5 + §3.1.3）。逐字段 sanitize：坏字段回该字段
- * 默认，好字段透传（部分覆盖合法）。整节缺失返回 undefined（不落键，与 engineRouting
- * 同风格——缺省语义由消费方读 DEFAULT_COLLECT_SYNC）。
- *
- * [D6 #8] 字段级坏值回默认时 warn 一条（缺省字段不 warn——部分覆盖合法）：config.json
- * 是用户手编文件，静默回落使「改了配置不生效」无从排查（sanitize 行为不变，只补可观测）。
- *
- * 消费时机：startHandler 缺省 collect 解析（config.default，新 session 生效）与
- * U3/U4 批通知预算（perItemChars/totalChars，flush 时热读）。
- */
-export function sanitizeCollectSync(value: unknown): CollectSyncConfig | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const v = value as Record<string, unknown>;
-  const fallback = DEFAULT_COLLECT_SYNC;
-  // [D6 #8] 坏值字段清单（仅「显式给了坏值」计——缺省是合法部分覆盖，不 warn）。
-  // 值格式化不用 JSON.stringify：Symbol/BigInt 等 stringify 返回 undefined，String() 全类型安全。
-  const fmt = (val: unknown): string => (typeof val === "string" ? JSON.stringify(val) : String(val));
-  const bad: string[] = [];
-  if (v.default !== undefined && v.default !== "sync" && v.default !== "async") {
-    bad.push(`default=${fmt(v.default)}`);
-  }
-  if (v.perItemChars !== undefined && !isPositiveInt(v.perItemChars)) {
-    bad.push(`perItemChars=${fmt(v.perItemChars)}`);
-  }
-  if (v.totalChars !== undefined && !isPositiveInt(v.totalChars)) {
-    bad.push(`totalChars=${fmt(v.totalChars)}`);
-  }
-  if (bad.length > 0) {
-    logger.warn(
-      `[subagents] config collectSync invalid field(s) reverted to defaults: ${bad.join(", ")}`,
-    );
-  }
-  return {
-    default: v.default === "sync" ? "sync" : v.default === "async" ? "async" : fallback.default,
-    perItemChars: sanitizePositiveInt(v.perItemChars, fallback.perItemChars),
-    totalChars: sanitizePositiveInt(v.totalChars, fallback.totalChars),
-  };
-}
-
-/** 正整数校验（collectSync 预算字段用；与 sanitizeMaxConcurrent 同判）。 */
-function sanitizePositiveInt(value: unknown, fallback: number): number {
-  return isPositiveInt(value) ? (value as number) : fallback;
-}
-
-/** 正整数判定（sanitizePositiveInt 的探测面，坏值 warn 清单复用）。 */
-function isPositiveInt(value: unknown): boolean {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_MAX_CONCURRENT;
 }
 
 /**

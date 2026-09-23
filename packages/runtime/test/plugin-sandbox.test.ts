@@ -9,7 +9,10 @@
  * 不创建真实 Worker Thread，只单元测试拦截函数逻辑。
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
 
 import {
   createRequireInterceptor,
@@ -40,19 +43,33 @@ describe('Task 2: Worker Sandbox (require 拦截)', () => {
   })
 
   describe('createRequireInterceptor', () => {
-    const pluginDir = '/tmp/test-plugin'
+    // fixture 目录 mkdtemp 自建自删且测试侧先 realpathSync 归一：生产码
+    // createRequireInterceptor 内部对 pluginDir 做 realpathSync 归一后再 startsWith
+    // 判界（macOS tmpdir 经 /var → /private/var symlink）——目录缺失会走生产码
+    // realpath warn + fail-closed 分支，未归一则断言传入的 resolvedPath 字符串与
+    // 归一后的判界前缀恒不匹配。
+    let pluginDir = ''
+
+    beforeAll(() => {
+      pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'taiji-plugin-sandbox-')))
+    })
+
+    afterAll(() => {
+      if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
 
     it('allows relative paths within pluginDir', () => {
       const interceptor = createRequireInterceptor(pluginDir)
       // 应该不抛异常
-      const result = interceptor('./utils', '/tmp/test-plugin/utils.js')
-      expect(result).toBe('/tmp/test-plugin/utils.js')
+      const inside = join(pluginDir, 'utils.js')
+      const result = interceptor('./utils', inside)
+      expect(result).toBe(inside)
     })
 
     it('rejects relative paths outside pluginDir', () => {
       const interceptor = createRequireInterceptor(pluginDir)
       try {
-        interceptor('../escape', '/tmp/escape.js')
+        interceptor('../escape', join(dirname(pluginDir), 'escape.js'))
         expect.unreachable('should have thrown')
       } catch (err) {
         expect(err).toBeInstanceOf(Error)
@@ -125,7 +142,7 @@ describe('Task 2: Worker Sandbox (require 拦截)', () => {
     it('handles nested path traversal attempts', () => {
       const interceptor = createRequireInterceptor(pluginDir)
       try {
-        interceptor('./../../etc/passwd', '/tmp/etc/passwd')
+        interceptor('./../../etc/passwd', join(dirname(pluginDir), 'etc', 'passwd'))
         expect.unreachable('should have thrown')
       } catch (err) {
         expect(err).toBeInstanceOf(Error)

@@ -562,16 +562,25 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
   })
 
   // ════════════════════════════════════════════════════════════════════
-  // FR-5: message_update error
+  // FR-5 / RT-2#2: message_update error（pi wire 真实形状）
+  // wire 实发 = {type:'error', reason:'aborted'|'error', error:AssistantMessage}
+  // （权威源 pi-ai 0.84.4 dist/types.d.ts AssistantMessageEvent error 变体；json-event.js
+  // 只剥 partial）。fixture 的 error 子对象只带 adapter 消费的 errorMessage 子集——完整
+  // AssistantMessage 另有 role/content/usage 等字段（PiErrorSubEvent 局部形态同款取舍）。
+  // reason 分流：error（provider 真错）→ message.stream_error；aborted（用户中止）→ noop
+  // （中止由 message_end/agent_end 的 stopReason='aborted' 通路收口，非 error 终态）。
+  // [HISTORICAL] 旧 fixture `{type:'error', content:'...'}` 是 pi 从不发送的形状：生产读
+  // sub.content 恒 undefined，测试绿而 provider 真错文本（401/限流/上下文溢出）永不显形。
   // ════════════════════════════════════════════════════════════════════
 
-  describe('FR-5: message_update — error sub-type', () => {
-    it('translates message_update with sub-type error to message.stream_error', async () => {
+  describe('FR-5: message_update — error sub-type (real pi wire shape)', () => {
+    it('error 分支：error.errorMessage 透传为 content，kind=error（provider 真错）', async () => {
       dispatchOne(adapter, {
         type: 'message_update',
         assistantMessageEvent: {
           type: 'error',
-          content: 'aborted by user',
+          reason: 'error',
+          error: { errorMessage: '401 Unauthorized: invalid api key' },
         },
       })
       await flushAsync()
@@ -581,8 +590,24 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       // payload 形状与 shared/protocol 契约对齐：kind（分类）+ content（人类可读）
       expect(sent[0].payload).toMatchObject({
         kind: 'error',
-        content: 'aborted by user',
+        content: '401 Unauthorized: invalid api key',
       })
+    })
+
+    it('aborted 分支：降级 noop 不产 stream_error 帧（中止由 agent_end stopReason 通路收口）', async () => {
+      dispatchOne(adapter, {
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'error',
+          reason: 'aborted',
+          error: {},
+        },
+      })
+      await flushAsync()
+
+      // 中止不是流错误：不产帧 = 前端不 finalizeSession('stream_error')（主动中止不翻 error
+      // 红条），枚举串 'aborted' 也无从经 content 进用户可见错误文本
+      expect(sent).toHaveLength(0)
     })
   })
 

@@ -23,6 +23,7 @@ const fakeStdin = {
   }),
   once: vi.fn(),
   end: vi.fn(),
+  on: vi.fn(), // RT-2#1：wireProcessHandlers 现注册 stdin 'error' listener
 }
 
 // ── readline 接口 mock ──

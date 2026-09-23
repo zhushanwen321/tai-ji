@@ -8,8 +8,6 @@
  * 已删——全库无生产消费方，仅测试锁定。）
  *
  * 层归属：Engine。
- *
- * 参考：domain-models.md §4（字段/不变式/操作）。
  */
 import type { AgentUsage } from "./types.ts";
 
@@ -34,7 +32,7 @@ export const OUTPUT_WEIGHT = 2;
 /**
  * Budget 值对象。
  *
- * 不变式（domain-models.md §4）：
+ * 不变式：
  * - maxTokens > 0 守卫：maxTokens===0 或 undefined 视为不限制
  * - maxCost > 0 守卫：同上
  * - consume 只累加，不减；isExceeded 只读

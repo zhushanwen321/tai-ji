@@ -4,7 +4,7 @@
  * 职责：把 pi session entry（get_entries 返回 / 实时事件重构，W21）逐条投影为 chat 视图态切片。
  * 消息列表 = entry 日志的纯函数——同 entry 序列必得同 state，「live ≡ reload」从构造上成立。
  *
- * 纯度契约（验收权威 w20-acceptance.md 规格锁定 1）：
+ * 纯度契约（规格锁定 1）：
  * - 无副作用、无时序依赖：不读 Date.now / crypto.randomUUID / Math.random，
  *   消息 id 与缺失 timestamp 全部从 entry 派生（确定性），两次喂入同一序列 state 全等。
  * - 不 mutate 输入 state / entry：toolResult 回填等就地变更点全部 copy-on-write。

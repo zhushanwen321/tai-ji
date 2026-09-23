@@ -11,8 +11,6 @@
  * Trace.update 负责（D-10 单一来源），AgentCall 只持有引用供 executeAgentCall 读取
  *
  * 层归属：Engine。
- *
- * 参考：domain-models.md §5（字段/不变式/设计决策）。
  */
 import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "./types.ts";
 

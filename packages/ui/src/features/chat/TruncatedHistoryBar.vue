@@ -1,11 +1,14 @@
 <template>
   <!--
-    [u4d-truncated-ui] 历史预算截断顶部条（crash-resilience §3.3 D4 / 场景 T3）。
+    [u4d-truncated-ui] 历史预算截断顶部条（D4 / 场景 T3）。
     显隐由壳层（MessageStream）v-if 控制：store 截断窗口状态 truncated=false 时本组件
     结构性不挂载（A6 回归：普通 session 无任何截断提示）。
     文案 N = loadedTurns（u4b session.history 窗口契约）；「加载更早」走 [u6] 游标翻页
     （壳层 @load → useLoadMoreHistory.handleLoadMore → useChat.loadMoreHistory，
     session.history 带 cursor——原 getFullHistory 全量通路已退役）。
+    [2026-09-19 触顶自动续载] 滚到顶即自动走同一加载通路（useLoadMoreHistory.onScrollOffset，
+    «keep 触发条件 = 已脱离锚定 + offset 触顶），本按钮降级为兜底/进度位：loading 期间显示
+    spinner（「正在续载」），触顶信号不可达（如窗口内容短于视口）时仍可手点。
   -->
   <div data-testid="truncated-history-bar" class="flex items-center gap-1">
     <span data-testid="truncated-history-info" class="text-[length:var(--text-sm)] leading-snug text-neutral-mid">

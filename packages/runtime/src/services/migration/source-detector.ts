@@ -7,8 +7,10 @@
  * - agentCount 仅统计目录顶层 *.md（agent 文件位于根目录，不递归子目录）。
  * - 不写日志（不泄露目录结构到日志）。
  *
- * 纯函数语义：内部 try-catch，对任何输入（含不存在的 homeDir）都返回数组、不抛异常。
- * 异常路径降级为对应源的 installed=false（无 count 字段）。
+ * 纯函数语义：对任何输入（含不存在的 homeDir）都返回数组、不抛异常。
+ * 目录不存在 → installed=false；目录存在但不可读（EACCES 等）→ installed=true +
+ * error='unreadable' + 计数缺省（RT-5#5：「不可读」不降级为「未安装」，三态可区分）。
+ * 子树级读失败（嵌套子目录 stat/readdir）按该子树计数 0 的局部降级处理。
  *
  * 源 → 配置目录映射：
  * - Claude Code: <home>/.claude/skills（skill）、<home>/.claude/agents（agent）
@@ -60,63 +62,79 @@ export function detectSources(homeDir: string): SourceDetectResult[] {
  * 检测 Claude Code 源（skill + agent 双目录）。
  * installed = skill 目录或 agent 目录任一存在即视为安装。
  * skillCount/agentCount 分别统计（仅存在的目录才计数）。
+ * RT-5#5：目录存在但顶层不可读（EACCES 等）保留 installed=true + error 字段显形
+ * 「不可读」——不再整体降级为 installed:false（「不可读」与「未安装」同形会误导用户
+ * 以为源里没有内容）。
  */
 function detectClaude(skillDir: string, agentDir: string): SourceDetectResult {
   const source: ProviderSource | AgentSource = 'claude'
-  try {
-    const skillExists = existsSync(skillDir)
-    const agentExists = existsSync(agentDir)
-    const installed = skillExists || agentExists
-    if (!installed) {
-      return { source, installed: false, dir: skillDir }
-    }
-    // skillCount 仅在 skill 目录存在时统计（不存在时省略字段，符合「installed=false 省略」语义延伸）。
-    const result: SourceDetectResult = {
-      source,
-      installed: true,
-      dir: skillDir,
-      skillCount: skillExists ? countSkillFiles(skillDir) : 0,
-      agentCount: agentExists ? countAgentFiles(agentDir) : 0,
-    }
-    return result
-  } catch {
-    // 异常降级：installed=false，无 count 字段。
+  const skillExists = existsSync(skillDir)
+  const agentExists = existsSync(agentDir)
+  if (!skillExists && !agentExists) {
     return { source, installed: false, dir: skillDir }
   }
+  const result: SourceDetectResult = { source, installed: true, dir: skillDir }
+  let errored = false
+  // skillCount 仅在 skill 目录存在时统计（不存在时省略字段，符合「installed=false 省略」语义延伸）。
+  try {
+    result.skillCount = skillExists ? countSkillFiles(skillDir) : 0
+  } catch {
+    // 顶层不可读：该计数缺省（不填 0 假数据），error 显形
+    errored = true
+  }
+  try {
+    result.agentCount = agentExists ? countAgentFiles(agentDir) : 0
+  } catch {
+    errored = true
+  }
+  if (errored) result.error = 'unreadable'
+  return result
 }
 
 /**
  * 检测仅有 skill 目录的源（codex / pi / zcode）。
- * installed = skill 目录存在。
+ * installed = skill 目录存在。目录存在但不可读 → error 显形（同 detectClaude）。
  */
 function detectSkillOnlySource(source: ProviderSource, skillDir: string): SourceDetectResult {
-  try {
-    const skillExists = existsSync(skillDir)
-    if (!skillExists) {
-      return { source, installed: false, dir: skillDir }
-    }
-    return {
-      source,
-      installed: true,
-      dir: skillDir,
-      skillCount: countSkillFiles(skillDir),
-    }
-  } catch {
-    // 异常降级：installed=false，无 count 字段。
+  if (!existsSync(skillDir)) {
     return { source, installed: false, dir: skillDir }
   }
+  const result: SourceDetectResult = { source, installed: true, dir: skillDir }
+  try {
+    result.skillCount = countSkillFiles(skillDir)
+  } catch {
+    result.error = 'unreadable'
+  }
+  return result
 }
 
 /**
  * 递归统计 dir 下名为 SKILL.md（不分大小写）的文件数。
- * 目录不存在或不可读时返回 0。
+ * 目录不存在返回 0；**顶层不可读上抛**（detect 层转 error 字段——「不可读」≠「0 个」）。
  */
 function countSkillFiles(dir: string): number {
   if (!existsSync(dir)) return 0
-  return countSkillFilesRecursive(dir)
+  const names = readdirSync(dir)
+  let count = 0
+  for (const name of names) {
+    count += countSkillEntry(join(dir, name), name)
+  }
+  return count
 }
 
-/** countSkillFiles 的递归实现（dir 已确认存在）。任何 readdir/stat 异常按 0 处理该子树。 */
+/** 单条目计数：子目录走递归（子树内部降级 0）、skill.md 计 1、stat 失败跳过。 */
+function countSkillEntry(child: string, name: string): number {
+  try {
+    if (statSync(child).isDirectory()) return countSkillFilesRecursive(child)
+  } catch {
+    // 符号链接断裂/权限等，跳过该条目
+    return 0
+  }
+  return name.toLowerCase() === SKILL_FILE_NAME_LOWER ? 1 : 0
+}
+
+/** countSkillFiles 的子树递归实现（子目录层级）：任何 readdir/stat 异常按 0 处理该子树
+ *  （局部降级——子树不可读只影响该子树计数，不掩盖顶层不可读）。 */
 function countSkillFilesRecursive(dir: string): number {
   let count = 0
   let names: string[]
@@ -145,16 +163,11 @@ function countSkillFilesRecursive(dir: string): number {
 
 /**
  * 统计 dir 顶层 *.md 文件数（不递归子目录）。
- * 目录不存在或不可读时返回 0。
+ * 目录不存在返回 0；**顶层不可读上抛**（detect 层转 error 字段）；单条目 stat 失败跳过。
  */
 function countAgentFiles(dir: string): number {
   if (!existsSync(dir)) return 0
-  let names: string[]
-  try {
-    names = readdirSync(dir)
-  } catch {
-    return 0
-  }
+  const names = readdirSync(dir)
   let count = 0
   for (const name of names) {
     if (!name.toLowerCase().endsWith('.md')) continue

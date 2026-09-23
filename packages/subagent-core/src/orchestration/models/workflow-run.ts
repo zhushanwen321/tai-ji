@@ -24,8 +24,6 @@
  * worker-error-retry（G5-001 + G6-001）：
  * - replaceRuntime(newRt): 前置 status==="running"（G6-001），原子释放前一个 runtime
  * + 绑定新 runtime，全程保持不变式 I1（中间不经过 runtime===undefined 的可见状态）。
- *
- * 参考：domain-models.md §1（聚合根定义）、clarification.md G3-001/G5-001/G6-001。
  */
 
 import { RunRuntime } from "./run-runtime.ts";

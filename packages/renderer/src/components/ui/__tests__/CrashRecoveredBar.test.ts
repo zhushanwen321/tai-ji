@@ -1,5 +1,5 @@
 /**
- * CrashRecoveredBar.vue 组件测试（crash-resilience §3.1 T2 / §4 A3）。
+ * CrashRecoveredBar.vue 组件测试（T2 / §4 A3）。
  *
  * 三视角 DOM 断言（TEST-STRATEGY §3，RespawnNoticeBar.test.ts 同型）：
  * - 标志存在：T2 文案可见（已从崩溃中恢复 + 原因 + 会话数据未丢失）+ 关闭按钮可见

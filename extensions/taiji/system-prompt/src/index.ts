@@ -4,9 +4,13 @@
  * Registers a `before_agent_start` hook that:
  *  1. Reads <dataDir>/system-prompt.json every turn (mtime-cached, see
  *     `cachedReadFileSync`).
- *  2. When `append.enabled === true` and `append.prompt` is non-blank,
+ *  2. Appends the fixed taiji capability section unless explicitly disabled
+ *     (`capability.enabled === false` — anything else, including a missing
+ *     field, keeps it ON; deliberate inversion of the readSection fail-safe
+ *     direction, see `readCapabilityEnabled`).
+ *  3. When `append.enabled === true` and `append.prompt` is non-blank,
  *     appends the user's text to the event's systemPrompt.
- *  3. Reads the global instructions file `~/.agents/AGENTS.md` (candidates
+ *  4. Reads the global instructions file `~/.agents/AGENTS.md` (candidates
  *     AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD) every turn and appends it
  *     under a labeled header. Modeled on pi's native `loadContextFileFromDir`
  *     but deliberately narrower: pi 0.84.4 also probes `AGENTS.override.md`
@@ -17,8 +21,9 @@
  *     context-file opt-out). `TAIJI_GLOBAL_AGENTS_DIR` overrides the global
  *     directory (test hook / escape hatch).
  *
- * Injection order per turn: base prompt → global instructions → append config
- * (the explicitly configured text wins last).
+ * Injection order per turn: base prompt → global instructions → taiji
+ * capability section → append config (the explicitly configured text wins
+ * last).
  *
  * Fail-safe: any error in the handler is swallowed and `undefined` is returned
  * so the agent loop is never blocked.
@@ -67,6 +72,22 @@ function cachedReadFileSync(filePath: string): string | null {
  * directory and intentionally exclude AGENTS.override.md.
  */
 const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD']
+
+/**
+ * taiji capability 固定注入段（设计 D6）：告知 AI 本渲染器的能力面，让新会话无需
+ * 用户手动教。常量放扩展源码内（版本化随 feature 走，非用户配置——用户只持有
+ * on/off 开关，不持有文案本身）。文案英文，与 pi system prompt 语言一致；四点 =
+ * 内联 HTML 白名单面 / 相对图片 cwd 解析 / 相对链接 cwd 解析（与反引号白名单路径
+ * 自动链接化同基准、校验面差异如实）/ 远程图片不渲染 + 反引号规约。
+ */
+const TAIJI_CAPABILITY_SECTION = `# TaiJi capabilities
+
+How TaiJi renders your markdown responses:
+
+- Inline HTML is rendered with a GitHub-grade tag allowlist. Script/style elements and style/class attributes are stripped.
+- Relative image paths (e.g. ![](docs/assets/img.png)) are resolved against the session working directory and displayed.
+- Relative links (e.g. [plan](docs/plan.md)) use the same session working directory; clicking one opens the target file inside the app. Backtick file paths that TaiJi auto-links share the same cwd base. Difference in guarantees: auto-linked backtick paths are checked to exist, relative links may be dead — when citing a file you know exists, backticks are the safer form.
+- Remote http(s) images are not rendered; reference a local file path instead. Always use backticks for inline code and type names in prose (bare angle-bracket names like Promise<void> are stripped).`
 
 /**
  * Resolve the data directory from the environment.
@@ -157,6 +178,7 @@ function readConfig(dataDir: string): {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  capability: { enabled: boolean }
 } {
   const parsed = readJsonIfValid(path.join(dataDir, CONFIG_FILE))
   if (!parsed) {
@@ -164,6 +186,8 @@ function readConfig(dataDir: string): {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: false, prompt: '' },
+      // capability 默认值与解析语义同向：缺 config → 开（见 readCapabilityEnabled）
+      capability: { enabled: true },
     }
   }
   // Merge defensively — every field has its own default.
@@ -173,7 +197,20 @@ function readConfig(dataDir: string): {
     version: typeof parsed.version === 'number' ? parsed.version : 1,
     replace: readSection(parsed.replace),
     append: readSection(parsed.append),
+    capability: { enabled: readCapabilityEnabled(parsed.capability) },
   }
+}
+
+/**
+ * capability 段开关解析——方向与 readSection 刻意相反（设计 D6 防照抄锚点）：
+ * 仅显式布尔 `false` 关闭；缺字段（v1 存量 json）/字段形态不对（如字符串
+ * "false"）/capability 非对象/文件损坏（readConfig 前置收敛）→ true。
+ * 原因：replace/append 是用户显式配置（缺省关闭才安全），capability 是 taiji
+ * 内置告知（默认开是交付语义）——fail-safe 方向各自服务于所属字段的语义。
+ */
+function readCapabilityEnabled(raw: unknown): boolean {
+  if (!isJsonObject(raw)) return true
+  return raw.enabled !== false
 }
 
 /** Read a JSON file and return it as an object; missing / malformed / non-object → null. */
@@ -219,6 +256,17 @@ function withGlobalInstructions(prompt: string): string {
   return prompt + '\n\n# Global instructions (' + global.path + ')\n\n' + global.content
 }
 
+/**
+ * Append the fixed taiji capability section（labeled header 与 global 注入段同构）。
+ * 生效粒度 = 下一 turn：本 hook 每 turn 读 config（mtime 缓存判变），改开关 → 写
+ * system-prompt.json → 下一 turn 读到新值——当前 turn 不受影响（机制既有，非新增）。
+ */
+function withCapabilitySection(prompt: string): string {
+  const cfg = readConfig(resolveDataDir())
+  if (!cfg.capability.enabled) return prompt
+  return prompt + '\n\n' + TAIJI_CAPABILITY_SECTION
+}
+
 /** Read the append config and apply it to the prompt (empty append → unchanged). */
 function withAppendPrompt(prompt: string): string {
   const cfg = readConfig(resolveDataDir())
@@ -228,13 +276,13 @@ function withAppendPrompt(prompt: string): string {
 
 /**
  * Build the injected system prompt. Injection order per turn:
- * base prompt → global instructions → append config (the explicitly
- * configured text wins last). Returns the new systemPrompt, or undefined
- * when nothing changed.
+ * base prompt → global instructions → taiji capability section → append
+ * config (the explicitly configured text wins last). Returns the new
+ * systemPrompt, or undefined when nothing changed.
  */
 function buildSystemPrompt(event: BeforeAgentStartEvent): { systemPrompt: string } | undefined {
   const basePrompt = typeof event.systemPrompt === 'string' ? event.systemPrompt : ''
-  const newPrompt = withAppendPrompt(withGlobalInstructions(basePrompt))
+  const newPrompt = withAppendPrompt(withCapabilitySection(withGlobalInstructions(basePrompt)))
   return newPrompt === event.systemPrompt ? undefined : { systemPrompt: newPrompt }
 }
 

@@ -1,95 +1,82 @@
-<p align="center"><img src="docs/assets/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
+<p align="center"><img src="docs/assets/logo/assets/qianwen/logo-square.png" width="96" alt="TaiJi logo" /></p>
 
-# TaiJi
+<h1 align="center">TaiJi</h1>
 
-[简体中文](README.md) | [English](README_EN.md)
+<p align="center"><strong>An AI Agent desktop workbench for long-running, multi-task collaboration</strong></p>
 
-An AI Agent desktop workbench (macOS / Windows / Linux) built on an Electron + Vue 3 + Node.js Runtime architecture.
+<p align="center">
+  <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a> | <a href="https://github.com/zhushanwen321/tai-ji/releases">Download</a>
+</p>
 
-It communicates with all kinds of AI Agents over the child-process RPC protocol of [pi](https://github.com/badlogic/pi-mono) (npm package `@earendil-works/pi-coding-agent`), providing multi-session management, dual-Panel split view, subagent/workflow orchestration, goal-driven autonomous loops, scheduled tasks, and more — designed for long-running, multi-task Agent collaboration. 18 Agent extensions ship bundled with the app, ready out of the box.
+TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks side by side, watch the AI think, edit files, and run commands as it happens, and fork a session to retry whenever a reply goes the wrong way. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel, with 18 extensions bundled and ready out of the box.
+
+<p align="center">
+  <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window: multi-session sidebar and live agent conversation stream with thinking, tool calls, and file edits" width="900" />
+</p>
 
 > For development conventions, key rules, and debugging discipline, see [AGENTS.md](AGENTS.md).
 
-## Installation
+---
 
-Current latest version: **v0.10.0** ([view all releases](https://github.com/zhushanwen321/tai-ji/releases)). After installation, the app automatically checks for new versions and offers a one-click upgrade.
+## Quick Start
+
+Current latest version: **v0.10.1** ([view all releases](https://github.com/zhushanwen321/tai-ji/releases)). After installation, the app automatically checks for new versions and offers a one-click upgrade.
 
 <!-- INSTALL:BEGIN -->
 <!-- Version numbers inside this block are replaced automatically by .agents/skills/merge/scripts/update-readme-install.mjs after each official release; version numbers outside the block are left untouched. -->
 
-### Mainland China download (GitCode mirror, measured at ~15 MB/s over direct domestic connections)
+<details>
+<summary><b>🇨🇳 Mainland China download (GitCode mirror, ~15 MB/s)</b></summary>
 
 Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433817/tai-ji)
 
-#### macOS (Apple Silicon)
-
+**macOS (Apple Silicon)**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
-  && open /tmp/TaiJi.dmg
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
-You can also download the dmg from [GitCode Releases](https://gitcode.com/qq_18433817/tai-ji/releases) in a browser and install it by double-clicking.
-
-#### Linux
-
+**Linux**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
-  && chmod +x ~/TaiJi.AppImage \
-  && ~/TaiJi.AppImage
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
-#### Windows
-
-PowerShell (uses Invoke-WebRequest to avoid the parameter conflicts caused by curl being an alias in PowerShell):
-
+**Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
-Command Prompt (cmd.exe; requires the system-bundled curl.exe, included by default since Windows 10 1803+):
+</details>
 
-```cmd
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
-```
-
-### International download (GitHub)
+<details>
+<summary><b>🌍 International download (GitHub)</b></summary>
 
 Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/tai-ji)
 
-#### macOS (Apple Silicon)
-
+**macOS (Apple Silicon)**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
-  && open /tmp/TaiJi.dmg
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
-#### Linux
-
+**Linux**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
-  && chmod +x ~/TaiJi.AppImage \
-  && ~/TaiJi.AppImage
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
-#### Windows
-
-PowerShell:
-
+**Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.3/TaiJi-0.10.3-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
-Command Prompt (cmd.exe):
+</details>
 
-```cmd
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
-```
+<details>
+<summary><b>❓ First launch issues?</b></summary>
 
-> On macOS, if the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads; needed for browser downloads):
->
-> ```bash
-> xattr -cr /Applications/TaiJi.app
-> ```
+- **macOS says "damaged" or "cannot verify developer"**: run `xattr -cr /Applications/TaiJi.app`
+- **Linux AppImage won't start**: confirm `chmod +x` was run, or try `--no-sandbox`
+- **Windows SmartScreen warning**: click "More info" → "Run anyway"
+
+</details>
 
 <!-- INSTALL:END -->
 
@@ -97,199 +84,129 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 ## Core Capabilities
 
-### Sessions & Workbench
+### 🔄 Multi-session parallelism
+Run multiple AI tasks at once. The sidebar shows live status for each session. Fork a new session from any reply, hand off context, or import an existing session at any time.
 
-- **Multi-session management** — session list in the sidebar, ⌘/Ctrl+N to create; session tree branching (fork / clone) is a native pi capability, letting you branch from any assistant message (⌘/Ctrl+G fork, ⌘/Ctrl+⇧+G fork mode, ⌘/Ctrl+J handoff)
-- **Dual-Panel split view** — a single Panel is the default state; opening a second session splits the view. Focus mode is supported to concentrate on the current session
-- **Overview** — a standalone bird's-eye view across sessions (card grid + filtering + background agent aggregation)
-- **Global efficiency entry points** — ⌘/Ctrl+K global search, ⌘/Ctrl+B collapse sidebar, ⌘/Ctrl+, settings, ⌘/Ctrl+[ ] session back/forward, ⌘/Ctrl+⇧+P preset switching; all shortcuts can be remapped in settings
+### 👁️ Fully visible execution
+Thinking chains, tool calls, and file edits stream in as they happen. Each turn collapses into a one-line summary; click to expand the full process. The Trace view supports filtering by type and full-text search.
 
-### Conversation Flow
+### 🤖 Subagents & Workflows
+Dispatch independent tasks to subagents running in parallel, or compose multi-step workflows with chain/parallel templates. The task tray aggregates progress in real time; each subtask runs under a budget and turn limit.
 
-- **Streaming rendering** — incremental markdown rendering, turn collapsing, thinking block expand/collapse
-- **GUI widget panels** — todo / goal and similar state render as dedicated widget panels with a unified meta header row (title, status dot, N/M progress, mini progress bar); Agent-side state syncs to the presentation layer over a single channel
-- **Structured interaction** — ask-user multi-question structured input (split-pane preview + inline editing), structured output validated by JSON Schema
+### 🛠️ Workbench integration
+Sidebar file tree (smooth on large directories + git badges), drawer terminal (per-session state), Git/worktree management, and a built-in browser pane.
 
-### Files / Terminal / Git
+### 🧩 21 built-in extensions
+Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 16 are usable standalone outside taiji. See the [extension development guide](docs/extensions/development-guide.md).
 
-- **File tree** — virtualized rendering (flattened visible rows) that stays smooth on large repositories; file status badges and line counts
-- **Terminal** — command-style buffer rendering, versioned replay, session-level persistent partitions
-- **Git** — branch and change status display; worktree create/switch/cleanup
+---
 
-### Built-in Extensions (18, bundled with the app)
+<details>
+<summary><b>📖 Full feature list (click to expand)</b></summary>
+
+### Agent execution
+- **Parallel subagents**: the task tray above the input box collects running subtasks; open one to read its full conversation and output in the drawer.
+- **Workflow orchestration**: compose subagents into stateful workflows with chain and parallel templates. Interrupted runs resume from where they stopped.
+- **Todo & goal**: the agent breaks work into a todo list and completes items one by one. Long-running goals run in goal mode with acceptance criteria and a budget.
+- **Scheduled tasks**: cron or interval tasks that wake a session automatically at the scheduled time. Tasks can be paused, deleted, or triggered once manually.
+- **Context management**: the agent compacts its own context when a session grows long and warns you as thresholds approach.
+- **Session operations**: ⌘/Ctrl+G forks, ⌘/Ctrl+J hands off, ⌘/Ctrl+I imports. The input box supports `/` commands, `#` session refs, `$` file refs, and `@` subagent spawning.
+
+### Watching the execution
+- **Live conversation**: thinking, tool calls, and file edits stream in; each turn collapses into a one-line summary.
+- **Trace view**: a ledger of every execution entry, filterable by type and searchable in full text. Context-only mode shows where compaction happened.
+- **Status strips**: todo and goal progress stays pinned inside the conversation.
+- **Structured prompts**: when the agent needs a decision it opens a form with multiple questions, options, and free-form input.
+- **Background tasks**: long-running commands can move to the background and notify you on completion.
+
+### Workbench
+- **File tree**: sidebar file panel that stays smooth on large directories, with git badges on modified files.
+- **Terminal**: a terminal built into the drawer, one per session, each keeping its own state.
+- **Git & worktrees**: check branches and file changes; create, switch, and clean up worktrees for parallel tasks.
+- **Browser pane**: a browser built into the drawer to watch the agent work through web pages.
+
+### Settings & control
+- **System prompt**: replace the agent's system prompt entirely from settings. Snapshots are taken before each edit.
+- **Tool permissions**: switch permission levels next to the input box, from read-only to full access.
+- **Models**: a built-in catalog of common providers; paste an API key to start.
+- **Settings center**: 12 sections covering provider, appearance, skills, agent, extensions, system prompt, terminal, presets, worktree, updates, system, and usage.
+- **Auto update**: new versions are detected automatically; confirm and restart to upgrade.
+
+</details>
+
+---
+
+## Extension Ecosystem
+
+TaiJi's Agent capabilities are implemented through the pi extension mechanism; source lives in [`extensions/`](extensions/) (21 `@zhushanwen/pi-*` packages + the `shared/` library), 18 of which ship bundled with the app.
+
+The following 16 extensions are usable standalone outside taiji (all published to npm, or loadable via `--extension`):
 
 | Extension | Purpose |
 |------|------|
-| `pi-permission` | Four permission modes (yolo / auto / approve / strict) + a three-tier approval pipeline |
-| `pi-subagent-workflow` | Unified subagent execution + multi-agent workflow orchestration (stateful workflows such as parallel / chain) |
-| `pi-goal` | `/goal` persistent goal-driven autonomous loop with evidence-based acceptance |
-| `pi-todo` | AI-driven todo list (session persistence + `/todos`) |
-| `pi-ask-user` | Structured multi-question input tool |
-| `pi-structured-output` | Structured output (JSON Schema + Ajv validation) |
-| `pi-scheduler` | Scheduled task scheduling (cron / interval, once / recurring) |
-| `pi-session-reader` | Read / query session history (trees, family, execution tree, search, export) |
-| `pi-rename-session` | Auto-generate session titles after the first conversation round |
-| `pi-pending-notifications` | Cross-extension async operation registration / query (prevents message injection during long tasks) |
-| `pi-agent-ext` | Internal commands (host-triggered reload `/__taiji_reload__` + on-demand system prompt fetch for the Trace view `/__taiji_get_system_prompt__`) |
-| `pi-system-prompt` | System prompt injection (AGENTS.md / settings append sections) |
-| `pi-msg-id-mapper` | client UUID ↔ user entry ID mapping |
-| `pi-system-prompt-trace` | Writes an taiji:system-prompt trace entry whenever the system prompt is established or changes |
-| `pi-smart-context` | Agent-driven context compaction (compact_context tool + dual-mode summary takeover + tiered reminders) |
-| `pi-session-manager` | Agent-managed child sessions (create / send / history / status / list / abort) |
-| `pi-base-tool-enhance` | Bash tool enhancement (foreground delegates to the pi official factory + background mode + tool error auditing) |
-| `pi-plugin-bridge` | Plugin system bridge (registers plugin tools into pi + relays events/intercepts over the marker channel) |
+| [`pi-subagent-workflow`](extensions/universal/subagent-workflow/README.md) | Unified subagent execution + multi-agent workflow orchestration |
+| [`pi-goal`](extensions/universal/goal/README.md) | `/goal` persistent goal-driven autonomous loop |
+| [`pi-todo`](extensions/universal/todo/README.md) | AI-driven todo list |
+| [`pi-ask-user`](extensions/universal/ask-user/README.md) | Structured multi-question input |
+| [`pi-permission`](extensions/universal/permission/README.md) | Four permission modes + three-layer decision pipeline |
+| [`pi-scheduler`](extensions/universal/scheduler/README.md) | Scheduled task scheduling (cron / interval) |
+| [`pi-session-reader`](extensions/universal/session-reader/README.md) | Read / query session history |
+| [`pi-session-manager`](extensions/universal/session-manager/README.md) | Agent-managed child sessions |
+| [`pi-rename-session`](extensions/universal/rename-session/README.md) | Auto-generate session titles |
+| [`pi-smart-context`](extensions/universal/smart-context/README.md) | Agent-driven context compaction |
+| [`pi-structured-output`](extensions/universal/structured-output/README.md) | Structured output (JSON Schema) |
+| [`pi-pending-notifications`](extensions/universal/pending-notifications/README.md) | Cross-extension async operation management |
+| [`pi-base-tool-enhance`](extensions/universal/base-tool-enhance/README.md) | Bash tool enhancement |
+| [`pi-plan`](extensions/universal/plan/README.md) | Lightweight plan mode |
+| [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
+| [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + read-only `cw_query` tool |
 
-Of these, 8 infrastructure-grade ones (`pi-pending-notifications` / `pi-session-reader` / `pi-structured-output` / `pi-agent-ext` / `pi-system-prompt` / `pi-msg-id-mapper` / `pi-base-tool-enhance` / `pi-plugin-bridge`) are always resident and cannot be disabled; the other 10 can be disabled in settings. In addition, 3 packages are published to npm and can be installed as needed: `pi-cache-probe` (cache prefix fingerprint collection + attribution analysis), `pi-cw-tool` (cw 2.0 runner hands-on guide + the read-only cw_query query tool), and `pi-plan` (lightweight plan mode).
+The remaining 5 (`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`) are taiji-integration-specific. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
-### Models & Settings
+---
 
-- **Provider management** — multi-provider configuration, built-in provider catalog, API key management
-- **Quota display** — usage quota queries per provider / model
-- **Settings center** — full-screen overlay covering 11 menu domains, including Provider / extensions / skills / terminal / presets / worktree / system updates
-- **Auto update** — periodic checks for new versions; after confirmation the app restarts to upgrade. Release Notes are bilingual (English / Chinese)
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────┐
-│                  Electron 主进程                   │
-│  窗口管理 · Runtime 子进程生命周期 · 全局快捷键   │
-└─────────────┬────────────────────┬────────────────┘
-              │ IPC                │ spawn
-              ▼                    ▼
-┌──────────────────┐   ┌──────────────────────────┐
-│   Preload 桥接    │   │   Runtime (Node.js 子进程) │
-│ electronAPI 暴露  │   │  WebSocket Server (ws)    │
-└────────┬─────────┘   │  pi RPC 适配 · 事件翻译    │
-         │             └────────────┬───────────────┘
-         │                          │ child_process RPC
-         ▼                          ▼
-┌──────────────────────────────────────────────────┐
-│        渲染进程 (Vue 3 + Vite · 太极纯灰暗色)      │
-│  Pinia 状态 · taiji ui 组件 · ws-client · event-bus │
-└──────────────────────────────────────────────────┘
-```
-
-Five core modules:
-
-| Module | Path | Responsibility |
-|------|------|------|
-| **Main process** | `apps/electron/main/` | BrowserWindow lifecycle, runtime spawn/stop, global shortcuts (supervisor / window / gateway orchestration subsystems) |
-| **Preload** | `apps/electron/preload/` | `contextIsolation`-secured bridge exposing `window.electronAPI` |
-| **Frontend** | `packages/renderer/` | Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + @taiji/ui (TaiJi pure-gray dark design system) |
-| **Runtime** | `packages/runtime/` | WebSocket service with a three-layer architecture (transport/services/infra); communicates with Agents over the pi RPC protocol |
-| **Shared types** | `packages/shared/` | TypeScript type definitions shared between frontend and runtime (pnpm workspace) |
-
-The renderer process has two outbound channels: **WS** (→ Runtime, business/data) and **IPC** (→ Main, window/process/OS privileges). The renderer never calls `window.electronAPI` directly; all access goes through the [`lib/ipc.ts`](packages/renderer/src/lib/ipc.ts) facade.
-
-### Why Electron
-
-1. **Rendering stability** — Chromium's CSS/layout output is identical to Chrome DevTools, with none of the WebView2/WebKit platform differences
-2. **Visual sharpness** — font rendering, subpixel anti-aliasing, and GPU compositing behavior are fully controllable, giving consistent cross-platform results
-3. **Ecosystem maturity** — a complete toolchain: electron-builder, DevTools extensions, crash reporting, and more
-4. **Native Node.js capabilities** — the main process uses Node APIs directly (child_process, fs, net); no Rust backend process or FFI needed
-
-### Dual Extension Mechanisms
-
-TaiJi has two independent extension mechanisms:
-
-**pi Extension** — runs inside the pi child process, loaded via the `--extension` argument; extends Agent capabilities (tools, commands, event hooks). Source lives in this repo under `extensions/` (21 `@zhushanwen/pi-*` packages + the `shared/` library), 18 of which are esbuild-bundled into the app. Development docs:
-
-- [Extension Development Guide](docs/extensions/development-guide.md) — single source of truth: structure, lifecycle, publishing
-- [Extension Conventions](docs/extensions/extension-conventions.md) — binding conventions you must follow
-- [Local Development & Debugging](docs/extensions/local-dev-guide.md) — `TAIJI_EXTENSION_PATHS` live link, log inspection
-- [GUI Protocol Integration](docs/extensions/gui-protocol-guide.md) — retrofitting TUI extensions for TUI/GUI dual mode
-- [Glossary](docs/extensions/glossary.md) / [Agent Authoring Guide](docs/extensions/agent-authoring-guide.md)
-
-**Plugin System** — a plugin sandbox running on the taiji Runtime side; extends UI and host capabilities (tools, hooks, slash commands, status bar items, message decorations, settings forms). Two-level isolation for trusted and sandbox plugins (Worker Thread / separate forked child process) — a single plugin crash does not affect other plugins or the main process. Develop against [`packages/plugin-sdk`](packages/plugin-sdk/) (types + mock), scaffolded by `create-taiji-plugin`.
-
-## Quick Start (Development)
+## Development Guide
 
 **Prerequisites**: Node.js >= 22.19 (24 recommended, see `.nvmrc`), pnpm >= 10
 
 ```bash
-# 安装依赖（pnpm workspace 单步装完 apps/* + packages/* + extensions/*）
-pnpm install
-
-# 开发模式（Vite HMR + Electron 主进程）
-pnpm dev
-
-# 生产构建（electron-builder，产出 DMG/EXE/AppImage/manifest）
-pnpm build
-
-# 类型检查
-pnpm --filter @taiji/frontend run typecheck
-
-# ESLint
-pnpm run lint
-
-# extensions/ 下的 pi 扩展
-pnpm extensions:typecheck
-pnpm extensions:lint
-pnpm extensions:test
-
-# Playwright E2E
-pnpm build:e2e && pnpm test:e2e
+pnpm install          # Install dependencies
+pnpm dev              # Dev mode (Vite HMR + Electron main process)
+pnpm build            # Production build (DMG/EXE/AppImage/manifest)
+pnpm lint             # ESLint
+pnpm --filter @taiji/frontend run typecheck  # Type check
+pnpm test:e2e         # Playwright E2E (requires pnpm build:e2e first)
 ```
 
-Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debugging port (stably derived from the worktree name; run `node apps/electron/scripts/dev-instance.mjs --print` to see this instance's port); connect with Playwright for screenshots / DOM snapshots / JS execution (without stealing focus) — see [AGENTS.md "Frontend Debugging"](AGENTS.md). Note that runtime source code is not hot-reloaded (tsx runs without watch), so restart `pnpm dev` after changing runtime code; renderer changes take effect automatically via vite HMR.
+Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debugging port (`node apps/electron/scripts/dev-instance.mjs --print` to see the port); connect with Playwright for screenshots/DOM snapshots/JS execution. See [AGENTS.md](AGENTS.md).
 
 ### Environment Variables
 
 | Variable | Purpose | Default |
 |------|------|--------|
-| `TAIJI_MOCK` | Set to `1` to skip runtime child process startup and use mock data | — |
-| `VITE_MOCK` | Set to `true` to intercept all WS messages at the ws-client layer | — |
-| `TAIJI_AGENT_DATA_DIR` | Custom data directory (dev mode defaults to `~/.taiji-dev`, fully isolated from pi's `~/.pi/agent/`) | `~/.taiji` |
+| `TAIJI_MOCK` | Set to `1` to skip runtime child process startup | — |
+| `VITE_MOCK` | Set to `true` to intercept WS messages at the ws-client layer | — |
+| `TAIJI_AGENT_DATA_DIR` | Custom data directory (dev mode pins `~/.taiji-dev`) | `~/.taiji` |
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
 |----|------|
 | Desktop framework | Electron 42 |
-| Frontend framework | Vue 3.5 + TypeScript 5.8 |
-| State management | Pinia 3 |
-| Build tooling | Vite 8 (renderer) + Vite lib mode (main/preload) |
-| UI components | @taiji/ui (in-house component library) + reka-ui |
-| Styling | Tailwind CSS v3 (TaiJi pure-gray tokens; scoped CSS component styles and `@apply` are forbidden) |
-| Icons | @lucide/vue |
-| Internationalization | vue-i18n 10 |
-| Backend communication | ws (WebSocket) + pi child-process RPC |
+| Frontend | Vue 3.5 + TypeScript 5.8 + Pinia 3 + Vite 8 + Tailwind CSS v3 |
+| UI | @taiji/ui + reka-ui + @lucide/vue + vue-i18n 10 |
+| Backend communication | WebSocket + pi child-process RPC |
 | Packaging | electron-builder 26 |
 
-## Project Structure
-
-```
-├── apps/electron/            # Electron 壳
-│   ├── main/                 # 主进程（supervisor / window / gateway / shortcuts）
-│   └── preload/              # 安全桥接（electronAPI）
-├── packages/                 # pnpm workspace 包
-│   ├── renderer/             # Vue 前端（components / composables / stores / lib）
-│   ├── runtime/              # Node.js Runtime（transport / services / infra + plugins）
-│   ├── shared/               # 前后端共享类型
-│   ├── ui/                   # taiji ui component library (@taiji/ui)
-│   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation）
-│   ├── dom-core/             # composer DOM 层
-│   ├── mobile-renderer/      # 移动端渲染入口
-│   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
-│   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   └── create-taiji-plugin/    # 插件项目脚手架
-├── extensions/               # 21 @zhushanwen/pi-* pi extension sources + shared/ library
-├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
-├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
-├── resources/                # pi binary + 内置 statusline 插件
-├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
-└── .agents/                  # 项目级 agent / skill（merge / review 等）
-```
-
 ## Release
-
-Two independent release pipelines, decoupled by tag prefix:
 
 | Pipeline | Artifacts | Trigger tag | Workflow |
 |------|------|----------|----------|
 | Electron packaging | DMG / EXE / AppImage / manifest | `v*` | `release.yml` |
-| npm package publishing | `@zhushanwen/pi-*` + `@zhushanwen/extension-protocol` | `npm-*` | `release-npm.yml` |
+| npm package publishing | `@zhushanwen/pi-*` extensions + engine/SDK packages | `npm-*` | `release-npm.yml` |
+| npm prerelease | dev dist-tag test versions | `dev-npm-*` | `release-npm-dev.yml` |
 
 ## Documentation Index
 

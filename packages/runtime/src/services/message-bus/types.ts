@@ -24,6 +24,11 @@ export interface BusClient {
   readyState: number
   /** 发送序列化后的消息体（JSON 字符串）。 */
   send(data: string): void
+  /**
+   * 发送缓冲堆积字节数（RT-1#7 背压观测用；ws 库 WebSocket 天然携带）。
+   * 可选成员——mock 实现缺省时背压检查 no-op，不影响发送主流程。
+   */
+  readonly bufferedAmount?: number
 }
 
 /**

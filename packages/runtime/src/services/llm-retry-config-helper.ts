@@ -1,5 +1,5 @@
 /**
- * LLM 重试配置 helper（设计 docs/design/llm-retry-settings.md §3.3 D3/D7/D8）。
+ * LLM 重试配置 helper。
  *
  * 承载 retry 域读写两侧的纯函数：缺省合并/坏值回落/置configured 判定（读侧）与
  * D3 嵌套键级 merge（写侧）。抽出原因：控 config-service max-lines 500

@@ -290,6 +290,49 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/worktree isolation/);
+    // [R5] pi 形态（sessionFile 有值）：历史保全占位维持 sessionFile 路径渲染
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
+      new RegExp(`remains intact at ${sessionFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.`),
+    );
+    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+  });
+
+  it("[R5] worktree 绑定丢失 zcode 形态（sessionFile undefined）→ 拒绝文案不产出 at undefined，改述隔离会话库承载", () => {
+    // zcode record 的历史由隔离会话库经 engineHandle.sessionRef 承载、不随 worktree
+    // checkout 丢失——sessionFile 占位按锚形态分流，硬渲染会产出 "at undefined"。
+    // 拒绝语义（ResurrectDeniedError）不变，仅修文案占位准确性。
+    const deps = makeDeps({
+      disk: [
+        makeFound({
+          worktree: true,
+          engine: "zcode",
+          sessionFile: undefined,
+          engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+        }),
+      ],
+    });
+
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/worktree isolation/);
+    // 不再出现 "at undefined" 占位泄漏
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/isolated session db/);
+    let message = "";
+    try {
+      coldLookupForAction(makeDeps({
+        disk: [
+          makeFound({
+            worktree: true,
+            engine: "zcode",
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ],
+      }), "sa-cold-1", true);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).not.toContain("at undefined");
+    expect(message).toContain("not affected by the lost checkout");
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
 
@@ -447,6 +490,26 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     // pid 死）→ B 接管刷新 pid=B → C 再触达被拦（S8⑤ 验收锚点的磁盘面前置）。
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
+  });
+
+  it("[A3/S3] 冷查重建透传来源身份：workflow 批成员候选（origin+parentRunId）复活后保留——否则绕过 messageHandler one-shot 守卫；tool 候选缺省 → 仍 undefined", () => {
+    const sessionFile = writeSessionFixture();
+    const wfDeps = makeDeps({
+      disk: [makeFound({ sessionFile, origin: "workflow", parentRunId: "wf-run-1" })],
+    });
+
+    const wfRecord = coldLookupForAction(wfDeps, "sa-cold-1", true)!;
+
+    // workflow 批成员收口归档出内存后，message 冷复活必须带着 origin 进守卫
+    //（subagent-actions-core messageHandler 按 record.origin === "workflow" 拒绝）
+    expect(wfRecord.origin).toBe("workflow");
+    expect(wfRecord.parentRunId).toBe("wf-run-1");
+
+    // tool 来源候选（无 origin）缺省形态不破坏：两字段 undefined 透传为 undefined
+    const toolDeps = makeDeps({ disk: [makeFound({ sessionFile })] });
+    const toolRecord = coldLookupForAction(toolDeps, "sa-cold-1", true)!;
+    expect(toolRecord.origin).toBeUndefined();
+    expect(toolRecord.parentRunId).toBeUndefined();
   });
 });
 

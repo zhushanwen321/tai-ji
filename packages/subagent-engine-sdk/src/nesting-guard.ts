@@ -7,7 +7,7 @@
 //      迁移清单，本模块只消费它这一个构造器；文案与恢复指引逐字保留）；
 //   2. 头部注释的模块路径改为 SDK 落点。
 //
-// 设计权威源：docs/architecture/subagent-engine-abstraction.md D8（嵌套防护双层）：
+// 设计决策（嵌套防护双层）：
 //   统一 TAIJI_AGENT_SUBAGENT=1 标记（所有引擎 spawn 都注入，引擎 adapter 检测到即拒绝
 //   递归派发）+ 剥离各引擎原生标记（CC 的 CLAUDECODE / zsub 的 ZSW_NESTED / pi 的
 //   PI_SUBAGENT_*）防继承泄漏——子代理环境的旧标记会让孙代理误判自己已在嵌套层。

@@ -1,5 +1,5 @@
 /**
- * ToolResultImages 渲染测试（crash-resilience §3.3 D6-⑨ / u7-memory-governance）。
+ * ToolResultImages 渲染测试（D6-⑨ / u7-memory-governance）。
  *
  * 覆盖（验收：图片消息路径引用渲染 + 占位文案 DOM 断言）：
  * - live 写盘路径：port 返回 path → img 渲染 local-file:// 路径引用（base64 不进 src）

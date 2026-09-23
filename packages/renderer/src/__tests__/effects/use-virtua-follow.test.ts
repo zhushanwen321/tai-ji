@@ -1,7 +1,7 @@
 /**
- * useVirtuaFollow 单测（cw wave w1 W1TC1-W1TC9 + chat-pin-bottom-fix U1 行为用例集）。
+ * useVirtuaFollow 单测（cw wave w1 W1TC1-W1TC9 + U1 行为用例集）。
  *
- * 覆盖（对照 docs/design/chat-pin-bottom-fix.md §4.3 D7 反例重演①-⑥ + §4.4 ⑥ 用例清单）：
+ * 覆盖（D7 反例重演①-⑥ + D7① 复合判据与 D7② 收敛抑制窗用例清单）：
  * - 既有 follow 状态机（W1TC*，U1 适配后语义）：onWheel 脱离 / onScroll 恢复分支 /
  *   followIfStuck guard（rAF 内重读）/ followToBottom(force) / showJumpButton 派生
  * - U1 R3 回归：D1 末项索引直取（itemCount 注入，scrollToIndex 收到 length-1，
@@ -13,7 +13,7 @@
  *   RO 静默 120ms 关窗 / RO 持续活跃下 1500ms 硬上限关窗 / notifyRoActivity 重置静默计时
  * - U1 静默跟随变体（followIfStuck({markUnread:false})：脱离态不标 unread、贴底态正常滚）
  *   与 onSessionRebuild（置 NaN 快照 + 开抑制窗）
- * - U3 guard 语义迁移（chat-pin-bottom-fix D5 删 useMessageStreamScroll 后）：
+ * - U3 guard 语义迁移（D5 删 useMessageStreamScroll 后）：
  *   followToBottom() 默认非 force 受 guard（旧 MS6 等价）/ followToBottom(true) 完整重置面
  *   unread+浮层清零（旧 MS4/force 语义等价）；MS1-MS3/MS5/isStreaming 守卫的去留逐条
  *   依据见迁移 describe 块注释
@@ -487,7 +487,7 @@ describe('useVirtuaFollow', () => {
     })
   })
 
-  describe('U3 guard 语义迁移（自 use-message-stream-scroll.test.ts，chat-pin-bottom-fix D5）', () => {
+  describe('U3 guard 语义迁移（自 use-message-stream-scroll.test.ts，D5）', () => {
     /**
      * D5：useMessageStreamScroll 整文件删除，其测试同步删除；仍有行为价值的 guard 语义
      * 用例以 U1 新 API 等价表达迁入本文件。旧用例逐条去留（MS1-MS6，旧文件已删）：

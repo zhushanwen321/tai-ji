@@ -33,6 +33,8 @@ function grab(v) {
 }
 async function main() {
   const out = {};
+  out.argv1 = process.argv[1] || null;
+  out.builtinProviderEnv = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
   out.existsConfig = fs.existsSync(CONFIG);
   out.existsMissing = fs.existsSync(path.join(os.homedir(), '.no-such-file'));
   out.existsOther = fs.existsSync(OTHER);
@@ -55,6 +57,10 @@ main().then(() => process.exit(0), (err) => {
 `;
 
 interface ProbeState {
+  /** CLI 内看到的入口锚（wrapper 修复后应 = 真实 CLI 路径） */
+  argv1: string | null;
+  /** CLI 内看到的内建 provider 配置定位键（未设 = null，wrapper 缺席不设键语义） */
+  builtinProviderEnv: string | null;
   existsConfig: boolean;
   existsMissing: boolean;
   existsOther: boolean;
@@ -78,9 +84,18 @@ interface HomeSpec {
   realRaw?: string;
   /** cli config 对象形态；undefined = 不布置该文件（GUI-only 宿主） */
   real?: unknown;
+  /** 显式预设 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE；缺省 = spawn env 不设该键 */
+  builtinProviderEnv?: string;
 }
 
-function setupHome(spec: HomeSpec): { run: () => childProcess.SpawnSyncReturns<string>; state: () => ProbeState } {
+function setupHome(spec: HomeSpec): {
+  run: () => childProcess.SpawnSyncReturns<string>;
+  state: () => ProbeState;
+  /** 探针 fake CLI 路径（= spawn env 的 ZCODE_ENG_CLI_PATH） */
+  cliPath: string;
+  /** fixture HOME（wrapper / probe 内 os.homedir() 读到该值） */
+  home: string;
+} {
   const home = fs.mkdtempSync(path.join(tmpRoot, "home-"));
   const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-"));
   const cliDir = path.join(home, ".zcode", "cli");
@@ -100,23 +115,47 @@ function setupHome(spec: HomeSpec): { run: () => childProcess.SpawnSyncReturns<s
   const statePath = path.join(tmpRoot, `state-${path.basename(home)}.json`);
 
   return {
-    run: () =>
-      childProcess.spawnSync(process.execPath, [launcher], {
+    cliPath: probePath,
+    home,
+    run: () => {
+      // 密封性：剔除宿主链路 ambient 的 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE（taiji
+      // 链下跑测试会被误判为「显式传入」短路派生分支），该键由用例经 spec 显式决定
+      const { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: _ambient, ...cleanEnv } = process.env;
+      const explicit = spec.builtinProviderEnv === undefined
+        ? {}
+        : { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: spec.builtinProviderEnv };
+      return childProcess.spawnSync(process.execPath, [launcher], {
         env: {
-          ...process.env,
+          ...cleanEnv,
           HOME: home,
           ZCODE_ENG_CLI_PATH: probePath,
           ZCODE_ENG_V2_CONFIG: v2Path,
           ZCODE_PROBE_STATE: statePath,
+          ...explicit,
         } as NodeJS.ProcessEnv,
         encoding: "utf8",
         timeout: 15_000,
-      }),
+      });
+    },
     state: () => JSON.parse(fs.readFileSync(statePath, "utf8")) as ProbeState,
   };
 }
 
 const providerEntry = (apiKey: string) => ({ options: { apiKey, baseURL: "https://example.test/v1" } });
+
+/** 在 fixture HOME 下布置 v2 runtime provider 目录树（每版本两个 endpoint 各含 zcode-builtin.json）。 */
+function plantRuntimeProvider(home: string, versions: string[]): void {
+  const platDir = path.join(
+    home, ".zcode", "v2", "runtime", "provider", `${process.platform}-${process.arch}`,
+  );
+  for (const ver of versions) {
+    for (const ep of ["endpoint-test1", "endpoint-test2"]) {
+      const file = path.join(platDir, ver, ep, "zcode-builtin.json");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "{}");
+    }
+  }
+}
 
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-launcher-test-"));
@@ -163,6 +202,77 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(res.status).toBe(0);
     const cfg = JSON.parse(h.state().syncUtf8.text as string);
     expect(cfg.model.main).toBe("p1/model-x");
+  });
+});
+
+describe("入口锚（argv[1] 改写）", () => {
+  it("CLI 内看到的 argv[1] = 真实 CLI 路径（ZCODE_ENG_CLI_PATH），wrapper 路径不泄漏回 argv[1]", () => {
+    // 守卫语义：上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI
+    // 内建 provider 配置——wrapper 路径泄漏回 argv[1] 即启动期 provider 配置定位
+    // 失败（真机事故形态：报「无法定位 CLI ZCode Built-in Provider Config」即退）。
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().argv1).toBe(h.cliPath);
+  });
+});
+
+describe("内建 provider 配置定位（env 补齐）", () => {
+  it("显式传入优先：spawn env 已设该键时 wrapper 原样保留，不做目录派生", () => {
+    const explicit = path.join(tmpRoot, "explicit-provider", "zcode-builtin.json");
+    // HOME 无 v2 runtime 目录 → 派生分支必然落空，键值仍为显式传入即「优先」实证
+    const h = setupHome({
+      v2: { provider: { p1: providerEntry("k1") } },
+      real: {},
+      builtinProviderEnv: explicit,
+    });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().builtinProviderEnv).toBe(explicit);
+  });
+
+  it("派生（真实桌面布局）：无显式键时扫平台前缀目录（Rust arch 命名 darwin-aarch64）取版本号最大目录的 endpoint-*/zcode-builtin.json", () => {
+    // 钉住真实桌面布局：桌面 app 建的平台目录用 Rust arch 命名（darwin-aarch64），
+    // 非 Node 的 process.arch 形态（darwin-arm64）——曾因按单一精确形态派生漏测此
+    // 变体，readdirSync ENOENT 被静默 catch、键未设、CLI 启动失败。不经 helper：
+    // helper 布的是 Node 精确形态（下一个用例的职责），本用例布 Rust 变体形态
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    const platDir = path.join(h.home, ".zcode", "v2", "runtime", "provider", "darwin-aarch64");
+    for (const ver of ["3.12.1", "3.12.3"]) {
+      for (const ep of ["endpoint-test1", "endpoint-test2"]) {
+        const file = path.join(platDir, ver, ep, "zcode-builtin.json");
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, "{}");
+      }
+    }
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().builtinProviderEnv).toBe(
+      path.join(
+        h.home, ".zcode", "v2", "runtime", "provider",
+        "darwin-aarch64", "3.12.3", "endpoint-test1", "zcode-builtin.json",
+      ),
+    );
+  });
+
+  it("派生（精确形态）：fixture 仅含 <plat>-<arch>（Node 形态）平台目录时同样命中（扫描法不破坏自建布局）", () => {
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    plantRuntimeProvider(h.home, ["3.12.1", "3.12.3"]);
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().builtinProviderEnv).toBe(
+      path.join(
+        h.home, ".zcode", "v2", "runtime", "provider",
+        `${process.platform}-${process.arch}`, "3.12.3", "endpoint-test1", "zcode-builtin.json",
+      ),
+    );
+  });
+
+  it("缺席不设键：HOME 无 runtime 目录且 env 无该键时保持未设（原生报错透出）", () => {
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().builtinProviderEnv).toBe(null);
   });
 });
 

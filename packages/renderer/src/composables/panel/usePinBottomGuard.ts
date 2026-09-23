@@ -1,11 +1,11 @@
 /**
- * usePinBottomGuard —— dev-only 贴底跟随收敛断言（chat-pin-bottom-fix §4.4 护栏⑦，U4）。
+ * usePinBottomGuard —— dev-only 贴底跟随收敛断言（护栏⑦，U4）。
  *
  * 防什么：R1 类「最后一段增长未补偿」的任何未来变体（新异步渲染形态 / 新尾部块 / virtua
  * 升级行为漂移）——单测只能覆盖「今天想到的回归」，本断言是结果导向的兜底层：dev 环境下
  * 贴底态跟随未真正收敛时即时 console.warn，不再依赖用户报障（设计 G3）。
  *
- * spec（docs/design/chat-pin-bottom-fix.md §4.4⑦ 逐条）：
+ * spec（护栏⑦ 逐条）：
  * - 前置收敛窗口：仅在最近一次 follow 原语执行后的 500ms 内检查；新 follow 重启窗口，
  *   用户脱离（stickToBottom 翻 false）取消窗口；
  * - 双采样：窗口末尾采一次 gap，超阈值则隔 200ms 复采一次，两次均超才 warn——区分
@@ -15,7 +15,7 @@
  *   不对用户阅读静止态发声（滚动条拖拽场景结构性不误报）；
  * - isStreaming 判读指引：流式中（isStreaming=true）双超阈值按真实跟随失效上报——收敛期
  *   恒在 force 后窗口内，窗口外的流式持续 gap 无合法瞬态解释（设计 v5）；
- * - follow 频率计数器（§4.5 P-no-loop，校准 r1 补齐）：滑动 1s 窗口内 follow 原语执行
+ * - follow 频率计数器（P-no-loop，校准 r1 补齐）：滑动 1s 窗口内 follow 原语执行
  *   >60 次 → warn（RO → follow → scrollToIndex → 内容高度变化 → RO 观察循环的唯一机器
  *   检测层）；沿触发——持续超限只报一次，回落后再超限再报；
  * - import.meta.env.DEV 门控：生产构建原样透传 follow API，零运行时开销（同构先例
@@ -119,7 +119,7 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
       : '非流式态持续 gap——排查最近改动的跟随链路（估算收敛类瞬态已被双采样过滤）。'
     console.warn(
       `[pin-bottom-guard] 贴底态跟随未收敛：gap=${gap}px > 阈值 ${threshold}px（dpr=${readDpr()}，双采样均超）。` +
-        `${guidance} 👉 复现与判读指引见 docs/design/chat-pin-bottom-fix.md §4.4；` +
+        `${guidance} 复现与判读指引：` +
         '最近改动的跟随链路：useVirtuaFollow.ts / useMessageStreamFollowTriggers.ts / MessageStream.vue。',
     )
   }
@@ -151,7 +151,7 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
       console.warn(
         `[pin-bottom-guard] follow 频率异常：${FOLLOW_RATE_WINDOW_MS}ms 内 follow 次数=${followTimestamps.length}` +
           ` > ${FOLLOW_RATE_LIMIT}——疑似 RO 兜底网观察循环（RO → follow → scrollToIndex → 内容高度变化 → RO）。` +
-          '👉 处置见 docs/design/chat-pin-bottom-fix.md §4.5 P-no-loop 降级路径（100ms 防抖 / 收窄观察目标）。',
+          '👉 处置：P-no-loop 降级路径（100ms 防抖 / 收窄观察目标）。',
       )
     } else if (!looping) {
       loopActive = false

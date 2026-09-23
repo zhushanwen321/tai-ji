@@ -22,6 +22,10 @@ import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import {
+  _resetHostUiRequestEndpointForTest,
+  setHostUiRequestEndpoint,
+} from "../../host/host-ui-endpoint.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -66,6 +70,8 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
+  // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
+  _resetHostUiRequestEndpointForTest();
 });
 
 interface Fixture {
@@ -480,18 +486,19 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
     await cleanup();
   });
 
-  it("host/askUser 经 RemoteEngine 门面（uiRequestHandler 由 EngineClient 承接）：请求形状 = UiRequest", async () => {
+  it("host/askUser 经 RemoteEngine 门面（应答端经 host-ui-endpoint 槽注入）：请求形状 = UiRequest", async () => {
     const seenRequests: UiRequest[] = [];
     const { engine, cleanup } = makeEngine(undefined, {
-      uiRequestHandler: async (req) => {
-        seenRequests.push(req);
-        return { confirmed: true };
-      },
       args: [
         FAKE_ENGINE,
         "--run-actions",
         JSON.stringify([{ op: "askUser", request: { method: "confirm", id: "q-facade" } }]),
       ],
+    });
+    // [D3] 构造后经槽登记（reverse-router 消费时现读，构造期无固化面）
+    setHostUiRequestEndpoint(async (req) => {
+      seenRequests.push(req);
+      return { confirmed: true };
     });
     const { ctx, events } = makeCtx();
     await engine.run({ prompt: "p" }, ctx);

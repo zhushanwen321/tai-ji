@@ -5,14 +5,18 @@
  * - loadPresets()：mock presetApi.list/getDefault 并行调用，结果写 store（TC-4）
  * - loadPresets 降级：getDefault 失败不阻断 list 写 store（allSettled，TC-4 边界）
  * - setDefault(id)：乐观更新 store + 调 RPC（TC-5）
+ * - **u5 加载点：`installPresetAutoLoad()`**（下方独立 describe）——首次 connected 后拉取 /
+ *   安装时已 connected 立即可用 / 失败后下一次 connected 补拉（可自愈）/ 重连不重复请求（幂等）
+ *   （`mode-declaration-row.test.ts` 头注声明“加载点本身由本文件覆盖”，即指该 describe）
  *
  * mock 策略：mock @/api 的 preset 域（vi.hoisted 捕获调用），真 pinia + 真 preset store。
  * 验证编排层「RPC 拉取 → store 写入」接线正确（不验 RPC 本身——那是 preset-domain.test 的职责）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-pi-presets.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises } from '@vue/test-utils'
 import type { PiLaunchPreset } from '@taiji/shared'
 
 // mock preset 域（捕获 list/getDefault/setDefault/create/update/remove 调用 + 可控返回值）
@@ -28,8 +32,22 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   preset: presetApiMock,
 }))
 
+// ── mock 边界：ws 连接态受控 ref（u5 加载点测试驱动；默认 disconnected，存量用例零影响）──
+const wsMock = vi.hoisted(() => ({ ref: null as null | { value: string } }))
+vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/ws-client')>()
+  const { ref } = await import('vue')
+  const stateRef = ref<string>('disconnected')
+  wsMock.ref = stateRef
+  return { ...actual, getState: () => stateRef }
+})
+
 import { usePresetStore } from '@/stores/preset'
-import { usePiPresets } from '@/composables/features/settings/usePiPresets'
+import {
+  usePiPresets,
+  installPresetAutoLoad,
+  __resetPresetAutoLoadForTest,
+} from '@/composables/features/settings/usePiPresets'
 
 const FIXTURE_PRESETS: PiLaunchPreset[] = [
   { id: 'builtin:full', name: '全工具模式', builtin: true, order: 0, toolMode: 'all', extensionMode: 'all' },
@@ -90,6 +108,8 @@ describe('usePiPresets.loadPresets（TC-4）', () => {
 describe('usePiPresets.setDefault（TC-5）', () => {
   it('setDefault(id) → 乐观更新 store + 调 RPC', async () => {
     presetApiMock.setDefault.mockResolvedValueOnce(undefined)
+    presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValueOnce('builtin:readonly')
 
     const store = usePresetStore()
     const { setDefault } = usePiPresets()
@@ -97,6 +117,36 @@ describe('usePiPresets.setDefault（TC-5）', () => {
 
     expect(store.defaultPresetId).toBe('builtin:readonly')
     expect(presetApiMock.setDefault).toHaveBeenCalledWith('builtin:readonly')
+  })
+
+  it('setDefault 成功后强拉权威值：getDefault 回读覆盖乐观镜像（RD-4#2）', async () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    // 写成功，但权威回读返回旧值（模拟 runtime 规范化/拒绝场景）——强拉必须覆盖乐观镜像
+    presetApiMock.setDefault.mockResolvedValueOnce(undefined)
+    presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValueOnce('builtin:full')
+
+    const { setDefault } = usePiPresets()
+    await setDefault('builtin:readonly')
+
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+    expect(presetApiMock.getDefault).toHaveBeenCalledTimes(1)
+    expect(store.defaultPresetId).toBe('builtin:full')
+  })
+
+  it('setDefault RPC 失败 → 回滚 defaultPresetId 至旧值 + throw（RD-4#2，与 create 同构）', async () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    presetApiMock.setDefault.mockRejectedValueOnce(new Error('rpc failed'))
+
+    const { setDefault } = usePiPresets()
+    await expect(setDefault('builtin:readonly')).rejects.toThrow('rpc failed')
+
+    // 回滚：store 回到旧默认值，不再显示未落盘的新值
+    expect(store.defaultPresetId).toBe('builtin:full')
+    // 失败分支不触发强拉
+    expect(presetApiMock.list).not.toHaveBeenCalled()
   })
 })
 
@@ -195,6 +245,88 @@ describe('usePiPresets.update（W-RN-3 reply 回写）', () => {
 
     // loadPresets 回滚：toolMode 恢复为原值
     expect(store.presets[0]!.toolMode).toBe('all')
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// u5 mode-declaration-row · 加载点（设计 §6.5 P0-12）：首次 connected 必拉一次，
+// 重连不重复；加载失败不置位 → 下一次 connected 补拉（E7 ③ 恢复通道）。
+// ─────────────────────────────────────────────────────────────────────────
+describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
+  beforeEach(() => {
+    __resetPresetAutoLoadForTest()
+    wsMock.ref!.value = 'disconnected'
+  })
+
+  afterEach(() => {
+    __resetPresetAutoLoadForTest()
+    wsMock.ref!.value = 'disconnected'
+  })
+
+  it('首次 connected → 拉一次（list/getDefault 各一次）；重连不重复拉', async () => {
+    presetApiMock.list.mockResolvedValue(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValue('builtin:full')
+
+    installPresetAutoLoad()
+    // 安装时未 connected → 不拉（bootstrap 只提交连接不等于 connected）
+    expect(presetApiMock.list).not.toHaveBeenCalled()
+
+    wsMock.ref!.value = 'connected'
+    await flushPromises()
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+    expect(presetApiMock.getDefault).toHaveBeenCalledTimes(1)
+    expect(usePresetStore().presets).toEqual(FIXTURE_PRESETS)
+
+    // 重连边沿：disconnected → connected 不重复拉
+    wsMock.ref!.value = 'reconnecting'
+    await flushPromises()
+    wsMock.ref!.value = 'connected'
+    await flushPromises()
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('安装时已 connected（AppShell 稳态：仅在 connected 后渲染）→ immediate 拉一次', async () => {
+    presetApiMock.list.mockResolvedValue(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValue('builtin:full')
+    wsMock.ref!.value = 'connected'
+
+    installPresetAutoLoad()
+    await flushPromises()
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+    expect(usePresetStore().defaultPresetId).toBe('builtin:full')
+  })
+
+  it('加载失败 → 不置位，下一次 connected 补拉（E7 ③ 恢复通道）', async () => {
+    presetApiMock.list.mockRejectedValueOnce(new Error('rpc failed'))
+    presetApiMock.getDefault.mockRejectedValueOnce(new Error('rpc failed'))
+
+    installPresetAutoLoad()
+    wsMock.ref!.value = 'connected'
+    await flushPromises()
+    expect(presetApiMock.list).toHaveBeenCalledTimes(1)
+    expect(usePresetStore().loadError).not.toBeNull()
+
+    // 下一次 connected：因未置位而补拉，成功后清错误态
+    presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValueOnce('builtin:full')
+    wsMock.ref!.value = 'disconnected'
+    await flushPromises()
+    wsMock.ref!.value = 'connected'
+    await flushPromises()
+    expect(presetApiMock.list).toHaveBeenCalledTimes(2)
+    expect(usePresetStore().loadError).toBeNull()
+    expect(usePresetStore().presets).toEqual(FIXTURE_PRESETS)
+  })
+
+  it('幂等：重复 installPresetAutoLoad 只挂一个 watcher（不重复拉）', async () => {
+    presetApiMock.list.mockResolvedValue(FIXTURE_PRESETS)
+    presetApiMock.getDefault.mockResolvedValue('builtin:full')
+    wsMock.ref!.value = 'connected'
+
+    installPresetAutoLoad()
+    installPresetAutoLoad()
+    await flushPromises()
     expect(presetApiMock.list).toHaveBeenCalledTimes(1)
   })
 })

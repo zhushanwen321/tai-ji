@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-core-dist-gate.mjs —— subagent-core dist 静态验证门（设计
- * docs/design/subagent-post-convergence-architecture.md §3.2 B-2「dist 静态验证门」
+ * check-core-dist-gate.mjs —— subagent-core dist 静态验证门（B-2「dist 静态验证门」
  * ①② 两项的脚本化落点，u-2c（3d01d3132）D9 closure）。
  *
  * 背景：u-2c 删除 `./*` 开发态通配后，对 dist 产物做过三项一次性人工核验（结论仅存

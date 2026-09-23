@@ -78,6 +78,7 @@ function makeHarness(seed: Record<string, FakeState>): Harness {
     hasQueuedDeliveries: () => false,
     getLastViewedAt: (sid) => states.get(sid)?.viewedAt,
     isRestoring: () => false,
+    hasPendingUiRequest: () => false,
   }
   const options: IdlePiReaperOptions = {
     seat,

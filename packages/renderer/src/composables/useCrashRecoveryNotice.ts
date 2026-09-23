@@ -1,5 +1,5 @@
 /**
- * useCrashRecoveryNotice —— renderer 崩溃恢复一次性提示条状态（crash-resilience §3.1 T2 / §3.4）。
+ * useCrashRecoveryNotice —— renderer 崩溃恢复一次性提示条状态（T2 / §3.4）。
  *
  * 状态源 = main 侧 window-factory.ts reloadWindowAfterCrash 注入的 URL query
  * （recoveredFrom=crash + crashReason）。首次消费即读 query 并 history.replaceState

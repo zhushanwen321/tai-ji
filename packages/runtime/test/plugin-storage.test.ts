@@ -100,4 +100,36 @@ describe('PluginStorage', () => {
       expect((err as unknown as { code: number }).code).toBe(-32021)
     }
   })
+
+  // ── D1c 对齐（P2#4）：损坏文件加载 → quarantine 隔离（非静默空 Map 覆写） ──
+  it('corrupt JSON on load → quarantined to .corrupt-<ts> copy, then set/flush rebuilds clean file', async () => {
+    const pluginId = 'test-corrupt-quarantine'
+    const filePath = join(tmpDir, 'plugins', pluginId, 'globalState.json')
+    await mkdir(join(tmpDir, 'plugins', pluginId), { recursive: true })
+    const corruptContent = '{"broken": tru' // 半截 JSON（模拟崩溃窗口）
+    await (await import('node:fs/promises')).writeFile(filePath, corruptContent, 'utf-8')
+
+    const storageQ = new PluginStorage()
+    storageQ.init(tmpDir, '/test/project')
+    try {
+      // 触发 lazy loadPartition：损坏 → quarantine rename + 空 Map 降级（get 返回 undefined）
+      expect(storageQ.get(pluginId, 'anyKey')).toBe(undefined)
+
+      // 原路径文件已被隔离移走；.corrupt-<ts> 副本保留损坏内容供人工恢复
+      const dirEntries = await (await import('node:fs/promises')).readdir(join(tmpDir, 'plugins', pluginId))
+      expect(dirEntries).not.toContain('globalState.json')
+      const quarantineCopy = dirEntries.find((n) => /^globalState\.json\.corrupt-\d{4}-\d{2}-\d{2}T\d{9}Z$/.test(n))
+      expect(quarantineCopy).toBeDefined()
+      const quarantined = await readFile(join(tmpDir, 'plugins', pluginId, quarantineCopy!), 'utf-8')
+      expect(quarantined).toBe(corruptContent)
+
+      // set + flush：原路径重建干净文件（无冲突备份噪音——quarantine 后 stat ENOENT 放行重建）
+      storageQ.set(pluginId, 'fresh', 'value')
+      storageQ.flush(pluginId)
+      const rebuilt = JSON.parse(await readFile(filePath, 'utf-8')) as Record<string, string>
+      expect(rebuilt.fresh).toBe('value')
+    } finally {
+      storageQ.dispose()
+    }
+  })
 })

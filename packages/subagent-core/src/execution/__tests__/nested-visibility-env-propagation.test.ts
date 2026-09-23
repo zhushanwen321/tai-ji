@@ -22,6 +22,7 @@ import {
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 
 // ── mock modules ──
@@ -35,10 +36,10 @@ vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 import { spawn } from "node:child_process";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -55,21 +56,11 @@ function getLastSpawnEnv(): Record<string, string | undefined> {
   return (mockSpawn.mock.calls.at(-1)?.[2]?.env as Record<string, string | undefined>) ?? {};
 }
 
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
 function setupService(sessionId: string, env?: Record<string, string>): SubagentService {
   const agentDir = "/tmp/env-prop-it";
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId,
     ctxModel,
   });

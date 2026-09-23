@@ -52,6 +52,14 @@ export interface ChatViewDeps {
    *  optional，同 isTakeover：未 provide 时 submitEdit 不做互斥（旧壳层兼容），renderer
    *  useChatViewDeps 运行时总 provide 真实实现，测试 mock 可省略 */
   isPendingSend?: (sessionId: string) => boolean
+  /** 取 session 的相对资源解析基准目录（session cwd，与工厂内 resourceBaseDir env 装配
+   *  同源同层查询）。MarkdownRenderer ④路相对链接点击的 props 缺省 fallback——设计
+   *  markdown-html-sanitize-render D4 双通道矩阵：props 覆盖优先（drawer 文件目录语义），
+   *  props 缺省（对话流/命令文档零模板传 props 的消费面）经此拿 session cwd。
+   *  optional，同 isTakeover：未 provide（测试 mock 壳）时 MarkdownRenderer 可选链容错
+   *  （fallback undefined → ④路 preventDefault 无动作），renderer useChatViewDeps 运行时
+   *  总 provide 真实实现 */
+  sessionCwdOf?: (sessionId: string) => string | undefined
 
   // ── 操作回调（触发 RPC / store action）──
   /** 切换 turn 展开/折叠（useTurnExpansion store action。key=turnStableId(turn)） */
@@ -85,12 +93,14 @@ export interface ChatViewDeps {
   loadFileCandidates: (sessionId: string, basename?: string) => FileNode[] | Promise<FileNode[]>
 
   // ── 渲染桥接（重库渲染经壳注入，ui 不带 shiki/mermaid 依赖）──
-  /** 渲染 markdown 为 segments（renderer 壳 renderMarkdownSegments，含 shiki 高亮 + 路径链接化） */
+  /** 渲染 markdown 为 segments（renderer 壳 renderMarkdownSegments，含 shiki 高亮 + 路径链接化；
+   *  env 携带相对资源基准目录 resourceBaseDir——对话流 = session cwd，设计 markdown-html-sanitize-render D4） */
   renderMarkdown: (source: string, sessionId?: string) => MarkdownSegment[] | Promise<MarkdownSegment[]>
   /**
    * D-5 增量渲染（W22 协议 / W23 消费，renderer 壳 renderIncremental）：前缀段引用恒等缓存 +
    * tail 段每帧重建。cache 是 opaque 句柄——首次传 null 由壳创建（随返回值带回，组件持有后透传），
-   * 壳内原地更新；env（filePaths/localFiles）引用变化由壳内全量重建处理。
+   * 壳内原地更新；env（filePaths/localFiles 引用恒等 + resourceBaseDir 值恒等，设计 D4 相对资源
+   * 基准目录）变化由壳内全量重建处理。
    * optional：未 provide（mock 壳/降级）时 MarkdownRenderer 回退 renderMarkdown 全量渲染（等价旧版）。
    */
   renderMarkdownIncremental?: (

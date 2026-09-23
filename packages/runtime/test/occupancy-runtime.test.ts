@@ -306,18 +306,18 @@ describe('MessageDispatcher occupancy 挂点', () => {
     return { dispatcher, session, svc, pm, publish, promptFn, bashFn, abortFn, compactFn, client, seq, registry }
   }
 
-  it('#1 sendMessage 受理后 → turn=dispatching（置位在 prompt 受理之后，D-18）', async () => {
+  it('#1 sendMessage 受理后 → turn=dispatching（[RT-4#10] occupancy 置位先于 prompt）', async () => {
     const { dispatcher, publish, promptFn, seq } = makeDispatcher()
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
     expect(promptFn).toHaveBeenCalled()
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
-    // 帧序（D-18 迁移）：受理（prompt 调用）先于置位——旧 dispatcher 为「预检通过即写、先于
-    // prompt」；u2 把三副作用迁至适配层 deliverOne 且位于 prompt 受理之后（与既有 registry 契约
-    // A5「受理口径」一致，防「prompt 还没受理就显示 working」）
+    // 帧序（[RT-4#10] 合并收口）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
+    // 不再呈 idle；lastActiveAt/record 记账面（D-18「成功才显示 working」）仍在 prompt
+    // 受理成功后（markSessionActive 尾置，occupancy 同值转移去重不二播）
     expect(seq.indexOf('prompt')).toBeGreaterThanOrEqual(0)
-    expect(seq.indexOf('prompt')).toBeLessThan(seq.indexOf('frame:session.occupancy'))
+    expect(seq.indexOf('frame:session.occupancy')).toBeLessThan(seq.indexOf('prompt'))
   })
 
   it('#1 busy（generating）不再预检拒绝：零 send.rejected + 按 lane=steer 承接投递（D5 排队取代拒绝）', async () => {
@@ -349,8 +349,12 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // 迁移面（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
     // compaction_end 后再投——持有而非失败/丢弃（D6 适配器 catch 面处置）
     expect(registry.entries('s1')?.active[0]).toMatchObject({ state: 'queued' })
-    // 置位在受理之后（D-18）：受理失败 → 不产生 dispatching 帧（旧「dispatching → 复位 idle」序列消失）
-    expect(occupancyFrames(publish)).toEqual([])
+    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → busy 类拒绝在 promptWithBusyRetry
+    // 内分型复位 idle（持有等 compaction_end）——显式收口帧序列，而非旧的「零帧」
+    expect(occupancyFrames(publish)).toEqual([
+      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+    ])
     // 原断言意图保留（防卡 dispatching）：终态 turn 不得停留 dispatching
     expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
   })
@@ -363,9 +367,12 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(result.blocked).toBe(false)
     expect(frameTypes(publish)).toContain('message.error')
     expect(String(publishedByType(publish, 'message.error')?.payload.message)).toContain('auth failed')
-    // 置位在受理之后（D-18）：受理失败 → 无 dispatching 帧，turn 无「复位」需求（原
-    // 「dispatching → 复位 idle」两帧序列消失）；原断言意图保留：终态不得停留 dispatching
-    expect(occupancyFrames(publish)).toEqual([])
+    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → 非 busy 真失败由投递腿 catch 面
+    // 收口回 idle（不卡 dispatching）；原断言意图保留：终态不得停留 dispatching
+    expect(occupancyFrames(publish)).toEqual([
+      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+    ])
     expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
   })
 
@@ -471,12 +478,17 @@ describe('MessageDispatcher occupancy 挂点', () => {
     const { dispatcher, publish, session, compactFn } = makeDispatcher({ compactBehavior: 'error' })
     compactFn.mockImplementation(async () => {
       // 模拟 compaction_start 已到达（interpreter #5 语义）：经原语置位（u3c readonly 收口；
-      // publish 传 null 与改前直写一致不广播——本用例焦点是 finally 兜底复位帧）
+      // publish 传 null 与改前直写一致不广播）。
+      // 注：RT-4#10 起 dispatcher 预检通过后自己先广播一帧 compacting=true（关重入窗口），
+      // 故本用例应见「true → false」两帧：前者是预检后置位帧，后者是 finally 复位帧。
       applySessionOccupancyTransition(session, null, 'compacting-start')
       throw new Error('compact transport exploded')
     })
     await expect(dispatcher.compact('s1')).rejects.toThrow('compact transport exploded')
-    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(occupancyFrames(publish)).toEqual([
+      { sessionId: 's1', turn: 'idle', compacting: true, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+    ])
   })
 
   it('messageBus 未注入 → 挂点 no-op 不抛（null-safety，存量语义：状态照写、广播跳过）', async () => {

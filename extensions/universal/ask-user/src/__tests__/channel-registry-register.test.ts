@@ -2,13 +2,15 @@
 //
 // Tests registerAskUserChannelHandler：ask-user 侧的 globalThis Symbol 握手注册纯函数。
 //
-// 覆盖（PR #85 #M4 + #M5）：
-//   - 空 globalThis → 建 slot（仅 pending），handler 入 pending；**slot.registry === undefined**
+// 覆盖（PR #85 #M4 + #M5 + D9 双名注册）：
+//   - 空 globalThis → 建 slot（仅 pending），handler 逐名入 pending；**slot.registry === undefined**
 //     （M4 核心断言：ask-user 永不创建 registry 实例）
 //   - slot 存在但 registry 未就绪 → push pending（registry 仍 undefined）
-//   - slot 存在且 registry 就绪 → 直接调 registry.register("ask_user", handler)，pending 不增长
+//   - slot 存在且 registry 就绪 → 对每个 channel 名调 registry.register(name, handler)，pending 不增长
 //   - 重复调用：registry 就绪时 register 多次（同名覆盖幂等）；未就绪时 pending.length 增长
 //   - version !== 1 → warn + 重建为新 slot，旧 pending 丢弃
+//   - D9：同一 handler 注册两代 channel 名——"ask_user"（旧孙进程 marker 派生）+
+//     "ui_form"（新孙进程 UI_FORM_MARKER 派生），顺序 = ASK_USER_CHANNELS 声明序
 //
 // 隔离：每个用例前 Reflect.deleteProperty(globalThis, CHANNEL_HANDSHAKE_KEY)。
 // Mock 共享 logger，让 logger.warn 可被 spy（源码已从 console.warn 改为 logger.warn）
@@ -73,8 +75,11 @@ describe("registerAskUserChannelHandler", () => {
 		expect(slot!.version).toBe(1);
 		// M4 核心断言：ask-user 永不创建 registry 实例
 		expect(slot!.registry).toBeUndefined();
-		expect(slot!.pending).toHaveLength(1);
-		expect(slot!.pending[0]).toEqual({ channel: "ask_user", handler: noopHandler });
+		// D9 双名：ask_user + ui_form 各一条 pending
+		expect(slot!.pending).toEqual([
+			{ channel: "ask_user", handler: noopHandler },
+			{ channel: "ui_form", handler: noopHandler },
+		]);
 	});
 
 	it("slot 存在但 registry 未就绪 → push pending（registry 仍 undefined）", () => {
@@ -87,11 +92,13 @@ describe("registerAskUserChannelHandler", () => {
 		const slot = readSlot();
 		expect(slot).toBe(preSlot); // 同一对象，未重建
 		expect(slot!.registry).toBeUndefined();
-		expect(slot!.pending).toHaveLength(1);
-		expect(slot!.pending[0]).toEqual({ channel: "ask_user", handler: noopHandler });
+		expect(slot!.pending).toEqual([
+			{ channel: "ask_user", handler: noopHandler },
+			{ channel: "ui_form", handler: noopHandler },
+		]);
 	});
 
-	it("slot 存在且 registry 就绪 → 调 registry.register，pending 不增长", () => {
+	it("slot 存在且 registry 就绪 → 逐名调 registry.register，pending 不增长", () => {
 		const mockRegistry = makeMockRegistry();
 		const preSlot: ChannelRegistryHandshake = {
 			version: 1,
@@ -102,8 +109,9 @@ describe("registerAskUserChannelHandler", () => {
 
 		registerAskUserChannelHandler(noopHandler);
 
-		expect(mockRegistry.register).toHaveBeenCalledTimes(1);
-		expect(mockRegistry.register).toHaveBeenCalledWith("ask_user", noopHandler);
+		expect(mockRegistry.register).toHaveBeenCalledTimes(2);
+		expect(mockRegistry.register).toHaveBeenNthCalledWith(1, "ask_user", noopHandler);
+		expect(mockRegistry.register).toHaveBeenNthCalledWith(2, "ui_form", noopHandler);
 		// pending 不增长（直接 register，不进队列）
 		expect(preSlot.pending).toHaveLength(0);
 	});
@@ -122,25 +130,30 @@ describe("registerAskUserChannelHandler", () => {
 		registerAskUserChannelHandler(h1);
 		registerAskUserChannelHandler(h2);
 
-		expect(mockRegistry.register).toHaveBeenCalledTimes(2);
+		expect(mockRegistry.register).toHaveBeenCalledTimes(4);
 		expect(mockRegistry.register).toHaveBeenNthCalledWith(1, "ask_user", h1);
-		expect(mockRegistry.register).toHaveBeenNthCalledWith(2, "ask_user", h2);
+		expect(mockRegistry.register).toHaveBeenNthCalledWith(2, "ui_form", h1);
+		expect(mockRegistry.register).toHaveBeenNthCalledWith(3, "ask_user", h2);
+		expect(mockRegistry.register).toHaveBeenNthCalledWith(4, "ui_form", h2);
 		expect(preSlot.pending).toHaveLength(0); // 幂等：不进 pending
 	});
 
 	it("registry 未就绪时多次 register → pending.length 增长（顺序保留）", () => {
-		// 第 1 次：空 globalThis → 建 slot + pending[0]
+		// 第 1 次：空 globalThis → 建 slot + 双名 pending
 		const h1: ChannelHandler = async () => "a";
 		registerAskUserChannelHandler(h1);
-		// 第 2 次：slot 已存在、registry 仍 undefined → pending[1]
+		// 第 2 次：slot 已存在、registry 仍 undefined → 双名 pending 追加
 		const h2: ChannelHandler = async () => "b";
 		registerAskUserChannelHandler(h2);
 
 		const slot = readSlot();
 		expect(slot!.registry).toBeUndefined();
-		expect(slot!.pending).toHaveLength(2);
-		expect(slot!.pending[0]).toEqual({ channel: "ask_user", handler: h1 });
-		expect(slot!.pending[1]).toEqual({ channel: "ask_user", handler: h2 });
+		expect(slot!.pending).toEqual([
+			{ channel: "ask_user", handler: h1 },
+			{ channel: "ui_form", handler: h1 },
+			{ channel: "ask_user", handler: h2 },
+			{ channel: "ui_form", handler: h2 },
+		]);
 	});
 
 	it("version !== 1 → warn + 重建为新 slot，旧 pending 丢弃", () => {
@@ -157,10 +170,13 @@ describe("registerAskUserChannelHandler", () => {
 		registerAskUserChannelHandler(noopHandler);
 
 		const slot = readSlot();
-		// 旧 slot 被替换（version 退回 1，pending 重置为仅含本次注册）
+		// 旧 slot 被替换（version 退回 1，pending 重置为仅含本次双名注册）
 		expect(slot).not.toBe(legacySlot);
 		expect(slot!.version).toBe(1);
-		expect(slot!.pending).toEqual([{ channel: "ask_user", handler: noopHandler }]);
+		expect(slot!.pending).toEqual([
+			{ channel: "ask_user", handler: noopHandler },
+			{ channel: "ui_form", handler: noopHandler },
+		]);
 		// warn 被调用（包含 version mismatch 提示）
 		expect(loggerMock.warn).toHaveBeenCalledTimes(1);
 		expect(loggerMock.warn.mock.calls[0]![0]).toContain("version mismatch");
@@ -180,7 +196,7 @@ describe("registerAskUserChannelHandler", () => {
 
 		registerAskUserChannelHandler(noopHandler);
 
-		expect(mockRegistry.register).toHaveBeenCalledTimes(1);
+		expect(mockRegistry.register).toHaveBeenCalledTimes(2);
 		// 遗留 pending 未被消费（长度不变）
 		expect(preSlot.pending).toHaveLength(1);
 		expect(preSlot.pending).toBe(preExistingPending);

@@ -11,7 +11,8 @@
  *     → 失败（envelope error 或 transport reject）：toast 报错，回 'idle'
  *   onImportConfirm(selectedIds)
  *     → config.applyImportProviders(importId, selectedIds)
- *     → 成功：toast 导入/跳过/失败统计 + key 缺失提示，复位 idle
+ *     → 成功：toast 导入/跳过/失败统计 + key 缺失提示；有失败项保留 preview 供回查（RD-4#12），
+ *       全部成功才复位 idle
  *     → 失败（envelope error 或 transport reject）：保持 'previewing' 允许重试
  *
  * 注意：config.previewImportProviders/applyImportProviders 在 transport 层（请求超时、
@@ -24,9 +25,26 @@ import { ref } from 'vue'
 import { config } from '@/api'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
-import type { ProviderSource, ProviderImportPreview } from '@taiji/shared'
+import type {
+  ProviderSource,
+  ProviderImportPreview,
+  ProviderImportResult,
+  ProviderImportedItem,
+} from '@taiji/shared'
 
 const t = i18n.global.t
+
+/**
+ * 凭据形态 → 提示 i18n key 表（成员顺序即 toast 顺序）：env/oauth/command/env-bundle
+ * 四态的「providers + orphanCredentials 两源计数 > 0 即 toast」为同构逻辑，表驱动单循环。
+ * missing（仅统计 providers、文案无 count）与 orphan 总数是差异分支，不在此表。
+ */
+const CREDENTIAL_TYPE_HINTS = [
+  { type: 'env', key: 'settings.provider.importToast.envVarNeeded' },
+  { type: 'oauth', key: 'settings.provider.importToast.oauthSkipped' },
+  { type: 'command', key: 'settings.provider.importToast.commandInjection' },
+  { type: 'env-bundle', key: 'settings.provider.importToast.envBundleSkipped' },
+] as const
 
 /** 导入流程状态 */
 type ImportState = 'idle' | 'loading-preview' | 'previewing' | 'applying'
@@ -78,43 +96,18 @@ export function useProviderImport() {
         importState.value = 'previewing'
         return
       }
-      const { imported, failedCount } = result.result
-      const ok = imported.filter((i) => i.status === 'imported').length
-      toastInfo(t('settings.provider.importToast.success', { count: ok }))
-      if (failedCount > 0) {
-        toastError(t('settings.provider.importToast.failed', { count: failedCount }))
+      reportImportSuccess(result.result, selectedIds)
+      // RD-4#12：有失败项时保留 preview（不 reset），让用户可在弹窗回查失败条目——此前成功后
+      // 立刻 resetImportState() 清空 preview，用户无法回查。全部成功才 reset 关闭弹窗。保留期间
+      // importState 留 'previewing'（弹窗不关）；用户关闭弹窗（onPreviewDialogToggle）或重新
+      // 导入（onImportSelect）时清空。注：弹窗内「灰显失败行」需 ProviderImportPreviewDialog
+      // （packages/ui，非本包域）渲染 result 逐条 status，本包仅保留 preview 数据供回查 +
+      // toast 已报 failedCount；行级灰显列为跨包协调项。
+      if (result.result.failedCount > 0) {
+        importState.value = 'previewing'
+      } else {
+        resetImportState()
       }
-      // wave 4 import-credential-types：分类提示选中 provider 的凭据形态
-      // - missing：apiKey 空，需手填；env：$ENV 引用，需确保环境变量已设；oauth：Phase 2 跳过
-      const selectedProviders = importPreview.value?.providers.filter((p) => selectedIds.includes(p.id)) ?? []
-      // sa3 F1：组 2 孤儿凭据同样参与凭据形态统计（providerId 是勾选 id）
-      const selectedOrphans = importPreview.value?.orphanCredentials?.filter((o) => selectedIds.includes(o.providerId)) ?? []
-      const missingCount = selectedProviders.filter((p) => p.credentialType === 'missing').length
-      const envCount = selectedProviders.filter((p) => p.credentialType === 'env').length + selectedOrphans.filter((o) => o.credentialType === 'env').length
-      const oauthCount = selectedProviders.filter((p) => p.credentialType === 'oauth').length + selectedOrphans.filter((o) => o.credentialType === 'oauth').length
-      // sa3 F1（B.5/M4）：command 态导入后 toast 命令注入警告；env-bundle 态提示 Phase 1 跳过
-      const commandCount = selectedProviders.filter((p) => p.credentialType === 'command').length + selectedOrphans.filter((o) => o.credentialType === 'command').length
-      const envBundleCount = selectedProviders.filter((p) => p.credentialType === 'env-bundle').length + selectedOrphans.filter((o) => o.credentialType === 'env-bundle').length
-      const orphanImportedCount = selectedOrphans.length
-      if (missingCount > 0) {
-        toastInfo(t('settings.provider.importToast.partialKeyMissing'))
-      }
-      if (envCount > 0) {
-        toastInfo(t('settings.provider.importToast.envVarNeeded', { count: envCount }))
-      }
-      if (oauthCount > 0) {
-        toastInfo(t('settings.provider.importToast.oauthSkipped', { count: oauthCount }))
-      }
-      if (commandCount > 0) {
-        toastInfo(t('settings.provider.importToast.commandInjection', { count: commandCount }))
-      }
-      if (envBundleCount > 0) {
-        toastInfo(t('settings.provider.importToast.envBundleSkipped', { count: envBundleCount }))
-      }
-      if (orphanImportedCount > 0) {
-        toastInfo(t('settings.provider.importToast.orphanImported', { count: orphanImportedCount }))
-      }
-      resetImportState()
     } catch (e) {
       // transport 层 reject（请求超时 / WebSocket 断连 pending.rejectAll / 传输发送失败）：
       // 回 previewing 保留对话框允许重试 + toast
@@ -122,6 +115,60 @@ export function useProviderImport() {
       importError.value = msg
       importState.value = 'previewing'
       toastError(msg)
+    }
+  }
+
+  /** apply 成功后的结果反馈编排：success/failed 统计 toast → 凭据形态提示 → quota 提示（顺序即既有约定） */
+  function reportImportSuccess(result: ProviderImportResult, selectedIds: string[]): void {
+    const { imported, failedCount } = result
+    const ok = imported.filter((i) => i.status === 'imported').length
+    toastInfo(t('settings.provider.importToast.success', { count: ok }))
+    if (failedCount > 0) {
+      toastError(t('settings.provider.importToast.failed', { count: failedCount }))
+    }
+    toastCredentialTypeHints(selectedIds)
+    toastQuotaAutoEnabled(imported)
+  }
+
+  /**
+   * wave 4 import-credential-types：分类提示选中 provider 的凭据形态
+   * - missing：apiKey 空，需手填；env：$ENV 引用，需确保环境变量已设；oauth：Phase 2 跳过
+   * sa3 F1：组 2 孤儿凭据同样参与凭据形态统计（providerId 是勾选 id）
+   * sa3 F1（B.5/M4）：command 态导入后 toast 命令注入警告；env-bundle 态提示 Phase 1 跳过
+   */
+  function toastCredentialTypeHints(selectedIds: string[]): void {
+    const selectedProviders = importPreview.value?.providers.filter((p) => selectedIds.includes(p.id)) ?? []
+    // sa3 F1：组 2 孤儿凭据同样参与凭据形态统计（providerId 是勾选 id）
+    const selectedOrphans = importPreview.value?.orphanCredentials?.filter((o) => selectedIds.includes(o.providerId)) ?? []
+    // missing 仅 providers 参与（孤儿凭据恒有 key 或已跳过），文案无 count
+    const missingCount = selectedProviders.filter((p) => p.credentialType === 'missing').length
+    if (missingCount > 0) {
+      toastInfo(t('settings.provider.importToast.partialKeyMissing'))
+    }
+    // 表驱动：每类计数 = providers + orphans 两源合计（两源字段名不同，注意映射）
+    for (const { type, key } of CREDENTIAL_TYPE_HINTS) {
+      const count =
+        selectedProviders.filter((p) => p.credentialType === type).length +
+        selectedOrphans.filter((o) => o.credentialType === type).length
+      if (count > 0) {
+        toastInfo(t(key, { count }))
+      }
+    }
+    if (selectedOrphans.length > 0) {
+      toastInfo(t('settings.provider.importToast.orphanImported', { count: selectedOrphans.length }))
+    }
+  }
+
+  /**
+   * coding-plan 额度显示自动开启提示（导入即默认同意）：runtime 在结果条目标记
+   * quotaAutoEnabled（写 extras 成功才置位），前端不推算不实报。单条带 name，多条带 count
+   */
+  function toastQuotaAutoEnabled(imported: ProviderImportedItem[]): void {
+    const quotaEnabledItems = imported.filter((i) => i.status === 'imported' && i.quotaAutoEnabled)
+    if (quotaEnabledItems.length === 1) {
+      toastInfo(t('settings.provider.importToast.quotaAutoEnabledOne', { name: quotaEnabledItems[0].name }))
+    } else if (quotaEnabledItems.length > 1) {
+      toastInfo(t('settings.provider.importToast.quotaAutoEnabledMany', { count: quotaEnabledItems.length }))
     }
   }
 

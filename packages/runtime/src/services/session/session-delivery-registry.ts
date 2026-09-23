@@ -42,10 +42,15 @@ import type {
 } from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
-import { SkillInjector } from './skill-injector.js'
+import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
-import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import {
+  applySessionOccupancyTransition,
+  IDLE_SESSION_OCCUPANCY,
+  occupancySettleWindow,
+  userStoppedGate,
+} from './event-interpreter.js'
 
 /** 组合根注入的装配材料（全部窄签名，测试可 mock） */
 export interface SessionDeliveryDeps {
@@ -349,8 +354,11 @@ interface DeliverOptions {
 
 export function createSessionDeliveryRegistry(
   deps: SessionDeliveryDeps,
-  // [A2 D-A2-1] skill 注入器：出站前统一处理（与 MessageDispatcher 同款「默认实例化 + 可替换」）
-  injector: SkillInjector = new SkillInjector(),
+  // [A2 D-A2-1] skill 注入器：deliverText 出站前统一处理（与 MessageDispatcher 同款
+  // 「默认实例化 + 可替换」形态，测试注入 spy）。[A1 接线] 默认源 = 晚绑定占位
+  //（组合根构造 delivery registry 时 registry 已可直传；本默认服务测试装配与
+  // server.ts 的退化兜底装配——无标记文本不触达映射）。
+  injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
 ): SessionDeliveryRegistry {
   const runtimes = new Map<string, SessionRuntime>()
 
@@ -378,8 +386,7 @@ export function createSessionDeliveryRegistry(
    * 合批语义保留，但用户消息必须逐条进 transcript（每条一个 user entry + 可单条撤销）。
    * 拆法：按已提交全文（submitted 表）在 composed 文本中按标记序做**精确子串**定位并逐段切出；
    * 段间只允许 BATCH_SEP 或未知文本（agent 通路条目无标记）。任一定位失败 → 放弃拆分，按内核
-   * 合批语义整条投递（不猜测切分——宁合不裂）。
-   */
+   * 合批语义整条投递（不猜测切分——宁合不裂）。   */
   function splitComposed(text: string, state: RuntimeState): string[] {
     const known = extractMarkerIds(text).map((bare) => findSubmittedByMarker(state, bare))
     if (known.length === 0 || known.some((r) => r === undefined)) return [text]
@@ -429,7 +436,7 @@ export function createSessionDeliveryRegistry(
     return handle.entries().active.some((e) => e.id === id)
   }
 
-  /** 三副作用置位（prompt 受理成功后；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。 */
+  /** 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。 */
   function markSessionActive(sessionId: string): void {
     const view = viewOf(sessionId)
     if (!view) return
@@ -441,6 +448,27 @@ export function createSessionDeliveryRegistry(
       // best-effort：record 失败仅 warn 不传播（isGenerating 已置位不回退）
       warn('workspace.record failed (non-blocking), sid=', sessionId, e)
     }
+  }
+
+  /**
+   * CP6：命令-only prompt 的 occupancy 收口窗口武装（prompt resolve 之后）。
+   *
+   * 回调幂等门（两重）：① 到期时重查活跃 session（恢复/重建后旧对象不得被回写）；
+   * ② 仅当 `turn === 'dispatching'` 才回落 idle——turn 事件已到达时窗口早被 cancel，
+   * 即使调度竞态晚到一步，turn 也不是 dispatching（不覆盖 generating/settling）。
+   * 真误判（活跃 turn 被短暂投影 idle）由 turn 事件自愈。
+   *
+   * [合并移植] 原 main 侧 dispatcher 直发流的武装点；投递内核化后随投递腿迁入本文件
+   * （prompt 发起点唯一落点 = deliverText）。
+   */
+  function armOccupancySettleWindowFor(sessionId: string): void {
+    occupancySettleWindow.arm(sessionId, () => {
+      const live = deps.getSession(sessionId)
+      if (!live) return
+      const occ = live.occupancy ?? IDLE_SESSION_OCCUPANCY
+      if (occ.turn !== 'dispatching') return
+      applySessionOccupancyTransition(live, deps.getMessageBus(), 'idle')
+    })
   }
 
   /**
@@ -485,28 +513,27 @@ export function createSessionDeliveryRegistry(
     opts: DeliverOptions,
   ): Promise<void> {
     let steerRetried = false
-    for (;;) {
-      try {
-        await client.prompt(text, opts.images, opts.behavior)
-        return
-      } catch (e) {
-        const reason = classifyBusyRejection(e)
-        if (reason === null) throw e
-        const view = viewOf(sessionId)
-        if (reason === 'processing') {
-          if (steerRetried) throw e
-          warn('prompt rejected (agent already processing) — occupancy reversed, retry as steer, sid=', sessionId)
-          if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-processing')
-          opts = { ...opts, behavior: 'steer' }
-          steerRetried = true
-          continue
-        }
-        warn('prompt rejected (compaction in progress) — holding until compaction ends, sid=', sessionId)
-        if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-other')
-        state.piCompactingBlocked = true
-        await waitDeliverable(sessionId, state)
-        if (state.disposed) throw e
+    for (;;) {      try {
+      await client.prompt(text, opts.images, opts.behavior)
+      return
+    } catch (e) {
+      const reason = classifyBusyRejection(e)
+      if (reason === null) throw e
+      const view = viewOf(sessionId)
+      if (reason === 'processing') {
+        if (steerRetried) throw e
+        warn('prompt rejected (agent already processing) — occupancy reversed, retry as steer, sid=', sessionId)
+        if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-processing')
+        opts = { ...opts, behavior: 'steer' }
+        steerRetried = true
+        continue
       }
+      warn('prompt rejected (compaction in progress) — holding until compaction ends, sid=', sessionId)
+      if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-other')
+      state.piCompactingBlocked = true
+      await waitDeliverable(sessionId, state)
+      if (state.disposed) throw e
+    }
     }
   }
 
@@ -538,8 +565,27 @@ export function createSessionDeliveryRegistry(
     userStoppedGate.consumeForExplicitDelivery(sessionId)
     const client = await deps.ensureActive(sessionId)
     watchClient(sessionId, state, handle, client)
-    const injection = await injector.inject(client, text)
-    await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
+    // [A1 切源] session cwd 作 project skill 扫描基准——视图缺失时 undefined = global-only
+    //（宁缺毋错，不猜 cwd）
+    const injection = await injector.inject(client, text, deps.getSession(sessionId)?.cwd)
+    // [RT-4#10] occupancy 置位先于 prompt：RPC 往返窗内对预检/回收豁免不再呈 idle；
+    // lastActiveAt/record（D-18「成功才显示 working」的记账面）仍在 prompt 受理成功后
+    //（markSessionActive，occupancy 同值转移被原语去重不二播）。
+    const dispatchView = viewOf(sessionId)
+    if (dispatchView) applySessionOccupancyTransition(dispatchView, deps.getMessageBus(), 'dispatching')
+    try {
+      await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
+    } catch (e) {
+      // [RT-4#10] 非 busy 真失败收口（不卡 dispatching）：turn 没跑起来（仍 dispatching）→
+      // idle；busy 类已在 promptWithBusyRetry 内分型收口（reject-processing → generating 等），
+      // 其终态不得被本腿覆盖——只收口仍停留 dispatching 的形态。
+      const failView = viewOf(sessionId)
+      if (failView && failView.occupancy?.turn === 'dispatching') {
+        applySessionOccupancyTransition(failView, deps.getMessageBus(), 'reject-other')
+      }
+      throw e
+    }
+    armOccupancySettleWindowFor(sessionId)
     publishSkillNotices(deps.getMessageBus(), sessionId, text, injection.notices)
     markSessionActive(sessionId)
   }

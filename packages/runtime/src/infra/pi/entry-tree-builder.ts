@@ -1,7 +1,7 @@
 import type { Message, Segment, SegmentsMetadataFile } from '@taiji/shared'
 import type { PiSessionEntry, PiHistoryToolResult, PiSessionCustomEntry } from './pi-protocol.js'
 import { convertPiHistory } from './message-converter.js'
-import { mapSessionEntries } from './session-entry-mapper.js'
+import { applyEntryEndTimes, mapSessionEntries } from './session-entry-mapper.js'
 
 /**
  * entry-tree-builder —— 从 pi get_entries 返回的 entry 树重建 taiji Message[]。
@@ -237,6 +237,11 @@ export function rebuildHistoryFromEntries(
   // 4. 回填 segments：对 user message 按判定顺序查 sidecar（clientUuid 链先、deferEntryId
   //    直查兜底）
   backfillSegments(converted, clientUuidMap, segmentsMetadata, deferIdByEntryId)
+
+  // 5. 回填 assistant 消息产出结束时刻（Message.endedAt = entry 时间戳）：turn 聚合口径
+  //    （「已工作」时长/时刻区间）的时间轴右端。展示字段回填，不进 reducer（理由见
+  //    applyEntryEndTimes 头注释——保 apply-entry 两条喂入路径逐字节同构）。
+  applyEntryEndTimes(converted, entries)
 
   return { messages: converted, clientUuidMap, orphanToolResults }
 }

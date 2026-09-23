@@ -5,15 +5,13 @@
  *
  * 与 Ports 节的 3 个注入 port（AgentRunner/RunStore/WorkerHost）的区别：
  * - 3 个 port 是"执行依赖"（子进程/文件系统/线程），注入到 LifecycleDeps
- * - WorkflowScriptRegistry 是"发现依赖"（扫描文件系统），是 repository（§8），
+ * - WorkflowScriptRegistry 是"发现依赖"（扫描文件系统），是 repository，
  * 不进 LifecycleDeps，由 Interface 层 tool 直接调用（list/get 脚本）
  *
- * 优先级：tmp > project > user（domain-models.md §8）。60s TTL，按 workspaceRoot 分桶。
+ * 优先级：tmp > project > user。60s TTL，按 workspaceRoot 分桶。
  * 实现在 Infra 层 WorkflowScriptRegistryImpl（扫描 + 缓存 + 去重）。
  *
  * 层归属：Engine（interface），Infra（impl）。
- *
- * 参考：domain-models.md §8。
  */
 import type { WorkflowScript } from "./workflow-script.ts";
 

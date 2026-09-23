@@ -114,6 +114,20 @@ describe('finalizeSubagentStream', () => {
 
     expect(messages.value.get('subagent:x')!.value[0].status).toBe('complete')
   })
+
+  it('TC3c 收口写入产出结束时刻 endedAt（turn 聚合口径时间轴右端）；已有值不覆写', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['subagent:x', shallowRef([streamingAssistant('a1')])]])
+
+    sm.finalizeSubagentStream('subagent:x')
+    expect(messages.value.get('subagent:x')!.value[0].endedAt).toBeTypeOf('number')
+
+    // 已有值不覆写（迟到收口不覆写真实终点）
+    const second = makeMachine()
+    second.messages.value = new Map([['subagent:y', shallowRef([streamingAssistant('a1', { endedAt: 1234 })])]])
+    second.sm.finalizeSubagentStream('subagent:y')
+    expect(second.messages.value.get('subagent:y')!.value[0].endedAt).toBe(1234)
+  })
 })
 
 describe('finalizeMessages', () => {
@@ -199,6 +213,63 @@ describe('finalizeMessages', () => {
     expect(after.toolCalls![0].endTime).toBeTypeOf('number')
   })
 
+  // [M2 error-visibility 不变量] 凡 streaming 收口产出 error 终态的 assistant 消息，
+  // error 字段必非空——渲染层以「error 有无」区分纯 error（整条 danger）与追加形态
+  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 超时 / 重启收口
+  // 不带文案）若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
+  it('TC4e errorText 缺失的 error 类收口：error 字段写 reason 兜底文案（追加形态不变量）', () => {
+    const { sm, messages } = makeMachine()
+    const assistant = streamingAssistant('a1', { content: 'partial' })
+    messages.value = new Map([['s1', shallowRef([assistant])]])
+
+    for (const reason of ['disconnect', 'timeout', 'restart'] as const) {
+      // 重置回 streaming 再收口（sealed 守卫：终态消息二次 finalize 不重写）
+      messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
+      sm.finalizeMessages('s1', reason)
+      const after = messages.value.get('s1')!.value[0]
+      expect(after.status).toBe('error')
+      expect(after.content).toBe('partial') // 崩溃前正文不动
+      expect(typeof after.error).toBe('string')
+      expect(after.error!.length).toBeGreaterThan(0) // 兜底文案非空——不会误判纯 error
+    }
+  })
+
+  it('TC4f errorText 空串视同缺失：error 字段走兜底（空 error 同样破坏形态判定信号）', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
+
+    sm.finalizeMessages('s1', 'error', '')
+
+    const after = messages.value.get('s1')!.value[0]
+    expect(after.status).toBe('error')
+    expect(after.error).toBe('会话出错，回复已中断。')
+  })
+
+  it('TC4g 非 error reason 不写兜底：normal 收口 error 字段保持 undefined', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'full' })])]])
+
+    sm.finalizeMessages('s1', 'normal')
+
+    const after = messages.value.get('s1')!.value[0]
+    expect(after.status).toBe('complete')
+    expect(after.error).toBeUndefined()
+  })
+
+  it('TC4h 收口写入产出结束时刻 endedAt（turn 聚合时间轴右端）；已有值不覆写（不迟到覆写真实终点）', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([
+      streamingAssistant('a1'),
+      streamingAssistant('a2', { endedAt: 777 }),
+    ])]])
+
+    sm.finalizeMessages('s1', 'aborted')
+
+    const after = messages.value.get('s1')!.value
+    expect(after[0].endedAt).toBeTypeOf('number')
+    expect(after[1].endedAt).toBe(777)
+  })
+
   it('TC5 normal 收口：streaming → complete；toolCall → end_not_received 且不设 endTime；无 errorText 不追加', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'full', toolCalls: [runningToolCall('tc1')] })
@@ -259,28 +330,5 @@ describe('clearIndependentTransient', () => {
     const retrySnapshot = retryStates.value
     sm.clearIndependentTransient('ghost')
     expect(retryStates.value).toBe(retrySnapshot)
-  })
-})
-
-describe('disposePrematureTimeoutIds（[u10/G4] dispose 补面，时机⑤）', () => {
-  it('timeout 收口置快照 → dispose 回收（take 空）；未 dispose 分区不受牵连；幂等', () => {
-    const { sm, messages } = makeMachine()
-    messages.value = new Map([
-      ['s1', shallowRef([streamingAssistant('a1')])],
-      ['s2', shallowRef([streamingAssistant('a2')])],
-    ])
-
-    sm.finalizeMessages('s1', 'timeout')
-    sm.finalizeMessages('s2', 'timeout')
-
-    // dispose 只回收指定 session 的快照条目
-    sm.disposePrematureTimeoutIds('s1')
-    expect(sm.takePrematureTimeoutIds('s1').size).toBe(0)
-    // 对照：未 dispose 的 s2 快照完好（take 返回打标 id）
-    expect(sm.takePrematureTimeoutIds('s2').size).toBe(1)
-
-    // 幂等：对未打标 / 已回收的 session no-op
-    expect(() => sm.disposePrematureTimeoutIds('s1')).not.toThrow()
-    expect(() => sm.disposePrematureTimeoutIds('ghost')).not.toThrow()
   })
 })

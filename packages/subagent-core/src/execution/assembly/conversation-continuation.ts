@@ -135,13 +135,11 @@ export interface ContinuationHost {
   dispatchChatRound(record: ExecutionRecord, input: ContinuationDispatchInput): void;
   /** 轮终簿记（doFinalizeRoundToIdle wrapper，D7 outcome 入参）。 */
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
-  /** 成功通知路由（collectCoordinator.route——正文权威 = record.result）。 */
-  routeRecord(record: ExecutionRecord): void;
-  /** [modeless 波3] 批成员资格查询（collectCoordinator.isMember——失败轮分流判据：
-   *  成员失败入批（批头 failed 计数）/ async 失败单发。route 自带通知副作用，
-   *  不可作谓词使用）。 */
-  isCollectMember(recordId: string): boolean;
-  /** 失败通知直投（独立构造载荷——不经 route，正文不读 record.result）。 */
+  /** 成功完成通知（toNotifyRecord 守卫映射 + notify——正文权威 = record.result）。
+   *  [collect 退役] 原 collectCoordinator.route（async 直通/sync 批缓冲双路）收敛为
+   *  单一 async 直通面。 */
+  notifyComplete(record: ExecutionRecord): void;
+  /** 失败通知直投（独立构造载荷——不经 toNotifyRecord 守卫映射，正文不读 record.result）。 */
   notifyRecord(record: BgNotifyRecord): void;
   /** 红线②派发前兜底：镜像在途子进程活着 → kill 等退出（引擎存活期状态错配）。 */
   killStaleChild(recordId: string): Promise<void>;
@@ -154,7 +152,10 @@ export interface ContinuationHost {
   reviveClosedRecord(record: ExecutionRecord): void;
   /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
-   *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
+   *  [W1/R1 方案 A] 宿主闭包经 transcriptAnchorOf 单点分派两引擎锚（pi = sessionFile /
+   *  zcode = engineHandle.sessionRef）——两引擎对 true/false 语义同构。
+   *  false = CAS 拒绝（record 非 idle——竞态收口）或 binding 持久化失败，调用方按
+   *  降级失败响亮上抛（D1a：原 zcode 静默降级分支已随闭包接线删除）。 */
   reopenRecord(record: ExecutionRecord): boolean;
   /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
@@ -174,11 +175,6 @@ export interface ContinuationHost {
    * 三失败形态在 outcome 判别联合内表达（形态③ IO 错 = throw 响亮）。
    */
   rebuildWorktree(record: ExecutionRecord): Promise<WorktreeRebuildOutcome>;
-  /**
-   * [U5 / §3.2.2 事件表] message 隐含寻回的宿主面：store.markReactivated（intent 翻回
-   * active + manifest 投影）。
-   */
-  reactivateRecord(record: ExecutionRecord): void;
   /**
    * [U5 / §3.2.5 形态②] apply 冲突的用户可见提示通道（appendEntry 落主 session，
    * 含 patch 备份路径）。
@@ -257,11 +253,8 @@ export class ConversationContinuation {
    */
   onMessage(text: string): void {
     const record = this.record;
-    // [U5 / §3.2.2 事件表] archived + message = **隐含寻回**——挂点独立于 revive 格：
-    // 轮终 idle（markRoundIdle 翻边收口 [two-state-convergence U4/D3]）与轮间 running
-    // 同样可达 close 归档后的续聊，寻回不能只在 idle 分流内。幂等：非 archived 时
-    // markReactivated no-op。
-    this.host.reactivateRecord(record);
+    // [u-arch merge] reactivateRecord 挂点随 dev 线意图机制清除移除——寻回语义由
+    // reviveOrThrow 构造性承接（万物可续：close 收口落账 record 的续聊照常可达）。
     if (record.status !== "running") {
       this.reviveOrThrow();
     }
@@ -376,11 +369,13 @@ export class ConversationContinuation {
    *     降级）：按 reopen 降级轮派发（resume:undefined + 摘要前缀），消费后即清；
    *   - 锚字段缺失（从未开跑，entry-born）：无历史可摘要——直接按全新 session 派发
    *     （resume:undefined），无世代推进（round/epoch 均为初始值）；
-   *   - 锚字段在但不可解析（续轮 drain 窗口内 transcript 被删，极窄现实面）：同按
+   *   - pi 锚字段在但不可解析（续轮 drain 窗口内 transcript 被删，极窄现实面）：同按
    *     全新 session 派发 + 摘要注入——**不**推进世代（markReopened CAS 仅收 idle，
    *     U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
    *     应答回填 writeBindingForRecord 保证）——世代推进仅 idle-message 触发的完整
    *     reopen 承担（偏差登记：续轮降级无 epoch/round 重置）；
+   *   - zcode 锚不进预检查分流（库投影滞后系统性误判——U3 退役，理由见
+   *     reviveOrThrow 注）：带锚正常派发，锚活性由引擎真实 resume 结果承担；
    *   - 锚可解析：原样 resume 续写（透明续聊）。
    *  [U5 / §3.2.5] worktree 绑定丢失守卫改为自动重建（异步——移入 dispatchRoundAsync，
    *  三失败形态处置见其方法头；原同步 throw 拒绝语义退役）。
@@ -407,13 +402,17 @@ export class ConversationContinuation {
         // [U4] 锚字段缺失（从未开跑）：全新 session 直派；无历史轮可摘要（binding
         // 只在首轮 run 后存在），不注入 reopen 摘要。
         freshSession = true;
-      } else if (summaryPrefix === undefined && !isAnchorResolvable(record)) {
-        // [U4] 续轮窗口内 transcript 被删（pi：文件不在 / zcode：库条目被 TTL 清）
-        //：全新 session 直派 + 摘要注入。完整 reopen 降级（markReopened 世代推进）
-        // 只在 idle-message 路径（reviveOrThrow）发生；本分支不推进世代
-        //（markReopened CAS 仅收 idle，U2 原语契约领地外不可放宽；round 连续保持
-        // 通知去重键单调，磁盘一致性由 run 应答回填 writeBindingForRecord 保证）
-        //——偏差登记见实现单元报告。
+      } else if (summaryPrefix === undefined && anchor?.engine === "pi" && !isAnchorResolvable(record)) {
+        // [U4] 续轮窗口内 pi transcript 文件被回收：全新 session 直派 + 摘要注入。
+        // 完整 reopen 降级（markReopened 世代推进）只在 idle-message 路径
+        //（reviveOrThrow）发生；本分支不推进世代（markReopened CAS 仅收 idle，
+        // U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由
+        // run 应答回填 writeBindingForRecord 保证）——偏差登记见实现单元报告。
+        //
+        // [U3] zcode 锚不进本降级：库投影预检查对 zcode 系统性误判（app-server 落库
+        // 滞后于 create 应答，分钟级窗 + 部分行永不落库——详见 reviveOrThrow 注），
+        // 误触发会丢 resume 通道。zcode 锚活性由引擎真实 resume 结果承担（失败时
+        // 引擎注入锚失效声明段），此处带锚正常派发。
         freshSession = true;
         summaryPrefix = this.reopenSummaryFor(record);
       }
@@ -695,11 +694,11 @@ export class ConversationContinuation {
     // 相位帧只在成功收敛后到达，同构）；drain 派发排队消息时经 dispatchRoundGuarded
     // disarm 接回「正在执行」。
     this.armIdleKeepalive();
-    // 成功通知：「门 → route」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
-    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本 route 之后，settle 时点
-    // intent 尚未翻转；route 正文权威 = record.result = 本轮 content）。
+    // 成功通知：「门 → 直发」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
+    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本通知之后，settle 时点
+    // intent 尚未翻转；正文权威 = record.result = 本轮 content）。
     if (notifyGateAllowsDelivery(record)) {
-      this.host.routeRecord(record);
+      this.host.notifyComplete(record);
       // [U5 / §3.2.5 close 顺序约束] 收口轮通知送达后归档（closeAfterRound 挂起消费，
       // chat 域挂点）。归档后 drain：record 已 archived（intent 翻转，占用位 idle
       // 化由后续流程承接）——drain 的 status 守卫决定排队消息去留。
@@ -730,19 +729,8 @@ export class ConversationContinuation {
     }
     // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
     // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
-    // [modeless 波3·成员资格判定] sync 成员经 route 进攒批缓冲（批语义保持：
-    // 失败成员同样计入批头 failed 计数与一次唤醒；载荷经 toNotifyRecord 投影——
-    // markRoundIdle failed 已写 record.error，outcome 派生正确），成员资格由协调器
-    // 登记集承载（isCollectMember 查询——collectMode 已出 record）。async 成员保持
-    // 失败单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
-    if (this.host.isCollectMember(record.id)) {
-      this.host.routeRecord(record);
-      if (record.closeAfterRound === true) {
-        await this.host.archiveAfterClosingRound(record);
-      }
-      this.drain();
-      return;
-    }
+    // [collect 退役] 原 sync 成员失败入批分流（isCollectMember → routeRecord）随批
+    // 机制删除——失败统一单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
     const notify: BgNotifyRecord = {
       id: record.id,
       // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态
@@ -883,22 +871,29 @@ export class ConversationContinuation {
    * closed」硬拒分支消亡（用户 close 后 message = 隐含寻回：intent 翻回 active 的
    * 挂点归 U5 意愿动作，见下方留桩），closedReason/stopReason 只是展示位。准入 =
    * 物理三件套（锚可解析 + 异进程探针 + 归属）：探针/归属已在 getRecordForAction
-   * 冷查链执行（内存 idle record 恒本进程持有）；锚可解析性在派发守卫
-   *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝。
+   * 冷查链执行（内存 idle record 恒本进程持有）；pi 锚可解析性在派发守卫
+   *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝（zcode 锚
+   * 不进预检查，见下方注）。
    * [modeless 波1] 升级概念消亡（chatMode 置位格删除）；message 资格 = 引擎
    * conversation 能力轴（与 record 无关）。
    */
   private reviveOrThrow(): void {
     const record = this.record;
-    // [U4 / §3.2.3 锚失效降级 → U6 引擎中立] 检测点在翻边**前**（markReopened CAS
+    // [U4 / §3.2.3 锚失效降级 → U3 pi 专属收窄] 检测点在翻边**前**（markReopened CAS
     // 仅收 idle——U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚在但
-    // 不可解析（pi：transcript 文件被回收 / zcode：库条目被 TTL 清，§3.2.6 ③）→
-    // 同 id 带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding
-    //（store.markReopened），摘要暂存 pendingReopen 由派发守卫消费（resume:undefined
-    // + prompt 注入）。锚缺失（从未开跑）不在此分支（无世代可推进，派发守卫按全新
-    // session 直派）。
+    // 不可解析（pi：transcript 文件被回收）→ 同 id 带历史重开——round 归零 + epoch+1
+    // + stopReason=reopened + 新锚 binding（store.markReopened），摘要暂存
+    // pendingReopen 由派发守卫消费（resume:undefined + prompt 注入）。锚缺失（从未
+    // 开跑）不在此分支（无世代可推进，派发守卫按全新 session 直派）。
+    //
+    // zcode 锚不进本降级：库投影预检查（isAnchorResolvable）对 zcode 系统性误判——
+    // app-server 对 session 元数据行的落库滞后于 session/create 应答（分钟级窗 +
+    // 部分行永不落库），滞后窗内预检查恒 false，会把完全有效的锚误降级 reopen（丢
+    // resume 通道 + 每条消息推进世代）。锚的活性改由引擎真实 resume 结果承担（失败
+    // 时引擎注入锚失效声明段，见 zcode-engine buildResumeHistoryPrefix）；pi 锚 =
+    // session 文件即时落盘，预检查可靠，保持 reopen。
     const anchor = transcriptAnchorOf(record);
-    if (anchor !== undefined && !isAnchorResolvable(record)) {
+    if (anchor !== undefined && anchor.engine === "pi" && !isAnchorResolvable(record)) {
       // 摘要快照先于 markReopened（后者 round 归零——摘要须反映重开前的历史轮数）。
       const summary = buildReopenSummaryPrompt({
         id: record.id,
@@ -911,18 +906,17 @@ export class ConversationContinuation {
       });
       if (this.host.reopenRecord(record)) {
         this.pendingReopenSummary = summary;
-      } else if (anchor.engine === "zcode") {
-        // [U6 偏差登记] zcode 锚失效降级：现行 reopenRecord 宿主闭包（run-orchestration
-        // 领地）只承载 pi 锚（sessionFile 缺失恒 false）——zcode 走无世代推进降级
-        //（fresh session + 摘要注入，round 连续——与 drain 窗口降级/U4-D2 偏差同族：
-        // round 不重置则 notifyId 无撞键面，epoch 推进非必要）。世代推进版 reopen
-        //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
-        this.pendingReopenSummary = summary;
       } else {
-        // pi：CAS false = 竞态防御（此刻仍 idle 的前提下理论不可达），响亮上抛。
+        // [W1/R1 D1a] pi 与 zcode 同构两分支（原 zcode 无世代推进静默降级分支随
+        // 宿主闭包 transcriptAnchorOf 单点分派接线删除——分支的存在前提「闭包对
+        // zcode 恒 false」已消失）。false = CAS 拒绝（竞态翻位）或 binding 持久化
+        // 失败（epoch 硬要求，markReopened 已回滚内存面）——两者 record 都保持
+        // idle 可重试，响亮上抛（Recovery 指引同款：重试 message 即可，写失败详情
+        // 见 markReopened warn）。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
-          `while the message was being processed). Recovery: retry the message (action:'message').`,
+          `while the message was being processed, or persisting the reopened generation failed). ` +
+          `Recovery: retry the message (action:'message').`,
         );
       }
     }

@@ -1,20 +1,11 @@
 // src/execution/__tests__/sync-collect-recovery.test.ts
 //
-// sync collect 域真实文件通路测试（subagent-sync-collect 设计 §3.1.5）。
-// [modeless 波3] E1 崩溃恢复面（扫描补发 / settled 有界重扫 / 账本幂等窗口 / dispose
-// 惰化）随 collectMode 记录态消亡退役——批协调状态 = 协调器内存登记态，随 session
-// 生命周期消亡，崩溃后批次协调不恢复（成员 record 本体仍健全）。本文件保留：
-//   1. 投影白名单：batchFinalized/终态五字段经末条 entry 重建后可见（rebuildEntryRecord）；
-//   2. E9 dispose：缓冲终态成员逐条转 async notify + 落标 + 协调状态清空；在跑成员
-//      走现有退出路径（不通知）；
-//   3. U4 deviation #8 接线：config collectSync 预算热读传入 flush 的 notifyBatch
-//      budget 参数；
-//   4. 波3 语义：kill -9 同构形态下重启——orphan 覆写自洽 + 批协调不恢复（零补发零落标）；
-//   5. manifest 屏障失败 warn 留痕（D6 #7a/SC-1，flush 路径驱动）；
-//   6. orphan 覆写 merge 语义（async 对照 / 保留方向反向锁定）；
-//   7. P-rebuild / P-manifest 探针不变量（投影不改变孤儿判定 / manifest 存在不改变
-//      重建投影）；
-//   8. S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标。
+// [collect 退役] sync collect 批机制本体（SyncCollectDomain/E9 dispose 转账/flushBatch/
+// 预算热读/manifest 屏障）已整体删除，本文件保留两个非批覆盖面（真实文件通路）：
+//   1. 存量 entry 读侧守卫：batchFinalized/终态五字段经末条 entry 重建投影可见
+//      （rebuildEntryRecord 白名单——旧 session 文件必须可读，D6 读侧保留纪律）；
+//   2. orphan 覆写 merge 语义（v2 断链遗产，通用 record 重建规则）+ P-rebuild /
+//      P-manifest 探针不变量。
 //
 // 通路保真（U8 红线：禁 mock record 断言）：
 //   种子 entry 经真实 RecordStore.reportSubagentRecord → toSubagentRecordEntry 序列化
@@ -22,14 +13,13 @@
 //   （scanLastRecordEntries → collectLastRecordEntries + rebuildEntryRecord 投影）。
 //   断言全部打在「磁盘文件内容 + 真实投影产物」上，scan/投影/序列化三层零 mock。
 //
-// mock 手法对齐 collect-coordinator-service.test.ts：mock session-runner（不 spawn 真子
-// 进程）+ logger；record-store / config 走真实实现（tmpdir 自建自删，红线）。
+// mock 手法：mock logger；record-store 走真实实现（tmpdir 自建自删，红线）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -38,18 +28,6 @@ const { loggerMock } = vi.hoisted(() => ({
 // 经 ../core/logger.ts 引用的同一模块）。曾写 ../core/logger.ts 指向不存在的
 // src/execution/core/，vi.mock 静默失效（D4 上限用例首次断言日志时暴露）。
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
-// [U3 适配] RecordStore 构造点接线 manifestDir 后，markBatchFinalized 的 manifest 面走
-// writeAtomicFileSync 同步写（不再经 manifestStore.writeManifest）——屏障失败注入面
-// 在本模块（默认透传真实现，仅「屏障失败」用例内 mockImplementationOnce）。
-vi.mock("../../shared/atomic-write.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../shared/atomic-write.ts")>();
-  return { ...actual, writeAtomicFileSync: vi.fn(actual.writeAtomicFileSync) };
-});
-
-// [W3 改写] mock session-runner（execute 链 runSpawn 替身）随 inproc pi 引擎目录 删除消亡——
-// execute 链改为协议 seam（registerFakePiEngine 替身 + 显式 settle 应答）。
-import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { clearEngines } from "../engine/registry.ts";
 
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
@@ -57,10 +35,9 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { SyncCollectDomain } from "../service/sync-collect-domain.ts";
-import type { SubagentRecord } from "../assembly/types.ts";
+import { derivedManifestRecord } from "../persistence/record-store-rebuild.ts";
+import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
 /** 剥身份/relay env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描），
  *  relay env 属 pi-invocation/relay-env 存量测试的敏感面（测试纪律：env 剥离）。 */
@@ -113,65 +90,10 @@ function makeAssertPi() {
 type AssertPi = ReturnType<typeof makeAssertPi>;
 type WritingPi = ReturnType<typeof makeWritingPi>;
 
-interface NotifierSpy {
-  // Mock<T> 而非纯函数签名：测试断言消费 .mock.calls，需保留 mock 元数据
-  notify: Mock<(record: unknown) => void>;
-  notifyBatch: Mock<(records: unknown, budget?: unknown) => boolean>;
-}
-
-function spyNotifier(service: SubagentService): NotifierSpy {
-  // [D4-① 适配] notifier 实例已封装进 notifyHost（createNotifyHost），spy 改为包装
-  // host 的 notify/notifyBatch 出口（其余方法经 ...host 保留真实现）；协调器 deps
-  // 闭包经 this 运行时读取 service.notifyHost，字段替换即生效。
-  const host = (service as unknown as { notifyHost: object }).notifyHost;
-  const spy: NotifierSpy = { notify: vi.fn(), notifyBatch: vi.fn(() => true) };
-  (service as unknown as { notifyHost: unknown }).notifyHost = {
-    ...host,
-    notify: (record: unknown) => spy.notify(record),
-    notifyBatch: (records: unknown, budget?: unknown) => spy.notifyBatch(records, budget),
-  };
-  return spy;
-}
-
-/** 手写短轮询（真实 timers）——vi.waitFor 在 vitest 4.1.8 本包环境对 falsy callback
- *  立即 resolve 不轮询（见 collect-coordinator-service.test.ts 同款说明）。 */
-async function until(cond: () => boolean, timeoutMs = 3000): Promise<void> {
-  const start = Date.now();
-  while (!cond()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`sync-collect-recovery: condition not met within ${timeoutMs}ms`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 /** 种子成员 record（真实 reportSubagentRecord 入参——序列化/落盘/扫描三层真实）。 */
-function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): SubagentRecord {
-  return {
-    agent: "/agents/worker.md",
-    task: "seed task",
-    slug: "seed",
-    status: "running",
-    mode: "background",
-    startedAt: 1000,
-    rootSessionId: ROOT_SESSION,
-    parentRecordId: undefined,
-    depth: 0,
-    endedAt: undefined,
-    turns: 0,
-    totalTokens: 0,
-    model: "prov/m1",
-    thinkingLevel: undefined,
-    eventLog: [],
-    displayItems: [],
-    result: undefined,
-    error: undefined,
-    sessionFile: undefined,
-    ...overrides,
-  };
-}
+const memberRecord = createMemberRecord({ task: "seed task", slug: "seed", rootSessionId: ROOT_SESSION });
 
-describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影）", () => {
+describe("[collect 退役] 存量 entry 读侧守卫 + orphan 覆写 merge（真实文件通路）", () => {
   let agentDir: string;
   let mainFile: string;
 
@@ -183,11 +105,8 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   });
 
   afterEach(() => {
-    clearEngines();
-    // maxRetries：E9 落标的 manifest fire-and-forget 原子写（tmp→fsync→rename，
-    // 链尾 fsyncDir 仍在飞；批通知路径的屏障 await 已含 fsyncDir，无此竞态）+
-    // sessions-index fire 写都可能与删除并发（ENOTEMPTY 竞态，根级全量并行时机器
-    // 负载高会放大窗口）——同款修法见 get-record-for-action-restart.test.ts /
+    // maxRetries：sessions-index fire 写可能与删除并发（ENOTEMPTY 竞态，根级全量
+    // 并行时机器负载高会放大窗口）——同款修法见 get-record-for-action-restart.test.ts /
     // record-store-index.test.ts。
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -199,14 +118,6 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
       new ManifestStore(getSubagentRecordsDir(agentDir, agentDir)),
       makeWritingPi(mainFile),
     );
-  }
-
-  /** 恢复侧 service：断言 pi（覆写不落盘，断言内存面）/ 写文件 pi（覆写真实落盘）
-   *  两用。 */
-  /** [W3] 协议替身注册（per-test 调用；afterEach clearEngines 统一清理）。 */
-  function makeRecoveryFake(): FakePiEnginePort {
-    clearEngines();
-    return registerFakePiEngine();
   }
 
   function makeRecoveryService(pi: AssertPi | WritingPi): SubagentService {
@@ -240,11 +151,10 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   }
 
   /** 在 sessionsDir 手工构造子 session 文件（session 头 + identity entry + 末行完整
-   *  JSON record entry，E9 用例同款形态）且**不写** `.state`/`.alive`
-   *  三 sidecar——重建矩阵分支 4 命中条件，保证 orphan 恢复走 finalizeOrphanRecord
-   *  真实路径（entry-born 兜底测不到 D3 merge 所在路径 = 假绿）。
-   *  identity 含 reconstructAll 过滤必需字段：id/agent/task string + mode 枚举 +
-   *  startedAt number + rootSessionId。
+   *  JSON record entry）且**不写** `.state`/`.alive` 三 sidecar——重建矩阵分支 4 命中
+   *  条件，保证 orphan 恢复走 finalizeOrphanRecord 真实路径（entry-born 兜底测不到
+   *  D3 merge 所在路径 = 假绿）。identity 含 reconstructAll 过滤必需字段：id/agent/
+   *  task string + mode 枚举 + startedAt number + rootSessionId。
    *  headModel（可选，"provider/modelId" 形态）：在 session 头与 identity 之间插一笔
    *  model_change entry——pi sdk 新 session 真实形态（dist sdk.js 对新 session 先
    *  appendModelChange 初值，session_start hook 的 identity 随后），readIdentityHeader
@@ -284,8 +194,7 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   }
 
   /** 种下「崩溃前主文件末条序列」：register（running）→ 轮终（idle + result 全文 +
-   *  sessionFile）——[U4/D3] 翻边后轮终权威形态（markRoundIdle 写 idle）。
-   *  [modeless 波3] collectMode 种子参数随字段消亡删除（批成员身份在协调器登记态）。 */
+   *  sessionFile）——[U4/D3] 翻边后轮终权威形态（markRoundIdle 写 idle）。 */
   function seedRoundTerminalEntries(id: string, childFile: string, result: string, model: string): void {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id, sessionFile: childFile, model }));
@@ -295,7 +204,7 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   }
 
   // ============================================================
-  // 投影白名单（rebuildEntryRecord）
+  // 投影白名单（rebuildEntryRecord）——存量 entry 读侧守卫
   // ============================================================
 
   it("批标记与终态五字段经真实落盘→扫描投影后可见（rebuildEntryRecord 白名单扩展）", () => {
@@ -316,13 +225,12 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
     store.reportSubagentRecord(
       memberRecord({ id: "sa-b", status: "idle", closedReason: "gc", endedAt: 3000, error: "boom" }),
     );
-    // 成员 C：已落标（batchFinalized，E9/flush 后形态）
+    // 成员 C：已落标（batchFinalized——存量批成员 entry 形态，[collect 退役] 后只读）
     store.reportSubagentRecord(
       memberRecord({ id: "sa-c", status: "idle", closedReason: "gc", endedAt: 4000, batchFinalized: true }),
     );
 
-    // 读侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问，与
-    // collect-coordinator-service.test.ts 访问 notifier 同款手法）
+    // 读侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问）
     const recovery = makeRecoveryService(makeAssertPi());
     const scanned = (recovery as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
     const byId = new Map(scanned.map((r) => [r.id, r]));
@@ -345,99 +253,11 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   });
 
   // ============================================================
-  // E9 dispose（缓冲转账 + 协调状态清空）
+  // kill -9 同构形态：重启 orphan 判定自洽 + 覆写幂等
+  // （[collect 退役] 原批协调不恢复断言随批机制删除——无恢复面即无补发面）
   // ============================================================
 
-  it("E9 dispose：缓冲终态成员逐条转 async notify + 落标；在跑成员走现有退出路径（不通知）", async () => {
-    // 复用 execute 真链：成员 1 受控终态（入缓冲后批因成员 2 在跑不闭合），成员 2 悬置 running
-    const fake = makeRecoveryFake();
-    const pi = makeAssertPi();
-    const service = makeRecoveryService(pi);
-    const spy = spyNotifier(service);
-    const h1 = await service.execute({ task: "terminal one", slug: "one", collect: "sync" });
-    await service.execute({ task: "running two", slug: "two", collect: "sync" });
-    await until(() => fake.runs.length >= 2);
-
-    // 成员 1 子文件就位（E9 落标 getFullRecord 冷路径数据源）
-    const sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    const ts = new Date(1000).toISOString();
-    fs.writeFileSync(
-      path.join(sessionsDir, `${h1.subagentId}.jsonl`),
-      `${JSON.stringify({ type: "session", version: 3, id: `sess-${h1.subagentId}`, timestamp: ts, cwd: agentDir })}\n` +
-        JSON.stringify({
-          type: "custom", id: "id-1", parentId: null, timestamp: ts,
-          customType: "subagent-identity",
-          data: { id: h1.subagentId, agent: "/agents/worker.md", mode: "background", task: "terminal one", startedAt: 1000, rootSessionId: ROOT_SESSION, depth: 0 },
-        }) + "\n" +
-        JSON.stringify({
-          type: "custom", id: "id-2", parentId: "id-1", timestamp: ts,
-          customType: "subagent-record",
-          data: {
-            v: 1, id: h1.subagentId, agent: "/agents/worker.md", task: "terminal one", slug: "one",
-            status: "closed", mode: "background", startedAt: 1000, rootSessionId: ROOT_SESSION,
-            depth: 0, endedAt: 2000, turns: 1, totalTokens: 10, model: "prov/m1",
-            eventLog: [], displayItems: [], result: "ok-terminal",
-          },
-        }) + "\n",
-      "utf-8",
-    );
-
-    // 成员 1 终态：入缓冲，成员 2 在跑 → 批不闭合（零批投递）
-    fake.runs[0]!.settle({ content: "ok-terminal" });
-    // 等 settle 收尾链排空（finalize→route 入缓冲；成员 2 悬置 → 零投递）
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(spy.notify.mock.calls.length + spy.notifyBatch.mock.calls.length).toBe(0);
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-
-    // dispose（E9）：成员 1 逐条转 async 写账 + 落标；成员 2 不通知（现有退出路径）
-    service.dispose();
-    expect(spy.notify).toHaveBeenCalledTimes(1);
-    expect(spy.notify.mock.calls[0]![0]).toMatchObject({ id: h1.subagentId, status: "closed" });
-    expect(spy.notifyBatch).not.toHaveBeenCalled(); // 放弃攒批
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id)).toEqual([h1.subagentId]);
-    expect(marks[0]!.result).toBe("ok-terminal");
-
-    // [modeless 波3] E9 后批协调状态清空（clear）：无挂起排程可触发、登记集消亡——
-    // dispose 后 settle 链不可能再入批（成员 2 走 disposeAllRecords 退出路径，无通知）。
-    expect(spy.notify).toHaveBeenCalledTimes(1);
-  });
-
-  it("U4 deviation #8 接线：config collectSync 预算热读传入 flush 的 notifyBatch budget 参数", async () => {
-    const fake = makeRecoveryFake();
-    // 写 config（collectSync 预算字段）+ reload —— 与 getCollectSyncDefault 同款访问链
-    const configPath = path.join(agentDir, "subagents", "config.json");
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ version: 1, maxConcurrent: 6, collectSync: { default: "sync", perItemChars: 1234, totalChars: 5678 } }),
-      "utf-8",
-    );
-
-    const pi = makeAssertPi();
-    const service = makeRecoveryService(pi);
-    const modelService = (service as unknown as { modelService: ModelConfigService }).modelService;
-    modelService.reloadGlobalConfig();
-    const spy = spyNotifier(service);
-    const handle = await service.execute({ task: "budget task", slug: "budget", collect: "sync" });
-    await until(() => fake.runs.length >= 1);
-    fake.runs[0]!.settle({ content: "ok-budget" });
-    await until(() => spy.notifyBatch.mock.calls.length > 0);
-
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    expect(spy.notifyBatch.mock.calls[0]![1]).toEqual({ perItemChars: 1234, totalChars: 5678 });
-    expect(spy.notifyBatch.mock.calls[0]![0]).toMatchObject([{ id: handle.subagentId }]);
-  });
-
-  // ============================================================
-  // [modeless 波3] kill -9 同构形态：重启后批协调不恢复
-  // （E1 恢复面退役——成员 record 本体健全，零补发零落标）
-  // ============================================================
-
-  it("kill -9 同构主用例（波3）：轮终 idle 末条自洽 → 重启 orphan 判定自洽 + 批协调不恢复（零补发）", async () => {
+  it("kill -9 同构主用例：轮终 idle 末条自洽 → 重启 orphan 判定自洽 + 覆写幂等", async () => {
     // ── 崩溃前形态：register（running）→ 轮终（idle+result 全文，[U4] 翻边）──
     const childFile = writeChildSessionFile("sa-kill9", "kill -9 crash task");
     seedRoundTerminalEntries("sa-kill9", childFile, "kill-9 full result body", "prov/round-m");
@@ -459,17 +279,7 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
     // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删；幂等由「纠偏
     // entry 落盘后末条变 idle，判据不再命中」构造性承接）
     expect(fs.existsSync(`${childFile}.state`)).toBe(false);
-
-    // ── [modeless 波3] 批协调不恢复：E1 已退役 → 零补发零落标 ──
-    // 成员通知已在崩溃前的 flush 投递（或随 dispose 转 async 兑底）；协调器登记态
-    // 随旧 session 消亡，重启后无人重收集——成员 record 本体（idle+result+锚）健全，
-    // fork/message 续用能力不受影响。
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch(); // accepted-no-op
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    expect(spy.notify).not.toHaveBeenCalled();
-    const marked = readMainFileLastEntries().get("sa-kill9")!;
-    expect(marked.batchFinalized).toBeUndefined();
+    void recovery; // [collect 退役] 原批恢复调用已随批机制删除，实例仅供下方自检链复用
 
     // orphan 覆写幂等自检：二次重启零追加（末条已 idle，判据不再命中）
     const before = readMainFileLastEntries().get("sa-kill9")!;
@@ -554,14 +364,13 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
   });
 
   // ============================================================
-  // v2 断链 1 遗产 + 探针 P-manifest：批落标出口 manifest 落盘后，running manifest
-  // 不得触发 collectRecords 孤儿补充投影——有子文件锚的成员永不被 manifest 补充
-  // 投影覆盖（record-store byId.has 跳过语义）。
+  // 探针 P-manifest：存量 manifest 与子文件锚并存时，manifest 不得改变重建投影——
+  // 有子文件锚的成员永不被 manifest 补充投影覆盖（record-store byId.has 跳过语义）。
+  // [collect 退役] 后 manifest 为磁盘遗留形态（批时代落标产物），种子改为存量模拟
+  //（batchFinalized entry + 手写 manifest）。
   // ============================================================
 
   it("P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 list 投影与删 manifest 后逐字段一致", () => {
-    // 落标形态构造：子文件锚（identity/子文件重建源）+ markBatchFinalized 落标
-    //（batchFinalized entry + manifest 同步落盘——批闭合 flush 的真实写面）。
     const childFile = writeChildSessionFile("sa-pm", "p-manifest task");
     const store = new RecordStore(
       getSubagentSessionDir(agentDir, agentDir),
@@ -569,13 +378,16 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
       makeWritingPi(mainFile),
       getSubagentRecordsDir(agentDir, agentDir),
     );
-    // 种子：末条轮终 idle + 锚（子文件在）→ 落标（原语内部序：manifest 落盘完成先于
-    // entry）。[modeless 波3] E1 已退役，落标数据源直接喂 record（与 flush 路径
-    // getFullRecord 重建产物同构——本用例断言面在 manifest 存在性不变量，不在重建链）。
-    void store.markBatchFinalized([
-      memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" }),
-    ]);
+    // 种子：末条轮终 idle + 锚（子文件在）+ 落标标记 entry（存量批成员形态）；
+    // manifest 以 derivedManifestRecord 投影手写（批时代 barrier 的磁盘遗留形态）。
+    const pmFull = memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" });
+    void store.reportSubagentRecord(memberRecord({ ...pmFull, batchFinalized: true }));
     const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-pm.json");
+    fs.writeFileSync(
+      manifestFile,
+      JSON.stringify(derivedManifestRecord(pmFull), null, 2),
+      "utf-8",
+    );
     expect(fs.existsSync(manifestFile)).toBe(true);
 
     // 模拟重启重建：全新 RecordStore + ManifestStore（内存缓存零残留），manifest 存在时
@@ -587,6 +399,8 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
     const withManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     const pm = withManifest.find((r) => r.id === "sa-pm");
     expect(pm).toBeDefined();
+    // 落标标记不在子文件锚重建投影词汇（entry 扫描链专属——见投影白名单用例）
+    expect(pm!.batchFinalized).toBeUndefined();
     // 投影来自子文件锚重建（[U3 / §3.2.4] 纠偏 idle + interrupted-by-restart，无
     // sidecar 落盘），非 manifest（status 下行投影）——closedReason 有无仍是可辨差异位
     expect(pm!.status).toBe("idle");
@@ -598,148 +412,5 @@ describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影�
     fs.rmSync(manifestFile);
     const withoutManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     expect(withoutManifest).toEqual(withManifest);
-  });
-
-  // ============================================================
-  // S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标
-  // ============================================================
-
-  it("S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标", async () => {
-    // 成员 1：失败终态（archive 出内存）且不写子文件 → getFullRecord 双 miss
-    //（内存已出 + 子文件缺失——子文件被 GC/删除的窗口形态）；
-    // 成员 2：SP-5 成功回退（留内存）→ getFullRecord 内存命中（正常落标对照）。
-    const fake = makeRecoveryFake();
-    // 写文件 pi：标记 entry 真实落盘主文件，扫描通路（rebuildEntryRecord）可重解析
-    const pi = makeWritingPi(mainFile);
-    const service = makeRecoveryService(pi);
-    const spy = spyNotifier(service);
-    const h1 = await service.execute({ task: "miss one", slug: "one", collect: "sync" });
-    const h2 = await service.execute({ task: "full two", slug: "two", collect: "sync" });
-    await until(() => fake.runs.length >= 2);
-
-    // 成员 1 子文件故意缺失（getFullRecord miss 前提）；成员 2 内存命中不依赖子文件。
-    // 注：两成员的 settle 链竞态可能拆两批（[U8] 合批窗口形态）——S11 断言与批切分
-    // 无关，只锁「批成员并集覆盖」与「miss 成员兜底落标」。
-    fake.runs[0]!.settle({ content: "boom-miss", error: "boom-miss" });
-    fake.runs[1]!.settle({ content: "ok-full" });
-    await until(() => spy.notifyBatch.mock.calls.length > 0);
-    await new Promise((resolve) => setTimeout(resolve, 50)); // flushBatch 落标同步链排空
-
-    // 批成员并集覆盖两成员（miss 成员随批写账，成员集 hash 口径不变）
-    const batchIds = spy.notifyBatch.mock.calls
-      .flatMap((c) => (c[0] as Array<{ id: string }>).map((m) => m.id))
-      .sort();
-    expect(batchIds).toEqual([h1.subagentId, h2.subagentId].sort());
-
-    // 落标全员覆盖：miss 成员 h1 缓冲快照兜底 + full 成员 h2 正常落标
-    //（修复前 h1 被跳过 → 无标记 → 批域排除判据失位）。
-    // [modeless 波3] 标记 entry 每成员可出现两笔（flush 落标 + 自动 close 归档透传
-    // ——archiveBatchMembers 把 batchFinalized 带进归档 entry，防 last-writer-wins
-    // 抹掉落标标记），按成员去重断言覆盖。
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect([...new Set(marks.map((m) => m.id))].sort()).toEqual([h1.subagentId, h2.subagentId].sort());
-
-    // 兜底标记 entry 经扫描通路可重解析且带标记（批域排除判据就位）
-    const scanned = (service as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
-    const h1Last = scanned.find((r) => r.id === h1.subagentId);
-    expect(h1Last).toBeDefined();
-    expect(h1Last!.batchFinalized).toBe(true);
-    // [U5] 失败轮 settle（markRoundIdle 落 idle，不终态化——
-    // [two-state-convergence U4/D3] 翻边）——entry status 投影随之 idle
-    expect(h1Last!.status).toBe("idle");
-  });
-
-  // ============================================================
-  // [modeless 波3] 屏障失败 warn 留痕（D6 #7a/SC-1，flush 路径驱动）
-  // ============================================================
-
-  it("屏障失败 warn 留痕（D6 #7a/SC-1）：manifest 同步写失败不阻断投递，warn 含成员 id", async () => {
-    // 直构 SyncCollectDomain（确定性单成员批 = 单次 writeAtomicFileSync 调用，
-    // mockImplementationOnce 恰好命中）：成员 route 入批 → 去抖窗口闭合 flush。
-    // 同步分支 try/catch 吞错 = 不阻断落标/写账投递（best-effort 与旧 allSettled 同源）。
-    const store = new RecordStore(
-      getSubagentSessionDir(agentDir, agentDir),
-      undefined,
-      makeWritingPi(mainFile),
-      getSubagentRecordsDir(agentDir, agentDir),
-    );
-    const notifyBatch = vi.fn(() => true);
-    const domain = new SyncCollectDomain({
-      getStore: () => store,
-      getNotifyHost: () => ({
-        toNotifyRecord: (record: { id: string }) => ({
-          id: record.id,
-          status: "closed" as const,
-          agent: "/agents/worker.md",
-          model: "prov/m1",
-          result: undefined,
-          error: undefined,
-          startedAt: 1000,
-          endedAt: 2000,
-        }),
-        notify: () => {},
-        notifyBatch,
-      }),
-      closeMembers: async () => {},
-      getSessionRootId: () => ROOT_SESSION,
-      getCollectSyncSection: () => undefined,
-    });
-    loggerMock.warn.mockClear(); // logger 模块级共享，计数从本用例起算
-    vi.mocked(writeAtomicFileSync).mockImplementationOnce(() => {
-      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-    });
-
-    domain.collectCoordinator.registerMember("sa-bar-fail");
-    expect(
-      domain.collectCoordinator.route({
-        id: "sa-bar-fail",
-        agent: "/agents/worker.md",
-        model: "prov/m1",
-        startedAt: 1000,
-        endedAt: 2000,
-        result: "barrier result",
-      } as never),
-    ).toBe("sync-flushed");
-    // 去抖窗口到期 → flushBatch 闭包（屏障吞错 → 写账 → 落标 → close）
-    await until(() => notifyBatch.mock.calls.length > 0);
-    await new Promise((resolve) => setTimeout(resolve, 50)); // closeMembers 落标链排空
-
-    // best-effort 语义：写账照常推进（反查索引缺失只影响指针行反查，不构成写账失败）
-    expect(notifyBatch).toHaveBeenCalledTimes(1);
-    // D6 #7a 适配（U1 同步分支 warn 形态）：message 含 sync write failed 语义 +
-    // detail.id 定位成员。
-    const barrierWarns = loggerMock.warn.mock.calls.filter((c) =>
-      String(c[0]).startsWith("[subagents] batch-finalized manifest sync write failed"),
-    );
-    expect(barrierWarns).toHaveLength(1);
-    expect((barrierWarns[0]![1] as { detail?: { id?: string } }).detail?.id).toBe("sa-bar-fail");
-  });
-
-  it("[round2-notify-fix] flushBatch 的 notifyBatch not-accepted 分支 warn 留痕（review S2：dispose 窗口/重复批键可见性）", async () => {
-    const fake = makeRecoveryFake();
-    const pi = makeWritingPi(mainFile);
-    const service = makeRecoveryService(pi);
-    const spy = spyNotifier(service);
-    // 预置拒绝：notifyBatch 恒 false（模拟 dispose 窗口 / 账本重复键拒绝）
-    spy.notifyBatch.mockReturnValue(false);
-    loggerMock.warn.mockClear(); // logger 模块级共享，计数从本用例起算（先例 :479）
-
-    const h1 = await service.execute({ task: "reject one", slug: "reject-one", collect: "sync" });
-    await until(() => fake.runs.length >= 1);
-    fake.runs[0]!.settle({ content: "ok" });
-    await until(() => spy.notifyBatch.mock.calls.length > 0);
-    await new Promise((resolve) => setTimeout(resolve, 50)); // flushBatch 落标同步链排空
-
-    expect(loggerMock.warn).toHaveBeenCalledWith(
-      expect.stringContaining("notifyBatch not accepted"),
-      { detail: { memberIds: [h1.subagentId] } },
-    );
-    // 拒绝不回滚落标：「accepted=false 也统一补标」语义（落标前置）不变
-    const scanned = (service as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
-    const last = scanned.find((r) => r.id === h1.subagentId);
-    expect(last?.batchFinalized).toBe(true);
   });
 });

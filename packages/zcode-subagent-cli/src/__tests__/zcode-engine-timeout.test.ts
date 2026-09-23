@@ -1,5 +1,5 @@
-// zcode-engine-timeout.test.ts —— [P0-1 U2] 引擎超时处置链测试（设计权威源
-// docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D3/D4、§5.2 F-1/F-2）。
+// zcode-engine-timeout.test.ts —— [P0-1 U2] 引擎超时处置链测试（设计锚点
+// D3/D4、F-1/F-2）。
 // 全部跑 __fixtures__/fake-appserver.mjs 子进程（scenario 注入），绝不 spawn 真
 // zcode.cjs。覆盖：
 //   - stop 应答三态裁决各一（D3 v1.1 超时入口 escalateOn:"stop-outcome"）：

@@ -1,7 +1,7 @@
 /**
  * Workflow Extension — WorkflowScript 实体
  *
- * 一个 workflow 脚本文件的数据 + 操作收敛（domain-models.md §7）。
+ * 一个 workflow 脚本文件的数据 + 操作收敛。
  *
  * 设计：
  * - 将"脚本源 + meta + validate + toExecutable"收敛为实体。
@@ -11,9 +11,7 @@
  * 的 buildWorkerScript 承担——那是技术资源模板生成，不属于实体职责（D-12：
  * 模型只管数据+不变式）。
  *
- * 层归属：Engine。
- *
- * 参考：domain-models.md §7（字段/操作）、engine/script-lint.ts（lint 实现）。
+ * 层归属：Engine。lint 语义见 engine/script-lint.ts（lint 实现）。
  */
 import { type LintResult,lintScript } from "../script-lint.ts";
 // LintFinding/LintResult 类型规范归属 engine/script-lint.ts（canonical 源）。

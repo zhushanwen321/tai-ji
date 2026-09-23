@@ -6,6 +6,10 @@
  *         点 × → emit('remove', path)
  * - 空数组：整行 v-if 自隐藏（不渲染外层容器）
  *
+ * [窄宽容错] chip 宽 `max-w-[min(180px,100%)]` + `min-w-0`：容器窄于 180px 时 chip 跟着收缩，
+ *   × 按钮保持可达（旧 `max-w-[180px] shrink-0` 在窄盒里被容器 overflow-hidden 切掉右半）。
+ *   内层 name span `min-w-0` + chip `:title` 兜住被截断的全名。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-chips-bar.test.ts
  */
 import { describe, it, expect } from 'vitest'
@@ -59,5 +63,28 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     const chip = wrapper.findAll('span').find((s) => s.text().includes('foo.ts'))
     expect(chip).toBeTruthy()
     expect(chip!.classes()).not.toContain('text-reasoning')
+  })
+
+  it('窄宽容错：chip 宽随容器收缩（max-w 用 min() 而非固定 180px），不写死上限', () => {
+    const wrapper = mount(ContextChipsBar, {
+      props: { items: [{ id: 'a.ts', name: 'a.ts', type: '#' }] },
+    })
+    const chip = wrapper.findAll('span').find((s) => s.text().includes('a.ts'))!
+    const cls = chip.classes().join(' ')
+    // 上限仍是 180px，但允许收到 100%（容器更窄时跟着缩）——固定 180px 会在窄盒里被裁
+    expect(cls).toContain('max-w-[min(180px,100%)]')
+    expect(cls).not.toContain('max-w-[180px]')
+    // chip 自身可收缩 + 内层 name span 可收缩（truncate 生效的前提）
+    expect(cls).toContain('min-w-0')
+    expect(chip.find('span.truncate').classes()).toContain('min-w-0')
+  })
+
+  it('窄宽容错：被截断的全名经 chip title 可达（不「无声裁切」）', () => {
+    const longName = 'a-very-long-file-name-that-will-be-truncated-in-a-narrow-composer-box.ts'
+    const wrapper = mount(ContextChipsBar, {
+      props: { items: [{ id: 'p', name: longName, type: '#' }] },
+    })
+    const chip = wrapper.findAll('span').find((s) => s.text().includes('a-very-long-file-name'))!
+    expect(chip.attributes('title')).toBe(longName)
   })
 })

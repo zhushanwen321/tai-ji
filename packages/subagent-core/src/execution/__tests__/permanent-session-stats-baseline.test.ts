@@ -15,7 +15,7 @@
 //      新 store 重建值；
 //   ③ zcode 锚 settle 快照收编（U6-D2 交接）+ 重启锚恢复（B-restart store 面）：
 //      锚键 binding 落盘 → entry 源可见 + 锚派生 → markResurrected zcode 分派
-//      （acquire 键 + foreign 探针 + 水合）→ markReopened/markArchived 锚分派；
+//      （acquire 键 + foreign 探针 + 水合）→ markReopened/markSettledOut 锚分派；
 //   ④ 归零覆盖回归（GUI 快修批次⑤根因）：冷复活后 register 的 entry 投影携带
 //      水合值，不再以归零 entry last-writer-wins 覆盖磁盘原值。
 //
@@ -398,7 +398,7 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
     expect(readRecordBinding(zcodeAnchorBasePath({ sessionId: "s-1", dbPath }))).toBeDefined();
   });
 
-  it("markArchived（zcode 锚）：release 分派（锚键 .alive 删除）", () => {
+  it("markSettledOut（zcode 锚）：release 分派（锚键 .alive 删除）", () => {
     const dbPath = path.join(dir, "db.sqlite");
     const base = zcodeAnchorBasePath({ sessionId: "s-1", dbPath });
     const store = newStore();
@@ -408,9 +408,9 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
     store.markResurrected(rec, false); // 接管形态 acquire（running 候选）
     expect(fs.existsSync(`${base}.alive`)).toBe(true);
 
-    store.markArchived(rec);
+    store.markSettledOut(rec);
     expect(fs.existsSync(`${base}.alive`)).toBe(false);
-    expect(rec.intent).toBe("archived");
+    expect(rec.status).toBe("running"); // 收口落账不动占用位
   });
 
   it("双锚皆缺（spawn 窗口期）→ markResurrected 维持响亮硬拒（现行语义保留）", () => {

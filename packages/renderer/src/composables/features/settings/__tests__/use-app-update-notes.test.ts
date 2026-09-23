@@ -85,3 +85,21 @@ describe('extractLocalizedNotes', () => {
     expect(extractLocalizedNotes(body)).toBe('Hello')
   })
 })
+
+describe('renderReleaseNotes — 传值矩阵「更新日志」行（设计 markdown-html-sanitize-render D4）', () => {
+  beforeEach(() => {
+    i18nMock.locale = 'zh-CN'
+  })
+
+  it('renderMarkdown 不携带 env（resourceBaseDir 恒 undefined——release notes 无相对资源语义，不回归）', async () => {
+    const markdown = await import('@/composables/logic/markdown')
+    const { renderReleaseNotes } = await import('../use-app-update-notes')
+    renderReleaseNotes(BILINGUAL_BODY)
+    // 既有行为回归断言：UpdateButton 渲染面调 renderMarkdown 只传内容不传 env（env 缺省 →
+    // 净化 hook 的 resourceBaseDir undefined → 相对 src 不重写、④路 preventDefault 无动作）
+    expect(markdown.renderMarkdown).toHaveBeenCalledOnce()
+    const [notes, env] = vi.mocked(markdown.renderMarkdown).mock.calls[0] ?? []
+    expect(notes).toBe('- 修复 bug X')
+    expect(env).toBeUndefined()
+  })
+})

@@ -91,24 +91,4 @@ describe('L2TabBar', () => {
     expect(wrapper.find('[data-testid="l2-tab-plain"]').exists()).toBe(true)
     wrapper.unmount()
   })
-
-  // ── badge 小圆点（background-task-sidebar-view D4④）──
-
-  it('badge：badge=true 渲染 7px 圆点（data-testid）；false/缺省不渲染（DOM 断言）', () => {
-    const badgeTabs: L2TabItem[] = [
-      { viewId: 'background-tasks', title: '后台命令', builtin: true, badge: true },
-      { viewId: 'off', title: '不亮', builtin: false, badge: false },
-      { viewId: 'unset', title: '未设', builtin: false },
-    ]
-    const wrapper = mountBar(badgeTabs, 'background-tasks')
-    // 点亮：圆点存在（用户可见 DOM 断言）
-    const badgeDot = wrapper.find('[data-testid="l2-tab-badge-background-tasks"]')
-    expect(badgeDot.exists()).toBe(true)
-    expect(badgeDot.classes()).toContain('bg-accent')
-    expect(badgeDot.classes()).toContain('rounded-full')
-    // 不亮 / 未设：无圆点
-    expect(wrapper.find('[data-testid="l2-tab-badge-off"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="l2-tab-badge-unset"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
 })

@@ -1,11 +1,9 @@
-import { defineConfig } from 'vitest/config'
+import { taijiTestConfig } from '../../test-guard/factory.ts'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
-export default defineConfig({
+export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     environment: 'happy-dom',
     setupFiles: ['./src/__tests__/vitest-i18n-setup.ts'],
     // W1 i18n-frontend-p2：注入 VITE_MOCK=true，让 useSearch 等 mock-mode 分支在测试环境默认走 mock fixture。
@@ -13,7 +11,7 @@ export default defineConfig({
     env: {
       VITE_MOCK: 'true',
     },
-    // coverage gate（master-spec §8.1，方法论见 TEST-STRATEGY.md §7「先测量后设阈」）。
+    // coverage gate（方法论见 docs/TEST-STRATEGY.md §7「覆盖率与 coverage gate」）。
     // 2026-08-20 重校准：PR #185 大量重构扩大全量分母，旧基线（2026-06 S3-W1：Stmts72.34/Branch61.79/
     // Funcs69.15/Lines74.84 → 阈值 72/70/59/67）失效，实测跌破必红。当前工作区全量实测
     // Lines70.57/Stmts68.38/Branch58.95/Funcs63.37，按基线-2~3% 设阈留 flake 缓冲。

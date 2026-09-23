@@ -146,13 +146,15 @@ describe('A1-2 迁移主场景（验收 1）', () => {
     expect(file.version).toBe(1)
   })
 
-  it('备份文件 models.json.bak-migrate-<ts> 存在且内容为迁移前原文', async () => {
+  it('备份文件 models.json.bak-migrate-<ts> 存在且内容为迁移前原文，权限收紧 0600（RT-5#7）', async () => {
     const original = readFileSync(join(agentDir, 'models.json'), 'utf-8')
     await migrateProviderExtras(configStore, extrasStore)
 
     const backups = listBackupFiles()
     expect(backups).toHaveLength(1)
     expect(readFileSync(join(agentDir, backups[0]), 'utf-8')).toBe(original)
+    // 源文件可含明文 apiKey——副本权限不得比源文件宽松（RT-5#7 chmod 0600）
+    expect(statSync(join(agentDir, backups[0])).mode & 0o777).toBe(0o600)
   })
 })
 

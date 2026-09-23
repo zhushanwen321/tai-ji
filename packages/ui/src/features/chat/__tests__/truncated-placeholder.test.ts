@@ -1,5 +1,5 @@
 /**
- * [u4d-truncated-ui] D3 push 截断占位文案渲染降级测试（crash-resilience §3.3 D3 代价 C /
+ * [u4d-truncated-ui] D3 push 截断占位文案渲染降级测试（D3 代价 C /
  * 场景 T3 失败路径：「renderer 收到截断占位时正常渲染降级提示，不抛错不白屏」）。
  *
  * 必测④（DOM 断言）：占位文案 content（u4a push 截断形态 [{type:'text',text:'内容过大…'}]

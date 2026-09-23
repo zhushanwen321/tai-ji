@@ -1,9 +1,12 @@
 // src/__tests__/notify-stale-guard.test.ts
 //
 // stale ctx 守卫接入单测（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-// - notifyDone（interface/helpers.ts）：pi.sendMessage 裸调经 guardStaleCtx 包裹后
-//   stale 错误（含 PS-30 分诊词）静默降级不外抛；非 stale 错误原样上抛（同一错误
-//   实例，守卫不吞真实 bug）；正常路径参数透传零变化（A2 负面验证的单测面）。
+// - notifyDone（interface/helpers.ts）：[u9 账本化] 主路径走 ledger（courier 装配层
+//   sendDelivery 已内置 stale 防御）；本组用例覆盖的是 ledger 未 bind 的降级直发
+//   分支——pi.sendMessage 经 guardStaleCtx 包裹后 stale 错误（含 PS-30 分诊词）静默
+//   降级不外抛；非 stale 错误原样上抛（同一错误实例，守卫不吞真实 bug）；正常路径
+//   参数透传零变化（A2 负面验证的单测面）。文件内 notifyDone 组先于 sendDelivery 组
+//   执行（后者才 bind 模块级 ledger），前置「无绑定环境」由声明顺序保证。
 // - sendDelivery（session-lifecycle.ts ledgerHost）：同链路家族同判，经
 //   bindLedgerHostAndRecover 测试直入 seam 取装配后的 host 验证同一分诊三面。
 //
@@ -105,7 +108,7 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
     expect(() => notifyDone(pi, "run-boom", makeRun() as never, new Set())).toThrow(boom);
   });
 
-  it("正常路径零变化：workflow-result 消息与 deliverAs:steer 参数原样透传", () => {
+  it("正常路径零变化：workflow-result 消息与单通道 triggerTurn 参数原样透传（[u9] 账本化后直发仅存于 ledger 未 bind 的降级形态——deliverAs 已删，本文件无绑定环境）", () => {
     const { pi, sendMessage } = makePi();
 
     notifyDone(pi, "run-ok", makeRun() as never, new Set());
@@ -118,7 +121,7 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
     expect(msg.customType).toBe("workflow-result");
     expect(msg.display).toBe(true);
     expect(msg.content).toContain("Workflow 'build' done");
-    expect(opts).toEqual({ triggerTurn: true, deliverAs: "steer" });
+    expect(opts).toEqual({ triggerTurn: true });
   });
 });
 

@@ -77,13 +77,13 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(checkBtn.text()).toContain('检查更新')
   })
 
-  it('TC2：点击检查按钮调 checkForUpdate(true)', async () => {
+  it('TC2：点击检查按钮调 checkForUpdate(true, "manual")（RD-4#5 手动检查显形）', async () => {
     setTestState({ state: 'idle' })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     await wrapper.find('[data-testid="settings-update-check"]').trigger('click')
     expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
-    expect(checkForUpdateMock).toHaveBeenCalledWith(true)
+    expect(checkForUpdateMock).toHaveBeenCalledWith(true, 'manual')
   })
 
   it('TC3：checking 态按钮 loading + disabled', async () => {
@@ -161,7 +161,7 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(retryBtn.text()).toContain('重试')
     await retryBtn.trigger('click')
     expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
-    expect(checkForUpdateMock).toHaveBeenCalledWith(true)
+    expect(checkForUpdateMock).toHaveBeenCalledWith(true, 'manual')
   })
 
   it('TC8：unsupported 态显示前往下载按钮，click 调 openFallbackUrl', async () => {

@@ -138,14 +138,16 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     expect(bodyItemButtons()).toHaveLength(0)
   })
 
-  it('L5 session 态（variant=panel + sessionId=s1）→ 用 commandStore（3 项 pi 命令）+ 前端注入 compact = 4 项，不被 globalSkills(7) 污染', async () => {
-    // AC-3：session 态不并入 globalSkills（配置态/运行态不混淆，ADR-0050 D2）
+  // [ADR-0050 二次修订翻转] panel 态 slash 段 skill 换源保留：SESSION_CMDS 的 /fix
+  // source='skill'（pi 真源 skill 快照项）仍剔除，globalSkills 的 registry 源 skill 项补入
+  // （与 landing 单列形态同构的追加函数）。
+  it('L5 session 态（variant=panel + sessionId=s1）→ compact + 2 extension 命令 + registry 源 skill 项(7)补入；pi 真源 skill 项（/fix source=skill）不进 slash 段', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
       props: { open: true, type: 'slash', variant: 'panel', sessionId: 's1', query: '', globalSkills: LANDING_SKILLS },
     })
     await flushPromises()
-    // 推 session 源命令（3 条 pi 动态命令）
+    // 推 session 源命令（3 条 pi 动态命令：2 extension + 1 skill）
     const msg = {
       type: 'session.commands',
       payload: { sessionId: 's1', commands: SESSION_CMDS },
@@ -155,8 +157,59 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     await nextTick()
 
     const btns = bodyItemButtons()
-    expect(btns).toHaveLength(4) // 3 pi 命令 + 1 前端注入 compact，非 7 条 globalSkills
+    // compact + 2 extension + 7 registry skills = 10 项
+    expect(btns).toHaveLength(10)
     expect(btns.some((b) => b.textContent?.includes('/compact'))).toBe(true) // 前端注入的 builtin，globalSkills 里没有
+    expect(btns.some((b) => b.textContent?.includes('commit'))).toBe(true)
+    expect(btns.some((b) => b.textContent?.includes('fix'))).toBe(false) // pi 真源 skill 快照项剔除（reload 才刷新，换源保留的剔除半边）
+    // registry 源 skill 项补入
+    expect(btns.some((b) => b.textContent?.includes('code-review'))).toBe(true)
+    expect(btns.some((b) => b.textContent?.includes('pi-goal'))).toBe(true)
+  })
+
+  // L5b [ADR-0050 二次修订] 换源保留的剔除半边：panel 态 slash 段对 pi 真源 `skill:` 前缀
+  // 命令剔除（pi 的 skill 命令名是裸 `skill:<name>`，reload 才刷新的快照）；未传 registry
+  // 源 props 时无 skill 项补入。registry 源补入的正向断言由 L5 覆盖；landing 态含 skill
+  // 不变（单列形态回归锁）。
+  it('L5b panel 态 slash 段剔除 pi 真源 skill: 前缀项（未传 registry 源则无 skill 补入）；landing 态 slash 含 skill 不变（回归锁）', async () => {
+    wrapper = mount(CommandPopover, {
+      attachTo: document.body,
+      props: { open: true, type: 'slash', variant: 'panel', sessionId: 's1', query: '' },
+    })
+    await flushPromises()
+    const msg = {
+      type: 'session.commands',
+      payload: {
+        sessionId: 's1',
+        commands: [
+          { name: 'skill:alpha', description: 'A', source: 'skill' },
+          { name: '/commit', description: '提交', source: 'extension' },
+        ],
+      },
+    } as ServerMessage<'session.commands'>
+    events.dispatchSession('s1', msg)
+    await flushPromises()
+    await nextTick()
+
+    const btns = bodyItemButtons()
+    // compact + commit = 2 项；pi 快照 skill:alpha 剔除、未传 registry 源故无 skill 项补入
+    expect(btns).toHaveLength(2)
+    expect(btns.some((b) => b.textContent?.includes('alpha'))).toBe(false)
+    expect(btns.some((b) => b.textContent?.includes('commit'))).toBe(true)
+    expect(btns.some((b) => b.textContent?.includes('/compact'))).toBe(true)
+    wrapper?.unmount()
+    wrapper = null
+
+    // 对照：landing 态 slash 含 skill 不变（L1 单列形态，过滤仅限 panel）
+    wrapper = mount(CommandPopover, {
+      attachTo: document.body,
+      props: { open: true, type: 'slash', variant: 'landing', sessionId: undefined, query: '', globalSkills: LANDING_SKILLS },
+    })
+    await flushPromises()
+    await nextTick()
+    const landingBtns = bodyItemButtons()
+    expect(landingBtns).toHaveLength(7)
+    expect(landingBtns.some((b) => b.textContent?.includes('code-review'))).toBe(true)
   })
 
   it('L6 每个命令项含 svg（icon=star 渲染）', async () => {

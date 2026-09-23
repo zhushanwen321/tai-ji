@@ -23,6 +23,13 @@ export interface CompactionNotifierDeps {
   onContextUpdate?: (sessionId: string, data: { inputTokens: number; totalTokens: number }) => void
   /** session-trace 增量腿补拉回调（compaction_end 触发信号的第四类挂点）。 */
   onTraceSync?: (sessionId: string, trigger: string) => void
+  /**
+   * **成功** compaction 后的上下文重写通知（归因降噪 2026-09-19）：命中率归因链路用
+   * （GenStatsService.markContextRewritten）——其后首条缓存样本若显示 0% 属预期重建。
+   * 只在 `ev.result` 真值（成功）分支调用：failed（errorMessage 真值）与 aborted（无 result
+   * 无 error）上下文未变，误标会把真 miss 洗成「压缩重建」。
+   */
+  onContextRewritten?: () => void
 }
 
 /** compaction_end 事件参与编排的字段子集（infra/pi 翻译后事件 compaction-end 分支的结构化投影）。 */
@@ -86,6 +93,9 @@ export class CompactionNotifier {
       // 成功（result 真值）或 aborted（无 errorMessage 真值）—— 都不带 error，前端 compacted handler flush queue。
       // 成功额外发 compactionSummary 进对话流 + applyContextUpdate 刷新 context 用量。
       if (ev.result) {
+        // 归因降噪（2026-09-19）：成功 compaction 即上下文前缀被重写——先标记后发帧（同
+        // 同步临界段内无时序窗口；标记只影响后续样本的归因注解，不阻断本帧发送）。
+        this.deps.onContextRewritten?.()
         const r = ev.result as { summary?: string; tokensBefore?: number; estimatedTokensAfter?: number }
         // [D2 closure] 恒发帧（原 `if (r.summary)` 真值门删除，conversation-turn-attribution-
         // closure D2）：pi appendCompaction 无条件落盘（手动 :1432 / auto :1670），summary 缺失的

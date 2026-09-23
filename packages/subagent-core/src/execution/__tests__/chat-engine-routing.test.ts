@@ -1,7 +1,7 @@
 // src/execution/__tests__/chat-engine-routing.test.ts
 //
-// U0 chat 工具域引擎路由分叉测试。设计权威源：
-// docs/architecture/subagent-engine-gui-visibility.md §3.3 D4（chat 入口路由分叉）/
+// U0 chat 工具域引擎路由分叉测试。设计锚点：
+// D4（chat 入口路由分叉）/
 // D5（pi 缺省字节级零变化）/ D10（zcode 分支终止链）。
 //
 // 覆盖：
@@ -85,6 +85,8 @@ import {
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
+import { CTX_MODEL, emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -196,12 +198,6 @@ function writeAgentMd(dir: string, engine: string): string {
   return file;
 }
 
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
-}
-
-const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
 function fakeRegistry(): ModelRegistryLike {
   // [U1] getAvailable 与 find 必须同源：assertCanonicalModelRef 以 getAvailable 为
@@ -220,7 +216,7 @@ interface SetupResult {
   service: SubagentService;
   zcode: FakeEngine;
   piEngine: FakeEngine;
-  pi: ReturnType<typeof makePi>;
+  pi: PiMock;
 }
 
 function setup(agentDir: string): SetupResult {
@@ -315,7 +311,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     clearEngines();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     modelService.initModel({
-      modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true } satisfies ModelRegistryLike,
+      modelRegistry: emptyRegistry(),
       sessionId: "test-session",
       ctxModel: CTX_MODEL,
     });
@@ -399,7 +395,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   });
 
   it("[D3-④] zcode + maxTurns → 同步拒绝（record 创建前，不产生孤儿 record）——旧形态的 engine.run 内异步拒绝废弃", async () => {
-    // 旧形态：Service 层预检不查 maxTurns → record 创建 + kickOffEngineRun →
+    // 旧形态：Service 层预检不查 maxTurns → record 创建 + kickOffEngineRun（已删）→
     // zcode run 内硬编码 shape 检查 throw → failed record（异步化）。
     // D3-④ 检查点钉死后：capabilities.maxTurns 位驱动，record 创建前同步 throw。
     const { service, zcode } = setup(agentDir);
@@ -554,7 +550,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
       zcode.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
       piEngine.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
 
-      // chat 域 background 派发（runEngineTask 的 runCtx 构造点）
+      // chat 域 background 派发（kickOffChatRound 的 runCtx 构造点）
       await service.execute(baseOpts(agentDir, { engine: "zcode" }));
       await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
       expect(zcode.runs[0].ctx.sessionRootId).toBe("test-session");
@@ -584,7 +580,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
 // ============================================================
 // U2：probe/守卫兜底 + JournalWriter + engineHandle 回填
-// 设计权威源：docs/architecture/subagent-engine-gui-visibility.md §3.3 D4/D6、§5 U2 行
+// 设计锚点：D4/D6、U2 行
 // ============================================================
 
 describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
@@ -846,7 +842,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   });
 
   it("[池槽回归] 引擎 run 完成后 release 并发槽：连续 7 次（> maxConcurrent=6）后第 7 次不被永久阻塞", async () => {
-    // review MF1：kickOffEngineRun 旧实现 acquire 后无 release——每次引擎后台 run 泄漏
+    // review MF1：kickOffEngineRun（已删）旧实现 acquire 后无 release——每次引擎后台 run 泄漏
     // 一个槽，累计 maxConcurrent(6) 次后全部 background subagent 在 acquire 队列挂死
     process.env.TAIJI_AGENT_DATA_DIR = agentDir;
     const { service, zcode } = setup(agentDir);
@@ -866,7 +862,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   }, 10_000);
 
   /** 最后一条 subagent-record entry（register→archive 双写点取终态侧）。 */
-  function lastRecordEntry(pi: ReturnType<typeof makePi>): Record<string, unknown> | undefined {
+  function lastRecordEntry(pi: PiMock): Record<string, unknown> | undefined {
     const calls = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }

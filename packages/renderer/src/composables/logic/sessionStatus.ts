@@ -2,7 +2,7 @@
 /**
  * 会话状态图标 + 派生逻辑 re-export（R2 logic 层）。
  *
- * SessionItem（sidebar）、PanelHeader、SessionCard（overview）共用同一 9 态 → 图标/颜色/动画映射，
+ * SessionItem（sidebar）、PanelHeader 共用同一 9 态 → 图标/颜色/动画映射，
  * 收敛到此避免多处复制粘贴漂移。语义色取自 design-tokens（CSS 变量），不硬编码十六进制色。
  *
  * deriveStatus（D6 → 方案 C 优化版 9 态）已迁 @taiji/core/domain/chat/derive-status.ts
@@ -10,19 +10,51 @@
  * DOT_CLASS / STATUS_ICON 等视觉映射（CSS 类属展示层）仍留 renderer（M3 §3.3.4）。
  */
 import type { DerivedStatus } from '@taiji/core'
+import type { SessionStatus } from '@taiji/shared'
 
 export type { DerivedStatus }
 
 /**
  * deriveStatus 纯函数（re-export 自 core，M3 搬迁）。
  * 签名与迁移前一致：
- * (sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasAskUserPending=false)
+ * (sessionId, chat, isActive, isCompacting=false, hasBackgroundWork=false, metaStatus?, hasFormOverlayPending=false)
  */
 export { deriveStatus } from '@taiji/core'
 
 /**
+ * 进程级 SessionStatus → 展示态 DerivedStatus（色语言 SSOT）。
+ *
+ * agent 派发的子会话通常未 hydrate，`deriveStatus` 对 status='active' 无消息会兜底 `done`
+ * （见 core derive-status 的 terminalStatusWithoutMessages），无法表达运行中；托盘/侧栏
+ * 需要展示态时以进程级真值为准，经此单一映射取 DOT_CLASS 色。
+ *
+ * active→streaming(accent) · error→error(danger) · stopped/dead→stopped(dim) ·
+ * idle/done→done(绿)。
+ */
+export const DISPLAY_STATUS: Record<SessionStatus, DerivedStatus> = {
+  active: 'streaming',
+  idle: 'done',
+  done: 'done',
+  error: 'error',
+  stopped: 'stopped',
+  dead: 'stopped',
+}
+
+/**
+ * 判据：session 是否「运行已完成」= 映射到绿点（done）态。
+ *
+ * 「绿点 = 运行已完成」的口径与侧栏/托盘的状态点色语言一致：DISPLAY_STATUS 映射到
+ * `'done'` 的进程级 status（idle / done）即绿点，其余（active / error / stopped / dead）
+ * 都算未完成。侧栏子会话徽标取 `!isSessionCompleted(status)` 汇总「未完成数」，故 error /
+ * stopped / dead 子会话也会计入（判据是「非绿点」，不是「运行中」）。
+ */
+export function isSessionCompleted(status: SessionStatus): boolean {
+  return DISPLAY_STATUS[status] === 'done'
+}
+
+/**
  * 状态点语义类：背景色（9 态）。
- * 活跃态在组件层改用语义图标 + 动画，圆点仅作为静态 fallback / overview 等处的点状指示。
+ * 活跃态在组件层改用语义图标 + 动画，圆点仅作为静态 fallback 等处的点状指示。
  */
 export const DOT_CLASS: Record<DerivedStatus, string> = {
   streaming: 'bg-accent',

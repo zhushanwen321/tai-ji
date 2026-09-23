@@ -1,5 +1,5 @@
 <!--
-  Settings · Extension 域「插件贡献」子页（M16 接线，04-settings-and-visual.md §3.1 方案 A）。
+  Settings · Extension 域「插件贡献」子页（M16 接线，方案 A）。
   挂 ExtensionPage 旁：SettingsModal 在 extension 域内按 extensionView 状态切换本子页 / ExtensionPage。
   内容 = ui/extension-host 的 PluginSettingsPage（插件列表 + contribution 可用性置灰 + 原因），
   数据源经 PluginSettingsDataSourceKey inject（壳 useExtensionHostBridge app.provide 注入真实实现，

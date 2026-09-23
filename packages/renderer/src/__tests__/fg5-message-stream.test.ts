@@ -334,7 +334,7 @@ describe('FG5 chat store 块类型扩展', () => {
    */
   it('queue_update 不再写 store（帧降级为内核内部回执：零快照、零 pendingBuffer 消费）', () => {
     const store = useChatStore()
-    store.pushPending('sx', textToSegments('继续'), 'steer')
+    // [B1 退役] 前身 pushPending 预置已删（无暂存 API）——本用例只锁「帧零落点」结构性终态
     store.applyMessageEvent('sx', {
       type: 'message.queue_update',
       payload: { sessionId: 'sx', steering: ['继续'], followUp: ['下一步'] },

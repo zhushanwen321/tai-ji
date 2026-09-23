@@ -4,7 +4,7 @@
 // 返回值属性会 TypeError。验证 4 个内置脚本的 agent() 返回值属性访问均含
 // null guard（?. 或 ??），不遗留裸 .property 访问。
 //
-// E1: workflows/ 目录含 4 个 .js 文件，每个 meta.name 与文件名 stem 一致。
+// E1: workflows/ 目录含 6 个 .js 文件，每个 meta.name 与文件名 stem 一致。
 
 import { readdirSync,readFileSync } from "node:fs";
 import { dirname,join } from "node:path";
@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = join(__dirname, "../../workflows");
 
-const SCRIPTS = ["chain.js", "parallel.js", "scatter-gather.js", "map-reduce.js", "review-fix-loop.js"] as const;
+const SCRIPTS = ["chain.js", "parallel.js", "scatter-gather.js", "map-reduce.js", "review-fix-loop.js", "fan-out.js"] as const;
 
 function readScript(name: string): string {
   return readFileSync(join(WORKFLOWS_DIR, name), "utf-8");
@@ -30,7 +30,7 @@ function extractMetaName(src: string): string | null {
 }
 
 describe("E1: 内置 workflow 文件结构一致性", () => {
-  it("workflows/ 目录含 5 个 .js 文件", () => {
+  it("workflows/ 目录含 6 个 .js 文件", () => {
     const files = readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith(".js"));
     expect(files.sort()).toEqual([...SCRIPTS].sort());
   });
@@ -130,8 +130,8 @@ describe("U2: 内置脚本 agent() 返回值属性访问含 null guard", () => {
 // W4: parallel() 降级返回值 {status:'failed'} 兼容 + 结果字段守卫 + spread 消除
 describe("W4: parallel() failed-status 兼容 + 结果字段守卫 + spread 消除", () => {
   // W1 后 worker parallel() 可能返回 {status:'failed', error:'...'}，脚本 for 循环
-  // 必须识别此对象并标记失败（不能误判为成功）。验证三个含 parallel() 的脚本。
-  const PARALLEL_SCRIPTS = ["parallel.js", "scatter-gather.js", "map-reduce.js"] as const;
+  // 必须识别此对象并标记失败（不能误判为成功）。验证四个含 parallel() 的脚本。
+  const PARALLEL_SCRIPTS = ["parallel.js", "scatter-gather.js", "map-reduce.js", "fan-out.js"] as const;
 
   it.each(PARALLEL_SCRIPTS)("%s 含 r.status === \"failed\" 失败识别（W1 兼容）", (filename) => {
     const src = readScript(filename);

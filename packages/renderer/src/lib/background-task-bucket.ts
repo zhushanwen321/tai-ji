@@ -3,10 +3,12 @@
  *（docs/architecture/background-task-sidebar-view.md §3.3 D10①，u-renderer-store）。
  *
  * 纯函数模块，零 Vue / 零 DOM 依赖。四方同源消费点（禁两处各写判定，D10① 纪律）：
- * - 列表过滤（BackgroundTaskListView，u-renderer-list）
- * - FilterBar 三桶计数（同上）
- * - L2 tab 角标点亮条件（badge = active 计数 > 0，D4④，u-renderer-list）
- * - item 状态 icon 色档（backgroundTaskStatusIcon，D10⑤，u-renderer-list / u-drawer）
+ * - 列表过滤（composer 任务托盘 TrayNativePanel 的 bash 面板，2026-09-16 起为唯一列表面）
+ * - 分桶视图计数（同上；托盘计数恒由行集长度派生）
+ * - 条目状态 icon 色档（backgroundTaskStatusIcon，D10⑤，托盘面板 / drawer bashTask）
+ * - 桶归属判定（backgroundTaskBucket，托盘行状态派生）
+ * [HISTORICAL] 原消费方「后台命令」L2 原生视图（Plugins tab 下）已随任务观察入口唯一化
+ * 退役（D10），判定本体与消费纪律不变。
  *
  * 分桶判据直接复用契约谓词 `isActiveBackgroundTaskState` / `isTerminalBackgroundTaskState`
  *（@zhushanwen/extension-protocol，D9 同源）：运行中桶 = running + killing（killing 是
@@ -82,21 +84,6 @@ export function filterBackgroundTasks(
     .filter((t) => isActiveBackgroundTaskState(t.state))
     .sort((a, b) => a.startedAt - b.startedAt)
   return [...activeSorted, ...endedSorted]
-}
-
-/** 三桶计数（FilterBar 计数预告 + L2 角标「运行中桶 > 0」同源派生，D4④/D10①）。 */
-export function countBackgroundTasks(tasks: BackgroundTaskEntry[]): {
-  active: number
-  ended: number
-  all: number
-} {
-  let active = 0
-  let ended = 0
-  for (const t of tasks) {
-    if (isActiveBackgroundTaskState(t.state)) active += 1
-    else if (isTerminalBackgroundTaskState(t.state)) ended += 1
-  }
-  return { active, ended, all: tasks.length }
 }
 
 /**

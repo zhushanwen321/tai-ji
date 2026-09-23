@@ -2,8 +2,8 @@
 //
 // [D3-④ 预检 capabilities 化] 调用前预检的唯一实现（capabilities 驱动，无引擎 id
 // 特判）。设计权威源（现行）：docs/architecture/subagent-engine-protocolization.md §3.3
-// 「能力位」段（manifest 权威 + 方向判定表）+ 历史源 docs/design/subagent-dual-track-
-// convergence.md §3.3 D3-④ + r3 裁定（EngineCapabilities 新增 maxTurns 能力位）+
+// 「能力位」段（manifest 权威 + 方向判定表）+ 历史 r3 裁定（EngineCapabilities 新增
+// maxTurns 能力位，D3-④）+
 // 错误规格（engine_capability_unsupported / engine_capability_mismatch）。
 //
 // 判据形态：每个引擎拦截「自己 capabilities 声明不支持的能力」——
@@ -27,7 +27,7 @@
 //   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步面只有
 //     manifest），由首个 run 的协议握手 `initialize` 发现 → engine_capability_mismatch
 //     该 run 失败 + record 标 failed + **清理 run 前已建的前置副作用**（worktree：
-//     executeViaEngine 在 kickOffEngineRun 前创建，经 finalizeFailed → finalizeRecord
+//     executeViaEngine 在 kickOffChatRound 派发前创建，经 finalizeFailed → finalizeRecord
 //     Step 3b cleanupWorktreeIfBound 清理）。判定函数 = 本文件
 //     assertGateCapabilitiesMatched（core 侧判据；协议客户端握手尾接线归 client/ 领地）。
 //   - **非 gate 位**（personaInjection / eventGranularity / sessionRead / resume /

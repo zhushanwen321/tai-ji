@@ -1,8 +1,7 @@
 /**
  * useSubagentTabData 单测（drawer-blank-fix u2-seed，T2 判定矩阵——设计 §10 v4）。
  *
- * 覆盖 loadSubagentData subagent 三段式分支的空历史兜底判定顺序（判定顺序即优先级，
- * 设计 docs/design/subagent-drawer-blank.md §7.2）：
+ * 覆盖 loadSubagentData subagent 三段式分支的空历史兜底判定顺序（判定顺序即优先级）：
  * - ①outcome 兜底先行（非 pi，U4 A8 既有分支）——命中后分区非空，②自然跳过
  * - ②task 种入随后（分区空 × task 非空）——pi 主场景 + 非 pi 磁盘扫描滞后窗口
  * - 分区非空（E-4 先到）→ 不种不擦；reload 幂等；空 task 不种

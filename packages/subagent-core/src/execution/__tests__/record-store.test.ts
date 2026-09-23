@@ -44,6 +44,7 @@ import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-e
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { manifestToSubagent, rebuildEntryRecord } from "../persistence/record-store-rebuild.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
@@ -1018,6 +1019,48 @@ describe("RecordStore", () => {
       expect(appended.find((c) => c.data.id === "sa-settled")).toBeUndefined();
       expect(appended.find((c) => c.data.id === "sa-foreign")).toBeUndefined();
     });
+
+    it("[A11] 损坏 entry（身份域缺失）→ warn 留痕跳过：不抛错、不纠偏、不重判", () => {
+      // task 缺失 = rebuildEntryRecord 拒绝重建（null）——末条 running 的损坏 entry
+      // 意味着该 record 永远无法被纠偏落 idle，静默 continue 会把损坏伪装成
+      // 「无孤儿可判」，排障无从下手（warn 必须含 id）。
+      const mainFile = writeMainSession([
+        { v: 1, id: "sa-corrupt-1", agent: "worker", status: "running", mode: "background", startedAt: 9000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
+      ]);
+      const { store, appended } = makeRecoveryStore();
+      expect(() => store.recoverEntryOnlyOrphans(mainFile, "sess-orphan")).not.toThrow();
+      expect(appended).toHaveLength(0); // 不纠偏
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining("sa-corrupt-1"),
+      );
+      // 防重：orphanJudged 已标记，二次扫描不重复 warn
+      loggerMock.warn.mockClear();
+      store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // [A11] reconstructAll 目录级读失败分通道：ENOENT = 合法缺省（静默空表）；
+  // 非 ENOENT（ENOTDIR/EACCES 等）= 真 IO 故障（warn 留痕——空表不得伪装 not-found）
+  // ============================================================
+  describe("reconstructAll 目录读失败分通道（collectRecords 冷查链消费）", () => {
+    it("sessions 目录不存在（ENOENT）→ 空表且零 warn（合法缺省静默）", () => {
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      const store = new RecordStore(tmpDir);
+      expect(store.collectRecords(100)).toEqual([]);
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    it("sessions 目录位被文件占据（ENOTDIR）→ 空表 + warn 留痕（IO 故障可诊断）", () => {
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      fs.writeFileSync(tmpDir, "not a directory");
+      const store = new RecordStore(tmpDir);
+      expect(store.collectRecords(100)).toEqual([]);
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining("reconstructAll"),
+      );
+    });
   });
 
   // ============================================================
@@ -1185,5 +1228,55 @@ describe("RecordStore", () => {
       );
       expect(warnIndexMsgs).toHaveLength(0);
     });
+  });
+});
+
+// ============================================================
+// [U4/R4-D6③] model 水合往返：entry/manifest 读侧空串归一缺席
+// （写侧 undefined 经 JSON 缺省落盘 → 重建仍 undefined；旧数据 "" 残留 → 归一
+// undefined，不再以 `?? ""` 复活——「压掉 defaultModelSelection」的空串复活链切断）
+// ============================================================
+describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
+  it.each([
+    { label: "无 model 键（新写侧缺席形态）", entryModel: "absent", expected: undefined },
+    { label: "model=\"\"（旧写侧空串残留）", entryModel: "", expected: undefined },
+    { label: "model 有值（显式留痕）", entryModel: "prov/model-1", expected: "prov/model-1" },
+  ])("entry 投影：$label → $expected", ({ entryModel, expected }) => {
+    const data: Record<string, unknown> = {
+      v: 1,
+      id: "sa-model-roundtrip",
+      agent: "worker",
+      task: "t",
+      slug: "s",
+      status: "running",
+      mode: "background",
+      startedAt: 1000,
+      rootSessionId: "sess-m",
+      depth: 0,
+      turns: 0,
+      totalTokens: 0,
+      eventLog: [],
+      displayItems: [],
+    };
+    if (entryModel !== "absent") data.model = entryModel;
+    const rec = rebuildEntryRecord("sa-model-roundtrip", data);
+    expect(rec).not.toBeNull();
+    expect(rec?.model).toBe(expected);
+  });
+
+  it("manifest 投影：model 缺失/空串 → undefined；有值 → 透传", () => {
+    const base: ManifestRecord = {
+      id: "sa-mani-m",
+      rootSessionId: "sess-m",
+      agentName: "worker",
+      status: "closed",
+      createdAt: 1000,
+      completedAt: 2000,
+      task: "t",
+      slug: "s",
+    };
+    expect(manifestToSubagent(base)?.model).toBeUndefined();
+    expect(manifestToSubagent({ ...base, model: "" })?.model).toBeUndefined();
+    expect(manifestToSubagent({ ...base, model: "prov/model-1" })?.model).toBe("prov/model-1");
   });
 });

@@ -100,21 +100,21 @@ export const TRIGGER_USER_REPORT_IDS: readonly number[] = [
 // 阈值（附录 A 给了数字的照抄；未给数字的取值依据随行注释）
 // ─────────────────────────────────────────────────────────────────────────────
 
-const T1_TRUNC_WARN_WEEKLY_MAX = 10 // #1 出站截断告警周均 >10（crash-resilience D3 代价 A 原文）
-// #3「显著上升」源文档无绝对阈值（crash-resilience.md:260 基线「现状一周数次以内」），
-// 取基线上界 3 次/周为判线：低于 supervisor 放弃线（MAX 5 连续重启）又高于单次自愈常态。
+const T1_TRUNC_WARN_WEEKLY_MAX = 10 // #1 出站截断告警周均 >10
+// #3「显著上升」无绝对阈值，基线「现状一周数次以内」；取基线上界 3 次/周为判线：
+// 低于 supervisor 放弃线（MAX 5 连续重启）又高于单次自愈常态。
 const T3_RUNTIME_CRASH_WEEKLY_MAX = 3
-const T7_AUTO_RESPAWN_WEEKLY_MAX = 5 // #7 auto-respawn 周均 >5（architecture D2 代价原文）
-const T8_ROLLING_RESTART_WEEKLY_MAX = 1 // #8a 滚动重启 >周 1（原文）
-const T8_DEFERRED_MONTHLY_MAX = 10 // #8b 推迟月均 >10（原文）
-const T8_FORCED_MONTHLY_MAX = 3 // #8c forced 月均 >3（原文）
+const T7_AUTO_RESPAWN_WEEKLY_MAX = 5 // #7 auto-respawn 周均 >5
+const T8_ROLLING_RESTART_WEEKLY_MAX = 1 // #8a 滚动重启 >周 1
+const T8_DEFERRED_MONTHLY_MAX = 10 // #8b 推迟月均 >10
+const T8_FORCED_MONTHLY_MAX = 3 // #8c forced 月均 >3
 const T8_DEFER_LIMIT_RATIO_MAX = 0.3 // #8d defer-limit 占 forced >30%（原文）
 // #8d absent-report 关联窗（分钟）：errs 推迟上限 30min（D5）+ 30min 观测余量，同 session
 // 的 deferred(absent-report) 先于 forced(defer-limit) 落在该窗内即判为 errs 兼容形态。
 const T8_ABSENT_REPORT_CORRELATION_MIN = 60
 const T8_ABSENT_REPORT_CORRELATION_MS = T8_ABSENT_REPORT_CORRELATION_MIN * MS_PER_MINUTE
-const T9_RELOAD_MONTHLY_MAX = 4 // #9 renderer reload 月均 >4（architecture D4 代价原文）
-const T10_EXT_CRASH_MONTHLY_MAX = 2 // #10 第三方扩展崩溃月均 >2（architecture D5 代价原文）
+const T9_RELOAD_MONTHLY_MAX = 4 // #9 renderer reload 月均 >4
+const T10_EXT_CRASH_MONTHLY_MAX = 2 // #10 第三方扩展崩溃月均 >2
 const T16_SAME_SECOND_SESSIONS_MIN = 3 // #16 ≥3 session 同秒 exit（原文）
 // #16 计划内关联窗（秒）：shutdown 杀链发起（D1 挂点）与 pi exit 的真实时差远小于秒级，
 // 5s 容忍时钟取整与落盘时序偏差。
@@ -187,24 +187,24 @@ export interface ParsedJournal {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CONDITION_DESCRIPTIONS: Readonly<Record<number, string>> = {
-  [COND_TRUNC_WARN]: '出站截断告警周均 >10 次（crash-resilience §3.3 D3 代价 A）',
-  [COND_REGISTRY_MISS]: '出站注册表 miss 任何一次（crash-resilience §3.3 D3 代价 B）——inbound-frame-dropped 关联佐证',
-  [COND_SUPERVISOR_RESTART]: 'supervisor 重启频率显著上升（crash-resilience §3.3 D7 代价 B）——main.jsonl runtime crash 窗口计数',
+  [COND_TRUNC_WARN]: '出站截断告警周均 >10 次（D3 代价 A）',
+  [COND_REGISTRY_MISS]: '出站注册表 miss 任何一次（D3 代价 B）——inbound-frame-dropped 关联佐证',
+  [COND_SUPERVISOR_RESTART]: 'supervisor 重启频率显著上升（D7 代价 B）——main.jsonl runtime crash 窗口计数',
   [COND_WATERMARK_TREND]: '回收态存量致水位长期不回落（idle-pi-reclamation 代价声明 1）——watermark-daily 趋势，coverage<50% 的日降权标注',
-  [COND_BASE64_ATTRIBUTION]: 'base64 证明为主要压力源·水位归因（crash-resilience v9 两步走）——人工归因型，watermark-daily 数据就绪标注',
-  [COND_TRACE_DEGRADED]: '活跃态 Trace 降级重审（crash-resilience §3.4）',
+  [COND_BASE64_ATTRIBUTION]: 'base64 证明为主要压力源·水位归因（v9 两步走）——人工归因型，watermark-daily 数据就绪标注',
+  [COND_TRACE_DEGRADED]: '活跃态 Trace 降级重审',
   [COND_AUTO_RESPAWN]: 'auto-respawn 周均 >5 次（long-run-stability-architecture D2 代价）',
   [COND_ROLLING_RESTART]:
     '滚动重启 >周 1 / 推迟月均 >10 / forced 月均 >3 / defer-limit 占 forced >30%（architecture D3 代价 + 本文 D5 缺席语义⑤；占比分子排除 reason=absent-report）',
   [COND_RENDERER_RELOAD]: 'renderer reload 月均 >4（long-run-stability-architecture D4 代价）',
   [COND_EXT_CRASH]: '第三方扩展崩溃月均 >2（long-run-stability-architecture D5 代价）——crash 事件扩展归因分类计数',
-  [COND_CRASH_REPORTER]: '白屏但两侧日志无记录 → crashReporter 立项（crash-resilience D2 代价 A）',
-  [COND_DRAFT_LOSS]: 'reload 丢草稿反馈 → 草稿持久化立项（crash-resilience D2 代价 B）',
-  [COND_LIVE_RELOAD_DIFF]: 'live/reload 大文本可见差异反馈（crash-resilience D3 代价 C）',
-  [COND_PAGINATION]: '「加载更早」翻页高频抱怨（crash-resilience D4）',
-  [COND_TRACE_FIRST_HIT]: 'Trace 首个真实命中 / cache size 帽占位真实出现（crash-resilience D5/D6）',
+  [COND_CRASH_REPORTER]: '白屏但两侧日志无记录 → crashReporter 立项（D2 代价 A）',
+  [COND_DRAFT_LOSS]: 'reload 丢草稿反馈 → 草稿持久化立项（D2 代价 B）',
+  [COND_LIVE_RELOAD_DIFF]: 'live/reload 大文本可见差异反馈（D3 代价 C）',
+  [COND_PAGINATION]: '「加载更早」翻页高频抱怨（D4）',
+  [COND_TRACE_FIRST_HIT]: 'Trace 首个真实命中 / cache size 帽占位真实出现（D5/D6）',
   [COND_E2_COLLATERAL]:
-    'E2 型连坐复发 → dev/prod 隔离升级立项（crash-resilience D6 代价）——同秒 ≥3 session exit 且非计划内（shutdown 杀链发起事件时间窗关联排除）',
+    'E2 型连坐复发 → dev/prod 隔离升级立项（D6 代价）——同秒 ≥3 session exit 且非计划内（shutdown 杀链发起事件时间窗关联排除）',
   [COND_RELIEF_REBOUND]: '降级反弹：memory-relief 执行后 10min 内水位不降反升 >5% 的比例周均 >30%（本文 D4 降级代价）',
   [COND_MISSED_DEFER]: '漏推迟首案例：滚动重启时有在途但未推迟·在途被杀（本文 D5 缺席语义⑤偏低方向）',
   [COND_PTY_SURVIVAL]: '终端终止抱怨随滚动重启出现 → PTY 独立存活（setsid）立项评估（本文 D5 家族表 terminal PTY 行）',

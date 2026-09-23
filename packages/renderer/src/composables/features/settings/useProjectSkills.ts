@@ -29,7 +29,9 @@
  *   SkillRegistry 有 chokidar watcher 自动刷新 globalCache，wave3 起前端订阅 config.skillCacheInvalidated
  *   信号实时重拉。globalSkills 为模块级 ref 保证 Composer 重挂后失效信号仍刷新活跃实例。
  * - useProjectSkills 保持实例级 Map<cwd, SkillInfo[]>（按 cwd key 隔离，切 cwd 切分区）。
- *   当前唯一消费者是 landing Composer（单例活跃），per-instance 缓存足够。
+ *   消费者是各 Composer 实例（landing 单例 + panel per-session，split mode 多 panel 多实例）：
+ *   per-instance 缓存下同 cwd 各实例各拉一次 RPC、失效信号逐实例刷新——冗余可接受，
+ *   未来需要跨实例共享再提升到模块级或 store。
  * - 失效信号订阅在模块顶层挂载（只执行一次），project 侧用模块级 signal watch 让订阅与实例数解耦。
  */
 import { computed, ref, watch, type Ref } from 'vue'
@@ -59,12 +61,16 @@ configApi.onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
  */
 export function useProjectSkills(currentCwd: Ref<string | null>) {
   // 按 cwd 缓存的项目 skill 表（cwd → SkillInfo[]）。实例级 state（每次 useProjectSkills 调用新建），
-  // 命中缓存不重复 RPC，避免闪烁 + 省 RPC。当前唯一消费者是 landing CommandPopover（单例活跃），
-  // per-instance 缓存足够；未来多消费者共享再提升到模块级或 store。
+  // 命中缓存不重复 RPC，避免闪烁 + 省 RPC。消费者是各 Composer 实例（landing 单例 + panel
+  // per-session——split mode 多 panel 多实例，同 cwd 各自缓存各拉一次，失效信号逐实例刷新）；
+  // 未来需要跨实例共享再提升到模块级或 store。
   const skillsByCwd = ref<Map<string, SkillInfo[]>>(new Map())
   // R3（review fix）：in-flight 去重。cwd 快速切 A→B→A 时，若 A 的 RPC 仍 pending，
   // 没有 in-flight 标记会重复触发 loadFor(A)。Set 记录 pending cwd，RPC 完成后删除。
   const inFlight = new Set<string>()
+  // RD-4#13：project skill 拉取失败标志——供列表区插「可重试」提示（此前仅 console.warn，
+  // slash 列表空与「该项目无 skill」不可区分）。
+  const loadError = ref(false)
 
   const projectSkills = computed<SkillInfo[]>(() => {
     const cwd = currentCwd.value
@@ -84,12 +90,22 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
       const next = new Map(skillsByCwd.value)
       next.set(cwd, skills)
       skillsByCwd.value = next
+      loadError.value = false
     } catch (e) {
       // 不写 cache：失败后 cache miss 仍在，下次 watch/失效信号触发会重试
+      // RD-4#13：置 loadError 供列表区插「可重试」提示（此前仅 warn，列表空与「无 skill」不可区分）
       console.warn(`[useProjectSkills] getProjectSkills failed for cwd=${cwd}, will retry on next trigger:`, e)
+      loadError.value = true
     } finally {
       inFlight.delete(cwd)
     }
+  }
+
+  /** RD-4#13：重试当前 cwd 的 project skill 拉取（供列表区「重试」入口调用）。 */
+  function retry(): void {
+    const cwd = currentCwd.value
+    if (!cwd || inFlight.has(cwd)) return
+    void loadFor(cwd)
   }
 
   // watch currentCwd：变化时按需拉取（缓存命中跳过）。immediate 触发初始 cwd 的拉取。
@@ -129,7 +145,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
     }
   })
 
-  return { projectSkills }
+  return { projectSkills, loadError, retry }
 }
 
 // ── useGlobalSkills：模块级 singleton 缓存 ──────────────────────────

@@ -181,7 +181,7 @@ describe("WorktreeManager", () => {
       expect(Object.isFrozen(handle)).toBe(true);
     });
 
-    it("成功后写入注册表（pid=0 占位）", async () => {
+    it("成功后写入注册表（pid = 宿主进程 pid——孤儿判据锚定宿主死活）", async () => {
       setupCleanTree();
 
       await mgr.create(MAIN_CWD, RECORD_ID);
@@ -190,7 +190,7 @@ describe("WorktreeManager", () => {
       const entry = mockAdd.mock.calls[0]![0] as { repo: string; branch: string; pid: number };
       expect(entry.repo).toBe(MAIN_CWD);
       expect(entry.branch).toBe(`pi-sub-${RECORD_ID}`);
-      expect(entry.pid).toBe(0);
+      expect(entry.pid).toBe(process.pid);
     });
 
     it("脏树抛 DirtyWorktreeError 且不写注册表（status 与 rev-parse 并行，均发起）", async () => {
@@ -302,13 +302,6 @@ describe("WorktreeManager", () => {
       // 同 repo 的 2 个 worktree add 全部执行且互斥（per-repo mutex）
       expect(addCount).toBe(2);
       expect(maxWriteActive).toBe(1);
-    });
-  });
-
-  describe("registerPid", () => {
-    it("委托 registry.updatePid", () => {
-      mgr.registerPid("pi-sub-bg-1", 12345);
-      expect(mockUpdatePid).toHaveBeenCalledWith("pi-sub-bg-1", 12345, undefined);
     });
   });
 

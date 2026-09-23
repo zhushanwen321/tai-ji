@@ -4,8 +4,6 @@
  * 收敛三条 fetch 路径（单段 download-asset / 多段 downloadPart / testProxyConnection）
  * 的 cause 提取与分类逻辑，消除多处实现 drift 风险。
  *
- * 设计决策：docs/design/update-observability.md §3.3 D1/D2。
- *
  * 依赖方向：net-errors → update/types（UpdateError）+ node:os（网络判定）。
  * 本模块不依赖 electron / undici，纯逻辑可测。
  */

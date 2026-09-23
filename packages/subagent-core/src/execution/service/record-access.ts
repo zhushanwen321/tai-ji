@@ -45,7 +45,7 @@ import type { EnginePort } from "../engine/port.ts";
 import { getEngine, listEngines } from "../engine/registry.ts";
 import type { ManifestStore } from "../persistence/manifest-store.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { AgentConfig, ResolvedModel } from "../assembly/model-resolver.ts";
+import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
 import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 // [R6/D-R3-2] 跨进程身份 env 名 ENV_SELF_RECORD_ID 归位常量叶子文件
 // service-constants.ts（原 SSOT 在 session-baselines.ts，R3 时的聚合间单向 import
@@ -64,14 +64,26 @@ import {
 
 const logger = getLogger("subagents");
 
+/** 空串/空白归一缺席（R4/D6-②）：trim 判空与引擎侧缺席判定同口径
+ *  （resolveZcodeModelRef 的 `trim() || undefined`）——写侧留痕链消费。 */
+function normalizeModelRef(ref: string | undefined): string | undefined {
+  const trimmed = ref?.trim();
+  return trimmed !== undefined && trimmed !== "" ? trimmed : undefined;
+}
+
 /** resolveIdentity 的产物——一次确定、写入 record 后不再变。
  *  [R3] 接口本体自壳文件迁入（唯一生产者 resolveIdentity/resolveIdentityForEngine）；
  *  壳经 type import 消费（execute/executeAndAwait/workflow 派发链的局部类型标注），
- *  对外无导出面（原模块内私有接口）。 */
+ *  对外无导出面（原模块内私有接口）。
+ *  [R4/D6-②] resolved.model 可缺席：undefined = 用户未指定模型（引擎走自身缺省
+ *  解析，如 zcode 的 defaultModelSelection）——pi 路径（resolveIdentity 三层解析）
+ *  恒有值；引擎路径（resolveIdentityForEngine）在显式 model 缺席且引擎未裁决出
+ *  canonical ref 时为 undefined。消费点：ctxModel 透传（RunContext.ctxModel 本就
+ *  可选）、record.model 盖章（createRecordForMode 条件留空）。 */
 export interface ResolvedIdentity {
   agent: string;
   agentConfig: AgentConfig | undefined;
-  resolved: ResolvedModel;
+  resolved: { model: ModelInfo | undefined; thinkingLevel: string | undefined };
 }
 
 /**
@@ -301,13 +313,15 @@ export class RecordAccess {
    * agent model 不透传——主 agent 的 pi id 对目标引擎大概率无效，缺省语义归引擎）。
    *
    * 逐层语义（设计 D2-1 归趋表）：
-   *   - model 源 = engineModel（调用参数 opts.model > agentConfig.model frontmatter，
-   *     agent 作者声明不忽略——配错在 validateModel 同步报错，不落引擎缺省静默续跑）；
-   *   - 无显式 model → 校验/留痕走引擎缺省（validateModel(undefined) 的 canonicalRef）；
-   *   - thinkingLevel 直接透传（引擎中立参数，不涉 registry）。
-   *
-   * 引擎未实现 validateModel 时 modelRef 原样透传（其 prepare 期校验兜底，现状语义）。
-   */
+ *   - model 源 = engineModel（调用参数 opts.model > agentConfig.model frontmatter，
+ *     agent 作者声明不忽略——配错在 validateModel 同步报错，不落引擎缺省静默续跑）；
+ *   - 无显式 model → 校验仍走引擎缺省裁决（validateModel(undefined)），留痕按裁决
+ *     结果条件留空（R4/D6-②：裁决缺席/空串 → record.model = undefined，如实投影
+ *     「用户未指定」，不伪造 fallback 已选）；
+ *   - thinkingLevel 直接透传（引擎中立参数，不涉 registry）。
+ *
+ * 引擎未实现 validateModel 时 modelRef 原样透传（其 prepare 期校验兜底，现状语义）。
+ */
   resolveIdentityForEngine(
     engine: EnginePort,
     engineModel: string | undefined,
@@ -316,23 +330,25 @@ export class RecordAccess {
     opts: ExecuteOptions,
   ): ResolvedIdentity {
     const canonical = validateModelForEngine(engine, engineModel);
-    // record.model 留痕：canonical（引擎裁决 ref，允许无斜杠形态——契约变更④，协议化
-    // 后引擎可原样返回 ref）；引擎未实现校验面且无显式 model 时为空串（记录形态退化，
-    // 生产不可达——注册表内非 pi 引擎均实现 validateModel；防御性空串避免 throw 打断
-    // 兜底语义）。拆分单一权威 = splitEngineModelRef（无斜杠 → provider=""/id=ref/
+    // record.model 留痕（R4/D6-② 缺席透传）：canonical（引擎裁决 ref）> engineModel
+    // （显式透传）；两者缺席时透传 undefined → record.model 条件留空 = 用户未指定
+    // （引擎走自身缺省解析，如 zcode 的 defaultModelSelection），不再伪造成 fallback
+    // 已选。空串归一为缺席（禁空串哨兵）：上游帧面对「缺席」的既有表达形态含空串
+    // （RemoteEngine validateModel 缺席分支、modelRef 显式空白串），trim 归一与引擎
+    // 侧缺席判定同口径（resolveZcodeModelRef 的 `trim() || undefined`）——写侧归一 +
+    // 读侧水合归一（record-store-rebuild / state-marker）共同保证 record.model 无
+    // 空串复活。拆分单一权威 = splitEngineModelRef（无斜杠 → provider=""/id=ref/
     // 整串进 name，不再落 "<ref>/" 畸形）。
-    const modelStr = canonical ?? engineModel ?? "";
-    const model = splitEngineModelRef(modelStr);
+    const modelStr = normalizeModelRef(canonical) ?? normalizeModelRef(engineModel);
+    const split = modelStr === undefined ? undefined : splitEngineModelRef(modelStr);
     return {
       agent,
       agentConfig,
       resolved: {
-        model: {
-          id: model.id,
-          name: model.name,
-          provider: model.provider,
-          reasoning: false,
-        },
+        model:
+          split === undefined
+            ? undefined
+            : { id: split.id, name: split.name, provider: split.provider, reasoning: false },
         thinkingLevel: opts.thinkingLevel ?? agentConfig?.thinkingLevel,
       },
     };
@@ -366,7 +382,11 @@ export class RecordAccess {
       // model 留痕词形与拆分同源（joinEngineModelRef）：provider 为空串只写 id——
       // 契约变更④的无斜杠 ref（provider=""/id=ref）不得落成 "/ref" 或 "ref/" 畸形；
       // 续聊回读侧 splitEngineModelRef 对无斜杠串还原 provider=""/id=ref，往返自洽。
-      model: joinEngineModelRef(identity.resolved.model),
+      // [R4/D6-②] 条件盖章：resolved.model 缺席（用户未指定）不落 model 键——
+      // record.model = undefined 如实投影，禁空串哨兵。
+      ...(identity.resolved.model !== undefined
+        ? { model: joinEngineModelRef(identity.resolved.model) }
+        : {}),
       thinkingLevel: identity.resolved.thinkingLevel,
       mode,
       task: opts.task,
@@ -382,8 +402,8 @@ export class RecordAccess {
       // 从 RunContext 回填；缺省 = pi 投影，存量调用方零感知）
       engine: opts.engine,
       engineFallback: opts.engineFallback,
-      // [modeless 波3] collect 路由选项不在 record 落值——sync 成员由 executeViaEngine
-      // 派发时点登记进协调器（成员身份 = 登记态，非 record 字段）。
+      // [collect 退役] collect 路由选项不在 record 落值（原 sync 成员由
+      // executeViaEngine 派发时点登记进协调器，随批机制删除——collect 值从未入 record）。
       controller,
     });
     // [H2 W2] 来源身份在对象构造点落位（origin/parentRunId 为 readonly，创建期一次性
@@ -478,7 +498,14 @@ export class RecordAccess {
   private readonly coldLookupDeps: ColdLookupDeps = {
     findLightById: (id) => this.deps.getStore().findLightById(id),
     collectRecords: (limit, statusFilter, rootFilter) =>
-      this.deps.getStore().collectRecords(limit, statusFilter, rootFilter),
+      // [a3rv 归因修复] 冷查兜底全扫必须 includeWorkflow:true——冷查是「按 id 定位
+      // action 候选」的治理语义，不是 list 展示消费面；[H2 W1] origin 展示过滤若在
+      // 此生效，归档出内存的 workflow record 会被滤掉 → 候选 undefined → 上转
+      // 「not found or not owned」→ endedMessageGuard 误分流为「different session
+      // tree」（同树也误报，a3rv 重验实测）。messageHandler 的 D7 workflow-origin
+      // 域边界守卫依赖冷查能定位到 workflow record；与 lookupRecordAnyState 的 [S2]
+      // 「查询能力必须与文案指引一致」同款论证。
+      this.deps.getStore().collectRecords(limit, statusFilter, rootFilter, true),
     register: (record) => this.deps.getStore().register(record),
     reportRecordTransition: (record) => this.deps.getStore().reportRecordTransition(record),
     // [U2a/B4] 透明重生回边原语（store.markResurrected）——ColdLookupDeps 新增字段的

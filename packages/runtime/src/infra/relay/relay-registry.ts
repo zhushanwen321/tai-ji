@@ -1,5 +1,5 @@
 /**
- * relay 子进程注册表（E 方案，subagent-realtime-channel.md §3.1/§4.2/§3.3）。
+ * relay 子进程注册表。
  *
  * 职责：socket 连接 → 握手帧校验（版本协商 + 归属校验）→ spawn 真实 pi（argv/env/cwd
  * 全从握手帧，env 剥离 TAIJI_SUBAGENT_RELAY_* 防孙进程嵌套误导）→ 双向字节泵（down 帧 →
@@ -574,7 +574,12 @@ export class RelayRegistry {
   /** 读进程启动时间（epoch ms）；失败/平台不支持返回 null。 */
   private readProcessStartTime(pid: number): Promise<number | null> {
     return new Promise((resolve) => {
-      execFile('ps', ['-p', String(pid), '-o', 'lstart='], { timeout: 5_000 }, (err, stdout) => {
+      // C-proc-09 出站契约：不传 env = 隐式全量继承父环境（含 TAIJI_RUNTIME_TOKEN），
+      // 泄漏给 ps 后代进程；只读探测仅需 PATH/HOME，白名单基座 + deny 兜底（RT-8#9）。
+      execFile('ps', ['-p', String(pid), '-o', 'lstart='], {
+        timeout: 5_000,
+        env: buildOutboundChildEnv({ parentEnv: process.env }),
+      }, (err, stdout) => {
         if (err) {
           resolve(null)
           return

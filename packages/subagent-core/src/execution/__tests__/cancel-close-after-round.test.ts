@@ -8,8 +8,8 @@
 // 缺陷链（修复前）：close(force:false) 挂起 → cancel 抢先 settle（status=idle、
 // 挂起残留）→ 轮收敛回调 onRunSettled 被 status 守卫拦截（不清挂起）→ 用户
 // message 开新轮 → 轮终 settleRoundSuccess gate 放行 → closeAfterRound===true →
-// archiveAfterClosingRound 意外归档。违背 §3.2.5 cancel 语义「暂停这一轮（可以
-// 继续聊）」——用户 cancel 后的正常续聊轮被自动收起。
+// archiveAfterClosingRound 意外收口。违背 §3.2.5 cancel 语义「暂停这一轮（可以
+// 继续聊）」——用户 cancel 后的正常续聊轮被自动收口。
 //
 // 集成面 = registerFakePiEngine 协议替身（与 conversation-continuation.test.ts
 // 同源 setup 形态）。
@@ -32,24 +32,17 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
 
 interface ServiceInternals {
   store: RecordStore;
@@ -59,7 +52,7 @@ function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike;
+  pi: PiMock;
   fake: FakePiEnginePort;
 } {
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "cancel-close-"));
@@ -67,7 +60,7 @@ function makeService(): {
   const fake = registerFakePiEngine();
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+    modelRegistry: emptyRegistry(),
     sessionId: "root-session",
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });
@@ -102,7 +95,7 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -120,7 +113,7 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("close 挂起 → cancel 抢先 settle（挂起作废）→ message 新轮 → 轮终不归档，intent 保持 active", async () => {
+  it("close 挂起 → cancel 抢先 settle（挂起作废）→ message 新轮 → 轮终不收口，record 保持可续聊", async () => {
     const record = makeChatRecord("sa-cancel-close", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "long round");
@@ -143,22 +136,21 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     fake.runs[0]!.settle({ content: "interrupted round partial" });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // 用户 message：cancel 后的正常续聊轮（寻回翻 active + 新轮派发）。
+    // 用户 message：cancel 后的正常续聊轮（idle 复活 + 新轮派发）。
     await service.chatActions.deliverChatMessage(record, "new round after cancel");
     await vi.waitFor(() => expect(fake.runs.length).toBe(2));
     fake.runs[1]!.settle({ content: "continuation reply" });
 
-    // 轮终：通知送达但**不归档**——残留挂起会在此触发 archiveAfterClosingRound
-    // 意外归档（intent 翻 "archived" = 回归失败信号）。cancel 不动 intent：record
-    // 从未归档（intent=undefined，语义 = active，types.ts「undefined = active 存量
-    // 零迁移」投影），寻回翻 active 只发生在 archived 之后。
+    // 轮终：通知送达但**不收口**——残留挂起会在此触发 archiveAfterClosingRound
+    // 意外收口（回归失败信号）。cancel = 暂停这一轮：record 留 idle 可续聊，
+    // 占用位不动。
     await vi.waitFor(() => expect(record.result).toBe("continuation reply"));
     expect(record.round).toBe(2);
     expect(record.closeAfterRound).toBeUndefined();
-    expect(record.intent).not.toBe("archived");
+    expect(record.status).toBe("idle");
   });
 
-  it("close 挂起 → disposeAllRecords 编排性关闭（挂起作废 + 立即归档收起）", async () => {
+  it("close 挂起 → disposeAllRecords 编排性关闭（挂起作废 + 立即收口落账）", async () => {
     const record = makeChatRecord("sa-dispose-close", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "long round");
@@ -169,12 +161,12 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
 
     const count = service.disposeAllRecords("parent-fork");
 
-    // 编排性关闭 = 立即打断 + settle interrupted-by-parent + 自动收起（archived）
-    //——挂起（等轮终归档）意愿被立即归档完全取代，随打断作废。
+    // 编排性关闭 = 立即打断 + settle interrupted-by-parent + 收口落账——
+    // 挂起（等轮终收口）意愿被立即收口完全取代，随打断作废。
     expect(count).toBe(1);
     expect(record.closeAfterRound).toBeUndefined();
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
-    expect(record.intent).toBe("archived");
+    expect(record.hadWorktree === true || record.worktreeHandle === undefined).toBe(true);
   });
 });

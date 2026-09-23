@@ -18,7 +18,6 @@ import {
 import {
   backgroundTaskBucket,
   filterBackgroundTasks,
-  countBackgroundTasks,
   backgroundTaskStatusIcon,
   type BackgroundTaskEntry,
 } from '@/lib/background-task-bucket'
@@ -107,17 +106,6 @@ describe('filterBackgroundTasks 过滤与排序（S1 验收口径同源）', () 
     for (const f of ['active', 'ended', 'all'] as const) {
       expect(filterBackgroundTasks([], f)).toEqual([])
     }
-  })
-})
-
-describe('countBackgroundTasks 三桶计数（FilterBar 计数 + L2 角标同源，D4④）', () => {
-  it('按桶分计，all = 全量长度（含 killing 入 active）', () => {
-    const counts = countBackgroundTasks([RUNNING, KILLING, EXITED_OK, EXITED_KILLED, ORPHANED])
-    expect(counts).toEqual({ active: 2, ended: 3, all: 5 })
-  })
-
-  it('空列表计数全 0（badge = active > 0 不点亮）', () => {
-    expect(countBackgroundTasks([])).toEqual({ active: 0, ended: 0, all: 0 })
   })
 })
 

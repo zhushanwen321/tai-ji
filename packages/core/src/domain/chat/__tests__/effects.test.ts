@@ -22,41 +22,21 @@
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/effects.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, shallowRef } from 'vue'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { dispatchMessageEvent } from '../effects/registry'
+import { dispatchMessageEvent, __clearUnhandledFrameTypeWarnForTest } from '../effects/registry'
+import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
+import { makeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'
 import type { Message, PiBranchSummaryEntry, PiCompactionEntry, PiCustomMessageEntry, Segment, ServerMessage } from '@taiji/shared'
 
 const SID = 's-test'
 
-/** 构造 ctx：真实 vue ref + 回调 mock（D-1 容器：分区值为 ShallowRef<Message[]>） */
-function makeCtx(initial: Message[] = []): MessageEffectContext {
-  return {
-    messages: ref(new Map([[SID, shallowRef(initial)]])),
-    retryStates: ref(new Map()),
-    applyFileChanges: vi.fn(),
-    markChangeSetsSuperseded: vi.fn(),
-    finalizeSession: vi.fn(),
-    clearPendingSend: vi.fn(),
-    armStreamingTimer: vi.fn(),
-    appendUser: vi.fn(),
-    // w21：entry 载体帧喂 reducer 的接入点（store.applyEntryFrame 注入）
-    applyEntryFrame: vi.fn(),
-    // steer-bubble u1/D2：inflight 确认计数读写（message_end 腿 2 裁决输入，store 注入）
-    getInflight: vi.fn(() => 0),
-    incrementInflight: vi.fn(),
-    decrementInflight: vi.fn(),
-    clearInflight: vi.fn(),
-    // [premature-timeout §5.2 D2] timeout 打标快照消费/清除（默认无打标 → take 返回空集）
-    takePrematureTimeoutIds: vi.fn(() => new Set<string>()),
-    clearPrematureTimeoutIds: vi.fn(),
-  }
-}
+// makeCtx 用 helpers/fixtures 共享版（u3b 后 ctx 终态形态）；本文件 makeCtx(initial)
+// 单参调用与共享版默认 sid 's-test' 同值，行为等价。
 
 function msg(type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: SID, ...payload } } as ServerMessage
+  return serverMsg(SID, type, payload)
 }
 
 /** [w21] toolCall entry 形态构造（payload.entry——event-adapter 重构载体） */
@@ -455,6 +435,24 @@ describe('dispatchMessageEvent message.stream_warn（W2 liveOnly 标记）', () 
     expect(list[0].content).toBe('长时间无响应')
     expect(list[0].liveOnly).toBe(true)
   })
+
+  it('[MF-1-13] streaming 期到达 → 不 finalizeSession，assistant 保持 streaming，turn 可被后续 complete 正常收口', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'partial' }))
+
+    // 单帧翻译失败经 adapter 显形为 stream_warn（MF-1-13）：非终结——不得收口 session
+    dispatchMessageEvent(ctx, SID, msg('message.stream_warn', { content: '事件翻译失败，本帧已跳过：x' }))
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
+    expect(lastAssistant(ctx).status).toBe('streaming')
+    expect(lastAssistant(ctx).content).toBe('partial')
+
+    // pi 实际成功的 turn：后续 message.complete 正常走完（不被提前 seal 成 error 终态）
+    dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'stop', content: 'partial + done' }))
+    expect(lastAssistant(ctx).status).toBe('complete')
+    expect(lastAssistant(ctx).error).toBeUndefined()
+    expect(getMsgs(ctx).some((m) => m.status === 'error')).toBe(false)
+  })
 })
 
 describe('dispatchMessageEvent message.compactionSummary（W6 entry 化——消灭最后一条直插双路径）', () => {
@@ -589,7 +587,41 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
     expect(list).toHaveLength(1)
     expect(list[0].role).toBe('assistant')
     expect(list[0].status).toBe('error')
-    expect(list[0].content).toBe('400: Unsupported model mimo-v2-pro')
+    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（无=空）
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('400: Unsupported model mimo-v2-pro')
+  })
+
+  // [M2 不变量·terminalMessagePatch 出口] pi error stop 但 errorMessage 缺失
+  // （extras.errorMessage 可 undefined）：error 字段走兜底——缺失会让崩溃前正文
+  // 被 Block.vue 误判纯 error 整条染红。
+  it('streaming 气泡收口且 errorMessage 缺失：error 字段写 reason 兜底文案（不变量）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '崩溃前正文' }))
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const a = lastAssistant(ctx)
+    expect(a.status).toBe('error')
+    expect(a.content).toBe('崩溃前正文')
+    expect(a.error).toBe('会话出错，回复已中断。')
+  })
+
+  // [错误可见性] 秒败 turn 且 errorMessage 缺失：仍追加纯 error 气泡（兜底文案）——
+  // 旧条件 isErrorStop && errorMessage && !changed 在此场景什么都不追加，错误完全静默。
+  it('无 streaming 气泡且 errorMessage 缺失：仍追加兜底纯 error 气泡（错误不得静默）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const list = getMsgs(ctx)
+    expect(list).toHaveLength(1)
+    expect(list[0].status).toBe('error')
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('会话出错，回复已中断。')
   })
 
   it('非 error stopReason 不消费 errorMessage 字段（正常完成不受影响）', () => {
@@ -639,6 +671,11 @@ describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn �
     // usage 是 turn 级聚合：只回填最后一条 assistant（回填到非末条语义错位）
     expect(list[0].usage).toBeUndefined()
     expect(list[1].usage).toEqual({ inputTokens: 100, outputTokens: 50 })
+    // 产出结束时刻（turn 聚合口径时间轴右端）：只标末条 assistant；中间段保持缺省
+    // （live 不可知其真实结束时刻，消费侧回退 timestamp；reload 侧由 entry 时间戳补齐）
+    expect(list[0].endedAt).toBeUndefined()
+    expect(list[1].endedAt).toBeTypeOf('number')
+    expect(list[1].endedAt).toBeGreaterThanOrEqual(list[1].timestamp)
   })
 
   it('权威 content 覆盖最后一条 assistant（末 delta 异步渲染竞态防线）；非末气泡 content 不动', () => {
@@ -797,7 +834,7 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
 
 // ── [投递所有权内核 u3b 退役] message_start 的 G-023 条件清 + 僵尸清理 ──
 // queueStates 快照与 pendingBuffer 计数腿已随内核退役（队列区数据源 = session.delivery
-// 状态帧）；message_start 只保留 streaming assistant 建立 + clearPendingSend + armStreamingTimer。
+// 状态帧）；message_start 只保留 streaming assistant 建立 + clearPendingSend（streaming timer 已随上游移除）。
 
 describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理腿退役，streaming 链路不变）', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -853,5 +890,146 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'error', errorMessage: 'x' }))
 
     expect(ctx.clearInflight).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异常帧不断流）', () => {
+  // [设计裁决登记（registry.ts 三处守卫，2026-09-17 错误处理审查 A5）] 正常流经
+  // event-adapter 构造的帧不会产生 undefined/形态不符 entry；守卫静默 return 是
+  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为面：坏帧
+  // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认腿均不触发）。
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('tool_call_start 缺 entry → 不抛错、streaming assistant 无 toolCall/contentBlocks 增量', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', {}))).not.toThrow()
+    const a = lastAssistant(ctx)
+    expect(a.toolCalls ?? []).toHaveLength(0)
+    expect(a.contentBlocks ?? []).toHaveLength(0)
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+  })
+
+  it('tool_call_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与 overlay 双零副作用', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: { type: 'toolCall' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(lastAssistant(ctx).toolCalls ?? []).toHaveLength(0)
+  })
+
+  it('message_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与腿 2 确认双零副作用', () => {
+    const ctx = makeCtx()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: { type: 'compaction' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(getMsgs(ctx)).toHaveLength(0)
+    // 腿 2（user 投递确认）在形态守卫处短路：确认计数零触碰
+    expect(ctx.incrementInflight).not.toHaveBeenCalled()
+    expect(ctx.decrementInflight).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchMessageEvent — 单帧异常隔离与终态安全网（RD-1#5）', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('非终态帧 handler 中途抛错：不逆传调用方 + console.error 记录半执行帧，后续帧继续处理', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    // message_start handler 的最后一步 clearPendingSend 抛错（前序副作用已完成：streaming 气泡已 commit）
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'm-1' }))).not.toThrow()
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    expect(String(errSpy.mock.calls[0]?.[0])).toContain('message.message_start')
+    // 半执行帧的前序副作用保留（streaming 气泡已落），不回滚不重放
+    expect(getMsgs(ctx)).toHaveLength(1)
+    expect(lastAssistant(ctx).status).toBe('streaming')
+    // 后续帧照常处理：text_delta 正常累积
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => {})
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'a' }))
+    expect(lastAssistant(ctx).content).toBe('a')
+  })
+
+  it('终态帧（message.error）异常截断收口：安全网按帧语义补 finalizeSession（error + 原始错误文本）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    const finalize = vi.mocked(ctx.finalizeSession)
+    // 首次 finalize（handler 内）抛错 → 安全网第二次调用成功
+    finalize.mockImplementationOnce(() => { throw new Error('finalize boom') })
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.error', { message: 'pi exploded' }))).not.toThrow()
+    expect(finalize).toHaveBeenCalledTimes(2)
+    expect(finalize).toHaveBeenLastCalledWith(SID, 'error', 'pi exploded')
+  })
+
+  it('终态帧（message.complete aborted）安全网保留 aborted 语义（不误标 error）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ctx = makeCtx()
+    const finalize = vi.mocked(ctx.finalizeSession)
+    finalize.mockImplementationOnce(() => { throw new Error('finalize boom') })
+    dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
+    expect(finalize).toHaveBeenLastCalledWith(SID, 'aborted', undefined)
+  })
+
+  it('非终态帧不触发安全网（delta 帧异常不收口进行中的流）', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const initial: Message[] = [{ id: 'a1', role: 'assistant', content: '', status: 'streaming', timestamp: 0 }]
+    const ctx = makeCtx(initial)
+    // text_delta handler 经 updateStreamingAssistant 守卫不会自然抛错——用 ctx.messages 只读
+    // 视角注入异常帧：构造 handler 必经的抛错点（queueStates 代理）成本高，改用 message_start
+    // 同款注入：clearPendingSend 抛错 + 断言 finalizeSession 全程零调用
+    vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'm-2' }))
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchMessageEvent 未注册 message.* 类型的 dev 观测（RD-1#9）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    __clearUnhandledFrameTypeWarnForTest()
+    __resetDevModeForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetDevModeForTesting()
+    __clearUnhandledFrameTypeWarnForTest()
+  })
+
+  it('dev 下未注册 type → console.warn 一次/类型（协议漂移可见），行为仍为 no-op 不抛错', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+
+    // 同一未知类型两次：去重后只 warn 一次（防刷屏）
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.future_frame', { x: 1 }))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.future_frame', { x: 2 }))).not.toThrow()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('unhandled frame type message.future_frame')
+
+    // no-op 语义不变：无消息副作用、不收口
+    expect(getMsgs(ctx)).toHaveLength(0)
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
+
+    // 另一类型独立计数（去重键 = 帧类型）
+    dispatchMessageEvent(ctx, SID, msg('message.another_unknown'))
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it('非 dev（未注入 provideDevMode，默认 false）→ 零 warn（生产零噪音）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.future_frame'))
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('已注册类型不触发 warn（不污染正常流的观测信号）', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(warn).not.toHaveBeenCalled()
   })
 })

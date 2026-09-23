@@ -1,8 +1,7 @@
 /**
  * Panel 渲染分支派生测试（panel-view switch 重写，单元 T3）。
  *
- * [权威] docs/design/panel-view-derivation-and-flow-lifecycle.md §3.3 D1/D2/D5：
- * Panel 主区与输入面判据收敛为 usePanelView → derivePanelView 单点派生，本文件锁
+ * Panel 主区与输入面判据收敛为 usePanelView → derivePanelView 单点派生（D1/D2/D5），本文件锁
  * renderer 装配层的派生消费行为（core 纯函数的 64 组合表在
  * packages/core/src/domain/session/__tests__/panel-view.test.ts，V5）。
  *
@@ -12,12 +11,12 @@
  * - PV2 landing：无 session + flow 活跃 → Landing；band 不重复挂 composer
  * - PV3 empty：绑定空会话（有 sid 无消息，flow idle）→ 空对话态 + Composer（直输）；
  *   无 session + flow idle → 选会话空态，无输入面
- * - PV4 dead：占位视图（重开入口），无 Composer；ask-user 请求在场仍无 overlay
- *   （W6「dead 不应答」由派生优先级 dead > ask-user 承接，收集侧不重复判）
- * - PV5 ask-user：请求到达 → AskUserOverlay 替换 Composer；应答出队 → Composer 恢复
+ * - PV4 dead：占位视图（重开入口），无 Composer；表单请求在场仍无 overlay
+ *   （W6「dead 不应答」由派生优先级 dead > form 承接，收集侧不重复判）
+ * - PV5 form overlay：请求到达 → FormOverlay 替换 Composer；应答出队 → Composer 恢复
  * - PV6 trace 输入面保留（D5/V4，一致性审查 R-U1）：trace 视图 → TraceView 替换对话流
- *   位置 + Composer 保留；trace + ask-user 请求 → overlay 承接应答
- * - PV7 respawn 过渡态（crash-resilience T4）：dead + respawnPending → 过渡条 + Composer
+ *   位置 + Composer 保留；trace + 表单请求 → overlay 承接应答
+ * - PV7 respawn 过渡态（T4）：dead + respawnPending → 过渡条 + Composer
  *   保持（dead 占位被抑制）；收口后回落 dead 占位
  *
  * mock 策略：vi.hoisted 模块级可变对象（对齐 ask-user-inline.test.ts / landing.test.ts
@@ -48,19 +47,21 @@ const mockState = vi.hoisted(() => ({
   flowIsActive: { value: false as boolean },
 }))
 
-// ask-user 请求用真 Vue ref（async 工厂内建，测试经 __mockAskUserReq 拿同一引用）：
+// 表单请求用真 Vue ref（async 工厂内建，测试经 __mockFormReq 拿同一引用）：
 // PV5「应答出队 → Composer 恢复」断言挂载后的响应式更新，普通对象不建依赖不触发重算。
 vi.mock('@/composables/useExtensionUI', async () => {
   const { ref } = await import('vue')
-  const askUserReq = ref<ExtensionUIRequest | undefined>(undefined)
+  const formReq = ref<ExtensionUIRequest | undefined>(undefined)
   return {
-    __mockAskUserReq: askUserReq,
+    __mockFormReq: formReq,
     useExtensionUI: () => ({
-      currentAskUserRequest: askUserReq,
+      currentFormRequest: formReq,
       respond: vi.fn(),
       cancel: vi.fn(),
     }),
-    askUserFilter: (req: { askUser?: boolean }) => req.askUser === true,
+    formFilter: (req: { form?: boolean }) => req.form === true,
+    // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+    planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
   }
 })
 
@@ -79,10 +80,9 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
 const stubs = {
   MessageStream: { template: '<div data-testid="msg-stream" />' },
   Composer: { template: '<div data-testid="composer-box" />' },
-  AskUserOverlay: { template: '<div data-testid="ask-user-overlay" />' },
+  FormOverlay: { template: '<div data-testid="form-overlay" />' },
   Landing: { template: '<div data-testid="landing">landing</div>' },
   TraceView: { template: '<div data-testid="trace-view" />' },
-  WidgetArea: { template: '<div data-testid="widget-area" />' },
 }
 
 function mountPanel(sessionId: string | null) {
@@ -96,12 +96,12 @@ function mountPanel(sessionId: string | null) {
   })
 }
 
-const askUserReq: ExtensionUIRequest = {
+const formReq: ExtensionUIRequest = {
   sessionId: 's1',
   requestId: 'req-1',
   method: 'select',
-  askUser: true,
-  askUserQuestions: [{ header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
+  form: true,
+  formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
 }
 
 // 拿 mock 工厂内建的同一 ref（直接改 .value 驱动挂载后重算）
@@ -138,7 +138,7 @@ beforeEach(() => {
   // panel store（对齐 useSessionTrace.test.ts 模式），防上一用例的 trace 视图态残留
   _resetTraceStoreForTest()
   bindTraceSessionId(computed(() => usePanelStore().focusedSessionId))
-  extUIMock.__mockAskUserReq.value = undefined
+  extUIMock.__mockFormReq.value = undefined
   mockState.flowIsActive.value = false
 })
 
@@ -176,7 +176,7 @@ describe('PV2: landing（新建任务流程唯一承接场景：无 session + fl
     expect(wrapper.find('[data-testid="landing"]').exists()).toBe(true)
     // landing 态 composer 由 Landing 内嵌，band 不重复渲染（D5 判据）
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
   })
 })
 
@@ -201,7 +201,7 @@ describe('PV3: empty 兜底（flow 未活跃）', () => {
   })
 })
 
-describe('PV4: dead 占位（W6：dead 不应答，派生优先级 dead > ask-user 承接）', () => {
+describe('PV4: dead 占位（W6：dead 不应答，派生优先级 dead > form 承接）', () => {
   it('dead → 占位视图 + 重开入口，无 Composer', () => {
     const sessionStore = useSessionStore()
     sessionStore.appendSession(makeSession('s1'))
@@ -214,21 +214,21 @@ describe('PV4: dead 占位（W6：dead 不应答，派生优先级 dead > ask-us
     expect(wrapper.find('[data-testid="msg-stream"]').exists()).toBe(false)
   })
 
-  it('dead + ask-user 请求在场 → 仍无 overlay（互斥由派生吞掉，收集侧不重复判）', () => {
+  it('dead + 表单请求在场 → 仍无 overlay（互斥由派生吞掉，收集侧不重复判）', () => {
     const sessionStore = useSessionStore()
     sessionStore.appendSession(makeSession('s1'))
     sessionStore.markDead('s1')
-    extUIMock.__mockAskUserReq.value = askUserReq
+    extUIMock.__mockFormReq.value = formReq
 
     const wrapper = mountPanel('s1')
 
     expect(wrapper.text()).toContain('会话进程已退出')
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
   })
 })
 
-describe('PV7: respawn 过渡态（crash-resilience T4：恢复窗口不进终态页）', () => {
+describe('PV7: respawn 过渡态（T4：恢复窗口不进终态页）', () => {
   it('dead + respawnPending → 过渡条渲染 + Composer 保持（dead 占位被抑制）', () => {
     const sessionStore = useSessionStore()
     const chat = useChatStore()
@@ -263,7 +263,7 @@ describe('PV7: respawn 过渡态（crash-resilience T4：恢复窗口不进终�
   })
 
   it('message_start 收口语义（恢复窗口发消息的 join 路径：dead 复位 + T4 条）→ 对话流恢复，不进终态页', async () => {
-    // [crash-resilience T4 回流修复] Gate B A7 缺陷：恢复窗口内发消息经 runtime 惰性恢复
+    // [T4 回流修复] Gate B A7 缺陷：恢复窗口内发消息经 runtime 惰性恢复
     // join 完成，无 session.restored 帧 → 此前过渡态无收口信号，超时回落 dead 终态页。
     // 修复后 useChat 的 message_start 收口 gate 执行同构三件套（clear + T4 条 + revive），
     // 本用例锁定收口后的用户可见 DOM 终态（gate 链路见 respawn-pending.test.ts ⑧）。
@@ -290,28 +290,28 @@ describe('PV7: respawn 过渡态（crash-resilience T4：恢复窗口不进终�
   })
 })
 
-describe('PV5: ask-user 互斥替换（D5：overlay ⟺ (conversation || trace) && input===ask-user）', () => {
-  it('有 ask-user 请求 → AskUserOverlay 替换 Composer', () => {
+describe('PV5: form overlay 互斥替换（D5：overlay ⟺ (conversation || trace) && input===form）', () => {
+  it('有表单请求 → FormOverlay 替换 Composer', () => {
     hydrateS1Messages()
-    extUIMock.__mockAskUserReq.value = askUserReq
+    extUIMock.__mockFormReq.value = formReq
 
     const wrapper = mountPanel('s1')
 
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
   })
 
   it('应答出队后 → Composer 恢复（阻塞解除回到常驻输入面）', async () => {
     hydrateS1Messages()
-    extUIMock.__mockAskUserReq.value = askUserReq
+    extUIMock.__mockFormReq.value = formReq
     const wrapper = mountPanel('s1')
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
 
     // 用户应答 → 请求出队（store 队列空）
-    extUIMock.__mockAskUserReq.value = undefined
+    extUIMock.__mockFormReq.value = undefined
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
   })
 })
@@ -330,24 +330,24 @@ describe('PV6: trace 态输入面保留（D5/V4：session-trace 契约「compose
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
   })
 
-  it('trace 视图 + ask-user 请求 → overlay 承接应答；应答出队后 composer 恢复、TraceView 不受影响', async () => {
+  it('trace 视图 + 表单请求 → overlay 承接应答；应答出队后 composer 恢复、TraceView 不受影响', async () => {
     hydrateS1Messages()
     focusSession('s1')
     setTraceView('s1', 'trace')
-    extUIMock.__mockAskUserReq.value = askUserReq
+    extUIMock.__mockFormReq.value = formReq
 
     const wrapper = mountPanel('s1')
 
-    // 前半程（用户可见）：trace 态 ask-user overlay 正常出现并替换 composer（V4 验收语义）
+    // 前半程（用户可见）：trace 态表单 overlay 正常出现并替换 composer（V4 验收语义）
     expect(wrapper.find('[data-testid="trace-view"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
 
     // 后半程：应答出队（响应式驱动同 PV5）→ overlay 消失、composer 恢复，TraceView 保持
-    extUIMock.__mockAskUserReq.value = undefined
+    extUIMock.__mockFormReq.value = undefined
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="trace-view"]').exists()).toBe(true)
   })

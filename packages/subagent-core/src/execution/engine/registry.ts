@@ -2,9 +2,7 @@
 //
 // 引擎注册表（P1；W3 协议化改造）。设计权威源（现行）：
 // docs/architecture/subagent-engine-protocolization.md §3.4 发现与注册 / §3.8 D1（EngineDescriptor
-// 双模）+ D4（缺省引擎与 fallback 目标）；实现级规格 impl-plan §2.3。历史权威源
-// docs/architecture/subagent-engine-abstraction.md §3.3.1/§3.3.3（engine_not_found 错误
-// 规格第 1 行）仍然有效。
+// 双模）+ D4（缺省引擎与 fallback 目标）；实现级规格 impl-plan §2.3。
 //
 // 为什么需要注册表：引擎身份是「spawn 细节的归属边界」——上层（配置路由/agent 解析）
 // 按 id 取引擎，不感知实现类；新引擎接入 = 装一个引擎包（manifest 自注册，W4 发现器
@@ -73,6 +71,13 @@ export interface CliEngineDescriptor {
   portFactory: EngineFactory;
   /** manifest 快照余项（modelCatalog/displayName；capabilities 已提升为直读字段）。 */
   manifest?: Omit<EngineManifestSnapshot, "capabilities">;
+  /**
+   * 引擎包版本面（package.json `version`，发现器装配时盖章；L3 显式配置无
+   * package.json → 缺省 undefined）。参与稳定标识比较——引擎包升级即使 bin 路径与
+   * capabilities 碰巧全同，版本变化也必须触发 dispose 换新实例（否则同进程内旧单例
+   * 持续跑旧代码直到进程重启）。两侧均 undefined（L3 显式配置 / 旧 descriptor）视为等价。
+   */
+  packageVersion?: string;
 }
 
 /** inproc 形态 descriptor（过渡期）：内建引擎工厂。DoD#5 后随 inproc 分支删除。 */
@@ -199,7 +204,8 @@ function triggerEngineDispose(engine: EnginePort, source: string): void {
  * 登记引擎工厂（inproc 快捷形态，等价 registerEngineDescriptor(id, {kind:"inproc", factory})）。
  * 重复注册同一 id = 覆盖（组合根可能多次执行，如每次 session_start 重跑 registerPiEngine
  * ——幂等覆盖保证不炸也不堆积），覆盖时丢弃缓存的旧单例，让下一次 getEngine 用新
- * descriptor 重建。
+ * descriptor 重建。inproc 覆盖恒走 dispose 分支（见 isStableEquivalentDescriptor——
+ * inproc 无磁盘来源的稳定标识字段，等价性无从证明）。
  *
  * [R1 D6②] 覆盖前对已实例化的旧单例触发 dispose（防泄漏——旧实例可能持有常驻进程/
  * 长连接）；触发不等待 + 失败不阻断（见 triggerEngineDispose），幂等覆盖语义不变。
@@ -209,11 +215,86 @@ export function registerEngine(id: string, factory: EngineFactory): void {
 }
 
 /**
+ * [D2b] 稳定标识比较的键序规范化 stringify：对象键排序后序列化，数组序保留
+ * （modelCatalog.models 的枚举序有语义）。直接 JSON.stringify 依赖键序——L3 保守
+ * capabilities（spread 构造）与 manifest 解析路径（解析器固定序）同内容不同键序会
+ * 误判不等价，故比较前规范化。
+ */
+function stableDescriptorKey(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableDescriptorKey).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableDescriptorKey(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+/**
+ * [D2b] 稳定标识等价判定：同 id 重注册时新旧 descriptor 是否「同一引擎」。
+ *
+ * 稳定标识字段集（实施期对照 discovery 写入 CliEngineDescriptor 的实际字段集核定，
+ * = 除 portFactory 外的全部字段）：
+ *   - kind（cli / inproc 实现形态不同 = 不同引擎）
+ *   - command + args（spawn 面：bin 路径与启动参数）
+ *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
+ *     实例，否则与「真换引擎」场景自相矛盾）
+ *   - manifest 余项（modelCatalog + displayName——manifest 派生版本面）
+ *   - packageVersion（package.json version——包版本面：升级即使 bin/capabilities
+ *     碰巧全同也要换新实例，防旧单例跑旧代码）
+ * portFactory 闭包不参与比较：每次 discovery 重跑都是新函数实例，但等价标识下其
+ * 产物行为等价；闭包内捕获的 engineConfig（L3 显式配置）与 entry.cwd（config.json
+ * 显式登记的引擎工作目录，同经 buildExplicitDescriptor 的 portFactory 闭包消费）
+ * 同理不在比较面——改 config.json 的 engineConfig / cwd 都不会触发换实例，属既定
+ * 接受面（command/args 变化会）。
+ *
+ * inproc 形态恒判不等价：仅有 factory 闭包、无磁盘来源字段，等价性无从证明；且
+ * inproc 工厂闭包捕获宿主模块图状态（ctx 等），物理上不可跨 reload 存活——保留
+ * 现状 dispose 是唯一安全语义。cli 形态（独立引擎进程 + host-ui-endpoint 槽现读）
+ * 才具备跨 reload 存活前提。
+ */
+function isStableEquivalentDescriptor(
+  previous: EngineDescriptor | undefined,
+  next: EngineDescriptor,
+): boolean {
+  if (previous === undefined || previous.kind !== "cli" || next.kind !== "cli") {
+    return false;
+  }
+  if (previous.command !== next.command || previous.args.length !== next.args.length) {
+    return false;
+  }
+  for (let i = 0; i < previous.args.length; i += 1) {
+    if (previous.args[i] !== next.args[i]) return false;
+  }
+  return (
+    previous.packageVersion === next.packageVersion &&
+    stableDescriptorKey(previous.capabilities) === stableDescriptorKey(next.capabilities) &&
+    stableDescriptorKey(previous.manifest) === stableDescriptorKey(next.manifest)
+  );
+}
+
+/**
  * 登记引擎 descriptor（D1 双模注册入口）。inproc（过渡期内建引擎）与 cli（引擎包，
- * portFactory 由发现器装配）两形态；覆盖语义与 dispose 触发同 registerEngine。
+ * portFactory 由发现器装配）两形态。
+ *
+ * [D2b] 覆盖语义二分：
+ *   - 稳定标识等价（见 isStableEquivalentDescriptor）→ **幂等重注册**：保留已实例化
+ *     单例不 dispose（descriptor 替换、singleton 不删——新 portFactory 生效于单例
+ *     缺席的下次 getEngine）。这是 reload / jiti 模块重载后 factory 重跑、
+ *     discoverAndRegisterEngines 对同一磁盘 manifest 重扫的常态：等价重注册 dispose
+ *     一个持有在飞 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
+ *   - 标识不等价 → 现状 dispose + 删单例（防泄漏语义保留——旧实例可能与新
+ *     descriptor 不兼容，如引擎包升级后 bin 相同但能力面变化）。
  */
 export function registerEngineDescriptor(id: string, descriptor: EngineDescriptor): void {
   const slot = getRegistrySlot();
+  if (isStableEquivalentDescriptor(slot.descriptors.get(id), descriptor)) {
+    slot.descriptors.set(id, descriptor);
+    return;
+  }
   const previous = slot.singletons.get(id);
   if (previous) triggerEngineDispose(previous, `registerEngineDescriptor('${id}') overwrite`);
   slot.descriptors.set(id, descriptor);

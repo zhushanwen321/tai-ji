@@ -19,6 +19,7 @@ import { ExtensionService, ExtensionInstallError } from '../src/services/extensi
 import { NpmGitInstaller } from '../src/infra/installers/npm-git-installer.js'
 import { ExtensionResolver } from '../src/infra/installers/extension-resolver.js'
 import { PiExtensionSettings } from '../src/infra/pi/pi-extension-settings.js'
+import { setSettingsPath } from '../src/infra/pi/pi-settings-store.js'
 
 // Mock npm-installer functions
 vi.mock('../src/infra/installers/npm-installer.js', () => ({
@@ -75,6 +76,9 @@ describe('Extension Upgrade', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     testSettingsDir = mkdtempSync(join(tmpdir(), 'ext-upgrade-test-'))
+    // RT-3#12：PiExtensionSettings 构造不再对齐全局 settings 路径（去全局化），
+    // 测试显式注入 setSettingsPath 指向 testSettingsDir（全仓测试惯例）。
+    setSettingsPath(join(testSettingsDir, 'settings.json'))
 
     // Create settings.json with a user-installed extension
     writeFileSync(join(testSettingsDir, 'settings.json'), JSON.stringify({

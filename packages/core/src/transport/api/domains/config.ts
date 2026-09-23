@@ -30,6 +30,7 @@ import type {
   ServerMessage,
   ProviderId,
   ConnectionTestResultRow,
+  UiLocale,
 } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -54,9 +55,13 @@ export async function listProviders(): Promise<{ providers: ProviderInfo[]; scop
 export async function refreshProviderCatalogs(): Promise<{
   refreshed: string[]
   failed: Array<{ providerId: string; reason: string }>
+  /** RT-7#8：读到的损坏缓存源（'own' 自刷缓存 / 'pi' pi models-store），空数组 = 无损坏。 */
+  corrupt?: Array<'own' | 'pi'>
+  /** RT-7#8：刷新结果落盘失败（内存有效，下次进入页面重刷）。 */
+  persistFailed?: boolean
 }> {
   const reply = await command('config.refreshProviderCatalogs', {}, RPC_BACKSTOP_TIMEOUT_MS)
-  return { refreshed: reply.refreshed, failed: reply.failed }
+  return { refreshed: reply.refreshed, failed: reply.failed, corrupt: reply.corrupt, persistFailed: reply.persistFailed }
 }
 
 export async function scanSkills(sources: string[]): Promise<ScannedSkillInfo[]> {
@@ -259,6 +264,17 @@ export function setProvider(providerId: ProviderId, data: SetProviderData): Prom
 // W3 默认模型持久化：动作-ack，状态变更经 onDefaults 订阅推回（runtime 广播 config.defaults）。
 export function setDefaultModel(provider: ProviderId, modelId: string): Promise<void> {
   return command('config.setDefaultModel', { provider, modelId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 上报 renderer UI 语言到跨进程 locale 通道（u-locale-channel）：runtime 原子写
+ * `<dataDir>/ui-preferences.json`，extension 侧就地读取热生效。
+ *
+ * ack 型（reply 无 payload，ReplyPayloadMap 登记 void）；写盘失败 runtime 回错误信封 → command reject，
+ * 调用方（useSettingsShell）warn 不阻塞本地语言切换。
+ */
+export function setUiLocale(locale: UiLocale): Promise<void> {
+  return command('config.setUiLocale', { locale }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 // Scoped models 白名单设置（config.setScopedModels）。reply 回写后规范化结果（去重保序）。

@@ -26,6 +26,16 @@
  *    裁决）；rename 同域失败幂等（ENOENT = 并发删除已隔离；EACCES = 原地残留静默，不重试
  *    不升级）；事件只记首次（进程内 once，防同一失败被反复记录）。
  *
+ * **写失败可见性（code-harden RT-4#6，在契约 5 风暴防护之内的增强）**：写失败上报从
+ * 「进程内 once、此后零日志」改为限流上报——首次失败立即 warn（保留 once 上报的首次
+ * 即报语义），此后每 5min 至多一条（携带连续失败次数与最后成功写时刻）；连续失败达
+ * 阈值落一条 crash 台账事件（reason=checkpoint-write-failed，每轮连续失败期只一条）。
+ * `write()` 返回 bool 并维护两个诊断面：`getLastSuccessfulWriteAt()`（最后成功写盘时刻）
+ * 与 `isCheckpointStale()`（自上次成功写盘后有失败 = 磁盘快照落后内存真相，下次成功
+ * 写盘清除）。影响面登记（不夸大）：checkpoint 是恢复增强，写失败的后果 = u5 reattach
+ * 读到旧版快照（漏恢复/多恢复，消费侧 staleness guard 已挡住「复活已删 session」），
+ * 退化为既有 lazy 恢复；本增强解决的是诊断失真——停更可被发现、可归因。
+ *
  * **时效性与 errs 方向（设计 D3 显式声明，实现口径必须一致）**：lastActivityAt 不在每次
  * touch 刷盘（写风暴），只搭 5min tick 的便车——checkpoint 值 ≤ 真实值，故消费侧算出的
  * idle = now − 值 **≥ 真实 idle**，过滤**偏「漏恢复」**（刚交互过但跨过阈值边界的 session
@@ -70,6 +80,16 @@ import { logger } from '../../infra/logger.js'
 
 /** 文件格式版本（消费方按需迁移；当前 1 = 设计 D3 字段集）。 */
 export const CHECKPOINT_VERSION = 1
+
+/** 写失败限流上报窗口（code-harden RT-4#6）：首次即报，此后每 5min 至多一条 warn。 */
+// eslint-disable-next-line no-magic-numbers -- 5min 限流窗口是审计定值（RT-4#6「每 5min 一条」），非可调魔数
+export const WRITE_FAILURE_WARN_INTERVAL_MS = 5 * 60_000
+
+/** 连续写失败落 crash 台账事件的阈值（每轮连续失败期只一条；成功写盘复位）。 */
+export const WRITE_FAILURE_LEDGER_THRESHOLD = 3
+
+/** 台账 detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
+const CRASH_DIGEST_MAX_CHARS = 2048
 
 /**
  * 占用快照（豁免 #1 三维判定：turn ≠ idle / compacting / bash，任一命中即 'occupied'）。
@@ -175,8 +195,17 @@ export class RuntimeCheckpointStore {
   private readonly failedSnapshotRetention: number
   /** checkpoint-corrupt 进程内一次（重复失败不重复记事件，D3 降级声明）。 */
   private corruptReported = false
-  /** 写失败上报一次（best-effort：台账/checkpoint 是旁路设施，失败不放大为调用链故障）。 */
-  private writeFailureReported = false
+  // ── 写失败可见性状态（code-harden RT-4#6）──
+  /** 连续写失败计数（成功写盘归零）。 */
+  private writeFailureCount = 0
+  /** 上条写失败 warn 时刻（null = 本进程尚未报过；首次失败恒即报）。 */
+  private lastWriteFailureWarnAt: number | null = null
+  /** 连续失败台账事件已落标志（每轮连续失败期只一条；成功写盘复位）。 */
+  private writeFailureLedgered = false
+  /** 最后成功写盘时刻（epoch ms；null = 本进程从未成功写过。诊断导出面）。 */
+  private lastSuccessfulWriteAt: number | null = null
+  /** checkpoint 陈旧标志：自上次成功写盘后有写入失败（磁盘快照落后内存真相），成功写盘清除。 */
+  private checkpointStale = false
 
   constructor(options: RuntimeCheckpointOptions = {}) {
     this.dir = options.dir ?? join(getDataDir(), 'run')
@@ -203,6 +232,20 @@ export class RuntimeCheckpointStore {
   /** 本进程清单中的 session id（诊断/测试断言面）。 */
   hasSession(sessionId: string): boolean {
     return this.entries.has(sessionId)
+  }
+
+  /** 最后成功写盘时刻（epoch ms）；null = 本进程从未成功写过（诊断导出面，RT-4#6）。 */
+  getLastSuccessfulWriteAt(): number | null {
+    return this.lastSuccessfulWriteAt
+  }
+
+  /**
+   * checkpoint 陈旧标志（诊断导出面，RT-4#6）：自上次成功写盘后发生过写入失败 = 磁盘
+   * 快照落后内存真相（主文件停在上版）。下次成功写盘清除。消费方（诊断导出 / 排查）
+   * 据此区分「checkpoint 新鲜」与「checkpoint 停更」。
+   */
+  isCheckpointStale(): boolean {
+    return this.checkpointStale
   }
 
   /**
@@ -311,9 +354,12 @@ export class RuntimeCheckpointStore {
   /**
    * 原子写主文件：tmp + rename（完整性降级的另一半——消费方永远读不到半截 JSON）。
    *
-   * 失败 best-effort：清掉 tmp 残留 + 记一次主日志 warn（唯一的错误出口，不抛）。
+   * 失败 best-effort：清掉 tmp 残留 + 限流上报（RT-4#6），不抛。
+   * 返回 bool（RT-4#6）：true = 成功落盘（更新 lastSuccessfulWriteAt、清 checkpointStale）；
+   * false = 失败（置 checkpointStale，主文件保持上一版）。全部写入挂点（upsert/remove/
+   * refresh）在本模块内部消费该结果维护诊断面，调用方无需感知。
    */
-  private write(): void {
+  private write(): boolean {
     let json: string
     try {
       json = JSON.stringify({
@@ -323,7 +369,7 @@ export class RuntimeCheckpointStore {
       } satisfies RuntimeCheckpointFile)
     } catch (e: unknown) {
       this.reportWriteFailure(`serialize failed: ${e instanceof Error ? e.message : String(e)}`)
-      return
+      return false
     }
     const tmpPath = `${this.checkpointPath}.tmp`
     try {
@@ -339,7 +385,14 @@ export class RuntimeCheckpointStore {
         // no-op
       }
       this.reportWriteFailure(`write failed: ${(e as NodeJS.ErrnoException).code ?? e}`)
+      return false
     }
+    // 成功写盘：刷新最后成功时刻、清陈旧标志、复位连续失败计数与台账事件轮次
+    this.lastSuccessfulWriteAt = this.now()
+    this.checkpointStale = false
+    this.writeFailureCount = 0
+    this.writeFailureLedgered = false
+    return true
   }
 
   /** 失败现场裁剪：保留最近 N 份（按文件名 ts 排序，新覆盖最旧）。 */
@@ -376,11 +429,37 @@ export class RuntimeCheckpointStore {
     })
   }
 
-  /** 写失败上报一次（best-effort 旁路设施；失败风暴不刷主日志）。 */
+  /**
+   * 写失败限流上报（code-harden RT-4#6，替代「进程内 once、此后零日志」）：
+   * - 首次失败立即 warn（保留 once 上报的首次即报语义——契约 5 风暴防护）；
+   * - 此后每 5min 至多一条 warn，携带连续失败次数与最后成功写时刻（stale 可归因）；
+   * - 连续失败达阈值落一条 crash 台账事件（reason=checkpoint-write-failed，每轮连续
+   *   失败期只一条）——warn 在滚动日志里会被轮转，台账是持久结构化证据。
+   * 成功写盘复位全部计数与标志（见 write()）。
+   */
   private reportWriteFailure(message: string): void {
-    if (this.writeFailureReported) return
-    this.writeFailureReported = true
-    logger.warn(`[runtime-checkpoint] ${message} (${this.checkpointPath})`)
+    this.writeFailureCount += 1
+    this.checkpointStale = true
+    const now = this.now()
+    const warnDue = this.lastWriteFailureWarnAt === null
+      || now - this.lastWriteFailureWarnAt >= WRITE_FAILURE_WARN_INTERVAL_MS
+    if (warnDue) {
+      this.lastWriteFailureWarnAt = now
+      const lastSuccess = this.lastSuccessfulWriteAt === null
+        ? 'never'
+        : new Date(this.lastSuccessfulWriteAt).toISOString()
+      logger.warn(`[runtime-checkpoint] checkpoint write failed (consecutive=${this.writeFailureCount}, lastSuccessfulWriteAt=${lastSuccess}, mainFileKeptAtPreviousVersion=true): ${message} (${this.checkpointPath})`)
+    }
+    if (this.writeFailureCount >= WRITE_FAILURE_LEDGER_THRESHOLD && !this.writeFailureLedgered) {
+      this.writeFailureLedgered = true
+      this.journal.append({
+        layer: 'runtime',
+        event: 'crash',
+        reason: 'checkpoint-write-failed',
+        detailDigest: `consecutive=${this.writeFailureCount}: ${message}`.slice(0, CRASH_DIGEST_MAX_CHARS),
+        detailPath: this.checkpointPath,
+      })
+    }
   }
 }
 

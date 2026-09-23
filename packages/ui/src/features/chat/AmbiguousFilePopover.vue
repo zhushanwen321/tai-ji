@@ -8,7 +8,7 @@
     - window capture 键盘导航（↑↓⏎ Esc）：与 CommandPopover 同模式，不依赖焦点位置
     - file 两行渲染（basename 主行 + 父目录暗行）：天然适合歧义区分（同名文件靠路径区分）
 
-    数据源：candidates 由调用方从 fileSearchStore 按 basename 反查传入（FileNode[]）。
+    数据源：candidates 由调用方从文件候选（useFileSearch.load 拉取的 FileNode[]）按 basename 反查传入。
     选中后 emit('select', path) → 调用方走 selectFile(path) + drawer.open('detail') + 关浮层。
   -->
   <Popover v-model:open="controlledOpen">
@@ -55,7 +55,7 @@
 /**
  * 歧义文件选择浮层。
  *
- * 触发：markdown 裸 basename（如 design.md）点击时，若 fileSearchStore 反查到多个匹配，
+ * 触发：markdown 裸 basename（如 design.md）点击时，若文件候选按 basename 反查到多个匹配，
  * 同包 MarkdownRenderer.vue 的路径点击分支（onClick ③）设 ambiguousState → 渲染本组件。
  *
  * 交互：↑↓ 切换高亮、⏎/Tab 选中、Esc 关闭（window capture 键盘导航，与 CommandPopover 同模式）。
@@ -77,7 +77,7 @@ const props = defineProps<{
   open: boolean
   /** 歧义 basename（标题展示用） */
   basename: string
-  /** 候选文件列表（按 basename 反查 fileSearchStore 的结果） */
+  /** 候选文件列表（按 basename 反查文件候选的结果） */
   candidates: FileNode[]
   /** 锚点 DOM 元素（点击的 <a>，PopoverAnchor reference 模式，不要求在 slot 内） */
   anchorEl?: HTMLElement | null

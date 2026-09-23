@@ -1,6 +1,5 @@
 /**
- * 模型档位记忆存储 —— 「provider/modelId → 最后使用的 UI 档位」偏好表
- * （设计文档 docs/design/model-thinking-level-memory.md §3.4）。
+ * 模型档位记忆存储 —— 「provider/modelId → 最后使用的 UI 档位」偏好表。
  *
  * 本模块只提供存储原语：模块级 reactive Map 内存表 + 惰性异步预载 + KV 写穿；
  * 「仅已建态记录」等写入门禁是下游（model-thinking 记录点 onThinkingSelect）的职责。

@@ -1,5 +1,5 @@
 /**
- * background 任务核心数据模型（设计文档 docs/design/base-tool-enhance.md §3.5）。
+ * background 任务核心数据模型。
  *
  * 两层存储分工：
  *  - 单例任务表（task-store.ts，模块级 Map）= 运行时权威；条目唯一来源 = 本进程

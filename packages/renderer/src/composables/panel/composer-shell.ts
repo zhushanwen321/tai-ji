@@ -65,6 +65,7 @@ import { useHandoffActions } from '@/composables/features/fork-handoff/useHandof
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
+import { useComposerShortcutActions } from './composer-shortcut-actions'
 import { useForkModeChannel } from './useForkModeChannel'
 import { useHandoffModeChannel } from './useHandoffModeChannel'
 import { handleImagePaste } from './useImageAttachment'
@@ -109,6 +110,12 @@ export interface ShellInputInstance {
   saveSelection: () => void
   restoreSelection: () => void
   moveCaretVertical: (dir: 'up' | 'down') => 'moved' | 'at-edge'
+  /**
+   * contenteditable 输入根元素读取口（command-popover-keyboard activeElement 门识别源）。
+   * 可选成员 = 运行时可能缺失（版本错配/简化实现），缺失时消费方 fail-closed false——
+   * 禁止回退实例 $el（W1 F-1：dev 构建保留模板注释 → $el 为注释节点，门恒 false）。
+   */
+  getInputElement?: () => HTMLElement | null
 }
 
 /** useComposerShell 入参：Composer.vue 组件局部状态（ref/Map 真源留在壳层） */
@@ -129,6 +136,8 @@ export interface ComposerShellParams {
   drafts: DraftStore
   /** session 是否活跃（流式/派发）—— canSend/visual 守卫 */
   isActive: ComputedRef<boolean>
+  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表守卫——浮层 open 时动作表跳过） */
+  cmdOpen: Readonly<Ref<boolean>>
 }
 
 /**
@@ -169,14 +178,14 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
  * @returns core 模块组装结果 + 派生状态（Composer.vue 解构消费）
  */
 export function useComposerShell(params: ComposerShellParams) {
-  const { sessionIdRef, variantRef, inputRef, composerBoxRef, draft, isSending, drafts, isActive } = params
+  const { sessionIdRef, variantRef, inputRef, composerBoxRef, draft, isSending, drafts, isActive, cmdOpen } = params
   const { t } = useI18n()
   const chatStore = useChatStore()
   const sessionStore = useSessionStore()
   const presetStore = usePresetStore()
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
-  const { error: toastError } = useToast()
+  const { info: toastInfo, error: toastError } = useToast()
   const { send, steer, followUp, abort, compact, sendBash } = useChat()
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
@@ -402,7 +411,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const stagingBoxClass = computed(() => staging.activeStaging.value?.visual.boxClass.value ?? '')
   const stagingPlaceholder = computed(() => staging.activeStaging.value?.visual.placeholder.value ?? null)
   /** composer-box class 三级链：staging > bash（accent 边 + ring）> 流式 steer 呼吸 > has-input 微环；发送中叠半透明。
-   *  分支 token 同口径（v6-master-spec §6.1 + v6-spec-base.css：has-input = 2px surface-hover/40 微环，不改 border；
+   *  分支 token 同口径（has-input = 2px surface-hover/40 微环，不改 border；
    *  rgba(255,255,255,0.04) 硬编码已废弃） */
   const boxClass = computed<Array<string | false>>(() => [
     stagingBoxClass.value
@@ -479,6 +488,31 @@ export function useComposerShell(params: ComposerShellParams) {
     })
   }
 
+  // ── Composer 命令动作表（composer-pi-shortcuts U1③组装；分发链「动作表」分支消费）──
+  // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
+  // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
+  // 重排的显示序，即模型循环序）。models?. 同款防御：测试 mock 的 settingsStore 可能缺字段。
+  const enabledModels = computed(() => (settingsStore.models?.value ?? []).filter((m) => m.enabled !== false))
+  /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
+  const isStaging = computed(() => staging.activeStaging.value !== null)
+  const shortcutActions = useComposerShortcutActions({
+    cmdOpen,
+    sessionId: sessionIdRef,
+    isStaging,
+    currentModelId,
+    currentThinkingLevel,
+    currentSupportedLevels,
+    enabledModels,
+    onModelSelect,
+    onThinkingSelect,
+    getMessages: (sid: string) => chatStore.getMessages(sid),
+    // toast 窄接口适配（U3）：入参 i18n key，此处完成翻译——翻译时刻 = 触发时刻
+    toast: {
+      info: (key: string) => toastInfo(t(key)),
+      error: (key: string) => toastError(t(key)),
+    },
+  })
+
   return {
     // model-thinking
     currentModelId,
@@ -522,6 +556,8 @@ export function useComposerShell(params: ComposerShellParams) {
     onSend,
     // [u3c] 队列条目撤销回草稿（useQueueRows 的行撤销 handler 注入本回调）
     restoreToDraft,
+    // composer 命令动作表（composer-pi-shortcuts：分发链「动作表」分支消费）
+    shortcutActions,
     // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）。
     // [u3c/D1] sendRoute 保留为**发送位 UI 预测**（不再是投递决策——决策权在内核），
     // Alt+⏎ 的 followUp 保留语义按它分流（composer-keydown）。

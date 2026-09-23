@@ -80,13 +80,19 @@ export function useComposerSubmit(deps: ComposerSubmitDeps) {
   /** 追加 steer：活跃态有输入时 ⏎ 触发。segments 先快照（clearInput 会清空 DOM）。
    *  [D2] 不经 submit 的 sender 包装消费：steer 内部 catch 不抛（toast + return false）后，
    *  submit 的 catch → restoreInput → rethrow 对 steer 成为 dead path——分支内直接消费
-   *  boolean，失败 restoreSegments 恢复完整草稿（text + chips，与 routeSteer 同款）。 */
+   *  boolean，失败 restoreSegments 恢复完整草稿（text + chips，与 routeSteer 同款）。
+   *  [form-hang-fix v3 防御性对齐] 现状死代码（composer-keydown 退役，Enter 统一走
+   *  onSend→routeSteer），改造仅为契约一致性：快照空短路同 routeSteer 范式（hasInput
+   *  已由入口守卫保证 true，快照空即失联格），防未来复活时带回丢失面。 */
   async function onSteer(): Promise<void> {
     if (!deps.hasInput.value || !deps.isActive.value) return
     // clearInput 会清空 DOM，必须在清空前提取 segments，否则丢段（同 onSend 快照范式）
     const segments = deps.inputRef.value?.getSegments() ?? []
     const text = deps.draft.value
     if (!text.trim()) return
+    // [form-hang-fix v3 失联格短路]（与 routeSteer 同范式）：不 clearInput 不调
+    // steer，输入原地保留。
+    if (segments.length === 0) return
     deps.clearInput()
     if (!(await deps.steer(deps.sessionIdRef.value!, segments))) {
       deps.restoreSegments(segments)

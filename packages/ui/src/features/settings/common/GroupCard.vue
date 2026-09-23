@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * GroupCard —— v6 §5.8 设置分组卡片。
+ * GroupCard —— 设置分组卡片。
  *
- * 范式（v6-master-spec §5.8）：
+ * 范式：
  * - bg-card + 圆角 var(--radius-card)，去 border（靠 surface 浮起分层，不叠 border）
  * - header 浮起分层：bg-surface-2 + 顶部 1px 极淡高光（rgba 0.04）
  * - header 左侧 title / actions slot；右侧 actions slot + 可选折叠按钮

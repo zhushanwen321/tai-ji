@@ -204,14 +204,39 @@ export class SessionManagerHandler {
   private async handleCreate(parentSessionId: string, params: SessionManagerCreateParams): Promise<SessionManagerCreateResult> {
     const { cwd, label, prompt } = params
 
+    // 0. project 归属继承（u8，设计文档 D8）：子会话随父会话归入同一 project。
+    // 侧栏命名 project 视图按 projectId 过滤，不继承会让派发出的子会话在用户当前
+    // 视图里直接消失。父会话此刻必然活跃（发起方 = 路由上下文，内存态可得；
+    // getSummary 已透传 projectId）。归属决策不交给 LLM：不新增工具参数，
+    // 服务端单侧推导（params.projectId 即使被携带也不读取）。
+    //
+    // E6（设计文档 §7.5）日志分级（dev→fix r1）：两种「projectId 不可得」成因不同，
+    // 噪声级别也不同——父 summary 真读不到才是异常（warn，含问题语气）；
+    // summary 在但 projectId 为空 = 「父项目本就是默认项目」的正常降级（debug，
+    // 仅陈述 fallback 事实）。两者都属正常降级路径：不 throw、不阻断创建
+    //（恢复路径：侧栏右键「归入项目」）。
+    const parentSummary = this.opts.sessionService.getSummary(parentSessionId)
+    const parentProjectId = parentSummary?.projectId
+    if (!parentSummary) {
+      console.warn(
+        `[session-manager] parent session ${parentSessionId} summary unavailable; child session falls back to default project`,
+      )
+    } else if (!parentProjectId) {
+      console.debug(
+        `[session-manager] parent session ${parentSessionId} has no projectId; child session falls back to default project`,
+      )
+    }
+
     // 1. SessionService.create —— spawnSource/parentAgentSessionId 服务端注入：
     // 父 session 由路由上下文（interpreter sessionId）决定，不信任 extension 请求参数（防伪造父 id）
     // A'（2026-08-24）：persistLabel=true —— agent 传 label 时是显式命名（语义性），
     // 持久化且防 auto-rename 覆盖；未传 label 则 no-op（见 session-lifecycle persistExplicitLabel）
+    // projectId：undefined 时空值守卫（persistCreateSidecars）跳过 sidecar 落盘 = 落默认项目。
     const session = await this.opts.sessionService.create(cwd, label, {
       spawnSource: 'agent',
       parentAgentSessionId: parentSessionId,
       persistLabel: true,
+      projectId: parentProjectId,
     })
 
     // 2. broadcastSessionList（先于 sendMessage，opts 注入回调）

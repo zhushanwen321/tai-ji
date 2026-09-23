@@ -4,8 +4,7 @@
  * 把插件发起的 UI 弹窗请求（confirm / select / input）串行派发给前端，在前端响应、
  * 到期取消通知（cancelRequest）或防泄漏兜底到期后收尾。
  *
- * 行为契约（timeout-plugin-service D2：语义计时权威在 Worker 侧 ui-api，本层退为
- * 防泄漏兜底——见 docs/design/timeout-plugin-service-granularity.md §6.2）：
+ * 行为契约（语义计时权威在 Worker 侧 ui-api，本层退为防泄漏兜底）：
  * - 同时只允许一个弹窗活跃（activeUiRequest），后续请求进 uiRequestQueue 排队。
  * - 语义超时由 Worker 侧 ui-api 计（opts.timeout 或默认 30min，全程含排队）；本层
  *   不再做语义裁决、不再替答（旧 60s resolve defaultResult 已删——替答会把「没回答」

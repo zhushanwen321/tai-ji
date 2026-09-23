@@ -64,7 +64,7 @@ vi.mock('virtua/vue', async () => {
       props: {
         data: { type: Array, default: () => [] },
         keepMounted: { type: Array, default: () => [] },
-        // [U3 适配] MessageStream U2 起传 :scroll-ref（chat-pin-bottom-fix D3 / P-wrap 门）。
+        // [U3 适配] MessageStream U2 起传 :scroll-ref（D3 / P-wrap 门）。
         // 必须声明为 prop 吸收：不声明则落 reactive attrs，dev 下 mock render 经 dev proxy
         // 读 attrs 会跟踪它触发额外交互。注意：声明后挂载期仍有一次父驱动二次渲染
         // （:scroll-ref 绑定 undefined→el 解析 → MessageStream 重渲染 → 本 mock props 变更

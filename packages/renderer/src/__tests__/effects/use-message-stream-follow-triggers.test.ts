@@ -1,8 +1,8 @@
 /**
- * useMessageStreamFollowTriggers 单测（chat-pin-bottom-fix U5→V6 修复：RO 回调双 rAF）。
+ * useMessageStreamFollowTriggers 单测（U5→V6 修复：RO 回调双 rAF）。
  *
- * 覆盖（对照 docs/design/chat-pin-bottom-fix.md §4.5 P-timing 降级预案「RO 回调内改为双 rAF
- * （再让一帧）」+ acceptance.md V6 shrink 方向间歇 113px 残留）：
+ * 覆盖（P-timing 降级预案「RO 回调内改为双 rAF
+ * （再让一帧）」+ V6 shrink 方向间歇 113px 残留）：
  * - 双 rAF 核心行为：scrollEl RO 触发后 follow 不立即执行（外层 rAF pending），flush 一帧后才调
  *   followIfStuck——scrollToIndex 落在 virtua 内部 RO 更新测量缓存之后（V6 残留根修验收面）
  * - 连续触发 cancel 合并：同帧两次 RO 触发只产生一次 followIfStuck（外层句柄 cancel-reschedule，
@@ -28,8 +28,8 @@ import type { Message } from '@taiji/shared'
 import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageStreamFollowTriggers'
 import { ManualResizeObserverStub } from './_virtua-mock-helper'
 
-function msg(id: string, content: string): Message {
-  return { id, role: 'user', content, status: 'complete' }
+function msg(id: string, content: string, role: Message['role'] = 'user'): Message {
+  return { id, role, content, status: 'complete' }
 }
 
 describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预案）', () => {
@@ -50,6 +50,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     const isPrepend = ref(false)
     const scrollEl = ref<HTMLElement | null>(document.createElement('div'))
     const followIfStuck = vi.fn()
+    const followToBottomForce = vi.fn()
     const notifyRoActivity = vi.fn()
 
     let api!: ReturnType<typeof useMessageStreamFollowTriggers>
@@ -61,6 +62,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
           isPrepend,
           scrollEl,
           followIfStuck,
+          followToBottomForce,
           notifyRoActivity,
         })
         return () => h('div', { ref: api.contentWrapEl }, [h('div', { ref: api.tailEl })])
@@ -71,7 +73,18 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     // onMounted 创建顺序：wrap RO 先、scroll RO 后
     const [wrapRo, scrollRo] = ManualResizeObserverStub.created()
     if (!wrapRo || !scrollRo) throw new Error('RO stub 未按预期创建（wrap 先、scroll 后）')
-    return { wrapper, api, messages, lastRenderTurn, isPrepend, followIfStuck, notifyRoActivity, wrapRo, scrollRo }
+    return {
+      wrapper,
+      api,
+      messages,
+      lastRenderTurn,
+      isPrepend,
+      followIfStuck,
+      followToBottomForce,
+      notifyRoActivity,
+      wrapRo,
+      scrollRo,
+    }
   }
 
   /** 覆盖 tailEl 实例 offsetHeight getter（happy-dom 恒 0，无法表达真实增高） */
@@ -163,5 +176,58 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     wrapper.unmount()
     await vi.advanceTimersByTimeAsync(32)
     expect(followIfStuck).not.toHaveBeenCalled()
+  })
+
+  // ── 用户主动发送 → 强制回底重锚定（feat-new-message-to-bottom，触发矩阵末行）──
+  // 语义分层：本文件只验「触发判定」（尾部新增 user 消息 → followToBottomForce）；
+  // force 原语本身的完整重置面（无视 stickToBottom / NaN 快照 / 开收敛抑制窗）已在
+  // use-virtua-follow.test.ts W1TC8 覆盖。
+  it('尾部追加 user 消息（直发/steer·followUp 投递共同形态）→ followToBottomForce', async () => {
+    const { messages, followToBottomForce } = mountTriggers()
+
+    // 基线：对话进行中（assistant 尾，模拟流式中用户上滑阅读后发送）
+    messages.value = [msg('u1', '第一问'), msg('a1', '回答中', 'assistant')]
+    await nextTick()
+    expect(followToBottomForce).not.toHaveBeenCalled() // assistant 尾不触发
+
+    // 尾部追加 user 消息 = appendUser 唯一共同落点（composer 直发 / drainN 投递同形态）
+    messages.value = [...messages.value, msg('u2', '补充一句')]
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+  })
+
+  it('尾部追加 assistant / system 消息 → 不 force（仍走 followIfStuck 矩阵）', async () => {
+    const { messages, followToBottomForce } = mountTriggers()
+
+    messages.value = [msg('u1', '第一问'), msg('s1', '系统提示', 'system'), msg('a1', '回答', 'assistant')]
+    await nextTick()
+
+    expect(followToBottomForce).not.toHaveBeenCalled()
+  })
+
+  it('load-more 前插（尾部身份不变）→ 不 force', async () => {
+    const { messages, followToBottomForce } = mountTriggers()
+
+    messages.value = [msg('u1', '最近一问')]
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1) // 初始尾 user 建快照即触发（等同向会话打开强滚）
+
+    // 前插更早历史：尾部仍是 u1（role:id 快照不变）→ 不触发
+    messages.value = [msg('u0', '更早一问'), ...messages.value]
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+  })
+
+  it('末条 user 消息同 id 对象替换（segments 回填）→ 不 force', async () => {
+    const { messages, followToBottomForce } = mountTriggers()
+
+    messages.value = [msg('u1', '第一问')]
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+
+    // 同 id 换新对象（回填 badge segments 等场景）→ 快照不变 → 不触发
+    messages.value = [{ ...msg('u1', '第一问'), content: [{ type: 'text', text: '第一问' }] }]
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1)
   })
 })

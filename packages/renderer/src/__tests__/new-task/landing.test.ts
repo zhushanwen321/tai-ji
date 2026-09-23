@@ -13,11 +13,14 @@
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/landing.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import Landing from '@/components/new-task/Landing.vue'
 import Panel from '@/components/panel/Panel.vue'
 import { useChatStore } from '@/stores/chat'
+import { walkFiles } from '../helpers/walk-files'
 import type { DerivedStatus } from '@/types'
 
 // Landing 绑定 useNewTaskFlow（chip→popover 渲染绑定 #5/#6）。mock 捕获方法调用
@@ -350,5 +353,25 @@ describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）'
     // 正常首发（completed）与切换（cancelled）路径下卸载不触发 cancelFlow——
     // 对已完成流程的二次 cancel 会是非法状态转换
     expect(flowMock.cancelFlow).not.toHaveBeenCalled()
+  })
+})
+
+// ── [不变式] Landing 全仓唯一挂载点 ─────────────────────────────────────
+// D4 卸载守卫（卸载即 cancelFlow）的正确性前提：Landing 只有一个挂载点。
+// 多面板（split）拓扑已删除（2026-07-24），唯一挂载点 = Panel.vue landing 分支。
+// 静态源码断言（同 sidebar-layout.test.ts 滚动修复先例）：扫描 src 下非测试源文件中
+// `<Landing` 模板标签，仅允许出现在 Panel.vue。此断言红 = 正在引入第二个挂载点，
+// 必须先重新设计 Landing.vue 的卸载语义（见其 [不变式] 注释——跨实例协调不能靠
+// 组件实例变量），不能直接改期望值放行。
+// 脆弱性边界（有意接受）：静态扫描看不到动态渲染形态（<component :is> / h(Landing)），
+// 它是廉价哨兵不是完备证明；`<Landing` 字面量出现在注释/字符串会误报，失败信息自解释。
+describe('[不变式] Landing 唯一挂载点', () => {
+  it('<Landing 模板标签仅出现在 Panel.vue（D4 卸载守卫的前提）', () => {
+    const srcRoot = resolve(__dirname, '../..')
+    const offenders = walkFiles(srcRoot, { extensions: ['.vue'], skipDirs: ['__tests__'] })
+      .filter((full) => !full.endsWith('.test.vue') && !full.endsWith('.spec.vue'))
+      .filter((full) => readFileSync(full, 'utf-8').includes('<Landing'))
+      .map((full) => relative(srcRoot, full))
+    expect(offenders).toEqual(['components/panel/Panel.vue'])
   })
 })

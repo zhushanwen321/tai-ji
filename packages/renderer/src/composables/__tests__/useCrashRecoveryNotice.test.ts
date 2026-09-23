@@ -1,5 +1,5 @@
 /**
- * useCrashRecoveryNotice 单元测试（crash-resilience §3.1 T2 / §4 A3）。
+ * useCrashRecoveryNotice 单元测试（T2 / §4 A3）。
  *
  * 覆盖一次性语义三要素：
  * - query 带 recoveredFrom=crash → visible=true + reason 透传 + query 被剥离

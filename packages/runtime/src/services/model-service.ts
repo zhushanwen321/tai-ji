@@ -32,7 +32,7 @@ import { toErrorMessage } from '../utils/errors.js'
 import { toModelInfo } from './model-mapper.js'
 import { isCatalogProvider } from './provider-catalog.js'
 import {
-  ModelCapabilityRegistry,
+  attachSupportedLevels,
   runCapabilityReconcile,
   type CapabilityDrift,
 } from './model-capability.js'
@@ -41,6 +41,8 @@ import {
 export type ModelDiscoveryErrorCode =
   | 'INVALID_AUTH_CHARS' // ByteString：Base URL / API Key 含 HTTP 不支持的字符
   | 'UNREACHABLE'        // fetch failed：无法访问目标 /v1/models
+  | 'TIMEOUT'            // RT-7#9：AbortSignal.timeout 超时（原落 UNKNOWN 英文串直传 UI）
+  | 'RATE_LIMITED'       // RT-7#9：上游 429（原落 UNKNOWN）
   | 'UNKNOWN'
 
 /**
@@ -301,16 +303,30 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
     }
   }
 
-  /** 把 infra 抛出的原始错误分类成 ModelDiscoveryError（domain→文案）。 */
+  /**
+   * 把 infra 抛出的原始错误分类成 ModelDiscoveryError（domain→文案）。
+   * RT-7#9：超时 / 429 单列 code（原落 UNKNOWN，英文技术串直传 UI）；UNKNOWN 分支
+   * 加中文前缀（如 JSON 解析失败的 "Unexpected token"——保留原始串供诊断，但不裸传）。
+   */
   private classifyDiscoveryError(e: unknown, baseUrl: string): ModelDiscoveryError {
     const raw = toErrorMessage(e)
     if (raw.includes('ByteString')) {
       return new ModelDiscoveryError('INVALID_AUTH_CHARS', '请求失败：Base URL 或 API Key 包含 HTTP 不支持的字符')
     }
+    // 超时：AbortSignal.timeout 抛 DOMException（name='TimeoutError'，message 因运行时而异，
+    // name + message 双锚防漏）
+    const errName = e instanceof Error ? e.name : ''
+    if (errName === 'TimeoutError' || raw.includes('aborted due to timeout')) {
+      return new ModelDiscoveryError('TIMEOUT', `请求超时：无法在时限内完成对 ${baseUrl} 的模型发现，请稍后重试`)
+    }
+    // 429：锚定 discoverer 的 message 前缀格式（`API 返回 <status>: ...`，同仓契约）
+    if (raw.startsWith('API 返回 429')) {
+      return new ModelDiscoveryError('RATE_LIMITED', '请求过于频繁（429）：上游限流，请稍后重试')
+    }
     if (raw.includes('fetch failed')) {
       return new ModelDiscoveryError('UNREACHABLE', `连接失败：无法访问 ${baseUrl}/v1/models`)
     }
-    return new ModelDiscoveryError('UNKNOWN', raw)
+    return new ModelDiscoveryError('UNKNOWN', `发现失败：${raw}`)
   }
 
   /**
@@ -350,9 +366,6 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   }
 
   // ── 能力注册表服务面（U5，pi-boundary-reliability design D2）──────────
-  /** 离线档位计算缓存（3 维缓存键：pi 版本 + models.json mtime + builtin-providers.json mtime）。 */
-  private readonly capabilityRegistry = new ModelCapabilityRegistry()
-
   /** drift 事件上报出口（WS 协议消息类型属后续单元，宿主经 setCapabilityDriftSink 订阅）。 */
   private capabilityDriftSink: ((drifts: CapabilityDrift[]) => void) | undefined
 
@@ -363,11 +376,11 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
 
   /**
    * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
-   * piVersion 建议传消息层 appInfo.piVersion（与 app.info 同源）；缺省 'unknown'——
-   * 缓存正确性不依赖该组分（逐模型签名兜底，见 model-capability.ts 缓存键说明）。
+   * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
+   * interfaces.ts 钉死），直调形态下不消费。
    */
-  attachSupportedLevels(providers: ProviderInfo[], piVersion?: string): ProviderInfo[] {
-    return this.capabilityRegistry.attachSupportedLevels(providers, piVersion)
+  attachSupportedLevels(providers: ProviderInfo[], _piVersion?: string): ProviderInfo[] {
+    return attachSupportedLevels(providers)
   }
 
   /**

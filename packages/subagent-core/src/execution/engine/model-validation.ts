@@ -1,8 +1,8 @@
 // src/execution/engine/model-validation.ts
 //
-// [u-h2] 引擎感知的派发期 model 校验入口 + 错误文案构造。设计权威源：
-// docs/design/timeout-audit-hygiene-batch.md §3.2（D2-1 路由先行 / D2-2 validateModel
-// 可选面 / D2-3「引擎与模型不配套」文案 / D2-4 pi 未命中跨引擎候选）。
+// [u-h2] 引擎感知的派发期 model 校验入口 + 错误文案构造。设计定案（D2 族）：
+// D2-1 路由先行 / D2-2 validateModel
+// 可选面 / D2-3「引擎与模型不配套」文案 / D2-4 pi 未命中跨引擎候选。
 //
 // 背景（§2.2 双重错配）：model 校验曾固定用 pi registry 且时机在引擎路由之前——
 // zcode 合法模型被误导性拒绝（F2-A）、pi 模型过校验后到 zcode 执行期才炸（F2-B）。

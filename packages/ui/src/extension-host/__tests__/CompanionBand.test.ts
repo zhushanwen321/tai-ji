@@ -5,12 +5,15 @@
  *  - TC-1 confirm 渲染 + 确认/取消回传（AC3）
  *  - TC-2 select 渲染选项 + 选中回传；未选确认禁用（AC3）
  *  - TC-3 input 渲染 + 文本回传（prefill 预填）；editor 变体（Textarea）
- *  - TC-4 askUser 渲染（AskUserForm）+ 单选提交回传（AC3）
  *  - TC-5 无请求自隐藏（根元素 v-if 隐藏）
  *  - TC-5b expired 撤窗（plugin:uiRequestExpired → 出队 → band 自隐藏，D2）
  *  - TC-6 未知 method 只读降级（ERR3，无按钮 + console.warn)
  *
- * Mock 策略：MockDialogRequestSource（onUiRequest/onUiTimeout/onUiRequestExpired vi.fn
+ * [ui-presentation-protocol §3.4-1] 原 TC-4/TC-4b askUser 富交互分支用例已随死分支
+ * 退役删除——表单类请求由 useExtensionUI 消费（FormOverlay 独占），CompanionBand
+ * 不再有 'askUser' method 路由。
+ *
+ * Mock 策略：MockDialogRequestSource（onUiRequest/onUiRequestExpired vi.fn
  * 存 handler 供触发，同 W1 测试模式）+ MockTransport（sendPiResponse/sendPluginResponse vi.fn），
  * global.provide 注入 DIALOG_REQUEST_SOURCE_KEY / UI_RESPONSE_TRANSPORT_KEY。
  * 不 mock useSessionScopedState（Map 分区是 W1 已验对象，组件测试透传验证集成）。
@@ -40,12 +43,6 @@ class MockDialogRequestSource implements DialogRequestSource {
     this.unsubs.push(unsub)
     return unsub as unknown as () => void
   })
-  onUiTimeout = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
-    this.timeoutHandler = handler
-    const unsub = vi.fn()
-    this.unsubs.push(unsub)
-    return unsub as unknown as () => void
-  })
   onUiRequestExpired = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
     this.expiredHandler = handler
     const unsub = vi.fn()
@@ -54,7 +51,6 @@ class MockDialogRequestSource implements DialogRequestSource {
   })
 
   requestHandler: ((req: DialogRequest) => void) | null = null
-  timeoutHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
   expiredHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
 
   triggerUiRequest(req: Partial<DialogRequest> & { requestId: string; sessionId: string }): void {
@@ -77,8 +73,9 @@ function makeRequest(overrides: Partial<DialogRequest> & { requestId: string; se
 
 function makeTransport(): UiResponseTransport {
   return {
-    sendPiResponse: vi.fn(),
-    sendPluginResponse: vi.fn(),
+    // 返 true = 送达（M1 环 3 后 DialogRequestQueue.respond 消费 boolean）
+    sendPiResponse: vi.fn((): boolean => true),
+    sendPluginResponse: vi.fn((): boolean => true),
   }
 }
 
@@ -192,59 +189,6 @@ describe('CompanionBand', () => {
     expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r3e', 'editor', 'multi\nline')
   })
 
-  it('TC-4 askUser 渲染（AskUserForm）+ 单选提交回传（AC3）', async () => {
-    const { wrapper, source, transport } = mountBand()
-    source.triggerUiRequest({
-      sessionId: 'A',
-      requestId: 'r4',
-      method: 'askUser',
-      askUserQuestions: [{ header: 'db', question: '选库?', options: [{ label: 'PG' }] }],
-    })
-    await nextTick()
-
-    // AskUserForm DOM
-    expect(wrapper.find('[data-testid="ask-user-form"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ask-user-option-PG"]').exists()).toBe(true)
-
-    // 单选 → 提交 → respond(answersJson)
-    await wrapper.find('[data-testid="ask-user-option-PG"]').trigger('click')
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-    expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r4', 'askUser', '{"db":"PG"}')
-  })
-
-  it('TC-4b askUser Other 编码：主 key 过滤 OTHER_VALUE + 独立 __other key（对齐 answer-codec）', async () => {
-    const { wrapper, source, transport } = mountBand()
-    source.triggerUiRequest({
-      sessionId: 'A',
-      requestId: 'r4b',
-      method: 'askUser',
-      askUserQuestions: [
-        {
-          header: 'db',
-          question: '选库?',
-          multiSelect: true,
-          allowOther: true,
-          options: [{ label: 'PG' }, { label: 'MySQL' }],
-        },
-      ],
-    })
-    await nextTick()
-
-    // 选中 PG + Other → Other 输入框展开
-    await wrapper.find('[data-testid="ask-user-option-PG"]').trigger('click')
-    await wrapper.find('[data-testid="ask-user-option-__other__"]').trigger('click')
-    await nextTick()
-    const otherInput = wrapper.find('[data-testid="ask-user-other-db"]')
-    expect(otherInput.exists()).toBe(true)
-
-    // 输入 Other 文本 → 提交
-    await otherInput.setValue('自研库')
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-
-    // 主 key = JSON.stringify(['PG'])（不含 OTHER_VALUE 占位符）；Other 文本进独立 `db__other` key
-    expect(transport.sendPiResponse).toHaveBeenCalledWith('A', 'r4b', 'askUser', '{"db":"[\\"PG\\"]","db__other":"自研库"}')
-  })
-
   it('TC-5 无请求自隐藏（根元素 v-if 隐藏，不占位）（IF3）', async () => {
     const { wrapper } = mountBand()
     await nextTick()
@@ -268,8 +212,8 @@ describe('CompanionBand', () => {
   it('MF-5: unmount 后订阅退订生效（queue 在 setup 顶层创建，onScopeDispose 正常注册）', async () => {
     const { wrapper, source } = mountBand()
     await nextTick()
-    // 队列创建时注册三个订阅（onUiRequest + onUiTimeout + onUiRequestExpired）
-    expect(source.unsubs).toHaveLength(3)
+    // 队列创建时注册两个订阅（onUiRequest + onUiRequestExpired）
+    expect(source.unsubs).toHaveLength(2)
 
     // 首次请求正常入队渲染
     source.triggerUiRequest({ sessionId: 'A', requestId: 'r1', method: 'confirm' })
@@ -277,11 +221,10 @@ describe('CompanionBand', () => {
     expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(true)
 
     wrapper.unmount()
-    // scope dispose → 三个订阅均退订。MF-5 修复前 queue 在 computed getter 内创建，
+    // scope dispose → 两个订阅均退订。MF-5 修复前 queue 在 computed getter 内创建，
     // onScopeDispose 注册静默失败（无 active effect scope），unmount 后 unsub 不会被调。
     expect(source.unsubs[0]).toHaveBeenCalledTimes(1)
     expect(source.unsubs[1]).toHaveBeenCalledTimes(1)
-    expect(source.unsubs[2]).toHaveBeenCalledTimes(1)
   })
 
   it('TC-6 未知 method 只读降级：title/message 展示 + 无按钮 + console.warn（ERR3）', async () => {

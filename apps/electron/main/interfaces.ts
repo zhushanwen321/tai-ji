@@ -69,6 +69,13 @@ export interface IRuntimeSupervisor {
    */
   readonly token: string | null
 
+  /**
+   * 最近一次启动失败原因（RD-3#2 启动失败真因可见性；成功启动后清除，null = 当前无已知失败）。
+   * renderer 经 get-runtime-start-error IPC 拉取——runtime-error 推送可能早于 renderer
+   * 订阅安装（boot 竞态），拉取半边保证启动真因（binary 缺失/端口占用等）不丢。
+   */
+  readonly startError: string | null
+
   /** 端口偏移量（dev 模式 +DEV_PORT_OFFSET） */
   readonly portOffset: number
 }
@@ -162,8 +169,7 @@ export interface WindowOptions {
  * - 1h 缓存命中时直接返回，不再次 fetch
  * - force=true 绕过缓存强制刷新
  * - sha256 优先 asset.digest，缺失时经 manifest.json lazy fallback 回填（仅目标 asset
- *   缺 sha256 时 fetch 一次；GitCode 源 sha256/size 唯一来源为 manifest，
- *   见 docs/design/update-multi-source.md §6.2）
+ *   缺 sha256 时 fetch 一次；GitCode 源 sha256/size 唯一来源为 manifest）
  */
 export interface IReleaseChecker {
   /**

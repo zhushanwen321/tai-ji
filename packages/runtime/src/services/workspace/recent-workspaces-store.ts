@@ -17,7 +17,7 @@ import { basename } from 'node:path'
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { RecentWorkspaceRecord } from '@taiji/shared'
-import { WriteBackCache } from '../../utils/json-store.js'
+import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEnoent } from '../../utils/errors.js'
 
@@ -40,6 +40,7 @@ export class RecentWorkspacesStore {
 
     this.cache = new WriteBackCache<typeof PARTITION_KEY, string, RecentWorkspaceRecord>(
       {
+        partitionPath: () => this.filePath,
         loadPartition: () => this.loadFromFile(),
         persistPartition: (_k, data) => this.persistToFile(data),
       },
@@ -113,10 +114,16 @@ export class RecentWorkspacesStore {
       return map
     } catch (e) {
       // INV-4：文件损坏 / ENOENT 返空（不抛）。ENOENT 是首启正常态静默；
-      // 其它错误（损坏/权限）记 warn 便于诊断，避免 fail-silent。
+      // 损坏必须隔离（对齐 JsonStore D1c 与 session-data-store/plugin-storage 同款）：
+      // 静默空 Map 时 loadRevision = 损坏文件指纹，下一次 flush 指纹比对判「未变」→
+      // 不触发冲突备份直接覆写，原始列表无痕丢失。quarantine 后 flush 走 ENOENT
+      // 放行重建，损坏数据保留 .corrupt-<ts> 副本供人工恢复。
       if (isEnoent(e)) return new Map()
-      console.warn('[recent-workspaces] load failed, starting fresh:',
-        e instanceof Error ? e.message : e)
+      quarantineCorruptFile(this.filePath, {
+        tag: 'recent-workspaces',
+        reason: 'store file corrupt/unreadable',
+        cause: e,
+      })
       return new Map()
     }
   }

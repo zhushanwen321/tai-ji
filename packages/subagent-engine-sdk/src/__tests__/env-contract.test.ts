@@ -195,4 +195,9 @@ describe("常量镜像自洽", () => {
   it("SHARED_POOL_KEY 值锚定 'shared'（存量 journal 落盘路径分段，L3 收编后改名不改值）", () => {
     expect(SHARED_POOL_KEY).toBe("shared");
   });
+
+  it("deny 清单含模式回落两键（SDK 镜像与 shared SSOT 逐项相等由 check_env_whitelist_sync.py 兜底；本断言防镜像内单侧漏项）", () => {
+    expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_FROM");
+    expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_TO");
+  });
 });

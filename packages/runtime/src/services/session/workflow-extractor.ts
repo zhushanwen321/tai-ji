@@ -24,10 +24,11 @@
  * - packages/subagent-core/src/orchestration/models/types.ts（RunStatus/DoneReason/AgentResult）
  */
 
-import { readFileSync, statSync } from 'node:fs'
-import { parseJsonl } from '../../utils/jsonl.js'
+import { readFileSync } from 'node:fs'
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { isEnoent } from '../../utils/errors.js'
-import { WORKFLOW_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { warnOnce } from '../../utils/warn-once.js'
 import type {
   WorkflowRunRecord,
   WorkflowAgentCall,
@@ -42,7 +43,7 @@ import type {
  * packages/subagent-core/src/orchestration/run-snapshot.ts 的 SNAPSHOT_VERSION
  * （export const，当前 'wf-run-v2'；extension 侧 jsonl-run-store.ts 留壳 import 消费）。
  * extension 升级格式时必须同步 bump 此处，否则版本守卫会把新快照全部判为不匹配跳过
- * （renderer WorkflowList 对新 run 显示为空）。
+ * （renderer 侧新 run 无 record，托盘 workflow 面板为空）。
  */
 const SNAPSHOT_VERSION = 'wf-run-v2'
 
@@ -196,64 +197,26 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   return snapshot as RunSnapshot
 }
 
-/** MB 换算常数（oversize 降级 warn 文案的体积展示，对齐 trace-sync BYTES_PER_MB） */
-// eslint-disable-next-line no-magic-numbers -- 1MB = 1024 * 1024 bytes
-const BYTES_PER_MB = 1024 * 1024
-
-/**
- * extract*FromSessionFile 的结果形状：records + oversize 正交降级标志（与
- * subagent-extractor 的 SubagentFileExtraction 同范式，正交字段先例 = HistoryFileReadResult
- * {messages, truncated} / traceEntries source:'oversize'）。oversize = 主 session JSONL 超
- * READ_PRECHECK_MAX_BYTES（32MB），已降级返回空列表（G3 峰值治理）。
- */
-export interface WorkflowFileExtraction {
-  /** 派生 workflow 列表；oversize 时恒空数组（不做尾读部分提取，设计裁决同 subagent 侧） */
-  records: WorkflowRunRecord[]
-  /** 主 session JSONL 超预检阈值的降级标记（true = 未读文件，records 为降级空列表） */
-  oversize: boolean
-}
-
 /**
  * 从主 session JSONL 文件提取 WorkflowRunRecord[]（冷启动 / getWorkflows RPC 路径）。
  *
- * 读取文件 → parseJsonl → scanWorkflowEntries（与实时增量拉取同一份派生代码）。
+ * 读取/预检/降级语义走 ./session-file-extraction.ts 共享骨架（与 subagent-extractor
+ * 同一实现）；本函数只注入日志标签、降级文案与 scanWorkflowEntries 扫描器。
  *
- * 读失败分级（与 extractSubagentsFromSessionFile 同款，renderer 侧栏 stale 守卫的契约前提）：
- * ENOENT → 空数组（pi session 文件延迟写入的合法窗口）；其他读错误 → 原样上抛（RPC 报错，
- * renderer catch 保留旧分区 + 重试态，不与「真实删空」混淆）。无 workflow record 时返回空数组。
+ * 读失败分级（与 extractSubagentsFromSessionFile 同款，renderer 侧栏 stale 守卫的
+ * 契约前提，由骨架承担）：ENOENT → 空数组（pi session 文件延迟写入的合法窗口）；
+ * 其他读错误 → 原样上抛（RPC 报错，renderer catch 保留旧分区 + 重试态，不与「真实
+ * 删空」混淆）。无 workflow record 时返回空数组。
  *
- * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检：statSync 大小 > READ_PRECHECK_MAX_BYTES
- * （32MB，与 session-file-utils 全量读预检同阈值同标尺）时不读全文，降级返回空列表 +
- * oversize 标记 + warn 留痕（对齐 trace-sync D5④ 的 oversize 降级范式）。预检 stat 失败
- * （含 ENOENT）走原读路径——错误分级语义由 readFileSync 路径原样承担，预检不引入新抛错。
+ * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检（> 32MB 降级空列表 + oversize 标记
+ * + warn 留痕）语义见骨架文件。
  */
-export function extractWorkflowsFromSessionFile(filePath: string): WorkflowFileExtraction {
-  let fileSize = -1
-  try {
-    fileSize = statSync(filePath).size
-  } catch {
-    // 预检失败不改变错误契约：fall through 到读路径，由 readFileSync 产生原分级错误
-    fileSize = -1
-  }
-  if (fileSize > READ_PRECHECK_MAX_BYTES) {
-    console.warn(
-      `[workflow-extractor] session file oversize ` +
-      `(${(fileSize / BYTES_PER_MB).toFixed(1)} MB > ${(READ_PRECHECK_MAX_BYTES / BYTES_PER_MB).toFixed(0)} MB), ` +
-      `skip workflow extraction (degraded to empty list): ${filePath}`,
-    )
-    return { records: [], oversize: true }
-  }
-
-  let content: string
-  try {
-    content = readFileSync(filePath, 'utf-8')
-  } catch (e) {
-    if (isEnoent(e)) return { records: [], oversize: false }
-    throw e
-  }
-
-  const entries = parseJsonl(content)
-  return { records: scanWorkflowEntries(entries), oversize: false }
+export function extractWorkflowsFromSessionFile(filePath: string): SessionFileExtraction<WorkflowRunRecord> {
+  return extractRecordsFromSessionFile(filePath, {
+    warnTag: 'workflow-extractor',
+    subject: 'workflow',
+    scan: scanWorkflowEntries,
+  })
 }
 
 /**
@@ -294,26 +257,47 @@ function extractWorkflowsFromEntriesLegacy(entries: unknown[]): WorkflowRunRecor
 /**
  * 读 workflow-state 文件 + 映射为 WorkflowRunRecord（legacy 路径）。
  * 文件不存在 / 解析失败 / 版本不匹配 → 返回 null（跳过该 run）。
+ * RT-5#6：跳过不再静默——ENOENT（state 文件被清理链删除，常态）保持安静，
+ * 其余降级 warn 一次（按路径去重），整条 run 从列表消失时可归因。
  */
 function readAndMapSnapshot(runId: string, stateFilePath: string): WorkflowRunRecord | null {
   let content: string
   try {
     content = readFileSync(stateFilePath, 'utf-8')
-  } catch {
-    // state 文件不存在或不可读（已被清理 / 并发删除）
+  } catch (e) {
+    // state 文件不存在（已被清理 / 并发删除）是常态不告警；不可读（EACCES 等）warn
+    if (!isEnoent(e)) {
+      warnOnce(
+        stateFilePath,
+        `[workflow-extractor] workflow state file unreadable, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+        e instanceof Error ? e.message : e,
+      )
+    }
     return null
   }
 
   // rewrite mode：文件始终是最新单行快照。取最后一个非空行。
   const lines = content.split('\n').filter((l) => l.trim())
   const lastLine = lines[lines.length - 1]
-  if (!lastLine) return null
+  if (!lastLine) {
+    // 空 state 文件是异常形态（rewrite mode 恒写单行快照）——空文件 run 静默消失不可观测
+    warnOnce(
+      stateFilePath,
+      `[workflow-extractor] workflow state file is empty, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+    )
+    return null
+  }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(lastLine)
-  } catch {
+  } catch (e) {
     // JSON 解析失败（损坏的 state 文件）
+    warnOnce(
+      stateFilePath,
+      `[workflow-extractor] workflow state file JSON parse failed, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+      e instanceof Error ? e.message : e,
+    )
     return null
   }
 
@@ -349,7 +333,7 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // 「同版本坏数据」区分开。
   // [review 修复 R4] 不再静默——pi-subagent-workflow 是 mandatory + autoUpgrade 扩展，
   // extension 先发版（npm-* tag 独立管线）而 app 未跟上时，版本守卫会把新 run 全部
-  // 判为不匹配跳过（WorkflowList 对新 run 显示为空），无日志则该版本漂移不可观测。
+  // 判为不匹配跳过（renderer 侧新 run 无 record，托盘 workflow 面板为空），无日志则该版本漂移不可观测。
   if (snapshot.v !== SNAPSHOT_VERSION) {
     console.warn(
       `[workflow-extractor] snapshot version '${String(snapshot.v)}' unsupported (expected '${SNAPSHOT_VERSION}') — ` +
@@ -386,8 +370,7 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
     scriptName: snapshot.spec.scriptName,
     slug: snapshot.spec.slug,
     description: snapshot.spec.description,
-    // v2 两态直接赋值（是 WorkflowRunStatus 三态的子集，无需断言；
-    // 'paused' 是 WorkflowRunStatus 的 legacy 读侧值，v2 快照不产出）
+    // v2 两态直接赋值（与 WorkflowRunStatus 一致，无需断言；一次性生命周期 D-2 只产出 running/done）
     status: snapshot.state.status,
     reason: snapshot.state.reason,
     startedAt: snapshot.meta.startedAt,

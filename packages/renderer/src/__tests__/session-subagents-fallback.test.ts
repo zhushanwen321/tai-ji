@@ -9,7 +9,7 @@
  *
  * 验证链路：transport.onMessage 注册的 routeInbound handler 收到终态推送 →
  *   1. subagents 非活跃 session（focus≠A）：applyRecords(A, [done]) → A 分区更新，hasRunning(A)=false
- *   2. workflowUpdate 非活跃 session：终态信号触发 loadWorkflows → 分区 done，hasRunningOrPaused=false
+ *   2. workflowUpdate 非活跃 session：终态信号触发 loadWorkflows → 分区 done，hasRunningWorkflow=false
  *   （running 信号 500ms 延迟重试在 store 层，由 stores/workflow.test.ts triggerWorkflowReload describe 锁定）
  *
  * mock 策略：vi.hoisted 捕获 ws-client.onMessage 注册的 routeInbound handler，测试向其注入
@@ -59,13 +59,17 @@ vi.mock('@/lib/ipc', () => ({
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
+  // RD-3#2：启动失败真因消费端口（core use-connection init 会调用，mock 须补形状）
+  onRuntimeError: vi.fn(() => () => {}),
+  getRuntimeStartError: vi.fn(async () => null),
   restartRuntime: vi.fn(async () => {}),
 }))
 
 // mock sessionApi（subagent/workflow store 内部 import；getSubagents 首拉返回空，
 // getWorkflows 用 vi.fn() 由用例内 mockResolvedValueOnce 控制返回值）
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
-  getSubagents: vi.fn(async () => []),
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagents: vi.fn(async () => ({ subagents: [], oversize: false })),
   getSubagentHistory: vi.fn(async () => []),
   getWorkflows: vi.fn(),
   getAgentCallHistory: vi.fn(),
@@ -197,10 +201,11 @@ describe('session.subagents routeInbound 兜底', () => {
 
     // 预填 A 分区 running workflow（模拟侧栏菊花）
     workflowStore.applyRecords('sess-A', [makeWorkflow({ runId: 'w1', status: 'running' })])
-    expect(workflowStore.hasRunningOrPaused('sess-A')).toBe(true)
+    expect(workflowStore.hasRunningWorkflow('sess-A')).toBe(true)
 
     // getWorkflows 返回 done（终态）
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValueOnce([makeWorkflow({ runId: 'w1', status: 'done' })])
+    // RT-4#8 起 API 返结构化形状 { workflows, oversize }（store 按此解构）
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValueOnce({ workflows: [makeWorkflow({ runId: 'w1', status: 'done' })], oversize: false })
 
     // 注入 A 的 workflowUpdate 终态信号
     const msg: ServerMessage = {
@@ -214,7 +219,7 @@ describe('session.subagents routeInbound 兜底', () => {
       expect(workflowStore.getRecordsBySession('sess-A')[0].status).toBe('done')
     })
 
-    expect(workflowStore.hasRunningOrPaused('sess-A')).toBe(false)
+    expect(workflowStore.hasRunningWorkflow('sess-A')).toBe(false)
     expect(sessionApi.getWorkflows).toHaveBeenCalledWith('sess-A')
   })
 })

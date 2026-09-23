@@ -6,8 +6,9 @@
 //   1. one-shot pi 轮（kickOffChatRound 回填点）：run 应答 sessionFile 回填后
 //      `.alive` 存在且 pid=本进程；轮终（settleOneShotOutcome SP-5 → markRoundIdle）
 //      后 marker 跨轮保留（D3a/B5）；
-//   2. 非 pi 引擎死亡 adopt 形态（finalizeEngineOutcome 回填点）：sessionFile 回填
-//      即声明写权，record 保持可续聊纳管态、marker 在（adopt 不终态化 → 声明不释放）；
+//   2. 非 pi 引擎死亡（run reject → Continuation 失败分支收口 settleRoundFailed：
+//      idle 可恢复 + 失败通知，无监督器 adopt 接管；旧 adopt 形态回填点
+//      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役）；
 //   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
 //      store 簿记⑧单轨发射（恰好一次）；
@@ -31,11 +32,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentOutcome } from "../engine/types.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetSettledWatchdogsForTest,
@@ -52,19 +54,11 @@ interface ServiceInternals {
   };
 }
 
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
-
 function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  pi: PiMock;
   fake: FakePiEnginePort;
   runOrchestration: ServiceInternals["runOrchestration"];
 } {
@@ -76,12 +70,12 @@ function makeService(): {
   const fake = registerFakePiEngine();
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+    modelRegistry: emptyRegistry(),
     sessionId: "root-session",
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });
   const service = new SubagentService({ cwd: agentDir, modelService });
-  const pi = makePi() as PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  const pi = makePi();
   service.initSession({ pi, sessionId: "root-session" });
   const { store, runOrchestration } = service as unknown as ServiceInternals;
   return { agentDir, service, store, pi, fake, runOrchestration };
@@ -193,7 +187,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       // 成功应答映射（workflow 域 AgentResult.content 承载正文）
       expect(result.content).toBe("wf done");
       // [two-state-convergence U4] 轮终翻边 idle——record 经 getMutable 断言
-      //（listAllActive 是 running 过滤视图，不再含轮终收口 record）。
+      //（listRunningMutable 是 running 过滤视图，不再含轮终收口 record）。
       const rec = h.store.getMutable(result.sessionId ?? "");
       expect(rec).toBeDefined();
       expect(rec!.sessionFile).toBe(sessionFile);

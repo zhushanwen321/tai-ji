@@ -370,8 +370,8 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
     expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
 
-    // 本地全量 task 还原（ctx.model 合回；task 其余字段透传）+ RunContext 断言
-    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1" });
+    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传）+ RunContext 断言
+    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1", cwd: "/w" });
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
     expect(captured?.ctx.schemaEnv).toBe("PI_WORKFLOW_SCHEMA=1");
@@ -414,6 +414,24 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       "run response",
     );
     expect(resp.result).toEqual({ handle: HANDLE, outcome: FAKE_OUTCOME });
+  });
+
+  it("ctx.cwd 缺省（wire 不带）→ task 不合回 cwd（additive 语义——引擎回退自身进程 cwd）", async () => {
+    const engine = makeEngine();
+    const { server, sink } = makeServer(engine);
+    await request(server, sink, 0, "initialize", INIT_PARAMS);
+
+    server.handleFrame({
+      id: 20,
+      method: "run",
+      params: { runId: "r-cwd", task: { prompt: "p" }, ctx: { model: "prov/m1" } },
+    });
+    await sink.waitFor(
+      (f) => f.id === 20 && (f.result !== undefined || f.error !== undefined),
+      "run#cwd-absent",
+    );
+    const task = (engine.run as Mock).mock.calls[0]?.[0] as AgentCallOpts;
+    expect(task.cwd).toBeUndefined();
   });
 
   it("ctxModel 归一：空串/空白/无斜杠/前导斜杠/尾斜杠 → undefined（parseCtxModel 边界）", async () => {

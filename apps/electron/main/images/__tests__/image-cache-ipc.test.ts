@@ -1,5 +1,5 @@
 /**
- * image-cache-ipc 单测（crash-resilience §3.3 D6-⑨ / u7-memory-governance，IPC 两侧职责）。
+ * image-cache-ipc 单测（D6-⑨ / u7-memory-governance，IPC 两侧职责）。
  *
  * 形态对齐同族先例 logs/__tests__/renderer-log-handler.test.ts：electron mock 捕获
  * ipcMain.handle 的 handler，构造 invoke payload 直接调用断言。

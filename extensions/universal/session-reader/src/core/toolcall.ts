@@ -9,6 +9,7 @@
  *   parser.ts 已 additive 透出这两个字段，O2/O3 据此精确关联取参数。
  */
 import type { Entry } from './parser.js'
+import { BYTES_PER_KB } from './units.js'
 
 // ---------------------------------------------------------------------------
 // 模块常量（参数摘要的截断宽度 / 换算基数）
@@ -20,8 +21,6 @@ const BASH_CMD_MAX_CHARS = 60
 const SUBAGENT_TASK_MAX_CHARS = 40
 /** 未知工具 arguments JSON 摘要截断字符数。 */
 const ARGS_JSON_MAX_CHARS = 50
-/** bytes→KB 换算基数（write content 的 KB 显示）。 */
-const BYTES_PER_KB = 1024
 
 /** 单次工具调用信息（从 assistant content 的 toolCall block 提取）。 */
 export interface ToolCallInfo {

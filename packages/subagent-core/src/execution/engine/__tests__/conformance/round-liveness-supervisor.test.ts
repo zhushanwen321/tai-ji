@@ -1,6 +1,6 @@
 // round-liveness-supervisor.test.ts —— [W6] 轮次活性监督器的 conformance 黑盒场景。
 //
-// 设计权威源：chat-domain-v1x-liveness-governance.md §3.2 D2（record 去向单一裁决
+// 设计锚点：D2（record 去向单一裁决
 // 表 + 三态判定 + 通知对账 + 纳管模型）+ D5（H9 keep-alive-no-progress 承接落点）
 // + 验收 A2/A5/A8。
 //

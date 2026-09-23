@@ -30,14 +30,13 @@ import {
 
 import type { SpawnedChildrenMirror } from "./mirror.ts";
 import type { RunRoute } from "./engine-client.ts";
+import { getHostUiRequestEndpoint } from "../host/host-ui-endpoint.ts";
 
 const logger = getLogger("subagents");
 
 /** 路由器依赖面（EngineClient 注入；全部单向引用，无回环持有）。 */
 export interface ReverseRouterDeps {
   engineId: string;
-  /** host/askUser 应答端（[D4-④] subagent-service init.uiRequestHandler 注入点）。 */
-  uiRequestHandler?: (req: UiRequest) => Promise<unknown>;
   /** run 作用域通知路由表（EngineClient 持有，EngineClient 生命周期内同一引用）。 */
   runRoutes: Map<string, RunRoute>;
   /** childSpawned/childStateChanged 的镜像落点。 */
@@ -55,7 +54,11 @@ export interface ReverseRouterDeps {
 /** 帧④入口（EngineClient.handleLine 委托）。 */
 export function routeReverseRequest(deps: ReverseRouterDeps, frame: { id: string; method: string; params: unknown }): void {
   if (frame.method === "host/askUser") {
-    handleInteractionRequest(deps, frame, deps.uiRequestHandler, (params) => (params as HostAskUserParams).request as UiRequest);
+    // [D3 槽现读] host/askUser 应答端在**消费时**经 host-ui-endpoint 槽现读，不在
+    // EngineClient 构造期固化：cli 引擎单例跨 reload 存活（D2b 幂等重注册），adoption
+    // 只更新槽、不重建 EngineClient——构造期固化会把在飞 run 的反向请求路由到旧 ctx
+    // 的 handler（assertActive 抛错 → {cancelled:true} 静默取消）。
+    handleInteractionRequest(deps, frame, getHostUiRequestEndpoint(), (params) => (params as HostAskUserParams).request as UiRequest);
     return;
   }
   const timeoutClass = (REVERSE_CHANNEL_TIMEOUT_CLASS as Record<string, string | undefined>)[frame.method];

@@ -1,18 +1,30 @@
 /**
- * WorkspaceDetector 三态检测测试（W2）。
+ * WorkspaceDetector 三态检测测试（W2）+ detectBareWorkspaceCached 门面测试（批 4 U10）。
+ *
+ * detectBareWorkspaceCached 已门面化到 repo 观测器（services/git/repo-observer.ts 共享单例）：
+ * 单例的解析走真实 GitRepoResolver（fs 用临时 fixture，execSync 经 vi.mock 钉死），缓存策略
+ * 断言经 GitRepoResolver.prototype.resolve spy 计数。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi/beforeEach）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/worktree/workspace-detector.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { execSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { GitRepoResolver } from '../../infra/system/git-repo-resolver.js'
+import { __resetRepoCacheForTests, initSharedRepoObserver } from '../git/repo-observer.js'
 import {
   WorkspaceDetector,
   type FsLike,
   type GitRevParser,
   detectBareWorkspaceCached,
-  pruneBareCache,
-  __resetBareCacheForTests,
 } from './workspace-detector.js'
+
+vi.mock('node:child_process', () => ({ execSync: vi.fn(() => 'main\n') }))
+
+const execSyncMock = vi.mocked(execSync)
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -196,56 +208,70 @@ describe('WorkspaceDetector.detectLegacy()', () => {
   })
 })
 
-// ── detectBareWorkspaceCached 缓存版本测试 ─────────────────
+// ── detectBareWorkspaceCached 门面测试（批 4 U10：观测器单例 + 真实 walk-up）──────
 
 describe('detectBareWorkspaceCached()', () => {
+  /** 本 describe 创建的临时根目录（afterEach 自删）。 */
+  const tmpRoots: string[] = []
+
+  function makeTmp(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'ws-detector-'))
+    tmpRoots.push(dir)
+    return dir
+  }
+
   beforeEach(() => {
-    __resetBareCacheForTests()
+    // 组合根装配语义的单测等价：门面读共享单例前必须先装配（resolver 走真实实现，
+    // fs fixture 临时目录 + execSync 已 vi.mock，解析行为确定性可钉）
+    initSharedRepoObserver(new GitRepoResolver())
+    __resetRepoCacheForTests()
   })
 
-  it('bare workspace 返回 true', () => {
-    // detectBareWorkspaceCached 用 realDetector + 真实 node:fs
-    // 这里测试 cwd 指向 .bare workspace 根目录
-    // 注：此测试依赖真实文件系统，需要 cwd 在 .bare workspace 下
-    // 为隔离 IO，我们用 __resetBareCacheForTests 确保缓存干净
-    const result = detectBareWorkspaceCached('/tmp/nonexistent')
-    expect(result).toBe(false) // /tmp 下没有 .bare
+  afterEach(() => {
+    execSyncMock.mockReset()
+    execSyncMock.mockImplementation(() => 'main\n')
+    for (const dir of tmpRoots.splice(0)) {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 
-  it('缓存命中：第二次调用不重新 detect', () => {
-    // 第一次调用
-    detectBareWorkspaceCached('/tmp/test-cache')
-    // 第二次调用应该命中缓存（不抛即证明）
-    const result = detectBareWorkspaceCached('/tmp/test-cache')
-    expect(result).toBe(false)
+  it('bare workspace（.bare 目录）返回 true', () => {
+    const root = makeTmp()
+    mkdirSync(join(root, '.bare'))
+    expect(detectBareWorkspaceCached(root)).toBe(true)
   })
 
-  it('pruneBareCache 清理过期/不存在的 cwd', () => {
-    detectBareWorkspaceCached('/tmp/prune-test')
-    pruneBareCache(new Set(['/tmp/prune-test']))
-    // 未过期的保留
-    expect(detectBareWorkspaceCached('/tmp/prune-test')).toBe(false)
-
-    pruneBareCache(new Set()) // 传空集合，清理所有
-    // 清理后重新查询
-    expect(detectBareWorkspaceCached('/tmp/prune-test')).toBe(false)
+  it('非 bare（无 .bare）返回 false', () => {
+    const root = makeTmp()
+    expect(detectBareWorkspaceCached(root)).toBe(false)
   })
 
-  // ── perf 微项 10：LRU 淘汰 O(n)→O(1)（容量 500，观察 detectSync 调用计数）──────
+  it('缓存命中：TTL 内第二次调用零新解析（观测器单例共享，resolve 计数 = 1）', () => {
+    const root = makeTmp()
+    const spy = vi.spyOn(GitRepoResolver.prototype, 'resolve')
+    try {
+      expect(detectBareWorkspaceCached(root)).toBe(false)
+      expect(detectBareWorkspaceCached(root)).toBe(false)
+      expect(spy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // ── perf 微项 10：LRU 淘汰 O(1)（容量 500 单例，观察 resolve 调用计数）──────
 
   it('容量满时 O(1) 驱逐最老条目（first-key 淘汰）', () => {
-    __resetBareCacheForTests()
-    const spy = vi.spyOn(WorkspaceDetector.prototype, 'detectSync')
+    const spy = vi.spyOn(GitRepoResolver.prototype, 'resolve')
     try {
       detectBareWorkspaceCached('/lru-wt-0')
-      // 填满缓存（模块常量 CACHE_MAX_SIZE=500）：第 501 个 key 插入时驱逐最老的 /lru-wt-0
+      // 填满缓存（观测器单例 OBSERVE_MAX_SIZE=500）：第 501 个 key 插入时驱逐最老的 /lru-wt-0
       for (let i = 1; i <= 500; i++) detectBareWorkspaceCached(`/lru-wt-${i}`)
       expect(spy).toHaveBeenCalledTimes(501)
 
-      // 被驱逐的最老条目：重新读取 → 缓存 miss → 重新检测
+      // 被驱逐的最老条目：重新读取 → 缓存 miss → 重新解析
       detectBareWorkspaceCached('/lru-wt-0')
       expect(spy).toHaveBeenCalledTimes(502)
-      // 未驱逐条目 TTL 内命中：零新检测
+      // 未驱逐条目 TTL 内命中：零新解析
       detectBareWorkspaceCached('/lru-wt-250')
       expect(spy).toHaveBeenCalledTimes(502)
     } finally {
@@ -255,8 +281,7 @@ describe('detectBareWorkspaceCached()', () => {
 
   it('过期重写把条目移到 Map 尾部：容量淘汰按最后写入时间（与原 ts 扫描语义等价）', () => {
     vi.useFakeTimers()
-    __resetBareCacheForTests()
-    const spy = vi.spyOn(WorkspaceDetector.prototype, 'detectSync')
+    const spy = vi.spyOn(GitRepoResolver.prototype, 'resolve')
     try {
       detectBareWorkspaceCached('/lru-a') // t0 写入
       detectBareWorkspaceCached('/lru-b') // t0 写入

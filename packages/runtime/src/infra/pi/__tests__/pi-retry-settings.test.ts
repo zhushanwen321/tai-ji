@@ -15,16 +15,20 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PiRetrySettings } from '../pi-retry-settings.js'
-import { invalidateSettingsCache } from '../pi-settings-store.js'
+import { invalidateSettingsCache, setSettingsPath } from '../pi-settings-store.js'
 
 let dir: string
 let settingsPath: string
 let retrySettings: PiRetrySettings
 
-/** 先摆盘再构造（构造会 setSettingsPath 重建 store、清缓存），保证读到种子内容。 */
+/**
+ * 先摆盘再重定向再构造：RT-3#12 起构造函数不再调用 setSettingsPath（去全局化——
+ * 模块级写入目标不被最后构造者决定），测试显式注入 settings 路径（全仓惯例）。
+ */
 function seedFile(retryValue: unknown, extra: Record<string, unknown> = {}): void {
   writeFileSync(settingsPath, JSON.stringify({ ...extra, retry: retryValue }, null, 2), 'utf-8')
-  retrySettings = new PiRetrySettings(dir)
+  invalidateSettingsCache()
+  retrySettings = new PiRetrySettings()
 }
 
 function readRetryFromDisk(): unknown {
@@ -36,7 +40,8 @@ const VALID = { enabled: true, maxRetries: 2, baseDelayMs: 3000 }
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'pi-retry-settings-'))
   settingsPath = join(dir, 'settings.json')
-  retrySettings = new PiRetrySettings(dir)
+  setSettingsPath(settingsPath)
+  retrySettings = new PiRetrySettings()
 })
 
 afterEach(() => {

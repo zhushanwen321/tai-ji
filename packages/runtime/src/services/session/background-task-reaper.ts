@@ -352,9 +352,16 @@ function deferToNextTick(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-/** 有实际收殓动作时的汇总日志（S4a/S4b「runtime 日志有收殓记录」的观测面）。 */
-function logReapSummary(scope: string, result: BackgroundTaskReapResult): void {
-  if (result.killedOrphans > 0 || result.finalizedOrphans > 0 || result.staleLocksRemoved > 0) {
+/** 有实际收殓动作（或保守跳过）时的汇总日志（S4a/S4b「runtime 日志有收殓记录」的观测面）。
+ *  RT-5#9：conservativelySkipped 纳入触发条件——只有保守跳过的拍次此前完全零记录，
+ *  跳过是否在发生不可观测。导出供单测直击条件矩阵（纯函数无状态）。 */
+export function logReapSummary(scope: string, result: BackgroundTaskReapResult): void {
+  if (
+    result.killedOrphans > 0 ||
+    result.finalizedOrphans > 0 ||
+    result.staleLocksRemoved > 0 ||
+    result.conservativelySkipped > 0
+  ) {
     console.log(`${LOG_TAG} ${scope}: killed=${result.killedOrphans} finalized=${result.finalizedOrphans} ownerAliveSkipped=${result.ownerAliveSkipped} conservativelySkipped=${result.conservativelySkipped} staleLocksRemoved=${result.staleLocksRemoved}`)
   }
 }

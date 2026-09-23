@@ -3,11 +3,17 @@
  *
  * 动态 import extensions/taiji/system-prompt/index.ts（npm 包源码），验证 hook 行为：
  * - append 开启且 prompt 非空 → 追加到 event.systemPrompt
- * - append 关闭 / 配置缺失 / 配置损坏 / append.prompt 空白 → 返回 undefined
+ * - append 关闭 / append.prompt 空白 → 返回 undefined
+ * - capability 段（schema v2，设计 D6）：默认开（文件缺失 / JSON 损坏也注入），
+ *   仅显式布尔 false 关闭——与 append 的「缺省关」方向相反
  * - 支持 TAIJI_AGENT_DATA_DIR 与 PI_CODING_AGENT_DIR 回退两种目录解析
  * - 全局指令文件（~/.agents/AGENTS.md 等候选，TAIJI_GLOBAL_AGENTS_DIR 指向 tmp）：
  *   存在 → 带头部注入；空白 → 跳过；目录/缺失候选 → 顺延下一候选；
  *   --no-context-files 在 argv → 全局不注入（append 仍生效）
+ *
+ * 适配约定：聚焦 append/global 语义的既有用例写盘 config 显式带 CAP_OFF 隔离关注点；
+ * 无法写 config 的用例（文件缺失 / JSON 损坏）期望如实更新为含 capability 段。
+ * capability 自身三态已由扩展包内 __tests__/system-prompt.test.ts 专项锚定。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -18,7 +24,14 @@ interface SystemPromptConfig {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  capability?: { enabled: boolean }
 }
+
+/** 既有用例隔离关注点用的「capability 显式关闭」片段（保持原精确断言） */
+const CAP_OFF: { capability: { enabled: boolean } } = { capability: { enabled: false } }
+
+/** capability 段 header 锚（与扩展源码 TAIJI_CAPABILITY_SECTION 的 header 一致） */
+const CAP_HEADER = '# TaiJi capabilities'
 
 const PLUGIN_PATH = new URL('../../../extensions/taiji/system-prompt/index.ts', import.meta.url).pathname
 
@@ -105,6 +118,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: 'EXTRA' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 
@@ -118,25 +132,30 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: false, prompt: 'ignored' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 
     expect(handler({ systemPrompt: 'BASE' })).toBeUndefined()
   })
 
-  it('配置文件缺失 → 返回 undefined', async () => {
+  it('配置文件缺失 → capability 默认开，仅注入 capability 段（D6：缺字段 → true）', async () => {
     const factory = await loadPlugin()
     const { handler } = installPlugin(factory)
 
-    expect(handler({ systemPrompt: 'BASE' })).toBeUndefined()
+    expect(handler({ systemPrompt: 'BASE' })).toEqual({
+      systemPrompt: expect.stringContaining(CAP_HEADER),
+    })
   })
 
-  it('配置文件 JSON 损坏 → 返回 undefined', async () => {
+  it('配置文件 JSON 损坏 → 同缺省语义，capability 默认开', async () => {
     const factory = await loadPlugin()
     writeFileSync(join(dataDir, 'system-prompt.json'), '{ not json', 'utf-8')
     const { handler } = installPlugin(factory)
 
-    expect(handler({ systemPrompt: 'BASE' })).toBeUndefined()
+    expect(handler({ systemPrompt: 'BASE' })).toEqual({
+      systemPrompt: expect.stringContaining(CAP_HEADER),
+    })
   })
 
   it('append.prompt 纯空白 → 返回 undefined', async () => {
@@ -145,6 +164,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: '   \t\n  ' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 
@@ -161,6 +181,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: 'FALLBACK' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 
@@ -169,6 +190,12 @@ describe('@zhushanwen/pi-system-prompt', () => {
 
   it('全局 AGENTS.md 存在 → 追加带头部的内容', async () => {
     const factory = await loadPlugin()
+    writeConfig(dataDir, {
+      version: 1,
+      replace: { enabled: false, prompt: '' },
+      append: { enabled: false, prompt: '' },
+      ...CAP_OFF,
+    })
     const p = writeGlobalAgents('GLOBAL_RULES')
     const { handler } = installPlugin(factory)
 
@@ -183,6 +210,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: 'EXTRA' },
+      ...CAP_OFF,
     })
     const p = writeGlobalAgents('GLOBAL_RULES')
     const { handler } = installPlugin(factory)
@@ -194,6 +222,12 @@ describe('@zhushanwen/pi-system-prompt', () => {
 
   it('全局文件内容纯空白 → 不注入（返回 undefined）', async () => {
     const factory = await loadPlugin()
+    writeConfig(dataDir, {
+      version: 1,
+      replace: { enabled: false, prompt: '' },
+      append: { enabled: false, prompt: '' },
+      ...CAP_OFF,
+    })
     writeGlobalAgents('   \n\t  ')
     const { handler } = installPlugin(factory)
 
@@ -202,6 +236,12 @@ describe('@zhushanwen/pi-system-prompt', () => {
 
   it('AGENTS.md 是目录（非文件）→ 跳过该候选，注入 CLAUDE.md', async () => {
     const factory = await loadPlugin()
+    writeConfig(dataDir, {
+      version: 1,
+      replace: { enabled: false, prompt: '' },
+      append: { enabled: false, prompt: '' },
+      ...CAP_OFF,
+    })
     mkdirSync(join(agentsDir, 'AGENTS.md')) // 同名目录：existsSync 为真但 isFile 为假
     const p = writeGlobalAgents('CLAUDE_RULES', 'CLAUDE.md')
     const { handler } = installPlugin(factory)
@@ -213,6 +253,12 @@ describe('@zhushanwen/pi-system-prompt', () => {
 
   it('AGENTS.MD（大写变体）被识别为全局指令文件', async () => {
     const factory = await loadPlugin()
+    writeConfig(dataDir, {
+      version: 1,
+      replace: { enabled: false, prompt: '' },
+      append: { enabled: false, prompt: '' },
+      ...CAP_OFF,
+    })
     const p = writeGlobalAgents('UPPER_RULES', 'AGENTS.MD')
     const { handler } = installPlugin(factory)
 
@@ -228,6 +274,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: 'EXTRA' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 
@@ -249,6 +296,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
       version: 1,
       replace: { enabled: false, prompt: '' },
       append: { enabled: true, prompt: 'EXTRA' },
+      ...CAP_OFF,
     })
     const { handler } = installPlugin(factory)
 

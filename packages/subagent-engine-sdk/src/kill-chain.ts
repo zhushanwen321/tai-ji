@@ -12,9 +12,8 @@
 //     文案与 core errors.ts 逐字等价）；toErrorMessage 改用 SDK 单源
 //     src/error-message.ts（round1-reuse R11 收编原内联副本）。
 //
-// 设计权威源：docs/architecture/subagent-engine-abstraction.md D1（abort 分级：引擎原生
-// 中断 → 公共杀链兜底；CLI-only 引擎直接杀链，杀死后宿主合成终态）+ §3.3.3
-// engine_timeout / engine_run_failed 行 + 附录 A「CLI 超时」行。
+// 设计决策（abort 分级）：引擎原生中断 → 公共杀链兜底；CLI-only 引擎直接杀链，
+// 杀死后宿主合成终态。错误行：engine_timeout / engine_run_failed（CLI 超时同口径）。
 
 import { getLogger } from "./logger.ts";
 import { toErrorMessage } from "./error-message.ts";

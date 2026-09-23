@@ -19,6 +19,8 @@ import { computed, onMounted, onUnmounted, provide, watch } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { Folder, GitFork, RefreshCw } from '@lucide/vue'
+import { resolveLaunchConfig } from '@taiji/core'
+import { BUILTIN_PRESET_IDS, type PiLaunchPreset } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -86,12 +88,7 @@ const cwd = computed(() => flow.currentCwd.value ?? props.currentCwd)
  * Git chip 不显示 + 点 chip 时 idle→branch-popover 非法转换报错。
  * startFlow 幂等（已 landing 不翻 state，只刷新 cwd），idle 态调它会 idle→landing + presetCwd。
  */
-// [review MF-11] 实例计数：flow 是模块级单例，split/drawer 模式下多个 sessionId===null
-// 面板可同时挂载 Landing；计数归零（最后一个实例卸载）才允许终结 flow，否则关闭副面板
-// 会把用户在另一面板正在编辑的草稿（draft/model/segments）一并 cancel 掉。
-let landingInstanceCount = 0
 onMounted(() => {
-  landingInstanceCount++
   if (flow.state.value !== 'landing') {
     flow.startFlow(props.currentCwd ?? undefined)
   } else if (!flow.currentCwd.value && props.currentCwd) {
@@ -99,16 +96,20 @@ onMounted(() => {
   }
 })
 /**
- * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图（挂载 → startFlow 见上），
- * 卸载即终结：封死「视图消失、状态漂留」的未知残留路径（flow.state 是 core 模块级单例，
- * 视图卸载后若停留 landing/overlay，无任何承接者能终结它——设计 panel-view-derivation
- * §3.3 D4 的出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
+ * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图，卸载即终结：
+ * 封死「视图消失、状态漂留」的残留路径（flow.state 是 core 模块级单例，视图卸载后
+ * 若停留 landing/overlay，无任何承接者能终结它——本守卫即 D4 的
+ * 出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
  * （completed）与切换（cancelled，selectSession 守卫已 cancel）路径下卸载时已非活跃，
- * 守卫 noop，不产生非法转换。多实例下仅最后一个卸载的实例执行 cancel（见上计数注释）。
+ * 守卫 noop，不产生非法转换。
+ *
+ * [不变式] Landing 全仓唯一挂载点 = Panel.vue 的 landing 分支（多面板 split 拓扑
+ * 已于 2026-07-24 删除），由 landing.test.ts 静态断言锁定。若未来重新引入多挂载点
+ * 拓扑，「卸载即 cancel」会误杀其他挂载点正在编辑的草稿（flow 是单例，跨实例协调
+ * 不能靠组件实例变量）——本处卸载语义必须先重新设计。
  */
 onUnmounted(() => {
-  landingInstanceCount = Math.max(0, landingInstanceCount - 1)
-  if (landingInstanceCount === 0 && flow.isActive.value) flow.cancelFlow()
+  if (flow.isActive.value) flow.cancelFlow()
 })
 watch(() => props.currentCwd, (newCwd) => {
   if (!flow.currentCwd.value && newCwd) {
@@ -166,6 +167,59 @@ const isWorktreeModalOpen = computed(() => flow.state.value === 'worktree-modal'
 /** 当前 cwd 所在 workspace 的已有 worktree 列表（BranchSelectPopover Worktree tab 数据源）。 */
 const worktreeItems = computed(() => flow.worktreeItems?.value ?? [])
 
+/** 短名去尾缀后的最小保留长度（低于此值回退全名，避免「模式」二字模式名被去空） */
+const MIN_SHORT_NAME_LENGTH = 2
+
+/**
+ * 当前显示 / 将生效的模式（u4b 接线）：与 PresetSelectChip 内部同一 resolve 链
+ * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 / 短名 /
+ * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约）。
+ */
+const displayPreset = computed<PiLaunchPreset | null>(() => {
+  const presets = deps.presets.value
+  const resolved = resolveLaunchConfig({
+    pendingPreset: flow.pendingPreset?.value ?? null,
+    presets,
+    defaultPresetId: deps.defaultPresetId.value,
+  })
+  const id =
+    resolved.presetId ??
+    (presets.some((p) => p.id === BUILTIN_PRESET_IDS.FULL) ? BUILTIN_PRESET_IDS.FULL : '')
+  return presets.find((p) => p.id === id) ?? null
+})
+/** 模式全名（缺省 undefined → ui chip 回落其内部解析名，既有接入零改动） */
+const modeName = computed(() => displayPreset.value?.name)
+/** 模式短名（中文本土模式名去「模式」尾缀；无尾缀保持全名） */
+const modeShortName = computed(() => {
+  const name = modeName.value
+  if (!name) return undefined
+  const stripped = name.replace(/模式$/, '')
+  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
+})
+/** 信任标记判据（设计 §7.1：`replace.enabled && 文案非空`） */
+const modeHasReplace = computed(() => {
+  const seg = displayPreset.value?.prompt?.replace
+  return !!seg?.enabled && (seg.prompt ?? '').trim().length > 0
+})
+/** 信任标记文案（文本/短名档 = chip 内后缀；纯图标档 = 角标 tooltip；空 → ui chip 不渲染标记） */
+const modeReplaceHint = computed(() =>
+  modeHasReplace.value ? t('newTask.presetChip.replaceHint') : undefined,
+)
+/**
+ * 模式 chip 强调底判据（设计 §5.1「颜色即状态」；方案 B）：当前生效模式 ≠ 默认模式才算非默认。
+ *
+ * 与 displayPreset 同源（同一 resolve 链）——displayPreset 存在 + id !== 默认档。默认档用
+ * `||` 而非 `??`：store 未加载时 deps.defaultPresetId 为 `''`（非 null），`'' ?? x` 仍是 `''`，
+ * 会把默认模式误判成非默认（恒亮 accent = 不携带信息，正是本判据要消除的退化）。
+ * 注意 displayPreset 已把「解析不到」回落到 builtin:full（含 presets 未加载的 `''` 分支），
+ * 故存在性 + 默认档比对即可，无需再处理空档。
+ */
+const isNonDefaultPreset = computed(() => {
+  const p = displayPreset.value
+  if (!p) return false
+  return p.id !== (deps.defaultPresetId.value || BUILTIN_PRESET_IDS.FULL)
+})
+
 function onSelectWorkspace(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
 }
@@ -173,12 +227,18 @@ function onSelectBranch(payload: { name: string }): void {
   flow.selectBranch(payload.name)
 }
 /**
- * worktree 创建成功（CreateWorktreeModal emit success）：
- * 选定新 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing。
+ * worktree 创建成功（CreateWorktreeModal emit success）：创建成功即回灌新 worktree cwd
+ * （chip 同刻切换），不关 overlay——modal 成功屏自行展示后 emit close（或用户提前关），
+ * 统一走 closeOverlay 回 landing。
+ * [HISTORICAL] 旧链路：success emit 挂在 modal 的 2s 展示定时器上，窗口内关 modal
+ * → 卸载清 timer → 切换静默丢失（chip 留旧目录，首发 create 也落旧目录）。
  */
+function onWorktreeCreated(payload: { cwd: string }): void {
+  flow.adoptWorktreeCwd(payload.cwd)
+}
 /**
- * worktree 创建成功 / exists 态「直接开始」（CreateWorktreeModal emit success / use-existing）：
- * 选定 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing。
+ * exists 态「直接开始」（CreateWorktreeModal emit use-existing）：
+ * 选定 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing（无成功屏，直接切换）。
  */
 function onWorktreeActivated(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
@@ -236,17 +296,22 @@ function onPresetSelect(payload: { presetId: string }): void {
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
     <Composer variant="landing" :session-id="composerSid">
       <template #meta-row>
-        <div class="flex items-center gap-2 px-2.5 pt-2.5">
+        <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
+             各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
+             （纯 CSS flex-shrink，分支 shrink-[8] 先于模式 shrink）→ 模式退化为纯图标
+             （PresetSelectChip 内部实测自适应，颜色即状态：默认模式中性底 / 非默认模式 accent 底
+             [方案 B，:accent=isNonDefaultPreset]，跨档不丢的信任标记）。 -->
+        <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-2.5 pt-2.5">
           <Popover v-model:open="isDirOpen">
             <PopoverTrigger as-child>
               <Button
                 data-testid="chip-directory"
                 variant="ghost"
-                class="h-auto gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-w-0 shrink-0 gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
                 :class="{ '!text-accent': !cwd }"
               >
                 <Folder class="shrink-0" />
-                <span class="font-mono">{{ dirLabel }}</span>
+                <span class="max-w-[110px] truncate font-mono">{{ dirLabel }}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" :collision-padding="8" class="w-[320px] p-0">
@@ -258,16 +323,16 @@ function onPresetSelect(payload: { presetId: string }): void {
               />
             </PopoverContent>
           </Popover>
-          <span v-if="isGitRepo" aria-hidden="true" class="h-3.5 w-px bg-border" />
+          <span v-if="isGitRepo" aria-hidden="true" class="h-3.5 w-px shrink-0 bg-border" />
           <Popover v-if="isGitRepo" v-model:open="isBranchOpen">
             <PopoverTrigger as-child>
               <Button
                 data-testid="chip-branch"
                 variant="ghost"
-                class="h-auto gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-w-0 shrink-[8] gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
               >
                 <GitFork class="shrink-0" />
-                <span class="font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
+                <span class="max-w-[76px] min-w-0 truncate font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" :collision-padding="8" class="w-[420px] p-0">
@@ -284,10 +349,15 @@ function onPresetSelect(payload: { presetId: string }): void {
               />
             </PopoverContent>
           </Popover>
-          <span aria-hidden="true" class="h-3.5 w-px bg-border" />
+          <span aria-hidden="true" class="h-3.5 w-px shrink-0 bg-border" />
           <PresetSelectChip
             :session-id="composerSid"
             :launch-preset-id="flow.currentSession.value?.launchPresetId"
+            :accent="isNonDefaultPreset"
+            :mode-name="modeName"
+            :short-name="modeShortName"
+            :has-replace-prompt="modeHasReplace"
+            :replace-hint="modeReplaceHint"
             v-model:preset-open="isPresetOpen"
             @select="onPresetSelect"
           />
@@ -299,11 +369,13 @@ function onPresetSelect(payload: { presetId: string }): void {
     <CreateBranchModal v-if="isBranchModalOpen" />
 
     <!-- 创建 worktree modal（W2 wave）：BranchSelectPopover emit create-worktree → openCreateWorktree →
-         state=worktree-modal → 渲染。modal 内五态自管，success/use-existing → selectWorkspace + closeOverlay。 -->
+         state=worktree-modal → 渲染。modal 内五态自管；success → adoptWorktreeCwd（chip 同刻切换，
+         不关 overlay）；close（2s 定时器/用户关）→ closeOverlay 回 landing；
+         use-existing → selectWorkspace + closeOverlay（无成功屏直接切换）。 -->
     <CreateWorktreeModal
       v-if="isWorktreeModalOpen"
       @close="flow.closeOverlay()"
-      @success="onWorktreeActivated"
+      @success="onWorktreeCreated"
       @use-existing="onWorktreeActivated"
     />
   </div>

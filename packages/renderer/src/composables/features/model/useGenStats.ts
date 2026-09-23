@@ -1,6 +1,6 @@
 /**
  * useGenStats —— Composer 生成指标（token 速度 + 缓存命中率）的 per-session 分区状态源
- * （composer-gen-stats P4，设计 docs/design/composer-gen-stats.md §3.3 D4/D5 + §3.4）。
+ * （composer-gen-stats P4，D4/D5）。
  *
  * 职责（照 useContextUsage 五件套范式：分区 / 订阅 / 恢复腿 / in-flight 去重 / cleanup）：
  * - 分区：useSessionScopedState 建 per-session 分区（Map 分区范式，ADR-0049），值直接存
@@ -19,8 +19,9 @@
  *   帧 recency 守卫（RPC 发起后已有更新帧落地则跳过写入，防陈旧 reply 回滚）；
  * - cleanup：registerSessionCleanup 挂进 useSidebar.deleteSession 清理编排。
  *
- * 显示语义 = 模型视角（D4）：分区值是「session 当前模型」的全局快照——同模型多 session
- * 分区值相同是预期行为，非串台。
+ * 显示语义 = 混合视角：分区值是「session 当前模型」的帧——current 字段为本会话私有样本
+ * （本会话最近一次请求；同模型多 session 各自独立，无回落），day/d7/d30 为该模型跨会话
+ * 全局聚合（同模型多 session 聚合值相同是预期行为，非串台）。
  *
  * 消费方：GenStatsTriggers.vue 纯读。必须在组件 setup 同步调用（内部 useSessionEvents
  * 依赖 getCurrentInstance 守卫）。
@@ -29,6 +30,7 @@ import { computed, onScopeDispose, reactive, watch, type ComputedRef, type Ref }
 import { registerSessionCleanup, useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
+import { createFrameBookkeeping } from '@taiji/core/foundation/create-frame-bookkeeping'
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import type { GenStatsFrame } from '@taiji/shared'
 
@@ -90,24 +92,18 @@ export function useGenStats(
   const scoped = useSessionScopedState(normalizedSid, () => reactive<GenStatsPartition>({ frame: null }))
 
   /**
-   * per-instance live 帧序号表：每次「合法帧」（过 model 校验）到达本实例 handler 时
-   * bump。用途：applyReply 判定「RPC 发起后分区是否已被更新的 live 帧覆盖」。
-   * 注：session cleanup 不清此表——序号是单调 recency 计数，清零会让在途条目的
-   * seqAtIssue 比对出现假性「已覆盖」，误跳过合法写入（与 useContextUsage 同论证）。
+   * 帧写入仲裁簿记（recency 序号表 + suppressed 抑制表）：共享原语单点
+   * createFrameBookkeeping（与 useContextUsage 同构收敛），行为语义见原语模块头注——
+   * 序号表 session cleanup 不清（清零会假性「已覆盖」误跳合法写入）；抑制表于
+   * deleteSession 后挡僵尸写回、重新进入视图解除。
    */
-  const liveFrameSeqs = new Map<string, number>()
-
-  /**
-   * 已清理 sid 抑制表：deleteSession 清掉分区后，在途 RPC resolve / 迟到帧不得把分区
-   * 僵尸式写回。重新进入该 sid 视图时解除抑制（新生命周期）。
-   */
-  const suppressedSids = new Set<string>()
+  const bookkeeping = createFrameBookkeeping()
 
   // ── 订阅（D4）：只订 session.stats_update；handler 用第二参数 sid（消息所属 session）写分区 ──
   const onMessage = useSessionEvents(sessionIdRef)
   onMessage('session.stats_update', (msg, sid) => {
     // 已销毁 session 的迟到帧：静默丢弃（分区已清理，写回即僵尸条目）
-    if (suppressedSids.has(sid)) return
+    if (bookkeeping.isSuppressed(sid)) return
     const payload = msg.payload
     // 前端兜底 ①：model 缺省的 live 帧丢弃（所有 live 推帧路径均有 modelKey，缺省即异常）
     if (!payload.model) return
@@ -116,7 +112,7 @@ export function useGenStats(
     const currentModel = modelIdRef?.value
     if (currentModel && !genStatsModelMatches(payload.model, currentModel)) return
     // 合法帧落地：bump recency 序号（applyReply 的 skip 判定基准）
-    liveFrameSeqs.set(sid, (liveFrameSeqs.get(sid) ?? 0) + 1)
+    bookkeeping.bumpSeq(sid)
     scoped.updateFor(sid, (p) => {
       p.frame = payload
     })
@@ -127,10 +123,10 @@ export function useGenStats(
    * modelId 由 runtime 侧降级链权威解析，见 D4）。
    */
   function applyReply(sid: string, reply: GenStatsFrame, seqAtIssue: number): void {
-    if (suppressedSids.has(sid)) return
+    if (bookkeeping.isSuppressed(sid)) return
     // RPC 发起后该 sid 已有更新的合法 live 帧落地 → 跳过写入（帧即真相，写入会用陈旧
     // 采样回滚 newer 帧值）
-    if ((liveFrameSeqs.get(sid) ?? 0) !== seqAtIssue) return
+    if (bookkeeping.hasNewerFrame(sid, seqAtIssue)) return
     scoped.updateFor(sid, (p) => {
       p.frame = reply
     })
@@ -142,7 +138,7 @@ export function useGenStats(
    */
   function recover(sid: string): void {
     // 重新进入视图 = 新生命周期：解除该 sid 的清理抑制
-    suppressedSids.delete(sid)
+    bookkeeping.release(sid)
 
     // meta（seqAtIssue）仅在首次发起时捕获，复用条目的实例共享发起时刻值——按 attach
     // 时刻捕获会让发起后落地过 live 帧的分区被陈旧 reply 回滚。settle 即清与引用比对
@@ -151,7 +147,7 @@ export function useGenStats(
     const entry = inflightGenStatsFetch.run(
       sid,
       () => command('session.getGenStats', { sessionId: sid }, RPC_BACKSTOP_TIMEOUT_MS),
-      { seqAtIssue: liveFrameSeqs.get(sid) ?? 0 },
+      { seqAtIssue: bookkeeping.seqAt(sid) },
     )
     void entry.promise.then(
       (reply) => applyReply(sid, reply, entry.meta.seqAtIssue),
@@ -174,10 +170,10 @@ export function useGenStats(
 
   // cleanup 编排：挂进 useSidebar.deleteSession 的 triggerSessionCleanups。
   // 分区删除本已由 useSessionScopedState 自身注册（幂等，二次 Map.delete 是 no-op），
-  // 这里显式再挂以对齐设计，同时登记本 composable 自有簿记（抑制表）。
+  // 这里显式再挂以对齐设计，同时登记本 composable 自有簿记（抑制表，原语承载）。
   const unregisterGenStatsCleanup = registerSessionCleanup((sid) => {
     scoped.cleanup(sid)
-    suppressedSids.add(sid)
+    bookkeeping.suppress(sid)
   })
   onScopeDispose(() => {
     unregisterGenStatsCleanup()

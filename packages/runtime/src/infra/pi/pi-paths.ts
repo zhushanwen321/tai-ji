@@ -82,7 +82,7 @@ export function getSettingsPath(): string {
  * 承载自 pi models.json 迁出的 taiji 私有字段（provider 级 quota/authMethod、
  * models[].enabled 转化的 modelStates），models.json 只留 pi schema 内字段
  *（provider-config-quota 架构 D4）。同目录已有先例 config/rename-session-ext-config.json
- *（worktree-config-helper），pi 不扫描 agent/config/ 子目录，无冲突。
+ *（写者 rename-session-config.ts，P1-7 名实拆分前在 worktree-config-helper），pi 不扫描 agent/config/ 子目录，无冲突。
  *
  * 「pi 不扫描 agent/config/ 子目录」断言锚点（ADR-0063 I4，pi 行为断言须带源码依据）：
  * - 权威源 = 实装 0.84.1（node_modules/@earendil-works/pi-coding-agent/dist）：

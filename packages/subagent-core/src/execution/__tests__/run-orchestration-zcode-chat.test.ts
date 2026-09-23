@@ -5,7 +5,7 @@
 //   - B-firstround：executeViaEngine 非 pi 分支（zcode conversation:'cold'）走
 //     Continuation.startFirstRound
 //     ——轮末 markRoundIdle 收口（status 翻 idle [two-state-convergence U4/D3] + round+1 +
-//     closedReason 清除），不走 kickOffEngineRun one-shot 编排（finalizeEngineOutcome
+//     closedReason 清除），不走 kickOffEngineRun（已删）one-shot 编排（finalizeEngineOutcome（已删）
 //     tryTransition：status='idle' + closedReason='gc' 且 round 不推进）；
 //   - B-routing：会话轮引擎按 record.engine 经 registry 解析——zcode chatMode 轮
 //     （首轮与续轮）派发到 zcode port，不再钉死 pi；续轮 resume 锚携带
@@ -35,12 +35,12 @@ import type {
   SessionView,
 } from "../engine/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
@@ -136,10 +136,6 @@ interface ServiceInternals {
   store: RecordStore;
 }
 
-function makePi(): PiLike {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } } as unknown as PiLike;
-}
-
 const EMPTY_REGISTRY: ModelRegistryLike = {
   getAvailable: () => [],
   find: () => undefined,
@@ -154,7 +150,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   let store: RecordStore;
   let zcode: ZcodeColdEngine;
   let piEngine: FakePiEnginePort;
-  let pi: PiLike;
+  let pi: PiMock;
   let prevDataDirEnv: string | undefined;
 
   beforeEach(() => {
@@ -234,8 +230,8 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     expect(zcode.runs[0]!.task.prompt).toBe("zcode cold chat");
 
     // 轮应答 → Continuation 轮末分流（markRoundIdle：status 翻 idle、
-    // round+1、closedReason 清除——[two-state-convergence U4/D3]）——与 kickOffEngineRun one-shot 编排
-    // （finalizeEngineOutcome：status='idle' + closedReason='gc' + round 不推进）
+    // round+1、closedReason 清除——[two-state-convergence U4/D3]）——与 kickOffEngineRun（已删）one-shot 编排
+    // （finalizeEngineOutcome（已删）：status='idle' + closedReason='gc' + round 不推进）
     // 的判别断言
     zcode.runs[0]!.settle("round one done");
     await vi.waitFor(() => expect(record.round).toBe(1));
@@ -309,8 +305,8 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
 
     zcode.runs[1]!.settle("round two done");
     await vi.waitFor(() => expect(record.round).toBe(2));
-    // 第三轮 resume 锚已推进到新 session（闭环：锚随轮自更新）——先 seed 新条目
-    //（isAnchorResolvable 的 zcode 判据 = 库条目在，未 seed 会误走 fresh 降级）
+    // 第三轮 resume 锚已推进到新 session（闭环：锚随轮自更新）——seed 新条目对齐
+    // 真实形态（库条目在；zcode 锚预检查已退役，seed 与否不再影响派发分流）
     await seedZcodeSession("sess_cold_2");
     await service.chatActions.deliverChatMessage(record, "third round");
     await vi.waitFor(() => expect(zcode.runs.length).toBe(3));

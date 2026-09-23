@@ -1,19 +1,23 @@
 /**
- * ConfigPreferencesMessageHandler 路由 + reply 塑形测试（timeout-streaming-ui-idle §5.3 D3 配置链）。
+ * ConfigPreferencesMessageHandler 路由 + reply 塑形测试。
  *
- * 覆盖（Gate A 定向补测——handler 路由与 reply 塑形本体此前无断言，ConfigService 层
- * streaming-idle-config.test.ts 与 renderer 表单层已有测试）：
- *  ① config.getStreamingIdleTimeout 路由 → ConfigService 读取 → reply 'config.streamingIdleTimeout' 塑形
- *  ② config.setStreamingIdleTimeout 合法值 → 原值透传 ConfigService（持久化调用）+ 生效值 reply
- *  ③ 越界值 → handler 原值透传（clamp 责任在 ConfigService），reply 回显 clamp 生效值
- *  ④ 未知 case → 子 handler 返回 false 且零副作用（不串扰主 switch）；主入口委托可达 + 未知 type 兜底 false
+ * 覆盖：
+ *  - 偏好组（worktreeRootDir / defaultBaseBranch）转发：读取/写入 reply 塑形 + 原值透传
+ *  - config.setUiLocale（u-locale-channel）：ack 型 reply 塑形 + 落盘 + 写盘失败错误信封
+ *  - 兜底与不串扰：未知 case 子 handler false 零副作用；主入口委托可达；未知 type 兜底 false
+ *
+ * 历史：本文件曾覆盖 config.get/setStreamingIdleTimeout 配置链，该功能废弃后用例随之移除。
  *
  * mock 范式对齐同目录 settings-message-handler-llm-retry.test.ts（mockCtx 收集 replies）。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/config-preferences-message-handler.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ConfigPreferencesMessageHandler } from './config-preferences-message-handler.js'
+import { readUiPreferences } from '../services/ui-preferences-helper.js'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
 import type { ClientMessage, ServerMessage } from '@taiji/shared'
 
@@ -22,15 +26,22 @@ const WS = {} as never
 function mockCtx() {
   const replies: ServerMessage[] = []
   const configService = {
-    getStreamingIdleTimeout: vi.fn(() => 1800),
-    setStreamingIdleTimeout: vi.fn((timeout: number) => Math.min(Math.max(timeout, 60), 3600)),
     // ④b 用例：非偏好组消息经主 switch 命中未迁移的既有 case（getAutoRenameEnabled）所需 stub
     getAutoRenameEnabled: vi.fn(() => false),
-    // S15 it.each 参数化用例：worktree/默认基分支两组转发所需 stub
+    // 偏好组 10 case 转发所需 stub（worktree 目录 / setup 脚本 / 裸仓脚本 / 超时 / 默认基分支）
+    // 写 stub 返回 {ok:true}（M4/RT-7#1：setter 返回 {ok, code, error}，失败走 sendError）
     getWorktreeRootDir: vi.fn(() => '/wt'),
-    setWorktreeRootDir: vi.fn(),
+    setWorktreeRootDir: vi.fn().mockReturnValue({ ok: true }),
+    getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
+    setSetupScript: vi.fn().mockReturnValue({ ok: true }),
+    getBareSetupScript: vi.fn(() => 'custom-hooks/bare-setup.sh'),
+    setBareSetupScript: vi.fn().mockReturnValue({ ok: true }),
+    getTimeout: vi.fn(() => 90),
+    setTimeout: vi.fn().mockReturnValue({ ok: true }),
     getDefaultBaseBranch: vi.fn(() => 'main'),
-    setDefaultBaseBranch: vi.fn(),
+    setDefaultBaseBranch: vi.fn().mockReturnValue({ ok: true }),
+    // u-locale-channel：config.setUiLocale 写盘经 configService.getConfigDir() 推导（用例内覆盖为 tmp 目录）
+    getConfigDir: vi.fn(() => '/nonexistent-ui-prefs'),
   }
   const ctx = {
     send: vi.fn(),
@@ -58,65 +69,6 @@ function mockCtx() {
   }
   return { ctx: ctx as unknown as SettingsHandlerContext, replies, configService }
 }
-
-describe('ConfigPreferencesMessageHandler · config.getStreamingIdleTimeout', () => {
-  it('① 路由到 ConfigService 读取，reply config.streamingIdleTimeout 透传秒值', async () => {
-    const { ctx, replies, configService } = mockCtx()
-    configService.getStreamingIdleTimeout.mockReturnValue(1800)
-    const handler = new ConfigPreferencesMessageHandler(ctx)
-    const handled = await handler.handle(
-      { type: 'config.getStreamingIdleTimeout', payload: {}, id: 'm1' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(configService.getStreamingIdleTimeout).toHaveBeenCalledTimes(1)
-    expect(replies).toHaveLength(1)
-    expect(replies[0]).toMatchObject({ type: 'config.streamingIdleTimeout', id: 'm1' })
-    expect(replies[0].payload).toEqual({ timeout: 1800 })
-  })
-
-  it('①b 经 SettingsMessageHandler 主入口委托可达（迁移接线不悬空）', async () => {
-    const { ctx, replies } = mockCtx()
-    const handler = new SettingsMessageHandler(ctx)
-    const handled = await handler.handleSettingsMessage(
-      { type: 'config.getStreamingIdleTimeout', payload: {}, id: 'm2' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(replies[0]).toMatchObject({ type: 'config.streamingIdleTimeout', id: 'm2', payload: { timeout: 1800 } })
-  })
-})
-
-describe('ConfigPreferencesMessageHandler · config.setStreamingIdleTimeout', () => {
-  it('② 合法值：原值透传 ConfigService（持久化入参）+ reply 生效值', async () => {
-    const { ctx, replies, configService } = mockCtx()
-    configService.setStreamingIdleTimeout.mockReturnValue(300)
-    const handler = new ConfigPreferencesMessageHandler(ctx)
-    const handled = await handler.handle(
-      { type: 'config.setStreamingIdleTimeout', payload: { timeout: 300 }, id: 'm3' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(configService.setStreamingIdleTimeout).toHaveBeenCalledTimes(1)
-    expect(configService.setStreamingIdleTimeout).toHaveBeenCalledWith(300)
-    expect(ctx.sendError).not.toHaveBeenCalled()
-    expect(replies[0]).toMatchObject({ type: 'config.streamingIdleTimeout', id: 'm3' })
-    expect(replies[0].payload).toEqual({ timeout: 300 })
-  })
-
-  it('③ 越界值：handler 原值透传（clamp 在 ConfigService），reply 回显 clamp 生效值', async () => {
-    const { ctx, replies, configService } = mockCtx()
-    configService.setStreamingIdleTimeout.mockReturnValue(3600)
-    const handler = new ConfigPreferencesMessageHandler(ctx)
-    const handled = await handler.handle(
-      { type: 'config.setStreamingIdleTimeout', payload: { timeout: 7200 }, id: 'm4' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(configService.setStreamingIdleTimeout).toHaveBeenCalledWith(7200)
-    expect(replies[0].payload).toEqual({ timeout: 3600 })
-  })
-})
 
 describe('ConfigPreferencesMessageHandler · 偏好组转发参数化（S15：12 条转发 case 零断言补测）', () => {
   it.each([
@@ -148,6 +100,48 @@ describe('ConfigPreferencesMessageHandler · 偏好组转发参数化（S15：12
       payload: { baseBranch: 'main' },
       setter: { fn: 'setDefaultBaseBranch', arg: 'develop' },
     },
+    {
+      name: '⑨ config.setSetupScript 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setSetupScript', payload: { script: 'hooks/init.sh' } },
+      replyType: 'config.setupScript',
+      payload: { script: 'custom-hooks/setup-worktree.sh' },
+      setter: { fn: 'setSetupScript', arg: 'hooks/init.sh' },
+    },
+    {
+      name: '⑩ config.getSetupScript 读取转发',
+      msg: { type: 'config.getSetupScript', payload: {} },
+      replyType: 'config.setupScript',
+      payload: { script: 'custom-hooks/setup-worktree.sh' },
+      setter: undefined,
+    },
+    {
+      name: '⑪ config.setBareSetupScript 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setBareSetupScript', payload: { script: 'hooks/bare.sh' } },
+      replyType: 'config.bareSetupScript',
+      payload: { script: 'custom-hooks/bare-setup.sh' },
+      setter: { fn: 'setBareSetupScript', arg: 'hooks/bare.sh' },
+    },
+    {
+      name: '⑫ config.getBareSetupScript 读取转发',
+      msg: { type: 'config.getBareSetupScript', payload: {} },
+      replyType: 'config.bareSetupScript',
+      payload: { script: 'custom-hooks/bare-setup.sh' },
+      setter: undefined,
+    },
+    {
+      name: '⑬ config.setTimeout 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setTimeout', payload: { timeout: 120 } },
+      replyType: 'config.worktreeTimeout',
+      payload: { timeout: 90 },
+      setter: { fn: 'setTimeout', arg: 120 },
+    },
+    {
+      name: '⑭ config.getTimeout 读取转发',
+      msg: { type: 'config.getTimeout', payload: {} },
+      replyType: 'config.worktreeTimeout',
+      payload: { timeout: 90 },
+      setter: undefined,
+    },
   ])('$name', async ({ msg, replyType, payload, setter }) => {
     const { ctx, replies, configService } = mockCtx()
     const handler = new ConfigPreferencesMessageHandler(ctx)
@@ -164,6 +158,62 @@ describe('ConfigPreferencesMessageHandler · 偏好组转发参数化（S15：12
   })
 })
 
+describe('ConfigPreferencesMessageHandler · config.setUiLocale（u-locale-channel）', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ui-locale-handler-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('写盘成功：回 ack 型 config.uiLocaleSet（空 payload）+ 文件落 zh-CN', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    configService.getConfigDir.mockReturnValue(root)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const handled = await handler.handle(
+      { type: 'config.setUiLocale', payload: { locale: 'zh-CN' }, id: 'loc1' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(ctx.sendError).not.toHaveBeenCalled()
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({ type: 'config.uiLocaleSet', id: 'loc1', payload: {} })
+    expect(readUiPreferences(root)).toBe('zh-CN')
+  })
+
+  it('同值重复推送：短路不重写（updatedAt 保持）且仍回 ack', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    configService.getConfigDir.mockReturnValue(root)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const msg = { type: 'config.setUiLocale', payload: { locale: 'en-US' }, id: 'loc2' } as unknown as ClientMessage
+    await handler.handle(msg, WS)
+    const first = readUiPreferences(root)
+    await handler.handle({ ...msg, id: 'loc3' } as unknown as ClientMessage, WS)
+    expect(replies).toHaveLength(2)
+    expect(replies.every((r) => r.type === 'config.uiLocaleSet')).toBe(true)
+    expect(readUiPreferences(root)).toBe(first)
+  })
+
+  it('写盘失败：错误信封（不 reply ack 假成功）', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    // configDir 指向一个已存在的文件 → mkdir/写盘失败
+    const notADir = join(root, 'not-a-dir')
+    writeFileSync(notADir, 'x', 'utf-8')
+    configService.getConfigDir.mockReturnValue(notADir)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const handled = await handler.handle(
+      { type: 'config.setUiLocale', payload: { locale: 'zh-CN' }, id: 'loc4' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(replies).toHaveLength(0)
+    expect(ctx.sendError).toHaveBeenCalledWith(WS, 'ui_preferences_io_error', expect.any(String), 'loc4')
+  })
+})
+
 describe('ConfigPreferencesMessageHandler · 兜底与不串扰', () => {
   it('④ 子 handler 对未知 type 返回 false 且零 reply/零 ConfigService 调用', async () => {
     const { ctx, replies, configService } = mockCtx()
@@ -175,8 +225,7 @@ describe('ConfigPreferencesMessageHandler · 兜底与不串扰', () => {
     expect(handled).toBe(false)
     expect(replies).toHaveLength(0)
     expect(ctx.sendError).not.toHaveBeenCalled()
-    expect(configService.getStreamingIdleTimeout).not.toHaveBeenCalled()
-    expect(configService.setStreamingIdleTimeout).not.toHaveBeenCalled()
+    expect(configService.getAutoRenameEnabled).not.toHaveBeenCalled()
   })
 
   it('④b 非偏好组消息经主入口仍由既有 case 消化（偏好组前置委托不吞消息）', async () => {
@@ -200,5 +249,28 @@ describe('ConfigPreferencesMessageHandler · 兜底与不串扰', () => {
     )
     expect(handled).toBe(false)
     expect(replies).toHaveLength(0)
+  })
+})
+
+describe('ConfigPreferencesMessageHandler · setter 校验拒绝路径（config.setTimeout）', () => {
+  it('config.setTimeout 非法值：校验异常上抛（不吞、零 reply、零 sendError）——sendError 由 server.handleMessage catch 层统一负责', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    // 校验本体在 ConfigService.setTimeout（worktree-config-helper：正数且 ≤3600，非法 throw）。
+    // handler 单测以 mock 抛错模拟该拒绝，锚定 handler 层契约：异常原样上抛、不 reply、
+    // 不越层 sendError（错误回包形态由 server.handleMessage 的 catch 统一塑形）。
+    configService.setTimeout.mockImplementation(() => {
+      throw new Error('timeout must be a positive number in (0, 3600], got -1')
+    })
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    await expect(
+      handler.handle(
+        { type: 'config.setTimeout', payload: { timeout: -1 }, id: 'm8' } as unknown as ClientMessage,
+        WS,
+      ),
+    ).rejects.toThrow(/timeout must be a positive number/)
+    expect(replies).toHaveLength(0)
+    expect(ctx.sendError).not.toHaveBeenCalled()
+    // 抛错即止：生效值回读（getTimeout）不达，无「半写」reply
+    expect(configService.getTimeout).not.toHaveBeenCalled()
   })
 })

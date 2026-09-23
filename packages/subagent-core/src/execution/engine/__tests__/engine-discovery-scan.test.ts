@@ -31,6 +31,7 @@ import {
   parseEngineRootsEnv,
   scanEngines,
 } from "../engine-discovery-scan.ts";
+import { readExplicitEngines } from "../config.ts";
 
 // ── fixture helpers ─────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ interface PkgOptions {
   binMode?: number;
   /** bin 文件不落盘（bin 缺失反例）。 */
   omitBin?: boolean;
+  /** package.json 顶层 version 覆盖（缺省不写字段——版本面缺省形态；非法形态传非 string）。 */
+  version?: unknown;
 }
 
 /** 在 rootDir 下造一个带 manifest 的引擎包，返回包目录。 */
@@ -59,6 +62,7 @@ function makeEnginePkg(
     JSON.stringify({
       name: `test-${pkgDirName}`,
       bin: { "test-engine-cli": binRel },
+      ...(opts.version !== undefined ? { version: opts.version } : {}),
       "taiji": { subagentEngine: { id: pkgDirName, bin: "test-engine-cli", protocol: 1, ...manifest } },
     }),
   );
@@ -192,6 +196,18 @@ describe("manifest schema 字段级解析", () => {
     expect(result.discovered[0].descriptor.command).toBe(
       path.join(tmpRoot, "binmap", "bin/cli.mjs"),
     );
+  });
+
+  it("O2 版本面盖章：package.json version → descriptor.packageVersion；缺失/非 string 宽容 undefined", () => {
+    makeEnginePkg(tmpRoot, "with-ver", { capabilities: FULL_CAPABILITIES }, { version: "1.4.2" });
+    makeEnginePkg(tmpRoot, "no-ver", { capabilities: FULL_CAPABILITIES });
+    makeEnginePkg(tmpRoot, "bad-ver", { capabilities: FULL_CAPABILITIES }, { version: 42 });
+    const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
+    expect(result.discovered).toHaveLength(3);
+    const byId = new Map(result.discovered.map((d) => [d.id, d.descriptor.packageVersion]));
+    expect(byId.get("with-ver")).toBe("1.4.2");
+    expect(byId.get("no-ver")).toBeUndefined();
+    expect(byId.get("bad-ver")).toBeUndefined();
   });
 
   it("必需字段缺失 → skip：id / bin / protocol 各自缺失均不装载", () => {
@@ -552,5 +568,35 @@ describe("装载与注册表", () => {
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.engines).toEqual([]);
     expect(listEngines()).toEqual([]);
+  });
+});
+
+// ── L3 config.json 读取分通道（D5 三态口径，2026-09-17 错误处理审查 A7）────────
+
+describe("readExplicitEngines 读失败与合法缺省分通道", () => {
+  it("文件不存在（ENOENT）= L3 显式配置缺席：静默空表，无 warn", () => {
+    const agentDir = path.join(tmpRoot, "agent-absent");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(collectedLogs.filter((l) => l.level === "warn")).toHaveLength(0);
+  });
+
+  it("坏 JSON ≠ 缺席：warn 留痕 + 空表（torn write 不得伪装成「用户无显式配置」）", () => {
+    const agentDir = path.join(tmpRoot, "agent-torn");
+    fs.mkdirSync(path.join(agentDir, "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(agentDir, "subagents", "config.json"), "{ torn");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(
+      collectedLogs.some((l) => l.level === "warn" && l.message.includes("not valid JSON")),
+    ).toBe(true);
+  });
+
+  it("非 ENOENT 读失败（subagents 被文件占据 → ENOTDIR）≠ 缺席：warn 留痕 + 空表", () => {
+    const agentDir = path.join(tmpRoot, "agent-blocked");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, "subagents"), "not a directory");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(
+      collectedLogs.some((l) => l.level === "warn" && l.message.includes("read failed")),
+    ).toBe(true);
   });
 });

@@ -8,12 +8,14 @@
  *   statusBarItems 文本为空串——实际内容由 runtime plugin:statusBarUpdate 广播填充
  * - tasks（goal/todo，s5 落地 plugin 实体）：
  *   slashCommands 声明（goal/todo，name 不含前导 /，对齐 s1 schema v2 形状），执行仍由 pi extension 承担（§8 边界）
- * - base-tool-enhance（后台命令视图，background-task-sidebar-view D4①）：
- *   第一个真实 sidebar.tab view 贡献——「后台命令」L2 视图（术语裁决见设计 §1：「后台任务」
- *   已被 subagent i18n 占用）。渲染载体是原生组件（renderer BackgroundTaskListView，经
- *   PluginViewContainer NATIVE_VIEWS 路由），viewType 沿用 'gui' 不改 schema（D4②）；
- *   title 是静态贡献声明的数据链路（非 i18n key，与上方 tasks 中文 description 同范式），
- *   组件内运行时文案仍走 i18n。pluginId 不可关闭（PluginViewContainer BUILTIN_PLUGIN_IDS）。
+ * - scheduler：
+ *   slashCommands 声明（/schedule 单条，命令名与 pi.registerCommand 一致）
+ *   ——landing 态无 session，pi 真源为空，slash 列表「声明即显示」（ADR-0050）；
+ *   description 对齐 pi.registerCommand 注册期静态串（i18n.ts 中文词条）
+ *
+ * 曾声明的 base-tool-enhance「后台命令」sidebar.tab view 已随该 native 视图退役
+ * （composer-task-tray D10：托盘承接后台命令观察面，Plugins tab 的 plugin sidebar
+ * view 机制本身保留——现由 external plugin 贡献面提供）。
  *
  * 本文件是 ContributionRegistry 的扁平贡献源，也是消费侧唯一真相（曾并存的插件
  * 实体级 manifest builtin/tasks/manifest.ts 已随 D11 死面清理删除——形状漂移且生产零消费）。
@@ -31,7 +33,7 @@ export const builtinContributions: BuiltinContribution[] = [
   },
   {
     // tasks 的 slashCommands 仍静态声明（W3 CommandRegistry 收编需要）；其 views 不声明——
-    // todo/goal 状态经 extension widget 推送（guiSetWidget）由 M17 对话流面板承接，不进 sidebar。
+    // todo/goal 状态经 extension widget 推送（guiSetWidget）由 Composer 托盘 widget 区承接，不进 sidebar。
     pluginId: 'tasks',
     contributes: {
       slashCommands: [
@@ -41,18 +43,15 @@ export const builtinContributions: BuiltinContribution[] = [
     },
   },
   {
-    // 后台命令 L2 视图（background-task-sidebar-view.md D4①/D9）：数据链路 = runtime 直读
-    // registry + WS backgroundTask.* 域；渲染 = renderer 原生 BackgroundTaskListView。
-    // id 与实体命名一致（viewId 'background-tasks'），title 用「后台命令」（§1 术语裁决）。
-    pluginId: 'base-tool-enhance',
+    // scheduler 的 slashCommands 静态声明：landing 态无 session → pi 真源为空，slash 列表
+    // 「声明即显示」（ADR-0050）——/schedule 命令路径创建本就是 landing 场景。description
+    // 对齐 pi.registerCommand 注册期静态串（scheduler 包 i18n.ts 的 command.description
+    // 中文词条）。命令名与 pi 侧注册一致（单条 /schedule）。执行仍由 pi extension
+    // 承担（声明与执行分离）。
+    pluginId: 'scheduler',
     contributes: {
-      views: [
-        {
-          id: 'background-tasks',
-          title: '后台命令',
-          placement: 'sidebar.tab',
-          viewType: 'gui',
-        },
+      slashCommands: [
+        { name: 'schedule', description: '新建定时任务（打开表单）' },
       ],
     },
   },

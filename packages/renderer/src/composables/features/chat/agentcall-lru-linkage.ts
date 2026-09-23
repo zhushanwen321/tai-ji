@@ -1,6 +1,6 @@
 /**
  * agentcall-lru-linkage —— [B9 agentcall 分区 LRU 联动] renderer 装配点
- * （docs/design/memory-leak-remediation.md §3.3-B9）。
+ * （内存审计 ADR-0069，原文档 §3.3-B9 已删除 git 可追溯）。
  *
  * 职责（两件事）：
  * 1. panel 枚举绑定：把 renderer panel store 的「全部 panel focusedSessionId 列表」注册进

@@ -265,9 +265,9 @@ onMounted(async () => {
   }
 })
 
-/** idle：强制检测新版 */
+/** idle：强制检测新版（manual：网络失败显形 error 态，RD-4#5） */
 function onCheck(): void {
-  void checkForUpdate(true)
+  void checkForUpdate(true, 'manual')
 }
 
 /** available：触发下载阶段 */
@@ -291,9 +291,9 @@ function onLater(): void {
   showConfirmDialog.value = false
 }
 
-/** error 态重试：强制重新检测 */
+/** error 态重试：强制重新检测（manual：再次失败继续显形，RD-4#5） */
 function onRetry(): void {
-  void checkForUpdate(true)
+  void checkForUpdate(true, 'manual')
 }
 
 /** unsupported：打开备用下载页 */

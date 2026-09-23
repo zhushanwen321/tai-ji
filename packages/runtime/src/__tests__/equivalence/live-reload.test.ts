@@ -38,6 +38,8 @@ import {
   type ChatViewState,
   type PiEntry,
 } from '../../../../core/src/domain/chat/apply-entry.js'
+import { scanPlanStateEntries } from '../../services/session/plan-state-extractor.js'
+import type { PlanStateView } from '@taiji/shared'
 
 /** 等 turn 完成的上限（faux 轨实际毫秒级；名义上限保留翻轨前余量防 flake） */
 const TURN_TIMEOUT_MS = 120_000
@@ -281,3 +283,98 @@ describe.skipIf(!FAUX_PI_READY)(
 })
 
 // seenAgentEnds 计数谓词已删：多轮 agent_end 等待由 runTurn 的 since 打点取代（fixture 原语）
+
+// ── plan-state entry 等价（plan 模式重设计 A7——静态 fixture）──────────────────
+//
+// plan 状态投影的「live ≡ reload」由 scanPlanStateEntries 唯一派生代码构造性保证
+// （plan-state-extractor.ts：live = SessionRecords 增量重拉的前缀切片派生；reload =
+// getPlanState 磁盘全量派生——同一函数，冷热共用）。本组用静态 entry 序列（不 spawn pi
+// 进程，与上方 faux 轨 describe.skipIf 块正交、任何环境可跑）钉住该构造性：fixture 含旧
+// 四字段与新七字段（skills/docs/reviewState 三 optional，D4）两种 schema entry + 噪声
+// entry（message 载体 / 其他 extension custom / data 非对象的坏 plan-state——派生按
+// 「跳过继续向前」语义穿越）。派生语义 = 最后一条合法 plan-state entry（extension 侧
+// reconstructPlanState 逆序取首同构）。只 import 消费派生函数，禁改其本体。
+describe('plan-state entry 等价（A7 静态 fixture）：live 增量折叠 ≡ reload 全量派生', () => {
+  /** plan-state entry 构造（JSONL 反序列化形态：type:'custom'；data 参数放宽 unknown 供坏形态用例） */
+  const planEntry = (data: unknown, id: string, ms: number) => ({
+    type: 'custom',
+    id,
+    parentId: null,
+    timestamp: new Date(ms).toISOString(),
+    customType: 'plan-state',
+    data,
+  })
+  /** 噪声 message entry（对话流载体，派生扫描应忽略） */
+  const msgEntry = (text: string, id: string, ms: number) => ({
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: new Date(ms).toISOString(),
+    message: { role: 'user', content: [{ type: 'text', text }], timestamp: ms },
+  })
+
+  // 序列：噪声 → 旧四字段 → 噪声（其他 extension）→ 坏 plan-state（data 非对象）→ 新七字段（终态）
+  const SEQUENCE: unknown[] = [
+    msgEntry('进入计划模式', '0198aabb-ccdd-7e01-8f00-000000000001', 1000),
+    planEntry(
+      { isActive: true, planFilePath: '/tmp/taiji-harness/auth/plan.md', requirement: '重构 auth 模块', templateName: 'refactor' },
+      '0198aabb-ccdd-7e02-8f00-000000000002',
+      2000,
+    ),
+    { type: 'custom', id: '0198aabb-ccdd-7e03-8f00-000000000003', parentId: null, timestamp: new Date(3000).toISOString(), customType: 'goal-context', data: { note: '其他 extension 的 custom entry，派生跳过' } },
+    planEntry(null, '0198aabb-ccdd-7e04-8f00-000000000004', 4000),
+    planEntry(
+      {
+        isActive: true,
+        planFilePath: '/tmp/taiji-harness/auth/plan.md',
+        requirement: '重构 auth 模块',
+        templateName: 'refactor',
+        skills: ['tech-design', 'dev-flow'],
+        docs: [{ fileName: 'design.md', absPath: '/tmp/taiji-harness/auth/design.md', sourceSkill: 'tech-design', version: 1 }],
+        reviewState: 'awaiting',
+      },
+      '0198aabb-ccdd-7e05-8f00-000000000005',
+      5000,
+    ),
+  ]
+
+  it('冷启动全量派生 ≡ 逐条前缀增量折叠（live 增量重拉镜像，构造性不变量）', () => {
+    // reload 路径：getPlanState 磁盘全量 → 同一份派生函数
+    const cold = scanPlanStateEntries(SEQUENCE)
+    expect(cold).not.toBeNull()
+    // live 路径镜像：SessionRecords 增量重拉（前缀切片）折叠，终态与全量一致
+    let live: PlanStateView | null = null
+    for (let k = 1; k <= SEQUENCE.length; k++) {
+      const view = scanPlanStateEntries(SEQUENCE.slice(0, k))
+      if (view) live = view
+    }
+    expect(live).toEqual(cold)
+  })
+
+  it('新旧 schema 派生形态：旧 entry 无新字段区（optional 缺省不设键）；新 entry 三 optional 透传', () => {
+    // 旧 schema（前缀止于旧 entry，噪声 message 已被穿越）：无新字段键（D4 字面语义）
+    const legacyOnly = scanPlanStateEntries(SEQUENCE.slice(0, 2))
+    expect(legacyOnly).toEqual({
+      isActive: true,
+      planFilePath: '/tmp/taiji-harness/auth/plan.md',
+      requirement: '重构 auth 模块',
+      templateName: 'refactor',
+    })
+    expect('skills' in legacyOnly!).toBe(false)
+    expect('docs' in legacyOnly!).toBe(false)
+    expect('reviewState' in legacyOnly!).toBe(false)
+    // 新 schema（全量终态）：skills/docs/reviewState 逐字段透传，两路径同形
+    const cold = scanPlanStateEntries(SEQUENCE)
+    expect(cold).toMatchObject({
+      isActive: true,
+      planFilePath: '/tmp/taiji-harness/auth/plan.md',
+      requirement: '重构 auth 模块',
+      templateName: 'refactor',
+      skills: ['tech-design', 'dev-flow'],
+      reviewState: 'awaiting',
+    })
+    expect(cold!.docs).toEqual([
+      { fileName: 'design.md', absPath: '/tmp/taiji-harness/auth/design.md', sourceSkill: 'tech-design', version: 1 },
+    ])
+  })
+})

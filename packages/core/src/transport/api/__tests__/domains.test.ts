@@ -304,18 +304,6 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('onUITimeout：命中派发 requestId，异 session 忽略', () => {
-    mockOn.mockReturnValue(vi.fn())
-    const handler = vi.fn()
-    extension.onUITimeout('s1', handler)
-
-    const registered = mockOn.mock.calls[0][1]
-    registered({ type: 'extension.ui_timeout', payload: { sessionId: 's1', requestId: 'req-9' } })
-    expect(handler).toHaveBeenCalledWith('req-9')
-    registered({ type: 'extension.ui_timeout', payload: { sessionId: 'other', requestId: 'x' } })
-    expect(handler).toHaveBeenCalledTimes(1)
-  })
-
   it('onNotify：解包 message/level，异 session / 异 type 忽略', () => {
     mockOn.mockReturnValue(vi.fn())
     const handler = vi.fn()
@@ -328,13 +316,17 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('sendExtensionUIResponse 经 ws send fire-and-forget', () => {
+  it('sendExtensionUIResponse 经 ws send fire-and-forget，透传 boolean 送达结果（M1 环 3）', () => {
     mockWsSend.mockReturnValue(true)
-    extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')
+    expect(extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')).toBe(true)
     expect(mockWsSend).toHaveBeenCalledWith({
       type: 'extension.ui_response',
       payload: { sessionId: 's1', requestId: 'r1', method: 'select', result: 'opt-1' },
     })
+
+    // WS 非 OPEN：send 返 false → 透传 false（调用方据此保留请求 + 提示重发，不再 :void 吞掉）
+    mockWsSend.mockReturnValue(false)
+    expect(extension.sendExtensionUIResponse('s1', 'r2', 'confirm', false)).toBe(false)
   })
 })
 
@@ -520,7 +512,8 @@ describe('session 域 请求-响应', () => {
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.setThinkingLevel', { sessionId: 's1', level: 'max' }])
 
     mockCommand.mockResolvedValueOnce({ subagents: [{ id: 'sa' }] })
-    await expect(session.getSubagents('s1')).resolves.toEqual([{ id: 'sa' }])
+    // [RT-4#8] 结构化返回透传（subagents + oversize?）：api domain 不再解包 .subagents
+    await expect(session.getSubagents('s1')).resolves.toEqual({ subagents: [{ id: 'sa' }] })
     expect(mockCommand.mock.calls[1][0]).toBe('session.getSubagents')
 
     mockCommand.mockResolvedValueOnce({ messages: [{ id: 'm' }] })
@@ -539,7 +532,8 @@ describe('session 域 请求-响应', () => {
 
   it('workflow 派生：getWorkflows / getAgentCallHistory / getAgentCallFilePath / workflowAction / subagentAction', async () => {
     mockCommand.mockResolvedValueOnce({ workflows: [{ runId: 'r1' }] })
-    await expect(session.getWorkflows('s1')).resolves.toEqual([{ runId: 'r1' }])
+    // [RT-4#8] 结构化返回透传（workflows + oversize?）：api domain 不再解包 .workflows
+    await expect(session.getWorkflows('s1')).resolves.toEqual({ workflows: [{ runId: 'r1' }] })
     expect(mockCommand.mock.calls[0][0]).toBe('session.getWorkflows')
 
     mockCommand.mockResolvedValueOnce({ messages: [] })
@@ -550,8 +544,8 @@ describe('session 域 请求-响应', () => {
     await expect(session.getAgentCallFilePath('s1', 'ac1')).resolves.toBe('/p.jsonl')
     expect(mockCommand.mock.calls[2][0]).toBe('session.getAgentCallFilePath')
 
-    await session.workflowAction('s1', 'pause', 'r1')
-    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.workflowAction', { sessionId: 's1', action: 'pause', runId: 'r1' }])
+    await session.workflowAction('s1', 'abort', 'r1')
+    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.workflowAction', { sessionId: 's1', action: 'abort', runId: 'r1' }])
 
     await session.subagentAction('s1', 'message', { subagentId: 'sa', text: 'hi' })
     expect(mockCommand.mock.calls[4][1]).toEqual({ sessionId: 's1', action: 'message', subagentId: 'sa', text: 'hi' })
@@ -652,32 +646,30 @@ describe('settings 域', () => {
     expect(mockCommand.mock.calls[7][0]).toBe('config.getTimeout')
   })
 
-  it('行为配置：streamingIdleTimeout / defaultBaseBranch / autoRename / renameModel / renameMode', async () => {
-    mockCommand.mockResolvedValue({ timeout: 1800 })
-    await settings.setStreamingIdleTimeout(1800)
-    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setStreamingIdleTimeout', { timeout: 1800 }])
-    await settings.getStreamingIdleTimeout()
-    expect(mockCommand.mock.calls[1][0]).toBe('config.getStreamingIdleTimeout')
-
+  it('行为配置：defaultBaseBranch / autoRename / renameModel / renameMode', async () => {
+    mockCommand.mockResolvedValue({ baseBranch: 'main' })
     await settings.setDefaultBaseBranch('main')
-    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setDefaultBaseBranch', { baseBranch: 'main' }])
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setDefaultBaseBranch', { baseBranch: 'main' }])
     await settings.getDefaultBaseBranch()
-    expect(mockCommand.mock.calls[3][0]).toBe('config.getDefaultBaseBranch')
+    expect(mockCommand.mock.calls[1][0]).toBe('config.getDefaultBaseBranch')
 
+    mockCommand.mockResolvedValue({ enabled: true })
     await settings.setAutoRenameEnabled(true)
-    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setAutoRenameEnabled', { enabled: true }])
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setAutoRenameEnabled', { enabled: true }])
     await settings.getAutoRenameEnabled()
-    expect(mockCommand.mock.calls[5][0]).toBe('config.getAutoRenameEnabled')
+    expect(mockCommand.mock.calls[3][0]).toBe('config.getAutoRenameEnabled')
 
+    mockCommand.mockResolvedValue({ model: 'p/m' })
     await settings.setRenameModel('p/m')
-    expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setRenameModel', { model: 'p/m' }])
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setRenameModel', { model: 'p/m' }])
     await settings.getRenameModel()
-    expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameModel')
+    expect(mockCommand.mock.calls[5][0]).toBe('config.getRenameModel')
 
+    mockCommand.mockResolvedValue({ mode: 'first-prompt' })
     await settings.setRenameMode('first-prompt')
-    expect(mockCommand.mock.calls[8].slice(0, 2)).toEqual(['config.setRenameMode', { mode: 'first-prompt' }])
+    expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setRenameMode', { mode: 'first-prompt' }])
     await settings.getRenameMode()
-    expect(mockCommand.mock.calls[9][0]).toBe('config.getRenameMode')
+    expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameMode')
   })
 
   it('smart-context 配置组', async () => {
@@ -758,6 +750,10 @@ describe('config 域 请求-响应', () => {
 
     mockCommand.mockResolvedValueOnce({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
     await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
+
+    // RT-7#8：损坏缓存源 / 落盘失败标志透传（api domain 不吞新字段）
+    mockCommand.mockResolvedValueOnce({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+    await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
 
     mockCommand.mockResolvedValueOnce({ providers: [{ id: 'p' }] })
     await expect(config.listProviders()).resolves.toEqual({ providers: [{ id: 'p' }], scopedModels: undefined })

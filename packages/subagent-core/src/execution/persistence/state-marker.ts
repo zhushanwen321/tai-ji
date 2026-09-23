@@ -375,7 +375,12 @@ export interface RecordBinding {
   startedAt: number;
   /** 已完成对话轮数（绑定写时点快照；回填点早于轮终 +1，恢复值可滞后一拍）。 */
   round?: number;
-  model: string;
+  /**
+   * 模型留痕（R4/D6-① 可选化）：undefined = 用户未指定模型（引擎自身缺省解析）。
+   * 读侧守卫（normalizeOptionalBindingFields）对存量 binding 的空串残留归一 undefined
+   * ——禁空串哨兵纪律覆盖持久化读写两侧。
+   */
+  model: string | undefined;
   thinkingLevel?: string;
   /** 创建时启用 worktree 隔离（重建面 hadWorktree 恢复源）。 */
   worktree: boolean;
@@ -383,7 +388,7 @@ export interface RecordBinding {
    * 来源身份（H2 S3 修复：引擎子文件身份面 origin 透传）。undefined（存量 binding）
    * = "tool" 语义，消费方零迁移——engine-CLI 化后子 session 文件无 identity entry，
    * 本 sidecar 是磁盘重建面 origin 过滤（subagents list / TUI overlay）的唯一承载，
-   * 漏本字段则归档/重启后 workflow record 逃过投影过滤（Gate B S3 FAIL 根因）。
+   * 漏本字段则收口/重启后 workflow record 逃过投影过滤（Gate B S3 FAIL 根因）。
    */
   origin?: RecordOrigin;
   /**
@@ -441,32 +446,37 @@ export function zcodeAnchorBasePath(ref: { sessionId: string; dbPath: string }):
 /**
  * 写 record 绑定 sidecar（原子写：独占创建 tmp → rename 覆盖目标）。
  *
- * best-effort 记账面：任何 I/O 失败只 warn 不抛——绑定写发生在派发/应答主路径上，
- * 绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。
+ * 大多数调用点（spawn 回填点 / settle 快照）是 best-effort 记账面：I/O 失败只 warn
+ * 不抛——绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。失败经返回值
+ * 上报调用方自行分派处置（markReopened 是硬要求例外——epoch 随 binding 持久化，
+ * 写失败必须拒绝重开，见 record-store-terminal.markReopenedImpl）。
  *
  * @param sessionFile 锚基底路径：pi = 子 session.jsonl 绝对路径（绑定目标 =
  *        `<sessionFile>.record-binding`）；zcode = {@link zcodeAnchorBasePath} 派生基底
  *        （U7 settle 快照收编——扩展名拼接同构，读写两侧共用本函数）。
+ * @returns true = 已落盘；false = 写失败（错误已 warn 留痕，处置归调用方）。
  */
-export function writeRecordBinding(sessionFile: string, binding: RecordBinding): void {
+export function writeRecordBinding(sessionFile: string, binding: RecordBinding): boolean {
   const target = `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`;
   // tmp 名带 pid：多进程共享 sessionsDir 时互不覆盖；wx 独占创建防同进程残留碰撞。
   const tmp = `${target}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tmp, JSON.stringify(binding), { encoding: "utf-8", flag: "wx" });
     fs.renameSync(tmp, target);
+    return true;
   } catch (err) {
     try {
       fs.rmSync(tmp, { force: true });
     } catch (_e) {
       void _e; // tmp 清理失败不追加处理（同为目标目录 IO 故障域）
     }
-    logger.warn("[subagents] record binding write failed (best-effort bookkeeping; dispatch unaffected)", {
+    logger.warn("[subagents] record binding write failed (best-effort bookkeeping; failure reported to caller)", {
       detail: {
         sessionFile,
         error: err instanceof Error ? err.message : String(err),
       },
     });
+    return false;
   }
 }
 
@@ -607,7 +617,10 @@ function normalizeOptionalBindingFields(
     depth: numOr(parsed.depth, 0),
     slug: strOr(parsed.slug, ""),
     round: numOrUndefined(parsed.round),
-    model: strOr(parsed.model, ""),
+    // [R4/D6-③] model 空串归一缺席：undefined/缺省/""（存量 binding 空串残留）→
+    // undefined = 用户未指定——空串若复活进 record，「压掉 defaultModelSelection」
+    // 经 taskSpec 空串带键路径静默回归（禁空串哨兵，持久化读写两侧纪律）。
+    model: modelOrUndefined(parsed.model),
     thinkingLevel: strOrUndefined(parsed.thinkingLevel),
     // 来源身份两字段（H2 S3）：字面量守卫归一（非法/缺省 → undefined = "tool" 语义），
     // 对齐 record-store.readEntryOriginFields 主 entry 重建侧的同名守卫。
@@ -635,6 +648,15 @@ function strOrUndefined(v: string | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * model 空串归一缺席（R4/D6-③，禁空串哨兵）：string 守卫 + trim 判空——undefined/
+ * 缺省/"" 一律归 undefined（= 用户未指定模型）。slug 仍走 strOr（"" 是其合法缺省域），
+ * model 的缺省域自 R4 起收敛为 undefined。
+ */
+function modelOrUndefined(v: string | undefined): string | undefined {
+  return typeof v === "string" && v.trim() !== "" ? v : undefined;
+}
+
 /** number 守卫（非法/缺省 → undefined）。 */
 function numOrUndefined(v: number | undefined): number | undefined {
   return typeof v === "number" ? v : undefined;
@@ -645,7 +667,7 @@ function numOr(v: number | undefined, fallback: number): number {
   return typeof v === "number" ? v : fallback;
 }
 
-/** string 守卫 + 显式缺省值（model "" 等非 undefined 缺省域）。 */
+/** string 守卫 + 显式缺省值（slug "" 等非 undefined 缺省域；model 已改归一缺席，R4/D6-③）。 */
 function strOr(v: string | undefined, fallback: string): string {
   return typeof v === "string" ? v : fallback;
 }

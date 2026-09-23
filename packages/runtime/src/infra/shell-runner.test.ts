@@ -80,6 +80,69 @@ describe('ShellRunner env 出站接线（U4-B8）', () => {
   })
 })
 
+/**
+ * 构造可手动触发 close 的假 spawn（RT-8#8 信号退出码用例用）：child 不自动 settle，
+ * 由用例 emit close(exitCode, signal)。
+ */
+function createManualSpawn() {
+  const children: Array<{ emitClose: (exitCode: number | null, signal: NodeJS.Signals | null) => void }> = []
+  const spawnFn = vi.fn(() => {
+    // emitter 单独持有：child 被 cast 成窄形状供生产代码消费，emit('close') 经 emitter
+    // 触发（从 cast 后的 child 上取 .emit 会丢 EventEmitter 类型，TS2339）
+    const emitter = new EventEmitter()
+    const child = emitter as unknown as {
+      stdout: EventEmitter
+      stderr: EventEmitter
+      kill: (signal?: string) => void
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => {}
+    children.push({
+      emitClose: (exitCode: number | null, signal: NodeJS.Signals | null) => {
+        emitter.emit('close', exitCode, signal)
+      },
+    })
+    return child
+  })
+  return { spawnFn: spawnFn as unknown as SpawnFn, children }
+}
+
+describe('ShellRunner 信号退出码（RT-8#8：exitCode ?? 0 假成功）', () => {
+  it('被信号杀死（exitCode=null + signal=SIGTERM）→ 折算 128+15=143 非 0，stderr 带信号标记', async () => {
+    const { spawnFn, children } = createManualSpawn()
+    const runner = new ShellRunner({ spawn: spawnFn })
+    const pending = runner.execute({ scriptPath: '/tmp/killed.sh', cwd: '/tmp', timeout: 120_000 })
+    children[0]!.emitClose(null, 'SIGTERM')
+
+    const result = await pending
+    expect(result.exitCode).toBe(143)
+    expect(result.stderr).toContain('killed by signal SIGTERM')
+  })
+
+  it('未知信号（表外）→ 兜底 128 仍是非 0（保持「非 0 = 失败」语义）', async () => {
+    const { spawnFn, children } = createManualSpawn()
+    const runner = new ShellRunner({ spawn: spawnFn })
+    const pending = runner.execute({ scriptPath: '/tmp/killed.sh', cwd: '/tmp', timeout: 120_000 })
+    children[0]!.emitClose(null, 'SIGUSR1')
+
+    const result = await pending
+    expect(result.exitCode).toBe(128)
+    expect(result.stderr).toContain('killed by signal SIGUSR1')
+  })
+
+  it('正常失败（exitCode=1 + signal=null）→ 原样透传 1，不追加信号标记', async () => {
+    const { spawnFn, children } = createManualSpawn()
+    const runner = new ShellRunner({ spawn: spawnFn })
+    const pending = runner.execute({ scriptPath: '/tmp/fail.sh', cwd: '/tmp', timeout: 120_000 })
+    children[0]!.emitClose(1, null)
+
+    const result = await pending
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).not.toContain('killed by signal')
+  })
+})
+
 describe('ShellRunner 超时用户值生效（timeout-slow-flow-wallclock D4）', () => {
   it('调用方传入的 timeout 驱动超时判定：到期 SIGTERM + ShellRunnerError(timeout)，消息含用户值', async () => {
     // child 永不 close（模拟脚本挂死）；timeout=5ms 远小于旧暗默认 120s——

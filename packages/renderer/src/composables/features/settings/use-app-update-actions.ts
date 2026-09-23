@@ -13,7 +13,13 @@ import {
   updateInstall as ipcUpdateInstall,
   openUpdateFallbackUrl as ipcOpenUpdateFallbackUrl,
 } from '@/api/domains/settings'
+import { useToast } from '@/composables/useToast'
+import i18n from '@/i18n'
 import { updateFlags, updateState } from './use-app-update-state'
+
+// 模块级 t：openFallbackUrl 的失败 toast 在事件回调里触发，非 setup 同步上下文
+// 用不了 useI18n()，照抄同目录 use-app-update-check.ts 的 global.t 模式。
+const t = i18n.global.t
 
 /**
  * 执行下载阶段。state='downloading' + errorHandled=false，调 ipc.updateDownload。
@@ -94,5 +100,14 @@ export async function performInstall(): Promise<void> {
 export async function openFallbackUrl(): Promise<void> {
   const release = updateState.latestRelease
   if (!release) return
-  await ipcOpenUpdateFallbackUrl(release.htmlUrl)
+  try {
+    await ipcOpenUpdateFallbackUrl(release.htmlUrl)
+  } catch (e) {
+    // RD-4#9：更新失败时唯一的「手动下载」出口自身不能裸崩。调用点 void openFallbackUrl()
+    // 不 await，IPC reject 会变 unhandledRejection 静默失灵。此处兜住：toast 报错并把
+    // release.htmlUrl 直接可复制地给出（用户手动访问下载页）。
+    console.warn('[useAppUpdate] openFallbackUrl failed:', e)
+    const { error: toastError } = useToast()
+    toastError(t('settings.system.openFallbackFailed', { url: release.htmlUrl }))
+  }
 }

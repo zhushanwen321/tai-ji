@@ -1,7 +1,7 @@
 /**
  * 反向守卫：`panel.*` 与 `settings.providerEdit.*` 的 locale 叶子 key 必须被源码消费。
  *
- * 存在动机（docs/design/coding-plan-quota-config-ux.impl-plan.md §7 残留风险 9）：
+ * 存在动机：
  * 仓库已有「引用 → 存在」守卫（provider-edit-key-existence.test.ts，防裸 key 透出），
  * 但没有反方向守卫，于是多年迭代后 locale 里沉淀了大量零引用死键（本守卫落地时
  * 一次清扫了 97 条，见 commit message）。本测试补上「存在 → 被引用」这条通路。

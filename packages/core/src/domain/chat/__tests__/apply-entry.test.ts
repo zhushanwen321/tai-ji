@@ -21,6 +21,7 @@ import {
   replayEntries,
 } from '../apply-entry'
 import type { PiEntry, PiMessageEntry } from '../apply-entry'
+import { msgEntry } from './helpers/fixtures'
 
 /**
  * [W5] 读取 spread 保字段的 images（shared.ToolCall/Message 暂无 images 类型声明，
@@ -35,21 +36,8 @@ function readImagesField(obj: object): Array<{ data: string; mimeType: string }>
   })
 }
 
-// ── 测试数据工厂（真实形态：ISO timestamp / parentId 链 / uuid 风格 id）──────────
-
-function msgEntry(
-  id: string,
-  body: Record<string, unknown>,
-  overrides?: { parentId?: string | null; timestamp?: string },
-): PiMessageEntry {
-  return {
-    type: 'message',
-    id,
-    parentId: overrides?.parentId ?? null,
-    timestamp: overrides?.timestamp ?? '2026-08-19T10:00:00.000Z',
-    message: body,
-  }
-}
+// ── 测试数据工厂（真实形态：ISO timestamp / parentId 链 / uuid 风格 id；
+//    msgEntry 构造收敛到 helpers/fixtures.ts 单源）──────────
 
 const ISO = (ms: number): string => new Date(ms).toISOString()
 

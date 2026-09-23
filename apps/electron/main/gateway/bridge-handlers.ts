@@ -31,6 +31,10 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   // getRuntimeToken 读取（与 get-runtime-port 同模式），连接 open 后作首条 auth 消息发送。
   // 通道②（<dataDir>/runtime-token 文件）面向 CLI / 脚本，不经此 IPC。
   ipcMain.handle('get-runtime-token', () => deps.runtime.token)
+  // RD-3#2：启动失败真因拉取（与 get-runtime-port 同模式只读 supervisor 状态）。
+  // runtime-error 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失）
+  // ——renderer 连接编排 init 时主动拉取，徒劳自动重试短路 + 连接屏显示真实原因。
+  ipcMain.handle('get-runtime-start-error', () => deps.runtime.startError)
 
   // ── 数据目录（只读，Settings 强制目录展示动态化用）─────────────────
   // 返回 ~ 缩写的展示路径（home 前缀 → ~），dev 下为 ~/.taiji-dev，prod 为 ~/.taiji。

@@ -76,14 +76,16 @@ describe('M5-01: setProvider catalog 分支（真实 isCatalogProvider，不 moc
     expect('apiKey' in merged).toBe(false)
   })
 
-  it('custom provider（my-custom）保存 apiKey → merged 含 apiKey（回归：custom 分支仍写 models.json + I9 清 auth.json oauth）', () => {
+  it('custom provider（my-custom）保存 apiKey → merged 含 apiKey（回归：custom 分支仍写 models.json + I9 清 auth.json oauth）', async () => {
     const store = makeStore()
     const auth = makeAuth()
     const writer = makeCredentialWriter()
     const svc = new ConfigService('/tmp/project', store, auth)
     svc.setCredentialWriter(writer)
 
-    svc.setProvider('my-custom', { apiKey: 'sk-x' })
+    // RT-7#3：custom 分支 auth.json 清理 await 化（resolver 源优先级 auth.json 在前，
+    // 清理未落盘会残留旧 oauth）——upsert 在清理完成后才发生，断言需 await
+    await svc.setProvider('my-custom', { apiKey: 'sk-x' })
 
     // custom 凭据写 models.json（apiKey 字段），auth.json 反而要清（I9 清理①）
     expect(writer.saveCredential).not.toHaveBeenCalled()

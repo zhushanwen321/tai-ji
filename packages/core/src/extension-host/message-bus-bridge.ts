@@ -264,7 +264,7 @@ function parseExtensionWidget(msg: IncomingPluginMessage): InternalEvent | null 
     }
   }
   // extension:widgetGui —— gui 为 null 时保留清除语义（[null] 进 guiTree，消费端据此删条目）。
-  // meta（v1.1 wire 的 widget 宿主元数据）透传，ViewHostStore 窄化后供 WidgetArea head 渲染。
+  // meta（v1.1 wire 的 widget 宿主元数据）透传，ViewHostStore 窄化后供托盘 widget 面板 head 渲染。
   if (!('gui' in payload)) return null
   return {
     kind: 'extension-widget',
@@ -296,6 +296,20 @@ function parseExtensionNotify(msg: IncomingPluginMessage): InternalEvent | null 
     ...(asOptionalString(payload.level) !== undefined ? { level: payload.level } : {}),
   }
   return { kind: 'extension-notify', sessionId: resolveSessionId(msg, payload), notification }
+}
+
+/** extension:requestsInvalidated —— 挂起 UI 请求失效广播（P2-2 失效链：requestIds 逐条移除） */
+function parseExtensionRequestsInvalidated(msg: IncomingPluginMessage): InternalEvent | null {
+  const payload = asRecord(msg.payload)
+  if (!payload) return null
+  const requestIds = asStringArray(payload.requestIds)
+  if (requestIds === null) return null
+  return {
+    kind: 'requests-invalidated',
+    sessionId: resolveSessionId(msg, payload),
+    requestIds,
+    reason: asOptionalString(payload.reason) ?? 'unknown',
+  }
 }
 
 function parseExtensionUiRequest(msg: IncomingPluginMessage): InternalEvent | null {
@@ -336,6 +350,7 @@ const EXTENSION_HANDLERS: Record<string, (msg: IncomingPluginMessage) => Interna
   'extension:widgetGui': parseExtensionWidget,
   'extension:status': parseExtensionStatus,
   'extension:notify': parseExtensionNotify,
+  'extension:requestsInvalidated': parseExtensionRequestsInvalidated,
   'extension.ui_request': parseExtensionUiRequest,
 }
 

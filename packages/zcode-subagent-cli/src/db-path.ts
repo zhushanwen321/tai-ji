@@ -11,12 +11,17 @@
 //
 // 路径单一来源纪律（不变量 2）：spawn env 的 ZCODE_SESSION_DB_PATH 值、后续
 // handle.sessionRef.dbPath 与两读取站点的白名单集合，全部由本模块两个构造函数
-// 产出，禁止任何消费方手拼字面量（与 resolvePoolDir 同款纪律）。
+// 产出，禁止任何消费方手拼字面量（与 resolvePoolDir 同款纪律）。构造函数的路径
+// 段常量同源自 @zhushanwen/subagent-engine-sdk zcode-db-paths.ts（跨侧契约根，
+// 与 runtime 读侧 import 同一常量——非本包私有重声明）。
 
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { ZCODE_HOST_DB_SUFFIX } from "./constants.ts";
+import {
+  ZCODE_HOST_DB_SUFFIX,
+  ZCODE_ISOLATED_DB_SEGMENTS,
+} from "@zhushanwen/subagent-engine-sdk";
 
 /**
  * 隔离会话库绝对路径（单一构造函数，唯一权威）：
@@ -32,7 +37,7 @@ import { ZCODE_HOST_DB_SUFFIX } from "./constants.ts";
  * @param engineDataDir 引擎数据目录（`deps.engineDataDir()`；禁硬编码，一律由入参推导）
  */
 export function zcodeSessionDbPath(engineDataDir: string): string {
-  return path.join(engineDataDir, "engines", "zcode", "session-db", "db.sqlite");
+  return path.join(engineDataDir, ...ZCODE_ISOLATED_DB_SEGMENTS);
 }
 
 /**

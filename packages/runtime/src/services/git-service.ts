@@ -1,5 +1,5 @@
 /**
- * GitService —— git 全量状态查询 + 写操作编排的深模块（issues.md #1 / code-architecture §3.7/§5.1）。
+ * GitService —— git 全量状态查询 + 写操作编排的深模块。
  *
  * 深度：调用方只传 sessionId（+ 可选路径/message）；cwd 解析、路径越界校验、git CLI 调用、
  * XY 码解析、numstat 聚合、冲突判定全部隐藏。handler 只需 catch → error envelope。

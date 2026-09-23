@@ -5,15 +5,14 @@
  * C-W3-1 端口注入：isMock 改 deps.ports.isMock（替代 import.meta.env.VITE_MOCK）、
  * mockApi.search fixture 经 deps.ports.searchMock（SearchDataPort）、composerApi.getFileCandidates
  * 经 deps.ports.fileCandidates（FileCandidatesPort）、sessionApi.list 经 deps.ports.sessionList
- * （SessionListPort）、chatStore.messages watch 经 deps.ports.watchFileChanges（FileChangeWatchPort，
- * C-W3-3）。i18n.global.t 经 deps.ports.t（TranslatePort）。
+ * （SessionListPort）。i18n.global.t 经 deps.ports.t（TranslatePort）。
  *
  * 数据流：SearchModal.watch(query) → debounce 120ms → query(q, ctx) →
- *   allSettled 并行查 3 源（命令内存 / file WS 缓存优先 / session WS）→
+ *   allSettled 并行查 3 源（命令内存 / file WS 直查 / session WS）→
  *   合并候选 → matchFilter 过滤 → DTO 映射 → 按类型分组（符号占位 D-001）→ Section[]
  *
  * 失败路径：
- *  - file 源 WS reject：error 从 fileCandidates 冒泡（AC-4.5 不经 useFileSearch.load 吞错层）
+ *  - file 源 WS reject：error 从 fileCandidates 冒泡（AC-4.5 不经壳层 useFileSearch.load 吞错层）
  *    → allSettled rejected → 分组空态（MR-4.2 单源静默）
  *  - WS 断连 pending 永不 settle（#17 F-1）：WS 超时 race 10s → reject → allSettled settled
  *    → 分组空态+toast（AC-17.1，不永久挂死）
@@ -22,8 +21,6 @@
  *
  * 并发（BC-9）：loadSeq 模块级自增序列号，await 后比对，旧响应丢弃。
  */
-import { ref, watch, onScopeDispose, getCurrentScope } from 'vue'
-import type { Ref } from 'vue'
 import { matchFilter } from './match-engine'
 import { toFileCandidates } from './file-candidates'
 import type { FileCandidate } from './file-candidates'
@@ -33,11 +30,10 @@ import type { SearchCtx, Section, SearchItem } from './types'
 import { useCommandRegistry } from './command-registry'
 import type { UnifiedCommand } from './command-registry'
 import { useRecents } from './recents'
-import { useFileSearch } from './file-search'
 import type { SearchDeps } from './search-ports'
 import type { AppCommand } from './types'
 import type { SessionCommand } from './command-store'
-import type { FileNode, SessionGroup, SessionSummary } from '@taiji/shared'
+import type { SessionGroup, SessionSummary } from '@taiji/shared'
 
 /**
  * 文件候选结果上限（D-021 校正值）。
@@ -63,47 +59,8 @@ export function useSearch(
   deps: SearchDeps,
 ) {
   const { ports } = deps
-  const fileSearchStore = deps.fileSearchStore
   const commandRegistry = useCommandRegistry(activeSessionId, deps.commandStore)
   const recents = useRecents(deps.storage)
-  const { setupInvalidation } = useFileSearch({
-    fileSearchStore,
-    fileCandidates: ports.fileCandidates,
-    watchFileChanges: ports.watchFileChanges,
-  })
-
-  /**
-   * AC-4.10 stale cache 防护：SearchModal 挂载即 useSearch 存活，
-   * 在此自绑 setupInvalidation watch（不依赖 CommandPopover 挂载）。
-   * activeSessionId 可能为 null（Ref<string|null>），需转 Ref<string>：
-   * watch activeSessionId，非 null 时调 setupInvalidation（其内部 watch 文件变更端口），
-   * null 或切换时 teardown 旧 watch。scope dispose 时确保最终 unwatch。
-   */
-  let cleanupInvalidation: (() => void) | undefined
-  const stopSidWatch = watch(
-    () => activeSessionId.value,
-    (sid) => {
-      // 切换 session 先 teardown 旧 watch，防重复订阅
-      if (cleanupInvalidation) {
-        cleanupInvalidation()
-        cleanupInvalidation = undefined
-      }
-      if (sid) {
-        // 转 Ref<string>（非 null）：sidRef 随 activeSessionId 变化由外层 watch 切换重建
-        // （每次 sid 变化都 teardown 旧的 setupInvalidation 再重建，故 sidRef 仅承载当前值）
-        const sidRef: Ref<string> = ref(sid)
-        cleanupInvalidation = setupInvalidation(sidRef)
-      }
-    },
-    { immediate: true },
-  )
-  // onScopeDispose 仅在 effect scope 内注册（组件挂载场景）；无 scope（node 测试）跳过不 warn
-  if (getCurrentScope()) {
-    onScopeDispose(() => {
-      if (cleanupInvalidation) cleanupInvalidation()
-      stopSidWatch()
-    })
-  }
 
   /** [BC-9 / D-022 骨架约束] loadSeq 序列号守卫（乱序响应不覆盖新结果） */
   let loadSeq = 0
@@ -182,25 +139,17 @@ export function useSearch(
   }
 
   /**
-   * file 源（WS 缓存优先 + #17 超时 race + 源内分级匹配）。
+   * file 源（WS 直查 + #17 超时 race + 源内分级匹配）。
    * 复用 composer # 的同一套匹配管线：FileNode[] → toFileCandidates → filterAndSortFileCandidates
    * （basename 前缀 > path 子串 + 文件优先 + 路径浅优先 + 排序），保证两处文件搜索行为一致。
-   * AC-4.9：缓存命中直返（不重复递归）。
-   * AC-4.5：缓存未命中直调 fileCandidates（不经 useFileSearch.load 吞错层）。
+   * AC-4.5：直调 fileCandidates（不经壳层 useFileSearch.load 吞错层）；无缓存（缓存治理 U1 1-3
+   * 退役）——每次现拉，外部建/删文件零陈旧窗。
    * #17：WS 源包 Promise.race timeout（防 pending 永不 settle）。
    */
   async function queryFileSource(sid: string | null, q: string): Promise<SearchItem[]> {
     if (!sid) return [] // AC-4.8 无 session → file 源空
-    const cached = fileSearchStore.get(sid)
-    let nodes: FileNode[]
-    if (cached) {
-      nodes = cached // AC-4.9 缓存命中
-    } else {
-      // AC-4.5：直调 fileCandidates（不经 useFileSearch.load 吞错层）
-      // #17：WS 超时 race（10s，防 WS 断连 pending 永不 settle 致浮层挂死）
-      nodes = await withWsTimeout(ports.fileCandidates(sid))
-      fileSearchStore.set(sid, nodes) // 写缓存供下次命中
-    }
+    // #17：WS 超时 race（10s，防 WS 断连 pending 永不 settle 致浮层挂死）
+    const nodes = await withWsTimeout(ports.fileCandidates(sid))
     // 复用 composer # 管线：DTO 映射 + 分级匹配过滤+排序（同一套算法）
     const candidates = toFileCandidates(nodes)
     const filtered = filterAndSortFileCandidates(candidates, q)

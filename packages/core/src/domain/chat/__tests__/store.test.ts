@@ -20,17 +20,14 @@ import type { ChatStoreInstance } from '../store'
 import { textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { replayEntries } from '../apply-entry'
+import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
+import { msg } from './helpers/fixtures'
 
 /** 构造独立 store 实例（effectScope 包裹 onScopeDispose 注册 + 测试隔离）。返回 store + dispose。 */
 function makeStore(): { store: ChatStoreInstance; dispose: () => void } {
   const scope = effectScope(true)
   const store = scope.run(() => createChatStore())!
   return { store, dispose: () => scope.stop() }
-}
-
-/** 构造 ServerMessage（payload 默认带 sessionId） */
-function msg(sid: string, type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: sid, ...payload } } as ServerMessage
 }
 
 /** 构造 complete user 消息（content: string） */
@@ -164,7 +161,7 @@ describe('createChatStore factory', () => {
         expect(sut.store.getMessages(sid)[0]!.content).toBe('更早')
       })
 
-      // ── [steer-bubble u3 / docs/design/steer-followup-user-bubble-display.md D3]
+      // ── [steer-bubble u3 / D3]
       //    两步合并快照序列：①尾部保护段收集（streaming assistant ∨ 未确认 user）
       //    ②user 正序-尾窗对齐去重（a=min(n,k)，保护段正数 1..a ↔ 基线尾部 k−a+1..k
       //    逐位剔除）。四类快照序列 + 已知边界逐一覆盖（F2：切入刷新不抹已投递气泡、
@@ -569,7 +566,7 @@ describe('createChatStore factory', () => {
 
   // ── [steer-bubble u0/D2] inflight 投递确认计数契约层：state + 增/减/清零 action 面。
   //    本组只锁 store 层语义；调用方接线（腿 1 消费 +m / send 乐观 ±1 / message_end 确认
-  //    −1 / abort 清零）归 u1/u2 单元。设计：docs/design/steer-followup-user-bubble-display.md D2/D4 ──
+  //    −1 / abort 清零）归 u1/u2 单元 ──
   describe('inflight 计数（u0 契约层：已显示待确认的投递数）', () => {
     it('increment/decrement 基本语义：默认步长 1，显式 n 累加（腿 1 实取数 m 形态）', () => {
       const sid = 's1'
@@ -803,6 +800,68 @@ describe('createChatStore factory', () => {
     })
   })
 
+  describe('finalizeSession 收口 warn 的 dev 门（D5：仅 timeout 去门）', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      // 钉死非 dev 起点（isDevMode 默认 false；防御同 worker 前序用例泄漏 true）
+      __resetDevModeForTesting()
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+    afterEach(() => {
+      warnSpy.mockRestore()
+      __resetDevModeForTesting()
+    })
+
+    /** 只取 finalizeSession 收口 warn 行（steer/send 等路径另有 warn，滤除） */
+    function finalizeWarnLines(): string[] {
+      const allLines: string[] = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]))
+      return allLines.filter((s) => s.includes('finalizeSession'))
+    }
+
+    it('非 dev（isDevMode=false）→ reason=timeout → console.warn 发出（含 sid/reason，「非 dev 构建可见」构造性证据）', () => {
+      sut.store.finalizeSession('s-t', 'timeout')
+      const line = finalizeWarnLines().find((s) => s.includes('sid=s-t') && s.includes('reason=timeout'))
+      expect(line).toBeDefined()
+    })
+
+    it('非 dev → 30s pendingSend timer 唯一来源路径同发 timeout warn（timer 到期 → finalizeSession timeout）', () => {
+      const sid = 's-timer'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+      sut.store.addPendingSend(sid)
+      vi.advanceTimersByTime(30_000)
+      const line = finalizeWarnLines().find((s) => s.includes(`sid=${sid}`) && s.includes('reason=timeout'))
+      expect(line).toBeDefined()
+      expect(sut.store.isActive(sid)).toBe(false) // 兜底收口照旧（D3 timer 语义零改动）
+    })
+
+    it('非 dev → 其余异常 reason（error/disconnect）零 warn（其余 reason dev 门保留）', () => {
+      sut.store.finalizeSession('s-e', 'error')
+      sut.store.finalizeSession('s-d', 'disconnect')
+      expect(finalizeWarnLines()).toHaveLength(0)
+    })
+
+    it('非 dev → normal/aborted 零 warn（正常路径零噪音不变）', () => {
+      sut.store.finalizeSession('s-n', 'normal')
+      sut.store.finalizeSession('s-a', 'aborted')
+      expect(finalizeWarnLines()).toHaveLength(0)
+    })
+
+    it('dev → 其余异常 reason 照旧 warn、normal 不 warn（dev 门行为零变化）', () => {
+      provideDevMode(true)
+      sut.store.finalizeSession('s-e', 'error')
+      expect(finalizeWarnLines()).toHaveLength(1)
+      sut.store.finalizeSession('s-n', 'normal')
+      expect(finalizeWarnLines()).toHaveLength(1) // normal 仍被排除
+    })
+
+    it('dev → timeout 仍 warn（去门是放大而非移除信号）', () => {
+      provideDevMode(true)
+      sut.store.finalizeSession('s-t', 'timeout')
+      expect(finalizeWarnLines()).toHaveLength(1)
+    })
+  })
+
   describe('finalizeAllStreaming（断连 / 崩溃兜底收口，review #1.2）', () => {
     it('disconnect → 全部候选 session 的 streaming 复位（isGenerating false）+ 消息 error 收口 + 独立瞬态清空', () => {
       const s1 = 's1'
@@ -938,6 +997,21 @@ describe('createChatStore factory', () => {
       // 推进 30s（PENDING_SEND_TIMEOUT_MS），pendingSend timer 触发 finalizeSession('timeout')
       vi.advanceTimersByTime(30_000)
       expect(sut.store.isGenerating(sid)).toBe(false) // streaming 被 timeout 收口
+    })
+
+    it('clearPendingSend 取消挂的 timer（到期不再 finalize）', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' })) // 建 streaming
+      sut.store.addPendingSend(sid)
+      sut.store.clearPendingSend(sid)
+
+      vi.advanceTimersByTime(30_000)
+      expect(sut.store.isGenerating(sid)).toBe(true) // timer 已被清，未被 timeout 收口
+    })
+
+    it('clearPendingSend 幂等：清不存在的 session 不抛错', () => {
+      expect(() => sut.store.clearPendingSend('ghost')).not.toThrow()
+      expect(sut.store.isActive('ghost')).toBe(false)
     })
   })
 

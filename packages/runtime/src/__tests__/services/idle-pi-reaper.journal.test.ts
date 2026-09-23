@@ -74,6 +74,7 @@ function makeHarness(seed: Record<string, FakeState>, reclaimResult = true): Har
     hasQueuedDeliveries: () => false,
     getLastViewedAt: (sid) => states.get(sid)?.viewedAt,
     isRestoring: () => false,
+    hasPendingUiRequest: () => false,
   }
   return {
     states,

@@ -3,7 +3,7 @@
  * 原 session-state-changed-sync.test.ts 已并入本文件——同 SUT ensureStreamSubscription
  * switch 分支、逐字相同 mock 脚手架）。
  *
- * session.renamed（CLAUDE.md 规则 #7 Session 隔离）：
+ * session.renamed（AGENTS.md 规则 #7 Session 隔离）：
  * 锁定 pi 改写 session 名（session_info_changed）经 runtime event-adapter 映射为
  * session.renamed 推送（payload { sessionId, name }），useChat 的 switch 消费后经
  * sessionStore.applySnapshot 同步侧栏 label。事故背景：tui-to-gui-mapping-audit.md:62

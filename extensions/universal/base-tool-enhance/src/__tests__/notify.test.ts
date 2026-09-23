@@ -12,6 +12,7 @@ import { killProcessTree } from "@zhushanwen/extension-protocol/background-task"
 import {
 	BACKGROUND_BASH_CUSTOM_TYPE,
 	buildNotificationContent,
+	buildNotifyDetails,
 	emitPendingRegister,
 	handleTaskExit,
 	refreshPiReference,
@@ -44,6 +45,12 @@ function createMockPi(): MockPi {
 
 function attach(pi: MockPi): void {
 	refreshPiReference(pi as unknown as ExtensionAPI);
+}
+
+/** 取第一条 sendMessage 的首参数对象（D1 details 断言入口）。 */
+function sentMessage(pi: MockPi): { content: string; details: unknown } {
+	const [message] = pi.sendMessage.mock.calls[0] as [{ content: string; details: unknown }, unknown];
+	return message;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -187,7 +194,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		});
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 		const [message, options] = pi.sendMessage.mock.calls[0] as [
-			{ customType: string; content: string; display: boolean },
+			{ customType: string; content: string; display: boolean; details: Record<string, unknown> },
 			{ deliverAs: string; triggerTurn: boolean },
 		];
 		expect(message.customType).toBe(BACKGROUND_BASH_CUSTOM_TYPE);
@@ -196,6 +203,15 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		expect(message.content).toContain("exit 0");
 		expect(message.content).toContain("done"); // tail 摘要
 		expect(options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		// U1（D1）：真实轮询边沿投递的 details 与终态条目逐字段一致（非 fixture 常量）
+		const finalizedEntry = getTask(task.taskId);
+		expect(message.details).toMatchObject({
+			taskId: task.taskId,
+			command: "sleep 0.3 && echo done",
+			endReason: "natural",
+			exitCode: 0,
+		});
+		expect((message.details as { durationMs: number }).durationMs).toBe(finalizedEntry?.durationMs);
 	});
 
 	it("killed: emits unregister reason 'cancelled' but does NOT sendMessage (single-point rule)", async () => {
@@ -282,6 +298,70 @@ describe("notification content (§3.1 sample)", () => {
 		expect(buildNotificationContent(finalizedTask({ durationMs: 45000 }))).toContain(", 45s):");
 		expect(buildNotificationContent(finalizedTask({ durationMs: 192000 }))).toContain("3m12s");
 		expect(buildNotificationContent(finalizedTask({ durationMs: 3_723_000 }))).toContain("1h02m03s");
+	});
+});
+
+describe("notification details (D1 schema: taskId/command/durationMs/endReason/exitCode)", () => {
+	it("natural: details mirror the terminal task fields; content stays byte-identical (LLM payload)", () => {
+		const pi = createMockPi();
+		attach(pi);
+		const task = finalizedTask();
+		handleTaskExit(task);
+
+		const message = sentMessage(pi);
+		expect(message.details).toEqual({
+			taskId: task.taskId,
+			command: task.command,
+			durationMs: task.durationMs,
+			endReason: "natural",
+			exitCode: task.exitCode,
+		});
+		// 键级断言：D1 恰五字段，防字段悄悄混入（register emit 同款范式）
+		expect(Object.keys(message.details as Record<string, unknown>).sort()).toEqual([
+			"command",
+			"durationMs",
+			"endReason",
+			"exitCode",
+			"taskId",
+		]);
+		// content 是 triggerTurn:true 给 LLM 接力的载荷：挂 details 不得改动一个字节
+		expect(message.content).toBe(
+			"[background-bash] bt-1700000000-test01 finished (exit 0, 3m12s): pnpm test\n" +
+				"Last lines: Tests: 42 passed\n" +
+				'Full output: /tmp/out/bt-1700000000-test01.log; use bash_output {task_id:"bt-1700000000-test01"} for details.',
+		);
+	});
+
+	it("natural nonzero exit: exitCode passes through unchanged, endReason stays 'natural'", () => {
+		const pi = createMockPi();
+		attach(pi);
+		handleTaskExit(finalizedTask({ exitCode: 3, durationMs: 5000 }));
+
+		expect(sentMessage(pi).details).toEqual({
+			taskId: "bt-1700000000-test01",
+			command: "pnpm test",
+			durationMs: 5000,
+			endReason: "natural",
+			exitCode: 3,
+		});
+	});
+
+	it("timeout: endReason 'timeout' + exitCode null (D1 可空字段的 timeout 形态)", () => {
+		const pi = createMockPi();
+		attach(pi);
+		handleTaskExit(finalizedTask({ reason: "timeout", exitCode: null, durationMs: 15_000 }));
+
+		expect(sentMessage(pi).details).toEqual({
+			taskId: "bt-1700000000-test01",
+			command: "pnpm test",
+			durationMs: 15_000,
+			endReason: "timeout",
+			exitCode: null,
+		});
+	});
+
+	it("durationMs 缺省归 0：必需字段恒为 number（消费侧解析器才不判 null）", () => {
+		expect(buildNotifyDetails(finalizedTask({ durationMs: undefined })).durationMs).toBe(0);
 	});
 });
 

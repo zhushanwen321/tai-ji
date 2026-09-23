@@ -21,8 +21,6 @@
  * 7. signal.aborted → abortRun + reason=aborted
  *
  * 层归属：Engine。依赖 registry + runWorkflow/abortRun + LifecycleDeps。
- *
- * 参考：domain-models.md §D-8（WorkflowRunResult 签名）、clarification.md C.7。
  */
 
 import { ArgsValidationError } from "./args-validator.ts";

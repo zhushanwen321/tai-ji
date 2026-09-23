@@ -16,14 +16,15 @@
  * scripts/verify-plugin-e2e.sh 的 SEC-A1/A2 场景覆盖。
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { fork } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { createRequireInterceptor, BLOCKED_BUILTINS } from '../src/services/plugin-service/plugin-sandbox.js'
+import { createTsxPathsTsconfig } from './helpers/tsx-fork-tsconfig.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOADER_PATH = join(__dirname, '../src/services/plugin-service/plugin-esm-loader.cjs')
@@ -182,33 +183,52 @@ describe('S1-W3: sandbox escape regression (real fork + real ESM loader)', () =>
 })
 
 describe('S1-W3: CJS interceptor boundary (/, file:, bare-name resolved)', () => {
-  const pluginDir = '/tmp/test-plugin'
-  const interceptor = createRequireInterceptor(pluginDir)
+  // fixture 目录 mkdtemp 自建自删且测试侧先 realpathSync 归一：生产码
+  // createRequireInterceptor 内部对 pluginDir 做 realpathSync 归一后再 startsWith 判界
+  // （macOS tmpdir 经 /var → /private/var symlink）——目录缺失会走生产码 realpath warn
+  // + fail-closed 分支（vitest 解析 warn 的 Error stack 会炸 sourcemap artifact），
+  // 未归一则断言传入的 resolvedPath 字符串与归一后的判界前缀恒不匹配。
+  let pluginDir = ''
+  let outsideRoot = ''
+  let outsideEntry = ''
+  let interceptor: ReturnType<typeof createRequireInterceptor>
+
+  beforeAll(() => {
+    pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'taiji-plugin-sandbox-cjs-')))
+    // 出界对照路径：mkdtemp 父目录下的兄弟路径必然不共享 pluginDir 前缀
+    outsideRoot = dirname(pluginDir)
+    outsideEntry = join(outsideRoot, 'sandbox-outside-evil.cjs')
+    interceptor = createRequireInterceptor(pluginDir)
+  })
+
+  afterAll(() => {
+    if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
 
   it('rejects absolute path requests outside pluginDir (SEC-A2 CJS 通道)', () => {
-    expect(() => interceptor('/tmp/evil/evil.cjs', '/tmp/evil/evil.cjs')).toThrowError(
-      /Sandbox: require\('\/tmp\/evil\/evil\.cjs'\) resolves outside plugin directory/,
+    expect(() => interceptor(outsideEntry, outsideEntry)).toThrowError(
+      `Sandbox: require('${outsideEntry}') resolves outside plugin directory`,
     )
   })
 
   it('rejects file: URL requests outside pluginDir', () => {
-    expect(() => interceptor('file:///tmp/evil/evil.cjs', 'file:///tmp/evil/evil.cjs')).toThrowError(
-      /resolves outside plugin directory/,
-    )
+    const outsideUrl = pathToFileURL(outsideEntry).href
+    expect(() => interceptor(outsideUrl, outsideUrl)).toThrowError(/resolves outside plugin directory/)
   })
 
   it('allows absolute path requests inside pluginDir', () => {
-    expect(interceptor('/tmp/test-plugin/helper.cjs', '/tmp/test-plugin/helper.cjs')).toBe('/tmp/test-plugin/helper.cjs')
+    const insideEntry = join(pluginDir, 'helper.cjs')
+    expect(interceptor(insideEntry, insideEntry)).toBe(insideEntry)
   })
 
   it('rejects bare-name require resolving to node_modules outside pluginDir', () => {
     expect(() =>
-      interceptor('escape-evil-pkg', '/tmp/outside/node_modules/escape-evil-pkg/index.js'),
+      interceptor('escape-evil-pkg', join(outsideRoot, 'node_modules', 'escape-evil-pkg', 'index.js')),
     ).toThrowError(/resolves outside plugin directory/)
   })
 
   it('allows bare-name require resolving inside pluginDir/node_modules', () => {
-    expect(interceptor('ok-pkg', '/tmp/test-plugin/node_modules/ok-pkg/index.js')).toBe('ok-pkg')
+    expect(interceptor('ok-pkg', join(pluginDir, 'node_modules', 'ok-pkg', 'index.js'))).toBe('ok-pkg')
   })
 
   it('still allows builtin bare names (resolvedPath 非文件形态)', () => {
@@ -252,82 +272,91 @@ describe('S-36: CJS 拦截一次性监控日志（usage monitor）', () => {
   }
 
   it('插件 CJS require 触发 patch 后，监控日志恰好输出一次，第二次 require 静默', async () => {
-    const workDir = mkdtempSync(join(tmpdir(), 's36-monitor-'))
-    const pluginDir = join(workDir, 'plugin')
-    mkdirSync(pluginDir)
-    // 两个不同 helper：两次 require 都真实走 _resolveFilename（require 同一文件第二
-    // 次命中 CJS 模块缓存不触发 resolve，会把「恰好一次」变成缓存假阴性）
-    writeFileSync(join(pluginDir, 'helper-a.cjs'), "module.exports = { tag: 'a' }\n")
-    writeFileSync(join(pluginDir, 'helper-b.cjs'), "module.exports = { tag: 'b' }\n")
-    const fixturePath = join(workDir, 'fixture.cjs')
-    writeFileSync(
-      fixturePath,
-      [
-        "'use strict'",
-        '// S-36 fixture：spy console.log → initSandbox → 两次界内 CJS require → 回传计数',
-        'const calls = []',
-        'const originalLog = console.log',
-        'console.log = (...args) => { calls.push(args.map(String).join(" ")) }',
-        '// node:module 在 BLOCKED_BUILTINS 黑名单内，须在 initSandbox 装 patch 前取好构造器',
-        "const Module = require('node:module').Module",
-        `const { initSandbox } = require(${JSON.stringify(PLUGIN_BOOTSTRAP_TS)})`,
-        `initSandbox(${JSON.stringify(pluginDir)})`,
-        '// 计数后续 _resolveFilename 触发次数（证明两次 require 都经过了 sandbox patch）',
-        'const sandboxPatched = Module._resolveFilename',
-        'let resolveCount = 0',
-        'Module._resolveFilename = function (...args) {',
-        '  resolveCount++',
-        '  return sandboxPatched.apply(this, args)',
-        '}',
-        `const a = require(${JSON.stringify(join(pluginDir, 'helper-a.cjs'))})`,
-        `const b = require(${JSON.stringify(join(pluginDir, 'helper-b.cjs'))})`,
-        'console.log = originalLog',
-        "process.stdout.write('S36_RESULT:' + JSON.stringify({",
-        '  monitorCalls: calls.filter((c) => c.includes("CJS require interception active")),',
-        '  resolveCount,',
-        '  loaded: [a.tag, b.tag],',
-        '}))',
-        '',
-      ].join('\n'),
-    )
+    // 临时 tsconfig（fork env TSX_TSCONFIG_PATH）：plugin-bootstrap 依赖链经 plugin-sdk
+    // 运行时 re-export require @zhushanwen/extension-protocol，其 exports 无 require 条件
+    // → 子进程崩溃产生 sourcemap artifact（unhandled error），见 helper 注释
+    const tsxTsconfig = createTsxPathsTsconfig()
+    try {
+      const workDir = mkdtempSync(join(tmpdir(), 's36-monitor-'))
+      const pluginDir = join(workDir, 'plugin')
+      mkdirSync(pluginDir)
+      // 两个不同 helper：两次 require 都真实走 _resolveFilename（require 同一文件第二
+      // 次命中 CJS 模块缓存不触发 resolve，会把「恰好一次」变成缓存假阴性）
+      writeFileSync(join(pluginDir, 'helper-a.cjs'), "module.exports = { tag: 'a' }\n")
+      writeFileSync(join(pluginDir, 'helper-b.cjs'), "module.exports = { tag: 'b' }\n")
+      const fixturePath = join(workDir, 'fixture.cjs')
+      writeFileSync(
+        fixturePath,
+        [
+          "'use strict'",
+          '// S-36 fixture：spy console.log → initSandbox → 两次界内 CJS require → 回传计数',
+          'const calls = []',
+          'const originalLog = console.log',
+          'console.log = (...args) => { calls.push(args.map(String).join(" ")) }',
+          '// node:module 在 BLOCKED_BUILTINS 黑名单内，须在 initSandbox 装 patch 前取好构造器',
+          "const Module = require('node:module').Module",
+          `const { initSandbox } = require(${JSON.stringify(PLUGIN_BOOTSTRAP_TS)})`,
+          `initSandbox(${JSON.stringify(pluginDir)})`,
+          '// 计数后续 _resolveFilename 触发次数（证明两次 require 都经过了 sandbox patch）',
+          'const sandboxPatched = Module._resolveFilename',
+          'let resolveCount = 0',
+          'Module._resolveFilename = function (...args) {',
+          '  resolveCount++',
+          '  return sandboxPatched.apply(this, args)',
+          '}',
+          `const a = require(${JSON.stringify(join(pluginDir, 'helper-a.cjs'))})`,
+          `const b = require(${JSON.stringify(join(pluginDir, 'helper-b.cjs'))})`,
+          'console.log = originalLog',
+          "process.stdout.write('S36_RESULT:' + JSON.stringify({",
+          '  monitorCalls: calls.filter((c) => c.includes("CJS require interception active")),',
+          '  resolveCount,',
+          '  loaded: [a.tag, b.tag],',
+          '}))',
+          '',
+        ].join('\n'),
+      )
 
-    const result = await new Promise<MonitorResult>((resolveP, reject) => {
-      const child = fork(fixturePath, [], {
-        execPath: process.execPath,
-        execArgv: ['--import', 'tsx'],
-        cwd: RUNTIME_ROOT,
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      const result = await new Promise<MonitorResult>((resolveP, reject) => {
+        const child = fork(fixturePath, [], {
+          execPath: process.execPath,
+          execArgv: ['--import', 'tsx'],
+          cwd: RUNTIME_ROOT,
+          env: { ...process.env, TSX_TSCONFIG_PATH: tsxTsconfig.tsconfigPath },
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('error', reject)
+        child.on('close', (code) => {
+          const line = stdout.split('\n').find((l) => l.startsWith('S36_RESULT:'))
+          if (code !== 0 || !line) {
+            reject(new Error(`fixture exited ${code}. stdout=${stdout} stderr=${stderr}`))
+            return
+          }
+          try {
+            resolveP(JSON.parse(line.slice('S36_RESULT:'.length)) as MonitorResult)
+          } catch (e) {
+            reject(new Error(`fixture result parse failed: ${(e as Error).message}`))
+          }
+        })
       })
-      let stdout = ''
-      let stderr = ''
-      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
-      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
-      child.on('error', reject)
-      child.on('close', (code) => {
-        const line = stdout.split('\n').find((l) => l.startsWith('S36_RESULT:'))
-        if (code !== 0 || !line) {
-          reject(new Error(`fixture exited ${code}. stdout=${stdout} stderr=${stderr}`))
-          return
-        }
-        try {
-          resolveP(JSON.parse(line.slice('S36_RESULT:'.length)) as MonitorResult)
-        } catch (e) {
-          reject(new Error(`fixture result parse failed: ${(e as Error).message}`))
-        }
-      })
-    })
-    rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 
-    // 两次 require 都真实经过了 sandbox patch 且加载成功（排除缓存假阴性）
-    expect(result.resolveCount).toBeGreaterThanOrEqual(2)
-    expect(result.loaded).toEqual(['a', 'b'])
-    // 监控日志恰好一次：首次 patch 触发输出，第二次 require 静默
-    expect(result.monitorCalls).toHaveLength(1)
-    expect(result.monitorCalls[0]).toContain(
-      `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir}`,
-    )
-    expect(result.monitorCalls[0]).toContain(
-      'spec gate S1-W3 usage monitor (observation window ends ~2026-11)',
-    )
+      // 两次 require 都真实经过了 sandbox patch 且加载成功（排除缓存假阴性）
+      expect(result.resolveCount).toBeGreaterThanOrEqual(2)
+      expect(result.loaded).toEqual(['a', 'b'])
+      // 监控日志恰好一次：首次 patch 触发输出，第二次 require 静默
+      expect(result.monitorCalls).toHaveLength(1)
+      expect(result.monitorCalls[0]).toContain(
+        `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir}`,
+      )
+      expect(result.monitorCalls[0]).toContain(
+        'spec gate S1-W3 usage monitor (observation window ends ~2026-11)',
+      )
+    } finally {
+      tsxTsconfig.dispose()
+    }
   }, 30_000)
 })

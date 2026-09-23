@@ -25,6 +25,7 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
+import { errorCodeOf } from "../../shared/fs-error.ts";
 
 import type { ExecutionMode, RecordOrigin } from "../assembly/types.ts";
 
@@ -71,8 +72,12 @@ export interface SessionsIndexEntry {
   rootSessionId: string | undefined;
   parentRecordId: string | undefined;
   depth: number;
-  /** 空串合法：尾部探测（readIdentityTail）拿不到 model 时的合法结果，不当损坏。 */
-  model: string;
+  /**
+   * [R4/D6-① 连带] undefined = 探测拿不到 model（尾部探测无 model_change 途经）或
+   * record 本身未指定模型（缺席语义）——旧「空串合法」哨兵随 R4 禁空串纪律退役，
+   * 存量索引条目的 "" 会被读侧归一（buildRecord 消费链）。
+   */
+  model: string | undefined;
   thinkingLevel: string | undefined;
   /**
    * 来源身份（H2 S3 修复：light→索引→重建往返闭合）。undefined 表示缺失
@@ -157,11 +162,11 @@ function hasOriginFields(v: Record<string, unknown>): boolean {
   );
 }
 
-/** 深度/模型/思考档字段组（model 空串合法——尾部探测拿不到 model 的合法结果，DS4）。 */
+/** 深度/模型/思考档字段组（model undefined 合法——尾部探测拿不到 / 用户未指定，[R4/D6-①]）。 */
 function hasModelFields(v: Record<string, unknown>): boolean {
   return (
     typeof v.depth === "number" &&
-    typeof v.model === "string" && // 空串合法（DS4）
+    (v.model === undefined || typeof v.model === "string") && // 缺席合法（旧 "" 由消费链归一）
     (v.thinkingLevel === undefined || typeof v.thinkingLevel === "string")
   );
 }
@@ -207,11 +212,6 @@ type ValidIndexTop = {
   version: number;
   entries: Record<string, unknown>;
 };
-
-/** unknown → Node fs 错误码（非 Error 或无 code → undefined）。 */
-function errorCodeOf(err: unknown): string | undefined {
-  return err instanceof Error && "code" in err && typeof err.code === "string" ? err.code : undefined;
-}
 
 /** 读索引文件文本。读失败 → null：ENOENT = 正常首跑保持静默；其余读失败（EACCES 等
  * 长期权限异常）留 debug 线索——空索引回退本身可自愈，但权限类异常不会自己消失，需可诊断。 */

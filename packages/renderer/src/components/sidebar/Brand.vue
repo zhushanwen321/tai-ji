@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /**
  * 品牌区：太极双鱼 logo（旋转，currentColor 适配主题）+ 产品名 + 版本号。
- * v6-master-spec §6.2 Brand 区。
  *
  * - logo 资产从 v6 demo 复制（TaijiLogo.vue，SVG 矢量，禁止手改 path d）。
  * - 产品名走 i18n（app.title）：中文「太极」/ 英文「TaiJi」，与 v6 demo 对齐。

@@ -27,6 +27,33 @@ export function formatClock(ms: number): string {
 export const MS_PER_SECOND = 1000
 export const MS_PER_MINUTE = 60000
 
+/** 时钟分段换算（秒/分/时；补零宽度复用 CLOCK_FIELD_WIDTH） */
+const SECONDS_PER_MINUTE = 60
+const MINUTES_PER_HOUR = 60
+
+/**
+ * 时钟分段耗时格式（ms → `45s` / `26m03s` / `1h02m03s`，秒/分补零两位）。
+ *
+ * 通知行族单点（Turn bg-notify 边界行 meta + SystemNotice background-bash 行 meta 共用，
+ * 原 Turn.vue formatNotifyDuration / SystemNotice.vue formatDurationMs 双实现收敛于此）。
+ * 补零口径二选一裁决：锚定 design §3.1 终态样本 `26m03s`（Turn.test.ts D5-COUNT 既有断言）。
+ * 与 extension notify.ts 的 formatDurationMs 数值换算同口径（同源 durationMs 可互证），
+ * 仅 min 档秒显示宽度不同（那边不补零，content 原文行保持其历史形态）。
+ * 不复用本文件 formatDuration：其口径是分钟小数（`3.2min`），服务 trace 块头耗时。
+ */
+export function formatDurationHms(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / MS_PER_SECOND))
+  const sec = totalSec % SECONDS_PER_MINUTE
+  const min = Math.floor(totalSec / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR
+  const hour = Math.floor(totalSec / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR))
+  const secText = String(sec).padStart(CLOCK_FIELD_WIDTH, '0')
+  if (hour > 0) {
+    return `${hour}h${String(min).padStart(CLOCK_FIELD_WIDTH, '0')}m${secText}s`
+  }
+  if (min > 0) return `${min}m${secText}s`
+  return `${totalSec}s`
+}
+
 /** 格式化时长（ms→s/min）。接受 unknown（meta 字段 / progress 快照字段类型宽松） */
 export function formatDuration(ms: unknown): string {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''

@@ -52,4 +52,6 @@ export interface IncrementalMarkdownCache {
   nextSegId: number
   envFilePaths?: Set<string>
   envLocalFiles?: Set<string>
+  /** 相对资源解析基准目录（设计 D4）：壳侧 env 签名第三项（值恒等），变化触发全量重建 */
+  envResourceBaseDir?: string
 }

@@ -729,6 +729,361 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
   })
 })
 
+// ── 尾单元：R2 边界聚合投影 notifySummary（D5）────────────────────────────────
+// 覆盖五条验收（impl-plan U6）：hiddenNotifies 累积 / 缓存复用路径 / batch 展开（含 U9
+// 展平后单层）/ 「通知后无 assistant 填充」空 turn 折叠不变 / id 去重与三态判据。
+
+/** subagent-bg-notify 隐藏通知（details 形态自定：单条 record / {batch,items} / 缺失畸形） */
+function bgNotify(id: string, details?: Record<string, unknown>): Message {
+  return makeMsg({
+    id,
+    role: 'system',
+    customType: 'subagent-bg-notify',
+    display: false,
+    content: '',
+    ...(details !== undefined ? { details } : {}),
+  })
+}
+
+/** workflow-result 隐藏通知（details = notifier notifyDone 形态：runId + name + status + reason） */
+function workflowNotify(id: string, details?: Record<string, unknown>): Message {
+  return makeMsg({
+    id,
+    role: 'system',
+    customType: 'workflow-result',
+    display: false,
+    content: '',
+    ...(details !== undefined ? { details } : {}),
+  })
+}
+
+/** BgNotifyRecord fixture：必需字段四件套（id/status/agent/startedAt）+ 可选项 over 覆盖 */
+function bgRecord(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: 't1', status: 'running', agent: 'main', startedAt: 1000, ...over }
+}
+
+/** 单个 trigger turn（user:null + trigger:'bg-notify' + 一条 assistant 填实）的 fixture 前缀 */
+function triggerFixture(...tail: Message[]): Message[] {
+  return [
+    makeMsg({ id: 'u1', role: 'user', content: 'q' }),
+    makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
+    ...tail,
+  ]
+}
+
+describe('groupRenderInput —— R2 边界聚合投影 notifySummary（D5）', () => {
+  it('hiddenNotifies 累积：连续两条边界折叠复用同组，聚合覆盖两条（跨消息 record 合并）', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', bgRecord({ id: 't1', startedAt: 1000, endedAt: 2000 })),
+        bgNotify('n2', bgRecord({ id: 't2', status: 'closed', closedReason: 'gc', startedAt: 3000 })),
+        makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
+      ),
+    )
+    expect(items.map((i) => i.kind)).toEqual(['turn', 'turn'])
+    const trigger = turnOf(items[1])
+    expect(trigger.trigger).toBe('bg-notify')
+    // 非边界 turn 不携带聚合值（undefined = 无边界语义）
+    expect(turnOf(items[0]).notifySummary).toBeUndefined()
+    // 两条消息各 1 record：count 2；t2 无 endedAt 不贡献耗时 → maxEnd−minStart = 2000−1000
+    expect(trigger.notifySummary).toEqual({
+      count: 2,
+      failedCount: 0,
+      neutralCount: 0,
+      outcomes: ['success', 'success'],
+      durationMs: 1000,
+    })
+  })
+
+  it('缓存复用路径：增量路边界累积后 summary 逐步更新，每步与全量版等价（两构造点同款携带）', () => {
+    const cache = createTurnRenderCache()
+    const u1 = makeMsg({ id: 'u1', role: 'user', content: 'q' })
+    const a1 = makeMsg({ id: 'a1', role: 'assistant', content: 'r' })
+    const n1 = bgNotify('n1', bgRecord({ id: 't1', startedAt: 0, endedAt: 60_000 }))
+    // 空 trigger turn 折叠：边界未被填实 → 无渲染项（summary 无处可显，语义同现状）
+    const r1 = toRenderItemsIncremental([u1, a1, n1], false, cache)
+    expect(r1.map((i) => i.kind)).toEqual(['turn'])
+    // 追加第二条边界 + 续跑 assistant：同组累积（count 2），聚合值随增量路更新
+    const n2 = bgNotify('n2', bgRecord({ id: 't2', startedAt: 0, endedAt: 120_000 }))
+    const a2 = makeMsg({ id: 'a2', role: 'assistant', content: '续跑' })
+    const src2 = [u1, a1, n1, n2, a2]
+    const r2 = toRenderItemsIncremental(src2, false, cache)
+    expect(turnOf(r2[1]).notifySummary?.count).toBe(2)
+    expect(turnOf(r2[1]).notifySummary?.durationMs).toBe(120_000)
+    expect(r2).toEqual(toRenderItems(src2, false))
+    // assistant 填实后第三条边界到达 → 另开独立组（跨组不重复计量：两行各计 1）
+    const r3 = toRenderItemsIncremental(
+      [...src2, bgNotify('n3', bgRecord({ id: 't3', startedAt: 0, endedAt: 180_000 })), makeMsg({ id: 'a3', role: 'assistant', content: '再续' })],
+      false,
+      cache,
+    )
+    expect(turnOf(r3[0])).toBe(turnOf(r2[0])) // 历史 turn 引用恒等
+    expect(turnOf(r3[1]).notifySummary?.count).toBe(2) // 前组聚合值不变
+    expect(turnOf(r3[2]).notifySummary).toEqual({
+      count: 1,
+      failedCount: 0,
+      neutralCount: 0,
+      outcomes: ['success'],
+      durationMs: 180_000,
+    })
+    expect(r3).toEqual(toRenderItems([...src2, bgNotify('n3', bgRecord({ id: 't3', startedAt: 0, endedAt: 180_000 })), makeMsg({ id: 'a3', role: 'assistant', content: '再续' })], false))
+  })
+
+  it('缓存复用路径：已有 trigger turn 同位置重扫时聚合值随 hiddenNotifies 重建（签名含 hiddenNotifies）', () => {
+    // 序列差异只在隐藏通知条数（a2 与 user/assistants 成员引用全同）：若 hiddenNotifies 不入
+    // 复用键，同位置签名会判等 → 复用陈旧 notifySummary（count 1 而非 2）。
+    const cache = createTurnRenderCache()
+    const u1 = makeMsg({ id: 'u1', role: 'user', content: 'q' })
+    const a1 = makeMsg({ id: 'a1', role: 'assistant', content: 'r' })
+    const n1 = bgNotify('n1', bgRecord({ id: 't1', startedAt: 0, endedAt: 60_000 }))
+    const a2 = makeMsg({ id: 'a2', role: 'assistant', content: '续跑' })
+    const r1 = toRenderItemsIncremental([u1, a1, n1, a2], false, cache)
+    expect(turnOf(r1[1]).notifySummary?.count).toBe(1)
+    // 同 id 序列尾追一条通知（数组长度变化 → 车道③全量重扫；同位置 turn 签名只在
+    // hiddenNotifies 上不同）→ 必须重建末位 turn 并刷新聚合值
+    const n2 = bgNotify('n2', bgRecord({ id: 't2', startedAt: 0, endedAt: 120_000 }))
+    const src = [u1, a1, n1, n2, a2]
+    const r2 = toRenderItemsIncremental(src, false, cache)
+    expect(turnOf(r2[0])).toBe(turnOf(r1[0])) // 历史 turn 引用恒等
+    expect(turnOf(r2[1])).not.toBe(turnOf(r1[1])) // 聚合输入变化 → 重建
+    expect(turnOf(r2[1]).notifySummary).toEqual({
+      count: 2,
+      failedCount: 0,
+      neutralCount: 0,
+      outcomes: ['success', 'success'],
+      durationMs: 120_000,
+    })
+    expect(r2).toEqual(toRenderItems(src, false))
+  })
+
+  it('batch 展开：{batch,items} 逐条计入；嵌套存量载荷成员被解析拒绝（U9 前历史数据，解析侧零改动）', () => {
+    // 单条形态 → 1
+    const single = toRenderItems(
+      triggerFixture(bgNotify('n1', bgRecord({ id: 't1' })), makeMsg({ id: 'a2', role: 'assistant' })),
+    )
+    expect(turnOf(single[1]).notifySummary?.count).toBe(1)
+    // 批形态（U9 展平后归单层）→ items.length 逐条计入（含批内失败）
+    const batch = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [bgRecord({ id: 't1', status: 'done' }), bgRecord({ id: 't2', status: 'failed' })],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(batch[1]).notifySummary).toEqual({
+      count: 2,
+      failedCount: 1,
+      neutralCount: 0,
+      outcomes: ['success', 'failed'],
+    })
+    // 存量嵌套载荷（U9 前落盘）：wrapper 成员被 parseSingleRecord 拒绝 → 只算合法子项
+    const nested = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [bgRecord({ id: 't1' }), { batch: true, items: [bgRecord({ id: 't9' })] }],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(nested[1]).notifySummary?.count).toBe(1)
+    // 全 wrapper → 整条 parse null → 消息级中性（count 0，只增 neutralCount）
+    const allWrapper = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', { batch: true, items: [{ batch: true, items: [bgRecord({ id: 't9' })] }] }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(allWrapper[1]).notifySummary).toEqual({
+      count: 0,
+      failedCount: 0,
+      neutralCount: 1,
+      outcomes: [],
+    })
+  })
+
+  it('通知后无 assistant 填充：hidden-only 组随空 turn 折叠、边界行不渲染（notifySummary 不参与折叠判定）', () => {
+    const n1 = bgNotify('n1', bgRecord({ id: 't1' }))
+    const n2 = bgNotify('n2', bgRecord({ id: 't2' }))
+    // 数组结束：未填实 trigger turn 不产出（连两条也折叠为一、不因载体存在变成两行）
+    expect(toRenderItems(triggerFixture(n1)).map((i) => i.kind)).toEqual(['turn'])
+    expect(toRenderItems(triggerFixture(n1, n2)).map((i) => i.kind)).toEqual(['turn'])
+    // 可见 system 边界同样关闭未填实 trigger turn（后续 assistant 自启，无 trigger）
+    const sysCase = toRenderItems(triggerFixture(n1, makeMsg({ id: 'c1', role: 'system', content: '压缩记录' }), makeMsg({ id: 'a2', role: 'assistant', content: 'r2' })))
+    expect(sysCase.map((i) => i.kind)).toEqual(['turn', 'systemNotice', 'turn'])
+    expect(turnOf(sysCase[2]).trigger).toBeUndefined()
+    // 对照：被 assistant 填实即产出边界行并携带聚合值
+    const filled = toRenderItems(triggerFixture(n1, makeMsg({ id: 'a2', role: 'assistant', content: '续跑' })))
+    expect(turnOf(filled[1]).notifySummary?.count).toBe(1)
+  })
+
+  it('id 去重：多轮同 id 取 round 最大者（轮终成功覆盖早轮失败）；round 缺失让位、全缺取首条', () => {
+    // 多轮同 id：round1 failed + round2 成功 → 取 round 最大者（不误报失败）
+    const multiRound = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [bgRecord({ id: 'sync-1', status: 'failed', round: 1 }), bgRecord({ id: 'sync-1', status: 'running', round: 2 })],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(multiRound[1]).notifySummary).toEqual({
+      count: 1,
+      failedCount: 0,
+      neutralCount: 0,
+      outcomes: ['success'],
+    })
+    // round 缺失的失败载荷（watchdog 裸 id 形态）让位于同 id 轮终
+    const legacyWatcher = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', bgRecord({ id: 'x1', status: 'failed' })),
+        bgNotify('n2', bgRecord({ id: 'x1', status: 'running', round: 1 })),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(legacyWatcher[1]).notifySummary?.failedCount).toBe(0)
+    expect(turnOf(legacyWatcher[1]).notifySummary?.outcomes).toEqual(['success'])
+    // 全部无 round → 取首条（不能取末条：末条会隐藏最新失败）
+    const allNoRound = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', bgRecord({ id: 'x2', status: 'failed' })),
+        bgNotify('n2', bgRecord({ id: 'x2', status: 'done' })),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(allNoRound[1]).notifySummary?.outcomes).toEqual(['failed'])
+  })
+
+  it('判据两段式（1）：legacy status 分派——done 成功 / failed 失败 / cancelled 中性', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [
+            bgRecord({ id: 'a', status: 'done' }),
+            bgRecord({ id: 'b', status: 'failed' }),
+            bgRecord({ id: 'c', status: 'cancelled' }),
+          ],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(items[1]).notifySummary).toEqual({
+      count: 3,
+      failedCount: 1,
+      neutralCount: 1,
+      outcomes: ['success', 'failed', 'neutral'],
+    })
+  })
+
+  it('判据两段式（2）：running/closed 走 shared deriveClosedDisplay——cancelled 中性 / gc+error 失败 / 级联关闭成功', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [
+            // 存量 cancelled（error 有值也判中性——与侧边栏中断灰一致，不并入失败）
+            bgRecord({ id: 'cancelled-1', status: 'closed', closedReason: 'cancelled', error: 'killed by user' }),
+            // gc + error → 失败
+            bgRecord({ id: 'gc-1', status: 'closed', closedReason: 'gc', error: 'boom' }),
+            // closedReason 缺失兜底 'gc' + error → 失败（legacy 无 closedReason 的失败终态）
+            bgRecord({ id: 'legacy-fail', status: 'closed', error: 'boom' }),
+            // 级联关闭 + error → 成功（parent-* 是正常关闭语义，勿回退成「error 有值即 failed」）
+            bgRecord({ id: 'cascade-1', status: 'closed', closedReason: 'parent-shutdown', error: 'closed due to parent-shutdown' }),
+            // 无 error 的 closed → 成功
+            bgRecord({ id: 'plain', status: 'closed' }),
+          ],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(items[1]).notifySummary).toEqual({
+      count: 5,
+      failedCount: 2,
+      neutralCount: 1,
+      outcomes: ['neutral', 'failed', 'failed', 'success', 'success'],
+    })
+  })
+
+  it('workflow-result：reason 三态映射 + runId 去重键 + runId 缺失落消息级中性', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        workflowNotify('w1', { runId: 'run-1', name: 'wf', status: 'done', reason: 'completed' }),
+        workflowNotify('w2', { runId: 'run-2', name: 'wf', status: 'done', reason: 'aborted' }),
+        workflowNotify('w3', { runId: 'run-3', name: 'wf', status: 'done', reason: 'weird-done-reason' }),
+        workflowNotify('w4', { name: 'wf', status: 'done', reason: 'completed' }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    // runId 缺失 → 消息级 parse null：不产 record、不计入 count，只增 neutralCount
+    expect(turnOf(items[1]).notifySummary).toEqual({
+      count: 3,
+      failedCount: 1,
+      neutralCount: 2,
+      outcomes: ['success', 'failed', 'neutral'],
+    })
+  })
+
+  it('parse null（旧 session / 第三方写入）：不产 record、只增 neutralCount，count===0', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        bgNotify('n1'), // details 缺失
+        bgNotify('n2', { id: 't1' }), // 畸形（非 {batch,items} 且必需字段缺失）
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(items[1]).notifySummary).toEqual({
+      count: 0,
+      failedCount: 0,
+      neutralCount: 2,
+      outcomes: [],
+    })
+  })
+
+  it('durationMs 聚合：去重后含值记录的 max(endedAt) − min(startedAt)，混合组只由含值记录贡献', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        bgNotify('n1', {
+          batch: true,
+          items: [
+            bgRecord({ id: 'a', startedAt: 1000, endedAt: 5000 }),
+            bgRecord({ id: 'b', startedAt: 2000, endedAt: 3000 }),
+            // 无 endedAt（归档/提示类不物化）→ 不计入聚合集合，仍计入 count
+            bgRecord({ id: 'c', status: 'closed', startedAt: 500 }),
+            // 守卫：endedAt < startedAt（时钟回拨）→ 排除。该值域刻意选在「若误纳入会把
+            // max(endedAt) 从 5000 抬到 6000」处，守卫失效即被本断言捕获
+            bgRecord({ id: 'd', startedAt: 7000, endedAt: 6000 }),
+          ],
+        }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    // max(endedAt)=5000 − min(startedAt)=1000（来自含值记录本身，非全体 count）
+    expect(turnOf(items[1]).notifySummary).toEqual({
+      count: 4,
+      failedCount: 0,
+      neutralCount: 0,
+      outcomes: ['success', 'success', 'success', 'success'],
+      durationMs: 4000,
+    })
+  })
+
+  it('durationMs 全无含值记录 → 不写入该字段（不显耗时；workflow 无时间字段同落此档）', () => {
+    const items = toRenderItems(
+      triggerFixture(
+        workflowNotify('w1', { runId: 'run-1', reason: 'completed' }),
+        bgNotify('n2', bgRecord({ id: 't2', status: 'closed' })),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ),
+    )
+    expect(turnOf(items[1]).notifySummary?.durationMs).toBeUndefined()
+    expect(turnOf(items[1]).notifySummary?.count).toBe(2)
+  })
+})
+
 // ── 尾部快车道（D-4 三车道演进：形态①同长度仅末条替换 / ②尾部 append / ③全量兜底）──
 // 正确性锚：任何车道产出与全量路径 deepEqual（既有等价断言形态，新车道同覆盖）。
 

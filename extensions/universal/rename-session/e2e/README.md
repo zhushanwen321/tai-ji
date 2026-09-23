@@ -149,8 +149,8 @@ data:    { error: "unknown error" }   ← 结构化 data 字段，message 不含
 |---|---|
 | session_info entry 位于 round 全部 entry 之后（佐证 rename 在 round 末触发） | 探针 1 实测行序 |
 | 手动 set_session_name 追加第二条 session_info，**最后一条生效** | 探针 1 实测 |
-| rename 结果日志 entry 三条：`renamed to "<title>"`（src/index.ts，`setSessionName` 之后打出）/ `rename LLM call failed`（src/llm.ts，`logger.warn(msg,{error})` 形态）/ `skip: <原因>`（no user prompt / title empty 在 llm.ts；name exists / count=N / stopReason=X 在 index.ts） | src/index.ts + src/llm.ts |
-| handler 侧日志 message 带 `turnIndex=<n>`（含 `renamed to`），llm.ts 侧不带；日志通道 = appendEntry（session custom entry，customType `rename-session:log`），不写 stderr | src/index.ts vs src/llm.ts |
+| rename 结果日志 entry 三条：`renamed to "<title>"`（src/landing.ts landTitle，`setSessionName` 之后打出）/ `rename LLM call failed`（src/landing.ts 的外层 catch + src/llm.ts，`logger.warn(msg,{error})` 形态）/ `skip: <原因>`（no user prompt / title empty 在 llm.ts；name exists 在 landing.ts；count=N / stopReason=X 在 index.ts） | src/index.ts + src/landing.ts + src/llm.ts |
+| handler 侧日志 message 带 `turnIndex=<n>`（含 `renamed to`；前缀由 index.ts 的 debugLog 包装注入），llm.ts 侧不带；日志通道 = appendEntry（session custom entry，customType `rename-session:log`），不写 stderr | src/index.ts + src/landing.ts vs src/llm.ts |
 | `turnIndex` 每进程从 0 重新计（--session 续跑后第二轮日志仍 turnIndex=0） | 探针 3 实测 |
 | error 轮：turn_end stopReason=error + errorMessage="Connection error."，pi 存活 | 探针 4 实测 |
 | 超时轮：约 30s 后 `rename LLM call failed`（message 子串；error 详情在结构化 data 字段，空串归一发生在 llm-shared extractText 层） | 探针 5 实测 |

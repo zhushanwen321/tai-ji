@@ -21,7 +21,7 @@ import { session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
 import { useToast } from '@/composables/useToast'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { toErrorMessage } from '@taiji/core'
+import { findLastAssistantMessage, toErrorMessage } from '@taiji/core'
 
 /**
  * Handoff 操作 composable。
@@ -90,22 +90,29 @@ export function useHandoffActions(focusedSessionId: Ref<string | null>) {
   function lastAssistantOfFocused(): { sessionId: string } | null {
     const sid = focusedSessionId.value
     if (!sid) return null
-    const msgs = chat.getMessages(sid)
-    for (let i = msgs.length - 1; i >= 0; i -= 1) {
-      if (msgs[i].role === 'assistant') return { sessionId: sid }
-    }
-    return null
+    const last = findLastAssistantMessage(chat.getMessages(sid))
+    return last ? { sessionId: sid } : null
   }
 
   /**
-   * 从末条 assistant 直接 handoff（⌘H）：runtime 从末条 assistant 跑 handoff turn 提取文档到新 session。
+   * 从末条 assistant 直接 handoff（⌘H/⌘J）：runtime 从末条 assistant 跑 handoff turn 提取文档到新 session。
    * 完成经 session.handoffComplete 广播 → useHandoffEffect 跳转新 session。
    * 无末条 assistant 时静默 no-op（无文档可打包）。
+   *
+   * RD-5#1：RPC 失败在函数内 catch + toastError。⌘J 全局快捷键的调用方是
+   * useGlobalShortcuts 的 `void handoffFromLastAssistant()`（返回 Promise 被丢弃）——
+   * 函数内不 catch 就是裸 reject + 用户零反馈。形态对齐 useForkActions.forkFromLastAssistant
+   * （useForkActions.ts:165-170 同族先例，该处注释已显式记录此坑）。
    */
   async function handoffFromLastAssistant(): Promise<void> {
     const last = lastAssistantOfFocused()
     if (!last) return
-    await handoff(last.sessionId)
+    try {
+      await handoff(last.sessionId)
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e)
+      toastError(t('panel.message.handoffFailed', { error }))
+    }
   }
 
   /**

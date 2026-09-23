@@ -1,6 +1,6 @@
 <template>
   <!--
-    [crash-resilience §3.1 T2 / §4 A3] renderer 崩溃恢复一次性提示条。
+    [T2 / §4 A3] renderer 崩溃恢复一次性提示条。
     窗口级通知（非对话流内容）：状态源 = URL query 恢复标志（main 侧
     window-factory.ts reloadWindowAfterCrash 注入），useCrashRecoveryNotice 首次
     消费即剥离标志——手动刷新不再重现（一次性语义）。挂载点 App.vue（ToastContainer

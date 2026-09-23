@@ -8,6 +8,15 @@ export default {
   title: 'Import Session',
   dialogTitle: 'Import pi Session',
   description: 'Bring in pi session records from disk and continue chatting',
+  pickSourceTitle: 'Import Session',
+  pickSourceDescription: 'Choose a session source to import from',
+  sourcePiTitle: 'Import pi Session',
+  sourcePiDesc: 'Bring in .jsonl session records from the pi sessions directory and continue chatting',
+  sourceZcodeTitle: 'Import zcode Session',
+  sourceZcodeDesc: 'Bring in sessions from the local zcode session library, converted to Taiji sessions',
+  zcodeDialogTitle: 'Import zcode Session',
+  zcodeDescription: 'From the local zcode session library, converted to Taiji sessions for continued chatting',
+  backToSource: 'Back to source',
   searchPlaceholder: 'Search by name or Session ID (supports 01a044-style short ID), or paste a .jsonl absolute path',
   allDirs: 'All directories',
   chooseDirBtn: 'Choose other directory',
@@ -35,6 +44,9 @@ export default {
   retry: 'Retry',
   toastImported: 'Imported "{name}" to {project} · continue chatting',
   toastWarnSidecar: 'Project assignment failed: reassign the session to a project manually in the sidebar',
+  toastWarnDropped: 'Skipped {count} zcode messages',
+  toastWarnUnclassified: 'Skipped {count} unclassified zcode messages',
+  toastUnclassifiedSample: 'First sample {messageId}: {preview}',
   freshBadge: 'Imported',
   errors: {
     import_source_missing: 'Source file is missing or unreadable: confirm it has not been moved or deleted and retry, or use "Choose other directory" to relocate the sessions directory',
@@ -45,7 +57,16 @@ export default {
     import_target_conflict: 'The target location is occupied by another session: check whether the source file was renamed or duplicated; import the session file with its original filename instead',
     import_copy_failed: 'Failed to copy the session file (disk space or permission issue): free up disk space or check permissions and retry',
     import_project_invalid: 'Target project is invalid: choose a project again and retry',
+    import_db_path_forbidden: 'Session library path is not allowed: reopen the source picker and retry with the default zcode session library',
     timeout: 'Request timed out: please retry',
     unknown: 'Import failed: please retry',
+  },
+  // zcode-source specific recovery copy (§3.6: three scenarios that share error codes with
+  // pi but need different guidance; consumed via the component ZCODE_ERROR_KEYS set —
+  // codes not listed here share the generic errors copy across sources)
+  errorsZcode: {
+    import_source_missing: 'zcode session library not found: confirm zcode is installed and has run at least one session',
+    import_invalid_session: 'This session is no longer in the zcode library, or the library schema has changed: refresh the list and pick again; if it keeps failing, upgrade Taiji and retry',
+    import_target_conflict: 'This session conflicts with an existing Taiji session: please contact feedback',
   },
 }

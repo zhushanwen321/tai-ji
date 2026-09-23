@@ -259,7 +259,7 @@ describe("RENAME_SYSTEM_PROMPT / RENAME_INSTRUCTION", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 设计 rename-session-three-modes.md D5 空 ref fallback（空 ref → ctx.model 跟随会话主模型；非空无效 ref → 静默跳过 + warn）
+// 空 ref fallback（空 ref → ctx.model 跟随会话主模型；非空无效 ref → 静默跳过 + warn）
 // ────────────────────────────────────────────────────
 
 describe("callRenameLLM D5 空 ref fallback（跟随会话主模型）", () => {
@@ -317,7 +317,7 @@ describe("callRenameLLM D5 空 ref fallback（跟随会话主模型）", () => {
 });
 
 // ────────────────────────────────────────────────────
-// promptText 选项（设计 rename-session-three-modes.md D2 first-prompt：文本从 message_end 载荷取，不走 entries）
+// promptText 选项（first-prompt：文本从 message_end 载荷取，不走 entries）
 // ────────────────────────────────────────────────────
 
 describe("callRenameLLM promptText 选项（first-prompt 载荷取文本）", () => {
@@ -557,7 +557,7 @@ describe("callRenameLLM", () => {
 		expect(logAtCallTime).toContain(head);
 		expect(logAtCallTime).toContain(tail);
 		expect(logAtCallTime).not.toContain("乙");
-		// 「renamed to」日志已移位到 index.ts handler 侧（setSessionName 之后）——
+		// 「renamed to」日志已移位到 landing.ts landTitle（setSessionName 之后）——
 		// callRenameLLM 全流程（含成功路径）不再打出该日志
 		const logAfter = warnLines(warnSpy).join("\n");
 		expect(logAfter).not.toContain("renamed to");
@@ -725,14 +725,14 @@ describe("callRenameLLM usage 落账回调（appendUsageEntry 注入）", () => 
 		expect(appendUsageEntry).not.toHaveBeenCalled();
 	});
 
-	it("回调内部抛错被回调实现 catch（契约：catch 位于回调实现内部，模拟 index.ts 注入的真实回调）→ 不阻断 cleanTitle 流程，标题照常返回", async () => {
+	it("回调内部抛错被回调实现 catch（契约：catch 位于回调实现内部，模拟 landing.ts 注入的真实回调）→ 不阻断 cleanTitle 流程，标题照常返回", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "修复登录bug", usage: STUB_USAGE });
 		const appendUsageEntry = vi.fn((_model: string, _usage: Usage) => {
 			try {
 				throw new Error("session switched"); // 模拟 pi.appendEntry 抛错（session 已切换等）
 			} catch {
-				// 回调体内 catch（catch 必须位于回调实现内部）——index.ts 注入实现同款
+				// 回调体内 catch（catch 必须位于回调实现内部）——landing.ts 注入实现同款
 			}
 		});
 
@@ -744,7 +744,7 @@ describe("callRenameLLM usage 落账回调（appendUsageEntry 注入）", () => 
 		expect(appendUsageEntry).toHaveBeenCalledTimes(1);
 	});
 
-	it("违约回调（实现未自吞错直接抛出）→ callRenameLLM reject（llm.ts 不吞错——catch 归属钉死回调实现内部，防双重 catch 漂移；真实接线的兜底由 index.ts 回调体内 catch + 外层 .catch 覆盖）", async () => {
+	it("违约回调（实现未自吞错直接抛出）→ callRenameLLM reject（llm.ts 不吞错——catch 归属钉死回调实现内部，防双重 catch 漂移；真实接线的兜底由 landing.ts 回调体内 catch + 外层 .catch 覆盖）", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "修复登录bug", usage: STUB_USAGE });
 		const appendUsageEntry = vi.fn(() => {

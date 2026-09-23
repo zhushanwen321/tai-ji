@@ -1,6 +1,5 @@
 /**
- * 合批 per-message settled 契约（探针 P1，设计 docs/design/ext-simplify-08-scheduler.md
- * §6.4 D1/B1）。
+ * 合批 per-message settled 契约（探针 P1，设计 D1/B1）。
  *
  * 锁死契约：批次受理后条目转 in-flight；送达回执（confirmDelivered 逐 id）落定后
  * onSettled 恰 N 次——每条消息各获一次终态回调，msg 为该条原始消息（非 composed

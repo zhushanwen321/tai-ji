@@ -137,7 +137,7 @@ export function isSubagentProcess(
 
 // ── stale ctx 守卫（guardStaleCtx，崩溃韧性 D1）────────────────────────
 //
-// 背景（docs/design/crash-resilience.md §3.3 D1 / §2.2 事件 E1）：pi 的 extension API
+// 背景：pi 的 extension API
 // 对象（pi / ctx）在 session 替换（newSession/fork/switchSession/reload）后被 runner
 // 标记 stale，再调用其方法会**同步抛错**（loader.js/runner.js 的 assertActive，错误文案
 // 含 STALE_CTX_MARKER）。跨 session 生命周期存活的异步回调（compact 的 onComplete/onError、

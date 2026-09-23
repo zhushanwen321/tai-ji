@@ -30,6 +30,10 @@ import { EngineClient } from "../../client/engine-client.ts";
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
 import type { AgentEvent } from "../../../assembly/types.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
+import {
+  _resetHostUiRequestEndpointForTest,
+  setHostUiRequestEndpoint,
+} from "../../host/host-ui-endpoint.ts";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");
 const FAKE_ENGINE = join(FIXTURE_DIR, "fake-engine-protocol.mjs");
@@ -70,6 +74,8 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
+  _resetHostUiRequestEndpointForTest();
 });
 
 interface Harness {
@@ -97,15 +103,16 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     hostVersion: "w10-protocol-blackbox",
     dataDir,
     envPrefixes: [],
-    uiRequestHandler: async (req) => {
-      h.askUserRequests.push(req);
-      return { value: "option-a" };
-    },
     baseEnv: {
       ...process.env,
       FAKE_PROTOCOL_FIXTURE: FIXTURE,
       ...extraEnv,
     },
+  });
+  // [D3] host/askUser 应答端经 host-ui-endpoint 槽注入（reverse-router 消费时现读）
+  setHostUiRequestEndpoint(async (req) => {
+    h.askUserRequests.push(req);
+    return { value: "option-a" };
   });
   const unregister = h.client.registerRunRoute(routeRunId, {
     onEvent: (event) => {

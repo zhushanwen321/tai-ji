@@ -1,7 +1,6 @@
 /**
  * session-lifecycle — 会话生命周期装配 seam（bootstrap seam）。
  *
- * 设计锚点：docs/design/subagent-post-convergence-architecture.md §3.1（D1/D2/D8）。
  * 随迁内容 = 原组合根 index.ts session_start handler（:336-613）的六职责，原样搬移
  * （D2 纪律：本文件不改行为；行为变更点——守卫合一 / lazyDeps getter 化（10 成员
  * 守卫触发对象，偏差 #10）——留在 index.ts，各自独立成条）：
@@ -19,7 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { guardStaleCtx, oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -156,10 +155,33 @@ export interface SessionLifecycleDeps {
   worktreeManager?: Pick<WorktreeManager, "scan">;
   /**
    * per-session run store 工厂（随迁块 5）。默认 = new JsonlRunStore({ sessionDir, pi, ctx })
-   * （per-session 新建为现状设计：store 生命周期与 session 等同，D-008/F-4）。
+   *  （per-session 新建为现状设计：store 生命周期与 session 等同，D-008/F-4）。
    * 测试注入 fake 以控制 loadAll 行为（kill-9 恢复分支）。
    */
   createRunStore?: (sessionDir: string, pi: ExtensionAPI, ctx: ExtensionContext) => JsonlRunStore;
+  /**
+   * [skill-reload D4] adoption 失败处置回调（组合根注入）：terminate adopted running
+   * runs（notifyDone: true——用户可见）+ 移除 sessionState 条目。terminate 依赖的
+   * LauncherDeps 完整形态（workerHost / onRunDone 通知链 / notifiedRunIds 去重窗口）
+   * 与 sessionState Map 归 workflow 域闭包（workflow-events.ts）持有，本 seam 无访问
+   * 通道，经此注入；未注入时失败处置仅完成 rebind-first + 日志（测试可观察调用）。
+   */
+  onAdoptionFailed?: (existing: SessionLifecycleResult, reason: string) => Promise<void>;
+}
+
+/** setupSessionLifecycle 的 adoption 分流入参（[skill-reload D4]）。 */
+export interface SessionStartOptions {
+  /**
+   * session_start 事件 reason（pi SessionStartEvent.reason，SDK 锚定）。缺省视为
+   * 非 reload——现状全量装配路径（向后兼容，现有调用/测试不传即走原行为）。
+   */
+  reason?: SessionStartEvent["reason"];
+  /**
+   * adoption 候选（既有 per-session 条目）。调用点在 reason==='reload' 时从
+   * sessionState 取；条目缺失（reload 落在首次装配 await 链中）传 undefined →
+   * 全量装配（唯一差异 = 恢复门控已跳过）。
+   */
+  existing?: SessionLifecycleResult;
 }
 
 /** setupSessionLifecycle 装配结果——组合根据此写入 per-session sessionState。 */
@@ -372,8 +394,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
 /**
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
  * 过期 session 文件清理 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
- * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除——collectMode 记录态消亡后
- * core 侧 recoverSyncCollectBatch 已是 accepted-no-op，调用点随之退役。）
+ * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除；[collect 退役] core 侧
+ * recoverSyncCollectBatch 方法本体已删——sync 批机制不存在，无恢复面可接线。）
  */
 async function runProcessLevelMaintenance(
   agentDir: string,
@@ -461,6 +483,7 @@ async function createSessionRunState(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   deps: SessionLifecycleDeps,
+  opts: { skipRecovery: boolean },
 ): Promise<SessionRunState> {
   const store = deps.createRunStore
     ? deps.createRunStore(sessionDir, pi, ctx)
@@ -476,32 +499,133 @@ async function createSessionRunState(
   // M2 修正：workflow 域 resolveAgentOpts 不再消费 agentRegistry（agent ref 交
   // resolveIdentity），无需经 state 透传——modelService 是唯一 registry 源。
   let storeHealthy = true;
-  try {
-    // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
-    // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
-    // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
-    await oncePerProcess(
-      "subagent-workflow:recover-crashed-runs",
-      () =>
-        recoverCrashedRuns(
-          store,
-          runs,
-          "Process killed (kill-9 or crash recovery)",
-          {
-            onRunRecovered: (payload) => {
-              pi.events.emit("pending:unregister", payload);
+  // [skill-reload D4] 恢复门控：session_start(reason==='reload') 全程不跑
+  // recoverCrashedRuns（无论条目有无）。暗礁（设计 §2.4）：recoverCrashedRuns 判
+  // 「crashed」只看磁盘快照 status=running、内存活 run 不参与判定且会被重建对象
+  // 覆盖——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
+  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
+  // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
+  // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
+  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。门控放
+  // 调用点先于条目判断（setupSessionLifecycle 分流处），不进 oncePerProcess 守卫
+  // 内——守卫 Map 是模块级状态 reload 后归零（D9 不提权），靠守卫判 reason 形同虚设。
+  if (!opts.skipRecovery) {
+    try {
+      // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
+      // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
+      // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
+      await oncePerProcess(
+        "subagent-workflow:recover-crashed-runs",
+        () =>
+          recoverCrashedRuns(
+            store,
+            runs,
+            "Process killed (kill-9 or crash recovery)",
+            {
+              onRunRecovered: (payload) => {
+                pi.events.emit("pending:unregister", payload);
+              },
             },
-          },
-        ),
-    );
-  } catch (err) {
-    // QMF-4 fix: store.loadAll 失败是关键路径错误，workflow 域将未初始化
-    logger.error("[subagent-workflow] store.loadAll failed, workflow domain uninitialized", {
-      reason: toErrorMessage(err),
-    });
-    storeHealthy = false;
+          ),
+      );
+    } catch (err) {
+      // QMF-4 fix: store.loadAll 失败是关键路径错误，workflow 域将未初始化
+      logger.error("[subagent-workflow] store.loadAll failed, workflow domain uninitialized", {
+        reason: toErrorMessage(err),
+      });
+      storeHealthy = false;
+    }
   }
   return { store, runs, storeHealthy };
+}
+
+// ── [skill-reload D4] post-reload adoption（接管而非重建） ─────────────────────
+
+/**
+ * adoption 主体：接管既有条目（同引用原地改写）。成功返回原 SessionLifecycleResult
+ * （sessionState.get(sid) 与 reload 前同一引用——探针红线，store/runs 不换实例）；
+ * 失败（健康检查不过 / rebind / 快照重发抛错）走 {@link failAdoption} 后返回
+ * undefined（调用方落到全量装配）。
+ */
+async function tryAdoptExistingSession(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  deps: SessionLifecycleDeps,
+  existing: SessionLifecycleResult,
+  lastEngine: string | undefined,
+): Promise<SessionLifecycleResult | undefined> {
+  // 健康检查：上一轮装配时 loadAll 失败（storeHealthy=false）的 store 不具备承载
+  // 接管的写入可靠性 → 失败处置（G3 用户可见），不接管。
+  if (!existing.storeHealthy) {
+    await failAdoption(pi, ctx, deps, existing, "store unhealthy (loadAll failed in previous session_start)");
+    return undefined;
+  }
+  try {
+    // D3 rebind：在飞去抖批与串行 flush 链持有 store（this），原地改写 .pi/.ctx
+    // 对后续 flush 天然可见；换入的 appendEntry 源带 stale guard（D5）。
+    existing.store.rebind(pi, ctx);
+    // D4 快照重发：经 store 既有 per-runId 串行 flush 链重发当前快照权威 entry
+    //（设计红线：禁止绕链直接 pi.appendEntry——物理乱序会让 last-ways 读回
+    // running → 崩溃恢复误判）。任何 IO 失败上抛 → 失败处置。
+    await existing.store.resendSnapshots(existing.runs);
+  } catch (err) {
+    await failAdoption(pi, ctx, deps, existing, toErrorMessage(err));
+    return undefined;
+  }
+  // 接管：同引用原地改写（ctx 换新——旧 ctx 已被 invalidate；lastEngine 按当前
+  // config 重置基线）+ runner 刷新 ctxModel。跳过 store/runner 重建（幂等 last-wins）。
+  existing.ctx = ctx;
+  existing.lastEngine = lastEngine;
+  existing.runner.updateCtxModel(ctx.model ?? undefined);
+  logger.debug(
+    `[subagent-workflow] adoption ok (sessionId=${existing.sessionId}, runs=${existing.runs.size})`,
+  );
+  return existing;
+}
+
+/**
+ * adoption 失败处置（顺序敏感，设计 D4/r4）：
+ * ① 先无条件 store.rebind(newPi, newCtx)——失败若发生在 rebind 之前，terminate
+ *   的终态 flush 走未 rebind 的旧 pi 且 stale guard 未装 → 终态 failed entry 不落
+ *   权威 JSONL，run 从 session 历史消失；先 rebind 让终态 flush 走新 pi，G3 可见性
+ *   与权威记录同时兑现。rebind 自身再失败则跳过并日志登记终态丢失面。
+ * ②+③ 经组合根注入回调：terminateRunningRuns（notifyDone: true，用户可见）+
+ *   移除 sessionState 条目（不残留半接管状态）。
+ * ④ adoption=failed 归因日志（G4：可从日志直接读出因果）。
+ */
+async function failAdoption(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  deps: SessionLifecycleDeps,
+  existing: SessionLifecycleResult,
+  reason: string,
+): Promise<void> {
+  try {
+    existing.store.rebind(pi, ctx);
+  } catch (rebindErr) {
+    logger.warn(
+      "[subagent-workflow] adoption failure rebind also failed (terminal entries may be lost)",
+      { sessionId: existing.sessionId, reason: toErrorMessage(rebindErr) },
+    );
+  }
+  if (!deps.onAdoptionFailed) {
+    logger.warn(
+      "[subagent-workflow] adoption failure cleanup callback not injected (runs not terminated, entry not removed)",
+      { sessionId: existing.sessionId },
+    );
+  } else {
+    try {
+      await deps.onAdoptionFailed(existing, reason);
+    } catch (err) {
+      logger.error("[subagent-workflow] adoption failure cleanup failed", {
+        sessionId: existing.sessionId,
+        reason: toErrorMessage(err),
+      });
+    }
+  }
+  logger.error(
+    `[subagent-workflow] adoption=failed sessionId=${existing.sessionId} reason=${reason}`,
+  );
 }
 
 // ── 单一装配入口 ─────────────────────────────────────────────────────────────────
@@ -518,6 +642,7 @@ export async function setupSessionLifecycle(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   deps: SessionLifecycleDeps,
+  options?: SessionStartOptions,
 ): Promise<SessionLifecycleResult> {
   const agentDir = getAgentDir();
   const sessionId = ctx.sessionManager.getSessionId();
@@ -529,26 +654,54 @@ export async function setupSessionLifecycle(
 
   // skill 路径两级缓存 session 级失效：pi 同进程可能有多个 session（TUI /new、/fork），
   // 运行中安装的 skill 需对新 session 可见（含曾 miss 缓存的 undefined 条目与 npm 新装
-  // 包的候选目录）。session 内复用收益不变（IF8/DM3 消重发生在同 session 的重复调用）。
+  // 包的候选目录）。session 内复用收益不变（IF8/DM3 重读发生在同 session 的重复调用）。
   clearSkillPathCache();
 
   // ── [M4] identity 子进程写入（随迁块 1）──
   appendSubagentIdentityEntry(pi);
 
   // ── [U2] 通知账本装配 + 重启恢复（随迁块 2）──
+  // [skill-reload D4] 两分支都保留：ledger re-bind 到新 pi/ctx（getBoundNotifyLedger()
+  // 现读方自动看到新绑定）。
   bindLedgerHostAndRecover(pi, ctx);
 
   // ── subagents 域：双 Service 装配（随迁块 3，经 deps 可注入）──
+  // [skill-reload D4] 两分支都保留：initSession 复活链 + 新 ctx 注入（SubagentService
+  // 跨 reload 存活，其 stale 面 _pi/_streamSink/_isIdleFn 由 initSession 重注入覆盖）。
   const { service, modelService } = deps.createServices
     ? deps.createServices(pi, ctx)
     : createOrReuseServices(pi, ctx);
 
   // ── GC / manifest tmp / worktree 恢复（随迁块 4）──
+  // [skill-reload D4] 两分支都保留：进程级维护幂等重跑无害（oncePerProcess 守卫 Map
+  // 是模块级状态，reload 后归零属预期——D9）。
   await runProcessLevelMaintenance(agentDir, ctx, service, deps);
+
+  // [engine-awareness D1b] lastEngine 基线重算提前到 adoption 分流前（两分支共用）：
+  // 构造性同源——单次 reloadGlobalConfig 读取同时刷新 Service 路由缓存与 lastEngine
+  // 基准，消灭 initModel 与本处两次独立读取间的分叉窗口。ok/absent → 归一后的当前
+  // 引擎；failed → undefined（首 turn 检测静默基线化兜底）。
+  const engineRead = modelService.reloadGlobalConfig();
+  const lastEngine =
+    engineRead.status === "failed" ? undefined : normalizeEngineId(engineRead.config.defaultEngine);
+
+  // ── [skill-reload D4] adoption 分流（post-reload session_start(reason==='reload')）──
+  // 恢复门控已由 isReload 承载（先于条目判断）；条目存在 → 接管（同引用原地改写，
+  // store/runner 不重建）；条目缺失（reload 落在首次装配 await 链中）→ 落到下方
+  // 全量装配，唯一差异 = 恢复门控已跳过。
+  const isReload = options?.reason === "reload";
+  if (isReload && options.existing) {
+    const adopted = await tryAdoptExistingSession(pi, ctx, deps, options.existing, lastEngine);
+    if (adopted) return adopted;
+    // adoption 失败处置已完成（rebind-first + terminate + 条目移除 + 日志）→
+    // 落到下方全量装配（session 继续可用：新建 store/runs/runner，恢复仍被门控跳过）。
+  }
 
   // ── workflow 域：per-session store + runs + kill-9 恢复（随迁块 5）──
   const sessionDir = resolveSessionDir();
-  const { store, runs, storeHealthy } = await createSessionRunState(sessionDir, pi, ctx, deps);
+  const { store, runs, storeHealthy } = await createSessionRunState(sessionDir, pi, ctx, deps, {
+    skipRecovery: isReload,
+  });
 
   // D-008: per-session SAR（需要 ctxModel 填底 + subagentService 委托目标）。
   // old: const runner = new SubprocessAgentRunner()（module-level singleton，无 deps）
@@ -558,14 +711,6 @@ export async function setupSessionLifecycle(
     ctxModel: ctx.model ?? undefined,
   });
 
-  // [engine-awareness D1b] lastEngine 初始化：构造性同源——单次 reloadGlobalConfig
-  // 读取同时刷新 Service 路由缓存与 lastEngine 基准，消灭 initModel 与本处两次独立
-  // 读取间的分叉窗口（两读值不一致时检测走 unchanged 分支不 reload，状态段/路由
-  // 永停旧值且永不通知）。ok/absent → 归一后的当前引擎；failed → undefined（首 turn
-  // 检测静默基线化兜底，此时缓存亦保持不动）。/resume、/fork 同样走 session_start
-  // （SR-3），基线天然覆盖。
-  const engineRead = modelService.reloadGlobalConfig();
-
   return {
     sessionId,
     store,
@@ -574,7 +719,6 @@ export async function setupSessionLifecycle(
     runner,
     ctx,
     storeHealthy,
-    lastEngine:
-      engineRead.status === "failed" ? undefined : normalizeEngineId(engineRead.config.defaultEngine),
+    lastEngine,
   };
 }

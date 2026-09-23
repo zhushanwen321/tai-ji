@@ -19,7 +19,7 @@ description: >-
 
 ## 流程
 
-**调用约束**：cwd 必须在待合并 feat worktree 根目录（脚本靠 `git rev-parse --show-toplevel` 定位源 worktree）。脚本路径用 `"$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh"` 动态拼**当前 worktree 内的副本**——禁止写死某个 worktree 目录的绝对路径（会随该 worktree cleanup 过期，如历史上写死的 dev-0.9.10 路径已失效），也禁止 `.agents/skills/...` 相对路径写法（bash cwd 不跨调用持久）。当前分支不含本 skill 文件时（极旧 base），从任意含该文件的 worktree 复制脚本后调用。
+**调用约束**：cwd 必须在待合并 feat worktree 根目录（脚本靠 `git rev-parse --show-toplevel` 定位源 worktree）。脚本路径用 `"$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh"` 动态拼**当前 worktree 内的副本**——禁止写死某个 worktree 目录的绝对路径（会随该 worktree cleanup 过期），也禁止 `.agents/skills/...` 相对路径写法（bash cwd 不跨调用持久）。当前分支不含本 skill 文件时（极旧 base），从任意含该文件的 worktree 复制脚本后调用。
 
 ### 第 1 步：处理未提交改动（AI 决策，脚本不代劳）
 
@@ -91,4 +91,4 @@ Cannot execute bash commands.
 
 例外：脚本 exit 非 0 且**没看到工具层报废错误**（bash 正常返回了脚本输出）时，按失败点分两类——**删目录之前** die（闸门失败：未合并 / 脏 worktree / git 状态读取失败）：目录完好，按脚本输出处置后重跑 cleanup；**rm -rf 目录失败**（die 消息含"登记与分支均未动"）：git 登记与分支完好、dev 侧可诊断，但目录可能已部分残缺（`.git` 文件或不存，目录内 git 不可信、重跑 cleanup 未必可行），排查根因并解除后执行 die 消息里的单命令配方。不要把任何一类失败当成删除已完成。
 
-**半删态兜底（历史残留 / 手工操作产生；现行脚本结构上不再产生该状态）**：识别特征 = worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失（成因：`git worktree remove` 内部先删登记、目录删除中途失败——旧版脚本或手工执行）。处置：从**兄弟 worktree**（不是 doomed 目录）执行单命令 `git -C <dev> merge-base --is-ancestor <feat-branch> <dev-branch> && git -C <dev> branch -D <feat-branch> && git -C <dev> worktree prune && rm -rf <feat 目录>`（is-ancestor 在链首，未合入即中止、不删任何东西；rm -rf 在链尾，失败即停时目录与分支状态可诊断）。agent 会话 cwd 若还在 doomed 目录内，该命令执行后本会话 bash 报废——应作为最后一条 bash 命令，剩余收尾用 read/write 类工具。
+**半删态兜底**（现行脚本结构上不产生该状态；出现即手工操作或旧产物残留）：识别特征 = worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失（成因：`git worktree remove` 内部先删登记、目录删除中途失败）。处置：从**兄弟 worktree**（不是 doomed 目录）执行单命令 `git -C <dev> merge-base --is-ancestor <feat-branch> <dev-branch> && git -C <dev> branch -D <feat-branch> && git -C <dev> worktree prune && rm -rf <feat 目录>`（is-ancestor 在链首，未合入即中止、不删任何东西；rm -rf 在链尾，失败即停时目录与分支状态可诊断）。agent 会话 cwd 若还在 doomed 目录内，该命令执行后本会话 bash 报废——应作为最后一条 bash 命令，剩余收尾用 read/write 类工具。

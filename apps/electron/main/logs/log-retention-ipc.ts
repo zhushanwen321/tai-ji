@@ -1,5 +1,5 @@
 /**
- * logs 保留期清理手动触发 IPC handler（crash-resilience A9② 验收调试口）。
+ * logs 保留期清理手动触发 IPC handler（A9② 验收调试口）。
  *
  * 经 DEBUG_RUN_LOG_RETENTION（'debug:run-log-retention'）通道把 main 侧每日清理定时器
  * 的触发函数 `runLogRetentionNow()` 暴露为手动入口（空参 invoke）：dev 调试 / 验收时

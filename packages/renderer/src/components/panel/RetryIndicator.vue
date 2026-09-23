@@ -1,5 +1,5 @@
 <!--
-  展示组件 · auto_retry 指示位（spec C10 / FR-3，issues.md #13，code-architecture §4.7b）。
+  展示组件 · auto_retry 指示位（spec C10 / FR-3）。
   Composer 上方独立行：RefreshCw 旋转 + 「重试中 N/M」+ 可选 errorMessage 缩略尾。
 
   纯展示型：props.state 由 Composer 从 chatStore.getRetryState(sessionId) 计算传入。

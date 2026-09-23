@@ -59,6 +59,17 @@ ALLOWED_MODULES = {
     # terminal-service / plugin-host-process 消费 buildOutboundChildEnv 组装子进程 env
     # （env-propagation-boundary 设计 C-proc-09），同族随 R3 收编
     "spawn-env",
+    # git-repo-resolver（2026-09-17）：无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、
+    # 查询不 reject），同 mem-pressure 裁决形态——IGitRepoResolver port 已存在且注入可用，
+    # value import 仅为注入缺省实例服务（repo-observer sharedRepoObserver 单例 +
+    # git-state-service fallback 两处构造点），为此定义 factory port 只增加无意义间接层
+    "git-repo-resolver",
+    # argv-redact（2026-09-19，模式体系 argv 脱敏）：kernel 类纯函数（无状态、无 IO、无副作用，
+    # 纯字符串/数组遮蔽），services 侧消费方仅 reap-orphan-pi 的 crash journal 摘要出口——
+    # 「日志回显前蔽值」属 logger 类横切关注点，与 crash-journal / mem-pressure 同裁决形态：
+    # 为它定义 port 只会增加无意义间接层（遮蔽是写日志的前置纯变换，非可替换的 IO 能力）。
+    # 登记同步见 docs/architecture/runtime-layering.md §3 ③e
+    "argv-redact",
 }
 
 # value import 行（import { X } from '...infra/...'；import type 豁免）

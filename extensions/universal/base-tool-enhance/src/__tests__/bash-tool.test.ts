@@ -139,6 +139,10 @@ describe("createBashOverrideToolDefinition", () => {
 		// 白名单自动转后台 + timeout 显式值被尊重（除白名单强转后台例外）
 		expect(tool.description).toContain("whitelist");
 		expect(tool.description).toContain("timeout in seconds");
+		// 自动通知契约（"DO NOT bash sleep" 统一话术是 background-bash-notify 主线主张——
+		// 实测大量 agent bash sleep 空等后加的硬契约，删改必须红灯）
+		expect(tool.description).toContain("Completion is auto-notified");
+		expect(tool.description).toContain("DO NOT bash sleep");
 	});
 
 	it("passes through official promptSnippet/promptGuidelines (system-prompt parity)", () => {
@@ -281,6 +285,9 @@ describe("background branch routing (M2)", () => {
 		expect(text).toContain("pid: 12345");
 		expect(text).toContain("Output file:");
 		expect(text).toContain('bash_output {task_id:"bt-1724589012-a3f7"}');
+		// 启动回执同钉自动通知契约（与 description 同一话术，startBackgroundAndReply 单点拼装）
+		expect(text).toContain("Completion is auto-notified");
+		expect(text).toContain("DO NOT bash sleep");
 	});
 
 	it("background spawn failure surfaces the error", async () => {

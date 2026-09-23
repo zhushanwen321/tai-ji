@@ -2,7 +2,7 @@
 
 cw 2.0 的 pi extension 薄封装：
 
-- **cw_query 工具**：只读查询透传（`status` / `frontier` / `tree` / `report`，参数面 `--unit` / `--root` / `--json` 按 cw 2.0 修正）。写命令（create / evidence submit / review submit / verify / run）不在工具面——经 bash 调 `cw`，用法以 cw-cli skill 为 SSOT。
+- **cw_query 工具**：只读查询透传，action 白名单 = `status` / `frontier` / `tree` / `report`。参数面按 cw 2.0 修正，越界组合在工具侧前置报错（不打到 cw）：`--unit` 仅 status（单 unit 详情）/ report（单 unit 证据链）接受；`--root` 仅 report（子树汇总）接受，且与 `--unit` 互斥；`--json` 仅 status / frontier 接受；`tree` 无 flag。写命令（create / evidence submit / review submit / verify / run）不在工具面——经 bash 调 `cw`，用法以 cw-cli skill 为 SSOT。
 - **pi-cw skill**：runner 实操指南（多 unit 任务 `cw run --spawn pi` 的后台运行、监控、escalation 处置、收尾回流）。
 
 编排智能收在 cw 2.0 引擎（runner + 账本 gate），「层主不能自审」由账本层硬保证。

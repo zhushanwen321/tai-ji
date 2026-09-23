@@ -11,7 +11,7 @@
  * - mount(Panel, { sessionId: null })（Landing 态），Landing/Composer 均真实渲染
  * - 仅 mock useNewTaskFlow（Landing + Composer 的 session/cwd/branch 真源）+ useExtensionUI
  *   （Panel 的 ask-user 订阅）+ useChat（Composer 的 chat RPC）
- * - stub 重子组件（PanelHeader/MessageStream/AskUserOverlay + Composer 子组件
+ * - stub 重子组件（PanelHeader/MessageStream/FormOverlay + Composer 子组件
  *   + Landing 的 popover/modal 子组件），保留 ComposerInput mock（testid 断言）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-smoke.test.ts
@@ -24,10 +24,10 @@ import { textToSegments } from '@taiji/shared'
 import Panel from '@/components/panel/Panel.vue'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
+// （currentCwd 不入 hoisted 块——W4 要求真 ref，由工厂执行期内联 ref 注入）
 const flowMock = vi.hoisted(() => ({
   currentSessionId: { value: null as string | null },
   currentSession: { value: null as { launchPresetId?: string } | null },
-  currentCwd: { value: null as string | null },
   currentModel: { value: null as string | null },
   gitInfo: { value: { branch: 'main' } as { branch: string } | null },
   mode: { value: 'plain-repo' as string },
@@ -75,23 +75,28 @@ const depsMock = vi.hoisted(() => ({
   toast: { error: vi.fn() },
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
-  useNewTaskDeps: () => ({ flow: flowMock, ...depsMock }),
+  // deps.flow 的 currentCwd 同样真 ref（Landing `flow.currentCwd.value` 直读）；与
+  // useNewTaskFlow 工厂各持独立实例——冒烟零跨面写入，语义等价
+  useNewTaskDeps: () => ({ flow: { ...flowMock, currentCwd: ref<string | null>(null) }, ...depsMock }),
 }))
 
-// ── useExtensionUI mock（Panel 的 ask-user 订阅，ask-user-inline 范式）──
+// ── useExtensionUI mock（Panel 的表单订阅，ask-user-inline 范式）──
+// formReq 形状对齐 ExtensionUIRequest 的 form 帧子集（requestId/formQuestions 供
+// formQuestions 复核守卫 warn 断言消费）
 const uiMock = vi.hoisted(() => ({
-  askUserReq: { value: undefined as { askUser?: boolean } | undefined },
-  dialogReq: { value: undefined as { askUser?: boolean } | undefined },
+  formReq: { value: undefined as { form?: boolean; requestId?: string; formQuestions?: unknown[] } | undefined },
   respond: () => {},
   cancel: () => {},
 }))
 vi.mock('@/composables/useExtensionUI', () => ({
   useExtensionUI: () => ({
-    currentAskUserRequest: uiMock.askUserReq,
+    currentFormRequest: uiMock.formReq,
     respond: uiMock.respond,
     cancel: uiMock.cancel,
   }),
-  askUserFilter: (req: { askUser?: boolean } | undefined) => req?.askUser === true,
+  formFilter: (req: { form?: boolean } | undefined) => req?.form === true,
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  planReviewFilter: (req: { planReview?: boolean } | undefined) => req?.planReview === true,
 }))
 
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
@@ -150,7 +155,7 @@ const stubs = {
   // Panel 子组件
   PanelHeader: SIMPLE,
   MessageStream: SIMPLE,
-  AskUserOverlay: SIMPLE,
+  FormOverlay: SIMPLE,
   // Landing 子组件（popover/modal 重依赖）
   DirSelectPopover: SIMPLE,
   BranchSelectPopover: SIMPLE,
@@ -195,5 +200,49 @@ describe('首屏冒烟（TC19）', () => {
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // Landing 顶部元信息 chip（spec §3.1）
     expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+  })
+})
+
+describe('formQuestions 复核守卫 warn（设计 D2：非法项跳过 + 留痕）', () => {
+  it('非法问题项被滤除时 console.warn 留痕（requestId + 滤除数）', () => {
+    // 一合法（text 题）+ 一非法（question 非 string，isFormQuestion 拒收）→ 过滤发生
+    uiMock.formReq.value = {
+      form: true,
+      requestId: 'req-warn-1',
+      formQuestions: [{ type: 'text', question: '备注' }, { type: 'text', question: 42 }],
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // FormOverlay 覆盖 stub 带 testid：观察者形态锚点（证明 overlay band 激活、
+    // formQuestions computed 在父渲染中被求值——warn 的触发前提）
+    const FormOverlayWarnStub = defineComponent({
+      name: 'FormOverlay',
+      template: '<div data-testid="form-overlay" />',
+    })
+    const wrapper = mount(Panel, {
+      props: {
+        panelId: 'panel-root',
+        sessionId: 'session-A',
+        sessionLabel: 'session-A',
+        sessionDir: '',
+        status: 'done',
+      },
+      global: { stubs: { ...stubs, FormOverlay: FormOverlayWarnStub } },
+    })
+    try {
+      // 使用者视角：FormOverlay 挂载（互斥 Composer 隐藏）——overlay band 激活
+      expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
+      // 观察者视角：滤除发生应有 [Panel] formQuestions warn，含 requestId 与 dropped 计数
+      // （「表单少渲染一题」P0 通道排查线索）
+      const warnMsg = warnSpy.mock.calls
+        .map(args => args[0])
+        .find((m): m is string => typeof m === 'string' && m.includes('[Panel] formQuestions'))
+      expect(warnMsg, '滤除发生应有 [Panel] formQuestions warn').toBeDefined()
+      expect(warnMsg).toContain('requestId=req-warn-1')
+      expect(warnMsg).toContain('dropped=1/2')
+    } finally {
+      warnSpy.mockRestore()
+      wrapper.unmount()
+    }
   })
 })

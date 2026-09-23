@@ -5,7 +5,7 @@
  * 改为构造 ModelThinkingDeps 注入。覆盖：currentModelId/currentThinkingLevel 派生、per-session 隔离、
  * onModelSelect/onThinkingSelect 三分支（staging/landing/已建）、Staging Mode 快照。
  *
- * [u3] 记忆恢复套件（设计 model-thinking-level-memory.md D2/D3 探针表）：
+ * [u3] 记忆恢复套件（D2/D3 探针表）：
  * - armed 序列族 9 断言点：armed 为内部状态，全部经行为序列断言（恢复 RPC 是否发出 =
  *   token 设立/保留/消费/清除的可观测投影），用真实 u1 memory API（record 预置记忆）
  *

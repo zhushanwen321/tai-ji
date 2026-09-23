@@ -26,6 +26,7 @@ import { computed, onScopeDispose, reactive, watch, type ComputedRef, type Ref }
 import { registerSessionCleanup, useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
+import { createFrameBookkeeping } from '@taiji/core/foundation/create-frame-bookkeeping'
 import { session as sessionApi } from '@/api'
 
 /** context.update 帧 / getContext reply 的 usage 载荷形状（D1：字段缺失 = 无值）。 */
@@ -97,26 +98,19 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
   )
 
   /**
-   * per-instance live 帧序号表：每次「合法帧」（真值或无值占位）到达本实例 handler 时
-   * bump。全 0 残帧不 bump（未写入分区，不构成 recency 前沿）。用途：
-   * applyReply 判定「RPC 发起后分区是否已被更新的 live 帧覆盖」。
-   * 注：session cleanup 不清此表——序号是单调 recency 计数，清零会让在途条目的
-   * seqAtIssue 比对出现假性「已覆盖」，误跳过合法写入。
+   * 帧写入仲裁簿记（recency 序号表 + suppressed 抑制表）：共享原语单点
+   * createFrameBookkeeping（与 useGenStats 同构收敛），行为语义见原语模块头注——
+   * 序号表 session cleanup 不清（清零会假性「已覆盖」误跳合法写入）；抑制表于
+   * deleteSession 后挡僵尸写回（updateFor 会重建分区，形成已销毁 session 的泄漏条目）、
+   * 重新进入视图解除。
    */
-  const liveFrameSeqs = new Map<string, number>()
-
-  /**
-   * 已清理 sid 抑制表：deleteSession 清掉分区后，在途 RPC resolve / 迟到帧不得把分区
-   * 僵尸式写回（updateFor 会重新创建分区，形成已销毁 session 的泄漏条目）。
-   * 重新进入该 sid 视图时解除抑制（新生命周期）。
-   */
-  const suppressedSids = new Set<string>()
+  const bookkeeping = createFrameBookkeeping()
 
   // ── 订阅（D2）：只订 context.update；handler 用第二参数 sid（消息所属 session）写分区 ──
   const onMessage = useSessionEvents(sessionIdRef)
   onMessage('context.update', (msg, sid) => {
     // 已销毁 session 的迟到帧：静默丢弃（分区已清理，写回即僵尸条目）
-    if (suppressedSids.has(sid)) return
+    if (bookkeeping.isSuppressed(sid)) return
     const { inputTokens, contextLimit, usagePercent } = msg.payload
     // D4 0 帧哨兵：三字段全 0 物理上不可能是真值（任何模型 contextWindow > 0），属协议
     // 演进期/regression 的 0 基线残帧——丢弃 + dev 冒泡。防御纵深：即使 D1 的 runtime
@@ -126,7 +120,7 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
       return
     }
     // 合法帧落地：bump recency 序号（applyReply 的 skip 判定基准）
-    liveFrameSeqs.set(sid, (liveFrameSeqs.get(sid) ?? 0) + 1)
+    bookkeeping.bumpSeq(sid)
     if (inputTokens === undefined || contextLimit === undefined || usagePercent === undefined) {
       // 无值占位帧（仅含 sessionId）：权威源明确无值。数值字段一并清零，防止 ok→no-value
       // 迁移后（如 compact）陈旧数值从 no-value 分区漏出
@@ -169,8 +163,8 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
    * 漂移，非当前视图分区无 UI 意义且无读取 API。
    */
   function applyReply(sid: string, reply: ContextUsageReply, seqAtIssue: number): void {
-    if (suppressedSids.has(sid)) return
-    const coveredByNewerFrame = (liveFrameSeqs.get(sid) ?? 0) !== seqAtIssue
+    if (bookkeeping.isSuppressed(sid)) return
+    const coveredByNewerFrame = bookkeeping.hasNewerFrame(sid, seqAtIssue)
     if (coveredByNewerFrame) return
 
     if (isDriftDetectorEnabled() && normalizedSid.value === sid) {
@@ -207,7 +201,7 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
    */
   function recover(sid: string): void {
     // 重新进入视图 = 新生命周期：解除该 sid 的清理抑制
-    suppressedSids.delete(sid)
+    bookkeeping.release(sid)
 
     // meta（seqAtIssue）仅在首次发起时捕获，复用条目的实例共享发起时刻值（理由见模块级
     // 表注释）。settle 即清与引用比对防误删由 factory 内建（settle 清理先于调用方 then，
@@ -215,7 +209,7 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
     const entry = inflightContextFetch.run(
       sid,
       () => sessionApi.getContext(sid),
-      { seqAtIssue: liveFrameSeqs.get(sid) ?? 0 },
+      { seqAtIssue: bookkeeping.seqAt(sid) },
     )
     void entry.promise.then(
       (reply) => applyReply(sid, reply, entry.meta.seqAtIssue),
@@ -241,7 +235,7 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
   // 这里显式再挂以对齐设计，同时清理本 composable 自有簿记（抑制表登记 + 分区）。
   const unregisterUsageCleanup = registerSessionCleanup((sid) => {
     scoped.cleanup(sid)
-    suppressedSids.add(sid)
+    bookkeeping.suppress(sid)
   })
   onScopeDispose(() => {
     unregisterUsageCleanup()

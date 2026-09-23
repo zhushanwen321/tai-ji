@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-agent-ext",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "taiji extension for Pi — internal host commands for extension reload and system prompt fetch",
   "type": "module",
   "main": "src/index.ts",

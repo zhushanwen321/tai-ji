@@ -9,7 +9,7 @@ import { PluginStorage } from './plugin-storage.js'
 import { SessionDataStore } from './session-data-store.js'
 import { PluginRpcServer } from './plugin-rpc-server.js'
 import { PluginHost } from './plugin-host.js'
-import { PluginActivator, PERMISSION_TIMEOUT_MS } from './plugin-activator.js'
+import { PluginActivator } from './plugin-activator.js'
 import { registerAllRpcMethods } from './plugin-rpc-setup.js'
 import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
@@ -29,37 +29,12 @@ import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEn
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
 import { join } from 'node:path'
 import { toErrorMessage } from '../../utils/errors.js'
+import { pluginToggleFailedError, pluginUninstallPartialError, removePluginDiskFiles } from './api/lifecycle-errors.js'
+import { readEnvPermissionTimeoutMs } from './plugin-env-timeout.js'
 import { PendingTracker } from '../../utils/async/pending-tracker.js'
 // type-only：IMessageBus 不反向依赖 plugin-service，无运行时环（与 message-dispatcher 同款约束）
 // wave:perf-w09（接口收敛）：依赖 publish 抽象而非 MessageBus 具体类
 import type { IMessageBus } from '../message-bus/message-bus.js'
-
-/**
- * TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS 读取（timeout-plugin-service D3）：权限审批
- * 等待的全局逃生门。合法正数生效；缺失/非法 warn 回落 undefined → Activator 构造
- * 函数落 PERMISSION_TIMEOUT_MS（回落权威单一在构造函数，此处只解析 env）。
- *
- * 形态对齐 subagent-core lifecycle-manager getEnvIdleTimeoutMs 先例：「以为设了
- * 超长等待、实际回落默认」的静默语义漂移不可见，非法必须 warn 留痕。
- *
- * §11 检查点结论（C-proc-09 核对）：runtime 进程自读 env，不进任何白名单——
- * 入站方向 ENV_WHITELIST_PREFIXES（shared/constants.ts）已含裸 'TAIJI_' 前缀天然
- * 放行；出站方向 runtime 不向子进程注入此变量（消费点仅 runtime 自身），且
- * SPAWN_ENV_FORWARD_REFERENCE 为纯文档性登记不参与过滤（runtime 自身行为开关
- * 不登记，TAIJI_LOG_LEVEL 族 U0-② 同款结论）。
- */
-function readEnvPermissionTimeoutMs(): number | undefined {
-  const raw = process.env.TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS
-  if (!raw) return undefined
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.warn(
-      `[plugin-service] TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS="${raw}" is invalid (expected a positive millisecond number) — falling back to default ${PERMISSION_TIMEOUT_MS}ms (30min); set a plain ms value (e.g. 1800000) to override`,
-    )
-    return undefined
-  }
-  return parsed
-}
 
 // （BC）findTsxImportArg / resolveEsmLoaderExecArgv 原从本文件导出（实现迁至
 // plugin-esm-execargv.ts，max-lines 拆分），re-export 保持既有导入路径稳定
@@ -486,8 +461,13 @@ export class PluginService implements IPluginService {
       }
      
     } catch (err: unknown) {
+      // RT-6#6：旧状「只 log 仍回 config.plugins 成功形状」——用户开关回弹、全程无错误/指引
+      // （假成功观感，B 类吞噬）。现在先广播最新列表（保留原「允许前端回滚 UI」的意图），
+      // 再抛带 code 的领域错误；transport server.ts 全局 catch 透传 .code 成 error 信封
+      // （L4 增强，与 ExtensionInstallError 透传范式同通路），前端拿到可行动的失败反馈。
       console.error(`[plugin-service] togglePlugin(${pluginId}, ${enabled}) failed:`, toErrorMessage(err))
-      // 激活/停用失败仍然返回当前插件列表（允许前端回滚 UI）
+      this.broadcastPluginList()
+      throw pluginToggleFailedError(pluginId, enabled, err)
     }
 
     this.broadcastPluginList()
@@ -506,6 +486,9 @@ export class PluginService implements IPluginService {
     // descriptor 先取（removeDescriptor 之前）：pluginPath 供磁盘删除、source 供
     // builtin 判定
     const descriptor = this.registry.getDescriptor(pluginId)
+    // RT-6#6：磁盘删除失败的事故记录——盘上残留意味着重启后 scan 会把插件扫回来
+    // （用户视角 = 卸载无效/复活）。内存清理仍必须完成（Fix-5），但失败要在收口时抛出。
+    let onDiskRemovalError: string | undefined
 
     // 停用插件。Fix-5：deactivate 失败不阻断后续清理——注册表/工具/hook/命令清理是
     // uninstall 的核心语义，Worker 侧 deactivate 抛错（如超时）时仍必须完成本地拆除
@@ -540,13 +523,9 @@ export class PluginService implements IPluginService {
     if (descriptor && descriptor.source === 'external') {
       const installer = this.deps.pluginInstaller
       if (installer) {
-        try {
-          await installer.uninstall(pluginId, descriptor.pluginPath)
-        } catch (err: unknown) {
-          // best-effort 降级：磁盘删除失败不阻断后续内存清理（registry/activator/贡献
-          // 拆除是 uninstall 的核心语义）——残留目录重启后被 scan 扫回、可重试
-          console.error(`[plugin-service] on-disk removal during uninstall failed (continuing in-memory cleanup) for ${pluginId}:`, toErrorMessage(err))
-        }
+        // RT-6#6：best-effort 删除——失败不阻断内存清理（Fix-5），但把原因交还调用方，
+        // 由下方收口抛出（「卸载重启后复活」不得静默假成功）。
+        onDiskRemovalError = await removePluginDiskFiles(installer, pluginId, descriptor.pluginPath)
       } else {
         console.warn(`[plugin-service] no pluginInstaller configured; on-disk removal skipped for ${pluginId}`)
       }
@@ -572,6 +551,9 @@ export class PluginService implements IPluginService {
 
     await this.syncToolsToBridge()
     this.broadcastPluginList()
+    // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
+    // 「只 log 不回错」会让卸载在重启后静默复活。code 供 transport 全局 catch 透传。
+    if (onDiskRemovalError !== undefined) throw pluginUninstallPartialError(pluginId, onDiskRemovalError)
     return this.getDiscoveredPlugins()
   }
 
@@ -659,6 +641,8 @@ export class PluginService implements IPluginService {
         rpcServer: this.rpcServer,
         commandRegistry: this.commandRegistry,
         commandInvokes: this.commandInvokes,
+        // RT-6#7：命令下发后广播 started（在途反馈，填上长命令 30min 兜底窗口的零反馈缺口）
+        broadcast: this.broadcastOrBroker.bind(this),
       },
       pluginId,
       commandId,

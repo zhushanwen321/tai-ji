@@ -2,7 +2,7 @@
 
 > **本文件定位**：subagent 体系的**结构导航页**——回答「这套能力现在由哪些包组成、各包边界在哪、关键机制落在哪个模块」，并指向各主题的权威文档。机制细节不在本文件展开（避免与设计文档双源漂移）。
 >
-> **最后校准**：2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化轴落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳与 relay-env.ts（exports 子入口物理位置）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
+> **最后校准**：2026-09-16（collect / sync 批机制整体退役后复核——`service/` 收敛为六聚合、persistence 去 `sync-rebuild`、assembly 去 `collect-coordinator`；新增 `subagents` 批量 tool 与 fan-out 模板现状条目，见 §2 与 §4 批量编排行）；2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化轴落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳与 relay-env.ts（exports 子入口物理位置）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
 > **历史**：本文件此前描述的是 M0 拆分前的**单包三层实现**（TUI / Runtime / Core 全在 extension 内，`session-runner.ts` / `session-factory.ts` / `executor` 等文件）。那些结构已随 core 抽包、引擎协议化、双轨收敛退役，对应实现迁至 `packages/subagent-core` 与两个引擎包（见 §7 历史沿革）。
 
 ---
@@ -53,11 +53,12 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 路径 | 职责 |
 |---|---|
-| `src/index.ts` | 组合根（装配点）：注册 3 tool + 2 command + messageRenderer + `pi.__workflowRun` + session 事件；接线 core 宿主端口（`configureCore` / `configureNotifyDomain`） |
+| `src/index.ts` | 组合根（装配点）：注册 3 tool + 2 command + messageRenderer + `pi.__workflowRun` + 进程级信号 hook；接线 core 宿主端口（`configureCore` / `configureNotifyDomain`）与两个装配 seam（`setupSessionLifecycle` / `setupWorkflowDomain`） |
 | `src/session-lifecycle.ts` | 会话生命周期装配 seam（bootstrap seam）：让测试注入 fake 依赖验证装配行为，不必挂载整个组合根 |
+| `src/workflow-events.ts` | workflow 域事件族装配 seam：per-factory 域状态 + 7 个 `pi.on` handler（session_start / session_compact / model_select / session_tree / session_before_fork / session_before_switch / session_shutdown）+ `makeDeps` / `getWorkflowDeps` 守卫 / `lazyDeps`（`createLazy` 单原语转发） |
 | `src/host/pi-host.ts` | pi 宿主端口实现（`HostServices` 的 pi 侧兑现），核心抽包时的宿主契约落点 |
 | `src/injectors/` | 提示注入器：engine-awareness / model-list / resource-list / subagent-list / workflow-list |
-| `src/interface/` | 注册胶水与展示：`subagent-tool` / `tool-workflow-script` / `commands` / `list-view` / `tool-render` / `bg-notify-render` / `gui-mappers` / `subagent-actions` |
+| `src/interface/` | 注册胶水与展示：`subagent-tool` / `tool-subagents`（批量编排入口，见 §4 批量编排行）/ `tool-workflow-script` / `commands` / `list-view` / `tool-render` / `bg-notify-render` / `gui-mappers` / `subagent-actions` |
 | `src/jsonl-run-store.ts` | workflow 运行存储（RunStore 端口的 JSONL 落盘实现） |
 | `relay/relay.mjs` | 零依赖代理脚本（tee 子进程 stdout/stderr）；常量内嵌镜像，与 SDK 单源一致性由 conformance 断言锁定 |
 
@@ -67,16 +68,16 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 子域 | 内容 |
 |---|---|
-| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（六聚合：`session-baselines` / `sync-collect-domain` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` + `service-bootstrap`） |
-| `src/execution/persistence/` | record 持久化轴：`record-store.ts`（内存 + 磁盘重建容器，意图原语唯一写入口 C-data-20；H4 三轴拆分后 = 容器 + 原语立面 + D7 写面收口本体，三轴实现拆至 `record-store-terminal.ts`（终态原语轴）/ `record-store-rounds.ts`（轮次簿记轴）/ `record-store-rebuild.ts`（重建与投影轴）——轴文件经 ctx 注入写面，守卫白名单零改动）、`execution-record.ts`（唯一状态对象与 CAS）、`finalize-record.ts`、`record-entry.ts`、`state-marker.ts` / `alive-store.ts`（轮收口收条与写权声明 sidecar）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts` / `sync-rebuild.ts` / `session-file-gc.ts` / `idle-gc.ts`（持久化与回收） |
+| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
+| `src/execution/persistence/` | record 持久化轴：`record-store.ts`（内存 + 磁盘重建容器，意图原语唯一写入口 C-data-20；H4 三轴拆分后 = 容器 + 原语立面 + D7 写面收口本体，三轴实现拆至 `record-store-terminal.ts`（终态原语轴）/ `record-store-rounds.ts`（轮次簿记轴）/ `record-store-rebuild.ts`（重建与投影轴）——轴文件经 ctx 注入写面，守卫白名单零改动）、`execution-record.ts`（唯一状态对象与 CAS）、`finalize-record.ts`、`record-entry.ts`、`state-marker.ts` / `alive-store.ts`（轮收口收条与写权声明 sidecar）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts` / `session-file-gc.ts` / `idle-gc.ts`（持久化与回收） |
 | `src/execution/notify/` | 通知轴：`notifier.ts` / `notify-host.ts` / `notify-ledger.ts`（确认式送达） |
 | `src/execution/worktree/` | worktree 隔离轴：`worktree-manager.ts` / `worktree-git-ops.ts` / `worktree-reconcile.ts` / `worktree-registry.ts`（worktree 隔离与归档重建对账） |
 | `src/execution/ui/` | 反向 UI 通道轴：`dialog-queue.ts` / `ui-channels.ts` / `ui-interaction-model.ts` / `ui-request-handler-factory.ts` / `ui-request-observability.ts` |
 | `src/execution/lifecycle/` | 生命周期轴：`lifecycle-manager.ts`（idle timer）、`lifecycle-predicates.ts`、`settled-watchdog.ts`（轮次活性守护） |
-| `src/execution/assembly/` | 装配与动作编排轴：`conversation-continuation.ts`（chat→run 统一，H1 唯一新增组件）、`subprocess-agent-runner.ts`（workflow 域 run 入口）、`subagent-actions-core.ts`、`agents-assembly.ts`、`agent-registry.ts`、`agent-result-mapper.ts`、`collect-coordinator.ts`、`concurrency-pool.ts`（background 并发与优先级排队）、`cold-lookup.ts`、`host-mode.ts`、`config.ts`、`model-resolver.ts`、`model-config-service.ts`、`stream-sink.ts`、`best-effort.ts`、`channel-registry-access.ts`、`path-encoding.ts`、`session-context-resolver.ts`、`session-pending.ts`、`workflow-state-root.ts`、`types.ts` |
+| `src/execution/assembly/` | 装配与动作编排轴：`conversation-continuation.ts`（chat→run 统一，H1 唯一新增组件）、`subprocess-agent-runner.ts`（workflow 域 run 入口）、`subagent-actions-core.ts`、`agents-assembly.ts`、`agent-registry.ts`、`agent-result-mapper.ts`、`concurrency-pool.ts`（background 并发与优先级排队）、`cold-lookup.ts`、`host-mode.ts`、`config.ts`、`model-resolver.ts`、`model-config-service.ts`、`stream-sink.ts`、`best-effort.ts`、`channel-registry-access.ts`、`path-encoding.ts`、`session-context-resolver.ts`、`session-pending.ts`、`workflow-state-root.ts`、`types.ts` |
 | `src/execution/engine/` | 引擎接入面：发现（`engine-discovery-roots` / `engine-discovery-scan` / `engine-inspect-package` / `engine-manifest`）、注册与路由（`registry` / `routing` / `types` / `port`）、`client/`（`client-options` / `engine-client` / `mirror` / `pid-file` / `reaper` / `remote-engine` 协议客户端 / `reverse-router`）、`common/`（`capability-gate` / `event-journal` / `journal-wiring` / `journal-replay` / `kill-chain` / `nesting-guard` / `pool-manager` / `persona-router` / `session-view-*` / `data-dir`）、`host/`（`host-bridge` / `host-ui-endpoint` / `pi-host-binding` / `spawned-children`） |
 | `src/execution/round-supervisor/` | 轮次监督器：看门狗与待决重认领（`supervisor` / `service-binding` / `notify-accounting` / `reconcile-sweep`） |
-| `src/orchestration/` | workflow 域：脚本生成与校验（`script-generate` / `script-lint` / `args-validator` / `workflow-files`）、执行（`execute-agent-call` / `launcher` / `lifecycle`）、worker（`worker-host` / `worker-script-builder` / `worker-message-pump`）、运行存储与快照（`file-run-store` / `run-snapshot`）、资源发现（`skill-discovery` / `config-loader` / `agent-opts-resolver`） |
+| `src/orchestration/` | workflow 域：内置模板（`workflows/`：chain / parallel / map-reduce / scatter-gather / review-fix-loop / fan-out——fan-out 为 `subagents` 批量 tool 的执行体，见 §4 批量编排行）、脚本生成与校验（`script-generate` / `script-lint` / `args-validator` / `workflow-files`）、执行（`execute-agent-call` / `launcher` / `lifecycle`）、worker（`worker-host` / `worker-script-builder` / `worker-message-pump`）、运行存储与快照（`file-run-store` / `run-snapshot`）、资源发现（`skill-discovery` / `config-loader` / `agent-opts-resolver`） |
 | `src/core/` | 宿主端口与日志（`host-services` / `notify-ports` / `logger` / `error-message`） |
 | `src/shared/` | 零依赖原语（`agent-event` / `atomic-write` / `injection-render` / `timer-delay` / `schema-jsonify` / `resource-discovery` 等） |
 
@@ -115,11 +116,12 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | chat→run 统一 | `assembly/conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（idle → `reviveOrThrow` 万物可续 / 在途轮 D2 打断入队 / 轮间直派）、`dispatchRoundGuarded` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`settleRoundSuccess`/`settleRoundFailed` 轮末收口（settle 簿记 + 通知门三元组路由 + armIdleKeepalive）；[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md) §3.4 + [永久会话模型](../../architecture/subagent-permanent-session-model.md) §3.2.7 |
 | 空闲回收 | `lifecycle/lifecycle-manager.ts` | per-record idle timer——arm 面 u7a 重挂（`armIdleTimer`/`armIdleKeepalive`：轮成功收口翻入保活 + 推 inFlight=0，新轮 disarm 翻回 executing），常量 `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` |
 | 楔死回收 | `lifecycle/settled-watchdog.ts` | settled 永不到达的两段式守护：中段无进展检测（刷新源 = run 事件通道既有事件）+ 收尾段固定上界（交棒 = run 应答驱动）；run 域（含 chatMode 续聊轮）与 workflow 域共用同一原语。one-shot 轮收敛点（`settleOneShotRound`）即撤两段窗——收敛后 record 保持 running-resumable（SP-5），armed entry 残留会在窗到期后对已交付槽误 kill + 误报 failed（2026-09-14 实测 ×7+，已根修） |
-| 嵌套生命周期 | `service/record-lifecycle.ts` `disposeAllRecords` + runtime `infra/relay/`（kill-on-disconnect） | **结构性限制：嵌套派发不能活过父的当前轮**。嵌套子（depth>0）record 挂在派生它的父 pi 进程内存：父轮末回收（U6 每轮=新进程）经 `disposeAllRecords("parent-shutdown")` 连带收起；runtime 侧父 relay socket 断开触发 kill-on-disconnect 连带杀链（crash-resilience §4.2 设计内防孤儿）。活跃嵌套子被连带关闭时 warn 留痕（恢复指引：父以 conversation:true 保活等待，或轮内同步等待结果）。2026-09-14 嵌套载体实测登记（sa-6619371b/sa-d0885b60：嵌套子 workflow 未及运行即被关闭，父方对失败无感）；「宿主接管嵌套子生命周期」为架构级演进方向，未排期 |
+| 嵌套生命周期 | `service/record-lifecycle.ts` `disposeAllRecords` + runtime `infra/relay/`（kill-on-disconnect） | **结构性限制：嵌套派发不能活过父的当前轮**。嵌套子（depth>0）record 挂在派生它的父 pi 进程内存：父轮末回收（U6 每轮=新进程）经 `disposeAllRecords("parent-shutdown")` 连带收起；runtime 侧父 relay socket 断开触发 kill-on-disconnect 连带杀链（crash-resilience §4.2 设计内防孤儿）。活跃嵌套子被连带关闭时 warn 留痕（恢复指引：嵌套结果只能轮内同步等待；已被连带关闭的查 subagents action:'list' 确认终态后重派——conversation 派发参数已随 modeless 波5 删除）。2026-09-14 嵌套载体实测登记（sa-6619371b/sa-d0885b60：嵌套子 workflow 未及运行即被关闭，父方对失败无感）；「宿主接管嵌套子生命周期」为架构级演进方向，未排期 |
 | 引擎装载 | `engine/engine-discovery*.ts` → `registry.ts` → `routing.ts` | 三级发现装载 cli descriptor；core 壳侧零内建引擎（`pi` 亦经发现装载） |
 | 协议客户端 | `engine/client/remote-engine.ts` + `engine-client.ts` | 宿主侧唯一协议适配点：帧编解码、能力门、反向路由、句柄镜像 |
 | journal | `engine/common/event-journal.ts` + `journal-wiring.ts` | 事件落盘（②级数据源）；固定分组 key `'shared'`（[池抽象降级] 无 retarget，路径构造即终值），30 天 mtime TTL 回收（`pool-manager.ts` `cleanupExpiredJournals`——journal 生命周期管理唯一清理机制，refs 计数已删） |
 | relay 通道 | shell `relay/relay.mjs` + `runtime/src/infra/relay/` | 代理脚本 tee 子进程输出；父身份键（SESSION_ID / RECORD_ID）由引擎按 `run.params.ctx` 重写，防误归属 |
+| 批量编排（fan-out） | shell `interface/tool-subagents.ts` + core `workflows/fan-out.js` | `subagents` 批量 tool（tasks 数组、一跳扁平）是 2+ 独立任务并行的唯一批量入口：handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道（tool 名收录 `WORKFLOW_TOOL_NAMES`），`parallel()` allSettled 派 N 个一次性成员——部分失败降 partial 不炸 run，run 收口经「结果通知」行通道发一条聚合通知（结构化 results：task/taskIndex/status/summary/fullReportPath）。成员不可 message/续聊（one-shot，重派恢复），中途停止走 workflow tool abort（runId 同体系）。单数 `subagent` tool 只管单个可持续会话实体，不再有批派发参数。成员为 one-shot 批成员：message 被 workflow-origin 域守卫拒绝（冷路径经 createRecord origin 透传 + 冷查治理口径 includeWorkflow:true 双修复可达，恢复指引 = re-dispatch via subagents）；close 对批成员 = 幂等收口放行（裁决：close 为意愿动作，无 message 同款的结果语义误读面）。 |
 | 结果通知 | `notify/notifier.ts` + `notify/notify-ledger.ts` | 结果语义通知必须走确认式送达（持久账本 + 幂等键），约束 C-ext-19 |
 | 反向 UI | `ui/dialog-queue.ts` + `ui/ui-request-handler-factory.ts` + `host/host-ui-endpoint.ts` | 引擎 `host/askUser` → 宿主 UI 请求队列 → 应答回传 |
 | worktree 隔离 | `worktree/worktree-manager.ts` / `worktree/worktree-git-ops.ts` | 子 agent 在 worktree 内改动，收尾回传 patch |

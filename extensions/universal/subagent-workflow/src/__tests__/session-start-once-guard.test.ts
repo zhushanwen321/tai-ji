@@ -1,13 +1,12 @@
 // src/__tests__/session-start-once-guard.test.ts
 //
-// u-audit-fix 探针实测（subagent-workflow 侧）：排查清单
-// （docs/design/pi-session-start-handler-idempotency-audit.md §2 subagent-workflow 行）
-// 判定「必须接入」的六项跨 session 副作用操作经 oncePerProcess 包装后，双派发
+// u-audit-fix 探针实测（subagent-workflow 侧）：判定「必须接入」的六项跨 session
+// 副作用操作经 oncePerProcess 包装后，双派发
 // （factory 二调/handler 累积形态：同一 handler 引用直接调两次）下各执行 1 次；
-// 清单「粒度边界」明令不包装的 ③identity appendEntry / ④bindNotifyLedger /
+// 粒度边界豁免（明令不包装）的 ③identity appendEntry / ④bindNotifyLedger /
 // ⑥service.initSession 保持每 session_start 执行（×2，防误伤反向断言）。
 //
-// 断言与清单探针验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
+// 断言与验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
 //   ① syncEnginesFile 写 = 1（engines.json 写发生在函数内部，入口 =1 ⟹ 写 ≤1）
 //   ⑦ startGcTimer = 1（setInterval 注册在 idle-gc 内部，入口 =1 ⟹ 注册 ≤1）
 //   ⑧ maybeCleanupExpiredSessionFiles = 1（扫描 + unlink 在函数内部）

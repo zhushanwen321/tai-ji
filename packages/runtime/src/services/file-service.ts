@@ -15,12 +15,16 @@
  * - expandDir/readFile 的 path：path.resolve(cwd, path) 后必须落在 cwd 之下（isUnderOrEqual），
  *   防 `../../etc/passwd` 路径穿越 → 越界抛 FileError('out_of_cwd')。
  *   （listTree 入口对 cwd 自身守门，恒 true，保持入口统一守门模式。）
+ * - readFile / readFileFromWhitelist 守门前两侧 realpath 归一（canonicalizePath，失败退词法）：
+ *   session cwd（前端/DB 词法形态）与 pi 子进程拼出的目标（物理形态）可因符号链接
+ *   （macOS /tmp → /private/tmp）词法前缀不一致，词法判定误拒同一物理目录内的文件；
+ *   归一后判定语义 = 物理路径包含关系。expandDir 保持词法判定不变。
  */
 import { resolve as resolvePath, join, relative, isAbsolute } from 'node:path'
 import type { FileNode } from '@taiji/shared'
 import type { IgnoreMatcher } from '../infra/fs/ignore-parser.js'
 import { compileIgnoreRules, matchPath } from '../infra/fs/ignore-parser.js'
-import { isUnderOrEqual, expandHome } from '../utils/path-utils.js'
+import { isUnderOrEqual, expandHome, canonicalizePath } from '../utils/path-utils.js'
 import type { IFileExecutor, FsEntry } from './ports/file-executor.js'
 import type { ISessionService, IFileService } from '../interfaces.js'
 import { FileError } from './file-error.js'
@@ -72,18 +76,6 @@ export const SEARCH_WALK_CONCURRENCY = 16
 export const BUILTIN_IGNORE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'coverage', '.next', '.cache', '.turbo',
 ])
-/**
- * .gitignore matcher 缓存容量上限（D7-1）。对齐项目 500 容量惯例；超出按 LRU 驱逐最旧 entry。
- * 导出供测试断言驱逐行为。每个 entry = 单个 .gitignore 文件的编译结果（远小于 500 文件的真实场景）。
- */
-export const IGNORE_MATCHER_CACHE_MAX = 500
-
-/** 缓存的 .gitignore 编译结果 + 文件身份戳（mtime/size 变化 → miss 重编译）。 */
-interface CachedIgnoreMatcher {
-  readonly mtimeMs: number
-  readonly size: number
-  readonly matcher: IgnoreMatcher
-}
 
 /**
  * 超时包装（NFR ④K-2，源码简化 T9 从 FileService 私有方法提取为可直测独立单元）：
@@ -125,15 +117,6 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 const EMPTY_MATCHER: IgnoreMatcher = compileIgnoreRules('')
 
 export class FileService implements IFileService {
-  /**
-   * .gitignore 编译结果缓存（D7-1，文件级）。
-   * key = 单个 .gitignore 文件绝对路径（非目录元组——expandDir 传 (cwd,dir) 两目录时，
-   * 各展开目录解析到同一根 .gitignore 即共享命中）；value 含 (mtimeMs,size) 身份戳，
-   * 文件被写工具改动 → stat 身份变化 → miss 重读重编译，无需手动失效。
-   * Map 迭代序 = 插入序，命中时 delete+set 移尾实现 LRU touch，驱逐从头删最旧。
-   */
-  private readonly ignoreCache = new Map<string, CachedIgnoreMatcher>()
-
   constructor(private opts: FileServiceOptions) {}
 
   /**
@@ -191,7 +174,14 @@ export class FileService implements IFileService {
     // 安全守门（NFR-AC-S2 越界统一守门）：所有路径（含 ~ 展开后的绝对路径）必须落在 cwd 下，
     // 防 `../../etc/passwd` 相对穿越与 `~/...` / `/etc/...` 绝对路径越界 → 越界抛 FileError('out_of_cwd')。
     // cwd 外文件读取（BC-3 skill 文件预览）走 readFileFromWhitelist（自带 allowedReadDirs 白名单）。
-    if (!isUnderOrEqual(cwd, resolvePath_)) throw new FileError('out_of_cwd', path)
+    // 守门前两侧 realpath 归一（canonicalizePath 失败退回原词法路径）：session cwd 是前端/DB
+    // 记录的词法形态（如 /tmp/x），pi 子进程 process.cwd() 拼出的目标常是解析后物理形态
+    // （如 /private/tmp/x，macOS /tmp → /private/tmp）——词法前缀判定会把同一物理目录误判
+    // 越界（A1 场景实测）。归一后判定语义 = 物理路径包含关系；目标不存在（realpath ENOENT）
+    // 退词法路径继续判，not_found 语义由后续 stat ENOENT 保持。读取仍用原词法路径，形态不变。
+    if (!isUnderOrEqual(canonicalizePath(cwd), canonicalizePath(resolvePath_))) {
+      throw new FileError('out_of_cwd', path)
+    }
     const statResult = await this.callFs(() => this.opts.executor.stat(resolvePath_), 'stat')
     const full = await this.callFs(() => this.opts.executor.readFile(resolvePath_), 'readFile')
     if (statResult.size > MAX_FILE_SIZE) {
@@ -210,8 +200,11 @@ export class FileService implements IFileService {
   async readFileFromWhitelist(path: string): Promise<{ content: string; truncated: boolean }> {
     const allowed = this.opts.allowedReadDirs ?? []
     const absPath = resolvePath(path)
-    // 白名单守门（与旧 server.ts handleFileRead 一致：absPath 必须在某白名单目录之下）
-    if (!allowed.some((dir) => isUnderOrEqual(dir, absPath))) {
+    // 白名单守门（与旧 server.ts handleFileRead 一致：absPath 必须在某白名单目录之下）。
+    // 同 readFile：两侧 realpath 归一（失败退词法，canonicalizePath）后再判——白名单目录
+    // 同样可能存在 symlink 形态不一致（如 ~ 家目录本身经 /etc/symlinks 或 macOS 重组形态），
+    // 纯词法前缀判定会误拒。归一后判定语义 = 物理路径包含关系，error code 语义不变。
+    if (!allowed.some((dir) => isUnderOrEqual(canonicalizePath(dir), canonicalizePath(absPath)))) {
       throw new FileError('out_of_cwd', `路径不在允许的 skill 目录内: ${path}`)
     }
     const statResult = await this.callFs(() => this.opts.executor.stat(absPath), 'stat')
@@ -452,87 +445,34 @@ export class FileService implements IFileService {
    * 读一组目录的 .gitignore 合并编译 matcher（IO 走 port，计算走 infra 纯函数）。
    * 任一目录无 .gitignore / 读取失败 → 该目录贡献空（不影响其它）。
    *
-   * D7-1 缓存（按单个 .gitignore 文件粒度，非目录元组组合键）：每个目录的 .gitignore
-   * 编译结果独立缓存复用，多文件合并 = rules 拼接（compileIgnoreRules 逐行编译无跨行
-   * 状态，`contents.join('\n')` 整体编译与逐文件编译再拼接等价，join 保证行边界）。
-   * expandDir 传 (cwd,dir) 两目录时，各展开目录的 cwd 根 .gitignore 共享同一缓存 entry。
+   * 无缓存直读（缓存治理 U1 1-2 裁决）：.gitignore 是 KB 级文件、文件树/搜索是低频
+   * 操作，读盘编译微秒-毫秒级；原 (mtimeMs,size) 身份戳 LRU 有「同毫秒等长写」陈旧
+   * 窗口，直读后外部改动下一次读即生效。多文件合并 = rules 拼接（compileIgnoreRules
+   * 逐行编译无跨行状态，按目录序拼接顺序求值语义不变）。
    */
   private async loadMatcher(...dirs: string[]): Promise<IgnoreMatcher> {
     const collected: IgnoreMatcher[] = []
     for (const d of dirs) {
-      // key 构造前 resolvePath 归一化（A-4 审查）：cwd 带尾斜杠（'/repo/'）与不带（'/repo'）
-      // 必须解析到同一缓存条目——否则同一 .gitignore 文件因尾斜杠分叉成两个 key，
-      // 各读各编译，D7-1 文件级缓存退化为目录级缓存
+      // resolvePath 归一化：cwd 带尾斜杠（'/repo/'）与不带（'/repo'）必须解析到同一
+      // 文件路径——否则尾斜杠形态拼出 '/repo//.gitignore' 读不到，ignore 标记整体失效
       const m = await this.loadFileMatcher(`${resolvePath(d)}/.gitignore`)
       if (m.rules.length > 0) collected.push(m)
     }
     if (collected.length === 0) return EMPTY_MATCHER
-    if (collected.length === 1) return collected[0] // 单文件：直接复用缓存实例，零拷贝
+    if (collected.length === 1) return collected[0] // 单文件：直接复用编译实例，零拷贝
     return { rules: collected.flatMap((m) => m.rules) } // 多文件：按目录序拼接（顺序求值语义不变）
   }
 
   /**
-   * 取单个 .gitignore 文件的编译结果（带 D7-1 mtime 缓存）。
-   *
-   * 身份键 (mtimeMs, size)：每次先 stat（一次 stat 代价远低于重读重编译），
-   * 与缓存 entry 身份戳一致 → 命中（免读免编译）；不一致/无 entry → miss 重读重编译。
-   * 文件不存在（ENOENT）→ 哨兵身份 (-1,-1) 缓存空 matcher（文件后续被创建时 stat
-   * 成功必然 miss，无陈旧风险）。
-   *
-   * 降级路径（不缓存，行为与旧 readIgnoreSafe 等价）：stat resolve 但形状不完整
-   * （无 mtimeMs——旧式/自定义 executor）、stat 抛非 ENOENT 错误（EACCES/timeout 等，
-   * 文件身份不可确认）→ 直接读取，readFile 失败贡献空。
-   *
-   * 固有局限（D7-1 已接受）：(mtimeMs, size) 双键基于文件系统时间戳粒度——同一毫秒内
-   * 对同一 .gitignore 做两次相同长度的写（mtimeMs/size 均不变）会命中陈旧 matcher。
-   * 会话内 .gitignore 几乎不变（证据：05 §3.3 D7-1），该窗口可忽略，不引入手动失效。
+   * 取单个 .gitignore 文件的编译结果（直读直编译，无缓存）。
+   * 文件不存在 / 读取失败 / 非 string 内容 → 空规则（readIgnoreFile 容错）。
+   * debug 日志打点：strace 在 macOS 不可用，.gitignore 读取/编译次数由 debug 日志验证。
+   * console 经 infra/logger.ts monkey-patch tee 到 <dataDir>/logs/（debug 级，
+   * TAIJI_LOG_LEVEL=debug 时可见）。
    */
   private async loadFileMatcher(gitignorePath: string): Promise<IgnoreMatcher> {
-    let mtimeMs = -1
-    let size = -1
-    try {
-      const st = await this.opts.executor.stat(gitignorePath)
-      if (st == null || typeof st.mtimeMs !== 'number' || typeof st.size !== 'number') {
-        return this.compileUncached(gitignorePath)
-      }
-      ;({ mtimeMs, size } = st)
-    } catch (e) {
-      if ((e as { code?: string } | null)?.code !== 'ENOENT') {
-        return this.compileUncached(gitignorePath)
-      }
-      // ENOENT：文件不存在，落哨兵身份 (-1,-1) 走缓存判定（命中空 matcher）
-    }
-    const hit = this.ignoreCache.get(gitignorePath)
-    if (hit && hit.mtimeMs === mtimeMs && hit.size === size) {
-      // LRU touch：移到 Map 尾部（最近使用），驱逐从头删最旧
-      this.ignoreCache.delete(gitignorePath)
-      this.ignoreCache.set(gitignorePath, hit)
-      return hit.matcher
-    }
-    const matcher = await this.compileUncached(gitignorePath)
-    this.putIgnoreCache(gitignorePath, { mtimeMs, size, matcher })
-    return matcher
-  }
-
-  /** 降级路径：直接读取并编译，不入缓存（身份键不可用）。 */
-  private async compileUncached(gitignorePath: string): Promise<IgnoreMatcher> {
-    // V2 日志打点（05 §4 V2，plan.md W24 注意事项）：strace 在 macOS 不可用，.gitignore
-    // 读取/编译次数由 debug 日志验证——每次 miss/降级路径（真实 readFile+compile）打点，
-    // 缓存命中（stat 身份一致，无 readFile/compile）不打点。console 经 infra/logger.ts
-    // monkey-patch tee 到 <dataDir>/logs/（debug 级，TAIJI_LOG_LEVEL=debug 时可见）。
     console.debug(`[file-service] .gitignore 读取/编译: ${gitignorePath}`)
     return compileIgnoreRules(await this.readIgnoreFile(gitignorePath))
-  }
-
-  /** 入缓存 + LRU 驱逐：超出 IGNORE_MATCHER_CACHE_MAX 时按插入序驱逐最旧。 */
-  private putIgnoreCache(path: string, entry: CachedIgnoreMatcher): void {
-    this.ignoreCache.delete(path)
-    this.ignoreCache.set(path, entry)
-    while (this.ignoreCache.size > IGNORE_MATCHER_CACHE_MAX) {
-      const oldest = this.ignoreCache.keys().next().value
-      if (oldest === undefined) break
-      this.ignoreCache.delete(oldest)
-    }
   }
 
   /**

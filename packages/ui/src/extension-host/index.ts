@@ -7,7 +7,6 @@
  * 真实数据源实现由壳（P5）provide（接 runtime config.plugins 订阅 + S2
  * status-bar-controller/view-host-store/contribution-registry + message-bus-bridge
  * / runtime WS 通道），本包只定义契约与组件本体。
- * AskUserForm 是 CompanionBand 的内部子组件（W2 clarify Q2），不进导出面。
  */
 export { default as PluginSettingsPage } from './PluginSettingsPage.vue'
 export {
@@ -46,7 +45,6 @@ export {
 } from './permission-transport'
 export { default as L2TabBar } from './L2TabBar.vue'
 export type { L2TabItem } from './l2-tab-item'
-export { L2_TAB_BADGE_SOURCE_KEY, NATIVE_VIEWS_KEY } from './l2-tab-item'
 export { default as PluginViewContainer } from './PluginViewContainer.vue'
 export {
   VIEWS_SOURCE_KEY,

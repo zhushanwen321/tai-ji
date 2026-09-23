@@ -1,7 +1,7 @@
 // session-channel-dispose-harvest.test.ts —— P0-1 U5 dispose 前收割单测（机制层）。
 //
-// 设计权威源：docs/design/timeout-zcode-turn-and-settled-watchdog.md §3.4（退化路径）、
-// §6 D7（dispose 收割兜底）、§11 P-Z3（close 吞没 → dispose 触发 failAllTurns）。
+// 设计锚点：退化路径、
+// dispose 收割兜底（D7）、close 吞没 → dispose 触发 failAllTurns（P-Z3）。
 // P-Z3 的「close 事件吞没」在真实子进程形态不可确定性注入（Node child 进程退出后
 // stdio 关闭即触发 close 事件）——真实现场归 Gate B；本文件用 mock 连接承载机制层
 // 可判定形态：不触发 onClose（= close 吞没的机制等价物）→ dispose → 在途 turn 收敛

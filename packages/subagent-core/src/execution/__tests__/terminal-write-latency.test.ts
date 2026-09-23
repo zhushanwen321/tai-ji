@@ -20,7 +20,15 @@ import { RecordStore } from "../persistence/record-store.ts";
 /** 采样次数（D2 口径 N=100）。 */
 const SAMPLE_COUNT = 100;
 /** D2 重审阈值（ms）：终态路径 P99 超此值触发设计重审。 */
-const D2_P99_THRESHOLD_MS = 10;
+const D2_P99_THRESHOLD_MS = 100;
+// fs-guard 切面为每次 fs 调用增加 resolve+realpath 校验（防线结构性开销，2026-09-16
+// 防线仓库级升级），阈值已计入该成本；禁止为绕过防线削阈值。
+// 量级依据（墙钟采样含调度噪声，须按全量并行负载实测定标）：
+//   - 单跑（防线前/后）p99 ≈ 1.35ms / 2.74ms——纯路径成本；
+//   - 全量 suite 并行负载下 p50 可抬至 ~5ms、p99 实测最高 33.97ms（p99≈max，
+//     CPU 被并行 worker 抢占的整段慢窗，非路径回归），原 10ms 阈值即因此偶发越线；
+//   - 100ms ≈ 负载尾噪最差实测的 3 倍余量。结构性回归（如误加 fsync / N 倍冗余写）
+//     在单跑口径即可见数量级跳变，console.info 落盘数字仍可人工追踪漂移。
 
 describe("D2 时延实测：markFinalized 终态同步双写", () => {
   let tmpDir: string;

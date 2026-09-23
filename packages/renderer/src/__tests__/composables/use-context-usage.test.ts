@@ -41,7 +41,7 @@ import type {
 
 // ── mock 边界：getContext RPC mock 掉；门面 session 重指回 mock 的 domain ──
 // vitest 注入 VITE_MOCK=true 使 '@/api' 门面默认指向 mock 门面，须重指才能与断言共用
-// 同一 vi.fn（对齐 useListSync.test.ts 的双 mock 形态）。
+// 同一 vi.fn（对齐 stores/workflow.test.ts 的「domain mock + 门面重指」双 mock 形态）。
 const getContextMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/session', () => ({ getContext: getContextMock }))
 vi.mock('@/api', async (importActual) => {

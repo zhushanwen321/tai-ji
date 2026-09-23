@@ -1,7 +1,7 @@
 /**
  * update-network-resilience u6-handlers 验收测试：gateway update-handlers 的四项接入。
  *
- * 覆盖（设计 docs/design/update-network-resilience.md）：
+ * 覆盖（update 网络韧性设计）：
  *   - D1 短路①②：update:download 入口本地短路（preloaded 严格同版本 / pending 认领），
  *     断网（resolveByVersion 抛网络错）场景零网络返回 downloaded；版本严格相等反例
  *     （preloaded 0.9.12 vs 请求 0.9.11 不短路，继续原链）

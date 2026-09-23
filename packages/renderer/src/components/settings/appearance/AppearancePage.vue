@@ -89,7 +89,7 @@
           :desc="t(region.descKey)"
         >
           <Select
-            :model-value="system.fontScales?.[region.key] ?? 'medium'"
+            :model-value="system.fontScales?.[region.key] ?? DEFAULT_FONT_SCALES[region.key]"
             @update:model-value="onRegionScale(region.key, $event as FontScaleTier)"
           >
             <SelectTrigger class="h-8 w-[200px] px-2 text-xs" :data-testid="`appearance-fs-${region.key}-trigger`">
@@ -148,6 +148,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
 import type { SystemSettings, FontScaleTier } from '@taiji/core'
+import { DEFAULT_FONT_SCALES } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
 import { config } from '@/api'
@@ -170,7 +171,8 @@ function applyTaijiTheme(th: TaijiTheme): void {
   emit('update', { theme: th.theme, themePreset: th.preset })
 }
 
-// ── 分区字号（setSystem 浅合并，须回传完整 fontScales 对象） ──
+// ── 分区字号（setSystem 浅合并，须回传完整 fontScales 对象）──
+// 显示回落逐区域取 DEFAULT_FONT_SCALES（SSOT，sidebar=large），不写死 'medium'。
 const FONT_REGIONS = [
   { key: 'sidebar', descKey: 'settings.appearance.regionSidebarDesc' },
   { key: 'chat', descKey: 'settings.appearance.regionChatDesc' },

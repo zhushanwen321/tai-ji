@@ -1,7 +1,6 @@
 // src/relay-env.ts
 //
-// subagent relay 通道 env 名与协议常量 SSOT（docs/architecture/subagent-realtime-channel.md
-// §5.1/§5.2/§3.1）。跨进程契约单源：core（./relay-env 子入口）与 pi 引擎 CLI
+// subagent relay 通道 env 名与协议常量 SSOT。跨进程契约单源：core（./relay-env 子入口）与 pi 引擎 CLI
 // 的副本（round1-reuse R9）自本模块 re-export 收编——边界合法（引擎 CLI → SDK、
 // core → SDK 均正向）。runtime 侧消费经 core 子入口间接取本单源。
 //

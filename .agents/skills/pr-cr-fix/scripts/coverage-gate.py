@@ -156,6 +156,12 @@ def run_coverage(pkg_dir: Path) -> tuple[bool, str]:
         "--coverage.exclude=src/**/__tests__/**",
     ]
     import os
+    # 降载开关（opt-in，默认口径不变）：TAIJI_COVERAGE_GATE_SERIAL=1 时测试文件串行跑。
+    # 背景：11 包连跑的包内默认并发下，faux 真进程时序断言（idle-pi-reclaim）与 vitest
+    # worker teardown 竞态会随机 1 例级失败（单包复跑均绿、断言本身无问题）——串行只排除
+    # CPU 竞争对时序敏感用例的干扰，不改变任何断言与覆盖范围。
+    if os.environ.get("TAIJI_COVERAGE_GATE_SERIAL") == "1":
+        cmd.append("--no-file-parallelism")
     env = {**os.environ, "TAIJI_SKIP_REAL_PI": "1"}
     debug(f"run_coverage: {' '.join(cmd)}  (cwd={pkg_dir})")
     proc = subprocess.run(cmd, cwd=pkg_dir, capture_output=True, text=True, env=env)

@@ -1,5 +1,5 @@
 /**
- * main-logger 单测（crash-resilience u5a-main-logging 验收条款）。
+ * main-logger 单测（u5a-main-logging 验收条款）。
  *
  * 覆盖：
  * - init 后写入落盘 main-<date>.log，日志行含时间戳 + level（验收条款）

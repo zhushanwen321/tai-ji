@@ -26,6 +26,8 @@ type WorkflowNotifyDetails = {
   status: string;
   reason: string | undefined;
   traceLength: number;
+  /** [u9] 账本幂等键（wf-done:<runId>）——本文件无 ledger 绑定，走降级直发，字段原样携带。 */
+  notifyId: string;
   __gui__?: GuiRenderResult;
 };
 

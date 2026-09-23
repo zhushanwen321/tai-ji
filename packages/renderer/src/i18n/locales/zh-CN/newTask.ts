@@ -41,6 +41,7 @@ export default {
     repoBareBadge: 'bare-workspace',
     repoChange: '更换…',
     repoNotRepo: '当前目录不在 Git 仓库中，请先选择一个仓库目录。',
+    repoDetectFailed: '仓库状态检测失败，请关闭后重试；若持续出现请查看日志。',
     branchLabel: '分支名',
     branchPlaceholder: '例如 feat/oauth',
     branchValidation: '分支名不能含空格 / .. / ~ / ^ / : ，且不能以 - 或 . 开头',
@@ -78,13 +79,18 @@ export default {
     gitRepo: 'Git 仓库',
   },
   presetSelect: {
-    title: '选择启动预设',
+    title: '选择启动模式',
     setAsDefault: '设为默认',
     alreadyDefault: '已是默认',
-    presetLockedTooltip: '此 Session 使用 {name} 模式创建，不可更改',
-    legacySessionTooltip: '（历史 session，未记录预设）',
+    presetLockedTooltip: '此会话以「{name}」创建，不可更改',
+    legacySessionTooltip: '（历史会话，未记录模式）',
     legacyPresetName: '全工具模式',
     loadingPresets: '加载中…',
-    noPresets: '暂无预设',
+    noPresets: '暂无模式',
+  },
+  // 模式 chip（u4）：landing 首行三档退化 + 跨档不丢的「含替换提示词」信任标记
+  presetChip: {
+    ariaLabel: '模式：{name}',
+    replaceHint: '含替换提示词',
   },
 }

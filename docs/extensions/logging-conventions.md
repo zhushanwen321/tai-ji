@@ -97,7 +97,7 @@ TAIJI_AGENT_DEBUG=1 pi          # DEBUG 全量：所有用 getLogger 的 extensi
 TAIJI_AGENT_EXT_LOG=1 pi        # INFO 级落盘：debug() 重标 info 写入（taiji 托管环境由 runtime spawn 时注入此变量 + 7 天保留期清理）
 ```
 
-日志位置：`~/.pi/agent/logs/<extName>-YYYY-MM-DD.log`（或 `$PI_CODING_AGENT_DIR/logs/`——taiji 隔离环境为 `~/.taiji/pi/agent/logs/`）。
+日志位置：`~/.pi/agent/logs/<extName>-YYYY-MM-DD.log`（或 `$PI_CODING_AGENT_DIR/logs/`——taiji 隔离环境为 `~/.taiji/agent/logs/`）。
 
 > **统一开关**：所有 extension 的 debug 开关统一使用 `TAIJI_AGENT_DEBUG=1`（DEBUG 全量）/ `TAIJI_AGENT_EXT_LOG=1`（INFO 级观测档），不要新增 `PI_*_DEBUG` / `PENDING_DEBUG` 这类 per-extension 变量；未接入共享 logger 的 extension 也应读取同一个变量。
 

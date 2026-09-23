@@ -9,6 +9,8 @@
  *   - 合并语义：resolveLoadPaths(cfg, kind) = dedupe([...projectPaths, ...globalPaths])，
  *     项目在前 = 项目优先级 > 全局（靠前覆盖靠后，§1.1 层 3）。
  *   - 强制目录（~/.taiji/skills · .taiji/skills 等）不进此文件（桥接层硬编码注入）
+ *   - 默认态（文件缺失回落）：全部 preset 目录默认勾选（DEFAULT_DISCOVERY_CONFIG，
+ *     pi + taiji 相关路径；claude 已移出预设）——新装用户打开设置即见勾选态，无需手动配置。
  *
  * v1→v2 迁移：读取 v1（扁平 skillDirs/agentDirs/extensionDirs）时按路径特征归类
  * （相对→project / 绝对/~→global，见 migrateDiscoveryV1ToV2），迁移后立即作为 v2 返回（下次写回落盘）。
@@ -26,6 +28,7 @@ import {
   PRESET_SKILL_DIRS,
   PRESET_AGENT_DIRS,
   PRESET_EXTENSION_DIRS,
+  DEFAULT_DISCOVERY_CONFIG,
   migrateDiscoveryV1ToV2,
 } from '@taiji/shared'
 import type { DiscoveryConfig, DiscoveryConfigV1, SkillDirConfig } from '@taiji/shared'
@@ -42,11 +45,27 @@ export type ScopedPaths = { projectPaths: string[]; globalPaths: string[] }
 /** discovery.json 当前 schema 版本（deserialize 只认此值 + v1 迁移路径） */
 const DISCOVERY_SCHEMA_VERSION = 2
 
+/**
+ * discovery.json 默认态（文件缺失时的回落值）：全部 preset 目录默认勾选（pi + taiji 相关，
+ * 路径 SSOT 见 shared DEFAULT_DISCOVERY_CONFIG）。此前默认全空 → 新装用户打开设置页所有
+ * 目录都是未勾选态，需手动配置；现在打开即默认勾选，无需用户操作。
+ *
+ * 顺序：projectPaths/globalPaths 各自内部按 preset 顺序，与 buildDirConfigs 展示序一致。
+ */
 const DEFAULT_DISCOVERY: DiscoveryConfig = {
   version: DISCOVERY_SCHEMA_VERSION,
-  skill: { projectPaths: [], globalPaths: [] },
-  agent: { projectPaths: [], globalPaths: [] },
-  extension: { projectPaths: [], globalPaths: [] },
+  skill: {
+    projectPaths: [...DEFAULT_DISCOVERY_CONFIG.skill.projectPaths],
+    globalPaths: [...DEFAULT_DISCOVERY_CONFIG.skill.globalPaths],
+  },
+  agent: {
+    projectPaths: [...DEFAULT_DISCOVERY_CONFIG.agent.projectPaths],
+    globalPaths: [...DEFAULT_DISCOVERY_CONFIG.agent.globalPaths],
+  },
+  extension: {
+    projectPaths: [...DEFAULT_DISCOVERY_CONFIG.extension.projectPaths],
+    globalPaths: [...DEFAULT_DISCOVERY_CONFIG.extension.globalPaths],
+  },
 }
 
 /** 把未知值归一为 string[]（过滤非字符串元素）。 */
@@ -66,12 +85,11 @@ function asScopedPaths(k: unknown): ScopedPaths {
 let discoveryStore = createDiscoveryStore(getDiscoveryPath())
 
 /**
- * discovery.json 存储：read-through（TTL 缓存 + ENOENT 容错）+ atomicWrite。
+ * discovery.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。
  * schema guard：认 v2（直接用）+ v1（迁移到 v2 后返回，不再 fallback 清空）。
  */
 function createDiscoveryStore(path: string): JsonStore<DiscoveryConfig> {
   return new JsonStore<DiscoveryConfig>(path, DEFAULT_DISCOVERY, {
-    ttlMs: 3_000,
     deserialize: (raw): DiscoveryConfig => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         console.warn(`[discovery-store] ${path} schema 不匹配，使用 fallback`)
@@ -108,11 +126,10 @@ function createDiscoveryStore(path: string): JsonStore<DiscoveryConfig> {
       console.warn(`[discovery-store] ${path} 未知 version=${String(obj.version)}，使用 fallback`)
       return { ...DEFAULT_DISCOVERY }
     },
-    // 六字段全空 → 删文件（与 disabled-packages.json 的「空则删」语义一致）
-    shouldDeleteWhen: (v) =>
-      v.skill.projectPaths.length === 0 && v.skill.globalPaths.length === 0 &&
-      v.agent.projectPaths.length === 0 && v.agent.globalPaths.length === 0 &&
-      v.extension.projectPaths.length === 0 && v.extension.globalPaths.length === 0,
+    // 不再配置 shouldDeleteWhen（旧「六字段全空 → 删文件」已移除）：默认态非空后，全空只能
+    // 来自用户显式取消全部勾选——删文件会让下次读回落到 DEFAULT_DISCOVERY，用户关掉的目录
+    // 在下次读取时「复活」为勾选态。保留全空文件即保留用户意图；旧的清理诉求（pi 首启
+    // 占位脏数据）已由读写两端的 existsSync 脏数据过滤承担（partitionByScope / buildDirConfigs）。
   })
 }
 
@@ -139,7 +156,7 @@ export function readDiscovery(): DiscoveryConfig {
   return discoveryStore.read()
 }
 
-/** 写入 discovery.json 全量（刷新缓存；六字段全空则删文件）。 */
+/** 写入 discovery.json 全量（刷新缓存；全空文件保留——见 createDiscoveryStore 内 shouldDeleteWhen 注）。 */
 export function writeDiscovery(config: DiscoveryConfig): void {
   discoveryStore.write(config)
 }

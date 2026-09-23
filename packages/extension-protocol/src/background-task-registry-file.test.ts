@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it, expect } from 'vitest'
 import {
@@ -18,7 +19,8 @@ import {
 let tmpDir: string
 
 function freshDir(): string {
-  tmpDir = mkdtempSync(join('/tmp', 'ext-protocol-registry-test-'))
+  // fs-guard 白名单：写删目标必须落 os.tmpdir()（macOS 上 /tmp ≠ tmpdir()，硬编码 /tmp 被拦）
+  tmpDir = mkdtempSync(join(tmpdir(), 'ext-protocol-registry-test-'))
   return tmpDir
 }
 
@@ -38,7 +40,8 @@ const entry = (taskId: string, overrides: Record<string, unknown> = {}): Backgro
   taskId,
   pid: 100 + Number(taskId.replace(/\D/g, '') || 0),
   command: 'sleep 30',
-  outputFile: '/tmp/out.log',
+  // fixture 数据值（非 fs 写目标），同样走 tmpdir() 形态避免 /tmp 硬编码起点
+  outputFile: join(tmpdir(), 'out.log'),
   startedAt: 1_000,
   state: 'running',
   ownerPiPid: 1,

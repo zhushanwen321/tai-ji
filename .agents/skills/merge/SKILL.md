@@ -35,8 +35,6 @@ description: >-
 
 **为什么不能在 feature worktree 操作**：阶段 2 起 feature 分支已合并，阶段 7 会删除 feature worktree；version bump / commit / tag / push 等写操作落在 feature worktree 会污染已合并分支、导致 main 实际未变更。详见阶段 7 的 [HISTORICAL] 说明。
 
-**事故背景**：阶段 4 `pnpm version patch` 因 bash 调用未自包含 `cd $WS_ROOT/main`，cwd reset 到 feature worktree，把 version bump 写进了 feature worktree 的 package.json（main worktree 未动），直到 `git branch --show-current` 检查才暴露。根因是旧版本文档误称"cwd 按调用持久"，AI 据此以为阶段 3 的 `cd main` 对后续调用仍有效。
-
 ```bash
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/init.sh <worktree-dir>
 ```
@@ -45,6 +43,63 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/init.sh <worktree-dir>
 - `<worktree-dir>` — feature worktree 目录名（basename），如 `feat-extensions-widget`
 
 脚本输出 `WS_ROOT`、`BRANCH_NAME`、`PR_NUMBER`，后续阶段需要这些值。
+
+### 阶段 0.5: commit 整理（合并过细分 commit）
+
+> **执行时机**：阶段 0 之后、阶段 1 本地验证之前——先把分支整理成最终形态再验证，阶段 1 本地验证与阶段 2 PR CI 覆盖的都是整理后的代码。改写历史会使 PR CI 重新触发，阶段 2 等待的是新一轮 CI，时序自洽。
+
+**目标**：AI 单元工作流（dev-flow / cw 等）按单元逐笔提交，feature 分支上会积累大量过细 commit（单元笔、簿记/文档同步小笔、fixup/typo/文案笔）。本阶段把 `merge-base` 之后的 commit 重组为**逻辑批次级**序列，使 main 侧 `--no-ff` 保留的分支历史可读、可 bisect。commit 数量少或已符合粒度时输出「无需整理」直接放行，不强行合并。
+
+**硬约束 [MANDATORY]**：
+
+1. **改写范围**：只重组 `git merge-base github/main HEAD..HEAD` 区间内的本分支 commit；main 侧既有历史绝不触碰
+2. **备份先行**：整理前打备份分支 `git branch backup/pre-squash-$(date +%m%d-%H%M)`——整理错误整链可恢复；阶段 7 清理时一并删除
+3. **每个整理后的 commit 必须自洽**：可编译、受影响测试通过——重组冲突解决后跑受影响包测试再继续
+4. **force push 只用 `--force-with-lease`**，禁止裸 `--force`
+5. **他人 commit 不动**：区间内存在 author 非本工作流的 commit → 停下询问用户，禁止自动改写
+6. **已在 review 的 PR**：整理会刷新 PR diff，若有进行中的人类 review 意见未处理完 → 先问用户再整理
+7. **区间内 merge commit 不碰**：重写会牵连重放其后全部 commit（冲突面陡增）→ 从最后一个 merge commit 之后重划整理起点，无法重划则放弃整理
+8. **重组 commit 全程走正常 pre-commit**（禁 `--no-verify`）——`reset --soft` 路线下每笔重组 commit 都触发 hook，逐笔有守卫；这也是不用 `rebase -i` 的原因之一（rebase 逐笔重放不触发 hook，且需要交互 TTY，agent 环境会挂死）
+9. **工作区先清空**：`git status --short` 非 empty（tracked + untracked）→ 先按全局提交策略处理完再进入本阶段
+
+**执行方式**（两步分离：先计划后应用，应用是确定性操作）：
+
+```bash
+cd $WS_ROOT/<worktree-dir>
+BASE=$(git merge-base github/main HEAD)
+git branch backup/pre-squash-$(date +%m%d-%H%M)
+git reset --soft "$BASE"
+# 按「重组计划表」分组重新暂存 + commit（精确 add，禁 -A/.）
+# ... 分组 add + git commit 循环，逐笔走 pre-commit ...
+git push github HEAD --force-with-lease
+```
+
+- **第一步·重组计划**：对照下方判定清单逐笔标注 `保留` / `折入 <目标>` / `重写 message`，产出计划表（每行附一句理由）。这是唯一需要判断力的步骤
+- **第二步·确定性应用**：`reset --soft` 把全部改动退回暂存区，按计划表分组重新 `git add`（精确路径）+ commit——`reset --soft` 不动工作区，无丢改动风险；commit message 按重组批次重写（英文 conventional 风格）
+- **第三步·机械校验**（见下方校验清单，不全过不算完成）
+
+**粒度判定清单**（基准 = 「一个 commit 是一个自包含的逻辑变更 + 该笔状态可构建/测试通过」，依据 Google eng-practices / Git 官方 ProGit / GitLab 官方文档 / #git 共识文 / Conventional Commits FAQ，五源一致；判据是逻辑边界，**不是行数或笔数**）：
+
+**该合并（折入）：**
+- IF message 匹配 wip / fixup / oops / tmp / typo / lint fix / review feedback 类，且 diff 归属于区间内某笔逻辑单元 → 折入该笔
+- IF 簿记小笔（snapshot 重生成、lockfile、构建配置补依赖、registry 同步等 2-5 行笔）单独存在无可说明的价值，是上一笔代码变更的直接后果 → 折入引发它的那笔
+- IF 文档同步小笔（设计文档 / 登记表随代码回写）→ 折入对应代码 commit（项目「同 commit 回写」纪律优先于业界默许）
+- IF 对本分支更早一笔的直接修正（补漏文件、review 修复）且无独立 revert 价值 → 折入
+- IF 相邻两笔同 type 同 scope、合并后 message 更清晰 → 合并为一笔
+
+**必须保留（不得合并）：**
+- IF 两笔 type 不同（refactor / feat / fix / docs 独立清理）→ 保持分离
+- IF 一笔可独立 revert 且有独立 revert 场景（配置 / 实验与代码分离、两个不相关 feature）→ 保持分离
+- IF 纯改名 / 纯移动与其内容修改分属两笔 → 保留分离
+- IF 合并后 message 将含两个以上 type 语义或无法一行说清 → 不合并
+- IF 区间内某笔被外部依赖（cherry-pick 过到别处）→ 标记不可动
+- 兜底：**拿不准 → 保留**（合并是单向损失信息的操作，保留可逆）
+
+**机械校验（重组后必须全过）：**
+1. **终态字节级一致**：`diff <(git diff "$BASE" <旧HEAD>) <(git diff "$BASE" <新HEAD>)` 必须为空——stat 一致不代表内容一致，这是防重组丢 hunk 的核心护栏（备份分支在此刻仍指向旧 HEAD）
+2. `git range-diff "$BASE" <旧HEAD> <新HEAD>` 核对逐笔映射，无意外消失/新增的笔
+3. 对最终态跑一次受影响域测试（增量口径，按本次改动面）
+4. 每笔 message 符合 conventional 风格且单 type
 
 ### 阶段 1: 本地验证
 
@@ -77,8 +132,6 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROO
 **为什么要清理**：dev-link 让 pi 通过 `TAIJI_EXTENSION_PATHS` 加载本地源码 extension。标准用法下 link 指向当前 worktree 自己的 `extensions/`，删 worktree 时该 worktree 内的 `.env.dev-extensions` 随之删除——不会残留。但存在**跨 worktree 残留**场景（用户在 main worktree 里 link 指向 feature worktree 测改动、手动编辑/复制 `.env.dev-extensions` 跨 worktree）：这些残留 link 在 feature worktree 删除后指向不存在的路径，下次 `pnpm dev` 时 pi 加载报 ENOENT。本阶段在删 worktree 前兜底清理所有这类残留。
 
 **输出语义**：无残留时输出「无残留 link」并 exit 0；有残留时逐个列出被移除的路径并 exit 0。两种情况都不阻塞后续阶段。
-
-> 历史背景：旧版阶段 1.5 标 `[OPTIONAL]` 且让在 workspace root 跑 `link-list.sh`——但 workspace root 不是 git repo，脚本 `git rev-parse --show-toplevel` 直接 exit 2，命令根本无法执行；且 AI 靠「记不记得用过 dev-link」决定是否跳过，残留风险高。现改为无条件执行 + 跨 worktree 精确清理。
 
 ### 阶段 2: PR CI + 合并
 
@@ -141,7 +194,7 @@ bash scripts/check-version-bump.sh
 cd $WS_ROOT/main && node scripts/select-affected-e2e.mjs --release
 ```
 
-脚本圈出 trigger ∈ {on-release, on-pi-bump} 的全部 rule（当前 = rename A2 真机 + M1 models-json-sanitize 真机零 mock + sync-collect probes pi-bump 面；每条 rule 附 `运行` 命令与空载串行标注，输出集为空即按上方跳过语义放行）。pi bump 时联动既有 W25 门禁（`pi-protocol-contract` 契约测试，脚本输出 E2E-EQUIV-02）——阶段 3.5 的 check-version-bump.sh 已内联该测试，此处红则先解决协议漂移再进阶段 4。
+脚本圈出 trigger ∈ {on-release, on-pi-bump} 的全部 rule（当前 = rename A2 真机 + M1 models-json-sanitize 真机零 mock；每条 rule 附 `运行` 命令与空载串行标注，输出集为空即按上方跳过语义放行）。pi bump 时联动既有 W25 门禁（`pi-protocol-contract` 契约测试，脚本输出 E2E-EQUIV-02）——阶段 3.5 的 check-version-bump.sh 已内联该测试，此处红则先解决协议漂移再进阶段 4。
 
 **人工定跑哪些**：
 - **A2（`E2E-RENAME-02`）烧真实 token [MANDATORY 用户确认]**：必须用户在场明确确认后才跑
@@ -465,6 +518,9 @@ curl -sL -o /dev/null -w '%{http_code}\n' -r 0-1048575 --max-time 60 \
 **自动化执行阶段 7 时，调用 remove-worktree.sh 的那条 bash 命令必须自包含 `cd $WS_ROOT/main &&`**（见阶段 0 cwd 隔离）。即便如此，删除后 session 启动目录已不存在，**后续任何 bash 调用仍可能 ENOENT**——因此阶段 7 必须是流程最后一步，删除后立即收尾，不再调 bash（手动终端执行则脚本内部的 cd 足够，因为终端 shell 的 cwd 会跟随 cd）。这与 AGENTS.md §8「multi-workspace cwd 不跨调用持久」是同一类陷阱。
 
 ```bash
+# 阶段 0.5 做过 commit 整理时：先删其备份分支（机械校验已用毕，须在删 worktree 前执行）；
+# 无备份分支时 glob 不展开、git 报错由 || true 兜住，属正常跳过
+git branch -D backup/pre-squash-* 2>/dev/null || true
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch-name> --force --skip-sync
 ```
 
@@ -477,6 +533,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 | # | 文本 | 命令 |
 |---|------|------|
 | 1 | 初始化环境（阶段 0） | |
+| 1.5 | ⚠️ commit 整理（阶段 0.5） | 备份分支 → `merge-base..HEAD` 重组成逻辑批次 → `--force-with-lease`；粒度判定见阶段 0.5 清单 |
 | 2 | 本地验证（阶段 1） | |
 | 2.5 | ⚠️ Dev-Link 清理（阶段 1.5） | `cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROOT/<worktree-dir>"` |
 | 3 | PR CI + 合并（阶段 2） | |

@@ -19,8 +19,16 @@
       :forced-dirs="forcedDirs"
       :dirs="dirs"
       :disabled="false"
+      :save-error="saveError"
       @update-dirs="onUpdateDirs"
     />
+
+    <!-- RD-4#11：数据目录读取失败时的显式标注（user 级强制目录不展示，不伪装真实路径） -->
+    <p
+      v-if="dataDirReadFailed"
+      data-testid="resource-datadir-read-failed"
+      class="text-[11px] text-warn"
+    >{{ t('settings.resource.dataDirReadFailed') }}</p>
 
     <!-- 层 B · 资源只读预览 -->
     <section>
@@ -100,6 +108,8 @@ const props = defineProps<{
   items: SkillInfo[] | AgentInfo[]
   /** 加载路径配置（来自 settings store，ADR-0021 §1 discovery.json SSOT 视图） */
   dirs: SkillDirConfig[]
+  /** 路径保存失败常驻态（RD-4#1）：由 SettingsModal 的持久化 catch 置位，透传 LoadPaths */
+  saveError?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -111,19 +121,28 @@ const emit = defineEmits<{
 const label = computed(() => (props.kind === 'skill' ? 'Skill' : 'Agent'))
 
 // ADR-0021 §1.1 强制目录（桥接层硬编码注入，UI 只读）
-// 动态推导数据目录（dev=~/.taiji-dev，prod=~/.taiji），修复原硬编码 '~/.taiji/skills'
-// 在 dev 下与实际扫描路径不一致、误导排查的问题。getDataDir 为 async（IPC），初始用默认值兜底，
-// 拉取完成后更新。
-const dataDirDisplay = ref('~/.taiji')
+// 动态推导数据目录，修复原硬编码 '~/.taiji/skills' 在 dev 下与实际扫描路径不一致、误导排查的问题。
+// getDataDir 为 async（IPC）；返回失败/无 IPC（web/mock）时保持 null → user 级强制目录不展示——
+// 数据目录缺省 dev（~/.taiji-dev）与打包 prod（~/.taiji）不同（C-proc-26），兜底断言任一具体
+// 路径都会误导排查，reject 时经 dataDirReadFailed 显式标注。
+const dataDirDisplay = ref<string | null>(null)
+/** RD-4#11：getDataDir 读取失败标记——失败时显式标注，不伪装真实路径。 */
+const dataDirReadFailed = ref(false)
 onMounted(async () => {
-  const dir = await getDataDir()
-  if (dir) dataDirDisplay.value = dir
+  try {
+    const dir = await getDataDir()
+    if (dir) dataDirDisplay.value = dir
+  } catch (e) {
+    // RD-4#11：IPC reject 时不回落写死路径。置位 dataDirReadFailed → 页面显式标注
+    // 「数据目录读取失败」，user 级强制目录不展示，避免误导排查。
+    console.warn('[SettingsResourcePage] getDataDir failed:', e)
+    dataDirReadFailed.value = true
+  }
 })
-const forcedDirs = computed(() =>
-  props.kind === 'skill'
-    ? [`${dataDirDisplay.value}/skills`, '.taiji/skills']
-    : [`${dataDirDisplay.value}/agents`, '.taiji/agents'],
-)
+const forcedDirs = computed(() => {
+  const sub = props.kind === 'skill' ? 'skills' : 'agents'
+  return dataDirDisplay.value ? [`${dataDirDisplay.value}/${sub}`, `.taiji/${sub}`] : [`.taiji/${sub}`]
+})
 
 const { t } = useI18n()
 

@@ -1,5 +1,5 @@
 /**
- * respawn 过渡态端到端测试（crash-resilience T4 回流修复，Gate B 实测缺陷回归）。
+ * respawn 过渡态端到端测试（T4 回流修复，Gate B 实测缺陷回归）。
  *
  * Gate B 实测：pi kill -9 后 runtime 3/3 自动恢复成功，但 renderer 0/3 出现 T4 提示条——
  * UI 立即进终态错误页（composer 卸载），session.restored 两条通路（live 定向推送 /
@@ -51,6 +51,9 @@ vi.mock('@/lib/ipc', () => ({
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
+  // RD-3#2：启动失败真因消费端口（core use-connection init 会调用，mock 须补形状）
+  onRuntimeError: vi.fn(() => () => {}),
+  getRuntimeStartError: vi.fn(async () => null),
   restartRuntime: vi.fn(async () => {}),
 }))
 
@@ -113,7 +116,7 @@ function injectRestoreFailed(sessionId: string, willRetry: boolean): void {
   })
 }
 
-describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
+describe('respawn 过渡态（T4 回流修复）', () => {
   it('① 意外退出 → 进过渡态（不进终态派生：composer 判据保持 conversation）', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
@@ -131,7 +134,7 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
       isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
       isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
       isTraceView: false,
-      hasAskUserRequest: false,
+      hasFormOverlay: false,
       isFlowActive: false,
     })
     // conversation 形态 = Panel.vue Composer 渲染判据（dead 才卸载 composer）
@@ -191,6 +194,7 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
     //（runtime 侧 ensureActive join 等恢复完成后送达——该半边已有 runtime 单测）
     // [u3c/D1] 发送链已收敛统一提交：RPC 类型为 delivery.submit（旧 message.send 保留至 u5 协议退役）
     const { useChat } = await import('@/composables/features/chat/useChat')
+    // [u3b] send 契约 Promise<void>（失败 toast 消化不 throw，成功路径无返回值）
     await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBeUndefined()
     const sentTypes = wsSend.mock.calls.map((args) => (args[0] as { type?: string }).type)
     expect(sentTypes).toContain('delivery.submit')
@@ -231,7 +235,7 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
         isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
         isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
         isTraceView: false,
-        hasAskUserRequest: false,
+        hasFormOverlay: false,
         isFlowActive: false,
       })
       expect(view.kind).toBe('dead')
@@ -297,7 +301,7 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
       isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
       isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
       isTraceView: false,
-      hasAskUserRequest: false,
+      hasFormOverlay: false,
       isFlowActive: false,
     })
     expect(view.kind).toBe('conversation')

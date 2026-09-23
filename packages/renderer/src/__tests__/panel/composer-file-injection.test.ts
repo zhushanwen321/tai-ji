@@ -17,6 +17,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import {
+  composerChatModule,
+  composerFlowModule,
+  composerApiModule,
+  composerChatStoreModule,
+  composerSessionStoreModule,
+  composerChildStubs,
+} from '../helpers/composer-mount'
 
 // ── mock composable / api（防真依赖构造报错）──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -114,21 +122,9 @@ afterEach(() => {
   mountedWrappers.splice(0).forEach((w) => w.unmount())
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
 /** mount Composer（mock ComposerInput），返回 wrapper + insertFileChip spy */
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
-  const wrapper = mount(Composer, { props, global: { stubs: otherStubs } })
+  const wrapper = mount(Composer, { props, global: { stubs: composerChildStubs } })
   mountedWrappers.push(wrapper)
   const spy = composerInputSpies.at(-1)?.insertFileChip
   if (!spy) throw new Error('ComposerInput spy 未生成')

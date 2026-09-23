@@ -230,7 +230,7 @@ describe("Tool execute behavior simulation", () => {
 //
 // 验证 setupWorkflowHook 的核心行为：当模型调用了 structured-output 但校验失败
 // （isError=true）时，turn_end 应主动 steer 提示修正（而非旧实现的撒手交给 Pi 自然修正）。
-// 通过 mock pi API（捕获 on() 回调 + spy sendUserMessage）驱动真实扩展入口点。
+// 通过 mock pi API（捕获 on() 回调 + spy sendMessage）驱动真实扩展入口点。
 
 describe("Workflow hook: structured-output failure retry", () => {
   const originalSchemaEnv = process.env[SCHEMA_ENV_NAME];
@@ -251,14 +251,21 @@ describe("Workflow hook: structured-output failure retry", () => {
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-    const [msg, opts] = pi.sendUserMessage.mock.calls[0]!;
-    expect(msg).toContain("FAILED validation");
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    // 形态契约（custom message 五要素，A2/A6）：customType / content / display:false /
+    // steer 队列 / triggerTurn 开轮
+    const [payload, opts] = pi.sendMessage.mock.calls[0]!;
+    expect(payload).toEqual({
+      customType: "structured-output:retry-reminder",
+      content: expect.stringContaining("FAILED validation"),
+      display: false,
+    });
+    const msg = (payload as { content: string }).content;
     expect(msg).toContain("Schema validation failed: /count must be number");
     // 单参数口径：schema 即工具 parameters，参数即数据，修正参数后重调
     expect(msg).toContain(`The required schema for your result is: ${SCHEMA}`);
     expect(msg).toContain("Fix your arguments to conform to this schema");
-    expect(opts).toEqual({ deliverAs: "steer" });
+    expect(opts).toEqual({ deliverAs: "steer", triggerTurn: true });
   });
 
   it("steers on 'never called' with the 'must call' reminder (no validation error)", async () => {
@@ -268,8 +275,8 @@ describe("Workflow hook: structured-output failure retry", () => {
     // 没有 tool_execution_end（完全没调），直接 turn_end
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-    const msg = pi.sendUserMessage.mock.calls[0]![0] as string;
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
     expect(msg).toContain("MUST call the structured-output tool");
     expect(msg).not.toContain("FAILED validation");
     // 与 failed 分支对齐：断言 steer 关键文案（参数即数据，单参数口径）
@@ -287,8 +294,8 @@ describe("Workflow hook: structured-output failure retry", () => {
 
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-    const msg = pi.sendUserMessage.mock.calls[0]![0] as string;
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
     expect(msg).toContain("MUST call the structured-output tool");
     expect(msg).toContain("{value: <data>}");
     expect(msg).toContain("`value`");
@@ -303,7 +310,7 @@ describe("Workflow hook: structured-output failure retry", () => {
     await pi.emit("tool_execution_end", SUCCESS_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("stops steering after MAX_HOOK_RETRIES (=2) exhausted", async () => {
@@ -316,7 +323,7 @@ describe("Workflow hook: structured-output failure retry", () => {
       await pi.emit("tool_execution_end", FAILED_TOOL_END);
       await pi.emit("turn_end", turnEndPayload());
     }
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(2);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it("does not steer when stopReason is toolUse (still in tool chain)", async () => {
@@ -326,7 +333,7 @@ describe("Workflow hook: structured-output failure retry", () => {
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload("toolUse"));
 
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 });
 

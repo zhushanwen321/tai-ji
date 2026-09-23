@@ -36,6 +36,25 @@
     <!-- xterm 挂载点（relative 包裹浮动按钮）。纯黑圆角块嵌在 drawer 深底上
          （demo .terminal-mock：#000 + radius 8px + padding 12px）。 -->
     <div class="relative m-2 min-h-0 flex-1 rounded bg-black">
+      <!-- RD-5#2：spawn 失败 inline 错误条（复用 FileView error 态范式：留痕 + 可重试）。
+           PTY 起不来时不再静默显示空白终端——失败既可见也可行动；重试直接重发 spawn
+           （retrySpawn），成功后错误条消失、PTY 输出经 flush 监听回放。 -->
+      <div
+        v-if="spawnError"
+        class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/90 p-4 text-center"
+        data-testid="terminal-spawn-error"
+      >
+        <AlertCircle class="size-5 text-danger opacity-70" />
+        <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('panel.terminal.spawnFailed', { error: spawnError }) }}</p>
+        <Button
+          variant="ghost"
+          class="h-6 text-[length:var(--text-2xs)] text-accent"
+          data-testid="terminal-spawn-retry"
+          @click="retrySpawn"
+        >
+          {{ t('panel.terminal.retry') }}
+        </Button>
+      </div>
       <div data-testid="terminal-xterm" ref="xtermContainer" class="h-full p-3" />
       <!-- 选区浮动按钮（Phase 4 联动 1：选中输出 → 发给 AI） -->
       <Transition name="fade">
@@ -62,22 +81,17 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { Eraser, Square, MessageSquare } from '@lucide/vue'
+import { Eraser, Square, MessageSquare, AlertCircle } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useTerminal, replayChunksBatched, type TerminalBuffer } from '@/composables/features/terminal/useTerminal'
+import { useTerminalSpawnFeedback } from '@/composables/features/terminal/useTerminalSpawnFeedback'
+import { resolveXtermFontOptions } from './terminal-xterm-options'
 import { useSessionStore } from '@/stores/session'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import { getSettingsStore } from '@taiji/core'
 import { darkTerminalTheme } from '@/composables/terminal/terminal-themes'
 
-/**
- * xterm 默认字体栈（canvas 渲染，不能用 CSS 变量 var()——canvas 不解析）。
- * 项目首选 JetBrains Mono 但未加载 webfont，canvas 回退到系统等宽字体 Menlo（macOS）/ Monaco。
- */
-const DEFAULT_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace'
-const DEFAULT_FONT_SIZE = 13
-const DEFAULT_SCROLLBACK = 5000
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{ sessionId: string | null }>()
@@ -90,20 +104,16 @@ const state = terminal.current
 const composerInjection = composerInjectionStore
 const settingsStore = getSettingsStore()
 
-/** 从 settings store 的 terminalConfig 解析 xterm 渲染选项。config 未加载时用默认值。 */
-function resolveXtermFontOptions() {
-  const cfg = settingsStore.terminalConfig.value?.config
-  return {
-    fontFamily: cfg && cfg.fontFamily.trim() !== '' ? cfg.fontFamily : DEFAULT_FONT_FAMILY,
-    fontSize: cfg?.fontSize ?? DEFAULT_FONT_SIZE,
-    scrollback: cfg?.scrollback ?? DEFAULT_SCROLLBACK,
-    cursorStyle: cfg?.cursorStyle ?? 'bar',
-  }
-}
-
 // Phase 4 联动 1：选区浮动按钮状态
 const hasSelection = ref(false)
 const selectionPos = ref({ top: 0, left: 0 })
+
+// RD-5#2：spawn 失败态（PTY 起不来时显示 inline 错误条 + 重试，复用 FileView error 态范式）。
+// 实现见 composables/features/terminal/useTerminalSpawnFeedback.ts。
+const { spawnError, spawnWithFeedback, retrySpawn } = useTerminalSpawnFeedback(terminal, () => {
+  const partition = state.value
+  return { cwd: getSessionCwd(), cols: partition.cols, rows: partition.rows }
+})
 
 let xterm: Terminal | null = null
 let fitAddon: FitAddon | null = null
@@ -179,7 +189,7 @@ function initXterm(): FitAddon | null {
 
   const fit = new FitAddon()
   fitAddon = fit
-  const fontOpts = resolveXtermFontOptions()
+  const fontOpts = resolveXtermFontOptions(settingsStore.terminalConfig.value?.config)
   const term = new Terminal({
     fontSize: fontOpts.fontSize,
     fontFamily: fontOpts.fontFamily,
@@ -269,11 +279,9 @@ onMounted(async () => {
   // 若 PTY 未活，发 spawn
   const partition = state.value
   if (!partition.ptyAlive) {
-    const cwd = getSessionCwd()
-    const dims = fit.proposeDimensions()
-    const cols = dims?.cols ?? partition.cols
-    const rows = dims?.rows ?? partition.rows
-    void terminal.spawnTerminal(cwd, cols, rows)
+    // RD-5#2：spawn 失败走 inline 错误条 + 重试（原 void 丢弃 → 裸 reject + 空白终端）；
+    // 维度（cwd/cols/rows）由 useTerminalSpawnFeedback 的 resolveDims 惰取
+    spawnWithFeedback()
   }
   terminal.attachTerminal()
 
@@ -305,7 +313,7 @@ watch(
   () => settingsStore.terminalConfig.value,
   () => {
     if (!xterm) return
-    const opts = resolveXtermFontOptions()
+    const opts = resolveXtermFontOptions(settingsStore.terminalConfig.value?.config)
     xterm.options.fontSize = opts.fontSize
     xterm.options.fontFamily = opts.fontFamily
     xterm.options.scrollback = opts.scrollback
@@ -341,9 +349,8 @@ watch(
     unregisterFlush = terminal.registerFlushListener(sid, onFlushed)
     const partition = state.value
     if (!partition.ptyAlive) {
-      const cwd = getSessionCwd()
-      const dims = fit2.proposeDimensions()
-      void terminal.spawnTerminal(cwd, dims?.cols ?? partition.cols, dims?.rows ?? partition.rows)
+      // RD-5#2：spawn 失败走 inline 错误条 + 重试（维度由 resolveDims 惰取）
+      spawnWithFeedback()
     }
     terminal.attachTerminal()
     try {

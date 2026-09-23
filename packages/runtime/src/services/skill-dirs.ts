@@ -27,6 +27,18 @@ import type { DirScopes } from './skill-dir-config.js'
 export const FORCED_PROJECT_SKILL_DIR = '.taiji/skills'
 
 /**
+ * pi 原生项目 skill 目录（skill-reload-nondestructive D7 扫描集对账）。
+ * pi 实装扫描 `resolve(cwd, CONFIG_DIR_NAME, "skills")` 且 CONFIG_DIR_NAME=".pi"
+ * （@earendil-works/pi-coding-agent 0.84.4 dist/config.js:402 + dist/core/skills.js:349），
+ * taiji 扫描集原本不含它——skill-injector 注入映射切源 taiji SkillRegistry 后，该目录
+ * 的 skill 会从 get_commands 权威消失，不补入即回归 skill_missing。scan 与 watch 经
+ * resolveProjectSkillDirs SSOT 同源双覆盖（连带良性行为：.pi/skills 变动开始触发 reload）。
+ * 顺序：排在 taiji 强制目录之后、discovery 用户配置之前（对齐 pi「defaults 先于 skillPaths」
+ * 的装载序；.taiji/skills 是 taiji 自己的强制目录，保持最高项目优先）。
+ */
+const PI_PROJECT_SKILL_DIR = '.pi/skills'
+
+/**
  * configStore 的窄接口（与 PiConfigStore / SkillRegistryConfigStore 对齐）。
  * 只需要目录发现相关的方法。
  */
@@ -68,9 +80,9 @@ export function resolveGlobalSkillDirs(
  * scanner 扫描这些 + 全局目录；watcher（getProjectSkills）只 watch 这些，
  * 不再 watch 整个 cwd。
  *
- * v2：直接读 discovery.skill.projectPaths（显式 project scope），不再用 isAbsolute 排除绝对路径。
+ * v2：直接读 discovery.skill.projectPaths（显式 project scope），不再 isAbsolute 排除绝对路径。
  * projectPaths 允许相对+绝对（项目级语义）：相对路径 resolve 到 projectRoot，绝对路径原样保留。
- * 加上强制项目目录（.taiji/skills）。
+ * 加上强制项目目录（.taiji/skills）与 pi 原生项目目录（.pi/skills，D7 扫描集对账，见常量注释）。
  */
 export function resolveProjectSkillDirs(
   projectRoot: string,
@@ -80,6 +92,7 @@ export function resolveProjectSkillDirs(
     isAbsolute(dir) ? dir : resolve(projectRoot, dir)
   return [
     resolve(projectRoot, FORCED_PROJECT_SKILL_DIR),
+    resolve(projectRoot, PI_PROJECT_SKILL_DIR),
     ...configStore.getSkillPathScopes().projectPaths.map(resolveDir),
   ]
 }

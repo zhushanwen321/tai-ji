@@ -12,8 +12,9 @@
  * 运行：cd packages/runtime && npx vitest run src/services/startup-background-init.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { runStartupBackgroundInit, resolveReclaimConfig } from './startup-background-init.js'
 import { getMigrationGate } from './session/session-lifecycle.js'
 import { getSessionsDir, getPiAgentDir } from '../infra/pi/pi-paths.js'
@@ -21,9 +22,11 @@ import {
   TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS,
   TAIJI_RUNTIME_PI_RECLAIM_TICK_MS,
   TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS,
+  TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS,
   DEFAULT_PI_RECLAIM_IDLE_MS,
   DEFAULT_PI_RECLAIM_TICK_MS,
   DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
 } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ExtensionService } from './extension-service.js'
@@ -56,7 +59,7 @@ const rh = vi.hoisted(() => ({
 vi.mock('./migration/legacy-provider-migration.js', () => ({
   migrateProviderConfig: h.migrateProviderConfig,
 }))
-vi.mock('./worktree-config-helper.js', () => ({
+vi.mock('./rename-session-config.js', () => ({
   ensureAutoRenameDefault: vi.fn(),
 }))
 // ⑦b startupConfig ensure 挂载测试用 mock：真实实现会写 getPiAgentDir()（测试未隔离
@@ -253,6 +256,51 @@ describe('先 listen 后初始化（D8-1，index.ts 源码顺序断言）', () =
   })
 })
 
+describe('⑧ sessions 残留清扫家族扩展（缓存治理 U9：退役 .model.json sidecar）', () => {
+  let dataDir: string
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'u9-startup-sidecar-residue-'))
+    process.env.TAIJI_AGENT_DATA_DIR = dataDir
+  })
+
+  afterEach(() => {
+    delete process.env.TAIJI_AGENT_DATA_DIR
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('启动序列执行后 sessions 目录 *.model.json 零残留，JSONL 主文件不受影响（设计验收挂点）', async () => {
+    const sessionsDir = join(dataDir, 'agent', 'sessions')
+    const subDir = join(sessionsDir, '--Users-x-proj--')
+    mkdirSync(subDir, { recursive: true })
+    const rootJsonl = join(sessionsDir, 'sess-root.jsonl')
+    const rootSidecar = rootJsonl + '.model.json'
+    const subJsonl = join(subDir, 'sess-sub.jsonl')
+    const subSidecar = subJsonl + '.model.json'
+    writeFileSync(rootJsonl, '{"type":"session","id":"sess-root","cwd":"/x"}\n', 'utf-8')
+    writeFileSync(rootSidecar, '{"modelId":"a/b"}', 'utf-8')
+    writeFileSync(subJsonl, '{"type":"session","id":"sess-sub","cwd":"/y"}\n', 'utf-8')
+    writeFileSync(subSidecar, '{"modelId":"c/d"}', 'utf-8')
+
+    const { deps } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
+
+    // 启动后零残留断言（两层目录均无 .model.json）
+    for (const dir of [sessionsDir, subDir]) {
+      expect(readdirSync(dir).filter((name) => name.endsWith('.model.json'))).toEqual([])
+    }
+    // JSONL 主文件不受影响
+    expect(existsSync(rootJsonl)).toBe(true)
+    expect(existsSync(subJsonl)).toBe(true)
+  })
+
+  it('sessions 目录无残留时启动序列正常完成（零操作不抛）', async () => {
+    mkdirSync(join(dataDir, 'agent', 'sessions'), { recursive: true })
+    const { deps } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
+  })
+})
+
 describe('⑩ 空闲 pi 回收 reaper 挂载（idle-pi-reclamation D4，u3b）', () => {
   it('传入 startIdleReaper 时在序列中被调用恰一次', async () => {
     const { deps } = makeDeps()
@@ -279,11 +327,12 @@ describe('⑩ 空闲 pi 回收 reaper 挂载（idle-pi-reclamation D4，u3b）',
 })
 
 describe('resolveReclaimConfig（idle-pi-reclamation D4 env 覆盖解析）', () => {
-  it('env 全缺失时返回 shared 默认三旋钮', () => {
+  it('env 全缺失时返回 shared 默认四旋钮', () => {
     expect(resolveReclaimConfig({})).toEqual({
       idleThresholdMs: DEFAULT_PI_RECLAIM_IDLE_MS,
       tickIntervalMs: DEFAULT_PI_RECLAIM_TICK_MS,
       viewedWindowMs: DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+      pendingUiRequestMaxAgeMs: DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
     })
   })
 
@@ -296,6 +345,47 @@ describe('resolveReclaimConfig（idle-pi-reclamation D4 env 覆盖解析）', ()
     expect(cfg.idleThresholdMs).toBe(5 * 60 * 1000)
     expect(cfg.viewedWindowMs).toBe(10 * 60 * 1000)
     expect(cfg.tickIntervalMs).toBe(DEFAULT_PI_RECLAIM_TICK_MS)
+    expect(cfg.pendingUiRequestMaxAgeMs).toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+  })
+
+  it('v6 上界旋钮：TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS 合法值生效', () => {
+    // 3h > 默认 IDLE 2h（避免无意触发「上界 < 空闲阈」warn）
+    const cfg = resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(3 * 60 * 60 * 1000) })
+    expect(cfg.pendingUiRequestMaxAgeMs).toBe(3 * 60 * 60 * 1000)
+  })
+
+  it('r5 联动护栏：上界 < 空闲阈值时打 warn（豁免恒不命中 = 死代码），但不 throw', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const cfg = resolveReclaimConfig({
+        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
+        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(60 * 60 * 1000), // 1h < 2h
+      })
+      expect(cfg.pendingUiRequestMaxAgeMs).toBe(60 * 60 * 1000)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('pending-UI-request exemption is unreachable'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('r5 联动护栏对照：上界 ≥ 空闲阈值不 warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      resolveReclaimConfig({
+        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
+        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(6 * 60 * 60 * 1000),
+      })
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('exemption is unreachable'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('v6 上界旋钮：非数字回落默认（含其余非法形态）', () => {
+    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: 'abc' }).pendingUiRequestMaxAgeMs)
+      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: '0' }).pendingUiRequestMaxAgeMs)
+      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
   })
 
   it.each([

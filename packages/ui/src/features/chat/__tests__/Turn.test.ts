@@ -16,28 +16,29 @@ import { describe, it, expect, vi } from 'vitest'
 // mock vue-i18n 的 useI18n：自包含 t（vue-i18n v10 的 createI18n 返回对象作 test-utils plugin 时报
 // 「must be a function or object with install」，直接 mock useI18n 最可靠）。
 // TraceCompactorRow 真实渲染时 useI18n() 拿到此 mock，文案 + count 插值均可断言（RC-2 i18n provide）。
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => {
-      const msgs: Record<string, string> = {
-        'panel.message.traceExpandAll': '展开全部（{count} 步）',
-        'panel.message.traceCollapse': '恢复精简',
-        'panel.message.traceFailed': '含 {count} 次失败',
-        'panel.message.turnTriggerBgNotify': '后台任务完成 · 已继续处理',
-        'panel.message.prematureTimeoutNotice': '响应已超时收口。若任务仍在后台进行，完成后将自动恢复显示；确认已停止可重新发送。',
-      }
-      let s = msgs[key] ?? key
-      if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v))
-      return s
-    },
-  }),
-}))
+// [U6] trigger 行聚合文案键（turnTriggerBgNotifySummary / Continued / Failed）由 U3 同批落地
+// locales——本文件按既有范式注入 mock 键值，不触碰 i18n locales 文件（U3 领地）。
+// 共享 mock 口径见 helpers/i18n-mock（g9-F5）。
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
+    'panel.message.traceExpandAll': '展开全部（{count} 步）',
+    'panel.message.traceCollapse': '恢复精简',
+    'panel.message.traceFailed': '含 {count} 次失败',
+    'panel.message.turnTriggerBgNotifySummary': '{count} 个后台任务完成',
+    'panel.message.turnTriggerBgNotifyContinued': '已继续处理',
+    // 边界行失败分句专用键（D5「· M 失败」）：与 TraceCompactorRow 的 traceFailed 不同键，
+    // 文案按设计字面（无「含…次」句式）
+    'panel.message.turnTriggerBgNotifyFailed': '{count} 失败',
+  })
+})
 
 import { mount } from '@vue/test-utils'
+import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
 import { Turn } from '@taiji/ui'
 import TraceCompactorRow from '../TraceCompactorRow.vue'
 import UserBubble from '../UserBubble.vue'
-import type { MessageTurn } from '@taiji/core/domain/chat'
+import type { MessageTurn, NotifySummary } from '@taiji/core/domain/chat'
 import type { ContentBlock, Message, ToolCall } from '@taiji/shared'
 import { mockChatProvide } from './helpers'
 
@@ -116,7 +117,7 @@ function makeWindowTurn(opts: {
 // ─── mount helper ───────────────────────────────────────────────
 
 /** Block stub：根节点带 .trace-blk + data-type/data-status/data-streaming，供断言 trace 块渲染与 props 透传。
- *  data-content 透传 text 正文（premature-timeout 恢复用例的「内容完整」DOM 断言锚点）。 */
+ *  data-content 透传 text 正文（DOM 断言锚点）。 */
 const BlockStub = {
   name: 'Block',
   props: {
@@ -507,11 +508,11 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
     } as Message
   }
 
-  it('W4-T1: trigger turn（user:null + trigger:bg-notify）→ 起点行渲染且含文案，UserBubble 不渲染', () => {
+  it('W4-T1: trigger turn（user:null + trigger:bg-notify）→ 起点行渲染且含从文案，UserBubble 不渲染', () => {
     const wrapper = mountTurn({ turn: makeTriggerTurn() })
     const row = wrapper.find('[data-testid="turn-trigger-bgnotify"]')
     expect(row.exists()).toBe(true)
-    expect(row.text()).toContain('后台任务完成')
+    expect(row.text()).toContain('已继续处理')
     // 非 user 气泡：起点行是弱化元信息行，不冒充用户发言
     expect(wrapper.findComponent(UserBubble).exists()).toBe(false)
   })
@@ -563,56 +564,122 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
 })
 
 // ═════════════════════════════════════════════════════════════════
-// describe 6：premature-timeout 恢复指引渲染（timeout-streaming-ui-idle §4.2 / §5.2 D2）
+// describe 7：U6 D5 —— trigger 起点行聚合渲染（图标三态 / 计数 / 失败分句 / 点列 / 耗时）
 //
-// 打标气泡（timeout 收口误判）显示超时 + 自动恢复指引；complete 自愈清标后指引消失。
-// core 侧恢复链见 core chat-premature-timeout-recovery.test.ts（本套只锁渲染契约）。
+// 聚合值（NotifySummary）由 core 分组层派生（message-turns R2 分支，单测在 core 侧），
+// 本套只锁展示映射：数字 → 图标色 / 文案 / 点列 / meta。i18n 键值由顶部 mock 注入
+// （turnTriggerBgNotifySummary / Continued 由 U3 同批落地 locales）。
 // ═════════════════════════════════════════════════════════════════
-describe('premature-timeout: 超时收口恢复指引渲染', () => {
-  /** timeout 误判收口的 assistant（error + prematureTimeout 标） */
-  function makeMarkedTurn(): MessageTurn {
+describe('U6 D5: trigger 起点行聚合渲染', () => {
+  /** D5 聚合 fixture：trigger turn + 指定 NotifySummary（其余字段取 W4 基础形态） */
+  function makeSummaryTurn(summary: NotifySummary | undefined): MessageTurn {
     return {
       index: 1,
-      user: { id: 'u1', role: 'user', content: '跑长任务', status: 'complete', timestamp: NOW },
+      user: null,
+      trigger: 'bg-notify',
       assistants: [
-        {
-          id: 'a1',
-          role: 'assistant',
-          content: '截断正文',
-          status: 'error',
-          prematureTimeout: true,
-          timestamp: NOW,
-        },
+        { id: 'a-bg1', role: 'assistant', content: '后台任务结果已处理', status: 'complete', timestamp: NOW },
       ],
       isStreaming: false,
       hasFoldable: false,
+      notifySummary: summary,
     }
   }
 
-  it('打标气泡（error + prematureTimeout）→ 恢复指引行渲染且含「自动恢复」语义文案（用户可见 DOM 断言）', () => {
-    const wrapper = mountTurn({ turn: makeMarkedTurn() })
-    const notice = wrapper.find('[data-testid="turn-premature-timeout"]')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('超时收口')
-    expect(notice.text()).toContain('自动恢复')
+  /** 聚合值构造 helper：outcomes 逐点三态，count 默认 = outcomes.length */
+  function summaryOf(
+    outcomes: NotifySummary['outcomes'],
+    over: Partial<NotifySummary> = {},
+  ): NotifySummary {
+    const failedCount = outcomes.filter((o) => o === 'failed').length
+    const neutralCount = outcomes.filter((o) => o === 'neutral').length
+    return { count: outcomes.length, failedCount, neutralCount, outcomes, ...over }
+  }
+
+  it('D5-ICON1: failedCount>0 → 图标 warn（TriangleAlert）且失败分句渲染', () => {
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'failed'], { count: 3, failedCount: 1 })) })
+    const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
+    expect(icon.classes()).toContain('text-warn')
+    expect(wrapper.findComponent(TriangleAlert).exists()).toBe(true)
+    const failed = wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]')
+    expect(failed.text()).toContain('1 失败')
   })
 
-  it('普通 error 气泡（无标）→ 指引不渲染（不把真实错误误标为可恢复）', () => {
-    const turn = makeMarkedTurn()
-    delete (turn.assistants[0] as Partial<Message>).prematureTimeout
-    const wrapper = mountTurn({ turn })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(false)
+  it('D5-ICON2: failedCount===0 且 neutralCount>0 → 图标中性（Bell，不冒充成功）', () => {
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'neutral'], { count: 2, neutralCount: 1 })) })
+    const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
+    expect(icon.classes()).toContain('text-neutral-mid')
+    expect(wrapper.findComponent(Bell).exists()).toBe(true)
+    // 无失败 → 失败分句不渲染
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]').exists()).toBe(false)
   })
 
-  it('complete 自愈恢复后（status 翻 complete + 清标）→ 指引消失、正文完整可见', async () => {
-    const turn = makeMarkedTurn()
-    const wrapper = mountTurn({ turn })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(true)
-    // 模拟 core 恢复分支产物：status 翻 complete + prematureTimeout 清除 + 权威 content 覆盖
-    turn.assistants[0] = { ...turn.assistants[0], status: 'complete', content: '权威完整正文', prematureTimeout: undefined }
-    await wrapper.setProps({ turn: { ...turn } })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(false)
-    // 内容完整：恢复后的权威正文透传到 text 块（Block stub data-content 锚点）
-    expect(wrapper.find('.trace-blk[data-type="text"]').attributes('data-content')).toBe('权威完整正文')
+  it('D5-ICON3: 全成功 → 图标 success（CheckCircle2）', () => {
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'success'])) })
+    const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
+    expect(icon.classes()).toContain('text-success')
+    expect(wrapper.findComponent(CheckCircle2).exists()).toBe(true)
+  })
+
+  it('D5-COUNT: 计数段 + 状态点列三色 + 耗时 meta（「N 个后台任务完成 · M 失败 ●●● · 已继续处理 · 26m03s」）', () => {
+    const wrapper = mountTurn({
+      turn: makeSummaryTurn(
+        summaryOf(['success', 'failed', 'neutral'], { count: 3, durationMs: 1_563_000 }),
+      ),
+    })
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').text()).toBe('3 个后台任务完成')
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]').text()).toBe('1 失败')
+    const dots = wrapper.findAll('[data-testid="turn-trigger-bgnotify-dot"]')
+    expect(dots.map((d) => d.classes().filter((c) => c.startsWith('bg-'))[0])).toEqual([
+      'bg-success',
+      'bg-warn',
+      'bg-neutral-dim',
+    ])
+    const duration = wrapper.find('[data-testid="turn-trigger-bgnotify-duration"]')
+    expect(duration.text()).toBe('26m03s')
+    // meta 规格（D3）：mono + tabular-nums + dim 钉右
+    expect(duration.classes()).toEqual(
+      expect.arrayContaining(['font-mono', 'tabular-nums', 'text-neutral-dim']),
+    )
+    // 段间分隔点：失败分句 / 从文案 / 耗时 各一（有主文案 → 从文案带前导点）
+    expect(wrapper.findAll('[data-testid="turn-trigger-bgnotify-sep"]')).toHaveLength(3)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-continued"]').text()).toBe('已继续处理')
+  })
+
+  it('D5-EMPTY: count===0（全解析失败/中性）→ 不渲染计数段与点列，从文案不带前导点', () => {
+    const wrapper = mountTurn({
+      turn: makeSummaryTurn({ count: 0, failedCount: 0, neutralCount: 2, outcomes: [] }),
+    })
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-dots"]').exists()).toBe(false)
+    const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
+    expect(icon.classes()).toContain('text-neutral-mid') // 未判定不冒充成功
+    // 无主文案 → 无前导点：行内仅图标 + 从文案，无任何分隔点
+    expect(wrapper.findAll('[data-testid="turn-trigger-bgnotify-sep"]')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify"]').text()).toBe('已继续处理')
+  })
+
+  it('D5-DOTS: >8 条去重记录只显计数（点列不渲染）', () => {
+    const outcomes: NotifySummary['outcomes'] = new Array(9).fill('success')
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(outcomes)) })
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-dots"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').text()).toBe('9 个后台任务完成')
+  })
+
+  it('D5-DURATION: 无含值记录不渲染耗时 meta；秒级/时级格式与设计样本一致', () => {
+    const noDuration = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'])) })
+    expect(noDuration.find('[data-testid="turn-trigger-bgnotify-duration"]').exists()).toBe(false)
+    const seconds = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 45_000 })) })
+    expect(seconds.find('[data-testid="turn-trigger-bgnotify-duration"]').text()).toBe('45s')
+    const hours = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 3_723_000 })) })
+    expect(hours.find('[data-testid="turn-trigger-bgnotify-duration"]').text()).toBe('1h02m03s')
+  })
+
+  it('D5-NOSUMMARY: 无 notifySummary（历史 turn / 空载体）→ 行形态回到无聚合态（只有图标 + 从文案）', () => {
+    const wrapper = mountTurn({ turn: makeSummaryTurn(undefined) })
+    // 无聚合值：行仍渲染（trigger 语义），但不带任何聚合段
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-duration"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]').exists()).toBe(true)
   })
 })

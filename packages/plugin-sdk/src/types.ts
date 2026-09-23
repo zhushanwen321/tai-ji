@@ -1,14 +1,14 @@
 /**
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
- * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布，刻意保持
- * 零依赖自包含（第三方插件作者无需装整个 monorepo）——Bridge* 回包形状定义源
- * 2026-09 D4 后上收协议包，本文件不再零依赖（见下方历史段）。
+ * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布（第三方插件作者无需
+ * 装整个 monorepo）；除 Bridge* 回包形状与 GUI 协议段定义源在
+ * @zhushanwen/extension-protocol（见下方 D4 单源化说明）外无运行时依赖。
  *
  * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
  *   packages/runtime/src/services/plugin-service/plugin-types/hook-types.ts（Hook 域）
- *   descriptor / rpc 子域仍由 runtime 本地文件定义，与本文件同构（过渡形态）。
+ *   descriptor / rpc 子域亦经本文件（SDK）re-export 消费，无本地副本。
  *
  * 修改契约：直接编辑本文件（对外类型名/结构零变化承诺——published API 兼容）。
  *
@@ -22,157 +22,39 @@
  */
 
 // D4 单源化：Bridge* 回包形状唯一定义源 = @zhushanwen/extension-protocol。
-// import 供本文件内 ToolExecuteHandler 返回类型引用；export 保持既有
+// import 供本文件内 ToolExecuteHandler / update(guiTree) 等类型引用；export 保持既有
 // `BridgeInterceptResponse`/`BridgeToolExecuteResponse` 导入面不变。
-import type { BridgeInterceptResponse, BridgeToolExecuteResponse } from '@zhushanwen/extension-protocol'
+import type { BridgeInterceptResponse, BridgeToolExecuteResponse, GuiComponent } from '@zhushanwen/extension-protocol'
 
 /**
- * GUI 渲染协议核心类型定义。
+ * GUI 渲染协议核心类型定义（单源化：定义源 = @zhushanwen/extension-protocol）。
  *
  * GuiComponent 是 pi Component { render(width): string[] } 的可序列化镜像。
  * extension 按 ctx.mode 分支：TUI 走原生 Component，RPC 走 GuiComponent（放进 details.__gui__）。
  *
- * GuiComponentProps 是类型路由的聚合点：通用布局原语 + extension 专属组件
- * 全部在此声明键值，子类型直接内联本文件（纯类型，无运行时逻辑）。
+ * 收敛说明（2026-09-17 ext-simplify-16 D4 同款）：本段曾是与
+ * extension-protocol/src/core/types.ts 逐字手工镜像的 167 行副本（另有一套文本探针
+ * 守卫测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
+ * 已如此），故改单行 re-export，镜像副本与守卫测试一并删除。导出名与类型面零变化
+ * （published API 兼容承诺不变）。
  *
  * @see docs/architecture/extension-gui-protocol.md
  */
 
-// ── 协议版本 ──
+// 单源化 re-export：GUI 协议段唯一定义源 = @zhushanwen/extension-protocol。
+// GuiComponent 另经上方 import 供本文件内后续类型引用（re-export 不引入本地作用域）。
+export type {
+  GuiComponent,
+  GuiComponentType,
+  GuiComponentProps,
+  GuiRenderResult,
+  WidgetMeta,
+  StatItem,
+  TreeItem,
+  TreeItemIcon,
+} from '@zhushanwen/extension-protocol'
 
-export const PROTOCOL_VERSION = 1 as const
-
-// ── 核心：GuiComponent ──
-
-/**
- * GUI 渲染组件——pi Component 的可序列化镜像。
- *
- * pi:  Component { render(width): string[] }   ← ANSI 文本行
- * gui: GuiComponent = { type, props }           ← 结构化数据
- */
-export interface GuiComponent<T extends GuiComponentType = GuiComponentType> {
-  /** 组件类型，前端按此路由到 Vue 组件 */
-  type: T
-  /** 组件 props，类型由 type 决定 */
-  props: GuiComponentProps[T]
-}
-
-export type GuiComponentType = keyof GuiComponentProps
-
-// ── 组件 props 映射（聚合点：通用原语 + extension 专属）──
-
-export interface GuiComponentProps {
-  /** ANSI 文本兜底——保留原始 ANSI 序列，前端用 ansi_up 渲染 */
-  'ansi-text': {
-    lines: string[]
-  }
-
-  // ── 布局原语（替代 TUI ASCII 布局）──
-
-  /** 卡片容器——替代 TUI 的 ┌─┐││└─┘ box 边框 */
-  'card': {
-    variant?: 'default' | 'elevated' | 'danger' | 'success'
-    header?: GuiComponent | string
-    body: GuiComponent[]
-  }
-
-  /** 统计行——替代 TUI 的 "N turns · Nk · Ns" */
-  'stats-line': {
-    items: StatItem[]
-  }
-
-  /** 进度条——替代 TUI 的 ████░░░░ */
-  'progress-bar': {
-    label?: string
-    current: number
-    total: number
-    unit?: string
-    severity?: 'ok' | 'warn' | 'danger'
-  }
-
-  /** 列表树——替代 TUI 的 ⎿ ├─ └─ 缩进 */
-  'list-tree': {
-    items: TreeItem[]
-    /** 行首显示弱化序号（1/2/3…，mono tabular-nums）。扁平有序清单用（todo）；
-     *  自带编号的文本（goal criteria "1. xxx"）不要开，避免双重编号 */
-    numbered?: boolean
-  }
-
-  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（WidgetArea）承担卡壳/head/折叠
-   *  后，widget 内容需要多组件组合时的组合根（替代「无头 card」的语义滥用） */
-  'group': {
-    children: GuiComponent[]
-  }
-
-  /** 双列网格——替代 TUI 的 │ 列分隔 */
-  'columns': {
-    children: GuiComponent[]
-    ratios?: number[]
-  }
-
-  /** 标签栏——替代 TUI 的 tab │ 分隔 */
-  'tab-bar': {
-    tabs: { label: string; active?: boolean; status?: 'done' | 'pending' }[]
-  }
-
-  /** 自定义组件——逃生口（仅限内置 extension 编译期注册） */
-  'custom': {
-    component: string
-    props: Record<string, unknown>
-  }
-}
-
-// ── tool result / message details 中 __gui__ 字段的完整类型 ──
-
-export interface GuiRenderResult {
-  /** 版本协商，前端检测，不认识降级 ansi-text */
-  v: typeof PROTOCOL_VERSION
-  component: GuiComponent
-  /**
-   * widget 宿主元数据（M17 对话流 widget 面板消费）：标题/状态点/进度计数由
-   * 宿主壳层统一渲染成单一 head（含折叠交互），extension 不再用 card 原语
-   * 的 header 表达这些（壳层 head 与 payload card header 双头重复的根因修复）。
-   * 可选：不发时宿主 fallback 到 viewId 标题、无状态点/进度。
-   */
-  meta?: WidgetMeta
-}
-
-/** widget 宿主元数据——head 渲染契约（title + 状态点 + 进度 + 折叠 chevron）。 */
-export interface WidgetMeta {
-  /** head 标题（todo → "Todo"；goal → slug） */
-  title: string
-  /** head 状态点语义：running=accent / done=success / failed=danger / idle=neutral 弱点 */
-  status?: 'running' | 'done' | 'failed' | 'idle'
-  /** head 进度（mini bar + 计数文本）；progress-bar 原语从 body 移入 head 的承载 */
-  progress?: {
-    /** fill 比例 = current/total */
-    current: number
-    total: number
-    /** 计数显示文本（head 空间有限，extension 全权格式化：todo "2/5"、goal "42%"）。
-     *  缺省 `${current}/${total}` */
-    label?: string
-    /** fill 语义色（预算阈值映射）；缺省按 meta.status（done→success，否则 accent） */
-    severity?: 'ok' | 'warn' | 'danger'
-  }
-}
-
-// ── 布局原语子类型 ──
-
-export interface StatItem {
-  label?: string
-  value: string
-  severity?: 'ok' | 'warn' | 'danger'
-  icon?: string
-}
-
-export interface TreeItem {
-  icon?: TreeItemIcon
-  label: string
-  status?: 'running' | 'done' | 'failed'
-  depth?: number
-  children?: TreeItem[]
-}
-export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pause' | 'branch'
+export { PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 /**
  * 插件描述域类型（manifest/descriptor 契约面）
@@ -332,8 +214,7 @@ export interface PluginContributesStatusBarItem {
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────
 //
-// 本文件仅包含 RPC 层的线协议类型与错误码，无跨域依赖——是 plugin-types
-// 拆分中最独立的一个域。
+// RPC 层的线协议类型与错误码，无跨域依赖。
 
 export interface RpcRequest {
   jsonrpc: '2.0'
@@ -390,7 +271,7 @@ export type PluginRpcErrorCode = (typeof PluginRpcErrorCodes)[keyof typeof Plugi
  *
  * 分层标注（IF2）：
  * - @proposed — Hook 机制整体为 Phase 2 扩展面（API 表面仍在演进）
- * - @internal — runtime 内部执行细节（HookResult/HookBlockedResult 等主线程塑形）
+ * - @internal — runtime 内部执行细节（HookResult 等主线程塑形）
  */
 
 /**
@@ -496,15 +377,6 @@ export interface HookResult {
   injectedMessages?: string[]
 }
 
-/** @internal — runtime 内部：Hook 被阻止时的详细结果 */
-export interface HookBlockedResult extends HookResult {
-  blocked: true
-  reason: string
-}
-
-// 本文件内部仍引用以下「已拆分」域的类型（lifecycle/bridge/agent-api 等
-// 内联类型用到了它们），故在此 import 以供本地使用；对外仍通过文件末尾的
-// `export ... from` 重导出，保证 `from './plugin-types.js'` 不破坏。
 /**
  * 插件系统内部类型定义
  *
@@ -518,13 +390,14 @@ export interface HookBlockedResult extends HookResult {
  *   NOT_IMPLEMENTED；已移出稳定面）
  * - @proposed — 演进中 API（Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/
  *   ui/agent/workspace、ToolRegistration、HookEntry、StatusBarItemOptions 等）
- * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等，
- *   其中 BridgeSyncPayload/IPluginServiceDeps 已在 sync 时从 SDK 剥离）
+ * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
+ *   BridgeSyncPayload 定义源在 @zhushanwen/extension-protocol，IPluginServiceDeps
+ *   为 runtime 专属内部类型——两者均不在本 SDK 面）
  */
 
 // ── Descriptor / Manifest 域 ───────────────────────────────────────
-// 已拆分到 ./plugin-types/descriptor-types.ts。此处 re-export 保持
-// 现有 `from './plugin-types.js'` 导入不破坏（NON-BREAKING）。
+// 留痕（历史区段标记）：descriptor 域定义见本文件上方「插件描述域类型」段
+// （SSOT）；runtime 侧 plugin-types.ts 经本文件 re-export 消费，无本地副本。
 // ── Worker 类型 ─────────────────────────────────────────────────
 
 /** @internal — runtime 内部：Worker 句柄，仅主进程 Worker 池使用 */
@@ -649,9 +522,6 @@ export interface PluginStateStorage {
   keys(): Promise<string[]>
 }
 
-// ── RPC 线协议域 ──────────────────────────────────────────────────
-// 已拆分到 ./plugin-types/rpc-protocol.ts。此处 re-export 保持
-// 现有 `from './plugin-types.js'` 导入不破坏（NON-BREAKING）。
 // ── Lifecycle 消息类型（Worker ↔ 主线程）────────────────────────
 
 /** @internal — runtime 内部：Worker↔主线程 lifecycle 消息（宿主方向） */
@@ -672,11 +542,9 @@ export type WorkerToHostMessage =
 
 // ── 通用类型 ─────────────────────────────────────────────────────
 
-// D28: Disposable 与 plugin-sdk/src/types.ts 的定义重复。理论上应提升到
-// @taiji/shared 作 single source of truth，但 SDK 通过 sync-types.sh 从本文件
-// 自动生成、且刻意保持零依赖（第三方插件作者无需装整个 monorepo）。若改 re-export
-// 会让 sync 后的 SDK 引入 @taiji/shared 依赖，破坏独立性。故保留独立定义——
-// 这是有意的跨包契约重复，sync 脚本是它的「真相源」。
+// Disposable 在本文件定义（SDK 为 SSOT，runtime 经 taiji-plugin-sdk re-export 消费）。
+// @taiji/shared 无同名定义；本文件是对外发布契约面（除 Bridge* 回包形状经
+// @zhushanwen/extension-protocol 外无依赖），无需跨包提升。
 /**
  * @stable — 可释放资源契约（Disposable 是插件生命周期的基础设施）。
  */
@@ -690,8 +558,6 @@ export type PluginPermission = string
 /** @internal — runtime 内部：插件生命周期状态机 */
 export type PluginState = 'UNLOADED' | 'LOADING' | 'ACTIVATING' | 'ACTIVE' | 'DEACTIVATING' | 'CRASHED' | 'DEPS_MISSING'
 
-// ── RPC Error Codes 域 ────────────────────────────────────────────
-// 已拆分到 ./plugin-types/rpc-protocol.ts。const 必须用 export-from 重导出。
 // ── Permission Constants ─────────────────────────────────────────
 
 /**
@@ -716,34 +582,10 @@ export const PermissionConstants = Object.freeze({
   NOTIFY: 'notify',
 } as const)
 
-/** @stable — 权限常量索引类型（随 PermissionConstants 冻结） */
-export type PermissionConstant = (typeof PermissionConstants)[keyof typeof PermissionConstants]
-
 // @internal — runtime 内部塑形对象（Bridge* 回包形状），定义源在协议包（见文件头 D4 单源化）
 export type { BridgeInterceptResponse, BridgeToolExecuteResponse }
 
 // ── Bridge 类型（插件 Worker ↔ 主进程桥接）─────────────────────────
-
-/** @internal — runtime 内部：Bridge 连接状态 */
-export interface BridgeState {
-  pluginId: string
-  connected: boolean
-  lastSyncAt: number
-}
-
-/** @internal — runtime 内部：插件向主进程同步工具和 hooks 的请求 */
-export interface BridgeSyncRequest {
-  type: 'bridge.sync'
-  tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
-  hooks: HookType[]
-}
-
-/** @internal — runtime 内部：主进程响应 Bridge 同步的结果 */
-export interface BridgeSyncResponse {
-  success: boolean
-  registeredTools: string[]
-  registeredHooks: HookType[]
-}
 
 /** @internal — runtime 内部：主进程调用插件注册的工具 */
 export interface BridgeToolExecuteRequest {
@@ -826,8 +668,8 @@ export interface HookEntry {
   priority: number
 }
 
-// HookInterceptor / HookObserver / PiEventCallback 已拆分到
-// ./plugin-types/hook-types.ts，下方 re-export 块统一导出。
+// Hook 域类型在本文件 Hook 类型段落定义（SSOT）；runtime 侧
+// plugin-types/hook-types.ts 经 taiji-plugin-sdk re-export 消费（薄壳）。
 
 // ── Phase 2 AgentAPI（在 Phase 1 基础上增加 tools 和 hooks）─────────
 
@@ -897,12 +739,3 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
   }
 }
 
-/** @internal — runtime 内部：插件向后端请求前端 UI 弹窗 */
-export interface PluginUIRequest {
-  sessionId: string
-  requestId: string
-  method: 'confirm' | 'select' | 'input'
-  title: string
-  message?: string
-  options?: string[]
-}

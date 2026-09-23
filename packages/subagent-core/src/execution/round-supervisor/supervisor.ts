@@ -2,7 +2,7 @@
 //
 // [W4] 轮次活性监督器——「等待有主」的权威层（本设计事故根因主修单元的核心）。
 //
-// 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2 三态判定表
+// 设计锚点：D2 三态判定表
 // + record 去向单一裁决表 + 通知对账 + 纳管模型。
 //
 // 职责一句话：后台子代理被杀后，goal 守卫（消费 pending 注册表）看不到 record 级

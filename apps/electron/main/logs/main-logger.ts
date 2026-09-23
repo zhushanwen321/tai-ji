@@ -1,5 +1,5 @@
 /**
- * Main 进程日志落盘 writer（crash-resilience §3.3 D6-①）。
+ * Main 进程日志落盘 writer（D6-①）。
  *
  * [HISTORICAL] 背景（E3 事故取证缺口）：main 是四层进程中生命周期最长的进程，但打包版
  * stdout 无人收集、main 的 console 无落盘通道——renderer 崩溃（render-process-gone）、

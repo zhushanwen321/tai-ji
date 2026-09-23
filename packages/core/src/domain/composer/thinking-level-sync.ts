@@ -19,8 +19,8 @@
  * - import 路径 `@/components/panel/thinking-levels` → core 本域 `./thinking-levels`（batch1 已迁入）。
  * 函数签名 / 逻辑 byte-level 保持。
  *
- * [u2 记忆恢复] watch 回调顶部新增 armed 消费（设计 model-thinking-level-memory.md
- * D3 规则 1/2/3 / D4 消费点 / D5 可用性回落）：显式切模型（u3 model-thinking 设立 armed）时
+ * [u2 记忆恢复] watch 回调顶部新增 armed 消费（D3 规则 1/2/3 / D4 消费点 / D5 可用性回落）：
+ * 显式切模型（u3 model-thinking 设立 armed）时
  * 优先恢复记忆档位，未命中 / 不可用 / 幂等 / 过期回落既有对齐分支。armed 相关 deps
  * 均为可选注入——未注入时消费块零副作用；[U5/D5] 对齐分支门禁与注入无关
  * （armedSnapshot 恒 null 即恒拦截分支 2/4/5，见下方门禁段）。

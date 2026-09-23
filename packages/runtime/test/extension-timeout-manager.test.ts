@@ -1,109 +1,75 @@
 /**
- * ExtensionTimeoutManager 单测 —— 纯逻辑状态机。
+ * ExtensionTimeoutManager 单测 —— 纯逻辑状态机（无超时：2026-07-16 取消 UI 超时，
+ * 2026-09-17 死代码清理后职责 = session 跟踪 + bridge 登记 + pending 缓存）。
  *
  * 覆盖：
- * - registerTimeout 两分支（notify 早退 / 交互式 method 仅 session 跟踪不建 timer）
+ * - trackUiRequest 两分支（notify 早退 / 交互式 method session 跟踪）
  * - addBridgeRequest：marker 通道（select+BRIDGE_MARKER）bridge 请求的唯一登记入口
  * - clearTimeout 单条清理
  * - clearForSession（含 bridgeRequestIds 清理 + 跨 session 隔离）
- * - [2026-07-16] 交互式 method（select/confirm/input/editor/ask-user）不再触发 onTimeout
- * - 重复 register 不再产生定时器
  * - isBridgeRequest / removeBridgeRequest
  * - B6（memory-leak-remediation §3.2-B6）removeBridgeRequest 双集合清理（bridgeRequestIds
  *   + per-session Set 同步归零，trackSessionRequest 对偶）/ sessionRequestCount 探针
+ * - pending request 缓存族（cache / get 非破坏快照 / remove / clearForSession）
  *
- * [HISTORICAL] registerTimeout 的 bridge: 前缀登记分支已随旧通道清理删除（设计
- * bridge-rewrite-pi-0.84 §3.3-D6）——bridge 登记单落在 addBridgeRequest（BridgeHandler
- * 入口调用），registerTimeout 只服务 extension-ui kind。
- *
- * 用 vi.useFakeTimers() 控制 setTimeout（manager 内部用真实 setTimeout + 300s 超时）。
+ * [HISTORICAL] 旧 registerTimeout 的 bridge: 前缀登记分支已随旧通道清理删除（设计
+ * bridge-rewrite-pi-0.84 §3.3-D6）；超时编排链（timedOutIds / handleExtensionTimeout /
+ * extension.ui_timeout 广播）已随 2026-09-17 死代码清理整体删除。
  *
  * 运行：pnpm --filter @taiji/runtime run test -- test/extension-timeout-manager.test.ts
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { ExtensionTimeoutManager } from '../src/services/extension-timeout-manager.js'
 
 describe('ExtensionTimeoutManager', () => {
-  beforeEach(() => vi.useFakeTimers())
-  afterEach(() => vi.useRealTimers())
-
-  it('registerTimeout(method="notify") 不建 timer（早退）', () => {
+  it('trackUiRequest(method="notify") 早退（无 UI 生命周期，不入 session 跟踪）', () => {
     const mgr = new ExtensionTimeoutManager()
-    const onTimeout = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'notify', onTimeout)
-    // 远超 5min 超时
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS + 1)
-    expect(onTimeout).not.toHaveBeenCalled()
+    mgr.trackUiRequest('s1', 'r1', 'notify')
+    expect(mgr.sessionRequestCount('s1')).toBe(0)
   })
 
-  it('addBridgeRequest 登记 bridgeRequestIds + session，不建 timer（marker 通道唯一登记入口）', () => {
+  it('trackUiRequest(交互式 method) 登记 session 跟踪（select/confirm/input/editor/ask-user 无超时，block 等待）', () => {
+    const mgr = new ExtensionTimeoutManager()
+    mgr.trackUiRequest('s1', 'r1', 'select')
+    mgr.trackUiRequest('s1', 'r2', 'confirm')
+    expect(mgr.sessionRequestCount('s1')).toBe(2)
+  })
+
+  it('trackUiRequest(method="bridge:*") 不登记 bridge 请求（登记单在 addBridgeRequest，防回归）', () => {
+    const mgr = new ExtensionTimeoutManager()
+    mgr.trackUiRequest('s1', 'r1', 'bridge:something')
+    expect(mgr.isBridgeRequest('r1')).toBe(false)
+  })
+
+  it('addBridgeRequest 登记 bridgeRequestIds + session（marker 通道唯一登记入口）', () => {
     const mgr = new ExtensionTimeoutManager()
     mgr.addBridgeRequest('s1', 'r1')
     expect(mgr.isBridgeRequest('r1')).toBe(true)
-    // bridge 请求靠跨进程序列驱动，不建本地 timer
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS + 1)
-    expect(() => mgr.isBridgeRequest('r1')).not.toThrow()
+    expect(mgr.sessionRequestCount('s1')).toBe(1)
   })
 
-  it('registerTimeout(method="bridge:*") 不再登记 bridge 请求（旧前缀分支已删，防回归）', () => {
+  it('clearTimeout 移除交互式请求的 session 跟踪（ui_response 应答后调）', () => {
     const mgr = new ExtensionTimeoutManager()
-    const onTimeout = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'bridge:something', onTimeout)
-    // 登记责任单落在 addBridgeRequest——误传 bridge: method 不得进 bridgeRequestIds
-    expect(mgr.isBridgeRequest('r1')).toBe(false)
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS + 1)
-    expect(onTimeout).not.toHaveBeenCalled()
-  })
-
-  it('registerTimeout(交互式 method) 仅 session 跟踪，不再建 timer/触发 onTimeout', () => {
-    const mgr = new ExtensionTimeoutManager()
-    const onTimeout = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'select', onTimeout)
-    // [2026-07-16] 交互式 method 统一不超时，block 等待用户决策
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS + 1)
-    expect(onTimeout).not.toHaveBeenCalled()
-  })
-
-  it('clearTimeout 对交互式 method 是 no-op（无 timer 可清，仍不触发回调）', () => {
-    const mgr = new ExtensionTimeoutManager()
-    const onTimeout = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'select', onTimeout)
+    mgr.trackUiRequest('s1', 'r1', 'select')
     mgr.clearTimeout('r1')
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS)
-    expect(onTimeout).not.toHaveBeenCalled()
+    expect(mgr.sessionRequestCount('s1')).toBe(0)
   })
 
-  it('clearForSession 清掉该 session 的 bridge 请求，不影响其他 session 的 session 跟踪', () => {
+  it('clearForSession 清掉该 session 的 bridge 请求，不影响其他 session 的跟踪', () => {
     const mgr = new ExtensionTimeoutManager()
-    const onTimeout1 = vi.fn()
-    const onTimeout2 = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'select', onTimeout1)
+    mgr.trackUiRequest('s1', 'r1', 'select')
     mgr.addBridgeRequest('s1', 'r2')
-    mgr.registerTimeout('s2', 'r3', 'select', onTimeout2)
+    mgr.trackUiRequest('s2', 'r3', 'select')
 
     mgr.clearForSession('s1')
 
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS)
-    expect(onTimeout1).not.toHaveBeenCalled() // 交互式 method 本就不触发
     expect(mgr.isBridgeRequest('r2')).toBe(false) // s1 bridge 请求已清
-    expect(onTimeout2).not.toHaveBeenCalled() // 交互式 method 本就不触发
+    expect(mgr.sessionRequestCount('s2')).toBe(1) // s2 跟踪不误伤
   })
 
   it('clearForSession 对无请求的 session 是 no-op', () => {
     const mgr = new ExtensionTimeoutManager()
     expect(() => mgr.clearForSession('no-such-session')).not.toThrow()
-  })
-
-  it('重复 registerTimeout(相同 requestId) 不再产生定时器，回调均不触发', () => {
-    const mgr = new ExtensionTimeoutManager()
-    const oldCb = vi.fn()
-    const newCb = vi.fn()
-    mgr.registerTimeout('s1', 'r1', 'select', oldCb)
-    mgr.registerTimeout('s1', 'r1', 'select', newCb) // 覆盖
-
-    vi.advanceTimersByTime(mgr.TIMEOUT_MS)
-    expect(oldCb).not.toHaveBeenCalled()
-    expect(newCb).not.toHaveBeenCalled()
   })
 
   it('removeBridgeRequest 从 bridge 跟踪表移除', () => {

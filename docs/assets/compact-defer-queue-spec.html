@@ -66,6 +66,21 @@
   .strip-band .t-main { font-size:var(--text-sm); color:var(--neutral-fg); }
   .strip-band .t-dot { color:var(--neutral-faint); margin:0 2px; }
   .strip-band .t-sub { font-size:var(--text-xs); color:var(--neutral-mid); }
+  /* ── 部分失效标注（2026-09-16 系统通知渲染升级 D4）───────────────
+     本资产两部分：队列区展示（继续有效）/ 压缩中通栏活动带（已失效）。 */
+  .spec-invalid {
+    width:min(880px,100%); margin:0 auto 18px;
+    border:1px solid color-mix(in oklch, #bf6b6b 45%, transparent);
+    background:color-mix(in oklch, #bf6b6b 10%, transparent);
+    border-radius:10px; padding:10px 14px;
+    font-size:12.5px; line-height:1.75; color:var(--neutral-mid);
+  }
+  .spec-invalid b { color:var(--neutral-fg); font-weight:600; }
+  .strip-band--invalid { opacity:.55; }
+  .strip-band__flag {
+    flex:none; font-size:var(--text-2xs); color:var(--neutral-dim);
+    padding:6px 20px 0; text-align:center;
+  }
   @keyframes spin { to { transform:rotate(360deg); } }
 
   /* ── composer ─────────────────────────────── */
@@ -123,6 +138,10 @@
 </head>
 <body>
 
+<p class="spec-invalid">
+  <b>形态失效标注（2026-09-16，系统通知渲染升级设计 D4）</b>：本资产「压缩中通栏活动带」部分<b>已失效</b>——压缩中提示已降级为与 bash/thinking/settling 行同构的 spinner 横线分隔行（待发副文案改「待发 N」chip），规格落点 = <b>docs/DESIGN.md §6.1 通知族二分「横线分隔行」修订行</b> + <b>docs/architecture/compact-defer-composer-queue.md §2.2</b>（资产保留作历史参照，不删除）。<b>队列区部分（下方 composer 队列区：defer 行 / Hourglass /「压缩后」chip / +N）继续有效</b>，仍为本地视觉基线。
+</p>
+
 <header class="demo-head">
   <div>
     <h1>压缩待发消息队列区展示 + 压缩中通栏活动带 <em>视觉规格 · 方案 2（三方案用户裁决选定）</em></h1>
@@ -139,8 +158,9 @@
     <div class="msg-a">已确认 ssh carbon 上的 pi 与 extension 更新完成。上下文快到阈值了，我先压缩一下会话记忆，再继续只读任务的回归验证。</div>
   </div>
 
-  <!-- 压缩中活动带 · 方案 2 -->
-  <div class="strip-band" title="方案 2：通栏 accent-soft 活动带，高度 ≈49px">
+  <!-- 压缩中活动带 · 方案 2 —— 已失效（2026-09-16 降级为横线分隔行，见页首失效标注）-->
+  <p class="strip-band__flag">↓ 本形态已失效（通栏活动带 → 横线分隔行），仅供历史对照</p>
+  <div class="strip-band strip-band--invalid" title="已失效：压缩中形态已降级为横线分隔行（DESIGN.md §6.1 + compact-defer-composer-queue.md §2.2）">
     <svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
     <span class="t-main">压缩中</span>
     <span class="t-dot">·</span>

@@ -29,7 +29,7 @@
  * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -40,6 +40,7 @@ import type { IProcessManager, IPiEngine, PiCommandInfo } from '../ports/pi-engi
 import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
+import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
@@ -48,7 +49,6 @@ import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, r
 // Facade 保留一行委托，语义注释见各新模块。
 import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
-import { persistModelBinding, readModelBinding } from '../../infra/pi/session-file-utils.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
@@ -79,13 +79,17 @@ import { SessionLifecycle } from './session-lifecycle.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
 // 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定面）。
-import { SessionEntryRemovalOrchestrator } from './session-entry-removal.js'
+import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
 // 空闲回收占座原语与等待观测超时（idle-pi-reclamation D6-2，u2）。type-only import：
 // Seat 实例由 u3 组合根创建后 setter 注入，本模块不持有创建权（不引入运行时依赖环）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
 import { RECLAIM_SEAT_WAIT_OBSERVE_MS } from './idle-pi-reaper.js'
 import { RespawnOrchestrator } from './pi-respawn.js'
 import { MessageDispatcher } from './message-dispatcher.js'
+// [A1 接线] skill 注入映射源（skill-reload-nondestructive D7）：records/dispatcher 的
+// SkillInjector 共享同一晚绑定占位，组合根在 SkillRegistry 构造后 bind 真源（构造顺序环
+// 见 LateBoundSkillSource 注释）。
+import { LateBoundSkillSource, SkillInjector, type SkillMappingSource } from './skill-injector.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
 import { SessionScanner } from './session-scanner.js'
 import { AttachmentStore } from './attachment-store.js'
@@ -112,6 +116,8 @@ import type { ForceQuitSource, UserStoppedMarkStore } from './types.js'
  * 本 Facade 值导入全部子模块，反向 import 成环），统一经 event-interpreter.ts 的
  * userStoppedGate 门面存取——本构造器经 gate.configure 注入下方 store 实现与 abort 能力。
  */
+// @data-owner #30（data-source-registry.md）：跨 ManagedSession 生命周期存活的用户停止
+// 意图标记（模块级 Map 是存在理由而非偶发形态，D4）；写方唯一 = userStoppedMarkStore。
 const userStoppedMarks = new Map<string, { source: ForceQuitSource; markedAt: number }>()
 
 /** 宿主 Map 的存取实现（gate.configure 注入 + 测试直断言用）。 */
@@ -136,9 +142,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
    * 惰性恢复共享，join 语义见 RespawnOrchestrator.ensureRestored）。
    */
-  private readonly lifecycle: SessionLifecycle
-  private readonly dispatcher: MessageDispatcher
-  private readonly scanner: SessionScanner
+  // H2 后组装字段在 assembleSubmodules/registerSessionExitHandler 内赋值——TS strict
+  // 的 readonly/definite-assignment 分析不跨方法，故声明为 `!`（先例 server.ts 同款），
+  // 赋值只发生在构造器调用的组装方法内，实例外不可见（private）。
+  private lifecycle!: SessionLifecycle
+  private dispatcher!: MessageDispatcher
+  private scanner!: SessionScanner
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -147,15 +156,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 先于本 Facade 剩余订阅体注册，播种顺序与迁移前逐一等价）；销毁经 onSessionDisposed
    * 由 removeSessionEntry 第 ⑤ 步直调。
    */
-  private readonly projection: SessionStateProjection
+  private projection!: SessionStateProjection
   /** trace/system-prompt 同步域（S4 迁出，构造器内组装 deps——见构造器注释） */
-  private readonly traceSync: TraceSync
+  private traceSync!: TraceSync
   /**
    * 模型/思考等级控制域（S6 迁出至 session-model-control.ts）：switchModel /
    * setThinkingLevel 的 RPC + 回执普查 + 实例失效 + 直写双投影。销毁无域状态（不持
    * per-session Map），无 onSessionDisposed。
    */
-  private readonly modelControl: SessionModelControl
+  private modelControl!: SessionModelControl
   /**
    * ConfigService 引用（组合根注入）。getReplaceSystemPrompt 委托用——
    * spawn pi 时透传用户配置的替换系统提示词。经 setter 注入而非构造参数，与
@@ -206,6 +215,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
   /**
+   * plan 退出失效回调（P2-2 失效链；MF-1-7 编排下沉）：abortPlan 发出 '/plan abort'
+   * 成功后上抛，transport 层（server.ts setServices 注册）消费——摘除 runtime pending
+   * + 广播失效帧。service 层不持有失效链实现（extensionTimeoutMgr 在 transport 编排层），
+   * 回调缺失时跳过（仅测试最小构造形态；组合根恒注入）。
+   */
+  private onPlanAborted: ((sessionId: string) => void) | null = null
+  /**
    * MessageBus 引用（组合根注入，wave:runtime-wiring）。
    *
    * session 级消息（带 sessionId payload）单通道走 bus.publish（per-session 单调 seq +
@@ -217,6 +233,18 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 避免破坏 SessionService 的 25+ 测试构造调用点。未注入时所有 bus 调用 no-op（this.messageBus?.*）。
    */
   private messageBus: IMessageBus | null = null
+  /**
+   * [A1 接线] skill 注入映射源的晚绑定占位（skill-reload-nondestructive D7 切源）。
+   *
+   * 为什么是占位而非构造注入：SkillRegistry 与 SessionService 互为依赖（registry 的
+   * 变更通知要 sessionService 的活跃表/cwd，sessionService 的注入器要 registry 的扫描），
+   * 构造顺序无解——SessionService 构造期持本占位组装 records/dispatcher 的 SkillInjector
+   * （两者共享同一实例，bind 后同源），组合根在 SkillRegistry 构造后调
+   * bindSkillMappingSource 绑真源（先于 server.start，生产不可达未绑定态；未绑定读取
+   * → injector 侧 mapping_unavailable notice，D8 禁止静默）。经 setter 而非构造参数，
+   * 同 setMessageBus 模式——避免破坏 SessionService 的 25+ 测试构造调用点。
+   */
+  private readonly skillSource = new LateBoundSkillSource()
   /**
    * 写 2 挂钩的投影专用 bus 视图缓存：getter 每次 publish 都会读，按底层 bus 身份
    * memoize（setMessageBus 晚期注入/替换后自动重建）。
@@ -243,14 +271,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    *    adapterFactory——EventAdapter 第三参，非本文件领地）；
    * ③ removeSessionEntry 汇聚点 unwatch（D8③，与 reaper 触发面 A 同挂点）。
    */
-  readonly backgroundTasks: BackgroundTaskService
+  backgroundTasks!: BackgroundTaskService
   /**
    * history 读编排域（S6 迁出至 history-rebuild-cache.ts）：getHistory 三分支重建
    * （缓存增量/RPC 全量/尾读降级）+ [u6] 游标翻页 + inflight 合并（getFullHistory 文件
    * 直读已随全量通路退役）。销毁经 onSessionDisposed 由 removeSessionEntry 第 ⑤ 步直调
    * （与 traceSync/projection/records 并列）。
    */
-  private readonly historyReader: SessionHistoryReader
+  private historyReader!: SessionHistoryReader
   /**
    * subagent/workflow 记录域（S6/D2③ 迁出至 session-records.ts）：W18 派生缓存族 +
    * 磁盘读侧/动作/引擎配置。onSessionRegistered 订阅者 = records 自身（构造器组装期
@@ -258,7 +286,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * Facade 订阅体内顺序逐一等价）；销毁经 onSessionDisposed 由 removeSessionEntry
    * 第 ⑤ 步直调（与 traceSync/projection 并列）。
    */
-  private readonly records: SessionRecords
+  private records!: SessionRecords
   /**
    * pi 崩溃自动恢复编排（crash-resilience §3.3 D7，u8-pi-respawn）。构造器内组装（deps 窄
    * 注入，同 traceSync/records 形态），三条挂点：
@@ -271,7 +299,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * messageBus 经 getter 动态读（setMessageBus 晚期注入语义，同 registerDeps 模式——未注入
    * 时 publish no-op）。
    */
-  private readonly respawn: RespawnOrchestrator
+  private respawn!: RespawnOrchestrator
   /**
    * 销毁收敛链编排（T8 有限拆分 2026-09，行为保持抽取）：removeSessionEntry 汇聚链的
    * 编排段（D1 台账 → checkpoint/mirror 摘除 → … → bus.clearSession 全序列 + 跨文件 B5
@@ -280,7 +308,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 与测试 spyOn 锁定面不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
    * 阅读顺序自然）。
    */
-  private readonly entryRemoval: SessionEntryRemovalOrchestrator
+  private entryRemoval!: SessionEntryRemovalOrchestrator
   /**
    * per-sid 最近查看时间戳（idle pi reclamation 设计 D2 #6，u1b）。
    *
@@ -316,6 +344,25 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     private readonly workspaceService: WorkspaceService,
     messageBus?: IMessageBus,
   ) {
+    // 构造器瘦身（H2）：9 子模块组装 + 创建侧订阅接线与 pi 崩溃 exit 编排分离为两个
+    // 私有方法（行为零变化——语句顺序逐行保持，时序不变式钉在各方法 JSDoc）。
+    this.assembleSubmodules(messageBus)
+    this.registerSessionExitHandler()
+  }
+
+  /**
+   * 子模块组装 + 创建侧订阅接线（H2 从构造器抽取，行为零变化——语句顺序逐行保持）。
+   *
+   * 本方法体内语句顺序 = 装配时序契约，重排前逐条核对：
+   * - lifecycle 先于 dispatcher 构造：lifecycle 的 forceQuitFallback 闭包引用
+   *   this.dispatcher，惰性求值（restore 发生在全部组装后，dispatcher 已就绪）；
+   *   projection / records 实例必须先构造后 subscribe。
+   * - onSessionRegistered 订阅顺序（组装根，S3 seam→S5/S6 换订阅者，设计 D2②）：
+   *   projection（W7 播种）→ records（W18 缓存注册）→ reconciler（U6 对账，
+   *   fire-and-forget）→ checkpoint（D3）→ mirror（D5）两个旁路订阅——「播种 →
+   *   record 注册 → 对账」顺序与迁移前 Facade 订阅体内顺序逐一等价，不得重排。
+   */
+  private assembleSubmodules(messageBus?: IMessageBus): void {
     // 子模块注入 this(Facade 半构造时仅存引用,其方法在 Facade 完全构造后才被调用)。
     // registerDeps(S3/D2②):registerSession 装配依赖窄注入——send 闭包对晚期注入状态
     // (messageBus/onMessageComplete)经 getter 每次调用动态读,与原 Facade 内联闭包捕获
@@ -381,7 +428,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       fetchContext: (sessionId) => this.fetchContext(sessionId),
       persistSessionOutcome: (sessionId, outcome, reason) => this.persistSessionOutcome(sessionId, outcome, reason),
       tryPersistProjectBinding: (session) => this.tryPersistProjectBinding(session),
-      tryPersistModelBinding: (session) => this.tryPersistModelBinding(session),
     })
     // subagent/workflow 记录域（S6 迁出至 session-records.ts）：deps 窄注入——session 存在性
     // 经 lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -392,8 +438,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       pm: this.pm,
       sessionStore: this.sessionStore,
       hasSession: (sessionId) => this.lifecycle.has(sessionId),
+      // [A1 接线] subagentAction 的 skill 注入 project 扫描基准（与 getSessionCwd 同源）
+      getSessionCwd: (sessionId) => this.getSessionCwd(sessionId),
       getMessageBus: () => this.messageBus,
-    })
+    }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块
     // 最小规范化（流式 strip + 首行 cwd fallback，见 restore-seeding.normalizeLargeSessionFileMinimal）。
@@ -462,6 +510,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         console.error(`[session-service] mirror preset failed (sessionId=${sessionId}):`, e)
       }
     })
+    // [u2 内核化] dispatcher 不持有注入器（skill 注入在 delivery registry 投递腿）——
+    // registry 构造点（runtime/src/index.ts）传 sessionService.skillMappingSource 共源。
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
 
@@ -495,23 +545,54 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       clearMessageBusSession: (sessionId) => this.messageBus?.clearSession(sessionId),
     })
 
+  }
+
+  /**
+   * pi 崩溃 exit 编排（H2 从构造器抽取，行为零变化——回调体语句顺序逐行保持）。
+   *
+   * 🔒 时序不变式（SSOT 钉在此处，重排前逐条核对）：
+   * - session.exited 的 messageBus.publish 必须先于 removeSessionEntry——后者内部调
+   *   bus.clearSession 清订阅者集合，clearSession 之后再 publish 等于送空集合，订阅
+   *   renderer 一条也收不到（wave:perf-w07/w09：进程退出标记 dead + toast 丢失）。
+   * - occupancy 'full-reset' 行同样必须在 removeSessionEntry（内部 bus.clearSession）
+   *   之前发布——同因 clearSession 断流，重连 renderer 会回放出永久占用投影
+   *   （session-dead-structural-fixes D2 挂点，u3b）。
+   * - W4 stopped 终态写在 removeSessionEntry 之后：session 是 delete 前缓存的引用，
+   *   persistSessionOutcome 的内部 get 在条目删除后返回 undefined，不能走它（首终态
+   *   优先语义见回调体内注释）。
+   * - respawn.schedule 收尾是设计裁决：本链天然不含 forceQuitSession（dispatcher 手工
+   *   编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 拦截）——
+   *   用户手动强杀的 session 结构性不触发自动恢复（crash-resilience D7，A7 反向验收）；
+   *   启动前守卫（active / in-flight restore / 熔断）在 schedule 内。
+   */
+  private registerSessionExitHandler(): void {
     // 进程崩溃清理:协调 adapter detach / Map 删 / 列表刷新 / session.exited 广播
     this.pm.onSessionExit((sessionId, code, stderr) => {
       const session = this.lifecycle.get(sessionId)
       if (!session) return
+      // [code-harden RT-4#1] 本回调体改为「前置段 try + 终态段 finally 必达」结构：
+      // 台账/detach 等前置步失败只降级日志；三步终态（session.exited 广播 / full-reset /
+      // removeEntry）与 stopped 终态 / config.sessions / respawn.schedule 收尾在 finally
+      // 中继续收敛——任一步异常不再让终态记录/列表广播/自动恢复承诺丢失、异常上抛成
+      // uncaughtException 连坐全 runtime。逐步隔离复用 runDestroyStepIsolated（与
+      // removeSessionEntry 编排链同一范式：日志 + crash 台账 reason=destroy-chain-step-failed）。
       // D1 台账（crash-forensics §3.3 D1 写入点矩阵「pi crash」行）：onSessionExit 链是 pi
       // 意外死亡的唯一通知路径（intentional destroy 被 process-manager 进程表守卫拦截不经
       // 此链），在此记 crash 与既有 session.exited 推送同点双写。stderr 为 rpc-client 透传的
       // 尾部 10 行摘要（getStderrTail 同源形态）；exitCode=null 表达信号致死（回调链不携带
       // signal 名，digest 兜底行注明形态）。fire-and-forget，不阻塞死亡清理链。
-      getCrashJournal().append({
-        layer: 'pi',
-        event: 'crash',
-        sessionId,
-        exitCode: code,
-        detailDigest: buildCrashDetailDigest(code, stderr),
+      runDestroyStepIsolated('crash-journal.crash', sessionId, () => {
+        getCrashJournal().append({
+          layer: 'pi',
+          event: 'crash',
+          sessionId,
+          exitCode: code,
+          detailDigest: buildCrashDetailDigest(code, stderr),
+        })
       })
-      session.adapter.detach()
+      runDestroyStepIsolated('adapter.detach', sessionId, () => {
+        session.adapter.detach()
+      })
 
       // 构建人类可读的退出原因（含 stderr 尾部，诊断价值 > 敏感性风险，本地工具场景）
       const reason = stderr
@@ -523,50 +604,60 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // clearSession 之后再 publish 等于送空集合，订阅 renderer 一条也收不到（进程退出标记
       // dead + toast 丢失）。wave:perf-w09（D1-2）：broadcast 腿已删，publish 是唯一通道
       //（renderer 全量订阅覆盖 list 内全部 session，见 useSessionStreamSync）。
-      const exitedMsg: ServerMessage = { type: 'session.exited', payload: { sessionId, code, reason } }
-      this.messageBus?.publish(sessionId, exitedMsg)
-
       // occupancy #10（session-dead-structural-fixes D2 挂点迁移，u3b；失败路径进程异常退出腿）：
       // 占用中 pi 死亡时 agent_settled / compaction_end 永不会发出（二者只从 pi run/compact
       // finally 触发），'full-reset' 行兜底——turn/compacting/bash 三维全复位 + 三布尔派生同步
       // 复位（结构上不再有「只复位一边」），否则重连 renderer 经 stateSnapshot 回放恢复的是
       // 永久的占用投影。须在 removeSessionEntry（内部 bus.clearSession）之前。
-      applySessionOccupancyTransition(session, this.messageBus, 'full-reset')
-
       // 注意：此处 session 是 delete 前缓存的引用，removeSessionEntry 后 Map 条目已删除
       // 统一经 removeSessionEntry（触发 onSessionDelete 清 pendingReload 等残留）
-      this.removeSessionEntry(sessionId)
-
-      // W4：进程异常退出写 stopped 终态（在 Map 条目删除后，直接用已取的 session 对象，
-      // 不走 persistSessionOutcome 的内部 get——删除后 get 返回 undefined）
-      if (session.sessionFilePath) {
-        // W2-5/W8：已有任意终态（done/error/stopped）则不覆盖。
-        // 正常 turn 完成时 handleTurnEndSideEffects 已写 'done'；随后 pi 进程正常退出触发本回调，
-        // 此处若再写 'stopped' 会覆盖已写入的 'done'。进程退出是正常结束的副作用，非用户中止。
-        // W8：abort 路径 dispatcher 已写 'stopped' + 原始 abort reason，随后进程退出触发本回调时，
-        // 若再次用「Process exited (code: N)」覆盖，会丢失 dispatcher 写入的原始 abort reason——
-        // 第一个终态优先（abort 是用户主动行为，reason 比 process exit 更具诊断价值）。
-        const existingOutcome = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
-        if (existingOutcome !== 'done' && existingOutcome !== 'error' && existingOutcome !== 'stopped') {
-          this.sessionStore.persistSessionEnd(
-            session.sessionFilePath,
-            'stopped',
-            `Process exited (code: ${code})`,
-          )
-        }
+      try {
+        const exitedMsg: ServerMessage = { type: 'session.exited', payload: { sessionId, code, reason } }
+        this.messageBus?.publish(sessionId, exitedMsg)
+        applySessionOccupancyTransition(session, this.messageBus, 'full-reset')
+      } catch (e: unknown) {
+        // 广播/occupancy 复位失败不得拦截 removeEntry 及后续收敛（终态必达，RT-4#1）
+        console.error(`[session-service] onSessionExit terminal broadcast failed (sessionId=${sessionId}):`, e)
       }
 
-      this.broker.broadcast({ type: 'config.sessions', payload: { groups: this.listPersistedSessions() } })
-      // session.exited（独立事件，区别于 message.error 的「单次消息失败」语义）：
-      // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
-      //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
+      try {
+        this.removeSessionEntry(sessionId)
 
-      // u8（crash-resilience D7-①②）：非主动退出 → 5s 延迟自动恢复。挂在本链（而非
-      // session.exited 消息生产点）是设计裁决：本链天然不含 forceQuitSession（dispatcher
-      // 手工编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 按
-      // processes.has 拦截）——用户手动强制退出的 session 构性不触发自动恢复（A7 反向验收）。
-      // 启动前守卫（active / restoringSessions in-flight / 熔断）在 schedule 内。
-      this.respawn.schedule(sessionId)
+        // W4：进程异常退出写 stopped 终态（在 Map 条目删除后，直接用已取的 session 对象，
+        // 不走 persistSessionOutcome 的内部 get——删除后 get 返回 undefined）
+        if (session.sessionFilePath) {
+          // W2-5/W8：已有任意终态（done/error/stopped）则不覆盖。
+          // 正常 turn 完成时 handleTurnEndSideEffects 已写 'done'；随后 pi 进程正常退出触发本回调，
+          // 此处若再写 'stopped' 会覆盖已写入的 'done'。进程退出是正常结束的副作用，非用户中止。
+          // W8：abort 路径 dispatcher 已写 'stopped' + 原始 abort reason，随后进程退出触发本回调时，
+          // 若再次用「Process exited (code: N)」覆盖，会丢失 dispatcher 写入的原始 abort reason——
+          // 第一个终态优先（abort 是用户主动行为，reason 比 process exit 更具诊断价值）。
+          const existingOutcome = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
+          if (existingOutcome !== 'done' && existingOutcome !== 'error' && existingOutcome !== 'stopped') {
+            this.sessionStore.persistSessionEnd(
+              session.sessionFilePath,
+              'stopped',
+              `Process exited (code: ${code})`,
+            )
+          }
+        }
+
+        this.broker.broadcast({ type: 'config.sessions', payload: { groups: this.listPersistedSessions() } })
+        // session.exited（独立事件，区别于 message.error 的「单次消息失败」语义）：
+        // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
+        //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
+
+        // u8（crash-resilience D7-①②）：非主动退出 → 5s 延迟自动恢复。挂在本链（而非
+        // session.exited 消息生产点）是设计裁决：本链天然不含 forceQuitSession（dispatcher
+        // 手工编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 按
+        // processes.has 拦截）——用户手动强制退出的 session 构性不触发自动恢复（A7 反向验收）。
+        // 启动前守卫（active / restoringSessions in-flight / 熔断）在 schedule 内。
+        this.respawn.schedule(sessionId)
+      } catch (e: unknown) {
+        // 收敛尾段（removeEntry / stopped 终态 / 列表广播 / respawn 承诺）失败显形：
+        // 不得静默吞掉，也不得沿 pm 回调多播上抛（RT-4#1）。
+        console.error(`[session-service] onSessionExit convergence tail failed (sessionId=${sessionId}):`, e)
+      }
     })
   }
 
@@ -612,6 +703,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * 注入 plan 退出失效回调（组合根 server.ts setServices 注册，与 setOnSessionDestroyed
+   * 同点同形态）：abortPlan prompt 成功后上抛 sessionId，transport 层消费失效链。
+   */
+  setOnPlanAborted(handler: (sessionId: string) => void): void {
+    this.onPlanAborted = handler
+  }
+
+  /**
    * U6（D2② 在线对账）：注入能力对账回调（组合根绑 modelService.reconcileModelCapabilities）。
    * session 附着路径（registerSession 的 onSessionRegistered 订阅,S3 前为 initializeManagedSession
    * 体内调用）fire-and-forget 调用——失败不阻断附着（内部降级：引擎不可用 / RPC 失败一律
@@ -638,6 +737,21 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   setMessageBus(bus: IMessageBus): void {
     this.messageBus = bus
     this.dispatcher.setMessageBus(bus)
+  }
+
+  /**
+   * [A1 接线] 绑定 skill 注入映射源真源（组合根在 SkillRegistry 构造后调用一次，
+   * skill-reload-nondestructive D7）。records/dispatcher 的 SkillInjector 构造期已持
+   * skillSource 占位，bind 后共享同源。getter 供组合根为 delivery registry 组装
+   * 同源 injector（三个注入挂点一份映射源，单权威）。
+   */
+  bindSkillMappingSource(source: SkillMappingSource): void {
+    this.skillSource.bind(source)
+  }
+
+  /** [A1 接线] skillSource 占位的对外只读面（组合根 delivery registry 组装用）。 */
+  get skillMappingSource(): SkillMappingSource {
+    return this.skillSource
   }
 
   /**
@@ -885,6 +999,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [reload-closeout D2] 送达水位对账腿入口（agent_settled 触发，interpreter 经组合根
+   * 注入）。实现迁 session-records.ts——重跑同一条 fetch→merge→publish 管线，发布门 =
+   * 已发布快照水位（守卫/发布门处曾丢的帧补发；扫描域门与 inflight 合并见该模块）。
+   */
+  reconcileRecordEntries(sessionId: string): void {
+    return this.records.reconcileRecordEntries(sessionId)
+  }
+
+  /**
    * 确保会话活跃;不存在则自动 restore。
    *
    * 并发语义（crash-resilience D7-③，u8 join 改造）：[HISTORICAL] 原对并发调用直接
@@ -972,7 +1095,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 
   /** subagent 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getSubagents(sessionId: string): Promise<SubagentRecord[]> { return this.records.getSubagents(sessionId) }
+  async getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>> { return this.records.getSubagents(sessionId) }
   /** subagent 对话流历史（record.sessionFile 直读 + 非 pi 引擎降级链，实现迁 session-records.ts）。 */
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> { return this.records.getSubagentHistory(sessionId, subagentId) }
   /** [U7] 引擎配置视图（engines.json + config.json，实现迁 session-records.ts）。 */
@@ -980,7 +1103,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
-  async getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> { return this.records.getWorkflows(sessionId) }
+  async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> { return this.records.getWorkflows(sessionId) }
+
+  /**
+   * plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，u1-rpc 补接线）：对称 getSubagents
+   * 转发形态，实现迁 session-records.ts（磁盘 JSONL → scanPlanStateEntries 派生，
+   * 与 live 投影同一份派生代码）。
+   */
+  async getPlanState(sessionId: string): Promise<PlanStateView> { return this.records.getPlanState(sessionId) }
 
   /**
    * session-trace 台账全量拉取（RPC 混合路由 → 文件降级 → empty 空态）。
@@ -1011,7 +1141,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** agent call JSONL 路径（展示型，找不到返回空串；实现迁 session-records.ts）。 */
   async getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string> { return this.records.getAgentCallFilePath(sessionId, agentCallSessionId) }
   /** workflow 生命周期操作（经扩展 slash command，实现迁 session-records.ts）。 */
-  async workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
+  async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
   /** subagent 生命周期/定向消息操作（encodeDirectiveText 编码，实现迁 session-records.ts）。 */
   async subagentAction(
     sessionId: string,
@@ -1053,6 +1183,33 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * 退出 plan 模式（D5/E9/E10：PlanModeBar 确认 Popover 后；MF-1-7 编排自 transport
+   * handler 下沉至此，形态对齐 promptReload / workflowAction 的命令编排区）。
+   *
+   * ① ensureActive 自动恢复 pi（join 语义，本类 ensureActive——崩溃恢复后懒重生未发生
+   * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
+   * 前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：`/` 前缀 prompt 被
+   * pi 先行执行为 extension command、不产用户消息、streaming 中可用（主审 R2 复核实证）；
+   * pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——prompt 对 `/` 前缀先行
+   * 尝试 extension command（源码注释明言 execute immediately, even during streaming），
+   * handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand :954。本断言
+   * 双承重：此写入路径 + .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过
+   * dispatcher busy 预检——照 workflowAction（session-records.ts workflowAction）先例，
+   * 审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发让 extension 侧
+   * abort handler（先 controller.abort 再 resetPlanState）落地。
+   * ③ 失效链经 onPlanAborted 回调上抛（P2-2：/plan abort → extension controller.abort()
+   * 解散挂起审批 select，响应永不可达——摘除 runtime pending + 广播失效帧，审批挂起中
+   * 退出后重进 plan，僵尸 ready 审批条不再出现）；回调缺失跳过（仅测试最小构造形态）。
+   * 退出结果经投影链 session.planState 广播推回（isActive=false），不在此处回包——
+   * reply 由 transport handler 负责。
+   */
+  async abortPlan(sessionId: string): Promise<void> {
+    const client = await this.ensureActive(sessionId)
+    await client.prompt('/plan abort')
+    this.onPlanAborted?.(sessionId)
+  }
+
+  /**
    * U3（composer 四符号 §3.3.5）：reload 完成后失效 commands 快照（slash 列表动态刷新
    * 链路闭合点）。失效点挂在这里的时机依据（设计 F8）：pi 对 extension 命令
    * `await _tryExecuteExtensionCommand`（agent-session.js:800），promptReload resolve 即
@@ -1078,9 +1235,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 数据源）。旧 session.inputTokens 缓存直写（applyContextUpdate / fetchContext 回写，
    * 及已删除的外部 setter）已删，sessions Map 内字段退化为恒 0 的派生基线（types 必填
    * 字段，读点全部走本方法）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 把「无快照/陈旧」折成数值 0，与「上下文真空」
+   * 不可区分）。null 语义对齐 context.update 无值占位帧（publishContextNoValuePlaceholder，
+   * 字段缺失 = 无值而非 0 基线）；0 仅表真值。
    */
-  getInputTokens(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? 0
+  getInputTokens(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.inputTokens ?? null
   }
 
   /**
@@ -1125,9 +1286,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 旧实现按「缓存 inputTokens + resolver 窗口」本地重算（computeUsage），W10 起快照
    * 已持有 pi 侧按当前模型窗口算出的权威 percent，读点直接派生；dirty 期间返回上次
    * 快照（核心不变量 2 的 UI 语义）。
+   *
+   * [RT-4#7] 无快照返回 null（原 `?? 0` 折叠「无值」与「真 0%」；语义对齐 getInputTokens）。
    */
-  getUsagePercent(sessionId: string): number {
-    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? 0
+  getUsagePercent(sessionId: string): number | null {
+    return this.projection.getReplicatedStates(sessionId)?.usage.get()?.usagePercent ?? null
   }
 
   async destroyAll(): Promise<void> {
@@ -1326,38 +1489,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     if (persisted || !projectId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
     this.sessionStore.persistProjectBinding(s.sessionFilePath, projectId)
     ;(s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted = true
-  }
-
-  /**
-   * model binding sidecar 补写兜底（D1 写点③延迟 flush 语义修正，Gate B 端到端实证，
-   * 2026-09-04）。镜像 tryPersistProjectBinding（D14 同款问题同款解法）。
-   *
-   * 背景：写点③（lifecycle create 路径）受 pi 延迟写入窗口约束——create 瞬间
-   * sessionFilePath 路径有值但 .jsonl 文件未 flush（pi 0.84.4 实装：SessionManager
-   * 构造即生成确定性路径），persistModelBinding 内部 existsSync 守卫恒跳过，且 pi flush
-   * 后没有任何补写点。真实 app 实证：新建并对话过的 session 目录里无 .model.json，重启后
-   * composer 回落全局默认（内存生效值丢失）；同 session 内显式切模型（写点①）立即产出
-   * sidecar，证明写点本身工作、缺的只是 create 窗口的补写时机。
-   * [V9-④ 根修注] preset/project/agent 三绑定已放行 create 写点（skipJsonlExistsGuard），
-   * model 写点保留守卫语义不改——本补偿已实测工作（V1 文件断言由其满足），无需扩大
-   * create 时序行为面。
-   *
-   * 本方法在 turn_end（主路径）/ agent_end（兜底）时补写——此时 pi 已完成 flush，文件
-   * 存在，写 sidecar 安全。文件仍不存在 → 跳过（下次兜底）。
-   *
-   * 缺失才写：readModelBinding 命中（写点①⑤写的新值或历史值）→ 视为已有，打标跳过
-   * 不覆写——sidecar 新鲜度归写点①⑤所有，本方法只补「从没写过的空洞」。
-   *
-   * 用 modelBindingSidecarEnsured 标记防重复写（session 级运行时标记，同
-   * projectBindingPersisted 形态，不进 toSummary）。
-   */
-  private tryPersistModelBinding(s: IManagedSessionView): void {
-    const view = s as IManagedSessionView & { modelBindingSidecarEnsured?: boolean }
-    if (view.modelBindingSidecarEnsured || !s.modelId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
-    if (!readModelBinding(s.sessionFilePath)) {
-      persistModelBinding(s.sessionFilePath, s.modelId, s.thinkingLevel ?? '')
-    }
-    view.modelBindingSidecarEnsured = true
   }
 
   /**

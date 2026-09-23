@@ -63,20 +63,22 @@ describe('block-rendering M0: Block text 分支正文样式（TC-M0-4）', () =>
   })
 })
 
-/* ── error-visibility M2：text 分支 error 形态判定（TC1 纯 error / TC3 追加形态）──
- * SSOT: docs/architecture/conversation-error-visibility.md §3.3.2
- * - 纯 error（status==='error' 无 msg.error）：整条 danger（AlertCircle + text-danger）
- * - 追加形态（status==='error' 且 msg.error 有值）：content 正常正文保持原色，error 独立 danger 行 */
+/* ── error-visibility M2 [形态统一]：text 分支唯一 error 形态 = 追加形态 ──
+ * 错误文本只住 msg.error，content 恒为崩溃前正文（可为空）——正文永不整条染红，
+ * 错误始终渲染为独立 danger 行（纯 error 形态已随形态统一消灭）。 */
 describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）', () => {
-  it('TC1: 纯 error 消息整条 danger（AlertCircle 图标 + text-danger，无 msg.error）', () => {
-    const wrapper = mountTextBlock({ content: '压缩失败', status: 'error' })
+  it('TC1: 纯错误消息（content 空）→ 正文区空 + msg.error 独立 danger 行', () => {
+    const wrapper = mountTextBlock({ content: '', status: 'error', error: '压缩失败' })
     const textEl = wrapper.find('[data-testid="block-text"]')
-    expect(textEl.classes()).toContain('text-danger') // 整条染 danger
-    expect(textEl.classes()).not.toContain('text-neutral-fg') // 不再是正常正文色
-    expect(wrapper.find('[data-testid="block-text-error-icon"]').exists()).toBe(true) // AlertCircle 图标
-    expect(wrapper.text()).toContain('压缩失败') // errorText 即全文
-    // 追加形态专属的独立 error 行不应出现
-    expect(wrapper.find('[data-testid="block-text-error"]').exists()).toBe(false)
+    // 正文容器保持正常正文色（永不因 error 整条染红）
+    expect(textEl.classes()).toContain('text-neutral-fg')
+    expect(textEl.classes()).not.toContain('text-danger')
+    // 独立 error 行：text-danger + AlertCircle + 错误文本
+    const errorRow = wrapper.find('[data-testid="block-text-error"]')
+    expect(errorRow.exists()).toBe(true)
+    expect(errorRow.classes()).toContain('text-danger')
+    expect(errorRow.find('svg').exists()).toBe(true)
+    expect(wrapper.text()).toContain('压缩失败')
   })
 
   it('TC3: 追加形态——正常正文（content）保持原色，msg.error 渲染独立 danger 行', () => {
@@ -92,13 +94,19 @@ describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）
     expect(errorRow.find('svg').exists()).toBe(true) // AlertCircle 图标
     expect(wrapper.text()).toContain('崩溃前追加的错误')
     expect(wrapper.text()).toContain('正常回复')
-    // 纯 error 专属的整条图标行不应出现（追加形态 content 前无图标）
-    expect(wrapper.find('[data-testid="block-text-error-icon"]').exists()).toBe(false)
+  })
+
+  it('TC4: error 终态缺 error 字段（漏网防御）→ 不整条染红，无 error 行（静默降级不误导）', () => {
+    const wrapper = mountTextBlock({ content: '正常回复', status: 'error' })
+    const textEl = wrapper.find('[data-testid="block-text"]')
+    // 防御形态：正文保持原色（不因缺 error 字段误判整条 danger）
+    expect(textEl.classes()).toContain('text-neutral-fg')
+    expect(textEl.classes()).not.toContain('text-danger')
+    expect(wrapper.find('[data-testid="block-text-error"]').exists()).toBe(false)
   })
 })
 
 /* ── error-visibility M1：failed tool header danger 色 + 终态默认展开（TC1-3）──
- * SSOT: docs/architecture/conversation-error-visibility.md §3.3.1
  * - T1: toolStatusClass failed 分支 → text-danger（unfinished 保持中性灰）
  * - T2: toolCollapsed 终态分化——failed(error) 初值 false（展开），其余 true（收起）
  * - CQ1: streaming 中失败不展开（mount 快照，running→error 不 remount），本测试覆盖终态挂载分支
@@ -151,7 +159,6 @@ describe('feat-chat-flow-dim: completed tool header 置灰', () => {
 })
 
 /* ── error-visibility M3：thinking 可收起 + 完成态回落（TC1-3）──
- * SSOT: docs/architecture/conversation-error-visibility.md §3.3.3
  * - T1: thinkingExpanded 去 props.working 短路（working 默认展开改由 collapsed 初值承担）
  *   ——working 挂载 collapsed 初值 false（展开）、非 working 挂载 true（收起，G3 骨架）
  * - T2: 删禁 toggle（working 中也可手动收起/展开）；watch working true→false 回落收起
@@ -438,7 +445,6 @@ describe('W4 tail-scroll: 无输出 tool（U10）', () => {
 })
 
 /* ── bash-running-stream-output（U3）：bash 展开恒渲染容器 + 输出区内容守卫 + 尾行取数回退 ──
- * SSOT: docs/design/bash-running-stream-output.md §6.2 D2 / §6.3 D3 / §7 U3
  * - D2: bash 展开容器恒渲染（含命令块），空输出不再「header 摘要消失 + 内容空白」假展开
  * - D3: toolTailLines bash raw 源 outputRaw ?? displayContent（无 ANSI 输出走 displayContent 尾行） */
 describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）', () => {

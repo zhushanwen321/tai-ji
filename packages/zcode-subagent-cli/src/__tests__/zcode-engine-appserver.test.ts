@@ -360,6 +360,25 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     expect(create.params["mode"]).toBe("yolo");
   }, 15_000);
 
+  // [U4/R4-G3] 缺席模型：create 帧不含 model 键——zcode 走自身缺省解析（用户
+  // defaultModelSelection 优先），且缺席跳过 preparer 凭据预校验（D3：正确行为非
+  // 放松——本用例 v2 config 仅含 m1 条目，若缺席仍走 fallback 解析链会在无
+  // builtin:bigmodel-coding-plan 条目时抛 engine_credential_missing）。
+  it.each([undefined, "   "] as const)(
+    "task.model 缺席/空白 → create 帧无 model 键（U4：缺席交 zcode 自身缺省解析，跳过凭据预校验）",
+    async (model) => {
+      const { engine, stateFile, workspace } = makeEngine();
+      const { outcome } = await engine.run(makeTask({ cwd: workspace, model }), makeCtx());
+      expect(outcome.error).toBeUndefined();
+      const create = sentFrames(stateFile, "session/create")[0];
+      expect("model" in create.params).toBe(false);
+      // 其余键集不受影响（strict 对象仍带 workspacePath/mode）
+      expect(create.params["workspace"]).toMatchObject({ workspacePath: workspace });
+      expect(create.params["mode"]).toBe("yolo");
+    },
+    15_000,
+  );
+
   it("thinkingLevel → create 帧 thoughtLevel 透传（F15a：task 声明映射协议通道）", async () => {
     const { engine, stateFile, workspace } = makeEngine();
     await engine.run(makeTask({ cwd: workspace, thinkingLevel: "high" }), makeCtx());
@@ -410,15 +429,10 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     expect(warns.filter((m) => m.includes("thoughtLevel"))).toHaveLength(0);
   }, 15_000);
 
-  it("task.model 缺省 + ctx.ctxModel 存在 → 出声留痕（F16b：ctxModel 是 pi 链路兜底，zcode 落自身缺省链）", async () => {
-    // v2 config 补缺省模型 provider 条目——ZCODE_FALLBACK_DEFAULT_MODEL 的解析链才可校验通过
-    writeJson(v2Path, {
-      provider: {
-        [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } },
-        "builtin:bigmodel-coding-plan": { options: { apiKey: "k" }, models: { "GLM-5.3": {} } },
-      },
-    });
-    const { engine, workspace } = makeEngine();
+  it("task.model 缺省 + ctx.ctxModel 存在 → 出声留痕（F16b：ctxModel 是 pi 链路兜底，zcode 不消费）", async () => {
+    // [R4/G3] v2 config 无需再补 fallback provider 条目——缺席 model 不再解析
+    // ZCODE_FALLBACK_DEFAULT_MODEL，create 不携带 model 键（zcode 自身缺省解析）。
+    const { engine, stateFile, workspace } = makeEngine();
     const warns: Array<{ msg: string; data: unknown }> = [];
     const warnSpy = vi.spyOn(subagentsLogger, "warn").mockImplementation(((msg: string, data: unknown) => {
       warns.push({ msg, data });
@@ -432,7 +446,12 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
       const hit = warns.find((w) => w.msg.includes("ctxModel"));
       expect(hit).toBeDefined();
       expect(hit?.msg).toContain("main-model");
-      expect(hit?.msg).toContain("builtin:bigmodel-coding-plan/GLM-5.3");
+      // [R4/G3] 文案不再声称「实际使用引擎缺省模型 <fallback>」——缺席 = 不携带键
+      expect(hit?.msg).toContain("不携带 model 键");
+      expect(hit?.msg).toContain("defaultModelSelection");
+      // U4：缺席 → create 帧不含 model 键（zcode 自身缺省解析）
+      const create = sentFrames(stateFile, "session/create")[0];
+      expect("model" in create.params).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
@@ -779,7 +798,9 @@ describe("capabilities（D5：仅 eventGranularity 变）", () => {
       conversation: "cold",
       personaInjection: "prompt",
       eventGranularity: "stream",
-      sandbox: "none",
+      // [W2/R2] sandbox 位升 emulated（cwd 传导已通，worktree 隔离由公共层承担——
+      // W3 交接翻转：带 worktree 任务不再被 capability gate 拒绝）
+      sandbox: "emulated",
       sessionRead: "full",
       resume: "cold",
       interrupt: "kill-only",

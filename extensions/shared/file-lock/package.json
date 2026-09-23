@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-file-lock",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Shared sync cross-process file lock for Pi extensions — zero-dependency self-implemented mkdir lock (protocol-compatible with proper-lockfile 4.1.2) with stale takeover and busy-wait retry, aligned with the runtime-side lock protocol (shared library, not a Pi extension).",
   "type": "module",
   "main": "src/index.ts",

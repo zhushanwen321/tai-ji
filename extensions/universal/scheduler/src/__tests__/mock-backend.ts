@@ -1,4 +1,4 @@
-import type { SchedulerBackend } from '../backend.js'
+import type { SchedulerBackend, SchedulerProviderOverride } from '../backend.js'
 import { replayFoldEntries, type SchedulerEntryLike } from '../replay.js'
 import type { ScheduledTask, SchedulerEntryOp } from '../types.js'
 
@@ -11,11 +11,13 @@ export interface SentMessage {
 }
 
 /**
- * Mock 后端：零 session/FS 副作用，记录 sendMessage/appendEntry 调用，支持注入固定时间与 fake entries。
+ * Mock 后端：零 session/FS 副作用，记录 sendMessage/appendEntry/registerProvider/
+ * unregisterProvider 调用，支持注入固定时间与 fake entries。
  *
  * 能力：
  * - sentMessages: 每次 sendMessage 的 {msg, opts} 记录
  * - appendedOps: 每次 appendEntry 收到的 SchedulerEntryOp（测 runtime 各 op 断言）
+ * - registeredProviders / unregisteredProviders: ack 覆写注册/注销记录
  * - fakeEntries / fakeSessionFile: loadTasks 经 replayFoldEntries 的注入源（测 backend→replay 委托）
  * - nowValue: now() 返回固定值，缺省 Date.now()
  * - appendError: 注入后 appendEntry 抛该错（测 ER-APPEND-FAIL 捕获路径）
@@ -23,6 +25,8 @@ export interface SentMessage {
 export class MockSchedulerBackend implements SchedulerBackend {
   sentMessages: SentMessage[] = []
   appendedOps: SchedulerEntryOp[] = []
+  registeredProviders: Array<{ providerId: string; config: SchedulerProviderOverride }> = []
+  unregisteredProviders: string[] = []
   fakeEntries: SchedulerEntryLike[] = []
   fakeSessionFile: string | undefined = '/test/session.json'
   nowValue: number | undefined
@@ -46,6 +50,18 @@ export class MockSchedulerBackend implements SchedulerBackend {
 
   now(): number {
     return this.nowValue ?? Date.now()
+  }
+
+  registerProvider(providerId: string, config: SchedulerProviderOverride): void {
+    this.registeredProviders.push({ providerId, config })
+  }
+
+  unregisterProvider(providerId: string): void {
+    this.unregisteredProviders.push(providerId)
+  }
+
+  getEntries(): SchedulerEntryLike[] {
+    return this.fakeEntries
   }
 
   /**

@@ -1,7 +1,7 @@
 // src/execution/engine/types.ts
 //
-// 引擎中立类型层（P1）。设计权威源：docs/architecture/subagent-engine-abstraction.md
-// §3.3.5（EnginePort 与中立类型完整契约）+ §3.3.6（EngineHandle/journal/SessionView 格式）。
+// 引擎中立类型层（P1）。承载 EnginePort 与中立类型完整契约 + EngineHandle/journal/SessionView 格式
+// （SDK protocol/contract-types.ts 为类型闭包 SSOT，见下方收编说明）。
 //
 // [S4 簇 3 收编] 契约类型单源化（type-only）：AgentOutcome / EngineHandleData /
 // ReplayedTurn / SessionView / EngineCapabilities / ProbeReport 的本地定义已删除，

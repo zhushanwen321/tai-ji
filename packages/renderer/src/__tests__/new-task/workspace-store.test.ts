@@ -65,6 +65,37 @@ describe('workspaceStore.load 降级（T3.4）', () => {
     expect(store.records).toEqual([])
     expect(store.defaultCwd).toBeUndefined()
   })
+
+  it('RD-3#4: RPC reject → 补 console.warn + loadError 标记（读失败 ≠ 无历史，可观测）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+      const store = useWorkspaceStore()
+      await store.load()
+      // AC-4.5 口径不变：records 置 [] 不抛、不阻断启动（不加错误条/重试）
+      expect(store.records).toEqual([])
+      // RD-3#4：留痕 + 标记，让「读失败」与「真无历史」在观测面可分
+      expect(store.loadError).toBe('RPC timeout')
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[workspace] load failed'),
+        'RPC timeout',
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('RD-3#4: load 成功 → loadError 清空（失败标记不残留）', async () => {
+    const store = useWorkspaceStore()
+    mockListRecent.mockRejectedValueOnce(new Error('transient'))
+    await store.load()
+    expect(store.loadError).toBe('transient')
+
+    mockListRecent.mockResolvedValueOnce([mkRecord('/repo-a', 300)])
+    await store.load()
+    expect(store.loadError).toBeNull()
+    expect(store.records).toHaveLength(1)
+  })
 })
 
 describe('workspaceStore.record（热更新）', () => {

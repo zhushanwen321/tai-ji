@@ -58,12 +58,12 @@ describe('pi-settings-store', () => {
       expect(readSettings()).toEqual({})
     })
 
-    it('serves cached value within TTL', () => {
+    it('serves external file change on next read (revision fingerprint)', () => {
       writeFileSync(settingsPath, JSON.stringify({ v: 1 }), 'utf-8')
       expect(readSettings().v).toBe(1)
       writeFileSync(settingsPath, JSON.stringify({ v: 2 }), 'utf-8')
-      // TTL 缓存挡住外部改动
-      expect(readSettings().v).toBe(1)
+      // 指纹失配 → 重读：外部改动（pi 子进程写 / 用户手改）下一次 read 立即可见
+      expect(readSettings().v).toBe(2)
     })
   })
 
@@ -74,11 +74,11 @@ describe('pi-settings-store', () => {
       expect(JSON.parse(raw)).toEqual({ defaultModel: 'claude' })
     })
 
-    it('refreshes cache after write', () => {
+    it('external changes after write are visible on next read', () => {
       writeSettings({ defaultModel: 'a' })
       writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'b' }), 'utf-8')
-      // write 刷新了缓存，但缓存值是 write 的值，不是盘上被外部改的
-      expect(readSettings().defaultModel).toBe('a')
+      // write 后的指纹 = 写入后 stat；外部改写使指纹失配 → 下一次 read 重读盘
+      expect(readSettings().defaultModel).toBe('b')
     })
 
     it('writes with indent', () => {

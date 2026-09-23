@@ -34,7 +34,7 @@
 - 不动 select+marker 通道机制与三条硬约束；
 - 不动 sync/准入闸/失败折叠等已核实非过度机制；
 - 不收紧协议层 `injectedMessages: unknown[]` 类型（与 plugin-intercept-injection D3「协议层不收紧」定案一致，见 D1 被否栏）；
-- 不动 SDK 侧 worker 通道专属类型（`BridgeSyncRequest`/`BridgeSyncResponse`/`BridgeState`/`BridgeToolExecuteRequest`——与协议形状是真差异：worker↔main RPC 概念域，字段结构不同源）；
+- 本设计当时不动 SDK 侧 worker 通道专属类型（`BridgeToolExecuteRequest` 保留——与协议形状是真差异：worker↔main RPC 概念域，字段结构不同源；`BridgeSyncRequest`/`BridgeSyncResponse`/`BridgeState` 经后续死代码清扫删除）；
 - 不动 runtime 侧 `bridge-handler`/`bridge-interop` 的路由与塑形逻辑（纯路由铁律、D1 取值链均有独立设计登记）。
 
 ## 3. 现状：六个死面的位置图
@@ -195,7 +195,7 @@
   - 协议 types.ts:33-35 手工同步注释删除（单源化后失义），「runtime 是实现侧权威」矛盾表述一并清理。**[终态括注]** 实装为正向 SSOT 声明（「本模块是 Bridge* 回包形状的唯一定义源」）取代字面删除——单源化后此处正是声明 SSOT 的位置，正向声明比留白更有导航价值（合理偏差 impl-plan §5 R1，矛盾表述确已消失）。
 - **选 b. 一致性测试（否，即索引原 low 项建议）**：测试冻结重复不消除重复，三处同改税照旧。被取代登记。
 - **选 c. 维持现状（否）**：三处定义 + 双权威矛盾注释，每次形状演进手工同步。
-- **真差异保留**：SDK 的 `BridgeSyncRequest`/`BridgeSyncResponse`/`BridgeState`/`BridgeToolExecuteRequest`（worker↔main RPC 概念域）不动——与协议形状字段结构不同源，非重复定义。
+- **真差异保留**：SDK 的 `BridgeToolExecuteRequest`（worker↔main RPC 概念域）保留——与协议形状字段结构不同源，非重复定义；`BridgeSyncRequest`/`BridgeSyncResponse`/`BridgeState` 零消费方，经后续死代码清扫删除。
 - **大简化**：删 3 份重复定义 + 1 段失实理由注释（plugin-types.ts:7-8「依赖 runtime 内部 service port」）+ 1 段手工同步契约注释；概念数 -3（读者从「三处形状 + 同步纪律」降为「一处 SSOT」）。
 
 ### 6.5 D5：details ok 变体去重（B4，语义层审计精化后收敛）

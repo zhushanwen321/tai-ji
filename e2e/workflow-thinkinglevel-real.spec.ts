@@ -17,8 +17,7 @@
  * model-keyed 对象形态（faux-llm-ext loadScript 的第二种形态）——主进程队列
  * [workflow toolCall → done 文本]（faux-1 槽位）、子进程队列 [PROBE-OK 文本]
  * （faux-1-reasoning 槽位，由 agent() 的 model 选择）。主/子进程共享同一
- * TAIJI_FAUX_SCRIPT（subagent 子进程经 env 透传 + --extension 镜像注入，先例：
- * scripts/probes/subagent-sync-collect）。
+ * TAIJI_FAUX_SCRIPT（subagent 子进程经 env 透传 + --extension 镜像注入，同此前探针做法）。
  *
  * 关键认知（实证 <dataDir>/agent/subagents/<cwd 编码>/sessions/*.jsonl 第 2-3 行）：
  * pi 以 --model provider/id:high 启动子进程时，启动即写两个 entry：

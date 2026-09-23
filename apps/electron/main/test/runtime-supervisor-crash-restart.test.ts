@@ -58,7 +58,7 @@ vi.mock('../supervisor/liveness-probe.js', () => ({
 import { RuntimeSupervisor } from '../supervisor/runtime-supervisor.js'
 import { spawnRuntimeProcess } from '../supervisor/process-control.js'
 
-// 杀链决策日志断言面（crash-resilience D6-⑥ 第三处「supervisor 重启决策」）：
+// 杀链决策日志断言面（D6-⑥ 第三处「supervisor 重启决策」）：
 // mock main-logger 捕获 supervisor 写出的结构化决策行（真实现经 initMainLogger 落盘
 // main-<date>.log；本测试只断言字段化决策行为，不触文件 IO）。
 const mainLoggerMocks = vi.hoisted(() => ({
@@ -138,7 +138,7 @@ describe('RuntimeSupervisor 崩溃自动重启（stopping 残留修复）', () =
   })
 })
 
-describe('杀链决策日志（crash-resilience D6-⑥：谁触发/杀谁/为什么，u5b 同形态）', () => {
+describe('杀链决策日志（D6-⑥：谁触发/杀谁/为什么，u5b 同形态）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

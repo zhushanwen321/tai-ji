@@ -15,6 +15,66 @@ export interface SessionFileAssertClient {
   getState(): Promise<Record<string, unknown> | undefined>
 }
 
+// ── RT-3#7：跳过分支显形（error 上报 + 计数）──────────────────────────────
+
+/**
+ * 三类跳过分支的累计计数。为什么必须有：I1 是「数据丢失级」唯一防线，三跳过分支
+ * 原为 warn-and-return——pi 侧字段/路径一旦漂移（如 get_state.sessionFile 改名），
+ * 防线会**每次附着都静默失效**，只有一行可被淹没的 warn。计数让「防线失效频率」
+ * 可观测（诊断/测试断言消费），error 级让单次发生也无法被淹没。
+ */
+export interface AttachAssertSkipStats {
+  /** client 无 getState 方法（RPC 面漂移信号）。 */
+  noGetState: number
+  /** get_state 回报无 sessionFile 字段（状态面漂移信号）。 */
+  noSessionFile: number
+  /** pi 回报的写目标在磁盘不存在（路径漂移信号）。 */
+  fileMissing: number
+}
+
+export const attachAssertSkipStats: AttachAssertSkipStats = { noGetState: 0, noSessionFile: 0, fileMissing: 0 }
+
+/** 每类跳过只 error 一次（防刷屏）；计数持续累计（见 attachAssertSkipStats）。 */
+const skipErrorEmitted: { [K in keyof AttachAssertSkipStats]: boolean } = {
+  noGetState: false,
+  noSessionFile: false,
+  fileMissing: false,
+}
+
+/**
+ * 显式测试豁免（RT-3#7）：使用 mock client（无 getState / 假 sessionFile / 假路径）的
+ * 测试设 true——跳过分支照常返回，但不打 error（测试明知是 mock 形态，error 是噪声）。
+ * 取代旧「形状探测静默兼容」的隐式豁免：豁免意图由测试显式声明，不再从 client 形状
+ * 反推。生产代码禁止调用（豁免后 I1 断言对真实漂移也静默）。
+ */
+let testExemption = false
+
+export function setAttachAssertExemptionForTest(exempt: boolean): void {
+  testExemption = exempt
+}
+
+/** 重置跳过计数与一次性 error 状态（测试隔离用，生产不调）。 */
+export function _resetAttachAssertSkipStatsForTest(): void {
+  attachAssertSkipStats.noGetState = 0
+  attachAssertSkipStats.noSessionFile = 0
+  attachAssertSkipStats.fileMissing = 0
+  skipErrorEmitted.noGetState = false
+  skipErrorEmitted.noSessionFile = false
+  skipErrorEmitted.fileMissing = false
+}
+
+function reportSkip(kind: keyof AttachAssertSkipStats, detail: string): void {
+  attachAssertSkipStats[kind]++
+  if (testExemption) return
+  if (!skipErrorEmitted[kind]) {
+    skipErrorEmitted[kind] = true
+    console.error(
+      `[assertPiSessionFile] ${detail} — I1 attach 断言（数据丢失级防线）被跳过；同类跳过后续不再重复输出，` +
+      `累计计数见 attachAssertSkipStats.${kind}。若此环境并非 mock 测试，说明 pi RPC/状态面已漂移，I1 防线失效。`,
+    )
+  }
+}
+
 /**
  * 附着后断言 pi 的实际写目标与期望登记路径一致（不变量 I1）。
  *
@@ -43,44 +103,45 @@ export interface SessionFileAssertClient {
  * @param context             调用方上下文（错误信息定位用，如 'restoreSession(<id>)'）
  * @throws 取到可比对的 sessionFile 且与期望路径 resolve 归一后仍不一致（可比对性守卫见
  *         实现内三处跳过分支——真实附着场景三者皆不触达，I1 漂移兜底 = 等价测试
- *         attach-lifecycle.test.ts 的真实 mismatch 断言）
+ *         attach-lifecycle.test.ts 的真实 mismatch 断言；跳过分支 RT-3#7 起 error 上报
+ *         一次 + 累计计数，mock 测试经 setAttachAssertExemptionForTest 显式豁免）
  */
 export async function assertPiSessionFile(
   client: SessionFileAssertClient,
   expectedSessionFile: string,
   context: string,
 ): Promise<void> {
-  // 跳过分支 1（mock 形态兼容）：getState 通道缺失——既有单测（process-manager-ephemeral.
-  // test.ts）mock 整个 rpc-client 模块且 FakeRpcClient 不含 getState。真实 RpcClient 恒有
-  // 该方法（类定义），此分支生产不可达。
+  // 跳过分支 1（RPC 面形态）：getState 通道缺失——真实 RpcClient 恒有该方法（类定义），
+  // 缺失 = mock client 或 RPC 面漂移。RT-3#7：error 上报 + 计数（mock 测试经
+  // setAttachAssertExemptionForTest 显式豁免出声，不再形状探测静默兼容）。
   const getState = (client as Partial<SessionFileAssertClient>).getState
   if (typeof getState !== 'function') {
-    console.warn(`[assertPiSessionFile] ${context}: client lacks getState (unit-test mock shape); skipping attach assertion`)
+    reportSkip('noGetState', `${context}: client lacks getState`)
     return
   }
   const state = await getState.call(client)
   const piSessionFile = state?.sessionFile
-  // 跳过分支 2（mock 形态兼容）：sessionFile 取不到（undefined / 非string / 空串）——既有
-  // 单测生态的 client mock 普遍把「getState 无 sessionFile」当 create 路径 pi 新 session
-  // 延迟写入窗口的正常态（restore/fork gate 用例复用同一 mock），throw 会全量误伤。真实
-  // pi 附着后该字段必为 string（switch_session 经 SessionManager.open 必设）。
+  // 跳过分支 2（状态面形态）：sessionFile 取不到（undefined / 非string / 空串）。真实
+  // pi 附着后该字段必为 string（switch_session 经 SessionManager.open 必设）；取不到 =
+  // mock 形态或 pi 状态面漂移。RT-3#7：error 上报 + 计数。
   if (typeof piSessionFile !== 'string' || piSessionFile === '') {
-    console.warn(
-      `[assertPiSessionFile] ${context}: pi get_state returned no comparable sessionFile `
-      + `(got: ${String(piSessionFile)}); skipping attach assertion. expected: ${expectedSessionFile}`,
+    reportSkip(
+      'noSessionFile',
+      `${context}: pi get_state returned no comparable sessionFile (got: ${String(piSessionFile)}), expected: ${expectedSessionFile}`,
     )
     return
   }
   const resolvedPi = resolve(piSessionFile)
   const resolvedExpected = resolve(expectedSessionFile)
-  // 跳过分支 3（mock 形态兼容 + 真实附着前置）：pi 报告的写目标在磁盘上不存在——真实
+  // 跳过分支 3（路径形态 + 真实附着前置）：pi 报告的写目标在磁盘上不存在——真实
   // switch_session 成功意味着该文件刚被 loadEntriesFromFile 读过，必存在；不存在 = mock
-  // 的假路径（如 '/fake/x.jsonl'）。存在性同时是「可比对 = 双侧都是磁盘上真实可指认文件」
-  // 的语义前置，不损失真实环境的断言强度（pi 侧永真）。
+  // 的假路径（如 '/fake/x.jsonl'）或路径漂移。存在性同时是「可比对 = 双侧都是磁盘上
+  // 真实可指认文件」的语义前置，不损失真实环境的断言强度（pi 侧永真）。
+  // RT-3#7：error 上报 + 计数。
   if (!existsSync(resolvedPi)) {
-    console.warn(
-      `[assertPiSessionFile] ${context}: pi-reported session file does not exist on disk `
-      + `(got: ${resolvedPi}); skipping attach assertion. expected: ${expectedSessionFile}`,
+    reportSkip(
+      'fileMissing',
+      `${context}: pi-reported session file does not exist on disk (got: ${resolvedPi}), expected: ${expectedSessionFile}`,
     )
     return
   }

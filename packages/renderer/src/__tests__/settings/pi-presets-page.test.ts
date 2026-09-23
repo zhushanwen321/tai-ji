@@ -3,11 +3,14 @@
  *
  * 覆盖：
  *  - 首屏冒烟：内置预设渲染 builtin 标签 + disabled 输入；自定义预设可编辑。
+ *  - 改名（D4）：页面/菜单文案用「模式」，不再出现旧「预设」。
  *  - 新建预设：点新建 → preset.create 被调用。
  *  - 删除自定义预设：确认弹窗 → preset.delete 被调用。
  *  - 恢复内置预设：点恢复 → preset.update 被调用。
  *  - 工具模式切换：点 mode 按钮 → preset.update 被调用 + checkbox 列表出现/消失。
  *  - 设为默认：点设为默认 → preset.setDefault 被调用。
+ *  - 模式提示词两卡：替换卡红字警示 / 合计计数一行且两卡联动 /
+ *    替换保存二次确认（未确认不触发 update）/ 内置调度模式追加卡预置文案非空。
  *
  * mock 策略：
  *  - vi.mock('@/api') 把 preset 门面替成可断言的 mock。
@@ -19,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { DEFAULT_PRESETS } from '@taiji/shared'
 
 /** mock preset API */
 const presetMock = vi.hoisted(() => ({
@@ -43,7 +47,9 @@ vi.mock('@taiji/ui/features/settings', () => ({
   },
   GroupCard: {
     name: 'GroupCard',
-    template: '<div data-testid="group-card"><slot /></div>',
+    // 真实 GroupCard 的 #head / #actions 具名 slot 也需渲染（提示词卡标题与 Switch 在其中），
+    // 否则测试看不到卡头与开关，与生产结构失真。
+    template: '<div data-testid="group-card"><slot name="head" /><slot name="actions" /><slot /></div>',
   },
 }))
 
@@ -75,6 +81,23 @@ function customPreset(): PiLaunchPreset {
     toolMode: 'allowlist',
     allowedTools: ['read', 'bash'],
     extensionMode: 'all',
+  }
+}
+
+/** 带提示词两段（替换 3 字符 + 追加 2 字符）的自定义预设 fixture */
+function promptPreset(): PiLaunchPreset {
+  return {
+    id: 'custom:prompt-preset',
+    name: 'Prompt Preset',
+    description: 'Custom preset with prompt',
+    builtin: false,
+    order: 1,
+    toolMode: 'all',
+    extensionMode: 'all',
+    prompt: {
+      replace: { enabled: true, prompt: 'abc' },
+      append: { enabled: true, prompt: 'de' },
+    },
   }
 }
 
@@ -139,7 +162,20 @@ describe('PiPresetsPage 首屏冒烟', () => {
     wrapper = mount(PiPresetsPage)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('暂无预设')
+    expect(wrapper.text()).toContain('暂无模式')
+  })
+
+  it('页面文案用「模式」而非旧「预设」（D4 改名）', async () => {
+    wrapper = mount(PiPresetsPage)
+    await flushPromises()
+
+    const text = wrapper.text()
+    // 新文案：页头标题 / 空态 / 新建按钮
+    expect(text).toContain('模式')
+    expect(text).toContain('暂无模式')
+    expect(text).toContain('新建模式')
+    // 旧文案彻底退场
+    expect(text).not.toContain('预设')
   })
 
   it('异步加载后：自定义预设自动展开、内置预设折叠（expandedIds 竞态回归防护）', async () => {
@@ -168,7 +204,7 @@ describe('PiPresetsPage 新建预设', () => {
     wrapper = mount(PiPresetsPage)
     await flushPromises()
 
-    const newBtn = wrapper.findAll('button').find((b) => b.text().includes('新建预设'))
+    const newBtn = wrapper.findAll('button').find((b) => b.text().includes('新建模式'))
     expect(newBtn).toBeTruthy()
     await newBtn!.trigger('click')
     await flushPromises()
@@ -299,6 +335,102 @@ describe('PiPresetsPage 设为默认', () => {
     await flushPromises()
 
     expect(presetMock.setDefault).toHaveBeenCalledWith('custom:my-preset')
+  })
+})
+
+describe('PiPresetsPage 模式提示词两卡', () => {
+  it('替换卡有红字警示元素', async () => {
+    const store = usePresetStore()
+    store.setPresets([promptPreset()])
+
+    wrapper = mount(PiPresetsPage)
+    await flushPromises()
+
+    const warning = wrapper.find('[data-testid="preset-prompt-replace-warning"]')
+    expect(warning.exists()).toBe(true)
+    // 红字 = text-danger（禁硬编码颜色的 token 表达）
+    expect(warning.classes()).toContain('text-danger')
+    // 警示文案点明「顶掉 pi 内置行为规范」这一危险后果
+    expect(warning.text()).toContain('内置行为规范')
+  })
+
+  it('合计计数只有一行，且随替换/追加两卡文本联动', async () => {
+    const store = usePresetStore()
+    store.setPresets([promptPreset()])
+
+    wrapper = mount(PiPresetsPage)
+    await flushPromises()
+
+    // 两卡共用一行合计计数（非分卡各自计数）
+    const counts = wrapper.findAll('[data-testid="preset-prompt-combined-count"]')
+    expect(counts.length).toBe(1)
+    // 初始 = 替换 3 + 追加 2 = 5，上限 = 两段合计 16000
+    expect(counts[0].text()).toContain('合计 5 / 16000')
+
+    // 改替换卡文本（3 → 6）→ 合计 8
+    await wrapper.find('[data-testid="preset-prompt-replace-input"]').setValue('abcdef')
+    expect(
+      wrapper.find('[data-testid="preset-prompt-combined-count"]').text(),
+    ).toContain('合计 8 / 16000')
+
+    // 改追加卡文本（2 → 3）→ 合计 9（证明两卡都参与同一计数）
+    await wrapper.find('[data-testid="preset-prompt-append-input"]').setValue('xyz')
+    expect(
+      wrapper.find('[data-testid="preset-prompt-combined-count"]').text(),
+    ).toContain('合计 9 / 16000')
+  })
+
+  it('替换卡保存走二次确认：未确认前不触发 preset.update', async () => {
+    const store = usePresetStore()
+    store.setPresets([promptPreset()])
+
+    wrapper = mount(PiPresetsPage, { attachTo: document.body })
+    await flushPromises()
+
+    // 改文本使替换卡 dirty（保存按钮解禁）
+    await wrapper.find('[data-testid="preset-prompt-replace-input"]').setValue('new replace text')
+    await flushPromises()
+
+    presetMock.update.mockClear()
+
+    // 点保存 → 只弹二次确认，不写盘
+    await wrapper.find('[data-testid="preset-prompt-replace-save"]').trigger('click')
+    await flushPromises()
+
+    const confirmBtn = Array.from(document.body.querySelectorAll('button'))
+      .find((b) => (b.textContent ?? '').includes('仍然保存'))
+    expect(confirmBtn).toBeTruthy()
+    expect(presetMock.update).not.toHaveBeenCalled()
+
+    // 确认后 → preset.update 被调用，替换段 = 新文本、追加段保留原值
+    confirmBtn!.click()
+    await flushPromises()
+
+    expect(presetMock.update).toHaveBeenCalledTimes(1)
+    const updated = presetMock.update.mock.calls[0][0] as PiLaunchPreset
+    expect(updated.prompt?.replace?.prompt).toBe('new replace text')
+    expect(updated.prompt?.replace?.enabled).toBe(true)
+    expect(updated.prompt?.append?.prompt).toBe('de')
+  })
+
+  it('内置「调度模式」的追加卡预置文案非空', async () => {
+    const store = usePresetStore()
+    store.setPresets([...DEFAULT_PRESETS])
+
+    wrapper = mount(PiPresetsPage)
+    await flushPromises()
+
+    // 内置预设默认折叠 → 点标题展开「调度模式」
+    const trigger = wrapper.findAll('button').find((b) => b.text().includes('调度模式'))
+    expect(trigger).toBeTruthy()
+    await trigger!.trigger('click')
+    await flushPromises()
+
+    const appendInput = wrapper.find('[data-testid="preset-prompt-append-input"]')
+    expect(appendInput.exists()).toBe(true)
+    const element = appendInput.element as HTMLTextAreaElement
+    expect(element.value.length).toBeGreaterThan(0)
+    expect(element.value).toContain('调度模式')
   })
 })
 

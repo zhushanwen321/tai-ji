@@ -1,5 +1,5 @@
 /**
- * LLM 重试配置域 port —— pi settings.json 的 retry 字段（设计 docs/design/llm-retry-settings.md §3.4）。
+ * LLM 重试配置域 port —— pi settings.json 的 retry 字段。
  *
  * 🔒 三层架构：services 定义 port，infra/pi/pi-retry-settings.ts 实现（经
  * pi-settings-store 统一读写层 + retry 字段域 scope 访问 settings.json）。

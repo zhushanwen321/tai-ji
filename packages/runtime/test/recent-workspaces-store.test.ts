@@ -203,21 +203,22 @@ describe('RecentWorkspacesStore', () => {
     expect(mockedMkdirSync).toHaveBeenCalledWith(TEST_CONFIG_DIR, { recursive: true })
   })
 
-  // ── W1: loadFromFile 文件损坏（非 ENOENT）记 console.warn（fail-soft 非 fail-silent）──
+  // ── W1: loadFromFile 文件损坏（非 ENOENT）→ quarantine 隔离（D1c 对齐，非静默）──
 
-  it('W1: loadFromFile 文件损坏时记 console.warn（非静默）', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('W1: loadFromFile 文件损坏时 quarantine 隔离 + error 日志（非静默、非覆盖）', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockedReadFileSync.mockReturnValue('not-valid-json{{{')
     mockedExistsSync.mockReturnValue(true)
 
     const corruptStore = new RecentWorkspacesStore(TEST_CONFIG_DIR)
     corruptStore.list()
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    const msg = String(warnSpy.mock.calls[0]!.join(' '))
-    expect(msg).toContain('starting fresh')
+    // fail-soft 非 fail-silent：quarantineCorruptFile 的隔离日志（error 级）替代旧 warn
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    const msg = String(errSpy.mock.calls[0]!.join(' '))
+    expect(msg).toContain('损坏隔离') // 成功（已隔离至）/ 失败（隔离失败）分支都命中
 
-    warnSpy.mockRestore()
+    errSpy.mockRestore()
   })
 
   it('W1: loadFromFile ENOENT（首启）静默不 warn', () => {

@@ -12,6 +12,7 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { IManagedSessionView } from '../types.js'
 import type { SessionReplicatedStates } from '../session-state-projection.js'
 import { SessionModelControl } from '../session-model-control.js'
+import { SESSION_NOT_ACTIVE } from '../../../utils/errors.js'
 
 /** 可变 session 视图（断言直写双投影）。 */
 function makeSession(): { modelId: string; thinkingLevel: string } & IManagedSessionView {
@@ -80,7 +81,7 @@ describe('switchModel', () => {
     }
   })
 
-  it('无活跃 client：返回 sessionId（不假装成功），零 RPC 零失效', async () => {
+  it('无活跃 client：fail-fast 抛 SESSION_NOT_ACTIVE（RT-4#4，不再降级返回 sessionId），零 RPC 零失效', async () => {
     const session = makeSession()
     const client = { setModel: vi.fn(), getState: vi.fn() }
     const markDirty = vi.fn()
@@ -90,7 +91,12 @@ describe('switchModel', () => {
       getReplicatedStates: vi.fn(() => ({ modelId: { markDirty } }) as unknown as SessionReplicatedStates),
       syncTraceEntries: vi.fn(),
     })
-    await expect(control.switchModel('s1', 'p1' as ProviderId, 'm')).resolves.toBe('s1')
+    // [code-harden RT-4#4] 旧契约 `resolves.toBe('s1')`（降级假成功）已废：切模型落到
+    // 回收/崩溃窗口时必须报错而非乐观回显，恢复动作内嵌错误消息。
+    await expect(control.switchModel('s1', 'p1' as ProviderId, 'm')).rejects.toMatchObject({
+      code: SESSION_NOT_ACTIVE,
+      message: expect.stringContaining('重开后可重试'),
+    })
     expect(client.setModel).not.toHaveBeenCalled()
     expect(markDirty).not.toHaveBeenCalled()
     expect(session.modelId).toBe('old/provider-old')
@@ -123,7 +129,7 @@ describe('setThinkingLevel', () => {
     expect(session.thinkingLevel).toBe('low')
   })
 
-  it('无活跃 client：请求值兜底 + 直写（行为同旧版）', async () => {
+  it('无活跃 client：fail-fast 抛 SESSION_NOT_ACTIVE（RT-4#4），不直写请求值', async () => {
     const session = makeSession()
     const control = new SessionModelControl({
       pm: { getClient: vi.fn(() => undefined) } as unknown as IProcessManager,
@@ -131,7 +137,10 @@ describe('setThinkingLevel', () => {
       getReplicatedStates: vi.fn(() => undefined),
       syncTraceEntries: vi.fn(),
     })
-    await expect(control.setThinkingLevel('s1', 'medium')).resolves.toBe('medium')
-    expect(session.thinkingLevel).toBe('medium')
+    // [code-harden RT-4#4] 旧契约「请求值兜底 + 直写」（乐观写未生效档位）已废。
+    await expect(control.setThinkingLevel('s1', 'medium')).rejects.toMatchObject({
+      code: SESSION_NOT_ACTIVE,
+    })
+    expect(session.thinkingLevel).toBe('medium') // 双写缓存不被未生效档位污染（初值不变）
   })
 })

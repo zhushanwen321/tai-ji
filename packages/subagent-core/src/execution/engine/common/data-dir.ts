@@ -1,7 +1,6 @@
 // src/execution/engine/common/data-dir.ts
 //
-// 引擎数据目录解析（P2）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md D5/D6——engines 根锚定 getDataDir()
+// 引擎数据目录解析（P2）。engines 根锚定 getDataDir()
 // 顶层（journal / 隔离池的父目录），extension 写侧与 runtime 校验侧同源推导。
 //
 // 通道调查结论（2026-08-25，P2 实测证据链）：

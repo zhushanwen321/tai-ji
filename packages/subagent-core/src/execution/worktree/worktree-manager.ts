@@ -94,7 +94,7 @@ export type WorktreeRebuildOutcome =
   /** 重建成功（patch 已恢复或无 patch 可恢复）——handle 回填 record.worktreeHandle。 */
   | { kind: "rebuilt"; handle: WorktreeHandle }
   /**
-   * 形态②：patch apply 冲突（归档期间分支已有新提交）——worktree 已重建为干净
+   * 形态②：patch apply 冲突（收口后分支已有新提交）——worktree 已重建为干净
    * 基线 + 原地续聊（transcript 仍有效，续聊资格判据不受工作区影响，不降级
    * reopen）；patchFile 留存供用户手动恢复（提示文案由调用方注入）。
    */
@@ -185,13 +185,17 @@ export class WorktreeManager {
       cwd: mainCwd,
     });
 
-    // 注册到全局表（pid=0 占位）。runSpawn 在 spawn() 返回后异步补 pid。
+    // 注册到全局表，pid = 宿主（core）进程 pid。孤儿判据 = 宿主进程死活：回收
+    // 责任在 core（finalizeRecord 正常路径清理；core 崩溃/重启后由 reaper 按 pid
+    // 死回收）。不用「pid=0 占位 + 子进程 spawn 后补全」——补全链路已随 inproc
+    // 引擎删除（协议化后 spawn 发生在引擎进程，宿主侧无补全调用方），pid 恒 0 的
+    // 条目超 SPAWN_GRACE 即被误判孤儿，活任务的 worktree 会被 reaper 清掉。
     // 放在 worktree add 成功后、symlink 前——确保只有真正创建了 worktree 才登记。
     await this.registry.add({
       repo: mainCwd,
       branch,
       checkout: worktreePath,
-      pid: 0,
+      pid: process.pid,
       createdAt: Date.now(),
     });
 
@@ -229,28 +233,14 @@ export class WorktreeManager {
   }
 
   /**
-   * 注册子进程 pid（runSpawn spawn() 返回后调）。
-   * create 时 pid 未知写 0 占位，子进程 spawn 返回后（child.pid 同步可得）由此补全。
-   * reaper 据 pid 死活判孤儿，pid=0 条目用 SPAWN_GRACE 宽限。
-   * sessionFile 可选补全：传入时填入 registry entry（reaper 据 pid 死活判孤儿，不读本字段；保留供诊断）。
-   *
-   * [D5a] async 化：pid 补全走跨进程锁内 RMW（互斥窗口消除 updatePid 与并发 add/remove
-   * 的交错）。永不 reject（锁降级 + best-effort save 均内部兜底），调用方可安全
-   * fire-and-forget（session-runner 的 stdout data 回调上下文）。
-   */
-  async registerPid(branch: string, pid: number, sessionFile?: string): Promise<void> {
-    await this.registry.updatePid(branch, pid, sessionFile);
-  }
-
-  /**
-   * [U5 / §3.2.5 worktree 续聊重建] 归档续聊时 worktree 已按保留期回收 → 自动重建：
+   * [U5 / §3.2.5 worktree 续聊重建] 收口续聊时 worktree 已按保留期回收 → 自动重建：
    * worktree add（checkout 记录的分支，分支名可由 recordId 推导 `pi-sub-<id>`）+
-   * apply patch（恢复归档时落盘的未提交改动）→ 原地续聊（transcript 还在）。
+   * apply patch（恢复收口时落盘的未提交改动）→ 原地续聊（transcript 还在）。
    *
    * 三失败形态处置（设计写死）：
    *   ① patch 丢失（备份文件不在）或分支不存在 → 返回 degrade-reopen，调用方降级
    *      带历史重开（同 §3.2.3）；
-   *   ② patch apply 冲突（归档期间分支有新提交）→ worktree 重建为干净基线 + 原地
+   *   ② patch apply 冲突（收口后分支有新提交）→ worktree 重建为干净基线 + 原地
    *      续聊（transcript 仍有效，续聊资格判据不受工作区影响）+ 返回 conflict 供
    *      调用方发用户可见提示（含 patch 备份路径）——不降级 reopen；
    *   ③ 重建自身 IO 错（git 命令失败、磁盘满等）→ GitRunError/DirtyWorktreeError
@@ -259,19 +249,19 @@ export class WorktreeManager {
    * repo 定位 [S5 修复：不依赖注册表]：repoPath 由调用方传入（run-orchestration
    * 传进程 cwd——与 create() 的 mainCwd 同源：record/session/binding 全按
    * encodeCwd(cwd) 物理分区存储，能扫到该 record 的进程其 cwd 必与创建时一致）。
-   * 旧实现按注册表 branch 反查——归档 cleanup 已删注册表条目 → 反查恒落空 →
+   * 旧实现按注册表 branch 反查——收口 cleanup 已删注册表条目 → 反查恒落空 →
    * 恒 degrade-reopen（U5-D8 偏差根因，随本修复失效）。branchName / checkout
    * 路径按 create() 同款命名约定派生（`pi-sub-<recordId>` + tmpdir/pi-subagents/
    * <enc(repoPath)>/<branch>）；分支存在性经 `rev-parse --verify` 实测（形态①：
    * 分支已被外部删除）。
    *
    * 与 create() 的差异：checkout 已有分支（无 -b 新建）、主树脏不校验（重建不动
-   * 主树工作区）、成功后补注册表条目（pid=0 占位——无子进程绑定，reaper 按宽限
-   * 期后回收无主条目，续聊轮 spawn 后经 registerPid 补全）。
+   * 主树工作区）、成功后补注册表条目（pid = 宿主进程 pid，同 create 的孤儿判据
+   * 语义——回收责任在 core，宿主死才由 reaper 回收）。
    *
    * @param repoPath 主仓库根目录（create 时的 mainCwd 同源值）
    * @param recordId record id（分支名推导键，必须匹配 `^[\w-]+$`）
-   * @param patchFile 归档时落盘的 patch 备份路径（record.patchFile；undefined = 无
+   * @param patchFile 收口时落盘的 patch 备份路径（record.patchFile；undefined = 无
    *        备份——干净基线重建）
    */
   async reconstruct(repoPath: string, recordId: string, patchFile?: string): Promise<WorktreeRebuildOutcome> {
@@ -289,7 +279,7 @@ export class WorktreeManager {
     } catch {
       return { kind: "degrade-reopen", reason: `branch ${branch} no longer exists in ${repo}` };
     }
-    // checkout 路径按 create() 同款约定派生（不读注册表——归档 cleanup 后注册表
+    // checkout 路径按 create() 同款约定派生（不读注册表——收口 cleanup 后注册表
     // 条目已删，重建依据 = 命名约定 + 入参 repoPath）。
     const worktreePath = path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), branch);
     // 前置清理残留 checkout 目录（同 create——上次 remove 未删净 / 外部残留）。
@@ -313,14 +303,14 @@ export class WorktreeManager {
       }
       await this.gitRunAsync(["worktree", "add", worktreePath, branch], { cwd: repo });
     }
-    // 补注册表条目（pid=0 占位；add 成功后才登记，回滚对称 create MF#3——重建链
-    // 后续失败不回滚 worktree/分支（分支是既有资产），仅注册表条目由 reaper 宽限
-    // 期自然收敛，无需显式回滚）。
+    // 补注册表条目（pid = 宿主进程 pid；add 成功后才登记，回滚对称 create MF#3——
+    // 重建链后续失败不回滚 worktree/分支（分支是既有资产），仅注册表条目由 reaper
+    // 按宿主进程死活收敛，无需显式回滚）。
     await this.registry.add({
       repo,
       branch,
       checkout: worktreePath,
-      pid: 0,
+      pid: process.pid,
       createdAt: Date.now(),
     });
     // 软链 node_modules（复用主仓库依赖，同 create）。
@@ -341,7 +331,7 @@ export class WorktreeManager {
     });
     if (patchFile !== undefined) {
       if (!fs.existsSync(patchFile)) {
-        // 形态①：patch 备份丢失（归档期被外部清理）——未提交改动不可恢复。
+        // 形态①：patch 备份丢失（收口后被外部清理）——未提交改动不可恢复。
         return { kind: "degrade-reopen", reason: `patch backup file is gone: ${patchFile}` };
       }
       try {
@@ -361,7 +351,7 @@ export class WorktreeManager {
    * 各步独立 try/catch——任一步失败不阻断其余（如 remove 失败仍尝试 branch -D + 注册表移除），
    * 避免单步失败导致后续资源泄漏。
    *
-   * [S5 修复] opts.keepBranch：归档回收传 true——回收 checkout（释放并发写隔离语义）
+   * [S5 修复] opts.keepBranch：close 收口回收传 true——回收 checkout（释放并发写隔离语义）
    * 但保留分支（reconstruct 的重建依据：branchName 按 `pi-sub-<recordId>` 命名约定
    * 派生 + rev-parse --verify 验证存在性；删了分支 = 重建依据消亡 → 续聊恒降级
    * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态守卫等无续聊重建
@@ -370,7 +360,7 @@ export class WorktreeManager {
    * discoverPhysicalWorktrees），不会误回收。
    *
    * @param handle 要清理的 worktree handle（含 mainCwd，不靠路径反推）
-   * @param opts.keepBranch true = 保留分支（归档回收——重建依据）
+   * @param opts.keepBranch true = 保留分支（close 收口回收——重建依据）
    */
   async cleanup(handle: WorktreeHandle, opts: { keepBranch?: boolean } = {}): Promise<void> {
     try {

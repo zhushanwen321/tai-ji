@@ -6,12 +6,15 @@
  * 直接注入 fake deps 单测返回的 handler。断言到依赖调用层面（哪个 dep 被调/未被调 +
  * preventDefault 次数），非「不抛错」式弱断言。
  *
- * 覆盖矩阵（与源文件头部分发语义逐条对应，u5b D6 改造后）：
+ * 覆盖矩阵（与源文件头部分发语义逐条对应，u5b D6 + composer-pi-shortcuts U1② 改造后）：
  *   bare-arrow：裸 ↑/↓ → preventDefault + moveCaretVertical；moved 不翻历史；
  *   at-edge ↑/↓ 翻历史；修饰键 + ↑/↓ 放行原生。
  *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ steer 路由行 → onFollowUp；
  *   Alt+⏎ queued/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收口在
  *   core dispatch/send，keydown 层不分流）；⇧⏎ 放行换行。
+ *   动作表接线（composer-pi-shortcuts）：链序（动作表先于 staging Esc）、消费短路（命中
+ *   返回 true → 链终止）、未命中放行（返回 false → 既有段照常触达）、浮层未消费仍咨询
+ *   （cmdOpen 入口守卫归动作表自判）、IME 段先行（组合中动作表不被咨询）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick, ref } from 'vue'
@@ -65,12 +68,19 @@ function makeDeps(overrides: {
   /** D6 发送路由（默认 direct） */
   route?: SendRoute
   stagingActive?: boolean
+  /** 命令动作表返回值（composer-pi-shortcuts U1②；默认 false = 未命中放行） */
+  shortcutConsumed?: boolean
+  /** 命令浮层 open 态（接线矩阵用） */
+  cmdOpen?: boolean
+  /** 浮层 handleKeydown 返回值（null = 不接浮层实例；默认 null） */
+  popoverConsumes?: boolean | null
 } = {}) {
   const moveCaretVertical = vi.fn(() => overrides.caret ?? 'at-edge')
   const handleArrowUp = vi.fn()
   const handleArrowDown = vi.fn()
   const onFollowUp = vi.fn()
   const onSend = vi.fn()
+  const shortcutActions = vi.fn(() => overrides.shortcutConsumed ?? false)
   const staging = {
     // Esc 路由默认不消费（消费与否属于 staging.action 自身测试，不在本矩阵）
     handleEsc: vi.fn(() => false),
@@ -79,18 +89,33 @@ function makeDeps(overrides: {
       overrides.stagingActive ? ({ type: 'fork' } as unknown as StagingAction) : null,
     ),
   }
+  const popoverHandle =
+    overrides.popoverConsumes === null || overrides.popoverConsumes === undefined
+      ? null
+      : { handleKeydown: vi.fn(() => overrides.popoverConsumes) }
   const deps: ComposerKeydownDeps = {
-    cmdOpen: ref(false),
-    commandPopoverRef: ref(null),
+    cmdOpen: ref(overrides.cmdOpen ?? false),
+    commandPopoverRef: ref(popoverHandle) as ComposerKeydownDeps['commandPopoverRef'],
     inputRef: ref({ moveCaretVertical } as unknown as ShellInputInstance),
     staging,
     sendRoute: computed(() => overrides.route ?? 'direct'),
+    shortcutActions,
     handleArrowUp,
     handleArrowDown,
     onFollowUp,
     onSend,
   }
-  return { deps, moveCaretVertical, handleArrowUp, handleArrowDown, onFollowUp, onSend }
+  return {
+    deps,
+    moveCaretVertical,
+    handleArrowUp,
+    handleArrowDown,
+    onFollowUp,
+    onSend,
+    shortcutActions,
+    staging,
+    popoverHandle,
+  }
 }
 
 describe('useComposerKeydown', () => {
@@ -268,6 +293,87 @@ describe('useComposerKeydown', () => {
   })
 
   /**
+   * 分发链接线（composer-pi-shortcuts U1②）：命令动作表分支插在 IME 之后、staging Esc 之前。
+   * 本矩阵只锁链序与短路语义（动作表消费 → 链终止；未消费 → 链继续），动作表内部
+   * 键位判定/守卫/编排由 composer-shortcut-actions.test.ts 全量覆盖。
+   */
+  describe('分发链接线：命令动作表分支（composer-pi-shortcuts）', () => {
+    it('动作表消费（shift+tab 命中返回 true）：链短路——staging Esc / 裸箭头 / Enter 均不触达', () => {
+      const { deps, moveCaretVertical, onSend, shortcutActions, staging } = makeDeps({
+        shortcutConsumed: true,
+        caret: 'at-edge',
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('Tab', { shift: true })
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(shortcutActions).toHaveBeenCalledWith(e)
+      expect(staging.handleEsc).not.toHaveBeenCalled()
+      expect(moveCaretVertical).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+    })
+
+    it('动作表未命中（返回 false）：链继续——裸箭头导航照常触达（既有段行为不变）', () => {
+      const { deps, moveCaretVertical, handleArrowUp, shortcutActions } = makeDeps({
+        shortcutConsumed: false,
+        caret: 'at-edge',
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('ArrowUp')
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(moveCaretVertical).toHaveBeenCalledTimes(1)
+      expect(handleArrowUp).toHaveBeenCalledTimes(1)
+    })
+
+    it('链序：动作表先于 staging Esc（同键 Esc 未命中时 handleEsc 在其后被咨询）', () => {
+      const { deps, shortcutActions, staging } = makeDeps({ shortcutConsumed: false })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('Escape')
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(staging.handleEsc).toHaveBeenCalledTimes(1)
+      expect(shortcutActions.mock.invocationCallOrder[0]).toBeLessThan(
+        staging.handleEsc.mock.invocationCallOrder[0],
+      )
+    })
+
+    it('IME 组合中动作表不被咨询（IME 段先于动作表放行——§3.4 插序约束）', () => {
+      const { deps, shortcutActions, onSend } = makeDeps()
+      const onKeydown = useComposerKeydown(deps)
+      const { e, preventDefault } = makeKeyEvent('Tab', { shift: true })
+      Object.defineProperty(e, 'isComposing', { value: true })
+
+      onKeydown(e)
+
+      expect(shortcutActions).not.toHaveBeenCalled()
+      expect(preventDefault).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+    })
+
+    it('浮层 open 且浮层未消费该键：动作表仍被咨询（消费与否由其 cmdOpen 入口守卫自判）', () => {
+      const { deps, shortcutActions, onSend, popoverHandle } = makeDeps({
+        cmdOpen: true,
+        popoverConsumes: false,
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('a')
+
+      onKeydown(e)
+
+      expect(popoverHandle!.handleKeydown).toHaveBeenCalledTimes(1)
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(onSend).not.toHaveBeenCalled() // 'a' 非 Enter，正常落空
+    })
+  })
+
+  /**
    * D2 时序锁（composer-chip-insertion-semantics 设计 §3.3 D2 + P5）：浮层 open 时 Enter
    * 经 CommandPopover window capture 消费（preventDefault + stopPropagation 截断）后，
    * 事件不得到达 composer 的 onKeydown/onSend——这是删除 defaultPrevented 防御层后的
@@ -283,18 +389,36 @@ describe('useComposerKeydown', () => {
    * file 错误/空结果态），理由是「不可见态吞键 = 消息发不出且无提示」；反馈行补齐后该理由
    * 消失 ⇒ 判据删除（不是与旧判据并存）。仅「浮层未 open」仍全部键放行（末条用例锁定
    * Enter 正常发送）。
+   *
+   * D4 三态细化（command-enter-exact-send §3.3 D4）：非精确匹配锁 = 现状断言（首条 + 前缀条）；
+   * 精确匹配锁 = select-and-send 同步直调 composer 分发链，onSend 恰一次（双发回归锁——
+   * 实现若走合成事件二次派发，计数变 2 而红）；Tab 锁 = 恒 onSelect（补参通道不因完整名关闭）。
+   * 精确锁前置 = 显式 focus（环境 activeElement 默认 body → D1 前置② fail-closed 恒拦，
+   * 见 setupExactChain）。
    */
-  describe('D2 时序锁：浮层 open 时 Enter 选中候选、不触发发送（capture/bubble 全链路）', () => {
+  describe('D2 时序锁三态（command-enter-exact-send D4）：前缀/门失败恒选中不发送、精确直发恰一次、Tab 恒选中（capture/bubble 全链路）', () => {
     let target: HTMLElement
     let removeTarget: () => void
     let popoverWrapper: ReturnType<typeof mount> | null = null
     let onSelect: ReturnType<typeof vi.fn>
+    let onSelectAndSend: ReturnType<typeof vi.fn>
     let onSend: ReturnType<typeof vi.fn>
+    /** select-and-send → composer 分发链直调通道（镜像产线 useCommandPopoverTrigger.onSelectAndSend
+     *  的 onComposerKeydown 晚绑定闭包）；由 wireComposerKeydown 赋值，beforeEach 复位 */
+    let composerKeydownHandler: ((e: KeyboardEvent) => void) | null
 
     beforeEach(() => {
       setActivePinia(createPinia())
       onSelect = vi.fn()
       onSend = vi.fn()
+      composerKeydownHandler = null
+      // select-and-send 消费端 = 产线直调镜像（传原事件，零合成零 DOM 派发）。
+      // onSend 恰一次断言的作用面盖三处：①键盘层分流只调一次 ②原事件被 capture 截断不到
+      // target 冒泡（到则 composer 分发器二次 dispatchEnter）③CommandPopover 未合成再派发
+      // KeyboardEvent（再派发会重进 window capture → 第二次 select-and-send → 第二次直调）。
+      onSelectAndSend = vi.fn((payload: { originalEvent: KeyboardEvent }) => {
+        composerKeydownHandler?.(payload.originalEvent)
+      })
       // target 模拟 composer contenteditable：keydown 冒泡链上挂 useComposerKeydown 产物
       target = document.createElement('div')
       target.setAttribute('contenteditable', 'true')
@@ -322,20 +446,23 @@ describe('useComposerKeydown', () => {
         inputRef: ref(null),
         staging: { handleEsc: vi.fn(() => false), activeStaging: computed(() => null) },
         sendRoute: computed(() => 'direct' as SendRoute),
+        shortcutActions: vi.fn(() => false),
         handleArrowUp: vi.fn(),
         handleArrowDown: vi.fn(),
         onFollowUp: vi.fn(),
         onSend,
       }
-      target.addEventListener('keydown', useComposerKeydown(deps))
+      composerKeydownHandler = useComposerKeydown(deps)
+      target.addEventListener('keydown', composerKeydownHandler)
     }
 
     /** 挂真 CommandPopover（panel 态无 sid → compact 一项保底非空）+ 接线 composer keydown。
-     *  propsOverride 供可见性矩阵用例换 type/query/variant（query 无匹配即可造「open 但空候选」）。 */
+     *  propsOverride 供可见性矩阵用例换 type/query/variant（query 无匹配即可造「open 但空候选」）。
+     *  onSelectAndSend 按产线 `@select-and-send="onSelectAndSend"` 接线（消费端见 beforeEach）。 */
     function setupChain(open: boolean, propsOverride: Record<string, unknown> = {}): void {
       popoverWrapper = mount(CommandPopover, {
         attachTo: document.body,
-        props: { open, type: 'slash', variant: 'panel', onSelect, ...propsOverride } as never,
+        props: { open, type: 'slash', variant: 'panel', onSelect, onSelectAndSend, ...propsOverride } as never,
       })
       wireComposerKeydown(open)
     }
@@ -377,6 +504,22 @@ describe('useComposerKeydown', () => {
       return e
     }
 
+    /** 精确锁链前置（D1 前置② focus 门，设计 §5 U3「测试态显式 focus composer」）：
+     *  环境 activeElement 默认 body → activeElement 门恒 fail-closed 拦截，精确锁进直发
+     *  分支前必须显式 focus。产线 shellInputRef = Composer shellInputHolder.ref（识别源 =
+     *  ComposerInput expose 的 getInputElement）；本组用例的「composer 输入区」= target
+     *  （contenteditable div，E-1 activeElementInInput 按该 expose 判据裁决），fake 实例
+     *  getInputElement 指向 target。withShellRef=false = 通道缺省 → 门 fail-closed（D1
+     *  降级态造法，focus 照做以证明拦截来自通道缺省而非焦点缺失）。 */
+    function setupExactChain(query: string, withShellRef = true): void {
+      const shellInputRef = withShellRef
+        ? ref<ShellInputInstance | null>({ getInputElement: () => target } as unknown as ShellInputInstance)
+        : undefined
+      setupChain(true, { query, shellInputRef })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：focus 门前置确已生效
+    }
+
     it('浮层 open：Enter 被浮层 capture 消费（onSelect 一次）且 stopPropagation 截断——onSend 不触发、事件 defaultPrevented', () => {
       setupChain(true)
 
@@ -384,6 +527,106 @@ describe('useComposerKeydown', () => {
 
       expect(onSelect).toHaveBeenCalledTimes(1)
       expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    // ── D4 三态细化（command-enter-exact-send §3.3 D4 + §4 场景 5）────────────────
+    // 非精确锁 = 上方既有用例（query 空 → 非精确，现状断言零改动）+ 下方前缀用例
+    // （前缀 + 焦点门通过 → 精确谓词为假 → 仍恒选中——设计场景 2「前缀插 chip 不回归」）。
+    it('非精确锁（前缀）：query=com + 输入区 focus → Enter 仍恒选中（onSelect 一次、不直发）', () => {
+      setupExactChain('com')
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    it('精确锁：完整名 /compact + 输入区 focus + Enter → 直发——select-and-send 恰一次且 onSend 恰一次（双发回归锁）', () => {
+      setupExactChain('compact')
+
+      const e = dispatchEnter()
+
+      expect(onSelectAndSend).toHaveBeenCalledTimes(1)
+      expect(onSelectAndSend).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'slash', name: '/compact', originalEvent: e }),
+      )
+      // D2 双发回归锁：唯一发送来源 = select-and-send 同步直调 composer 分发链（传原事件）。
+      // 实现若走合成事件二次派发（重进 window capture 或落 target 冒泡）→ 第二次
+      // dispatchEnter → 计数变 2 而红；=0 则直调链断（fail-closed 通道亦红）。
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSelect).not.toHaveBeenCalled() // 直发不经 select 通路（插 chip 前置态在产线 onCmdSelect 侧）
+      expect(e.defaultPrevented).toBe(true) // capture 截断：原事件不到 target 冒泡（到则第二次 onSend）
+    })
+
+    it('Tab 锁：完整名 + 输入区 focus + Tab → 恒选中插 chip（onSelect 一次、select-and-send/onSend 零次）', () => {
+      setupExactChain('compact')
+
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      target.dispatchEvent(tab)
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      // exactMatch 直发仅 Enter；Tab 恒 onSelect（补参通道不因完整名关闭——设计场景 3）
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(tab.defaultPrevented).toBe(true)
+    })
+
+    it('门失败降级：shellInputRef 缺省（D1 前置② fail-closed）+ 精确形 query → 不直发走选中', () => {
+      setupExactChain('compact', false)
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    // ── F-1 回归锁（W1 验收 P1）：门识别源 = getInputElement，不读实例 $el ──────────────
+    // 缺陷形态：dev 构建保留 ComposerInput 模板 HTML 注释 → subTree 根为 Fragment → 实例
+    // $el 是注释节点（nodeType 8）→ 旧实现 root.contains(activeElement) 恒 false →
+    // 精确直发在 dev 全变体静默退化插 chip（prod 剥离注释才正常）。两用例反向锁死 $el
+    // 通道不得复活：①$el 是注释 + expose 正确 → 门必须通过；②expose 缺失 + $el 正确 →
+    // 门必须 fail-closed（实现若回退 $el，②的 onSelectAndSend 会被调而红）。
+    it('F-1 锁：$el 为注释节点（dev 构建形态）+ getInputElement 正确 → 门通过，精确直发照常', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({
+          $el: document.createComment(' 富文本输入区（contenteditable）'),
+          getInputElement: () => target,
+        } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点门前置确已生效
+
+      const e = dispatchEnter()
+
+      expect(onSelectAndSend).toHaveBeenCalledTimes(1)
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    it('F-1 锁：expose 缺失（$el 正确且 focus 在内）→ 门 fail-closed 不直发（禁回退 $el）', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({ $el: target } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点在位，拦截只能来自 expose 缺失
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
       expect(onSend).not.toHaveBeenCalled()
       expect(e.defaultPrevented).toBe(true)
     })

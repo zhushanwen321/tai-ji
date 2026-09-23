@@ -16,8 +16,7 @@
  *    共享 createPiStreamWriter）
  *
  * [合并裁决 2026-09] u9 的「打开时预滚（跨重启 stat 超阈值先滚动）」用例已删除：对方
- * 实现的 pi 流无打开时预滚（仅主日志 openMainStream 有），语义随 .1 实现被取代失去宿主，
- * 差异登记见 crash-forensics-and-watchdog.impl-plan.md §7 v5。
+ * 实现的 pi 流无打开时预滚（仅主日志 openMainStream 有），语义随 .1 实现被取代失去宿主。
  *
  * 真实 fs + mkdtempSync 自建自删目录（fs-guard 白名单合规，禁止触碰真实数据目录）；
  * 写流 flush 是异步的，断言前轮询等待（对齐 test/logger.test.ts 既有形态）。

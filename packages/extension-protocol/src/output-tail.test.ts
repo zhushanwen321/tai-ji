@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it, expect } from 'vitest'
 import { readOutputTail, type OutputTailLogFn } from './output-tail'
@@ -6,7 +7,8 @@ import { readOutputTail, type OutputTailLogFn } from './output-tail'
 let tmpDir: string
 
 function freshDir(): string {
-  tmpDir = mkdtempSync(join('/tmp', 'ext-protocol-tail-test-'))
+  // fs-guard 白名单：写删目标必须落 os.tmpdir()（macOS 上 /tmp ≠ tmpdir()，硬编码 /tmp 被拦）
+  tmpDir = mkdtempSync(join(tmpdir(), 'ext-protocol-tail-test-'))
   return tmpDir
 }
 
@@ -84,5 +86,35 @@ describe('readOutputTail（单一签名 file + opts { maxBytes, maxLines }）', 
     const { events, logger } = collectLogs()
     readOutputTail(path, { maxBytes: 100, maxLines: 10 }, logger)
     expect(events).toEqual([])
+  })
+
+  // ── 参数校验（maxLines 是编程参数，非法 fail-fast）──────────
+
+  it('maxLines=0 → RangeError（slice(-0) 反转全量的调用方 bug 在入口拦截）', () => {
+    const path = writeOutput('guard.log', 'line1\nline2')
+    expect(() => readOutputTail(path, { maxBytes: 100, maxLines: 0 })).toThrow(RangeError)
+    expect(() => readOutputTail(path, { maxBytes: 100, maxLines: 0 })).toThrow(/maxLines/)
+  })
+
+  it('maxLines 负数 / 非整数 → RangeError 带原因', () => {
+    const path = writeOutput('guard2.log', 'line1\nline2')
+    expect(() => readOutputTail(path, { maxBytes: 100, maxLines: -3 })).toThrow(/maxLines must be a positive integer, got -3/)
+    expect(() => readOutputTail(path, { maxBytes: 100, maxLines: 1.5 })).toThrow(/got 1.5/)
+  })
+
+  // ── 超长单行（单行长度远超字节窗口）─────────────────────
+
+  it('超长单行超字节窗口 → 整行是残行被丢弃，text 为空 + truncated:true（不炸）', () => {
+    const path = writeOutput('single-huge.log', 'X'.repeat(1000))
+    const result = readOutputTail(path, { maxBytes: 64, maxLines: 2000 })
+    // 窗口起点落在唯一一行中间 → 首行（整体）按残行丢弃，无可展示内容
+    expect(result).toEqual({ text: '', truncated: true })
+  })
+
+  it('超长单行 + 尾随短行 → 短行完整保留 + truncated:true', () => {
+    const path = writeOutput('huge-then-short.log', `${'X'.repeat(1000)}\nlast line`)
+    const result = readOutputTail(path, { maxBytes: 64, maxLines: 2000 })
+    expect(result?.truncated).toBe(true)
+    expect(result?.text).toBe('last line')
   })
 })

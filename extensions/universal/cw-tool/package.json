@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-cw-tool",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Pi extension for cw 2.0: a read-only cw_query tool (status / frontier / tree / report passthrough) + the pi-cw skill (runner practical guide for multi-unit tasks: background run, monitoring, escalation, merge back).",
   "type": "module",
   "main": "index.ts",

@@ -31,9 +31,9 @@ import * as os from 'node:os'
 // 子 env 须经出站契约构建器组装（白名单前缀过滤保 PATH 可解析 sysctl + deny 清单剥
 // TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN，防止 runtime 凭据随探针进程外泄）。
 import { buildOutboundChildEnv } from './spawn-env.js'
-
-/** 字节 → MB 换算基数 = 1_048_576（对齐 crash-journal BYTES_PER_KB 惯例；单字面量形态，禁裸 1024 表达式）。 */
-const BYTES_PER_MB = 1_048_576
+// 字节 → MB 换算基数单点（结构收敛批：本地 1_048_576 常量收编到 shared，与
+// trace-sync / restore-seeding / extractor 骨架共用同一换算口径）
+import { BYTES_PER_MB } from '@taiji/shared'
 
 /** /proc/meminfo 的 kB 字段 → MB 换算基数。 */
 const KB_PER_MB = 1024

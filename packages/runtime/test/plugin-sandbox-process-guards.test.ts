@@ -8,10 +8,11 @@
  *
  * 回归保护目标：未来 sandbox 重构若删除/弱化 override（如「清理死代码」），本测试拦截。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { fork } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createTsxPathsTsconfig, type TsxPathsTsconfig } from './helpers/tsx-fork-tsconfig.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE = resolve(__dirname, 'fixtures/sandbox-process-guards.fixture.cjs')
@@ -22,6 +23,9 @@ interface GuardResult {
   ppidMasked: boolean
   ppidValue?: unknown
 }
+
+/** 临时 tsconfig（fork env TSX_TSCONFIG_PATH）：绕开 extension-protocol exports 缺 require 条件，见 helper 注释 */
+let tsxTsconfig: TsxPathsTsconfig | null = null
 
 /**
  * 在隔离 CJS 子进程中运行 fixture，返回 stdout 解析的 GuardResult。
@@ -34,6 +38,7 @@ function runFixture(): Promise<GuardResult> {
     const child = fork(FIXTURE, [], {
       execPath: process.execPath,
       execArgv: ['--import', 'tsx'],
+      env: { ...process.env, TSX_TSCONFIG_PATH: tsxTsconfig?.tsconfigPath },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     })
     let stdout = ''
@@ -56,6 +61,14 @@ function runFixture(): Promise<GuardResult> {
 }
 
 describe('MF-1: initSandbox process 守卫（process.kill / process.ppid）', () => {
+  // 临时 tsconfig 生命周期 = describe 级（mkdtemp 自建自删，测试红线）
+  beforeAll(() => {
+    tsxTsconfig = createTsxPathsTsconfig()
+  })
+  afterAll(() => {
+    tsxTsconfig?.dispose()
+    tsxTsconfig = null
+  })
   // 超时豁免登记（口径对齐 plugin-host.test.ts fork 用例的显式超时登记）：真实 fork 子进程
   // + execArgv ['--import','tsx'] 注册链，CI 满并行下冷启可达数秒超 vitest 默认 5s testTimeout；
   // 本地实测 0.25s——15s 是 CI 负载余量非真实耗时。

@@ -105,6 +105,7 @@
             kind="skill"
             :items="skills"
             :dirs="skillDirs"
+            :save-error="skillDirsSaveError"
             @update-dirs="onUpdateSkillDirs"
           />
           <div v-else-if="activeMenu === 'agent'" :key="activeMenu" class="flex flex-col gap-4">
@@ -114,6 +115,7 @@
               kind="agent"
               :items="agents"
               :dirs="agentDirs"
+              :save-error="agentDirsSaveError"
               @update-dirs="onUpdateAgentDirs"
             />
           </div>
@@ -322,18 +324,28 @@ async function onSystemUpdate(patch: Partial<SystemSettings>): Promise<void> {
   }
 }
 
+// RD-4#1 路径保存失败常驻态（per-kind 各一份）：失败置位 → LoadPaths 回弹至最近落盘值 +
+// 常驻红字；每次保存尝试起点复位（成功即消、再失败再亮）。store 不做乐观更新（靠广播推回），
+// 失败时无广播，故由该标志驱动 LoadPaths 从 store 镜像（最近落盘值）强制重拉回弹。
+const skillDirsSaveError = ref(false)
+const agentDirsSaveError = ref(false)
+
 async function onUpdateSkillDirs(dirs: SkillDirConfig[]): Promise<void> {
+  skillDirsSaveError.value = false
   try {
     await settingsStore.setSkillDirs(dirs)
   } catch (e) {
+    skillDirsSaveError.value = true
     toastError(e instanceof Error ? e.message : String(e))
   }
 }
 
 async function onUpdateAgentDirs(dirs: SkillDirConfig[]): Promise<void> {
+  agentDirsSaveError.value = false
   try {
     await settingsStore.setAgentDirs(dirs)
   } catch (e) {
+    agentDirsSaveError.value = true
     toastError(e instanceof Error ? e.message : String(e))
   }
 }

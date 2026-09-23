@@ -32,7 +32,7 @@ const fakeProc = {
   removeListener: vi.fn(),
   stdout: { on: vi.fn(), resume: vi.fn(), destroy: vi.fn() },
   stderr: { on: vi.fn() },
-  stdin: { write: vi.fn(() => true), once: vi.fn() },
+  stdin: { write: vi.fn(() => true), once: vi.fn(), on: vi.fn() }, // on：RT-2#1 stdin 'error' 接线
   /** 信号调用记录：[['SIGCONT'], ['SIGTERM'], ...] */
   kill: vi.fn(),
   pid: 12345,

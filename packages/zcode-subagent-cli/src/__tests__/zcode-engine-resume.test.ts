@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AgentCallOpts, RunContext } from "../port-types.ts";
 import { ZCODE_APPSERVER_GOLDEN } from "../golden-sample.ts";
-import { buildResumeInjectionSegment } from "../zcode-engine.ts";
+import { buildResumeInjectionSegment, buildResumeUnavailableNoticeSegment } from "../zcode-engine.ts";
 import { extractResumeHistory, extractResumeTotalTokens, type ResumedHistoryTurn } from "../session-channel.ts";
 import { ZcodeEngine, type ZcodeEngineDeps } from "../zcode-engine.ts";
 
@@ -215,7 +215,7 @@ describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行�
     expect(sendFrames[0]?.params["sessionId"]).not.toBe(OLD_SESSION_ID);
   });
 
-  it("resume 读失败（条目被 TTL 清/会话失效）→ 降级为无历史前缀的新会话，run 仍成功", async () => {
+  it("resume 读失败（锚真失效）→ 注入锚失效声明段（延续但无历史）+ 用户消息照常执行，run 仍成功", async () => {
     const { engine, stateFile } = makeEngine({
       resumeError: { code: -32602, message: `session not found: ${OLD_SESSION_ID}` },
     });
@@ -225,8 +225,12 @@ describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行�
     const sendFrames = sentFrames(stateFile, "session/send");
     expect(sendFrames).toHaveLength(1);
     const content = String(sendFrames[0]?.params["content"] ?? "");
+    // 锚失效声明段：模型知情「延续但无历史」（不再静默无前缀裸跑）
+    expect(content).toContain("[会话延续提示]");
+    expect(content).toContain("不可恢复");
     expect(content).not.toContain("[Continued conversation]");
-    expect(content).toBe("我刚才告诉你的暗号是什么？");
+    // 用户消息在声明段之后照常执行
+    expect(content.endsWith("我刚才告诉你的暗号是什么？")).toBe(true);
   });
 
   it("resume 应答空历史（锚在但从未成轮）→ 不注入空前缀", async () => {
@@ -300,5 +304,20 @@ describe("buildResumeInjectionSegment（token 预算裁剪契约）", () => {
     expect(segment).toContain("user: hi");
     expect(segment).not.toContain("omitted");
     expect(segment).not.toContain("tokens of history");
+  });
+});
+
+describe("buildResumeUnavailableNoticeSegment（锚失效声明段文案契约）", () => {
+  it("说清「延续但无历史」语义：延续提示 + 历史不可恢复 + 独立续推指引", () => {
+    const segment = buildResumeUnavailableNoticeSegment();
+    expect(segment).toContain("[会话延续提示]");
+    expect(segment).toContain("同一任务的延续会话");
+    expect(segment).toContain("不可恢复");
+    expect(segment).toContain("独立判断并继续推进任务");
+    // 与 buildResumeInjectionSegment 相同的尾部形态：与后续 prompt 空行分隔
+    expect(segment.endsWith("\n\n")).toBe(true);
+    // 「延续且有历史」的既有框架文本不得出现（两段语义互斥）
+    expect(segment).not.toContain("[Continued conversation]");
+    expect(segment).not.toContain("conversation_history");
   });
 });

@@ -65,7 +65,8 @@ describe('ChatStore · F7 错误不变量集中', () => {
     expect(messages.length).toBe(1)
     expect(messages[0].role).toBe('assistant')
     expect(messages[0].status).toBe('error')
-    expect(messages[0].content).toBe('Process crashed')
+    expect(messages[0].content).toBe('') // [M2] 错误文本不拼进 content
+    expect(messages[0].error).toBe('Process crashed')
   })
 
   it('F7: markSessionError 并入 streaming 消息（有 streaming 时不新建）', () => {

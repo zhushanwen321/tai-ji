@@ -20,13 +20,19 @@
  * 行为等价性：
  * - 状态更新顺序与原 applyChunk 逐 case 一致（handler 内先更新 chunk 状态，后收口，
  *   对应原 useChat 先 appendAssistantChunk 再 switch 翻 flag 的顺序）。
- * - 收口时机：message_start 挂载超时兜底 timer、complete/error/stream_error 调
- *   finalizeSession 收口（status 由 streaming 派生 isGenerating，非手动 flag）。
+ * - 收口时机：complete/error/stream_error 调 finalizeSession 收口
+ *   （status 由 streaming 派生 isGenerating，非手动 flag）。
+ * - [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）] 消息类 handler
+ *   （构造点 = event-adapter tool-call-start / tool-call-end / handleMessageEnd）在 entry
+ *   缺失或形态不符时静默 return 是有意取舍，不加 warn：正常流经 event-adapter 构造的帧
+ *   不会产生坏 entry（构造侧已守卫）；单帧异常静默丢弃换取异常帧不断流（主对话流不因
+ *   协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，排障入口 = 对齐
+ *   event-adapter（runtime event-adapter.ts）对应构造点日志。坏帧行为由 effects.test.ts
+ *   坏帧用例锁定（不抛错、零副作用）。各 handler 只留一行指针。
  *
  * 设计：dispatchMessageEvent(ctx, sessionId, msg) 查 messageEffects 表执行 handler；
  * 非 message.* 或未注册 type 直接 no-op。MessageEffectContext 含 store refs
- * 上下文 + finalizeSession/clearPendingSend/armStreamingTimer 回调（由 store 注入，
- * 完成收口与超时兜底）。
+ * 上下文 + finalizeSession/clearPendingSend 回调（由 store 注入，完成收口）。
  *
  * [W21 data-source-governance] entry 形态实时 feed：message.message_end /
  * message.tool_call_start / message.tool_call_end 的 handler 输入从「直译事件 payload」
@@ -54,7 +60,6 @@ import { truncateEntryToolOutput } from '../apply-entry-utils'
 import type { RetryState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
-import { recoverPrematureTimeoutMessages } from './complete-recovery'
 import {
   readString,
   readNumber,
@@ -66,10 +71,11 @@ import {
   readChangeSetStatus,
 } from '../readers'
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
-import { commitMessages, terminalMessagePatch } from '../mutations'
+import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
+import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数腿
 // （countDrained/drainN）已随内核整体退役（设计 §3.1 删除面），git 可追溯。
@@ -219,12 +225,9 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收口 + isGenerating 派生）──
   'message.message_start': (ctx, sid, payload) => {
-    const { messages, clearPendingSend, armStreamingTimer, clearPrematureTimeoutIds } = ctx
-    // [premature-timeout §5.2 D2 时机③] 新 turn 开始 → 旧 turn 的 timeout 打标作废
-    //（防跨 turn 错配：turn A 超时打标未恢复 → 用户发新 prompt → 本帧到达 → 清 A 标，
-    // turn B 的 complete 不命中任何标记，无误恢复旧气泡——设计 §5.2 反例重演第 2 条）。
-    // 快照与实体字段的清扫都在 clearPrematureTimeoutIds 内闭环（streaming-state-machine）。
-    clearPrematureTimeoutIds(sid)
+    const { messages, clearPendingSend } = ctx
+    // [合并收口] premature-timeout 打标作废腿与 armStreamingTimer 随上游「streaming idle
+    // timeout 移除」一并退役（main 侧已整体摘除，git 可追溯）。
     // [HISTORICAL] QueueBubble 快照条件清/僵尸清理（G-023）已随 queue_update 计数腿退役：
     // 队列区数据源 = session.delivery 状态帧（内核 state topic 快照，D7），queueStates
     // 不再是任何机制的工作前提。store 侧 queueStates 分区与其清理方法已随 u5a 退役（删除）
@@ -244,8 +247,6 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     ])
     // 空窗结束：clearPendingSend（接管 dispatching 语义）
     clearPendingSend(sid)
-    // 挂载 streaming 超时兜底 timer：防 message.complete 永不到的 pi 静默卡死。
-    armStreamingTimer(sid)
   },
 
   'message.complete': (ctx, sid, payload) => {
@@ -256,7 +257,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
-    // 消费双通道（SSOT docs/architecture/conversation-error-visibility.md §3.3.2）：
+    // 消费双通道：
     // 有 streaming 气泡 → errorMessage 写最后一条 assistant 的 Message.error 字段（追加形态，
     // content 崩溃前正文不动）；无 streaming 气泡 → 追加纯 error 气泡（errorMessage 即全文）。
     const errorMessage = readString(payload, 'errorMessage')
@@ -280,24 +281,22 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const next = prev.map((m, i) => {
       if (m.role !== 'assistant' || m.status !== 'streaming') return m
       changed = true
-      // 终态字段 patch 单源（与 complete-recovery 恢复分支同语义，S4-A6）：
-      // usage/error/content 只作用于末位 assistant，见 terminalMessagePatch 注释
-      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload })
+      // 终态字段 patch 单源（S4-A6）：
+      // usage/error/content/endedAt 只作用于末位 assistant，见 terminalMessagePatch 注释
+      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt: Date.now() })
     })
-    // ── [premature-timeout §5.2 D2] 误判收口自愈：恢复分支（实现见 ./complete-recovery.ts）──
     if (changed) commitMessages(messages, sid, next)
-    const recovered = recoverPrematureTimeoutMessages({
-      messages, sessionId: sid, base: changed ? next : prev, stopReason, errorMessage, finalContent, payload, lastAssistantIdx,
-      takePrematureTimeoutIds: ctx.takePrematureTimeoutIds,
-    })
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收口：错误信息必须以纯 error
     // 气泡落进聊天流，否则 complete 事件被消费后错误只剩 stopReason 标志，用户不可见。
-    // [premature-timeout] 恢复命中时抑制追加——errorMessage 已按追加形态双通道写进命中实体，
-    // 再追加纯 error 气泡会重复展示同一错误。
-    if (isErrorStop && errorMessage && !changed && !recovered) {
+    // errorMessage 缺失（pi extras.errorMessage 可 undefined）走 error reason 兜底文案——
+    // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
+    if (isErrorStop && !changed) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
+      // 同帧气泡：开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorMessage, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
@@ -325,9 +324,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'error', errorText)
     // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
     if (!hasStreaming) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorText, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },
@@ -342,18 +343,21 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'stream_error', streamErrContent)
     // 无前置 streaming entity 时需手动追加
     if (!hasStreaming) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: streamErrContent, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },
 
-  // B1（PR#86 review）：pi 静默卡死 WARN（120s 无活动，提示性，不中断流）。
-  // 与 stream_error 物理隔离——仅追加 system 提示消息，不调 finalizeSession，
-  // session 保持 streaming 态（pi 可能只是慢，130s 后恢复产出）。
+  // B1（PR#86 review）：非终结性提示通道，与 stream_error 物理隔离——仅追加 system
+  // 提示消息，不调 finalizeSession，session 保持 streaming 态。两个生产者：ping 探测
+  // 的 pi 静默卡死 WARN（120s 无活动，pi 可能只是慢，130s 后恢复产出）与 EventAdapter
+  // 的单帧翻译失败提示（MF-1-13：pi 流继续、turn 可能照常成功，失败帧不可终结 turn）。
   // [W2 fix-chat-flow-order D4] liveOnly 标记（全仓唯一写入点）：stream_warn 是 taiji runtime
-  // 自产健康警告，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
+  // 自产提示，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
   // 消息的正确入流路径），分组层据此归 turn 内 notice（不切断 turn，W3 消费），不参与
   // 「live ≡ reload」等价性断言。
   'message.stream_warn': (ctx, sid, payload) => {
@@ -425,7 +429,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   'message.tool_call_start': (ctx, sid, payload) => {
     // [D-010 sealed]
     // [W21] 输入从直译平铺 payload 改为 toolCall entry 形态（event-adapter 翻译时重构，
-    // interpreter 补 contentIndex/messageId 锚点）。entry 缺失（异常帧）降级丢弃；
+    // interpreter 补 contentIndex/messageId 锚点）。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-start]
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
     if (entry === undefined) return
@@ -456,6 +461,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // toolResult entry 同构）。overlay 收口（streaming 气泡上的 running toolCall → 终态）
     // 语义保留；权威回填经 ctx.applyEntryFrame 喂 reducer（先于 overlay 早 return——
     // ref 无 owner 时 reducer 喂入照常，ref 收敛归 W22）。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-end]
     const entry = payload['entry'] as PiMessageEntry | undefined
     if (entry === undefined || entry.type !== 'message') return
     // 状态类全走 reducer（w21）：toolResult entry 喂 per-session reducer state
@@ -504,7 +510,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   // ── [W21] message_end —— 重构 entry 喂 reducer（实时 feed 权威载体，reducer 薄封装）──
   'message.message_end': (ctx, sid, payload) => {
     const entry = payload['entry']
-    // entry 形态守卫：message entry（type:'message'）才喂（协议契约，异常帧降级丢弃）
+    // entry 形态守卫：message entry（type:'message'）才喂。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter handleMessageEnd]
     if (typeof entry !== 'object' || entry === null || (entry as { type?: unknown }).type !== 'message') return
     // custom role 去双计：pi 对同一条 custom message 双发 message_start + message_end（同一
     // message 对象——agent-loop.ts:112 prompt 路径 / agent-session sendCustomMessage no-trigger
@@ -702,6 +709,37 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
 }
 
 /**
+ * 终态帧 type 集合（收口在 handler 尾部执行的帧）：单帧异常安全网的裁决依据——
+ * 这些帧的 finalizeSession 调用若被异常截断，session 的 streaming 实体永不收口
+ * （isGenerating 恒 true，输入框永久禁用），必须在 dispatch 层补收口（RD-1#5）。
+ */
+const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
+  'message.complete',
+  'message.error',
+  'message.stream_error',
+])
+
+/**
+ * [RD-1#9] 未注册 message.* 帧类型的 dev 观测去重集合（一次/类型 warn 防刷屏）。
+ *
+ * 与已登记的「坏 entry 静默丢弃」裁决不同类：未注册 type **无构造点守卫**，是 runtime
+ * 新增 message.* 帧而注册表漏接的协议漂移，旧实现零痕迹。dev 留痕、生产零开销（isDevMode 门）。
+ * 清理：__clearUnhandledFrameTypeWarnForTest（测试隔离）。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
+const warnedUnregisteredFrameTypes = new Set<string>()
+
+/** [RD-1#9] 未注册 type 的一次性 dev warn（观测补齐，no-op 行为不变）。 */
+function warnUnregisteredFrame(type: string, sessionId: string): void {
+  if (!isDevMode() || warnedUnregisteredFrameTypes.has(type)) return
+  warnedUnregisteredFrameTypes.add(type)
+  console.warn(`[effects] unhandled frame type ${type} (sid=${sessionId}) — no message effect registered; frame is a no-op (protocol drift or intentionally unhandled)`)
+}
+
+/** 测试专用：清空去重集合（对齐 platform/dev-mode __resetDevModeForTesting 模式）。 */
+export function __clearUnhandledFrameTypeWarnForTest(): void { warnedUnregisteredFrameTypes.clear() }
+
+/**
  * message.* 事件的单一入口（消除 double-dispatch）。
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
@@ -709,6 +747,13 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
  * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
+ * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。
+ *
+ * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
+ * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
+ * 理由：非终态帧（delta/queue_update 等）半执行后下一帧自然继续，强行收口反而误杀
+ * 进行中的流；终态帧的收口是 handler 的最后一步，被截断 = 永久卡 streaming，且
+ * finalizeSession 幂等（handler 已收口则 no-op），补调安全。
  */
 export function dispatchMessageEvent(
   ctx: MessageEffectContext,
@@ -719,5 +764,28 @@ export function dispatchMessageEvent(
   // msg.payload 是 ServerMessageMap 的联合（含 SystemPromptSnapshot 等 interface 类型，
   // 无 string index signature）。handler 内部统一用 readString 等安全窄化（见上方注释），
   // 不依赖 index signature，故 cast 到 Record<string, unknown> 是安全的。
-  if (handler) handler(ctx, sessionId, msg.payload as Record<string, unknown>)
+  if (!handler) return warnUnregisteredFrame(msg.type, sessionId)
+  const payload = msg.payload as Record<string, unknown>
+  try {
+    handler(ctx, sessionId, payload)
+  } catch (e) {
+    console.error(`[effects] handler threw for ${msg.type} (sid=${sessionId}) — frame side effects may be partial:`, e)
+    if (!TERMINAL_FRAME_TYPES.has(msg.type)) return
+    // 终态帧安全网：按帧语义推导收口参数（complete 按 stopReason 区分 aborted/error；
+    // error/stream_error 帧尽量透传原始错误文本），finalizeSession 本身抛错则放弃收口
+    // 仅记录（不得让安全网成为新异常源）。
+    const reason: FinalizeReason = msg.type === 'message.complete'
+      ? (readString(payload, 'stopReason') === 'aborted' ? 'aborted' : 'error')
+      : msg.type === 'message.stream_error' ? 'stream_error' : 'error'
+    const errorText = msg.type === 'message.complete'
+      ? readString(payload, 'errorMessage')
+      : readString(payload, 'message') ?? readString(payload, 'content')
+    try {
+      ctx.finalizeSession(sessionId, reason, errorText)
+    } catch (finalizeError) {
+      // best-effort 降级：安全网自身失败时放弃收口仅记录——不得让安全网成为新异常源
+      // （再抛会逆传到 events/coalescer 上游，把单帧故障放大成消费面崩溃）。
+      console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
+    }
+  }
 }

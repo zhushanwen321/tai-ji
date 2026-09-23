@@ -20,6 +20,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import {
+  composerChatModule,
+  composerFlowModule,
+  composerApiModule,
+  composerChatStoreModule,
+  composerChildStubs,
+} from '../helpers/composer-mount'
 
 // ── mock composable / api（防真依赖构造报错，同 composer-file-injection.test.ts）──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -123,20 +130,8 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const composerStubs = {
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
-  const wrapper = mount(Composer, { props, global: { stubs: composerStubs } })
+  const wrapper = mount(Composer, { props, global: { stubs: composerChildStubs } })
   mounted.push(wrapper)
   const spy = inputSpies.at(-1)
   if (!spy) throw new Error('ComposerInput spy 未生成')
@@ -147,7 +142,7 @@ function mountSessionItem(id: string, label: string) {
   const wrapper = mount(SessionItem, {
     attachTo: document.body,
     props: { session: { id, label, cwd: '/p', lastActiveAt: 0 }, active: false, status: 'done' as never },
-    global: { stubs: composerStubs },
+    global: { stubs: composerChildStubs },
   })
   mounted.push(wrapper)
   return wrapper

@@ -28,12 +28,6 @@
       ]
     },
     {
-      "file": "packages/renderer/src/stores/chat.ts",
-      "exports": [
-        "DEFAULT_STREAMING_IDLE_TIMEOUT_MS"
-      ]
-    },
-    {
       "file": "packages/runtime/src/infra/pi/session-file-utils.ts",
       "exports": [
         "persistBindingSidecar",

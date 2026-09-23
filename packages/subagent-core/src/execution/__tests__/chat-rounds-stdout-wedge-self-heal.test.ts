@@ -146,7 +146,6 @@ function makeChatRounds(resolveChatEnginePort: () => unknown): {
     getStreamSink: vi.fn(),
     getUiObservability: vi.fn(),
     getRoundSupervisor: vi.fn(),
-    getCollectCoordinator: vi.fn(),
     finalizeFailed: vi.fn(),
     finalizeAborted: vi.fn(),
     idleTimeoutRecycle: vi.fn(),

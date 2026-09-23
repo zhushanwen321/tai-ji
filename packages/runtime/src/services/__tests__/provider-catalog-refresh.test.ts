@@ -151,4 +151,51 @@ describe('refreshProviderCatalogs 刷侧', () => {
     expect(result.failed).toEqual([{ providerId: 'anthropic', reason: 'network down' }])
     expect(mod.getCatalogOverlayModels('zai').map(m => m.id)).toEqual(['glm-5.3'])
   })
+
+  // ── RT-7#8：损坏缓存单独回传（不折叠进 never-seen）+ 落盘失败回传 persistFailed ──
+
+  it('自刷缓存损坏 → result.corrupt 含 "own"，刷新继续 fail-safe（200 正常落盘）', async () => {
+    writeFileSync(join(dataDir, 'provider-catalog-overlay.json'), '{broken json')
+    const mod = await loadFresh()
+    mockFetch(200, { 'glm-5.3': { id: 'glm-5.3' } }, { 'last-modified': new Date(GENERATED_AT + 5000).toUTCString() })
+    const result = await mod.refreshProviderCatalogs(['zai'])
+    expect(result.corrupt).toEqual(['own'])
+    expect(result.refreshed).toEqual(['zai'])
+    expect(result.persistFailed).toBeUndefined()
+    // 刷新结果正常落盘（损坏旧缓存被覆写自愈）
+    expect(mod.getCatalogOverlayModels('zai').map(m => m.id)).toEqual(['glm-5.3'])
+  })
+
+  it('pi store 损坏 → result.corrupt 含 "pi"；两源均损坏 → ["own", "pi"]', async () => {
+    writeFileSync(join(dataDir, 'agent', 'models-store.json'), 'not json at all')
+    const mod = await loadFresh()
+    mockFetch(304)
+    const result = await mod.refreshProviderCatalogs(['zai'])
+    expect(result.corrupt).toEqual(['pi'])
+    expect(result.refreshed).toEqual([])
+
+    writeFileSync(join(dataDir, 'provider-catalog-overlay.json'), '[[[')
+    const mod2 = await loadFresh()
+    mockFetch(304)
+    const result2 = await mod2.refreshProviderCatalogs(['zai'])
+    expect(result2.corrupt).toEqual(['own', 'pi'])
+  })
+
+  it('缓存完好损坏均无 → result.corrupt 为空数组（正常态不误报）', async () => {
+    const mod = await loadFresh()
+    mockFetch(304)
+    const result = await mod.refreshProviderCatalogs(['zai'])
+    expect(result.corrupt).toEqual([])
+  })
+
+  it('落盘失败（tmp 路径被目录占位）→ result.persistFailed=true，reply 不被阻断', async () => {
+    const mod = await loadFresh()
+    // 目录占位 tmp 文件名：writeFile(`${cache}.tmp`) 抛 EISDIR → persistOwnCache reject
+    mkdirSync(join(dataDir, 'provider-catalog-overlay.json.tmp'))
+    mockFetch(200, { 'glm-5.3': { id: 'glm-5.3' } })
+    const result = await mod.refreshProviderCatalogs(['zai'])
+    expect(result.refreshed).toEqual(['zai'])
+    expect(result.persistFailed).toBe(true)
+    expect(result.failed).toEqual([])
+  })
 })

@@ -91,7 +91,7 @@ describe("createGoalState", () => {
 
 describe("E1 守卫：src 内禁止 .status 裸赋值（必须走 transitionStatus 查表）", () => {
 	it("扫描 src/**/*.ts（排除 __tests__）：0 命中", () => {
-		// 正则逐字来自设计 docs/design/ext-simplify-03-goal.md §5.4「E1 守卫设计」，不得自行修改：
+		// 正则逐字来自设计定稿，不得自行修改：
 		// (?![=>]) 排除 ==/===/=>（比较与箭头函数形态）；(?!\s*transitionStatus\b) 放行白名单查表赋值。
 		// 扫描粒度 = 整文件内容（非逐行）：\s* 必须能跨行吃换行，才能排除
 		// `state.status =\n transitionStatus(...)` 这类跨行白名单赋值形态，逐行实现会误报。

@@ -6,7 +6,7 @@
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
-import type { ProviderId } from '@taiji/shared'
+import type { ProviderId, ImportSourceKind } from '@taiji/shared'
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
@@ -142,19 +142,55 @@ describe('mock session domain', () => {
     expect(r.deleted).toContain(forked.id)
   })
 
+  it('create/fork override 生效面（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
+    // create 四参 override：presetId→launchPresetId / projectId / modelOverride→modelId / thinkingOverride→thinkingLevel
+    const created = await session.create('/tmp/ov', 'ov-src', 'preset-x', 'proj-x', 'test/model-x', 'high')
+    expect(created.launchPresetId).toBe('preset-x')
+    expect(created.projectId).toBe('proj-x')
+    expect(created.modelId).toBe('test/model-x')
+    expect(created.thinkingLevel).toBe('high')
+    // server-push 同源的 list 快照可断言（fixture 已带 override）
+    const groups = await session.list()
+    const found = groups.flatMap((g) => g.sessions).find((s) => s.id === created.id)
+    expect(found).toMatchObject({ modelId: 'test/model-x', projectId: 'proj-x', launchPresetId: 'preset-x', thinkingLevel: 'high' })
+    // fork：override 覆盖（ADR-0056 Staging Mode）+ projectId 继承父归属 + 血缘键
+    // parentSession 用源 sessionId（FR-20 fallback 键形态：mock 无 sessionFile）+ forkEntryId
+    const forked = await session.fork(created.id, {
+      label: 'ov-fork',
+      modelOverride: 'test/model-y',
+      thinkingOverride: 'low',
+      piEntryId: 'pi-entry-1',
+    })
+    expect(forked.modelId).toBe('test/model-y')
+    expect(forked.thinkingLevel).toBe('low')
+    expect(forked.projectId).toBe('proj-x')
+    expect(forked.parentSession).toBe(created.id)
+    expect(forked.forkEntryId).toBe('pi-entry-1')
+    await session.remove(created.id)
+    await session.remove(forked.id)
+  })
+
   it('getCommands / getContext / getSubagents(s3 fixture) / getWorkflows / 空历史与 stub 动作', async () => {
     const cmds = await session.getCommands('s1')
     expect(cmds.commands.length).toBeGreaterThan(0)
     expect((await session.getContext('s1')).usagePercent).toBeDefined()
-    expect((await session.getSubagents('s3')).length).toBeGreaterThan(0)
-    expect(await session.getSubagents('other')).toEqual([])
+    expect((await session.getSubagents('s3')).subagents.length).toBeGreaterThan(0)
+    // [RT-4#8] 结构化返回（records/oversize 语义同 real 域；mock 恒非 oversize）
+    expect(await session.getSubagents('other')).toEqual({ subagents: [], oversize: undefined })
     expect(await session.getSubagentHistory('s1', 'a1')).toEqual([])
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
-    expect((await session.getWorkflows('s3')).length).toBeGreaterThan(0)
-    expect(await session.getWorkflows('other')).toEqual([])
-    await expect(session.workflowAction('s3', 'pause', 'r1')).resolves.toBeUndefined()
+    expect((await session.getWorkflows('s3')).workflows.length).toBeGreaterThan(0)
+    expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined })
+    // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
+    expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
+    expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
+    expect(await session.getAgentCallFilePath('s1', 'ac1')).toBe('')
+    // workflowAction 仅 'abort'（pause/resume 已随扩展 D-2 移除，real 域参数为 'abort' 字面量）
+    await expect(session.workflowAction('s3', 'abort', 'r1')).resolves.toBeUndefined()
     await expect(session.subagentAction('s3', 'message', { text: 'hi' })).resolves.toBeUndefined()
     await expect(session.handoff('s1', 'ok')).resolves.toBeUndefined()
+    // options（modelOverride/thinkingOverride）mock 不仿真（无 HandoffService），签名对齐 resolve
+    await expect(session.handoff('s1', 'ok', { modelOverride: 'x/m', thinkingOverride: 'high' })).resolves.toBeUndefined()
     await expect(session.abortHandoff('s1')).resolves.toBeUndefined()
     await expect(session.forceQuit('s1')).resolves.toBeUndefined()
   })
@@ -172,6 +208,40 @@ describe('mock session domain', () => {
     const cand = await session.importCandidates({} as never)
     expect(cand.total).toBe(0)
     await expect(session.importSession({} as never)).rejects.toMatchObject({ code: 'import_source_missing' })
+  })
+
+  it('importCandidates/importSession source 路由（sess-session-import u-foundation）：zcode sess_ 形态候选 + 归一化 reply；缺省/pi 空集，未知 source 两侧同构抛 import_source_missing', async () => {
+    // zcode 分支：sessionId 带 sess_ 前缀（原始源 id 形态）+ dirLabel = basename(cwd)
+    // + sourcePath 为 db 路径结构占位（候选间共享同源，不参与 zcode query 匹配）
+    const zc = await session.importCandidates({ source: 'zcode' })
+    expect(zc.items.length).toBeGreaterThan(0)
+    expect(zc.total).toBe(zc.items.length)
+    for (const item of zc.items) {
+      expect(item.sessionId).toMatch(/^sess_[0-9a-f-]{36}$/)
+      expect(item.dirLabel).toBe(item.cwd.split('/').pop())
+      expect(item.sourcePath).toBe(zc.items[0].sourcePath)
+    }
+    // lastModified 降序（契约排序键）+ dirs 按 dirLabel 聚合 count
+    const times = zc.items.map((i) => i.lastModified)
+    expect([...times].sort((a, b) => b - a)).toEqual(times)
+    for (const d of zc.dirs) {
+      expect(d.count).toBe(zc.items.filter((i) => i.dirLabel === d.label).length)
+    }
+    // zcode import 固定 reply：reply.sessionId = T1 归一化形态（剥 sess_ 前缀 + '_'→'-'，
+    // 与侧边栏/扫描集同域——非请求传入的原始 sess_ 形态）
+    const first = zc.items[0]
+    const imported = await session.importSession({ source: 'zcode', sessionId: first.sessionId, sourcePath: first.sourcePath, projectId: 'p1' })
+    expect(imported.sessionId).not.toMatch(/^sess_/)
+    expect(imported.sessionId).not.toContain('_')
+    expect(imported.targetPath).toContain(imported.sessionId)
+    // 缺省（向后兼容）/ 显式 pi：pi 分支空候选集（mock 无外部目录可扫）
+    const emptyReply = { total: 0, items: [], dirs: [] }
+    expect(await session.importCandidates({})).toEqual(emptyReply)
+    expect(await session.importCandidates({ source: 'pi' })).toEqual(emptyReply)
+    // 类型外未知 source（JS 调用方运行时值）：importCandidates 与 importSession 同构抛
+    // import_source_missing（对齐 real 侧 resolveSource 缺项行为）
+    await expect(session.importCandidates({ source: 'ghost' as ImportSourceKind })).rejects.toMatchObject({ code: 'import_source_missing' })
+    await expect(session.importSession({ sourcePath: '/x.jsonl', projectId: 'p1' })).rejects.toMatchObject({ code: 'import_source_missing' })
   })
 
   it('setMockE2E(true)：cwd 注入时 e2eTestSession 并入 list / switch / restore 放行；cwd 空串不注入', async () => {
@@ -265,7 +335,7 @@ describe('mock chat domain', () => {
       reason: 'mock: no kernel backing for s-del',
     })
     expect(await chat.drainDelivery('s-del')).toEqual({ sessionId: 's-del', entries: [] })
-    expect(await chat.resyncDelivery('s-del')).toEqual({ sessionId: 's-del', deduped: [] })
+    expect(await chat.resyncDelivery('s-del', [])).toEqual({ sessionId: 's-del', deduped: [] })
   })
 })
 
@@ -287,7 +357,7 @@ describe('mock config domain', () => {
 
   it('空签名同构 stub：builtin/refresh/checkEnv/oauth/discover/detectSources', async () => {
     expect(await config.listBuiltinProviders()).toEqual([])
-    expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [] })
+    expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
     expect(await config.checkEnvVars(['PATH'])).toEqual({ PATH: true })
     expect(await config.oauthLogin('p')).toMatchObject({ started: false })
     expect(await config.oauthCancel('p')).toEqual({ cancelled: false })
@@ -344,6 +414,9 @@ describe('mock config domain', () => {
     await waitFor(() => skills.length > 0 && agents.length > 0 && skillDirs.length > 0 && agentDirs.length > 0 && extDirs.length > 0)
     await config.scanSkills(['x'])
     await config.scanAgents(['x'])
+    // [G4 锚定] 返回类型补齐：real 返回扫描结果，mock 无文件系统扫描恒 []
+    expect(await config.scanSkills(['x'])).toEqual([])
+    expect(await config.scanAgents(['x'])).toEqual([])
     await config.scanSessionSkills('/cwd')
     expect(await config.getGlobalSkills()).toEqual(skills[0])
     expect(await config.getProjectSkills('/cwd')).toEqual([])
@@ -370,9 +443,12 @@ describe('mock config domain', () => {
     await config.setDefaultModel('p2' as ProviderId, 'm')
     await waitFor(() => defaults.some((d) => d.defaultModel === 'p2/m'))
     un1()
-    const { preview } = await config.previewImportProviders('pi')
-    expect(preview.providers).toHaveLength(1)
+    // real 域返回成功/错误联合（错误以 envelope 返回）；mock 恒成功，断言前按 discriminant 收窄
+    const imported = await config.previewImportProviders('pi')
+    if (!('preview' in imported)) throw new Error('mock previewImportProviders 恒成功，不应返回 error')
+    expect(imported.preview.providers).toHaveLength(1)
     const applied = await config.applyImportProviders('id', ['demo-provider'])
+    if (!('result' in applied)) throw new Error('mock applyImportProviders 恒成功，不应返回 error')
     expect(applied.result.imported).toHaveLength(1)
     const sp = await config.getSystemPrompt()
     expect(sp.corrupted).toBe(false)
@@ -388,6 +464,13 @@ describe('mock config domain', () => {
     await config.setTerminalConfig({ ...tc.config, fontSize: 16 })
     await waitFor(() => tcSeen.length > 0)
     un3()
+    // retry 配置 stub（[G4 锚定补齐]）：set 回显 configured=true；get 恒 configured=false
+    //（mock 不持久化不广播，保真度登记 docs/TEST-STRATEGY.md §5）
+    const rcSet = await config.setRetryConfig({ enabled: false, maxRetries: 5, baseDelayMs: 100 })
+    expect(rcSet).toEqual({ config: { enabled: false, maxRetries: 5, baseDelayMs: 100 }, configured: true })
+    const rc = await config.getRetryConfig()
+    expect(rc.configured).toBe(false)
+    expect(typeof config.onRetryConfig(() => {})).toBe('function')
   })
 })
 
@@ -430,18 +513,23 @@ describe('mock model / extension / plugin / composer / search domain', () => {
     un()
   })
 
-  it('plugin.onPlugins 空订阅 + settings 转发 + composer 候选', async () => {
+  it('plugin.onPlugins 空订阅 + 权限 stub + settings 转发 + composer 候选', async () => {
     const plugins: unknown[][] = []
     const un = plugin.onPlugins((p) => plugins.push(p))
     await waitFor(() => plugins.length > 0)
     expect(plugins[0]).toEqual([])
     un()
+    // [G4 锚定补齐] 权限审批/回收 stub：mock 无插件运行时，ack resolve 即可
+    await expect(plugin.approvePermissions('p1', ['fs.read'])).resolves.toBeUndefined()
+    await expect(plugin.revokePermissions('p1')).resolves.toBeUndefined()
     expect(typeof settings.onProviders).toBe('function')
     expect(settings.listProviders).toBe(config.listProviders)
-    const mentions = await composer.getMentionCandidates()
-    expect(mentions.length).toBeGreaterThan(0)
-    const files = await composer.getFileCandidates()
+    // getMentionCandidates 对齐 real 已废弃语义（恒 []）；getFileCandidates 与 real 同签名（sessionId）
+    expect(await composer.getMentionCandidates()).toEqual([])
+    const files = await composer.getFileCandidates('s1')
     expect(files.every((f) => f.type === 'dir' || f.type === 'file')).toBe(true)
+    // landing cwd 路 stub（现消费方直连 real domain，mock 保持签名同构）
+    expect(await composer.getFileCandidatesByCwd('/any')).toEqual({ files: [], truncated: false })
   })
 
   it('search：空查询返回 recent+suggested；有查询按四类过滤', async () => {
@@ -472,24 +560,32 @@ describe('mock workspace / quota / project / preset domain', () => {
     expect(await quota.configure({ providerId: 'p', enabled: true })).toEqual({ ok: true })
   })
 
-  it('project：load 空态 + save 透传', async () => {
+  it('project：load 空态 + save ack（[G4 锚定] 对齐 real void 契约，原返回透传偏差已收口）', async () => {
     expect(await project.load()).toEqual({ projects: [], activeProjectId: '' })
     const state = { projects: [], activeProjectId: 'p1' }
-    expect(await project.save(state)).toEqual(state)
+    await expect(project.save(state)).resolves.toBeUndefined()
   })
 
-  it('preset：CRUD + default', async () => {
-    expect(await preset.list()).toEqual([])
+  it('preset：内置目录非空 + CRUD + default', async () => {
+    // [u7a] 由「返回空列表」收口为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
+    // 会话的 chip / 声明行永远落不到正常分支（见 mock/index.ts 的 mockPresets 注释）。
+    const builtins = await preset.list()
+    expect(builtins.map((x) => x.id)).toEqual([
+      'builtin:full',
+      'builtin:orchestrator',
+      'builtin:readonly',
+      'builtin:session-dispatch',
+    ])
     expect(await preset.getDefault()).toBe('builtin:full')
     const p = { id: 'p1', name: 'n', tools: [] } as never
     const created = await preset.create(p)
     expect(created.id).toBe('p1')
-    expect((await preset.list())).toHaveLength(1)
+    expect((await preset.list())).toHaveLength(builtins.length + 1)
     await preset.setDefault('p1')
     await preset.update({ ...created, name: 'n2' } as never)
-    expect((await preset.list())[0]?.name).toBe('n2')
+    expect((await preset.list()).find((x) => x.id === 'p1')?.name).toBe('n2')
     await preset.remove('p1')
-    expect(await preset.list()).toEqual([])
+    expect((await preset.list()).map((x) => x.id)).toEqual(builtins.map((x) => x.id))
   })
 })
 

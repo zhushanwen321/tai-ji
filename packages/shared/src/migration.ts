@@ -34,6 +34,11 @@ export interface SourceDetectResult {
   agentCount?: number
   /** provider 数量（W1 不实现，留 undefined）。W2/W3 填充。 */
   providerCount?: number
+  /**
+   * 检测异常显形（RT-5#5）：目录存在但不可读（EACCES 等）时置 'unreadable'——
+   * 「不可读」≠「未安装」≠「0 个」，三态须可区分；此时计数字段缺省（不填 0 假数据）。
+   */
+  error?: 'unreadable'
 }
 
 // ══ W2（cw-2026-07-26-migration-other-agents）—— Provider 导入预览/结果 DTO ══
@@ -154,12 +159,15 @@ export interface ProviderImportPreview {
  * - status 'imported'：成功 upsert 到 models.json。
  * - status 'skipped'：因冲突（duplicate-id）跳过，未写入。
  * - status 'failed'：upsertProvider 抛异常，reason 含错误信息。
+ * - quotaAutoEnabled：本次导入已自动开启 coding-plan 额度显示（导入即默认同意，
+ *   写 extras 成功才置位；前端据此 toast 提示）。缺省 = 未开启（不命中条件或写失败）。
  */
 export interface ProviderImportedItem {
   id: string
   name: string
   status: 'imported' | 'skipped' | 'failed'
   reason?: string
+  quotaAutoEnabled?: boolean
 }
 
 /**

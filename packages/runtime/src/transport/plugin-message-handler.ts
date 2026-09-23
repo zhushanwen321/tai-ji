@@ -31,7 +31,17 @@ export class PluginMessageHandler {
     // 依据同一 key 断言（Extract 与 switch narrowing 同构，ClientMessageMap 为协议 SSOT）。
     // cast 仅放宽索引键域（Partial 化），不改变任何 handler 的签名与运行时行为。
     const handler = (PLUGIN_CASE_HANDLERS as Partial<Record<ClientMessageType, PluginCaseHandler>>)[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与分发表漂移（漏登记）时，前端 pending
+    // Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[plugin-handler] no case handler for type "${msg.type}" — handles/dispatch 表漂移？`)
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+      )
+    }
     return handler(this.ctx, msg, ws, this.ctx.pluginService)
   }
 }

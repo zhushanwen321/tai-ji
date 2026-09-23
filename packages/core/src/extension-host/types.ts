@@ -95,6 +95,7 @@ export type InternalEvent =
   | { kind: 'ui-request'; sessionId?: string; request: DialogRequest } // uiRequest + extension.ui_request 归一
   | { kind: 'extension-widget'; sessionId?: string; widget: WidgetPayload } // widget + widgetGui 归一
   | { kind: 'extension-notify'; sessionId?: string; notification: NotificationPayload }
+  | { kind: 'requests-invalidated'; sessionId?: string; requestIds: string[]; reason: string } // 挂起 UI 请求失效广播（P2-2）
   | { kind: 'session-destroyed'; sessionId: string }
   | { kind: 'unregistered-mount-point'; pluginId: string; contributionId: string; expectedMountPoint: string }
   | { kind: 'error'; source: string; message: string }

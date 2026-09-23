@@ -1,5 +1,5 @@
 /**
- * electron-runtime-stderr.log main 侧 size 轮转单测（crash-resilience u5a 验收：
+ * electron-runtime-stderr.log main 侧 size 轮转单测（u5a 验收：
  * D6-⑦「固定名 stderr 文件治理唯一归 writer 侧 size 轮转」——writer 是 main）。
  *
  * 覆盖：

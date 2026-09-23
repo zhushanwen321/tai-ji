@@ -3,7 +3,6 @@
  *
  * 模式参考 main worktree navigation.ts：entries[] + pointer + back/forward +
  * 分支截断（splice pointer+1）+ MAX_ENTRIES=50 上限（超限丢最早）。
- * 扩展：加 'overview' 第三 view（chat/overview/settings）。
  *
  * 依赖方向：无（stores 间禁止互相 import）。
  * 骨架阶段：state/getter 合法初始值，action throw。

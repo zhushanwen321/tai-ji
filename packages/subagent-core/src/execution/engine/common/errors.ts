@@ -1,8 +1,7 @@
 // src/execution/engine/common/errors.ts
 //
-// 引擎层错误 SSOT（P2 公共降级层）。现行权威：docs/architecture/subagent-engine-
-// protocolization.md（原 subagent-engine-abstraction.md §3.3.3 错误规格全表 11 条，
-// 已删除，git 可追溯）。
+// 引擎层错误 SSOT（P2 公共降级层）。现行权威：docs/architecture/subagent-engine-protocolization.md
+// （原 subagent-engine-abstraction.md 的 §3.3.3 错误规格全表 11 条已删除，git 可追溯）。
 //
 // 为什么集中一处：错误文案契约（code + 恢复指引）被三层消费——公共降级层
 // （prompt_too_large / nested_spawn_rejected / engine_timeout）、后续 wave 的路由与

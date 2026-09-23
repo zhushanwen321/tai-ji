@@ -4,16 +4,22 @@
     输入区上方：每条已附上下文（@ 引用 / # 文件 / 图片）一个小徽章，每条都带直接删除按钮。
     数据源：父组件（Composer）从输入区 segments 派生 image chips（id=path），经 props 注入；
     删除经 emit('remove', id) 回传父组件定位 DOM 节点移除（W4：从本地 ref([]) 改 props/emit 接真实数据源）。
+
+    [窄宽容错] chip 宽 `max-w-[min(180px,100%)]` + `min-w-0`：容器窄于 180px 时 chip 跟着收缩
+    （旧 `max-w-[180px] shrink-0` 在 < ~208px 的 composer 盒里被容器 overflow-hidden 切掉右半，
+    × 按钮变得不可见且不可达——「无声裁切」）；内层 name span 补 `min-w-0` 让 truncate 真正生效，
+    chip 挂 `:title` 兜住被截断的全名。
   -->
   <div v-if="items.length" class="flex flex-wrap items-center gap-1.5 overflow-hidden px-3.5 pt-[7px]">
     <span
       v-for="item in items"
       :key="item.id"
-      class="group inline-flex max-w-[180px] shrink-0 items-center gap-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-[length:var(--text-2xs)] text-neutral-mid"
+      :title="item.name"
+      class="group inline-flex min-w-0 max-w-[min(180px,100%)] shrink-0 items-center gap-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-[length:var(--text-2xs)] text-neutral-mid"
       :class="item.type === 'image' ? 'text-reasoning' : ''"
     >
       <component :is="iconFor(item)" class="size-3 shrink-0" :class="item.type === 'image' ? 'text-reasoning' : 'text-neutral-dim'" />
-      <span class="truncate">{{ item.name }}</span>
+      <span class="min-w-0 truncate">{{ item.name }}</span>
       <Button
         variant="ghost"
         class="ml-0.5 grid size-4 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-danger-soft hover:text-danger"

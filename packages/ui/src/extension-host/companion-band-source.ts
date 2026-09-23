@@ -7,7 +7,7 @@
  *
  * 壳（P5）provide 真实实现：
  *  - DialogRequestSource：把 S2 MessageBusBridge 的 InternalEventBus.on('ui-request')
- *    / WS extension.ui_timeout 适配成 W1 定义的事件源接口；
+ *    / WS plugin:uiRequestExpired 适配成 W1 定义的事件源接口；
  *  - UiResponseTransport：转发 extension.ui_response（pi 源）/ plugin.uiResponse（plugin 源）。
  *
  * 单测 global.provide mock；未注入时组件静默空态不崩（design-review R3）。

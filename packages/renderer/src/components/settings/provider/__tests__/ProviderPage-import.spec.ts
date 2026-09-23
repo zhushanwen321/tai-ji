@@ -8,6 +8,8 @@
  * - T10d：preview transport reject（Promise.reject）→ importState 回 idle，菜单按钮重新可点
  * - T10e：apply transport reject（Promise.reject）→ importState 回 previewing，对话框仍开允许重试
  * - T10f：apply envelope error（{ error: {...} }）→ importState 回 previewing，对话框仍开 + error 区域显示
+ * - T10g：apply 结果带 quotaAutoEnabled（单条）→ 额度自动开启 toast 含 provider name
+ * - T10h：多条 quotaAutoEnabled → 聚合 count toast；未标记条目不额外提示
  *
  * mock 策略：
  *  - vi.mock('@/api') 把 config 门面替成可控 mock（listProviders 空 providers 结果 + previewImportProviders fixture）
@@ -217,5 +219,138 @@ describe('ProviderPage 导入入口', () => {
     const errorEl = document.body.querySelector('[data-testid="preview-error"]')
     expect(errorEl).toBeTruthy()
     expect(errorEl!.textContent).toContain('preview 已过期')
+  })
+
+  it('T10g: apply 结果带 quotaAutoEnabled（单条）→ 额度自动开启 toast 含 provider name', async () => {
+    configMock.applyImportProviders.mockImplementationOnce(() =>
+      Promise.resolve({
+        result: {
+          source: 'claude',
+          imported: [{ id: 'openai', name: 'OpenAI', status: 'imported', quotaAutoEnabled: true }],
+          failedCount: 0,
+        },
+      }),
+    )
+
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    expect(confirmBtn).toBeTruthy()
+    confirmBtn!.click()
+    await flushPromises()
+
+    // 用户可见 DOM 断言：额度自动开启 toast（quotaAutoEnabledOne 含 name；
+    // success toast 只含 count 不含 name，其余凭据形态 toast 对 plaintext 不触发）
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.type === 'info' && t.message.includes('OpenAI'))).toBe(true)
+  })
+
+  it('T10h: 多条 quotaAutoEnabled → 聚合 count toast；未标记条目不额外提示', async () => {
+    configMock.applyImportProviders.mockImplementationOnce(() =>
+      Promise.resolve({
+        result: {
+          source: 'claude',
+          imported: [
+            { id: 'a', name: 'Alpha', status: 'imported', quotaAutoEnabled: true },
+            { id: 'b', name: 'Beta', status: 'imported', quotaAutoEnabled: true },
+            { id: 'c', name: 'Gamma', status: 'imported' },
+          ],
+          failedCount: 0,
+        },
+      }),
+    )
+
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    expect(confirmBtn).toBeTruthy()
+    confirmBtn!.click()
+    await flushPromises()
+
+    // 聚合 toast 含 count=2（quotaAutoEnabledMany）；success toast 含 3，不含 2；
+    // 未标记的 Gamma 不出现专属提示
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.type === 'info' && t.message.includes('2'))).toBe(true)
+    expect(toasts.some((t) => t.type === 'info' && t.message.includes('Gamma'))).toBe(false)
+  })
+
+  it('RD-4#12: apply 有失败项 → 保留 preview（弹窗不关，用户可回查失败条目）+ failedCount toast', async () => {
+    configMock.applyImportProviders.mockImplementationOnce(() =>
+      Promise.resolve({
+        result: {
+          source: 'claude',
+          imported: [
+            { id: 'openai', name: 'OpenAI', status: 'imported' },
+            { id: 'anthropic', name: 'Anthropic', status: 'failed', reason: 'network' },
+          ],
+          failedCount: 1,
+        },
+      }),
+    )
+
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    expect(confirmBtn).toBeTruthy()
+    confirmBtn!.click()
+    await flushPromises()
+
+    // RD-4#12：有失败项 → 不 resetImportState，preview 保留（弹窗不关，preview-provider-item 仍渲染）。
+    // 此前成功后立刻清空 preview，用户无法回查失败条目。
+    expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBeGreaterThan(0)
+    // failedCount>0 → error toast（reportImportSuccess 既有行为）
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+
+  it('RD-4#12: 全部成功（failedCount=0）→ reset 关闭弹窗（既有行为不变）', async () => {
+    // 默认 mock applyImportProviders 返回 failedCount:0
+    wrapper = mount(ProviderPage, {
+      props: { providers: [] },
+    })
+    await flushPromises()
+
+    await selectClaudeSource()
+
+    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
+    confirmBtn!.click()
+    await flushPromises()
+
+    // failedCount=0 → reset → 对话框关闭（preview-provider-item 消失）
+    expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBe(0)
+  })
+
+  it('RD-4#10: refreshProviderCatalogs 有 failed 项 → Picker 头部「目录可能过期」提示', async () => {
+    configMock.refreshProviderCatalogs.mockResolvedValueOnce({
+      refreshed: [],
+      failed: [{ providerId: 'openai', reason: 'timeout' }],
+    })
+    wrapper = mount(ProviderPage, { props: { providers: [] } })
+    await flushPromises()
+
+    // 协议侧 providerCatalogsRefreshed.failed 非空 → catalogsStale 置位 → 头部提示显形
+    expect(wrapper.find('[data-testid="provider-catalogs-stale"]').exists()).toBe(true)
+  })
+
+  it('RD-4#10: refreshProviderCatalogs reject → 同样标「目录可能过期」（离线不无痕迹）', async () => {
+    configMock.refreshProviderCatalogs.mockRejectedValueOnce(new Error('ws closed'))
+    wrapper = mount(ProviderPage, { props: { providers: [] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-catalogs-stale"]').exists()).toBe(true)
   })
 })

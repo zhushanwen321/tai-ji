@@ -75,18 +75,27 @@ export function reconstructState(state: TodoSessionState, ctx: ExtensionContext)
 
 		const details = msg.details as TodoDetails | undefined;
 		if (details?.todos && Array.isArray(details.todos)) {
-			// 脏数据降级：单条迁移失败（null/primitive）跳过该条，全部失败则忽略整个快照，不中断回放
+			// 脏数据降级：单条迁移失败（null/primitive/脏 id/脏 text）跳过该条；跳过清单
+			// 汇总一次 warn（不逐条刷屏），全部失败则忽略整个快照，不中断回放
 			const migrated: TodoDetails["todos"] = [];
+			const skippedErrors: string[] = [];
 			for (const t of details.todos) {
 				try {
 					migrated.push(migrateTodo(t));
 				} catch (e) {
-					// best-effort 降级：脏数据（null/primitive）跳过该条，不中断会话回放
-					logger.debug("reconstructState: skipping dirty todo entry", { error: String(e) });
+					skippedErrors.push(String(e));
 				}
+			}
+			if (skippedErrors.length > 0) {
+				logger.warn("reconstructState: skipped dirty todo entries", {
+					skipped: skippedErrors.length,
+					total: details.todos.length,
+					errors: skippedErrors,
+				});
 			}
 			if (migrated.length > 0) {
 				state.todos = migrated;
+				// 脏 id 已在 migrateTodo 被拒——Math.max 只见存活条目，不产 NaN
 				state.nextId = details.nextId ?? Math.max(...migrated.map((t) => t.id)) + 1;
 			}
 		}

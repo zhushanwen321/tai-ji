@@ -28,6 +28,11 @@ export default [
       'apps/electron/resources/engines/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
       '.taiji-harness/**',
+      // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
+      // 草稿）：引擎生成的 .mjs 非项目源码，已被 .gitignore；.zcode/agents/ 是 tracked
+      // 子代理定义，不在排除范围
+      '.zcode/workflow-runs/**',
+      '.zcode/workflow-drafts/**',
       // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
       'playwright-report/**',
       'playwright/.cache/**',
@@ -80,8 +85,7 @@ export default [
   // 中心，职责内聚但行数超 500，拆分属独立重构任务（event-adapter 归 C2 候选收尾）。
   // 短期 max-lines override 避免阻塞，长期应拆分。
   // [HISTORICAL] session-service 曾在本清单（session 生命周期/历史/fork/agentcall 的
-  // facade），2026-09 session-service-deepening 六域迁出后移除（S6/D5：行数守卫恢复，
-  // 设计 docs/design/session-service-deepening.md）。
+  // facade），2026-09 session-service-deepening 六域迁出后移除（S6/D5：行数守卫恢复）。
   {
     files: [
       'packages/runtime/src/infra/pi/event-adapter.ts',
@@ -94,6 +98,17 @@ export default [
     ],
     rules: {
       'max-lines': 'off',
+    },
+  },
+  // [code-harden RT-3#5] pi-provider-store：resolver 未注入一次性 warn 显形（防装配序
+  // 漂移静默判全量 provider 无凭据）净增 10 行代码，508 > 500 微超即提额（先例：
+  // event-interpreter / engine-client 的「微超即提额，保留软上限告警」同型）。该文件
+  // 曾按 max-lines 拆出 pi-maintenance / pi-enabled-models / pi-skill-paths /
+  // pi-provider-repair（模块头注释），再拆属独立重构任务。
+  {
+    files: ['packages/runtime/src/infra/pi/pi-provider-store.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
@@ -110,7 +125,7 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] 复杂度债务偿还（docs/design/complexity-debt-full-repayment.md）产物：
+  // [HISTORICAL] 复杂度债务偿还产物：
   // 以下文件因行为保持提取（helper 签名/花括号/JSDoc 开销）代码行超 max-lines 阈值。
   // 职责内聚（每文件均为单一子系统的高复杂度函数原地拆解，cyclo 已全部 ≤12），
   // 按行数再拆属独立重构任务。第一批：rpc-client / session-lifecycle / 两个
@@ -187,15 +202,24 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [HISTORICAL] session-records.ts 是 record 域唯一聚合中心（W18 派生缓存族 + 磁盘读侧/
+  // 动作/引擎配置，冷热同源共用同一份 scan 派生代码——拆开会造成派生逻辑双份）。
+  // 2026-09-19 reload-closeout D2 送达水位机制入列（发布门换基线 + 对账两腿 + 定时器）
+  // 时代码行越过 500。与 event-adapter 等 override 同型，拆分属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/session-records.ts'],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
   // [HISTORICAL] session-channel.ts 是 zcode 单任务会话通道的唯一聚合点：A.2 协议帧序
   // SSOT（create/subscribe/send/终态双保险判定/read/close）+ P0-1 turn 等待两 timer
-  // 状态机（idle 主判定 + 总上界兜底，timeout-zcode-turn-and-settled-watchdog.md §6 D1，
-  // 2026-09-05 落地后超限）。职责内聚（帧序分发、终态判定与 idle 刷新共享同一
-  // ActiveTurn 状态），行数超 500。拆分违反该设计 §7「无新模块」约束，属独立重构任务。
+  // 状态机（idle 主判定 + 总上界兜底，2026-09-05 落地后超限）。职责内聚（帧序分发、
+  // 终态判定与 idle 刷新共享同一 ActiveTurn 状态），行数超 500。拆分违反「无新模块」约束，
+  // 属独立重构任务。
   // 与 event-adapter/session-service 等 override 同型——唯一聚合中心，短期避免阻塞。
   // [W11] session-channel.ts 随 zcode 引擎外移迁入 @zhushanwen/zcode-subagent-cli
-  // （W5 整包搬移），override 路径同步跟随——搬移前后生效规则集 diff = 0（impl-plan
-  // §2.11 eslint override 迁移验收）。
+  // （W5 整包搬移），override 路径同步跟随——搬移前后生效规则集 diff = 0。
   {
     files: [
       'packages/zcode-subagent-cli/src/session-channel.ts',
@@ -293,10 +317,11 @@ export default [
     },
   },
   // [HISTORICAL] ConfigService 是 config 域唯一聚合点（settings-message-handler 全部 config.* case 的
-  // 注入端），随功能以纯委托行增长——真实逻辑已在 worktree-config-helper（worktree 偏好 + auto-rename
-  // flag/rename 模型）/ config-merge-helpers（system prompt/terminal 合并）等 helper。rename-model 功能
-  // +8 行触顶（此前已 499/500 计行，任何新增即超限），拆 Skill CRUD 等区块属独立重构任务，
-  // 短期 max-lines override 避免阻塞。
+  // 注入端），随功能以纯委托行增长——真实逻辑已在 worktree-config-helper（worktree 偏好）/
+  // rename-session-config（auto-rename flag/rename 模型）/ smart-context-config（smart-context 快照）/
+  // config-merge-helpers（system prompt/terminal 合并）等 helper（P1-7 名实拆分后 worktree-config-helper
+  // 仅存 worktree 偏好域）。rename-model 功能 +8 行触顶（此前已 499/500 计行，任何新增即超限），
+  // 拆 Skill CRUD 等区块属独立重构任务，短期 max-lines override 避免阻塞。
   {
     files: ['packages/runtime/src/services/config-service.ts'],
     rules: {
@@ -412,19 +437,6 @@ export default [
       ],
     },
   },
-  // [HISTORICAL] subagent-workflow factory（src/index.ts）是 extension 的唯一装配点：
-  // 注册 3 tool + 2 command + messageRenderer + pi.__workflowRun + 4 个 session 事件 handler
-  // （session_start 单独就 ~100 行：双 Service 装配 + AgentRegistry + store 健康度 + recovery）。
-  // 与 event-adapter/session-service/chat.ts 同质——唯一聚合中心，职责内聚但函数体超 300。
-  // 拆分需先把 session_start handler 及 makeDeps/log/resolveSessionDir 等闭包内函数提取到
-  // 模块级（需透传 pi/sessionState/registry 等大量闭包变量），属独立重构任务。
-  // 短期 max-lines-per-function override 避免阻塞（HEAD 版已 321 行超限，属存量）。
-  {
-    files: ['extensions/universal/subagent-workflow/src/index.ts'],
-    rules: {
-      'max-lines-per-function': 'off',
-    },
-  },
   // pi extensions（extensions/**/*.ts）专用规则块。
   // extensions 是无构建的 TS 源码（pi 运行时直接加载），迁自旧 pi 扩展仓（已废弃，见 git 历史与 AGENTS.md），
   // 与 renderer/runtime 的 Vue/Electron 代码性质不同：
@@ -474,8 +486,7 @@ export default [
     },
   },
   // [subagent-core 抽离 P0（新规则例外，沿用 [HISTORICAL] 登记风格）] core log 端口的
-  // 缺省 sink 按 subagent-core 设计 D2 即为 console（docs/design/
-  // subagent-core-package-extraction.md §3.3 D2「缺省 console」）：configureCore 之前
+  // 缺省 sink 按 subagent-core 设计 D2 即为 console（「缺省 console」）：configureCore 之前
   // 宿主 appendEntry 通道不存在，console 是唯一可用出口，该路径仅测试与库误用场景
   // 可达（host-services.ts 的 NULL_HOST.log）。故不走行内注释豁免形态（对应
   // taste 守卫规则语义），统一走本配置级 override。
@@ -536,8 +547,7 @@ export default [
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
-  // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地，登记于
-  // subagent-record-persistence-consolidation.md 残留风险）：store 保留容器 +
+  // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地）：store 保留容器 +
   // 意图原语立面 + 有状态扫描（原 1450 提额过渡废止，现折算 677 → max 800 余量）；
   // 终态原语轴（record-store-terminal.ts，折算 275）与轮次簿记轴
   // （record-store-rounds.ts，折算 101）在 500 基线内不设 override；重建与投影轴
@@ -583,7 +593,7 @@ export default [
   // [H3/R4 已消解] subagent-service.ts 单列 override（max 1700）已移除——R4 抽取
   // RunOrchestration（域 #6/#7/#12/#14/#15，strangler 第五单元）+ WorkflowDispatch
   //（[D-R4-1] workflow 族拆分）后壳折算行低于 packages 域 500 上限，warning 消解
-  //（impl-plan §7 ⑤ 预授权动作：移除而非抬阈值；演化史——旧位 2141 行即超限，抽离
+  //（预授权动作：移除而非抬阈值；演化史——旧位 2141 行即超限，抽离
   // 1245 → 无界等待修复 1415 → u-h2 1471 → W4 监督器 1548 → W3 协议化 1684 →
   // R0 重排折算 1842 → R1 1785 → R2 1640 → R3 后触发告警 → R4 移除本 override）。
   // run-orchestration.ts 单列：R4 核心编排聚合——[D-R4-1] G1 容量偏差的 lint 面
@@ -623,8 +633,7 @@ export default [
     },
   },
   // provider-config-helper：provider 配置读改/清洗/凭据应用聚合中心。
-  // 设计 catalog-provider-field-authority §3.3 D1 的写侧防线载体（applyProviderWritePolicy）
-  // 驻本文件，且后续单元（M2b 的 listProviders 迁移、M4 的 resolveCatalogDisplayFields 改造）
+  // 写侧防线载体（applyProviderWritePolicy）驻本文件，且后续单元（M2b 的 listProviders 迁移、M4 的 resolveCatalogDisplayFields 改造）
   // 仍会继续追加，故上限抬到 900（先例：download-asset.ts 抬到 1000）。
   // 沿用既有「sanitize* 校验组拆分是长期方向，短期 override 与 chat.ts 等聚合中心同模式」表述——
   // 长期仍应拆分（防线载体可拆独立模块）。
@@ -693,6 +702,17 @@ export default [
     rules: {
       'max-lines': 'off',
       'max-lines-per-function': 'off',
+    },
+  },
+  // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /
+  // usage 逐条目折叠同住，读路折叠只属读盘入口是文件头既有设计约束）。FR-14 usage 裸断言
+  // 补逐条目守卫（coerceUsage + isPresetUsageEntry）净增 ~23 行代码，统计行 508 > 500 微超
+  // 即提额（pi-provider-store RT-3#5 同型）。提额而非 off：保留 520 软上限告警，超限即再
+  // 暴露；再拆 usage 折叠独立文件会打碎 coerce 家族内聚，属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/preset-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

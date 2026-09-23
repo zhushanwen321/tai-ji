@@ -1,5 +1,5 @@
 /**
- * useChat 单测 —— 流式状态机（CLAUDE.md 规则 #3/#7 防护的「UI 卡思考中」失败模式）。
+ * useChat 单测 —— 流式状态机（AGENTS.md 规则 #3/#7 防护的「UI 卡思考中」失败模式）。
  *
  * 覆盖：
  * - ensureStreamSubscription 幂等：首次 send 订阅一次，二次不重复订阅
@@ -18,7 +18,7 @@
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/useChat.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, Segment } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
@@ -166,6 +166,12 @@ describe('useChat 流式状态机', () => {
 })
 
 describe('useChat pendingSend 合并态（空窗期）', () => {
+  // fake timers 统一恢复：放用例尾部会在断言失败时跳过恢复 → 向后续用例泄漏 fake timers
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
   it('send 置 pendingSend → isActive 立即为 true（不等 message_start）', async () => {
     const chat = useChatStore()
     const { send } = useChat()
@@ -203,7 +209,8 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const chat = useChatStore()
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('network'))
     const { send } = useChat()
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）
+    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
+    // [u3b] send 契约 Promise<void>（form-hang-fix 的 boolean 契约随 B 策略退役）
     await expect(send('s-fail', textToSegments('hi'))).resolves.toBeUndefined()
     expect(chat.pendingSend.has('s-fail')).toBe(false)
     expect(chat.isActive('s-fail')).toBe(false)
@@ -262,23 +269,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     vi.advanceTimersByTime(1_000)
     expect(chat.pendingSend.has('s-timeout')).toBe(false)
     expect(chat.isActive('s-timeout')).toBe(false)
-    vi.useRealTimers()
-  })
-
-  it('streaming 超时兜底：message.complete 永不到 → armStreamingTimer 强制收口（W3 扩展）', () => {
-    vi.useFakeTimers()
-    const chat = useChatStore()
-    // 创建 streaming entity + arm 超时 timer（取代 setStreaming 二合一）
-    chat.applyMessageEvent('s-stream-timeout', { type: 'message.message_start', payload: { sessionId: 's-stream-timeout', messageId: 'a1' } })
-    chat.testInternals.armStreamingTimer('s-stream-timeout')
-    expect(chat.isGenerating('s-stream-timeout')).toBe(true)
-    // 阈值 DEFAULT_STREAMING_IDLE_TIMEOUT_MS=30min idle（1_800_000ms）：30min-1s 零帧未超时，仍 streaming
-    vi.advanceTimersByTime(1_799_000)
-    expect(chat.isGenerating('s-stream-timeout')).toBe(true)
-    // 推进到 30min+1s 触发超时回调，finalizeSession('timeout') 强制收口
-    vi.advanceTimersByTime(2_000)
-    expect(chat.isGenerating('s-stream-timeout')).toBe(false)
-    vi.useRealTimers()
   })
 
   it('finalizeAllStreaming 强制收口所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
@@ -306,7 +296,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.pendingSend.has('s-normal')).toBe(false)
     // streaming entity 仍存在（未被 pendingSend timer 误清）
     expect(chat.isGenerating('s-normal')).toBe(true)
-    vi.useRealTimers()
   })
 
   it('[u3c/D1] steer 提交失败回滚乐观副作用 + toast 提示（不留孤儿气泡，不 unhandled reject）', async () => {

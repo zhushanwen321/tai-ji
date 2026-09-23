@@ -1,9 +1,9 @@
 // host/askUser 壳侧应答端集成断言（W6 验收，R3 MF-A / impl-plan §2.6 验收补充）：
 // fake 引擎经 host/askUser 反向请求可在 core 壳侧收到应答——链路 = fake-engine CLI
-// 帧④ → EngineClient reverse-router（ack 先行，R9-2）→ EngineClientOptions
-// .uiRequestHandler 注入点（discovery portFactory 的接线形态：读壳侧登记处）→
-// SubagentService init.uiRequestHandler 同源的 handler（[D4-④] 唯一注入入口的
-// 协议化投影）。应答复用 dialog-queue 的 UiRequest/UiResponse 形状。
+// 帧④ → EngineClient reverse-router（ack 先行，R9-2）→ host-ui-endpoint 槽现读
+// （[D3] 消费时求值，非构造期固化）→ SubagentService init.uiRequestHandler 同源的
+// handler（[D4-④] 唯一注入入口的协议化投影）。应答复用 dialog-queue 的
+// UiRequest/UiResponse 形状。
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EngineClient } from "../../client/engine-client.ts";
 import {
   _resetHostUiRequestEndpointForTest,
-  getHostUiRequestEndpoint,
   setHostUiRequestEndpoint,
 } from "../host-ui-endpoint.ts";
 
@@ -42,7 +41,7 @@ describe("host/askUser 壳侧应答端（W6 R3 MF-A 集成断言）", () => {
       return { value: "host-answer" };
     });
 
-    // ② EngineClient 构造（discovery portFactory 同款接线形态：注入点读登记处）
+    // ② EngineClient 构造（无应答端传参——[D3] reverse-router 消费时经槽现读）
     const client = new EngineClient({
       engineId: "fake",
       command: process.execPath,
@@ -57,7 +56,6 @@ describe("host/askUser 壳侧应答端（W6 R3 MF-A 集成断言）", () => {
       hostVersion: "test-host-1.0",
       dataDir,
       envPrefixes: [],
-      uiRequestHandler: getHostUiRequestEndpoint(),
     });
 
     const events: Array<{ type: string; message?: string }> = [];
@@ -98,7 +96,6 @@ describe("host/askUser 壳侧应答端（W6 R3 MF-A 集成断言）", () => {
       hostKind: "test",
       dataDir,
       envPrefixes: [],
-      uiRequestHandler: getHostUiRequestEndpoint(), // undefined
     });
     const events: Array<{ type: string; message?: string }> = [];
     const unregister = client.registerRunRoute("run-1", {

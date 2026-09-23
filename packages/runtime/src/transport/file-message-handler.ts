@@ -1,5 +1,5 @@
 /**
- * File message handler —— 路由 file.* 消息（issues.md #2/#7/#14 / code-architecture §3.7）。
+ * File message handler —— 路由 file.* 消息。
  *
  * 结构对称 git-message-handler：handles 清单 + switch 内编译期类型收窄 + 领域逻辑委托 FileService。
  *

@@ -24,6 +24,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import {
+  composerChatModule,
+  composerFlowModule,
+  composerApiModule,
+  composerChatStoreModule,
+  composerSessionStoreModule,
+  composerChildStubs,
+} from '../helpers/composer-mount'
 
 // ── mock composable / api（对齐 composer-file-injection.test.ts 的可挂载最小面）──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -132,20 +140,8 @@ import zhSidebar from '@/i18n/locales/zh-CN/sidebar'
 import enSidebar from '@/i18n/locales/en-US/sidebar'
 import { useI18n } from 'vue-i18n'
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
-  const wrapper = mount(Composer, { props, global: { stubs: otherStubs } })
+  const wrapper = mount(Composer, { props, global: { stubs: composerChildStubs } })
   return wrapper
 }
 

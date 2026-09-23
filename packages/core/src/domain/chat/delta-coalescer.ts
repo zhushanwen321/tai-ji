@@ -82,7 +82,14 @@ export function createMessageCoalescer(): MessageCoalescer {
         // 非 delta（message_start/complete/tool_call_*/thinking_start/end 等）：
         // 先 flush 同 sid 缓冲保序，再同步 dispatch——终态即时可见，不等 microtask。
         flush(sid)
-        dispatch(msg)
+        try {
+          dispatch(msg)
+        } catch (e) {
+          // 逐帧隔离（RD-1#5，与上方 flush 逐 buffer try/catch 同策略）：dispatch 链路
+          //（store.applyMessageEvent → effects registry）抛错不得沿订阅回调逆传炸掉
+          // enqueue 调用方（useChat 订阅回调），仅 warn 记录后半执行帧，后续帧正常处理。
+          console.warn(`[delta-coalescer] dispatch failed for session ${sid} (${msg.type}) — this frame's side effects may be partial:`, e)
+        }
         return
       }
       const key = `${sid}:${msg.type}`

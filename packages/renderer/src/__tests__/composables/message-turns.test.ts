@@ -475,3 +475,37 @@ describe('W21 re-export —— D-4 增量函数经 renderer shim 可导入（per
     expect(r2).toBe(r1)
   })
 })
+
+describe('U6 D5 边界聚合 —— notifySummary 经 renderer 通路（全量构造点）产出', () => {
+  /** subagent-bg-notify 隐藏完成通知（display:false + details 单条 record） */
+  function notifyMsg(id: string, details: Record<string, unknown>): Message {
+    return makeMsg({ id, role: 'system', customType: 'subagent-bg-notify', display: false, content: '', details })
+  }
+
+  it('renderer shim 的 toRenderItems：trigger turn 携带 core 派生的 notifySummary（计数 + 三态 + 耗时）', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
+      notifyMsg('n1', {
+        batch: true,
+        items: [
+          { id: 't1', status: 'running', agent: 'main', startedAt: 1000, endedAt: 61_000 },
+          { id: 't2', status: 'failed', agent: 'main', startedAt: 0 },
+        ],
+      }),
+      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
+    ])
+    const trigger = items[1]
+    if (trigger.kind !== 'turn') throw new Error('expected turn item')
+    expect(trigger.turn.trigger).toBe('bg-notify')
+    expect(trigger.turn.notifySummary).toEqual({
+      count: 2,
+      failedCount: 1,
+      neutralCount: 0,
+      outcomes: ['success', 'failed'],
+      durationMs: 60_000, // 聚合集合 = 含 endedAt 记录：max(endedAt)=61000 − min(startedAt)=1000（t2 无 endedAt 不入集合）
+    })
+    // 渲染过滤不变：隐藏通知本体不产出独立渲染项
+    expect(items.map((i) => i.kind)).toEqual(['turn', 'turn'])
+  })
+})

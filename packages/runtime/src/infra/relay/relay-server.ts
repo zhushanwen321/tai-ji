@@ -1,5 +1,5 @@
 /**
- * relay socket server（E 方案，subagent-realtime-channel.md §4.1）。
+ * relay socket server。
  *
  * runtime 启动即 listen（早建早发现权限问题），socket 路径 per-instance 唯一（含 pid）。
  * 生命周期：initRelayServer（残留探活 + listen + 孤儿扫描）↔ deinitRelayServer（全部

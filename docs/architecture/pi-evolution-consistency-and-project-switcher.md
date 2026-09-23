@@ -17,7 +17,7 @@
 
 ### 系统是什么
 
-taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC）三层桌面应用。**pi 负责真正执行 AI 会话**：runtime 以 `--mode rpc` spawn pi binary 子进程，模型解析、provider 认证全部在 pi 侧完成。taiji 围绕 pi 建立了自己的 provider/模型管理体系（models.json / auth.json / settings.json，经 `PI_CODING_AGENT_DIR` 重定向到 `~/.taiji/pi/agent/` 与用户全局 `~/.pi/agent/` 隔离）。
+taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC）三层桌面应用。**pi 负责真正执行 AI 会话**：runtime 以 `--mode rpc` spawn pi binary 子进程，模型解析、provider 认证全部在 pi 侧完成。taiji 围绕 pi 建立了自己的 provider/模型管理体系（models.json / auth.json / settings.json，经 `PI_CODING_AGENT_DIR` 重定向到 `~/.taiji/agent/` 与用户全局 `~/.pi/agent/` 隔离）。
 
 两个本文档反复使用的核心概念（术语锚定）：
 
@@ -295,8 +295,8 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 |---|----------------|------|---------|
 | A1 | 守卫逐项拦截漏同步（G1） | 对 §3.2 守卫矩阵**每行**各制造一处真实不一致（改 build.yml 版本 / 改脚本默认值 / 回退快照 / 降一个 extension peerDeps / 增删 KNOWN_PI_API_TYPES 一项……），逐项跑 `node scripts/check-pi-sync.mjs`；全部恢复后复跑 | fail 级行每次注入都被报告且非零退出；warn 级行（dev binary 版本）输出警告；干净仓库复跑绿——单项漏判即 G1 失守，故逐项负向探测而非只测一例 |
 | A2 | 守卫覆盖当前实证（G1） | 守卫开发完成后、U0 修复前，在**当前仓库**首跑（真实漏同步在场） | 必须报出 build.yml 0.84.1 等不一致项——本次真实漏同步作为守卫的第一次实战验收；U0 修复后复跑转绿（红→绿闭环，与 U0 同 PR 交付） |
-| A3 | 默认模型不被静默改写（G2） | 真机 dev 环境。**前置条件**：① 断网（防 Provider 页 mount 触发的 `refreshProviderCatalogs` 从 pi.dev 拉回真实数据整体替换假条目——fetch 失败走 fail-safe 保留缓存）；② 向 `<getDataDir>/provider-catalog-overlay.json` 写入真实形状测试条目（zai + 一个快照外模型 id 如 `glm-test-overlay`），其 lastModified 晚于 pi store 的 zai 条目与快照 catalogGeneratedAt（防 newer-wins 压制与 staleness 过滤）。然后进 Provider 页设其为默认 → 重启应用 → 查看默认模型与 `~/.taiji/pi/agent/settings.json` | Composer 默认模型仍显示 `glm-test-overlay`；settings.json 未被 auto-fix 改写；runtime 日志无 auto-fix 记录 |
-| A4 | 态 3 pass-through 不劣化（G2，负面行为） | 真机 dev：默认模型设为快照内模型（glm-5.3）+ 构造态 3（own 缓存 `<getDataDir>/provider-catalog-overlay.json` 与 pi store `~/.taiji/pi/agent/models-store.json` 中该 provider 条目**双双清空**——只删 own 不够，pi store 是第二数据源）→ 重启 | 默认模型原样保留（无 auto-fix 改写，`--model` 直传 pi 解析成功）；再设一个垃圾模型名验证态 3 trade-off：pi 报 model-not-found 且 settings.json 未被静默改写 |
+| A3 | 默认模型不被静默改写（G2） | 真机 dev 环境。**前置条件**：① 断网（防 Provider 页 mount 触发的 `refreshProviderCatalogs` 从 pi.dev 拉回真实数据整体替换假条目——fetch 失败走 fail-safe 保留缓存）；② 向 `<getDataDir>/provider-catalog-overlay.json` 写入真实形状测试条目（zai + 一个快照外模型 id 如 `glm-test-overlay`），其 lastModified 晚于 pi store 的 zai 条目与快照 catalogGeneratedAt（防 newer-wins 压制与 staleness 过滤）。然后进 Provider 页设其为默认 → 重启应用 → 查看默认模型与 `~/.taiji/agent/settings.json` | Composer 默认模型仍显示 `glm-test-overlay`；settings.json 未被 auto-fix 改写；runtime 日志无 auto-fix 记录 |
+| A4 | 态 3 pass-through 不劣化（G2，负面行为） | 真机 dev：默认模型设为快照内模型（glm-5.3）+ 构造态 3（own 缓存 `<getDataDir>/provider-catalog-overlay.json` 与 pi store `~/.taiji/agent/models-store.json` 中该 provider 条目**双双清空**——只删 own 不够，pi store 是第二数据源）→ 重启 | 默认模型原样保留（无 auto-fix 改写，`--model` 直传 pi 解析成功）；再设一个垃圾模型名验证态 3 trade-off：pi 报 model-not-found 且 settings.json 未被静默改写 |
 | A5 | 排序持久化（G3） | 真机：拖某项目到**首位**、另一项目到**中间位置**（显式覆盖密集重排语义）→ 重启 → 再切换到另一项目 → 再重启；另以键盘通道复验一次（卡片 focus 后方向键交换位置，D8 同一 reorder 入口） | 顺序始终 = 拖拽落点顺序（拖到首位即首位，非尾部）；切换行为不重排有序项目；新建项目落自动序段首位（手动排序项目之后，见 D7 声明②）；键盘交换与拖拽落点语义一致 |
 | A6 | 徽章数 = 列表实际数（G3） | 真机：多项目各含不同数量会话（含 1 个无归属 session） | 每张卡徽章数字 = 点击该卡后 SessionList 顶部的 totalCount；无归属 session 计入默认项目 |
 | A7 | 1 步切换（G3） | 真机点击非活跃项目卡 | 视图立即切换到该项目（无中间展开态）；active 卡样式反白 |

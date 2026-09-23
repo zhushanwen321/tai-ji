@@ -58,6 +58,7 @@ const rejectAllSpy = vi.spyOn(pendingApi, 'rejectAll')
 let restartingCb: (() => void) | null = null
 let failedCb: (() => void) | null = null
 let portCb: ((port: number) => void) | null = null
+let errorCb: ((error: { message: string }) => void) | null = null
 const mockRuntimeCleanup = vi.fn()
 const mockT = vi.fn((key: string) => `[${key}]`)
 
@@ -85,6 +86,14 @@ getRuntimeToken: vi.fn(async () => null),
           failedCb = null
         }
       },
+      // RD-3#2：启动失败真因消费端口（推送置 failed 短路徒劳重连 + init 拉取兜底）
+      onRuntimeError: (cb: (error: { message: string }) => void) => {
+        errorCb = cb
+        return () => {
+          errorCb = null
+        }
+      },
+      getRuntimeStartError: async () => null,
       restartRuntime: vi.fn().mockResolvedValue(undefined),
     },
     visibility: {
@@ -106,6 +115,7 @@ describe('T5: runtime 重连清理 ask-user pending（clearAllPending）', () =>
     restartingCb = null
     failedCb = null
     portCb = null
+    errorCb = null
     const ports = makePorts()
     setConnectionPorts(ports)
     // D9：注入 no-op dispatcher——init() 内 ensureDispatcher(ports) 幂等跳过，

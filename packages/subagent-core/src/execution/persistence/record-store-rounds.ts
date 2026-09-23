@@ -48,12 +48,12 @@ export interface RoundsCtx {
  * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
  * 放大 entry 写面，编排粒度属调用方职责）。
  *
- * @returns false = id 不在内存（未注册/已归档）——事件丢弃并 debug 留痕。
+ * @returns false = id 不在内存（未注册/已回收）——事件丢弃并 debug 留痕。
  */
 export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
-    logger.debug("[subagents] appendEvent: record not in memory (not registered / archived)", {
+    logger.debug("[subagents] appendEvent: record not in memory (not registered)", {
       detail: { id, eventType: event.type },
     });
     return false;
@@ -108,7 +108,7 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  *      字段已退役（[U5/D4] idle 即 resumable——字段从 record/entry 契约整体删除，
  *      无簿记动作）；⑥ idleSince 刷新
  *      （idle-GC 判据锚）；⑦ **`.alive` 保留**
- *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
+ *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
  *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
  *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
  *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
@@ -143,8 +143,8 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   let nextResult: string | undefined;
   if (outcome.kind === "failed") {
     rec.lastError = outcome.reason;
-    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——collect
-    // 域 toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
+    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
+    // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
     // 路径经 finalizeFailed → completeRecord 写 error 的等价承接）。
     rec.error = outcome.reason;
     nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
@@ -161,7 +161,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   rec.round = (rec.round ?? 0) + 1;
   rec.idleSince = Date.now();
   // ⑩ [A-lite / 区1-U1+区3-U1] 轮终停因展示位：成功轮 completed / 失败轮 failed
-  //（「上一轮为什么停」——SubagentList failed 红点判据词 + 排障有词；投影随 ⑨
+  //（「上一轮为什么停」——任务卡片 failed 状态词 + 排障有词；投影随 ⑨
   // entry/recordToSubagent 自动携带）。status 已翻 idle（U4 翻边）；中断族走
   // markSettled interrupted 族不经本原语，值域无冲突。endedAt 内存位不写（终态冻结
   // 信号，写了会击穿方法头 A3 断言——同 record 跨轮轮终第二次即抛错；对齐

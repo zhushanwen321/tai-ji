@@ -16,7 +16,7 @@
  * - complete: finalizeAndPersist(state, "complete", ...)（内部已含 tickState → finalizeGoal → persist）
  * - report_blocked: 手动 tickState（status 仍 active 才累加当前运行段）→ transitionStatus(active→blocked) → persistState
  *
- * create 不调 sendUserMessage：toolcall 时 AI 已在 turn 中，返回结果后自行续跑
+ * create 不发消息注入：toolcall 时 AI 已在 turn 中，返回结果后自行续跑
  * （与 /goal set 的 followUp 触发区分；对齐 Codex create_goal 不自动续跑）。
  *
  * schema：扁平 Type.Object（OpenAI 兼容，C3）——parameters 顶层必须是 type:"object"，
@@ -33,6 +33,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { type Static, Type } from "typebox";
 
 import { SHORT_ID_LENGTH } from "../constants";
@@ -112,6 +113,26 @@ export const GoalControlParams = Type.Object(
 
 export type GoalControlParamsT = Static<typeof GoalControlParams>;
 
+const logger = getLogger("goal");
+
+/**
+ * 辅助 UI 通道降级包装：updateWidget / notify 失败只 warn 留痕不上抛。
+ *
+ * 调用点全部位于核心副作用（createGoal / finalizeAndPersist / persistState）之后——
+ * 状态已落盘，UI 通道故障不能翻转工具结果（与 base-tool-enhance notify.ts 的接入点
+ * 降级同构）。错误串格式化内联（Error message / String）而非复用
+ * @zhushanwen/pi-ext-guards 的 toErrorMessage——不为一个一行 helper 引入运行时依赖。
+ */
+function runUiChannelSafe(action: GoalControlDetails["action"], goalId: string, fn: () => void): void {
+	try {
+		fn();
+	} catch (err) {
+		logger.warn(`goal_control ${action}: ui channel failed; persisted state unaffected`, {
+			detail: { goalId, err: err instanceof Error ? err.message : String(err) },
+		});
+	}
+}
+
 // ── Details（renderResult 数据来源）──────────────────
 
 export interface GoalControlDetails {
@@ -130,7 +151,7 @@ export interface GoalControlDetails {
  * slug：AI 生成的短标识，仅 widget 标题 + history 用，不注入 prompt。真 optional。
  * objective：完整描述，注入每轮 context prompt（保证方向感）。
  *
- * 全解耦：不读 todo/plan。toolcall 时 AI 已在 turn 中，**不**调 sendUserMessage
+ * 全解耦：不读 todo/plan。toolcall 时 AI 已在 turn 中，**不**发消息注入
  * （AI 返回后自行续跑，对齐 Codex create_goal）。
  *
  * 守卫用 D25 严格语义：非终态 active/paused/blocked 全挡，提示用 /goal resume 或
@@ -212,14 +233,16 @@ export function handleCreate(
 		// createGoal 内部 active 守卫兜底（理论上上面守卫已挡；防御性）
 		throw new Error("Goal already active. Cannot create a new one.");
 	}
-	updateWidget(session, ports.ui);
 
 	const state = session.state!;
 	// slug fallback：未提供时用 goalId 截断作标题（与 buildGoalGui 一致，避免 [undefined]）
 	const slug = state.slug ?? state.goalId.slice(0, SHORT_ID_LENGTH);
 	const budgetNotice: string[] = [];
 	if (budget.tokenBudget) budgetNotice.push(`Token budget: ${budget.tokenBudget}`);
-	ports.ui.notify([`Goal created [${slug}]: ${objective}`, ...budgetNotice].join("\n"), "info");
+	runUiChannelSafe("create", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify([`Goal created [${slug}]: ${objective}`, ...budgetNotice].join("\n"), "info");
+	});
 
 	return { action: "create", goalId: state.goalId, status: state.status, slug };
 }
@@ -251,8 +274,10 @@ export function handleComplete(
 
 	// FR-3.3: 唯一终态序列入口（内部：tickState → finalizeGoal(transition+history) → persist）
 	finalizeAndPersist(state, "complete", ports);
-	updateWidget(session, ports.ui);
-	ports.ui.notify(`Goal completed: ${state.objective}`, "info");
+	runUiChannelSafe("complete", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify(`Goal completed: ${state.objective}`, "info");
+	});
 
 	return { action: "complete", goalId: state.goalId, status: state.status };
 }
@@ -289,8 +314,10 @@ export function handleReportBlocked(
 	state.status = transitionStatus(state.status, "blocked");
 
 	persistState(session, ports);
-	updateWidget(session, ports.ui);
-	ports.ui.notify(`Goal blocked: ${reason}`, "warning");
+	runUiChannelSafe("report_blocked", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify(`Goal blocked: ${reason}`, "warning");
+	});
 
 	return { action: "report_blocked", goalId: state.goalId, status: state.status };
 }
@@ -376,12 +403,23 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 						: `Goal reported blocked.\nGoal ID: ${details.goalId}\nReason: ${params.reason?.trim() ?? ""}`;
 
 			// 状态展示不再进 tool result（GUI 渲染字段已移除）：GUI 由 handle* 内的 updateWidget
-			// 经 guiSetWidget 推送（M17 对话流 widget 面板）。
+			// 经 setWidgetDual 推送（GUI 臂 = guiSetWidget/marker 通道，低层原语不单独调用；
+			// 渲染终点 = composer 任务托盘的协议 widget 区）。
 			return { content: [{ type: "text", text }], details };
 		},
 
 		renderCall(args: Record<string, unknown>, theme: Theme): Text {
-			const action = args.action as string;
+			// TUI 渲染先于 schema 校验（args 是未经 schema 收窄的原始形态）：非对象整体
+			// 走安全占位（不抛错）；action/slug 逐个 typeof 守卫替代裸断言——非法 action
+			// 落 report_blocked 回落分支（与原行为一致）
+			if (typeof args !== "object" || args === null) {
+				return new Text(
+					theme.fg("toolTitle", theme.bold("goal_control ")) + theme.fg("muted", "(invalid args)"),
+					0,
+					0,
+				);
+			}
+			const action = typeof args.action === "string" ? args.action : "";
 			const slug = typeof args.slug === "string" ? args.slug : "";
 			const actionLabel =
 				action === "create"

@@ -1,5 +1,5 @@
 /**
- * log-retention-ipc 单测（crash-resilience A9② 验收调试口条款）。
+ * log-retention-ipc 单测（A9② 验收调试口条款）。
  *
  * 覆盖：
  * - 调用返回统计：handler 返回 {scanned, removed}，超龄匹配前缀文件被清、固定名 stderr

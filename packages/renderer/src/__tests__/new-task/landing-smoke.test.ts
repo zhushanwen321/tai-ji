@@ -41,6 +41,8 @@ const flowMock = vi.hoisted(() => ({
   openBranchModal: vi.fn(),
   setPendingModel: vi.fn(),
   setPendingPreset: vi.fn(),
+  // u4b：PendingPreset（显式选择档）是 Landing 的 displayPreset / ui chip 的 resolve 输入
+  pendingPreset: { value: null as string | null },
 }))
 // [w5] NewTaskDeps mock（Landing 经 useNewTaskDeps 构造 + provide NewTaskDepsKey；
 // ui 组件（PresetSelectChip 等）inject 消费。flow = flowMock）
@@ -70,6 +72,9 @@ beforeEach(() => {
   flowMock.currentCwd.value = '/repo'
   flowMock.gitInfo.value = { branch: 'main' }
   flowMock.state.value = 'idle'
+  flowMock.pendingPreset.value = null
+  depsMock.presets.value = []
+  depsMock.defaultPresetId.value = ''
 })
 
 describe('首屏冒烟（渲染 gate）', () => {
@@ -106,5 +111,57 @@ describe('首屏冒烟（渲染 gate）', () => {
     const sendBtn = wrapper.find('[title="输入内容后发送"]')
     expect(sendBtn.exists()).toBe(true)
     expect(sendBtn.attributes('disabled')).toBeDefined()
+  })
+})
+
+/**
+ * u4b 接线回归：landing 模式 chip 的「含替换提示词」信任标记。
+ *
+ * 设计 D3b / §7.1：**创建决策点必须常显该标记**（不是 hover 才有）。ui chip（u4a）的
+ * `hasReplacePrompt` 缺省 false → 若 Landing 不接线，标记永不出现（静默丢失信任披露）。
+ * 本用例补上 renderer 侧的透传断言：选中 replace.enabled && 文案非空的模式 → 出现。
+ */
+const MODE_PRESETS = [
+  { id: 'builtin:full', name: '全工具模式', builtin: true, order: 0, toolMode: 'all', extensionMode: 'all' },
+  {
+    id: 'custom:dispatch',
+    name: '调度模式',
+    builtin: false,
+    order: 1,
+    toolMode: 'allowlist',
+    allowedTools: ['read'],
+    extensionMode: 'all',
+    prompt: { replace: { enabled: true, prompt: '你是调度者，不要自己执行' } },
+  },
+]
+
+describe('landing 模式 chip 信任标记接线（u4b）', () => {
+  it('选中含替换提示词的模式 → chip 上常显「含替换提示词」标记（非 hover）', () => {
+    depsMock.presets.value = MODE_PRESETS
+    depsMock.defaultPresetId.value = 'builtin:full'
+    flowMock.pendingPreset.value = 'custom:dispatch'
+    // landing 态 = composerSid 为 null（ui chip 的 landing 分支才渲染可选 Popover chip）
+    flowMock.currentSessionId.value = null
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: '/repo', gitBranch: 'main' },
+    })
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('调度模式')
+    expect(chip.text()).toContain('含替换提示词')
+  })
+
+  it('选中无替换提示词的模式 → chip 不出现该标记（判据 replace.enabled && 文案非空）', () => {
+    depsMock.presets.value = MODE_PRESETS
+    depsMock.defaultPresetId.value = 'builtin:full'
+    flowMock.pendingPreset.value = 'builtin:full'
+    flowMock.currentSessionId.value = null
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: '/repo', gitBranch: 'main' },
+    })
+    const chip = wrapper.find('[data-testid="chip-preset"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('全工具模式')
+    expect(chip.text()).not.toContain('含替换提示词')
   })
 })

@@ -1,12 +1,14 @@
 /**
- * TurnRail 组件测试（TC-w3-1 到 TC-w3-16，w3 wave，共 15 用例，编号缺 TC-w3-6）。
+ * TurnRail 组件测试（TC-w3-1 到 TC-w3-19，w3 wave，共 18 用例，编号缺 TC-w3-6）。
  *
  * 覆盖 IF4 契约：
  * - 渲染：turns=[] 不渲染；否则每个 turn 一个 rail-node 含 dot+摘要+chev
  * - 交互：点节点文本区 emit('jump')；点 chev emit('toggle')（stopPropagation 隔离）
  * - 状态：sessionActive 时 chev 全禁用；activeTurnIndex 高亮 active 节点；dot 反映状态
+ * - 占位门（TC-w3-17/18/19，D1）：「进行中…」= sessionActive ∧ 真末位；
+ *   测试环境 vue-i18n mock 下 t() 返回 key，占位 DOM 文本 = 'panel.message.railInProgress'
  *
- * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/TurnRail.test.ts
+ * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/TurnRail.test.ts
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -30,6 +32,8 @@ function makeRailTurn(
     thinkingCount?: number
     /** toolCall 数量（测 fallback 计数 M tools；failed=true 时叠加 1 个失败 tool） */
     toolCount?: number
+    /** user-only turn（assistants=[]，命令取消 / 纯 notify 命令残留形态，测占位门 D1） */
+    userOnly?: boolean
   } = {},
 ): MessageTurn {
   // thinking 块数组（每块 content 非空）
@@ -70,16 +74,18 @@ function makeRailTurn(
           content: opts.userText ?? `turn ${idx}`,
           status: 'done',
         } as unknown as Message),
-    assistants: [
-      {
-        id: `a${idx}`,
-        role: 'assistant',
-        content: opts.assistantContent ?? '...',
-        status: 'done',
-        thinking,
-        toolCalls,
-      } as unknown as Message,
-    ],
+    assistants: opts.userOnly
+      ? []
+      : [
+          {
+            id: `a${idx}`,
+            role: 'assistant',
+            content: opts.assistantContent ?? '...',
+            status: 'done',
+            thinking,
+            toolCalls,
+          } as unknown as Message,
+        ],
     isStreaming: false,
     hasFoldable: opts.failed ?? ((toolCalls.length > 0) || (thinking !== undefined)),
   } as MessageTurn
@@ -257,5 +263,47 @@ describe('TurnRail (IF4)', () => {
     // fallback 计数：2 thoughts · 3 tools
     expect(agentRowText).toContain('2 thoughts')
     expect(agentRowText).toContain('3 tools')
+  })
+
+  // ---- 占位门 TC-w3-17/18/19（D1：isPlaceholderVisible = sessionActive ∧ 真末位）----
+  // 占位 DOM 文本 = t('panel.message.railInProgress')，vitest.setup.ts mock 下返回 key 本身。
+  // 19 是防旧判据（isActiveTurn = sessionActive ∧ idx===activeTurnIndex）假绿的核心锁，
+  // 三元组构造钉死：被测 idx == activeTurnIndex 同值且 idx ≠ 末位（详见各用例注释）。
+
+  it('TC-w3-17: sessionActive=false + 末位 user-only turn（assistants=[]）→ 无占位文本，显示 fallback', () => {
+    // 三元组：被测 idx=2 == 末位(turns.length-1)；activeTurnIndex=0(defaultProps)；sessionActive=false
+    const turns = [makeRailTurn(0), makeRailTurn(1), makeRailTurn(2, { userOnly: true })]
+    const wrapper = mount(TurnRail, { props: defaultProps({ turns }) })
+    const node = wrapper.findAll('[data-testid="rail-node"]')[2]
+    expect(node.text()).not.toContain('panel.message.railInProgress')
+    // fallback = ' '（D2 空格兜底）→ agent 行文本 trim 后为空
+    const rows = node.findAll(':scope > div')
+    expect(rows[1].text().trim()).toBe('')
+  })
+
+  it('TC-w3-18: sessionActive=true + 末位 assistants=[] → 显示「进行中…」占位', () => {
+    // 三元组：被测 idx=2 == 末位(turns.length-1)；activeTurnIndex=0(defaultProps，≠末位)；sessionActive=true
+    // activeTurnIndex 不在末位 → 断言同时锁住「占位不依赖视口语义」（D1 与 isActiveTurn 分离）
+    const turns = [makeRailTurn(0), makeRailTurn(1), makeRailTurn(2, { userOnly: true })]
+    const wrapper = mount(TurnRail, { props: defaultProps({ turns, sessionActive: true }) })
+    const node = wrapper.findAll('[data-testid="rail-node"]')[2]
+    const rows = node.findAll(':scope > div')
+    expect(rows[1].text()).toContain('panel.message.railInProgress')
+  })
+
+  it('TC-w3-19: sessionActive=true + 3 turn 阵 + 非末位 user-only turn（idx==activeTurnIndex）→ 无占位（防旧判据假绿）', () => {
+    // 三元组钉死：被测 idx=0 == activeTurnIndex=0(defaultProps 同值) 且 idx ≠ 末位(2)；sessionActive=true
+    // ——旧判据 isActiveTurn(sessionActive ∧ idx===activeTurnIndex) 在此构造判 true 会显占位 =
+    // 假绿复现（设计 U2 明示：若 idx 恰为末位或传 activeTurnIndex=末位，旧判据同绿）。
+    const turns = [makeRailTurn(0, { userOnly: true }), makeRailTurn(1), makeRailTurn(2)]
+    const wrapper = mount(TurnRail, { props: defaultProps({ turns, sessionActive: true }) })
+    const nodes = wrapper.findAll('[data-testid="rail-node"]')
+    const node = nodes[0]
+    expect(node.text()).not.toContain('panel.message.railInProgress')
+    const rows = node.findAll(':scope > div')
+    expect(rows[1].text().trim()).toBe('')
+    // 全阵无占位：turns[1]/turns[2] 有 assistant 内容（agentSummary 非空不走占位分支），
+    // turns[0] 门关 → 整条 rail 均不应出现占位 key
+    expect(wrapper.find('[data-testid="turn-rail"]').text()).not.toContain('panel.message.railInProgress')
   })
 })

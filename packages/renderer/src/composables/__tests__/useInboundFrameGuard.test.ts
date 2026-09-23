@@ -9,6 +9,9 @@
  *   非 tripped 切换 / 原地不动（cur===prev）零动作；首次进入 tripped session 亦触发
  *   （从宽语义，见 composable 注释）；retry 返回 false（非 tripped 残留防御）不重试订阅
  * - install 幂等 / uninstall 解绑（teardown 配对）
+ * - [RD-1#7] session 销毁清理挂点：registerSessionCleanup(clearTripped)——
+ *   triggerSessionCleanups(sid) 回收已删 session 的提示态（集合不再只增不清）；
+ *   uninstall 一并清空投影集合并反注册
  *
  * mock 策略：partial mock '@taiji/core'（onInboundFrameDropped 捕获回调 +
  * retryInboundDroppedSession/subscribeSession 调用断言）+ '@/lib/ipc'（reportRendererLog）；
@@ -21,6 +24,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import type { InboundFrameDroppedInfo } from '@taiji/core'
 import { ROOT_PANEL_ID, usePanelStore } from '@/stores/panel'
+import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
 import {
   installInboundFrameGuard,
   uninstallInboundFrameGuard,
@@ -191,6 +195,38 @@ describe('useInboundFrameGuard 入站守卫 renderer 消费编排（D8 / A6）',
     panel.loadSession(ROOT_PANEL_ID, 's1')
     await nextTick()
     expect(coreMock.subscribeSession).toHaveBeenCalledTimes(1)
+    expect(isInboundSessionTripped('s1')).toBe(false)
+  })
+
+  it('[RD-1#7] session 销毁（triggerSessionCleanups）→ tripped 投影按 sid 回收，不连坐其他 session', () => {
+    installInboundFrameGuard()
+    fireDrop({ sessionId: 's1', sessionDropCount: 3, valveTripped: true })
+    fireDrop({ sessionId: 's2', sessionDropCount: 3, valveTripped: true })
+    expect(isInboundSessionTripped('s1')).toBe(true)
+    expect(isInboundSessionTripped('s2')).toBe(true)
+
+    // useSidebar.deleteSession 编排：session 销毁 → triggerSessionCleanups(sid)
+    triggerSessionCleanups('s1')
+
+    // 已删 session 的静态提示态回收（未注册 cleanup 时该集合只增不清）
+    expect(isInboundSessionTripped('s1')).toBe(false)
+    expect(isInboundSessionTripped('s2')).toBe(true) // 不连坐
+  })
+
+  it('[RD-1#7] uninstall → 投影集整体清空 + 反注册 session cleanup（teardown 配对）', () => {
+    installInboundFrameGuard()
+    fireDrop({ sessionId: 's1', sessionDropCount: 3, valveTripped: true })
+    expect(isInboundSessionTripped('s1')).toBe(true)
+
+    uninstallInboundFrameGuard()
+    // 残留 tripped 态会在重新 install 后表现为「未丢帧却显示静态提示」的假阳性
+    expect(isInboundSessionTripped('s1')).toBe(false)
+
+    // 重新 install 后链路仍可用（幂等标志 + cleanup 注册均复位）
+    installInboundFrameGuard()
+    fireDrop({ sessionId: 's1', sessionDropCount: 3, valveTripped: true })
+    expect(isInboundSessionTripped('s1')).toBe(true)
+    triggerSessionCleanups('s1')
     expect(isInboundSessionTripped('s1')).toBe(false)
   })
 

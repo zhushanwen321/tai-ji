@@ -13,19 +13,16 @@
  *
  * RunSnapshot 格式版本：`wf-run-v2`（D-5 版本守卫，v1 旧格式跳过——extension 侧
  * 声明的接受边界，旧 run 历史价值低，不做兼容迁移）。
- * 扩展源码：extensions/universal/subagent-workflow/src/orchestration/jsonl-run-store.ts
+ * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts
  */
 
 /**
- * workflow run 状态机。
- *
- * 'paused' 是 legacy 读侧兼容值：wf-run-v2 快照（随一次性生命周期收窄）只产出
- * running/done 两态，且 runtime workflow-extractor 对 v1 三态快照一律跳过——该值
- * 实际不再出现。保留在联合中是因为 renderer（WorkflowList/WorkflowDetail/Sidebar
- * 的 `status === 'paused'` 分支与 Pause/Resume 按钮链路）仍引用它，移除需连带清理
- * renderer UI，待 renderer 侧 pause/resume 链路退役时一并删除。
+ * workflow run 状态机（一次性生命周期，subagent-workflow D-2：pause/resume 已移除，
+ * 提前停止唯一方式 = abort）。wf-run-v2 快照只产出 running/done 两态。
+ * [2026-09-16] 'paused' legacy 值随 renderer 侧 Pause/Resume 按钮链路退役一并删除
+ * （composer 任务托盘验收发现死按钮链，修复对齐扩展语义）。
  */
-export type WorkflowRunStatus = 'running' | 'paused' | 'done'
+export type WorkflowRunStatus = 'running' | 'done'
 
 /** done 终态原因（WorkflowRun 不变式 I2：done 时必有 reason）。 */
 export type WorkflowDoneReason =
@@ -77,7 +74,7 @@ export interface WorkflowAgentCall {
  * - runId：RunSnapshot.runId（如 "wf-1783679279983-hlpc46"）
  * - scriptName/slug/description：RunSnapshot.spec（spec.scriptName / spec.slug / spec.description）
  * - status/reason：RunSnapshot.state（state.status / state.reason）
- * - startedAt/completedAt：RunSnapshot.meta（pausedAt 为 legacy 字段，v2 不产出）
+ * - startedAt/completedAt：RunSnapshot.meta
  * - usedTokens/totalCallCount：RunSnapshot.state.budget
  * - agentCalls：RunSnapshot.state.trace[] 逐项映射
  * - stateFilePath：主 session JSONL 的 workflow-state-link.data.path
@@ -99,8 +96,6 @@ export interface WorkflowRunRecord {
   startedAt: string
   /** 完成时间 ISO（meta.completedAt，done 时有值） */
   completedAt?: string
-  /** 暂停时间 ISO（legacy：wf-run-v2 快照无 paused 态，此字段不再产出，恒 undefined） */
-  pausedAt?: string
   /** 已消耗 token（state.budget.usedTokens） */
   usedTokens?: number
   /** agent call 总数（state.budget.totalCallCount） */
