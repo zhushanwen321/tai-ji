@@ -248,8 +248,8 @@ export function extractPlanSteps(planContent: string): string[] {
  * 投递 complete 后的执行通知（2026-09-21 选项集重排：mode 值域 = execute | skill:<name>；
  * execute 档整合 goal 桥 + auto-parallel subagent——goal 可用时先 goalInit 建跟踪，
  * 失败/不可用降级为直接执行的 steer 指令，用户可见失败提示走 notify i18n）。
- * skill 档动态构造 steer（含 skillDir 路径，对齐 register-doc sourceSkill 的 skill 关联
- * 先例；skillDir = skill 入口文件路径——标准形态 SKILL.md 路径 / 散 .md 形态文件本身，
+ * skill 档动态构造 steer（含 skillEntryPath 路径，对齐 register-doc sourceSkill 的 skill 关联
+ * 先例；skillEntryPath = skill 入口文件路径——标准形态 SKILL.md 路径 / 散 .md 形态文件本身，
  * 直接 read 不再拼 SKILL.md）。返回 goalInit 的 outcome（非 execute 档为 undefined）。
  */
 function deliverExecutionNotice(
@@ -257,7 +257,7 @@ function deliverExecutionNotice(
   ctx: ExtensionContext,
   planFilePath: string,
   execMode: string,
-  skillDir?: string,
+  skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
   // execute 档整合 goal 桥：tryGoalInit 内部含 goal-unavailable gate（goal 未挂载走
   // started:false 降级），无需前置 detectGoalCapability 探测
@@ -266,8 +266,8 @@ function deliverExecutionNotice(
   let modeHint: string;
   if (execMode.startsWith(SKILL_MODE_PREFIX)) {
     const skillName = execMode.slice(SKILL_MODE_PREFIX.length);
-    modeHint = skillDir
-      ? `Execute via skill: read the ${skillName} skill at ${skillDir} first, then follow its workflow to execute the plan file.`
+    modeHint = skillEntryPath
+      ? `Execute via skill: read the ${skillName} skill at ${skillEntryPath} first, then follow its workflow to execute the plan file.`
       : `Execute via skill: load the ${skillName} skill and follow its workflow to execute the plan file.`;
   } else if (outcome?.started) {
     modeHint =
@@ -311,7 +311,7 @@ export function handlePlanComplete(
   state: PlanState,
   isolation: string,
   execMode: string,
-  skillDir?: string,
+  skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
   const planFilePath = state.planFilePath;
 
@@ -327,7 +327,7 @@ export function handlePlanComplete(
         // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
         onComplete: () => {
           guardStaleCtx(() => {
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
           }, {
             label: "plan:compact-onComplete",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -336,7 +336,7 @@ export function handlePlanComplete(
         onError: (_error: Error) => {
           guardStaleCtx(() => {
             ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
           }, {
             label: "plan:compact-onError",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -348,7 +348,7 @@ export function handlePlanComplete(
 
     case "direct":
     default: {
-      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillDir);
+      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
     }
   }
 }

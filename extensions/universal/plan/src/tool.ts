@@ -662,7 +662,7 @@ interface ExecOption {
   mode: string;
   description?: string;
   /** skill 档携带（skill 入口文件路径，标准形态 SKILL.md / 散 .md 形态文件本身；CompleteChoiceOutcome 数据通路 → steer 文案 read 该路径） */
-  skillDir?: string;
+  skillEntryPath?: string;
 }
 
 /** skill 选项上限（用户裁决：第一/第二两个 skill 排位；检测再多不进选项） */
@@ -674,7 +674,7 @@ function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
     label: t("exec.viaSkill", { name: skill.name }),
     mode: `skill:${skill.name}`,
     description: skill.description ?? t("exec.viaSkillDesc", { name: skill.name }),
-    skillDir: skill.skillDir,
+    skillEntryPath: skill.skillEntryPath,
   }));
   options.push({
     label: t("exec.execute"),
@@ -698,7 +698,7 @@ const LATER_MODE = "later";
 /** Outcome of the complete-action execution-method prompt. */
 type CompleteChoiceOutcome =
   | { kind: "cancelled"; result: ActionResult }
-  | { kind: "mode"; chosenMode: string; skillDir?: string };
+  | { kind: "mode"; chosenMode: string; skillEntryPath?: string };
 
 /** complete-cancelled result（用户选暂不执行 / 通道取消，reason = 点选 label 或 cancelled） */
 function cancelledByUserResult(choice: string | undefined): ActionResult {
@@ -755,7 +755,7 @@ async function resolveCompleteChoice(
   }
 
   // complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
-  // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillDir 随 outcome 流转
+  // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillEntryPath 随 outcome 流转
   const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
   const execOptions = buildExecOptions(execSkills);
 
@@ -809,7 +809,7 @@ async function resolveCompleteChoice(
   if (option.mode === LATER_MODE) {
     return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
   }
-  return { kind: "mode", chosenMode: option.mode, skillDir: option.skillDir };
+  return { kind: "mode", chosenMode: option.mode, skillEntryPath: option.skillEntryPath };
 }
 
 /**
@@ -860,7 +860,7 @@ async function executeComplete(
   restoreFullToolSet(pi);
 
   // Execute completion handler (compact setup + steer/goalInit delivery)
-  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillDir);
+  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillEntryPath);
 
   // Reset state and clear widget — same as abort
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx);

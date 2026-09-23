@@ -96,9 +96,8 @@ describe("四根枚举与根序（pi 本体加载集对齐）", () => {
 
     const skills = detect();
     expect(namesOf(skills)).toEqual(["lib-skill", "mid-skill", "root-skill", "agent-skill", "home-skill"]);
-    // skillDir 数据通路：steer 指引的路径来源 = 入口文件路径（标准形态即 SKILL.md 路径）
-    expect(skills[0].skillDir).toBe(join(world.cwd, ".pi", "skills", "lib-skill", "SKILL.md"));
-    expect(skills[0].skillPath).toBe(join(world.cwd, ".pi", "skills", "lib-skill", "SKILL.md"));
+    // skillEntryPath 数据通路：steer 指引的路径来源 = 入口文件路径（标准形态即 SKILL.md 路径）
+    expect(skills[0].skillEntryPath).toBe(join(world.cwd, ".pi", "skills", "lib-skill", "SKILL.md"));
   });
 
   it("ancestor chain stops at a .git FILE (worktree 双语义), skills beyond the root are not proposed", () => {
@@ -237,7 +236,7 @@ describe("对照表⑤ 同名 first-writer-wins 去重", () => {
     writeSkill(join(world.homeDir, ".agents", "skills", "dup"));
     const skills = detect();
     expect(namesOf(skills)).toEqual(["dup"]);
-    expect(skills[0].skillDir).toBe(join(world.cwd, ".pi", "skills", "dup", "SKILL.md"));
+    expect(skills[0].skillEntryPath).toBe(join(world.cwd, ".pi", "skills", "dup", "SKILL.md"));
   });
 
   it("non-marker skill still occupies its name（pi collision 语义：marker 不改变占名）", () => {
@@ -252,7 +251,7 @@ describe("对照表⑤ 同名 first-writer-wins 去重", () => {
     fs.symlinkSync(real.skillDir, join(world.homeDir, ".agents", "skills", "alias"));
     const skills = detect();
     expect(namesOf(skills)).toEqual(["dup"]);
-    expect(skills[0].skillDir).toBe(real.skillPath); // 入口文件路径（realPath 去重后指向真身）
+    expect(skills[0].skillEntryPath).toBe(real.skillPath); // 入口文件路径（realPath 去重后指向真身）
   });
 });
 
@@ -315,14 +314,14 @@ describe("对照表①③⑥ 对拍（pi 实装锚点守卫；⑦散 .md 为已�
       expect(piNames).toContain("beta");
       expect(namesOf(detected).sort()).toEqual(["beta", "custom-alpha", "gamma", "loose"]);
       // ⑥：steer 指引名与 pi prompt 列表一致（frontmatter name 而非目录名）
-      expect(detected.some((s) => s.name === "custom-alpha" && s.skillDir.endsWith(join("alpha", "SKILL.md")))).toBe(true);
+      expect(detected.some((s) => s.name === "custom-alpha" && s.skillEntryPath.endsWith(join("alpha", "SKILL.md")))).toBe(true);
       expect(detected.some((s) => s.name === "alpha")).toBe(false);
     } finally {
       rmWorld(root);
     }
   });
 
-  it("散 .md 形态：skillDir = 文件路径本身（steer 指引路径不悬空，⑦登记面内）", () => {
+  it("散 .md 形态：skillEntryPath = 文件路径本身（steer 指引路径不悬空，⑦登记面内）", () => {
     const { root, agentDir } = makeAnchorRoot();
     try {
       const detected = detectExecSkills({
@@ -333,7 +332,7 @@ describe("对照表①③⑥ 对拍（pi 实装锚点守卫；⑦散 .md 为已�
       });
       const loose = detected.find((s) => s.name === "loose");
       // 入口路径 = loose.md 文件本身——不是 `<skills根>/SKILL.md`（散 .md 形态拼 SKILL.md 必然悬空）
-      expect(loose?.skillDir).toBe(join(agentDir, "skills", "loose.md"));
+      expect(loose?.skillEntryPath).toBe(join(agentDir, "skills", "loose.md"));
     } finally {
       rmWorld(root);
     }

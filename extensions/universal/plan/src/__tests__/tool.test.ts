@@ -355,14 +355,14 @@ describe("registerPlanTool", () => {
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
     });
 
-    it("detected plan-exec skills lead the option set (first + second) and map to skill:<name> with skillDir (D10 重排)", async () => {
+    it("detected plan-exec skills lead the option set (first + second) and map to skill:<name> with skillEntryPath (D10 重排)", async () => {
       const { exec, ctx } = setup();
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
       const secondPath = "/tmp/fixtures/skills/pr-cr-fix/SKILL.md";
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir: skillEntryPath, skillPath: skillEntryPath },
-        { name: "pr-cr-fix", description: "PR lifecycle.", skillDir: secondPath, skillPath: secondPath },
-        { name: "third", description: "Beyond the cap.", skillDir: "/tmp/x", skillPath: "/tmp/x" },
+        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillEntryPath },
+        { name: "pr-cr-fix", description: "PR lifecycle.", skillEntryPath: secondPath },
+        { name: "third", description: "Beyond the cap.", skillEntryPath: "/tmp/x" },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute via skill: dev-flow");
       const res = await exec({ action: "complete" });
@@ -377,7 +377,7 @@ describe("registerPlanTool", () => {
       ]);
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("skill:dev-flow");
-      // skillDir 数据通路：CompleteChoiceOutcome → handlePlanComplete（steer 文案的路径来源）
+      // skillEntryPath 数据通路：CompleteChoiceOutcome → handlePlanComplete（steer 文案的路径来源）
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
@@ -471,7 +471,7 @@ describe("registerPlanTool", () => {
       const { exec, ctx } = setupGui();
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillDir: skillEntryPath, skillPath: skillEntryPath },
+        { name: "dev-flow", description: "Deliver a plan via dev-flow.", skillEntryPath },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>)
         .mockResolvedValue(JSON.stringify({ "Execution method": "Execute via skill: dev-flow" }));
