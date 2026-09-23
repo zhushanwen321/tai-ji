@@ -69,6 +69,27 @@ export function canRunTransition(from: RunStatus, to: RunStatus): boolean {
   return (VALID_RUN_TRANSITIONS[from] as readonly RunStatus[]).includes(to);
 }
 
+/**
+ * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
+ * 「run 因异常收口」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
+ * 当成功汇报——防偷懒收尾指令只对终止性 reason 追加）。
+ *
+ * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
+ * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ */
+export function isTerminalDoneReason(reason: DoneReason): boolean {
+  switch (reason) {
+    case "completed":
+      return false;
+    case "failed":
+    case "aborted":
+    case "invalid_args":
+    case "budget_limited":
+    case "time_limited":
+      return true;
+  }
+}
+
 // ── Agent 调用 ────────────────────────────────────────────────
 
 /**

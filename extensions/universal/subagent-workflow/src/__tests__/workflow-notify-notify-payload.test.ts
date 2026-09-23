@@ -18,7 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { bindNotifyLedgerHost, getBoundNotifyLedger, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
 
-import { notifyDone, WORKFLOW_DONE_NOTIFY_ID_PREFIX } from "../interface/helpers.ts";
+import { notifyDone, WORKFLOW_DONE_NOTIFY_ID_PREFIX } from "../workflow-notify.ts";
 
 // ── mock 面（helpers-notify-ledger.test.ts 同款 duck typing） ────────────
 

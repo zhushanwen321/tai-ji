@@ -1,5 +1,5 @@
 /**
- * Workflow Extension — Interface helpers
+ * Workflow Extension — workflow 域通知生产
  *
  * notifyDone(pi, runId, run, notified) — run 完成时发 completion notification
  * （[u9 账本化] 经 core NotifyLedger 四步生命周期，C-ext-19；未 bind 降级直发）。
@@ -8,7 +8,9 @@
  * errorCode 与证据指针、取消亦通知——载荷 outcome/errorCode/resultSummary/
  * artifactsDir/eventsJournalPath（details 层，content 追加指针段）。
  *
- * 层归属：Interface（依赖 Pi SDK + Engine WorkflowRun 模型）。
+ * 层归属：workflow 域（与 workflow-events.ts / workflow-stall-watchdog.ts 同层；
+ * 唯一生产消费方 = workflow-events.ts。原名 interface/helpers.ts，2026-09-24
+ * 名实归位——内容自始是通知生产而非 interface 注册面杂项）。
  */
 
 import { join } from "node:path";
@@ -25,6 +27,7 @@ import {
   boundedPrettySerialize,
   doneReasonToRunOutcome,
   getBoundNotifyLedger,
+  isTerminalDoneReason,
   RUN_EVENT_JOURNAL_SUFFIX,
   type RunOutcome,
 } from "@zhushanwen/subagent-core";
@@ -40,8 +43,8 @@ import {
   guiResult,
   isGuiCapable,
 } from "@zhushanwen/extension-protocol";
-import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
-import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { mapRunIcon, mapRunStatus } from "./interface/gui-mappers.ts";
+import { ID_PREVIEW_LENGTH } from "./interface/id-preview.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -219,8 +222,9 @@ export function notifyDone(
 
  // 终止性原因（非正常完成）追加防偷懒收尾指令——budget/time 耗尽或 abort 不是任务完成，
  // 模型可能把 "done" 当成功汇报（F3 偷懒完成）。收尾三步骤与 turn-limiter WRAP_UP_MESSAGE 对齐。
-  const TERMINAL_REASONS = new Set(["budget_limited", "time_limited", "aborted", "failed", "circular"]);
-  if (run.state.reason && TERMINAL_REASONS.has(run.state.reason)) {
+ // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类）；
+ // 原本地 Set 镜像已删（其幽灵成员 "circular" 不在 core 词表——镜像漂移实证）。
+  if (run.state.reason !== undefined && isTerminalDoneReason(run.state.reason)) {
     parts.push("");
     parts.push(
       "This is NOT task completion. Summarize what was DONE and VERIFIED, list what remains " +

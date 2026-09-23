@@ -17,7 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
-import { notifyDone } from "../interface/helpers.ts";
+import { notifyDone } from "../workflow-notify.ts";
 
 // ── 最小 mock（helpers-gui.test.ts 同款 duck typing）─────────────
 

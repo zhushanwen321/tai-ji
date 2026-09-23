@@ -457,6 +457,9 @@ export type {
 // 原 execution/execute-options-mapper.ts 重复定义已删（改 import 消费，深路径消费者
 // subagent-actions-core 同步切到 models/types 单源）。
 export { SLUG_MAX_LENGTH } from "./orchestration/models/types.ts";
+// isTerminalDoneReason：DoneReason 终止性判定（穷举 switch，词表新增成员 tsc 强制归类）。
+// 壳 workflow-notify 的防偷懒收尾指令按它判定——词表镜像收编 core 单源。
+export { isTerminalDoneReason } from "./orchestration/models/types.ts";
 
 // workflow 脚本资产面：registry 契约 + 实现 / 脚本 lint / 文件落盘（save / delete）
 // + skill 路径缓存清理——组合根装配与 workflow 工具面消费。

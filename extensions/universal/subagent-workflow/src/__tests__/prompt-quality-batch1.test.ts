@@ -41,13 +41,13 @@ describe("U1: SKILL.md 示例不含 review-${file}/${round} 模式", () => {
 // ── U2: notifyDone 终止性错误收尾 ──────────────────────────────
 
 describe("U2: notifyDone 终止性原因追加防偷懒收尾", () => {
-  const helpersSrc = readSrc("src/interface/helpers.ts");
+  const helpersSrc = readSrc("src/workflow-notify.ts");
 
-  it("含终止性原因集合定义", () => {
-    // TERMINAL_REASONS 包含 budget_limited / time_limited / aborted 等
-    expect(helpersSrc).toContain("budget_limited");
-    expect(helpersSrc).toContain("time_limited");
-    expect(helpersSrc).toContain("aborted");
+  it("终止性判定消费 core 谓词（词表已收编 isTerminalDoneReason，非本地 Set）", () => {
+    // 原本地 TERMINAL_REASONS Set 镜像已删（其幽灵成员 circular 不在 core 词表）；
+    // 判定单源 = core isTerminalDoneReason（穷举 switch，词表演化 tsc 强制归类）
+    expect(helpersSrc).toContain("isTerminalDoneReason");
+    expect(helpersSrc).not.toContain("TERMINAL_REASONS");
   });
 
   it("含防偷懒收尾指令（NOT task completion）", () => {

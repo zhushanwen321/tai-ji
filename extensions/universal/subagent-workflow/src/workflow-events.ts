@@ -63,7 +63,7 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // [u7a D5] 在途上报出口类型（实例由组合根创建并接线 setInFlightListener，
 // 本模块只在 session_start / session_shutdown 驱动 attach/detach）。
 import type { InFlightReporter } from "./host/inflight-reporter.ts";
-import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./interface/helpers.ts";
+import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./workflow-notify.ts";
 import { toGuiCtx } from "./interface/gui-mappers.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
 import {

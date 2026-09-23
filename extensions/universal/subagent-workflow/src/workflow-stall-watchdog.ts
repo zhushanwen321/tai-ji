@@ -54,7 +54,7 @@ export interface StallWatchdogDeps {
   notifyStalled(view: StallRunView, stalledMs: number, lastProgressMs: number): void;
   /** tick 异常围栏：watchdog 自吞错误保 timer 存活，错误经此上报（informational 面 fail-open）。 */
   onTickError(err: unknown): void;
-  /** 阈值（SSOT = interface/helpers.ts 的 WORKFLOW_STALL_THRESHOLD_MS，20min，对齐 zcode）。 */
+  /** 阈值（SSOT = workflow-notify.ts 的 WORKFLOW_STALL_THRESHOLD_MS，20min，对齐 zcode）。 */
   thresholdMs: number;
   /** 检测周期，缺省 60s。检测延迟上界 = 阈值 + 本周期（秒级精度无意义——分钟级
    * 周期把 tick 空转成本压到可忽略）。 */

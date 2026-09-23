@@ -34,7 +34,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 
 import { bindNotifyLedgerHost, getBoundNotifyLedger, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
 
-import { notifyDone, WORKFLOW_DONE_NOTIFY_ID_PREFIX } from "../interface/helpers.ts";
+import { notifyDone, WORKFLOW_DONE_NOTIFY_ID_PREFIX } from "../workflow-notify.ts";
 
 // ── core 账本常量镜像（见文件头说明） ──────────────────────────
 
