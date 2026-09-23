@@ -283,8 +283,11 @@ jobs:
       # pre-commit 而无测试，tmp mirror × spawnSync python3 同族惯例，不依赖 staged 产物）。
       # scheduler e2e 判定器单测同批追加（MF-1-13：判定器自错 = e2e 假绿/假红不可辨，
       # 纯函数族抽至 scripts/lib/scheduler-e2e-judgers.cjs 直测，不依赖 staged 产物）。
+      # render-sampling 管道判定层单测同批追加（MF-1-22：复用管道判定逻辑出错 = 静默
+      # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
+      # 同一函数体，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
