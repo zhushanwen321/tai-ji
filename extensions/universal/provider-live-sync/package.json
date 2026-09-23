@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-provider-live-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential config changes.",
   "type": "module",
   "main": "index.ts",

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-pending-notifications",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Cross-extension async operation registration/query mechanism for Pi.",
   "type": "module",
   "main": "src/index.ts",

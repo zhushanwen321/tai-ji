@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.4.3
+
+### Patch Changes
+
+- 43a50ae2e: Test hardening: pin git locale and strip ambient relay env in baseline suites so suite results no longer depend on host locale/relay state.
+
 ## 0.4.2
 
 ### Patch Changes
