@@ -65,6 +65,9 @@ import time
 from pathlib import Path
 
 MIN_INCREMENTAL_DEFAULT = 80.0
+# S4 文件级增量门槛默认值（防单文件盲区被包百分比稀释，见 main() 内注释）
+MIN_FILE_INCREMENTAL_DEFAULT = 60.0
+FILE_GATE_MIN_LINES_DEFAULT = 8
 # 只对这些前缀下的包做 gate（apps/electron 无独立 vitest 包；resources/plugins =
 # builtin 插件包，2026-09-22 显式裁决纳入——scheduler-manager 装配 vitest 后盲区合入
 # 的 MF-1-7 形态不允许再发生；前缀内缺装配的包由 unmeasured 登记显式出声，不静默）
@@ -250,17 +253,19 @@ def added_lines(repo_root: Path, base: str, files: list[str]) -> dict[str, set[i
 
 
 def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
-                    added: dict[str, set[int]]) -> tuple[float, int, int, list[str], list[str]]:
-    """(增量覆盖率%, 覆盖行数, 可执行新增行数, 未覆盖文件清单, 无 lcov 记录文件清单)。
+                    added: dict[str, set[int]]) -> tuple[float, int, int, list[str], list[str], list[dict]]:
+    """(增量覆盖率%, 覆盖行数, 可执行新增行数, 未覆盖文件清单, 无 lcov 记录文件清单, 文件级明细)。
 
     lcov SF 是包相对路径（SF:src/App.vue），added 是 repo 相对（packages/<pkg>/src/App.vue）：
     去包前缀后全字符串精确匹配。禁止 basename 兜底——同名文件（多个 index.ts）会拿错
     hits_map（2026-08-21 假 pass 根因 #2）。无 lcov 记录的新文件不入分母（无可执行行或
-    未被任何测试加载），但列出供 debug。
+    未被任何测试加载），但列出供 debug。文件级明细（S4）= 每个有可执行新增行的文件的
+    executable/hit/pct，供文件级门槛消费——包百分比会稀释单文件零覆盖盲区。
     """
     covered = total = 0
     uncovered_files: list[str] = []
     no_lcov: list[str] = []
+    file_details: list[dict] = []
     for rel_file, lines in added.items():
         sf_key = rel_file[len(pkg) + 1:] if rel_file.startswith(pkg + "/") else rel_file
         hits_map = coverage.get(sf_key)
@@ -275,11 +280,15 @@ def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
             # 条目语义 = 未覆盖行数/总可执行行（I-13 修正：旧格式 (hit/total) 是已覆盖数，
             # 与字段名 uncovered 直觉相反，下游按「未覆盖 X 行」消费会系统性夸大缺口）。
             uncovered_files.append(f"{rel_file} ({len(executable) - hit} uncovered / {len(executable)})")
+        file_details.append({
+            "file": rel_file, "executable": len(executable), "hit": hit,
+            "pct": round(hit / len(executable) * 100, 1),
+        })
         covered += hit
         total += len(executable)
         debug(f"match {rel_file}: executable={len(executable)} hit={hit}")
     pct = (covered / total * 100) if total else 100.0
-    return pct, covered, total, uncovered_files, no_lcov
+    return pct, covered, total, uncovered_files, no_lcov, file_details
 
 
 def main() -> None:
@@ -287,6 +296,12 @@ def main() -> None:
     args = sys.argv[1:]
     base = args[args.index("--base") + 1] if "--base" in args else "main"
     min_pct = float(args[args.index("--min-incremental") + 1]) if "--min-incremental" in args else MIN_INCREMENTAL_DEFAULT
+    # S4 文件级增量门槛：包百分比会稀释单文件盲区（PR #20 组 A 的 A2 形态——
+    # composer-shell.ts 6/6 全未覆盖但所在包 93.6% 过线）。对新增可执行行 ≥
+    # min_file_lines 的文件单独卡线，防稀释；阈值 60% 拦「严重稀释」（0%/13%/37% 型），
+    # 78-90% 边缘属断言强度问题（不可守卫化，归 review）。min_file_lines 排除小文件噪声。
+    min_file_pct = float(args[args.index("--min-file-incremental") + 1]) if "--min-file-incremental" in args else MIN_FILE_INCREMENTAL_DEFAULT
+    min_file_lines = int(args[args.index("--file-gate-min-lines") + 1]) if "--file-gate-min-lines" in args else FILE_GATE_MIN_LINES_DEFAULT
     # --packages 与 --extra-packages 语义不同、可共存：前者是交集过滤器（只收窄
     # changed_packages() 结果，无 src/ 改动的包加不进去）；后者是追加器（无条件并入
     # 包集合，见文件头 docstring）
@@ -367,7 +382,30 @@ def main() -> None:
                 "pct": round(hit / executable * 100, 1) if executable else 100.0,
             }
         added = added_lines(repo_root, base, files)
-        pct, covered, total, unc, no_lcov = incremental_pct(cov, pkg, added)
+        pct, covered, total, unc, no_lcov, file_details = incremental_pct(cov, pkg, added)
+        # S4 文件级门槛：新增可执行行 ≥ min_file_lines 的文件，自身增量 < min_file_pct 即
+        # 违规（包整体过线不能稀释单文件盲区）。违规不覆盖包级判定——两者独立，任一红即红。
+        # 豁免机制（登记式，与 taste-lint 行内登记同构）：文件头注释含
+        # `coverage-file-gate-exempt: <理由>` → 该文件退出文件级门槛（包级仍卡），
+        # 报告登记为 exempt（可见不静默）——适用面：组合根装配接线（单测不可达，
+        # 行为由 e2e/bundle 验证承载）、跨环境分支（本轨结构性不可达，另轨由
+        # 专项守卫覆盖）。
+        raw_violations = [f for f in file_details
+                          if f["executable"] >= min_file_lines and f["pct"] < min_file_pct]
+        file_violations = []
+        file_exempt = []
+        for v in raw_violations:
+            abs_file = repo_root / v["file"]
+            try:
+                head = abs_file.read_text(encoding="utf-8", errors="replace")[:2400]
+            except OSError:
+                head = ""
+            m = re.search(r"coverage-file-gate-exempt:\s*(.+)", head)
+            if m:
+                file_exempt.append({"file": v["file"], "pct": v["pct"],
+                                    "executable": v["executable"], "reason": m.group(1).strip()})
+            else:
+                file_violations.append(v)
         summary_file = pkg_dir / "coverage" / "coverage-summary.json"
         overall = ""
         if summary_file.is_file():
@@ -382,10 +420,24 @@ def main() -> None:
             "executable_added_lines": total,
             "overall": overall, "uncovered_files": unc[:10],
             "files_without_lcov": no_lcov[:10],
+            "file_gate": {"min_file_pct": min_file_pct, "min_file_lines": min_file_lines,
+                          "violations": [{"file": v["file"], "pct": v["pct"],
+                                          "executable": v["executable"]} for v in file_violations],
+                          "exempt": file_exempt},
         })
         if pct < min_pct:
             entry["status"] = "FAIL"
             entry["reason"] = f"增量覆盖率 {pct:.1f}% < {min_pct}%"
+            verdict = "fail"
+        elif file_violations:
+            entry["status"] = "FAIL"
+            worst = min(file_violations, key=lambda v: v["pct"])
+            entry["reason"] = (
+                f"文件级增量门槛：{len(file_violations)} 个新增文件自身覆盖率 < {min_file_pct}%"
+                f"（最差 {worst['file']} {worst['pct']}% = {worst['hit']}/{worst['executable']} 行，"
+                "包整体过线不能稀释单文件盲区）；恢复：为违规文件补测试（见 file_gate.violations）"
+                "或该文件属不可测面时在 PR 说明并经裁决后调整"
+            )
             verdict = "fail"
         report[pkg] = entry
         print(f"  {entry['status']:<4} {pkg}: 增量 {pct:.1f}% ({covered}/{total} 可执行新增行) {overall}")
@@ -406,6 +458,7 @@ def main() -> None:
         sys.exit(2)
 
     out = {"verdict": verdict, "base": base, "min_incremental": min_pct,
+           "min_file_incremental": min_file_pct, "file_gate_min_lines": min_file_lines,
            "packages": report, "files": file_cov, "unmeasured": unmeasured}
     (repo_root / ".review").mkdir(exist_ok=True)
     (repo_root / ".review" / "coverage.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
