@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-llm-shared",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Shared LLM invocation library for Pi extensions — model resolution (ref exact only), LLM calling (completeSimple), and config read/write with mtime+size caching. Shared library, not a Pi extension.",
   "type": "module",
   "main": "src/index.ts",
