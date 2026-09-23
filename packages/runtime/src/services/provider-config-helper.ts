@@ -813,7 +813,7 @@ function applyCustomApiWritePolicy(
  * RT-5#2（M15）：本函数是导入路径的模型装配点（importer 传 models；setProvider 侧自行走
  * mergeProviderModel 装配后不传 models），转译后追加 B-4b 校验型白名单（applyValidatedModelFields
  * ——settings 路径同源），外部配置的畸形 cost/headers/reasoning/maxTokens 不再裸透传写盘：
- * pi 0.84.4 ModelConfig.load 对 schema 违规**整表拒载**（node_modules dist core/model-config.js
+ * pi 0.84.4 ModelConfig.load 对 schema 违规**整表拒载**（dist core/model-config.js:232-237
  * validateModelsConfig.Check 失败 → 空 providers Map + error），一条畸形模型毒死全部自定义
  * provider。非法值 throw 由导入链 per-entry catch 折叠为该条 `status:'failed'` + reason。
  */

@@ -18,9 +18,11 @@
 //      本轮内被 steer/followUp drain 出的后续请求与后续轮次全部走真实 provider；
 //   ④ turn_end / session 边界 ⇒ 安全网注销（幂等）。
 //
-// 状态住模块级单例 ackState：pi 每次 session 替换都重跑 extension factory（index.ts
-// 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的覆写窗口会失去清理者；模块级
-// 单例跨代共享，新实例才能注销上一代残留的覆写窗口（本机制的结构性前提）。
+// 状态住进程级单例槽（development-guide §7.5）：pi 每次 session 替换都重跑 extension
+// factory（index.ts 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的覆写窗口会失去
+// 清理者；ackState 持在 globalThis[Symbol.for] 槽内，跨 factory 重跑与 jiti 模块重求值
+// （reload/cwd 变化产生新模块环境）都取回同一对象，新实例才能注销上一代残留的覆写
+// 窗口（本机制的结构性前提）。
 
 import { existsSync } from 'node:fs'
 
@@ -38,21 +40,40 @@ import type {
 } from './types.js'
 
 /**
- * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），
- * 保证跨代共享同一引用。availability 承载建任务期的可用性判定结果，供同会话重复创建复用
+ * ack 状态进程槽（development-guide §7.5：跨 session 存活的进程级单例必须用
+ * globalThis[Symbol.for] 持有——jiti 按模块路径字符串做缓存 key，双路径加载会把
+ * 模块级单例分裂成多份互不可见；Symbol.for 全局注册表 + 进程级唯一 globalThis
+ * 保证槽内对象跨所有 module instance 唯一）。
+ */
+const ACK_STATE_SLOT_KEY = Symbol.for('@zhushanwen/pi-scheduler.ack-state')
+
+/** 槽 get-or-create（整对象一槽；形态同 subagent-workflow getOrCreateWorkflowDomainState）。 */
+function getOrCreateAckState(): AckState {
+  let state = Reflect.get(globalThis, ACK_STATE_SLOT_KEY) as AckState | undefined
+  if (!state) {
+    state = {
+      window: null,
+      ackTurnStarted: false,
+      ackStreamCalled: false,
+      taskId: null,
+      taskName: '',
+      ackText: '',
+      model: undefined,
+      sessionFile: undefined,
+      availability: undefined,
+    }
+    Reflect.set(globalThis, ACK_STATE_SLOT_KEY, state)
+  }
+  return state
+}
+
+/**
+ * ack 进程级单例状态（槽内对象，见 getOrCreateAckState 与 development-guide §7.5）。
+ * resetAckState() 之外禁止整体重新赋值（字段赋值重置），保证跨代共享同一引用。
+ * availability 承载建任务期的可用性判定结果，供同会话重复创建复用
  * （省重复读 models.json 与动态 import）。
  */
-export const ackState: AckState = {
-  window: null,
-  ackTurnStarted: false,
-  ackStreamCalled: false,
-  taskId: null,
-  taskName: '',
-  ackText: '',
-  model: undefined,
-  sessionFile: undefined,
-  availability: undefined,
-}
+export const ackState: AckState = getOrCreateAckState()
 
 /** 通知去重（模块级；resetAckState 全清——跨会话隔离）。 */
 const notifyDedup = createAckNotifyDedup()
@@ -103,8 +124,8 @@ export interface AckTurnController {
 }
 
 /**
- * 全量清理模块级状态（session_start 与 session_shutdown 都调）：清 window /
- * ackTurnStarted / 记录上下文 / 可用性缓存与通知去重。幂等。
+ * 全量清理槽内状态（session_start 与 session_shutdown 都调）：对槽内对象逐字段重置
+ * window / ackTurnStarted / 记录上下文 / 可用性缓存，并清通知去重。幂等。
  */
 export function resetAckState(): void {
   ackState.window = null
@@ -119,7 +140,7 @@ export function resetAckState(): void {
   notifyDedup.clear()
 }
 
-/** 构造 ack 编排控制器（backend 装配点注入；状态仍是模块级单例）。 */
+/** 构造 ack 编排控制器（backend 装配点注入；状态为槽内进程级单例）。 */
 export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
   /** 通知去重键：同 session 同 task 只发一次（sessionFile 缺失时以字面量占位）。 */
   function dedupKey(): string {

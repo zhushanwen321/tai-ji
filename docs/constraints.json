@@ -1206,7 +1206,7 @@
     },
     {
       "id": "C-ext-12",
-      "summary": "TUI/GUI 环境区分用 ctx.mode === \"rpc\"（hasUI 在 TUI/RPC 均为 true 不能区分）；event handler 注入消息只能 pi.sendUserMessage；agent_end 禁启动新 LLM 调用",
+      "summary": "TUI/GUI 环境区分用 ctx.mode === \"rpc\"（hasUI 在 TUI/RPC 均为 true 不能区分）；event handler 注入消息首选 pi.sendMessage custom message（display 控可见性），sendUserMessage 保留给真实用户视角语义；agent_end 禁启动新 LLM 调用",
       "scope": [
         "extensions/**"
       ],

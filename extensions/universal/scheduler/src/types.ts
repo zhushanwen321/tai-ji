@@ -209,7 +209,8 @@ export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed
 export type AckNotifyReason = 'e3-no-turn' | 'e8-no-base'
 
 /**
- * ack 模块级编排状态（u-ack-turn 的单例状态域）。类型放此处而非编排模块，便于编排单测
+ * ack 编排状态（u-ack-turn 的单例状态域；实例持在 globalThis[Symbol.for] 进程槽，
+ * development-guide §7.5）。类型放此处而非编排模块，便于编排单测
  * 构造夹具与跨模块引用；生命周期由 session_start / session_shutdown 跨代清理。
  */
 export interface AckState {

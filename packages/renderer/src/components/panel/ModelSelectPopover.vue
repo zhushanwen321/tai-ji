@@ -130,7 +130,11 @@ const currentName = computed(() => {
 /** panel 选中回调：裸 id → 反查 providerId → 复用 onSelect 的 select 语义 */
 function onPickFromPanel(modelId: string): void {
   const group = groups.value.find((g) => g.models.some((m) => m.id === modelId))
-  onSelect(modelId, group?.providerId ?? ('' as ProviderId))
+  // 渲染与点击之间 groups 被刷新（模型禁用/移除、providerFilter 变化）时反查失败：
+  // 不发 select——provider 缺失时伪造空串会穿品牌类型，下游拼出 `/modelId` 畸形复合 id；
+  // 静默忽略该次点击，浮层保持打开展示刷新后的列表
+  if (!group) return
+  onSelect(modelId, group.providerId)
 }
 
 function onSelect(id: string, provider: ProviderId): void {

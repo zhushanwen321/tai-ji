@@ -15,13 +15,30 @@ import type { SchedulerService } from './service.js'
 
 const logger = getLogger('scheduler')
 
-// ── 命令路径挂起窗口的 AbortController 注册表（模块级）──
+// ── 命令路径挂起窗口的 AbortController 注册表（进程级单例槽）──
 //
 // pi 的 `ExtensionContext.signal` 在命令 idle 时恒 undefined（不可复用），命令路径的表单
 // 挂起窗口必须自持 AbortController；`session_shutdown`（reason ∈ quit/reload/new/resume/fork）
 // 时由 index.ts 调 abortPendingScheduleForms() 统一 abort → 交互以取消收尾（不创建、不 toast）。
-// 模块级而非 factory 闭包级：registry 需跨 factory 重跑可见（pi 每次 session 替换重跑 factory）。
-const pendingFormControllers = new Set<AbortController>()
+// 住 globalThis[Symbol.for] 进程槽（development-guide §7.5）：registry 需跨 factory 重跑
+// （pi 每次 session 替换重跑 factory）与 jiti 模块重求值（reload/cwd 变化）可见。
+const PENDING_FORM_CONTROLLERS_SLOT_KEY = Symbol.for(
+  '@zhushanwen/pi-scheduler.pending-form-controllers',
+)
+
+/** 槽 get-or-create（整 Set 一槽；形态同 subagent-workflow getOrCreateWorkflowDomainState）。 */
+function getOrCreatePendingFormControllers(): Set<AbortController> {
+  let controllers = Reflect.get(globalThis, PENDING_FORM_CONTROLLERS_SLOT_KEY) as
+    | Set<AbortController>
+    | undefined
+  if (!controllers) {
+    controllers = new Set<AbortController>()
+    Reflect.set(globalThis, PENDING_FORM_CONTROLLERS_SLOT_KEY, controllers)
+  }
+  return controllers
+}
+
+const pendingFormControllers: Set<AbortController> = getOrCreatePendingFormControllers()
 
 /** 中止全部挂起中的命令路径表单（index.ts 的 session_shutdown 接线点）。 */
 export function abortPendingScheduleForms(): void {

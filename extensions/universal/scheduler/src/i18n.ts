@@ -1,19 +1,19 @@
-import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { readUiLocale } from '@zhushanwen/pi-llm-shared/ui-locale'
 
 import { formatRelativeTime, formatSchedule } from './format.js'
 import type { UiLocale } from './format.js'
 import type { ScheduleSpec, ScheduledTask, TaskKind, TaskStatus } from './types.js'
 
 export type { UiLocale } from './format.js'
+export { readUiLocale }
 
 /**
- * L2 extension 侧词典 + 就地 locale 读取器（设计 §6.6 D6 / §7.1）。
+ * L2 extension 侧词典 + locale 读取接线（设计 §6.6 D6 / §7.1）。
  *
  * 语言归属原则（D6）：跨边界只走数据——renderer 是语言权威，进程只读派生态。
- * 读取器**就地实现**、不抽共享模块（设计 §7.2：本设计内需求方仅此一处，
- * 抽取会新增第三个位置而非去重）。先例 = `extensions/taiji/system-prompt/src/index.ts`
- * 的 mtime+size 双键读缓存。
+ * 读取器（readUiLocale + mtime+size 双键读缓存 + 降级）下沉在
+ * `@zhushanwen/pi-llm-shared` 单一实现（@data-owner #39 注解随实现持有）；
+ * 需求方（本包与 plan 的 i18n 层）经 import 消费，不再各自就地实现。
  *
  * 三个渲染入口按受众分工（设计 §6.9「双受众」）：
  * - `t(key, params)`：单条词典模板
@@ -300,64 +300,6 @@ function interpolate(template: string, params?: Record<string, string | number>)
     const value = params[name]
     return value === undefined ? match : String(value)
   })
-}
-
-// ── 就地 locale 读取（含 @data-owner 注解 + mtime+size 双键缓存）──
-
-const UI_PREFERENCES_FILENAME = 'ui-preferences.json'
-
-/**
- * 模块级 (mtimeMs, size) 双键读缓存（先例 `extensions/taiji/system-prompt/src/index.ts`）：
- * 每次读仍 stat 判变（runtime 写盘后下一轮即生效），但文件未变时跳过 readFileSync/JSON.parse。
- * stat / 读盘 / 解析任一失败 → 驱逐缓存并回落默认 `en-US`（缺失/损坏文件是同一条降级路径）。
- *
- * @data-owner #39 `ui-preferences.json`（读缓存，非第二写方；写方唯一 = runtime
- * `config.setUiLocale` handler，见 `docs/architecture/data-source-registry.md` 登记行——
- * 该登记行由 u-locale-channel 单元落表，本单元只承诺注解条目号一致）。
- */
-let localeCache: { filePath: string; mtimeMs: number; size: number; locale: UiLocale } | null = null
-
-/**
- * 读界面语言（数据目录动态推导，禁硬编码路径）：
- * runtime 以 `TAIJI_AGENT_DATA_DIR = getConfigDir()` 注入 pi 子进程；文件
- * `<dataDir>/ui-preferences.json` 形如 `{ v: 1, locale: 'zh-CN' | 'en-US', updatedAt }`。
- * env 缺失 → 默认 `en-US`（设计 §6.6 L-c 降级路径）。
- */
-export function readUiLocale(): UiLocale {
-  const dataDir = process.env.TAIJI_AGENT_DATA_DIR
-  if (!dataDir) return DEFAULT_UI_LOCALE
-
-  const filePath = join(dataDir, UI_PREFERENCES_FILENAME)
-  try {
-    const stat = statSync(filePath)
-    const cached = localeCache
-    if (
-      cached !== null &&
-      cached.filePath === filePath &&
-      cached.mtimeMs === stat.mtimeMs &&
-      cached.size === stat.size
-    ) {
-      return cached.locale
-    }
-    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf-8'))
-    const locale = parseUiLocale(parsed)
-    localeCache = { filePath, mtimeMs: stat.mtimeMs, size: stat.size, locale }
-    return locale
-  } catch {
-    // 文件缺失 / 不可读 / JSON 损坏均归此路径（设计口径：损坏 = 回落默认 + 无出声面）
-    localeCache = null
-    return DEFAULT_UI_LOCALE
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function parseUiLocale(value: unknown): UiLocale {
-  if (!isRecord(value)) return DEFAULT_UI_LOCALE
-  const locale = value.locale
-  return locale === 'zh-CN' || locale === 'en-US' ? locale : DEFAULT_UI_LOCALE
 }
 
 // ── 形状投影 ──

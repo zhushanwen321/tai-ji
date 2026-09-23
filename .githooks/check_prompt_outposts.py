@@ -160,13 +160,15 @@ OUTPOST_CALLSITES = [
         "登记豁免；若未来 handoff 支持富内容需回头重审",
     ),
     (
-        "transport/session-message-handler.ts",
+        "services/session/session-service.ts",
         "client.prompt('/plan abort')",
         "internal",
         "exempt",
         "abortPlan 退出命令：固定命令字面量（无任何用户内容插值），pi 对 / 前缀"
         "prompt 先行执行 extension command；刻意绕 busy 预检（workflowAction 先例，"
-        "设计 D5/E9——挂起审批期退出是高概率动线）",
+        "设计 D5/E9——挂起审批期退出是高概率动线）。MF-1-7 编排自 transport"
+        "handler 下沉 session-service（形态对齐 promptReload/workflowAction 命令"
+        "编排区），豁免条目随调用点迁移",
     ),
 ]
 
