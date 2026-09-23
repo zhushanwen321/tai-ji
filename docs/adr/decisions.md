@@ -25,6 +25,9 @@ taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表
 ### ADR-0062 单一数据 owner + 绝对写规则
 pi 当前持有的 session JSONL 唯一写方是 pi 进程——taiji 任何代码永不直写，能力缺口由 pi 扩展在 pi 进程内补齐。三类登记在案的合法边界形态：sidecar 家族四后缀（.meta/.preset/.project/.handoff.json，写前 existsSync 守卫）、fork 文件创建型、restore-time 归一化 rename-over（inactive-only、白名单变换、每文件一次）。标量状态复制模式 = 快照拉取 + 事件只做失效（事件永不直写数据）。登记表 SSOT：[docs/architecture/data-source-registry.md](../architecture/data-source-registry.md) + `replicated-states.config.ts`（新数据 = 新配置条目）。登记 C-pi-07、C-data-01。
 
+### ADR-0065 btw 旁路提问：派生临时会话形态
+btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定案（2026-09-22 定案，2026-09-23 交付）：① 每条 btw 线 = 主会话当前进度的 **pi 原生 fork 全树快照**（`--fork` + `--session-dir`，含分支；不复用 session-fork.ts 单路径截断），跑在独立 pi 进程；源状态三分支（正常 / 无快照线（fork throw → 回落无 fork 新建 spawn，宿主零直写）/ 截断快照）；② 虚拟 ID 第三家族 `btw:<piSessionId>` 两段式（与 pi id 零冲突契约：真 sid 禁冒号、虚拟 id 永含冒号；派生键第二段 = owner piSessionId，INVAR-1.1 强制化 + 生产值域断言）；③ 持久化 = 目录即关联（`btw/<encodeCwd>/<mainSid>/`，注册表启动重建 hidden 复原）+ 重载链（applyEntry 全量回放；离线尾读含 btw 目录解析腿）+ 孤儿补账；仅主删级联删（deleteSession / deleteByCwd 连带）/ 显式关线，关闭/退出/闲置回收均不删；④ G4 三防线（目录隔离 / `hidden: true` / 不记工作区历史）——关联只服务生命周期与自身线列表，不进任何展示链；⑤ 派生资源边界（zcode selection side chat 先例对照）：命令族硬禁 + 派发能力保留 + 投影收窄（无 opener）+ 派生键三触发分层（失效保留 / 终结清除 / btw 驱逐同驱）+ model-only 行为契约注入；⑥ 挂起交互请求终态机（应答 / 撤回 / 失效 + 回收提醒/未读清除支），失效提示三路收口——事件 invalidated 与快照对账差集两路写入收口单入口 + 回放悬空对账独立路（信号源 = pi 会话文件持久层，不依赖内存簿记跨进程存活）；交互呈现现行形态 = **D8 降级启用**（V4 核实三通道抽离的 plan 通道不成立）：五类请求统一 drawer 内联确认条 + 富表单降档，三通道 per-vid 路由为未启用备手（产品意图仍为与主 agent 同形态保真，plan-store 分区化后可复评启用）。权威源：`.tmp/tech-design/btw-question.md`（设计文档，不入 git；实施记录 git 可追溯）。登记：数据面见 data-source-registry ⑧ btw 补登链；未新增约束族（机制边界由既有 C-ext-19 / C-pi-12/13 / C-data-01 等覆盖）。
+
 ## 通信与协议
 
 ### ADR-0055 MessageBus：per-session 消息分发 SSOT
