@@ -285,7 +285,8 @@ function buildFixPrompt({ header, groupDocPath, reportPath, fixPrompt, commitIns
 
 /**
  * fix 结果兼容解析（5.3）：旧格式 fixes string[] / 新格式 object[]（issue_id/description/
- * self_check/affected_files）+ deferred 缺省 []。畸形输入（fixed_count 缺失/非对象）返回 null。
+ * self_check/affected_files）+ deferred/disputed 缺省 []。畸形输入（fixed_count 缺失/非对象）
+ * 返回 null。disputed = fixer 误报申述（claim 非裁决，人类终态裁决）。
  */
 function normalizeFixResult(raw) {
   const parsed = parseResult(raw);
@@ -299,7 +300,10 @@ function normalizeFixResult(raw) {
   const deferred = Array.isArray(parsed.deferred)
     ? parsed.deferred.filter((d) => d && typeof d === "object")
     : [];
-  return { fixed_count: parsed.fixed_count, fixes: normalized, deferred };
+  const disputed = Array.isArray(parsed.disputed)
+    ? parsed.disputed.filter((d) => d && typeof d === "object")
+    : [];
+  return { fixed_count: parsed.fixed_count, fixes: normalized, deferred, disputed };
 }
 
 /**
@@ -376,15 +380,20 @@ function normMustFixEntryId(id) {
 /**
  * must-fix 漏修违规收集（m3）：ID 归一化比较——大小写 + 尾部括号尾注（如 "(fixed)"）
  * 漂移不误杀：严格 trim 比较会把 "mf-1"/"MF-1 (fixed)" 判漏修，整轮 fix-failure 误杀。
+ * disputed 申述豁免（格式合法性由 collectDisputedViolations 把关）：申述条目不再判漏修，
+ * 裁决权移交人类——否则「fixer 申述 + must-fix-not-fixed 违规」绕回一票否决老路。
  */
 function collectMustFixNotFixedViolations(result, mustFixIds) {
   const violations = [];
   const fixedIds = new Set((result.fixes || [])
     .map((f) => (f && typeof f.issue_id === "string" ? normIssueId(f.issue_id) : ""))
     .filter(Boolean));
+  const disputedIds = new Set((result.disputed || [])
+    .map((d) => (d && typeof d.issue_id === "string" ? normIssueId(d.issue_id) : ""))
+    .filter(Boolean));
   for (const id of mustFixIds) {
     const norm = normMustFixEntryId(id);
-    if (norm && !fixedIds.has(norm)) {
+    if (norm && !fixedIds.has(norm) && !disputedIds.has(norm)) {
       violations.push({ issue_id: norm, severity: "must-fix-not-fixed" });
     }
   }
@@ -392,19 +401,48 @@ function collectMustFixNotFixedViolations(result, mustFixIds) {
 }
 
 /**
+ * disputed 申述违规收集（2026-09-23 disputed 通道取代 rejected 一票否决）：申述是
+ * claim 不是裁决——格式非法（未命中台账 / 反证空洞）仍违规（敷衍申诉不可放行），
+ * 格式合法则豁免 must-fix 记账、随终态转人类裁决。反证门槛 = evidence ≥20 字符
+ *（对齐 ES2 deferred 理由下限）且含路径 hint（"/" 或 ":"）——防「我觉得不是问题」式
+ * 空洞申诉。idMap 翻译同 deferred 侧（findIssueKey 查表输入）；trackedIssues 缺省
+ *（无台账降级路径）跳过命中检查，仅查反证。
+ */
+function collectDisputedViolations(result, trackedIssues, idMap) {
+  const violations = [];
+  for (const d of result.disputed || []) {
+    if (!d) continue;
+    const key = trackedIssues
+      ? findIssueKey(trackedIssues, translateId(idMap, d.issue_id, trackedIssues))
+      : undefined;
+    if (trackedIssues && !key) {
+      violations.push({ issue_id: d.issue_id || "(unnamed)", severity: "disputed-untracked" });
+      continue;
+    }
+    const ev = typeof d.evidence === "string" ? d.evidence.trim() : "";
+    if (ev.length < 20 || (ev.indexOf("/") === -1 && ev.indexOf(":") === -1)) {
+      violations.push({ issue_id: d.issue_id || "(unnamed)", severity: "disputed-no-evidence" });
+    }
+  }
+  return violations;
+}
+
+/**
  * ES3 硬校验（5.3-P1 红线）：(1) deferred 只允许 minor/trivial；(2) must-fix 必须全进
- * fixes[]——mustFixIds 中未修复且未显式处理的 ID 判 violation（漏修）。mustFixIds
+ * fixes[]/disputed[]——mustFixIds 中未修复且未申述的 ID 判 violation（漏修）。mustFixIds
  * 为 null/undefined 时仅做 (1)（无 aggregator 数据的降级路径，wave 2 限制）。
- * trackedIssues（state.issues）可选：deferred 的 severity 与追踪表交叉核对（MF-4）——
+ * (3) disputed 申述格式校验（未命中台账/反证空洞即违规）。
+ * trackedIssues（state.issues）可选：deferred/disputed 的交叉核对——
  * 追踪条目以追踪 severity 为准（must-fix 追踪皆 critical/major，defer 即违规），
  * 仅追踪无此 ID（S-x minor）时采信 fix agent 自报。
- * idMap（可选，本轮表格号→台账键）：仅在 deferred 交叉核对「查台账」的输入上翻译——
- * L2/L3 改键后 fixer 申报的表格号需翻译才能命中台账。mustFixIds 与 fixes[].issue_id
+ * idMap（可选，本轮表格号→台账键）：仅在 deferred/disputed 交叉核对「查台账」的输入上
+ * 翻译——L2/L3 改键后 fixer 申报的表格号需翻译才能命中台账。mustFixIds 与 fixes[].issue_id
  * 的集合比较（第 2 项）**双侧保持表格号空间不翻译**——它们同源（aggregated.md），
  * 翻译任一侧都会制造假失配（must-fix-not-fixed 误杀整 run）。
  */
 function validateFixResult(result, mustFixIds, trackedIssues, idMap) {
   const violations = collectDeferredViolations(result, trackedIssues, idMap);
+  violations.push(...collectDisputedViolations(result, trackedIssues, idMap));
   if (Array.isArray(mustFixIds) && mustFixIds.length > 0) {
     violations.push(...collectMustFixNotFixedViolations(result, mustFixIds));
   }

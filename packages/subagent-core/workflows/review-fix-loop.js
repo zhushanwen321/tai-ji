@@ -408,6 +408,18 @@ const fixSchema = {
         },
       },
     },
+    disputed: {
+      type: "array",
+      description: "Suspected false positives — do NOT fix these; dispute for human adjudication after the run",
+      items: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string", description: "Issue identifier from the aggregated report" },
+          evidence: { type: "string", description: "Counter-evidence: file:line refs + what the aggregator's verification missed (>= 20 chars; vague claims are an ES3 violation). A claim, not a verdict" },
+        },
+        required: ["issue_id", "evidence"],
+      },
+    },
   },
   required: ["fixed_count"],
 };
@@ -472,6 +484,7 @@ function freshState() {
     batches: [],
     calls: [],
     dormant: [],
+    disputed: [],
     fixResults: [],
     issues: undefined,
     knownRemaining: [],
@@ -1495,7 +1508,11 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }
       body.push(
         "",
-        "Verify-first: a claim that does not hold → report it rejected with evidence, do not blind-fix.",
+        "Verify-first: ledger entries were independently verified by the aggregator — presume they hold.",
+        "If reading the code convinces you a claim is a false positive, do NOT fix it: report it in",
+        "`disputed` with concrete counter-evidence (file:line + what the aggregator's verification",
+        "missed; empty or vague evidence is an ES3 violation). Disputed items do not abort the loop —",
+        "a human adjudicates them after the run. If you cannot rebut, fix it.",
         "All severity levels in scope; only minor may be deferred (with a concrete reason).",
         "self_check per fix: one grep command + the expected result.",
       );
@@ -1579,6 +1596,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       fixed_count: perGroupResults.reduce((a, r) => a + (typeof r.fixed_count === "number" ? r.fixed_count : 0), 0),
       fixes: perGroupResults.flatMap((r) => r.fixes || []),
       deferred: perGroupResults.flatMap((r) => r.deferred || []),
+      disputed: perGroupResults.flatMap((r) => r.disputed || []),
     };
 
     // ES3 硬校验（5.3 红线，恢复 mustFixIds 交叉校验——wave 3 后 agg.must_fix_ids
@@ -1593,19 +1611,25 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     const fixIdMap = (state.idMap && state.idMap.round === round && state.idMap.map) || {};
     const es3Violations = validateFixResult(fixResult, filterActiveIds(agg.must_fix_ids), state.issues, fixIdMap);
     if (es3Violations.length > 0) {
-      // m7: violation 分两类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed），
-      // finalMessage 文案区分：统一文案会把漏修误报成 defer 违规，误导修复方向
+      // m7: violation 分四类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed）/
+      // disputed 申述格式非法（untracked / no-evidence），finalMessage 文案区分：
+      // 统一文案会把漏修误报成 defer 违规，误导修复方向
       const parts = es3Violations.map((v) =>
         v.severity === "must-fix-not-fixed"
-          ? "must-fix 未在 fixes[] 中修复（漏修）— " + v.issue_id
-          : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
+          ? "must-fix 未在 fixes[]/disputed[] 中处理（漏修）— " + v.issue_id
+          : v.severity === "disputed-untracked"
+            ? "disputed 申述未命中台账条目 — " + v.issue_id
+            : v.severity === "disputed-no-evidence"
+              ? "disputed 申述缺实质反证（需 file:line + 聚合方核实遗漏点）— " + v.issue_id
+              : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
       );
       log("ES3 violation: " + JSON.stringify(es3Violations));
       batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
       state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
       saveState(state);
       terminated = "fix-failure";
-      finalMessage = "Batch " + batchIndex + " round " + round + ": " + parts.join("; ");
+      finalMessage = "Batch " + batchIndex + " round " + round + ": " + parts.join("; ")
+        + "（本轮各组在途编辑已留在工作区未提交，接管前先 git status 盘点）";
       batchIndex = BATCHES.length + 1;
       break;
     }
@@ -1696,6 +1720,28 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         };
       }
     }
+    // 2026-09-23 disputed 申述落账：格式合法的申述（ES3 已把关）转 status=disputed 并记
+    // state.disputed——不阻塞收敛（hasOpenResidue/活跃判定只认 open/regressed；reviewer
+    // 不再重报则条目自然退出视野，重报则按既有 dedup 复活进修复队列，滥用被 stuck 熔断
+    // 兜住）。收敛/clean 终态存在未裁决申述时升级 needs-human（见脚本尾部）。
+    for (const d of fixResult.disputed || []) {
+      if (!d || typeof d.issue_id !== "string" || !d.issue_id) continue;
+      const evidence = typeof d.evidence === "string" ? d.evidence : "";
+      const trackedKey = findIssueKey(state.issues, translateId(fixIdMap, d.issue_id, state.issues));
+      if (trackedKey) {
+        state.issues[trackedKey].status = "disputed";
+        state.issues[trackedKey].disputeEvidence = evidence;
+        state.issues[trackedKey].history.push({ round, status: "disputed" });
+        if (!Array.isArray(state.disputed)) state.disputed = [];
+        state.disputed.push({
+          id: trackedKey,
+          title: state.issues[trackedKey].title || "",
+          severity: state.issues[trackedKey].severity || "unknown",
+          evidence,
+          round,
+        });
+      }
+    }
     // known-remaining 同步更新：deferred 在本轮 fix 后即生效，R2+ prompt 立即消费
     // （不依赖下轮 reconcile 才生成——否则滞后一轮，reviewer 本轮看不到 deferred 清单）
     state.knownRemaining = computeKnownRemaining(state.issues);
@@ -1773,6 +1819,17 @@ saveState(state);
 // 自相矛盾终态在消费侧可机器判定。残留口径 = status != fixed/deferred（与 message 同源）。
 const remaining = buildRemaining(state.issues);
 
+// 2026-09-23 disputed 申述裁决权移交：收敛/clean 终态若存在未裁决申述，升级 needs-human
+//——修复成果照常入账（commit 已完成），人类按 result.disputed 的反证逐项裁决后处置
+//（真问题修复重跑 / 误报 ack）。stuck/needs-redesign/max-rounds/*-failure 保持原终态，
+// state.disputed 仍随 result 带出供参考。
+const disputedOutstanding = Array.isArray(state.disputed) ? state.disputed : [];
+if ((terminated === "clean" || terminated === "converged") && disputedOutstanding.length > 0) {
+  terminated = "needs-human";
+  finalMessage += " " + disputedOutstanding.length + " disputed item(s) pending human adjudication: "
+    + disputedOutstanding.map((d) => d.id).join(", ");
+}
+
 return {
   batches: BATCHES.length,
   totalFixed,
@@ -1782,6 +1839,8 @@ return {
   runDir: RUN_ROOT,
   // B2：残留问题结构化清单（消费方可机器判定「converged 却 remaining 非空」类矛盾终态）
   remaining,
+  // disputed 申述清单（needs-human 终态的主要消费面；人类按 evidence 逐项裁决）
+  disputed: disputedOutstanding,
   // 5.9 terminated 透出：非 clean 时 message 含终止原因 + 残留 ID 清单 + deferred 理由
   // （stuck/needs-redesign/converged/max-rounds/*-failure 均由 finalMessage 承载）。
   // 渲染层特判（launcher 对 terminated 非 clean 的视觉区分）留 TODO：当前 tool 结果
@@ -1790,7 +1849,7 @@ return {
   // launcher 透传 message——无需跨模块渲染特判，W5C3 决策更新）
   message: terminated === "clean"
     ? "All batches clean. " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
-    : terminated === "converged"
-      ? finalMessage + " " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
+    : terminated === "converged" || terminated === "needs-human"
+      ? (terminated === "needs-human" ? "[NEEDS-HUMAN] " : "") + finalMessage + " " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
       : "[UNRESOLVED] " + finalMessage + ". State: " + STATE_FILE,
 };

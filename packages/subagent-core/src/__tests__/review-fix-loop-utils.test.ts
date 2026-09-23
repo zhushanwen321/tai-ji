@@ -313,6 +313,17 @@ describe("normalizeFixResult", () => {
     expect(normalizeFixResult({ fixes: [] })).toBeNull();
     expect(normalizeFixResult("not json")).toBeNull();
   });
+  it("disputed 申述数组透传；缺省归一为空数组（2026-09-23 disputed 通道）", () => {
+    const r = normalizeFixResult({
+      fixed_count: 1,
+      fixes: [{ issue_id: "MF-1", description: "d", self_check: "grep X → 0 hits", affected_files: ["a.ts"] }],
+      disputed: [{ issue_id: "MF-2", evidence: "src/a.ts:42 — aggregator missed the guard at line 42" }],
+    });
+    expect(r).not.toBeNull();
+    expect(r!.disputed.length).toBe(1);
+    expect(r!.disputed[0].issue_id).toBe("MF-2");
+    expect(normalizeFixResult({ fixed_count: 0, fixes: [] })!.disputed).toEqual([]);
+  });
 });
 
 describe("validateFixResult", () => {
@@ -387,6 +398,44 @@ describe("validateFixResult", () => {
       fixes: [],
       deferred: [{ issue_id: "S-2", severity: "minor", reason: "high cost" }],
     }, [], trackedIssues)).toEqual([]);
+  });
+  it("disputed 合法申述豁免 must-fix 记账（2026-09-23 disputed 通道取代一票否决）", () => {
+    // MF-1 被 fixer 申述（带实质反证）→ 不判漏修；MF-2 未处理仍判
+    const violations = validateFixResult({
+      fixed_count: 1,
+      fixes: [{ issue_id: "MF-2" }],
+      disputed: [{ issue_id: "MF-1", evidence: "src/a.ts:42 — aggregator missed the guard at line 42" }],
+    }, ["MF-1", "MF-2"]);
+    expect(violations).toEqual([]);
+  });
+  it("disputed 反证空洞 → disputed-no-evidence 违规（敷衍申述不可放行）", () => {
+    const violations = validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-1", evidence: "我觉得不是问题" }],
+    }, ["MF-1"]);
+    expect(violations).toEqual([{ issue_id: "MF-1", severity: "disputed-no-evidence" }]);
+  });
+  it("disputed 未命中追踪台账 → disputed-untracked 违规；无台账降级路径仅查反证", () => {
+    const trackedIssues = {
+      "MF-1": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
+    };
+    // MF-9 申述未命中台账；MF-1 未修复也未申述 → 漏修违规并列出现
+    const violations = validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-9", evidence: "src/nonexistent.ts:1 — claim references a file that does not exist" }],
+    }, ["MF-1"], trackedIssues);
+    expect(violations).toEqual([
+      { issue_id: "MF-9", severity: "disputed-untracked" },
+      { issue_id: "mf-1", severity: "must-fix-not-fixed" },
+    ]);
+    // 无台账（mustFixIds null 降级路径）→ 跳过命中检查，反证合格即放行
+    expect(validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-9", evidence: "src/a.ts:7 — counter evidence with file and line" }],
+    })).toEqual([]);
   });
 });
 

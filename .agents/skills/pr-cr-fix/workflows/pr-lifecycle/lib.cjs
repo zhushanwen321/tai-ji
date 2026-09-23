@@ -1004,10 +1004,12 @@ function metricsFixContext(io) {
 
 /* ── cr-fix step 辅助（u4：§3.6 D2 嵌套内置 loop；§3.4-(3)-5 恢复粒度 = step 整体重跑） ── */
 
-// terminated 全集（review-fix-loop.js 实测赋值，八种；未知值 fail-closed 按 failed）
+// terminated 全集（review-fix-loop.js 实测赋值，九种；未知值 fail-closed 按 failed）。
+// needs-human = fixer 误报申述待人工裁决（2026-09-23 disputed 通道），归人工接管集：
+// 修复已 commit，resume 前须按 result.disputed 逐项裁决（真问题修复 / 误报 skip-steps 接管）
 const CR_FIX_PASS_TERMINATED = new Set(['clean', 'converged']);
 const CR_FIX_RETRY_TERMINATED = new Set(['review-failure', 'aggregator-failure', 'fix-failure']);
-const CR_FIX_STUCK_TERMINATED = new Set(['stuck', 'max-rounds', 'needs-redesign']);
+const CR_FIX_STUCK_TERMINATED = new Set(['stuck', 'max-rounds', 'needs-redesign', 'needs-human']);
 const CR_FIX_MAX_NESTED_ATTEMPTS = 2; // 首次 + 自动重试恰 1 次（D2）
 
 // batch1 组装（§3.5）：扫 <repoRoot>/.agents/skills/pr-cr-fix/agents/review-*.md 排序；
