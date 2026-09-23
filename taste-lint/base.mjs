@@ -26,6 +26,7 @@ import requireDataOwnerAnnotation from './rules/require-data-owner-annotation.mj
 import noNonOwnerStoreMutation from './rules/no-non-owner-store-mutation.mjs';
 import noInstanceLevelSessionState from './rules/no-instance-level-session-state.mjs';
 import noChatOpsInComponents from './rules/no-chat-ops-in-components.mjs';
+import noOutboundWithoutSessionId from './rules/no-outbound-without-session-id.mjs';
 
 export const tastePlugin = {
   meta: { name: 'eslint-plugin-taste' },
@@ -61,6 +62,11 @@ export const tastePlugin = {
     // chat store facet 护栏（renderer-deepening D6③/A8）：组件只碰 ChatStoreReaders 面，
     // ops 面字段访问 error 级阻断。规则内自守卫（仅 src/components/** 的 .vue 生效）。
     'no-chat-ops-in-components': noChatOpsInComponents,
+    // 出站 sessionId 护栏（review-findings P2-S5，关键规则 #7 静态化）：publish 第 1 参 /
+    // payload 字面量 sessionId 键 + sendError details 字面量 sessionId 键，缺即 error
+    //（前端 useChat 按 payload.sessionId 恒等过滤，缺字段消息被静默丢弃）。豁免走
+    // 行内登记注释 taste:allow-outbound-without-session-id（规则 docstring）。
+    'no-outbound-without-session-id': noOutboundWithoutSessionId,
   },
 };
 
@@ -120,6 +126,12 @@ export const tasteRules = {
   // 访问拦截。仅 src/components/** 的 .vue 生效（规则内自守卫，composables/stores/
   // effects/tests 不受限），error 级 = 阻断。
   'taste/no-chat-ops-in-components': 'error',
+
+  // 出站 sessionId 护栏（review-findings P2-S5，关键规则 #7 静态化）：runtime → 前端
+  // 出站调用点的 sessionId 位缺失（publish 第 1 参 / payload 字面量键 / sendError
+  // details 字面量键），error 级 = 阻断。排除 broadcast/send/reply（语义与豁免理由见
+  // 规则 docstring），误报豁免走行内登记注释。
+  'taste/no-outbound-without-session-id': 'error',
 };
 
 export default [
