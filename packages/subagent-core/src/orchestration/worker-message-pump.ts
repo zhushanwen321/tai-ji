@@ -776,7 +776,15 @@ export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentNam
  *  上报判据见 SDK AgentOutcome.stderrTeePath 注释；成功/cancelled 不带）。 */
 export function dispatchAskSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
-  if (!result) return; // AgentCall 状态机前置保证 done ⟹ result；防御性静默
+  if (!result) {
+    // [加固] 防御分支出声（原静默 return）：done ⟹ result 契约被破坏（ask-dispatched
+    // 已落账而 settled 结果缺失），journal 出现无 ask-settled 尾的悬空 ask 序列——warn 留锚点。
+    runEventLogger.warn(
+      `ask-settled dropped: ask-dispatched journaled but settled result missing ` +
+        `(runId=${run.runId}, callId=${call.id}, status=${call.status})`,
+    );
+    return;
+  }
   const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "completed" : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
@@ -1215,8 +1223,16 @@ export async function handleWorkerMessage(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // 终态（done）丢弃 stale 消息（P0-1）
-  if (isTerminal(run)) return;
+  // 终态（done）丢弃 stale 消息（P0-1）——[加固] debug 留痕（原静默 return；type 于 M7 校验前自 raw 安全提取）。
+  if (isTerminal(run)) {
+    const type = typeof raw === "object" && raw !== null
+      ? (raw as { type?: unknown }).type
+      : null;
+    logger.debug(
+      `[workflow] stale worker message dropped on terminal run (runId=${run.runId}, type=${JSON.stringify(type)})`,
+    );
+    return;
+  }
 
   // M7: 形状校验——防畸形 IPC 消息（worker 崩溃/发非对象）导致下游 TypeError
   if (typeof raw !== "object" || raw === null) return;
@@ -1322,11 +1338,16 @@ function dispatchAgentCall(
   msg: AgentCallMsg,
   deps: LifecycleDeps,
 ): void {
-  // M4: IPC 字段校验——畸形 agent-call 消息（opts 非对象/缺失、callId 非数字、prompt 缺失）
-  // 不写 trace / 不 postAgentResult——这类消息通常意味着 worker 模块版本不匹配或内存损坏，
-  // 回发结果给 worker 也没意义（worker 可能已崩）。仅记日志，让 worker timeout/exit 路径接管。
+  // M4: IPC 字段校验——畸形 agent-call 消息不写 trace / 不建 call（worker/main 模块
+  // 不匹配疑号）。[加固] callId 合法（worker 侧有对应 pending）时回发可克隆 error
+  // result 让 worker 内 agent() pending 收敛（原仅日志 return = pending 永挂）；callId
+  // 非法无法定向回发，仅日志。
   if (isMalformedAgentCallMsg(msg)) {
     logger.error(`[workflow] malformed agent-call message: callId=${JSON.stringify(msg.callId)}, opts=${JSON.stringify(msg.opts)?.slice(0, MALFORMED_MSG_LOG_PREVIEW_CHARS)}`);
+    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
+      const dropped = "malformed message dropped: agent-call IPC fields invalid (worker/main module mismatch suspected)";
+      postAgentResult(run, msg.callId, { content: "", error: dropped }, false);
+    }
     return;
   }
 
@@ -1589,11 +1610,25 @@ function dispatchWorkflowCall(
   msg: WorkflowCallMsg,
   deps: LifecycleDeps,
 ): void {
-  // M4: IPC 字段校验——畸形 workflow-call 消息
+  // M4: IPC 字段校验——畸形 workflow-call 消息。[加固] callId 合法（worker 侧有对应
+  // pending）时回发可克隆 error result 让 worker 内 workflow() pending 收敛（原仅日志
+  // return = pending 永挂）；callId 非法无法定向回发，仅日志。回发走 try/catch：纯字符串
+  // result 必可克隆，仅通道死（worker 已终）才可能抛，留痕即可。
   if (typeof msg.callId !== "number" || !Number.isFinite(msg.callId) ||
       typeof msg.name !== "string" ||
       typeof msg.args !== "object" || msg.args === null) {
     logger.error(`[workflow] malformed workflow-call message: callId=${JSON.stringify(msg.callId)}, name=${JSON.stringify(msg.name)}`);
+    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
+      try {
+        run.runtime?.worker.postMessage({
+          type: "workflow-result",
+          callId: msg.callId,
+          result: { content: "", error: "malformed message dropped: workflow-call IPC fields invalid (worker/main module mismatch suspected)" },
+        });
+      } catch (err) {
+        logger.error(`[workflow] malformed workflow-call error-reply failed (callId=${msg.callId}): ${toErrorMessage(err)}`);
+      }
+    }
     return;
   }
 
@@ -1749,9 +1784,14 @@ export async function handleWorkerError(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // 与 handleWorkerMessage 对称——终态（done）丢弃 stale error。
-  // 否则终态后到达的 worker error 仍会 workerErrorCount++（污染跨 runtime 计数）。
-  if (isTerminal(run)) return;
+  // 与 handleWorkerMessage 对称——终态（done）丢弃 stale error（否则 workerErrorCount
+  // 被污染）。[加固] debug 留痕（原静默 return）。
+  if (isTerminal(run)) {
+    logger.debug(
+      `[workflow] stale worker error dropped on terminal run (runId=${run.runId}, event=worker-error, message=${JSON.stringify(err.message)})`,
+    );
+    return;
+  }
 
   // [R4-F1] 同代际幂等守卫：worker 崩溃时 error + exit(1) 双事件各派发一次
   // handleWorkerError（onError 先到，exit 非 0 经 handleWorkerExit 委托二次到达）——
@@ -1804,9 +1844,20 @@ export async function handleWorkerExit(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // G-025: stale exit 事件丢弃（handle 已不是当前 runtime 的 worker）
-  if (!handle.isCurrent) return;
-  if (isTerminal(run)) return;
+  // G-025: stale exit 事件丢弃（handle 已不是当前 runtime 的 worker）——[加固] debug
+  // 留痕（原静默 return，丢弃不可观测）。
+  if (!handle.isCurrent) {
+    logger.debug(
+      `[workflow] stale worker exit dropped (runId=${run.runId}, event=worker-exit, code=${code}, handle not current generation)`,
+    );
+    return;
+  }
+  if (isTerminal(run)) {
+    logger.debug(
+      `[workflow] stale worker exit dropped on terminal run (runId=${run.runId}, event=worker-exit, code=${code})`,
+    );
+    return;
+  }
 
   if (code === 0) {
     // 本代际已交付终态消息 → 正常收尾 / 重试退避窗口，no-op（rebuild 负责后续）

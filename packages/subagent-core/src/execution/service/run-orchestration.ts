@@ -801,10 +801,12 @@ export class RunOrchestration {
   ): Promise<AgentResult | undefined> {
     try {
       await this.deps.getPool().acquire(priority, this.effectiveMaxConcurrentFor(record), signal);
-    } catch {
-      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致。
+    } catch (err) {
+      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致；
+      // 非 abort 的池内故障透传原始 err——改写为 new Error("aborted") 会把池内真实
+      // 故障（如池 dispose / 内部异常）误标为 aborted，误导排障方向。
       if (signal?.aborted) return this.deps.finalizeAborted(record);
-      return this.deps.finalizeFailed(record, new Error("aborted"));
+      return this.deps.finalizeFailed(record, err);
     }
     return undefined;
   }
