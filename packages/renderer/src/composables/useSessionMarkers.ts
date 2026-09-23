@@ -32,15 +32,16 @@ let hydrated = false
 // 防止以（可能不完整的）内存表 setItem 覆写原始损坏字符串——原始值保留在 localStorage
 // 供人工恢复。另一窗口经 storage 事件写入合法值（或删 key）即自动解除保护。
 let corrupt = false
-// warn 去重（防刷屏）：损坏发生与拒绝写各只提示一次，__resetCacheForTest 复位。
+// warn 去重（防刷屏）：损坏发生、拒绝写、条目丢弃各只提示一次，__resetCacheForTest 复位。
 let warnedCorrupt = false
 let warnedRefuseWrite = false
+let warnedDroppedEntries = false
 
 function warnCorruptOnce(error: unknown): void {
   if (warnedCorrupt) return
   warnedCorrupt = true
   console.warn(
-    `[session-markers] localStorage key '${STORAGE_KEY}' 值损坏（JSON 解析失败），未读/完成标记暂不可读，且写入已暂停以防覆写原始数据。` +
+    `[session-markers] localStorage key '${STORAGE_KEY}' 值损坏（JSON 解析失败或顶层结构非预期），未读/完成标记暂不可读，且写入已暂停以防覆写原始数据。` +
       `恢复动作：DevTools 执行 localStorage.getItem('${STORAGE_KEY}') 检查并修复，或 localStorage.removeItem('${STORAGE_KEY}') 重置`,
     error,
   )
@@ -54,9 +55,34 @@ function warnRefuseWriteOnce(): void {
   )
 }
 
+function warnDroppedEntriesOnce(count: number): void {
+  if (warnedDroppedEntries) return
+  warnedDroppedEntries = true
+  console.warn(
+    `[session-markers] localStorage key '${STORAGE_KEY}' 中 ${count} 个标记条目形状非法（非对象或无有效布尔标记字段），已丢弃不加载；` +
+      `其余条目正常加载，下次写盘时自动清理坏条目`,
+  )
+}
+
+/**
+ * 条目形状守卫：localStorage 是外部输入，合法 JSON 不代表条目形状合法。
+ * 只接受 plain object；unread/markedDone 必须为 boolean 才保留（漂移字段剔除而非整条丢弃，
+ * 合法标记不因同条目另一字段漂移而丢失）；重建后无任何合法字段的条目不可用，返回 undefined。
+ */
+function toSessionMarker(value: unknown): SessionMarker | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const { unread, markedDone } = value as { unread?: unknown; markedDone?: unknown }
+  const marker: SessionMarker = {}
+  if (typeof unread === 'boolean') marker.unread = unread
+  if (typeof markedDone === 'boolean') marker.markedDone = markedDone
+  if (marker.unread === undefined && marker.markedDone === undefined) return undefined
+  return marker
+}
+
 /**
  * 解析并应用存储值（主读取 hydrate 与 storage 事件共用同一损坏方案）。
- * 空值（null/''）= 合法空表；解析失败 = 保留 cache 旧值（不置空）+ 置 corrupt。
+ * 空值（null/''）= 合法空表；解析失败或顶层非「sid → marker」对象表（数组/原始值等形状漂移）
+ * = 保留 cache 旧值（不置空）+ 置 corrupt；条目形状非法 = 丢弃该条目 + warn-once，其余照常。
  */
 function applyParsedMarkers(raw: string | null): void {
   if (!raw) {
@@ -65,8 +91,24 @@ function applyParsedMarkers(raw: string | null): void {
     return
   }
   try {
-    const data = JSON.parse(raw) as Record<string, SessionMarker>
-    cache.value = new Map(Object.entries(data))
+    const data: unknown = JSON.parse(raw)
+    // 顶层形状漂移与解析失败同走 corrupt 通道：错误形状的「表」不进 cache，也不允许
+    // 后续以它为基底写盘覆写原始值（与 JSON.parse 抛错同一保护语义）
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new Error(`expected a JSON object keyed by session id, got ${Array.isArray(data) ? 'array' : typeof data}`)
+    }
+    let dropped = 0
+    const next = new Map<string, SessionMarker>()
+    for (const [sid, value] of Object.entries(data as Record<string, unknown>)) {
+      const marker = toSessionMarker(value)
+      if (marker === undefined) {
+        dropped++
+        continue
+      }
+      next.set(sid, marker)
+    }
+    if (dropped > 0) warnDroppedEntriesOnce(dropped)
+    cache.value = next
     corrupt = false
   } catch (error) {
     corrupt = true
@@ -191,6 +233,7 @@ export function __resetCacheForTest(): void {
   corrupt = false
   warnedCorrupt = false
   warnedRefuseWrite = false
+  warnedDroppedEntries = false
 }
 
 /**
