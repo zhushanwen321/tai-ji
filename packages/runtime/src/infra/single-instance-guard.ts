@@ -12,12 +12,21 @@
  * - probe：读 `<dataDir>/runtime-instance.json`（本机制登记）与
  *   `<dataDir>/runtime.port`（Electron supervisor 通道——兼容未写本文件的旧版实例，
  *   如安装版），对候选端口做 127.0.0.1 TCP 探活。任一可达 = 活实例在场 → 拒绝启动；
- *   全部不可达 = stale 残留（正常退出/崩溃后未清理）→ 放行接管。
- * - register：listen 成功后原子写 runtime-instance.json（tmp + rename）。
- *   刻意不做退出清理：SIGKILL 等无清理钩子的骤死残留由端口判活天然判 stale。
+ *   全部不可达时，instance.json 候选若携带合法 pid 且进程存活 = 启动窗口内的
+ *   预登记实例（probe 通过即登记、listen 前被并发 probe 读到——端口尚未 listen
+ *   但持有者活着）→ 拒绝启动；否则 = stale 残留（正常退出/崩溃后未清理）→ 放行接管。
+ * - register：probe 通过后立即原子写 runtime-instance.json（tmp + rename），早于
+ *   listen——把并发同启漏防窗口从「probe→listen」（秒级：service 构造 + 迁移）
+ *   缩到单文件原子写内。刻意不做退出清理：SIGKILL 等无清理钩子的骤死残留由
+ *   「pid 死亡 → stale」天然放行接管。
+ * - 设计内残差：两实例在彼此写入登记前的毫秒级窗口内并发 probe 仍可双双放行
+ *   （文件锁 + 重试可进一步收窄，对「并发同启同目录」的运维异常场景属过度设计）。
+ *   同端口并发不受此影响——后到者 listen 即 EADDRINUSE 拒绝；漏防只在两实例
+ *   端口不同时可能发生。
  *
  * 探活为纯 TCP connect，不做 token/协议校验：数据目录同源已是强信号，误判方向
- * 取保守侧（拒绝双跑）；文件缺失/损坏不阻塞启动（文件非权威）。
+ * 取保守侧（拒绝双跑）——pid 复用导致的偶发误拒符合保守取向，恢复动作见
+ * 拒绝输出与 TROUBLESHOOTING；文件缺失/损坏不阻塞启动（文件非权威）。
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
@@ -39,15 +48,22 @@ export interface RuntimeInstanceRecord {
   startedAt: string
 }
 
-/** probe 结果：blocked=true 时 holder 必在（拒绝信息需要 pid/port/source）。 */
+/** probe 结果：blocked=true 时 holder 必在（拒绝信息需要 pid/port/source/reachable）。 */
 export interface InstanceGuardProbeResult {
   blocked: boolean
-  holder?: { port: number; pid?: number; source: 'runtime-instance.json' | 'runtime.port' }
+  holder?: {
+    port: number
+    pid?: number
+    source: 'runtime-instance.json' | 'runtime.port'
+    /** 探活时端口是否可达：false = 预登记窗口判定（pid 存活但尚未 listen）。 */
+    reachable: boolean
+  }
 }
 
 /** 依赖注入（测试替换探活/时钟；生产用默认实现）。 */
 export interface InstanceGuardDeps {
   isPortReachable?: (port: number, timeoutMs: number) => Promise<boolean>
+  isPidAlive?: (pid: number) => boolean
 }
 
 /** 候选端口合法性：1-65535（0/NaN/越界的损坏文件值直接丢弃）。 */
@@ -67,6 +83,7 @@ export async function probeSingleInstance(
   deps: InstanceGuardDeps = {},
 ): Promise<InstanceGuardProbeResult> {
   const isReachable = deps.isPortReachable ?? defaultIsPortReachable
+  const isPidAlive = deps.isPidAlive ?? defaultIsPidAlive
   // 候选按优先级收集（instance.json 优先——含 pid 可直接定位持有者）；同端口去重。
   const candidates = new Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }>()
   try {
@@ -85,7 +102,13 @@ export async function probeSingleInstance(
   }
   for (const [port, meta] of candidates) {
     if (await isReachable(port, INSTANCE_PROBE_TIMEOUT_MS)) {
-      return { blocked: true, holder: { port, pid: meta.pid, source: meta.source } }
+      return { blocked: true, holder: { port, pid: meta.pid, source: meta.source, reachable: true } }
+    }
+    // 预登记窗口判定：instance.json 候选端口未 listen 但持有 pid 存活 = 实例在启动中
+    // （probe 通过即登记、listen 前的窗口）——拒绝启动，堵并发同启漏防。supervisor
+    // runtime.port 通道无 pid 佐证，维持纯端口判活。pid 损坏值（0/负数）不参与判定。
+    if (meta.source === 'runtime-instance.json' && meta.pid !== undefined && meta.pid >= 1 && isPidAlive(meta.pid)) {
+      return { blocked: true, holder: { port, pid: meta.pid, source: meta.source, reachable: false } }
     }
   }
   return { blocked: false }
@@ -94,10 +117,22 @@ export async function probeSingleInstance(
 /** 探活超时：localhost TCP connect 的宽松上界（真实连接 <10ms，给降载机器留余量）。 */
 const INSTANCE_PROBE_TIMEOUT_MS = 500
 
+/** pid 存活判定：kill(pid, 0) 空信号探测（EPERM = 存在但无权限，也算活）。 */
+function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 /**
- * 登记本实例（listen 成功后调用）。原子写（tmp + rename）避免半写文件被下轮 probe
- * 读到。写失败仅记录不阻塞：文件是 probe 的候选来源之一而非权威，且 supervisor 的
- * runtime.port 通道仍在，双通道全失效才会退化为无互斥。
+ * 登记本实例（probe 通过后立即调用，早于 listen——并发同启时后到实例的 probe
+ * 读到本登记即因 pid 存活拒绝，漏防窗口缩到单文件原子写内）。原子写（tmp + rename）
+ * 避免半写文件被下轮 probe 读到。写失败仅记录不阻塞：文件是 probe 的候选来源之一
+ * 而非权威，且 supervisor 的 runtime.port 通道仍在，双通道全失效才会退化为无互斥
+ * （仅剩毫秒级并发窗口）。listen 成功后无需重复登记（登记内容不含 listen 结果）。
  */
 export function registerRuntimeInstance(dataDir: string, port: number): void {
   const record: RuntimeInstanceRecord = { pid: process.pid, port, startedAt: new Date().toISOString() }

@@ -1,9 +1,10 @@
 /**
  * 单实例互斥守卫单测（probe 判定矩阵 + register 原子写）。
  *
- * probe 侧注入 fake isPortReachable 隔离网络；register/读文件走 mkdtemp 真目录
- * （防线路线：tmp 自建自删）。核心断言面：活实例拒绝（双来源）、stale 放行接管、
- * 损坏文件不阻塞、同端口去重、登记文件内容与权限。
+ * probe 侧注入 fake isPortReachable / isPidAlive 隔离网络与进程表；register/读文件走
+ * mkdtemp 真目录（防线路线：tmp 自建自删）。核心断言面：活实例拒绝（双来源）、
+ * 预登记窗口拒绝（pid 存活但未 listen）、stale 放行接管（pid 死亡）、损坏文件不阻塞、
+ * 同端口去重、登记文件内容与权限。
  */
 import { describe, it, expect } from 'vitest'
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
@@ -11,9 +12,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { probeSingleInstance, registerRuntimeInstance, RUNTIME_INSTANCE_FILE, type InstanceGuardDeps } from '../../infra/single-instance-guard.js'
 
-/** 按端口可控的探活 fake：reachablePorts 集合外的端口一律不可达。 */
-function fakeProbe(reachablePorts: number[]): InstanceGuardDeps {
-  return { isPortReachable: async (port) => reachablePorts.includes(port) }
+/** 按端口可控的探活 fake：reachablePorts 集合外的端口一律不可达；pid 活性可选注入（默认全死，断言不受宿主进程表干扰）。 */
+function fakeProbe(reachablePorts: number[], pidAlive = false): InstanceGuardDeps {
+  return { isPortReachable: async (port) => reachablePorts.includes(port), isPidAlive: () => pidAlive }
 }
 
 /** 每用例独立 tmp 数据目录（用后删除）。 */
@@ -40,15 +41,35 @@ describe('probeSingleInstance', () => {
       await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: 4242, port: 3370, startedAt: '2026-09-22T00:00:00.000Z' }))
       const result = await probeSingleInstance(dir, fakeProbe([3370]))
       expect(result.blocked).toBe(true)
-      expect(result.holder).toEqual({ port: 3370, pid: 4242, source: 'runtime-instance.json' })
+      expect(result.holder).toEqual({ port: 3370, pid: 4242, source: 'runtime-instance.json', reachable: true })
     })
   })
 
-  it('instance 端口已死（stale 残留）→ 放行接管', async () => {
+  it('instance 端口未 listen 但持有 pid 存活（并发同启预登记窗口）→ 拒绝且 reachable=false', async () => {
+    await withTmpDataDir(async (dir) => {
+      await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: 4242, port: 3370, startedAt: '2026-09-22T00:00:00.000Z' }))
+      const result = await probeSingleInstance(dir, fakeProbe([], true))
+      expect(result.blocked).toBe(true)
+      expect(result.holder).toEqual({ port: 3370, pid: 4242, source: 'runtime-instance.json', reachable: false })
+    })
+  })
+
+  it('instance 端口已死且持有 pid 已死（SIGKILL 残留）→ 放行接管', async () => {
     await withTmpDataDir(async (dir) => {
       await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: 1, port: 3370, startedAt: '2026-09-22T00:00:00.000Z' }))
-      const result = await probeSingleInstance(dir, fakeProbe([]))
+      const result = await probeSingleInstance(dir, fakeProbe([], false))
       expect(result.blocked).toBe(false)
+    })
+  })
+
+  it('pid 损坏值（0/负数）不触发 pid 判定 → 即便进程表误报存活也放行', async () => {
+    await withTmpDataDir(async (dir) => {
+      await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: 0, port: 3370, startedAt: '2026-09-22T00:00:00.000Z' }))
+      const pidZero = await probeSingleInstance(dir, fakeProbe([], true))
+      await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: -7, port: 3371, startedAt: '2026-09-22T00:00:00.000Z' }))
+      const pidNegative = await probeSingleInstance(dir, fakeProbe([], true))
+      expect(pidZero.blocked).toBe(false)
+      expect(pidNegative.blocked).toBe(false)
     })
   })
 
@@ -57,7 +78,7 @@ describe('probeSingleInstance', () => {
       await writeFile(join(dir, 'runtime.port'), '3210')
       const result = await probeSingleInstance(dir, fakeProbe([3210]))
       expect(result.blocked).toBe(true)
-      expect(result.holder).toEqual({ port: 3210, source: 'runtime.port' })
+      expect(result.holder).toEqual({ port: 3210, source: 'runtime.port', reachable: true })
     })
   })
 
@@ -67,7 +88,7 @@ describe('probeSingleInstance', () => {
       await writeFile(join(dir, 'runtime.port'), '3210')
       const result = await probeSingleInstance(dir, fakeProbe([3210]))
       expect(result.blocked).toBe(true)
-      expect(result.holder).toEqual({ port: 3210, source: 'runtime.port' })
+      expect(result.holder).toEqual({ port: 3210, source: 'runtime.port', reachable: true })
     })
   })
 
@@ -76,7 +97,7 @@ describe('probeSingleInstance', () => {
       await writeFile(join(dir, RUNTIME_INSTANCE_FILE), JSON.stringify({ pid: 4242, port: 3210, startedAt: '2026-09-22T00:00:00.000Z' }))
       await writeFile(join(dir, 'runtime.port'), '3210')
       const result = await probeSingleInstance(dir, fakeProbe([3210]))
-      expect(result.holder).toEqual({ port: 3210, pid: 4242, source: 'runtime-instance.json' })
+      expect(result.holder).toEqual({ port: 3210, pid: 4242, source: 'runtime-instance.json', reachable: true })
     })
   })
 
@@ -115,7 +136,7 @@ describe('probeSingleInstance', () => {
 })
 
 describe('registerRuntimeInstance', () => {
-  it('listen 成功后原子写登记文件：pid/port/startedAt 齐全且可被 probe 读回', async () => {
+  it('probe 通过后预登记原子写：pid/port/startedAt 齐全且可被 probe 读回', async () => {
     await withTmpDataDir(async (dir) => {
       registerRuntimeInstance(dir, 3370)
       const raw = JSON.parse(await readFile(join(dir, RUNTIME_INSTANCE_FILE), 'utf-8')) as { pid: number; port: number; startedAt: string }

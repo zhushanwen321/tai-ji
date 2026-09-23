@@ -307,7 +307,12 @@ function exitIfInstanceConflict(guardProbe: Awaited<ReturnType<typeof probeSingl
     console.error('[runtime] fatal: data directory already served by a live runtime instance — refusing to start (dual runtime would reattach + destroy its sessions/subagents)')
     console.error(`  data dir : ${getDataDir()}`)
     console.error(`  live at  : 127.0.0.1:${holder.port} (source: ${holder.source}${holder.pid !== undefined ? `, pid ${holder.pid}` : ''})`)
-    console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
+    if (holder.reachable) {
+      console.error(`  recovery : \`lsof -i :${holder.port}\` to identify the process; stop it (or wait for its exit on app restart) and retry.`)
+    } else {
+      // 预登记窗口拒绝：持有 pid 存活但端口尚未 listen——并发同启中，或 pid 复用误判（保守侧）。
+      console.error(`  recovery : holder pid ${holder.pid} is alive but not listening yet (concurrent startup in progress) — wait for it to finish starting and retry, or \`ps -p ${holder.pid}\` to identify it; if it is NOT a runtime process (pid reuse) remove runtime-instance.json and retry.`)
+    }
     console.error('             for a second concurrent instance use a separate TAIJI_AGENT_DATA_DIR — dev/e2e/acceptance must NOT inherit the prod data dir')
     process.exit(1)
   }
@@ -398,6 +403,11 @@ async function main(): Promise<void> {
   // 使拒绝报错落盘可见。守卫语义与判据见 single-instance-guard.ts 模块头注。
   const guardProbe = await probeSingleInstance(getDataDir())
   exitIfInstanceConflict(guardProbe)
+  // 预登记本实例（probe 通过即写、早于 listen）：并发同启同目录时，后到实例的 probe
+  // 读到本登记即因 pid 存活拒绝——漏防窗口从「probe→listen」（秒级）缩到单文件原子
+  // 写内。listen 成功后无需重复登记（登记内容不含 listen 结果）；写失败不阻塞（文件
+  // 非权威，supervisor runtime.port 通道并行）。
+  registerRuntimeInstance(getDataDir(), port)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
@@ -1289,10 +1299,6 @@ async function main(): Promise<void> {
     exitOnListenFailure(err, port)
   }
   console.log('[runtime] ready')
-
-  // 单实例互斥守卫登记：listen 成功即写入本实例定位（下一轮启动 probe 的候选来源；
-  // supervisor 的 runtime.port 通道照旧由 Electron 侧写入，两通道并行）。
-  registerRuntimeInstance(getDataDir(), port)
 
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
   // 早建早发现权限问题（设计 §4.1）。
