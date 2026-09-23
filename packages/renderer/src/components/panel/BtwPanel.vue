@@ -261,6 +261,8 @@ const props = defineProps<{
 const { t } = useI18n()
 
 /** per-main-session 面板状态（ADR-0049 Map 分区；切 sid 不丢、切回恢复，异步回写用 updateFor） */
+// @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（btw.list 拉取 reply 喂入，
+// 与 useBtwTabData badge 分区各自拉取各自收敛；权威源/唯一写入口见登记表主表 #44 行，非第二写方）
 interface BtwPanelState {
   threads: BtwThreadInfo[]
   loading: boolean

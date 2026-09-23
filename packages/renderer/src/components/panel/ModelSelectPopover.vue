@@ -55,7 +55,6 @@ const props = withDefaults(defineProps<{
   /** 限定展示的 provider 分组（ProviderPage 默认 pill 传 [p.id]，只列该供应商模型） */
   providerFilter?: ProviderId[]
   /**
-  /**
    * U4「切换中」：true 时 trigger 显示转圈并**忽略开合与点选**（禁用重复点击；并发两条
    * model.switch 在飞会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
    * sessionId 等值后传入（本组件不感知 session）。

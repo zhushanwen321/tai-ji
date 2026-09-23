@@ -359,7 +359,12 @@ async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
         )
         mirror.entries = []
         mirror.cursor = undefined
-        void refresh(api, mirror.sessionId)
+        // 重拉必须挂在当前 in-flight 结束之后：此刻 refresh() 仍能看见本轮登记的
+        // promise（finally 未跑、refreshInFlight 未清），直接调会被并发合并复用返回，
+        // 自愈拉取静默丢失（E11 用例实测抓出）。挂到 settle 之后登记已清空，
+        // refresh() 才真正发起全量重拉。
+        const settle = mirror.refreshInFlight ?? Promise.resolve()
+        void settle.then(() => refresh(api, mirror.sessionId))
         return
       }
     }

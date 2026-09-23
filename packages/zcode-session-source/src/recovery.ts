@@ -24,6 +24,13 @@
  * 崩溃残留显式「不接管」：mkdtemp 固定前缀 taiji-zcode-snap- + 读后 finally 清理；
  * os.tmpdir() 由 OS 回收，前缀可人工识别。不为此新增清理器（新机制新义务，超出
  * 读取链职责——设计 §3.4 CANTOPEN 四要素「恢复路径」节）。
+ *
+ * $TMPDIR 治理面登记（2026-09-23 review round 1 MF-1-4）：L3 快照把会话库整库拷入
+ * $TMPDIR 属「读快照」非「对话数据存放」——源库只读零触碰、副本即弃（OS 清空
+ * $TMPDIR 无任何权威数据丢失面），已按此语义登记为 data-source-registry §4 ⑰
+ * （ADR-0063 I2「对话数据禁入 $TMPDIR」的登记例外，taiji 侧消费面经该条豁免
+ * review MUST「会话内容入 $TMPDIR」）。迁移 dataDir scratch 的长期方向与代价
+ * 见该条目处置列——跨包 API 变更，另批裁决。
  */
 
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'

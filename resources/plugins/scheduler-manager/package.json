@@ -5,6 +5,9 @@
   "type": "module",
   "displayName": "Scheduler Manager",
   "description": "Session-scoped scheduled-task manager: header-action entry + modal list + /schedule write path (plugin-header-action-modal-points first consumer)",
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9"
+  },
   "taijiPlugin": {
     "manifestVersion": 1,
     "main": "index.js",

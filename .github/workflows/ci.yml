@@ -97,6 +97,14 @@ jobs:
       - name: TypeCheck - pi extensions
         run: pnpm extensions:typecheck
 
+      # builtin taiji 插件（resources/plugins/<name>/index.ts + 装配的 __tests__/）不在
+      # pnpm workspace，不被任何包级 tsconfig include；构建走 esbuild 只剥类型不查类型
+      # ——统一 tsconfig（resources/plugins/tsconfig.json，*/index.ts 通配自动纳新插件）
+      # 是插件源码类型回归的唯一机器拦截点。pnpm exec 显式走根 node_modules 的 tsc
+      # （同 taste-lint step 的防 npx 拉版理由）。
+      - name: TypeCheck - builtin plugins (resources)
+        run: pnpm exec tsc -p resources/plugins
+
   # SDK 类型同步 job 已删除（D28 方向反转，2026-09-05）：plugin-sdk/src/types.ts
   # 现为契约 SSOT，runtime 经 plugin-types 薄壳 re-export 消费——不存在「两份
   # 文件需保持同步」的漂移面，sync-types.sh 生成方向已不存在。
@@ -251,6 +259,13 @@ jobs:
 
       - name: Test
         run: pnpm extensions:test
+
+      # builtin taiji 插件（resources/plugins/<name>/）单测：经根 test:resources-plugins
+      # script 走 --config 指入（config root 钉在插件目录，cwd 无关），目标非空由
+      # check-ci-vitest-targets 守卫覆盖；当前成员 scheduler-manager，新插件装配测试后
+      # 在 script 追加同形 --config 段。
+      - name: Test - builtin plugins (resources)
+        run: pnpm test:resources-plugins
 
       # builtin-ext-bundle vitest 套件（scripts/__tests__/builtin-ext-bundle.test.mjs，TC3/TC4/TC7/TC8
       # + checkManifest 6 失败分支）依赖 prepare-builtin-extensions.sh 预产出的 staged 产物

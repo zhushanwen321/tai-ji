@@ -12,6 +12,8 @@
  * - 浮层互斥：Search 打开 / Settings 挂载（body 直挂 .fso）→ reason host-overlay（AP-2 规则①）
  * - 关闭键、内容树 = ViewHost 消费 modal-<pluginId>-<modalId> per-session 分区
  * - 全局单例守卫：split 双实例只渲染一层
+ * - 键盘细节（test-coverage SG-1 补防线）：Esc 去重（层内 keydown preventDefault 后
+ *   window 级兜底不二次 dismiss）+ Tab 焦点陷阱首末循环（末→首 / 首 Shift→末 / 中间放行）
  *
  * Teleport 到 body 的层不在 wrapper.find 范围内——层断言统一走 document.querySelector。
  * afterEach 必须先 unmount 再清 body（Teleport 锚点挂在 body，顺序颠倒会让 Vue 的
@@ -301,6 +303,76 @@ describe('PluginModalHost', () => {
     openSlot()
     await nextTick()
     expect(document.querySelectorAll('[data-testid=plugin-modal]').length).toBe(1)
+  })
+
+  it('Esc 去重（window 级兜底）：层内 keydown 先 preventDefault，冒泡到 window 不二次 dismiss', async () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const modalSource = makeModalSource()
+    mountHost({ modalSource })
+    openSlot()
+    await nextTick()
+    expect(layerExists()).toBe(true)
+    // Esc 从层内焦点元素发起（bubbles 冒泡经层内 @keydown → window 兜底监听双路可达）；
+    // 显式聚焦关闭键（open 自动聚焦是异步 nextTick 回调，显式聚焦使命中路径确定）
+    const closeBtn = document.querySelector('[data-testid=plugin-modal-close]') as HTMLButtonElement
+    expect(closeBtn).not.toBeNull()
+    closeBtn.focus()
+    expect(layerEl()?.contains(document.activeElement)).toBe(true)
+
+    closeBtn.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+
+    // 双路只 dismiss 一次（层内先 preventDefault，window 兜底 defaultPrevented 跳过）
+    expect(modalSource.dismiss).toHaveBeenCalledTimes(1)
+    expectDismissReported(modalSource, 'dismissed')
+    expect(layerExists()).toBe(false)
+    // 焦点归还触发元素（场景 1 归焦判据，window 兜底路径同样成立）
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('Tab 焦点陷阱（a11y 契约）：末个 Tab → 首个；首个 Shift+Tab → 末个', async () => {
+    mountHost()
+    openSlot()
+    await nextTick()
+    expect(layerExists()).toBe(true)
+
+    // 层内内容区补两个可聚焦元素（ViewHost 空内容首帧无 focusable，构造首末序）：
+    // 文档序 = [关闭键(header), extra-1, extra-2]
+    const content = layerEl()?.querySelector('.overflow-auto') ?? layerEl()!
+    const extra1 = document.createElement('button')
+    extra1.textContent = 'extra-1'
+    const extra2 = document.createElement('a')
+    extra2.textContent = 'extra-2'
+    extra2.setAttribute('href', '#')
+    content.append(extra1, extra2)
+
+    const closeBtn = document.querySelector('[data-testid=plugin-modal-close]') as HTMLButtonElement
+    expect(closeBtn).not.toBeNull()
+
+    // 末个（extra-2）非 shift Tab → preventDefault + 聚焦首个（关闭键）
+    extra2.focus()
+    expect(document.activeElement).toBe(extra2)
+    const tabFwd = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    extra2.dispatchEvent(tabFwd)
+    expect(tabFwd.defaultPrevented).toBe(true) // 陷阱接管（不外泄浏览器原生顺序）
+    expect(document.activeElement).toBe(closeBtn)
+
+    // 首个（关闭键）shift Tab → preventDefault + 聚焦末个（extra-2）
+    const tabBack = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+    closeBtn.dispatchEvent(tabBack)
+    expect(tabBack.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(extra2)
+
+    // 中间元素（extra-1）非 shift Tab：不接管（defaultPrevented false，交浏览器原生顺序）
+    extra1.focus()
+    const tabMid = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    extra1.dispatchEvent(tabMid)
+    expect(tabMid.defaultPrevented).toBe(false)
   })
 
   it('远端换主（不同 owner 的 open 带 replaced 仲裁）→ 层跟随新槽渲染新内容', async () => {

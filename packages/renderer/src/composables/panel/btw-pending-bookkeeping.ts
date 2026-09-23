@@ -8,7 +8,8 @@
  * 在 computed/渲染内读取建立依赖。
  *
  * 依赖边界（层级约束：本模块必须保持在 useBtwTabData 之下、可被 store 层直接消费）：
- * 只 import vue / shared·core·ui 类型 / stores/extension-ui——不 import bus 订阅
+ * 只 import vue / shared·core·ui 类型 + core 纯函数值（hasDanglingInteractiveRequest——
+ * 零依赖纯谓词，不构成环）/ stores/extension-ui——不 import bus 订阅
  * （getExtensionBus）、dialog 转换（extension-host-dialog 的 convertToDialogRequest /
  * createUiResponseTransport）与 stores/chat。stores/btw-replay.ts（chat store 的回放装配点）
  * 直接消费本模块（markBtwStaleInteractiveFromReplay），上述任何一条依赖都会构成
@@ -43,6 +44,7 @@
  * 无超时语义：本簿记不含任何墙钟（D8——pi 源 dialog 无超时，plugin 超时撤窗契约不套用）。
  */
 import { reactive } from 'vue'
+import { hasDanglingInteractiveRequest } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
 import type { DialogRequest } from '@taiji/ui/extension-host'
 import type { Message } from '@taiji/shared'
@@ -127,22 +129,6 @@ export const BTW_EXPIRED_REASON_SNAPSHOT_PRUNED = 'snapshot-pruned'
 export const BTW_EXPIRED_REASON_REPLAY_DANGLING = 'replay-dangling'
 
 /**
- * 交互请求类工具名（回放对账路的悬空判定名单，窄而准——宁漏不误）。口径 = D8 请求范围
- * 五类中「以本名工具 toolCall 持久化、且执行体阻塞等待用户应答」的子集：
- * - `ask_user`：ask-user 富提问表单（extensions/universal/ask-user/src/index.ts registerTool）
- * - `schedule`：scheduler 建单表单（extensions/universal/scheduler/src/index.ts registerTool，
- *   interaction.ts 经 uiFormInteract 阻塞等应答）
- * - `plan`：plan 模式生命周期（extensions/universal/plan/src/tool.ts registerTool，
- *   submit-review 阻塞等用户审批）
- * 刻意排除（按名不可辨识或非用户对话等待）：`schedule_control`（纯服务调用无 UI 阻塞）；
- * session-manager 六工具（SESSION_MANAGER_MARKER 机器 RPC 通道，亚秒级非用户应答）；
- * permission 审批与 confirm/input/editor 简单 dialog（挂在 bash/edit 等普通工具执行体或
- * extension 内部调用上，悬空 toolCall 名不可辨识——误标普通工具即违名单窄而准）；
- * plugin-bridge 动态插件工具（非 taiji 交互请求族）。
- */
-const BTW_INTERACTIVE_REQUEST_TOOLS: ReadonlySet<string> = new Set(['ask_user', 'schedule', 'plan'])
-
-/**
  * 失效支单入口（多路写入合并收口，`expiredNoticeByVid` 单状态）：事件路订阅与快照修剪路
  * （`invalidateBtwStaleFromSnapshot`）都收口至此——逐条出账 + 行内提示置位 + dialog 渲染
  * 载荷撤下。`had` 守卫：requestIds 全部不在本簿记时零副作用（重复帧 / 剪枝差集为空均 no-op）。
@@ -184,8 +170,8 @@ export function invalidateBtwStaleFromSnapshot(
 
 /**
  * 回放对账路失效（失效支三路之三，btw-replay 回放链在定格投影落地时同步调用）：
- * 扫描回放投影 messages 中的悬空交互请求 toolCall（`BTW_INTERACTIVE_REQUEST_TOOLS` 命名 +
- * 无 toolResult 回填），检出即置行内「请求已失效」提示。
+ * 经 core 纯谓词 `hasDanglingInteractiveRequest`（core `domain/chat/btw-dangling-requests.ts`
+ * 投影层 SSOT——名单/不变量/层界见其文件头）扫描回放投影，检出即置行内「请求已失效」提示。
  *
  * 信号源 = pi 会话文件持久层（悬空 toolCall 是执行体被杀时留下的持久痕迹），不依赖任何
  * 内存簿记跨进程存活——补快照修剪路（②）的结构性盲区：整机杀重启时本簿记与 runtime
@@ -203,16 +189,7 @@ export function invalidateBtwStaleFromSnapshot(
  * 不被本路清除（用户 dismiss / 新请求顶掉是仅有的清除支）。
  */
 export function markBtwStaleInteractiveFromReplay(vid: string, messages: readonly Message[]): void {
-  let hasDangling = false
-  for (const m of messages) {
-    const tcs = m.toolCalls
-    if (!tcs) continue
-    if (tcs.some((tc) => tc.output === undefined && BTW_INTERACTIVE_REQUEST_TOOLS.has(tc.toolName))) {
-      hasDangling = true
-      break
-    }
-  }
-  if (!hasDangling) return
+  if (!hasDanglingInteractiveRequest(messages)) return
   if (pendingReqIdsByVid.get(vid)?.size) return
   if (useExtensionUIStore().getRequestsBySession(vid).length > 0) return
   expiredNoticeByVid.set(vid, BTW_EXPIRED_REASON_REPLAY_DANGLING)

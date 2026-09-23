@@ -13,7 +13,9 @@ zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费�
     `-wal` 下 immutable 静默丢行，必须门控）
   - L3 小库快照兜底（db 拷 mkdtemp 固定前缀 `taiji-zcode-snap-` + 自建 0 字节
     `-wal` → 开库后验证 `sqlite_master` 表集合含 `session/message/part`；规模门
-    256MB 拒拷；读后 finally 清理）
+    256MB 拒拷；读后 finally 清理。**$TMPDIR 治理面**：快照属「读快照」非对话数据
+    存放——源库只读零触碰、副本即弃，taiji 侧登记为 data-source-registry §4 ⑰
+    〔ADR-0063 I2 的登记例外〕，详见 recovery.ts 头注）
   - L4 错误面（`SqliteUnreadableError`，`attempted` 记录已尝试级别，供上层映射
     消费侧错误码——本包不私建错误码词表）
   - 拷贝集唯一定义：db only + 自建 0 字节 `-wal`；`-wal`/`-shm` 在场绝不自动拷贝

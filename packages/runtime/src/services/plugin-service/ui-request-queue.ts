@@ -51,11 +51,13 @@ export type UiBroadcastType = 'plugin:uiRequest' | 'plugin:uiRequestExpired'
  * 广播回调：把 UI 请求推给前端 / 通知前端撤回到期弹窗。payload requestId 必带
  * （dispatch 与 cancelRequest 均恒含）——与 shared ServerMessageMap['plugin:uiRequest' /
  * 'plugin:uiRequestExpired'] 契约对齐，消费方（plugin-service 广播回调）可免
- * `as ServerMessage` 断言直接构造类型化消息。
+ * `as ServerMessage` 断言直接构造类型化消息。pluginId 同样恒含（dispatch 从
+ * entry.pluginId 带出、四路 expired 收尾从 pending/queued entry 带出），必填化对齐
+ * ServerMessageMap['plugin:uiRequestExpired'] 的 pluginId 契约（uiRequest 侧为透传字段）。
  */
 export type UiBroadcastFn = (
   type: UiBroadcastType,
-  payload: { requestId: string; pluginId?: string } & Record<string, unknown>,
+  payload: { requestId: string; pluginId: string } & Record<string, unknown>,
 ) => void
 
 export class UiRequestQueue {

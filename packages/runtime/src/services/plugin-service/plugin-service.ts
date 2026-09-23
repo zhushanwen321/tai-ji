@@ -3,7 +3,7 @@ import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, B
 import type { StatusBarItem, PluginInfo } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
-import type { ServerMessage } from '@taiji/shared'
+import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
 import { PluginRegistry } from './plugin-registry.js'
 import { PluginStorage } from './plugin-storage.js'
 import { SessionDataStore } from './session-data-store.js'
@@ -179,9 +179,11 @@ export class PluginService implements IPluginService {
     }))
 
     // Status bar 注册表：广播保持 `plugin:statusBarUpdate` 契约（ADR-0015）。
+    // MF-3-1：该 type 无 ServerMessageMapBase 具名条目，经 Exclude 占位腿收
+    // Record<string, unknown>，字面量窄→宽可直赋 ServerMessage，免 as 断言。
     this.statusBarRegistry = new StatusBarRegistry((payload) => this.broker.broadcast({
       type: 'plugin:statusBarUpdate', id: `sb_${Date.now()}`, payload,
-    } as ServerMessage))
+    }))
 
     this.activator = new PluginActivator({
       permissionChecker: this.permissionChecker,
@@ -206,8 +208,9 @@ export class PluginService implements IPluginService {
     }
   }
 
-  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（实现迁 plugin-broadcast.ts，行为保持） */
-  private broadcastOrBroker(type: string, id: string, payload: unknown): void {
+  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（实现迁 plugin-broadcast.ts，行为保持）。
+   *  type/payload 经 ServerMessageMap 泛型关联（MF-2-4：构造点契约校验，免 as 断言）。 */
+  private broadcastOrBroker<T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]): void {
     broadcastOrBrokerWith(this.broadcastDeps, type, id, payload)
   }
 

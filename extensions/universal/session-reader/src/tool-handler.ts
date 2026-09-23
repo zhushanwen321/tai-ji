@@ -32,6 +32,7 @@ import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 import { convertZcodeTranscript, openZcodeSessionDb } from '@zhushanwen/zcode-session-source'
 import {
+  buildSessionFileIndex,
   findSessions,
   type MatchedSession,
   type SessionMetadataEntry,
@@ -200,8 +201,10 @@ export type ResolveResult =
       kind: 'ok'
       sessionId: string
       /**
-       * 内容源路径。pi = session .jsonl 绝对路径；zcode 路由命中 = 会话库 .sqlite
-       * 绝对路径（loadParsed 按 zcodeAnchor 分流，safeParse 不会以此路径开 JSONL）。
+       * 内容源路径。pi = session .jsonl 绝对路径；zcode 路由命中（非 family）= 会话库
+       * .sqlite 绝对路径（loadParsed 按 zcodeAnchor 分流，safeParse 不会以此路径开
+       * JSONL）；zcode family 路由 = rootSessionId 反查的 .jsonl 路径（反查未命中为
+       * 空串——仅作树构建 sessionFile 用途，buildExecutionTree 侧归一为 undefined）。
        */
       fileName: string
       /**
@@ -302,7 +305,7 @@ async function resolveSaIdRoute(
     throw err(formatZcodeAnchorMissing(session))
   }
   if (zm.kind === 'zcode') {
-    return resolveZcodeRoute(session, zm.anchor, agentDir, action)
+    return resolveZcodeRoute(session, zm.anchor, agentDir, action, liveSessionDir)
   }
   // not-zcode：pi manifest 命中 → 现路径（同一 manifests 传入，不二次扫描）
   const manifests = prefetchedManifests ?? (await listRecordManifests(agentDir))
@@ -312,7 +315,7 @@ async function resolveSaIdRoute(
   // entry 兜底（§3.5 第②层）：候选 = liveSessionDir 内主 session 文件（第一梯队
   // 只在 liveSessionDir 内做，根内全扫不做——越界显式失败）
   const candidates = await liveSessionCandidateFiles(agentDir, liveSessionDir)
-  const anchor = findZcodeEntryAnchor(candidates, session)
+  const anchor = await findZcodeEntryAnchor(candidates, session)
   if (anchor === undefined) {
     // 兜底失败的两类归因（§3.4 第 0 段，场景 5 ②）：候选里有该 sa-id 的 record entry
     // 但锚不完整 → zcode_anchor_missing（缺失键名进结构化日志——engineHandle 整体
@@ -326,7 +329,7 @@ async function resolveSaIdRoute(
     }
     throw err(formatZcodeRecordNotFound())
   }
-  return resolveZcodeRoute(session, anchor, agentDir, action)
+  return resolveZcodeRoute(session, anchor, agentDir, action, liveSessionDir)
 }
 
 /**
@@ -369,7 +372,11 @@ async function liveSessionCandidateFiles(
  *   文件，buildFamilyFromFs 的 byId 索引查不到锚 sessionId；zcode 节点按 rootSessionId
  *   挂载（D5-1），rootSessionId 视图即「该 subagent 的后代与关联」（§3.4 指引语义）。
  *   rootSessionId 取自 `listZcodeManifests` 枚举（readZcodeManifest 直读信号只携带锚，
- *   不携带 rootSessionId——family 是低频 action，枚举一次可接受）。
+ *   不携带 rootSessionId——family 是低频 action，枚举一次可接受）。fileName 按完整
+ *   rootSessionId 反查其 .jsonl 路径回填（MF-1 链路：recursive 树 main root 填
+ *   sessionFile 后才能读到该 session 自身发起的 workflow run）；反查未命中（文件已
+ *   GC）回退空串（buildExecutionTree 侧归一为 undefined，树退化为无 sessionFile
+ *   root，不伪造路径）。
  * - 其余 action：sessionId = 锚会话 id、fileName = 锚库路径（内容源），zcodeAnchor
  *   在场使 loadParsed 分流到 zcode 读链。
  */
@@ -378,15 +385,34 @@ async function resolveZcodeRoute(
   anchor: ZcodeAnchor,
   agentDir: string,
   action: SessionReadAction,
+  liveSessionDir: string | undefined,
 ): Promise<ResolveResult> {
   if (action === 'family') {
     const zcodeNodes = await listZcodeManifests(agentDir)
     const rootSessionId = zcodeNodes.find((n) => n.id === saId)?.rootSessionId
     // 枚举未含该 id（直读命中与枚举之间 manifest 被迁移的极端窗口）→ 退回锚 sessionId，
     // 后续 byId 查不到走既有 not-found 错误面（不静默伪造家族）
-    return { kind: 'ok', sessionId: rootSessionId ?? anchor.sessionId, fileName: '' }
+    if (rootSessionId === undefined) {
+      return { kind: 'ok', sessionId: anchor.sessionId, fileName: '' }
+    }
+    const rootFile = await findSessionFileById(rootSessionId, agentDir, liveSessionDir)
+    return { kind: 'ok', sessionId: rootSessionId, fileName: rootFile ?? '' }
   }
   return { kind: 'ok', sessionId: anchor.sessionId, fileName: anchor.dbPath, zcodeAnchor: anchor }
+}
+
+/**
+ * 按完整 session id 反查其 .jsonl 路径（zcode family 路由回填 fileName 用）。
+ * 单次根扫描建 id→path 索引（u12 既有管线，同 id 多根取 mtime 新者）；未命中
+ *（文件已 GC / 根外）→ undefined，调用方自行降级。
+ */
+async function findSessionFileById(
+  sessionId: string,
+  agentDir: string,
+  liveSessionDir: string | undefined,
+): Promise<string | undefined> {
+  const index = await buildSessionFileIndex({ agentDir, liveSessionDir })
+  return index.get(sessionId)?.path
 }
 
 /** 形态①：绝对路径 / ~ 前缀 → 展开后读首行 header，sessionId=header 真实 id（文件名仅定位）。 */

@@ -11,18 +11,28 @@
  *   ③ 非 ENOENT 读失败只跳过该文件；④ 不存在→存在 → refresh
  * - 基线推进：同一坏内容连续 N 拍 → 决策 refresh 恰 1 次（不重复）
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import providerLiveSync, {
   evaluateSnapshot,
   readObservation,
+  POLL_INTERVAL_MS,
   WATCHED_FILES,
   type FileObservation,
   type Snapshot,
   type WatchedFile,
 } from '../index.ts'
+
+// tick 层用例：mock pi 宿主模块的 getAgentDir 指向真实 tmp fixture。纯函数用例不经
+// getAgentDir（readObservation 显式传目录），mock 对它们无影响。
+const piMocks = vi.hoisted(() => ({ agentDir: '' }))
+
+vi.mock('@earendil-works/pi-coding-agent', () => ({
+  getAgentDir: () => piMocks.agentDir,
+}))
 
 function makeSnapshot(): Snapshot {
   return { baselines: new Map(), initialized: false, suppressed: new Set() }
@@ -201,5 +211,119 @@ describe('readObservation —— 真实文件系统（ENOENT vs 其它错误的�
     } finally {
       chmodSync(join(dir, 'auth.json'), 0o600)
     }
+  })
+})
+
+/**
+ * tick 层（MF-1-1 回归）：decision 之外的扩展运行时行为——首基线完成的置位时机与
+ * `modelRegistry.refresh` 触发。
+ *
+ * catalog-only 全新安装标准路径：首拍双 absent（models.json/auth.json 均不存在）→ 用户
+ * 首次保存凭据（auth.json 物化）→ **必须** refresh。缺陷形态：initialized 只在 refresh
+ * 分支内置位，双 absent 首拍 decision=none 提前 return 不置位，首个真实变化被
+ * firstBaseline 吞掉（用户首次配完凭据切模型仍报 Model not found）。
+ *
+ * 驱动方式：getAgentDir mock 指向真实 tmp fixture（mkdtemp 自建自删）；fake pi 只需
+ * `on('session_start')` 捕获 ctx（含 refresh/getError spy）；fake timers 只替换
+ * setTimeout/clearTimeout——tick 链上的 readFile 与 setImmediate 保持真实，I/O 宏任务
+ * 逐事件循环轮次自然落地。
+ */
+describe('tick 层 —— 首基线置位时机与 refresh 触发', () => {
+  let agentDir: string
+
+  beforeEach(() => {
+    agentDir = mkdtempSync(join(tmpdir(), 'provider-live-sync-tick-'))
+    piMocks.agentDir = agentDir
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  function startWithFakeCtx(): { refresh: ReturnType<typeof vi.fn>; appendEntry: ReturnType<typeof vi.fn> } {
+    const refresh = vi.fn(async () => ({ aborted: false, errors: new Map() }))
+    const getError = vi.fn(() => null)
+    const ctx = { modelRegistry: { refresh, getError } }
+    const appendEntry = vi.fn()
+    const on = vi.fn()
+    providerLiveSync({ on, appendEntry } as unknown as ExtensionAPI)
+    const handler = on.mock.calls.find((call) => call[0] === 'session_start')?.[1] as
+      | ((event: unknown, sessionCtx: unknown) => void)
+      | undefined
+    expect(handler).toBeTypeOf('function')
+    handler({ type: 'session_start' }, ctx)
+    return { refresh, appendEntry }
+  }
+
+  /** 逐真实事件循环轮次（setImmediate 未被 fake）轮询等待谓词成立。 */
+  async function waitFor(predicate: () => boolean, maxTurns = 5_000): Promise<void> {
+    for (let i = 0; i < maxTurns && !predicate(); i += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+  }
+
+  /**
+   * 推进一个轮询周期并等本拍 tick **完整落地**。确定性拍屏障：tick 完成后其
+   * `.finally(schedule)` 必然注册下一个 fake timer——等 `getTimerCount() >= 1`
+   * 即证明本拍 readFile 链（真实线程池 I/O）已结束。固定轮次 flush 不行：线程池
+   * 完成回调的到达轮次不定，偶发「tick 晚于下一拍的 writeFileSync 完成 → 新内容
+   * 被当首基线」假红。
+   */
+  async function tickOnce(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    await waitFor(() => vi.getTimerCount() >= 1)
+  }
+
+  it('MF-1-1：首拍双 absent（catalog-only 全新安装）→ auth.json 首次出现 → 必须 refresh', async () => {
+    const { refresh } = startWithFakeCtx()
+    await tickOnce() // 首拍：双 absent 建基线，decision=none（首拍本就不刷新）
+    expect(refresh).not.toHaveBeenCalled()
+    // 用户首次保存凭据：auth.json 物化（absent → present）——不得被 firstBaseline 吞掉
+    writeFileSync(join(agentDir, 'auth.json'), '{"kimi":{"apiKey":"sk-1"}}')
+    await tickOnce()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
+  })
+
+  it('对照不变量：首拍双在场建基线不刷新；此后内容变化 → refresh 恰一次', async () => {
+    writeFileSync(join(agentDir, 'models.json'), '{"providers":{}}')
+    writeFileSync(join(agentDir, 'auth.json'), '{"a":"x"}')
+    const { refresh } = startWithFakeCtx()
+    await tickOnce() // 首拍 decision=refresh 被 firstBaseline 吞（pi spawn 时已建快照）
+    expect(refresh).not.toHaveBeenCalled()
+    writeFileSync(join(agentDir, 'auth.json'), '{"a":"y"}')
+    await tickOnce()
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * 日志通道（MF-2-5 迁移回归）：error 级日志必须落 pi.appendEntry（session JSONL custom
+   * entry，持久化、不依赖 pi 不捕获的 extension stderr）。驱动 `getError()` 非空分支——
+   * 引擎拒绝配置是「坏配置的唯一机器证据」（SKILL.md 排障入口），其可见性不能寄望 stderr。
+   */
+  it('MF-2-5：引擎拒绝配置 → logger.error 落 pi.appendEntry（provider-live-sync:log）', async () => {
+    writeFileSync(join(agentDir, 'models.json'), '{"providers":{}}')
+    writeFileSync(join(agentDir, 'auth.json'), '{"a":"x"}')
+    const refresh = vi.fn(async () => ({ aborted: false, errors: new Map() }))
+    const getError = vi.fn(() => 'Invalid models.json schema: - providers')
+    const ctx = { modelRegistry: { refresh, getError } }
+    const appendEntry = vi.fn()
+    const on = vi.fn()
+    providerLiveSync({ on, appendEntry } as unknown as ExtensionAPI)
+    const handler = on.mock.calls.find((call) => call[0] === 'session_start')?.[1] as
+      | ((event: unknown, sessionCtx: unknown) => void)
+      | undefined
+    handler({ type: 'session_start' }, ctx)
+
+    await tickOnce() // 首拍建基线（不刷新）
+    writeFileSync(join(agentDir, 'auth.json'), '{"a":"y"}')
+    await tickOnce() // 本拍 refresh → getError() 非空 → logger.error
+
+    expect(appendEntry).toHaveBeenCalledWith('provider-live-sync:log', expect.objectContaining({
+      level: 'error',
+      message: expect.stringContaining('[provider-live-sync] model config rejected by the engine'),
+    }))
   })
 })

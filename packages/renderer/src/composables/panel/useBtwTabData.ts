@@ -81,6 +81,8 @@ import {
 export type BtwThreadInfo = ServerMessageMap['btw.list']['threads'][number]
 
 /** per-主会话 btw badge 分区状态（useSessionScopedState 容器契约：必须 reactive） */
+// @data-owner #44 —— #44 btw 线列表的 renderer badge 消费分区（btw.list 拉取 reply +
+// state 帧 typeKey 'btw' 双路喂入；权威源/唯一写入口/空值语义见登记表主表 #44 行，非第二写方）
 export interface BtwTabState {
   /** 主会话名下线列表（btw.list 拉取产物；badge Σ 的分母面） */
   threads: BtwThreadInfo[]

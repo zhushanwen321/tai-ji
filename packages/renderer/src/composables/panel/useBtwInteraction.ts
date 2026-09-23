@@ -143,6 +143,20 @@ function questionsOf(req: ExtensionUIRequest): BtwBarFormQuestion[] {
   return []
 }
 
+/**
+ * 测试后门命名空间（生产代码禁止消费，useExtensionHostBridge.__testing 同款惯例）：
+ * 上方六个表单归一化纯函数的直测面——非法项剔除策略与 runtime isFormQuestion 逐项过滤
+ * 对齐，双侧此前无 renderer 侧回归防线（test-coverage MF-3）。
+ */
+export const __testing = {
+  toScheduleDraft,
+  toBarQuestionKind,
+  toBarQuestionBase,
+  toBarOptions,
+  toBarQuestion,
+  questionsOf,
+}
+
 /** answers key（与协议 askUserKey fallback 同规则：header ?? question） */
 function questionKey(q: BtwBarFormQuestion): string {
   return q.header ?? q.question

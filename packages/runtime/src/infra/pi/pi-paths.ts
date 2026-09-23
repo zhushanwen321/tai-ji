@@ -154,7 +154,8 @@ export function getBtwSessionsRoot(): string {
 }
 
 /**
- * pi 会话 id 合法值域判定（pi `assertValidSessionId` 同款正则，dist/core/session-manager.js）：
+ * pi 会话 id 合法值域判定（pi `assertValidSessionId` 同款正则，
+ * dist/core/session-manager.js:15-19 正则字面量 :16，verifiedWith 0.84.4；登记 pi-semantics PS-52）：
  * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`。真 sid 永不含 `:` ⇒ 本校验同时挡住
  * btw vid 误传（`btw:<sid>` 含冒号必拒——vid 是 runtime/前端路由 key，不直传目录层）。
  */

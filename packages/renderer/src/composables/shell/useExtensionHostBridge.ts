@@ -266,6 +266,14 @@ export interface PluginModalSource {
 export const PLUGIN_MODAL_SOURCE_KEY: InjectionKey<PluginModalSource> = Symbol('plugin-modal-source')
 
 /**
+ * E13 判定的最小读取面（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
+ * 只需 getCommands，test-coverage SG-2 补防线时提出）。
+ */
+export interface CommandPartitionReader {
+  getCommands(sessionId: string): Array<{ name: string }>
+}
+
+/**
  * E13 判定（bridge 真实实现，双源 OR）：
  * ① 会话命令分区（commandStore，pi getCommands 消费产物）含同名命令 → registered；
  * ② CommandRegistry（plugin 命令注册表，builtin 声明经 ensureCommandDeclarationsSync 注册）
@@ -275,8 +283,8 @@ export const PLUGIN_MODAL_SOURCE_KEY: InjectionKey<PluginModalSource> = Symbol('
  *    组件侧保持上次值、首次缺省可点，失败由 E14 写路径兜底不拦入口）。
  * 已知近似：真「空命令表」会话被判 unknown 而非 unregistered（登记 u4b deviations）。
  */
-function resolveHeaderActionAvailability(
-  commandStore: ReturnType<typeof useCommandStore>,
+export function resolveHeaderActionAvailability(
+  commandStore: CommandPartitionReader,
   commandRegistry: CommandRegistry,
   sessionId: string,
   commandId: string,

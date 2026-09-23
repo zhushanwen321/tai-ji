@@ -9,8 +9,10 @@
  * 维持全仓不变量「session 文件名（剥 .jsonl 后）最后一个 `_` 之后的尾段 == header.id」
  * （image-cache 孤儿判定/删除级联、session-reader 文件名提取、parent-session 兜底
  * 匹配、短名展示共 4 处消费点）。zcode 原始 id 形如 `sess_<uuid>`，`_` 前缀会打破
- * 该不变量。pi 侧对 header.id 无格式校验（恢复路径不校验），本函数的字符集是 taiji
- * 自定约束（pi assertValidSessionId 允许集的真子集，收紧方向安全）。
+ * 该不变量。pi 侧对 header.id 无格式校验（恢复路径不校验——assertValidSessionId
+ * 仅在显式指定 id 时调用），本函数的字符集是 taiji 自定约束（pi
+ * assertValidSessionId 允许集的真子集，收紧方向安全；锚点
+ * dist/core/session-manager.js:15-19 正则字面量 :16，verifiedWith 0.84.4）。
  *
  * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误面归消费侧」）：不再
  * 抛 runtime services 层的 ImportServiceError（本包不私建 import_* / zcode_* 错误码），

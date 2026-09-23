@@ -45,7 +45,7 @@
  * 例外（CT-D5 毒化隔离）：statusBarUpdate 的 items 内单条坏值跳过该条保留其余
  * （全坏才整包 error）——坏条目来自单个插件，不连坐其余插件的条目。
  */
-import type { InternalEvent, StatusBarEntry, PluginModalClosedReason } from './types'
+import type { InternalEvent, StatusBarEntry, PluginModalClosedReason, PluginModalStatePayload } from './types'
 import type { InternalEventBus } from './internal-event-bus'
 import type { PluginMessageSource, IncomingPluginMessage } from './plugin-message-source'
 
@@ -251,9 +251,32 @@ function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
 
 // ── plugin-header-action-modal-points 两帧守卫（AP-1/AP-2）────────────
 
-const MODAL_WIDTHS = new Set(['sm', 'md', 'lg'])
+/**
+ * width / reason 词表穷举表——键集锁死为对应协议类型的字面量闭集（编译期 parity 锁：
+ * 类型增删成员时缺员/多员均编译失败，杜绝词表与类型靠人眼对齐的漂移面）。
+ * 查询走 hasOwnProperty（`in` 会命中 Object.prototype 上的 'toString' 等原型键）。
+ */
+const MODAL_WIDTHS: Record<NonNullable<PluginModalStatePayload['width']>, true> = {
+  sm: true,
+  md: true,
+  lg: true,
+}
 
-const MODAL_CLOSED_REASONS = new Set(['dismissed', 'session-switched', 'host-overlay', 'replaced', 'plugin-gone'])
+const MODAL_CLOSED_REASONS: Record<PluginModalClosedReason, true> = {
+  dismissed: true,
+  'session-switched': true,
+  'host-overlay': true,
+  replaced: true,
+  'plugin-gone': true,
+}
+
+function isModalWidth(value: unknown): value is NonNullable<PluginModalStatePayload['width']> {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODAL_WIDTHS, value)
+}
+
+function isModalClosedReason(value: unknown): value is PluginModalClosedReason {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODAL_CLOSED_REASONS, value)
+}
 
 /**
  * plugin:modalState 解析守卫（AP-2 开合帧：runtime 仲裁结果的 S→C 全局广播，transient）。
@@ -279,14 +302,10 @@ export function parseModalState(msg: IncomingPluginMessage): InternalEvent | nul
       modalId,
       sessionId,
       title: asOptionalString(payload.title),
-      width: typeof payload.width === 'string' && MODAL_WIDTHS.has(payload.width)
-        ? (payload.width as 'sm' | 'md' | 'lg')
-        : undefined,
+      width: isModalWidth(payload.width) ? payload.width : undefined,
       state: payload.state,
       epoch,
-      reason: typeof payload.reason === 'string' && MODAL_CLOSED_REASONS.has(payload.reason)
-        ? (payload.reason as PluginModalClosedReason)
-        : undefined,
+      reason: isModalClosedReason(payload.reason) ? payload.reason : undefined,
     },
   }
 }

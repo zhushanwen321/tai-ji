@@ -154,6 +154,9 @@ const guidelines = [
   'find first to locate a session by uuid fragment or name. TUI #references are full uuids.',
   'outline before detail. Never read raw .jsonl files—use this tool.',
   'family traces fork parents/children, subagent sessions, and workflow runs.',
+  // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇
+  // zcode_* 错误码前先有背景预告（schema 面按设计 D4 零变化，不在此重复）
+  'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the sa- id from the completion notice.',
   'extract what=<type> to pull user messages / commands / files / commits / tool results across turns (optional tool= filter for commands/tool-results).',
   "workflow action to see workflow run overviews (status/budget/steps). Each step's call sessionId can jump to outline/detail for deep reading.",
   "result action to fetch a subagent's final result text (same content as its completion notice): session takes a single sa-id/uuid/path or a comma-separated batch of at most 10; optional limit caps chars per item (default 8000, truncated items carry a pointer to the full file).",

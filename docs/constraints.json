@@ -2419,6 +2419,7 @@
         "extensions/shared/ext-guards/**",
         "extensions/universal/smart-context/**",
         "extensions/universal/plan/**",
+        "extensions/universal/provider-live-sync/**",
         "extensions/universal/scheduler/**",
         "extensions/universal/structured-output/**",
         "extensions/universal/subagent-workflow/**",

@@ -92,6 +92,30 @@ describe('forkViaCliPi：一次性 fork bootstrap 机制', () => {
     ).rejects.toMatchObject({ code: 'fork_failed', message: expect.stringContaining('timed out after 400ms') })
     expect(Date.now() - t0).toBeLessThan(5000)
   })
+
+  it('SIGTERM 被目标 handler 吞掉不退 → 宽限后升级 SIGKILL 仍返回（成功分支不挂死）', async () => {
+    const threadDir = join(fx, 'threadStubborn')
+    const src = join(fx, 'src.jsonl')
+    writeFileSync(src, '{"type":"session"}\n')
+    const sigLog = join(scriptDir, 'sigterm-received')
+    // fake pi 注册 SIGTERM handler 吞信号（极端形态：默认 node 收 SIGTERM 即退，此处构造不退）
+    const script = writeFakePi('stubborn.js', `
+      process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(sigLog)}, 'term') })
+      const dir = args[args.indexOf('--session-dir') + 1]
+      fs.mkdirSync(dir, { recursive: true })
+      setTimeout(() => {
+        fs.writeFileSync(dir + '/2026T_stubborn.jsonl', '{"type":"session","id":"sb"}\\n')
+      }, 20)
+      ${sleepCode(30000)}
+    `)
+
+    const t0 = Date.now()
+    const got = await forkViaCliPi({ piCommand: script, sourceFile: src, threadDir, cwd: fx, timeoutMs: 5000, killGraceMs: 300 })
+
+    expect(got).toBe(join(threadDir, '2026T_stubborn.jsonl'))
+    expect(readFileSync(sigLog, 'utf8')).toBe('term') // SIGTERM 确已送达且被吞
+    expect(Date.now() - t0).toBeLessThan(5000) // SIGKILL 升级后返回，不无限 pending
+  })
 })
 
 describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi → 附着）', () => {

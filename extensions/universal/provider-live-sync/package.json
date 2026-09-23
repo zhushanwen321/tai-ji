@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential config changes.",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "index.ts",
   "taiji": {
     "role": "universal"
   },
@@ -28,6 +28,9 @@
     "index.ts",
     "skills/"
   ],
+  "dependencies": {
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"

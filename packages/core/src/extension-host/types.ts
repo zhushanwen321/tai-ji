@@ -1,10 +1,13 @@
 /**
  * types.ts —— ExtensionHost 层共享类型（DM3 InternalEvent union + payload 类型 + DM1 ContributionRecord）。
  *
- * 本文件是 core/src/extension-host/ 全部模块的类型集中定义处（headless，零 import 依赖）。
+ * 本文件是 core/src/extension-host/ 全部模块的类型集中定义处（headless，runtime 零依赖；
+ * 唯一例外 = plugin modal/headerAction 三帧协议类型自 @taiji/shared type-only import——
+ * wire 协议 SSOT 单点在 shared/protocol.ts，此处不持副本）。
  * 形状对齐 wave plan：IF2（InternalEvent union）/ DM3（payload 类型）/ DM1（ContributionRecord）/
  * s1 schema v2（PluginContributes，对齐 packages/plugin-sdk/src/types.ts 的 PluginContributes v2）。
  */
+import type { PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload } from '@taiji/shared'
 
 // ── InternalEvent union（IF2）────────────────────────────────────────
 
@@ -81,41 +84,11 @@ export interface NotificationPayload {
   [key: string]: unknown
 }
 
-/** plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集）。 */
-export type PluginModalClosedReason =
-  | 'dismissed'
-  | 'session-switched'
-  | 'host-overlay'
-  | 'replaced'
-  | 'plugin-gone'
-
-/** plugin modal 开合帧载荷（AP-2；kind='plugin:modalState'，S→C 全局广播 transient 帧）。
- *  payload = 调用参数原文（可缺省）——title/width 解析与 fallback 在 renderer（单一解析源）；
- *  sessionId 必带（AP-1/AP-2 必填契约，仅作 payload 归属信息，路由键 = 全局广播）。 */
-export interface PluginModalStatePayload {
-  pluginId: string
-  modalId: string
-  sessionId: string
-  title?: string
-  width?: 'sm' | 'md' | 'lg'
-  state: 'open' | 'closed'
-  /** 单调递增槽代数（同 (pluginId,modalId) 重复 open / replaced 均递增） */
-  epoch: number
-  /** state='closed' 时的关闭原因（PluginModalClosedReason 闭集） */
-  reason?: PluginModalClosedReason
-}
-
-/** headerAction 运行时更新帧载荷（AP-1；kind='plugin:headerActionUpdate'，必带 sessionId）。
- *  渲染端按 (sessionId, headerActionId) 写入对应会话分区。 */
-export interface HeaderActionUpdatePayload {
-  pluginId: string
-  headerActionId: string
-  sessionId: string
-  /** 徽标 ≤4 字符（宿主截断，全文进 tooltip） */
-  badge?: string
-  tooltip?: string
-  disabled?: boolean
-}
+/** plugin modal/headerAction 三帧协议类型（AP-1/AP-2）re-export——SSOT = @taiji/shared
+ *  protocol（shared 不依赖 core，core→shared 为既有合法依赖边）。re-export 维持
+ *  `@taiji/core` / `@taiji/core/extension-host` 出口面（index.ts `export * from './types'`）
+ *  与既有消费方（plugin-modal-slot / message-bus-bridge / renderer PluginModalHost）引用面不变。 */
+export type { PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload }
 
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */
 export type InternalEvent =

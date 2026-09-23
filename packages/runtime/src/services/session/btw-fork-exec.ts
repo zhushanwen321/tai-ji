@@ -33,6 +33,12 @@ export const BTW_FORK_TIMEOUT_MS = 10_000
 /** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制面内部采样间隔，规则 #19 秒级量级）。 */
 const FORK_POLL_INTERVAL_MS = 50
 
+/**
+ * SIGTERM 宽限上限：bootstrap 收进程后等退出的兜底（node 默认 SIGTERM 即终止，
+ * 目标注册 handler 吞信号属极端形态——超时升级 SIGKILL，不可捕获即保证返回）。
+ */
+export const BTW_FORK_KILL_GRACE_MS = 5_000
+
 /** fork 失败诊断保留的 stderr 尾行数。 */
 const STDERR_TAIL_LINES = 3
 
@@ -140,6 +146,9 @@ function collectToolCallIds(entries: readonly unknown[]): { callIds: Set<string>
  * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 守卫——缺失/空/无 header
  * 即不可 fork——并**更严**一档：header-only（零非 header entry）也判不可用，构造性
  * 杜绝「空上下文线」击穿 G2；pi 对 header-only 会产出空快照文件，宿主前置拦截）。
+ * pi 守卫与 header-only 行为断言登记 PS-51（锚点 pi@0.84.4
+ * dist/core/session-manager.js forkFrom :1237-1246 守卫 throw / :1271-1275 循环
+ * 对 header-only 源零 append 仍产出文件），durable 探针 = btw-pi-fork-semantics.test.ts。
  * 读侧容忍尾部半行（append 中读到未写完的行直接丢弃，不整文件判废）。
  */
 export function inspectSourceState(sourceFile: string | undefined): BtwSourceState {
@@ -184,14 +193,18 @@ export interface ForkViaCliRequest {
   threadDir: string
   cwd: string
   timeoutMs?: number
+  /** SIGTERM 宽限上限（超时升级 SIGKILL 的触发线；秒级量级，测试注入缩短用）。 */
+  killGraceMs?: number
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
  * 一次性 fork bootstrap：`pi --mode rpc --fork <源> --session-dir <线目录>` 起进程，
- * pi 在启动期同步完成 forkFrom 落盘（写 header + 逐条复制全树，V2 探针 A 实测 206ms），
- * 宿主轮询到**新增** .jsonl 即 SIGTERM 收掉 bootstrap（该进程不承载线——线进程由
+ * pi 在启动期同步完成 forkFrom 落盘（写 header + 逐条复制全树，V2 探针 A 实测 206ms；
+ * 写序断言登记 PS-51，锚点 pi@0.84.4 dist/core/session-manager.js forkFrom :1237），
+ * 宿主轮询到**新增** .jsonl 即 SIGTERM 收掉 bootstrap 并等其退出（文件可见先于内容
+ * 写完，退出即写入侧封闭）再返回（该进程不承载线——线进程由
  * ensureProcess 另行惰性 spawn，避免污染进程表）。
  *
  * 失败语义（调用方按 D3 分支② 回落）：源缺失/空 → pi exit 1（不产空文件，V2 探针 D）；
@@ -227,6 +240,20 @@ export async function forkViaCliPi(req: ForkViaCliRequest): Promise<string> {
     if (files.length > 0) {
       const file = join(req.threadDir, files[0])
       child.kill('SIGTERM')
+      // 等退出再返回：pi forkFrom 先 writeFileSync(header) 后逐条 appendFileSync，
+      // 文件可见先于内容写完；Node 信号不打断同步复制循环，进程退出即写入侧封闭，
+      // 下游 switchSession 读到的是完整静止文件（构造性保证，非时序依赖）。
+      // 写序断言登记 PS-51（锚点 pi@0.84.4 dist/core/session-manager.js:1237 定义 /
+      // :1269 wx 写 / :1271-1275 append 循环）——pi 改异步落盘即漂移，重验见该条目 guard。
+      // SIGTERM 极端形态（目标注册 handler 吞信号不退，node 默认即终止故罕见）→ 宽限
+      // 后升级 SIGKILL（不可捕获，写入侧随进程消亡封闭），保证 await 不无限 pending。
+      await Promise.race([
+        exited,
+        sleep(req.killGraceMs ?? BTW_FORK_KILL_GRACE_MS).then(() => {
+          child.kill('SIGKILL')
+          return exited
+        }),
+      ])
       return file
     }
     if (await Promise.race([exited.then(() => true), sleep(FORK_POLL_INTERVAL_MS).then(() => false)])) {

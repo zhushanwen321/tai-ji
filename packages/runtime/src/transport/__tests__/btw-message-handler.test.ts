@@ -304,7 +304,7 @@ describe('BtwMessageHandler · btw.remove', () => {
 
     await handler.handleBtwMessage(msg('btw.remove', { vid: 'btw:t1' }), ws)
 
-    expect(errorCalls(ctx)).toEqual([[ws, 'line_not_found', '[btw] thread already closed: btw:t1', 'req-1']])
+    expect(errorCalls(ctx)).toEqual([[ws, 'line_not_found', '[btw] thread already closed: btw:t1', 'req-1', { sessionId: 'main-1' }]])
     expect(replyCalls(ctx)).toHaveLength(0)
     expect(publish).not.toHaveBeenCalled()
   })

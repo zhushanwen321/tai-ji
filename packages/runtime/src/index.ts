@@ -2,16 +2,17 @@ import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
+// 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
+import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
 import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
-// D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧本文件）。
+// D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
+// btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）。
 import { getMigrationGate, setBtwCascadeOps } from './services/session/session-lifecycle.js'
 // [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
 import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
-import { buildPresetClientOptions, buildPresetFallbackEnv, resolveAppendSystemPrompt, resolveEffectiveSystemPrompt } from './services/session/launch-params.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
-import type { RpcClientOptions } from './infra/pi/rpc-client.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
 import { createCompletionBackflow } from './services/session/completion-backflow.js'
@@ -26,7 +27,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT, BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
+import { BASE_PORT, MAX_PORT, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
@@ -1098,30 +1099,16 @@ async function main(): Promise<void> {
   }
   const btwService = new BtwService({
     processes: pm,
-    buildLineSpawnOptions: async (ctx) => {
-      // D8-3 迁移门（与 create/restore 同约束）：provider 迁移完成前禁启动 pi。
-      await getMigrationGate()
-      // 线 launch 快照取主会话 preset（工具/权限面 = 主会话创建档；活跃/冷会话统一读
-      // 扫盘面——spawnRestoreClient 同源，sidecar 缺失回落 builtin:full = FR-10 兜底）。
-      const presetId = sessionService.findScannedSession(ctx.mainSid)?.launchPresetId
-        ?? BUILTIN_PRESET_IDS.FULL
-      const resolution = await sessionService.getLaunchPresetOptions(presetId, ctx.cwd)
-      // 组合形态逐字段对齐 lifecycle.spawnRestoreClient（线进程 = 附着态启动）：模型终态
-      // 随线会话文件 entry 恢复——pi CLI --model 恒优先 entry 恢复，拼 --model 会把 fork
-      // 快照里用户切换过的模型压回（P1 final gate V1⑤）。宽类型中转变量：BtwLineSpawnOptions
-      // 是最小结构面（3 键），对象字面量直返会触发 excess property check。
-      const options: RpcClientOptions = {
-        skillPaths: resolution?.skillPaths ?? sessionService.getSkillPaths(ctx.cwd),
-        extensionPaths: resolution?.extensionPaths ?? await sessionService.getExtensionPaths(ctx.cwd),
-        systemPrompt: resolveEffectiveSystemPrompt(resolution, sessionService.getReplaceSystemPrompt()),
-        appendSystemPrompt: resolveAppendSystemPrompt(resolution),
-        env: buildPresetFallbackEnv(resolution),
-        ...buildPresetClientOptions(resolution, undefined, undefined),
-        model: undefined,
-        inheritSessionModel: true,
-      }
-      return options
-    },
+    // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策面
+    // 在 btw-line-spawn-options.ts，直测见其同名单测；此处仅窄面接线）。
+    buildLineSpawnOptions: createBtwLineSpawnOptionsFactory({
+      migrationGate: getMigrationGate,
+      findScannedSession: (sid) => sessionService.findScannedSession(sid),
+      getLaunchPresetOptions: (presetId, cwd) => sessionService.getLaunchPresetOptions(presetId, cwd),
+      getSkillPaths: (cwd) => sessionService.getSkillPaths(cwd),
+      getExtensionPaths: (cwd) => sessionService.getExtensionPaths(cwd),
+      getReplaceSystemPrompt: () => sessionService.getReplaceSystemPrompt(),
+    }),
     registerSession: (id, client, cwd, label, sessionFilePath, hidden) =>
       sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, hidden),
     resolveMainSessionFile: (mainSid) =>

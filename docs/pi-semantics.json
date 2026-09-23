@@ -1106,5 +1106,39 @@
       "note": "消费面：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-51",
+    "claim": "forkFrom 写序：先 writeFileSync(新 header, flag:'wx') 建文件，后同步 appendFileSync 循环逐条复制全部非 header entry——文件可见先于内容写完；复制循环为同步 Node 调用，信号不打断 → 进程退出即写入侧封闭。btw fork bootstrap「await exited 后读到的必是完整静止文件」保证（btw-fork-exec.ts forkViaCliPi 成功分支）以此为承重前提：pi 若改异步/流式落盘即漂移失效，宿主须改为等待可观测写入完成信号。守卫面：源空/无 header → throw（CLI 语境 exit 1 'Cannot fork: source session file is empty or invalid'）；header-only 源不 throw，产出仅 header 快照（宿主 inspectSourceState 前置判 empty 更严一档）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "forkFrom（fork 写序 + 守卫）",
+        "note": ":1237 定义 —— :1241-1246 守卫（源空 :1241-1242 / 无 header :1245-1246 throw）；:1269 writeFileSync(newSessionFile, header, { flag: 'wx' }) 排他建文件；:1271-1275 for 循环 appendFileSync(newSessionFile, entry) 同步复制全部非 header entry（无 await/流式；header-only 源零 append 仍产出文件）"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费面：packages/runtime/src/services/session/btw-fork-exec.ts forkViaCliPi 成功分支 await 注释（锚点 pi@0.84.4 dist/core/session-manager.js:1237/:1269/:1271-1275）+ inspectSourceState JSDoc；btw-service.ts 设计前提核实块①回指本条。pi 升级重验：forkFrom 是否仍先同步 writeFileSync(header) 后同步 appendFileSync 循环（改异步/流式即漂移——「退出即写入侧封闭」失效）；守卫 throw 与 header-only 行为有 durable 探针 packages/runtime/src/services/session/__tests__/btw-pi-fork-semantics.test.ts（forkFrom 实装直驱，断言最终逐字节等价/throw/零 entry 快照）；写序时序本身无探针（时序断言探针化成本高，靠锚点行号复审）"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-52",
+    "claim": "pi 会话 id 合法值域 = assertValidSessionId 内联正则 ^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$（首尾字母数字，中间 [A-Za-z0-9._-]，真 sid 永不含 :）。taiji 侧两处消费：pi-paths.ts isPiSessionId 的 PI_SESSION_ID_PATTERN 与其逐字符一致；zcode-session-source normalize.ts 后置字符集（禁 . 与 _）为其真子集。pi 侧仅显式指定 id 时校验（自建 id=uuidv7 / 恢复路径不校验），taiji 侧在路径构造（getBtwThreadDir）与 id 判定处主动校验",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "assertValidSessionId",
+        "note": ":15-19（正则字面量 :16）；调用点仅三处且均为显式 id：main.js:250（--session-id CLI 参数）、session-manager.js:649（newSession options.id）、:1254（fork options.id）"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费面：packages/runtime/src/infra/pi/pi-paths.ts isPiSessionId JSDoc + packages/zcode-session-source/src/normalize.ts 头注（两处均带锚点行号）。漂移形态 = pi 放宽/收紧字符集时 taiji 侧 fail-fast 响亮拒绝（getBtwThreadDir throw / normalizeZcodeSessionId throw），非静默错路由。pi 升级重验：比对 assertValidSessionId 正则字面量与 taiji 侧 PI_SESSION_ID_PATTERN 是否仍逐字符一致"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

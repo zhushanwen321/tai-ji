@@ -41,6 +41,7 @@ import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 
 /** 轮询周期（ms）。设计标定：内容变更到生效的上界 ≈ 2s，小于「保存 → 切回会话 → 点选」的人工时延。 */
 export const POLL_INTERVAL_MS = 2_000;
@@ -60,7 +61,11 @@ export type FileBaseline = { state: "present"; content: string } | { state: "abs
 
 export interface Snapshot {
   baselines: Map<WatchedFile, FileBaseline>;
-  /** 是否至少成功比较过一次（首拍只建基线，不触发 refresh）。 */
+  /**
+   * 是否已完成首个**可比**基线拍：两受监视文件各完成一次可比观察（absent 计入、
+   * unreadable 不计）。此后首拍只建基线、不触发 refresh（pi spawn 时已按磁盘建过快照）。
+   * 置位与当拍 decision 无关——双 absent 首拍（catalog-only 常态）也构成完整基线。
+   */
   initialized: boolean;
   /**
    * **曾存在 → 缺失且尚未恢复**的文件（quarantine / 外部删除窗口）。
@@ -188,23 +193,35 @@ export function evaluateSnapshot(
   return decideAction(snapshot, changedFiles, missingFiles, comparable);
 }
 
-/** 供上层（与测试）复用的结构化日志前缀。 */
-export const LOG_PREFIX = "[provider-live-sync]";
+/**
+ * 本拍完成可比观察的文件数（absent 计入、unreadable / 缺观察不计）——首基线完成判定：
+ * 与当拍 decision 解耦，双 absent 首拍（catalog-only 常态）也构成完整基线。
+ */
+function comparableCount(observations: Map<WatchedFile, FileObservation>): number {
+  let count = 0;
+  for (const file of WATCHED_FILES) {
+    const obs = observations.get(file);
+    if (obs && obs.state !== "unreadable") count += 1;
+  }
+  return count;
+}
 
 /**
- * 日志出口 = stderr（仓内 extension 既有范式：cache-probe / structured-output 同款——
- * extension 的 no-console 规则要求；pi 会把 extension stderr 并入宿主运行日志）。
- * stderr 已销毁（EPIPE）时错误走流 error 事件而非同步 throw，无需兜底 catch。
+ * 日志出口 = @zhushanwen/pi-extension-logger（logging-conventions.md 三层通道分类）。
+ * pi 自身不捕获 extension 的 stderr——`process.stderr.write` 直写在独立 pi 用户形态下
+ * 不落任何文件（taiji 托管形态的落盘链也只是 runtime rpc-client 转发），故不走 stderr：
+ * - error（config 消失 / 引擎拒绝配置 / refresh 报错 / tick 异常）→ pi.appendEntry 持久化
+ *   （session JSONL custom entry `provider-live-sync:log`，不进 LLM 上下文）+
+ *   `TAIJI_AGENT_DEBUG=1` / `TAIJI_AGENT_EXT_LOG=1` 时文件日志（`<agentDir>/logs/`）；
+ * - debug（变更检测的正常观察 `config change detected`）→ 仅文件日志，默认 no-op
+ *   （taiji 托管环境 runtime spawn 恒注入 `TAIJI_AGENT_EXT_LOG=1`，INFO 级落盘）。
+ * 消息前缀 `[provider-live-sync]` 由 logger 按 extName 自动补（getLogger 名即前缀唯一来源）。
  */
-function logError(message: string): void {
-  process.stderr.write(`${LOG_PREFIX} ERROR ${message}\n`);
-}
-
-function logInfo(message: string): void {
-  process.stderr.write(`${LOG_PREFIX} ${message}\n`);
-}
+const logger = getLogger("provider-live-sync");
 
 export default function providerLiveSync(pi: ExtensionAPI): void {
+  // 最早期注入 pi handle——上方 logger 的 error 通道（appendEntry）由此生效（session-reader 同款）。
+  setPiHandle(pi);
   const snapshot: Snapshot = { baselines: new Map(), initialized: false, suppressed: new Set() };
   /** ctx 每次 session_start 重新捕获（pi 可能换实例；未就绪时本拍跳过且不推进基线）。 */
   let ctx: ExtensionContext | null = null;
@@ -226,11 +243,17 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
         observations.set(file, await readObservation(agentDir, file));
       }
       const decision = evaluateSnapshot(snapshot, observations);
+      // 首基线完成判定与 refresh 分支解耦：本拍两受监视文件完成可比观察（absent 计入、
+      // unreadable 不计）即置位。若只在 refresh 分支置位，双 absent 首拍（catalog-only
+      // 全新安装常态）decision=none 永不置位，下一拍 auth.json 首次出现会被 firstBaseline
+      // 吞掉——用户首次配完凭据切模型仍报 Model not found。
+      const firstBaseline = !snapshot.initialized;
+      if (comparableCount(observations) === WATCHED_FILES.length) snapshot.initialized = true;
       if (decision.action === "skip-missing") {
         for (const file of decision.missingFiles) {
           if (!missingLogged.has(file)) {
             missingLogged.add(file);
-            logError(
+            logger.error(
               `config file disappeared: ${file} — refresh suppressed until it is written again `
               + "(rebuilding from an empty config would drop the user's custom providers from the running "
               + "engine; it keeps its last good snapshot meanwhile; restarting the session also recovers).",
@@ -242,23 +265,21 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       for (const file of WATCHED_FILES) missingLogged.delete(file);
       if (decision.action !== "refresh") return;
       // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）。
-      const firstBaseline = !snapshot.initialized;
-      snapshot.initialized = true;
       if (firstBaseline) return;
 
-      logInfo(`config change detected (${decision.changedFiles.join(", ")}) → refreshing model snapshot`);
+      logger.debug(`config change detected (${decision.changedFiles.join(", ")}) → refreshing model snapshot`);
       const result = await currentCtx.modelRegistry.refresh({ allowNetwork: false });
       // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
       const error = currentCtx.modelRegistry.getError();
       if (error) {
-        logError(`model config rejected by the engine (models.json / auth.json): ${error}`);
+        logger.error(`model config rejected by the engine (models.json / auth.json): ${error}`);
       } else if (result.errors.size > 0 || result.aborted) {
-        logError(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
+        logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
       }
     } catch (err) {
       // 轮询绝不自杀：本拍失败下一拍继续（内容未变则基线已推进 → 不会重复刷新同一内容）。
       const message = err instanceof Error ? err.message : String(err);
-      logError(`tick failed: ${message}`);
+      logger.error(`tick failed: ${message}`);
     }
   };
 

@@ -15,7 +15,7 @@
  * 经 getter 闭包注入——调用时求值，与原实例方法动态读 this.* 逐字等价。
  */
 import type { IMessageBroker } from '../../interfaces.js'
-import type { ServerMessage } from '@taiji/shared'
+import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
 // type-only：IMessageBus 不反向依赖 plugin-service，无运行时环（与 message-dispatcher 同款约束）
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import type { UiBroadcastType } from './ui-request-queue.js'
@@ -38,12 +38,23 @@ export interface PluginBroadcastDeps {
   readonly getMessageBus: () => IMessageBus | null
 }
 
-/** 通用广播原语：broadcastFn 优先，否则回退 broker.broadcast（广播契约不变）。 */
-export function broadcastOrBrokerWith(deps: PluginBroadcastDeps, type: string, id: string, payload: unknown): void {
+/**
+ * 通用广播原语：broadcastFn 优先，否则回退 broker.broadcast（广播契约不变）。
+ *
+ * type/payload 经 ServerMessageMap 泛型关联（T 收窄到注册 type 集）：{ type, id,
+ * payload } 构造即满足 ServerMessage<T>（窄→宽可赋），免 as 断言——payload 形状
+ * 漂移在编译期被 shared 契约拦截，与下方 viewUpdate / uiRequest 两处免断言先例同款。
+ */
+export function broadcastOrBrokerWith<T extends ServerMessageType>(
+  deps: PluginBroadcastDeps,
+  type: T,
+  id: string,
+  payload: ServerMessageMap[T],
+): void {
   if (deps.broadcastFn) {
     deps.broadcastFn(type, payload)
   } else {
-    deps.broker.broadcast({ type, id, payload } as ServerMessage)
+    deps.broker.broadcast({ type, id, payload })
   }
 }
 
@@ -81,8 +92,9 @@ export interface UiRequestBroadcastDeps {
   readonly resolveActiveSessionId: () => string | undefined
   /** IMessageBus 晚期注入，经 getter 每次调用动态读（m2 腿）。 */
   readonly getMessageBus: () => IMessageBus | null
-  /** 回退腿 = PluginService.broadcastOrBroker（经绑定闭包注入，动态读 broadcastFn/broker）。 */
-  readonly broadcastOrBroker: (type: string, id: string, payload: unknown) => void
+  /** 回退腿 = PluginService.broadcastOrBroker（经绑定闭包注入，动态读 broadcastFn/broker）。
+   *  签名与 broadcastOrBrokerWith 同步泛型化（type/payload 经 ServerMessageMap 关联）。 */
+  readonly broadcastOrBroker: <T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]) => void
 }
 
 /**
@@ -98,7 +110,7 @@ export interface UiRequestBroadcastDeps {
  */
 export function createUiRequestBroadcastFn(deps: UiRequestBroadcastDeps): (
   type: UiBroadcastType,
-  payload: { requestId: string; pluginId?: string } & Record<string, unknown>,
+  payload: { requestId: string; pluginId: string } & Record<string, unknown>,
 ) => void {
   return (type, payload) => {
     if (type === 'plugin:uiRequestExpired') {

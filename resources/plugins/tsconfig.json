@@ -1,0 +1,18 @@
+{
+  // builtin taiji 插件的 typecheck 统一入口（MF-1-19 装配）：resources/plugins 不在
+  // pnpm workspace，各插件的 index.ts 不被任何包级 tsconfig include；构建走 esbuild
+  // 只剥类型不查类型——本 config 是插件源码类型回归的唯一机器拦截点（CI typecheck
+  // job：pnpm exec tsc -p resources/plugins）。新插件目录自动纳入（*/index.ts 通配）。
+  // 相对路径直指包源码/根设施的 import 形态约束见各插件源码头注。
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true
+  },
+  "include": ["*/index.ts", "*/vitest.config.ts", "*/__tests__/*.ts"]
+}

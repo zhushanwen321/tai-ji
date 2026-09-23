@@ -67,7 +67,7 @@ function writeMainSession(name: string, lines: string[]): string {
 }
 
 describe('变体 E：同 sa-id 多条 entry 取文件顺序末条（F16 覆写）', () => {
-  it('首条 sess-A / 末条 sess-B → 命中 sess-B 且 ≠ sess-A（取首条/合并必失败）', () => {
+  it('首条 sess-A / 末条 sess-B → 命中 sess-B 且 ≠ sess-A（取首条/合并必失败）', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1', cwd: '/tmp/proj' }),
       messageLine('m1', 'dispatch subagent'),
@@ -76,7 +76,7 @@ describe('变体 E：同 sa-id 多条 entry 取文件顺序末条（F16 覆写�
       recordLine('e2', 'sa-1', { sessionId: 'sess-B', dbPath: DB_PATH }),
     ])
 
-    const anchor = findZcodeEntryAnchor([file], 'sa-1')
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
 
     // 非平凡断言：两个不同锚值使「末条 vs 首条」结果可区分
     expect(anchor).toBeDefined()
@@ -85,7 +85,7 @@ describe('变体 E：同 sa-id 多条 entry 取文件顺序末条（F16 覆写�
     expect(anchor?.dbPath).toBe(DB_PATH)
   })
 
-  it('多条不同 sa-id 交错：只命中目标 id 的末条，不串锚', () => {
+  it('多条不同 sa-id 交错：只命中目标 id 的末条，不串锚', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sa1-r1', dbPath: DB_PATH }),
@@ -95,13 +95,13 @@ describe('变体 E：同 sa-id 多条 entry 取文件顺序末条（F16 覆写�
       recordLine('e5', 'sa-1', { sessionId: 'sa1-r3', dbPath: DB_PATH }),
     ])
 
-    expect(findZcodeEntryAnchor([file], 'sa-1')?.sessionId).toBe('sa1-r3')
-    expect(findZcodeEntryAnchor([file], 'sa-2')?.sessionId).toBe('sa2-r2')
+    expect((await findZcodeEntryAnchor([file], 'sa-1'))?.sessionId).toBe('sa1-r3')
+    expect((await findZcodeEntryAnchor([file], 'sa-2'))?.sessionId).toBe('sa2-r2')
   })
 })
 
 describe('行级容错（best-effort，不因一行坏 JSON 失败整文件）', () => {
-  it('坏行穿插 + 末行半行：正常命中末条完整条目', () => {
+  it('坏行穿插 + 末行半行：正常命中末条完整条目', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       'not-json-at-all{{{',
@@ -109,58 +109,58 @@ describe('行级容错（best-effort，不因一行坏 JSON 失败整文件）',
       '{"type":"custom","customType":"subagent-record","data":{"broken"',
     ])
 
-    const anchor = findZcodeEntryAnchor([file], 'sa-1')
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-A')
   })
 })
 
 describe('形状校验窄而严：缺键条目不算命中，继续找更早条目', () => {
-  it('末条 sessionRef 缺 dbPath → 命中更早的完整条目', () => {
+  it('末条 sessionRef 缺 dbPath → 命中更早的完整条目', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-EARLY', dbPath: DB_PATH }),
       recordLine('e2', 'sa-1', REF_NO_DBPATH),
     ])
 
-    const anchor = findZcodeEntryAnchor([file], 'sa-1')
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-EARLY')
   })
 
-  it('全部条目缺双键 → not-found（undefined）', () => {
+  it('全部条目缺双键 → not-found（undefined）', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', REF_NO_DBPATH),
       recordLine('e2', 'sa-1', REF_NO_SESSION_ID),
     ])
 
-    expect(findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
+    expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 
-  it('sessionRef 键为空串 → 不算命中（非空 string 才算锚）', () => {
+  it('sessionRef 键为空串 → 不算命中（非空 string 才算锚）', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: '', dbPath: DB_PATH }),
       recordLine('e2', 'sa-1', { sessionId: 'sess-A', dbPath: '' }),
     ])
 
-    expect(findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
+    expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 
-  it('data.v ≠ 1 的条目不算命中，更早 v=1 条目仍可命中', () => {
+  it('data.v ≠ 1 的条目不算命中，更早 v=1 条目仍可命中', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-A', dbPath: DB_PATH }),
       recordLine('e2', 'sa-1', { sessionId: 'sess-V2', dbPath: DB_PATH }, 2),
     ])
 
-    const anchor = findZcodeEntryAnchor([file], 'sa-1')
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-A')
     expect(anchor?.sessionId).not.toBe('sess-V2')
   })
 })
 
 describe('无关条目不命中', () => {
-  it('非 subagent-record 的 custom entry、id 不匹配的 record 均跳过', () => {
+  it('非 subagent-record 的 custom entry、id 不匹配的 record 均跳过', async () => {
     const todoLine = JSON.stringify({
       type: 'custom',
       customType: 'todo',
@@ -174,24 +174,24 @@ describe('无关条目不命中', () => {
       recordLine('e1', 'sa-other', { sessionId: 'sess-OTHER', dbPath: DB_PATH }),
     ])
 
-    expect(findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
-    expect(findZcodeEntryAnchor([file], 'sa-other')?.sessionId).toBe('sess-OTHER')
+    expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
+    expect((await findZcodeEntryAnchor([file], 'sa-other'))?.sessionId).toBe('sess-OTHER')
   })
 })
 
 describe('候选文件列表：顺序回退 + 命中即止（越界语义由调用方承载）', () => {
-  it('前一候选未命中 → 后一候选命中', () => {
+  it('前一候选未命中 → 后一候选命中', async () => {
     const empty = writeMainSession('empty.jsonl', [JSON.stringify({ type: 'session', id: 's0' })])
     const withAnchor = writeMainSession('with-anchor.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-2' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-B', dbPath: DB_PATH }),
     ])
 
-    const anchor: ZcodeAnchor | undefined = findZcodeEntryAnchor([empty, withAnchor], 'sa-1')
+    const anchor: ZcodeAnchor | undefined = await findZcodeEntryAnchor([empty, withAnchor], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-B')
   })
 
-  it('前一候选命中即止：不跨文件合并（后一候选的更新条目不覆盖）', () => {
+  it('前一候选命中即止：不跨文件合并（后一候选的更新条目不覆盖）', async () => {
     const first = writeMainSession('first.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-A', dbPath: DB_PATH }),
@@ -201,20 +201,20 @@ describe('候选文件列表：顺序回退 + 命中即止（越界语义由调�
       recordLine('e2', 'sa-1', { sessionId: 'sess-B', dbPath: DB_PATH }),
     ])
 
-    const anchor = findZcodeEntryAnchor([first, second], 'sa-1')
+    const anchor = await findZcodeEntryAnchor([first, second], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-A')
     expect(anchor?.sessionId).not.toBe('sess-B')
   })
 
-  it('候选不可读（不存在）→ 跳过继续，全不可读 → not-found', () => {
+  it('候选不可读（不存在）→ 跳过继续，全不可读 → not-found', async () => {
     const withAnchor = writeMainSession('with-anchor.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-B', dbPath: DB_PATH }),
     ])
 
-    expect(findZcodeEntryAnchor([join(dir, 'missing.jsonl'), withAnchor], 'sa-1')?.sessionId).toBe('sess-B')
-    expect(findZcodeEntryAnchor([join(dir, 'missing.jsonl')], 'sa-1')).toBeUndefined()
-    expect(findZcodeEntryAnchor([], 'sa-1')).toBeUndefined()
+    expect((await findZcodeEntryAnchor([join(dir, 'missing.jsonl'), withAnchor], 'sa-1'))?.sessionId).toBe('sess-B')
+    expect(await findZcodeEntryAnchor([join(dir, 'missing.jsonl')], 'sa-1')).toBeUndefined()
+    expect(await findZcodeEntryAnchor([], 'sa-1')).toBeUndefined()
   })
 })
 

@@ -37,7 +37,13 @@ pi 自身没有文件 watcher、也没有 refresh RPC。因此「会话开着 �
 
 ## 日志与排障
 
-日志前缀 `[provider-live-sync]`（写 pi 的 stderr / 运行日志）：
+日志走 `@zhushanwen/pi-extension-logger`（前缀 `[provider-live-sync]`，不写 pi 不捕获的 stderr）：
+
+- **error 行**（下表除首行外）→ session JSONL 的 `provider-live-sync:log` custom entry（持久化、
+  不进 LLM 上下文，重开会话可 grep）+ `TAIJI_AGENT_DEBUG=1` / `TAIJI_AGENT_EXT_LOG=1` 时落
+  `<agentDir>/logs/provider-live-sync-YYYY-MM-DD.log`；
+- **debug 行**（`config change detected`）→ 仅上述文件日志（裸 pi 默认 no-op；taiji 托管环境
+  runtime 恒注入 `TAIJI_AGENT_EXT_LOG=1`，INFO 级落盘）。
 
 | 日志 | 含义 |
 |---|---|
@@ -49,9 +55,10 @@ pi 自身没有文件 watcher、也没有 refresh RPC。因此「会话开着 �
 
 常见问题：
 
-- **切换新加的模型仍报 `Model not found`**：先看有没有 `config change detected` 行。
-  没有 → 配置写入的不是该会话所用的目录（检查 `PI_CODING_AGENT_DIR` / 数据目录）；
-  有 → 看紧随其后的 `model config rejected by the engine` 行（那是 pi 的原话）。
+- **切换新加的模型仍报 `Model not found`**：先在文件日志看有没有 `config change detected` 行。
+  没有 → 配置写入的不是该会话所用的目录（检查 `PI_CODING_AGENT_DIR` / 数据目录），或裸 pi
+  形态下 debug 日志默认 no-op（用 `TAIJI_AGENT_DEBUG=1` 重启复现）；
+  有 → 再看 session JSONL 里 `model config rejected by the engine` 行（那是 pi 的原话）。
 - **日志出现 `Invalid models.json schema: - <字段路径>`**：配置文件里有 pi 不接受的内容
   （如模型缺 `id`、`baseUrl` 为空串）。按字段路径修正后保存，扩展会自动恢复（≤2s）。
 - **`config file disappeared` 之后模型列表变少**：这是抑制窗口内的预期形态（引擎保留最后一份

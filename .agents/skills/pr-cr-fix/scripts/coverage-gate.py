@@ -19,6 +19,12 @@
    以 rev-list 为锚做瞬态判定 + 3 次重试 + 空输出且有 commit ahead 时 exit 2。
 5. extensions/shared/<lib> 三层目录曾被 parts[:2] 切到不存在的 extensions/shared/
    package.json 而静默漏门禁。修复：pkg_dir_of() 按前缀分层切片。
+6. [2026-09-22 盲区] extensions/universal|taiji/<pkg>（同为三层）仍被旧特判折叠成
+   无 package.json 的组目录、resources/plugins/<name> 落在 PKG_PREFIXES 外——6 包
+   40 个 src 文件 + scheduler-manager 668 行合入时 gate 零可见。修复：pkg_dir_of()
+   改为向上探测最近含 package.json 的祖先（深度不再硬编码）、resources/plugins/
+   前缀纳入 PKG_PREFIXES（builtin 插件包根平铺布局走 flat 档 include）、前缀内
+   缺装配的目录记 unmeasured 显式登记（stderr + coverage.json），静默路径清零。
 
 对 base...HEAD 改动过 src/ 的 workspace 包跑 `vitest run --coverage`（lcov），
 解析 lcov 的 DA 行命中数据 + git diff 新增行号，计算**可执行新增行的覆盖率**。
@@ -59,8 +65,13 @@ import time
 from pathlib import Path
 
 MIN_INCREMENTAL_DEFAULT = 80.0
-# 只对这些 workspace 前缀下的包做 gate（apps/electron 无独立 vitest 包）
-PKG_PREFIXES = ("packages/", "extensions/")
+# 只对这些前缀下的包做 gate（apps/electron 无独立 vitest 包；resources/plugins =
+# builtin 插件包，2026-09-22 显式裁决纳入——scheduler-manager 装配 vitest 后盲区合入
+# 的 MF-1-7 形态不允许再发生；前缀内缺装配的包由 unmeasured 登记显式出声，不静默）
+PKG_PREFIXES = ("packages/", "extensions/", "resources/plugins/")
+# builtin 插件包根平铺布局的源文件扩展（无 src/ 段，判据与 workspace 包不同）；
+# 匹配用 .search（后缀锚定）——re.match 锚串首，对完整 repo 路径恒不命中
+PLUGIN_SOURCE_SUFFIX = re.compile(r"\.(ts|tsx|mts|vue)$")
 
 DEBUG = False
 
@@ -101,28 +112,57 @@ def git_diff_names(repo_root: Path, base: str) -> list[str]:
     sys.exit(2)
 
 
-def pkg_dir_of(repo_file: str) -> str | None:
-    """repo 相对文件 → 所属 workspace 包目录。extensions/shared/<lib> 是三层，其余两层。"""
+def pkg_dir_of(repo_root: Path, repo_file: str) -> str | None:
+    """repo 相对文件 → 所属包目录（向上探测最近含 package.json 的祖先）。
+
+    [HISTORICAL 2026-09-22 盲区] 旧实现按前缀特判切片（extensions/shared/ 三层、
+    其余两层）：extensions/universal|taiji/<pkg> 被折叠成无 package.json 的组目录、
+    resources/plugins/<name> 落在 PKG_PREFIXES 外——两者都被 changed_packages 的
+    is_file 过滤静默吞掉（6 包 40 个 src 文件 + scheduler-manager 668 行合入时
+    gate 零可见，MF-1-8）。修复：分层深度不再硬编码，从文件父目录逐级向上（最多
+    3 层：packages/<pkg> 两层、extensions/<group>/<pkg> 与 resources/plugins/<name>
+    三层），最近含 package.json 的目录即包根；候选必须落在 PKG_PREFIXES 之下，
+    探测跳出前缀即 None（组目录无 package.json 的中间态由 changed_packages 记
+    unmeasured，不静默）。
+    """
     parts = repo_file.split("/")
-    if repo_file.startswith("extensions/shared/"):
-        pkg = "/".join(parts[:3])
-    else:
-        pkg = "/".join(parts[:2])
-    return pkg if pkg.startswith(PKG_PREFIXES) else None
+    for depth in range(min(len(parts) - 1, 3), 1, -1):
+        candidate = "/".join(parts[:depth])
+        if not candidate.startswith(PKG_PREFIXES):
+            break  # 前缀是路径段前缀，一旦跳出更浅的候选不可能再命中
+        if (repo_root / candidate / "package.json").is_file():
+            return candidate
+    return None
 
 
-def changed_packages(repo_root: Path, base: str) -> dict[str, list[str]]:
-    """返回 {包目录: 改动的 src 文件列表（repo 相对路径）}。"""
+def changed_packages(repo_root: Path, base: str) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """返回 ({包目录: 改动的源文件列表}, {包目录: 不测量原因})。
+
+    源文件判据：/src/ 路径段（workspace 包布局），或 resources/plugins/ 前缀下的
+    源扩展（builtin 插件包根平铺布局——index.ts 在包根，无 src/ 段；测试文件
+    __tests__/**.test.* 不算源）。前缀内但缺 package.json / vitest.config.ts 的
+    目录记入 unmeasured（gate 输出显式登记「改动不测量」，不静默跳过）。
+    """
     pkgs: dict[str, list[str]] = {}
+    unmeasured: dict[str, str] = {}
     for f in git_diff_names(repo_root, base):
-        if "/src/" not in f:
+        in_plugin_prefix = f.startswith("resources/plugins/")
+        if "/src/" not in f and not (
+            in_plugin_prefix and PLUGIN_SOURCE_SUFFIX.search(f) and "__tests__" not in f
+        ):
             continue
-        pkg = pkg_dir_of(f)
+        pkg = pkg_dir_of(repo_root, f)
         if pkg is None:
             continue
-        if (repo_root / pkg / "package.json").is_file() and (repo_root / pkg / "vitest.config.ts").is_file():
-            pkgs.setdefault(pkg, []).append(f)
-    return pkgs
+        if not (repo_root / pkg / "package.json").is_file():
+            unmeasured.setdefault(pkg, "缺 package.json（非包目录布局）")
+            continue
+        if not (repo_root / pkg / "vitest.config.ts").is_file():
+            unmeasured.setdefault(
+                pkg, "缺 vitest.config.ts（无测试装配，改动不测量；装配后自动纳入）")
+            continue
+        pkgs.setdefault(pkg, []).append(f)
+    return pkgs, unmeasured
 
 
 def coverage_declared(pkg_dir: Path) -> bool:
@@ -140,20 +180,24 @@ def coverage_declared(pkg_dir: Path) -> bool:
     return "@vitest/coverage-v8" in deps
 
 
-def run_coverage(pkg_dir: Path) -> tuple[bool, str]:
+def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
     """包内跑 vitest --coverage 产 lcov。返回 (ok, 说明)。
 
     TAIJI_SKIP_REAL_PI=1 与 CI 同口径（TEST-STRATEGY §4 双轨设计）：真实 pi 子进程用例
     不在覆盖率测量目标内（慢且环境敏感，插桩开销下必超时），走 mock 双轨即可。
     reportsDirectory 显式钉死：防包级 vitest.config 覆盖默认输出位置。
+    flat_layout（resources/plugins 插件包，包根平铺：index.ts 在包根、测试在
+    __tests__/）：include= 整包 + exclude __tests__；workspace 包维持 src/ 档。
     """
     lcov = pkg_dir / "coverage" / "lcov.info"
+    cov_include = "." if flat_layout else "src"
+    cov_exclude = "__tests__/**" if flat_layout else "src/**/__tests__/**"
     cmd = [
         "npx", "vitest", "run", "--coverage",
         "--coverage.reporter=lcov", "--coverage.reporter=json-summary",
         "--coverage.reportsDirectory=coverage",
-        "--coverage.include=src",
-        "--coverage.exclude=src/**/__tests__/**",
+        f"--coverage.include={cov_include}",
+        f"--coverage.exclude={cov_exclude}",
     ]
     import os
     # 降载开关（opt-in，默认口径不变）：TAIJI_COVERAGE_GATE_SERIAL=1 时测试文件串行跑。
@@ -251,9 +295,15 @@ def main() -> None:
     DEBUG = "--debug" in args
 
     repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    pkgs = changed_packages(repo_root, base)
+    pkgs, unmeasured = changed_packages(repo_root, base)
     if only:
         pkgs = {k: v for k, v in pkgs.items() if k in only}
+    # 前缀内但缺装配的目录：显式登记「改动不测量」——静默跳过正是 2026-09-22 盲区
+    # 根因（extensions/<group>/<pkg> 折叠丢失 + resources 落前缀外，MF-1-8）
+    if unmeasured:
+        print("WARN: 前缀内目录改动不测量（缺装配，登记如下，不静默）：", file=sys.stderr)
+        for pkg_dir_name, reason in sorted(unmeasured.items()):
+            print(f"  UNMEASURED {pkg_dir_name}: {reason}", file=sys.stderr)
     # --extra-packages 追加（在 --packages 过滤之后，追加不受交集过滤器影响）。追加包
     # 不要求 src/ 改动（setdefault：已在 changed 集合的包保留原 files 列表）。路径无效/
     # 缺 vitest.config.ts 的同样并入集合（记账闭合守卫要求每个迭代包产出 report 条目），
@@ -274,7 +324,8 @@ def main() -> None:
         print(f"Gate-1.6 pass：base={base} 无带 src/ 改动的 vitest 包")
         (repo_root / ".review").mkdir(exist_ok=True)
         (repo_root / ".review" / "coverage.json").write_text(json.dumps(
-            {"verdict": "pass", "base": base, "packages": {}, "note": "no changed vitest packages"}, indent=2))
+            {"verdict": "pass", "base": base, "packages": {}, "unmeasured": unmeasured,
+             "note": "no changed vitest packages"}, indent=2))
         sys.exit(0)
 
     report: dict[str, dict] = {}
@@ -299,7 +350,7 @@ def main() -> None:
             report[pkg] = entry
             print(f"  SKIP {pkg}: {entry['note']}")
             continue
-        ok, err = run_coverage(pkg_dir)
+        ok, err = run_coverage(pkg_dir, flat_layout=pkg.startswith("resources/plugins/"))
         if not ok:
             entry.update({"status": "FAIL", "reason": err})
             report[pkg] = entry
@@ -355,7 +406,7 @@ def main() -> None:
         sys.exit(2)
 
     out = {"verdict": verdict, "base": base, "min_incremental": min_pct,
-           "packages": report, "files": file_cov}
+           "packages": report, "files": file_cov, "unmeasured": unmeasured}
     (repo_root / ".review").mkdir(exist_ok=True)
     (repo_root / ".review" / "coverage.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
     print(f"Gate-1.6 verdict={verdict}  min_incremental={min_pct}%  (base={base}, pkgs={len(report)})")

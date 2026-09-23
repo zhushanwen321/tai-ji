@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 
 import { parseSessionContent, type Entry } from '@zhushanwen/session-core'
 
@@ -79,16 +79,20 @@ function zcodeAnchorOfEntry(entry: Entry, saId: string): ZcodeAnchor | undefined
  * 是「锚或 not-found」，IO 错误同样收敛到 not-found 信号（调用方映射错误码），
  * 不向上抛。
  *
+ * 读取用 node:fs/promises 的 async readFile——本函数跑在 pi 扩展进程内，同步
+ * readFileSync 全文读入会阻塞事件循环（同函数族 classifyIncompleteEntryAnchor
+ * 同形态；对照 readSessionHeaderIdSync 只在首行 4KB 有界读时才允许同步）。
+ *
  * @returns 命中的锚；所有候选均未命中（或全部候选不可读）→ undefined（not-found 信号）
  */
-export function findZcodeEntryAnchor(
+export async function findZcodeEntryAnchor(
   candidateFiles: readonly string[],
   saId: string,
-): ZcodeAnchor | undefined {
+): Promise<ZcodeAnchor | undefined> {
   for (const file of candidateFiles) {
     let content: string
     try {
-      content = readFileSync(file, 'utf8')
+      content = await readFile(file, 'utf8')
     } catch {
       continue
     }

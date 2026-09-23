@@ -353,8 +353,9 @@ export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
 // ── plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）──
 
 /**
- * plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集；
- * 与 core extension-host/types.ts 同构别名——shared 不依赖 core，结构兼容即协议兼容）。
+ * plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集）。
+ * 本处是唯一权威定义——core extension-host/types.ts type-only import + re-export 本类型
+ * （shared 不依赖 core；消费方经 @taiji/shared 或 @taiji/core 引用同一份）。
  */
 export type PluginModalClosedReason =
   | 'dismissed'

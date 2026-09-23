@@ -179,7 +179,9 @@ export class BtwMessageHandler {
           if (!closed) {
             // 检查 success：注册表竞态（并发双删 / 与级联同拍）——不回成功 ack，
             // 走与 getLine 落空同款的 line_not_found（幂等语义：线已不在即视为删成）。
-            return this.ctx.sendError(ws, 'line_not_found', `[btw] thread already closed: ${vid}`, msg.id)
+            // details 带 sessionId（rec 此前已取得）——与 catch 路径 sendHandlerError 的
+            // details 形态对齐（关键规则 #7：错误帧关联会话，renderer 可路由归属）。
+            return this.ctx.sendError(ws, 'line_not_found', `[btw] thread already closed: ${vid}`, msg.id, { sessionId: rec.mainSid })
           }
           this.publishThreadList(rec.mainSid)
           return this.ctx.reply(ws, msg.id, 'btw.remove', { vid })

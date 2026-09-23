@@ -255,7 +255,7 @@ describe('变体 M 定位分支 instrument：manifest 主路径命中（结果�
 
     // 标记有效性自证：entry 兜底（U7 函数）在同 fixture 上返回的是 entry 来源的锚——
     // 两来源可区分，主路径断言非平凡
-    const entryAnchor = findZcodeEntryAnchor([mainFile], 'sa-inst')
+    const entryAnchor = await findZcodeEntryAnchor([mainFile], 'sa-inst')
     expect(entryAnchor?.sessionId).toBe('sess-from-entry')
   })
 

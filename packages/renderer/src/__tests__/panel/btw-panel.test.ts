@@ -8,6 +8,8 @@
  *   切焦点会话线列表不串台 / 加载失败可见可重试 / 创建失败可见可恢复
  * - 观察者（形态）：首屏冒烟（drawer-btw-tab + 头部 + 关键 testid 存在）；Composer 装配
  *   variant=panel + show-btw=false（防递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）
+ * - M3-c 行为面：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
+ *   Submit 门；纯函数直测归 __tests__/composables/panel/use-btw-interaction.test.ts）
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（门面其余域走 actual）；
  * MessageStream / Composer stub 为透传 attrs 的占位 div——渲染树装配断言经 DOM 属性
@@ -27,6 +29,7 @@ import {
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
+import { useExtensionUIStore } from '@/stores/extension-ui'
 import type { ServerMessageMap } from '@taiji/shared'
 
 // btw 具名类型走 indexed-access（shared 包出口未挂具名，SSOT = shared protocol.ts）
@@ -275,5 +278,54 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
     // 无选中线 → 会话区不装配
     expect(wrapper.find('[data-testid="btw-stream"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="btw-composer"]').exists()).toBe(false)
+  })
+})
+
+describe('BtwPanel 内联确认条表单降档（M3-c 行为面，useBtwInteraction 消费链）', () => {
+  it('formQuestions 请求 → 确认条渲染问题文本 + choice 选项按钮 + Other/text 单行输入', async () => {
+    apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+    // 自动选中唯一线（latest = pi-1）→ 交互区挂载到该 vid
+    expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-1')
+
+    // 驱动面 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
+    // useExtensionUI 订阅路径写入同一分区）；归一化纯函数群直测见
+    // src/__tests__/composables/panel/use-btw-interaction.test.ts
+    const store = useExtensionUIStore()
+    store.addRequest('btw:pi-1', {
+      sessionId: 'btw:pi-1',
+      requestId: 'r-form-1',
+      method: 'select',
+      form: true,
+      formQuestions: [
+        {
+          type: 'choice',
+          header: '模型',
+          question: '选哪个模型？',
+          options: [{ label: 'A' }, { label: 'B', description: '更快' }, { noLabel: true }],
+        },
+        { type: 'text', question: '补充说明' },
+        { type: 'boolean', question: '越界类型应被剔除' },
+      ],
+      receivedAt: Date.now(),
+    })
+    await settle(wrapper)
+
+    const bar = wrapper.find('[data-testid="btw-inline-confirm"]')
+    expect(bar.exists()).toBe(true)
+    // 合法题渲染（choice 文本 + text 文本）；非法项（type 越界 + 缺 label 选项）被剔除不渲染
+    expect(bar.text()).toContain('选哪个模型？')
+    expect(bar.text()).toContain('补充说明')
+    expect(bar.text()).not.toContain('越界类型应被剔除')
+    const options = bar.findAll('[data-testid="btw-form-option"]')
+    expect(options).toHaveLength(2)
+    expect(options[0].attributes('data-value')).toBe('A')
+    expect(options[1].attributes('data-value')).toBe('B')
+    // choice 题降档带 Other 单行输入（allowOther 缺省 true）；text 题降档 = 单行输入
+    expect(bar.find('[data-testid="btw-form-other"]').exists()).toBe(true)
+    expect(bar.find('[data-testid="btw-form-text"]').exists()).toBe(true)
+    // 提交门：choice/text 均未作答 → Submit 禁用（降档口径逐题可答判定）
+    expect(bar.find('[data-testid="btw-form-submit"]').attributes('disabled')).toBeDefined()
   })
 })

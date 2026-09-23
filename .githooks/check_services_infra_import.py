@@ -47,6 +47,7 @@ ALLOWED_MODULES = {
     # 只读（ps 进程表 + log show 系统日志，spawn-env-boundary 白名单豁免的同族只读探测）、
     # best-effort 永不 reject（无 sink 不采样）；session-service pi crash 台账行消费
     # captureMachinePiDigest（同 mem-pressure 由 D 系列消费先例）
+    # 登记同步见 docs/architecture/runtime-layering.md §3 ③f
     "crash-correlation",
     # 现状基线（2026-08-22，待专项治理收编或正式豁免）
     "session-file-utils",

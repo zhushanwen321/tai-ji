@@ -23,6 +23,8 @@
  *   ① `--fork` + `--session-dir` 双旗标组合成立：forkFrom 落点吃 sessionDir 参数，
  *      实测 fork 文件落 --session-dir 目录、全树（含分支）逐字节等价、
  *      header.parentSession = 源绝对路径（P-fork-equivalence 实证，206ms）。
+ *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点 pi@0.84.4
+ *      dist/core/session-manager.js forkFrom :1237，逐 claim 行号见该条目 piAnchor）。
  *   ② 单旗标与 RPC new 组合成立：`PI_CODING_AGENT_SESSION_DIR` env（main.js 与
  *      --session-dir 同优先级的等价通道）启动 → get_state/new_session 落点均在该目录
  *      （agent-session-runtime newSession 继承 getSessionDir）。
@@ -294,7 +296,7 @@ async function requireSpawnState(
 export class BtwService {
   /** mainSid → 条目仅经 registry 全表索引（消费方 listLines(mainSid) 过滤；注册表即 D4 关联投影）。 */
   private readonly registry = new Map<string, BtwLineRecord>()
-  private timer: unknown = null
+  private timer: ReturnType<typeof setInterval> | null = null
   private readonly idleThresholdMs: number
 
   constructor(private readonly deps: BtwServiceDeps) {
@@ -700,7 +702,7 @@ export class BtwService {
   /** 停止闲置扫描定时器（shutdown / 测试收尾）。 */
   dispose(): void {
     if (this.timer !== null) {
-      clearInterval(this.timer as Parameters<typeof clearInterval>[0])
+      clearInterval(this.timer)
       this.timer = null
     }
   }
@@ -752,9 +754,8 @@ export class BtwService {
 
   private armTimer(): void {
     if (this.timer !== null) return
-    const handle = setInterval(() => { this.idleTick() }, BTW_IDLE_TICK_MS) as unknown as { unref?: () => void }
-    handle.unref?.() // 不阻塞进程退出（runtime shutdown 另有 destroyAll 兜底）
-    this.timer = handle
+    this.timer = setInterval(() => { this.idleTick() }, BTW_IDLE_TICK_MS)
+    this.timer.unref() // 不阻塞进程退出（runtime shutdown 另有 destroyAll 兜底）
   }
 
   /**

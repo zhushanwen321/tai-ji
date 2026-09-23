@@ -611,6 +611,17 @@ describe('family：zcode 节点接线（D5-1 两态）与 sa-id family 路由', 
     expect(node?.cleanedUp).toBe(false) // 库可达态（D5-1：锚可解析 ∧ 库文件存在）
   })
 
+  it('sa-id family recursive=true：rootSessionId 反查回填 fileName → 树 main root 填真实 session 路径（MF-1 链路）', async () => {
+    const r = await handleSessionRead({ action: 'family', session: SA_M, recursive: true }, signals())
+    const tree = (
+      r.details as { tree: { root: { type: string; sessionId: string; sessionFile?: string } } }
+    ).tree
+    expect(tree.root.type).toBe('main')
+    expect(tree.root.sessionId).toBe(ROOT_SESSION)
+    // 反查命中默认根的 root session 文件（writeRootSessionFile 落的路径），非空串占位
+    expect(tree.root.sessionFile).toBe(join(agentDir, 'sessions', `1700000000000_${ROOT_SESSION}.jsonl`))
+  })
+
   it('rootSessionId family：buildFamilyFromFs 接线后 zcode 节点进列表（真实 family action 输出）', async () => {
     const r = await handleSessionRead({ action: 'family', session: ROOT_SESSION }, signals())
     const family = r.details as { subagents: Array<{ sessionId: string; cleanedUp?: boolean }> }
