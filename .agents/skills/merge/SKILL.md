@@ -203,6 +203,8 @@ cd $WS_ROOT/main && node scripts/select-affected-e2e.mjs --release
 
 ### 阶段 4: 版本 bump + 发布
 
+> [MANDATORY] **git 关键操作纪律（全流程适用，commit/tag/push 一律如此）**：单命令执行 + 输出重定向文件 + 显式核对退出码，**禁止接进任何管道链**——`| head` 会 SIGPIPE 中途杀 commit（hook 执行一半中断，看似已执行）；`| tail` 不产生 SIGPIPE 但管道退出码 = tail 的 0，hook 拒绝的非零退出码被 `&&` 当成功放行（2026-09-23 v0.10.3 发布期坏 npm tag 推上远端的根因，教训已二犯）。skill 内命令模板是必经上下文，不依赖 memory 召回。
+
 ```bash
 cd $WS_ROOT/main
 
@@ -222,17 +224,20 @@ git branch --show-current  # 必须输出 main，否则 git checkout main
 pnpm version patch --no-git-tag-version
 cd apps/electron && pnpm version patch --no-git-tag-version && cd ../..
 
-# 2. 原子提交：两个 package.json 在同一个 commit
+# 2. 原子提交：两个 package.json 在同一个 commit。
+#    commit 后必须核对 exit=0 且 HEAD 前进（git 关键操作纪律，见阶段 4 顶部 [MANDATORY]）
 VERSION=$(node -p "require('./package.json').version")
 git add package.json apps/electron/package.json
-git commit -m "chore: bump version to ${VERSION}"
+git commit -m "chore: bump version to ${VERSION}" > /tmp/merge-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-commit.log
 
-# 3. 手动打 tag，确保指向包含两个文件变更的 commit
+# 3. 手动打 tag，确保指向包含两个文件变更的 commit。
+#    push 前核对 tag 指向（在本地拦截坏 tag，不等 push 后 CI 兜底）
 git tag "v${VERSION}"
+[ "$(git rev-parse "v${VERSION}^{commit}")" = "$(git rev-parse HEAD)" ] || { echo "FATAL: tag v${VERSION} 未指向 HEAD，禁止 push" >&2; exit 1; }
 
-# 4. 推送 commit + tag
-git push github HEAD
-git push github "v${VERSION}"
+# 4. 推送 commit + tag（逐条核对退出码）
+git push github HEAD > /tmp/merge-push.log 2>&1; echo "exit=$?"; tail -3 /tmp/merge-push.log
+git push github "v${VERSION}" > /tmp/merge-push-tag.log 2>&1; echo "exit=$?"; tail -3 /tmp/merge-push-tag.log
 
 # [MANDATORY] 等待 CI 完成并验证产物
 # 此命令会轮询 CI 直到完成，验证 dmg/exe/AppImage 全部存在
@@ -328,15 +333,17 @@ cd $WS_ROOT/main
 SLUG="<本次发布主题-kebab>"   # 人工定，来自 PR 标题
 STAMP=$(date +%Y%m%d-%H%M)
 
+# git 关键操作纪律见阶段 4 顶部 [MANDATORY]：单命令 + 重定向 + 显式退出码 + tag 指向 push 前核对
 git add extensions/*/package.json extensions/shared/*/package.json packages/*/package.json \
         '**/CHANGELOG.md'
-git commit -m "chore: version bump — <包与版本摘要>"
+git commit -m "chore: version bump — <包与版本摘要>" > /tmp/merge-4n-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-4n-commit.log
 
 # npm-* tag（不绑单一版本号，多包不同步时不误导；release-npm.yml 不从 tag 解析版本）
 git tag "npm-${SLUG}-${STAMP}"
+[ "$(git rev-parse "npm-${SLUG}-${STAMP}^{commit}")" = "$(git rev-parse HEAD)" ] || { echo "FATAL: npm tag 未指向 HEAD，禁止 push" >&2; exit 1; }
 
-git push github HEAD
-git push github "npm-${SLUG}-${STAMP}"
+git push github HEAD > /tmp/merge-4n-push.log 2>&1; echo "exit=$?"; tail -3 /tmp/merge-4n-push.log
+git push github "npm-${SLUG}-${STAMP}" > /tmp/merge-4n-push-tag.log 2>&1; echo "exit=$?"; tail -3 /tmp/merge-4n-push-tag.log
 ```
 
 #### 4N.5 验证 npm 发布
@@ -485,7 +492,7 @@ cd $WS_ROOT/main && source ~/.zshrc >/dev/null 2>&1; \
   GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs push-repo --ref-source github
 ```
 
-⚠️ **`--ref-source github` 本地必传**：本地 bare-repo workspace 的 `origin` 指向本地 `.bare`，不传会把本地分支状态（含已删/落后分支）推上 GitCode 造成 drift。脚本 push 前自动 `fetch <src> --prune` 刷新分支跟踪视图（防 GitHub 旁路变更——web 端合并/他人 push 后本地视图过期，推旧位置再被推后验证打回），保证 GitCode 与 GitHub 分支集严格一致（--force --prune 对齐）。首次全量约 2 分钟（pack ≈ 490MB），后续发布秒级增量。
+⚠️ **`--ref-source github` 本地必传**：本仓唯一 remote 是 `github`，不显式传 src 脚本无法确定推送源，会把过期分支状态推上 GitCode 造成 drift。脚本 push 前自动 `fetch <src> --prune` 刷新分支跟踪视图（防 GitHub 旁路变更——web 端合并/他人 push 后本地视图过期，推旧位置再被推后验证打回），保证 GitCode 与 GitHub 分支集严格一致（--force --prune 对齐）。首次全量约 2 分钟（pack ≈ 490MB），后续发布秒级增量。
 
 ⚠️ **tags 与 HEAD 由脚本内部处理（勿手动换 refspec）**：tags 不推本地 `refs/tags/*`——本仓还会 fetch pi-mono upstream，同名 `v*` tag 空间互相污染（2026-09-07 实测本地 478 vs GitHub 191：285 个 pi 上游 tag 混入，另有 v0.3.15 这类 GitHub 侧重打后本地残留的过期旧位置 tag——普通 fetch 永不更新已有 tag），脚本会先 fetch 到 `refs/remotes/github-tags/*` 独立命名空间再从该处推送；分支 refspec 展开前脚本会先删 `github/HEAD` symref——否则会尝试在 GitCode 创建 `refs/heads/HEAD`（保留关键字），pre-receive hook 一票否决整个 push。推送完成后脚本自动逐条比对 GitCode 与 GitHub 的引用集，不一致即 exit 非 0，无需手动 ls-remote 复核。
 

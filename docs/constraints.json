@@ -1401,7 +1401,7 @@
     },
     {
       "id": "C-proc-03",
-      "summary": "worktree 创建必须走 git-cwt（自动 install + Electron dist 缓存）；bare repo 模式 origin=.bare、GitHub remote 叫 github；gh 命令带 --repo",
+      "summary": "worktree 创建必须走 git-cwt（自动 install + Electron dist 缓存）；bare repo 模式唯一 remote 叫 github、分支间整合走本地 refs（worktree 共享 .bare 的 refs，兄弟分支纳入 main 直接 git merge main）；gh 命令带 --repo",
       "scope": [
         "global"
       ],

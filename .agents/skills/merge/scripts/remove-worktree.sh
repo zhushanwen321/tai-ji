@@ -52,20 +52,20 @@ if [[ "$FORCE" != "true" ]]; then
     echo "=== 检查合并状态 ==="
 
     # 先 fetch 获取最新远程状态
-    git -C .bare fetch origin --prune 2>&1 | tail -1
+    git -C .bare fetch github --prune 2>&1 | tail -1
 
-    # 检查分支是否已合并到 origin/main
-    MAIN_BRANCH=$(git -C .bare remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
+    # 检查分支是否已合并到 github/main
+    MAIN_BRANCH=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
     MAIN_BRANCH="${MAIN_BRANCH:-main}"
 
-    if git -C .bare branch --merged "origin/$MAIN_BRANCH" 2>/dev/null | grep -q "$BRANCH_NAME"; then
-        echo "✓ 分支 '$BRANCH_NAME' 已合并到 origin/$MAIN_BRANCH"
+    if git -C .bare branch --merged "github/$MAIN_BRANCH" 2>/dev/null | grep -q "$BRANCH_NAME"; then
+        echo "✓ 分支 '$BRANCH_NAME' 已合并到 github/$MAIN_BRANCH"
     else
-        echo "✗ 分支 '$BRANCH_NAME' 尚未合并到 origin/$MAIN_BRANCH"
+        echo "✗ 分支 '$BRANCH_NAME' 尚未合并到 github/$MAIN_BRANCH"
         echo ""
         # 显示未合并的 commits
         echo "未合并的 commits:"
-        git -C .bare log --oneline "origin/$MAIN_BRANCH..$BRANCH_NAME" 2>/dev/null | head -10 || echo "  (无法获取 commit 历史)"
+        git -C .bare log --oneline "github/$MAIN_BRANCH..$BRANCH_NAME" 2>/dev/null | head -10 || echo "  (无法获取 commit 历史)"
         echo ""
         echo "Error: 分支未合并，拒绝删除。使用 --force 强制清理。"
         exit 1
@@ -98,9 +98,9 @@ CONFLICT_WTS=""
 
 if [[ "$SKIP_SYNC" != "true" ]]; then
     echo ""
-    echo "=== 同步其他 worktree 到 origin/main ==="
+    echo "=== 同步其他 worktree 到 github/main ==="
 
-    MAIN_BRANCH=$(git -C .bare remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
+    MAIN_BRANCH=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
     MAIN_BRANCH="${MAIN_BRANCH:-main}"
 
     for _wt_entry in */; do
@@ -120,9 +120,9 @@ if [[ "$SKIP_SYNC" != "true" ]]; then
         echo "同步 $_wt_name ($_branch)..."
 
         cd "$WORKSPACE_ROOT/$_wt_name"
-        git fetch origin "$MAIN_BRANCH" 2>&1 | tail -1
+        git fetch github "$MAIN_BRANCH" 2>&1 | tail -1
 
-        if git merge --no-ff "origin/$MAIN_BRANCH"; then
+        if git merge --no-ff "github/$MAIN_BRANCH"; then
             echo "  OK: $_wt_name 已同步到最新 $MAIN_BRANCH"
             SYNCED=$((SYNCED + 1))
         else

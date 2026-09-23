@@ -93,7 +93,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 **workspace / git**：
 
 10. **Worktree 创建必须走 `git-cwt`**（自动 pnpm install + Electron dist 缓存 symlink）；Vite `strictPort: true`，1420 被占则静默失败加载旧代码——`lsof -i :1420 -P` 确认端口归属
-11. **Bare repo 模式**：`origin` = 本地 `.bare`，GitHub remote 叫 `github`（push 用 `git push github HEAD:fix-xxx`）；workspace root 不是 git repo，`gh` 命令带 `--repo zhushanwen321/tai-ji`；merge 脚本无 main worktree 时用 `git --git-dir` 指向 `.bare`，版本 bump push 用 `HEAD:refs/heads/main`
+11. **Bare repo 模式**：唯一 remote = `github`（GitHub，push 用 `git push github HEAD:fix-xxx`）；所有 worktree 共享 `.bare` 的 refs——merge skill 发布后本地 main 即 GitHub 最新，兄弟分支纳入 main 直接 `git merge main`（纯本地，勿经 remote 绕行）；workspace root 不是 git repo，`gh` 命令带 `--repo zhushanwen321/tai-ji`；merge 脚本无 main worktree 时用 `git --git-dir` 指向 `.bare`，版本 bump push 用 `HEAD:refs/heads/main`
 
 **架构机制**：
 
