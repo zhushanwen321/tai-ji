@@ -637,11 +637,24 @@ function assertValidRunId(runId: string): void {
 
 const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 
-/** 坏行判定的最小形状校验：JSON 对象 + type 落在词表内（词表外 = 坏行）。 */
+/**
+ * 坏行判定的最小形状校验：JSON 对象 + type 落在词表内 + ts 有限数值（EventEnvelope
+ * 信封全词表必填——fold 投影的 startedAt/lastProgressAt 派生与注册表新鲜度判据都
+ * 消费它，坏值防污染投影）+ outcome（ask-settled / run-settled 携带）落词表
+ * （其余事件不携带，缺省自然放行）。任一不过 = 坏行。
+ */
 function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
   if (typeof value !== "object" || value === null) return false;
-  const type = (value as { type?: unknown }).type;
-  return typeof type === "string" && RUN_EVENT_TYPE_SET.has(type);
+  const rec = value as { type?: unknown; ts?: unknown; outcome?: unknown };
+  if (typeof rec.type !== "string" || !RUN_EVENT_TYPE_SET.has(rec.type)) return false;
+  if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) return false;
+  if (
+    rec.outcome !== undefined &&
+    !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec.outcome as string)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isNodeErrorCode(error: unknown, code: string): boolean {

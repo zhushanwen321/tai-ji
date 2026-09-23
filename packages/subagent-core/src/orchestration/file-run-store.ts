@@ -349,7 +349,10 @@ export class FileRunStore implements RunStore {
 
     const runs: WorkflowRun[] = [];
     for (const file of files) {
-      if (!file.endsWith(".jsonl")) continue;
+      // journal（<runId>.events.jsonl）同为 .jsonl 后缀但是事件流附属文件——不排除
+      // 会进逐行 parseLine，事件行全部按损坏快照行逐条 warn（噪音洪泛）。排除先例：
+      // pruneTerminalRunFiles 的 stateNames 过滤同款。
+      if (!file.endsWith(".jsonl") || file.endsWith(JOURNAL_FILE_SUFFIX)) continue;
       const run = await this.loadLatestValidLine(join(this.stateDir(), file), file);
       if (run) runs.push(run);
     }
@@ -364,8 +367,9 @@ export class FileRunStore implements RunStore {
    * 单源，同步只读不触碰 lastSavedAt 节流记账）。
    *
    * 判定（宁挂账不失明——误注销活跃 run 是事故方向，判据保守侧取「不可判定」）：
-   * - state 文件不存在 → missing（设计判据「已归档/不存在视同终态」——run 从未
+   * - state 文件不存在（ENOENT）→ missing（设计判据「已归档/不存在视同终态」——run 从未
    *   落盘或已被清理，注册是死亡窗口残留）；
+   * - state 文件读错误（非 ENOENT）→ running + warn 留证（IO 故障 ≠ 不存在，宁挂账）；
    * - 末条有效快照 status = running → running（活跃，sweep 跳过）；
    * - 末条有效快照 status ≠ running（done）→ terminal + reason（I2：done ⟹ reason
    *   有值；reason 作 pending unregister 的 status 语义源）；
@@ -375,8 +379,17 @@ export class FileRunStore implements RunStore {
     let content: string;
     try {
       content = readFileSync(this.stateFilePath(runId), "utf8");
-    } catch {
-      return { kind: "missing" }; // ENOENT（未落盘/已清理）等不可读形态同视——见头注判定
+    } catch (err) {
+      if (!isEnoentError(err)) {
+        // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——同「读不出 ≠ 不存在」
+        // 的保守侧按活跃挂账（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[file-run-store] findStateByIdSync read failed, treating as running (stay registered): ${this.stateFilePath(runId)}: ${msg}`,
+        );
+        return { kind: "running" };
+      }
+      return { kind: "missing" }; // ENOENT（未落盘/已清理）——见头注判定
     }
     const lines = content.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {

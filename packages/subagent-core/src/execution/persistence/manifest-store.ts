@@ -164,12 +164,23 @@ export class ManifestStore {
    */
   async readManifest(id: string): Promise<ManifestRecord | null> {
     const filePath = path.join(this.dir, `${id}.json`);
+    let content: string;
     try {
-      const content = await fsPromises.readFile(filePath, "utf-8");
+      content = await fsPromises.readFile(filePath, "utf-8");
+    } catch (err) {
+      // 分通道（对齐 listAllSync 的 isMissingFsError 纪律）：ENOENT = 文件缺失
+      //（合法缺省，静默降级 null）；其余读错误 warn 留证后同样降级 null——IO
+      // 故障不得伪装成 not-found。
+      if (!isMissingFsError(err)) {
+        bestEffort(err, `read manifest ${filePath} (readManifest)`, "error");
+      }
+      return null;
+    }
+    try {
       const parsed: unknown = JSON.parse(content);
       return isValidManifest(parsed) ? parsed : null;
     } catch {
-      // 文件缺失（ENOENT）或 JSON 损坏（SyntaxError）均降级为 null
+      // JSON 损坏（SyntaxError）降级为 null
       return null;
     }
   }
@@ -377,11 +388,24 @@ export async function readRunTerminalManifest(
 ): Promise<RunTerminalManifest | null> {
   assertValidRunTerminalManifestId(runId);
   const filePath = path.join(dir, `${runId}.json`);
+  let content: string;
+  try {
+    content = await fsPromises.readFile(filePath, "utf-8");
+  } catch (err) {
+    // 分通道（对齐 listAllSync 的 isMissingFsError 纪律）：ENOENT（未终局/已清理）
+    // = 合法缺省，静默降级 null；其余读错误 warn 留证后同样降级 null。
+    if (!isMissingFsError(err)) {
+      logger.warn(`[subagents] readRunTerminalManifest: read failed, degraded to null: ${filePath}`, {
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return null; // ENOENT（未终局/已清理）按「无投影」降级。
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fsPromises.readFile(filePath, "utf-8"));
+    parsed = JSON.parse(content);
   } catch {
-    return null; // ENOENT（未终局/已清理）或损坏 JSON——均按「无投影」降级。
+    return null; // 损坏 JSON——按「无投影」降级。
   }
   return isRunTerminalManifest(parsed) ? parsed : null;
 }

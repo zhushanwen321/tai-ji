@@ -45,6 +45,10 @@
 import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
+// 原子写单源原语（tmp+rename）：.state 半写（进程死在 writeFileSync 中段）会让
+// 读侧落入「JSON 损坏 → finalized 存在性降级」的死因不可考窗口，rename 原子性
+// 把该窗口收到读侧不可见的层面。
+import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
 import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../assembly/types.ts";
 // 类型面依赖（D5 终局投影词表单源）——run-events 不回指 execution 层，无循环；
@@ -217,7 +221,12 @@ function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
       // stat 与「旧名在 .state 缺失/损坏时充当兼容读序兜底」），删除只是 stat 优化非正确性
       // 依赖——若在写前删而写失败（重试耗尽），存量终态标记已被删而新标记未落，
       // .cancelled tombstone 静默降级为无终态形态（重建回落 running，死因/时间丢失）。
-      fs.writeFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, JSON.stringify(marker), "utf-8");
+      // ensureDir:false——session 目录被外部删除属异常态，保持由下方响亮重试 +
+      // error 留痕暴露的既有失败语义，不静默重建目录掩盖。
+      writeAtomicFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, JSON.stringify(marker), {
+        encoding: "utf-8",
+        ensureDir: false,
+      });
       // force:true 静默 ENOENT（未写过旧名的 session 正常路径）。
       fs.rmSync(`${sessionFile}${LEGACY_FINALIZED_EXT}`, { force: true });
       fs.rmSync(`${sessionFile}${LEGACY_CANCELLED_EXT}`, { force: true });
