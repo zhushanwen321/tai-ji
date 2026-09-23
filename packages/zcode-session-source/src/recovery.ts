@@ -38,8 +38,14 @@ export type RecoveryLevel = 'L1-direct' | 'L2-immutable' | 'L3-snapshot'
 /** L3 快照目录固定前缀（崩溃残留人工识别 + 验收判据断言面）。 */
 export const SNAPSHOT_TMP_PREFIX = 'taiji-zcode-snap-'
 
+/** KiB 字节数——SNAPSHOT_MAX_DB_BYTES 的乘数基元。 */
+const KIB = 1024
+
+/** L3 规模门上限：256MB（KiB 计）。 */
+const SNAPSHOT_MAX_DB_KIB = 256
+
 /** L3 规模门：db 文件超过此大小不拷（直接错误面 + 指引）。 */
-export const SNAPSHOT_MAX_DB_BYTES = 256 * 1024 * 1024
+export const SNAPSHOT_MAX_DB_BYTES = SNAPSHOT_MAX_DB_KIB * KIB * KIB
 
 /** L3 开库后的表集合验证（防「开库成功但缺表」半残态）。 */
 export const REQUIRED_TABLES: readonly string[] = ['session', 'message', 'part']
@@ -90,8 +96,9 @@ async function tryOpen(dbPath: string, opts: { immutable?: boolean } = {}): Prom
     // 失败归因以探测错误为准）
     try {
       db.close()
-    } catch {
+    } catch (err) {
       /* 探测已失败，close 错误不参与归因 */
+      console.debug('recovery: close after failed probe not attributed (best-effort)', err)
     }
     throw err
   }
@@ -105,8 +112,9 @@ function tablesPresent(tableNames: readonly string[]): boolean {
 function closeQuietly(db: SqliteDb): void {
   try {
     db.close()
-  } catch {
+  } catch (err) {
     // [HISTORICAL] 只读连接 close 失败（WAL 并发读常见）不影响读取结果——吞掉继续
+    console.debug('recovery: readonly connection close failed (best-effort)', err)
   }
 }
 
@@ -168,8 +176,9 @@ export async function openWithRecovery(dbPath: string): Promise<OpenedWithRecove
     let dbBytes = -1
     try {
       dbBytes = statSync(dbPath).size
-    } catch {
+    } catch (err) {
       /* stat 失败按未知大小处理，交给快照路径的拷贝失败归因 */
+      console.debug('recovery: statSync failed, db size treated as unknown (best-effort)', err)
     }
     if (dbBytes > SNAPSHOT_MAX_DB_BYTES) {
       skipNotes.push(

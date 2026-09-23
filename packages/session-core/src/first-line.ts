@@ -58,9 +58,10 @@ export async function readFirstJsonlLine(filePath: string): Promise<string | und
   } finally {
     try {
       await fh.close()
-    } catch {
+    } catch (err) {
       // close 失败：首行数据已读取，finally 内抛错会替换已成功的返回值——
       // 吞掉（best-effort，对齐 sync 形态语义）
+      console.debug('first-line read: close failed after successful read (best-effort)', err)
     }
   }
 }
@@ -86,8 +87,9 @@ export function readFirstJsonlLineSync(filePath: string): string | undefined {
   } finally {
     try {
       closeSync(fd)
-    } catch {
+    } catch (err) {
       // closeSync 失败：fd 可能已无效，首行数据已读取，关闭失败不影响结果（best-effort）
+      console.debug('first-line read: closeSync failed after successful read (best-effort)', err)
     }
   }
 }

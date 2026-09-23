@@ -21,6 +21,7 @@ export {
   type ZcodeSessionRow,
 } from './sqlite-access.ts'
 
-export { convertZcodeTranscript, readZcodeSession } from './converter.ts'
+export { convertZcodeTranscript } from './converter.ts'
+export { readZcodeSession } from './read.ts'
 
 export { normalizeZcodeSessionId, zcodeCandidateKey } from './normalize.ts'

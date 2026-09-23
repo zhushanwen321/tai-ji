@@ -5,12 +5,12 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Check } from 'typebox/value'
 
+import { handleSessionRead } from '../tool-handler.js'
 import {
-  handleSessionRead,
   SQLITE_DRIVER_UNSUPPORTED_MARK,
   ZCODE_DB_MISSING_MARK,
   zcodeReadErrorMessage,
-} from '../tool-handler.js'
+} from '../tool-format.js'
 import { SqliteUnreadableError } from '@zhushanwen/zcode-session-source'
 import sessionReaderExtension from '../index.js'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'

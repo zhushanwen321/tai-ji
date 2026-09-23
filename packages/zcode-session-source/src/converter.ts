@@ -31,7 +31,8 @@
  * - entry id 生成收敛基座单点：normalizeZcodeRowId（8-hex 零填充，与 pi 自身
  *   randomUUID().slice(0,8) 同形态；pi 侧对 entry id 仅作 opaque map key 消费）。
  * - 对外主函数 readZcodeSession(dbPath, sessionId) → NormalizedSession
- *   （{header, entries, degradations} 三键，形状由 session-core 类型强制）。
+ *   （{header, entries, degradations} 三键，形状由 session-core 类型强制；承载于
+ *   read.ts——converter 聚焦纯转换映射，开库→查询→转换→dispose 组合编排在彼）。
  *   header 由库内 session 行构造：id 归一化（normalizeZcodeSessionId）、timestamp 取
  *   session 创建时间、cwd 缺省留空——zcode 会话无 cwd 概念，不伪造（D1）。
  *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配面：
@@ -57,7 +58,6 @@
 import { normalizeZcodeRowId } from '@zhushanwen/session-core'
 import type { Entry, ImportDegradation, NormalizedSession, SessionHeader } from '@zhushanwen/session-core'
 
-import { openZcodeSessionDb } from './sqlite-access.ts'
 import { normalizeZcodeSessionId } from './normalize.ts'
 import { classifyMessage } from './projection.ts'
 import { precomputeCompactionAssociation, resolveFirstKeptEntryId, summaryBodyOf } from './compaction.ts'
@@ -215,12 +215,15 @@ class EntryChain {
 // （converter 自产物违约 = 编程错误，fail-fast 优于让下游拿到结构坏 entry）。
 const MESSAGE_ROLES: ReadonlySet<string> = new Set(['user', 'assistant', 'toolResult'])
 
+/** toCanonicalEntry 违约错误消息里 raw 的 JSON 截断长度（防超长行日志爆炸）。 */
+const RAW_JSON_SNIPPET_CHARS = 120
+
 function toCanonicalEntry(raw: Record<string, unknown>): Entry {
   const type = raw.type
   const id = raw.id
   const parentId = raw.parentId
   if (typeof type !== 'string' || type.length === 0) {
-    throw new Error(`converter 内部错误：entry 缺 type（${JSON.stringify(raw).slice(0, 120)}）`)
+    throw new Error(`converter 内部错误：entry 缺 type（${JSON.stringify(raw).slice(0, RAW_JSON_SNIPPET_CHARS)}）`)
   }
   if (typeof id !== 'string' || id.length === 0) {
     throw new Error(`converter 内部错误：entry 缺 id（type=${type}）`)
@@ -767,38 +770,3 @@ function partStartTime(part: Record<string, unknown>): number | undefined {
   return isRecord(part.time) ? asFinite(part.time.start) : undefined
 }
 
-// ── db 读取 + 纯转换组合（对外主入口）────────────────────────────────────────────
-
-/**
- * 读单会话并转换为 NormalizedSession（zcode source 包对外主函数，D1）。
- *
- * 契约面说明：现生产消费方（reader 扩展 / runtime 导入薄包装）均走
- * openZcodeSessionDb + convertZcodeTranscript 组合形态（各自持有分相位错误映射），
- * 本函数当前无生产调用方——保留导出是设计 §1.5 声明的对外主函数（未来第三源契约锚），
- * 第二源落地前的契约面。
- *
- * 开库走 sqlite-access 的 openZcodeSessionDb（存在性 → 四级恢复阶梯 → schema 已知集
- * 闸门）；返回值三键 {header, entries, degradations}（NormalizedSession，session-core
- * 类型强制）。db 行存在性在查询阶段复查（定位校验与会话读取间的竞态窗口）。
- *
- * 错误面（归消费侧，调用方按各自词表映射——reader → zcode_* / runtime 导入 → import_*）：
- * - db 文件不存在 / 恢复阶梯耗尽 → Error（sqlite-access 抛出，消息含路径与已尝试级别）
- * - schema 版本超出已知集 → ZcodeSchemaDriftError（观测版本在 observedVersion 字段）
- * - session 行不存在（zcode 侧 GC / 从未落库）→ Error，消息含 sessionId 与事实归因
- * - 行 data 列 JSON 非法（schema 漂移域）→ 原始 Error 上抛（sqlite-access 不静默跳过）
- */
-export async function readZcodeSession(dbPath: string, sessionId: string): Promise<NormalizedSession> {
-  const handle = await openZcodeSessionDb(dbPath)
-  try {
-    const row = handle.db.getSessionRow(sessionId)
-    if (!row) {
-      throw new Error(
-        `该会话已不在 zcode 库中（sessionId=${sessionId}）：该 id 可能已被 zcode 侧回收或从未落库`,
-      )
-    }
-    const transcript = handle.db.getSessionTranscript(sessionId)
-    return convertZcodeTranscript(transcript, { id: sessionId, title: row.title, timeCreated: row.timeCreated })
-  } finally {
-    handle.dispose()
-  }
-}

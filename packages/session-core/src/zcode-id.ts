@@ -11,11 +11,14 @@
 /** 归一化产物的固定十六进制位数（8-hex，'00000001' 起）。 */
 export const ZCODE_ROW_ID_WIDTH = 8
 
+/** toString 的进制参数：16 = 十六进制。 */
+const HEX_RADIX = 16
+
 export function normalizeZcodeRowId(rowId: number): string {
   if (!Number.isSafeInteger(rowId) || rowId < 0) {
     // 静默产出（负数 toString(16) 带 '-'、小数带小数点）会破坏 8-hex id 值域，
     // fail-fast 优于下游拿到结构坏 id
     throw new RangeError(`zcode row id must be a non-negative safe integer, got: ${rowId}`)
   }
-  return rowId.toString(16).padStart(ZCODE_ROW_ID_WIDTH, '0')
+  return rowId.toString(HEX_RADIX).padStart(ZCODE_ROW_ID_WIDTH, '0')
 }

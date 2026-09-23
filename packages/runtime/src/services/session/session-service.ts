@@ -54,12 +54,10 @@ import { createProjectionBusView } from './projection-bus-view.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
-// D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
-// respawn（经 registerSession 汇聚）/ detach / reclaim 四类生命周期事件处增量维护。
-import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
-// D5 在途镜像（crash-forensics §3.3 D5，u7b API + 偏差 #20 生命周期接线）：attach 预置 0 /
-// detach、reclaim 摘除——挂点与 checkpoint 同点位（同一收敛面，无双写）。
-import { inflightMirror } from './inflight-mirror.js'
+// crash-forensics 台账挂点域（D1 detailDigest 格式化 + D3 checkpoint / D5 mirror 的
+// attach 预置与 reclaim 摘除，§3.3）：实现迁 crash-forensics-hooks.ts（行为保持抽取，
+// max-lines 门禁），本 Facade 保留调用点。
+import { buildCrashDetailDigest, dropCrashLedgersOnReclaim, registerCrashLedgerAttachHooks } from './crash-forensics-hooks.js'
 // main（file-lock-unification reaper 下沉，D2 触发面 A）：removeSessionEntry 汇聚点收殓
 // 孤儿后台任务——[T8 有限拆分 2026-09] 调用点随销毁收敛链编排迁入 session-entry-removal.ts
 // （模块单例直接 import，语义不变），本 Facade 不再消费。
@@ -507,47 +505,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         this.modelCapabilityReconciler(sessionId).catch(() => { /* 降级吞错：附着主链路优先 */ })
       }
     })
-    // D3 checkpoint（crash-forensics §3.3 D3，u4）attach / respawn 成功挂点：onSessionRegistered
-    // 是 create / restore（含自动 respawn 与惰性恢复）/ fork 三入口的注册汇聚点（session-lifecycle
-    // registerSession 在 sessions.set 之后同步直发），**一个挂点覆盖四类事件中的全部「附着」
-    // 形态**——respawn 成功即 pi 重新附着，无需在 restore 链路另设挂点（单一收敛点 = 无双写）。
-    // 元数据取既有读面：filePath/occupancy 来自 lifecycle 条目，lastActivityAt 取 pi client
-    // 空闲信号（u1a，attach 瞬间读不到则用本模块时钟兜底），lastViewedAt 取 per-sid 查看表。
-    // 台账/checkpoint 都是旁路设施，本订阅体自带异常隔离（异常不外抛——否则会打断
-    // registerSession 主链，把旁路故障放大成创建/恢复失败）。
-    this.lifecycle.onSessionRegistered((sessionId) => {
-      try {
-        const session = this.lifecycle.get(sessionId)
-        const occupancy = session?.occupancy
-        getRuntimeCheckpointStore().upsertSession({
-          sessionId,
-          filePath: session?.sessionFilePath ?? null,
-          activityAt: this.pm.getClient(sessionId)?.lastActivityAt,
-          viewedAt: this.getSessionLastViewedAt(sessionId),
-          occupancy: occupancy && (occupancy.turn !== 'idle' || occupancy.compacting || occupancy.bash)
-            ? 'occupied'
-            : 'idle',
-        })
-      } catch (e: unknown) {
-        // best-effort 降级：checkpoint 是崩溃恢复的旁路设施，写入异常绝不外抛——
-        // 外抛会打断 registerSession 主链，把旁路故障放大成创建/恢复失败。
-        console.error(`[session-service] checkpoint attach update failed (sessionId=${sessionId}):`, e)
-      }
-    })
-    // D5 mirror 预置 0（crash-forensics §3.3 D5，偏差 #20 接线）：五 spawn 形态（新 session /
-    // respawn / reattach / lazy restore / fork）的条目建立腿——与上一挂点同一 registerSession
-    // 收敛面（fork 产生新 sessionId，同点覆盖），一挂点覆盖全部附着形态。presetZero = 新
-    // reporting epoch（inFlight=0 + 清 hasEverReported，不触碰 injected——spawn 装配顺序
-    // 无关，语义见 inflight-mirror.ts 文件头）。独立第二订阅而非并入 checkpoint 订阅体：
-    // 两个旁路设施各自 best-effort 异常隔离，故障日志可归因、互不放大。
-    this.lifecycle.onSessionRegistered((sessionId) => {
-      try {
-        inflightMirror.presetZero(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：mirror 是 errs 判别的旁路设施，预置异常绝不外抛——
-        // 外抛会打断 registerSession 主链，把旁路故障放大成创建/恢复失败。
-        console.error(`[session-service] mirror preset failed (sessionId=${sessionId}):`, e)
-      }
+    // D3 checkpoint + D5 mirror 的 attach 挂点（crash-forensics §3.3）：订阅体迁
+    // crash-forensics-hooks.ts（行为保持抽取，语义注释见该模块）。注册位置/时序不变：
+    // 排在 reconciler 订阅之后，函数内先 checkpoint 后 mirror，与迁移前两订阅的
+    // 注册顺序逐一等价（上方「播种 → record 注册 → 对账」顺序契约不受影响）。
+    registerCrashLedgerAttachHooks(this.lifecycle, {
+      getSession: (sessionId) => this.lifecycle.get(sessionId),
+      activityAt: (sessionId) => this.pm.getClient(sessionId)?.lastActivityAt,
+      viewedAt: (sessionId) => this.getSessionLastViewedAt(sessionId),
     })
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus, new SkillInjector(this.skillSource))
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
@@ -1048,30 +1013,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 七步最小摘除编排——进程处置语义收口在 Map 所有者（D3），Facade 只做一行委托。
    * 返回 false = 未回收（占座被占 / 最终豁免拦截 / 代际校验取消）。
    *
-   * D3 checkpoint（u4）reclaim 成功挂点：回收**不是销毁**（removeSessionEntry 刻意不经
-   * 此路径），但该 session 已摘出活跃 Map → 不再属「活跃 session 清单」，从 checkpoint
-   * 摘除条目（文件本身不删——删除属主在 main 退出链与 u5 reattach 编排）。挂 ok 分支：
-   * 未回收路径零改动，防误摘（与 reclaimed 台账行同抑制语义）。
+   * D3 checkpoint + D5 mirror reclaim 成功摘除挂点：挂 ok 分支（未回收路径零改动、
+   * 防误摘，与 reclaimed 台账行同抑制语义）——实现迁 crash-forensics-hooks.ts
+   * （dropCrashLedgersOnReclaim，行为保持抽取，语义注释见该模块）。
    */
   async reclaimSession(sessionId: string, deps: ReclaimSessionDeps): Promise<boolean> {
     const reclaimed = await this.lifecycle.reclaimManagedSession(sessionId, deps)
-    if (reclaimed) {
-      try {
-        getRuntimeCheckpointStore().removeSession(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：摘除条目失败不影响回收主流程（回收已完成的事实不变）。
-        console.error(`[session-service] checkpoint reclaim removal failed (sessionId=${sessionId}):`, e)
-      }
-      // D5 mirror（偏差 #20 接线）：回收 ≠ 销毁（刻意不经 removeSessionEntry 汇聚点）但该
-      // session 已摘出活跃清单，mirror 条目与 checkpoint 同语义同步摘除；恢复后经预置 0
-      // 重建（新 reporting epoch）。挂 ok 分支：未回收路径零改动，防误摘（与 checkpoint 同型）。
-      try {
-        inflightMirror.dropSession(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：摘除条目失败不影响回收主流程（回收已完成的事实不变）。
-        console.error(`[session-service] mirror reclaim removal failed (sessionId=${sessionId}):`, e)
-      }
-    }
+    if (reclaimed) dropCrashLedgersOnReclaim(sessionId)
     return reclaimed
   }
 
@@ -1671,24 +1619,3 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 }
 
-// ── D1 台账 helper（crash-forensics §3.3 D1 防漏设计①）───────────────────────
-
-/** 台账 detailDigest 内嵌上限（设计 D1：「末 10 行 stderr 摘要内嵌（≤2KB）」）。 */
-const CRASH_DETAIL_DIGEST_MAX_CHARS = 2048
-
-/**
- * crash 事件的 detailDigest：stderr 尾部摘要截断内嵌（取尾不取头——崩溃根因通常在输出末尾，
- * 与 rpc-client getStderrTail 的尾部形态同向）。stderr 为空（信号死亡无输出）时兜底一行
- * 退出形态描述——digest 恒非空，崩溃行的最小归因信息不因 stderr 缺失而全空。
- */
-function buildCrashDetailDigest(code: number | null, stderr: string | undefined): string {
-  const tail = (stderr ?? '').trim()
-  const digest = tail
-    || (code === null
-      ? 'process died by signal (no stderr captured)'
-      : `process exited with code ${code} (no stderr captured)`)
-  // 超限取尾部（保留最接近崩溃现场的输出），换行结构原样保留
-  return digest.length > CRASH_DETAIL_DIGEST_MAX_CHARS
-    ? digest.slice(-CRASH_DETAIL_DIGEST_MAX_CHARS)
-    : digest
-}

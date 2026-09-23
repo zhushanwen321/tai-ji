@@ -37,7 +37,8 @@ import {
 import type { NormalizedSession } from '@zhushanwen/session-core'
 
 import { buildFixtureDb, makeFixtureDir, openWritableSqlite, type FixtureMessage, type FixturePart } from './helpers.ts'
-import { convertZcodeTranscript, readZcodeSession, type ZcodeMessageInput } from '../converter.ts'
+import { convertZcodeTranscript, type ZcodeMessageInput } from '../converter.ts'
+import { readZcodeSession } from '../read.ts'
 import { normalizeZcodeSessionId, zcodeCandidateKey } from '../normalize.ts'
 
 // ── fixture 构造（内存行结构，字段形态对齐宿主库实测）────────────────────────────────
