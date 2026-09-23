@@ -401,7 +401,7 @@ export interface AgentOutcome {
   /**
    * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（引擎侧 W11 已有落盘）。
    *
-   * 通道裁决（协议演进宪法 D11 判据链，2026-09-22 一致性审查 P1 修复登记）：stderr
+   * 通道裁决（协议演进宪法 ADR-0071 判据链，2026-09-22 一致性审查 P1 修复登记）：stderr
    * tee 路径是引擎产生的诊断事实，宿主不可靠推导（文件名格式/dataDir 解析/轮转
    * rename 后的真实名只有引擎知道，两引擎前缀不同——判据③「推导会分叉」）→ 上协议。
    * 承载形态选 run 终态应答（本类型）的字段扩展而非 AgentEvent 词表变体，判据：
@@ -438,8 +438,9 @@ export interface ModelCatalogEntry {
  * 单次 agent 调用的任务声明——引擎面子集（协议 run.params.task；core 全量
  * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费面）。
  *
- * 字段归属判据（协议演进宪法 D11 成文，权威源
- * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」；
+ * 字段归属判据（协议演进宪法 ADR-0071 成文，权威源
+ * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」与
+ * docs/adr/decisions.md ADR-0071；
  * 本注释是判据与存量结论的投影，新增字段按决策树依序裁决后在此登记）：
  *   ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段
  *      声明携带的约束面——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；

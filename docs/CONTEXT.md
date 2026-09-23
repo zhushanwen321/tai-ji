@@ -251,7 +251,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### Run 事件 journal（workflow 域）
-workflow run 的事件流持久化：`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐帧记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等）。它是 run 态的**权威投影源**——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0072](adr/decisions.md)）。由显式状态机单写点落账，引擎不直接写。
+workflow run 的事件流持久化：`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐帧记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等）。它是 run 态的**权威投影源**——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单写点落账，引擎不直接写。
 
 ### 武装回执（armed，workflow 域）
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。

@@ -2967,7 +2967,7 @@
         "packages/subagent-core/src/execution/service/**"
       ],
       "authority": [
-        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21"
       ],
       "dimensions": [
         "extension-api"
@@ -2992,7 +2992,7 @@
         "packages/pi-subagent-cli/src/**"
       ],
       "authority": [
-        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21"
       ],
       "dimensions": [
         "extension-api",
@@ -3007,14 +3007,14 @@
     },
     {
       "id": "C-ext-26",
-      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0072）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0074）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
       "scope": [
         "extensions/universal/subagent-workflow/**",
         "packages/subagent-core/src/orchestration/**"
       ],
       "authority": [
-        "adr/decisions.md#adr-0073-workflow-域四支柱平移与-schema-通道终态2026-09-21",
-        "adr/decisions.md#adr-0072-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21",
+        "adr/decisions.md#adr-0074-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
       ],
       "dimensions": [
         "extension-api",

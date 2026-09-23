@@ -361,7 +361,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **版本协商**：`ENGINE_PROTOCOL_VERSION = 1`（core 支持 `>=1 <2`）；越界 → `engine_protocol_mismatch`
 （含双方版本 + 升级指引），该引擎标记不可用，不影响其他引擎与宿主。
 
-**协议演进宪法**（D11；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
+**协议演进宪法**（条文权威 = 本节 + [ADR-0071](adr/decisions.md)；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
 
 *字段归属三分判据（新增 wire 字段按决策树依序裁决；存量不搬家不重判，判据只约束新增）*：
 ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段声明携带的约束面——
