@@ -199,29 +199,35 @@ function isArmedEventFrame(event: unknown): boolean {
 }
 
 /**
- * run 请求与 armed 等待门的合流：run 应答先到 → 正常收门返回；窗满先到 → 合流
- * resolve 为调用方合成的失败结果（fail-fast，EnginePort 契约「运行中失败不 reject
- * ——合成 outcome + 正常 handle」）。败者后续 settle 一律吞掉（settled 守卫 +
- * run 请求的 then 链恒有 handler，无 unhandled rejection）。
+ * run 请求与触发源的竞态合流（单源，两处消费：① armed 回执等待门——窗满合成失败
+ * outcome fail-fast；② cancel 收敛窗——窗满本地合成 abort 终态）：run 应答先到 →
+ * 正常返回；触发源先到 → 合流 resolve 为调用方合成的结果（EnginePort 契约「运行中
+ * 失败不 reject——合成 outcome + 正常 handle」）。败者后续 settle 一律吞掉（settled
+ * 守卫 + run 请求的 then 链恒有 handler，无 unhandled rejection）。
+ *
+ * registerTrigger 两侧实现均为纯登记赋值（ArmedReceiptGate.onTimeout /
+ * AbortWiring.onForceSettle），登记与 run 请求 then 链的先后顺序无可观察差异；
+ * dispose 在 settle 时执行（撤 timer / 摘 listener）。
  */
-function awaitRunOrArmedTimeout<T>(
+function awaitRunOrTrigger<T>(
   runRequest: Promise<T>,
-  gate: ArmedReceiptGate,
-  synthesizeOnTimeout: () => T,
+  registerTrigger: (onFire: () => void) => void,
+  disposeTrigger: () => void,
+  synthesize: () => T,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const settle = (settleFn: () => void): void => {
       if (settled) return;
       settled = true;
-      gate.dispose();
+      disposeTrigger();
       settleFn();
     };
+    registerTrigger(() => settle(() => resolve(synthesize())));
     runRequest.then(
       (value) => settle(() => resolve(value)),
       (err) => settle(() => reject(err)),
     );
-    gate.onTimeout(() => settle(() => resolve(synthesizeOnTimeout())));
   });
 }
 
@@ -382,38 +388,44 @@ export class RemoteEngine implements EnginePort {
         outcome: SdkAgentOutcome;
       }>;
       const armedSettled = armedGate !== undefined
-        ? awaitRunOrArmedTimeout(runRequest, armedGate, () => {
-          // 窗满 fail-fast（EnginePort 契约：运行中失败不 reject——合成 outcome +
-          // 正常 handle）。best-effort cancel 先行：孙进程可能已在烧 token，宿主
-          // 侧失败不等于引擎侧自停（cancel 受理失败由下方武装的杀链兜底窗承接）。
-          // [加固] 受理失败必须出声：空 catch 吞掉 cancel 失败信号后，兜底窗是否真正接管不可诊断。
-          void this.opts.client.cancelRun(runId, "armed receipt timeout").catch((err: unknown) => {
-            logger.error(
-              `[remote-engine] armed receipt timeout cancel failed for run ${runId}: ` +
-                `${err instanceof Error ? err.message : String(err)} (kill-chain fallback armed, grace ${killChainGraceMs}ms)`,
+        ? awaitRunOrTrigger(
+          runRequest,
+          (onFire) => armedGate.onTimeout(onFire),
+          () => armedGate.dispose(),
+          () => {
+            // 窗满 fail-fast（EnginePort 契约：运行中失败不 reject——合成 outcome +
+            // 正常 handle）。best-effort cancel 先行：孙进程可能已在烧 token，宿主
+            // 侧失败不等于引擎侧自停（cancel 受理失败由下方武装的杀链兜底窗承接）。
+            // [加固] 受理失败必须出声：空 catch 吞掉 cancel 失败信号后，兜底窗是否真正接管不可诊断。
+            void this.opts.client.cancelRun(runId, "armed receipt timeout").catch((err: unknown) => {
+              logger.error(
+                `[remote-engine] armed receipt timeout cancel failed for run ${runId}: ` +
+                  `${err instanceof Error ? err.message : String(err)} (kill-chain fallback armed, grace ${killChainGraceMs}ms)`,
+              );
+            });
+            // [加固] 杀链兜底窗真实武装：本合成路径不经过 wireAbortSignal 的 onAbort
+            // （无外部 abort signal），「cancel 受理失败由杀链兜底窗承接」的第二道回收
+            // 此前结构性缺席——cancel 受理成功但引擎不收敛 / 受理失败两种形态都由本
+            // timer 到点 killRunTopology 定点收割（armKillChainFallbackForArmedTimeout
+            // 注释块载裁决）。
+            armKillChainFallbackForArmedTimeout(this.opts.client, ctx, runId, killChainGraceMs, runRequest);
+            logger.warn(
+              `[remote-engine] armed receipt not received within ${resolveArmedReceiptTimeoutMs()}ms ` +
+                `for run ${runId} (native engine, schema task) — failing the run fast`,
             );
-          });
-          // [加固] 杀链兜底窗真实武装：本合成路径不经过 wireAbortSignal 的 onAbort
-          // （无外部 abort signal），「cancel 受理失败由杀链兜底窗承接」的第二道回收
-          // 此前结构性缺席——cancel 受理成功但引擎不收敛 / 受理失败两种形态都由本
-          // timer 到点 killRunTopology 定点收割（armKillChainFallbackForArmedTimeout
-          // 注释块载裁决）。
-          armKillChainFallbackForArmedTimeout(this.opts.client, ctx, runId, killChainGraceMs, runRequest);
-          logger.warn(
-            `[remote-engine] armed receipt not received within ${resolveArmedReceiptTimeoutMs()}ms ` +
-              `for run ${runId} (native engine, schema task) — failing the run fast`,
-          );
-          return {
-            handle: this.synthesizeHandle(),
-            outcome: armedReceiptTimeoutOutcome(this.id, runId),
-          };
-        })
+            return {
+              handle: this.synthesizeHandle(),
+              outcome: armedReceiptTimeoutOutcome(this.id, runId),
+            };
+          },
+        )
         : runRequest;
       // [D9-2] 收敛窗合流：引擎应答先到正常返回；窗满先到 = 本地合成 abort 终态 +
       // run 拓扑杀（wireAbortSignal 窗满回调），晚到的引擎应答由 settled 守卫吞掉。
-      const wireResult = await awaitRunOrForceSettle(
+      const wireResult = await awaitRunOrTrigger(
         armedSettled,
-        abort,
+        (onForceSettle) => abort.onForceSettle(onForceSettle),
+        () => abort.dispose(),
         () => ({
           handle: this.synthesizeHandle(),
           outcome: abortedRunOutcome(this.id, runId, undefined),
@@ -746,33 +758,6 @@ function wireAbortSignal(
       if (ctx.signal !== undefined) ctx.signal.removeEventListener("abort", onAbort);
     },
   };
-}
-
-/**
- * run 请求与收敛窗的合流（形态同 awaitRunOrArmedTimeout）：引擎应答先到 → 正常返回；
- * 收敛窗超时先到 → 本地合成 abort 终态（EnginePort「record 必须收尾」契约）。败者
- * 后续 settle 一律吞掉（settled 守卫 + run 请求的 then 链恒有 handler，无 unhandled
- * rejection）。
- */
-function awaitRunOrForceSettle<T>(
-  runRequest: Promise<T>,
-  wiring: AbortWiring,
-  synthesizeOnForceSettle: () => T,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const settle = (settleFn: () => void): void => {
-      if (settled) return;
-      settled = true;
-      wiring.dispose();
-      settleFn();
-    };
-    wiring.onForceSettle(() => settle(() => resolve(synthesizeOnForceSettle())));
-    runRequest.then(
-      (value) => settle(() => resolve(value)),
-      (err) => settle(() => reject(err)),
-    );
-  });
 }
 
 /** abort 期合成 outcome（exitCode null = 被信号杀死，杀链判据）。 */

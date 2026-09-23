@@ -52,8 +52,8 @@ import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.
 import {
   createRunEventJournal,
   finalRunErrorCodeOf,
+  foldRunEventFrames,
   IllegalTransitionError,
-  INITIAL_RUN_STATE,
   RUN_EVENT_TYPES,
   transition,
   type RunErrorCode,
@@ -478,20 +478,13 @@ function resolveRunEventJournal(): { dir: string; journal: RunEventJournal } {
 async function foldRunState(runId: string): Promise<RunState> {
   const { journal } = resolveRunEventJournal();
   const events = await journal.scan(runId);
-  let state = INITIAL_RUN_STATE;
-  for (const event of events) {
-    try {
-      state = transition(state, event).state;
-    } catch (err) {
-      // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
-      // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
-      runEventLogger.warn(
-        `run-event journal fold stopped at a broken frame (runId=${runId}, lastType=${event.type}): ${toErrorMessage(err)}`,
-      );
-      break;
-    }
-  }
-  return state;
+  return foldRunEventFrames(events, (err, lastType) => {
+    // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
+    // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
+    runEventLogger.warn(
+      `run-event journal fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${toErrorMessage(err)}`,
+    );
+  });
 }
 
 /**

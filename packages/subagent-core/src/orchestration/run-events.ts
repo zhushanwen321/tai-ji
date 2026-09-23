@@ -613,6 +613,33 @@ export function transition(
   return { state: nextState, outputs: rule.outputs };
 }
 
+// ── journal fold 循环（投影侧共享单源）──────────────────────
+
+/**
+ * journal fold 循环（scan 事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
+ * （不传 ctx——fold 契约），坏帧（历史帧与当前转移表不兼容）经 onBrokenFrame 出声
+ * 后保守停在最近一致态，不炸投影——与 scan 侧坏行容忍同一精神。
+ *
+ * 消费方：worker-message-pump（journal 活体 fold，活体缓存 miss 时补投影）与
+ * run-registry（注册表投影 / abandon 终局化）。两处 warn 文案与 logger 各随其域，
+ * 经 onBrokenFrame 注入；循环体与失效模式单源。
+ */
+export function foldRunEventFrames(
+  events: readonly WorkflowRunEvent[],
+  onBrokenFrame: (err: unknown, lastType: string) => void,
+): RunState {
+  let state = INITIAL_RUN_STATE;
+  for (const event of events) {
+    try {
+      state = transition(state, event).state;
+    } catch (err) {
+      onBrokenFrame(err, event.type);
+      break;
+    }
+  }
+  return state;
+}
+
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────
 
 const journalLogger = getLogger("run-event-journal");

@@ -85,7 +85,8 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+// 嵌套深度护栏单点（D-033 共享判据 + MAX_FORK_DEPTH 上限常量同源）。
+import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -99,7 +100,7 @@ import type {
   ExecutionMode,
   ExecutionRecord,
 } from "../assembly/types.ts";
-import { DEFAULT_AGENT_NAME, ForkDepthExceededError } from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 // [2026-09-13 design-code-sync] MS_PER_SECOND / SECONDS_PER_MINUTE 消费主体
 //（onOneShotSettledWatchdogTimeout）已迁 chat-rounds.ts，本聚合余 PRIORITY_BACKGROUND。
@@ -248,20 +249,8 @@ export class RunOrchestration {
     // [T4② / PS-4] idleTimeoutMs 配置错误在首个副作用前同步 fail-fast（错误含合法范围）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // 通用嵌套深度护栏（D-033）：嵌套上下文（[D3-⑤] 公共层 ExecutionNestingContext）
-    // 记录所有 subagent 嵌套层级（fork + 非 fork），每层 +1。MAX_FORK_DEPTH 同时限
-    // fork 链与通用嵌套——非 fork 递归虽不累积 session 体积，但耗资源且 LLM 易陷入
-    // 「委派→再委派」死循环。在所有副作用之前拦截，错误直达调用方。
-    // 计数基准：顶层 nestingDepth=0，nestingDepth>MAX 被拒。与 fork 体积护栏（parentForkDepth 检查）
-    // 互补：本护栏更严（计所有嵌套），混合链下先生效；两者共享 MAX_FORK_DEPTH 上限不漂移。
-    // [ALS 断裂修复] current() 内含基线兜底（pi 事件回调模型下 enterWith 不贯穿）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // 通用嵌套深度护栏（D-033，单源 session-context-resolver）：在所有副作用之前拦截。
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // mode 固定 background（sync 模式已删除）
     const mode: ExecutionMode = "background";
@@ -326,15 +315,8 @@ export class RunOrchestration {
     // [T4② / PS-4] 与 execute() 同款入口校验（两入口共享 runAndFinalize → armIdleTimer 链）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // ── BC-12 嵌套护栏：复用 execute() 的嵌套上下文深度检查 ──
-    // [ALS 断裂修复] current() 内含基线兜底（与 execute 同）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // ── BC-12 嵌套护栏：与 execute() 同款单点检查（session-context-resolver）──
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // ── 步骤 1: IDENTITY 解析 ──
     const identity = await this.deps.resolveIdentity(opts);
