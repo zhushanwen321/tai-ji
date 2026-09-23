@@ -1142,46 +1142,28 @@ function normalizeGroupEntry(x) {
   return entry;
 }
 
-/**
- * 修复分组确定性校验（不信任 LLM 分组自觉；与 zcode 原生版同构）：
- *  ① 过滤无效组（issueIds 非活跃 id 的剔除 + 重复认领去重，剔空的组丢弃）
- *  ② 覆盖性兜底——未被认领的活跃问题独立成组（漏分 ≠ 漏修）
- *  ③ 组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）
- *  ④ 组 files 以组内 issue 的 files 聚合为准（aggregator 报的组 files 仅参考）
- *  ⑤ 重编 G1..Gn；rawGroups 缺失/空时全部活跃问题归一组（退化 = 旧单 fixer 行为）
- * @param rawGroups normalizeGroupEntry 归一后的分组（或 undefined）
- * @param activeEntries 活跃（adjudication=evidence）聚合条目 [{id, files?, ...}]
- */
-function reconcileGroups(rawGroups, activeEntries) {
-  const active = (activeEntries || []).filter((e) => e && typeof e.id === "string" && e.id);
-  if (active.length === 0) return [];
-  const activeIds = new Set(active.map((e) => e.id));
-  const filesOf = new Map(active.map((e) => [e.id, Array.isArray(e.files) ? e.files.filter((f) => typeof f === "string" && f.trim()) : []]));
-  let groups;
-  if (!rawGroups || rawGroups.length === 0) {
-    // 缺失/空分组 → 单组全包（退化 = 旧单 fixer 行为；单组无组对，下方合并循环天然 no-op）
-    groups = [{ issueIds: [...activeIds], note: "" }];
-  } else {
-    groups = [];
-    // claimed 双职责：过滤阶段逐组去重（id 已被前组认领则从后组剔除，剔空组丢弃，
-    // 与 ② 漏分兜底对称）+ 兜底阶段漏分判定。重复认领不去重的话，同 id 两组在
-    // files 缺失时（空集恒不相交）③ 的相交合并不触发，两个并行 fixer 并发修同一 issue。
-    const claimed = new Set();
-    for (const g of rawGroups) {
-      const issueIds = g.issueIds.filter((id) => activeIds.has(id) && !claimed.has(id));
-      if (issueIds.length === 0) continue;
-      for (const id of issueIds) claimed.add(id);
-      groups.push({ note: g.note || "", issueIds });
-    }
-    for (const id of activeIds) {
-      if (!claimed.has(id)) groups.push({ issueIds: [id], note: "aggregator 漏分，兜底独立组" });
-    }
+/** ①② rawGroups 过滤 + 漏分兜底（reconcileGroups 子步骤）：issueIds 非活跃 id 剔除、
+ * 重复认领逐组去重（id 已被前组认领则从后组剔除，剔空组丢弃）、未被认领的活跃问题
+ * 独立成组。claimed 去重的动机：同 id 两组在 files 缺失时（空集恒不相交）③ 的相交
+ * 合并不触发，两个并行 fixer 会并发修同一 issue。 */
+function filterAndBackfillGroups(rawGroups, activeIds) {
+  const groups = [];
+  const claimed = new Set();
+  for (const g of rawGroups) {
+    const issueIds = g.issueIds.filter((id) => activeIds.has(id) && !claimed.has(id));
+    if (issueIds.length === 0) continue;
+    for (const id of issueIds) claimed.add(id);
+    groups.push({ note: g.note || "", issueIds });
   }
-  const groupFiles = (ids) => {
-    const s = new Set();
-    for (const id of ids) for (const f of filesOf.get(id) || []) s.add(f);
-    return [...s];
-  };
+  for (const id of activeIds) {
+    if (!claimed.has(id)) groups.push({ issueIds: [id], note: "aggregator 漏分，兜底独立组" });
+  }
+  return groups;
+}
+
+/** ③ 组间文件相交 → 传递闭包合并（reconcileGroups 子步骤）：并行 fixer 不编辑同一
+ * 文件；groupFiles 为组→files 投影函数。 */
+function mergeOverlappingGroups(groups, groupFiles) {
   let mergedFlag = true;
   while (mergedFlag) {
     mergedFlag = false;
@@ -1202,27 +1184,58 @@ function reconcileGroups(rawGroups, activeEntries) {
       }
     }
   }
-  // 空 files 组防御归并（空 files = 并行安全性未知，按最保守处置）：files 缺失/全空白
-  // 的组对上方相交合并不可达（空集恒不相交），但组内 issue 仍可能按 evidence/guidance
-  // 描述改同一物理文件——aggregator 漏给 files 的数据质量问题无法用声明数据判定并行
-  // 安全，全部归并进首个非空 files 组（无非空组则互并成单组），保证空 files 组永不
-  // 与其他组并行。claimed 去重与上方 while 合并循环保持不动。
+  return groups;
+}
+
+/** 空 files 组防御归并（reconcileGroups 子步骤）：files 缺失/全空白 的组对相交合并
+ * 不可达（空集恒不相交），但组内 issue 仍可能按 evidence/guidance 描述改同一物理
+ * 文件——aggregator 漏给 files 的数据质量问题无法用声明数据判定并行安全，全部归并
+ * 进首个非空 files 组（无非空组则互并成单组），保证空 files 组永不与其他组并行。 */
+function mergeEmptyFilesGroups(groups, groupFiles) {
   const emptyIdxs = [];
   for (let i = 0; i < groups.length; i++) {
     if (groupFiles(groups[i].issueIds).length === 0) emptyIdxs.push(i);
   }
-  if (emptyIdxs.length > 0 && groups.length > 1) {
-    let target = groups.findIndex((_, i) => !emptyIdxs.includes(i));
-    if (target === -1) target = emptyIdxs[0];
-    const absorbed = groups.filter((_, i) => i !== target && emptyIdxs.includes(i));
-    groups[target] = {
-      issueIds: [...groups[target].issueIds, ...absorbed.flatMap((g) => g.issueIds)],
-      note: [groups[target].note, ...absorbed.map((g) => g.note)].filter(Boolean).join("; ")
-        + " (empty files, conservatively merged)",
-    };
-    groups = groups.filter((_, i) => i === target || !emptyIdxs.includes(i));
-  }
-  return groups.map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
+  if (emptyIdxs.length === 0 || groups.length === 1) return groups;
+  let target = groups.findIndex((_, i) => !emptyIdxs.includes(i));
+  if (target === -1) target = emptyIdxs[0];
+  const absorbed = groups.filter((_, i) => i !== target && emptyIdxs.includes(i));
+  groups[target] = {
+    issueIds: [...groups[target].issueIds, ...absorbed.flatMap((g) => g.issueIds)],
+    note: [groups[target].note, ...absorbed.map((g) => g.note)].filter(Boolean).join("; ")
+      + " (empty files, conservatively merged)",
+  };
+  return groups.filter((_, i) => i === target || !emptyIdxs.includes(i));
+}
+
+/**
+ * 修复分组确定性校验（不信任 LLM 分组自觉；与 zcode 原生版同构）：
+ *  ① 过滤无效组（issueIds 非活跃 id 的剔除 + 重复认领去重，剔空的组丢弃）
+ *  ② 覆盖性兜底——未被认领的活跃问题独立成组（漏分 ≠ 漏修）
+ *  ③ 组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）
+ *  ④ 组 files 以组内 issue 的 files 聚合为准（aggregator 报的组 files 仅参考）
+ *  ⑤ 重编 G1..Gn；rawGroups 缺失/空时全部活跃问题归一组（退化 = 旧单 fixer 行为）
+ * ①② → filterAndBackfillGroups；③ → mergeOverlappingGroups；空 files 防御归并 →
+ * mergeEmptyFilesGroups（同文件私有辅助，行为契约由 reconcileGroups 单测锁定）。
+ * @param rawGroups normalizeGroupEntry 归一后的分组（或 undefined）
+ * @param activeEntries 活跃（adjudication=evidence）聚合条目 [{id, files?, ...}]
+ */
+function reconcileGroups(rawGroups, activeEntries) {
+  const active = (activeEntries || []).filter((e) => e && typeof e.id === "string" && e.id);
+  if (active.length === 0) return [];
+  const activeIds = new Set(active.map((e) => e.id));
+  const filesOf = new Map(active.map((e) => [e.id, Array.isArray(e.files) ? e.files.filter((f) => typeof f === "string" && f.trim()) : []]));
+  const groupFiles = (ids) => {
+    const s = new Set();
+    for (const id of ids) for (const f of filesOf.get(id) || []) s.add(f);
+    return [...s];
+  };
+  // 缺失/空分组 → 单组全包（退化 = 旧单 fixer 行为；单组无组对，③ 合并天然 no-op）
+  const groups = !rawGroups || rawGroups.length === 0
+    ? [{ issueIds: [...activeIds], note: "" }]
+    : filterAndBackfillGroups(rawGroups, activeIds);
+  return mergeEmptyFilesGroups(mergeOverlappingGroups(groups, groupFiles), groupFiles)
+    .map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
 }
 
 /** 数字字段多键名归一（5.1→5.7 键名演进）：按序取首个 number 形态键，全缺省返回 fallback */
