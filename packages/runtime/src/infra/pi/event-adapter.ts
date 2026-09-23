@@ -174,10 +174,17 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
     // FR-5 / RT-2#2: streaming error — surface as message.stream_error
     // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）。
     // wire 真实字段 = {reason:'aborted'|'error', error:{errorMessage?}}（PiErrorSubEvent）：
-    // content 读 error.errorMessage（缺失回退 reason——中止场景无 errorMessage，仍可辨因）；
-    // kind 透传 reason，保留 aborted（用户中止）与 error（provider 真错）的语义区分，
-    // 禁止硬编码回 'error'（曾使所有 provider 真错文本永久不显形）。
+    // content 读 error.errorMessage（缺失回退 reason），kind 透传 reason（运行时若 pi 新增
+    // reason 值仍如实分类）。
     case 'error':
+      // aborted（用户中止）降级 noop，不产 stream_error 帧：中止不是流错误——pi 对中止的
+      // 权威收口通路是 message_end/agent_end 携带的 stopReason='aborted'（→ 前端
+      // message.complete{stopReason:'aborted'}，complete 终态非 error）。此处若产帧，前端
+      // finalizeSession('stream_error') 会把主动中止错标为 error 红条，且 errorMessage 缺失时
+      // 原始枚举串 'aborted' 经 content 直进用户可见错误文本。
+      // [HISTORICAL] 本分支曾硬编码 kind='error'，使 provider 真错文本（401/限流/上下文溢出）
+      // 永久不显形——RT-2#2 改读 wire 真实字段后修复。
+      if (sub.reason === 'aborted') return [{ kind: 'noop' }]
       return [{ kind: 'message', message: { type: 'message.stream_error', payload: { sessionId: sid, content: sub.error?.errorMessage ?? sub.reason, kind: sub.reason } } }]
     default:
       console.warn('[EventAdapter] Unhandled message_update sub-type:', subType)
