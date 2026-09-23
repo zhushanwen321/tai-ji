@@ -2432,14 +2432,14 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     { id: "MF-4", files: [] },
   ];
   it("合法分组直通（文件不相交、全覆盖）+ 重编 G1..Gn + files 以 issue 聚合为准", () => {
+    // MF-4 空 files：不再独立并行（空组防御归并进首个非空组 G1）
     const out = reconcileGroups(
       [{ issueIds: ["MF-1", "MF-2"], id: "Ga", note: "a-module" }, { issueIds: ["MF-3"] }, { issueIds: ["MF-4"] }],
       entries,
     );
     expect(out).toEqual([
-      { id: "G1", issueIds: ["MF-1", "MF-2"], files: ["src/a.ts", "src/b.ts"], note: "a-module" },
+      { id: "G1", issueIds: ["MF-1", "MF-2", "MF-4"], files: ["src/a.ts", "src/b.ts"], note: "a-module (empty files, conservatively merged)" },
       { id: "G2", issueIds: ["MF-3"], files: ["src/c.ts"], note: "" },
-      { id: "G3", issueIds: ["MF-4"], files: [], note: "" },
     ]);
   });
   it("覆盖性兜底：漏分的活跃问题独立成组（漏分 ≠ 漏修）", () => {
@@ -2449,7 +2449,8 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     expect(out.some((g) => g.issueIds.includes("MF-2") && g.note.includes("漏分"))).toBe(true);
   });
   it("组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）", () => {
-    // MF-1(a)↔MF-2(a,b)↔MF-5(b,c)↔MF-3(c) 传递链全连通；MF-4 无文件孤立
+    // MF-1(a)↔MF-2(a,b)↔MF-5(b,c)↔MF-3(c) 传递链全连通；MF-4 无文件 → 相交合并后
+    // 再被空 files 防御归并吸收（并行安全性未知 → 最保守单组）
     const chain = [
       { id: "MF-1", files: ["src/a.ts"] },
       { id: "MF-2", files: ["src/a.ts", "src/b.ts"] },
@@ -2461,10 +2462,29 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
       [{ issueIds: ["MF-1"] }, { issueIds: ["MF-2"] }, { issueIds: ["MF-3"] }, { issueIds: ["MF-5"] }],
       chain,
     );
-    expect(out).toHaveLength(2);
-    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-2", "MF-3", "MF-5"]);
+    expect(out).toHaveLength(1);
+    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-2", "MF-3", "MF-4", "MF-5"]);
     expect(out[0].files.sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
     expect(out[0].note).toContain("defensively merged");
+    expect(out[0].note).toContain("conservatively merged");
+  });
+  it("空 files 组防御归并：空组全部并入首个非空组（漏分兜底空组同罪）；全空 → 互并成单组", () => {
+    const es = [
+      { id: "MF-1", files: ["src/a.ts"] },
+      { id: "MF-4", files: [] },
+      { id: "MF-6" }, // 无 files 键（aggregator 漏给）与空数组同罪
+    ];
+    const out = reconcileGroups([{ issueIds: ["MF-1"] }, { issueIds: ["MF-4"] }, { issueIds: ["MF-6"] }], es);
+    expect(out).toHaveLength(1);
+    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-4", "MF-6"]);
+    expect(out[0].files).toEqual(["src/a.ts"]);
+    expect(out[0].note).toContain("conservatively merged");
+    // 全部组都空 files（无任何非空组可吸）→ 互并成单组（单 fixer 串行，最保守）
+    const onlyEmpty = [{ id: "MF-4", files: [] }, { id: "MF-6" }];
+    const allEmpty = reconcileGroups([{ issueIds: ["MF-4"] }, { issueIds: ["MF-6"] }], onlyEmpty);
+    expect(allEmpty).toHaveLength(1);
+    expect(allEmpty[0].files).toEqual([]);
+    expect(allEmpty[0].note).toContain("conservatively merged");
   });
   it("rawGroups 缺失/空 → 单组全包（退化 = 旧单 fixer 行为；含互不相交条目也不拆）", () => {
     expect(reconcileGroups(undefined, entries)).toEqual([

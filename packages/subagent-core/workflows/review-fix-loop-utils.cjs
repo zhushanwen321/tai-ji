@@ -1164,6 +1164,26 @@ function reconcileGroups(rawGroups, activeEntries) {
       }
     }
   }
+  // 空 files 组防御归并（空 files = 并行安全性未知，按最保守处置）：files 缺失/全空白
+  // 的组对上方相交合并不可达（空集恒不相交），但组内 issue 仍可能按 evidence/guidance
+  // 描述改同一物理文件——aggregator 漏给 files 的数据质量问题无法用声明数据判定并行
+  // 安全，全部归并进首个非空 files 组（无非空组则互并成单组），保证空 files 组永不
+  // 与其他组并行。claimed 去重与上方 while 合并循环保持不动。
+  const emptyIdxs = [];
+  for (let i = 0; i < groups.length; i++) {
+    if (groupFiles(groups[i].issueIds).length === 0) emptyIdxs.push(i);
+  }
+  if (emptyIdxs.length > 0 && groups.length > 1) {
+    let target = groups.findIndex((_, i) => !emptyIdxs.includes(i));
+    if (target === -1) target = emptyIdxs[0];
+    const absorbed = groups.filter((_, i) => i !== target && emptyIdxs.includes(i));
+    groups[target] = {
+      issueIds: [...groups[target].issueIds, ...absorbed.flatMap((g) => g.issueIds)],
+      note: [groups[target].note, ...absorbed.map((g) => g.note)].filter(Boolean).join("; ")
+        + " (empty files, conservatively merged)",
+    };
+    groups = groups.filter((_, i) => i === target || !emptyIdxs.includes(i));
+  }
   return groups.map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
 }
 
