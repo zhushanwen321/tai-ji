@@ -152,10 +152,13 @@ describe('/schedule 命令 表单路径（rpc）', () => {
     const payload = JSON.parse(select.mock.calls[0]![1]![0]!) as {
       formQuestions: { type: string }[]
       allowCancel?: boolean
+      expectTurn?: boolean
     }
     expect(payload.formQuestions).toHaveLength(1)
     expect(payload.formQuestions[0]!.type).toBe('schedule')
     expect(payload.allowCancel).toBe(true)
+    // 命令路径声明无 turn（form-submit-busy-convergence D1 段 2）：显式 false 进 payload
+    expect(payload.expectTurn).toBe(false)
 
     const draft = capturedDraft(select)
     expect(draft.kind).toBe('once')
@@ -290,24 +293,27 @@ describe('/schedule 命令 表单路径（rpc）', () => {
   // ── 异步打开：handler 不 await 表单（规避 prompt RPC 60s 窗口） ──
 
   it('handler 立即 resolve：select 挂起未决时 handler 已返回（异步打开不阻塞）', async () => {
+    // C-proc-01：原真实 50ms race 上限改 fake 时钟确定性推进——handler 正确（rpc 分支
+    // `void run()` fire-and-forget）时微任务排空即 settle；若回归为 await 挂起 select，
+    // 推进后标志仍 false，快速失败且不依赖墙钟（慢机不再假失败）
+    vi.useFakeTimers()
     let resolveSelect: ((value: string | undefined) => void) | undefined
     const select = vi.fn(() => new Promise<string | undefined>((resolve) => {
       resolveSelect = resolve
     }))
     const { ctx } = createCtx({ select })
 
-    const pending = handler("5m 'x'", ctx)
-    const settled = await Promise.race([
-      pending.then(() => 'resolved' as const),
-      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 50)),
-    ])
+    let handlerSettled = false
+    void handler("5m 'x'", ctx).then(() => { handlerSettled = true })
+    await vi.advanceTimersByTimeAsync(50)
 
-    expect(settled).toBe('resolved')
+    expect(handlerSettled).toBe(true)
     expect(select).toHaveBeenCalledTimes(1)
 
-    // 清理挂起交互，避免跨用例泄漏
+    // 清理挂起交互，避免跨用例泄漏（fake timers 下 flush 的 0ms timer 需推进时钟）
     resolveSelect!(undefined)
-    await flush()
+    await vi.advanceTimersByTimeAsync(0)
+    vi.useRealTimers()
   })
 })
 

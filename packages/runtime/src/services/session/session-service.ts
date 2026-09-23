@@ -215,6 +215,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
   /**
+   * plan 退出失效回调（P2-2 失效链；MF-1-7 编排下沉）：abortPlan 发出 '/plan abort'
+   * 成功后上抛，transport 层（server.ts setServices 注册）消费——摘除 runtime pending
+   * + 广播失效帧。service 层不持有失效链实现（extensionTimeoutMgr 在 transport 编排层），
+   * 回调缺失时跳过（仅测试最小构造形态；组合根恒注入）。
+   */
+  private onPlanAborted: ((sessionId: string) => void) | null = null
+  /**
    * MessageBus 引用（组合根注入，wave:runtime-wiring）。
    *
    * session 级消息（带 sessionId payload）单通道走 bus.publish（per-session 单调 seq +
@@ -694,6 +701,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * 注入 plan 退出失效回调（组合根 server.ts setServices 注册，与 setOnSessionDestroyed
+   * 同点同形态）：abortPlan prompt 成功后上抛 sessionId，transport 层消费失效链。
+   */
+  setOnPlanAborted(handler: (sessionId: string) => void): void {
+    this.onPlanAborted = handler
+  }
+
+  /**
    * U6（D2② 在线对账）：注入能力对账回调（组合根绑 modelService.reconcileModelCapabilities）。
    * session 附着路径（registerSession 的 onSessionRegistered 订阅,S3 前为 initializeManagedSession
    * 体内调用）fire-and-forget 调用——失败不阻断附着（内部降级：引擎不可用 / RPC 失败一律
@@ -1163,6 +1178,33 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 重置、回收饿死且不体现为豁免命中（日志看不到）——maintenance 标记让 RpcClient
     // 跳过 lastActivityAt 刷新（u1a 的 SendCommandOptions 通道）。
     await client.prompt('/__taiji_reload__', undefined, undefined, { maintenance: true })
+  }
+
+  /**
+   * 退出 plan 模式（D5/E9/E10：PlanModeBar 确认 Popover 后；MF-1-7 编排自 transport
+   * handler 下沉至此，形态对齐 promptReload / workflowAction 的命令编排区）。
+   *
+   * ① ensureActive 自动恢复 pi（join 语义，本类 ensureActive——崩溃恢复后懒重生未发生
+   * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
+   * 前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：`/` 前缀 prompt 被
+   * pi 先行执行为 extension command、不产用户消息、streaming 中可用（主审 R2 复核实证）；
+   * pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——prompt 对 `/` 前缀先行
+   * 尝试 extension command（源码注释明言 execute immediately, even during streaming），
+   * handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand :954。本断言
+   * 双承重：此写入路径 + .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过
+   * dispatcher busy 预检——照 workflowAction（session-records.ts workflowAction）先例，
+   * 审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发让 extension 侧
+   * abort handler（先 controller.abort 再 resetPlanState）落地。
+   * ③ 失效链经 onPlanAborted 回调上抛（P2-2：/plan abort → extension controller.abort()
+   * 解散挂起审批 select，响应永不可达——摘除 runtime pending + 广播失效帧，审批挂起中
+   * 退出后重进 plan，僵尸 ready 审批条不再出现）；回调缺失跳过（仅测试最小构造形态）。
+   * 退出结果经投影链 session.planState 广播推回（isActive=false），不在此处回包——
+   * reply 由 transport handler 负责。
+   */
+  async abortPlan(sessionId: string): Promise<void> {
+    const client = await this.ensureActive(sessionId)
+    await client.prompt('/plan abort')
+    this.onPlanAborted?.(sessionId)
   }
 
   /**

@@ -10,6 +10,8 @@
  *   入口，interpreter 路由 onExtensionUIRequest）+ message kind（前端广播帧）成对且字段一致
  * - 既有 marker 分支无回归（legacy 归一上移：ASK_USER / SCHEDULE_CREATE 分支同样产出
  *   form:true 统一表单帧——askUser 源 type 推断映射、scheduleCreate 源保留键分流应答形状）
+ * - expectTurn 条件落键（form-submit-busy-convergence D1 段 3 单点透传）：options 显式
+ *   false → 帧含 expectTurn:false；缺省 / 非 boolean → 帧无该键（类型守卫）
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-ui-form-marker.test.ts
  */
@@ -88,6 +90,40 @@ describe('EventAdapter UI_FORM_MARKER 检测路由（u2）', () => {
     )
     const payload = broadcastPayload(events)
     expect(payload?.['allowCancel']).toBe(true)
+  })
+
+  it('expectTurn 显式 false → 条件落键：extension-ui kind 与广播帧 payload 均含 expectTurn:false', () => {
+    const events = translate(
+      selectEvent({ id: 'req-et-false', title: UI_FORM_MARKER, options: [JSON.stringify({ formQuestions: [{ type: 'text', question: 'q' }], expectTurn: false })] }),
+      SID,
+    )
+    // 双事件一致（沿既有逐字段断言形态）：extension-ui kind 与前端广播帧同键
+    expect(events).toHaveLength(2)
+    const uiEvent = events[0]
+    if (uiEvent.kind !== 'extension-ui') throw new Error(`expected extension-ui kind, got ${String((uiEvent as { kind?: string }).kind)}`)
+    expect(uiEvent.payload['expectTurn']).toBe(false)
+
+    const payload = broadcastPayload(events)
+    expect(payload?.['form']).toBe(true)
+    expect(payload?.['expectTurn']).toBe(false)
+    // 与既有键互不串扰
+    expect(payload?.['allowCancel']).toBe(true)
+    expect(payload?.['formQuestions']).toEqual([{ type: 'text', question: 'q' }])
+  })
+
+  it('expectTurn 缺省 → 帧 payload 无该键（undefined 省键：存量断言与 pending {...r,...r.payload} 解包无需适配）', () => {
+    const payload = broadcastPayload(selectTranslate(JSON.stringify({ formQuestions: [{ type: 'text', question: 'q' }] })))
+    expect(payload).toBeDefined()
+    expect(payload).not.toHaveProperty('expectTurn')
+  })
+
+  it('expectTurn 非 boolean（字符串 "false"）→ 不入帧（类型守卫，与 renderer 侧 typeof === "boolean" 守卫对齐）', () => {
+    const payload = broadcastPayload(
+      selectTranslate(JSON.stringify({ formQuestions: [{ type: 'text', question: 'q' }], expectTurn: 'false' })),
+    )
+    // form 帧照常产出，仅该键被守卫拦截
+    expect(payload?.['form']).toBe(true)
+    expect(payload).not.toHaveProperty('expectTurn')
   })
 
   it('混合数组仅保留合法项（逐项过滤，不合法项剔除且合法项顺序保持）', () => {
@@ -234,6 +270,27 @@ describe('EventAdapter 既有 marker 分支回归（legacy 归一上移后）', 
     // legacy 键不再透传（归一在 runtime 单点完成，renderer 只消费 view-ready 帧）
     expect(payload?.['askUser']).toBeUndefined()
     expect(payload?.['askUserQuestions']).toBeUndefined()
+    expect(payload?.['allowCancel']).toBe(true)
+  })
+
+  it('ASK_USER_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true，不穿透类型标注', () => {
+    const questions = [{ question: '备注?' }]
+    // 旧版扩展序列化出字符串形态（?? 只挡 null/undefined，挡不住非 boolean 串）
+    const events = translate(
+      selectEvent({ title: ASK_USER_MARKER, options: [JSON.stringify({ questions, allowCancel: 'no' })] }),
+      SID,
+    )
+    const payload = broadcastPayload(events)
+    expect(payload?.['allowCancel']).toBe(true)
+  })
+
+  it('UI_FORM_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true（与 ask-user 分支同款守卫）', () => {
+    const questions = [{ type: 'text', question: '备注?' }]
+    const events = translate(
+      selectEvent({ title: UI_FORM_MARKER, options: [JSON.stringify({ formQuestions: questions, allowCancel: 0 })] }),
+      SID,
+    )
+    const payload = broadcastPayload(events)
     expect(payload?.['allowCancel']).toBe(true)
   })
 

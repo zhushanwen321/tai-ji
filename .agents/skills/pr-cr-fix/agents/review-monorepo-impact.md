@@ -7,7 +7,7 @@ name: review-monorepo-impact
 
 审查变更对 monorepo 结构的影响：workspace 包间依赖、循环依赖、公共 API 变更。
 
-> **项目结构**：pnpm workspace 包含 `packages/*`（renderer/runtime/shared/extension-protocol）+ `apps/*`（electron）+ `extensions/*`（16 个 pi 扩展）+ `extensions/shared/*`（quota-providers 共享库）。包间通过 `workspace:*` 依赖。
+> **项目结构**：pnpm workspace 包含 `packages/*`（renderer/runtime/shared 等）+ `apps/*`（electron）+ `extensions/*`（pi 扩展，taiji 组 + universal 组共 21 个 role 包，数量以 `extension-dependencies.json` SSOT 为准）+ `extensions/shared/*`（4 个共享库：llm-shared / extension-logger / file-lock / ext-guards）。包间通过 `workspace:*` 依赖。
 
 ## 输入
 
@@ -24,8 +24,8 @@ task prompt 中必须包含：
 1. **获取变更范围**：`git diff main...HEAD --stat` + `git diff main...HEAD`。
 2. **workspace 依赖检查**：
    - 变更的 `package.json` 中 `workspace:*` 引用是否正确（被引用的包必须在本 workspace 内）
-   - 已知依赖链：`quota-providers` ← `model-switch`/`statusline`；`structured-output` ← `subagent-workflow` ← `ask-user`（这些在 `.changeset/config.json` 的 `linked` 组中，版本需同步）
-   - 新增的包间依赖是否破坏了 changeset `linked` 组的版本同步约束
+   - extensions 包间依赖的分组/登记以 `extension-dependencies.json` 为 SSOT（`node scripts/check-extension-dependencies.mjs` 校验），新增/变更 extensions 依赖时核对该登记与实际一致
+   - `.changeset/config.json` 现无 `fixed`/`linked` 组；若 merge 阶段新增分组，须核对组内版本同步不被本 diff 破坏
 3. **循环依赖检查**（消费阶段 1.5 度量报告，禁止手工 `grep` 追 import 链——确定性计算归机器）：
    - 读 `<repo>/.review/metrics.json` 的 `fail`/`warn` 中 `circular-dependency` 条目；新增 cycle 在 Gate-1.5 已 fail 打回，若仍流到本维度说明是门禁后新增或脚本未覆盖场景 → MUST_FIX
    - inherited cycle（存量）：变更若加重纠缠（如向既有 cycle 中加新模块、深化相互依赖）→ SUGGESTION

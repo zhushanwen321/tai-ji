@@ -63,10 +63,16 @@
           </div>
           <!-- agent 行：状态图标（failed=danger 常驻 / active=accent loader-spin / done=neutral-ico）+ agent 摘要。
                failed 文本 text-neutral-mid（hover 升 text-neutral-fg），其余 text-neutral-mid。
-               agent 摘要文本优先（content 截断），空则 fallback 计数（N thoughts · M tools），
-               全空显「进行中…」占位（含 assistant=[] 的 pending turn）。 -->
+               agent 摘要文本优先（content 截断），空则 fallback 计数（N thoughts · M tools）。
+               摘要全空时只在占位门开（isPlaceholderVisible = sessionActive ∧ 真末位）显「进行中…」——
+               本意覆盖 pending turn（streaming 刚起 / ask-user 表单等待）；原裸判据「无 agent 内容」
+               把已完结 user-only turn（命令取消 / 纯 notify 命令）也算进来致永久占位，故加门收敛；
+               门关的 user-only turn 走空格 fallback（D2，与 user 行同款 `|| ' '`），不谎报进行中。 -->
           <div class="flex min-w-0 items-center gap-1.5">
-            <!-- active 态：双环 loader-spin（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG，accent 蓝） -->
+            <!-- active 态：双环 loader-spin（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG，accent 蓝）。
+                 loader 判据 isActiveTurn = sessionActive ∧ 视口位（activeTurnIndex），与占位判据
+                 （sessionActive ∧ 真末位）有意分离：上滑时占位留在末位节点、loader 随视口走，
+                 两判据同门反而错（占位会被视口态压空串，streaming/ask-user 等待击穿）。 -->
             <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
             <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-3 shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
             <!-- 非 active 态：Bot 图标（failed=danger 常驻 / done=neutral-ico） -->
@@ -80,7 +86,7 @@
               class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-tight transition-colors"
               :class="railMemoFor(turn).failed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'"
             >
-              {{ railMemoFor(turn).agentSummary || t('panel.message.railInProgress') }}
+              {{ railMemoFor(turn).agentSummary || (isPlaceholderVisible(turn, idx) ? t('panel.message.railInProgress') : ' ') }}
             </span>
           </div>
           <!-- 折展 toggle 按钮：hover/focus 浮出（渐进披露），active 节点常驻可见（用户决策）。
@@ -179,6 +185,23 @@ function isActiveTurn(_turn: MessageTurn, idx: number): boolean {
 }
 
 /**
+ * 「进行中…」占位可见性判据（D1）：sessionActive ∧ 真末位（idx === props.turns.length - 1）。
+ *
+ * 与 isActiveTurn 有意分离：activeTurnIndex 是滚动视口派生（内容不超视口恒 0、上滑停在视口
+ * 首项），复用它做占位门会在多轮/上滑时把末位 turn 的占位压成空串——streaming 刚起与
+ * ask-user 表单等待（sessionActive=true 的 waiting 分支）都显示不出占位，目标击穿。
+ * 判据语义从占位需求直接倒推：「进行中」= 会话在进行中且这是当前轮；turns.length - 1
+ * 是组件内零依赖真末位。门关时（sessionActive=false 或非末位）已完结 user-only turn
+ * 走空格 fallback，不谎报进行中。
+ *
+ * 禁入 railMemoFor：memo 是模块级 WeakMap，无实例/props 维度（双实例挂载真实存在——
+ * 主 Panel + SubagentTab 内嵌），入 memo 即 props 盲区串态。
+ */
+function isPlaceholderVisible(_turn: MessageTurn, idx: number): boolean {
+  return props.sessionActive && idx === props.turns.length - 1
+}
+
+/**
  * rail 横向定位：根据 panelRightEdge 算 right 偏移。
  * panelRightEdge 给定时 → 贴面板右侧（内缩 8px，与「右侧导航 rail」语义一致）；
  * 缺省 → 贴视口右侧 8px（CSS fallback 路径，用于独立预览/无 panel 场景）。
@@ -236,7 +259,7 @@ function agentIconClass(turn: MessageTurn): string {
 interface RailTurnMemo {
   /** user 行摘要（summarizeTurnForRail，无 user turn 为空串——模板 `|| ' '` 兜底不变） */
   userSummary: string
-  /** agent 行摘要（summarizeAssistantForRail，空串时模板走 i18n「进行中」占位） */
+  /** agent 行摘要（summarizeAssistantForRail，空串时模板经占位门判定「进行中…」或空格 fallback——判据不在 memo 内） */
   agentSummary: string
   /** hasFailedTool 结果（agent 行文本 hover 升色依据） */
   failed: boolean

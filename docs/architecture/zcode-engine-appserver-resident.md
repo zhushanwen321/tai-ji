@@ -61,7 +61,7 @@
 - **Q（问题）**：core 需要改哪些东西才能把 zcode 引擎换成 app-server 常驻形态，且不破坏 EnginePort 接口契约与现有 conformance 保障？
 - **A（答案）**：一处接口层补充（`dispose()` 停机面）+ zcode 引擎目录 8 文件中 6 个实质重写（连接层/会话层/引擎编排）+ 测试面迁移；pi 引擎、公共降级层、宿主编排层全部不动。
 
-**系统是什么**（给不熟悉 subagent-core 的读者）：`packages/subagent-core/` 是从 taiji 抽出的引擎中立 subagent 执行核心，核心抽象是 EnginePort（6 成员接口：capabilities / probe / run / interact / read / listModels），现有 pi 与 zcode 两个引擎实现。任务经 `run(task, ctx)` 进入引擎，`ctx.onEvent` 回调流出 AgentEvent 流（8 种事件类型），AbortSignal 负责取消。zsw 壳把执行链整个委托给 core 的 zcode 引擎。
+**系统是什么**（给不熟悉 subagent-core 的读者）：`packages/subagent-core/` 是从 taiji 抽出的引擎中立 subagent 执行核心，核心抽象是 EnginePort（4 必选方法 capabilities / probe / run / read + 3 可选方法 listModels / validateModel / dispose，另 id 只读键；interact 已随 chat 域退役），现有 pi 与 zcode 两个引擎实现。任务经 `run(task, ctx)` 进入引擎，`ctx.onEvent` 回调流出 AgentEvent 流（9 种事件类型），AbortSignal 负责取消。zsw 壳把执行链整个委托给 core 的 zcode 引擎。
 
 **设计目标**（从使用者体验倒推）：
 

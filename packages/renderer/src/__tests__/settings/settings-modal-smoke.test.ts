@@ -79,7 +79,7 @@ vi.mock('@/lib/ipc', () => ({
   getProxyConfig: vi.fn(async () => ({})),
   setProxyConfig: vi.fn(async () => undefined),
   testProxy: vi.fn(async () => ({ success: true })),
-  // SettingsResourcePage forcedDirs 动态化调用（返回 undefined 走默认值兜底）
+  // SettingsResourcePage forcedDirs 动态化调用（返回 undefined → user 级强制目录不展示）
   getDataDir: vi.fn(async () => undefined),
   // 目录选择（SystemPage chooseDirectory）
   chooseDirectory: vi.fn(async () => null),

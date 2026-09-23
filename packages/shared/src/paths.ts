@@ -33,16 +33,80 @@
  * 迁 runtime/main 各自实现——收编时机随 C-state-05 白名单整体治理，不在本批。
  */
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+
+/**
+ * prod 值准入守卫（C-proc-26 第二支柱）：`TAIJI_AGENT_DATA_DIR` 指向 `~/.taiji` 树内的
+ * 合法前提 = 进程声明自己是 prod 形态（`TAIJI_AGENT_PACKAGED === '1'`）。非 prod 进程
+ * （dev/测试/裸跑/脚本）持有 prod 值 = env 泄漏或配置错误 → fail-fast。
+ *
+ * 与缺省反转互补：缺省反转管「env 未设」（裸跑落 ~/.taiji-dev），本守卫管「env 被污染」
+ * ——典型受害形态 = 绕过 vitest config 的测试执行器（bun test 等：globalSetup 的自动
+ * 脱钩不在场）恰逢宿主 shell 泄漏 `TAIJI_AGENT_DATA_DIR=~/.taiji`，两层防线同时失守
+ * 时数据目录被采信为 prod。守卫挂在 getDataDir 唯一入口上，不依赖任何 config 被加载，
+ * 任何 runner / 任何代码路径第一个 getDataDir() 调用即拦截。
+ *
+ * 合法 prod 消费链（全部带 PACKAGED=1，不受影响）：runtime 由 process-control 成对注入
+ * （C-proc-26 入口断言保证）；打包 main 进程在 packaged 分支自置位。pi 子树内的 taiji
+ * 代码不 import 本模块（extension 包不依赖 @taiji/shared，import 即包边界越界）。
+ *
+ * 判定纯词法（path.resolve 消解 ../ 后树内包含判定 + sep 边界），不触磁盘。
+ * 树内包含判定双侧 casefold：大小写不敏感卷（macOS/Windows 默认）上 `~/.TAIJI`
+ * 类手滑变体词法在树外、磁盘实际命中 prod 目录（stat dev+ino 同一物理文件），
+ * 漏判即非 prod 进程写真实 prod 数据。Linux 大小写敏感卷上该路径本就是树外另一目录，
+ * casefold 属 fail-fast 方向的从严误拦，错误消息自带恢复动作，可接受。
+ */
+function assertNotLeakedProdDataDir(env: NodeJS.ProcessEnv): void {
+  const external = env.TAIJI_AGENT_DATA_DIR
+  if (!external) return
+  const resolved = resolve(external)
+  const prodRoot = join(homedir(), '.taiji')
+  // 判定用小写副本（错误消息保留原大小写）：见函数头 casefold 注释
+  const foldedResolved = resolved.toLowerCase()
+  const foldedProdRoot = prodRoot.toLowerCase()
+  const inProdTree =
+    foldedResolved === foldedProdRoot || foldedResolved.startsWith(foldedProdRoot + sep)
+  if (inProdTree && env.TAIJI_AGENT_PACKAGED !== '1') {
+    throw new Error(
+      `[getDataDir] blocked: TAIJI_AGENT_DATA_DIR=${resolved} resolves into the prod data dir` +
+        ` (${prodRoot}) while this process is not packaged (TAIJI_AGENT_PACKAGED !== '1')` +
+        ` — leaked env detected (C-proc-26 prod-admission guard).\n` +
+        `  fix: unset TAIJI_AGENT_DATA_DIR, or point it under ~/.taiji-dev / a tmp dir` +
+        ` (bare runs fall to the fail-safe default ~/.taiji-dev).\n` +
+        `  if this IS the packaged app: the pin point must set TAIJI_AGENT_PACKAGED='1'` +
+        ` alongside (apps/electron/main packaged branch / process-control spawn pair).`,
+    )
+  }
+}
 
 /**
  * taiji 数据根目录。
- * 读 TAIJI_AGENT_DATA_DIR 环境变量，缺省 `~/.taiji`。
+ * 读 TAIJI_AGENT_DATA_DIR 环境变量，缺省 `~/.taiji-dev`（缺省反转，fail-safe default：
+ * prod 形态由入口显式钉死——打包 main 用 resolvePackagedDataDir（~/.taiji 树）、
+ * dev main 用 resolveDevDataDir（~/.taiji-dev 树）且 main→runtime spawn 成对注入
+ * TAIJI_AGENT_PACKAGED + TAIJI_AGENT_DATA_DIR（runtime 入口有交叉断言兜底）；
+ * 能走到本缺省的只有裸跑（手动 tsx / 验证脚本 / 探针），一律落 dev 树，
+ * 结构性杜绝 dev 工具写 prod 数据目录）。非 PACKAGED 进程持有 prod 树值时
+ * fail-fast（见 assertNotLeakedProdDataDir）。
+ *
+ * [HISTORICAL] 缺省反转（2026-09-23）：原缺省 `~/.taiji`（prod），裸跑 runtime
+ * （`scripts/validate-runtime-bundle.sh` 与手动 `tsx packages/runtime/src/index.ts`）
+ * 在 env 未设时整个进程跑在 prod 数据目录上——validate-runtime-bundle 每次深度
+ * 验证都向 `~/.taiji` 写日志/runtime.port/crash journal。反转后 prod 只能被
+ * 「打包 main 显式钉死」触达，缺省即安全。
+ * [HISTORICAL] 准入守卫（2026-09-23 第二批）：2026-09-22 bun test 事故（dev-0.10.4
+ * 线，TROUBLESHOOTING #22）——bun test 把 vitest import 映射到 bun:test、不加载
+ * vitest config，globalSetup 钉 env 与 fs-guard 双防线同时不在场，宿主泄漏的
+ * `~/.taiji` 值被采信，测试垃圾写入真实附件区。缺省反转已消掉「env 未设」半边，
+ * 本守卫堵「env 被污染 + 防线不在场」的残余半边。
  *
  * @param env 可选 env 注入（测试用）；缺省读 process.env
  */
 export function getDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.TAIJI_AGENT_DATA_DIR ?? join(homedir(), '.taiji')
+  assertNotLeakedProdDataDir(env)
+  // 空串视同未设（|| 非 ??）：与 resolveDev/PackagedDataDir 的「非空才算外部值」
+  // 对齐——空串只可能来自宿主手滑 export，归缺省 dev 树是安全方向。
+  return env.TAIJI_AGENT_DATA_DIR || join(homedir(), '.taiji-dev')
 }
 
 /**

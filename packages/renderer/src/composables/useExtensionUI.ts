@@ -40,6 +40,7 @@ import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useChatStore } from '@/stores/chat'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -153,21 +154,41 @@ function ensureInvalidatedSubscription(): void {
     for (const requestId of e.requestIds) {
       store.removeRequest(e.sessionId, requestId)
     }
+    // D1 invalidated 锚点（form-hang-fix）：runtime 非 respond 终结（reclaimed / plan-aborted /
+    // turn-aborted / session-destroyed 四类触发源）均无后续 turn 预期，pendingSend 等
+    // message_start 必然空等——按帧 sid 收口。clearPendingSend 幂等，与 message_start /
+    // respond 锚点并发竞争无副作用。
+    // chatStore 此处**现取**而非 respond 侧的 setup 捕获：本订阅是模块级单例、生命周期跨
+    // Panel 实例（首个使用者挂上后永驻），setup 捕获会钉死首个实例的上下文；而事件到达
+    // 时点 pinia 必已 active（与上方 useExtensionUIStore() 同模式），现取安全。
+    useChatStore().clearPendingSend(e.sessionId)
   })
 }
 
+/** dialog level 白名单守卫（ExtensionUIRequest.level 契约面，三值）。 */
+function isDialogLevel(value: unknown): value is 'info' | 'warn' | 'error' {
+  return value === 'info' || value === 'warn' || value === 'error'
+}
+
+/** string[] 守卫（options 契约面）：数组且逐项 string。 */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
- *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约断言收窄。 */
+ *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约
+ *  运行时守卫收窄（isPlanReviewRequest 同范式）：畸形值（非 string / 非 string[] /
+ *  越界 level）按无值处理落缺键降级分支，不伪造类型流入渲染层。 */
 function pickDialogFields(
   request: DialogRequest,
 ): Partial<Pick<ExtensionUIRequest, 'title' | 'message' | 'options' | 'default' | 'level' | 'prefill'>> {
   return {
     ...(request.title !== undefined ? { title: request.title } : {}),
-    ...(request.message !== undefined ? { message: request.message as string } : {}),
-    ...(request.options !== undefined ? { options: request.options as string[] } : {}),
-    ...(request.default !== undefined ? { default: request.default as string } : {}),
-    ...(request.level !== undefined ? { level: request.level as 'info' | 'warn' | 'error' } : {}),
-    ...(request.prefill !== undefined ? { prefill: request.prefill as string } : {}),
+    ...(typeof request.message === 'string' ? { message: request.message } : {}),
+    ...(isStringArray(request.options) ? { options: request.options } : {}),
+    ...(typeof request.default === 'string' ? { default: request.default } : {}),
+    ...(isDialogLevel(request.level) ? { level: request.level } : {}),
+    ...(typeof request.prefill === 'string' ? { prefill: request.prefill } : {}),
   }
 }
 
@@ -218,6 +239,10 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
     // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
     ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
+    // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
+    //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
+    // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
+    ...(typeof request.expectTurn === 'boolean' ? { expectTurn: request.expectTurn } : {}),
     receivedAt: typeof rawReceivedAt === 'number' ? rawReceivedAt : Date.now(),
   }
 }
@@ -229,6 +254,9 @@ export function useExtensionUI(
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   const store = useExtensionUIStore()
+  // D1 分型锚点的 chatStore 取用（form-hang-fix）：setup 上下文捕获（对齐上方 extensionUIStore
+  // 模式），respond 事件回调经闭包引用——不在回调内重取。
+  const chatStore = useChatStore()
   // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
   ensureInvalidatedSubscription()
 
@@ -371,6 +399,21 @@ export function useExtensionUI(
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
+    // D1 分型锚点（form-hang-fix）：cancel 型（result === null——Esc / 取消按钮 / cancel()
+    // 同链）送达后 pi 无后续 turn 事件预期，pendingSend 等 message_start 必然空等（假忙
+    // 窗口病灶）——送达即收口。提交型（result !== null）不清：pi 起 turn，pendingSend
+    // 桥接「respond 完成 → message_start 到达」窗口并由其正常清除（现状语义，不制造
+    // isActive=false 空窗）。判据严格按 result 是否 null——boolean 型按提交型处理。
+    if (result === null) {
+      chatStore.clearPendingSend(sid)
+    } else if (target.expectTurn === false) {
+      // D1 段 5 + D2 严格双条件（result ≠ null ∧ expectTurn === false）：提交型但源声明
+      // 无 turn 预期（命令 handler 内 select，message_start 永不来）→ 立即收尾，消除
+      // 30s 假忙。判定必须 `=== false` 显式判定——truthy 简化（`!expectTurn`）会把
+      // undefined（存量扩展/断链缺省）也当无 turn、误清 ask-user 桥接（D2 被否谱系）；
+      // true / undefined → 隐式 else，桥接照旧（缺省安全）。
+      chatStore.clearPendingSend(sid)
+    }
   }
 
   /** 用户取消（等价 respond(requestId, null)） */

@@ -659,4 +659,148 @@ describe('MessageBus', () => {
     // publish 主流程继续：seq 递增、ring 写入正常
     expect(bus.subscribe(sid, createMockClient()).lastSeq).toBe(1)
   })
+
+  // ── widget 帧 state 类化（scheduler-widget-push D3）──────────────────────
+  // 'extension:widget' / 'extension:widgetGui' 从 stream 类改 state 类：分配 seq、
+  // 写 stateSnapshot（typeKey 从 payload.widgetKey 派生）、不入 ring、照常广播 live。
+
+  it('D3-U1: widget 帧 publish 分配 seq、广播 live、不入 ring，同 key 覆盖快照', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    const ws = createMockClient()
+    bus.subscribe(sid, ws)
+    const w1 = createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree', rows: ['a'] } })
+    bus.publish(sid, w1)
+    // live 行为不变：广播照常 + seq 分配（state 类不 transient 化）
+    expect(ws.sent).toHaveLength(1)
+    const live = JSON.parse(ws.sent[0])
+    expect(live.seq).toBe(1)
+    expect(live.type).toBe('extension:widgetGui')
+    // state 类化：不入 ring、写 stateSnapshot
+    const sub1 = bus.subscribe(sid, createMockClient())
+    expect(sub1.snapshot).toHaveLength(0)
+    expect(sub1.stateSnapshot).toHaveLength(1)
+    expect(sub1.stateSnapshot[0]).toBe(w1)
+    expect(sub1.lastSeq).toBe(1)
+    // 同 (type, widgetKey) 第二帧：live 再广播、快照同 key 覆盖（仍 1 条且为新帧）
+    const w2 = createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree', rows: ['a', 'b'] } })
+    bus.publish(sid, w2)
+    expect(ws.sent).toHaveLength(2)
+    const sub2 = bus.subscribe(sid, createMockClient())
+    expect(sub2.stateSnapshot).toHaveLength(1)
+    expect(sub2.stateSnapshot[0]).toBe(w2)
+  })
+
+  it('D3-U2: typeKey 按 (类型前缀, widgetKey) 派生——不同 widget 与不同类型互不覆盖', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    const schedText = createMockMessage('extension:widget', { widgetKey: 'scheduler', lines: ['check-build'] })
+    const schedGui = createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree' } })
+    const todoGui = createMockMessage('extension:widgetGui', { widgetKey: 'todo', gui: { kind: 'text' } })
+    bus.publish(sid, schedText)
+    bus.publish(sid, schedGui)
+    bus.publish(sid, todoGui)
+    const { stateSnapshot } = bus.subscribe(sid, createMockClient())
+    // 3 个独立槽位（widget:scheduler / widgetGui:scheduler / widgetGui:todo）——
+    // 若派生丢失类型前缀或 widgetKey 维度，槽位数会 < 3（互撞合并）
+    expect(stateSnapshot).toHaveLength(3)
+    expect(stateSnapshot.find((m) => m.type === 'extension:widget')).toBe(schedText)
+    expect(
+      stateSnapshot.find((m) => m.type === 'extension:widgetGui' && (m.payload as { widgetKey: string }).widgetKey === 'scheduler'),
+    ).toBe(schedGui)
+    expect(
+      stateSnapshot.find((m) => m.type === 'extension:widgetGui' && (m.payload as { widgetKey: string }).widgetKey === 'todo'),
+    ).toBe(todoGui)
+  })
+
+  it('D3-U3: 清屏帧 gui:null 作为 last-value 覆盖快照槽位（清屏语义保留）', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    bus.publish(sid, createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree', rows: ['a'] } }))
+    const clear = createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: null })
+    bus.publish(sid, clear)
+    const { stateSnapshot } = bus.subscribe(sid, createMockClient())
+    // 清屏帧覆盖原内容槽位：重订阅拿到 gui:null 帧，renderer 据此删条目（不复活）
+    expect(stateSnapshot).toHaveLength(1)
+    expect(stateSnapshot[0]).toBe(clear)
+    expect((stateSnapshot[0].payload as { gui: unknown }).gui).toBeNull()
+  })
+
+  it('D3-U4: widgetKey 缺失/空串（falsy）→ 不入快照 + live 广播与 seq 照常', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    const ws = createMockClient()
+    bus.subscribe(sid, ws)
+    // event-adapter 把缺失 widgetKey 翻译为空串（falsy 判定同一回落路径），undefined 直测缺失形态
+    bus.publish(sid, createMockMessage('extension:widget', { widgetKey: undefined, lines: ['x'] }))
+    bus.publish(sid, createMockMessage('extension:widgetGui', { widgetKey: '', gui: { kind: 'text' } }))
+    // live 行为不变：广播照常、seq 照常分配（缺失回落不等价于 transient 化）
+    expect(ws.sent).toHaveLength(2)
+    expect(JSON.parse(ws.sent[0]).seq).toBe(1)
+    expect(JSON.parse(ws.sent[1]).seq).toBe(2)
+    // 快照零写入
+    const { snapshot, stateSnapshot, lastSeq } = bus.subscribe(sid, createMockClient())
+    expect(snapshot).toHaveLength(0)
+    expect(stateSnapshot).toHaveLength(0)
+    expect(lastSeq).toBe(2)
+  })
+
+  it('D3-U5: 派生 key 缺失 warn 每 type 恰一次（模块级 once，resetModules 隔离验证）', async () => {
+    vi.resetModules()
+    const { MessageBus: FreshBus } = await import('./message-bus.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const bus = new FreshBus()
+      const sid = 's1'
+      bus.publish(sid, createMockMessage('extension:widget', { widgetKey: '', lines: ['x'] }))
+      bus.publish(sid, createMockMessage('extension:widget', { widgetKey: undefined, lines: ['x'] }))
+      bus.publish(sid, createMockMessage('extension:widgetGui', { widgetKey: '', gui: { kind: 'text' } }))
+      // 同 type 两条缺失帧只 warn 1 次 + 另一 type 1 次 = message-bus warn 共 2 条
+      const mbWarns = warnSpy.mock.calls.filter((args) => String(args[0]).startsWith('[message-bus]'))
+      expect(mbWarns).toHaveLength(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('D3-U6: 忙会话臂——ring 被 stream 帧充满冲刷后重订阅，widget 帧经 stateSnapshot 构造性恢复', () => {
+    const bus = new MessageBus(5) // 小容量 ring 缩放：注入数 ≥ 容量即等效触发冲刷（容量无关拓扑）
+    const sid = 's1'
+    const widget = createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree', rows: ['a'] } })
+    bus.publish(sid, widget)
+    // 注入 > 容量的 stream 帧（对话流冲刷 ring）
+    for (let i = 0; i < 8; i++) {
+      bus.publish(sid, createMockMessage('message.status', { n: i }))
+    }
+    const { snapshot, stateSnapshot } = bus.subscribe(sid, createMockClient())
+    // ring 内无 widget 帧（widget 已退出 ring，容量全部留给对话帧）
+    expect(snapshot).toHaveLength(5)
+    expect(snapshot.every((m) => m.type === 'message.status')).toBe(true)
+    // 恢复不依赖 ring：widget 帧从 stateSnapshot 构造性恢复
+    expect(stateSnapshot).toHaveLength(1)
+    expect(stateSnapshot[0]).toBe(widget)
+  })
+
+  it('D3-U7: clearSession 整删 per-session 态——widget 快照随 session 清除不残留', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    bus.publish(sid, createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list-tree' } }))
+    bus.clearSession(sid)
+    // 重新 subscribe = 全新状态：ring、widget 快照、seq 全零（既有 clearSession 语义对 widget 快照成立）
+    const { snapshot, stateSnapshot, lastSeq } = bus.subscribe(sid, createMockClient())
+    expect(snapshot).toHaveLength(0)
+    expect(stateSnapshot).toHaveLength(0)
+    expect(lastSeq).toBe(0)
+  })
+
+  it('D3-U8: 同 widgetKey 跨 session 各自独立快照（per-session 隔离）', () => {
+    const bus = new MessageBus()
+    bus.publish('s1', createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'text' } }))
+    bus.publish('s2', createMockMessage('extension:widgetGui', { widgetKey: 'scheduler', gui: { kind: 'list' } }))
+    const s1 = bus.subscribe('s1', createMockClient())
+    const s2 = bus.subscribe('s2', createMockClient())
+    expect(s1.stateSnapshot).toHaveLength(1)
+    expect(s2.stateSnapshot).toHaveLength(1)
+    expect(s1.stateSnapshot[0]).not.toBe(s2.stateSnapshot[0])
+  })
 })

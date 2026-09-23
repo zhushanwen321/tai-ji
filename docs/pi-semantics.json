@@ -234,13 +234,13 @@
  },
  {
   "id": "PS-14",
-  "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失",
+  "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失；翻转时机 = assistant entry append 的同步点（_appendEntry push 后同步 _persist，hasAssistant 命中即走 wx 全量补写分支，无异步 flush 窗口）——getEntries 读到 assistant ⇒ 磁盘文件必已含全部内存 entry，scheduler ack 落盘判据①的反向推论以此承重",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",
     "distPath": "dist/core/session-manager.js",
     "symbol": "_persist(entry) 的 hasAssistant 门控",
-    "note": ":724-752 —— flushed 翻转前全部 entry 内存持有，wx 独占创建后逐条补写"
+    "note": ":726-756 —— hasAssistant 检查 :729；!hasAssistant 分支 :730-740（flushed 已真则 appendFileSync :732，否则置 false 内存持有）；!flushed 全量补写分支 :741-752 同步执行（openSync \"wx\" :742 → for writeFileSync :744-746 → flushed=true :751）；_appendEntry :757-762（push :758 → _persist :761）——0.84.4 无 _flushSoon/异步 flush，全链同步 I/O"
    }
   ],
   "guard": {
@@ -285,18 +285,18 @@
  },
  {
   "id": "PS-17",
-  "claim": "已存在 session 文件上的 appendEntry 为内存同步入账 + flush debounce 管线落盘，非即写即盘/fsync——强杀落在 flush 窗口内该 entry 丢失（跨重启不可恢复）",
+  "claim": "已存在 session 文件上的 appendEntry 为同步 appendFileSync 追加（0.84.4 无 debounce/异步 flush：_flushSoon 全 dist 不存在，_appendEntry push 后同步 _persist），无 fsync——entry 一经 append 即已交内核页缓存，进程强杀（SIGKILL）不丢已追加 entry；OS 崩溃/断电窗口仍在（页缓存未 fsync 刷盘）",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",
     "distPath": "dist/core/session-manager.js",
-    "symbol": "_appendEntry + _flushSoon 管线",
-    "note": "appendEntry 同步入内存缓冲并调度 flush；flush 为批量异步写，无 fsync——与 PS-14 首写延迟同族的落盘窗口语义"
+    "symbol": "_appendEntry + _persist 同步链",
+    "note": "_appendEntry :757-762（push :758 → _persist :761）；_persist 已 flush 分支 appendFileSync :754 同步追加；全链无 fsync 调用——与 PS-14 首写同步翻转同族（同一条同步链的两个分支）"
    }
   ],
   "guard": {
    "type": "observe",
-   "note": "影响面：sw notify-ledger 的 G2『跨重启不丢』在 flush 窗口不成立（账目丢失→通知不重放，真丢失面）；notify-ledger.ts 头注与设计文档 D4/G2 已按此如实限定。观察项：flush 窗口量级为 debounce 毫秒级，日常触发概率低"
+   "note": "消费面：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
   },
   "verifiedWith": "0.84.4"
  },
@@ -873,6 +873,86 @@
   "guard": {
    "type": "probe",
    "test": "packages/runtime/src/services/session/zcode-import/pi-reader-invariant.test.ts"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-42",
+  "claim": "rpc 模式扩展 UI 应答（extension_ui_response）只 resolve 扩展持有的 Promise 并在命令分派前退出——应答路径可达效应集（分派块 ∪ 模块内被调函数展开 ∪ 全部 resolve 应答回调体）不含对话回灌（prompt/sendMessage/sendUserMessage/steer/followUp/appendMessage/appendEntry 等 session 写入与续轮投递）、不开 turn（agent 轮次启动）、不进命令分派（handleCommand）、不发任何 stdout 帧（message/turn 事件串与 output() 全缺席）；这是 taiji ADR-0072 分型与 expectTurn 通路（form-submit-busy-convergence 前提 1：pi select 应答从不回灌对话、不开 turn）的 pi 侧承重语义——pi 升级若在此路径引入对话效应，D1 全链失锚且无显式信号，由本探针拦为红灯。探针断言语义非源码结构：按 wire 协议串定位分派、效应集做缺席断言、控制流只锁「分派前终止」（块尾 exit 或紧邻 else），不绑行号/处理函数名/代码形状，pi 重构形态变而语义不变不误报",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/modes/rpc/rpc-mode.js",
+    "symbol": "extension_ui_response 应答分派（handleInputLine 内 pendingExtensionRequests resolve 后 return）",
+    "note": ":614-626 —— `parsed.type === \"extension_ui_response\"` 分支：get → delete → pending.resolve(response) → return（早退，不落 :629 handleCommand）；resolve 回调体 :71-74（createDialogPromise，cleanup + Promise resolve）与 :178-187（editor，cancelled/value 分派 resolve）均零 output()/session 调用；select 请求面 :84 createDialogPromise（method: \"select\"）"
+   }
+  ],
+  "guard": {
+   "type": "probe",
+   "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-no-turn.test.ts"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-43",
+  "claim": "convertToLlm 对 role:\"custom\" 消息无条件转 LLM user 消息：case \"custom\" 分支不读 display、无任何条件门控，content（string 包一层 text / 数组原样）整体映射为 { role: \"user\", content, timestamp }——custom 消息进上下文后对 LLM 的可见性与 user message 无差别；display 只影响对话流渲染不影响该转换。ext 消息注入通道选型（sendMessage custom 形态，ADR-0068 语义①）的承重语义：提示词类内容走 custom 形态迁移不损失模型可见性",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/messages.js",
+    "symbol": "convertToLlm 的 case \"custom\" 分支",
+    "note": ":75 导出；:89-96 case \"custom\" —— content 归一 :90（typeof string → [{type:\"text\",text}]，数组原样透传），:91-95 return { role: \"user\", content, timestamp } 无条件分支"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费面同审"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-44",
+  "claim": "prompt() 对 / 开头文本（expandPromptTemplates 默认 true）先 await _tryExecuteExtensionCommand，命令命中时 preflightResult?.(true) 后立即 return——纯扩展命令（如 /schedule list）不进 agent 轮、不产任何 turn 事件（turn_start/agent_start/agent_settled 全缺席）。taiji CP6 occupancy 收口窗的 pi 侧前提：dispatcher 在 client.prompt 前已置 occupancy.turn=dispatching，纯命令路径无 turn 事件驱动其回落，必须 prompt resolve 后武装 2s 短窗兜底回落 idle，否则该维度永久卡 dispatching（stop 按钮态 + busy 预检拒下一条消息）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/agent-session.js",
+    "symbol": "prompt() 命令分支（_tryExecuteExtensionCommand 优先于 agent 轮）",
+    "note": ":828-835 —— :828 expandPromptTemplates && text.startsWith(\"/\") 门控 → :829 await _tryExecuteExtensionCommand(text)（实装 :954-977：命中即 command.handler(args, ctx) 后 return true，不触碰 _runAgentPrompt）→ handled 时 :832 preflightResult?.(true) → :833 return，早退于 compaction 检查（:836）与起轮路径——prompt() 路径零 turn 事件"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收口设计"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-45",
+  "claim": "provider registry 两层分层的写入/删除/读取语义：registerProvider 注册时无条件先删 native 重载层条目再 merge 写扩展注册层（undefined 字段保留前值）；unregisterProvider 两层同删且无恢复（register 顶掉的 native 条目不回填）；getRegisteredProviderIds 返回两层 keys 并集。scheduler ack 判据②的 pi 侧前提：providerId 已被任一层持有时，scheduler 覆写注册会静默顶掉该第三方注册（含覆写内置 provider 的第三方注册），故 no-base 短路必须先于 builtin/models.json 的 available 判定——registry 分层语义漂移时判据②前提失效（fail-closed 方向，最坏误降级文案）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "registerProvider（注册即删 native 层 + merge 写扩展注册层）",
+    "note": ":555-590 —— :558 validateExtensionProvider 校验后 :559 this.nativeExtensionProviders.delete(providerId) 无条件删 native 重载层（注册即删）；:562-568 merge：:563 effective = { ...previous }、:564-567 Object.entries(config) 的 defined 值覆盖（undefined 保留前值，legacy ModelRegistry 契约）、:568 this.extensionProviders.set 写扩展注册层；:569 起重组合+快照+refresh"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "unregisterProvider（两层同删不恢复）",
+    "note": ":591-597 —— :592 this.extensionProviders.delete + :593 this.nativeExtensionProviders.delete 两层同删，:594-596 重组合+快照+refresh，无任何恢复/回填分支（register 时被删的 native 条目不因 unregister 回来）"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "getRegisteredProviderIds（两层 keys 并集）",
+    "note": ":320-322 —— return [...new Set([...this.extensionProviders.keys(), ...this.nativeExtensionProviders.keys()])]——扩展注册层 ∪ native 重载层并集去重"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
   },
   "verifiedWith": "0.84.4"
  }

@@ -165,8 +165,9 @@ describe('T1.5 send api.send 失败回滚', () => {
     const chat = useChatStore()
     const { send } = useChat()
     apiMock.send.mockRejectedValueOnce(new Error('ws disconnected'))
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）
-    await expect(send('s-fail', textToSegments('hello'))).resolves.toBeUndefined()
+    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
+    // [form-hang-fix] send 契约 Promise<boolean>：直发失败已 toast 消化 → true（false 仅属 B 策略）
+    await expect(send('s-fail', textToSegments('hello'))).resolves.toBe(true)
     // clearPendingSend：isActive 恢复 false（无 streaming entity + 无 pendingSend）
     expect(chat.isActive('s-fail')).toBe(false)
   })

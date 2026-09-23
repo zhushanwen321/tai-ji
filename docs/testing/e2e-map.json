@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）/ ZCODE（zcode 引擎会话库域）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -819,6 +819,48 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+    },
+    {
+      "id": "E2E-BATCH-07",
+      "summary": "review-fix-loop（pi 版工作流实装）循环协议单测锁 + 双实现锁步守卫：ES3 fixer 结果校验（disputed 申述豁免记账 / deferred 仅 minor）/ 调度单遍归类 / fixer 文档契约",
+      "scope": [
+        "packages/subagent-core/workflows/review-fix-loop.js",
+        "packages/subagent-core/workflows/review-fix-loop-utils.cjs",
+        "packages/subagent-core/workflows/review-fix-loop-utils.d.cts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/review-fix-loop.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-rfl-parity.mjs && cd packages/subagent-core && npx vitest run src/__tests__/review-fix-loop-utils.test.ts src/__tests__/review-fix-loop-script.test.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：循环协议行为由 utils/script 两测试件零 token 锁定（含 disputed 通道用例，经 run 命令执行，不重复登记为 asset——共享基建目录防聚合泛化）；与 zcode 原生版（仓外 ~/.zcode/workflows/review-fix-loop.dwf.ts）的语义同源由 check-rfl-parity.mjs 机器锁步（结构骨架 + planReviewerOrder 行为对账 + 排列不变量，zcode 副本缺失时 SKIP）。真机验证 = 真实 PR 流水线 run（2026-09-23 PR #19 四轮：disputed 通道协议在 R4 首跑收敛，maxRounds 收窄下 round-2 复核 16/16 fixed）"
+    },
+    {
+      "id": "E2E-ZCODE-01",
+      "summary": "zcode 引擎存量宿主行清理工具 fixture 级验证：白名单解析 / I2 时间戳交叉验证 / FK 依赖序删除 / 残留清单与补删（假库构造，禁触真实 ~/.zcode 与 ~/.taiji）",
+      "scope": [
+        "scripts/zcode-session-db-cleanup.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/zcode-session-db-cleanup.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx vitest run scripts/__tests__/zcode-session-db-cleanup.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/architecture/zcode-session-db-isolation.md",
+      "note": "R2 态：一次性迁移清理工具（设计 D7/W5a），行为由 fixture 测试零 token 锁定（mkdtempSync 假库 + BEFORE DELETE 触发器注入索引侧失败）；真实库执行属停机窗口人工操作（--plan 确认 + --confirm-count 受控旁路），不进自动化"
     }
   ]
 }

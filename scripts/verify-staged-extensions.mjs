@@ -27,6 +27,9 @@ import { readdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// staged 特殊资产目录单一登记表（MF-1-17）：与 bundle-extensions.mjs 共读同一登记处，
+// 契约与条目动机见该模块注释——本脚本不得另持字面量表
+import { PACKAGE_ASSET_DIRS } from "./lib/staged-asset-dirs.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -49,19 +52,6 @@ const EXTERNAL_PREFIXES = ["@earendil-works/", "@mariozechner/", "typebox", "@si
 
 /** pi manifest 资源字段：声明引用非 JS bundle 内容，bundle 时须已整体拷贝（M6a-04） */
 const MANIFEST_RESOURCE_FIELDS = ["agents", "skills", "workflows"];
-
-/**
- * per-package 特殊资产目录表（MF-1-6）：bundle-extensions.mjs 专项拷贝、不走 pi
- * manifest 三字段的资产目录（checkManifest 探测不到），verify 侧投影对齐——目录
- * 缺失/为空即红。当前条目与 bundle-extensions.mjs 的 TEMPLATES_DIR_PACKAGES 一一
- * 对应（键为 staged 目录名 pi-<short>，bundle 侧常量用 short 名）：plan 的
- * templates/ 是 list-template / select-template 数据源，缺失 = 打包版模板发现恒空
- *（templates.ts scanTemplateDir 对缺失目录防御性返回空清单、listTemplates 仅 warn
- * 不 throw 的静默失效，postbuild 必须在此拦截）。
- */
-const PACKAGE_ASSET_DIRS = {
-	"pi-plan": ["templates"],
-};
 
 /**
  * 校验 staged package.json 的 pi manifest 引用（M6a-09 + M6a-04）。
@@ -114,13 +104,15 @@ function checkManifest(pkgDir) {
 }
 
 /**
- * per-package 特殊资产目录校验（MF-1-6）：PACKAGE_ASSET_DIRS 登记的目录必须存在
- * 且非空——空目录与缺失同罪（scanTemplateDir 对空目录同样静默返回空清单）。
+ * per-package 特殊资产目录校验（MF-1-6）：PACKAGE_ASSET_DIRS（共享登记表，键为包
+ * short 名）登记的目录必须存在且非空——空目录与缺失同罪（scanTemplateDir 对空目录
+ * 同样静默返回空清单）。staged 目录名 pi-<short> 查表前去前缀归一。
  * 返回失败原因数组（空 = 通过）。
  */
 async function checkPackageAssetDirs(pkgDirName, pkgDir) {
 	const failures = [];
-	for (const dir of PACKAGE_ASSET_DIRS[pkgDirName] ?? []) {
+	const short = pkgDirName.replace(/^pi-/, "");
+	for (const dir of PACKAGE_ASSET_DIRS[short] ?? []) {
 		const dirPath = join(pkgDir, dir);
 		if (!existsSync(dirPath)) {
 			failures.push(`特殊资产目录缺失: ${dir}/（bundle 专项拷贝回归，运行时静默失效）`);

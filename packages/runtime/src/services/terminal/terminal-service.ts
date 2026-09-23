@@ -162,7 +162,8 @@ export class TerminalService implements ITerminalService {
       //（ack 语义保持：击键流不该被单个失败打断）。但输入字节已丢，必须让前端知道
       //（RT-8#10）：每 PTY 生命周期 publish 一次 terminal.writeFailed（防击键流刷屏，
       // spawn/onExit 清 writeFailedReported），renderer 收到后 toast「输入可能丢失」。
-      console.error(`[terminal] write failed: sid=${sid}`, serializeError(e))
+      // publish 是唯一上报通道（不再叠加本地 console.error——publish 帧已含 message，
+      // 根因由 terminal.exit 广播 + onExit 日志独立承载，避免双通道重复记录同事件）。
       if (!this.writeFailedReported.has(sid)) {
         this.writeFailedReported.add(sid)
         this.deps.publish(sid, {

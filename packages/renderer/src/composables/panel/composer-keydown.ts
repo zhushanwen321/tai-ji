@@ -2,9 +2,9 @@
  * composer-keydown.ts —— Composer 键盘分发（complexity-debt U02，从 Composer.vue onKeydown 拆出）。
  *
  * 定位：纯 UI 事件分派器（无自有状态，全部依赖经 deps 只读注入）。拆分为文件级 composable
- * 而非 Composer.vue 同文件局部函数的原因：Composer.vue <script setup> 实测 285 行（口径 =
- * vue_rules_checker.py 计数：script 体行数，不含 <script setup>/</script> 两个标签行；
- * 含标签 287），距上限 MAX_SCRIPT_LINES=300 余 15 行，同文件提取余量有限。目录归属对齐
+ * 而非 Composer.vue 同文件局部函数的原因：Composer.vue <script setup> 体行已达
+ * MAX_SCRIPT_LINES=300 上限（.githooks/vue_rules_checker.py >300 判死、无豁免）——
+ * 本文件任何增行须先提取拆分。目录归属对齐
  * composer-shell.ts（同目录、文件名不带 use 前缀、导出函数带 use 前缀的既有约定）。
  *
  * ADR-0049 判定：不持有 per-session 状态（无按 sessionId 分区的 ref/Map/Set；sendRoute

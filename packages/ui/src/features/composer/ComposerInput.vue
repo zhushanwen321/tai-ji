@@ -207,6 +207,17 @@ function removeImageChip(chipId: string): void {
   onInput()
 }
 
+/**
+ * 输入根元素（contenteditable div）读取口——壳层键盘路由 activeElement 门
+ * （command-popover-keyboard）的识别源。[HISTORICAL] 勿改回读实例 $el：本组件模板含
+ * HTML 注释块，dev 构建保留注释 → subTree 根为 Fragment → $el 是注释节点（nodeType 8）
+ * 而非本元素，dev 下门的 contains 判定恒 false（W1 验收 F-1）；prod 剥离注释才正常。
+ * 经 expose 显式提供是唯一对两构建一致可靠的通道。
+ */
+function getInputElement(): HTMLDivElement | null {
+  return elRef.value
+}
+
 defineExpose({
   clear,
   focus,
@@ -214,6 +225,7 @@ defineExpose({
   getSegments,
   setText,
   insertTextAtCursor,
+  getInputElement,
   insertSlashChip,
   insertSkillChip,
   insertMentionChip,

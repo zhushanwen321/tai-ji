@@ -930,8 +930,9 @@ describe('plan-state 投影（D1③④）', () => {
     await flushDebounce()
     expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
 
-    // 同值新 entry 仅追加 reviewStateSource（explain 分支落盘后的重放形态）
-    const sourced = { ...fullPlanData('awaiting'), reviewStateSource: 'explain' }
+    // 同值新 entry 仅追加 reviewStateSource（resubmit 分支落盘后的重放形态；'explain'
+    // 存量值在 extractor 归无值，白名单只认 'resubmit'——plan-state-extractor 裁决）
+    const sourced = { ...fullPlanData('awaiting'), reviewStateSource: 'resubmit' }
     client.getEntries.mockResolvedValue({
       data: { entries: [planStateEntry(sourced, 'e2')], leafId: 'e2' },
     })
@@ -940,7 +941,7 @@ describe('plan-state 投影（D1③④）', () => {
 
     const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
     expect(planMsgs).toHaveLength(2)
-    expect((planMsgs[1]![1] as { payload: { planState: { reviewStateSource?: string } } }).payload.planState.reviewStateSource).toBe('explain')
+    expect((planMsgs[1]![1] as { payload: { planState: { reviewStateSource?: string } } }).payload.planState.reviewStateSource).toBe('resubmit')
   })
 
   it('reset entry：isActive=false 且 docs 保留仍 publish（产物 tab 回看驱动，与 isActive 解耦）', async () => {

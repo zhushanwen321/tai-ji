@@ -174,10 +174,17 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
     // FR-5 / RT-2#2: streaming error — surface as message.stream_error
     // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）。
     // wire 真实字段 = {reason:'aborted'|'error', error:{errorMessage?}}（PiErrorSubEvent）：
-    // content 读 error.errorMessage（缺失回退 reason——中止场景无 errorMessage，仍可辨因）；
-    // kind 透传 reason，保留 aborted（用户中止）与 error（provider 真错）的语义区分，
-    // 禁止硬编码回 'error'（曾使所有 provider 真错文本永久不显形）。
+    // content 读 error.errorMessage（缺失回退 reason），kind 透传 reason（运行时若 pi 新增
+    // reason 值仍如实分类）。
     case 'error':
+      // aborted（用户中止）降级 noop，不产 stream_error 帧：中止不是流错误——pi 对中止的
+      // 权威收口通路是 message_end/agent_end 携带的 stopReason='aborted'（→ 前端
+      // message.complete{stopReason:'aborted'}，complete 终态非 error）。此处若产帧，前端
+      // finalizeSession('stream_error') 会把主动中止错标为 error 红条，且 errorMessage 缺失时
+      // 原始枚举串 'aborted' 经 content 直进用户可见错误文本。
+      // [HISTORICAL] 本分支曾硬编码 kind='error'，使 provider 真错文本（401/限流/上下文溢出）
+      // 永久不显形——RT-2#2 改读 wire 真实字段后修复。
+      if (sub.reason === 'aborted') return [{ kind: 'noop' }]
       return [{ kind: 'message', message: { type: 'message.stream_error', payload: { sessionId: sid, content: sub.error?.errorMessage ?? sub.reason, kind: sub.reason } } }]
     default:
       console.warn('[EventAdapter] Unhandled message_update sub-type:', subType)
@@ -761,7 +768,10 @@ function tryTranslateAskUserSelect(
     method: 'select',              // 仍是 select（复用回传通道）
     form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
     formQuestions: askUserData.questions.map(toFormQuestion), // AskUserQuestion → FormQuestion type 推断
-    allowCancel: askUserData.allowCancel ?? true,
+    // [MF-1-14] 运行时 boolean 守卫：payload 来自旧版扩展的动态 JSON（parseSelectOptionsPayload
+    // 不验证形状），`?? true` 只挡 null/undefined，非 boolean 形态（如字符串）会穿透类型标注
+    // 直达 FormOverlay——与 questions 的 Array.isArray 同款入口收窄。
+    allowCancel: typeof askUserData.allowCancel === 'boolean' ? askUserData.allowCancel : true,
   }
   return [
     // ★ extension-ui kind 事件：EventInterpreter 据此暂停 watchdog，并通知 server 跟踪请求 + 缓存 pending 请求。
@@ -855,6 +865,9 @@ function tryTranslatePlanReviewSelect(
  * 剔除该项，不废掉整张表单；全不合法（含非 JSON / formQuestions 非数组 / 空数组）返回
  * undefined，由调用方降级普通 select（与既有 marker 守卫失败降级一致，对齐 :856-871
  * ask-user/schedule-create 的兜底模式）。
+ *
+ * expectTurn 源元数据条件落键透传（form-submit-busy-convergence D1 段 3）：本分支是
+ * 唯一活跃表单通路的单点；legacy 两分支（ask-user / schedule-create）不透传——见下方落键注释。
  */
 function tryTranslateFormSelect(
   event: PiExtensionUiRequestEvent,
@@ -862,7 +875,7 @@ function tryTranslateFormSelect(
   requestId: string,
   dialogMethod: ExtensionInteractMethod,
 ): PiTranslatedEvent[] | undefined {
-  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean } | undefined
+  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean; expectTurn?: boolean } | undefined
   const rawQuestions = formData?.formQuestions
   if (!Array.isArray(rawQuestions)) {
     return undefined
@@ -877,7 +890,15 @@ function tryTranslateFormSelect(
     method: 'select',              // 仍是 select（复用 respond 回传通道）
     form: true,                    // 标记统一表单富交互，前端据此路由到 FormOverlay（C4 过滤器）
     formQuestions: validQuestions, // 守卫过滤后的合法问题集透传（前端复核守卫收窄，设计 D2）
-    allowCancel: formData?.allowCancel ?? true,
+    // [MF-1-14] 同 ask-user 分支的运行时 boolean 守卫（payload 为动态 JSON，?? 只挡缺席）
+    allowCancel: typeof formData?.allowCancel === 'boolean' ? formData.allowCancel : true,
+    // expectTurn 条件落键（D1 段 3）：仅显式 false 落 expectTurn:false；undefined/缺省与
+    // 显式 true 皆省键（D2 `=== false` 判定下 true≡undefined 同走桥接，语义等价）——帧上
+    // 永不出现 undefined 值键，存量逐字段断言测试与 pending `{...r,...r.payload}` 解包无需
+    // 适配。严格 `=== false` 兼作类型守卫：非 boolean 不入帧（与 renderer 侧
+    // toExtensionUIRequest 的 typeof === 'boolean' 守卫对齐）。legacy 两分支不透传：旧 npm
+    // 扩展结构上不可能携带该键，透传是投机作用域（设计被否谱系），单点即唯一活跃通路。
+    ...(formData?.expectTurn === false ? { expectTurn: false } : {}),
   }
   return [
     // 与 ask-user 分支同构：extension-ui kind 事件使 EventInterpreter 暂停 watchdog，
@@ -1704,6 +1725,13 @@ export interface PiEventClient {
  */
 export class EventAdapter {
   private unsub: (() => void) | null = null
+  /**
+   * [MF-1-13] 已向用户显形过的 translate 失败原因（stream_warn 去重）。pi 字段漂移通常
+   * 按帧复发（同一畸形事件类型每次出现都炸），逐帧追加提示会刷屏；[ADAPTER-FAIL] 日志
+   * 每帧照记不受此去重影响。生命周期同 adapter（session 绑定期），条目数受限于相异
+   * 失败原因数（个位数级）。
+   */
+  private readonly notifiedTranslateFailures = new Set<string>()
 
   constructor(
     private sessionId: string,
@@ -1725,25 +1753,35 @@ export class EventAdapter {
       // 漂移致 handler 直读炸掉（如 queue_update.steering 非数组、tool_execution_update
       // partialResult.content 数组形态缺位）时异常逃逸进 rpc-client 的 stdout parse catch，
       // 被误记「parse error」，且 listener 循环无隔离使本帧对后续 listener（handoff 的
-      // agent_end 探测）整帧丢失、无用户可见失败。现失败在 adapter 内显形为
-      // message.stream_error（content 带原因，前端 finalize 收口 + 文案可见），流继续。
+      // agent_end 探测）整帧丢失、无用户可见失败。现失败在 adapter 内非终结显形（见
+      // catch 内注释），流继续。
       let events: PiTranslatedEvent[]
       try {
         // PiEventListener 的 event 是 unknown（pi 动态 JSON），断言为 PiEvent 联合翻译。
         events = translate(event as unknown as PiEvent, this.sessionId)
       } catch (err) {
         console.error(`[ADAPTER-FAIL] translate error (isolated; stream continues) sid=${this.sessionId}:`, err)
-        events = [{
-          kind: 'message',
-          message: {
-            type: 'message.stream_error',
-            payload: {
-              sessionId: this.sessionId,
-              content: `事件翻译失败，本帧已跳过：${err instanceof Error ? err.message : String(err)}`,
-              kind: 'adapter',
+        // [MF-1-13] 单帧翻译失败是非终结事件——pi 流继续，本 turn 可能照常成功。不产
+        // message.stream_error（registry handler 对其无条件 finalizeSession('stream_error')
+        // 收口，会把实际成功的 turn 永久标红 + 内容截断，live ≠ reload），改沿 B1
+        // stream_warn 形态显形：前端仅追加 system 提示消息、不调 finalizeSession，
+        // session 保持 streaming 态。同一失败原因只提示一次（去重理由见字段注释）。
+        const reason = err instanceof Error ? err.message : String(err)
+        if (this.notifiedTranslateFailures.has(reason)) {
+          events = []
+        } else {
+          this.notifiedTranslateFailures.add(reason)
+          events = [{
+            kind: 'message',
+            message: {
+              type: 'message.stream_warn',
+              payload: {
+                sessionId: this.sessionId,
+                content: `事件翻译失败，本帧已跳过：${reason}`,
+              },
             },
-          },
-        }]
+          }]
+        }
       }
       if (events.length === 0) return
       // interpret 同步执行（message/status WS 帧即时送出）；

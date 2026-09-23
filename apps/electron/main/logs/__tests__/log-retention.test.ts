@@ -2,7 +2,7 @@
  * log-retention 单测（u5a-main-logging 验收条款）。
  *
  * 覆盖：
- * - 清理扫描只删「超龄 + 匹配清理前缀」的文件（runtime- / pi- / plugin-crash- / main- / renderer-error- 前缀族）
+ * - 清理扫描只删「超龄 + 匹配清理前缀」的文件（runtime- / pi- / plugin-crash- / main- / renderer-error- / renderer-console- 前缀族）
  * - 固定名 stderr 文件（electron-runtime-stderr.log / zcode-appserver-stderr.log）不进超龄清单
  *   ——mtime 超龄也必须存活（设计 D6-⑦：unlink 后 writer 持有 fd 写孤儿 inode，静默丢证据）
  * - 活跃文件 mtime 刷新不误删（文件名日期老但 mtime 新——跨天长寿命 tee 场景）
@@ -57,7 +57,7 @@ describe('cleanExpiredLogs', () => {
   }
 
   it('只删超龄且匹配清理前缀的文件；保留超龄固定名 stderr、超龄无关文件与活跃文件', () => {
-    // 超龄（10 天前）匹配前缀——五族前缀各一，全部应删
+    // 超龄（10 天前）匹配前缀——六族前缀各一，全部应删
     const staleTargets = [
       touch('runtime-2026-01-01.log', 10),
       touch('runtime-2026-01-01.log.1', 10),
@@ -67,6 +67,7 @@ describe('cleanExpiredLogs', () => {
       touch('plugin-crash-2026-01-01-w1.log', 10),
       touch('main-2026-01-01.log', 10),
       touch('renderer-error-2026-01-01.log', 10),
+      touch('renderer-console-2026-01-01.log', 10),
     ]
     // 固定名 stderr 文件：mtime 超龄也必须存活（D6-⑦ 验收断言）
     const fixedStderr = [touch('electron-runtime-stderr.log', 10), touch('zcode-appserver-stderr.log', 10)]

@@ -659,8 +659,9 @@ export class RpcClient implements IPiEngine {
    * 向 pi stdin 写入一行原始 JSON，不注册 pending、不等 RPC reply。
    *
    * 用于 pi 不回复 `{type:'response'}` 的命令（目前仅 `extension_ui_response`——
-   * pi rpc-mode.ts 处理后直接 return，不回 RPC 确认）。用 sendCommand 会导致 pending
-   * 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer 泄漏 + 无用等待）。
+   * pi 0.84.4 dist/modes/rpc/rpc-mode.js:618-625 处理后直接 return，不回 RPC 确认）。
+   * 用 sendCommand 会导致 pending 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer
+   * 泄漏 + 无用等待）。
    *
    * 注意：调用方自行保证 JSON 格式正确 + 换行符结尾。
    *
@@ -952,14 +953,21 @@ export class RpcClient implements IPiEngine {
     // renderer backstop 引同一常量 + RENDERER_RPC_MARGIN_MS（编译期对齐，恒不先于本层判死）。
     const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {}, COMPACT_RPC_TIMEOUT_MS)
     // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
-    // CompactionResult 对象（rpc-mode.js:419-421 success(id,"compact",result)），data
-    // 缺失/非对象 = 协议异常。pi 手动 compact 失败另有 compaction_end{errorMessage}
-    // 事件编排（dispatcher 零广播注释），不走本返回值——reject 让协议异常显形而非
-    // undefined 字段渗入消费方。
-    const data = msg.data as unknown
-    if (typeof data !== 'object' || data === null) {
-      console.warn('[rpc] compact: malformed response from pi (data is not an object). data=', msg.data)
-      throw new Error('[rpc] compact: malformed response from pi (data is not an object)')
+    // CompactionResult 对象（rpc-mode.js:421 success(id,"compact",result)），且三必填字段
+    // 齐备（pi 0.84.4 dist/core/compaction/compaction.d.ts CompactionResult：summary:string /
+    // firstKeptEntryId:string / tokensBefore:number），与 port 契约（services/ports/pi-engine.ts
+    // PiCompactionResult）一致。data 缺失/非对象/缺必填字段 = 协议异常。pi 手动 compact 失败
+    // 另有 compaction_end{errorMessage} 事件编排（dispatcher 零广播注释），不走本返回值——
+    // reject 让协议异常显形而非 undefined 字段渗入消费方。
+    const data = msg.data as Record<string, unknown> | undefined
+    if (
+      typeof data !== 'object' || data === null ||
+      typeof data.summary !== 'string' ||
+      typeof data.firstKeptEntryId !== 'string' ||
+      typeof data.tokensBefore !== 'number'
+    ) {
+      console.warn('[rpc] compact: malformed response from pi (data is not a CompactionResult with summary/firstKeptEntryId/tokensBefore). data=', msg.data)
+      throw new Error('[rpc] compact: malformed response from pi (data is not a CompactionResult with summary/firstKeptEntryId/tokensBefore)')
     }
     return data as unknown as PiCompactionResult
   }

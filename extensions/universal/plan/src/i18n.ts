@@ -1,24 +1,17 @@
 /**
- * plan 包 i18n 层（u-locale-channel 消费端，先例 = scheduler/src/i18n.ts 同款模式）：
- * 只本地化「给人看的交互面」——complete 执行方式选择的 FormOverlay 单 choice 问题
- * （question/header/options）与 ctx.ui.notify 提示。tool result 里的英文是给 LLM 的
- * 执行指令，不进词典（agent 会以会话语言转述，指令语言 ≠ UI 语言）。
+ * plan 包 i18n 层（u-locale-channel 消费端）：只本地化「给人看的交互面」——complete
+ * 执行方式选择的 FormOverlay 单 choice 问题（question/header/options）与 ctx.ui.notify
+ * 提示。tool result 里的英文是给 LLM 的执行指令，不进词典（agent 会以会话语言转述，
+ * 指令语言 ≠ UI 语言）。
  *
- * locale 读取 = `<dataDir>/ui-preferences.json`（runtime `config.setUiLocale` 唯一写方，
- * renderer 上报）。env `TAIJI_AGENT_DATA_DIR` 缺失 / 文件缺失 / JSON 损坏 → 回落
- * `en-US`（与 runtime readUiPreferences 的降级口径一致）。
+ * locale 读取（readUiLocale + mtime/size 缓存 + 降级）下沉在
+ * `@zhushanwen/pi-llm-shared` 单一实现（@data-owner #39 注解随实现持有），本包
+ * re-export；env `TAIJI_AGENT_DATA_DIR` 缺失 / 文件缺失 / JSON 损坏 → 回落 `en-US`
+ * （与 runtime readUiPreferences 的降级口径一致）。
  */
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { DEFAULT_UI_LOCALE, readUiLocale, type UiLocale } from "@zhushanwen/pi-llm-shared/ui-locale";
 
-/**
- * UI 语言两值（与 shared protocol.ts 的 UiLocale 字面量一致、与 scheduler format.ts
- * 同款本地定义——extension 不依赖 @taiji/shared，字面量漂移由 ui-preferences.json
- * 读写两端守卫测试拦截）。
- */
-export type UiLocale = "zh-CN" | "en-US";
-
-export const DEFAULT_UI_LOCALE: UiLocale = "en-US";
+export { DEFAULT_UI_LOCALE, readUiLocale, type UiLocale };
 
 /** 词典 key 集合（exec-choice 交互面 + notify；键缺失回落链见 t()）。 */
 type Dictionary = Record<string, string>;
@@ -74,43 +67,4 @@ function interpolate(template: string, params?: Record<string, string | number>)
     const value = params[name];
     return value === undefined ? match : String(value);
   });
-}
-
-// ── 就地 locale 读取（mtime+size 双键缓存，scheduler 同款降级口径）──
-
-const UI_PREFERENCES_FILENAME = "ui-preferences.json";
-
-let localeCache: { filePath: string; mtimeMs: number; size: number; locale: UiLocale } | null = null;
-
-/** 读界面语言（数据目录动态推导，禁硬编码路径）；任何失败回落 en-US 且不出声。 */
-export function readUiLocale(): UiLocale {
-  const dataDir = process.env.TAIJI_AGENT_DATA_DIR;
-  if (!dataDir) return DEFAULT_UI_LOCALE;
-
-  const filePath = join(dataDir, UI_PREFERENCES_FILENAME);
-  try {
-    const stat = statSync(filePath);
-    const cached = localeCache;
-    if (
-      cached !== null &&
-      cached.filePath === filePath &&
-      cached.mtimeMs === stat.mtimeMs &&
-      cached.size === stat.size
-    ) {
-      return cached.locale;
-    }
-    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf-8"));
-    const locale = parseUiLocale(parsed);
-    localeCache = { filePath, mtimeMs: stat.mtimeMs, size: stat.size, locale };
-    return locale;
-  } catch {
-    localeCache = null;
-    return DEFAULT_UI_LOCALE;
-  }
-}
-
-function parseUiLocale(raw: unknown): UiLocale {
-  if (typeof raw !== "object" || raw === null) return DEFAULT_UI_LOCALE;
-  const locale = (raw as Record<string, unknown>).locale;
-  return locale === "zh-CN" || locale === "en-US" ? locale : DEFAULT_UI_LOCALE;
 }

@@ -10,7 +10,14 @@
  * 覆盖 getPiAgentDir（方案 B 布局对齐 pi：`<dataDir>/agent`）：
  * - env 注入 TAIJI_AGENT_DATA_DIR → `<dataDir>/agent`（旧两级布局已退役；正向断言即回归守卫）
  * - 不传 env → 与 getDataDir() 推导一致
- * - env 无 TAIJI_AGENT_DATA_DIR → `~/.taiji/agent`（缺省分支，字面路径断言）
+ * - env 无 TAIJI_AGENT_DATA_DIR → `~/.taiji-dev/agent`（缺省反转后的字面路径断言——
+ *   缺省 = dev 目录（fail-safe default），prod 形态由打包 main 显式钉死 ~/.taiji，
+ *   不得回归旧缺省 ~/.taiji）
+ *
+ * 覆盖 getDataDir prod 值准入守卫（C-proc-26 第二支柱，词法判定不触磁盘）：
+ * - prod 树值 + 无 PACKAGED → throw；+ PACKAGED=1 → 放行
+ * - dev/tmp/未设/空串 → 不触发；词法出入树 resolve 消解后判定；前缀混淆 sep 边界放行
+ * - 大小写变体 ~/.TAIJI → 判定双侧 casefold（大小写不敏感卷上词法树外 = 磁盘命中 prod）
  *
  * 运行：cd packages/shared && npx vitest run __tests__/paths.test.ts
  */
@@ -61,9 +68,74 @@ describe('getPiAgentDir（方案 B 布局对齐 pi）', () => {
     expect(getPiAgentDir()).toBe(join(getDataDir(), 'agent'))
   })
 
-  it('env 无 TAIJI_AGENT_DATA_DIR → 缺省 ~/.taiji/agent（且非系统 pi 的 ~/.pi/agent）', () => {
-    // 纯路径推导，不触碰磁盘
-    expect(getPiAgentDir({})).toBe(join(homedir(), '.taiji', 'agent'))
+  it('env 无 TAIJI_AGENT_DATA_DIR → 缺省 ~/.taiji-dev/agent（fail-safe default，非 prod ~/.taiji、非系统 pi 的 ~/.pi/agent）', () => {
+    // 纯路径推导，不触碰磁盘。缺省反转回归守卫：旧缺省 ~/.taiji 必红。
+    expect(getPiAgentDir({})).toBe(join(homedir(), '.taiji-dev', 'agent'))
+    expect(getPiAgentDir({})).not.toBe(join(homedir(), '.taiji', 'agent'))
     expect(getPiAgentDir({})).not.toBe(join(homedir(), '.pi', 'agent'))
+  })
+})
+
+describe('getDataDir prod 值准入守卫（C-proc-26 第二支柱）', () => {
+  /** 守卫判定纯词法（resolve + 真实 homedir 树内判），构造值不触磁盘 */
+  const PROD_ROOT = join(homedir(), '.taiji')
+  const DEV_ROOT = join(homedir(), '.taiji-dev')
+
+  it('prod 树值 + 无 PACKAGED → throw（泄漏形态：消息含恢复动作）', () => {
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: PROD_ROOT })).toThrow(/C-proc-26 prod-admission guard/)
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: join(PROD_ROOT, 'agent') })).toThrow(
+      /unset TAIJI_AGENT_DATA_DIR/,
+    )
+  })
+
+  it('prod 树值 + PACKAGED=1 → 放行返回原值（合法 prod 消费链）', () => {
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: PROD_ROOT, TAIJI_AGENT_PACKAGED: '1' })).toBe(PROD_ROOT)
+  })
+
+  it('dev 树值 / tmp 值 / 未设 / 空串 → 不触发守卫（缺省或原值）', () => {
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: DEV_ROOT })).toBe(DEV_ROOT)
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: '/tmp/anything' })).toBe('/tmp/anything')
+    expect(getDataDir({})).toBe(DEV_ROOT)
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: '' })).toBe(DEV_ROOT)
+  })
+
+  it('词法入树形态 ~/.taiji-dev/../.taiji → resolve 消解后在 prod 树内，throw', () => {
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: `${DEV_ROOT}/../.taiji` })).toThrow(
+      /prod-admission guard/,
+    )
+  })
+
+  it('词法出树形态 ~/.taiji/../.taiji-dev → resolve 消解后在 dev 树，放行', () => {
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: `${PROD_ROOT}/../.taiji-dev` })).toBe(
+      `${PROD_ROOT}/../.taiji-dev`,
+    )
+  })
+
+  it('前缀混淆形态 ~/.taijiish → sep 边界判不在树内，放行', () => {
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: `${PROD_ROOT}ish` })).not.toThrow()
+  })
+
+  it('大小写变体 ~/.TAIJI（无 PACKAGED）→ casefold 判在 prod 树内，throw（大小写不敏感卷漏判 = 写真实 prod）', () => {
+    const variant = join(homedir(), '.TAIJI')
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: variant })).toThrow(/prod-admission guard/)
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: join(variant, 'agent') })).toThrow(
+      /prod-admission guard/,
+    )
+  })
+
+  it('大小写变体 ~/.TAIJI + PACKAGED=1 → 放行返回原值（错误消息保留原大小写）', () => {
+    const variant = join(homedir(), '.TAIJI')
+    expect(getDataDir({ TAIJI_AGENT_DATA_DIR: variant, TAIJI_AGENT_PACKAGED: '1' })).toBe(variant)
+  })
+
+  it('大小写变体前缀混淆 ~/.TAIJIish → casefold 后 sep 边界仍生效，放行', () => {
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: `${join(homedir(), '.TAIJI')}ish` })).not.toThrow()
+  })
+
+  it('PACKAGED 非 "1" 值（0/true）不构成 prod 形态声明，prod 树值仍 throw', () => {
+    expect(() => getDataDir({ TAIJI_AGENT_DATA_DIR: PROD_ROOT, TAIJI_AGENT_PACKAGED: '0' })).toThrow()
+    expect(() =>
+      getDataDir({ TAIJI_AGENT_DATA_DIR: PROD_ROOT, TAIJI_AGENT_PACKAGED: 'true' }),
+    ).toThrow()
   })
 })
