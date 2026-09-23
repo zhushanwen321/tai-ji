@@ -12,7 +12,7 @@
  * 会让 workflow 仍 running，资源泄漏）。
  *
  * 流程：
- * 1. registry.getPath(name) → WorkflowScript（未找到返回 failed；按名解析已退役 D4-1）
+ * 1. registry.getPath(name) → WorkflowScript（未找到/不可用（available=false stub）返回 failed；按名解析已退役 D4-1）
  * 2. script.validate（lint 检查）→ 失败抛错（不进 runWorkflow）
  * 3. script.toExecutable → 可执行源
  * 4. 构建 RunSpec + runWorkflow(spec, deps, signal)
@@ -145,6 +145,22 @@ export async function workflowNotFoundMessage(name: string, deps: LauncherDeps):
 }
 
 /**
+ * unavailable 拒单文案单点（runAndWait / executeNestedWorkflow 共用）。
+ *
+ * getPath 命中但 script.available=false（registry stub：文件不可读/不存在竞态/meta
+ * 提取失败——loader never throws 契约）。stub 本身不携带失败原因字段（原因只进
+ * config-loader 日志），故文案给恢复动作而非枚举原因。与 not found（引用非法，
+ * 附可用清单）语义分界：本分支 path 已解析成功，问题在文件侧。
+ */
+function workflowUnavailableMessage(ref: string, path: string): string {
+  return (
+    `Workflow '${ref}' is unavailable: the script file could not be loaded ` +
+    `(resolved location: ${path} — file missing/unreadable, or no valid @pi-meta metadata block). ` +
+    `Recovery: check the file exists and is readable at that location, fix the @pi-meta block if malformed, then retry.`
+  );
+}
+
+/**
  * 从 WorkflowRun 构建 WorkflowRunResult（D-8）。
  *
  * reason 取 run.state.reason（done 时必有，WorkflowRun 不变式 I2 保证），
@@ -243,7 +259,8 @@ async function pollRunToResult(
  *
  * **signal abort**：signal.aborted → abortRun + 返回 reason=aborted。
  *
- * **脚本未找到**：返回 reason=failed（不抛错——编程调用方据 reason 判断）。
+ * **脚本未找到 / 不可用**：返回 reason=failed（不抛错——编程调用方据 reason 判断）。
+ * 不可用 = getPath 命中 available:false 的 stub（文件不可读/不存在竞态/meta 提取失败）。
  *
  * @param name workflow 脚本引用（getPath 查找——绝对路径 + ~/ 展开；未找到返回 failed 附可用清单）
  * @param args 调用参数（worker 内 $ARGS 访问）
@@ -274,6 +291,19 @@ export async function runAndWait(
       status: "done",
       reason: "failed",
       error: await workflowNotFoundMessage(name, deps),
+      runId: "",
+    };
+  }
+  // W4c 同案（extension 壳层已修，core 侧补齐）：getPath 对不可读/不存在文件返回
+  // available:false 的 stub（sourceCode 空串）而非 undefined——仅判 !script 会穿透到
+  // validate() 产出误导性 lint 错误（空源码 → "must call agent()/parallel()/pipeline()"），
+  // 掩盖真实原因（文件不可达）。unavailable 与 not found 同走 reason=failed 不抛错
+  //（jsdoc 契约：编程调用方据 reason 判断），文案单点 workflowUnavailableMessage。
+  if (!script.available) {
+    return {
+      status: "done",
+      reason: "failed",
+      error: workflowUnavailableMessage(name, script.path),
       runId: "",
     };
   }
@@ -456,7 +486,7 @@ function toNestedCallResult(
  * 流程（6 步，Step 2-6 的机制细节见各 helper）：
  * 1. 循环检测——name 已在 parentWorkflowChain 中则拒绝（防 A→B→A 死循环）
  * 2. signal 继承——子 run 响应父 run abort（inheritParentSignal）
- * 3. registry.getPath + lint——失败返回 error result（不抛错，让脚本 soft-fail；not found 附可用清单）
+ * 3. registry.getPath + lint——失败返回 error result（不抛错，让脚本 soft-fail；not found 附可用清单，unavailable 附恢复指引）
  * 4. 构建 RunSpec（共享父 Budget 引用 + parentWorkflowChain 延长）+ runWorkflow
  * 5. pollRunToResult 轮询至 done（复用 runAndWait 的轮询逻辑）
  * 6. 结果转换（toNestedCallResult）
@@ -498,6 +528,12 @@ export async function executeNestedWorkflow(
     const script = await deps.registry.getPath(name);
     if (!script) {
       return { content: "", error: await workflowNotFoundMessage(name, deps) };
+    }
+    // W4c 同案（extension 壳层已修，core 侧补齐）：available:false stub 拒在 lint 前——
+    // 空 sourceCode 穿透 validate() 只会产出误导性 lint 错误，掩盖真实原因（文件不可达，
+    // 恢复动作见文案）。返回 error result 不抛错（与 not found 分支形态一致，脚本 soft-fail）。
+    if (!script.available) {
+      return { content: "", error: workflowUnavailableMessage(name, script.path) };
     }
     const lintResult = script.validate();
     if (!lintResult.valid) {
