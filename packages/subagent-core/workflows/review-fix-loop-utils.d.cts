@@ -101,6 +101,7 @@ export declare function normalizeFixResult(raw: unknown): {
   fixed_count: number;
   fixes: Array<{ issue_id: string; description?: string; [key: string]: unknown }>;
   deferred: Array<{ issue_id: string; reason?: string; severity?: string; [key: string]: unknown }>;
+  disputed: Array<{ issue_id: string; evidence?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 };
 export declare function normIssueId(s: string | null | undefined): string;

@@ -506,14 +506,14 @@ describe('useComposerKeydown', () => {
 
     /** 精确锁链前置（D1 前置② focus 门，设计 §5 U3「测试态显式 focus composer」）：
      *  环境 activeElement 默认 body → activeElement 门恒 fail-closed 拦截，精确锁进直发
-     *  分支前必须显式 focus。产线 shellInputRef = Composer shellInputHolder.ref（$el =
-     *  输入区 contenteditable 根）；本组用例的「composer 输入区」= target（contenteditable
-     *  div，E-1 activeElementInInput 按 $el 判据裁决），fake 实例 $el 指向 target。
-     *  withShellRef=false = 通道缺省 → 门 fail-closed（D1 降级态造法，focus 照做以证明
-     *  拦截来自通道缺省而非焦点缺失）。 */
+     *  分支前必须显式 focus。产线 shellInputRef = Composer shellInputHolder.ref（识别源 =
+     *  ComposerInput expose 的 getInputElement）；本组用例的「composer 输入区」= target
+     *  （contenteditable div，E-1 activeElementInInput 按该 expose 判据裁决），fake 实例
+     *  getInputElement 指向 target。withShellRef=false = 通道缺省 → 门 fail-closed（D1
+     *  降级态造法，focus 照做以证明拦截来自通道缺省而非焦点缺失）。 */
     function setupExactChain(query: string, withShellRef = true): void {
       const shellInputRef = withShellRef
-        ? ref<ShellInputInstance | null>({ $el: target } as unknown as ShellInputInstance)
+        ? ref<ShellInputInstance | null>({ getInputElement: () => target } as unknown as ShellInputInstance)
         : undefined
       setupChain(true, { query, shellInputRef })
       target.focus()
@@ -579,6 +579,48 @@ describe('useComposerKeydown', () => {
 
     it('门失败降级：shellInputRef 缺省（D1 前置② fail-closed）+ 精确形 query → 不直发走选中', () => {
       setupExactChain('compact', false)
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    // ── F-1 回归锁（W1 验收 P1）：门识别源 = getInputElement，不读实例 $el ──────────────
+    // 缺陷形态：dev 构建保留 ComposerInput 模板 HTML 注释 → subTree 根为 Fragment → 实例
+    // $el 是注释节点（nodeType 8）→ 旧实现 root.contains(activeElement) 恒 false →
+    // 精确直发在 dev 全变体静默退化插 chip（prod 剥离注释才正常）。两用例反向锁死 $el
+    // 通道不得复活：①$el 是注释 + expose 正确 → 门必须通过；②expose 缺失 + $el 正确 →
+    // 门必须 fail-closed（实现若回退 $el，②的 onSelectAndSend 会被调而红）。
+    it('F-1 锁：$el 为注释节点（dev 构建形态）+ getInputElement 正确 → 门通过，精确直发照常', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({
+          $el: document.createComment(' 富文本输入区（contenteditable）'),
+          getInputElement: () => target,
+        } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点门前置确已生效
+
+      const e = dispatchEnter()
+
+      expect(onSelectAndSend).toHaveBeenCalledTimes(1)
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    it('F-1 锁：expose 缺失（$el 正确且 focus 在内）→ 门 fail-closed 不直发（禁回退 $el）', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({ $el: target } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点在位，拦截只能来自 expose 缺失
 
       const e = dispatchEnter()
 

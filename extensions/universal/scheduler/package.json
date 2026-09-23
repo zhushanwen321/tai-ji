@@ -57,6 +57,7 @@
     "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*",
     "croner": "^9.0.0"
   }
 }

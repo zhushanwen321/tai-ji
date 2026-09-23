@@ -9,6 +9,7 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 | **Electron 主进程** | 终端直接看 | 终端启动 `/Applications/TaiJi.app/Contents/MacOS/TaiJi` 或 `log show --process TaiJi` |
 | **Runtime** | 终端 `[runtime:out]` / `[runtime:err]` 前缀 + `~/.taiji-dev/logs/runtime-*.log` | 同主进程转发 + `~/.taiji/logs/runtime-*.log` |
 | **pi 子进程** | 终端 pi 自身输出 + `~/.taiji-dev/logs/pi-<date>-<sessionId>.jsonl` | `~/.taiji/logs/pi-<date>-<sessionId>.jsonl` + pi 日志目录 `~/.taiji/agent/logs/` |
+| **Renderer console** | `~/.taiji-dev/logs/renderer-console-<date>.log`（renderer 进程 warn/error 泛捕流，main 侧 console-message 监听落盘） | `~/.taiji/logs/renderer-console-<date>.log`（同左） |
 | **升级子系统** | `~/.taiji-dev/update/update-error.log`（JSONL 512KB×2 轮转；失败登记含 errorCode/rawCause/engine/releaseSource，成功登记 source-selection/source-failover/download-success） | `~/.taiji/update/update-error.log`（同左） |
 | **前端 DevTools** | Cmd+Option+I 打开 | 同左 |
 
@@ -285,13 +286,13 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
-### 20. 表单提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
+### 20. 表单/命令提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
 
-**现象**：scheduler 类表单提交（如「新建定时任务」）后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（该 warn 仅 dev 模式可见——收口日志为 dev 门内，生产包无此日志，生产侧按「30s 内自行恢复」的时序特征判定）。
+**现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见；生产落 `renderer-console-<date>.log`（`<dataDir>/logs/`），无需 attach）。
 
-**判定**：提交后 pi 不起 turn 的表单类型（scheduler 型）属**预期兜底路径**，非挂死——pendingSend 桥接等不到 message_start（结构性不可达），由 30s timeout 设计内清除并留 warn（ADR-0072 已知边界）。30s 内自愈 = 正常；超 30s 不恢复或断连期外高频伴随其他异常，才升级排查。
+**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收口条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
 
-**排障**：确认表单类型——ask-user 型提交后有 assistant 回复入流（有 turn，正常清除路径）；scheduler 型无回复是常态。若 ask-user 型提交也出现该 warn（提交后无 turn），先核对表单是否被 extension 接管为无 turn 模式再判定异常。
+**排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 
 ### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
 
@@ -310,6 +311,24 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 **恢复**：① 按测试命名模式识别垃圾条目（`att-store-*` 等用例 sessionId 命名、tmp 下 `logger-test-*`/`zcode-engine-*` 等本仓 fixture 前缀），核对条目内无用户数据后删除；② 会话数据核查：`agent/sessions/` 在事故时段的修改检查（本次事故会话区零触碰）。tmp 大量残留会让依赖 readdir 的用例超时（实测 21 万条目时 `countSnapshotDirs` 单次 >3.6s）。
 
 **防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 腿只走 `bunx --bun vitest`（守卫同口径）；禁止 `bun test` 执行本项目测试文件。
+
+### 23. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
+
+**现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
+
+**判定**：同数据目录已有活 runtime 实例（单实例守卫，约束 C-proc-25）。守卫读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
+
+**排障**：定位行带 `reachable: true`（端口可达）时按 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；定位行带 `reachable: false`（pid 存活但未 listen）时先等并发的另一实例完成启动再重试，`ps -p <pid>` 确认其身份；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当持有 pid / 端口确认是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
+
+
+
+### 24. dev 构建下组件实例 `$el` 是注释节点（模板首注释致 Fragment 根）
+
+**现象**：仅在 dev 构建出现的「取不到真实 DOM 元素」类失效——如组件实例 `$el` 为注释节点（nodeType 8），`root === activeElement` / `root.contains(...)` 恒 false；生产构建行为正常（vue 编译剥离模板注释），happy-dom 直挂测试也不暴露（测试态注释被剥离）。
+
+**判定**：Vue 模板顶部有 HTML 注释块时，dev 构建 subTree 根为 Fragment，`instance.$el` 解析为首子注释节点——**任何「实例 → 真实输入根元素」的取法禁止依赖 `$el`**。
+
+**排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
 ## 环境变量速查
 

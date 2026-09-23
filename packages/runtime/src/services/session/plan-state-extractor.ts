@@ -127,7 +127,7 @@ function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
 /**
  * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
  * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量、
- * reviewStateSource 限两字面量（降级两源标记，plan-mode-ux-refactor §3.4——漏透传 =
+ * reviewStateSource 仅 'resubmit'（explain 交互已删——漏透传 =
  * 字段在派生处静默丢弃、renderer 恒渲染通用降级文案）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {

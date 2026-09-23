@@ -86,9 +86,10 @@ export type AckAvailability =
   | { available: false; reason: AckUnavailableReason }
 
 /**
- * ack 不可用原因：`no-base` = 覆写会在注销时丢失基座的 provider（仅被其它扩展 native
- * 重载注册过）；`toggle-disabled` = 显式禁用开关；`check-failed` = 基座判据导入/读取失败
- * （fail-closed）。三者都走「不覆写 + 如实文案」路径。
+ * ack 不可用原因：`no-base` = 无可安全覆写的基座，两种形态——①builtin/models.json 皆无
+ * provider；②provider 已被其它扩展 native 重载注册（pi registerProvider 注册时即删 native
+ * 层且 unregister 不恢复，覆写会静默顶掉第三方注册）；`toggle-disabled` = 显式禁用开关；
+ * `check-failed` = 基座判据导入/读取失败（fail-closed）。三者都走「不覆写 + 如实文案」路径。
  */
 export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed'
 
@@ -108,7 +109,8 @@ export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed
 export type AckNotifyReason = 'e3-no-turn' | 'e8-no-base'
 
 /**
- * ack 模块级编排状态（u-ack-turn 的单例状态域）。类型放此处而非编排模块，便于编排单测
+ * ack 编排状态（u-ack-turn 的单例状态域；实例持在 globalThis[Symbol.for] 进程槽，
+ * development-guide §7.5）。类型放此处而非编排模块，便于编排单测
  * 构造夹具与跨模块引用；生命周期由 session_start / session_shutdown 跨代清理。
  */
 export interface AckState {

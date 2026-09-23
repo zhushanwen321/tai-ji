@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ExtensionResolver } from '../src/infra/installers/extension-resolver.js'
 import type { SourceMap } from '../src/infra/installers/extension-resolver.js'
 import { setSettingsPath, invalidateSettingsCache } from '../src/infra/pi/pi-settings-store.js'
+import { _resetWarnOnceForTest } from '../src/utils/warn-once.js'
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('node:path', () => ({
   dirname: vi.fn((p: string) => p.split('/').slice(0, -1).join('/')),
   basename: vi.fn((p: string) => p.split('/').pop() ?? ''),
   resolve: vi.fn((...args: string[]) => args.join('/')),
+  sep: '/',
 }))
 
 import { existsSync, readdirSync, statSync, readFileSync, realpathSync } from 'node:fs'
@@ -105,6 +107,35 @@ describe('ExtensionResolver', () => {
       mockedReadFileSync.mockImplementation(() => { throw new Error('not found') })
       // @ts-expect-error — testing private method
       expect(resolver.readExtName('/dir')).toBe('dir')
+    })
+  })
+
+  describe('isValidPiExtension', () => {
+    it('malformed package.json (exists but syntax-broken) → judged not-a-pi-extension, no throw, warnOnce fires once per path', () => {
+      // 「语法坏但文件存在」夹具：readFileSync 成功、JSON.parse 抛——与 ENOENT（readFileSync
+      // 即抛）不是同一入口分支，走 :473 的畸形判非 catch（ext-pkg-json warnOnce）。
+      _resetWarnOnceForTest()
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const pkgDir = '/ext/broken-pkg'
+
+      mockedExistsSync.mockImplementation(((p: unknown) => p === `${pkgDir}/package.json`) as unknown as typeof existsSync)
+      mockedReadFileSync.mockImplementation(((p: unknown) => {
+        if (typeof p === 'string' && p === `${pkgDir}/package.json`) {
+          return '{ "keywords": ["pi-package" ' // 缺右括号，JSON.parse 必抛
+        }
+        throw new Error('not found')
+      }) as unknown as typeof readFileSync)
+
+      // 不抛 + 判非（半损坏清单被当「非 extension 目录」的降级语义）
+      expect(resolver.isValidPiExtension(pkgDir)).toBe(false)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain(`${pkgDir}/package.json`)
+
+      // 同路径再次调用：warnOnce 去重不追加 warn，判非行为不变
+      expect(resolver.isValidPiExtension(pkgDir)).toBe(false)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+
+      warnSpy.mockRestore()
     })
   })
 
@@ -651,6 +682,53 @@ describe('ExtensionResolver', () => {
       const result = resolver.scanDiscoveryExtensions([dir])
       // 目录自身有 index.ts → resolveExtensionEntries 返回 [dir/index.ts]
       expect(result.size).toBe(1)
+    })
+
+    it('malformed package.json degrades to index.ts fallback, no throw, warnOnce fires once per path', () => {
+      // 「语法坏但文件存在」夹具：package.json 存在但 JSON.parse 抛——resolveExtensionEntries
+      // 的 manifest 解析失败 catch（:402，ext-discovery-pkg-json warnOnce）走降级路径
+      // 尝试 index.ts/index.js；与「package.json 不存在」（跳过 try 块）不是同一分支。
+      _resetWarnOnceForTest()
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const dir = '/discovery/broken-manifest'
+
+      mockedExistsSync.mockImplementation(((p: unknown) => {
+        if (typeof p !== 'string') return false
+        if (p === dir) return true
+        if (p === `${dir}/package.json`) return true
+        if (p === `${dir}/index.ts`) return true
+        return false
+      }) as unknown as typeof existsSync)
+
+      mockedStatSync.mockImplementation(((p: unknown) => {
+        if (typeof p !== 'string') throw new Error('not found')
+        return { isDirectory: () => true } as import('node:fs').Stats
+      }) as unknown as typeof statSync)
+
+      mockedReadFileSync.mockImplementation(((p: unknown) => {
+        if (typeof p !== 'string') throw new Error('not found')
+        if (p === `${dir}/package.json`) {
+          return '{ "pi": { "extensions": [' // 未闭合 JSON，JSON.parse 必抛
+        }
+        throw new Error('not found')
+      }) as unknown as typeof readFileSync)
+
+      resolver = new ExtensionResolver({})
+
+      // 第一次扫描：不抛 + 降级到 index.ts 入口 + warn 一次（消息含路径）
+      const result = resolver.scanDiscoveryExtensions([dir])
+      expect(result.size).toBe(1)
+      expect(result.has(`${dir}/index.ts`)).toBe(true)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain(`${dir}/package.json`)
+
+      // 同路径再次扫描（discovery 重扫是常态）：warnOnce 去重不追加，降级行为不变
+      const second = resolver.scanDiscoveryExtensions([dir])
+      expect(second.size).toBe(1)
+      expect(second.has(`${dir}/index.ts`)).toBe(true)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+
+      warnSpy.mockRestore()
     })
 
     it('discovers manifest-declared extensions (pi.extensions in package.json)', () => {

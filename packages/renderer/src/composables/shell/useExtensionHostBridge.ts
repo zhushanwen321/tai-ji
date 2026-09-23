@@ -23,8 +23,8 @@
  * CompanionBand（plugin:uiRequest dialog）接线：createDialogRequestSource/createUiResponseTransport
  * 适配（见 extension-host-dialog.ts）经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
  *
- * plugin-header-action-modal-points（u4b）接线：HeaderActionStore（#38 徽标镜像）+
- * plugin-modal-slot 帧订阅（#39 槽镜像）+ headerAction 声明镜像（响应式，E2 清理/重放后
+ * plugin-header-action-modal-points（u4b）接线：HeaderActionStore（#42 徽标镜像）+
+ * plugin-modal-slot 帧订阅（#43 槽镜像）+ headerAction 声明镜像（响应式，E2 清理/重放后
  * 刷新）+ E2 触发链（plugin:statusChange/plugin:crashed → 三容器清理 + 命令注销）+
  * ACTION_EXECUTOR_KEY / HEADER_ACTIONS_SOURCE_KEY / PLUGIN_MODAL_SOURCE_KEY 三个 provide。
  */
@@ -233,7 +233,7 @@ export type HeaderActionCommandAvailability = 'registered' | 'unregistered' | 'u
 export interface HeaderActionsSource {
   /** headerAction 型声明（panel.header 挂载点）。响应式镜像：注册同步 / E2 清理与重放后刷新。 */
   getDeclarations(): ContributionRecord[]
-  /** per-session 运行时状态镜像（#38；reactive 分区读，未收到帧返回 undefined）。 */
+  /** per-session 运行时状态镜像（#42；reactive 分区读，未收到帧返回 undefined）。 */
   getRuntimeState(sessionId: string, headerActionId: string): HeaderActionEntry | undefined
   /** E13 三态判定（实现见 resolveHeaderActionAvailability）。 */
   resolveCommandAvailability(sessionId: string, commandId: string): HeaderActionCommandAvailability
@@ -458,15 +458,15 @@ export function initExtensionHostBridge(app: App): void {
 
   // ── u4b（AP-1/AP-2）渲染宿主接线 ────────────────────────────────
 
-  // HeaderActionStore（#38 徽标镜像）：reactive 分区（对齐 ViewHostStore 响应式桥两层
+  // HeaderActionStore（#42 徽标镜像）：reactive 分区（对齐 ViewHostStore 响应式桥两层
   // reactive 化范式，MF-4）+ bus 帧订阅自驱动（plugin:headerActionUpdate 写入 /
-  // session-destroyed 清理）。声明处 @data-owner #38。
+  // session-destroyed 清理）。声明处 @data-owner #42。
   const headerActionStore = new HeaderActionStore({
     bus,
     sessionScoped: createReactiveSessionScopedMap(() => reactive(new Map<string, HeaderActionEntry>())),
   })
   headerActionStore.subscribe()
-  // plugin-modal-slot 帧订阅（#39）：plugin:modalState → 槽镜像（open/closed 仲裁在 core 单模块）。
+  // plugin-modal-slot 帧订阅（#43）：plugin:modalState → 槽镜像（open/closed 仲裁在 core 单模块）。
   // 幂等（模块级守卫），重复 init 不翻倍。
   subscribePluginModalSlot(bus)
 

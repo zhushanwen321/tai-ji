@@ -307,13 +307,14 @@ export class ScheduleCreateComponent implements Component {
 		this.kindCursor = draft.kind === 'once' ? 1 : 0
 		this.prompt = draft.prompt
 
-		// 模型预选：draft.model 精确匹配 → 会话当前模型（精确/后缀）→ 首个
+		// 模型预选：draft.model 精确匹配 → 会话当前模型（精确 / 短名后缀——current 含 '/'
+		// 时已是全 id，只精确匹配）→ 首个
 		const models = draft.models
 		const byModel = draft.model ? models.indexOf(draft.model) : -1
 		const current = draft.currentModel
 		const byCurrent =
 			current !== undefined
-				? models.findIndex((m) => m === current || (current.includes('/') ? m === current : m.endsWith(`/${current}`)))
+				? models.findIndex((m) => m === current || (!current.includes('/') && m.endsWith(`/${current}`)))
 				: -1
 		this.modelCursor = byModel >= 0 ? byModel : byCurrent >= 0 ? byCurrent : 0
 

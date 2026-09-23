@@ -142,13 +142,19 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     runtime.startScheduler()
 
     // ack 确认轮装配（u-ack-turn）：构造后立刻调 handleSessionBoundary——它是 session_start
-    // 与 session_shutdown 共用的边界清理，顺手做一次写盘判定并清掉上一代残留的 30s 定时器 /
-    // 覆写窗口（模块级单例跨代共享的结构性意义）。
+    // 与 session_shutdown 共用的边界清理：做一次写盘判定并注销上一代残留的覆写窗口
+    // （模块级单例跨代共享的结构性意义）。
     ackController = createAckTurnController({
       backend,
       log: logger,
       render: (key, params) => t(key, params),
       notify: (message, level) => ctx.ui.notify(message, level),
+      // 已注册 provider 查询（ack no-base 判据②）：闭包捕获本 session 的 modelRegistry——
+      // getRegisteredProviderIds 返回 native 重载层 ∪ 扩展注册层两层并集，任一层命中即
+      // no-base（覆写会顶掉注册且 unregister 两层同删不恢复，第三方经任一层注册的
+      // provider 不能被 ack 静默删除）。
+      isProviderRegistered: (providerId) =>
+        ctx.modelRegistry.getRegisteredProviderIds().includes(providerId),
     })
     ackController.handleSessionBoundary()
 
@@ -192,7 +198,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
     service?.runtime.handleTurnEnd(event?.turnIndex)
     // ack 安全网注销（幂等）：正常路径已在 streamSimple 调用点自撤，这里覆盖「覆写未被调用」
-    // 的轮次（E2）。不取消 30s 定时器——它服务通知判定。
+    // 的轮次（E2）。
     ackController?.handleTurnEnd()
   })
 

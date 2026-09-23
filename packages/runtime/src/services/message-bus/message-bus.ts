@@ -184,6 +184,10 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'extension:notify': 'stream',
   // extension:* 全族（event-adapter.ts setEditorText → session 级 push 型，W06-M1 补录）
   'extension:setEditorText': 'stream',
+  // 挂起 UI 请求失效帧（P2-2 失效链，server.invalidatePendingUiRequests 单一出口）：
+  // 一次性失效信号、需可靠送达——stream 入 ring，断连重连/切回 session 经回放补见
+  //（session.restored 同款理由）；renderer removeRequest 按 requestId 幂等，回放重复帧无副作用。
+  'extension:requestsInvalidated': 'stream',
   // ── transient 类：不分配 seq、不入 ring、不写快照、直传 ──
   'message.text_delta': 'transient',
   'message.thinking_delta': 'transient',

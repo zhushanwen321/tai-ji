@@ -185,23 +185,30 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  *   未送达时本层 toast（队列 headless 无 UI，可见反馈归壳层）。
  * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
- * - D4a cancel 分型锚点（ADR-0072 通道覆盖缺口）：sendPiResponse 的 result === null
- *   （Esc/取消按钮 → queue.cancel 唯一生产者）即 clearPendingSend——命令路径 plain dialog
- *   （/permission、/session-pick）取消后无 message_start 可桥接，不清则假忙 30s 兜底窗。
- *   判据在 delivered 之前（取消意图与 WS 送达无关）；仅 pi 源（plugin 源 dialog 命令无
- *   addPendingSend 链）；提交型（result !== null）不清（D4b 另案）。
+ * - 通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 cancel 型分型先例 →
+ *   ADR-0073 D4a 壳层锚点与通路级收口）：sendPiResponse 应答终局无条件 clearPendingSend——cancel
+ *   （result === null，取消按钮 → queue.cancel 唯一生产者；plain dialog 无 Esc 绑定，
+ *   Esc 取消属 FormOverlay form 通路）/ 提交（result !== null）/ WS 断连（!delivered）
+ *   三型统一。plain dialog 通路默认值 = 无 turn 预期、应答终局即收尾，由生产者穷尽论证
+ *   构造性成立：command handler 源（/permission 命令族）pi rpc `void run()` 结构性无
+ *   turn；turn 内源（approval tool_call 审批）pendingSend 恒空（message_start 在 tool
+ *   执行前已清）——锚点对后者是空操作。清在 delivered 判定之前：断连期 turn 同样
+ *   不可达，不清则该形态仍走 30s 兜底（「意图先于送达」的两通路相位分叉登记见
+ *   ADR-0073）。已知失真：多步链悬挂期插发直发会被误清（构造上无从区分直发与命令
+ *   链置位的 pendingSend）——实测 pi 命令 dispatch 即返（void run()），直发被并行
+ *   处理、message_start 即时到达覆盖，无可见假闲窗口（2026-09-23 验收 O-5）；
+ *   重审条件见 ADR-0072 收口条目。仅 pi 源（plugin 源 dialog 无 addPendingSend 链，
+ *   sendPluginResponse 旁路不经此锚点）。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {
     sendPiResponse(sessionId, requestId, method, result) {
-      // D4a cancel 锚点：result === null = 用户取消（respond(requestId, null) 是该值唯一
-      // 生产者）。命令路径 dialog 取消后 pi 侧只 resolve Promise、无 turn 跟随，pendingSend
-      // 等 message_start 必然空等（30s 假忙窗）——送达前即收口。chatStore 现取（对齐
-      // useExtensionUI.ts:164 模块级回调先例：回调执行时 pinia 必已 active）；clearPendingSend
-      // 幂等，重复取消 / 与 message_start 并发均无副作用。
-      if (result === null) {
-        useChatStore().clearPendingSend(sessionId)
-      }
+      // 通路级收尾锚点：应答终局无条件清（cancel / 提交 / 断连三型统一，通路默认值
+      // 穷尽论证见上方注释块与 ADR-0072/0073）。若某源提交后真有 turn，message_start
+      // 照常驱动 isGenerating——恒清不吞 turn 信号。chatStore 现取（对齐
+      // useExtensionUI.ts:164 模块级回调先例：回调执行时 pinia 必已 active）；
+      // clearPendingSend 幂等，重复应答 / 与 message_start 并发均无副作用。
+      useChatStore().clearPendingSend(sessionId)
       const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
       if (!delivered) {
         // 未送达：表项保留（请求仍在队列，撤窗反查仍需可用）+ 壳层 toast（队列 headless 无 UI）

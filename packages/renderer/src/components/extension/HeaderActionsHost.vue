@@ -2,7 +2,7 @@
   HeaderActionsHost（plugin-header-action-modal-points AP-1 / u4b）——panel header 插件按钮区。
 
   消费 ContributionRegistry 的 headerAction 声明（经 bridge 的响应式声明镜像）+
-  HeaderActionStore per-session 运行时镜像（badge/tooltip/disabled，#38）渲染按钮组。
+  HeaderActionStore per-session 运行时镜像（badge/tooltip/disabled，#42）渲染按钮组。
   插入点：PanelHeader 既有按钮组内、ViewHost panel.header 之后 session-file 之前；
   与内置按钮同视觉规格（drawer/git 同款 size-[22px]，DESIGN.md §11 几何不动）。
 
@@ -94,7 +94,7 @@ const buttons = computed(() => {
     // E13 三态：unknown 保持上次值；首次（无上次值）缺省可点（E14 兜底不拦入口）
     const effective = availability === 'unknown' ? lastResolved.get(`${sid}::${ha.commandId}`) : availability
     const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
-    // 运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#38 镜像）直接灰置
+    // 运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#42 镜像）直接灰置
     // （插件侧业务态，如「调度器运行中不可配置」），宿主侧 E13/E3 判定与之 OR 合成。
     // E3 让位规则（F5）：宿主已判 registered（命令重注册回来了）时 missing 不再置灰——
     // 一次性派发失败让位于重注册事实；unknown 语境无法确认重注册，保持本地置灰原行为

@@ -234,13 +234,13 @@
   },
   {
     "id": "PS-14",
-    "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失",
+    "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失；翻转时机 = assistant entry append 的同步点（_appendEntry push 后同步 _persist，hasAssistant 命中即走 wx 全量补写分支，无异步 flush 窗口）——getEntries 读到 assistant ⇒ 磁盘文件必已含全部内存 entry，scheduler ack 落盘判据①的反向推论以此承重",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/session-manager.js",
         "symbol": "_persist(entry) 的 hasAssistant 门控",
-        "note": ":724-752 —— flushed 翻转前全部 entry 内存持有，wx 独占创建后逐条补写"
+        "note": ":726-756 —— hasAssistant 检查 :729；!hasAssistant 分支 :730-740（flushed 已真则 appendFileSync :732，否则置 false 内存持有）；!flushed 全量补写分支 :741-752 同步执行（openSync \"wx\" :742 → for writeFileSync :744-746 → flushed=true :751）；_appendEntry :757-762（push :758 → _persist :761）——0.84.4 无 _flushSoon/异步 flush，全链同步 I/O"
       }
     ],
     "guard": {
@@ -285,18 +285,18 @@
   },
   {
     "id": "PS-17",
-    "claim": "已存在 session 文件上的 appendEntry 为内存同步入账 + flush debounce 管线落盘，非即写即盘/fsync——强杀落在 flush 窗口内该 entry 丢失（跨重启不可恢复）",
+    "claim": "已存在 session 文件上的 appendEntry 为同步 appendFileSync 追加（0.84.4 无 debounce/异步 flush：_flushSoon 全 dist 不存在，_appendEntry push 后同步 _persist），无 fsync——entry 一经 append 即已交内核页缓存，进程强杀（SIGKILL）不丢已追加 entry；OS 崩溃/断电窗口仍在（页缓存未 fsync 刷盘）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/session-manager.js",
-        "symbol": "_appendEntry + _flushSoon 管线",
-        "note": "appendEntry 同步入内存缓冲并调度 flush；flush 为批量异步写，无 fsync——与 PS-14 首写延迟同族的落盘窗口语义"
+        "symbol": "_appendEntry + _persist 同步链",
+        "note": "_appendEntry :757-762（push :758 → _persist :761）；_persist 已 flush 分支 appendFileSync :754 同步追加；全链无 fsync 调用——与 PS-14 首写同步翻转同族（同一条同步链的两个分支）"
       }
     ],
     "guard": {
       "type": "observe",
-      "note": "影响面：sw notify-ledger 的 G2『跨重启不丢』在 flush 窗口不成立（账目丢失→通知不重放，真丢失面）；notify-ledger.ts 头注与设计文档 D4/G2 已按此如实限定。观察项：flush 窗口量级为 debounce 毫秒级，日常触发概率低"
+      "note": "消费面：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
     },
     "verifiedWith": "0.84.4"
   },
@@ -969,79 +969,142 @@
     "verifiedWith": "0.84.4"
   },
   {
-   "id": "PS-46",
-   "claim": "turn_start 逐 LLM 请求恰发一次（composer-genstats-ttft TTFT 起算锚点前提，设计 §3.2）：pi-agent-core runLoop 内层循环每轮迭代在 prepareNextTurn 之后 emit 一次 turn_start（原生 auto-compaction 运行在 prepareNextTurn 内、先于锚点——TTFT 窗口不含原生压缩；工具执行发生在上一轮 turn_end 之后——亦不含，工具后下一轮 turn_start 重新起算）；首个请求的 turn_start 由 runAgentLoop / runAgentLoopContinue 入口（agent_start 后、runLoop 调用前）emit；锚点后、streamAssistantResponse 前的 steering 注入段计入窗口（通常毫秒级，设计接受）。taiji 依赖面：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler.onRequestStart 重锚（清 ttftMs/firstOutputAt 重锚清除不变量）。pi 升级后若此前提漂移：TTFT 系统性偏大（锚点早于压缩）/ 偏小（晚于首输出）/ 恒 null（不再逐请求 emit）",
-   "piAnchor": [
-    {
-     "pkg": "pi-agent-core",
-     "distPath": "dist/agent-loop.js",
-     "symbol": "runAgentLoop / runAgentLoopContinue 入口 turn_start",
-     "note": ":50 与 :68 —— await emit({ type: \"agent_start\" }) 后、await runLoop(...) 前各恰一次 await emit({ type: \"turn_start\" })（首个 LLM 请求 + 重试续跑轮的锚点）"
+    "id": "PS-46",
+    "claim": "turn_start 逐 LLM 请求恰发一次（composer-genstats-ttft TTFT 起算锚点前提，设计 §3.2）：pi-agent-core runLoop 内层循环每轮迭代在 prepareNextTurn 之后 emit 一次 turn_start（原生 auto-compaction 运行在 prepareNextTurn 内、先于锚点——TTFT 窗口不含原生压缩；工具执行发生在上一轮 turn_end 之后——亦不含，工具后下一轮 turn_start 重新起算）；首个请求的 turn_start 由 runAgentLoop / runAgentLoopContinue 入口（agent_start 后、runLoop 调用前）emit；锚点后、streamAssistantResponse 前的 steering 注入段计入窗口（通常毫秒级，设计接受）。taiji 依赖面：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler.onRequestStart 重锚（清 ttftMs/firstOutputAt 重锚清除不变量）。pi 升级后若此前提漂移：TTFT 系统性偏大（锚点早于压缩）/ 偏小（晚于首输出）/ 恒 null（不再逐请求 emit）",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "runAgentLoop / runAgentLoopContinue 入口 turn_start",
+        "note": ":50 与 :68 —— await emit({ type: \"agent_start\" }) 后、await runLoop(...) 前各恰一次 await emit({ type: \"turn_start\" })（首个 LLM 请求 + 重试续跑轮的锚点）"
+      },
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "runLoop 内层循环 turn_start 发射点",
+        "note": ":109 —— if (lastCompletedTurn) 块内、prepareNextTurn 调用（:90）之后、steering 注入 for 循环（:114）与 streamAssistantResponse 调用（:122）之前——runLoop 体内唯一发射点；窗口构成四元组时序（prepare < turn_start < steering < stream）即设计 §3.2 [HISTORICAL] 修正后的现口径"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
     },
-    {
-     "pkg": "pi-agent-core",
-     "distPath": "dist/agent-loop.js",
-     "symbol": "runLoop 内层循环 turn_start 发射点",
-     "note": ":109 —— if (lastCompletedTurn) 块内、prepareNextTurn 调用（:90）之后、steering 注入 for 循环（:114）与 streamAssistantResponse 调用（:122）之前——runLoop 体内唯一发射点；窗口构成四元组时序（prepare < turn_start < steering < stream）即设计 §3.2 [HISTORICAL] 修正后的现口径"
-    }
-   ],
-   "guard": {
-    "type": "probe",
-    "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
-   },
-   "verifiedWith": "0.84.4"
+    "verifiedWith": "0.84.4"
   },
   {
-   "id": "PS-47",
-   "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 守卫）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型守卫，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块守卫）；③ 守卫分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
-   "piAnchor": [
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/openai-completions.js",
-     "symbol": "ensureTextBlock / ensureThinkingBlock / ensureToolCallBlock + blocks.push 三处",
-     "note": "ensure 工厂 :294-345；blocks.push(textBlock) :296 / (thinkingBlock) :306 / (block) :15038 邻域——每处 120 字符内紧跟 stream.push({ type: \"text_start\"|\"thinking_start\"|\"toolcall_start\" })；text_delta :405 前置 ensureTextBlock() :404、thinking_delta :434 前置 ensureThinkingBlock( :417；toolcall_delta 两站点：流式 :463 前置 ensureToolCallBlock( :422（~1255 字符，间夹 toolCall 字段修补）、finishBlock custom flush :269 操作既有块（创建点已钉）"
+    "id": "PS-47",
+    "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 守卫）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型守卫，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块守卫）；③ 守卫分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
+    "piAnchor": [
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/openai-completions.js",
+        "symbol": "ensureTextBlock / ensureThinkingBlock / ensureToolCallBlock + blocks.push 三处",
+        "note": "ensure 工厂 :294-345；blocks.push(textBlock) :296 / (thinkingBlock) :306 / (block) :15038 邻域——每处 120 字符内紧跟 stream.push({ type: \"text_start\"|\"thinking_start\"|\"toolcall_start\" })；text_delta :405 前置 ensureTextBlock() :404、thinking_delta :434 前置 ensureThinkingBlock( :417；toolcall_delta 两站点：流式 :463 前置 ensureToolCallBlock( :422（~1255 字符，间夹 toolCall 字段修补）、finishBlock custom flush :269 操作既有块（创建点已钉）"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/openai-responses-shared.js",
+        "symbol": "createSlot / getSlot / pushToolCallDelta",
+        "note": "createSlot :343-409 三分支（reasoning→thinking_start :353 / message→text_start :362 / function_call+custom_tool_call→toolcall_start :381,:405）各播报；getSlot :329-332 类型不匹配返回 undefined；delta 站点 :487-535 均前置 getSlot(event.output_index, \"text\"|\"thinking\") + if (!slot) continue；toolcall_delta 经 pushToolCallDelta(slot) 助手 :333-340（slot 同源 getSlot/getOrCreateSlot，调用点 5 处）"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/anthropic-messages.js",
+        "symbol": "content_block_start / content_block_delta 分支",
+        "note": "start 分支 :412-458 四子型（text/thinking/redacted_thinking/tool_use）建块 output.content.push 后即播报对应 *_start；delta 分支 :459-496 每站点 blocks.findIndex((b) => b.index === event.index) 查块 + if (block && block.type === ...) 守卫（blocks = output.content :389，块只在 start 分支创建）"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/bedrock-converse-stream.js",
+        "symbol": "handleContentBlockStart / handleContentBlockDelta",
+        "note": "Start 处理器 :425-433 toolUse 块创建播报 toolcall_start :432；Delta 处理器 :434 起——text :444-452 if (!block) 建块播报 text_start :447 后 text_delta :451；toolcall :456 前置 block?.type === \"toolCall\" 守卫（块由 Start 处理器创建）；thinking :460-475 if (!thinkingBlock) 建块播报 thinking_start :467（redacted 二站点同分支）"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/google-generative-ai.js",
+        "symbol": "part.text 守卫分支 + functionCall toolcall 三连",
+        "note": ":80-91 if (!currentBlock) 建块分支按 isThinking 播报 thinking_start :84 / text_start :89；:92-111 同迭代 delta push（thinking_delta :96 / text_delta :106，距 start ~840/~1072 字符——间夹 heuristics 分支，窗口 1300）；:145-151 toolcall_start :147 → toolcall_delta :149 紧邻"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/mistral-conversations.js",
+        "symbol": "contentItems 守卫分支 + tool_calls 建块",
+        "note": "text（string item）:458-470 与 text item :497-509 两站点 if (!currentBlock || type !== \"text\") 建块播报 text_start :460/:500 后 text_delta :464/:504（~200 字符）；thinking :481-491 同款 :483→:487；toolcall :522-552 if (!block) 建块播报 toolcall_start :540 后 toolcall_delta :548（~474 字符，间夹 id/key 解析）"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/api/openai-codex-responses.js",
+        "symbol": "processResponsesStream 委托（含 azure-openai-responses.js 同款）",
+        "note": "codex :14 import + :476/:1183 调用；azure-openai-responses.js :11 import + :92 调用——responses 系包装无独立流式实现，*_start 前提由 openai-responses-shared 单源承载；若 pi 升级引入独立实现，探针族闭合断言先红"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
     },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/openai-responses-shared.js",
-     "symbol": "createSlot / getSlot / pushToolCallDelta",
-     "note": "createSlot :343-409 三分支（reasoning→thinking_start :353 / message→text_start :362 / function_call+custom_tool_call→toolcall_start :381,:405）各播报；getSlot :329-332 类型不匹配返回 undefined；delta 站点 :487-535 均前置 getSlot(event.output_index, \"text\"|\"thinking\") + if (!slot) continue；toolcall_delta 经 pushToolCallDelta(slot) 助手 :333-340（slot 同源 getSlot/getOrCreateSlot，调用点 5 处）"
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-48",
+    "claim": "convertToLlm 对 role:\"custom\" 消息无条件转 LLM user 消息：case \"custom\" 分支不读 display、无任何条件门控，content（string 包一层 text / 数组原样）整体映射为 { role: \"user\", content, timestamp }——custom 消息进上下文后对 LLM 的可见性与 user message 无差别；display 只影响对话流渲染不影响该转换。ext 消息注入通道选型（sendMessage custom 形态，ADR-0068 语义①）的承重语义：提示词类内容走 custom 形态迁移不损失模型可见性",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/messages.js",
+        "symbol": "convertToLlm 的 case \"custom\" 分支",
+        "note": ":75 导出；:89-96 case \"custom\" —— content 归一 :90（typeof string → [{type:\"text\",text}]，数组原样透传），:91-95 return { role: \"user\", content, timestamp } 无条件分支"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费面：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费面同审"
     },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/anthropic-messages.js",
-     "symbol": "content_block_start / content_block_delta 分支",
-     "note": "start 分支 :412-458 四子型（text/thinking/redacted_thinking/tool_use）建块 output.content.push 后即播报对应 *_start；delta 分支 :459-496 每站点 blocks.findIndex((b) => b.index === event.index) 查块 + if (block && block.type === ...) 守卫（blocks = output.content :389，块只在 start 分支创建）"
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-49",
+    "claim": "prompt() 对 / 开头文本（expandPromptTemplates 默认 true）先 await _tryExecuteExtensionCommand，命令命中时 preflightResult?.(true) 后立即 return——纯扩展命令（如 /schedule list）不进 agent 轮、不产任何 turn 事件（turn_start/agent_start/agent_settled 全缺席）。taiji CP6 occupancy 收口窗的 pi 侧前提：dispatcher 在 client.prompt 前已置 occupancy.turn=dispatching，纯命令路径无 turn 事件驱动其回落，必须 prompt resolve 后武装 2s 短窗兜底回落 idle，否则该维度永久卡 dispatching（stop 按钮态 + busy 预检拒下一条消息）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "prompt() 命令分支（_tryExecuteExtensionCommand 优先于 agent 轮）",
+        "note": ":828-835 —— :828 expandPromptTemplates && text.startsWith(\"/\") 门控 → :829 await _tryExecuteExtensionCommand(text)（实装 :954-977：命中即 command.handler(args, ctx) 后 return true，不触碰 _runAgentPrompt）→ handled 时 :832 preflightResult?.(true) → :833 return，早退于 compaction 检查（:836）与起轮路径——prompt() 路径零 turn 事件"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费面：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收口设计"
     },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/bedrock-converse-stream.js",
-     "symbol": "handleContentBlockStart / handleContentBlockDelta",
-     "note": "Start 处理器 :425-433 toolUse 块创建播报 toolcall_start :432；Delta 处理器 :434 起——text :444-452 if (!block) 建块播报 text_start :447 后 text_delta :451；toolcall :456 前置 block?.type === \"toolCall\" 守卫（块由 Start 处理器创建）；thinking :460-475 if (!thinkingBlock) 建块播报 thinking_start :467（redacted 二站点同分支）"
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-50",
+    "claim": "provider registry 两层分层的写入/删除/读取语义：registerProvider 注册时无条件先删 native 重载层条目再 merge 写扩展注册层（undefined 字段保留前值）；unregisterProvider 两层同删且无恢复（register 顶掉的 native 条目不回填）；getRegisteredProviderIds 返回两层 keys 并集。scheduler ack 判据②的 pi 侧前提：providerId 已被任一层持有时，scheduler 覆写注册会静默顶掉该第三方注册（含覆写内置 provider 的第三方注册），故 no-base 短路必须先于 builtin/models.json 的 available 判定——registry 分层语义漂移时判据②前提失效（fail-closed 方向，最坏误降级文案）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "registerProvider（注册即删 native 层 + merge 写扩展注册层）",
+        "note": ":555-590 —— :558 validateExtensionProvider 校验后 :559 this.nativeExtensionProviders.delete(providerId) 无条件删 native 重载层（注册即删）；:562-568 merge：:563 effective = { ...previous }、:564-567 Object.entries(config) 的 defined 值覆盖（undefined 保留前值，legacy ModelRegistry 契约）、:568 this.extensionProviders.set 写扩展注册层；:569 起重组合+快照+refresh"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "unregisterProvider（两层同删不恢复）",
+        "note": ":591-597 —— :592 this.extensionProviders.delete + :593 this.nativeExtensionProviders.delete 两层同删，:594-596 重组合+快照+refresh，无任何恢复/回填分支（register 时被删的 native 条目不因 unregister 回来）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "getRegisteredProviderIds（两层 keys 并集）",
+        "note": ":320-322 —— return [...new Set([...this.extensionProviders.keys(), ...this.nativeExtensionProviders.keys()])]——扩展注册层 ∪ native 重载层并集去重"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费面：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
     },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/google-generative-ai.js",
-     "symbol": "part.text 守卫分支 + functionCall toolcall 三连",
-     "note": ":80-91 if (!currentBlock) 建块分支按 isThinking 播报 thinking_start :84 / text_start :89；:92-111 同迭代 delta push（thinking_delta :96 / text_delta :106，距 start ~840/~1072 字符——间夹 heuristics 分支，窗口 1300）；:145-151 toolcall_start :147 → toolcall_delta :149 紧邻"
-    },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/mistral-conversations.js",
-     "symbol": "contentItems 守卫分支 + tool_calls 建块",
-     "note": "text（string item）:458-470 与 text item :497-509 两站点 if (!currentBlock || type !== \"text\") 建块播报 text_start :460/:500 后 text_delta :464/:504（~200 字符）；thinking :481-491 同款 :483→:487；toolcall :522-552 if (!block) 建块播报 toolcall_start :540 后 toolcall_delta :548（~474 字符，间夹 id/key 解析）"
-    },
-    {
-     "pkg": "pi-ai",
-     "distPath": "dist/api/openai-codex-responses.js",
-     "symbol": "processResponsesStream 委托（含 azure-openai-responses.js 同款）",
-     "note": "codex :14 import + :476/:1183 调用；azure-openai-responses.js :11 import + :92 调用——responses 系包装无独立流式实现，*_start 前提由 openai-responses-shared 单源承载；若 pi 升级引入独立实现，探针族闭合断言先红"
-    }
-   ],
-   "guard": {
-    "type": "probe",
-    "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
-   },
-   "verifiedWith": "0.84.4"
+    "verifiedWith": "0.84.4"
   }
 ]

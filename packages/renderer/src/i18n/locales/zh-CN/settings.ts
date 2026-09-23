@@ -525,7 +525,7 @@ export default {
   // ── Extension 页（ExtensionPage）──
   extension: {
     // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
-    dataDirReadFailed: '实际路径读取失败，显示的是默认路径 ~/.taiji',
+    dataDirReadFailed: '数据目录读取失败，用户级强制目录暂不展示',
     recommendedTitle: '推荐扩展',
     installed: '已安装',
     install: '安装',
@@ -718,7 +718,7 @@ export default {
   resource: {
     discovered: '已发现的 {label}',
     // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
-    dataDirReadFailed: '实际路径读取失败，显示的是默认路径 ~/.taiji',
+    dataDirReadFailed: '数据目录读取失败，用户级强制目录暂不展示',
     refresh: '刷新',
     refreshing: '刷新中…',
     notFound: '未发现 {label}',

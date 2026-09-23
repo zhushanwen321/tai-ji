@@ -34,11 +34,13 @@
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@earendil-works/pi-tui": "0.84.4",
     "@playwright/test": "^1.61.1",
+    "esbuild": "^0.27.7",
     "eslint": "^10.3.0",
     "eslint-plugin-vue": "^10.9.1",
     "typescript": "^5.8",
     "typescript-eslint": "^8.59.2",
-    "vue-eslint-parser": "^10.4.1"
+    "vue-eslint-parser": "^10.4.1",
+    "ws": "^8.21.0"
   },
   "pnpm": {
     "overrides": {

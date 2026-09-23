@@ -3,8 +3,12 @@
     命令浮层（draft-composer-states §2d，四符号体系扩为四路共享容器：$ 文件 / # session /
     @ subagent / / 命令）。由 Composer 受控打开（v-model:open）。用 reka-ui Popover portal
     到 body，不受 composer-box 父容器 overflow/stacking context 限制（修复 D5 定位 bug）。
-    **anchor 是 slot 传入的 composer-box**：composer-box 内任何 focus 都算 inside，
-    不触发 onFocusOutside dismiss（修复 focus-outside 误关 bug）。
+    **anchor 是 slot 传入的 composer-box**：仅承担定位参考职责（side/align 对齐 +
+    宽度变量 --reka-popper-anchor-width 的锚源），不参与 focus-outside/pointerdown-outside
+    的 inside 判定——该判定只认 DismissableLayer 层链（isLayerExist 按
+    [data-dismissable-layer] closest 查 target 层 + DOM 序晚挂载层覆盖早层，anchor 无
+    此属性不在层链上）。焦点留在输入区打字不产生 focusin（焦点未转移），focusOutside
+    判定无从发生，浮层不因输入被 dismiss。
     键盘事件（↑↓ ⏎ Tab Esc）主入口 = 本组件经 command-popover-keyboard.ts 注册的 window
     capture 监听；Composer 在 ComposerInput keydown 时调 handleKeydown 为兜底路（见
     composer-keydown.ts），二者共用同一 handleKeydown——幂等守卫（e.defaultPrevented）在
@@ -26,8 +30,9 @@
     - 容器投影走 PopoverContent 默认 shadow-2（demo .cmd-pop box-shadow）
   -->
   <Popover v-model:open="controlledOpen">
-    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），DOM contains 成立 →
-         composer-box 内任何 focus 都算 inside，不触发 onFocusOutside dismiss -->
+    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），仅作定位/宽度锚源，
+         不参与 DismissableLayer inside 判定（见上方头注：isLayerExist 只认
+         [data-dismissable-layer] 层序） -->
     <PopoverAnchor as-child>
       <slot />
     </PopoverAnchor>

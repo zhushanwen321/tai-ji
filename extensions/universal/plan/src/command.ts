@@ -150,19 +150,14 @@ export function registerPlanCommand(
         const plansDir = path.join(projectDir, ".tmp", "plans");
         const existingPlans = findExistingPlans(plansDir);
         if (existingPlans.length > 0) {
-          pi.sendMessage(
-            {
-              customType: PLAN_CONTEXT_CUSTOM_TYPE,
-              content:
-                `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
-                `Choose an option:\n` +
-                `  a) Continue existing plan\n` +
-                `  b) Implement existing plan\n` +
-                `  c) Create new plan\n` +
-                `  d) Cancel`,
-              display: false,
-            },
-            { triggerTurn: true },
+          sendPlanContextMessage(
+            pi,
+            `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
+            `Choose an option:\n` +
+            `  a) Continue existing plan\n` +
+            `  b) Implement existing plan\n` +
+            `  c) Create new plan\n` +
+            `  d) Cancel`,
           );
           return;
         }
@@ -231,6 +226,18 @@ function findExistingPlans(plansDir: string): string[] {
   }
 }
 
+/**
+ * plan 上下文消息单点（slash 通道 4 个 sendMessage 位共用形态）：custom message 注入
+ * （display:false——提示词全文消费者是 LLM，用户感知走 plan widget 状态呈现，不占用户
+ * 气泡）+ triggerTurn:true 保留原开轮语义。
+ */
+function sendPlanContextMessage(pi: ExtensionAPI, content: string): void {
+  pi.sendMessage(
+    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content, display: false },
+    { triggerTurn: true },
+  );
+}
+
 /** E1 fail-fast 回复：不进入计划模式（不写 entry / 不限制工具 / 不注入计划提示词），回复可用技能清单与纠正命令 */
 function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResolution, { ok: false }>): void {
   const available = resolution.available.length > 0
@@ -239,16 +246,11 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
   const problem = resolution.missing.length > 0
     ? `unknown skill(s): ${resolution.missing.join(", ")}`
     : "--skills was given but no skill names followed it";
-  pi.sendMessage(
-    {
-      customType: PLAN_CONTEXT_CUSTOM_TYPE,
-      content:
-        `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
-        `Available skills:\n${available}\n\n` +
-        `Do NOT enter plan mode. Reply to the user listing the available skills and the corrected command, e.g. /plan <requirement> --skills <skill1>,<skill2>.`,
-      display: false,
-    },
-    { triggerTurn: true },
+  sendPlanContextMessage(
+    pi,
+    `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
+    `Available skills:\n${available}\n\n` +
+    `Do NOT enter plan mode. Reply to the user listing the available skills and the corrected command, e.g. /plan <requirement> --skills <skill1>,<skill2>.`,
   );
 }
 
@@ -258,15 +260,10 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
  * 已带用法样例）。
  */
 function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
-  pi.sendMessage(
-    {
-      customType: PLAN_CONTEXT_CUSTOM_TYPE,
-      content:
-        `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
-        `Do NOT enter plan mode. Reply to the user with the problem and the corrected command.`,
-      display: false,
-    },
-    { triggerTurn: true },
+  sendPlanContextMessage(
+    pi,
+    `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
+    `Do NOT enter plan mode. Reply to the user with the problem and the corrected command.`,
   );
 }
 
@@ -341,12 +338,8 @@ function handleEnterPlanMode(
       : {}),
   });
 
-  // Inject plan mode prompt as custom message（display:false——提示词全文消费者是 LLM，
-  // 用户感知走 plan widget 状态呈现，不占用户气泡；triggerTurn:true 保留原开轮语义。
+  // Inject plan mode prompt as custom message（display/triggerTurn 语义见 sendPlanContextMessage。
   // 非 streaming 直调 _runAgentPrompt 跳过 prompt() 前置链，首轮 systemPrompt 叠加
   // 差异已登记为可接受——设计 §1.1-⑥ / §2.2 P1。tool 入口走 tool result）
-  pi.sendMessage(
-    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: prompt, display: false },
-    { triggerTurn: true },
-  );
+  sendPlanContextMessage(pi, prompt);
 }

@@ -105,8 +105,9 @@ export default {
   },
   plugins: [
     // 对话流内容列布局原语 .content-col（收敛 mx-auto + w-full + max-w-[var(--content-max-w)]
-    // 三件套，9 组件消费：Turn/Composer/AskUserOverlay/SystemNotice/BashOutputBlock/
-    // RespawnNoticeBar/SkillNoticeInline/ForkNotice/ActivityStrip）。宽度数值 SSOT 仍是
+    // 三件套，12 处消费：Turn/Composer/FormOverlay/SystemNotice/BashOutputBlock/
+    // RespawnNoticeBar/SkillNoticeInline/ForkNotice/ActivityStrip/ModeDeclarationRow/
+    // StreamItemBoundary/MessageStream broken 行）。宽度数值 SSOT 仍是
     // style.css 的 --content-max-w
     // token，本 plugin 只生成「居中 + 封顶」布局类；display/gap 等由使用处 Tailwind 工具类
     // 叠加。不满足 check_css_tokens 白名单「Tailwind 无法表达」判据，故不落 style.css，

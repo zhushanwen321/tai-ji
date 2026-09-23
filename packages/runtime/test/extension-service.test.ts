@@ -37,8 +37,16 @@ vi.mock('node:child_process', () => ({
 // - cpSync：源路径含 fail-cp 标记时抛错（仅 cp 失败用例的 fixture 用该目录名）；
 // - renameSync：仅当 failRenameMarker 非空且 from 路径命中「marker + .tmp-」（原子
 //   换代「顶上」一步）时抛错，其余委托原实现——换代中断后的备份恢复
-//   （.old- → destDir）走原实现，才能断言恢复真实发生。
-const fsFailState = vi.hoisted(() => ({ failRenameMarker: '' }))
+//   （.old- → destDir）走原实现，才能断言恢复真实发生；
+// - renameSync failRestoreRenameMarker：from 路径命中「marker + .old-」（恢复一步）
+//   时抛错，与 failRenameMarker 组合触发「顶上 + 恢复双失败」深防御分支；
+// - rmSync failRmBackupMarker：路径命中「marker + .old-」（备份清理）时抛错，
+//   触发「删备份失败 best-effort 告警」深防御分支（rename 全走原实现，换代成功）。
+const fsFailState = vi.hoisted(() => ({
+  failRenameMarker: '',
+  failRestoreRenameMarker: '',
+  failRmBackupMarker: '',
+}))
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   const cpSyncMock: typeof actual.cpSync = (src, dest, opts) => {
@@ -48,14 +56,28 @@ vi.mock('node:fs', async (importOriginal) => {
     return actual.cpSync(src, dest, opts)
   }
   const renameSyncMock: typeof actual.renameSync = (fromPath, toPath) => {
+    const from = String(fromPath)
     if (fsFailState.failRenameMarker !== ''
-      && String(fromPath).includes(fsFailState.failRenameMarker)
-      && String(fromPath).includes('.tmp-')) {
+      && from.includes(fsFailState.failRenameMarker)
+      && from.includes('.tmp-')) {
       throw Object.assign(new Error('ENOTEMPTY: simulated rename failure'), { code: 'ENOTEMPTY' })
+    }
+    if (fsFailState.failRestoreRenameMarker !== ''
+      && from.includes(fsFailState.failRestoreRenameMarker)
+      && from.includes('.old-')) {
+      throw Object.assign(new Error('EPERM: simulated restore rename failure'), { code: 'EPERM' })
     }
     return actual.renameSync(fromPath, toPath)
   }
-  return { ...actual, cpSync: vi.fn(cpSyncMock), renameSync: vi.fn(renameSyncMock) }
+  const rmSyncMock: typeof actual.rmSync = (targetPath, opts) => {
+    if (fsFailState.failRmBackupMarker !== ''
+      && String(targetPath).includes(fsFailState.failRmBackupMarker)
+      && String(targetPath).includes('.old-')) {
+      throw Object.assign(new Error('EPERM: simulated backup cleanup failure'), { code: 'EPERM' })
+    }
+    return actual.rmSync(targetPath, opts)
+  }
+  return { ...actual, cpSync: vi.fn(cpSyncMock), renameSync: vi.fn(renameSyncMock), rmSync: vi.fn(rmSyncMock) }
 })
 
 const mockedInstallPackage = vi.mocked(installPackage)
@@ -69,8 +91,10 @@ describe('ExtensionService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // RT-6#1 注入开关复位（rename 失败用例内显式打开）
+    // RT-6#1 注入开关复位（失败用例内显式打开）
     fsFailState.failRenameMarker = ''
+    fsFailState.failRestoreRenameMarker = ''
+    fsFailState.failRmBackupMarker = ''
     // Create test directory structure
     testSettingsDir = mkdtempSync(join(tmpdir(), 'ext-service-test-'))
     // RT-3#12：PiExtensionSettings 构造不再对齐全局 settings 路径（去全局化），
@@ -848,6 +872,82 @@ describe('ExtensionService', () => {
       expect(readFileSync(join(extensionsDir, 'ext-a', 'old-version.txt'), 'utf-8')).toBe('v1-old-content')
       // tmp 与备份均被清理（恢复后备份已不在）
       expect(readdirSync(extensionsDir).some((e) => e.includes('.tmp-') || e.includes('.old-'))).toBe(false)
+    })
+
+    // 深防御分支 1（RT-6#1）：顶上失败后「恢复也失败」——抛错必须带 destDir 与
+    // backupDir 路径（旧内容仍在盘可手工找回的承诺），绝不静默丢弃。
+    it('renameSync 顶上与恢复双失败：失败消息带 destDir/backupDir 路径与两侧错误，旧内容仍在备份目录', async () => {
+      const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-restore-also-fail')
+      const src = join(tempDir, 'ext-restore-fail')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), JSON.stringify({
+        name: 'pi-ext-restore-fail', version: '2.0.0', description: 'R', keywords: ['pi-package'],
+      }), 'utf-8')
+      // 预置旧版本 ext-restore-fail
+      const extensionsDir = join(testSettingsDir, 'extensions')
+      const destDir = join(extensionsDir, 'ext-restore-fail')
+      mkdirSync(destDir, { recursive: true })
+      writeFileSync(join(destDir, 'old-version.txt'), 'v1-old-content', 'utf-8')
+      // 双注入：顶上（.tmp- → destDir）与恢复（.old- → destDir）两步 rename 均抛错
+      fsFailState.failRenameMarker = 'ext-restore-fail'
+      fsFailState.failRestoreRenameMarker = 'ext-restore-fail'
+
+      const failures = await service.finishInstall(tempDir, ['ext-restore-fail'])
+
+      expect(failures).toHaveLength(1)
+      expect(failures[0]!.dirName).toBe('ext-restore-fail')
+      const err = failures[0]!.error
+      // 错误消息承诺旧版本所在备份路径 + 透传两侧根因（顶上 ENOTEMPTY / 恢复 EPERM）
+      expect(err).toContain('restore also failed')
+      expect(err).toContain(`destDir=${destDir}`)
+      expect(err).toContain('ENOTEMPTY: simulated rename failure')
+      expect(err).toContain('EPERM: simulated restore rename failure')
+      // 备份目录名含运行期 token（pid-ts），按前缀定位后核对路径承诺与旧内容在盘
+      const backupEntry = readdirSync(extensionsDir).find((e) => e.startsWith('ext-restore-fail.old-'))
+      expect(backupEntry).toBeDefined()
+      const backupDir = join(extensionsDir, backupEntry!)
+      expect(err).toContain(`old version preserved at ${backupDir}`)
+      expect(readFileSync(join(backupDir, 'old-version.txt'), 'utf-8')).toBe('v1-old-content')
+      // 换代未完成且恢复也未完成：destDir 不存在（内容全在备份目录，未静默丢弃）
+      expect(existsSync(destDir)).toBe(false)
+    })
+
+    // 深防御分支 2（RT-6#1）：删备份失败——换代已成功，仅磁盘残留，best-effort
+    // 告警不上报（不进失败清单）。
+    it('备份清理 rmSync 失败：换代成功且失败清单为空，best-effort warn 带备份路径、备份残留', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-backup-cleanup-fail')
+        const src = join(tempDir, 'ext-cleanup-fail')
+        mkdirSync(src, { recursive: true })
+        writeFileSync(join(src, 'package.json'), JSON.stringify({
+          name: 'pi-ext-cleanup-fail', version: '2.0.0', description: 'C', keywords: ['pi-package'],
+        }), 'utf-8')
+        // 预置旧版本 ext-cleanup-fail
+        const extensionsDir = join(testSettingsDir, 'extensions')
+        const destDir = join(extensionsDir, 'ext-cleanup-fail')
+        mkdirSync(destDir, { recursive: true })
+        writeFileSync(join(destDir, 'old-version.txt'), 'v1-old-content', 'utf-8')
+        // 仅注入备份清理失败（路径含 .old- 的 rmSync）；rename 全走原实现 → 换代成功
+        fsFailState.failRmBackupMarker = 'ext-cleanup-fail'
+
+        const failures = await service.finishInstall(tempDir, ['ext-cleanup-fail'])
+
+        // 换代已成功：destDir 是新版本内容，且不进失败清单（磁盘残留仅 best-effort）
+        expect(failures).toEqual([])
+        expect(JSON.parse(readFileSync(join(destDir, 'package.json'), 'utf-8')).version).toBe('2.0.0')
+        // 备份目录残留（注入的 rmSync 失败未影响换代）+ warn 告警带备份路径与根因
+        const backupEntry = readdirSync(extensionsDir).find((e) => e.startsWith('ext-cleanup-fail.old-'))
+        expect(backupEntry).toBeDefined()
+        const backupDir = join(extensionsDir, backupEntry!)
+        const warned = warnSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+        expect(warned).toContain('failed to cleanup backup dir')
+        expect(warned).toContain(backupDir)
+        expect(warned).toContain('EPERM: simulated backup cleanup failure')
+        expect(readFileSync(join(backupDir, 'old-version.txt'), 'utf-8')).toBe('v1-old-content')
+      } finally {
+        warnSpy.mockRestore()
+      }
     })
 
     it('全新安装（destDir 不存在）：tmp+rename 直装成功，返回空失败清单', async () => {

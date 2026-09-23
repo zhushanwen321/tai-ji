@@ -20,11 +20,9 @@ import {
   sampleDomShape,
   waitForRenderSettled,
 } from './lib.mjs'
+import { flagValue, missingSampleCliArgs } from './decisions.mjs'
 
-function arg(flag) {
-  const i = process.argv.indexOf(flag)
-  return i !== -1 ? process.argv[i + 1] : undefined
-}
+const arg = (flag) => flagValue(process.argv, flag)
 
 const cdpPort = arg('--cdp-port')
 const samplePath = arg('--sample')
@@ -32,8 +30,9 @@ const outDir = arg('--out')
 const name = arg('--name') ?? 'sample'
 const styleProbe = arg('--style-probe')
 
-if (!cdpPort || !samplePath || !outDir) {
-  console.error('用法: node scripts/render-sampling/cli.mjs --cdp-port <port> --sample <md 路径> --out <产物目录> [--name a1] [--style-probe <selector>]')
+const missingArgs = missingSampleCliArgs({ cdpPort, samplePath, outDir })
+if (missingArgs.length > 0) {
+  console.error(`缺少必填参数: ${missingArgs.join(' ')}。用法: node scripts/render-sampling/cli.mjs --cdp-port <port> --sample <md 路径> --out <产物目录> [--name a1] [--style-probe <selector>]`)
   process.exit(1)
 }
 

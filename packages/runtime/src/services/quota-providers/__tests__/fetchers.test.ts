@@ -474,6 +474,40 @@ describe('minimaxFetcher', () => {
       model_remains: ['x'],
     })).toEqual({ ok: false, reason: 'parse' })
   })
+
+  // ── shape guard 分支补齐（isMinimaxResponse 余下判定单元）──
+
+  it('顶层非对象（null / 字符串 / 数字）→ parse；顶层数组（两字段均缺）放行 → no-subscription', async () => {
+    expect(await fetchOk(minimaxFetcher, null)).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(minimaxFetcher, 'oops')).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(minimaxFetcher, 42)).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(minimaxFetcher, [])).toEqual({ ok: false, reason: 'no-subscription' })
+  })
+
+  it('base_resp.status_code / model_name 类型漂移 → parse（guard 收到字段级）', async () => {
+    expect(await fetchOk(minimaxFetcher, { base_resp: { status_code: '0' } })).toEqual({
+      ok: false,
+      reason: 'parse',
+    })
+    expect(await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...generalModel, model_name: 123 }],
+    })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  it('余下数值字段逐字段漂移（remains_time / weekly 三字段）→ parse', async () => {
+    for (const field of [
+      'remains_time',
+      'current_weekly_remaining_percent',
+      'current_weekly_status',
+      'weekly_remains_time',
+    ] as const) {
+      expect(await fetchOk(minimaxFetcher, {
+        base_resp: { status_code: 0 },
+        model_remains: [{ ...generalModel, [field]: 'drift' }],
+      })).toEqual({ ok: false, reason: 'parse' })
+    }
+  })
 })
 
 describe('zhipuFetcher', () => {

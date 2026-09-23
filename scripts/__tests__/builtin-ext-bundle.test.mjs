@@ -17,6 +17,18 @@ import { join } from "node:path";
 
 const REPO = process.cwd();
 const STAGED = join(REPO, "apps/electron/resources/extensions/@zhushanwen");
+const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
+const ASSET_DIR_LIB_SRC = join(REPO, "scripts/lib/staged-asset-dirs.mjs");
+
+/**
+ * mirror 复制守卫脚本进 <tmp>/scripts/ 时同步带 scripts/lib/ 共享登记表——
+ * verify-staged import 该登记表（MF-1-17 单一来源），mirror 缺文件 = MODULE_NOT_FOUND。
+ */
+function stageVerifyGuardInto(root) {
+	mkdirSync(join(root, "scripts/lib"), { recursive: true });
+	copyFileSync(VERIFY_SRC, join(root, "scripts/verify-staged-extensions.mjs"));
+	copyFileSync(ASSET_DIR_LIB_SRC, join(root, "scripts/lib/staged-asset-dirs.mjs"));
+}
 
 describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 	it("TC3: bundle 自动 inline 静态 value 依赖（pi-ask-user 含 @zhushanwen/extension-protocol 的 runtime export）", () => {
@@ -58,8 +70,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 	 */
 	function makePermissionMirror({ withWasm = false } = {}) {
 		const root = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-staged-"));
-		mkdirSync(join(root, "scripts"), { recursive: true });
-		copyFileSync(join(REPO, "scripts/verify-staged-extensions.mjs"), join(root, "scripts/verify-staged-extensions.mjs"));
+		stageVerifyGuardInto(root);
 		mkdirSync(join(root, "packages/shared/src"), { recursive: true });
 		writeFileSync(
 			join(root, "packages/shared/src/mandatory-extensions.json"),
@@ -177,7 +188,6 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
  * 从未触达（MF-2-3）。
  */
 describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
-	const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
 	let tmpBase;
 	let tmpScoped;
 	let tmpPkg;
@@ -186,8 +196,7 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦；
 		// mkdtemp 每次全新目录，免旧路径的预清理 rmSync）
 		tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-verify-"));
-		mkdirSync(join(tmpBase, "scripts"), { recursive: true });
-		copyFileSync(VERIFY_SRC, join(tmpBase, "scripts/verify-staged-extensions.mjs"));
+		stageVerifyGuardInto(tmpBase);
 		mkdirSync(join(tmpBase, "packages/shared/src"), { recursive: true });
 		writeFileSync(
 			join(tmpBase, "packages/shared/src/mandatory-extensions.json"),
@@ -288,10 +297,10 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 /**
  * verify-staged per-package 特殊资产目录校验测试（MF-1-6）。
  *
- * plan 的 templates/ 由 bundle-extensions.mjs 专项拷贝（TEMPLATES_DIR_PACKAGES），
- * 不走 pi manifest 三字段——checkManifest 探测不到，缺失 = 打包版 list-template
- * 恒 0 / select-template 恒 null 的静默失效（templates.ts scanTemplateDir 防御性
- * 返回空清单、listTemplates 仅 warn）。PACKAGE_ASSET_DIRS 是唯一 postbuild 拦截面。
+ * plan 的 templates/ 由 bundle-extensions.mjs 专项拷贝（scripts/lib/staged-asset-dirs.mjs
+ * 登记表驱动），不走 pi manifest 三字段——checkManifest 探测不到，缺失 = 打包版
+ * list-template 恒 0 / select-template 恒 null 的静默失效（templates.ts scanTemplateDir
+ * 防御性返回空清单、listTemplates 仅 warn）。共享登记表是唯一 postbuild 拦截面。
  *
  * 构造模式（tmp mirror × spawnSync，同 check-guide-contract-projection 惯例）：
  * 守卫脚本复制进 <tmp>/scripts/（REPO_ROOT 即 <tmp>，SSOT mandatory-extensions.json
@@ -300,16 +309,13 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
  * stderr 断言定位原因，防「其它校验先行 exit 1」的假绿。
  */
 describe("verify-staged per-package asset dirs (MF-1-6)", () => {
-	const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
-
 	/**
 	 * 组装 tmp mirror。planTemplates 三形态：undefined = 不建 templates/（缺失）、
 	 * "empty" = 空目录、nonempty = 含一个 .md（正向对照）。
 	 */
 	function makeMirror({ planTemplates } = {}) {
 		const root = mkdtempSync(join(tmpdir(), "verify-staged-assets-"));
-		mkdirSync(join(root, "scripts"), { recursive: true });
-		copyFileSync(VERIFY_SRC, join(root, "scripts/verify-staged-extensions.mjs"));
+		stageVerifyGuardInto(root);
 		// SSOT fixture：最小两包集，不含 permission（绕开 wasm 专项校验的无关面）
 		mkdirSync(join(root, "packages/shared/src"), { recursive: true });
 		writeFileSync(
@@ -380,28 +386,29 @@ describe("verify-staged per-package asset dirs (MF-1-6)", () => {
 });
 
 /**
- * PACKAGE_ASSET_DIRS ↔ TEMPLATES_DIR_PACKAGES 投影一致性（MF-2-4）。
+ * staged 特殊资产目录单一登记表结构守卫（MF-1-17）。
  *
- * verify 侧 PACKAGE_ASSET_DIRS（键 = staged 目录名 pi-<short>）与 bundle 侧
- * TEMPLATES_DIR_PACKAGES（元素 = short 名）是同一份「专项拷贝资产包集合」的两处
- * 投影，键形不同、仅注释互指——bundle 侧加 templates/ 包漏改 verify 侧时，MF-1-6
- * 的 staged 校验静默失效（缺目录无人拦截，原缺失形态重开）。本用例读两脚本源码
- * 文本做投影比对（仿 host-db-suffix-parity 的脚本投影文本比对形态），单侧加条目即红。
+ * bundle 侧 templates/ 专项拷贝与 verify 侧 staged 校验共读 scripts/lib/staged-asset-dirs.mjs
+ * 的唯一登记表（键 = 包 short 名，值 = staged 包根下资产目录名）——原「双登记 + 仅注释
+ * 互指」结构已删除（bundle 侧加条目漏改 verify 侧时 MF-1-6 校验静默失效、缺失形态复辟，
+ * 运行期无任何红灯）。本用例做结构性回归守卫：两脚本必须 import 共享登记表、不得另持
+ * 字面量表；登记表本体非空（空表 = bundle 不拷 + verify 不查的双侧失明）。
  */
-describe("PACKAGE_ASSET_DIRS ↔ TEMPLATES_DIR_PACKAGES projection parity (MF-2-4)", () => {
-	it("两表归一（pi-<short> ↔ <short>）后包集合相等", () => {
+describe("staged asset dirs single-source registry (MF-1-17)", () => {
+	it("两脚本均消费共享登记表且不再各持字面量表", () => {
 		const bundleSrc = readFileSync(join(REPO, "scripts/bundle-extensions.mjs"), "utf8");
 		const verifySrc = readFileSync(join(REPO, "scripts/verify-staged-extensions.mjs"), "utf8");
 
-		// bundle 侧：const TEMPLATES_DIR_PACKAGES = new Set(["plan"]) → 提取引号内元素
-		const bundleSetLiteral = bundleSrc.match(/const TEMPLATES_DIR_PACKAGES = new Set\(\[([^\]]*)\]\)/)?.[1] ?? "";
-		const bundlePkgs = [...bundleSetLiteral.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]).sort();
-		expect(bundlePkgs.length, "bundle 侧 TEMPLATES_DIR_PACKAGES 提取非空（常量改名/移位时防静默空集假绿）").toBeGreaterThan(0);
+		expect(bundleSrc, "bundle 侧 import 共享登记表").toContain('from "./lib/staged-asset-dirs.mjs"');
+		expect(bundleSrc, "bundle 侧不得另持 TEMPLATES_DIR_PACKAGES 字面量 Set").not.toMatch(
+			/TEMPLATES_DIR_PACKAGES\s*=\s*new Set/,
+		);
+		expect(verifySrc, "verify 侧 import 共享登记表").toContain('from "./lib/staged-asset-dirs.mjs"');
+		expect(verifySrc, "verify 侧不得另持 PACKAGE_ASSET_DIRS 字面量表").not.toMatch(/const PACKAGE_ASSET_DIRS\s*=\s*\{/);
 
-		// verify 侧：PACKAGE_ASSET_DIRS 对象字面量 → 提取 "pi-xxx": 键集，去 pi- 前缀归一
-		const verifyTableSrc = verifySrc.match(/const PACKAGE_ASSET_DIRS = \{([\s\S]*?)\n\}/)?.[1] ?? "";
-		const verifyPkgs = [...verifyTableSrc.matchAll(/"(pi-[^"]+)"\s*:/g)].map((m) => m[1].replace(/^pi-/, "")).sort();
-
-		expect(verifyPkgs, "verify 侧键集（去 pi- 前缀）与 bundle 侧元素集相等").toEqual(bundlePkgs);
+		const libSrc = readFileSync(join(REPO, "scripts/lib/staged-asset-dirs.mjs"), "utf8");
+		const tableBody = libSrc.match(/export const PACKAGE_ASSET_DIRS = \{([\s\S]*?)\n\};/)?.[1] ?? "";
+		const shorts = [...tableBody.matchAll(/^\t(\S+):/gm)].map((m) => m[1]);
+		expect(shorts.length, "登记表条目非空（空表 = bundle 不拷 + verify 不查的双侧失明）").toBeGreaterThan(0);
 	});
 });
