@@ -254,7 +254,8 @@ describe("registerPlanTool", () => {
   // --- complete ---
   describe("complete", () => {
     beforeEach(() => {
-      // 默认桥不可达（与真实 pi 0.84.4 现状一致）；goal 档用例显式 mock 桥可达
+      // detectGoalCapability 不在 complete 链上消费（execute 档 tryGoalInit 内部自理
+      // goal-unavailable 降级）；goal outcome 用例经 handlePlanComplete mock 构造结果
       (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(false);
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReset();

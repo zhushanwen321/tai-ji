@@ -162,14 +162,14 @@ describe('computeAckAvailability', () => {
     expect(result).toEqual({ available: false, reason: 'toggle-disabled' })
   })
 
-  it('native 重载在场 ⇒ no-base（先于 builtin/models.json 的 available 短路）', async () => {
-    // 关键回归组合：builtin ∩ native——native 检查若放在 builtin 判定之后会被
-    // available 短路掉，覆写照样顶掉第三方 native 注册（registerProvider 即删 native
-    // 层且 unregister 不恢复）。
+  it('provider 已注册（任一层）⇒ no-base（先于 builtin/models.json 的 available 短路）', async () => {
+    // 关键回归组合：builtin ∩ 已注册——注册检查若放在 builtin 判定之后会被
+    // available 短路掉，覆写照样顶掉第三方注册（registerProvider 即删 native 层 +
+    // merge 扩展注册层，unregister 两层同删不恢复——第三方经任一层注册均受害）。
     const builtinHit = await computeAckAvailability({
       providerId: 'anthropic',
       isToggleDisabled: () => false,
-      hasRegisteredNativeOverride: (id) => id === 'anthropic',
+      isProviderRegistered: (id) => id === 'anthropic',
     })
     expect(builtinHit).toEqual({ available: false, reason: 'no-base' })
 
@@ -177,15 +177,15 @@ describe('computeAckAvailability', () => {
       providerId: 'acme-custom',
       isToggleDisabled: () => false,
       loadModelsJsonProviderIds: async () => new Set(['acme-custom']),
-      hasRegisteredNativeOverride: (id) => id === 'acme-custom',
+      isProviderRegistered: (id) => id === 'acme-custom',
     })
     expect(modelsJsonHit).toEqual({ available: false, reason: 'no-base' })
 
-    // toggle-disabled 仍优先于 native 判据。
+    // toggle-disabled 仍优先于注册判据。
     const toggled = await computeAckAvailability({
       providerId: 'anthropic',
       isToggleDisabled: () => true,
-      hasRegisteredNativeOverride: () => true,
+      isProviderRegistered: () => true,
     })
     expect(toggled).toEqual({ available: false, reason: 'toggle-disabled' })
   })

@@ -46,11 +46,14 @@ const PHASE_B_SECTION =
   `4. **Propose 2-3 approaches** with trade-offs + recommendation.\n` +
   `5. **Assumption audit**: Grep-verify interfaces/types exist. Mark [UNVERIFIED] what can't be verified.`;
 
+// Phase D 第 3 点的选项集描述必须与 buildExecOptions（tool.ts）产出的实际选项一致
+// （≤2 个 plan-exec skill 档 + Execute + Not now，label 与 i18n exec.* 词典同源）——
+// 选项集重排后此处描述漂移会诱导模型向用户预告不存在的执行方式。
 const PHASE_D_SECTION =
   `## Phase D: Completion\n` +
   `1. Ask user to review the complete plan.\n` +
   `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
-  `3. After plan complete: the user picks an execution method in the completion dialog — Develop (auto-parallel: complexity-driven subagent delegation vs current-session steps), an execution skill (Execute via skill: <name>, when detected), or goal-driven execution.`;
+  `3. After plan complete: the user picks an execution method in the completion dialog — up to 2 detected plan-exec skills (Execute via skill: <name>, when detected), Execute (goal tracking integrated when available), or Not now (stay in plan mode).`;
 
 /**
  * /plan 命令的提示词四段注入（D2）：

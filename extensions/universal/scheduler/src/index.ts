@@ -149,10 +149,12 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       log: logger,
       render: (key, params) => t(key, params),
       notify: (message, level) => ctx.ui.notify(message, level),
-      // native 重载查询（ack no-base 判据②）：闭包捕获本 session 的 modelRegistry——
-      // 命中即 no-base（覆写会顶掉第三方 native 注册且 unregister 不恢复）。
-      hasRegisteredNativeOverride: (providerId) =>
-        ctx.modelRegistry.getRegisteredNativeProvider(providerId) !== undefined,
+      // 已注册 provider 查询（ack no-base 判据②）：闭包捕获本 session 的 modelRegistry——
+      // getRegisteredProviderIds 返回 native 重载层 ∪ 扩展注册层两层并集，任一层命中即
+      // no-base（覆写会顶掉注册且 unregister 两层同删不恢复，第三方经任一层注册的
+      // provider 不能被 ack 静默删除）。
+      isProviderRegistered: (providerId) =>
+        ctx.modelRegistry.getRegisteredProviderIds().includes(providerId),
     })
     ackController.handleSessionBoundary()
 

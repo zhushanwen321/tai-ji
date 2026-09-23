@@ -128,12 +128,13 @@ export interface AckAvailabilityDeps {
   /** models.json provider id 集合加载器（可注入，测试用）。 */
   loadModelsJsonProviderIds?: () => Promise<Set<string>>
   /**
-   * native 重载查询器（可注入，测试用）：providerId 已被 `registerNativeProvider`
-   * 注册过 ⇒ true。生产装配点必传（闭包捕获 `ctx.modelRegistry` 的
-   * `getRegisteredNativeProvider`，pi 无全局 registry 单例可达）；未注入时跳过本判据
-   * （仅测试最小夹具的退化形态）。
+   * 已注册 provider 查询器（可注入，测试用）：providerId 已被任一注册层——native
+   * 重载层（`registerNativeProvider`）或扩展注册层（`registerProvider`）——持有 ⇒
+   * true。生产装配点必传（闭包捕获 `ctx.modelRegistry` 的
+   * `getRegisteredProviderIds`（两层并集），pi 无全局 registry 单例可达）；未注入时
+   * 跳过本判据（仅测试最小夹具的退化形态）。
    */
-  hasRegisteredNativeOverride?: (providerId: string) => boolean
+  isProviderRegistered?: (providerId: string) => boolean
 }
 
 /**
@@ -185,9 +186,11 @@ async function resolveAgentDir(): Promise<string> {
 /**
  * 预计算 ack 可用性（供编排层缓存，供武装点同步消费）：
  *   ① `isToggleDisabled()` ⇒ `toggle-disabled`
- *   ② providerId 已被 native 重载注册（`getRegisteredNativeProvider` 命中）⇒ `no-base`
- *      ——pi 的 registerProvider 实装注册时即删 native 层且 unregister 两层同删不恢复
- *      （dist/core/model-runtime.js），覆写会静默顶掉第三方扩展的 native 注册，
+ *   ② providerId 已被任一注册层持有（`getRegisteredProviderIds()` 命中：native 重载层
+ *      ∪ 扩展注册层）⇒ `no-base`——pi 的 registerProvider 实装注册时即删 native 层且
+ *      unregister 两层同删不恢复（pi 语义锚 docs/pi-semantics.json PS-45，行号权威在
+ *      登记处），覆写会静默顶掉第三方
+ *      扩展经任一层注册的 provider（含覆写内置 provider 的第三方注册），
  *      与 builtin/models.json 是否命中无关，故先于一切 available 短路；
  *   ③ providerId ∈ 内置集合（`builtinProviders()`，含 radius）⇒ `available`
  *   ④ providerId ∈ models.json 的 providers ⇒ `available`
@@ -198,9 +201,11 @@ export async function computeAckAvailability(deps: AckAvailabilityDeps): Promise
   try {
     if (deps.isToggleDisabled()) return { available: false, reason: 'toggle-disabled' }
 
-    // native 重载检查必须在 ③④ 的 available 短路之前：builtin ∩ native 组合若先命中
-    // ③，覆写照样会顶掉 native 注册（判据就漏了）。
-    if (deps.hasRegisteredNativeOverride?.(deps.providerId)) {
+    // 已注册 provider 检查必须在 ③④ 的 available 短路之前：builtin ∩ 已注册组合若先命中
+    // ③，覆写照样会顶掉注册（registerProvider 删 native 层 + merge 写扩展注册层，unregister
+    // 两层同删不恢复——第三方经任一层注册的 provider 会被静默删除，判据就漏了；pi 语义锚
+    // docs/pi-semantics.json PS-45）。
+    if (deps.isProviderRegistered?.(deps.providerId)) {
       return { available: false, reason: 'no-base' }
     }
 

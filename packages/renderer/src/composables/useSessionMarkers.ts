@@ -21,7 +21,7 @@ interface SessionMarker {
 const STORAGE_KEY = 'taiji:session-markers'
 
 // ── 内存缓存（避免每次 isUnread 都 parse JSON）──
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：session 角标（unread/markedDone）localStorage 内存缓存（12 类未覆盖；权威 = localStorage）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 data-source-registry §4 ⑧ 非草稿）：session 角标（unread/markedDone）localStorage 内存缓存（权威 = localStorage key taiji:session-markers）
 const cache = shallowRef<Map<string, SessionMarker>>(new Map())
 // 是否已尝试从 localStorage hydrate。禁止用 cache.value.size===0 推断「是否已 hydrate」——
 // localStorage 存空对象 {} 时 new Map 是空 Map，size===0 恒成立，会导致每次查询都重新 parse。

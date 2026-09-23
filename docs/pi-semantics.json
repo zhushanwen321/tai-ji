@@ -909,5 +909,51 @@
    "note": "消费面：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费面同审"
   },
   "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-44",
+  "claim": "prompt() 对 / 开头文本（expandPromptTemplates 默认 true）先 await _tryExecuteExtensionCommand，命令命中时 preflightResult?.(true) 后立即 return——纯扩展命令（如 /schedule list）不进 agent 轮、不产任何 turn 事件（turn_start/agent_start/agent_settled 全缺席）。taiji CP6 occupancy 收口窗的 pi 侧前提：dispatcher 在 client.prompt 前已置 occupancy.turn=dispatching，纯命令路径无 turn 事件驱动其回落，必须 prompt resolve 后武装 2s 短窗兜底回落 idle，否则该维度永久卡 dispatching（stop 按钮态 + busy 预检拒下一条消息）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/agent-session.js",
+    "symbol": "prompt() 命令分支（_tryExecuteExtensionCommand 优先于 agent 轮）",
+    "note": ":828-835 —— :828 expandPromptTemplates && text.startsWith(\"/\") 门控 → :829 await _tryExecuteExtensionCommand(text)（实装 :954-977：命中即 command.handler(args, ctx) 后 return true，不触碰 _runAgentPrompt）→ handled 时 :832 preflightResult?.(true) → :833 return，早退于 compaction 检查（:836）与起轮路径——prompt() 路径零 turn 事件"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收口设计"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-45",
+  "claim": "provider registry 两层分层的写入/删除/读取语义：registerProvider 注册时无条件先删 native 重载层条目再 merge 写扩展注册层（undefined 字段保留前值）；unregisterProvider 两层同删且无恢复（register 顶掉的 native 条目不回填）；getRegisteredProviderIds 返回两层 keys 并集。scheduler ack 判据②的 pi 侧前提：providerId 已被任一层持有时，scheduler 覆写注册会静默顶掉该第三方注册（含覆写内置 provider 的第三方注册），故 no-base 短路必须先于 builtin/models.json 的 available 判定——registry 分层语义漂移时判据②前提失效（fail-closed 方向，最坏误降级文案）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "registerProvider（注册即删 native 层 + merge 写扩展注册层）",
+    "note": ":555-590 —— :558 validateExtensionProvider 校验后 :559 this.nativeExtensionProviders.delete(providerId) 无条件删 native 重载层（注册即删）；:562-568 merge：:563 effective = { ...previous }、:564-567 Object.entries(config) 的 defined 值覆盖（undefined 保留前值，legacy ModelRegistry 契约）、:568 this.extensionProviders.set 写扩展注册层；:569 起重组合+快照+refresh"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "unregisterProvider（两层同删不恢复）",
+    "note": ":591-597 —— :592 this.extensionProviders.delete + :593 this.nativeExtensionProviders.delete 两层同删，:594-596 重组合+快照+refresh，无任何恢复/回填分支（register 时被删的 native 条目不因 unregister 回来）"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "getRegisteredProviderIds（两层 keys 并集）",
+    "note": ":320-322 —— return [...new Set([...this.extensionProviders.keys(), ...this.nativeExtensionProviders.keys()])]——扩展注册层 ∪ native 重载层并集去重"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
+  },
+  "verifiedWith": "0.84.4"
  }
 ]

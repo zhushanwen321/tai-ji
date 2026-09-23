@@ -273,6 +273,27 @@ describe('EventAdapter 既有 marker 分支回归（legacy 归一上移后）', 
     expect(payload?.['allowCancel']).toBe(true)
   })
 
+  it('ASK_USER_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true，不穿透类型标注', () => {
+    const questions = [{ question: '备注?' }]
+    // 旧版扩展序列化出字符串形态（?? 只挡 null/undefined，挡不住非 boolean 串）
+    const events = translate(
+      selectEvent({ title: ASK_USER_MARKER, options: [JSON.stringify({ questions, allowCancel: 'no' })] }),
+      SID,
+    )
+    const payload = broadcastPayload(events)
+    expect(payload?.['allowCancel']).toBe(true)
+  })
+
+  it('UI_FORM_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true（与 ask-user 分支同款守卫）', () => {
+    const questions = [{ type: 'text', question: '备注?' }]
+    const events = translate(
+      selectEvent({ title: UI_FORM_MARKER, options: [JSON.stringify({ formQuestions: questions, allowCancel: 0 })] }),
+      SID,
+    )
+    const payload = broadcastPayload(events)
+    expect(payload?.['allowCancel']).toBe(true)
+  })
+
   it('SCHEDULE_CREATE_MARKER → form:true + 源键保留（scheduleCreate/scheduleDraft——FormOverlay 按挂载源分流应答形状）', () => {
     const draft = { kind: 'once', schedule: '0 0 9 19 9 *', prompt: '提醒我喝水', models: ['m1'] }
     const events = translate(

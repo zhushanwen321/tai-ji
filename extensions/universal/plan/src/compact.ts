@@ -155,7 +155,7 @@ export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]):
 
 /** goalInit 失败原因——五值与 tryGoalInit 的 5 个失败出口一一对应（设计 §6.2 D2）。 */
 export type GoalBridgeFailureReason =
-  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——桥修复后是真实可达的防御分支：goal 档仅在 detectGoalCapability 通过时出现，但 slot 残留 fn 失效等窗口仍可能触发）
+  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——execute 档无条件尝试 goalInit，goal 扩展未装/未挂 slot 时即走此出口，独立 pi 常态分支）
   | "plan-unreadable" // plan 文件读取失败
   | "no-steps" // plan 内容提取到 0 条步骤
   | "init-refused" // goalInit 返回 false（已有 active goal / ctx 缺失）
@@ -299,9 +299,9 @@ function deliverExecutionNotice(
 /**
  * complete 的 isolation 分发（D1 后仅 compact | direct，两档都投递执行通知）。
  *
- * 返回值：execMode=goal 且 isolation=direct 时同步返回 goalInit 的 outcome
+ * 返回值：execMode=execute 且 isolation=direct 时同步返回 goalInit 的 outcome
  * （executeComplete 写进 result content 与 details）；其余情形返回 undefined——
- * 非 goal 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
+ * skill 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
  * entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，时序
  * 不动——设计 §6.2 D2），该档 result 已返回，失败报告走 steer + notify 通道。
  */

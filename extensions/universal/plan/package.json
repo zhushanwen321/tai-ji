@@ -10,6 +10,9 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "keywords": [
@@ -47,6 +50,7 @@
   "files": [
     "index.ts",
     "src/",
+    "skills/",
     "templates/"
   ],
   "dependencies": {

@@ -97,10 +97,10 @@ export interface AckTurnDeps {
   loadBuiltinProviderIds?: () => Promise<Set<string>>
   loadModelsJsonProviderIds?: () => Promise<Set<string>>
   /**
-   * native 重载查询器（测试缝隙；生产不传则判据缺失——装配点必传，见
+   * 已注册 provider 查询器（测试缝隙；生产不传则判据缺失——装配点必传，见
    * ack-provider AckAvailabilityDeps 注释）。
    */
-  hasRegisteredNativeOverride?: (providerId: string) => boolean
+  isProviderRegistered?: (providerId: string) => boolean
 }
 
 /** ack 编排控制器（index.ts 在既有 pi.on handler 内委派，不新增事件类型）。 */
@@ -194,7 +194,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       isToggleDisabled: () => isToggleDisabled,
       loadBuiltinProviderIds: deps.loadBuiltinProviderIds,
       loadModelsJsonProviderIds: deps.loadModelsJsonProviderIds,
-      hasRegisteredNativeOverride: deps.hasRegisteredNativeOverride,
+      isProviderRegistered: deps.isProviderRegistered,
     })
     ackState.availability = { providerId, isToggleDisabled, value }
     return value
