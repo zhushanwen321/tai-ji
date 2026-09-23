@@ -42,10 +42,14 @@ import type {
   WorkflowAgentCall,
   WorkflowDoneReason,
   WorkflowRunOutcome,
+  WorkflowRunStatus,
 } from '@taiji/shared'
 
 /** [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。 */
 const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled'] as const
+
+/** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 两态）。 */
+const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'done']
 
 /** workflow-state-link entry 的 data 结构（legacy） */
 interface WorkflowStateLinkData {
@@ -193,7 +197,15 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   if (typeof data !== 'object' || data === null) return null
   const d = data as Record<string, unknown>
   if (d.v !== 1) {
-    console.warn(
+    // warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏 entry 只出声一次；
+    // snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）
+    const snapForId = d.snapshot
+    const entryRunId = typeof snapForId === 'object' && snapForId !== null
+      && typeof (snapForId as Record<string, unknown>).runId === 'string'
+      ? ((snapForId as Record<string, unknown>).runId as string)
+      : '(no runId)'
+    warnOnce(
+      `entry-schema:${entryRunId}:${String(d.v)}`,
       `[workflow-extractor] workflow-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
         `extension/runtime version skew, skip this entry. Fix: align schema with ` +
         `extensions/universal/subagent-workflow/src/jsonl-run-store.ts (W17 v1).`,
@@ -317,7 +329,8 @@ function readAndMapSnapshot(runId: string, stateFilePath: string): WorkflowRunRe
 
 /**
  * 已解析 snapshot（state 文件行 / workflow-record entry 内嵌）→ 结构校验 + 版本守卫 +
- * 映射 WorkflowRunRecord。坏结构 / 版本不匹配 → null（跳过该 run）。
+ * 核心必填字段值级守卫 + 映射 WorkflowRunRecord。坏结构 / 版本不匹配 / 核心字段值非法
+ * → null（跳过该 run，warnOnce 留痕）。
  *
  * [W18] 自 legacy readAndMapSnapshot 抽出共用：state 文件路径（legacy）与自描述 entry
  * 路径（stateFilePath = ''）同守卫同映射，两路派生行为一致。
@@ -346,7 +359,10 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // extension 先发版（npm-* tag 独立管线）而 app 未跟上时，版本守卫会把新 run 全部
   // 判为不匹配跳过（renderer 侧新 run 无 record，托盘 workflow 面板为空），无日志则该版本漂移不可观测。
   if (snapshot.v !== SNAPSHOT_VERSION) {
-    console.warn(
+    // warnOnce 按 runId/路径去重（热路径反复重扫同一 run 只出声一次，形态对齐上方
+    // state 文件路径的 warnOnce 用法）
+    warnOnce(
+      `snapshot-version:${stateFilePath || 'workflow-record'}:${runId}`,
       `[workflow-extractor] snapshot version '${String(snapshot.v)}' unsupported (expected '${SNAPSHOT_VERSION}') — ` +
         `extension/runtime version skew, skip run ${runId} (${stateFilePath || 'workflow-record entry'}). ` +
         `Fix: align the app runtime with the bundled @zhushanwen/pi-subagent-workflow extension ` +
@@ -363,7 +379,48 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // 按坏行跳过；数组内的 null 项在 mapSnapshotToRecord 过滤（项级隔离，不弃整个 run）。
   if (!Array.isArray((body.state as Record<string, unknown>).trace)) return null
 
+  // 核心必填字段值级守卫：mapSnapshotToRecord 直接透传的 scriptName/status/startedAt
+  // 消费方按非空/词表/可解析时间语义消费，谎报类型的值（截断写 / 外部覆写产出）会使
+  // record 进入列表但渲染坏行——按坏行跳过该 run 并 warn（对齐上方既有「坏行跳过」
+  // 语义与同文件 collectCallProgress 的值级防御哲学）。
+  const coreIssue = coreProjectionFieldIssue(snapshot)
+  if (coreIssue !== null) {
+    warnOnce(
+      `core-fields:${stateFilePath || 'workflow-record'}:${runId}`,
+      `[workflow-extractor] snapshot core field invalid, run no longer listed: runId=${runId}, ` +
+        `path=${stateFilePath || 'workflow-record entry'}, issue=${coreIssue}`,
+    )
+    return null
+  }
+
   return mapSnapshotToRecord(snapshot, stateFilePath)
+}
+
+/**
+ * 核心必填字段值级守卫（mapSnapshotToRecord 直接透传三字段的校验点）。
+ * 返回首个不合法字段的描述（诊断用）或 null = 全部合法：
+ * - spec.scriptName：非空 string（record 直透，列表/详情展示键）；
+ * - state.status：∈ WorkflowRunStatus 词表（running/done，renderer 状态徽标按词表消费）；
+ * - meta.startedAt：非空 string 且可解析为有限时间（ISO 契约，写点 = subagent-core
+ *   lifecycle.ts 的 meta.startedAt toISOString；非有限时间串 = 损坏数据）。
+ */
+function coreProjectionFieldIssue(snapshot: RunSnapshot): string | null {
+  const spec = snapshot.spec as Record<string, unknown>
+  if (typeof spec.scriptName !== 'string' || spec.scriptName.length === 0) {
+    return `spec.scriptName invalid (${typeof spec.scriptName})`
+  }
+  const state = snapshot.state as Record<string, unknown>
+  if (!(WORKFLOW_RUN_STATUSES as readonly unknown[]).includes(state.status)) {
+    return `state.status invalid (${String(state.status)})`
+  }
+  const meta = snapshot.meta as Record<string, unknown>
+  if (
+    typeof meta.startedAt !== 'string' || meta.startedAt.length === 0
+    || !Number.isFinite(Date.parse(meta.startedAt))
+  ) {
+    return `meta.startedAt invalid (${typeof meta.startedAt})`
+  }
+  return null
 }
 
 /**

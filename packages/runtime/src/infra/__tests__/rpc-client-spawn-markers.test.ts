@@ -18,7 +18,7 @@
  * 运行：npx vitest run src/infra/__tests__/rpc-client-spawn-markers.test.ts
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -27,6 +27,7 @@ import {
   readSpawnMarkerList,
   recordSpawnMarkers,
   selectSpawnMarkerPaths,
+  sweepStaleSpawnMarkerTmpFiles,
   writeSpawnMarkersFile,
   type SpawnMarkerFsDeps,
 } from '../pi/spawn-markers.js'
@@ -383,6 +384,33 @@ describe('D · readSpawnMarkerList 读侧（u17 reap 判据③数据源）', () 
       expect(readSpawnMarkerList(dir)).toBeNull()
       expect(warnSpy).toHaveBeenCalledTimes(2)
       expect(String(warnSpy.mock.calls[0]?.[0])).toContain('malformed')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
+describe('E · sweepStaleSpawnMarkerTmpFiles（启动期 tmp 残片清扫）', () => {
+  it('超 24h 残片删除，新鲜残片与非 tmp 文件保留，run/ 不存在静默返回 0', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-spawn-markers-sweep-'))
+    try {
+      const runDir = join(dir, 'run')
+      mkdirSync(runDir, { recursive: true })
+      const stale = join(runDir, 'pi-spawn-markers.json.tmp-111-1000-0')
+      const fresh = join(runDir, `pi-spawn-markers.json.tmp-111-${Date.now()}-1`)
+      const keeper = join(runDir, 'pi-spawn-markers.json')
+      writeFileSync(stale, '{}')
+      writeFileSync(fresh, '{}')
+      writeFileSync(keeper, '[]')
+      const aged = new Date(Date.now() - 25 * 60 * 60 * 1000)
+      utimesSync(stale, aged, aged)
+      expect(sweepStaleSpawnMarkerTmpFiles(dir)).toBe(1)
+      expect(existsSync(stale)).toBe(false)
+      // 新鲜 tmp（并发 spawn 在途形态）与终态文件不误删
+      expect(existsSync(fresh)).toBe(true)
+      expect(existsSync(keeper)).toBe(true)
+      // run/ 不存在（首启前形态）→ 静默 0 不抛
+      expect(sweepStaleSpawnMarkerTmpFiles(join(dir, 'no-such-root'))).toBe(0)
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

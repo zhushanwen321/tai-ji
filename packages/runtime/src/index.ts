@@ -130,7 +130,7 @@ export type {
 import { RUNTIME_PLANNED_EXIT_CODE } from '@taiji/shared'
 // u17（设计 §6.12）：spawn 清单读侧在 infra SSOT（读写同模块）；组合根注入给 services 层
 // （D6c port 纪律——reap/startup-background-init 不直接 import infra）。
-import { readSpawnMarkerList } from './infra/pi/spawn-markers.js'
+import { readSpawnMarkerList, sweepStaleSpawnMarkerTmpFiles } from './infra/pi/spawn-markers.js'
 // A1-2（provider-config-quota 架构）：models.json 寄生字段 → config/providers.json 迁移。
 // 挂载薄包装在独立小模块 run-extras-migration.ts（失败语义 + 返回值契约可单测，
 // 组合根 import 即执行 main() 不可直测）；此处 readExtrasWithFallback 供 QuotaService 双读。
@@ -1387,6 +1387,8 @@ async function main(): Promise<void> {
     },
     // u17 判据 v2：spawn 清单读取（infra 读侧经 port 注入；闭包绑定组合根同源 getDataDir()）
     readSpawnMarkers: () => readSpawnMarkerList(getDataDir()),
+    // 加固轮：spawn 清单 tmp 残片清扫（infra 实现经 port 注入，同上闭包形态）
+    sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
   })
 
   // ── u5（crash-forensics-and-watchdog D3）：reattach 编排 ─────────────────────
