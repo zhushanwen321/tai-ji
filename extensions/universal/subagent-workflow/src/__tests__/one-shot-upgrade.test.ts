@@ -33,7 +33,7 @@ import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import type { PiLike } from "@zhushanwen/subagent-core/execution/subagent-service.ts";
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
-import { messageHandler } from "../interface/subagent-actions.ts";
+import { messageHandler } from "@zhushanwen/subagent-core";
 
 // [commit 前修复] 测试进程可能继承宿主（pi 子进程链）的 PI_SUBAGENT_* 身份 env：
 // initSession 的 sessionRootId/execCtx 基线读 env 优先于 init.sessionId——宿主 env

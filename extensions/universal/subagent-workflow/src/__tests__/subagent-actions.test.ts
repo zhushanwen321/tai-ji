@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { ListHandlerResult } from "../interface/subagent-actions.ts";
+import type { ListHandlerResult } from "@zhushanwen/subagent-core";
 import { adapter } from "../interface/subagent-actions.ts";
 import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 

@@ -13,7 +13,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import { displayAgentName } from "@zhushanwen/subagent-core";
-import { messageHandler, startHandler } from "./subagent-actions.ts";
+import { messageHandler, startHandler } from "@zhushanwen/subagent-core";
 import { parseSubagentRpcCommand } from "./command-actions.ts";
 import type { SubagentRpcAction } from "./command-actions.ts";
 import { LIST_LIMIT } from "./list-shared.ts";

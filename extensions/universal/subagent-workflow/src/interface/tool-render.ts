@@ -32,8 +32,8 @@ import {
   formatElapsedSeconds,
   statusGlyph,
   type ThemeLike,
-  truncLine,
 } from "./format.ts";
+import { truncLine } from "./tui-kit.ts";
 
 // ============================================================
 // 常量

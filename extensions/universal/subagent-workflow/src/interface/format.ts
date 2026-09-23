@@ -6,8 +6,8 @@
 //   `·` 同级并列字段/thinking 图标;`()` 元数据分组;`›` 工具;`>` 输出;`·` thinking.
 //   禁用 `│` 做 stats 分隔、`├─`/`└─` 做 eventLog 前缀.
 //
-// 截断/填充/换行（truncLine / padToVisible / segFillColored / wrapText）已迁
-// ./tui-kit.ts（post-convergence C4 零依赖叶），本文件 re-export 维持既有导入面.
+// 截断/填充/换行（truncLine / padToVisible / segFillColored / wrapText）单定义
+// ./tui-kit.ts（零依赖叶），消费方直接从 tui-kit import。
 
 import os from "node:os";
 
@@ -24,12 +24,6 @@ import type {
   ToolCallEntry,
 } from "@zhushanwen/subagent-core";
 import { displayAgentName } from "@zhushanwen/subagent-core";
-
-import { padToVisible, segFillColored, truncLine, wrapText } from "./tui-kit.ts";
-
-// ANSI 可见宽度布局家族单定义在 ./tui-kit.ts（零依赖叶）；此处 re-export 保持
-// 既有消费方（tool-render / bg-notify-render / 测试等）导入面零改动。
-export { padToVisible, segFillColored, truncLine, wrapText };
 
 /**
  * ThemeLike:TUI 语义 token 着色接口(duck-typed,兼容 Pi Theme).
@@ -419,7 +413,7 @@ export function formatDisplayItem(item: DisplayItem, theme: ThemeLike): string {
 // 自 views/format.ts 并入（D7-① 双轨合并）：workflow 视图特有的 badge/phase/
 // trace 行格式化在此作差异段保留。并入时收敛的同构构件——ThemeLike、
 // formatElapsedSeconds（本文件版含小时分支，>1h 显示 "1h15m" 而非 "75m30s"）、
-// segFillColored、padToVisible（后者已随 C4 迁 ./tui-kit.ts，经 re-export 复用）。
+// segFillColored、padToVisible（后者已随 C4 迁 ./tui-kit.ts，消费方直接 import）。
 // ============================================================
 
 // ── Workflow view 布局常量 ────────────────────────────────────

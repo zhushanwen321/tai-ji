@@ -10,16 +10,13 @@ import {
   formatRunStatusElapsed,
   formatTokens,
   formatToolCall,
-  padToVisible,
   sanitizeLabel,
-  segFillColored,
   shortId,
   spinnerGlyph,
   statusGlyph,
-  truncLine,
-  wrapText,
   type ThemeLike,
 } from "../interface/format.ts";
+import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui-kit.ts";
 
 // ============================================================
 // formatTokens
