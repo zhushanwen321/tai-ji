@@ -88,12 +88,16 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // （u-2c 删 ./* 通配后深路径 tsc 不可解析，barrel 是壳侧唯一消费通道）；
 // RUN_EVENT_JOURNAL_SUFFIX / STATE_DIR_NAME 同理经 barrel 单源（C3 常量上收：
 // journal 后缀与 workflow-state 目录分量原为本地镜像，漂移即 watcher 失配 /
-// store 读写错目录，现编译期跟随 core）。
+// store 读写错目录，现编译期跟随 core）；createRunPersistThrottle = entry
+// append 节流决策单点（原与 core FileRunStore 平行的五要素判定收编，B3 单侧
+// 修复实证独立演化风险）。
 import {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
   DEFAULT_STATE_MAX_RUNS,
   RUN_EVENT_JOURNAL_SUFFIX,
   STATE_DIR_NAME,
+  createRunPersistThrottle,
+  type RunPersistThrottle,
 } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/subagent-core";
 
@@ -402,8 +406,8 @@ export class JsonlRunStore {
   private pi?: Pick<ExtensionAPI, "appendEntry">;
   private ctx?: ExtensionContext;
   private readonly saveDebounceMs: number;
-  /** workflow-record entry append 节流最小间隔（ms），0 = 禁用。 */
-  private readonly entryAppendMinIntervalMs: number;
+  /** workflow-record entry append 节流（判定 + 记账单点见 core persist-throttle.ts）。 */
+  private readonly entryThrottle: RunPersistThrottle;
   /** [P3/D6] 事件边沿 flush 防抖窗口（ms）。 */
   private readonly eventEdgeDebounceMs: number;
   /**
@@ -430,13 +434,6 @@ export class JsonlRunStore {
   /** 本实例已至少成功发起过一次 flush 的 runId（冷/热路径判据）。 */
   private readonly writtenOnce = new Set<string>();
   /**
-   * per-runId 上次 workflow-record entry append 时刻（节流判据，时间源 Date.now()——
-   * fake timers 下可推进）。终态 append 后删（终态后 runId 不再 save）；残留条目
-   * 只出现在 running 中 run 消失场景，单条可忽略（对齐 core FileRunStore.lastSavedAt
-   * 的取舍先例）。
-   */
-  private readonly lastEntryAppendAt = new Map<string, number>();
-  /**
    * per-runId 串行 flush 链。同 runId 的 flush 排队顺序执行（排队不跳过——
    * 跳过会丢最新状态且打破后写覆盖前写的单调性），不同 runId 互不阻塞。
    * 链条目 settle 后不清理：runId 数量有界、生命周期短于 store，惰性清理
@@ -451,8 +448,7 @@ export class JsonlRunStore {
     this.pi = opts.pi;
     this.ctx = opts.ctx;
     this.saveDebounceMs = opts.saveDebounceMs ?? DEFAULT_SAVE_DEBOUNCE_MS;
-    this.entryAppendMinIntervalMs = Math.max(
-      0,
+    this.entryThrottle = createRunPersistThrottle(
       opts.entryAppendMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS,
     );
     this.eventEdgeDebounceMs = Math.max(0, opts.eventEdgeDebounceMs ?? DEFAULT_EVENT_EDGE_DEBOUNCE_MS);
@@ -649,29 +645,19 @@ export class JsonlRunStore {
       // 形态都无害：appendEntry 失败 → entry 与 state 双缺（等价崩溃丢失，冷路径
       // 回滚后重试）；appendEntry 成功 + writeFile 失败 → 权威 entry 已落，state
       // 停在旧快照（读序 entry > state 文件，读侧无损失）。
-      // [B-1] entry append 节流（语义对齐 core FileRunStore.save OR-5 ⑥a）：running
-      // 中间态距上次 append 不足间隔 → 跳过（pi session JSONL append-only，节流前
-      // 每次 flush 全量 append 累积单 run O(n²) 磁盘）；终态永不节流（最终状态必进
-      // pi 权威文件）；间隔 0 禁用。判据在 append 成功后更新——writeFile 随后失败
-      // 不回退判据：entry 已成功落账是既成事实，重试的 writeFile 无需重复 append。
+      // [B-1] entry append 节流（决策单点 = core persist-throttle.ts，与
+      // FileRunStore.save 共享同一五要素矩阵：pi session JSONL append-only，节流前
+      // 每次 flush 全量 append 累积单 run O(n²) 磁盘；终态永不节流（最终状态必进
+      // pi 权威文件）；间隔 0 禁用。记账在 append 成功后——writeFile 随后失败
+      // 不回退判据：entry 已成功落账是既成事实，重试的 writeFile 无需重复 append）。
       const isTerminal = run.state.status !== "running";
       const now = Date.now();
-      const lastAppendAt = this.lastEntryAppendAt.get(runId);
-      if (
-        this.entryAppendMinIntervalMs <= 0 ||
-        isTerminal ||
-        lastAppendAt === undefined ||
-        now - lastAppendAt >= this.entryAppendMinIntervalMs
-      ) {
+      if (this.entryThrottle.shouldPersist(runId, isTerminal, now)) {
         this.pi?.appendEntry(
           WORKFLOW_RECORD_CUSTOM_TYPE,
           toWorkflowRecordEntryData(snapshot),
         );
-        if (isTerminal) {
-          this.lastEntryAppendAt.delete(runId);
-        } else {
-          this.lastEntryAppendAt.set(runId, now);
-        }
+        this.entryThrottle.recordPersisted(runId, isTerminal, now);
       }
       await fs.promises.writeFile(filePath, JSON.stringify(snapshot) + "\n", "utf8");
       // OR-5 ⑥b 磁盘保留维护（默认开 → [Q2] core 单源收口 + abandon 接线）：新 run
@@ -893,7 +879,7 @@ export class JsonlRunStore {
    * 原地改写 entry 写入源与 ctx——store 实例跨 reload 存活（D2 槽），在飞去抖批与
    * per-runId 串行 flush 链持有 this，原地改写对后续 flush 天然可见（不遍历对象图
    * 重绑：闭包引用不可枚举，漏一处 = 恢复后随机 assertActive 抛——设计被否项）。
-   * writtenOnce / lastEntryAppendAt / pending / chains 全部保留（接管而非重建）。
+   * writtenOnce / entry 节流记账 / pending / chains 全部保留（接管而非重建）。
    *
    * [skill-reload D5] 换入的 appendEntry 源包 guardStaleCtx：下一次 reload 窗口
    * （invalidate → adoption rebind 完成之间，通常 <1s）in-flight flush 触碰已 stale

@@ -30,6 +30,7 @@ import { getLogger } from "../core/logger.ts";
 // writeRunTerminalManifest）；manifest-store 不回指 orchestration，无环。
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import type { RunStore } from "./models/ports.ts";
+import { createRunPersistThrottle, type RunPersistThrottle } from "./persist-throttle.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 // journal 后缀经 run-events 单源消费（本文件只裁剪/排除 journal 附属文件，不定义后缀词表）。
 import { RUN_EVENT_JOURNAL_SUFFIX } from "./run-events.ts";
@@ -296,18 +297,11 @@ export class FileRunStore implements RunStore {
   /** 显式状态目录覆盖（构造注入；见 FileRunStoreOptions.stateDir）。 */
   private readonly stateDirOverride: string | undefined;
 
-  /** save 节流最小间隔（ms），0 = 禁用。 */
-  private readonly saveMinIntervalMs: number;
-  /**
-   * per-runId 上次实际落盘时刻（节流判据）。终态落盘成功即删（终态后 runId 不再
-   * save）；残留条目只出现在「running 中 run 消失（崩溃/宿主弃用）」场景，单条
-   * ~100B 可忽略（对齐 jsonl-run-store chains「每 runId 残留 settled Promise」
-   * 的取舍先例）。时间源 Date.now()（fake timers 下可推进，测试友好）。
-   */
-  private readonly lastSavedAt = new Map<string, number>();
+  /** save 节流（判定 + 记账单点见 persist-throttle.ts；窗口注入见 FileRunStoreOptions.saveMinIntervalMs）。 */
+  private readonly throttle: RunPersistThrottle;
 
   constructor(opts?: FileRunStoreOptions) {
-    this.saveMinIntervalMs = Math.max(0, opts?.saveMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS);
+    this.throttle = createRunPersistThrottle(opts?.saveMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS);
     this.stateDirOverride = opts?.stateDir;
   }
 
@@ -316,22 +310,17 @@ export class FileRunStore implements RunStore {
   }
 
   /**
-   * 快照落盘（OR-5 ⑥a 节流后）：
-   * - 首写（该 runId 尚无落盘记录）永不节流——保证新 run 至少一条快照，
-   *   loadAll 重水合可发现；
-   * - 终态（status 非 running）永不节流——最终状态必落盘，末行即终态快照；
-   * - running 中间态距上次落盘不足 {@link saveMinIntervalMs} → 跳过本次 append
-   *   （状态仍在调用方内存 runs Map，下次落盘带全量最新快照；本文件最后一条
-   *   快照因此最多落后真实状态一个节流窗口——崩溃语义与 jsonl-run-store 去抖
-   *   同源：未落盘的 running 尾部丢失，等价崩溃链由恢复路径收编）。
-   *
-   * 节流判据在落盘成功后才更新（IO 失败不吞下一次重试机会）。
+   * 快照落盘（节流决策经 persist-throttle.ts 单点——五要素矩阵与记账语义的
+   * 期望源在该文件的表驱动单测）：窗口内跳过本次 append（状态仍在调用方内存
+   * runs Map，下次落盘带全量最新快照；本文件最后一条快照因此最多落后真实状态
+   * 一个节流窗口——崩溃语义与 jsonl-run-store 去抖同源：未落盘的 running 尾部
+   * 丢失，等价崩溃链由恢复路径收编）。记账在落盘成功后（IO 失败不吞下一次
+   * 重试机会）。
    */
   async save(run: WorkflowRun): Promise<void> {
     const isTerminal = run.state.status !== "running";
     const now = Date.now();
-    const last = this.lastSavedAt.get(run.runId);
-    if (!isTerminal && last !== undefined && now - last < this.saveMinIntervalMs) {
+    if (!this.throttle.shouldPersist(run.runId, isTerminal, now)) {
       return; // 节流窗口内：跳过本次全量快照 append
     }
     // mkdir recursive 每次 save 前执行：幂等零成本（目录已存在时仅一次 stat），
@@ -340,11 +329,7 @@ export class FileRunStore implements RunStore {
     // toRunSnapshot 补 v 字段（D4 裁决②写入侧）；live strip 已随 [H2 W3] live 字段删除退役
     const line = JSON.stringify(toRunSnapshot(run));
     await appendFile(this.stateFilePath(run.runId), line + "\n", "utf8");
-    if (isTerminal) {
-      this.lastSavedAt.delete(run.runId);
-    } else {
-      this.lastSavedAt.set(run.runId, now);
-    }
+    this.throttle.recordPersisted(run.runId, isTerminal, now);
   }
 
   async loadAll(): Promise<WorkflowRun[]> {
@@ -373,7 +358,7 @@ export class FileRunStore implements RunStore {
    * 判据）。同步形态：sweep 在 session_start 同步链内运行（runReconcileSweep 同步
    * 契约），不能 await loadAll——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs
    * 读先例），逐行解析复用 parseLine（版本衔接 + 形状校验与 loadLatestValidLine
-   * 单源，同步只读不触碰 lastSavedAt 节流记账）。
+   * 单源，同步只读不触碰节流记账）。
    *
    * 判定（宁挂账不失明——误注销活跃 run 是事故方向，判据保守侧取「不可判定」）：
    * - state 文件不存在（ENOENT）→ missing（设计判据「已归档/不存在视同终态」——run 从未
