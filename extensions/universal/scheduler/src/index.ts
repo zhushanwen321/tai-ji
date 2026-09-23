@@ -149,6 +149,10 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       log: logger,
       render: (key, params) => t(key, params),
       notify: (message, level) => ctx.ui.notify(message, level),
+      // native 重载查询（ack no-base 判据②）：闭包捕获本 session 的 modelRegistry——
+      // 命中即 no-base（覆写会顶掉第三方 native 注册且 unregister 不恢复）。
+      hasRegisteredNativeOverride: (providerId) =>
+        ctx.modelRegistry.getRegisteredNativeProvider(providerId) !== undefined,
     })
     ackController.handleSessionBoundary()
 

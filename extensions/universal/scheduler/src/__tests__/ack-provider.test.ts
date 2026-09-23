@@ -162,6 +162,34 @@ describe('computeAckAvailability', () => {
     expect(result).toEqual({ available: false, reason: 'toggle-disabled' })
   })
 
+  it('native 重载在场 ⇒ no-base（先于 builtin/models.json 的 available 短路）', async () => {
+    // 关键回归组合：builtin ∩ native——native 检查若放在 builtin 判定之后会被
+    // available 短路掉，覆写照样顶掉第三方 native 注册（registerProvider 即删 native
+    // 层且 unregister 不恢复）。
+    const builtinHit = await computeAckAvailability({
+      providerId: 'anthropic',
+      isToggleDisabled: () => false,
+      hasRegisteredNativeOverride: (id) => id === 'anthropic',
+    })
+    expect(builtinHit).toEqual({ available: false, reason: 'no-base' })
+
+    const modelsJsonHit = await computeAckAvailability({
+      providerId: 'acme-custom',
+      isToggleDisabled: () => false,
+      loadModelsJsonProviderIds: async () => new Set(['acme-custom']),
+      hasRegisteredNativeOverride: (id) => id === 'acme-custom',
+    })
+    expect(modelsJsonHit).toEqual({ available: false, reason: 'no-base' })
+
+    // toggle-disabled 仍优先于 native 判据。
+    const toggled = await computeAckAvailability({
+      providerId: 'anthropic',
+      isToggleDisabled: () => true,
+      hasRegisteredNativeOverride: () => true,
+    })
+    expect(toggled).toEqual({ available: false, reason: 'toggle-disabled' })
+  })
+
   it('内置 provider 命中 ⇒ available（含动态 provider radius）', async () => {
     const anthropic = await computeAckAvailability({
       providerId: 'anthropic',

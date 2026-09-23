@@ -234,13 +234,13 @@
  },
  {
   "id": "PS-14",
-  "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失",
+  "claim": "session 延迟首写：首条 assistant 消息前 jsonl 不落盘（_persist 的 hasAssistant 门控），新 session crash 窗口内内存记账丢失；翻转时机 = assistant entry append 的同步点（_appendEntry push 后同步 _persist，hasAssistant 命中即走 wx 全量补写分支，无异步 flush 窗口）——getEntries 读到 assistant ⇒ 磁盘文件必已含全部内存 entry，scheduler ack 落盘判据①的反向推论以此承重",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",
     "distPath": "dist/core/session-manager.js",
     "symbol": "_persist(entry) 的 hasAssistant 门控",
-    "note": ":724-752 —— flushed 翻转前全部 entry 内存持有，wx 独占创建后逐条补写"
+    "note": ":726-756 —— hasAssistant 检查 :729；!hasAssistant 分支 :730-740（flushed 已真则 appendFileSync :732，否则置 false 内存持有）；!flushed 全量补写分支 :741-752 同步执行（openSync \"wx\" :742 → for writeFileSync :744-746 → flushed=true :751）；_appendEntry :757-762（push :758 → _persist :761）——0.84.4 无 _flushSoon/异步 flush，全链同步 I/O"
    }
   ],
   "guard": {
@@ -285,18 +285,18 @@
  },
  {
   "id": "PS-17",
-  "claim": "已存在 session 文件上的 appendEntry 为内存同步入账 + flush debounce 管线落盘，非即写即盘/fsync——强杀落在 flush 窗口内该 entry 丢失（跨重启不可恢复）",
+  "claim": "已存在 session 文件上的 appendEntry 为同步 appendFileSync 追加（0.84.4 无 debounce/异步 flush：_flushSoon 全 dist 不存在，_appendEntry push 后同步 _persist），无 fsync——entry 一经 append 即已交内核页缓存，进程强杀（SIGKILL）不丢已追加 entry；OS 崩溃/断电窗口仍在（页缓存未 fsync 刷盘）",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",
     "distPath": "dist/core/session-manager.js",
-    "symbol": "_appendEntry + _flushSoon 管线",
-    "note": "appendEntry 同步入内存缓冲并调度 flush；flush 为批量异步写，无 fsync——与 PS-14 首写延迟同族的落盘窗口语义"
+    "symbol": "_appendEntry + _persist 同步链",
+    "note": "_appendEntry :757-762（push :758 → _persist :761）；_persist 已 flush 分支 appendFileSync :754 同步追加；全链无 fsync 调用——与 PS-14 首写同步翻转同族（同一条同步链的两个分支）"
    }
   ],
   "guard": {
    "type": "observe",
-   "note": "影响面：sw notify-ledger 的 G2『跨重启不丢』在 flush 窗口不成立（账目丢失→通知不重放，真丢失面）；notify-ledger.ts 头注与设计文档 D4/G2 已按此如实限定。观察项：flush 窗口量级为 debounce 毫秒级，日常触发概率低"
+   "note": "消费面：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
   },
   "verifiedWith": "0.84.4"
  },
@@ -890,6 +890,23 @@
   "guard": {
    "type": "probe",
    "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-no-turn.test.ts"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-43",
+  "claim": "convertToLlm 对 role:\"custom\" 消息无条件转 LLM user 消息：case \"custom\" 分支不读 display、无任何条件门控，content（string 包一层 text / 数组原样）整体映射为 { role: \"user\", content, timestamp }——custom 消息进上下文后对 LLM 的可见性与 user message 无差别；display 只影响对话流渲染不影响该转换。ext 消息注入通道选型（sendMessage custom 形态，ADR-0068 语义①）的承重语义：提示词类内容走 custom 形态迁移不损失模型可见性",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/messages.js",
+    "symbol": "convertToLlm 的 case \"custom\" 分支",
+    "note": ":75 导出；:89-96 case \"custom\" —— content 归一 :90（typeof string → [{type:\"text\",text}]，数组原样透传），:91-95 return { role: \"user\", content, timestamp } 无条件分支"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费面同审"
   },
   "verifiedWith": "0.84.4"
  }

@@ -1,15 +1,19 @@
 // ack 确认轮编排（dev-flow u-ack-turn 单元）。
 //
 // 背景：scheduler 命令路径建任务后，任务条目只 append 到 pi 的内存 fileEntries，
-// 而 pi 只有在会话「第一次落盘」后才把 fileEntries 写到磁盘 —— 若用户建完任务就
+// 而 pi 只有在会话「第一次落盘」后才把 fileEntries 写到磁盘（pi _persist 的
+// hasAssistant 门控，语义登记 docs/pi-semantics.json PS-14，锚 pi
+// dist/core/session-manager.js:726-756）—— 若用户建完任务就
 // 不再说话，任务会随进程退出丢失。解法：注入一次零 token 本地合成轮，产出真
 // assistant 消息，打开落盘开关（设计 scheduler-command-path-persistence §3.3）。
 //
 // 生命周期（覆写只活在极小时间片，故无需互斥）：
 //   ① 建任务成功 ⇒ maybeStartAck：只读检查未落盘 + 空闲 + 可用，注入 custom 触发器
 //      （triggerTurn）；写盘兜底判定收敛在 session 边界；
-//   ② 触发器的 message_start 到达（本轮首次模型请求之前，已按 pi-agent-core
-//      agent-loop 实装核实）⇒ 同步 registerProvider 覆写当前 provider 的 streamSimple；
+//   ② 触发器的 message_start 到达（本轮首次模型请求之前——pi-agent-core
+//      agent-loop.js:51-53 初始 prompt 逐条 emit message_start/message_end 先于
+//      :56 runLoop → :122 streamAssistantResponse 首次模型请求，按 0.84.4 实装核实；
+//      直达链锚 PS-08）⇒ 同步 registerProvider 覆写当前 provider 的 streamSimple；
 //   ③ 我们的 streamSimple 被调用 ⇒ 返回 stream 之前同步注销覆写（one-shot 自撤），
 //      本轮内被 steer/followUp drain 出的后续请求与后续轮次全部走真实 provider；
 //   ④ turn_end / session 边界 ⇒ 安全网注销（幂等）。
@@ -71,6 +75,11 @@ export interface AckTurnDeps {
    */
   loadBuiltinProviderIds?: () => Promise<Set<string>>
   loadModelsJsonProviderIds?: () => Promise<Set<string>>
+  /**
+   * native 重载查询器（测试缝隙；生产不传则判据缺失——装配点必传，见
+   * ack-provider AckAvailabilityDeps 注释）。
+   */
+  hasRegisteredNativeOverride?: (providerId: string) => boolean
 }
 
 /** ack 编排控制器（index.ts 在既有 pi.on handler 内委派，不新增事件类型）。 */
@@ -164,6 +173,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       isToggleDisabled: () => isToggleDisabled,
       loadBuiltinProviderIds: deps.loadBuiltinProviderIds,
       loadModelsJsonProviderIds: deps.loadModelsJsonProviderIds,
+      hasRegisteredNativeOverride: deps.hasRegisteredNativeOverride,
     })
     ackState.availability = { providerId, isToggleDisabled, value }
     return value
@@ -312,6 +322,11 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
 /**
  * 落盘判据①：会话内已有 assistant 消息 ⇒ pi 已 flush，任务必然已落盘。
+ *
+ * 反向推论承重锚（语义登记 docs/pi-semantics.json PS-14）：pi _appendEntry 先 push 进
+ * fileEntries 再同步 _persist（dist/core/session-manager.js:757-762），assistant 在列时
+ * hasAssistant 命中即走同步 wx 全量补写分支（:741-752，0.84.4 无异步 flush）——getEntries
+ * 读到 assistant 的时刻磁盘必已含全部内存 entry，无异步窗口。
  *
  * entry 形状来自 replay 的 SchedulerEntryLike（无 role 字段声明），故用 `in` 收窄到
  * unknown 再比较——不引断言、不引 any。

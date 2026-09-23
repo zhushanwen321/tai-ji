@@ -127,6 +127,13 @@ export interface AckAvailabilityDeps {
   loadBuiltinProviderIds?: () => Promise<Set<string>>
   /** models.json provider id 集合加载器（可注入，测试用）。 */
   loadModelsJsonProviderIds?: () => Promise<Set<string>>
+  /**
+   * native 重载查询器（可注入，测试用）：providerId 已被 `registerNativeProvider`
+   * 注册过 ⇒ true。生产装配点必传（闭包捕获 `ctx.modelRegistry` 的
+   * `getRegisteredNativeProvider`，pi 无全局 registry 单例可达）；未注入时跳过本判据
+   * （仅测试最小夹具的退化形态）。
+   */
+  hasRegisteredNativeOverride?: (providerId: string) => boolean
 }
 
 /**
@@ -178,14 +185,24 @@ async function resolveAgentDir(): Promise<string> {
 /**
  * 预计算 ack 可用性（供编排层缓存，供武装点同步消费）：
  *   ① `isToggleDisabled()` ⇒ `toggle-disabled`
- *   ② providerId ∈ 内置集合（`builtinProviders()`，含 radius）⇒ `available`
- *   ③ providerId ∈ models.json 的 providers ⇒ `available`
- *   ④ 皆否 ⇒ `no-base`
+ *   ② providerId 已被 native 重载注册（`getRegisteredNativeProvider` 命中）⇒ `no-base`
+ *      ——pi 的 registerProvider 实装注册时即删 native 层且 unregister 两层同删不恢复
+ *      （dist/core/model-runtime.js），覆写会静默顶掉第三方扩展的 native 注册，
+ *      与 builtin/models.json 是否命中无关，故先于一切 available 短路；
+ *   ③ providerId ∈ 内置集合（`builtinProviders()`，含 radius）⇒ `available`
+ *   ④ providerId ∈ models.json 的 providers ⇒ `available`
+ *   ⑤ 皆否 ⇒ `no-base`
  *   任一环节抛错 ⇒ `check-failed`（永不抛出，保证扩展加载与会话启动不被能力探测拖垮）。
  */
 export async function computeAckAvailability(deps: AckAvailabilityDeps): Promise<AckAvailability> {
   try {
     if (deps.isToggleDisabled()) return { available: false, reason: 'toggle-disabled' }
+
+    // native 重载检查必须在 ③④ 的 available 短路之前：builtin ∩ native 组合若先命中
+    // ③，覆写照样会顶掉 native 注册（判据就漏了）。
+    if (deps.hasRegisteredNativeOverride?.(deps.providerId)) {
+      return { available: false, reason: 'no-base' }
+    }
 
     const builtinIds = await (deps.loadBuiltinProviderIds ?? loadBuiltinProviderIds)()
     if (builtinIds.has(deps.providerId)) return { available: true }

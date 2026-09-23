@@ -186,9 +186,10 @@ export type AckAvailability =
   | { available: false; reason: AckUnavailableReason }
 
 /**
- * ack 不可用原因：`no-base` = 覆写会在注销时丢失基座的 provider（仅被其它扩展 native
- * 重载注册过）；`toggle-disabled` = 显式禁用开关；`check-failed` = 基座判据导入/读取失败
- * （fail-closed）。三者都走「不覆写 + 如实文案」路径。
+ * ack 不可用原因：`no-base` = 无可安全覆写的基座，两种形态——①builtin/models.json 皆无
+ * provider；②provider 已被其它扩展 native 重载注册（pi registerProvider 注册时即删 native
+ * 层且 unregister 不恢复，覆写会静默顶掉第三方注册）；`toggle-disabled` = 显式禁用开关；
+ * `check-failed` = 基座判据导入/读取失败（fail-closed）。三者都走「不覆写 + 如实文案」路径。
  */
 export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed'
 
