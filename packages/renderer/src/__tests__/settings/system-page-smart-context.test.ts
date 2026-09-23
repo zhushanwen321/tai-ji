@@ -39,6 +39,10 @@ vi.mock('@/composables/useToast', () => toastModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/lib/ipc', () => ipcModule())
 
+// SystemPage 集成 mount 重组件树，插桩/全量套件负载下超 5s 默认预算（空载单跑秒级过）
+// ——预算放宽对齐兄弟文件 system-page-rename-model.test.ts 的 20s 形态
+vi.setConfig({ testTimeout: 20_000 })
+
 // 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
 const settingsMock = settingsApiMocks
 
