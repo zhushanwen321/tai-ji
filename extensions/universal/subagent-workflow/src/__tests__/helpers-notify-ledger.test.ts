@@ -23,6 +23,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const { loggerFns } = vi.hoisted(() => ({
+  loggerFns: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+  getLogger: () => loggerFns,
+  setPiHandle: vi.fn(),
+}));
+
 import { bindNotifyLedgerHost, getBoundNotifyLedger, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
 
 import { notifyDone, WORKFLOW_DONE_NOTIFY_ID_PREFIX } from "../interface/helpers.ts";
@@ -196,22 +205,31 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     expect(mock.entries.filter((e) => e.customType === NOTIFY_LEDGER_CUSTOM_TYPE)).toHaveLength(1);
   });
 
-  it("record 抛（reload 窗口 appendEntry assertActive 形态）→ 去重不标记，重调可重试（窗口内不永久丢通知）", () => {
+  it("record 抛（reload 窗口 appendEntry assertActive 形态）→ error 留痕（含 notifyId/content 摘要）后原样上抛，去重不标记", () => {
     const { pi } = makePi();
     const run = makeRun();
     const notified = new Set<string>();
 
-    // 第一次：appendLedgerEntry 抛（模拟 reload 窗口 pi.appendEntry 命中 assertActive——
-    // 异常由 finalizeRun 围栏接住不崩，但账面 entry 未写）
+    // 已知丢失面（如实登记，见 notifyDone 注释）：appendLedgerEntry 抛 = 账面
+    // entry 未写、无重放源——该终局通知丢失，仅 error 日志留痕供手工补偿。
     const origAppend = mock.host.appendLedgerEntry;
     mock.host.appendLedgerEntry = () => {
       throw new Error("session context is no longer active (assertActive)");
     };
     expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified)).toThrow("assertActive");
-    // 关键断言：去重未标记（提前标记 = 去重阻断重试 + 账本无 entry 不可重放 = 永久丢失）
+    // error 留痕：含 notifyId 与 content 摘要（事后按 run 手工补偿的检索入口）
+    expect(loggerFns.error).toHaveBeenCalledWith(
+      expect.stringContaining("ledger record failed"),
+      expect.objectContaining({
+        runId: "wf-stale",
+        notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`,
+        contentPreview: expect.stringContaining("Workflow 'build' done"),
+      }),
+    );
+    // 去重未标记：进程内的重复收口回调不被去重阻断（防御形态）
     expect(notified.has("wf-stale")).toBe(false);
 
-    // 第二次（adoption 后重复收口回调）：appendLedgerEntry 恢复 → 写账 + 投递成功
+    // 重复收口回调（若到达）：appendLedgerEntry 恢复 → 写账 + 投递成功
     mock.host.appendLedgerEntry = origAppend;
     notifyDone(pi, "wf-stale", runAsParam(run), notified);
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`]));

@@ -24,10 +24,6 @@ export {
   respond,
   sendPromptCommand,
   sendGetStateCommand,
-  recordEpipeFailure,
-  clearEpipeFailure,
-  resetAllEpipeFailures,
-  EPIPE_FAILURE_THRESHOLD,
 } from "./stdin-writer.ts";
 export { parseChannel, type ParsedChannel } from "./ui-channels.ts";
 export { createUiRequestQueue, type UiRequestQueueDeps } from "./ui-request-queue.ts";

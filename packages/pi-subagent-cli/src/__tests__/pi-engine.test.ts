@@ -37,7 +37,6 @@ import {
   type SpawnRunParams,
   type SpawnRunResult,
 } from "../spawn-runner.ts";
-import { resetAllEpipeFailures } from "../stdin-writer.ts";
 import { PI_ADAPTER_VERSION, PI_ENGINE_ID } from "../constants.ts";
 
 /** fake 子进程：stdin 写捕获 + EPIPE 注入 + kill 观测（原 chat-session.test 形态，该文件已随 U5 删除）。 */
@@ -163,7 +162,6 @@ async function settleRun(cap: Captured, result: SpawnRunResult, opts: { askUser?
 
 afterEach(() => {
   killAllActiveChildren();
-  resetAllEpipeFailures();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });

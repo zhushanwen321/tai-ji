@@ -23,6 +23,7 @@
 import {
   ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
+  getLogger,
   isResponseFrame,
   isReverseRequestFrame,
   type AgentCallOpts,
@@ -42,6 +43,8 @@ import { ZCODE_ADAPTER_VERSION } from "./constants.ts";
 import { createDefaultZcodeEngine } from "./registration.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
+
+const logger = getLogger("subagents");
 
 /** 出站帧写入面（main.ts 注入 process.stdout；测试注入内存缓冲）。 */
 export type FrameWriter = (frame: unknown) => void;
@@ -207,7 +210,14 @@ export class EngineProtocolServer {
       ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
     };
     const ctxModel: EngineCtxModel | undefined = parseCtxModel(ctx.ctxModel);
-    const stream: EngineStream | undefined = ctx.streamMode === "stream" ? { onDelta: (delta) => { void this.reverseRequestInternal("host/streamDelta", { runId, delta }); } } : undefined;
+    const stream: EngineStream | undefined = ctx.streamMode === "stream"
+      ? {
+        onDelta: (delta) => {
+          void this.reverseRequestInternal("host/streamDelta", { runId, delta })
+            .catch(this.warnReverseFailure("host/streamDelta", `run ${runId}`));
+        },
+      }
+      : undefined;
 
     const runCtx: RunContext = {
       taskId: runId,
@@ -220,7 +230,8 @@ export class EngineProtocolServer {
       // sessionRef {sessionId, dbPath}，引擎侧 resume 读 + 新 session 注入消费）。
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
-        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef });
+        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef })
+          .catch(this.warnReverseFailure("host/handleReady", `run ${runId}`));
       },
     };
 
@@ -269,6 +280,20 @@ export class EngineProtocolServer {
    * 应答超时兜底 reject——数据面通道（host/log 等）core 10s 应答，reject 由调用方
    * 吞掉留痕（数据面丢失不拖死主链路）。
    */
+  /**
+   * fire-and-forget 反向请求（`void this.reverseRequestInternal(...)` 形态）的
+   * rejection 兜底：60s 超时（reverseRequestInternal 计时器）或宿主 error 帧
+   * （settleReverse）都会 reject——无 handler 即 unhandled rejection（Node ≥15
+   * 默认崩引擎进程）。失败只降级该次通道上报，warn 留痕不断流。
+   */
+  private warnReverseFailure(method: string, context: string): (err: unknown) => void {
+    return (err: unknown) => {
+      logger.warn(`[protocol] ${method} reverse request failed (${context}); continuing without it`, {
+        detail: toErrorMessage(err),
+      });
+    };
+  }
+
   /** 反向请求发送（公开面：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown> {
     return this.reverseRequestInternal(method, params);
@@ -285,7 +310,17 @@ export class EngineProtocolServer {
       if (typeof timer.unref === "function") timer.unref();
       this.reversePending.set(id, { resolve, reject, timer });
       this.reverseClock?.started(id);
-      this.write({ id, method, params });
+      try {
+        this.write({ id, method, params });
+      } catch (err) {
+        // write 同步抛错（stdout 关闭等）：就地收口——清 pending + timer 后转
+        // reject，不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer
+        // 残留，且 reject 无人消费时仍是 unhandled rejection 面）。
+        this.reversePending.delete(id);
+        clearTimeout(timer);
+        this.reverseClock?.settled(id);
+        reject(new Error(`reverse request ${method} (${id}) could not be written: ${toErrorMessage(err)}`));
+      }
     });
   }
 

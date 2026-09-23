@@ -370,7 +370,14 @@ export function setupWorkflowDomain(
         data,
       });
     } catch (err) {
-      void err;
+      // appendEntry 失败（stale ctx / session 已关闭等）= workflow:log entry 零痕迹。
+      // 独立通道留痕：extension-logger 的写点通道是 `subagents:log`（非
+      // `workflow:log`），不重入本函数；其 error() 内部 catch appendEntry 失败并
+      // 降级文件日志（TAIJI_AGENT_DEBUG=1 可见），自身不再抛。
+      logger.error(
+        `[subagent-workflow] workflow:log appendEntry failed (component=${component}): ${message}`,
+        { level, reason: toErrorMessage(err) },
+      );
     }
   }
 
@@ -491,23 +498,34 @@ export function setupWorkflowDomain(
   //  开头一致）+ 装配结果写入 per-session sessionState。
   // ════════════════════════════════════════════════════════════
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
-    lsRef.lastSessionId = ctx.sessionManager.getSessionId();
-    // [u7a D5] 初始上报（count=当下绝对计数）：触发时点 = extension 加载完成 / session
-    // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子——plugin-bridge 同款
-    // 事实）。fire-and-forget 在 await 装配链之前发起，不阻塞也不被阻塞。
-    inflightReporter.attachSession(ctx);
-    // [skill-reload D4] adoption 入参接线：reason 是 handler 独占信息（event 参数），
-    // existing 是 sessionState（domainState 闭包）里的既有条目——两者都是
-    // session-lifecycle seam 的 adoption 分流判据，经 SessionStartOptions 传入。
-    // 非 reload 的 session_start 不取 existing（quit 族 session_shutdown 已删条目，
-    // 此处恒 undefined；显式不传也防误接管）。
-    const existing =
-      event.reason === "reload" ? sessionState.get(ctx.sessionManager.getSessionId()) : undefined;
-    const result = await setupSessionLifecycle(pi, ctx, makeLifecycleDeps(), {
-      reason: event.reason,
-      existing,
-    });
-    sessionState.set(result.sessionId, result);
+    // 装配链异常不向 pi 事件分发逃逸（pi 0.84.4 extension handler 未捕获的 rejection
+    // 直接炸进程——E1 同机制）：围栏 error 留痕（含 sessionId）后保持 handler 不抛。
+    // lsRef 在 try 内先行赋值：getSessionId 自身抛错时 catch 里拿到的是上一 session
+    // 的 id（留痕仍可检索）。
+    try {
+      lsRef.lastSessionId = ctx.sessionManager.getSessionId();
+      // [u7a D5] 初始上报（count=当下绝对计数）：触发时点 = extension 加载完成 / session
+      // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子——plugin-bridge 同款
+      // 事实）。fire-and-forget 在 await 装配链之前发起，不阻塞也不被阻塞。
+      inflightReporter.attachSession(ctx);
+      // [skill-reload D4] adoption 入参接线：reason 是 handler 独占信息（event 参数），
+      // existing 是 sessionState（domainState 闭包）里的既有条目——两者都是
+      // session-lifecycle seam 的 adoption 分流判据，经 SessionStartOptions 传入。
+      // 非 reload 的 session_start 不取 existing（quit 族 session_shutdown 已删条目，
+      // 此处恒 undefined；显式不传也防误接管）。
+      const existing =
+        event.reason === "reload" ? sessionState.get(ctx.sessionManager.getSessionId()) : undefined;
+      const result = await setupSessionLifecycle(pi, ctx, makeLifecycleDeps(), {
+        reason: event.reason,
+        existing,
+      });
+      sessionState.set(result.sessionId, result);
+    } catch (err) {
+      logger.error(
+        `[subagent-workflow] session_start handler failed (sessionId=${lsRef.lastSessionId})`,
+        { reason: toErrorMessage(err) },
+      );
+    }
   });
 
   // ════════════════════════════════════════════════════════════
@@ -553,7 +571,9 @@ export function setupWorkflowDomain(
       try {
         await terminateRunningRuns(makeDeps(state), "Session switched: run terminated");
       } catch (err) {
-        bestEffort(err, "terminateRunningRuns (session_tree handler)");
+        // 外层兜底（正常路径 helper 内部已自过滤单 run 失败）——error 级：终态落盘
+        // 失败意味着重启后 kill-9 恢复的输入缺失，必须可见。
+        bestEffort(err, "terminateRunningRuns (session_tree handler)", "error");
       }
     }
   });
@@ -642,7 +662,17 @@ export function setupWorkflowDomain(
     }
 
     // ── subagents 域：dispose SubagentService ──
-    getSubagentService()?.dispose();
+    // dispose 是多步同步链，任一步同步抛错会跳过后续全部清理（terminateRunningRuns /
+    // store.dispose / dialogQueue.rejectAll）——围栏与下方 store.dispose 的防御同款：
+    // error 留痕（含 sessionId）后继续后续清理，不向 pi 事件分发逃逸。
+    try {
+      getSubagentService()?.dispose();
+    } catch (err) {
+      logger.error(
+        `[subagent-workflow] session_shutdown SubagentService.dispose failed (sessionId=${lsRef.lastSessionId})`,
+        { reason: toErrorMessage(err) },
+      );
+    }
 
     // [u7a D5] 在途上报通道随 session 终结：摘 ctx + 停重试（session 已死，重试直至
     // 成功的语义只对活 session 成立；进程级出口监听保留——后续 /new 重新 attach）。
@@ -660,13 +690,15 @@ export function setupWorkflowDomain(
       try {
         await terminateRunningRuns(makeDeps(state), "Session shutdown: run terminated");
       } catch (err) {
-        bestEffort(err, "terminateRunningRuns (session_shutdown handler)");
+        // 外层兜底（正常路径 helper 内部已自过滤单 run 失败）——error 级：终态落盘
+        // 失败意味着重启后 kill-9 恢复的输入缺失，必须可见。
+        bestEffort(err, "terminateRunningRuns (session_shutdown handler)", "error");
       }
       // dispose 自身恒 resolve，catch 兜底防御——handler 内抛错会中断后续 session
-      // 条目清理。不留静默吞错（错误必须可操作）：debug 留痕带 sessionId/sessionDir，
+      // 条目清理。不留静默吞错（错误必须可操作）：warn 留痕带 sessionId/sessionDir，
       // 排查「shutdown 后 run 状态不落盘」类问题时有迹可循。
       await state.store.dispose().catch((err: unknown) => {
-        logger.debug(
+        logger.warn(
           `[subagent-workflow] session_shutdown store.dispose failed (sessionId=${sessionId}, sessionDir=${state.sessionDir})`,
           { reason: toErrorMessage(err) },
         );
@@ -694,7 +726,15 @@ export function setupWorkflowDomain(
     }
     // MF-1: store 不健康时 fail-fast，避免 store.save 再次失败导致 run 状态不落地。
     if (!state.storeHealthy) {
-      return { ok: false, reason: "Workflow store unavailable (loadAll failed in session_start)" };
+      // 错误带恢复动作（错误 → 恢复闭环）：loadAll 失败的 store 本进程内不恢复，
+      // 重启 pi 或重载 session（重建 store + 重跑 kill-9 恢复）是唯一出路。前半段
+      // 子串（"store unavailable" / "loadAll failed"）被 crash-recovery 等测试锁定。
+      return {
+        ok: false,
+        reason:
+          "Workflow store unavailable (loadAll failed in session_start). " +
+          "Restart pi or reload this session to re-run crash recovery.",
+      };
     }
     return { ok: true, deps: makeDeps(state) };
   };

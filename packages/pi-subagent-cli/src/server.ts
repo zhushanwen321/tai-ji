@@ -27,6 +27,7 @@ import {
   ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
   assertChatConversationSupported,
+  getLogger,
   isResponseFrame,
   isReverseRequestFrame,
   isUiResponse,
@@ -49,6 +50,8 @@ import { PI_ADAPTER_VERSION } from "./constants.ts";
 import { PiEngine } from "./pi-engine.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
+
+const logger = getLogger("pi-engine-cli");
 
 /** 出站帧写入面（main.ts 注入 process.stdout；测试注入内存缓冲）。 */
 export type FrameWriter = (frame: unknown) => void;
@@ -272,7 +275,12 @@ export class EngineProtocolServer {
     const { runId, ctx } = params;
     const ctxModel: EngineCtxModel | undefined = parseCtxModel(ctx.ctxModel);
     const stream: EngineStream | undefined = ctx.streamMode === "stream"
-      ? { onDelta: (delta) => { void this.reverseRequestInternal("host/streamDelta", { runId, delta }); } }
+      ? {
+        onDelta: (delta) => {
+          void this.reverseRequestInternal("host/streamDelta", { runId, delta })
+            .catch(this.warnReverseFailure("host/streamDelta", `run ${runId}`));
+        },
+      }
       : undefined;
 
     return {
@@ -292,11 +300,13 @@ export class EngineProtocolServer {
       ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
-        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef });
+        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef })
+          .catch(this.warnReverseFailure("host/handleReady", `run ${runId}`));
       },
       onChildSpawned: (child) => {
         if (child.pid === undefined) return;
-        void this.reverseRequestInternal("host/childSpawned", { pid: child.pid, recordId: chatRecordId ?? runId });
+        void this.reverseRequestInternal("host/childSpawned", { pid: child.pid, recordId: chatRecordId ?? runId })
+          .catch(this.warnReverseFailure("host/childSpawned", `run ${runId}`));
       },
       // [SR-4 接线] 子进程退出态上报（宿主镜像据此取消该 pid 的挂起 dialog）。
       // 只报 exited——running 由上方 childSpawned 帧覆盖，不重复上报。
@@ -309,7 +319,7 @@ export class EngineProtocolServer {
           killed: p.killed,
           ...(p.exitCode !== undefined ? { exitCode: p.exitCode } : {}),
           ...(p.signal !== undefined ? { signal: p.signal } : {}),
-        });
+        }).catch(this.warnReverseFailure("host/childStateChanged", `run ${runId}`));
       },
     };
   }
@@ -343,6 +353,20 @@ export class EngineProtocolServer {
     this.write({ method: "event", params: { runId, seq, event } });
   }
 
+  /**
+   * fire-and-forget 反向请求（`void this.reverseRequestInternal(...)` 形态）的
+   * rejection 兜底：60s 超时（reverseRequestInternal 计时器）或宿主 error 帧
+   * （settleReverse）都会 reject——无 handler 即 unhandled rejection（Node ≥15
+   * 默认崩引擎进程）。失败只降级该次通道上报，warn 留痕不断流。
+   */
+  private warnReverseFailure(method: string, context: string): (err: unknown) => void {
+    return (err: unknown) => {
+      logger.warn(`[protocol] ${method} reverse request failed (${context}); continuing without it`, {
+        detail: toErrorMessage(err),
+      });
+    };
+  }
+
   /** 反向请求发送（公开面：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown> {
     return this.reverseRequestInternal(method, params);
@@ -359,7 +383,17 @@ export class EngineProtocolServer {
       if (typeof timer.unref === "function") timer.unref();
       this.reversePending.set(id, { resolve, reject, timer, method });
       this.reverseClock?.started(id);
-      this.write({ id, method, params });
+      try {
+        this.write({ id, method, params });
+      } catch (err) {
+        // write 同步抛错（stdout 关闭等）：就地收口——清 pending + timer 后转
+        // reject，不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer
+        // 残留，且 reject 无人消费时仍是 unhandled rejection 面）。
+        this.reversePending.delete(id);
+        clearTimeout(timer);
+        this.reverseClock?.settled(id);
+        reject(new Error(`reverse request ${method} (${id}) could not be written: ${toErrorMessage(err)}`));
+      }
     });
   }
 
@@ -370,7 +404,11 @@ export class EngineProtocolServer {
    * 结果帧才 settle。数据面通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {
     const pending = this.reversePending.get(String(id));
-    if (pending === undefined) return;
+    if (pending === undefined) {
+      // 迟到/未知应答帧（超时已判死清理、或重复应答）：debug 留痕后丢弃，不落位。
+      logger.debug(`[protocol] response frame for unknown reverse request ${String(id)} dropped (already settled or unknown id)`);
+      return;
+    }
     this.reverseClock?.acked(String(id));
     if (
       frame.error === undefined &&

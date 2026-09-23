@@ -350,45 +350,69 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 返回 undefined。
  */
 export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
+  const ledgerHost: NotifyLedgerHost = {
+    appendLedgerEntry: (customType, data) => {
+      pi.appendEntry(customType, data);
+    },
+    readSessionEntries: () => ctx.sessionManager.getEntries(),
+    isIdle: () => ctx.isIdle(),
+    onAgentSettled: (handler) => {
+      pi.on("agent_settled", handler);
+    },
+    sendDelivery: (message) => {
+      // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
+      // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
+      // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
+      // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
+      // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
+      // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
+      // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
+      // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
+      // settleRejected 留账重试语义不变）。
+      guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
+        label: "subagent-workflow:sendDelivery",
+        onStale: (error) =>
+          logger.warn("notify delivery skipped (stale ctx)", {
+            error: toErrorMessage(error),
+          }),
+      });
+    },
+    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn
+    // ——notifyStall 同款形态），让主 agent/用户在会话里看到「通知已放弃」线索。
+    // 与 sendDelivery（triggerTurn 唤醒）分工，通道不复用。
+    sendDisplayMessage: (message) => {
+      guardStaleCtx(() => pi.sendMessage(message), {
+        label: "subagent-workflow:sendDisplayMessage",
+        onStale: (error) =>
+          logger.warn("notify abandon display skipped (stale ctx)", {
+            error: toErrorMessage(error),
+          }),
+      });
+    },
+  };
+  // bind 与 recover 拆独立 try（失败归因不同）：
+  // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
+  // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放
+  //   缺席，边沿/看门狗仍投新通知）——不得共用 "bind failed" 文案误报。
+  let ledger: ReturnType<typeof bindNotifyLedgerHost>;
   try {
-    const ledgerHost: NotifyLedgerHost = {
-      appendLedgerEntry: (customType, data) => {
-        pi.appendEntry(customType, data);
-      },
-      readSessionEntries: () => ctx.sessionManager.getEntries(),
-      isIdle: () => ctx.isIdle(),
-      onAgentSettled: (handler) => {
-        pi.on("agent_settled", handler);
-      },
-      sendDelivery: (message) => {
-        // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
-        // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
-        // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-        // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
-        // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
-        // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
-        // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
-        // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
-        // settleRejected 留账重试语义不变）。
-        guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
-          label: "subagent-workflow:sendDelivery",
-          onStale: (error) =>
-            logger.warn("notify delivery skipped (stale ctx)", {
-              error: toErrorMessage(error),
-            }),
-        });
-      },
-    };
-    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
-    // 通道落盘），此处不再重复打日志。
-    bindNotifyLedgerHost(ledgerHost).recoverFromSession();
-    return ledgerHost;
+    ledger = bindNotifyLedgerHost(ledgerHost);
   } catch (err) {
     logger.warn("[subagents] notify ledger bind failed", {
       reason: toErrorMessage(err),
     });
     return undefined;
   }
+  try {
+    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
+    // 通道落盘），此处不再重复打日志。
+    ledger.recoverFromSession();
+  } catch (err) {
+    logger.warn("[subagents] notify ledger recoverFromSession failed (ledger stays bound)", {
+      reason: toErrorMessage(err),
+    });
+  }
+  return ledgerHost;
 }
 
 /**

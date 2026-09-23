@@ -42,7 +42,6 @@ import { toErrorMessage } from "./error-message.ts";
 import type { AgentCallOpts, EngineHandle, EnginePort, EngineCtxModel, RunContext } from "./port-types.ts";
 import type { PiInvocation } from "./pi-invocation.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
-import { resetAllEpipeFailures } from "./stdin-writer.ts";
 import {
   killAllActiveChildren,
   type SpawnRunCallbacks,
@@ -204,10 +203,9 @@ export class PiEngine implements EnginePort {
     return { engineId: PI_ENGINE_ID, turns: [], source: "outcome-only" };
   }
 
-  /** dispose：全量收割活跃子进程 + 清 EPIPE 计数（幂等）。 */
+  /** dispose：全量收割活跃子进程（幂等）。 */
   async dispose(): Promise<void> {
     killAllActiveChildren();
-    resetAllEpipeFailures();
   }
 
   // ── 反向通道注入面（server 构造后接线 host/askUser） ──

@@ -41,7 +41,6 @@ import {
   type SpawnRunParams,
   type SpawnRunResult,
 } from "../spawn-runner.ts";
-import { resetAllEpipeFailures } from "../stdin-writer.ts";
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
 
 /**
@@ -217,7 +216,6 @@ async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
 
 afterEach(() => {
   killAllActiveChildren();
-  resetAllEpipeFailures();
 });
 
 describe("runSpawnOnce 集成（fake pi 子进程）", () => {
@@ -233,8 +231,9 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.success).toBe(true); // agent_settled resolve = exit 0 口径
       expect(result.error).toBeUndefined();
       expect(result.content).toBe("hello world");
-      // settled 按轮归零 turnCount（SP-9：轮独立预算）——outcome.turns 恒 0
-      expect(result.turns).toBe(0);
+      // 成功 run 轮数 = resolve 时刻快照（本流 1 条 turn_end → 真实轮数 1）——
+      // agent_settled 消费面的按轮清零（SP-9）不得腐化收集面
+      expect(result.turns).toBe(1);
       expect(result.sessionId).toBe("fake-sess-1");
       expect(result.sessionFile).toBe(
         "/tmp/fake-sessions/20260910T010101_00000000-0000-0000-0000-0000000000aa.jsonl",
@@ -669,8 +668,8 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
 
       expect(result.success).toBe(true); // resolveChatRun(0)，与 close 信号无关
       expect(result.content).toBe("hello world");
-      // agent_settled 消费面按轮重置 turnCount（SP-9：续聊轮独立预算）
-      expect(result.turns).toBe(0);
+      // 成功 run 轮数 = resolve 时刻快照（真实轮数），按轮清零不得泄漏进收集面
+      expect(result.turns).toBe(1);
 
       // [H1 U3] agent_settled resolve 后杀链收割（每轮一进程——续聊 = 新 run +
       // resume 锚点；不再保活）：active-children 注销 + exited 镜像上报（killed）

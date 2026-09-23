@@ -48,7 +48,7 @@ import {
   MAX_TIMER_DELAY_MS,
   workflowNotFoundMessage,
 } from "@zhushanwen/subagent-core";
-import { assertEntryTimeBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
+import { assertEntryTimeBudget, assertEntryTokenBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
@@ -430,7 +430,11 @@ export async function actionRun(
   // Type.Number 直通（无上界）——超 setTimeout 安全域的值会穿透到 lifecycle 内层
   // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链（判定与文案单点在
   // core shared/entry-guards；LLM 可据消息自纠：clamp 或省略走 unlimited 语义）。
+  // 负值同在入口拒绝：tokens 负值会被 Budget 的 maxTokens>0 守卫、time 负值会被
+  // lifecycle 的 budgetTimeMs>0 判定静默升格 unlimited（显式预算被忽略），入口拦截
+  // 替代静默升格。
   assertEntryTimeBudget(time);
+  assertEntryTokenBudget(tokens);
 
   // [D8 创建期拒单] 工具参数 model 是创建期唯一静态声明源（agent 资产 frontmatter
   // model 随脚本 JS 动态求值不可静态解析——由派发期 isPiRoute 对称校验覆盖，

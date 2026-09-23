@@ -114,7 +114,7 @@ export async function killChain(
  * （zsub 实测经验）——幂等吞掉并 debug 留痕，不阻断杀链语义（对已退进程信号本就是
  * no-op）。收口自 zcode launcher 的内联实现（对齐点②：单一权威）。
  */
-function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
+export function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
   try {
     child.kill(signal);
   } catch (err) {

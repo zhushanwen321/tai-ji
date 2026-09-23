@@ -11,10 +11,10 @@
 // reaper 双跑即此形态）。本包把这类「pi 运行环境隐式坑」的守卫集中一处，业务
 // extension 引入即用，防线不再散落各包内联。
 
-/** 一次执行的结果记录：正常返回记值、抛错记错误——两者都不释放 key。 */
-type ExecutionRecord =
-	| { readonly outcome: "returned"; readonly value: unknown }
-	| { readonly outcome: "threw"; readonly error: unknown };
+/** 一次执行的结果记录：只缓存成功结果；失败（同步抛错 / Promise rejection）不缓存，下次调用可重试。 */
+interface ExecutionRecord {
+	readonly value: unknown;
+}
 
 // 「按进程去重」的物理载体 = 模块级 Map。有效前提：同一进程内模块级状态跨 factory
 // 二调持久——pi extension 缓存按 cwd 失效时 factory 重跑，但 jiti/Node 模块缓存同图
@@ -23,22 +23,24 @@ type ExecutionRecord =
 const executions = new Map<string, ExecutionRecord>();
 
 /**
- * 进程内按 key 去重地执行 fn：同一 key 至多执行一次，后续调用重放首次结果。
+ * 进程内按 key 去重地执行 fn：同一 key 至多执行一次**成功**，后续调用重放首次成功结果。
  *
- * 语义细节（设计 §3.2 D3 守卫粒度段 + §3.3 D3 守卫语义）：
+ * 语义细节（设计 §3.2 D3 守卫粒度段 + §3.3 D3 守卫语义；失败语义按加固审查裁决修订
+ * ——「恢复幂等，下次启动重试」承诺优先，见下方失败段）：
  *
  * - **结果缓存形态（非跳过）**：首次调用执行 fn 并缓存结果；后续同 key 调用不执行
  *   fn，返回首次的返回值——原样重放：对象返回严格同一引用（toBe 级，非重新求值）；
- *   fn 返回 Promise 时重放同一实例，因此 **rejected Promise 同样被缓存**、不因
- *   rejection 释放 key。
- * - **fn 抛错不吞、key 不释放**：同步抛错原样上抛（守卫不捕获、不包装），同时记录
- *   该错误——后续同 key 调用重抛同一错误实例、不再执行 fn。验收条款「fn 抛错不阻断
- *   后续 handler」的准确语义是**守卫不吞 fn 的错误**（调用方 catch 守卫调用即可继续
- *   handler 后续逻辑，先例：base-tool-enhance runSessionStartMaintenance 的 try/catch
- *   形态），而非把 key 释放给二次执行——失败释放会让 factory 二调双跑窗口重新打开
- *   （本次事故形态），与 u-bte-guard 内联 flag 先例「reap 抛错不重置 flag」同语义。
- *   失败重试不归守卫：需要兜底的场景由宿主的其他触发面承接（该先例的失败兜底即交
- *   runtime 收殓触发面 B）。
+ *   fn 返回 Promise 时重放同一实例。
+ * - **失败不缓存、可重试**：fn 同步抛错原样上抛（守卫不捕获、不包装）且**不写缓存**；
+ *   fn 返回的 Promise rejection 落定后释放 key（仅释放本条失败记录，期间同 key 重试
+ *   成功的新记录不受影响）——下次同 key 调用重新执行 fn。守卫不自动重试，重试节奏
+ *   由调用方决定（宿主的其他触发面承接，如下一个 session_start）。代价（有意接受）：
+ *   首次失败到重试成功之间，factory 二调的双跑窗口重新打开——重试的是**失败过**的
+ *   操作，成功即缓存、窗口随即关闭；对幂等的进程级维护（recoverCrashedRuns「恢复
+ *   幂等，下次启动重试」、配置迁移、索引重建等）这正是期望行为。验收条款「fn 抛错
+ *   不阻断后续 handler」的准确语义仍是**守卫不吞 fn 的错误**（调用方 catch 守卫调用
+ *   即可继续 handler 后续逻辑，先例：base-tool-enhance runSessionStartMaintenance
+ *   的 try/catch 形态）。
  * - **粒度边界**：只包「跨 session 副作用操作」（进程级全局维护类，正确频率就是每
  *   进程至多一次）。session 级幂等操作（如 pending 对账——读当前 session 的 entries
  *   与 registry，appendEntry 幂等）必须保持每 session_start 执行，不要挂本守卫；需要
@@ -47,29 +49,32 @@ const executions = new Map<string, ExecutionRecord>();
  *   （如 "base-tool-enhance:reap"）避免撞 key。
  *
  * @param key 去重键（进程内全局，建议带包名前缀）
- * @param fn 无参函数——首次调用时求值一次，后续调用不再执行；需要上下文（pi/ctx）
- *   的调用方在闭包里捕获，被闭包捕获的是首次调用处的值（这正是「每进程至多一次」
- *   的字面语义）
+ * @param fn 无参函数——首次调用时求值一次（直到成功），后续调用不再执行；需要上下文
+ *   （pi/ctx）的调用方在闭包里捕获，被闭包捕获的是首次调用处的值（这正是「每进程
+ *   至多一次成功」的字面语义）
  * @returns 首次执行的返回值（后续调用重放同一结果；async fn 重放同一 Promise 实例）
  */
 export function oncePerProcess<T>(key: string, fn: () => T): T {
 	const hit = executions.get(key);
 	if (hit !== undefined) {
-		if (hit.outcome === "threw") {
-			throw hit.error;
-		}
 		// 同 key 的值由首次调用的泛型参数化记录，模块级 Map 无法按 key 参数化类型，
 		// 断言仅收窄回该泛型（构造点与重放点同函数，无跨来源混装）。
 		return hit.value as T;
 	}
-	try {
-		const result = fn();
-		executions.set(key, { outcome: "returned", value: result });
-		return result;
-	} catch (error) {
-		executions.set(key, { outcome: "threw", error });
-		throw error;
+	const result = fn();
+	// 只缓存成功结果：同步抛错不经过本行（原样上抛 + 无缓存，下次调用可重试）；
+	// Promise 的 rejection 在落定后经下方 handler 释放 key（同样可重试）。
+	executions.set(key, { value: result });
+	if (isPromiseLike(result)) {
+		// 内部挂 rejection 释放 handler（同时消除本条 rejection 的 unhandled 面——
+		// 调用方是否自行接 rejection 均安全）。仅当缓存里仍是本条失败记录时删除：
+		// rejection 落定前同 key 已被重试成功覆盖的场景不误删新记录。
+		void Promise.resolve(result).catch(() => {
+			const record = executions.get(key);
+			if (record !== undefined && record.value === result) executions.delete(key);
+		});
 	}
+	return result;
 }
 
 /**
