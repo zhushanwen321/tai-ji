@@ -7,5 +7,10 @@ import { taijiTestConfig } from '../../test-guard/factory.ts'
 export default taijiTestConfig({
   test: {
     include: ['src/__tests__/**/*.test.ts'],
+    // 真实 sqlite I/O 测试族（recovery 阶梯 / error-contract 假驱动 / L3 快照拷贝）
+    // 单条 1.5-2.4s，插桩 + 全仓并行负载下超 vitest 默认 5s（2026-09-24 recovery 与
+    // error-contract 两族先后越线）。包级 30s = 负载态实测最长（~11s）约 3 倍余量；
+    // 预算是环境余量不是断言语义，真挂死仍会红。
+    testTimeout: 30000,
   },
 })

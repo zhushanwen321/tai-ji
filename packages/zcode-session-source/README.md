@@ -10,7 +10,9 @@ zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费�
 - **四级恢复阶梯**（设计 §3.5 单一规格，全网唯一）：
   - L1 直开（readonly，`-wal` 在场正常工作）
   - L2 immutable 逃逸（常态恢复，零拷贝；仅当开库前确认 `-wal` 不存在——有内容
-    `-wal` 下 immutable 静默丢行，必须门控）
+    `-wal` 下 immutable 静默丢行，必须门控。darwin bun 常态；linux bun 的
+    `file:` URI 开库不可用，直开失败直接落 L3——bun 平台分叉矩阵登记在
+    `src/__tests__/platform-matrix.ts`）
   - L3 小库快照兜底（db 拷 mkdtemp 固定前缀 `taiji-zcode-snap-` + 自建 0 字节
     `-wal` → 开库后验证 `sqlite_master` 表集合含 `session/message/part`；规模门
     256MB 拒拷；读后 finally 清理。**$TMPDIR 治理面**：快照属「读快照」非对话数据

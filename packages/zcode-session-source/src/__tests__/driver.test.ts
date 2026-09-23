@@ -22,6 +22,11 @@ import {
   makeFixtureDir,
   openWritableSqlite,
 } from './helpers.ts'
+import {
+  expectProbeOutcomeAccounting,
+  probeRestDbImmutableUriOpen,
+  resolveRestDbExpectation,
+} from './platform-matrix.ts'
 
 describe('loadSqliteDriver', () => {
   it('探测当前运行时的驱动 id（node 趟 = node:sqlite / bun 趟 = bun:sqlite）', async () => {
@@ -104,15 +109,22 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
     }
   })
 
-  it('immutable URI 开库（L2 行为面）：静息态库全行可读、零附属文件创建', async () => {
+  it('immutable URI 开库（L2 行为面）：works 平台全行可读零附属 / URI 不可用平台直开数据等价承接', async () => {
     const fx = makeFixtureDir('zss-driver-imm-')
     try {
       const fixture = await buildFixtureDb(fx.root, defaultTranscriptSeeds(), { quiesce: true })
       const before = dirSnapshot(fx.root)
       expect(before).toEqual(['db.sqlite']) // 静息态前置确认
 
+      // 平台矩阵对账（node/darwin bun：works；linux bun：throws——矩阵登记），
+      // 实测与登记不符 = bun 捆绑 sqlite 语义漂移警报
+      const probe = await probeRestDbImmutableUriOpen(fixture.dbPath)
+      expectProbeOutcomeAccounting(probe, 'immutableUriOpen', resolveRestDbExpectation(), 2)
+
       const driver = await loadSqliteDriver()
-      const db = driver.open(toSqliteFileUri(fixture.dbPath, true), { readOnly: true })
+      const db = driver.open(probe.outcome === 'works' ? toSqliteFileUri(fixture.dbPath, true) : fixture.dbPath, {
+        readOnly: true,
+      })
       try {
         const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
         const names = tables.map((t) => (t as Record<string, unknown>)['name']).sort()
@@ -126,9 +138,13 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
       } finally {
         db.close()
       }
-      // immutable 定义性质：零 -shm/-wal 创建
-      expect(dirSnapshot(fx.root)).toEqual(before)
-      expect(expectFileExists(`${fixture.dbPath}-shm`, false)).toBe(true)
+      // immutable 定义性质（零 -shm/-wal 创建）仅在 URI 可用平台断言——URI 不可用
+      // 平台（linux bun）以直开承接数据等价性，直开路径不承担零附属断言（node F24
+      // 直开本就创建附属文件）
+      if (probe.outcome === 'works') {
+        expect(dirSnapshot(fx.root)).toEqual(before)
+        expect(expectFileExists(`${fixture.dbPath}-shm`, false)).toBe(true)
+      }
     } finally {
       fx.cleanup()
     }

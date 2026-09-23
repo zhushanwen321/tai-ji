@@ -21,11 +21,11 @@ import {
   buildFixtureDb,
   checkpointAndClose,
   defaultTranscriptSeeds,
-  isBun,
   makeFixtureDir,
   openWritableSqlite,
   type FixtureDb,
 } from './helpers.ts'
+import { expectedRestDbVia, resolveRestDbExpectation } from './platform-matrix.ts'
 
 const FIXTURE_DIR = 'zss-access-'
 
@@ -57,7 +57,14 @@ describe('行集查询（getSessionTranscript：session → message → part 三
       const fixture = await makeReadyFixture(fx.root)
       const handle = await openZcodeSessionDb(fixture.dbPath)
       try {
-        expect(handle.via).toBe(isBun ? 'L2-immutable' : 'L1-direct')
+        // 命中级别按平台矩阵（node 与 linux bun：L1 直开 / darwin bun：L2 immutable）——
+        // known 红灯 = bun 捆绑 sqlite 语义漂移警报；未登记平台仅断言合法级别之一
+        const expectation = resolveRestDbExpectation()
+        if (expectation.kind === 'known') {
+          expect(handle.via).toBe(expectedRestDbVia(expectation.behavior))
+        } else {
+          expect(['L1-direct', 'L2-immutable']).toContain(handle.via)
+        }
         const transcript = handle.db.getSessionTranscript('sess_fix_a')
         expect(transcript.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4'])
         expect(transcript[0].parts[0]).toMatchObject({ type: 'text', text: expect.stringContaining('ZZQFIXTURE') })

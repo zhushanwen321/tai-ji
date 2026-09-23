@@ -2,11 +2,12 @@
  * 四级恢复阶梯测试（U3 验收④；设计 §4 场景 1a 变体 W1/W2 配对断言形态）。
  *
  * 双趟口径（D3 源级双跑）：同一断言集 node/bun 各跑一遍。驱动不对称面（F22/F24）
- * 在断言内显式分叉——「静息态直开必 CANTOPEN」是 bun 特有事实，node 趟断言其
- * 不对称半边（直开成功但创建 -shm/-wal），bun 趟（U5）断言 CANTOPEN 半边。
+ * 在断言内显式分叉——F22「静息态直开抛 CANTOPEN」是 darwin bun 的事实（linux bun
+ * 相反：直开成功可读），bun 侧断言按平台矩阵对账（platform-matrix.ts，对账红灯 =
+ * bun 捆绑 sqlite 语义漂移警报）；node 趟断言其不对称半边（直开成功但创建 -shm/-wal）。
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { chmodSync, existsSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -28,11 +29,16 @@ import {
   openWritableSqlite,
   quiesceDir,
 } from './helpers.ts'
+import {
+  expectProbeOutcomeAccounting,
+  expectedRestDbVia,
+  probeRestDbDirectOpen,
+  probeRestDbImmutableUriOpen,
+  resolveRestDbExpectation,
+} from './platform-matrix.ts'
 
-// 超时预算：本文件 fixture 是真实 sqlite + WAL 竞态等待（真实 I/O，非 fake timer 可模拟），
-// 空载单条 1.5-2.4s、机器负载/插桩（coverage）下单条实测可超 5s 默认预算（junit 最长
-// 10.7s）。30s/条 = 负载态实测的 3 倍左右余量，只放宽时间预算，断言不变。
-vi.setConfig({ testTimeout: 30000 })
+// 超时预算已上移包级 vitest.config.ts（testTimeout 30s，真实 sqlite I/O 测试族共用，
+// 含本文件与 error-contract 假驱动族）——文件级设置移除，单一来源。
 
 const TOTAL_ROWS = 3 // 建库 2 行（sess_fix_a/​sess_fix_b）+ 1 条只存在于 -wal 的行（WALROW-PROOF）
 
@@ -59,23 +65,19 @@ async function buildWalLadderFixture(dir: string): Promise<{ dbPath: string; wal
 }
 
 describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
-  it('① 不走恢复直开：bun 必失败（CANTOPEN 形态）/ node 成功但创建附属文件（F24 不对称另一半）', async () => {
+  it('① 不走恢复直开：bun 静息态直开按平台矩阵（darwin 抛 / linux 成功可读）/ node 成功但创建附属文件（F24 不对称另一半）', async () => {
     const fx = makeFixtureDir('zss-w1-direct-')
     try {
       const { dbPath } = await buildWalLadderFixture(fx.root)
       const driver = await loadSqliteDriver()
       if (isBun) {
-        // bun 特有断言（F22）：-wal 缺失直开必然 CANTOPEN，目录可写也失败。
-        // bun:sqlite 打开同样是惰性的（CANTOPEN 在首查询抛，构造不抛——bun 1.3.8
-        // 实测），断言须含探测查询，与产品 tryOpen 的 open+probe 语义对齐
-        expect(() => {
-          const ro = driver.open(dbPath, { readOnly: true })
-          try {
-            ro.prepare('SELECT COUNT(*) AS c FROM sqlite_master').all()
-          } finally {
-            ro.close()
-          }
-        }).toThrow()
+        // F22 平台分叉（bun 1.3.8 实测矩阵）：darwin 静息态直开抛 CANTOPEN（目录
+        // 可写也失败）；linux 相反——直开成功且全行可读（含曾只在 -wal 的
+        // WALROW-PROOF 行，rowCount 对账）。实测与登记不符 = bun 捆绑 sqlite
+        // 语义漂移警报；未登记平台走探测兜底（works 仍须全行可读，不假装知道方向）。
+        // 探测语义含首查询（双端开库均惰性），与产品 tryOpen 的 open+probe 对齐
+        const probe = await probeRestDbDirectOpen(dbPath)
+        expectProbeOutcomeAccounting(probe, 'readonlyDirectOpen', resolveRestDbExpectation(), TOTAL_ROWS)
       } else {
         // node 侧不对称半边（F24）：直开成功且创建 -shm/-wal（close 后残留）——
         // 这是恢复阶梯要消除的宿主目录副作用面
@@ -91,7 +93,7 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
     }
   })
 
-  it('② 走 L2 immutable 逃逸：读到全部行（含曾只在 -wal 的行，对照留证）', async () => {
+  it('② L2 immutable 逃逸面：URI 可用平台全行可读零拷贝 / URI 不可用平台以直开数据等价承接', async () => {
     const fx = makeFixtureDir('zss-w1-imm-')
     try {
       const { dbPath, walSizeDuringWrite } = await buildWalLadderFixture(fx.root)
@@ -100,7 +102,15 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
       const driver = await loadSqliteDriver()
       const before = dirSnapshot(fx.root)
       const snapshotsBefore = countSnapshotDirs()
-      const ro = driver.open(toSqliteFileUri(dbPath, true), { readOnly: true })
+      // 平台矩阵对账（node/darwin bun：works；linux bun：throws）——对不上 =
+      // bun 捆绑 sqlite 语义漂移警报；未登记平台探测兜底
+      const probe = await probeRestDbImmutableUriOpen(dbPath)
+      expectProbeOutcomeAccounting(probe, 'immutableUriOpen', resolveRestDbExpectation(), TOTAL_ROWS)
+
+      // URI 不可用平台（linux bun）以直开承接数据等价性：fixture 收尾已显式
+      // checkpoint，s-wal-only 行在主库文件内——直开同样读到全部行。零附属文件
+      // 是 immutable 的专属性质，仅 works 分支承担（直开路径本就可能创建附属）
+      const ro = driver.open(probe.outcome === 'works' ? toSqliteFileUri(dbPath, true) : dbPath, { readOnly: true })
       try {
         const count = ro.prepare('SELECT COUNT(*) AS c FROM session').get() as Record<string, unknown>
         expect(Number(count['c'])).toBe(TOTAL_ROWS)
@@ -111,9 +121,11 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
       } finally {
         ro.close()
       }
-      // ③ 零拷贝、零 -shm/-wal 创建（immutable 定义性质；快照计数用差分——
-      // 不假设 tmpdir 初始无残留）
-      expect(dirSnapshot(fx.root)).toEqual(before)
+      // ③ 零拷贝、零 -shm/-wal 创建（immutable 定义性质，works 分支；快照计数用
+      // 差分——不假设 tmpdir 初始无残留；两分支都不开快照）
+      if (probe.outcome === 'works') {
+        expect(dirSnapshot(fx.root)).toEqual(before)
+      }
       expect(countSnapshotDirs()).toBe(snapshotsBefore)
     } finally {
       fx.cleanup()
@@ -195,14 +207,21 @@ describe('W2 两态断言（-wal 在场）', () => {
 })
 
 describe('阶梯编排（openWithRecovery）', () => {
-  it('静息态合法库：node 命中 L1 直开 / bun 命中 L2 immutable（驱动不对称的编排分叉）', async () => {
+  it('静息态合法库：命中级别按平台矩阵（node 与 linux bun 命中 L1 直开 / darwin bun 命中 L2 immutable）', async () => {
     const fx = makeFixtureDir('zss-ladder-')
     try {
       await buildFixtureDb(fx.root, defaultTranscriptSeeds(), { quiesce: true })
       const snapshotsBefore = countSnapshotDirs()
       const opened = await openWithRecovery(join(fx.root, 'db.sqlite'))
       try {
-        expect(opened.via).toBe(isBun ? 'L2-immutable' : 'L1-direct')
+        // via 是两项开库行为（平台矩阵登记）的编排投影——known 红灯 = bun 捆绑
+        // sqlite 语义漂移警报；未登记平台仅断言命中合法级别之一（不假装知道分叉）
+        const expectation = resolveRestDbExpectation()
+        if (expectation.kind === 'known') {
+          expect(opened.via).toBe(expectedRestDbVia(expectation.behavior))
+        } else {
+          expect(['L1-direct', 'L2-immutable']).toContain(opened.via)
+        }
         const count = opened.db.prepare('SELECT COUNT(*) AS c FROM message').get() as Record<string, unknown>
         expect(Number(count['c'])).toBe(4)
       } finally {

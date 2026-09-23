@@ -9,7 +9,8 @@
  * 相对 runtime 旧版的改造：
  * - 驱动来自本包 sqlite-driver（D3 双驱动），不再固定 node:sqlite；
  * - 开库统一走四级恢复阶梯（recovery.ts，设计 §3.5 单一规格）——runtime（node）
- *   侧直开从来可用（F24），阶梯主要服务 bun 宿主侧的静息态 CANTOPEN；
+ *   侧直开从来可用（F24），阶梯主要服务 bun 宿主侧的静息态 CANTOPEN（darwin bun；
+ *   linux bun 静息态直开同样可用——bun 平台分叉矩阵登记在 __tests__/platform-matrix.ts）；
  * - schema 版本从「best-effort 诊断」升级为已知集闸门（KNOWN_ZCODE_SCHEMA_
  *   VERSIONS，版本超出已知集抛 ZcodeSchemaDriftError——错误码词表属消费侧，
  *   本包不私建 zcode_* 码）。

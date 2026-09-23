@@ -2,10 +2,13 @@
  * 四级恢复阶梯（设计 §3.5 单一规格，全网唯一——其他位置只引用不另立）：
  *
  *   L1 直开（readonly）：-wal 在场时正常工作（实测：写者活跃 + -wal 有内容可开
- *      且读到已提交行）。失败多因 -wal 缺失（静息态 bun 必 CANTOPEN——F22）。
+ *      且读到已提交行）。失败多因 -wal 缺失（静息态 darwin bun 抛 CANTOPEN——F22；
+ *      linux bun 与 node 直开成功——bun 平台分叉矩阵登记在 __tests__/platform-matrix.ts）。
  *   L2 immutable 逃逸（常态恢复，零拷贝）：直开失败 ∧ 开库前确认 -wal 不存在
  *      → file:<db>?immutable=1（免拷贝、数据完整、不创建 -shm——F25）。
  *      ⚠ 门控：immutable 仅在确认 -wal 缺失时用——有内容 -wal 下 immutable 静默丢行。
+ *      （darwin bun 的常态恢复路径；linux bun 的 file: URI 开库不可用——直开
+ *      失败直接落 L3，平台分叉矩阵同上）
  *   L3 小库快照兜底（罕见）：immutable 也失败 → db 拷 mkdtemp（固定前缀
  *      taiji-zcode-snap-）+ 自建 0 字节 -wal → 开库后验证 sqlite_master 表集合含
  *      session/message/part（防「开库成功但缺表」半残态）→ 通过才读。
