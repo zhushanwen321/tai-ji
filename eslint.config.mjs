@@ -1,4 +1,22 @@
+import { readFileSync } from 'node:fs';
 import tasteConfig from './taste-lint/vue.mjs';
+
+// [C-ext-27] core exports 子入口白名单——唯一权威源 = core package.json exports，
+// core 新增子入口自动放行（本配置零改动）。regex 负向前瞻表达白名单（不用 group
+// 负向 glob：`*` 不跨目录段、多段子入口的负向排除在本实现不可靠）。
+const coreExports = JSON.parse(
+  readFileSync(new URL('./packages/subagent-core/package.json', import.meta.url), 'utf8'),
+).exports;
+const coreSubentries = Object.keys(coreExports).filter((k) => k !== '.');
+const coreSubentryAllowlist = coreSubentries.map((k) => `@zhushanwen/subagent-core${k.slice(1)}`);
+const coreSubentryRegex = coreSubentries
+  .map((k) => k.slice(2)) // './relay-env' -> 'relay-env'，'./workflows/*' -> 'workflows/*'
+  .map((frag) =>
+    frag.endsWith('*')
+      ? frag.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // 通配子入口 = 前缀放行
+      : `${frag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, // 精确子入口 = 全匹配锚定
+  )
+  .join('|');
 
 export default [
   ...tasteConfig,
@@ -268,6 +286,39 @@ export default [
               importNames: ['saveIndex'],
               message:
                 'store 外禁 import sessions-index 落盘函数（索引是可丢缓存）——索引维护归 RecordStore 内部（H4/G1，D7 守卫分级）',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // [C-ext-27] extensions 生产码消费 @zhushanwen/subagent-core 只允许主 barrel（裸名
+  // import，不经本 patterns 面）与 core exports 登记的子入口——深路径 import（含
+  // import type）在 bundle（esbuild exports 解析）/ npm dist（ERR_PACKAGE_PATH_NOT_
+  // EXPORTED）/ jiti（pi 运行时）三形态全部断裂，而 tsc 不拦：extensions/tsconfig.json
+  // 的 paths 通配（fallow 静态分析依赖，PR #198）优先于 exports 解析，深路径静默
+  // 通过——守卫必须在 import 面直接红灯。测试/bench/mocks 的深路径是 u-2c 已裁决
+  // 设计（测试消费符号不塞 barrel），经 vitest alias + tsconfig paths 双轨解析，
+  // 不受本块限制；断链信号 = extensions:typecheck 红，修复 = 改 specifier。
+  {
+    files: ['extensions/**/src/**/*.ts'],
+    ignores: [
+      'extensions/**/src/**/__tests__/**',
+      'extensions/**/src/**/*.test.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: `^@zhushanwen/subagent-core/(?!${coreSubentryRegex})`,
+              message:
+                'extensions 生产码禁 @zhushanwen/subagent-core 深路径 import（barrel + exports ' +
+                '子入口是唯一消费面，C-ext-27）——深路径在 bundle/npm dist/jiti 三形态全断。' +
+                '恢复：走主 barrel（from "@zhushanwen/subagent-core"）或 exports 已登记子入口' +
+                `（${coreSubentryAllowlist.join('、')}）；` +
+                '确需新子入口 = 在 core package.json exports 登记（semver 决策）后自动放行。',
             },
           ],
         },

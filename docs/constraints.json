@@ -3026,6 +3026,26 @@
           "agent": "review-business-logic"
         }
       ]
+    },
+    {
+      "id": "C-ext-27",
+      "summary": "extensions 生产码消费 @zhushanwen/subagent-core 只允许主 barrel（裸名 import）与 core package.json exports 登记的子入口（./engine/paths、./engine/engine-discovery-scan、./relay-env、./workflows/*），深路径 import/export-from（含 import type）一律禁止——深路径在 taiji bundle（esbuild exports 解析）/ npm dist（ERR_PACKAGE_PATH_NOT_EXPORTED）/ pi jiti 三形态全部断裂。白名单动态读 core exports（唯一权威源，core 新增子入口自动放行）。tsc 对生产码深路径不拦（extensions/tsconfig.json 的 paths 通配是 fallow 静态分析依赖、优先于 exports 解析），防线只在 ESLint。测试/bench/mocks 文件的深路径是 u-2c 已裁决设计（测试消费符号不塞 barrel，PR #198），经 vitest alias + tsconfig paths 双轨解析，不受本约束管辖；断链信号 = extensions:typecheck 红，修复 = 改 specifier",
+      "scope": [
+        "extensions/**"
+      ],
+      "authority": [
+        "../eslint.config.mjs",
+        "../packages/subagent-core/package.json"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "eslint.config.mjs"
+        }
+      ]
     }
   ]
 }
