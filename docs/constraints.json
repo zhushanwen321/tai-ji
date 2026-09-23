@@ -2959,6 +2959,48 @@
           "agent": "review-arch-boundary"
         }
       ]
+    },
+    {
+      "id": "C-proc-27",
+      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 守卫化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线面（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量面），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/守卫面全漏）由本守卫在 commit 时拦截",
+      "scope": [
+        "docs/structure-wiring.json",
+        "scripts/check-structure-wiring.mjs",
+        "pnpm-workspace.yaml",
+        ".github/workflows/ci.yml"
+      ],
+      "authority": [
+        "structure-wiring.json"
+      ],
+      "dimensions": [
+        "monorepo-impact"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-structure-wiring.mjs"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-20",
+      "summary": "分层例外登记互指机器化（S2②，2026-09-24 源自 PR #20 组 B 的 MF-5-1 形态守卫化）：runtime-layering.md §3「跨切面例外」表行模块集与 check_services_infra_import.py 的 DOCUMENTED_MODULES 集合双向相等——§3 登记了守卫未收录 = 该模块 value import 被误拦；守卫收录了 §3 未登记 = 例外面静默扩大。基线债模块（BASELINE_MODULES）不在对账面（待 ports 收编，收编完成移除；应转正例外则先 §3 登记再移入 DOCUMENTED）。守卫白名单增删 §3 相关成员时必须同步另一侧，同 commit 落地",
+      "scope": [
+        "docs/architecture/runtime-layering.md",
+        ".githooks/check_services_infra_import.py"
+      ],
+      "authority": [
+        "architecture/runtime-layering.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check_layering_registry_sync.py"
+        }
+      ]
     }
   ]
 }

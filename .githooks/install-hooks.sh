@@ -1021,13 +1021,15 @@ fi
 #   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
+#   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 守卫
+#                                    DOCUMENTED_MODULES 双向对账（登记漂移即红，MF-5-1 形态）
 #   注：与 R1 同例不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     print_section "[架构约束登记检查]"
 
-    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py; do
+    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py check_layering_registry_sync.py; do
         CHECKER_PATH=".githooks/$CONSTRAINT_CHECKER"
         if [ ! -f "$CHECKER_PATH" ]; then
             echo -e "${YELLOW}[WARN] 找不到检查脚本 $CHECKER_PATH${NC}"
@@ -1047,6 +1049,38 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     echo -e "${GREEN}[OK] 架构约束登记检查通过${NC}"
 else
     echo -e "${YELLOW}[SKIP] 架构约束登记检查已跳过${NC}"
+fi
+
+# ============================================================================
+# 非.workspace 结构接线对账（S1，PR #20 组 D 守卫化）
+#   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
+#   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
+#   必须在 docs/structure-wiring.json 登记各管线接线面（CI typecheck / 测试装配 /
+#   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
+#   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
+#   触发面：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
+#   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[结构接线对账]"
+    STRUCT_WIRING_TRIGGER=0
+    if echo "$STAGED_FILES" | grep -qE "^(pnpm-workspace\.yaml|docs/structure-wiring\.json)$|^(packages|extensions|resources/plugins)/.*package\.json$"; then
+        STRUCT_WIRING_TRIGGER=1
+    fi
+    if [ "$STRUCT_WIRING_TRIGGER" -eq 1 ]; then
+        echo -e "${BLUE}[INFO] 结构接线相关变更，运行对账...${NC}"
+        node scripts/check-structure-wiring.mjs
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] 结构接线对账失败${NC}"
+            echo -e "${YELLOW}[INFO] 新顶层结构第一笔 commit 只做接线与登记（docs/structure-wiring.json SSOT）${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无结构接线相关变更，跳过对账${NC}"
+    fi
 fi
 
 # ============================================================================

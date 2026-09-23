@@ -450,6 +450,16 @@ jobs:
       - name: ENV whitelist SSOT check
         run: python3 .githooks/check_env_whitelist_sync.py
 
+      # 非 workspace 结构接线对账（S1，PR #20 组 D 守卫化；与 pre-commit 结构接线段同源——
+      # D7 通则：pre-commit 之外的 CI 面同源拦截，防本地 hook 被绕过）
+      - name: Structure wiring check (non-workspace packages)
+        run: node scripts/check-structure-wiring.mjs
+
+      # runtime-layering §3 表行 ↔ 守卫 DOCUMENTED_MODULES 双向对账（S2②，与 pre-commit
+      # 架构约束登记段同源）
+      - name: Layering registry sync check
+        run: python3 .githooks/check_layering_registry_sync.py
+
       # 路径白名单动态化（getConfigDir/getPiAgentDir，与 pre-commit SKIP_PATH_WHITELIST_CHECK 同源）
       - name: Path whitelist check
         run: python3 .githooks/check_path_whitelist.py
