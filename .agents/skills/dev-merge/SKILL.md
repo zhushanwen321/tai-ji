@@ -30,6 +30,12 @@ description: >-
 
 处理完再进第 2 步。
 
+### 第 1.5 步：commit 粒度整理（条件执行）
+
+合并前看一眼 `git log --oneline $(git merge-base github/main HEAD)..HEAD`：分支上存在 wip/fixup/typo/簿记小笔/跟进修复散笔等过细 commit 时，**先在源 worktree 内整理再合并**——此时 commit 记忆最新鲜、单分支无跨分支交织，整理成本远低于发布期集中整理（[HISTORICAL] 2026-09-23 v0.10.3 发布期 62 → 35 commit 三轮 subagent 整理，instance-guard 类 hunk 交织笔无法合并的根因就是粒度债攒到了历史改写窗口最窄的时点）。粒度判定清单、两条执行路线（reset --soft / rebase）与硬约束**直接复用 merge skill 阶段 0.5**，不在此重复。
+
+分支 commit 已是逻辑批次级（或只有个位数笔）→ 跳过本步直接合并，不为仪式感整理。
+
 ### 第 2 步：合并
 
 ```bash
