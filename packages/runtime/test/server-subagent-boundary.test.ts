@@ -50,6 +50,7 @@ vi.mock('../src/services/session/session-service.js', () => {
       abort = sessionServiceInstance.abort
       switchModel = sessionServiceInstance.switchModel
       setOnSessionDestroyed = sessionServiceInstance.setOnSessionDestroyed
+      setOnPlanAborted = sessionServiceInstance.setOnPlanAborted
     },
   }
 })

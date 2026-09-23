@@ -18,6 +18,7 @@ import type { ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
+import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
 import { msg } from './helpers/fixtures'
 
@@ -222,7 +223,7 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('[D2] steer 返回值契约：失败 return false，成功 return true，早退 return true', async () => {
+  it('[D2 / form-hang-fix] steer 返回值契约：失败 false，成功 true，早退 false（输入未被消费）', async () => {
     const f = makeFixture()
     await f.useChat.send('s8d2', textToSegments('hi'))
     f.emit('s8d2', msg('s8d2', 'message.message_start', { messageId: 'a1' }))
@@ -231,8 +232,9 @@ describe('createUseChat factory 行为', () => {
     await expect(f.useChat.steer('s8d2', textToSegments('补充'))).resolves.toBe(false)
     // 成功：RPC resolve → true
     await expect(f.useChat.steer('s8d2', textToSegments('再补'))).resolves.toBe(true)
-    // 早退：空 segments → true（无投递动作非失败）
-    await expect(f.useChat.steer('s8d2', [])).resolves.toBe(true)
+    // 早退：空 segments → false（form-hang-fix 契约收窄——原「无事发生 return true」
+    // 语义废除，早退也是输入未被消费，调用方须恢复/保留）
+    await expect(f.useChat.steer('s8d2', [])).resolves.toBe(false)
     f.dispose()
   })
 
@@ -505,7 +507,9 @@ describe('send 定向分流（含 subagent 段）', () => {
         { type: 'subagent', subagentId: 'rec-x', slug: 'closed-one' },
         { type: 'text', text: '继续' },
       ]),
-    ).resolves.toBeUndefined()
+      // [form-hang-fix] send 契约 Promise<boolean>：定向分流内部消化 toast，返回 true
+      //（false 仅属 B 策略转 steer 未消费语义）
+    ).resolves.toBe(true)
     expect(f.toast.error).toHaveBeenCalledWith(
       'composable.subagentDirectiveFailed:{"msg":"subagent 已结束"}',
     )
@@ -1408,6 +1412,73 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
         .getMessages('s-race')
         .filter((m) => m.role === 'system' && (m.details as { variant?: string } | undefined)?.variant === 'restored'),
     ).toHaveLength(1)
+    f.dispose()
+  })
+})
+
+// ── [RD-1#9] 未列 session.* 帧类型的 dev 观测（协议漂移零痕迹 → 一次/类型 warn）──────────
+
+describe('未列 session.* 帧类型的 dev 观测（RD-1#9）', () => {
+  /** 只取本观测点的 warn 行（send 路径另有 subscribe 端口未注入的 warn，须滤除）。 */
+  function frameWarns(warn: ReturnType<typeof vi.spyOn>): string[] {
+    return warn.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .filter((m: string) => m.includes('unhandled session frame type'))
+  }
+
+  beforeEach(() => {
+    resetChatModuleStateForTest()
+    __resetDevModeForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetDevModeForTesting()
+    resetChatModuleStateForTest()
+  })
+
+  it('dev 下未列 session.* 类型 → console.warn 一次/类型；已列类型不 warn', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    void f.useChat.send('s90', textToSegments('hi'))
+
+    // 已列类型（session.renamed 有 case）不 warn
+    f.emit('s90', msg('s90', 'session.renamed', { name: 'renamed' }))
+    expect(frameWarns(warn)).toHaveLength(0)
+
+    // 未列 session.* 类型：去重后一次/类型
+    f.emit('s90', msg('s90', 'session.exited', { code: 1 }))
+    f.emit('s90', msg('s90', 'session.exited', { code: 2 }))
+    expect(frameWarns(warn)).toEqual([
+      expect.stringContaining('unhandled session frame type session.exited'),
+    ])
+
+    // 另一未列类型独立计数
+    f.emit('s90', msg('s90', 'session.stats_update', {}))
+    expect(frameWarns(warn)).toHaveLength(2)
+    f.dispose()
+  })
+
+  it('非 session.* 前缀的全局帧不 warn（app.info / config.* 由其他域消费，warn 即误报）', () => {
+    provideDevMode(true)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    void f.useChat.send('s91', textToSegments('hi'))
+
+    f.emit('s91', msg('s91', 'app.info', { version: '1' }))
+    f.emit('s91', msg('s91', 'config.plugins', { plugins: [] }))
+    expect(frameWarns(warn)).toHaveLength(0)
+    f.dispose()
+  })
+
+  it('非 dev（未注入 provideDevMode）→ 零 warn（生产零噪音）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    void f.useChat.send('s92', textToSegments('hi'))
+
+    f.emit('s92', msg('s92', 'session.exited', { code: 1 }))
+    expect(frameWarns(warn)).toHaveLength(0)
     f.dispose()
   })
 })

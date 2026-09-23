@@ -1182,10 +1182,13 @@ describe('QuotaService — U2③: 按 credentialSource 解析凭证（§7.5 清�
     expect(existsSync(keyPath)).toBe(true) // 来源切换不删文件（可逆）
   })
 
-  it('source=provider 且 resolver 抛异常 → 降级 no-credential（不逃逸成 RPC 无响应）', async () => {
+  it('source=provider 且 resolver 抛异常 → 降级 credential-unavailable（不逃逸成 RPC 无响应）', async () => {
     // 防的回归：改动 3 的 try/catch 降级若被删，resolver 异常会逃出 doFetch（它不在
     // doFetch 的 try 内）→ quota.fetch RPC 无响应 → 退化为 backstop 超时，比
-    // no-credential 难诊断得多。
+    // credential-unavailable 难诊断得多。
+    // 注：RT-7#7 起读盘/锁失败与「确实没有凭证」分流——本场景（resolver 抛
+    // 'auth.json locked'）是 io-error → credential-unavailable，非 no-credential
+    //（同场景的权威口径见 services/__tests__/quota-service-credential-failures.test.ts）。
     const resolver = {
       hasProviderCredential: vi.fn(() => false),
       listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),
@@ -1206,8 +1209,8 @@ describe('QuotaService — U2③: 按 credentialSource 解析凭证（§7.5 清�
 
     expect(mockFetchQuota).not.toHaveBeenCalled()
     expect(result.data).toBeNull()
-    expect(result.reason).toBe('no-credential')
-    expect(svc.getCached('glm-id').reason).toBe('no-credential')
+    expect(result.reason).toBe('credential-unavailable')
+    expect(svc.getCached('glm-id').reason).toBe('credential-unavailable')
   })
 })
 

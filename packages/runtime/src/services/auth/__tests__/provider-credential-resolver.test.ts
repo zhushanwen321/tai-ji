@@ -16,7 +16,8 @@
  *    `!` 前缀当 shell 命令执行、`$$`/`$!` 转义；任一 env 引用缺失则整值 undefined。
  * ③ 采取分支（降级路径）：resolver 对 `$ENV_VAR` / `${ENV_VAR}` 自行用 process.env 展开
  *    （credential.env 优先，与 pi resolve-config-value.js:71-73 同语义）；command（`!` 前缀）
- *    首版不支持且**不执行 shell**，原样返回 `!` 前缀形态标记，由消费方报「该凭据形态暂不支持」。
+ *    首版不支持且**不执行 shell**，与「env 引用缺失」一起返回 { unsupported } 判别结构
+ *    （RT-7#4），由消费方报「该凭据形态暂不支持」且禁止把形态标记当 key 下发外部请求。
  *    下方 "P-cred" 用例组即该分支的回归断言。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -173,11 +174,11 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     })
   })
 
-  it('env 引用缺失 → undefined（与 pi resolveConfigValue 一致：该凭据不可用）', async () => {
+  it('env 引用缺失 → { unsupported: "unresolved-env" }（RT-7#4：不再与「无凭据」的 undefined 混同）', async () => {
     writeAuthFile({ 'env-prov': { type: 'api_key', key: '$TAIJI_CRED_PROBE_MISSING' } })
     const resolver = new ProviderCredentialResolver(makeDeps())
 
-    expect(await resolver.resolveProviderCredential('env-prov')).toBeUndefined()
+    expect(await resolver.resolveProviderCredential('env-prov')).toEqual({ unsupported: 'unresolved-env' })
   })
 
   it('非变量的字面 $ 不作展开（如 $1abc 保持字面）', async () => {
@@ -187,14 +188,34 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('literal')).toEqual({ key: '$1abc', source: 'auth.json' })
   })
 
-  it('command 形态（! 前缀）不执行 shell，原样返回形态标记', async () => {
+  it('command 形态（! 前缀）不执行 shell，返回 { unsupported: "command" } 判别结构', async () => {
     writeAuthFile({ 'cmd-prov': { type: 'api_key', key: '!echo sk-from-command' } })
     const resolver = new ProviderCredentialResolver(makeDeps())
 
-    expect(await resolver.resolveProviderCredential('cmd-prov')).toEqual({
-      key: '!echo sk-from-command',
-      source: 'auth.json',
-    })
+    expect(await resolver.resolveProviderCredential('cmd-prov')).toEqual({ unsupported: 'command' })
+  })
+
+  it('command 形态命中即不降级 models.json（高优先源显式配置错误不被低优先源静默接住，RT-7#4）', async () => {
+    writeAuthFile({ 'cmd-prov': { type: 'api_key', key: '!echo sk' } })
+    writeModelsFile({ 'cmd-prov': { apiKey: 'sk-plaintext-in-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderCredential('cmd-prov')).toEqual({ unsupported: 'command' })
+  })
+
+  it('unresolved-env 同样不降级 models.json', async () => {
+    writeAuthFile({ 'env-prov': { type: 'api_key', key: '$TAIJI_CRED_PROBE_MISSING' } })
+    writeModelsFile({ 'env-prov': { apiKey: 'sk-plaintext-in-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderCredential('env-prov')).toEqual({ unsupported: 'unresolved-env' })
+  })
+
+  it('models.json 侧 apiKey 的 command 形态同样返回 unsupported（两源共享同一份配置值解析）', async () => {
+    writeModelsFile({ 'custom-cmd': { apiKey: '!cat /run/secrets/key' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderCredential('custom-cmd')).toEqual({ unsupported: 'command' })
   })
 
   it('models.json 侧 apiKey 的 $ENV_VAR 同样展开（两源共享同一份配置值解析）', async () => {

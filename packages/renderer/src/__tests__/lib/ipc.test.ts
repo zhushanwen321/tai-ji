@@ -230,3 +230,70 @@ describe('lib/ipc revealInFolder 封装（原 ipc-reveal-in-folder.test.ts 并�
     expect(impl).toHaveBeenCalledWith('/data/agent/sessions/s1.jsonl')
   })
 })
+
+describe('lib/ipc no-Ipc 分支 noIpc 标记（RD-3#9：保留 success 语义 + 可选标记）', () => {
+  beforeEach(() => {
+    delete (window as { electronAPI?: unknown }).electronAPI
+  })
+
+  it('openUpdateManualDir 无 IPC → { success: true, noIpc: true }（禁整体翻转，仅加标记）', async () => {
+    const ipc = await import('@/lib/ipc')
+    await expect(ipc.openUpdateManualDir()).resolves.toEqual({ success: true, noIpc: true })
+  })
+
+  it('testProxy 无 IPC → success:true + noIpc:true（需真值的调用方按标记分流）', async () => {
+    const ipc = await import('@/lib/ipc')
+    const res = await ipc.testProxy({ mode: 'system' })
+    expect(res.success).toBe(true)
+    expect(res.noIpc).toBe(true)
+  })
+
+  it('setUpdateSettings 无 IPC → { success: true, noIpc: true }', async () => {
+    const ipc = await import('@/lib/ipc')
+    await expect(ipc.setUpdateSettings({ preDownload: true })).resolves.toEqual({ success: true, noIpc: true })
+  })
+
+  it('有 IPC 时透传真值、不带 noIpc 标记（testProxy）', async () => {
+    const impl = vi.fn().mockResolvedValue({ success: false, code: 'ECONNREFUSED' })
+    ;(window as { electronAPI?: unknown }).electronAPI = { testProxy: impl }
+    const ipc = await import('@/lib/ipc')
+    const res = await ipc.testProxy({ mode: 'manual' })
+    expect(res).toEqual({ success: false, code: 'ECONNREFUSED' })
+    expect(res.noIpc).toBeUndefined()
+  })
+})
+
+describe('lib/ipc reportRendererLog 交付信号（RD-3#8：供 error-reporter 缓冲/回放分流）', () => {
+  it('无 IPC → resolve false（通道不可用，非静默吞）', async () => {
+    delete (window as { electronAPI?: unknown }).electronAPI
+    const ipc = await import('@/lib/ipc')
+    await expect(
+      ipc.reportRendererLog({ source: 'window-onerror', message: 'x', timestamp: 1 }),
+    ).resolves.toBe(false)
+  })
+
+  it('有 IPC 且 invoke resolve → true；invoke reject → false；同步抛错 → false', async () => {
+    const ok = vi.fn().mockResolvedValue(undefined)
+    ;(window as { electronAPI?: unknown }).electronAPI = { reportRendererLog: ok }
+    const ipc = await import('@/lib/ipc')
+    await expect(
+      ipc.reportRendererLog({ source: 'window-onerror', message: 'x', timestamp: 1 }),
+    ).resolves.toBe(true)
+
+    vi.resetModules()
+    const bad = vi.fn().mockRejectedValue(new Error('invoke reject'))
+    ;(window as { electronAPI?: unknown }).electronAPI = { reportRendererLog: bad }
+    const ipc2 = await import('@/lib/ipc')
+    await expect(
+      ipc2.reportRendererLog({ source: 'window-onerror', message: 'x', timestamp: 1 }),
+    ).resolves.toBe(false)
+
+    vi.resetModules()
+    const thrower = vi.fn(() => { throw new Error('sync boom') })
+    ;(window as { electronAPI?: unknown }).electronAPI = { reportRendererLog: thrower }
+    const ipc3 = await import('@/lib/ipc')
+    await expect(
+      ipc3.reportRendererLog({ source: 'window-onerror', message: 'x', timestamp: 1 }),
+    ).resolves.toBe(false)
+  })
+})

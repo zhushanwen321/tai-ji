@@ -125,10 +125,15 @@ function seedFauxScript(workDir: string): void {
   const scriptPath = join(workDir, 'faux-responses.json')
   writeFileSync(scriptPath, JSON.stringify([{ text: 'reclaim-seed-alpha' }, { text: 'reclaim-round-beta' }]))
   process.env.TAIJI_FAUX_SCRIPT = scriptPath
+  // 本测试 restore 后继续对话：pi 进程内 factory 重跑（session_start 侧既有重载行为）必须
+  // 重新播种，否则恢复进程的 core 空队列、第二 turn 命中 faux 耗尽 error（delta 断言红）。
+  // 与 skill-reload 的防重放语义相反，经 fixture 的退出通道显式选择本侧语义。
+  process.env.TAIJI_FAUX_RESEED_ON_RELOAD = '1'
 }
 
 function clearFauxScript(): void {
   delete process.env.TAIJI_FAUX_SCRIPT
+  delete process.env.TAIJI_FAUX_RESEED_ON_RELOAD
 }
 
 /** 等 pi 事件流里的 agent_end（listener 先于 prompt 注册，消除快 turn 竞态） */
@@ -315,6 +320,7 @@ describe.skipIf(!FAUX_PI_READY)(
             hasQueuedDeliveries: () => false,
             getLastViewedAt: () => undefined,
             isRestoring: () => false,
+            hasPendingUiRequest: () => false,
           },
           getClientActivity: (target) => pm.getClient(target)?.lastActivityAt,
           listCandidateSessionIds: () => [sid],

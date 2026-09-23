@@ -7,8 +7,8 @@
  *    guard 写 exited 终态。写入协议：原子写 temp+rename + 统一文件锁内 RMW；
  *    解析失败/形状非法 → 重命名 .corrupt 保留现场 + 按空表重建。
  *  - 读侧：taiji runtime 后台任务收殓器——按属主判定处置孤儿（见 ownerPiPid
- *    字段注释），orphaned 终态由 runtime 写入（收殓下沉，设计 docs/design/
- *    file-lock-unification-and-reaper-sink.md D2）。
+ *    字段注释），orphaned 终态由 runtime 写入（收殓下沉，设计
+ *    docs/architecture/file-lock-unification-and-reaper-sink.md D2）。
  *
  * 目录布局（per-session 隔离）：
  *   <agentDir>/base-tool-enhance/<sessionId>/registry.json

@@ -26,6 +26,12 @@
  *   pnpm dev                          装配并启动（package.json dev 的入口）
  *   node scripts/dev-instance.mjs --print          只打印派生参数不启动（探测/验证）
  *   node scripts/dev-instance.mjs --fresh          删除本实例目录后从模板重建（验收要干净环境时）
+ *   node scripts/dev-instance.mjs --data-dir <path>  实验用独立数据目录（值域 = ~/.taiji-dev/
+ *                                                  <suffix>，见 dev-instance-lib resolveCustomDataDir）。
+ *                                                  隔离并行验收互不踩（基线采集/mock 实例/多实验并行），
+ *                                                  取代「临时改 main.ts dataDir + 用完 revert」的实验
+ *                                                  通道；树内值经 main.ts dev 解析（resolveDevDataDir
+ *                                                  树内采信）直接生效。
  *   node scripts/dev-instance.mjs init-template [--force]   从现有 ~/.taiji-dev 生成只读模板
  *   node scripts/dev-instance.mjs init-template --seed-from <旧模板路径>
  *                                                  数据目录改名一次性种子（taiji-full-rename R3）：
@@ -51,6 +57,7 @@ import {
   copyTreeFiltered,
   deriveParams,
   ensureInstanceDir,
+  resolveCustomDataDir,
 } from './dev-instance-lib.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -179,7 +186,27 @@ if (argv[0] === 'init-template') {
   initTemplate(hasFlag('--force'), seedFrom)
 } else {
   const p = deriveParams(resolveInstanceName(cliName))
+  // --data-dir 实验数据目录：必须在 buildDevEnv 之前解析覆盖——env 在 buildDevEnv 内
+  // 固化 TAIJI_AGENT_DATA_DIR = p.dataDir，后改 p 不生效。值域校验失败 = 响亮退出并给
+  // 恢复指引（resolveCustomDataDir：树内严格子路径、拒保留目录防 --fresh 误删）；
+  // 树内值经 main.ts dev 解析（resolveDevDataDir 树内采信）直接生效，无需装配标记。
+  const dataDirIdx = argv.indexOf('--data-dir')
+  if (dataDirIdx !== -1) {
+    const cliDataDir = argv[dataDirIdx + 1]
+    try {
+      p.dataDir = resolveCustomDataDir(cliDataDir)
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e))
+      process.exit(1)
+    }
+  }
   const env = buildDevEnv(p)
+  // dev 装配 spawn 的 electron cwd = apps/electron（下方 launch 的 cwd: APP_ROOT），
+  // main 侧 local-file 白名单按 cwd/appPath 构造命中不了 worktree 根下的用户文件
+  // （对话流 <img src="docs/..."> 相对路径解析出的绝对路径会被 403）。显式注入项目根，
+  // main 侧仅 dev 态消费（打包态 env 不会被装配器注入且调用侧双重防泄漏），
+  // 供 local-file 图片预览恢复「项目根」语义。
+  env.TAIJI_DEV_PROJECT_ROOT = REPO_ROOT
   if (hasFlag('--mock')) {
     env.VITE_MOCK = 'true'
     env.TAIJI_MOCK = '1'

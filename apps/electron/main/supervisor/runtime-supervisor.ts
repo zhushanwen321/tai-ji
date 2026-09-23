@@ -135,6 +135,13 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   private _port: number | null = null
   /** 当前 runtime 的 WS auth token（S1-W1：spawn 时生成，随进程生命周期存续；stop/exit 清 null） */
   private _token: string | null = null
+  /**
+   * 最近一次启动失败原因（RD-3#2 启动失败真因可见性）：startAndNotify / attemptRestart
+   * 失败时记录，start() 成功即清除（null = 当前无已知失败）。renderer 经
+   * get-runtime-start-error IPC 拉取——runtime-error 推送可能早于 renderer 订阅安装
+   * （boot 竞态，webContents.send 静默丢失），拉取半边保证真因不丢。
+   */
+  private lastStartError: string | null = null
   /** 重启策略（纯逻辑，可单测） */
   private readonly policy = new RestartPolicy()
   /** 重启定时器（在途幂等：存在时不叠加新重启） */
@@ -157,6 +164,11 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   /** 当前 runtime 的 WS auth token（未启动为 null）。renderer 经 get-runtime-token IPC 读取 */
   get token(): string | null {
     return this._token
+  }
+
+  /** 最近一次启动失败原因（成功启动后清除；null = 当前无已知失败）。renderer 经 get-runtime-start-error IPC 拉取 */
+  get startError(): string | null {
+    return this.lastStartError
   }
 
   /**
@@ -203,6 +215,8 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // [HISTORICAL] 用 exitCode===null 判活而非 !killed：自然崩溃时 killed 仍为 false，
     // 仅 exitCode 由 null 变为退出码。避免崩溃后守卫误判存活、返回死端口（应用假死）。
     if (this.child && this.child.exitCode === null && this._port !== null) {
+      // runtime 存活复用：历史启动失败已非当前事实，清除（startError 语义 = 当前无已知失败）
+      this.lastStartError = null
       return this._port
     }
     // 先停掉已有的，等待其真正退出
@@ -240,6 +254,9 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // 路径处理，防双路重启）；此处成功落定即回到「可崩溃重启」态。
     this.policy.reset()
 
+    // 启动成功：清除启动失败记录（RD-3#2——真因只反映「当前无已知失败」之前的最近一次）
+    this.lastStartError = null
+
     // [HISTORICAL] W5 改动 3：启动存活探针，监测 runtime「半活」状态。
     // 探针在 stop() 时关闭，不会泄漏 timer。连续失败达阈值调 forceRestartForLiveness。
     this.livenessMonitor = new LivenessMonitor({
@@ -267,6 +284,8 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       return port
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      // 记录真因（RD-3#2）：renderer 经 get-runtime-start-error 拉取兜底 boot 竞态丢推送
+      this.lastStartError = message
       console.error(`[runtime] startAndNotify failed: ${message}`)
       win.webContents.send('runtime-error', { message })
       return 0
@@ -523,6 +542,8 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       this.broadcastToAllWindows('runtime-port', newPort)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      // 重启失败同样刷新真因（RD-3#2）：failed 屏显示的始终是最近一次启动失败原因
+      this.lastStartError = message
       console.error(`[runtime] Restart failed: ${message}`)
       this.handleRestartFailure()
     }

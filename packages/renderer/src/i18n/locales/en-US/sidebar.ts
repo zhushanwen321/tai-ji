@@ -65,6 +65,13 @@ export default {
     // 强制退出（右键两段确认）：卡死 session 无停止按钮时的逃生入口
     forceQuit: 'Force quit',
     forceQuitConfirm: 'Confirm force quit?',
+    // 软停止（右键两段确认，ForkGroup 退役后迁入通用行）：运行中菜单项「停止」
+    stop: 'Stop',
+    stopConfirm: 'Confirm stop?',
+    // Child-session count chip (D9): tooltip of the neutral chip on the parent row. The number
+    // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
+    // rather than "running".
+    childCount: '{n} child session unfinished | {n} child sessions unfinished',
   },
   sessionList: {
     empty: 'No sessions',
@@ -76,12 +83,6 @@ export default {
   forceQuitFailed: 'Failed to force quit: {msg}',
   // [session-dead structural fix D3] explicit toast after forceQuit recovers the defer queue into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
-  forkGroup: {
-    title: 'Branches',
-    branchN: 'Branch {n}',
-    stop: 'Stop',
-    stopConfirm: 'Confirm stop?',
-  },
   segmentedTab: {
     session: 'Session',
     file: 'File',

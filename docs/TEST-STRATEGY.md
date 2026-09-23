@@ -193,6 +193,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 - **factory 不能引用外部变量**（hoisted）：用 `vi.hoisted()` 或在 factory 内 inline + `import { session as sessionMock } from '@/api'`
 - **mock 整个 api 模块时记得 mock 所有被测路径用到的方法**（漏 mock 会 undefined 崩溃）
 - **happy-dom 对 contenteditable/Selection/Range 支持有限**：测 contenteditable 组件用 textContent + querySelector + dispatch input event，不要依赖真实光标操作
+- **DOMPurify 与 happy-dom 不兼容（nodeName 在元素子类而非 Node.prototype）**：DOMPurify 在 happy-dom 下全标签误拒（净化整体失真，且失真环境下既有断言可能假阴性通过）——markdown 渲染管线测试族（`markdown-sanitize.test.ts` 等触及 renderMarkdown/DOMPurify 的文件）已钉 `// @vitest-environment jsdom`（2026-09-19 markdown-html-sanitize-render U1 探针实证）；新增触及 DOMPurify 的测试文件照此办理
 
 ### mock 保真度登记（类型锚定 + override 生效面，2026-09-17 G4）
 
@@ -240,7 +241,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 **ci.yml e2e-visual job**：CI 内跑 mock 轨 visual-chromium project（`npx playwright test e2e/visual`），复用 lint job 成熟模式（checkout → pnpm/action-setup → setup-node → pnpm install，`fetch-depth:1`/node24/cache pnpm/`ELECTRON_SKIP_BINARY_DOWNLOAD:1` 全一致）。
 
-**ci.yml e2e-behavior job**（2026-09-15）：CI 内跑 mock 轨 electron-smoke project（`npx playwright test --project=electron-smoke`，9 条 `@p0-smoke` 用例，零 token / 零凭证 / 不 spawn pi；本地实测 30s、含 globalSetup 自动 build 38s）。与 e2e-visual 的关键差异：① install **不设** `ELECTRON_SKIP_BINARY_DOWNLOAD`（`_electron.launch` 需要 node_modules/electron 真实二进制）；② **不设** `E2E_VISUAL_ONLY`（globalSetup 检出产物缺失时自动跑 build:e2e，VITE_E2E/VITE_MOCK env 由 globalSetup 内部注入）；③ 无需 `npx playwright install chromium`（Electron 自带 Chromium）。圈定 SSOT = `playwright.config.ts` electron-smoke project 的 grep 标签（`@p0-smoke`，子集关系非互斥分轨）；用例名单见下方「e2e 资产归宿纪律」。
+**ci.yml e2e-behavior job**（2026-09-15）：CI 内跑 mock 轨 electron-smoke project（`npx playwright test --project=electron-smoke`，10 条 `@p0-smoke` 用例，零 token / 零凭证 / 不 spawn pi；本地实测 30s、含 globalSetup 自动 build 38s）。与 e2e-visual 的关键差异：① install **不设** `ELECTRON_SKIP_BINARY_DOWNLOAD`（`_electron.launch` 需要 node_modules/electron 真实二进制）；② **不设** `E2E_VISUAL_ONLY`（globalSetup 检出产物缺失时自动跑 build:e2e，VITE_E2E/VITE_MOCK env 由 globalSetup 内部注入）；③ 无需 `npx playwright install chromium`（Electron 自带 Chromium）。圈定 SSOT = `playwright.config.ts` electron-smoke project 的 grep 标签（`@p0-smoke`，子集关系非互斥分轨）；用例名单见下方「e2e 资产归宿纪律」。
 
 - **build gate 联动**：两个 E2E job（e2e-visual + e2e-behavior）都加入 reusable workflow（`build.yml`）的 needs 数组，任一质量 gate job 失败则 build 不触发（阻塞 release）
 - **artifact 隔离**：upload-artifact name 用 `test-results-visual` / `test-results-behavior`（与 test job 的 `test-results` 区分，GitHub Actions artifact name 必须唯一）
@@ -264,12 +265,15 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 ### 行为轨 mock spec 归宿标注（2026-09-15 初判）
 
-9 个 mock spec / 45 用例（2026-09-15 腐烂清理后：44 可跑绿 / 1 fixme 待修；同批 8 条腐烂中 7 条已退役删除——R3，1 条 SM-E2E-6 查证为真回归 fixme 保留，处置见各行登记）。smoke 子集成员（9 条 `@p0-smoke`，目标 P0 面：布局 / session 切换与隔离 / 首条消息流 / composer slash / 侧栏文件树 / 失败路径入口 / 升级残留清理）标 R1；其余 R2 初判如下（触发条件 = 改动这些路径时在 dev-flow 验收阶段跑对应 spec）：
+10 个 mock spec / 47 用例（2026-09-15 腐烂清理后：44 可跑绿 / 1 fixme 待修；同批 8 条腐烂中 7 条已退役删除——R3，1 条 SM-E2E-6 查证为真回归 fixme 保留，处置见各行登记）。smoke 子集成员（10 条 `@p0-smoke`，目标 P0 面：布局 / 对话流渲染布局 / session 切换与隔离 / 首条消息流 / composer slash / 侧栏文件树 / 失败路径入口 / 升级残留清理）标 R1；其余 R2 初判如下（触发条件 = 改动这些路径时在 dev-flow 验收阶段跑对应 spec）：
+
+> **容量状态（2026-09-20）**：smoke 现 10 条 = 规则 2「目标 5-10 条」的上限。后续新 P0 面成员进 smoke 前，须先按规则 2 评估挤掉低价值现存成员（降级回 R2），防止每 PR 关键路径继续膨胀。
 
 | spec | 归宿 | 触发条件（R2 必填）/ 说明 |
 |------|------|--------------------------|
 | `v6-shell-baseline.spec.ts` | R1（3 条：TC-SHELL-LAYOUT / TC-SESSION-SWITCH / TC-MSGSTREAM-TURN）+ R2（TC-SIDEBAR-COLLAPSE） | R2 触发：改 `AppShell` / 侧栏折叠 chrome（AppNavControls / PanelHeader 折叠按钮）时跑 |
 | `state-tearing.spec.ts` | R1（2 条：ST-1 / ST-5）+ R2（harness smoke / ST-2 / ST-3 / ST-6） | R2 触发：改 `useChat` / `derive-status`（isActive 状态机）/ steer 队列 / mock `run-send-stream.ts` 时跑 |
+| `markdown-table-layout.spec.ts` | R1（1 条：对话流 markdown 表格列宽地板，@p0-smoke） | 布局断言（列宽 / 行数）jsdom 无 layout 引擎测不了，故落 L1 行为轨；数据源 = mock 哨兵词 'md-table'（`run-send-stream.ts` TABLE_REPLY 复刻宽表）。改 `MarkdownRenderer.vue` / `UpdateButton.vue` 表格 CSS（4em 地板 / GitHub 四条滚动声明）或 mock `run-send-stream.ts` 时本用例即守卫面；列间配比（code 列占比）与 fixed+colgroup 升级为声明过的范围外项，不属本用例断言 |
 | `composer.spec.ts` | R2（harness smoke / CF-1 / CF-4 / CF-5） | 触发：改 `Composer.vue` / `useCommandPopoverTrigger` / CommandPopover 时跑。CF-2 / CF-3 / CF-6 已退役 R3（2026-09-15 清理）：composer 符号体系已改为 **# session / $ file**（`ComposerInput.vue` onFileTrigger→session-trigger / onDollarFileTrigger→file-trigger），敲 `#auth` 期望文件候选的断言永挂；git 可追溯 |
 | `search-modal.spec.ts` | R1（1 条：SM-E2E-7）+ R2（harness smoke / SM-E2E-1~5 / SM-E2E-8~10）+ **R2 fixme 待修**（SM-E2E-6） | R2 触发：改 SearchModal / `useSearch` / `commandStore`（pendingSlash 一次性通道）时跑。SM-E2E-6（2026-09-15 查证定性：**真回归**，fixme 保留）：confirm 文件项后浮层未关闭（`search-modal-root` 仍可见）——UI 意图明确是关闭（AC-6.7），根因 = `useSearchModalDeps.ts:62` fileRead 直连 core real file 域绕过 `@/api` 门面 isMock 切换，mock 轨下 `file.read` RPC 挂 65s backstop；修复方向 = fileRead 改走 `@/api` 门面 |
 | `file-tree.spec.ts` | R1（1 条：E2E-1）+ R2（其余 9 条） | R2 触发：改 `FileView` / `FileTreeRow` / `useFileTree` / fileTreeStore / mock `file.tree` 时跑。E2E-3b 已退役 R3（2026-09-15 清理）：diff 视图已从 raw diff 文本（`diff --git` 头）改为结构化 hunk 渲染（`@@ … @@`），断言过期；git 可追溯 |

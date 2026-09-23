@@ -61,7 +61,12 @@ import type { Locale } from '@/i18n'
  */
 export function bootstrapSettingsCore(): void {
   provideSettingsTransport(createSettingsTransport())
-  void useSettings().init()
+  // RD-3#10：不 void 吞 rejection——init 失败（如 storage 配额错致主题停留默认）显式落
+  // console.error，且 settings-lifecycle.init 成功后才置 initialized（失败可重试，不再被守卫吞
+  // 为 no-op）。.catch 已处理 rejection，无需再包 try/catch。
+  useSettings().init().catch((e: unknown) => {
+    console.error('[settings] bootstrapSettingsCore init failed; settings degraded to defaults', e)
+  })
 }
 
 /**
@@ -85,10 +90,29 @@ export function useSettingsShell(): void {
   // matchMedia 系统色监听 + applySystemToDom 兜底
   const store = getSettingsStore()
 
-  /** apply 当前 system 偏好到 DOM（theme/themePreset/fontSize + locale） */
+  // 跨进程 locale 通道（u-locale-channel）：上次已成功推送/已发起推送的语言值。
+  // 值守卫 = 只在语言真实变化时推送——applyCurrent 同时被外观/字号变更触发，无守卫会每个变更都写盘。
+  let lastPushedLocale: Locale | undefined
+
+  /**
+   * 推送 UI 语言到 runtime（写 `<dataDir>/ui-preferences.json`，extension 侧读取热生效）。
+   *
+   * 幂等：值未变直接返回（首启 = lastPushedLocale undefined → 推送一次，让"从不切语言的
+   * zh-CN 用户"也写入文件，V3(b)）；失败不阻塞本地切换（warn 留痕，下次语言变更/重启重试）。
+   */
+  const pushUiLocale = (locale: Locale): void => {
+    if (locale === lastPushedLocale) return
+    lastPushedLocale = locale
+    void config.setUiLocale(locale).catch((e: unknown) => {
+      console.warn('[settings] push ui locale failed; extension 侧文案可能滞后', e)
+    })
+  }
+
+  /** apply 当前 system 偏好到 DOM（theme/themePreset/fontSize + locale）+ 推送跨进程 locale 通道 */
   const applyCurrent = (): void => {
     // ui deps.setLocale 签名为 string；@/i18n setLocale 窄化为 Locale（locale 来自 SystemSettings.locale，运行时必合法）。
     applySystemToDom(store.system.value, { setLocale: (l) => setLocale(l as Locale) })
+    pushUiLocale(store.system.value.locale)
   }
 
   // 初始 apply：init() 内 setSystem 已把 storage 值同步到 store（async），但 watch 默认 lazy 不触发初始；

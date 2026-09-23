@@ -177,4 +177,123 @@ describe('useSessionMarkers', () => {
     // 标记完成时自动清除 unread，且 markedDone=true 保留条目
     expect(stored.s1).toEqual({ unread: false, markedDone: true })
   })
+
+  // ── 损坏保护（RD-1#2 / 审计 M4 族：损坏数据读回空骨架 → 全量覆写）──
+
+  it('[RD-1#2] localStorage 值损坏时 mutateMarker 拒绝写盘：原始（可人工恢复）数据不被空表覆写', () => {
+    const corruptRaw = '{"s1":{"unread":true},"s2":{"markedDone":true},BROKEN'
+    localStorage.setItem(STORAGE_KEY, corruptRaw)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    markUnread('s3') // ensureCache hydrate → 解析失败 → corrupt → 拒绝写
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(corruptRaw) // 原值原样保留
+    expect(warnSpy).toHaveBeenCalled()
+    // warn 含 key 与恢复动作指引（可行动错误消息）
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(warned).toContain(STORAGE_KEY)
+    expect(warned).toContain('恢复动作')
+
+    // 读侧降级但不写：多次标记操作后原值仍不被覆写
+    toggleMarkedDone('s3')
+    clearAll('s1')
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(corruptRaw)
+    warnSpy.mockRestore()
+  })
+
+  it('[RD-1#2] 损坏 warn 去重：连续多次操作只提示一次，不刷屏', () => {
+    localStorage.setItem(STORAGE_KEY, 'NOT-JSON{')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    markUnread('s1')
+    markUnread('s2')
+    toggleMarkedDone('s3')
+    expect(warnSpy).toHaveBeenCalledTimes(2) // 损坏发生 1 次 + 拒绝写 1 次
+    warnSpy.mockRestore()
+  })
+
+  it('[RD-1#2] storage 事件推送损坏 newValue：内存缓存保留旧值不被清空，后续写被拒', () => {
+    markUnread('s1') // 正常 hydrate + 写入
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: 'BROKEN{' }))
+    expect(isUnread('s1')).toBe(true) // 旧缓存保留，不被清空
+
+    markUnread('s2') // corrupt 态 → 拒绝写
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({ s1: { unread: true } })
+    warnSpy.mockRestore()
+  })
+
+  it('[RD-1#2] 损坏后另一窗口写入合法值（storage 事件）→ 解除保护，写入恢复', () => {
+    localStorage.setItem(STORAGE_KEY, 'BROKEN{')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    markUnread('s1') // corrupt → 拒绝
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('BROKEN{')
+
+    // 另一窗口修复了该值
+    const fixed = JSON.stringify({ s1: { unread: true } })
+    localStorage.setItem(STORAGE_KEY, fixed)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: fixed }))
+
+    markUnread('s2') // 保护解除 → 正常写
+    expect(isUnread('s1')).toBe(true)
+    expect(isUnread('s2')).toBe(true)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
+      s1: { unread: true },
+      s2: { unread: true },
+    })
+    warnSpy.mockRestore()
+  })
+
+  // ── 形状守卫（合法 JSON 但结构漂移不进 cache）──
+
+  it('[形状守卫] 顶层非对象 JSON（数组等形状漂移）与解析失败同走 corrupt 通道', () => {
+    const arrayRaw = '[{"s1":{"unread":true}}]'
+    localStorage.setItem(STORAGE_KEY, arrayRaw)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    markUnread('s2') // hydrate → 顶层形状守卫失败 → corrupt → 拒写
+    expect(warnSpy).toHaveBeenCalled()
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(arrayRaw) // 原值保留不覆写
+    expect(isUnread('s1')).toBe(false) // 错误形状未进 cache
+
+    // 与解析失败同一恢复路径：合法值经 storage 事件写入后解除保护
+    const fixed = JSON.stringify({ s1: { unread: true } })
+    localStorage.setItem(STORAGE_KEY, fixed)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: fixed }))
+    markUnread('s2')
+    expect(isUnread('s2')).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('[形状守卫] 条目形状漂移被丢弃并 warn-once，合法条目与合法字段照常加载', () => {
+    const raw = JSON.stringify({
+      s1: { unread: true }, // 合法
+      s2: 'junk', // 非对象 → 丢弃
+      s3: { unread: 'yes' }, // 字段漂移且无合法字段 → 丢弃
+      s4: { unread: 'yes', markedDone: true }, // 部分漂移 → 剔除漂移字段，保留 markedDone
+    })
+    localStorage.setItem(STORAGE_KEY, raw)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(isUnread('s1')).toBe(true)
+    expect(isUnread('s2')).toBe(false)
+    expect(isUnread('s3')).toBe(false)
+    expect(isMarkedDone('s3')).toBe(false)
+    expect(isUnread('s4')).toBe(false)
+    expect(isMarkedDone('s4')).toBe(true)
+    expect(warnSpy).toHaveBeenCalledTimes(1) // 丢弃只提示一次，不刷屏
+
+    // 丢弃不置 corrupt：写盘正常，坏条目随下次写盘被清理
+    markUnread('s5')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
+      s1: { unread: true },
+      s4: { markedDone: true },
+      s5: { unread: true },
+    })
+
+    // warn 去重跨读取生效：再次读入含坏条目的值不重复提示
+    localStorage.setItem(STORAGE_KEY, raw)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: raw }))
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    warnSpy.mockRestore()
+  })
 })

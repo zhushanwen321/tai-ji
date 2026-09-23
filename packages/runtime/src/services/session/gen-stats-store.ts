@@ -15,6 +15,10 @@
  *     outputTokens > 50 && durationMs < 100ms 的速度样本判定为 bogus（缓存回放型异常）。
  *     本文件只提供阈值常量 + 纯判定谓词（SSOT），丢弃动作在 u3 GenStatsService
  *     recordSample 采样入口执行。
+ *   - 缓存命中率归因降噪（2026-09-19）：展示 0% 的样本在**已知成因**（会话首个请求 /
+ *     空闲超 provider 缓存 TTL / compaction 后前缀重建）下由服务侧附归因，UI 渲染成因
+ *     文案而非裸 0%；分类 SSOT = 本文件 classifyCacheMiss + isDisplayedZeroCacheRatio
+ *     + hasReportedCacheFields（纯函数，状态判定在服务侧）。
  *   - §3.3 D8 同步 API：read→append→write 必须在同一同步临界段内完成（runtime 单进程
  *     + 单线程事件循环 + 同步 fs 天然串行化）——本模块全部 fs 操作为同步 API，即为此
  *     前提的结构性保证；将来改 async 必须引入互斥，否则多 session 并发写同一模型文件
@@ -31,6 +35,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 
@@ -79,6 +84,13 @@ const DATE_PAD_WIDTH = 2
 /** 样本记录二元组长度（SpeedRecord / CacheRatioRecord 同形，读写校验共用） */
 const RECORD_TUPLE_LENGTH = 2
 
+/**
+ * provider 前缀缓存 TTL 参考值（300_000 ms = 5 分钟，对齐 pi cache-stats 的 CACHE_TTL_MS；
+ * idle-expiry 归因阈值——空闲超过该值后的首个请求，缓存大概率已被 provider 淘汰，0% 属预期内）。
+ * 刻意不改用配置：蓝本同款常量，且阈值只影响归因文案（真值仍由 provider 上报）。
+ */
+export const CACHE_TTL_MS = 300_000
+
 /** atomicWrite 的 tmp 后缀（utils/fs-utils 同名约定；孤儿清扫匹配用） */
 const TMP_SUFFIX = '.tmp'
 
@@ -91,6 +103,52 @@ const TMP_SUFFIX = '.tmp'
  */
 export function isBogusSpeedSample(outputTokens: number, durationMs: number): boolean {
   return outputTokens > BOGUS_OUTPUT_THRESHOLD && durationMs < BOGUS_DURATION_THRESHOLD_MS
+}
+
+// ── 命中率无值 / 归零判定（归因降噪 2026-09-19，SSOT）─────────────────
+
+/**
+ * provider 是否上报了 cache 计量字段：两字段（cacheRead / cacheWrite）全缺省 → 无缓存计量。
+ * 无缓存能力的 provider（或单次请求未带 cache 字段）恒缺省——命中率样本整体不采（null
+ * 编码纪律：无数据 ≠ 0% miss；此前按 0 计入 promptTotal 会把它恒写成 0%）。
+ * 任一字段有值即视为有计量（如只上报 cacheRead 的 provider）。
+ */
+export function hasReportedCacheFields(cacheRead: number | null, cacheWrite: number | null): boolean {
+  return cacheRead !== null || cacheWrite !== null
+}
+
+/**
+ * 展示归零判定（**与 UI 显示口径同源**）：round(cacheRead ÷ promptTotal × 100) === 0。
+ * 归因只对「UI 会渲染成 0%」的样本触发——极小命中（如 0.1%，四舍五入后同样是刺眼的 0%）
+ * 一并覆盖。promptTotal ≤ 0（无有效分母）返回 false：那不是测量值，是无效样本。
+ */
+export function isDisplayedZeroCacheRatio(cacheRead: number, promptTotal: number): boolean {
+  if (promptTotal <= 0) return false
+  return Math.round((cacheRead / promptTotal) * PERCENT_SCALE) === 0
+}
+
+/**
+ * 展示 0% 的归因分类（纯函数，SSOT；状态（前序请求时刻 / compaction 标记）由调用方提供）。
+ *
+ * 只覆盖**预期内的 miss**（三值均非故障，UI 以中性色呈现）：
+ *  - 无前序请求 → cold-start（会话首个请求 / 新会话）；
+ *  - compaction 标记在场 → context-rewrite（优先级高于空闲：前缀被重写是结构性成因，
+ *    即使同时空闲超时，本次 miss 也无法靠 TTL 解释口径消化）；
+ *  - 空闲严格大于 CACHE_TTL_MS → idle-expiry（携带实际空闲时长）；
+ *  - 其余 → undefined（未知成因的真实 miss：如 provider 服务端淘汰——保留裸 0%，不降噪）。
+ */
+export function classifyCacheMiss(input: {
+  /** 本会话此前是否已有请求样本（false = 本样本是本会话首条） */
+  hasPreviousRequest: boolean
+  /** 距上一次请求的空闲毫秒数（无前序请求时 null） */
+  idleMs: number | null
+  /** 上一次请求之后是否发生过成功 compaction（前缀整体重写） */
+  contextRewritten: boolean
+}): GenStatsCacheMiss | undefined {
+  if (!input.hasPreviousRequest) return { reason: 'cold-start' }
+  if (input.contextRewritten) return { reason: 'context-rewrite' }
+  if (input.idleMs !== null && input.idleMs > CACHE_TTL_MS) return { reason: 'idle-expiry', idleMs: input.idleMs }
+  return undefined
 }
 
 // ── 日 key（本地时区）────────────────────────────────────────────────

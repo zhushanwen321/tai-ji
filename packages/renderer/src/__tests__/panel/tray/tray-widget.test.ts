@@ -1,7 +1,7 @@
 /**
  * TrayWidgetButton / TrayWidgetPanel 组件 + widget 区依赖追踪测试（u-tray-widget）。
  *
- * 设计依据：docs/design/composer-task-tray.md §3.1 场景 B/C、§3.3 D3/D4/D6/D7、§3.4 终态
+ * 设计依据：docs/design/composer-task-tray.md（已删除，git 可追溯）§3.1 场景 B/C、§3.3 D3/D4/D6/D7、§3.4 终态
  * 数据流、§3.5 错误规格、§3.6 探针 P3/P6。
  *
  * 三视角（TEST-STRATEGY §3）：
@@ -19,8 +19,8 @@
  *   数据源/夹具实现与 composer-tray.test.ts 共享 tray-view-host-mock.ts
  * - 真实 GuiComponentRenderer（经 @taiji/ui/rendering-protocol）：面板正文断言渲染到 DOM 的
  *   真实原语（ansi-text / list-tree），不 stub 渲染器
- * - i18n 走全局 setup mock（__tests__/vitest-i18n-setup.ts）；本单元组件零 i18n 文案（文本全
- *   来自 meta 数据），故无 i18n 断言
+ * - i18n 走全局 setup mock（__tests__/vitest-i18n-setup.ts）；组件文案基本全来自 meta 数据，
+ *   唯一例外 = [RD-2#8] progress 数值非有限时的「无进度」占位（panel.trayWidget.*）
  *
  * timer 说明：本单元两组件无计时器（hover 160ms / 移出 240ms 归外壳 u-tray-shell），故无
  * fake timers 用例；后续若在组件内引入计时，用 vi.useFakeTimers({ now })（范式同
@@ -435,6 +435,38 @@ describe('TrayWidgetPanel（meta head + guiTree 正文）', () => {
     })
     expect(wrapper.find('[data-testid="tray-widget-panel-label"]').text()).toBe('95/100')
     expect(wrapper.find('[data-testid="tray-widget-panel-progress-fill"]').classes()).toContain('bg-danger')
+  })
+
+  it('[RD-2#8] progress 数值非有限（NaN/Infinity，第三方 widget 脏数据）→ 不渲染 mini bar、计数显「无进度」；extension 自带 label 仍优先', () => {
+    // current=NaN：ViewHostStore.narrowMeta 只校验 title，progress 深度字段归本组件把关
+    const nanCurrent = mountPanel({
+      viewId: 'bad-widget',
+      meta: makeMeta({ title: 'Bad', progress: { current: Number.NaN, total: 5 } }),
+      guiTree: [ansiLine('x')],
+    })
+    expect(nanCurrent.find('[data-testid="tray-widget-panel-progress-fill"]').exists()).toBe(false)
+    expect(nanCurrent.find('[data-testid="tray-widget-panel-label"]').text()).toBe('无进度')
+    nanCurrent.unmount()
+
+    // total=Infinity：旧守卫只挡 total<=0（NaN/Infinity 比较恒 false 会漏过 → width:'NaN%'）
+    const infTotal = mountPanel({
+      viewId: 'bad-widget',
+      meta: makeMeta({ progress: { current: 3, total: Number.POSITIVE_INFINITY } }),
+      guiTree: [ansiLine('x')],
+    })
+    expect(infTotal.find('[data-testid="tray-widget-panel-progress-fill"]').exists()).toBe(false)
+    expect(infTotal.find('[data-testid="tray-widget-panel-label"]').text()).toBe('无进度')
+    infTotal.unmount()
+
+    // label 契约优先：extension 已格式化的 label 不被「无进度」覆盖（数值缺失只影响派生 label/bar）
+    const withLabel = mountPanel({
+      viewId: 'bad-widget',
+      meta: makeMeta({ progress: { current: Number.NaN, total: Number.NaN, label: '42%' } }),
+      guiTree: [ansiLine('x')],
+    })
+    expect(withLabel.find('[data-testid="tray-widget-panel-label"]').text()).toBe('42%')
+    expect(withLabel.find('[data-testid="tray-widget-panel-progress-fill"]').exists()).toBe(false)
+    withLabel.unmount()
   })
 
   it('body = GuiComponentRenderer 渲染 guiTree（ansi-text + list-tree 落真实 DOM）', () => {

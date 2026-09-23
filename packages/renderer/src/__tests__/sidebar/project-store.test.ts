@@ -150,6 +150,74 @@ describe('Project store: 初始态与 init()', () => {
   })
 })
 
+// ── 读失败禁回写（RD-3#3 / 审计 M4：读失败被当「可覆写态」→ 整表覆盖 projects.json）──
+
+describe('Project store: loadState 读失败禁回写', () => {
+  it('init()：RPC reject → loadState=failed + loadError 落位，不阻断启动', async () => {
+    mockLoad.mockRejectedValue(new Error('runtime not ready'))
+    const store = useProjectStore()
+    await expect(store.init()).resolves.toBeUndefined()
+    expect(store.loadState).toBe('failed')
+    expect(store.loadError).toBe('runtime not ready')
+    expect(store.projects).toHaveLength(1) // 默认兜底（UI 永不空态）
+  })
+
+  it('failed 态下 state 变化不触发落盘 save（deep watch early-return）', async () => {
+    mockLoad.mockRejectedValue(new Error('runtime not ready'))
+    const store = useProjectStore()
+    await store.init()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    store.addProject('X')
+    store.setActiveProject(DEFAULT_PROJECT_ID)
+    await nextTick()
+    await nextTick()
+    expect(mockSave).not.toHaveBeenCalled() // 防整表覆盖 projects.json
+    // 「改动不会落盘」warn 一次（含原因与恢复指引）
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(warned).toContain('不会落盘')
+    expect(warned).toContain('runtime not ready')
+    warnSpy.mockRestore()
+  })
+
+  it('failed 态不走 legacy 迁移：localStorage 有旧数据也不 save（迁移 save 同样会覆写）', async () => {
+    mockLoad.mockRejectedValue(new Error('runtime not ready'))
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ projects: [{ id: 'p1', name: '旧项目', lastUsedAt: 1 }], activeProjectId: 'p1' }),
+    )
+    const store = useProjectStore()
+    await store.init()
+
+    expect(store.loadState).toBe('failed')
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(store.projects).toHaveLength(1) // 内存也保持默认兜底，不消费可能过期的 legacy 数据
+  })
+
+  it('重试（重新执行 init）成功 → loadState 回 loaded，落盘恢复', async () => {
+    mockLoad.mockRejectedValueOnce(new Error('runtime not ready'))
+    const store = useProjectStore()
+    await store.init()
+    expect(store.loadState).toBe('failed')
+
+    mockLoad.mockResolvedValue({
+      projects: [makeProject('proj-a', 'Alpha'), makeProject(DEFAULT_PROJECT_ID, '')],
+      activeProjectId: 'proj-a',
+    })
+    await store.init() // 重试 = 重新执行 init
+    expect(store.loadState).toBe('loaded')
+    expect(store.loadError).toBe('')
+    expect(store.projects).toHaveLength(2)
+
+    mockSave.mockClear()
+    store.addProject('B') // 落盘恢复
+    await nextTick()
+    expect(mockSave).toHaveBeenCalled()
+    const saved = mockSave.mock.calls[0][0] as ProjectStoreState
+    expect(saved.projects.some((p) => p.name === 'B')).toBe(true)
+  })
+})
+
 describe('Project store: CRUD + 持久化', () => {
   it('addProject：新建 + 设为活跃 + 返回 id；空名不创建', () => {
     const store = useProjectStore()

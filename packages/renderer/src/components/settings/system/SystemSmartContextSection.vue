@@ -1,18 +1,34 @@
 <template>
   <GroupCard :title="t('settings.system.smartContextTitle')">
     <div class="px-2.5 pt-1 pb-2">
+      <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+      <div
+        v-if="loadError"
+        data-testid="smart-context-load-error"
+        class="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-1.5 text-[11px] text-warn"
+      >
+        <AlertTriangle class="size-3.5 shrink-0" />
+        <span>{{ t('settings.system.loadErrorHint') }}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-5 px-1.5 text-[11px] text-accent"
+          data-testid="smart-context-load-retry"
+          @click="loadConfig"
+        >{{ t('settings.system.loadErrorRetry') }}</Button>
+      </div>
       <SettingRow :label="t('settings.system.smartContextEnable')" :desc="t('settings.system.smartContextDesc')">
         <Switch
           data-testid="setting-smart-context-switch"
           :model-value="enabled"
-          :disabled="toggling"
+          :disabled="toggling || loadError"
           @update:model-value="onSaveEnabled"
         />
       </SettingRow>
       <SettingRow :label="t('settings.system.smartContextModelLabel')" :desc="t('settings.system.smartContextModelHint')">
         <Select
           :model-value="selectedValue"
-          :disabled="!enabled || savingCompactModel"
+          :disabled="!enabled || savingCompactModel || loadError"
           @update:model-value="onCompactModelChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-smart-context-model">
@@ -44,7 +60,7 @@
             :step="1"
             :aria-label="`${t('settings.system.smartContextThresholdLabel')} ${i + 1}`"
             class="h-8 w-[72px] px-2 text-right font-mono text-xs"
-            :disabled="!enabled || savingThresholds"
+            :disabled="!enabled || savingThresholds || loadError"
             @change="onThresholdsSave"
           />
           <span class="text-neutral-dim font-mono text-xs">K</span>
@@ -69,7 +85,7 @@
           </span>
           <Select
             :model-value="EXCLUDED_ADD_PLACEHOLDER"
-            :disabled="!enabled || savingExcluded || addableGroups.length === 0"
+            :disabled="!enabled || savingExcluded || addableGroups.length === 0 || loadError"
             @update:model-value="onExcludedAdd"
           >
             <SelectTrigger class="h-6 gap-1 rounded-sm border border-dashed border-border-strong px-2 text-xs text-neutral-dim">
@@ -97,7 +113,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Plus } from '@lucide/vue'
+import { X, Plus, AlertTriangle } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -177,7 +193,10 @@ const addableGroups = computed<AuthedModelGroup[]>(() => {
     .filter((g) => g.models.length > 0)
 })
 
-onMounted(async () => {
+/** RD-4#8：读配置失败标志——置位时控件禁用 + 顶部常驻提示，禁止把默认值当已存值渲染。 */
+const loadError = ref(false)
+
+async function loadConfig(): Promise<void> {
   try {
     const cfg = await getSmartContextConfig()
     enabled.value = cfg.enabled
@@ -185,10 +204,18 @@ onMounted(async () => {
     thresholdsK.value = cfg.reminderThresholds.map((tk) => tk / TOKENS_PER_K)
     loadedThresholdsK.value = [...thresholdsK.value]
     excludedModels.value = cfg.excludedModels
+    loadError.value = false
   } catch (e) {
-    // best-effort：加载失败保持默认值（各控件仍可操作，保存时以输入为准），不打扰用户
+    // RD-4#8：读失败不再 best-effort 冒充已存值。此前 console.warn 后按默认值渲染（开关显
+    // 「开」冒充已存值），误显的默认值会随用户操作直接落盘。现置 loadError → 控件禁用 +
+    // 常驻提示 + 可重试，默认值明确标注为默认而非已存。
     console.warn('[SystemSmartContextSection] failed to load smart-context config:', e)
+    loadError.value = true
   }
+}
+
+onMounted(() => {
+  void loadConfig()
 })
 
 async function onSaveEnabled(next: boolean): Promise<void> {
@@ -199,9 +226,9 @@ async function onSaveEnabled(next: boolean): Promise<void> {
   try {
     await setSmartContextEnabled(next)
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     enabled.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     toggling.value = false
   }
@@ -217,9 +244,9 @@ async function onCompactModelChange(value: unknown): Promise<void> {
   try {
     await setSmartContextCompactModel(next)
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     compactModel.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     savingCompactModel.value = false
   }
@@ -241,9 +268,9 @@ async function onThresholdsSave(): Promise<void> {
     thresholdsK.value = res.thresholds.map((tk) => tk / TOKENS_PER_K)
     loadedThresholdsK.value = [...thresholdsK.value]
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     thresholdsK.value = [...loadedThresholdsK.value]
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     savingThresholds.value = false
   }
@@ -259,9 +286,9 @@ async function persistExcluded(next: string[]): Promise<void> {
     const res = await setSmartContextExcludedModels(next)
     excludedModels.value = res.models
     toastInfo(t('settings.system.saved'))
-  } catch (_e) {
+  } catch (e) {
     excludedModels.value = prev
-    toastError(t('settings.system.saveFailed'))
+    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
   } finally {
     savingExcluded.value = false
   }

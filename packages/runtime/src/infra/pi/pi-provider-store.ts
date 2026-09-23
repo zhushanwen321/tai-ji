@@ -14,7 +14,9 @@ import { deriveEnabled, getMergedCatalogModels, isCatalogProvider } from '../../
 // 链 3（凭据读路径收口，D3）：infra 层只 type-only import 接口，不 value import 实现
 // （C-comm-03；实现在 services/auth，由组合根经模块级 init setter 注入）。
 import type { IProviderCredentialResolver } from '../../services/ports/provider-credential-resolver.js'
-import { JsonStore } from '../../utils/json-store.js'
+import { existsSync, readdirSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { JsonStore, quarantineCorruptFile } from '../../utils/json-store.js'
 import { getModelsPath } from './pi-paths.js'
 // settings.json 的唯一读写层（D17 收口）：readSettings/updateSettingsFields/PiSettings/缓存/
 // 跨进程锁/原子写都收敛到 pi-settings-store，model 域（本文件）与 extension 域共享同一
@@ -103,11 +105,64 @@ let modelsFilePath: string = getModelsPath()
 /** models.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。 */
 let modelsStore = createModelsStore(modelsFilePath)
 
+/** 诊断日志里的损坏内容截断长度（对齐 provider-extras-store 的 SCHEMA_SNIPPET_MAX 家族形态）。 */
+const SCHEMA_SNIPPET_MAX = 120
+
+/**
+ * models.json 损坏降级态错误（M4/RT-3#4）：schema 不匹配已隔离后，writeModels 拒绝
+ * 以空骨架覆写时抛出。code 经 server.ts handleMessage 的 catch 透传为 error envelope。
+ */
+export class ModelsStoreCorruptedError extends Error {
+  readonly code = 'models_store_corrupted'
+  constructor(modelsPath: string, quarantineCopies: string[]) {
+    const copyRef = quarantineCopies[0] ?? `${modelsPath}.corrupt-<ts>`
+    super(`models.json 已损坏并被隔离（副本：${copyRef}），已拒绝写入以防空配置覆写。恢复指引：对比 .corrupt 副本找回配置写回后重试`)
+    this.name = 'ModelsStoreCorruptedError'
+  }
+}
+
+/**
+ * 列出 models.json 的隔离取证副本（`models.json.corrupt-<ts>` 家族）。目录不可读返回 []。
+ * 降级态判定 = 磁盘真值（见 isModelsStoreCorrupted）——JsonStore 的隔离是 rename 语义，
+ * 两条隔离路径（本文件 deserialize 的 schema 不匹配 + JsonStore readFromDisk 的
+ * JSON.parse 失败）殊途同归到同一磁盘后态，内存标志反而会漏记后者。
+ */
+function findQuarantinedModelsCopies(): string[] {
+  try {
+    const dir = dirname(modelsFilePath)
+    const prefix = `${basename(modelsFilePath)}.corrupt-`
+    return readdirSync(dir).filter(name => name.startsWith(prefix)).map(name => join(dir, name))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * models.json 是否处于损坏降级态（原位文件已被隔离移走、providers 读回空骨架、
+ * 真实数据只在 .corrupt 副本）。随 config.providers RPC 下发 UI（字段名 corrupted，
+ * 与 system-prompt / terminal 两处一致）。自愈：副本内容写回原位 → false；
+ * 保守方向：副本尚在 + 原位被整体删除（未恢复）时保持 true，写侧拒绝、强制显式恢复。
+ */
+export function isModelsStoreCorrupted(): boolean {
+  return findQuarantinedModelsCopies().length > 0 && !existsSync(modelsFilePath)
+}
+
 function createModelsStore(path: string): JsonStore<PiModelsConfig> {
   return new JsonStore<PiModelsConfig>(path, { providers: {} }, {
     deserialize: (raw): PiModelsConfig => {
-      if (!raw || typeof raw !== 'object' || typeof (raw as PiModelsConfig).providers !== 'object') {
-        console.warn(`[provider-store] ${path} schema 不匹配，使用 fallback`)
+      const providers = (raw as PiModelsConfig | null | undefined)?.providers
+      const schemaOk = !!raw && typeof raw === 'object' && providers !== null
+        && providers !== undefined && typeof providers === 'object' && !Array.isArray(providers)
+      if (!schemaOk) {
+        // schema 不匹配 = 损坏（M4/RT-3#4）：隔离保现场后回空骨架，不再只 warn——
+        // 否则下一次 writeModels 会以 {providers:{}} 全量覆写，用户全部 provider 配置
+        // （含明文 apiKey）不可逆丢失。providers 为 null/数组是穿透原 typeof 守卫的
+        // 隐患形态，一并按损坏处置。
+        quarantineCorruptFile(path, {
+          tag: 'provider-store',
+          reason: 'schema mismatch (expect { providers: {} })',
+          cause: new Error(`unexpected shape: ${JSON.stringify(raw)?.slice(0, SCHEMA_SNIPPET_MAX)}`),
+        })
         return { providers: {} }
       }
       return raw as PiModelsConfig
@@ -130,7 +185,15 @@ export function readModels(): PiModelsConfig {
   return modelsStore.read()
 }
 
+/**
+ * 全量覆写 models.json。[M4/RT-3#4] 损坏降级态下拒绝写入（readModels 回的空骨架 +
+ * 本次变更会把用户其余 provider 含明文 apiKey 全部静默清空），抛带 code 的
+ * ModelsStoreCorruptedError 上抛到 server catch 转 error envelope。
+ */
 export function writeModels(config: PiModelsConfig): void {
+  if (isModelsStoreCorrupted()) {
+    throw new ModelsStoreCorruptedError(modelsFilePath, findQuarantinedModelsCopies())
+  }
   modelsStore.write(config)
 }
 
@@ -179,12 +242,29 @@ function pickFirstModelProvider(
  */
 let credentialResolver: IProviderCredentialResolver | undefined
 
+/** RT-3#5：未注入一次性 warn 状态（(re)注入时重置——再次未注入可再报）。 */
+let warnedResolverMissing = false
+
+/**
+ * 取 resolver；未注入打一次性 warn（RT-3#5）：`resolver?.… ?? false` 使「未注入」与
+ * 「确无凭据」同值，装配序漂移会全量判无凭据且零告警。返回语义不变（组合根契约）。
+ */
+function credentialResolverOrWarn(context: string): IProviderCredentialResolver | undefined {
+  if (credentialResolver) return credentialResolver
+  if (!warnedResolverMissing) {
+    warnedResolverMissing = true
+    console.warn(`[provider-store] credential resolver not injected (context: ${context}) — all providers treated as credential-less, no default model will be resolved. Composition root must call initProviderCredentialResolver before any model lookup.`)
+  }
+  return undefined
+}
+
 /**
  * 注入凭据 resolver（生产 = 组合根装配期调用；测试可传 undefined 清空注入，用于断言
  * 「未注入 → 视为无凭据」的安全降级行为与装配序契约）。
  */
 export function initProviderCredentialResolver(resolver: IProviderCredentialResolver | undefined): void {
   credentialResolver = resolver
+  warnedResolverMissing = false
 }
 
 /**
@@ -364,8 +444,8 @@ function adjudicateCatalogOnlyDefault(
   const mergedCatalog = getMergedCatalogModels(defaultProvider)
   if (!mergedCatalog || mergedCatalog.models.length === 0) return null
   // 链 3（D3 收口）：凭据判定经唯一通道 sync 布尔版（auth.json → models.json 双源），
-  // 未注入 resolver 时视为无凭据（安全降级：不抛错、不误选，装配序由组合根保证）。
-  const hasCredential = credentialResolver?.hasProviderCredential(defaultProvider) ?? false
+  // 未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
+  const hasCredential = credentialResolverOrWarn('adjudicateCatalogOnlyDefault')?.hasProviderCredential(defaultProvider) ?? false
   if (!hasCredential || !isEnabled) return null
   // D5 态 3（never-seen）：pass-through——不判定有效性、不触发 auto-fix、不改写
   // settings.json，`--model` 直传 pi 由执行侧解析（模型确实不存在时 pi 报
@@ -400,9 +480,8 @@ function pickCredentialBackedCatalogProvider(): {
     models?: Array<{ id: string }>
   }>
   // 链 3（D3 收口）：遍历 39 个 builtin 候选用**批量形态**——auth.json / models.json 各单次
-  // 读盘（B3 先例：消除 N+1；逐个 hasProviderCredential 会对 auth.json 做 N 次同步读）。
-  // 未注入 resolver 时视为无凭据（安全降级：不抛错、不误选）。
-  const credentialBackedIds = credentialResolver?.listCredentialBackedProviderIds() ?? new Set<string>()
+  // 读盘（B3 先例：消除 N+1）。未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
+  const credentialBackedIds = credentialResolverOrWarn('pickCredentialBackedCatalogProvider')?.listCredentialBackedProviderIds() ?? new Set<string>()
   for (const bp of builtinProviders) {
     const hasCredential = credentialBackedIds.has(bp.id)
     // ES3：被 enabledModels 禁用的 catalog provider 不作 default 候选（避免返回用户已禁用的 provider）。

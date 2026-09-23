@@ -36,6 +36,7 @@ export default defineConfig({
     'journal-io': 'src/journal-io.ts',
     'port-contract': 'src/port-contract.ts',
     'cli-entry': 'src/cli-entry.ts',
+    'zcode-db-paths': 'src/zcode-db-paths.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

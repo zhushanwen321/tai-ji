@@ -22,6 +22,7 @@ import {
 } from '@zhushanwen/subagent-core/relay-env'
 import { getRelayScriptPath } from './relay-paths.js'
 import { isRelayServerActive, getActiveRelaySocketPath } from './relay-server.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 /** 探针超时（§10-1：spawn 执行器跑 --eval "process.exit(0)" 的完成上限）。 */
 const PROBE_TIMEOUT_MS = 5_000
@@ -109,8 +110,17 @@ export async function getRelaySpawnEnv(projectRoot: string, opts?: RelaySpawnEnv
   const socketPath = getActiveRelaySocketPath()
   if (!isRelayServerActive() || socketPath === undefined) return {}
   const scriptPath = opts?.scriptPath ?? getRelayScriptPath(projectRoot)
-  // staged 脚本缺失只降级不激活——并行任务（bundle 登记拷贝）未就绪是常态路径
-  if (!existsSync(scriptPath)) return {}
+  // staged 脚本缺失只降级不激活——并行任务（bundle 登记拷贝）未就绪是常态路径。
+  // RT-8#11：常态路径也不该零留痕（「relay 从未激活」不可观测——探针失败同款有 warn，
+  // 此处此前静默）。warn-once 按路径去重：拷贝就绪后不再出声，长期缺失每次进程重启各提示一次。
+  if (!existsSync(scriptPath)) {
+    warnOnce(
+      `relay-script:${scriptPath}`,
+      `[relay] staged 脚本缺失，relay 未激活（extension 进程将直 spawn，不经代理）: ${scriptPath}。` +
+        '若长期持续：重启 runtime 让 bundle 重新登记拷贝，或检查 apps/electron/resources/ 产物完整性',
+    )
+    return {}
+  }
 
   const execPath = opts?.execPath ?? process.execPath
   const isElectron = opts?.isElectron ?? process.versions.electron !== undefined

@@ -15,12 +15,16 @@
  * - expandDir/readFile 的 path：path.resolve(cwd, path) 后必须落在 cwd 之下（isUnderOrEqual），
  *   防 `../../etc/passwd` 路径穿越 → 越界抛 FileError('out_of_cwd')。
  *   （listTree 入口对 cwd 自身守门，恒 true，保持入口统一守门模式。）
+ * - readFile / readFileFromWhitelist 守门前两侧 realpath 归一（canonicalizePath，失败退词法）：
+ *   session cwd（前端/DB 词法形态）与 pi 子进程拼出的目标（物理形态）可因符号链接
+ *   （macOS /tmp → /private/tmp）词法前缀不一致，词法判定误拒同一物理目录内的文件；
+ *   归一后判定语义 = 物理路径包含关系。expandDir 保持词法判定不变。
  */
 import { resolve as resolvePath, join, relative, isAbsolute } from 'node:path'
 import type { FileNode } from '@taiji/shared'
 import type { IgnoreMatcher } from '../infra/fs/ignore-parser.js'
 import { compileIgnoreRules, matchPath } from '../infra/fs/ignore-parser.js'
-import { isUnderOrEqual, expandHome } from '../utils/path-utils.js'
+import { isUnderOrEqual, expandHome, canonicalizePath } from '../utils/path-utils.js'
 import type { IFileExecutor, FsEntry } from './ports/file-executor.js'
 import type { ISessionService, IFileService } from '../interfaces.js'
 import { FileError } from './file-error.js'
@@ -170,7 +174,14 @@ export class FileService implements IFileService {
     // 安全守门（NFR-AC-S2 越界统一守门）：所有路径（含 ~ 展开后的绝对路径）必须落在 cwd 下，
     // 防 `../../etc/passwd` 相对穿越与 `~/...` / `/etc/...` 绝对路径越界 → 越界抛 FileError('out_of_cwd')。
     // cwd 外文件读取（BC-3 skill 文件预览）走 readFileFromWhitelist（自带 allowedReadDirs 白名单）。
-    if (!isUnderOrEqual(cwd, resolvePath_)) throw new FileError('out_of_cwd', path)
+    // 守门前两侧 realpath 归一（canonicalizePath 失败退回原词法路径）：session cwd 是前端/DB
+    // 记录的词法形态（如 /tmp/x），pi 子进程 process.cwd() 拼出的目标常是解析后物理形态
+    // （如 /private/tmp/x，macOS /tmp → /private/tmp）——词法前缀判定会把同一物理目录误判
+    // 越界（A1 场景实测）。归一后判定语义 = 物理路径包含关系；目标不存在（realpath ENOENT）
+    // 退词法路径继续判，not_found 语义由后续 stat ENOENT 保持。读取仍用原词法路径，形态不变。
+    if (!isUnderOrEqual(canonicalizePath(cwd), canonicalizePath(resolvePath_))) {
+      throw new FileError('out_of_cwd', path)
+    }
     const statResult = await this.callFs(() => this.opts.executor.stat(resolvePath_), 'stat')
     const full = await this.callFs(() => this.opts.executor.readFile(resolvePath_), 'readFile')
     if (statResult.size > MAX_FILE_SIZE) {
@@ -189,8 +200,11 @@ export class FileService implements IFileService {
   async readFileFromWhitelist(path: string): Promise<{ content: string; truncated: boolean }> {
     const allowed = this.opts.allowedReadDirs ?? []
     const absPath = resolvePath(path)
-    // 白名单守门（与旧 server.ts handleFileRead 一致：absPath 必须在某白名单目录之下）
-    if (!allowed.some((dir) => isUnderOrEqual(dir, absPath))) {
+    // 白名单守门（与旧 server.ts handleFileRead 一致：absPath 必须在某白名单目录之下）。
+    // 同 readFile：两侧 realpath 归一（失败退词法，canonicalizePath）后再判——白名单目录
+    // 同样可能存在 symlink 形态不一致（如 ~ 家目录本身经 /etc/symlinks 或 macOS 重组形态），
+    // 纯词法前缀判定会误拒。归一后判定语义 = 物理路径包含关系，error code 语义不变。
+    if (!allowed.some((dir) => isUnderOrEqual(canonicalizePath(dir), canonicalizePath(absPath)))) {
       throw new FileError('out_of_cwd', `路径不在允许的 skill 目录内: ${path}`)
     }
     const statResult = await this.callFs(() => this.opts.executor.stat(absPath), 'stat')

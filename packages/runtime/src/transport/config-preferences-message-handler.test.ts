@@ -3,6 +3,7 @@
  *
  * 覆盖：
  *  - 偏好组（worktreeRootDir / defaultBaseBranch）转发：读取/写入 reply 塑形 + 原值透传
+ *  - config.setUiLocale（u-locale-channel）：ack 型 reply 塑形 + 落盘 + 写盘失败错误信封
  *  - 兜底与不串扰：未知 case 子 handler false 零副作用；主入口委托可达；未知 type 兜底 false
  *
  * 历史：本文件曾覆盖 config.get/setStreamingIdleTimeout 配置链，该功能废弃后用例随之移除。
@@ -11,8 +12,12 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/config-preferences-message-handler.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ConfigPreferencesMessageHandler } from './config-preferences-message-handler.js'
+import { readUiPreferences } from '../services/ui-preferences-helper.js'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
 import type { ClientMessage, ServerMessage } from '@taiji/shared'
 
@@ -24,16 +29,19 @@ function mockCtx() {
     // ④b 用例：非偏好组消息经主 switch 命中未迁移的既有 case（getAutoRenameEnabled）所需 stub
     getAutoRenameEnabled: vi.fn(() => false),
     // 偏好组 10 case 转发所需 stub（worktree 目录 / setup 脚本 / 裸仓脚本 / 超时 / 默认基分支）
+    // 写 stub 返回 {ok:true}（M4/RT-7#1：setter 返回 {ok, code, error}，失败走 sendError）
     getWorktreeRootDir: vi.fn(() => '/wt'),
-    setWorktreeRootDir: vi.fn(),
+    setWorktreeRootDir: vi.fn().mockReturnValue({ ok: true }),
     getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
-    setSetupScript: vi.fn(),
+    setSetupScript: vi.fn().mockReturnValue({ ok: true }),
     getBareSetupScript: vi.fn(() => 'custom-hooks/bare-setup.sh'),
-    setBareSetupScript: vi.fn(),
+    setBareSetupScript: vi.fn().mockReturnValue({ ok: true }),
     getTimeout: vi.fn(() => 90),
-    setTimeout: vi.fn(),
+    setTimeout: vi.fn().mockReturnValue({ ok: true }),
     getDefaultBaseBranch: vi.fn(() => 'main'),
-    setDefaultBaseBranch: vi.fn(),
+    setDefaultBaseBranch: vi.fn().mockReturnValue({ ok: true }),
+    // u-locale-channel：config.setUiLocale 写盘经 configService.getConfigDir() 推导（用例内覆盖为 tmp 目录）
+    getConfigDir: vi.fn(() => '/nonexistent-ui-prefs'),
   }
   const ctx = {
     send: vi.fn(),
@@ -147,6 +155,62 @@ describe('ConfigPreferencesMessageHandler · 偏好组转发参数化（S15：12
       // it.each 表格字面量推宽 fn 为 string；收窄回 mock 对象键集合（TS7053，无 any 断言）
       expect(configService[setter.fn as keyof typeof configService]).toHaveBeenCalledWith(setter.arg)
     }
+  })
+})
+
+describe('ConfigPreferencesMessageHandler · config.setUiLocale（u-locale-channel）', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ui-locale-handler-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('写盘成功：回 ack 型 config.uiLocaleSet（空 payload）+ 文件落 zh-CN', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    configService.getConfigDir.mockReturnValue(root)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const handled = await handler.handle(
+      { type: 'config.setUiLocale', payload: { locale: 'zh-CN' }, id: 'loc1' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(ctx.sendError).not.toHaveBeenCalled()
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({ type: 'config.uiLocaleSet', id: 'loc1', payload: {} })
+    expect(readUiPreferences(root)).toBe('zh-CN')
+  })
+
+  it('同值重复推送：短路不重写（updatedAt 保持）且仍回 ack', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    configService.getConfigDir.mockReturnValue(root)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const msg = { type: 'config.setUiLocale', payload: { locale: 'en-US' }, id: 'loc2' } as unknown as ClientMessage
+    await handler.handle(msg, WS)
+    const first = readUiPreferences(root)
+    await handler.handle({ ...msg, id: 'loc3' } as unknown as ClientMessage, WS)
+    expect(replies).toHaveLength(2)
+    expect(replies.every((r) => r.type === 'config.uiLocaleSet')).toBe(true)
+    expect(readUiPreferences(root)).toBe(first)
+  })
+
+  it('写盘失败：错误信封（不 reply ack 假成功）', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    // configDir 指向一个已存在的文件 → mkdir/写盘失败
+    const notADir = join(root, 'not-a-dir')
+    writeFileSync(notADir, 'x', 'utf-8')
+    configService.getConfigDir.mockReturnValue(notADir)
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    const handled = await handler.handle(
+      { type: 'config.setUiLocale', payload: { locale: 'zh-CN' }, id: 'loc4' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(replies).toHaveLength(0)
+    expect(ctx.sendError).toHaveBeenCalledWith(WS, 'ui_preferences_io_error', expect.any(String), 'loc4')
   })
 })
 

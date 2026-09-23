@@ -1,6 +1,6 @@
 <!--
   TrayWidgetButton —— composer 任务托盘（Widget Tray）的协议 widget 条目按钮
-  （设计 docs/design/composer-task-tray.md §3.1 场景 B + §3.3 D3/D4/D7 + §3.5 错误规格）。
+  （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.1 场景 B + §3.3 D3/D4/D7 + §3.5 错误规格）。
 
   ── 契约（供 u-tray-shell 消费）──
   props.viewId: string —— widget key（= ViewHostStore viewId，extension 调 setWidget 的第一个
@@ -41,7 +41,7 @@
   超长 truncate 至 BADGE_MAX_CHARS 字符，全文进 badge 的 title（§3.5）
 
   ── status 视觉（D4：running=accent+呼吸点 / done=success / failed=danger / idle=dim）──
-  视觉序列 = `[icon][呼吸点（仅 running，size-1.5 + animate-pulse，与 AskUserOverlay/AskUserForm
+  视觉序列 = `[icon][呼吸点（仅 running，size-1.5 + animate-pulse，与统一表单 overlay
   同款）][badge 计数]`（外壳 built-in 三件按同序镜像 → §3.1 场景 A 的「icon + mono 计数 +
   呼吸点」同视觉语言）。
   icon 与 badge 同取状态色；idle 走 neutral-dim；v1 旧 extension 无 status 时 icon 继承按钮

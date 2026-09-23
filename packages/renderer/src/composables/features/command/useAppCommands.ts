@@ -67,8 +67,9 @@ export function registerAppCommands(actions: AppCommandActions): void {
   const appCommands: AppCommand[] = [
     { id: 'new-session', name: t('settings.command.new-session'), shortcut: resolveShortcut('new-session', 'n'), action: actions.newSession },
     { id: 'toggle-sidebar', name: t('settings.command.toggle-sidebar'), shortcut: resolveShortcut('toggle-sidebar', 'b'), action: () => sidebarStore.toggleCollapsed() },
-    // FR-16：Cmd+Shift+P 打开预设选择 Popover
-    { id: 'open-preset-select', name: t('settings.command.open-preset-select', '选择启动预设'), shortcut: resolveShortcut('open-preset-select', 'shift+p'), action: () => presetStore.requestOpen() },
+    // FR-16：Cmd+Shift+P 打开模式选择 Popover
+    // 兜底默认值（i18n key `settings.command.open-preset-select` 缺失时使用）必须与该 key 新措辞保持同步
+    { id: 'open-preset-select', name: t('settings.command.open-preset-select', '打开模式选择'), shortcut: resolveShortcut('open-preset-select', 'shift+p'), action: () => presetStore.requestOpen() },
   ]
 
   commandStore.registerApp(appCommands)

@@ -102,8 +102,12 @@ export function transcriptAnchorOf(record: AnchorProbeShape): TranscriptRef | un
  * node:sqlite 零依赖，与 zcode-subagent-cli reader 同选型；subagent-core 不开引擎
  * CLI 包的生产 import（仓内零生产 import 约定），任务书钦点的「内嵌只读查询」形态）。
  * 同步经 process.getBuiltinModule（Node ≥22.3，仓根 engines node>=22.19 满足）。
- * fail-closed：运行时不支持 / db 缺失 / 查询异常 = false——锚失效走 reopen 降级是
- * 设计内恢复路径（§3.2.6 ③），误判可解析才会造成双写/挂死。
+ * [U3] 非降级消费面：本函数是通用锚探测（isAnchorResolvable）的 zcode 判据单点，
+ * fork 守卫等消费点经后者取判据；续聊降级链已不消费它——zcode 库投影预检查退役
+ *（app-server 落库滞后于 create 应答，分钟级窗 + 部分行永不落库，滞后窗内查询
+ * 恒 false，会把完全有效的锚误降级 reopen，理由详见 conversation-continuation
+ * reviveOrThrow 注）。fail-closed（运行时不支持 / db 缺失 / 查询异常 = false）的
+ * 保守方向保留：误判可解析仍是有害方向，宁报失效不虚报在库。
  */
 function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
   try {
@@ -137,12 +141,16 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
 }
 
 /**
- * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性：
+ * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性（通用锚探测面——
+ * fork 守卫等非降级消费点经此取判据）：
  *   - pi：sessionFile 在盘可读（现行判据不变——`{sessionFile}` 字面量入参兼容）；
  *   - zcode：sessionId+dbPath 库中条目存在（TTL 清理/外部删除 = 锚失效）。
- *  锚失效 ≠ 拒绝续聊——消费方按 §3.2.3 降级规则走同 id 带历史重开（markReopened，
- *  编排归 Continuation 派发守卫；zcode 现行降级形态见 conversation-continuation
- *  reviveOrThrow 的 zcode 分支注记）。
+ *  「锚失效 ≠ 拒绝续聊」的降级语义（markReopened 同 id 带历史重开，编排归
+ *  Continuation 派发守卫）[U3] 收窄为 pi 锚专属：pi transcript 即时落盘、预检查
+ *  可靠，锚失效的现实触发面 = 文件被回收；zcode 锚不进预检查分流——库投影滞后
+ *  于 create 应答属系统性误判（理由详见 conversation-continuation reviveOrThrow
+ *  注），带锚正常派发、锚活性由引擎真实 resume 结果承担。zcode 分支保留：探测面
+ *  维持引擎中立完整，zcode 锚的判据不因降级收窄而失去单点归属。
  */
 export function isAnchorResolvable(record: AnchorProbeShape): boolean {
   const anchor = transcriptAnchorOf(record);
@@ -203,11 +211,19 @@ function findColdLookupCandidate(deps: ColdLookupDeps, id: string): SubagentReco
  *  该记录（findRecord 契约）。 */
 function assertAdmissionAllowed(found: SubagentRecord, id: string): void {
   if (found.worktree === true) {
+    // [R5] 历史保全占位按锚形态分流：pi 锚 = session 文件路径，直接指出处；
+    // zcode record 无 sessionFile（历史由隔离会话库经 engineHandle.sessionRef 承载、
+    // 不随 worktree checkout 丢失），硬渲染 `${sessionFile}` 会产出 "at undefined"。
+    // 拒绝语义本身不变，仅修文案占位的锚准确性。
+    const historyNote =
+      found.sessionFile !== undefined
+        ? `its conversation history remains intact at ${found.sessionFile}.`
+        : `its conversation history lives in the engine's isolated session db (carried by its session ref) and is not affected by the lost checkout.`;
     throw new ResurrectDeniedError(
       `subagent ${id} cannot be transparently resumed: it was created with worktree isolation, ` +
         `and its worktree checkout no longer exists after restart (resuming in place would make spawn cwd fall back to the main repo). ` +
         `Recovery: action:'start' a fresh subagent (with a new worktree if isolation is still needed); ` +
-        `its conversation history remains intact at ${found.sessionFile}.`,
+        historyNote,
     );
   }
   const foreign = found.sessionFile ? findForeignLiveInstance(found.sessionFile) : undefined;

@@ -126,11 +126,37 @@ export class BridgeToolCache {
   private schemas: ToolRegistration[] = []
   private entriesByName = new Map<string, ToolEntry>()
 
-  /** 同步 toolRegistry schema 到 bridge 轮询缓存 + name 执行路由索引 */
+  /**
+   * 同步 toolRegistry schema 到 bridge 轮询缓存 + name 执行路由索引。
+   *
+   * RT-6#2（裸名跨插件遮蔽）：toolRegistry 以复合键 `pluginId:name` 为键，两个插件
+   * 可注册同名 schema。旧实现 `new Map(entries.map(...))` 后写覆盖——B 注册同名工具
+   * 会静默顶掉 A 的执行路由（name 索引只认裸名），而 getSyncPayload 仍把两份同名
+   * schema 都下发给 pi。预探针结论：pi dist 无 "Tool conflicts" 字符串（不会 fail-fast
+   * 退出），故不升 critical；但遮蔽必须留痕 + 收敛为单条目（首见优先，与 registry 的
+   * 插入序一致 = 先注册者保留），杜绝「A 的工具被 B 静默代打」。
+   *
+   * 查重口径是裸名（跨插件），与 tool-api.ts 注册入口按复合键 `pluginId:name` 的
+   * 查重语义正交——入口不拒同名（勿改其语义），遮蔽在此同步点 warn + 消歧。
+   */
   syncFrom(toolRegistry: Map<string, ToolEntry>): void {
     const entries = Array.from(toolRegistry.values())
     this.schemas = entries.map(e => e.schema)
-    this.entriesByName = new Map(entries.map(e => [e.schema.name, e]))
+    const entriesByName = new Map<string, ToolEntry>()
+    for (const entry of entries) {
+      const name = entry.schema.name
+      const shadowed = entriesByName.get(name)
+      if (shadowed) {
+        console.warn(
+          `[plugin-service] duplicate tool name '${name}' across plugins: ` +
+          `plugin '${shadowed.pluginId}' (registered first) shadows plugin '${entry.pluginId}'; ` +
+          `bridge sync payload forwards only the first entry`,
+        )
+        continue
+      }
+      entriesByName.set(name, entry)
+    }
+    this.entriesByName = entriesByName
   }
 
   /** 获取 bridge 轮询缓存的工具 schema */
@@ -146,9 +172,19 @@ export class BridgeToolCache {
   /**
    * 构造 bridge:sync 同步负载（plugin 工具 schema 塑形）。
    * pi 侧命令发现不走本协议（另走 getCommands 通路）。
+   *
+   * RT-6#2：按裸名去重（首见优先，与 syncFrom 的 entriesByName 同口径）——同名项不
+   * 前递，pi 侧只会看到一个（预探针：pi 不因同名冲突 fail-fast，只静默取一个，故此处
+   * 主动收敛 + syncFrom 已 warn 留痕）。
    */
   getSyncPayload(): BridgeSyncPayload {
-    const tools = this.schemas.map(s => ({ name: s.name, description: s.description, parameters: s.parameters }))
+    const seen = new Set<string>()
+    const tools: BridgeSyncPayload['tools'] = []
+    for (const s of this.schemas) {
+      if (seen.has(s.name)) continue
+      seen.add(s.name)
+      tools.push({ name: s.name, description: s.description, parameters: s.parameters })
+    }
     return { tools, success: true }
   }
 }

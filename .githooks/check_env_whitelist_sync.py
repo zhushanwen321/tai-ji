@@ -25,7 +25,9 @@ src/env.ts 的内联镜像（SDK 不得运行时 import @taiji/shared——F9）
 规则 3（2026-09-15 改名复查 R1-P1 补强）：env 名字面量镜像断言——SDK/引擎侧
 除 env.ts 两常量外还有多处字面量镜像（engine-manifest RESERVED_ENV_PREFIXES、
 relay-env 5 键、node-executor ENGINE_NODE_ENV、data-dir ×2、relay.mjs 零依赖
-镜像、zcode turn-timeout 2 键），此前无机器断言，单侧改名/改动即静默漂移。
+镜像、zcode turn-timeout 2 键、system-prompt-trace preset-fallback 2 键（2026-09-20 R1
+评审补，shared PRESET_FALLBACK_ENV_KEYS ↔ extension types.ts 镜像 + deny 面不回退）），
+此前无机器断言，单侧改名/改动即静默漂移。
 A 类与权威侧（SSOT / shared paths.ts / SDK 同名常量）相等断言；B 类（无 SSOT
 对应者）按 TAIJI_* 前缀形态断言，防旧名回退。
 
@@ -241,6 +243,53 @@ def check_env_literal_mirrors() -> list[str]:
             )
     else:
         errors.append('[ERROR] spawn-env-contract.ts 未登记 TAIJI_ZCODE_CLI 或 registration.ts 缺失，规则 3 A7 无法锚定')
+
+    # A8 模式回落 env 名 extension 镜像（shared PRESET_FALLBACK_ENV_KEYS 为权威；
+    # system-prompt-trace 独立发布体系不依赖 @taiji/shared，types.ts 字面量镜像——
+    # 单侧改名即 runtime 注入 ↔ extension 读取静默断链，presetFallback 披露面消失；
+    # deny 面同步断言：ENGINE_ENV_DENY_LIST 两成员不回退，引擎出站剥除失效同害）
+    m_preset = re.search(
+        r"PRESET_FALLBACK_ENV_KEYS\s*=\s*\{(.*?)\}",
+        re.sub(r'/\*.*?\*/', '', ssot_text, flags=re.DOTALL),
+        re.DOTALL,
+    )
+    trace_types = PROJECT_ROOT / 'extensions/taiji/system-prompt-trace/src/types.ts'
+    if m_preset is None:
+        errors.append('[ERROR] SSOT 未定义 PRESET_FALLBACK_ENV_KEYS，规则 3 A8 无法锚定')
+    elif trace_types.exists():
+        m_from = re.search(r"FROM:\s*['\"]([^'\"]+)['\"]", m_preset.group(1))
+        m_to = re.search(r"TO:\s*['\"]([^'\"]+)['\"]", m_preset.group(1))
+        if not (m_from and m_to):
+            errors.append('[ERROR] SSOT PRESET_FALLBACK_ENV_KEYS 缺 FROM/TO 键，规则 3 A8 无法锚定')
+        else:
+            mirror_text = re.sub(r'/\*.*?\*/', '', read(trace_types), flags=re.DOTALL)
+            m_mirror = re.search(r"PRESET_FALLBACK_ENV_KEYS\s*=\s*\{(.*?)\}", mirror_text, re.DOTALL)
+            if m_mirror is None:
+                errors.append(
+                    f'[ERROR] {trace_types.relative_to(PROJECT_ROOT)} 未定义 '
+                    '`PRESET_FALLBACK_ENV_KEYS`（镜像常量丢失，与 shared SSOT 同批维护）'
+                )
+            else:
+                for key, expected in [('FROM', m_from.group(1)), ('TO', m_to.group(1))]:
+                    m_key = re.search(rf"{key}:\s*['\"]([^'\"]+)['\"]", m_mirror.group(1))
+                    if m_key is None:
+                        errors.append(
+                            f'[ERROR] {trace_types.relative_to(PROJECT_ROOT)} '
+                            f'`PRESET_FALLBACK_ENV_KEYS` 缓 {key} 键（镜像形状漂移）'
+                        )
+                    elif m_key.group(1) != expected:
+                        errors.append(
+                            f'[ERROR] {trace_types.relative_to(PROJECT_ROOT)} '
+                            f'`PRESET_FALLBACK_ENV_KEYS.{key}` 镜像漂移：\n'
+                            f'  期望（shared SSOT）：{expected}\n  实际：{m_key.group(1)}'
+                        )
+                deny_items = extract_const_items(ssot_text, 'ENGINE_ENV_DENY_LIST')
+                for name in (m_from.group(1), m_to.group(1)):
+                    if deny_items is not None and name not in deny_items:
+                        errors.append(
+                            f'[ERROR] SSOT ENGINE_ENV_DENY_LIST 缺 `{name}`'
+                            f'（deny 面回退——引擎出站不再剥除，子 agent trace 记假披露）'
+                        )
 
     # A4 数据目录 env 名三镜像（shared paths.ts 读 env.TAIJI_AGENT_DATA_DIR 为权威）
     for f in [SDK_DIR / 'data-dir.ts', CORE_ENGINE_DIR / 'common' / 'data-dir.ts']:

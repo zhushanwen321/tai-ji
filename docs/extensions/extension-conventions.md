@@ -130,7 +130,7 @@ streamSink: ctx.mode === "rpc"
 
 ## Event handler 消息注入
 
-event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUserMessage()`**，不能用 `ctx.sendUserMessage()`：
+event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消息，**首选 `pi.sendMessage()` custom message 形态**（custom message 经 pi `convertToLlm` 无条件转 LLM user 消息——对 LLM 与 user message 无差别；`display` 可控、不伪装用户消息归属。语义登记 [pi-semantics.json](../pi-semantics.json) PS-43，锚 pi `dist/core/messages.js:89-96` case "custom"）。`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息；提示词类内容伪装成用户消息的形态已在 2026-09-21 四包改造（smart-context/goal/structured-output/plan）中清除（决策登记 [ADR-0068](../adr/decisions.md)；改造设计原文已删除，git 可追溯）。两者都必须用 pi 通道，不能用 `ctx.sendUserMessage()`：
 
 | API | ctx (ExtensionContext) | pi (ExtensionAPI) |
 |-----|----------------------|-------------------|
@@ -139,7 +139,7 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 
 `tool_execution_end` 事件字段是 `{ toolCallId, toolName, result, isError }`——**没有 `args`**（输入参数只在 `tool_execution_start` / `tool_execution_update` 事件上，字段名是 `args` 不是 `input`），结果是 `result`（不是 `content`/`details`）。
 
-`sendUserMessage` 的 `deliverAs` 两模式：
+投递时机 `deliverAs` 两模式（`sendMessage` 与 `sendUserMessage` 同语义；`sendMessage` 另有 `triggerTurn` 控制非 streaming 时是否开轮——不设则只 append 不开轮，消息成死文，见下方静默注入段）：
 
 | 模式 | 行为 |
 |------|------|
@@ -147,6 +147,8 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 | `"followUp"` | 等 agent 完全空闲后投递 |
 
 `"nextTurn"`（队列到下一个用户 prompt）只属于 `pi.sendMessage()` 的 `deliverAs`，`sendUserMessage` 不支持。
+
+**静默注入（注入但不唤醒）**：`pi.sendMessage({ customType, content, display: false }, { triggerTurn: false })` —— agent 空闲时只 append 到会话态（进下一轮 LLM 上下文）而**不触发新 turn**；`display:false` 使其不进对话流（`custom_message` entry 由前端 display 过滤隐藏）。适用「信息应进上下文但不该打断、也不该自己产生一轮 LLM 请求」的场景。注意 `sendUserMessage` **恒触发一轮**（pi 语义：Always triggers a turn）——挂在 `agent_settled`（agent 已空闲）上的提醒类注入若用它，等于用户收工后还被强行唤醒烧一整轮全量上下文（先例事故：@zhushanwen/pi-smart-context 越档提醒，2026-09-19 修复改用本形态）。
 
 **消息注入不触发 skill 命令**：`pi.sendUserMessage("/skill-name")` 只是普通用户消息文本，不会触发 skill 机制（skill 由命令系统解析）。正确做法：把期望行为直接写进消息内容（如 `Run fix_whitespace.py --fix <file>, then retry the edit`），不依赖 skill 命令。
 

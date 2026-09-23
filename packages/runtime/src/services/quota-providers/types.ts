@@ -59,6 +59,12 @@ export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
 
+/** shape guard 共享谓词：可选字段缺失（undefined）合法放行，存在则必须匹配 kind
+ * （RT-7#5 字段级 guard 语义——防 `"500"` 等字符串数值被静默接受产错数据）。 */
+export function isOptionalField(v: unknown, kind: 'number' | 'string' | 'boolean'): boolean {
+  return v === undefined || typeof v === kind
+}
+
 /**
  * JSON fetcher 共用骨架：凭证检查 → HTTP 状态归类 → JSON 解析 + shape guard →
  * 网络异常归类（logger.debug 落盘，禁止静默 catch）。doFetch 返回的 Response 由
@@ -88,9 +94,10 @@ export async function fetchQuotaJson<T>(
     if (!guard(data)) return { ok: false, reason: 'parse' }
     return { ok: true, data }
   } catch (err) {
-    // fetch 网络异常 / 超时 → network（架构约定 #4 落盘，禁止静默 catch）
+    // fetch 网络异常 / 超时 → network（架构约定 #4 落盘，禁止静默 catch）。
+    // RT-7#6：debug → warn——打包态日志级别 info 会过滤 debug，网络失败成因生产不可见。
     const msg = toErrorMessage(err)
-    logger.debug(`[${logTag}] fetch failed`, { error: msg })
+    logger.warn(`[${logTag}] fetch failed`, { error: msg })
     return { ok: false, reason: 'network' }
   }
 }

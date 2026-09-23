@@ -39,6 +39,29 @@ import type { IShellRunner, ShellRunnerExecuteOptions, ShellRunnerResult, SpawnF
 const ESCALATION_DELAY_MS = 5000
 
 /**
+ * 常见 POSIX 信号名 → 编号（RT-8#8）：被信号杀死时 exitCode=null，shell 惯例折算
+ * 128+N（SIGHUP=1 … SIGKILL=9 … SIGTERM=15）。不在表中的信号兜底 128（非 0 即失败，
+ * 具体信号名已写入 stderr 标记行保真）。
+ */
+const SIGNAL_EXIT_CODES: Readonly<Record<string, number>> = {
+  SIGHUP: 1,
+  SIGINT: 2,
+  SIGQUIT: 3,
+  SIGABRT: 6,
+  SIGKILL: 9,
+  SIGALRM: 14,
+  SIGTERM: 15,
+}
+
+/** 信号退出码基数（POSIX shell 惯例 128+N；未知信号兜底基数本身，保持非 0 = 失败语义）。 */
+const SIGNAL_EXIT_CODE_BASE = 128
+
+/** 信号杀死场景的退出码（128+N；未知信号兜底 128，保持非 0 = 失败语义）。 */
+function signalExitCode(signal: string): number {
+  return SIGNAL_EXIT_CODE_BASE + (SIGNAL_EXIT_CODES[signal] ?? 0)
+}
+
+/**
  * stdout/stderr 累积字节帽（G3 峰值治理，memory-leak-remediation §3.4）：对齐
  * git-executor 的 GIT_MAX_BUFFER_BYTES（10MB）——失控脚本（如死循环 echo）的输出累积
  * 不得无界钉死 runtime 堆。超限截断保留头尾：头部保留脚本输出起点（错误上下文），
@@ -191,7 +214,7 @@ export class ShellRunner implements IShellRunner {
         if (timer) clearTimeout(timer)
         if (escalationTimer) clearTimeout(escalationTimer)
       }
-      const onClose = (exitCode: number | null): void => {
+      const onClose = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
         closed = true
         cleanupTimers()
         // timeout 路径已 reject；后续 close 不再 resolve（保留 timeout 语义，避免 SR-3 失败）。
@@ -207,6 +230,15 @@ export class ShellRunner implements IShellRunner {
         stderrBuffer = ''
         stdout = stdoutAcc.finish()
         stderr = stderrAcc.finish()
+        // RT-8#8：被信号杀死时 child_process close 的 exitCode=null、signal 非空——
+        // 原 `exitCode ?? 0` 把「SIGTERM/SIGKILL 杀死」折算成 0（成功），setup 脚本被
+        // 超时强杀后 worktree-service 误判 setup 成功。信号场景折算 128+N 非 0 退出码
+        // + stderr 追加标记行（真因可诊断——脚本自己来不及输出任何东西）。
+        if (signal !== null && exitCode === null) {
+          stderr += `\n[shell-runner] killed by signal ${signal} (exitCode folded to ${signalExitCode(signal)})\n`
+          resolve({ exitCode: signalExitCode(signal), stdout, stderr })
+          return
+        }
         resolve({ exitCode: exitCode ?? 0, stdout, stderr })
       }
       const onError = (err: NodeJS.ErrnoException): void => {

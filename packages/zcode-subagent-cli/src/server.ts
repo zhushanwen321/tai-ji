@@ -199,8 +199,13 @@ export class EngineProtocolServer {
     const active: ActiveRun = { controller, seq: 0 };
     this.activeRuns.set(runId, active);
 
-    // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）
-    const fullTask: AgentCallOpts = { ...task, ...(ctx.model !== undefined ? { model: ctx.model } : {}) };
+    // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）。
+    // cwd 有值才还原（wire additive 语义）——session/create workspacePath 的任务级载体。
+    const fullTask: AgentCallOpts = {
+      ...task,
+      ...(ctx.model !== undefined ? { model: ctx.model } : {}),
+      ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
+    };
     const ctxModel: EngineCtxModel | undefined = parseCtxModel(ctx.ctxModel);
     const stream: EngineStream | undefined = ctx.streamMode === "stream" ? { onDelta: (delta) => { void this.reverseRequestInternal("host/streamDelta", { runId, delta }); } } : undefined;
 

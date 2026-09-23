@@ -204,6 +204,132 @@ describe('TerminalService', () => {
     })
   })
 
+  // ── RT-8#10：write 失败回码 + kill SIGKILL 升级 ──────────────────────
+
+  it('RT8-10-W1: write 失败 publish terminal.writeFailed（每 PTY 生命周期至多一次，防击键流刷屏）', async () => {
+    const { messages, publish } = createPublishCollector()
+    const svc = new TerminalService({ publish })
+    await svc.spawn('s-w1', undefined, 80, 24)
+    const pty = mockPtys[0]!
+    // write 模拟管道关闭（进程已死）抛错
+    ;(pty.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('EPIPE: broken pipe')
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    svc.write('s-w1', 'a')
+    svc.write('s-w1', 'b')
+    svc.write('s-w1', 'c')
+
+    const failed = messages.filter((m) => m.type === 'terminal.writeFailed')
+    expect(failed).toHaveLength(1)
+    expect((failed[0]!.payload as { sessionId: string; message: string }).sessionId).toBe('s-w1')
+    expect((failed[0]!.payload as { sessionId: string; message: string }).message).toContain('EPIPE')
+    errorSpy.mockRestore()
+  })
+
+  it('RT8-10-W2: PTY onExit 后重新 spawn，writeFailed 标记重置（新周期可再报）', async () => {
+    const { messages, publish } = createPublishCollector()
+    const svc = new TerminalService({ publish })
+    await svc.spawn('s-w2', undefined, 80, 24)
+    const first = mockPtys[0]!
+    ;(first.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('EPIPE')
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    svc.write('s-w2', 'x') // 第一周期首报
+    first.__emitExit(1) // 周期结束（清理标记）
+
+    await svc.spawn('s-w2', undefined, 80, 24) // 同 sid 重 spawn（新 PTY）
+    const second = mockPtys[1]!
+    ;(second.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('EPIPE again')
+    })
+    svc.write('s-w2', 'y') // 新周期应可再报
+
+    expect(messages.filter((m) => m.type === 'terminal.writeFailed')).toHaveLength(2)
+    vi.restoreAllMocks()
+  })
+
+  it('RT8-10-K1: kill 后 SIGTERM 未退出（5s），升级 SIGKILL', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-k1', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.kill('s-k1')
+      expect(pty.kill).toHaveBeenCalledWith() // 先 SIGTERM（默认信号）
+
+      vi.advanceTimersByTime(4999)
+      expect(pty.kill).toHaveBeenCalledTimes(1) // 升级窗口内未触发
+
+      vi.advanceTimersByTime(1)
+      expect(pty.kill).toHaveBeenCalledTimes(2)
+      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('RT8-10-K2: kill 后 PTY 已退出（onExit 清理），升级 timer no-op 不误杀', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-k2', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.kill('s-k2')
+      pty.__emitExit(0) // PTY 在升级窗口内正常退出（ptyMap 清理）
+
+      vi.advanceTimersByTime(6000)
+      expect(pty.kill).toHaveBeenCalledTimes(1) // 只有初始 SIGTERM，无 SIGKILL
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('RT8-10-K3: kill 后同 sid 重 spawn 新 PTY，升级 timer 不误杀新 PTY', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-k3', undefined, 80, 24)
+      const oldPty = mockPtys[0]!
+
+      svc.kill('s-k3')
+      oldPty.__emitExit(0)
+      await svc.spawn('s-k3', undefined, 80, 24) // 同 sid 新 PTY
+      const newPty = mockPtys[1]!
+
+      vi.advanceTimersByTime(6000)
+      expect(newPty.kill).not.toHaveBeenCalled() // 旧 timer 的守卫（map 引用比对）挡住误杀
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-k4', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.destroyPty('s-k4')
+      // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+      vi.advanceTimersByTime(5000)
+      expect(pty.kill).toHaveBeenCalledTimes(2)
+      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('TS-10: spawn 失败时 console.error 收到序列化后的 plain object（含 message/stack/code），非裸 Error 实例', async () => {
     // 回归守卫：spawn catch 块用 serializeError(e) 把 Error 转成 plain object 再传给 console.error。
     // 若有人改回裸 e，Error 实例经 logger 的 JSON.stringify 会变成 {}，日志看不出真实错误。

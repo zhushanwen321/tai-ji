@@ -307,6 +307,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
 | `ctxModel` / `schemaEnv` / `engineFallback` | `run.params.ctx` | model 兜底/结构化输出降级 |
+| `cwd` | `run.params.ctx.cwd`（有值才上 wire；server additive 还原进 `task.cwd`） | worktree 隔离失效——core 的 `taskSpecWithModel` 把 `WorktreeHandle.path` 合流进 cwd，引擎以 `task.cwd ?? process.cwd()` 决定子进程 spawn cwd；缺省不上 wire = 引擎回退自身进程 cwd（与无 worktree 任务现状一致） |
 
 **同步成员清单（`EnginePort` 的四个同步面，逐条给源——协议化后无同步源即锁死）**：
 
@@ -346,7 +347,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **被否**：「未握手时返回保守能力位」——击穿反例：pi 缺省路径的 `conversation:true` / `maxTurns` /
 `worktree` 会被 `capability-gate` 全部拒掉（G3/G5 首轮即破）。
 
-**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（8 种）逐字序列化；journal 落盘仍在 core。
+**事件与背压**：`event.params.event` 就是现有 `AgentEvent`（9 种）逐字序列化；journal 落盘仍在 core。
 **默认关闭事件合并**（`TAIJI_ENGINE_EVENT_COALESCE=0`）——A1 要求「事件逐字段等价」，
 合并（16ms/4KB）与逐字段等价不可兼得。合并开关保留，启用需另立验收（量级/恢复/重审）后方可默认开。
 **stdout/stderr 分工**：stdout 独占 NDJSON（行解析器 + 背压：core 读得慢时靠 OS 管道背压，不做无界缓存）；

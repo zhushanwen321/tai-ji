@@ -2,14 +2,14 @@
  * QueueBubble S8 组件单测 —— v6 内嵌队列气泡。
  *
  * v6 §8.5 视觉重构后行为（组件注释为准）：去独立卡片/去标签/去 chevron（不支持收起）、
- * 多条显前 3 条 + 「+N」溢出计数。本文件为 v6 重构后 stale 断言的同步修复
- * （对应 commit 5d46b9234 同类工作），断言对齐组件现状。
+ * 多条按 3 行预算显示（≤3 条全显；>3 条显 2 条 + 「+N」汇总行）。本文件为 v6 重构后 stale
+ * 断言的同步修复（对应 commit 5d46b9234 同类工作），断言对齐组件现状。
  *
  * [compact-defer-composer-queue u1] defer 行扩展后：
  * - steer/followUp 行：仍只读（无按钮/无 emit），Zap/Clock icon + truncate 文本
  * - defer 行：Hourglass（info 色）+ 分档 chip（deferChip prop）+ truncate 文本 +
  *   富内容 +N 徽标（segments 非 text 段 >0）+ hover ×（emit removeDefer）
- * - 展平顺序 steering → followUp → defer；VISIBLE_MAX=3 与 +N 覆盖三组总和
+ * - 展平顺序 steering → followUp → defer；3 行预算（QUEUE_LINE_BUDGET）与 +N 覆盖三组总和
  * - 根门基于展平列表非空（state === undefined 时 defer 行仍渲染，A1）
  * - 承接 PendingBubble.test.ts（u2 删除前）的占用分档 hover 文案用例（迁为 deferHint prop
  *   渲染断言）与 × 撤销边界用例（未提交行 × 可点 emit removeDefer；已提交条目不渲染 defer 行）
@@ -98,25 +98,41 @@ describe('QueueBubble S8 · 根门与 steer/followUp 只读契约', () => {
       followUp: ['fu1'],
     }
     const wrapper = mountQB({ state })
-    // 展平顺序：steering 全在前（3 条 ≤ VISIBLE_MAX，无溢出）
+    // 展平顺序：steering 全在前（3 条 ≤ 行数预算，无溢出行）
     expect(wrapper.text()).toContain('steer1')
     expect(wrapper.text()).toContain('steer2')
     expect(wrapper.text()).toContain('fu1')
     expect(wrapper.text()).not.toContain('+1')
   })
 
-  it('超过 3 条（steer/followUp only）→ 只显前 3 条 + 「+N」溢出计数', () => {
+  it('超过 3 条（steer/followUp only）→ 行数预算内只显 2 条 + 「+N」溢出计数', () => {
     const state: QueueState = {
       steering: ['s1', 's2', 's3', 's4'],
       followUp: ['f1', 'f2'],
     }
     const wrapper = mountQB({ state })
-    // 前 3 条：s1/s2/s3；f1/f2 与 s4 被截断，溢出 +3
+    // 6 条 > 预算 3：让位给汇总行 → 只显 s1/s2，其余 4 条收进 +4（总行数仍为 3）
     expect(wrapper.text()).toContain('s1')
     expect(wrapper.text()).toContain('s2')
-    expect(wrapper.text()).toContain('s3')
-    expect(wrapper.text()).toContain('+3')
+    expect(wrapper.text()).toContain('+4')
+    expect(wrapper.text()).not.toContain('s3')
     expect(wrapper.text()).not.toContain('s4')
+  })
+
+  it('恰 3 条 → 全显且无溢出行（常见形态零变化）', () => {
+    const state: QueueState = { steering: ['s1', 's2'], followUp: ['f1'] }
+    const wrapper = mountQB({ state })
+    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['s1', 's2', 'f1'])
+    // 无溢出 → 不渲染 +N 汇总行（不多出一行撑高 composer）
+    expect(wrapper.text()).not.toContain('+1')
+    expect(wrapper.findAll('.qb-item').length).toBe(3)
+  })
+
+  it('4 条 → 2 条 + 汇总行，总行数恒为 3（纵向不随条目数增长）', () => {
+    const state: QueueState = { steering: ['s1', 's2', 's3'], followUp: ['f1'] }
+    const wrapper = mountQB({ state })
+    expect(wrapper.findAll('.qb-item').length).toBe(2)
+    expect(wrapper.text()).toContain('+2')
   })
 
   it('只读契约收窄：steer/followUp 行不渲染删除/dequeue/编辑/撤回等破坏性按钮（无 emit 通道）', () => {
@@ -219,16 +235,24 @@ describe('QueueBubble S8 · defer 行（compact-defer-composer-queue u1）', () 
     expect(wrapper2.find('[data-testid="defer-chips-dq-3"]').exists()).toBe(false)
   })
 
-  it('三组展平顺序 steering → followUp → defer；VISIBLE_MAX=3 覆盖三组总和', () => {
+  it('三组展平顺序 steering → followUp → defer（恰 3 条全显，无溢出行）', () => {
+    const state: QueueState = { steering: ['steer1'], followUp: ['fu1'] }
+    const entries = [deferEntry('d1', 'defer1')]
+    const wrapper = mountQB({ state, deferEntries: entries })
+    // 展平顺序：steer1 → fu1 → defer1（3 条 = 行数预算，全部可见）
+    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['steer1', 'fu1', 'defer1'])
+    expect(wrapper.text()).not.toContain('+1')
+    expect(wrapper.findAll('.qb-item').length).toBe(3)
+  })
+
+  it('三组总和溢出时 +N 覆盖三组（不重复计 defer 行：单一切片口径）', () => {
     const state: QueueState = { steering: ['steer1'], followUp: ['fu1'] }
     const entries = [deferEntry('d1', 'defer1'), deferEntry('d2', 'defer2')]
     const wrapper = mountQB({ state, deferEntries: entries })
-    // 展平顺序：steer1 → fu1 → defer1（前 3 条可见），defer2 溢出 → +1
-    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['steer1', 'fu1', 'defer1'])
-    expect(wrapper.text()).toContain('+1')
-    expect(wrapper.text()).not.toContain('defer2')
-    // 溢出计数不重复计 defer 行（VISIBLE_MAX 单一口径）
-    expect(wrapper.findAll('.qb-item').length).toBe(3)
+    // 4 条跨三组：可见 steer1/fu1（steering 先于 followUp 的消费序保持），defer1/defer2 收进 +2
+    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['steer1', 'fu1'])
+    expect(wrapper.text()).toContain('+2')
+    expect(wrapper.text()).not.toContain('defer1')
   })
 
   it('deferEntries 变化 → defer 行跟随更新（响应式）', async () => {
@@ -238,5 +262,41 @@ describe('QueueBubble S8 · defer 行（compact-defer-composer-queue u1）', () 
     await nextTick()
     expect(wrapper.text()).toContain('second')
     expect(wrapper.text()).not.toContain('first')
+  })
+})
+
+describe('QueueBubble 稳定 key（RD-2#9：重排/中段删除 index 漂移 → DOM 复用错位）', () => {
+  it('defer 中段删除 → 幸存 defer 行保持同一 DOM 元素（key=defer:id 稳定，无重挂载错位）', async () => {
+    const wrapper = mountQB({ state: undefined, deferEntries: [deferEntry('d1', 'one'), deferEntry('d2', 'two')] })
+    const d2ElBefore = wrapper.find('[data-testid="defer-cancel-d2"]').element
+    // 删除前一项 d1（中段删除）：d2 的行元素应原地保留（旧 index key 会把 d1 的 DOM 复用给 d2）
+    await wrapper.setProps({ deferEntries: [deferEntry('d2', 'two')] })
+    await nextTick()
+    const d2ElAfter = wrapper.find('[data-testid="defer-cancel-d2"]').element
+    expect(d2ElAfter).toBe(d2ElBefore)
+    wrapper.unmount()
+  })
+
+  it('跨类型重排（steering 消费 → followUp 顶替首位）→ 不同 type 不复用同一 DOM（type 域 key）', async () => {
+    const wrapper = mountQB({ state: { steering: ['a'], followUp: ['b'] } })
+    const rowBefore = wrapper.findAll('.qb-item')[0].element
+    // steering 被消费：followUp 行顶到首位；裸 index key（0→0）会原地复用 steering 行的 DOM
+    await wrapper.setProps({ state: { followUp: ['b'] } })
+    await nextTick()
+    const rowAfter = wrapper.findAll('.qb-item')[0].element
+    expect(rowAfter).not.toBe(rowBefore)
+    wrapper.unmount()
+  })
+
+  it('steering 同族追加（尾部增长）→ 既有行 DOM 保持（构造期 seq 在族内单调）', async () => {
+    const wrapper = mountQB({ state: { steering: ['a', 'b'] } })
+    const firstRowBefore = wrapper.findAll('.qb-item')[0].element
+    await wrapper.setProps({ state: { steering: ['a', 'b', 'c'] } })
+    await nextTick()
+    const rows = wrapper.findAll('.qb-item')
+    expect(rows).toHaveLength(3)
+    expect(rows[0].element).toBe(firstRowBefore)
+    expect(rows[2].text()).toContain('c')
+    wrapper.unmount()
   })
 })

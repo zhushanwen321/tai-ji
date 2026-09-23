@@ -5,7 +5,7 @@
  *
  * - persistence: pi.appendEntry 映射到 appendState / appendHistory（type 字符串区分）
  * - ui: ctx.ui 的 setWidget/setStatus/notify + hasUI + theme（fg/bold 适配 ThemeLike）
- * - messaging: pi.sendMessage 映射到 sendContextMessage / sendUserMessage
+ * - messaging: pi.sendMessage（custom message 形态）映射到 sendContextMessage
  * - session: ctx.sessionManager.getEntries
  *
  * port/ctx 双通道惯例：port 对象仅用于传入 service/session 的实参；
@@ -74,6 +74,8 @@ export function buildPorts(pi: ExtensionAPI, ctx: ExtensionContext): ServicePort
 	};
 
 	const messaging: MessagingPort = {
+		// triggerTurn: true——非 streaming 时真实开轮（不设则 pi 只 append entry 不开轮，
+		// 消息成死文）；streaming 时走 deliverAs 队列（steer/followUp），triggerTurn 不额外生效。
 		sendContextMessage: (content, deliverAs, customType): void => {
 			pi.sendMessage(
 				{
@@ -81,11 +83,8 @@ export function buildPorts(pi: ExtensionAPI, ctx: ExtensionContext): ServicePort
 					content,
 					display: false,
 				},
-				{ deliverAs },
+				{ deliverAs, triggerTurn: true },
 			);
-		},
-		sendUserMessage: (content, deliverAs): void => {
-			pi.sendUserMessage(content, { deliverAs });
 		},
 	};
 

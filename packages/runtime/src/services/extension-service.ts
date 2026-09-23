@@ -16,7 +16,7 @@
  * 4. finishInstall() 复制选中到 extensions/ 目录
  * 5. 清理临时目录
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, realpathSync, cpSync, rmSync, mkdtempSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, realpathSync, cpSync, rmSync, mkdtempSync, renameSync } from 'node:fs'
 import { join, resolve, basename, dirname, relative, isAbsolute, delimiter } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import type { ExtensionInfo } from '@taiji/shared'
@@ -67,6 +67,18 @@ export class ExtensionInstallError extends Error {
     this.code = code
     this.hint = hint
   }
+}
+
+/**
+ * finishInstall 单包失败条目（逐包隔离后的失败聚合；空返回 = 全部成功）。
+ * 消费方 = extension-message-handler：非空时聚合抛 ExtensionInstallError
+ * （'finish_partial_failed'）透传给前端，成功包已落盘不受影响。
+ */
+export interface FinishInstallFailure {
+  /** 选中的 dirName（tempDir 相对路径，非 npm 包名） */
+  dirName: string
+  /** 失败原因（toErrorMessage 归一化后的消息） */
+  error: string
 }
 
 export interface ExtensionServiceOptions {
@@ -724,13 +736,22 @@ export class ExtensionService {
       throw new Error(`git clone failed: ${msg}`)
     }
 
-    // If package.json exists, install dependencies (经 IInstaller port)
+    // If package.json exists, install dependencies (经 IInstaller port).
+    // RT-8#4（F1 假成功）：failed 非空即抛 deps_failed，不继续发现/登记——缺依赖的
+    // 扩展以子进程崩溃形式延后暴露，比安装期显形更糟（ExtensionInstallError 透传
+    // 范式：code/hint 经消息层 error envelope 到前端）。
     if (existsSync(join(destInTemp, 'package.json'))) {
-      try {
-        await this.installer.installDeps(destInTemp)
-      } catch (e) {
-        log.warn(`[extension-service] npm install in git repo failed: ${toErrorMessage(e)}`)
-        // Non-fatal — some repos don't need deps to discover extensions
+      const { failed } = await this.installer.installDeps(destInTemp)
+      if (failed.length > 0) {
+        try { rmSync(tempDir, { recursive: true, force: true }) } catch (cleanupErr) {
+          log.warn('[extension-service] failed to cleanup temp dir:', cleanupErr)
+        }
+        const detail = failed.map(f => `${f.name}: ${f.error}`).join('; ')
+        throw new ExtensionInstallError(
+          'deps_failed',
+          `npm install in git repo failed — ${detail}`,
+          '依赖安装失败，请检查网络/registry 连通性或仓库 package.json，修复后重试安装。',
+        )
       }
     }
 
@@ -757,8 +778,10 @@ export class ExtensionService {
    *   NOT npm package names — scoped packages have dirName = basename(dir).
    *   NOTE: Two scoped packages with same leaf name (e.g. @foo/bar and @baz/bar) will
    *   collide since both resolve to dirName='bar'. This is an accepted limitation.
+   * @returns 失败清单（逐包隔离聚合）。空数组 = 全部成功；非空时成功包已落盘、
+   *   失败包旧版本原样保留，由消息层聚合透传给前端。
    */
-  async finishInstall(tempDir: string, selected: string[]): Promise<void> {
+  async finishInstall(tempDir: string, selected: string[]): Promise<FinishInstallFailure[]> {
     // Validate tempDir is within settingsDir/tmp
     const resolvedTemp = resolve(tempDir)
     const allowedTmpPrefix = resolve(this.settingsDir, 'tmp')
@@ -798,14 +821,36 @@ export class ExtensionService {
     const extensionsDir = this.extensionsDir
     mkdirSync(extensionsDir, { recursive: true })
 
+    // RT-6#1 原子换代：旧实现 rmSync(destDir) 后 cpSync（先毁后写）——中途失败 =
+    // 旧扩展不可恢复 + 半目录残留。现改为「cp 到 <destDir>.tmp-<pid>-<ts> → 备份名
+    // 中转换代 → 失败只回收 tmp」。逐包 try/catch：单包失败不阻断其余包（失败聚合
+    // 进返回清单），与 checkAndAutoUpgrade 的逐项隔离范式同构。
+    const failures: FinishInstallFailure[] = []
     for (const dirName of selected) {
       const srcDir = join(tempDir, dirName)
       // destDir 用 basename —— dirName 可能是嵌套相对路径（如 "extensions/pi-subagent-workflow"），
       // 但安装目标应平铺在 extensions/ 下，不保留源目录层级。
       const destDir = join(extensionsDir, basename(dirName))
-      // Remove old version first to prevent residual files from previous installs
-      rmSync(destDir, { recursive: true, force: true })
-      cpSync(srcDir, destDir, { recursive: true })
+      // pid+ts 唯一后缀（atomicWrite uniqueTmpSuffix 同思路）：并发安装/上次崩溃的
+      // 残留 tmp 互不碰撞；backup 同理。
+      const token = `${process.pid}-${Date.now()}`
+      const tmpDir = `${destDir}.tmp-${token}`
+      const backupDir = `${destDir}.old-${token}`
+      try {
+        cpSync(srcDir, tmpDir, { recursive: true })
+        this.replaceDirAtomically(tmpDir, destDir, backupDir)
+      } catch (e) {
+        const msg = toErrorMessage(e)
+        failures.push({ dirName, error: msg })
+        log.warn(`[extension-service] finishInstall failed for ${dirName}: ${msg}`)
+        // 失败回收：只清 tmp 半成品，绝不动 destDir——此时旧版本必然完好
+        //（cp 失败未触换代；换代失败已由 replaceDirAtomically 恢复）
+        try {
+          rmSync(tmpDir, { recursive: true, force: true })
+        } catch (cleanupErr) {
+          log.warn(`[extension-service] failed to cleanup tmp dir ${tmpDir}: ${toErrorMessage(cleanupErr)}`)
+        }
+      }
     }
 
     // Cleanup temp dir
@@ -813,6 +858,49 @@ export class ExtensionService {
       rmSync(tempDir, { recursive: true, force: true })
     } catch (e) {
       log.warn(`[extension-service] failed to cleanup temp dir ${tempDir}: ${toErrorMessage(e)}`)
+    }
+
+    return failures
+  }
+
+  /**
+   * 目录原子换代（RT-6#1）：tmp → destDir，旧 destDir 经备份名中转。
+   *
+   * POSIX rename(2) / Windows 都不能把目录直接 rename 覆盖到已存在的非空 destDir
+   * （ENOTEMPTY/EPERM），故换代走三步：旧目录原子挪到 backupDir（内容全程在盘，
+   * 非先毁后写）→ tmp 顶上 destDir → 成功后删 backupDir。任一步失败：
+   * - 挪旧失败：destDir 未动，直接抛（调用方只回收 tmp）；
+   * - 顶上失败：backupDir 挪回 destDir 恢复旧版本后抛；恢复也失败则抛错并带
+   *   backupDir 路径（旧内容仍在盘可手工找回，绝不静默丢弃）；
+   * - 删备份失败：换代已成功，仅磁盘残留，best-effort 告警不上报。
+   */
+  private replaceDirAtomically(tmpDir: string, destDir: string, backupDir: string): void {
+    const hadOld = existsSync(destDir)
+    if (hadOld) {
+      renameSync(destDir, backupDir)
+    }
+    try {
+      renameSync(tmpDir, destDir)
+    } catch (e) {
+      if (hadOld) {
+        try {
+          renameSync(backupDir, destDir)
+        } catch (restoreErr) {
+          throw new Error(
+            `atomic replace failed and restore also failed: destDir=${destDir}, `
+            + `old version preserved at ${backupDir} (${toErrorMessage(restoreErr)}); `
+            + `original error: ${toErrorMessage(e)}`,
+          )
+        }
+      }
+      throw e
+    }
+    if (hadOld) {
+      try {
+        rmSync(backupDir, { recursive: true, force: true })
+      } catch (cleanupErr) {
+        log.warn(`[extension-service] failed to cleanup backup dir ${backupDir}: ${toErrorMessage(cleanupErr)}`)
+      }
     }
   }
 

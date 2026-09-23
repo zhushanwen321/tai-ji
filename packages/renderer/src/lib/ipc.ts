@@ -52,6 +52,16 @@ export function onRuntimeError(cb: (error: { message: string }) => void): () => 
   return api?.onRuntimeError(cb) ?? (() => {})
 }
 
+/**
+ * 读取 main 侧最近一次 runtime 启动失败原因（RD-3#2；null = 无已知失败）。
+ * runtime-error 推送可能早于订阅安装（boot 竞态，webContents.send 静默丢失）——
+ * 连接编排 init / App 挂载时经此拉取兜底（对齐「时序竞争必须主动拉取」规则）。
+ * 无 IPC（web/mock）返回 null。
+ */
+export function getRuntimeStartError(): Promise<string | null> {
+  return api ? api.getRuntimeStartError() : Promise.resolve(null)
+}
+
 /** 监听 runtime 崩溃后重启中事件（supervisor 正在拉起新实例），返回取消函数 */
 export function onRuntimeRestarting(cb: (payload: { attempt: number }) => void): () => void {
   return api?.onRuntimeRestarting(cb) ?? (() => {})
@@ -299,9 +309,13 @@ export function openUpdateFallbackUrl(url: string): Promise<void> {
  * 打开手动升级产物目录（D9 设置页手动通道「打开目录」按钮）。
  * main 侧幂等建目录后在系统文件管理器打开；打开失败 reject（Error.message 含
  * openPath 错误字符串），调用方自行提示。无 IPC（web/mock）时 no-op 返回 success。
+ *
+ * RD-3#9：无 IPC 分支保留 `{ success: true }` 语义（禁整体翻转 success:false——与 :298-302
+ * 等「无 IPC 优雅降级」注释及既有测试口径冲突），仅增设可选 `noIpc: true` 标记，让需区分
+ * 「未执行 / 已执行」的调用方可按标记分流。
  */
-export function openUpdateManualDir(): Promise<{ success: boolean }> {
-  return api?.openUpdateManualDir() ?? Promise.resolve({ success: true })
+export function openUpdateManualDir(): Promise<{ success: boolean; noIpc?: boolean }> {
+  return api?.openUpdateManualDir() ?? Promise.resolve({ success: true, noIpc: true })
 }
 
 // ── 代理配置 ────────────────────────────────────────────────────────
@@ -333,9 +347,9 @@ export function setProxyConfig(config: import('@taiji/shared').IProxyConfig): Pr
   return api?.setProxyConfig(config) ?? Promise.resolve()
 }
 
-/** 测试代理连接。无 IPC 时返回成功（跳过测试） */
-export function testProxy(config: import('@taiji/shared').IProxyConfig): Promise<ProxyTestResult> {
-  return api?.testProxy(config) ?? Promise.resolve({ success: true, message: 'No IPC available' })
+/** 测试代理连接。无 IPC 时返回成功（跳过测试）+ noIpc 标记（RD-3#9，调用方按标记分流） */
+export function testProxy(config: import('@taiji/shared').IProxyConfig): Promise<ProxyTestResult & { noIpc?: boolean }> {
+  return api?.testProxy(config) ?? Promise.resolve({ success: true, message: 'No IPC available', noIpc: true })
 }
 
 // ── 升级提醒持久化标志 + 升级设置（功能 1 常驻提醒 + 功能 2 预下载开关）─────────
@@ -353,9 +367,9 @@ export function getUpdateSettings(): Promise<UpdateSettings> {
   return api?.getUpdateSettings() ?? Promise.resolve({ preDownload: false })
 }
 
-/** 保存升级设置。无 IPC 时 no-op 返回 success */
-export function setUpdateSettings(settings: Partial<UpdateSettings>): Promise<{ success: boolean }> {
-  return api?.setUpdateSettings(settings) ?? Promise.resolve({ success: true })
+/** 保存升级设置。无 IPC 时 no-op 返回 success + noIpc 标记（RD-3#9） */
+export function setUpdateSettings(settings: Partial<UpdateSettings>): Promise<{ success: boolean; noIpc?: boolean }> {
+  return api?.setUpdateSettings(settings) ?? Promise.resolve({ success: true, noIpc: true })
 }
 
 // ── 系统提示音（跨平台：mac afplay / linux paplay / win 返 wav base64）─────────
@@ -390,13 +404,24 @@ export async function playSystemSound(
 // （windowId 限流在 main 侧）。fire-and-forget：invoke reject / 无 IPC（web/mock）/
 // 旧 preload 未暴露时全部静默——日志通道故障不得再炸 renderer（D2 降级契约）。
 
-/** 上报一条 renderer 全局错误记录。自身零抛错，调用方无需再捕获。 */
-export function reportRendererLog(payload: RendererLogPayload): void {
+/**
+ * 上报一条 renderer 全局错误记录。
+ *
+ * RD-3#8：返回 Promise<boolean> 交付信号——true = 已交付 main（invoke resolve）；
+ * false = 通道不可用（无 IPC / 旧 preload 未暴露 / 同步抛错 / invoke reject）。调用方
+ * （boot/error-reporter）据此把记录留在环形缓冲，通道恢复后回放（修复「无 electronAPI 时
+ * 通道整体消失、错误可整体蒸发」）。自身零抛错（同步抛错已捕获转 false），调用方无需再包 try/catch。
+ */
+export function reportRendererLog(payload: RendererLogPayload): Promise<boolean> {
+  if (!api?.reportRendererLog) return Promise.resolve(false)
   try {
-    void api?.reportRendererLog?.(payload)?.catch(() => {})
-  // eslint-disable-next-line taste/no-silent-catch -- 发送同步抛错静默：错误上报通道自身故障不得放大为 renderer 崩溃（对齐本文件「无 IPC 静默 no-op」惯例）
+    return api.reportRendererLog(payload).then(
+      () => true,
+      () => false,
+    )
   } catch {
-    // no-op
+    // 发送同步抛错（极端：preload 桥异常）——交付失败转 false，不放大为 renderer 崩溃
+    return Promise.resolve(false)
   }
 }
 

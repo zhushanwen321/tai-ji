@@ -206,7 +206,7 @@ test.describe('新建任务 E2E', () => {
     // 若点 .first()（sample-project），与预填 cwd 相同 → selectWorkspace 走 noop 分支
     //（useNewTaskFlow：cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
     // 故点 .nth(1)（第 2 个，fixtureSessions 去 cwd 重后 = taiji，s1/s2/s5 的 cwd
-    // /Users/dev/Code/taiji 末段）。
+    // ~/Code/taiji 末段）。
     await page.getByTestId('chip-directory').click()
     await expect(page.getByTestId('dir-select-popover')).toBeVisible({ timeout: 5_000 })
     // 点第 2 个工作区（非预填的 sample-project）
@@ -315,6 +315,52 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 触发/可见条件 |
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
+| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged`）；本表不重复登记，避免两处漂移 |
+| `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
+| `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
+
+### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
+
+> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
+
+**底栏三簇 + 按序退化 + 溢出菜单**：
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行） |
+| `composer-overflow-menu` | Composer.vue | 序 3 生效且有被收起项（零贡献插件 toolbar 时不渲染，不留死入口） |
+| `composer-capacity-merged` / `composer-model-merged` | Composer.vue | 序 1 / 序 2 合流态（`density.slots.* === 'merged'`） |
+
+**任务托盘（built-in 四件 + 协议 widget 区）**：
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
+| `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
+| `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
+| `tray-aggregate-button` | 序 4 生效（`<520px`）且托盘有条目（`hasTrayItems`）；聚合入口 = 层叠图标 + 运行数 |
+| `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
+| `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
+| `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
+| `tray-native-panel` | 面板容器（`data-kind` = 面板类型；`data-pinned` = pin 态） |
+| `tray-panel-tabs` / `tray-panel-tab-{running|ended}` / `tray-panel-tab-count-{bucket}` | 分桶筛选槽（进行中 / 已结束两桶） |
+| `tray-bash-row` / `tray-subagent-row` / `tray-workflow-row` | 各面板行（行内操作仅 pin 态） |
+| `tray-widget-button` / `tray-widget-panel` / `tray-widget-panel-progress-fill` | 协议 widget 区条目与面板（todo / goal） |
+
+**模式可见性（chip + 声明行）**：
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `chip-preset` | `@taiji/ui` PresetSelectChip.vue（landing） | landing 首行第三 chip（有选中 id 才渲染） |
+| `chip-preset-locked` | `@taiji/ui` PresetSelectChip.vue | 已建 session 的锁定态（landing chip 只读分支） |
+| `preset-chip` | PresetChip.vue（对话态只读 chip） | 仅**非默认模式**渲染（判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`；**用 `||` 不用 `??`**——store 未加载时空串会让 `??` 穿透）；**E7 三态同声明行口径**：模式列表未加载 / 加载失败时不渲染（避免闪裸 `custom:xxxx`） |
+| `preset-chip-replace-badge` | PresetChip.vue | 模式 `replace` 启用且文案非空 **且** chip 退化为纯图标档（文本/短名档改为 chip 内后缀，无独立 testid） |
+| `preset-chip-popover` | PresetChip.vue | hover chip 弹出（模式详情 + 锁定说明 + 新建会话出口） |
+| `mode-declaration-row` | ModeDeclarationRow.vue | 非默认模式在消息流顶部渲染一条派生声明行（零新 entry 类型；三态降级：未加载 / 已加载缺 id / 加载失败） |
+
+**退役（testid 已删，源码零命中）**：`fork-group-*` 全族——侧栏 ForkGroup 聚合容器已退役（不聚合），两项独家能力已迁走：分支未读角标合流进既有 `session-unread-dot`、分支软停止迁入通用行菜单项 `session-stop-item`。详见 [02-panels-sidebar.md](./02-panels-sidebar.md) 的会话列表 testid 登记。
+
+> **[u7 已落地]** 第 4 件「子会话」已随 u7 落地：`useTrayCounts` 的 `TrayBuiltinKind = TrayTaskKind | 'session'`（`session` 不并入 `TrayTaskKind`/`TRAY_BUCKETS`，走独立面板 `packages/renderer/src/components/panel/tray/TraySessionPanel.vue`）；`use-composer-bar-density` 的 `hasTrayItems` 由四件 + widget 区共同派生，序 4 聚合面板内分段展示含 session 类别。
 
 **CommandPopover / ComposerInput 目前没有 data-testid**。E2E 查询靠：
 - 命令项：`page.getByRole('button', { name: '/commit' })`（命令名作 button text）
@@ -794,6 +840,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 - ❌ 错误流（mock 永远成功；错误路径只能单测注入 `message.error`）
 - ❌ deleted fileChanges（只 modified/added/unmerged）
 - ✅ retry（仅当输入含 'retry' 关键词触发）
+- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局守卫取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
 
 ## 8. MOCK 模式测试
 
@@ -869,6 +916,7 @@ pnpm dev
 | E2E-CF-5：fileChanges 变更集卡 | `change-set-card` | 卡片可见，含文件路径 |
 | E2E-CF-6：retry（输入 retry） | retry 指示器 | 输入含 'retry' 触发重试指示 |
 | E2E-CF-7：session 隔离 | 两个 session 消息独立 | 切 session 消息不串扰 |
+| E2E-CF-8：markdown 表格列宽地板（`e2e/markdown-table-layout.spec.ts`，@p0-smoke） | 输入哨兵词 `md-table` → `block-text` 内 `table` 首列 | 首列 ≥ 4em（border-box）、表头单行不竖排、表格不撑爆 `.md-render` 宿主、长文本列仍正常折行 |
 
 ### 10.3 完整 E2E 示例代码（补 testid 前的文本锚点版）
 
@@ -991,6 +1039,45 @@ test.describe('对话流 E2E', () => {
 | 11. fileChanges | （mock 推） | ChangeSetCard 出现（accumulating→ready，120ms×2） |
 | 12. complete | （mock 推） | `setStreaming(false)`；turn 复位完成态；usage 回填 |
 | 13. 终态断言 | （验证） | 收尾 summary「好的，我来处理这个请求」可见 |
+
+### 10.5 markdown 表格列宽地板（已落地 `e2e/markdown-table-layout.spec.ts`，@p0-smoke）
+
+**背景**：对话流表格 CSS 是 GitHub 四条声明（`display:block / overflow-x:auto / width:max-content / max-width:100%`）。自然宽超容器时 auto table layout 把所有列压向 min-content；拉丁文 min-content = 最长单词，CJK = 1 个汉字 → 短中文标签列被压成 1 字宽竖排（用户截图事故）。修复 = th/td `min-width:4em` 地板（`MarkdownRenderer.vue` + `UpdateButton.vue` 两宿主）。
+
+**为什么只能落 e2e**：断言是布局量（列宽 / 行数），jsdom 无 layout 引擎，vitest 测不了（TEST-STRATEGY 三视角之「观察者」形态 + 三态纪律 R1）。
+
+```typescript
+// 数据流：composer 发哨兵词 'md-table' → mock runSendStream 回复体换成复刻宽表
+// （TABLE_REPLY）→ Block text → MarkdownRenderer 渲染出 .md-render table
+await page.getByRole('textbox').click()
+await page.getByRole('textbox').pressSequentially('md-table')
+await page.getByRole('textbox').press('Enter')
+const table = page.locator('[data-testid="block-text"] table').last()
+await expect(table).toBeVisible({ timeout: 45_000 })
+// 必须等 complete 再测宽：流式中途行数不足，表的自然宽没到峰值，判定不稳
+await expect(page.locator('.stop-btn')).toHaveCount(0, { timeout: 45_000 })
+const m = await table.evaluate((t) => {
+  const th = t.querySelector('thead th') as HTMLElement
+  const host = t.closest('.md-render') as HTMLElement
+  const lines = (el: HTMLElement) => {
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    return r.getClientRects().length // Range clientRects 数量 = 行数
+  }
+  return {
+    fontSize: parseFloat(getComputedStyle(th).fontSize),
+    firstColW: th.getBoundingClientRect().width,
+    headerLines: lines(th),
+    tableScrollW: t.scrollWidth,
+    hostW: host.getBoundingClientRect().width,
+  }
+})
+expect(m.firstColW).toBeGreaterThanOrEqual(m.fontSize * 4 - 1) // 地板契约
+expect(m.headerLines).toBe(1)                                   // 表头不竖排
+expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿主
+```
+
+**失效形态**（无地板时实测，pane 588px）：首列 35.6px ≈ 1 字 + padding、表头 2 行（竖排）→ 断言红；有地板时 52px / 1 行 → 绿。
 
 ## 11. 覆盖缺口（漏测 backlog）
 

@@ -6,7 +6,7 @@
  *
  * 覆盖：
  * - handleWorkerExit：code=0 正常退出（no-op） / code!=0 委托 handleWorkerError / stale handle 过滤
- * - handleWorkerError：超限（count > MAX=3）→ transition done,failed + emit pending:unregister
+ * - handleWorkerError：超限（count > MAX=3）→ transition done,failed + 直落 pending:unregister
  *   / 未超限 → rebuildRuntime（workerHost.start 重建）
  * - handleScriptError：超限 → transition done,failed / workerLogs 捕获
  * - postBudgetUpdate：postMessage budget-update（usedTokens/usedCost）
@@ -81,17 +81,18 @@ function makeRunningRun(opts: {
   } as unknown as WorkflowRun;
 }
 
-/** LifecycleDeps mock：store/workerHost/runner/eventBus/scheduleTimeBudget 可观察。
+/** LifecycleDeps mock：store/workerHost/runner/eventBus/appendEntry/scheduleTimeBudget 可观察。
  *  mock 成员 = 真实签名 & vi.fn 能力（交叉纯 Mock 会丢真实签名，传回被测函数即报错）。 */
 type MockLifecycleDeps = Omit<
   LifecycleDeps,
-  "store" | "workerHost" | "runner" | "eventBus" | "onRunDone" | "log"
+  "store" | "workerHost" | "runner" | "eventBus" | "appendEntry" | "onRunDone" | "log"
 > & {
   // 真实类型整体保留（RunStore/WorkerHost 等接口成员完整），仅 mock 方法交叉 vi.fn 能力
   store: LifecycleDeps["store"] & { save: LifecycleDeps["store"]["save"] & ReturnType<typeof vi.fn> };
   workerHost: LifecycleDeps["workerHost"] & { start: LifecycleDeps["workerHost"]["start"] & ReturnType<typeof vi.fn> };
   runner: LifecycleDeps["runner"] & { run: LifecycleDeps["runner"]["run"] & ReturnType<typeof vi.fn> };
   eventBus: NonNullable<LifecycleDeps["eventBus"]> & { emit: NonNullable<LifecycleDeps["eventBus"]>["emit"] & ReturnType<typeof vi.fn> };
+  appendEntry: NonNullable<LifecycleDeps["appendEntry"]> & ReturnType<typeof vi.fn>;
   onRunDone: LifecycleDeps["onRunDone"] & ReturnType<typeof vi.fn>;
   log: LifecycleDeps["log"] & ReturnType<typeof vi.fn>;
 };
@@ -105,6 +106,7 @@ function makeDeps(opts: {
     runner: { run: vi.fn(async () => ({})) },
     runs: new Map(),
     eventBus: { emit: vi.fn() },
+    appendEntry: vi.fn(),
     onRunDone: vi.fn(),
     log: vi.fn(),
     scheduleTimeBudget: opts.scheduleTimeBudget,
@@ -149,6 +151,7 @@ describe("handleWorkerExit", () => {
     expect(run.state.status).toBe("running"); // 未改
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
+    expect(deps.appendEntry).not.toHaveBeenCalled();
   });
 
   it("code=0 且无终态消息：[F1] 转 done,failed（不可克隆 return 被吞的悬挂防线）", async () => {
@@ -209,7 +212,7 @@ describe("handleWorkerExit", () => {
 // ── handleWorkerError ────────────────────────────────────────
 
 describe("handleWorkerError", () => {
-  it("count > MAX（3）：transition done,failed + save + emit pending:unregister", async () => {
+  it("count > MAX（3）：transition done,failed + save + 直落 pending:unregister", async () => {
     // workerErrorCount=3 → count=4 > MAX
     const run = makeRunningRun({ workerErrorCount: 3 });
     const deps = makeDeps();
@@ -221,9 +224,10 @@ describe("handleWorkerError", () => {
     expect(run.state.reason).toBe("failed");
     expect(run.state.error).toBe("worker boom");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: undefined, // mock run 无 runId
       reason: "failed",
+      status: "failed",
     });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
@@ -447,13 +451,13 @@ describe("race-F3: rebuild 时间预算折算", () => {
     // 不 rebuild：不启新 worker、不重排计时器
     expect(deps.workerHost.start).not.toHaveBeenCalled();
     expect(scheduleTimeBudget).not.toHaveBeenCalled();
-    // 直接 time_limited 终态 + 持久化 + 注销通知 + onRunDone
+    // 直接 time_limited 终态 + 持久化 + 注销直落 + onRunDone
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("time_limited");
     expect(deps.store.save).toHaveBeenCalled();
-    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+    expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ reason: "time_limited" }),
+      expect.objectContaining({ reason: "time_limited", status: "time_limited" }),
     );
     expect(deps.onRunDone).toHaveBeenCalled();
   });

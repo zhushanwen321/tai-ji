@@ -8,8 +8,9 @@
 // （home-appserver 池/锁/pidfile/派生上限/凭据引导/probe 冒烟/漂移降级码）。
 // 引擎只走 app-server RPC，spawn env 不覆写 HOME（共享宿主 ~/.zcode/）；会话库
 // 随 2026-09 会话库隔离设计独立于宿主库（隔离路径契约见 db-path.ts 的
-// zcodeSessionDbPath/zcodeDbPathAllowlist，下方 ZCODE_HOST_DB_SUFFIX 降级为存量
-// 兼容锚点）。
+// zcodeSessionDbPath/zcodeDbPathAllowlist；路径段常量 SSOT 已收编至
+// @zhushanwen/subagent-engine-sdk zcode-db-paths.ts，本文件不再持有
+// ZCODE_HOST_DB_SUFFIX——引擎包与 runtime 读侧同源 import）。
 
 /** zcode 引擎的 registry key。 */
 export const ZCODE_ENGINE_ID = "zcode";
@@ -36,17 +37,20 @@ export const ZCODE_CLI_DEFAULT_PATH = "/Applications/ZCode.app/Contents/Resource
  */
 export const ZCODE_V2_CONFIG_PATH_SUFFIX = [".zcode", "v2", "config.json"] as const;
 
-/** zsub 同构的兜底缺省模型（v2 config 无 model.main 且 task 未指定时）。 */
-export const ZCODE_FALLBACK_DEFAULT_MODEL = "builtin:bigmodel-coding-plan/GLM-5.3";
-
 /**
- * 宿主 HOME 下 zcode 会话 db 的相对位置（绝对路径 = join(os.homedir(), ...suffix)，
- * 仅由 db-path.hostZcodeDbPath 消费）。2026-09 会话库隔离后定位降级为「存量兼容
- * 锚点」：新 handle.dbPath 恒为隔离库路径（db-path.zcodeSessionDbPath），读侧白名单
- * （db-path.zcodeDbPathAllowlist 第二项）仅放行「共享 HOME 时代」record 已落盘的
- * 宿主绝对路径；旧池时代 records 的相对 dbPath 仍按 poolKey 锚定兼容。
+ * zsub 同构的兜底缺省模型（v2 config 无 model.main 且 task 未指定时）。
+ *
+ * [R4/D4 实施期门核对结论：保留] 三消费面依赖关系：
+ *   ① preparer.resolveZcodeModelRef 缺省分支——R4 条件携带后仅剩 validateModel 诊断面
+ *      与 run 显式路径的消费（create 缺席不再经此，走 zcode 自身缺省解析）；
+ *   ② appserver-launcher 内嵌 FALLBACK_MODEL_MAIN（launcher 注入 config.model.main 的
+ *      兜底——内嵌字符串无法 import，双源须人工同步，改值时两处同改）；
+ *   ③ core 侧 shared/zcode-model-ref.ts 镜像（宿主只做引用切分不做凭据校验，协议面
+ *      不共享该常量，各自演进——见其头注）。
+ * launcher 的 model.main 兜底是 zcode 缺席解析链的一环（defaultModelSelection 缺席
+ * 时的进程级缺省），与 create 条件携带正交——依赖成立，常量随 D4 结论保留。
  */
-export const ZCODE_HOST_DB_SUFFIX = [".zcode", "cli", "db", "db.sqlite"] as const;
+export const ZCODE_FALLBACK_DEFAULT_MODEL = "builtin:bigmodel-coding-plan/GLM-5.3";
 
 /** 杀链 grace 窗口：SIGTERM 后等这么久再 SIGKILL（zsub 同构 5s；实测 SIGTERM→exit 仅 103ms）。 */
 export const ZCODE_KILL_GRACE_MS = 5_000;
@@ -82,16 +86,6 @@ export const ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS = 5_000;
  * 旧 zsw 实现 RELEASE_CLOSE_TIMEOUT_MS=1500（wave2 D2，同值同语义）。
  */
 export const ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS = 1_500;
-
-/**
- * [R3 → superseded by P0-1] 旧「一轮终态等待」固定墙钟缺省值（ms）。**已被
- * `ZCODE_TURN_IDLE_TIMEOUT_MS`（idle 主判定）+ `ZCODE_TURN_MAX_TIMEOUT_MS`
- * （总上界兜底）两 timer 语义替换，session-channel 不再消费本值**——固定墙钟
- * 「到点=不可推进」判定被 2026-09 T001 深诊击穿（21% 活跃任务被误杀；当时的
- * 设计与 timeout-audit-2026-09.md 等审计文档已删除，git 可追溯——曾以本名记录
- * 事故成因）。符号保留：作为该事故的代码侧命名锚点。
- */
-export const ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS = 300_000;
 
 // ============================================================
 // [P0-1 U1] turn 等待两 timer（idle 主判定 + 总上界回收兜底）

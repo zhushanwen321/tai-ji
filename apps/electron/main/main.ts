@@ -13,7 +13,9 @@
  *    → process.stdout/stderr.on('error', EPIPE → destroy())
  *
  * 2. Dev 模式隔离：
- *    - TAIJI_AGENT_DATA_DIR = ~/.taiji-dev（dev 无条件钉死，外部 env 不采信——2026-09-08 泄漏事故）
+ *    - TAIJI_AGENT_DATA_DIR = resolveDevDataDir(...)（受控采信：外部值仅当解析后
+ *      位于 ~/.taiji-dev 树内才采信——装配器 per-worktree 实例目录；其余钉死
+ *      ~/.taiji-dev，2026-09-08 泄漏事故防线语义保留）
  *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险面，保持兜底语义）
  *    - app.setPath('userData', 隔离目录)  ← 防 Chromium LevelDB LOCK 竞争
  *
@@ -81,6 +83,8 @@ import { initCrashJournal, crashJournal } from './logs/crash-journal.js'
 import { startTriggerPatrol } from './diagnostics/trigger-patrol.js'
 import { expandLocalFilePath } from './utils/path.js'
 import { computeLocalFilePrefixes } from './utils/local-file-prefixes.js'
+import { resolveDevDataDir } from './utils/dev-data-dir.js'
+import { resolvePackagedDataDir } from './utils/packaged-data-dir.js'
 
 // ── PATH 修复（GUI 启动时补全用户级 bin 目录）──────────────────────
 // macOS LaunchServices 给 GUI 进程的 PATH 是最小值（/usr/bin:/bin:...），
@@ -121,34 +125,38 @@ process.on('uncaughtException', (err) => {
 // ── 路径 & 模式 ──────────────────────────────────────────────────
 const isDev = !app.isPackaged
 
-// getDataDir（shared SSOT）：读 TAIJI_AGENT_DATA_DIR，缺省 ~/.taiji。
-// dev 模式下方块会把它无条件钉死为 ~/.taiji-dev（隔离 prod 实例）。
+// getDataDir（shared SSOT）：读 TAIJI_AGENT_DATA_DIR，缺省 ~/.taiji-dev（缺省反转，
+// fail-safe default——见 shared/paths.ts [HISTORICAL]）。两形态经下方受控采信解析：
+// dev → resolveDevDataDir（~/.taiji-dev 树），打包 → resolvePackagedDataDir（~/.taiji 树）。
 
 // Dev 模式：自动隔离数据目录和端口，防止与 prod 实例冲突。
-// TAIJI_AGENT_DATA_DIR 无条件钉死——外部 env 一律不采信：防宿主环境泄漏使 dev
-// 读到 prod 数据。
-// [HISTORICAL] 2026-09-08 Gate B 真机验收事故：宿主 shell 的
-// TAIJI_AGENT_DATA_DIR=/Users/<user>/.taiji 泄漏进 dev Electron，旧实现
-// `env ?? ~/.taiji-dev` 只在 undefined 兜底、泄漏值被采信，dev app 整个
-// 跑在用户 prod 数据目录上，与「隔离 prod 实例」语义相反。
-// 需要临时指向其他目录做实验时，直接改这一行或用 TAIJI_AGENT_PORT_OFFSET 同款
-// 显式机制；PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
+// TAIJI_AGENT_DATA_DIR 受控采信（R-13 修复）：外部值仅当解析后位于 ~/.taiji-dev
+// 目录树内才采信（装配器 dev-instance.mjs 注入的 instances/<worktree> per-worktree
+// 实例目录——多 worktree 并行 dev 的数据隔离权威来源）；其余（未设 / 泄漏值如
+// ~/.taiji / 任意树外路径）一律钉死回 ~/.taiji-dev，防宿主环境泄漏使 dev 读到
+// prod 数据。解析序（e2e 豁免 → 树内采信 → 钉死）与 [HISTORICAL] 事故背景见
+// utils/dev-data-dir.ts。
+// PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
 if (isDev) {
-  // e2e 受控装配豁免（2026-09-15）：TAIJI_E2E=1（e2e fixtures launch-app.ts /
-  // launch-app-real.ts 显式注入）时尊重外部 TAIJI_AGENT_DATA_DIR——e2e 是受控测试
-  // 进程，mkdtemp 隔离目录正是其注入意图，不属于「宿主 shell 泄漏」场景；豁免让
-  // real 轨 seed/断言（runtime.port / settings 预置）与 mock 轨数据隔离承诺真正生效
-  // （钉死期间 launch fixture 的 TAIJI_AGENT_DATA_DIR 一直被静默覆盖）。
-  process.env.TAIJI_AGENT_DATA_DIR =
-    process.env.TAIJI_E2E === '1' && process.env.TAIJI_AGENT_DATA_DIR
-      ? process.env.TAIJI_AGENT_DATA_DIR
-      : path.join(homedir(), '.taiji-dev')
+  process.env.TAIJI_AGENT_DATA_DIR = resolveDevDataDir(process.env, homedir())
   process.env.TAIJI_AGENT_PORT_OFFSET = process.env.TAIJI_AGENT_PORT_OFFSET ?? String(DEV_PORT_OFFSET)
   // 隔离 Electron userData，防止与 prod 实例共享 Chromium 存储（LevelDB LOCK 竞争）。
   // 从 TAIJI_AGENT_DATA_DIR 派生（而非硬编码 .taiji-dev）：多 worktree 并行 dev 时
   // 各实例用独立数据目录，userData 隔离随之成立——否则单实例锁互斥导致第二个 dev
   // 实例静默退出（subagent-drawer-blank 设计 §8.2 验收场景实测发现）。
   app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), '.taiji-dev'), 'electron'))
+} else {
+  // 打包态：数据目录钉死 ~/.taiji（外部注入值仅当 resolve 后位于 ~/.taiji 树内才
+  // 采信——与 dev 侧 resolveDevDataDir 树检查镜像对称，防宿主 shell 残留的 dev 值
+  // 使打包版写 dev 目录）。缺省反转（getDataDir 缺省已改 ~/.taiji-dev）后，这里是
+  // prod 数据目录的唯一权威钉死点；本赋值早于下方 initMainLogger / initCrashJournal
+  // 等一切 getDataDir() 消费者，并经 process-control spawn 显式透传给 runtime
+  // （TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 入口有交叉断言）。
+  process.env.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir(process.env, homedir())
+  // 自置位 PACKAGED=1：getDataDir 的 prod 值准入守卫（C-proc-26）要求持有 ~/.taiji
+  // 树值的进程声明 prod 形态——打包 main 自身后续的 getDataDir() 消费也走这条链。
+  // 出站侧不受影响：spawn 子进程经 buildSafeEnv/buildOutboundChildEnv 按需注入或剥除。
+  process.env.TAIJI_AGENT_PACKAGED = '1'
 }
 
 // ── main 日志落盘（D6-①）────────────────────────
@@ -339,12 +347,19 @@ app.whenReady().then(async () => {
     // ~ 本身（含 ~/.ssh）」的注释护栏曾被该运行时环境击穿。不变量守护已移到单测：
     // main/test/local-file-prefixes.test.ts（打包态不含文件系统根 / 不含 homedir 本身）。
     // 各成员的取舍理由见 utils/local-file-prefixes.ts 文件头。
+    // projectRoot：仅 dev + dev-instance.mjs 装配器注入 TAIJI_DEV_PROJECT_ROOT 时生效
+    // （dev 装配的 electron cwd/appPath 都指向 apps/electron，白名单需要 worktree 根
+    // 成员才能放行 session cwd 下的用户文件）。打包态 env 不会被装配器注入，isDev
+    // 判断再显式防一层泄漏（isPackaged 时不传）。
     const allowedPrefixes = computeLocalFilePrefixes({
       isPackaged: app.isPackaged,
       cwd: process.cwd(),
       appPath: app.getAppPath(),
       dataDir: getDataDir(),
       tmpdir: tmpdir(),
+      ...(isDev && process.env.TAIJI_DEV_PROJECT_ROOT
+        ? { projectRoot: process.env.TAIJI_DEV_PROJECT_ROOT }
+        : {}),
     })
     const resolved = path.resolve(filePath)
     // 校验逻辑集中到 input-validators，拒绝不在白名单前缀内的路径（防目录穿越）

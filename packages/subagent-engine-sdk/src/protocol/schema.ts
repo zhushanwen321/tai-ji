@@ -6,12 +6,29 @@
 //
 // schema 层禁止凭据的实现口径：所有对象帧 additionalProperties:false + 属性白名单，
 // 凭据类键名（apiKey/token/credential 等）不在任何白名单内；测试侧另断言白名单全集
-// 无凭据键（src/__tests__/protocol-frames.test.ts）。params/result 的深载荷结构由
+// 无凭据键（src/__tests__/protocol-schema.test.ts「不变量 5」）。params/result 的深载荷结构由
 // TS 类型承载（protocol/methods.ts / reverse-channels.ts / contract-types.ts），
 // 帧级 schema 只定形状骨架（id/method/params/result/error 的存在性与类型）——
 // 帧校验的目的是行解析器快速拒格式坏帧，不做深校验（深校验成本高于收益，坏载荷
 // 由消费方结构化报错）。
+//
+// 深载荷 schema 判据（协议宪法）：帧级骨架校验不变；深载荷配专属 schema 需任一——
+// ①该载荷经历过键切换/搬家事故（先例 runSessionParamsSchema）；②载荷跨信任边界
+// （第三方引擎独立开发）。演进政策（schema 面）：enum 词表面 additive 演进不 bump
+// 版本，新增成员须过新增门槛（消费方 + 降级路径 + 能力位绑定），无消费方不进协议；
+// 判据全文 = engine-protocol.ts 头注，删改史与判据 why = docs/adr/decisions.md
+// ADR-0071。
+//
+// schema 定位声明（设计决策 D6 原文语义）：ENGINE_PROTOCOL_SCHEMAS = 测试 oracle +
+// conformance 契约源，不进运行时（前提 P2：运行时零消费，仅测试在用；运行时深校验
+// 成本高于收益，坏载荷由消费方结构化报错——见上文帧校验目的）。U2 落地后事件 enum
+// 已从 AGENT_EVENT_TYPE_NAMES 词表派生，oracle 与实现同源，漂移风险归零。
+//
+// fixture 派生登记：conformance fixture 从本 schema 派生（需求发生再接线）——纯登记，
+// 不落任何实现，遵守 C 型「无消费方不进协议」纪律；接线时以 ENGINE_PROTOCOL_SCHEMAS
+// 为唯一派生源，禁止另手写 fixture schema 面。
 
+import { AGENT_EVENT_TYPE_NAMES } from "./contract-types.ts";
 import { REVERSE_CHANNELS } from "./reverse-channels.ts";
 import { PROTOCOL_METHODS } from "./methods.ts";
 
@@ -94,17 +111,9 @@ export const notificationFrameSchema = {
           properties: {
             type: {
               type: "string",
-              enum: [
-                "tool_start",
-                "tool_end",
-                "text_delta",
-                "thinking_delta",
-                "turn_end",
-                "message_end",
-                "compaction",
-                "activity",
-                "error",
-              ],
+              // 事件 enum 从词表 SSOT 派生（U2 词表锁：union⟷词表互证后，此处不再
+              // 手写字面量集合——手写即漂移面，病灶 1 的第三处同步点）
+              enum: [...AGENT_EVENT_TYPE_NAMES],
             },
           },
         },

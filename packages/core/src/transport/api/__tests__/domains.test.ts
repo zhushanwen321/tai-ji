@@ -294,13 +294,17 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('sendExtensionUIResponse 经 ws send fire-and-forget', () => {
+  it('sendExtensionUIResponse 经 ws send fire-and-forget，透传 boolean 送达结果（M1 环 3）', () => {
     mockWsSend.mockReturnValue(true)
-    extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')
+    expect(extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')).toBe(true)
     expect(mockWsSend).toHaveBeenCalledWith({
       type: 'extension.ui_response',
       payload: { sessionId: 's1', requestId: 'r1', method: 'select', result: 'opt-1' },
     })
+
+    // WS 非 OPEN：send 返 false → 透传 false（调用方据此保留请求 + 提示重发，不再 :void 吞掉）
+    mockWsSend.mockReturnValue(false)
+    expect(extension.sendExtensionUIResponse('s1', 'r2', 'confirm', false)).toBe(false)
   })
 })
 
@@ -486,7 +490,8 @@ describe('session 域 请求-响应', () => {
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.setThinkingLevel', { sessionId: 's1', level: 'max' }])
 
     mockCommand.mockResolvedValueOnce({ subagents: [{ id: 'sa' }] })
-    await expect(session.getSubagents('s1')).resolves.toEqual([{ id: 'sa' }])
+    // [RT-4#8] 结构化返回透传（subagents + oversize?）：api domain 不再解包 .subagents
+    await expect(session.getSubagents('s1')).resolves.toEqual({ subagents: [{ id: 'sa' }] })
     expect(mockCommand.mock.calls[1][0]).toBe('session.getSubagents')
 
     mockCommand.mockResolvedValueOnce({ messages: [{ id: 'm' }] })
@@ -505,7 +510,8 @@ describe('session 域 请求-响应', () => {
 
   it('workflow 派生：getWorkflows / getAgentCallHistory / getAgentCallFilePath / workflowAction / subagentAction', async () => {
     mockCommand.mockResolvedValueOnce({ workflows: [{ runId: 'r1' }] })
-    await expect(session.getWorkflows('s1')).resolves.toEqual([{ runId: 'r1' }])
+    // [RT-4#8] 结构化返回透传（workflows + oversize?）：api domain 不再解包 .workflows
+    await expect(session.getWorkflows('s1')).resolves.toEqual({ workflows: [{ runId: 'r1' }] })
     expect(mockCommand.mock.calls[0][0]).toBe('session.getWorkflows')
 
     mockCommand.mockResolvedValueOnce({ messages: [] })
@@ -722,6 +728,10 @@ describe('config 域 请求-响应', () => {
 
     mockCommand.mockResolvedValueOnce({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
     await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
+
+    // RT-7#8：损坏缓存源 / 落盘失败标志透传（api domain 不吞新字段）
+    mockCommand.mockResolvedValueOnce({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+    await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
 
     mockCommand.mockResolvedValueOnce({ providers: [{ id: 'p' }] })
     await expect(config.listProviders()).resolves.toEqual({ providers: [{ id: 'p' }], scopedModels: undefined })

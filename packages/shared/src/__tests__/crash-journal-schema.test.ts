@@ -91,6 +91,10 @@ const IMPLEMENTED_KNOWN_REASONS = [
   'defer-limit',
   'inflight',
   'absent-report',
+  // runtime destroy 收敛链单步失败（session-entry-removal.ts，code-harden RT-4#1）
+  'destroy-chain-step-failed',
+  // checkpoint 持续写失败达连续阈值（runtime-checkpoint.ts，code-harden RT-4#6）
+  'checkpoint-write-failed',
 ]
 // schema JSON 块顶层字段集（14 个，与 CrashJournalEvent 字段一一对应）
 const DESIGN_TOP_LEVEL_FIELDS = [

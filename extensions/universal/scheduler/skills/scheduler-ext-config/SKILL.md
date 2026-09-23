@@ -5,7 +5,7 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 
 # scheduler 使用与存储指南
 
-> @zhushanwen/pi-scheduler：定时任务调度扩展。任务到期时向当前 session 注入一条 message（`deliverAs: 'followUp'` + `triggerTurn: true`），唤醒 agent 开新一轮 turn 处理。
+> @zhushanwen/pi-scheduler：定时任务调度扩展。任务到期时向当前 session 注入一条 message（`deliverAs: 'steer'` + `triggerTurn: true`，steer 直投：busy 时插入当前 turn、idle 时开新 turn），唤醒 agent 处理。
 
 **重要前提**：scheduler **没有独立的配置文件**。任务通过命令/工具交互创建，数据以 append-only event sourcing 方式存储在 session JSONL 中（见下文「数据存储位置」）。排查「任务存哪 / 为什么 resume 后任务变了 / fork 后任务是否继承」都必须基于此模型理解，不要去找独立的 `scheduler.json`（那是已废弃的旧版格式，仅迁移探测时使用）。
 
@@ -13,29 +13,35 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 
 两条入口，底层都走 `SchedulerService`（单一业务实现，无双轨）：
 
-### 1. `/schedule` slash 命令（用户/AI 直接输入）
+### 1. `/schedule` slash 命令（用户直接输入）
 
 | 用法 | 作用 |
 |------|------|
-| `/schedule <schedule> <prompt>` | 创建 recurring 任务（默认） |
-| `/schedule once <delay> <prompt>` | 创建一次性任务（执行一次后自动删除） |
-| `/schedule cron '<cron表达式>' <prompt>` | 创建 cron 任务（**必须用引号**包裹，否则空格会被 tokenize 拆散） |
+| `/schedule` | 打开创建表单（空草稿，默认循环 + 每天 09:00） |
+| `/schedule <schedule> <prompt>` | 打开预填时间/提示词的创建表单（如 `/schedule 5m 'check build'`） |
 | `/schedule list` | 列出全部任务（按 nextRunAt 排序） |
 | `/schedule on <id>` / `/schedule off <id>` | 启用 / 禁用某任务 |
 | `/schedule rm <id>` | 删除某任务 |
 | `/schedule run <id>` | 立即触发一次某任务 |
 
-- 无参数 `/schedule`：当前返回「TUI 未实现」提示，用 `/schedule list` 查看任务。
+- 一次性（once）与 cron 形态由表单内选择/填写，不再有 `once` / `cron` 关键字子命令。
+- 命令 handler 异步打开表单后立即返回——填表时长不受命令通道超时约束。
 - `on`/`off`/`rm`/`run` 的 `<id>` 支持命令补全（`getArgumentCompletions` 会列出 `id · name · schedule`）。
-- cron 表达式含空格，**必须用单/双引号**包成一个 token，例：`/schedule cron '*/10 * * * *' 跑测试`。
+- `json`/`print` 模式无交互通道：带参直建，无参/失败抛错（stderr 可见）。
 
 ### 2. `schedule` / `schedule_control` 工具（AI 调用）
 
-- **`schedule`**（创建）：参数 `prompt`（必填，到期注入的消息）、`schedule`（必填，duration 或 cron）、`kind`（`once`/`recurring`，默认 `recurring`）、`name`（可选，缺省从 prompt 自动截取前 30 字）、`expires`（可选，默认 7 天；传 `"never"` 关闭过期）、`force`（可选，默认 `false`）。
+- **`schedule`**（创建）：参数 `prompt`（必填，到期注入的消息）、`schedule`（必填，duration 或 cron）、`kind`（`once`/`recurring`，默认 `recurring`）、`name`（可选，缺省从 prompt 自动截取前 30 字）、`expires`（可选，默认 7 天；传 `"never"` 关闭过期）、`model`（可选，scoped model id（`provider/model`），任务执行所用模型；缺省跟随会话当前模型）。
 - **`schedule_control`**（管理）：`action` = `list`/`toggle`/`delete`/`run`，`id`（toggle/delete/run 必填），`enabled`（toggle 必填）。
 - 两个工具的返回都是结构化 `{content: [{type:'text', text}], details}`；业务失败以异常抛出（pi 只对 execute throw 置 `isError:true`，错误 message 作为 toolResult content 返回），不通过返回值表达失败。
 
-> 创建/管理操作无需 agent idle——只有**到期 dispatch** 才受 idle/速率限制约束（见「运行限制与 dispatch 行为」）。
+> 创建/管理操作不受 agent 运行状态约束；**到期 dispatch** 也不等待 agent idle（steer 直投，busy 时插入当前 turn），仅受速率限制/同任务 in-flight 守卫约束（见「运行限制与 dispatch 行为」）。
+
+### 3. 创建方式（触发反转）
+
+- **模型侧 `schedule` tool**：**直接创建**（无确认表单、无 headless「未经确认」附注）。参数不完整时必须先经 ask-user / 对话澄清，禁止猜测频率后静默创建。
+- **人侧 `/schedule` 命令**：打开创建表单（GUI 走统一表单协议 / TUI 走 `ScheduleCreateComponent`），用户在表单里自定模式/时间/模型/提示词；命令异步打开、立即返回。`json`/`print` 模式无交互通道：带参直建、无参或失败抛错。
+- **会话生命周期**：表单挂起期间 `session_shutdown`（quit/reload/new/resume/fork）会 abort 交互（不创建）；taiji 内切换会话不触发，表单保留。
 
 ## 调度格式
 
@@ -89,17 +95,17 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 旧版（npm ≤ 0.1.1）用独立 store 文件，按 **cwd 隔离**存储：
 
 ```
-<agentDir>/scheduler/<root>/<segments>/scheduler.json
+<agentDir>/schedule/<root>/<segments>/schedule.json
 ```
 
 - `<agentDir>` = `getAgentDir()`（候选 1）或 `~/.pi/agent`（候选 2，旧版硬编码）。
 - `<root>` = cwd 根盘符 sanitize：mac/linux 的 `/` → `root`；Windows `C:\` → `c`（非字母数字转 `-`，trim 首尾，小写）。
 - `<segments>` = cwd 去根盘符后的路径段，按 `path.sep` 拆分。例 cwd `/Users/foo/project` → `Users/foo/project`。
-- 完整示例（mac）：`~/.pi/agent/scheduler/root/Users/foo/project/scheduler.json`。
+- 完整示例（mac）：`~/.pi/agent/schedule/root/Users/foo/project/schedule.json`。
 
 **迁移机制**（`importLegacyStore`，session_start 时自动执行，无需用户介入）：
 
-1. 双候选探测：优先 `getAgentDir()` 路径，不存在则 fallback `~/.pi/agent/scheduler/...`（兼容 taiji 数据目录隔离前的旧版写入位置）。
+1. 双候选探测：优先 `getAgentDir()` 路径，不存在则 fallback `~/.pi/agent/schedule/...`（兼容 taiji 数据目录隔离前的旧版写入位置）。
 2. 原子 rename `scheduler.json` → `scheduler.json.imported` 独占迁移；rename 抛 ENOENT 说明并发/崩溃已被别人处理，走 `.imported` 残留恢复。
 3. 读取 `.imported`，逐任务 `appendEntry('pi-scheduler:task', upsert)` 写入当前 session（owner 归属当前 session）。
 4. 删除 `.imported`：**新 session 首次 flush 前（尚未收到 assistant 消息）延迟删除**，由首个 `turn_end` / `session_shutdown` 确认 flush 后再删（防未 flush 即退出导致任务永久丢失 + 源文件已毁）。
@@ -117,12 +123,14 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 | 默认过期 | 7 天（`DEFAULT_EXPIRY_MS`） | 仅 recurring；`expires="never"` 关闭 |
 | 历史记录 | 最近 20 条（`HISTORY_LIMIT`） | 每任务的执行历史 |
 
-dispatch 触发条件（`dispatchTask`）：
+dispatch 行为（`dispatchTask`，scheduler-steer-direct-dispatch 直投模型）：
 
-- **非 force 任务**：走统一 session delivery 内核（park 模式）——到期即入队，agent 忙时消息 park 在内核队列，等 agent 空闲的 settled 边沿投递，scheduler 每 30s tick 触发一次 flush 兜底重试；不丢弃。
-- **force=true 任务**：即使 agent busy 也立即触发（用于必须准点执行的场景）。
-- dispatch 成功后：recurring 推进 `nextRunAt` 并 append `advance`；once 删除任务并 append `delete`；失败（`sendMessage` 抛错）记 `lastStatus='failed'` 不 rethrow，下个 tick 重试（transient 失败重试语义，不 append advance）。
-- 注入的消息：`{content: task.prompt, customType: 'pi-scheduler:dispatched', display: true}`，`deliverAs: 'followUp'` + `triggerTurn: true`（排进 followUp 队列并唤醒 agent 开新 turn）。
+- **steer 直投**：到期任务 `backend.sendMessage(..., {deliverAs: 'steer', triggerTurn: true})` 直接投递——agent busy 时消息插入当前 turn（立即被模型看到）、idle 时开新 turn。不排队、不等 idle、不丢弃。
+- **受理即记账**：`sendMessage` 是 fire-and-forget（返回 void），await 立即通过，`nextRunAt` 调用即推进——无「入队未终态」窗口。
+- **同任务 in-flight 守卫**：该任务 dispatch 在途（如 `/schedule run` 与 tick dispatch 并发）时本 tick 跳过，防双投。
+- **模型切换**（`task.model` 设定且 ≠ 会话当前模型）：sendMessage 前 `setModel` 切到目标任务模型、记未决切换记录，事件恢复（turn_end + isIdle 复核）后切回原模型；切换失败降级——照常 dispatch（模型字段不阻塞核心调度）。
+- dispatch 成功后：recurring 推进 `nextRunAt` 并 append `advance`；once 删除任务并 append `delete`；失败（`sendMessage` 同步抛错，如 session 关闭）记 `lastStatus='failed'` 不 rethrow，下个 tick 重试（transient 失败重试语义，不 append advance）。
+- 注入的消息：`{content: task.prompt, customType: 'pi-scheduler:dispatched', display: true}`，投递选项 `{deliverAs: 'steer', triggerTurn: true}`。
 
 ## 任务数据结构
 
@@ -133,8 +141,8 @@ dispatch 触发条件（`dispatchTask`）：
 - `prompt`：到期注入的 message 内容。
 - `kind`：`once` | `recurring`。
 - `schedule`：`{mode:'cron', cronExpression}` | `{mode:'interval', intervalMs}`。
+- `model?`：任务执行模型（scoped model id，`provider/model`）；缺省跟随会话当前模型。
 - `enabled`：是否启用。
-- `force`：是否在 agent busy 时强制 dispatch。
 - `createdAt` / `nextRunAt` / `expiresAt?`：时间戳（ms）。
 - `runCount` / `lastRunAt?` / `lastStatus?`（`success`|`failed`）/ `lastError?`：执行统计。
 - `history`：最近 20 条 `ExecutionRecord`（`{at, status}`）。
@@ -145,30 +153,23 @@ dispatch 触发条件（`dispatchTask`）：
 
 ## 示例
 
-创建一个每 5 分钟检查构建状态的任务：
+打开创建表单（空草稿，表单里选每天 09:00）：
+
+```
+/schedule
+```
+
+打开预填表单（每 5 分钟检查构建状态）：
 
 ```
 /schedule 5m 检查当前项目的构建状态，失败则报告原因
 ```
 
-创建 2 小时后的一次性提醒：
+一次性提醒 / cron 任务：在 `/schedule` 表单里切换执行模式（一次性）或填自定义 cron（如 `*/30 * * * *`）。非交互模式（json/print）带参直建：
 
 ```
-/schedule once 2h 提醒我 review 这个 PR
+pi -p "/schedule 5m 'check build'"
 ```
-
-创建每 30 分钟跑测试的 cron 任务（注意引号）：
-
-```
-/schedule cron '*/30 * * * *' 跑一次 vitest 并报告结果
-```
-
-创建工作日早 9 点的早会提醒（不过期、force）：
-
-```
-/schedule cron '0 9 * * 1-5' 早会时间到了，总结昨天进展和今天计划
-```
-（如需 force + 不过期，用 `schedule` 工具传 `force:true, expires:"never"`，命令行暂未暴露这两个开关）
 
 列出并禁用某任务：
 
@@ -177,10 +178,10 @@ dispatch 触发条件（`dispatchTask`）：
 /schedule off abc12345
 ```
 
-AI 通过工具创建（force + 永不过期）：
+AI 通过工具创建（指定模型 + 永不过期；工具直建，无确认表单）：
 
 ```
-schedule({ prompt: "...", schedule: "1h", kind: "recurring", force: true, expires: "never", name: " hourly-check" })
+schedule({ prompt: "...", schedule: "1h", kind: "recurring", model: "anthropic/claude-sonnet-4-5", expires: "never", name: "hourly-check" })
 ```
 
 ## 备注
@@ -188,4 +189,4 @@ schedule({ prompt: "...", schedule: "1h", kind: "recurring", force: true, expire
 - **croner 依赖**：cron 模式依赖 `croner`（dependencies，随包自动安装 + 静态 import，2026-09 0.6.0 起；此前为 optional peer，独立安装形态下 cron 任务会静默失败）。cron 解析失败（`INVALID_SCHEDULE`）= 表达式无效，不存在「解析器未安装」形态。
 - **数据目录隔离**：任务存储在 `getAgentDir()` 指向的 session JSONL。taiji 通过 `TAIJI_AGENT_DATA_DIR` / `PI_CODING_AGENT_DIR` 隔离实例时，任务随 session 落在隔离目录，与 `~/.pi/agent` 互不干扰。
 - **无配置 schema 可编辑**：scheduler 的所有状态都由运行时命令产生，没有可手动编辑的配置文件。要「批量预置任务」只能在 session 内逐条创建（或迁移旧 store）。
-- **TUI 管理器未实现**：无参 `/schedule` 当前只返回提示，任务管理请用 `list`/`on`/`off`/`rm`/`run` 子命令或 `schedule_control` 工具。
+- **无参 `/schedule`**：打开创建表单（不是提示语）。任务管理用 `list`/`on`/`off`/`rm`/`run` 子命令或 `schedule_control` 工具。

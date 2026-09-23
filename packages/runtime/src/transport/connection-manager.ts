@@ -172,8 +172,13 @@ export class ConnectionManager {
     this.resetHeartbeat(ws)
     this.callbacks.onMessage(msg, ws).catch((err) => {
       console.error('[runtime] unhandled error in handleMessage:', err)
+      // RT-1#3：兜底信封补 sessionId（裁决 7：错误消息必须可归属 session）——server 主漏斗
+      // 二次抛（error envelope 发送失败）落到这里时，缺 sessionId 的信封会让前端按
+      // session 隔离规则丢弃该错误。可选链提取 + typeof 守卫（畸形帧 payload 不可信）。
+      const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+      const details = typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined
       try {
-        this.callbacks.sendError(ws, 'handler_error', toErrorMessage(err), msg.id)
+        this.callbacks.sendError(ws, 'handler_error', toErrorMessage(err), msg.id, details)
       // eslint-disable-next-line taste/no-silent-catch -- ws may have already closed
       } catch { /* ws 可能已关闭 */ }
     })

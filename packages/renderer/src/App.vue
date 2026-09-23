@@ -12,10 +12,17 @@
         <Loader2 class="size-4 animate-spin text-neutral-dim" />
         <span class="text-[12.5px] text-neutral-dim">{{ t('connection.restarting') }}</span>
       </template>
-      <!-- runtime 重启用尽，需手动重试 -->
+      <!-- runtime 重启用尽，需手动重试。runtimeStartError = 最近一次启动失败真因
+           （RD-3#2：binary 缺失/端口占用等，main 经 runtime-error 推送/拉取兜底到达；
+           通用 failed 文案保留为兜底，真因到达即补充显示） -->
       <template v-else-if="connectionState === 'failed'">
         <AlertCircle class="size-5 text-danger" />
         <span class="text-[12.5px] text-neutral-mid">{{ t('connection.failed') }}</span>
+        <span
+          v-if="runtimeStartError"
+          data-testid="runtime-error-cause"
+          class="max-w-[320px] text-center text-[11.5px] text-neutral-dim"
+        >{{ t('connection.errorCause', { message: runtimeStartError }) }}</span>
         <Button variant="default" size="sm" data-testid="runtime-retry-btn" @click="onRetry">
           {{ t('connection.retry') }}
         </Button>
@@ -35,19 +42,46 @@
        （main 侧 reloadWindowAfterCrash 注入），useCrashRecoveryNotice 消费即清除标志
        （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->
   <CrashRecoveredBar />
+  <!-- RD-3#7：ToastContainer 上提根部——连接前（connecting/failed/restarting）也渲染，让启动期
+       错误（如渲染异常 toast）有 UI 留痕。connected 态仍由 PanelContainer main-area / MainPanel
+       内的挂载点承接（保持 drawer 感知定位、恒不遮 drawer），故此处仅非连接态挂载——两态均渲染、
+       不双实例。 -->
+  <ToastContainer v-if="connectionState !== 'connected'" />
+  <!-- RD-3#11：内存压力提示条（最小可见形态）——useMemoryPressure 的 level 接入 UI 消费方。
+       warn/critical 时显示，用户据此行动；level 无 normal 回弹（协议 normal 不广播），dismiss 后
+       level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入（同 CrashRecoveredBar 定位范式）。 -->
+  <div
+    v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
+    data-testid="memory-pressure-bar"
+    class="fixed left-1/2 top-3 z-[9999] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
+  >
+    <AlertTriangle class="size-3.5 shrink-0 text-warn" aria-hidden="true" />
+    <p data-testid="memory-pressure-text" class="select-text break-words text-[12.5px] leading-snug text-neutral-fg">
+      {{ memoryLevel === 'critical' ? t('app.memoryPressureCritical') : t('app.memoryPressureWarn') }}
+    </p>
+    <Button
+      variant="ghost"
+      class="ml-1 size-6 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+      :aria-label="t('app.crashDismiss')"
+      @click="memoryBarDismissed = true"
+    >
+      <X class="size-3.5" aria-hidden="true" />
+    </Button>
+  </div>
   <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
        transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
   <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, watch } from 'vue'
-import { Loader2, AlertCircle } from '@lucide/vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Loader2, AlertCircle, AlertTriangle, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 
 import CrashRecoveredBar from '@/components/ui/CrashRecoveredBar.vue'
+import ToastContainer from '@/components/ui/ToastContainer.vue'
 import { Button } from '@/components/ui/button'
 import { useConnection } from '@/composables/useConnection'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
@@ -63,6 +97,8 @@ import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSyn
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
 import { useMemoryPressure } from '@/composables/useMemoryPressure'
+import { onRuntimeError, getRuntimeStartError } from '@/lib/ipc'
+import { reportRuntimeStartError } from '@/boot/error-reporter'
 
 // 应用挂载（onMounted bootstrap 第 2 步）即提交连接编排（mock 模式 200ms 直进 connected；真 runtime 走端口发现）。
 // settings 域核心初始化（transport + 订阅注册）必须在 WS 连接前完成：
@@ -80,6 +116,28 @@ watch(locale, () => {
   document.title = t('app.title') + (isDevMode() ? ' - dev' : '')
 }, { immediate: true })
 const { state: connectionState, teardown, retryRuntime } = useConnection()
+// RD-3#2：runtime 启动失败真因（binary 缺失/端口占用等）。此前 main 发 runtime-error
+// 全仓零消费——启动失败用户只能干等 60s 后看到通用 failed，真因永不可见。
+// 挂点选 App.vue 而非 core 编排：① failed 屏（真因显示位）就在本组件；② 状态转移
+// （置 failed 短路徒劳重连）归 core use-connection（经 ConnectionPorts 消费同一事件），
+// 本组件只管显示 + 台账，两层各司其职。推送 + 拉取双通道：boot 竞态下 main whenReady
+// 发事件早于本组件挂载，webContents.send 静默丢失——拉取兜底对齐「时序竞争必须主动
+// 拉取」既有规则。connected 即清（陈旧真因不再显示）。
+const runtimeStartError = ref<string | null>(null)
+let removeRuntimeErrorListener: (() => void) | null = null
+
+/** 记录真因 + 落台账（幂等：同因去重；空消息丢弃）。状态转移归 core，本组件不置态 */
+function handleRuntimeStartError(message: string): void {
+  if (!message || runtimeStartError.value === message) return
+  runtimeStartError.value = message
+  reportRuntimeStartError(message)
+}
+removeRuntimeErrorListener = onRuntimeError((err) => handleRuntimeStartError(err?.message ?? ''))
+// 拉取兜底：推送可能早于上面的订阅安装（boot 竞态），挂载编排后主动问一次 main 侧
+// 最近一次启动失败原因（无 IPC / 无失败记录返回 null，no-op）
+void getRuntimeStartError().then((message) => {
+  if (message) handleRuntimeStartError(message)
+})
 // 启动编排（#1/#3）：连接建立后自动进 new-task landing（首次）或恢复最近 session。
 // 五步 bootstrap（onMounted）第 2 步 initConnection 提交连接编排——resolve = 编排已提交
 // 而非 connected（connectWs 异步握手不等待，D2 裁决②）；state==='connected' 是「连接成功」
@@ -108,7 +166,12 @@ useCompactQueue()
 // warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
 // 【oe-audit C2】此前全链零装配（hook 零调用方 = 双重休眠，impl-plan u7d「经 useRollingRestartStatus
 // 引用链生产挂载」登记失实——该文件仅注释引用范式）；本挂载补齐生产消费方。
-useMemoryPressure()
+// 【RD-3#11】捕获 level 供上方提示条消费（此前返回值丢弃、level 无 UI 消费方——内存压力 warn 阶段
+// 用户无从得知、无法据以行动）。
+const { level: memoryLevel } = useMemoryPressure()
+const memoryBarDismissed = ref(false)
+// level 变化（normal→warn→critical 升级）时重显提示条：dismiss 只对当前 level 生效，不跨级别持久。
+watch(memoryLevel, () => { memoryBarDismissed.value = false })
 // 入站超界帧守卫消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
 // core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态投影 + 切走切回重试订阅。
 // App setup 顶层装配（与 bindForkNoticeEffect 同区），teardown 在 onBeforeUnmount 配对；
@@ -137,6 +200,8 @@ onMounted(() => {
 //   避免新实例误判为「首次」再调 initApp（被守卫吞）导致 load 不刷新。
 watch(connectionState, (s) => {
   if (s === 'connected') {
+    // RD-3#2：连接成功即清除启动失败真因（陈旧原因不再出现在后续 failed 屏）
+    runtimeStartError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
     // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
@@ -154,6 +219,10 @@ function onRetry(): void {
 
 onBeforeUnmount(() => {
   teardown()
+  // RD-3#2：runtime-error 订阅随 App 卸载退订（与 setup 顶层安装配对，HMR/测试卸载后
+  // 重挂可再次安装，不留残留 listener）
+  removeRuntimeErrorListener?.()
+  removeRuntimeErrorListener = null
   // 入站守卫消费编排解绑（与 setup 顶层 installInboundFrameGuard 配对：HMR/测试卸载后
   // 重挂可再次安装；core 侧监听与 focus watch 不留残留）。
   uninstallInboundFrameGuard()

@@ -109,12 +109,32 @@
       </div>
     </div>
   </section>
+
+  <!-- git 不可用（RT-8#5）：探测失败（未装 git/超时）≠ 非 git 仓库——显示真因而非误导用户
+       按「非仓库」方向自救。真非仓库不进本分支（无 gitUnavailableReason，走 SideDrawer 空态）。 -->
+  <section
+    v-else-if="result?.gitUnavailableReason"
+    data-testid="git-unavailable"
+    class="flex h-full flex-col items-start gap-2 p-3 text-[length:var(--text-xs)] text-neutral-dim"
+  >
+    <div class="flex items-center gap-1.5">
+      <CircleAlert class="size-3.5 shrink-0 text-warn" />
+      <span>{{ t('panel.git.unavailableTitle') }}</span>
+    </div>
+    <p class="font-mono text-[length:var(--text-3xs)] break-all opacity-70">{{ result.gitUnavailableReason }}</p>
+    <Button
+      variant="ghost"
+      class="h-6 rounded-sm px-2 text-[length:var(--text-2xs)]"
+      :disabled="pending"
+      @click="refresh"
+    >{{ t('panel.git.refresh') }}</Button>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GitBranch, RefreshCw, Quote } from '@lucide/vue'
+import { GitBranch, RefreshCw, Quote, CircleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useGitStatusOrFail, type GitState } from '@/composables/features/file-tree/useGitStatus'

@@ -194,6 +194,11 @@ export function useComposerModelThinking(
    * 必须注册在 useThinkingLevelSync 的 sync watch 之前：同一 flush 内 watch job 按
    * 注册序执行，若消费检查先跑，换绑到恰为 armed 目标模型的 session 会在作废前被
    * 消费（伪恢复，D3 被否①的换绑变体）。
+   *
+   * [AC11 豁免登记，2026-09-20 R1] armed 是会话级单值意图 token（非 per-session
+   * 分区态）：本 watch 是「换绑即整体作废」的安全侧语义，迁 useSessionScopedState
+   * 分区会改为「按 session 保留」，换绑回原 session 时已作废意图复活（行为回退）。
+   * 已登记 scripts/check-domain-boundaries.sh 的 AC11_WATCH_ALLOWLIST。
    */
   watch(sessionId, () => {
     armed.value = null

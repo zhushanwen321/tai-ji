@@ -48,6 +48,25 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ### ADR-0044 系统提示词双路
 替换走 pi 原生 `--system-prompt` CLI 核心段替换（runtime spawn 链透传，仅新会话生效）；追加走 builtin 扩展 `extensions/taiji/system-prompt` 的 before_agent_start hook 每轮读 `<dataDir>/system-prompt.json`（热生效）。配置全局一份，runtime 与 pi 内扩展读同一文件。登记 C-pi-09。
 
+### ADR-0068 扩展消息注入形态：custom message 首选（2026-09-21）
+pi extension 向 LLM 注入提示词/通知消息统一走 `pi.sendMessage()` custom message 形态（`display` 控制用户可见性、不伪装用户消息归属）；`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息——提示词类内容伪装用户消息的形态已在四包改造中清除（smart-context/goal/structured-output/plan，merge accb67c37）。关键语义两条：① custom message 经 pi `convertToLlm` 无条件转 LLM user 消息，对 LLM 与 user message 无差别，形态迁移不损失模型可见性（语义登记 [pi-semantics.json](../pi-semantics.json) PS-43，锚 pi `dist/core/messages.js:89-96` case "custom"）；② `sendMessage(triggerTurn:true)` 非 streaming 时直调 `_runAgentPrompt`，跳过 `prompt()` 主路径前置链（compaction 检查 / before_agent_start 事件 / systemPrompt 叠加 / pending nextTurn 消费）——依赖 per-turn 注入的需求不得走该通道。约定载体 [extension-conventions.md](../extensions/extension-conventions.md)「Event handler 消息注入」。
+
+### ADR-0071 引擎协议演进宪法：删改分类学与判据（2026-09-22）
+engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成文宪法。终态条文浓缩于协议四处头注（`packages/subagent-engine-sdk/src/protocol/` 的 engine-protocol.ts / contract-types.ts / reverse-channels.ts / schema.ts——头注只载终态纪律不载删改史）；**本条是 6 次历史破坏性删改与判据 why 的唯一入库权威载体**（协议目录系 fresh import、git 不可追溯，改写前的源码头注是唯一现场记录，随本条收编后同批改写为终态）。约束登记：C-proc-13（存量演进表述对齐）、C-proc-22/23/24（判据 6 行为键必配门 / 四张词表锁 / 宽容语义四行）。
+
+**6 次破坏性删改分类学**（三型纪律不同，不能一刀切 additive 也不能一刀切同批）：
+- **A 型同形改名**（1 项）：`run.params.chat` → `run.params.resume`（载荷同形仅键名泛化；架构权威 docs/architecture/subagent-chat-run-unification.md §3.3 D3/D5）。additive 替代（新增 resume 键 + 读端 `params.resume ?? params.chat` 双读 + 旧键 `@deprecated` + major 清除）成本趋零却走读写同批，且双读形态从未被实践——A 型但书由此立：同形改名默认 additive 双读，仅当双读引入语义纠缠时才允许同批。
+- **B 型机制替换**（2 项）：`interact` 控制面方法删除（续聊统一为新 run + resume 锚点；双轨 = 两套执行模型在 reducer/journal/conformance/能力门四面长期双维护，本身就是协议债）；`task.conversation` 键删除（per-run 模式开关语义消亡、职责并入 resume，双保留会造成「谁赢」的语义纠缠）。同批切换合法，条件 = 对端同仓 + ADR 登记（即本条）。
+- **C 型死成员清理**（3 项）：轮次相位反向通道（新增后从未被消费）、`host/poolResolved` 通道（poolKey 恒 'shared'、回调零信息量——池抽象降级，docs/architecture/zcode-engine-appserver-resident.md）、`host/permission` 通道骨架（双侧零实装占位，「未接线死通道」）。根因不在删除在**新增**——治理 = 新增门槛：无消费方不进协议、占位先行即违宪（与能力位「声明链路实际接通的能力」哲学同源）。
+
+**判据 1-7 证据锚点**（条文终态见 engine-protocol.ts 头注）：判据 1（引擎不消费→宿主自持）→ `task.idleTimeoutMs` 错位（六引擎映射全部不支持，实为宿主 idle GC 参数）；判据 2/3（what→task / 推导分叉→ctx）→ schemaEnv 三次搬家与 sessionRootId 事故补丁（文字判据靠人执行必然漏的两次实证）；判据 4（task/ctx 双写禁令）→ schemaEnv 双源事故——**H1b 收口未完成**：`packages/subagent-core/src/execution/engine/client/remote-engine.ts:382` 仍 `ctx.schemaEnv ?? task.schemaEnv`——wire 层禁令断言现状纯 never、无豁免（AgentCallOpts 已单侧排除 schemaEnv，键集交集为空），双源现状登记于断言注释（wire-field-locks.test.ts）待收口回看；判据 5（能力位双向回指）→ 先例 streamMode↔eventGranularity；判据 6（键三分类 + behavior 键必配门）→ resume↔conversation gate（error-codes.ts `assertChatConversationSupported`）与 forkSource 注释双先例，判别式 =「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）；判据 7（能力位消费点/载体登记）→ steer 首个登记条目（capability-gate.ts 联合判据消费、pi-host-binding.ts 声明 unsupported，无独立 wire 执行通道——缺失如实登记，不设计）。
+
+**演进政策三条**：① additive 面——新增可选字段/事件变体/方法/反向通道不 bump 版本，旧端忽略或 no-op 安全落空；新增须过门槛：消费方 + 降级路径 + 能力位绑定三件齐才进协议，无消费方不进协议。② 删除面——A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」；B 型机制替换/语义收窄同批切换合法（条件 = 对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major。③ major bump——core 支持区间平移 `[1,2)→[2,3)`，遗留清单届时清理。存量不搬家（搬家本身是删改），遗留清单 = idleTimeoutMs（明确错位）/ scene、description（弱错位待核）/ schemaEnv（待 H1b 收口，未收口）/ steer 执行通道缺失；**重审触发条件** = 遗留清单 >5 项或任一错位引发实际派发事故 → 提前清理裁决，不等 major。
+
+**未知成员宽容语义四行**（与编译期词表锁互补的运行时半边；词表头注与 engine-development-guide.md 引擎实装义务落地随之推进）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（逐变体 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 `engine_method_unsupported`（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 `{unsupported:true}`（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。配套机器锁 = **四张词表锁**（事件/方法/通道/能力位键集统一为常量 SSOT 派生或键集互锁，编译期红灯堵 schema enum 缺值与缺键 undefined 透传洞）。
+
+**minor 协商触发条件（任一命中重开裁决；条件不到不加协商位）**：① 出现本仓之外发布的引擎适配层（第三方作者或独立 npm 分发/版本节奏）；② 单宿主需同时挂载跨协议代差引擎且无法同批升级；③ 出现「需宿主确认才可启用」的运行时可变能力（能力位从静态 manifest 变动态协商的真实需求）。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
@@ -91,10 +110,16 @@ runtime 为 transport → services → infra 三层，组装在 index.ts 手动 
 ### ADR-0011（部分有效）builtin 扩展打包内置
 `@zhushanwen/pi-*` 扩展 esbuild bundle 后 staged 到 `apps/electron/resources/extensions/` 随应用打包，不走 npm 安装；清单 SSOT = `packages/shared/src/mandatory-extensions.json`。「随应用内置、版本随应用」核心决策延续（实现从源码拷贝演进为 bundle）。登记 C-build-02。
 
+### plan 模式重设计的决策承载（2026-09-18，显式裁决：不另立 ADR 编号条目）
+plan 模式重设计（GUI 投影 + skill 挂载 + 文档审阅闭环）的全部关键决策由 pi-ext ADR 家族（pi-ext-021 prompt-only readonly / pi-ext-022 session-manager state 等既有条目）与 `extensions/universal/plan/` 源码注释 + [CONTEXT.md](../CONTEXT.md) 的「计划模式 / plan-state entry / PLAN_REVIEW_MARKER / record 投影链」词条承载，不另立 ADR 编号条目。理由：决策密度已由设计期对抗式审查收敛，核心机制（marker select 通道 = Marker RPC 词条、投影链 = 既有 subagent/workflow 机制的参数化扩容）均复用已登记决策，新编号只增检索成本不增信息。本条目即「为何检索 plan 相关决策不到 ADR-XXXX 编号」的权威解释。
+
 ## 可靠性与看护
 
 ### ADR-0047 watchdog 用进程健康探测
 pi 卡死检测用「进程健康探测」（每 60s ping get_state）替代「事件静默时长」——静默 ≠ 卡死（ask_user 等待/慢工具都会静默），连续 2 次失败广播 WARN、3 次（180s）才 onSilentAbort。实装 `event-interpreter-ping.ts`（PingProbe）。与「runtime watchdog 滚动重启」（默认不武装，TAIJI_RUNTIME_WATCHDOG_ARMED）是两套机制。登记 C-comm-09。
+
+### ADR-0069 内存活性治理审计裁决（2026-09-14，维持不治为默认）
+全仓内存活性审计后的用户裁决：登记不治点位「维持不治」是默认，翻案需新实测压力数据（原审计文档 docs/design/memory-leak-remediation.md 已删除、git 可追溯，各点位量级锚与重审条件见其 §2.5；裁决注释已写入各源码处）。不治 8 项：sessionMetaCache / externalMetaCache / notRepoCache / usage-stats shards（语料有界）、pi-respawn 熔断计数（熔断语义优先）、clearedSessions tombstone（有意无界防迟到写）、executingBash 断连残留（两害相权残留更轻）、session-file-utils 32MB 全量读（协议合法载荷有硬上界）。已治理面：G2 活性无界组（openPiStreams close 摘除、ws-client sweepExpiredInFlightSubscribes 挂重连路径）与 G4 杂项组（prematureTimeoutIds/deferFlushFailureCounts 纳入 disposeSession、skill-registry projectWatchers LRU(8)、ImportSessionDialog close 清扫描结果、quota fetch body cancel）。系统性防护（纯加状态不接线清理打回）已并入 ADR-0049 checklist。
 
 ### ADR-0018 extension 安装临时目录
 Collection 安装先完整落 `tmp/ext-scan-{timestamp}/`（clone/cp + npm install），用户确认后拷入正式目录——取消/失败只清理临时目录，不污染 extensions/。
@@ -131,8 +156,8 @@ isOpen/activeTab/docked 三控制态经 useSessionScopedState 按 focusedSession
 ### ADR-0032 thinkingLevelMap key/value 语义
 key = UI 档位（含 max），value = 发 pi 的实际 level（max → xhigh）；可用档位按 key 判定，传 pi 必经 resolveThinkingValue 映射（pi 不认识 max 会 clamp）。实装 `core/domain/composer/thinking-levels.ts`。
 
-### ADR-0050 slash/skill 候选源按 variant 分支（panel skill 段权威 = taiji registry）
-skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），但 panel 态 slash 段过滤 skill 项——panel 的 skill 段是唯一 skill 入口（双入口消除；landing 单列形态不过滤）。用户可感知后果两条：①panel `/` 浮层 slash 段不再列 skill 项（skill 只经行中 `/` 的 skill 段入口）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
+### ADR-0050 slash/skill 候选源按 variant 分支（skill 段与 slash 段 skill 项均 = taiji registry）
+skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），panel 态 slash 段的 skill 项**换源保留**（0.10.1 首版「过滤 skill 项、panel 的 skill 段是唯一 skill 入口」的双入口消除二次修订推翻）：pi 真源 skill 命令（reload 才刷新的滞后快照）仍剔除，registry 源 skill 项以 `/skill:<name>` 形态补入（与 landing 单列形态同构、同一追加函数）。行首 `/` 与行中 `/` skill 段双入口共存——跨入口防双插由 selectedSkillNames 已选标记（S-2）承担，不依赖入口裁剪。用户可感知后果两条：①panel `/` 浮层 slash 段列 registry 源 skill 项（首版不列致行首 `/` 肌肉记忆下 session 发起后 skill 不可见，属回归）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
 
 ### ADR-0028 / ADR-0029 / ADR-0030（digest）搜索域内聚（0028/0029 部分有效）
 多源聚合（命令/文件/会话/recents）收敛于 `core/src/domain/new-task-search/`（search.ts 编排 + match-engine + file-match 单一管线复用于 composer # 与 SearchModal）；mock 反向依赖生产类型，生产类型归 domain types.ts。登记 C-state-07。
@@ -145,6 +170,15 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 
 ### ADR-0067 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
+
+### ADR-0070 scheduler widget 推送减频与帧双职责显式接管（2026-09-21 设计裁决）
+widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（稳定字段 id/name/schedule/kind/enabled/nextRunAt/locale 序列化对比，不变不推；维护不变量：指纹字段集 ⊇ widget 显示决定因素全集）。显示面**时间投影整体移除**（用户裁决全砍倒计时/时间投影）：widget 行文本只含任务名与静态调度描述，TUI 逾期标记、GUI status 逾期翻牌删除，TUI 最近任务选择按 nextRunAt 升序不用 now 过滤；连带清理 = widget 专用 i18n 词条 + widgetStatus 逾期分支（`formatRelativeTime` **保留**——`task.list`/`task.created`/`service.list` 命令层仍消费，`renderTaskLine` 拆分为 widget 静态变体 / 命令变体）；`task.list` 人侧渲染补执行状态摘要补偿失败可见性——widget 显示 = f(稳定字段, locale)，时间流逝不是状态变化，不得触发推送。widget 帧曾意外承载的两个隐藏职责显式接管：①**空闲保活心跳**（入站全帧 touch `lastActivityAt`，30s 帧掩护下 scheduler 会话永不 idle）→ 显式化为「有任务且距上次推送 >10min」的保活底线帧（方案不变量：保活间隔 ≪ idle 回收阈值 ≥3 倍余量；空任务不发——pi 清屏帧同样 touch 心跳，空任务保活 = 空会话永不回收）；②**reload 恢复时机**（现状靠 per-session ring 概率性回放，忙会话冲刷后失源）→ message-bus 中 `extension:widget`/`extension:widgetGui` 改登记 **state 类**（typeKey 载荷派生 per-widgetKey），重订阅经既有 stateSnapshot 段构造性恢复（清屏帧 gui:null 即 last-value；session 销毁随 bus.clearSession 清理；曾考虑 runtime 新建帧缓存 + sendInitialState 补发段，因与 stateSnapshot 重复建设且重连场景被 seqGate drop 而否决）。设计文档 `.tmp/tech-design/scheduler-widget-push.md`（过程产物），实施落点 = u1 extension 侧闭环（静态化+清理+跳推+保活，挂既有 onAfterTick）→ u2 runtime message-bus widget 帧 state 类化 → u3 回归面。
+
+### ADR-0072 pendingSend 分型清除锚点与 composer 发送布尔契约（2026-09-22 设计裁决，expectTurn 相关边界已由 ADR-0073 交付收敛）
+表单假忙修复的语义裁决：`isActive ≡ isGenerating ∨ pendingSend` 的 pendingSend 桥接清除收敛为**分型锚点**——form 通路 ui_response 送达（delivered=true）后仅 cancel 型（result===null：Esc/取消按钮）即时清除；提交型（result≠null）不清，桥接「respond 完成 → message_start」窗口由 turn 事件正常清除（无 turn 期待型经 ADR-0073 expectTurn 声明即时清除）；`requests-invalidated` 广播按 sid 清除（reclaimed/plan-aborted/turn-aborted/session-destroyed 四源）；30s timeout 纯兜底（可观测三要素：上界/自愈/warn——timeout 分支 warn 已去 dev 门（ADR-0073 U5），生产 attach 可见含 sid）。原登记已知边界「无 turn 提交型每提交必命中 30s 兜底 + 源元数据通路未打通（后续候选）」已由 ADR-0073 交付解决（scheduler 提交 91ms 即时清）；剩余常态命中面 = plain dialog 提交面已由通路级即时收尾解决（sendPiResponse 应答终局无条件清 pendingSend，生产者穷尽论证：command handler 源结构性无 turn / turn 内源 pendingSend 恒空；落地 98e2aa8b5）；已知失真登记：多步链悬挂期插发直发会被误清（构造上无从区分直发与命令链置位的 pendingSend）——实测 pi 命令 dispatch 即返（void run()），直发被并行处理、message_start 即时到达覆盖，无可见假闲窗口（2026-09-23 验收 O-5）；重审触发 = 用户报告误导操作（保留）。occ-idle 不可作锚的裁决维持（会破坏 ask-user 桥接制造 isActive=false 空窗）。composer 发送布尔契约：`send()` 返回 true = 已投递或输入已可见保留（直发失败乐观气泡亦 true），false = 输入未消费须恢复（仅 B 策略专用）；steer 三早退（空段 / 空白文本 / session 非活跃——非 busy：busy 时 steer 是合法投递路径）返回 false 并 warn（60 字符截断），主链三个 clearInput-first 落点（routeSteer/sendActiveMessage/sendLandingFirstMessage；onSteer 死代码防御对齐为同范式第四落点）统一「快照空 + hasInput 短路不变量」（快照非空失败走 restoreSegments 恢复）。设计文档 `.tmp/tech-design/form-hang-fix.md`（过程产物），实施 = U1 respond 分型锚点 + invalidated 清除 / U2 steer 输入保留三落点。
+
+### ADR-0073 expectTurn 源元数据通路与直发门终态通道（2026-09-22 设计裁决）
+表单提交型「是否有 turn 跟随」的判别权归扩展作者显式声明：`uiFormInteract` options 增 `expectTurn?: boolean`（缺省 true 全兼容存量），五段通路 = 声明（scheduler 命令路径传 `expectTurn:false`）→ marker select options JSON 携带 → event-adapter `tryTranslateFormSelect` 单点**条件落键**（仅显式 false 落键、undefined 省键；legacy 归一分支不透传——旧 npm 包结构上不可能携带）→ `ExtensionUIRequest` 加员（`toExtensionUIRequest` typeof 守卫）→ respond 分型严格双条件 `result≠null && expectTurn===false → clearPendingSend`（`=== false` 显式判定禁 truthy，undefined 走桥接 = fail-safe；双侧类型守卫把脏值挡在帧外走桥接）。效果：/schedule 提交即时收尾（真机 91ms/48ms 两轮实测，不再命中 30s 兜底）；ask-user/plan 桥接零改动。连带裁决：D4a——plain dialog 应答收尾锚点落壳层 transport `sendPiResponse`（**先于 delivered 检查**即 clearPendingSend，cancel/提交/断连三型应答终局统一收尾（ADR-0072 收口条目）；**两通路相位分叉属有意设计**——form 通路分型锚点在 delivered 之后（`useExtensionUI.respond` 未送达即 return，锚点不可达，未送达期间维持 busy），plain 恒清在 delivered 之前（「意图先于送达」），重审 = 两通路收尾语义统一化提案出现时整体重审，勿单独判其一为 bug；原 ui 队列落点结构性不可达 store，chat-view-deps 反向依赖禁令）；D5——timeout warn 去 dev 门（store timeout 分支恒发；该残余已由 renderer console 落盘管道解决（renderer-console-<date>.log，落地 4f85d2964/7dfe760bf；重开 = 用户 2026-09-22 裁决，30s 兜底 warn 生产可取证——warn/error 级经 main 侧 console-message 监听落盘，排障取 <dataDir>/logs/ 即得））；30s 兜底 timer 保留（语义收窄为真异常回收层）。已知边界：plain dialog 提交面（/permission 命令族）pi select API 无元数据通道、每次提交命中 30s 兜底的挂账已由通路级即时收尾解决（sendPiResponse 应答终局无条件清 pendingSend——pi select 无元数据位的缺口由通路默认值「无 turn 收尾」绕开，非交互形态迁移：CompanionBand → FormOverlay 方案已否（错层反例：用交互形态重构解决收尾语义缺陷）；论证与已知失真登记见 ADR-0072 收口条目）；/session-pick 系 tui 注册门源 RPC 模式不可触发。同批终态通道：composer 直发门读 ShellInputInstance expose 的 `getInputElement()`（禁回退 `$el`——dev 构建模板首注释使 `$el` 为注释节点、门恒 false 的 W1 F-1 教训，[HISTORICAL] 钉死于 command-popover-keyboard.ts）。实施 = form-submit-busy-convergence 七单元（43ca4df7b…0f1ac2dce）+ F-1 修复 3227df0bd；设计文档 `.tmp/tech-design/form-submit-busy-convergence.md`（过程产物）。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 

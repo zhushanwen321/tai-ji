@@ -22,6 +22,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@earendil-works/pi-tui": "^0.84.4",
     "@vitest/coverage-v8": "^4.1.9",
     "fast-check": "^4.9.0",
     "vitest": "^4.1.8"
@@ -33,11 +34,19 @@
     "vitest.config.ts"
   ],
   "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
       "optional": true
     },
     "typebox": {
@@ -45,8 +54,10 @@
     }
   },
   "dependencies": {
+    "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*",
     "croner": "^9.0.0"
   }
 }

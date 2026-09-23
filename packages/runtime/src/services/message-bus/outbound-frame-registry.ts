@@ -86,7 +86,10 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   整条丢弃 + error 日志（可观测），不登记。
 // - session.occupancy / session.state_changed / context.update / session.commands /
 //   session.subagents / session.workflowUpdate / session.stats_update / session.skillNotice /
-//   backgroundTask:updated / terminal.alive / terminal.exit / terminal.ack /
+//   session.planState（session-records.ts:545，PlanStateView = requirement 文本 + 产物文档/
+//   挂载技能小清单；requirement 有界前提由 plan extension 写/读两侧 64KB 封顶保障——
+//   extensions/universal/plan/src/state.ts capPlanRequirement）/ backgroundTask:updated /
+//   terminal.alive / terminal.exit / terminal.ack /
 //   subagent.directive：标量/小列表状态帧。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。

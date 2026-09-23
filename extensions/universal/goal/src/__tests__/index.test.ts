@@ -38,15 +38,13 @@ interface FactoryFixture {
 	ctx: ExtensionContext;
 	states: unknown[];
 	history: unknown[];
-	sendUser: unknown[];
 	commands: Record<string, { description?: string }>;
 }
 
-/** 工厂所需的最小 pi：registerCommand/registerTool/on/registerMessageRenderer + appendEntry/sendMessage/sendUserMessage */
+/** 工厂所需的最小 pi：registerCommand/registerTool/on/registerMessageRenderer + appendEntry/sendMessage */
 function makeFactoryFixture(): FactoryFixture {
 	const states: unknown[] = [];
 	const history: unknown[] = [];
-	const sendUser: unknown[] = [];
 	const commands: Record<string, { description?: string }> = {};
 	const pi = {
 		registerCommand: (name: string, opts: { description?: string }) => {
@@ -60,9 +58,6 @@ function makeFactoryFixture(): FactoryFixture {
 			else states.push(data);
 		},
 		sendMessage: () => {},
-		sendUserMessage(content: unknown): void {
-			sendUser.push(content);
-		},
 	} as unknown as ExtensionAPI;
 
 	const ctx = {
@@ -78,7 +73,7 @@ function makeFactoryFixture(): FactoryFixture {
 		sessionManager: { getEntries: () => [], getBranch: () => undefined },
 	} as unknown as ExtensionContext;
 
-	return { pi, ctx, states, history, sendUser, commands };
+	return { pi, ctx, states, history, commands };
 }
 
 // ── goalInit slot（NFR-AC-8 / T1.8）──────────────────
@@ -181,7 +176,6 @@ function makeE1Fixture(
 			appendFileSync(sessionFile, `${JSON.stringify({ type: "custom", customType, data })}\n`, "utf-8");
 		},
 		sendMessage: () => {},
-		sendUserMessage: () => {},
 	} as unknown as ExtensionAPI;
 
 	const ctx = {

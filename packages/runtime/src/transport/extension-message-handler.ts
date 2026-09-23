@@ -62,7 +62,19 @@ export class ExtensionMessageHandler {
 
   async handleExtensionMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     const handler = this.routes[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与内部 routes 表漂移（漏登记）时，
+    // 前端 pending Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[extension-handler] no case handler for type "${msg.type}" — handles/routes 表漂移？`)
+      const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+        typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined,
+      )
+    }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
     // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。
@@ -86,9 +98,23 @@ export class ExtensionMessageHandler {
       this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
       return this.ctx.sendError(ws, 'handler_error', `No active session for extension response: ${extSid}`, msg.id, { sessionId: extSid })
     }
-    client.sendExtensionUiResponse(requestId, extResult ?? null, method)
+    // M1/RT-1#4：sendRaw 返 false（pi 进程不在/已退出或 stdin 写失败）时该应答已无法
+    // 送达——rpc client 绑定当前进程，pi 重启后是全新 pending 表、旧 requestId 永不可
+    // 投递，runtime 侧没有重投通道，故选「立即终结」而非保留 pending：摘跟踪 + 带码
+    // error envelope 上行（无 msg.id 的 fire-and-forget，renderer 经 route-inbound D6b
+    // onSessionError 兜底进消息流 + toast，用户作答不再石沉大海）。
+    const delivered = client.sendExtensionUiResponse(requestId, extResult ?? null, method)
     this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
     this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+    if (!delivered) {
+      return this.ctx.sendError(
+        ws,
+        'extension_response_send_failed',
+        `Extension response for request ${requestId} was not delivered to pi (process not running or stdin write failed)`,
+        msg.id,
+        { sessionId: extSid, hint: '回复未送达 pi（进程不在或写入失败），该请求已终结；请检查会话状态后重试操作。' },
+      )
+    }
     return
   }
 
@@ -187,7 +213,17 @@ export class ExtensionMessageHandler {
       if (typeof tempDir !== 'string' || !Array.isArray(selected)) {
         return this.ctx.sendError(ws, 'invalid_payload', 'extension.finishInstall requires tempDir (string) and selected (string[])', msg.id)
       }
-      await ext.finishInstall(tempDir, selected)
+      const failures = await ext.finishInstall(tempDir, selected)
+      if (failures.length > 0) {
+        // RT-6#1 逐包隔离失败聚合上报：成功包已落盘（列表随刷新可见），失败清单经
+        // ExtensionInstallError 透传（code/hint），前端 catch 显示——不吞失败回假成功。
+        const names = failures.map((f) => f.dirName).join(', ')
+        throw new ExtensionInstallError(
+          'finish_partial_failed',
+          `Failed to install extension(s): ${names}`,
+          '部分扩展安装失败，已成功的扩展已保留、失败扩展的旧版本不受影响，可重试安装。',
+        )
+      }
       const extensions = await ext.scanExtensions()
       return this.ctx.reply(ws, msg.id, 'config.extensions', { extensions })
     } catch (e) {

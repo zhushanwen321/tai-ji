@@ -57,6 +57,16 @@ export function errorWithCode(message: string, code: string | number): Error & {
 export const MODEL_NOT_CONFIGURED = 'MODEL_NOT_CONFIGURED'
 
 /**
+ * session 无活跃 pi 进程时的状态变更类 RPC 错误码（code-harden RT-4#4）。
+ *
+ * 触发面：switchModel / setThinkingLevel 落在回收或崩溃窗口（session 条目还在、pi 进程
+ * 已不在进程表）。语义 = fail-fast 拒绝而非降级假成功：transport server.ts 的全局 catch
+ * 透传 `.code` + `details.sessionId`（L4 增强，与 MODEL_NOT_CONFIGURED 同通路），前端展示
+ * 错误消息，用户重开 session 后重试。恢复动作内嵌在错误消息（「重开后可重试」）。
+ */
+export const SESSION_NOT_ACTIVE = 'SESSION_NOT_ACTIVE'
+
+/**
  * packaged 模式 builtin extensions staged 目录缺失（electron-build R3-S1）。
  * extension-resolver 的打包产物断链 fail-fast throw 携带此 code，供 facade
  * （session-service.getExtensionPaths）区分「不可降级」错误 rethrow 贯通 fail-fast

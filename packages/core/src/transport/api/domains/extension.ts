@@ -131,6 +131,23 @@ export interface ExtensionUIRequest {
   askUser?: boolean
   askUserQuestions?: unknown[]  // AskUserQuestion[]，前端用类型守卫收窄
   allowCancel?: boolean
+  // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在，
+  // runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select）
+  scheduleCreate?: boolean
+  scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
+  // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+  // runtime event-adapter 翻译 UI_FORM_MARKER select，前端 FormOverlay 渲染类型化问题集）
+  form?: true
+  formQuestions?: unknown[]  // FormQuestion[]（@zhushanwen/extension-protocol），前端守卫收窄
+  // 源元数据：本次表单提交后是否有 turn 预期（respond 分型判据，form-submit-busy-convergence D1 段 4/5）。
+  // 来源契约 = @zhushanwen/extension-protocol uiFormInteract options 的同名字段（A-1 加员）；
+  // core 不依赖 extension-protocol，本地同形声明（同上方 scheduleDraft/formQuestions 注释惯例），
+  // 帧上值由 runtime event-adapter tryTranslateFormSelect 条件落键（仅显式 false 落键，undefined 省键）。
+  // 三态语义（D2）：`true | undefined` = 有 turn 预期——提交型桥接 message_start 照旧
+  //（undefined 为存量扩展缺省态，桥接 = 现状，方向安全）；`false` = 无 turn 预期——命令
+  // handler 内 select（提交后结构性无 turn），respond 侧提交即收尾。消费方判定必须
+  // `=== false` 显式判定：truthy 简化（`!expectTurn`）会把 undefined 也当无 turn、误清桥接。
+  expectTurn?: boolean
   /** 请求入队时刻（ms，由 useExtensionUI 在 push 时打戳）。用于倒计时基准 */
   receivedAt?: number
 }
@@ -171,9 +188,13 @@ export function onNotify(sessionId: string, handler: (payload: { message: string
  *
  * method 必须透传：runtime 按 method 构建正确的 pi response 格式（pi 鸭子类型字段检测，
  * 发错字段静默返回默认值）。
+ *
+ * 返回 boolean（透传 ws-client.send：false = WS 非 OPEN 未送出）。应答承载用户决策，
+ * 调用方见 false 必须保留本地请求并提示可重发（M1/RD-3#1——此前 :void 吞掉 false，
+ * 断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂）。
  */
-export function sendExtensionUIResponse(sessionId: string, requestId: string, method: ExtensionInteractMethod, result: boolean | string | null): void {
-  send({
+export function sendExtensionUIResponse(sessionId: string, requestId: string, method: ExtensionInteractMethod, result: boolean | string | null): boolean {
+  return send({
     type: 'extension.ui_response',
     payload: { sessionId, requestId, method, result },
   })

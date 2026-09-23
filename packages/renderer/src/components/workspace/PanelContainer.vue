@@ -38,6 +38,8 @@
       @open-git="openDrawerTab('git')"
       @toggle-drawer="toggleDrawer()"
     />
+    <!-- plan 模式状态带（PlanModeBar）与审批条已随 plan-mode-ux-refactor u-plan-bar 收敛到
+         Panel 内 composer 下方一行（设计 §3.3 D1），本容器不再挂载。 -->
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
@@ -139,6 +141,11 @@
           <BackgroundTaskDetailPanel
             v-else-if="drawerTab === 'bashTask' && bashTaskSelected"
           />
+          <!-- plan tab（plan 模式重设计 u1-drawer-tab + u1-docs-panel）：无条件注入（tab 激活
+               即渲染，不经空态 fallback——与 bashTask 的「未选中不注入」相反）。u1-docs-panel
+               起由 PlanDocsPanel 承载（L2 文档 tab + file.read 正文 + 划选评论），面板内部
+               docs 空时自渲染空态（D10），替代 u1-drawer-tab 的过渡空骨架。 -->
+          <PlanDocsPanel v-else-if="drawerTab === 'plan'" :session-id="panelSessionId" />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -182,9 +189,11 @@ import { useSessionDerivations } from '@/composables/features/chat/useSessionDer
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth } from '@/composables/features/drawer/useDrawerSplitWidth'
+import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
+import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
@@ -286,6 +295,12 @@ function statusOf(l: PanelLeaf) {
  *  值等价）。 */
 bindDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSessionId))
 const { isOpen: drawerOpen, activeTab: drawerTab, docked: drawerDocked } = useDrawerControl()
+
+// drawer「计划产物」tab 自动打开接线（plan 模式重设计 u1-drawer-tab）：plan 激活/首份产物
+// 边界经 ADR-0053 pendingOpen 语义打开 drawer（消费源 = planStore 焦点分区；focusedSid
+// 的注入方自 u-plan-bar 起为 Panel 内 PlanModeBar 的 setup——本容器与 PlanModeBar 共享
+// 同一 pinia store 单例，接线读焦点分区不依赖注入宿主同层）。
+usePlanDrawerSync()
 
 /** bashTask tab 选中态（D5①：selectedBackgroundTaskId undefined=未选中 → 不注入本面板，
  *  DrawerPanel 空态 fallback 承载；core per-session 分区直读，写入方 = 列表 item 点击 D5④） */

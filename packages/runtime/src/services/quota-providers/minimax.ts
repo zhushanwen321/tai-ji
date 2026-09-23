@@ -38,14 +38,35 @@ interface MinimaxApiResponse {
 
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（base_resp.status_code 判定、
- * model_remains 数组迭代）。字段缺失是合法业务态（→ no-subscription），
- * 字段类型漂移归 parse（防 `base_resp: "err"` 等形态在 string 上取属性静默走错分支）。
+ * model_remains 数组迭代）。字段缺失是合法业务态（→ no-subscription / 该窗口不可知），
+ * 字段类型漂移归 parse（RT-7#5：guard 收到字段级——防 `base_resp: "err"` 等形态在
+ * string 上取属性静默走错分支、防字符串数值被 Number() 静默接受）。
  */
 function isMinimaxResponse(v: unknown): v is MinimaxApiResponse {
   if (!isRecord(v)) return false
   const o = v
-  if (o.base_resp !== undefined && (typeof o.base_resp !== 'object' || o.base_resp === null)) return false
-  if (o.model_remains !== undefined && !Array.isArray(o.model_remains)) return false
+  if (o.base_resp !== undefined) {
+    if (!isRecord(o.base_resp)) return false
+    if (o.base_resp.status_code !== undefined && typeof o.base_resp.status_code !== 'number') return false
+  }
+  if (o.model_remains !== undefined) {
+    if (!Array.isArray(o.model_remains)) return false
+    for (const m of o.model_remains) {
+      if (!isRecord(m)) return false
+      if (m.model_name !== undefined && typeof m.model_name !== 'string') return false
+      const numericFields = [
+        'current_interval_remaining_percent',
+        'current_interval_status',
+        'remains_time',
+        'current_weekly_remaining_percent',
+        'current_weekly_status',
+        'weekly_remains_time',
+      ] as const
+      for (const field of numericFields) {
+        if (m[field] !== undefined && typeof m[field] !== 'number') return false
+      }
+    }
+  }
   return true
 }
 
@@ -54,16 +75,18 @@ const isActive = (s: number | undefined): boolean => s === 1
 
 /**
  * 把 API 的"剩余百分比"反转为"已用百分比"，并判断是否无限。
+ * RT-7#5：remainingPercent 缺失（平台未提供该窗口数据）→ pct=null（不可知，前端整行
+ * 隐藏），resetSec 仍按 remainsMs 输出——原 `Number(x ?? 0)` 折叠会产 pct=100 假耗尽。
  */
 function toWindow(
   remainingPercent: number | undefined,
   status: number | undefined,
   remainsMs: number | undefined,
 ): { pct: number | null; resetSec: number | null } {
-  if (!isActive(status)) return INFINITE_WIN
-  const rem = Number(remainingPercent ?? 0)
-  const used = Math.max(0, Math.min(PERCENT_SCALE, PERCENT_SCALE - rem))
   const resetSec = remainsMs && remainsMs > 0 ? Math.ceil(remainsMs / MS_PER_SEC) : null
+  if (!isActive(status)) return INFINITE_WIN
+  if (remainingPercent === undefined) return { pct: null, resetSec }
+  const used = Math.max(0, Math.min(PERCENT_SCALE, PERCENT_SCALE - remainingPercent))
   return { pct: used, resetSec }
 }
 

@@ -370,7 +370,9 @@ export function initExtensionHostBridge(app: App): void {
     getContributions: (pluginId) =>
       toContributionInfos(contributions.getContributions({ pluginId }), mountPoints),
   })
-  // CompanionBand 数据源：bus 'ui-request' 适配（无 sid 跳过 / askUser 过滤）+ 回传双通道（FR2/FR7）
+  // CompanionBand 数据源：bus 'ui-request' 适配（无 sid 跳过 / C4 分流：form ∨ legacy
+  // askUser ∨ scheduleCreate ∨ planReview 四键排除——form 类与审批请求各归 FormOverlay /
+  // PlanReviewBar，CompanionBand 只收简单 dialog）+ 回传双通道（FR2/FR7）
   app.provide(DIALOG_REQUEST_SOURCE_KEY, createDialogRequestSource(bus))
   app.provide(UI_RESPONSE_TRANSPORT_KEY, createUiResponseTransport())
 

@@ -18,11 +18,13 @@
 import { watch, type FSWatcher } from 'chokidar'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import type { SkillCacheScope, SkillInfo } from '@taiji/shared'
 import { resolveGlobalSkillDirs, resolveProjectSkillDirs } from './skill-dirs.js'
 import type { DirScopes } from './skill-dir-config.js'
 import type { IConfigStore } from './ports/config.js'
+import { expandHome } from '../utils/path-utils.js'
+import { warnOnce } from '../utils/warn-once.js'
 
 /**
  * skill 扫描函数签名：给定 projectRoot（项目根 / cwd），返回该根下解析出的 skill 列表。
@@ -325,10 +327,44 @@ export class SkillRegistry {
   }
 
   /**
+   * 用户显式配置的 skill 目录（discovery globalPaths/projectPaths）不存在时 warn-once
+   * （RT-8#11）：配置目录失效 = 该目录下全部 skill 从未加载且不可监听，「防线从未生效」
+   * 必须可观测。强制推导目录（.taiji/skills、<configDir>/skills 等）不存在是常态，
+   * 刻意不 warn（否则每个无 skill 的项目都产生噪音日志）。
+   *
+   * @param cwd 项目根（project scope 的相对路径 resolve 基准）；undefined = 只查 global scope
+   */
+  private warnMissingConfiguredSkillDirs(cwd?: string): void {
+    const scopes = this.options.configStore.getSkillPathScopes()
+    const globalMissing = scopes.globalPaths
+      .map(d => expandHome(d))
+      .filter(d => !existsSync(d))
+    for (const dir of globalMissing) {
+      warnOnce(
+        `skill-config-dir:${dir}`,
+        `[skill-registry] 配置的全局 skill 目录不存在，该目录下的 skill 不会被加载/监听: ${dir}。` +
+          '恢复动作：在设置中修正该路径，或创建目录',
+      )
+    }
+    if (cwd === undefined) return
+    const projectMissing = scopes.projectPaths
+      .map(d => (isAbsolute(d) ? d : resolve(cwd, d)))
+      .filter(d => !existsSync(d))
+    for (const dir of projectMissing) {
+      warnOnce(
+        `skill-config-dir:${dir}`,
+        `[skill-registry] 配置的项目 skill 目录不存在，该目录下的 skill 不会被加载/监听: ${dir}。` +
+          '恢复动作：在设置中修正该路径，或创建目录',
+      )
+    }
+  }
+
+  /**
    * 挂全局 watcher（initGlobal 启动期 + rebuildGlobal 重建共用）。
    * watch 范围 = scan 范围（SSOT）：只 watch 实际存在的全局 skill 目录。
    */
   private setupGlobalWatcher(): void {
+    this.warnMissingConfiguredSkillDirs()
     const dirs = resolveGlobalSkillDirs(this.options.configStore, this.options.configDir).filter(d => existsSync(d))
     if (dirs.length === 0) return
     // 幂等防护：若已存在 globalWatcher（重试/重建），先 close 旧的避免泄漏。
@@ -410,6 +446,7 @@ export class SkillRegistry {
     if (cached) {
       // W3：补查首次扫描时不存在、后来用户创建的 skill 目录。检测到则异步补挂 watcher + 重扫缓存，
       // 不阻塞当前返回（返回缓存旧值），重扫完成后 notifyProjectChange 通知上游刷新。
+      this.warnMissingConfiguredSkillDirs(cwd)
       const dirs = resolveProjectSkillDirs(cwd, this.options.configStore).filter(d => existsSync(d))
       const existingWatcher = this.projectWatchers.get(cwd)
       // [G4] 缓存命中刷新 watcher recency（活跃 cwd 不被后续新 cwd 挤出 LRU）
@@ -434,6 +471,7 @@ export class SkillRegistry {
       // （.taiji/skills、discovery 相对路径 resolve 后），不递归 watch 整个 cwd。
       // 原实现 watch 整个 cwd → cwd 为 home 目录时 chokidar 递归 watch 几十万文件 → EMFILE fd 耗尽
       // → pi spawn EBADF → 发消息/读历史全挂 + runtime 崩溃（2026-07-22 事故根因）。
+      this.warnMissingConfiguredSkillDirs(cwd)
       const dirs = resolveProjectSkillDirs(cwd, this.options.configStore).filter(d => existsSync(d))
       if (dirs.length > 0) {
         this.setupProjectWatcher(cwd, dirs)

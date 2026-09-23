@@ -101,6 +101,8 @@ export function createMockSessionServiceInstance(options: SessionServiceMockOpti
     // D6a：server.setServices 装配时注册挂起 UI 请求汇聚清理（onSessionDestroyed 回调），
     // mock 缺此方法会在 setServices 内抛 TypeError。
     setOnSessionDestroyed: vi.fn(),
+    // MF-1-7：abortPlan 编排下沉的失效回调注册槽（setServices 同点注册，同上缺法即 TypeError）。
+    setOnPlanAborted: vi.fn(),
   }
 
   return { instance, sendMessageMock }
@@ -137,6 +139,8 @@ export function createMockSessionServiceClass(options: SessionServiceMockOptions
     // D6a：server.setServices 装配时注册挂起 UI 请求汇聚清理（onSessionDestroyed 回调），
     // mock 缺此方法会在 setServices 内抛 TypeError。
     setOnSessionDestroyed = vi.fn()
+    // MF-1-7：abortPlan 编排下沉的失效回调注册槽（setServices 同点注册，同上缺法即 TypeError）。
+    setOnPlanAborted = vi.fn()
   }
 }
 
@@ -149,7 +153,9 @@ export function createMockConfigServiceClass() {
     setProvider = vi.fn()
     deleteProvider = vi.fn().mockReturnValue({ removed: true })
     getProvider = vi.fn().mockReturnValue(undefined)
-    updateToolPermissions = vi.fn()
+    isModelsStoreCorrupted = vi.fn().mockReturnValue(false)
+    // M4/RT-7#1：updateToolPermissions 返回 {ok}（config.json 损坏降级态拒绝覆写）
+    updateToolPermissions = vi.fn().mockReturnValue({ ok: true })
     loadSkills = vi.fn().mockReturnValue([])
     saveSkills = vi.fn()
     loadAgents = vi.fn().mockReturnValue([])

@@ -11,6 +11,18 @@ export interface InstallerError {
   message: string
 }
 
+/**
+ * installDeps 失败清单条目（RT-8#4 失败聚合；infra 的 DepsInstallFailure 实现此形状）。
+ * 只收两类失败：package.json 解析失败（name='package.json'）与单个依赖安装失败；
+ * 「无 package.json」是合法 no-op → 空清单，不是失败类。
+ */
+export interface DepsInstallFailure {
+  /** 依赖名；package.json 解析失败时为 'package.json' */
+  name: string
+  /** 失败原因（归一化后的消息） */
+  error: string
+}
+
 /** 扩展发现来源（按优先级降序） */
 export type ExtensionSource = 'npm' | 'user' | 'discovery' | 'settings' | 'third-party' | 'bundled'
 
@@ -36,8 +48,10 @@ export interface IInstaller {
   installNpm(pkgName: string, nodeModulesDir: string, opts?: { timeout?: number }): Promise<void>
   /** npm uninstall 一个包。 */
   uninstallNpm(name: string, nodeModulesDir: string): Promise<void>
-  /** 在指定目录执行 npm install（装 dependencies，用于 git clone 后的仓库）。 */
-  installDeps(dir: string): Promise<void>
+  /** 在指定目录执行 npm install（装 dependencies，用于 git clone 后的仓库）。
+   *  返回失败清单（RT-8#4：解析失败 + 依赖失败两类；「无 package.json」→ 空清单），
+   *  调用方据 failed 非空裁决失败，不得按成功登记。 */
+  installDeps(dir: string): Promise<{ failed: DepsInstallFailure[] }>
   /** git clone --depth 1 一个仓库到目标目录。失败抛 Error。 */
   installGit(url: string, destDir: string, timeout?: number): Promise<void>
   /** 从 npm registry 获取包的 latest 版本号。失败抛 InstallerError 形状的错误。

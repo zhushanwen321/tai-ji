@@ -138,7 +138,7 @@ interface PiStreamState {
 const openPiStreams = new Set<PiStreamState>()
 
 /**
- * G2 活性无界治理（docs/design/memory-leak-remediation.md §3.4）：流确认 close 后从
+ * G2 活性无界治理（ADR-0069；原文档已删除 git 可追溯）：流确认 close 后从
  * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / relay subagent /
  * crash log）各注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
  * Set 随工作流强度无界增长（~0.5-2KB/条，两组审计独立发现）。摘除条件三合一（全满足才删）：

@@ -1,5 +1,5 @@
 /**
- * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13）。
+ * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
@@ -18,14 +18,15 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { computed, defineComponent, h, reactive } from 'vue'
+import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
+import { useSessionStore } from '@/stores/session'
 import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
-import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：bash 分区状态根（直接 mutate 模拟 list reply / 广播）──
 let partitionState: { tasks: BackgroundTaskEntry[]; loaded: boolean; corrupted: boolean; fetchFailed: boolean }
@@ -39,8 +40,9 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
 
 // ── mock：首拉 RPC（subagent/workflow 列表）──
 const apiMocks = vi.hoisted(() => ({
-  getSubagents: vi.fn<(sessionId: string) => Promise<SubagentRecord[]>>(),
-  getWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunRecord[]>>(),
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
+  getWorkflows: vi.fn<(sessionId: string) => Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }>>(),
 }))
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
@@ -117,8 +119,8 @@ function data(): UseTrayCountsReturn {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  apiMocks.getSubagents.mockResolvedValue([])
-  apiMocks.getWorkflows.mockResolvedValue([])
+  apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
+  apiMocks.getWorkflows.mockResolvedValue({ workflows: [], oversize: false })
   // reactive 容器：bash 分区面的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
   partitionState = reactive({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })
   tray = undefined
@@ -199,20 +201,106 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
 
   it('计数随 session 分区切换（各 session 独立，不串台）', async () => {
     // 首拉 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
-    apiMocks.getSubagents.mockImplementation(async (sid: string) =>
-      sid === SID2
-        ? [
-            makeSubagent({ subagentId: 'b-1', status: 'idle' }),
-            makeSubagent({ subagentId: 'b-2', status: 'idle' }),
-          ]
-        : [makeSubagent({ subagentId: 'a-1', status: 'running' })],
-    )
+    apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
+      subagents:
+        sid === SID2
+          ? [
+              makeSubagent({ subagentId: 'b-1', status: 'idle' }),
+              makeSubagent({ subagentId: 'b-2', status: 'idle' }),
+            ]
+          : [makeSubagent({ subagentId: 'a-1', status: 'running' })],
+      oversize: false,
+    }))
     const wrapper = mountHarness(SID)
     await vi.waitFor(() => expect(data().counts.value.subagent.running).toBe(1))
 
     await wrapper.setProps({ sessionId: SID2 })
     await vi.waitFor(() => expect(data().counts.value.subagent.total).toBe(2))
     expect(data().counts.value.subagent).toEqual({ running: 0, ended: 2, total: 2 })
+  })
+})
+
+/** 子会话 fixture（u7：session kind 数据源 = renderer session store 的 SessionSummary） */
+function makeChild(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
+  return {
+    label: '子会话',
+    cwd: '/Users/dev/Code/work-project',
+    status: 'idle',
+    lastActiveAt: FIXED_NOW,
+    modelId: 'Anthropic/claude-sonnet-4.5',
+    tokenCount: 0,
+    spawnSource: 'agent',
+    parentAgentSessionId: SID,
+    ...overrides,
+  }
+}
+
+describe('useTrayCounts session kind（第 4 件子会话，u7 / 设计 mode-system-composer-density §6.7 D7）', () => {
+  it('仅计 parentAgentSessionId === 当前 sessionId：父为 null 的根会话 / 别人（SID2）的子会话都不计入', () => {
+    useSessionStore().applySnapshot({
+      groups: [
+        {
+          cwd: '/w',
+          sessions: [
+            makeChild({ id: 'c-mine', parentAgentSessionId: SID, status: 'active' }),
+            makeChild({ id: 'c-other', parentAgentSessionId: SID2, status: 'active' }),
+            makeChild({ id: 'c-root', parentAgentSessionId: undefined, status: 'active' }),
+          ],
+        },
+      ],
+    })
+    mountHarness(SID)
+
+    expect(data().counts.value.session).toEqual({ running: 1, ended: 0, total: 1 })
+    expect(data().lists.session.children.value.map((c) => c.id)).toEqual(['c-mine'])
+  })
+
+  it('运行中计数口径 = SessionSummary.status === \'active\'；状态翻转后计数跟随（运行中 → 完成）', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.applySnapshot({
+      groups: [
+        {
+          cwd: '/w',
+          sessions: [
+            makeChild({ id: 'c-run', status: 'active' }),
+            makeChild({ id: 'c-done', status: 'done' }),
+            makeChild({ id: 'c-err', status: 'error' }),
+          ],
+        },
+      ],
+    })
+    mountHarness(SID)
+    expect(data().counts.value.session).toEqual({ running: 1, ended: 2, total: 3 })
+
+    // 子会话结束（active → done）：运行中归零，已结束 +1（同一 store，响应式重算）
+    sessionStore.applySnapshot('c-run', { status: 'done' })
+    await nextTick()
+    expect(data().counts.value.session).toEqual({ running: 0, ended: 3, total: 3 })
+  })
+
+  it('行集按 lastActiveAt 倒序（最近在前；面板行序 = 数据面行序）', () => {
+    useSessionStore().applySnapshot({
+      groups: [
+        {
+          cwd: '/w',
+          sessions: [
+            makeChild({ id: 'c-old', lastActiveAt: FIXED_NOW - 60_000 }),
+            makeChild({ id: 'c-new', lastActiveAt: FIXED_NOW - 1_000 }),
+          ],
+        },
+      ],
+    })
+    mountHarness(SID)
+    expect(data().lists.session.children.value.map((c) => c.id)).toEqual(['c-new', 'c-old'])
+  })
+
+  it('无 session（null sid）→ session 计数归零（不读全表）', () => {
+    useSessionStore().applySnapshot({
+      groups: [{ cwd: '/w', sessions: [makeChild({ id: 'c-mine', status: 'active' })] }],
+    })
+    const wrapper = mountHarness('')
+    expect(data().counts.value.session).toEqual({ running: 0, ended: 0, total: 0 })
+    wrapper.unmount()
   })
 })
 

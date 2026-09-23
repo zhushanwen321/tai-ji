@@ -93,6 +93,9 @@ describe('UsageStatsService 流级容错（设计 §3.3 D3）', () => {
     expect(first.rows).toEqual([])
     expect(first.skippedLines).toBe(0)
     expect(first.sessionCount).toBe(1)
+    // RT-8#12：读流失败的文件计入 failedFiles——聚合偏低显形（「不含 N 个会话文件」），
+    // 与「该 session 无用量」区分
+    expect(first.failedFiles).toBe(1)
 
     // 断言③：分片键保留——文件未变更（mtime/size 不变）时第二次 getStats 直接复用
     // 空分片，不再触发 createReadStream（不重读语义，按实现注释断言）
@@ -101,6 +104,8 @@ describe('UsageStatsService 流级容错（设计 §3.3 D3）', () => {
     expect(second.rows).toEqual([])
     expect(second.skippedLines).toBe(0)
     expect(second.sessionCount).toBe(1)
+    // 失败分片被 (mtime,size) 缓存：文件未变更期间重扫仍计入 failedFiles
+    expect(second.failedFiles).toBe(1)
   })
 
   it('多文件场景：单个文件流失败不打断聚合，其余文件正常计入', async () => {
@@ -130,6 +135,8 @@ describe('UsageStatsService 流级容错（设计 §3.3 D3）', () => {
     expect(result.rows).toHaveLength(1)
     expect(result.rows[0]).toMatchObject({ provider: 'test-provider', input: 30 })
     expect(result.skippedLines).toBe(0)
+    // RT-8#12：仅坏文件进 failedFiles（好文件不误计）
+    expect(result.failedFiles).toBe(1)
   })
 
   it('行级内容损坏：JSON 解析失败行计入 skippedLines，不降级整文件', async () => {

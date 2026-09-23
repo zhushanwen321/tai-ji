@@ -277,8 +277,17 @@ jobs:
       # mirror 内复制守卫副本运行、pi-ai 走 node_modules symlink，不依赖 staged 产物）。
       # G5 注释 docs 引用守卫同批追加 check-doc-symbol-drift（纯函数 + tmpdir fixture +
       # 真实仓库 tracked .md 名字集只读断言，不依赖 staged 产物，同上 fixture 惯例）。
+      # guide-contract-projection 守卫测试同批追加（R1 评审：守卫已接线 pre-commit 而自身
+      # 无测试，tmp mirror × spawnSync 同 check-thinking-levels 惯例，不依赖 staged 产物）。
+      # infra-services-import 守卫测试同批追加（R1 评审 MF-1-15：.githooks py 守卫已接线
+      # pre-commit 而无测试，tmp mirror × spawnSync python3 同族惯例，不依赖 staged 产物）。
+      # scheduler e2e 判定器单测同批追加（MF-1-13：判定器自错 = e2e 假绿/假红不可辨，
+      # 纯函数族抽至 scripts/lib/scheduler-e2e-judgers.cjs 直测，不依赖 staged 产物）。
+      # render-sampling 管道判定层单测同批追加（MF-1-22：复用管道判定逻辑出错 = 静默
+      # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
+      # 同一函数体，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -332,7 +341,7 @@ jobs:
           retention-days: 7
 
   # E2E 行为轨 P0 smoke（mock 轨 electron-smoke project，2026-09-15 L1 层接线）：每 PR 固定跑
-  # 9 条 @p0-smoke 用例（_electron.launch + VITE_MOCK mock 构建产物，零 token / 零凭证 / 不 spawn pi）。
+  # 10 条 @p0-smoke 用例（_electron.launch + VITE_MOCK mock 构建产物，零 token / 零凭证 / 不 spawn pi）。
   # 与 e2e-visual 的两个关键差异：① install 不设 ELECTRON_SKIP_BINARY_DOWNLOAD（_electron.launch
   # 需要 node_modules/electron 真实二进制）；② 不设 E2E_VISUAL_ONLY（globalSetup 检出产物缺失时自动
   # 跑 build:e2e，VITE_E2E/VITE_MOCK env 由 globalSetup 内部注入，不在本 YAML 复刻）。runner 用
@@ -613,6 +622,15 @@ jobs:
       # 一律 if ! VAR=$(cmd) 形态（诊断可见、失败分支可达）。
       - name: Hook script antipattern guard (G3)
         run: python3 .githooks/check_hook_exitcode_antipattern.py
+
+      # review-fix-loop 双实现锁步守卫：pi 内置版（packages/subagent-core/workflows/）与
+      # zcode 原生版（~/.zcode/workflows/*.dwf.ts，版本控制外）必须保持调度/常量一致。
+      # CI 环境无 zcode 副本，双实现对账自动跳过；但 pi 侧去重不变量（order 恒为输入
+      # 的排列）与结构标记在跳过判定之前照跑且失败不被吞——这是本仓库侧唯一防线：
+      # pre-commit 只在 staged paths 命中 review-fix-loop* 时触发，本步骤每次 CI 都覆盖。
+      # 接线口径与 install-hooks.sh 的 2g 段一致（同一脚本、同一判定）。
+      - name: review-fix-loop dual-implementation parity guard
+        run: node scripts/check-rfl-parity.mjs
 
   # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
   # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。

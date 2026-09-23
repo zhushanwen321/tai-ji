@@ -9,8 +9,9 @@
  *
  * 测试框架：vitest（从 vitest 导入），运行：npx vitest run，禁止 node:test。
  */
-import { describe, it, expect } from 'vitest'
-import { mapSessionEntries } from '../session-entry-mapper.js'
+import { describe, it, expect, vi } from 'vitest'
+import { applyEntryEndTimes, mapSessionEntries } from '../session-entry-mapper.js'
+import type { Message } from '@taiji/shared'
 import type {
   PiSessionEntry,
   PiSessionMessageEntry,
@@ -226,16 +227,115 @@ describe('TC4 畸形 data 降级', () => {
     expect(customDataEntries).toHaveLength(1)
   })
 
-  it('compaction 缺 timestamp → 兜底 Date.now()，不抛错', () => {
+  it('RT-3#6：compaction 缺 timestamp → 省略 timestamp 字段（不伪造时刻），warn 计数', () => {
     const malformed = [
       { type: 'compaction', id: 'e1', parentId: null, summary: 's', firstKeptEntryId: 'k', tokensBefore: 1 },
     ] as unknown as PiSessionEntry[]
 
-    const before = Date.now()
-    const { messages } = mapSessionEntries(malformed)
-    const ts = (messages[0] as { timestamp: number }).timestamp
-    const after = Date.now()
-    expect(ts).toBeGreaterThanOrEqual(before)
-    expect(ts).toBeLessThanOrEqual(after)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { messages } = mapSessionEntries(malformed)
+      // 旧兜底 Date.now() 已禁（伪造原始时刻不可追溯）：字段省略，消费侧 lift 单点兜底
+      expect('timestamp' in (messages[0] as Record<string, unknown>)).toBe(false)
+      expect(warnSpy.mock.calls.some(c => String(c[0]).includes('missing or malformed timestamp'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('RT-3#6：畸形 timestamp（不可解析串）→ 省略字段（NaN 不入产物，不抛错）', () => {
+    const malformed = [
+      { type: 'branch_summary', id: 'e1', parentId: null, timestamp: 'not-a-date', fromId: 'f', summary: 's' },
+      { type: 'custom_message', id: 'e2', parentId: null, timestamp: '2026-13-45T99:99:99Z', customType: 't', content: 'c' },
+    ] as unknown as PiSessionEntry[]
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { messages } = mapSessionEntries(malformed)
+      expect('timestamp' in (messages[0] as Record<string, unknown>)).toBe(false)
+      expect('timestamp' in (messages[1] as Record<string, unknown>)).toBe(false)
+      const warn = warnSpy.mock.calls.map(c => String(c[0])).find(m => m.includes('mapSessionEntries'))
+      expect(warn).toBeDefined()
+      expect(warn).toContain('2 entry/entries')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('RT-3#6：合法 timestamp 正常产出（正向对照，字段仍在）', () => {
+    const { messages } = mapSessionEntries([compactionEntry('e-ok')])
+    expect((messages[0] as { timestamp: number }).timestamp).toBe(new Date('2026-01-01T00:00:00Z').getTime())
+  })
+})
+
+// ── applyEntryEndTimes：产出结束时刻回填（整个 agent-turn 聚合口径的时间轴右端）──────
+//
+// 语义：pi 在 appendMessage（message_end 之后）写 entry → entry.timestamp ≈ 该 assistant
+// 消息产出结束；body message.timestamp 是其开始。两者差值即生成时长，是「单条 assistant 的
+// turn 恒显 1s」修复的数据源。展示字段回填，不进 reducer（保 apply-entry 两路喂入同构）。
+
+describe('applyEntryEndTimes assistant 产出结束时刻回填', () => {
+  const ENTRY_TS = '2026-01-01T00:01:00.000Z'
+  const ENTRY_MS = new Date(ENTRY_TS).getTime()
+
+  function assistantMsg(over: Partial<Message> = {}): Message {
+    return { id: 'm1', role: 'assistant', content: 'hi', status: 'complete', timestamp: ENTRY_MS - 5_000, ...over }
+  }
+
+  /** message entry 工厂（entry 时间戳独立于消息体时间戳） */
+  function entryWithTs(id: string, role: 'user' | 'assistant'): PiSessionEntry {
+    return { type: 'message', id, parentId: null, timestamp: ENTRY_TS, message: { role, content: [], timestamp: ENTRY_MS - 5_000 } as PiHistoryMessage }
+  }
+
+  it('assistant 消息按 piEntryId 回填 entry 时间戳（ISO → ms）——同一条消息 live/reload 同一语义', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBe(ENTRY_MS)
+  })
+
+  it('user 消息不回填（无「产出结束」语义，不得污染「已工作」时长起点/终点）', () => {
+    const msgs: Message[] = [{ id: 'u1', piEntryId: 'e1', role: 'user', content: [], status: 'complete', timestamp: ENTRY_MS - 5_000 }]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'user')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('entry 时间戳早于消息开始（时钟回拨/畸形数据）→ 不回填（消费侧回退 timestamp）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1', timestamp: ENTRY_MS + 1_000 })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('窗口内无对应 entry（截断窗口）/ 无 piEntryId → 不回填（降级 = 修复前行为）', () => {
+    const noEntry = [assistantMsg({ piEntryId: 'e-missing' })]
+    applyEntryEndTimes(noEntry, [entryWithTs('e1', 'assistant')])
+    expect(noEntry[0].endedAt).toBeUndefined()
+
+    const noPiEntryId = [assistantMsg()]
+    applyEntryEndTimes(noPiEntryId, [entryWithTs('e1', 'assistant')])
+    expect(noPiEntryId[0].endedAt).toBeUndefined()
+  })
+
+  it('空 entries → 早退不抛错（空 session / 全非 message entry）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    expect(() => applyEntryEndTimes(msgs, [])).not.toThrow()
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('RT-3#6：entry timestamp 畸形（不可解析/非字符串）→ 不回填 endedAt（NaN 不得入产物）+ warn', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    const badEntries = [
+      { type: 'message', id: 'e1', parentId: null, timestamp: 'not-a-date', message: { role: 'assistant', content: [], timestamp: 1 } },
+      { type: 'message', id: 'e2', parentId: null, timestamp: 12345, message: { role: 'assistant', content: [], timestamp: 1 } },
+    ] as unknown as PiSessionEntry[]
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      applyEntryEndTimes(msgs, badEntries)
+      expect(msgs[0].endedAt).toBeUndefined()
+      const warn = warnSpy.mock.calls.map(c => String(c[0])).find(m => m.includes('applyEntryEndTimes'))
+      expect(warn).toBeDefined()
+      expect(warn).toContain('2 entry/entries')
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

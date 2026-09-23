@@ -31,6 +31,27 @@ const CORE_SRC = join(ROOT, 'packages/core/src')
 /** watch(sessionId) 订阅重订形态 allowlist（相对 ROOT 路径，CLI 参数注入）。 */
 const watchAllowlist = new Set(process.argv.slice(2))
 
+/**
+ * AC10 存量基线豁免（`${rel}→${relResolved}` 键，2026-09-20 R1 评审登记）。
+ *
+ * composer ↔ new-task-search 域级**双向依赖**：model-thinking（composer）消费
+ * createLaunchConfigView（new-task-search/launch-config），flow / launch-config
+ * （new-task-search）反向消费 last-used-model / model-thinking-memory / thinking-levels
+ * （composer）。按守卫建议形态改经 `@taiji/core/domain/<域>` barrel 会引入
+ * composer/index → model-thinking → new-task-search/index → flow → composer/index
+ * 的域级循环 import（现状模块级直连因目标模块不回指而无环）——修复形态本身制造更深的
+ * 架构问题。斩环需移动模块归属（专项裁决），完成前本清单登记存量基线：**仅豁免列出的
+ * 键，新增跨域 import 直接违规**（同 check_pi_type_leak.py 存量 allowlist 先例）。
+ */
+const AC10_BASELINE = new Set([
+  'packages/core/src/domain/composer/model-thinking.ts→packages/core/src/domain/new-task-search/launch-config',
+  'packages/core/src/domain/new-task-search/flow.ts→packages/core/src/domain/composer/last-used-model',
+  'packages/core/src/domain/new-task-search/flow.ts→packages/core/src/domain/composer/model-thinking-memory',
+  'packages/core/src/domain/new-task-search/launch-config.ts→packages/core/src/domain/composer/last-used-model',
+  'packages/core/src/domain/new-task-search/launch-config.ts→packages/core/src/domain/composer/model-thinking-memory',
+  'packages/core/src/domain/new-task-search/launch-config.ts→packages/core/src/domain/composer/thinking-levels',
+])
+
 /** 收集一个目录下全部 .ts 文件（递归，排除 __tests__ 与 *.test.ts）。 */
 function collectTsFiles(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -97,6 +118,8 @@ for (const file of collectTsFiles(DOMAIN_ROOT)) {
       const relResolved = resolved.slice(ROOT.length + 1)
       const targetDomain = relResolved.match(/domain\/([^/]+)\//)?.[1] ?? null
       if (targetDomain && targetDomain !== fileDomain) {
+        // AC10 存量基线豁免（键 = 文件→解析目标；域级双向依赖斩环前登记，见 AC10_BASELINE）
+        if (AC10_BASELINE.has(`${rel}→${relResolved.replace(/\.ts$/, '')}`)) continue
         const lineNo = lines.findIndex((l) => l.includes(spec.slice(0, 30))) + 1
         violations.push(
           `${rel}:${lineNo || '?'} AC10 违规：相对路径跨域 import '${spec}' → ${relResolved} —— 经 '@taiji/core/domain/${targetDomain}' 公开 index API 消费`

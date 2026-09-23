@@ -18,7 +18,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
-import { useToast } from '@/composables/useToast'
+import { useToast, setToastLimiter } from '@/composables/useToast'
 
 const selectSessionSpy = vi.fn()
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
@@ -31,9 +31,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // 模块级单例：清空在列 toast，避免跨用例污染
-  const { toasts, remove } = useToast()
+  // 模块级单例：清空在列 toast + 归零丢弃计数，避免跨用例污染
+  const { toasts, remove, resetDropped } = useToast()
   for (const t of [...toasts.value]) remove(t.id)
+  resetDropped()
   vi.useRealTimers()
 })
 
@@ -112,5 +113,34 @@ describe('ToastContainer hover 暂停自动移除', () => {
     await nextTick() // timer 回调改 toasts 后 DOM 异步重渲染
     expect(toasts.value).toHaveLength(0)
     expect(wrapper.find(`[data-testid="toast-message-${id}"]`).exists()).toBe(false)
+  })
+})
+
+describe('ToastContainer 溢出折叠摘要（RD-3#7：droppedCount 的 UI 消费方）', () => {
+  it('droppedCount > 0 → 渲染「还有 N 条」摘要；点击关闭归零（resetDropped）', async () => {
+    const { info, droppedCount, resetDropped } = useToast()
+    // 恒丢弃限流器强制产生一次丢弃（不依赖逐个入列到 MAX_IN_FLIGHT）
+    setToastLimiter(() => true)
+    info('dropped-1')
+    expect(droppedCount.value).toBeGreaterThan(0)
+    setToastLimiter(null) // 恢复默认，避免影响其它用例
+
+    const wrapper = mount(ToastContainer)
+    const summary = wrapper.find('[data-testid="toast-overflow-summary"]')
+    expect(summary.exists()).toBe(true)
+    // 摘要文案含当前 droppedCount（i18n mock 从 zh-CN 取词，{count} 已替换）
+    expect(wrapper.find('[data-testid="toast-overflow-text"]').text()).toContain(String(droppedCount.value))
+
+    // 点击关闭 → resetDropped 归零 → 摘要消失（droppedCount 有消费 + 重置出口）
+    await summary.find('button').trigger('click')
+    expect(droppedCount.value).toBe(0)
+    expect(wrapper.find('[data-testid="toast-overflow-summary"]').exists()).toBe(false)
+
+    resetDropped() // 兜底归零（幂等）
+  })
+
+  it('droppedCount = 0 → 不渲染摘要（默认态无溢出）', () => {
+    const wrapper = mount(ToastContainer)
+    expect(wrapper.find('[data-testid="toast-overflow-summary"]').exists()).toBe(false)
   })
 })

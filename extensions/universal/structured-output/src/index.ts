@@ -9,7 +9,7 @@
  *
  * Hook 机制（仅 workflow 模式）：
  *   turn_end 时检查模型是否调用了 structured-output 工具。
- *   如果没调 → 通过 pi.sendUserMessage() 注入 steering message 强制调用。
+ *   如果没调 → 通过 pi.sendMessage()（custom message）注入 steering message 强制调用。
  *   最多重试 2 次，防止无限循环。
  *
  * 失败闸门（仅 workflow 模式，D3/U2）：

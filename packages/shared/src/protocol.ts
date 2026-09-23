@@ -62,6 +62,12 @@ export interface CommandSourceInfo {
   baseDir?: string
 }
 
+/**
+ * UI 语言（renderer i18n 支持集）：跨进程 locale 通道的 wire 值域与磁盘值域 SSOT
+ *（u-locale-channel）。runtime 写 `<dataDir>/ui-preferences.json`，extension 侧就地读取热生效。
+ */
+export type UiLocale = 'zh-CN' | 'en-US'
+
 // ── ClientMessageType（保持向后兼容）──────────────────────────
 
 export type ClientMessageType =
@@ -86,6 +92,12 @@ export type ClientMessageType =
   // wave:runtime-wiring 已在 ClientMessageMap 补登记 request payload 形状（见下方）。
   | 'session.subscribe' | 'session.unsubscribe'
   | 'session.getSubagents' | 'session.getSubagentHistory'
+  // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
+  // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
+  // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
+  // abortPlan：PlanModeBar 左区退出按钮（确认 Popover 后）→ runtime 经 ensureActive 恢复后
+  // client.prompt('/plan abort') 直发（绕 busy 预检，streaming 中可用）。
+  | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
   | 'session.getWorkflows' | 'session.getAgentCallHistory' | 'session.getAgentCallFilePath'
@@ -156,6 +168,8 @@ export type ClientMessageType =
   | 'config.setSmartContextCompactModel'
   | 'config.setSmartContextThresholds'
   | 'config.setSmartContextExcludedModels'
+  // u-locale-channel：renderer 上报 UI 语言 → runtime 写 <dataDir>/ui-preferences.json（ack 型 reply）。
+  | 'config.setUiLocale'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
   | 'preset.create' | 'preset.update' | 'preset.delete'
   | 'preset.recordUsage' | 'preset.getUsage'
@@ -255,13 +269,22 @@ export interface SetProviderData {
 }
 
 /** 系统提示词配置（FR-6）。文件：<dataDir>/system-prompt.json。
- *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，仅新建会话生效）
+ *  - replace: 替换 pi 核心系统提示词（走 --system-prompt CLI，**每次进程启动都生效**，含 restore/resume——D1 活定义依据；[HISTORICAL] 早期注释写"仅新建会话生效"与实装不符）
  *  - append:  追加注入（走 before_agent_start hook，每轮读配置热生效）
+ *  - capability: taiji capability 固定注入段开关（schema v2 新增，D6）
  *  version: schema 版本号（SR1） */
 export interface SystemPromptConfig {
   version: number
   replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
+  /**
+   * 可选 = v1 存量 json 无此字段的常态形态。语义权威在扩展侧解析（消费方是
+   * system-prompt 扩展的 before_agent_start hook，直接读原始 json）：缺字段/
+   * 形态不对/文件损坏 → 按 enabled true 生效，仅显式布尔 false 关闭——与
+   * replace/append 的「缺省 false」方向相反（capability 是 taiji 内置告知，
+   * 默认开是设计裁决）。renderer 读侧对 undefined 同样兜底 true。
+   */
+  capability?: { enabled: boolean }
 }
 
 /** 终端配置（Phase 6 settings）。文件：<dataDir>/terminal.json。
@@ -418,6 +441,12 @@ export interface ClientMessageMap {
   // subagent 列表/对话流读取（runtime 直读主 session JSONL + subagent JSONL，不依赖扩展）
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
+  // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
+  // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
+  // 退出命令（确认 Popover 后），
+  // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
+  'session.getPlanState': { sessionId: string }
+  'session.abortPlan': { sessionId: string }
   // [U7] 子代理引擎配置读写（payload：set 带 engineId；get 无参）
   'session.getSubagentEngineConfig': Record<string, never>
   'session.setSubagentDefaultEngine': { engineId: string }
@@ -667,6 +696,11 @@ export interface ClientMessageMap {
   'config.setSmartContextThresholds': { thresholds: number[] }
   /** config.setSmartContextExcludedModels：设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重）。 */
   'config.setSmartContextExcludedModels': { models: string[] }
+  /**
+   * config.setUiLocale：上报 renderer UI 语言（跨进程 locale 通道，u-locale-channel）。
+   * runtime 原子写 `<dataDir>/ui-preferences.json`（{ v:1, locale, updatedAt }），extension 侧读取热生效。
+   */
+  'config.setUiLocale': { locale: UiLocale }
   // pi 启动预设域（设计文档 pi-launch-presets.md）。
   // preset.list：列出全部预设（内置 + 自定义）；preset.getDefault：读全局默认预设 id；
   // preset.setDefault：设全局默认预设（写入 pi-presets.json）。均按需 RPC，无 server-push 广播。
@@ -781,6 +815,10 @@ export type ServerMessageType =
   | 'session.occupancy'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
+  // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
+  //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
+  // session.getPlanState RPC，reply 复用本 payload。
+  | 'session.planState'
   // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
   | 'session.subagentEngineConfig' | 'session.subagentDefaultEngineSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
@@ -814,6 +852,8 @@ export type ServerMessageType =
   | 'config.skillDirs' | 'config.agentDirs' | 'config.extensionDirs'
   | 'config.skillCacheInvalidated'
   | 'config.systemPrompt'
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（u-locale-channel，payload 空）。
+  | 'config.uiLocaleSet'
   | 'model.list' | 'model.switched'
   // model:capabilityDrift：能力注册表在线对账漂移上报（U6，pi-boundary-reliability D2 ②）。
   // 全局诊断通道（无 sessionId 路由需求，消费方=设置页/composer 档位显示的自省入口）。
@@ -881,7 +921,7 @@ export type ServerMessageType =
   | 'workspace.bareDetected'
   | 'workspace.detected'
   | 'worktree.created'
-  | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack'
+  | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack' | 'terminal.writeFailed'
   | 'config.terminalConfig'
   | 'config.retryConfig'
   | 'quota.fetch:result' | 'quota.getCached:result' | 'quota.configure:result' | 'quota.refresh:result'
@@ -991,6 +1031,12 @@ export interface SkillCacheInvalidatedPayload {
   scope: SkillCacheScope
   /** scope='project' 时携带变更的项目根；setSkillDirs 全局配置变更场景缺省（影响所有 cwd）。 */
   cwd?: string
+  /**
+   * partial=true：scope='global' 的降级补发形态——setSkillDirs 后 rebuildGlobal/通知链
+   * 失败，失效信号由失败分支补发（globalCache 可能仍是旧值，重拉结果以 runtime 当前缓存
+   * 为准）。可选字段，正常失效广播缺省；当前消费方只读 scope，字段向后兼容。
+   */
+  partial?: boolean
 }
 
 // ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
@@ -1273,11 +1319,69 @@ export interface SessionSetProjectMutationReply {
   projectId: string
 }
 
+/**
+ * 计划产物文档元数据（plan 模式重设计 D1）。
+ * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形——shared 是最底层
+ * 共享包不能反向依赖 extension-protocol，同形状漂移由双端契约测试守卫。
+ */
+export interface PlanDocMeta {
+  /** 文件名（drawer 文档 tab 标题，不含目录） */
+  fileName: string
+  /** 文件绝对路径（前端 file.read RPC 带 sessionId 读取） */
+  absPath: string
+  /** 来源技能名（挂载 --skills 时产出该文档的技能；模板流程产出时为空串） */
+  sourceSkill: string
+  /** 修订版本，从 1 起，每次修订重登记 +1（前端凭 version 变化重拉 file.read） */
+  version: number
+}
+
+/**
+ * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
+ *
+ * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
+ * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
+ * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
+ * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
+ * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
+ * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
+ * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
+ */
+export interface PlanStateView {
+  isActive: boolean
+  planFilePath: string | null
+  requirement: string | null
+  templateName: string | null
+  /** 挂载技能名清单（/plan <需求> --skills a,b 解析结果） */
+  skills?: string[]
+  /** 产物文档清单（产物 tab 由 docs.length 驱动，与 isActive 解耦——退出/执行后仍可回看） */
+  docs?: PlanDocMeta[]
+  /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
+  reviewState?: 'awaiting' | 'revising'
+  /**
+   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
+   * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
+   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
+   * 缺省 = 来源未知，渲染通用降级文案（恢复入口 + 退出照给，不猜测来源）。
+   * 仅 reviewState 有值时有语义。
+   */
+  reviewStateSource?: 'resubmit'
+}
+
 export interface ServerMessageMapBase {
   // ── sendInitialState 推送 / domain 订阅（精确）──
-  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[] }
-  // refreshed = 远程目录协商完成的 provider（304/404 也算完成）；failed 携带原因
-  'config.providerCatalogsRefreshed': { refreshed: string[]; failed: Array<{ providerId: string; reason: string }> }
+  // corrupted = models.json 损坏降级态（原位文件已隔离为 .corrupt-* 副本，providers 为
+  // 空骨架）——UI 据此提示「配置已隔离可找回」而非「无任何 provider」（M4/RT-3#4）
+  'config.providers': { providers: ProviderInfo[]; scopedModels?: string[]; corrupted?: boolean }
+  // refreshed = 远程目录协商完成的 provider（304/404 也算完成）；failed 携带原因。
+  // corrupt（RT-7#8）= 读到的损坏缓存源（'own' 自刷缓存 / 'pi' pi models-store，损坏
+  // fail-safe 回退空 entries 后单独回传，不折叠进「从未见过」）；persistFailed = 本次
+  // 刷新结果落盘失败（内存有效，下次进入页面重刷）。
+  'config.providerCatalogsRefreshed': {
+    refreshed: string[]
+    failed: Array<{ providerId: string; reason: string }>
+    corrupt?: Array<'own' | 'pi'>
+    persistFailed?: boolean
+  }
   'config.skills': { skills: SkillInfo[] }
   /**
    * skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
@@ -1346,6 +1450,8 @@ export interface ServerMessageMapBase {
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
+  // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（无读回字段——写盘失败走错误信封）。
+  'config.uiLocaleSet': Record<string, never>
 
   // ── 协议级 reply / push（精确）──
   'pong': Record<string, never>
@@ -1397,10 +1503,17 @@ export interface ServerMessageMapBase {
   'extension:status': { sessionId: string; statusKey: string; text: string; textRaw?: string }
   // extension notify（pi fire-and-forget 通知，前端渲染为 toast）
   'extension:notify': { sessionId: string; message: string; level: 'info' | 'warn' | 'error' }
+  // 挂起 UI 请求失效广播（P2-2 失效链）：abort turn / 退出 plan / 回收等非 respond 路径
+  // 摘除 runtime pending 缓存时推给 renderer——renderer 按帧移除本屏对应请求（审批条/
+  // 表单），消除「僵尸 ready 审批条点击静默无效」的残留窗口
+  'extension:requestsInvalidated': { sessionId: string; requestIds: string[]; reason: string }
   // extension.ui_request：交互对话框请求（select/confirm/input/editor + ask-user 富交互）。
   // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
   // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
   // 前端消费时用类型守卫收窄为 AskUserQuestion[]。
+  // schedule-create 扩展字段（scheduleCreate/scheduleDraft）仅在 method='select' + scheduleCreate=true 时存在
+  // （runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select，U5）；
+  // scheduleDraft 用 unknown 保持 shared 依赖最小化，前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
   'extension.ui_request': {
     sessionId: string
     requestId: string
@@ -1415,6 +1528,19 @@ export interface ServerMessageMapBase {
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
+    // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在）
+    scheduleCreate?: boolean
+    scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
+    // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
+    // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
+    // 审批条文档清单由 usePlanState 投影链（session.planState）承载，本帧不携带 docs。
+    planReview?: boolean
+    // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+    // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
+    // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
+    // 前端消费时用 extension-protocol 的 isFormQuestion 守卫收窄为 FormQuestion[]。
+    form?: true
+    formQuestions?: unknown[]
   }
   // session 通道推送（runtime session-service / index.ts 生产，W04 收紧）
   // compacting：compaction_start → interpreter 广播（唯一发送点 event-interpreter.handleCompactionStart），
@@ -1448,8 +1574,16 @@ export interface ServerMessageMapBase {
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
-  // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）
-  'session.subagents': { sessionId: string; subagents: SubagentRecord[] }
+  // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）。
+  // oversize（RT-4#8）：session 文件超 runtime 读取预检阈值（>32MB）时列表不可用（subagents
+  // 恒空）——true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省
+  // false（mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
+  // source='oversize'。
+  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean }
+  // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
+  // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
+  // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
+  'session.planState': { sessionId: string; planState: PlanStateView }
   // session.subagentHistory：subagent 对话流消息（runtime 直读 subagent JSONL，复用 convertPiHistory）。
   // truncated：u4b（D5①）巨型 subagent JSONL（高发源）超预检阈值后逆序窗口降级标志
   //（optional——mock / 旧 runtime 不带此键，消费方按 false 处理）。
@@ -1472,8 +1606,9 @@ export interface ServerMessageMapBase {
     subagentId: string
     entries: Array<import('./pi-entry').PiEntry | import('./pi-entry').PiToolCallEntryForm>
   }
-  // session.workflows：当前 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）
-  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[] }
+  // session.workflows：当前 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）。
+  // oversize（RT-4#8）：与 session.subagents 同款降级标志（文件 >32MB 时列表不可用，恒空数组）。
+  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean }
   // session.agentCallHistory：workflow 内 agent call 的对话流消息（runtime 按 trace[].sessionId 查找 JSONL）。
   // truncated：u4b（D5①）巨型 JSONL 超预检阈值后逆序窗口降级标志（optional，消费方按 false 处理）。
   'session.agentCallHistory': { sessionId: string; agentCallSessionId: string; messages: import('./message').Message[]; truncated?: boolean }
@@ -1624,9 +1759,17 @@ export interface ServerMessageMapBase {
   'session.migrateImage:result': { path: string }
   /** session.writeSegments:result：ack 型空 payload（atomic 写成功） */
   'session.writeSegments:result': Record<string, never>
-  'workspace.recentList': { records: RecentWorkspaceRecord[] }
-  /** workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。 */
-  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string }
+  /**
+   * degraded=true：本次 reply 是降级形态（入参 cwd 无效等校验失败），records 仍为当前
+   * 已记录列表（RPC 契约要求 pending Promise 必然 resolve）。可选字段，正常路径缺省。
+   */
+  'workspace.recentList': { records: RecentWorkspaceRecord[]; degraded?: boolean }
+  /**
+   * workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。
+   * degraded=true：探测降级形态（cwd 无效 / detector 抛错）——isBare:false 是兜底值而非
+   * 真实探测结果，hint 携带恢复指引。可选字段，真实探测路径缺省。
+   */
+  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string; degraded?: boolean; hint?: string }
   /** workspace.detected：workspace.detect 的三态 reply。 */
   'workspace.detected': {
     mode: 'bare-workspace' | 'plain-repo' | 'not-repo'
@@ -1635,14 +1778,19 @@ export interface ServerMessageMapBase {
     repoRoot: string
     defaultBranch: string
   }
-  /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。 */
-  'worktree.created': { cwd: string; branch: string }
+  /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。
+   *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
+   *  runtime 会 fallback 到本地 main——可选字段存在即「实际 ref ≠ 请求 ref」，前端可提示。 */
+  'worktree.created': { cwd: string; branch: string; usedBaseRef?: string }
   // terminal.data：PTY 输出流（高频广播，按 sessionId 路由到对应 panel 的 scrollback buffer）。
   'terminal.data': { sessionId: string; data: string }
   // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。PTY 销毁后 ptyMap 移除。
   'terminal.exit': { sessionId: string; exitCode: number }
   // terminal.alive：PTY 就绪信号（spawn 成功后发，renderer flush 写队列——联动 2 异步写时序）。
   'terminal.alive': { sessionId: string }
+  // terminal.writeFailed：PTY 写入失败（进程已退出/管道关闭，RT-8#10）。低频错误信号
+  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后 toast 提示输入可能丢失。
+  'terminal.writeFailed': { sessionId: string; message: string }
   // terminal.ack：spawn/write/resize/kill/attach 的通用 ack reply（空 payload，前端按 id 匹配）。
   'terminal.ack': Record<string, never>
   // config.terminalConfig：reply + broadcast + sendInitialState 三用（复刻 config.systemPrompt 范式）。
@@ -2131,6 +2279,8 @@ export interface ReplyPayloadMap {
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
   'session.getSubagents': ServerMessageMap['session.subagents']
+  // plan 模式（D1-⑥ 冷启动首拉）：reply 复用 session.planState 广播 payload（同 getSubagents 先例）
+  'session.getPlanState': ServerMessageMap['session.planState']
   'session.getWorkflows': ServerMessageMap['session.workflows']
   'session.history': ServerMessageMap['session.history']
   'config.sessions': ServerMessageMap['config.sessions']
@@ -2191,6 +2341,8 @@ export interface ReplyPayloadMap {
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']
   'config.setSmartContextThresholds': ServerMessageMap['config.smartContextThresholds']
   'config.setSmartContextExcludedModels': ServerMessageMap['config.smartContextExcludedModels']
+  // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
+  'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。
   // 全部引用 ServerMessageMapBase 中登记的精确 payload 形状（W-SH-1 收紧，SSOT）。
   //  - preset.list / getDefault / getUsage / export / import
@@ -2259,6 +2411,10 @@ export interface ReplyPayloadMap {
   'session.abortHandoff': void    // reply message.status
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
+  // session.abortPlan：PlanModeBar 退出（确认 Popover 后）→ runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
+  // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
+  // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
+  'session.abortPlan': void       // reply message.status
   // session.subscribe（runtime-message-bus wave:protocol-seq）：订阅某 session 的 live 事件流。
   // payload 消费型——renderer 读 snapshot 做 reconcile（订阅时刻 bus ring 内当前事件序列，
   // 元素为带 seq 的 ServerMessage），记 lastSeq 作为后续 gap 检测基线；gap=true 标记本次

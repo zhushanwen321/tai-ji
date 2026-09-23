@@ -19,6 +19,9 @@
  *  - permission 额外含 tree-sitter-bash.wasm + web-tree-sitter.wasm（手动拷贝，与 index.js 同目录）
  *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/（内置 workflow
  *    脚本资产，u1-staged 起源在 packages/subagent-core/workflows/，见下方常量注释）
+ *  - plan 额外含 templates/（内置计划模板 .md，<available-plans> 清单注入与
+ *    select-template 数据源，登记与缺失后果见 scripts/lib/staged-asset-dirs.mjs
+ *    登记表注释）
  *
  * external 边界权威源：0.84.1 pi binary virtualModules 实测（0.80.3 首测，2026-08-12
  * 随 pi 0.84.1 升级重测 10 包 get_state 加载全绿后更新；见
@@ -36,6 +39,9 @@ import { readFile, writeFile, copyFile, cp, mkdir, stat, rm, chmod, readdir } fr
 import { existsSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+// staged 特殊资产目录单一登记表（MF-1-17）：与 verify-staged-extensions.mjs 共读，
+// 契约与条目动机见该模块注释——本脚本不得另持字面量表
+import { PACKAGE_ASSET_DIRS } from "./lib/staged-asset-dirs.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -204,12 +210,30 @@ async function copyWorkflowDir(outDir, extraAssets) {
 	extraAssets.push("workflows/");
 }
 
-// 按包名 short 分发的三类特殊资产拷贝（顺序敏感：permission → relay → workflows，
-// 与 extraAssets 汇总顺序及 fail-fast 先后一致）
+// plan 内置模板（MF-7）：templates/*.md 整目录拷到 staged 包根（bundle 形态路径探测
+// 由 templates.ts getBuiltinTemplateDir 同级 existsSync 完成；登记与缺失后果见
+// scripts/lib/staged-asset-dirs.mjs 登记表注释）
+async function copyTemplatesDir(srcDir, outDir, extraAssets) {
+	const src = join(srcDir, "templates");
+	if (!existsSync(src)) {
+		throw new Error(
+			`templates dir missing: ${src}（plan 包内置模板资产缺失 = 打包配置回归）`,
+		);
+	}
+	await cp(src, join(outDir, "templates"), { recursive: true });
+	extraAssets.push("templates/");
+}
+
+// 按包名 short 分发的特殊资产拷贝（顺序敏感：permission → relay → workflows →
+// templates，与 extraAssets 汇总顺序及 fail-fast 先后一致）。templates 条目是否拷贝
+// 由共享登记表驱动（PACKAGE_ASSET_DIRS[short] 含 "templates" 即拷，MF-1-17）
 async function copySpecialAssets(short, srcDir, outDir, extraAssets) {
 	if (short === "permission") await copyPermissionWasm(outDir, extraAssets);
 	if (RELAY_DIR_PACKAGES.has(short)) await copyRelayDir(srcDir, outDir, extraAssets);
 	if (WORKFLOW_DIR_PACKAGES.has(short)) await copyWorkflowDir(outDir, extraAssets);
+	if ((PACKAGE_ASSET_DIRS[short] ?? []).includes("templates")) {
+		await copyTemplatesDir(srcDir, outDir, extraAssets);
+	}
 }
 
 // 改写 staged 副本 package.json：pi.extensions 指向 ./index.js（不改源码 package.json）

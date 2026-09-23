@@ -7,7 +7,7 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isRecord } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord } from './types.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const PERCENT_SCALE = 100
@@ -34,17 +34,52 @@ interface KimiApiResponse {
   usage?: KimiUsage
 }
 
+/** limits[].detail 形态：limit/remaining 可选 number、resetTime 可选 string（5h 窗口字段）。 */
+function isKimiLimitDetail(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return (
+    isOptionalField(v.limit, 'number') &&
+    isOptionalField(v.remaining, 'number') &&
+    isOptionalField(v.resetTime, 'string')
+  )
+}
+
+/** limits[] 条目形态：detail 缺失合法（该条目无 5h 窗口数据）。 */
+function isKimiLimitEntry(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return v.detail === undefined || isKimiLimitDetail(v.detail)
+}
+
+/** usage 形态（week 窗口字段）。 */
+function isKimiUsage(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  return (
+    isOptionalField(v.limit, 'number') &&
+    isOptionalField(v.used, 'number') &&
+    isOptionalField(v.resetTime, 'string')
+  )
+}
+
 /**
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（limits 数组迭代判定、
- * usage 对象解构）。字段缺失是合法业务态（→ no-subscription），字段类型漂移归 parse
- * （防 `{"limits":"abc"}` 时 string.length truthy 绕过 no-subscription 检查产出错数据）。
+ * usage 对象解构）。字段缺失是合法业务态（→ no-subscription / 该窗口不可知），字段
+ * 类型漂移归 parse（RT-7#5：guard 收到字段级——防 `{"limits":"abc"}` 时 string.length
+ * truthy 绕过 no-subscription 检查、防 `"500"` 等字符串数值被 Number() 静默接受产错数据）。
  */
 function isKimiResponse(v: unknown): v is KimiApiResponse {
   if (!isRecord(v)) return false
   const o = v
-  if (o.limits !== undefined && !Array.isArray(o.limits)) return false
-  if (o.usage !== undefined && (typeof o.usage !== 'object' || o.usage === null)) return false
+  if (o.limits !== undefined) {
+    if (!Array.isArray(o.limits)) return false
+    if (!o.limits.every(isKimiLimitEntry)) return false
+  }
+  if (o.usage !== undefined && !isKimiUsage(o.usage)) return false
   return true
+}
+
+/** 数值字段取值（guard 已拒类型漂移，此处只区分「在的 number」与「缺失」）。 */
+function optionalNumber(v: unknown): number | undefined {
+  return typeof v === 'number' ? v : undefined
 }
 
 /** ISO 时间戳 → 剩余秒 */
@@ -66,11 +101,14 @@ function requestsWindow(limit: number, used: number, resetSec: number | null): Q
     : INFINITE_WIN
 }
 
-/** 5h 滚动窗口（limit − remaining 折算 used） */
+/** 5h 滚动窗口（limit − remaining 折算 used）。RT-7#5：used 计算需 limit/remaining
+ * 齐备，任一缺失该窗口不可知 → INFINITE_WIN（pct:null 整行隐藏）——原 `Number(x ?? 0)`
+ * 折叠会让 remaining 缺失时 used=limit，产出 100% 假耗尽。 */
 function buildWin5h(data: KimiApiResponse): QuotaWindow {
   const winDetail = data?.limits?.[0]?.detail
-  const winLimit = Number(winDetail?.limit ?? 0)
-  const winRemaining = Number(winDetail?.remaining ?? 0)
+  const winLimit = optionalNumber(winDetail?.limit)
+  const winRemaining = optionalNumber(winDetail?.remaining)
+  if (winLimit === undefined || winRemaining === undefined) return INFINITE_WIN
   return requestsWindow(
     winLimit,
     winLimit - winRemaining,
@@ -78,10 +116,12 @@ function buildWin5h(data: KimiApiResponse): QuotaWindow {
   )
 }
 
-/** 每日/周窗口（usage 字段，绝对量直出） */
+/** 每日/周窗口（usage 字段，绝对量直出）。RT-7#5：used 缺失而 limit 在时不再产 pct=0
+ * 假未用——任一字段缺失该窗口不可知 → INFINITE_WIN。 */
 function buildWinWk(data: KimiApiResponse): QuotaWindow {
-  const dailyLimit = Number(data?.usage?.limit ?? 0)
-  const dailyUsed = Number(data?.usage?.used ?? 0)
+  const dailyLimit = optionalNumber(data?.usage?.limit)
+  const dailyUsed = optionalNumber(data?.usage?.used)
+  if (dailyLimit === undefined || dailyUsed === undefined) return INFINITE_WIN
   return requestsWindow(
     dailyLimit,
     dailyUsed,

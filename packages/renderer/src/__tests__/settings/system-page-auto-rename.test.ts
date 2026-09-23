@@ -351,6 +351,31 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
     const trigger = wrapper.find('[data-testid="setting-rename-mode"]')
     expect(trigger.attributes('disabled')).toBeUndefined()
   })
+
+  it('RD-4#8：读取失败 → 常驻提示 + Switch 禁用（不把默认「开」当已存值）', async () => {
+    settingsMock.getAutoRenameEnabled.mockRejectedValue(new Error('ws down'))
+    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="auto-rename-load-error"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('读取失败')
+    const swEl = wrapper.find('[data-testid="setting-auto-rename-session"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(true)
+  })
+
+  it('RD-4#8：重试成功后清除提示 + Switch 恢复可用', async () => {
+    settingsMock.getAutoRenameEnabled.mockRejectedValueOnce(new Error('ws down'))
+    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="auto-rename-load-error"]').exists()).toBe(true)
+
+    settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: true })
+    await wrapper.find('[data-testid="auto-rename-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="auto-rename-load-error"]').exists()).toBe(false)
+    const swEl = wrapper.find('[data-testid="setting-auto-rename-session"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(false)
+  })
 })
 
 describe('SystemPage 容器编排', () => {

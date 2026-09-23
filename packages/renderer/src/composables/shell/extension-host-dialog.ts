@@ -6,7 +6,7 @@
  * 由 initExtensionHostBridge provide 注入，CompanionBand 消费。
  *
  * 数据流：bus 'ui-request'（plugin:uiRequest + extension.ui_request 双源归一）
- * → createDialogRequestSource.onUiRequest（无 sid 跳过 / askUser 过滤 C4 分流）
+ * → createDialogRequestSource.onUiRequest（无 sid 跳过 / form 类过滤 C4 分流）
  * → convertToDialogRequest → DialogRequestQueue → CompanionBand 渲染
  * → 用户操作 → queue.respond → transport 回传（pi → extension.ui_response / plugin → plugin.uiResponse）。
  *
@@ -18,8 +18,11 @@
  * （source 投递写入 / transport respond 删除两工厂共管），respond
  * （sendPiResponse + sendPluginResponse 双通道）即删；plugin 源另有撤窗广播删除点。
  *
- * 分流契约（feature clarify C2/C4）：askUser 请求由 useExtensionUI 消费（Panel inline 独占），
- * 本适配层只投递非 askUser（CompanionBand 独占 dialog）；两者在数据源层分流，零重叠。
+ * 分流契约（feature clarify C2/C4 + ui-presentation-protocol D5 收敛）：统一表单 overlay
+ * 请求（form 键；窗口期含 legacy askUser / scheduleCreate 原始帧键——本侧消费 bus 原始帧，
+ * 归一只发生在 useExtensionUI handler 内，故排除面按窗口键集合对称排除）由 useExtensionUI
+ * 消费（Panel inline 独占，挂 FormOverlay），本适配层只投递其余请求（CompanionBand 独占
+ * dialog）；两类在数据源层分流，零重叠。
  */
 import type { InternalEvent, InternalEventBus } from '@taiji/core'
 import type {
@@ -32,12 +35,15 @@ import type { ExtensionInteractMethod } from '@taiji/shared'
 import { onGlobal } from '@taiji/core/transport/api'
 import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
+import i18n from '@/i18n'
+import { useToast } from '@/composables/useToast'
+import { useChatStore } from '@/stores/chat'
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
 // ── 类型守卫（索引签名字段收窄，禁止 any 断言） ──────────────────────
 
-const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor', 'askUser']
+const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor']
 
 function isDialogMethod(v: unknown): v is DialogRequest['method'] {
   return typeof v === 'string' && (DIALOG_METHODS as readonly string[]).includes(v)
@@ -75,19 +81,16 @@ function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
 /**
  * 转换 bus ui-request 事件为 ui 包 DialogRequest（AC2）：
  * - source：request.pluginId !== '' → 'plugin'（plugin 源），否则 'pi'（extension 源统一 ''）
- * - method：askUser === true → 'askUser'（C2 改写，askUserQuestions/allowCancel 透传）；
- *   否则索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐 toExtensionUIRequest 语义）
+ * - method：索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐
+ *   toExtensionUIRequest 语义）；form 类请求已被 C4 排除，不会到达本转换
  * - options：双形状归一（normalizeOptions）
  * - receivedAt：转换时刻时间戳（队列倒计时基准）
  */
 export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   const req = e.request
-  const askUser = req.askUser === true
-  const method: DialogRequest['method'] = askUser
-    ? 'askUser'
-    : isDialogMethod(req.method)
-      ? req.method
-      : req.kind
+  const method: DialogRequest['method'] = isDialogMethod(req.method)
+    ? req.method
+    : req.kind
   return {
     source: req.pluginId !== '' ? 'plugin' : 'pi',
     sessionId: e.sessionId ?? '',
@@ -99,8 +102,6 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
     ...(req.default !== undefined ? { default: req.default as string } : {}),
     ...(req.prefill !== undefined ? { prefill: req.prefill as string } : {}),
     ...(req.level !== undefined ? { level: req.level as 'info' | 'warn' | 'error' } : {}),
-    ...(askUser ? { askUserQuestions: req.askUserQuestions as unknown[] } : {}),
-    ...(askUser ? { allowCancel: req.allowCancel as boolean } : {}),
     receivedAt: Date.now(),
   }
 }
@@ -116,7 +117,7 @@ const requestIdSessions = new Map<string, string>()
 /**
  * 创建 DialogRequestSource（bus 'ui-request' + WS plugin:uiRequestExpired 适配）：
  * - onUiRequest：无 sessionId 跳过 + console.warn（C2，防 '' 分区脏数据）；
- *   askUser === true 跳过投递（C4 分流，CompanionBand 独占 dialog）
+ *   form 类请求跳过投递（C4 分流，CompanionBand 独占 dialog）
  * - onUiRequestExpired：WS plugin:uiRequestExpired（timeout-plugin-service D2 超时撤窗，
  *   不经 bus——bridge 无此归一项）。按 requestId 反查（onUiRequest 流经时记录 requestId→sessionId
  *   映射，投递时归属 sid，MF-4 反查为主）；Map miss 时 payload 可选 sessionId 兜底（renderer 重启）。
@@ -131,7 +132,17 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
           console.warn('[dialog-adapters] ui-request 事件缺少 sessionId，跳过投递:', e.request.requestId)
           return
         }
-        if (e.request.askUser === true) return // C4：askUser 由 useExtensionUI 消费（Panel inline）
+        // C4：统一表单 overlay 类由 useExtensionUI 消费（Panel inline 挂 FormOverlay），本侧
+        // 对称排除（窗口键集合 = form ∨ askUser ∨ scheduleCreate——本侧消费 bus 原始帧，
+        // legacy 帧无 form 键，归一只发生在 useExtensionUI handler 内；窗口末 legacy 键删）——
+        // 漏排除则同一请求被转成空壳 select dialog 入队（用户误点 = respond null = 误触取消）
+        // 并与 overlay 双 UI 并存，违反双消费方「零重叠」契约。
+        if (e.request.form === true || e.request.askUser === true || e.request.scheduleCreate === true) return
+        // C4（plan 模式重设计 D5；u-plan-bar 起宿主收敛）：planReview 审批请求由 PlanModeBar
+        // 行内右区的 PlanReviewBar 消费（useExtensionUI planReviewFilter 实例入 store 枚举 +
+        // respond 回传，常驻订阅宿主 = PlanModeBar）——不落 CompanionBand 原始 dialog 渲染
+        // marker 控制符 title。
+        if (e.request.planReview === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))
@@ -157,7 +168,7 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
   }
 }
 
-/** method 收窄到 ExtensionInteractMethod（askUser 请求已被 C4 过滤，不会到达回传通道） */
+/** method 收窄到 ExtensionInteractMethod（form 类请求已被 C4 过滤，不会到达回传通道） */
 function toInteractMethod(method: string): ExtensionInteractMethod {
   return method === 'confirm' || method === 'select' || method === 'input' || method === 'editor'
     ? method
@@ -169,20 +180,65 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  * - sendPiResponse：复用 sendExtensionUIResponse（extension.ui_response，method 透传，
  *   runtime 按 method 构建 pi 响应格式，AC9）
  * - sendPluginResponse：发 plugin.uiResponse（runtime UiRequestQueue.handleResponse 消费，AC6）
- * - [G1] 双通道 respond 即删 requestIdSessions 表项（本函数与 createDialogRequestSource
+ * - 双通道返回 boolean（false = WS 非 OPEN 未送出）：DialogRequestQueue.respond 见 false
+ *   保留请求不出队（M1/RD-3#1——断连期应答不丢失，连接恢复后可重发，同 requestId 幂等），
+ *   未送达时本层 toast（队列 headless 无 UI，可见反馈归壳层）。
+ * - [G1] 双通道送达即删 requestIdSessions 表项（本函数与 createDialogRequestSource
  *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
+ * - 通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 cancel 型分型先例 →
+ *   ADR-0073 D4a 壳层锚点与通路级收口）：sendPiResponse 应答终局无条件 clearPendingSend——cancel
+ *   （result === null，取消按钮 → queue.cancel 唯一生产者；plain dialog 无 Esc 绑定，
+ *   Esc 取消属 FormOverlay form 通路）/ 提交（result !== null）/ WS 断连（!delivered）
+ *   三型统一。plain dialog 通路默认值 = 无 turn 预期、应答终局即收尾，由生产者穷尽论证
+ *   构造性成立：command handler 源（/permission 命令族）pi rpc `void run()` 结构性无
+ *   turn；turn 内源（approval tool_call 审批）pendingSend 恒空（message_start 在 tool
+ *   执行前已清）——锚点对后者是空操作。清在 delivered 判定之前：断连期 turn 同样
+ *   不可达，不清则该形态仍走 30s 兜底（「意图先于送达」的两通路相位分叉登记见
+ *   ADR-0073）。已知失真：多步链悬挂期插发直发会被误清（构造上无从区分直发与命令
+ *   链置位的 pendingSend）——实测 pi 命令 dispatch 即返（void run()），直发被并行
+ *   处理、message_start 即时到达覆盖，无可见假闲窗口（2026-09-23 验收 O-5）；
+ *   重审条件见 ADR-0072 收口条目。仅 pi 源（plugin 源 dialog 无 addPendingSend 链，
+ *   sendPluginResponse 旁路不经此锚点）。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {
     sendPiResponse(sessionId, requestId, method, result) {
+      // 通路级收尾锚点：应答终局无条件清（cancel / 提交 / 断连三型统一，通路默认值
+      // 穷尽论证见上方注释块与 ADR-0072/0073）。若某源提交后真有 turn，message_start
+      // 照常驱动 isGenerating——恒清不吞 turn 信号。chatStore 现取（对齐
+      // useExtensionUI.ts:164 模块级回调先例：回调执行时 pinia 必已 active）；
+      // clearPendingSend 幂等，重复应答 / 与 message_start 并发均无副作用。
+      useChatStore().clearPendingSend(sessionId)
+      const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
+      if (!delivered) {
+        // 未送达：表项保留（请求仍在队列，撤窗反查仍需可用）+ 壳层 toast（队列 headless 无 UI）
+        notifyUiResponseNotDelivered(sessionId)
+        return false
+      }
       requestIdSessions.delete(requestId)
-      sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
+      return true
     },
     sendPluginResponse(requestId, result) {
+      const delivered = send({ type: 'plugin.uiResponse', payload: { requestId, result } })
+      if (!delivered) {
+        notifyUiResponseNotDelivered()
+        return false
+      }
       requestIdSessions.delete(requestId)
-      send({ type: 'plugin.uiResponse', payload: { requestId, result } })
+      return true
     },
   }
+}
+
+/**
+ * 「回复未送达」统一提示（M1 环 3）：sendPiResponse / sendPluginResponse 未送达（WS 非
+ * OPEN）时由壳层 toast，FormOverlay 侧 useExtensionUI.respond 共用。定义在本模块（叶子，
+ * 只依赖 core/ui/shared）——useExtensionUI → useExtensionHostBridge → 本模块，若反向
+ * import 会成环。
+ */
+export function notifyUiResponseNotDelivered(sessionId?: string): void {
+  const t = i18n.global.t as (key: string) => string
+  useToast().error(t('extensionUI.responseNotDelivered'), sessionId ? { sessionId } : undefined)
 }
 
 // ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收后降级/移除，非业务 API）──

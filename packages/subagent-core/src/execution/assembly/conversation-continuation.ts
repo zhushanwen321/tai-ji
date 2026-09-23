@@ -152,7 +152,10 @@ export interface ContinuationHost {
   reviveClosedRecord(record: ExecutionRecord): void;
   /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
-   *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
+   *  [W1/R1 方案 A] 宿主闭包经 transcriptAnchorOf 单点分派两引擎锚（pi = sessionFile /
+   *  zcode = engineHandle.sessionRef）——两引擎对 true/false 语义同构。
+   *  false = CAS 拒绝（record 非 idle——竞态收口）或 binding 持久化失败，调用方按
+   *  降级失败响亮上抛（D1a：原 zcode 静默降级分支已随闭包接线删除）。 */
   reopenRecord(record: ExecutionRecord): boolean;
   /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
@@ -366,11 +369,13 @@ export class ConversationContinuation {
    *     降级）：按 reopen 降级轮派发（resume:undefined + 摘要前缀），消费后即清；
    *   - 锚字段缺失（从未开跑，entry-born）：无历史可摘要——直接按全新 session 派发
    *     （resume:undefined），无世代推进（round/epoch 均为初始值）；
-   *   - 锚字段在但不可解析（续轮 drain 窗口内 transcript 被删，极窄现实面）：同按
+   *   - pi 锚字段在但不可解析（续轮 drain 窗口内 transcript 被删，极窄现实面）：同按
    *     全新 session 派发 + 摘要注入——**不**推进世代（markReopened CAS 仅收 idle，
    *     U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
    *     应答回填 writeBindingForRecord 保证）——世代推进仅 idle-message 触发的完整
    *     reopen 承担（偏差登记：续轮降级无 epoch/round 重置）；
+   *   - zcode 锚不进预检查分流（库投影滞后系统性误判——U3 退役，理由见
+   *     reviveOrThrow 注）：带锚正常派发，锚活性由引擎真实 resume 结果承担；
    *   - 锚可解析：原样 resume 续写（透明续聊）。
    *  [U5 / §3.2.5] worktree 绑定丢失守卫改为自动重建（异步——移入 dispatchRoundAsync，
    *  三失败形态处置见其方法头；原同步 throw 拒绝语义退役）。
@@ -397,13 +402,17 @@ export class ConversationContinuation {
         // [U4] 锚字段缺失（从未开跑）：全新 session 直派；无历史轮可摘要（binding
         // 只在首轮 run 后存在），不注入 reopen 摘要。
         freshSession = true;
-      } else if (summaryPrefix === undefined && !isAnchorResolvable(record)) {
-        // [U4] 续轮窗口内 transcript 被删（pi：文件不在 / zcode：库条目被 TTL 清）
-        //：全新 session 直派 + 摘要注入。完整 reopen 降级（markReopened 世代推进）
-        // 只在 idle-message 路径（reviveOrThrow）发生；本分支不推进世代
-        //（markReopened CAS 仅收 idle，U2 原语契约领地外不可放宽；round 连续保持
-        // 通知去重键单调，磁盘一致性由 run 应答回填 writeBindingForRecord 保证）
-        //——偏差登记见实现单元报告。
+      } else if (summaryPrefix === undefined && anchor?.engine === "pi" && !isAnchorResolvable(record)) {
+        // [U4] 续轮窗口内 pi transcript 文件被回收：全新 session 直派 + 摘要注入。
+        // 完整 reopen 降级（markReopened 世代推进）只在 idle-message 路径
+        //（reviveOrThrow）发生；本分支不推进世代（markReopened CAS 仅收 idle，
+        // U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由
+        // run 应答回填 writeBindingForRecord 保证）——偏差登记见实现单元报告。
+        //
+        // [U3] zcode 锚不进本降级：库投影预检查对 zcode 系统性误判（app-server 落库
+        // 滞后于 create 应答，分钟级窗 + 部分行永不落库——详见 reviveOrThrow 注），
+        // 误触发会丢 resume 通道。zcode 锚活性由引擎真实 resume 结果承担（失败时
+        // 引擎注入锚失效声明段），此处带锚正常派发。
         freshSession = true;
         summaryPrefix = this.reopenSummaryFor(record);
       }
@@ -862,22 +871,29 @@ export class ConversationContinuation {
    * closed」硬拒分支消亡（用户 close 后 message = 隐含寻回：intent 翻回 active 的
    * 挂点归 U5 意愿动作，见下方留桩），closedReason/stopReason 只是展示位。准入 =
    * 物理三件套（锚可解析 + 异进程探针 + 归属）：探针/归属已在 getRecordForAction
-   * 冷查链执行（内存 idle record 恒本进程持有）；锚可解析性在派发守卫
-   *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝。
+   * 冷查链执行（内存 idle record 恒本进程持有）；pi 锚可解析性在派发守卫
+   *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝（zcode 锚
+   * 不进预检查，见下方注）。
    * [modeless 波1] 升级概念消亡（chatMode 置位格删除）；message 资格 = 引擎
    * conversation 能力轴（与 record 无关）。
    */
   private reviveOrThrow(): void {
     const record = this.record;
-    // [U4 / §3.2.3 锚失效降级 → U6 引擎中立] 检测点在翻边**前**（markReopened CAS
+    // [U4 / §3.2.3 锚失效降级 → U3 pi 专属收窄] 检测点在翻边**前**（markReopened CAS
     // 仅收 idle——U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚在但
-    // 不可解析（pi：transcript 文件被回收 / zcode：库条目被 TTL 清，§3.2.6 ③）→
-    // 同 id 带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding
-    //（store.markReopened），摘要暂存 pendingReopen 由派发守卫消费（resume:undefined
-    // + prompt 注入）。锚缺失（从未开跑）不在此分支（无世代可推进，派发守卫按全新
-    // session 直派）。
+    // 不可解析（pi：transcript 文件被回收）→ 同 id 带历史重开——round 归零 + epoch+1
+    // + stopReason=reopened + 新锚 binding（store.markReopened），摘要暂存
+    // pendingReopen 由派发守卫消费（resume:undefined + prompt 注入）。锚缺失（从未
+    // 开跑）不在此分支（无世代可推进，派发守卫按全新 session 直派）。
+    //
+    // zcode 锚不进本降级：库投影预检查（isAnchorResolvable）对 zcode 系统性误判——
+    // app-server 对 session 元数据行的落库滞后于 session/create 应答（分钟级窗 +
+    // 部分行永不落库），滞后窗内预检查恒 false，会把完全有效的锚误降级 reopen（丢
+    // resume 通道 + 每条消息推进世代）。锚的活性改由引擎真实 resume 结果承担（失败
+    // 时引擎注入锚失效声明段，见 zcode-engine buildResumeHistoryPrefix）；pi 锚 =
+    // session 文件即时落盘，预检查可靠，保持 reopen。
     const anchor = transcriptAnchorOf(record);
-    if (anchor !== undefined && !isAnchorResolvable(record)) {
+    if (anchor !== undefined && anchor.engine === "pi" && !isAnchorResolvable(record)) {
       // 摘要快照先于 markReopened（后者 round 归零——摘要须反映重开前的历史轮数）。
       const summary = buildReopenSummaryPrompt({
         id: record.id,
@@ -890,17 +906,13 @@ export class ConversationContinuation {
       });
       if (this.host.reopenRecord(record)) {
         this.pendingReopenSummary = summary;
-      } else if (anchor.engine === "zcode") {
-        // [U6 偏差登记] zcode 锚失效降级：现行 reopenRecord 宿主闭包（run-orchestration
-        // 领地）只承载 pi 锚（sessionFile 缺失恒 false）——zcode 走无世代推进降级
-        //（fresh session + 摘要注入，round 连续——与 drain 窗口降级/U4-D2 偏差同族：
-        // round 不重置则 notifyId 无撞键面，epoch 推进非必要）。世代推进版 reopen
-        //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
-        this.pendingReopenSummary = summary;
       } else {
-        // pi：false = CAS 拒绝（竞态翻位）或 binding 持久化失败（epoch 硬要求，
-        // markReopened 已回滚内存面）——两者 record 都保持 idle 可重试，响亮上抛
-        //（Recovery 指引同款：重试 message 即可，写失败详情见 markReopened warn）。
+        // [W1/R1 D1a] pi 与 zcode 同构两分支（原 zcode 无世代推进静默降级分支随
+        // 宿主闭包 transcriptAnchorOf 单点分派接线删除——分支的存在前提「闭包对
+        // zcode 恒 false」已消失）。false = CAS 拒绝（竞态翻位）或 binding 持久化
+        // 失败（epoch 硬要求，markReopened 已回滚内存面）——两者 record 都保持
+        // idle 可重试，响亮上抛（Recovery 指引同款：重试 message 即可，写失败详情
+        // 见 markReopened warn）。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
           `while the message was being processed, or persisting the reopened generation failed). ` +

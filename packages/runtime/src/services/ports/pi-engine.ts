@@ -106,6 +106,8 @@ export interface PiSessionOptions {
   extensionPaths?: string[]
   /** 替换 pi 核心系统提示词（透传到 RpcClientOptions.systemPrompt → --system-prompt CLI）。 */
   systemPrompt?: string
+  /** 追加在 pi 基础系统提示词之后（透传到 RpcClientOptions.appendSystemPrompt → --append-system-prompt CLI）。 */
+  appendSystemPrompt?: string
   piCommand?: string
   /** 工具白名单（替换语义），透传到 RpcClientOptions.tools → --tools。 */
   tools?: string[]
@@ -195,8 +197,12 @@ export interface IPiEngine {
   switchSession(sessionPath: string): Promise<void>
   /** 查询 pi session 状态（get_state），返回归一后的 state 对象。 */
   getState(): Promise<Record<string, unknown> | undefined>
-  /** 向 pi 发送 extension_ui_response（extension UI / bridge 请求的响应，pi 不回 RPC reply）。 */
-  sendExtensionUiResponse(id: string, response: unknown, method?: string): void
+  /**
+   * 向 pi 发送 extension_ui_response（extension UI / bridge 请求的响应，pi 不回 RPC reply）。
+   * 返回 boolean（false = 未写进 pi stdin：进程不在/已退出或写失败）——应答承载用户决策，
+   * 调用方须消费 false 走可感知失败路径，不得静默丢弃。
+   */
+  sendExtensionUiResponse(id: string, response: unknown, method?: string): boolean
   /** 订阅 pi 事件流。返回 unsubscribe。事件由 EventAdapter 翻译，service 一般不直接处理。 */
   onEvent(listener: PiEventListener): () => void
 

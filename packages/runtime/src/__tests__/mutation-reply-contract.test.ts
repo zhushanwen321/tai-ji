@@ -3,7 +3,7 @@
  *
  * 锁定行为（ADR-0065 / C-pi-14，设计 state-truth-sync-architecture.md §3.3 D8）：
  * 全部 mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session 配置状态 /
- * model / preset 三域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
+ * model / preset / config 四域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
  * 分支一（后端可变换请求值：pi 钳制/pattern 换模）reply 必须携带生效值字段且消费侧
  * 禁乐观写；分支二（后端原样存储）reply 携带回显字段或登记豁免理由，消费侧允许
  * 乐观写 + reply 权威覆盖 + 失败回滚。
@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ServerMessageMap } from '@taiji/shared'
+import type { ServerMessageMap, ReplyPayloadMap } from '@taiji/shared'
 
 /**
  * 本测试文件位于 <runtime>/src/__tests__/。fileURLToPath 返回文件路径（首个 '..' 消掉
@@ -76,6 +76,16 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     replyKey: 'session.thinkingLevelSet',
     effectiveFields: ['level'],
   },
+  {
+    // 后端变换点 = 去重保序（Set 插入序，model-message-handler handleConfigSetScopedModels），
+    // 请求数组 ≠ 生效数组；reply 携带去重后生效值。wire reply 'config.scopedModels' 无具名
+    // ServerMessageMap 条目，ReplyPayloadMap 登记为内联形状（extractReplyShape 内联回退分支）。
+    type: 'config.setScopedModels',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'config.scopedModels',
+    effectiveFields: ['scopedModels'],
+  },
   // ── 分支二：后端原样存储，reply 携带回显字段（echo-value）──
   {
     type: 'preset.create',
@@ -97,6 +107,115 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'echo-value',
     replyKey: 'session.subagentDefaultEngineSet',
     effectiveFields: ['engineId'],
+  },
+  // ── 分支二（config 域）：偏好组 setter——set 原值落盘 + reply 读回生效值，全部亲读核实：
+  // config-preferences / smart-context-config / rename-config / system-prompt-terminal /
+  // retry-config 各 message handler；renameMode/retry 等的非法值归一在 helper 层拒绝或归一，
+  // reply 读回的即生效值（echo 权威覆盖语义承载）。──
+  {
+    type: 'config.setTerminalConfig',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.terminalConfig',
+    effectiveFields: ['config'],
+  },
+  {
+    type: 'config.setRetryConfig',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.retryConfig',
+    effectiveFields: ['config'],
+  },
+  {
+    type: 'config.setSystemPrompt',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.systemPrompt',
+    effectiveFields: ['config'],
+  },
+  {
+    type: 'config.setWorktreeRootDir',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.worktreeRootDir',
+    effectiveFields: ['dir'],
+  },
+  {
+    type: 'config.setSetupScript',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.setupScript',
+    effectiveFields: ['script'],
+  },
+  {
+    type: 'config.setBareSetupScript',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.bareSetupScript',
+    effectiveFields: ['script'],
+  },
+  {
+    type: 'config.setTimeout',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.worktreeTimeout',
+    effectiveFields: ['timeout'],
+  },
+  {
+    type: 'config.setDefaultBaseBranch',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.defaultBaseBranch',
+    effectiveFields: ['baseBranch'],
+  },
+  {
+    type: 'config.setAutoRenameEnabled',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.autoRenameEnabled',
+    effectiveFields: ['enabled'],
+  },
+  {
+    type: 'config.setRenameModel',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.renameModel',
+    effectiveFields: ['model'],
+  },
+  {
+    type: 'config.setRenameMode',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.renameMode',
+    effectiveFields: ['mode'],
+  },
+  {
+    type: 'config.setSmartContextEnabled',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.smartContextEnabled',
+    effectiveFields: ['enabled'],
+  },
+  {
+    type: 'config.setSmartContextCompactModel',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.smartContextCompactModel',
+    effectiveFields: ['model'],
+  },
+  {
+    type: 'config.setSmartContextThresholds',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.smartContextThresholds',
+    effectiveFields: ['thresholds'],
+  },
+  {
+    type: 'config.setSmartContextExcludedModels',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.smartContextExcludedModels',
+    effectiveFields: ['models'],
   },
   // ── 分支二：ack 豁免清单（reply 无回显字段，豁免理由逐条登记）──
   {
@@ -128,6 +247,96 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     branch: 'verbatim',
     contract: 'ack-exempt',
     rationale: '同 session.rename：wire 回显 + broadcastSessionList 全量刷新',
+  },
+  // ── 分支二（config 域）：ack 豁免——wire reply 多数实际携带回显 payload，但类型层登记
+  // void（domain register<void> 不读 reply payload），权威覆盖由广播通道承担（session.rename
+  // 同模式）；广播通道依据 ReplyPayloadMap 行注 + 各 message handler 实读。──
+  {
+    // u-locale-channel：renderer 是语言权威（乐观写 i18n 即生效，无 store 读回依赖），
+    // 无读回 RPC；成功只回 config.uiLocaleSet 空 ack，写盘失败走 D10 错误信封——
+    // reply 生效值无消费方（config-preferences-message-handler）。
+    type: 'config.setUiLocale',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'renderer 是语言权威（乐观写 i18n 即生效），无读回 RPC；成功只回 config.uiLocaleSet 空 ack，reply 生效值无消费方',
+  },
+  {
+    type: 'config.setProvider',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply 实际携带 config.providerUpdated { providerId } + broadcastProviderList 全量广播（provider-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.deleteProvider',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: '删除语义：wire reply config.providerUpdated { providerId, deleted } + broadcastProviderList；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.toggleProviderEnabled',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.providerUpdated { providerId } + broadcastProviderList（payload 显式携带目标 enabled，非翻转语义）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.removeProviderByKind',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: '删除语义：wire reply config.providerUpdated { providerId, deleted } + broadcastProviderList（provider-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setToolPermissions',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.providerUpdated { saved }（tool-permissions-message-handler）+ 广播；类型层登记 void，无生效值字段可回显',
+  },
+  {
+    type: 'config.setDefaultModel',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply 实际携带 config.defaults { defaultModel }（provider/modelId 拼复合串）+ 全 panel 广播带 source（model-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setSkill',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.skillUpdated { skill, success }（resources-message-handler）+ 广播；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.deleteSkill',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: '删除语义：wire reply config.skillDeleted { skillId, success }（resources-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setAgent',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.agentUpdated { agent, success }（resources-message-handler）+ 广播；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.deleteAgent',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: '删除语义：wire reply config.agentDeleted { agentId, success }（resources-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setSkillDirs',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.skillDirs { dirs }（resources-message-handler，目录列表整组刷新）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setAgentDirs',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.agentDirs { dirs }（resources-message-handler，同 setSkillDirs 模式）；类型层登记 void，权威覆盖由广播通道承担',
+  },
+  {
+    type: 'config.setExtensionDirs',
+    branch: 'verbatim',
+    contract: 'ack-exempt',
+    rationale: 'wire reply config.extensionDirs { dirs }（resources-message-handler，同 setSkillDirs 模式）；类型层登记 void，权威覆盖由广播通道承担',
   },
   // ── 非配置状态 mutation（excluded，排除理由登记）──
   {
@@ -184,6 +393,24 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'excluded',
     rationale: '实体生命周期（交接创建新 session，与 session.create 同族）：reply message.status ack，完成经 session.handoffComplete 独立广播；新 session 生效配置经 D6 继承链承接，非 mutation 回执语义',
   },
+  {
+    type: 'session.abortPlan',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（投影链唯一承载，abort 前后无 mutation 生效值概念）',
+  },
+  {
+    type: 'session.forceQuit',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（强制退出 session 进程，与 session.abortPlan 同族）：reply void ack，状态经独立广播通道推回，无 mutation 生效值概念',
+  },
+  {
+    type: 'session.abortHandoff',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（取消进行中的 handoff：runtime client.abort + 清 listener/timer/inflight）：reply message.status ack（与 message.abort 同模式），无配置状态生效值概念',
+  },
 ]
 
 // ── protocol.ts 静态扫描（提取三个区段 + 候选 mutation 谓词）────────────────
@@ -210,8 +437,8 @@ const CLIENT_MESSAGE_TYPES_BLOCK = extractBlock('export type ClientMessageType =
 const REPLY_PAYLOAD_MAP_BLOCK = extractBlock('export interface ReplyPayloadMap {')
 const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessageMapBase {')
 
-/** 谓词覆盖域（ADR-0065「四、范围边界」）：session 配置状态 / model / preset 三域 */
-const MUTATION_DOMAINS = ['session', 'model', 'preset'] as const
+/** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config 四域 */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config'] as const
 
 /**
  * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头守卫取向声明）。
@@ -223,7 +450,7 @@ const MUTATION_DOMAINS = ['session', 'model', 'preset'] as const
  */
 const MUTATION_VERB_PREFIXES = [
   'set', 'rename', 'switch', 'create', 'update', 'delete', 'remove', 'recordUsage', 'import',
-  'fork', 'handoff', 'clear', 'reset', 'toggle', 'enable', 'disable', 'add',
+  'fork', 'handoff', 'clear', 'reset', 'toggle', 'enable', 'disable', 'add', 'abort', 'force',
 ] as const
 
 /** 判断 ClientMessageType 字面量是否为候选 mutation（域内 + 改值动词形态开头） */
@@ -255,22 +482,26 @@ function extractMapValue(block: string, key: string): string | undefined {
   return raw === undefined ? undefined : raw.split('//')[0].trim()
 }
 
-/** 提取 reply 形状文本：内联 `{ ... }` 直接返回；具名 `XxxMutationReply` 引用则取该 interface 的 body */
-function extractReplyShape(replyKey: string): string {
-  const value = extractMapValue(SERVER_MESSAGE_MAP_BASE_BLOCK, replyKey)
-  if (value === undefined) {
-    throw new Error(`ServerMessageMapBase 中未找到 reply key '${replyKey}'——协议类型登记缺失`)
+/** 提取 reply 形状文本：内联 `{ ... }` 直接返回；具名 `XxxMutationReply` 引用则取该 interface 的 body。
+ *  ServerMessageMapBase 无该 replyKey 时回退取 ReplyPayloadMap 映射行的内联形状——适用
+ *  wire reply 无具名广播条目的 RPC（如 config.setScopedModels 的 'config.scopedModels'）。 */
+function extractReplyShape(replyKey: string, requestType: string): string {
+  const base = extractMapValue(SERVER_MESSAGE_MAP_BASE_BLOCK, replyKey)
+  if (base !== undefined) {
+    if (base.startsWith('{')) return base
+    // 具名引用：取 `export interface <Name> {` 到配对 `}` 的 body（嵌套一层对象字面量内
+    // 的 } 会导致提前截断——当前 mutation reply 形状均为扁平字段，无嵌套）
+    const anchor = `export interface ${base} {`
+    const start = PROTOCOL_SOURCE.indexOf(anchor)
+    if (start === -1) {
+      throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts 中未找到其 interface 声明`)
+    }
+    const end = PROTOCOL_SOURCE.indexOf('\n}', start)
+    return PROTOCOL_SOURCE.slice(start, end)
   }
-  if (value.startsWith('{')) return value
-  // 具名引用：取 `export interface <Name> {` 到配对 `}` 的 body（嵌套一层对象字面量内
-  // 的 } 会导致提前截断——当前 mutation reply 形状均为扁平字段，无嵌套）
-  const anchor = `export interface ${value} {`
-  const start = PROTOCOL_SOURCE.indexOf(anchor)
-  if (start === -1) {
-    throw new Error(`reply '${replyKey}' 引用了具名类型 ${value}，但 protocol.ts 中未找到其 interface 声明`)
-  }
-  const end = PROTOCOL_SOURCE.indexOf('\n}', start)
-  return PROTOCOL_SOURCE.slice(start, end)
+  const inline = extractMapValue(REPLY_PAYLOAD_MAP_BLOCK, requestType)
+  if (inline !== undefined && inline.startsWith('{')) return inline
+  throw new Error(`ServerMessageMapBase 中未找到 reply key '${replyKey}'——协议类型登记缺失`)
 }
 
 describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强制）', () => {
@@ -329,18 +560,24 @@ describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强
           ? '分支一（后端可变换）禁 void：reply 生效值是显示态唯一合法来源（C-pi-13 事故 B 形态）。'
           : '分支二 echo-value 应携带回显字段；确需 ack 型须把 contract 改为 ack-exempt 并登记豁免理由（同步 ADR-0065 豁免清单）。',
       ].join('')).not.toBe('void')
-      expect(value, `'${entry.type}' 的 ReplyPayloadMap 须引用 ServerMessageMap['${entry.replyKey}']（payload 消费型）`)
-        .toBe(`ServerMessageMap['${entry.replyKey}']`)
+      // payload 消费型两种合法形态：引用具名 ServerMessageMap 条目，或内联 payload 形状
+      //（wire reply 无具名广播条目的 RPC，如 config.setScopedModels 的 { scopedModels }）
+      const refForm = `ServerMessageMap['${entry.replyKey}']`
+      expect(
+        value === refForm || (value !== undefined && value.startsWith('{')),
+        `'${entry.type}' 的 ReplyPayloadMap 须引用 ${refForm} 或内联 payload 形状（当前：${value ?? '(未登记)'}）`,
+      ).toBe(true)
     }
   })
 
   it('effective-value/echo-value 项：reply 形状含全部登记字段且必需（非 optional）', () => {
     for (const entry of MUTATION_RPC_REGISTRY) {
       if (entry.contract !== 'effective-value' && entry.contract !== 'echo-value') continue
-      const shape = extractReplyShape(entry.replyKey as string)
+      const shape = extractReplyShape(entry.replyKey as string, entry.type)
       for (const field of entry.effectiveFields ?? []) {
         expect(
-          new RegExp(`(^|\\n)\\s*${field}:`).test(shape),
+          // `(^|[{]|\n)`：任意行首（具名 interface body 字段）或 `{` 后（单行内联形状 `{ field: ... }`）
+          new RegExp(`(^|[{]|\\n)\\s*${field}:`).test(shape),
           [
             `reply '${entry.replyKey}' 的形状中未找到必需字段 "${field}"（'${entry.type}' 的 ${entry.contract} 契约）。`,
             '生效值/回显字段缺失 = 消费侧无从取真值（C-pi-13）。请在 protocol.ts 的具名 reply 类型或内联形状中补齐（必需，不 optional）。',
@@ -383,10 +620,15 @@ describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强
     const presetCreateEcho: HasRequiredField<ServerMessageMap['preset.create'], 'preset'> = true
     const presetUpdateEcho: HasRequiredField<ServerMessageMap['preset.update'], 'preset'> = true
     const engineIdEcho: HasRequiredField<ServerMessageMap['session.subagentDefaultEngineSet'], 'engineId'> = true
+    // config 域代表：具名形状（smartContextEnabled）与内联形状（setScopedModels 的 ReplyPayloadMap 行）
+    const smartContextEnabledEcho: HasRequiredField<ServerMessageMap['config.smartContextEnabled'], 'enabled'> = true
+    const terminalConfigEcho: HasRequiredField<ServerMessageMap['config.terminalConfig'], 'config'> = true
+    const scopedModelsEffective: HasRequiredField<ReplyPayloadMap['config.setScopedModels'], 'scopedModels'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
       presetCreateEcho, presetUpdateEcho, engineIdEcho,
+      smartContextEnabledEcho, terminalConfigEcho, scopedModelsEffective,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)

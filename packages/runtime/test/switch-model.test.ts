@@ -38,6 +38,7 @@ import type {
 } from '../src/interfaces.js'
 import type { IProcessManager, IPiEngine } from '../src/services/ports/pi-engine.js'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
+import { SESSION_NOT_ACTIVE } from '../src/utils/errors.js'
 
 // pi-provider-store: 控制默认 model 配置（测试主路径需要 model 已配置）
 const providerMocks = vi.hoisted(() => ({
@@ -179,7 +180,7 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
       .rejects.toThrow('session not active')
   })
 
-  it('U3: session 在 Map 但无 client → 不写缓存、不广播，返回 sessionId', async () => {
+  it('U3: session 在 Map 但无 client → 拒绝 SESSION_NOT_ACTIVE，不写缓存、不广播', async () => {
     const { service, pm, broker, clientMap } = createService()
     // 1. 建立一个 session（会进 sessions Map 且挂 client）
     const seedState = { sessionId: 's1', sessionFile: '/fake/s1.jsonl' }
@@ -197,12 +198,14 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
     expect(beforeModelId).toBeDefined()
     vi.mocked(broker.broadcast).mockClear()
 
-    // 3. switchModel 应 fail-skip：不写缓存、不广播
-    const returned = await service.switchModel('s1', 'new' as ProviderId, 'model')
-    expect(returned).toBe('s1')
-    // modelId 未被改写（未假装成功）
+    // 3. RT-4#4 契约：无 client 是真失败，必须以 SESSION_NOT_ACTIVE 显形——
+    // 旧契约「fail-skip 返回 sessionId」是被审计点名的假成功（transport 按请求值
+    // 回 model.switched，UI 乐观确认而内存档位未生效）
+    await expect(service.switchModel('s1', 'new' as ProviderId, 'model'))
+      .rejects.toMatchObject({ code: SESSION_NOT_ACTIVE })
+    // modelId 未被改写（拒绝路径不落半态）
     expect(service.getSummary('s1')?.modelId).toBe(beforeModelId)
-    // 未广播 session.state_changed（不广播假信号）
+    // 未广播 session.state_changed（失败不产生状态假信号）
     expect(findBroadcast(broker, 'session.state_changed')).toBeUndefined()
   })
 })

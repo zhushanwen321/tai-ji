@@ -9,11 +9,13 @@
       <Button
         variant="ghost"
         class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
-        :title="t('panel.thinkingLevel.title')"
+        :class="props.iconOnly && 'px-1.5'"
+        :title="iconOnlyTitle"
       >
         <Brain class="size-3 shrink-0" />
-        <span>{{ currentLabel }}</span>
+        <span v-if="!props.iconOnly">{{ currentLabel }}</span>
         <ChevronDown
+          v-if="!props.iconOnly"
           class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
           :class="open && 'rotate-180'"
         />
@@ -86,8 +88,18 @@ const props = withDefaults(
     /** 当前模型档位可用集（models[].supportedLevels，runtime 注册表 pi 同源计算下发，U6 切源）。
      *  undefined/空 = 下发链路未接通 → 归一默认五档（off..high）。 */
     supportedLevels?: string[]
+    /**
+     * 纯图标态（u6b fit L2 图标化）：只留 Brain 图标，档位名进 title（点击仍出档位 popover，
+     * 交互路径不丢）。
+     */
+    iconOnly?: boolean
  }>(),
-  { level: undefined, levelMap: undefined, supportedLevels: undefined },
+  {
+    level: undefined,
+    levelMap: undefined,
+    supportedLevels: undefined,
+    iconOnly: false,
+  },
 )
 
 const { t } = useI18n()
@@ -110,6 +122,11 @@ const availableOptions = computed<ThinkingLevelOption[]>(() => {
 
 const currentLabel = computed(
   () => props.level ? getDisplayLabel(level.value, props.levelMap, t) : t('panel.thinkingLevel.placeholder'),
+)
+
+/** 图标态 title：标题 + 当前档位（文本被图标取代，档位信息不能丢） */
+const iconOnlyTitle = computed(() =>
+  props.iconOnly ? `${t('panel.thinkingLevel.title')} · ${currentLabel.value}` : t('panel.thinkingLevel.title'),
 )
 
 function onSelect(opt: ThinkingLevelOption): void {

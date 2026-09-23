@@ -2,7 +2,13 @@
 /**
  * Mock fixture —— 最小但结构完整的预制数据（D7：严格镜像 shared 类型）。
  *
- * - 5 个 SessionSummary，覆盖 D6 派生 5 态（error/waiting/done/running/stopped 各一）
+ * - 8 个 SessionSummary（5 个演示态 + 3 个 agent 子会话 s3-c1/c2/c3），覆盖 D6 派生 5 态
+ *   （error/waiting/done/running/stopped 各一）
+ * - [u7a 模式/调度 fixture] s3 额外承载两个演示角色（同一会话，不是新增第三类）：
+ *   ① 非默认模式会话：launchPresetId = builtin:session-dispatch（≠ 全局默认 builtin:full）→
+ *      composer 只读模式 chip + 流顶声明行的渲染断言锚点；
+ *   ② 子会话父节点：3 个 agent 派发子会话（spawnSource:'agent' + parentAgentSessionId:'s3'）→
+ *      托盘第 4 件（session kind）计数与面板行断言锚点；子会话状态覆盖 运行中/完成/失败 三支。
  * - s1 多回合（error）：user / assistant text / tool_call(成功+失败) / thinking，
  *   末条 assistant status:error → error 态；覆盖 G2-006 契约所有块类型让 UC-2 可验收（回合折叠 pill 可验）
  * - s2 单回合（waiting）：末条 assistant 含 status:running 的 toolCall → waiting 脉冲
@@ -15,7 +21,7 @@
  * 内存介质（D7）：reload 重置，不写文件。
  */
 import type { SessionSummary, Message } from '@taiji/shared'
-import { textToSegments } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS, textToSegments } from '@taiji/shared'
 
 // E2E 构建期由 Vite define 注入 globalThis.__E2E_SAMPLE_PROJECT_CWD__（renderer/vite.config.ts）：
 // E2E 构建时替换为 sample-project 绝对路径。vitest/非 E2E 构建时该属性 undefined → 空串兜底。
@@ -60,6 +66,9 @@ export const fixtureSessions: SessionSummary[] = [
     lastActiveAt: NOW - 5 * DAY,
     modelId: 'OpenAI/gpt-5',
     tokenCount: 8_700,
+    // [u7a] 非默认模式会话：调度模式（builtin:session-dispatch）≠ 全局默认 builtin:full
+    // → composer 只读 chip 与流顶声明行的渲染断言锚点。同时是下方 3 个子会话的父节点。
+    launchPresetId: BUILTIN_PRESET_IDS.SESSION_DISPATCH,
   },
   {
     id: 's4',
@@ -80,6 +89,42 @@ export const fixtureSessions: SessionSummary[] = [
     lastActiveAt: NOW - 60 * MINUTE,
     modelId: 'Anthropic/claude-sonnet-4.5',
     tokenCount: 2_400,
+  },
+  // ── [u7a] 调度模式派发的子会话（parentAgentSessionId → s3）──────────────────────
+  // 三支状态覆盖托盘 session 面板分支：c1 运行中（active + running toolCall）、
+  // c2 完成态（done）、c3 失败态（error）。cwd 与父会话一致（S5：子会话在父 project 下可见）。
+  {
+    id: 's3-c1',
+    label: '子会话：解析查询计划',
+    cwd: '/Users/dev/Code/work-project',
+    status: 'active',
+    lastActiveAt: NOW - 5 * MINUTE,
+    modelId: 'Anthropic/claude-sonnet-4.5',
+    tokenCount: 1_800,
+    spawnSource: 'agent',
+    parentAgentSessionId: 's3',
+  },
+  {
+    id: 's3-c2',
+    label: '子会话：压测连接池',
+    cwd: '/Users/dev/Code/work-project',
+    status: 'done',
+    lastActiveAt: NOW - 12 * MINUTE,
+    modelId: 'Anthropic/claude-sonnet-4.5',
+    tokenCount: 4_200,
+    spawnSource: 'agent',
+    parentAgentSessionId: 's3',
+  },
+  {
+    id: 's3-c3',
+    label: '子会话：回归用例跑批',
+    cwd: '/Users/dev/Code/work-project',
+    status: 'error',
+    lastActiveAt: NOW - 25 * MINUTE,
+    modelId: 'Anthropic/claude-sonnet-4.5',
+    tokenCount: 900,
+    spawnSource: 'agent',
+    parentAgentSessionId: 's3',
   },
 ]
 
@@ -236,6 +281,69 @@ export const fixtureMessages: Record<string, Message[]> = {
       status: 'complete',
       isInterrupted: true,
       timestamp: NOW - 59 * MINUTE,
+    },
+  ],
+  // ── [u7a] 子会话最小消息流：点开托盘面板行即 hydrate，状态分支可断言 ──
+  // c1 末条 assistant 末位 toolCall status:running → 派生 waiting（进行中）
+  's3-c1': [
+    {
+      id: 'u-c1',
+      role: 'user',
+      content: textToSegments('把 /api/orders 的查询计划解析一下，标出慢点。'),
+      status: 'complete',
+      timestamp: NOW - 6 * MINUTE,
+    },
+    {
+      id: 'a-c1',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+      timestamp: NOW - 5 * MINUTE,
+      toolCalls: [
+        {
+          id: 'tc-c1',
+          toolName: 'bash',
+          input: { command: 'EXPLAIN ANALYZE SELECT * FROM orders' },
+          status: 'running',
+          startTime: NOW - 5 * MINUTE,
+        },
+      ],
+      contentBlocks: [{ type: 'toolCall', refId: 'tc-c1' }],
+    },
+  ],
+  // c2 末条 assistant 正常收尾 → 派生 done（完成态）
+  's3-c2': [
+    {
+      id: 'u-c2',
+      role: 'user',
+      content: textToSegments('压测连接池，给出 P95。'),
+      status: 'complete',
+      timestamp: NOW - 20 * MINUTE,
+    },
+    {
+      id: 'a-c2',
+      role: 'assistant',
+      content: '连接池在 200 并发下 P95 = 42ms，无排队超时。',
+      status: 'complete',
+      timestamp: NOW - 12 * MINUTE,
+    },
+  ],
+  // c3 末条 assistant status:error → 派生 error（失败态，面板 error 色分支）
+  's3-c3': [
+    {
+      id: 'u-c3',
+      role: 'user',
+      content: textToSegments('把回归用例跑一遍。'),
+      status: 'complete',
+      timestamp: NOW - 30 * MINUTE,
+    },
+    {
+      id: 'a-c3',
+      role: 'assistant',
+      content: '',
+      error: '用例容器启动失败：端口 5432 被占用。',
+      status: 'error',
+      timestamp: NOW - 25 * MINUTE,
     },
   ],
 }

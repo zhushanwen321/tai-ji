@@ -57,6 +57,11 @@ coverage/
 # ZCode plan mode artifacts (session-local planning docs)
 .zcode/plans/
 
+# ZCode dynamic-workflow engine artifacts (run script snapshots + launch drafts;
+# .zcode/agents/ stays tracked — subagent definitions)
+.zcode/workflow-runs/
+.zcode/workflow-drafts/
+
 # Legacy build dir from pre-monorepo layout (commit 0f6eed87 migrated src-electron/
 # to packages/* + apps/electron). Leftover build artifacts + node_modules linger in
 # some worktrees; ignore to prevent accidental staging.

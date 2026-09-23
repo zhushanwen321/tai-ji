@@ -13,11 +13,11 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, resolve, sep } from 'node:path'
 import { expandHome } from '../../utils/path-utils.js'
 import type { ThinkingLevel } from '@taiji/shared'
-import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS, PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
 import type { IExtensionService, IConfigService } from '../../interfaces.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { PresetService, PresetResolution } from '../preset-service.js'
-import { BUILTIN_EXTENSIONS_MISSING } from '../../utils/errors.js'
+import { BUILTIN_EXTENSIONS_MISSING, toErrorMessage } from '../../utils/errors.js'
 
 /**
  * thinkingLevel 合法值集合（S-RT-5；W2 值域 SSOT 派生，A-03 修复）。
@@ -64,25 +64,76 @@ export function resolveSkillPaths(configStore: IConfigStore, cwd: string): strin
 /**
  * 收集有效的 extension 路径（经 ExtensionService）。cwd 用于解析相对的 discovery extension 目录。
  *
- * 打包产物断链（builtin staged 目录缺失）不可降级：rethrow 贯通 resolver 的
- * fail-fast（electron-build R3-S1）——吞掉会让无 presetId 的 session 启动路径
- * pi 无 --extension 静默启动（system-prompt 注入 / msg-id 映射无声失效），
- * 与 preset 路径（resolveLaunchPresetOptions 全链无 catch）语义对齐，错误冒泡到
- * session handler 可见。其余意外错误维持降级（旧版兼容：空列表不阻断会话）。
+ * [RT-4#5] 两态显式分流：
+ * - 「无可装扩展」：getExtensionPaths 正常 resolve 出空列表（合法 no-op），照常返回 []。
+ * - 「装载器异常」：读 discovery 目录 / settings 解析等抛错——与 builtin staged 断链
+ *   （BUILTIN_EXTENSIONS_MISSING）同族 fail-fast rethrow。此前 `console.warn + return []`
+ *   使「装载器异常」与「无可装扩展」同形，pi 无 --extension 静默启动（system-prompt
+ *   注入 / msg-id 映射无声失效），降级仅存磁盘日志、用户不可见。extension 装载是
+ *   两通路等价（live ≡ reload）的前提，属核心链——错误冒泡到 session handler 可见。
  */
 export async function resolveExtensionPaths(extensionService: IExtensionService, cwd?: string): Promise<string[]> {
   try {
     return await extensionService.getExtensionPaths(cwd)
   } catch (e) {
+    // builtin staged 断链自带结构化 code，原样贯通（既有 fail-fast 语义与 handler 消费面不变）
     if (typeof e === 'object' && e !== null && (e as NodeJS.ErrnoException).code === BUILTIN_EXTENSIONS_MISSING) throw e
-    console.warn('[session-service] getExtensionPaths failed:', e)
-    return []
+    // 其余装载器异常：包一层带恢复指引后 rethrow（与 BUILTIN_MISSING 同族，消息内嵌
+    // 恢复动作——检查数据目录可读性 / 禁用可疑扩展后重试）
+    throw new Error(
+      `[session-service] extension loader failed (session cannot start without extensions): ${toErrorMessage(e)}` +
+      ' — recovery: check readability of the extension discovery directories under the data dir' +
+      ' and the settings.json extension entries, then reopen the session',
+      { cause: e },
+    )
   }
 }
 
 /** 当前生效的替换系统提示词（委托 ConfigService.getReplaceSystemPrompt；未注入时 undefined，pi 走默认系统提示词）。 */
 export function resolveReplaceSystemPrompt(configService: IConfigService | null | undefined): string | undefined {
   return configService?.getReplaceSystemPrompt()
+}
+
+/**
+ * 模式 replace 段是否「启用且有实义文本」。
+ *
+ * 空白判定用 trim（与 spawn-args 的 `?.trim()` 拼装门同口径）：若只按 `!== ''` 判非空，
+ * 一个「enabled + 纯空白」的模式段会返回空白串 → spawn-args 的 trim 门将其丢弃 →
+ * 替换无值可传且**全局值已被压掉**，等价于「替换为空」的静默失效。故空白视为「未配置」，
+ * 回落下一步（全局 / pi 默认）。
+ */
+function hasEffectivePromptSegment(segment: { enabled: boolean; prompt: string } | undefined): segment is { enabled: boolean; prompt: string } {
+  return segment !== undefined && segment.enabled && segment.prompt.trim() !== ''
+}
+
+/**
+ * 模式级替换系统提示词的取值 helper（D3 优先级：模式 replace > 全局 replace > pi 默认）。
+ *
+ * 规则集中这一处，create/restore/fork 三处 spawn 共用（避免三处各写一份优先级判断）。
+ * 返回 undefined 即「无替换」——pi 走自带系统提示词。
+ *
+ * 取值与 argv 拼装的职责边界：本 helper 只做「选谁」，**不做** pi 二义陷阱的 `\n` 前缀处理
+ * ——前缀统一落在 spawn-args 的 argv 拼装处（`toInlinePromptValue`），模式值与全局值两条
+ * 来路同一处加前缀，不会出现「漏了某条通道」。
+ */
+export function resolveEffectiveSystemPrompt(
+  resolution: PresetResolution | undefined,
+  globalReplace: string | undefined,
+): string | undefined {
+  const segment = resolution?.prompt?.replace
+  return hasEffectivePromptSegment(segment) ? segment.prompt : globalReplace
+}
+
+/**
+ * 模式级追加系统提示词的取值 helper（D3 链序：模式 append 段无全局对手——全局追加由
+ * `@zhushanwen/pi-system-prompt` 扩展独立处理，两者共存不互斥）。
+ *
+ * 未启用 / 空白 / 未配置 → undefined（不拼 `--append-system-prompt`）。
+ * `\n` 前缀处理同 resolveEffectiveSystemPrompt，落在 spawn-args 拼装处。
+ */
+export function resolveAppendSystemPrompt(resolution: PresetResolution | undefined): string | undefined {
+  const segment = resolution?.prompt?.append
+  return hasEffectivePromptSegment(segment) ? segment.prompt : undefined
 }
 
 /**
@@ -127,13 +178,46 @@ export async function resolveLaunchPresetOptions(
 ): Promise<PresetResolution | undefined> {
   if (!presetService) return undefined
   let preset = presetService.getPreset(presetId)
+  let fellBackFromPresetId: string | undefined
   if (!preset) {
     // 找不到 preset 时 fallback 到 builtin:full（设计文档 §4.3）。
     // 避免返回 undefined 让 session-lifecycle 退到无 tool/thinking args 的旧行为。
+    // F1（设计 `mode-system-composer-density` §7.5 E4）：回落事实必须
+    // 随 resolution 上抛——restore 路径据此向 renderer 披露「模式已删除，本次以全工具模式启动」。
+    // 只报「已删除」不报后果即 E4 判定前提未达成。
+    fellBackFromPresetId = presetId
     preset = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)
     if (!preset) return undefined  // 理论上不会发生（builtin 永在）
   }
-  return presetService.resolve(preset, cwd)
+  // `resolve` 是 async（PresetService.resolve → Promise<PresetResolution>）：必须 await，
+  // 否则回落分支的 `{ ...resolution }` 展开 Promise 得空壳对象，静默丢掉 toolArgs/flags/
+  // extensionPaths/prompt 等全部字段（回落会话实际拿不到全工具参数，而披露行仍称「以全工具
+  // 模式启动」→ 假陈述）。无回落分支在 async 调用方 await 后恰好正确，故该缺陷长期未暴露。
+  const resolution = await presetService.resolve(preset, cwd)
+  // 无回落时保持对象同一性（既有测试/调用方断言 `.toBe(resolution)`；回落才新建对象附加事实）。
+  return fellBackFromPresetId === undefined ? resolution : { ...resolution, fellBackFromPresetId }
+}
+
+/**
+ * 模式回落事实 → pi 子进程出站 env（F1b，设计 `mode-system-composer-density`
+ * §7.5 E4 的 trace 披露面）。
+ *
+ * `resolveLaunchPresetOptions` 检测到悬空 presetId 时在 resolution 上附
+ * `fellBackFromPresetId`，本 helper 把它翻译成 pi 子进程 env：回落时 FROM=原悬空 id /
+ * TO=`builtin:full`；**未回落时两键写空串**而非省略——出站基座是「白名单过滤后的父 env」，
+ * 父 env 的 `TAIJI_` 前缀键会被继承，空串覆盖可显式清除陈旧值（避免非回落 session 被
+ * 误披露为已回落）。两键恒存在让 extension 侧读取形状稳定。
+ *
+ * 返回值直接作为 `RpcClientOptions.env` 的 extras（经 ProcessManager.createSession →
+ * rpc-client.start → buildPiOutboundEnv → buildOutboundChildEnv，C-proc-09 出站契约）。
+ * 纯函数、无副作用。
+ */
+export function buildPresetFallbackEnv(resolution: PresetResolution | undefined): Record<string, string> {
+  const from = resolution?.fellBackFromPresetId
+  return {
+    [PRESET_FALLBACK_ENV_KEYS.FROM]: from ?? '',
+    [PRESET_FALLBACK_ENV_KEYS.TO]: from === undefined ? '' : BUILTIN_PRESET_IDS.FULL,
+  }
 }
 
 /** buildPresetClientOptions 的返回形状：pi createSession options（preset 相关字段）的子集（全部可选）。 */

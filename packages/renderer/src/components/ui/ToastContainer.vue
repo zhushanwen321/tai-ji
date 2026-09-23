@@ -5,11 +5,29 @@
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
     （settings view 兜底）。
   -->
-  <TransitionGroup
-    tag="div"
-    name="toast"
-    class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none"
-  >
+  <div class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
+    <!-- RD-3#7 溢出折叠摘要：droppedCount 消费方——在列上限丢弃的通知以「还有 N 条」显形，
+         不再只 console.warn 无 UI 留痕。可关闭（resetDropped 归零，给累计计数一个重置出口）。 -->
+    <div
+      v-if="droppedCount > 0"
+      data-testid="toast-overflow-summary"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-surface py-1.5 pl-3 pr-1.5 text-[11.5px] text-neutral-dim shadow-lg"
+    >
+      <span data-testid="toast-overflow-text" class="select-text">{{ t('panel.message.toastDropped', { count: droppedCount }) }}</span>
+      <Button
+        variant="ghost"
+        class="ml-0.5 size-5 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+        :aria-label="t('panel.message.toastDroppedDismiss')"
+        @click="resetDropped"
+      >
+        <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      </Button>
+    </div>
+    <TransitionGroup
+      tag="div"
+      name="toast"
+      class="flex flex-col items-end gap-2.5"
+    >
     <div
       v-for="t in toasts"
       :key="t.id"
@@ -89,14 +107,17 @@
       </Button>
     </div>
   </TransitionGroup>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 
-const { toasts, remove, pause, resume } = useToast()
+const { t } = useI18n()
+const { toasts, remove, pause, resume, droppedCount, resetDropped } = useToast()
 const { selectSession } = useSidebar()
 
 /** toast 类型 → 边框强调色（背景统一 bg-surface，克制：色彩只落在 icon 与正文） */

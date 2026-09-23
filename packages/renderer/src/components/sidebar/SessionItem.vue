@@ -11,7 +11,9 @@
     :parent-agent-session-id="session.parentAgentSessionId"
     :has-agent-parent="hasAgentParent"
     :can-force-quit="canForceQuit"
+    :can-stop="canStop"
     @navigate-parent="emit('navigateParent', $event)"
+    @abort="emit('abort', $event)"
     @force-quit="emit('forceQuit', $event)"
   >
     <div
@@ -25,7 +27,7 @@
       @click="emit('select', session.id)"
       @mouseleave="confirming = false"
     >
-      <SessionItemDisplay :session="session" :active="active" :status="status" />
+      <SessionItemDisplay :session="displaySession" :active="active" :status="status" :child-count="childCount" />
 
       <SessionItemActions
         v-model:confirming="confirming"
@@ -57,11 +59,16 @@ import type { SessionItemSession } from './session-item/types'
  */
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   session: SessionItemSession
   active: boolean
   status: DerivedStatus
-}>()
+  /** 子会话数（按 parentAgentSessionId 计数，SessionList 注入）；只读徒标，0 不渲染 */
+  childCount?: number
+  /** 父 session 显示名（SessionList 反查血缘注入，sub 行展示「fork 自 <父名>」；
+   *  缺省回退 session.parentSession 原值——SessionItemDisplay 的 `parentLabel || parentSession`） */
+  parentLabel?: string
+}>(), { childCount: 0 })
 
 const emit = defineEmits<{
   select: [sessionId: string]
@@ -72,6 +79,9 @@ const emit = defineEmits<{
   /** 查看父 session（U8）：payload 单字符串 = parentAgentSessionId（与 select 同形）。
    *  跳转本身由上层（Sidebar/store）接线，本组件只发事件。 */
   navigateParent: [parentAgentSessionId: string]
+  /** 停止（软停止，两段确认后 emit）：abort 中止当前生成，上层接 chat.abort。
+   *  与 forceQuit（硬杀 pi 进程 → dead）不是同一能力，不可互相替代。 */
+  abort: [sessionId: string]
   /** 强制退出（两段确认后 emit）：杀 pi 进程 + stopped 收敛，上层接 RPC。 */
   forceQuit: [sessionId: string]
 }>()
@@ -84,6 +94,19 @@ const hasAgentParent = computed(
 )
 /** 非 dead session 可强制退出（dead 进程已退出，无需强杀；点击走 restore 重开）。 */
 const canForceQuit = computed(() => !isDead.value)
+/** 运行中（session.status === 'active' = pi 进程存活且生成中）可软停止：
+ *  菜单项「停止」→ abort（会话转 stopped，可 restore 重开）——ForkGroup 退役后能力迁入（D9）。 */
+const canStop = computed(() => props.session.status === 'active')
+
+/**
+ * 血缘展示用 session：把容器（SessionList.parentLabelOf）反查到的父名合并进展示对象。
+ * parentLabel 是展示期注入字段（不污染 SessionSummary 实体），合并在展示边界完成——
+ * 此前 SessionList 传了 :parent-label 但 SessionItem 未声明该 prop，血缘 sub 行实际
+ * 回退到 parentSession 原值（文件路径/UUID，不可读），与 SessionList 注释声明的机制不符。
+ */
+const displaySession = computed<SessionItemSession>(() =>
+  props.parentLabel ? { ...props.session, parentLabel: props.parentLabel } : props.session,
+)
 
 /**
  * 删除两段式确认态（确认 UI 在 Actions 子组件，经 v-model:confirming 双向）。

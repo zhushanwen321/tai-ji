@@ -271,6 +271,34 @@ describe('M2c 装配序：init 注入先于 findValidDefaultModel 的行为差�
     expect(r!.result).toBeNull()
   })
 
+  it('RT-3#5：未注入首次打一行 warn（带 context）且一次性——返回语义不变，重复调用不刷屏', () => {
+    initProviderCredentialResolver(undefined)
+    writeModels({})
+    writeSettings({ enabledModels: [] })
+    writeAuth({})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      // 第一次调用：catalog 兜底路径触发 warn（pickCredentialBackedCatalogProvider context）
+      findValidDefaultModel()
+      const firstWarns = warnSpy.mock.calls.filter(c => String(c[0]).includes('credential resolver not injected'))
+      expect(firstWarns).toHaveLength(1)
+      expect(String(firstWarns[0]![0])).toContain('context: pickCredentialBackedCatalogProvider')
+
+      // 第二次调用：计数去重，不再重复 warn
+      findValidDefaultModel()
+      expect(warnSpy.mock.calls.filter(c => String(c[0]).includes('credential resolver not injected'))).toHaveLength(1)
+
+      // (re)注入后重置：再清空可再报（装配序回归场景可观测）
+      initResolver()
+      initProviderCredentialResolver(undefined)
+      findValidDefaultModel()
+      expect(warnSpy.mock.calls.filter(c => String(c[0]).includes('credential resolver not injected'))).toHaveLength(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('对照（注入后）：同一份数据可选出 catalog provider——差异即装配序契约的语义后果', () => {
     writeModels({})
     writeSettings({ enabledModels: [] })

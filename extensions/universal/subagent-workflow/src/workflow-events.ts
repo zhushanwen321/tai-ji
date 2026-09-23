@@ -273,6 +273,15 @@ export function setupWorkflowDomain(
       get eventBus() {
         return resolveCurrentPi().events;
       },
+      // [reload-closeout D4] pending:unregister 直落权威面：finalizeRun 直接
+      // appendEntry 落盘（session JSONL 唯一权威），不经 eventBus emit→内存
+      // listener——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效，
+      // 丢失即注销 entry 永缺位（S1b 事故形态①段）。函数体内现读 current pi
+      // （与 log/onRunDone 同款 volatile 形态）——在飞 pump 持有的旧 deps 对象
+      // 经属性访问自动路由到新 pi。
+      appendEntry: (customType: string, data: unknown) => {
+        resolveCurrentPi().appendEntry(customType, data);
+      },
       scheduleTimeBudget: (runId: string, budgetTimeMs: number) =>
         scheduleTimeBudget(runId, deps, budgetTimeMs),
       onWorkflowCall: (name: string, args: Record<string, unknown>, parentRun: WorkflowRun) =>
@@ -563,12 +572,15 @@ export function setupWorkflowDomain(
     get eventBus() { return createLazy(resolveDeps, "eventBus"); },
     get workerHost() { return createLazy(resolveDeps, "workerHost"); },
     get runner() { return createLazy(resolveDeps, "runner"); },
-    // scheduleTimeBudget / onWorkflowCall 不可缺席（ports.ts D-12 regression fix）：
-    // rebuildRuntime 重排 run 级墙钟预算计时器、worker 脚本嵌套 workflow() 调用都经
-    // 这两个成员消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性静默放行），
-    // 带时间预算的 run 命中一次错误重试后计时器静默失效。转发形态与其余成员一致。
+    // scheduleTimeBudget / onWorkflowCall / appendEntry 不可缺席（ports.ts D-12
+    // regression fix 同族）：rebuildRuntime 重排 run 级墙钟预算计时器、worker 脚本
+    // 嵌套 workflow() 调用、finalizeRun 的 pending:unregister 直落都经这三个成员
+    // 消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性静默放行）；appendEntry
+    // 缺席尤其危险：workflow tool 的 run action 以 lazyDeps 为 deps 启动 run，直落
+    // 静默跳过 + emit 已删 = 注销 entry 永缺位。转发形态与其余成员一致。
     get scheduleTimeBudget() { return createLazy(resolveDeps, "scheduleTimeBudget"); },
     get onWorkflowCall() { return createLazy(resolveDeps, "onWorkflowCall"); },
+    get appendEntry() { return createLazy(resolveDeps, "appendEntry"); },
     get log() { return createLazy(resolveDeps, "log"); },
   };
 

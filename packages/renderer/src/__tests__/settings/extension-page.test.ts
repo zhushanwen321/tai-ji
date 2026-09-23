@@ -17,6 +17,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ExtensionItem } from '@taiji/core'
+import {
+  getSettingsStore,
+  provideSettingsTransport,
+  __resetSettingsStoreForTesting,
+  __resetSettingsTransportForTesting,
+  type SettingsTransport,
+} from '@taiji/core'
+import type { SkillDirConfig } from '@taiji/shared'
 
 /** mock 捕获 extension.upgrade / setAutoUpgrade 调用。vi.hoisted 保证在 vi.mock 工厂执行前就绪。 */
 const extensionMock = vi.hoisted(() => ({
@@ -38,6 +46,13 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   default: { extension: extensionMock },
   config: { detectSources: async () => [] },
 }))
+
+// RD-4#11：ExtensionPage onMounted 读 getDataDir——mock 该域以便注入「读取失败」路径
+const settingsDomainMock = vi.hoisted(() => ({
+  getDataDir: vi.fn(() => Promise.resolve('~/.taiji-dev')),
+  chooseDirectory: vi.fn(() => Promise.resolve(null)),
+}))
+vi.mock('@/api/domains/settings', () => settingsDomainMock)
 
 import ExtensionPage from '@/components/settings/extension/ExtensionPage.vue'
 import { useToast } from '@/composables/useToast'
@@ -265,5 +280,101 @@ describe('ExtensionPage 操作成功 toast 反馈（W4 D11）', () => {
     await flushPromises()
     expect(extensionMock.upgrade).toHaveBeenCalledWith('my-tools')
     expect(toasts.value.some((t) => t.message === '扩展已升级' && t.type === 'info')).toBe(true)
+  })
+})
+
+// ── RD-4#1 · 扩展加载路径保存失败回弹（skill/agent 同族第三处：onUpdateExtensionDirs）──
+//
+// 链路：LoadPaths 勾选（乐观编辑）→ emit update-dirs → onUpdateExtensionDirs →
+// settingsStore.setExtensionDirs（transport）→ reject → catch 置位 dirsSaveError →
+// LoadPaths 回弹至最近落盘值 + 常驻红字。权威值源 = store.extensionDirs 广播镜像
+// （dirs 域无 getter RPC，镜像只被成功落盘后的广播写入）。
+describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
+  function stubTransportWithFailingSetExtensionDirs(): SettingsTransport {
+    const noopUnsub = (): void => {}
+    return {
+      listProviders: async () => ({ providers: [] }),
+      listModels: async () => [],
+      setProvider: async () => undefined,
+      setScopedModels: async () => [],
+      discoverModels: async () => ({ success: true, models: [] }),
+      setSkillDirs: async () => undefined,
+      setAgentDirs: async () => undefined,
+      setExtensionDirs: () => Promise.reject(new Error('write failed')),
+      onProviders: () => noopUnsub,
+      onModels: () => noopUnsub,
+      onSkills: () => noopUnsub,
+      onAgents: () => noopUnsub,
+      onExtensions: () => noopUnsub,
+      onSkillDirs: () => noopUnsub,
+      onAgentDirs: () => noopUnsub,
+      onExtensionDirs: () => noopUnsub,
+      onDefaults: () => noopUnsub,
+      onSystemPrompt: () => noopUnsub,
+      onTerminalConfig: () => noopUnsub,
+    }
+  }
+
+  it('勾选目录保存失败 → toast + 常驻红字 + 勾选态回弹至最近落盘值', async () => {
+    __resetSettingsStoreForTesting()
+    __resetSettingsTransportForTesting()
+    const persisted: SkillDirConfig[] = [{ path: '/persisted/exts', enabled: false, scope: 'global' }]
+    getSettingsStore().extensionDirs.value = persisted
+    provideSettingsTransport(stubTransportWithFailingSetExtensionDirs())
+
+    const { toasts } = useToast()
+    toasts.value = []
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    const checkbox = document.body.querySelector<HTMLElement>('[data-testid="dir-row"] button[role="checkbox"]')
+    expect(checkbox).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
+
+    // 用户勾选 → 持久化 reject
+    checkbox!.click()
+    await flushPromises()
+
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('write failed'))).toBe(true)
+    expect(document.body.querySelector('[data-testid="load-paths-save-error"]')).not.toBeNull()
+    expect(checkbox!.getAttribute('data-state')).toBe('unchecked')
+  })
+})
+
+// ── RD-4#11 · getDataDir 读取失败显形（不伪装真实路径）──
+//
+// 链路：ExtensionPage onMounted → getDataDir() reject → catch 置位 dataDirReadFailed →
+// 页面常驻「数据目录读取失败，用户级强制目录暂不展示」标注（此前无 try/catch，静默回落
+// 写死 ~/.taiji，dev 实例路径误导排查；C-proc-26 后 dev/prod 缺省不同，兜底不断言任一路径）。
+describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
+  it('getDataDir reject → 常驻标注（不伪装真实路径）', async () => {
+    settingsDomainMock.getDataDir.mockRejectedValueOnce(new Error('ipc down'))
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    const note = document.body.querySelector('[data-testid="extension-datadir-read-failed"]')
+    expect(note).not.toBeNull()
+    expect(note!.textContent).toContain('读取失败')
+
+    // C-proc-26：dev/prod 数据目录缺省不同，兜底不断言任一具体路径——reject 时
+    // user 级强制目录不展示，仅剩 project 级（防回退到写死 ~/.taiji 兜底的旧形态）。
+    const forcedRows = document.body.querySelectorAll('[data-testid="forced-dir-row"]')
+    expect(forcedRows.length).toBe(1)
+    expect(forcedRows[0].textContent).toContain('.taiji/extensions')
+    expect(forcedRows[0].textContent).not.toContain('~/.taiji')
+  })
+
+  it('getDataDir 成功 → 无标注', async () => {
+    settingsDomainMock.getDataDir.mockResolvedValueOnce('~/.taiji-dev')
+    wrapper = mount(ExtensionPage, { props: { extensions: [] }, attachTo: document.body })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="extension-datadir-read-failed"]')).toBeNull()
+
+    // 成功路径：user 级强制目录按实际数据目录展示（动态推导，非写死）
+    const forcedRows = document.body.querySelectorAll('[data-testid="forced-dir-row"]')
+    expect(forcedRows.length).toBe(2)
+    expect(forcedRows[0].textContent).toContain('~/.taiji-dev/extensions')
+    expect(forcedRows[1].textContent).toContain('.taiji/extensions')
   })
 })

@@ -135,3 +135,27 @@ describe('TraceRowItem.suffix kind 特化输出锚定（round3 S1 / mutation M3�
     }
   })
 })
+
+describe('TraceRowItem MALFORMED 行号未知降级（RD-2#6：不伪装「第 0 行」）', () => {
+  /** 行 div（模板前导注释使组件成 fragment 根，attributes 须落在行元素上取） */
+  function rowElOf(w: ReturnType<typeof mountRow>) {
+    return w.find('[data-testid^="trace-row-"]')
+  }
+
+  it('无 lineNumber（makeRow 本就缺省）→ 行文案「行号未知」，hover 提示不含「第 0 行」假行号', () => {
+    const w = mountRow(makeRow('MALFORMED', {}))
+    expect(w.text()).toContain('无法解析的 entry（行号未知）')
+    expect(w.text()).not.toContain('第 0 行')
+    const title = rowElOf(w).attributes('title')
+    expect(title).toContain('行号未知')
+    expect(title).not.toContain('第 0 行')
+    w.unmount()
+  })
+
+  it('有 lineNumber（回归锚）→ 行文案与 hover 提示带真实行号', () => {
+    const w = mountRow({ ...makeRow('MALFORMED', {}), lineNumber: 7 })
+    expect(w.text()).toContain('第 7 行')
+    expect(rowElOf(w).attributes('title')).toContain('第 7 行')
+    w.unmount()
+  })
+})

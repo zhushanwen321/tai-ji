@@ -27,10 +27,13 @@
  * - 必须在 sanitizeInvalidProviders 之前：sanitize 对非 catalog 空壳条目直接删除，
  *   先迁移才能把空壳条目的 quota 等寄生数据保入 providers.json（否则数据丢失）。
  */
-import { copyFileSync, existsSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IConfigStore, ConfigProviderConfig } from '../ports/config.js'
 import type { TaijiProviderStore, ProviderExtras } from '../provider-extras-store.js'
+
+/** 迁移前备份副本的文件权限（RT-5#7）：仅属主读写——副本可含明文 apiKey，不得比源文件宽松。 */
+const BACKUP_FILE_MODE = 0o600
 
 /** 单条目剥离结果：extras = 迁出数据，stripped = 剥离后条目，dirty = 是否含寄生字段。 */
 export interface StripResult {
@@ -112,11 +115,20 @@ export async function migrateProviderExtras(
   }
   report.noOp = false
 
-  // 备份磁盘原文件（写回前；no-op 时不产生备份，保证二次启动文件 mtime/hash 不变）
+  // 备份磁盘原文件（写回前；no-op 时不产生备份，保证二次启动文件 mtime/hash 不变）。
+  // RT-5#7：副本 chmod 0600（源文件含明文 apiKey，副本不得比源文件更宽松）+ 后缀已
+  // 纳入 cleanupAgedBackupResidue 回收家族（含凭据走 30 天窗口，见 json-store 注释）。
   const modelsPath = join(configStore.getPiAgentDir(), 'models.json')
   if (existsSync(modelsPath)) {
     const ts = new Date().toISOString().replace(/[:.]/g, '')
-    copyFileSync(modelsPath, `${modelsPath}.bak-migrate-${ts}`)
+    const backupPath = `${modelsPath}.bak-migrate-${ts}`
+    copyFileSync(modelsPath, backupPath)
+    try {
+      chmodSync(backupPath, BACKUP_FILE_MODE)
+    } catch (e) {
+      // best-effort 收紧：chmod 失败（如异构文件系统）不阻断迁移——副本仍在回收窗口内被清理
+      console.warn(`[provider-extras-migration] backup chmod 0600 failed: ${backupPath}`, e instanceof Error ? e.message : e)
+    }
   }
 
   // 第二遍：寄生数据入 providers.json（合并策略：字段级合并——已有字段域保留，缺失字段域补入）。

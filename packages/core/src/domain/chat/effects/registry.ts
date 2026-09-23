@@ -78,6 +78,7 @@ import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
+import { isDevMode } from '../../../platform/dev-mode'
 // [session-occupancy u4a] message_end(user) 三分支 ①（defer 分区 FIFO 匹配）与 ①③ 共用
 // helper 归位 effects/user-delivery.ts（机制独立成模块，u4b flush 确认驱动只扩展该文件）
 import { confirmDeferQueueEntry, extractUserContentText, removeQueuedTextFromSnapshot } from './user-delivery'
@@ -440,8 +441,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       if (m.role !== 'assistant' || m.status !== 'streaming') return m
       changed = true
       // 终态字段 patch 单源（S4-A6）：
-      // usage/error/content 只作用于末位 assistant，见 terminalMessagePatch 注释
-      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload })
+      // usage/error/content/endedAt 只作用于末位 assistant，见 terminalMessagePatch 注释
+      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt: Date.now() })
     })
     if (changed) commitMessages(messages, sid, next)
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收口：错误信息必须以纯 error
@@ -450,9 +451,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
     if (isErrorStop && !changed) {
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
+      // 同帧气泡：开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
@@ -485,10 +488,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'error', errorText)
     // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },
@@ -503,19 +507,21 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'stream_error', streamErrContent)
     // 无前置 streaming entity 时需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
+      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
+      const errNow = Date.now()
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: errNow, endedAt: errNow },
       ])
     }
   },
 
-  // B1（PR#86 review）：pi 静默卡死 WARN（120s 无活动，提示性，不中断流）。
-  // 与 stream_error 物理隔离——仅追加 system 提示消息，不调 finalizeSession，
-  // session 保持 streaming 态（pi 可能只是慢，130s 后恢复产出）。
+  // B1（PR#86 review）：非终结性提示通道，与 stream_error 物理隔离——仅追加 system
+  // 提示消息，不调 finalizeSession，session 保持 streaming 态。两个生产者：ping 探测
+  // 的 pi 静默卡死 WARN（120s 无活动，pi 可能只是慢，130s 后恢复产出）与 EventAdapter
+  // 的单帧翻译失败提示（MF-1-13：pi 流继续、turn 可能照常成功，失败帧不可终结 turn）。
   // [W2 fix-chat-flow-order D4] liveOnly 标记（全仓唯一写入点）：stream_warn 是 taiji runtime
-  // 自产健康警告，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
+  // 自产提示，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
   // 消息的正确入流路径），分组层据此归 turn 内 notice（不切断 turn，W3 消费），不参与
   // 「live ≡ reload」等价性断言。
   'message.stream_warn': (ctx, sid, payload) => {
@@ -880,6 +886,37 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
 }
 
 /**
+ * 终态帧 type 集合（收口在 handler 尾部执行的帧）：单帧异常安全网的裁决依据——
+ * 这些帧的 finalizeSession 调用若被异常截断，session 的 streaming 实体永不收口
+ * （isGenerating 恒 true，输入框永久禁用），必须在 dispatch 层补收口（RD-1#5）。
+ */
+const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
+  'message.complete',
+  'message.error',
+  'message.stream_error',
+])
+
+/**
+ * [RD-1#9] 未注册 message.* 帧类型的 dev 观测去重集合（一次/类型 warn 防刷屏）。
+ *
+ * 与已登记的「坏 entry 静默丢弃」裁决不同类：未注册 type **无构造点守卫**，是 runtime
+ * 新增 message.* 帧而注册表漏接的协议漂移，旧实现零痕迹。dev 留痕、生产零开销（isDevMode 门）。
+ * 清理：__clearUnhandledFrameTypeWarnForTest（测试隔离）。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
+const warnedUnregisteredFrameTypes = new Set<string>()
+
+/** [RD-1#9] 未注册 type 的一次性 dev warn（观测补齐，no-op 行为不变）。 */
+function warnUnregisteredFrame(type: string, sessionId: string): void {
+  if (!isDevMode() || warnedUnregisteredFrameTypes.has(type)) return
+  warnedUnregisteredFrameTypes.add(type)
+  console.warn(`[effects] unhandled frame type ${type} (sid=${sessionId}) — no message effect registered; frame is a no-op (protocol drift or intentionally unhandled)`)
+}
+
+/** 测试专用：清空去重集合（对齐 platform/dev-mode __resetDevModeForTesting 模式）。 */
+export function __clearUnhandledFrameTypeWarnForTest(): void { warnedUnregisteredFrameTypes.clear() }
+
+/**
  * message.* 事件的单一入口（消除 double-dispatch）。
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
@@ -887,6 +924,13 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
  * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
+ * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。
+ *
+ * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
+ * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
+ * 理由：非终态帧（delta/queue_update 等）半执行后下一帧自然继续，强行收口反而误杀
+ * 进行中的流；终态帧的收口是 handler 的最后一步，被截断 = 永久卡 streaming，且
+ * finalizeSession 幂等（handler 已收口则 no-op），补调安全。
  */
 export function dispatchMessageEvent(
   ctx: MessageEffectContext,
@@ -897,5 +941,28 @@ export function dispatchMessageEvent(
   // msg.payload 是 ServerMessageMap 的联合（含 SystemPromptSnapshot 等 interface 类型，
   // 无 string index signature）。handler 内部统一用 readString 等安全窄化（见上方注释），
   // 不依赖 index signature，故 cast 到 Record<string, unknown> 是安全的。
-  if (handler) handler(ctx, sessionId, msg.payload as Record<string, unknown>)
+  if (!handler) return warnUnregisteredFrame(msg.type, sessionId)
+  const payload = msg.payload as Record<string, unknown>
+  try {
+    handler(ctx, sessionId, payload)
+  } catch (e) {
+    console.error(`[effects] handler threw for ${msg.type} (sid=${sessionId}) — frame side effects may be partial:`, e)
+    if (!TERMINAL_FRAME_TYPES.has(msg.type)) return
+    // 终态帧安全网：按帧语义推导收口参数（complete 按 stopReason 区分 aborted/error；
+    // error/stream_error 帧尽量透传原始错误文本），finalizeSession 本身抛错则放弃收口
+    // 仅记录（不得让安全网成为新异常源）。
+    const reason: FinalizeReason = msg.type === 'message.complete'
+      ? (readString(payload, 'stopReason') === 'aborted' ? 'aborted' : 'error')
+      : msg.type === 'message.stream_error' ? 'stream_error' : 'error'
+    const errorText = msg.type === 'message.complete'
+      ? readString(payload, 'errorMessage')
+      : readString(payload, 'message') ?? readString(payload, 'content')
+    try {
+      ctx.finalizeSession(sessionId, reason, errorText)
+    } catch (finalizeError) {
+      // best-effort 降级：安全网自身失败时放弃收口仅记录——不得让安全网成为新异常源
+      // （再抛会逆传到 events/coalescer 上游，把单帧故障放大成消费面崩溃）。
+      console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
+    }
+  }
 }

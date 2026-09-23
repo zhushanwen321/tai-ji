@@ -174,16 +174,23 @@ function readPiAuth(authPath: string): { authData: PiAuthJson; authWarnings: str
 }
 
 /**
- * 协议检查：google-generative-ai / 未知协议 → skip + 顶层警告（pi 专属文案，逐字节保持）。
+ * 协议检查：google-generative-ai / 缺 api / 未知协议 → skip + 顶层警告（pi 专属文案，逐字节保持）。
  *
  * S5：warning 进 topWarnings 而非局部变量，否则 continue 后字符串随局部 warnings
  * 被丢弃，用户无感知。
+ *
+ * RT-5#3：缺 `api` 与未知协议同路 skip——pi 的 createProvider 直接 `input.api.stream`
+ * 取流实现（pi-ai 0.84.4 dist/models.js:443），无 api 的 provider 在 pi 运行时直接
+ * TypeError；放行只会导入一个不可用条目（空壳防线③只核八字段，挡不住无协议空壳）。
  */
 function piProtocolSkipWarning(providerId: string, api: string | undefined): string | undefined {
   if (api === 'google-generative-ai') {
     return `provider ${providerId}: protocol google-generative-ai not supported, skipped`
   }
-  if (api && !PI_SUPPORTED_PROTOCOLS.has(api)) {
+  if (!api) {
+    return `provider ${providerId}: missing protocol (api), skipped`
+  }
+  if (!PI_SUPPORTED_PROTOCOLS.has(api)) {
     return `provider ${providerId}: unknown protocol ${api}, skipped`
   }
   return undefined

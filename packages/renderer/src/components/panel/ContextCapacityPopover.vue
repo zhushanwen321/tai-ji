@@ -14,16 +14,22 @@
         :class="
           cn(
             'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+            variant === 'iconic' && 'px-1.5',
             isHigh ? 'text-warn hover:text-warn' : 'text-neutral-dim hover:text-neutral-mid',
           )
         "
-        :title="t('panel.context.capacity')"
+        :title="triggerTitle"
         @mouseenter="onHoverEnter"
       >
-        <span class="tabular-nums">{{ hasUsage ? usedDisplay : '—' }}</span>
-        <template v-if="hasPercent">
-          <span aria-hidden="true">·</span>
-          <span class="tabular-nums">{{ usage.percent }}%</span>
+        <!-- fit L2 图标态：只留图标，摘要进 title / 浮层 -->
+        <ChartPie v-if="variant === 'iconic'" class="size-4 shrink-0" />
+        <template v-else>
+          <span class="tabular-nums">{{ hasUsage ? usedDisplay : '—' }}</span>
+          <!-- fit L1 起精简：只留百分比（绝对用量进 title 与浮层） -->
+          <template v-if="hasPercent && variant !== 'simplified'">
+            <span aria-hidden="true">·</span>
+            <span class="tabular-nums">{{ usage.percent }}%</span>
+          </template>
         </template>
       </Button>
     </HoverCardTrigger>
@@ -173,6 +179,7 @@
 <script setup lang="ts">
 import { ref, computed, toRef, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChartPie } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
@@ -194,7 +201,16 @@ const props = defineProps<{
    * 对齐 ModelSelectPopover/ThinkingLevelPopover 的受控范式。
    */
   modelId?: string
+  /**
+   * 内容密度（u6b fit 轴）：`full` = 「已用 · 百分比」（默认）；
+   * `simplified` = 只留百分比（绝对用量进 title 与浮层）；
+   * `iconic` = 只留 ChartPie 图标（摘要进 title 与浮层）。
+   */
+  variant?: 'full' | 'simplified' | 'iconic'
 }>()
+
+/** 内容密度归一（缺省 full：调用方不传 fit 轴时行为与改动前完全一致） */
+const variant = computed<'full' | 'simplified' | 'iconic'>(() => props.variant ?? 'full')
 
 const quotaStore = useQuotaStore()
 
@@ -282,6 +298,14 @@ const totalDisplay = computed(() => formatTokens(usage.value.total))
 const hasUsage = computed(() => usage.value.status === 'ok')
 /** contextWindow 已知（provider 未配 contextWindow 时 total=0：只显用量不显百分比） */
 const hasPercent = computed(() => usage.value.status === 'ok' && usage.value.total > 0)
+
+/** 触发器 title：精简/图标态下标题必须自带摘要（文本被裁掉，信息不能丢） */
+const triggerTitle = computed(() => {
+  if (variant.value === 'full') return t('panel.context.capacity')
+  const used = hasUsage.value ? usedDisplay.value : '—'
+  const pct = hasPercent.value ? `${usage.value.percent}%` : '—'
+  return `${t('panel.context.capacity')} · ${used} · ${pct}`
+})
 
 const isHigh = computed(() => usage.value.percent > HIGH_THRESHOLD)
 const isDanger = computed(() => usage.value.percent > DANGER_THRESHOLD)

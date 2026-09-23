@@ -109,6 +109,12 @@ export interface ShellInputInstance {
   saveSelection: () => void
   restoreSelection: () => void
   moveCaretVertical: (dir: 'up' | 'down') => 'moved' | 'at-edge'
+  /**
+   * contenteditable 输入根元素读取口（command-popover-keyboard activeElement 门识别源）。
+   * 可选成员 = 运行时可能缺失（版本错配/简化实现），缺失时消费方 fail-closed false——
+   * 禁止回退实例 $el（W1 F-1：dev 构建保留模板注释 → $el 为注释节点，门恒 false）。
+   */
+  getInputElement?: () => HTMLElement | null
 }
 
 /** useComposerShell 入参：Composer.vue 组件局部状态（ref/Map 真源留在壳层） */

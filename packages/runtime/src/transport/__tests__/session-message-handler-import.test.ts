@@ -1,9 +1,14 @@
 /**
- * SessionMessageHandler 导入 pi 会话 case 分发测试（import-session u3 / D5）。
+ * SessionMessageHandler 导入会话 case 分发测试（import-session u3 / D5 + 多源 §3.7）。
  *
  * 覆盖：
  * - payload→reply 映射：session.importCandidates / session.import 两命令（reply 与 request
- *   同名，payload/reply 类型 SSOT = shared import-session.ts，handler 只透传不裁剪）
+ *   同名，payload/reply 类型 SSOT = shared import-session.ts，handler 只透传不裁剪——
+ *   含 source/sessionId 多源字段随 payload 整体透传，路由在 ImportService 的
+ *   source 注册表内，handler 对源零分支）
+ * - wire 帧 dbPath 白名单（MF-3-1）：session.import 的 dbPath 有值时须在
+ *   zcodeImportDbAllowlist 封闭集合内（缺省 undefined 放行；集合外/非 string 形态
+ *   → import_db_path_forbidden，service 不被调不广播）
  * - 错误 envelope：ImportServiceError.code 透传；非预期无 code 错误归 import_failed
  * - import 成功后 broadcastSessionList 被调（P-broadcast，reply 先于广播）
  * - importService 缺席 → import_unsupported（对齐 handoffService 可选服务惯例）
@@ -13,6 +18,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SessionMessageHandler, type SessionHandlerContext } from '../session-message-handler.js'
 import { ImportServiceError, type ImportService } from '../../services/session/import-service.js'
+import { zcodeImportDbAllowlist } from '../../services/session/zcode-import/sqlite-access.js'
+import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../../interfaces.js'
 import type { ClientMessage, ImportCandidatesReply, ImportReply } from '@taiji/shared'
 
@@ -32,6 +39,7 @@ function mockContext(overrides?: Partial<SessionHandlerContext>): SessionHandler
     nextPushId: vi.fn(() => 'push-1'),
     broadcastSessionList: vi.fn(),
     broadcast: vi.fn(),
+    invalidatePendingUiRequests: vi.fn(),
     ...overrides,
   }
 }
@@ -120,8 +128,29 @@ describe('SessionMessageHandler session.importCandidates', () => {
 
     await handler.handleSessionMessage(msg('session.importCandidates', {}), ws)
 
+    // candidates payload 契约无 sessionId 字段（ImportCandidatesRequest）→ envelope 无从带
     expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
     expect(ctx.reply).not.toHaveBeenCalled()
+  })
+
+  it('payload 携带 source 等多源字段 → 原样透传（handler 对源零分支，路由在 ImportService）', async () => {
+    // 多源 §3.7：source 在 ImportCandidatesRequest/ImportRequest 两契约内；sessionId/dbPath
+    // 仅在 ImportRequest——candidates 用例塞 dbPath 是验证 handler 透传不裁剪的测试手段
+    // 而非契约字段。本用例锁「新增源字段不经 handler 本地分支」的接线形态
+    //（service mock 直接消费 payload，字段值用 zcode 形态验证透传不被吞/改）。
+    const svc = mockImportService()
+    svc.listCandidates.mockResolvedValue({ total: 0, items: [], dirs: [] })
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    const payload = { source: 'zcode', query: 'refactor', dbPath: '/tmp/fixture/db.sqlite' }
+
+    await handler.handleSessionMessage(msg('session.importCandidates', payload), ws)
+
+    expect(svc.listCandidates).toHaveBeenCalledWith(payload)
+    expect(svc.listCandidates).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'session.importCandidates', { total: 0, items: [], dirs: [] })
+    expect(ctx.sendError).not.toHaveBeenCalled()
   })
 })
 
@@ -249,8 +278,91 @@ describe('SessionMessageHandler session.import', () => {
 
     await handler.handleSessionMessage(msg('session.import', { sourcePath: '/ext/a.jsonl', projectId: 'p1' }), ws)
 
-    expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
+    // C-comm-05：error envelope 第 5 参 details.sessionId 条件传递（本用例 payload 无
+    // sessionId——pi 源可不带 → 收到 undefined，与「有则必带」的实现形态锁定）
+    expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1', undefined)
     expect(ctx.reply).not.toHaveBeenCalled()
     expect(ctx.broadcastSessionList).not.toHaveBeenCalled()
+  })
+
+  it('payload 携带 source/sessionId/dbPath（白名单内）→ 原样透传（zcode 形态，handler 零分支）', async () => {
+    const svc = mockImportService()
+    const result: ImportReply = { sessionId: 'normalized-id', targetPath: '/taiji/sessions/--x--/2026-01-01_normalized-id.jsonl' }
+    svc.importSession.mockResolvedValue(result)
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    // zcode 源形态：sourcePath 是 db 路径占位、以 sessionId + dbPath 定位（契约注释语义）；
+    // dbPath 取白名单集合内值（隔离库，进程内同函数推导——测试 env 的 dataDir 被 test-guard
+    // 钉死 tmp，不触真实数据目录）
+    const allowedDbPath = zcodeImportDbAllowlist(getDataDir())[0]
+    const payload = {
+      sourcePath: allowedDbPath,
+      projectId: 'p1',
+      source: 'zcode',
+      sessionId: 'sess_0199abc',
+      dbPath: allowedDbPath,
+    }
+
+    await handler.handleSessionMessage(msg('session.import', payload), ws)
+
+    expect(svc.importSession).toHaveBeenCalledWith(payload)
+    expect(svc.importSession).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'session.import', result)
+    expect(ctx.broadcastSessionList).toHaveBeenCalledTimes(1)
+  })
+
+  it('dbPath 白名单集合外 → sendError import_db_path_forbidden，service 不被调不广播（MF-3-1）', async () => {
+    const svc = mockImportService()
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const payload = {
+      sourcePath: '/elsewhere/db.sqlite',
+      projectId: 'p1',
+      source: 'zcode',
+      sessionId: 'sess_0199abc',
+      dbPath: '/elsewhere/db.sqlite',
+    }
+
+    await handler.handleSessionMessage(msg('session.import', payload), ws)
+
+    expect(ctx.sendError).toHaveBeenCalledWith(
+      ws,
+      'import_db_path_forbidden',
+      expect.stringContaining('dbPath 不在允许的会话库路径集合内'),
+      'msg-1',
+      { sessionId: 'sess_0199abc' },
+    )
+    expect(svc.importSession).not.toHaveBeenCalled()
+    expect(ctx.reply).not.toHaveBeenCalled()
+    expect(ctx.broadcastSessionList).not.toHaveBeenCalled()
+    expect(errSpy).not.toHaveBeenCalled()
+  })
+
+  it('dbPath 非 string 形态（wire 不可信面）→ sendError import_db_path_forbidden（MF-3-1）', async () => {
+    const svc = mockImportService()
+    const ctx = mockContext({ importService: svc as unknown as ImportService })
+    const handler = new SessionMessageHandler(ctx)
+    const ws = mockWs()
+    const payload = {
+      sourcePath: '/x/db.sqlite',
+      projectId: 'p1',
+      source: 'zcode',
+      sessionId: 'sess_0199abc',
+      dbPath: 42,
+    }
+
+    await handler.handleSessionMessage(msg('session.import', payload as Record<string, unknown>), ws)
+
+    expect(ctx.sendError).toHaveBeenCalledWith(
+      ws,
+      'import_db_path_forbidden',
+      expect.stringContaining('dbPath 不在允许的会话库路径集合内'),
+      'msg-1',
+      { sessionId: 'sess_0199abc' },
+    )
+    expect(svc.importSession).not.toHaveBeenCalled()
   })
 })

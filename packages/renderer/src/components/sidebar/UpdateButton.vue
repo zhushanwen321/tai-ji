@@ -33,7 +33,7 @@
           代码复制交互无意义且会拖入 shiki WASM）。HoverCard 内 release note 是只读展示，复制/链接交互非必需；
           如需交互可后续抽取一个轻量只读 MarkdownView 组件再迁移。
         -->
-        <!-- eslint-disable-next-line vue/no-v-html -- release note 经 markdown-it 渲染（html:false 默认禁裸 HTML + scheme 白名单过滤），与 MarkdownRenderer 同论证 XSS-safe。受控注入点。 -->
+        <!-- eslint-disable-next-line vue/no-v-html -- release note 经 markdown-it + 出口 DOMPurify 两级白名单净化（可信段摘出-回填，markdown-sanitize.ts），与 MarkdownRenderer 同论证 XSS-safe。受控注入点。 -->
         <div class="release-notes-markdown" data-testid="update-release-notes" v-html="state.releaseNotesHtml" />
       </HoverCardContent>
     </HoverCard>
@@ -332,17 +332,31 @@ function onRetry(): void {
   padding: 0;
 }
 
-/* 表格 */
+/* 表格：与 MarkdownRenderer 同款滚动能力四条声明（两宿主能力统一——同源 renderMarkdown
+   输出，表格滚动能力不随宿主分叉；窄表收缩到内容宽 = GitHub 同形态）。外观保留自身
+   既有形态：border-collapse:collapse（display:block 下仍作用于内部网格）与自身 margin，
+   不迁移对话流宿主的 border/radius。 */
 .release-notes-markdown :deep(table) {
-  width: 100%;
+  display: block;
+  overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 0.6em 0;
   font-size: 0.9em;
 }
+/* th/td 拆两条与 MarkdownRenderer 同理（对齐转写配套：带 align 的单元格靠呈现属性生效，
+   无 align 兜底 left；border/padding 无条件防视觉破损）。min-width 列宽地板同在无条件侧——
+   与 MarkdownRenderer 同源同步（理由全文见该处注释）：CJK 列 min-content = 1 汉字，
+   auto table layout 夹紧下短中文列会被压成 1 字宽竖排；抬地板到 4em 兜底。 */
 .release-notes-markdown :deep(th),
 .release-notes-markdown :deep(td) {
   border: 1px solid var(--border);
   padding: 0.3em 0.5em;
+  min-width: 4em;
+}
+.release-notes-markdown :deep(th:not([align])),
+.release-notes-markdown :deep(td:not([align])) {
   text-align: left;
 }
 .release-notes-markdown :deep(th) {

@@ -27,23 +27,29 @@
       <!-- streaming 态：spinner（更显眼的流式生成指示），替代原脉冲点。仅文本流式生成时转（A 类） -->
       <!-- [u6a] dispatching 占位态（isPendingPlaceholder）已删除：空 turn 不再渲染 TurnMeta
            （v-if 收窄），「思考中」指示迁 ActivityStrip thinking 行；spinner 只跟 isStreaming -->
-      <Loader2 v-if="isStreaming" class="size-3.5 shrink-0 animate-spin" :class="spinnerColor" />
+      <!-- 配色恒 accent：曾按期长分 warn(5min)/danger(30min) 三档警示，已删（2026-09）——
+           时长改为整 turn 墙钟（含工具执行/等待）后，等构建/等子代理/等用户回答都会触红，
+           颜色不再是「生成异常」信号（唯一可靠的信号是时长数字本身） -->
+      <Loader2 v-if="isStreaming" class="size-3.5 shrink-0 animate-spin text-accent" />
       <span class="text-[length:var(--text-sm)] font-medium">
         <span class="lbl" :class="isWorkingTurn ? 'text-accent' : 'text-neutral-mid'">{{ statusLabel }}</span>
-        <span class="elapsed ml-1 font-mono font-medium tracking-[0.01em]" :class="elapsedColor">{{ elapsed }}</span>
+        <span class="elapsed ml-1 font-mono font-medium tracking-[0.01em] text-neutral-fg">{{ elapsed }}</span>
       </span>
-      <!-- Turn 区间：首末时刻 -->
-      <span v-if="firstTs > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
-        · {{ formatClock(firstTs) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(lastTs) }}
+      <!-- Turn 区间（整个 agent-turn 起止时刻）：进行中右端显「（进行中）」，
+           定格后显末次产出结束时刻 -->
+      <span v-if="startedAt > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
+        · {{ formatClock(startedAt) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(endedAt) }}
       </span>
-      <!-- [u3 remove-turn-progress-bar] 已生成字符数（设计 §2.1，B1 完成态定格常驻）：
-           TurnMeta 是 per-turn 事实聚合位，chars 与 elapsed/时刻区间同族事实。样式跟
-           tm-range 档（text-2xs neutral-dim mono）；0 不渲染（零内容 turn 不占行宽） -->
+      <!-- 已生成 token 数（B1 完成态定格常驻；口径 = 本 turn 已上报的真实 usage.outputTokens
+           之和，含正文 + 思考 + 工具参数——pi usage 原语义，无需按 block 分类）：
+           TurnMeta 是 per-turn 事实聚合位，tokens 与 elapsed/时刻区间同族事实。
+           流式期的当前调用尚无 usage → 显示已完成段的真实累计（收口时跳到完整值）；
+           全程无近似值（用户裁决 A：不在真值之外显示估算）。0 不渲染（零内容 turn 不占行宽） -->
       <span
-        v-if="generatedChars > 0"
-        data-testid="turn-meta-chars"
-        class="tm-chars ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums"
-      >· {{ t('panel.message.generatedChars', { chars: generatedChars.toLocaleString() }) }}</span>
+        v-if="generatedTokens > 0"
+        data-testid="turn-meta-tokens"
+        class="tm-tokens ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums"
+      >· {{ t('panel.message.generatedTokens', { tokens: generatedTokens.toLocaleString() }) }}</span>
       <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
       <ChevronRight
         v-if="turn.hasFoldable && !isWorkingTurn"
@@ -82,25 +88,23 @@ const props = withDefaults(
     thinkCount: number
     toolCount: number
     elapsed: string
-    /** 已耗时秒数（与 elapsed 字符串同源，用于长时生成分级警示配色） */
-    elapsedSecs: number
     /** 当前 turn 在 session 内的序列下标（仅展示/testid 用） */
     turnIndex: number
     /** 当前 turn 的稳定 key（turnStableId(turn)，M5 stable-key：展开态查询按此，不随消息插删漂移） */
     turnKey: string
     /** session id（透传保留） */
     sessionId: string
-    /** turn 首条 assistant 时刻（epoch ms） */
-    firstTs: number
-    /** turn 末条 assistant 时刻（epoch ms） */
-    lastTs: number
-    /** 是否正在流式生成 */
+    /** turn 起点时刻（epoch ms；user 消息 / 首条 assistant，core deriveTurnAggregates） */
+    startedAt: number
+    /** turn 终点时刻（epoch ms；最后一次产出结束；进行中 = 当下已发生活动的结束时刻） */
+    endedAt: number
+    /** 本 turn 是否仍在进行（未定格，= 工作 turn）——驱动「（进行中）」与 live 语义 */
     isLive: boolean
-    /** [u3 remove-turn-progress-bar] 已生成字符数（useTurnElapsed 秒级 tick 重算/完成定格）；0 不渲染。
+    /** 本 turn 已上报的真实生成 token 总量（Σ usage.outputTokens）；0 不渲染。
      *  可选 + 默认 0：非可选类型经 withDefaults 会编译出 required:true，漏传即 Vue warn */
-    generatedChars?: number
+    generatedTokens?: number
   }>(),
-  { generatedChars: 0 },
+  { generatedTokens: 0 },
 )
 
 // turn 展开/折叠经 ChatViewDeps inject（renderer 壳绑 useTurnExpansion store）
@@ -118,30 +122,4 @@ const statusLabel = computed(() => {
   if (!props.isWorkingTurn) return t('panel.message.worked')
   return t('panel.message.working')
 })
-
-/** 长时生成分级阈值（秒）：≥5min 转 warn、≥30min 转 danger（正常生成 30s~2min 不触发）。 */
-const DURATION_WARN_SECS = 300
-const DURATION_DANGER_SECS = 1800
-
-/** 分级警示：驱动 spinner + elapsed 配色，让卡死/死循环类异常长耗时在视觉上跳出来。 */
-const durationLevel = computed<'normal' | 'warn' | 'danger'>(() => {
-  const s = props.elapsedSecs
-  if (s >= DURATION_DANGER_SECS) return 'danger'
-  if (s >= DURATION_WARN_SECS) return 'warn'
-  return 'normal'
-})
-
-/** spinner 配色：normal 跟随 accent，warn/danger 转警示色（随时长“变暖”）。 */
-const spinnerColor = computed(() =>
-  durationLevel.value === 'danger' ? 'text-danger'
-    : durationLevel.value === 'warn' ? 'text-warn'
-      : 'text-accent',
-)
-
-/** elapsed 配色：normal 中性前景，warn/danger 转警示色。 */
-const elapsedColor = computed(() =>
-  durationLevel.value === 'danger' ? 'text-danger'
-    : durationLevel.value === 'warn' ? 'text-warn'
-      : 'text-neutral-fg',
-)
 </script>

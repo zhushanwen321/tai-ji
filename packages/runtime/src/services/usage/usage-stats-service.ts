@@ -30,6 +30,11 @@ interface FileShard {
   rows: UsageRow[]
   skippedLines: number
   cwd: string | null
+  /**
+   * 读流/解析过程整体失败（RT-8#12）：文件存在（stat 成功、计入 sessionCount）但数据点
+   * 全缺——聚合偏低须可观测（failedFiles 计数），否则与「该 session 无用量」不可区分。
+   */
+  failed: boolean
 }
 
 /**
@@ -42,7 +47,15 @@ type ScanRowResult = UsageRow | 'skip' | null
 
 /** 空分片降级（scanFile 读流失败时返回）：mtime/size 键保留，文件未变更期间不重读。 */
 function emptyShard(fileStat: { mtimeMs: number; size: number }): FileShard {
-  return { mtimeMs: fileStat.mtimeMs, size: fileStat.size, rows: [], skippedLines: 0, cwd: null }
+  return { mtimeMs: fileStat.mtimeMs, size: fileStat.size, rows: [], skippedLines: 0, cwd: null, failed: true }
+}
+
+/** getStats 逐文件聚合的累计口径（aggregateFiles 输出，拼装进 UsageStatsResult）。 */
+interface UsageFileAggregate {
+  rows: UsageRow[]
+  skippedLines: number
+  sessionCount: number
+  failedFiles: number
 }
 
 /**
@@ -68,7 +81,7 @@ export class UsageStatsService {
   private readonly sessionsDir: string
 
   /** @data-owner #16 派生缓存：per-file 分片，(mtimeMs, size) 双键失效（登记表主表 #16）。
-   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5） */
+   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯） */
   private readonly shards = new Map<string, FileShard>()
 
   constructor(sessionsDir: string = getSessionsDir()) {
@@ -90,19 +103,45 @@ export class UsageStatsService {
    */
   async getStats(): Promise<UsageStatsResult> {
     const scannedAt = Date.now()
-    const allRows: UsageRow[] = []
-    let skippedLines = 0
-    let sessionCount = 0
 
-    let entries: Dirent[]
-    try {
-      entries = await readdir(this.sessionsDir, { withFileTypes: true })
-    } catch {
-      // 目录不存在或不可读 → 返回空结果
-      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0 }
+    const entries = await this.readRootEntries()
+    if (entries === null) {
+      return { rows: [], scannedAt, sessionCount: 0, skippedLines: 0, failedFiles: 0 }
     }
 
     // 根层 + 一层 encodeCwd 子目录（只下钻一层，孙目录不进）
+    const jsonlPaths = await this.collectJsonlPaths(entries)
+    // 收集当前磁盘文件路径，用于清理已删除文件的分片
+    const currentPaths = new Set<string>()
+    const agg = await this.aggregateFiles(jsonlPaths, currentPaths)
+    this.pruneDeletedShards(currentPaths)
+
+    return { ...agg, scannedAt }
+  }
+
+  /**
+   * 根层 readdir；不可读时 warn 留痕（含恢复动作）并返回 null，调用方返回空结果
+   * （sessionCount=0 + rows 空，UI 至少显示空态而非崩溃）。
+   */
+  private async readRootEntries(): Promise<Dirent[] | null> {
+    try {
+      return await readdir(this.sessionsDir, { withFileTypes: true })
+    } catch (e) {
+      // ENOENT（首启未产生 session 目录）= 合法空态；其他错误（EACCES 等）= 全量数据点
+      // 不可读——warn 留痕，但不伪装成「无用量」之外的任何形态
+      if (!isEnoent(e)) {
+        console.warn(
+          `[usage-stats] session 目录不可读，用量统计返回空（实际用量不可见）: ${this.sessionsDir}。` +
+            '恢复动作：检查目录读权限后刷新用量页',
+          e,
+        )
+      }
+      return null
+    }
+  }
+
+  /** 根层 + 一层 encodeCwd 子目录的 .jsonl 路径清单（§11.12：两层即够——pi 只写一层）。 */
+  private async collectJsonlPaths(entries: Dirent[]): Promise<string[]> {
     const jsonlPaths = collectScannableJsonlPaths(this.sessionsDir, entries)
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
@@ -110,32 +149,54 @@ export class UsageStatsService {
       let subEntries: Dirent[]
       try {
         subEntries = await readdir(subDir, { withFileTypes: true })
-      } catch {
-        // 单个子目录不可读 → 跳过继续（与单文件读失败的容错语义一致）
+      } catch (e) {
+        // 单个子目录不可读 → 跳过继续（与单文件读失败的容错语义一致）——但留痕
+        //（RT-8#12：该目录下全部 session 的数据点静默缺失不可观测）。无法预知其中
+        // 文件数，不进 failedFiles 计数（那是文件级口径），warn 含路径。
+        if (!isEnoent(e)) {
+          console.warn(
+            `[usage-stats] session 子目录不可读，该目录用量未计入: ${subDir}。恢复动作：检查目录读权限`,
+            e,
+          )
+        }
         continue
       }
       jsonlPaths.push(...collectScannableJsonlPaths(subDir, subEntries))
     }
+    return jsonlPaths
+  }
 
-    // 收集当前磁盘文件路径，用于清理已删除文件的分片
-    const currentPaths = new Set<string>()
+  /**
+   * 逐文件聚合：(mtimeMs, size) 双键命中（D9）→ 直接用分片；变化/新增 → 重读并回写分片。
+   * currentPaths 记录磁盘现存文件（pruneDeletedShards 的清理依据）。
+   */
+  private async aggregateFiles(
+    jsonlPaths: string[],
+    currentPaths: Set<string>,
+  ): Promise<UsageFileAggregate> {
+    const rows: UsageRow[] = []
+    let skippedLines = 0
+    let sessionCount = 0
+    let failedFiles = 0
 
     for (const filePath of jsonlPaths) {
       let fileStat
       try {
         fileStat = await stat(filePath)
       } catch {
+        // stat 失败（扫描间隙被删/权限）：文件级失败计数（RT-8#12）而非静默跳过
+        failedFiles++
         continue
       }
 
       currentPaths.add(filePath)
       const cached = this.shards.get(filePath)
 
-      // (mtimeMs, size) 双键比对（D9）
       if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
         // 未变文件：直接用分片
-        allRows.push(...cached.rows)
+        rows.push(...cached.rows)
         skippedLines += cached.skippedLines
+        if (cached.failed) failedFiles++
         sessionCount++
         continue
       }
@@ -143,19 +204,22 @@ export class UsageStatsService {
       // 变化/新增文件：重读
       const shard = await this.scanFile(filePath, fileStat)
       this.shards.set(filePath, shard)
-      allRows.push(...shard.rows)
+      rows.push(...shard.rows)
       skippedLines += shard.skippedLines
+      if (shard.failed) failedFiles++
       sessionCount++
     }
 
-    // 清理已删除文件的分片
+    return { rows, skippedLines, sessionCount, failedFiles }
+  }
+
+  /** 清理已删除文件的分片（磁盘上不再存在的路径对应分片丢弃）。 */
+  private pruneDeletedShards(currentPaths: Set<string>): void {
     for (const key of this.shards.keys()) {
       if (!currentPaths.has(key)) {
         this.shards.delete(key)
       }
     }
-
-    return { rows: allRows, scannedAt, sessionCount, skippedLines }
   }
 
   /**
@@ -244,6 +308,7 @@ export class UsageStatsService {
       rows,
       skippedLines,
       cwd,
+      failed: false,
     }
   }
 
@@ -362,6 +427,11 @@ function extractMetrics(usage: Record<string, unknown>): UsageMetrics {
   const messages = 1
 
   return { input, output, cacheRead, cacheWrite, costUSD, messages }
+}
+
+/** Node fs 错误的 ENOENT 判定（合法空态 vs 真读取失败分流用）。 */
+function isEnoent(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'ENOENT'
 }
 /**
  * UTC timestamp → 本地时区 'YYYY-MM-DD'（D6）；非法/缺失 timestamp 返回 null（行级失败，计入 skippedLines）。

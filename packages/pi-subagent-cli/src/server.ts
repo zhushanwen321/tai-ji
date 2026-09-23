@@ -227,8 +227,13 @@ export class EngineProtocolServer {
       this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
     );
 
-    // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）
-    const fullTask: AgentCallOpts = { ...task, ...(ctx.model !== undefined ? { model: ctx.model } : {}) };
+    // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）。
+    // cwd 有值才还原（wire additive 语义）——worktree 隔离路径的子进程 spawn cwd 载体。
+    const fullTask: AgentCallOpts = {
+      ...task,
+      ...(ctx.model !== undefined ? { model: ctx.model } : {}),
+      ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
+    };
 
     try {
       const r = await this.engine.run(

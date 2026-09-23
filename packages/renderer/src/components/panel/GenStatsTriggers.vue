@@ -4,14 +4,17 @@
     位于上下文容量触发器左侧：左 = TOKEN 速度（t/s），右 = 缓存命中率（%），独立判定
     null → 「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
     命中率语义色三档：≥80 success · 50–80 warn · <50 danger（项目语义色 token）。
+    归因降噪（2026-09-19 D-A）：帧带 cacheRatio.currentMiss（cold-start / idle-expiry /
+    context-rewrite）时，本次行不再显示裸 0%，改渲染成因文案（中性色，非故障）+ 浮层说明行；
+    未知成因的 0%（如服务端淘汰）仍显示 0% 三档色——那正是需要被看到的信号。
     hover 出各自浮层：速度四行（本次/今日/7天/30天）+ 口径说明；缓存两行（本次/今日加权）
     + bar + 口径说明。「本次」= 本会话最近一次请求样本（会话视角，runtime per-session 槽）；
     今日/7天/30天 = 该模型跨会话全局聚合（模型视角）。数据纯读 useGenStats 分区
     （订阅/恢复腿/model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
-    <!-- 速度触发器 -->
-    <HoverCard>
+    <!-- 速度触发器（fit L1 起只留数值；fit L2 起只留图标） -->
+    <HoverCard v-if="props.variant !== 'iconic'">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
@@ -58,7 +61,7 @@
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 缓存命中率触发器 -->
+    <!-- 缓存命中率触发器：fit L1 起精简（归因态仍显成因文案，优先级高于精简）；fit L2 起只留图标 -->
     <HoverCard>
       <HoverCardTrigger as-child>
         <Button
@@ -66,12 +69,14 @@
           :class="
             cn(
               'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+              props.variant === 'iconic' && 'px-1.5',
               cacheTriggerClass,
             )
           "
-          :title="t('panel.context.genStatsCacheTitle')"
+          :title="cacheTitle"
         >
-          <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
+          <Gauge v-if="props.variant === 'iconic'" class="size-4 shrink-0" />
+          <span v-else class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
         </Button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -94,8 +99,8 @@
           <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
             <div class="flex flex-col gap-0.5">
               <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsCurrentReq') }}</span>
-              <span class="font-sans text-[14px] font-semibold tabular-nums" :class="frame.cacheRatio.current == null ? 'text-neutral-dim' : 'text-neutral-fg'">
-                {{ cachePercentDisplay(frame.cacheRatio.current) }}
+              <span class="font-sans text-[14px] font-semibold tabular-nums" :class="cacheCurrentClass">
+                {{ cacheDisplay }}
               </span>
             </div>
             <div class="flex flex-col gap-0.5">
@@ -105,16 +110,22 @@
               </span>
             </div>
           </div>
-          <!-- bar（仅本次命中率有值时显示；宽度/颜色按三档语义色） -->
-          <div v-if="frame.cacheRatio.current != null" class="mx-2.5 mt-0.5 h-1 overflow-hidden rounded-full bg-surface-2">
+          <!-- bar（仅未归因的数值命中率有值时显示；宽度/颜色按三档语义色）——归因态无 0% 数值可画，
+               空轨道反而会读成「命中率 0」的另一种画法，故整体隐藏 -->
+          <div v-if="frame.cacheRatio.current != null && !cacheMiss" class="mx-2.5 mt-0.5 h-1 overflow-hidden rounded-full bg-surface-2">
             <div
               :class="cn('h-full rounded-full transition-[width,background-color]', cacheBarClass)"
               :style="{ width: `${frame.cacheRatio.current}%` }"
               data-testid="genstats-cache-bar"
             />
           </div>
-          <!-- 口径说明 -->
+          <!-- 口径说明（归因降噪：已知成因的 0% 先把成因说清，再接通用口径） -->
           <div class="mt-2 border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-neutral-dim">
+            <p
+              v-if="cacheMissNote"
+              class="mb-1 text-neutral-mid"
+              data-testid="genstats-cache-miss-note"
+            >{{ cacheMissNote }}</p>
             {{ t('panel.context.genStatsCacheNote') }}
           </div>
         </template>
@@ -126,10 +137,12 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Gauge } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
 import { useGenStats } from '@/composables/features/model/useGenStats'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 
 /**
  * 纯读组件（D5）：per-session 分区状态在 useGenStats composable，组件只做帧 → 显示映射。
@@ -139,6 +152,12 @@ import { useGenStats } from '@/composables/features/model/useGenStats'
 const props = defineProps<{
   sessionId?: string
   modelId?: string
+  /**
+   * 内容密度（u6b fit 轴）：`full` = 速度 + 缓存两个数值触发器（默认）；
+   * `simplified` = 速度只留数值（去 ` t/s` 单位），缓存不变；
+   * `iconic` = 速度触发器整体收起（数值进 title 与浮层），缓存触发器只留 Gauge 图标。
+   */
+  variant?: 'full' | 'simplified' | 'iconic'
 }>()
 
 const { t } = useI18n()
@@ -146,10 +165,11 @@ const { t } = useI18n()
 // 订阅（session.stats_update）/ 恢复腿（session.getGenStats）/ model 校验全在 composable 内
 const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, 'modelId'))
 
-// ── 速度触发器：current →「N t/s」，null →「—」 ──
+// ── 速度触发器：current →「N t/s」，null →「—」；fit L1 起去单位只留数值 ──
 const speedDisplay = computed(() => {
   const v = frame.value?.speed.current
-  return v == null ? '—' : `${v} t/s`
+  if (v == null) return '—'
+  return props.variant === 'simplified' ? String(v) : `${v} t/s`
 })
 
 /** 速度浮层四行（label + 聚合值；null → 浮层行显「—」）。note = label 的原生
@@ -168,15 +188,32 @@ const speedRows = computed(() => {
 const CACHE_SUCCESS_THRESHOLD = 80
 const CACHE_WARN_THRESHOLD = 50
 
+/** 空闲时长格式化基数（毫秒/分钟、分钟/小时；模块级常量，避免 no-magic-numbers） */
+const MS_PER_MINUTE = 60_000
+const MINUTES_PER_HOUR = 60
+
 const cacheCurrent = computed(() => frame.value?.cacheRatio.current ?? null)
 
+/**
+ * 归因降噪（2026-09-19 D-A）：帧内 currentMiss（runtime 已归因的「预期内 0%」）为
+ * 显示与着色的最高优先依据——有归因时本次行渲染成因文案 + 中性色（非故障），
+ * 无归因才回落到数值三档色。
+ */
+const cacheMiss = computed(() => frame.value?.cacheRatio.currentMiss ?? null)
+
 const cacheTriggerClass = computed(() => {
+  if (cacheMiss.value) return 'text-neutral-dim hover:text-neutral-mid'
   const v = cacheCurrent.value
   if (v == null) return 'text-neutral-dim hover:text-neutral-mid'
   if (v >= CACHE_SUCCESS_THRESHOLD) return 'text-success hover:text-success'
   if (v >= CACHE_WARN_THRESHOLD) return 'text-warn hover:text-warn'
   return 'text-danger hover:text-danger'
 })
+
+/** 浮层本次行文字色：归因态与无值同为中性（归因不是异常，不该用 fg 强调） */
+const cacheCurrentClass = computed(() =>
+  cacheMiss.value || cacheCurrent.value == null ? 'text-neutral-dim' : 'text-neutral-fg',
+)
 
 const cacheBarClass = computed(() => {
   const v = cacheCurrent.value
@@ -186,10 +223,64 @@ const cacheBarClass = computed(() => {
   return 'bg-danger'
 })
 
+/** 缓存触发器 title：图标态下标题必须自带档位/数值（文本被图标取代，信息不能丢） */
+const cacheTitle = computed(() =>
+  props.variant === 'iconic'
+    ? `${t('panel.context.genStatsCacheTitle')} · ${cacheDisplay.value}`
+    : t('panel.context.genStatsCacheTitle'),
+)
+
 /** 百分比统一显示：null →「—」，否则「N%」 */
 function cachePercentDisplay(v: number | null | undefined): string {
   return v == null ? '—' : `${v}%`
 }
 
-const cacheDisplay = computed(() => cachePercentDisplay(cacheCurrent.value))
+/** 归因 reason → 触发器短文案（i18n；已知三值均为「预期内 miss，非故障」语义）。
+ *  [RD-2#7] default：TS2366 只拦编译期，runtime 领先 renderer 的版本漂移会送来未知
+ *  reason——落通用「缓存未命中」文案 + warn（缺省会让 cacheDisplay 为 undefined，
+ *  触发器 chip 空白且无日志）。 */
+function cacheMissLabel(reason: GenStatsCacheMiss['reason']): string {
+  switch (reason) {
+    case 'cold-start':
+      return t('panel.context.genStatsCacheMissColdStart')
+    case 'idle-expiry':
+      return t('panel.context.genStatsCacheMissIdle')
+    case 'context-rewrite':
+      return t('panel.context.genStatsCacheMissCompaction')
+    default:
+      console.warn(`[gen-stats] 未知 cacheMiss reason：${String(reason)}（runtime 与 renderer 协议漂移？）`)
+      return t('panel.context.genStatsCacheMissUnknown')
+  }
+}
+
+/** 空闲时长显示（locale-neutral 短单位：< 1h →「20m」，≥ 1h →「3h50m」） */
+function formatIdle(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / MS_PER_MINUTE))
+  if (minutes < MINUTES_PER_HOUR) return `${minutes}m`
+  const hours = Math.floor(minutes / MINUTES_PER_HOUR)
+  const rest = minutes % MINUTES_PER_HOUR
+  return rest === 0 ? `${hours}h` : `${hours}h${rest}m`
+}
+
+/** 浮层归因说明行（无归因 → null，不出行；reason 已知值穷尽，防御分支见 cacheMissLabel default） */
+const cacheMissNote = computed(() => {
+  const miss = cacheMiss.value
+  if (!miss) return null
+  if (miss.reason === 'cold-start') return t('panel.context.genStatsCacheMissColdStartNote')
+  if (miss.reason === 'idle-expiry') {
+    // [RD-2#6] idleMs 缺失 = 时长未知：不以 ?? 0 伪装成「空闲 1m」假测量值（D4：null=无数据/0=真值）
+    return miss.idleMs != null
+      ? t('panel.context.genStatsCacheMissIdleNote', { duration: formatIdle(miss.idleMs) })
+      : t('panel.context.genStatsCacheMissIdleNoteUnknownDuration')
+  }
+  if (miss.reason === 'context-rewrite') return t('panel.context.genStatsCacheMissCompactionNote')
+  // 防御：协议新增 reason 时不出说明行（触发器文案侧的 default 分支兜底 + warn）
+  return null
+})
+
+/** 触发器显示：归因态 → 成因文案（「空闲过期」等）；否则数值（null →「—」） */
+const cacheDisplay = computed(() => {
+  const miss = cacheMiss.value
+  return miss ? cacheMissLabel(miss.reason) : cachePercentDisplay(cacheCurrent.value)
+})
 </script>

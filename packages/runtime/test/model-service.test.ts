@@ -198,13 +198,14 @@ describe('ModelService · discoverModelsFromApi 错误分类（transport 下沉�
     })
   })
 
-  it('其他错误 → ModelDiscoveryError(UNKNOWN) + 原始消息透传', async () => {
+  it('其他错误 → ModelDiscoveryError(UNKNOWN) + 「发现失败：」前缀（原始消息保真）', async () => {
     const { svc } = makeServiceWithRejectingSource(new Error('rate limited'))
 
     await expect(svc.discoverModelsFromApi(BASE_URL, 'k')).rejects.toMatchObject({
       name: 'ModelDiscoveryError',
       code: 'UNKNOWN',
-      message: 'rate limited',
+      // RT-7#9：UNKNOWN 分支加中文前缀（原始英文技术串不直传 UI），raw 原样拼在后
+      message: '发现失败：rate limited',
     })
   })
 

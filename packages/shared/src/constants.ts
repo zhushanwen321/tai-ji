@@ -48,6 +48,17 @@ export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'su
 export const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
 export const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
 
+/**
+ * plan-state 自描述持久化 entry 的 customType（plan 模式重设计 D1①，runtime 侧消费值）。
+ *
+ * 权威源与 subagent/workflow 两常量同层登记：extension 侧（extensions/universal/plan）自带
+ * 同字面量、runtime 不 import extensions/ 源码，故此处为 runtime 侧唯一登记处（跨层消费方
+ * infra/event-adapter 与 services/plan-state-extractor 共用，禁止 infra import services 层
+ * 模块——分层依赖方向 infra → shared 合法、infra → services 违规）。extension 升级字面量时
+ * 必须同步此处。
+ */
+export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
+
 /** pi 支持的 provider api 标识全集（前后端共享 SSOT）。
  *  runtime 的 applyTypeTranslation 改为透传后，前端 Select 必须直接发送此集合内的终值。
  *  注意：pi 不支持 ollama；ollama 的前端适配在 W4 处理，runtime 不做别名翻译。 */
@@ -259,8 +270,9 @@ export const ENGINE_ENV_PREFIXES: readonly string[] = [
 ]
 
 export const ENGINE_ENV_DENY_LIST: readonly string[] = [
-  // 出站 deny 清单（与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员——
-  // 引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）
+  // 出站 deny 清单。前两键与 spawn-env-contract.ts SPAWN_ENV_OUTBOUND_DENY_LIST 同成员
+  // （引擎 spawn 面同样不得携带生命周期标志 / WS 令牌；此处单列因 SDK 不能 import shared）；
+  // 其余为引擎面特有的 deny 项（见各条注释）。
   'TAIJI_AGENT_PACKAGED',
   'TAIJI_RUNTIME_TOKEN',
   // 凭证键：引擎凭据不跨进程（设计不变量 5），泄漏面与 WS 令牌同级
@@ -269,6 +281,13 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 误继承会把孙帧归到父 record
   'TAIJI_SUBAGENT_RELAY_SESSION_ID',
   'TAIJI_SUBAGENT_RELAY_RECORD_ID',
+  // 「进程生命周期标志不出站」同族（env 名 SSOT = 下方 PRESET_FALLBACK_ENV_KEYS，
+  // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
+  // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
+  // → 子 agent pi）继承陈旧值会让子 agent pi 的 trace 扩展记一个从未发生的
+  // presetFallback 假披露——故在引擎出站面一律剥除。
+  'TAIJI_PRESET_FALLBACK_FROM',
+  'TAIJI_PRESET_FALLBACK_TO',
 ]
 
 /**
@@ -286,6 +305,29 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
 export const ENGINE_LAUNCH_ENV_KEYS = {
   ROOTS: 'TAIJI_AGENT_ENGINE_ROOTS',
   NODE: 'TAIJI_AGENT_ENGINE_NODE',
+} as const
+
+/**
+ * 模式回落事实 env 名 SSOT（F1b，设计 `mode-system-composer-density`
+ * §7.5 E4 的 trace 披露面）。
+ *
+ * 语义：restore / create / fork 解析模式时，sidecar 里的 presetId 定义不可得 → 本次已
+ * 回落 `builtin:full` 启动。runtime 把这一「本进程本次运行」的事实经出站 env 传给 pi
+ * 子进程，`@zhushanwen/pi-system-prompt-trace` 读取后写进 `taiji:system-prompt` entry
+ * 的可选 `presetFallback` 字段——事后审计从 trace 即可得知「提示词为何变了」。
+ *
+ * 写入 = `packages/runtime/src/services/session/launch-params.ts` 的
+ * `buildPresetFallbackEnv`（未回落时写空串**显式清除**，防白名单继承的父 env 陈旧值
+ * 穿透造成假披露）；读取 = `extensions/taiji/system-prompt-trace/src/types.ts`
+ * （extension 独立发布体系不依赖 @taiji/shared，按字面量镜像，单侧改名即静默断链）。
+ * 出站路径 = runtime ProcessManager → RpcClient → buildPiOutboundEnv →
+ * buildOutboundChildEnv（C-proc-09 出站契约构建器）。
+ */
+export const PRESET_FALLBACK_ENV_KEYS = {
+  /** 原（悬空）模式 id——发生回落时有值，否则空串 */
+  FROM: 'TAIJI_PRESET_FALLBACK_FROM',
+  /** 回落目标模式 id（现行恒 builtin:full）——发生回落时有值，否则空串 */
+  TO: 'TAIJI_PRESET_FALLBACK_TO',
 } as const
 
 /**
@@ -417,7 +459,7 @@ export function readLogKeepDays(env: Record<string, string | undefined> = proces
 }
 
 // ── 空闲 pi 进程回收（idle-pi-reclamation D4，实施计划 u3）──
-// 三个旋钮的 env 变量名 + 默认值 SSOT。本文件保持纯常量：解析（env 读取 + 非法值回落）
+// 四个旋钮的 env 变量名 + 默认值 SSOT。本文件保持纯常量：解析（env 读取 + 非法值回落）
 // 收口在 runtime 的 resolveReclaimConfig（startup-background-init.ts），此处不写函数。
 
 /**
@@ -434,13 +476,20 @@ export const TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS = 'TAIJI_RUNTIME_PI_RECLAIM_IDLE_M
  * （D2 #6：窗口内被 session.switch 查看过的 session 不回收）。
  */
 export const TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS = 'TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS'
+/**
+ * 挂起 UI 请求豁免的计龄上界（ms）。`TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS` env 覆盖，
+ * 默认 6 小时（v6 第四案：豁免无上界 = 把有界的 2h 缺陷换成无界进程滞留）。上界写在豁免
+ * 判定内部（阈值判定先于豁免，外部上界会被结构性旁路），且只作用于回收豁免判定、
+ * **不排空 pending 存储**——超龄 pending 在进程存活期内仍可被重订阅捞回。
+ */
+export const TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS = 'TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS'
 
 /**
- * 默认值三件套（与 runtime idle-pi-reaper.ts 的 DEFAULT_REAP_TICK_MS /
- * DEFAULT_IDLE_THRESHOLD_MS / DEFAULT_VIEWED_WINDOW_MS 数值逐一同源）：reaper 模块内的
- * DEFAULT_* 是「options 未传时」的 fallback 兜底（DI 纯单测场景），生产装配经
- * resolveReclaimConfig 把此处权威值（可被 env 覆盖）传入 config——改默认值只改这里，
- * reaper 内 fallback 仅保测试构造点不炸，两处数值失同步时以本处为准。
+ * 默认值四件套（与 runtime idle-pi-reaper.ts 的 DEFAULT_REAP_TICK_MS /
+ * DEFAULT_IDLE_THRESHOLD_MS / DEFAULT_VIEWED_WINDOW_MS / DEFAULT_FORM_MAX_AGE_MS 数值
+ * 逐一同源）：reaper 模块内的 DEFAULT_* 是「options 未传时」的 fallback 兜底（DI 纯单测
+ * 场景），生产装配经 resolveReclaimConfig 把此处权威值（可被 env 覆盖）传入 config——
+ * 改默认值只改这里，reaper 内 fallback 仅保测试构造点不炸，两处数值失同步时以本处为准。
  */
 // eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D4），校准依据见上方 JSDoc
 export const DEFAULT_PI_RECLAIM_TICK_MS = 5 * 60 * 1000
@@ -448,6 +497,8 @@ export const DEFAULT_PI_RECLAIM_TICK_MS = 5 * 60 * 1000
 export const DEFAULT_PI_RECLAIM_IDLE_MS = 2 * 60 * 60 * 1000
 // eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D2 #6），校准依据见上方 JSDoc
 export const DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS = 30 * 60 * 1000
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（v6 第四案挂起表单豁免上界），校准依据见上方 JSDoc
+export const DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
 // ── 滚动重启计划内退出码（crash-forensics-and-watchdog §3.3 D5 ④，u7c）──
 

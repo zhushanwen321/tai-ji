@@ -27,12 +27,14 @@ import { createGoalSession } from "../session";
 // ── Fake pi / ctx ────────────────────────────────────
 
 interface RecordedCall {
-	kind: "appendState" | "appendHistory" | "notify" | "sendContext" | "sendUser";
+	kind: "appendState" | "appendHistory" | "notify" | "sendContext";
 	text?: string;
 	level?: string;
 	content?: string;
-	deliverAs?: string;
 	customType?: string;
+	display?: boolean;
+	deliverAs?: string;
+	triggerTurn?: boolean;
 	payload?: unknown;
 }
 
@@ -60,12 +62,17 @@ function makeHarness(entries: SessionEntryLike[] = []): FakeHarness {
 				payload: data,
 			});
 		},
-		sendMessage(message: unknown, _options?: unknown): void {
-			const msg = message as { customType?: string; content?: string };
-			piCalls.push({ kind: "sendContext", content: msg.content, customType: msg.customType });
-		},
-		sendUserMessage(content: string | unknown[], _options?: unknown): void {
-			piCalls.push({ kind: "sendUser", content: typeof content === "string" ? content : undefined });
+		sendMessage(message: unknown, options?: unknown): void {
+			const msg = message as { customType?: string; content?: string; display?: boolean };
+			const opts = (options ?? {}) as { deliverAs?: string; triggerTurn?: boolean };
+			piCalls.push({
+				kind: "sendContext",
+				content: msg.content,
+				customType: msg.customType,
+				display: msg.display,
+				deliverAs: opts.deliverAs,
+				triggerTurn: opts.triggerTurn,
+			});
 		},
 	} as unknown as ExtensionAPI;
 
@@ -119,6 +126,11 @@ function notifyText(h: FakeHarness): string[] {
 	return allCalls(h)
 		.filter((c) => c.kind === "notify")
 		.map((c) => c.text ?? "");
+}
+
+/** 发出的 custom message 调用（经 ports.messaging.sendContextMessage → pi.sendMessage） */
+function sendContextCalls(h: FakeHarness): RecordedCall[] {
+	return h.piCalls.filter((c) => c.kind === "sendContext");
 }
 
 // ── /goal status ─────────────────────────────────────
@@ -200,8 +212,14 @@ describe("handleGoalCommand — resume (FR-3 paused/blocked→active + G-014)", 
 		await handleGoalCommand(h.pi, session, "resume", h.ctx);
 		expect(session.state!.status).toBe("active");
 		expect(h.states).toHaveLength(1); // persist 恰好 1 次
-		// FR-8.12: resume 后触发 AI
-		expect(h.piCalls.filter((c) => c.kind === "sendUser")).toHaveLength(1);
+		// FR-8.12: resume 后触发 AI（custom message 四要素：customType/display/deliverAs/triggerTurn）
+		const sends = sendContextCalls(h);
+		expect(sends).toHaveLength(1);
+		expect(sends[0]?.customType).toBe("goal-context");
+		expect(sends[0]?.display).toBe(false);
+		expect(sends[0]?.deliverAs).toBe("followUp");
+		expect(sends[0]?.triggerTurn).toBe(true);
+		expect(sends[0]?.content).toContain("Goal resumed");
 	});
 
 	it("resume 重置 timeStartedAt=now（FR-3.2 重启计时器）", async () => {
@@ -482,7 +500,7 @@ describe("parseGoalArgs — 子命令路由", () => {
 	});
 });
 
-// ── /goal set（提示词触发器：sendUserMessage 让 AI 调 goal_control create）──
+// ── /goal set（提示词触发器：custom message 让 AI 调 goal_control create）──
 
 describe("handleGoalCommand — set (提示词触发器 + #11/D25 拒绝非终态)", () => {
 	it("无旧 goal → 发触发消息（不直接创建 state）", async () => {
@@ -492,11 +510,15 @@ describe("handleGoalCommand — set (提示词触发器 + #11/D25 拒绝非终�
 		// 提示词触发器：不直接 createGoal，state 仍为 null（由 AI 后续 toolcall 创建）
 		expect(session.state).toBeNull();
 		expect(h.states).toHaveLength(0); // 不写 state
-		// 发送 sendUserMessage 引导 AI 调 create
-		const sendUserCalls = h.piCalls.filter((c) => c.kind === "sendUser");
-		expect(sendUserCalls).toHaveLength(1);
-		expect(sendUserCalls[0]?.content).toContain("my objective");
-		expect(sendUserCalls[0]?.content).toContain("goal_control");
+		// 发 custom message 引导 AI 调 create（四要素 + content 含 objective 与工具名）
+		const sends = sendContextCalls(h);
+		expect(sends).toHaveLength(1);
+		expect(sends[0]?.customType).toBe("goal-context");
+		expect(sends[0]?.display).toBe(false);
+		expect(sends[0]?.deliverAs).toBe("followUp");
+		expect(sends[0]?.triggerTurn).toBe(true);
+		expect(sends[0]?.content).toContain("my objective");
+		expect(sends[0]?.content).toContain("goal_control");
 	});
 
 	const SET_REJECT_STATUSES: GoalRuntimeState["status"][] = ["active", "paused"];
@@ -515,7 +537,7 @@ describe("handleGoalCommand — set (提示词触发器 + #11/D25 拒绝非终�
 			expect(notifyText(h).join("\n")).toContain("clear");
 			expect(session.state!.status).toBe(status); // 状态不变
 			expect(session.state!.objective).toBe(`old ${status} goal`); // 旧 goal 保留
-			expect(h.piCalls.filter((c) => c.kind === "sendUser")).toHaveLength(0); // 不触发 AI
+			expect(sendContextCalls(h)).toHaveLength(0); // 不触发 AI
 		},
 	);
 
@@ -527,7 +549,7 @@ describe("handleGoalCommand — set (提示词触发器 + #11/D25 拒绝非终�
 		await handleGoalCommand(h.pi, session, "new objective", h.ctx);
 		expect(h.history.length).toBe(historyBefore); // 不写 history（触发器不直接创建）
 		// 终态旧 goal 不挡触发器，发消息让 AI 创建
-		expect(h.piCalls.filter((c) => c.kind === "sendUser")).toHaveLength(1);
+		expect(sendContextCalls(h)).toHaveLength(1);
 	});
 
 	it("空 objective → usage 提示", async () => {
@@ -547,18 +569,18 @@ describe("handleGoalCommand — set (提示词触发器 + #11/D25 拒绝非终�
 		await handleGoalCommand(h.pi, session, "obj --tokens 0", h.ctx);
 		// 提示词触发器不直接创建 state
 		expect(session.state).toBeNull();
-		const sendUserCalls = h.piCalls.filter((c) => c.kind === "sendUser");
-		expect(sendUserCalls).toHaveLength(1);
-		expect(sendUserCalls[0]?.content).toContain("obj");
+		const sends = sendContextCalls(h);
+		expect(sends).toHaveLength(1);
+		expect(sends[0]?.content).toContain("obj");
 	});
 
 	it("--tokens N → 触发消息含 budget 值", async () => {
 		const h = makeHarness();
 		const session = createGoalSession();
 		await handleGoalCommand(h.pi, session, "obj --tokens 5000", h.ctx);
-		const sendUserCalls = h.piCalls.filter((c) => c.kind === "sendUser");
-		expect(sendUserCalls).toHaveLength(1);
-		expect(sendUserCalls[0]?.content).toContain("5000");
+		const sends = sendContextCalls(h);
+		expect(sends).toHaveLength(1);
+		expect(sends[0]?.content).toContain("5000");
 	});
 });
 

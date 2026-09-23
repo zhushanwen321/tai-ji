@@ -64,6 +64,12 @@ export default {
     // 强制退出（右键两段确认）：卡死 session 无停止按钮时的逃生入口
     forceQuit: '强制退出',
     forceQuitConfirm: '确认强制退出？',
+    // 软停止（右键两段确认，ForkGroup 退役后迁入通用行）：运行中菜单项「停止」
+    stop: '停止',
+    stopConfirm: '确认停止？',
+    // 子会话计数徒标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
+    // （非绿点：active / error / stopped / dead 都计入），故文案用「未完成」而非「运行中」。
+    childCount: '{n} 个子会话未完成',
   },
   sessionList: {
     empty: '暂无会话',
@@ -77,12 +83,6 @@ export default {
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',
   // [session-dead 结构性修复 D6/D7 C1 方案一] 长 turn 观测面（Composer 上方常驻条）。
   // 文案纪律（D7）：只陈述事实，禁止判断词（卡死/无响应/异常/建议中止）；操作项中性不预置推荐
-  forkGroup: {
-    title: '本会话的分支',
-    branchN: '分支 {n}',
-    stop: '停止',
-    stopConfirm: '确认停止？',
-  },
   segmentedTab: {
     session: '会话',
     file: '文件',

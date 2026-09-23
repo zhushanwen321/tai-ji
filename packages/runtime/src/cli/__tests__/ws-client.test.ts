@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { rpc } from '../ws-client.js'
+import { _resetWarnOnceForTest } from '../../utils/warn-once.js'
 
 vi.mock('../port-discovery.js', () => ({
   discoverPort: vi.fn(() => 3210),
@@ -75,6 +76,51 @@ describe('rpc', () => {
     await expect(promise).rejects.toThrow(/auth failed/)
     // 只发过 auth 一条，业务命令未发出
     expect(lastMockWs.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('RT-8#1: error envelope（type=error 复用请求 id）→ reject 带 code+message，不得 resolve', async () => {
+    const promise = rpc('config.deleteProvider', { providerId: 'ghost' })
+    lastMockWs.emit('open')
+    lastMockWs.emit('message', Buffer.from(JSON.stringify({ type: 'auth.result', payload: { ok: true } })))
+    const secondMsg = JSON.parse(String((lastMockWs.send as ReturnType<typeof vi.fn>).mock.calls[1][0]))
+    // broker sendError 的 wire 形状：{ type:'error', id, payload:{ code, message } }（同 id 复用）
+    lastMockWs.emit('message', Buffer.from(JSON.stringify({
+      type: 'error',
+      id: secondMsg.id,
+      payload: { code: 'PROVIDER_NOT_FOUND', message: 'Provider "ghost" not found' },
+    })))
+    // 此前此处 resolve {code,message} payload → 调用方按字段读 undefined → 假成功
+    const err = await promise.then(
+      () => { throw new Error('expected reject, got resolve') },
+      (e: Error & { code?: string }) => e,
+    )
+    expect(err.message).toContain('PROVIDER_NOT_FOUND')
+    expect(err.message).toContain('Provider "ghost" not found')
+    expect(err.code).toBe('PROVIDER_NOT_FOUND')
+    expect(lastMockWs.close).toHaveBeenCalled()
+  })
+
+  it('RT-8#13: 非 JSON 帧（心跳/半帧）不打断 RPC，但 warn-once 出声（附帧样本 + dropCount）', async () => {
+    _resetWarnOnceForTest()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const promise = rpc('config.getProviders', {})
+      lastMockWs.emit('open')
+      lastMockWs.emit('message', Buffer.from(JSON.stringify({ type: 'auth.result', payload: { ok: true } })))
+      const secondMsg = JSON.parse(String((lastMockWs.send as ReturnType<typeof vi.fn>).mock.calls[1][0]))
+      // 非 JSON 帧：此前静默 ignore（零留痕）；随后正常 reply 必须仍能 resolve（不被打断）
+      lastMockWs.emit('message', Buffer.from('\x00\x01not-json-at-all'))
+      lastMockWs.emit('message', Buffer.from(JSON.stringify({ id: secondMsg.id, payload: { providers: [] } })))
+      await expect(promise).resolves.toEqual({ providers: [] })
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const warned = String(warnSpy.mock.calls[0]![0])
+      expect(warned).toContain('丢弃 1 帧')
+      expect(warned).toContain('config.getProviders')
+      expect(warned).toContain('not-json-at-all')
+    } finally {
+      warnSpy.mockRestore()
+      _resetWarnOnceForTest()
+    }
   })
 
   it('rejects on timeout', async () => {

@@ -1,4 +1,39 @@
 export default {
+  // 模式 chip（u4 mode-visibility-chip；对话态只读 chip + hover popover）
+  presetChip: {
+    ariaLabel: '模式：{name}',
+    replaceHint: '含替换提示词',
+    lockNote: '模式在创建时确定，本会话内不能更换；模式定义可在设置页编辑（下次启动采用新定义）',
+    newSession: '新建会话以使用其他模式',
+    toolSurface: '工具面',
+    extensionSurface: '扩展面',
+    promptSegments: '提示词段数',
+    builtin: '内置',
+    deleted: '模式已删除（{id}）',
+    // F1 回落披露（设计 `mode-system-composer-density` §7.5 E4）：两态文案
+    // 严格区分——未回落只预告后果，已回落才声称「本次」。禁在未重启窗口内声称已用全工具。
+    deletedFallbackPending: '会话重启后将回落全工具',
+    deletedFellBack: '本次以全工具模式启动',
+    unknownSurface: '—',
+    toolAll: '全部工具',
+    toolNone: '无工具',
+    extAll: '全部扩展',
+    extNone: '无扩展',
+    allowCount: '允许 {count} 项',
+    denyCount: '禁用 {count} 项',
+    promptCount: '{count} 段',
+  },
+  // 模式声明行（u5 mode-declaration-row；消息流顶部的派生行，零新 entry 类型）
+  modeDeclaration: {
+    label: '模式：{name}',
+    toolChip: '工具 · {surface}',
+    promptChip: '提示词 · {count} 段',
+    deleted: '模式已删除（{id}）',
+    // F1 回落披露（设计 §7.5 E4）：与 panel.presetChip 同口径，两态文案区分（未回落只预告）。
+    deletedFallbackPending: '会话重启后将回落全工具',
+    deletedFellBack: '本次以全工具模式启动',
+    newSession: '新建会话',
+  },
   header: {
     toggleSidebarExpand: '展开侧栏',
     toggleSidebarCollapse: '收起侧栏',
@@ -88,6 +123,13 @@ export default {
     respawnRetryFailed: '恢复失败，请稍后重试或新建会话',
     dispatching: '思考中…',
     railInProgress: '进行中…',
+    // [RD-2#1 渲染错误边界] 单条渲染失败占位行 + 重试入口；全局渲染异常上屏 toast
+    itemRenderFailed: '本条渲染失败',
+    itemRenderRetry: '重试',
+    renderErrorToast: '界面渲染出现异常，已记录日志',
+    // [RD-3#7] toast 在列上限溢出折叠摘要（droppedCount 的 UI 消费方）
+    toastDropped: '还有 {count} 条通知未显示',
+    toastDroppedDismiss: '关闭折叠通知提示',
     startConversation: '开始对话，或从左侧选择一个会话',
     scrollToBottom: '回到底部',
     // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
@@ -98,8 +140,9 @@ export default {
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
     toolCount: '工具 ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（TurnMeta.vue，设计 §2.1/§2.4）
-    generatedChars: '已生成 {chars} 字符',
+    // [u3 remove-turn-progress-bar] TurnMeta 已生成 token 数（TurnMeta.vue，设计 §2.1/§2.4；
+    // 2026-09 口径改 token：整 turn 全部 LLM 调用的 usage.outputTokens 之和，不估算）
+    generatedTokens: '已生成 {tokens} tokens',
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',
@@ -139,6 +182,7 @@ export default {
     pillStaged: '已暂存',
     pillDirty: '有改动',
     pillConflict: '冲突',
+    unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
     capacity: '上下文容量',
@@ -163,6 +207,10 @@ export default {
     quotaFailParse: '额度响应解析失败',
     quotaFailNotConfigured: '未配置 Workspace，请在设置中填写后重试',
     quotaFailNoCredential: '未找到可用凭证，请到设置页检查额度查询配置',
+    // RT-7#7：凭据文件读取失败（读盘/锁异常，非「没有凭证」）——指引用户查文件而非重填
+    quotaFailCredentialUnavailable: '凭据文件读取失败，请检查磁盘与文件权限后重试',
+    // RT-7#4：凭据形态不支持（! command 前缀 / 环境变量未定义）
+    quotaFailCredentialUnsupported: '凭据形态暂不支持，请改用明文 API Key',
     window5h: '5h',
     windowWeek: '本周',
     windowMonth: '本月',
@@ -187,7 +235,18 @@ export default {
     genStatsD30: '近 30 天',
     genStatsDayShort: '今日加权（此模型）',
     genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
-    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
+    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时显示「—」',
+    // 归因降噪（2026-09-19 D-A）：预期内 0% 的成因文案——三值均非故障，以中性色呈现
+    genStatsCacheMissColdStart: '首次请求',
+    genStatsCacheMissIdle: '空闲过期',
+    genStatsCacheMissCompaction: '压缩重建',
+    genStatsCacheMissColdStartNote: '会话首个请求，缓存尚未建立（预期内未命中）',
+    genStatsCacheMissIdleNote: '距上次请求已空闲 {duration}，provider 缓存已过期（预期内未命中）',
+    genStatsCacheMissCompactionNote: '上下文压缩后前缀重建，本次请求必然未命中（预期内）',
+    // [RD-2#6] idle-expiry 而 idleMs 缺失：时长未知不伪装成测量值（null=无数据/0=真值，D4）
+    genStatsCacheMissIdleNoteUnknownDuration: '距上次请求空闲时长未知，provider 缓存已过期（预期内未命中）',
+    // [RD-2#7] runtime 领先 renderer 的协议漂移（未知 reason）→ 通用文案兜底（default 分支 + warn）
+    genStatsCacheMissUnknown: '缓存未命中',
     genStatsNoData: '暂无数据',
   },
   sideDrawer: {
@@ -232,7 +291,7 @@ export default {
     // 后台命令 tab（background-task-sidebar-view D5：drawer bashTask 详情）。
     // 术语裁决（设计 §1）：用户可见命名一律「后台命令」，与 subagent 的「后台任务」区分。
     // 入口提示（2026-09-16 回写）：入口唯一化后的列表承载 = composer 任务托盘的「后台命令」面板
-    // （原侧栏 L2 视图已退役，设计 composer-task-tray.md D10/D11）。
+    // （原侧栏 L2 视图已退役，设计 composer-task-tray.md D10/D11——已删除，git 可追溯）。
     tabBashTask: '后台命令',
     noBashTask: '未选中后台命令',
     bashTaskHint: '在 composer 工具条的任务托盘中打开「后台命令」面板，点击任务查看详情',
@@ -278,6 +337,12 @@ export default {
     clear: '清屏',
     kill: '终止终端进程',
     sendToAI: '发给 AI',
+    writeRpcFailed: '终端命令发送失败：{error}',
+    writeFailed: '终端输入可能丢失：{message}',
+    queueDropped: '终端待写队列已满，已丢弃 {count} 条最早的命令',
+    // RD-5#2：PTY spawn 失败 inline 错误条（复用 FileView error 态范式）
+    spawnFailed: '终端启动失败：{error}',
+    retry: '重试',
   },
   mermaid: {
     rendering: '图表渲染中…',
@@ -309,6 +374,10 @@ export default {
     builtin: '内置',
     noDescription: '该命令无详细描述',
     noDocBody: '该 skill 无文档正文',
+    // [RD-2#3] SKILL.md 读取失败（两路守门均拒绝/IO 异常）显式失败态，区别于「无文档正文」空态
+    loadFailed: 'SKILL.md 读取失败：',
+    openDir: '打开所在目录',
+    revealFailed: '打开目录失败',
     path: '路径',
     commandType: '扩展命令',
     builtinCommand: '内置命令',
@@ -396,6 +465,8 @@ export default {
     preview: '预览',
     loadFailed: '无法加载图片',
     noDiff: '无差异内容',
+    // [RD-2#2] shiki 高亮失败显形降级（内容仍按原始行纯文本渲染）
+    highlightFailed: '高亮失败，已降级纯文本',
     tabDiff: '差异',
     copyFileName: '复制文件名',
     copyFilePath: '复制路径',
@@ -470,11 +541,17 @@ export default {
     loading: '加载中…',
     malformedLine: '无法解析的 entry（第 {line} 行）',
     malformedHint: 'JSONL 第 {line} 行损坏；可在文件管理器中检查 session JSONL 文件',
+    // [RD-2#6] 损坏行无行号（协议/版本漂移防御）：不承诺行定位、不指引用户查不存在的行
+    malformedLineUnknown: '无法解析的 entry（行号未知）',
+    malformedHintUnknownLine: 'JSONL 存在损坏行（行号未知）',
     inspectorBack: '返回',
     inspectorCopy: '复制',
     inspectorCopied: '已复制',
     inspectorSubtitle: '来自 Trace 视图 · 选中 entry 的完整详情',
     inspectorRaw: '原始 entry JSON',
+    // [RD-2#5] safeJson 守卫文案：环形引用等不可序列化 / 超限截断
+    rawJsonUnserializable: '（内容无法序列化展示）',
+    rawJsonTruncated: '…（内容过大，已截断）',
     // usage 行尾弱标注（互斥桶语义：cacheRead > input 是缓存命中的常态）
     usageUncached: '未缓存',
     usageCacheRead: '缓存命中',
@@ -483,5 +560,9 @@ export default {
     usageReasoning: '含于 output',
     blockRedacted: '（thinking 已脱敏，原文不可见）',
     jumpToolResult: '跳到对应 TOOL 行',
+  },
+  trayWidget: {
+    // [RD-2#8] 第三方 widget meta.progress 数值非有限（NaN/Infinity）：不渲染进度条，显示无进度
+    progressUnavailable: '无进度',
   },
 }

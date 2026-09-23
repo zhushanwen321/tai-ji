@@ -547,6 +547,10 @@
       "enforcement": [
         {
           "type": "machine",
+          "hook": "check_infra_services_import.py"
+        },
+        {
+          "type": "machine",
           "hook": "check_no_service_cycle.py"
         },
         {
@@ -1145,7 +1149,7 @@
     },
     {
       "id": "C-ext-09",
-      "summary": "错误处理两层：内部实现可 throw；execute 是 API 边界必须 catch 返回 { isError: true } + err.message（不含堆栈）；禁错误成功模式",
+      "summary": "错误处理 throw 范式：内部实现与 execute 直接 throw，pi 统一置 isError:true；禁止 catch 后返回 { isError: true }（返回值 isError 被 pi 丢弃 = 错误标成功）；错误消息不含堆栈；禁错误成功模式",
       "scope": [
         "extensions/**"
       ],
@@ -1202,7 +1206,7 @@
     },
     {
       "id": "C-ext-12",
-      "summary": "TUI/GUI 环境区分用 ctx.mode === \"rpc\"（hasUI 在 TUI/RPC 均为 true 不能区分）；event handler 注入消息只能 pi.sendUserMessage；agent_end 禁启动新 LLM 调用",
+      "summary": "TUI/GUI 环境区分用 ctx.mode === \"rpc\"（hasUI 在 TUI/RPC 均为 true 不能区分）；event handler 注入消息首选 pi.sendMessage custom message（display 控可见性），sendUserMessage 保留给真实用户视角语义；agent_end 禁启动新 LLM 调用",
       "scope": [
         "extensions/**"
       ],
@@ -2086,7 +2090,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只回收内存不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已离场/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只回收不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 收口落账点 markSettledOut 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道现为 6 条——host/poolResolved 与 host/permission 后续亦退役、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；协议演进按演进政策三条执行（ADR-0071）：增量以可选载荷向后兼容、major 当前恒 1（删除类变更走 major bump 区间平移，政策③），且新增须过新增门槛（消费方 + 降级路径 + 能力位绑定三件齐，无消费方不进协议）；A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」，B 型机制替换同批合法（对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major——minor 协商触发条件三条见 ADR-0071，条件不到不加协商位。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只回收内存不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已离场/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只回收不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 收口落账点 markSettledOut 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2840,6 +2844,118 @@
         {
           "type": "review",
           "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-22",
+      "summary": "引擎协议判据 6——wire 可选键三分类（advisory/degradable/behavior）与行为键必配门：behavior 键（引擎静默忽略会改变任务语义）必须绑定能力位并在宿主派发前预检（先例 resume↔conversation gate、forkSource），degradable 键缺省最弱档 + 判据 5 能力位双向回指 + 预检豁免（先例 streamMode↔eventGranularity），advisory 直接 additive；判别式「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）。执行方式 = review（新 wire 可选键按判别式分类并核对能力门绑定/双向回指）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/common/capability-gate.test.ts（behavior 键派发前预检既有回归）、packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts（能力位类型面必填断言）；条文权威 = ADR-0071 与 engine-protocol.ts 头注判据 6",
+      "scope": [
+        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/subagent-core/src/execution/engine/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071",
+        "../packages/subagent-engine-sdk/src/protocol/engine-protocol.ts"
+      ],
+      "dimensions": [
+        "business-logic",
+        "type-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-23",
+      "summary": "引擎协议四张词表锁——事件/方法/通道/能力位键集四张词表统一为常量 SSOT 派生或键集互锁：AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES、ProtocolMethod ⟷ PROTOCOL_METHODS、ReverseChannel ⟷ REVERSE_CHANNELS 双向 AssertMutuallyAssignable（编译期锁），keyof CONSERVATIVE_CAPABILITIES ⟷ keyof EngineCapabilities（11=11）与 keyof CAPABILITY_ENUMS ⟷ Exclude<keyof EngineCapabilities,'maxTurns'>（10=10）键集互等；union/schema enum/manifest 两表任一处漏同步即 typecheck 红（堵 schema enum 静默缺值与缺键 undefined 透传 + gate 字面值判据放行洞）。执行方式 = 编译期断言（落在测试文件内随 typecheck 生效）+ 守卫锚点（测试文件路径）= packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts、packages/subagent-engine-sdk/src/__tests__/protocol.test.ts、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts、packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts；条文权威 = ADR-0071（病灶 why）与 engine-protocol.ts 头注",
+      "scope": [
+        "packages/subagent-engine-sdk/src/**",
+        "packages/subagent-core/src/execution/engine/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071",
+        "../packages/subagent-engine-sdk/src/protocol/contract-types.ts"
+      ],
+      "dimensions": [
+        "type-safety",
+        "test-coverage"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-type-safety"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-24",
+      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
+      "scope": [
+        "packages/subagent-engine-sdk/src/**",
+        "packages/subagent-core/src/execution/engine/__tests__/conformance/**",
+        "docs/extensions/subagents/engine-development-guide.md",
+        "docs/architecture/engine-adaptation/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071"
+      ],
+      "dimensions": [
+        "business-logic",
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-25",
+      "summary": "同数据目录单 runtime 实例互斥：runtime 进程启动必须经 single-instance-guard 探活（<dataDir>/runtime-instance.json 与 supervisor runtime.port 双候选端口 TCP 探活），活实例在场即 fail-fast 拒绝启动（早于一切子进程 spawn）；probe 通过即原子写 runtime-instance.json 预登记（早于 listen：并发同启时后到实例的 probe 读到登记且 pid 存活即拒绝——端口未 listen 但持有 pid 存活同判拒绝，漏防窗口缩到单文件原子写内；双方写入前的毫秒级并发窗口为设计内残差，pid 死亡残留由判活天然放行接管）。禁止双 runtime 共享同一 TAIJI_AGENT_DATA_DIR 并行——第二实例 reattach 抢管他人 session + reaping orphan 杀幸存 subagent，退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent（2026-09-22 批量 subagent exit 143 事故形态）。验收/e2e/脚本起 runtime 必须用独立数据目录（mkdtemp / 实例目录），不得继承 prod 数据目录 env；单测守护 = packages/runtime/src/__tests__/infra/single-instance-guard.test.ts",
+      "scope": [
+        "packages/runtime/src/infra/single-instance-guard.ts",
+        "packages/runtime/src/index.ts"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-26",
+      "summary": "数据目录缺省反转（fail-safe default，2026-09-23）：getDataDir() 缺省 = ~/.taiji-dev，prod 数据目录（~/.taiji）只能被显式声明触达——打包 main 经 resolvePackagedDataDir 钉死（外部值仅 ~/.taiji 树内采信，与 dev 侧 resolveDevDataDir 镜像对称）并自置位 TAIJI_AGENT_PACKAGED=1，dev main 经 resolveDevDataDir（~/.taiji-dev 树内采信）；main spawn runtime 时 TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 组合根最早期（早于 initLogger）经 spawnDataDirContractViolation 交叉断言缺一即 fail-fast。第二支柱 prod 值准入守卫：getDataDir 内 assertNotLeakedProdDataDir——非 PACKAGED 进程持有 ~/.taiji 树值即 throw（堵「env 被污染 + 防线不在场」组合：bun test 等绕过 vitest config 的执行器恰逢宿主泄漏 ~/.taiji 值，globalSetup 脱钩与 fs-guard 双防线同时失守的 2026-09-22 事故残余形态），守卫挂在唯一入口不依赖任何 config 被加载。裸跑（手动 tsx / 验证脚本 / 探针）一律落缺省 dev 树。测试守护 = packages/shared __tests__/paths.test.ts（守卫矩阵 + 缺省字面断言）+ apps/electron/main test/packaged-data-dir.test.ts（行为矩阵）+ test/main-dev-datadir-pin.test.ts packaged describe（接线时序 + 自置位）+ packages/runtime src/utils/__tests__/runtime-env.test.ts（契约函数）；validate-runtime-bundle.sh 起 runtime 必须 mkdtemp 注入数据目录并剥 TAIJI_AGENT_PACKAGED",
+      "scope": [
+        "packages/shared/src/paths.ts",
+        "apps/electron/main/main.ts",
+        "apps/electron/main/utils/packaged-data-dir.ts",
+        "packages/runtime/src/utils/runtime-env.ts",
+        "packages/runtime/src/index.ts",
+        "scripts/validate-runtime-bundle.sh"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety",
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
         }
       ]
     }

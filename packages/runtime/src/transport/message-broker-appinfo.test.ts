@@ -25,6 +25,8 @@ function makeBroker(appInfo: { appVersion: string; piVersion: string }) {
     sessionService: { listPersistedSessions: vi.fn(() => []) },
     configService: {
       listProviders: vi.fn(() => []),
+      // M4/RT-3#4：buildProviderListMsgs 读降级态标志（config.providers 帧新增字段）
+      isModelsStoreCorrupted: vi.fn(() => false),
       loadSkills: vi.fn(() => []),
       loadAgents: vi.fn(() => []),
       getSkillPathScopes: vi.fn(() => ({ projectPaths: [], globalPaths: [] })),

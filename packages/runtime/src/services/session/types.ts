@@ -407,12 +407,13 @@ export type PiTranslatedEvent =
   | { kind: 'subagent-stream'; sessionId: string; recordId: string; lines: string[] | undefined }
   /**
    * 自描述 record entry 到达的失效信号（W18，D4）——pi entry_appended（extension appendEntry
-   * 路径，message entry 不发射）经 adapter customType 过滤后仅对 subagent-record / workflow-record
-   * 产出。interpreter 据此触发 onRecordEntriesInvalidated（组合根注入 sessionService
+   * 路径，message entry 不发射）经 adapter customType 过滤后仅对 subagent-record / workflow-record /
+   * plan-state 产出（第三员为 plan 模式重设计 D1② 扩容）。interpreter 据此触发
+   * onRecordEntriesInvalidated（组合根注入 sessionService
    * .invalidateRecordEntries：markDirty → 防抖 get_entries(since) 增量重拉 → entry 扫描写入
    * 派生缓存）。事件 payload 不进任何数据缓存（ReplicatedState「事件只做失效」不变量）。
    */
-  | { kind: 'record-entry-appended'; customType: 'subagent-record' | 'workflow-record' }
+  | { kind: 'record-entry-appended'; customType: 'subagent-record' | 'workflow-record' | 'plan-state' }
   /**
    * compaction 生命周期开始（pi compaction_start{reason}）—— interpreter 编排：
    * 广播 session.compacting{reason} + isCompacting 置位经 occupancy 转移原语
@@ -453,6 +454,14 @@ export type PiTranslatedEvent =
    * 在其 handler 内同调 onTraceSync（四类触发信号的第四类）。
    */
   | { kind: 'trace-trigger'; trigger: 'message_end' | 'agent_settled' | 'entry_appended' }
+  /**
+   * 送达水位对账触发信号（reload-closeout D2）—— agent_settled（run 级联结束）到达 →
+   * interpreter 调 onRecordReconcile 回调（sessionService.reconcileRecordEntries：重跑
+   * fetch→merge→publish 管线，发布门 = 已发布快照水位，diff 非空补发——守卫/发布门处
+   * 曾丢的帧下轮触发必补发）。组合注册追加（withRecordReconcileTrigger，照抄
+   * trace-trigger 先例），只由 agent_settled 产出。
+   */
+  | { kind: 'record-reconcile-trigger' }
 
 
 /**

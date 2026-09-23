@@ -29,8 +29,18 @@
  * 零外部 npm 依赖（避免 tsup noExternal 变更）。本 wave（W6）只交付原语本体，
  * 不接线任何实例（W7/W8 做，接线时实例配置即登记表条目）。
  *
+ * 失败可见性（code-harden RT-4#3）：快照失败不再零日志——每次失败 warn 一条（实例
+ * 诊断标签 + 第几次尝试 + RPC 异常 / wire 归一异常分型）；退避预算耗尽落一条终末
+ * warn（每轮耗尽只一条）后停止重试（核心不变量 2），恢复路径 = 既有失效边沿
+ * （markDirty / refetch / 周期兜底）：各实例的失效源与真值变化语义一一对应
+ * （usage=turn_end/agent_end/compaction、modelId=switchModel RPC、thinkingLevel=
+ * thinking_level_changed 事件 + setThinkingLevel RPC、commands=查询即失效），
+ * 不另配低频 poll（对真值只在 runtime RPC 时变化的实例是纯浪费 RPC，且会推翻
+ * 「耗尽后停止、等下一次失效」的既有不变量）。
+ *
  * @module replicated-state
  */
+import { toErrorMessage } from '../../utils/errors.js'
 
 /**
  * 字段空值语义登记条目（D1b 规则 2 wire 归一依据）。
@@ -78,6 +88,11 @@ export interface ReplicatedStateConfig<T> {
   merge: (snapshot: T, current: T) => T
   /** 字段空值语义登记（D1b 规则 2 wire 归一依据）。 */
   fieldsNullSemantics: FieldsNullSemantics
+  /**
+   * 诊断标签（可选，code-harden RT-4#3）：失败 warn 日志的实例身份（如 'usage(s1)'）。
+   * 缺省 'unnamed-replicated-state'——日志仍产生，但建议实例化时提供以定位 session。
+   */
+  diagnosticLabel?: string
 }
 
 /**
@@ -158,6 +173,8 @@ export class ReplicatedState<T> {
   /** 在途 fetch 期间又有拉取触发（防抖到点/周期/重连）→ 挂起，fetch 结束后补拉一次。 */
   private chainedRefetch = false
   private disposed = false
+  /** 退避预算耗尽的终末 warn 已落标志（每轮耗尽只落一条；成功/refetch 重置开启新一轮）。 */
+  private backoffExhaustionLogged = false
 
   constructor(config: ReplicatedStateConfig<T>) {
     this.config = config
@@ -205,6 +222,7 @@ export class ReplicatedState<T> {
   refetch(): void {
     if (this.disposed) return
     this.backoffAttempt = 0
+    this.backoffExhaustionLogged = false
     void this.doFetch()
   }
 
@@ -231,8 +249,16 @@ export class ReplicatedState<T> {
       const raw = await this.config.fetchSnapshot()
       const normalized = normalizeWireSnapshot(raw, this.config.fieldsNullSemantics)
       this.applySnapshot(normalized, epochAtStart)
-    } catch {
-      // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，退避重试
+    } catch (e: unknown) {
+      // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，退避重试。
+      // [code-harden RT-4#3] 失败显形：RPC 异常 / wire 归一异常分型 + 尝试序号，替代零日志 catch。
+      const kind = e instanceof WireSnapshotSchemaError ? 'wire-schema' : 'rpc'
+      const attemptNo = this.backoffAttempt + 1
+      const totalAttempts = this.config.backoffSchedule.length + 1
+      console.warn(
+        `[replicated-state] ${this.diagnosticLabel} snapshot fetch failed`
+        + ` (attempt=${attemptNo}/${totalAttempts}, kind=${kind}): ${toErrorMessage(e)}`,
+      )
       this.scheduleBackoffRetry()
     } finally {
       this.inFlight = false
@@ -251,6 +277,7 @@ export class ReplicatedState<T> {
       // 拉取期间无新失效：数据新鲜 → 清 dirty、归零退避、撤销冗余的后续拉取
       this.dirty = false
       this.backoffAttempt = 0
+      this.backoffExhaustionLogged = false
       this.clearBackoffTimer()
       this.clearDebounceTimer()
     }
@@ -261,7 +288,20 @@ export class ReplicatedState<T> {
   private scheduleBackoffRetry(): void {
     if (this.disposed) return
     if (this.backoffTimer !== null) return
-    if (this.backoffAttempt >= this.config.backoffSchedule.length) return
+    if (this.backoffAttempt >= this.config.backoffSchedule.length) {
+      // [code-harden RT-4#3] 预算耗尽显形：每轮耗尽只落一条终末 warn（快照陈旧不再零线索）。
+      // 恢复路径 = 既有失效边沿（markDirty / refetch / 周期兜底），理由见文件头
+      // 「失败可见性」段——不另配低频 poll。
+      if (!this.backoffExhaustionLogged) {
+        this.backoffExhaustionLogged = true
+        const totalAttempts = this.config.backoffSchedule.length + 1
+        console.warn(
+          `[replicated-state] ${this.diagnosticLabel} backoff budget exhausted after ${totalAttempts} attempts`
+          + ` (dirty=${this.dirty}); keeping last snapshot, will retry on next invalidation/refetch/poll edge`,
+        )
+      }
+      return
+    }
     const delay = this.config.backoffSchedule[this.backoffAttempt]
     this.backoffAttempt += 1
     this.backoffTimer = setTimeout(() => {
@@ -282,5 +322,10 @@ export class ReplicatedState<T> {
       clearTimeout(this.backoffTimer)
       this.backoffTimer = null
     }
+  }
+
+  /** 诊断标签（失败 warn 的实例身份；缺省兜底，建议实例化时提供）。 */
+  private get diagnosticLabel(): string {
+    return this.config.diagnosticLabel ?? 'unnamed-replicated-state'
   }
 }

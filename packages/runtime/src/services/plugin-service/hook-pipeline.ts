@@ -27,6 +27,24 @@ import { toErrorMessage } from '../../utils/errors.js'
 /** 每个 hook handler 的执行超时（ms） */
 const HOOK_HANDLER_TIMEOUT_MS = 5_000
 
+/**
+ * RT-6#3：hook 异常（无 handle skip / handler 失败或超时）聚合 warn 的间隔。
+ *
+ * 逐条 warn 会在 onPiEvent 高频路径刷屏（message_end/turn_end 每帧一次），故按 N 次
+ * 聚合一条；计数在 HookPipeline 实例生命周期内累计不清零，日志仍可判断「发生过多少」。
+ * 导出供单测断言节流口径（与 OBSERVE_HOOK_TYPES 同）。
+ */
+export const HOOK_ANOMALY_WARN_EVERY = 10
+
+/**
+ * RT-6#4：observe 腿单次派发的在途通知深度上限。
+ *
+ * observe 走 rpcServer.notify（fire-and-forget，无 pending 登记、无超时定时器、不等
+ * 响应），onPiEvent 又是逐事件高频（message_end/turn_end…）。旧状对「在途多少」毫无
+ * 约束：卡死（未崩）worker 的入站队列无界增长即泄漏。此处加在途深度上限 + drop+warn。
+ */
+const OBSERVE_MAX_IN_FLIGHT = 64
+
 /** describeShape 的 warn 摘要截断上限（chars）：防超大条目刷日志 */
 const WARN_SUMMARY_MAX_CHARS = 80
 
@@ -58,6 +76,14 @@ export class HookPipeline {
   private readonly hookRegistry: Map<string, HookEntry[]>
   private readonly host: PluginHost
   private readonly rpcServer: PluginRpcServer
+  /** RT-6#3：无 handle 被 skip 的 handler 累计数（聚合 warn 节流，禁逐条刷屏） */
+  private skippedNoHandle = 0
+  /** RT-6#3：失败/超时（视为放行）的 handler 累计数（同上） */
+  private failedHandlers = 0
+  /** RT-6#4：observe 腿在途通知深度（派发 +1、宏任务释放 -1） */
+  private observeInFlight = 0
+  /** RT-6#4：因在途深度超限被 drop 的 observe 通知累计数（聚合 warn 节流） */
+  private observeDropped = 0
 
   constructor(deps: HookPipelineDeps) {
     this.hookRegistry = deps.hookRegistry
@@ -99,7 +125,12 @@ export class HookPipeline {
     // 串行执行：await 每个 handler，支持 transform 和 block
     for (const entry of entries) {
       const handle = this.host.getWorkerHandle(entry.pluginId)
-      if (!handle) continue // Worker crashed → skip
+      if (!handle) {
+        // RT-6#3：Worker crashed/插件重建窗口 → skip 该 handler，但不再零日志 continue
+        // （hook 整体失效与「无插件注册」此前不可分）。聚合 warn 留痕，不逐条刷屏。
+        this.noteHookAnomaly('no-handle', entry, hookType, context)
+        continue // Worker crashed → skip
+      }
 
       try {
         const result = await this.rpcServer.invoke(
@@ -135,11 +166,9 @@ export class HookPipeline {
         }
 
       } catch (err: unknown) {
-        // 超时或错误 → 视为放行（不阻止链路）
-        console.warn(
-          `[plugin-service] hook handler ${entry.handlerId} failed/timed out:`,
-          toErrorMessage(err),
-        )
+        // 超时或错误 → 视为放行（不阻止链路）。RT-6#3：warn 补 pluginId/handlerId/
+        // hookType/sessionId + 累计计数（此前只有 handlerId + 消息，定位不到插件与 session）。
+        this.noteHookAnomaly('handler-failed', entry, hookType, context, toErrorMessage(err))
       }
     }
 
@@ -152,12 +181,52 @@ export class HookPipeline {
   }
 
   /**
+   * RT-6#3：hook 异常聚合 warn（无 handle skip / handler 失败或超时）。
+   *
+   * 旧状两个不可观测点：① 无 handle 时零日志 `continue`——插件重建窗口内 hook 整体
+   * 失效与「无插件注册」不可分（红线 2/4）；② 超时仅 warn 且只含 handlerId，缺
+   * pluginId/hookType/sessionId，定位不到是哪个插件的哪个 hook 在哪条 session 上失效。
+   *
+   * 节流：每 HOOK_ANOMALY_WARN_EVERY 次输出一条（含累计计数），避免 onPiEvent 高频
+   * 路径逐条刷屏。计数永不清零（进程生命周期累计，日志可判断「发生过多少」）。
+   */
+  private noteHookAnomaly(
+    kind: 'no-handle' | 'handler-failed',
+    entry: HookEntry,
+    hookType: string,
+    context: HookContext,
+    detail?: string,
+  ): void {
+    const count = kind === 'no-handle' ? ++this.skippedNoHandle : ++this.failedHandlers
+    if (count % HOOK_ANOMALY_WARN_EVERY !== 0) return
+    const where =
+      `plugin=${entry.pluginId} handler=${entry.handlerId} hookType=${hookType} ` +
+      `sessionId=${contextSessionId(context) ?? 'unknown'}`
+    if (kind === 'no-handle') {
+      console.warn(
+        `[plugin-service] hook handler skipped: worker unavailable (plugin crashed or ` +
+          `rebuilding) — ${where}; skipped total=${count}`,
+      )
+      return
+    }
+    console.warn(
+      `[plugin-service] hook handler failed/timed out (treated as proceed) — ${where}; ` +
+        `failed total=${count}${detail ? `; last=${detail}` : ''}`,
+    )
+  }
+
+  /**
    * observe 类 hook 的零往返派发（D2-2）：对每个注册 handler 发无 id 通知后立即返回。
    *
    * 与 execute 的差异：rpcServer.notify（无 pending 登记、无超时定时器、不等响应），
    * Worker 侧 handleMessage 的 notification 分支执行 handler 后丢弃结果（fire-and-forget）。
    * Worker crashed → skip 该 handler（与 execute 语义一致）。entries 注册时已按
    * priority 保序（D2-5），postMessage FIFO 保证到达顺序。
+   *
+   * RT-6#4 背压：notify 不回句柄、无 ack，父侧无法精确知道 worker 何时消化完队列。
+   * 以「单个事件循环轮次内派发的通知数」为在途深度记账（派发 +1、宏任务释放 -1），
+   * 超 OBSERVE_MAX_IN_FLIGHT 即 drop + 聚合 warn——把此前完全无约束的 observe 腿
+   * 收敛为有界，且让「在途积压」从静默变为可见。
    */
   notifyObservers(hookType: string, context: HookContext): void {
     const entries = this.hookRegistry.get(hookType)
@@ -165,7 +234,17 @@ export class HookPipeline {
 
     for (const entry of entries) {
       const handle = this.host.getWorkerHandle(entry.pluginId)
-      if (!handle) continue // Worker crashed → skip
+      if (!handle) {
+        // RT-6#3：与 execute 同口径——无 handle 聚合 warn 留痕后再 skip
+        this.noteHookAnomaly('no-handle', entry, hookType, context)
+        continue // Worker crashed → skip
+      }
+      if (this.observeInFlight >= OBSERVE_MAX_IN_FLIGHT) {
+        this.noteObserveDrop(entry, hookType, context)
+        continue
+      }
+      this.observeInFlight++
+      this.releaseObserveSlotLater()
       this.rpcServer.notify(handle.workerId, 'plugin.hooks.invoke', {
         handlerId: entry.handlerId,
         hookType,
@@ -173,6 +252,37 @@ export class HookPipeline {
       })
     }
   }
+
+  /** RT-6#4：在途槽位的延迟释放（宏任务）。timer.unref 避免兜底定时器阻塞 runtime 退出。 */
+  private releaseObserveSlotLater(): void {
+    const timer = setTimeout(() => {
+      this.observeInFlight = Math.max(0, this.observeInFlight - 1)
+    }, 0)
+    timer.unref?.()
+  }
+
+  /** RT-6#4：observe drop 聚合 warn（与 noteHookAnomaly 同节流口径，禁逐条刷屏） */
+  private noteObserveDrop(entry: HookEntry, hookType: string, context: HookContext): void {
+    const dropped = ++this.observeDropped
+    if (dropped % HOOK_ANOMALY_WARN_EVERY !== 0) return
+    console.warn(
+      `[plugin-service] observe hook notification dropped: in-flight depth at limit ` +
+        `(${OBSERVE_MAX_IN_FLIGHT}) — plugin=${entry.pluginId} handler=${entry.handlerId} ` +
+        `hookType=${hookType} sessionId=${contextSessionId(context) ?? 'unknown'}; ` +
+        `dropped total=${dropped}`,
+    )
+  }
+}
+
+/**
+ * 从 HookContext 取 sessionId（诊断日志用）：顶层 `context.sessionId` 优先，回落
+ * `context.data.sessionId`（bridge 事件链路的历史形状——handleBridgeEvent 把
+ * sessionId 放在 data 里，见 bridge-interop.ts）。两者都缺 → undefined（日志落 unknown）。
+ */
+function contextSessionId(context: HookContext): string | undefined {
+  if (typeof context.sessionId === 'string') return context.sessionId
+  const data = context.data as { sessionId?: unknown } | undefined
+  return typeof data?.sessionId === 'string' ? data.sessionId : undefined
 }
 
 /**

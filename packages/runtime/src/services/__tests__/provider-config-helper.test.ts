@@ -260,8 +260,8 @@ describe('M1b: applyProviderWritePolicy 防线②③', () => {
   })
 })
 
-describe('S15: custom provider oauth 清理失败 warn（I9 清理① 降级可观测）', () => {
-  it('authStorage.remove reject → console.warn 指明清理失败，主写路径不受阻', async () => {
+describe('S15: custom provider oauth 清理失败 fail-fast（I9 清理① + RT-7#3 await 化）', () => {
+  function makeSetProviderService(auth: FullAuthPick) {
     const upsertProvider = vi.fn((_providerId: string, _merged: Record<string, unknown>) => ({}))
     const store = {
       getProviderConfig: vi.fn(() => undefined),
@@ -270,19 +270,33 @@ describe('S15: custom provider oauth 清理失败 warn（I9 清理① 降级可�
       ensureProviderInWhitelist: vi.fn(),
       getEnabledModels: vi.fn(() => []),
     } as unknown as IConfigStore
+    return { svc: new ConfigService('/tmp/project', store, auth, new TaijiProviderStore(extrasPath)), upsertProvider }
+  }
+
+  it('authStorage.remove reject → setProvider 整体 reject 且 upsert 不执行（清理失败不落半成品 models.json）', async () => {
     const auth = makeAuth()
     ;(auth.remove as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('auth store locked'))
-    const svc = new ConfigService('/tmp/project', store, auth, new TaijiProviderStore(extrasPath))
+    const { svc, upsertProvider } = makeSetProviderService(auth)
+
+    await expect(svc.setProvider('p-custom', { apiKey: 'sk-new' })).rejects.toThrow('auth store locked')
+    expect(upsertProvider).not.toHaveBeenCalled()
+    expect(auth.remove).toHaveBeenCalledWith('p-custom')
+  })
+
+  it('authStorage.remove 成功 → upsert 在清理完成后执行（await 顺序，merged 含新 apiKey）', async () => {
+    const removeDone: number[] = []
+    const auth = makeAuth()
+    ;(auth.remove as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      removeDone.push(1)
+    })
+    const { svc, upsertProvider } = makeSetProviderService(auth)
 
     await svc.setProvider('p-custom', { apiKey: 'sk-new' })
-    // fire-and-forget catch 在微任务后触发，排空后再断言
-    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(upsertProvider).toHaveBeenCalled()
-    expect(console.warn).toHaveBeenCalledWith(
-      '[config-service] auth.json oauth cleanup failed for p-custom (I9 清理①):',
-      expect.any(Error),
-    )
+    // 清理先完成、upsert 后执行（fire-and-forget 时 upsert 可先于 auth.json 落盘发生）
+    expect(removeDone).toHaveLength(1)
+    expect(upsertProvider).toHaveBeenCalledTimes(1)
+    expect(upsertProvider.mock.calls[0][1]).toMatchObject({ apiKey: 'sk-new' })
   })
 })
 

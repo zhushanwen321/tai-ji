@@ -28,8 +28,10 @@ const ENV_PREFIX_PATTERN = /^[A-Za-z0-9_]+$/;
 /**
  * capabilities 全保守值（manifest capabilities 缺失/缺键时的回退——「声明即能力」
  * 模型下，未声明 = 最弱能力：gate 同步拦生成，运行期不会踩引擎不支持的路径）。
+ * 声明形态 = satisfies（U5 键集锁：保留字面键集，`keyof typeof` 即真实键集；
+ * 原 `: EngineCapabilities` 注释会把 typeof 拓宽为接口全集、令键集断言同义反复）。
  */
-export const CONSERVATIVE_CAPABILITIES: EngineCapabilities = {
+export const CONSERVATIVE_CAPABILITIES = {
   schemaEnforcement: "emulated",
   steer: "unsupported",
   conversation: "unsupported",
@@ -41,10 +43,13 @@ export const CONSERVATIVE_CAPABILITIES: EngineCapabilities = {
   interrupt: "kill-only",
   permissionMode: "ignored",
   maxTurns: false,
-};
+} satisfies EngineCapabilities;
 
-/** 枚举能力位词表（与 types.ts EngineCapabilities 逐键对应；maxTurns 单独 boolean）。 */
-const CAPABILITY_ENUMS: Record<string, readonly string[]> = {
+/** 枚举能力位词表（与 types.ts EngineCapabilities 逐键对应；maxTurns 单独 boolean）。
+ * export 为键集锁开放（U5：protocol-closure.test.ts 断言 B 消费 `keyof typeof`）；
+ * 声明形态 = satisfies Record（保留字面键集，原 `Record<string, ...>` 注释会使
+ * `keyof typeof` 退化为 string|number、断言现状即红），键值与解析逻辑不变。 */
+export const CAPABILITY_ENUMS = {
   schemaEnforcement: ["native", "emulated"],
   steer: ["native", "emulated", "unsupported"],
   // [U6 / §3.2.6 要点 4 + modeless 波2] conversation 轴 = 「怎么续」形态轴兼
@@ -60,7 +65,7 @@ const CAPABILITY_ENUMS: Record<string, readonly string[]> = {
   resume: ["native", "cold", "unsupported"],
   interrupt: ["native", "kill-only"],
   permissionMode: ["native", "fixed", "ignored"],
-};
+} satisfies Record<string, readonly string[]>;
 
 /**
  * 解析 manifest bin → 入口文件绝对路径。package.json `bin` 为字符串（单入口形态）

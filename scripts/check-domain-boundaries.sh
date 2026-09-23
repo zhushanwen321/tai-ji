@@ -46,7 +46,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 占位，C4 deferred）、core/src/coordination/lease.ts（TTL 管控占位，C4 deferred）。
 # 2026-08-04 审计：core/src 全域零 watch(sessionId)、零 reset*ModuleState（非
 # ForTest），AC11 当前零违规，allowlist 为空为结构预留。
+# composer/model-thinking.ts（2026-09-20 R1 评审登记）：「换绑清」语义——armed 意图
+# token 是会话级单值（非 per-session 分区态），watch(sessionId) 换绑即作废全部未消费
+# 意图（安全侧语义，u3·D3 规则 6）；迁 useSessionScopedState 分区会改为「按 session
+# 保留」，换绑回原 session 时意图复活——行为回退，故显式豁免。
 # -----------------------------------------------------------------------------
-AC11_WATCH_ALLOWLIST=()
+AC11_WATCH_ALLOWLIST=(
+  "packages/core/src/domain/composer/model-thinking.ts"
+)
 
 node "$ROOT/scripts/check-domain-boundaries-node.mjs" "${AC11_WATCH_ALLOWLIST[@]}"

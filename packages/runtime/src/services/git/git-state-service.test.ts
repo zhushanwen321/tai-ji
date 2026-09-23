@@ -450,6 +450,65 @@ describe('GitStateService.getStatus', () => {
     }
   })
 
+  // ── RT-8#5：git 不可用与「真非仓库」区分（gitUnavailableReason） ──────────
+
+  it('RT8-5-U1: status 链 GitExecutorError（git_unavailable）→ isRepo=false 但携带 gitUnavailableReason（非「非仓库」误导）', async () => {
+    const fake = createFakeExecutor()
+    const svc = createService(fake.executor)
+    fake.setImpl(async () => {
+      throw new GitExecutorError('git_unavailable', 'git binary not found')
+    })
+    const result = await svc.getStatus('sid-u1', '/repo')
+    expect(result.isRepo).toBe(false)
+    expect(result.gitUnavailableReason).toContain('git_unavailable')
+    expect(result.gitUnavailableReason).toContain('git binary not found')
+    expect(result.files).toEqual([])
+  })
+
+  it('RT8-5-U2: numstat/branch 任一 rejected（超时）→ 聚合降级携带 gitUnavailableReason（timeout 码透出）', async () => {
+    const fake = createFakeExecutor()
+    const svc = createService(fake.executor)
+    fake.setImpl(async (_cwd, command) => {
+      if (command === 'status') {
+        return { stdout: '## main\n', stderr: '', exitCode: 0 }
+      }
+      throw new GitExecutorError('timeout', '执行超时')
+    })
+    const result = await svc.getStatus('sid-u2', '/repo')
+    expect(result.isRepo).toBe(false)
+    expect(result.gitUnavailableReason).toContain('timeout')
+  })
+
+  it('RT8-5-U3: 真非仓库（128 + 官方文案）→ 无 gitUnavailableReason（与不可用区分）+ 负缓存生效', async () => {
+    const fake = createFakeExecutor()
+    const svc = createService(fake.executor)
+    fake.setImpl(async (_cwd, command) => {
+      if (command === 'status') {
+        return { stdout: '', stderr: NOT_REPO_STDERR, exitCode: 128 }
+      }
+      return { stdout: '', stderr: '', exitCode: 0 }
+    })
+    const result = await svc.getStatus('sid-u3', '/repo')
+    expect(result.isRepo).toBe(false)
+    expect(result.gitUnavailableReason).toBeUndefined()
+    // 负缓存：二次调用零 spawn（既有守卫保留）
+    await svc.getStatus('sid-u3', '/repo')
+    expect(fake.countOf('status')).toBe(1)
+  })
+
+  it('RT8-5-U4: 未知异常 → gitUnavailableReason 携带 message（isRepo:false 不再伪装「非仓库」）', async () => {
+    const fake = createFakeExecutor()
+    const svc = createService(fake.executor)
+    fake.setImpl(async () => {
+      throw new TypeError('cannot read properties of undefined')
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await svc.getStatus('sid-u4', '/repo')
+    expect(result.isRepo).toBe(false)
+    expect(result.gitUnavailableReason).toContain('cannot read properties of undefined')
+    vi.restoreAllMocks()
+  })
+
   it('invalidate 后缓存 miss：下一次 getStatus 重新执行；不影响其他 session', async () => {
     const fake = createFakeExecutor()
     const svc = createService(fake.executor)

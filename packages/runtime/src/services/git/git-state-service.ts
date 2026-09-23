@@ -29,7 +29,7 @@
  * xyToStatus——无 IO 纯计算，与 git-service.ts import infra/git/git-status-parser 同款豁免）；
  * 观测器解析 IO 经 IGitRepoResolver（infra/system/git-repo-resolver）注入。
  */
-import type { FileChangeStatus, GitStatusResult } from '@taiji/shared'
+import type { FileChangeStatus, GitFileStatus, GitStatusResult } from '@taiji/shared'
 import { parseGitStatus, deriveCounts, parseNumstatEntries } from '../../infra/git/git-status-parser.js'
 import { parseGitStatusPorcelain, xyToStatus } from '../../infra/pi/file-change-reconciler.js'
 import { GitExecutorError } from '../ports/git-executor.js'
@@ -78,8 +78,13 @@ export interface GitStateServiceOptions {
   notRepoTtlMs?: number
 }
 
-/** getStatus 成功聚合结果才缓存；null 哨兵 = 降级路径（非仓库/不可用/超时），调用方转 notRepoResult。 */
-type GetStatusOutcome = GitStatusResult | null
+/**
+ * getStatus 内部执行结果：result=null 且无 unavailableReason = 真非仓库（fallbackResult）；
+ * result=null + unavailableReason = git 探测失败（unavailableResult 携带真因）。
+ * 两种降级都不进 TTL 缓存（「缓存不因失败写入错误值」既有纪律——瞬态不可用被缓存
+ * 会把 isRepo:false 的错误值钉进窗口，git 恢复后最长 TTL 内仍误报）。
+ */
+type GetStatusOutcome = { result: GitStatusResult | null; unavailableReason?: string }
 
 export class GitStateService implements IGitStateService, IGitRepoObserver {
   private readonly executor: IGitExecutor
@@ -99,7 +104,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
    */
   private readonly statusCache = new Map<string, { result: GitStatusResult; ts: number }>()
   /** cwd → 判定为非仓库的时刻（ms）。
-   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5） */
+   * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯） */
   private readonly notRepoCache = new Map<string, number>()
 
   constructor(opts: GitStateServiceOptions) {
@@ -180,12 +185,14 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
 
     const entry: InflightGetStatus = { dead: false, promise: Promise.resolve(fallbackResult(sessionId)) }
     entry.promise = this.runGetStatus(sessionId, cwd).then((outcome) => {
-      // 降级路径（null 哨兵）不缓存；invalidate 判死的执行不回写（防旧值复活竞态）
-      if (outcome !== null && !entry.dead) {
+      // 降级路径（非仓库 / 不可用）不缓存；invalidate 判死的执行不回写（防旧值复活竞态）
+      if (outcome.result !== null && !entry.dead) {
         this.evictStatusCacheIfFull()
-        this.statusCache.set(key, { result: outcome, ts: Date.now() })
+        this.statusCache.set(key, { result: outcome.result, ts: Date.now() })
       }
-      return outcome ?? fallbackResult(sessionId)
+      return outcome.result ?? (outcome.unavailableReason !== undefined
+        ? unavailableResult(sessionId, outcome.unavailableReason)
+        : fallbackResult(sessionId))
     })
     this.inflightGetStatus.set(key, entry)
     // 完成/失败都离开去重表（后续调用走缓存或重新执行）；仅删除自己，防止误删 invalidate 后新发起的条目
@@ -199,7 +206,8 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
   /**
    * 聚合 status + numstat + branch（D4-1「一次调用内并发执行」：status 先行——非仓库判定
    * 依赖它；numstat 与 branch 并发）。聚合/解析逻辑与 git-service.getStatus 现状逐段等价
-   * （W17 收编时行为不变的前提）。
+   * （W17 收编时行为不变的前提）；numstat 聚合 / branch 清单解析 / catch 降级出口分别见
+   * aggregateNumstat / parseBranchList / statusDegradedOutcome。
    */
   private async runGetStatus(sessionId: string, cwd: string): Promise<GetStatusOutcome> {
     try {
@@ -213,7 +221,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
       )
       if (statusRes.exitCode !== 0) {
         this.maybeMarkNotRepo(cwd, statusRes)
-        return null
+        return { result: null }
       }
       const { branch, files } = parseGitStatus(statusRes.stdout)
       const { stagedCount, unstagedCount, hasConflict } = deriveCounts(files)
@@ -223,70 +231,30 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
         this.execGit(cwd, 'branch', ['--list', '--format=%(refname:short)'], STATUS_TIMEOUT_MS),
       ])
       // numstat/branch 是同一聚合查询的组成部分（非独立数据源）：任一 rejected（git 不可用/超时）
-      // 即整体降级——与 git-service.getStatus 现状「串行 await 任一异常 → catch 降级」行为等价
+      // 即整体降级——与 git-service.getStatus 现状「串行 await 任一异常 → catch 降级」行为等价。
+      // RT-8#5：降级携带 gitUnavailableReason（真因是 git 探测失败而非非仓库，前端据此
+      // 显示「Git 不可用」而非「非 git 仓库」）；result=null = 降级不进 TTL 缓存（既有纪律）
       if (numstatSettled.status === 'rejected' || branchSettled.status === 'rejected') {
-        return null
+        return { result: null, unavailableReason: executorErrorReason(firstRejectionReason(numstatSettled, branchSettled)) }
       }
-      const numstatRes = numstatSettled.value
-      const branchRes = branchSettled.value
-
-      // stats：tracked 改动行数聚合。无 HEAD（空仓库）时 diff 失败 → 0（现状语义）。
-      // 微项 8（perf W17）：单趟解析——一次遍历 parseNumstatEntries 同时产出聚合 stats 与
-      // per-file Map（原 parseNumstat / parseNumstatByFile 双趟薄包装已删除，W17 审查 Fix-5，
-      // 聚合与 per-file 语义收敛到此处单趟实现）。
-      // 聚合语义：add/del 各自独立跳过 undefined（二进制 `-`）；per-file：双值均数字才收录。
-      const stats = { add: 0, del: 0 }
-      if (numstatRes.exitCode === 0) {
-        const numstatMap = new Map<string, { add: number; del: number }>()
-        for (const e of parseNumstatEntries(numstatRes.stdout)) {
-          if (e.add !== undefined) stats.add += e.add
-          if (e.del !== undefined) stats.del += e.del
-          if (e.add !== undefined && e.del !== undefined) {
-            numstatMap.set(e.path, { add: e.add, del: e.del })
-          }
-        }
-        // per-file 行数填充（+N −M 角标）：numstat 不含 untracked/unmerged/二进制 → 保持 undefined
-        for (const file of files) {
-          const ns = numstatMap.get(file.path)
-          if (ns) {
-            file.additions = ns.add
-            file.deletions = ns.del
-          }
-        }
-      }
-
-      let branches: string[] = []
-      if (branchRes.exitCode === 0) {
-        branches = branchRes.stdout
-          .split('\n')
-          .map((b) => b.trim())
-          .filter((b) => b.length > 0)
-      }
+      const stats = aggregateNumstat(numstatSettled.value, files)
+      const branches = parseBranchList(branchSettled.value)
 
       return {
-        sessionId,
-        isRepo: true,
-        branch,
-        branches,
-        stagedCount,
-        unstagedCount,
-        stats,
-        hasConflict,
-        files,
+        result: {
+          sessionId,
+          isRepo: true,
+          branch,
+          branches,
+          stagedCount,
+          unstagedCount,
+          stats,
+          hasConflict,
+          files,
+        },
       }
     } catch (e) {
-      if (e instanceof GitExecutorError) {
-        // git 不可用 / 超时（executor 已知降级路径）→ 静默 null（与 git-service.getStatus catch 降级一致）
-        return null
-      }
-      // W17 审查 Fix-1：未知异常（TypeError 等编程错误）不得无声吞成 isRepo:false——降级语义保持
-      // （不 rethrow：rethrow 会改变 handler 行为链，降级 + 出声是「失败要出声」的最小正确实现），
-      // 但必须留痕供事后诊断（runtime 内 console 经 initLogger monkey-patch 落盘，非仅终端）
-      console.warn(
-        `[git-state] getStatus 未知异常，降级 isRepo:false: sessionId=${sessionId} cwd=${cwd}`,
-        e,
-      )
-      return null
+      return statusDegradedOutcome(e, sessionId, cwd)
     }
   }
 
@@ -383,6 +351,96 @@ function fallbackResult(sessionId: string): GitStatusResult {
     hasConflict: false,
     files: [],
   }
+}
+
+/**
+ * git 探测失败（不可用/超时/未知异常）的降级结果（RT-8#5）：形状同 fallbackResult，但携带
+ * gitUnavailableReason——与「真非仓库」区分（仅 exit 128 + 官方英文文案才判非仓库，
+ * 见 maybeMarkNotRepo），前端据此显示「Git 不可用」而非「非 git 仓库」。
+ */
+function unavailableResult(sessionId: string, reason: string): GitStatusResult {
+  return { ...fallbackResult(sessionId), gitUnavailableReason: reason }
+}
+
+/** executor 异常 → 原因描述（GitExecutorError 带 code，其余取 message）。 */
+function executorErrorReason(e: unknown): string {
+  if (e instanceof GitExecutorError) return `${e.code}: ${e.message}`
+  return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * stats：tracked 改动行数聚合 + per-file 行数填充（runGetStatus 的 numstat 输出聚合）。
+ * 无 HEAD（空仓库）时 diff 失败 → 0（现状语义）。微项 8（perf W17）：单趟解析——一次遍历
+ * parseNumstatEntries 同时产出聚合 stats 与 per-file Map（原 parseNumstat /
+ * parseNumstatByFile 双趟薄包装已删除，W17 审查 Fix-5，聚合与 per-file 语义收敛到此处
+ * 单趟实现）。聚合语义：add/del 各自独立跳过 undefined（二进制 `-`）；per-file：双值均
+ * 数字才收录。
+ */
+function aggregateNumstat(
+  numstatRes: GitExecutorResult,
+  files: GitFileStatus[],
+): { add: number; del: number } {
+  const stats = { add: 0, del: 0 }
+  if (numstatRes.exitCode !== 0) return stats
+  const numstatMap = new Map<string, { add: number; del: number }>()
+  for (const e of parseNumstatEntries(numstatRes.stdout)) {
+    if (e.add !== undefined) stats.add += e.add
+    if (e.del !== undefined) stats.del += e.del
+    if (e.add !== undefined && e.del !== undefined) {
+      numstatMap.set(e.path, { add: e.add, del: e.del })
+    }
+  }
+  // per-file 行数填充（+N −M 角标）：numstat 不含 untracked/unmerged/二进制 → 保持 undefined
+  for (const file of files) {
+    const ns = numstatMap.get(file.path)
+    if (ns) {
+      file.additions = ns.add
+      file.deletions = ns.del
+    }
+  }
+  return stats
+}
+
+/** branch --list 输出 → 分支名清单（失败 → 空清单，现状语义）。 */
+function parseBranchList(branchRes: GitExecutorResult): string[] {
+  if (branchRes.exitCode !== 0) return []
+  return branchRes.stdout
+    .split('\n')
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0)
+}
+
+/** 任一 settled rejection 的真因提取（仅在确认有 rejected 后调用；numstat 侧优先）。 */
+function firstRejectionReason(
+  numstatSettled: PromiseSettledResult<GitExecutorResult>,
+  branchSettled: PromiseSettledResult<GitExecutorResult>,
+): unknown {
+  return numstatSettled.status === 'rejected'
+    ? numstatSettled.reason
+    : (branchSettled as PromiseRejectedResult).reason
+}
+
+/**
+ * runGetStatus 的 catch 降级统一出口（RT-8#5 + W17 审查 Fix-1）：
+ * - GitExecutorError（executor 已知降级路径）：git 不可用 / 超时不再与「真非仓库」塌缩为
+ *   同一 fallbackResult——降级携带 gitUnavailableReason，前端显示「Git 不可用（原因）」
+ *   而非「非 git 仓库」（未装 git 的用户曾被引导按错方向自救）。瞬态失败不写负缓存
+ *   （既有守卫：仅 exit 128 + 官方英文文案才负缓存为非仓库）也不进 TTL 缓存
+ *   （「缓存不因失败写入错误值」纪律；git 恢复后下一次调用即拿到正确状态）。
+ * - 未知异常（TypeError 等编程错误）不得无声吞成 isRepo:false——降级语义保持（不
+ *   rethrow：rethrow 会改变 handler 行为链，降级 + 出声是「失败要出声」的最小正确实现），
+ *   但必须留痕供事后诊断（runtime 内 console 经 initLogger monkey-patch 落盘，非仅终端）。
+ *   同样携带 reason——未知异常的 isRepo:false 也不是「真非仓库」。
+ */
+function statusDegradedOutcome(e: unknown, sessionId: string, cwd: string): GetStatusOutcome {
+  if (e instanceof GitExecutorError) {
+    return { result: null, unavailableReason: `${e.code}: ${e.message}` }
+  }
+  console.warn(
+    `[git-state] getStatus 未知异常，降级 isRepo:false: sessionId=${sessionId} cwd=${cwd}`,
+    e,
+  )
+  return { result: null, unavailableReason: e instanceof Error ? e.message : String(e) }
 }
 
 function statusCacheKey(sessionId: string, cwd: string): string {

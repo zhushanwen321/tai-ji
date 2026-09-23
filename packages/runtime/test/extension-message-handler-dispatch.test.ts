@@ -85,7 +85,10 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
     })
 
     it('正常路径 → client.sendExtensionUiResponse(requestId, result, method) + 清理 pending；result undefined 时第二参为 null（?? null）', async () => {
-      const client = { sendExtensionUiResponse: vi.fn() }
+      // RT-2#8 契约：sendExtensionUiResponse 返 boolean（false=写 pi 失败），
+      // 正常路径 mock 返 true；false→sendError(extension_response_send_failed) 路径
+      // 由 extension-message-handler-ui-response.test.ts 覆盖
+      const client = { sendExtensionUiResponse: vi.fn().mockReturnValue(true) }
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue(client) })
       await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'confirm', result: true }), WS)
       expect(client.sendExtensionUiResponse).toHaveBeenCalledWith('r1', true, 'confirm')
@@ -183,11 +186,23 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
     })
   })
 
-  it('未知 type → 查表落空：不发任何消息、不抛错（同原 switch 无 default 行为）', async () => {
+  it('未知 type → 查表落空：sendError(handler_not_registered)，不发 reply（RT-1#6 显形）', async () => {
     const { cap, handler } = makeHandler()
     await expect(handler.handleExtensionMessage(msg('extension.nonexistent', {}), WS)).resolves.toBeUndefined()
     expect(cap.replies).toHaveLength(0)
-    expect(cap.errors).toHaveLength(0)
+    // 落空不再静默（RT-1#6）：显式 error 信封让前端 pending Promise 立即失败，而非等到泛化超时。
+    expect(cap.errors).toHaveLength(1)
+    expect(cap.errors[0]).toMatchObject({
+      id: 'm1',
+      code: 'handler_not_registered',
+      message: expect.stringContaining('extension.nonexistent'),
+    })
+  })
+
+  it('落空信封透传 payload.sessionId（session 隔离裁决：错误可归属）', async () => {
+    const { cap, handler } = makeHandler()
+    await handler.handleExtensionMessage(msg('extension.nonexistent', { sessionId: 's9' }), WS)
+    expect(cap.errors[0]?.details).toEqual({ sessionId: 's9' })
   })
 })
 

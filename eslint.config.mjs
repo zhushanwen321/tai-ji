@@ -28,6 +28,11 @@ export default [
       'apps/electron/resources/engines/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
       '.taiji-harness/**',
+      // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
+      // 草稿）：引擎生成的 .mjs 非项目源码，已被 .gitignore；.zcode/agents/ 是 tracked
+      // 子代理定义，不在排除范围
+      '.zcode/workflow-runs/**',
+      '.zcode/workflow-drafts/**',
       // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
       'playwright-report/**',
       'playwright/.cache/**',
@@ -93,6 +98,17 @@ export default [
     ],
     rules: {
       'max-lines': 'off',
+    },
+  },
+  // [code-harden RT-3#5] pi-provider-store：resolver 未注入一次性 warn 显形（防装配序
+  // 漂移静默判全量 provider 无凭据）净增 10 行代码，508 > 500 微超即提额（先例：
+  // event-interpreter / engine-client 的「微超即提额，保留软上限告警」同型）。该文件
+  // 曾按 max-lines 拆出 pi-maintenance / pi-enabled-models / pi-skill-paths /
+  // pi-provider-repair（模块头注释），再拆属独立重构任务。
+  {
+    files: ['packages/runtime/src/infra/pi/pi-provider-store.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
@@ -182,6 +198,16 @@ export default [
   // 拆分需重新设计写者注册与 flush 生命周期，属独立重构任务；与 protocol.ts override 同型。
   {
     files: ['packages/runtime/src/infra/logger.ts'],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
+  // [HISTORICAL] session-records.ts 是 record 域唯一聚合中心（W18 派生缓存族 + 磁盘读侧/
+  // 动作/引擎配置，冷热同源共用同一份 scan 派生代码——拆开会造成派生逻辑双份）。
+  // 2026-09-19 reload-closeout D2 送达水位机制入列（发布门换基线 + 对账两腿 + 定时器）
+  // 时代码行越过 500。与 event-adapter 等 override 同型，拆分属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/session-records.ts'],
     rules: {
       'max-lines': 'off',
     },
@@ -656,6 +682,17 @@ export default [
     files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
     rules: {
       'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /
+  // usage 逐条目折叠同住，读路折叠只属读盘入口是文件头既有设计约束）。FR-14 usage 裸断言
+  // 补逐条目守卫（coerceUsage + isPresetUsageEntry）净增 ~23 行代码，统计行 508 > 500 微超
+  // 即提额（pi-provider-store RT-3#5 同型）。提额而非 off：保留 520 软上限告警，超限即再
+  // 暴露；再拆 usage 折叠独立文件会打碎 coerce 家族内聚，属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/preset-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

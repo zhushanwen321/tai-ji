@@ -104,12 +104,25 @@ export function useBrowserZoom(sessionIdRef: Ref<string>): {
     return false
   }
 
-  // sessionId 变化时从主进程读回该 session 的 zoom（view keep-alive 保留状态）
+  // sessionId 变化时从主进程读回该 session 的 zoom（view keep-alive 保留状态）。
+  // RD-5#5：seq 守卫 + catch——watch 回调是 async，快速切 session 时多个 browserGetZoom
+  // 在途，晚到的旧 sid 响应会把陈旧 zoom 写进当前 session 的 ref（竞态写错值）；await 无
+  // catch 时 IPC 失败还会裸 reject（watch 回调的 rejection 无接收方）。形态对齐
+  // useFileTree.expandNode 的在途 stale 丢弃（AC-3.7）。
+  let zoomReadSeq = 0
   watch(
     () => sessionIdRef.value,
     async (sid) => {
-      if (sid) {
-        zoomFactor.value = await browserGetZoom(sid)
+      if (!sid) return
+      const seq = ++zoomReadSeq
+      try {
+        const zoom = await browserGetZoom(sid)
+        // 在途期间又切了 session（seq 已被更新的请求超越）→ 丢弃 stale 响应
+        if (seq !== zoomReadSeq) return
+        zoomFactor.value = clampZoom(zoom)
+      } catch (e: unknown) {
+        // 读回失败（IPC 断连 / view 未就绪）→ 保持本地当前值不写坏，留痕（红线 1）
+        console.warn(`[browserZoom] browserGetZoom 失败，保持当前 zoom: sid=${sid}`, e)
       }
     },
     { immediate: true },

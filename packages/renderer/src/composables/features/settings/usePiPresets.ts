@@ -5,21 +5,75 @@
  *
  * 职责（编排，与 useSettings 同构——features 层是跨 api + stores 的唯一合法层）：
  * - loadPresets：并行拉 preset.list + preset.getDefault RPC，写 store（presets + defaultPresetId）。
- * - setDefault：乐观更新 store.defaultPresetId + 调 preset.setDefault RPC。
+ * - setDefault：乐观更新 store.defaultPresetId + 调 preset.setDefault RPC，失败回滚 + 成功后强拉权威值。
  * - create / update：乐观 upsert + 用 RPC reply 回写 store（runtime 可能补全 id/order 等字段），失败回滚。
  *
  * 不职责：
  * - 不持状态本身（状态在 preset store，本 composable 只做「RPC 拉取 → store 写入」的接线）。
- * - 不挂常驻订阅（preset 域无 server-push 广播，preset.* 不在 ServerMessageType）。组件
- *   （PresetSelectChip）onMounted 调 loadPresets 按需拉取，无 onScopeDispose 订阅清理。
+ * - 不挂常驻订阅（preset 域无 server-push 广播，preset.* 不在 ServerMessageType）。
+ * - 唯一例外 = installPresetAutoLoad 的「首次 connected 必拉一次」单例 watch（u5
+ *   mode-declaration-row · 设计 §6.5 P0-12 / §7.5 E7）——preset 域无广播，但**冷启动直接进入
+ *   上次的非默认模式会话**（不经 landing）时 store 为空，声明行会误报「模式已删除」。
+ *   App bootstrap 只提交连接编排、**不等 connected**（冷启时 preset.list/getDefault 两条 WS RPC
+ *   必 rejected），故加载点挂在连接态（`watch(getState())`）而非 bootstrap：首次 connected 拉一次，
+ *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补拉（E7 ③ 恢复通道）。
  *
  * 依赖方向：
  * - 读 @/api（preset 域 RPC：list / getDefault / setDefault）。
+ * - 读 @taiji/core/transport/ws-client（连接态；与 useBackgroundTasks 同源依赖）。
  * - 写 preset store（presets / defaultPresetId）。
  */
+import { effectScope, watch } from 'vue'
+import type { EffectScope } from 'vue'
+import { getState } from '@taiji/core/transport/ws-client'
 import { preset as presetApi } from '@/api'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
+
+// ── 首次 connected 自动拉取单例（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
+/** 单例安装标志（幂等：HMR / 多次调用只挂一个 watcher）。 */
+let presetAutoLoadInstalled = false
+/** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
+let presetLoadedOnce = false
+/** detached effect scope 持有单例 watch（不随调用方组件卸载停止）。 */
+let presetAutoLoadScope: EffectScope | null = null
+
+/**
+ * 安装 preset「首次 connected 必拉一次」单例（幂等）。
+ *
+ * 何时调用：会话面板常驻挂载点（MessageStream setup）。安装后：
+ * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
+ * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
+ * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
+ * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+ */
+export function installPresetAutoLoad(): void {
+  if (presetAutoLoadInstalled) return
+  presetAutoLoadInstalled = true
+  presetAutoLoadScope = effectScope(true)
+  presetAutoLoadScope.run(() => {
+    const { loadPresets } = usePiPresets()
+    watch(
+      getState(),
+      (s) => {
+        if (s !== 'connected' || presetLoadedOnce) return
+        void loadPresets().then(() => {
+          // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
+          if (usePresetStore().loadError === null) presetLoadedOnce = true
+        })
+      },
+      { immediate: true },
+    )
+  })
+}
+
+/** 测试专用：停止单例 watch 并复位标志（生产不调用）。 */
+export function __resetPresetAutoLoadForTest(): void {
+  presetAutoLoadScope?.stop()
+  presetAutoLoadScope = null
+  presetAutoLoadInstalled = false
+  presetLoadedOnce = false
+}
 
 /**
  * preset 域编排 composable。
@@ -73,16 +127,24 @@ export function usePiPresets() {
   /**
    * 设置全局默认预设。
    *
-   * 乐观更新：立即写 store.defaultPresetId（UI 即时响应），随后发 RPC 持久化。
-   * RPC 失败时由调用方（chip）决定是否 toast 提示——本编排层不 toast（保持与
-   * store.setSkillDirs 同模式：只发请求 + 让广播/乐观更新覆盖）。
-   * preset 域无广播，故 RPC 失败时本地 state 与后端可能短暂不一致——preset 设置是
-   * 低频操作且单点写入（仅 setDefault 一个入口），不一致风险可接受；如需严格一致，
-   * 调用方可在 RPC 失败时重调 loadPresets 刷新。
+   * 乐观更新 + 失败回滚（RD-4#2，与 create/update/remove 同构）：
+   * 备份旧 defaultPresetId → 立即写 store（UI 即时响应）→ await RPC 持久化；
+   * RPC 失败回滚 store 后向上 throw（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
+   *
+   * 成功后 loadPresets() 强拉权威值：preset 域无广播（installPresetAutoLoad 仅首次 connected
+   * 拉一次），乐观镜像与后端的背离不会自行消除——强拉是唯一的对齐通道。loadPresets 内部
+   * allSettled 不会 reject；拉取失败走 store.loadError 既有错误态（页面有重试入口）。
    */
   async function setDefault(presetId: string): Promise<void> {
+    const previous = store.defaultPresetId
     store.setDefaultPresetId(presetId)
-    await presetApi.setDefault(presetId)
+    try {
+      await presetApi.setDefault(presetId)
+    } catch (e) {
+      store.setDefaultPresetId(previous)
+      throw e
+    }
+    await loadPresets()
   }
 
   /**

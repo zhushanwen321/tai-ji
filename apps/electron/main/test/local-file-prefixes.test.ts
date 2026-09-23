@@ -94,7 +94,7 @@ describe('computeLocalFilePrefixes: 打包态（D2a 守卫）', () => {
 })
 
 describe('computeLocalFilePrefixes: dev 态', () => {
-  it('白名单含 cwd（dev 下 cwd=项目根是图片预览主场景，语义保留）', () => {
+  it('白名单含 cwd（dev 态保留 cwd 成员，D2a 语义）', () => {
     const prefixes = devPrefixes()
     expect(prefixes).toContain(PROJECT_CWD + path.sep)
   })
@@ -109,6 +109,53 @@ describe('computeLocalFilePrefixes: dev 态', () => {
     const prefixes = devPrefixes()
     expect(isPathInAllowedPrefixes(`${PROJECT_CWD}/assets/chart.png`, prefixes)).toBe(true)
     expect(isPathInAllowedPrefixes(`${HOME}/.ssh/id_rsa`, prefixes)).toBe(false)
+  })
+})
+
+describe('computeLocalFilePrefixes: projectRoot（dev 装配器注入成员）', () => {
+  // dev-instance.mjs 装配的真实形态：electron cwd/appPath 都指向 worktree 根下的
+  // apps/electron 子目录，projectRoot 才是 worktree 根——对话流 <img src="docs/...">
+  // 相对路径解析出的项目根文件只有它能放行
+  const WORKTREE_ROOT = '/Users/tester/Code/taiji-worktree'
+
+  /** dev 装配形态白名单（cwd/appPath = apps/electron 子目录 + projectRoot = worktree 根） */
+  function devAssembledPrefixes(): string[] {
+    return computeLocalFilePrefixes({
+      isPackaged: false,
+      cwd: `${WORKTREE_ROOT}/apps/electron`,
+      appPath: `${WORKTREE_ROOT}/apps/electron`,
+      projectRoot: WORKTREE_ROOT,
+      dataDir: '/Users/tester/.taiji-dev',
+      tmpdir: TMP,
+      home: HOME,
+    })
+  }
+
+  it('dev 装配态传入 projectRoot 时拼入白名单且带 trailing sep，项目根下用户文件放行', () => {
+    const prefixes = devAssembledPrefixes()
+    expect(prefixes).toContain(WORKTREE_ROOT + path.sep)
+    expect(isPathInAllowedPrefixes(`${WORKTREE_ROOT}/docs/assets/logo.png`, prefixes)).toBe(true)
+    // cwd/appPath 命中不了的项目根文件由 projectRoot 成员放行（本次修复场景）
+    expect(prefixes.every(p => p.endsWith(path.sep))).toBe(true)
+  })
+
+  it('projectRoot 缺省时不混入对应项（既有行为不回归）', () => {
+    const prefixes = devPrefixes()
+    expect(prefixes.some(p => p.startsWith(WORKTREE_ROOT))).toBe(false)
+  })
+
+  it('本函数对 projectRoot 无条件拼入（含打包态入参）——dev-only 过滤职责在 main.ts 调用侧', () => {
+    // computeLocalFilePrefixes 是纯构造函数，不按 isPackaged 过滤 projectRoot；
+    // 「打包态不出现该成员」由 main.ts protocol.handle 调用侧条件展开裁决
+    // （isDev && process.env.TAIJI_DEV_PROJECT_ROOT 才传入，打包态缺省），此处锁定
+    // 纯函数语义；调用侧防线已按读代码核实（main.ts local-file handler 入参展开）。
+    const prefixes = computeLocalFilePrefixes({
+      isPackaged: true,
+      cwd: '/',
+      projectRoot: WORKTREE_ROOT,
+      home: HOME,
+    })
+    expect(prefixes).toContain(WORKTREE_ROOT + path.sep)
   })
 })
 

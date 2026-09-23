@@ -22,8 +22,8 @@ export default {
     systemPromptDesc: '配置替换与追加系统提示词',
     terminal: '终端',
     terminalDesc: 'Shell、字体与终端偏好',
-    preset: '预设',
-    presetDesc: '管理 Pi 启动参数预设与工具/扩展访问策略',
+    preset: '模式',
+    presetDesc: '管理模式、工具/扩展访问策略与提示词',
     worktree: '工作区',
     worktreeDesc: '配置 worktree 创建参数与初始化脚本',
     update: '更新',
@@ -64,6 +64,8 @@ export default {
     title: '子代理引擎',
     label: '默认引擎',
     desc: '派发子代理任务时使用的执行引擎；更改后需重新打开会话生效',
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
   },
   // ── SystemPrompt 页（SystemPromptPage）──
   systemPrompt: {
@@ -75,6 +77,8 @@ export default {
     appendTitle: '注入额外提示词',
     appendSubtitle: '在系统提示词末尾追加内容',
     appendHint: '追加到系统提示词末尾，保存后下一轮对话即生效（含进行中的会话）',
+    capabilityLabel: 'taiji 内置能力告知',
+    capabilityHint: '在系统提示词中注入 taiji 渲染能力说明（内联 HTML、相对图片与链接按会话目录解析等）；保存后下一轮对话生效',
     appendLabel: '追加的提示词',
     appendPlaceholder: '输入要追加的提示词……',
     save: '保存',
@@ -112,6 +116,8 @@ export default {
   provider: {
     add: '添加供应商',
     listTitle: '供应商列表',
+    // RD-4#10：远程模型目录刷新失败/部分失败时的陈旧提示（离线时列表陈旧无痕迹）
+    catalogsStale: '目录可能过期',
     emptyTitle: '还没有供应商',
     emptyDesc: '添加第一个供应商，连接 AI 模型开始对话。',
     defaultPill: '默认供应商',
@@ -518,6 +524,8 @@ export default {
   },
   // ── Extension 页（ExtensionPage）──
   extension: {
+    // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
+    dataDirReadFailed: '数据目录读取失败，用户级强制目录暂不展示',
     recommendedTitle: '推荐扩展',
     installed: '已安装',
     install: '安装',
@@ -567,6 +575,8 @@ export default {
     currentVersion: '当前版本',
     checkUpdate: '检查更新',
     checking: '检查中…',
+    // RD-4#5：手动「检查更新」网络失败显形文案（指向恢复动作；与「已是最新版」区分）
+    checkUpdateFailed: '网络不可达，请检查连接或前往下载页',
     upToDate: '已是最新版本',
     newVersionAvailable: '发现新版本 v{version}',
     downloadAndInstall: '下载并安装',
@@ -580,6 +590,8 @@ export default {
     retry: '重试',
     unsupported: '当前平台不支持自动更新',
     goToDownload: '前往下载',
+    // RD-4#9：手动下载逃生通道自身失败时，把 URL 直接可复制地给出
+    openFallbackFailed: '无法打开下载页，请手动访问 {url}',
     replacing: '替换中',
     restarting: '即将重启',
     // ── 手动升级通道（update-network-resilience D9，UpdateCheckCard 折叠区）──
@@ -678,7 +690,10 @@ export default {
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
     saved: '已保存',
-    saveFailed: '保存失败',
+    saveFailed: '保存失败：{reason}',
+    // RD-4#8：onMounted 读配置失败时的常驻提示（禁止把默认值当已存值渲染）
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
     shortcutTitle: '快捷键',
     shortcutName: '命令',
     shortcutKey: '快捷键',
@@ -702,6 +717,8 @@ export default {
   // ── 资源页（SettingsResourcePage）──
   resource: {
     discovered: '已发现的 {label}',
+    // RD-4#11：getDataDir 读取失败时的显式标注（不伪装真实路径）
+    dataDirReadFailed: '数据目录读取失败，用户级强制目录暂不展示',
     refresh: '刷新',
     refreshing: '刷新中…',
     notFound: '未发现 {label}',
@@ -736,12 +753,14 @@ export default {
     systemTag: '系统',
     pathFormatError: '路径格式错误（项目允许相对/绝对；全局限绝对路径）',
     priorityHint: '靠前优先级更高',
+    saveErrorHint: '未保存，当前显示的是最近落盘值',
     // ── 从其他 Agent 导入（SourceImportSection，W1）──
     importFromAgents: {
       title: '从其他 Agent 导入',
       loading: '检测中...',
       detectError: '检测失败',
       notInstalled: '未安装',
+      unreadable: '目录不可读',
       sharedPoolActive: '已通过共享池生效',
       importSelected: '导入选中',
       skillCount: '{count} 个 skill',
@@ -769,30 +788,47 @@ export default {
   command: {
     'new-session': '新建任务',
     'toggle-sidebar': '收起侧栏',
-    'open-preset-select': '打开启动预设',
+    'open-preset-select': '打开模式选择',
   },
   // ── Preset 页（PiPresetsPage）──
   preset: {
-    pageDesc: '管理 Pi 启动预设，配置工具和扩展的访问策略',
-    groupTitle: '启动预设',
-    new: '新建预设',
-    empty: '暂无预设',
+    pageDesc: '管理模式，配置工具、扩展访问策略与提示词',
+    groupTitle: '模式',
+    new: '新建模式',
+    empty: '暂无模式',
     builtin: '内置',
     default: '默认',
     setDefault: '设为默认',
     restore: '恢复默认',
-    newPresetName: '新预设',
-    created: '预设已创建',
-    deleted: '预设已删除',
+    newPresetName: '新模式',
+    created: '模式已创建',
+    deleted: '模式已删除',
     restored: '已恢复出厂设置',
     defaultSet: '已设为默认',
     name: '名称',
-    namePlaceholder: '预设名称',
+    namePlaceholder: '模式名称',
     id: 'ID',
     description: '描述',
-    descPlaceholder: '预设描述（可选）',
+    descPlaceholder: '模式描述（可选）',
     deleteConfirmTitle: '删除 {name}？',
-    deleteConfirmDesc: '此操作不可撤销，自定义预设将被永久删除。',
+    deleteConfirmDesc: '此操作不可撤销，自定义模式将被永久删除。',
+    promptReplaceTitle: '替换系统提示词',
+    promptReplaceWarning: '启用后会用下方文本顶掉 pi 内置行为规范（工具纪律与安全边界），请谨慎使用。',
+    promptReplaceLabel: '替换提示词',
+    promptReplacePlaceholder: '输入替换 pi 系统提示词的内容…',
+    promptAppendTitle: '追加提示词',
+    promptAppendHint: '追加在 pi 基础提示词之后，与内置规范共同生效，适合补充模式纪律。',
+    promptAppendLabel: '追加提示词',
+    promptAppendPlaceholder: '输入追加到 pi 基础提示词之后的内容…',
+    promptCombinedCount: '合计 {count} / {max}',
+    promptSave: '保存',
+    promptDiscard: '放弃',
+    promptRestoreDefault: '恢复默认',
+    promptSaved: '模式提示词已保存',
+    promptReplaceConfirmTitle: '启用替换系统提示词？',
+    promptReplaceConfirmDesc: '保存后，使用该模式创建的会话将失去 pi 内置行为规范，仅收到你写的替换提示词。取消则改为仅追加。',
+    promptReplaceConfirmBtn: '仍然保存',
+    promptReplaceConfirmCancel: '改为仅追加',
     deleteConfirmBtn: '确认删除',
     cancel: '取消',
     toolMode: '工具访问策略',
@@ -843,7 +879,10 @@ export default {
     defaultBaseBranchHint: '创建 worktree 时的默认基础分支',
     defaultBaseBranchPlaceholder: 'origin/main',
     saved: 'Worktree 配置已保存',
-    saveFailed: '保存失败',
+    saveFailed: '保存失败：{reason}',
+    // RD-4#7：前端范围/非空校验（命中即 inline error 不发 RPC，避免无谓往返 + 后端才炸）
+    timeoutInvalid: '超时时间必须是 1 到 3600 之间的数字',
+    baseBranchEmpty: '默认基分支不能为空',
   },
   // ── 更新代理页（UpdatePage）──
   update: {
@@ -1057,6 +1096,7 @@ export default {
     // ── 脚注 ──
     footnote: '统计口径：assistant 消息 usage 逐条累加，含 compaction / summary 用量；费用为 pi models.json 费率估算值，订阅制 provider 记为 0（显示为 —）。',
     footnoteSkipped: '跳过 {count} 行无法解析的记录',
+    footnoteFailedFiles: '不含 {count} 个读取失败的会话文件',
     // ── 单看 chip ──
     isolateClear: '清除单看',
   },

@@ -298,6 +298,20 @@ function parseExtensionNotify(msg: IncomingPluginMessage): InternalEvent | null 
   return { kind: 'extension-notify', sessionId: resolveSessionId(msg, payload), notification }
 }
 
+/** extension:requestsInvalidated —— 挂起 UI 请求失效广播（P2-2 失效链：requestIds 逐条移除） */
+function parseExtensionRequestsInvalidated(msg: IncomingPluginMessage): InternalEvent | null {
+  const payload = asRecord(msg.payload)
+  if (!payload) return null
+  const requestIds = asStringArray(payload.requestIds)
+  if (requestIds === null) return null
+  return {
+    kind: 'requests-invalidated',
+    sessionId: resolveSessionId(msg, payload),
+    requestIds,
+    reason: asOptionalString(payload.reason) ?? 'unknown',
+  }
+}
+
 function parseExtensionUiRequest(msg: IncomingPluginMessage): InternalEvent | null {
   const payload = asRecord(msg.payload)
   if (!payload) return null
@@ -336,6 +350,7 @@ const EXTENSION_HANDLERS: Record<string, (msg: IncomingPluginMessage) => Interna
   'extension:widgetGui': parseExtensionWidget,
   'extension:status': parseExtensionStatus,
   'extension:notify': parseExtensionNotify,
+  'extension:requestsInvalidated': parseExtensionRequestsInvalidated,
   'extension.ui_request': parseExtensionUiRequest,
 }
 

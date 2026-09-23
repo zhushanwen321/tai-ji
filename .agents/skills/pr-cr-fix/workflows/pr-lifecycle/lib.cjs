@@ -1004,10 +1004,12 @@ function metricsFixContext(io) {
 
 /* ── cr-fix step 辅助（u4：§3.6 D2 嵌套内置 loop；§3.4-(3)-5 恢复粒度 = step 整体重跑） ── */
 
-// terminated 全集（review-fix-loop.js 实测赋值，八种；未知值 fail-closed 按 failed）
+// terminated 全集（review-fix-loop.js 实测赋值，九种；未知值 fail-closed 按 failed）。
+// needs-human = fixer 误报申述待人工裁决（2026-09-23 disputed 通道），归人工接管集：
+// 修复已 commit，resume 前须按 result.disputed 逐项裁决（真问题修复 / 误报 skip-steps 接管）
 const CR_FIX_PASS_TERMINATED = new Set(['clean', 'converged']);
 const CR_FIX_RETRY_TERMINATED = new Set(['review-failure', 'aggregator-failure', 'fix-failure']);
-const CR_FIX_STUCK_TERMINATED = new Set(['stuck', 'max-rounds', 'needs-redesign']);
+const CR_FIX_STUCK_TERMINATED = new Set(['stuck', 'max-rounds', 'needs-redesign', 'needs-human']);
 const CR_FIX_MAX_NESTED_ATTEMPTS = 2; // 首次 + 自动重试恰 1 次（D2）
 
 // batch1 组装（§3.5）：扫 <repoRoot>/.agents/skills/pr-cr-fix/agents/review-*.md 排序；
@@ -1143,6 +1145,8 @@ function createPrSteps({ repoRoot, scriptPaths = {} } = {}) {
       || path.join(repoRoot, '.agents', 'skills', 'pr-cr-fix', 'scripts', 'coverage-gate.py'),
     metricsGate: scriptPaths.metricsGate
       || path.join(repoRoot, '.agents', 'skills', 'pr-cr-fix', 'scripts', 'metrics-gate.py'),
+    selectAffectedE2e: scriptPaths.selectAffectedE2e
+      || path.join(repoRoot, 'scripts', 'select-affected-e2e.mjs'),
   };
 
   return [
@@ -1504,6 +1508,20 @@ function createPrSteps({ repoRoot, scriptPaths = {} } = {}) {
         if (st.code !== 0) throw new Error(MSG.gitFailed(['status', '--porcelain'], st.stderr));
         const dirt = worktreeDirt(st.stdout);
         if (dirt !== '') throw new Error(MSG.finalGatesDirtyTail(dirt));
+
+        // e2e 影响面披露（非门禁，SKILL.md「e2e 影响面披露」）：3a 三道 gate 通过后，把本
+        // 次 diff 触及的 e2e 资产（受影响 rule + 各自运行命令）写进 run 日志——PR/merge 门禁
+        // 不跑真实 LLM e2e（SSOT = AGENTS.md 测试节），此披露只保证「哪些 e2e 面被本次改动
+        // 触及、由开发阶段承接」对用户可见。脚本失败（非 0 / 不在 git 仓等）仅记 WARN，
+        // 不阻塞 push：它与 pass/fail 判定无关，把报告脚本故障混进门禁会污染终止语义。
+        const e2e = ctx.io.sh('node', [paths.selectAffectedE2e, '--base', ctx.state.base]);
+        if (e2e.code === 0) {
+          ctx.io.log('[final-gates] e2e 影响面披露（非门禁；受影响资产由开发阶段按改动面承接）：\n'
+            + tailLines(e2e.stdout, 40));
+        } else {
+          ctx.io.log('[final-gates] WARN: select-affected-e2e.mjs exit ' + e2e.code
+            + '——披露跳过（非门禁，不阻塞）：\n' + tailLines(e2e.stderr || e2e.stdout, 10));
+        }
         return outputs;
       },
     },

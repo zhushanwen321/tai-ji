@@ -16,6 +16,8 @@ import crypto from 'node:crypto'
 import semver from 'semver'
 import { extract as tarExtract } from 'tar'
 import { toErrorMessage } from '../../utils/errors.js'
+import { isUnderOrEqual } from '../../utils/path-utils.js'
+import { warnOnce } from '../../utils/warn-once.js'
 
 // ── 常量 ──────────────────────────────────────────────────────
 
@@ -44,6 +46,18 @@ interface PackageMetadata {
 
 export interface NpmInstallOptions {
   timeout?: number
+}
+
+/**
+ * installDependencies 失败清单条目（RT-8#4 失败聚合）。
+ * 与 services/ports/installer.ts 的 DepsInstallFailure 结构同构（port 拥有抽象形状，
+ * infra 实现之——同文件 NpmInstallError 与 port InstallerError 的关系同款）。
+ */
+export interface DepsInstallFailure {
+  /** 依赖名；package.json 解析失败时为 'package.json' */
+  name: string
+  /** 失败原因（toErrorMessage 归一化后的消息） */
+  error: string
 }
 
 export class NpmInstallError extends Error {
@@ -199,6 +213,78 @@ function encodePackageName(name: string): string {
   return name.startsWith('@') ? name.replace('/', '%2F') : name
 }
 
+// ── 包名校验（RT-8#3 路径穿越守卫）─────────────────────────────
+
+/**
+ * npm 包名白名单校验（RT-8#3）：name 可来自外部 clone 仓库 package.json 的
+ * 依赖名，未经校验 join(nodeModulesDir, name) 后 rmSync/renameSync 会写删
+ * node_modules 之外任意目录（`../../` 逃逸）。比 npm 官方
+ * validate-npm-package-name 从严：只认 [a-z0-9-._] 白名单子集 + scoped 恰好
+ * 一个 `/`，大写、空格、`~`、多段 `/`、`.`/`..` 段一律拒绝——安装场景从严
+ * 无副作用（registry 包名均小写 url-safe）。
+ */
+const NPM_NAME_SEGMENT_RE = /^[a-z0-9._-]+$/
+const NPM_NAME_MAX_LENGTH = 214
+
+/**
+ * 拒绝并抛 NpmInstallError。code 取 not_found：非法名在 registry 必然查无此包；
+ * 消费方（ExtensionService 经 InstallerError 形状读 code）按「包不存在」处理，
+ * 无需扩 code 契约。
+ */
+function rejectNpmName(name: string, reason: string): never {
+  throw new NpmInstallError(
+    'not_found',
+    `Invalid package name "${name}": ${reason}. Path traversal outside node_modules is blocked. 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
+  )
+}
+
+export function validateNpmName(name: string): void {
+  if (name === '') rejectNpmName(name, 'empty name')
+  if (name.length > NPM_NAME_MAX_LENGTH) rejectNpmName(name, `longer than ${NPM_NAME_MAX_LENGTH} chars`)
+  if (name !== name.trim()) rejectNpmName(name, 'leading/trailing whitespace')
+  if (name.startsWith('.') || name.startsWith('_')) rejectNpmName(name, 'starts with "." or "_"')
+  if (name.startsWith('@')) validateScopedNpmName(name)
+  else validateUnscopedNpmName(name)
+}
+
+/** scoped 包名（@scope/pkg）段规则：恰好一个 `/`，scope 与包段各自过白名单。 */
+function validateScopedNpmName(name: string): void {
+  const rest = name.slice(1)
+  const slash = rest.indexOf('/')
+  if (slash === -1) rejectNpmName(name, 'scoped name missing "/"')
+  if (rest.indexOf('/', slash + 1) !== -1) rejectNpmName(name, 'more than one "/" in scoped name')
+  const scope = rest.slice(0, slash)
+  const pkg = rest.slice(slash + 1)
+  if (scope === '') rejectNpmName(name, 'empty scope')
+  if (pkg === '') rejectNpmName(name, 'empty package part after scope')
+  if (scope === '.' || scope === '..') rejectNpmName(name, `scope is "${scope}"`)
+  if (pkg === '.' || pkg === '..') rejectNpmName(name, `package part is "${pkg}"`)
+  if (!NPM_NAME_SEGMENT_RE.test(scope)) rejectNpmName(name, 'scope has characters outside [a-z0-9-._]')
+  if (!NPM_NAME_SEGMENT_RE.test(pkg)) rejectNpmName(name, 'package part has characters outside [a-z0-9-._]')
+}
+
+/** 非 scoped 包名段规则：不含 `/` 且整体过白名单。 */
+function validateUnscopedNpmName(name: string): void {
+  if (name.includes('/')) rejectNpmName(name, 'unscoped name contains "/"')
+  if (!NPM_NAME_SEGMENT_RE.test(name)) rejectNpmName(name, 'has characters outside [a-z0-9-._]')
+}
+
+/**
+ * RT-8#3 双向守卫（第二向）：白名单通过后仍断言 join 结果受 nodeModulesDir
+ * 约束——纵深防线，覆盖白名单遗漏的组合逃逸形态。
+ */
+function guardedPackageDir(name: string, nodeModulesDir: string): string {
+  validateNpmName(name)
+  const pkgDir = join(nodeModulesDir, name)
+  if (!isUnderOrEqual(nodeModulesDir, pkgDir)) {
+    throw new NpmInstallError(
+      'not_found',
+      `Package dir "${pkgDir}" escapes node_modules "${nodeModulesDir}". 👉 Check the dependency name in the source package.json (possible tampering), then retry with a plain npm package name.`,
+    )
+  }
+  return pkgDir
+}
+
 function parseSpec(spec: string): { name: string; range?: string } {
   if (spec.startsWith('@')) {
     const lastAt = spec.indexOf('@', 1)
@@ -211,6 +297,8 @@ function parseSpec(spec: string): { name: string; range?: string } {
 }
 
 async function fetchMetadata(name: string, timeout?: number): Promise<PackageMetadata> {
+  // RT-8#3：name 进 registry URL 前先过白名单（覆盖 install/tarball/latest 三个入口）
+  validateNpmName(name)
   const registry = getRegistry()
   const url = `${registry}/${encodePackageName(name)}`
   return fetchJson<PackageMetadata>(url, timeout)
@@ -450,6 +538,7 @@ async function installPackageRecursive(
 
   mkdirSync(nodeModulesDir, { recursive: true })
 
+  // RT-8#3：name 经双向守卫后才进 join（后续 rmSync/renameSync 均以 pkgDir 为靶）
   const metadata = await fetchMetadata(name, options?.timeout)
   const version = resolveVersion(metadata, range)
   const manifest = metadata.versions[version]
@@ -459,7 +548,7 @@ async function installPackageRecursive(
   }
 
   // 目标目录（scoped 包需创建 @scope/ 子目录）
-  const pkgDir = join(nodeModulesDir, name)
+  const pkgDir = guardedPackageDir(name, nodeModulesDir)
 
   // 下载 + 解压（原子操作）
   await downloadAndExtract(manifest.dist.tarball, pkgDir, manifest.dist, name, options?.timeout)
@@ -513,7 +602,8 @@ export async function installPackage(
  * 从 node_modules 移除指定包。
  */
 export async function uninstallPackage(name: string, nodeModulesDir: string): Promise<void> {
-  const pkgDir = join(nodeModulesDir, name)
+  // RT-8#3：删除靶目录先过双向守卫，`../../` 形态在 rmSync 前被拒
+  const pkgDir = guardedPackageDir(name, nodeModulesDir)
   if (existsSync(pkgDir)) {
     rmSync(pkgDir, { recursive: true, force: true })
   }
@@ -553,19 +643,40 @@ export async function downloadPackageTarball(
 /**
  * 安装 projectDir 中 package.json 的所有 dependencies。
  * 用于 git clone 后安装依赖的场景。
+ *
+ * RT-8#4（F1 假成功）：失败聚合进返回值 failed[]，不再静默 return——调用方
+ * （extension-service）据 failed[] 拒绝按「已安装」登记。口径（审查 D）：
+ * - 无 package.json = 本无依赖，合法 no-op → 空清单（不是失败类）；
+ * - package.json 解析失败 → 单条 failed（name='package.json'）；
+ * - 单个依赖安装失败 → 逐条进 failed（仍继续装其余依赖）。
  */
 export async function installDependencies(
   projectDir: string,
   options?: NpmInstallOptions,
-): Promise<void> {
+): Promise<{ failed: DepsInstallFailure[] }> {
+  const failed: DepsInstallFailure[] = []
   const pkgJsonPath = join(projectDir, 'package.json')
-  if (!existsSync(pkgJsonPath)) return
+  // RT-8#11：无 package.json 本身是合法 no-op（审查 D 对 RT-8#4 的口径：不是失败类，
+  // 不进 failed[]），但不该零留痕——clone 出的扩展目录没有 package.json 也可能是
+  // 「clone 不完整/空目录」，此前静默 return 让这种形态与「确实无依赖」不可区分。
+  // warn-once 按路径去重（同一扩展重装/升级不刷屏），恢复动作写进文案。
+  // 不加 degraded 标记：该形态非失败（见上），标记会让调用方把无依赖扩展误判为降级。
+  if (!existsSync(pkgJsonPath)) {
+    warnOnce(
+      `npm-install-deps:${pkgJsonPath}`,
+      `[npm-installer] ${projectDir} 无 package.json，按「无依赖」跳过依赖安装（未安装任何依赖）: ${pkgJsonPath}。` +
+        '恢复动作：若该扩展实际需要依赖，检查 clone 产物完整性（空目录/不完整 clone 会是此形态）或手动补齐 package.json 后重装',
+    )
+    return { failed }
+  }
 
   let pkg: { dependencies?: Record<string, string> }
   try {
     pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
-  } catch {
-    return
+  } catch (e) {
+    const error = toErrorMessage(e)
+    console.warn(`[npm-installer] Failed to parse ${pkgJsonPath}:`, error)
+    return { failed: [{ name: 'package.json', error }] }
   }
 
   const deps = pkg.dependencies ?? {}
@@ -575,12 +686,12 @@ export async function installDependencies(
   for (const [depName, depRange] of Object.entries(deps)) {
     try {
       await installPackageRecursive(`${depName}@${depRange}`, nodeModulesDir, options, installed)
-    } catch (e) {  
-      // 传递依赖安装失败不阻塞主包。仅记录错误继续安装其他依赖。
-      console.warn(
-        `[npm-installer] Failed to install dependency ${depName}:`,
-        toErrorMessage(e),
-      )
+    } catch (e) {
+      // 聚合进 failed[] 供调用方裁决（warn 后 resolve 但不带失败信号 = 假成功）。
+      const error = toErrorMessage(e)
+      console.warn(`[npm-installer] Failed to install dependency ${depName}:`, error)
+      failed.push({ name: depName, error })
     }
   }
+  return { failed }
 }

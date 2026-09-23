@@ -1,6 +1,6 @@
 <!--
   TrayNativePanel —— composer 任务托盘的 built-in 三件面板（bash / subagent / workflow）。
-  设计 docs/design/composer-task-tray.md §3.3 D2/D8/D9 + §3.4 + §3.5。
+  设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D8/D9 + §3.4 + §3.5。
   props / emits / 尺寸契约与形态说明见 <script setup> 顶部块注释（消费方必读，u-tray-shell）。
 -->
 <!-- split-justified: built-in 三件面板同一语义域（分桶 tab + 行渲染 + 行内操作 + 行点击归宿） -->
@@ -43,6 +43,15 @@
       <p class="min-w-0 px-2 text-[length:var(--text-2xs)] text-neutral-mid">{{ t('panel.tray.loadFailed', { error: kindError }) }}</p>
       <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent"
         data-testid="tray-panel-retry" @click="onRetry">{{ t('panel.tray.retry') }}</Button>
+    </div>
+
+    <!-- oversize 降级态（[RT-4#8] subagent / workflow：session 文件 >32MB 列表不可用）：
+         与「无记录」的空列表显式分形（不可重试——重试结果恒同，给指引而非按钮） -->
+    <div v-else-if="kindOversize" data-testid="tray-panel-oversize"
+      class="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+      <AlertTriangle class="size-5 text-warn opacity-70" />
+      <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('panel.tray.oversizeTitle') }}</p>
+      <p class="text-[length:var(--text-3xs)] leading-relaxed text-neutral-dim opacity-70">{{ t('panel.tray.oversizeHint') }}</p>
     </div>
 
     <template v-else>
@@ -369,6 +378,13 @@ const isKindLoading = computed(() =>
 /** 错误态（subagent / workflow 首拉失败；bash 的失败信号由提示条承载，见设计 §3.5） */
 const kindError = computed(() =>
   props.kind === 'bash' ? null : tray.errors[props.kind].value,
+)
+/**
+ * [RT-4#8] oversize 降级态（subagent / workflow）：session 文件超 runtime 读取预检阈值
+ * （>32MB）时列表不可用——「会话过大，列表不可用」与「无记录」空列表显式分形。bash 无此态。
+ */
+const kindOversize = computed(() =>
+  props.kind === 'bash' ? false : tray.oversize[props.kind].value,
 )
 
 // ── bash 提示条判据（损坏 = 分区 sticky 位；断连 = 非 connected 且（拉取失败 || 未拉到过））──
