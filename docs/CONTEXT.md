@@ -257,7 +257,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 ### ~~Panel Grid~~（v3 已废弃）
 
-> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要“全局 panel 缩略图网格”。鸟瞰形态已随 Overview 视图整体移除而消亡（见 [ADR-0067](adr/decisions.md)），会话统筹由 Sidebar Session List 承担。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
+> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要“全局 panel 缩略图网格”。鸟瞰形态已随 Overview 视图整体移除而消亡（见 [ADR-0075](adr/decisions.md)），会话统筹由 Sidebar Session List 承担。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
 
 ~~全局面板网格视图。展示所有 Panel 的缩略图，类似 macOS Mission Control / Windows Task View。用于快速定位和跳转 Panel。~~
 

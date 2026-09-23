@@ -19,7 +19,7 @@ pi 以独立可执行文件随应用打包（`Resources/pi/pi-<plat>-<arch>`，d
 ### ADR-0064 pi 语义吸收层四支柱
 taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表——模型/思考档位能力只在 `packages/runtime/src/services/model-capability.ts` 一点进入（离线 pi-ai 同源计算 + 在线 get_available_models 对账），renderer/扩展禁止本地推断；② 生效回执——改状态 RPC reply 必回 pi 实际生效值，禁乐观写；③ 确认式送达——结果语义通知走 session-delivery 持久账本 + 幂等键（at-least-once），禁依赖 pi 内存队列；④ 漂移守卫——pi 语义依赖机器登记 + 探针测试 + 版本门禁。另有轮询精简准则：对方会 push 的信息禁周期 pull 兜底。权威源 [docs/architecture/pi-boundary-reliability.md](../architecture/pi-boundary-reliability.md)，登记 C-pi-12/13、C-ext-19、C-proc-08。
 
-### ADR-0067 投递所有权内核：单一所有者 + 两阶段回执
+### ADR-0074 投递所有权内核：单一所有者 + 两阶段回执
 **背景**：pi 的契约假定「消息进入 transcript 之前所有权属于前端」（steer/followUp 队列只是交接槽位，前端须自己盯它是否被取走、必要时用 `clear_queue` 收回），而 taiji 的消息所有权长期碎在四处——renderer 乐观气泡、renderer defer 队列、renderer pendingBuffer 计数、runtime 投递内核（仅服务 agent 间消息）——四处都不完整：steer 车道 fire-and-forget（入槽后无人跟踪），且车道判定源有三套（renderer 发送路由表 / runtime occupancy / extension 自身视角）互不同步，压缩、中止、进程回收三类窗口轮流暴露同一结构性缺口（消息丢失/滞留/乱序）。
 
 **决策**：全部发送方（composer 用户消息 / session_manager send / completion-backflow / plugin / landing 首发）经 runtime **投递所有权内核**提交——纯逻辑状态机在 `packages/session-delivery`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`：
@@ -82,7 +82,7 @@ engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成�
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
-任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器）。**范围修订（ADR-0067 投递所有权内核）**：队列区状态不作为独立 cleanup 注册项——现役载体 = 投递内核的 per-session 投影（`session.delivery` 帧消费），清理点在 core `useChat.disposeSession`（随 `deleteSession → triggerSessionCleanups → disposeChat` 编排一并执行），renderer 侧注册清单不新增队列分区项。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
+任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器）。**范围修订（ADR-0074 投递所有权内核）**：队列区状态不作为独立 cleanup 注册项——现役载体 = 投递内核的 per-session 投影（`session.delivery` 帧消费），清理点在 core `useChat.disposeSession`（随 `deleteSession → triggerSessionCleanups → disposeChat` 编排一并执行），renderer 侧注册清单不新增队列分区项。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
 
 ### ADR-0043 消息模型 Segment[]
 user message content 为 Segment 判别联合（text/skill/file/mention），badge 信息从 composer DOM（getSegmentsFromEl）结构化传递到渲染层；序列化/反序列化各只一处（segmentsToPrompt / parsePiUserContent）；归一化函数在 `packages/shared/src/segments.ts`。assistant/system 仍为纯 string。登记 C-state-02。
@@ -180,7 +180,7 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
-### ADR-0067 Overview 视图整体移除
+### ADR-0075 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
 
 ### ADR-0070 scheduler widget 推送减频与帧双职责显式接管（2026-09-21 设计裁决）

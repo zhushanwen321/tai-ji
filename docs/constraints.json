@@ -2839,7 +2839,7 @@
         "extensions/**"
       ],
       "authority": [
-        "adr/decisions.md#ADR-0067",
+        "adr/decisions.md#ADR-0074",
         "architecture/pi-boundary-reliability.md"
       ],
       "dimensions": [

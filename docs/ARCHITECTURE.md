@@ -87,7 +87,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
   → Vue 响应式组件
 ```
 
-**消息发送下行链（投递所有权内核，ADR-0067）**：composer 统一提交 `delivery.submit` RPC → runtime 受理组合点 `sessionService.sendMessage`（入口 touch + BeforeSend hook + 内核提交，hook 属受理阶段一次语义）→ 投递内核 FIFO（lane 判定 direct/steer/queued，受理回执 ≠ 送达）→ 出站交接（skill 注入 + prompt/steer）→ 送达回执（message_end 标记匹配）→ `session.delivery` state 帧广播（队列区单一数据源）；滞留/断连由对账器（settled 边沿/watchdog 五触发点 + clear_queue 收回）自愈。
+**消息发送下行链（投递所有权内核，ADR-0074）**：composer 统一提交 `delivery.submit` RPC → runtime 受理组合点 `sessionService.sendMessage`（入口 touch + BeforeSend hook + 内核提交，hook 属受理阶段一次语义）→ 投递内核 FIFO（lane 判定 direct/steer/queued，受理回执 ≠ 送达）→ 出站交接（skill 注入 + prompt/steer）→ 送达回执（message_end 标记匹配）→ `session.delivery` state 帧广播（队列区单一数据源）；滞留/断连由对账器（settled 边沿/watchdog 五触发点 + clear_queue 收回）自愈。
 
 **跨 store 编排在 composable 层（实例）**：⌘K 全局搜索（`useSearch`）聚合 4 源——命令内存（core `command-registry`/`command-store`）+ 文件 WS（core `file-search` 缓存，未命中调 composer domain WS + 超时 race）+ session domain（WS）+ recents（localStorage）。实现位于 core `packages/core/src/domain/new-task-search/`（`search.ts`/`search-jump.ts`/`recents.ts`），2026-09-11 由 renderer 迁入。编排归 composable 非 domain（domain 严格只调 transport+pending，编排跨 store 违反铁律），见 [ADR-0028](adr/decisions.md)。
 
@@ -100,7 +100,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 | Message streaming | `message_start → text_delta×N → tool_execution_start/end → agent_end` | [STANDARDS.md](STANDARDS.md) §3.3 |
 | NewTaskFlow | 8 态：`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled` | `useNewTaskFlow.ts` |
 | Plugin 生命周期 | `UNLOADED → LOADING → ACTIVATING → ACTIVE → DEACTIVATING → UNLOADED`（+ CRASHED） | [CONTEXT.md](CONTEXT.md)「Plugin」词条 |
-| 投递条目（delivery 内核） | `queued → in-flight → delivered/failed/cancelled`（每条目记 lane：direct/steer/queued）；delivered/cancelled 转判重 tombstone（轻量元数据，runtime 存活期）；受理 ≠ 送达两阶段，failed 可重试/撤销 | [ADR-0067](adr/decisions.md)（投递所有权内核） |
+| 投递条目（delivery 内核） | `queued → in-flight → delivered/failed/cancelled`（每条目记 lane：direct/steer/queued）；delivered/cancelled 转判重 tombstone（轻量元数据，runtime 存活期）；受理 ≠ 送达两阶段，failed 可重试/撤销 | [ADR-0074](adr/decisions.md)（投递所有权内核） |
 
 ## 共享类型（shared）
 
