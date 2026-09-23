@@ -91,6 +91,8 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   if (typeof data !== 'object' || data === null) return null
   const d = data as Record<string, unknown>
 
+  // requirement 读侧封顶 64KB（64 × 1024 = 65536 字符）：与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
+  const MAX_PLAN_REQUIREMENT_LENGTH = 65536
   const view: PlanStateView = {
     isActive: d.isActive === true,
     planFilePath: normalizeNonEmptyString(d.planFilePath),

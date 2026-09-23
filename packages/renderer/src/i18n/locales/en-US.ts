@@ -14,6 +14,7 @@ import composable from './en-US/composable'
 import importSession from './en-US/importSession'
 import rollingRestart from './en-US/rollingRestart'
 import plan from './en-US/plan'
+import btw from './en-US/btw'
 
 export default {
   common,
@@ -33,4 +34,5 @@ export default {
   importSession,
   rollingRestart,
   plan,
+  btw,
 }

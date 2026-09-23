@@ -209,6 +209,13 @@ export type ClientMessageType =
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：滚动重启状态只读查询
   // （无参数；reply 与 request 同名——session.subscribe 模式）。状态机实现在 u7c。
   | 'rollingRestart.status'
+  // btw.*（btw-question 设计 D6，M2-a 协议根节点）：btw 旁路线 3 个控制帧——
+  // create（建线 + fork 主会话当前进度）/ list { mainSid }（主会话名下线枚举）/
+  // remove（关线销毁，单线级联）。ack 必回（ReplyPayloadMap 三帧全登记）。
+  // 发送复用 message.send（sessionId = btw vid）、帧族复用 message.*——**不设 btw.send /
+  // btw.close**（D6 被否项：与 message.send 双轨重复 / 与 remove 职责重叠；
+  // __tests__/protocol.test.ts 负向守卫锁定「恰好 3 帧、无 send/close」）。
+  | 'btw.create' | 'btw.list' | 'btw.remove'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -820,6 +827,15 @@ export interface ClientMessageMap {
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询，无参数
   //（全局状态，非 session 级）。reply 见 ServerMessageMap['rollingRestart.status']。
   'rollingRestart.status': Record<string, never>
+  // ── btw.*（btw-question D6 控制帧，M2-a）──
+  // ack 必回：三帧在 ReplyPayloadMap 全登记（create/list payload 消费型、remove ack 型）；
+  // 失败走统一 error envelope（错误契约 D10）。
+  /** btw.create：在主会话 mainSid 名下创建一条 btw 线（runtime BtwService fork 主会话当前进度）。 */
+  'btw.create': { mainSid: string }
+  /** btw.list：枚举主会话 mainSid 名下的 btw 线（drawer btw 面板线列表数据源，D4 关联枚举读）。 */
+  'btw.list': { mainSid: string }
+  /** btw.remove：关线销毁（单线级联——线进程 + 派生资源；主删级联走 session.delete，不走本帧）。 */
+  'btw.remove': { vid: string }
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1050,6 +1066,12 @@ export type ServerMessageType =
   // 启动 reattach 高水位延迟推送（Server→Client 冒号 camelCase；进入单发 + 缓解退出单发，
   // payload 见 ReattachDeferredPayload）。
   | 'reattach:deferred'
+  // btw.*（btw-question D6）：3 个控制帧的 RPC reply（同名 request/reply——session.subscribe /
+  // session.import 同款模式）。其中 btw.list 兼作线列表状态广播载体（state topic，typeKey 'btw'，
+  // publish 于主会话 bus——btw.create / btw.remove 成功后 handler 广播全量线列表，重连经
+  // stateSnapshot 恢复；登记见 message-bus.ts TOPIC_TABLE / STATE_TYPE_KEY_MAP）。btw.create /
+  // btw.remove 是纯 RPC reply（走 reply 通道不经 publish，不入 TOPIC_TABLE——session.subscribe 同族）。
+  | 'btw.create' | 'btw.list' | 'btw.remove'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -1323,6 +1345,32 @@ export interface WatchdogMemoryPressurePayload {
   warnPercent: number
   /** 临界档阈值（%，默认 85，env 可覆盖）。 */
   criticalPercent: number
+}
+
+// ── btw.*（btw-question D6）payload 辅助类型 ──────────────────────────────
+
+/**
+ * btw 线创建时的 fork 快照状态（D3 源状态三分支 → btw.create reply 的创建期 pill 数据源）。
+ * 仅线创建时一次性携带（快照元信息不持久化，跨重启重开不回填 pill——D3 pill 口径）。
+ */
+export type BtwForkState =
+  | 'full'       // 分支①：源已落盘 → 全树 fork（含分支）
+  | 'truncated'  // 分支③：源含进行中 turn → entry 级截断快照（pill 注明半截）
+  | 'none'       // 分支②：源不存在/为空 → 回落无 fork 新建 spawn（pill「无快照」，不静默）
+
+/**
+ * btw 线列表条目（btw.list reply / 状态广播共用）。刻意最小：只带线 vid——
+ * forkState 是创建期一次性元信息，不进列表（进列表会在跨重启重开时回填 pill，违背 D3 口径）。
+ */
+export interface BtwThreadInfo {
+  /** 线虚拟 id（`btw:<piSessionId>` 两段式；工厂 SSOT = shared virtual-session-id.ts 的 btwVirtualId）。 */
+  vid: string
+  /**
+   * 回收提醒态（D1「回收前」提醒窗口，提前 1 拍置位；回收发生/用户续问后清）——
+   * runtime 置位/清除 + renderer useBtwTabData.syncReclaimReminders 消费（badge 待处理
+   * 数据源，读方按 `=== true` 判定）。**可选字段防破坏既有消费**（缺省 = 无提醒）。
+   */
+  reclaimImminent?: boolean
 }
 
 /**
@@ -2218,6 +2266,15 @@ export interface ServerMessageMapBase {
   // deferred：启动 reattach 高水位延迟推送（u5 生产；renderer useRollingRestartStatus
   // 消费——高压延迟横幅腿；active 进入/缓解退出两态，字段语义见 payload 类型）。
   'reattach:deferred': ReattachDeferredPayload
+
+  // ── btw.*（btw-question D6 控制帧 reply；btw.list 兼作状态广播）──
+  /** btw.create reply：新建线的 vid + 归属主会话 + fork 快照状态（创建期 pill 数据源）。 */
+  'btw.create': { vid: string; mainSid: string; forkState: BtwForkState }
+  /** btw.list reply / 状态广播同形（state topic typeKey 'btw'，publish 于 mainSid 会话）：
+   *  最新线列表全量快照（last-value 覆盖式，重连/切回构造性恢复）。 */
+  'btw.list': { mainSid: string; threads: BtwThreadInfo[] }
+  /** btw.remove reply：ack 回显被关线 vid（ReplyPayloadMap 登记 void，消费侧不读 payload）。 */
+  'btw.remove': { vid: string }
 }
 
 /**
@@ -2535,6 +2592,11 @@ export interface ReplyPayloadMap {
   'terminal.resize': ServerMessageMap['terminal.ack']
   'terminal.spawn': ServerMessageMap['terminal.ack']
   'terminal.write': ServerMessageMap['terminal.ack']
+
+  // ── btw.*（btw-question D6 控制帧，M2-a）：ack 必回，三帧全部登记 ──
+  'btw.create': ServerMessageMap['btw.create'] // payload 消费型：vid + mainSid + forkState
+  'btw.list': ServerMessageMap['btw.list']     // payload 消费型：threads 线枚举
+  'btw.remove': void                           // ack 型：关线完成即 resolve（wire reply btw.remove 回显 vid）
 }
 
 /**

@@ -32,6 +32,7 @@ vi.mock('../../ws-client', () => ({
   send: (msg: unknown) => mockWsSend(msg),
 }))
 
+import * as btw from '../domains/btw'
 import * as chat from '../domains/chat'
 import * as composer from '../domains/composer'
 import * as config from '../domains/config'
@@ -925,5 +926,25 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     expect(h3).toHaveBeenCalledWith({ providerId: 'p' })
     byType['auth.error']({ payload: { error: 'expired' } })
     expect(h4).toHaveBeenCalledWith({ error: 'expired' })
+  })
+})
+
+// ── btw 域（btw-question D6，M2-a）────────────────────────────────────────
+describe('btw 域 RPC 封装（D6 3 控制帧）', () => {
+  it('create：type/payload { mainSid } + reply 全字段透传（vid + mainSid + forkState）', async () => {
+    mockCommand.mockResolvedValueOnce({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
+    await expect(btw.create('s-main')).resolves.toEqual({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
+    expect(mockCommand).toHaveBeenCalledWith('btw.create', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('list：type/payload { mainSid } + 解包 threads（与 session.list 解包 groups 同模式）', async () => {
+    mockCommand.mockResolvedValueOnce({ mainSid: 's-main', threads: [{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }] })
+    await expect(btw.list('s-main')).resolves.toEqual([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
+    expect(mockCommand).toHaveBeenCalledWith('btw.list', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('remove：type/payload { vid }，ack 型（command 返回 void，完成即 resolve）', async () => {
+    await btw.remove('btw:pi-1')
+    expect(mockCommand).toHaveBeenCalledWith('btw.remove', { vid: 'btw:pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 })

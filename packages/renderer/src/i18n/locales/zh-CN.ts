@@ -14,6 +14,7 @@ import composable from './zh-CN/composable'
 import importSession from './zh-CN/importSession'
 import rollingRestart from './zh-CN/rollingRestart'
 import plan from './zh-CN/plan'
+import btw from './zh-CN/btw'
 
 export default {
   common,
@@ -33,4 +34,5 @@ export default {
   importSession,
   rollingRestart,
   plan,
+  btw,
 }

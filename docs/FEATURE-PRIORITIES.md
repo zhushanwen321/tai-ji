@@ -81,6 +81,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
+| btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
 
 ## 5. P3 — 特定人群/低影响
 

@@ -182,3 +182,16 @@ describe('useCompletionNotify', () => {
     expect(markers.markUnread).not.toHaveBeenCalled()
   })
 })
+
+describe('[M4-a] P-invisible·通知面：btw 线完成不进全局通知（D9③ 投影收窄）', () => {
+  it('btw vid 完成 → 无提示音 + 不落 sidebar 未读标记；主会话同输入对照照常', () => {
+    handleCompletion('btw:line-notify-1', 'stop', 'other-sid')
+    expect(sound.playSuccess).not.toHaveBeenCalled()
+    expect(markers.markUnread).not.toHaveBeenCalled() // 不写 taiji:session-markers（防已删线死条目）
+
+    // 对照：主会话完成不受抑制（既有行为回归）
+    handleCompletion('s1', 'stop', 'other-sid')
+    expect(sound.playSuccess).toHaveBeenCalledOnce()
+    expect(markers.markUnread).toHaveBeenCalledWith('s1')
+  })
+})

@@ -135,6 +135,14 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // goal / plan 四方（同经 widget 通道，同批获得保证性恢复）。
   'extension:widget': 'state',
   'extension:widgetGui': 'state',
+  // btw 线列表（btw-question D6 的 TOPIC/STATE 登记，M2-a）：state last-value——payload =
+  // { mainSid, threads }（ServerMessageMap['btw.list']），publish 于**主会话**（mainSid）bus：
+  // btw.create / btw.remove 成功后 handler 广播全量线列表（覆盖式），重连/切回主会话经
+  // stateSnapshot('btw') 恢复 drawer 线列表与 badge 聚合（不依赖广播时序；拉取兜底 =
+  // btw.list RPC 同形应答，双通道同一 payload——C6「需立即消费的状态必须可拉取」）。
+  // btw.create / btw.remove 是纯 RPC reply（同名 request/reply，走 reply 通道不经 publish）
+  // ——不入本表（session.subscribe 同族；守卫锚定见 __tests__/state-type-key-map-guard.test.ts）。
+  'btw.list': 'state',
   // ── stream 类：分配 seq、入 ring（O(1) 覆盖写）──
   'message.message_start': 'stream',
   'message.complete': 'stream',
@@ -239,6 +247,9 @@ export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   // 时 subscribe 返回的 stateSnapshot 含此帧，renderer sessionPhase 从快照恢复（G4）。
   // 写快照/回放对 stateSnapshot Map 的任意 key 自动生效，无需其他登记点。
   'session.occupancy': 'occupancy',
+  // btw 线列表（btw-question D6，M2-a）：typeKey 'btw'——与 TOPIC_TABLE 的 state 登记配对，
+  // 重连回放键 = 主会话 stateSnapshot 内的 'btw' 条目（全量线列表 last-value 覆盖）。
+  'btw.list': 'btw',
 }
 
 /**

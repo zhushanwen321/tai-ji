@@ -47,6 +47,8 @@ function makeDeps(sids: string[]): { deps: LruEvictDeps; deleted: string[] } {
       deleteHydrated: () => undefined,
       // [B9] 未装配联动回调（core 无 renderer 装配环境）：默认不联动，驱逐面不变
       agentCallEvictionsOf: () => [],
+      // [D5/AU1] 未装配查看源（本用例无 drawer bind）：默认空集 = 无查看保护
+      viewedVids: () => new Set(),
     },
   }
 }

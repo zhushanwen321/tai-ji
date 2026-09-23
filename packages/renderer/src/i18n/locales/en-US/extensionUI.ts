@@ -9,6 +9,8 @@ export default {
   commentPlaceholder: 'Optional, add a note…',
   // M1 ring 3: response not delivered while disconnected (send returned false); request kept for resubmission after reconnect
   responseNotDelivered: 'Reply not delivered. You can resubmit after the connection recovers',
+  // D8 submit-loop contract (M3-c): replies to terminated requestIds are discarded with an expiry hint
+  requestExpired: 'Request expired; your reply was discarded',
   // ── Schedule create form (ScheduleForm, unified form protocol renderer; header/actions owned by FormOverlay shell) ──
   scheduleCreateFormTitle: 'New scheduled task',
   scheduleCreateSubtitle: 'Runs only while this session is open.',

@@ -58,6 +58,15 @@
  */
 import { vi } from 'vitest'
 
+import { repinDataDirEnv } from './fs-guard-impl.js'
+
+// env 钉扎漂移恢复：本 setupFile 先于每个测试文件执行。worker 进程复用形态（isolate=false）
+// 下前序文件的 process.env 变更（afterEach delete TAIJI_AGENT_DATA_DIR 等）会跨文件泄漏，
+// 使后续文件的 getSessionsDir() 缺省解析到真实 ~/.taiji（2026-09-22 import-service 污染
+// 事故的 env 腿）。首次执行记录 globalSetup 钉扎值，后续执行发现漂移即恢复——模块注册表
+// 每文件重建，故记录值挂 globalThis 存续（详见 fs-guard-impl.ts repinDataDirEnv）。
+repinDataDirEnv()
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   const impl = await import('./fs-guard-impl.js')

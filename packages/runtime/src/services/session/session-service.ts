@@ -29,6 +29,7 @@
  * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
+import { isBtwVirtualId } from '@taiji/shared'
 import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
@@ -79,6 +80,9 @@ import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccup
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
+// B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
+// type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
+import type { BtwService } from './btw-service.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
 // 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定面）。
 import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
@@ -182,6 +186,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 见 pi-launch-presets 设计文档 §8.1。
    */
   private presetService: PresetService | null = null
+  /**
+   * BtwService 引用（组合根注入，btw-question B3 裁决 + M2-b）：ensureActive 对 btw vid
+   * 转自建附着编排（restore 腿 findScannedSession 只扫 sessions/，btw 线目录不在其扫描面
+   * ——V5 核实结论；D1⑥ 回收后续问的附着入口）。经 setter 注入（同 setConfigService
+   * 模式，避免破坏现有测试构造点）；未注入时 btw vid fall through 既有 restore 链
+   *（存量测试零变更，对 btw vid 的失败形态与注入前一致）。
+   */
+  /**
+   * btw 能力注入（组合根 setBtwService 晚于构造）。ensureProcess 必选（ensureActive 主链
+   * 必经）；getLine 可选（btw vid 离线尾读的线文件解析增强——缺失时 historyReader 的
+   * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）。
+   */
+  private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
   /**
    * U6：能力对账回调（组合根绑 modelService.reconcileModelCapabilities，附着路径调用）。
    */
@@ -418,9 +435,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。
+    // [btw-question 重载链修复] resolveBtwThreadFile：btw vid 离线尾读的线文件解析，查
+    // BtwService 注册表（rebuildFromDisk 启动重建的内存投影）。late-bound 闭包——btwService
+    // 在组合根晚于本构造（setBtwService 注入），未注入（存量测试构造）时 resolve 返回
+    // undefined → btw 尾读 warn 空页，主会话路径零影响。
     this.historyReader = new SessionHistoryReader({
       pm: this.pm,
       sessionStore: this.sessionStore,
+      resolveBtwThreadFile: (vid) => this.btwService?.getLine?.(vid)?.sessionFilePath,
     })
     // 状态投影域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
     // lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -688,6 +710,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   setPresetService(presetService: PresetService): void {
     this.presetService = presetService
+  }
+
+  /**
+   * 注入 BtwService（组合根在 BtwService 构造后、server.start 前调用，M2-b/B2 授权接线）。
+   * ensureActive 的 btw 分支依赖——窄面只取 ensureProcess（alive → markActivity 直返；
+   * 回收/死亡 → spawn→switch→附着断言 reattach）。
+   */
+  setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
+    this.btwService = btwService
   }
 
   /** W5：注入 message.complete 回调（组合根绑 ReloadOrchestrator.onMessageComplete）。 */
@@ -1055,6 +1086,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 迁入 pi-respawn 编排器（ensureRestored，join 状态单一所有者）。
    */
   async ensureActive(sessionId: string): Promise<IPiEngine> {
+    // [btw-question B3 裁决] btw 线的 ensure 链走自建附着编排：alive → markActivity 直返；
+    // 闲置回收/进程死亡 → spawn→switch→附着断言 reattach（D1⑥ 回收后续问）。restore 腿
+    //（findScannedSession 只扫 sessions/）对 btw vid 构造性失败（V5 核实结论），故分支
+    // 先于既有 getClient/restore 链。附着失败 BtwError 原样上抛——message.send 路径由
+    // dispatcher.ensureActiveOrBroadcast 收口为 message.error（错误文案含恢复指引），
+    // 不静默。未注入 btwService（存量测试构造）→ fall through 零变更。
+    if (this.btwService !== null && isBtwVirtualId(sessionId)) {
+      return await this.btwService.ensureProcess(sessionId)
+    }
     const existing = this.pm.getClient(sessionId)
     // 纵深防御（pi-exit-notification-and-respawn §6.6）：上游清理（onSessionExit）出现竞态时
     // processes Map 可能残留已死 client——视同无 client 走下方 restoreSession（其内部对

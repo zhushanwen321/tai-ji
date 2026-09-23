@@ -12,7 +12,7 @@
  * promises.open 的写 flags 校验 path——写 fd 只能经此产生，闭合 writeSync/ftruncate 等
  * fd 消费点（详见 test/fs-guard.ts「边界」注释）。
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeSync,
   createWriteStream,
@@ -39,8 +39,10 @@ import {
   FS_OPEN_FNS,
   FS_PROMISES_OPEN_FNS,
   FS_SYNC_FNS,
+  _resetDataDirEnvPinForTest,
   isDestructiveAllowed,
   isRealDataDir,
+  repinDataDirEnv,
   wrapOpenFns,
 } from './fs-guard-impl.js'
 import { setup } from './global-setup.js'
@@ -400,5 +402,55 @@ describe('G1 防线自检——四访问面端到端探针（对白名单外不�
     expect(existsSync(bait)).toBe(false)
     expect(() => fsPromises.rm(bait)).toThrow(/fs-guard|BLOCKED/)
     expect(existsSync(bait)).toBe(false)
+  })
+})
+
+describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09-22 import-service 污染事故 env 腿）', () => {
+  const PIN_VALUE = join(tmpdir(), 'taiji-repin-pin-fixture')
+  let savedValue: string | undefined
+
+  beforeAll(() => {
+    savedValue = process.env.TAIJI_AGENT_DATA_DIR
+  })
+
+  beforeEach(() => {
+    _resetDataDirEnvPinForTest()
+    process.env.TAIJI_AGENT_DATA_DIR = PIN_VALUE
+  })
+
+  afterAll(() => {
+    _resetDataDirEnvPinForTest()
+    if (savedValue === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+    else process.env.TAIJI_AGENT_DATA_DIR = savedValue
+  })
+
+  it('首执行记录当前值且不改 env（globalSetup 钉扎值的登记点，恒 no-op）', () => {
+    expect(repinDataDirEnv(process.env)).toBe(false)
+    expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
+  })
+
+  it('env 被删除 → 恢复记录值（isolate=false 同 worker 跨文件泄漏形态，探针实证）', () => {
+    repinDataDirEnv(process.env)
+    delete process.env.TAIJI_AGENT_DATA_DIR
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(repinDataDirEnv(process.env)).toBe(true)
+    expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('TAIJI_AGENT_DATA_DIR'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('env 被改为其他值 → 恢复记录值（前序文件泄漏自有值同属漂移）', () => {
+    repinDataDirEnv(process.env)
+    process.env.TAIJI_AGENT_DATA_DIR = join(tmpdir(), 'taiji-repin-leaked-fixture')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(repinDataDirEnv(process.env)).toBe(true)
+    expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
+    warnSpy.mockRestore()
+  })
+
+  it('env 等于记录值 → no-op（钉扎未漂移零开销路径）', () => {
+    repinDataDirEnv(process.env)
+    expect(repinDataDirEnv(process.env)).toBe(false)
+    expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
   })
 })
