@@ -144,9 +144,12 @@ interface JsonlEntry {
 /** custom entry 的 customType 标识（session-runner 写 / reconstructor 读，约定常量）。 */
 export const IDENTITY_CUSTOM_TYPE = "subagent-identity";
 
-/** 重建产出的完整 SubagentRecord 数据（身份 + 可变状态 + 派生 eventLog）。 */
-export interface ReconstructedRecord {
-  // ── 身份（来自 custom entry）──
+/**
+ * 身份域字段单源（identity custom entry 经守卫归一后的公共投影）。全量重建
+ * （ReconstructedRecord）与轻量头部读取（IdentityHeaderRecon）共用——字段清单
+ * 与守卫归一语义以此为准，两投影的差异只在可变状态/详情域。
+ */
+interface RecordIdentityFields {
   id: string;
   agent: string;
   mode: ExecutionMode;
@@ -172,6 +175,10 @@ export interface ReconstructedRecord {
   origin: RecordOrigin | undefined;
   /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
   parentRunId: string | undefined;
+}
+
+/** 重建产出的完整 SubagentRecord 数据（身份 + 可变状态 + 派生 eventLog）。 */
+export interface ReconstructedRecord extends RecordIdentityFields {
   /**
    * 对话轮次计数（非 identity entry 字段，reconstructFromFile 不填）。
    * V2 idle record 的 round 只在内存维护（doFinalizeRoundToIdle 递增），磁盘重建不恢复。
@@ -616,23 +623,7 @@ export function reconstructFromFile(sessionFile: string): ReconstructedRecord | 
 export const IDENTITY_HEAD_BYTES = 65536;
 
 /** 轻量重建产出：仅身份字段 + 头部可见的 model/thinkingLevel（详情字段一律缺省）。 */
-export interface IdentityHeaderRecon {
-  id: string;
-  agent: string;
-  mode: ExecutionMode;
-  task: string;
-  slug: string;
-  startedAt: number;
-  rootSessionId: string | undefined;
-  parentRecordId: string | undefined;
-  depth: number;
-  forkDepth: number | undefined;
-  /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
-  worktree?: boolean;
-  /** 来源身份（H2 S3 修复，守卫归一后；缺省 undefined = "tool" 语义）。light 列表投影用。 */
-  origin: RecordOrigin | undefined;
-  /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
-  parentRunId: string | undefined;
+export interface IdentityHeaderRecon extends RecordIdentityFields {
   /** [R4/D6-① 连带] undefined = 头部未途经 model_change（用户未指定模型，禁空串哨兵）。 */
   model: string | undefined;
   thinkingLevel: string | undefined;

@@ -180,13 +180,12 @@ export function isProcessAlive(pid: number): boolean | undefined {
 }
 
 /**
- * 读目标 pid 的完整命令行（macOS + Linux 通用的 `ps -p <pid> -o command=`）。
+ * `ps -p <pid> -o <column>=` 探测共用实现（command= / lstart= 同款语义）。
  * 返回 undefined：ps 失败 / 超时 / 空输出（进程刚死等）——调用方按「不确定」保守跳过。
- * 复用 pi/session-runner.ts:595 readProcessCmdline 先例（同实现、同超时、同失败语义）。
  */
-function readProcessCmdline(pid: number): string | undefined {
+function readPsColumn(pid: number, column: string): string | undefined {
   try {
-    const r = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    const r = spawnSync("ps", ["-p", String(pid), "-o", column], {
       encoding: "utf-8",
       timeout: CMDLINE_PROBE_TIMEOUT_MS,
     });
@@ -199,23 +198,21 @@ function readProcessCmdline(pid: number): string | undefined {
 }
 
 /**
+ * 读目标 pid 的完整命令行（macOS + Linux 通用的 `ps -p <pid> -o command=`）。
+ * 复用 pi/session-runner.ts:595 readProcessCmdline 先例（同实现、同超时、同失败语义）。
+ */
+function readProcessCmdline(pid: number): string | undefined {
+  return readPsColumn(pid, "command=");
+}
+
+/**
  * 读目标 pid 的 OS 级启动时间（`ps -p <pid> -o lstart=`，macOS/Linux 通用文本形态，
  * 如 "Mon Sep  8 21:14:32 2026"）。R9-3b 的 pid 复用识别数据源：同 cmdline 的 pid
  * 复用启动时间必不同。读不到 → undefined（保守跳过）。Windows 无可移植等价 →
  * 调用方按平台分流（win32 不杀只删）。
  */
 export function readProcessStartTime(pid: number): string | undefined {
-  try {
-    const r = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], {
-      encoding: "utf-8",
-      timeout: CMDLINE_PROBE_TIMEOUT_MS,
-    });
-    if (r.error || r.status !== 0) return undefined;
-    const out = typeof r.stdout === "string" ? r.stdout.trim() : "";
-    return out.length > 0 ? out : undefined;
-  } catch {
-    return undefined;
-  }
+  return readPsColumn(pid, "lstart=");
 }
 
 /** 清扫结果（诊断/测试可观测）。 */
