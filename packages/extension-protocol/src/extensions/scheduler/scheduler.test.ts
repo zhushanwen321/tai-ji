@@ -10,7 +10,8 @@ import {
 
 // ── scheduler 折叠器下沉 smoke（P7 验收③：两个消费方都能从包入口取符号）──
 // 包入口（barrel）必须可取到全部下沉符号；折叠行为在此只做最小冒烟
-// （逐行为覆盖在扩展侧 replay.test.ts / format.test.ts，P7 判据 = 扩展全量测试不改断言仍绿）。
+// （逐行为覆盖在扩展侧 replay.test.ts / format.test.ts，P7 判据 = 扩展全量测试不改断言仍绿；
+//  包内 replay.test.ts / format.test.ts 承接 coverage-gate 增量口径的直接覆盖）。
 
 describe('包入口导出 scheduler 下沉符号（barrel smoke）', () => {
   it('entry 契约常量与折叠器/格式化器可从包入口导入', () => {

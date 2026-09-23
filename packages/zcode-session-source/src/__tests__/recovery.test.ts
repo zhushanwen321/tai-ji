@@ -6,7 +6,7 @@
  * 不对称半边（直开成功但创建 -shm/-wal），bun 趟（U5）断言 CANTOPEN 半边。
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { chmodSync, existsSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -28,6 +28,11 @@ import {
   openWritableSqlite,
   quiesceDir,
 } from './helpers.ts'
+
+// 超时预算：本文件 fixture 是真实 sqlite + WAL 竞态等待（真实 I/O，非 fake timer 可模拟），
+// 空载单条 1.5-2.4s、机器负载/插桩（coverage）下单条实测可超 5s 默认预算（junit 最长
+// 10.7s）。30s/条 = 负载态实测的 3 倍左右余量，只放宽时间预算，断言不变。
+vi.setConfig({ testTimeout: 30000 })
 
 const TOTAL_ROWS = 3 // 建库 2 行（sess_fix_a/​sess_fix_b）+ 1 条只存在于 -wal 的行（WALROW-PROOF）
 

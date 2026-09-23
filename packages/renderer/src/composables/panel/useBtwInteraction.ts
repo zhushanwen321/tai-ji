@@ -1,6 +1,6 @@
 /**
  * btw 内联确认条编排（D8 降级路径，唯一形态）——useExtensionUI 的 btw 交互段拆分
- * （依赖方向单向：本文件 → useExtensionUI / useBtwTabData，无环）。
+ * （依赖方向单向：本文件 → useExtensionUI / useBtwTabData / btw-pending-bookkeeping，无环）。
  *
  * V4 核实③不成立（plan-store 单全局 focusedSid 焦点投影，第二 usePlanState 实例会把
  * 主审批条读分区抢走 → S9b 互不抢占被破坏；修复面在领地外 plan-store/use-plan-sync）
@@ -18,7 +18,8 @@ import { computed, watch, type Ref } from 'vue'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
 import { btwBarDrafts, emptyBtwBarDraft, useExtensionUI, type BtwBarDraft } from '@/composables/useExtensionUI'
-import { ensureBtwPendingBookkeeping, firstBtwDialogReq, noteBtwRequestResolved, respondBtwDialog } from '@/composables/panel/useBtwTabData'
+import { firstBtwDialogReq, noteBtwRequestResolved } from '@/composables/panel/btw-pending-bookkeeping'
+import { ensureBtwPendingBookkeeping, respondBtwDialog } from '@/composables/panel/useBtwTabData'
 
 /** 确认条当前活动请求（按 receivedAt 与 store 族/dialog 族合并排序取最早——多请求并发呈现有序） */
 export interface BtwBarRequest {
@@ -74,37 +75,53 @@ function toScheduleDraft(v: unknown): BtwScheduleDraft | null {
   }
 }
 
+/** 问题类型收窄（choice/text/schedule 之外 = 非法项） */
+function toBarQuestionKind(t: unknown): 'choice' | 'text' | 'schedule' | null {
+  if (t === 'choice' || t === 'text' || t === 'schedule') return t
+  return null
+}
+
+/** 公共基底提取（header/question 双守卫；两者皆缺 = 非法项） */
+function toBarQuestionBase(
+  q: Record<string, unknown>,
+  kind: 'choice' | 'text' | 'schedule',
+): Omit<BtwBarFormQuestion, 'options' | 'multi' | 'allowOther' | 'initial'> | null {
+  const header = typeof q.header === 'string' ? q.header : undefined
+  const question = typeof q.question === 'string' ? q.question : ''
+  if (header === undefined && question === '') return null
+  return { type: kind, ...(header !== undefined ? { header } : {}), question }
+}
+
+/** choice 选项数组归一（非法项剔除——label 守卫；非数组/无有效项 = 空数组） */
+function toBarOptions(v: unknown): BtwBarOption[] {
+  const out: BtwBarOption[] = []
+  if (!Array.isArray(v)) return out
+  for (const o of v) {
+    if (typeof o !== 'object' || o === null) continue
+    const rec = o as Record<string, unknown>
+    if (typeof rec.label !== 'string') continue
+    out.push({
+      label: rec.label,
+      ...(typeof rec.description === 'string' ? { description: rec.description } : {}),
+    })
+  }
+  return out
+}
+
 /** formQuestions 逐项归一（非法项剔除——runtime 侧 isFormQuestion 逐项过滤同策略） */
 function toBarQuestion(v: unknown): BtwBarFormQuestion | null {
   if (typeof v !== 'object' || v === null) return null
   const q = v as Record<string, unknown>
-  let kind: 'choice' | 'text' | 'schedule'
-  if (q.type === 'choice') kind = 'choice'
-  else if (q.type === 'text') kind = 'text'
-  else if (q.type === 'schedule') kind = 'schedule'
-  else return null
-  const header = typeof q.header === 'string' ? q.header : undefined
-  const question = typeof q.question === 'string' ? q.question : ''
-  if (header === undefined && question === '') return null
-  const base = { type: kind, ...(header !== undefined ? { header } : {}), question }
+  const kind = toBarQuestionKind(q.type)
+  if (kind === null) return null
+  const base = toBarQuestionBase(q, kind)
+  if (base === null) return null
   if (kind === 'schedule') {
     const initial = toScheduleDraft(q.initial)
     return { ...base, ...(initial !== null ? { initial } : {}) }
   }
   if (kind !== 'choice') return base
-  const options: BtwBarOption[] = []
-  if (Array.isArray(q.options)) {
-    for (const o of q.options) {
-      if (typeof o !== 'object' || o === null) continue
-      const rec = o as Record<string, unknown>
-      if (typeof rec.label !== 'string') continue
-      options.push({
-        label: rec.label,
-        ...(typeof rec.description === 'string' ? { description: rec.description } : {}),
-      })
-    }
-  }
-  return { ...base, options, multi: q.multi === true, allowOther: q.allowOther !== false }
+  return { ...base, options: toBarOptions(q.options), multi: q.multi === true, allowOther: q.allowOther !== false }
 }
 
 /** 问题集派生（questions 源优先；legacy scheduleCreate·scheduleDraft 源包装单 schedule 问） */
@@ -293,29 +310,65 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
       if (draft) respondActive(scheduleResultJson(draft))
       return
     }
+    const payload = formAnswersJson(activeQuestions.value, curDraft.value)
+    if (payload !== null) respondActive(payload)
+  }
+
+  /** 逐题收集 answers envelope（null = 有题不可答，整体不回传——对齐原「遇缺 initial 即中止」语义） */
+  function formAnswersJson(
+    qs: BtwBarFormQuestion[],
+    draft: BtwBarDraft | null,
+  ): string | null {
     const answers: Record<string, string> = {}
-    const draftText = curDraft.value?.text ?? {}
-    const draftSel = curDraft.value?.sel ?? {}
-    for (const q of activeQuestions.value) {
-      const key = questionKey(q)
-      if (q.type === 'schedule') {
-        if (!q.initial) return
-        answers[key] = scheduleResultJson(q.initial)
-        continue
-      }
-      if (q.type === 'text') {
-        const t = draftText[`${key}__other`] ?? ''
-        if (t.trim().length > 0) answers[`${key}__other`] = t
-        continue
-      }
-      const sel = draftSel[key] ?? []
-      if ((q.options ?? []).length > 0 && sel.length > 0) {
-        answers[key] = q.multi === true ? JSON.stringify(sel) : sel[0]
-      }
-      const other = draftText[`${key}__other`] ?? ''
-      if (other.length > 0) answers[`${key}__other`] = other
+    const draftText = draft?.text ?? {}
+    const draftSel = draft?.sel ?? {}
+    for (const q of qs) {
+      if (!appendQuestionAnswer(answers, q, draftText, draftSel)) return null
     }
-    respondActive(JSON.stringify(answers))
+    return JSON.stringify(answers)
+  }
+
+  /** 单题入账；false = schedule 题缺 initial（预填草稿被清），整体不可提交 */
+  function appendQuestionAnswer(
+    answers: Record<string, string>,
+    q: BtwBarFormQuestion,
+    draftText: Record<string, string>,
+    draftSel: Record<string, string[]>,
+  ): boolean {
+    const key = questionKey(q)
+    if (q.type === 'schedule') {
+      if (!q.initial) return false
+      answers[key] = scheduleResultJson(q.initial)
+      return true
+    }
+    if (q.type === 'text') {
+      appendTextAnswer(answers, key, draftText[`${key}__other`] ?? '')
+      return true
+    }
+    appendChoiceAnswer(answers, key, q, draftText, draftSel)
+    return true
+  }
+
+  /** text 题入账（空白不写键） */
+  function appendTextAnswer(answers: Record<string, string>, key: string, text: string): void {
+    if (text.trim().length > 0) answers[`${key}__other`] = text
+  }
+
+  /** choice 题入账：选中项（multi = JSON 数组 / 单选 = 首项）+ Other 文本（写入判定无 trim，
+   *  与 text 题的 trim 判定不同——保持既有提交形状） */
+  function appendChoiceAnswer(
+    answers: Record<string, string>,
+    key: string,
+    q: BtwBarFormQuestion,
+    draftText: Record<string, string>,
+    draftSel: Record<string, string[]>,
+  ): void {
+    const sel = draftSel[key] ?? []
+    if ((q.options ?? []).length > 0 && sel.length > 0) {
+      answers[key] = q.multi === true ? JSON.stringify(sel) : sel[0]
+    }
+    const other = draftText[`${key}__other`] ?? ''
+    if (other.length > 0) answers[`${key}__other`] = other
   }
 
   /** plan 审批降档回传（PlanReviewResponse 本地同形；revise 单行意见 = 降档契约登记面） */

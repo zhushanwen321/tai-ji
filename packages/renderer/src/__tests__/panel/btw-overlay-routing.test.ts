@@ -44,10 +44,8 @@ import {
   __resetDialogRequestIdSessionsForTest,
 } from '@/composables/shell/extension-host-dialog'
 import { __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
-import {
-  __resetBtwPendingBookkeepingForTest,
-  setBtwReclaimReminder,
-} from '@/composables/panel/useBtwTabData'
+import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
+import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'

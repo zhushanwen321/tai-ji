@@ -6,7 +6,7 @@
  * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 投影）拉取快照，注入
  * chatStore 的 `btw:` 分区（store.hydrate，内部 mergeBaselineWithLive 保尾部 live 实体）。
  * 回放落地时联动 D8 失效支回放对账（markBtwStaleInteractiveFromReplay：悬空交互请求
- * toolCall → 行内失效提示，见 useBtwTabData）。
+ * toolCall → 行内失效提示，见 btw-pending-bookkeeping）。
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。
  *
@@ -34,7 +34,7 @@ import {
 } from '@taiji/core'
 import type { ChatStoreInstance } from '@taiji/core'
 import { chat as chatApi } from '@/api'
-import { markBtwStaleInteractiveFromReplay } from '@/composables/panel/useBtwTabData'
+import { markBtwStaleInteractiveFromReplay } from '@/composables/panel/btw-pending-bookkeeping'
 
 /**
  * 回放目标面（chat store 的四个回放编排方法）。窄化 Pick：与 core factory 产物、

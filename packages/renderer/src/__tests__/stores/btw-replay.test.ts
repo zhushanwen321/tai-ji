@@ -30,11 +30,8 @@ import {
 import { replayEntries } from '@taiji/core'
 import type { Message, PiEntry, PiMessageBody, PiMessageEntry } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
-import {
-  btwExpiredNoticeOf,
-  BTW_EXPIRED_REASON_REPLAY_DANGLING,
-  __resetBtwPendingBookkeepingForTest,
-} from '@/composables/panel/useBtwTabData'
+import { btwExpiredNoticeOf, BTW_EXPIRED_REASON_REPLAY_DANGLING } from '@/composables/panel/btw-pending-bookkeeping'
+import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 
 // ── @/api 门面局部 mock：只替换 chat.getHistory（回放数据源），其余域走 actual ──
 const getHistoryMock = vi.hoisted(() => vi.fn())

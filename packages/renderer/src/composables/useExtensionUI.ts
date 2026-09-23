@@ -48,7 +48,7 @@ import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChatStore } from '@/stores/chat'
-import { BTW_EXPIRED_REASON_SNAPSHOT_PRUNED, invalidateBtwStaleFromSnapshot } from '@/composables/panel/useBtwTabData'
+import { BTW_EXPIRED_REASON_SNAPSHOT_PRUNED, invalidateBtwStaleFromSnapshot } from '@/composables/panel/btw-pending-bookkeeping'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean

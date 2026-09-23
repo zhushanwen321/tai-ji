@@ -12,7 +12,8 @@
  *   result-action.ts（result）/ doctor.ts（doctor + SessionReadSignals）/
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
  *   tool-format.ts（各 action 输出文本渲染 + 错误面 message + F2 消歧与
- *   find 零匹配包装）/ no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/
+ *   find 零匹配包装）/ no-match.ts（F1 自检行）/ zcode-anchor-classify.ts（entry
+ *   兜底归因的 entry 级纯判定）/ handler-utils.ts（pad/err/
  *   stripHash/requireStr/SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
  * 本模块保留公共类型、定位解析（resolveSessionId）、zcode 读链与各 action 编排；
  * 域模块符号不经此 re-export——从所属域模块直接 import（唯一例外 SessionReadSignals：
@@ -123,6 +124,8 @@ import {
   zcodeReadErrorMessage,
 } from './tool-format.js'
 import { doDoctor, type SessionReadSignals } from './doctor.js'
+// entry 兜底归因的 entry 级判定（同目录域模块，零 I/O 纯函数，复杂度偿还提取）。
+import { firstIncompleteAnchorReason } from './zcode-anchor-classify.js'
 
 // SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
@@ -328,17 +331,10 @@ async function resolveSaIdRoute(
 
 /**
  * 候选文件里该 sa-id 的 `subagent-record` entry 若「在场但锚不完整」，返回缺失归因
- * （§3.4 zcode_anchor_missing 的 entry 形态触发 + 日志归因；记录完全不在场返回
- * undefined）。判定与 entry-anchor.ts 的 zcodeAnchorOfEntry 双键判据同构，协议字面量
- * 同值（写侧 subagent-core record-entry.ts SUBAGENT_RECORD_CUSTOM_TYPE，漂移由
- * entry-anchor.test.ts 守卫）。
- *
- * engine 判别（D5，本函数新增；entry-anchor 的锚查找无需同判别——pi 形态 sessionRef
- * 缺 dbPath，zcodeAnchorOfEntry 双键判据天然不命中）：`d.engine !== 'zcode'` 的记录
- * （pi 形态——engine 缺省、sessionRef 无 dbPath）不是「zcode 锚不完整」，跳过不归因
- * ——误归因 missing-dbPath 会把「pi record 先于 manifest settle 落盘」的正常窗口错报成
- * zcode_anchor_missing（旧版本产物指引不适用）；正确归因 = undefined → 上层落
- * zcode_record_not_found。
+ *（§3.4 zcode_anchor_missing 的 entry 形态触发 + 日志归因；记录完全不在场返回
+ * undefined）。entry 级判定（五关过滤 + D5 engine 判别 + 锚完整性链）在
+ * zcode-anchor-classify.ts 的 firstIncompleteAnchorReason，本函数只做文件扫描 I/O
+ *（读失败跳过该文件，首个命中归因即终止扫描）。
  */
 async function classifyIncompleteEntryAnchor(
   candidateFiles: readonly string[],
@@ -351,21 +347,8 @@ async function classifyIncompleteEntryAnchor(
     } catch {
       continue
     }
-    for (const entry of parseSessionContent(content).entries) {
-      if (entry.type !== 'custom' || entry.customType !== 'subagent-record') continue
-      const data: unknown = entry.data
-      if (typeof data !== 'object' || data === null) continue
-      const d = data as Record<string, unknown>
-      if (d.v !== 1 || d.id !== saId) continue
-      if (d.engine !== 'zcode') continue // pi 形态记录：非 zcode 锚残缺，跳过（D5 判别）
-      const handle = d.engineHandle
-      if (typeof handle !== 'object' || handle === null) return 'missing-engineHandle'
-      const ref = (handle as Record<string, unknown>).sessionRef
-      if (typeof ref !== 'object' || ref === null) return 'missing-sessionRef'
-      const r = ref as Record<string, unknown>
-      if (typeof r.sessionId !== 'string' || r.sessionId === '') return 'missing-sessionId'
-      if (typeof r.dbPath !== 'string' || r.dbPath === '') return 'missing-dbPath'
-    }
+    const reason = firstIncompleteAnchorReason(parseSessionContent(content).entries, saId)
+    if (reason !== undefined) return reason
   }
   return undefined
 }

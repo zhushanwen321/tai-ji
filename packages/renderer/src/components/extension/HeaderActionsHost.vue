@@ -45,6 +45,11 @@ import type { Component } from 'vue'
 import { Button } from '@/components/ui/button'
 import { useI18n } from 'vue-i18n'
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
+import type {
+  HeaderActionCommandAvailability,
+  HeaderActionsSource,
+} from '@/composables/shell/useExtensionHostBridge'
+import type { ContributionRecord, HeaderActionEntry } from '@taiji/core'
 
 const props = defineProps<{
   /** 所属 session（per-session 徽标分区路由键；空 = landing，不渲染） */
@@ -60,6 +65,20 @@ const BADGE_MAX_CHARS = 4
 /** lucide 名 → 组件映射（宿主解析，插件不给 SVG）。未登记名 fallback 到通用插件图标。 */
 const HEADER_ACTION_ICONS: Record<string, Component> = {
   clock: Clock,
+}
+
+/** E13 生效三态 = 判定三态 | 上次值兜底（unknown 且无上次值 = undefined → 首次缺省可点） */
+type EffectiveAvailability = 'registered' | 'unregistered' | undefined
+
+/** 按钮渲染视图（buttons computed 的元素形状；非声明本体——归一后的呈现面） */
+interface HeaderActionButtonView {
+  key: string
+  testid: string
+  icon: Component
+  badge: string
+  disabled: boolean
+  tooltip: string
+  onClick: () => void
 }
 
 /** testid 形态 = header-action-<pluginId>-<actionId 的 id 段>（设计场景 1 契约：
@@ -78,6 +97,94 @@ const lastResolved = new Map<string, 'registered' | 'unregistered'>()
  *  按钮恢复可点；切会话由下方 watch 清理（置灰期间按钮不可点，无「点击自愈」路径）。 */
 const commandMissing = ref(new Set<string>())
 
+/** E13 生效态判定（computed 求值期同步写 lastResolved 簿记——既有副作用模式）：非 unknown
+ *  判定值入簿记；unknown 保持上次值，首次（无上次值）缺省可点（E14 兜底不拦入口）。 */
+function effectiveAvailabilityOf(
+  sid: string,
+  commandId: string,
+  availability: HeaderActionCommandAvailability,
+): EffectiveAvailability {
+  if (availability !== 'unknown') {
+    lastResolved.set(`${sid}::${commandId}`, availability)
+    return availability
+  }
+  return lastResolved.get(`${sid}::${commandId}`)
+}
+
+/** 灰置三源 OR 合成：E13 unregistered + E3 本地置灰 + 运行时镜像 disabled。
+ *  运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#42 镜像）直接灰置（插件侧
+ *  业务态，如「调度器运行中不可配置」）。E3 让位规则（F5）：宿主已判 registered（命令
+ *  重注册回来了）时 missing 不再置灰——一次性派发失败让位于重注册事实；unknown 语境
+ *  无法确认重注册，保持本地置灰原行为（executeCommand 返回 false ⟺ 注册表查无此命令
+ *  ⟹ 该失败只发生在非 registered 语境）。 */
+function isHeaderActionDisabled(
+  effective: EffectiveAvailability,
+  missing: boolean,
+  availability: HeaderActionCommandAvailability,
+  entry: HeaderActionEntry | undefined,
+): boolean {
+  if (effective === 'unregistered') return true
+  if (missing && availability !== 'registered') return true
+  return entry?.disabled === true
+}
+
+/** badge 截断展示（超 4 字符截断，全文进 tooltip） */
+function badgeOf(entry: HeaderActionEntry | undefined): string {
+  return entry?.badge ? entry.badge.slice(0, BADGE_MAX_CHARS) : ''
+}
+
+/** tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
+ *  ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点；
+ *  F6 分叉——unregistered 用「未加载扩展」原 key，插件业务 disabled 用「暂不可用」泛化 key）
+ *  ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）。 */
+function headerActionTooltip(
+  availability: HeaderActionCommandAvailability,
+  effective: EffectiveAvailability,
+  entry: HeaderActionEntry | undefined,
+  declaredTitle: string,
+): string {
+  const lines: string[] = []
+  if (entry?.badge && entry.badge.length > BADGE_MAX_CHARS) lines.push(entry.badge)
+  if (availability === 'unknown') lines.push(t('panel.header.pluginActionRestoring'))
+  else if (effective === 'unregistered') lines.push(t('panel.header.pluginActionExtensionNotLoaded'))
+  else lines.push(entry?.tooltip ?? (entry?.disabled === true ? t('panel.header.pluginActionTemporarilyUnavailable') : declaredTitle))
+  return lines.join('\n')
+}
+
+/** E3 点击执行：execute 内部对缺失命令 emit error（ERR6）；返回 false（命令缺失）时
+ *  本地置灰，禁静默 no-op。 */
+function dispatchHeaderAction(src: HeaderActionsSource, sid: string, commandId: string): void {
+  const dispatched = src.executeCommand(commandId)
+  if (!dispatched) {
+    const next = new Set(commandMissing.value)
+    next.add(`${sid}::${commandId}`)
+    commandMissing.value = next
+  }
+}
+
+/** 单条声明 → 按钮视图（无 headerAction 段 = null，filter 剔除） */
+function toHeaderActionButton(
+  src: HeaderActionsSource,
+  decl: ContributionRecord,
+  sid: string,
+): HeaderActionButtonView | null {
+  const ha = decl.headerAction
+  if (!ha) return null
+  const entry = src.getRuntimeState(sid, decl.contributionId)
+  const availability = src.resolveCommandAvailability(sid, ha.commandId)
+  const effective = effectiveAvailabilityOf(sid, ha.commandId, availability)
+  const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
+  return {
+    key: `${decl.pluginId}::${decl.contributionId}`,
+    testid: actionTestId(decl.pluginId, decl.contributionId),
+    icon: HEADER_ACTION_ICONS[ha.icon] ?? Puzzle,
+    badge: badgeOf(entry),
+    disabled: isHeaderActionDisabled(effective, missing, availability, entry),
+    tooltip: headerActionTooltip(availability, effective, entry, ha.title),
+    onClick: () => dispatchHeaderAction(src, sid, ha.commandId),
+  }
+}
+
 const buttons = computed(() => {
   if (!source || !props.sessionId) return []
   const sid = props.sessionId
@@ -85,54 +192,9 @@ const buttons = computed(() => {
     // order 升序；缺省排在内置按钮组声明之后（order ?? Infinity，追加在后语义）
     .sort((a, b) => (a.headerAction?.order ?? Number.POSITIVE_INFINITY) - (b.headerAction?.order ?? Number.POSITIVE_INFINITY))
 
-  return declarations.map((decl) => {
-    const ha = decl.headerAction
-    if (!ha) return null
-    const entry = source.getRuntimeState(sid, decl.contributionId)
-    const availability = source.resolveCommandAvailability(sid, ha.commandId)
-    if (availability !== 'unknown') lastResolved.set(`${sid}::${ha.commandId}`, availability)
-    // E13 三态：unknown 保持上次值；首次（无上次值）缺省可点（E14 兜底不拦入口）
-    const effective = availability === 'unknown' ? lastResolved.get(`${sid}::${ha.commandId}`) : availability
-    const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
-    // 运行时镜像第三源：插件 updateHeaderAction 推的 disabled（#42 镜像）直接灰置
-    // （插件侧业务态，如「调度器运行中不可配置」），宿主侧 E13/E3 判定与之 OR 合成。
-    // E3 让位规则（F5）：宿主已判 registered（命令重注册回来了）时 missing 不再置灰——
-    // 一次性派发失败让位于重注册事实；unknown 语境无法确认重注册，保持本地置灰原行为
-    // （executeCommand 返回 false ⟺ 注册表查无此命令 ⟹ 该失败只发生在非 registered 语境）
-    const disabled =
-      effective === 'unregistered'
-      || (missing && availability !== 'registered')
-      || entry?.disabled === true
-
-    // tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
-    // ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点；
-    // F6 分叉——unregistered 用「未加载扩展」原 key，插件业务 disabled 用「暂不可用」泛化 key）
-    // ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）
-    const tooltipLines: string[] = []
-    if (entry?.badge && entry.badge.length > BADGE_MAX_CHARS) tooltipLines.push(entry.badge)
-    if (availability === 'unknown') tooltipLines.push(t('panel.header.pluginActionRestoring'))
-    else if (effective === 'unregistered') tooltipLines.push(t('panel.header.pluginActionExtensionNotLoaded'))
-    else tooltipLines.push(entry?.tooltip ?? (entry?.disabled === true ? t('panel.header.pluginActionTemporarilyUnavailable') : ha.title))
-    const badge = entry?.badge ? entry.badge.slice(0, BADGE_MAX_CHARS) : ''
-
-    return {
-      key: `${decl.pluginId}::${decl.contributionId}`,
-      testid: actionTestId(decl.pluginId, decl.contributionId),
-      icon: HEADER_ACTION_ICONS[ha.icon] ?? Puzzle,
-      badge,
-      disabled,
-      tooltip: tooltipLines.join('\n'),
-      onClick: () => {
-        // E3：execute 内部对缺失命令 emit error（ERR6）；返回 false 时本地置灰，禁静默 no-op
-        const dispatched = source.executeCommand(ha.commandId)
-        if (!dispatched) {
-          const next = new Set(commandMissing.value)
-          next.add(`${sid}::${ha.commandId}`)
-          commandMissing.value = next
-        }
-      },
-    }
-  }).filter((b): b is NonNullable<typeof b> => b !== null)
+  return declarations
+    .map((decl) => toHeaderActionButton(source, decl, sid))
+    .filter((b): b is HeaderActionButtonView => b !== null)
 })
 
 // 切会话时清「上次值」簿记与 E3 本地置灰（per-session 语义不跨会话残留）

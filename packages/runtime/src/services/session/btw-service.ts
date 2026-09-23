@@ -63,7 +63,7 @@ import { BtwError } from './btw-error.js'
 import { BTW_BEHAVIOR_CONTRACT, composeContractAppendPrompt } from './btw-contract-inject.js'
 import type { BtwContractInjectionTrace } from './btw-contract-inject.js'
 import { forkViaCliPi, inspectSourceState, readSessionHeader } from './btw-fork-exec.js'
-import type { BtwSessionHeader } from './btw-fork-exec.js'
+import type { BtwSessionHeader, BtwSourceState } from './btw-fork-exec.js'
 import { isInsideBtwRoot, reconcileOrphanThreadDirs as reconcileOrphanDirs } from './btw-orphan-reconcile.js'
 
 // ─ 导出面保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
@@ -249,6 +249,45 @@ export interface BtwLineSpawnContext {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 纯函数 helper（createLine 分解件，fixture 可驱动）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 快照 kind 判定（D3 三分支投影，metrics-gate 复杂度偿还分解件）：无 fork 文件 =
+ * no-source（分支②）；有 fork 文件时源含进行中 turn（悬空 tool-call 或调用方标注
+ * mainTurnActive）= truncated（分支③），否则 forked（分支①）。纯映射零副作用。
+ */
+function resolveSnapshotKind(
+  forkFile: string | undefined,
+  source: BtwSourceState,
+  mainTurnActive: boolean | undefined,
+): Exclude<BtwSnapshotKind, 'unknown'> {
+  if (!forkFile) return 'no-source'
+  if (source.state !== 'ok') return 'forked'
+  return source.hasDanglingToolCall || mainTurnActive === true ? 'truncated' : 'forked'
+}
+
+/**
+ * spawn 后 get_state 提取 + 完备性守卫（fail-fast）：缺 sessionId/sessionFile 即
+ * spawn_state_invalid（不注册半截条目）。
+ */
+async function requireSpawnState(
+  client: IPiEngine,
+  forkFile: string | undefined,
+): Promise<{ piSessionId: string; sessionFilePath: string }> {
+  const state = await client.getState()
+  const piSessionId = typeof state?.sessionId === 'string' ? state.sessionId : undefined
+  const sessionFilePath = typeof state?.sessionFile === 'string' ? state.sessionFile : undefined
+  if (!piSessionId || !sessionFilePath) {
+    // 文案避开 `spawn (` 形态：守卫 check_spawn_env_boundary 的 spawn\s*\( 模式按行
+    // 文本匹配（不剥模板字符串），原「after spawn (fork=" 会被误判为进程创建调用点
+    //（本行是错误消息 prose，非 spawn；本文件真实 spawn = forkViaCliPi 已武装构建器）。
+    throw new BtwError('spawn_state_invalid', `[btw] get_state missing sessionId/sessionFile after spawn; fork=${forkFile ?? 'none'}`)
+  }
+  return { piSessionId, sessionFilePath }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BtwService
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -397,6 +436,9 @@ export class BtwService {
    * 全程零触碰主会话进程与主会话文件（P-no-abort 结构面：主 turn 不可能被本路径
    * 打断——真机断言归 S7 真实进程轨）；零直写线会话文件（fork 文件由 pi 写、
    * 回落文件由 pi 首 flush 自建）。
+   *
+   * 分解件（metrics-gate 复杂度偿还，编排序不变）：fork 编排归 forkSnapshotForLine、
+   * 快照 kind 纯判定归 resolveSnapshotKind、spawn/附着/登记归 spawnAndRegisterLine。
    */
   async createLine(req: BtwCreateRequest): Promise<BtwCreateResult> {
     const { mainSid, cwd } = req
@@ -404,48 +446,66 @@ export class BtwService {
     const label = req.label ?? basename(cwd)
     const sourceFile = this.deps.resolveMainSessionFile(mainSid)
     const source = inspectSourceState(sourceFile)
-
-    // 分支①：源可用 → pi 原生 fork（--fork + --session-dir，V2①）。
-    let forkFile: string | undefined
-    if (source.state === 'ok' && sourceFile) {
-      try {
-        const fork = this.deps.forkSession
-          ? await this.deps.forkSession({ sourceFile, threadDir, cwd })
-          : await forkViaCliPi({ piCommand: this.deps.resolvePiCommand(), sourceFile, threadDir, cwd })
-        readSessionHeader(fork) // fail-fast：fork 文件不可解析 → 回落（不产半截态登记）
-        forkFile = fork
-      } catch (e) {
-        // best-effort 降级：fork bootstrap 失败（源消失/超时/异因）→ 回落无 fork 分支，
-        // 不静默——pill 标 no-source + 警告日志（D3 分支② 编排，原始错误已进日志）。
-        console.warn(`[btw] fork bootstrap failed, falling back to no-snapshot line: ${toErrorMessage(e)}`)
-      }
-    } else {
-      // 分支② 预期路径（首 flush 前源不存在）：警告含不可用原因，不构成 IO 故障伪装（规则 #11.2）。
-      console.warn(`[btw] fork source unavailable (${source.state === 'unavailable' ? source.reason : 'n/a'}), creating no-snapshot line (source=${sourceFile ?? '<unresolved>'})`)
-    }
-
-    const snapshotKind: Exclude<BtwSnapshotKind, 'unknown'> = forkFile ? (source.state === 'ok' && (source.hasDanglingToolCall || req.mainTurnActive === true) ? 'truncated' : 'forked') : 'no-source'
+    const forkFile = await this.forkSnapshotForLine(source, sourceFile, threadDir, cwd)
+    const snapshotKind = resolveSnapshotKind(forkFile, source, req.mainTurnActive)
     const ctx: BtwLineSpawnContext = { mainSid, cwd, threadDir, snapshotKind }
     const options = await this.buildEstablishOptions(ctx)
+    return await this.spawnAndRegisterLine(ctx, label, forkFile, options)
+  }
+
+  /**
+   * createLine 的 fork 编排（D3 分支①/②）：源可用 → 执行 fork（deps.forkSession
+   * 覆写口优先，缺省 forkViaCliPi）+ fail-fast 验收 fork 文件；源不可用或 bootstrap
+   * 失败 → warn 后回落（返回 undefined = 分支② 无快照新建，pill 不静默）。
+   */
+  private async forkSnapshotForLine(
+    source: BtwSourceState,
+    sourceFile: string | undefined,
+    threadDir: string,
+    cwd: string,
+  ): Promise<string | undefined> {
+    if (source.state !== 'ok' || !sourceFile) {
+      // 分支② 预期路径（首 flush 前源不存在）：警告含不可用原因，不构成 IO 故障伪装（规则 #11.2）。
+      console.warn(`[btw] fork source unavailable (${source.state === 'unavailable' ? source.reason : 'n/a'}), creating no-snapshot line (source=${sourceFile ?? '<unresolved>'})`)
+      return undefined
+    }
+    // 分支①：源可用 → pi 原生 fork（--fork + --session-dir，V2①）。
+    try {
+      const fork = this.deps.forkSession
+        ? await this.deps.forkSession({ sourceFile, threadDir, cwd })
+        : await forkViaCliPi({ piCommand: this.deps.resolvePiCommand(), sourceFile, threadDir, cwd })
+      readSessionHeader(fork) // fail-fast：fork 文件不可解析 → 回落（不产半截态登记）
+      return fork
+    } catch (e) {
+      // best-effort 降级：fork bootstrap 失败（源消失/超时/异因）→ 回落无 fork 分支，
+      // 不静默——pill 标 no-source + 警告日志（D3 分支② 编排，原始错误已进日志）。
+      console.warn(`[btw] fork bootstrap failed, falling back to no-snapshot line: ${toErrorMessage(e)}`)
+      return undefined
+    }
+  }
+
+  /**
+   * createLine 的 spawn/附着/登记编排：临时 key spawn →（fork 时）switch_session +
+   * 附着断言（I1：登记路径 ≡ pi 写路径）→ get_state 守卫 → rekey →
+   * registerSession(hidden:true) → 注册表登记 + 契约注入留痕 + 闲置武装。
+   * 任一步失败 → 双键收尸（不留半截条目）。
+   */
+  private async spawnAndRegisterLine(
+    ctx: BtwLineSpawnContext,
+    label: string,
+    forkFile: string | undefined,
+    options: BtwLineSpawnOptions,
+  ): Promise<BtwCreateResult> {
+    const { mainSid, cwd, snapshotKind } = ctx
     const tempKey = `btw-create-${crypto.randomUUID()}`
-    let client: IPiEngine | undefined
     let registeredKey = tempKey
     try {
-      client = await this.deps.processes.createSession(tempKey, cwd, options)
+      const client = await this.deps.processes.createSession(tempKey, cwd, options)
       if (forkFile) {
-        // 分支① 附着：switch_session → 附着断言（I1：登记路径 ≡ pi 写路径）。
         await client.switchSession(forkFile)
         await assertPiSessionFile(client, forkFile, `btw.createLine(${mainSid})`)
       }
-      const state = await client.getState()
-      const piSessionId = typeof state?.sessionId === 'string' ? state.sessionId : undefined
-      const sessionFilePath = typeof state?.sessionFile === 'string' ? state.sessionFile : undefined
-      if (!piSessionId || !sessionFilePath) {
-        // 文案避开 `spawn (` 形态：守卫 check_spawn_env_boundary 的 spawn\s*\( 模式按行
-        // 文本匹配（不剥模板字符串），原「after spawn (fork=" 会被误判为进程创建调用点
-        //（本行是错误消息 prose，非 spawn；本文件真实 spawn = forkViaCliPi 已武装构建器）。
-        throw new BtwError('spawn_state_invalid', `[btw] get_state missing sessionId/sessionFile after spawn; fork=${forkFile ?? 'none'}`)
-      }
+      const { piSessionId, sessionFilePath } = await requireSpawnState(client, forkFile)
       if (forkFile && piSessionId !== readSessionHeader(forkFile).id) {
         // 附着一致性守卫：switch 后活跃会话必须是 fork 目标（进程绑错 = 实现 bug，fail-fast）。
         throw new BtwError('state_mismatch', `[btw] attached session id ${piSessionId} !== fork header id — refusing to register`)
@@ -462,7 +522,7 @@ export class BtwService {
         mainSid,
         cwd,
         label,
-        threadDir,
+        threadDir: ctx.threadDir,
         sessionFilePath,
         snapshotKind,
         hidden: true,

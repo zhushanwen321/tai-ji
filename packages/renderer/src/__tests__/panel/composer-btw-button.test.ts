@@ -40,10 +40,8 @@ import { COMPOSER_BTW_BUTTON_DEGRADATION_ORDER } from '@/components/panel/tray/u
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { makeTrayCountsStub } from './tray/tray-counts-stub'
 import { useChatStore } from '@/stores/chat'
-import {
-  setBtwReclaimReminder,
-  __resetBtwPendingBookkeepingForTest,
-} from '@/composables/panel/useBtwTabData'
+import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
+import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 

@@ -93,6 +93,71 @@ export async function readObservation(agentDir: string, file: WatchedFile): Prom
   }
 }
 
+/** 单文件本拍归类：changed（触发 refresh）/ missing（models.json 抑制窗口）/ stable（无变化）。 */
+type FileChangeKind = "changed" | "missing" | "stable";
+
+/**
+ * 单文件比对 + 基线推进（规则 2-4 的 per-file 分支；返回该文件的变化归类）。
+ * present：先摘抑制集合（文件回归即变化），再比内容，基线推进为 present；
+ * absent：按 absentChangeKind 归类，基线推进为 absent。
+ */
+function classifyFileChange(
+  snapshot: Snapshot,
+  file: WatchedFile,
+  obs: FileObservation,
+): FileChangeKind {
+  const prev = snapshot.baselines.get(file);
+
+  if (obs.state === "present") {
+    // 文件回来了（隔离副本被写回 / 用户重新保存）→ 视为变化，恢复正常刷新。
+    const recovered = snapshot.suppressed.delete(file);
+    const changed = recovered || !prev || prev.state !== "present" || prev.content !== obs.content;
+    snapshot.baselines.set(file, { state: "present", content: obs.content });
+    return changed ? "changed" : "stable";
+  }
+
+  const kind = absentChangeKind(snapshot, file, prev);
+  snapshot.baselines.set(file, { state: "absent" });
+  return kind;
+}
+
+/** absent 观察的归类（规则 3 + 抑制持续语义；models.json 路径有入抑制集合的副作用）。 */
+function absentChangeKind(
+  snapshot: Snapshot,
+  file: WatchedFile,
+  prev: FileBaseline | undefined,
+): FileChangeKind {
+  if (prev?.state !== "present") {
+    // 仍在抑制窗口内（持续缺失）：保持抑制，逐拍静默（只在跃迁那一拍有日志）；
+    // 从未出现（catalog-only 常态）= 非变化信号。
+    return snapshot.suppressed.has(file) ? "missing" : "stable";
+  }
+  if (file === "models.json") {
+    // 配置源消失：抑制**整拍**刷新（refresh 会以空配置重建可用集合）；抑制持续到文件回归。
+    snapshot.suppressed.add(file);
+    return "missing";
+  }
+  // auth.json 消失：不威胁 provider 配置，按普通变化处理（凭据缺失自愈——写回即恢复）。
+  return "changed";
+}
+
+/** 本拍决策（优先级：全不可比 → models.json 抑制 → 无变化 → 仅缺失 → refresh）。 */
+function decideAction(
+  snapshot: Snapshot,
+  changedFiles: WatchedFile[],
+  missingFiles: WatchedFile[],
+  comparable: number,
+): SyncDecision {
+  if (comparable === 0) return { action: "none", reason: "all-unreadable" };
+  // 抑制优先于一切：配置源缺失窗口内绝不 refresh（宁可让引擎保留最后一份好快照）。
+  if (snapshot.suppressed.has("models.json")) return { action: "skip-missing", missingFiles: ["models.json"] };
+  if (changedFiles.length === 0 && missingFiles.length === 0) {
+    return { action: "none", reason: "unchanged" };
+  }
+  if (changedFiles.length === 0) return { action: "skip-missing", missingFiles };
+  return { action: "refresh", changedFiles };
+}
+
 /**
  * 对比观察与基线，产出本拍决策**并就地推进基线**（按文件独立）。
  *
@@ -115,45 +180,12 @@ export function evaluateSnapshot(
     const obs = observations.get(file);
     if (!obs || obs.state === "unreadable") continue;
     comparable += 1;
-    const prev = snapshot.baselines.get(file);
-
-    if (obs.state === "present") {
-      if (snapshot.suppressed.delete(file)) {
-        // 文件回来了（隔离副本被写回 / 用户重新保存）→ 视为变化，恢复正常刷新。
-        changedFiles.push(file);
-      } else if (!prev || prev.state !== "present" || prev.content !== obs.content) {
-        changedFiles.push(file);
-      }
-      snapshot.baselines.set(file, { state: "present", content: obs.content });
-      continue;
-    }
-
-    // obs.state === "absent"
-    if (prev?.state === "present") {
-      if (file === "models.json") {
-        // 配置源消失：抑制**整拍**刷新（refresh 会以空配置重建可用集合）；抑制持续到文件回归。
-        snapshot.suppressed.add(file);
-        missingFiles.push(file);
-      } else {
-        // auth.json 消失：不威胁 provider 配置，按普通变化处理（凭据缺失自愈——写回即恢复）。
-        changedFiles.push(file);
-      }
-    } else if (snapshot.suppressed.has(file)) {
-      // 仍在抑制窗口内（持续缺失）：保持抑制，逐拍静默（只在跃迁那一拍有日志）。
-      missingFiles.push(file);
-    }
-    // 持续缺失（且从未出现过）= catalog-only 常态 → 非变化信号，基线保持 absent。
-    snapshot.baselines.set(file, { state: "absent" });
+    const kind = classifyFileChange(snapshot, file, obs);
+    if (kind === "changed") changedFiles.push(file);
+    else if (kind === "missing") missingFiles.push(file);
   }
 
-  if (comparable === 0) return { action: "none", reason: "all-unreadable" };
-  // 抑制优先于一切：配置源缺失窗口内绝不 refresh（宁可让引擎保留最后一份好快照）。
-  if (snapshot.suppressed.has("models.json")) return { action: "skip-missing", missingFiles: ["models.json"] };
-  if (changedFiles.length === 0 && missingFiles.length === 0) {
-    return { action: "none", reason: "unchanged" };
-  }
-  if (changedFiles.length === 0) return { action: "skip-missing", missingFiles };
-  return { action: "refresh", changedFiles };
+  return decideAction(snapshot, changedFiles, missingFiles, comparable);
 }
 
 /** 供上层（与测试）复用的结构化日志前缀。 */

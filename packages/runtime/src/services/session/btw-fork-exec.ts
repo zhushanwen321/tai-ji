@@ -86,31 +86,54 @@ export type BtwSourceState =
  * 进行中 turn 的已落盘部分」的文件级判定（P-fork-source）。形状容忍多代 pi 消息
  * 结构（content item `toolResult.toolCallId` / message role toolResult 的
  * `toolCallId` 字段），判定只影响 pill 标注不影响 fork 内容（fork 逐字节复制）。
+ *
+ * 分解件（metrics-gate 复杂度偿还）：单 entry 形状守卫归 asPiMessageEntry、单
+ * content item 判定归 collectContentItemIds，本函数只做两集合收集与差集判定。
  */
 export function hasDanglingToolCall(entries: readonly unknown[]): boolean {
+  const { callIds, resultIds } = collectToolCallIds(entries)
+  return [...callIds].some(id => !resultIds.has(id))
+}
+
+/** 单个 pi message entry 的最小形状面（悬空判定的消费字段）。 */
+interface DanglingCheckMessage {
+  toolCallId?: unknown
+  content?: unknown
+}
+
+/** entry 形状守卫：非 message entry / message 非对象 → undefined（判定面外，跳过）。 */
+function asPiMessageEntry(raw: unknown): DanglingCheckMessage | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const entry = raw as { type?: string; message?: DanglingCheckMessage | null }
+  if (entry.type !== 'message' || typeof entry.message !== 'object' || entry.message === null) return undefined
+  return entry.message
+}
+
+/** 单 content item 的 id 归集：toolCall 计入 callIds；toolResult（toolCallId 缺省回落 id）计入 resultIds。 */
+function collectContentItemIds(item: unknown, callIds: Set<string>, resultIds: Set<string>): void {
+  if (typeof item !== 'object' || item === null) return
+  const part = item as { type?: string; id?: unknown; toolCallId?: unknown }
+  if (part.type === 'toolCall' && typeof part.id === 'string') callIds.add(part.id)
+  if (part.type === 'toolResult') {
+    const tid = typeof part.toolCallId === 'string' ? part.toolCallId : part.id
+    if (typeof tid === 'string') resultIds.add(tid)
+  }
+}
+
+/** 单轮收集：逐 entry 取 message（含 role toolResult 的顶层 toolCallId 字段）+ 逐 content item 归集。 */
+function collectToolCallIds(entries: readonly unknown[]): { callIds: Set<string>; resultIds: Set<string> } {
   const callIds = new Set<string>()
   const resultIds = new Set<string>()
   for (const raw of entries) {
-    if (typeof raw !== 'object' || raw === null) continue
-    const entry = raw as { type?: string; message?: { role?: string; toolCallId?: unknown; content?: unknown } }
-    if (entry.type !== 'message' || typeof entry.message !== 'object' || entry.message === null) continue
-    const message = entry.message
+    const message = asPiMessageEntry(raw)
+    if (!message) continue
     if (typeof message.toolCallId === 'string') resultIds.add(message.toolCallId)
     if (!Array.isArray(message.content)) continue
     for (const item of message.content) {
-      if (typeof item !== 'object' || item === null) continue
-      const part = item as { type?: string; id?: unknown; toolCallId?: unknown }
-      if (part.type === 'toolCall' && typeof part.id === 'string') callIds.add(part.id)
-      if (part.type === 'toolResult') {
-        const tid = typeof part.toolCallId === 'string' ? part.toolCallId : part.id
-        if (typeof tid === 'string') resultIds.add(tid)
-      }
+      collectContentItemIds(item, callIds, resultIds)
     }
   }
-  for (const id of callIds) {
-    if (!resultIds.has(id)) return true
-  }
-  return false
+  return { callIds, resultIds }
 }
 
 /**

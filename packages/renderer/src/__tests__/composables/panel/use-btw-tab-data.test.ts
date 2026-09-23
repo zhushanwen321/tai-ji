@@ -31,8 +31,11 @@ import {
   getBtwVirtualIdsByMain,
   clearBtwVirtualKeyMapping,
   disposeBtwLinePartitions,
-  isBtwPending,
   ensureBtwPendingBookkeeping,
+  __resetBtwPendingBookkeepingForTest,
+} from '@/composables/panel/useBtwTabData'
+import {
+  isBtwPending,
   invalidateBtwRequests,
   invalidateBtwStaleFromSnapshot,
   btwExpiredNoticeOf,
@@ -41,8 +44,7 @@ import {
   markBtwStaleInteractiveFromReplay,
   BTW_EXPIRED_REASON_SNAPSHOT_PRUNED,
   BTW_EXPIRED_REASON_REPLAY_DANGLING,
-  __resetBtwPendingBookkeepingForTest,
-} from '@/composables/panel/useBtwTabData'
+} from '@/composables/panel/btw-pending-bookkeeping'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { dispatchGlobal, dispatchSession } from '@taiji/core/transport/api'
 import { useWorkflowStore } from '@/stores/workflow'

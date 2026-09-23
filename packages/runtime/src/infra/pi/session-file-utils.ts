@@ -1089,6 +1089,54 @@ export function isScannableSessionFile(name: string): boolean {
   return name.endsWith('.jsonl') && !isTmpResidueFileName(name)
 }
 
+// ── 磁盘扫描分解件（metrics-gate 复杂度偿还；单文件/子目录/顶层条目三级各管一层容错）──
+
+/** 单文件收录（防御纵深 catch）：scanSessionMeta 抛错计 scanFail，不中断整轮。 */
+function collectSessionMetaIntoResults(filePath: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  try {
+    const meta = scanSessionMeta(filePath, degraded)
+    if (meta) results.push(meta)
+  } catch {
+    noteScanDegraded(degraded, 'scanFail', filePath)
+  }
+}
+
+/** cwd 分组子目录收录：文件名过滤（isScannableSessionFile，排除崩溃残留）后逐文件。 */
+function scanCwdGroupDir(groupDir: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  try {
+    const files = readdirSync(groupDir).filter(isScannableSessionFile)
+    for (const file of files) {
+      collectSessionMetaIntoResults(join(groupDir, file), results, degraded)
+    }
+  } catch {
+    // RT-3#2：子目录列举失败 = 整个 cwd 分组的会话未收录，必须显形
+    noteScanDegraded(degraded, 'dirFail', groupDir)
+  }
+}
+
+/** 单个顶层目录项收录（cwd 分组子目录 / 散置 session 文件分流）；stat 失败计 statFail 跳过。 */
+function scanSessionsDirEntry(sessionsDir: string, entry: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  const entryPath = join(sessionsDir, entry)
+  let stat
+  try {
+    stat = statSync(entryPath)
+  } catch {
+    // RT-3#2：静默跳过 → 计数显形（权限/竞态删除，该条目未收录）
+    noteScanDegraded(degraded, 'statFail', entryPath)
+    return
+  }
+  if (stat.isDirectory()) {
+    scanCwdGroupDir(entryPath, results, degraded)
+  } else if (isScannableSessionFile(entry)) {
+    collectSessionMetaIntoResults(entryPath, results, degraded)
+  }
+}
+
+/** 轮末降级判定（[BU5] scanDegradedFlag.last 置位依据）：任一收录降级计数非零。 */
+function hasScanDegradation(degraded: ScanDegradedStats): boolean {
+  return degraded.badHeader > 0 || degraded.statFail > 0 || degraded.dirFail > 0 || degraded.scanFail > 0 || degraded.noHeader > 0
+}
+
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   if (!existsSync(sessionsDir)) { scanDegradedFlag.last = false; return [] } // 权威空（非读取降级）→ 入口复位；其余路径由轮末聚合覆盖
 
@@ -1110,47 +1158,13 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   }
 
   for (const entry of entries) {
-    const entryPath = join(sessionsDir, entry)
-    let stat
-    try {
-      stat = statSync(entryPath)
-    } catch {
-      // RT-3#2：静默 continue → 计数显形（权限/竞态删除，该条目未收录）
-      noteScanDegraded(degraded, 'statFail', entryPath)
-      continue
-    }
-
-    if (stat.isDirectory()) {
-      try {
-        // 文件名过滤（isScannableSessionFile）：排除 .tmp-migrate- 归一化崩溃残留
-        const files = readdirSync(entryPath).filter(isScannableSessionFile)
-        for (const file of files) {
-          const filePath = join(entryPath, file)
-          try {
-            const meta = scanSessionMeta(filePath, degraded)
-            if (meta) results.push(meta)
-          } catch {
-            noteScanDegraded(degraded, 'scanFail', filePath)
-          }
-        }
-      } catch {
-        // RT-3#2：子目录列举失败 = 整个 cwd 分组的会话未收录，必须显形
-        noteScanDegraded(degraded, 'dirFail', entryPath)
-      }
-    } else if (isScannableSessionFile(entry)) {
-      try {
-        const meta = scanSessionMeta(entryPath, degraded)
-        if (meta) results.push(meta)
-      } catch {
-        noteScanDegraded(degraded, 'scanFail', entryPath)
-      }
-    }
+    scanSessionsDirEntry(sessionsDir, entry, results, degraded)
   }
 
   logScanDegradedSummary(degraded)
   // [BU5] 轮末降级旗标：任一收录降级 = 列表可能缺条目（语义与消费面见 scanDegradedFlag；
   // 目录不存在的权威空由上方复位保持 false，顶层 readdir 失败在 catch 内置 true 提前返回）。
-  scanDegradedFlag.last = degraded.badHeader > 0 || degraded.statFail > 0 || degraded.dirFail > 0 || degraded.scanFail > 0 || degraded.noHeader > 0
+  scanDegradedFlag.last = hasScanDegradation(degraded)
 
   results.sort((a, b) => b.lastModified - a.lastModified)
   return results
