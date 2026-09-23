@@ -139,6 +139,43 @@ else
     echo "跳过同步其他 worktree (--skip-sync)"
 fi
 
+# --- 远端分支卫生（已合并进 main 的陈年远端分支自动清理） ---
+# 根因：web 端合并 / 非 PR 直推的分支无人删除，多轮发布循环后永久滞留。每次发布必经
+# 本脚本 → 残留不过夜。判定 = 纯 git 祖先关系（已合并删除零损失）；失败语义 = 辅助
+# 功能，单条失败记 warning 不阻断主流程（分级即错误处理契约）。
+echo ""
+echo "=== 远端分支卫生检查 ==="
+# 段内自 fetch：force 模式跳过了开头的合并检查段（含 fetch），此处保证视图新鲜
+git -C .bare fetch github --prune --quiet 2>/dev/null || true
+# MAIN_BRANCH 段内自持（force / --skip-sync 组合下前置段落可能未定义，set -u 防线）
+MAIN_BRANCH=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
+MAIN_BRANCH="${MAIN_BRANCH:-main}"
+# 现行 dev 集成线动态识别 = 版本号最大的 dev 分支（dev-0.11.x 出现时无需改本脚本）
+ACTIVE_DEV=$(git -C .bare for-each-ref --format='%(refname:short)' refs/remotes/github 2>/dev/null | grep -E 'github/dev-[0-9]+\.[0-9]+' | sort -V | tail -1) || ACTIVE_DEV=""
+HYGIENE_SKIP="^(github/main|github/HEAD|github$"  # github 裸引用 = HEAD symref 实体，fetch 副产物，非分支
+[[ -n "$ACTIVE_DEV" ]] && HYGIENE_SKIP="^(github/main|github/HEAD|github|${ACTIVE_DEV//./\\.})$"
+GH_BRANCHES=$(git -C .bare for-each-ref --format='%(refname:short)' refs/remotes/github 2>/dev/null | grep -vE "$HYGIENE_SKIP" | grep -v 'github/dependabot/') || GH_BRANCHES=""
+HYGIENE_DELETED=0
+HYGIENE_KEPT=0
+for _gb in $GH_BRANCHES; do
+    _branch_name="${_gb#github/}"
+    if git -C .bare merge-base --is-ancestor "$_gb" "github/$MAIN_BRANCH" 2>/dev/null; then
+        if git -C .bare push github --delete "$_branch_name" >/dev/null 2>&1; then
+            echo "  ✓ 已删除远端已合并分支: $_branch_name"
+            HYGIENE_DELETED=$((HYGIENE_DELETED + 1))
+        else
+            echo "  Warning: 远端分支 $_branch_name 删除失败（不阻断，留待下次）"
+        fi
+    else
+        _ahead=$(git -C .bare rev-list --count "github/$MAIN_BRANCH..$_gb" 2>/dev/null || echo '?')
+        echo "  ⚠ 未合并远端分支需人工裁决: $_branch_name（领先 $MAIN_BRANCH ${_ahead} commit）"
+        HYGIENE_KEPT=$((HYGIENE_KEPT + 1))
+    fi
+done
+if [[ $HYGIENE_DELETED -gt 0 || $HYGIENE_KEPT -gt 0 ]]; then
+    echo "  卫生结果: 自动删除 ${HYGIENE_DELETED} 个 / 需人工裁决 ${HYGIENE_KEPT} 个"
+fi
+
 # --- 删除目标 worktree（最后执行） ---
 echo ""
 echo "=== 清理 worktree $BRANCH_NAME ==="
