@@ -40,6 +40,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
 import type { WorkflowDomainHandle } from "../workflow-events.ts";
+import { peekStallWatchdog } from "../workflow-stall-watchdog.ts";
 
 const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
 const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
@@ -115,6 +116,7 @@ function resetSlots(): void {
   Reflect.deleteProperty(globalThis, WORKFLOW_DOMAIN_SLOT_KEY);
   Reflect.deleteProperty(globalThis, DIALOG_QUEUE_KEY);
   Reflect.deleteProperty(globalThis, NOTIFY_LEDGER_SLOT_KEY);
+  Reflect.deleteProperty(globalThis, Symbol.for("@zhushanwen/pi-subagents.workflow-stall-watchdog"));
 }
 
 /** 临时 sessionDir + 预写 journal 尾帧（ts 由调用方控制，控制「最近进展」时点）。 */
@@ -167,11 +169,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  // 清本测试建的 stall timer（fake timers 下 interval 句柄真实存在）
-  const state = Reflect.get(globalThis, WORKFLOW_DOMAIN_SLOT_KEY) as
-    | { stallTimer?: ReturnType<typeof setInterval> }
-    | undefined;
-  if (state?.stallTimer !== undefined) clearInterval(state.stallTimer);
+  // 清本测试装配的 stall watchdog timer（fake timers 下 interval 句柄真实存在）
+  peekStallWatchdog()?.dispose();
   vi.useRealTimers();
   resetSlots();
 });
@@ -189,7 +188,7 @@ describe("stall informational 通知（D6-2）", () => {
     rmSync(tmpDir, { recursive: true, maxRetries: 5, retryDelay: 20 });
 
     const runs = new Map<string, WorkflowRun>([[runId, makeRunningRun(runId)]]);
-    const { pi, handle } = await mount("sess-1", journalDir, runs);
+    const { pi } = await mount("sess-1", journalDir, runs);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
 
@@ -207,9 +206,7 @@ describe("stall informational 通知（D6-2）", () => {
     expect(details["runId"]).toBe(runId);
     expect(details["thresholdMs"]).toBe(STALL_THRESHOLD_MS);
     // 恰好一次标记已落（Set 先于发送）
-    expect(handle.state.stallNotifiedRunIds.has(runId)).toBe(true);
-
-    clearInterval(handle.state.stallTimer);
+    expect(peekStallWatchdog()?.hasNotified(runId)).toBe(true);
   });
 
   it("恰好一次：二次 tick 零重发", async () => {
@@ -217,15 +214,13 @@ describe("stall informational 通知（D6-2）", () => {
     const runId = "wf-stall-once";
     const journalDir = makeSessionDirWithJournal(runId, Date.now() - (STALL_THRESHOLD_MS + 60_000));
     const runs = new Map<string, WorkflowRun>([[runId, makeRunningRun(runId)]]);
-    const { pi, handle } = await mount("sess-2", journalDir, runs);
+    const { pi } = await mount("sess-2", journalDir, runs);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     expect(sentMessages(pi)).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     expect(sentMessages(pi)).toHaveLength(1); // 零重发
-
-    clearInterval(handle.state.stallTimer);
   });
 
   it("阈值内（journal 尾帧新鲜）零通知；journal 缺文件回退 run 起点", async () => {
@@ -234,12 +229,10 @@ describe("stall informational 通知（D6-2）", () => {
     // 无 journal 的 run：startedAt 25min 前 → 回退起点判定 stall（另一 session 条目不可行
     // ——单 run 断言面拆两用例太重，此处 fresh 断言零通知，回退路径下一条单独断言）
     const runs = new Map<string, WorkflowRun>([["wf-stall-fresh", makeRunningRun("wf-stall-fresh")]]);
-    const { pi, handle } = await mount("sess-3", freshDir, runs);
+    const { pi } = await mount("sess-3", freshDir, runs);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     expect(sentMessages(pi)).toHaveLength(0);
-
-    clearInterval(handle.state.stallTimer);
   });
 
   it("journal 缺文件 → 回退 run 起点（startedAt 超阈值仍通知，不因无帧静默）", async () => {
@@ -247,14 +240,12 @@ describe("stall informational 通知（D6-2）", () => {
     const emptyDir = mkdtempSync(join(tmpdir(), "wf-stall-empty-"));
     const startedAt = new Date(Date.now() - (STALL_THRESHOLD_MS + 10 * 60_000)).toISOString();
     const runs = new Map<string, WorkflowRun>([["wf-stall-nojournal", makeRunningRun("wf-stall-nojournal", startedAt)]]);
-    const { pi, handle } = await mount("sess-4", emptyDir, runs);
+    const { pi } = await mount("sess-4", emptyDir, runs);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     const messages = sentMessages(pi);
     expect(messages).toHaveLength(1);
     expect(messages[0]!.content).toContain("NOT be terminated");
-
-    clearInterval(handle.state.stallTimer);
   });
 
   it("非 running run（已终局）零通知", async () => {
@@ -265,11 +256,9 @@ describe("stall informational 通知（D6-2）", () => {
       state: { status: "done", reason: "completed", calls: new Map(), trace: { toArray: () => [] } },
     } as unknown as WorkflowRun;
     const runs = new Map<string, WorkflowRun>([["wf-stall-done", doneRun]]);
-    const { pi, handle } = await mount("sess-5", emptyDir, runs);
+    const { pi } = await mount("sess-5", emptyDir, runs);
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     expect(sentMessages(pi)).toHaveLength(0);
-
-    clearInterval(handle.state.stallTimer);
   });
 });
