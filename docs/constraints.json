@@ -394,7 +394,7 @@
     },
     {
       "id": "C-data-08",
-      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目投影：五态 + lane，renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
+      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目投影视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不投影；renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
       "scope": [
         "packages/renderer/src/**",
         "packages/core/src/**",

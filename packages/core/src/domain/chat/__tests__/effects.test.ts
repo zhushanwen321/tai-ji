@@ -41,9 +41,6 @@ function makeCtx(initial: Message[] = []): MessageEffectContext {
     finalizeSession: vi.fn(),
     clearPendingSend: vi.fn(),
     armStreamingTimer: vi.fn(),
-    // m2→W14：queue_update drain 接线 drainN（计数 FIFO）+ appendUser + 深度对账 reconcilePending
-    drainN: vi.fn(() => []),
-    reconcilePending: vi.fn(),
     appendUser: vi.fn(),
     // w21：entry 载体帧喂 reducer 的接入点（store.applyEntryFrame 注入）
     applyEntryFrame: vi.fn(),
@@ -331,15 +328,13 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
   // topic 快照，useChat.handleSessionDelivery 消费）。未注册 type 经 dispatchMessageEvent
   // 直接 no-op——本 describe 锁定「零消费」的退役终态。
 
-  it('RET-1: queue_update 帧零消费（drainN/appendUser/inflight/reconcilePending 全不触）', () => {
+  it('RET-1: queue_update 帧零消费（appendUser/inflight 全不触）', () => {
     const ctx = makeCtx()
 
     dispatchMessageEvent(ctx, SID, msg('message.queue_update', { steering: [] }))
 
-    expect(ctx.drainN).not.toHaveBeenCalled()
     expect(ctx.appendUser).not.toHaveBeenCalled()
     expect(ctx.incrementInflight).not.toHaveBeenCalled()
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
   })
   // [u5a 退役] 前身 RET-2「queueStates 快照不再被写入/删除」已删：快照分区本尊随 u5a 删除
   // （ctx 无该字段、store 无该分区），「无生产写方」由缺字段结构性保证，用例主体消失。
@@ -760,7 +755,7 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
 // ── [投递所有权内核 u3b] message_end(user) 投递确认收敛（原三分支 → 两分支）──
 // ① 内核送达回执（标记 id 匹配投影条目）→ ② 纯计数兜底。① 的正测在
 // effects-delivery-receipt.test.ts（含投影/morph 段/inflight 回收/幂等），此处锁定
-// ② 计数兜底与「③ includes 兜底/drainN 消费已退役」的零消费终态。
+// ② 计数兜底与「③ includes 兜底已退役」的零消费终态（[B1] 其消费面计数腿已删除）。
 
 describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①回执 + ②计数兜底）', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -783,41 +778,32 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
 
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('any') }))
 
-    expect(ctx.drainN).not.toHaveBeenCalled()
     expect(ctx.appendUser).not.toHaveBeenCalled()
     expect(ctx.decrementInflight).not.toHaveBeenCalled()
     expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
   })
 
-  it('RET: ③ includes 兜底/drainN 消费已退役——queueStates 快照内容不再驱动任何入流', () => {
+  it('RET: ③ includes 兜底已退役——无标记帧即使 inflight == 0 也不产生任何入流', () => {
     const ctx = makeCtx()
-    const segs: Segment[] = [{ type: 'text', text: 'T' }]
-    vi.mocked(ctx.drainN).mockReturnValue([segs])
     vi.mocked(ctx.getInflight).mockReturnValue(0)
 
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('T') }))
 
-    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数腿 D7；
-    // [u5a] 快照分区删除后不在 ctx 上，断言面收敛为 drainN/appendUser 零调用）
-    expect(ctx.drainN).not.toHaveBeenCalled()
+    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数腿 D7 + [B1]
+    // 计数腿删除；[u5a] 快照分区删除后不在 ctx 上），断言面收敛为 appendUser 零调用。
     expect(ctx.appendUser).not.toHaveBeenCalled()
   })
 })
 
-// ── [投递所有权内核 u3b 退役] message_start 的 G-023 条件清 + reconcilePending 僵尸清理 ──
+// ── [投递所有权内核 u3b 退役] message_start 的 G-023 条件清 + 僵尸清理 ──
 // queueStates 快照与 pendingBuffer 计数腿已随内核退役（队列区数据源 = session.delivery
 // 状态帧）；message_start 只保留 streaming assistant 建立 + clearPendingSend + armStreamingTimer。
 
 describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理腿退役，streaming 链路不变）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('RET: 不再调 reconcilePending（快照/僵尸清理腿退役）', () => {
-    const ctx = makeCtx()
-
-    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
-
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
-  })
+  // [u5a 退役] 前身 RET「不再调 reconcilePending」已删：僵尸清理腿本尊随 u5b 删除
+  // （ctx 无该字段），「无调用方」由缺字段结构性保证，用例主体消失。
 
   it('streaming assistant 照常建立（contentBlocks:[]）', () => {
     const ctx = makeCtx()
@@ -839,7 +825,6 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     // D4 修订（Gate B 实测 2026-08-30）：pi abort() 不清队列，残余在下一 prompt 投递——
     // buffer 与快照是 pi 存活队列的前端镜像，保留供两腿消费；只清确认计数（已显示未
     // 确认条目不会再有 message_end，残留会吞掉后续确认配额）。
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
     // [u5a] 前身「快照原样保留」哨兵随 queueStates 分区删除而移除
     // 通用收口照常（清理在 finalizeSession 之外显式做，不替代收口）
@@ -852,7 +837,6 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
 
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
   })
 
   it('normal（stopReason=stop）不触发清理（finalizeSession 是通用收口，normal/error 不清）', () => {
@@ -860,7 +844,6 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'stop' }))
 
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).not.toHaveBeenCalled()
   })
 
@@ -869,7 +852,6 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'error', errorMessage: 'x' }))
 
-    expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).not.toHaveBeenCalled()
   })
 })

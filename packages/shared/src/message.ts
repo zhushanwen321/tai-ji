@@ -2,10 +2,6 @@ import type { Segment } from './segments'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-/** steer / follow-up 发送模式（pushPending / drainPending / abortPending 共用）。
- *  从 Message.sendMode 的子集抽出，避免 'steer' | 'follow-up' 字面量在三处手写漂移。 */
-export type SteerFollowUpMode = 'steer' | 'follow-up'
-
 /**
  * 完成通知类 customType SSOT（conversation-renderer-model-unification §3.3.2：
  * 黑名单已删，收敛为 display 单一判别）。

@@ -2,10 +2,10 @@
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
     发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 / settling 单独）/
-    queue（↑ 时钟角标：compacting/bash/settling+compacting，点击入 defer 队列）/
+    queue（↑ 时钟角标：compacting/bash/settling+compacting，点击统一提交——排队 lane 由内核裁定）/
     spinner（isSending）。staging 模式优先（fork/handoff）。
-    steer/followUp/defer 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
-    sendRoute——turn 活跃→steer、占用→defer、idle→direct），Alt+⏎ 在 steer 路由行保留
+    steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
+    sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
     followUp 语义。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
@@ -346,7 +346,6 @@ const {
   fork,
   handoff,
   staging,
-  // [u5b] onSteer 解构退役：Enter 路由收口在分发器（onSend 内部 steer 分支），组件内无直调消费方
   onFollowUp,
   onAbort,
   onSend,
@@ -415,7 +414,7 @@ function onInputChange(text: string): void {
 const { composing } = useCompositionFlag()
 
 /** 键盘分发（composer-keydown.ts，U02 拆出）：staging 优先 ⏎ 提交（fork/handoff，含 streaming 中）；
- *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/defer；
+ *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/queued；
  *  Alt+⏎ 保留 followUp 语义：steer 路由行走 followUp 下一轮，其余经分发器）；⇧⏎ 换行，↑/↓ 翻历史。
  *  命令浮层 open 时优先路由到浮层。[HISTORICAL] isActive→onSteer 与 isCompacting→onSend 两套
  *  分散判定（优先级倒挂根因）已退役，路由判定收口在 useComposerSend（core dispatch/send）。 */

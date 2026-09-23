@@ -1157,9 +1157,11 @@ function handleAutoRetryEnd(event: PiAutoRetryEndEvent, sid: string): PiTranslat
  * 深度 = pendingMessageCount = steering.length + followUp.length（pi agent-session.ts
  * `get pendingMessageCount()` 同源公式，rpc-mode get_state 的 pendingMessageCount 字段同值）。
  * 本帧附带的深度 = pi 队列深度的**推送投影**（与 get_state 快照同公式同源、数值恒等，
- * PR #185 MF2 定口径）：renderer 对账（core registry reconcilePending）直读帧内值，
- * 不经任何 runtime 侧快照缓存——原 queue ReplicatedState 实例及 markDirty 失效接线
- * 已撤销（.get() 生产零消费，防抖重拉 get_state 属无效 RPC，登记表 #6 修订）。
+ * PR #185 MF2 定口径）：帧内值直读透传，不经任何 runtime 侧快照缓存——原 queue
+ * ReplicatedState 实例及 markDirty 失效接线已撤销（.get() 生产零消费，防抖重拉
+ * get_state 属无效 RPC，登记表 #6 修订）。[u3b 退役] 前身消费方 core registry
+ * reconcilePending 已删，core 现对 queue_update 帧零消费，队列深度显示归
+ * session.delivery 状态帧。
  */
 function handleQueueUpdate(event: PiQueueUpdateEvent, sid: string): PiTranslatedEvent[] {
   return [{

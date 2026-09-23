@@ -50,10 +50,6 @@ function makeCtx(): MessageEffectContext & { inflightOf: () => number } {
     armStreamingTimer: vi.fn(),
     takePrematureTimeoutIds: vi.fn((_sid: string) => new Set<string>() as ReadonlySet<string>),
     clearPrematureTimeoutIds: vi.fn(),
-    // [u3b 退役注记] drainN/reconcilePending 为 ctx 接口存量成员（effect-types 不在领地），
-    // 消费方（queue_update 计数腿/G-023）已退役——占位 mock 仅满足接口完整
-    drainN: vi.fn(() => [] as Segment[][]),
-    reconcilePending: vi.fn(),
     appendUser: vi.fn(),
     applyEntryFrame: vi.fn(),
     getInflight: (sid: string) => inflight.get(sid) ?? 0,

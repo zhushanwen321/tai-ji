@@ -363,7 +363,10 @@ export function useComposerShell(params: ComposerShellParams) {
   const isBashMode = composerBash.isBashMode
 
   // ── 提交动作（core dispatch/submit）──
-  const { onSteer, onFollowUp, onAbort } = useComposerSubmit({
+  // onSteer 产物不再解构/导出（Enter 路由收口在统一分发器 onSend，renderer 零消费方）。
+  // steer / restoreSegments 保留注入：core ComposerSubmitDeps 仍声明为必填 deps（供其内部
+  // onSteer 消费），随 core 侧 onSteer 退役同批摘除——单侧摘除即 TS 必填报错。
+  const { onFollowUp, onAbort } = useComposerSubmit({
     hasInput,
     isActive,
     draft,
@@ -371,7 +374,6 @@ export function useComposerShell(params: ComposerShellParams) {
     sessionIdRef,
     clearInput,
     restoreInput,
-    // [D2] onSteer 失败恢复完整草稿（text + chips，与 send.ts routeSteer 同款）
     restoreSegments,
     steer,
     followUp,
@@ -389,7 +391,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
    *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兑底（handleHandoffSend）。
-   *  非 staging 态维持原 canSend（hasInput ∧ ¬isBusy）。 */
+   *  非 staging 态维持 canSend（hasInput ∧ ¬isSending）。 */
   const canSubmit = computed(() => {
     const active = staging.activeStaging.value
     if (active) return (hasInput.value || active.allowsEmptySend) && !isSending.value
@@ -514,7 +516,6 @@ export function useComposerShell(params: ComposerShellParams) {
     composerBash,
     isBashMode,
     // submit
-    onSteer,
     onFollowUp,
     onAbort,
     // send

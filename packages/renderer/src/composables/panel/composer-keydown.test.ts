@@ -10,7 +10,7 @@
  *   bare-arrow：裸 ↑/↓ → preventDefault + moveCaretVertical；moved 不翻历史；
  *   at-edge ↑/↓ 翻历史；修饰键 + ↑/↓ 放行原生。
  *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ steer 路由行 → onFollowUp；
- *   Alt+⏎ defer/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收口在
+ *   Alt+⏎ queued/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收口在
  *   core dispatch/send，keydown 层不分流）；⇧⏎ 放行换行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -206,8 +206,8 @@ describe('useComposerKeydown', () => {
       expect(onSend).not.toHaveBeenCalled()
     })
 
-    it('Alt+Enter + defer 路由行 → onSend（占用期经统一分发器入队待重放）', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'defer' })
+    it('Alt+Enter + queued 路由行 → onSend（统一分发器提交；queued 行不保留 followUp 语义，排队 lane 由内核裁定）', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ route: 'queued' })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter', { alt: true })
 

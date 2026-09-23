@@ -505,15 +505,11 @@ describe('createChatStore factory', () => {
     // 此处保留退役锁断言（防无设计依据地复活该驱动链）。
     it('[u3b/D7 退役锁] queue_update 帧不再驱动 ref 气泡（队列区数据源 = session.delivery 状态帧单一源）', () => {
       const sid = 's-w2-steer-retired'
-      const segs: Segment[] = [{ type: 'skill', name: 'deploy' }, { type: 'text', text: ' --prod' }]
-      sut.store.pushPending(sid, segs, 'steer')
       // pi 入队帧 + drain 帧（前身腿 1 的投递证据链，逐字节保留原形态）：退役后两帧都不再
-      // 产生 ref 气泡、也不再消费 pendingBuffer
+      // 产生 ref 气泡（[B1] 其消费面 pendingBuffer 计数腿已整体删除，无暂存可消费）
       sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: ['skill deploy 展开后全文'], pendingMessageCount: 1 } } as ServerMessage)
       sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: [], pendingMessageCount: 0 } } as ServerMessage)
       expect(sut.store.getMessages(sid)).toHaveLength(0)
-      // pendingBuffer 是 store 存量分区（退役归 u5）：帧不再 drainN 消费它
-      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(1)
     })
   })
 
@@ -567,73 +563,9 @@ describe('createChatStore factory', () => {
     })
   })
 
-  describe('pendingBuffer 数据层（m1：pushPending / drainN 计数 FIFO / abortPending）', () => {
-    it('TC1: pushPending 暂存到 buffer 不碰 messages', () => {
-      const sid = 's1'
-      sut.store.pushPending(sid, textToSegments('steer msg'), 'steer')
-      // buffer[sid] 含 1 项，记录 text + sendMode
-      const buf = sut.store.pendingBuffer.value.get(sid)
-      expect(buf).toHaveLength(1)
-      expect(buf![0].text).toBe('steer msg')
-      expect(buf![0].sendMode).toBe('steer')
-      // messages[sid] 不变（pending 不进对话流——m1 核心目标）
-      expect(sut.store.getMessages(sid)).toHaveLength(0)
-    })
-
-    it('TC2: drainN 计数 FIFO（同 text 多次暂存，取 n 条按入队顺序，超出取尽即止）', () => {
-      const sid = 's1'
-      const seg = textToSegments('dup')
-      sut.store.pushPending(sid, seg, 'steer')
-      sut.store.pushPending(sid, seg, 'steer')
-
-      const r1 = sut.store.drainN(sid, 'steer', 1)
-      const r2 = sut.store.drainN(sid, 'steer', 5) // n 超过存量 → 取尽即止（扩展注入例外收敛路径）
-      const r3 = sut.store.drainN(sid, 'steer', 1)
-
-      expect(r1).toHaveLength(1)
-      expect(r2).toHaveLength(1)
-      expect(r3).toHaveLength(0)
-      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(0)
-    })
-
-    it('TC2b: drainN sendMode 隔离（steer 计数不动 follow-up 项）', () => {
-      const sid = 's1'
-      sut.store.pushPending(sid, textToSegments('steer one'), 'steer')
-      sut.store.pushPending(sid, textToSegments('follow one'), 'follow-up')
-
-      const r = sut.store.drainN(sid, 'steer', 5)
-
-      expect(r).toHaveLength(1)
-      expect(sut.store.drainN(sid, 'follow-up', 1)).toHaveLength(1)
-      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(0)
-    })
-
-    it('TC3: abortPending 移除匹配项 + 不碰 messages', () => {
-      const sid = 's1'
-      sut.store.pushPending(sid, textToSegments('abort me'), 'steer')
-      expect(sut.store.getMessages(sid)).toHaveLength(0)
-
-      sut.store.abortPending(sid, 'abort me', 'steer')
-
-      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(0)
-      expect(sut.store.getMessages(sid)).toHaveLength(0)
-    })
-
-    it('TC3b: abortPending 保留文本匹配（W14 D6 差异：回滚有准确原文，sendMode 必填隔离）', () => {
-      const sid = 's1'
-      sut.store.pushPending(sid, textToSegments('rollback target'), 'steer')
-      sut.store.pushPending(sid, textToSegments('other'), 'steer')
-
-      // sendMode 不匹配（follow-up）→ no-op
-      sut.store.abortPending(sid, 'rollback target', 'follow-up')
-      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(2)
-
-      sut.store.abortPending(sid, 'rollback target', 'steer')
-      const buf = sut.store.pendingBuffer.value.get(sid) ?? []
-      expect(buf).toHaveLength(1)
-      expect(buf[0].text).toBe('other')
-    })
-  })
+  // [B1 退役] 前身 `pendingBuffer 数据层` describe（TC1/TC2/TC2b/TC3/TC3b 五例：pushPending
+  // 暂存 / drainN 计数 FIFO / abortPending 文本匹配）已随计数腿整体删除（设计 §3.1 删除面）——
+  // 分区与四个方法不再是 store 面 API，无方法可测。
 
   // ── [steer-bubble u0/D2] inflight 投递确认计数契约层：state + 增/减/清零 action 面。
   //    本组只锁 store 层语义；调用方接线（腿 1 消费 +m / send 乐观 ±1 / message_end 确认
@@ -947,14 +879,9 @@ describe('createChatStore factory', () => {
       expect(sut.store.getRetryState(sid)).toBeUndefined()
     })
 
-    it('TC5: 清 pendingBuffer（与 queueStates 对称）', () => {
-      const sid = 's1'
-      sut.store.pushPending(sid, textToSegments('steer'), 'steer')
-      expect(sut.store.pendingBuffer.value.get(sid)).toHaveLength(1)
-
-      sut.store.disposeSession(sid)
-      expect(sut.store.pendingBuffer.value.get(sid)).toBeUndefined()
-    })
+    // [B1 退役] 前身 TC5「清 pendingBuffer（与 queueStates 对称）」已随分区删除。同点语义
+    // （disposeSession 清不可重建的 per-session 记账）由上方 inflight 组「disposeSession 后
+    // 计数清空（D4：确认基线随分区销毁作废）」承接，不留空档。
   })
 
   // [u3b/D7 裁决 → u5a 结清] 前身用例「清指定 session 的 queueStates 快照，其他 session 不受

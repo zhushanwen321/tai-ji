@@ -30,7 +30,7 @@ export type {
   MessageRole, MessageStatus, ToolCallStatus,
   ToolCall, ThinkingBlock, ContentBlockType, ContentBlock, Usage, Message,
   FileChangeStatus, FileChange, ChangeSetStatus, ReviewDecision,
-  CompactionSummary, BranchSummary, SteerFollowUpMode,
+  CompactionSummary, BranchSummary,
   BgNotifyRecord, BgNotifyDetails,
   SubagentDirectiveData,
   PiRespawnNoticeVariant,

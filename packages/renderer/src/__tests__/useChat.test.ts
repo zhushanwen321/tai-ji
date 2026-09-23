@@ -231,9 +231,9 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-pending', textToSegments('first'))
     await steer('s-pending', textToSegments('steer 内容'))
     await followUp('s-pending', textToSegments('followup 内容'))
-    // 三条各自经统一提交（内核判 lane）；每条都有乐观气泡入流（不再暂存 pendingBuffer 等投递）
+    // 三条各自经统一提交（内核判 lane）；每条都有乐观气泡入流。[B1 退役] 前身「pendingBuffer
+    // 不暂存」哨兵已删：分区本尊随计数腿删除，无暂存由缺字段结构性保证。
     expect(apiMock.submitDelivery).toHaveBeenCalledTimes(3)
-    expect(chat.pendingBuffer.get('s-pending') ?? []).toHaveLength(0)
     const users = chat.getMessages('s-pending').filter((m) => m.role === 'user')
     expect(users).toHaveLength(3)
   })

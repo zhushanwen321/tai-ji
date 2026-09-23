@@ -26,12 +26,13 @@ type CompactOpts = {
 	onError: (e: Error) => void;
 };
 
-function makePi(): { pi: ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn> }; tools: RegisteredTool[] } {
+function makePi(): { pi: ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn>; sendUserMessage: ReturnType<typeof vi.fn> }; tools: RegisteredTool[] } {
 	const tools: RegisteredTool[] = [];
 	const pi = {
 		registerTool: (t: RegisteredTool) => tools.push(t),
 		sendMessage: vi.fn(),
-	} as unknown as ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn> };
+		sendUserMessage: vi.fn(),
+	} as unknown as ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn>; sendUserMessage: ReturnType<typeof vi.fn> };
 	return { pi, tools };
 }
 
@@ -110,8 +111,8 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(text).toContain("500K");
 		expect(text).toContain("24K");
 		expect(text).toContain("compacted multiple times");
-		// 旧车道（自起 run 的 user 消息）已退役：不再调用 sendUserMessage
-		expect((pi as { sendUserMessage?: unknown }).sendUserMessage).toBeUndefined();
+		// 旧车道（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
+		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
 
 	it("onComplete 无 engine 标记 → 注入消息含回退说明与修复指引（D7）", async () => {

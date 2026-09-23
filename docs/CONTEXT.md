@@ -154,7 +154,7 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 **lane（投递车道）**：一条消息交给 pi 的方式，三档——`direct`（pi 空闲，直接 prompt 起新 run）/ `steer`（pi 有活跃 run，入 steeringQueue 等 turn 边界注入）/ `queued`（pi 暂不可收，内核 FIFO 持有等时机）。lane 判定单一源 = runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态；renderer 的 `resolveSendRoute` 降级为发送位按钮形态（send/stop/queue）的 UI 预测，真实车道以 `session.delivery` 帧的 lane 字段为准。
 
-**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。五态经内核投影视图进 `session.delivery` 帧，是队列区行形态的唯一来源。
+**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。进入 `session.delivery` 帧的是**投影视图**而非五态全量：活跃态（queued / in-flight / failed）全量 + delivered 最近 50 条完整条目，**cancelled 不投影**（撤销即从队列区消失，全文经 `delivery.cancel` reply 回草稿）——该帧是队列区行形态的唯一来源。
 
 **两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`，由对账器盯。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
 

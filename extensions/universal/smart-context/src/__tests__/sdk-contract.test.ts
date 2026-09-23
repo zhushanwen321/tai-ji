@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 /**
  * SDK 契约测试（规范：凡调用 pi.on / pi.registerTool / 读 ctx.* 的代码必须有契约测试覆盖）。
  * 兜底 compact-handler.ts / llm.ts 中跨 SDK 泛型边界的 `as never` 断言——
- * 断言的运行时形状在这里实测（node_modules 实装 @earendil-works/pi-coding-agent@0.84.1）。
+ * 断言的运行时形状在这里实测（node_modules 实装 @earendil-works/pi-coding-agent@0.84.4）。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

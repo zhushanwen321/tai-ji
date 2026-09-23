@@ -230,8 +230,10 @@
       "id": "E2E-EQUIV-05",
       "summary": "压缩窗口投递 e2e（投递所有权内核 V1 自动化形态：真 pi + faux LLM，压缩中提交两条 → 压缩窗口零投递 → 压缩结束按序逐条到达 + 标记确认 + delivered）",
       "scope": [
+        "packages/runtime/src/index.ts",
         "packages/runtime/src/services/session/**",
         "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+        "packages/session-delivery/src/**",
         "extensions/universal/smart-context/**"
       ],
       "layer": "L2.5",

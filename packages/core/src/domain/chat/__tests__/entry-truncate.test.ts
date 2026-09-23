@@ -178,8 +178,6 @@ describe('live overlay（registry tool_call_end）与 reducer 同函数一致性
       finalizeSession: vi.fn(),
       clearPendingSend: vi.fn(),
       armStreamingTimer: vi.fn(),
-      drainN: vi.fn(() => []),
-      reconcilePending: vi.fn(),
       appendUser: vi.fn(),
       applyEntryFrame: vi.fn(),
       getInflight: vi.fn(() => 0),

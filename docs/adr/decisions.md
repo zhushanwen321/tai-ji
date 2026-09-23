@@ -27,7 +27,7 @@ taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表
 2. **两阶段回执**：受理（prompt 受理 / 文本进入 pi 槽位）与送达（`message_end(user)` 命中消息标记 = 已进 transcript）显式分离，只有拿到送达回执的条目转终态，停留受理的由对账器接管。`sendChecked` 的同步 settle 时点维持**受理口径**（agent 间 send 的 `{queued:true}` 契约锚定受理时点，不因送达而阻塞工具调用），记账回调 `onSettled` 为送达口径。
 3. **对账器**：五触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog）在「空闲 + pi 槽位非空」时 `clear_queue` 全收，按消息标记三分处置——reclaim（内核在途条目回队首重投）/ rebuild（带标记但内核无记录，先按标记对 transcript 全量扫描判已送达再决定重建或仅记账）/ adopt（无标记外来文本收养入队）。撤销（`delivery.cancel`）与投递中收回复用同一路径（pi 只有队列级原语，不新造条目级原语）。
 4. **消息身份**：出站文本尾附裸标记 `<!--taiji:msg:<uuid>-->`（与 msg-id-mapper 的 `u-` 前缀标记空间互斥、正交共存），随文本进 transcript 成为逐消息精确身份；判重按 id 匹配（禁计数 FIFO / 文本匹配）；终态 tombstone 在 runtime 存活期内全量保留供 `delivery.resync` 去重，不跨 runtime 重启——reattach 场景判重锚回落 transcript 全量标记扫描。
-5. **UI 单一数据源**：队列区状态帧 = `session.delivery`（内核条目投影：五态 queued/in-flight/delivered/failed/cancelled + lane），`queue_update` 帧降级为内核内部回执；pi 的 steer/followUp/clear_queue/get_state/get_entries/nextTurn 契约原语全部保留复用，零绕过、零重造。
+5. **UI 单一数据源**：队列区状态帧 = `session.delivery`（内核条目**投影视图**：活跃态全量 + delivered 最近 50 条完整条目 + lane；cancelled 不投影），`queue_update` 帧降级为内核内部回执；pi 的 steer/followUp/clear_queue/get_state/get_entries/nextTurn 契约原语全部保留复用，零绕过、零重造。
 
 **后果**：消息「按序必达」由结构保证——任一窗口的判定误判从致命降级为一次对账回收，新发送方接入即继承（无需各自发明时序防御）。已接受代价：出站消息文本携带 ~40 字符裸标记进 LLM 上下文与 session 文件（展示层剥离 SSOT = `apply-entry-convert.ts`，live/reload 同点）；判重表不跨 runtime 重启（reattach 走一次 O(transcript) 标记扫描）；删除 session = 显式废弃未送达条目（与既有语义等价）；消息内核 outbox 不落盘——应用整体退出/崩溃时未送达消息需用户重发（不劣于既有 renderer 内存队列形态）。权威域注记见 [pi-boundary-reliability.md 附录 E](../architecture/pi-boundary-reliability.md)。登记 C-data-08、C-data-25。
 
