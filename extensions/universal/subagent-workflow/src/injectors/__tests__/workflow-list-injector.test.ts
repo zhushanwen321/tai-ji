@@ -2,8 +2,9 @@
 //
 // 两类覆盖（与 subagent-list-injector.test.ts 对称）：
 // 1. 纯函数：summarizeDescription（截断）+ parseWorkflowMeta（meta 块解析）+
-//    formatWorkflowList（B2 注入段格式 + 引导语）。discoverAllWorkflows 依赖文件系统
-//    + resource-discovery，属集成层，此处聚焦可快速回归的格式化契约（TC5 回归保护）。
+//    formatWorkflowList（B2 注入段格式 + 引导语）。发现路径依赖文件系统
+//    + resource-discovery，属集成层（顺序契约经 injector handler 驱动），此处聚焦
+//    可快速回归的格式化契约（TC5 回归保护）。
 // 2. session 级缓存行为（TC1-TC4）：与 subagent 对称，mock shared/resource-discovery
 //    的 discoverResources + getCachedFileContent，mock pi.on 捕获三 handler 手动触发；
 //    模块级缓存靠 vi.resetModules + 动态 import 重置。
@@ -292,10 +293,29 @@ describe("workflow-list-injector session 级缓存", () => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// KV-cache 顺序契约：输出按 name 码点序，重建（两次发现）逐字节一致
+// KV-cache 顺序契约：注入段按 name 码点序，重建（两次发现）逐字节一致。
+// 经真实 injector 实例的 handler 驱动（工厂 discover 不再模块导出，顺序契约
+// 直接验证注入面——比裸 entries 断言更端到端）。
 // ──────────────────────────────────────────────────────────────
 
-describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
+/** 从注入段提取 <name> 条目出现序（码点序断言用）。 */
+function injectedNames(prompt?: string): string[] {
+	return [...(prompt ?? "").matchAll(/<name>(.*?)<\/name>/g)].map((m) => m[1]);
+}
+
+describe("workflow 注入段顺序契约（KV-cache）", () => {
+	let handlers: CapturedHandlers;
+
+	beforeEach(async () => {
+		// resetModules + 动态 import：拿 fresh 工厂实例（闭包缓存重置），setup 后经 handler 驱动
+		vi.resetModules();
+		spies.discoverResources.mockReset();
+		spies.getCachedFileContent.mockReset();
+		handlers = {};
+		const mod = await import("../workflow-list-injector");
+		mod.setupWorkflowListInjector(createMockPi(handlers));
+	});
+
 	it("输出按 name 码点序排序，与发现层返回顺序（readdir 枚举序）无关", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.pi/workflows/zeta.js": workflowJs("zeta", "z"),
@@ -309,14 +329,14 @@ describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
 		]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllWorkflows } = await import("../workflow-list-injector");
-		const result = await discoverAllWorkflows("/ws");
-		// P5 D4-3：discover 返回 { entries, invalids }——无损坏文件时 invalids 恒空
-		expect(result.invalids).toEqual([]);
-		expect(result.entries.map((w) => w.name)).toEqual(["alpha", "chain", "zeta"]);
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+		// P5 D4-3：无损坏文件时 invalids 恒空——条目段无 invalid 行
+		expect(r?.systemPrompt).not.toContain("<invalid>");
+		expect(injectedNames(r?.systemPrompt)).toEqual(["alpha", "chain", "zeta"]);
 	});
 
-	it("重建（两次发现顺序不同）输出与渲染结果逐字节一致", async () => {
+	it("重建（两次发现顺序不同）注入段逐字节一致", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.pi/workflows/b.js": workflowJs("beta", "b"),
 			"/ws/.pi/workflows/a.js": workflowJs("alpha", "a"),
@@ -332,13 +352,16 @@ describe("discoverAllWorkflows 顺序契约（KV-cache）", () => {
 			]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllWorkflows } = await import("../workflow-list-injector");
-		const first = await discoverAllWorkflows("/ws");
-		const second = await discoverAllWorkflows("/ws");
-		expect(second).toEqual(first);
-		expect(formatWorkflowList(second.entries, { guide: WORKFLOW_LIST_GUIDE })).toBe(
-			formatWorkflowList(first.entries, { guide: WORKFLOW_LIST_GUIDE }),
-		);
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const first = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 重建：shutdown 清缓存 → reload 重新发现（第二次发现顺序漂移）→ 渲染
+		handlers.sessionShutdown!({ type: "session_shutdown", reason: "quit" }, createMockCtx());
+		await handlers.sessionStart!({ type: "session_start", reason: "reload" }, createMockCtx());
+		const second = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 注入段（渲染产物）逐字节一致——强于原 entries 全等 + 渲染等价双断言
+		expect(second?.systemPrompt).toBe(first?.systemPrompt);
 	});
 });
 

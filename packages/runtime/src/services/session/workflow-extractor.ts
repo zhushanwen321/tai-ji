@@ -26,6 +26,14 @@
 
 import { readFileSync } from 'node:fs'
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+// RunSnapshot 格式版本（D-5 版本守卫判据）单源 import 自 subagent-core barrel（权威定义
+// orchestration/run-snapshot.ts；extension 侧 jsonl-run-store.ts 留壳消费同一常量）——
+// 无本地字面量副本，runtime 与 extension 的快照格式版本对齐由 workspace 依赖承载。
+// [P3/D6] additive 字段策略：同版本内新增的可选字段（calls[] 条目的 startedAt/
+// lastProgressAt、state.health/outcome/errorCode）读侧无需同步——格式重构（字段改形/
+// 删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段逐项 `??` 缺省，历史
+// run 投影保留）。字段集演进时对照权威源的 projectRunEvents 注释核对（fold 填充面）。
+import { SNAPSHOT_VERSION } from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { isEnoent } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
@@ -38,24 +46,6 @@ import type {
 
 /** [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。 */
 const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled'] as const
-
-/**
- * RunSnapshot 格式版本。版本不匹配跳过（D-5）。
- *
- * 注意：这是 SNAPSHOT_VERSION 的本地副本——跨包依赖方向不允许 runtime import
- * 其他包源码，只能复制字面量。权威源（[u1-move] 随 core 切面迁入 subagent-core）：
- * packages/subagent-core/src/orchestration/run-snapshot.ts 的 SNAPSHOT_VERSION
- * （export const，当前 'wf-run-v2'；extension 侧 jsonl-run-store.ts 留壳 import 消费）。
- * extension 升级格式时必须同步 bump 此处，否则版本守卫会把新快照全部判为不匹配跳过
- * （renderer 侧新 run 无 record，托盘 workflow 面板为空）。
- *
- * [P3/D6] additive 字段策略：本副本对「同版本内新增的可选字段」（calls[] 条目的
- * startedAt/lastProgressAt、state.health/outcome/errorCode）**无需同步**——格式
- * 重构（字段改形/删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段
- * 逐项 `??` 缺省，历史 run 投影保留）。字段集演进时对照权威源的 projectRunEvents
- * 注释核对（fold 填充面）。
- */
-const SNAPSHOT_VERSION = 'wf-run-v2'
 
 /** workflow-state-link entry 的 data 结构（legacy） */
 interface WorkflowStateLinkData {
@@ -359,9 +349,8 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
     console.warn(
       `[workflow-extractor] snapshot version '${String(snapshot.v)}' unsupported (expected '${SNAPSHOT_VERSION}') — ` +
         `extension/runtime version skew, skip run ${runId} (${stateFilePath || 'workflow-record entry'}). ` +
-        `Fix: bump SNAPSHOT_VERSION in workflow-extractor.ts to match ` +
-        `packages/subagent-core/src/orchestration/run-snapshot.ts (consumed via ` +
-        `extensions/universal/subagent-workflow/src/jsonl-run-store.ts; see header comment).`,
+        `Fix: align the app runtime with the bundled @zhushanwen/pi-subagent-workflow extension ` +
+        `(SNAPSHOT_VERSION single source: packages/subagent-core/src/orchestration/run-snapshot.ts).`,
     )
     return null
   }

@@ -46,6 +46,7 @@ import {
   argKeysFromMeta,
   findFlattenedArgKeys,
   MAX_TIMER_DELAY_MS,
+  workflowNotFoundMessage,
 } from "@zhushanwen/subagent-core";
 import { assertEntryTimeBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
@@ -62,7 +63,6 @@ import { formatRunStatusElapsed } from "./format.ts";
 import {
   assertNotAborted,
   buildRunSpecFromScript,
-  formatAvailableWorkflowList,
   optionSlugSuffix,
   renderTextResult,
 } from "./tool-shared.ts";
@@ -320,7 +320,7 @@ export function registerWorkflowTool(
             result = actionStatus(deps);
             break;
           case "abort":
-            result = await actionLifecycle("abort", params, deps);
+            result = await actionAbort(params, deps);
             break;
           default: {
             // Exhaustiveness check — 新增 WorkflowAction 成员时未补 case，tsc 在此报错。
@@ -387,19 +387,16 @@ export async function actionRun(
   const script = await deps.registry.getPath(name);
   // W4c：config-loader 的 toCachedMeta 对不可读/不存在文件返回 available:false 的
   // stub（非 undefined），仅判 !script 会绕过 not_found → 空 sourceCode 假启动
-  //（W4b verifier 探针实测复现）。与下方 suggestions 分支的 wf.available 过滤口径对齐。
+  //（W4b verifier 探针实测复现）。
   if (!script || !script.available) {
- // 模糊匹配建议。throw（W4）：pi 只对 execute throw 置 isError:true，
- // 返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
-    const all = await deps.registry.loadAll();
-    const suggestions = formatAvailableWorkflowList(all);
-    // [全路径自救指引] 摘要逐条附绝对路径 location：run 的 name 形参最贴近的
+    // throw（W4）：pi 只对 execute throw 置 isError:true，返回值里的 isError 被
+    // agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
+    // [全路径自救指引] 清单逐条附绝对路径 location：run 的 name 形参最贴近的
     // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
     // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
-    // （D4-1），location 是唯一活路；同案文案见 launcher 嵌套调用拒单（core）。
-    throw new Error(
-      `Workflow '${name}' not found. Available (name — use the absolute location path as 'name' when the bare name is rejected):\n${suggestions || "  (none)"}`,
-    );
+    // （D4-1），location 是唯一活路；文案单源 = core launcher.workflowNotFoundMessage
+    //（与 runAndWait / executeNestedWorkflow 内层入口拒单同源）。
+    throw new Error(await workflowNotFoundMessage(name, deps));
   }
 
   // m6：动态参数集（schema 即 SSOT）→ 平铺检测；无 parameters → 单次 warn + 跳过
@@ -509,18 +506,16 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
   };
 }
 
-// ── abort lifecycle action ────────────────────────────────────
+// ── abort action ─────────────────────────────────────────────
 
-// 一次性生命周期：abort 是唯一的提前停止方式（pause/resume 已随 D-2 移除），
-// action 参数保留字面量类型与 WorkflowAction 单成员分发对齐。
-async function actionLifecycle(
-  action: "abort",
+// 一次性生命周期：abort 是唯一的提前停止方式（pause/resume 已随 D-2 移除）。
+async function actionAbort(
   params: WorkflowToolParams,
   deps: LauncherDeps,
 ): Promise<WorkflowExecuteResult> {
   const runId = params.runId;
   if (!runId) {
-    throw new Error(`'runId' is required for ${action}. Correct: {"action":"${action}","runId":"<id>"} (use action:"status" to find runId)`);
+    throw new Error(`'runId' is required for abort. Correct: {"action":"abort","runId":"<id>"} (use action:"status" to find runId)`);
   }
   const run = deps.runs.get(runId);
   if (!run) {
@@ -540,7 +535,7 @@ async function actionLifecycle(
           text: `Workflow '${run.spec.scriptName}' (${runId}): ${oldStatus} → ${newStatus}${reasonSuffix}`,
         },
       ],
-      details: { action, runId, status: newStatus, reason: run.state.reason },
+      details: { action: "abort", runId, status: newStatus, reason: run.state.reason },
     };
   } catch (err) {
     // throw（W4b）：abortRun 失败改 throw（原 return isError 被 pi 丢弃），"Error: " 前缀保持

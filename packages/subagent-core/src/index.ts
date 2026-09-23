@@ -200,9 +200,7 @@ export type {
 } from "./execution/assembly/types.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
-// calls），interface 渲染层唯一消费入口。projectLiveProgress 已随 2026-09-13
-// barrel 收窄出公共面（仅测试深路径消费，live 进度新投影面 = SubagentRecord
-// 投影族）。
+// calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
 export {
   computeElapsedSeconds,
   deriveOutcome,
@@ -248,12 +246,8 @@ export {
 // 消费 core 符号，不进 barrel 无法接线，H4 formatEmptyResourceList 同构先例）。
 export {
   assertModelInCatalog,
-  resolveModelInCatalog,
   type ModelCatalogEntry,
-  type ModelCatalogMiss,
-  type ModelCatalogMissClassification,
   type ModelCatalogOptions,
-  type ModelCatalogResolution,
   type ModelCatalogSource,
 } from "./orchestration/model-catalog.ts";
 
@@ -411,9 +405,13 @@ export { recoverCrashedRuns } from "./orchestration/lifecycle.ts";
 
 // launcher 层：runAndWait / executeNestedWorkflow（workflow 域嵌套编排入口）
 // + deps / 结果类型。
+// formatAvailableWorkflowRefs / workflowNotFoundMessage：not found 拒单清单与
+// 文案单点（extension 顶层 workflow tool 同案消费，副本已删）。
 export {
   runAndWait,
   executeNestedWorkflow,
+  formatAvailableWorkflowRefs,
+  workflowNotFoundMessage,
   type LauncherDeps,
   type WorkflowRunResult,
 } from "./orchestration/launcher.ts";
@@ -510,8 +508,6 @@ export type {
 // LifecycleDeps.store 用；pi 壳继续用 session 锚定的 JsonlRunStore。
 // DEFAULT_* 两常量：壳 jsonl-run-store.ts 生产消费（D3 判定进 barrel），
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
-// pruneStateFilesBeyondCap：cap-only 通用裁剪原语（S4-A7；[Q2] 注记——生产链已切
-// pruneTerminalRunFiles，本函数保留为 FileRunStore 公共方法面与通用原语）。
 // pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
 // manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
 // DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
@@ -522,21 +518,16 @@ export {
   DEFAULT_STATE_TTL_MS,
   STATE_TTL_MS_ENV,
   FileRunStore,
-  pruneStateFilesBeyondCap,
   pruneTerminalRunFiles,
   resolveStateTtlMs,
   type PruneTerminalRunFilesOptions,
   type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
 
-// run 级终局投影 manifest（[P1b-2 / D5]）：壳 jsonl-run-store 的保留清理资格判定
-// 消费（「已终局」单源锚定 = outcome 非空）——生产源码只从 barrel 消费 core 符号
-//（全仓零深路径 import 先例），不进 barrel 无法接线。
-export {
-  readRunTerminalManifest,
-  writeRunTerminalManifest,
-  type RunTerminalManifest,
-} from "./execution/persistence/manifest-store.ts";
+// run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
+// 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
+// worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格
+// 判定），壳零消费——按 D3 判定标准不进 barrel。
 
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
@@ -559,22 +550,13 @@ export {
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 
-// [Q2/D9-1] run 注册表（D5 状态机投影面）：journal fold 投影（活跃/终局/
-// interrupted——mtime 启发式退役后的结构判据）+ interrupted 放弃窗终局化
-// （D5 清理规则③：abandon 写 manifest 后 journal 获清理资格）。pi 宿主
-// jsonl-run-store 的 retention 维护轮生产消费（H4 偏差先例同构：extensions 生产
-// 源码只从 barrel 消费 core 符号，不进 barrel 无法接线）。
-export {
-  abandonElapsedInterruptedRuns,
-  projectRunRegistryEvents,
-  projectRunRegistryState,
-  resolveRunAbandonWindowMs,
-  DEFAULT_RUN_ABANDON_WINDOW_MS,
-  RUN_ABANDON_WINDOW_MS_ENV,
-  type RunRegistryPhase,
-  type RunRegistryProjection,
-  type RunProjectionOptions,
-} from "./orchestration/run-registry.ts";
+// [Q2/D9-1] run 注册表（D5 状态机投影面）：interrupted 放弃窗终局化（D5 清理
+// 规则③：abandon 写 manifest 后 journal 获清理资格）——pi 宿主 jsonl-run-store
+// 的 retention 维护轮生产消费（H4 偏差先例同构：extensions 生产源码只从 barrel
+// 消费 core 符号，不进 barrel 无法接线）。journal fold 投影函数族
+//（projectRunRegistryEvents / projectRunRegistryState / abandon 窗 env 通道与
+// 投影类型）消费全在 core 内部，壳零消费——按 D3 判定标准不进 barrel。
+export { abandonElapsedInterruptedRuns } from "./orchestration/run-registry.ts";
 
 // run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
 // 投影（runSummary 双投影分叉收口）。
@@ -612,8 +594,8 @@ export {
 } from "./shared/entry-guards.ts";
 // 资源发现面（W2③）：discoverResources——agent .md / workflow .js 的多源统一发现
 // （ADR-031）——多源扫描 + stem last-writer-wins 合并 + realpath 去重。宿主（zsw
-// 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键，
-// 含 project-host 项目级槽）；深路径消费在 npm/vendored 发布形态不可达（exports 无
+// 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键）；
+// 深路径消费在 npm/vendored 发布形态不可达（exports 无
 // 深路径通配），故出 barrel。发现链辅助（C5b）：findWorkspaceRoot（project 源根
 // 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——getCachedFileContent
 // 生产消费在 core 内部 3 处（agents-assembly / config-loader / workflow-script-registry-impl）；
@@ -673,8 +655,8 @@ export type {
   ModelEntry,
   WorkflowEntry,
 } from "./shared/injection-render.ts";
-// [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions /
-// ModelReasoningInfo 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
+// [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions
+// 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
 // InvalidResource 随 P5 D4-3 入公共面（workflow-list-injector 经 barrel 消费——
 // extensions 源文件只从 barrel 消费 core 符号，H4 formatEmptyResourceList 同款先例）。
 

@@ -301,6 +301,7 @@ function scheduleOrphanReapChain(deps: StartupBackgroundDeps): void {
       dataDir: getDataDir(),
       ownPid: process.pid,
       readSpawnMarkers: deps.readSpawnMarkers,
+      trigger: 'startup-sweep',
     })
       .catch((e) => {
         console.warn('[runtime] orphan pi reap failed unexpectedly:', e)

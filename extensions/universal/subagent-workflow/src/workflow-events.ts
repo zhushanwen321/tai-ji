@@ -532,16 +532,10 @@ export function setupWorkflowDomain(
   // ════════════════════════════════════════════════════════════
   //  model_select：用户切换 model 时刷新缓存
   // ════════════════════════════════════════════════════════════
-  pi.on("model_select", (event, ctx: ExtensionContext) => {
+  pi.on("model_select", (event) => {
     const service = getModelConfigService();
     if (service && typeof service.setCtxModel === "function") {
       service.setCtxModel(event.model);
-    }
-    // H1: 同步刷新所有 session 的 SAR ctxModel（旧实现只在 session_start 固化）
-    const sid = ctx.sessionManager.getSessionId();
-    const state = sessionState.get(sid);
-    if (state) {
-      state.runner.updateCtxModel(event.model);
     }
   });
 

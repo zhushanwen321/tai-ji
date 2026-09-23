@@ -72,8 +72,5 @@ const injector = createResourceListInjector<WorkflowEntry>({
 	includeTmp: true,
 });
 
-/** 用统一资源发现发现所有可用 workflow（includeTmp 覆盖 generate 产物；骨架与排序契约见工厂）。 */
-export const discoverAllWorkflows = injector.discover;
-
 /** 注册 session 生命周期 handler，注入 `<available_workflows>` 段（与 subagent 注入 handler 链式）。 */
 export const setupWorkflowListInjector = injector.setup;

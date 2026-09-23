@@ -160,11 +160,19 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
     host = new FakeHost(dataDir);
     await initialize(host, dataDir);
 
-    // ① 首轮 run chat（无 resume）：反向帧链（recordId 锚定）→ run 应答
+    // ① 首轮 run chat（无 resume）：反向帧链（recordId 锚定）→ run 应答。
+    // sessionDir = 宿主真实形态必传字段（remote-engine 恒传，缺失 fail-fast
+    // engine_not_found）——取测试 tmp 目录子路径（fake recursive mkdir 兜底，
+    // 不碰真实目录），首轮与 resume 轮同传。
     const runP = host.request("run", {
       runId: "run-chat-1",
       task: { prompt: "hello", description: "chat-e2e" },
-      ctx: { cwd: dataDir, model: "fake-provider/fake-model", streamMode: "stream" },
+      ctx: {
+        cwd: dataDir,
+        sessionDir: path.join(dataDir, "subagent-sessions"),
+        model: "fake-provider/fake-model",
+        streamMode: "stream",
+      },
       resume: { recordId: "rec-chat-1" },
     });
 
@@ -209,7 +217,7 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
     const resumeP = host.request("run", {
       runId: "run-resume-1",
       task: { prompt: "continue" },
-      ctx: { cwd: dataDir, model: "fake-provider/fake-model" },
+      ctx: { cwd: dataDir, sessionDir: path.join(dataDir, "subagent-sessions"), model: "fake-provider/fake-model" },
       resume: {
         recordId: "rec-chat-1",
         resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }},

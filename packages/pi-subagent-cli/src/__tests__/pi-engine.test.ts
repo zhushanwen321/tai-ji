@@ -146,7 +146,9 @@ function makeEngine(deps: PiEngineDeps = {}): Harness {
 }
 
 const baseTask: AgentCallOpts = { prompt: "do things" };
-const baseCtx: RunContext = { taskId: "run-e1"};
+/** 测试宿主注入的权威 sessionDir（ctx.sessionDir 缺失即 fail-fast，直构 ctx 必带）。 */
+const HOST_SESSION_DIR = "/host/agent-dir/subagents/test-proj/sessions";
+const baseCtx: RunContext = { taskId: "run-e1", sessionDir: HOST_SESSION_DIR };
 
 /** 驱动 fake executor 的标准回调序列并 resolve（askUser 可选触发）。 */
 async function settleRun(cap: Captured, result: SpawnRunResult, opts: { askUser?: boolean } = {}): Promise<void> {
@@ -305,6 +307,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
       },
       {
         taskId: "run-full",
+        sessionDir: HOST_SESSION_DIR,
         signal,
         ctxModel: { id: "m1", provider: "prov" },
         stream: { onDelta: (d) => deltas.push(d) },
@@ -330,9 +333,8 @@ describe("PiEngine.run（一次性任务形态）", () => {
       forkSource: "/tmp/fork-source.jsonl",
       sessionRootId: "root-sess-f6",
       signal,
-      // [LEGACY fallback] ctx.sessionDir 缺省 → 旧推导 <dataDir>/subagents/sessions/
-      // <encoded(cwd)>（cwd 未传 = process.cwd()）；权威 = 宿主注入（见下方优先用例）
-      sessionDir: join("/tmp/engine-data", "subagents", "sessions", process.cwd().replace(/[^a-zA-Z0-9_-]+/g, "_")),
+      // [Option C] ctx.sessionDir 宿主注入值直通（引擎不自推导）
+      sessionDir: HOST_SESSION_DIR,
     });
 
     await settleRun(
@@ -395,7 +397,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
       properties: { answer: { type: "number" } },
       required: ["answer"],
     } as Record<string, unknown>;
-    const runP = engine.run({ prompt: "structured", schema }, { taskId: "run-schema" });
+    const runP = engine.run({ prompt: "structured", schema }, { ...baseCtx, taskId: "run-schema" });
     // schema 以本体（对象引用）透传——派生 env 是 spawn-runner 的职责，引擎适配层
     // 不预序列化（PI_WORKFLOW_SCHEMA 值 = spawn 期 JSON.stringify 本体，逐字节
     // 等值断言见 run-spawn-once.integration 的真实 spawn 链用例）
@@ -418,7 +420,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
 
   it("agentName 回落链 description → agent → workflow-agent；失败结果分诊透传", async () => {
     const { engine, captured } = makeEngine();
-    const runP = engine.run({ prompt: "x" }, { taskId: "run-fb"});
+    const runP = engine.run({ prompt: "x" }, { ...baseCtx, taskId: "run-fb" });
     expect(captured[0]!.params.agentName).toBe("workflow-agent");
     // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义，one-shot 形态）
     expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
@@ -436,23 +438,34 @@ describe("PiEngine.run（一次性任务形态）", () => {
     expect(outcome.usage).toBeUndefined();
 
     // agent 字段兜底（description 缺失）
-    const runP2 = engine.run({ prompt: "y", agent: "/agents/a.md" }, { taskId: "run-fb2"});
+    const runP2 = engine.run({ prompt: "y", agent: "/agents/a.md" }, { ...baseCtx, taskId: "run-fb2" });
     expect(captured[1]!.params.agentName).toBe("/agents/a.md");
     await settleRun(captured[1]!, spawnRunResult());
     await runP2;
   });
 
-  it("[Option C] ctx.sessionDir 优先——引擎不再自推导（宿主权威 getSubagentSessionDir 值直通 --session-dir）", async () => {
+  it("[Option C] ctx.sessionDir 宿主注入值直通 --session-dir（引擎不自推导）", async () => {
     const { engine, captured } = makeEngine();
     const hostAuthoritative = "/host/agent-dir/subagents/--Users-x-proj--/sessions";
     const runP = engine.run(
       { prompt: "sessionDir priority" },
       { taskId: "run-sd-priority", sessionDir: hostAuthoritative },
     );
-    // ctx.sessionDir 有值 → 原样直通（[LEGACY] fallback 不参与——即使其推导值不同）
+    // ctx.sessionDir 原样直通（引擎无自推导 fallback——推导目录落宿主扫描根外，
+    // 缺失即 fail-fast，见下方缺失用例）
     expect(captured[0]!.params.sessionDir).toBe(hostAuthoritative);
     await settleRun(captured[0]!, spawnRunResult());
     await runP;
+  });
+
+  it("ctx.sessionDir 缺失 → engine_not_found fail-fast（附宿主接线恢复指引），不进 spawn", async () => {
+    const { engine, captured } = makeEngine();
+    const ctx: RunContext = { taskId: "run-sd-missing" };
+    await expect(engine.run(baseTask, ctx)).rejects.toMatchObject({
+      code: "engine_not_found",
+    });
+    await expect(engine.run(baseTask, ctx)).rejects.toThrow(/ctx\.sessionDir/);
+    expect(captured).toHaveLength(0);
   });
 
   it("bindAskUser 注入后 run 回调 askUser 转发 host handler", async () => {
@@ -478,6 +491,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
       { prompt: "chat turn" },
       {
         taskId: "run-chat-1",
+        sessionDir: HOST_SESSION_DIR,
         sessionRootId: "root-sess-f6",
         resume: {
           recordId: "rec-chat-9",
@@ -493,8 +507,8 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
       // 唯一语义，[modeless 波2] 无 per-run 形态参数），不经 ChatSessionRegistry.startRound
       resumeSessionFile: "/tmp/sess-c9.jsonl",
       sessionRootId: "root-sess-f6",
-      // [LEGACY fallback] ctx.sessionDir 缺省 → 旧推导不变（LEGACY 语义锁定）
-      sessionDir: join("/tmp/engine-data", "subagents", "sessions", process.cwd().replace(/[^a-zA-Z0-9_-]+/g, "_")),
+      // [Option C] ctx.sessionDir 宿主注入值直通（引擎不自推导）
+      sessionDir: HOST_SESSION_DIR,
     });
     expect(cap.params.agentName).toBe("chat-agent");
 
@@ -518,10 +532,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
 
   it("会话形态轮无 resume 锚点（首轮新建）→ resumeSessionFile 不挂键", async () => {
     const { engine, captured } = makeEngine();
-    const runP = engine.run({ prompt: "first" }, {
-      taskId: "run-chat-2",
-      resume: { recordId: "rec-new" },
-    });
+    const runP = engine.run({ prompt: "first" }, { ...baseCtx, taskId: "run-chat-2", resume: { recordId: "rec-new" } });
     expect(captured[0]!.params.resumeSessionFile).toBeUndefined();
     // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义）
     expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
@@ -538,6 +549,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
       return { value: "picked" };
     });
     const runP = engine.run({ prompt: "chat" }, {
+      ...baseCtx,
       taskId: "run-chat-ask",
       resume: { recordId: "rec-ask" },
     });

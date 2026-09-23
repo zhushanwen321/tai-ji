@@ -221,12 +221,16 @@ export interface AgentCallOpts {
  idleTimeoutMs?: number;
  /**
   * 工具 denylist（原 AgentTaskSpec.denyTools 并入，中立新增面）：各引擎做语法映射
-  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。无 workflow 写入方，预留形状。
+  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。按 ADR-0071「无消费方不进协议」
+  * 对照：源头零写入方（workflow 脚本层无此 API），字段仅作为 zcode 消费端已沉淀的
+  * 透传链保留；删除触发条件 = 下批协议面审计仍零写入方时，随批删除透传链与 zcode 映射。
   */
   denyTools?: string[];
  /**
   * 中立权限模式（原 AgentTaskSpec.permissionMode 并入，预留形状）：映射按各引擎
-  * capabilities.permissionMode。无生产写入方/消费者。
+  * capabilities.permissionMode。按 ADR-0071「无消费方不进协议」对照：源头零写入方
+  * （workflow 脚本层无此 API）且零消费方；删除触发条件 = 下批协议面审计仍零写入方
+  * 时，随批删除本字段与各引擎映射面。
   */
   permissionMode?: string;
 }

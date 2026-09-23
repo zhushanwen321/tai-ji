@@ -59,7 +59,7 @@ import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { persistSettleSnapshot } from "../persistence/record-store-terminal.ts";
 import { zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
-import { killRecordChildWithEscalation, registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
+import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 import { RemoteEngine } from "../engine/client/remote-engine.ts";
 import type { EnginePort, EngineRunResult } from "../engine/port.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
@@ -507,10 +507,6 @@ export class ChatRounds {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // [modeless 波1] D10 终止链接线（原 runEngineTask 专属——已删，随四象限坍缩并入统一
-        // 轮次面）：engine spawn 的子进程注册进 spawnedChildren 记账（cancelBackground
-        // SIGTERM / dispose killAll 收割对引擎 per-run 子进程生效）。
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
         // [modeless 波1→波2·core→cli 接缝] 会话形态由 resume 键携带（唯一形态键）：
         // pi-cli 引擎内建唯一轮终语义 = agent_end 收敛不 kill + agent_settled resolve
         // 并收割（[modeless 波2] SpawnRunParams.chatMode 过渡桥已删）——万物可续 =

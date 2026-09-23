@@ -30,7 +30,13 @@ import { type Static, Type } from "typebox";
 
 import { MAX_TIMER_DELAY_MS, SLUG_MAX_LENGTH, THINKING_ORDER } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { assertEntryTimeBudget, assertSlugWithinLimit, runWorkflow } from "@zhushanwen/subagent-core";
+// formatAvailableWorkflowRefs：拒单可用清单单源（core launcher，副本已并入）。
+import {
+  assertEntryTimeBudget,
+  assertSlugWithinLimit,
+  formatAvailableWorkflowRefs,
+  runWorkflow,
+} from "@zhushanwen/subagent-core";
 import {
   acquireReentryGuard,
   REENTRY_BUSY_MESSAGE,
@@ -40,7 +46,6 @@ import {
 import {
   assertNotAborted,
   buildRunSpecFromScript,
-  formatAvailableWorkflowList,
   optionSlugSuffix,
   renderTextResult,
 } from "./tool-shared.ts";
@@ -190,7 +195,7 @@ export async function runSubagentsBatch(
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
     const all = await deps.registry.loadAll();
-    const available = formatAvailableWorkflowList(all);
+    const available = formatAvailableWorkflowRefs(all);
     throw new Error(
       `Built-in workflow '${FAN_OUT_SCRIPT_NAME}' is not available — the subagents tool runs it as its batch body. ` +
       `Recovery: verify the @zhushanwen/subagent-core package ships workflows/${FAN_OUT_SCRIPT_NAME}.js (reinstall/repair it), then retry. ` +

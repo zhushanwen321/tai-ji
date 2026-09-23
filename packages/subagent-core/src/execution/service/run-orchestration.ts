@@ -45,7 +45,7 @@
 //     显式接口（R4 兑现，接线 2026-09-13）。
 //   - B-6（roundSupervisor 归属争议）：留壳——boot 分区（initSession）与 dispose 时序
 //     消费在壳、装配闭包 finalizeClosed 经壳转发 late-bound（C-6 天然兼容）；本聚合
-//     经 deps.getRoundSupervisor() 现读（noteRun*/adoptOnProcessDeath）。
+//     零消费（真实消费方在兄弟聚合 workflow-dispatch / chat-rounds，各自 deps 通道）。
 // 4. 只搬不改：方法体除依赖通道替换（this.X → this.deps.getY()）外逐字节保留
 //   （审计 /tmp/r4-move-audit.py）；r0-inventory 清单② A 通道直写 14 处（#12 域
 //   executeAndAwait 1 处 + #14 域 13 处——任务口径 12 处按「#14 域 adopt 三行并 1」
@@ -69,7 +69,6 @@ import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
-import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
@@ -86,7 +85,6 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
@@ -114,8 +112,8 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
- *   getPool/getWorktreeManager/getCwd/getRoundSupervisor）：
- *   getter 现读同一实例（B-6 roundSupervisor 留壳、C-6 装配闭包经壳 late-bound）。
+ *   getPool/getWorktreeManager/getCwd）：
+ *   getter 现读同一实例（C-6 装配闭包经壳 late-bound）。
  * - 会话基线 getter（getExecNesting/getSessionRootId）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
@@ -147,8 +145,6 @@ export interface RunOrchestrationDeps {
   readonly getSessionRootId: () => string | null;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
-  /** [B-6 留壳] 轮次活性监督器（在途记账/死亡分诊 adoptOnProcessDeath）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [R3 RecordAccess 显式接口] 步骤 1 身份解析（三层：override → agentConfig → 主
    *  agent model；含 pi 未命中跨引擎候选文案）。 */
   readonly resolveIdentity: (
@@ -665,8 +661,6 @@ export class RunOrchestration {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 镜像记账
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       const { handle, outcome } = await engine.run(this.taskSpecWithModel(opts, record.model), runCtx);
       record.engineHandle = {

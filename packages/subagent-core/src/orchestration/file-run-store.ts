@@ -40,18 +40,14 @@ const STATE_DIR_NAME = "workflow-state";
 
 // ── 磁盘保留（C1，语义对齐 pi jsonl-run-store mtime 裁剪） ─────────
 
-/** run state 文件名 glob：runId 形如 `wf-<ts>-<rand>`（lifecycle.ts 生成），只删命中者。
- *  同目录可能存在的非 state 文件永不碰（对齐 pi STATE_FILE_GLOB）。 */
-const STATE_FILE_GLOB = /^wf-.*\.jsonl$/;
-
 /**
- * 磁盘保留默认上限（OR-5 跨 run 保留修复）：envName 通道在 env 未设/空时生效。
+ * 磁盘保留默认上限（OR-5 跨 run 保留修复）：pi 宿主 jsonl-run-store env 通道
+ * （getEnvStateMaxRuns）在 env 未设/空时的缺省上限。
  *
  * OR-5 将「STATE_MAX_RUNS opt-in 默认关」（无界累积）改为默认开：跨 run state
  * 文件按 mtime 裁剪到本上限。取值 50 是无真实 run 体积分布数据下的保守值
  * （设计 §11-4：标定待 S-A 验收后复核）——偏大不碍事（有界即达标），偏小会
- * 误删仍被引用的 run 缓存，故取保守端。env 显式设置（有效正数）优先于本值；
- * 显式非法值是 opt-out 通道（不清理，见 pruneStateFilesBeyondCap）。
+ * 误删仍被引用的 run 缓存，故取保守端。
  */
 export const DEFAULT_STATE_MAX_RUNS = 50;
 
@@ -101,19 +97,11 @@ function isEnoentError(err: unknown): boolean {
 
 // ── 磁盘保留原语（C1，两宿主单源）──────────────────────────
 //
-// pruneStateFilesBeyondCap 主体是宿主无关的目录裁剪原语（S4-A7 收口为导出单源）：
-// pi 宿主（subagent-workflow 扩展的 jsonl-run-store）此前持有一份逐段同构的私有实现，
-// retention 语义（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛）双份各自演化是
-// 漂移隐患——现在两宿主消费同一实现，日志与错误字符串化经 deps 注入（宿主各自的
-// logger tag / error 工具保持自治，行为差异仅 log tag 文案）。
-//
-// [Q2 收口注记] 生产消费链已切换到下方资格感知单源 pruneTerminalRunFiles（D5 清理
-// 规则①②：manifest 资格 + cap + TTL + journal 同删）；本函数现为 cap-only 通用
-// 原语，生产零调用（唯一历史消费 jsonl-run-store 的本地资格感知实现同批收口），
-// 保留 = FileRunStore.pruneStateFilesBeyondCap 公共方法面与 file-run-store-prune
-// 测试仍消费其语义。后续清理轮若仍无生产消费方，随方法一并退役。
+// retention 语义单源（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛），日志与
+// 错误字符串化经 deps 注入（宿主各自的 logger tag / error 工具保持自治，行为差异
+// 仅 log tag 文案）。
 
-/** pruneStateFilesBeyondCap 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
+/** pruneTerminalRunFiles 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
 export interface PruneStateDeps {
   /** warn 通道（readdir / unlink 失败留证；清理是旁路维护，失败不抛） */
   warn: (msg: string) => void;
@@ -121,59 +109,6 @@ export interface PruneStateDeps {
   debug: (msg: string) => void;
   /** error → 可读字符串（core 侧 err.message 兜底 String，宿主可用自有 error 工具） */
   toMsg: (err: unknown) => string;
-}
-
-/**
- * 把 state 目录裁剪到 cap 个最新 state 文件（mtime 升序删最旧，C1）。
- *
- * 语义（OR-5，两宿主单源）：
- * - 只删目录内命中 {@link STATE_FILE_GLOB} 的文件；任何失败都不抛（清理是旁路
- *   维护，不能拖垮持久化主链路）：readdir 失败静默放弃本轮（ENOENT = 从未持久化，
- *   正常态），单个 unlink 失败（非 ENOENT）warn 留证后继续删其余——ENOENT 视为
- *   并发删除竞态下的已达成目标，不告警；
- * - stat 全集取 mtime，allSettled 部分降级——单文件 stat 失败（并发删除 ENOENT
- *   等）静默跳过该文件，不阻断本轮裁剪。
- *
- * cap 解析（env 通道等）归调用方：FileRunStore 方法含 envName 通道超集；
- * pi 宿主 jsonl-run-store 经 getEnvStateMaxRuns 解析后直传。
- */
-export async function pruneStateFilesBeyondCap(
-  stateDir: string,
-  cap: number,
-  deps: PruneStateDeps,
-): Promise<void> {
-  let names: string[];
-  try {
-    names = await readdir(stateDir);
-  } catch (err) {
-    if (!isEnoentError(err)) {
-      deps.warn(`state retention: readdir ${stateDir} failed: ${deps.toMsg(err)}`);
-    }
-    return;
-  }
-  const stateFiles = names.filter((n) => STATE_FILE_GLOB.test(n)).sort();
-  if (stateFiles.length <= cap) return;
-
-  // stat 全集取 mtime；allSettled 部分降级（单文件失败静默跳过，不阻断本轮）
-  const settled = await Promise.allSettled(
-    stateFiles.map(async (name) => {
-      const full = join(stateDir, name);
-      return { full, mtimeMs: (await stat(full)).mtimeMs };
-    }),
-  );
-  const byMtimeAsc = settled
-    .flatMap((r) => (r.status === "fulfilled" ? [r.value] : []))
-    .sort((a, b) => a.mtimeMs - b.mtimeMs);
-  const victims = byMtimeAsc.slice(0, byMtimeAsc.length - cap);
-  for (const victim of victims) {
-    try {
-      await unlink(victim.full);
-      deps.debug(`state retention: pruned ${victim.full}`);
-    } catch (err) {
-      if (isEnoentError(err)) continue; // 并发删除已达成目标
-      deps.warn(`state retention: failed to delete ${victim.full}: ${deps.toMsg(err)}`);
-    }
-  }
 }
 
 // ── 已终局 run 的磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]）────────
@@ -241,10 +176,9 @@ export interface PruneTerminalRunFilesResult {
  * 把 state 目录内「已终局且超限」的 run 磁盘足迹（state + journal）裁剪掉
  * （[Q2 / D5 清理规则①②] 生产单源——资格感知语义见上方段落注释）。
  *
- * 与 {@link pruneStateFilesBeyondCap} 的关系：同一 retention 纪律族（glob 命中才删 /
- * mtime 升序裁最旧 / 任何失败不抛），差异在资格过滤（manifest outcome 单源锚定）
- * 与清理对象（run 粒度成对删 state + journal）。cap 解析（env 通道）归调用方
- * （pi 宿主 getEnvStateMaxRuns / FileRunStore 方法各自持有 env 通道）。
+ * retention 纪律（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛）+ 资格过滤
+ * （manifest outcome 单源锚定）+ 清理对象（run 粒度成对删 state + journal）。
+ * cap 解析（env 通道）归调用方（pi 宿主 getEnvStateMaxRuns 持有 env 通道）。
  */
 export async function pruneTerminalRunFiles(
   stateDir: string,
@@ -519,48 +453,5 @@ export class FileRunStore implements RunStore {
       return undefined;
     }
     return run;
-  }
-
-  /**
-   * 把 workflow-state 目录裁剪到上限个最新 state 文件（mtime 升序删最旧，C1）。
- *
- * 主体委托导出单源 {@link pruneStateFilesBeyondCap}（retention 语义两宿主单源，
- * S4-A7；日志经 deps 注入本模块 logger + `[file-run-store]` tag，行为与收口前
- * 逐字一致）。磁盘裁剪不动内存 runs Map（内存侧淘汰归
- * lifecycle.evictDoneRunsBeyondCap，两域独立）。
- *
- * 上限解析（envName 通道，OR-5 ⑥b 默认开；显式非法值 opt-out 对齐 pi 解析风格）：
- * - `envName` 提供 → env 通道：`process.env[envName]` 未设/空 → 按默认上限
- *   {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——OR-5 修复前的 opt-in
- *   「默认关」正是跨 run 无界累积缺陷本身）；设了有限正数 → 上限 = env 值
- *   （env 值即上限）；设了非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：
- *   用户意图不明时不动磁盘——对齐本方法 readdir/stat 失败一律放弃的保守哲学，
- *   宿主如需自管保留可设足够大的正数值）；
- * - `envName` 缺省 → 无 env 通道，直接按 `max` 参数裁剪（上限 = max，调用方
- *   自管启用时机）。
- *
- * @param max 上限（envName 缺省时生效；env 通道启用时被 env 值覆盖）
- * @param envName opt-in 开关 + 上限覆盖 env 变量名（可选；pi 先例
- *   `TAIJI_SUBAGENT_STATE_MAX_RUNS`）
- */
-  async pruneStateFilesBeyondCap(max: number, envName?: string): Promise<void> {
-    let cap = max;
-    if (envName !== undefined) {
-    // 未设/空 → 默认开（OR-5 ⑥b：DEFAULT_STATE_MAX_RUNS）；非法/≤0 → 不清理
-    // （显式 opt-out 通道，见方法注释）；有效正数 → env 值覆盖
-      const raw = process.env[envName];
-      if (raw === undefined || raw === "") {
-        cap = DEFAULT_STATE_MAX_RUNS;
-      } else {
-        const parsed = Number(raw);
-        if (!Number.isFinite(parsed) || parsed <= 0) return;
-        cap = parsed;
-      }
-    }
-    await pruneStateFilesBeyondCap(this.stateDir(), cap, {
-      warn: (msg) => logger.warn(`[file-run-store] ${msg}`),
-      debug: (msg) => logger.debug(`[file-run-store] ${msg}`),
-      toMsg: (err) => (err instanceof Error ? err.message : String(err)),
-    });
   }
 }

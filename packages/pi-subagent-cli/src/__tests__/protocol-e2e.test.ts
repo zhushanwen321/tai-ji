@@ -159,11 +159,17 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       expect(initResult.engineId).toBe("pi");
       expect(initResult.capabilities.maxTurns).toBe(true);
 
-      // 2. run：fake pi 子进程执行（事件回流 + ask_user 反向）
+      // 2. run：fake pi 子进程执行（事件回流 + ask_user 反向）。sessionDir =
+      // 宿主真实形态必传字段（remote-engine 恒传，缺失 fail-fast engine_not_found），
+      // 取测试 tmp 目录子路径（fake-pi recursive mkdir 兜底，不碰真实目录）。
       const runP = host.request("run", {
         runId: "run-e2e-1",
         task: { prompt: "say hi then ask", description: "e2e", agent: "worker" },
-        ctx: { cwd: dataDir, model: "fake-provider/fake-model" },
+        ctx: {
+          cwd: dataDir,
+          sessionDir: path.join(dataDir, "subagent-sessions"),
+          model: "fake-provider/fake-model",
+        },
       });
 
       // 3. 反向通道断言（按协议契约逐个应答；poolResolved 已随池抽象降级退役）

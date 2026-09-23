@@ -49,7 +49,6 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 // 派发的 timeout+watchdog+外部 signal 三源合流。
 import { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
-import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
@@ -412,11 +411,6 @@ export class WorkflowDispatch {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // ⑦ D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 记账（cancel
-        // SIGTERM / dispose killAll 收割兜底，键 = record.id——[D9-2] 裁决：cancel
-        // 收敛兜底走 run 拓扑杀（mirror recordId 锚定），dispose 豁免保留组杀，
-        // 登记见 remote-engine killRunTopology 注释块）
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
       // 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与

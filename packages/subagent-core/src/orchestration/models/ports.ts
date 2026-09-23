@@ -29,7 +29,7 @@ import type { WorkflowRun } from "./workflow-run.ts";
  * 刷新源），生产 pump 侧恒 undefined。
  *
  * D-005: onEvent 签名从 raw Record<string,unknown> 升级为 AgentEvent——委托后不再有
- * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent，session-runner handleSdkEvent 出口）。
+ * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
  */
 export interface AgentRunner {
   run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: SubagentStream): Promise<AgentResult>;

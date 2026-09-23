@@ -173,29 +173,25 @@ function readGlobalAgentsFile(): { path: string; content: string } | null {
 /**
  * Read & parse the config file. Missing / malformed / partial → all-default.
  * Returns the effective config object; never throws.
+ *
+ * Only parses the sections this extension consumes (append / capability).
+ * The config file's `version` / `replace` fields belong to the runtime-side
+ * `--system-prompt` consumer (ADR-0044) and are intentionally not parsed here.
  */
 function readConfig(dataDir: string): {
-  version: number
-  replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
   capability: { enabled: boolean }
 } {
   const parsed = readJsonIfValid(path.join(dataDir, CONFIG_FILE))
   if (!parsed) {
     return {
-      version: 1,
-      replace: { enabled: false, prompt: '' },
       append: { enabled: false, prompt: '' },
       // capability 默认值与解析语义同向：缺 config → 开（见 readCapabilityEnabled）
       capability: { enabled: true },
     }
   }
   // Merge defensively — every field has its own default.
-  // replace 字段仅防御性解析保持 config 结构完整，不参与本 hook 逻辑——
-  // replace 走 --system-prompt CLI（ADR-0044），hook 只处理 append。
   return {
-    version: typeof parsed.version === 'number' ? parsed.version : 1,
-    replace: readSection(parsed.replace),
     append: readSection(parsed.append),
     capability: { enabled: readCapabilityEnabled(parsed.capability) },
   }
@@ -229,7 +225,7 @@ function isJsonObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object'
 }
 
-/** Defensive field parsing for a `replace`/`append` config section. */
+/** Defensive field parsing for the `append` config section. */
 function readSection(raw: unknown): { enabled: boolean; prompt: string } {
   const section = isJsonObject(raw) ? raw : {}
   return {

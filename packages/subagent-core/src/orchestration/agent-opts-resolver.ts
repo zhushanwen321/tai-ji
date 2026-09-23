@@ -85,10 +85,10 @@ function isObjectRootSchema(schema: unknown): schema is Record<string, unknown> 
  * [审查项#4] AP 告知：注入侧校验用 additionalProperties:false 收窄后的
  * parameters，模型自带 schema 外字段会被拒——不前置告知，拒绝显得凭空。
  *
- * JSON 序列化用 compact（stringifySchemaCached）——schema 全文嵌进 ASP，无缩进省 token。
+ * JSON 序列化经 stringifySchemaCached（直调 JSON.stringify）——schema 全文嵌进 ASP，无缩进省 token。
  */
 export function formatSchemaInstruction(schema: Record<string, unknown>): string {
-  const schemaJson = stringifySchemaCached(schema, "compact");
+  const schemaJson = stringifySchemaCached(schema);
   // [U3] 根类型条件化：判定与 structured-output 的工具 parameters {value} 包装/解包
   // 同源（上方 isObjectRootSchema 本地副本）。object 根 arguments 即 data；非 object
   // 根参数层实为 {value} 包装——ASP 文案必须与工具 description 同语汇告知包装契约

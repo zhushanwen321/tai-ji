@@ -102,20 +102,6 @@ export interface SpawnRunCallbacks {
   askUser?: (request: UiRequest) => Promise<UiResponse>;
   /** text_delta 分流出口（→ host/streamDelta）。 */
   onDelta?: (delta: string) => void;
-  /**
-   * agent_end（非 willRetry，队列排空）到达：本轮收敛（输出完整即轮终）。不 kill
-   * 子进程（等 agent_settled——pi 的 compact/收尾在 agent_end 后执行）。[H1 U5] 原
-   * chat-session 会话管理器的 settled 相位上报消费已随 registry 删除；本回调保留为
-   * 轮次时序的可观测面（run-spawn-once.integration 断言轮次时序）。
-   */
-  onChatRoundEnd?: () => void;
-  /**
-   * agent_settled（真空闲边界）到达：run 在此 resolve（exit 0 口径）并收割子进程
-   * （runSpawnOnce 内建，见 runSpawnOnce 生命周期注释）。[H1 U5] 原 chat-session
-   * 会话管理器的 idle 相位上报消费已随 registry 删除；本回调保留为轮次时序的
-   * 可观测面。
-   */
-  onChatAgentSettled?: () => void;
 }
 
 /** runSpawnOnce 的入参（协议 RunParams 的引擎侧还原形态）。 */
@@ -407,16 +393,14 @@ function buildTranslatorOpts(
     // 也按 0 口径收尾。
     onAgentEnd: () => {
       runEnd.endedCleanly = true;
-      callbacks.onChatRoundEnd?.();
     },
     // agent_settled（真空闲，agent_end 之后、post-run 完成后才 emit）= run 的 resolve
-    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：onChatAgentSettled 回调先于
-    // run resolve（run-spawn-once.integration 的轮次时序断言面），resolveChatRun
-    // settle exitPromise（run 应答不等收割），随后 fire-and-forget 杀链收割子进程
-    // ——每轮一进程，续聊 = 新 run + resume 锚点，进程不再保活。
+    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：resolveChatRun 先 settle
+    // exitPromise（run 应答不等收割——应答 exit 0 口径与 close 信号无关），随后
+    // fire-and-forget 杀链收割子进程——每轮一进程，续聊 = 新 run + resume 锚点，
+    // 进程不再保活。
     onAgentSettled: () => {
       runEnd.endedCleanly = true;
-      callbacks.onChatAgentSettled?.();
       runEnd.resolveChatRun?.(0);
       killChild("agent_settled reap");
     },

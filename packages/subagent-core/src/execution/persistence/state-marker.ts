@@ -175,9 +175,9 @@ export function writeCancelledState(sessionFile: string, endedAt: number): boole
  * 构造性成立。
  *
  * [P1b-2 / D5] payload 扩展 outcome/errorCode（终局投影字段，向后兼容——缺省
- * undefined 不写字段，存量调用方零变化）。run 域消费 = worker-message-pump 的
- * manifest-write 输出动作（workflow-state/<runId>.jsonl 的 sidecar）；record 域
- * 终态链（markSettled）的传参接线归后继批次。
+ * undefined 不写字段，存量调用方零变化）。run 域不消费本扩展（run 终局事实经
+ * 事件 journal + terminal manifest 落账，无 .state sidecar）；record 域终态链
+ *（markSettled）现未传参（缺省 undefined，读侧守卫归一兼容存量 .state）。
  *
  * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
  *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义）。
@@ -193,37 +193,6 @@ export function writeSettledState(
   return writeStateMarker(sessionFile, {
     status: "idle",
     ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
-    ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
-    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
-    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
-  });
-}
-
-/**
- * [P1b-2 / D5] run 域（workflow run）终局 `.state` 投影专用写入原语。
- *
- * 与 record 域 {@link writeSettledState} 分立（R1 写面守卫按域分立语义）：
- * writeSettledState 是 record 持久化写面七名原语之一（store 外直调被
- * scripts/check-record-write-surface.mjs R1 拦截——record 写面唯一入口 =
- * RecordStore markSettled 意图原语）；本函数服务 workflow run 域的终局投影
- * （消费方 = worker-message-pump 的 manifest-write 输出动作，sidecar 落
- * `<workflow-state>/<runId>.jsonl.state`），不在 record 写面收敛谱系内。
- *
- * 内部复用模块私有 writeStateMarker（响亮重试 + 旧名清理与 record 域同源），
- * 载荷 = idle 收条 + [P1b-2 / D5] 终局投影字段。stopReason 缺位：run 域的
- * DoneReason（budget_limited/time_limited）不在 StopReason 词表，不硬造映射
- * （诊断文本由 run-settled 事件的 reason 与 journal 承载）。
- *
- * @param sessionFile sidecar 基底路径（run 域 = `<stateDir>/<runId>.jsonl`）。
- * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕，处置归
- *          调用方留痕归因；prune 资格不受影响——manifest 是单源锚定）。
- */
-export function writeRunStateProjection(
-  sessionFile: string,
-  payload: { endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
-): boolean {
-  return writeStateMarker(sessionFile, {
-    status: "idle",
     ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
     ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
     ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),

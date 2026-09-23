@@ -10,8 +10,7 @@
  * （Map<stepIndex, LiveProgressView>，经 collectNodeLiveProgress 配对注入）——
  * 字段口径不变（totalTokens/toolCallCount/elapsedSeconds/turns/eventLog.length/
  * currentActivity/lastError），本文件用 makeLiveView 直接构造投影驱动「已入字段
- * 变 → 签名变」；投影与旧 projectLiveProgress 的逐字段等价性见
- * record-progress.test.ts（双路径对齐断言）。
+ * 变 → 签名变」。
  *
  * 确定性说明：签名非完全纯——live 投影的 elapsedSeconds 由 projectRecordProgress
  * 内 computeElapsedSeconds 现算（record.endedAt ?? Date.now()）。fake timers 控制

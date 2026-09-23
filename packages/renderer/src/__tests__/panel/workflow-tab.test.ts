@@ -9,7 +9,7 @@
  * - 构建者：旧快照 additive 读缺省渲染路径（health/startedAt/lastProgressAt 缺省
  *   → 无停滞徽标、时长槽省略，组件不炸）
  *
- * mock 策略：真实 pinia（panel + workflow store，applyRecords 直接种数据）；
+ * mock 策略：真实 pinia（panel + workflow store，分区 ref 直写种数据）；
  * drawer 控制态 bindDrawerSessionId + openWorkflow 真实域状态；vue-i18n 全局 setup
  * （zh-CN 取值）；fake timers 固定 now（1s tick 在 fake timers 下不推进——推导以
  * FIXED_NOW 为锚，确定性断言）。
@@ -52,7 +52,8 @@ function record(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
 
 async function mountTab(records: WorkflowRunRecord[]): Promise<VueWrapper> {
   const workflowStore = useWorkflowStore()
-  workflowStore.applyRecords(SID, records)
+  // 种数据：applyRecords 已从 store 导出面摘除，直写分区 ref（不可变替换触发响应性）
+  workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, records)
   openWorkflow(records[0]!.runId)
   const wrapper = mount(WorkflowTab)
   return wrapper
