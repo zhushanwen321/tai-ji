@@ -4,6 +4,7 @@
  * PluginService 持有（rpc-setup 注册侧与测试直查共享同一 Map），经 deps 注入。
  */
 
+import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
 import type { PluginRegistry } from '../plugin-registry.js'
 import type { PluginHost } from '../plugin-host.js'
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
@@ -42,8 +43,10 @@ export interface CommandExecutorDeps {
    * 形态 = transport 广播三件套（type + id + payload），调用方直通自己的
    * broadcastOrBroker（bind 后传入）。缺省 undefined = 不广播——命令执行是任务级、
    * 默认 30min 兜底窗口，长命令期间前端此前只能等最终 pong，全程零在途反馈。
+   * type/payload 经 ServerMessageMap 泛型关联（与 broadcastOrBrokerWith 同步泛型化，
+   * MF-2-4：免 as 断言，payload 漂移编译期拦截）。
    */
-  broadcast?: (type: string, id: string, payload: unknown) => void
+  broadcast?: <T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]) => void
 }
 
 /** RT-6#7：命令开始执行时下发的通知帧类型（plugin:notification → 前端 toast） */

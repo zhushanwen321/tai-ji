@@ -8,9 +8,10 @@
  *    发生在 LRU 驱逐时（pinia 已 active），对齐 useSideDrawer 的 bindDrawerSessionId 模式。
  *    split 模式恢复时多 panel 全查（panel store panels 即全部叶子）。
  * 2. LRU 联动回调装配：agentCallLruLinkage() 返回 createChatStore 的 options——
- *    主 session 被驱逐时，workflow store 映射（getAgentCallVirtualIdsByMain，agentcall
- *    清理唯一通路）筛除 viewedVids 豁免集后返回待释放的 agentcall virtualId，core lru.ts
- *    执行删除。正在查看的分区存活（drawer 不白屏）；豁免窗口外被驱逐 = getMessages(vid)
+ *    主 session 或 btw 分区被驱逐时（core lru 按被驱逐 sid **原形态**透传：主会话 =
+ *    mainSid，btw 分区 = 线 vid——D9③/M2-c），workflow store 映射（getAgentCallVirtualIdsByMain，
+ *    agentcall 清理唯一通路）筛除 viewedVids 豁免集后返回待释放的 agentcall virtualId，
+ *    core lru.ts 执行删除。正在查看的分区存活（drawer 不白屏）；豁免窗口外被驱逐 = getMessages(vid)
  *    返回 [] 静态白屏，恢复 = 用户重选 tab 触发 selectedSubagentId watch 重拉快照
  *    （一次性交互，设计登记取舍，不新增自动恢复机制）。
  *
@@ -35,7 +36,8 @@ bindViewedVidPanels(computed(() => usePanelStore().panels.map((p) => p.sessionId
 /**
  * [B9] createChatStore 的 LRU 联动 options（stores/chat.ts 装配调用）。
  *
- * 回调为纯查询：workflow store 映射 ∖ viewedVids（panel 枚举豁免集）。返回的 vid 由
+ * 回调为纯查询：workflow store 映射 ∖ viewedVids（panel 枚举豁免集）。形参 = 被驱逐 sid
+ * 原形态（主会话 mainSid / btw 线 vid，两形态共用同一回调零分支）。返回的 vid 由
  * core lru.ts 在两驱逐路径（evictIfNeeded 阈值 / evictSessionWithVirtual 显式）统一执行
  * deleteMessageKey + 时序记录清理。
  */

@@ -734,3 +734,67 @@ describe('D12: 删除链 quota 清理（排序约束 + warn-only）', () => {
     expect(extras.getExtrasSync('my-custom')).toBeUndefined()
   })
 })
+
+describe('U6① 模型 id 规则（id 类毒化收口：可强转则强转、不可用才丢）', () => {
+  it('id 缺失（undefined / null）/ 空串 / 纯空白 / 对象 → 整条丢弃 + droppedModels 可见', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p1' },
+      {
+        models: [
+          { id: 'keep-1' },
+          { name: 'no-id' },
+          { id: null },
+          { id: '' },
+          { id: '   ' },
+          { id: { nested: true } },
+        ] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p1',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept.map((m) => m.id)).toEqual(['keep-1'])
+    expect(result.droppedModels).toHaveLength(5)
+    // 文案区分命中类（S9a 类排障按文案 grep）
+    expect(result.droppedModels?.[0]).toContain('invalid id')
+    expect(result.droppedModels?.[0]).toContain('(no id)')
+  })
+
+  it('可强转 id（number / boolean）→ 保留并就地写回字符串形式（与 settings 路径 String(m.id) 同口径）', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p2' },
+      {
+        models: [{ id: 123 }, { id: true }] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p2',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept.map((m) => m.id)).toEqual(['123', 'true'])
+    expect(result.droppedModels).toBeUndefined()
+  })
+
+  it('合法 id + 空串 name/api/baseUrl → 保留条目 + 删键（既有防线②行为不回归）', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p3' },
+      {
+        models: [{ id: 'm1', name: '', api: '  ', baseUrl: 'https://x' }] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p3',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept).toEqual([{ id: 'm1', baseUrl: 'https://x' }])
+    expect(result.droppedModels).toBeUndefined()
+  })
+
+  it('未传 models → 不触碰 merged.models，无 droppedModels 信号', () => {
+    const merged: Record<string, unknown> = { name: 'p4', models: [{ id: 'existing' }] }
+    const result = applyProviderWritePolicy(merged, { name: 'p4' }, 'custom', 'settings', 'p4')
+    expect(result.merged.models).toEqual([{ id: 'existing' }])
+    expect(result.droppedModels).toBeUndefined()
+  })
+})

@@ -9,6 +9,8 @@ export default {
   commentPlaceholder: '选填，补充说明…',
   // M1 环 3：断连期应答未送达（send 返 false），请求保留待连接恢复后重发
   responseNotDelivered: '回复未送达，连接恢复后可重新提交',
+  // D8 提交回路契约（M3-c）：已终结 requestId 的应答丢弃并提示失效
+  requestExpired: '请求已失效，应答已丢弃',
   // ── schedule 创建表单（ScheduleForm，统一表单协议渲染器；表头/按钮由 FormOverlay 壳承担）──
   scheduleCreateFormTitle: '新建定时任务',
   scheduleCreateSubtitle: '任务只在当前会话打开时触发。',
@@ -58,4 +60,7 @@ export default {
   scheduleCreateRelHours: '{h} 小时后',
   scheduleCreateRelHoursMinutes: '{h} 小时 {m} 分后',
   scheduleCreateRelDays: '{n} 天后',
+  // ── plugin modal 宿主 chrome（PluginModalHost，AP-2：chrome 只有标题 + 关闭键）──
+  pluginModalClose: '关闭',
+  pluginModalCloseEsc: '关闭 (Esc)',
 }

@@ -354,12 +354,20 @@ api.sessions.onDidDestroySession(handler: (session: SessionInfo) => void): Dispo
 ### 3.8 api.agent — Agent 桥接 API（trusted 专属）
 
 ```typescript
-api.agent.setModel(model: string): Promise<void>
+// setModel 返回**引擎实际生效**的模型串（pi 的 set→get_state 回读；pattern 引擎静默换模时 ≠ 请求值）
+api.agent.setModel(model: string): Promise<string>
 api.agent.getModel(): Promise<string>
 api.agent.getThinkingLevel(): Promise<string>
-api.agent.setThinkingLevel(level: string): Promise<void>
+api.agent.setThinkingLevel(level: string): Promise<string>
 api.agent.getActiveTools(): Promise<string[]>
 ```
+
+**失败语义（model-switch-live-provider-sync §3.4）**：切换/设档失败时 **reject**，错误的 `message`
+里带语义码（`SESSION_ACTIVATE_FAILED` / `SESSION_ACTIVATE_TIMEOUT` / `MODEL_NOT_FOUND` /
+`PROVIDER_CREDENTIAL_MISSING` / `ENGINE_MODEL_MISSING`）——注意 plugin JSON-RPC 的 `error.code`
+是**数值**字段，字符串语义码经 `plugin-rpc-server` 降为 `INTERNAL_ERROR`，语义码以 `[CODE]` tag
+拼在 message 里（插件侧 grep message 即可分型）。停止态会话调用会先 `ensureActive` 拉起引擎
+（1–2s，有 15s 上界），超时错误码为 `SESSION_ACTIVATE_TIMEOUT`（后台恢复继续，可重试）。
 
 ### 3.9 api.events — 跨插件通信
 
@@ -714,9 +722,9 @@ interface PluginStateStorage {
 | `api.sessions` | `get(id)` | `Promise<SessionInfo \| undefined>` |
 | `api.sessions` | `getActive()` | `Promise<SessionInfo \| undefined>` |
 | `api.sessions` | `sendMessage(params)` | `Promise<void>` |
-| `api.agent` | `setModel(model)` | `Promise<void>` |
+| `api.agent` | `setModel(model)` | `Promise<string>`（生效模型串；失败 reject，message 含语义码 tag） |
 | `api.agent` | `getModel()` | `Promise<string>` |
-| `api.agent` | `setThinkingLevel(level)` | `Promise<void>` |
+| `api.agent` | `setThinkingLevel(level)` | `Promise<string>`（生效档位，pi 可能钳制；失败 reject） |
 | `api.agent` | `getThinkingLevel()` | `Promise<string>` |
 | `api.agent` | `getActiveTools()` | `Promise<string[]>` |
 | `api.events` | `on(event, handler)` | `Disposable` |

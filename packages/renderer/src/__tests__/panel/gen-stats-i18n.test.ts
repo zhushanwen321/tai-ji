@@ -51,4 +51,24 @@ describe('genStats i18n zh/en 双侧对齐', () => {
       expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
     }
   })
+
+  it('composer-genstats-ttft 新增 key 双侧齐（U4：title/note/day/d7/d30 五键，不复用 genStatsDay）', () => {
+    const zhCtx = asRecord(asRecord(zhPanel).context)
+    const enCtx = asRecord(asRecord(enPanel).context)
+    const TTFT_KEYS = [
+      'genStatsTtftTitle',
+      'genStatsTtftNote',
+      'genStatsTtftDay',
+      'genStatsTtftD7',
+      'genStatsTtftD30',
+    ] as const
+    for (const k of TTFT_KEYS) {
+      expect(typeof zhCtx[k], `zh-CN panel.context.${k}`).toBe('string')
+      expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
+    }
+    // p50 语义独立锁：genStatsTtftDay 与 genStatsDay（今日均值）双侧均非同文
+    //（设计 §3.1 采纳 R1-suggestion——「今日均值」与 p50 中位数语义矛盾，禁复用）
+    expect(zhCtx.genStatsTtftDay).not.toBe(zhCtx.genStatsDay)
+    expect(enCtx.genStatsTtftDay).not.toBe(enCtx.genStatsDay)
+  })
 })

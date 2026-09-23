@@ -120,7 +120,7 @@ grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.tai
 
 ### 7. bash 工具里启动 Electron 二进制被静默降级纯 node 模式（ELECTRON_RUN_AS_NODE=1）
 
-打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。机制细节见 relay 模块（源码注释待后续批次补齐）。
+打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 relay 模块（源码注释待后续批次补齐）。
 
 **同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
 
@@ -294,7 +294,25 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 
-### 21. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
+### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
+
+**症状**：手工跑 zcode-session-source 的 bun:sqlite 腿测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
+
+**根因**：vitest 可执行文件的 shebang 是 node，`bunx` 默认按 shebang 用 node 启动它——进程内 `typeof Bun === 'undefined'`，D3 双驱动探测走 node 分支。`bunx` ≠ bun 运行时，必须显式 `--bun` 才把 vitest 本体跑在 bun 下。
+
+**正确做法**：真 bun 腿 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在守卫 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
+
+### 22. 测试防线被绕过：非 vitest-config 入口执行测试会写真实数据目录（2026-09-22 事故）
+
+**症状**：`~/.taiji/` 下出现测试命名的目录/文件（如 `attachments/att-store-*`——`attachment-store.test.ts` 的用例 sessionId 命名），而测试红线的双层防线（globalSetup 钉死 `TAIJI_AGENT_DATA_DIR` + fs-guard 白名单拦截）本应阻止一切真实目录写入。
+
+**根因**：防线挂在 vitest config（`taijiTestConfig` 工厂）上，**只对经 config 启动的 vitest 进程生效**。绕过形态：`bun test`（Bun 测试运行器自动把 `import from 'vitest'` 映射到 `bun:test`，完全不读 vitest.config）、或任何不经项目 config 的执行方式——此时无 env 钉死（dataDir 解析回真实 `~/.taiji`）、无 fs-guard（拦截不发生）。标准入口已复现验证有效：包目录 `pnpm vitest run` 写入被正确钉到 tmp。
+
+**恢复**：① 按测试命名模式识别垃圾条目（`att-store-*` 等用例 sessionId 命名、tmp 下 `logger-test-*`/`zcode-engine-*` 等本仓 fixture 前缀），核对条目内无用户数据后删除；② 会话数据核查：`agent/sessions/` 在事故时段的修改检查（本次事故会话区零触碰）。tmp 大量残留会让依赖 readdir 的用例超时（实测 21 万条目时 `countSnapshotDirs` 单次 >3.6s）。
+
+**防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 腿只走 `bunx --bun vitest`（守卫同口径）；禁止 `bun test` 执行本项目测试文件。
+
+### 23. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
 
 **现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
 
@@ -304,7 +322,7 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 
 
-### 22. dev 构建下组件实例 `$el` 是注释节点（模板首注释致 Fragment 根）
+### 24. dev 构建下组件实例 `$el` 是注释节点（模板首注释致 Fragment 根）
 
 **现象**：仅在 dev 构建出现的「取不到真实 DOM 元素」类失效——如组件实例 `$el` 为注释节点（nodeType 8），`root === activeElement` / `root.contains(...)` 恒 false；生产构建行为正常（vue 编译剥离模板注释），happy-dom 直挂测试也不暴露（测试态注释被剥离）。
 

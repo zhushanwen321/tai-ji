@@ -126,6 +126,29 @@ describe('provider-importer', () => {
     }
   })
 
+  // ── U6②：写侧丢弃的非法模型项 → 结果 warnings 可见（不静默丢数据）─────
+  it('U6②: 含 id 缺失模型项 → status=imported 但结果 warnings 列出被跳过项，且落盘 models 不含该项', async () => {
+    const fixture = [
+      fp({
+        _sourceName: 'with-bad-model',
+        models: [{ id: 'good' }, { name: 'no-id' }] as unknown as ParsedProvider['models'],
+      }),
+    ]
+    vi.mocked(parseProviders).mockReturnValue(result(fixture))
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['with-bad-model'])
+
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    const item = applyOut.result.imported.find((i) => i.id === 'with-bad-model')
+    expect(item?.status).toBe('imported')
+    expect(item?.warnings?.[0]).toContain('invalid id')
+    // 落盘 config 的 models 只含合法项（pi 不会被整文件拒载）
+    const [, config] = vi.mocked(upsertProvider).mock.calls[0] as [string, { models?: Array<{ id: string }> }]
+    expect(config.models?.map((m) => m.id)).toEqual(['good'])
+  })
+
   // ── T5：冲突检测（duplicate-id → skipped）────────────────────
   it('T5: existingIds 含 foo → preview conflict=duplicate-id, apply status=skipped', async () => {
     vi.mocked(parseProviders).mockReturnValue(result([fp({ _sourceName: 'foo' })]))

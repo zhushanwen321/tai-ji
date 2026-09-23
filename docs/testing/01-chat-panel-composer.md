@@ -43,6 +43,8 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 | `chip-directory` | Landing.vue | Landing 态恒显（directory chip 行） |
 | `chip-branch` | Landing.vue | 仅 git 目录（`gitInfo != null`）显示 |
 | `retry-history` | Landing.vue | 仅 `historyError=true`（getHistory 失败）时显示 |
+| `composer-btw-button` | tray/ComposerBtwButton.vue | `showBtw && sessionId` 时显（drawer 内经 `show-btw=false` 不显；2026-09-22 btw-question 新增） |
+| `composer-btw-badge` | tray/ComposerBtwButton.vue | 焦点主会话名下线 unread>0（9+ 封顶）或待处理>0 时显 |
 | `dir-select-popover` | DirSelectPopover.vue | 点 directory chip 后弹出 |
 | `workspace-item` | DirSelectPopover.vue | popover 内每个工作区项 |
 | `action-open-dir` | DirSelectPopover.vue | 「打开其他目录」（触发 OS dialog） |
@@ -324,6 +326,8 @@ testid 以组件 template 内 data-testid 属性为准。
 > 覆盖决策：模式体系设计 D5（可见性）/ D6（密度）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
 
 **底栏三簇 + 按序退化 + 溢出菜单**：
+
+> **btw 按钮密度登记（2026-09-22 btw-question）**：`COMPOSER_BTW_BUTTON_DEGRADATION_ORDER = 0`（序 0 不退化，三档常驻——badge 是后台回复唯一通知载体），守护测试 = `composer-bar-density-wiring` 三档常驻断言；落点 `tray/use-composer-bar-density.ts`，未动纯状态机 `composer-density.ts`。
 
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|

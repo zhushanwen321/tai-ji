@@ -20,7 +20,7 @@
  * （行缓冲/累积文本/锚点缓存全释放）。
  */
 import type { ServerMessage } from '@taiji/shared'
-import { subagentVirtualId } from '@taiji/shared'
+import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { translate } from '../pi/event-adapter.js'
 import type { PiEvent } from '../pi/pi-protocol.js'
@@ -71,7 +71,14 @@ export class RelayTee {
   private readonly virtualId: string
 
   constructor(private readonly opts: RelayTeeOptions) {
-    this.virtualId = subagentVirtualId(opts.mainSessionId, opts.recordId)
+    // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
+    // btw 线的 relay 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布面保持 vid 原样），
+    // 键构造前先 extract——vid 不入键，INVAR-1.1 三段式不破（M1a 值域断言对 `btw:` 前缀
+    // fail-fast，未翻译即 throw）。非 btw 输入零变化。
+    this.virtualId = subagentVirtualId(
+      isBtwVirtualId(opts.mainSessionId) ? extractBtwPiSessionId(opts.mainSessionId) : opts.mainSessionId,
+      opts.recordId,
+    )
   }
 
   /** tee 分支是否已放弃（放弃后 registry 停止喂入，转纯转发）。 */

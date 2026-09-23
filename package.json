@@ -17,6 +17,7 @@
     "test": "pnpm --filter './packages/**' --filter './apps/**' --filter './extensions/**' --no-bail run test",
     "test:e2e": "playwright test",
     "test:taste-lint": "pnpm exec vitest run --config taste-lint/vitest.config.ts taste-lint",
+    "test:resources-plugins": "pnpm exec vitest run --config resources/plugins/scheduler-manager/vitest.config.ts",
     "dev:smoke": "node scripts/dev-smoke.mjs",
     "changeset": "changeset",
     "changeset:version": "changeset version",

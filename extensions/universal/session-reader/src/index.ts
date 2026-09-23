@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
 import { StringEnum } from '@earendil-works/pi-ai'
 import { Type } from 'typebox'
+import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 import type { SessionMetadataProvider } from './discovery/find.js'
 import { handleSessionRead, type SessionReadParams, type SessionReadSignals } from './tool-handler.js'
 import { createHashAutocompleteProvider } from './tui/hash-provider.js'
@@ -153,6 +154,9 @@ const guidelines = [
   'find first to locate a session by uuid fragment or name. TUI #references are full uuids.',
   'outline before detail. Never read raw .jsonl files—use this tool.',
   'family traces fork parents/children, subagent sessions, and workflow runs.',
+  // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇
+  // zcode_* 错误码前先有背景预告（schema 面按设计 D4 零变化，不在此重复）
+  'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the sa- id from the completion notice.',
   'extract what=<type> to pull user messages / commands / files / commits / tool results across turns (optional tool= filter for commands/tool-results).',
   "workflow action to see workflow run overviews (status/budget/steps). Each step's call sessionId can jump to outline/detail for deep reading.",
   "result action to fetch a subagent's final result text (same content as its completion notice): session takes a single sa-id/uuid/path or a comma-separated batch of at most 10; optional limit caps chars per item (default 8000, truncated items carry a pointer to the full file).",
@@ -181,6 +185,9 @@ const registeredPis = new WeakSet<ExtensionAPI>()
 let currentCwdSessionDir: string | null = null
 
 export default function sessionReaderExtension(pi: ExtensionAPI): void {
+  // zcode 读链的结构化日志走「事后排查」通道（appendEntry，不进 LLM 上下文不显 TUI）：
+  // 最早期注入 pi handle——tool-handler 的 getLogger('session-reader') 由此生效（U9）。
+  setPiHandle(pi)
   // u11（design 2026-09-10 §6.6）：标题元数据走 pi 的 SessionManager.listAll(dir)——
   // session_info name 提取、首消息采集与并发解析由 pi 维护。注入范式同 §6.2 信号包：
   // pi 类型只在本层出现（SessionInfo 对发现层 SessionMetadataEntry 结构兼容，直接透传），

@@ -43,6 +43,30 @@ export const builtinContributions: BuiltinContribution[] = [
     },
   },
   {
+    // scheduler-manager（plugin-header-action-modal-points 首消费者，AP-1/AP-2）：
+    // headerActions/modals 为新点位声明（icon 为 lucide 名宿主解析，插件不给 SVG；width 三档闭集）。
+    // commands 是命令点击链的必要配套：commandId 须经 ensureCommandDeclarationsSync 注册进
+    // CommandRegistry，点击才走 execute → WS plugin.executeCommand → Worker handler 闭环；
+    // 缺声明则 E3「命令查不到」错误路径成为唯一路径（open 缺失 → G1 点击开层失效；
+    // toggle/run/delete 缺失 → modal 内 action-bar 写操作 ERR6 死链）。id 与插件侧
+    // api.commands.register 逐字一致（resources/plugins/scheduler-manager/index.ts）。
+    pluginId: 'scheduler-manager',
+    contributes: {
+      headerActions: [
+        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20 },
+      ],
+      modals: [
+        { id: 'scheduler-manager.panel', title: '定时任务', width: 'md' },
+      ],
+      commands: [
+        { command: 'scheduler-manager.open', title: '定时任务' },
+        { command: 'scheduler-manager.toggle', title: '暂停/恢复定时任务' },
+        { command: 'scheduler-manager.run', title: '立即执行定时任务' },
+        { command: 'scheduler-manager.delete', title: '删除定时任务' },
+      ],
+    },
+  },
+  {
     // scheduler 的 slashCommands 静态声明：landing 态无 session → pi 真源为空，slash 列表
     // 「声明即显示」（ADR-0050）——/schedule 命令路径创建本就是 landing 场景。description
     // 对齐 pi.registerCommand 注册期静态串（scheduler 包 i18n.ts 的 command.description

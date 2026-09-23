@@ -26,6 +26,7 @@
 import { onScopeDispose, readonly, shallowRef, watch, type DeepReadonly, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
+import { isBtwVirtualId } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
@@ -82,6 +83,10 @@ export function useForkNoticeFeed(): {
   } {
   /** 按 sessionId 取 entries（shallowRef 下每次重算，feedMap 变化即响应） */
   function notices(sessionId: string): DeepReadonly<ForkNoticeEntry[]> {
+    // [M4-a / btw-question D4] ForkNotice suppress（btw 流渲染）：线是 fork 产物
+    //（header.parentSession 指向源）但关联只删不显——fork 反馈行/分支追踪状态不进 btw 流
+    //（读口单点抑制：MessageStream 全部消费方经本函数；dismiss/clear 对空表幂等）。
+    if (isBtwVirtualId(sessionId)) return readonly([])
     return readonly(feedMap.value.get(sessionId) ?? [])
   }
 

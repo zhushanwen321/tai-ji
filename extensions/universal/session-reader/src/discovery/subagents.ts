@@ -1,9 +1,10 @@
 import { readFile, readdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join, basename } from 'node:path'
-import type { Entry } from '../core/parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 import type { Family, SessionRef } from '../core/family.js'
 import { buildFamilyIndex, resolveFamily } from '../core/family.js'
+import { listZcodeManifests } from './zcode-manifest.js'
 import { resolveSessionRoots, type SessionFileMeta } from './roots.js'
 import { parseSessionHeader, readSessionHeaderFirstLine } from './session-header.js'
 import { resolveWorkflows } from './workflows.js'
@@ -54,7 +55,13 @@ export async function buildFamilyFromFs(sessionId: string, agentDir: string): Pr
   if (!scan.sessionIdToPath.has(sessionId)) {
     throw new Error(await formatSessionNotFound(sessionId, agentDir))
   }
-  const index = buildFamilyIndex(scan.headers, scan.identities, scan.fileStats)
+  // U9 family 接线（design session-reader-shared-core §5 Phase 3 单元三）：zcode 节点
+  // 并入 subagentsByRoot（D5-1 判据在 core 层 buildZcodeSubagentsByRoot）——**纯追加**，
+  // pi 现路径（listRecordManifests/isRecordManifest/appendOrphanIdentities）零改动；
+  // zcode manifest 无 sessionFile 键本就被 isRecordManifest 整条丢弃（F21），与 pi 扫描
+  // 结果集天然不相交，两条来源互不污染。枚举失败容错内置（根不存在 → 空数组不报错）。
+  const zcodeNodes = await listZcodeManifests(agentDir)
+  const index = buildFamilyIndex(scan.headers, scan.identities, scan.fileStats, zcodeNodes)
   const family = resolveFamily(sessionId, index)
 
   // ---- 6. workflows（enrichRefs 回填已删除，ext-simplify-04 U4/E2：fileName/cwd 占位

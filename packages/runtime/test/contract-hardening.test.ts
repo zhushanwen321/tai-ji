@@ -605,7 +605,7 @@ describe('session 事件注册表定向投递（registerCreate → didCreate）'
       listSessions: () => [],
       getSession: () => undefined,
       getActiveSession: () => undefined,
-      sendMessage: async () => {},
+      sendMessage: async () => ({ blocked: false }),
       sessionEvents: dispatchTable,
     })
   })
@@ -811,7 +811,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     configSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>>
     storageSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>>
     sessionDataSet: ReturnType<typeof vi.fn<(sessionId: string, key: string, value: unknown) => void>>
-    messageSent: ReturnType<typeof vi.fn<(sessionId: string | undefined, role: string, content: string) => Promise<void>>>
+    messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>>
     notifySent: ReturnType<typeof vi.fn<(pluginId: string, level: string, message: string) => void>>
     statusBarSet: ReturnType<typeof vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>>
     viewUpdated: ReturnType<typeof vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>>
@@ -830,7 +830,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       configSet: vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>(),
       storageSet: vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>(),
       sessionDataSet: vi.fn<(sessionId: string, key: string, value: unknown) => void>(),
-      messageSent: vi.fn<(sessionId: string | undefined, role: string, content: string) => Promise<void>>(),
+      messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>(),
       notifySent: vi.fn<(pluginId: string, level: string, message: string) => void>(),
       statusBarSet: vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>(),
       viewUpdated: vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>(),
@@ -985,8 +985,10 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     await expectInvalid('plugin.agent.setModel', { model: {} }, 'INVALID_MODEL', 'model')
     await expectInvalid('plugin.agent.setThinkingLevel', {}, 'INVALID_LEVEL', 'level')
     await expectInvalid('plugin.workspace.findFiles', { pattern: 999 }, 'INVALID_PATTERN', 'pattern')
-    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', guiTree: 'not-array' }, 'INVALID_GUI_TREE', 'guiTree')
+    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', sessionId: 's1', guiTree: 'not-array' }, 'INVALID_GUI_TREE', 'guiTree')
     await expectInvalid('plugin.views.update', { pluginId: 'p', guiTree: [] }, 'INVALID_VIEW_ID', 'viewId')
+    // [D1/u5b] sessionId 显式必填（E15）：缺失即拒，不再回落活跃会话猜测
+    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', guiTree: [] }, 'INVALID_SESSION_ID', 'sessionId')
   })
 
   it('CT-U1 畸形输入零写副作用：全部写通道未被调用、注册表零条目（不落盘不毒化）', async () => {
@@ -995,9 +997,10 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       ['plugin.config.set', { pluginId: 'p', key: '../k', value: 1 }],
       ['plugin.sessionData.set', { sessionId: '../s', key: 'k', value: 1 }],
       ['plugin.sessions.sendMessage', { sessionId: '../s', role: 'user', content: 'x' }],
+      ['plugin.sessions.sendMessage', {}],
       ['plugin.notify', { pluginId: 'p', level: 'info', message: 42 }],
       ['plugin.ui.updateStatusBarItem', { pluginId: 'p', id: 'i', text: {} }],
-      ['plugin.views.update', { pluginId: 'p', viewId: 'v', guiTree: {} }],
+      ['plugin.views.update', { pluginId: 'p', viewId: 'v', sessionId: 's1', guiTree: {} }],
       ['plugin.agent.setModel', { model: 42 }],
       ['plugin.commands.register', { pluginId: 'p', command: { id: 'x' }, handlerId: 42 }],
       ['plugin.tools.register', { pluginId: 'p', name: {}}],

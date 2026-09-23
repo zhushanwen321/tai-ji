@@ -44,6 +44,10 @@ export default {
     branch: 'Branch',
     gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
+    // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
+    pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
+    pluginActionRestoring: 'Session restoring, availability unknown',
+    pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
   },
   composer: {
     send: 'Send',
@@ -92,7 +96,12 @@ export default {
     // the collapsed state reuses collapse, no new key)
     blockScrollLines: '{from}–{to} of {total} lines',
     blockScrollExpandAll: 'Expand all',
+    // Process-block (third family) header prefixes and detail-bar stats
     thinkingBlock: 'Thinking',
+    subagent: 'Subagent',
+    metaLines: '{n} lines',
+    metaChars: '{n} chars',
+    metaCharsK: '{n}K chars',
     imagePlaceholder: 'Image cache full',
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',
@@ -154,8 +163,17 @@ export default {
     bashNoContext: 'no context',
     bashCancel: 'Cancel',
     bashUnknownCommand: '(unknown command)',
-    // [system-notice-rendering-upgrade U3] "background" chip of the structured background-bash row (D2)
-    bashBackgroundChip: 'background',
+    // [notice-family-phrase-detail 2026-09-18 option A] background-bash row phrase-first: body
+    // keeps only the terminal phrase (finished/failed/timed out); the raw command moves into the
+    // hover detail (HoverCard, read-only + copy); the "background" chip is retired with its
+    // semantics absorbed into the phrase (bashBackgroundChip key deleted). bashCancelled/bashTimeout
+    // are still consumed by BashOutputBlock
+    bashFinished: 'Background command finished',
+    bashFinishedFailed: 'Background command failed',
+    bashTimedOut: 'Background command timed out',
+    // [notice-family-phrase-detail] hover-detail panel titles (shared by SystemNotice rows + ActivityStrip bash row)
+    bashCommandLabel: 'Command',
+    noticeDetailLabel: 'Full notice',
     // [system-notice-rendering-upgrade U3] boundary row splits into main/sub copies (D5, consumed by
     // U6): count main copy + "resumed" sub copy. No leading dot in the value — the separator is
     // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
@@ -167,6 +185,9 @@ export default {
     turnTriggerBgNotifyFailed: '{count} failed',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
+    // [notice-family-phrase-detail 2026-09-18 option A] executing-bash row elapsed meta — keeps an
+    // in-row observation of the run after the command moved to the hover detail
+    executingBashElapsed: '{elapsed} elapsed',
     // no hardcoded threshold — user-adjustable, a literal would drift)
   },
   git: {
@@ -250,6 +271,14 @@ export default {
     // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
     genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
+    // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
+    // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
+    // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
+    genStatsTtftTitle: 'First token latency (TTFT)',
+    genStatsTtftDay: 'Today p50 (this model)',
+    genStatsTtftD7: 'Last 7 days p50',
+    genStatsTtftD30: 'Last 30 days p50',
+    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (p50 median); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
   },
   sideDrawer: {
     title: 'Side drawer',
@@ -491,6 +520,17 @@ export default {
     selectSession: 'Select a session from the left',
     taskFailed: 'Task creation failed: {error}',
     sendFailed: 'Failed to send message: {error}',
+    // ── U4 model/thinking switch failures (model-switch-live-provider-sync §3.4) ──
+    // 5 new codes + general; the 4 pass-through codes fall back to `general`
+    // (toast shows the backend message).
+    modelSwitch: {
+      general: 'Switch failed: {error}',
+      sessionActivateFailed: 'Could not restore the session — reopen it from the sidebar',
+      sessionActivateTimeout: 'Session restore timed out — please retry shortly',
+      modelNotFound: 'This model no longer exists — please pick another',
+      providerCredentialMissing: 'This provider has no credential — add the API key in Settings',
+      engineModelMissing: 'The engine has not picked up this model yet: retry in a couple of seconds if you just changed the config; if it keeps failing, check the provider config in Settings',
+    },
   },
   ambiguous: {
     title: '「{basename}」 has {count} matches, choose a file to open',

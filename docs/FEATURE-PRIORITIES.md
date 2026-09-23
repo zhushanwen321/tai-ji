@@ -54,7 +54,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
-| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
+| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
@@ -73,7 +73,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 自动更新 | 更新检查、下载、安装（update-e2e） |
 | 通知系统 | 桌面通知、pending-notifications 汇聚 |
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
-| session-reader | 通知链 session_read 指针解析、跨进程读 |
+| session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
@@ -81,6 +81,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
+| btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
 
 ## 5. P3 — 特定人群/低影响
 
@@ -94,6 +95,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
 | 视觉细节与动画 | 过渡动画、traffic light 布局数值 | 全体但纯视觉 |
+| 生成指标触发器（gen-stats） | composer 工具带速度 t/s · 缓存命中率 · TTFT 首字延迟三触发器 + 浮层 p50 聚合（`GenStatsTriggers` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
 | Mock 开发轨 | VITE_MOCK 拦截层 | 仅开发者 |
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。
@@ -111,10 +113,11 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |
 | msg-id-mapper | taiji | P1 | 挂了消息映射错乱 |
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
+| provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
 | plan | universal | P2 | 面板能力 + 执行方式选择 |
-| session-reader | universal | P2 | 通知链依赖 |
+| session-reader | universal | P2 | 通知链依赖（2026-09-21 起覆盖 zcode 引擎 subagent 回读；挂掉后果不变，zcode 引擎自身 P2 封顶） |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |
 | todo | universal | P2 | 面板能力 |

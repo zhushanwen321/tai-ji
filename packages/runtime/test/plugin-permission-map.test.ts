@@ -40,6 +40,14 @@ interface ServiceInternals {
   registerRpcMethods: () => void
 }
 
+/**
+ * SSOT 已登记、RPC handler 尚未实装的方法豁免表（u2d 批次建立）。[u5b 已清空]：
+ * activate 订阅族（session-api 六点扩表）与 ui 命令式三点位（ui-api showModal/
+ * hideModal/updateHeaderAction）handler 均已落地，5 方法全部转正——豁免表保留空集
+ * 形态供后续批次复用（登记即债务，落地即清账）。
+ */
+const PENDING_U5B_METHODS: ReadonlySet<string> = new Set<string>([])
+
 describe('plugin-permission-map SSOT（AC-I6）', () => {
   let tmpDir: string
   /** 真实 PluginRpcServer 注册表全量（registerAllRpcMethods 产物） */
@@ -78,8 +86,14 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
   })
 
   it('AC-I6: PLUGIN_RPC_METHODS 与真实 rpcServer 注册表集合相等（双向防漂移）', () => {
-    // SSOT 表 ⊆ 真实注册表：表里的方法都真实存在（无幽灵方法）
+    // SSOT 表 ⊆ 真实注册表：表里的方法都真实存在（无幽灵方法）。
+    // PENDING_U5B_METHODS 例外反向锁定：登记在案但 handler 随 U5 落地——
+    // 若已实装（should be false 变红）说明 U5 已交付，须从豁免表移除并更新 size 锚点。
     for (const m of PLUGIN_RPC_METHODS) {
+      if (PENDING_U5B_METHODS.has(m)) {
+        expect(registeredMethods.has(m), `pending method '${m}' is now registered on PluginRpcServer — remove it from PENDING_U5B_METHODS and bump the size anchor`).toBe(false)
+        continue
+      }
       expect(registeredMethods.has(m), `SSOT method '${m}' not registered on real PluginRpcServer`).toBe(true)
     }
     // 真实注册表 ⊆ SSOT 表：新增 RPC 方法未收录进 SSOT 表时红（孤儿方法，
@@ -87,10 +101,12 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     const ssot = new Set<string>(PLUGIN_RPC_METHODS)
     const orphans = [...registeredMethods].filter(m => !ssot.has(m))
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
-    // 数量级回归锚点：当前 47（agent5 commands3 config3 hooks2 notify1 sessionData4
-    // sessions8 storage8 tools2 ui6 views2 workspace3）——增减方法时同步更新注释
-    expect(PLUGIN_RPC_METHODS.length).toBe(47)
-    expect(registeredMethods.size).toBe(47)
+    // 数量级回归锚点：47（agent5 commands3 config3 hooks2 notify1 sessionData4
+    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 9（readEntries/
+    // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2 + ui 三点位 3，
+    // [u5b] 后五者 handler 已落地转正）= 56。registeredMethods.size 同步锚点：56/56。
+    expect(PLUGIN_RPC_METHODS.length).toBe(56)
+    expect(registeredMethods.size).toBe(56)
   })
 
   it('AC-I6: 全部口径归一化产物无孤儿（每个产出方法名都在真实注册表）', () => {
@@ -105,7 +121,8 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       const methods = normalizePermissionInput(input)
       expect(methods.length, `input '${input}' must map to non-empty set`).toBeGreaterThan(0)
       for (const m of methods) {
-        expect(registeredMethods.has(m), `mapped method '${m}' (from '${input}') not on real PluginRpcServer`).toBe(true)
+        // 豁免表（PENDING_U5B_METHODS）当前为空：全部登记方法均已实装
+        expect(registeredMethods.has(m) || PENDING_U5B_METHODS.has(m), `mapped method '${m}' (from '${input}') not on real PluginRpcServer`).toBe(true)
       }
     }
   })
@@ -122,6 +139,10 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       'plugin.sessions.list', 'plugin.sessions.get', 'plugin.sessions.getActive',
       'plugin.sessions.registerCreate', 'plugin.sessions.registerDestroy',
       'plugin.sessions.unregisterCreate', 'plugin.sessions.unregisterDestroy',
+      // AP-4 读面（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
+      'plugin.sessions.readEntries', 'plugin.sessions.getCommands',
+      'plugin.sessions.registerEntryInvalidation', 'plugin.sessions.unregisterEntryInvalidation',
+      'plugin.sessions.registerActivate', 'plugin.sessions.unregisterActivate',
     ])
     // 注册类能力连带 unregister（成对授予避免「能注册不能注销」）
     expect(normalizePermissionInput('tools.register')).toEqual(['plugin.tools.register', 'plugin.tools.unregister'])

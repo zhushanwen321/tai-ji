@@ -3,15 +3,41 @@
  *
  * 覆盖（complexity-debt 第二批 U08，handlePluginMessage switch→表驱动重构的行为锚定）：
  * - 前置守卫：pluginService null → sendError('handler_error')，不触分发表
- * - 11 个 plugin.* case 的 reply/error 路径（payload 透传 + 文案逐字节）
+ * - 12 个 plugin.* case 的 reply/error 路径（payload 透传 + 文案逐字节）
  * - plugin.install 的 invalid_params / success / failure(+error 缺省兜底) 三分支
+ * - plugin.dismissModal（AP-2 关①，u5b）：三元组校验 + 广播/notify 委托 + 畸形拒绝
+ * - E6（AP-3）：executeCommand args 非标量 → INVALID_ARGS，不 dispatch
  * - 落空语义：未知 type 不调用任何 service 方法、无 reply/error（原 switch 无 default）
  *
  * 运行：pnpm --filter @taiji/runtime run test -- test/plugin-message-handler.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PluginMessageHandler } from '../src/transport/plugin-message-handler.js'
-import type { ClientMessage } from '@taiji/shared'
+import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-server.js'
+import type { WorkerPort } from '../src/services/plugin-service/plugin-rpc-server.js'
+import {
+  registerUiRpcHandlers,
+  wireRuntimeModalExits,
+  resetRuntimeModalSlotForTest,
+  getRuntimeModalSlot,
+} from '../src/services/plugin-service/api/ui-api.js'
+import type { ClientMessage, PluginModalStatePayload } from '@taiji/shared'
+
+/** mock WorkerPort（session-api-read.test.ts 同模式） */
+function createMockPort(): WorkerPort & { messages: unknown[] } {
+  const messages: unknown[] = []
+  return {
+    messages,
+    postMessage(msg: unknown) {
+      messages.push(msg)
+    },
+  }
+}
+
+beforeEach(() => {
+  // 模块级槽复位：用例间互不残留（出线在 wireExits 内按用例重挂）
+  resetRuntimeModalSlotForTest()
+})
 
 interface CapturedReply {
   id: string | undefined
@@ -131,6 +157,22 @@ describe('PluginMessageHandler — 查询/操作类 case', () => {
     expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
   })
 
+  it('E6: args 含非标量值 → INVALID_ARGS error envelope，不 dispatch handler', async () => {
+    const { replies, errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.executeCommand', { pluginId: 'p6', commandId: 'cmd1', args: { nested: { x: 1 } } }), WS)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ code: 'INVALID_ARGS', id: 'm1' })
+    expect(pluginService.executeCommand).not.toHaveBeenCalled()
+    expect(replies).toHaveLength(0)
+  })
+
+  it('E6: args 数组形态同样拒绝（非 flat scalar record）', async () => {
+    const { errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.executeCommand', { pluginId: 'p6', commandId: 'cmd1', args: ['a'] }), WS)
+    expect(errors[0]?.code).toBe('INVALID_ARGS')
+    expect(pluginService.executeCommand).not.toHaveBeenCalled()
+  })
+
   it('plugin.uiResponse → handleUiResponse(requestId, result) + reply pong {}', async () => {
     const { replies, handler, pluginService } = makeHandler()
     await handler.handlePluginMessage(buildMsg('plugin.uiResponse', { requestId: 'req-9', result: { ok: true } }), WS)
@@ -213,6 +255,113 @@ describe('PluginMessageHandler — plugin.install 三分支', () => {
   })
 })
 
+describe('PluginMessageHandler — plugin.dismissModal（AP-2 关①，u5b）', () => {
+  /** 复位 ui-api 的模块级 modal 槽（每用例干净起点），返回捕获广播/notify 的 wire */
+  function wireExits() {
+    resetRuntimeModalSlotForTest()
+    const modalStateFrames: PluginModalStatePayload[] = []
+    const headerActionFrames: unknown[] = []
+    const notifications: Array<{ workerId: string; payload: unknown }> = []
+    wireRuntimeModalExits({
+      // 回 true = 帧已发出（B-F2 后出线回传投递结果；void 形态会被 showModal 判为丢弃并回滚槽）
+      broadcastModalState: (payload) => { modalStateFrames.push(payload); return true },
+      broadcastHeaderActionUpdate: (payload) => { headerActionFrames.push(payload); return true },
+      notifyModalClosed: (workerId, payload) => { notifications.push({ workerId, payload }) },
+    })
+    return { modalStateFrames, headerActionFrames, notifications }
+  }
+
+  it('三元组匹配 → closed 广播 + plugin.ui.modalClosed notify + reply pong', async () => {
+    const exits = wireExits()
+    // 预置 open 槽（workerId 'w1'，epoch 1）：经 showModal RPC handler 全链路
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    registerUiRpcHandlers(rpc, {
+      showSelect: vi.fn(),
+      showConfirm: vi.fn(),
+      showInput: vi.fn(),
+      notify: vi.fn(),
+      updateStatusBarItem: vi.fn(),
+    })
+    await rpc.dispatch('w1', {
+      jsonrpc: '2.0', id: 1, method: 'plugin.ui.showModal',
+      params: { pluginId: 'p1', modalId: 'm1', sessionId: 's1' },
+    })
+
+    const { replies, handler } = makeHandler()
+    await handler.handlePluginMessage(
+      buildMsg('plugin.dismissModal', { pluginId: 'p1', modalId: 'm1', epoch: 1, reason: 'dismissed' }),
+      WS,
+    )
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
+    // open 帧来自 showModal 预置（epoch 1）；dismiss 只追加一条 closed 帧
+    const closedFrames = exits.modalStateFrames.filter((f) => f.state === 'closed')
+    expect(closedFrames).toHaveLength(1)
+    expect(closedFrames[0]).toMatchObject({
+      pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 1, reason: 'dismissed',
+    })
+    expect(exits.notifications).toEqual([
+      { workerId: 'w1', payload: { modalId: 'm1', reason: 'dismissed' } },
+    ])
+  })
+
+  it('陈旧 epoch（关闭在途时的重开）→ 忽略：零广播零 notify + reply pong', async () => {
+    const exits = wireExits()
+    // 槽 epoch 已推进到 2（重复 open 递增），陈旧 dismiss(epoch=1) 不误关
+    const rpc = new PluginRpcServer()
+    rpc.registerWorker('w1', createMockPort())
+    registerUiRpcHandlers(rpc, {
+      showSelect: vi.fn(), showConfirm: vi.fn(), showInput: vi.fn(), notify: vi.fn(), updateStatusBarItem: vi.fn(),
+    })
+    await rpc.dispatch('w1', { jsonrpc: '2.0', id: 1, method: 'plugin.ui.showModal', params: { pluginId: 'p1', modalId: 'm1', sessionId: 's1' } })
+    await rpc.dispatch('w1', { jsonrpc: '2.0', id: 2, method: 'plugin.ui.showModal', params: { pluginId: 'p1', modalId: 'm1', sessionId: 's1' } })
+
+    const { replies, handler } = makeHandler()
+    await handler.handlePluginMessage(
+      buildMsg('plugin.dismissModal', { pluginId: 'p1', modalId: 'm1', epoch: 1, reason: 'dismissed' }),
+      WS,
+    )
+    expect(exits.modalStateFrames.filter((f) => f.state === 'closed')).toHaveLength(0)
+    expect(exits.notifications).toHaveLength(0)
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
+    // 槽仍在（epoch 2 未被陈旧 dismiss 清掉）
+    expect(getRuntimeModalSlot()?.epoch).toBe(2)
+    resetRuntimeModalSlotForTest()
+  })
+
+  it('槽不存在 / pluginId 或 modalId 不匹配 → 忽略（closed 对已关层 no-op）', async () => {
+    const exits = wireExits()
+    const { replies, handler } = makeHandler()
+    await handler.handlePluginMessage(
+      buildMsg('plugin.dismissModal', { pluginId: 'ghost', modalId: 'm1', epoch: 1, reason: 'session-switched' }),
+      WS,
+    )
+    expect(exits.modalStateFrames).toHaveLength(0)
+    expect(exits.notifications).toHaveLength(0)
+    expect(replies).toHaveLength(1)
+    resetRuntimeModalSlotForTest()
+  })
+
+  it('畸形 payload（epoch 非正整数 / reason 越界）→ invalid_params error envelope', async () => {
+    const exits = wireExits()
+    const { errors, handler } = makeHandler()
+    await handler.handlePluginMessage(
+      buildMsg('plugin.dismissModal', { pluginId: 'p1', modalId: 'm1', epoch: 0, reason: 'dismissed' }),
+      WS,
+    )
+    await handler.handlePluginMessage(
+      buildMsg('plugin.dismissModal', { pluginId: 'p1', modalId: 'm1', epoch: 1, reason: 'bogus' }),
+      WS,
+    )
+    expect(errors).toHaveLength(2)
+    expect(errors[0]).toMatchObject({ code: 'invalid_params' })
+    expect(errors[1]).toMatchObject({ code: 'invalid_params' })
+    expect(exits.modalStateFrames).toHaveLength(0)
+    resetRuntimeModalSlotForTest()
+  })
+})
+
 describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
   it('未知 type（不在分发表）→ sendError(handler_not_registered)：无 service 调用、无 reply（RT-1#6 显形）', async () => {
     const { replies, errors, handler, pluginService } = makeHandler()
@@ -228,13 +377,13 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 11 个 plugin.* type', () => {
+  it('handles 清单含全部 12 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(11)
+    expect(handler.handles).toHaveLength(12)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
-      'plugin.mountPoints.sync',
+      'plugin.mountPoints.sync', 'plugin.dismissModal',
     ]))
   })
 })

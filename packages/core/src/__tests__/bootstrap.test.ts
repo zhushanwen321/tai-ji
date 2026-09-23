@@ -124,7 +124,7 @@ describe('步骤真实现（非 spyOn 路径）', () => {
     await expect(restoreSessions()).resolves.toBeUndefined()
   })
 
-  it('registerMountPoints 注入 registry 后注册 4 个 Tier 1 挂载点', async () => {
+  it('registerMountPoints 注入 registry 后注册 5 个挂载点（Tier 1 四点 + modal）', async () => {
     const register = vi.fn()
     setExtensionRegistries({
       mountPoints: { register } as never,
@@ -138,6 +138,7 @@ describe('步骤真实现（非 spyOn 路径）', () => {
       'panel.header',
       'composer.toolbar',
       'statusbar',
+      'modal',
     ])
   })
 
