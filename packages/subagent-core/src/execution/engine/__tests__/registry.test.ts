@@ -180,7 +180,7 @@ describe("engine registry", () => {
     expect(() => registerEngine("fake", () => makeFakeEngine("fake-v2"))).not.toThrow();
   });
 
-  // ── [R1 D6③] disposeEngines：宿主收割（killAllSpawnedChildren）前的触发遍历 ──
+  // ── [R1 D6③] disposeEngines：宿主收割（markAllSpawnedChildrenDead）前的触发遍历 ──
 
   describe("disposeEngines（D6③）", () => {
     it("只对已实例化的引擎触发 dispose（绝不实例化未用引擎）", () => {

@@ -21,8 +21,14 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 // （u-core-atomic 逐字平移，输出与原本地实现字节一致；本地实现已删）。
 // getBoundNotifyLedger：core 通知账本消费入口（bindNotifyLedgerHost 在
 // session-lifecycle.ts session_start 装配；未 bind 时降级直发，见 notifyDone 注释）。
-import { boundedPrettySerialize, getBoundNotifyLedger } from "@zhushanwen/subagent-core";
-import type { DoneReason, WorkflowRun } from "@zhushanwen/subagent-core";
+import {
+  boundedPrettySerialize,
+  doneReasonToRunOutcome,
+  getBoundNotifyLedger,
+  RUN_EVENT_JOURNAL_SUFFIX,
+  type RunOutcome,
+} from "@zhushanwen/subagent-core";
+import type { WorkflowRun } from "@zhushanwen/subagent-core";
 
 // 模块级 logger（与 session-lifecycle.ts / index.ts 同 component 名）
 const logger = getLogger("subagents");
@@ -54,15 +60,13 @@ const MS_PER_MINUTE = 60_000;
 /** [D6-2] stall 阈值缺省（分钟）：20 分钟（对齐 zcode 语义）。 */
 const WORKFLOW_STALL_THRESHOLD_MINUTES = 20;
 
-/** [D7] run 事件 journal 的文件名形态（core run-events P1a 钉死：`<runId>.events.jsonl`
- *  ——runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
- *  core 未从 barrel 导出文件名推导，本地镜像 + 上述锚点注释（漂移信号 = journal
- *  指针失效，core 命名变更时同批改）。 */
-const RUN_EVENTS_JOURNAL_SUFFIX = ".events.jsonl";
-
-/** [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）。 */
+/**
+ * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.events.jsonl`
+ * （runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
+ * 后缀经 core barrel 单源 RUN_EVENT_JOURNAL_SUFFIX，core 命名变更时编译期同步）。
+ */
 function runEventsJournalPath(artifactsDir: string, runId: string): string {
-  return join(artifactsDir, `${runId}${RUN_EVENTS_JOURNAL_SUFFIX}`);
+  return join(artifactsDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
 }
 
 /**
@@ -90,33 +94,10 @@ const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
  */
 export const MAX_NOTIFIED_RUN_IDS = 1000;
 
-/**
- * [D7] run 终局 outcome 三态（core run-events ALL_RUN_OUTCOMES 词表镜像——barrel
- * 未导出该类型，本地封闭字面量联合 + 上方映射函数注释锚定；漂移信号 = journal
- * run-settled 帧出现词表外值时 core 自有用例先红）。
- */
-type RunOutcome = "completed" | "failed" | "cancelled";
-
-/**
- * [D7] DoneReason 六因 → RunOutcome 三态。与 core worker-message-pump 的
- * dispatchFinalRunSettle 同构映射（budget_limited/time_limited 是 run 怎么死的
- * 系统层失败 = failed；aborted 经 cancel-requested 控制事件 = cancelled）。core
- * 不能 import extension（workflow-state-root.ts 头注同款分层约束），双侧注释互指
- * ——漂移信号 = 通知 outcome 与 journal run-settled 帧 outcome 不一致。
- */
-function mapDoneReasonToOutcome(reason: DoneReason): RunOutcome {
-  switch (reason) {
-    case "completed":
-      return "completed";
-    case "failed":
-    case "budget_limited":
-    case "time_limited":
-    case "invalid_args":
-      return "failed";
-    case "aborted":
-      return "cancelled";
-  }
-}
+// [D7] run 终局 outcome 三态 + DoneReason 六因 → 三态映射：经 core barrel 单源
+// （RunOutcome / doneReasonToRunOutcome，run-events 定义——词表语义与映射依据的
+// 权威注释在 core 侧；漂移信号 = journal run-settled 帧出现词表外值时 core 自有
+// 用例先红）。原本地镜像类型 + mapDoneReasonToOutcome 已删。
 
 /**
  * [D7] 失败终局的结构化码提取：最后一个失败 call 的 failureKind
@@ -288,7 +269,7 @@ export function notifyDone(
     notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}${runId}`,
     // [D7] 终局必达载荷：outcome 恒有（done ⟹ reason 有值，I2 不变式；防御缺省
     // completed 兜底只在异常形态生效）；errorCode/resultSummary/指针按终局形态。
-    outcome: mapDoneReasonToOutcome(run.state.reason ?? "completed"),
+    outcome: doneReasonToRunOutcome(run.state.reason ?? "completed"),
   };
   if (run.state.reason === "failed") {
     const errorCode = extractFailureErrorCode(run);

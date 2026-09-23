@@ -54,7 +54,9 @@ import { executeNestedWorkflow, terminateRunningRuns } from "@zhushanwen/subagen
 import {
   evictDoneRunsBeyondCap,
   MAX_RETAINED_DONE_RUNS,
+  RUN_EVENT_JOURNAL_SUFFIX,
   scheduleTimeBudget,
+  STATE_DIR_NAME,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { WorkerHostImpl } from "@zhushanwen/subagent-core";
@@ -223,8 +225,8 @@ function checkStalledRuns(
       if (run.state.status !== "running") continue;
       if (domainState.stallNotifiedRunIds.has(run.runId)) continue;
       // journal 文件名 = <runId>.events.jsonl（runId 自带 wf- 前缀，core run-events
-      // P1a 钉死——RUN_EVENTS_JOURNAL_SUFFIX 本地镜像见下方常量注释）
-      const journalPath = join(st.sessionDir, "workflow-state", `${run.runId}${RUN_EVENTS_JOURNAL_SUFFIX}`);
+      // P1a 钉死——后缀经 core barrel 单源 RUN_EVENT_JOURNAL_SUFFIX）
+      const journalPath = join(st.sessionDir, STATE_DIR_NAME, `${run.runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
       const lastProgressMs =
         readLastJournalTimestamp(journalPath) ?? Date.parse(run.meta.startedAt);
       if (!Number.isFinite(lastProgressMs)) continue;
@@ -235,12 +237,6 @@ function checkStalledRuns(
     }
   }
 }
-
-/** journal 文件名尾段（core run-events P1a 钉死 `<runId>.events.jsonl`——runId
- *  自带 wf- 前缀，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；与 helpers.ts 的
- *  指针构造同锚——core 未导出文件名推导，本地镜像，漂移信号 = stall 判定恒
- *  回退 run 起点）。 */
-const RUN_EVENTS_JOURNAL_SUFFIX = ".events.jsonl";
 
 // [skill-reload D3] makeDeps volatile 成员的 pi 现读源。只读槽不创建——本函数被调
 // 时 domainState 必已存在（makeDeps 只能经 setupWorkflowDomain 之后的事件链创建）。
@@ -405,7 +401,8 @@ export function setupWorkflowDomain(
       //
       // [D7] notifyDone 第 6 参注入产物目录指针（<sessionDir>/workflow-state——
       // journal/manifest/.state 同目录；state.sessionDir 是 sessionState 条目字段，
-      // adoption rebind 换新后自动跟进）。[D6-2] 终局同时回收 stall 已通知标记
+      // adoption rebind 换新后自动跟进；目录分量经 core barrel STATE_DIR_NAME 单源）。
+      // [D6-2] 终局同时回收 stall 已通知标记
       // （run 已终局，stall 声明生命周期结束；Set 防泄漏）。
       onRunDone: (run: WorkflowRun) => {
         domainState.stallNotifiedRunIds.delete(run.runId);
@@ -415,7 +412,7 @@ export function setupWorkflowDomain(
           run,
           notifiedRunIds,
           toGuiCtx(state.ctx),
-          join(state.sessionDir, "workflow-state"),
+          join(state.sessionDir, STATE_DIR_NAME),
         );
         trackNotifiedRunId(notifiedRunIds, run.runId);
         const evicted = evictDoneRunsBeyondCap(state.runs, MAX_RETAINED_DONE_RUNS);
@@ -451,7 +448,13 @@ export function setupWorkflowDomain(
       workflowAgentDispatch: (opts, parentRunId, signal) => {
         const service = getSubagentService();
         if (!service) {
-          throw new Error("workflow agent dispatch unavailable: subagent service not initialized");
+          // [C2] 错误带恢复动作：service 缺席 = session_start 装配链失败（与
+          // getWorkflowDeps 的 Session not initialized 同根因），文案同款闭环。
+          throw new Error(
+            "workflow agent dispatch unavailable: subagent service not initialized " +
+              "(session_start assembly failed). Recovery: restart pi or reload this session; " +
+              "check the subagents extension logs for the root cause.",
+          );
         }
         return service.executeWorkflowAgent(opts, parentRunId, signal);
       },
@@ -554,6 +557,14 @@ export function setupWorkflowDomain(
     const service = getModelConfigService();
     if (service && typeof service.setCtxModel === "function") {
       service.setCtxModel(event.model);
+    } else {
+      // [C2] 不再静默：service 缺席（session_start 装配链失败）时模型切换缓存未
+      // 刷新，后续 resolveModel 会用旧模型——warn 留痕接通「现象 → 根因」链路。
+      // model_select 是低频用户操作，不会刷屏。
+      logger.warn(
+        "[subagent-workflow] model_select ignored: model config service not initialized (session_start assembly failed) — model switch will not take effect for new subagents until session reload",
+        { model: event.model },
+      );
     }
   });
 
@@ -722,7 +733,18 @@ export function setupWorkflowDomain(
   const getWorkflowDeps = (sessionId: string): WorkflowDepsResolution => {
     const state = sessionState.get(sessionId);
     if (!state) {
-      return { ok: false, reason: "Session not initialized" };
+      // [C2] 错误带恢复动作（对齐下方 store unavailable 的 MF-1 闭环风格）：state
+      // 缺席的 root cause 是 session_start 装配链失败（围栏 catch 只留 extension
+      // 日志），文案指引 reload + 查日志，接通「现象 → 根因」链路。前缀子串
+      // "Session not initialized" 被 session-lifecycle / workflow-events-deps-getter
+      // 测试锁定（toThrowError 子串匹配），改写时保留该前缀。
+      return {
+        ok: false,
+        reason:
+          "Session not initialized (session_start assembly failed). " +
+          "Recovery: restart pi or reload this session to re-run initialization; " +
+          "check the subagents extension logs (session_start failure) for the root cause.",
+      };
     }
     // MF-1: store 不健康时 fail-fast，避免 store.save 再次失败导致 run 状态不落地。
     if (!state.storeHealthy) {

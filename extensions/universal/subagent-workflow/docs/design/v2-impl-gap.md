@@ -22,7 +22,7 @@
 
 ## 关键发现（决定派发策略）
 
-1. **lifecycle-manager.ts 完全不存在**，V2 的 5 项职责（idle timer / 全局 ceiling / shutdown 收割 / 孤儿扫描 / activate 互斥）全部从零新建。但部分能力散落现有代码可复用：keep-alive 超时骨架（session-runner MF-3/MF-4）、进程句柄 Map（`spawnedChildren`）、dispose 时 killAllSpawnedChildren。
+1. **lifecycle-manager.ts 完全不存在**，V2 的 5 项职责（idle timer / 全局 ceiling / shutdown 收割 / 孤儿扫描 / activate 互斥）全部从零新建。但部分能力散落现有代码可复用：keep-alive 超时骨架（session-runner MF-3/MF-4）、进程句柄 Map（`spawnedChildren`）、dispose 时 markAllSpawnedChildrenDead。
 2. **keep-alive（MF-3/MF-4）是改造复用，不是替换也不是共存**：MF-3/MF-4 是「agent_end 触发 kill，但有理由暂缓 kill」的临时保活；V2 idle timer 是「agent_settled 后不 kill，挂 timer 等续聊/超时」。setTimeout→SIGTERM 骨架可复用，但触发条件（后代/recentUnregister）和完成事件（agent_end→agent_settled）都要重构。
 3. **统一投递：messageHandler 已支持续聊结构，但走 v1 resumeRound（每轮重开 session）**。deliverToRunning 的热路径（getChildByRecord→child.stdin）形态正确、V2 可复用，但因每轮 kill 进程句柄只在一个轮次内存活。V2 把进程生命周期从「单轮」拉长到「整个对话」即可原样复用这条热路径。
 4. **identity fs 补写是独立 bug 源**（tree 污染），与 kill-per-round 正交——无论范式如何都要修，V2 改由子进程 session_start 写。
@@ -43,7 +43,7 @@
 | **childEnv 组装** | L745-764，仅 5 个 `PI_SUBAGENT_*` env（FORK_DEPTH/ROOT_SESSION_ID/SELF_RECORD_ID/DEPTH/ROOT_CWD） | 全字段经 env 传子进程（id/agent/mode/task/slug/startedAt/rootSessionId/parentRecordId/depth/forkDepth/chatMode） | **改**（S-M）：补全 ~8 个 identity env 字段 |
 | **事件 pump** | L892-1000，按 `parsed.kind` 分发（header/event/response/extension_ui_request）；handleSdkEvent（L627-690）处理 tool/message/turn/compaction。**零 `agent_settled` 引用** | pump 加 `agent_settled` 跟踪 | **新增**（M）：加 `isAgentSettledEvt` 守卫 + handler |
 
-**可复用**：`spawnedChildren` Map（L194）+ `getChildByRecord`（L243-245）+ `killAllSpawnedChildren`（dispose 调用）+ MF-3/MF-4 超时骨架。
+**可复用**：`spawnedChildren` Map（L194）+ `getChildByRecord`（L243-245）+ `markAllSpawnedChildrenDead`（dispose 调用）+ MF-3/MF-4 超时骨架。
 
 ### 2. `execution/subagent-service.ts`（1472 行）— **L，核心战场**
 
@@ -121,7 +121,7 @@
 |---|---|---|---|
 | **idle timer** | 部分能力散落：MF-3（WAKEUP_GRACE_MS 15s）/MF-4（computeWatchdogMs 动态）是「agent_end 后暂缓 kill」的临时保活 | per-record idle timer（agent_settled arm / 新 turn disarm / 超时 SIGTERM） | **新增**（M）：新建。MF-3/MF-4 超时骨架可复用为模板，触发条件重构 |
 | **全局 ceiling** | **完全缺失** | 全局活进程上限，最久空闲挤出（LRU） | **新增**（M）：全新 |
-| **shutdown 收割** | 部分：`killAllSpawnedChildren`（session-runner，dispose 时调 subagent-service L408），但只在 session_shutdown 触发，无 process 级 hook | 父进程 shutdown hook 显式 SIGTERM 全部 activation | **新增**（S-M）：与 index.ts 的 process hook 联动 |
+| **shutdown 收割** | 部分：`markAllSpawnedChildrenDead`（session-runner，dispose 时调 subagent-service L408），但只在 session_shutdown 触发，无 process 级 hook | 父进程 shutdown hook 显式 SIGTERM 全部 activation | **新增**（S-M）：与 index.ts 的 process hook 联动 |
 | **孤儿扫描** | 部分：worktree-manager `isOrphan` 按 pid 死活判（但维度是 worktree，非 subagent record） | 父进程启动时按持久化 PID 扫收孤儿 | **新增**（M）：全新。依赖 record 持久化 PID（与 record-store 联动） |
 | **activate 互斥** | **完全缺失**。spawnedChildren Map 是单例但无互斥/串行化 | 单 activation 不变量（activate 前确认旧进程死透，并发 message 串行化） | **新增**（M）：全新 |
 
@@ -138,7 +138,7 @@ V2 的 5 项职责（idle timer / 全局 ceiling / shutdown 收割 / 孤儿扫�
 | V2 职责 | 现有散落能力 | 复用程度 |
 |---|---|---|
 | idle timer | MF-3 `WAKEUP_GRACE_MS=15s`（session-runner L111）+ MF-4 `computeWatchdogMs`（L128-134）= setTimeout→SIGTERM 骨架 | **骨架可复用**，触发条件（后代/recentUnregister）需重构为（chatMode+agent_settled） |
-| shutdown 收割 | `killAllSpawnedChildren`（session-runner，dispose 时 subagent-service L408 调） | **可复用**，但缺 process 级 hook（index.ts）触发 |
+| shutdown 收割 | `markAllSpawnedChildrenDead`（session-runner，dispose 时 subagent-service L408 调） | **可复用**，但缺 process 级 hook（index.ts）触发 |
 | 进程句柄 | `spawnedChildren: Map<recordId, ChildProcess>`（session-runner L194）进程内单例 + `getChildByRecord`（L243-245） | **可复用**，但不持久化、不跨重启 |
 | 孤儿扫描 | worktree-manager `isOrphan`（L239-259）按 pid 死活判 | **维度错配**（worktree 维度非 subagent record 维度），需新建 record 维度扫描 |
 | 全局 ceiling | 无 | **完全新建** |

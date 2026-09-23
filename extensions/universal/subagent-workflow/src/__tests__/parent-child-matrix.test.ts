@@ -38,14 +38,14 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-// mock session-runner（import 链需要 runSpawn/killAllSpawnedChildren/getChildByRecord；
+// mock session-runner（import 链需要 runSpawn/markAllSpawnedChildrenDead/getChildByRecord；
 // 避免真实 kill，且 dispose 收割路径可断言）
-const { killAllSpawnedChildrenMock } = vi.hoisted(() => ({
-  killAllSpawnedChildrenMock: vi.fn(),
+const { markAllSpawnedChildrenDeadMock } = vi.hoisted(() => ({
+  markAllSpawnedChildrenDeadMock: vi.fn(),
 }));
 vi.mock("@zhushanwen/subagent-core/execution/engine/engines/pi/session-runner.ts", () => ({
   runSpawn: vi.fn(),
-  killAllSpawnedChildren: killAllSpawnedChildrenMock,
+  markAllSpawnedChildrenDead: markAllSpawnedChildrenDeadMock,
   killRecordChildWithEscalation: vi.fn(),
   getChildByRecord: vi.fn(() => undefined),
 }));
@@ -248,7 +248,7 @@ describe("SP-4 index.ts 事件接线", () => {
     processOnSpy = vi.spyOn(process, "on").mockImplementation((() => process) as never);
 
     registered.clear();
-    killAllSpawnedChildrenMock.mockReset();
+    markAllSpawnedChildrenDeadMock.mockReset();
 
     const ctx = setupRealService();
     agentDir = ctx.agentDir;

@@ -97,7 +97,17 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
   }
 }
 
-/** workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。 */
+/**
+ * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
+ *
+ * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
+ * 目录 B resume cwd 为 A 的 session 时，新 run 的 state 文件/journal 落 B 的 slug
+ * 目录、旧 run 的在 A——GC/retention sweep（同规则推导）读不到旧 run 的磁盘足迹，
+ * 兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。修复
+ * 需与 core 读侧 resolvePiWorkflowStateDir（workflow-state-root.ts，有意对齐进程
+ * cwd）同步改锚，单侧改会制造新的读写错位——taiji 桌面场景（spawn cwd 恒等于
+ * session cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
+ */
 function resolveSessionDir(): string {
   const defaultDir = getAgentDir();
   const sessionSlug = `--${process.cwd().replace(/^\//, "").replace(/\//g, "-")}--`;
@@ -530,27 +540,24 @@ async function createSessionRunState(
   // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
   // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
   // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
-  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。门控放
-  // 调用点先于条目判断（setupSessionLifecycle 分流处），不进 oncePerProcess 守卫
-  // 内——守卫 Map 是模块级状态 reload 后归零（D9 不提权），靠守卫判 reason 形同虚设。
+  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。
   if (!opts.skipRecovery) {
     try {
-      // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
-      // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
-      // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
-      const { loaded, recovered } = await oncePerProcess(
-        "subagent-workflow:recover-crashed-runs",
-        () =>
-          recoverCrashedRuns(
-            store,
-            runs,
-            "Process killed (kill-9 or crash recovery)",
-            {
-              onRunRecovered: (payload) => {
-                pi.events.emit("pending:unregister", payload);
-              },
-            },
-          ),
+      // [B1 修复] 恢复不挂 oncePerProcess：W17 后 loadAll 只读当前 session 的
+      // entries（本 session 权威面）、save 只写自身 runId 的 state 文件——恢复是
+      // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
+      // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
+      // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方
+      // opts.skipRecovery（分流处按 reason 判定）承担，无需进程级守卫。
+      const { loaded, recovered } = await recoverCrashedRuns(
+        store,
+        runs,
+        "Process killed (kill-9 or crash recovery)",
+        {
+          onRunRecovered: (payload) => {
+            pi.events.emit("pending:unregister", payload);
+          },
+        },
       );
       logger.debug(
         `[subagent-workflow] recoverCrashedRuns: loaded=${loaded} recovered=${recovered}`,

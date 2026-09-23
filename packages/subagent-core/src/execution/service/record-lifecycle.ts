@@ -221,7 +221,7 @@ export class RecordLifecycle {
     }
     // [u7a 生产补挂] 批量 dispose 收敛点推一次终态快照（绝对计数语义下循环内逐条推
     // 与收敛后单推等价，单推省 N-1 次同步派发）。此刻镜像已由上方 kill/disarm 全量
-    // 清零（壳 dispose 链的 killAllSpawnedChildren 更先行——两清零路径正交幂等）。
+    // 清零（壳 dispose 链的 markAllSpawnedChildrenDead 更先行——两清零路径正交幂等）。
     notifyInFlightChanged();
     return count;
   }

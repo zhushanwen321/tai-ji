@@ -38,11 +38,12 @@ vi.mock("../jsonl-run-store.ts", () => ({
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-// session_start 的 recoverCrashedRuns 经 oncePerProcess 守卫（u-audit-fix），守卫 Map
-// 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例，否则首用例
-// 消费 key 后，后续用例的恢复链静默不执行（storeHealthy=false 等断言失真）。
-// seam 直测用例同因改用例内动态 import setupSessionLifecycle——静态引用跨 resetModules
-// 存活（守卫 Map 不随用例重置），后续 seam 用例会被已消费的 key 静默旁路。
+// session-lifecycle 仍持有多个进程级维护守卫（oncePerProcess，模块级 Map）：
+// beforeEach resetModules + 动态 import 每用例取新鲜模块实例，防守卫 Map 跨用例
+// 残留（recoverCrashedRuns 自身已不挂守卫——B1 修复：恢复是 session 级幂等操作，
+// 挂进程级守卫会让同进程后续 session 的崩溃残留不被收编）。
+// seam 直测用例同因改用例内动态 import setupSessionLifecycle——静态引用跨
+// resetModules 存活（守卫 Map 不随用例重置）。
 let subagentsExtension: typeof import("../index.ts").default;
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
@@ -243,6 +244,50 @@ describe("session_start crash recovery（store.loadAll 路径）", () => {
     const unregister = emits.find((e) => e.channel === "pending:unregister");
     expect(unregister).toBeDefined();
     expect(unregister!.data).toEqual({ id: "wf-crash-1", reason: "failed" });
+  });
+
+  it("B1: 同进程第二个 session 的恢复不被跳过（/new 后 /resume 崩溃 session 场景）", async () => {
+    // [B1 回归] 恢复曾挂 oncePerProcess（进程级单次），同进程第二个 session_start
+    // 重放首次 Promise、跳过 loadAll——被 /resume 的崩溃 session 残留 run 不被收编。
+    // 修复后恢复是 session 级幂等操作：同一模块实例连续两次装配，第二次照常收编。
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const mkDeps = (runs: WorkflowRunType[]): SessionLifecycleDeps => ({
+      createServices: (() => ({
+        service: {
+          initSession: vi.fn(),
+          recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+          startGcTimer: vi.fn(),
+        },
+        modelService: {
+          initModel: vi.fn(),
+          reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+        },
+        reused: false,
+      })) as never,
+      worktreeManager: { scan: vi.fn(async () => {}) },
+      createRunStore: () =>
+        ({
+          loadAll: vi.fn(async () => runs),
+          save: vi.fn(async () => {}),
+          dispose: vi.fn(async () => {}),
+        }) as never,
+    });
+
+    // 第一次 session_start（session-a）：无残留，恢复空转
+    const first = await setupSessionLifecycle(createFakePi().pi, createFakeCtx(), mkDeps([]));
+    expect(first.storeHealthy).toBe(true);
+
+    // 第二次 session_start（session-b，同进程 /resume 上次崩溃的 session）：其
+    // running 残留必须被收编（不被首次调用旁路）
+    const runningRun = makeRun("wf-crash-2", "running");
+    const { pi: pi2, emits } = createFakePi();
+    const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
+    expect(second.storeHealthy).toBe(true);
+    expect(runningRun.state.status).toBe("done");
+    expect(runningRun.state.reason).toBe("failed");
+    const unregister = emits.find((e) => e.channel === "pending:unregister");
+    expect(unregister).toBeDefined();
+    expect(unregister!.data).toEqual({ id: "wf-crash-2", reason: "failed" });
   });
 
   it("loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition", async () => {

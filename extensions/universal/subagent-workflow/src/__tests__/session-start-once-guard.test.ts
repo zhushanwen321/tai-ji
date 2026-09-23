@@ -1,10 +1,17 @@
 // src/__tests__/session-start-once-guard.test.ts
 //
-// u-audit-fix 探针实测（subagent-workflow 侧）：判定「必须接入」的六项跨 session
-// 副作用操作经 oncePerProcess 包装后，双派发
+// u-audit-fix 探针实测（subagent-workflow 侧）：判定「必须接入」的跨 session 副作用
+// 操作经 oncePerProcess 包装后，双派发
 // （factory 二调/handler 累积形态：同一 handler 引用直接调两次）下各执行 1 次；
 // 粒度边界豁免（明令不包装）的 ③identity appendEntry / ④bindNotifyLedger /
 // ⑥service.initSession 保持每 session_start 执行（×2，防误伤反向断言）。
+//
+// [B1] recoverCrashedRuns 已移出守卫清单（原⑪）：W17 后 loadAll 只读本 session
+// entries、save 只写自身 runId 的 state 文件——恢复是 session 级幂等操作，挂进程级
+// 守卫会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
+// （crash-recovery.test.ts 的 B1 用例锁定该场景）。双派发下恢复 ×2 是幂等空转
+// （第二次 loadAll 全终态、emit 0 条）——本文件 mock 不模拟幂等（每次调用恒 emit），
+// 故断言 ×2 / emit 2 条，真实幂等语义由 B1 用例锁定。
 //
 // 断言与验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
 //   ① syncEnginesFile 写 = 1（engines.json 写发生在函数内部，入口 =1 ⟹ 写 ≤1）
@@ -12,7 +19,6 @@
 //   ⑧ maybeCleanupExpiredSessionFiles = 1（扫描 + unlink 在函数内部）
 //   ⑨ recoverManifestTmpFiles = 1（promote/unlink 在函数内部）
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
-//   ⑪ recoverCrashedRuns = 1 + pending:unregister emit 恰 1 条（落盘 save 在函数内部）
 //   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）
 //
 // 守卫 Map 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例。
@@ -278,7 +284,7 @@ function createMockCtx(): Record<string, unknown> {
 // ── tests ──
 
 describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）", () => {
-  it("双派发下六项跨 session 副作用操作各执行 1 次，pending:unregister 仅 emit 1 条", async () => {
+  it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出守卫，B1）", async () => {
     // ⑪ 模拟恢复一个 run：onRunRecovered 回调 → pi.events.emit（真实链路观察点）
     mockRecoverCrashedRuns.mockImplementation(async (
       _store: unknown,
@@ -302,19 +308,20 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     await handler!({ type: "session_start", reason: "resume" }, ctx);
 
     // 探针 a：handler 体执行 2 次（防误伤项证明双派发真实发生，见下一用例的 ×2 断言）
-    // + 六项包装操作各执行 1 次
+    // + 五项包装操作各执行 1 次
     expect(mockSyncEnginesFile).toHaveBeenCalledTimes(1);
     expect(mockStartGcTimer).toHaveBeenCalledTimes(1);
     expect(mockMaybeCleanup).toHaveBeenCalledTimes(1);
     expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
     expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);
     expect(mockScan).toHaveBeenCalledTimes(1);
-    // 探针 e：recoverCrashedRuns 落盘链（loadAll → 转 failed → save）入口 =1
-    expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(1);
+    // [B1] recoverCrashedRuns 不再挂进程级守卫：每 session_start 各跑一次（×2）——
+    // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒 emit 故 unregister = 2；
+    // 真实幂等语义（第二次 emit 0 条）由 crash-recovery.test.ts 的 B1 用例锁定。
+    expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(2);
     expect(mockRecoverCrashedRuns.mock.calls[0]?.[2]).toBe("Process killed (kill-9 or crash recovery)");
-    // onRunRecovered 回调只在首次执行内触发 → emit 恰 1 条（第二派发重放 Promise 不重放回调）
     const unregister = emits.filter((e) => e.channel === "pending:unregister");
-    expect(unregister).toHaveLength(1);
+    expect(unregister).toHaveLength(2);
     expect(unregister[0]!.data).toEqual({ id: "wf-recover-1", reason: "failed" });
   });
 

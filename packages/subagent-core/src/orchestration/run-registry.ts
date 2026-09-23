@@ -33,6 +33,7 @@ import {
 } from "../execution/persistence/manifest-store.ts";
 import {
   INITIAL_RUN_STATE,
+  RUN_EVENT_JOURNAL_SUFFIX,
   createRunEventJournal,
   foldRunEventFrames,
   transition,
@@ -257,7 +258,6 @@ export async function abandonElapsedInterruptedRuns(
   const activeRunIds = opts?.activeRunIds;
   if (abandonWindowMs === undefined) return result; // 显式 opt-out：不终局化
 
-  const JOURNAL_SUFFIX = ".events.jsonl";
   let names: string[];
   try {
     names = await readdir(dir);
@@ -270,8 +270,8 @@ export async function abandonElapsedInterruptedRuns(
     return result; // ENOENT = 从未有任何 run 落账，正常空态
   }
   const journalRunIds = names
-    .filter((n) => n.endsWith(JOURNAL_SUFFIX))
-    .map((n) => n.slice(0, -JOURNAL_SUFFIX.length));
+    .filter((n) => n.endsWith(RUN_EVENT_JOURNAL_SUFFIX))
+    .map((n) => n.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length));
   result.scanned = journalRunIds.length;
 
   for (const runId of journalRunIds) {

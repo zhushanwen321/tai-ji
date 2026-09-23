@@ -87,9 +87,40 @@ export type RunErrorCode =
   | "time_limited"
   | "interrupted_abandoned";
 
+// ── DoneReason → RunOutcome 三态映射（与下方 RunErrorCode 映射同族的姊妹单点）──
+
+/**
+ * DoneReason 六因 → RunOutcome 三态的单点映射。
+ *
+ * - completed → completed；aborted → cancelled（cancel-requested 控制事件合成路径
+ *   的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致）；
+ * - failed/budget_limited/time_limited/invalid_args → failed（budget/time 是
+ *   「run 怎么死的」系统层失败；invalid_args 生产不达 finalizeRun——launcher
+ *   参数校验在 run 创建前返回，收录仅为映射穷尽）。
+ *
+ * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
+ * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳
+ * helpers 通知载荷的 outcome 字段（原 extension 侧 mapDoneReasonToOutcome 本地
+ * 镜像已删，经 barrel 消费本单源；漂移信号 = 通知 outcome 与 journal
+ * run-settled 帧 outcome 不一致）。
+ */
+export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
+  switch (reason) {
+    case "completed":
+      return "completed";
+    case "aborted":
+      return "cancelled";
+    case "failed":
+    case "budget_limited":
+    case "time_limited":
+    case "invalid_args":
+      return "failed";
+  }
+}
+
 // ── DoneReason → RunErrorCode 映射（词表语义的同位归属：映射的每个分支都引用
 // 上方词表收录依据；唯一消费方 = worker-message-pump 的 dispatchFinalRunSettle，
-// 与 extension helpers 的 mapDoneReasonToOutcome 同族——同一个 DoneReason 判别）──
+// 与本文件上方 doneReasonToRunOutcome 同族——同一个 DoneReason 判别）──
 
 /**
  * DoneReason → RunErrorCode 的单点映射。
@@ -645,6 +676,17 @@ export function foldRunEventFrames(
 const journalLogger = getLogger("run-event-journal");
 
 /**
+ * run 事件 journal 文件名尾段（`<runId>.events.jsonl` 的 `.events.jsonl`）。
+ *
+ * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 journalPath、
+ * file-run-store / run-registry 的成对裁剪与扫描）+ 壳侧镜像消费点
+ * （stall watchdog 的 journal 路径构造、终局通知的 eventsJournalPath、
+ * jsonl-run-store 的 watcher 边沿判定）统一 import 本常量——后缀字面量散布
+ * 多处时任何一侧单独改动都是静默漂移（watcher 失配 / 指针失效）。
+ */
+export const RUN_EVENT_JOURNAL_SUFFIX = ".events.jsonl";
+
+/**
  * runId 白名单：字母数字开头 + [A-Za-z0-9_-]，长度 ≤ 128。
  *
  * 为什么白名单而非黑名单：journal 文件名由 runId 直接拼出（join(dir,
@@ -693,9 +735,9 @@ class FileRunEventJournal implements RunEventJournal {
 
   constructor(private readonly dir: string) {}
 
-  /** journal 文件名：<runId>.events.jsonl（runId 自带 wf- 前缀，渲染名即设计的 wf-<id>.events.jsonl）。 */
+  /** journal 文件名：<runId>.events.jsonl（runId 自带 wf- 前缀，渲染名即设计的 wf-<id>.events.jsonl；后缀经 RUN_EVENT_JOURNAL_SUFFIX 单源）。 */
   private journalPath(runId: string): string {
-    return join(this.dir, `${runId}.events.jsonl`);
+    return join(this.dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
   }
 
   async append(runId: string, event: WorkflowRunEvent): Promise<void> {

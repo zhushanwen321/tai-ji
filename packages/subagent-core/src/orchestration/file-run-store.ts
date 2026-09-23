@@ -31,12 +31,21 @@ import { getLogger } from "../core/logger.ts";
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import type { RunStore } from "./models/ports.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
+// journal 后缀经 run-events 单源消费（本文件只裁剪/排除 journal 附属文件，不定义后缀词表）。
+import { RUN_EVENT_JOURNAL_SUFFIX } from "./run-events.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
 
 const logger = getLogger("file-run-store");
 
-/** run 状态目录名（<dataRoot> 下的固定分量）。 */
-const STATE_DIR_NAME = "workflow-state";
+/**
+ * run 状态目录名（<dataRoot> 下的固定分量）。
+ *
+ * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
+ * `<sessionDir>/workflow-state` 布局与 core FileRunStore 的
+ * `<dataRoot>/workflow-state` 同名分量——字面量散布时任一侧单独改名即静默
+ * 漂移（store 读写错目录 / stall 判定读不到 journal）。
+ */
+export const STATE_DIR_NAME = "workflow-state";
 
 // ── 磁盘保留（C1，语义对齐 pi jsonl-run-store mtime 裁剪） ─────────
 
@@ -151,8 +160,8 @@ export function resolveStateTtlMs(): number | undefined {
   return parsed;
 }
 
-/** journal 文件后缀（<runId>.events.jsonl）——glob 同族但作为 run 附属成对裁剪，不单独计时。 */
-const JOURNAL_FILE_SUFFIX = ".events.jsonl";
+/** journal 文件后缀（<runId>.events.jsonl）——经 run-events RUN_EVENT_JOURNAL_SUFFIX
+ *  单源消费（glob 同族但作为 run 附属成对裁剪，不单独计时）。 */
 
 /** pruneTerminalRunFiles 的可调项。 */
 export interface PruneTerminalRunFilesOptions {
@@ -197,7 +206,7 @@ export async function pruneTerminalRunFiles(
   }
   // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.events.jsonl——附属，不单独候选）
   const stateNames = names.filter(
-    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(JOURNAL_FILE_SUFFIX),
+    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
   );
   result.scanned = stateNames.length;
   if (stateNames.length === 0) return result;
@@ -237,7 +246,7 @@ export async function pruneTerminalRunFiles(
 
   for (const runId of victims) {
     const stateFull = join(stateDir, `${runId}.jsonl`);
-    const journalFull = join(stateDir, `${runId}${JOURNAL_FILE_SUFFIX}`);
+    const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
     let prunedState = false;
     for (const full of [stateFull, journalFull]) {
       try {
@@ -352,7 +361,7 @@ export class FileRunStore implements RunStore {
       // journal（<runId>.events.jsonl）同为 .jsonl 后缀但是事件流附属文件——不排除
       // 会进逐行 parseLine，事件行全部按损坏快照行逐条 warn（噪音洪泛）。排除先例：
       // pruneTerminalRunFiles 的 stateNames 过滤同款。
-      if (!file.endsWith(".jsonl") || file.endsWith(JOURNAL_FILE_SUFFIX)) continue;
+      if (!file.endsWith(".jsonl") || file.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) continue;
       const run = await this.loadLatestValidLine(join(this.stateDir(), file), file);
       if (run) runs.push(run);
     }

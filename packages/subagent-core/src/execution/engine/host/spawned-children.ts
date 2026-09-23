@@ -118,8 +118,13 @@ export function killRecordChildWithEscalation(recordId: string, _source: string)
   coreMirrorSlot().markKilled(recordId);
 }
 
-/** 全量收割记账（dispose / parent-shutdown）：镜像整体置死。 */
-export function killAllSpawnedChildren(_signal: NodeJS.Signals = "SIGTERM"): number {
+/**
+ * 全量收割记账（dispose / parent-shutdown）：镜像整体置死。
+ *
+ * 命名如实标注语义（只动镜像记账，不发任何进程信号）——真实回收链 = 子进程
+ * stdin-EOF 自灭（宿主退出 / EngineClient 销毁）+ disposeEngines()（registry）。
+ */
+export function markAllSpawnedChildrenDead(): number {
   const before = coreMirrorSlot().snapshot().length;
   coreMirrorSlot().killAll();
   return before;

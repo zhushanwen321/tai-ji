@@ -99,22 +99,23 @@ export { setEngineDiscoveryRescanOptions } from "./execution/engine/routing.ts";
 
 // ── 引擎注册 / 发现与进程面（execution/engine）────────────────
 // 组合根 index.ts 接线消费（registerXxx 引擎注册、syncEnginesFile engines 文件
-// 同步、killAllSpawnedChildren session 派生进程兜底清理）。
+// 同步、markAllSpawnedChildrenDead session 派生进程兜底清理）。
 export { syncEnginesFile } from "./execution/engine/engine-discovery.ts";
 // [W11/DoD#5] registerPiEngine（inproc 'pi' 注册）已删；[W3 chat 域收口] chat 域 inproc
 // 引擎（inproc pi 引擎目录）与 SubagentService 自持 DI 实例一并删除——registry 'pi' 由三级发现
 // 装载 cli descriptor，chat 轮次与 run 域同路经协议客户端发往 pi-subagent-cli 引擎进程
 // （G1：pi 引擎单一 CLI 形态，core 壳侧零内建引擎）。
-// [W8 D8 薄壳] killAllSpawnedChildren：扩展 index.ts / zsw runner-core.js 的业务调用点
-// 零改动。语义（[F-7 注释纠偏，如实口径]）= **仅镜像记账**——core 侧 spawnedChildren
-// 镜像整体清空（engine/host/spawned-children.ts 公共面），不发任何进程信号；
+// [W8 D8 薄壳] markAllSpawnedChildrenDead：扩展 index.ts / zsw runner-core.js 的
+// 业务调用点。语义（[F-7 注释纠偏，如实口径]）= **仅镜像记账**——core 侧
+// spawnedChildren 镜像整体清空（engine/host/spawned-children.ts 公共面），
+// 不发任何进程信号（命名即语义：mark 镜像置死，非 kill 进程）；
 // 子进程活在引擎进程内，其回收链 = ① stdin-EOF 自灭（宿主退出 / EngineClient 销毁
 // → 引擎进程 stdin 断源自灭，正常路径）；② disposeEngines()（registry）显式触发全部
 // 已实例化引擎 dispose（cli 形态 = RemoteEngine.dispose → EngineClient 有界收口）——
 // 该入口为宿主 shutdown 链预留，现无生产接线。subagent-workflow 扩展的
 // reapSpawnedChildrenOnShutdown（process hook 调本函数）因此同为镜像置死 no-op，
 // 不构成真实收割（现状登记，workflow 包生产码不动）。
-export { killAllSpawnedChildren } from "./execution/engine/host/spawned-children.ts";
+export { markAllSpawnedChildrenDead } from "./execution/engine/host/spawned-children.ts";
 
 // [W8 D8 兼容公共面薄壳]（设计 §3.6 D8 表）：registerZcodeEngine 确保cli descriptor
 // 注册（vendored 相对定位，失败回退 inproc 过渡）+ engineDataDir 记入；createZcodeEngine
@@ -512,10 +513,14 @@ export type {
 // manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
 // DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
 // pi 宿主 jsonl-run-store 的 retention 维护轮生产消费（barrel 先例同上）。
+// [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
+// `<sessionDir>/workflow-state` 与 core `<dataRoot>/workflow-state` 同名分量单源
+// ——壳侧字面量改 import 消费，防布局分量漂移。
 export {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
   DEFAULT_STATE_MAX_RUNS,
   DEFAULT_STATE_TTL_MS,
+  STATE_DIR_NAME,
   STATE_TTL_MS_ENV,
   FileRunStore,
   pruneTerminalRunFiles,
@@ -544,9 +549,17 @@ export {
 
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
+// [C3 常量上收] RUN_EVENT_JOURNAL_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
+// doneReasonToRunOutcome：壳侧曾本地镜像 journal 后缀与 DoneReason→RunOutcome
+// 映射（无机器守卫、漂移即静默失配）——经 barrel 单源后壳改 import 消费；
+// 词表与映射的语义锚点注释见 run-events.ts 对应定义。
 export {
+  ALL_RUN_OUTCOMES,
   createRunEventJournal,
+  doneReasonToRunOutcome,
+  RUN_EVENT_JOURNAL_SUFFIX,
   type RunEventJournal,
+  type RunOutcome,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 

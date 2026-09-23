@@ -210,7 +210,7 @@ export interface EnginePort {
    * 幂等契约（§3.4 不变量 4）：重复调用无副作用；dispose 后首个 run 自动重建（与
    * 「进程死后重建」同一代码路径）。可选成员保持向后兼容——无常驻资源的引擎（pi
    * 现状 spawn 单轮）不必实现。等待策略（D6①「触发不等待」）：宿主收割入口
-   * （registry disposeEngines → killAllSpawnedChildren）只同步调用拿 Promise 不
+   * （registry disposeEngines → markAllSpawnedChildrenDead）只同步调用拿 Promise 不
    * await，引擎实现须自行保证同步面（立即 fire close 帧 + 同步 SIGTERM）在返回
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */

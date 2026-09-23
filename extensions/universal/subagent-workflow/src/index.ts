@@ -42,7 +42,7 @@ import { syncEnginesFile } from "@zhushanwen/subagent-core";
 // [P3 引擎接线] 组合根登记 'zcode' 引擎（D8 薄壳：vendored 定位 cli descriptor；
 // engineDataDir 默认走 common/data-dir SSOT）
 import { registerZcodeEngine } from "@zhushanwen/subagent-core";
-import { killAllSpawnedChildren } from "@zhushanwen/subagent-core";
+import { markAllSpawnedChildrenDead } from "@zhushanwen/subagent-core";
 import { runAndWait, type WorkflowRunResult } from "@zhushanwen/subagent-core";
 // [engine-awareness U3/D7-④] per-turn 引擎检测编排 + before_agent_start 链尾接线
 import { setupEngineAwarenessInjector } from "./injectors/engine-awareness.ts";
@@ -83,23 +83,23 @@ const logger = getLogger("subagents");
 //
 // session_shutdown 是 pi 的 async hook，进程被 SIGTERM/SIGINT 强杀或崩溃时来不及
 // 触发；sync 子进程（controller 为 undefined，abortRunningControllers 跳过它们）会
-// 泄漏为孤儿。process.on 兜底调 killAllSpawnedChildren——[如实口径] core 侧该入口
-// 为镜像置死 no-op（仅清空 core spawnedChildren 镜像记账，不发任何进程信号），真实
-// 回收链 = 子进程 stdin-EOF 自灭（宿主退出 / EngineClient 销毁）+ dispose 链；本调用
-// 保留兜底占位（镜像一致性），不构成真实收割。guard 防多信号叠加（如 SIGINT 后又
-// beforeExit）重复触发。
+// 泄漏为孤儿。process.on 兜底调 markAllSpawnedChildrenDead——core 侧该入口为
+// 镜像置死 no-op（仅清空 core spawnedChildren 镜像记账，不发任何进程信号；命名即
+// 语义，防「kill 前缀」误读为发信号），真实回收链 = 子进程 stdin-EOF 自灭（宿主
+// 退出 / EngineClient 销毁）+ dispose 链；本调用保留兜底占位（镜像一致性），不构成
+// 真实收割。guard 防多信号叠加（如 SIGINT 后又 beforeExit）重复触发。
 let processShutdownHookFired = false;
 
 function reapSpawnedChildrenOnShutdown(): void {
   if (processShutdownHookFired) return;
   processShutdownHookFired = true;
   try {
-    killAllSpawnedChildren("SIGTERM");
+    markAllSpawnedChildrenDead();
   } catch (err) {
     // best-effort：收割失败不阻断退出流程——debug 留痕（孤儿子进程排查线索），
     // 不静默吞错，对齐「错误必须可操作」。
     logger.debug(
-      "[subagents] process shutdown reap best-effort failed (killAllSpawnedChildren SIGTERM)",
+      "[subagents] process shutdown reap best-effort failed (markAllSpawnedChildrenDead)",
       { reason: toErrorMessage(err) },
     );
   }

@@ -552,18 +552,22 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
     const store4 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc4b");
 
-    // 首写冷路径遇 writeFile EACCES reject
+    // 首写冷路径遇 writeFile EACCES reject。[B3 顺序反转] 后权威 entry 先于 state
+    // 文件写入：appendEntry 已成功落账（1 次）——「state 缺而 entry 有」是读侧无害
+    // 形态（loadAll 读序 entry > state），不再是待补窗口。
     vi.spyOn(fs.promises, "writeFile").mockRejectedValueOnce(
       Object.assign(new Error("permission denied"), { code: "EACCES" }),
     );
     await expect(store4.save(run)).rejects.toThrow("permission denied");
-    expect(mockPi.appendEntry).not.toHaveBeenCalled(); // entry 未写（写在 writeFile 成功之后）
+    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1); // 权威 entry 已先落（B3）
 
-    // 恢复 IO 后 running 中间态 save：不经 timer 立即落盘（首写资格已回滚，冷路径重试 entry）
+    // 恢复 IO 后 running 中间态 save：不经 timer 立即落盘（首写资格已回滚，冷路径重写双通道）
     const p = store4.save(run);
     await p; // 冷路径同步 flush 完成
     expect(readStateFile(tmpDir, "run-w2tc4b").state.status).toBe("running");
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1); // entry 经冷路径补写
+    // entry 不重复 append：首写的 appendEntry 已成功（B3 权威先落）且 run 未变，
+    // 重试的 running 中间态按 [B-1] 节流跳过——权威 entry 已是最新快照，无需重复。
+    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1);
   });
 
   it("W2TC5: ENOENT 静默语义保留——热路径去抖批 mkdir ENOENT resolve 全部批 Promise", async () => {

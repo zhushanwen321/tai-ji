@@ -295,7 +295,16 @@ const executeSubagent: SubagentExecuteCb = async (
   // background 模式：execute 立即返回，detached 运行不向 tool 层回流 onUpdate
   //（完成由 notify 驱动新 turn）。onUpdate 参数保留以兼容 SDK 回调签名，但不消费。
   const service = getSubagentService();
-  if (!service) throw new Error("subagents runtime not initialized");
+  if (!service) {
+    // [C2] 错误带恢复动作（对齐 workflow-events getWorkflowDeps 的 store unavailable
+    // 闭环风格）：service 缺席的 root cause 是 session_start 装配链失败（围栏 catch
+    // 只留 extension 日志），此处指引 reload + 查日志，接通「现象 → 根因」链路。
+    throw new Error(
+      "subagents runtime not initialized (session_start assembly failed). " +
+        "Recovery: reload this session or restart pi to re-run initialization, " +
+        "and check the subagents extension logs (session_start failure) for the root cause.",
+    );
+  }
 
   // typebox v1 的 StringEnum 在 Static 投影下退化为 string，此处类型守卫收窄回
   // 字面量联合，恢复 switch 的 exhaustiveness 约束（default 分支 = never）。
