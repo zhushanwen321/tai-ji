@@ -529,6 +529,15 @@ export {
   type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
 
+// RunPersistThrottle：RunStore 两 adapter（FileRunStore / pi 壳 JsonlRunStore）
+// 共享的落盘节流决策单点（判定五要素 + 记账时机）——收编前两侧平行实现无共享
+// 测试锚定（B3 单侧修复实证独立演化风险）。壳生产消费必须走 barrel（深路径
+// 仅测试侧 vitest alias 可解析）。
+export {
+  createRunPersistThrottle,
+  type RunPersistThrottle,
+} from "./orchestration/persist-throttle.ts";
+
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
 // worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格
