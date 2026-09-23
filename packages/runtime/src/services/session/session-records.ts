@@ -317,15 +317,20 @@ export class SessionRecords {
   reconcileRecordEntries(sessionId: string): void {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache || !isInReconcileDomain(cache)) return
-    void this.refreshRecordEntries(sessionId).catch((e) => {
-      // 恢复指引（设计 §3.1 场景 B / §3.4 错误规格「日志含恢复指引」）：数据目录可读性
-      // 是该腿失败的常见根因；W18 失效链全量重拉是既有兜底路径，指给排障者。
-      console.warn(
-        `[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`
-        + ` — recovery: check readability of the sessions/ directory under the session data dir;`
-        + ` next session start re-pulls full records via the W18 invalidation chain as fallback`,
-      )
-    })
+    void this.refreshRecordEntries(sessionId).catch((e) => this.warnReconcileRoundFailed(sessionId, e))
+  }
+
+  /**
+   * [reload-closeout D2] 对账轮失败 warn（agent_settled 腿与定时 sweep 腿共用，两腿恢复
+   * 指引保持一致）。恢复指引（设计 §3.1 场景 B / §3.4 错误规格「日志含恢复指引」）：
+   * 数据目录可读性是该腿失败的常见根因；W18 失效链全量重拉是既有兜底路径，指给排障者。
+   */
+  private warnReconcileRoundFailed(sessionId: string, e: unknown): void {
+    console.warn(
+      `[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`
+      + ` — recovery: check readability of the sessions/ directory under the session data dir;`
+      + ` next session start re-pulls full records via the W18 invalidation chain as fallback`,
+    )
   }
 
   /** 取/建 per-session record entry 派生缓存（subscribe 注册点调用；水位随 cache 新建为空）。 */
@@ -433,14 +438,7 @@ export class SessionRecords {
         const cache = this.recordEntriesCaches.get(sessionId)
         if (!cache) continue
         if (cache.cursor === null) continue // 实施期门③
-        void this.refreshRecordEntries(sessionId).catch((e) => {
-          // 恢复指引与 agent_settled 腿（reconcileRecordEntries）同款，两处保持一致。
-          console.warn(
-            `[session-service] record reconcile round failed for ${sessionId}: ${toErrorMessage(e)}`
-            + ` — recovery: check readability of the sessions/ directory under the session data dir;`
-            + ` next session start re-pulls full records via the W18 invalidation chain as fallback`,
-          )
-        })
+        void this.refreshRecordEntries(sessionId).catch((e) => this.warnReconcileRoundFailed(sessionId, e))
       }
     } catch (e) {
       // 定时器单轮 try 围栏：异常不杀 timer，下轮恢复（对账循环自身挂死处置，§3.4）
