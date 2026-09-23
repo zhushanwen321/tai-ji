@@ -178,6 +178,59 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
   })
 
+  it('并发提交 per-session 串行：hook 完成序不可重排内核提交序（到达序 = 提交序，复审 R2）', async () => {
+    const h = makeHarness()
+    const order: string[] = []
+    const gates: Array<() => void> = []
+    h.dispatcher.setSendMessageHook(async (_sid: string, content: string) => {
+      order.push(`hook:${content}`)
+      await new Promise<void>((resolve) => gates.push(resolve))
+      order.push(`hook-done:${content}`)
+      return { blocked: false }
+    })
+
+    const p1 = h.dispatcher.sendMessage('s1', 'msg-1')
+    const p2 = h.dispatcher.sendMessage('s1', 'msg-2')
+    await h.flush()
+
+    // 第二条在前驱 hook 完成前不得进入受理段（串行链生效——不串行时两条 hook 并发启动）
+    expect(order).toEqual(['hook:msg-1'])
+    gates[0]?.()
+    await h.flush()
+    expect(order).toEqual(['hook:msg-1', 'hook-done:msg-1', 'hook:msg-2'])
+    gates[1]?.()
+    const [r1, r2] = await Promise.all([p1, p2])
+    expect(r1.blocked).toBe(false)
+    expect(r2.blocked).toBe(false)
+
+    // 用户可见断言：内核按到达序投递（prompt 序 = msg-1 先于 msg-2）
+    const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain('msg-1')
+    expect(prompts[1]).toContain('msg-2')
+  })
+
+  it('前驱 hook 否决不毒化链：blocked 正常返回，后继提交照常受理', async () => {
+    const h = makeHarness()
+    h.dispatcher.setSendMessageHook(async (_sid: string, content: string) =>
+      content === 'msg-1' ? { blocked: true, reason: '插件拦截' } : { blocked: false },
+    )
+
+    const [r1, r2] = await Promise.all([
+      h.dispatcher.sendMessage('s1', 'msg-1'),
+      h.dispatcher.sendMessage('s1', 'msg-2'),
+    ])
+    await h.flush()
+
+    expect(r1.blocked).toBe(true)
+    expect(r2.blocked).toBe(false)
+    expect(r2.receipt).toMatchObject({ lane: 'direct' })
+    // 唯一 msg-2 进入内核投递（msg-1 被否决零投递）
+    const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('msg-2')
+  })
+
   it('notices 在投递受理后逐条发布，clientUuid 取裸标记（u- 前缀剥离形态）', async () => {
     const h = makeHarness()
     h.injectState.notices = [notice('budget_exceeded', ['skill-a']), notice('skill_missing', ['ghost'])]

@@ -7,7 +7,8 @@
  *   inject → prompt）在投递内核适配层异步发生，「hook 执行中 + 交接在途」窗口靠本
  *   touch 关闭（reaper 判定刚 touch 过 → 不满足空闲阈值）
  * - 调用序（u2：出站交接异步化后经 flush 观察完整链）：touch 先于 hook 先于
- *   restore（ensureActive）先于 prompt——与迁移前逐字一致
+ *   restore（ensureActive）先于 prompt——hook 经 per-session 受理串行链（复审 R2）
+ *   微任务级启动，先于 restore/prompt 不变
  * - client 未附着（pm.getClient → undefined，已回收态）不 touch 也不炸：restore 路径
  *   spawn 的新 client lastActivityAt 初值 = spawn 时刻，天然不满足回收阈值
  *
@@ -95,15 +96,14 @@ describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', (
     const p = fx.dispatcher.sendMessage('s1', 'hello')
 
     // 同步时刻断言（微任务/宏任务均未推进）：touch 已发生且是调用链第一个动作。
-    // hook 是 async 函数，其同步段（push('hook') 前无 await）随 sendMessage 调用栈
-    // 同步执行——touch 排在 hook 前即证明入口 touch 先于任何 hook 副作用；restore
-    // （ensureActive，位于 sendPrompt 首个 await 之后）尚未执行。
-    expect(fx.order).toEqual(['touch', 'hook'])
+    // hook 经 per-session 受理串行链进入（复审 R2：hook 完成序不得重排内核提交序），
+    // 推迟至微任务级启动——同步窗口只剩 touch，恰证明入口 touch 先于任何链内副作用。
+    expect(fx.order).toEqual(['touch'])
     expect(fx.touchActivity).toHaveBeenCalledTimes(1)
 
     await p
     await flushDelivery()
-    // 完整调用序：touch（入口）→ hook（BeforeSend）→ restore（ensureActive）→ prompt
+    // 完整调用序：touch（入口，同步）→ hook（BeforeSend，串行链内）→ restore（ensureActive）→ prompt
     expect(fx.order).toEqual(['touch', 'hook', 'restore', 'prompt'])
   })
 
@@ -111,8 +111,8 @@ describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', (
     const fx = makeFixture(false)
     const p = fx.dispatcher.sendMessage('s1', 'hello')
 
-    // 无附着 client：入口零动作（不抛 TypeError），后续链路照常推进
-    expect(fx.order).toEqual(['hook'])
+    // 无附着 client：入口零动作（不抛 TypeError），hook 在串行链的微任务窗口启动
+    expect(fx.order).toEqual([])
     await p
     await flushDelivery()
 

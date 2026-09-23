@@ -115,6 +115,8 @@ export { classifyPromptRejection, type PromptRejectionReason } from './session-d
 
 export class MessageDispatcher {
   private sendMessageHook: SendMessageHook | null = null
+  /** per-session 受理串行链（hook 竞态顺序闭合，见 sendMessage；settled 后自清）。 */
+  private readonly sendMessageChains = new Map<string, Promise<unknown>>()
 
   /**
    * abort 阶梯协作实例（W7 三级阶梯 + 防重入 + 处置竞态，实现见 abort-liveness.ts）。
@@ -171,6 +173,11 @@ export class MessageDispatcher {
    * busy 预检与 send.rejected 已退役——排队取代拒绝（D5）：暂不可收时态（compacting / bash）
    * 由内核持有，settled 边沿/对账器驱动投递，消息不再被拒回 renderer。
    *
+   * [hook 竞态顺序闭合（复审 R2）] 同 session 并发提交按 per-session 链串行：hook 是异步
+   * 等待（Worker RPC，单 handler 5s 超时），而 WS 分发逐帧 fire-and-forget——不串行时
+   * hook 完成序可倒置内核提交序（内核 FIFO 保提交序而非发送序，G1/V6 可违）。串行化让
+   * 到达序 = 提交序；链只含 hook + 同步内核提交（有界：hook 数 × 5s），settled 后自清。
+   *
    * rejected 返回值保留为类型完备（恒 undefined）——handler 的 message.status{rejected}
    * ack 分支自此不可达，protocol 条目退役归 u5。
    */
@@ -182,6 +189,25 @@ export class MessageDispatcher {
     // 初值 = spawn 时刻，空闲时长天然不达标。
     this.pm.getClient(sessionId)?.touchActivity()
 
+    // ── per-session 受理串行链（到达序 = 内核提交序）──
+    // 前驱失败不毒化链（catch 吞 rejection，错误面已由链内各层自广播）。
+    const prev = this.sendMessageChains.get(sessionId) ?? Promise.resolve()
+    const run = prev.catch(() => undefined).then(() => this.runAcceptance(sessionId, content, images, clientUuid))
+    this.sendMessageChains.set(sessionId, run)
+    run.then(
+      () => this.releaseSendChain(sessionId, run),
+      () => this.releaseSendChain(sessionId, run),
+    )
+    return run
+  }
+
+  /** 受理段（hook + 内核提交）——仅经 per-session 串行链进入。 */
+  private async runAcceptance(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+  ): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult }> {
     // ── BeforeSend hook（提交前唯一拦截面）──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
@@ -191,6 +217,13 @@ export class MessageDispatcher {
     }
     const receipt = this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
     return { blocked: false, receipt }
+  }
+
+  /** 串行链尾自清：本 run 仍是链尾时释放槽位（跨 session 恒不互相阻塞）。 */
+  private releaseSendChain(sessionId: string, run: Promise<unknown>): void {
+    if (this.sendMessageChains.get(sessionId) === run) {
+      this.sendMessageChains.delete(sessionId)
+    }
   }
 
   /**
