@@ -27,6 +27,12 @@ import {
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_RECORD_ID,
 } from '@zhushanwen/subagent-core/relay-env'
+import {
+  RELAY_FRAME_DIRS,
+  RELAY_FRAME_KINDS,
+  RELAY_REJECT_REASONS,
+  type RelayRejectReason,
+} from '@zhushanwen/subagent-engine-sdk'
 import { killPiProcess } from '@zhushanwen/pi-rpc'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
@@ -51,7 +57,7 @@ const MALFORMED_FRAME_HEAD_PREVIEW_CHARS = 120
 
 interface RelayHandshakeFrame {
   v: number
-  kind: 'handshake'
+  kind: typeof RELAY_FRAME_KINDS.handshake
   mainSessionId: string
   recordId: string
   argv: string[]
@@ -61,15 +67,16 @@ interface RelayHandshakeFrame {
 
 interface RelayDataFrame {
   v: number
-  kind: 'data'
-  dir: 'down'
+  kind: typeof RELAY_FRAME_KINDS.data
+  dir: typeof RELAY_FRAME_DIRS.down
   b64: string
 }
 
 type InboundFrame = RelayHandshakeFrame | RelayDataFrame
 
-/** runtime → 代理的 reject 帧理由。E-1 代理对 reason='version' 以退出码 10 退出。 */
-export type RelayRejectReason = 'version' | 'identity' | 'duplicate' | 'malformed'
+// reject 帧理由词表已收编 SDK relay-frames（RELAY_REJECT_REASONS 单源）；re-export
+// 维持本文件既有导出面。E-1 代理对 reason='version' 以退出码 10 退出。
+export type { RelayRejectReason }
 
 interface RegisteredEntry {
   conn: Socket
@@ -297,8 +304,8 @@ export class RelayRegistry {
         handshaked = true
         clearTimeout(handshakeTimer)
         const frame = this.tryParseFrame(line)
-        if (frame === null || frame.kind !== 'handshake') {
-          writeFrame(conn, { kind: 'reject', reason: 'malformed', supported: [RELAY_PROTOCOL_VERSION] })
+        if (frame === null || frame.kind !== RELAY_FRAME_KINDS.handshake) {
+          writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.malformed, supported: [RELAY_PROTOCOL_VERSION] })
           endConn(conn)
           return
         }
@@ -310,7 +317,7 @@ export class RelayRegistry {
       // 单点定义——畸形帧在解析层已按 null 丢弃，此处不再重复编码该判据；
       // null（畸形帧）按连接显形（首帧 warn + 计数，见 noteDroppedDataFrame）
       const frame = this.tryParseFrame(line)
-      if (frame !== null && frame.kind === 'data') {
+      if (frame !== null && frame.kind === RELAY_FRAME_KINDS.data) {
         const entry = this.entries.get(conn)
         if (!entry) return
         const bytes = Buffer.from(frame.b64, 'base64')
@@ -359,7 +366,7 @@ export class RelayRegistry {
       // data 帧形状守卫：b64 缺失/非 string 时 Buffer.from 抛 TypeError，且本调用点在
       // readline 回调内无捕获——畸形帧按 malformed 丢弃（数据阶段仅丢帧不断连，同连接
       // 后续帧仍有效；与握手首帧 malformed 的 reject+断连语义按阶段区分）
-      if (parsed.kind === 'data' && (parsed.dir !== 'down' || typeof parsed.b64 !== 'string')) return null
+      if (parsed.kind === RELAY_FRAME_KINDS.data && (parsed.dir !== RELAY_FRAME_DIRS.down || typeof parsed.b64 !== 'string')) return null
       return parsed
     } catch {
       return null
@@ -370,21 +377,21 @@ export class RelayRegistry {
   private registerHandshake(conn: Socket, frame: RelayHandshakeFrame): void {
     // 版本协商：v > runtime 支持版本 → reject(reason:'version') + 断连（代理退出码 10）
     if (typeof frame.v !== 'number' || frame.v > RELAY_PROTOCOL_VERSION) {
-      writeFrame(conn, { kind: 'reject', reason: 'version', supported: [RELAY_PROTOCOL_VERSION] })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.version, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
       console.warn(`[relay] handshake rejected: version v=${String(frame.v)} > supported ${RELAY_PROTOCOL_VERSION}`)
       return
     }
     // 归属校验：字段形状 + env 归属键（防任意本地进程挂载借道 spawn，见两谓词注释）
     if (!hasValidHandshakeFrameShape(frame) || !isHandshakeEnvOwnershipValid(frame)) {
-      writeFrame(conn, { kind: 'reject', reason: 'identity', supported: [RELAY_PROTOCOL_VERSION] })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.identity, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
       console.warn('[relay] handshake rejected: identity/env validation failed')
       return
     }
     // 同 recordId 重复注册：旧条目可能还活着（异常重连），拒绝新连接防双代理同 id
     if (this.recordIdToConn.has(frame.recordId)) {
-      writeFrame(conn, { kind: 'reject', reason: 'duplicate', supported: [RELAY_PROTOCOL_VERSION] })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.duplicate, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
       console.warn(`[relay] handshake rejected: duplicate recordId=${frame.recordId}`)
       return
@@ -415,7 +422,7 @@ export class RelayRegistry {
 
     // accept 确认帧：E-1 代理是严格状态机（accept 前不启动字节泵）——必须在 spawn 成功、
     // 条目注册完成后发出，此时 down 帧到来时 entries 已有条目可写入 child.stdin
-    writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'accept' })
+    writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.accept })
 
     this.attachRelayChildWiring(entry)
   }
@@ -438,7 +445,7 @@ export class RelayRegistry {
       // spawn 同步失败（异常 spawn 形态）表现为「子进程非零退出」——exit 帧 127 + 断连，
       // extension 走既有失败路径（§7 错误表：代理层失败不设独立错误面）
       console.error(`[relay] spawn failed recordId=${frame.recordId}:`, e)
-      writeFrame(conn, { kind: 'exit', code: SPAWN_FAILURE_EXIT_CODE, signal: null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code: SPAWN_FAILURE_EXIT_CODE, signal: null })
       endConn(conn)
       return undefined
     }
@@ -458,7 +465,7 @@ export class RelayRegistry {
     })
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'data', dir: 'up', b64: chunk.toString('base64') })
+      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.data, dir: RELAY_FRAME_DIRS.up, b64: chunk.toString('base64') })
       entry.log.write(chunk)
       if (!tee.abandoned) tee.feed(chunk)
     })
@@ -467,7 +474,7 @@ export class RelayRegistry {
     })
     // stderr 只转发不进 tee（extension 的 stderrBuffer 累积语义不变）
     child.stderr?.on('data', (chunk: Buffer) => {
-      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'data', dir: 'up-stderr', b64: chunk.toString('base64') })
+      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.data, dir: RELAY_FRAME_DIRS.upStderr, b64: chunk.toString('base64') })
     })
     child.stderr?.on('error', (err) => {
       console.debug(`[relay] child stderr stream error recordId=${entry.recordId}:`, err.message)
@@ -477,14 +484,14 @@ export class RelayRegistry {
       // spawn 异步失败（ENOENT 等）：表现为子进程非零退出（exit 帧 127）
       console.error(`[relay] child error recordId=${entry.recordId}:`, err)
       this.cleanupEntry(entry)
-      writeFrame(conn, { kind: 'exit', code: SPAWN_FAILURE_EXIT_CODE, signal: null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code: SPAWN_FAILURE_EXIT_CODE, signal: null })
       endConn(conn)
     })
 
     child.once('exit', (code, signal) => {
       // 正常/被杀退出：exit 帧传播 → 关连接 → 清理（tee 销毁、pid 文件删除、注销）
       this.cleanupEntry(entry)
-      writeFrame(conn, { kind: 'exit', code, signal: signal ?? null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code, signal: signal ?? null })
       endConn(conn)
       // droppedDataFrames：数据阶段畸形帧丢弃计数（首帧已单独 warn）——非 0 说明
       // 该连接的数据通道有丢帧，配合「连接可能假活」排障归因

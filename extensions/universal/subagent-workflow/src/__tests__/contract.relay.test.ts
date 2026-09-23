@@ -32,6 +32,11 @@ import {
   RELAY_EXIT_CODES,
   RELAY_PROTOCOL_VERSION,
 } from "@zhushanwen/subagent-core/relay-env";
+import {
+  RELAY_FRAME_DIRS,
+  RELAY_FRAME_KINDS,
+  RELAY_REJECT_REASONS,
+} from "@zhushanwen/subagent-engine-sdk";
 
 /** 被锁定的代理脚本：包根 relay/relay.mjs（与 src/ 平行的零依赖脚本）。 */
 const RELAY_SCRIPT_PATH = path.resolve(
@@ -77,6 +82,59 @@ describe("relay 变体 C-镜像：relay.mjs 内嵌常量与 relay-env.ts SSOT �
     expect(source).toMatch(/const RELAY_ENV_SOCKET/);
     expect(source).not.toMatch(/const RELAY_ENV_NODE\b/);
     expect(source).not.toMatch(/const RELAY_ENV_SCRIPT\b/);
+  });
+});
+
+// ── 2. 帧词表镜像一致性（relay-frames.ts SSOT ↔ relay.mjs 内嵌字面量）──
+//
+// relay.mjs 对帧词表是「值字面量内嵌」（kind/dir 出现在构造与比较点，非命名常量——
+// 零依赖脚本保持无声明面）。断言按源内实际形态锁定每个协议点，值来自 SSOT 导出，
+// 词表改值/改形态双侧不同步即此处转红（与上方 env 常量段同款纪律）。
+
+describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frames.ts SSOT 一致", () => {
+  const source = fs.readFileSync(RELAY_SCRIPT_PATH, "utf8");
+
+  it("握手帧构造：kind 与 SSOT handshake 一致", () => {
+    expect(source).toMatch(new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.handshake}["']`));
+  });
+
+  it("下行数据帧构造：kind / dir 与 SSOT data / down 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.data}["']`),
+    );
+    expect(source).toMatch(new RegExp(`dir:\\s*["']${RELAY_FRAME_DIRS.down}["']`));
+  });
+
+  it("协商应答比较：reject / accept 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.reject}["']`),
+    );
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.accept}["']`),
+    );
+  });
+
+  it("上行数据帧比较：kind data + dir up / up-stderr 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.data}["']`),
+    );
+    expect(source).toMatch(new RegExp(`frame\\.dir\\s*===\\s*["']${RELAY_FRAME_DIRS.up}["']`));
+    expect(source).toMatch(
+      new RegExp(`frame\\.dir\\s*===\\s*["']${RELAY_FRAME_DIRS.upStderr}["']`),
+    );
+  });
+
+  it("终局帧比较：exit 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.exit}["']`),
+    );
+  });
+
+  it("reject reason 语义键（代理对 version 退出码 10 的行为耦合）在 SSOT 词表内", () => {
+    // 代理侧对 reject 只统一处理（非零退出），不逐 reason 分支——但 E-1 的
+    // version→10 耦合登记在 SSOT 注释里，词表成员变更时此断言强制人工复核。
+    const reasons = Object.values(RELAY_REJECT_REASONS);
+    expect(reasons).toContain("version");
   });
 });
 
