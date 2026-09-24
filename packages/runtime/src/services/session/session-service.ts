@@ -538,10 +538,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       hasRunningWorkflow: async (sessionId) =>
         (await this.records.getWorkflows(sessionId)).records.some((r) => r.status === 'running'),
       evictHistoryRebuildCache: (sessionId) => this.evictHistoryRebuildCache(sessionId),
-      // U6d 接线点（复审 F2 拆边）：派生态失效窄接口，U4 以 no-op 占位实现——U6d
-      // committed 后替换为 SessionRecords 丢 cursor 强制全量重建的真实调用（主 agent
-      // 在 U6d commit 核验后监督核销该接线点，阶段 3 一致性审查复核）。
-      invalidateDerivedState: () => undefined,
+      // [message-revoke U6d] 撤回派生态失效：SessionRecords 丢 cursor + forceFullRebuild
+      // 强制全量重建（plan 腿接 leafId 裁剪、subagent/workflow 照实保留）——复审 F2 拆边
+      // 窄接口已接线（U4 曾以 no-op 占位，U6d 交付后核销；session 无激活缓存条目时
+      // SessionRecords 侧内部 no-op，冷启动腿已各自接裁剪）。
+      invalidateDerivedState: (sessionId) => this.records.invalidateDerivedState(sessionId),
       sendSystemCommand: (sid, cmd, req) => this.dispatcher.sendSystemCommand(sid, cmd, req),
     })
 

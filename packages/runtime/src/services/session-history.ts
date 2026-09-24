@@ -435,11 +435,22 @@ function collectRecentTurnEntriesFromTail(
  * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
  */
 function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
-  const last = entries[entries.length - 1]
+  // 文件腿喂入前剥 session header 行：pi getEntries() RPC 已滤除（dist/core/
+  // session-manager.js getEntries 的 `e.type !== "session"`，0.84.4 实锚），而 parseJsonl
+  // 文件直读原样含 header——header 有 id 无 parentId，会与真根 entry 一起把
+  // computeActivePathEntries 的单根守卫顶成多根降级（warn + 原样返回），活跃路径裁剪
+  // 静默失效、被撤分支从文件源腿渲染。header 本就不进映射产物，剥除零行为差异，仅恢复
+  // 裁剪生效（喂数语义与 RPC 腿对齐；session-file-utils.trimFileEntriesToActivePath 同款
+  // 剥除——文件腿喂数变换的两个消费点各自单点持有）。
+  // 类型注记：header 形态不在 PiSessionEntry 联合内（pi 类型层的已知盲区——它只在文件
+  // raw 首行存在，历史调用点把 parseJsonl 输出直接断言成 PiSessionEntry[]），故谓词经
+  // unknown 中转比较；此 filter 即运行时守卫本体。
+  const scoped = entries.filter((e) => (e as { type?: unknown }).type !== 'session')
+  const last = scoped[scoped.length - 1]
   const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined
-  const { messages, entryIds } = mapSessionEntries(entries, leafId)
+  const { messages, entryIds } = mapSessionEntries(scoped, leafId)
   const converted = sessionStore.convertHistory(messages, entryIds)
-  applyEntryEndTimes(converted, entries)
+  applyEntryEndTimes(converted, scoped)
   return converted
 }
 
