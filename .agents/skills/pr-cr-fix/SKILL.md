@@ -180,12 +180,10 @@ node scripts/select-constraints.mjs --base main
 
 **review-fix-loop 宿主路由（循环本体双版本）**：review+fix 循环本体有两个同源实现，按主 agent 宿主路由——pi 主 agent 用 **pi 内置版**（`pi workflow run review-fix-loop`，路径 1）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，缺省全部 8 维））。两版本共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，autoCommit 由循环统一显式路径 commit（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。zcode 版差异：无 `aggregatorModel`（per-call 模型路由不存在，模型由 run 级 subagent_model 承载）、无嵌套 workflow、断点恢复走引擎原生（AmendWorkflow / ResumeWorkflowRun）、报告落 `{reportDir}/{topic}/round-<n>/`（`reportDir` 默认 `.tmp/review-fix-loop`，`topic` 执行开始时命名）。适用边界：**只跑 review+fix 循环**（不进门禁、不开 PR）时按宿主路由单跑；**完整 PR 生命周期**走路径 2（zcode 原生 pr-lifecycle，cr-fix step 内联同源循环）。
 
-**循环本体行为差异登记表**（2026-09-24 一致性审查后集中登记——两版循环骨架同源，以下为已知的语义分叉，改任一侧前先查此表）：
+**循环本体行为差异登记表**（2026-09-24 一致性审查后集中登记——两版循环骨架同源，以下为已知的语义分叉，改任一侧前先查此表；2026-09-24 A1/A2 对齐后 needs-redesign 前置与 deferred 复活通道两行已消除，现行共同语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
 
 | 差异点 | pi 版 | zcode 版（saved + prl 内联） | 备注 |
 |---|---|---|---|
-| needs-redesign 前置 | 要求条目 regressed（修了又坏）且 fixAttempts 达上限 | 无 regressed 前置，聚合仍报即计数 | pi 更宽容精准；zcode 早熔断 |
-| deferred 复活通道 | R2 reviewer 受控 escalate 申报（prompt 注入 deferred 清单 + 不许重报） | 无 escalate 状态，靠聚合重报 L1/L2 命中被动复活 | zcode 通道弱（deferred 低频，待裁决是否补） |
 | converged 判定 | 新发现率收敛（convergeRounds 轮 ≤N 新问题且无 critical）+ 活跃清零 | 仅活跃清零（R1 全 clean 报 clean） | zcode 无「边修边冒新问题」防护，靠 stuck 兜底 |
 | stuck 计数起算 | 对账数据缺失才计数式，R1 不起算 | 恒双轨且 R1 起算 | zcode 早一轮触发 |
 | 会话墙钟超时 | reviewer/aggregator 1h | 无超时 | zcode 符合「任务级默认无超时」裁决（AGENTS.md 规则 19） |
@@ -221,7 +219,7 @@ pi workflow run review-fix-loop --args '{
 }'
 ```
 
-内置行为要点：某 agent `must_fix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复未收敛 → `terminated=needs-redesign`（pi 实装要求条目处于 regressed——修了又坏才算；zcode 版无此前置，聚合仍报即计数，两版熔断严格度差异见「宿主路由」差异登记表）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 result.disputed 带出）；聚合器内置（合并去重为 `aggregated.md` + must_fix 计数）。
+内置行为要点：某 agent `must_fix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复未收敛 → `terminated=needs-redesign`（两版同语义：要求条目处于 regressed——修了又坏才算设计问题，fixAttempts 计修复失败次数，not-fixed 由 stuck 防线承接；deferred 条目唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 result.disputed 带出）；聚合器内置（合并去重为 `aggregated.md` + must_fix 计数）。
 
 **Gate-2**：workflow `terminated` ∈ {`clean`, `converged`, `stuck`, `needs-human`} → 进阶段 3（`needs-human` 须先按 `result.disputed` 反证逐项裁决：真问题修复后进阶段 3，误报 ack 后进阶段 3，裁决结论逐项披露）。`terminated=needs-redesign` = 结构性问题需人工介入，**停手上报用户**。`terminated ∈ {review-failure, aggregator-failure, fix-failure, max-rounds}` = 失败终态（review/aggregator/fix agent 调用失败或结果无效、轮次耗尽）：环境类（review/aggregator/fix-failure）调参重跑一次再败停手上报；`max-rounds` 读 `{reportDir}/{topic}/` 下聚合报告人工判定（误报接管披露、真问题修复 commit 后重新发起）——处置与路径 2 同类问题一致。
 
