@@ -2,7 +2,8 @@
  * Session 层 — 运行时句柄 + 状态重建（entry 不做 GC，只读最新一条）
  *
  * GoalSession 是进程内瞬态句柄（不持久化）。
- * reconstructGoalState 从 entry 恢复状态（session_start 时调）。
+ * reconstructGoalState 从 entry 恢复状态（session_start / session_tree 时调，
+ * U6c：重建输入接活跃路径裁剪——被撤子树的 goal-state 不进重建态）。
  *
  * FR-6.4: 删除 hasPendingInjection（僵尸字段）
  * FR-6.7: 删除 pendingPause（ESC 改用 aborted 守卫）
@@ -12,7 +13,7 @@
 
 import type { GoalRuntimeState } from "./engine/types";
 import { deserializeState, ENTRY_TYPE } from "./persistence";
-import type { SessionEntryLike, SessionPort, UiPort } from "./ports";
+import type { SessionEntryLike, UiPort } from "./ports";
 
 // ── 运行时句柄 ────────────────────────────────────────
 
@@ -47,10 +48,80 @@ export function createGoalSession(): GoalSession {
 // 复用价值场景请参照 scheduler 的已验证方案：runtime.ts STALE_CTX_MARKER
 // 'stale after session replacement'（子串匹配真实文案）+ 代际计数治本（G1）。
 
-// ── reconstructGoalState（session_start 时调）──────────
+// ── 活跃路径裁剪（U6c）────────────────────────────────
 
 /**
- * 从 session entries 恢复 goal state。
+ * 活跃路径回溯所需的最小 session 视图（U6c）。getLeafId 可选：SessionPort
+ * （buildPorts 产物）不携带时按文件尾回退——session_start 时点 pi 树重放规则
+ * （叶子 = 文件最后一条 entry）使两锚等价；session_tree handler 传
+ * ctx.sessionManager（含 getLeafId），覆盖运行中树回退后 leaf ≠ 文件尾的形态。
+ */
+export interface ActivePathSessionView {
+	getEntries(): SessionEntryLike[];
+	getLeafId?(): string | null;
+}
+
+/**
+ * SessionEntryLike 的树结构字段视图（duck-typed 收窄，无断言）。含 type?: unknown
+ * 只为通过 weak-type 检查（全 optional 目标须与源共享属性名）；真实 pi SessionEntry
+ * 恒有 id/parentId（SessionEntryBase），缺失时按线性文件语义处理（见 filterActivePath）。
+ */
+interface TreeEntryFields {
+	type?: unknown;
+	id?: unknown;
+	parentId?: unknown;
+}
+
+/**
+ * 活跃路径裁剪：从 leafId 沿 parentId 回溯得活跃路径 id 集合，按文件序过滤 entries。
+ * 撤回（navigateTree 树回退）后被撤子树的 goal-state entry 不再进入重建输入——被撤
+ * goal 不得经 before_agent_start 逐轮注入模型上下文。与 runtime 侧 entry-tree-builder
+ * 及 todo/plan 侧的裁剪是设计登记的并行同构实现（extension 不能 import runtime 包）。
+ * leafId 缺失/失效时回退文件尾（pi buildSessionPath 同构防御；线性文件回溯链 =
+ * 全部 entries，行为与裁剪前一致）。无 id 的 entry（duck-typed 最小形状 / legacy
+ * fixture）按线性文件语义保留——真实 pi SessionEntry 恒有 id（SessionEntryBase）。
+ */
+function filterActivePath(view: ActivePathSessionView): SessionEntryLike[] {
+	const entries = view.getEntries();
+	if (entries.length === 0) return entries;
+
+	const byId = new Map<string, { id: string; parentId: string | null }>();
+	for (const entry of entries) {
+		const tree: TreeEntryFields = entry;
+		if (typeof tree.id === "string") {
+			byId.set(tree.id, {
+				id: tree.id,
+				parentId: typeof tree.parentId === "string" ? tree.parentId : null,
+			});
+		}
+	}
+	// 无任何树信息（legacy 线性 fixture）→ 不过滤，保持裁剪前行为
+	if (byId.size === 0) return entries;
+
+	const leafId = view.getLeafId?.();
+	let current =
+		(leafId ? byId.get(leafId) : undefined) ?? lastOfMapValues(byId);
+	const activeIds = new Set<string>();
+	while (current && !activeIds.has(current.id)) {
+		activeIds.add(current.id);
+		current = current.parentId ? byId.get(current.parentId) : undefined;
+	}
+	return entries.filter((entry) => {
+		const tree: TreeEntryFields = entry;
+		return typeof tree.id !== "string" || activeIds.has(tree.id);
+	});
+}
+
+function lastOfMapValues(map: Map<string, { id: string; parentId: string | null }>): { id: string; parentId: string | null } | undefined {
+	let last: { id: string; parentId: string | null } | undefined;
+	for (const value of map.values()) last = value;
+	return last;
+}
+
+// ── reconstructGoalState（session_start / session_tree 时调）──────────
+
+/**
+ * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径投影，非全文件）。
  *
  * Pi SDK 的 session 是 append-only，getEntries() 返回 filter-copy——splice
  * 无法修改真实 entries。Entry GC（goal-state 留 1、goal-history 留 20）在生产
@@ -60,11 +131,11 @@ export function createGoalSession(): GoalSession {
  *   paused/blocked 保持（用户/agent 主动叫停不被抹除），终态保持。
  * FR-8.1 G-024: deserialize throw → state=null（部分损坏全丢）
  */
-export function reconstructGoalState(session: GoalSession, sessionPort: SessionPort): void {
+export function reconstructGoalState(session: GoalSession, sessionPort: ActivePathSessionView): void {
 	session.state = null;
-	const entries = sessionPort.getEntries();
+	const entries = filterActivePath(sessionPort);
 
-	// 找到最新的 goal-state entry（从后往前）
+	// 找到最新的 goal-state entry（活跃路径内从后往前）
 	let latestStateIdx = -1;
 	for (let i = entries.length - 1; i >= 0; i--) {
 		if (isGoalStateEntry(entries[i]!)) {
