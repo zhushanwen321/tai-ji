@@ -33,6 +33,8 @@ import type { SkillRegistry } from '../services/skill-registry.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
+// notify-once U3：通知债权状态机（组合根 index.ts 构造，经 optional 注入 SessionManagerHandler）
+import type { ClaimLedger } from '../services/session/notify-claims.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
 import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager } from './connection-manager.js'
@@ -105,6 +107,11 @@ export interface RuntimeServerOptionalServices {
   connectionTester?: IModelConnectionTester
   project?: ProjectStore
   delivery?: SessionDeliveryRegistry
+  /**
+   * notify-once 通知债权状态机（组合根 index.ts 构造后注入）。缺席时 SessionManagerHandler
+   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配面）。
+   */
+  claims?: ClaimLedger
   /** 导入 pi 会话服务（import-session D5/U2）：session.importCandidates / session.import 路由依赖。可选：未注入时该 case 报 unsupported。 */
   importService?: ImportService
   /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复腿路由依赖。可选：未注入时该 case 报 unsupported。 */
@@ -475,7 +482,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
   private assembleSessionManagerHandler(optional: RuntimeServerOptionalServices): void {
-    const { delivery, workspace } = optional
+    const { delivery, workspace, claims } = optional
     // 不走 WS 路由表——由 EventInterpreter.onSessionManagerRequest fire-and-forget 调用。
     // sd-u5：delivery（send 排队投递 + create 直投）必注入——组合根装配 sessionId 单例注册表；
     // 缺省时现场构造无 settled 订阅的退化实例（内核自动退化为退避轮询，D8 兜底），仅兜测试装配遗漏。
@@ -499,12 +506,16 @@ export class RuntimeServer implements IMessageBroker {
         }),
       sendExtensionUiResponse: (sessionId, requestId, response, method) => {
         // requestId 只在发起方 pi 进程的 pending 表有效——按 sessionId 直发，
-        // 不能遍历找「第一个可用 client」（多 active session 会错发 → 发起方 select 挂到超时）
-        this.sessionService.getRpcClient(sessionId)?.sendExtensionUiResponse(requestId, response, method)
+        // 不能遍历找「第一个可用 client」（多 active session 会错发 → 发起方 select 挂到超时）。
+        // D7① boolean 传导：rpc-client 返回值透传（是否写进发起方 pending 表），
+        // `?.` 缺失分支（client 不在）显式归 false 计入 respond 失败（watch 回执 → orphaned）。
+        return this.sessionService.getRpcClient(sessionId)?.sendExtensionUiResponse(requestId, response, method) ?? false
       },
       broadcastSessionList: () => {
         this.broker.broadcastSessionList()
       },
+      // notify-once U3：债权状态机透传（缺席 = 停用象限，见 SessionManagerHandlerOptions.claims）
+      claims,
     })
   }
 

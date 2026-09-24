@@ -59,6 +59,37 @@ import { applySessionOccupancyTransition, userStoppedGate } from './event-interp
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
 
+// ─── notify-once D5 死亡处置登记（组合根 index.ts 订阅消费）──────────────
+// 汇聚点先于杀进程立 latch（设计检查点①：delete 在 pm.destroySession 之前），
+// 防 delete→exit 双事件响应序竞态（exit 腿抢先 respond 则 'deleted' 不保证胜出）。
+// - 'delete'：终局删除——组合根收到即 onSessionDeath('delete')+clearSession 发声销账，
+//   随后 removeSessionEntry 的销毁回调查无记录自然静默（幂等空转）。
+// - 'suppress'：非终局杀（restore 清场——同 id 随即重开）——组合根标记静默，
+//   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
+// 回收（reclaim）与 destroyAll 刻意不经本登记：前者不走 removeSessionEntry 汇聚点、
+// 后者随进程内存消亡，均无销毁回调需抑制。
+export type SessionDeathDisposition = 'delete' | 'suppress'
+const deathDispositionSubscribers = new Set<(sessionId: string, disposition: SessionDeathDisposition) => void>()
+
+/** 订阅死亡处置登记（返回退订函数；组合根接线，多订阅者隔离由扇出侧 try/catch 保证）。 */
+export function subscribeSessionDeathDisposition(
+  cb: (sessionId: string, disposition: SessionDeathDisposition) => void,
+): () => void {
+  deathDispositionSubscribers.add(cb)
+  return () => { deathDispositionSubscribers.delete(cb) }
+}
+
+function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition): void {
+  for (const cb of [...deathDispositionSubscribers]) {
+    try {
+      cb(sessionId, disposition)
+    } catch (e: unknown) {
+      // 订阅者异常不得阻断删除/清场主链（best-effort 留痕，可回溯）
+      console.error(`[session-lifecycle] death-disposition subscriber error (sessionId=${sessionId}, disposition=${disposition}):`, e)
+    }
+  }
+}
+
 // [arch 技术债登记，R3 ports 依赖倒置待收口] 下方四个 infra/pi 值 import（getSessionsDir /
 // cleanupMigrateResidues / hydrateBindingMeta / assertPiSessionFile）
 // 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-layering.md 阶段 R3）。
@@ -936,6 +967,10 @@ export class SessionLifecycle implements ISessionRegistry {
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。
     userStoppedGate.disposeForDelete(sessionId)
+    // [notify-once D5] 死亡汇聚点立 latch（先于任何杀进程/文件处置，覆盖 active 与
+    // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声销账 + clearSession，
+    // 随后 active 分支的 pm.destroySession 即便漏出 exit 事件也查无记录（'deleted' 必胜出）。
+    fireDeathDisposition(sessionId, 'delete')
     // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
     // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
@@ -1184,6 +1219,9 @@ export class SessionLifecycle implements ISessionRegistry {
   private async clearExistingSessionForRestore(sessionId: string): Promise<void> {
     const existing = this.get(sessionId)
     if (!existing) return
+    // [notify-once D5] 非终局杀立 'suppress' latch（先于 kill）：同 id 随即重开（restore
+    // 清场），销毁回调据此静默——不产生伪造死亡通知（respawn/restore 链静默同族）。
+    fireDeathDisposition(sessionId, 'suppress')
     console.warn(`[session-lifecycle] killing active pi before restore, session ${sessionId} (kill_source=restore_clear | who: restore request while old pi still active (session.restore RPC / ensureActive) | chain: detach -> safeDestroy old pi -> respawn + switch_session)`)
     this.detachSession(sessionId)
     await this.safeDestroy(sessionId)

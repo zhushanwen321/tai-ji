@@ -65,6 +65,39 @@ export interface RespawnDeps {
   publish: (sessionId: string, msg: ServerMessage) => void
 }
 
+/**
+ * respawn 终态命运事件（notify-once D5 death 收口挂点）：组合根 index.ts 据以判定
+ * 子会话进程死亡是否发声——
+ * - 'retry-pending'：respawn 链接管（5s 重试已挂）——静默，claim 悬挂交 TTL 清扫（E8）；
+ * - 'recovered'：session 活跃/恢复中/恢复成功——静默，丢弃退出现场 stash；
+ * - 'terminal'：熔断（连续失败达阈值）或调度前已熔断——按不可恢复 crash 发声
+ *   （携原 crash 的 exitCode/stderrTail stash，同 deathSeq 递增）。
+ * 模块级订阅（组合根单消费方）；无订阅者时零开销，测试构造的 orchestrator 实例不受扰。
+ */
+export type RespawnFate = 'retry-pending' | 'recovered' | 'terminal'
+export interface RespawnFateEvent {
+  sessionId: string
+  fate: RespawnFate
+}
+const respawnFateListeners = new Set<(e: RespawnFateEvent) => void>()
+
+/** 订阅 respawn 终态命运（返回退订函数；组合根 notify-once 接线）。 */
+export function onRespawnFate(cb: (e: RespawnFateEvent) => void): () => void {
+  respawnFateListeners.add(cb)
+  return () => { respawnFateListeners.delete(cb) }
+}
+
+function emitRespawnFate(sessionId: string, fate: RespawnFate): void {
+  for (const cb of [...respawnFateListeners]) {
+    try {
+      cb({ sessionId, fate })
+    } catch (e: unknown) {
+      // 订阅者异常不得阻断恢复编排（best-effort 留痕，可回溯）
+      console.error(`[pi-respawn] respawn-fate listener error (sessionId=${sessionId}, fate=${fate}):`, e)
+    }
+  }
+}
+
 export class RespawnOrchestrator {
   private readonly deps: RespawnDeps
   /** pending 恢复 timer（sessionId → handle）。取消语义的状态载体。 */
@@ -95,13 +128,21 @@ export class RespawnOrchestrator {
    * 决策日志（D6-⑥ 同款「谁触发、对谁、为什么」）：每次调度落一行，崩溃恢复链路可归因。
    */
   schedule(sessionId: string): void {
-    if (this.deps.isActive(sessionId)) return
+    if (this.deps.isActive(sessionId)) {
+      // 进程仍活（防御位）：非死亡终态，丢弃退出现场 stash（notify-once D5）
+      emitRespawnFate(sessionId, 'recovered')
+      return
+    }
     if (this.isRestoring(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} has in-flight restore — skip auto respawn (join semantics, D7-3)`)
+      // 惰性恢复在跑 = session 将复活（respawn 链同族）——静默
+      emitRespawnFate(sessionId, 'recovered')
       return
     }
     if (this.isTripped(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} respawn breaker tripped (${this.consecutiveFailures.get(sessionId)} consecutive failures) — skip auto respawn`)
+      // 已熔断的后续死亡：session 保持 dead → 不可恢复 crash 发声（前次熔断时已销账则空转）
+      emitRespawnFate(sessionId, 'terminal')
       return
     }
     this.clearTimer(sessionId)
@@ -117,6 +158,7 @@ export class RespawnOrchestrator {
       sessionId,
       detailDigest: `attempt=${attempt + 1} delayMs=${RESPAWN_DELAY_MS}`,
     })
+    emitRespawnFate(sessionId, 'retry-pending')
     this.armTimer(sessionId)
   }
 
@@ -132,6 +174,8 @@ export class RespawnOrchestrator {
   private async attemptRespawn(sessionId: string): Promise<void> {
     if (this.deps.isActive(sessionId) || this.isRestoring(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} already active/restoring at timer fire — skip auto respawn`)
+      // 5s 窗内已复活（惰性恢复完成/进行中）——respawn 链静默，丢弃退出现场 stash
+      emitRespawnFate(sessionId, 'recovered')
       return
     }
     if (this.isTripped(sessionId)) return
@@ -175,6 +219,8 @@ export class RespawnOrchestrator {
         console.log(`[pi-respawn] session ${sessionId} retry scheduled in ${RESPAWN_DELAY_MS}ms (attempt ${attempt + 1})`)
         this.armTimer(sessionId)
       } else {
+        // 熔断 = 不可恢复 crash（notify-once D5：按死亡发声，携原 crash 退出现场 stash）
+        emitRespawnFate(sessionId, 'terminal')
         console.warn(`[pi-respawn] session ${sessionId} respawn breaker tripped — session stays dead, waiting for user action (manual retry / lazy restore)`)
       }
       return
@@ -194,6 +240,8 @@ export class RespawnOrchestrator {
       type: 'session.restored',
       payload: { sessionId, attempts: attempt },
     })
+    // 自动恢复成功 = respawn 链静默收口（notify-once D5），丢弃退出现场 stash
+    emitRespawnFate(sessionId, 'recovered')
   }
 
   /** 任一次自动恢复成功（含用户手动恢复，挂 facade.restoreSession 成功路径）→ 计数清零。 */

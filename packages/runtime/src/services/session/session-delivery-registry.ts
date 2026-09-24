@@ -10,10 +10,12 @@
  *   成功后 skillNotice 广播 + 置位 + record（D7 保留副作用）
  *
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
- * sd-u6（完成回流）将复用本注册表，禁止自行 createDelivery。
+ * [HISTORICAL] sd-u6 完成回流曾复用本注册表；notify-once 废弃 CompletionBackflow 后回流腿
+ * 消失，禁止自行 createDelivery 的单例约束仍由现行消费方（session-manager send 排队 /
+ * create 直投 / landing 首发）共守。
  */
 import { createDelivery } from '@zhushanwen/session-delivery'
-import type { DeliveryHandle } from '@zhushanwen/session-delivery'
+import type { DeliveryHandle, DeliveryMessage } from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
@@ -38,6 +40,14 @@ export interface SessionDeliveryDeps {
    * getter 晚期注入语义，返回 null → notice 发布 no-op，注入文本处理照常）。
    */
   getMessageBus(): IMessageBus | null
+  /**
+   * per-message 终态回调（notify-once D2 受理回执锚）：delivered → 消费方读
+   * `msg.meta.notifyId/parentSid` 完成 armed→injected；rejected → 投递失败腿 disarm。
+   * 注入点在组合根 index.ts（ClaimLedger 消费）；缺席（测试/退化装配）= 回执缺位，
+   * claim 悬挂由 TTL 清扫兕底（D7）。内核同栈于 port.send 受理回执触发
+   *（P9 帧序：先于其后的 agent_settled 帧处理）。
+   */
+  onSettledMessage?: (sessionId: string, msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
 
 /** 注册表对外接口（SessionManagerHandler 经此消费 delivery 能力） */
@@ -84,9 +94,9 @@ export function createSessionDeliveryRegistry(
    * 按 classifyPromptRejection 分型收口终态（不卡 dispatching）。
    *
    * [A2 MF-C] skill 注入（D-A2-1）：client.prompt 之前。三个消费方（landing 首发直投
-   * sendDirect / session_manager send 工具的 agent 构造 prompt / completion-backflow
-   * 回流通知）统一行为——字面 `<taiji-skill/>` 标记即展开、无标记 no-op 零 RPC 原文
-   * 通过（设计裁决：首发用户内容是注入目标；代理构造/回流模板文本被模仿输出标记时
+   * sendDirect / session_manager send 工具的 agent 构造 prompt / create 初始 prompt 直投）
+   * 统一行为——字面 `<taiji-skill/>` 标记即展开、无标记 no-op 零 RPC 原文
+   * 通过（设计裁决：首发用户内容是注入目标；代理构造/模板文本被模仿输出标记时
    * 展开与主链语义一致化，接受）。
    */
   const deliverText = async (
@@ -95,8 +105,7 @@ export function createSessionDeliveryRegistry(
     streamingBehavior?: 'steer' | 'followUp',
   ): Promise<void> => {
     // [session-dead-structural-fixes D4 显式投递清标记（u3b 补线）] 经 runtime delivery 的投递
-    // （session_manager send / completion-backflow 回流 / landing 首发直投 sendDirect——三者
-    // 全部汇聚于本函数）= 新意图，投递前清 userStopped 标记放行 + 停收敛环。与 sendPrompt
+    // （session_manager send / create 直投 / landing 首发直投 sendDirect——三者全部汇聚于本函数）= 新意图，投递前清 userStopped 标记放行 + 停收敛环。与 sendPrompt
     // 同构：清标记先于 ensureActive/restore（restore-abort 读不到标记即不掐），也先于
     // client.prompt（显式投递开 turn 的 agent_start 事件回流时环已停，不会被收敛环误掐）。
     userStoppedGate.consumeForExplicitDelivery(sessionId)
@@ -151,8 +160,15 @@ export function createSessionDeliveryRegistry(
     }
   }
 
-  const buildHandle = (sessionId: string): DeliveryHandle =>
-    createDelivery(
+  const buildHandle = (sessionId: string): DeliveryHandle => {
+    // notify-once D2 受理回执（per-message、meta 原样透传）；缺席（未注入）= 字段缺省，
+    // 内核行为零变化。内核同栈于 port.send 受理回执触发（P9 帧序：先于 settled 帧）。
+    const notifyReceipt = deps.onSettledMessage
+      ? (msg: DeliveryMessage, outcome: 'delivered' | 'rejected'): void => {
+          deps.onSettledMessage!(sessionId, msg, outcome)
+      }
+      : undefined
+    return createDelivery(
       {
         supportedPayloads: ['text'],
         isIdle: () => {
@@ -175,9 +191,13 @@ export function createSessionDeliveryRegistry(
           return deliverText(sessionId, msg.payload.content, toStreamingBehavior(intent))
         },
       },
-      // 默认意图：turn 边界抢占（D3，F1 教训内化）
-      { intent: 'interrupt-at-turn-boundary' },
+      // 默认意图：turn 边界抢占（D3，F1 教训内化）；onSettled = notify-once D2 受理回执锚
+      {
+        intent: 'interrupt-at-turn-boundary',
+        ...(notifyReceipt ? { onSettled: notifyReceipt } : {}),
+      },
     )
+  }
 
   return {
     getOrCreateDelivery(sessionId, factory) {
@@ -191,7 +211,7 @@ export function createSessionDeliveryRegistry(
       // create 初始 prompt：新 session 必 idle，不传 streamingBehavior（无竞态窗口）
       return deliverText(sessionId, content)
     },
-    // D2 #5「delivery 内核有排队投递（completion-backflow 回流）」的只读查询（u3a）。
+    // D2 #5「delivery 内核有排队投递（session_manager send 排队/直投在途）」的只读查询（u3a）。
     //
     // 查询面选择：DeliveryHandle 不暴露 isIdle（isIdle 是注入 createDelivery 的
     // DeliveryPort 成员，registry 拿到的 handle 上不可达），但暴露队列深度查询
@@ -204,7 +224,7 @@ export function createSessionDeliveryRegistry(
     //
     // 为什么不用 buildHandle 的 isIdle 三维标志：那与豁免 #1 occupancy 同源（同读
     // deps.getSession 的三维标志），重复豁免无增量；depth() 恰好覆盖 occupancy 不
-    // 覆盖的窗口——session 已空闲但回流消息停在队列/在途投递中（此时回收会杀掉
+    // 覆盖的窗口——session 已空闲但 send/直投消息停在队列/在途投递中（此时回收会杀掉
     // 承接投递的 pi）。
     hasDeliveryActivity(sessionId) {
       const handle = handles.get(sessionId)
