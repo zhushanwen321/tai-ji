@@ -116,6 +116,12 @@ interface RegisteredEntry {
    * （info 级日志），而非异常断连（warn 级 kill-on-disconnect）。kill 行为不变。
    */
   goodbyeReceived: boolean
+  /**
+   * destroyAll 已接管本条目的杀链：close 事件异步于 destroyAll 的 conn.destroy()
+   * （kill await 让出事件循环刻度，close 触发时条目仍在册），无此标记时 close
+   * handler 会对同一 child 重复跑杀链（重复 kill decision 日志 + inflightKills 双登记）。
+   */
+  teardownStarted: boolean
 }
 
 export interface RelayRegistryOptions {
@@ -421,11 +427,13 @@ export class RelayRegistry {
 
   /** 握手校验（§3.1 版本协商 + §4.1 归属校验）+ 注册 + spawn + 子进程事件挂载。 */
   private registerHandshake(conn: Socket, frame: RelayHandshakeFrame): void {
-    // 版本协商：v > runtime 支持版本 → reject(reason:'version') + 断连（代理退出码 10）
-    if (typeof frame.v !== 'number' || frame.v > RELAY_PROTOCOL_VERSION) {
+    // 版本锁定（严等而非只拒更新版）：协议两侧（relay.mjs 与 registry）同仓同发、
+    // verifiedWith 版本门禁钉死同源——跨版本静默容忍只会把方言漂移推迟到数据阶段
+    // 解析爆炸；严等让漂移在握手即显式失败（代理退出码 10）。
+    if (typeof frame.v !== 'number' || frame.v !== RELAY_PROTOCOL_VERSION) {
       writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.version, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
-      console.warn(`[relay] handshake rejected: version v=${String(frame.v)} > supported ${RELAY_PROTOCOL_VERSION}`)
+      console.warn(`[relay] handshake rejected: version v=${String(frame.v)} != supported ${RELAY_PROTOCOL_VERSION}`)
       return
     }
     // 归属校验：字段形状 + env 归属键（防任意本地进程挂载借道 spawn，见两谓词注释）
@@ -459,7 +467,7 @@ export class RelayRegistry {
     // stdout 磁盘镜像（架构约定：pi stdout 落盘是卡死时唯一证据，relay 子进程同款覆盖）。
     // logger 未初始化（如单测）时是 no-op 写入器，与 rpc-client 的 pi session log 同契约。
     const log = createPiRelayLog(frame.recordId)
-    const entry: RegisteredEntry = { conn, mainSessionId: frame.mainSessionId, recordId: frame.recordId, child, pidFile, tee, log, droppedDataFrames: 0, warnedMalformedFrame: false, goodbyeReceived: false }
+    const entry: RegisteredEntry = { conn, mainSessionId: frame.mainSessionId, recordId: frame.recordId, child, pidFile, tee, log, droppedDataFrames: 0, warnedMalformedFrame: false, goodbyeReceived: false, teardownStarted: false }
     this.entries.set(conn, entry)
     this.recordIdToConn.set(frame.recordId, conn)
     try {
@@ -557,6 +565,9 @@ export class RelayRegistry {
     // 64 条 kill-on-disconnect 中 41 条是正常收割，warn 级污染故障统计与 E2 连坐判定）。
     conn.once('close', () => {
       if (!this.entries.has(conn)) return // 已因 child exit 清理，no-op
+      // destroyAll 已接管杀链（conn.destroy 的 close 异步落在 kill await 的事件循环
+      // 刻度里，条目此刻仍在册）：杀链/日志全部归 destroyAll，此处 no-op 防重复登记
+      if (entry.teardownStarted) return
       if (entry.goodbyeReceived) {
         console.log(`[relay] connection closed after goodbye, reaping child (normal teardown) recordId=${entry.recordId}`)
       } else {
@@ -608,6 +619,8 @@ export class RelayRegistry {
     }
     const list = [...this.entries.values()]
     await Promise.allSettled(list.map(async (entry) => {
+      // 先标记再 destroy：close handler 异步触发时据此让路（杀链由本函数唯一负责）
+      entry.teardownStarted = true
       entry.conn.destroy()
       await killRelayChild(entry.child)
       this.cleanupEntry(entry)

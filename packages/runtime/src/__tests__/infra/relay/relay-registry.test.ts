@@ -250,6 +250,17 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     expect(agent.rejectFrames().map((r) => r.reason)).toContain('version')
   })
 
+  // 版本严等锁定：落后版本同样拒绝（协议两侧同仓同发，跨版本静默容忍只会把方言
+  // 漂移推迟到数据阶段解析爆炸；握手即显式失败）
+  t('握手校验：v 落后 → reject reason=version + 断连', async () => {
+    await startServer()
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    agent.send(validHandshake({ v: RELAY_PROTOCOL_VERSION - 1 }))
+    await agent.waitForClosed()
+    expect(agent.rejectFrames().map((r) => r.reason)).toContain('version')
+  })
+
   t('握手校验：归属缺失（空 mainSessionId）→ reject reason=identity + 断连', async () => {
     await startServer()
     const agent = new TestAgent(getActiveRelaySocketPath()!)
@@ -490,6 +501,35 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       warnSpy.mockRestore()
       logSpy.mockRestore()
     }
+  })
+
+  // destroyAll 与 close handler 双杀链去重（2026-09-24 预防加固）：conn.destroy 的
+  // close 事件异步落在 destroyAll 的 kill await 刻度里，条目此刻仍在册——无
+  // teardownStarted 标记时 close handler 会对同一 child 重复跑杀链（重复 kill
+  // decision 日志 + inflightKills 双登记）。
+  t('destroyAll 接管杀链：close 不重复打 kill decision，child 仍被收割', async () => {
+    await startServer()
+    const marker = join(workDir, 'sigterm-marker-destroyall')
+    const ready = join(workDir, 'ready-marker-destroyall')
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    const hs = validHandshake({ argv: [fakePi, 'hang'] })
+    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
+    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
+    agent.send(hs)
+    await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
+    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await getActiveRelayRegistry()!.destroyAll()
+      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (child reaped by destroyAll)')
+      // close handler 对同一 child 不重复杀链（无 kill decision / kill-on-disconnect warn）
+      expect(warnSpy.mock.calls.some(([msg]) => msg === '[relay] kill decision')).toBe(false)
+      expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+    agent.destroy()
   })
 
   // 2026-09-04 runtime 整机崩溃事故回归：对端 FIN 后本端 conn 自动 end()
