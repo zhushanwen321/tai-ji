@@ -81,7 +81,10 @@ export default {
   // [perf-landing 跳转先行] 首发提交 → session 创建中的过渡视图（点击同帧离开 landing 内容态）
   creating: {
     hint: '正在创建新任务…',
+    cancellingHint: '正在取消…',
   },
+  // [E/F12] 创建中切走后消息后台投递进新 session 的可发现性通知
+  backgroundDelivered: '消息已发送到新任务',
   presetSelect: {
     title: '选择启动模式',
     setAsDefault: '设为默认',

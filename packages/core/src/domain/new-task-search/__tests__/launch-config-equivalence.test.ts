@@ -270,7 +270,7 @@ function mountHarness(
         setActiveSession: vi.fn(),
         pushChat: vi.fn(),
       },
-      toast: { error: vi.fn(), warning: vi.fn() },
+      toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn() },
       fileTree: { loadTree: vi.fn(), selectFile: vi.fn() },
       t: vi.fn((key: string) => key),
       migrateImage: { migrateImage: vi.fn() },
@@ -404,6 +404,7 @@ async function runMatrixCell(cell: {
       segments: [textSeg('hi')],
       bashCommand: null,
       pendingThinkingLevel: B.thinkingLevel as ThinkingLevel,
+      clientUuid: expect.any(String),
     })
   } finally {
     h.scope.stop()

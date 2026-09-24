@@ -37,15 +37,16 @@ export interface SessionFlowPort {
   createSession(input: CreateSessionFlowInput): Promise<CreateSessionFlowResult | null>
 }
 
-/** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。 */
+/** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。
+ *
+ * 返回值契约（两法同构，A 消费侧）：false = 未投递（RPC 真失败，错误面已 toast 消化）——
+ * flow 后台投递分支据此保稿（stashOrphanedDraft）。壳层消费判真用 `r !== false`
+ * （兼容 void 形态，boolean 下语义等价）。
+ */
 export interface ChatSendPort {
-  /** 普通发送（segments 结构化段；壳适配 useChat().send）。
-   *  返回值随 useChat.send 契约（[R2-A5 失败信号] Promise<boolean>：true = 提交成功或
-   *  无事发生；false = RPC 失败——内部已 toast 消化不 throw）。
-   *  flow 消费方（submitFirstMessage）不取返回值——send 成败属 session 错误通道（W2）。 */
+  /** 普通发送（segments 结构化段；壳适配 useChat().send）。false = 未投递（见上）。 */
   send(sessionId: string, segments: Segment[]): Promise<boolean>
-  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn）。
-   *  返回值随 useChat.sendBash 契约（Promise<boolean>：true = RPC 受理；false = 失败，内部已 toast）。 */
+  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn）。false = 未投递（见上）。 */
   sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<boolean>
 }
 
@@ -69,10 +70,21 @@ export interface NavigationPanelPort {
   pushChat(sessionId: string): void
 }
 
-/** toast 端口（壳适配 useToast().error / useToast().warning）。 */
+/** toast 端口（壳适配 useToast().error / .warning / .info）。
+ *  info = 后台投递可发现性（F12：用户切走但消息去了新 session 的通知通道）。 */
 export interface ToastPort {
   error(msg: string): void
   warning(msg: string): void
+  info(msg: string): void
+}
+
+/**
+ * [E] session 清理端口（创建中「取消」的收尾——删掉本次提交已建的 session，防幽灵任务烧 token）。
+ * 壳适配 @/api session.remove。可选端口：未接线时取消只跳过删除（flow 侧 console.warn 放行），
+ * 不影响取消主语义（不投递 + 草稿归还）。
+ */
+export interface SessionRemovePort {
+  remove(sessionId: string): Promise<void>
 }
 
 /** 文件树端口（壳适配 useFileTree().loadTree / useFileTreeStore().selectFile）。 */
@@ -157,6 +169,8 @@ export interface NewTaskFlowDeps {
     fileTree: FileTreePort
     t: TranslatePort['t']
     migrateImage: ImageMigratePort
+    /** [E] session 清理（取消收尾删已建 session，best-effort）；可选——未接线时跳过删除 */
+    session?: SessionRemovePort
   }
   /** git 分支操作（branch 子编排器注入） */
   gitApi: GitApiPort

@@ -13,7 +13,7 @@
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/landing.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -52,6 +52,10 @@ const flowMock = vi.hoisted(() => ({
   isActive: { value: false as boolean },
   // [perf-landing] 首发提交飞行标记（Landing 创建中过渡视图判据）
   isInflight: { value: false as boolean },
+  // [E] 创建中「取消」真语义：abandonSubmit 置 abandoned（不改状态机），
+  // isSubmitAbandoned 驱动过渡视图「正在取消…」态（hint 替换 + 按钮 disabled）
+  isSubmitAbandoned: { value: false as boolean },
+  abandonSubmit: vi.fn(),
   startFlow: vi.fn(),
   cancelFlow: vi.fn(),
 }))
@@ -97,6 +101,8 @@ beforeEach(() => {
   flowMock.isActive.value = false
   // [perf-landing] 创建中过渡视图默认不飞行；飞行用例单独设 true
   flowMock.isInflight.value = false
+  // [E] 默认非取消态；取消用例单独置位
+  flowMock.isSubmitAbandoned.value = false
 })
 
 const DONE = 'done' as DerivedStatus
@@ -275,6 +281,52 @@ describe('Landing 组件（presentational）', () => {
     expect((wrapper.find('div.contents').attributes('style') ?? '')).not.toContain('display: none')
     expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
+    // [E] 取消按钮只在 creating 态在场（内容态不泄露创建期控件）
+    expect(wrapper.find('[data-testid="new-task-cancel-create"]').exists()).toBe(false)
+  })
+
+  it('E: creating 态取消按钮可见可点 → 点击后「正在取消…」+ disabled；settle 后回内容态、无失败 toast', async () => {
+    // 真实 flow 是 ref/computed——点击后同实例 DOM 翻转依赖反应性，mock 换真 ref（plain 不失效链）
+    const isInflight = ref(true)
+    const isSubmitAbandoned = ref(false)
+    flowMock.isInflight = isInflight
+    flowMock.isSubmitAbandoned = isSubmitAbandoned
+    flowMock.abandonSubmit.mockImplementation(() => {
+      isSubmitAbandoned.value = true
+    })
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: landingStubs },
+    })
+    await nextTick()
+    // 取消按钮在 creating 态可见可点（用户可见 DOM）
+    const cancelBtn = wrapper.find('[data-testid="new-task-cancel-create"]')
+    expect(cancelBtn.exists()).toBe(true)
+    expect(cancelBtn.attributes('disabled')).toBeUndefined()
+    expect(cancelBtn.text()).toContain('取消')
+
+    // 点击 → flow.abandonSubmit（真语义：置 abandoned 标志，不改状态机 state）
+    await cancelBtn.trigger('click')
+    expect(flowMock.abandonSubmit).toHaveBeenCalledTimes(1)
+    await nextTick()
+    // 「正在取消…」态：hint 文案替换 + 按钮 disabled（防重入）；过渡视图保持到 settle
+    const creating = wrapper.find('[data-testid="new-task-creating"]')
+    expect(creating.exists()).toBe(true)
+    expect(creating.text()).toContain('正在取消')
+    expect(creating.text()).not.toContain('正在创建新任务')
+    expect(wrapper.find('[data-testid="new-task-cancel-create"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('div.contents').attributes('style')).toContain('display: none')
+
+    // create settle（isInflight 复位）→ 过渡视图让位内容态；草稿由 sendLandingFirstMessage
+    // 归还（send.test ⑬ 闭环），此处断言用户可见形态回显 + 无失败 toast
+    isInflight.value = false
+    await nextTick()
+    expect(wrapper.find('[data-testid="new-task-creating"]').exists()).toBe(false)
+    expect((wrapper.find('div.contents').attributes('style') ?? '')).not.toContain('display: none')
+    expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
+    // 无失败 toast（用户主动取消，「创建失败」是误导性误报——E 拍板）
+    expect(toastMock.error).not.toHaveBeenCalled()
+    expect(depsMock.toast.error).not.toHaveBeenCalled()
   })
 
   it('点 directory chip → 调 useNewTaskFlow.openDirPopover（#5 渲染绑定）', async () => {

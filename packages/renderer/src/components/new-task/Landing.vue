@@ -76,6 +76,12 @@ const toastError = deps.toast.error
  * 会 cancelFlow 杀掉在途 create），过渡完全发生在组件内部。
  */
 const isCreating = computed(() => flow.isInflight.value)
+/** [E] 「正在取消…」态（abandonSubmit 置位）：hint 替换 + 取消按钮 disabled；过渡视图保持到 create settle */
+const isCancelling = computed(() => flow.isSubmitAbandoned?.value ?? false)
+/** [E] 创建中取消：置 abandoned（flow 在 submitFirstMessage 出口收尾：不投递 + 删已建 session + 归还草稿） */
+function onCancelCreate(): void {
+  flow.abandonSubmit()
+}
 
 /**
  * onOpenDirDialog — 打开 OS 目录选择器（AC-5.6 异常反馈）。
@@ -282,7 +288,9 @@ function onPresetSelect(payload: { presetId: string }): void {
 
     <!-- [perf-landing 跳转先行] 创建中过渡视图：点击发送后同帧出现（isInflight 入口同步置位），
          替换问候语/composer 内容态；create 完成后 Panel 切 conversation 分支，本视图随 Landing
-         一并卸载。失败时 isInflight 复位 → 内容态回显 + restoreSegments 已回滚草稿。 -->
+         一并卸载。失败时 isInflight 复位 → 内容态回显 + restoreSegments 已回滚草稿。
+         [E] 取消按钮：abandonSubmit 置 abandoned → 「正在取消…」态（disabled 防重入），
+         过渡视图保持到 create settle（防 create 仍在途时重发造成并发双 create）。 -->
     <div
       v-if="isCreating"
       data-testid="new-task-creating"
@@ -290,7 +298,18 @@ function onPresetSelect(payload: { presetId: string }): void {
       role="status"
     >
       <LoaderCircle class="size-6 animate-spin text-neutral-mid" />
-      <p class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('newTask.creating.hint') }}</p>
+      <p class="text-[length:var(--text-sm)] text-neutral-mid">
+        {{ isCancelling ? t('newTask.creating.cancellingHint') : t('newTask.creating.hint') }}
+      </p>
+      <Button
+        data-testid="new-task-cancel-create"
+        variant="ghost"
+        class="h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
+        :disabled="isCancelling"
+        @click="onCancelCreate"
+      >
+        {{ t('common.cancel') }}
+      </Button>
     </div>
 
     <!-- landing 内容态（问候语 + chip 行 + composer 卡片）：创建中 v-show 隐藏（保挂载）。

@@ -10,9 +10,11 @@
  * 端口适配映射（C-NT-2 / C-SS-2 / D8 裁决）：
  * - createSessionFlow：core domain/session createSessionFlow(ctx, input) 包一层
  *   （ctx 的 store/api/defaultCwd/onCwdFallback 由本壳组装）
- * - chat：useChat().send / sendBash
- * - navigation：useSessionStore().activeId + usePanelStore().loadSession + useNavigationStore().push
- * - toast：useToast().error / warning
+ * - chat：useChat().send / sendBash（判真 `r !== false`；A 消费侧保稿依赖 false 语义）
+ * - navigation：useSessionStore().activeId + usePanelStore().loadSession +
+ *   useNavigationStore().push + useWorkspaceStore().defaultCwd
+ * - toast：useToast().error / warning / info（info = 后台投递可发现性 F12）
+ * - session：@/api session.remove（E 取消收尾删已建 session，best-effort）
  * - fileTree：useFileTree().loadTree + useFileTreeStore().selectFile
  * - t：i18n.global.t
  * - migrateImage：sessionApi.migrateImage
@@ -105,7 +107,7 @@ export function useNewTaskFlow() {
   const panel = usePanelStore()
   const navigation = useNavigationStore()
   const chat = useChat()
-  const { error: toastError, warning: toastWarning } = useToast()
+  const { error: toastError, warning: toastWarning, info: toastInfo } = useToast()
   // [U2d] launch 配置解析数据源：preset store（presets/defaultPresetId）+ 惰性加载编排
   //（usePiPresets.loadPresets 内部 allSettled 永不 reject——E1/E4 收敛语义）+ settings
   // 单例（与显示链 composer-shell 同一 getSettingsStore，两链同源）
@@ -144,8 +146,12 @@ export function useNewTaskFlow() {
       },
       chat: {
         send: (sid, segments) => chat.send(sid, segments),
-        sendBash: (sid, command, excludeFromContext) =>
-          chat.sendBash(sid, command, excludeFromContext),
+        // [A 兼容形态] sendBash boolean 化过渡：r 为 boolean 后即真透传；当前 void→true
+        // 即现状「不可知=当作已投递」语义（chat.send 已是 Promise<boolean> 直透传）
+        sendBash: async (sid, command, excludeFromContext) => {
+          const r: unknown = await chat.sendBash(sid, command, excludeFromContext)
+          return r !== false
+        },
       },
       navigation: {
         activePanelId: () => panel.activePanelId,
@@ -164,6 +170,11 @@ export function useNewTaskFlow() {
       toast: {
         error: (msg) => toastError(msg),
         warning: (msg) => toastWarning(msg),
+        info: (msg) => toastInfo(msg),
+      },
+      // [E] 取消收尾：删除本次提交已建的 session（防幽灵任务烧 token，best-effort）
+      session: {
+        remove: (sessionId: string) => sessionApi.remove(sessionId),
       },
       fileTree: {
         loadTree: (sid) => useFileTree().loadTree(sid),

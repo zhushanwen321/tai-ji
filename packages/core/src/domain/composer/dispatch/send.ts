@@ -64,7 +64,8 @@ interface ComposerBashShape {
 
 /**
  * flow 最小契约（submitFirstMessage）。landing 态首发提交用。
- * 结构类型精准表达「只消费 submitFirstMessage」。
+ * 结构类型精准表达「只消费 submitFirstMessage」（返回三态为字面联合，对齐 new-task-search
+ * flow 的 SubmitFirstMessageResult——消费面契约留在消费模块局部声明，不跨域 import）。
  */
 interface NewTaskFlowShape {
   /**
@@ -72,12 +73,16 @@ interface NewTaskFlowShape {
    * @param segments 结构化 segments（含 text/image/skill/file/mention 段）
    * @param thinkingLevel 可选思考等级（landing 态 Composer 选定值）
    * @param bashCommand bash 命令参数（仅 extractBashCommand.type === 'command' 时传入）
+   * @returns 'handed-over' = 交接完成（视图已切新 session）；'background' = 创建中用户切走，
+   *   后台投递（可发现性 info toast 由 flow 后台分支经 ToastPort 发出，F12）；'abandoned' =
+   *   用户主动取消（不投递，已建 session 已删）→ 调用方归还草稿。未投递早退（空内容守卫 /
+   *   飞行中重复提交）统一报 'abandoned'（草稿归还语义）。
    */
   submitFirstMessage: (
     segments: Segment[],
     thinkingLevel?: string,
     bashCommand?: { command: string; excludeFromContext: boolean },
-  ) => Promise<void>
+  ) => Promise<'handed-over' | 'background' | 'abandoned'>
 }
 
 export interface ComposerSendDeps {
@@ -177,7 +182,8 @@ async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handle
 
 /**
  * landing 首发分支（priority 3）：bash 提取分流（empty=空命令不提交）→ 清输入 →
- * submitFirstMessage，失败 restoreSegments 回滚。
+ * submitFirstMessage，按三态返回收尾（E 拍板）：'abandoned' 归还草稿 + 焦点拉回（无 toast）；
+ * 'background' / 'handed-over' 无草稿动作。
  */
 async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment[], text: string): Promise<void> {
   // landing bash 分流：提取 !/!! 前缀（empty=空命令不提交；not-bash=走普通首发）
@@ -188,19 +194,27 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
   try {
     // B6：preset 透传走 flow.pendingPreset，不在此读 store 第二真源
     const bashCommand = bashExtract.type === 'command' ? bashExtract : undefined
-    await deps.flow.submitFirstMessage(segments, deps.localThinkingLevel.value, bashCommand)
+    const result = await deps.flow.submitFirstMessage(segments, deps.localThinkingLevel.value, bashCommand)
+    if (result === 'abandoned') {
+      // [E] 用户主动取消（或未投递早退）：草稿归还 + 焦点拉回（同 catch 的 nextTick 形态），
+      // **无 toast**——用户主动放弃，「创建失败」是误导性误报。
+      deps.restoreSegments(segments)
+      void nextTick(() => deps.inputRef.value?.focus?.())
+    }
+    // 'handed-over'：现状不变（交接完成即 flow 终态）；'background'：用户已切走、消息已去
+    // 新 session——可发现性 info toast 由 flow 后台分支经 ToastPort 发出（F12），此处无草稿
+    // 动作（投递失败时 flow 侧已 stashOrphanedDraft 保稿，A 消费侧）。
   } catch (e) {
+    // [C] 无条件保底暂存（幂等双写）：堵「catch 后卸载」镜像竞态——restore 写进活实例后
+    // Landing 紧接着卸载会消亡且未入槽（原单点二分只堵了「卸载后 catch」半边）。
+    // 有活实例照常 restore + focus（槽与实例双写，取回由 landing 单挂载点不变量保证幂等）。
+    stashOrphanedDraft(segments)
     if (deps.inputRef.value) {
       deps.restoreSegments(segments)
       // [robustness P1] 创建中过渡视图（display:none）丢焦 → 焦点拉回。必须延到 nextTick：
       // createInFlight 复位虽在本 catch 前（finally），但 v-show 翻回可见是异步渲染 flush，
       // 对 display:none 内元素调 focus() 会静默失败（真机实测 activeElement 停在 BODY）
       void nextTick(() => deps.inputRef.value?.focus?.())
-    } else {
-      // [robustness P2/③b] 目标实例已随 Landing 卸载（create 飞行中切 session 等），restore
-      // 写不进任何活实例（?. 静默 no-op）= 输入丢失 → 暂存 orphan 槽，下次 landing composer
-      // 挂载时取回恢复（composer-shell onMounted takeOrphanedDraft 接线）
-      stashOrphanedDraft(segments)
     }
     deps.toastError(deps.t('panel.panel.taskFailed', { error: toErrorMessage(e) }))
   } finally {

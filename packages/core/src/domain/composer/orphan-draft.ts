@@ -13,13 +13,27 @@
  *   兜底，不是草稿持久化通道）
  * - 落 core 而非 dom-core restore.ts：包依赖方向是 dom-core→core（core 零跨包 import），
  *   写侧 send.ts 在 core，槽必须与写侧同包
+ *
+ * [D 显性耦合] 本槽的正确性依赖 **Landing 单挂载点不变量**（Landing.vue [不变式] 注释 +
+ * landing.test 静态断言锁死唯一挂载点 = Panel.vue landing 分支）：take 消费点唯一
+ * （composer-shell onMounted，仅 landing 消费），单写单读才保证「一次性取回」幂等。
+ * 若未来出现多 landing 挂载点，本槽会变成跨实例草稿串扰源——必须先重新设计（多实例
+ * 键化不在预造范围，YAGNI：多实例拓扑出现再说）。
  */
 import type { Segment } from '@taiji/shared'
 
 let orphanedDraft: Segment[] | null = null
 
-/** 暂存孤立草稿（覆盖式：后写覆盖先写——同一时刻至多一份 landing 在途失败草稿）。 */
+/**
+ * 暂存孤立草稿（覆盖式：后写覆盖先写——同一时刻至多一份 landing 在途失败草稿）。
+ * 覆盖**未消费**槽时 console.warn：上一份草稿从未被 takeOrphanedDraft 取回就被顶掉，
+ * 是泄漏/交叉污染信号（失败→restore 后未重发即离开 / 双写路径下旧意图草稿残留）——
+ * 留痕供排障，不阻断（后写优先是既定语义）。
+ */
 export function stashOrphanedDraft(segments: Segment[]): void {
+  if (orphanedDraft !== null) {
+    console.warn('[orphan-draft] overwriting unconsumed orphaned draft (leak/cross-contamination signal)')
+  }
   orphanedDraft = segments
 }
 

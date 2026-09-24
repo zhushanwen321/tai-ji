@@ -416,4 +416,47 @@ describe('useComposerSend.onSend', () => {
     // 失败反馈不丢（用户可见形态）
     expect(spies.toastError).toHaveBeenCalledWith('panel.panel.taskFailed')
   })
+
+  it('⑫c [C] landing 首发失败（活实例）→ 无条件 stash 保底（幂等双写）+ restore/focus 照常', async () => {
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockRejectedValueOnce(new Error('landing fail'))
+    await useComposerSend(deps).onSend()
+    // 有活实例照常恢复 + 焦点拉回（⑫ 同形态）
+    expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
+    await nextTick()
+    expect(spies.focus).toHaveBeenCalledTimes(1)
+    // [C] 镜像竞态保底：即使 restore 写进了活实例，槽也同步暂存——堵「catch 后卸载」半边
+    //（restore 后 Landing 紧接卸载 → 草稿消亡且未入槽，原单点二分漏掉的镜像竞态）
+    expect(takeOrphanedDraft()).toEqual(SEGMENTS)
+    expect(spies.toastError).toHaveBeenCalledWith('panel.panel.taskFailed')
+  })
+
+  it('⑬ [E] landing 首发被取消（abandoned）→ 草稿归还 + 焦点拉回，无 toast（不误报「创建失败」）', async () => {
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockResolvedValueOnce('abandoned')
+    await useComposerSend(deps).onSend()
+    expect(spies.submitFirstMessage).toHaveBeenCalledTimes(1)
+    // 草稿归还（clearInput 已清 DOM）+ 焦点拉回（nextTick 形态同 catch）
+    expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
+    await nextTick()
+    expect(spies.focus).toHaveBeenCalledTimes(1)
+    // 无 toast：用户主动取消（「创建失败」是误导性误报）
+    expect(spies.toastError).not.toHaveBeenCalled()
+  })
+
+  it('⑭ [E/F12] background（后台投递）→ 不归还草稿（消息已去新 session）+ 无 error toast', async () => {
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockResolvedValueOnce('background')
+    await useComposerSend(deps).onSend()
+    expect(spies.submitFirstMessage).toHaveBeenCalledTimes(1)
+    // 消息已后台投递进新 session（或 flow 侧已保稿）——不归还草稿、不抢焦点
+    expect(spies.restoreSegments).not.toHaveBeenCalled()
+    expect(spies.focus).not.toHaveBeenCalled()
+    expect(spies.toastError).not.toHaveBeenCalled()
+    // 可发现性 info toast（F12）走 flow 后台分支的 ToastPort.info 通道——
+    // 「info toast 出现」断言见 flow.test TC-6f（同一 background 分支语义面）
+  })
 })

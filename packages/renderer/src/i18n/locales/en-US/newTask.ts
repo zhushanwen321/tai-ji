@@ -81,7 +81,10 @@ export default {
   // [perf-landing jump-first] first submit → creating-session transition view (leaves landing content same frame as click)
   creating: {
     hint: 'Creating new task…',
+    cancellingHint: 'Cancelling…',
   },
+  // [E/F12] discoverability notice: message was delivered to the new task after switching away mid-create
+  backgroundDelivered: 'Message sent to the new task',
   presetSelect: {
     title: 'Launch mode',
     setAsDefault: 'Set as default',
