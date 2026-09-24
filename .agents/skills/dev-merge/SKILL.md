@@ -36,7 +36,7 @@ description: >-
 
 分支 commit 已是逻辑批次级（或只有个位数笔）→ 跳过本步直接合并，不为仪式感整理。
 
-### 第 1.7 步：合入点横切审查（4+2 维，条件触发）
+### 第 1.7 步：合入点横切审查（4+3 维，条件触发）
 
 feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，data-governance / test-coverage / arch-boundary / type-safety 四个横切面不在其审查面内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切面前置到合入点，终局 PR 期 8 维 loop 只收跨域交互与漏网项（「前置消化 vs 终局兜底」并存关系）。
 
@@ -45,8 +45,8 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
 1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`
-2. 派 4 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`arch-boundary` / `data-governance` / `test-coverage` / `type-safety`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<4 个 review-<维度>.md 绝对路径>", autoCommit:true, ...}'`；zcode 宿主用原生 `review-fix-loop` saved workflow（reviewers 传 4 个 agent .md 绝对路径子集）
-3. 触发式追加 2 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`
+2. 派 4 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`arch-boundary` / `data-governance` / `test-coverage` / `type-safety`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径，逗号分隔>", autoCommit:true, ...}'`；zcode 宿主用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
+3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切面，且是本仓高频改动面；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）
 4. business-logic 维度**不进本步**（成本最高、发现密度最低）——分支内语义正确性由 dev-flow 场景验收承载
 5. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 
