@@ -138,7 +138,7 @@ python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-pa
 - 自动检测 base...HEAD 改动过 `src/` 的 vitest 包（含 `extensions/shared/<lib>` 三层目录），逐包跑 `vitest run --coverage`（lcov），解析 lcov DA 行命中 × git diff 新增行号（精确路径匹配），算**可执行新增行覆盖率**
 - **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释——PR #20 组 A 的 A2 形态；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 `.review/coverage.json`（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
 - **shared 下游传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，承接「1.1 不再跑全量测试」后的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
-- `--packages <pkg>` 是交集过滤器（单包探针用，会以单包产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages` 是追加器，两者语义不同、可共存。**注意**：修复 worker 在途时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
+- `--packages <pkg>` 是交集过滤器（单包探针用，会以单包产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages` 是追加器，两者语义不同、可共存。**注意**：修复 worker 还在运行时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
 
 **Gate-1.6 判定**：fail → 派测试专项 subagent 补测试 → 重跑（上限 3 轮）。补测试优先级看 `.review/coverage.json` 的 uncovered_files 清单（按可执行新增行缺口排序）。
 
@@ -221,9 +221,9 @@ node <zsw-cli> workflow --workflow <repo>/.agents/skills/pr-cr-fix/workflows/pr-
 - CLI run 恒本地同步执行：zcode 下用 Bash `run_in_background` 包裹等待，完成后读输出（scriptResult JSON）
 - 可覆盖参数：`--runId prw-...`（断点恢复）、`--skip-steps "cr-fix,simplify"`（人工接管逃生舱，逗号串）、`--max-rounds N`、`--simplify-mode report`、`--base <ref>`、`--reviewers <逗号串白名单>`、`--aggregator-model <provider/model>`（cr-fix 聚合阶段模型；缺省跟随 run 模型，仅当聚合需降档/升档时设置——provider 必须为当前引擎侧存在者）、`--allow-external-changes`（HEAD 外部变更显式放行）
 
-**发起前披露义务 [MANDATORY]**：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖（固化契约 `agents/simplify-apply.md`），**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `--simplify-mode report`（完全不改码，断点语义完整保留）。
+**发起前披露义务 [MANDATORY]**：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」中的人工确认环节已被该模式显式取代（固化契约 `agents/simplify-apply.md`），**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `--simplify-mode report`（完全不改码，人工确认环节完整保留）。
 
-**恢复（resume）**：同 fresh 命令（含 `--repo <repo 绝对路径>`，与原 run 同仓）+ `--runId prw-...`。runId 三通道：① failed 终态的 `resumeCommand` 字段（可直接复制执行）；② `cat .review/pr-workflow/latest`（脚本暴毙无通知时的兜底）；③ run 日志首行。
+**恢复（resume）**：同 fresh 命令（含 `--repo <repo 绝对路径>`，与原 run 同仓）+ `--runId prw-...`。runId 三通道：① failed 终态的 `resumeCommand` 字段（可直接复制执行）；② `cat .review/pr-workflow/latest`（脚本异常退出且无通知时的兜底）；③ run 日志首行。
 
 **终态映射表**（scriptResult 必含 `status/runId`；成功另含 `prUrl/terminated/simplify/gates/skippedSteps`；失败另含 `failedStep/error/resumeCommand`）：
 
@@ -296,7 +296,7 @@ node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.m
 
 **Step 4 — 修复 MUST_FIX**（条件触发，`must_fix > 0` 时）：
 
-- 按文件归属分组，每组派 1 个 `worker` subagent 并行修复（≤5）。worker task 含：review 报告原文路径（worker 必须复读）+ 本组问题清单 + 「全部修复，不挑 level」+ 「修复后 `pnpm -r typecheck` 通过」；完成后 commit `fix: review round 1 — N must-fix`
+- 按文件归属分组，每组派 1 个 `worker` subagent 并行修复（≤5）。worker task 含：review 报告原文路径（worker 必须复读）+ 本组问题清单 + 「全部修复，不分严重等级」+ 「修复后 `pnpm -r typecheck` 通过」；完成后 commit `fix: review round 1 — N must-fix`
 - **每条先验证真实性再修**：worker 逐条读代码证实 review 断言；不成立的（误报）在报告列「已验证不成立 + 证据（file:line + 逻辑）」，不盲改
 - **测试类问题派独立测试 subagent**，与修复 worker 分离：补测试 / 验证修复有效性（bug 类修复要求「修前红修后绿」——回归测试在旧代码上必须 fail、新代码上 pass，证明测试真能抓 bug 而非凑数）
 
@@ -446,7 +446,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 | 3a pre-merge exit 2（coverage.json 缺失 / base 不一致） | 工具错误：重跑 3a ① coverage-gate 后再 ③ |
 | Gate-3a pre-merge FAIL | 按 `failed_step` 重派 worker 修复后从 3a ① 重跑 |
 | 阶段 3b push 冲突 | `git fetch && git rebase` 后重试；重写历史后重审未解决的 review 线程 |
-| （zcode 路径 2）pr-lifecycle failed（任意 failedStep） | 一律先读 scriptResult 的 `error`（内含恢复指引）与 `resumeCommand`；暴毙无通知时 `cat .review/pr-workflow/latest` 拿 runId 续跑（详见路径 2 终态映射表） |
+| （zcode 路径 2）pr-lifecycle failed（任意 failedStep） | 一律先读 scriptResult 的 `error`（内含恢复指引）与 `resumeCommand`；异常退出且无通知时 `cat .review/pr-workflow/latest` 拿 runId 续跑（详见路径 2 终态映射表） |
 | （zcode 路径 2）pr-lifecycle failed 且 error 含 `Provider Registry 中不存在 Model: builtin:*` | zsw 引擎模型契约漂移，resume 与重试均无效——改走路径 2b；zsw 修复后可带 `--runId` resume 原 run 续走路径 2（HEAD 未变时守卫放行） |
 
 ## 本 skill 目录结构
