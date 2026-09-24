@@ -267,6 +267,39 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewAckMarked.value).toBe(false)
   })
 
+  it('多挂起镜像一致性：markPlanReviewAnswered 不覆写镜像真值（registry 仍有挂起时保持 true）', () => {
+    const { store, planReviewPendingKnown, planReviewAckMarked } = mountStore()
+    // 多挂起异常形态：registry 两条挂起入店 → 消费其中一条（respond/失效）置已应答标记，
+    // 镜像必须保持 registry 现值 true（不被无条件置 false 打假——漏斗自述不变量）
+    store.setPlanReviewPending('A', true)
+    store.markPlanReviewAnswered('A')
+    expect(planReviewPendingKnown.value).toBe(true)
+    expect(planReviewAckMarked.value).toBe(true)
+  })
+
+  it('D8 检测窗分区态：未开窗/已收口的 turn 信号 no-op；重挂到达内含收口（关窗 + 清错误）', () => {
+    const { store, planReviewNudgeWatching, planReviewNudgeError } = mountStore()
+    // 未开窗 → endPlanReviewNudge no-op（不误报）
+    store.endPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgeError.value).toBeNull()
+
+    // 开窗 → turn 结束未重挂 → 落错误行
+    store.beginPlanReviewNudge('A')
+    expect(planReviewNudgeWatching.value).toBe(true)
+    store.endPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgeWatching.value).toBe(false)
+    expect(planReviewNudgeError.value).toBe('no-response')
+
+    // 重试成功形态：开窗后重挂到达（setPlanReviewPending(true) 内含收口：关窗 + 清错误）
+    store.beginPlanReviewNudge('A')
+    store.setPlanReviewPending('A', true)
+    expect(planReviewNudgeWatching.value).toBe(false)
+    expect(planReviewNudgeError.value).toBeNull()
+    // 已收口后的 turn 信号不再误报
+    store.endPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgeError.value).toBeNull()
+  })
+
   it('稳定窗 arm/cancel·重置（fake timers）：组合持续 ≥2s 放行；中途变假重置，再转真重新计满', async () => {
     vi.useFakeTimers()
     const { store, planReviewDegradedGate } = mountStore()

@@ -182,6 +182,7 @@ import { send as sendChatMessage } from '@taiji/core/transport/api/domains/chat'
 import { toErrorMessage } from '@taiji/core'
 import type { PlanReviewResponse } from '@zhushanwen/extension-protocol'
 import { usePlanState } from '@/composables/use-plan-sync'
+import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import {
   usePlanStore,
   derivePlanReviewBarMode,
@@ -282,20 +283,46 @@ function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
  * 在 composer 直发同链）注入一条固定文案的 user 可见消息（「请重新提交计划审批」——D8
  * 写入面穷举已登记：rename-session / smart-context / session-reader / fork / 回放审计等
  * 消费方同真实用户消息语义），agent 在 plan 模式提示词纪律下重调 submit-review。
- * 失败（发送失败/agent 未响应）就近错误行 + 左区退出常驻兜底（不静默）。
+ * 失败双分支（设计 D8 明文「发送失败/agent 未响应」）就近错误行 + 左区退出常驻兜底：
+ * ① 发送失败 = message.send 抛错（WS/超时）；② agent 未响应 = 发送成功但预期重挂未发生
+ *（见下方无响应检测）。
  */
 const resubmitting = ref(false)
-const resubmitError = ref<string | null>(null)
+/**
+ * 就近错误行（D8 失败双分支的呈现面）：分区级状态（plan-store reviewNudgeError）——
+ * turn 事件 handler 经 store action 写「消息所属 sid」分区（updateFor(capturedSid) 语义），
+ * 无实例级 session 状态（ADR-0049；焦点切换后错误随分区保留/隔离）。
+ */
+const resubmitError = computed(() => planStore.planReviewNudgeError)
+
+/**
+ * 「agent 未响应」检测（D8 失败契约②）——**turn 生命周期信号驱动，非墙钟超时**
+ *（AGENTS.md 超时默认原则：任务级正常路径不设墙钟——nudge 的正常路径 = 开轮 → agent 调
+ * submit-review 重挂，耗时随 turn 长度自然波动，固定窗口必误杀长思考轮）：
+ * - 成功收口 = 新 planReview 挂起登记到达（重挂发生）→ 内含于 plan-store
+ *   setPlanReviewPending(true)（关检测窗 + 清旧错误，同轮先重挂后收尾不误报）；
+ * - 失败判定 = 检测窗开着时 turn 结束（message.complete / message.error）而重挂未至，
+ *   或发送被预检拒绝未进轮（send.rejected）→ endPlanReviewNudge 落错误行提示可重试；
+ *   未开窗（未点重提）/ 已收口的 turn 信号由 action no-op；
+ * - WS 断连无信号的形态不判死（fail-safe 不误导，与评论/批准同风险面 R1）；
+ * - 切 session 无串台：检测窗在 per-session 分区（非实例 ref），事件按 capturedSid 写旧
+ *   分区，新焦点分区天然是干净基线（ADR-0049 Map 分区，免 watch(sessionId) 手动清空）。
+ */
+const onMessage = useSessionEvents(sessionIdRef)
+onMessage(['message.complete', 'message.error', 'send.rejected'], (_msg, sid) => {
+  planStore.endPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
+})
 
 async function onResubmit(): Promise<void> {
   const sid = props.sessionId
   if (!sid || resubmitting.value) return
   resubmitting.value = true
-  resubmitError.value = null
+  planStore.setPlanReviewNudgeError(sid, null) // 清旧错误（重试入口）
   try {
     await sendChatMessage(sid, t('plan.reviewBar.resubmitNudge'))
+    planStore.beginPlanReviewNudge(sid) // 开检测窗（失败契约②的判定窗）
   } catch (e) {
-    resubmitError.value = t('plan.reviewBar.resubmitError', { message: toErrorMessage(e) })
+    planStore.setPlanReviewNudgeError(sid, t('plan.reviewBar.resubmitError', { message: toErrorMessage(e) }))
   } finally {
     resubmitting.value = false
   }

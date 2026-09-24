@@ -17,10 +17,12 @@ export default {
     degradedResubmit: 'The review prompt was invalidated by a session restart',
     degradedMissing: 'No review prompt is pending',
     // D8 recovery button (reuses the message-send channel to inject a fixed user message;
-    // the agent calls submit-review again per prompt discipline)
+    // the agent calls submit-review again per prompt discipline); two failure branches:
+    // send failure / agent no-response (turn ended without resubmitting)
     resubmit: 'Resubmit for review',
     resubmitNudge: 'Please resubmit the plan for review',
     resubmitError: 'Resubmit failed: {message}. Retry, or exit plan mode via the "Exit" button on the left',
+    resubmitNoResponse: 'The agent did not respond: the plan was not resubmitted. Retry, or exit plan mode via the "Exit" button on the left',
     // D9 agent self-review line (truncated in the ready branch + full text in a popover)
     selfReviewLabel: 'Agent self-review',
     // §3.5 guard & review: tooltip while "Submit comments for revision" is disabled at 0 drafts;

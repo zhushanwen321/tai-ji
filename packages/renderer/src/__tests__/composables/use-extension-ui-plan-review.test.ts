@@ -293,4 +293,22 @@ describe('D4 审批窗口漏斗接线（respond/失效置已应答标记；pendi
 
     expect(plan.planReviewAckMarked).toBe(true)
   })
+
+  it('多挂起异常形态：respond 其中一条 → 镜像按 registry 现值保持 true + 已应答标记置起', () => {
+    const plan = usePlanStore()
+    plan.syncFocus('sess-A')
+    const { result, dispose } = runWithScope(() =>
+      useExtensionUI(ref('sess-A'), planReviewFilter),
+    )
+
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1'))
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-2'))
+    result.respond('pr-1', JSON.stringify({ decision: 'dismiss' }))
+
+    // registry 仍有 pr-2 → 镜像保持 true（markPlanReviewAnswered 不得覆写为 false）
+    expect(result.currentPlanReviewRequests.value.map((r) => r.requestId)).toEqual(['pr-2'])
+    expect(plan.planReviewPendingKnown).toBe(true)
+    expect(plan.planReviewAckMarked).toBe(true)
+    dispose()
+  })
 })

@@ -208,26 +208,28 @@ describe('首拉：watch immediate', () => {
 // ── WS 帧驱动状态流转（updateFor 分区写）─────────────────────
 
 describe('WS 帧：状态流转与分区隔离', () => {
-  it('帧驱动状态流转：awaiting → ③；revising → ②（D1 phase：规划中 = planning|revising）；无值 → ②', async () => {
+  it('帧驱动状态流转（真形态：View 携带 state、无 reviewState 键）：reviewing → ③；revising → ②；planning → ②', async () => {
     const host = mountHost('A')
     await settle()
 
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state、**不透出 reviewState**（D2）
+    // ——fixture 直塞旧键会掩盖「直读旧字段恒失灵」的失灵面
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
+    expect(host.plan.view.value?.reviewState).toBeUndefined()
 
     // revising 归 phase 'planning'（derivePhase 单点接线）→ 文档撰写档（②）
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'revising' }))
-    await settle()
-    expect(host.plan.stage.value).toBe('writing')
-    expect(host.plan.view.value?.reviewState).toBe('revising')
-
-    // 修订完成重新提交前的过渡帧（reviewState 无值）——D1 三步推导落回 ②
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC] }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'revising' }))
     await settle()
     expect(host.plan.stage.value).toBe('writing')
     expect(host.plan.view.value?.reviewState).toBeUndefined()
+
+    // 修订完成重新提交前的过渡帧（state=planning）——D1 三步推导落回 ②
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+    await settle()
+    expect(host.plan.stage.value).toBe('writing')
   })
 
   it('isActive=false 帧驱动 plan 态消失语义（stage → null）', async () => {

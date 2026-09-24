@@ -85,6 +85,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 })
 
 import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
+import * as events from '@taiji/core/transport/api'
 import {
   useExtensionUI,
   formFilter,
@@ -522,6 +523,77 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('重新提交失败')
     expect(wrapper.find('[data-testid="plan-review-resubmit"]').exists()).toBe(true)
+  })
+})
+
+describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙钟）', () => {
+  /** turn 生命周期事件派发（真实 events 通道，use-plan-sync.test 同款 dispatchSession 形态） */
+  function dispatchTurnEvent(type: 'message.complete' | 'message.error' | 'send.rejected'): void {
+    events.dispatchSession(SID, { type, payload: { sessionId: SID } } as never)
+  }
+
+  async function clickResubmit(wrapper: VueWrapper): Promise<void> {
+    await wrapper.find('[data-testid="plan-review-resubmit"]').trigger('click')
+    await flushAsync()
+  }
+
+  async function mountDegraded(): Promise<VueWrapper> {
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing', resumeHint: 'resubmit' }))
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
+    await flushAsync()
+    return wrapper
+  }
+
+  it('nudge 发送成功但 turn 结束未重挂 → 就近错误行「agent 未响应」（D8 失败契约②）', async () => {
+    const wrapper = await mountDegraded()
+    await clickResubmit(wrapper)
+    expect(chatSendMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
+
+    // turn 结束（message.complete）而预期重挂未至 → 判未响应
+    dispatchTurnEvent('message.complete')
+    await flushAsync()
+
+    const err = wrapper.find('[data-testid="plan-review-resubmit-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('agent 未响应')
+    expect(wrapper.find('[data-testid="plan-review-resubmit"]').exists()).toBe(true) // 保留可重试
+  })
+
+  it('同轮先重挂后收尾：pending 到达撤销检测，turn 结束不误报（成功路径）', async () => {
+    const wrapper = await mountDegraded()
+    await clickResubmit(wrapper)
+
+    // submit-review 是轮内工具调用：挂起登记先于 turn 结束到达 → 成功收口
+    emitPlanReviewRequest('pr-resub')
+    await flushAsync()
+    dispatchTurnEvent('message.complete')
+    await flushAsync()
+
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true) // ready 优先
+  })
+
+  it('turn 错误收尾（message.error）同判未响应；send.rejected（预检拒绝未进轮）同判', async () => {
+    const wrapper = await mountDegraded()
+    await clickResubmit(wrapper)
+    dispatchTurnEvent('message.error')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').text()).toContain('agent 未响应')
+
+    // 重试 → 预检拒绝（busy 未进轮）→ 同一失败契约②
+    await clickResubmit(wrapper)
+    dispatchTurnEvent('send.rejected')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').text()).toContain('agent 未响应')
+  })
+
+  it('未点重提时 turn 信号不误报（检测窗口未开启）', async () => {
+    const wrapper = await mountDegraded()
+    dispatchTurnEvent('message.complete')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
   })
 })
 

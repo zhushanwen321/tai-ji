@@ -200,6 +200,14 @@ interface PlanPartition {
    * 定时器 arm/cancel 的组合判定）。
    */
   reviewPendingKnown: boolean
+  /**
+   * D8「agent 未响应」检测窗（per-session，分区派而非实例级 ref——turn 事件 handler 经
+   * action 写「消息所属 sid」分区，切 session 无丢值/串台，ADR-0049）：nudge 发送成功即
+   * 开窗，重挂到达（setPlanReviewPending(true) 内含收口）/ turn 结束判未响应后关窗。
+   */
+  reviewNudgeWatching: boolean
+  /** D8 重新提交错误行（发送失败 / agent 未响应双分支的就近呈现；分区级，随焦点切换保留）。 */
+  reviewNudgeError: string | null
   /** degraded 稳定窗放行（组合持续 ≥2s；变假 cancel·重置）。 */
   reviewDegradedStable: boolean
   /** 冷拉真值豁免稳定窗（对账结果即事实，直接放行；随组合变假同批重置）。 */
@@ -245,6 +253,8 @@ export const usePlanStore = defineStore('plan', () => {
       reviewDegradedStable: false,
       reviewColdExempt: false,
       reviewStableEpoch: 0,
+      reviewNudgeWatching: false,
+      reviewNudgeError: null,
     }),
   )
 
@@ -427,7 +437,12 @@ export const usePlanStore = defineStore('plan', () => {
     if (!sessionId) return
     scoped.updateFor(sessionId, (p) => {
       p.reviewPendingKnown = has
-      if (has) clearAckMark(sessionId, p)
+      if (has) {
+        clearAckMark(sessionId, p)
+        // D8 成功收口（内含于挂起到达）：预期重挂发生 → 关检测窗 + 清旧错误（含重试后成功）
+        p.reviewNudgeWatching = false
+        p.reviewNudgeError = null
+      }
       evalReviewWindow(sessionId, p)
     })
   }
@@ -441,7 +456,9 @@ export const usePlanStore = defineStore('plan', () => {
     if (!sessionId) return
     scoped.updateFor(sessionId, (p) => {
       p.reviewAckMarked = true
-      p.reviewPendingKnown = false
+      // 镜像真值不由本函数覆写：reviewPendingKnown 由 useExtensionUI 挂起漏斗按 registry
+      // 现值收口（syncPlanReviewWindow）/冷拉对账真值置位——无条件置 false 会在多挂起异常
+      // 形态（一条应答消费、registry 仍有挂起）把镜像打假（违反漏斗自述不变量）
       p.reviewAckEpoch += 1
       const epoch = p.reviewAckEpoch
       const prev = ackTimers.get(sessionId)
@@ -501,6 +518,41 @@ export const usePlanStore = defineStore('plan', () => {
         p.view = planState
       }
       afterViewWrite(sessionId, p)
+    })
+  }
+
+  // ── D8 重新提交审批的检测窗/错误行（分区级，action 收口供事件 handler 经 capturedSid 写入）──
+
+  /** nudge 发送成功：开「agent 未响应」检测窗（清旧错误）。 */
+  function beginPlanReviewNudge(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgeWatching = true
+      p.reviewNudgeError = null
+    })
+  }
+
+  /**
+   * nudge 错误行写入/清除（发送失败分支落文案；null = 清除）。无检测窗语义，直接落分区。
+   */
+  function setPlanReviewNudgeError(sessionId: string, message: string | null): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgeWatching = false
+      p.reviewNudgeError = message
+    })
+  }
+
+  /**
+   * turn 生命周期信号收口（D8 失败契约②「agent 未响应」）：检测窗开着才判——重挂已到达
+   * 的同轮收尾（窗口已被 setPlanReviewPending(true) 关闭）/ 未点重提（未开窗）均 no-op。
+   */
+  function endPlanReviewNudge(sessionId: string, message: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (!p.reviewNudgeWatching) return
+      p.reviewNudgeWatching = false
+      p.reviewNudgeError = message
     })
   }
 
@@ -569,6 +621,25 @@ export const usePlanStore = defineStore('plan', () => {
   /** 焦点分区「已应答抑制窗」标记（PlanReviewBar 分支公式的压制输入）。 */
   const planReviewAckMarked: ComputedRef<boolean> = computed(() => scoped.current.value.reviewAckMarked)
 
+  /**
+   * 焦点分区 planReview 挂起镜像（D4 稳定窗输入面的只读透出；**非渲染权威**——审批条
+   * presence 判定以 registry（useExtensionUI currentPlanReviewRequests）为唯一交互权威，
+   * 本视图供漏斗一致性断言/诊断读取，多挂起异常形态下必须与 registry 同真）。
+   */
+  const planReviewPendingKnown: ComputedRef<boolean> = computed(
+    () => scoped.current.value.reviewPendingKnown,
+  )
+
+  /** 焦点分区「agent 未响应」检测窗（D8；PlanReviewBar/测试读取）。 */
+  const planReviewNudgeWatching: ComputedRef<boolean> = computed(
+    () => scoped.current.value.reviewNudgeWatching,
+  )
+
+  /** 焦点分区重新提交错误行文案（null = 无错误；PlanReviewBar 就近呈现）。 */
+  const planReviewNudgeError: ComputedRef<string | null> = computed(
+    () => scoped.current.value.reviewNudgeError,
+  )
+
   /** 焦点分区 degraded 稳定窗放行位（稳定窗通过 ∨ 冷拉真值豁免）。 */
   const planReviewDegradedGate: ComputedRef<boolean> = computed(
     () => scoped.current.value.reviewDegradedStable || scoped.current.value.reviewColdExempt,
@@ -582,6 +653,9 @@ export const usePlanStore = defineStore('plan', () => {
     coldReconcilePlanReview,
     setPlanReviewPending,
     markPlanReviewAnswered,
+    beginPlanReviewNudge,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
     addDraftComment,
     removeDraftComment,
     clearDraftComments,
@@ -595,6 +669,9 @@ export const usePlanStore = defineStore('plan', () => {
     draftsRevealPending,
     planReviewAckMarked,
     planReviewDegradedGate,
+    planReviewPendingKnown,
+    planReviewNudgeWatching,
+    planReviewNudgeError,
   }
 })
 

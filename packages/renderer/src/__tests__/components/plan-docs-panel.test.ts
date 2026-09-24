@@ -389,7 +389,28 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
   })
 
-  it('reviewState 离开 revising → 重新 file.read（修订收尾刷新）', async () => {
+  it('真形态（View 无 reviewState 键）：state=revising 驱动修订中视觉 + 评论禁用；state 离开 → 重新 file.read', async () => {
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state 且**不透出 reviewState**（D2）
+    // ——直读旧字段会恒 false 致修订中视觉/禁评全族失灵（fix 轮 1 修因）
+    const wrapper = await mountPanel(viewOf({ state: 'revising' }), { stubCommentPopover: false })
+    expect(readMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="plan-docs-tab-revising"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(true)
+    // 修订中禁评（PlanCommentPopover disabled 同一判定源）
+    expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(true)
+    // 真形态断言：View 无旧键（fixture 若直塞 reviewState 会掩盖失灵面）
+    expect(usePlanStore().planView.value?.reviewState).toBeUndefined()
+
+    usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
+    await flushAsync()
+
+    // 刷新键第三段随解析 state 变化 → 重新 file.read（修订收尾刷新）
+    expect(readMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(false)
+  })
+
+  it('旧字段兼容位（混装格兑底）：reviewState 直塞的旧 View 形态仍经 D2③ 映射驱动 revising 判定', async () => {
     const wrapper = await mountPanel(viewOf({ reviewState: 'revising' }))
     expect(readMock).toHaveBeenCalledTimes(1)
     // revising 态视觉：tab 圆点 + meta 提示

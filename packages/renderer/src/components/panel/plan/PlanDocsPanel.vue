@@ -208,8 +208,9 @@
  * 带 sessionId 走 cwd 守门（plan 产物在 session cwd 的 .tmp/plans/ 下），失败按 E2
  * 落占位错误态——不做无 sessionId 白名单降级（.tmp 不在白名单内，二次必失败）。
  *
- * 修订刷新（G3）：刷新键 = 选中文档 absPath + version + reviewState 组合——agent 修订重
- * 登记（version bump）或 reviewState 离开 revising 时键变化 → 重新 file.read；tab 切换
+ * 修订刷新（G3）：刷新键 = 选中文档 absPath + version + 生命周期状态组合——agent 修订重
+ * 登记（version bump）或状态离开 revising（D2③ 兑底映射解析，不再直读旧字段 reviewState
+ * ——真实链路 View 恒无该键）时键变化 → 重新 file.read；tab 切换
  * （absPath 变化）同键承载，单一 watch 收口三种触发。loadingPath 标记防并发竞态
  * （CommandDocPanel 同款：异步期间切走丢弃旧结果）。
  *
@@ -229,7 +230,7 @@ import type { PlanDocMeta } from '@taiji/shared'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import * as fileApi from '@taiji/core/transport/api/domains/file'
 import { useChatStore } from '@/stores/chat'
-import { usePlanStore } from '@/stores/plan-store'
+import { usePlanStore, resolvePlanLifecycleState } from '@/stores/plan-store'
 import { usePlanState } from '@/composables/use-plan-sync'
 import PlanCommentPopover from './PlanCommentPopover.vue'
 
@@ -295,7 +296,7 @@ const agentActive = computed(() => (props.sessionId !== null && chatStore.isGene
 /**
  * pending 态（§3.2 矩阵）：isActive && docs 空。判据不含 planFilePath 维度——
  * activatePlanMode 每次进入恒设该字段，pending 期间该字段非空不代表产物已创建。
- * docs 空时 reviewState 必无值（submit-review 前置 ≥1 doc，结构性成立），不引入第四维度。
+ * docs 空时不会进入 reviewing 态（submit-review 前置 ≥1 doc，结构性成立），不引入第四维度。
  */
 const pendingGenerating = computed(
   () => view.value?.isActive === true && docItems.value.length === 0 && agentActive.value,
@@ -304,8 +305,12 @@ const pendingIdle = computed(
   () => view.value?.isActive === true && docItems.value.length === 0 && !agentActive.value,
 )
 
-/** 修订中（reviewState=revising：tab 圆点 / meta 提示 / 评论按钮禁用） */
-const revising = computed(() => view.value?.reviewState === 'revising')
+/**
+ * 修订中（state=revising：tab 圆点 / meta 提示 / 评论按钮禁用）——D2③ 兑底映射解析
+ *（resolvePlanLifecycleState，与 PlanModeBar 同型判定）：真实链路 View 恒无 reviewState 键
+ *（归一点只作映射输入不透出），直读旧字段会恒 false 致修订中视觉/禁评全族失灵。
+ */
+const revising = computed(() => resolvePlanLifecycleState(view.value) === 'revising')
 
 /** 选中 tab（absPath 定位；未选/失效回落第一个——docs 渐进增长与重置的自然兜底） */
 const selectedAbsPath = ref<string | null>(null)
@@ -357,14 +362,14 @@ async function loadSelected(): Promise<void> {
 
 /**
  * 刷新键单 watch 收口三种触发：tab 切换（absPath）/ 修订重登记（version bump）/ 修订
- * 收尾（reviewState 变化含离开 revising）。immediate 承担挂载首拉；null 键 = 无选中，
+ * 收尾（生命周期状态变化含离开 revising，D2③ 解析值）。immediate 承担挂载首拉；null 键 = 无选中，
  * 清空正文。
  */
 watch(
   () => {
     const doc = selectedDoc.value
     if (!doc) return null
-    return `${doc.absPath}\u0000${doc.degraded ? 'd' : doc.version}\u0000${view.value?.reviewState ?? ''}`
+    return `${doc.absPath}\u0000${doc.degraded ? 'd' : doc.version}\u0000${resolvePlanLifecycleState(view.value)}`
   },
   () => void loadSelected(),
   { immediate: true },

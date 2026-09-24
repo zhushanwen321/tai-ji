@@ -15,10 +15,12 @@ export default {
     // D8 降级态可行动化（分源文案）：resubmit = E3 会话重启后 agent 尚未重提；其余不猜测来源
     degradedResubmit: '审批提问已随会话重启失效',
     degradedMissing: '审批提问未挂起',
-    // D8 恢复按钮（复用消息发送通道注入固定文案 user 消息，agent 重调 submit-review）
+    // D8 恢复按钮（复用消息发送通道注入固定文案 user 消息，agent 重调 submit-review）；
+    // 失败双分支：发送失败 / agent 未响应（turn 结束未重挂）
     resubmit: '重新提交审批',
     resubmitNudge: '请重新提交计划审批',
     resubmitError: '重新提交失败：{message}。可重试，或点击左侧的『退出』按钮退出计划模式',
+    resubmitNoResponse: 'agent 未响应：未重新提交审批。可重试，或点击左侧的『退出』按钮退出计划模式',
     // D9③ agent 自审结论行（ready 分支截断展示 + Popover 全文）
     selfReviewLabel: 'agent 自审结论',
     // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
