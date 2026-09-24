@@ -4,7 +4,7 @@ import { handleCompletion, __resetDebounceForTest } from '../useCompletionNotify
 import * as sound from '../useCompletionSound'
 import * as markers from '../../useSessionMarkers'
 import { useBackgroundWork } from '../../features/chat/useBackgroundWork'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 
 vi.mock('../useCompletionSound', () => ({
   // playSuccess/playError 现在是 async + 接受可选声音名参数
@@ -25,7 +25,7 @@ vi.mock('../../features/chat/useBackgroundWork', () => ({
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   vi.clearAllMocks()
   // 重置 useBackgroundWork mock 到默认实现（hasBackgroundWork=false），
   // 避免上一个用例的 mockReturnValue 污染下一个用例。

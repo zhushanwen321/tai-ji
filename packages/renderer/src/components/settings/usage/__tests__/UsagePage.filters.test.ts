@@ -26,17 +26,13 @@ import type { UsageRow, UsageStatsResult } from '@taiji/shared'
 const getUsageStats = vi.hoisted(() => vi.fn())
 
 import UsagePage from '@/components/settings/usage/UsagePage.vue'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 const mockedGetUsageStats = vi.mocked(getUsageStats)
 
 beforeEach(() => {
   provideSettingsTransport(makeSettingsTransportStub({ getUsageStats }))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 /* ── DOM 环境补丁：ResizeObserver + clientWidth（图表真实渲染） ── */

@@ -13,7 +13,6 @@ import { reactive, ref, effectScope } from 'vue'
 import type { ProviderInfo, ProviderId } from '@taiji/shared'
 import {
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
@@ -35,7 +34,6 @@ function getTransport(): SettingsTransport {
 }
 
 beforeEach(() => {
-  __resetSettingsTransportForTesting()
   currentTransport = makeFakeTransport()
   provideSettingsTransport(currentTransport)
   tStub.mockClear()

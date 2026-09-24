@@ -18,13 +18,12 @@
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/composables/use-project-skills.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SkillInfo } from '@taiji/shared'
 import {
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
 } from '@taiji/core'
 import { makeSettingsTransportStub, type SettingsTransportStubOverrides } from '../helpers/settings-transport-stub'
 
@@ -56,10 +55,6 @@ beforeEach(() => {
     getProjectSkills: getProjectSkillsMock,
     onSkillCacheInvalidated: onSkillCacheInvalidatedMock,
   }))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('useProjectSkills (W4)', () => {

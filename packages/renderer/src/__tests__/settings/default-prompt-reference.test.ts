@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 interface SystemPromptConfig {
@@ -71,7 +71,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

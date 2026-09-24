@@ -21,7 +21,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/launch-config-shell-wiring.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { createPinia, getActivePinia, setActivePinia } from 'pinia'
@@ -112,7 +112,6 @@ import {
   createSessionFlow,
   getSettingsStore,
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
 } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import {
@@ -132,10 +131,6 @@ beforeEach(() => {
     getDefaultPreset: presetApiMock.getDefault,
     setDefaultPreset: presetApiMock.setDefault,
   }))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {

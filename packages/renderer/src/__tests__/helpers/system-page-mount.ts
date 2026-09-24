@@ -18,7 +18,6 @@ import type { ProviderInfo, ModelInfo } from '@taiji/shared'
 import {
   getSettingsStore,
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
   type SystemSettings,
 } from '@taiji/core'
 import { makeSettingsTransportStub } from './settings-transport-stub'
@@ -49,14 +48,9 @@ export const settingsApiMocks = createSettingsApiMocks()
 /**
  * [C3] 把 settings API mock 集注入 SettingsTransport seam（测试打 seam，替换原
  * '@taiji/core/transport/api/domains/settings' 模块 mock）；未覆盖方法用桩中性默认值。
- * afterEach 配套调用 __resetSettingsTransportForTesting()（测试文件内）。
  */
 export function provideSettingsApiMocks(): void {
   provideSettingsTransport(makeSettingsTransportStub({ ...settingsApiMocks }))
-}
-
-export function resetSettingsTransportForTest(): void {
-  __resetSettingsTransportForTesting()
 }
 
 /** '@/composables/useToast' 的 mock 模块工厂（隔离 toast 全局副作用）。 */

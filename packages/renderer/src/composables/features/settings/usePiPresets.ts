@@ -32,49 +32,61 @@ import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
 
-// ── 首次 connected 自动拉取单例（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
-/** 单例安装标志（幂等：HMR / 多次调用只挂一个 watcher）。 */
-let presetAutoLoadInstalled = false
-/** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
-let presetLoadedOnce = false
-/** detached effect scope 持有单例 watch（不随调用方组件卸载停止）。 */
-let presetAutoLoadScope: EffectScope | null = null
+// ── 首次 connected 自动拉取容器（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
+/**
+ * 创建 preset「首次 connected 必拉一次」自动加载容器：安装标志 / 已成功加载标志 /
+ * detached effect scope 收进闭包。生产走模块级单例 defaultPresetAutoLoad
+ * （installPresetAutoLoad 委托）；测试新建实例即隔离（无 reset 后门）。
+ */
+export function createPresetAutoLoad() {
+  /** 安装标志（幂等：多次调用只挂一个 watcher）。 */
+  let installed = false
+  /** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
+  let loadedOnce = false
+  /** detached effect scope 持有 watch（不随调用方组件卸载停止）。 */
+  let scope: EffectScope | null = null
+
+  /**
+   * 安装 preset「首次 connected 必拉一次」watch（幂等）。
+   *
+   * 行为：
+   * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
+   * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
+   * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
+   * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+   */
+  function install(): void {
+    if (installed) return
+    installed = true
+    scope = effectScope(true)
+    scope.run(() => {
+      const { loadPresets } = usePiPresets()
+      watch(
+        getState(),
+        (s) => {
+          if (s !== 'connected' || loadedOnce) return
+          void loadPresets().then(() => {
+            // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
+            if (usePresetStore().loadError === null) loadedOnce = true
+          })
+        },
+        { immediate: true },
+      )
+    })
+  }
+
+  return { install }
+}
+
+const defaultPresetAutoLoad = createPresetAutoLoad()
 
 /**
  * 安装 preset「首次 connected 必拉一次」单例（幂等）。
  *
- * 何时调用：会话面板常驻挂载点（MessageStream setup）。安装后：
- * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
- * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
- * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
- * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+ * 何时调用：会话面板常驻挂载点（MessageStream setup）。
  */
 export function installPresetAutoLoad(): void {
-  if (presetAutoLoadInstalled) return
-  presetAutoLoadInstalled = true
-  presetAutoLoadScope = effectScope(true)
-  presetAutoLoadScope.run(() => {
-    const { loadPresets } = usePiPresets()
-    watch(
-      getState(),
-      (s) => {
-        if (s !== 'connected' || presetLoadedOnce) return
-        void loadPresets().then(() => {
-          // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
-          if (usePresetStore().loadError === null) presetLoadedOnce = true
-        })
-      },
-      { immediate: true },
-    )
-  })
-}
-
-/** 测试专用：停止单例 watch 并复位标志（生产不调用）。 */
-export function __resetPresetAutoLoadForTest(): void {
-  presetAutoLoadScope?.stop()
-  presetAutoLoadScope = null
-  presetAutoLoadInstalled = false
-  presetLoadedOnce = false
+  defaultPresetAutoLoad.install()
 }
 
 /**

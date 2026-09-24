@@ -15,9 +15,9 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-api-key-auto-enable.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { ProviderInfo } from '@taiji/shared'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configMock = vi.hoisted(() => ({
@@ -79,10 +79,6 @@ beforeEach(() => {
   settingsStoreStub.setProviderEnabled.mockReturnValue(true)
   providers = [{ ...DISABLED_PROVIDER }]
   provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('afterApiKeySave 判定矩阵', () => {

@@ -5,7 +5,7 @@
  * - loadPresets()：mock presetApi.list/getDefault 并行调用，结果写 store（TC-4）
  * - loadPresets 降级：getDefault 失败不阻断 list 写 store（allSettled，TC-4 边界）
  * - setDefault(id)：乐观更新 store + 调 RPC（TC-5）
- * - **u5 加载点：`installPresetAutoLoad()`**（下方独立 describe）——首次 connected 后拉取 /
+ * - **u5 加载点：`createPresetAutoLoad()` 容器 install**（下方独立 describe）——首次 connected 后拉取 /
  *   安装时已 connected 立即可用 / 失败后下一次 connected 补拉（可自愈）/ 重连不重复请求（幂等）
  *   （`mode-declaration-row.test.ts` 头注声明“加载点本身由本文件覆盖”，即指该 describe）
  *
@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // mock preset 域（捕获 list/getDefault/setDefault/create/update/remove 调用 + 可控返回值）
@@ -51,8 +51,7 @@ vi.mock('@taiji/core', async (importOriginal) => {
 import { usePresetStore } from '@/stores/preset'
 import {
   usePiPresets,
-  installPresetAutoLoad,
-  __resetPresetAutoLoadForTest,
+  createPresetAutoLoad,
 } from '@/composables/features/settings/usePiPresets'
 
 const FIXTURE_PRESETS: PiLaunchPreset[] = [
@@ -76,10 +75,6 @@ beforeEach(() => {
     updatePreset: presetApiMock.update,
     removePreset: presetApiMock.remove,
   }))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('usePiPresets.loadPresets（TC-4）', () => {
@@ -272,13 +267,15 @@ describe('usePiPresets.update（W-RN-3 reply 回写）', () => {
 // 重连不重复；加载失败不置位 → 下一次 connected 补拉（E7 ③ 恢复通道）。
 // ─────────────────────────────────────────────────────────────────────────
 describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
+  // 每用例新自动加载容器（createPresetAutoLoad 实例即隔离，不碰生产默认单例）
+  let autoLoad: ReturnType<typeof createPresetAutoLoad>
+
   beforeEach(() => {
-    __resetPresetAutoLoadForTest()
+    autoLoad = createPresetAutoLoad()
     wsMock.ref!.value = 'disconnected'
   })
 
   afterEach(() => {
-    __resetPresetAutoLoadForTest()
     wsMock.ref!.value = 'disconnected'
   })
 
@@ -286,7 +283,7 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     presetApiMock.list.mockResolvedValue(FIXTURE_PRESETS)
     presetApiMock.getDefault.mockResolvedValue('builtin:full')
 
-    installPresetAutoLoad()
+    autoLoad.install()
     // 安装时未 connected → 不拉（bootstrap 只提交连接不等于 connected）
     expect(presetApiMock.list).not.toHaveBeenCalled()
 
@@ -309,7 +306,7 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     presetApiMock.getDefault.mockResolvedValue('builtin:full')
     wsMock.ref!.value = 'connected'
 
-    installPresetAutoLoad()
+    autoLoad.install()
     await flushPromises()
     expect(presetApiMock.list).toHaveBeenCalledTimes(1)
     expect(usePresetStore().defaultPresetId).toBe('builtin:full')
@@ -319,7 +316,7 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     presetApiMock.list.mockRejectedValueOnce(new Error('rpc failed'))
     presetApiMock.getDefault.mockRejectedValueOnce(new Error('rpc failed'))
 
-    installPresetAutoLoad()
+    autoLoad.install()
     wsMock.ref!.value = 'connected'
     await flushPromises()
     expect(presetApiMock.list).toHaveBeenCalledTimes(1)
@@ -342,8 +339,8 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     presetApiMock.getDefault.mockResolvedValue('builtin:full')
     wsMock.ref!.value = 'connected'
 
-    installPresetAutoLoad()
-    installPresetAutoLoad()
+    autoLoad.install()
+    autoLoad.install()
     await flushPromises()
     expect(presetApiMock.list).toHaveBeenCalledTimes(1)
   })

@@ -27,14 +27,14 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-quota-configure.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow, ProviderId, ProviderInfo, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaPreset } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
 import type { QuotaConfigureModule, QuotaFailureKind, QuotaSnapshot } from '@taiji/core'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
@@ -113,10 +113,6 @@ beforeEach(() => {
     refreshQuota: quotaApi.refreshQuota,
     configureQuota: quotaApi.configure,
   }))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 // ── ① readiness 齐备性矩阵 ──────────────────────────────────────────────────

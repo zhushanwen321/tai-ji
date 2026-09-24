@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { DEFAULT_PRESETS } from '@taiji/shared'
 
@@ -127,7 +127,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

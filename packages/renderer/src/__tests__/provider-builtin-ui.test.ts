@@ -24,7 +24,7 @@ import type { BuiltinProviderTemplate } from '@taiji/shared'
 import { ProviderTemplatePicker as Picker, ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from './helpers/settings-transport-stub'
 
 // t7 需 mock @/api：listBuiltinProviders 返回空数组（不阻塞页面），setProvider 桩。
@@ -120,7 +120,6 @@ beforeEach(() => {
   provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

@@ -3,9 +3,9 @@
  *
  * A3: add/remove/move 调 RPC 且乐观更新 + 失败回滚。
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getSettingsStore, __resetSettingsStoreForTesting, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import { SCOPED_MODEL_RENDERER_TOKEN } from './impl-token'
 
@@ -39,13 +39,9 @@ const MOCK_PROVIDERS = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   configMock.setScopedModels.mockReset()
   provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('useScopedModels', () => {

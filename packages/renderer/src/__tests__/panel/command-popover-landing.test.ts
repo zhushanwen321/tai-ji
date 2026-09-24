@@ -25,7 +25,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
-import { getSettingsStore, __resetSettingsStoreForTesting, provideSettingsTransport } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
@@ -87,7 +87,7 @@ function bodyItemButtons(): HTMLElement[] {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   // [w5] CommandPopover 改经壳单例（core 实例）：reset 防跨用例残留 commandsBySession/appCommands
   __resetCommandStoreForTesting()
 })

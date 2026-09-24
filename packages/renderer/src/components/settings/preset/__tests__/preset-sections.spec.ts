@@ -20,7 +20,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { Trash2 } from '@lucide/vue'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import PresetListSection from '@/components/settings/preset/PresetListSection.vue'
 import PresetDetailSection from '@/components/settings/preset/PresetDetailSection.vue'
@@ -78,7 +78,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

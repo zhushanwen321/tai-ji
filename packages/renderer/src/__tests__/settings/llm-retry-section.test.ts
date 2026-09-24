@@ -22,10 +22,10 @@
  *
  * 运行：npx vitest run src/__tests__/settings/llm-retry-section.test.ts（packages/renderer 目录）
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configApiMock = vi.hoisted(() => ({
@@ -86,10 +86,6 @@ beforeEach(() => {
   configApiMock.getRetryConfig.mockResolvedValue(defaultFixture())
   configApiMock.setRetryConfig.mockResolvedValue({ ok: true })
   provideSettingsTransport(makeSettingsTransportStub(configApiMock))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('SystemLlmRetrySection（u3 LLM 调用重试）', () => {

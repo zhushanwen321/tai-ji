@@ -38,9 +38,9 @@ import type {
 import {
   providePlatform,
   provideSettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
   type DiscoverModelsResponse,
 } from '@taiji/core'
@@ -189,8 +189,7 @@ let wrapper: VueWrapper | null = null
 
 beforeEach(() => {
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: inMemoryStorage(),

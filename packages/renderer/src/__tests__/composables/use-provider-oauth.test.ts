@@ -24,7 +24,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref, type Ref } from 'vue'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // auth.* 订阅回调捕获（onMounted 注册后由测试手动派发事件；实现须返回 disposer 供 onScopeDispose）。
@@ -170,7 +170,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   api = null

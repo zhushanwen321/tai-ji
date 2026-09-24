@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { useAuthedModelGroups, staleModelRef } from '../useAuthedModelGroups'
 import type { ProviderInfo } from '@taiji/shared'
 
@@ -39,7 +39,7 @@ function mockProviders(extra: Partial<ProviderInfo> = {}): ProviderInfo[] {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
 })
 
 describe('useAuthedModelGroups', () => {

@@ -13,15 +13,14 @@
  * mock 策略：mock 工厂 / fixtures / mount 编排经 __tests__/helpers/system-page-mount
  *  共享（与 system-page-rename-model.test.ts 的公共样板提取）；vi.mock 注册留在本文件
  *  （hoisting 约束），用例断言与特定覆写保留在各自 describe。
- *  settings store 用 @taiji/core 的 getSettingsStore() 单例，beforeEach 经
- *  __resetSettingsStoreForTesting 重置避免跨用例残留。
+ *  settings store 经 provideSettingsStore(createSettingsStore()) 每用例注入全新实例，无跨用例残留。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/system-page-smart-context.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { __resetSettingsStoreForTesting, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsStore, createSettingsStore } from '@taiji/core'
 import {
   settingsApiMocks,
   provideSettingsApiMocks,
@@ -55,7 +54,7 @@ async function mountPage(): Promise<void> {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   resetSettingsApiMocks(settingsMock)
   // 本文件默认值覆写：切 Switch 用例断言传参 false，响应也用 false 保持一致形态
   settingsMock.setSmartContextEnabled.mockResolvedValue({ enabled: false })
@@ -63,7 +62,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

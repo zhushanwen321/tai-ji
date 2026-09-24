@@ -23,9 +23,9 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   ProviderEditBody,
@@ -151,8 +151,7 @@ let wrapper: ReturnType<typeof mount> | null = null
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: inMemoryStorage(),

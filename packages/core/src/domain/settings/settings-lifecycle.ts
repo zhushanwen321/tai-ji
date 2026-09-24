@@ -29,144 +29,148 @@ import { getSettingsStore } from './settings-store'
 import { getSettingsTransport } from './transport'
 
 /**
- * 订阅句柄 + 幂等守卫（模块级，跨 init() 调用共享）。
- */
-const unsubs: Array<() => void> = []
-let initialized = false
-
-/**
- * 幂等初始化：挂载常驻订阅 + 同步 system 偏好到 store。
+ * 创建 settings 生命周期实例：订阅句柄（unsubs）+ 幂等守卫（initialized）收进闭包。
  *
- * 由 AppShell（应用级，常驻）调用一次即可；多次调用安全（initialized 去重）。
- * 订阅常驻不随 modal 关闭断开，保证 settings 数据全局可消费。
- *
- * 通道（行为不变约束，与 renderer 原实现一一对应）：
- * 1. transport.onProviders → providers
- * 2. transport.onModels → models（与 providers 同源，故常驻）
- * 3. transport.onSkills → skills
- * 4. transport.onAgents → agents
- * 5. transport.onSkillDirs → skillDirs
- * 6. transport.onAgentDirs → agentDirs
- * 7. transport.onExtensionDirs → extensionDirs（Phase 4）
- * 8. transport.onDefaults → defaultModel
- * 9. transport.onSystemPrompt → systemPromptConfig
- * 10. transport.onTerminalConfig → terminalConfig（Phase 6）
- * 11. transport.onExtensions → extensions
+ * 生产走模块级单例 defaultLifecycle（useSettings 委托）；测试用
+ * createSettingsLifecycle() 新建实例即隔离（无 reset 后门）。
  */
-async function init(): Promise<void> {
-  if (initialized) return
-  // fail-fast：transport 未注入时同步抛错（保持既有 reject 契约，供测试与调用方观察）——
-  // 在任何订阅注册前，抛错时无副作用、initialized 保持 false（可重试）。
-  const transport = getSettingsTransport()
-  const store = getSettingsStore()
+export function createSettingsLifecycle() {
+  /**
+   * 订阅句柄 + 幂等守卫（实例内，跨 init() 调用共享）。
+   */
+  const unsubs: Array<() => void> = []
+  let initialized = false
 
-  // 订阅注册（同步，抢在 sendInitialState 首推前）。先入本地表，**成功才提交到模块级 unsubs**
-  // ——await 段（getSystem/setSystem）失败时回滚本地订阅，避免重试重复注册双 handler
-  // （RD-3#10：失败可重试，不再被 initialized 先置位吞为 no-op）。
-  const localUnsubs: Array<() => void> = []
-  localUnsubs.push(transport.onProviders((p, scopedModels) => {
-    store.setProviders(p, scopedModels)
-  }))
-  // models 与 providers 同源（sendInitialState 同 step 推、provider 增删同广播），故常驻订阅
-  localUnsubs.push(transport.onModels((m) => { store.models.value = m }))
-  localUnsubs.push(transport.onSkills((s) => { store.skills.value = s }))
-  localUnsubs.push(transport.onAgents((a) => { store.agents.value = a }))
-  localUnsubs.push(transport.onSkillDirs((d) => { store.skillDirs.value = d }))
-  localUnsubs.push(transport.onAgentDirs((d) => { store.agentDirs.value = d }))
-  localUnsubs.push(transport.onExtensionDirs((d) => { store.extensionDirs.value = d }))
-  localUnsubs.push(transport.onDefaults((m) => { store.defaultModel.value = m }))
-  // 系统提示词配置（FR-4，systemPrompt 广播 → store.systemPromptConfig 常驻同步）
-  localUnsubs.push(transport.onSystemPrompt((cfg, corrupted) => {
-    store.systemPromptConfig.value = { config: cfg, corrupted }
-  }))
-  // 终端配置（Phase 6，terminalConfig 广播 → store.terminalConfig 常驻同步）
-  localUnsubs.push(transport.onTerminalConfig((cfg, corrupted) => {
-    store.terminalConfig.value = { config: cfg, corrupted }
-  }))
-  localUnsubs.push(transport.onExtensions((e) => { store.extensions.value = e }))
+  /**
+   * 幂等初始化：挂载常驻订阅 + 同步 system 偏好到 store。
+   *
+   * 由 AppShell（应用级，常驻）调用一次即可；多次调用安全（initialized 去重）。
+   * 订阅常驻不随 modal 关闭断开，保证 settings 数据全局可消费。
+   *
+   * 通道（行为不变约束，与 renderer 原实现一一对应）：
+   * 1. transport.onProviders → providers
+   * 2. transport.onModels → models（与 providers 同源，故常驻）
+   * 3. transport.onSkills → skills
+   * 4. transport.onAgents → agents
+   * 5. transport.onSkillDirs → skillDirs
+   * 6. transport.onAgentDirs → agentDirs
+   * 7. transport.onExtensionDirs → extensionDirs（Phase 4）
+   * 8. transport.onDefaults → defaultModel
+   * 9. transport.onSystemPrompt → systemPromptConfig
+   * 10. transport.onTerminalConfig → terminalConfig（Phase 6）
+   * 11. transport.onExtensions → extensions
+   */
+  async function init(): Promise<void> {
+    if (initialized) return
+    // fail-fast：transport 未注入时同步抛错（保持既有 reject 契约，供测试与调用方观察）——
+    // 在任何订阅注册前，抛错时无副作用、initialized 保持 false（可重试）。
+    const transport = getSettingsTransport()
+    const store = getSettingsStore()
 
-  // system 是纯前端偏好（storage），初始化时读并同步到 store
-  // （setSystem 内部经 IF3 updateSystem 持久化，幂等写回）。
-  // DOM 同步（applySystemToDom：theme→data-theme + themePreset→data-theme-preset +
-  // locale→i18n）由壳侧（W4）承接，core 不做。
-  try {
-    const system = await getSystem(getPlatform().storage)
-    await store.setSystem(system)
-  } catch (e) {
-    // RD-3#10：读/写 system 失败（如 storage 配额错）→ 回滚本次已注册订阅 + 不置 initialized
-    // （保留可重试性），异常上抛供调用方（bootstrapSettingsCore）落日志显形。
-    localUnsubs.forEach((u) => u())
-    throw e
+    // 订阅注册（同步，抢在 sendInitialState 首推前）。先入本地表，**成功才提交到实例 unsubs**
+    // ——await 段（getSystem/setSystem）失败时回滚本地订阅，避免重试重复注册双 handler
+    // （RD-3#10：失败可重试，不再被 initialized 先置位吞为 no-op）。
+    const localUnsubs: Array<() => void> = []
+    localUnsubs.push(transport.onProviders((p, scopedModels) => {
+      store.setProviders(p, scopedModels)
+    }))
+    // models 与 providers 同源（sendInitialState 同 step 推、provider 增删同广播），故常驻订阅
+    localUnsubs.push(transport.onModels((m) => { store.models.value = m }))
+    localUnsubs.push(transport.onSkills((s) => { store.skills.value = s }))
+    localUnsubs.push(transport.onAgents((a) => { store.agents.value = a }))
+    localUnsubs.push(transport.onSkillDirs((d) => { store.skillDirs.value = d }))
+    localUnsubs.push(transport.onAgentDirs((d) => { store.agentDirs.value = d }))
+    localUnsubs.push(transport.onExtensionDirs((d) => { store.extensionDirs.value = d }))
+    localUnsubs.push(transport.onDefaults((m) => { store.defaultModel.value = m }))
+    // 系统提示词配置（FR-4，systemPrompt 广播 → store.systemPromptConfig 常驻同步）
+    localUnsubs.push(transport.onSystemPrompt((cfg, corrupted) => {
+      store.systemPromptConfig.value = { config: cfg, corrupted }
+    }))
+    // 终端配置（Phase 6，terminalConfig 广播 → store.terminalConfig 常驻同步）
+    localUnsubs.push(transport.onTerminalConfig((cfg, corrupted) => {
+      store.terminalConfig.value = { config: cfg, corrupted }
+    }))
+    localUnsubs.push(transport.onExtensions((e) => { store.extensions.value = e }))
+
+    // system 是纯前端偏好（storage），初始化时读并同步到 store
+    // （setSystem 内部经 IF3 updateSystem 持久化，幂等写回）。
+    // DOM 同步（applySystemToDom：theme→data-theme + themePreset→data-theme-preset +
+    // locale→i18n）由壳侧（W4）承接，core 不做。
+    try {
+      const system = await getSystem(getPlatform().storage)
+      await store.setSystem(system)
+    } catch (e) {
+      // RD-3#10：读/写 system 失败（如 storage 配额错）→ 回滚本次已注册订阅 + 不置 initialized
+      // （保留可重试性），异常上抛供调用方（bootstrapSettingsCore）落日志显形。
+      localUnsubs.forEach((u) => u())
+      throw e
+    }
+
+    // 成功：提交订阅到实例表 + 置幂等守卫（**仅此处置位**——失败路径不置位，重试不被吞）。
+    unsubs.push(...localUnsubs)
+    initialized = true
+
+    // [W4 交接] 原 renderer 实现的 theme=system 时 watch(store.system.theme) + matchMedia
+    // 监听（updateSystemThemeListener）不迁 core——壳侧 watch system.theme 挂/卸监听。
   }
 
-  // 成功：提交订阅到模块级表 + 置幂等守卫（**仅此处置位**——失败路径不置位，重试不被吞）。
-  unsubs.push(...localUnsubs)
-  initialized = true
-
-  // [W4 交接] 原 renderer 实现的 theme=system 时 watch(store.system.theme) + matchMedia
-  // 监听（updateSystemThemeListener）不迁 core——壳侧 watch system.theme 挂/卸监听。
-}
-
-/**
- * 打开 modal 时刷新 providers（拿最新快照）；skills/agents 靠订阅，不主动拉。
- * 失败时不阻塞 UI：onProviders 订阅会兜底推回最新数据。
- */
-async function refreshProviders(): Promise<void> {
-  const store = getSettingsStore()
-  try {
-    const { providers, scopedModels } = await getSettingsTransport().listProviders()
-    store.setProviders(providers, scopedModels)
-  // eslint-disable-next-line taste/no-silent-catch -- 拉取失败不阻塞 UI：onProviders 订阅会兜底推回最新数据，无需打扰用户
-  } catch (e) {
-    console.warn('[settings] listProviders 失败，依赖订阅兜底', e)
+  /**
+   * 打开 modal 时刷新 providers（拿最新快照）；skills/agents 靠订阅，不主动拉。
+   * 失败时不阻塞 UI：onProviders 订阅会兜底推回最新数据。
+   */
+  async function refreshProviders(): Promise<void> {
+    const store = getSettingsStore()
+    try {
+      const { providers, scopedModels } = await getSettingsTransport().listProviders()
+      store.setProviders(providers, scopedModels)
+    // eslint-disable-next-line taste/no-silent-catch -- 拉取失败不阻塞 UI：onProviders 订阅会兜底推回最新数据，无需打扰用户
+    } catch (e) {
+      console.warn('[settings] listProviders 失败，依赖订阅兜底', e)
+    }
   }
-}
 
-/**
- * 连接后主动拉取模型列表（对齐 refreshProviders 范式的兜底）。
- *
- * [HISTORICAL] 2026-08-05：onModels 订阅曾因「注册晚于 sendInitialState 首推」竞态丢首条 model.list，
- * 导致 settingsStore.models 永空（根因已由 bootstrapSettingsCore 上提订阅注册到 App.vue setup 修复）。
- * 本方法作为防御纵深：即使订阅时序未来被回归，连接后的显式拉取仍能填充 models。
- * 由 App.vue onConnected 首次连接后调一次（非 mock 模式）。失败不阻塞（onModels 订阅兜底）。
- */
-async function refreshModels(): Promise<void> {
-  const store = getSettingsStore()
-  try {
-    store.models.value = await getSettingsTransport().listModels()
-  // eslint-disable-next-line taste/no-silent-catch -- 拉取失败不阻塞 UI：onModels 订阅会兜底推回最新数据，无需打扰用户
-  } catch (e) {
-    console.warn('[settings] listModels 失败，依赖订阅兜底', e)
+  /**
+   * 连接后主动拉取模型列表（对齐 refreshProviders 范式的兜底）。
+   *
+   * [HISTORICAL] 2026-08-05：onModels 订阅曾因「注册晚于 sendInitialState 首推」竞态丢首条 model.list，
+   * 导致 settingsStore.models 永空（根因已由 bootstrapSettingsCore 上提订阅注册到 App.vue setup 修复）。
+   * 本方法作为防御纵深：即使订阅时序未来被回归，连接后的显式拉取仍能填充 models。
+   * 由 App.vue onConnected 首次连接后调一次（非 mock 模式）。失败不阻塞（onModels 订阅兜底）。
+   */
+  async function refreshModels(): Promise<void> {
+    const store = getSettingsStore()
+    try {
+      store.models.value = await getSettingsTransport().listModels()
+    // eslint-disable-next-line taste/no-silent-catch -- 拉取失败不阻塞 UI：onModels 订阅会兜底推回最新数据，无需打扰用户
+    } catch (e) {
+      console.warn('[settings] listModels 失败，依赖订阅兜底', e)
+    }
   }
-}
 
-/** 销毁订阅（AppShell 卸载时调用，应用生命周期内通常不触发）。 */
-function dispose(): void {
-  unsubs.splice(0).forEach((u) => u())
-  initialized = false
-}
+  /** 销毁订阅（AppShell 卸载时调用，应用生命周期内通常不触发）。 */
+  function dispose(): void {
+    unsubs.splice(0).forEach((u) => u())
+    initialized = false
+  }
 
-/**
- * 测试隔离：重置 init 守卫（与 settings store 重置配合，beforeEach 调）。
- * 让 settings-lifecycle 的「init 幂等 / dispose 清订阅」用例可重复运行。
- */
-function resetSettingsInit(): void {
-  dispose()
-}
-
-/**
- * settings 域编排（模块级单例形态，保持 renderer 原 useSettings 语义）。
- *
- * 返回订阅生命周期方法（init/refreshProviders/dispose/resetSettingsInit）。
- * 状态读取直接用 getSettingsStore()（各消费方按需 .value / 直读）。
- */
-export function useSettings() {
   return {
     init,
     refreshProviders,
     refreshModels,
     dispose,
-    resetSettingsInit,
   }
+}
+
+const defaultLifecycle = createSettingsLifecycle()
+
+/**
+ * settings 域编排（模块级单例形态，保持 renderer 原 useSettings 语义）。
+ *
+ * 返回 defaultLifecycle 的订阅生命周期方法（init/refreshProviders/refreshModels/dispose）。
+ * 状态读取直接用 getSettingsStore()（各消费方按需 .value / 直读）。
+ * 测试隔离用 createSettingsLifecycle() 新实例（不碰默认单例）。
+ */
+export function useSettings() {
+  return defaultLifecycle
 }
 

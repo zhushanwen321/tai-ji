@@ -333,24 +333,43 @@ export interface SettingsTransport {
   onAuthError(h: (payload: AuthErrorPayload) => void): () => void
 }
 
-let currentTransport: SettingsTransport | null = null
+/**
+ * SettingsTransport 注入点容器（可实例化 seam slot）。
+ *
+ * 生产用模块级 defaultSlot；测试需要「未注入态」时用 createSettingsTransportSlot()
+ * 新建独立 slot 断言 fail-fast，不碰默认 slot（无 reset 后门，实例即隔离）。
+ */
+export interface SettingsTransportSlot {
+  provide(transport: SettingsTransport): void
+  /** 未注入时 fail-fast 抛错（防隐式 undefined）。 */
+  get(): SettingsTransport
+}
+
+export function createSettingsTransportSlot(): SettingsTransportSlot {
+  let current: SettingsTransport | null = null
+  return {
+    provide(transport: SettingsTransport): void {
+      current = transport
+    },
+    get(): SettingsTransport {
+      if (!current) {
+        throw new Error(
+          '[core/domain/settings] getSettingsTransport() called before provideSettingsTransport() — transport not injected',
+        )
+      }
+      return current
+    },
+  }
+}
+
+const defaultSlot = createSettingsTransportSlot()
 
 /** 壳 bootstrap / 测试注入 transport 适配实现（模块级单例）。 */
 export function provideSettingsTransport(transport: SettingsTransport): void {
-  currentTransport = transport
+  defaultSlot.provide(transport)
 }
 
 /** 获取已注入的 transport。注入前调用 fail-fast 抛错（防隐式 undefined）。 */
 export function getSettingsTransport(): SettingsTransport {
-  if (!currentTransport) {
-    throw new Error(
-      '[core/domain/settings] getSettingsTransport() called before provideSettingsTransport() — transport not injected',
-    )
-  }
-  return currentTransport
-}
-
-/** 仅测试用：重置为 null（单测隔离，避免跨用例污染）。 */
-export function __resetSettingsTransportForTesting(): void {
-  currentTransport = null
+  return defaultSlot.get()
 }

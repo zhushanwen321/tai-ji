@@ -13,10 +13,9 @@ import type { ProviderInfo, ProviderId } from '@taiji/shared'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
-import { __resetSettingsStoreForTesting, getSettingsStore } from '../settings-store'
+import { createSettingsStore, getSettingsStore, provideSettingsStore } from '../settings-store'
 import { useProviderEdit, type ProviderEditSession } from '../use-provider-edit'
 import { InMemoryStorage } from './helpers/in-memory-storage'
 
@@ -26,8 +25,7 @@ const tStub = vi.fn((key: string) => key)
 // fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
 
 beforeEach(() => {
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   __resetPlatformForTesting()
   providePlatform({ kind: 'mock', storage: new InMemoryStorage(), webSocket: { create: () => ({}) as never } })
   provideSettingsTransport(makeFakeTransport())

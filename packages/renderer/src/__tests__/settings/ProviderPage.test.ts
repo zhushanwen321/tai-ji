@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
-import { getSettingsStore, __resetSettingsStoreForTesting, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configMock = vi.hoisted(() => ({
@@ -87,7 +87,7 @@ const PROVIDERS: ProviderInfo[] = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   configMock.setProvider.mockClear()
   configMock.deleteProvider.mockClear()
   configMock.toggleProviderEnabled.mockClear()
@@ -98,7 +98,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

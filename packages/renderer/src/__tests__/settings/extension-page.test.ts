@@ -21,8 +21,8 @@ import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import {
   getSettingsStore,
   provideSettingsTransport,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import type { SkillDirConfig } from '@taiji/shared'
 
@@ -114,7 +114,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''
@@ -331,8 +330,7 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
   }
 
   it('勾选目录保存失败 → toast + 常驻红字 + 勾选态回弹至最近落盘值', async () => {
-    __resetSettingsStoreForTesting()
-    __resetSettingsTransportForTesting()
+    provideSettingsStore(createSettingsStore())
     const persisted: SkillDirConfig[] = [{ path: '/persisted/exts', enabled: false, scope: 'global' }]
     getSettingsStore().extensionDirs.value = persisted
     provideSettingsTransport(stubTransportWithFailingSetExtensionDirs())

@@ -75,7 +75,7 @@ vi.mock('@/api', () => ({
 
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { Switch } from '@/components/ui/switch'
-import { getSettingsStore, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import { useToast } from '@/composables/useToast'
 
@@ -93,7 +93,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

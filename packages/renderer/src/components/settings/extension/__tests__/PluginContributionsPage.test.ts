@@ -28,12 +28,12 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   ContributionRegistry,
   InternalEventBus,
   MountPointRegistry,
   type SettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
@@ -175,8 +175,7 @@ function settingsModalProvides() {
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: {

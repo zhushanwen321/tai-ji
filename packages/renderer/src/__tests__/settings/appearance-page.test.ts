@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@/composables/useToast'
-import { DEFAULT_SYSTEM, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { DEFAULT_SYSTEM, provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { TerminalConfig } from '@taiji/shared'
 
@@ -67,7 +67,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

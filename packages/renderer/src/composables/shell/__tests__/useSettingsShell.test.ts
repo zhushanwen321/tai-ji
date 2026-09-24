@@ -54,7 +54,7 @@ vi.mock('@/i18n', async (importOriginal) => {
 })
 
 import { useSettingsShell } from '../useSettingsShell'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { getLocale } from '@/i18n'
 
 /** 挂载一个 setup 内调用 useSettingsShell 的探针组件（provide/watch 需组件实例上下文） */
@@ -71,7 +71,7 @@ function mountShell() {
 beforeEach(() => {
   localStorage.clear()
   setLocaleSpy.mockClear()
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
 })
 
 describe('useSettingsShell · locale 接线（Fix-1）', () => {

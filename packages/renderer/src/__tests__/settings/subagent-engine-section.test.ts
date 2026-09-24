@@ -12,10 +12,10 @@
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/subagent-engine-section.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const sessionApiMock = vi.hoisted(() => ({
@@ -48,10 +48,6 @@ beforeEach(() => {
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
   useToast().toasts.value = []
   provideSettingsTransport(makeSettingsTransportStub(sessionApiMock))
-})
-
-afterEach(() => {
-  __resetSettingsTransportForTesting()
 })
 
 describe('SubagentEngineSection（U7 引擎选择器）', () => {

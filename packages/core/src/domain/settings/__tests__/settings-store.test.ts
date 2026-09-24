@@ -9,14 +9,13 @@ import type { ProviderId } from '@taiji/shared'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   createSettingsStore,
   getSettingsStore,
-  __resetSettingsStoreForTesting,
+  provideSettingsStore,
 } from '../settings-store'
 import { InMemoryStorage } from './helpers/in-memory-storage'
 import type { ProviderInfo, ExtensionInfo } from '@taiji/shared'
@@ -24,8 +23,6 @@ import type { ProviderInfo, ExtensionInfo } from '@taiji/shared'
 // fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
 
 beforeEach(() => {
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
   __resetPlatformForTesting()
 })
 
@@ -152,13 +149,14 @@ describe('settings-store 乐观 toggle', () => {
   })
 })
 
-describe('getSettingsStore 惰性单例', () => {
-  it('两次调用返回同一实例；reset 后新实例', () => {
+describe('getSettingsStore 惰性单例 + 注入优先', () => {
+  it('两次调用返回同一实例；provideSettingsStore 注入后返回注入实例', () => {
     const a = getSettingsStore()
     const b = getSettingsStore()
     expect(a).toBe(b)
-    __resetSettingsStoreForTesting()
-    const c = getSettingsStore()
-    expect(c).not.toBe(a)
+    const injected = createSettingsStore()
+    provideSettingsStore(injected)
+    expect(getSettingsStore()).toBe(injected)
+    expect(getSettingsStore()).not.toBe(a)
   })
 })

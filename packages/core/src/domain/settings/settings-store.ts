@@ -221,20 +221,26 @@ export function createSettingsStore() {
   }
 }
 
-// ── 模块级惰性单例（域内消费方共用；壳/测试可 createSettingsStore() 新建独立实例）──
+// ── 注入 + 模块级惰性单例（域内消费方共用；壳/测试可 createSettingsStore() 新建独立实例）──
 
+let injectedStore: SettingsStoreInstance | null = null
 let storeSingleton: SettingsStoreInstance | null = null
 
 /**
- * 获取 settings store 模块级单例（首次调用惰性创建）。
+ * 注入 store 实例（对称 provideSettingsTransport）：测试装配入口——beforeEach
+ * provideSettingsStore(createSettingsStore()) 即拿到全新 store，取代旧 reset 后门。
+ * 生产不调用（bootstrapSettingsCore 不 provide，走下方惰性单例，行为不变）。
+ */
+export function provideSettingsStore(store: SettingsStoreInstance): void {
+  injectedStore = store
+}
+
+/**
+ * 获取 settings store：有注入值返回注入值（测试装配），否则惰性单例（首次调用惰性创建）。
  * settings-lifecycle / use-provider-edit 等域内模块共用同一实例。
  */
 export function getSettingsStore(): SettingsStoreInstance {
+  if (injectedStore) return injectedStore
   if (!storeSingleton) storeSingleton = createSettingsStore()
   return storeSingleton
-}
-
-/** 仅测试用：清空单例缓存（跨用例隔离，避免 state 泄漏）。 */
-export function __resetSettingsStoreForTesting(): void {
-  storeSingleton = null
 }

@@ -21,9 +21,9 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
@@ -111,8 +111,7 @@ function inMemoryStorage() {
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
 })
 
 // 懒加载语义测试断言 document.activeElement，用例间必须卸载 teleport 到 body 的挂载件

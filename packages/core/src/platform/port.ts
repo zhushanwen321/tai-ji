@@ -71,7 +71,7 @@ export function getPlatform(): PlatformPort {
   return currentPlatform
 }
 
-/** 仅测试用：重置为 null（单测隔离，避免跨用例污染，对齐 transport 的 __resetSettingsTransportForTesting）。 */
+/** 仅测试用：重置为 null（单测隔离，避免跨用例污染）。 */
 export function __resetPlatformForTesting(): void {
   currentPlatform = null
 }
