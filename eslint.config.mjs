@@ -4,20 +4,15 @@ export default [
   ...tasteConfig,
   {
     ignores: [
-      'src/dist/**',
-      'src-tauri/**',
       'taste-lint/**',
       // 独立 CJS 验证脚本（verify-scheduler-e2e.cjs，随 tools→scripts 目录迁移更新路径）：
       // require() 是 CJS 唯一导入方式 + 内部 `_` 占位变量，no-require-imports/no-unused-vars 均误报
       'scripts/*.cjs',
-      'vendor/**',
-      '.pi/**',
       // 临时/历史 demo 目录（.tmp 已 gitignore，v6 是重构前的遗留 demo）
       '.tmp/**',
       // 构建产物（目录重构后：apps/electron + packages/*）
       'apps/electron/dist/**',
       'apps/electron/renderer/dist/**',
-      'apps/electron/renderer/dist-new/**',
       'packages/*/dist/**',
       // subagent-core 本地 bundle 产物（untracked、gitignored，构建后不重排 lint 代码风格）
       'packages/*/dist.bundle/**',
@@ -33,7 +28,8 @@ export default [
       // 子代理定义，不在排除范围
       '.zcode/workflow-runs/**',
       '.zcode/workflow-drafts/**',
-      // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
+      // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore；
+      // playwright/.cache 与 .gitignore 的 /playwright/.cache/ 预留一致，防御性保留）
       'playwright-report/**',
       'playwright/.cache/**',
       'test-results/**',
@@ -49,13 +45,10 @@ export default [
       // （设计 D1），src=dist 同字节直发不做 TS 化——同 extensions/**/workflows 先例豁免。
       'packages/subagent-core/workflows/**',
       'extensions/**/examples/**',
-      // zsub/zflow workflow 脚本（.agents/workflows/*.js）：CJS 是 zflow 加载器契约
-      // （module.exports + require，.cjs 后缀不被其发现层扫描），与根 package.json
-      // type:module 的冲突由同目录 package.json {"type":"commonjs"} 解决；
-      // no-require-imports 对其是误报（同 extensions/**/workflows/** 先例）
-      '.agents/workflows/**',
       // skill 内置 workflow 脚本（pr-lifecycle 入口 + lib.cjs + node 直测 run-tests.js）：
-      // CJS 是 workflow 加载器契约（同上），no-require-imports 对其是误报
+      // workflow 加载器契约即 CJS（module.exports + require，.cjs 后缀不被其发现层
+      // 扫描，根 package.json type:module 的冲突由同目录 package.json 解决），
+      // no-require-imports 对其是误报
       '.agents/skills/**/workflows/**',
     ],
   },
@@ -344,17 +337,13 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] useProviderEdit 是 Provider 编辑弹窗的唯一 composable 工厂（同 chat.ts 性质），
+  // [HISTORICAL] useProviderEdit 是 Provider 编辑弹窗的唯一 composable 工厂
+  // （packages/core/src/domain/settings/use-provider-edit.ts，同 chat.ts 性质）：
   // 承载 form/localModels/headerRows 状态 + test/discover/save 编排 + 模型/headers CRUD +
   // compat 编辑器展开态 + isDirty 快照 + 过期刷新 watch。职责内聚但函数体超 300 行。
   // 与 chat.ts setup 同理：唯一聚合中心，max-lines-per-function 规则不适用，override 避免误报。
-  // [HISTORICAL] arch-fix-v2 归位：useProviderEdit 迁至 packages/core/src/domain/settings/（M1a 新包），
-  // files 模式补新路径（旧 renderer 路径文件已删，仅保留作迁移记录）。
   {
-    files: [
-      'packages/renderer/src/composables/features/useProviderEdit.ts',
-      'packages/core/src/domain/settings/use-provider-edit.ts',
-    ],
+    files: ['packages/core/src/domain/settings/use-provider-edit.ts'],
     rules: {
       'max-lines-per-function': 'off',
     },
@@ -473,11 +462,11 @@ export default [
   // core 切面抽离（u1-move），迁移前该源码受上方 extensions no-console:error 块约束，
   // 抽离后 extensions glob 不再命中——本块恢复同强度约束，防裸 console 渗入跨宿主
   // 共享层。范围同样限 src 源码：__tests__/ 与 *.test.ts 属测试基建（spyOn /
-  // monkey-patch），不在守卫目标内。
+  // monkey-patch），不在守卫目标内。src/core/** 的豁免由下方 no-console off 块唯一
+  // 承载（core log 端口缺省 sink = console，见该块注释），不在本块 ignores 重复编码。
   {
     files: ['packages/subagent-core/src/**/*.ts'],
     ignores: [
-      'packages/subagent-core/src/core/**',
       'packages/subagent-core/src/**/__tests__/**',
       'packages/subagent-core/src/**/*.test.ts',
     ],
@@ -577,19 +566,6 @@ export default [
       'max-lines': ['warn', { max: 1300, skipBlankLines: true, skipComments: true }],
     },
   },
-  // engine-client.ts：协议客户端聚合中心（spawn/握手/帧路由/崩溃重建/收割 + [W3]
-  // chat 轮次 recordId 路由面）。H1 chat-run 统一期间收割链与轮次活性承载并入后
-  // 541 行，按仓内惯例（偏差 #2 message-dispatcher 同款）登记 override；结构性拆分
-  // （正向请求面 / 反向路由面 / 收割面）登记为后续重构债，随 H3 service 拆分轮处置。
-  // [HISTORICAL] metrics-gate cyclo 偿还（teardownProcess 17 → reapOrphansAfterUnexpectedDeath
-  // / killLeakedAliveChild 原地拆解，各 ≤7）：行为保持提取的 helper 签名/花括号/调用行
-  // +6 代码行越 545 上限（547），同轮抬至 555——拆分债本体不变。
-  {
-    files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
-    rules: {
-      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
-    },
-  },
   // [H3/R4 已消解] subagent-service.ts 单列 override（max 1700）已移除——R4 抽取
   // RunOrchestration（域 #6/#7/#12/#14/#15，strangler 第五单元）+ WorkflowDispatch
   //（[D-R4-1] workflow 族拆分）后壳折算行低于 packages 域 500 上限，warning 消解
@@ -678,6 +654,10 @@ export default [
   // 内聚（桥接消费本类镜像广播），抽独立模块仍余微超且引入新模块边界——微超即提额
   // 先例（session-service 650 / event-interpreter 700 同型）。提额而非 off：保留 650
   // 软上限告警，超限即再暴露。
+  // [HISTORICAL] 本文件更早一次提额：metrics-gate cyclo 偿还（teardownProcess 原地
+  // 拆解为 reapOrphansAfterUnexpectedDeath / killLeakedAliveChild，各 ≤7）行为保持
+  // 提取的签名/花括号/调用行 +6 曾抬至 555——拆分债本体不变，由本块 650 覆盖（同
+  // 文件多块同规则时后位生效，勿再另开同 files 块）。
   {
     files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
     rules: {

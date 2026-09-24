@@ -45,13 +45,12 @@ afterEach(() => {
 
 describe('check_prompt_outposts.py 判定行为', () => {
   it('白名单登记形态：已注入 / 内部命令豁免全放行 → exit 0', () => {
-    writeSrc('services/session/message-dispatcher.ts', [
-      "import { x } from 'y'",
-      'async function f(client) {',
-      '  const injection = await injector.inject(client, promptText)',
-      '  await client.prompt(injection.text, images)',
-      '  await client.steer(injection.text)',
-      '  await client.followUp(injection.text)',
+    // fixture 用现行活指纹（deliverOne 单点出站的注入后形态）——已删除的 dispatcher
+    // 直发死条目不再回填（白名单按真实调用点登记，测试不钉死形态）
+    writeSrc('services/session/session-delivery-registry.ts', [
+      'async function deliverOne(client, text, opts) {',
+      '  const injection = await injector.inject(client, text)',
+      '  await client.prompt(text, opts.images, opts.behavior)',
       '}',
     ])
     writeSrc('services/session/session-service.ts', [
@@ -62,7 +61,7 @@ describe('check_prompt_outposts.py 判定行为', () => {
     const r = runGuard()
     expect(r.status).toBe(0)
     expect(r.stdout).toContain('未登记违规 0')
-    expect(r.stdout).toContain('命中放行 4 处')
+    expect(r.stdout).toContain('命中放行 2 处')
   })
 
   it('未登记的 client.prompt( 调用点 → exit 2 且报出文件与行', () => {
