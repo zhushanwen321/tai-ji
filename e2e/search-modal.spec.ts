@@ -126,6 +126,12 @@ test.describe('搜索浮层 E2E', () => {
     // 输入 auth 查到文件，Enter confirm（useSearchJump.confirmFile → mock file.read）
     await page.getByTestId('search-input').pressSequentially('auth')
     await expect(page.getByTestId('search-section-文件')).toBeVisible({ timeout: 5_000 })
+    // Enter 消费当前选中项：等选中收敛为 auth 文件项再按 Enter——与 SM-E2E-7/8/9 同款守卫
+    // （防抖窗口内旧结果排前时 Enter 可能消费应用命令（如 toggle-sidebar：收侧栏 + ok:true 关弹层、
+    // 不开 drawer、recents 无记录），2026-09-24 批内实发：二次 openSearch 侧栏不可点 → 30s 超时）
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('auth', { timeout: 5_000 })
+
     // Enter confirm 第一项（selIdx=0，auth/session.ts 排第一）
     await page.getByTestId('search-input').press('Enter')
     // confirm 成功 → modal 关闭（AC-6.7 ok:true 才关）
@@ -184,7 +190,7 @@ test.describe('搜索浮层 E2E', () => {
     //（'r' 子串命中概览 sub 'Mission Control'，概览 app 命令排名在 review 前 + 默认选中
     // 首项），此时 section 已含 review 文本（'r' 同样命中 review）但选中项落在概览上，
     // Enter 会确认概览 → goOverview 跳概览页 → chip 不注入（与 SM-E2E-7 同一竞态类，同款
-    // settle 等待）。等命令分组内选中项收敛为 review 再按 Enter。
+    // settle 等待；同族 2026-09-24 再次实发）。等命令分组内选中项收敛为 review 再按 Enter。
     await expect(page.getByTestId('search-section-命令').locator('[aria-selected="true"]'))
       .toContainText('review', { timeout: 5_000 })
 
@@ -211,7 +217,8 @@ test.describe('搜索浮层 E2E', () => {
     await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('search-section-命令')).toContainText('commit')
     // 同 SM-E2E-7/8：中间查询 'c'/'o'/'co' 子串命中概览 sub 'Mission Control'，section 已含
-    // commit 文本但选中项中间态可能落在概览上，Enter 会消费概览而非 commit → chip 不注入。
+    // commit 文本但选中项中间态可能落在概览上，Enter 会消费概览而非 commit → chip 不注入
+    //（同族 2026-09-24 再次实发：Enter 消费 toggle-sidebar → 收侧栏且不开 drawer）。
     // 等命令分组内选中项收敛为 commit 再按 Enter。
     await expect(page.getByTestId('search-section-命令').locator('[aria-selected="true"]'))
       .toContainText('commit', { timeout: 5_000 })

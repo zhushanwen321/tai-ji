@@ -1,340 +1,217 @@
 /**
- * composer-density 纯状态机单测（设计 mode-system-composer-density §6.6 决策 D6）。
+ * composer-density 纯状态机单测（D6 修订「三步聚合」版）。
  *
- * 覆盖：三档阈值与边界归属（640/520）· 720 全展开 · 560 序 1–3 · 440 序 1–4（托盘聚合）·
- * 序 0 任意宽度不退化 · `»` 菜单仅有被收起项时才存在 · 托盘全无条目不渲染 · 纯函数契约 ·
- * **fit 轴**（方案 A：L1 精简+模型名截断 / L2 图标化 / L3 容量+指标进 `»`，归一与正交性）。
+ * 覆盖（穷举 = 本模块的 100% 行覆盖承诺）：
+ * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 左簇 / L2 指标 / L3 模型+思考）。
+ * - 能力标志：托盘全无 + 插件零贡献 → `leftCluster: 'absent'`（不留死入口）；任一有内容 → 可聚合。
+ * - 锚点保护：仅 L3 顶格生效；左簇/指标让位，模型聚合按钮与序 0 锚点恒在。
+ * - **构造性回归防线**：模型形态域只有 `expanded`（完整名）/ `aggregated` 两态——穷举矩阵断言
+ *   不存在任何截断/进菜单形态；输出域不存在 `tier` / `overflow*` 键（双轴旧语义已退役）。
+ * - 纯函数契约：同输入恒等、不改入参、不共享引用。
+ *
+ * [HISTORICAL] 旧版三档阈值（640/520 tier 轴）、`»` 溢出菜单、simplified/iconic/merged 中间态
+ * 的用例已随语义删除——它们曾断言「放得下也截模型名」的行为，正是本次重做的根因。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-density.test.ts
  */
 import { describe, expect, it } from 'vitest'
 import {
-  COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH,
+  COMPOSER_DEGRADATION_ORDER,
   COMPOSER_DENSITY_EXPANDED_MIN_WIDTH,
   COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
-  DEFAULT_COMPOSER_DENSITY_THRESHOLDS,
+  COMPOSER_FIT_LEVEL_LEFT_AGGREGATE,
+  COMPOSER_FIT_LEVEL_METRICS_AGGREGATE,
+  COMPOSER_FIT_LEVEL_MODEL_AGGREGATE,
+  COMPOSER_FIT_LEVEL_NONE,
   normalizeComposerFitLevel,
   resolveComposerDensity,
-  resolveComposerDensityTier,
+} from '@/components/panel/composer-density'
+import type {
+  ComposerDensityCapabilities,
+  ComposerDensityLayout,
 } from '@/components/panel/composer-density'
 
-const ALL_WIDTHS = [0, 1, 100, 319, 440, 519, 520, 559, 639, 640, 720, 1024, 2560]
+/** 穷举矩阵的维度：fit 0–3 × 能力组合 × 锚点保护开关 */
+const ALL_LEVELS = [0, 1, 2, 3]
+const CAP_VARIANTS: Array<[string, ComposerDensityCapabilities]> = [
+  ['缺省（托盘有面 + 插件零贡献）', {}],
+  ['托盘全无 + 插件零贡献', { hasTrayItems: false }],
+  ['托盘全无 + 插件有贡献', { hasTrayItems: false, pluginToolbarContributionCount: 1 }],
+  ['托盘有面 + 插件有贡献', { hasTrayItems: true, pluginToolbarContributionCount: 3 }],
+]
+const PROTECT_VARIANTS = [false, true]
 
-describe('三档阈值与边界归属', () => {
-  it('默认阈值常量 = 640 / 520（D6 实测推导值）', () => {
+function allCombos(): Array<{ level: number; caps: ComposerDensityCapabilities; protect: boolean; out: ComposerDensityLayout }> {
+  const rows = []
+  for (const level of ALL_LEVELS) {
+    for (const [, caps] of CAP_VARIANTS) {
+      for (const protect of PROTECT_VARIANTS) {
+        rows.push({ level, caps, protect, out: resolveComposerDensity(caps, level, protect) })
+      }
+    }
+  }
+  return rows
+}
+
+describe('常量与归一', () => {
+  it('首帧种子宽保留 640（[HISTORICAL] 原全展开档断点，不再参与形态判定）', () => {
     expect(COMPOSER_DENSITY_EXPANDED_MIN_WIDTH).toBe(640)
-    expect(COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH).toBe(520)
-    expect(DEFAULT_COMPOSER_DENSITY_THRESHOLDS).toEqual({
-      expandedMinWidth: 640,
-      aggregatedBelowWidth: 520,
-    })
   })
 
-  it('fit 轴顶格 = 3（顶格后仍放不下即到 D6 允许的极限）', () => {
+  it('fit 顶格 = 3，级命名常量与退化序一一对应', () => {
     expect(COMPOSER_DENSITY_MAX_FIT_DEGRADATION).toBe(3)
+    expect(COMPOSER_FIT_LEVEL_NONE).toBe(0)
+    expect(COMPOSER_FIT_LEVEL_LEFT_AGGREGATE).toBe(COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE)
+    expect(COMPOSER_FIT_LEVEL_METRICS_AGGREGATE).toBe(COMPOSER_DEGRADATION_ORDER.METRICS_AGGREGATE)
+    expect(COMPOSER_FIT_LEVEL_MODEL_AGGREGATE).toBe(COMPOSER_DEGRADATION_ORDER.MODEL_THINKING_AGGREGATE)
   })
 
-  it('640 归 expanded（`>=` 归高档）', () => {
-    expect(resolveComposerDensityTier(640)).toBe('expanded')
-    expect(resolveComposerDensity(COMPOSER_DENSITY_EXPANDED_MIN_WIDTH).tier).toBe('expanded')
-    // 边界上一格即 compact
-    expect(resolveComposerDensityTier(639.99)).toBe('compact')
-  })
-
-  it('520 归 compact（不是 narrow）；519 才落 narrow', () => {
-    expect(resolveComposerDensityTier(520)).toBe('compact')
-    expect(resolveComposerDensity(COMPOSER_DENSITY_AGGREGATED_BELOW_WIDTH).tier).toBe('compact')
-    expect(resolveComposerDensityTier(519)).toBe('narrow')
-    expect(resolveComposerDensityTier(519.99)).toBe('narrow')
-  })
-
-  it('三档覆盖：720 expanded / 560 compact / 440 narrow', () => {
-    expect(resolveComposerDensity(720).tier).toBe('expanded')
-    expect(resolveComposerDensity(560).tier).toBe('compact')
-    expect(resolveComposerDensity(440).tier).toBe('narrow')
-  })
-
-  it('非有限宽度落 narrow（最保守档），不是 expanded', () => {
-    expect(resolveComposerDensityTier(Number.NaN)).toBe('narrow')
-    expect(resolveComposerDensity(Number.NaN).slots.tray).toBe('aggregated')
-  })
-
-  it('阈值可整体覆盖（测试与未来调参入口）', () => {
-    const overrides = { expandedMinWidth: 800, aggregatedBelowWidth: 600 }
-    expect(resolveComposerDensity(700, {}, overrides).tier).toBe('compact')
-    expect(resolveComposerDensity(500, {}, overrides).tier).toBe('narrow')
-    expect(resolveComposerDensity(900, {}, overrides).tier).toBe('expanded')
-  })
-
-  it('阈值可部分覆盖（未覆盖项回落命名常量）', () => {
-    // 只抬 expandedMin：560 < 600 → 不是 expanded；仍 >= 默认 520 → compact
-    expect(resolveComposerDensity(560, {}, { expandedMinWidth: 600 }).tier).toBe('compact')
-    // 只抬 aggregatedBelow：530 >= 540? 否 → narrow（expandedMin 回落默认 640）
-    expect(resolveComposerDensity(530, {}, { aggregatedBelowWidth: 540 }).tier).toBe('narrow')
+  it('normalize：NaN → 0；负 → 0；越界 → 顶格；小数 → 取整', () => {
+    expect(normalizeComposerFitLevel(Number.NaN)).toBe(0)
+    expect(normalizeComposerFitLevel(-5)).toBe(0)
+    expect(normalizeComposerFitLevel(0.4)).toBe(0)
+    expect(normalizeComposerFitLevel(1.6)).toBe(2)
+    expect(normalizeComposerFitLevel(99)).toBe(3)
+    expect(normalizeComposerFitLevel(Number.POSITIVE_INFINITY)).toBe(3)
   })
 })
 
-describe('720px（≥640）全展开：不动任何序', () => {
-  it('全部元素原形态；插件零贡献 → toolbar 不渲染', () => {
-    const layout = resolveComposerDensity(720)
-    expect(layout.slots).toEqual({
-      add: 'expanded',
-      send: 'expanded',
-      capacity: 'expanded',
-      genStats: 'expanded',
-      model: 'expanded',
-      thinking: 'expanded',
-      pluginToolbar: 'absent',
-      tray: 'expanded',
-    })
+describe('三步累计映射（fit 级 → 形态）', () => {
+  it('L0 全展开：三组均原形态，零退化序', () => {
+    const layout = resolveComposerDensity({}, 0)
+    expect(layout.slots.leftCluster).toBe('expanded')
+    expect(layout.slots.metrics).toBe('expanded')
+    expect(layout.slots.modelThinking).toBe('expanded')
     expect(layout.appliedOrders).toEqual([])
+    expect(layout.anchorProtected).toBe(false)
     expect(layout.allowsWrap).toBe(false)
   })
 
-  it('有插件贡献时 toolbar 全展开、无 `»` 菜单、仍无退化序', () => {
-    const layout = resolveComposerDensity(720, { pluginToolbarContributionCount: 3 })
-    expect(layout.slots.pluginToolbar).toBe('expanded')
-    expect(layout.slots.tray).toBe('expanded')
-    expect(layout.appliedOrders).toEqual([])
-    expect(layout.overflowMenuVisible).toBe(false)
-    expect(layout.overflowItems).toEqual([])
+  it('L1 只聚合左簇；L2 再聚合指标；L3 再聚合模型+思考（前缀累计）', () => {
+    const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
+    expect(l1.slots).toMatchObject({
+      leftCluster: 'aggregated',
+      metrics: 'expanded',
+      modelThinking: 'expanded',
+    })
+    expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE])
+
+    const l2 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_METRICS_AGGREGATE)
+    expect(l2.slots).toMatchObject({
+      leftCluster: 'aggregated',
+      metrics: 'aggregated',
+      modelThinking: 'expanded',
+    })
+    expect(l2.appliedOrders).toEqual([1, 2])
+
+    const l3 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_MODEL_AGGREGATE)
+    expect(l3.slots).toMatchObject({
+      leftCluster: 'aggregated',
+      metrics: 'aggregated',
+      modelThinking: 'aggregated',
+    })
+    expect(l3.appliedOrders).toEqual([1, 2, 3])
+  })
+
+  it('缺省 fit 入参 = 0（全展开）', () => {
+    expect(resolveComposerDensity().fitLevel).toBe(0)
+    expect(resolveComposerDensity({}).slots.leftCluster).toBe('expanded')
   })
 })
 
-describe('560px（520–640）序 1–3 生效', () => {
-  it('序 1 合流 + 序 2 合体生效；序 4 托盘不聚合；序 0 原样', () => {
-    const layout = resolveComposerDensity(560)
-    expect(layout.tier).toBe('compact')
+describe('能力标志（不留死入口）', () => {
+  it('托盘全无 + 插件零贡献 → leftCluster absent（任何 fit 级都不渲染聚合按钮）', () => {
+    for (const level of ALL_LEVELS) {
+      const layout = resolveComposerDensity({ hasTrayItems: false }, level)
+      expect(layout.slots.leftCluster).toBe('absent')
+    }
+  })
+
+  it('托盘全无但插件有贡献 → 左簇仍可达（L0 展开 / L1+ 聚合）', () => {
+    const caps: ComposerDensityCapabilities = { hasTrayItems: false, pluginToolbarContributionCount: 1 }
+    expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')
+    expect(resolveComposerDensity(caps, 1).slots.leftCluster).toBe('aggregated')
+  })
+
+  it('贡献数非正数一律视为零贡献；缺省 hasTrayItems = true', () => {
+    expect(
+      resolveComposerDensity({ hasTrayItems: false, pluginToolbarContributionCount: 0 }, 0).slots.leftCluster,
+    ).toBe('absent')
+    expect(
+      resolveComposerDensity({ hasTrayItems: false, pluginToolbarContributionCount: -2 }, 0).slots.leftCluster,
+    ).toBe('absent')
+    expect(resolveComposerDensity({ pluginToolbarContributionCount: 1 }, 0).slots.leftCluster).toBe('expanded')
+  })
+})
+
+describe('锚点保护（L3 顶格仍放不下 → 中部让位，锚点与模型入口零裁剪）', () => {
+  it('仅 L3 生效：左簇与指标 absent，模型聚合按钮恒在', () => {
+    const layout = resolveComposerDensity({}, 3, true)
+    expect(layout.anchorProtected).toBe(true)
+    expect(layout.slots.leftCluster).toBe('absent')
+    expect(layout.slots.metrics).toBe('absent')
+    expect(layout.slots.modelThinking).toBe('aggregated')
     expect(layout.slots.add).toBe('expanded')
     expect(layout.slots.send).toBe('expanded')
-    expect(layout.slots.capacity).toBe('merged')
-    expect(layout.slots.genStats).toBe('merged')
-    expect(layout.slots.model).toBe('merged')
-    expect(layout.slots.thinking).toBe('merged')
-    expect(layout.slots.tray).toBe('expanded')
-    expect(layout.appliedOrders).toEqual([1, 2])
   })
 
-  it('零贡献 → 序 3 无可收项：无 `»` 菜单（不留死入口）', () => {
-    const layout = resolveComposerDensity(560, { pluginToolbarContributionCount: 0 })
-    expect(layout.slots.pluginToolbar).toBe('absent')
-    expect(layout.appliedOrders).toEqual([1, 2])
-    expect(layout.overflowMenuVisible).toBe(false)
-    expect(layout.overflowItems).toEqual([])
+  it('低 fit 级下 anchorOverflow 入参被忽略（先走正常三级退化）', () => {
+    for (const level of [0, 1, 2]) {
+      const layout = resolveComposerDensity({}, level, true)
+      expect(layout.anchorProtected).toBe(false)
+      expect(layout.slots.metrics).not.toBe('absent')
+      expect(layout.slots.leftCluster).not.toBe('absent')
+    }
   })
 
-  it('有插件贡献 → 序 3 生效：toolbar 收进 `»`', () => {
-    const layout = resolveComposerDensity(560, { pluginToolbarContributionCount: 2 })
-    expect(layout.slots.pluginToolbar).toBe('collapsed-to-menu')
+  it('保护态下 appliedOrders 仍是 L3 前缀（保护是顶格之上的让位，不新增序号）', () => {
+    const layout = resolveComposerDensity({}, 3, true)
     expect(layout.appliedOrders).toEqual([1, 2, 3])
-    expect(layout.overflowMenuVisible).toBe(true)
-    expect(layout.overflowItems).toEqual(['pluginToolbar'])
-    // 序 4 仍未生效
-    expect(layout.slots.tray).toBe('expanded')
+    expect(layout.fitLevel).toBe(3)
   })
 })
 
-describe('440px（<520）序 4 生效：托盘聚合成单入口', () => {
-  it('托盘聚合 + 序 1–3 同时生效（累计退化）', () => {
-    const layout = resolveComposerDensity(440, { pluginToolbarContributionCount: 1 })
-    expect(layout.tier).toBe('narrow')
-    expect(layout.slots.tray).toBe('aggregated')
-    expect(layout.slots.capacity).toBe('merged')
-    expect(layout.slots.genStats).toBe('merged')
-    expect(layout.slots.model).toBe('merged')
-    expect(layout.slots.thinking).toBe('merged')
-    expect(layout.slots.pluginToolbar).toBe('collapsed-to-menu')
-    expect(layout.appliedOrders).toEqual([1, 2, 3, 4])
-  })
-
-  it('零插件贡献时窄档 = 序 1、2、4（序 3 无可收项）', () => {
-    const layout = resolveComposerDensity(440)
-    expect(layout.slots.pluginToolbar).toBe('absent')
-    expect(layout.slots.tray).toBe('aggregated')
-    expect(layout.appliedOrders).toEqual([1, 2, 4])
-    expect(layout.overflowMenuVisible).toBe(false)
-  })
-
-  it('窄档仍保留发送位与 `+` 原形态', () => {
-    const layout = resolveComposerDensity(440)
-    expect(layout.slots.add).toBe('expanded')
-    expect(layout.slots.send).toBe('expanded')
-  })
-})
-
-describe('序 0 在任何宽度都不退化', () => {
-  it('参数化跑一组宽度：add / send 恒 expanded', () => {
-    for (const width of ALL_WIDTHS) {
-      const layout = resolveComposerDensity(width)
-      expect(layout.slots.add).toBe('expanded')
-      expect(layout.slots.send).toBe('expanded')
+describe('穷举矩阵不变式（32 组合：4 级 × 4 能力 × 2 保护）', () => {
+  it('序 0 恒不退化；模型形态只有两态且恒不缺席；输出域无双轴旧键', () => {
+    for (const { out } of allCombos()) {
+      // 锚点类型级保证
+      expect(out.slots.add).toBe('expanded')
+      expect(out.slots.send).toBe('expanded')
+      expect(out.allowsWrap).toBe(false)
+      // 模型名两态：完整展示 / 聚合按钮——**无截断态、永不缺席**（切模型恒可达）
+      expect(['expanded', 'aggregated']).toContain(out.slots.modelThinking)
+      // 指标缺席只可能来自锚点保护
+      if (out.slots.metrics === 'absent') expect(out.anchorProtected).toBe(true)
+      // 双轴旧语义构造性不存在
+      expect('tier' in out).toBe(false)
+      expect('overflowItems' in out).toBe(false)
+      expect('overflowMenuVisible' in out).toBe(false)
+      expect('fit' in out).toBe(false)
     }
   })
 
-  it('叠加能力标志与阈值覆盖后依然不退化', () => {
-    const caps = { pluginToolbarContributionCount: 5, hasTrayItems: true }
-    const overrides = { expandedMinWidth: 900, aggregatedBelowWidth: 700 }
-    for (const width of ALL_WIDTHS) {
-      const layout = resolveComposerDensity(width, caps, overrides)
-      expect(layout.slots.add).toBe('expanded')
-      expect(layout.slots.send).toBe('expanded')
+  it('appliedOrders 恒等于 fitLevel 前缀（单一真源，不漂移）', () => {
+    for (const { level, out } of allCombos()) {
+      expect(out.appliedOrders).toHaveLength(level)
+      expect(out.appliedOrders).toEqual([1, 2, 3].slice(0, level))
+      expect(out.fitLevel).toBe(level)
     }
-  })
-
-  it('「永不换行」：任何宽度/档位下 allowsWrap 恒 false', () => {
-    for (const width of ALL_WIDTHS) {
-      expect(resolveComposerDensity(width).allowsWrap).toBe(false)
-    }
-  })
-})
-
-describe('`»` 溢出菜单仅有被收起项时才存在', () => {
-  it('全展开档即使有贡献也无菜单（无被收起项）', () => {
-    const layout = resolveComposerDensity(640, { pluginToolbarContributionCount: 4 })
-    expect(layout.overflowMenuVisible).toBe(false)
-    expect(layout.overflowItems).toEqual([])
-  })
-
-  it('窄档 + 零贡献：无被收起项 → 无菜单', () => {
-    const layout = resolveComposerDensity(300, { pluginToolbarContributionCount: 0 })
-    expect(layout.overflowMenuVisible).toBe(false)
-    expect(layout.overflowItems).toEqual([])
-  })
-
-  it('有被收起项才渲染菜单，且条目 = 被收起槽位', () => {
-    const compact = resolveComposerDensity(600, { pluginToolbarContributionCount: 1 })
-    const narrow = resolveComposerDensity(400, { pluginToolbarContributionCount: 1 })
-    for (const layout of [compact, narrow]) {
-      expect(layout.overflowMenuVisible).toBe(true)
-      expect(layout.overflowItems).toEqual(['pluginToolbar'])
-    }
-  })
-
-  it('负贡献数视为零贡献（不留死入口）', () => {
-    const layout = resolveComposerDensity(560, { pluginToolbarContributionCount: -1 })
-    expect(layout.slots.pluginToolbar).toBe('absent')
-    expect(layout.overflowMenuVisible).toBe(false)
-  })
-})
-
-describe('托盘全无条目时不渲染（既有三态契约在密度层一致）', () => {
-  it('hasTrayItems: false → absent，序 4 不生效', () => {
-    const layout = resolveComposerDensity(440, { hasTrayItems: false })
-    expect(layout.slots.tray).toBe('absent')
-    expect(layout.appliedOrders).toEqual([1, 2])
-  })
-
-  it('hasTrayItems: false 在全展开档同样 absent', () => {
-    expect(resolveComposerDensity(720, { hasTrayItems: false }).slots.tray).toBe('absent')
-  })
-
-  it('缺省 = 有托盘面（tray expanded/aggregated 由宽度决定）', () => {
-    expect(resolveComposerDensity(720).slots.tray).toBe('expanded')
-    expect(resolveComposerDensity(440).slots.tray).toBe('aggregated')
   })
 })
 
 describe('纯函数契约', () => {
-  it('同输入恒同输出，且每次返回全新对象/数组（无共享可变状态）', () => {
-    const caps = { pluginToolbarContributionCount: 1 }
-    const a = resolveComposerDensity(560, caps)
-    const b = resolveComposerDensity(560, caps)
+  it('同输入恒等（深比较）且不共享引用', () => {
+    const a = resolveComposerDensity({ hasTrayItems: false }, 2, true)
+    const b = resolveComposerDensity({ hasTrayItems: false }, 2, true)
     expect(a).toEqual(b)
     expect(a).not.toBe(b)
     expect(a.slots).not.toBe(b.slots)
-    expect(a.overflowItems).not.toBe(b.overflowItems)
     expect(a.appliedOrders).not.toBe(b.appliedOrders)
   })
 
-  it('不修改入参对象', () => {
-    const caps = { pluginToolbarContributionCount: 1, hasTrayItems: true }
-    const capsSnapshot = { ...caps }
-    const overrides = { expandedMinWidth: 700, aggregatedBelowWidth: 500 }
-    const overridesSnapshot = { ...overrides }
-    resolveComposerDensity(560, caps, overrides)
-    expect(caps).toEqual(capsSnapshot)
-    expect(overrides).toEqual(overridesSnapshot)
-  })
-
-  it('缺省入参安全：只给宽度即可解析', () => {
-    const layout = resolveComposerDensity(720)
-    expect(layout.tier).toBe('expanded')
-    expect(layout.slots.pluginToolbar).toBe('absent')
-    expect(layout.slots.tray).toBe('expanded')
-  })
-})
-
-describe('fit 轴（方案 A「内容自适应」：溢出兜底第二轴）', () => {
-  it('fit 级 0（缺省）= 不施加 fit 退化：两组均为 full，fitLevel 原样带回', () => {
-    const layout = resolveComposerDensity(440)
-    expect(layout.fitLevel).toBe(0)
-    expect(layout.fit).toEqual({ capacityMetrics: 'full', modelThinking: 'full' })
-    expect(layout.appliedOrders).toEqual([1, 2, 4])
-  })
-
-  it('fit 级 1：容量+指标精简（只留百分比）、模型名截断；tier 分组不变', () => {
-    const layout = resolveComposerDensity(440, {}, {}, 1)
-    expect(layout.fitLevel).toBe(1)
-    expect(layout.fit).toEqual({ capacityMetrics: 'simplified', modelThinking: 'simplified' })
-    // tier 轴不受 fit 影响：仍是窄档合流 + 托盘聚合
-    expect(layout.slots.capacity).toBe('merged')
-    expect(layout.slots.model).toBe('merged')
-    expect(layout.slots.tray).toBe('aggregated')
-    // 退化序 = tier 序 + fit 序 5/6
-    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6])
-  })
-
-  it('fit 级 2：右簇四触发器图标化（modelThinking 仍可点，不收进菜单）', () => {
-    const layout = resolveComposerDensity(440, {}, {}, 2)
-    expect(layout.fit).toEqual({ capacityMetrics: 'iconic', modelThinking: 'iconic' })
-    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6, 7])
-  })
-
-  it('fit 级 3：容量+指标收进 `»`（overflowItems 追加 capacity/genStats，菜单可见）', () => {
-    const layout = resolveComposerDensity(440, {}, {}, 3)
-    expect(layout.fit).toEqual({ capacityMetrics: 'collapsed-to-menu', modelThinking: 'iconic' })
-    expect(layout.overflowMenuVisible).toBe(true)
-    expect(layout.overflowItems).toEqual(['capacity', 'genStats'])
-    expect(layout.appliedOrders).toEqual([1, 2, 4, 5, 6, 7, 8])
-  })
-
-  it('fit 级 3 + 插件贡献：菜单条目 = 插件 toolbar + 容量/指标（共用同一个 `»`）', () => {
-    const layout = resolveComposerDensity(400, { pluginToolbarContributionCount: 1 }, {}, 3)
-    expect(layout.overflowItems).toEqual(['pluginToolbar', 'capacity', 'genStats'])
-    expect(layout.appliedOrders).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
-  })
-
-  it('模型+档位永不收进菜单（切模型/切档位任何宽度可达）', () => {
-    for (const level of [0, 1, 2, 3]) {
-      expect(resolveComposerDensity(440, {}, {}, level).fit.modelThinking).not.toBe('collapsed-to-menu')
-    }
-  })
-
-  it('fit 级归一：非有限值 / 负值 → 0，越界（>3）→ 顶格 3，小数四舍五入', () => {
-    expect(resolveComposerDensity(440, {}, {}, Number.NaN).fitLevel).toBe(0)
-    expect(resolveComposerDensity(440, {}, {}, -2).fitLevel).toBe(0)
-    expect(resolveComposerDensity(440, {}, {}, 99).fitLevel).toBe(3)
-    expect(resolveComposerDensity(440, {}, {}, 2.4).fitLevel).toBe(2)
-    expect(normalizeComposerFitLevel(1.6)).toBe(2)
-    // +Infinity = 越界 → 顶格；NaN = 脏输入 → 不施加
-    expect(normalizeComposerFitLevel(Number.POSITIVE_INFINITY)).toBe(3)
-    expect(normalizeComposerFitLevel(Number.NaN)).toBe(0)
-  })
-
-  it('fit 轴与 tier 轴正交：全展开档同样可被 fit 收紧（长模型名等实宽超限场景）', () => {
-    const layout = resolveComposerDensity(720, {}, {}, 1)
-    expect(layout.tier).toBe('expanded')
-    expect(layout.slots.capacity).toBe('expanded')
-    expect(layout.fit.capacityMetrics).toBe('simplified')
-    expect(layout.fit.modelThinking).toBe('simplified')
-  })
-
-  it('fit 纯函数契约：同输入恒同输出且返回全新对象', () => {
-    const a = resolveComposerDensity(440, {}, {}, 2)
-    const b = resolveComposerDensity(440, {}, {}, 2)
-    expect(a).toEqual(b)
-    expect(a).not.toBe(b)
-    expect(a.fit).not.toBe(b.fit)
-    expect(a.appliedOrders).not.toBe(b.appliedOrders)
+  it('不修改入参（能力标志冻结后调用不抛）', () => {
+    const caps = Object.freeze({ hasTrayItems: true, pluginToolbarContributionCount: 2 })
+    expect(() => resolveComposerDensity(caps, 3, true)).not.toThrow()
+    expect(caps).toEqual({ hasTrayItems: true, pluginToolbarContributionCount: 2 })
   })
 })

@@ -34,6 +34,7 @@ import { computed, nextTick, reactive } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
+import type { ViewHostSource } from '@taiji/ui/extension-host'
 import { ansiLine, makeEntry, makeWidgetSource } from './tray-view-host-mock'
 import type { MockWidgetSource } from './tray-view-host-mock'
 import { makeTrayCountsStub } from './tray-counts-stub'
@@ -913,15 +914,18 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
 // ── 序 4 聚合入口（u6b / D6：「层叠图标 + 运行数」→ 面板内分段展示全部类别）──
 
 describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
-  it('aggregated + 有进行中条目 → 单入口按钮（层叠图标 + 运行数），逐件按钮不再渲染', () => {
+  it('aggregated + 有进行中条目 → 单入口按钮（单图标 + 运行数数字角标），逐件按钮不再渲染', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
     mountTray(makeWidgetSource(SID), SID, true)
 
     const aggregate = row().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
-    // 层叠图标：两个类别 icon（bash + subagent）重叠于入口内
-    expect(aggregate.findAll('svg').length).toBeGreaterThanOrEqual(2)
+    // 单图标硬约束（W3a 禁多 icon 重叠）：入口内只有一个 svg（layers），运行数走数字角标
+    expect(aggregate.findAll('svg')).toHaveLength(1)
+    // title = 「全部工具」（运行数不进 title，只在角标）
+    expect(aggregate.attributes('title')).toBe(zhTray.tray.aggregate.allTools)
+    expect(aggregate.attributes('aria-label')).toBe(zhTray.tray.aggregate.allTools)
     // 运行数 = 进行中合计（仅历史件不计入）
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
     expect(aggregate.find('[data-testid="tray-aggregate-pulse"]').exists()).toBe(true)
@@ -954,6 +958,50 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
 
     expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
     expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+  })
+
+  // ── W3a：聚合入口可见条件扩展 + 聚合面板承接插件 toolbar ──
+
+  it('aggregated + 托盘全无条目但插件 toolbar 有贡献 → 聚合入口仍渲染；面板含发丝分隔 + toolbar ViewHost', async () => {
+    // 挂载点视图只经 getView 可见、不进 getViewIds 枚举（聚合入口可见条件的独立判定面）
+    const toolbarSource: ViewHostSource = {
+      getViewIds: () => [],
+      getView: (sid, viewId) =>
+        sid === SID && viewId === 'composer.toolbar'
+          ? makeEntry('composer.toolbar', [ansiLine('toolbar body')])
+          : undefined,
+    }
+    wrapper = mount(ComposerTray, {
+      props: { sessionId: SID, aggregated: true },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: toolbarSource } },
+      attachTo: document.body,
+    })
+
+    // 基线（只看托盘条目）下此场景不渲染聚合入口——可见条件已扩为「或插件有贡献」
+    const aggregate = row().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+
+    await realClick(aggregate)
+    expect(panelKeys()).toEqual(['aggregate'])
+    const panel = panelNodes()[0]
+    // toolbar 承接：ViewHost 渲染贡献内容（用户可见 DOM）
+    expect(panel?.querySelector('[data-testid="view-host"]')).not.toBeNull()
+    expect(panel?.textContent ?? '').toContain('toolbar body')
+    // 发丝分隔存在（h-px + bg-border-strong，紧邻 ViewHost 包装容器之前）
+    expect(panel?.querySelector('span.h-px.bg-border-strong')).not.toBeNull()
+  })
+
+  it('aggregated + 插件零贡献 → 面板无发丝分隔、无 toolbar ViewHost（不留死分隔）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
+    expect(panelKeys()).toEqual(['aggregate'])
+    const panel = panelNodes()[0]
+    expect(panel?.querySelector('[data-testid="view-host"]')).toBeNull()
+    expect(panel?.querySelector('span.h-px.bg-border-strong')).toBeNull()
+    // 既有托盘分段不受影响
+    expect(panel?.querySelector('[data-testid="tray-aggregate-section-bash"]')).not.toBeNull()
   })
 
   it('widget-only（无 built-in 记录）→ 聚合入口仍渲染（通用图标兜底）且面板含 widget 段', async () => {

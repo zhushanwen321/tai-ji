@@ -17,8 +17,8 @@
  *   useHandoffModeChannel / useImageAttachment / useI18n
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
- * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
- * staging > bash > steerHint/inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
+ * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 四级链：
+ * staging > bash > steerHint > deferHint > inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
  */
 import { computed, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -419,7 +419,9 @@ export function useComposerShell(params: ComposerShellParams) {
             : ''),
     isSending.value && 'opacity-[0.55]',
   ])
-  /** placeholder 三级链：staging > bash > 流式 steerHint / 普通 inputHint */
+  /** placeholder 四级链：staging > bash > 流式 steerHint > defer 占用 deferHint > 普通 inputHint。
+   *  defer 行（settling/compacting/bash 占用、turn 不活跃）此前误显 idle inputHint，
+   *  与发送位 queue 态不同源——补第四级与 D6 路由同源取数。 */
   const placeholder = computed(
     () =>
       stagingPlaceholder.value
@@ -427,7 +429,9 @@ export function useComposerShell(params: ComposerShellParams) {
         ? t('panel.composer.bashPlaceholder')
         : isActive.value
           ? t('panel.composer.steerHint')
-          : t('panel.composer.inputHint')),
+          : sendRoute.value === 'defer'
+            ? t('panel.composer.deferHint')
+            : t('panel.composer.inputHint')),
   )
 
   // ── 发送分流（core dispatch/send；D6 统一分发器：staging > steer 路由 > canSend > staging.send >
