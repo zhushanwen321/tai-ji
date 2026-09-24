@@ -41,6 +41,7 @@ AI 根据触发词自动判断 target。不确定时问用户。
 ```bash
 cd <workspace-root>/main && node scripts/check-line-propagation.mjs --target HEAD
 ```
+（`cd <workspace-root>/main` 是常态形态；用户点名从 dev 线打包时「同一 worktree」= 该 dev worktree，cd 目标随之替换——守卫与预发布脚本都在该 worktree 内运行）
 
 - **`--target HEAD` 必须保持此形态**：target = 当前打包线 HEAD。从 main worktree 打包时 HEAD = main、`main ⊇ main` 恒绿**属预期语义而非空转**（从 main 打包本无落后问题）；从 dev worktree 跑打包（`prerelease-test.sh` 对非 main 分支仅 warn 放行的偏离形态）时 HEAD = dev-x.x.x，落后 main 即红灯——守卫恰好补上该 warn 放行的缺口。**禁止把 `--target` 写死为 `main` 等分支名字面量**（任何 worktree 跑都恒绿，接线即空转）。
 - **硬检查红灯 = block**：按守卫输出中的恢复指引在目标线 worktree 内 `git merge main` 后重跑守卫；确有正当理由才可加 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。

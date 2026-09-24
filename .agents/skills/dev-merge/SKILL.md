@@ -66,6 +66,7 @@ node scripts/check-line-propagation.mjs --target <dev-branch>
 
 - `--target` **禁止写死为 `main` 等分支名字面量**（任何 worktree 跑都恒绿，接线即空转）；worktree 内一律 `--target HEAD`。
 - **硬检查红灯 = block**：按守卫恢复指引在目标线 worktree 内 `git merge main` 后重跑；确有正当理由才可 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。
+- **仅分支存在形态红灯的处置**：目标 worktree 不存在时上述恢复指引不可直接执行——block 挡的是第 2 步合并，不挡恢复前置。先经 `worktree-manipulate` 创建目标 worktree（检出既有分支，等价于第 2 步的自动创建）→ 在其中 `git merge main` → 重跑守卫消除红灯后再进第 2 步。
 - **软提示头条摘要呈报用户后才进第 2 步**（流程一等步骤，不是可选日志）：每条兄弟线的 commit 总量 + 最老停留天数；裁决粒度 = **线粒度**（对每条兄弟线回答「吸收 / 暂缓」），不逐条裁决。兄弟线长周期 WIP 每次全量呈报数十条属无状态恒常呈报的稳态，不是异常。
 
 **降级 clean 处置条款（CR 门呈报义务）**：第 1.7 步 review-fix-loop 的 run 返回值 message 带 `(degraded: N round(s))` 后缀时（结构化返回链路断、run 降级完成的标记——计数来自 agent 自报汇总行、无 schema 校验、fix 分组退化），执行 agent 须把该后缀与降级轮数 N **呈报用户后才进合并步骤**。降级 clean **不阻塞合并**（降级完成是设计意图），但呈报义务必尽——合并产物出问题时回溯「当时是降级 run」有据可查。

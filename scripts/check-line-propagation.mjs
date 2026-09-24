@@ -22,10 +22,11 @@
  *    非 merge commit 语义等价，--no-merges 已滤掉 merge）。
  *
  * 用法：node scripts/check-line-propagation.mjs [--target <ref>] [--allow-diverged]
- *   --target 默认 HEAD。挂接约定（prerelease / dev-merge skill）一律在目标线
+ *   --target 默认 HEAD。挂接约定（prerelease / dev-merge skill）常态在目标线
  *   worktree 内以 --target HEAD 运行——bare+worktree 拓扑下 worktree 内默认 cwd
- *   即可，main / dev-* 经 .bare 共享 refs 可见。禁止把 --target 写死为 'main'
- *   字面量：它在任何 worktree 跑都恒绿，接线即空转。
+ *   即可，main / dev-* 经 .bare 共享 refs 可见；目标 worktree 不存在的挂接分支
+ *   （dev-merge 1.8 第二分支）在源 worktree 内以分支名变量跑。禁止把 --target
+ *   写死为 'main' 字面量：它在任何 worktree 跑都恒绿，接线即空转。
  *
  * 退出码：0 = 通过（或 --allow-diverged 越过）；1 = 硬检查红；2 = 用法/基础设施错误。
  * 挂载：prerelease / dev-merge skill 前置步骤（人工触发，非 pre-commit——本守卫

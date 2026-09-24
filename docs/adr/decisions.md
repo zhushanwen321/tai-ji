@@ -157,7 +157,7 @@ config 层 skill/agent 加载 = 强制目录（桥接层硬编码注入，不可
 skill 路径按 cwd 解析（getSkillPaths(cwd)），项目自用 skill 归 `.agents/skills/`，跨项目通用归 `~/.agents/`。
 
 ### ADR-0076 集成线传播纪律与守卫：fix 优先回流 main（2026-09-24）
-多条 dev-x.x.x 集成线数周并行下，修复跨线传播不再靠人记，两条纪律：① **fix 优先回流 main**——修复当日 cherry-pick / merge 回 main，不滞留开发线过夜是默认；滞留须自知守卫不保证兜底（见下残余类）。② **打包 / 集成合并前跑传播守卫**（`scripts/check-line-propagation.mjs`）——硬检查红灯必须消除（merge main）或显式 `--allow-diverged` 一次性越过，红灯静默放行即违纪律。守卫两级语义：硬检查 = 目标线 ⊇ main（`git merge-base --is-ancestor main <target>`，挂接一律在目标线 worktree 内 `--target HEAD`，禁分支名字面量）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（总量 + 最老停留天数头条 + 明细，无状态恒常呈报、无本地基线文件），裁决粒度 = 线粒度（吸收 / 暂缓），挂接 skill 的执行 agent 须将头条摘要呈报用户后才继续。**残余类诚实声明**：「修复滞留兄弟线、main 与目标线均无」在 git 形态上与正常 WIP 无差别，守卫只软提示不保证拦截——该类主防线 = 纪律①。**待用户裁决（P6）**：硬检查 block 是当前默认值（红灯 exit 1 + 一次性 `--allow-diverged` 越过），流程成本需用户确认——若不接受 block，硬检查降级为 warn（G2 的机器保证弱化为提示），裁决后回写本条销账。登记 C-proc-30。
+多条 dev-x.x.x 集成线数周并行下，修复跨线传播不再靠人记，两条纪律：① **fix 优先回流 main**——修复当日 cherry-pick / merge 回 main，不滞留开发线过夜是默认；滞留须自知守卫不保证兜底（见下残余类）。② **打包 / 集成合并前跑传播守卫**（`scripts/check-line-propagation.mjs`）——硬检查红灯必须消除（merge main）或显式 `--allow-diverged` 一次性越过，红灯静默放行即违纪律。守卫两级语义：硬检查 = 目标线 ⊇ main（`git merge-base --is-ancestor main <target>`，挂接常态 = 目标线 worktree 内 `--target HEAD`——目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑，见 dev-merge skill 1.8 步；禁 'main' 等恒绿字面量）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（总量 + 最老停留天数头条 + 明细，无状态恒常呈报、无本地基线文件），裁决粒度 = 线粒度（吸收 / 暂缓），挂接 skill 的执行 agent 须将头条摘要呈报用户后才继续。**残余类诚实声明**：「修复滞留兄弟线、main 与目标线均无」在 git 形态上与正常 WIP 无差别，守卫只软提示不保证拦截——该类主防线 = 纪律①。**待用户裁决（P6）**：硬检查 block 是当前默认值（红灯 exit 1 + 一次性 `--allow-diverged` 越过），流程成本需用户确认——若不接受 block，硬检查降级为 warn（G2 的机器保证弱化为提示），裁决后回写本条销账。登记 C-proc-30。
 
 ## 前端交互结构
 
