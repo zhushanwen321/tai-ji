@@ -52,6 +52,24 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 
 成本预期 30-50 分钟审查 + 15-30 分钟修复（diff 为单分支增量，远小于终局全量）。
 
+### 第 1.8 步：传播守卫前置（目标线 ⊇ main + 兄弟线未传播呈报）
+
+进入合并（第 2 步）前对**目标集成线**跑传播守卫（纪律与约束 SSOT：ADR-0076 / C-proc-30）。硬检查语义 = **目标线 ⊇ main**（合并产物的落点线不得落后 main），**不以源 feature 线为检查对象**——源线落后而目标线不落后时合并产物仍 ⊇ main，拦截即过度；源线开发基线新旧是 ADR-0076 纪律①的治理面，不是本守卫语义。
+
+```bash
+# 目标集成 worktree 已存在（常态）——命令自包含 cd：
+cd <workspace>/<dev-branch> && node scripts/check-line-propagation.mjs --target HEAD
+# 目标 worktree 不存在但分支已存在（.bare 共享 refs 可见）——在源 worktree 内以分支名变量跑：
+node scripts/check-line-propagation.mjs --target <dev-branch>
+# 分支也不存在：跳过守卫，在合并汇报记一句理由（第 2 步将基于 main 新建该分支，构造性 ⊇ main）
+```
+
+- `--target` **禁止写死为 `main` 等分支名字面量**（任何 worktree 跑都恒绿，接线即空转）；worktree 内一律 `--target HEAD`。
+- **硬检查红灯 = block**：按守卫恢复指引在目标线 worktree 内 `git merge main` 后重跑；确有正当理由才可 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。
+- **软提示头条摘要呈报用户后才进第 2 步**（流程一等步骤，不是可选日志）：每条兄弟线的 commit 总量 + 最老停留天数；裁决粒度 = **线粒度**（对每条兄弟线回答「吸收 / 暂缓」），不逐条裁决。兄弟线长周期 WIP 每次全量呈报数十条属无状态恒常呈报的稳态，不是异常。
+
+**降级 clean 处置条款（CR 门呈报义务）**：第 1.7 步 review-fix-loop 的 run 返回值 message 带 `(degraded: N round(s))` 后缀时（结构化返回链路断、run 降级完成的标记——计数来自 agent 自报汇总行、无 schema 校验、fix 分组退化），执行 agent 须把该后缀与降级轮数 N **呈报用户后才进合并步骤**。降级 clean **不阻塞合并**（降级完成是设计意图），但呈报义务必尽——合并产物出问题时回溯「当时是降级 run」有据可查。
+
 ### 第 2 步：合并
 
 ```bash
