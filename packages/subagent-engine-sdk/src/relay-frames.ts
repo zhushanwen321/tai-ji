@@ -24,6 +24,14 @@ export const RELAY_FRAME_KINDS = {
   reject: "reject",
   data: "data",
   exit: "exit",
+  /**
+   * goodbye（代理 → runtime，v1）：代理被宿主终止（SIGTERM/SIGINT）前的预告帧——
+   * 宿主侧的正常收割（agent_settled 后杀代理）与异常断连（宿主崩溃/主 pi 死）在
+   * runtime 侧都表现为 socket close，无法区分；goodbye 让正常收割显式自报，runtime
+   * 据此把后续 close 的日志从 warn（kill-on-disconnect）降级为 info（reaped，正常
+   * teardown）。kill 行为本身不变（预告后 child 仍由 runtime 收割）。
+   */
+  goodbye: "goodbye",
 } as const;
 
 /** 数据泵方向（data 帧 dir 字段词表）。 */
