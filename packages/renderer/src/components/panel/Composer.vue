@@ -106,106 +106,96 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（u6b / D6）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）· 中簇（可压缩占位）·
-           右簇（容量+指标 / 模型+档位 / 发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；
-           逐元素形态由密度状态机（ResizeObserver 实测内容宽 → composer-density）驱动，按序退化：
-           序 0 发送位/`+` 不退化 · 序 1 容量+指标合流 · 序 2 模型+档位合体 · 序 3 插件 toolbar 进 `»`
-           （仅有收起项时渲染）· 序 4 托盘聚合单入口 · 序 5–8 fit 轴（实测放不下时逐级收紧右簇内容：
-           数值精简/模型名截断 → 图标化 → 容量+指标进 `»`）。禁硬编码 px 断点（阈值只在状态机常量里）。
+      <!-- 底栏三簇（D6 修订「三步聚合」）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）· 中簇（可压缩占位）·
+           右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；
+           逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽 → composer-density）驱动，
+           累计三步退化：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 · 序 2 指标收
+           单图标聚合按钮（hover 聚合页）· 序 3 模型+思考收单图标聚合按钮（click 弹层 + hover 行内
+           切换；非聚合态模型名**恒完整展示**，无截断态）· 顶格仍溢出 → 锚点保护（中部让位）。
+           禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
            左右两簇挂 data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
       <div
         ref="composerBarRef"
         data-testid="composer-bar"
-        :data-tier="density.tier"
         :data-fit="density.fitLevel"
-        :data-slot-capacity="density.slots.capacity"
-        :data-slot-model="density.slots.model"
-        :data-slot-plugin-toolbar="density.slots.pluginToolbar"
-        :data-slot-tray="density.slots.tray"
+        :data-anchor-protected="density.anchorProtected ? 'true' : undefined"
+        :data-slot-left-cluster="density.slots.leftCluster"
+        :data-slot-metrics="density.slots.metrics"
+        :data-slot-model-thinking="density.slots.modelThinking"
         class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
       >
-        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ 任务托盘（序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
+        <!-- 左簇：`+`（序 0，不退化不裁剪）/ 任务托盘（左簇唯一聚合入口：aggregated 时单图标按钮
+             承载托盘分段 + 插件 toolbar）/ 展开态插件 toolbar 挂载点 -->
         <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
           <AddMenuPopover @select="onAddSelect" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
-               aggregated = 序 4：托盘整体收为单入口（层叠图标 + 运行数）→ 面板内分段展示。
+               aggregated = 序 1 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
+               禁多 icon 重叠），面板内分段展示；absent = 无内容或锚点保护（不留死入口）。
                @update:has-items = 托盘三态上抛（托盘数据面唯一实例在外壳，Composer 不建第二份）。 -->
           <ComposerTray
-            v-if="sessionId"
+            v-if="sessionId && density.slots.leftCluster !== 'absent'"
             :session-id="sessionId"
-            :aggregated="density.slots.tray === 'aggregated'"
+            :aggregated="density.slots.leftCluster === 'aggregated'"
             @update:has-items="onTrayItemsChange"
           />
           <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
-               序 3 收起后本处不渲染（腾出宽度），同一挂载点 view 改在 `»` 菜单内渲染（仍是同一份缓存）。 -->
+               展开态渲染（零贡献时 empty=hidden 零 DOM）；序 1 聚合后本处不渲染，同一挂载点 view
+               改在托盘聚合面板内渲染（仍是同一份缓存）。[HISTORICAL] `»` Ellipsis 溢出菜单已随
+               三步聚合退役（底栏不再有省略号入口）。 -->
           <ViewHost
-            v-if="sessionId && density.slots.pluginToolbar === 'expanded'"
+            v-if="sessionId && density.slots.leftCluster === 'expanded'"
             view-id="composer.toolbar"
             :session-id="sessionId"
             empty="hidden"
           />
-          <!-- 序 3 溢出兜底：被收起项进 `»`；**仅有收起项时渲染**（overflowMenuVisible 由状态机从
-               overflowItems 派生：插件 toolbar 零贡献 + fit 未到 L3 时不留死入口）。图标语义硬约束：
-               溢出入口 = 省略号，与聚合入口的层叠图标不得共用。 -->
-          <span v-if="sessionId && density.overflowMenuVisible" data-testid="composer-overflow-menu" class="inline-flex shrink-0">
-            <Popover>
-              <PopoverTriggerButton variant="icon" :show-chevron="false" :title="t('panel.tray.more')">
-                <Ellipsis class="size-4" />
-              </PopoverTriggerButton>
-              <PopoverContent side="top" align="start" class="w-auto min-w-[180px] p-1.5">
-                <!-- fit L3（序 8）：容量+指标整体收进菜单，底栏腾出宽度给模型/档位/发送位。
-                     菜单内用完整形态（有地方放），浮层详情路径不变。 -->
-                <div
-                  v-if="sessionId && density.fit.capacityMetrics === 'collapsed-to-menu'"
-                  data-testid="composer-overflow-capacity-metrics"
-                  class="flex items-center gap-0 px-1"
-                >
-                  <GenStatsTriggers :session-id="sessionId ?? undefined" :model-id="currentModelId" />
-                  <span aria-hidden="true" :class="MERGED_CHIP_SEPARATOR_CLASS" />
-                  <ContextCapacityPopover :session-id="sessionId ?? undefined" :model-id="currentModelId" />
-                </div>
-                <ViewHost view-id="composer.toolbar" :session-id="sessionId" empty="hidden" />
-              </PopoverContent>
-            </Popover>
-          </span>
         </div>
         <!-- 中簇：可压缩占位（宽度不足时只压它，两簇元素不因换行漂位） -->
         <span class="min-w-0 flex-1" />
 
-        <!-- 右簇：容量+指标 / 模型+档位 / 发送位（shrink-0，发送位右锚不漂移） -->
+        <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
         <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-0">
-          <!-- 序 1：容量 + 生成指标（merged = 合流为一个 chip；各触发器自身浮层保留为再入路径）。
-               fit L3 起整组收进 `»`（不再占底栏宽度）；L1/L2 只降内容密度，触发器与浮层都在。 -->
+          <!-- 序 2：指标（容量 + 速度 + 缓存）。展开 = 三触发器平铺（各自浮层保留为再入路径）；
+               aggregated = **单图标**聚合按钮（hover 弹指标聚合页，容量/速度/缓存三段全量）；
+               absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
           <div
-            v-if="sessionId && density.fit.capacityMetrics !== 'collapsed-to-menu'"
-            :data-testid="density.slots.capacity === 'merged' ? 'composer-capacity-merged' : undefined"
-            :class="density.slots.capacity === 'merged' ? MERGED_CHIP_CLASS : 'flex items-center gap-0'"
+            v-if="sessionId && density.slots.metrics !== 'absent'"
+            :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
           >
-            <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
-                 landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。
-                 variant 由 fit 轴下发：full / simplified（只留数值）/ iconic（缓存触发器只留图标）。 -->
-            <GenStatsTriggers v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" :variant="density.fit.capacityMetrics === 'full' ? 'full' : density.fit.capacityMetrics" />
-            <!-- V2：合流态用 1px 发丝分隔表达分组（替代原实心底），与展开态纯文本触发器风格连续 -->
-            <span v-if="density.slots.capacity === 'merged'" aria-hidden="true" :class="MERGED_CHIP_SEPARATOR_CLASS" />
-            <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update）；landing 同上隐藏 -->
-            <ContextCapacityPopover v-if="sessionId" :session-id="sessionId ?? undefined" :model-id="currentModelId" :variant="density.fit.capacityMetrics === 'full' ? 'full' : density.fit.capacityMetrics" />
-          </div>
-          <!-- 序 2：模型 + 推理档位（merged = 合体为一个 chip；模型名窄档用容器级截断收口，
-               fit L1 再收紧到 56px，fit L2 起模型/档位各退为图标——title 与浮层仍带全量信息） -->
-          <div
-            :data-testid="density.slots.model === 'merged' ? 'composer-model-merged' : undefined"
-            :class="composerModelGroupClass(density.slots.model === 'merged', density.fit.modelThinking === 'simplified')"
-          >
-            <!-- 模型（spec §2b：click 出模型切换 popover） -->
-            <ModelSelectPopover
-              :selected="currentModelId"
-              :variant="density.fit.modelThinking === 'iconic' ? 'icon' : 'text'"
-              @select="onModelSelect"
+            <ComposerMetricsAggregate
+              v-if="density.slots.metrics === 'aggregated'"
+              :session-id="sessionId"
+              :model-id="currentModelId"
             />
-            <span v-if="density.slots.model === 'merged'" aria-hidden="true" :class="MERGED_CHIP_SEPARATOR_CLASS" />
-            <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集） -->
-            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" :icon-only="density.fit.modelThinking === 'iconic'" @select="onThinkingSelect" />
+            <template v-else>
+              <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
+                   landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。
+                   [HISTORICAL] variant（simplified/iconic 中间态）已随三步聚合退役——收不完就整组聚合。 -->
+              <GenStatsTriggers :session-id="sessionId" :model-id="currentModelId" />
+              <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update） -->
+              <ContextCapacityPopover :session-id="sessionId" :model-id="currentModelId" />
+            </template>
+          </div>
+          <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮；
+               aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2）。 -->
+          <div
+            :class="density.slots.modelThinking === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
+          >
+            <ModelThinkingAggregate
+              v-if="density.slots.modelThinking === 'aggregated'"
+              :selected="currentModelId"
+              :level="currentThinkingLevel"
+              :level-map="currentThinkingLevelMap"
+              :supported-levels="currentSupportedLevels"
+              @select-model="onModelSelect"
+              @select-thinking="onThinkingSelect"
+            />
+            <template v-else>
+              <!-- 模型（spec §2b：click 出模型切换 popover） -->
+              <ModelSelectPopover :selected="currentModelId" @select="onModelSelect" />
+              <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集） -->
+              <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" @select="onThinkingSelect" />
+            </template>
           </div>
 
           <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
@@ -279,9 +269,8 @@
 <script setup lang="ts">
 import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Clock, Ellipsis, Loader2, Square, X } from '@lucide/vue'
+import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
@@ -291,6 +280,8 @@ import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import GenStatsTriggers from './GenStatsTriggers.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
+import ComposerMetricsAggregate from './ComposerMetricsAggregate.vue'
+import ModelThinkingAggregate from './ModelThinkingAggregate.vue'
 import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
 import QueueBubble from './QueueBubble.vue'
@@ -305,9 +296,8 @@ import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import {
   useComposerBarDensity,
-  composerModelGroupClass,
-  MERGED_CHIP_CLASS,
-  MERGED_CHIP_SEPARATOR_CLASS,
+  AGGREGATE_GROUP_CLASS,
+  EXPANDED_GROUP_CLASS,
 } from '@/components/panel/tray/use-composer-bar-density'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
@@ -325,8 +315,8 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
-/** 底栏密度接线（u6b / D6）：ResizeObserver 实测内容宽 → `density`（档位/形态/溢出菜单可见性）；
- * 阈值与退化序全在 `composer-density.ts`，本处零 px 常量（合流容器类见接线件导出）。 */
+/** 底栏密度接线（D6 修订「三步聚合」）：ResizeObserver 实测溢出 → `density`（逐组形态 / fit 级 / 锚点
+ * 保护）；判据与退化序全在 `composer-density.ts` + 本件测量回路，本处零 px 常量（容器 class 见接线件导出）。 */
 const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(
   computed(() => props.sessionId),
 )
