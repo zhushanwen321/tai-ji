@@ -1,9 +1,11 @@
 /**
  * settings 组件注入 key（W3 · C-W3-2 决议）。
  *
- * ui 包零 renderer import 铁律：ProviderEditModal/SourceImportSection 消费的 renderer 侧
- * useQuotaConfigure / useToast / config(@/api) 经 provide/inject 注入，ui 只持有类型别名 +
- * inject helper（缺失 noop fallback + dev console.warn，保证组件不因注入缺失崩溃）。
+ * ui 包零 renderer import 铁律：ProviderEditModal 消费的 renderer 侧 useQuotaConfigure /
+ * useToast 经 provide/inject 注入，ui 只持有类型别名 + inject helper（缺失 noop fallback +
+ * dev console.warn，保证组件不因注入缺失崩溃）。SourceImportSection 的 detectSources 不走
+ * 注入：SettingsTransport seam 已有该方法，组件直接 getSettingsTransport()（ui→core 合法
+ * 依赖方向，[C3] 走 seam）。
  *
  * 注入方向：renderer 壳（ProviderPage/SettingsResourcePage 等）→ provide 真实实现；
  * ui 组件 → inject 取用。与 core 的 TC4 t 注入模式一致（依赖经边界注入，不越界 import）。
@@ -79,28 +81,7 @@ export function useQuotaConfigureModule(): QuotaConfigureModule {
   return v
 }
 
-// ── ③ Config API（@/api 的 detectSources 等）──
-
-export interface SettingsConfigApi {
-  /** 检测 source（provider/agent）目录下可导入的源。对齐 @/api config.detectSources。 */
-  detectSources: () => Promise<unknown[]>
-}
-
-const NOOP_CONFIG_API: SettingsConfigApi = {
-  detectSources: async () => [],
-}
-
-export const SETTINGS_CONFIG_API_KEY: InjectionKey<SettingsConfigApi> = Symbol('settingsConfigApi')
-
-export function useSettingsConfigApi(): SettingsConfigApi {
-  const v = inject(SETTINGS_CONFIG_API_KEY, null)
-  if (!v && import.meta.env?.dev) {
-    console.warn('[ui/settings] SETTINGS_CONFIG_API_KEY not provided; using noop fallback')
-  }
-  return v ?? NOOP_CONFIG_API
-}
-
-// ── ④ 目录选择 dialog（§3 双方式添加：Electron showOpenDialog 经 renderer provide）──
+// ── ③ 目录选择 dialog（§3 双方式添加：Electron showOpenDialog 经 renderer provide）──
 // ui 包零 renderer import：LoadPaths 的「选择目录」按钮调此注入函数打开 OS 目录选择器。
 // renderer 壳（SettingsResourcePage）provide 真实实现（window.electronAPI.chooseDirectory）。
 // 缺失时返回 undefined——LoadPaths 据此把「选择目录」按钮置 disabled（UI 完整，IPC 接线由后续 wave）。
@@ -113,7 +94,7 @@ export function useChooseDirectory(): ChooseDirectoryFn | undefined {
   return inject(SETTINGS_CHOOSE_DIRECTORY_KEY, undefined)
 }
 
-// ── ⑤ 模型清单 CRUD module（C4：原 provide('modelListDeps') 字符串 key + 非空断言的无型缝）──
+// ── ④ 模型清单 CRUD module（C4：原 provide('modelListDeps') 字符串 key + 非空断言的无型缝）──
 /**
  * ModelListSection 的注入面 = core 模型 CRUD module（ProviderEditModelsModule）+ providerApi
  * 派生（compat 字段集判定的 provider 级回退，ProviderEditBody 按当前编辑体装配）。

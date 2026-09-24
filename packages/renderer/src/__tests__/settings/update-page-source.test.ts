@@ -12,14 +12,15 @@
  * Mock 策略（同 settings/update-page.test.ts）：
  *  - vi.mock('@/api/domains/settings') 捕获 getUpdateSettings/setUpdateSettings
  *  - vi.mock('@/composables/useToast') 隔离 toast
- *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖）
+ *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖，
+ *    工厂注入真实控制器 createAppUpdateController + 内存 ipc——原内联动作 vi.fn 已收敛）
  *  - Select 交互经 reka-ui 真实组件：pointerdown 打开下拉（SelectPortal teleport 到 body），
  *    在 document.body 找 [role="option"] 点选（同 settings/system-page-rename-model.test.ts）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page-source.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { cardTestState, checkForUpdateMock, settingsMock, toastMock, settingsApiModule, toastMockModule } from '@/__tests__/helpers/update-card-mock'
+import { getCardUpdateHarness, resetCardUpdateHarness, settingsMock, toastMock, settingsApiModule, toastMockModule, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
 import { mount, flushPromises } from '@vue/test-utils'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
@@ -29,19 +30,8 @@ vi.mock('@/api/domains/settings', () => settingsApiModule())
 
 vi.mock('@/composables/useToast', () => toastMockModule())
 
-// UpdateCheckCard → useAppUpdate（本文件 mock 面：非单例动作内联 vi.fn——与 update-page 的变体差异，保留）
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: cardTestState,
-    checkForUpdate: checkForUpdateMock,
-    performDownload: vi.fn(() => Promise.resolve()),
-    performInstall: vi.fn(() => Promise.resolve()),
-    openFallbackUrl: vi.fn(() => Promise.resolve()),
-    initAutoCheck: vi.fn(),
-    restorePendingUpdate: vi.fn(),
-    restorePreloadedUpdate: vi.fn(),
-  }),
-}))
+// UpdateCheckCard → useAppUpdate（真实 controller 面同 update-page）
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdatePage from '@/components/settings/update/UpdatePage.vue'
 
@@ -58,13 +48,7 @@ beforeEach(() => {
   settingsMock.getProxyConfig.mockResolvedValue({ mode: 'system', httpProxy: '', httpsProxy: '' })
   settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
   settingsMock.setUpdateSettings.mockResolvedValue(undefined)
-  Object.assign(cardTestState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 afterEach(() => {
@@ -149,7 +133,7 @@ describe('UpdatePage 更新来源三选控件', () => {
     wrapper = mount(UpdatePage)
     await flushPromises()
     await pickOption('GitHub')
-    expect(checkForUpdateMock).not.toHaveBeenCalled()
+    expect(getCardUpdateHarness().ipc.checkForUpdate).not.toHaveBeenCalled()
   })
 
   it('持久化失败：trigger 保持原选项 + toast error（不抛错）', async () => {
@@ -160,6 +144,7 @@ describe('UpdatePage 更新来源三选控件', () => {
     // 失败回滚：trigger 仍显示初始选项「自动（推荐）」
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('自动（推荐）')
     expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('write failed')
+    // module 统一失败反馈：saveFailed toast 透传 IPC 错误文案（{reason} 插值）
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败: write failed')
   })
 })

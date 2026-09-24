@@ -10,74 +10,33 @@
  * - W4TC8  unsupported：「前往下载」按钮 + click 触发 openUpdateFallbackUrl
  * - W4TC9  available click：触发 performDownload
  *
- * Mock 策略：vi.mock('@/composables/features/settings/useAppUpdate') 桩 state 与方法，
- * vi.mock('@/lib/ipc') 避免 ipc.ts 顶层 window.electronAPI 报错。
+ * Mock 策略：vi.mock('@/composables/features/settings/useAppUpdate') 工厂注入真实控制器
+ * （helpers/update-card-mock.ts：createAppUpdateController + 内存 ipc）——state 恒真形状
+ * （UpdateAppState 全 6 字段），动作断言走内存 adapter 的 vi.fn。
  * i18n 经 vitest-i18n-setup.ts 全局 mock，t() 取 zh-CN 文案。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/UpdateButton.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { reactive, nextTick } from 'vue'
-import type { UpdateState } from '@taiji/shared'
+import { nextTick } from 'vue'
+import { getCardUpdateHarness, makeCardRelease, resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
+import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
 
 // __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之
 vi.stubGlobal('__APP_VERSION__', '0.0.0-test')
 
-// 单例 state：测试通过 setTestState 改写驱动组件分支渲染
-const testState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string } | null,
-  errorMessage: '',
-  percent: 0,
-  releaseNotesHtml: '',
-})
-
-/** 构造 mock release（downloaded/确认 Dialog 用例需 version 填充 confirmInstall 占位符） */
-function makeRelease(version: string): { version: string; htmlUrl: string } {
-  return { version, htmlUrl: 'https://example.com/release' }
-}
-
-const performDownloadMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performInstallMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const openFallbackUrlMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: testState,
-    performDownload: performDownloadMock,
-    performInstall: performInstallMock,
-    openFallbackUrl: openFallbackUrlMock,
-    checkForUpdate: vi.fn(),
-    initAutoCheck: vi.fn(),
-  }),
-}))
-
-// ipc.ts 顶层 const api = window.electronAPI；mock 之避免无 preload 报错
-vi.mock('@/lib/ipc', () => ({
-  checkForUpdate: vi.fn(() => Promise.resolve(null)),
-  performUpdate: vi.fn(() => Promise.resolve({ triggerRestart: false })),
-  openUpdateFallbackUrl: vi.fn(() => Promise.resolve()),
-  onUpdateProgress: vi.fn(() => () => {}),
-  onUpdateError: vi.fn(() => () => {}),
-}))
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateButton from '@/components/sidebar/UpdateButton.vue'
 
-/** 设置测试态（驱动组件 v-if 分支） */
-function setTestState(partial: Partial<typeof testState>): void {
-  Object.assign(testState, partial)
+/** 设置测试态（驱动组件 v-if 分支；直改真实控制器的 state） */
+function setTestState(partial: Partial<UpdateAppState>): void {
+  Object.assign(getCardUpdateHarness().controller.state, partial)
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  Object.assign(testState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 describe('UpdateButton', () => {
@@ -110,10 +69,12 @@ describe('UpdateButton', () => {
   })
 
   it('W4TC9：available click 触发 performDownload', async () => {
-    setTestState({ state: 'available' })
+    // latestRelease 前置：controller.performDownload 无 release 短路不调 ipc（真实守卫语义）
+    setTestState({ state: 'available', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-available"]').trigger('click')
-    expect(performDownloadMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateDownload).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateDownload).toHaveBeenCalledWith('0.9.0')
   })
 
   it('W4TC7：downloading 渲染 spinner + 进度条 + 百分比文案', () => {
@@ -147,14 +108,17 @@ describe('UpdateButton', () => {
   })
 
   it('W4TC8：unsupported 渲染「前往下载」按钮，click 触发 openUpdateFallbackUrl', async () => {
-    setTestState({ state: 'unsupported' })
+    // 摆 latestRelease：真实链 available → main 推送 unsupported 错误时 release 数据保留，
+    // controller.openFallbackUrl 前置 latestRelease 提供 htmlUrl（无 release 时短路不调 ipc）
+    setTestState({ state: 'unsupported', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     const unsupported = wrapper.find('[data-testid="update-unsupported"]')
     expect(unsupported.exists()).toBe(true)
     expect(unsupported.text()).toContain('前往下载')
 
     await unsupported.trigger('click')
-    expect(openFallbackUrlMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledWith('https://example.com/release')
   })
 
   it('replacing 渲染 spinner + 「替换中」文案', () => {
@@ -171,7 +135,7 @@ describe('UpdateButton', () => {
   // 禁止用 document.body.innerHTML='' 强删——会破坏 Vue 内部 vnode 引用，触发 unmount 崩溃。
 
   it('W3TC1：downloaded 渲染 CheckCircle2 + downloaded 文案', () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     const downloaded = wrapper.find('[data-testid="update-downloaded"]')
     expect(downloaded.exists()).toBe(true)
@@ -180,7 +144,7 @@ describe('UpdateButton', () => {
   })
 
   it('W3TC2：downloaded click 弹确认 Dialog', async () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-downloaded"]').trigger('click')
     await nextTick()
@@ -192,7 +156,7 @@ describe('UpdateButton', () => {
   })
 
   it('W3TC3：确认安装调 performInstall', async () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-downloaded"]').trigger('click')
     await nextTick()
@@ -200,12 +164,12 @@ describe('UpdateButton', () => {
     expect(confirmBtn).not.toBeNull()
     confirmBtn!.click()
     await flushPromises()
-    expect(performInstallMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateInstall).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
   it('W3TC4：稍后关闭 Dialog 不调 install', async () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-downloaded"]').trigger('click')
     await nextTick()
@@ -216,7 +180,7 @@ describe('UpdateButton', () => {
     laterBtn!.click()
     await nextTick()
     await flushPromises()
-    expect(performInstallMock).not.toHaveBeenCalled()
+    expect(getCardUpdateHarness().ipc.updateInstall).not.toHaveBeenCalled()
     // Dialog 关闭：确认安装按钮不再可见（reka-ui Presence 卸载 content）
     expect(document.body.querySelector('[data-testid="update-confirm-install"]')).toBeNull()
     wrapper.unmount()
@@ -253,8 +217,8 @@ describe('UpdateButton', () => {
       expect(retry).not.toBeNull()
       retry!.click()
       await nextTick()
-      // onRetry 设 state.state='available'；testState 与组件 state 同一引用
-      expect(testState.state).toBe('available')
+      // onRetry 设 state.state='available'；controller.state 与组件 state 同一引用
+      expect(getCardUpdateHarness().controller.state.state).toBe('available')
     } finally {
       wrapper.unmount()
       vi.useRealTimers()

@@ -58,7 +58,10 @@ export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: Pro
   const discover = createProviderEditDiscover({
     providerRef,
     draft: form.draft,
-    actionError: form.actionError,
+    // 动作错误写通道（MF-1-7）：discover 侧写入统一落 source='discover' 标签，
+    // 错误归属由 form module 按 source 判定（不比对展示文案）
+    reportActionError: (message) => form.setActionError('discover', message),
+    clearActionError: () => form.clearActionError(),
     models,
     t,
   })

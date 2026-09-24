@@ -32,7 +32,8 @@ const extensionMock = vi.hoisted(() => ({
   setAutoUpgrade: vi.fn(() => Promise.resolve()),
   fetchRecommended: vi.fn(() => Promise.resolve([])),
   onExtensions: vi.fn(() => () => {}),
-  toggle: vi.fn(() => Promise.resolve()),
+  // toggle reply 携带权威扩展快照（transport 契约），乐观更新测试用 deferred 控制 resolve 时点
+  toggle: vi.fn((): Promise<{ extensions: ExtensionItem[] }> => Promise.resolve({ extensions: [] })),
   install: vi.fn(() => Promise.resolve()),
   installDir: vi.fn(() => Promise.resolve()),
   installGitRepository: vi.fn(() => Promise.resolve()),
@@ -156,6 +157,78 @@ describe('ExtensionPage 升级交互', () => {
     await flushPromises()
     expect(extensionMock.upgrade).toHaveBeenCalledTimes(1)
     expect(extensionMock.upgrade).toHaveBeenCalledWith('my-tools')
+  })
+})
+
+// ── MF-1-3 · 启用开关乐观更新协议（runOptimisticUpdate 归一）──────────────────
+//
+// 行为不变量（组件手写 try/catch 回滚迁入协议后必须逐点保持）：
+//  B1 乐观翻转：点开关 → store 对应项 enabled 立即翻转（不等 RPC），开关乐观滑动；
+//  B2 失败回滚：RPC reject → 回滚到旧值 + 开关回弹 + error ref 就近显示 e.message；
+//  B3 权威覆盖：RPC resolve → store.extensions 被 reply.extensions 权威快照整体覆盖
+//     （toggle reply 命中 pending 被 routeInbound 吞掉、不走 onExtensions 广播）。
+// 走 seam stub（makeSettingsTransportStub + extensionMock.toggle）断言，与生产装配同构。
+describe('ExtensionActions 启用开关乐观更新协议（MF-1-3）', () => {
+  /** 装配：store 预置 userExt，页面 props 与 store.extensions 同引用（生产链路 props 即 store 镜像） */
+  async function mountWithPresetStore(): Promise<ReturnType<typeof getSettingsStore>> {
+    provideSettingsStore(createSettingsStore())
+    const store = getSettingsStore()
+    store.extensions.value = [userExt()]
+    wrapper = mount(ExtensionPage, {
+      props: { extensions: store.extensions.value },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    return store
+  }
+
+  it('点开关 → store enabled 立即翻转 + 开关乐观滑动（不等 RPC，B1）', async () => {
+    const store = await mountWithPresetStore()
+    // commit 挂起不 resolve：断言乐观翻转发生在 await 之前
+    let resolveToggle!: (reply: { extensions: ExtensionItem[] }) => void
+    extensionMock.toggle.mockImplementationOnce(
+      () => new Promise<{ extensions: ExtensionItem[] }>((res) => { resolveToggle = res }),
+    )
+    const sw = wrapper!.find('button[aria-label="禁用扩展"]')
+    expect(sw.exists()).toBe(true)
+    expect(sw.attributes('data-state')).toBe('checked')
+
+    await sw.trigger('click')
+    // RPC 尚未返回：store 已翻转（乐观写先于 commit），开关已滑动
+    // （aria-label 随 enabled 翻转为「启用扩展」——UI 已响应乐观写）
+    expect(store.extensions.value[0]!.enabled).toBe(false)
+    expect(wrapper!.find('button[aria-label="启用扩展"]').attributes('data-state')).toBe('unchecked')
+
+    resolveToggle({ extensions: [{ ...userExt(), enabled: false }] })
+    await flushPromises()
+    expect(extensionMock.toggle).toHaveBeenCalledWith('my-tools', false)
+  })
+
+  it('toggle reject → 回滚到旧值 + 开关回弹 + error ref 显示 e.message（B2）', async () => {
+    const store = await mountWithPresetStore()
+    extensionMock.toggle.mockRejectedValueOnce(new Error('toggle down'))
+
+    await wrapper!.find('button[aria-label="禁用扩展"]').trigger('click')
+    await flushPromises()
+
+    // 回滚到旧值 + 开关回弹（现有 catch 行为逐字保持）
+    expect(store.extensions.value[0]!.enabled).toBe(true)
+    expect(wrapper!.find('button[aria-label="禁用扩展"]').attributes('data-state')).toBe('checked')
+    // error ref 就近显示 e.message（非静默吞）
+    expect(wrapper!.text()).toContain('toggle down')
+  })
+
+  it('toggle resolve → store.extensions 被 reply.extensions 权威快照整体覆盖（B3）', async () => {
+    const store = await mountWithPresetStore()
+    const authoritative: ExtensionItem[] = [{ ...userExt(), enabled: false, version: '2.0.0' }]
+    extensionMock.toggle.mockResolvedValueOnce({ extensions: authoritative })
+
+    await wrapper!.find('button[aria-label="禁用扩展"]').trigger('click')
+    await flushPromises()
+
+    // reply.extensions 整体覆盖 store（读侧经 reactive 代理，断言内容整体替换而非引用同一）
+    expect(store.extensions.value).toStrictEqual(authoritative)
+    expect(store.extensions.value[0]!.version).toBe('2.0.0')
   })
 })
 

@@ -40,6 +40,7 @@ import { Switch } from '@/components/ui/switch'
 import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
+import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 
 defineProps<{ ext: ExtensionItem }>()
 
@@ -51,18 +52,28 @@ const toggling = ref<Set<string>>(new Set())
 /** 操作失败信息（就近显示在 autoUpgrade 行下方） */
 const error = ref('')
 
-/** 设置扩展自动升级开关（仅 user-installed）→ 乐观更新 + 持久化。 */
+/** 设置扩展自动升级开关（仅 user-installed）→ 乐观更新 + 持久化。
+ * 编排走乐观更新协议（runOptimisticUpdate，apply/rollback/commit 三步，失败回滚后 rethrow），
+ * 本地只把 rethrow 的错误映射到既有错误面（error ref），不手写 try/catch 回滚。 */
 async function onSetAutoUpgrade(ext: ExtensionItem, enabled: boolean) {
   if (toggling.value.has(ext.name)) return
   error.value = ''
   const next = new Set(toggling.value)
   next.add(ext.name)
   toggling.value = next
-  const old = settingsStore.setExtensionAutoUpgrade(ext.name, enabled)
   try {
-    await getSettingsTransport().setExtensionAutoUpgrade(ext.name, enabled)
+    // apply 内经 setExtensionAutoUpgrade（协议原语，返回旧值）顺带捕获回滚快照
+    let old = false
+    await runOptimisticUpdate({
+      apply: () => {
+        old = settingsStore.setExtensionAutoUpgrade(ext.name, enabled)
+      },
+      rollback: () => {
+        settingsStore.setExtensionAutoUpgrade(ext.name, old)
+      },
+      commit: () => getSettingsTransport().setExtensionAutoUpgrade(ext.name, enabled),
+    })
   } catch (e) {
-    settingsStore.setExtensionAutoUpgrade(ext.name, old)
     error.value = e instanceof Error
       ? t('settings.extension.autoUpgradeFailed', { msg: e.message })
       : t('settings.extension.autoUpgradeFailed', { msg: String(e) })

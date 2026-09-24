@@ -36,7 +36,7 @@ import type { NormalizedQuotaRow } from '@taiji/shared'
 import type { QuotaConfigureModule, QuotaFailureKind, QuotaTestStatus } from '@taiji/core'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import { QUOTA_CONFIGURE_MODULE_KEY } from '../injection-keys'
-import { makeQuotaModuleStub } from './quota-module-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 
 /** 三窗口 fixture：5h 带绝对量（requests）、周仅 pct、月 ∞（pct=null 隐藏） */
 const ROW_WITH_ABS: NormalizedQuotaRow = {
@@ -54,7 +54,7 @@ let quota: QuotaConfigureModule
 
 beforeEach(() => {
   vi.clearAllMocks()
-  quota = makeQuotaModuleStub()
+  quota = makeQuotaModuleStub({ state: 'ready' })
 })
 afterEach(() => {
   wrapper?.unmount()

@@ -24,6 +24,8 @@ import {
   provideSettingsTransport,
   __resetPlatformForTesting,
   type SettingsTransport,
+  type Translate,
+  type QuotaConfigureFactoryInputs,
   provideSettingsStore,
   createSettingsStore,
 } from '@taiji/core'
@@ -34,6 +36,7 @@ import {
 } from '@taiji/ui/features/settings'
 import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
+import i18n from '@/i18n'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
@@ -179,7 +182,9 @@ function mountBody(provider: ProviderInfo, props: Record<string, unknown> = {}):
     global: {
       provide: {
         [SETTINGS_TOAST_KEY]: useToast(),
-        [QUOTA_CONFIGURE_FACTORY_KEY]: useQuotaConfigure,
+        // 壳层同款包装：业务输入归 ProviderEditBody 物化点，t 由包装函数注入
+        [QUOTA_CONFIGURE_FACTORY_KEY]: (inputs: QuotaConfigureFactoryInputs) =>
+          useQuotaConfigure({ ...inputs, t: i18n.global.t as Translate }),
       },
     },
   })

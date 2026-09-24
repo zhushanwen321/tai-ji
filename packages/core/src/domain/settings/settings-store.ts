@@ -127,7 +127,10 @@ export function createSettingsStore() {
   // ── 乐观更新（toggle 级，区别于 setSkillDirs 的「靠广播推回」）──
   // Switch 受控于 store state，点 toggle 到 UI 动效需经历一次 WS 往返（几十~数百 ms），
   // 纯广播模式期间开关卡在原位 → 用户以为没反应。这些 action 立即改本地 state，
-  // 组件「先调 action 再调 API、失败回滚」，广播回来时权威值自然覆盖（幂等调和）。
+  // 广播回来时权威值自然覆盖（幂等调和）。
+  // 这些 toggle action 是乐观更新协议（foundation/optimistic-update）的 apply/rollback
+  // 原语（返回旧值供回滚）：编排一律走 runOptimisticUpdate（apply 捕获旧值 / rollback 写回 /
+  // commit 走 transport），禁止组件内手写 try/catch 回滚。
 
   /**
    * 乐观切换 provider enabled。

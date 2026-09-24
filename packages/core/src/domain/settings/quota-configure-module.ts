@@ -28,6 +28,7 @@ import type {
   QuotaCredentialSource,
   QuotaPreset,
 } from '@taiji/shared'
+import type { Translate } from './provider-edit-types'
 
 /** 测试查询状态 */
 export type QuotaTestStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -166,12 +167,14 @@ export interface QuotaTestView {
 }
 
 /**
- * module 工厂输入（ProviderEditBody 按当前编辑体装配）。
+ * module 工厂输入（业务输入归 ProviderEditBody 按当前编辑体装配；t 由壳层统一注入）。
  * providerApiKeyDraft 是 **carry-in 槽位**：「Provider 凭据已填但未保存」（§7.4）的判定
  * 需要 provider 表单草稿，而表单归 useProviderEdit（U5 领地）——由编辑体把草稿 ref 传进来，
  * module 不自造该值。判定式（排除清除哨兵）在 module 内。
  */
 export interface QuotaConfigureInputs {
+  /** i18n 翻译函数（TC4 注入，与 provider-edit 五模块 deps.t 同范式；失败文案渲染唯一出口） */
+  t: Translate
   /** 当前编辑 provider 的已保存快照（草稿回填与「∨ 已保存」并集读它） */
   provider: Ref<ProviderInfo | null>
   /** 自动匹配的 QuotaPreset（matchQuotaPreset 命中；类型草稿默认值来源） */
@@ -182,8 +185,15 @@ export interface QuotaConfigureInputs {
   providerApiKeyDraft: Ref<string>
 }
 
-/** QuotaConfigure module 实现工厂（renderer useQuotaConfigure） */
-export type QuotaConfigureFactory = (inputs: QuotaConfigureInputs) => QuotaConfigureModule
+/**
+ * 壳层工厂入参：业务输入之外，t 由壳层包装函数统一注入（useSettingsShell provide
+ * `(inputs) => useQuotaConfigure({ ...inputs, t: i18n.global.t })`），ProviderEditBody
+ * 物化点保持纯业务输入、不感知 i18n 装配。
+ */
+export type QuotaConfigureFactoryInputs = Omit<QuotaConfigureInputs, 't'>
+
+/** QuotaConfigure module 实现工厂（renderer useQuotaConfigure；壳层包装注入 t） */
+export type QuotaConfigureFactory = (inputs: QuotaConfigureFactoryInputs) => QuotaConfigureModule
 
 /**
  * QuotaConfigure module 对外契约 —— CodingPlanSection 的全部消费面。

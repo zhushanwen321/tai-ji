@@ -64,6 +64,8 @@ export default {
     title: '子代理引擎',
     label: '默认引擎',
     desc: '派发子代理任务时使用的执行引擎；更改后需重新打开会话生效',
+    saved: '已保存',
+    saveFailed: '保存失败：{reason}',
     loadErrorHint: '读取失败，显示的是默认值',
     loadErrorRetry: '重试',
   },
@@ -866,7 +868,9 @@ export default {
     worktreeRootDirPlaceholder: '~/worktrees',
     browse: '浏览',
     browseComingSoon: '浏览功能将在后续版本中支持，目前请手动输入路径',
-    loadFailed: '部分 worktree 配置加载失败，请检查网络或重启应用: {details}',
+    // RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
     setupScript: '初始化脚本',
     setupScriptHint: 'worktree 创建后执行的脚本（相对于仓库根目录），留空则不执行',
     setupScriptPlaceholder: '如 custom-hooks/setup-worktree.sh',
@@ -922,6 +926,13 @@ export default {
     updateSourceGitcode: 'GitCode',
     currentVersionLabel: '当前版本',
     channelHint: 'stable 渠道 · 更新完成后需重启应用生效',
+    // 更新设置三字段（autoUpdate/preDownload/updateSource）经 setting-field 收编后的统一 toast；
+    // 上方 saved/saveFailed 语义专属 proxy 表单，不混用
+    updateSettingsSaved: '更新设置已保存',
+    updateSettingsSaveFailed: '保存失败：{reason}',
+    // RD-4#8：读配置失败常驻提示 + 重试
+    loadErrorHint: '读取失败，显示的是默认值',
+    loadErrorRetry: '重试',
   },
   // ── Compat 编辑器（CompatEditor / CompatField）──
   compat: {

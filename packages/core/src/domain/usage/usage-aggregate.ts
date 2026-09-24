@@ -328,7 +328,6 @@ function aggregateDay(
  *
  * @param rows - 原始行集（date × provider × model × project）
  * @param filter - 过滤器状态
- * @param allDateStrs - 全量日期字符串数组（用于热力日历，传入全部 rows 的去重日期）
  */
 export function aggregate(
   rows: UsageRow[],

@@ -5,7 +5,6 @@
   },
   "include": [
     "src/__tests__/api/rpc-type-pairing.test.ts",
-    "src/__tests__/helpers/quota-module-stub.ts",
     "src/__tests__/composables/use-quota-configure.test.ts",
     "src/__tests__/api/events-safe-forEach.test.ts",
     "src/__tests__/useSidebar-get-commands.test.ts",

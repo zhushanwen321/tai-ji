@@ -243,7 +243,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, provide, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, AlertTriangle, Settings, Trash2 } from '@lucide/vue'
 import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
@@ -256,7 +256,6 @@ import type { BuiltinProviderTemplate, ProviderInfo, ProviderStatus, SetProvider
 import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
-import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
 import {
   ProviderEditBody,
@@ -266,8 +265,6 @@ import {
   ProviderQuickSetup,
   OAuthDialog,
   ScopedModelSection,
-  SETTINGS_TOAST_KEY,
-  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
 import { useProviderOAuth } from '@/composables/features/settings/useProviderOAuth'
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
@@ -276,10 +273,9 @@ import { useAccordionGuard } from '@/composables/features/settings/useAccordionG
 import { useScopedModels } from '@/composables/features/settings/useScopedModels'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 
-// ui 包组件 renderer 侧依赖经 provide/inject 注入（ui 零 renderer import 铁律）
-provide(QUOTA_CONFIGURE_FACTORY_KEY, useQuotaConfigure)
+// ui 包组件 renderer 侧依赖由 AppShell 级 useSettingsShell 统一 provide（SETTINGS_TOAST_KEY /
+// QUOTA_CONFIGURE_FACTORY_KEY 已在壳层注入 SettingsModal 全子树，此处不再组件级重复 provide）
 const toast = useToast()
-provide(SETTINGS_TOAST_KEY, toast)
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连 @/api 门面 / 禁深 import transport 域）
 const transport = getSettingsTransport()
 

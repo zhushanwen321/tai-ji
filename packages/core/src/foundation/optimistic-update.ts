@@ -11,9 +11,11 @@
  * - {@link optimisticUpdate}（值单元）：快照 / 还原由协议持有（{@link refCell} 包装响应式值），
  *   调用方只声明「下一个值 + 持久化」。
  *
- * 典型调用面（收编前 8 处手写「快照→改→await→catch 回滚」）：settings-store.setSystem、
+ * 典型调用面（收编前各处手写「快照→改→await→catch 回滚」）：settings-store.setSystem、
  * useScopedModels add/remove/move、useApiKeyAutoEnable.onToggleEnabled、usePiPresets
- * setDefault/create/update、RPC 设置项字段 module（setting-field）与各 System Section。
+ * setDefault/create/update、RPC 设置项字段 module（setting-field）与各 System Section、
+ * extension toggle 双组件（ExtensionActions 启用开关 / ExtensionDetail autoUpgrade）、
+ * useQuotaConfigure.setEnabled（envelope ok:false 转 throw 走同一回滚语义）。
  */
 import type { Ref } from 'vue'
 

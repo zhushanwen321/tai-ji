@@ -10,7 +10,8 @@
  *  - 「打开目录」按钮（u7b D9）：可见 + 点击触发 openUpdateManualDir IPC + 失败 toast 降级
  *
  * Mock 策略（同 update-page.test.ts 结构）：
- *  - vi.mock('@/composables/features/settings/useAppUpdate') 隔离单例 state
+ *  - vi.mock('@/composables/features/settings/useAppUpdate') 注入真实控制器
+ *    （helpers/update-card-mock.ts：createAppUpdateController + 内存 ipc）
  *  - vi.mock('@/api/domains/settings') 提供 getDataDir / openUpdateManualDir（手动通道区 IPC
  *    依赖；组件已收编走 settings 域接缝，不再直取 @/lib/ipc）
  *  - useToast 保留真实模块（模块级单例，无 provider 依赖；断言失败态 toast 入列）
@@ -20,8 +21,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { reactive } from 'vue'
-import type { UpdateState } from '@taiji/shared'
+import { resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
 
 // ── mock 层 ──
 
@@ -33,27 +33,7 @@ vi.mock('@/api/domains/settings', () => ({
   openUpdateManualDir: openUpdateManualDirMock,
 }))
 
-const testState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string; releaseNotes: string } | null,
-  errorMessage: '',
-  errorSuggestion: '',
-  percent: 0,
-  releaseNotesHtml: '',
-})
-
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: testState,
-    checkForUpdate: vi.fn(() => Promise.resolve()),
-    performDownload: vi.fn(() => Promise.resolve()),
-    performInstall: vi.fn(() => Promise.resolve()),
-    openFallbackUrl: vi.fn(() => Promise.resolve()),
-    initAutoCheck: vi.fn(),
-    restorePendingUpdate: vi.fn(),
-    restorePreloadedUpdate: vi.fn(),
-  }),
-}))
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateCheckCard from '@/components/settings/UpdateCheckCard.vue'
 import { useToast } from '@/composables/useToast'
@@ -66,14 +46,7 @@ beforeEach(() => {
   getDataDirMock.mockResolvedValue('~/.taiji-dev')
   openUpdateManualDirMock.mockReset()
   openUpdateManualDirMock.mockResolvedValue({ success: true })
-  Object.assign(testState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    errorSuggestion: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 afterEach(() => {

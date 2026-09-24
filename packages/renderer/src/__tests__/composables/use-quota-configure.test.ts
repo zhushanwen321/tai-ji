@@ -33,7 +33,7 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow, ProviderId, ProviderInfo, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaPreset } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
-import type { QuotaConfigureModule, QuotaFailureKind, QuotaSnapshot } from '@taiji/core'
+import type { QuotaConfigureModule, QuotaFailureKind, QuotaSnapshot, Translate } from '@taiji/core'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
@@ -72,19 +72,23 @@ function provider(overrides: Partial<Omit<ProviderInfo, 'id'>> & { id?: string }
   } as ProviderInfo
 }
 
-/** module 装配（对齐 QuotaConfigureInputs）：返回实例 + provider ref（广播重置用例要换快照）。 */
+/** module 装配（对齐 QuotaConfigureInputs）：返回实例 + provider ref（广播重置用例要换快照）。
+ *  t 注入 fake（key 前缀 T: 渲染）：文案断言全部走「注入 t 的渲染值」，证明 i18n 出口来自
+ *  注入而非模块级 cast（失败文案用例见 ⑧ describe 的显式打点断言）。 */
 function mountModule(
   providerInit: ProviderInfo,
   opts: { preset?: QuotaPreset | undefined; oauthPresent?: boolean; providerApiKeyDraft?: string } = {},
-): { module: QuotaConfigureModule; provider: Ref<ProviderInfo | null> } {
+): { module: QuotaConfigureModule; provider: Ref<ProviderInfo | null>; t: Translate } {
   const providerRef = ref<ProviderInfo | null>(providerInit)
+  const t = vi.fn<(key: string, params?: Record<string, unknown>) => string>((key) => `T:${key}`)
   const module = useQuotaConfigure({
+    t,
     provider: providerRef,
     preset: ref(opts.preset),
     providerOauthPresent: ref(opts.oauthPresent ?? false),
     providerApiKeyDraft: ref(opts.providerApiKeyDraft ?? ''),
   })
-  return { module, provider: providerRef }
+  return { module, provider: providerRef, t }
 }
 
 /** 读取最近一次 configure 的 payload（逐键断言用；避免 toEqual 对 undefined 键的宽松处理掩盖 ''）。 */
@@ -474,7 +478,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('请先输入 Workspace 地址')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceRequired')
   })
 
   it('非 requiresWorkspace 类型不传 workspace 键', async () => {
@@ -531,7 +535,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     await module.saveAndTest()
 
     expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('保存并测试失败')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 
   it('payload 在 await 之前捕获：configure 期间 provider 广播重置草稿，提交的 fetcher 仍是调用时刻的草稿值', async () => {
@@ -594,7 +598,7 @@ describe('setEnabled 纯配置位（D4）', () => {
 
     expect(vi.mocked(quotaApi.configure).mock.calls[0]![0]).toEqual({ providerId: 'kimi-p', enabled: false })
     expect(module.view.value.enabled).toBe(true) // 回滚
-    expect(module.view.value.configureError).toBe('额度查询配置保存失败')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaConfigureFail')
     expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
   })
 
@@ -779,7 +783,7 @@ describe('configureError i18n（D9）', () => {
     await Promise.resolve()
 
     await module.saveAndTest()
-    expect(module.view.value.configureError).toBe('保存并测试失败')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 
   it('workspace 非法输入 → i18n 文案且不发 RPC', async () => {
@@ -793,7 +797,21 @@ describe('configureError i18n（D9）', () => {
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toContain('Workspace 地址无效')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceInvalid')
+  })
+
+  it('失败文案经注入 t 渲染（i18n 出口来自入参注入，与 provider-edit deps.t 同范式）', async () => {
+    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: '' })
+    const { module, t } = mountModule(
+      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
+      { preset: KIMI_PRESET },
+    )
+    await Promise.resolve()
+
+    await module.saveAndTest()
+
+    expect(t).toHaveBeenCalledWith('settings.providerEdit.quotaSaveAndTestFail')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 })
 
@@ -810,7 +828,7 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
     await module.saveAndTest()
 
     expect(module.test.value.status).toBe('error')
-    expect(module.test.value.failure).toEqual({ kind: 'network', cookieAuth: false, message: '查询失败，请检查凭证' })
+    expect(module.test.value.failure).toEqual({ kind: 'network', cookieAuth: false, message: 'T:settings.providerEdit.quotaTestFail' })
     expect(module.test.value.lastFetchAt).toBe(5000)
   })
 

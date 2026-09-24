@@ -4,13 +4,16 @@
  * 锁定「不可读」三态区分：目录存在但不可读（error='unreadable'）的源渲染「目录不可读」
  * 文案，不渲染「未安装」也不渲染计数——「不可读」≠「未安装」≠「0 个」。
  *
- * i18n 经 vitest.setup mock（t 返回 key，断言 key 形态）；detectSources 经 provide mock。
+ * i18n 经 vitest.setup mock（t 返回 key，断言 key 形态）；detectSources 经 SettingsTransport
+ * seam 桩注入（组件 [C3] 直取 getSettingsTransport()，不再走注入通道；ui 包测试无默认桩，
+ * 用例内自行 provideSettingsTransport）。
  * 运行：cd packages/ui && npx vitest run src/features/settings/common/__tests__/SourceImportSection.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import SourceImportSection from '../SourceImportSection.vue'
-import { SETTINGS_CONFIG_API_KEY } from '../../injection-keys'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@taiji/core/testing'
 import type { SourceDetectResult } from '@taiji/shared'
 
 const K = {
@@ -20,13 +23,11 @@ const K = {
 } as const
 
 function mountSection(results: SourceDetectResult[]) {
+  provideSettingsTransport(makeSettingsTransportStub({
+    detectSources: vi.fn(async () => results),
+  }))
   return mount(SourceImportSection, {
     props: { kind: 'skill' as const, existingDirs: [] },
-    global: {
-      provide: {
-        [SETTINGS_CONFIG_API_KEY]: { detectSources: vi.fn(async () => results) },
-      },
-    },
   })
 }
 

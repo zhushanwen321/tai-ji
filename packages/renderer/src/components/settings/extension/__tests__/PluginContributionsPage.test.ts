@@ -16,8 +16,9 @@
  *   - vi.mock('@/api') 把 config/extension 门面替成可控 mock（ExtensionPage/InstallFlow 依赖）
  *   - vi.mock('@/api/domains/settings') 避免 electronAPI 缺失（chooseDirectory/SystemPage 依赖；
  *     settings 组件已收编走该 seam，不再直取 lib/ipc 原始模块）
- *   - providePlatform + provideSettingsTransport + pinia（SettingsModal 打开时刷新 providers）
- *   - global.provide 注入 SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY/SETTINGS_CONFIG_API_KEY
+ *   - providePlatform + provideSettingsTransport + pinia（SettingsModal 打开时刷新 providers；
+ *     SourceImportSection 的 detectSources 走 seam，由 vitest-settings-transport-setup 默认桩兜底）
+ *   - global.provide 注入 SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY
  *   - global.stubs 把 LoadPaths/ExtensionInstallFlow/ExtensionList 重子组件 stub 掉（聚焦入口 + 子页）
  *   - global.provide PluginSettingsDataSourceKey mock 数据源（TC1/TC2 组件测试）
  */
@@ -38,7 +39,6 @@ import {
 import {
   SETTINGS_TOAST_KEY,
   QUOTA_CONFIGURE_FACTORY_KEY,
-  SETTINGS_CONFIG_API_KEY,
 } from '@taiji/ui/features/settings'
 import {
   PluginSettingsDataSourceKey,
@@ -109,7 +109,7 @@ vi.mock('@/api/domains/settings', () => ({
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import PluginContributionsPage from '@/components/settings/extension/PluginContributionsPage.vue'
 import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'
-import { makeQuotaModuleStub } from '@/__tests__/helpers/quota-module-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 /** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认）。 */
@@ -168,7 +168,6 @@ function settingsModalProvides() {
     // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
     // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
     [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-    [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
   }
 }
 

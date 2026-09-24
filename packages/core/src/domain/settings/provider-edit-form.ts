@@ -66,6 +66,22 @@ export function headerRowsFromHeaders(headers: Record<string, string>): Array<{ 
 
 // ── module 契约 ──
 
+/**
+ * 动作错误来源标签（MF-1-7）：错误归属判定按来源，不比对展示文案（i18n 文案运行时值
+ * 随 locale 变化，作判据会在切换后失效导致旧错误滞留）。
+ * - save：保存校验 / setProvider 失败
+ * - headers：headers 行编辑重复 key
+ * - discover：test / discover 探活失败（use-provider-edit 装配时经写通道注入落标签）
+ * - models：模型清单 CRUD 校验错（ProviderEditBody onAddModel 捕获填入）
+ */
+export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models'
+
+/** 动作错误内部态（带来源标签；null = 无错误） */
+export interface ActionErrorState {
+  source: ActionErrorSource
+  message: string
+}
+
 /** 凭据/名称/端点表单草稿（ProviderEditBody 模板 v-model 直绑） */
 export interface ProviderEditFormDraft {
   name: string
@@ -99,8 +115,16 @@ export interface ProviderEditFormModule {
   readonly showKey: Ref<boolean>
   /** 保存中（save-bar 按钮禁用） */
   readonly saving: Ref<boolean>
-  /** 动作错误（保存/测试/发现失败时显示在底栏，非静默吞） */
-  readonly actionError: Ref<string>
+  /**
+   * 动作错误（保存/测试/发现/模型 CRUD 失败时显示在底栏，非静默吞）。
+   * MF-1-7：对外是只露 message 的投影（空串 = 无错误）；写入走 setActionError（带来源
+   * 标签），headers 来源错误的自动清除按 source 判定——不比对展示文案，locale 切换安全。
+   */
+  readonly actionError: ComputedRef<string>
+  /** 动作错误唯一写入口（MF-1-7）：message 空 = 清除 */
+  setActionError(source: ActionErrorSource, message: string): void
+  /** 动作错误清除（provider 切换重置 / 动作置况 / headers 重复 key 消除时） */
+  clearActionError(): void
   /**
    * form 相对初始快照是否有变更（D13 取消确认 + W3 过期快照刷新用）。
    * 对比 name/api/baseUrl/apiKey 状态/models 整体/authHeader/headers/authMethod。
@@ -159,8 +183,18 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   const headerRows = ref<Array<{ key: string; value: string }>>([])
   const showKey = ref(false)
   const saving = ref(false)
-  const actionError = ref('')
+  // 动作错误内部态（MF-1-7：带来源标签）；对外只投影 message（下方 actionError computed）
+  const actionErrorState = ref<ActionErrorState | null>(null)
+  const actionError = computed<string>(() => actionErrorState.value?.message ?? '')
   const snapshot = ref<FormSnapshot | null>(null)
+
+  function setActionError(source: ActionErrorSource, message: string): void {
+    actionErrorState.value = message ? { source, message } : null
+  }
+
+  function clearActionError(): void {
+    actionErrorState.value = null
+  }
 
   function applyPatch(patch: ProviderFormPatch): void {
     draft.name = patch.name
@@ -213,7 +247,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
 
   function resetTransient(): void {
     showKey.value = false
-    actionError.value = ''
+    clearActionError()
   }
 
   /**
@@ -267,11 +301,11 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   async function save(): Promise<SaveResult> {
     const validationError = validateBeforeSave()
     if (validationError) {
-      actionError.value = validationError
+      setActionError('save', validationError)
       return { ok: false, wroteApiKey: false }
     }
     saving.value = true
-    actionError.value = ''
+    clearActionError()
     const providerId = providerRef.value?.id ?? draft.name
     // 防线①（设计 D1）：catalog / custom 的 provider 级字段分体系。kind 缺失（旧数据 / 新建态
     // 无 providerRef）按 custom 处理（自定义 provider 需要 provider 级协议）。
@@ -283,7 +317,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       // 哨兵→''、空→undefined 均为 falsy：只有本次真正写入非空 key（明文或 $ENV 引用）才 true
       return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(draft.apiKey)), quotaAutoEnabled: res?.quotaAutoEnabled }
     } catch (e) {
-      actionError.value = e instanceof Error ? e.message : String(e)
+      setActionError('save', e instanceof Error ? e.message : String(e))
       return { ok: false, wroteApiKey: false }
     } finally {
       saving.value = false
@@ -298,9 +332,11 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     const { headers, hasDuplicate } = buildHeadersFromRows(headerRows.value)
     draft.headers = headers
     if (hasDuplicate) {
-      actionError.value = t('composable.duplicateHeaderKey')
-    } else if (actionError.value === t('composable.duplicateHeaderKey')) {
-      actionError.value = ''
+      setActionError('headers', t('composable.duplicateHeaderKey'))
+    } else if (actionErrorState.value?.source === 'headers') {
+      // 清除判定按来源标签（MF-1-7）：locale 切换后文案运行时值变化不会滞留旧错误；
+      // save/discover/models 来源的错误不被 headers 同步误清
+      clearActionError()
     }
   }
 
@@ -355,6 +391,8 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     showKey,
     saving,
     actionError,
+    setActionError,
+    clearActionError,
     isDirty,
     save,
     clearApiKey,

@@ -341,6 +341,39 @@ describe('headers 行编辑 CRUD（W3 D7）', () => {
     form.removeHeader(1)
     expect(form.actionError.value).toBe('')
   })
+
+  it('headers 错误清除按来源判定：save 来源错误不被 headers 同步误清（MF-1-7）', () => {
+    const { form } = mountForm(null)
+    // save 来源错误先置入（保存失败残留形态）
+    form.setActionError('save', 'save failed')
+    // headers 无重复同步 → save 来源错误保留（不误清）
+    form.syncHeadersFromRows()
+    expect(form.actionError.value).toBe('save failed')
+    // headers 来源错误置入 → 重复 key 消除后仅该错误被清除
+    form.headerRows.value = [
+      { key: 'X-A', value: '1' },
+      { key: 'X-A', value: '2' },
+    ]
+    form.syncHeadersFromRows()
+    expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+    form.removeHeader(1)
+    expect(form.actionError.value).toBe('')
+  })
+
+  it('locale 切换后 headers 错误仍能被清除（归属按 source 标签，不比对展示文案，MF-1-7）', () => {
+    const { form } = mountForm(null)
+    form.headerRows.value = [
+      { key: 'X-A', value: '1' },
+      { key: 'X-A', value: '2' },
+    ]
+    form.syncHeadersFromRows()
+    expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+    // locale 切换：同 key 的文案运行时值变化（stub 由「返回 key」切到「加 en: 前缀」）
+    tStub.mockImplementation((key: string) => `en:${key}`)
+    // 用户修正重复 key → syncHeadersFromRows（经 removeHeader 触发，与真实 UI 路径一致）
+    form.removeHeader(1)
+    expect(form.actionError.value).toBe('')
+  })
 })
 
 describe('save：跨 module 集成（models 供给载荷，B-2 回传规则）', () => {

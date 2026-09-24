@@ -67,7 +67,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     expect(sessionApiMock.getSubagentEngineConfig).toHaveBeenCalledTimes(1)
   })
 
-  it('选择变更 → 调用 setSubagentDefaultEngine（engineId 透传）+ 选中态更新', async () => {
+  it('选择变更 → 调用 setSubagentDefaultEngine（engineId 透传）+ 选中态更新 + saved toast', async () => {
     sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
       engines: ['pi', 'zcode'],
       defaultEngine: 'zcode',
@@ -80,6 +80,9 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
 
     expect(sessionApiMock.setSubagentDefaultEngine).toHaveBeenCalledWith('pi')
     expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('pi')
+    // module 统一成功反馈：saved toast（域文案 settings.subagentEngine.saved）
+    const { toasts } = useToast()
+    expect(toasts.value.some((t) => t.type === 'info' && t.message.includes('已保存'))).toBe(true)
   })
 
   it('同值选择不发写请求（幂等）', async () => {
@@ -116,6 +119,8 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     expect(wrapper.find('[data-testid=subagent-engine-select]').text()).not.toContain('pi')
     // 失败显形：error toast 携带 runtime 原始文案
     expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('disk write failed'))).toBe(true)
+    // 回滚路径无成功反馈（saved toast 仅在写成功出现）
+    expect(toasts.value.some((t) => t.type === 'info')).toBe(false)
   })
 
   it('RPC 失败 → loadError 显形：控件禁用 + 顶部常驻提示（RD-4#8，不再 best-effort 冒充已存值）', async () => {
@@ -146,5 +151,22 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
 
     expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(false)
+    // 重拉成功后权威值回填：触发器从占位 pi 前进到已存默认 zcode（field reset 回填基准）
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
+  })
+
+  it('RD-4#8：重试仍失败 → loadError 保持 + 控件保持禁用（占位值不冒充已存值）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
+    const wrapper = mountSection()
+    await flushPromises()
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+
+    // 重试：mock 依旧失败
+    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down again'))
+    await wrapper.find('[data-testid=subagent-engine-load-retry]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
   })
 })

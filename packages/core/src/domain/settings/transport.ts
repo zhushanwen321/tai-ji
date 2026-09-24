@@ -5,12 +5,14 @@
  * 构造适配实现转发 @/api/domains；P1 transport 迁移完成后仅换实现为 core/transport
  * 直连，域内代码不动。
  *
- * [C3] settings 域 transport 访问收拢到单一 seam：settings 页（components/settings）与
- * settings composables（composables/features/settings）只经本接口访问 transport——
- * 禁止直连 `@/api` 门面、禁止深 import `@taiji/core/transport/**`。原先散落 6 处
- * 深 import（retry / smart-context / auto-rename / worktree / usage / subagent-engine）
- * 与 QuickSetup 的 `@/api` 直连全部收编为本接口方法；QuickSetup 保存与编辑体保存
- * 合流到同一 `setProvider`（quotaAutoEnabled reply 透传语义不变）。
+ * [C3] settings 域 transport 访问按通道分工收口：本 seam 只承载 runtime WS 通道——settings 页
+ * （components/settings）与 settings composables（composables/features/settings）的 WS 读写 /
+ * 订阅一律经本接口访问，禁止深 import `@taiji/core/transport/**` 直连。Electron main 进程通道
+ * （@/api/domains/settings 的 proxy / update / dialog / 数据目录路径 / 系统声音面）不经本 seam，
+ * 消费方继续直连 @/api/domains/settings（现存 6 处为登记豁免，通道分工以该文件头注为准）——
+ * 不是「全部进 seam」的一刀切。原先散落 6 处 WS 深 import（retry / smart-context / auto-rename /
+ * worktree / usage / subagent-engine）与 QuickSetup 的 WS 直连全部收编为本接口方法；QuickSetup
+ * 保存与编辑体保存合流到同一 `setProvider`（quotaAutoEnabled reply 透传语义不变）。
  *
  * 两个 adapter 证明 seam 真实：real adapter（renderer settings-transport-adapter，
  * 转发 @/api/WS 命令）+ mock adapter（@/api 三元的 mock 轨，core/transport/mock）。

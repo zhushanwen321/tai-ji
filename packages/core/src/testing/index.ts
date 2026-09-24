@@ -5,3 +5,4 @@
  * node_modules exports 两种解析路径都经本 index 命中——故用 index.ts 形态而非直达文件）。
  */
 export * from './settings-transport-stub'
+export * from './quota-module-stub'

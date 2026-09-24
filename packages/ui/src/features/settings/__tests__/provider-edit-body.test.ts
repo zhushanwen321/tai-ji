@@ -51,7 +51,7 @@ import {
   QUOTA_CONFIGURE_FACTORY_KEY,
   type SettingsToast,
 } from '../injection-keys'
-import { makeQuotaModuleStub } from './quota-module-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 
 // ── fixture ──
 
@@ -153,7 +153,7 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
 
 /** QUOTA_CONFIGURE_FACTORY_KEY stub 工厂（vi.fn 包装供「注入被真实消费」断言；契约门由
  *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担） */
-const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub())
+const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
 const toastStub: SettingsToast = {

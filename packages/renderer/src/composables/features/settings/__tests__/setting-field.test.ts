@@ -17,6 +17,7 @@
  * 运行：cd packages/renderer && npx vitest run src/composables/features/settings/__tests__/setting-field.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { ref } from 'vue'
 import {
   createSettingFieldGroup,
   createMirrorSave,
@@ -239,6 +240,115 @@ describe('field · persist 编排', () => {
     toggle.reset(false)
     await mode.persist('first-prompt')
     expect(toastMock.info).toHaveBeenCalledWith('mode.switchedAutoDisabled')
+  })
+})
+
+describe('field · 同值短路（blur 形态字段）', () => {
+  it('persist 与已保存基准同值 → 不校验不保存不 toast（blur 未改动不触发任何动作）', async () => {
+    const group = createSettingFieldGroup()
+    const save = vi.fn(async (_next: string): Promise<void> => undefined)
+    const validate = vi.fn((_next: string): string | null => null)
+    const f = group.field<string>('saved', { save, validate })
+    f.reset('saved')
+
+    await f.persist('saved')
+    expect(save).not.toHaveBeenCalled()
+    expect(validate).not.toHaveBeenCalled()
+    expect(toastMock.info).not.toHaveBeenCalled()
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  it('数组值域同值短路：元素相同的新数组实例不触发 save（JSON 序列化值比较）', async () => {
+    const group = createSettingFieldGroup()
+    const save = vi.fn(async (_next: number[]): Promise<void> => undefined)
+    const f = group.field<number[]>([200, 400], { save })
+    f.reset([200, 400])
+
+    await f.persist([200, 400])
+    expect(save).not.toHaveBeenCalled()
+  })
+})
+
+describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字形态）', () => {
+  it('提供 invalidInline：validate 拒绝 → inline key 置入 + 不弹 toast + 回弹基准 + 不调 RPC', async () => {
+    const group = createSettingFieldGroup()
+    const save = vi.fn(async (_next: number): Promise<void> => undefined)
+    const invalidInline = ref<string | null>(null)
+    const f = group.field<number>(60, {
+      save,
+      validate: (next) => (!Number.isFinite(next) || next <= 0 ? 'settings.worktree.timeoutInvalid' : null),
+      invalidInline,
+    })
+    f.reset(60)
+
+    await f.persist(0)
+    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+    expect(save).not.toHaveBeenCalled()
+    expect(f.value.value).toBe(60)
+    expect(toastMock.error).not.toHaveBeenCalled()
+    expect(toastMock.info).not.toHaveBeenCalled()
+  })
+
+  it('不提供 invalidInline：validate 拒绝仍走专属 toast（System sections 形态不受影响）', async () => {
+    const group = createSettingFieldGroup()
+    const f = group.field<number[]>([200, 400], {
+      save: async () => undefined,
+      validate: (next) => (next.some((tk) => tk <= 0) ? 'settings.system.smartContextThresholdInvalid' : null),
+    })
+
+    await f.persist([300, -1])
+    expect(toastMock.error).toHaveBeenCalledTimes(1)
+    expect(toastMock.error).toHaveBeenCalledWith('settings.system.smartContextThresholdInvalid')
+  })
+
+  it('persist 尝试起点清 inline：拒绝后再合法保存成功 → inline 复位 + saved toast', async () => {
+    const group = createSettingFieldGroup()
+    const invalidInline = ref<string | null>(null)
+    const f = group.field<number>(60, {
+      save: async () => undefined,
+      validate: (next) => (next <= 0 ? 'settings.worktree.timeoutInvalid' : null),
+      invalidInline,
+    })
+
+    await f.persist(0)
+    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+
+    await f.persist(120)
+    expect(invalidInline.value).toBe(null)
+    expect(toastMock.info).toHaveBeenCalledWith('settings.system.saved')
+  })
+
+  it('同值 persist 同样清 inline（先清后短路：再次 blur 带走旧 error 的既有 UI 行为）', async () => {
+    const group = createSettingFieldGroup()
+    const invalidInline = ref<string | null>(null)
+    const f = group.field<number>(60, {
+      save: async () => undefined,
+      validate: () => 'settings.worktree.timeoutInvalid',
+      invalidInline,
+    })
+
+    await f.persist(0)
+    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+
+    // 拒绝路径已回弹基准（60），再次 blur → 同值短路，但旧 inline error 被起点复位带走
+    await f.persist(60)
+    expect(invalidInline.value).toBe(null)
+  })
+
+  it('reset 更新基准时清 inline（重试加载成功后旧校验错误不再适用）', async () => {
+    const group = createSettingFieldGroup()
+    const invalidInline = ref<string | null>(null)
+    const f = group.field<number>(60, {
+      save: async () => undefined,
+      validate: () => 'settings.worktree.timeoutInvalid',
+      invalidInline,
+    })
+
+    await f.persist(0)
+    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+
+    f.reset(90)
+    expect(invalidInline.value).toBe(null)
   })
 })
 

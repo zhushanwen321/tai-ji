@@ -3,7 +3,7 @@
  *
  * 验证 useSettingsShell 壳接入后 SettingsModal 能渲染关键 DOM（AGENTS.md 测试规范 §8）：
  * mount SettingsModal(open=true)，providePlatform(in-memory) + provideSettingsTransport(stub)
- * + provide 3 ui 注入 key stub + mock @/api 门面（避免 WS），断言：
+ * + provide ui 注入 key stub + mock @/api 门面（避免 WS），断言：
  *   ① Dialog 内容渲染（标题 + 导航）
  *   ② provider 导航项存在（settings-nav-provider）
  *   ③ 默认 provider 页区渲染（ProviderPage 表单区）
@@ -28,7 +28,6 @@ import {
 import {
   SETTINGS_TOAST_KEY,
   QUOTA_CONFIGURE_FACTORY_KEY,
-  SETTINGS_CONFIG_API_KEY,
 } from '@taiji/ui/features/settings'
 
 // @/api 门面 mock：所有 config/extension/model/settings 域返回空/resolved，避免 WS 调用。
@@ -87,7 +86,7 @@ vi.mock('@/lib/ipc', () => ({
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
-import { makeQuotaModuleStub } from '../helpers/quota-module-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import { getSettingsStore } from '@taiji/core'
@@ -135,7 +134,6 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
           // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
           // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
           [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
     })
@@ -173,7 +171,6 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
           // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
           // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
           [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
     })
@@ -210,7 +207,6 @@ describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-m
           // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
           // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
           [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
     })
@@ -254,7 +250,6 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
           [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
     })

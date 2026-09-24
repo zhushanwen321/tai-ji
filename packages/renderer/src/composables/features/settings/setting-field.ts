@@ -1,10 +1,12 @@
 /**
- * RPC 设置项字段编排器（setting-field）——System 设置项「字段编排」的唯一 deep module（C2）。
+ * RPC 设置项字段编排器（setting-field）——RPC 设置项字段编排的唯一 deep module（C2）。
  *
  * 组件只声明 hooks（load / save / validate + toast key 覆盖），编排收进 module。三种形态：
  * - {@link createSettingFieldGroup}：乐观更新字段组——组级 load 归并（RD-4#8 loadError）+
- *   per-field「busy 防重入 → validate → 乐观写 → save → 成功回填权威值 + saved toast；
- *   失败回滚 + saveFailed toast（带 reason 插值）」。底层乐观协议走
+ *   per-field「busy 防重入 → 同值短路（blur 形态字段）→ validate → 乐观写 → save →
+ *   成功回填权威值 + saved toast；失败回滚 + saveFailed toast（带 reason 插值）」。
+ *   validate 拒绝的反馈形态二选一：hooks.invalidInline 提供时置 inline key 由组件就近渲染
+ *   （表单红字，RD-4#7），否则专属 toast。底层乐观协议走
  *   {@link runOptimisticUpdate}（@taiji/core/foundation/optimistic-update）。
  *   回滚锚点 = field 内部 lastSaved 基准，而非 persist 入口快照：v-model 直改 value 的字段
  *   （如阈值输入框）在 persist 被调前已带脏值，回到 lastSaved 才是「回到已保存态」。
@@ -48,6 +50,15 @@ function reasonOf(e: unknown): string {
 }
 
 /**
+ * 同值判定（blur 形态字段：值未变的 blur 不触发校验/保存/toast）。设置项值域 = 可结构化克隆的
+ * 原始值/纯数据（见 snapshotOf 注）：原始值 `===` 即等，数组/对象走 JSON 序列化比较
+ * （同构构造键序稳定，序列化比较等价于值比较）。
+ */
+function sameValue<TValue>(a: TValue, b: TValue): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
  * 字段便捷 hooks：load 缺省 = 无便捷 load（由 registerLoader 共享拉取，如单 RPC 回填多字段）；
  * save resolve 非空值 = 权威回填（runtime 归一/clamp 后的生效值），resolve void = 不回填。
  */
@@ -56,8 +67,14 @@ export interface SettingFieldHooks<TValue> {
   load?(): Promise<TValue>
   /** 持久化 RPC。resolve 非空值 = 成功回填权威值并更新回滚基准；resolve void = 不回填。 */
   save(next: TValue): Promise<TValue | void>
-  /** 前端校验：返回错误 i18n key → 不调 RPC、value 回弹已保存基准、toast 该 key（非 saveFailed 文案）；返回 null = 通过。 */
+  /** 前端校验：返回错误 i18n key → 不调 RPC、value 回弹已保存基准；返回 null = 通过。 */
   validate?(next: TValue): string | null
+  /**
+   * 校验拒绝的 inline 通道（additive，RD-4#7 表单就近红字形态）：提供时 validate 拒绝不再弹
+   * toast，错误 i18n key 置入该 ref 由组件就近渲染；每次 persist 尝试起点与 reset 自动清空。
+   * 缺省 = toast 形态（validate key 经 toastError 呈现）。
+   */
+  invalidInline?: Ref<string | null>
   /** 成功 toast key 覆盖（默认 'settings.system.saved'）；函数形态支持运行时决定（如按其他字段状态选文案）。 */
   savedToastKey?: string | (() => string)
   /** saveFailed toast 的 key 覆盖（默认 'settings.system.saveFailed'，带 reason 插值）。 */
@@ -69,7 +86,7 @@ export interface SettingField<TValue> {
   readonly value: Ref<TValue>
   /** 保存中（防重入 + 控件禁用态）。 */
   readonly busy: Ref<boolean>
-  /** persist 编排：busy 防重入 → validate（可选）→ 乐观写 → save → 成功回填权威值 + saved toast；失败回滚 + saveFailed toast。 */
+  /** persist 编排：busy 防重入 → 同值短路 → validate（可选）→ 乐观写 → save → 成功回填权威值 + saved toast；失败回滚 + saveFailed toast。 */
   persist(next: TValue): Promise<void>
   /** 加载回填 + 更新回滚/回弹基准（load hooks 与共享 loader 的回填唯一入口）。 */
   reset(loaded: TValue): void
@@ -119,16 +136,26 @@ export function createSettingFieldGroup(): SettingFieldGroup {
     const reset = (loaded: TValue): void => {
       value.value = loaded
       lastSaved = snapshotOf(loaded)
+      // 基准变更后旧校验错误不再适用（重试加载成功场景），inline 通道复位
+      if (hooks.invalidInline) hooks.invalidInline.value = null
     }
 
     const persist = async (next: TValue): Promise<void> => {
       if (busy.value) return
+      // inline error 每次保存尝试起点复位（同值 blur / 校验通过 / 保存完成都带走旧 error）
+      if (hooks.invalidInline) hooks.invalidInline.value = null
+      // 同值短路（blur 形态字段通用语义）：值未变不触发校验/保存/成功 toast
+      if (sameValue(next, lastSaved)) return
       if (hooks.validate) {
-        const invalidToastKey = hooks.validate(next)
-        if (invalidToastKey !== null) {
-          // 前端校验拒绝：不调 RPC，回弹到已保存基准 + 专属 toast（非 saveFailed 文案）
+        const invalidKey = hooks.validate(next)
+        if (invalidKey !== null) {
+          // 前端校验拒绝：不调 RPC，回弹到已保存基准；inline 通道置 key 由组件就近渲染，否则专属 toast
           value.value = snapshotOf(lastSaved)
-          toastError(t(invalidToastKey))
+          if (hooks.invalidInline) {
+            hooks.invalidInline.value = invalidKey
+          } else {
+            toastError(t(invalidKey))
+          }
           return
         }
       }

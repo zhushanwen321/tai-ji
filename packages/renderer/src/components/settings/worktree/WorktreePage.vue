@@ -2,6 +2,7 @@
   Settings · Worktree 配置页。
   三个 section：普通 git 仓库 / bare-workspace / 通用。
   所有设置项变更后立即通过 WS 同步到 runtime（乐观更新 + 失败回滚）。
+  字段编排走 setting-field module（RD-4#8 loadError 归并：加载失败常驻禁用 + 可重试）。
 -->
 <template>
   <div class="flex max-w-[860px] flex-col gap-3">
@@ -11,6 +12,23 @@
         <p class="desc">{{ t('settings.menu.worktreeDesc') }}</p>
       </div>
     </header>
+
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+    <div
+      v-if="loadError"
+      data-testid="worktree-load-error"
+      class="flex items-center gap-2 px-4 text-[11px] text-warn"
+    >
+      <AlertTriangle class="size-3.5 shrink-0" />
+      <span>{{ t('settings.worktree.loadErrorHint') }}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-5 px-1.5 text-[11px] text-accent"
+        data-testid="worktree-load-retry"
+        @click="loadConfig"
+      >{{ t('settings.worktree.loadErrorRetry') }}</Button>
+    </div>
 
     <!-- Section 1：普通 git 仓库 -->
     <GroupCard>
@@ -33,6 +51,7 @@
               data-testid="worktree-root-dir-input"
               :placeholder="t('settings.worktree.worktreeRootDirPlaceholder')"
               class="h-8 w-[240px] text-[12px]"
+              :disabled="rootDirBusy || loadError"
               @blur="onSaveWorktreeRootDir"
             />
             <Button
@@ -55,6 +74,7 @@
             v-model="setupScript"
             :placeholder="t('settings.worktree.setupScriptPlaceholder')"
             class="h-8 w-[280px] text-[12px]"
+            :disabled="setupScriptBusy || loadError"
             @blur="onSaveSetupScript"
           />
         </div>
@@ -80,6 +100,7 @@
             v-model="bareSetupScript"
             :placeholder="t('settings.worktree.bareSetupScriptPlaceholder')"
             class="h-8 w-[280px] text-[12px]"
+            :disabled="bareSetupScriptBusy || loadError"
             @blur="onSaveBareSetupScript"
           />
         </div>
@@ -98,9 +119,12 @@
               class="h-8 w-[120px] text-[12px]"
               min="1"
               max="3600"
+              :disabled="timeoutBusy || loadError"
               @blur="onSaveTimeout"
             />
-            <span v-if="timeoutError" data-testid="worktree-timeout-error" class="text-[11px] text-danger">{{ timeoutError }}</span>
+            <span v-if="timeoutInvalid" data-testid="worktree-timeout-error" class="text-[11px] text-danger">
+              {{ inlineText(timeoutInvalid) }}
+            </span>
           </div>
         </div>
       </div>
@@ -127,9 +151,12 @@
               data-testid="worktree-base-branch-input"
               :placeholder="t('settings.worktree.defaultBaseBranchPlaceholder')"
               class="h-8 w-[200px] text-[12px]"
+              :disabled="baseBranchBusy || loadError"
               @blur="onSaveDefaultBaseBranch"
             />
-            <span v-if="baseBranchError" data-testid="worktree-base-branch-error" class="text-[11px] text-danger">{{ baseBranchError }}</span>
+            <span v-if="baseBranchInvalid" data-testid="worktree-base-branch-error" class="text-[11px] text-danger">
+              {{ inlineText(baseBranchInvalid) }}
+            </span>
           </div>
         </div>
       </div>
@@ -140,18 +167,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { AlertTriangle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { GroupCard } from '@taiji/ui/features/settings'
-import { useToast } from '@/composables/useToast'
 import { getSettingsTransport } from '@taiji/core'
+import { createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
 const transport = getSettingsTransport()
 
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
 
 /** worktree 创建超时默认值（秒） */
 const DEFAULT_TIMEOUT_SECONDS = 60
@@ -159,154 +186,103 @@ const DEFAULT_TIMEOUT_SECONDS = 60
 /** RD-4#7：超时上限（对齐 runtime worktree-config-helper setTimeout 的 (0, 3600] 区间）。 */
 const TIMEOUT_MAX_SECONDS = 3600
 
-// ── 本地状态（乐观更新：先更新 UI，失败时回滚）──
-const worktreeRootDir = ref('')
-const setupScript = ref('')
-const bareSetupScript = ref('')
-const timeout = ref(DEFAULT_TIMEOUT_SECONDS)
-const defaultBaseBranch = ref('origin/main')
+// ── 字段编排组（setting-field module）：RD-4#8 加载归并 + 乐观更新/回滚/toast/同值短路 ──
+const group = createSettingFieldGroup()
+const loadError = group.loadError
 
-// ── 初始值快照（用于失败回滚）──
-let prevWorktreeRootDir = ''
-let prevSetupScript = ''
-let prevBareSetupScript = ''
-let prevTimeout = DEFAULT_TIMEOUT_SECONDS
-let prevDefaultBaseBranch = 'origin/main'
+// worktree 域 toast 文案（与迁移前一致，不用 module 默认的 settings.system.*）
+const TOAST_KEYS = {
+  savedToastKey: 'settings.worktree.saved',
+  saveFailedToastKey: 'settings.worktree.saveFailed',
+} as const
 
-// ── RD-4#7：前端校验 inline error（命中即显形，不发 RPC）──
-const timeoutError = ref('')
-const baseBranchError = ref('')
+// ── RD-4#7：前端校验 inline error 通道（validate 拒绝置 key，命中即显形不发 RPC）──
+const timeoutInvalid = ref<string | null>(null)
+const baseBranchInvalid = ref<string | null>(null)
 
-// ── 加载初始配置 ──
-onMounted(async () => {
-  const [rootDirRes, scriptRes, bareScriptRes, timeoutRes, baseBranchRes] = await Promise.allSettled([
-    transport.getWorktreeRootDir(),
-    transport.getSetupScript(),
-    transport.getBareSetupScript(),
-    transport.getWorktreeTimeout(),
-    transport.getDefaultBaseBranch(),
-  ])
+/** inline error key → 用户可见文案（模板渲染 helper；null 已被 v-if 拦截）。 */
+function inlineText(key: string | null): string {
+  return key === null ? '' : t(key)
+}
 
-  if (rootDirRes.status === 'fulfilled') {
-    worktreeRootDir.value = rootDirRes.value.dir
-    prevWorktreeRootDir = rootDirRes.value.dir
-  }
-  if (scriptRes.status === 'fulfilled') {
-    setupScript.value = scriptRes.value.script
-    prevSetupScript = scriptRes.value.script
-  }
-  if (bareScriptRes.status === 'fulfilled') {
-    bareSetupScript.value = bareScriptRes.value.script
-    prevBareSetupScript = bareScriptRes.value.script
-  }
-  if (timeoutRes.status === 'fulfilled') {
-    timeout.value = timeoutRes.value.timeout
-    prevTimeout = timeoutRes.value.timeout
-  }
-  if (baseBranchRes.status === 'fulfilled') {
-    defaultBaseBranch.value = baseBranchRes.value.baseBranch
-    prevDefaultBaseBranch = baseBranchRes.value.baseBranch
-  }
+// ── Section 1：普通 git 仓库（rootDir / setupScript 无前端域校验，失败走 saveFailed 回滚）──
+const rootDirField = group.field<string>('', {
+  load: () => transport.getWorktreeRootDir().then((res) => res.dir),
+  // resolve void = 不回填（setXxx echo 无归一语义），乐观值即生效值
+  save: (next) => transport.setWorktreeRootDir(next).then(() => undefined),
+  ...TOAST_KEYS,
+})
+const worktreeRootDir = rootDirField.value
+const rootDirBusy = rootDirField.busy
 
-  // 收集所有 rejected，提示用户（allSettled 自身永不 reject，但内部 RPC 可能失败）
-  const failures = [rootDirRes, scriptRes, bareScriptRes, timeoutRes, baseBranchRes]
-    .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-  if (failures.length > 0) {
-    const details = failures.map(r => r.reason instanceof Error ? r.reason.message : String(r.reason)).join('; ')
-    toastError(t('settings.worktree.loadFailed', { details }))
-  }
+const setupScriptField = group.field<string>('', {
+  load: () => transport.getSetupScript().then((res) => res.script),
+  save: (next) => transport.setSetupScript(next).then(() => undefined),
+  ...TOAST_KEYS,
+})
+const setupScript = setupScriptField.value
+const setupScriptBusy = setupScriptField.busy
+
+// ── Section 2：bare-workspace ──
+const bareSetupScriptField = group.field<string>('', {
+  load: () => transport.getBareSetupScript().then((res) => res.script),
+  save: (next) => transport.setBareSetupScript(next).then(() => undefined),
+  ...TOAST_KEYS,
+})
+const bareSetupScript = bareSetupScriptField.value
+const bareSetupScriptBusy = bareSetupScriptField.busy
+
+const timeoutField = group.field<number>(DEFAULT_TIMEOUT_SECONDS, {
+  load: () => transport.getWorktreeTimeout().then((res) => res.timeout),
+  // RD-4#7：前端范围校验（对齐 runtime (0, 3600]），inline error 形态不弹 toast
+  validate: (next) =>
+    !Number.isFinite(next) || next <= 0 || next > TIMEOUT_MAX_SECONDS ? 'settings.worktree.timeoutInvalid' : null,
+  invalidInline: timeoutInvalid,
+  save: (next) => transport.setWorktreeTimeout(next).then(() => undefined),
+  ...TOAST_KEYS,
+})
+const timeout = timeoutField.value
+const timeoutBusy = timeoutField.busy
+
+// ── Section 3：通用 ──
+const baseBranchField = group.field<string>('origin/main', {
+  load: () => transport.getDefaultBaseBranch().then((res) => res.baseBranch),
+  // RD-4#7：非空校验（runtime setDefaultBaseBranch 不校验空串，直到 git 操作才炸），inline error 形态
+  validate: (next) => (next.trim() === '' ? 'settings.worktree.baseBranchEmpty' : null),
+  invalidInline: baseBranchInvalid,
+  save: (next) => transport.setDefaultBaseBranch(next).then(() => undefined),
+  ...TOAST_KEYS,
+})
+const defaultBaseBranch = baseBranchField.value
+const baseBranchBusy = baseBranchField.busy
+
+/** 加载/重试：五个字段的便捷 load 已注册进 group，loadAll 归并（任一失败置 loadError）。 */
+async function loadConfig(): Promise<void> {
+  await group.loadAll()
+}
+
+onMounted(() => {
+  void loadConfig()
 })
 
-// ── 保存 handlers（乐观更新 + 失败回滚）──
-
-async function onSaveWorktreeRootDir() {
-  if (worktreeRootDir.value === prevWorktreeRootDir) return
-  const prev = prevWorktreeRootDir
-  prevWorktreeRootDir = worktreeRootDir.value
-  try {
-    await transport.setWorktreeRootDir(worktreeRootDir.value)
-    toastInfo(t('settings.worktree.saved'))
-  } catch (e) {
-    worktreeRootDir.value = prev
-    prevWorktreeRootDir = prev
-    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  }
+// ── blur 保存（薄转发，编排全在 setting-field module：同值短路 → validate → 乐观写/回滚/toast）──
+function onSaveWorktreeRootDir(): void {
+  void rootDirField.persist(worktreeRootDir.value)
 }
 
-async function onSaveSetupScript() {
-  if (setupScript.value === prevSetupScript) return
-  const prev = prevSetupScript
-  prevSetupScript = setupScript.value
-  try {
-    await transport.setSetupScript(setupScript.value)
-    toastInfo(t('settings.worktree.saved'))
-  } catch (e) {
-    setupScript.value = prev
-    prevSetupScript = prev
-    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  }
+function onSaveSetupScript(): void {
+  void setupScriptField.persist(setupScript.value)
 }
 
-async function onSaveBareSetupScript() {
-  if (bareSetupScript.value === prevBareSetupScript) return
-  const prev = prevBareSetupScript
-  prevBareSetupScript = bareSetupScript.value
-  try {
-    await transport.setBareSetupScript(bareSetupScript.value)
-    toastInfo(t('settings.worktree.saved'))
-  } catch (e) {
-    bareSetupScript.value = prev
-    prevBareSetupScript = prev
-    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  }
+function onSaveBareSetupScript(): void {
+  void bareSetupScriptField.persist(bareSetupScript.value)
 }
 
-async function onSaveTimeout() {
-  timeoutError.value = ''
-  if (timeout.value === prevTimeout) return
-  // RD-4#7：前端范围校验（对齐 runtime (0, 3600]），命中即 inline error 回滚，不发 RPC
-  if (!Number.isFinite(timeout.value) || timeout.value <= 0 || timeout.value > TIMEOUT_MAX_SECONDS) {
-    timeoutError.value = t('settings.worktree.timeoutInvalid')
-    timeout.value = prevTimeout
-    return
-  }
-  const prev = prevTimeout
-  prevTimeout = timeout.value
-  try {
-    await transport.setWorktreeTimeout(timeout.value)
-    toastInfo(t('settings.worktree.saved'))
-  } catch (e) {
-    timeout.value = prev
-    prevTimeout = prev
-    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  }
+function onSaveTimeout(): void {
+  void timeoutField.persist(timeout.value)
 }
 
-async function onSaveDefaultBaseBranch() {
-  baseBranchError.value = ''
-  if (defaultBaseBranch.value === prevDefaultBaseBranch) return
-  // RD-4#7：前端非空校验（runtime setDefaultBaseBranch 不校验空串，直到 git 操作才炸），
-  // 命中即 inline error 回滚，不发 RPC
-  if (defaultBaseBranch.value.trim() === '') {
-    baseBranchError.value = t('settings.worktree.baseBranchEmpty')
-    defaultBaseBranch.value = prevDefaultBaseBranch
-    return
-  }
-  const prev = prevDefaultBaseBranch
-  prevDefaultBaseBranch = defaultBaseBranch.value
-  try {
-    await transport.setDefaultBaseBranch(defaultBaseBranch.value)
-    toastInfo(t('settings.worktree.saved'))
-  } catch (e) {
-    defaultBaseBranch.value = prev
-    prevDefaultBaseBranch = prev
-    toastError(t('settings.worktree.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  }
+function onSaveDefaultBaseBranch(): void {
+  void baseBranchField.persist(defaultBaseBranch.value)
 }
-
-// ── 浏览按钮（placeholder：后续可接入 Electron dialog）──
-// stub: onBrowseWorktreeRootDir 暂不导出——按钮 disabled，后续 wave 接 dialog.showOpenDialog 时再加
-// function onBrowseWorktreeRootDir(): void {
-//   toastInfo(t('settings.worktree.browseComingSoon'))
-// }
 </script>

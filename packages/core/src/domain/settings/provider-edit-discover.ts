@@ -57,8 +57,13 @@ export interface ProviderEditDiscoverInputs {
   providerRef: Ref<ProviderInfo | null>
   /** 表单草稿（discover 请求的 baseUrl/apiKey/providerType 来源） */
   draft: ProviderEditFormDraft
-  /** 动作错误写入通道（保存/测试/发现共用 save-bar 错误位） */
-  actionError: Ref<string>
+  /**
+   * 动作错误写通道（MF-1-7 带来源标签协议）：本 module 的写入固定归属 discover，
+   * 标签由装配方（use-provider-edit）落——错误归属按 source 判定，不比对展示文案。
+   */
+  reportActionError: (message: string) => void
+  /** 动作错误清除（runDiscover 置况阶段清旧错误） */
+  clearActionError: () => void
   /** 模型清单 module（discover 合并目标） */
   models: ProviderEditModelsModule
   /** TC4 注入：t（i18n 翻译函数） */
@@ -66,7 +71,7 @@ export interface ProviderEditDiscoverInputs {
 }
 
 export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): ProviderEditDiscoverModule {
-  const { providerRef, draft, actionError, models, t } = input
+  const { providerRef, draft, reportActionError, clearActionError, models, t } = input
 
   const testing = ref(false)
   const discovering = ref(false)
@@ -98,7 +103,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
     testResults.value = res.results ?? []
     testError.value = res.success ? '' : res.error ?? ''
     testResult.value = res.success ? 'ok' : 'error'
-    if (!res.success && res.error) actionError.value = res.error
+    if (!res.success && res.error) reportActionError(res.error)
   }
 
   /**
@@ -107,7 +112,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
    */
   function applyDiscoverResult(res: DiscoverModelsResponse): void {
     if (!res.success) {
-      actionError.value = res.error ?? t('composable.discoverFailed')
+      reportActionError(res.error ?? t('composable.discoverFailed'))
       return
     }
     const { total, addedCount } = models.mergeDiscovered(res.models ?? [])
@@ -127,7 +132,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
       discovering.value = true
       discoverResult.value = ''
     }
-    actionError.value = ''
+    clearActionError()
 
     try {
       const res = await getSettingsTransport().discoverModels(buildDiscoverRequest(action))
@@ -138,7 +143,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
       applyDiscoverResult(res)
     } catch (e) {
       if (isTest) testResult.value = 'error'
-      actionError.value = e instanceof Error ? e.message : String(e)
+      reportActionError(e instanceof Error ? e.message : String(e))
     } finally {
       if (isTest) testing.value = false
       else discovering.value = false

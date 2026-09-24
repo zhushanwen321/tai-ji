@@ -87,13 +87,21 @@ function mountDiscover(options: {
 } = {}): MountedDiscover {
   const providerRef = ref<ProviderInfo | null>(options.provider ?? makeProvider())
   const draft = reactive<ProviderEditFormDraft>(options.draft ?? makeDraft())
+  // 动作错误投影 stub（MF-1-7 写通道协议：report/clear 落到本地 ref 供断言）
   const actionError = ref('')
   scope = effectScope()
   // effectScope.run 类型签名 T | undefined——活动 scope 内同步返回值恒非空
   return scope!.run(() => {
     const models = createProviderEditModels({ t: tStub })
     models.applyProvider(providerRef.value)
-    const discover = createProviderEditDiscover({ providerRef, draft, actionError, models, t: tStub })
+    const discover = createProviderEditDiscover({
+      providerRef,
+      draft,
+      reportActionError: (message) => { actionError.value = message },
+      clearActionError: () => { actionError.value = '' },
+      models,
+      t: tStub,
+    })
     return { discover, models, actionError }
   })!
 }

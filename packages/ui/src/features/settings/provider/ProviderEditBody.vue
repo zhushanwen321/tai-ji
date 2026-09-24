@@ -125,7 +125,7 @@
             <Eye v-else class="size-4" />
           </Button>
           <Button
-            v-if="provider?.apiKeySet && form.apiKey !== '__CLEAR__'"
+            v-if="provider?.apiKeySet && form.apiKey !== API_KEY_CLEAR_SENTINEL"
             variant="ghost"
             class="size-8 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
             :aria-label="t('settings.providerEdit.clearKey')"
@@ -331,7 +331,9 @@ import {
 import { matchQuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
-import { useProviderEdit } from '@taiji/core'
+// API_KEY_CLEAR_SENTINEL：清除哨兵常量与 core save 链同源（MF-1-9：模板判断不再手写
+// 同值字面量，哨兵值变更时按钮显隐与 save 语义不背离）
+import { API_KEY_CLEAR_SENTINEL, useProviderEdit } from '@taiji/core'
 import { MODEL_LIST_DEPS_KEY, QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import ModelListSection from '../common/ModelListSection.vue'
@@ -380,13 +382,17 @@ const matchedPreset = computed(() => {
 // 按组读 test 状态与模型数）；本组件每组只解构模板绑定所需成员，不再逐名消费 28 名扁平面。
 const edit = useProviderEdit(toRef(props, 'provider'), { t })
 const { form: formEdit, discover, models } = edit
-// form 组：表单草稿 + dirty/快照 + headers CRUD + save（模板 v-model 绑 draft）
+// form 组：表单草稿 + dirty/快照 + headers CRUD + save（模板 v-model 绑 draft）。
+// setActionError/clearActionError 是动作错误唯一写入口（MF-1-7：带来源标签，
+// headers 来源错误的清除按 source 判定）
 const {
   draft: form,
   headerRows,
   showKey,
   saving,
   actionError,
+  setActionError,
+  clearActionError,
   isDirty,
   save,
   clearApiKey,
@@ -468,13 +474,13 @@ provide(MODEL_LIST_DEPS_KEY, {
 // dirty 上抛父组件（展开切换守卫）。immediate 让父组件初始即知当前 dirty 态
 watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
 
-/** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示） */
+/** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */
 function onAddModel(): void {
-  actionError.value = ''
+  clearActionError()
   try {
     addModel()
   } catch (e) {
-    actionError.value = e instanceof Error ? e.message : String(e)
+    setActionError('models', e instanceof Error ? e.message : String(e))
   }
 }
 

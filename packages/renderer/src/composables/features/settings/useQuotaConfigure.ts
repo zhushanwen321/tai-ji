@@ -33,12 +33,8 @@ import type {
   ReadinessMissing,
 } from '@taiji/core'
 import { API_KEY_CLEAR_SENTINEL, getSettingsTransport } from '@taiji/core'
-import i18n from '@/i18n'
+import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
-
-// i18n.global.t 的类型窄化 cast（对齐 useQuotaQuery 的非 setup composable 模式）：
-// 失败文案走 i18n（en-US locale 不再透出硬编码中文，D9）。
-const t = i18n.global.t as (key: string) => string
 
 /**
  * Workspace 草稿的保存前归一化（模块级辅助）。
@@ -159,10 +155,11 @@ const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
 /**
  * QuotaConfigure module 实现（契约见 core QuotaConfigureModule）。
  *
- * @param inputs - 工厂输入（ProviderEditBody 按当前编辑体装配，见 core QuotaConfigureInputs）
+ * @param inputs - 工厂输入（业务输入由 ProviderEditBody 按当前编辑体装配；t 由壳层包装
+ *   函数注入，见 core QuotaConfigureInputs / useSettingsShell provide 点）
  */
 export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
-  const { provider: providerRef, preset, providerOauthPresent, providerApiKeyDraft } = inputs
+  const { t, provider: providerRef, preset, providerOauthPresent, providerApiKeyDraft } = inputs
   const quotaStore = useQuotaStore()
   const enabled = ref(false)
   /** 类型草稿底层态：外部经 selectType（同值短路 + 真变清凭证草稿）写入 */
@@ -425,29 +422,27 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /**
    * 切换启用状态（D4）：纯配置位，唯一语义是「要不要在对话框容量浮层里展示」。
    * 只构造 `{ providerId, enabled }`，其余键一律缺省（= 不变）——否则草稿里的类型 / 来源
-   * 选择会经由一次拨开关被偷偷落盘。乐观更新：Switch 是受控组件，先翻转再等 RPC 以免视觉回弹。
+   * 选择会经由一次拨开关被偷偷落盘。乐观更新走 optimistic-update 协议值单元形态（快照/回滚
+   * 归协议持有，禁止手写并存）：Switch 是受控组件，先翻转再等 RPC 以免视觉回弹；envelope
+   * ok:false 转 throw 复用同一回滚语义，外层 catch 把错误映射到 configureError。
    */
   async function setEnabled(v: boolean): Promise<void> {
     const p = providerRef.value
     if (!p) return
 
-    const prevEnabled = enabled.value
-    enabled.value = v
     configuring.value = true
     configureError.value = ''
-
     try {
-      const result = await getSettingsTransport().configureQuota({ providerId: p.id, enabled: v })
-      if (!result.ok) {
-        enabled.value = prevEnabled
-        configureError.value = result.error || t('settings.providerEdit.quotaConfigureFail')
-        return
-      }
+      await optimisticUpdate(refCell(enabled), v, async (applied) => {
+        const result = await getSettingsTransport().configureQuota({ providerId: p.id, enabled: applied })
+        if (!result.ok) {
+          throw new Error(result.error || t('settings.providerEdit.quotaConfigureFail'))
+        }
+      })
       // 关闭额度查询：清 renderer quotaStore 镜像（runtime 侧 lastFailure 由 configure 清理）；
       // 开启不做任何查询（D4 边界：拨开关零网络副作用）
       if (!v) quotaStore.clearCache(p.id)
     } catch (e) {
-      enabled.value = prevEnabled
       configureError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaConfigureFail')
     } finally {
       configuring.value = false

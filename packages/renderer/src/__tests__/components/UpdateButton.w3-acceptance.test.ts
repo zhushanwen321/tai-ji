@@ -9,61 +9,24 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { reactive, nextTick } from 'vue'
-import type { UpdateState } from '@taiji/shared'
+import { nextTick } from 'vue'
+import { getCardUpdateHarness, makeCardRelease, resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
+import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
 
 // __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之
 vi.stubGlobal('__APP_VERSION__', '0.9.7')
 
-// 单例 state：测试通过 setTestState 改写驱动组件分支渲染
-const testState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string } | null,
-  errorMessage: '',
-  errorSuggestion: '',
-  percent: 0,
-  releaseNotesHtml: '',
-})
-
-const performDownloadMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performInstallMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const openFallbackUrlMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: testState,
-    performDownload: performDownloadMock,
-    performInstall: performInstallMock,
-    openFallbackUrl: openFallbackUrlMock,
-    checkForUpdate: vi.fn(),
-    initAutoCheck: vi.fn(),
-  }),
-}))
-
-vi.mock('@/lib/ipc', () => ({
-  checkForUpdate: vi.fn(() => Promise.resolve(null)),
-  performUpdate: vi.fn(() => Promise.resolve({ triggerRestart: false })),
-  openUpdateFallbackUrl: vi.fn(() => Promise.resolve()),
-  onUpdateProgress: vi.fn(() => () => {}),
-  onUpdateError: vi.fn(() => () => {}),
-}))
+// 真实控制器注入（helpers/update-card-mock.ts）：state 恒真形状（UpdateAppState 全 6 字段）
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateButton from '@/components/sidebar/UpdateButton.vue'
 
-function setTestState(partial: Partial<typeof testState>): void {
-  Object.assign(testState, partial)
+function setTestState(partial: Partial<UpdateAppState>): void {
+  Object.assign(getCardUpdateHarness().controller.state, partial)
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  Object.assign(testState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    errorSuggestion: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 describe('W3-A4-update-button-error-overlay-vitest', () => {
@@ -125,7 +88,7 @@ describe('W3-A5-hover-version-vitest', () => {
     vi.useFakeTimers()
     setTestState({
       state: 'available',
-      latestRelease: { version: '0.9.9', htmlUrl: 'https://example.com' },
+      latestRelease: makeCardRelease('0.9.9'),
       releaseNotesHtml: '<p>Release notes</p>',
     })
     const wrapper = mount(UpdateButton)

@@ -86,14 +86,11 @@ import { computed, ref, provide, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { LoadPaths, SETTINGS_CONFIG_API_KEY, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
+import { LoadPaths, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
 import type { SkillInfo, AgentInfo, SkillDirConfig } from '@taiji/shared'
 import { getSettingsTransport } from '@taiji/core'
 import { chooseDirectory, getDataDir } from '@/api/domains/settings'
 
-// W3：LoadPaths（含 SourceImportSection）迁入 ui 包，其 transport 依赖经 inject 注入。
-// 此处把 SettingsTransport seam 的 detectSources 作为 SettingsConfigApi provide 给 ui 组件（[C3] 走 seam）。
-provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => getSettingsTransport().detectSources() })
 // v2 §3 目录选择 dialog：LoadPaths 经 inject 调 chooseDirectory（lib/ipc 封装，preload 复用 pick-directory handler）
 provide(SETTINGS_CHOOSE_DIRECTORY_KEY, chooseDirectory)
 
