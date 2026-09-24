@@ -67,6 +67,9 @@ const maxRounds = typeof args.maxRounds === "number" && args.maxRounds >= 1 ? Ma
 const reviewers = Array.isArray(args.reviewers)
   ? (args.reviewers as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "")
   : [];
+if (args.simplifyMode !== undefined && args.simplifyMode !== "apply" && args.simplifyMode !== "report") {
+  throw new Error(`参数 simplifyMode 非法：${String(args.simplifyMode)}（应为 "apply" | "report"）——apply 是自动改码模式，拼错值静默按 apply 处理会放大授权范围，故 fail-fast`);
+}
 const simplifyMode = args.simplifyMode === "report" ? "report" : "apply";
 const STEP_IDS = [
   "preflight", "static-gate", "changeset", "pr-meta", "skill-yaml", "pr-submit",
@@ -81,6 +84,30 @@ for (const s of skipSteps) {
   }
 }
 const skipSet = new Set(skipSteps);
+
+// ── step 级 agent 返回契约（命名 interface：引擎从类型合成运行时 schema） ──
+interface ChangesetDraft {
+  /** draft = 已写入 changeset 文件；no-release = 全部为非发布改动 */
+  action: "draft" | "no-release";
+  /** 已写入的 .changeset/*.md 路径（action=draft 时必填） */
+  files?: string[];
+  /** 逐包跳过原因（action=no-release 时必填，格式「包名: 原因 + 证据」） */
+  skipReasons?: string[];
+}
+
+interface PrMeta {
+  /** PR title，conventional commit 风格，英文 */
+  title: string;
+  /** PR body 全文 markdown，英文 */
+  body: string;
+}
+
+interface SimplifyResult {
+  /** 已应用（A 档落地并 commit）的简化项数；report 模式恒 0 */
+  applied: number;
+  /** 仅进报告未落地的提案数 */
+  proposals: number;
+}
 
 // ── 常量与脚本级状态 ──
 const MAX_GATE_ROUNDS = 3; // gate 修复子循环上限（同 zsw 版 MAX_GATE_ROUNDS）
@@ -122,7 +149,10 @@ function tailLines(text: string, n: number): string {
 // 里脚本写产物会自挡干净检查，结构性排除语义只强不弱）
 async function dirtyWorktree(): Promise<string> {
   const st = await world.run("git", ["status", "--porcelain"]);
-  if (st.exitCode !== 0) return `git status --porcelain 失败：${st.stderr.trim()}`;
+  if (st.exitCode !== 0) {
+    // 工具错误单独分流（不折叠成「存在未提交改动」误导恢复指引）
+    throw new Error(`git status --porcelain 失败（exit ${st.exitCode}）：${st.stderr.trim() || "无 stderr"}；确认当前目录是有效 git 仓库`);
+  }
   return st.stdout
     .split("\n")
     .map((s) => s.trimEnd())
@@ -160,13 +190,14 @@ async function readPremergeMarker(): Promise<string | null> {
   return m?.[1] ?? null;
 }
 
-// ── step wrapper：skipSteps 命中记 skipped；失败记 failure 短路后续 step ──
+// ── step wrapper：skipSteps 命中记 skipped（先于 failure 检查——failed 终态也完整
+//    披露显式声明的 skip）；失败记 failure 短路后续 step ──
 async function step<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
-  if (failure) return null;
   if (skipSet.has(id)) {
     skippedSteps.push({ step: id, reason: "发起方 skipSteps 显式跳过（人工接管逃生舱）" });
     return null;
   }
+  if (failure) return null;
   try {
     return await fn();
   } catch (e) {
@@ -583,7 +614,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 `第 ${round}/${maxRounds} 轮评审（维度：${d.name}；topic=${topic}，round=${round}）。`,
                 "",
                 `第一步：Read 评审定义文件 ${d.path}——其中是你的完整审查 checklist，按它执行审查。`,
-                `审查范围：git diff ${diffBase}...HEAD（已提交改动）。约束清单存在时必读消费：.review/constraints.md（dimensions 含本维度的条目逐条核对，enforcement: review 的条目是重点；权威源文档按需 Read 原文）。`,
+                `审查范围：先跑 git diff ${diffBase}...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（dimensions 含本维度的条目逐条核对，enforcement: review 的条目是重点；权威源文档按需 Read 原文）。`,
                 "只读审查：禁止修改、新建、删除任何代码文件。",
                 reconBlock,
                 "",
@@ -597,7 +628,22 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         );
         raw.push(...part);
       }
-      verdicts = raw.map((v, i) => ({ ...v, dimension: ordered[i]?.name ?? `dim-${i}` }));
+      verdicts = raw.map((v, i) => ({
+        ...v,
+        dimension: ordered[i]?.name ?? `dim-${i}`,
+        // LLM 畸形防御（P1-3）：reconciliation 缺失 / 条目缺字段不裸崩——裸 TypeError
+        // 会绕过环境类自动重试链且无恢复指引。归一为受控形态：status 严格比较（=== "fixed"
+        // 等）把畸形值自然当「未修复」，下一轮台账对账重报，不会假清账。
+        reconciliation: Array.isArray(v.reconciliation)
+          ? v.reconciliation
+              .filter((r): r is ReconEntry => r !== null && typeof r === "object")
+              .map((r) => ({
+                prevId: typeof r.prevId === "string" ? r.prevId : "",
+                status: r.status,
+                evidence: typeof r.evidence === "string" ? r.evidence : "",
+              }))
+          : [],
+      }));
     } catch (e) {
       return finish("review-failure", round, `reviewer 调用失败：${String(e)}`);
     }
@@ -638,7 +684,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       "任务：",
       "1. 跨维度合并同根因问题（保留最强证据与完整文件清单；guidance 合并为最具体的一句表述——合并后的修复指南会随 per-fixer 文档直达修复者）。",
       '2. 逐条证据裁决：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测/纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目会进修复队列。',
-      round > 1 ? `3. 延续条目复用台账 id；新条目分配 id，格式 MF-${round}-<序号>。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
+      round > 1 ? `3. 延续条目复用台账 id；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
       "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因的问题归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）。单条问题独立成组即可；问题间无关联时不要强行合并。",
       "",
       `产出——聚合总报告 ${rDir}/aggregated.md：## Summary（一句话）+ "- Must-fix: N" + "- Suggestions: N" + 问题表（ID|严重度|文件|证据|修复方向；新问题 ID 列写 pending）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
@@ -851,9 +897,10 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     }
 
     const merged: FixOutcome = {
-      fixes: outcomes.flatMap((o) => o.fixes ?? []),
-      disputed: outcomes.flatMap((o) => o.disputed ?? []),
-      deferred: outcomes.flatMap((o) => o.deferred ?? []),
+      // LLM 返回的数组元素可能为 null（P2-4 防御：null 元素在下游 .issueId 访问崩）
+      fixes: outcomes.flatMap((o) => (o.fixes ?? []).filter((f): f is FixRecord => f !== null && typeof f === "object")),
+      disputed: outcomes.flatMap((o) => (o.disputed ?? []).filter((d): d is FixOutcome["disputed"][number] => d !== null && typeof d === "object")),
+      deferred: outcomes.flatMap((o) => (o.deferred ?? []).filter((d): d is FixOutcome["deferred"][number] => d !== null && typeof d === "object")),
       commitMessage: "",
     };
 
@@ -956,23 +1003,31 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 
 // ══ 12 step 主流程 ══
 
-// step 1：preflight（工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用 / baseHash 锁定）
-let baseHash = "";
+// base 锁定（step 体系外的幂等读——preflight 被 skipSteps 跳过时 baseHash 依然锁定，
+// zsw 版同设计；恢复移植时误放进可跳过 step 的丢失）：下游 changeset / pr-meta /
+// skill-yaml / coverage 的 sharedSrcArgs / final-gates / cr-fix 六个消费点依赖该值，
+// 空串渗透会渲染出畸形 git 命令且空 stdout 被当「无改动」静默消费。解析失败与参数
+// 校验同类别（发起方配置错误）：throw 走 errored run，重新发起是唯一恢复路径。
+const baseLockRes = await world.run("git", ["rev-parse", base]);
+if (baseLockRes.exitCode !== 0 || baseLockRes.stdout.trim() === "") {
+  throw new Error(`base "${base}" 无法解析为 commit（${baseLockRes.stderr.trim() || "无 stderr"}）；确认 base 分支/ref 名正确后重新发起`);
+}
+const baseHash = baseLockRes.stdout.trim();
+
+phase("发起前检查");
+// step 1：preflight（仓库根 / 工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用）
 await step("preflight", async () => {
   const failures: string[] = [];
+  // 仓库根守卫（对齐 zsw 版 Gate B S1）：workspace 非仓库根时后续全部相对路径脚本
+  // ENOENT，且 git 命令向上找 .git 会审错仓库——以门禁脚本存在性为根判据提前拦截
+  if (!(await existsViaNode("scripts/pr-pre-merge.sh"))) {
+    failures.push("当前 workspace 不是本仓库根（scripts/pr-pre-merge.sh 不存在）；CreateWorkflow 须在仓库根（git rev-parse --show-toplevel）发起");
+  }
   const dirt = await dirtyWorktree();
   if (dirt !== "") failures.push(`存在未提交改动：\n${dirt}\n若为中断残留，人工检查后显式路径 commit 或 git checkout -- <路径> 还原后重新发起`);
-  const lockRes = await world.run("git", ["rev-parse", base]);
-  if (lockRes.exitCode !== 0 || lockRes.stdout.trim() === "") {
-    failures.push(`base "${base}" 无法解析为 commit（${lockRes.stderr.trim()}）；确认 base 分支/ref 名正确`);
-  } else {
-    baseHash = lockRes.stdout.trim();
-  }
-  if (baseHash) {
-    const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--oneline"]);
-    if (commits.exitCode !== 0) failures.push(`git log ${baseHash}..HEAD 失败：${commits.stderr.trim()}`);
-    else if (!commits.stdout.trim()) failures.push(`分支相对 base ${base} 无 commits；确认当前分支正确，或先 commit 后重新发起`);
-  }
+  const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--oneline"]);
+  if (commits.exitCode !== 0) failures.push(`git log ${baseHash}..HEAD 失败：${commits.stderr.trim()}`);
+  else if (!commits.stdout.trim()) failures.push(`分支相对 base ${base} 无 commits；确认当前分支正确，或先 commit 后重新发起`);
   const gh = await world.run("gh", ["auth", "status"]);
   if (gh.exitCode !== 0) failures.push(`gh 未认证（${(gh.stderr || gh.stdout).trim().split("\n")[0]}）；运行 gh auth login 后重新发起`);
   const fallow = await world.run("fallow", ["--version"]);
@@ -981,6 +1036,7 @@ await step("preflight", async () => {
   log(`[preflight] base=${base} → ${baseHash.slice(0, 12)}，前置条件全部通过`);
 });
 
+phase("静态门禁与 changeset 补齐");
 // step 2：static-gate（typecheck 三处 + lint，不跑测试）
 let changesetWarn = false;
 await step("static-gate", async () => {
@@ -993,8 +1049,13 @@ await step("static-gate", async () => {
   changesetWarn = /WARN changeset-check/.test(out.stdout);
 });
 
-// step 3：changeset（条件：static-gate 输出含 WARN changeset-check）
+// step 3：changeset（条件：static-gate 实跑且输出含 WARN changeset-check）
 await step("changeset", async () => {
+  if (skipSet.has("static-gate")) {
+    // static-gate 被跳过 = changeset-check 未执行（状态未知），不能谎报「无发布级改动」
+    skippedSteps.push({ step: "changeset", reason: "static-gate 被 skipSteps 跳过，changeset-check 未执行（有无缺 changeset 的发布级改动状态未知，由发起方接管核验）" });
+    return;
+  }
   if (!changesetWarn) {
     skippedSteps.push({ step: "changeset", reason: "changeset-check 无 WARN：无 extension src/ 发布级改动，条件不满足" });
     return;
@@ -1003,14 +1064,7 @@ await step("changeset", async () => {
   const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
-  const v = await agent("changeset-draft", "你是发布管理工程师：按 diff 逐包判断是否需要 changeset，只起草不询问。").ask<{
-    /** draft = 已写入 changeset 文件；no-release = 全部为非发布改动 */
-    action: "draft" | "no-release";
-    /** 已写入的 .changeset/*.md 路径（action=draft 时必填） */
-    files?: string[];
-    /** 逐包跳过原因（action=no-release 时必填，格式「包名: 原因 + 证据」） */
-    skipReasons?: string[];
-  }>(
+  const v = await agent("changeset-draft", "你是发布管理工程师：按 diff 逐包判断是否需要 changeset，只起草不询问。").ask<ChangesetDraft>(
     [
       "任务：为分支改动补齐 changeset（对齐 Gate-1a.5 自动分类，不弹窗询问）。",
       "",
@@ -1035,6 +1089,8 @@ await step("changeset", async () => {
       changesetFiles.length
         ? `现有 changeset 文件（勿重复声明）：\n${changesetFiles.join("\n")}`
         : "现有 changeset 文件：无",
+      "",
+      "完成后以 action=draft + files（写入的文件路径列表）或 action=no-release + skipReasons（格式「包名: 原因 + 证据」）返回。",
     ].join("\n"),
   );
   if (!v || (v.action !== "draft" && v.action !== "no-release")) {
@@ -1043,6 +1099,7 @@ await step("changeset", async () => {
   log(`[changeset] ${v.action === "draft" ? `已起草 ${(v.files ?? []).length} 个 changeset 文件` : `非发布改动跳过：${(v.skipReasons ?? []).join("; ")}`}`);
 });
 
+phase("生成 PR 描述并创建 PR");
 // step 4：pr-meta（生成 PR title/body 并落盘）
 let prTitle = "";
 await step("pr-meta", async () => {
@@ -1050,12 +1107,7 @@ await step("pr-meta", async () => {
   const diffStat = await world.run("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
-  const v = await agent("pr-meta", "你是 PR 文案撰写者：从分支 commit 历史提炼英文 title 与 body，忠实反映改动，不夸大不遗漏。").ask<{
-    /** PR title，conventional commit 风格，英文 */
-    title: string;
-    /** PR body 全文 markdown，英文 */
-    body: string;
-  }>(
+  const v = await agent("pr-meta", "你是 PR 文案撰写者：从分支 commit 历史提炼英文 title 与 body，忠实反映改动，不夸大不遗漏。").ask<PrMeta>(
     [
       "任务：从分支全部 commit 自动生成 PR title 与 body（英文，无需用户提供）。",
       "",
@@ -1124,6 +1176,7 @@ await step("pr-submit", async () => {
   throw new Error(`pr-submit 失败（exit ${res.exitCode}）：\n${tailLines(detail, 20)}`);
 });
 
+phase("约束加载与覆盖率/度量门禁");
 // step 7：constraints（约束动态加载 → .review/constraints.md，reviewer 消费）
 await step("constraints", async () => {
   const res = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
@@ -1203,6 +1256,7 @@ await step("coverage-1", async () => {
     async () => {
       const cov = await readCoverageJson();
       const pct = coveragePctOf(cov);
+      gates.coverage = cov?.verdict ?? "pass"; // fallback：final-gates 被 skip 时的终态披露仍有初跑读数（final-gates onPass 会覆盖）
       log(`[coverage-1] verdict=${cov?.verdict ?? "?"}${pct !== null ? `，增量覆盖率 ${pct}%` : ""}`);
     },
     coverageFixContext,
@@ -1236,6 +1290,7 @@ await step("metrics-1", async () => {
   );
 });
 
+phase("评审修复循环");
 // step 10：cr-fix（内联 review-fix-loop；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
   const relReviewers = (await files.glob(".agents/skills/pr-cr-fix/agents/review-*.md")).sort();
@@ -1262,6 +1317,16 @@ await step("cr-fix", async () => {
     }
     if (CR_FIX_RETRY_TERMINATED.has(last.terminated)) {
       if (attempt < CR_FIX_MAX_ATTEMPTS) {
+        // 止损守卫（对齐 gateFixLoop/simplify 的 agent 返回后 porcelain 检查）：fix-failure
+        // 的三个来源（ES3 违规 / 统一 commit 失败 / 批中途 throw）都可能留下未提交的半成品
+        // 编辑——本轮 reviewer 只审已提交改动 + 双路降级路径，残留直接重试会被 attempt 2 的
+        // 统一 commit 一并 stage（未经审查）。脏区不自动重试，failed 交人工盘点。
+        const dirt = await dirtyWorktree();
+        if (dirt !== "") {
+          throw new Error(
+            `cr-fix 终态 ${last.terminated}（第 ${attempt} 次发起）且工作区存在未提交改动——不自动重试（attempt 2 会把未经审查的残留一并 commit）：\n${dirt}\n人工盘点后显式路径 commit 或还原，再重新发起本 workflow（cr-fix 整体重跑）`,
+          );
+        }
         log(`[cr-fix] nested loop ${last.terminated}（第 ${attempt} 次发起），自动重试 1 次`);
         continue;
       }
@@ -1278,6 +1343,7 @@ await step("cr-fix", async () => {
   }
 });
 
+phase("代码简化");
 // step 11：simplify（条件：cr-fix clean/converged；apply 档 A 类自动落地）
 await step("simplify", async () => {
   if (crFixTerminated !== "clean" && crFixTerminated !== "converged") {
@@ -1296,12 +1362,7 @@ await step("simplify", async () => {
   const v = await agent(
     "simplify-apply",
     "你是代码简化工程师：按固化契约执行，A 档高置信小步落地，B 档与低置信只进报告；一次只做一个简化并验证。",
-  ).ask<{
-    /** 已应用（A 档落地并 commit）的简化项数；report 模式恒 0 */
-    applied: number;
-    /** 仅进报告未落地的提案数 */
-    proposals: number;
-  }>(
+  ).ask<SimplifyResult>(
     [
       apply
         ? [
@@ -1358,6 +1419,7 @@ await step("simplify", async () => {
   log(`[simplify] ${simplifySummary}`);
 });
 
+phase("终局三道门禁");
 // step 12：final-gates（coverage → metrics → pre-merge --test-result + 收尾防线 + e2e 披露）
 await step("final-gates", async () => {
   const extra = await sharedSrcArgs();
@@ -1373,20 +1435,11 @@ await step("final-gates", async () => {
         return { exitCode: met.exitCode, stdout: `${cov.stdout}\n${met.stdout}`, stderr: met.stderr };
       }
       lastCovJson = await readCoverageJson();
-      // 注入值 = coverage-gate 的测试判定：exit 0 或「测试全绿仅覆盖率不足」→ PASS；测试跑红 → FAIL
-      let inject = "PASS";
-      if (cov.exitCode !== 0 && lastCovJson && lastCovJson.packages) {
-        let insufficient = false;
-        for (const pkg of Object.keys(lastCovJson.packages)) {
-          const e = lastCovJson.packages[pkg];
-          if (e && e.status === "FAIL") {
-            if (typeof e.reason === "string" && e.reason.startsWith("增量覆盖率")) insufficient = true;
-            else { insufficient = false; break; }
-          }
-        }
-        if (!insufficient) inject = "FAIL";
-      }
-      const pre = await world.run("bash", ["scripts/pr-pre-merge.sh", "--test-result", inject, "--base", base, "--quiet"], { timeoutMs: 1_800_000 });
+      // 注入值恒 PASS：coverage 失败在上方短路返回，能走到 pre-merge 时测试必然全绿
+      //（与 zsw 版同构——其 coverageTestInject 的 insufficient 分工分支同样不可达；
+      //「测试跑红 → FAIL」的终局拦截由 runGate 短路本身承担，pre-merge 的 FAIL 注入
+      // 判定路径保留在 pr-pre-merge.sh 内部）
+      const pre = await world.run("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], { timeoutMs: 1_800_000 });
       return {
         exitCode: pre.exitCode,
         stdout: `${cov.stdout}\n${met.stdout}\n${pre.stdout}`,
@@ -1439,7 +1492,7 @@ const summaryLines = [
 try {
   await artifact.markdown("summary", summaryLines.join("\n"), {
     title: failure ? `PR lifecycle failed：${failure.step}` : "PR lifecycle awaiting-push",
-    description: failure ? failure.error.split("\n")[0] : "全部门禁通过，等待 push 授权。",
+    description: (failure ? failure.error.split("\n")[0] : "全部门禁通过，等待 push 授权。").slice(0, 500),
     primary: true,
   });
 } catch {
