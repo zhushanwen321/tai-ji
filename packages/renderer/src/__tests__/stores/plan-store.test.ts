@@ -1,18 +1,17 @@
 /**
- * plan store 单测 —— plan 模式重设计 u1-store 层 1（状态与操作）。
+ * plan store 单测 —— plan 模式状态机显式化（D1/D2/D4）：状态、推导与审批窗口机件。
  *
- * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款 + u-review-source-ui 增量）：
- * - 三步阶段推导三元组（D1：① exploring / ② writing / ③ reviewing；isActive 门 + reviewState 优先）
- * - 首拉成功写分区 / 响应缺 planState 置空 / RPC 失败错误通路（分区 loadError，view 不被覆盖）
- * - WS 帧落地 updateFor 分区写（applyFrame + 清 loadError）
- * - 评论草稿只作用焦点分区（per-session 隔离、切回恢复、越界删除 no-op、null 焦点 no-op）
- * - cleanup 链（triggerSessionCleanups → 分区重置，其他 session 保留）
- * - §3.5 enter 翻转清草稿（applyFrame 与 loadPlanState 双路 updateFor 出口：sid 分区内
- *   isActive 旧值 无→有 翻转清该 sid 草稿；true→true / true→false / 失败路径不清；
- *   切 session 焦点视图不误清——设计禁令的反向断言）
- * - §3.5 草稿回看请求信号（requestDraftsReveal / markDraftsRevealConsumed / per-session 隔离）
- * - 陈旧首拉守卫（F-R2-1）：首拉在途窗口内帧到达 → 迟到的空/失败 reply 整体丢弃
- *   （不倒拨 view、不误写 loadError）；正常序（reply 先于帧）与新一轮重拉不受守卫误伤
+ * 覆盖（impl-plan U4b 验收条款 + S15 renderer 断言族）：
+ * - derivePlanStage 重写（derivePhase 单点接线）：① exploring / ② writing（含 revising 归
+ *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
+ * - D2 读方③ 兜底映射（resolvePlanLifecycleState：state ?? reviewState 映射 ?? 按 isActive
+ *   推断；resolveResumeHint：reviewStateSource:'resubmit' 同义映射）
+ * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制窗 / 稳定窗输入面
+ * - 审批窗口机件：已应答标记三路解除（预期后态帧值判定 / 新 pending / 冷拉真值）、迟到旧帧
+ *   不解标记、稳定窗 arm/cancel·重置、10s 兑底双源冷拉（失败 → 标记悬挂 + loadError（R7）；
+ *   成功 → 真值解除 + 冷拉豁免直通 + sink 再入店）
+ * - 首拉成功/置空/失败、陈旧首拉守卫、applyFrame 分区写、评论草稿、enter 翻转清、
+ *   草稿回看（历史族，行为不变）
  *
  * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
  * 的 mock 边界（spread actual 保真实 events 通道，只换 command）。
@@ -20,7 +19,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { storeToRefs } from 'pinia'
 import {
@@ -30,9 +29,17 @@ import {
 import {
   usePlanStore,
   derivePlanStage,
+  derivePlanReviewBarMode,
+  resolvePlanLifecycleState,
+  resolveResumeHint,
+  registerPlanReviewColdSink,
+  __resetPlanReviewColdSinkForTesting,
+  PLAN_REVIEW_DEGRADED_STABLE_MS,
+  PLAN_REVIEW_ACK_FALLBACK_MS,
   type PlanReviewComment,
 } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
 // ── mock 边界：getPlanState RPC mock 掉（runtime 侧 u1-rpc 未接线，用受控 deferred 驱动）──
 // spread actual 保留 events 真实通道与 transport 其余面（本文件不 mount，不依赖 events；
@@ -42,6 +49,12 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api')>()
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
+
+// ── mock 边界②：extension domain（D4③ 冷拉双源之一 getPendingRequests）——受控返回/拒绝 ──
+const getPendingRequestsMock = vi.hoisted(() => vi.fn())
+vi.mock('@taiji/core/transport/api/domains/extension', () => ({
+  getPendingRequests: getPendingRequestsMock,
+}))
 
 import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 
@@ -105,34 +118,228 @@ beforeEach(() => {
         pendingRpcs.push({ sid: payload.sessionId, resolve, reject })
       }),
   )
+  getPendingRequestsMock.mockReset().mockResolvedValue([])
   setActivePinia(createPinia())
   __clearSessionCleanupRegistryForTest()
+  __resetPlanReviewColdSinkForTesting()
 })
 
-// ── 三步阶段推导（D1 推导三元组）─────────────────────────────
+afterEach(() => {
+  vi.useRealTimers()
+})
 
-describe('derivePlanStage：三步阶段推导三元组', () => {
-  it('① 需求探索 = isActive && 无 docs（docs 缺省与空数组两形态）', () => {
+// ── 阶段推导（D1 derivePhase 单点接线 + D5 已批准档）──────────
+
+describe('derivePlanStage：derivePhase 单点接线（consumers.md §三 C）', () => {
+  it('① 需求探索 = phase planning ∧ 无 docs（docs 缺省与空数组两形态）', () => {
     expect(derivePlanStage(BASE_VIEW)).toBe('exploring')
     expect(derivePlanStage({ ...BASE_VIEW, docs: [] })).toBe('exploring')
   })
 
-  it('② 文档撰写 = isActive && docs.length ≥ 1 && 无 reviewState', () => {
+  it('② 文档撰写 = phase planning ∧ docs ≥ 1；revising 归规划中档（D1：规划中 = planning|revising）', () => {
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC] })).toBe('writing')
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC, DOC] })).toBe('writing')
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'revising' })).toBe('writing')
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], reviewState: 'revising' })).toBe('writing')
   })
 
-  it('③ 审阅确认 = reviewState ∈ {awaiting, revising}（优先于 docs 判定）', () => {
+  it('③ 审阅确认 = phase reviewing（state 直读）', () => {
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'reviewing' })).toBe('reviewing')
+    // 异常组合防御：state=reviewing 但 docs 空——③ 公式不含 docs 条件
+    expect(derivePlanStage({ ...BASE_VIEW, state: 'reviewing' })).toBe('reviewing')
+  })
+
+  it('③✓ 已批准档 = phase approved（approved/dispatching，D5 阶段不倒退——F5 不复活）', () => {
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'approved' })).toBe('approved')
+    // 执行方式表单挂起期间（dispatching）不再打回 ②文档撰写（F5 病灶形态）
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'dispatching' })).toBe('approved')
+  })
+
+  it('D2③ 兜底映射（混装格）：state 缺失时 reviewState 映射（awaiting→③），无字段按 isActive 推断', () => {
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })).toBe('reviewing')
-    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], reviewState: 'revising' })).toBe('reviewing')
-    // 异常组合防御：reviewState 有值但 docs 空——③ 公式不含 docs 条件，仍 reviewing
-    expect(derivePlanStage({ ...BASE_VIEW, reviewState: 'awaiting' })).toBe('reviewing')
+    // 旧 runtime 错配格：state/reviewState 双缺但 isActive → 推断 planning → 文档档
+    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC] })).toBe('writing')
   })
 
-  it('isActive=false（退出/执行后 reset 终态）或无 view → null（无 plan 态呈现，阶段随之不外显）', () => {
+  it('isActive=false（退出/执行后 reset 终态）或无 view → null；终态/垃圾 state 不外显', () => {
     expect(derivePlanStage(null)).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false })).toBeNull()
-    expect(derivePlanStage({ ...BASE_VIEW, isActive: false, docs: [DOC], reviewState: 'awaiting' })).toBeNull()
+    expect(derivePlanStage({ ...BASE_VIEW, isActive: false, docs: [DOC], state: 'reviewing' })).toBeNull()
+    expect(derivePlanStage({ ...BASE_VIEW, state: 'completed' })).toBeNull()
+    expect(derivePlanStage({ ...BASE_VIEW, state: 'exited' })).toBeNull()
+    expect(derivePlanStage({ ...BASE_VIEW, state: 'garbage' as never })).toBe('exploring')
+  })
+})
+
+// ── D2 读方③ 兜底解析（resolvePlanLifecycleState / resolveResumeHint）──
+
+describe('D2 读方③ 兜底映射（state ?? reviewState 映射 ?? 按 isActive 推断）', () => {
+  it('state 直读（恒携带的归一 View）；垃圾 state 值走兜底（不信任外部格式）', () => {
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'dispatching' })).toBe('dispatching')
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'garbage' as never })).toBe('planning')
+    expect(resolvePlanLifecycleState(null)).toBe('idle')
+  })
+
+  it('state 缺失 → reviewState 映射（awaiting→reviewing / revising→revising）', () => {
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, reviewState: 'awaiting' })).toBe('reviewing')
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, reviewState: 'revising' })).toBe('revising')
+  })
+
+  it('双缺 → 按 isActive 推断（有 plan → planning，无 → idle）', () => {
+    expect(resolvePlanLifecycleState(BASE_VIEW)).toBe('planning')
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, isActive: false })).toBe('idle')
+  })
+
+  it('resolveResumeHint：resumeHint 直读；旧字段 reviewStateSource:resubmit 同义映射；其余不猜测', () => {
+    expect(resolveResumeHint({ ...BASE_VIEW, resumeHint: 'resubmit' })).toBe('resubmit')
+    expect(resolveResumeHint({ ...BASE_VIEW, reviewStateSource: 'resubmit' })).toBe('resubmit')
+    expect(resolveResumeHint({ ...BASE_VIEW, reviewStateSource: 'explain' as never })).toBeUndefined()
+    expect(resolveResumeHint(BASE_VIEW)).toBeUndefined()
+    expect(resolveResumeHint(null)).toBeUndefined()
+  })
+})
+
+// ── D4 分支公式单源（derivePlanReviewBarMode）──────────────
+
+describe('derivePlanReviewBarMode：D4 分支公式单源（presence 语义）', () => {
+  const base = { isActive: true, hasPending: false, state: 'reviewing' as const, ackMarked: false, degradedGate: true }
+
+  it('ready ⇔ 挂起存在且恒优先（presence）：压制标记 / revising 态均不压 ready', () => {
+    expect(derivePlanReviewBarMode({ ...base, hasPending: true })).toBe('ready')
+    expect(derivePlanReviewBarMode({ ...base, hasPending: true, ackMarked: true })).toBe('ready')
+    expect(derivePlanReviewBarMode({ ...base, hasPending: true, state: 'revising' })).toBe('ready')
+  })
+
+  it('已应答抑制窗压制 state 判定分支（degraded/revising）', () => {
+    expect(derivePlanReviewBarMode({ ...base, ackMarked: true })).toBeNull()
+    expect(derivePlanReviewBarMode({ ...base, ackMarked: true, state: 'revising' })).toBeNull()
+  })
+
+  it('revising ⇔ state=revising（无挂起无压制）；degraded ⇔ reviewing ∧ 稳定窗放行', () => {
+    expect(derivePlanReviewBarMode({ ...base, state: 'revising' })).toBe('revising')
+    expect(derivePlanReviewBarMode(base)).toBe('degraded')
+    expect(derivePlanReviewBarMode({ ...base, degradedGate: false })).toBeNull()
+  })
+
+  it('dispatching/approved 不进审批条；isActive=false 恒不渲染', () => {
+    expect(derivePlanReviewBarMode({ ...base, state: 'dispatching' })).toBeNull()
+    expect(derivePlanReviewBarMode({ ...base, state: 'approved' })).toBeNull()
+    expect(derivePlanReviewBarMode({ ...base, isActive: false, hasPending: true })).toBeNull()
+  })
+})
+
+// ── 审批窗口机件（D4 抑制窗 / 稳定窗 / 冷拉对账）─────────────
+
+describe('审批窗口机件（D4）', () => {
+  /** planReview 帧记录（冷拉 getPendingRequests 快照形态） */
+  function planReviewRecord(requestId: string): ExtensionUIRequest {
+    return { sessionId: 'A', requestId, method: 'select', planReview: true } as unknown as ExtensionUIRequest
+  }
+
+  function mountStore(): ReturnType<typeof usePlanRefs> {
+    const refs = usePlanRefs()
+    refs.store.syncFocus('A')
+    return refs
+  }
+
+  it('已应答标记：markPlanReviewAnswered 置起；预期后态帧（state ≠ reviewing）值判定解除', () => {
+    const { store, planReviewAckMarked } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    store.markPlanReviewAnswered('A')
+    expect(planReviewAckMarked.value).toBe(true)
+
+    // 迟到旧帧（值仍是 reviewing）不解标记（D4②：按帧内值判定，不按任意帧到达）
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    expect(planReviewAckMarked.value).toBe(true)
+
+    // 预期后态帧（dismiss/review_aborted→planning）→ 解除
+    store.applyFrame('A', { ...BASE_VIEW, state: 'planning' })
+    expect(planReviewAckMarked.value).toBe(false)
+  })
+
+  it('新 planReview pending 登记到达同样解除标记（ready 优先于抑制）', () => {
+    const { store, planReviewAckMarked } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    store.markPlanReviewAnswered('A')
+    expect(planReviewAckMarked.value).toBe(true)
+
+    store.setPlanReviewPending('A', true)
+    expect(planReviewAckMarked.value).toBe(false)
+  })
+
+  it('稳定窗 arm/cancel·重置（fake timers）：组合持续 ≥2s 放行；中途变假重置，再转真重新计满', async () => {
+    vi.useFakeTimers()
+    const { store, planReviewDegradedGate } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    expect(planReviewDegradedGate.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
+    expect(planReviewDegradedGate.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(planReviewDegradedGate.value).toBe(true)
+
+    // 变假（挂起到达）→ cancel·重置；再转真 → 重新计满 2s 才放行
+    store.setPlanReviewPending('A', true)
+    expect(planReviewDegradedGate.value).toBe(false)
+    store.setPlanReviewPending('A', false)
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
+    expect(planReviewDegradedGate.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(planReviewDegradedGate.value).toBe(true)
+  })
+
+  it('冷拉失败（R7 失败分支）→ 标记悬挂不解除 + loadError 呈现', async () => {
+    vi.useFakeTimers()
+    const { store, planReviewAckMarked, planReviewDegradedGate, planLoadError } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    store.markPlanReviewAnswered('A')
+    commandMock.mockReset().mockRejectedValue(new Error('ws closed'))
+    getPendingRequestsMock.mockReset().mockRejectedValue(new Error('ws closed'))
+
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 标记悬挂（审批条保持不渲染——fail-safe 不误导）+ loadError 既有错误通路
+    expect(planReviewAckMarked.value).toBe(true)
+    expect(planReviewDegradedGate.value).toBe(false)
+    expect(planLoadError.value).toContain('ws closed')
+  })
+
+  it('冷拉真值（reviewing ∧ 无挂起）→ 解除标记 + 冷拉豁免稳定窗直通', async () => {
+    vi.useFakeTimers()
+    const { store, planReviewAckMarked, planReviewDegradedGate } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    store.markPlanReviewAnswered('A')
+    commandMock.mockReset().mockResolvedValue({ sessionId: 'A', planState: { ...BASE_VIEW, state: 'reviewing' } })
+    getPendingRequestsMock.mockReset().mockResolvedValue([])
+
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(planReviewAckMarked.value).toBe(false)
+    // 冷拉真值豁免稳定窗：对账结果即事实，直接放行（不再等 2s）
+    expect(planReviewDegradedGate.value).toBe(true)
+  })
+
+  it('冷拉真值（pending 在场）→ 真值解除标记 + sink 再入店 registry（呈 ready 权威优先）', async () => {
+    vi.useFakeTimers()
+    const sinkRecords: ExtensionUIRequest[][] = []
+    registerPlanReviewColdSink((sid, records) => {
+      expect(sid).toBe('A')
+      sinkRecords.push(records)
+    })
+    const { store, planReviewAckMarked } = mountStore()
+    store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
+    store.markPlanReviewAnswered('A')
+    commandMock.mockReset().mockResolvedValue({ sessionId: 'A', planState: { ...BASE_VIEW, state: 'reviewing' } })
+    getPendingRequestsMock.mockReset().mockResolvedValue([planReviewRecord('pr-cold'), { ...planReviewRecord('form-1'), planReview: false }])
+
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(planReviewAckMarked.value).toBe(false)
+    // 只有 planReview 记录入店（form 键不归审批条）
+    expect(sinkRecords).toHaveLength(1)
+    expect(sinkRecords[0]!.map((r) => r.requestId)).toEqual(['pr-cold'])
   })
 })
 

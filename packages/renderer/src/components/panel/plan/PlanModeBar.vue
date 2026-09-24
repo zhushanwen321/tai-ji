@@ -19,15 +19,50 @@
     data-testid="plan-mode-bar"
     class="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border px-5 pb-3 pt-1.5 text-xs text-neutral-dim"
   >
-    <!-- 左区（常驻，isActive 即渲染）：模式名 + 三阶段点（done 对勾/同色系，去绿）+ 退出 -->
+    <!-- 左区（常驻，isActive 即渲染）：模式名 + 技能 chips + 三阶段点（done 对勾/同色系，去绿）+ 退出 -->
     <span
       data-testid="plan-mode-bar-title"
       class="flex shrink-0 items-center gap-1.5 font-medium text-neutral-mid"
-      :title="skillsTitle"
     >
       <SquareCheckBig class="size-3.5 shrink-0 text-accent" aria-hidden="true" />
       {{ t('plan.modeBar.title') }}
     </span>
+    <!-- 技能 chips（D7① 可见性：挂载技能内联可读，取代 tooltip-only；至多 2 枚 + +n，
+         点击 Popover 列全量技能名）；无技能不渲染 -->
+    <Popover v-if="skills.length > 0">
+      <PopoverTrigger as-child>
+        <Button
+          variant="ghost"
+          size="dense"
+          data-testid="plan-mode-bar-skills"
+          class="shrink-0 gap-1 rounded-[var(--radius-sm)] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+        >
+          <span
+            v-for="skill in visibleSkills"
+            :key="skill"
+            class="rounded-full bg-surface-hover px-1.5 py-px text-[length:var(--text-3xs)] text-neutral-mid"
+          >{{ skill }}</span>
+          <span
+            v-if="hiddenSkillCount > 0"
+            class="rounded-full bg-surface-hover px-1.5 py-px font-mono text-[length:var(--text-3xs)] text-neutral-mid"
+          >+{{ hiddenSkillCount }}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" :collision-padding="8" class="w-64 p-3">
+        <div class="flex flex-col gap-1.5">
+          <p class="text-[length:var(--text-2xs)] font-medium text-neutral-fg">
+            {{ t('plan.modeBar.skillsLabel') }}
+          </p>
+          <div data-testid="plan-mode-bar-skills-list" class="flex flex-col gap-1">
+            <span
+              v-for="skill in skills"
+              :key="skill"
+              class="text-[length:var(--text-2xs)] text-neutral-mid"
+            >{{ skill }}</span>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
     <!-- 三步阶段指示（D1 推导不落盘，消费 usePlanState 的 stage；点带 tooltip 说明含义） -->
     <span class="flex shrink-0 items-center gap-1 whitespace-nowrap" data-testid="plan-mode-bar-stage">
       <template v-for="(step, i) in stageSteps" :key="step.stage">
@@ -79,7 +114,7 @@
           <!-- 警示行（分情境，可共存时按优先级取首个）：revising 优先（与审批条分支
                竞态安全序一致——revising 态 GUI 草稿已在 revise 提交时清空，两警示语义互斥） -->
           <p
-            v-if="reviewState === 'revising'"
+            v-if="isRevising"
             data-testid="plan-mode-bar-exit-warn-revising"
             class="text-[length:var(--text-2xs)] leading-relaxed text-warn"
           >
@@ -145,8 +180,8 @@
 /**
  * PlanModeBar —— 计划模式状态带（左区常驻模式态 + 右区情境审批条）。
  *
- * 结构（设计 §3.3）：一行两区。左区 = 模式名 + 三阶段点 + 退出（常驻，isActive 即渲染）；
- * 右区 = PlanReviewBar（四分支情境渲染，机制知识随其文件延续）。
+ * 结构（设计 §3.3）：一行两区。左区 = 模式名 + 技能 chips（D7①）+ 三阶段点 + 退出
+ *（常驻，isActive 即渲染）；右区 = PlanReviewBar（三分支情境渲染，机制知识随其文件延续）。
  *
  * 常驻挂载订阅约束（承接清单①，M1）：本组件由 Panel 无条件挂载（禁组件级 v-if），
  * isActive=false 时仅 template 根 v-if 不渲染 DOM——setup 内 useExtensionUI(
@@ -175,6 +210,7 @@ import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
 import { usePlanState } from '@/composables/use-plan-sync'
 import { useExtensionUI, planReviewFilter } from '@/composables/useExtensionUI'
+import { resolvePlanLifecycleState, type PlanStage } from '@/stores/plan-store'
 import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
 
 const props = defineProps<{
@@ -199,15 +235,14 @@ useExtensionUI(sessionIdRef, planReviewFilter)
 const isActive = computed(() => view.value?.isActive === true)
 
 /**
- * 技能名收进模式名 tooltip（设计砍噪音条款）：默认不渲染技能文本，有 skills 时
- * title = 「技能：a · b」；旧 entry 无字段 / 空数组 → undefined（无 title 属性）。
+ * 技能 chips（D7① 可见性）：挂载技能内联渲染（至多 2 枚 + +n），点击 Popover 列全量
+ * 技能名——取代旧 tooltip-only 形态（模式名 title 挂点已删）。旧 entry 无字段 / 空数组不渲染。
  */
-const skillsTitle = computed(() => {
-  const skills = view.value?.skills
-  return skills && skills.length > 0
-    ? `${t('plan.modeBar.skillsLabel')}: ${skills.join(' · ')}`
-    : undefined
-})
+/** chips 内联上限（D7①：至多 2 枚 + +n 溢出计数，防噪音墙） */
+const SKILL_CHIPS_MAX = 2
+const skills = computed(() => view.value?.skills ?? [])
+const visibleSkills = computed(() => skills.value.slice(0, SKILL_CHIPS_MAX))
+const hiddenSkillCount = computed(() => Math.max(0, skills.value.length - SKILL_CHIPS_MAX))
 
 /** 三步阶段（顺序即推导序号；label 与 tooltip 均响应 i18n） */
 const stageSteps = computed(() => [
@@ -216,9 +251,16 @@ const stageSteps = computed(() => [
   { stage: 'reviewing' as const, label: t('plan.modeBar.stageReviewing'), tip: t('plan.modeBar.stageReviewingTip') },
 ])
 
-/** 步骤视觉态：当前（accent 高亮）/ 已完成（对勾）/ 未到（默认灰点） */
+/**
+ * 步骤视觉态：当前（accent 高亮）/ 已完成（对勾）/ 未到（默认灰点）。
+ * 阶段序号表含已批准档（D5）：approved/dispatching → ③ 落 done（对勾）不倒退（F5）；
+ * revising 归 phase 'planning'（D1：规划中 = planning|revising）→ ② 档。
+ */
+const STAGE_RANK: Record<PlanStage, number> = { exploring: 0, writing: 1, reviewing: 2, approved: 3 }
+
 function stepStage(index: number): 'cur' | 'done' | 'todo' {
-  const current = stageSteps.value.findIndex((s) => s.stage === stage.value)
+  const current = stage.value == null ? -1 : STAGE_RANK[stage.value]
+  if (current < 0) return 'todo'
   if (index === current) return 'cur'
   return index < current ? 'done' : 'todo'
 }
@@ -229,7 +271,11 @@ const exitError = ref<string | null>(null)
 /** 退出确认 Popover 开合（受控） */
 const exitConfirmOpen = ref(false)
 
-const reviewState = computed(() => view.value?.reviewState)
+/**
+ * revising 判定（D2 读方③：reviewState 分支全部迁移——state 兜底映射读（state ?? reviewState
+ * 映射 ?? 按 isActive 推断），不再直读旧字段）。退出确认警示语境（agent 侧修订将中止）。
+ */
+const isRevising = computed(() => resolvePlanLifecycleState(view.value) === 'revising')
 
 /**
  * 确认退出（§3.5）：关确认层 → 发 abortPlan → 命令成功后才清焦点分区评论草稿

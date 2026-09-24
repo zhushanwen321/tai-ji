@@ -1,11 +1,14 @@
 /**
- * useExtensionUI planReview 分流单测 —— plan 模式重设计 u1-banner（设计 D5 marker select 通道）。
+ * useExtensionUI planReview 分流单测 —— plan 模式状态机显式化（D5 marker select 通道）。
  *
- * 覆盖（plan-mode-redesign impl-plan u1-banner（历史项目，未入库）验收条款 C4 过滤器面）：
+ * 覆盖（impl-plan U4b 验收条款⑥ + 既有 C4 过滤器面）：
  * - planReview 标记请求入 store（C4 放行），挂起状态按 requestId 可枚举（currentPlanReviewRequests）
  * - 非 form 非 planReview 的 dialog 原语仍不入 store（C4 负向不回归）
  * - planReviewFilter 实例与 formFilter 实例互斥（一请求只归一面；表单类行为无回归）
  * - respond 按 requestId 精确回传 + 出队（planReview 请求面）
+ * - pickPlanFields 白名单 selfReview 双入店路径契约（D9③）：热帧（bus→toExtensionUIRequest
+ *   白名单搬运）与冷补（getPendingRequests 快照全量解包）两路都携带 selfReview——防
+ *   「切回 session 有自审行、实时挂起无」半残形态；respond 后置已应答标记（D4 抑制窗①）
  *
  * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus + extension domain mock），
  * 本文件只覆盖 planReview 新增面，T1-T10 既有断言不在此重复。
@@ -19,6 +22,7 @@ import { InternalEventBus } from '@taiji/core'
 
 // ── mock extension api domain（照 useExtensionUI.test.ts）──
 const uiTimeoutHandlers = new Map<string, Array<(requestId: string) => void>>()
+const getPendingRequestsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
   onUITimeout: (sid: string, handler: (requestId: string) => void) => {
@@ -37,7 +41,7 @@ vi.mock('@taiji/core/transport/api/domains/extension', () => ({
   sendExtensionUIResponse: vi.fn((): boolean => true),
   onNotify: () => () => {},
   onExtensions: vi.fn(),
-  getPendingRequests: vi.fn().mockResolvedValue([]),
+  getPendingRequests: getPendingRequestsMock,
 }))
 
 // ── mock getExtensionBus：真实 InternalEventBus 实例 ──
@@ -60,6 +64,7 @@ import {
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { usePlanStore, __resetPlanReviewColdSinkForTesting } from '@/stores/plan-store'
 
 /** 在独立 effectScope 内运行，模拟组件实例生命周期 */
 function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
@@ -71,16 +76,18 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
   return { result, dispose: () => scope.stop() }
 }
 
-/** planReview 标记请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后的广播形状，D5） */
-function mkPlanReviewReq(requestId: string): Record<string, unknown> {
+/** planReview 标记请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后的广播形状，D5）；
+ *  可带 selfReview（D9③，帧字段与 PlanReviewRequest.selfReview 同名同义） */
+function mkPlanReviewReq(requestId: string, selfReview?: string): Record<string, unknown> {
   return {
     requestId,
     pluginId: '',
     kind: 'select',
     method: 'select',
     title: '\x00TAIJI_PLAN_REVIEW:',
-    options: [JSON.stringify({ docs: [] })],
+    options: [JSON.stringify({ docs: [], ...(selfReview !== undefined ? { selfReview } : {}) })],
     planReview: true,
+    ...(selfReview !== undefined ? { selfReview } : {}),
   }
 }
 
@@ -104,9 +111,11 @@ function emitBusUIRequest(sid: string, request: unknown): void {
 
 beforeEach(() => {
   __resetExtensionBusSubscriptionForTesting()
+  __resetPlanReviewColdSinkForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
   uiTimeoutHandlers.clear()
+  getPendingRequestsMock.mockReset().mockResolvedValue([])
   vi.mocked(sendExtensionUIResponse).mockClear()
 })
 
@@ -204,5 +213,84 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
     sid.value = 'sess-A'
     expect(result.currentPlanReviewRequests.value.map((r) => r.requestId)).toEqual(['pr-a'])
     dispose()
+  })
+})
+
+describe('pickPlanFields 白名单 selfReview 双入店路径契约（D9③）', () => {
+  it('热帧路径：bus → toExtensionUIRequest 白名单搬运携带 selfReview', () => {
+    const { result, dispose } = runWithScope(() =>
+      useExtensionUI(ref('sess-A'), planReviewFilter),
+    )
+
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1', '已核对 3 条需求全覆盖'))
+
+    const req = result.currentPlanReviewRequests.value[0]
+    expect(req?.selfReview).toBe('已核对 3 条需求全覆盖')
+    expect(useExtensionUIStore().getRequestsBySession('sess-A')[0]).toMatchObject({
+      requestId: 'pr-1',
+      selfReview: '已核对 3 条需求全覆盖',
+    })
+    dispose()
+  })
+
+  it('热帧路径负向：非 string selfReview 不入店（守卫即透传闸）', () => {
+    const { result, dispose } = runWithScope(() =>
+      useExtensionUI(ref('sess-A'), planReviewFilter),
+    )
+
+    emitBusUIRequest('sess-A', { ...mkPlanReviewReq('pr-1'), selfReview: 42 })
+
+    const req = result.currentPlanReviewRequests.value[0] as { selfReview?: unknown } | undefined
+    expect(req?.selfReview).toBeUndefined()
+    dispose()
+  })
+
+  it('冷补路径：getPendingRequests 快照全量解包携带 selfReview（切回 session 不丢自审行）', async () => {
+    getPendingRequestsMock.mockResolvedValue([
+      { ...mkPlanReviewReq('pr-cold', '冷补自审结论'), receivedAt: Date.now() },
+    ])
+    const { result, dispose } = runWithScope(() =>
+      useExtensionUI(ref('sess-A'), planReviewFilter),
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    await nextTick()
+
+    const req = result.currentPlanReviewRequests.value[0]
+    expect(req?.requestId).toBe('pr-cold')
+    expect(req?.selfReview).toBe('冷补自审结论')
+    dispose()
+  })
+})
+
+describe('D4 审批窗口漏斗接线（respond/失效置已应答标记；pending 到达解除）', () => {
+  it('respond（planReview）→ markPlanReviewAnswered 置已应答标记；非 planReview respond 不置', () => {
+    const plan = usePlanStore()
+    plan.syncFocus('sess-A') // 窗口位断言读焦点分区（usePlanState 的 syncFocus 义务，本文件直驱）
+    const { result, dispose } = runWithScope(() =>
+      useExtensionUI(ref('sess-A'), planReviewFilter),
+    )
+
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1'))
+    expect(plan.planReviewAckMarked).toBe(false)
+
+    result.respond('pr-1', JSON.stringify({ decision: 'dismiss' }))
+    expect(plan.planReviewAckMarked).toBe(true)
+
+    // 新 planReview pending 到达 → 解除（ready 优先于抑制）
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-2'))
+    expect(plan.planReviewAckMarked).toBe(false)
+    dispose()
+  })
+
+  it('requestsInvalidated 摘除 planReview → 同置已应答标记（turn abort / /plan abort 解散源）', () => {
+    const plan = usePlanStore()
+    plan.syncFocus('sess-A')
+    runWithScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
+
+    emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1'))
+    mockBus.emit({ kind: 'requests-invalidated', sessionId: 'sess-A', requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
+
+    expect(plan.planReviewAckMarked).toBe(true)
   })
 })

@@ -208,7 +208,7 @@ describe('首拉：watch immediate', () => {
 // ── WS 帧驱动状态流转（updateFor 分区写）─────────────────────
 
 describe('WS 帧：状态流转与分区隔离', () => {
-  it('帧驱动 reviewState 流转：awaiting → revising → 无值（reviewing → reviewing → writing）', async () => {
+  it('帧驱动状态流转：awaiting → ③；revising → ②（D1 phase：规划中 = planning|revising）；无值 → ②', async () => {
     const host = mountHost('A')
     await settle()
 
@@ -217,9 +217,10 @@ describe('WS 帧：状态流转与分区隔离', () => {
     expect(host.plan.stage.value).toBe('reviewing')
     expect(host.plan.view.value?.reviewState).toBe('awaiting')
 
+    // revising 归 phase 'planning'（derivePhase 单点接线）→ 文档撰写档（②）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'revising' }))
     await settle()
-    expect(host.plan.stage.value).toBe('reviewing')
+    expect(host.plan.stage.value).toBe('writing')
     expect(host.plan.view.value?.reviewState).toBe('revising')
 
     // 修订完成重新提交前的过渡帧（reviewState 无值）——D1 三步推导落回 ②

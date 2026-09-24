@@ -224,14 +224,18 @@
         {
           "kind": "spec",
           "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/__tests__/stores/extension-ui.test.ts"
         }
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+      "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts src/__tests__/stores/extension-ui.test.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"
+      "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）。[2026-09-24 plan-mode-state-machine U4b] assets 扩 stores/extension-ui.test.ts（D12 waiting 谓词族，U4a 新增资产）+ run 命令同步；本条既有 assets 各自承接 U4b 重设计断言族（plan-review-bar.test.ts = D4 分支公式单源 + 已应答抑制窗/degraded 稳定窗 fake-timers 五断言（S15）+ 10s 兑底冷拉对账 + D3 搁置 respond 通道 + D8 重新提交审批按钮 + D9③ 自审行；plan-mode-bar.test.ts = D7① 技能 chips + derivePhase 阶段映射含 approved 档；plan-store.test.ts = derivePlanStage 重写 + D2③ 兑底映射 + 公式单测 + 冷拉失败标记悬挂 + loadError（R7）；use-plan-sync.test.ts = 帧驱动 state 流转；use-extension-ui-plan-review.test.ts = pickPlanFields selfReview 双入店路径契约 + D4 漏斗接线）。真实 LLM 场景 S1-S16（S15 单测锚定行除外）属新能力无 e2e 资产，执行归阶段 5 U6 真机窗口空载串行，不进 PR/CI 门禁（AGENTS.md e2e 执行准则）；U4b 后实施落地复对账基准 = 595b9cbaa2d2553191bc629335ec85af277d1da4"
     },
     {
       "id": "E2E-REAL-01",

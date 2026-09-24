@@ -7,18 +7,22 @@ export default {
     commentsCount: '{count} comments',
     submitRevise: 'Submit comments for revision',
     confirmExecute: 'Approve and execute',
-    // 2026-09-21 two-button + dismiss adjudication: explain removed; dismiss stops the turn
-    // and closes the prompt while keeping the plan intact
-    ignore: 'Dismiss',
-    ignoreTip: 'Stop the agent and close this prompt; the plan is kept unchanged',
-    // D13⑧ copy without layout jargon ("left-zone") + D13⑨ em dash rewritten
-    ignoreError: 'Dismiss failed: {message}. The agent may be unresponsive. Retry, or exit plan mode via the "Exit" button on the left',
+    // D3 set aside (protocol-level dismiss decision, replacing "dismiss = kill turn"): non-destructive
+    // (no turn kill, no state loss); copy carries the "keep for later" hint (plan progress and drafts kept)
+    dismiss: 'Set aside',
+    dismissTip: 'Keep for later: skip this review for now; plan progress and comment drafts are kept',
     revising: 'The agent is revising docs based on your comments; versions update here when done',
-    waitingResubmit: 'Waiting for the agent to resubmit for review',
-    // §3.4 degraded state (single source + legacy-entry generic): shared recovery hint;
-    // exit entry collapsed into the left-zone exit button
-    degradedResubmit: 'The agent session restarted and has not resubmitted yet',
-    degradedRecoverHint: 'Send any message in the composer to remind the agent to resubmit',
+    // D8 actionable degraded state (reason-by-source copy): resubmit = after an E3 session restart
+    // the agent has not resubmitted yet; otherwise the source stays unknown (never guessed)
+    degradedResubmit: 'The review prompt was invalidated by a session restart',
+    degradedMissing: 'No review prompt is pending',
+    // D8 recovery button (reuses the message-send channel to inject a fixed user message;
+    // the agent calls submit-review again per prompt discipline)
+    resubmit: 'Resubmit for review',
+    resubmitNudge: 'Please resubmit the plan for review',
+    resubmitError: 'Resubmit failed: {message}. Retry, or exit plan mode via the "Exit" button on the left',
+    // D9 agent self-review line (truncated in the ready branch + full text in a popover)
+    selfReviewLabel: 'Agent self-review',
     // §3.5 guard & review: tooltip while "Submit comments for revision" is disabled at 0 drafts;
     // comment count is clickable (review drafts)
     reviseEmptyDisabled: 'Select text in the doc to add comments first, then submit for revision',

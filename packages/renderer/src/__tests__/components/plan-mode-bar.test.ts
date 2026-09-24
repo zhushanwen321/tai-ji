@@ -9,13 +9,14 @@
  *   ready 分支可达（先有 isActive 帧后有消费者的鸡蛋困境由常驻订阅消除）
  * - 承接清单② focusedSid 注入：mount 后 planStore.focusedSid 非空（syncFocus 义务随
  *   组件自 PanelContainer 横幅/审批条迁移到 PlanModeBar）
- * - 左区渲染：模式名 + 三阶段点（tooltip 含义文案）+ 退出；skills 默认不渲染（有技能
- *   收进模式名 title）；hint 长句不再存在（组件无该文案挂点）
+ * - 左区渲染：模式名 + 技能 chips（D7①：至多 2 枚 + +n，点击 Popover 列全量；取代
+ *   tooltip-only）+ 三阶段点（tooltip 含义文案，含已批准档 ③✓ 不倒退）+ 退出；hint 长句
+ *   不再存在（组件无该文案挂点）
  * - §3.5 退出确认 Popover：点退出只开确认层（不发 abortPlan）；分情境警示（revising =
  *   「退出将中止修订」优先 / 有评论草稿 =「N 条评论草稿将丢弃」）；确认后才发 abortPlan
  *   且草稿清空；取消不发；退出唯一入口 = 左区退出按钮（degraded 右区退出已删，问题 5）
  * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
- * - 右区四分支：ready 三键 / revising / degraded / 隐藏（仅左区）
+ * - 右区三分支：ready 三键（修订/执行/搁置）/ revising / degraded（稳定窗放行后）/ 隐藏（仅左区）
  * - 窄窗换行策略（F-R2-2）：右区 grow+flex-wrap 反重叠契约 + 左区退出 shrink-0
  *   （jsdom 无布局，class 断言守卫策略不被改回 flex-1 收缩形态）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
@@ -172,6 +173,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   while (mountedWrappers.length > 0) {
     const w = mountedWrappers.pop()
     w?.unmount()
@@ -270,13 +272,30 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
     expect(firstAfter.find('svg').exists()).toBe(true) // done = 对勾（同色系，去绿点）
   })
 
-  it('skills 默认不渲染；有技能时收进模式名 title（hover tooltip）', async () => {
+  it('技能 chips（D7①）：无技能不渲染；有技能内联 chips（至多 2 枚 + +n），点击 Popover 列全量', async () => {
     const wrapper = await mountBar(viewOf())
+    expect(wrapper.find('[data-testid="plan-mode-bar-skills"]').exists()).toBe(false)
+
+    usePlanStore().applyFrame(SID, viewOf({ skills: ['tech-design', 'dev-flow', 'test-quality'] }))
+    await nextTick()
+    const chips = wrapper.find('[data-testid="plan-mode-bar-skills"]')
+    expect(chips.exists()).toBe(true)
+    // 至多 2 枚 + +n（D7①：不扩噪音墙）
+    expect(chips.text()).toContain('tech-design')
+    expect(chips.text()).toContain('dev-flow')
+    expect(chips.text()).not.toContain('test-quality')
+    expect(chips.text()).toContain('+1')
+    // 技能名不藏 tooltip（取代 tooltip-only）
     expect(wrapper.find('[data-testid="plan-mode-bar-title"]').attributes('title')).toBeUndefined()
 
-    usePlanStore().applyFrame(SID, viewOf({ skills: ['tech-design', 'dev-flow'] }))
-    await nextTick()
-    expect(wrapper.find('[data-testid="plan-mode-bar-title"]').attributes('title')).toContain('tech-design · dev-flow')
+    // 点击 Popover 列全量技能名（Portal 在 document.body；reka jsdom 形态 = 即点即查，
+    // 退出确认同款窗口断言形态）
+    await chips.trigger('click')
+    const list = document.body.querySelector('[data-testid="plan-mode-bar-skills-list"]')
+    expect(list).not.toBeNull()
+    expect(list!.textContent).toContain('tech-design')
+    expect(list!.textContent).toContain('dev-flow')
+    expect(list!.textContent).toContain('test-quality')
   })
 
   it('退出按钮 click 只开确认层（§3.5 确认前置）：abortPlan 未发、确认层含标题与两键', async () => {
@@ -359,7 +378,9 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('degraded 态右区无退出按钮（问题 5 去重：退出唯一入口 = 左区常驻退出按钮）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000) // degraded 稳定窗放行（D4）
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
@@ -397,30 +418,32 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 })
 
-describe('右区四分支（PlanReviewBar 情境渲染，宿主行内）', () => {
-  it('ready：awaiting + 挂起请求 → 两键 + 忽略渲染在状态带行内', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () => {
+  it('ready：state=reviewing + 挂起请求 → 修订/执行/搁置三键渲染在状态带行内', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-dismiss"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(false)
   })
 
-  it('revising → 修订中状态行，三键不渲染', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'revising' }))
-    emitPlanReviewRequest('pr-1')
+  it('revising（无挂起）→ 修订中状态行，三键不渲染', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'revising' }))
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-revising"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
   })
 
-  it('degraded：awaiting 无挂起 → 降级态行', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+  it('degraded：state=reviewing 无挂起 → 稳定窗放行后降级态行', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000)
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
@@ -582,12 +605,15 @@ describe('D13 视觉/文案合规断言（S13 降级兑现：状态带/审批条
     expect(badge.classes()).toContain('text-neutral-mid')
   })
 
-  it('D13⑤ 降级提示小字无 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.7）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+  it('D13⑤ 降级文案区无 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.7）', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000)
     await flushAsync()
-    const hint = wrapper.find('[data-testid="plan-review-degraded-hint"]')
-    expect(hint.exists()).toBe(true)
-    expect(hint.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-degraded"]').classes().some((c) => c.startsWith('opacity-'))).toBe(false)
   })
 
   it('D13⑧⑨ 文案合规（静态）：无布局黑话「左区」/left-zone；plan 域文案无 em dash；zh 无键盘标点', () => {
