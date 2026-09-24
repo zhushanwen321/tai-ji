@@ -31,7 +31,7 @@
  * 产出一组中间事件），可变态由 EventInterpreter 持有。
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
-import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
+import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
 import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
@@ -1488,23 +1488,11 @@ function handleCompactionEnd(event: PiCompactionEndEvent, _sid: string): PiTrans
  * 事件 payload（entry 对象）不进任何数据缓存：失效信号只携带 customType，数据本体由
  * get_entries 权威拉取获得（ReplicatedState「事件只做失效」核心不变量）。
  */
-/** entry_appended 产出失效信号的 customType 全集（与 record-entry-appended 事件的字面量联合同源）。 */
-const RECORD_ENTRY_CUSTOM_TYPES = [
-  SUBAGENT_RECORD_CUSTOM_TYPE,
-  WORKFLOW_RECORD_CUSTOM_TYPE,
-  PLAN_STATE_CUSTOM_TYPE,
-] as const
-type RecordEntryCustomType = (typeof RECORD_ENTRY_CUSTOM_TYPES)[number]
-
 function handleEntryAppended(event: PiEntryAppendedEvent, _sid: string): PiTranslatedEvent[] {
   const entry = event.entry as { type?: unknown; customType?: unknown } | null
-  if (!entry || entry.type !== 'custom') return [{ kind: 'noop' }]
-  // 集合守卫（includes）先行收窄，返回处的断言由该守卫背书（wire 字面量 → 事件联合）
-  if (typeof entry.customType === 'string' && (RECORD_ENTRY_CUSTOM_TYPES as readonly string[]).includes(entry.customType)) {
-    return [{ kind: 'record-entry-appended', customType: entry.customType as RecordEntryCustomType }]
-  }
-  return [{ kind: 'noop' }]
-
+  // customType typeof 收窄：来源是 extension 第三方代码（对齐 handleMessageStart 先例）
+  if (!entry || entry.type !== 'custom' || typeof entry.customType !== 'string') return [{ kind: 'noop' }]
+  return [{ kind: 'record-entry-appended', customType: entry.customType }]
 }
 
 /**

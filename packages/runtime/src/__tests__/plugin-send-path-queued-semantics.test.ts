@@ -121,8 +121,8 @@ describe('检查点 3：plugin-service 经 dispatcher 的 {queued} 语义透明�
     const send = h.handlers.get('plugin.sessions.sendMessage')!
     expect(send, '插件 RPC 表已注册 sendMessage').toBeTruthy()
 
-    // ① 不拒绝：RPC resolve（旧语义 = send.rejected 拒绝面，插件不可见地失败）
-    await expect(send({ sessionId: 's1', role: 'user', content: '插件消息' })).resolves.toBeUndefined()
+    // ① 不拒绝：RPC resolve，回执契约形态 {accepted:true}（旧语义 = send.rejected 拒绝面，插件不可见地失败）
+    await expect(send({ sessionId: 's1', role: 'user', content: '插件消息' })).resolves.toEqual({ accepted: true })
     await h.flush()
     expect(h.promptCalls).toHaveLength(0) // 持有：pi 暂不可收
     expect(h.published.some((m) => m.type === 'send.rejected')).toBe(false) // ③ 零 send.rejected 帧
