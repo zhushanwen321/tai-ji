@@ -603,6 +603,7 @@ function findLastEntryField<R>(
  */
 export function trimFileEntriesToActivePath(entries: unknown[]): unknown[] {
   const scoped = entries.filter((e) => typeof e === 'object' && e !== null && (e as Record<string, unknown>).type !== 'session')
+  if (scoped.length === 0) return scoped // 空文件/纯 header 文件（pi 延迟写入合法形态）——无可裁物非降级，不发 warn
   const last = scoped.at(-1) as { id?: unknown } | undefined
   const leafId = typeof last?.id === 'string' ? last.id : undefined
   if (leafId === undefined) {
