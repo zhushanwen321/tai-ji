@@ -123,7 +123,7 @@ OUTPOST_CALLSITES = [
         "exempt",
         "[message-revoke U4] sendSystemCommand 系统信令旁路：commandLine = 内部命令名"
         "（__taiji_nav__）+ runtime 域 entryId，无用户内容（与 __taiji_reload__ 豁免同族）；"
-        "不经 hook/不经内核（设计 D4 语义）",
+        "不经 hook/不经内核（设计 D1 信令通道决策）",
     ),
     (
         "services/handoff-service.ts",
