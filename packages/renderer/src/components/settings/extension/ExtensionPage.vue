@@ -32,8 +32,8 @@
       kind="extension"
       :forced-dirs="forcedExtDirs"
       :dirs="extensionDirs"
-      :save-error="dirsSaveError"
-      @update-dirs="onUpdateExtensionDirs"
+      :save-error="saveExtensionDirs.saveError.value"
+      @update-dirs="saveExtensionDirs.run"
     />
 
     <!-- RD-4#11：数据目录读取失败时的显式标注（user 级强制目录不展示，不伪装真实路径） -->
@@ -64,7 +64,7 @@ provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => getSettingsTransport().d
 provide(SETTINGS_CHOOSE_DIRECTORY_KEY, chooseDirectory)
 import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
-import { useToast } from '@/composables/useToast'
+import { createMirrorSave } from '@/composables/features/settings/setting-field'
 import ExtensionInstallFlow from './ExtensionInstallFlow.vue'
 import ExtensionList from './ExtensionList.vue'
 
@@ -72,7 +72,6 @@ defineProps<{ extensions: ExtensionItem[] }>()
 const emit = defineEmits<{ 'open-contributions': [] }>()
 const settingsStore = getSettingsStore()
 const { extensionDirs } = settingsStore
-const { error: toastError } = useToast()
 const { t } = useI18n()
 
 // ── 加载路径配置（Phase 4，接 store.extensionDirs，回写 store.setExtensionDirs）──
@@ -102,16 +101,8 @@ const forcedExtDirs = computed(() =>
   dataDirDisplay.value ? [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'] : ['.taiji/extensions'],
 )
 
-/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。
- *  失败常驻态（RD-4#1）：置位 dirsSaveError → LoadPaths 回弹至最近落盘值 + 常驻红字；每次尝试起点复位。 */
-const dirsSaveError = ref(false)
-async function onUpdateExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {
-  dirsSaveError.value = false
-  try {
-    await settingsStore.setExtensionDirs(dirs)
-  } catch (e) {
-    dirsSaveError.value = true
-    toastError(e instanceof Error ? e.message : String(e))
-  }
-}
+/** 加载路径变更 → store 持久化（setting-field module · createMirrorSave，整体透传 SkillDirConfig[]，
+ *  含 scope）。拖拽即时性由 LoadPaths 本地状态保证；失败常驻态（RD-4#1：失败置 saveError →
+ *  LoadPaths 回弹至最近落盘值 + 常驻红字，每次尝试起点复位）由 module 内化。 */
+const saveExtensionDirs = createMirrorSave((dirs: SkillDirConfig[]) => settingsStore.setExtensionDirs(dirs))
 </script>

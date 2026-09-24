@@ -21,14 +21,14 @@
         <Switch
           data-testid="setting-auto-rename-session"
           :model-value="autoRenameEnabled"
-          :disabled="togglingAutoRename || loadError"
-          @update:model-value="onSaveAutoRename"
+          :disabled="autoRenameBusy || loadError"
+          @update:model-value="autoRenameEnabledField.persist"
         />
       </SettingRow>
       <SettingRow :label="t('settings.system.renameMode')" :desc="t('settings.system.renameModeHint')">
         <Select
           :model-value="renameMode"
-          :disabled="savingRenameMode || loadError"
+          :disabled="renameModeBusy || loadError"
           @update:model-value="onRenameModeChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-mode">
@@ -44,7 +44,7 @@
       <SettingRow :label="t('settings.system.renameModel')" :desc="t('settings.system.renameModelHint')">
         <Select
           :model-value="selectedValue"
-          :disabled="!autoRenameEnabled || savingRenameModel || loadError"
+          :disabled="!autoRenameEnabled || renameModelBusy || loadError"
           @update:model-value="onRenameModelChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-model">
@@ -70,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
@@ -78,9 +78,9 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { getSettingsTransport, type SystemSettings } from '@taiji/core'
+import { getSettingsTransport } from '@taiji/core'
 import type { RenameMode } from '@taiji/shared'
-import { useToast } from '@/composables/useToast'
+import { createSettingFieldGroup, type SettingField } from '@/composables/features/settings/setting-field'
 import {
   MODEL_UNSET_SENTINEL,
   fromSelectValue,
@@ -89,24 +89,23 @@ import {
   useAuthedModelGroups,
 } from '@/composables/features/settings/useAuthedModelGroups'
 
-// 统一 Section 契约（未使用 system：autoRename 走独立 API；不 emit：变更经各自 API 持久化）
-defineProps<{
-  system: SystemSettings
-}>()
-
-defineEmits<{
-  update: [patch: Partial<SystemSettings>]
-}>()
-
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
 const transport = getSettingsTransport()
 
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
+
+// ── 字段编排组（setting-field module）：加载归并（RD-4#8 loadError）+ 乐观更新/回滚/toast/回填 ──
+const group = createSettingFieldGroup()
+const loadError = group.loadError
 
 // ── 会话自动重命名开关（独立 flag file，不走 SystemSettings 体系）──
-const autoRenameEnabled = ref(true)
-const togglingAutoRename = ref(false)
+const autoRenameEnabledField = group.field<boolean>(true, {
+  load: () => transport.getAutoRenameEnabled().then((res) => res.enabled),
+  // resolve void = 开关无权威回填语义（API 无归一），乐观值即生效值
+  save: (next) => transport.setAutoRenameEnabled(next).then(() => undefined),
+})
+const autoRenameEnabled = autoRenameEnabledField.value
+const autoRenameBusy = autoRenameEnabledField.busy
 
 /** 触发模式选项（值域 = shared protocol RenameMode；排列 = 触发时点从早到晚，agent 模式殿后）。 */
 const RENAME_MODE_OPTIONS: ReadonlyArray<{ value: RenameMode; labelKey: string }> = [
@@ -115,19 +114,37 @@ const RENAME_MODE_OPTIONS: ReadonlyArray<{ value: RenameMode; labelKey: string }
   { value: 'agent-tool', labelKey: 'settings.system.renameModeAgentTool' },
 ]
 
-// ── 触发模式（三选一，默认 first-stop；与开关独立——agent-tool 的 rename_session 工具注册
-//    不受开关 flag 门控，extension 侧 load 时只看 mode，故本行不随开关 disabled）──
-const renameMode = ref<RenameMode>('first-stop')
-const savingRenameMode = ref(false)
-
 /** Select 载荷收窄 guard（禁 any：运行时校验后才交给 setRenameMode）。 */
 function isRenameModeValue(value: unknown): value is RenameMode {
   return typeof value === 'string' && RENAME_MODE_OPTIONS.some((o) => o.value === value)
 }
 
+// ── 触发模式（三选一，默认 first-stop；与开关独立——agent-tool 的 rename_session 工具注册
+//    不受开关 flag 门控，extension 侧 load 时只看 mode，故本行不随开关 disabled）──
+// 显式类型标注：savedToastKey 闭包引用本字段自身，不标注会构成自引用初始化环（TS7022）
+const renameModeField: SettingField<RenameMode> = group.field<RenameMode>('first-stop', {
+  load: () => transport.getRenameMode().then((res) => res.mode),
+  // 成功后回填 runtime 归一后的生效值（reply.mode，非法值由 runtime 归一为默认 first-stop），
+  // 避免本地乐观值与实际生效值漂移
+  save: (next) => transport.setRenameMode(next).then((reply) => reply.mode),
+  // 设计 D1 求值时点边界：事件面 live 生效、工具面（rename_session 注册）只对新会话生效——
+  // 开关关 + 自动模式组合下自动路径被 enabled flag 拦截（D1 正交契约：flag 只门控自动路径），
+  // 换提示指明恢复动作，不承诺不会发生的「已生效」。开关值在保存完成时求值。
+  savedToastKey: () =>
+    !autoRenameEnabled.value && renameModeField.value.value !== 'agent-tool'
+      ? 'settings.system.renameModeSwitchedAutoDisabled'
+      : 'settings.system.renameModeSwitched',
+})
+const renameMode = renameModeField.value
+const renameModeBusy = renameModeField.busy
+
 // ── 重命名模型（extension 配置文件，"provider/modelId" 复合串，空串 = 未设置）──
-const renameModel = ref('')
-const savingRenameModel = ref(false)
+const renameModelField = group.field<string>('', {
+  load: () => transport.getRenameModel().then((res) => res.model),
+  save: (next) => transport.setRenameModel(next).then((reply) => reply.model),
+})
+const renameModel = renameModelField.value
+const renameModelBusy = renameModelField.busy
 
 // 可选模型分组 / sentinel / stale 判定共享实现（与 SystemSmartContextSection 同源）
 const { modelGroups, availableValues } = useAuthedModelGroups()
@@ -138,102 +155,23 @@ const selectedValue = computed(() => toSelectValue(renameModel.value))
 /** 当前 ref 不在可选列表时返回该 ref（渲染 disabled 兜底项），否则 null。 */
 const staleRef = computed(() => staleModelRef(renameModel.value, availableValues.value))
 
-/** RD-4#8：读配置失败标志——置位时控件禁用 + 顶部常驻提示，禁止把默认值当已存值渲染。 */
-const loadError = ref(false)
-
 async function loadConfig(): Promise<void> {
-  // 三个字段独立加载（任一失败不阻塞其余），但任一失败即置 loadError——默认值明确标注为
-  // 默认而非已存（此前每段 console.warn 后按默认值渲染，开关显「开」冒充已存值，误显的
-  // 默认值会随用户操作直接落盘）。
-  let failed = false
-  try {
-    const res = await transport.getAutoRenameEnabled()
-    autoRenameEnabled.value = res.enabled
-  } catch (e) {
-    console.warn('[SystemAutoRenameSection] failed to load auto-rename state:', e)
-    failed = true
-  }
-  try {
-    const res = await transport.getRenameModel()
-    renameModel.value = res.model
-  } catch (e) {
-    console.warn('[SystemAutoRenameSection] failed to load rename model:', e)
-    failed = true
-  }
-  try {
-    const res = await transport.getRenameMode()
-    renameMode.value = res.mode
-  } catch (e) {
-    console.warn('[SystemAutoRenameSection] failed to load rename mode:', e)
-    failed = true
-  }
-  loadError.value = failed
+  // 三个字段独立加载（便捷 load 已注册进 group），任一失败即置 loadError（loadAll 归并）
+  await group.loadAll()
 }
 
 onMounted(() => {
   void loadConfig()
 })
 
-async function onSaveAutoRename(enabled: boolean): Promise<void> {
-  if (togglingAutoRename.value) return
-  togglingAutoRename.value = true
-  const prev = autoRenameEnabled.value
-  autoRenameEnabled.value = enabled
-  try {
-    await transport.setAutoRenameEnabled(enabled)
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    autoRenameEnabled.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    togglingAutoRename.value = false
-  }
-}
-
 /** Select change：sentinel → 空串（跟随会话模型）；乐观更新 + 成功回填生效值 + 失败回滚。 */
-async function onRenameModelChange(value: unknown): Promise<void> {
-  if (savingRenameModel.value) return
-  const next = fromSelectValue(value)
-  savingRenameModel.value = true
-  const prev = renameModel.value
-  renameModel.value = next
-  try {
-    const reply = await transport.setRenameModel(next)
-    renameModel.value = reply.model
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    renameModel.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    savingRenameModel.value = false
-  }
+function onRenameModelChange(value: unknown): void {
+  void renameModelField.persist(fromSelectValue(value))
 }
 
-/** Select change（设计 D1 求值时点边界）：事件面 live 生效、工具面（rename_session 注册）只对新
- *  会话生效——成功提示用该边界文案替代通用 saved，失败回滚 + saveFailed。开关关 + 自动模式组合下
- *  自动路径被 enabled flag 拦截（D1 正交契约：flag 只门控自动路径），换提示指明恢复动作，
- *  不承诺不会发生的「已生效」。 */
-async function onRenameModeChange(value: unknown): Promise<void> {
-  if (savingRenameMode.value) return
+/** Select change：sentinel/guard 后乐观更新；成功提示按开关状态分流（见 savedToastKey）。 */
+function onRenameModeChange(value: unknown): void {
   if (!isRenameModeValue(value) || value === renameMode.value) return
-  savingRenameMode.value = true
-  const prev = renameMode.value
-  renameMode.value = value
-  try {
-    // 成功后回填 runtime 归一后的生效值（reply.mode，非法值由 runtime 归一为默认 first-stop），
-    // 避免本地乐观值与实际生效值漂移
-    const reply = await transport.setRenameMode(value)
-    renameMode.value = reply.mode
-    toastInfo(
-      !autoRenameEnabled.value && value !== 'agent-tool'
-        ? t('settings.system.renameModeSwitchedAutoDisabled')
-        : t('settings.system.renameModeSwitched'),
-    )
-  } catch (e) {
-    renameMode.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    savingRenameMode.value = false
-  }
+  void renameModeField.persist(value)
 }
 </script>

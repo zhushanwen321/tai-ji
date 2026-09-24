@@ -22,13 +22,13 @@
           data-testid="setting-smart-context-switch"
           :model-value="enabled"
           :disabled="toggling || loadError"
-          @update:model-value="onSaveEnabled"
+          @update:model-value="enabledField.persist"
         />
       </SettingRow>
       <SettingRow :label="t('settings.system.smartContextModelLabel')" :desc="t('settings.system.smartContextModelHint')">
         <Select
           :model-value="selectedValue"
-          :disabled="!enabled || savingCompactModel || loadError"
+          :disabled="!enabled || compactModelBusy || loadError"
           @update:model-value="onCompactModelChange"
         >
           <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-smart-context-model">
@@ -60,7 +60,7 @@
             :step="1"
             :aria-label="`${t('settings.system.smartContextThresholdLabel')} ${i + 1}`"
             class="h-8 w-[72px] px-2 text-right font-mono text-xs"
-            :disabled="!enabled || savingThresholds || loadError"
+            :disabled="!enabled || thresholdsBusy || loadError"
             @change="onThresholdsSave"
           />
           <span class="text-neutral-dim font-mono text-xs">K</span>
@@ -85,7 +85,7 @@
           </span>
           <Select
             :model-value="EXCLUDED_ADD_PLACEHOLDER"
-            :disabled="!enabled || savingExcluded || addableGroups.length === 0 || loadError"
+            :disabled="!enabled || excludedBusy || addableGroups.length === 0 || loadError"
             @update:model-value="onExcludedAdd"
           >
             <SelectTrigger class="h-6 gap-1 rounded-sm border border-dashed border-border-strong px-2 text-xs text-neutral-dim">
@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X, Plus, AlertTriangle } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
@@ -120,8 +120,8 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { getSettingsTransport, type SystemSettings } from '@taiji/core'
-import { useToast } from '@/composables/useToast'
+import { getSettingsTransport } from '@taiji/core'
+import { createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 import {
   MODEL_UNSET_SENTINEL,
   fromSelectValue,
@@ -134,17 +134,7 @@ import {
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
 const transport = getSettingsTransport()
 
-// 统一 Section 契约（未使用 system：smart-context 走独立 API；不 emit：变更经各自 API 持久化）
-defineProps<{
-  system: SystemSettings
-}>()
-
-defineEmits<{
-  update: [patch: Partial<SystemSettings>]
-}>()
-
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
 
 const TOKENS_PER_K = 1000
 
@@ -152,13 +142,55 @@ const TOKENS_PER_K = 1000
 // eslint-disable-next-line no-magic-numbers -- 200K/400K/600K 是与 pi-smart-context extension 契约对齐的默认档位
 const DEFAULT_THRESHOLDS_K = [200, 400, 600]
 
-// ── 启用开关（独立字段，乐观更新 + 失败回滚）──
-const enabled = ref(true)
-const toggling = ref(false)
+// ── 字段编排组（setting-field module）：单 loader 拉全量回填 + per-field 乐观更新/回滚/toast/回填 ──
+const group = createSettingFieldGroup()
+const loadError = group.loadError
+
+// ── 启用开关 ──
+const enabledField = group.field<boolean>(true, {
+  // resolve void = 开关无权威回填语义（API 无归一），乐观值即生效值
+  save: (next) => transport.setSmartContextEnabled(next).then(() => undefined),
+})
+const enabled = enabledField.value
+const toggling = enabledField.busy
 
 // ── 压缩模型（"provider/modelId" 复合串，空串 = 跟随当前会话模型）──
-const compactModel = ref('')
-const savingCompactModel = ref(false)
+const compactModelField = group.field<string>('', {
+  save: (next) => transport.setSmartContextCompactModel(next).then(() => undefined),
+})
+const compactModel = compactModelField.value
+const compactModelBusy = compactModelField.busy
+
+// ── 3 档提醒阈值（GUI 显示 K，保存 ×1000 转绝对数）──
+const thresholdsField = group.field<number[]>([...DEFAULT_THRESHOLDS_K], {
+  // 非法正数校验拒绝：不调 RPC，回弹已保存基准 + 专属 toast（saveFailed 专属文案不弹）
+  validate: (next) =>
+    next.some((tk) => !Number.isFinite(tk) || tk <= 0) ? 'settings.system.smartContextThresholdInvalid' : null,
+  // ×1000 落盘；成功回填 runtime clamp（升序 3 档）后的实际生效值
+  save: (next) =>
+    transport.setSmartContextThresholds(next.map((tk) => Math.round(tk * TOKENS_PER_K))).then((res) =>
+      res.thresholds.map((tk) => tk / TOKENS_PER_K),
+    ),
+})
+const thresholdsK = thresholdsField.value
+const thresholdsBusy = thresholdsField.busy
+
+// ── 排除模型（tag 列表 + Select 添加）──
+const excludedField = group.field<string[]>([], {
+  // 成功回填 runtime 过滤去重结果
+  save: (next) => transport.setSmartContextExcludedModels(next).then((res) => res.models),
+})
+const excludedModels = excludedField.value
+const excludedBusy = excludedField.busy
+
+// 共享 loader：getSmartContextConfig 一次拉全量，4 个 field.reset 回填（基准由 reset 内化）
+group.registerLoader(async () => {
+  const cfg = await transport.getSmartContextConfig()
+  enabledField.reset(cfg.enabled)
+  compactModelField.reset(cfg.compactModel)
+  thresholdsField.reset(cfg.reminderThresholds.map((tk) => tk / TOKENS_PER_K))
+  excludedField.reset(cfg.excludedModels)
+})
 
 // 可选模型分组 / sentinel / stale 判定共享实现（与 SystemAutoRenameSection 同源）
 const { modelGroups, availableValues } = useAuthedModelGroups()
@@ -167,16 +199,6 @@ const selectedValue = computed(() => toSelectValue(compactModel.value))
 
 /** 当前 ref 不在可选列表时返回该 ref（渲染 disabled 兜底项），否则 null。 */
 const staleRef = computed(() => staleModelRef(compactModel.value, availableValues.value))
-
-// ── 3 档提醒阈值（GUI 显示 K，保存 ×1000 转绝对数）──
-const thresholdsK = ref<number[]>([...DEFAULT_THRESHOLDS_K])
-/** 已加载/已保存的回滚基准（K）。 */
-const loadedThresholdsK = ref<number[]>([...DEFAULT_THRESHOLDS_K])
-const savingThresholds = ref(false)
-
-// ── 排除模型（tag 列表 + Select 添加）──
-const excludedModels = ref<string[]>([])
-const savingExcluded = ref(false)
 
 /** 添加 Select 的占位项 value（受控值恒定 = 选择后回到占位，形成可反复添加的「菜单按钮」）。 */
 const EXCLUDED_ADD_PLACEHOLDER = '__add__'
@@ -189,114 +211,31 @@ const addableGroups = computed<AuthedModelGroup[]>(() => {
     .filter((g) => g.models.length > 0)
 })
 
-/** RD-4#8：读配置失败标志——置位时控件禁用 + 顶部常驻提示，禁止把默认值当已存值渲染。 */
-const loadError = ref(false)
-
 async function loadConfig(): Promise<void> {
-  try {
-    const cfg = await transport.getSmartContextConfig()
-    enabled.value = cfg.enabled
-    compactModel.value = cfg.compactModel
-    thresholdsK.value = cfg.reminderThresholds.map((tk) => tk / TOKENS_PER_K)
-    loadedThresholdsK.value = [...thresholdsK.value]
-    excludedModels.value = cfg.excludedModels
-    loadError.value = false
-  } catch (e) {
-    // RD-4#8：读失败不再 best-effort 冒充已存值。此前 console.warn 后按默认值渲染（开关显
-    // 「开」冒充已存值），误显的默认值会随用户操作直接落盘。现置 loadError → 控件禁用 +
-    // 常驻提示 + 可重试，默认值明确标注为默认而非已存。
-    console.warn('[SystemSmartContextSection] failed to load smart-context config:', e)
-    loadError.value = true
-  }
+  await group.loadAll()
 }
 
 onMounted(() => {
   void loadConfig()
 })
 
-async function onSaveEnabled(next: boolean): Promise<void> {
-  if (toggling.value) return
-  toggling.value = true
-  const prev = enabled.value
-  enabled.value = next
-  try {
-    await transport.setSmartContextEnabled(next)
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    enabled.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    toggling.value = false
-  }
-}
-
 /** Select change：sentinel → 空串（跟随当前会话模型）；乐观更新 + 失败回滚。 */
-async function onCompactModelChange(value: unknown): Promise<void> {
-  if (savingCompactModel.value) return
-  const next = fromSelectValue(value)
-  savingCompactModel.value = true
-  const prev = compactModel.value
-  compactModel.value = next
-  try {
-    await transport.setSmartContextCompactModel(next)
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    compactModel.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    savingCompactModel.value = false
-  }
+function onCompactModelChange(value: unknown): void {
+  void compactModelField.persist(fromSelectValue(value))
 }
 
-/** 阈值 change（失焦/回车）：校验正数 → ×1000 保存；成功回填 clamp 后结果，失败/非法回滚。 */
-async function onThresholdsSave(): Promise<void> {
-  if (savingThresholds.value) return
-  const nums = thresholdsK.value
-  if (nums.some((tk) => !Number.isFinite(tk) || tk <= 0)) {
-    toastError(t('settings.system.smartContextThresholdInvalid'))
-    thresholdsK.value = [...loadedThresholdsK.value]
-    return
-  }
-  savingThresholds.value = true
-  try {
-    const res = await transport.setSmartContextThresholds(nums.map((tk) => Math.round(tk * TOKENS_PER_K)))
-    // runtime clamp（升序 3 档）可能与输入不同 → 回填实际生效值
-    thresholdsK.value = res.thresholds.map((tk) => tk / TOKENS_PER_K)
-    loadedThresholdsK.value = [...thresholdsK.value]
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    thresholdsK.value = [...loadedThresholdsK.value]
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    savingThresholds.value = false
-  }
-}
-
-/** 持久化排除列表（乐观更新 + 失败回滚；成功回填 runtime 过滤去重结果）。 */
-async function persistExcluded(next: string[]): Promise<void> {
-  if (savingExcluded.value) return
-  savingExcluded.value = true
-  const prev = excludedModels.value
-  excludedModels.value = next
-  try {
-    const res = await transport.setSmartContextExcludedModels(next)
-    excludedModels.value = res.models
-    toastInfo(t('settings.system.saved'))
-  } catch (e) {
-    excludedModels.value = prev
-    toastError(t('settings.system.saveFailed', { reason: e instanceof Error ? e.message : String(e) }))
-  } finally {
-    savingExcluded.value = false
-  }
+/** 阈值 change（失焦/回车）：v-model 已直改 value → persist 读当前值过 validate 后 ×1000 保存。 */
+function onThresholdsSave(): void {
+  void thresholdsField.persist(thresholdsK.value)
 }
 
 function onExcludedAdd(value: unknown): void {
   if (typeof value !== 'string' || value === EXCLUDED_ADD_PLACEHOLDER) return
   if (excludedModels.value.includes(value)) return
-  void persistExcluded([...excludedModels.value, value])
+  void excludedField.persist([...excludedModels.value, value])
 }
 
 function onExcludedRemove(model: string): void {
-  void persistExcluded(excludedModels.value.filter((m) => m !== model))
+  void excludedField.persist(excludedModels.value.filter((m) => m !== model))
 }
 </script>

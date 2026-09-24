@@ -167,6 +167,7 @@ import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
 import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import {
   LLM_RETRY_DOMAIN,
   validateLlmRetryConfig,
@@ -178,7 +179,7 @@ import {
 const transport = getSettingsTransport()
 
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
+const { error: toastError } = useToast()
 
 const MS_PER_SEC = 1000
 const SEC_PER_MIN = 60
@@ -205,7 +206,6 @@ const providerTimeoutSecInput = ref('')
 const providerMaxDelaySecInput = ref('')
 
 const configured = ref(false)
-const saving = ref(false)
 /** 保存失败时标红的字段名集合（validateLlmRetryConfig error 信封字段名）。 */
 const invalidFields = reactive(new Set<string>())
 /** 加载期存量超域/坏值的行内标注（D7/D8），字段名 → 提示文本。 */
@@ -394,6 +394,18 @@ function buildConfig(): LlmRetryConfig | null {
   }
 }
 
+// 保存尾段（setting-field module）：saving 防重入 + setRetryConfig + toast（成败文案本域固定）；
+// 域校验（buildConfig / validateLlmRetryConfig）留在组件，不搬
+const saveAction = createExplicitSave<LlmRetryConfig>({
+  run: (config) => transport.setRetryConfig(config).then(() => undefined),
+  savedToastKey: 'settings.system.llmRetrySavedToast',
+  onError: (e) => {
+    console.warn('[SystemLlmRetrySection] failed to save retry config:', e)
+    return t('settings.system.llmRetrySaveFailed')
+  },
+})
+const saving = saveAction.saving
+
 /** 保存：先前端同规则校验（shared validateLlmRetryConfig），失败 toast + 标红不发 RPC。 */
 async function onSave(): Promise<void> {
   if (saving.value) return
@@ -414,15 +426,6 @@ async function onSave(): Promise<void> {
     toastError(res.error)
     return
   }
-  saving.value = true
-  try {
-    await transport.setRetryConfig(config)
-    toastInfo(t('settings.system.llmRetrySavedToast'))
-  } catch (e) {
-    console.warn('[SystemLlmRetrySection] failed to save retry config:', e)
-    toastError(t('settings.system.llmRetrySaveFailed'))
-  } finally {
-    saving.value = false
-  }
+  await saveAction.run(config)
 }
 </script>

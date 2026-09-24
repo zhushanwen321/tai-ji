@@ -79,7 +79,7 @@
               data-testid="system-prompt-replace-save"
               size="dense"
               :disabled="!replaceDirty || saving"
-              @click="saveReplace"
+              @click="saveConfig.run()"
             >
               {{ t('settings.systemPrompt.save') }}
             </Button>
@@ -181,7 +181,7 @@
               data-testid="system-prompt-append-save"
               size="dense"
               :disabled="!appendDirty || saving"
-              @click="saveAppend"
+              @click="saveConfig.run()"
             >
               {{ t('settings.systemPrompt.save') }}
             </Button>
@@ -203,6 +203,7 @@ import { Label } from '@/components/ui/label'
 import { GroupCard } from '@taiji/ui/features/settings'
 import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import { SYSTEM_PROMPT_MAX_LENGTH, DEFAULT_PI_SYSTEM_PROMPT } from '@taiji/shared'
 import type { SystemPromptConfig } from '@taiji/shared'
 
@@ -244,9 +245,17 @@ const appendDirty = computed(
 /** 参考区展开态（默认折叠）。 */
 const showDefaultPrompt = ref(false)
 
-/** 保存 in-flight 标志（RD-4#7）：replace/append 两卡共用同一 config 写入，65s 窗口内防重复点击
- *  （并发覆盖同一 config + 双 toast）。任一卡保存中两按钮均禁用。 */
-const saving = ref(false)
+// 保存动作（setting-field module · createExplicitSave）：replace/append 两卡共用同一 config 写入
+// 与保存流（含 capability 段），故两卡绑同一动作——唯一 saving 窗口（RD-4#7，65s 窗口内防重复
+// 点击并发覆盖 + 双 toast），任一卡保存中两按钮均禁用。失败 toast = e.message 原文 error。
+const saveConfig = createExplicitSave({
+  run: async () => {
+    await getSettingsTransport().setSystemPrompt(buildConfig())
+    snapshot()
+  },
+  savedToastKey: 'settings.systemPrompt.savedToast',
+})
+const saving = saveConfig.saving
 
 /** 构造完整 SystemPromptConfig（schema v2：含 capability 段，保存时写回完整结构）。 */
 function buildConfig(): SystemPromptConfig {
@@ -257,7 +266,6 @@ function buildConfig(): SystemPromptConfig {
     capability: { enabled: capabilityEnabled.value },
   }
 }
-
 /** 加载系统提示词配置到本地编辑态。 */
 async function loadConfig(): Promise<void> {
   try {
@@ -291,36 +299,6 @@ function discardAppend(): void {
 function resetReplace(): void {
   replaceEnabled.value = false
   replacePrompt.value = ''
-}
-
-/** 保存替换卡：以当前编辑态写回 config。 */
-async function saveReplace(): Promise<void> {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await getSettingsTransport().setSystemPrompt(buildConfig())
-    snapshot()
-    info(t('settings.systemPrompt.savedToast'))
-  } catch (e) {
-    error(e instanceof Error ? e.message : String(e))
-  } finally {
-    saving.value = false
-  }
-}
-
-/** 保存追加卡：以当前编辑态写回 config。 */
-async function saveAppend(): Promise<void> {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await getSettingsTransport().setSystemPrompt(buildConfig())
-    snapshot()
-    info(t('settings.systemPrompt.savedToast'))
-  } catch (e) {
-    error(e instanceof Error ? e.message : String(e))
-  } finally {
-    saving.value = false
-  }
 }
 
 /** 复制 pi 默认提示词到剪贴板。失败走 error toast，成功走 info toast。 */

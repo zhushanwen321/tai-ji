@@ -147,7 +147,7 @@
             data-testid="terminal-save"
             size="dense"
             :disabled="saving"
-            @click="save"
+            @click="saveConfig.run()"
           >
             {{ t('settings.terminal.save') }}
           </Button>
@@ -169,10 +169,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { GroupCard } from '@taiji/ui/features/settings'
 import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import type { TerminalConfig } from '@taiji/shared'
 
 const { t } = useI18n()
-const { info, error } = useToast()
+const { error } = useToast()
 
 /** 当前加载的配置（getTerminalConfig 返回）。corrupted=true 表示磁盘损坏已回退默认。 */
 const corrupted = ref(false)
@@ -186,9 +187,13 @@ const scrollback = ref(1000)
 const cursorStyle = ref<TerminalConfig['cursorStyle']>('block')
 const bell = ref(false)
 
-/** 保存 in-flight 标志（RD-4#7）：整体保存为显式按钮触发，65s 窗口内防重复点击
- *  （并发覆盖同一 config + 双 toast）。 */
-const saving = ref(false)
+// 保存动作（setting-field module · createExplicitSave）：整体保存为显式按钮触发，唯一 saving
+// 窗口（RD-4#7，65s 窗口内防重复点击并发覆盖 + 双 toast）。失败 toast = e.message 原文 error。
+const saveConfig = createExplicitSave({
+  run: () => getSettingsTransport().setTerminalConfig(buildConfig()).then(() => undefined),
+  savedToastKey: 'settings.terminal.savedToast',
+})
+const saving = saveConfig.saving
 
 /** 从本地编辑态组装 TerminalConfig。shellArgs 由逗号分隔串转为 string[]。 */
 function buildConfig(): TerminalConfig {
@@ -221,20 +226,6 @@ async function loadConfig(): Promise<void> {
     bell.value = res.config.bell
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-/** 整体保存终端配置。 */
-async function save(): Promise<void> {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await getSettingsTransport().setTerminalConfig(buildConfig())
-    info(t('settings.terminal.savedToast'))
-  } catch (e) {
-    error(e instanceof Error ? e.message : String(e))
-  } finally {
-    saving.value = false
   }
 }
 
