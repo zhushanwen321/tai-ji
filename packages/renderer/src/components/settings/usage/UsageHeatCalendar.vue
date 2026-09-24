@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { fmtInt, toLocalDate, fmtISO } from './aggregate'
+import { fmtInt, toLocalDate, fmtISO } from '@taiji/core'
 
 const { t } = useI18n()
 

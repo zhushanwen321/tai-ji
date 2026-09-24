@@ -76,7 +76,7 @@ import {
   totalTokens,
   fmtMMDD,
   toLocalDate,
-} from './aggregate'
+} from '@taiji/core'
 
 const { t } = useI18n()
 

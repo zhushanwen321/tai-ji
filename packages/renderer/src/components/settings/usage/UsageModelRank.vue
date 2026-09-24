@@ -54,8 +54,8 @@ import {
   fmtUSD,
   fmtPct,
   totalTokens,
-} from './aggregate'
-import type { PerModelEntry } from './aggregate'
+} from '@taiji/core'
+import type { PerModelEntry } from '@taiji/core'
 
 const props = defineProps<{
   perModel: Record<string, PerModelEntry>

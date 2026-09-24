@@ -21,7 +21,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { mount } from '@vue/test-utils'
 import type { UsageRow } from '@taiji/shared'
 import UsageDailyChart from '../UsageDailyChart.vue'
-import { aggregate, newMetrics, accumulate, type DayView } from '../aggregate'
+import { aggregate, newMetrics, accumulate, type DayView } from '@taiji/core'
 
 /* ── DOM 环境补丁：ResizeObserver + clientWidth ── */
 const clientWidthDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
