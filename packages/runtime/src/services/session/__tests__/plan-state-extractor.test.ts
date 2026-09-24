@@ -244,3 +244,100 @@ describe('extractPlanStateFromSessionFile：冷路径', () => {
     expect(() => extractPlanStateFromSessionFile(longPath)).toThrowError(/ENAMETOOLONG/)
   })
 })
+
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径裁剪（message-revoke U6d）：G2 二分的未来状态随树腿——plan 状态 =
+// 当前状态，被撤子树的 plan-state entry 不进派生态
+// ════════════════════════════════════════════════════════════════════
+
+/** 树节点 fixture（带 id/parentId 链——真实 pi entry 形态；RPC getEntries 排除 header）。 */
+function treeEntry(id: string, parentId: string | null, extra: Record<string, unknown>): Record<string, unknown> {
+  return { id, parentId, timestamp: '2026-09-24T00:00:00Z', ...extra }
+}
+
+/** 链上 plan-state entry（plan-state-extractor 写侧经 pi appendCustomEntry 进树，parentId=当时叶子）。 */
+function chainedPlanEntry(id: string, parentId: string, requirement: string): Record<string, unknown> {
+  return treeEntry(id, parentId, {
+    type: 'custom',
+    customType: 'plan-state',
+    data: { ...legacyData(), requirement },
+  })
+}
+
+/** 真实撤回形态的分支文件 entries（header 由文件用例单独加）：q → p1（活跃）→ [m → p2] / [lbl 锚]。 */
+function branchedTreeEntries(): Array<Record<string, unknown>> {
+  return [
+    treeEntry('q', null, { type: 'message', message: { role: 'user', content: '问题' } }),
+    chainedPlanEntry('p1', 'q', '活跃路径上的 plan'),
+    treeEntry('m', 'p1', { type: 'message', message: { role: 'user', content: '发错的消息' } }),
+    chainedPlanEntry('p2', 'm', '被撤子树的 plan'),
+    treeEntry('lbl', 'p1', { type: 'label', label: 'taiji:revoked', targetId: 'm' }),
+  ]
+}
+
+describe('scanPlanStateEntries：leafId 活跃路径裁剪', () => {
+  it('传 leafId（全量重建调用点）：被撤子树的 plan-state entry 不进派生，取活跃路径内最后一条', () => {
+    const view = scanPlanStateEntries(branchedTreeEntries(), 'lbl')!
+    expect(view.requirement).toBe('活跃路径上的 plan')
+  })
+
+  it('leafId 缺省 = 现行为回归：全文件逆序取首（物理最后一条命中——增量合并路径不裁剪的契约面）', () => {
+    const view = scanPlanStateEntries(branchedTreeEntries())!
+    expect(view.requirement).toBe('被撤子树的 plan')
+  })
+
+  it('leafId 不在 id 集合 → 纯函数 fail-safe 原样返回（物理最后一条命中）+ warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const view = scanPlanStateEntries(branchedTreeEntries(), 'ghost-leaf')!
+      expect(view.requirement).toBe('被撤子树的 plan')
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('活跃路径无任何 plan-state entry（撤回带走唯一 plan entry）→ null（publish 侧收敛由水位承接）', () => {
+    const entries = [
+      treeEntry('q', null, { type: 'message', message: { role: 'user', content: 'hi' } }),
+      chainedPlanEntry('p2', 'q', '被撤子树的 plan'),
+      treeEntry('lbl', 'q', { type: 'label', label: 'taiji:revoked', targetId: 'p2' }),
+    ]
+    expect(scanPlanStateEntries(entries, 'lbl')).toBeNull()
+  })
+})
+
+describe('extractPlanStateFromSessionFile：文件腿活跃路径裁剪（冷启动）', () => {
+  /** 真实 pi 文件首行 header（有 id 无 parentId——pi getEntries() 排除、文件直读包含）。 */
+  function sessionHeaderLine(): Record<string, unknown> {
+    return { type: 'session', version: 1, id: 'sid-branched', timestamp: '2026-09-24T00:00:00Z', cwd: '/tmp' }
+  }
+
+  it('有分支真实文件形态（header + 撤回分支 + label 锚落文件尾）→ 派生不含被撤子树 entry', () => {
+    const filePath = makeTmpJsonl([sessionHeaderLine(), ...branchedTreeEntries()])
+    const view = extractPlanStateFromSessionFile(filePath)
+    expect(view.isActive).toBe(true)
+    expect(view.requirement).toBe('活跃路径上的 plan')
+  })
+
+  it('撤回带走唯一 plan entry → 「未激活」缺省 View（活跃路径空收敛的冷腿形态）', () => {
+    const filePath = makeTmpJsonl([
+      sessionHeaderLine(),
+      treeEntry('q', null, { type: 'message', message: { role: 'user', content: 'hi' } }),
+      chainedPlanEntry('p2', 'q', '被撤子树的 plan'),
+      treeEntry('lbl', 'q', { type: 'label', label: 'taiji:revoked', targetId: 'p2' }),
+    ])
+    expect(extractPlanStateFromSessionFile(filePath)).toEqual(INACTIVE_PLAN_STATE_VIEW)
+  })
+
+  it('无分支真实文件形态（header + 链式 entries）→ 现行为：最后一条 plan entry 生效（回归）', () => {
+    const filePath = makeTmpJsonl([
+      sessionHeaderLine(),
+      treeEntry('q', null, { type: 'message', message: { role: 'user', content: 'hi' } }),
+      chainedPlanEntry('p1', 'q', '第一条 plan'),
+      chainedPlanEntry('p3', 'p1', '第二条 plan'),
+    ])
+    const view = extractPlanStateFromSessionFile(filePath)
+    expect(view.requirement).toBe('第二条 plan')
+  })
+})

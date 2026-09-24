@@ -97,6 +97,14 @@ export interface RecordEntriesCache {
   /** in-flight 拉取 promise（并发失效共享一次拉取，消除重复 RPC）。 */
   inflight: Promise<void> | null
   /**
+   * [message-revoke U6d] 撤回失效标记：invalidateDerivedState 置位——在途增量轮的
+   * cursor 回写不得复活增量通道（check-then-act 竞态：失效落在增量 getEntries 在途时，
+   * 轮末 `cursor = fetched.leafId` 会把刚丢掉的 cursor 写回去，失效静默失效）。消费点
+   * 两处：fetchRecordEntriesRound 增量门（置位期间强制走全量）+ refreshRecordEntries
+   * 轮末复查（在途增量轮作废重跑全量）；全量轮入口清位（失效已兑现）。
+   */
+  forceFullRebuild: boolean
+  /**
    * [reload-closeout D2] 送达水位：已发布 subagents 快照（publish 完成后镜像派生缓存
    * id 集；引用共享安全——scan 每轮产新对象，旧引用不可变，equals 走字段级比对）。
    */
@@ -306,6 +314,37 @@ export class SessionRecords {
   }
 
   /**
+   * [message-revoke U6d] 撤回路径的派生态失效契约（设计 §5 U6「SessionRecords 失效契约
+   * （定死）」+ D2 ④）：**丢 cursor 强制全量重建**。防抖增量通道不适用——增量批 plan 派生
+   * null 显式「保持基线」（mergePlanState），被撤回合的 plan 残影清不掉；清 Map 形态破坏
+   * 豁免族照实保留（subagent/workflow run 真实执行过）。全量重建时 plan 扫描接 leafId
+   * 活跃路径裁剪（被撤子树 plan-state 不进派生态）、subagent/workflow 扫描不裁（照实
+   * 构造性保持）。
+   *
+   * 三水位字段（publishedSubagents/publishedWorkflows/publishedPlanState）**同批处置 =
+   * 刻意存续**（[reload-closeout D2] fullRebuild 只重置派生 Map、水位存续的既有裁决）：
+   * plan 腿撤回后派生值变化由水位 diff 自然触发收敛帧（含被撤子树含唯一 plan entry →
+   * 活跃路径空 → mergePlanState 全量收敛 null → 水位 null↔View 差异发缺省帧）；
+   * subagent/workflow 照实族全量重派生内容不变 → 水位 diff 恒空零冗余帧——清水位反而
+   * 会发整帧冗余广播。
+   *
+   * 同步立即触发一轮重算（fire-and-forget；与在途增量轮经 forceFullRebuild 标记 +
+   * inflight 合并竞态安全，见 RecordEntriesCache.forceFullRebuild 注释）——撤回 reply 前
+   * 面板残影窗口收敛到本轮拉取时延。调用方 = revoke-orchestrator ④ 注入窄接口
+   * invalidateDerivedState（组合根 no-op 占位由本方法替换接线，主 agent 核销）。
+   *
+   * session 未激活（无缓存条目）→ no-op：冷启动路径（getSubagents/getWorkflows/
+   * getPlanState 磁盘扫描）已各自接活跃路径/照实语义，无需失效。
+   */
+  invalidateDerivedState(sessionId: string): void {
+    const cache = this.recordEntriesCaches.get(sessionId)
+    if (!cache) return
+    cache.cursor = null // 丢 cursor：下次拉取强制全量重建
+    cache.forceFullRebuild = true
+    void this.refreshRecordEntries(sessionId).catch((e) => this.warnReconcileRoundFailed(sessionId, e))
+  }
+
+  /**
    * [reload-closeout D2] 送达水位对账腿入口（agent_settled 触发，interpreter 经组合根
    * 注入 onRecordReconcile → Facade 委托到达）。对账没有第二实现——重跑同一条
    * fetch→merge→publish 管线（refreshRecordEntries），发布门 = 已发布快照水位：fetch
@@ -344,6 +383,7 @@ export class SessionRecords {
       planState: null,
       debounceTimer: null,
       inflight: null,
+      forceFullRebuild: false,
       publishedSubagents: new Map(),
       publishedWorkflows: new Map(),
       publishedPlanState: null,
@@ -387,8 +427,12 @@ export class SessionRecords {
             console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
             return
           }
-          this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
+          this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild, fetched.leafId)
           if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
+          // [message-revoke U6d] 撤回失效在途命中：本轮是失效前捕获的增量轮（cursor 已被
+          // 上方回写复活）——作废本轮结果，重跑全量（flag 在全量轮入口清除；两轮上限恰好
+          // 覆盖「一轮增量竞态 + 一轮全量兑现」）
+          if (cache.forceFullRebuild) continue
           return
         }
       } finally {
@@ -480,6 +524,8 @@ export class SessionRecords {
   /**
    * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量（fullRebuild 随返回值上浮，
    * 供 plan 收敛语义分流，见 mergePlanState）。
+   * [message-revoke U6d] 增量门加 forceFullRebuild：撤回失效置位期间强制走全量（丢 cursor
+   * 的失效语义不被在途增量通道绕过）；全量轮入口清位（失效已兑现，后续轮次恢复增量）。
    * 全量重建时 Map 族派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）；plan 基线
    * **不**在此复位：「重建前基线」正是 entry 被外部清空时收敛发布的 diff 依据，复位会把
    * 基线抹成 null 使收敛分支失去触发条件，语义由 mergePlanState 的 isFullRebuild 分支承接。
@@ -491,10 +537,11 @@ export class SessionRecords {
     client: IPiEngine,
     cache: RecordEntriesCache,
   ): Promise<{ entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }> {
-    if (cache.cursor !== null) {
+    if (cache.cursor !== null && !cache.forceFullRebuild) {
       const inc = await client.getEntries(cache.cursor) as EntriesSinceResult
       return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined, fullRebuild: false }
     }
+    cache.forceFullRebuild = false
     const full = await client.getEntries() as EntriesSinceResult
     cache.subagents.clear()
     cache.workflows.clear()
@@ -523,14 +570,21 @@ export class SessionRecords {
     entries: unknown[],
     sessionId: string,
     isFullRebuild: boolean,
+    leafId?: string,
   ): void {
     // 三家族（subagents / workflows / plan）同批扫描 + merge（同一份 entries，零额外 RPC），
     // merge 语义下沉到下方模块级 merge helper。merge 先于 publish 守卫执行（已销毁
     // session 也完成缓存 merge，只拦发布——D3 登记卫生债，水位机制下无害：publish 未
     // 发生 → 水位滞留 → session 恢复后下轮触发补发）。
+    //
+    // [message-revoke U6d] G2 二分在此落点：plan 腿（随树）仅全量重建传 leafId 活跃路径
+    // 裁剪（scanPlanStateEntries 第二参——被撤子树的 plan-state entry 不进派生态）；
+    // subagent/workflow 腿（照实）刻意不裁——run 真实执行过，全量重建语义天然保持照实
+    // 保留。增量轮（isFullRebuild=false）不传 leafId：delta 是活跃路径后缀切片，统一裁剪
+    // 会在窗口越界误裁（U6a 调用点契约同款）。
     mergeSubagentRecords(cache.subagents, scanSubagentEntries(entries))
     mergeWorkflowRecords(cache.workflows, scanWorkflowEntries(entries))
-    mergePlanState(cache, scanPlanStateEntries(entries), isFullRebuild)
+    mergePlanState(cache, scanPlanStateEntries(entries, isFullRebuild ? leafId : undefined), isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
     this.publishRecordChanges(cache, sessionId)

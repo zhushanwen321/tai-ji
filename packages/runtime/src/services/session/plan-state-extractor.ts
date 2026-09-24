@@ -6,8 +6,11 @@
  * 与冷启动（getPlanState 磁盘全量，D1⑥ 冷路径）共用同一份代码——live ≡ reload 由「派生代码
  * 唯一」构造性保证（session-records.ts:64-79 同款「数据写路径唯一 = entry 扫描」不变量）。
  *
- * 派生语义 = 读 session 内**最后一条**合法 plan-state entry（extension 侧 reconstructPlanState
- * 的逆序取首同构——entry 顺序即时间顺序，每次状态迁移整体重写快照，无 per-key merge）。
+ * 派生语义 = 读 session **活跃路径内最后一条**合法 plan-state entry（extension 侧
+ * reconstructPlanState 的逆序取首同构——entry 顺序即时间顺序，每次状态迁移整体重写快照，
+ * 无 per-key merge；[message-revoke U6d] 活跃路径裁剪 = G2 二分的未来状态随树腿，被撤
+ * 子树的 plan-state entry 不进派生态——live（SessionRecords 全量重建传 leafId）/ 冷启
+ * （文件腿 trimFileEntriesToActivePath）三处同批，见 scanPlanStateEntries 注释）。
  *
  * schema 兼容（D4）：entry data 无版本字段（版本号字段 + 迁移逻辑已被 D1 明文否决），新旧
  * schema 靠**字段级 optional 判存在**消解——旧 entry（仅四必填字段）派生出无新字段区的
@@ -22,6 +25,10 @@ import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
 import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
+// 活跃路径裁剪（message-revoke U6d）：U6a 交付的导出 SSOT 纯函数 + 文件腿喂数单点
+//（剥 header / 文件尾 leaf 派生），plan 派生读者按 census §4.2 复用、不自含重复实现
+import { computeActivePathEntries } from '../../infra/pi/session-entry-mapper.js'
+import { trimFileEntriesToActivePath } from '../../infra/pi/session-file-utils.js'
 
 /** JSONL 中的 custom entry 结构（照 subagent-extractor JsonlCustomEntry 简化形态）。 */
 interface JsonlCustomEntry {
@@ -59,16 +66,27 @@ export const INACTIVE_PLAN_STATE_VIEW: PlanStateView = {
 /**
  * entry 扫描器：从 entry 列表派生 plan 状态视图（D1④）。
  *
- * 逆序取**最后一条**合法 plan-state entry（坏 entry 跳过继续向前——extension 侧
- * state.ts reconstructPlanState 的 continue 语义同构）；无任何合法命中返回 null
- * （= session 从未进过 plan 模式，publish 侧跳过；冷路径调用方归一为「未激活」缺省 View）。
+ * [message-revoke U6d] 派生语义升级为「**活跃路径内**最后一条」合法 plan-state entry
+ * （G2 二分的未来状态随树腿——plan 状态 = 当前状态，被撤子树的 plan-state entry 不得
+ * 进派生态）：提供 leafId 时先经 computeActivePathEntries（U6a 导出 SSOT）裁剪再逆序扫；
+ * 缺省 = 现行为（全文件逆序取首）。调用点契约（U6a 同款）：仅全量重建路径传 leafId、
+ * 增量合并路径不传（delta 是活跃路径后缀切片，裁剪是全树语义，统一传会在窗口越界误裁）。
+ *
+ * 坏 entry 跳过继续向前（extension 侧 state.ts reconstructPlanState 的 continue 语义
+ * 同构）；无任何合法命中返回 null（= 活跃路径从未进过 plan 模式，publish 侧跳过；冷路径
+ * 调用方归一为「未激活」缺省 View）。
  *
  * entries 来源两种形态同构（pi SessionEntry 内存对象与 JSONL 行反序列化，type 判定
  * 'custom'，对齐 subagent-extractor:181-182 注释）。
  */
-export function scanPlanStateEntries(entries: unknown[]): PlanStateView | null {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const view = parsePlanStateEntry(entries[i])
+export function scanPlanStateEntries(entries: unknown[], leafId?: string): PlanStateView | null {
+  // leafId 缺省时 computeActivePathEntries 原样直通（同一引用），既有调用零行为变化；
+  // leafId 与 entries 不匹配（上游异常）→ 纯函数 fail-safe 原样返回 + warn（宁多显）
+  const scoped = leafId !== undefined
+    ? computeActivePathEntries(entries as Array<{ id?: unknown; parentId?: unknown }>, leafId)
+    : entries
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    const view = parsePlanStateEntry(scoped[i])
     if (view) return view
   }
   return null
@@ -171,7 +189,10 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
 /**
  * 从主 session JSONL 文件提取 plan 状态视图（冷启动 / getPlanState RPC 路径，D1⑥ 冷腿）。
  *
- * 读取文件 → parseJsonl → scanPlanStateEntries（与实时增量拉取同一份派生代码）。
+ * 读取文件 → parseJsonl → [message-revoke U6d] trimFileEntriesToActivePath（剥 header +
+ * 文件尾 leaf 回溯——pi 树重放规则保证文件尾即活跃叶子，撤回后 label 锚落文件尾，被撤
+ * 子树的 plan-state entry 经 parentId 回溯滤除）→ scanPlanStateEntries（与实时增量拉取
+ * 同一份派生代码；live ≡ reload 由「派生代码唯一 + 裁剪单点」构造性保持）。
  *
  * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile 契约）：
  * - 文件不存在（ENOENT）→ 「未激活」缺省 View（合法边界：pi session 文件延迟写入，文件
@@ -208,5 +229,5 @@ export function extractPlanStateFromSessionFile(filePath: string): PlanStateView
     throw e
   }
 
-  return scanPlanStateEntries(parseJsonl(content)) ?? INACTIVE_PLAN_STATE_VIEW
+  return scanPlanStateEntries(trimFileEntriesToActivePath(parseJsonl(content))) ?? INACTIVE_PLAN_STATE_VIEW
 }
