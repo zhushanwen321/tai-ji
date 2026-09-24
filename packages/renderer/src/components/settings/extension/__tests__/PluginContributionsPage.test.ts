@@ -17,7 +17,7 @@
  *   - vi.mock('@/api/domains/settings') 避免 electronAPI 缺失（chooseDirectory/SystemPage 依赖；
  *     settings 组件已收编走该 seam，不再直取 lib/ipc 原始模块）
  *   - providePlatform + provideSettingsTransport + pinia（SettingsModal 打开时刷新 providers）
- *   - global.provide 注入 SETTINGS_TOAST_KEY/USE_QUOTA_CONFIGURE_KEY/SETTINGS_CONFIG_API_KEY
+ *   - global.provide 注入 SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY/SETTINGS_CONFIG_API_KEY
  *   - global.stubs 把 LoadPaths/ExtensionInstallFlow/ExtensionList 重子组件 stub 掉（聚焦入口 + 子页）
  *   - global.provide PluginSettingsDataSourceKey mock 数据源（TC1/TC2 组件测试）
  */
@@ -37,7 +37,7 @@ import {
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
   SETTINGS_CONFIG_API_KEY,
 } from '@taiji/ui/features/settings'
 import {
@@ -109,7 +109,7 @@ vi.mock('@/api/domains/settings', () => ({
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import PluginContributionsPage from '@/components/settings/extension/PluginContributionsPage.vue'
 import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'
-import { makeQuotaStateStub } from '@/__tests__/helpers/quota-state-stub'
+import { makeQuotaModuleStub } from '@/__tests__/helpers/quota-module-stub'
 
 /** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空）。 */
 function stubTransport(): SettingsTransport {
@@ -185,9 +185,9 @@ function makeDataSource(): PluginSettingsDataSource {
 function settingsModalProvides() {
   return {
     [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-    // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-    // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-    [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+    // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+    // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+    [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
     [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
   }
 }

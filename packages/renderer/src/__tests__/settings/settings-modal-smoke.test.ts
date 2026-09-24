@@ -27,7 +27,7 @@ import {
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
   SETTINGS_CONFIG_API_KEY,
 } from '@taiji/ui/features/settings'
 
@@ -87,7 +87,7 @@ vi.mock('@/lib/ipc', () => ({
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
-import { makeQuotaStateStub } from '../helpers/quota-state-stub'
+import { makeQuotaModuleStub } from '../helpers/quota-module-stub'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import { getSettingsStore } from '@taiji/core'
@@ -154,9 +154,9 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
           [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
@@ -192,9 +192,9 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
           [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
@@ -229,9 +229,9 @@ describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-m
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
           [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },
@@ -275,7 +275,7 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
           [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
         },
       },

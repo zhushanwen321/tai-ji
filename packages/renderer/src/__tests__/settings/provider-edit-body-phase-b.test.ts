@@ -12,7 +12,7 @@
  * mock 策略：
  *  - vue-i18n 全局 mock（vitest-i18n-setup.ts，t() 从 zh-CN 取值）
  *  - provideSettingsTransport 注入 spy transport（save 路径断言）
- *  - USE_QUOTA_CONFIGURE_KEY provide 真实 useQuotaConfigure（'@taiji/core/transport/api/domains/quota' mock）
+ *  - QUOTA_CONFIGURE_FACTORY_KEY provide 真实 useQuotaConfigure（'@taiji/core/transport/api/domains/quota' mock）
  *  - Dialog（形态切换确认）teleport 到 body：attachTo + document.body 查询（对齐 provider-builtin-ui 模式）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -30,9 +30,9 @@ import {
 import {
   ProviderEditBody,
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
+import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 
@@ -99,6 +99,20 @@ const ZHIPU_READY_P: ProviderInfo = {
   name: 'Zhipu GLM',
   api: 'openai-completions',
   apiKeySet: true,
+  authMethod: 'api_key',
+  status: 'connected',
+  kind: 'catalog',
+  baseUrl: 'https://open.bigmodel.cn/api',
+  models: [{ id: 'glm-4', name: 'GLM-4.6', source: 'builtin' }],
+  quota: { fetcher: 'zhipu', enabled: true },
+}
+
+/** api-key 类但 provider 侧无凭据：matchQuotaPreset 命中 zhipu → 凭证警示区可见（§7.4 两套文案） */
+const ZHIPU_NO_KEY_P: ProviderInfo = {
+  id: 'zhipu-nokey',
+  name: 'Zhipu GLM',
+  api: 'openai-completions',
+  apiKeySet: false,
   authMethod: 'api_key',
   status: 'connected',
   kind: 'catalog',
@@ -178,7 +192,7 @@ function mountBody(provider: ProviderInfo, props: Record<string, unknown> = {}):
     global: {
       provide: {
         [SETTINGS_TOAST_KEY]: useToast(),
-        [USE_QUOTA_CONFIGURE_KEY]: useQuotaConfigure,
+        [QUOTA_CONFIGURE_FACTORY_KEY]: useQuotaConfigure,
       },
     },
   })
@@ -509,5 +523,29 @@ describe('契约 v2 接线：readiness / setEnabled / saveAndTest（真实 compo
     const payload = configureSpy.mock.calls[0]![0] as Record<string, unknown>
     expect(payload.credentialSource).toBe('exclusive')
     expect(payload.apiKey).toBe('sk-exclusive-draft')
+  })
+
+  it('§7.4 跨区块时序：provider 表单填 API Key（未保存）→ 警示从「还没有」切「已填写，保存后即可查询」', async () => {
+    wrapper = mountBody(ZHIPU_NO_KEY_P)
+    await flushPromises()
+
+    // 首屏：来源=provider 且 provider 侧无凭据 → 「还没有可用的 API Key」警示 + 按钮置灰
+    const warn = () => wrapper!.find('[data-testid="quota-provider-credential-warning"]')
+    expect(warn().exists()).toBe(true)
+    expect(warn().text()).toContain('还没有可用的 API Key')
+    expect(saveDisabled()).toBe(true)
+
+    // 表单里填 Key（尚未保存 provider）→ carry-in 槽位（providerApiKeyDraft）驱动文案切换：
+    // 用户可见差异 =「按钮灰但屏幕上明明填了 Key」的矛盾消除（指引先保存 provider）
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-draft-key')
+    await flushPromises()
+    expect(warn().text()).toContain('已填写 API Key，保存 provider 配置后即可查询')
+    expect(warn().text()).not.toContain('还没有可用的 API Key')
+    expect(saveDisabled()).toBe(true) // runtime 仍读不到（provider 未保存），齐备性不变
+
+    // 草稿清空（删除已输入内容）→ 文案退回「还没有」
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('')
+    await flushPromises()
+    expect(warn().text()).toContain('还没有可用的 API Key')
   })
 })

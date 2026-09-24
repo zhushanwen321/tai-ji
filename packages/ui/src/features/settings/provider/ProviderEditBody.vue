@@ -205,39 +205,10 @@
         </Button>
       </div>
 
-      <!-- Coding Plan 额度查询（契约 v2 接线：D3 凭证来源 / D1 齐备性 / D4 开关 / D2 保存并测试） -->
-      <CodingPlanSection
-        :fetcher-id="quotaFetcherId"
-        :fetcher-options="quotaFetcherOptions"
-        :enabled="quotaEnabled"
-        :cookie-input="quotaCookieInput"
-        :api-key-input="quotaApiKeyInput"
-        :credential-source="quotaCredentialSource"
-        :provider-credential-available="quotaProviderCredentialAvailable"
-        :provider-credential-pending-save="quotaProviderCredentialPendingSave"
-        :workspace-input="quotaWorkspaceInput"
-        :needs-workspace="quotaNeedsWorkspace"
-        :readiness="quotaReadiness"
-        :test-status="quotaTestStatus"
-        :test-error-msg="quotaTestError"
-        :quota-row="quotaData"
-        :last-fetch-at="quotaLastFetchAt"
-        :is-cookie-auth="quotaIsCookieAuth"
-        :configuring="quotaConfiguring"
-        :configure-error-msg="quotaConfigureError"
-        :auth-kinds="quotaAuthKinds"
-        :oauth-ready="oauthPresent"
-        :test-fail-reason="quotaTestFailReason"
-        :help-url="quotaHelpUrl"
-        :help-text="quotaHelpText"
-        @update:fetcher-id="quotaFetcherId = $event"
-        @update:enabled="quotaSetEnabled"
-        @update:credential-source="quotaCredentialSource = $event"
-        @save-and-test="quotaSaveAndTest"
-        @update:cookie-input="quotaCookieInput = $event"
-        @update:api-key-input="quotaApiKeyInput = $event"
-        @update:workspace-input="quotaWorkspaceInput = $event"
-      />
+      <!-- Coding Plan 额度查询（契约 v2 接线：D3 凭证来源 / D1 齐备性 / D4 开关 / D2 保存并测试）。
+           [C1] 零 props 接线：本组件把 quota configure module 实例 provide 给子组件，
+           CodingPlanSection 跨 seam 直接持有（原 23 props + 7 emits 逐名管道已删）。 -->
+      <CodingPlanSection v-if="quota" />
 
       <!-- 测试连接 / 自动发现（纯展示块抽为 ProviderTestDiscoverSection，编排仍在 useProviderEdit）。
            props 经 useCatalogDisplay().testDiscoverProps 整体接线（含 M3b 的 providerKind /
@@ -359,8 +330,8 @@ import {
 import { matchQuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
-import { useProviderEdit, API_KEY_CLEAR_SENTINEL } from '@taiji/core'
-import { useQuotaConfigureFactory as useQuotaConfigure } from '../injection-keys'
+import { useProviderEdit } from '@taiji/core'
+import { QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import ModelListSection from '../common/ModelListSection.vue'
 import ProviderTestDiscoverSection from './ProviderTestDiscoverSection.vue'
@@ -403,35 +374,6 @@ const matchedPreset = computed(() => {
   return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
 })
 
-const quotaFactory = useQuotaConfigure()
-
-const {
-  fetcherId: quotaFetcherId,
-  fetcherOptions: quotaFetcherOptions,
-  enabled: quotaEnabled,
-  cookieInput: quotaCookieInput,
-  apiKeyInput: quotaApiKeyInput,
-  credentialSource: quotaCredentialSource,
-  providerCredentialAvailable: quotaProviderCredentialAvailable,
-  providerCredentialPendingSave: quotaProviderCredentialPendingSave,
-  workspaceInput: quotaWorkspaceInput,
-  needsWorkspace: quotaNeedsWorkspace,
-  readiness: quotaReadiness,
-  testStatus: quotaTestStatus,
-  testError: quotaTestError,
-  testFailReason: quotaTestFailReason,
-  quotaData,
-  lastFetchAt: quotaLastFetchAt,
-  isCookieAuth: quotaIsCookieAuth,
-  authKinds: quotaAuthKinds,
-  helpUrl: quotaHelpUrl,
-  helpText: quotaHelpText,
-  configuring: quotaConfiguring,
-  configureError: quotaConfigureError,
-  setEnabled: quotaSetEnabled,
-  saveAndTest: quotaSaveAndTest,
-} = quotaFactory(matchedPreset, toRef(props, 'provider'))
-
 // 业务编排全在 composable。整份返回值留作 edit：展示接线 composable 从这里读 test 状态与模型数
 // （test/discover 结果不再逐个解构到本组件——第 1 轮抽走展示逻辑后本组件行数余量已用尽）。
 const edit = useProviderEdit(toRef(props, 'provider'), { t })
@@ -463,17 +405,18 @@ const {
   syncHeadersFromRows,
 } = edit
 
-// R4：providerCredentialPendingSave 是 carry-in ref（useQuotaConfigure 的输入只有 preset + providerRef，
-// 看不到 provider 表单草稿），由本组件按 §7.4 判定式写入——漏接则「已填未保存」文案区分不生效。
-// 判定式必须排除清除哨兵：用户点「清除」时 form.apiKey === API_KEY_CLEAR_SENTINEL（非空但语义是
-// 无凭据），只用 `!== ''` 会显示与事实相反的「已填写，保存后即可查询」。
-watch(
-  () => form.apiKey,
-  (v) => {
-    quotaProviderCredentialPendingSave.value = v !== '' && v !== API_KEY_CLEAR_SENTINEL
-  },
-  { immediate: true },
-)
+// [C1] quota configure module 实例：经注入的工厂（renderer 实现）按当前编辑体物化，
+// provide 给 CodingPlanSection 跨 seam 直接持有。工厂缺失（壳未接线）时不渲染该区块
+// （v-if），不留 noop 兼容层。输入里的 providerApiKeyDraft 是 §7.4「已填未保存」文案的
+// carry-in 槽位（表单草稿归 useProviderEdit，判定式含清除哨兵语义，在 module 内）。
+const quotaFactory = useQuotaConfigureFactory()
+const quota = quotaFactory?.({
+  provider: toRef(props, 'provider'),
+  preset: matchedPreset,
+  providerOauthPresent: computed(() => props.oauthPresent === true),
+  providerApiKeyDraft: toRef(form, 'apiKey'),
+})
+if (quota) provide(QUOTA_CONFIGURE_MODULE_KEY, quota)
 
 // catalog 展示字段（类型只读派生文案 + 端点自定义网关；设计 D5）+ 测试连接区 props 接线（M3b）
 // ——逻辑在同目录 composable（受本组件行数约束抽出；runtime 已下发派生值，此处只做展示转译）

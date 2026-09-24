@@ -1,24 +1,38 @@
 /**
- * useQuotaConfigure —— ProviderEditModal「Coding Plan 额度查询」Section 业务编排。
+ * useQuotaConfigure —— ProviderEditBody「Coding Plan 额度查询」deep module 实现。
  *
- * 契约 v2（coding-plan-quota-config-ux §7.1/§7.2）：
+ * 契约 v2（coding-plan-quota-config-ux §7.1/§7.2）+ C1 收拢：
+ * - 对外只暴露 QuotaConfigureModule（core 契约）：3 个状态透镜（draft / view / test）+ 3 个写动作；
+ *   27 成员旧契约里的全部规则性成员（类型切换清凭证草稿、齐备性、失败原因归一、
+ *   provider 凭据警示分档、来源提示分档等）都内化为本实现的派生量
  * - 类型 / 凭证 / Workspace 进草稿，经 saveAndTest 一次点击提交（D2/D5）；开关只写配置位（D4）
  * - readiness 是「保存并测试」按钮禁用状态的唯一依据；密文字段取「草稿 ∨ 已保存」并集，
  *   明文的 Workspace 只看草稿（D13）
- * - cookie 输入去掩码（D7）：cookieInput 永远只放用户真实输入，保存成功后清空
+ * - cookie 输入去掩码（D7）：cookie 草稿永远只放用户真实输入，保存成功后清空
  */
-import { ref, computed, watch, type Ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type {
   NormalizedQuotaRow,
   QuotaConfigurePayload,
   QuotaCredentialSource,
   QuotaPreset,
-  ProviderInfo,
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
 import { QUOTA_PRESETS, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
-import type { QuotaConfigureState, QuotaTestStatus, ReadinessMissing } from '@taiji/core'
+import type {
+  QuotaConfigureInputs,
+  QuotaConfigureModule,
+  QuotaDraftInput,
+  QuotaFailureKind,
+  QuotaReadiness,
+  QuotaSectionView,
+  QuotaSourceHint,
+  QuotaTestStatus,
+  QuotaTestView,
+  ReadinessMissing,
+} from '@taiji/core'
+import { API_KEY_CLEAR_SENTINEL } from '@taiji/core'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import i18n from '@/i18n'
 import { useQuotaStore } from '@/stores/quota'
@@ -26,9 +40,6 @@ import { useQuotaStore } from '@/stores/quota'
 // i18n.global.t 的类型窄化 cast（对齐 useQuotaQuery 的非 setup composable 模式）：
 // 失败文案走 i18n（en-US locale 不再透出硬编码中文，D9）。
 const t = i18n.global.t as (key: string) => string
-
-// 状态契约 SSOT 在 core（ui injection-keys 与本 composable 共享，字段语义注释见彼处）
-export type { QuotaTestStatus }
 
 /**
  * Workspace 草稿的保存前归一化（模块级辅助）。
@@ -128,35 +139,47 @@ function toMissingFields(checks: ReadinessCheck[]): ReadinessMissing[] {
   return missing
 }
 
-/**
- * composable 返回类型 = core 契约（[BL round1 monorepo S] 原 ui injection-keys 逐字段
- * 手工镜像本接口，提升 core 后双侧 import 同一类型消除镜像）。
- */
-export type UseQuotaConfigureReturn = QuotaConfigureState
+// ── 失败原因归一（A2-4）──
 
 /**
- * @param preset - 当前匹配的 QuotaPreset（matchQuotaPreset 命中）
- * @param providerRef - 当前编辑的 ProviderInfo ref（已保存快照；草稿回填与「∨ 已保存」并集读它）
+ * reason → 失败分档。credential-unavailable / credential-unsupported（IO 层 / 形态不支持）
+ * 无专属恢复指引，落 'generic'（UI 回退通用文案，与收拢前的表现一致）。
+ * Record 全键登记：新增 reason 时编译器强制在此表态。
  */
-export function useQuotaConfigure(
-  preset: Ref<QuotaPreset | undefined>,
-  providerRef: Ref<ProviderInfo | null>,
-): UseQuotaConfigureReturn {
+const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
+  unauthorized: 'unauthorized',
+  network: 'network',
+  'no-subscription': 'no-subscription',
+  parse: 'parse',
+  not_configured: 'not-configured',
+  'no-credential': 'no-credential',
+  'credential-unavailable': 'generic',
+  'credential-unsupported': 'generic',
+}
+
+/**
+ * QuotaConfigure module 实现（契约见 core QuotaConfigureModule）。
+ *
+ * @param inputs - 工厂输入（ProviderEditBody 按当前编辑体装配，见 core QuotaConfigureInputs）
+ */
+export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
+  const { provider: providerRef, preset, providerOauthPresent, providerApiKeyDraft } = inputs
   const quotaStore = useQuotaStore()
   const enabled = ref(false)
-  /** 类型草稿底层态：外部经 fetcherId（writable computed）写入，同值短路在 setter 上 */
+  /** 类型草稿底层态：外部经 selectType（同值短路 + 真变清凭证草稿）写入 */
   const fetcherIdDraft = ref<string | undefined>(undefined)
-  /** cookie 输入草稿（D7 去掩码：永远只放用户真实输入，不回填掩码、不回填密文） */
-  const cookieInput = ref('')
-  /** 专属 API Key 输入草稿（密文不回显，保存成功后清空） */
-  const apiKeyInput = ref('')
-  /** 凭证来源选择（D3，api-key 类专用）：UI 显示与 runtime 使用由同一份持久化数据驱动 */
-  const credentialSource = ref<QuotaCredentialSource>('provider')
-  /** Workspace 地址输入草稿（明文回显，D13：判定只看草稿） */
-  // D13 已知代价（设计 §6.14）：UI 不支持清除已保存 workspace（清空草稿 → readiness 置灰
-  // 保存不出去）；换地址直接覆盖、停用关开关。显式清除按钮是登记的重审触发条件，勿在
-  // readiness 里单独开「空串 = 清除」后门。
-  const workspaceInput = ref('')
+  /**
+   * 输入草稿（D7 去掩码：cookie / 专属 Key 只放用户真实输入，不回填掩码、不回填密文）。
+   * D13 已知代价（设计 §6.14）：UI 不支持清除已保存 workspace（清空草稿 → readiness 置灰
+   * 保存不出去）；换地址直接覆盖、停用关开关。显式清除按钮是登记的重审触发条件，勿在
+   * readiness 里单独开「空串 = 清除」后门。
+   */
+  const draft = ref<QuotaDraftInput>({
+    cookie: '',
+    apiKey: '',
+    credentialSource: 'provider',
+    workspace: '',
+  })
   const testStatus = ref<QuotaTestStatus>('idle')
   const testError = ref('')
   const quotaData = ref<NormalizedQuotaRow | null>(null)
@@ -171,22 +194,28 @@ export function useQuotaConfigure(
   const fetcherOptions = QUOTA_PRESETS.map((p) => ({ value: p.fetcher, label: p.label }))
 
   /**
-   * 类型草稿（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
+   * 类型草稿写入（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
    *
    * [D5 守卫必须落在值上] CodingPlanSection 用 reka Select 的 `:model-value` + update 事件，
    * 而 reka 的 `SelectItem.handleSelect` 无条件 emit —— 用户重复点选当前类型也会触发写入。
    * 没有同值短路就会丢掉用户未提交的输入（丢的是正在输入的内容，不是磁盘数据）。
    * 类型**真变**才清凭证草稿；Workspace 草稿不清（明文回显字段，清了等于制造屏幕与磁盘背离）。
    */
-  const fetcherId = computed<string | undefined>({
-    get: () => fetcherIdDraft.value,
-    set: (newId) => {
-      if (newId === fetcherIdDraft.value) return
-      fetcherIdDraft.value = newId
-      cookieInput.value = ''
-      apiKeyInput.value = ''
-    },
-  })
+  function applyFetcherId(newId: string | undefined): void {
+    if (newId === fetcherIdDraft.value) return
+    fetcherIdDraft.value = newId
+    draft.value.cookie = ''
+    draft.value.apiKey = ''
+  }
+
+  /**
+   * selectType（契约写动作）：reka Select 的 update:modelValue 是宽联合类型，做运行时 guard
+   * 只放字符串通过。不做 String($event) 强转——undefined 会被转成 "undefined" 这个看似合法的类型值。
+   */
+  function selectType(value: unknown): void {
+    if (typeof value !== 'string') return
+    applyFetcherId(value)
+  }
 
   /**
    * isCookieAuth：基于当前选中的 fetcherId 计算（而非 preset.auth）。
@@ -196,7 +225,7 @@ export function useQuotaConfigure(
    * （内置 5 preset 中仅 mimo/opencode-go 声明，行为与单值时代一致）。
    */
   const isCookieAuth = computed(() => {
-    const fid = fetcherId.value
+    const fid = fetcherIdDraft.value
     if (fid) {
       const opt = QUOTA_PRESETS.find((p) => p.fetcher === fid)
       return opt?.auth.includes('cookie') ?? false
@@ -205,19 +234,14 @@ export function useQuotaConfigure(
   })
 
   /** 当前选中 fetcher 对应的预设（用于 helpUrl/helpText/requiresWorkspace）。 */
-  const activePreset = computed<QuotaPreset | undefined>(() => findPreset(fetcherId.value, preset.value))
-
-  /** 帮助链接（基于当前选中 fetcher）。 */
-  const helpUrl = computed<string | undefined>(() => activePreset.value?.helpUrl)
-  /** 帮助文案（基于当前选中 fetcher）。 */
-  const helpText = computed<string | undefined>(() => activePreset.value?.helpText)
+  const activePreset = computed<QuotaPreset | undefined>(() => findPreset(fetcherIdDraft.value, preset.value))
 
   /** 当前 fetcher 是否需要 workspace 配置（D1-1：资源维度 fetcher 如 opencode-go） */
   const needsWorkspace = computed<boolean>(() => activePreset.value?.requiresWorkspace ?? false)
 
   /**
    * 当前选中 fetcher 的凭证能力声明（B-3）：fetcherId 优先、fallback 自动匹配 preset。
-   * CodingPlanSection 据此渲染凭证态（oauth 就绪/缺失、api-key 回退顺序说明）。
+   * 凭证态按 fetcher.auth 派生（oauth 就绪/缺失、api-key 回退顺序说明）。
    */
   const authKinds = computed<readonly QuotaAuthKind[]>(() => activePreset.value?.auth ?? [])
 
@@ -230,20 +254,16 @@ export function useQuotaConfigure(
    */
   const providerCredentialAvailable = computed<boolean>(() => !!providerRef.value?.apiKeySet)
 
-  /** 专属 Key 是否已保存（D3：单独表达，不再与 provider 侧合并） */
-  const quotaApiKeyConfigured = computed<boolean>(() => providerRef.value?.quota?.apiKeySet === true)
-
-  /** 是否已配置 workspace（provider.quota.workspace 非空；明文，回显判定同源） */
-  const workspaceConfigured = computed<boolean>(() => !!providerRef.value?.quota?.workspace)
-
   /**
-   * Provider 侧凭据「已填但未保存」（§7.4 文案区分）。证据来源是 provider 表单草稿
-   * （form.apiKey 非空且非清除哨兵），而本 composable 的输入只有 (preset, providerRef)，
-   * 看不到 provider 表单草稿 —— 它是 **carry-in 槽位**：由 ProviderEditBody 侧（U5 领地）
-   * 计算后写入本 ref（或直接作为 prop 传给 CodingPlanSection），composable 不自造该值。
-   * 初始 false；不参与 readiness 判定（§7.2 该分支只看 providerCredentialAvailable）。
+   * Provider 侧凭据「已填但未保存」（§7.4 文案区分）判定。证据来源是 provider 表单草稿
+   * （carry-in 槽位：form.apiKey 由 ProviderEditBody 经 inputs.providerApiKeyDraft 传入）。
+   * 判定式必须排除清除哨兵：用户点「清除」时草稿 === API_KEY_CLEAR_SENTINEL（非空但语义是
+   * 无凭据），只用 `!== ''` 会显示与事实相反的「已填写，保存后即可查询」。
+   * 不参与 readiness 判定（§7.2 该分支只看 providerCredentialAvailable）。
    */
-  const providerCredentialPendingSave = ref(false)
+  const providerCredentialPendingSave = computed<boolean>(
+    () => providerApiKeyDraft.value !== '' && providerApiKeyDraft.value !== API_KEY_CLEAR_SENTINEL,
+  )
 
   /**
    * 齐备性派生量（D1）——「保存并测试」按钮禁用状态的唯一依据（§7.2 伪码逐条落地）。
@@ -252,8 +272,8 @@ export function useQuotaConfigure(
    * 类型保存过」不算类型已变 —— 把 undefined 也算变更会给这类 provider 制造一次用户从未
    * 请求的 cookie 清除。
    */
-  const readiness = computed<{ ready: boolean; missing: ReadinessMissing[] }>(() => {
-    const fid = fetcherId.value
+  const readiness = computed<QuotaReadiness>(() => {
+    const fid = fetcherIdDraft.value
     // 草稿类型不在 QUOTA_PRESETS（仅历史数据 / 手工编辑 providers.json 可达，下拉只列预设）：
     // 未知 fetcher 无法判定该类型的凭证形态（是否 cookie 类、是否需要 workspace），isCookieAuth /
     // needsWorkspace 会双双落 false 后静默走 api-key 分支 —— providerCredentialAvailable 为 true 时
@@ -264,20 +284,71 @@ export function useQuotaConfigure(
     const quota = providerRef.value?.quota
     const missing = toMissingFields(readinessChecks({
       cookieAuth: isCookieAuth.value,
-      credentialSource: credentialSource.value,
+      credentialSource: draft.value.credentialSource,
       exclusiveSupported: supportsExclusiveCredential(authKinds.value),
       providerCredentialAvailable: providerCredentialAvailable.value,
       needsWorkspace: needsWorkspace.value,
       typeChanged: quota?.fetcher !== undefined && fid !== quota.fetcher,
-      cookieDraft: cookieInput.value,
-      apiKeyDraft: apiKeyInput.value,
+      cookieDraft: draft.value.cookie,
+      apiKeyDraft: draft.value.apiKey,
       cookieSaved: quota?.cookieSet,
       apiKeySaved: quota?.apiKeySet,
-      workspaceDraft: workspaceInput.value,
+      workspaceDraft: draft.value.workspace,
     }))
 
     return { ready: missing.length === 0, missing }
   })
+
+  /** 展示派生面（只读）：UI 分层 / 凭证区形态 / 警示分档 / 帮助链接一次派生到位 */
+  const view = computed<QuotaSectionView>(() => {
+    const undetermined = !fetcherIdDraft.value || readiness.value.missing.includes('type')
+    const exclusiveApplicable = supportsExclusiveCredential(authKinds.value)
+    const source = draft.value.credentialSource
+    // 专属 Key 输入块是否渲染（§7.4：false 时 provider 警示才有登场资格）
+    const exclusiveKeyBlockShown = exclusiveApplicable && source === 'exclusive'
+    let sourceHint: QuotaSourceHint = 'providerApiKey'
+    if (source === 'exclusive') sourceHint = 'exclusive'
+    else if (authKinds.value.includes('oauth') && providerOauthPresent.value) sourceHint = 'providerOauth'
+    const helpUrl = activePreset.value?.helpUrl
+    return {
+      type: {
+        selected: fetcherIdDraft.value,
+        options: fetcherOptions,
+        undetermined,
+      },
+      enabled: enabled.value,
+      configuring: configuring.value,
+      configureError: configureError.value,
+      readiness: readiness.value,
+      credential: {
+        form: isCookieAuth.value ? 'cookie' : 'apiKey',
+        exclusiveApplicable,
+        providerAvailable: providerCredentialAvailable.value,
+        sourceHint,
+        // §7.4 跨区块时序：provider 凭据不可用且未改用专属 Key → 警示，两套文案按
+        // 「已填未保存」分档（providerCredentialPendingSave 判定式见彼处）
+        providerWarning: !exclusiveKeyBlockShown && !providerCredentialAvailable.value
+          ? (providerCredentialPendingSave.value ? 'pendingSave' : 'missing')
+          : null,
+      },
+      workspace: { required: needsWorkspace.value },
+      help: helpUrl ? { url: helpUrl, text: activePreset.value?.helpText ?? '' } : null,
+    }
+  })
+
+  /** 测试结果面（只读）：成功行 / 失败归一 / 旧缓存保留 */
+  const test = computed<QuotaTestView>(() => ({
+    status: testStatus.value,
+    row: quotaData.value,
+    lastFetchAt: lastFetchAt.value,
+    failure: testStatus.value === 'error'
+      ? {
+        kind: testFailReason.value ? FAILURE_KINDS[testFailReason.value] : 'generic',
+        cookieAuth: isCookieAuth.value,
+        message: testError.value,
+      }
+      : null,
+  }))
 
   // ── 初始化：从 provider.quota 读取已保存的配置 ──
   function syncFromProvider(): void {
@@ -285,12 +356,9 @@ export function useQuotaConfigure(
     if (!p?.quota) {
       enabled.value = false
       // fetcherId 默认值：provider.quota.fetcher > 自动匹配的 preset.fetcher > undefined
-      fetcherId.value = preset.value?.fetcher
-      cookieInput.value = ''
-      apiKeyInput.value = ''
+      applyFetcherId(preset.value?.fetcher)
       // 无 quota 条目 = 读侧兜底 'provider'（与 runtime resolveQuotaCredentialSource 同源）
-      credentialSource.value = resolveQuotaCredentialSource(undefined)
-      workspaceInput.value = ''
+      draft.value = { cookie: '', apiKey: '', credentialSource: resolveQuotaCredentialSource(undefined), workspace: '' }
       testStatus.value = 'idle'
       testError.value = ''
       testFailReason.value = null
@@ -300,14 +368,16 @@ export function useQuotaConfigure(
     }
     enabled.value = p.quota.enabled
     // fetcherId 初始值：手动指定的 quota.fetcher 优先，未设置时 fallback 到自动匹配值
-    fetcherId.value = p.quota.fetcher ?? preset.value?.fetcher
-    // D7 去掩码：密文（cookie / 专属 Key）一律不回填，输入框只承载用户本次的真实输入
-    cookieInput.value = ''
-    apiKeyInput.value = ''
-    // D3 读侧：未显式设置时按既存标记推断（历史数据兼容）；两端调用同一函数避免推断背离
-    credentialSource.value = resolveQuotaCredentialSource(p.quota)
+    applyFetcherId(p.quota.fetcher ?? preset.value?.fetcher)
+    // D7 去掩码：密文（cookie / 专属 Key）一律不回填，输入框只承载用户本次的真实输入；
     // workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
-    workspaceInput.value = p.quota.workspace ?? ''
+    // D3 读侧：未显式设置时按既存标记推断（历史数据兼容）；两端调用同一函数避免推断背离
+    draft.value = {
+      cookie: '',
+      apiKey: '',
+      credentialSource: resolveQuotaCredentialSource(p.quota),
+      workspace: p.quota.workspace ?? '',
+    }
     // 如果已启用，尝试读缓存
     if (p.quota.enabled) {
       loadCached()
@@ -339,7 +409,7 @@ export function useQuotaConfigure(
   }
 
   // provider 变化时同步状态
-  watch(providerRef, syncFromProvider, { immediate: true })
+  watch(() => providerRef.value, syncFromProvider, { immediate: true })
   // preset 变化时：若用户未手动指定 fetcherId，跟随自动匹配值更新默认。
   // 不再 reset 全部状态——用户可能已手动选了 fetcher 或填了 cookie。
   watch(preset, (newPreset) => {
@@ -347,9 +417,9 @@ export function useQuotaConfigure(
     const manualFetcher = p?.quota?.fetcher
     if (manualFetcher) {
       // 已手动指定，保留
-      fetcherId.value = manualFetcher
+      applyFetcherId(manualFetcher)
     } else {
-      fetcherId.value = newPreset?.fetcher
+      applyFetcherId(newPreset?.fetcher)
     }
   })
 
@@ -403,19 +473,19 @@ export function useQuotaConfigure(
     if (!p) return
 
     const savedFetcher = p.quota?.fetcher
-    const draftFetcher = fetcherId.value
+    const draftFetcher = fetcherIdDraft.value
     // 归属判据同 readiness（§7.2 细节 1）：无既存归属不算类型已变
     const typeChanged = savedFetcher !== undefined && draftFetcher !== savedFetcher
-    const source = credentialSource.value
-    const cookieDraft = cookieInput.value.trim()
-    const apiKeyDraft = apiKeyInput.value.trim()
+    const source = draft.value.credentialSource
+    const cookieDraft = draft.value.cookie.trim()
+    const apiKeyDraft = draft.value.apiKey.trim()
 
     configureError.value = ''
 
     // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
     let workspacePayload: string | undefined
     if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(workspaceInput.value)
+      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
       if (!normalized.ok) {
         configureError.value = t(normalized.errorKey)
         return
@@ -450,8 +520,8 @@ export function useQuotaConfigure(
         return
       }
       // 保存成功：密文草稿清空（不回显）；已保存态由 provider 广播 → syncFromProvider 重建
-      cookieInput.value = ''
-      apiKeyInput.value = ''
+      draft.value.cookie = ''
+      draft.value.apiKey = ''
       await testQuery()
     } catch (e) {
       configureError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaSaveAndTestFail')
@@ -477,7 +547,7 @@ export function useQuotaConfigure(
         lastFetchAt.value = result.lastFetchAt
         testStatus.value = 'success'
       } else {
-        // 失败态（A2-4）：reason 透传给 UI（恢复指引文案按 reason 渲染）；旧缓存保留在
+        // 失败态（A2-4）：reason 归一给 UI（恢复指引文案按分档渲染）；旧缓存保留在
         // quotaData 不展示（「查看上次成功数据」展开可见）；lastFetchAt = 最近一次成功时间
         testStatus.value = 'error'
         testFailReason.value = result.reason ?? null
@@ -490,50 +560,12 @@ export function useQuotaConfigure(
     }
   }
 
-  /** 重置全部状态（派生量随底层引用归零自动重算） */
-  function reset(): void {
-    enabled.value = false
-    fetcherId.value = undefined
-    cookieInput.value = ''
-    apiKeyInput.value = ''
-    credentialSource.value = resolveQuotaCredentialSource(providerRef.value?.quota)
-    workspaceInput.value = ''
-    testStatus.value = 'idle'
-    testError.value = ''
-    testFailReason.value = null
-    quotaData.value = null
-    lastFetchAt.value = null
-    configuring.value = false
-    configureError.value = ''
-  }
-
   return {
-    fetcherId,
-    fetcherOptions,
-    enabled,
-    cookieInput,
-    apiKeyInput,
-    credentialSource,
-    providerCredentialAvailable,
-    quotaApiKeyConfigured,
-    providerCredentialPendingSave,
-    workspaceInput,
-    workspaceConfigured,
-    needsWorkspace,
-    readiness,
-    testStatus,
-    testError,
-    quotaData,
-    lastFetchAt,
-    isCookieAuth,
-    authKinds,
-    testFailReason,
-    helpUrl,
-    helpText,
-    configuring,
-    configureError,
+    draft,
+    view,
+    test,
+    selectType,
     setEnabled,
     saveAndTest,
-    reset,
   }
 }

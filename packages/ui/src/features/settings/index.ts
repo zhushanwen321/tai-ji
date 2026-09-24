@@ -35,17 +35,18 @@ export {
 
 export {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
+  QUOTA_CONFIGURE_MODULE_KEY,
   SETTINGS_CONFIG_API_KEY,
   SETTINGS_CHOOSE_DIRECTORY_KEY,
   useSettingsToast,
   useQuotaConfigureFactory,
+  useQuotaConfigureModule,
   useSettingsConfigApi,
   useChooseDirectory,
   type SettingsToast,
-  type QuotaConfigureState,
-  type UseQuotaConfigureFactory,
+  type QuotaConfigureFactory,
+  type QuotaConfigureModule,
   type SettingsConfigApi,
-  type QuotaTestStatus,
   type ChooseDirectoryFn,
 } from './injection-keys'

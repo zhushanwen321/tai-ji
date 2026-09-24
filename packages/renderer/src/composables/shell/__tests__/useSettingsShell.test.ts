@@ -19,7 +19,7 @@ import { mount } from '@vue/test-utils'
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn(), success: vi.fn() }),
 }))
-vi.mock('@/composables/features/model/useQuotaConfigure', () => ({
+vi.mock('@/composables/features/settings/useQuotaConfigure', () => ({
   useQuotaConfigure: vi.fn(),
 }))
 vi.mock('@/api', async (importOriginal) => {

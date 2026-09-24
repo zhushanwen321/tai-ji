@@ -257,7 +257,7 @@ import { config } from '@/api'
 import { getSettingsStore } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
+import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
 import {
   ProviderEditBody,
@@ -268,7 +268,7 @@ import {
   OAuthDialog,
   ScopedModelSection,
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
 import { useProviderPageOauth } from '@/composables/features/settings/useProviderPageOauth'
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
@@ -278,7 +278,7 @@ import { useScopedModels } from '@/composables/features/settings/useScopedModels
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 
 // ui 包组件 renderer 侧依赖经 provide/inject 注入（ui 零 renderer import 铁律）
-provide(USE_QUOTA_CONFIGURE_KEY, useQuotaConfigure)
+provide(QUOTA_CONFIGURE_FACTORY_KEY, useQuotaConfigure)
 const toast = useToast()
 provide(SETTINGS_TOAST_KEY, toast)
 

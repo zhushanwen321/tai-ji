@@ -34,13 +34,13 @@ import {
 import { provideSettingsTransport } from '@taiji/core/domain/settings'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
   SETTINGS_CONFIG_API_KEY,
   applySystemToDom,
 } from '@taiji/ui/features/settings'
 import { createSettingsTransport } from './settings-transport-adapter'
 import { useToast } from '@/composables/useToast'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
+import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { config } from '@/api'
 import { setLocale } from '@/i18n'
 import type { Locale } from '@/i18n'
@@ -84,7 +84,7 @@ export function useSettingsShell(): void {
     info: (m: string) => toast.info(m),
     warning: (m: string) => toast.warning(m),
   })
-  provide(USE_QUOTA_CONFIGURE_KEY, useQuotaConfigure)
+  provide(QUOTA_CONFIGURE_FACTORY_KEY, useQuotaConfigure)
   provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => config.detectSources() })
 
   // matchMedia 系统色监听 + applySystemToDom 兜底

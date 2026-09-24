@@ -9,17 +9,16 @@
  * ui 组件 → inject 取用。与 core 的 TC4 t 注入模式一致（依赖经边界注入，不越界 import）。
  *
  * 类型来源：QuotaPreset / ProviderInfo 来自 @taiji/shared（ui 已依赖）；
- * QuotaConfigureState / QuotaTestStatus 来自 @taiji/core（[BL round1 monorepo S]
- * 契约 SSOT——原为本地逐字段镜像 renderer UseQuotaConfigureReturn，提升 core 后
- * renderer 真实返回类型亦从 core 契约派生，双侧同一类型消除镜像漂移）。
+ * QuotaConfigureModule / QuotaConfigureFactory 契约来自 @taiji/core（[C1] deep module
+ * 契约 SSOT——原 QuotaConfigureState 27 成员扁平契约 + NOOP_FACTORY 逐名镜像已收拢，
+ * 见 core quota-configure-module.ts 文件头注释）。
  */
-import { inject, ref } from 'vue'
-import type { ComputedRef, InjectionKey, Ref } from 'vue'
-import type { ProviderInfo, NormalizedQuotaRow, QuotaPreset, QuotaAuthKind, QuotaCredentialSource, QuotaFetchFailureReason } from '@taiji/shared'
-import type { QuotaConfigureState, QuotaTestStatus, ReadinessMissing } from '@taiji/core'
+import { inject } from 'vue'
+import type { InjectionKey } from 'vue'
+import type { QuotaConfigureFactory, QuotaConfigureModule } from '@taiji/core'
 
-// 状态契约 SSOT re-export（消费方 CodingPlanSection / settings barrel 经本模块取类型）
-export type { QuotaConfigureState, QuotaTestStatus, ReadinessMissing }
+// 契约 SSOT re-export（消费方 CodingPlanSection / settings barrel 经本模块取类型）
+export type { QuotaConfigureFactory, QuotaConfigureModule }
 
 // ── ① Toast ──
 
@@ -45,59 +44,39 @@ export function useSettingsToast(): SettingsToast {
   return v ?? NOOP_TOAST
 }
 
-// ── ② Quota Configure 工厂 ──
+// ── ② Quota Configure deep module（C1 收拢）──
+/**
+ * seam 两段（typed InjectionKey，零 renderer import）：
+ * - renderer 壳（ProviderPage / useSettingsShell）provide `QuotaConfigureFactory`
+ *   （module 实现工厂，入参见 core QuotaConfigureInputs）
+ * - ProviderEditBody 按当前编辑体物化实例并 provide `QUOTA_CONFIGURE_MODULE_KEY`，
+ *   CodingPlanSection 跨过该 seam 直接持有实例（原 23 props / 7 emits / 28 名解构管道已删）
+ *
+ * DI 失败语义（与 ①③ 的 noop fallback 刻意不同——额度配置没有「无状态可用」的降级形态）：
+ * - 工厂缺失（壳未接线）→ 返回 undefined，ProviderEditBody 不渲染 CodingPlanSection（v-if）
+ * - module 缺失（CodingPlanSection 脱离 ProviderEditBody 单独渲染）→ 抛错：空壳渲染会把
+ *   接线错误伪装成「功能正常但没数据」，loud fail 才能让漏接在测试/开发期立刻可见
+ */
+export const QUOTA_CONFIGURE_FACTORY_KEY: InjectionKey<QuotaConfigureFactory> =
+  Symbol('quotaConfigureFactory')
 
-/** 工厂签名：(preset, providerRef) => QuotaConfigureState。与 renderer useQuotaConfigure 同构
- *  （返回态契约 QuotaConfigureState 的 SSOT 在 @taiji/core，见文件头注释）。 */
-export type UseQuotaConfigureFactory = (
-  preset: Ref<QuotaPreset | undefined>,
-  providerRef: Ref<ProviderInfo | null>,
-) => QuotaConfigureState
-
-function noopAsync(): Promise<void> {
-  return Promise.resolve()
+export function useQuotaConfigureFactory(): QuotaConfigureFactory | undefined {
+  const v = inject(QUOTA_CONFIGURE_FACTORY_KEY, null)
+  if (!v && import.meta.env?.dev) {
+    console.warn('[ui/settings] QUOTA_CONFIGURE_FACTORY_KEY not provided; CodingPlanSection will not render')
+  }
+  return v ?? undefined
 }
 
-// 契约 v2（coding-plan-quota-config-ux §7.1）：草稿模型 + readiness/credentialSource，
-// 旧动作成员（selectFetcher/save*/testQuery/toggleEnabled）与 apiKeyConfigured 已移除
-const NOOP_FACTORY: UseQuotaConfigureFactory = () => ({
-  fetcherId: ref<string | undefined>(undefined),
-  fetcherOptions: [],
-  enabled: ref(false),
-  cookieInput: ref(''),
-  apiKeyInput: ref(''),
-  credentialSource: ref<QuotaCredentialSource>('provider'),
-  providerCredentialAvailable: ref(false),
-  quotaApiKeyConfigured: ref(false),
-  providerCredentialPendingSave: ref(false),
-  workspaceInput: ref(''),
-  workspaceConfigured: ref(false),
-  needsWorkspace: ref(false),
-  readiness: ref({ ready: false, missing: [] as ReadinessMissing[] }),
-  testStatus: ref<QuotaTestStatus>('idle'),
-  testError: ref(''),
-  quotaData: ref<NormalizedQuotaRow | null>(null),
-  lastFetchAt: ref<number | null>(null),
-  isCookieAuth: ref(false),
-  authKinds: ref<readonly QuotaAuthKind[]>([]),
-  testFailReason: ref<QuotaFetchFailureReason | null>(null),
-  helpUrl: ref<string | undefined>(undefined),
-  helpText: ref<string | undefined>(undefined),
-  configuring: ref(false),
-  configureError: ref(''),
-  setEnabled: noopAsync,
-  saveAndTest: noopAsync,
-  reset: () => {},
-})
+export const QUOTA_CONFIGURE_MODULE_KEY: InjectionKey<QuotaConfigureModule> =
+  Symbol('quotaConfigureModule')
 
-export const USE_QUOTA_CONFIGURE_KEY: InjectionKey<UseQuotaConfigureFactory> = Symbol('useQuotaConfigure')
-
-export function useQuotaConfigureFactory(): UseQuotaConfigureFactory {
-  const v = inject(USE_QUOTA_CONFIGURE_KEY, null)
-  if (!v && import.meta.env?.dev) {
-    console.warn('[ui/settings] USE_QUOTA_CONFIGURE_KEY not provided; using noop fallback')
+export function useQuotaConfigureModule(): QuotaConfigureModule {
+  const v = inject(QUOTA_CONFIGURE_MODULE_KEY, null)
+  if (!v) {
+    throw new Error('[ui/settings] QUOTA_CONFIGURE_MODULE_KEY not provided; CodingPlanSection must render under ProviderEditBody')
   }
-  return v ?? NOOP_FACTORY
+  return v
 }
 
 // ── ③ Config API（@/api 的 detectSources 等）──
@@ -133,6 +112,3 @@ export const SETTINGS_CHOOSE_DIRECTORY_KEY: InjectionKey<ChooseDirectoryFn> =
 export function useChooseDirectory(): ChooseDirectoryFn | undefined {
   return inject(SETTINGS_CHOOSE_DIRECTORY_KEY, undefined)
 }
-
-// ComputedRef 未在本文件直接使用（类型来自 vue 顶层 import），保留 import 供未来扩展。
-export type { ComputedRef }
