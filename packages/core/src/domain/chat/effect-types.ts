@@ -46,10 +46,14 @@ export interface MessageEffectContext {
   clearPendingSend: (sessionId: string) => void
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。
-   * 消费方两处：统一提交的乐观气泡 + 送达回执的 ② 纯文本降级入流（无本地气泡的外来投递）。
+   * 可选 id：提供则气泡沿用该 id，缺省自生成 `u-<uuid>`。保号消费方 = 送达回执的两分支
+   * 入流（① morph 段 / ② 外来纯文本降级，effects/user-delivery）——重建气泡沿用提交时
+   * clientUuid，使 live 窗口（未刷新，reconcile 仅切入/重试触发）的已送达消息可按
+   * clientUuid 定位（消息撤回入口的结构前提：换号不在映射、不匹配文件末尾标记，撤回
+   * 定位双通道会构造性 miss）。乐观插入（统一提交）不传 id，保持自生成现行为。
    * [B1 退役] 前身 queue_update 计数腿（drainN/reconcilePending）已随投递所有权内核删除。
    */
-  appendUser: (sessionId: string, segments: Segment[]) => string
+  appendUser: (sessionId: string, segments: Segment[], id?: string) => string
   /**
    * [W21] 重构 entry 喂 store 内 per-session reducer state（applyEntry）。
    * message_end / tool_call_end 等 entry 载体帧的 handler 经此把实时 feed 喂入与文件重放

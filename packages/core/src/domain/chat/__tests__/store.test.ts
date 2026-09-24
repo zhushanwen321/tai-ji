@@ -454,6 +454,20 @@ describe('createChatStore factory', () => {
       expect(id).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     })
 
+    it('可选 id 参数：缺省自生成（乐观插入现行为回归）/ 提供则气泡沿用（回执保号）', () => {
+      // 缺省：两次调用各自生成新 u-<uuid>（乐观插入路径——useChat.submitNewMessage 不传 id）
+      const a = sut.store.appendUser('s-w2-id', textToSegments('a'))
+      const b = sut.store.appendUser('s-w2-id', textToSegments('b'))
+      expect(a).toMatch(/^u-/)
+      expect(b).toMatch(/^u-/)
+      expect(a).not.toBe(b)
+      // 提供：送达回执重建保号（消息撤回 U8）——entry.id 沿用 → 气泡 id = 传入 id
+      const kept = 'u-11111111-2222-3333-4444-555555555555'
+      const returned = sut.store.appendUser('s-w2-id', textToSegments('c'), kept)
+      expect(returned).toBe(kept)
+      expect(sut.store.getMessages('s-w2-id').at(-1)!.id).toBe(kept)
+    })
+
     it('live ≡ reload（user 类型）：appendUser 派生的 ref 投影 ≡ 真实 message_end 帧喂入的 reducer 投影 ≡ 同形态 entry 重放', () => {
       const sid = 's-w2-equiv'
       // live 乐观（ref 投影）

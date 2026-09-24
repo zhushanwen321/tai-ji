@@ -13,6 +13,8 @@
  * - direct 车道回执：无 morph 段 → 不重复入流，仅占位回收
  * - 未命中下落 ②：无标记 / 标记不命中投影 → 纯计数兜底（现状链）
  * - 幂等：已 delivered 条目二次回执不重复消费
+ * - [消息撤回 U8] 回执入流保号：两分支（① morph 段 / ② 外来纯文本降级）appendUser
+ *   第三参均传原 clientUuid——重建气泡沿用提交 id（live 窗口撤回定位锚）
  * - 投影生命周期：replaceDeliveryProjection 整体替换 / 空帧删键 / captureMorphSegments
  *   一次性消费
  *
@@ -103,8 +105,9 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     // 投影转 delivered（队列区随帧隐去；u3c 渲染消费）
     expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
     // morph 段按原 segments 入流（overlay-only 插入点；气泡已 morph 移除后恢复为正常气泡）
+    // [消息撤回 U8] 分支①保号：第三参传原 clientUuid——重建气泡沿用提交 id（撤回定位锚）
     expect(ctx.appendUser).toHaveBeenCalledTimes(1)
-    expect(ctx.appendUser).toHaveBeenCalledWith(SID, segs)
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, segs, CLIENT_UUID)
     // 占位回收：1 → 0（本帧即确认帧，② 不再重复扣）
     expect(ctx.inflightOf()).toBe(0)
     // 帧消费终止：权威 reducer 喂入无条件保留（调用方在 ① 之前执行）
@@ -190,6 +193,40 @@ describe('captureMorphSegments（morph 段暂存，送达回执消费）', () =>
 
     dispatchMessageEvent(ctx, SID, userEndFrame(SID, 'hi', UUID))
 
-    expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '第二版' }])
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '第二版' }], CLIENT_UUID)
+  })
+})
+
+// ── [消息撤回 U8] 回执入流保号（两分支重建气泡沿用原 id）──────────────────────
+
+describe('送达回执入流保号（消息撤回 U8：重建气泡沿用原 clientUuid）', () => {
+  it('分支②外来纯文本降级入流：无 morph 段无本地气泡的 steer 条目 → appendUser 收到原 clientUuid', () => {
+    // 外来条目（session_manager send / 收养形态）：内核投影有条目、无本地乐观气泡、
+    // 未捕获 morph 段 → 显示责任由 ② 纯文本降级分支承接，且保号传条目 clientUuid
+    replaceDeliveryProjection(SID, [entry()])
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '外来消息', UUID))
+
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    // 保号：第三参 = 内核条目 clientUuid（外来形态可能为裸 uuid，照保——见 store.appendUser 注释）
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '外来消息' }], CLIENT_UUID)
+    expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
+  })
+
+  it('分支②外来条目为内核裸 uuid 形态：照保原 id（保号语义优先于 u- 形态约束）', () => {
+    const bareUuid = '5b1a6c2e-8d34-4f07-b1c5-92d7e83c4402'
+    replaceDeliveryProjection(SID, [entry({ clientUuid: bareUuid })])
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '裸 uuid 条目', bareUuid))
+
+    expect(ctx.appendUser).toHaveBeenCalledWith(
+      SID,
+      [{ type: 'text', text: '裸 uuid 条目' }],
+      bareUuid,
+    )
   })
 })

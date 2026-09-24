@@ -677,15 +677,20 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 送达回执的 ② 纯文本降级入流），返回值保持 `u-<uuid>` 形态（clientUuid 映射链不断）。
    *
    * overlay content 覆写回原 segments：entry 反解 content 是纯文本窄化
-   * （skill/file/mention/image badge 不可从 entry 重放推导——重开侧由 segments sidecar +
+   *（skill/file/mention/image badge 不可从 entry 重放推导——重开侧由 segments sidecar +
    * clientUuidMap 回填，textToSegments 已知限制），live 渲染层必须保留原始 segments；
    * 引用原样透传（morph 暂存段经送达回执取出的原引用直接进消息流）。
    * piEntryId 同点剥除（见实现内注释：客户端 entry id 非真实 pi entry id，防 fork 误定位）。
+   *
+   * [消息撤回 U8] 可选 id：送达回执入流重建时传提交 clientUuid 保号（气泡 id 与内核
+   * 条目 id / morph 前乐观气泡 id 对齐——live 窗口撤回定位的锚，见 effect-types
+   * appendUser 注释）；缺省自生成（乐观插入现行为）。id 任意形态照用（外来条目可能为
+   * 内核裸 uuid），无 u- 前缀校验——保号语义优先于形态约束。
    */
-  function appendUser(sessionId: string, segments: Segment[]): string {
+  function appendUser(sessionId: string, segments: Segment[], id?: string): string {
     const entry: PiMessageEntry = {
       type: 'message',
-      id: `u-${crypto.randomUUID()}`,
+      id: id ?? `u-${crypto.randomUUID()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       message: { role: 'user', content: segments, timestamp: Date.now() },

@@ -681,6 +681,9 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     const users = f.chatStore.getMessages('m4').filter((m) => m.role === 'user')
     expect(users).toHaveLength(1)
     const delivered = users[0]!
+    // [消息撤回 U8] id 稳定端到端：morph → 回执重建 → 气泡 id 不变（=== 提交时
+    // clientUuid）——live 窗口（未刷新）撤回入口按 clientUuid 定位的结构前提
+    expect(delivered.id).toBe(bubbleId)
     expect(delivered.status).toBe('complete')
     // 段保真：skill badge 段引用恒等（morph 暂存搬运非重建）+ 序列化文本与提交原样一致
     expect(toRaw(delivered.content)).toBe(segs)
@@ -707,11 +710,13 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     expect(f.chatStore.getMessages('m5').filter((m) => m.role === 'user')).toHaveLength(0)
     expect(getDeliveryProjection('m5')).toHaveLength(2)
     // 投递序回执：第一条先回（气泡回填），第二条后回——回填顺序与发送序一致
-    //（回执入流产生新消息 id（appendUser 生成新 u-<uuid>），按 content 文本断言顺序）
+    // [消息撤回 U8] 回执入流保号：重建气泡沿用提交时 clientUuid，可直接断言 id
     f.emit('m5', userEndFrame('m5', '第一条', ids[0]!.slice(2)))
     f.emit('m5', userEndFrame('m5', '第二条', ids[1]!.slice(2)))
     const users = f.chatStore.getMessages('m5').filter((m) => m.role === 'user')
     expect(users).toHaveLength(2)
+    expect(users[0]!.id).toBe(ids[0]!)
+    expect(users[1]!.id).toBe(ids[1]!)
     const textOf = (m: (typeof users)[number]) =>
       (Array.isArray(m.content) ? (m.content as unknown as Array<{ type: string; text?: string }>) : [])
         .filter((s) => s.type === 'text')

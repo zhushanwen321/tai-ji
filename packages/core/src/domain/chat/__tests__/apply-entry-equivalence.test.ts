@@ -996,8 +996,16 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     const replay = replayState.messages[0]!
 
     expect(stripHetero(live)).toEqual(stripHetero(replay))
-    // timestamp 异源容差：live 客户端时钟窗 / 重放 pi 落盘时刻 2000（fixture 值），不直比
-    expectIdShapeAndTsWindow(live, replay, [t0, t1], 2000)
+    // [消息撤回 U8] id 保号（外来形态单列断言，不走共享 helper 的 u- 形态断言）：live
+    // 气泡 id = 内核条目 clientUuid（外来形态为裸 uuid——保号语义优先于 u- 形态约束，
+    // store.appendUser 注释）；重放 id 为 pi uuidv7，异源不等
+    expect(live.id).toBe(foreignId)
+    expect(replay.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(live.id).not.toBe(replay.id)
+    // timestamp 异源容差（共享 helper 同款断言）：live 客户端时钟窗 / 重放 pi 落盘时刻 2000
+    expect(live.timestamp).toBeGreaterThanOrEqual(t0)
+    expect(live.timestamp).toBeLessThanOrEqual(t1)
+    expect(replay.timestamp).toBe(2000)
 
     // reducer 权威镜像同构（多 text part 拼接 + 标记剥离两处同源点的直接断言）
     const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.messages

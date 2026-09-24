@@ -204,6 +204,11 @@ function extractUserContentText(entry: PiMessageEntry): string {
  * submit 每条挂 1，回执即其确认帧）+ 返回 true（帧消费终止，调用方不再走 ② 计数兜底）。
  * 未命中返回 false（无标记 / 标记不命中投影——外来直发、帧缺失形态，落 ② 现状链）。
  *
+ * [消息撤回 U8] 两分支入流均传 hit.clientUuid 保号：重建气泡沿用提交时 clientUuid
+ * （= morph 前乐观气泡 id = 内核条目 id，三者同源）。保号是 live 窗口撤回入口的结构
+ * 前提——换新 `u-<uuid>` 会使该消息在撤回定位双通道（custom entry 映射 / 裸标记末尾
+ * 锚）构造性 miss（no-mapping 空洞，且 live 窗口 reconcile 仅切入/重试触发、无自愈）。
+ *
  * [HISTORICAL ② 前身] 退役的腿 2 ③「includes 兜底」以 queue_update 快照文本匹配为据、
  * 插入含标记的原文纯文本；本分支以「内核条目身份 + 剥标记文本」同职责重建（数据源从
  * 已退役的 queue_update 快照换成 session.delivery 投影，D7 单一数据源）。
@@ -235,11 +240,13 @@ export function confirmKernelDeliveryOnMessageEnd(
   const isForeignReceipt = segments === undefined && !hasLocalBubble(ctx, sid, hit.clientUuid)
   if (segments) {
     // ① morph 段入流（气泡已移除的条目按原 segments 恢复为正常 user 气泡——overlay-only，
-    // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）
-    ctx.appendUser(sid, segments)
+    // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）；
+    // 保号传 hit.clientUuid（= 被移除乐观气泡的 id——morph key 同源），见函数头 [U8] 注释
+    ctx.appendUser(sid, segments, hit.clientUuid)
   } else if (hit.lane !== 'direct' && !hasLocalBubble(ctx, sid, hit.clientUuid)) {
-    // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示
-    ctx.appendUser(sid, textToSegments(text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()))
+    // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示；
+    // 保号传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保号语义优先于形态）
+    ctx.appendUser(sid, textToSegments(text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()), hit.clientUuid)
   }
   if (isForeignReceipt) logForeignReceiptDecrement(sid, hit)
   // inflight 占位回收：统一 submit 的每条乐观气泡挂 1，本帧即其确认帧（② 不再重复扣）
