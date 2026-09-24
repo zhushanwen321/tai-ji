@@ -58,8 +58,9 @@ export default {
     sendBusy: '会话正在处理中，请稍候再发送',
     sendEmptyHint: '请输入内容后再发送',
     sendHint: '输入内容后发送',
-    steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮…',
-    inputHint: '描述你想让 AI 做什么，或 # 文件、/ 命令…',
+    steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮 · Shift+⏎ 换行…',
+    inputHint: '描述你想让 AI 做什么…（/ 命令 · $ 文件 · # 会话 · {\'@\'} 子代理 · ! bash · Shift+⏎ 换行 · ↑/↓ 历史 · Shift+Tab 思考档 · Ctrl+P/Ctrl+Shift+P 模型）',
+    deferHint: '会话占用中，⏎ 将排队、空闲后自动发送…',
     addContent: '添加内容（附件 / 命令）',
     attach: '附件',
     image: '图片',
@@ -204,6 +205,8 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
+    // 指标聚合入口（W3a 单图标聚合按钮，hover 出容量+速度+缓存聚合页）title
+    metricsAggregateTitle: '指标',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',
@@ -390,6 +393,8 @@ export default {
     searchPlaceholder: '搜索模型…',
     noMatch: '无匹配模型',
     placeholder: '\u2026',
+    // 模型聚合入口（W3a 单图标聚合按钮，click 出模型列表+思考档位）title
+    modelThinkingAggregateTitle: '模型 · 思考等级',
   },
   thinkingLevel: {
     title: '思考级别',

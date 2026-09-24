@@ -165,4 +165,21 @@ describe('ModelSelectPopover 纯受控 + store 数据源', () => {
     // enabled===false 的 claude-haiku 被过滤
     expect(allIds).not.toContain('claude-haiku')
   })
+
+  it('S4: 默认触发器模型名不带 truncate/max-w 截断 class（非聚合态恒完整，两态规格）', async () => {
+    // 三步聚合 S4：模型名只有「完整展示 / 聚合按钮」两态——展开态 DOM 不得携带任何截断 class；
+    // 名字过长由 fit 实测回路升级到聚合按钮，而非在展开态内省略（验收判据 1，2026-09-25）。
+    getSettingsStore().models.value = MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    const trigger = wrapper.find('[title="切换模型"]')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('Claude 4')
+    const nameSpan = trigger.find('span')
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).not.toContain('truncate')
+    expect(trigger.html()).not.toContain('max-w-[')
+  })
 })

@@ -451,7 +451,27 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
       expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
       expect(buttons[buttons.length - 1]?.attributes('title')).toContain('发送')
     }
-    // 档位本身如实驱动（证明确实经过三档，而非恒 expanded）
-    expect(bar().attributes('data-tier')).toBe('narrow')
+    // 密度档位本身如实驱动（证明确实经过退化，而非恒 fit=0 展开）
+    // [HISTORICAL] 原断言 data-tier='narrow'（固定阈值 tier 轴：700/560/400 → expanded/mid/narrow）
+    // ——该轴已随三步聚合实测化退役；现行轴 = data-fit（0–3 实测 fit 级，判据 = 可用宽 vs 两簇
+    // 占宽）。jsdom 无真实几何（clientWidth/占宽恒 0 → 需求 0 → 恒 fit=0），故本探针须打桩几何
+    // （composer-bar-density-wiring 的 dispatchFitGeometry 同法）才走退化；data-fit 0→3 全档
+    // 由 wiring 测试的纯接线面承接，此处只证全量挂载下回路真实驱动。
+    const probeBar = bar().element as HTMLElement
+    const probeLeft = probeBar.querySelector<HTMLElement>('[data-composer-cluster="left"]')
+    const probeRight = probeBar.querySelector<HTMLElement>('[data-composer-cluster="right"]')
+    if (!probeLeft || !probeRight) throw new Error('底栏两簇节点缺失：模板与 fit 回路不同步？')
+    Object.defineProperty(probeBar, 'clientWidth', { value: 200, configurable: true })
+    vi.spyOn(probeLeft, 'getBoundingClientRect').mockReturnValue({ width: 150 } as DOMRect)
+    vi.spyOn(probeRight, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    ManualResizeObserverStub.created()[0].dispatch([
+      { target: probeBar, contentRect: { width: 200 } as DOMRectReadOnly },
+    ])
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+      else setTimeout(resolve, 0)
+    })
+    await settle()
+    expect(Number(bar().attributes('data-fit'))).toBeGreaterThan(0)
   })
 })
