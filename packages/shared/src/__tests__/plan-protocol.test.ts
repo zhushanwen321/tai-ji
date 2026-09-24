@@ -7,9 +7,13 @@
  *  - 新 RPC session.getPlanState / session.abortPlan 在 ClientMessageType 联合 +
  *    ClientMessageMap + ReplyPayloadMap 三处登记；getPlanState reply 复用
  *    session.planState 广播 payload（getSubagents 先例），abortPlan 为 ack 型
- *  - PlanStateView 字段与 plan-state entry schema 一致：四必填 + 四 optional——
- *    optional 性是 D4 向后兼容契约（旧 entry 无新字段，前端逐字段判存在降级），
+ *  - PlanStateView 字段与 plan-state entry schema 一致：四必填 + 六 optional——
+ *    optional 性是向后兼容契约（旧 entry 无新字段，前端逐字段判存在降级），
  *    optional 改必填 = 旧 session 重开派生 View 缺字段编译红，本测试机器拦截。
+ *    六 optional = D4 四扩展字段（skills/docs/reviewState/reviewStateSource）+
+ *    状态机显式化 D2 加员（state/resumeHint）——state 直接引用 extension-protocol 的
+ *    PlanLifecycleState（跨包 AssertExact 锁）；reviewState/reviewStateSource 已降级为
+ *    只读兼容位（新派生不透出，混装格兜底映射输入）。
  *    reviewStateSource（降级态来源标记，plan-mode-ux-refactor §3.4）旧 entry 必无——
  *    重放兼容断言用 __tests__/fixtures/plan-state-entries.ts 的旧 entry fixture
  *    （含 awaiting reviewState、无 reviewStateSource，可被后续单元复用导出）
@@ -39,7 +43,7 @@ import type {
   PlanDocMeta,
 } from '../protocol'
 // 对侧同形契约源：跨包断言的另一半（devDependency，仅类型消费）
-import type { PlanDocMeta as ProtocolPlanDocMeta } from '@zhushanwen/extension-protocol'
+import type { PlanDocMeta as ProtocolPlanDocMeta, PlanLifecycleState } from '@zhushanwen/extension-protocol'
 // 旧 entry 重放 fixture（升级前落盘形态：awaiting reviewState + 无 reviewStateSource）
 import { LEGACY_AWAITING_PLAN_STATE_ENTRY, LEGACY_AWAITING_PLAN_STATE_VIEW } from './fixtures/plan-state-entries'
 
@@ -74,18 +78,23 @@ type _Assert_AbortPlan_reply_key = AssertHasKey<ReplyPayloadMap, 'session.abortP
 // ack 型（状态变化经投影链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
 type _Assert_AbortPlan_reply_void = AssertExact<ReplyPayloadMap['session.abortPlan'], void>
 
-// ── PlanStateView 字段契约：四必填 + 四 optional（optional 性 = D4 向后兼容契约）──
-type _Assert_View_keys = AssertExact<keyof PlanStateView, 'isActive' | 'planFilePath' | 'requirement' | 'templateName' | 'skills' | 'docs' | 'reviewState' | 'reviewStateSource'>
+// ── PlanStateView 字段契约：四必填 + 六 optional（optional 性 = 向后兼容契约）──
+type _Assert_View_keys = AssertExact<keyof PlanStateView, 'isActive' | 'planFilePath' | 'requirement' | 'templateName' | 'skills' | 'docs' | 'state' | 'resumeHint' | 'reviewState' | 'reviewStateSource'>
 type _Assert_View_isActive = AssertExact<PlanStateView['isActive'], boolean>
 type _Assert_View_planFilePath = AssertExact<PlanStateView['planFilePath'], string | null>
 type _Assert_View_requirement = AssertExact<PlanStateView['requirement'], string | null>
 type _Assert_View_templateName = AssertExact<PlanStateView['templateName'], string | null>
-// 四个扩展字段的 optional 编码精确断言：`skills?: string[]` 的字段类型是 `string[] | undefined`
+// 扩展字段的 optional 编码精确断言：`skills?: string[]` 的字段类型是 `string[] | undefined`
 //（改必填会在此 TS2344 红——旧 entry 派生的 View 无新字段，缺字段即兼容破坏）
 type _Assert_View_skills_optional = AssertExact<PlanStateView['skills'], string[] | undefined>
 type _Assert_View_docs_optional = AssertExact<PlanStateView['docs'], PlanDocMeta[] | undefined>
 type _Assert_View_reviewState_optional = AssertExact<PlanStateView['reviewState'], 'awaiting' | 'revising' | undefined>
 type _Assert_View_reviewStateSource_optional = AssertExact<PlanStateView['reviewStateSource'], 'resubmit' | undefined>
+// 状态机显式化 D2 加员（state/resumeHint）的 optional 编码精确断言：state 字段类型**直接
+// 引用 extension-protocol 的 PlanLifecycleState**（跨包相对断言——镜像副本/值域漂移/改必填
+// 任一即红）；resumeHint 与旧字段 reviewStateSource 同值域（取代式演进的映射契约面）
+type _Assert_View_state_optional = AssertExact<PlanStateView['state'], PlanLifecycleState | undefined>
+type _Assert_View_resumeHint_optional = AssertExact<PlanStateView['resumeHint'], 'resubmit' | undefined>
 // 反向锚点：'explain' 交互已删，联合仅 'resubmit'（旧 entry 存量 'explain' 由 runtime 投影
 // 归无值）——若有人把 'explain' 加回联合，下方 @ts-expect-error 无错可压即编译红
 // @ts-expect-error reviewStateSource 不接受已删除的 'explain'
@@ -125,6 +134,8 @@ const _planProtocolAssertsEnforced = [
   _enforceTrue<_Assert_View_docs_optional>(),
   _enforceTrue<_Assert_View_reviewState_optional>(),
   _enforceTrue<_Assert_View_reviewStateSource_optional>(),
+  _enforceTrue<_Assert_View_state_optional>(),
+  _enforceTrue<_Assert_View_resumeHint_optional>(),
   _enforceTrue<_Assert_Doc_keys>(),
   _enforceTrue<_Assert_Doc_fileName>(),
   _enforceTrue<_Assert_Doc_absPath>(),

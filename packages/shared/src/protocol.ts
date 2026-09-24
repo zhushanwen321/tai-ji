@@ -29,6 +29,11 @@ import type { UsageStatsResult } from './usage-stats'
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
+// plan 生命周期状态类型（plan 状态机显式化 D2）：经包出口（@zhushanwen/extension-protocol）
+// 直接引用 PlanLifecycleState（canonical = extensions/plan/state-machine，barrel 已 re-export），
+// type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
+// plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
+import type { PlanLifecycleState } from '@zhushanwen/extension-protocol'
 
 /**
  * 测试连接按协议分组的单行结果（SSOT，2026-09-10 review S-9 手写重复收编）：
@@ -1457,13 +1462,31 @@ export interface PlanDocMeta {
 /**
  * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
  *
- * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
- * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
+ * 生命周期状态 `state`（plan 状态机显式化 D1/D2）：类型**直接引用 extension-protocol 的
+ * `PlanLifecycleState`**（零依赖纯模块 type-only 引入，零运行时面；「本地同形」惯例在此不适用，
+ * 直接引用消除镜像漂移面）。新派生（runtime plan-state-extractor / 扩展 reconstructPlanState
+ * 两个归一点）恒携带 `state`：旧 entry 经 reviewState 映射（awaiting→reviewing /
+ * revising→revising / 无→planning|idle 按 isActive），新 entry 直读；映射契约 fixture =
+ * `__tests__/fixtures/plan-state-entries.ts`（旧 entry → 新 View 等价对，归一点实现各按此对账）。
+ *
+ * optional 性是兼容契约（D2 读方③）：「旧 runtime × 新扩展」混装格旧 extractor 白名单剥
+ * 未知字段，View 可能缺 `state`——renderer 读侧兜底映射（state ?? reviewState 映射 ?? 按
+ * isActive 推断）保退化不双盲；optional 改必填 = 旧 View 形态编译红（plan-protocol.test.ts
+ * 契约锁）。
+ *
+ * 旧字段 reviewState/reviewStateSource 为**只读兼容位（deprecated）**：新派生停写停透出
+ * （D2 取代式演进，新写只落 state/resumeHint/selfReview），保留于契约供混装格兜底映射
+ * 作输入（reviewStateSource:'resubmit' → resumeHint 同义映射）。
+ *
+ * resumeHint（D2）：降级态等待原因，取代 reviewStateSource 语义——仅 E3 重挂时落 'resubmit'，
+ * 清除点三处（resetPlanState / 进入重置组 / submit-review 转移落盘）；不变量：只描述当前降级
+ * 等待的原因，不跨轮残留。仅 state 降级等待态有语义。
+ *
+ * selfReview **不投影进本帧**（D9③：消费面 = 审批请求帧 + E3 扩展内读 + entry 比较基线，
+ * 到此为止）；planState 帧有界前提不扩展。
+ * 四个必填字段是 entry schema v1 原有字段；optional 字段逐字段判存在降级显示
  * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
- * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
- * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
- * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
- * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
+ * planFilePath 单文件）。optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  */
 export interface PlanStateView {
   isActive: boolean
@@ -1474,14 +1497,25 @@ export interface PlanStateView {
   skills?: string[]
   /** 产物文档清单（产物 tab 由 docs.length 驱动，与 isActive 解耦——退出/执行后仍可回看） */
   docs?: PlanDocMeta[]
-  /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
+  /**
+   * plan 生命周期状态（D1 八值）——新派生恒携带（旧 entry 经映射 / 新 entry 直读，见头注释）；
+   * 混装格缺失时由读侧兜底映射（state ?? reviewState 映射 ?? 按 isActive 推断）。
+   * 阶段指示（①②③）由 derivePhase/推导承载，不落盘（ext-simplify-06 D6 延续）。
+   */
+  state?: PlanLifecycleState
+  /**
+   * 降级态等待原因（D2 resumeHint，取代 reviewStateSource 语义）：'resubmit' = 会话重启（E3）
+   * 后 agent 尚未重新提交审批。不跨轮残留（清除点三处，见头注释）。
+   */
+  resumeHint?: 'resubmit'
+  /**
+   * @deprecated 只读兼容位（旧 schema）——新派生不透出（D2）；仅供混装格兜底映射读。
+   * awaiting = 文档就绪等审批；revising = 修订中。
+   */
   reviewState?: 'awaiting' | 'revising'
   /**
-   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
+   * @deprecated 只读兼容位（旧 schema，→ resumeHint 同义映射）——新派生不透出（D2）。
    * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
-   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
-   * 缺省 = 来源未知，渲染通用降级文案（恢复入口 + 退出照给，不猜测来源）。
-   * 仅 reviewState 有值时有语义。
    */
   reviewStateSource?: 'resubmit'
 }

@@ -192,6 +192,18 @@ pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--ski
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
+### 计划生命周期状态机（Plan Lifecycle State Machine）
+
+plan 模式流程的单一显式状态契约（状态散落三处 → 任意两者漂移即产「僵尸/谎言」UI 的根因修复）。8 存储态 `idle / planning / reviewing / revising / approved / dispatching / completed / exited`（`idle` = 无 plan 缺省；终态两值 `completed`（批准并派发执行）/ `exited`（主动退出）共享全部终态规则，仅留诊断/审计区分）+ `transition(state, event)` 纯函数转移表（守卫集中一处；非法转移返回 `{ ok: false }` 由调用方降级，不 throw 炸 turn；副作用不进返回值）+ `derivePhase` 呈现映射（8 存储态 → 5 呈现相位：规划中 = planning|revising / 待审批 = reviewing / 已批准 = approved|dispatching / 终态 = completed|exited 同映 / 无 plan = idle——用户口述四主态是呈现层，不是存储）。状态写全走转移函数；挂起事实唯一权威 = runtime pending 注册表，entry 不镜像挂起。
+
+**代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（契约 SSOT，全边表 19 合法边 / 53 非法格）；消费面清单与勾销锚 = 同目录 `consumers.md`。
+
+### plan 状态机事件（Plan Lifecycle Event）
+
+状态机边的名字（9 值闭集）：`enter`（进入/新一轮，idle|终态 → planning）/ `submit`（submit-review 重挂，planning|revising → reviewing）/ `revise`（用户评论修订，reviewing → revising）/ `dismiss`（用户搁置——非破坏协议级决策，reviewing → planning，被搁置的审批不复活）/ `review_aborted`（挂起期外部解散，如 turn abort：reviewing → planning；dispatching → approved，批准事实保留不倒退）/ `approve`（确认执行意向——reviewing|approved → dispatching 进入执行方式选择；含「批准后重调 complete 重新选执行方式」，事件命名裁决见 state-machine.ts 模块头）/ `exec_chosen`（选定执行方式并派发，dispatching → completed）/ `later`（用户显式「暂不执行」，dispatching → approved，不是解散不进解散文案桶）/ `exit`（退出 plan 模式，任何非终态 → exited）。归口点按 `via: 'later' | 'dissolved'` 判别选择 `later` / `review_aborted` 边，不从 result/details 反推。
+
+**代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（`PlanLifecycleEvent` + 边表）。
+
 ### PLAN_REVIEW_MARKER
 
 plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染两键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise 必带 `{ quote, comment }[]`）。
