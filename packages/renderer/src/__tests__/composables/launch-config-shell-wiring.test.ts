@@ -21,7 +21,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/launch-config-shell-wiring.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { createPinia, getActivePinia, setActivePinia } from 'pinia'
@@ -108,7 +108,13 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { supportedLevelsOf } from '@/composables/features/new-task/supported-levels'
-import { createSessionFlow, getSettingsStore } from '@taiji/core'
+import {
+  createSessionFlow,
+  getSettingsStore,
+  provideSettingsTransport,
+  __resetSettingsTransportForTesting,
+} from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import {
   __resetLastUsedModelForTesting,
   recordLastUsedModel,
@@ -117,6 +123,20 @@ import {
 } from '@taiji/core/domain/composer'
 import { usePresetStore } from '@/stores/preset'
 import Composer from '@/components/panel/Composer.vue'
+
+// [C3] preset 域调用经 SettingsTransport seam 桩注入（usePiPresets.loadPresets 的数据源探针；
+// 替换原 '@/api' 门面 preset mock 的消费面）。
+beforeEach(() => {
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetApiMock.list,
+    getDefaultPreset: presetApiMock.getDefault,
+    setDefaultPreset: presetApiMock.setDefault,
+  }))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
+})
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }

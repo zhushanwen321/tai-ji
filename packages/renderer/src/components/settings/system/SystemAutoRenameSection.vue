@@ -78,16 +78,8 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { type SystemSettings } from '@taiji/core'
+import { getSettingsTransport, type SystemSettings } from '@taiji/core'
 import type { RenameMode } from '@taiji/shared'
-import {
-  getAutoRenameEnabled,
-  getRenameMode,
-  getRenameModel,
-  setAutoRenameEnabled,
-  setRenameMode,
-  setRenameModel,
-} from '@taiji/core/transport/api/domains/settings'
 import { useToast } from '@/composables/useToast'
 import {
   MODEL_UNSET_SENTINEL,
@@ -105,6 +97,9 @@ defineProps<{
 defineEmits<{
   update: [patch: Partial<SystemSettings>]
 }>()
+
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
@@ -152,21 +147,21 @@ async function loadConfig(): Promise<void> {
   // 默认值会随用户操作直接落盘）。
   let failed = false
   try {
-    const res = await getAutoRenameEnabled()
+    const res = await transport.getAutoRenameEnabled()
     autoRenameEnabled.value = res.enabled
   } catch (e) {
     console.warn('[SystemAutoRenameSection] failed to load auto-rename state:', e)
     failed = true
   }
   try {
-    const res = await getRenameModel()
+    const res = await transport.getRenameModel()
     renameModel.value = res.model
   } catch (e) {
     console.warn('[SystemAutoRenameSection] failed to load rename model:', e)
     failed = true
   }
   try {
-    const res = await getRenameMode()
+    const res = await transport.getRenameMode()
     renameMode.value = res.mode
   } catch (e) {
     console.warn('[SystemAutoRenameSection] failed to load rename mode:', e)
@@ -185,7 +180,7 @@ async function onSaveAutoRename(enabled: boolean): Promise<void> {
   const prev = autoRenameEnabled.value
   autoRenameEnabled.value = enabled
   try {
-    await setAutoRenameEnabled(enabled)
+    await transport.setAutoRenameEnabled(enabled)
     toastInfo(t('settings.system.saved'))
   } catch (e) {
     autoRenameEnabled.value = prev
@@ -203,7 +198,7 @@ async function onRenameModelChange(value: unknown): Promise<void> {
   const prev = renameModel.value
   renameModel.value = next
   try {
-    const reply = await setRenameModel(next)
+    const reply = await transport.setRenameModel(next)
     renameModel.value = reply.model
     toastInfo(t('settings.system.saved'))
   } catch (e) {
@@ -227,7 +222,7 @@ async function onRenameModeChange(value: unknown): Promise<void> {
   try {
     // 成功后回填 runtime 归一后的生效值（reply.mode，非法值由 runtime 归一为默认 first-stop），
     // 避免本地乐观值与实际生效值漂移
-    const reply = await setRenameMode(value)
+    const reply = await transport.setRenameMode(value)
     renameMode.value = reply.mode
     toastInfo(
       !autoRenameEnabled.value && value !== 'agent-tool'

@@ -59,11 +59,15 @@ vi.mock('@/api', () => ({
 
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
   useToast().toasts.value = []
   configMock.previewImportProviders.mockReset()
@@ -84,6 +88,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

@@ -20,10 +20,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { Trash2 } from '@lucide/vue'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import PresetListSection from '@/components/settings/preset/PresetListSection.vue'
 import PresetDetailSection from '@/components/settings/preset/PresetDetailSection.vue'
 
-/** mock @/api preset 域（TC7 容器测试；usePiPresets 唯一外部依赖）。 */
+/** mock preset 域（TC7 容器测试；usePiPresets 唯一外部依赖）——[C3] 经 seam 桩注入。 */
 const presetApiMock = vi.hoisted(() => ({
   list: vi.fn(),
   getDefault: vi.fn(),
@@ -64,9 +66,19 @@ let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] preset 域调用经 SettingsTransport seam 桩注入（逐名映射）
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetApiMock.list,
+    getDefaultPreset: presetApiMock.getDefault,
+    setDefaultPreset: presetApiMock.setDefault,
+    createPreset: presetApiMock.create,
+    updatePreset: presetApiMock.update,
+    removePreset: presetApiMock.remove,
+  }))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

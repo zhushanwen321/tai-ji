@@ -20,7 +20,7 @@
  *  - update 透传：Section 的 update 事件原样透传为容器 update。
  *
  * mock 策略：
- *  - vi.mock('@taiji/core/transport/api/domains/settings') 捕获 getAutoRenameEnabled / setAutoRenameEnabled。
+ *  - SettingsTransport seam 桩（[C3] 测试打 seam）捕获 getAutoRenameEnabled / setAutoRenameEnabled。
  *  - vi.mock('@/composables/useToast') 隔离 toast 全局副作用。
  *  - vi.mock('@/lib/ipc') mock listSystemSounds（容器用例挂 SystemSoundSection onMounted 调用）。
  *  - vi.mock('@/composables/features/settings/useAuthedModelGroups') 部分注入（importOriginal 保
@@ -32,21 +32,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import type { SystemSettings } from '@taiji/core'
+import { provideSettingsTransport, __resetSettingsTransportForTesting, type SystemSettings } from '@taiji/core'
+import type { RenameMode } from '@taiji/shared'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import SystemAutoRenameSection from '@/components/settings/system/SystemAutoRenameSection.vue'
 import SystemPage from '@/components/settings/system/SystemPage.vue'
 import SystemAppearanceSection from '@/components/settings/system/SystemAppearanceSection.vue'
 import SystemSoundSection from '@/components/settings/system/SystemSoundSection.vue'
 import SystemShortcutSection from '@/components/settings/system/SystemShortcutSection.vue'
 
-/** mock 捕获 auto-rename / rename-model / rename-mode / smart-context API 调用。vi.hoisted 保证在 vi.mock 工厂执行前就绪。 */
+/** mock 捕获 auto-rename / rename-model / rename-mode / smart-context API 调用（经 seam 桩注入）。 */
 const settingsMock = vi.hoisted(() => ({
   getAutoRenameEnabled: vi.fn(() => Promise.resolve({ enabled: true })),
   setAutoRenameEnabled: vi.fn(() => Promise.resolve({ enabled: true })),
   getRenameModel: vi.fn(() => Promise.resolve({ model: '' })),
   setRenameModel: vi.fn(() => Promise.resolve({ model: '' })),
   getRenameMode: vi.fn(() => Promise.resolve({ mode: 'first-stop' })),
-  setRenameMode: vi.fn((mode: string) => Promise.resolve({ mode })),
+  setRenameMode: vi.fn((mode: RenameMode) => Promise.resolve({ mode })),
   // SystemPage 现挂 SystemSmartContextSection（onMounted 读全量配置）——缺导出会告警
   getSmartContextConfig: vi.fn(() =>
     Promise.resolve({ enabled: true, compactModel: '', reminderThresholds: [200_000, 400_000, 600_000], excludedModels: [] }),
@@ -66,23 +68,8 @@ const authedGroups = vi.hoisted(() => ({
   groups: [] as Array<{ providerId: string; providerName: string; models: Array<{ value: string; label: string }> }>,
 }))
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => ({
-  getAutoRenameEnabled: settingsMock.getAutoRenameEnabled,
-  setAutoRenameEnabled: settingsMock.setAutoRenameEnabled,
-  getRenameModel: settingsMock.getRenameModel,
-  setRenameModel: settingsMock.setRenameModel,
-  getRenameMode: settingsMock.getRenameMode,
-  setRenameMode: settingsMock.setRenameMode,
-  getSmartContextConfig: settingsMock.getSmartContextConfig,
-  setSmartContextEnabled: settingsMock.setSmartContextEnabled,
-  setSmartContextCompactModel: settingsMock.setSmartContextCompactModel,
-  setSmartContextThresholds: settingsMock.setSmartContextThresholds,
-  setSmartContextExcludedModels: settingsMock.setSmartContextExcludedModels,
-  // stores/settings → '@/api' → mock/index 转发引用 real 域的 getSystem/updateSystem，
-  // 工厂缺导出会在模块加载时抛 "No export defined"；本测试不消费，给空实现即可
-  getSystem: vi.fn(() => Promise.resolve({})),
-  updateSystem: vi.fn(() => Promise.resolve()),
-}))
+// [C3] auto-rename / rename-model / rename-mode / smart-context 读写经 SettingsTransport seam 桩注入
+//（makeSettingsTransportStub + provideSettingsTransport，见 beforeEach，替换原 domains/settings 模块 mock）
 
 vi.mock('@/composables/useToast', () => ({
   // info 走共享 toastMock 捕获（分流断言用）；error/warning 仅隔离副作用
@@ -154,9 +141,11 @@ beforeEach(() => {
   settingsMock.setRenameMode.mockImplementation((mode: string) => Promise.resolve({ mode }))
   authedGroups.groups = []
   toastMock.info.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(settingsMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

@@ -5,13 +5,13 @@
  * setSkillDirs/setAgentDirs/setExtensionDirs 经 IF1 transport 转发；四个乐观 toggle
  * （旧值返回 + state 更新 + 找不到默认返回）；getSettingsStore 惰性单例。
  */
-import type { ModelInfo,  ProviderId } from '@taiji/shared'
+import type { ProviderId } from '@taiji/shared'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   provideSettingsTransport,
   __resetSettingsTransportForTesting,
-  type SettingsTransport,
 } from '../transport'
+import { makeFakeTransport } from './helpers/fake-transport'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   createSettingsStore,
@@ -21,29 +21,7 @@ import {
 import { InMemoryStorage } from './helpers/in-memory-storage'
 import type { ProviderInfo, ExtensionInfo } from '@taiji/shared'
 
-function makeFakeTransport(): SettingsTransport {
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => [] as ModelInfo[]),
-    setScopedModels: vi.fn(async (_models: string[]): Promise<string[]> => []),
-    setProvider: vi.fn(async () => ({})),
-    discoverModels: vi.fn(async () => ({ success: true })),
-    setSkillDirs: vi.fn(async () => {}),
-    setAgentDirs: vi.fn(async () => {}),
-    setExtensionDirs: vi.fn(async () => {}),
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-  }
-}
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
 
 beforeEach(() => {
   __resetSettingsStoreForTesting()

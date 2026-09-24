@@ -5,7 +5,7 @@ import { resolve } from 'path'
 export default taijiTestConfig({
   test: {
     environment: 'happy-dom',
-    setupFiles: ['./src/__tests__/vitest-i18n-setup.ts'],
+    setupFiles: ['./src/__tests__/vitest-i18n-setup.ts', './src/__tests__/vitest-settings-transport-setup.ts'],
     // 单用例超时预算：coverage 插桩 + 全包并行 worker 的负载下，mount+flush 类用例
     // 可越 vitest 默认 5s（2026-09-24 两例：zcode-session-source recovery 阶梯、
     // system-page-smart-context mount——空载单跑均毫秒级，仅重负载下超线）。预算是

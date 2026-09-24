@@ -88,12 +88,12 @@ import { RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { LoadPaths, SETTINGS_CONFIG_API_KEY, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
 import type { SkillInfo, AgentInfo, SkillDirConfig } from '@taiji/shared'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { chooseDirectory, getDataDir } from '@/api/domains/settings'
 
-// W3：LoadPaths（含 SourceImportSection）迁入 ui 包，其 config(@/api) 依赖经 inject 注入。
-// 此处把 renderer 的 config 作为 SettingsConfigApi provide 给 ui 组件（detectSources 等方法）。
-provide(SETTINGS_CONFIG_API_KEY, config)
+// W3：LoadPaths（含 SourceImportSection）迁入 ui 包，其 transport 依赖经 inject 注入。
+// 此处把 SettingsTransport seam 的 detectSources 作为 SettingsConfigApi provide 给 ui 组件（[C3] 走 seam）。
+provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => getSettingsTransport().detectSources() })
 // v2 §3 目录选择 dialog：LoadPaths 经 inject 调 chooseDirectory（lib/ipc 封装，preload 复用 pick-directory handler）
 provide(SETTINGS_CHOOSE_DIRECTORY_KEY, chooseDirectory)
 
@@ -196,9 +196,9 @@ async function onScan(): Promise<void> {
   try {
     const paths = props.dirs.filter((d) => d.enabled).map((d) => d.path)
     if (props.kind === 'skill') {
-      await config.scanSkills(paths)
+      await getSettingsTransport().scanSkills(paths)
     } else {
-      await config.scanAgents(paths)
+      await getSettingsTransport().scanAgents(paths)
     }
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e)

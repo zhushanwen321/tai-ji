@@ -37,7 +37,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
-import { extension as extensionApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
 
@@ -60,7 +60,7 @@ async function onSetAutoUpgrade(ext: ExtensionItem, enabled: boolean) {
   toggling.value = next
   const old = settingsStore.setExtensionAutoUpgrade(ext.name, enabled)
   try {
-    await extensionApi.setAutoUpgrade(ext.name, enabled)
+    await getSettingsTransport().setExtensionAutoUpgrade(ext.name, enabled)
   } catch (e) {
     settingsStore.setExtensionAutoUpgrade(ext.name, old)
     error.value = e instanceof Error

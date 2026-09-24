@@ -13,7 +13,7 @@
  */
 import { computed } from 'vue'
 import { getSettingsStore } from '@taiji/core'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ScopedRenderItem, SelectableModel } from '@taiji/ui/features/settings'
 
 // 防重入：setScopedModels 是整列表覆写，in-flight 期间的新触发会拿含乐观值的快照当 old，
@@ -82,7 +82,7 @@ export function useScopedModels() {
     scopedMutationInFlight = true
     settingsStore.scopedModels.value = next
     try {
-      const result = await config.setScopedModels(next)
+      const result = await getSettingsTransport().setScopedModels(next)
       settingsStore.scopedModels.value = result
     } catch (e) {
       settingsStore.scopedModels.value = old

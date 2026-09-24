@@ -8,7 +8,8 @@
  *  - #7 defaultBaseBranch 空串：blur → inline error + 不发 RPC + 回滚。
  *  - #6 保存失败透传：setWorktreeRootDir reject → toastError 含 runtime 精确文案（reason）。
  *
- * mock 策略：vi.mock('@taiji/core/transport/api/domains/settings') 替换 10 个 worktree API；
+ * mock 策略：SettingsTransport seam 桩（makeSettingsTransportStub + provideSettingsTransport，
+ *  [C3] 测试打 seam 不 mock 路由链）替换 10 个 worktree API；
  *  i18n 经 vitest-i18n-setup 全局解析 zh-CN。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/worktree-page.test.ts
@@ -16,6 +17,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { useToast } from '@/composables/useToast'
 
 const settingsMock = vi.hoisted(() => ({
@@ -31,7 +34,7 @@ const settingsMock = vi.hoisted(() => ({
   setDefaultBaseBranch: vi.fn(() => Promise.resolve({ baseBranch: 'origin/main' })),
 }))
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsMock)
+// [C3] 10 个 worktree API 经 SettingsTransport seam 桩注入（替换原 domains/settings 模块 mock）
 
 import WorktreePage from '@/components/settings/worktree/WorktreePage.vue'
 
@@ -47,9 +50,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   useToast().toasts.value = []
   vi.clearAllMocks()
+  provideSettingsTransport(makeSettingsTransportStub(settingsMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

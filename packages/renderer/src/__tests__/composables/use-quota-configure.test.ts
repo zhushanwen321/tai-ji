@@ -22,27 +22,31 @@
  * ⑩ 收拢进 implementation 的派生面：失败原因归一（A2-4）/ providerWarning 分档（§7.4）/
  *    sourceHint 分档（D3）/ type.undetermined（D8）
  *
- * mock 策略：vi.mock('@taiji/core/transport/api/domains/quota') 替换 RPC 层（module 直连
- * domain，对齐 provider-edit-body-phase-b.test.ts）；pinia 提供 useQuotaStore。
+ * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）替换 quota RPC 层（module 经 seam 消费，
+ * 对齐 provider-edit-body-phase-b.test.ts）；pinia 提供 useQuotaStore。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-quota-configure.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import type { NormalizedQuotaRow, ProviderId, ProviderInfo, QuotaFetchFailureReason, QuotaPreset } from '@taiji/shared'
+import type { NormalizedQuotaRow, ProviderId, ProviderInfo, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaPreset } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
-import type { QuotaConfigureModule, QuotaFailureKind } from '@taiji/core'
+import type { QuotaConfigureModule, QuotaFailureKind, QuotaSnapshot } from '@taiji/core'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
-vi.mock('@taiji/core/transport/api/domains/quota', () => ({
-  getCached: vi.fn(),
-  fetchQuota: vi.fn(),
-  refreshQuota: vi.fn(),
-  configure: vi.fn(async () => ({ ok: true })),
+// [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
+// 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言面不变，仍打 quotaApi.*）。
+// fetchQuota 不在 seam 方法面（useQuotaConfigure 结构上不可达），保留仅供「零查询调用」负向断言。
+const quotaApi = vi.hoisted(() => ({
+  getCached: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),
+  fetchQuota: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),
+  refreshQuota: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),
+  configure: vi.fn<(payload: QuotaConfigurePayload) => Promise<{ ok: boolean; error?: string }>>(async () => ({ ok: true })),
 }))
 
-import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 
 const P = (fetcher: string): QuotaPreset | undefined => QUOTA_PRESETS.find((p) => p.fetcher === fetcher)
@@ -104,6 +108,15 @@ beforeEach(() => {
   vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
   vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
   vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
+  provideSettingsTransport(makeSettingsTransportStub({
+    getCachedQuota: quotaApi.getCached,
+    refreshQuota: quotaApi.refreshQuota,
+    configureQuota: quotaApi.configure,
+  }))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
 })
 
 // ── ① readiness 齐备性矩阵 ──────────────────────────────────────────────────

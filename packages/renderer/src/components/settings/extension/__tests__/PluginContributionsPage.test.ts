@@ -110,31 +110,11 @@ import SettingsModal from '@/components/settings/SettingsModal.vue'
 import PluginContributionsPage from '@/components/settings/extension/PluginContributionsPage.vue'
 import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'
 import { makeQuotaModuleStub } from '@/__tests__/helpers/quota-module-stub'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
-/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空）。 */
+/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认）。 */
 function stubTransport(): SettingsTransport {
-  const noopUnsub = (): void => {}
-  return {
-    listProviders: async () => ({ providers: [] }),
-    listModels: async () => [],
-    setProvider: async () => ({}),
-    setScopedModels: async () => [],
-    discoverModels: async () => ({ success: true, models: [] }),
-    setSkillDirs: async () => undefined,
-    setAgentDirs: async () => undefined,
-    setExtensionDirs: async () => undefined,
-    onProviders: () => noopUnsub,
-    onModels: () => noopUnsub,
-    onSkills: () => noopUnsub,
-    onAgents: () => noopUnsub,
-    onExtensions: () => noopUnsub,
-    onSkillDirs: () => noopUnsub,
-    onAgentDirs: () => noopUnsub,
-    onExtensionDirs: () => noopUnsub,
-    onDefaults: () => noopUnsub,
-    onSystemPrompt: () => noopUnsub,
-    onTerminalConfig: () => noopUnsub,
-  }
+  return makeSettingsTransportStub()
 }
 
 /** mock 数据源：builtin statusline/tasks 插件 + 贡献可用性（statusbar/sidebar.tab 注册=可用，slash 未注册=置灰+原因）。 */

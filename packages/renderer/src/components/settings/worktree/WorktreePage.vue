@@ -145,18 +145,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { GroupCard } from '@taiji/ui/features/settings'
 import { useToast } from '@/composables/useToast'
-import {
-  getWorktreeRootDir,
-  setWorktreeRootDir,
-  getSetupScript,
-  setSetupScript,
-  getBareSetupScript,
-  setBareSetupScript,
-  getWorktreeTimeout,
-  setWorktreeTimeout,
-  getDefaultBaseBranch,
-  setDefaultBaseBranch,
-} from '@taiji/core/transport/api/domains/settings'
+import { getSettingsTransport } from '@taiji/core'
+
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
@@ -188,11 +180,11 @@ const baseBranchError = ref('')
 // ── 加载初始配置 ──
 onMounted(async () => {
   const [rootDirRes, scriptRes, bareScriptRes, timeoutRes, baseBranchRes] = await Promise.allSettled([
-    getWorktreeRootDir(),
-    getSetupScript(),
-    getBareSetupScript(),
-    getWorktreeTimeout(),
-    getDefaultBaseBranch(),
+    transport.getWorktreeRootDir(),
+    transport.getSetupScript(),
+    transport.getBareSetupScript(),
+    transport.getWorktreeTimeout(),
+    transport.getDefaultBaseBranch(),
   ])
 
   if (rootDirRes.status === 'fulfilled') {
@@ -232,7 +224,7 @@ async function onSaveWorktreeRootDir() {
   const prev = prevWorktreeRootDir
   prevWorktreeRootDir = worktreeRootDir.value
   try {
-    await setWorktreeRootDir(worktreeRootDir.value)
+    await transport.setWorktreeRootDir(worktreeRootDir.value)
     toastInfo(t('settings.worktree.saved'))
   } catch (e) {
     worktreeRootDir.value = prev
@@ -246,7 +238,7 @@ async function onSaveSetupScript() {
   const prev = prevSetupScript
   prevSetupScript = setupScript.value
   try {
-    await setSetupScript(setupScript.value)
+    await transport.setSetupScript(setupScript.value)
     toastInfo(t('settings.worktree.saved'))
   } catch (e) {
     setupScript.value = prev
@@ -260,7 +252,7 @@ async function onSaveBareSetupScript() {
   const prev = prevBareSetupScript
   prevBareSetupScript = bareSetupScript.value
   try {
-    await setBareSetupScript(bareSetupScript.value)
+    await transport.setBareSetupScript(bareSetupScript.value)
     toastInfo(t('settings.worktree.saved'))
   } catch (e) {
     bareSetupScript.value = prev
@@ -281,7 +273,7 @@ async function onSaveTimeout() {
   const prev = prevTimeout
   prevTimeout = timeout.value
   try {
-    await setWorktreeTimeout(timeout.value)
+    await transport.setWorktreeTimeout(timeout.value)
     toastInfo(t('settings.worktree.saved'))
   } catch (e) {
     timeout.value = prev
@@ -303,7 +295,7 @@ async function onSaveDefaultBaseBranch() {
   const prev = prevDefaultBaseBranch
   prevDefaultBaseBranch = defaultBaseBranch.value
   try {
-    await setDefaultBaseBranch(defaultBaseBranch.value)
+    await transport.setDefaultBaseBranch(defaultBaseBranch.value)
     toastInfo(t('settings.worktree.saved'))
   } catch (e) {
     defaultBaseBranch.value = prev

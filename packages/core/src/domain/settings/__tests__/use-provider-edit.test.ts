@@ -14,8 +14,8 @@ import { providePlatform, __resetPlatformForTesting } from '../../../platform/po
 import {
   provideSettingsTransport,
   __resetSettingsTransportForTesting,
-  type SettingsTransport,
 } from '../transport'
+import { makeFakeTransport } from './helpers/fake-transport'
 import { __resetSettingsStoreForTesting, getSettingsStore } from '../settings-store'
 import { useProviderEdit, type ProviderEditSession } from '../use-provider-edit'
 import { InMemoryStorage } from './helpers/in-memory-storage'
@@ -23,29 +23,7 @@ import { InMemoryStorage } from './helpers/in-memory-storage'
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
 const tStub = vi.fn((key: string) => key)
 
-function makeFakeTransport(): SettingsTransport {
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setScopedModels: vi.fn(async (_models: string[]): Promise<string[]> => []),
-    setProvider: vi.fn(async () => ({})),
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    setSkillDirs: vi.fn(async () => {}),
-    setAgentDirs: vi.fn(async () => {}),
-    setExtensionDirs: vi.fn(async () => {}),
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-  }
-}
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
 
 beforeEach(() => {
   __resetSettingsStoreForTesting()

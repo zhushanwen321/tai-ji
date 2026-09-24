@@ -120,14 +120,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { type SystemSettings } from '@taiji/core'
-import {
-  getSmartContextConfig,
-  setSmartContextCompactModel,
-  setSmartContextEnabled,
-  setSmartContextExcludedModels,
-  setSmartContextThresholds,
-} from '@taiji/core/transport/api/domains/settings'
+import { getSettingsTransport, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import {
   MODEL_UNSET_SENTINEL,
@@ -137,6 +130,9 @@ import {
   useAuthedModelGroups,
   type AuthedModelGroup,
 } from '@/composables/features/settings/useAuthedModelGroups'
+
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 // 统一 Section 契约（未使用 system：smart-context 走独立 API；不 emit：变更经各自 API 持久化）
 defineProps<{
@@ -198,7 +194,7 @@ const loadError = ref(false)
 
 async function loadConfig(): Promise<void> {
   try {
-    const cfg = await getSmartContextConfig()
+    const cfg = await transport.getSmartContextConfig()
     enabled.value = cfg.enabled
     compactModel.value = cfg.compactModel
     thresholdsK.value = cfg.reminderThresholds.map((tk) => tk / TOKENS_PER_K)
@@ -224,7 +220,7 @@ async function onSaveEnabled(next: boolean): Promise<void> {
   const prev = enabled.value
   enabled.value = next
   try {
-    await setSmartContextEnabled(next)
+    await transport.setSmartContextEnabled(next)
     toastInfo(t('settings.system.saved'))
   } catch (e) {
     enabled.value = prev
@@ -242,7 +238,7 @@ async function onCompactModelChange(value: unknown): Promise<void> {
   const prev = compactModel.value
   compactModel.value = next
   try {
-    await setSmartContextCompactModel(next)
+    await transport.setSmartContextCompactModel(next)
     toastInfo(t('settings.system.saved'))
   } catch (e) {
     compactModel.value = prev
@@ -263,7 +259,7 @@ async function onThresholdsSave(): Promise<void> {
   }
   savingThresholds.value = true
   try {
-    const res = await setSmartContextThresholds(nums.map((tk) => Math.round(tk * TOKENS_PER_K)))
+    const res = await transport.setSmartContextThresholds(nums.map((tk) => Math.round(tk * TOKENS_PER_K)))
     // runtime clamp（升序 3 档）可能与输入不同 → 回填实际生效值
     thresholdsK.value = res.thresholds.map((tk) => tk / TOKENS_PER_K)
     loadedThresholdsK.value = [...thresholdsK.value]
@@ -283,7 +279,7 @@ async function persistExcluded(next: string[]): Promise<void> {
   const prev = excludedModels.value
   excludedModels.value = next
   try {
-    const res = await setSmartContextExcludedModels(next)
+    const res = await transport.setSmartContextExcludedModels(next)
     excludedModels.value = res.models
     toastInfo(t('settings.system.saved'))
   } catch (e) {

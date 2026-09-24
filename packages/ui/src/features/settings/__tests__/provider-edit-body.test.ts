@@ -44,6 +44,7 @@ import {
   type SettingsTransport,
   type DiscoverModelsResponse,
 } from '@taiji/core'
+import { makeSettingsTransportStub } from '@taiji/core/testing'
 import ProviderEditBody from '../provider/ProviderEditBody.vue'
 import {
   SETTINGS_TOAST_KEY,
@@ -167,29 +168,12 @@ const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({})
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
 
+/** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法面中性默认）+ 本文件两个 spy。 */
 function makeTransport(): SettingsTransport {
-  const noop = (): void => {}
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setScopedModels: vi.fn(async () => [] as string[]),
+  return makeSettingsTransportStub({
     setProvider: setProviderSpy,
     discoverModels: discoverModelsSpy,
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    onProviders: () => noop,
-    onModels: () => noop,
-    onSkills: () => noop,
-    onAgents: () => noop,
-    onExtensions: () => noop,
-    onSkillDirs: () => noop,
-    onAgentDirs: () => noop,
-    onExtensionDirs: () => noop,
-    onDefaults: () => noop,
-    onSystemPrompt: () => noop,
-    onTerminalConfig: () => noop,
-  }
+  })
 }
 
 function inMemoryStorage() {

@@ -64,7 +64,7 @@ import { Trash2, Loader2, AlertCircle, ArrowUpCircle } from '@lucide/vue'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { extension as extensionApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -107,7 +107,7 @@ async function onToggle(ext: ExtensionItem, enabled: boolean) {
   // 乐观：立即改 store
   const old = settingsStore.setExtensionEnabled(ext.name, enabled)
   try {
-    const reply = await extensionApi.toggle(ext.name, enabled)
+    const reply = await getSettingsTransport().toggleExtension(ext.name, enabled)
     // RPC reply 命中 pending 被 routeInbound 吞掉、不触发 onExtensions 全局订阅，
     // 故手动用 reply 的权威扫描结果刷新列表（替代不可靠的广播）。乐观值与权威值一致时幂等。
     settingsStore.extensions.value = reply.extensions
@@ -129,7 +129,7 @@ async function onConfirmUninstall() {
   uninstalling.value = true
   const name = confirmTarget.value
   try {
-    await extensionApi.uninstall(name)
+    await getSettingsTransport().uninstallExtension(name)
     confirmTarget.value = ''
     toastInfo(t('settings.extension.uninstalledToast'))
   } catch (e) {
@@ -148,7 +148,7 @@ async function onUpgrade(name: string) {
   next.add(name)
   upgrading.value = next
   try {
-    await extensionApi.upgrade(name)
+    await getSettingsTransport().upgradeExtension(name)
     toastInfo(t('settings.extension.upgradedToast'))
   } catch (e) {
     error.value = e instanceof Error

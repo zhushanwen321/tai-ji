@@ -19,14 +19,15 @@
  *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补拉（E7 ③ 恢复通道）。
  *
  * 依赖方向：
- * - 读 @/api（preset 域 RPC：list / getDefault / setDefault）。
- * - 读 @taiji/core/transport/ws-client（连接态；与 useBackgroundTasks 同源依赖）。
+ * - 读 SettingsTransport seam（[C3] preset 域 RPC：listPresets / getDefaultPreset / setDefaultPreset /
+ *   createPreset / updatePreset / removePreset——settings 域禁直连 @/api 门面）。
+ * - 读 @taiji/core 顶层 barrel 的 getState（连接态；ws-client 实现经 barrel 允许面透出，
+ *   不深 import transport 域；与 useBackgroundTasks 同源依赖）。
  * - 写 preset store（presets / defaultPresetId）。
  */
 import { effectScope, watch } from 'vue'
 import type { EffectScope } from 'vue'
-import { getState } from '@taiji/core/transport/ws-client'
-import { preset as presetApi } from '@/api'
+import { getState, getSettingsTransport } from '@taiji/core'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
 
@@ -101,8 +102,8 @@ export function usePiPresets() {
    */
   async function loadPresets(): Promise<void> {
     const results = await Promise.allSettled([
-      presetApi.list(),
-      presetApi.getDefault(),
+      getSettingsTransport().listPresets(),
+      getSettingsTransport().getDefaultPreset(),
     ])
     // 任一 rejected → 记首个错误；全部 fulfilled → 清错误态
     const firstReject = results.find(
@@ -139,7 +140,7 @@ export function usePiPresets() {
     const previous = store.defaultPresetId
     store.setDefaultPresetId(presetId)
     try {
-      await presetApi.setDefault(presetId)
+      await getSettingsTransport().setDefaultPreset(presetId)
     } catch (e) {
       store.setDefaultPresetId(previous)
       throw e
@@ -158,7 +159,7 @@ export function usePiPresets() {
   async function create(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
     store.upsertPreset(preset)
     try {
-      const saved = await presetApi.create(preset)
+      const saved = await getSettingsTransport().createPreset(preset)
       // 用 RPC reply 回写（runtime 可能补全 order/id 等字段）
       store.upsertPreset(saved)
       return saved
@@ -179,7 +180,7 @@ export function usePiPresets() {
   async function update(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
     store.upsertPreset(preset)
     try {
-      const saved = await presetApi.update(preset)
+      const saved = await getSettingsTransport().updatePreset(preset)
       // 用 RPC reply 回写（runtime 规范化后的权威态）
       store.upsertPreset(saved)
       return saved
@@ -199,7 +200,7 @@ export function usePiPresets() {
     const backup = store.presets.find((p) => p.id === presetId)
     store.removePreset(presetId)
     try {
-      await presetApi.remove(presetId)
+      await getSettingsTransport().removePreset(presetId)
     } catch (e) {
       if (backup) store.upsertPreset(backup)
       throw e

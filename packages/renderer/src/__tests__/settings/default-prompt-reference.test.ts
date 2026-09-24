@@ -10,6 +10,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 interface SystemPromptConfig {
   version: number
@@ -65,9 +67,11 @@ function hasTestId(id: string): boolean {
 beforeEach(() => {
   setActivePinia(createPinia())
   configMock.getSystemPrompt.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

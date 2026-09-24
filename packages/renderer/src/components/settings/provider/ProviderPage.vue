@@ -253,8 +253,7 @@ import { Switch } from '@/components/ui/switch'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import type { BuiltinProviderTemplate, ProviderInfo, ProviderStatus, SetProviderData, ProviderId } from '@taiji/shared'
-import { config } from '@/api'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
 import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
@@ -281,6 +280,8 @@ import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 provide(QUOTA_CONFIGURE_FACTORY_KEY, useQuotaConfigure)
 const toast = useToast()
 provide(SETTINGS_TOAST_KEY, toast)
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连 @/api 门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 // Scoped Models 白名单（乐观更新 + 失败回滚；RPC 失败 rethrow 由下方包装 handler 统一反馈）
 const { scopedRenderItems, selectableModels, addScopedModels, removeScopedModel, moveScopedModel } = useScopedModels()
@@ -308,7 +309,7 @@ const { catalogsStale, refreshCatalogs } = useProviderCatalogsStale()
 
 onMounted(async () => {
   try {
-    builtinProviders.value = await config.listBuiltinProviders()
+    builtinProviders.value = await transport.listBuiltinProviders()
   } catch {
     // 拉取失败静默降级（Picker 渲染空列表），不阻断页面
     toast.error(t('settings.provider.builtinTemplate.fetchFailed'))
@@ -342,7 +343,7 @@ const existingAuthMethod = computed(() => {
     ?? (oauth.oauthPresent.value.has(tpl.id) ? ('oauth' as const) : undefined)
 })
 
-/** QuickSetup 保存 → config.setProvider（方案 B 占位 data），成功后关闭 + toast */
+/** QuickSetup 保存 → SettingsTransport.setProvider（[C3] 与编辑体保存合流同一 seam 方法），成功后关闭 + toast */
 async function onQuickSetupSave({
   providerId,
   data,
@@ -351,7 +352,7 @@ async function onQuickSetupSave({
   data: SetProviderData
 }): Promise<void> {
   try {
-    const res = await config.setProvider(providerId as ProviderId, data)
+    const res = await transport.setProvider(providerId, data)
     showQuickSetup.value = false
     selectedTemplate.value = null
     // apikey 模式（plaintext 填值 / env '$VAR' 引用）保存后：被禁用的 provider 自动启用
@@ -384,7 +385,7 @@ const defaultProviderId = computed(() => settingsStore.defaultModel.value?.split
 // 变更后自动对账默认模型（reconcileDefaultModelAfterProviderChange + getDefaultModel 兜底）并广播
 // config.defaults。前端消费广播：默认模型实际发生变化（非用户主动 default-set）时 toast 告知。
 const lastDefaultModel = ref(settingsStore.defaultModel.value)
-const unsubscribeDefaults = config.onDefaultsWithSource(({ defaultModel, source }) => {
+const unsubscribeDefaults = transport.onDefaultsWithSource(({ defaultModel, source }) => {
   const prev = lastDefaultModel.value
   lastDefaultModel.value = defaultModel
   if (!defaultModel || defaultModel === prev || source === 'default-set') return
@@ -392,11 +393,11 @@ const unsubscribeDefaults = config.onDefaultsWithSource(({ defaultModel, source 
 })
 onUnmounted(unsubscribeDefaults)
 
-/** P2：pill 点击选择默认模型 → config.setDefaultModel（状态经 onDefaults 广播推回，无需本地乐观更新） */
+/** P2：pill 点击选择默认模型 → setDefaultModel（状态经 onDefaults 广播推回，无需本地乐观更新） */
 async function onSetDefaultModel({ modelId, provider }: { modelId: string; provider: ProviderId }): Promise<void> {
   actionError.value = ''
   try {
-    await config.setDefaultModel(provider, modelId)
+    await transport.setDefaultModel(provider, modelId)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     actionError.value = msg
@@ -521,7 +522,7 @@ async function confirmDelete() {
   try {
     // wave4：按 kind 调 removeProviderByKind（catalog 清凭据/custom 删条目）。
     // kind 缺失兼容 'custom'（wave2 聚合层保证 listProviders 返回的 ProviderInfo 已标 kind）。
-    await config.removeProviderByKind(target.id, target.kind ?? 'custom')
+    await transport.removeProviderByKind(target.id, target.kind ?? 'custom')
     // MF-3：同步清理 oauth 内存态（runtime 已清 auth.json 凭据），防重开 QuickSetup 误默认 oauth。
     oauth.clearOAuthPresence(target.id)
     if (settingsStore.defaultModel.value.startsWith(`${target.id}/`)) {

@@ -32,34 +32,45 @@
  *   消费者是各 Composer 实例（landing 单例 + panel per-session，split mode 多 panel 多实例）：
  *   per-instance 缓存下同 cwd 各实例各拉一次 RPC、失效信号逐实例刷新——冗余可接受，
  *   未来需要跨实例共享再提升到模块级或 store。
- * - 失效信号订阅在模块顶层挂载（只执行一次），project 侧用模块级 signal watch 让订阅与实例数解耦。
+ * - 失效信号订阅为模块级单例（只执行一次），project 侧用模块级 signal watch 让订阅与实例数解耦。
+ *   [C3] 订阅在首次 useProjectSkills/useGlobalSkills 调用时挂载（seam fail-fast 注入序要求
+ *   不可在模块 import 期注册）；信号只推进版本号驱动重拉，挂载前到达的信号不影响新实例
+ *   自拉取（首拉即新值），行为等价。
  */
 import { computed, ref, watch, type Ref } from 'vue'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
-import { config as configApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { SkillCacheInvalidatedPayload, SkillInfo } from '@taiji/shared'
 
 // ── useProjectSkills 失效信号（模块级，所有实例共享）─────────────
 // 收到 scope='project' 失效信号时推进 version 并携带 cwd：
 // - 有 cwd（磁盘 watcher 触发的具体项目目录变更）：只清该 cwd 分区。
 // - 无 cwd（setSkillDirs 改全局配置，所有 cwd 都可能受影响）：保守清所有。
-// S1：模块顶层只执行一次，无需 projectInvalidateSubscribed 守卫。
+// S1：与 useGlobalSkills 同款订阅守卫（只挂一次）。
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：skills 失效信号版本号（watch 驱动重拉，12 类未覆盖）
 const projectInvalidateSignal = ref<{ version: number; cwd?: string }>({ version: 0 })
-configApi.onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
-  if (payload.scope === 'project') {
-    projectInvalidateSignal.value = {
-      version: projectInvalidateSignal.value.version + 1,
-      cwd: payload.cwd,
+let projectInvalidateSubscribed = false
+function ensureProjectInvalidateSubscription(): void {
+  if (projectInvalidateSubscribed) return
+  projectInvalidateSubscribed = true
+  getSettingsTransport().onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
+    if (payload.scope === 'project') {
+      projectInvalidateSignal.value = {
+        version: projectInvalidateSignal.value.version + 1,
+        cwd: payload.cwd,
+      }
     }
-  }
-})
+  })
+}
 
 /**
  * @param currentCwd 当前 session/landing 的 cwd ref（null = 未选目录，projectSkills 为空）
  * @returns projectSkills：当前 cwd 对应的项目 skill（computed，切 cwd 自动切换分区）
  */
 export function useProjectSkills(currentCwd: Ref<string | null>) {
+  // 失效信号订阅（模块级单例）：首次调用挂载（[C3] seam 注入序约束）
+  ensureProjectInvalidateSubscription()
+
   // 按 cwd 缓存的项目 skill 表（cwd → SkillInfo[]）。实例级 state（每次 useProjectSkills 调用新建），
   // 命中缓存不重复 RPC，避免闪烁 + 省 RPC。消费者是各 Composer 实例（landing 单例 + panel
   // per-session——split mode 多 panel 多实例，同 cwd 各自缓存各拉一次，失效信号逐实例刷新）；
@@ -86,7 +97,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
   async function loadFor(cwd: string): Promise<void> {
     inFlight.add(cwd)
     try {
-      const skills = await configApi.getProjectSkills(cwd)
+      const skills = await getSettingsTransport().getProjectSkills(cwd)
       const next = new Map(skillsByCwd.value)
       next.set(cwd, skills)
       skillsByCwd.value = next
@@ -196,7 +207,7 @@ export function useGlobalSkills() {
   function runGlobalSkillsFetch(): Promise<SkillInfo[]> {
     return globalSkillsFetchDedup.run(GLOBAL_SKILLS_FETCH_KEY, async () => {
       try {
-        const skills = await configApi.getGlobalSkills()
+        const skills = await getSettingsTransport().getGlobalSkills()
         globalSkillsCache = skills
         globalLoaded = true
         globalSkills.value = skills
@@ -245,7 +256,7 @@ export function useGlobalSkills() {
   // 订阅失效信号（模块级，只挂一次）。收到 scope='global' 时强制重拉。
   if (!globalInvalidateSubscribed) {
     globalInvalidateSubscribed = true
-    configApi.onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
+    getSettingsTransport().onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
       if (payload.scope === 'global') {
         void loadGlobal(true)
       }

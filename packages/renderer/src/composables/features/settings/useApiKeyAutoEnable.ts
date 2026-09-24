@@ -18,7 +18,7 @@
  * 无该 provider（新建，broadcast 未回——runtime ensure 已启用）；已启用（幂等）。
  */
 import { ref } from 'vue'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
@@ -48,7 +48,7 @@ export function useApiKeyAutoEnable(opts: {
     try {
       // wave4：走 toggleProviderEnabled（写 enabledModels 白名单）。旧 setProvider({enabled})
       // 在 wave3 停用 provider 级 enabled 写入后无效。newDefault 经 onDefaults 订阅推回。
-      await config.toggleProviderEnabled(p.id, enabled)
+      await getSettingsTransport().toggleProviderEnabled(p.id, enabled)
       if (!enabled && settingsStore.defaultModel.value.startsWith(`${p.id}/`)) {
         settingsStore.defaultModel.value = ''
       }

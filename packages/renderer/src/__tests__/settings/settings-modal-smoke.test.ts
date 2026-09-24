@@ -91,32 +91,11 @@ import { makeQuotaModuleStub } from '../helpers/quota-module-stub'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import { getSettingsStore } from '@taiji/core'
+import { makeSettingsTransportStub, type SettingsTransportStubOverrides } from '../helpers/settings-transport-stub'
 
-/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空；可按用例覆写成员）。 */
-function stubTransport(overrides: Partial<SettingsTransport> = {}): SettingsTransport {
-  const noopUnsub = (): void => {}
-  return {
-    listProviders: async () => ({ providers: [] }),
-    listModels: async () => [],
-    setProvider: async () => ({}),
-    setScopedModels: async () => [],
-    discoverModels: async () => ({ success: true, models: [] }),
-    setSkillDirs: async () => undefined,
-    setAgentDirs: async () => undefined,
-    setExtensionDirs: async () => undefined,
-    onProviders: () => noopUnsub,
-    onModels: () => noopUnsub,
-    onSkills: () => noopUnsub,
-    onAgents: () => noopUnsub,
-    onExtensions: () => noopUnsub,
-    onSkillDirs: () => noopUnsub,
-    onAgentDirs: () => noopUnsub,
-    onExtensionDirs: () => noopUnsub,
-    onDefaults: () => noopUnsub,
-    onSystemPrompt: () => noopUnsub,
-    onTerminalConfig: () => noopUnsub,
-    ...overrides,
-  }
+/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认，可按用例覆写成员）。 */
+function stubTransport(overrides: SettingsTransportStubOverrides = {}): SettingsTransport {
+  return makeSettingsTransportStub(overrides)
 }
 
 /** 提供最小 in-memory KVStorage（满足 PlatformPort.storage 形状）。 */

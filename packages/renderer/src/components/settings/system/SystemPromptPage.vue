@@ -1,7 +1,7 @@
 <!--
   Settings · SystemPrompt 菜单页（FR-4/FR-5）。
   两卡片：替换系统提示词 / 注入额外提示词（卡 2 含 taiji 内置能力告知开关，capability 段）。
-  数据层：config.getSystemPrompt / setSystemPrompt（保存为显式按钮触发，不自动保存，
+  数据层：SettingsTransport seam 的 getSystemPrompt / setSystemPrompt（保存为显式按钮触发，不自动保存，
   失败走 toast error，成功走 toast info）。
   替换卡下方含可折叠的 pi 默认提示词参考区，展开后可一键复制（DEFAULT_PI_SYSTEM_PROMPT）。
 -->
@@ -201,7 +201,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { GroupCard } from '@taiji/ui/features/settings'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import { SYSTEM_PROMPT_MAX_LENGTH, DEFAULT_PI_SYSTEM_PROMPT } from '@taiji/shared'
 import type { SystemPromptConfig } from '@taiji/shared'
@@ -261,7 +261,7 @@ function buildConfig(): SystemPromptConfig {
 /** 加载系统提示词配置到本地编辑态。 */
 async function loadConfig(): Promise<void> {
   try {
-    const res = await config.getSystemPrompt()
+    const res = await getSettingsTransport().getSystemPrompt()
     corrupted.value = res.corrupted
     replaceEnabled.value = res.config.replace.enabled
     replacePrompt.value = res.config.replace.prompt
@@ -298,7 +298,7 @@ async function saveReplace(): Promise<void> {
   if (saving.value) return
   saving.value = true
   try {
-    await config.setSystemPrompt(buildConfig())
+    await getSettingsTransport().setSystemPrompt(buildConfig())
     snapshot()
     info(t('settings.systemPrompt.savedToast'))
   } catch (e) {
@@ -313,7 +313,7 @@ async function saveAppend(): Promise<void> {
   if (saving.value) return
   saving.value = true
   try {
-    await config.setSystemPrompt(buildConfig())
+    await getSettingsTransport().setSystemPrompt(buildConfig())
     snapshot()
     info(t('settings.systemPrompt.savedToast'))
   } catch (e) {

@@ -28,7 +28,7 @@
 import { computed, onMounted, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BuiltinProviderTemplate, ProviderInfo, ProviderId } from '@taiji/shared'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
 // OAuthDialog 的 .vue 导出类型在 plain tsc 下不可用（ui 包 shim 不导出命名类型），本地定义结构兼容
@@ -162,7 +162,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
     editOauthTarget.value = null
     if (!target) return
     try {
-      await config.setProvider(target.id, { authMethod: 'oauth' })
+      await getSettingsTransport().setProvider(target.id, { authMethod: 'oauth' })
       toast.info(t('settings.provider.builtinTemplate.oauthAuthorized', { name: target.name }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -173,7 +173,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
   onMounted(() => {
     // 订阅先行：Dialog 打开前事件已挂（broadcast 先于订阅会丢消息）
     disposers.push(
-      config.onAuthDeviceCode((payload) => {
+      getSettingsTransport().onAuthDeviceCode((payload) => {
         if (payload.providerId !== activeProviderId) return
         state.value = {
           open: true,
@@ -188,7 +188,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
           errorMessage: '',
         }
       }),
-      config.onAuthAuthUrl((payload) => {
+      getSettingsTransport().onAuthAuthUrl((payload) => {
         if (payload.providerId !== activeProviderId) return
         state.value = {
           open: true,
@@ -198,13 +198,13 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
           errorMessage: '',
         }
       }),
-      config.onAuthSuccess((payload) => {
+      getSettingsTransport().onAuthSuccess((payload) => {
         if (payload.providerId !== activeProviderId) return
         state.value = { ...state.value, open: false, status: 'success' }
         authorized.value = new Set(authorized.value).add(payload.providerId)
         void onOAuthAuthorized(payload.providerId)
       }),
-      config.onAuthError((payload) => {
+      getSettingsTransport().onAuthError((payload) => {
         if (payload.providerId !== activeProviderId) return
         state.value = { ...state.value, status: 'error', errorMessage: payload.message }
       }),
@@ -220,7 +220,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
     activeProviderId = providerId
     state.value = { open: true, status: 'pending', deviceInfo: null, authUrl: null, errorMessage: '' }
     try {
-      const result = await config.oauthLogin(providerId)
+      const result = await getSettingsTransport().oauthLogin(providerId)
       if (!result.started) {
         state.value = { ...state.value, status: 'error', errorMessage: result.error ?? 'OAuth 启动失败' }
       }
@@ -235,7 +235,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
     state.value = { ...state.value, open: false }
     if (activeProviderId) {
       try {
-        await config.oauthCancel(activeProviderId)
+        await getSettingsTransport().oauthCancel(activeProviderId)
       } catch (e) {
         // cancel 失败不阻塞关闭 Dialog（幂等，重试由用户再次触发），仅告警
         console.warn('[provider-oauth] oauthCancel failed:', e)
@@ -304,7 +304,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
    */
   async function onEditOauthLogout(p: ProviderInfo): Promise<void> {
     try {
-      const reply = await config.oauthLogout(p.id)
+      const reply = await getSettingsTransport().oauthLogout(p.id)
       if (!reply.ok) {
         toast.error(reply.error ?? t('settings.providerEdit.credentialOauthLogoutFailed'))
         return
@@ -324,7 +324,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
   async function refreshOAuthPresence(providerId: string): Promise<void> {
     let present = false
     try {
-      present = await config.hasOAuth(providerId)
+      present = await getSettingsTransport().hasOAuth(providerId)
     } catch {
       // 查询失败不阻断：调用方回退 stored authMethod / 默认 env（existingAuthMethod 逻辑）
       console.warn(`[provider-oauth] config.hasOAuth query failed for ${providerId}`)
@@ -348,7 +348,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
       return
     }
     try {
-      envCheck.value = await config.checkEnvVars(tpl.envVars)
+      envCheck.value = await getSettingsTransport().checkEnvVars(tpl.envVars)
     } catch {
       envCheck.value = undefined
     }

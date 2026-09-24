@@ -14,7 +14,7 @@
  * - 派生：oauthDialogProvider / oauthDialogInfo（模板优先、编辑体兜底）/ quickSetupOauthAuthorized
  * - onEditOauthLogout（B-1 场景 C）三分支 + checkEnv 三分支
  *
- * mock 策略：vi.mock('@/api') 捕获 auth.* 订阅回调（module 内 onMounted 注册——经 harness
+ * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）捕获 auth.* 订阅回调（onMounted 注册——经 harness
  * 组件在 setup 中调用获得组件上下文）；vue-i18n 由 vitest-i18n-setup 全局 mock（t() 从 zh-CN 取值）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-provider-oauth.test.ts
@@ -24,6 +24,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref, type Ref } from 'vue'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // auth.* 订阅回调捕获（onMounted 注册后由测试手动派发事件；实现须返回 disposer 供 onScopeDispose）。
 // vi.fn 显式参数类型 → mock.calls[0][0] 拿到类型化 handler，派发零断言收窄。
@@ -58,10 +60,7 @@ const configMock = vi.hoisted(() => ({
   onAuthSuccess: authCbs.onAuthSuccess,
 }))
 
-vi.mock('@/api', () => ({
-  config: configMock,
-  default: { config: configMock },
-}))
+// [C3] OAuth/config 调用经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 
 import { useProviderOAuth, type ProviderOauthModule } from '@/composables/features/settings/useProviderOAuth'
 import { useToast } from '@/composables/useToast'
@@ -167,9 +166,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   useToast().toasts.value = []
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   api = null

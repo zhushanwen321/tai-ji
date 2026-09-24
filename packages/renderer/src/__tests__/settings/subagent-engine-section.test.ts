@@ -7,20 +7,23 @@
  *  - 选择变更 → setSubagentDefaultEngine 调用 + 本地态更新；
  *  - RPC 失败兜底 ['pi']（runtime 同语义）。
  *
- * mock 策略：vi.mock('@taiji/core/transport/api/domains/session') 替换引擎配置读写。
+ * mock 策略：SettingsTransport seam 桩（makeSettingsTransportStub + provideSettingsTransport，
+ * [C3] 测试打 seam 不 mock 路由链）替换引擎配置读写。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/subagent-engine-section.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const sessionApiMock = vi.hoisted(() => ({
   getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })),
   setSubagentDefaultEngine: vi.fn(async () => ({ engineId: 'pi' })),
 }))
 
-vi.mock('@taiji/core/transport/api/domains/session', () => sessionApiMock)
+// [C3] 引擎配置读写经 SettingsTransport seam 桩注入（替换原 domains/session 模块 mock）
 
 import SubagentEngineSection from '@/components/settings/agent/SubagentEngineSection.vue'
 import { useToast } from '@/composables/useToast'
@@ -44,6 +47,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
   useToast().toasts.value = []
+  provideSettingsTransport(makeSettingsTransportStub(sessionApiMock))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
 })
 
 describe('SubagentEngineSection（U7 引擎选择器）', () => {

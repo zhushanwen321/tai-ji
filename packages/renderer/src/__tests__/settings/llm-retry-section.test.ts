@@ -18,13 +18,15 @@
  *  - provider 全未设：三输入留空 = 未设 → 保存成功，载荷 provider 键值为 undefined（留空路径回归）；
  *  - 小数秒组装：baseDelay=1.005 → baseDelayMs 1005（Math.round 消浮点尾差，校验通过）。
  *
- * mock 策略：vi.mock core transport config 域（dev-merge 后组件直引 @taiji/core/transport/api/domains/config）替换读写 RPC；toast 走 useToast mock 捕获。
+ * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam，不 mock 路由链）替换读写 RPC；toast 走 useToast mock 捕获。
  *
  * 运行：npx vitest run src/__tests__/settings/llm-retry-section.test.ts（packages/renderer 目录）
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configApiMock = vi.hoisted(() => ({
   getRetryConfig: vi.fn(),
@@ -36,7 +38,7 @@ const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
 }))
 
-vi.mock('@taiji/core/transport/api/domains/config', () => configApiMock)
+// [C3] retry 读写经 SettingsTransport seam 桩注入（替换原 core config 域模块 mock）
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ info: toastMock.info, error: toastMock.error, warning: vi.fn() }),
 }))
@@ -83,6 +85,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   configApiMock.getRetryConfig.mockResolvedValue(defaultFixture())
   configApiMock.setRetryConfig.mockResolvedValue({ ok: true })
+  provideSettingsTransport(makeSettingsTransportStub(configApiMock))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
 })
 
 describe('SystemLlmRetrySection（u3 LLM 调用重试）', () => {

@@ -9,7 +9,7 @@
  *   安装时已 connected 立即可用 / 失败后下一次 connected 补拉（可自愈）/ 重连不重复请求（幂等）
  *   （`mode-declaration-row.test.ts` 头注声明“加载点本身由本文件覆盖”，即指该 describe）
  *
- * mock 策略：mock @/api 的 preset 域（vi.hoisted 捕获调用），真 pinia + 真 preset store。
+ * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）捕获 preset 域调用，真 pinia + 真 preset store。
  * 验证编排层「RPC 拉取 → store 写入」接线正确（不验 RPC 本身——那是 preset-domain.test 的职责）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-pi-presets.test.ts
@@ -18,8 +18,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // mock preset 域（捕获 list/getDefault/setDefault/create/update/remove 调用 + 可控返回值）
+// [C3] 经 SettingsTransport seam 桩注入（seam 方法名 listPresets/getDefaultPreset/… 逐名映射）
 const presetApiMock = vi.hoisted(() => ({
   list: vi.fn(),
   getDefault: vi.fn(),
@@ -33,9 +36,12 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
 }))
 
 // ── mock 边界：ws 连接态受控 ref（u5 加载点测试驱动；默认 disconnected，存量用例零影响）──
+// [C3] usePiPresets 的 getState 改经 @taiji/core 顶层 barrel（ws-client 实现经 barrel 允许面透出）——
+// mock 目标随之换 barrel（spread actual 保 getSettingsTransport 等真实单例；vi.mock 包子路径
+// 不拦截 barrel 内相对 re-export）。
 const wsMock = vi.hoisted(() => ({ ref: null as null | { value: string } }))
-vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@taiji/core/transport/ws-client')>()
+vi.mock('@taiji/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core')>()
   const { ref } = await import('vue')
   const stateRef = ref<string>('disconnected')
   wsMock.ref = stateRef
@@ -62,6 +68,18 @@ beforeEach(() => {
   presetApiMock.create.mockReset()
   presetApiMock.update.mockReset()
   presetApiMock.remove.mockReset()
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetApiMock.list,
+    getDefaultPreset: presetApiMock.getDefault,
+    setDefaultPreset: presetApiMock.setDefault,
+    createPreset: presetApiMock.create,
+    updatePreset: presetApiMock.update,
+    removePreset: presetApiMock.remove,
+  }))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
 })
 
 describe('usePiPresets.loadPresets（TC-4）', () => {

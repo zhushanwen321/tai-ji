@@ -3,19 +3,17 @@
  *
  * A3: add/remove/move 调 RPC 且乐观更新 + 失败回滚。
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, __resetSettingsStoreForTesting, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import { SCOPED_MODEL_RENDERER_TOKEN } from './impl-token'
 
 const configMock = vi.hoisted(() => ({
   setScopedModels: vi.fn(async () => [] as string[]),
 }))
 
-vi.mock('@/api', () => ({
-  config: configMock,
-  default: { config: configMock },
-}))
+// [C3] setScopedModels 经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 
 import { useScopedModels } from '../useScopedModels'
 
@@ -43,6 +41,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   __resetSettingsStoreForTesting()
   configMock.setScopedModels.mockReset()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
+})
+
+afterEach(() => {
+  __resetSettingsTransportForTesting()
 })
 
 describe('useScopedModels', () => {

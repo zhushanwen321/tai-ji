@@ -50,6 +50,8 @@ import { defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // ── getGlobalSkills 可控 mock（hoisted：vi.mock 工厂早于 import 求值）──
 // TC5-Composer 中途改返回值模拟 runtime 重扫 globalCache 后缓存更新。
@@ -149,6 +151,15 @@ beforeEach(() => {
   vi.clearAllMocks()
   // 默认空数组；TC5-Composer 用例内覆盖为具体 skill 列表
   getGlobalSkillsMock.mockResolvedValue([])
+  // [C3] 打 seam：getGlobalSkills 可控 mock + onSkillCacheInvalidated 桥真实 events
+  //（同本文件 '@/api' mock 工厂语义——广播端到端触达 useGlobalSkills 订阅）
+  provideSettingsTransport(makeSettingsTransportStub({
+    getGlobalSkills: getGlobalSkillsMock,
+    onSkillCacheInvalidated: (handler: (p: { scope: 'global' | 'project'; cwd?: string }) => void) =>
+      events.onGlobalType('config.skillCacheInvalidated', (msg) => {
+        handler(msg.payload as { scope: 'global' | 'project'; cwd?: string })
+      }),
+  }))
   // 清 body（reka-ui Popover portal 到 body，跨用例残留会污染断言）
   document.body.innerHTML = ''
 })

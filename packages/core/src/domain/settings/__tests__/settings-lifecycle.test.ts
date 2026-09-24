@@ -12,8 +12,8 @@ import { providePlatform, __resetPlatformForTesting } from '../../../platform/po
 import {
   provideSettingsTransport,
   __resetSettingsTransportForTesting,
-  type SettingsTransport,
 } from '../transport'
+import { makeFakeTransport } from './helpers/fake-transport'
 import { __resetSettingsStoreForTesting, getSettingsStore } from '../settings-store'
 import { useSettings } from '../settings-lifecycle'
 import { InMemoryStorage } from './helpers/in-memory-storage'
@@ -35,15 +35,8 @@ function makeRecordingTransport() {
     unsubs.push(unsub)
     return unsub
   })
-  const transport: SettingsTransport = {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setProvider: vi.fn(async () => ({})),
-    setScopedModels: vi.fn(async () => [] as string[]),
-    discoverModels: vi.fn(async () => ({ success: true })),
-    setSkillDirs: vi.fn(async () => {}),
-    setAgentDirs: vi.fn(async () => {}),
-    setExtensionDirs: vi.fn(async () => {}),
+  // [C3] 请求/动作默认值由共享工厂提供（seam 方法面全覆盖）；on* 用 register 包装记录 handler
+  const transport = makeFakeTransport({
     onProviders: register('providers'),
     onModels: register('models'),
     onSkills: register('skills'),
@@ -55,7 +48,7 @@ function makeRecordingTransport() {
     onDefaults: register('defaults'),
     onSystemPrompt: register('systemPrompt'),
     onTerminalConfig: register('terminalConfig'),
-  }
+  })
   return { transport, handlers, unsubs }
 }
 

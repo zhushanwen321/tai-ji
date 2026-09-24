@@ -151,7 +151,7 @@ import type { SystemSettings, FontScaleTier } from '@taiji/core'
 import { DEFAULT_FONT_SCALES } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -193,7 +193,7 @@ let terminalConfig: TerminalConfig | null = null
 
 async function loadTerminalConfig(): Promise<void> {
   try {
-    const res = await config.getTerminalConfig()
+    const res = await getSettingsTransport().getTerminalConfig()
     terminalConfig = res.config
     terminalFontSize.value = res.config.fontSize
   } catch (e) {
@@ -208,7 +208,7 @@ async function saveTerminalFontSize(): Promise<void> {
   const size = Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, Math.round(Number(terminalFontSize.value) || TERMINAL_FONT_DEFAULT)))
   if (!terminalConfig || size === terminalConfig.fontSize) return
   try {
-    await config.setTerminalConfig({ ...terminalConfig, fontSize: size })
+    await getSettingsTransport().setTerminalConfig({ ...terminalConfig, fontSize: size })
     terminalConfig = { ...terminalConfig, fontSize: size }
     terminalFontSize.value = size
     toastInfo(t('settings.appearance.terminalFontSaved'))

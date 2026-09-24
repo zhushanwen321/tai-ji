@@ -75,7 +75,8 @@ vi.mock('@/api', () => ({
 
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { Switch } from '@/components/ui/switch'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import { useToast } from '@/composables/useToast'
 
 let wrapper: ReturnType<typeof mount> | null = null
@@ -87,9 +88,12 @@ beforeEach(() => {
   configMock.setDefaultModel.mockClear()
   configMock.onDefaultsWithSource.mockClear()
   useToast().toasts.value = []
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

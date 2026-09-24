@@ -21,10 +21,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { __resetSettingsStoreForTesting } from '@taiji/core'
+import { __resetSettingsStoreForTesting, __resetSettingsTransportForTesting } from '@taiji/core'
 import {
   settingsApiMocks,
-  settingsApiModule,
+  provideSettingsApiMocks,
   toastModule,
   commandStoreModule,
   ipcModule,
@@ -33,7 +33,7 @@ import {
   seedStore,
 } from '../helpers/system-page-mount'
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsApiModule())
+// [C3] settings API mock 经 SettingsTransport seam 注入（provideSettingsApiMocks，见 beforeEach）
 vi.mock('@/composables/useToast', () => toastModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/lib/ipc', () => ipcModule())
@@ -42,7 +42,7 @@ vi.mock('@/lib/ipc', () => ipcModule())
 //（Gate A R4②）。mount 慢是集成测试固有成本而非挂起，放宽本文件超时作资源竞争容差。
 vi.setConfig({ testTimeout: 20_000 })
 
-// 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
+// 工厂引用 helper 单例（seam 桩与断言共享同一 mock fn 实例）
 const settingsMock = settingsApiMocks
 
 let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
@@ -56,9 +56,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   __resetSettingsStoreForTesting()
   resetSettingsApiMocks(settingsMock)
+  provideSettingsApiMocks()
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

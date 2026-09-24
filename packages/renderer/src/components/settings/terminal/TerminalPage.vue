@@ -1,7 +1,7 @@
 <!--
   Settings · Terminal 菜单页（Phase 6）。
   单卡片表单：shell / shellArgs / fontSize / fontFamily / scrollback / cursorStyle / bell。
-  数据层：config.getTerminalConfig / setTerminalConfig（整体保存为显式按钮触发，不自动保存，
+  数据层：SettingsTransport seam 的 getTerminalConfig / setTerminalConfig（整体保存为显式按钮触发，不自动保存，
   失败走 toast error，成功走 toast info）。
   shellArgs 以逗号分隔输入，存储为 string[]。
 -->
@@ -167,7 +167,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import type { TerminalConfig } from '@taiji/shared'
 
@@ -210,7 +210,7 @@ function buildConfig(): TerminalConfig {
 /** 加载终端配置到本地编辑态。shellArgs 由 string[] 转为逗号分隔串便于编辑。 */
 async function loadConfig(): Promise<void> {
   try {
-    const res = await config.getTerminalConfig()
+    const res = await getSettingsTransport().getTerminalConfig()
     corrupted.value = res.corrupted
     shell.value = res.config.shell
     shellArgsInput.value = res.config.shellArgs.join(',')
@@ -229,7 +229,7 @@ async function save(): Promise<void> {
   if (saving.value) return
   saving.value = true
   try {
-    await config.setTerminalConfig(buildConfig())
+    await getSettingsTransport().setTerminalConfig(buildConfig())
     info(t('settings.terminal.savedToast'))
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))

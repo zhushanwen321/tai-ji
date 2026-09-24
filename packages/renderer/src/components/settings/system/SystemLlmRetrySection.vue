@@ -148,7 +148,7 @@
 <script setup lang="ts">
 /**
  * System · LLM 调用重试 Section（llm-retry-settings u3）。
- * 数据层：config.getRetryConfig / setRetryConfig（RPC，整体保存为显式按钮触发）。
+ * 数据层：SettingsTransport seam 的 getRetryConfig / setRetryConfig（RPC，整体保存为显式按钮触发）。
  * 校验域：直接消费 shared LLM_RETRY_DOMAIN / validateLlmRetryConfig（禁另写一套域）。
  * 存量超域/坏值（D7/D8）：加载值超出合法域或类型不可用时，对应行显示行内标注。
  */
@@ -165,7 +165,7 @@ import {
 } from '@/components/ui/collapsible'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { getRetryConfig, setRetryConfig, onRetryConfig } from '@taiji/core/transport/api/domains/config'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import {
   LLM_RETRY_DOMAIN,
@@ -173,6 +173,9 @@ import {
   type LlmRetryConfig,
   type LlmRetryProviderConfig,
 } from '@taiji/shared'
+
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
@@ -213,7 +216,7 @@ const warnings = reactive<Record<string, string>>({})
 let unsubscribeRetryConfig: (() => void) | null = null
 
 onMounted(async () => {
-  unsubscribeRetryConfig = onRetryConfig((payload) => {
+  unsubscribeRetryConfig = transport.onRetryConfig((payload) => {
     if (!payload.configured) return
     configured.value = true
     // 其他窗口保存的合法值到达后，本窗口过期的校验红框不应残留
@@ -221,7 +224,7 @@ onMounted(async () => {
     applyLoaded(payload.config)
   })
   try {
-    const res = await getRetryConfig()
+    const res = await transport.getRetryConfig()
     configured.value = res.configured
     applyLoaded(res.config)
   } catch (e) {
@@ -413,7 +416,7 @@ async function onSave(): Promise<void> {
   }
   saving.value = true
   try {
-    await setRetryConfig(config)
+    await transport.setRetryConfig(config)
     toastInfo(t('settings.system.llmRetrySavedToast'))
   } catch (e) {
     console.warn('[SystemLlmRetrySection] failed to save retry config:', e)

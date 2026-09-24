@@ -16,6 +16,7 @@ import {
   __resetSettingsTransportForTesting,
   type SettingsTransport,
 } from '../transport'
+import { makeFakeTransport } from './helpers/fake-transport'
 import type { DiscoverModelsResponse } from '../transport'
 import type { ProviderEditFormDraft } from '../provider-edit-form'
 import { createProviderEditModels, type ProviderEditModelsModule } from '../provider-edit-models'
@@ -24,29 +25,7 @@ import { createProviderEditDiscover, type ProviderEditDiscoverModule } from '../
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
 const tStub = vi.fn((key: string) => key)
 
-function makeFakeTransport(): SettingsTransport {
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setScopedModels: vi.fn(async (_models: string[]): Promise<string[]> => []),
-    setProvider: vi.fn(async () => ({})),
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    setSkillDirs: vi.fn(async () => {}),
-    setAgentDirs: vi.fn(async () => {}),
-    setExtensionDirs: vi.fn(async () => {}),
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-  }
-}
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
 
 /** 当前注入的 fake transport（模块级，供断言用）。 */
 let currentTransport: SettingsTransport

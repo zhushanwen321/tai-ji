@@ -35,8 +35,10 @@ import {
 import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
-// useQuotaConfigure 直连 quota domain（原实现如此，非绕门面场景），mock 其 RPC 面
+// [C3] useQuotaConfigure 经 SettingsTransport seam 消费 quota RPC——本域模块 mock 作为 seam 桩
+// 函数源（getCachedQuota / configureQuota / refreshQuota 逐名映射，见 makeTransport）。
 vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   getCached: vi.fn(async () => ({ data: null, lastFetchAt: null })),
   fetchQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
@@ -125,28 +127,14 @@ const ZHIPU_NO_KEY_P: ProviderInfo = {
 
 const setProviderSpy = vi.fn(async () => undefined)
 
+/** [C3] 共享 seam 桩工厂（全方法面中性默认）+ 本文件 spy/映射（保存 spy + quota RPC）。 */
 function makeTransport(): SettingsTransport {
-  const noop = (): void => {}
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
+  return makeSettingsTransportStub({
     setProvider: setProviderSpy,
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    onProviders: () => noop,
-    onModels: () => noop,
-    onSkills: () => noop,
-    onAgents: () => noop,
-    onExtensions: () => noop,
-    onSkillDirs: () => noop,
-    onAgentDirs: () => noop,
-    onExtensionDirs: () => noop,
-    onDefaults: () => noop,
-    onSystemPrompt: () => noop,
-    onTerminalConfig: () => noop,
-  }
+    getCachedQuota: quotaApi.getCached,
+    refreshQuota: quotaApi.refreshQuota,
+    configureQuota: quotaApi.configure,
+  })
 }
 
 function inMemoryStorage() {

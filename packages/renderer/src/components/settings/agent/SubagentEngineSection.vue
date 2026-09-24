@@ -43,8 +43,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { getSubagentEngineConfig, setSubagentDefaultEngine } from '@taiji/core/transport/api/domains/session'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 const { t } = useI18n()
 const { error: toastError } = useToast()
@@ -59,7 +62,7 @@ const loadError = ref(false)
 async function loadConfig(): Promise<void> {
   loading.value = true
   try {
-    const config = await getSubagentEngineConfig()
+    const config = await transport.getSubagentEngineConfig()
     engines.value = config.engines
     current.value = config.defaultEngine
     loadError.value = false
@@ -83,7 +86,7 @@ async function onEngineChange(value: unknown): Promise<void> {
   const engineId = typeof value === 'string' ? value : ''
   if (engineId === '' || engineId === current.value) return
   try {
-    await setSubagentDefaultEngine(engineId)
+    await transport.setSubagentDefaultEngine(engineId)
     current.value = engineId
   } catch (e) {
     // RD-4#3 失败显形 + 回滚：current 仅在写成功后前进（Select 以 :model-value 受控于 current，

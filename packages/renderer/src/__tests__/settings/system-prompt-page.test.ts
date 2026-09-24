@@ -10,7 +10,7 @@
  *  - corrupted：getSystemPrompt 返回 corrupted=true → 页内出现损坏提示。
  *
  * mock 策略：
- *  - vi.mock('@/api') 提供 config.getSystemPrompt / setSystemPrompt，
+ *  - SettingsTransport seam 桩提供 getSystemPrompt / setSystemPrompt（[C3] 测试打 seam），
  *    以及 SettingsModal/store 需要的 config.listProviders / setSkillDirs / setAgentDirs。
  *  - vi.mock('@/i18n') 仅 stub setLocale，保留 t 行为（菜单 key 未翻译时回退 key）。
  *  - Dialog / DialogContent 走 reka-ui teleport 到 body，查询走 document.body。
@@ -21,6 +21,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 interface SystemPromptConfig {
   version: number
@@ -91,9 +93,11 @@ beforeEach(() => {
   configMock.getSystemPrompt.mockClear()
   configMock.setSystemPrompt.mockClear()
   configMock.listProviders.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

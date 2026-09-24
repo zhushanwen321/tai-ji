@@ -22,6 +22,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { provideSettingsTransport, __resetSettingsTransportForTesting } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { DEFAULT_PRESETS } from '@taiji/shared'
 
 /** mock preset API */
@@ -113,9 +115,19 @@ beforeEach(() => {
   presetMock.setDefault.mockResolvedValue(undefined)
   const { toasts } = useToast()
   toasts.value = []
+  // [C3] preset 域调用经 SettingsTransport seam 桩注入（逐名映射）
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetMock.list,
+    getDefaultPreset: presetMock.getDefault,
+    setDefaultPreset: presetMock.setDefault,
+    createPreset: presetMock.create,
+    updatePreset: presetMock.update,
+    removePreset: presetMock.remove,
+  }))
 })
 
 afterEach(() => {
+  __resetSettingsTransportForTesting()
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''

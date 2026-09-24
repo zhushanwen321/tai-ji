@@ -124,7 +124,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { extension as extensionApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
@@ -142,7 +142,7 @@ const installingRecommended = ref<Set<string>>(new Set())
 
 async function refreshRecommended() {
   try {
-    recommended.value = await extensionApi.fetchRecommended()
+    recommended.value = await getSettingsTransport().fetchRecommendedExtensions()
   } catch (e) {
     // 拉取失败仅记录到 actionError，不阻塞页面其余功能
     actionError.value = e instanceof Error
@@ -163,7 +163,7 @@ async function onInstallRecommended(pkgName: string) {
   next.add(pkgName)
   installingRecommended.value = next
   try {
-    await extensionApi.install(`npm:${pkgName}`)
+    await getSettingsTransport().installExtension(`npm:${pkgName}`)
     toastInfo(t('settings.extension.installedToast'))
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e)
@@ -211,14 +211,14 @@ async function onInstall() {
     if (activeTab.value === 'npm') {
       // 自动补 npm: 前缀（runtime installExtension 强制要求，placeholder 仅提示不强制）
       const source = input.startsWith('npm:') ? input : `npm:${input}`
-      await extensionApi.install(source)
+      await getSettingsTransport().installExtension(source)
       installInput.value = ''
       toastInfo(t('settings.extension.installedToast'))
     } else if (activeTab.value === 'dir') {
-      const result = await extensionApi.installDir(input)
+      const result = await getSettingsTransport().installExtensionDir(input)
       setDiscovered(result)
     } else {
-      const result = await extensionApi.installGitRepository(input)
+      const result = await getSettingsTransport().installExtensionGitRepository(input)
       setDiscovered(result)
     }
   } catch (e) {
@@ -267,7 +267,7 @@ async function onFinishInstall() {
   const { tempDir } = discovered.value
   const selectedNames = [...selected.value]
   try {
-    await extensionApi.finishInstall(tempDir, selectedNames)
+    await getSettingsTransport().finishExtensionInstall(tempDir, selectedNames)
     discovered.value = null
     selected.value = new Set()
     installInput.value = ''
@@ -286,7 +286,7 @@ async function onCancelInstall() {
   discovered.value = null
   selected.value = new Set()
   try {
-    await extensionApi.cancelInstall(tempDir)
+    await getSettingsTransport().cancelExtensionInstall(tempDir)
   } catch (e) {
     // tempDir 清理失败仅记录，不阻塞 UI（候选区已关闭）。临时文件可能未清理，需手动检查。
     const baseMsg = e instanceof Error ? e.message : String(e)

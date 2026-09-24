@@ -57,13 +57,12 @@ import { useI18n } from 'vue-i18n'
 import type { SkillDirConfig } from '@taiji/shared'
 import { LoadPaths, SETTINGS_CONFIG_API_KEY, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
 import { Button } from '@/components/ui/button'
-import { config } from '@/api'
 import { chooseDirectory, getDataDir } from '@/api/domains/settings'
 
-provide(SETTINGS_CONFIG_API_KEY, config) // LoadPaths(SourceImportSection) 迁 ui，config 经 inject
+provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => getSettingsTransport().detectSources() }) // LoadPaths(SourceImportSection) 迁 ui，detectSources 经 inject（[C3] 走 seam）
 // v2 §3 目录选择 dialog：LoadPaths 经 inject 调 chooseDirectory（lib/ipc 封装，preload 复用 pick-directory handler）
 provide(SETTINGS_CHOOSE_DIRECTORY_KEY, chooseDirectory)
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import ExtensionInstallFlow from './ExtensionInstallFlow.vue'

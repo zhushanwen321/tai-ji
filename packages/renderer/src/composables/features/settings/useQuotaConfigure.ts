@@ -32,8 +32,7 @@ import type {
   QuotaTestView,
   ReadinessMissing,
 } from '@taiji/core'
-import { API_KEY_CLEAR_SENTINEL } from '@taiji/core'
-import * as quotaApi from '@taiji/core/transport/api/domains/quota'
+import { API_KEY_CLEAR_SENTINEL, getSettingsTransport } from '@taiji/core'
 import i18n from '@/i18n'
 import { useQuotaStore } from '@/stores/quota'
 
@@ -389,7 +388,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const p = providerRef.value
     if (!p) return
     try {
-      const result = await quotaApi.getCached(p.id)
+      const result = await getSettingsTransport().getCachedQuota(p.id)
       // 失败态（D6 no-credential 等）data 为 null 但带 reason：只看 data 会把失败态丢成
       // idle，重开编辑体看不到失败原因（§7.3 影响面表「设置页 loadCached」修正）。
       if (result.data || result.reason) {
@@ -438,7 +437,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     configureError.value = ''
 
     try {
-      const result = await quotaApi.configure({ providerId: p.id, enabled: v })
+      const result = await getSettingsTransport().configureQuota({ providerId: p.id, enabled: v })
       if (!result.ok) {
         enabled.value = prevEnabled
         configureError.value = result.error || t('settings.providerEdit.quotaConfigureFail')
@@ -509,7 +508,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
 
     configuring.value = true
     try {
-      const result = await quotaApi.configure(payload)
+      const result = await getSettingsTransport().configureQuota(payload)
       // 半提交窗口对齐（runtime 改动 4：清理锚定 persist 成功而非 configure 整体成功）：
       // persist 成功 + secrets 段失败 → runtime 返回 ok:false 但 QuotaCache 已清、fetcher
       // 已换新 —— renderer 镜像失效不能只挂在 ok:true 上，typeChanged 时无条件同步失效
@@ -541,7 +540,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
 
     try {
       // 用 refresh 绕过 10s throttle，确保测试查询每次都发真实请求（设计 §2.2.5）
-      const result = await quotaApi.refreshQuota(p.id)
+      const result = await getSettingsTransport().refreshQuota(p.id)
       if (result.data) {
         quotaData.value = result.data
         lastFetchAt.value = result.lastFetchAt

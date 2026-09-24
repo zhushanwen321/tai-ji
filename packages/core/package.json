@@ -55,6 +55,10 @@
    "types": "./src/domain/settings/index.ts",
    "import": "./src/domain/settings/index.ts"
   },
+  "./testing": {
+   "types": "./src/testing/index.ts",
+   "import": "./src/testing/index.ts"
+  },
   "./domain/chat": {
    "types": "./src/domain/chat/index.ts",
    "import": "./src/domain/chat/index.ts"
