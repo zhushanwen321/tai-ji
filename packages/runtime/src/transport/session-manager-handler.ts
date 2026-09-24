@@ -175,7 +175,7 @@ export function runClaimSweep(claims: ClaimLedger, respond: WatchRespondFn): Swe
   return result
 }
 
-/** dispatch 的统一返回形状：6 个 action 结果 + 错误闭环（send 同步失败 / create 后置失败） */
+/** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道 deferred 返回 null，不产生本形状 */
 type SessionManagerDispatchResult =
   | SessionManagerCreateResult
   | SessionManagerSendResult
@@ -221,7 +221,7 @@ export interface SessionManagerHandlerOptions {
 }
 
 /**
- * SessionManagerHandler — 处理 agent-managed session 的 6 个 action。
+ * SessionManagerHandler — 处理 agent-managed session 的 7 个 action（含 notify-once watch 纯应答通道）。
  *
  * handle() 是唯一入口，由 EventInterpreter.onSessionManagerRequest 调用。
  * dispatch() 纯分发（各分支只 return 结果），回写统一由 respond() 收口；

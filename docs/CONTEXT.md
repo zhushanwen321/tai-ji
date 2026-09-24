@@ -53,7 +53,7 @@ session-manager extension 与 taiji runtime 之间的长挂应答事件通道（
 
 ### pending type 'session'
 
-`pending_notifications` 查询面的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类，每 session 固定 +2 条）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 守卫在子会话未收口时不误判「已干完」）。
+`pending_notifications` 查询面的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类——每子会话 1 条 register，随终局死亡 unregister，写入面每 session 共 2 行 entry）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 守卫在子会话未收口时不误判「已干完」）。
 
 **代码映射**: `extensions/universal/pending-notifications/src/state.ts`（词表）；`packages/extension-protocol/src/pending-entries.ts`（族映射）；`packages/subagent-core/src/execution/round-supervisor/reconcile-sweep.ts`（skip 分支）。
 

@@ -662,7 +662,7 @@ async function main(): Promise<void> {
   // 职责面：respond 写回通道 / settle 兑现腿（agentSettledListeners）/ 终局死亡发声
   //（delete·forceQuit·非 respawn 链 exit·熔断四汇聚点）/ 父死亡批量 orphan（触发器②）/
   // TTL 清扫消费 / shutdown 非零 warn（D7b）。
-  // 订阅顺序硬约束（completion-backflow 注释头同款）：pm.onSessionExit 订阅须先于下方
+  // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理腿（按订阅序分发，本腿排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
   //
