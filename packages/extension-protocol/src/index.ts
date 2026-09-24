@@ -117,7 +117,7 @@ export {
 // ── ./extensions/plan：plan 模式生命周期状态机（D1：states/events/transition/derivePhase）+
 // 审阅回传值域契约（D3①⑤/D9③：值域守卫 + error envelope + selfReview 有界截断）——纯数据 +
 // 纯函数零 pi 依赖，pi-plan 扩展（转移接管）/ runtime（派生归一）/ renderer（呈现映射）三层共用；
-// 消费面勾销锚 = extensions/plan/consumers.md ──
+// 消费面勾销锚 = src/extensions/plan/consumers.md ──
 export type {
   PlanLifecycleState,
   PlanLifecycleEvent,

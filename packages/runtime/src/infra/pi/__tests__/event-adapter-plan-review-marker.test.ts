@@ -10,7 +10,7 @@
  *   与 ask-user 检测失败降级同构边界）
  * - selfReview 透传（D9③）：marker select 帧携带 selfReview（仅这一个有界字段加员，docs
  *   不透传纪律保留）；边界形态：缺席/非 string 不落键、空串原样过、超限不截不拒（截断在
- *   扩展写侧——canonical = extensions/plan/review-contract.ts 的 truncateSelfReview）
+ *   扩展写侧——canonical = packages/extension-protocol/src/extensions/plan/review-contract.ts 的 truncateSelfReview）
  * - 既有 marker 路由无回归：ASK_USER_MARKER 富交互分流照常（form:true 统一表单帧）；
  *   SUBAGENT_INFLIGHT_MARKER 唯一不广播例外照常（translate 守卫分支零产出）
  *

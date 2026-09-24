@@ -217,7 +217,7 @@ export interface PlanDocMeta {
  *
  * selfReview（自审结论，D9①③）：agent 提交审批前的自审摘要，投影面到审批请求帧为止
  * （不进 PlanStateView / session.planState 帧）；有界性由写侧 4KB 单点截断保证
- * （canonical 上限与截断 = extensions/plan/review-contract.ts，R3）。**optional 是兼容契约**：
+ * （canonical 上限与截断 = src/extensions/plan/review-contract.ts，R3）。**optional 是兼容契约**：
  * 旧扩展不携带 → 宿主自审行不渲染的降级形态；submit-review 的必填硬门在 tool 层执行
  * （缺失/空 → tool result 错误纠偏，不 throw），wire 帧不设必填。
  */
@@ -229,7 +229,7 @@ export interface PlanReviewRequest {
 /**
  * 审批三键裁决（D3）：approve 确认执行 / revise 提交修订（必带评论）/ dismiss 搁置
  * （非破坏：不杀 turn、不丢状态，计划进度保留）。revise 携带评论、approve/dismiss
- * 不携带（结构上不可混带）。值域守卫 canonical 版 = extensions/plan/review-contract.ts
+ * 不携带（结构上不可混带）。值域守卫 canonical 版 = src/extensions/plan/review-contract.ts
  * （运行时判别 TS 穷尽性管不到——未知值域降级语义见该模块「降级双分源」）。
  */
 export type PlanReviewDecision = 'approve' | 'revise' | 'dismiss'
@@ -247,7 +247,7 @@ export interface PlanReviewComment {
  * dismiss（D3 搁置）→ 转移 reviewing→planning 落盘，tool result 告知 agent「用户搁置了
  * 本次审阅：plan 模式保持、文档与进度不变；简短告知用户已搁置并询问下一步，不要实施改动」。
  * 未知 decision 值域的降级指引 = 「宿主/扩展版本不匹配」类文案（**不再引导重挂**，防
- * 再入循环，D3①）——判别与降级枚举见 extensions/plan/review-contract.ts。
+ * 再入循环，D3①）——判别与降级枚举见 src/extensions/plan/review-contract.ts。
  */
 export type PlanReviewResponse =
   | { decision: 'approve' }

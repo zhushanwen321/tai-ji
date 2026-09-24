@@ -139,6 +139,14 @@ for (const pkg of diskPackages) {
 //   - (?<!\w)：排除 abcextensions/xxx 之类的子串前缀误匹配
 //   - (?<!docs/)：排除 docs/extensions/<name>/... 文档目录路径（topic 目录与包名
 //     同名时——如 smart-context 设计文档目录——不是包路径引用）
+//   - (?<!src/)：排除包内 `src/extensions/<pkg>/` 模块命名空间——extension-protocol 的
+//     plan 契约模块 `src/extensions/plan/` 与仓库根旧单层路径 extensions/<pkg>/ 撞名。
+//     [HISTORICAL] 2026-09-24 plan 状态机契约落地时，本检查（一层路径残留）把指向契约
+//     模块的简写注释（形如 `extensions/<pkg>/review-contract.ts` 的简写指向 src/extensions/plan/
+//     模块，6 文件 8 处）误报为旧一层路径残留、拦下 U2 提交——根因 = 简写未含 `src/`
+//     落进匹配域；处置 = 误报后简写已改无歧义全限定形（含 `src/`），并加本豁免防模块
+//     命名空间再次被误判。真正的一层路径残留（extensions/<pkg>/ 前无 src/）仍按原样拦截，
+//     检测面不减。（本注释自身用 <pkg> 占位描述匹配形，避免自命中——同上方各条先例。）
 //   - (?![\w-]) 终止黑名单：包名边界 = 后面不是字母数字/连字符。不用白名单枚举
 //     （[/\s"'\`,)\]]|$）——白名单漏全角标点/英文句点，中文文档全角括号包路径的
 //     高频写法会逃逸（2026-08-22 审查实证，扩大后即抓出 6 处漏网）
@@ -153,7 +161,7 @@ for (const dir of readdirSync(SHARED_DIR)) {
   if (existsSync(join(SHARED_DIR, dir, 'package.json'))) knownNames.add(dir)
 }
 
-const staleRe = new RegExp(`(?<!\\w)(?<!\\./)(?<!agent/)(?<!packages/extensions/)(?<!docs/)extensions/(${[...knownNames].join('|')})(?![\\w-])`)
+const staleRe = new RegExp(`(?<!\\w)(?<!\\./)(?<!agent/)(?<!packages/extensions/)(?<!docs/)(?<!src/)extensions/(${[...knownNames].join('|')})(?![\\w-])`)
 // 历史记录判定：CHANGELOG / ADR / 验收报告 / 包内 docs 设计记录 / 历史事故文档
 // （包内 docs 的分组名用 GROUPS 构建，新增分组单点同步）
 const groupDocsRe = new RegExp(`^extensions/(${GROUPS.join('|')})/[^/]+/docs/`)
