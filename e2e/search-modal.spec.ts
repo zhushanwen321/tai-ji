@@ -179,6 +179,10 @@ test.describe('搜索浮层 E2E', () => {
     await page.getByTestId('search-input').pressSequentially('review')
     await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('search-section-命令')).toContainText('review')
+    // Enter 消费当前选中项：等选中收敛为 review 再按 Enter——与 SM-E2E-7/9 同款守卫
+    // （防抖窗口内旧结果排前时 Enter 会消费错项：app 命令成功则关弹层但无 chip，2026-09-24 实发）
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('review', { timeout: 5_000 })
 
     await page.getByTestId('search-input').press('Enter')
     await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
@@ -202,6 +206,11 @@ test.describe('搜索浮层 E2E', () => {
     await page.getByTestId('search-input').pressSequentially('commit')
     await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('search-section-命令')).toContainText('commit')
+    // Enter 消费的是**当前选中项**：等选中收敛为 commit 再按 Enter——与 SM-E2E-7 同款守卫
+    // （防抖窗口内旧结果仍可能排前，如「概览 Mission Control」前缀命中 → Enter confirm 错项 →
+    // ok:false toast「未找到命令」+ 浮层保持打开；2026-09-24 实发，同 SM-7 2026-09-18 竞态家族）
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('commit', { timeout: 5_000 })
 
     await page.getByTestId('search-input').press('Enter')
     await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
