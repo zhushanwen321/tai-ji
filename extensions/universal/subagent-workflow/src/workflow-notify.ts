@@ -11,11 +11,19 @@
  * 层归属：workflow 域（与 workflow-events.ts / workflow-stall-watchdog.ts 同层；
  * 唯一生产消费方 = workflow-events.ts。原名 interface/helpers.ts，2026-09-24
  * 名实归位——内容自始是通知生产而非 interface 注册面杂项）。
+ *
+ * 事件注册面：setupNotifyLedgerCompactionGuard（pi compaction 事件的 ledger
+ * 补写守卫——notify 账本的家内事务，随跨域 handler 迁出从 workflow-events.ts
+ * 装配 seam 原样搬入；注册时点仍由 setupWorkflowDomain 在原位调用）。
  */
 
 import { join } from "node:path";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionCompactEvent,
+} from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -490,3 +498,33 @@ export const WORKFLOW_STALL_THRESHOLD_MS = WORKFLOW_STALL_THRESHOLD_MINUTES * MS
 
 /** [D6-2] stall 通知的送达 customType（新通道值——W18 失效信号互斥，见 notifyStall）。 */
 export const WORKFLOW_STALL_CUSTOM_TYPE = "workflow-stall";
+
+// ── notify 域事件注册（跨域 handler 迁入） ────────────────────────────────────
+
+/**
+ * compaction 后 notify ledger 补写守卫（注册 pi 的 session compaction 事件）。
+ *
+ * [U2 P-B4 降级] compaction 对 custom entry 保留行为实装未验证——检测 ledger/ack
+ * entry 被 compaction 清除时按内存态补写（notify-ledger compactionCheck；未清除则
+ * no-op）。内存态在 compaction 后仍活着，作为补写源；重启后的权威仍是两列 entry
+ * 差集（内存不承担销账职责）。
+ *
+ * 归 notify 域：守卫对象是 NotifyLedger 的账面完整性（getBoundNotifyLedger 的
+ * 家内事务），与 workflow 域事件族装配零数据耦合。由 setupWorkflowDomain 在
+ * 原注册位置调用（pi.on 注册顺序逐位不变，
+ * workflow-events-registration-order.test.ts 锁定）。
+ */
+export function setupNotifyLedgerCompactionGuard(pi: ExtensionAPI): void {
+  pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
+    try {
+      const rewritten = getBoundNotifyLedger()?.compactionCheck() ?? 0;
+      if (rewritten > 0) {
+        logger.warn(`[subagents] notify ledger entries lost to compaction; rewrote ${rewritten} from memory`);
+      }
+    } catch (err) {
+      logger.warn("[subagents] notify ledger compactionCheck failed", {
+        reason: toErrorMessage(err),
+      });
+    }
+  });
+}

@@ -113,7 +113,7 @@ vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", ()
   maybeCleanupExpiredSessionFiles: mockMaybeCleanup,
 }));
 
-// ④ 通知账本 bind（index.ts 另消费 getBoundNotifyLedger —— session_compact handler）
+// ④ 通知账本 bind（setupNotifyLedgerCompactionGuard 另消费 getBoundNotifyLedger —— workflow-notify.ts）
 vi.mock("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts", () => ({
   bindNotifyLedgerHost: mockBindNotifyLedgerHost,
   getBoundNotifyLedger: () => null,

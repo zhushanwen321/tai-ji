@@ -10,9 +10,11 @@
  * 在飞 run）：
  *   1. per-factory 域状态（lsRef / notifiedRunIds / workerHost / registry / sessionState）
  *   2. log（pi.appendEntry 包装）+ makeLifecycleDeps + makeDeps（LauncherDeps 生产装配）
- *   3. 7 个 pi.on handler（session_start / session_compact / model_select /
- *      session_tree / session_before_fork / session_before_switch / session_shutdown，
- *      注册相对顺序原样保留）
+ *   3. 本域 3 个 pi.on handler（session_start / session_tree / session_shutdown）
+ *      + 4 个跨域事件注册（notify ledger compaction 守卫 / model 缓存刷新 /
+ *      subagents 父级联关闭×2——setup* 函数住各自域模块，本 seam 在原注册位
+ *      置调用；pi.on 全链注册顺序逐位不变，
+ *      workflow-events-registration-order.test.ts 锁定）
  *   4. getWorkflowDeps 守卫（单一出口，discriminated union）+ lazyDeps（tool lazy 注入源）
  *
  * 组合根消费面：setupWorkflowDomain(pi, { inflightReporter }) 返回
@@ -36,7 +38,6 @@ import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
-  SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
   SessionTreeEvent,
@@ -45,8 +46,6 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 // ═══ 经 core barrel 消费 workflow 域（引擎与 worker 住 packages/subagent-core） ═══
 import { bestEffort } from "@zhushanwen/subagent-core";
-import { getBoundNotifyLedger } from "@zhushanwen/subagent-core";
-import { getModelConfigService } from "@zhushanwen/subagent-core";
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { executeNestedWorkflow, terminateRunningRuns } from "@zhushanwen/subagent-core";
@@ -64,6 +63,10 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // 本模块只在 session_start / session_shutdown 驱动 attach/detach）。
 import type { InFlightReporter } from "./host/inflight-reporter.ts";
 import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./workflow-notify.ts";
+// ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
+import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
+import { setupModelEvents } from "./model-events.ts";
+import { setupSubagentsCascadeEvents } from "./subagents-events.ts";
 import { toGuiCtx } from "./interface/gui-mappers.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
 import {
@@ -204,10 +207,12 @@ export interface WorkflowDomainHandle {
  * workflow 域事件族装配单一入口（事件族 seam，与 session-lifecycle.ts 同构）。
  * index.ts 的 workflow 域退为本调用 + 装配结果消费。
  *
- * 7 个 pi.on handler 的注册相对顺序原样保留（session_start → session_compact →
- * model_select → session_tree → session_before_fork → session_before_switch →
- * session_shutdown）；engine-awareness（before_agent_start 链尾）仍由组合根在
- * 本调用之后注册（before_agent_start 链序不变，跨事件通道无注册时序语义）。
+ * 本域 3 个 handler（session_start → session_tree → session_shutdown）与 4 个
+ * 跨域 setup* 注册（notify ledger compaction 守卫 / model 缓存刷新 / subagents
+ * 父级联关闭×2）交错，pi.on 全链注册顺序逐位不变（锁
+ * workflow-events-registration-order.test.ts）；engine-awareness
+ * （before_agent_start 链尾）仍由组合根在本调用之后注册（before_agent_start
+ * 链序不变，跨事件通道无注册时序语义）。
  */
 export function setupWorkflowDomain(
   pi: ExtensionAPI,
@@ -433,41 +438,14 @@ export function setupWorkflowDomain(
   });
 
   // ════════════════════════════════════════════════════════════
-  //  [U2 P-B4 降级] session_compact：compaction 对 custom entry 保留行为实装未
-  //  验证——检测 ledger/ack entry 被 compaction 清除时按内存态补写（notify-ledger
-  //  compactionCheck；未清除则 no-op）。内存态在 compaction 后仍活着，作为补写源；
-  //  重启后的权威仍是两列 entry 差集（内存不承担销账职责）。
-  // ═══════════════════════════════════════════════════════════
-  pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
-    try {
-      const rewritten = getBoundNotifyLedger()?.compactionCheck() ?? 0;
-      if (rewritten > 0) {
-        logger.warn(`[subagents] notify ledger entries lost to compaction; rewrote ${rewritten} from memory`);
-      }
-    } catch (err) {
-      logger.warn("[subagents] notify ledger compactionCheck failed", {
-        reason: toErrorMessage(err),
-      });
-    }
-  });
+  //  [U2 P-B4 降级] notify ledger compaction 补写守卫（notify 域）
+  // ════════════════════════════════════════════════════════════
+  setupNotifyLedgerCompactionGuard(pi);
 
   // ════════════════════════════════════════════════════════════
-  //  model_select：用户切换 model 时刷新缓存
+  //  model 缓存刷新（model 域）
   // ════════════════════════════════════════════════════════════
-  pi.on("model_select", (event) => {
-    const service = getModelConfigService();
-    if (service && typeof service.setCtxModel === "function") {
-      service.setCtxModel(event.model);
-    } else {
-      // [C2] 不再静默：service 缺席（session_start 装配链失败）时模型切换缓存未
-      // 刷新，后续 resolveModel 会用旧模型——warn 留痕接通「现象 → 根因」链路。
-      // model_select 是低频用户操作，不会刷屏。
-      logger.warn(
-        "[subagent-workflow] model_select ignored: model config service not initialized (session_start assembly failed) — model switch will not take effect for new subagents until session reload",
-        { model: event.model },
-      );
-    }
-  });
+  setupModelEvents(pi);
 
   // ════════════════════════════════════════════════════════════
   //  session_tree：切分支前终止所有 running run（一次性生命周期——切走即作废）
@@ -491,41 +469,9 @@ export function setupWorkflowDomain(
   });
 
   // ════════════════════════════════════════════════════════════
-  //  SP-4: session_before_fork（/fork）/ session_before_switch（/new）级联关闭
+  //  SP-4: 父级联关闭（subagents 域）——/fork 与 /new 的级联 record 清理
   // ════════════════════════════════════════════════════════════
-  //  主 session /fork 或 /new 时，清理旧 record（disposeAllRecords：CAS 转终态 +
-  //  archive + worktree 清理）。before 事件在 session 替换前触发，确保旧 session 的
-  //  subagent 在新 session 创建前被清理（随后的 session_shutdown → dispose 收割子进程）。
-  //
-  //  [M2 修复] 旧实现把 /new 级联挂在 session_before_tree 上——SDK 中该事件只由
-  //  AgentSession.navigateTree()（/tree 同 session 分支切换）触发，/new 走
-  //  session_before_switch(reason:"new") + session_shutdown(reason:"new")，从不触发
-  //  before_tree。后果双向：/new 级联是死代码；普通 /tree 分支导航反而误杀全部活跃
-  //  subagent。现 /new 改挂 session_before_switch(reason==="new")，before_tree handler
-  //  移除（/tree 是同 session 内导航，record/子进程归属不变，无级联关闭诉求）。
-  pi.on("session_before_fork", (_event, _ctx) => {
-    const service = getSubagentService();
-    if (service) {
-      const count = service.onParentFork();
-      if (count > 0) {
-        logger.warn(`[subagents] /fork 级联关闭 ${count} 个 subagent`);
-      }
-    }
-  });
-
-  pi.on("session_before_switch", (event, _ctx) => {
-    // /new（reason:"new"）创建全新 session → 级联关闭旧 record。
-    // reason:"resume"（/resume /import 回到已有 session）不级联：record 按 rootSessionId
-    // 归属隔离，跨 session 读写由 store 过滤守卫，无需销毁。
-    if (event.reason !== "new") return;
-    const service = getSubagentService();
-    if (service) {
-      const count = service.onParentNew();
-      if (count > 0) {
-        logger.warn(`[subagents] /new 级联关闭 ${count} 个 subagent`);
-      }
-    }
-  });
+  setupSubagentsCascadeEvents(pi);
 
   // ════════════════════════════════════════════════════════════
   //  session_shutdown：dispose subagents + terminate workflows + store 收尾 + cleanup
@@ -539,8 +485,8 @@ export function setupWorkflowDomain(
   //  stale ctx 反复 attempt；新 factory 建新 reporter 并覆盖进程级单监听）。存活的
   //  在飞 run / store 经 D2 槽由 post-reload session_start(reason=reload) 的
   //  adoption 接管（D4，session-lifecycle.ts）。quit/new/resume/fork = 会话真离开，
-  //  六动作现状全保持；session_tree / session_before_switch 的 terminate 路径不受
-  //  影响（各自独立 handler，真语义）。
+  //  六动作现状全保持；session_tree 与 /new 父级联（subagents-events.ts）的
+  //  terminate 路径不受影响（各自独立 handler，真语义）。
   //
   //  store 收尾：每 session 的 JsonlRunStore 在 terminateRunningRuns 之后 dispose（刷
   //  pending 去抖批 + await in-flight 链，见 W2C5）。R3 声明：SIGTERM/SIGINT 走
