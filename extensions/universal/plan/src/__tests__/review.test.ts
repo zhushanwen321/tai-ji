@@ -34,6 +34,7 @@ vi.mock("../exec-skills.js", () => ({
 }));
 
 import { handlePlanComplete } from "../compact.js";
+import { detectExecSkills } from "../exec-skills.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { PlanState } from "../state.js";
@@ -391,6 +392,10 @@ describe("decision 消费（taiji 形态）", () => {
 
   it("approve → transition reviewing→dispatching 落盘后再挂 exec-choice，终局 completed（D5 阶段不倒退）", async () => {
     const { exec, ctx, pi } = setupTaiji();
+    // 有 plan-exec 技能 → 挂执行方式表单（D7②：空集直通无表单窗，本用例锁 form 挂起窗的 D5 时序）
+    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+    ]);
     (ctx.ui.select as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(JSON.stringify({ decision: "approve" }))
       .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Execute" }));

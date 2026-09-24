@@ -42,6 +42,7 @@ import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanCommand } from "../command.js";
+import { detectExecSkills } from "../exec-skills.js";
 import type { PlanState } from "../state.js";
 import { DEFAULT_PLAN_STATE } from "../state.js";
 import { registerPlanTool } from "../tool.js";
@@ -133,6 +134,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  // exec-skills 模块 mock 归位空集（D7②：空集直通是缺省形态，用例内显式注入技能的覆写不跨用例泄漏）
+  (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
 });
 
 // ── S15 扩展侧断言族（单测锚定，零 token）──
@@ -318,6 +321,10 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
 
   it("complete：reviewing --approve--> dispatching（文本流转直调 complete 同边，§三B）→ later --> approved", async () => {
     const h = setup(planningState());
+    // 有技能才挂表单（D7②）——later 边只存在于表单的「暂不执行」档
+    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+    ]);
     // 文本流：submit-review 软门后用户口头确认 → agent 直调 complete
     await h.exec({ action: "submit-review", selfReview: SR });
     (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Not now");
@@ -353,6 +360,9 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
 describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，归口直读）", () => {
   it("构造点②（TUI choice 空）→ via 'dissolved' 外部解散归口（approved 保留）", async () => {
     const h = setup({ ...planningState(), state: "approved" });
+    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+    ]);
     (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     const res = await h.exec({ action: "complete" });
     expect(res.details).toMatchObject({ action: "complete-cancelled", source: "external" });
@@ -362,6 +372,9 @@ describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，�
   it("构造点③（rpc cancel：select 解散 + signal aborted）→ via 'dissolved'；与④timeout 同折 reason 'cancelled'", async () => {
     const h = setup({ ...planningState(), state: "approved" });
     h.ctx.mode = "rpc";
+    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+    ]);
     // 挂起窗口内 controller 被 abort（handleAbort 的 controller.abort() 半边 / turn 级联），
     // 无 reset 介入 → uiFormInteract 判 reason='cancelled'
     (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {

@@ -80,6 +80,11 @@ interface CompleteDetails {
   planFilePath: string;
   isolation: string;
   execMode: string;
+  /**
+   * 执行方式的选定来源（D7②）：'headless' = 无 UI 默认 execute；'no-exec-skills' =
+   * 无 plan-exec 技能直通（不挂执行方式表单）；'dialog' = 表单/选择器选定。
+   */
+  execModeSource?: "headless" | "no-exec-skills" | "dialog";
   /** D2：direct 档 goalInit 的同步结果；compact 档在 onComplete 回调内执行，不进 result */
   goalOutcome?: GoalBridgeOutcome;
 }
@@ -250,8 +255,12 @@ function renderPlanResult(
     case "complete": {
       const header = fg("success", `✓ Plan 已批准 → ${details.execMode}`) + NL;
       const body = fg("dim", `  ${details.planFilePath}`) + NL;
+      // D7② 直通明示（无 plan-exec 技能不挂表单）：渲染同样不静默——用户知道为何没弹表单
+      const direct = details.execModeSource === "no-exec-skills"
+        ? fg("dim", "  无 plan-exec 技能，直接执行（未弹执行方式表单）") + NL
+        : "";
       const info = fg("dim", `  isolation: ${details.isolation} · 工具集已恢复`);
-      return new Text(header + body + info, 0, 0);
+      return new Text(header + body + direct + info, 0, 0);
     }
 
     case "complete-cancelled": {
@@ -863,9 +872,11 @@ const LATER_MODE = "later";
  * 五构造点：① LATER_MODE（用户显式「暂不执行」→ via 'later'，是明确选择不是解散）；
  * ② choice 空 / ③ uiFormInteract cancel / ④ timeout / ⑤ channel-error、non-json 等非 ok
  * 其余 reason → 均 via 'dissolved'（无选择解散，归口点执行 review_aborted 转移义务）。
+ * mode 分支的 `pickedBy`（D7②）：'headless' = 无 UI 默认 execute；'no-exec-skills' =
+ * 无 plan-exec 技能直通（不挂表单）；'dialog' = 表单/选择器选定。
  */
 type CompleteChoiceOutcome =
-  | { kind: "mode"; chosenMode: string; skillEntryPath?: string }
+  | { kind: "mode"; chosenMode: string; skillEntryPath?: string; pickedBy: "headless" | "no-exec-skills" | "dialog" }
   | { kind: "cancelled"; via: "later"; chosenLabel: string }
   | {
       kind: "cancelled";
@@ -900,12 +911,18 @@ async function resolveCompleteChoice(
   signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
   if (!ctx.hasUI) {
-    return { kind: "mode", chosenMode: "execute" };
+    return { kind: "mode", chosenMode: "execute", pickedBy: "headless" };
   }
 
   // complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
   // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillEntryPath 随 outcome 流转
   const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
+  // D7②（设计 §3.1 终态 6 / S4）：无 plan-exec 技能**不挂执行方式表单**——「确认执行」
+  // 按钮语义自洽，approve 直通 execute 走完执行派发链（goal 桥/直执 steer）；「暂不执行」
+  // 需求由「不点确认执行 / 搁置」覆盖。恒两项死表单（F6 用户可感形态）构造性消除。
+  if (execSkills.length === 0) {
+    return { kind: "mode", chosenMode: "execute", pickedBy: "no-exec-skills" };
+  }
   const execOptions = buildExecOptions(execSkills);
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
@@ -969,20 +986,29 @@ async function resolveCompleteChoice(
   if (option.mode === LATER_MODE) {
     return { kind: "cancelled", via: "later", chosenLabel };
   }
-  return { kind: "mode", chosenMode: option.mode, skillEntryPath: option.skillEntryPath };
+  return { kind: "mode", chosenMode: option.mode, skillEntryPath: option.skillEntryPath, pickedBy: "dialog" };
 }
 
 /**
  * complete 的 result 正文：direct 档 goalInit 同步完成，追加 goal 结果行（D2）；
  * compact 档 goalInit 在 onComplete 回调内执行、result 已返回，不携带（通道差异
- * 为设计 §6.2 D2 登记的终态）。
+ * 为设计 §6.2 D2 登记的终态）。D7② 直通（no-exec-skills）明示一行——工具结果文案
+ * 不得静默吞掉「没弹表单」的事实。
  */
-function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome | undefined): string {
+function completeResultText(
+  displayPath: string,
+  goalOutcome: GoalBridgeOutcome | undefined,
+  execModeSource: "headless" | "no-exec-skills" | "dialog",
+): string {
   const base = `Plan approved. File: ${displayPath}`;
-  if (goalOutcome === undefined) return base;
+  const directLine =
+    execModeSource === "no-exec-skills"
+      ? `\nNo plan-exec skill was detected — executed directly (no execution-method dialog).`
+      : "";
+  if (goalOutcome === undefined) return base + directLine;
   return goalOutcome.started
-    ? `${base}\nGoal tracking started via /goal.`
-    : `${base}\nGoal tracking was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
+    ? `${base}${directLine}\nGoal tracking started via /goal.`
+    : `${base}${directLine}\nGoal tracking was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
 }
 
 /**
@@ -1098,8 +1124,15 @@ async function executeComplete(
 
   const displayPath = relativePath(planFilePath, projectDir);
   return {
-    content: [{ type: "text" as const, text: completeResultText(displayPath, goalOutcome) }],
-    details: { action: "complete", planFilePath: displayPath, isolation, execMode: chosenMode, goalOutcome },
+    content: [{ type: "text" as const, text: completeResultText(displayPath, goalOutcome, choice.pickedBy) }],
+    details: {
+      action: "complete",
+      planFilePath: displayPath,
+      isolation,
+      execMode: chosenMode,
+      execModeSource: choice.pickedBy,
+      goalOutcome,
+    },
   };
 }
 

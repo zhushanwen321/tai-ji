@@ -294,6 +294,10 @@ describe("registerPlanTool", () => {
 
     it("does not advance when user picks Not now — later 边（dispatching→approved）+ later 文案，不进解散文案桶（A9 反向）", async () => {
       const { exec, ctx, pi } = setup();
+      // 有 plan-exec 技能才挂表单（D7②：空集直通，暂不执行档只存在于表单内）
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Not now");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-later");
@@ -311,6 +315,9 @@ describe("registerPlanTool", () => {
 
     it("turn abort during the pending execution-method select dissolves the dialog → 归口②外部解散（review_aborted→approved，MF-1-8）", async () => {
       const { exec, ctx, pi } = setup();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       // select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：
       // signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
@@ -352,12 +359,19 @@ describe("registerPlanTool", () => {
       expect(entries.at(-1)).toMatchObject({ state: "completed", isActive: false });
     });
 
-    it("dialog options = skills (max 2) + Execute + Not now, goal bridge availability irrelevant (选项集重排)", async () => {
+    it("dialog options = skills (max 2) + Execute + Not now, goal bridge availability irrelevant (选项集重排；D7② 有技能才弹表单)", async () => {
       const { exec, ctx } = setup();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d1", skillEntryPath: "/tmp/a/SKILL.md" },
+        { name: "pr-cr-fix", description: "d2", skillEntryPath: "/tmp/b/SKILL.md" },
+        { name: "third", description: "d3", skillEntryPath: "/tmp/c/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       await exec({ action: "complete" });
       const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
       expect(options).toEqual([
+        "Execute via skill: dev-flow",
+        "Execute via skill: pr-cr-fix",
         "Execute",
         "Not now",
       ]);
@@ -409,13 +423,23 @@ describe("registerPlanTool", () => {
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
     });
 
-    it("empty detection set leaves no skill options (空集不误伤选项集)", async () => {
-      const { exec, ctx } = setup();
+    it("D7② 空集直通（TUI）：无 plan-exec 技能不挂任何选择器，直接走执行派发链 + 文案明示", async () => {
+      const { exec, ctx, pi } = setup();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
-      await exec({ action: "complete" });
-      const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-      expect(options.some((label) => label.startsWith("Execute via skill:"))).toBe(false);
+      const res = await exec({ action: "complete" });
+
+      // 不挂执行方式选择（恒两项死表单构造性消除，S4 通过标准）
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+      expect(res.details.action).toBe("complete");
+      expect(res.details.execMode).toBe("execute");
+      expect(res.details.execModeSource).toBe("no-exec-skills");
+      // 工具结果文案明示「无 plan-exec 技能，直接执行」（不静默吞掉没弹表单的事实）
+      expect(res.content[0].text).toContain("No plan-exec skill was detected");
+      expect(res.content[0].text).toContain("executed directly");
+      // 复用既有执行派发链（goal 桥/直执 steer）+ 终局 completed
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { state?: string });
+      expect(entries.at(-1)?.state).toBe("completed");
     });
 
     it("execute tier carries the goal outcome into result content and details (整合档 D2)", async () => {
@@ -478,8 +502,11 @@ describe("registerPlanTool", () => {
       return payload.formQuestions[0].options;
     }
 
-    it("sends a single choice question via UI_FORM_MARKER and maps the execute answer (无 tab 条单视图)", async () => {
+    it("sends a single choice question via UI_FORM_MARKER and maps the execute answer (无 tab 条单视图；D7② 有技能才挂)", async () => {
       const { exec, ctx } = setupGui();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>)
         .mockResolvedValue(JSON.stringify({ "Execution method": "Execute" }));
       const res = await exec({ action: "complete" });
@@ -488,6 +515,7 @@ describe("registerPlanTool", () => {
       expect(title).toBe(UI_FORM_MARKER);
       const labels = formOptionLabels(ctx.ui.select as ReturnType<typeof vi.fn>).map((o) => o.label);
       expect(labels).toEqual([
+        "Execute via skill: dev-flow",
         "Execute",
         "Not now",
       ]);
@@ -517,6 +545,9 @@ describe("registerPlanTool", () => {
       // timeout，库层 callMarkerRpc 判别），构造点③④同折 via 'dissolved' reason='cancelled'。
       // 无 reset 介入（epoch 未变）→ 外部解散：批准事实保留，文案不得声称已退出
       const { exec, ctx, pi } = setupGui();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
@@ -532,6 +563,9 @@ describe("registerPlanTool", () => {
       // 真实通道注入 = command.ts handleAbort 的因果链：controller.abort() 后 resetPlanState
       // 同步递增 epoch（同步临界段，无让出点）——归口点在微任务里运行时世代已变
       const { exec, ctx, controllers, epochs, pi } = setupGui();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {
         controllers.get("test-session")?.abort();
         // 模拟 resetPlanState 的 epoch 递增（命令解散的世代事实）
@@ -552,6 +586,9 @@ describe("registerPlanTool", () => {
 
     it("channel-error (echo payload) folds to 归口②外部解散（构造点⑤）with channel note, no throw", async () => {
       const { exec, ctx, pi } = setupGui();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       // echo 检测：宿主不识别 UI_FORM_MARKER 时 band 单选项 = payload 自身，点选即回显
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async (_t: string, options: string[]) => options[0]);
       const res = await exec({ action: "complete" });
@@ -566,6 +603,9 @@ describe("registerPlanTool", () => {
 
     it("non-json response folds to 归口②外部解散（构造点⑤）with channel note, no throw", async () => {
       const { exec, ctx } = setupGui();
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("not-json");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
@@ -573,6 +613,45 @@ describe("registerPlanTool", () => {
       expect(res.details.source).toBe("external");
       expect(res.content[0].text).toContain("interrupted");
       expect(res.content[0].text).toContain("non-json");
+    });
+  });
+
+  // --- D7② 无技能直通（S4 通过标准：无 plan-exec 技能不挂表单、approve 直通 execute）---
+  describe("D7② 无 plan-exec 技能直通（不挂执行方式表单）", () => {
+    it("rpc 空集直通：不挂 UI_FORM_MARKER 表单，直通 execute + 文案明示（双向之一）", async () => {
+      vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+      const h = setup();
+      (h.ctx as { mode?: string }).mode = "rpc";
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const res = await h.exec({ action: "complete" });
+
+      expect(h.ctx.ui.select).not.toHaveBeenCalled();
+      expect(res.details.execMode).toBe("execute");
+      expect(res.details.execModeSource).toBe("no-exec-skills");
+      expect(res.content[0].text).toContain("No plan-exec skill was detected");
+      expect(detectExecSkills).toHaveBeenCalled(); // 仍现扫（直通判定依赖检测，不是跳过检测）
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      vi.unstubAllEnvs();
+    });
+
+    it("非空照旧挂表单（双向之二）：技能档 + Execute + 暂不执行照常出现", async () => {
+      vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+      const h = setup();
+      (h.ctx as { mode?: string }).mode = "rpc";
+      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+        { name: "dev-flow", description: "Deliver via dev-flow.", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+      ]);
+      (h.ctx.ui.select as ReturnType<typeof vi.fn>)
+        .mockResolvedValue(JSON.stringify({ "Execution method": "Execute via skill: dev-flow" }));
+
+      const res = await h.exec({ action: "complete" });
+
+      expect(h.ctx.ui.select).toHaveBeenCalledOnce();
+      expect(res.details.execMode).toBe("skill:dev-flow");
+      expect(res.details.execModeSource).toBe("dialog");
+      expect(res.content[0].text).not.toContain("No plan-exec skill");
+      vi.unstubAllEnvs();
     });
   });
 
