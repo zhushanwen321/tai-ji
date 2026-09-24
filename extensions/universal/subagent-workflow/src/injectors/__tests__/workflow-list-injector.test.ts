@@ -22,7 +22,9 @@ import { formatWorkflowList, summarizeDescription } from "@zhushanwen/subagent-c
 // ── 稳定 spy（vi.hoisted 保证 resetModules 后引用不变，见 subagent 测试同款注释） ──
 const spies = vi.hoisted(() => ({ discoverResources: vi.fn(), getCachedFileContent: vi.fn() }));
 
-vi.mock("@zhushanwen/subagent-core/shared/resource-discovery.ts", () => createDiscoveryModuleMock(spies));
+vi.mock("@zhushanwen/subagent-core/shared/resource-discovery.ts", async (importOriginal) =>
+	createDiscoveryModuleMock(spies, importOriginal),
+);
 
 // 工厂必须写成箭头惰性形式（vi.mock 提升后直接传引用会 TDZ，见 helper 文件头注释）
 vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
@@ -139,8 +141,10 @@ describe("formatWorkflowList", () => {
 			[{ name: "chain", description: "三步链", path: "/workflows/chain.js" }],
 			{ guide: WORKFLOW_LIST_GUIDE },
 		);
+		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 WORKFLOW_LIST_GUIDE
+		// 即红灯，避免「两侧同源插值」下文案漂移无守卫
 		expect(out).toBe(
-			`\n\n<available_workflows>\n${WORKFLOW_LIST_GUIDE}\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
+			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via action:run — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagents\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
 		);
 	});
 

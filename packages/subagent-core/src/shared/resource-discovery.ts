@@ -530,6 +530,57 @@ function readExtensionPaths(): string[] {
   return [...new Set(paths)];
 }
 
+// ── 约定根单源推导 ───────────────────────────────────────────
+//
+// buildScanTargets 的 4 个硬编码槽与壳空态 roots 提示清单（barrel 导出
+// conventionRootDirs）共用同一组单根推导——约定根增删/挪位只改这一组函数，
+// 消费方禁止复刻 join 字面（壳 resource-list-injector 曾有 4 join 复刻 +
+// 「须与彼处同步改」注释，收敛于此）。宿主注入根（discoveryRoots 槽）与
+// TAIJI_EXTENSION_PATHS 不属于约定根：前者归宿主槽位决策，后者是 taiji
+// 内部 dev-link 通道、非 agent 自救面（壳提示清单刻意不列）。
+
+/** user 级约定根 ~/.agents/{kind}/（homedir 推导）。 */
+function userAgentsConventionRoot(kind: ResourceKind): string {
+  return join(homedir(), ".agents", kind);
+}
+
+/** project 级约定根 <workspaceRoot>/.pi/{kind}/。 */
+function projectPiConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".pi", kind);
+}
+
+/** project 级 tmp 约定根 <workspaceRoot>/.pi/{kind}/.tmp/（仅 workflow generate 产物）。 */
+function projectPiTmpConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".pi", kind, ".tmp");
+}
+
+/** project 级约定根 <workspaceRoot>/.agents/{kind}/。 */
+function projectAgentsConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".agents", kind);
+}
+
+/**
+ * 约定根路径集合（有序：user-agents → project-pi → project-pi-tmp（仅
+ * includeTmp）→ project-agents，相对序与 buildScanTargets 各槽的优先级序一致）。
+ *
+ * 壳 resource-list-injector 的空态 roots 提示清单消费本导出做纯投影（宿主
+ * 注入根现取 + 本集合拼接），路径决策全在 core——壳侧不再持有任何 join 字面。
+ */
+export function conventionRootDirs(
+  config: Pick<ScanConfig, "kind" | "workspaceRoot" | "includeTmp">,
+): string[] {
+  const { kind, workspaceRoot, includeTmp } = config;
+  const roots = [
+    userAgentsConventionRoot(kind),
+    projectPiConventionRoot(workspaceRoot, kind),
+  ];
+  if (includeTmp) {
+    roots.push(projectPiTmpConventionRoot(workspaceRoot, kind));
+  }
+  roots.push(projectAgentsConventionRoot(workspaceRoot, kind));
+  return roots;
+}
+
 /**
  * 构建所有扫描源（按优先级低→高排列）。
  *
@@ -548,7 +599,6 @@ function readExtensionPaths(): string[] {
  */
 function buildScanTargets(config: ScanConfig): ScanTarget[] {
   const { kind, workspaceRoot, hostRoots, includeTmp } = config;
-  const home = homedir();
 
   // 同标签多条目依注入序全部保留（W2④ 列表语义）：宿主把「展开目标 + 本体根」
   // 按注入序注入同标签，core 同序位依次扫描；本体靠后 → last-writer-wins 本体胜。
@@ -564,10 +614,10 @@ function buildScanTargets(config: ScanConfig): ScanTarget[] {
   const targets: ScanTarget[] = [];
   // 1. user .pi/agent/{kind}/（宿主注入，pi 壳 source "user-pi"）
   targets.push(...hostTargets("user-pi"));
-  // 2. user .agents/{kind}/（硬编码根 = homedir 推导 + 宿主可选注入合并，硬编码
-  //    本体根后置 → 注入的展开目标在前、本体在后，last-writer-wins 本体胜）
+  // 2. user .agents/{kind}/（约定根单源推导 + 宿主可选注入合并，本体
+  //    根后置 → 注入的展开目标在前、本体在后，last-writer-wins 本体胜）
   targets.push(...hostTargets("user-agents"));
-  targets.push({ dir: join(home, ".agents", kind), source: "user-agents", enabled: true });
+  targets.push({ dir: userAgentsConventionRoot(kind), source: "user-agents", enabled: true });
   // 3. npm global: <agentDir>/npm/node_modules/*/<pkg>/（宿主注入，pi 壳 source "npm"）
   targets.push(...hostTargets("npm"));
   // 4. npm dev symlink: <agentDir>/extensions/*/<pkg>/（宿主注入，pi 壳 source "npm-dev"）
@@ -579,21 +629,21 @@ function buildScanTargets(config: ScanConfig): ScanTarget[] {
     ...readExtensionPaths().map((dir) => ({ dir, source: "user-extension-paths" as const, enabled: true })),
   );
   // 5. project .pi/{kind}/
-  targets.push({ dir: join(workspaceRoot, ".pi", kind), source: "project-pi", enabled: true });
+  targets.push({ dir: projectPiConventionRoot(workspaceRoot, kind), source: "project-pi", enabled: true });
 
   // 6. project .pi/{kind}/.tmp/（仅 workflow）
   if (includeTmp) {
     targets.push({
-      dir: join(workspaceRoot, ".pi", kind, ".tmp"),
+      dir: projectPiTmpConventionRoot(workspaceRoot, kind),
       source: "project-pi-tmp",
       enabled: true,
     });
   }
 
-  // 7. project .agents/{kind}/（硬编码根 + 宿主可选注入合并，本体根后置同槽 2）
+  // 7. project .agents/{kind}/（约定根单源推导 + 宿主可选注入合并，本体根后置同槽 2）
   targets.push(...hostTargets("project-agents"));
   targets.push({
-    dir: join(workspaceRoot, ".agents", kind),
+    dir: projectAgentsConventionRoot(workspaceRoot, kind),
     source: "project-agents",
     enabled: true,
   });

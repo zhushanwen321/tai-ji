@@ -37,14 +37,13 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { getHostServices } from "@zhushanwen/subagent-core";
 
 import {
+	conventionRootDirs,
 	discoverResources,
 	findWorkspaceRoot,
 	formatEmptyResourceList,
@@ -110,12 +109,11 @@ function singularKind(kind: "agents" | "workflows"): string {
 
 /**
  * 空态注入（D4-2）渲染的发现根清单：宿主注入根（discoveryRoots 槽，现取——
- * 实例隔离语义同 discover）+ core 约定根推导（homedir/workspaceRoot join）。
- *
- * 与 core buildScanTargets 的约定根集合对齐（下方 4 个 join 字面须与彼处
- * 同步改）；TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非
- * agent 自救面。清单是给 agent 的提示信息：顺序无优先级契约，保序去重由
- * 渲染函数保证（同 turn 重建字节稳定，KV-cache 契约）。
+ * 实例隔离语义同 discover）+ core 约定根推导（conventionRootDirs 单源，含
+ * includeTmp 的 .tmp 根）——本函数只做纯投影，不持有任何 join 字面。
+ * TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非 agent 自救面。
+ * 清单是给 agent 的提示信息：顺序无优先级契约，保序去重由渲染函数保证
+ * （同 turn 重建字节稳定，KV-cache 契约）。
  */
 function discoveryRootDirs(
 	workspaceRoot: string,
@@ -124,10 +122,7 @@ function discoveryRootDirs(
 ): string[] {
 	const hostRoots = getHostServices().discoveryRoots?.()?.[kind] ?? [];
 	const roots = hostRoots.map((root) => root.dir);
-	roots.push(join(homedir(), ".agents", kind));
-	roots.push(join(workspaceRoot, ".pi", kind));
-	if (includeTmp) roots.push(join(workspaceRoot, ".pi", kind, ".tmp"));
-	roots.push(join(workspaceRoot, ".agents", kind));
+	roots.push(...conventionRootDirs({ kind, workspaceRoot, includeTmp }));
 	return roots;
 }
 

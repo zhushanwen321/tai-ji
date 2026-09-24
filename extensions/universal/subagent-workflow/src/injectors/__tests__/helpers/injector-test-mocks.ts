@@ -3,7 +3,9 @@
 //
 // 使用方式（测试文件内，spies 必须留在文件里——vi.hoisted 保证 resetModules 后引用不变）：
 //   const spies = vi.hoisted(() => ({ discoverResources: vi.fn(), getCachedFileContent: vi.fn() }));
-//   vi.mock("../../shared/resource-discovery.ts", () => createDiscoveryModuleMock(spies));
+//   vi.mock("../../shared/resource-discovery.ts", async (importOriginal) =>
+//     createDiscoveryModuleMock(spies, importOriginal),
+//   );
 //   vi.mock("@zhushanwen/pi-extension-logger", createLoggerModuleMock);
 //
 // vi.mock 工厂引用本 helper 的 import 绑定是安全的：工厂惰性执行（被 mock 模块首次被
@@ -19,13 +21,19 @@ export interface DiscoverySpies {
 }
 
 /**
- * resource-discovery 模块 mock 工厂：discoverResources/getCachedFileContent 直通
- * spies，findWorkspaceRoot 固定 "/ws"，getCachedParsed passthrough（真实实现走
- * mtime 缓存需真文件，测试里委托 getCachedFileContent 的 mock 返回值——保持
- * 「content → parse」语义）。
+ * resource-discovery 模块 mock 工厂：真实模块为底（importOriginal 透传——
+ * conventionRootDirs 等纯推导保持真实实现，空态 roots 断言即真实验证 core
+ * 推导），仅覆写四成员：discoverResources/getCachedFileContent 直通 spies，
+ * findWorkspaceRoot 固定 "/ws"，getCachedParsed 委托 getCachedFileContent 的
+ * mock 返回值（真实实现走 mtime 缓存需真文件——保持「content → parse」语义）。
  */
-export function createDiscoveryModuleMock(spies: DiscoverySpies) {
+export async function createDiscoveryModuleMock(
+	spies: DiscoverySpies,
+	importOriginal: () => Promise<typeof import("@zhushanwen/subagent-core/shared/resource-discovery.ts")>,
+) {
+	const actual = await importOriginal();
 	return {
+		...actual,
 		discoverResources: spies.discoverResources,
 		findWorkspaceRoot: () => "/ws",
 		getCachedFileContent: spies.getCachedFileContent,

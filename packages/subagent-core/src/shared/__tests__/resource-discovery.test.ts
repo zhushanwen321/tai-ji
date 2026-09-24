@@ -49,6 +49,7 @@ import {
   isMachineSource,
   getCachedParsed,
   clearFileCache,
+  conventionRootDirs,
   type ResourceSource,
 } from "../resource-discovery.ts";
 // logger 断言目标随源切换（u0-data-discovery）：resource-discovery 的 logger 是
@@ -768,6 +769,59 @@ describe("manifestCache（async readPackageManifest）", () => {
       ).toHaveLength(0);
       // 合法解析 + 无 manifest → 缓存 undefined 条目（两 kind 共享，零重读）
       expect(asyncReadCount() - caseStart, `case ${label}`).toBe(1);
+    }
+  });
+});
+
+// ============================================================
+// conventionRootDirs（约定根推导导出面）
+// ============================================================
+
+describe("conventionRootDirs", () => {
+  it("约定根有序：user-agents → project-pi → project-agents（无 includeTmp）", () => {
+    expect(conventionRootDirs({ kind: "agents", workspaceRoot: "/ws" })).toEqual([
+      path.join(mockHomeDir, ".agents", "agents"),
+      path.join("/ws", ".pi", "agents"),
+      path.join("/ws", ".agents", "agents"),
+    ]);
+  });
+
+  it("includeTmp 时在 project-pi 与 project-agents 之间插入 .pi/{kind}/.tmp", () => {
+    expect(
+      conventionRootDirs({ kind: "workflows", workspaceRoot: "/ws", includeTmp: true }),
+    ).toEqual([
+      path.join(mockHomeDir, ".agents", "workflows"),
+      path.join("/ws", ".pi", "workflows"),
+      path.join("/ws", ".pi", "workflows", ".tmp"),
+      path.join("/ws", ".agents", "workflows"),
+    ]);
+  });
+
+  it("与发现链同源：文件放在 conventionRootDirs 推导的根下会被 discoverResources 扫到", async () => {
+    // 守护导出面与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
+    // （导出改了、扫描槽没改），放在「导出说有」的根下的文件将扫不到
+    const ws = tmpWorkspace();
+    const prevExtPaths = process.env.TAIJI_EXTENSION_PATHS;
+    delete process.env.TAIJI_EXTENSION_PATHS;
+    try {
+      const roots = conventionRootDirs({ kind: "workflows", workspaceRoot: ws, includeTmp: true });
+      const expected: string[] = [];
+      roots.forEach((root, i) => {
+        expected.push(writeFile(root, `conv${i}.mjs`, ""));
+      });
+      const found = await discoverResources({
+        kind: "workflows",
+        workspaceRoot: ws,
+        hostRoots: [],
+        includeTmp: true,
+      });
+      expect(found.map((r) => r.path)).toEqual(expect.arrayContaining(expected));
+      // 反向：发现面没有约定根之外的 project/user 级来源混入（hostRoots 空 +
+      // ext-paths 清空后，4 文件即全部发现）
+      expect(found).toHaveLength(roots.length);
+    } finally {
+      if (prevExtPaths !== undefined) process.env.TAIJI_EXTENSION_PATHS = prevExtPaths;
+      fs.rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 });

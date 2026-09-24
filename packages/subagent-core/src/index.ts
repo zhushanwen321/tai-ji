@@ -650,8 +650,11 @@ export {
 // 深路径通配），故出 barrel。发现链辅助（C5b）：findWorkspaceRoot（project 源根
 // 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——getCachedFileContent
 // 生产消费在 core 内部 3 处（agents-assembly / config-loader / workflow-script-registry-impl）；
-// 壳侧测试 mock 引用不计，深路径同样不可达。
+// 壳侧测试 mock 引用不计，深路径同样不可达。conventionRootDirs（约定根路径
+// 集合，buildScanTargets 硬编码槽同源单推导）：壳 resource-list-injector 空态
+// roots 提示清单消费，杜绝壳侧复刻 join 字面。
 export {
+  conventionRootDirs,
   discoverResources,
   findWorkspaceRoot,
   getCachedFileContent,
