@@ -41,6 +41,22 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 ### 调度模式（Session Dispatch Mode）
 内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具面 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展面 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
 
+### 通知债权（claim / lifetime / notifyId）
+
+managed session 完成通知的判据模型（[ADR-0074](adr/decisions.md)）：一笔债权 = 主 session 一次「等待子会话结果」的请求，携带唯一 `notifyId`（幂等键，`sm-` 前缀形态）；请求被消费的轮次结束时销账并经 B-ledger 通知一次，无债权的完成一律静默。两种记录：**claim**（随单笔请求生灭——create+prompt / send 成功产生，settle 兑现 / exit·deleted 终结 / 主 abort 抹除）与 **lifetime**（随 session 生灭——create 时 runtime 自动 arm，非 respawn 链终局死亡时发声，携带 runtime 生成的 `lifetimeNotifyId`，与 claim 键独立杜绝撞幂等键）。claim 状态机 = `armed → injected → fulfilled → 删除`，吸收/终态 `orphaned` / `aborted`；唯一键 `(parentSessionId, notifyId)`，重复 arm 拒绝。**不变量**：债权只在 session-manager 通道产生与消灭，UI 续聊/插话、scheduler、孙会话回流一律不触碰（「插话仍通知」「只通知第一次」均由不变量推导，无需特判 flag）。
+
+**代码映射**: `packages/runtime/src/services/session/notify-claims.ts`（ClaimLedger 纯状态机）。
+
+### watch 桥
+
+session-manager extension 与 taiji runtime 之间的长挂应答事件通道（[ADR-0074](adr/decisions.md)）：extension 以 `{action:'watch', params:{notifyId}}` **单键寻址** fire-and-forget 挂起 select（不传 timeout，前提 = marker select 长挂语义探针实测），runtime 按（调用方 parentSid, notifyId）反查 claim 后 deferred respond——查无 fail-closed 立即 'cancelled'、已兑现 catch-up 快照、未兑现挂等、已终结回终结 reason；每 claim 单 watch 槽新覆盖旧（被覆盖的旧 watch 悬置为已知无害）。respond payload 回带 `sessionId` + `deathSeq`/`settleSeq`/`fulfills N`/`exitCode`/`stderrTail`，extension 据此 unregister + `notifyLedger.record`（两例外：cancelled·orphaned 静默、死亡新闻槽 (sessionId, deathSeq) 去重）。它把「生命周期观测者在 runtime、注册者在父 pi 进程内」的跨进程缝桥起来，是 managed session 并入 pending-notifications 注册面与 notify-ledger 送达面的唯一事件通路。与 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的区别 = 挂起等待状态迁移，而非即问即答。
+
+### pending type 'session'
+
+`pending_notifications` 查询面的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类，每 session 固定 +2 条）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 守卫在子会话未收口时不误判「已干完」）。
+
+**代码映射**: `extensions/universal/pending-notifications/src/state.ts`（词表）；`packages/extension-protocol/src/pending-entries.ts`（族映射）；`packages/subagent-core/src/execution/round-supervisor/reconcile-sweep.ts`（skip 分支）。
+
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
 

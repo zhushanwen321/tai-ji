@@ -70,6 +70,20 @@ engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成�
 
 **minor 协商触发条件（任一命中重开裁决；条件不到不加协商位）**：① 出现本仓之外发布的引擎适配层（第三方作者或独立 npm 分发/版本节奏）；② 单宿主需同时挂载跨协议代差引擎且无法同批升级；③ 出现「需宿主确认才可启用」的运行时可变能力（能力位从静态 manifest 变动态协商的真实需求）。
 
+### ADR-0074 session-manager 通知债权模型与 watch 桥（2026-09-24 设计裁决）
+
+managed session 完成通知从「每次 settle 无条件回流（CompletionBackflow 文本 steer）」改为**通知债权模型**：主 session 每笔经 session-manager 发出的请求产生一笔债权（唯一 `notifyId` 幂等键），该请求被消费的轮次结束时销账并经 B-ledger 通知一次；无债权的完成一律静默。**结构性不变量**：债权只在 session-manager 通道产生（create+prompt / send 成功）与消灭（settle 兑现 / exit·deleted 终结 / 主 abort 抹除），UI 续聊/插话、scheduler、孙会话回流一律不触碰。claim 记录 `{notifyId, kind: claim|lifetime, sessionId, parentSessionId, state, outcomeSnapshot?}`，键 `(parentSessionId, notifyId)` 唯一、重复 arm 拒绝；状态机 **armed → injected → fulfilled{outcomeSnapshot} → 删除**，吸收/终态 **orphaned** / **aborted**，delivery 失败腿 armed → 删除（静默 disarm）。兑现锚 = injected 后首次 `agent_settled`（reason outcome 映射 **completed/failed/stopped**；前提 = pi stdout 帧序 FIFO + steer 级联排空，探针1 9/9 / 探针2 B2 实测登记于设计前提清单）；主 abort 在 `handleAbort` 入口同步抹除（respond 'cancelled'，先于 await abort）。
+
+**watch 桥（notifyId 单键寻址）**：extension 以 `{action:'watch', params:{notifyId}}` 长挂 select（不传 timeout、fire-and-forget），runtime 按（调用方 parentSid, notifyId）反查 claim——查无 fail-closed 立即 respond **'cancelled'**、已兑现 catch-up 快照、每 claim 单 watch 槽新覆盖旧；respond payload 回带 **sessionId** + meta **deathSeq** / **settleSeq** / fulfills N / exitCode / stderrTail。协议面全 additive：send/create params `notifyId` optional（缺省不 arm + **willNotify:false**）、create result **lifetimeNotifyId**（runtime 生成，与 claim 键独立、同 `sm-` 形态同入站校验）、status/list result **undeliveredResults** 事实计数、pending type **'session'**。extension 响应处理 = unregister（**mapReasonToStatus** 族映射 stopped→aborted、exited/deleted/orphaned→cancelled，不扩共享词表）+ 默认 `notifyLedger.record`，两例外 = cancelled·orphaned 静默、死亡新闻槽 (sessionId, deathSeq) 去重；合批 = extension 侧 50ms trailing debounce（分拣键 reason、批身份 settleSeq/deathSeq）。
+
+**B-ledger 确认式送达（清偿 C-ext-19 存量违规）**：通知经 notify-ledger（notifyId 幂等 + at-least-once + ack + 重放）择父 session settled 边沿投递，替换旧 backflow 的 at-most-once 内存文本通道；managed session 同时进入 pending-notifications 注册面（type 'session'，register id = notifyId，三键契约零改动）。CompletionBackflow 全链废弃（settled/exit 检测职责并入 ClaimLedger，文案构造迁 extension）。死亡无条件通知 = create 时 runtime 自动 arm lifetime 记录，非 respawn 链死亡（delete / forceQuit / 不可恢复 crash）经 removeSessionEntry 汇聚点**先于杀进程** respond **'exited'/'deleted'**（同 deathSeq 同批终结）；respawn 链（普通 crash 复活、idle 回收）静默。
+
+**持久化二期登记（D8）**：v1 债权账本 = runtime 内存（与 delivery outbox 同生命周期）；跨 runtime/父 pi 重启的债权存活登记**持久化二期**（方向：并入 B-ledger 同族持久设施或 runtime 侧 journal，复用不另造），二期同时根治父 pi 死亡窗口的通知补投。
+
+**关键被否**：① per-session「已通知」布尔 flag——推导性质不应物化为状态，多债权合并时语义破碎；② extension 侧轮询子会话状态——有事件源禁周期 pull（ADR-0064 轮询精简准则），且「谁的完成算数」仍绕不开债权模型；③ 扩 notify-ledger 外部通道合批——P0 设施改动连带 workflow-result 通知形态回归，合批改 extension 侧 50ms 微窗；④ 死亡新闻槽「槽释放后新 claim 自带」的时间基判定——extension 无从知晓死亡事件响应笔数，arm→watch 微窗竞态下迟到 watch 会二次发声，(sessionId, deathSeq) 槽键序无关消解。已接受代价全集（create 失败路径死亡通知缺失 / 跨窗拆条 / 混装退化 / arm→watch 微窗提示缺位等 9 条）登记于设计附C。
+
+设计 SSOT `.tmp/tech-design/session-manager-notify-once.md`（过程产物，不入库；实施记录 git 可追溯）。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
