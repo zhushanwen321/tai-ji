@@ -3,7 +3,8 @@ description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow（10 s
   静态门禁（typecheck+lint）→ PR 标题/描述 + 条件 changeset 补全 → skill YAML 校验 → 开 PR →
   约束加载 → 覆盖率+度量聚合门禁 → 多维评审修复循环（内联 review-fix-loop，8 维并行
   review → 聚合 → 分组修复 → 对账重审）→ code-simplify → 终局三道门禁 → 停在 awaiting-push
-  等 push 授权。与 pi 版（pi 内置 review-fix-loop + 主 agent 手工门禁）为仅有的两个版本。
+  等 push 授权。与 pi 版（.agents/workflows/pr-lifecycle.js，pi workflow 工具按名发起）为
+  仅有的两个全链实现，语义完全一致。
 whenToUse: zcode 主 agent 执行 pr-cr-fix skill 的完整 PR 生命周期时发起本 workflow（CreateWorkflow
   path 指向本文件 + args）。只跑 review+fix 循环不进门禁时用全局 saved workflow review-fix-loop。
 args:
@@ -32,7 +33,8 @@ args:
 // 语义同源：zsw 版 pr-lifecycle.js/lib.cjs（已退役，git 可追溯）的 12 step 注册表
 // + 全局 saved workflow review-fix-loop.dwf.ts 的循环本体（cr-fix step 内联）。
 // 两版本收敛裁决（2026-09-24）：完整 PR 生命周期只留 zcode 原生版（本文件）与
-// pi 版（pi 内置 review-fix-loop + 主 agent 手工门禁，见 SKILL.md 路径 1）。
+// pi 版（.agents/workflows/pr-lifecycle.js，pi workflow 工具按名发起，见 SKILL.md 路径 1）。
+// 2026-09-24 pi 版全链落地后，两版 cr-fix 内联循环 + zcode saved 版循环 = 三镜像同语义。
 //
 // 10 step 执行序（2026-09-24 上下文重合度合并：changeset 并入 pr-meta、
 // coverage-1+metrics-1 并为 gate-suite——判据 = 两个会话各自必须加载的工作上下文
