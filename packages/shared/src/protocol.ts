@@ -1445,8 +1445,9 @@ export interface SessionSetProjectMutationReply {
 
 /**
  * 计划产物文档元数据（plan 模式重设计 D1）。
- * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形——shared 是最底层
- * 共享包不能反向依赖 extension-protocol，同形状漂移由双端契约测试守卫。
+ * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形（值形状镜像惯例）——
+ * PlanLifecycleState 已 type-only 直引 extension-protocol（D2 裁决：plan 状态机处
+ * 同形惯例不适用），同形状漂移由双端契约测试守卫。
  */
 export interface PlanDocMeta {
   /** 文件名（drawer 文档 tab 标题，不含目录） */

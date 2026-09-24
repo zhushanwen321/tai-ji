@@ -128,10 +128,20 @@ const TRANSITION_TABLE: Record<PlanLifecycleState, Partial<Record<PlanLifecycleE
  * 非法转移（含运行时垃圾 state/event 值——跨版本帧、坏反序列化）返回 `{ ok: false }`
  * 且**不携带 next 键**，由调用方降级（不 throw 炸 turn）。调用方义务：`ok:false` 时
  * 不落盘、不执行副作用（终态上 `ok:false` 不落盘即 D3 归口点的兜底保险）。
+ *
+ * 入口白名单守卫（与 derivePhase 同一机制）：普通对象字面量查表会沿原型链命中继承键——
+ * `transition('reviewing', '__proto__')` 取出 Object.prototype、`('__proto__', 'valueOf')`
+ * 取出函数，均被误判为合法 next（违背本契约）。故垃圾键必须先挡在查表前。
+ * **选「枚举 includes 白名单」而非 null-prototype 表 / Object.hasOwn**：① transition 与
+ * derivePhase 共用同一守卫形态（单一机制，不并存两种写法）；② PLAN_LIFECYCLE_STATES /
+ * PLAN_LIFECYCLE_EVENTS 就是值域 SSOT（测试穷举同源），includes 判定与之同源，
+ * 原型键天然不在白名单内。
  */
 export function transition(state: PlanLifecycleState, event: PlanLifecycleEvent): PlanTransitionResult {
-  // Record 索引对运行时垃圾键天然落 undefined（无 cast、无 throw），见函数契约
-  const next = TRANSITION_TABLE[state]?.[event]
+  if (!PLAN_LIFECYCLE_STATES.includes(state) || !PLAN_LIFECYCLE_EVENTS.includes(event)) {
+    return { ok: false }
+  }
+  const next = TRANSITION_TABLE[state][event]
   return next === undefined ? { ok: false } : { ok: true, next }
 }
 
@@ -162,7 +172,12 @@ const PHASE_OF_STATE: Record<PlanLifecycleState, PlanPhase> = {
 /**
  * 8 存储态 → 5 呈现相位的单点映射（renderer 阶段指示/状态带共用，禁止消费方各自 if 拼）。
  * 运行时垃圾 state（混装格坏帧）降级 'idle'（无 plan 缺省，fail-safe 不误示进行中）。
+ *
+ * 入口白名单守卫（理由同 transition，见彼处）：裸查表对继承键 'constructor' / 'toString'
+ * 会取出 Object 构造函数等并经 `?? 'idle'` 流出（非 nullish 不落兜底）——垃圾 state
+ * 必须精确落 'idle'，函数/对象不得作为相位流入 renderer。
  */
 export function derivePhase(state: PlanLifecycleState): PlanPhase {
-  return PHASE_OF_STATE[state] ?? 'idle'
+  if (!PLAN_LIFECYCLE_STATES.includes(state)) return 'idle'
+  return PHASE_OF_STATE[state]
 }

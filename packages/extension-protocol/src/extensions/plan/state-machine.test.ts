@@ -6,7 +6,9 @@
  *   无效转移返回 `{ ok: false }` 且不携带 next 键（调用方降级语义的结构保证）。
  * - D1 关键边命名锚定（dismiss / review_aborted 双出口 / later / exec_chosen / 终态规则）。
  * - derivePhase 8 存储态 → 5 呈现相位全映射 + 混装格垃圾值降级。
- * - 边界：运行时垃圾 state/event 不 throw、落 { ok: false }（「不 throw 炸 turn」契约）。
+ * - 边界：垃圾键全输入域不 throw、不产出伪转移（「不 throw 炸 turn」契约）——含原型链
+ *   继承键双轴用例（event 轴 __proto__/valueOf/toString/constructor × state 轴
+ *   __proto__/constructor/toString），旧版裸查表会沿原型链产出 Object.prototype/函数伪 next。
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -211,20 +213,52 @@ describe('derivePhase 呈现映射（8 存储态 → 5 呈现相位）', () => {
     expect(derivePhase('completed')).toBe(derivePhase('exited'))
   })
 
-  it('混装格垃圾 state 降级 idle（无 plan 缺省，不误示进行中）', () => {
-    expect(derivePhase('bogus' as unknown as PlanLifecycleState)).toBe('idle')
+  it('混装格垃圾 state 降级 idle（无 plan 缺省，不误示进行中）——含原型链继承键', () => {
+    // constructor/toString/valueOf 曾穿透裸查表返回 Object 构造函数等（非 nullish 绕过 ?? 兜底）——
+    // 白名单守卫后垃圾 state 全输入域精确落 'idle'，函数/对象不得作为相位流出
+    for (const state of ['bogus', '__proto__', 'constructor', 'toString', 'valueOf'] as const) {
+      expect(derivePhase(state as unknown as PlanLifecycleState)).toBe('idle')
+    }
     expect(derivePhase(undefined as unknown as PlanLifecycleState)).toBe('idle')
+    expect(derivePhase(null as unknown as PlanLifecycleState)).toBe('idle')
   })
 })
 
-describe('边界：运行时垃圾值不 throw（不炸 turn 契约）', () => {
-  it('垃圾 state / 事件值 → { ok: false }', () => {
+describe('边界：垃圾键全输入域不 throw、不产出伪转移（不炸 turn 契约 + 原型链防御）', () => {
+  it('垃圾 state（非继承键形态）→ { ok: false }', () => {
     expect(transition('bogus' as unknown as PlanLifecycleState, 'dismiss')).toEqual({ ok: false })
+    expect(transition(undefined as unknown as PlanLifecycleState, 'dismiss')).toEqual({ ok: false })
+    expect(transition(null as unknown as PlanLifecycleState, 'exit')).toEqual({ ok: false })
+  })
+
+  it('垃圾 event（非继承键形态）→ { ok: false }', () => {
     expect(transition('reviewing', 'bogus' as unknown as PlanLifecycleEvent)).toEqual({ ok: false })
-    expect(transition(undefined as unknown as PlanLifecycleState, undefined as unknown as PlanLifecycleEvent)).toEqual({
-      ok: false,
-    })
-    expect(transition('__proto__' as unknown as PlanLifecycleState, 'enter')).toEqual({ ok: false })
-    expect(transition('constructor' as unknown as PlanLifecycleState, 'enter')).toEqual({ ok: false })
+  })
+
+  it('event 轴原型链继承键（__proto__/valueOf/toString/constructor）→ { ok: false }——裸查表曾产出 Object.prototype/函数伪 next', () => {
+    // 宣称域修正：旧用例只跑了 '__proto__'+enter / 'constructor'+enter（继承键撞不上 enter
+    // 才碰巧 ok:false），并未验证 event 轴继承键——本组把 event 轴原型成员名全列断言
+    for (const event of ['__proto__', 'valueOf', 'toString', 'constructor'] as const) {
+      expect(transition('reviewing', event as unknown as PlanLifecycleEvent)).toEqual({ ok: false })
+    }
+  })
+
+  it('state 轴原型链继承键（__proto__/constructor/toString）× 含继承成员名事件 → 全部 { ok: false }', () => {
+    for (const state of ['__proto__', 'constructor', 'toString'] as const) {
+      for (const event of ['enter', 'valueOf', 'constructor', '__proto__'] as const) {
+        expect(transition(state as unknown as PlanLifecycleState, event as unknown as PlanLifecycleEvent)).toEqual({
+          ok: false,
+        })
+      }
+    }
+  })
+
+  it('双垃圾轴（含 __proto__ × valueOf——曾返回 { ok: true, next: 函数 }）→ { ok: false }', () => {
+    expect(
+      transition('__proto__' as unknown as PlanLifecycleState, 'valueOf' as unknown as PlanLifecycleEvent),
+    ).toEqual({ ok: false })
+    expect(
+      transition(undefined as unknown as PlanLifecycleState, undefined as unknown as PlanLifecycleEvent),
+    ).toEqual({ ok: false })
   })
 })

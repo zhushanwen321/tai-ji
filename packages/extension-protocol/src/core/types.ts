@@ -192,8 +192,9 @@ export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pau
 // 与 ask-user 家族同构的「marker select + JSON payload」跨层契约：
 // extension 序列化 payload 进 select options，runtime event-adapter 按 marker 分流，
 // 前端审批条渲染并经 respond 回传 PlanReviewResponse。
-// shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（shared 是最底层包不能反向依赖
-// 本包，同形状漂移由双端注释互指 + 投影链契约测试守卫）。
+// shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（PlanDocMeta 保持同形镜像——
+// 值形状惯例；PlanLifecycleState 已 type-only 直引本包，D2 裁决：plan 状态机处
+// 同形惯例不适用），形状漂移由双端注释互指 + 投影链契约测试守卫）。
 
 /**
  * 计划产物文档元数据——agent 调 register-doc 登记的一份产物。

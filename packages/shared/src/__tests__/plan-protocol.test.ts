@@ -14,7 +14,10 @@
  *    状态机显式化 D2 加员（state/resumeHint）——state 直接引用 extension-protocol 的
  *    PlanLifecycleState（跨包 AssertExact 锁）；reviewState/reviewStateSource 已降级为
  *    只读兼容位（新派生不透出，混装格兜底映射输入）。
- *    reviewStateSource（降级态来源标记，plan-mode-ux-refactor §3.4）旧 entry 必无——
+ *    reviewStateSource（降级态来源标记，plan-mode-ux-refactor §3.4）在
+ *    reviewStateSource 引入前世代的旧 entry 必无（快照 =
+ *    LEGACY_AWAITING_PLAN_STATE_ENTRY；含 reviewStateSource 世代快照 =
+ *    LegacyPlanStateData——「旧 entry」跨两世代，勿混）——
  *    重放兼容断言用 __tests__/fixtures/plan-state-entries.ts 的旧 entry fixture
  *    （含 awaiting reviewState、无 reviewStateSource，可被后续单元复用导出）
  *  - PlanDocMeta 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 跨包同形：
