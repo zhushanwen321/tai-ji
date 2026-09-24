@@ -41,6 +41,8 @@
 import type { ServerMessage, ServerMessageType } from '@taiji/shared'
 import type { FileChange } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
+// workflow-record 词表单源 core（与 workflow-extractor/event-adapter 同源消费）
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import { CompactionNotifier } from './event-interpreter-compaction.js'
 import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
 import { PingProbe } from './event-interpreter-ping.js'
@@ -1224,7 +1226,7 @@ export class EventInterpreter {
       this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'subagent-record')
     }
     if (WORKFLOW_TOOL_NAMES.has(toolName)) {
-      this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'workflow-record')
+      this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
     }
   }
 
@@ -1363,7 +1365,7 @@ export class EventInterpreter {
   private handleWorkflowResult(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
     if (payload?.customType !== 'workflow-result') return
-    this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'workflow-record')
+    this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
   }
 
   // ── compaction 生命周期编排已迁 CompactionNotifier（event-interpreter-compaction.ts，T4）──
