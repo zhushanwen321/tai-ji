@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播守卫）/ MODELREF（extensions 资产模型引用漂移守卫）/ RECORD（record 持久化写面唯一入口守卫）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -959,6 +959,87 @@
       "owner": "scripts/",
       "authority": "docs/architecture/zcode-session-db-isolation.md",
       "note": "R2 态：一次性迁移清理工具（设计 D7/W5a），行为由 fixture 测试零 token 锁定（mkdtempSync 假库 + BEFORE DELETE 触发器注入索引侧失败）；真实库执行属停机窗口人工操作（--plan 确认 + --confirm-count 受控旁路），不进自动化"
+    },
+    {
+      "id": "E2E-PROP-01",
+      "summary": "集成线传播守卫（ADR-0076 / C-proc-30）：目标线 ⊇ main 硬检查 + 兄弟 dev-* 线未传播 commit 软提示——本表登记自含冒烟形态（用法面 exit 2 契约 + --allow-diverged 旁路主链路恒绿）",
+      "scope": [
+        "scripts/check-line-propagation.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-line-propagation.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-line-propagation.mjs --bogus; test $? -eq 2 && node scripts/check-line-propagation.mjs --target HEAD --allow-diverged",
+      "owner": "scripts/",
+      "authority": "docs/adr/decisions.md#ADR-0076",
+      "note": "R2 态：真实运行形态 = prerelease / dev-merge skill 前置人工触发（约束 C-proc-30：常态在目标线 worktree 内 --target HEAD 不带旁路；硬检查红 = 目标线落后 main，红灯 block 属合法失败形态），非 pre-commit / 非 CI——集成线门不是逐 commit 门。真实检查的绿红取决于集成线拓扑而非代码正确性（目标线落后 main 即红），不能作为确定性 run；本表 run = 改守卫自身时的自含冒烟：①--bogus 走用法错误路径断言 exit 2（退出码契约面）②--allow-diverged 旁路形态走完主链路（ref 解析 + merge-base 硬检查越过 + 兄弟线枚举软提示），exit 0 由设计契约保证（软提示恒不阻塞 exit code，见脚本头注释两级检查约定）。scope 仅脚本自身：传播检查的触发时机是打包/集成事件而非代码 diff，挂接纪律权威源 = docs/constraints.json C-proc-30"
+    },
+    {
+      "id": "E2E-MODELREF-01",
+      "summary": "extensions/ 内 agent 资产 frontmatter model: 引用 vs builtin-providers.json 快照漂移守卫（provider 退役/改名/模型 id 下架在提交期红，不等 run 烧 token）",
+      "scope": [
+        "scripts/check-model-references.mjs",
+        "packages/runtime/src/generated/builtin-providers.json"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-model-references.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-model-references.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径双接线——接线 SSOT = .github/workflows/ci.yml invariants 步与 .githooks/install-hooks.sh MODEL_REF 段，触发面 extensions/**/*.md、builtin-providers.json、脚本自身；e2e-map 登记 run 面 = 脚本自身与快照变更）。来源设计 workflow-architecture-redesign D8（过程档案不在 docs/，按登记原则 authority 回退 TEST-STRATEGY 三态锚点）。快照锚定 pi 实装版（pnpm gen:builtin-providers 重生成），pi bump 后 CI 固定环节自动重验，不需独立 on-pi-bump 触发面"
+    },
+    {
+      "id": "E2E-RECORD-01",
+      "summary": "record 持久化写面唯一入口 grep 守卫（D7 v2：R1 七名写函数 store 外直调零命中 + R2 subagent-record custom entry 直写只许 store 内部）",
+      "scope": [
+        "scripts/check-record-write-surface.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-record-write-surface.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-record-write-surface.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/architecture/subagent-record-persistence-consolidation.md",
+      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收口 RecordStore 唯一写入口）；grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
+    },
+    {
+      "id": "E2E-THIRDHOST-01",
+      "summary": "第三宿主模拟探针（subagent-core 包抽取 G3 契约）：仅凭 dist barrel 导出面消费——S5 列 agents/run workflow/崩溃恢复 + S1 资产一致性 + S2 预算 floor + S6 原子写 kill -9 零损坏",
+      "scope": [
+        "scripts/probe-third-host-integration.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "probe",
+          "ref": "scripts/probe-third-host-integration.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @zhushanwen/subagent-engine-sdk build && pnpm --filter @zhushanwen/subagent-core build && node scripts/probe-third-host-integration.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/architecture/subagent-core-package-extraction.md",
+      "note": "R2 态（按改动面 = 改探针自身或 barrel 导出面时跑；fixture 全落 os.tmpdir() 自清理、零 token 零真实 app/pi 进程，实测 47 断言 PASS）。前置链两层构建：subagent-core 的 CJS 产物 noExternal 打包 engine-sdk 的 dist/index.cjs（缺失即 MODULE_NOT_FOUND）→ 先 build engine-sdk 再 build subagent-core → probe——dist 为 gitignored 产物，run 内联构建保证干净环境可复现。本探针同时是 barrel 弱活符号的保留依据（package-extraction.md：maxTurnsToWatchdogMs / loadWorkflowScriptByPath / normalizeWorkflowRef / 原子写三函数等经真实 import 消费——收窄 barrel 前先核对本探针）"
     }
   ]
 }
