@@ -226,7 +226,7 @@
       @oauth-login="onQuickSetupOAuthLogin"
     />
     <!-- OAuth 授权对话框（wave-oauth-infra T7 产出，四态）。QuickSetup 与编辑体凭证区共用
-         同一 useProviderOAuth 状态机（useProviderPageOauth 内单实例 → auth.* listener 不重复注册） -->
+         同一 useProviderOAuth 状态机（ProviderPage 单实例 → auth.* listener 不重复注册） -->
     <OAuthDialog
       v-if="oauthDialogInfo"
       :open="oauth.state.value.open"
@@ -270,7 +270,7 @@ import {
   SETTINGS_TOAST_KEY,
   QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
-import { useProviderPageOauth } from '@/composables/features/settings/useProviderPageOauth'
+import { useProviderOAuth } from '@/composables/features/settings/useProviderOAuth'
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
 import { useQuotaAutoEnableNotice } from '@/composables/features/settings/useQuotaAutoEnableNotice'
 import { useAccordionGuard } from '@/composables/features/settings/useAccordionGuard'
@@ -420,9 +420,15 @@ const {
   onBodyCancel,
 } = useAccordionGuard(NEW_ID)
 
-// ── OAuth 编排（B-1：QuickSetup 与编辑体凭证区共用单实例状态机，提取见 useProviderPageOauth）──
+// ── OAuth 编排（B-1：QuickSetup 与编辑体凭证区共用单实例状态机，[C4·尾项] 合并后单 module）──
+const oauth = useProviderOAuth({
+  builtinProviders,
+  providers: computed(() => props.providers),
+  selectedTemplate,
+  expandedId,
+  newId: NEW_ID,
+})
 const {
-  oauth,
   isOauthSupported,
   hasOauthPresence,
   quickSetupOauthAuthorized,
@@ -430,13 +436,7 @@ const {
   onEditOauthLogin,
   onEditOauthLogout,
   onQuickSetupOauthLogin: startQuickSetupOauth,
-} = useProviderPageOauth({
-  builtinProviders,
-  providers: computed(() => props.providers),
-  selectedTemplate,
-  expandedId,
-  newId: NEW_ID,
-})
+} = oauth
 
 /** 删除目标 + 删除中 */
 const deleteTarget = ref<ProviderInfo | null>(null)
