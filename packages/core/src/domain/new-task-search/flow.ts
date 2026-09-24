@@ -47,10 +47,32 @@ import { supportedLevelsOf } from './supported-levels'
 // core 域 KV 单例直接 import（设计 D1，同 launch-config.ts 自身 import 先例）
 import { lookup as lookupLastUsedModel } from '../composer/last-used-model'
 import { lookup as lookupRememberedLevel } from '../composer/model-thinking-memory'
+// [A 消费侧] 后台投递失败保稿：orphan 草稿槽单源（与 send.ts catch 共用同一槽）
+import { stashOrphanedDraft } from '@taiji/core/domain/composer'
 import { getSettingsStore } from '../settings'
 import type {
   NewTaskFlowDeps,
+  SessionRemovePort,
 } from './ports'
+
+/**
+ * [E] 取消收尾：删除本次提交已建的 session（best-effort——失败仅 console.warn 不阻断，
+ * 残留幽灵 session 可由用户侧栏手动删）。端口未接线同样 warn 放行，不影响取消主语义。
+ * 模块级（不依赖编排器实例内部状态）：入参 = ports.session.remove 接线面 + 目标 sid。
+ */
+async function removeSessionBestEffort(port: SessionRemovePort | undefined, sid: string): Promise<void> {
+  if (!port) {
+    console.warn(`[new-task] abandon cleanup: session.remove 端口未接线，session ${sid} 保留`)
+    return
+  }
+  try {
+    await port.remove(sid)
+  } catch (e) {
+    // best-effort 降级策略：取消收尾的删除失败不阻断主语义（不投递 + 草稿归还已定），
+    // 残留幽灵 session 可由用户侧栏手动删——仅 console.warn 留痕供排障
+    console.warn(`[new-task] abandon cleanup: remove session ${sid} failed`, e)
+  }
+}
 
 /**
  * launch 配置解析端口（D1「store 数据经 deps 注入」，U2b）。
@@ -79,6 +101,16 @@ export interface LaunchConfigPort {
 export type NewTaskFlowDepsWithLaunch = NewTaskFlowDeps & {
   ports: { launchConfig?: LaunchConfigPort }
 }
+
+/**
+ * submitFirstMessage 三态返回（E 拍板契约；send.ts NewTaskFlowShape 结构对齐）：
+ * - 'handed-over'：交接完成（setActiveSession + loadPanel + pushChat + 发送），视图已切新 session。
+ * - 'background'：创建中用户切走（post-create 状态复核命中）→ 后台投递，不碰视图/状态机；
+ *   可发现性 info toast（F12）在本侧后台分支发出。
+ * - 'abandoned'：用户主动取消（abandonSubmit）→ 不投递、删已建 session，草稿由调用方归还。
+ *   未投递早退（空内容守卫 / 飞行中重复提交）统一报此值（草稿归还语义）。
+ */
+export type SubmitFirstMessageResult = 'handed-over' | 'background' | 'abandoned'
 
 /**
  * 壳未注入 launchConfig 端口时的 resolve 输入基座（过渡语义）：core 域可达单例——
@@ -125,6 +157,34 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 实例局部 ref（源语义，非模块级）。
    */
   const pendingPreset = ref<string | null>(null)
+
+  /**
+   * [E] 放弃标志：abandonSubmit() 置位（不改状态机 state——创建中 state 仍是 landing）。
+   * submitFirstMessage 各出口消费（post-create 复核点优先于 state 检查；throw 路径静默化）。
+   * 每次 submit 真正启动（过 createInFlight 守卫）时清零，防上一轮残留标志误杀新一轮。
+   */
+  const submitAbandoned = ref(false)
+
+  /**
+   * [B renderer 半] clientUuid 黏滞槽：同一用户意图（segments 序列化全等）的重试复用同一
+   * uuid（runtime 按 uuid 幂等——防 65s 超时后重试重复建 session）。成功（handed-over/
+   * background）或 abandoned 清槽；失败（throw 未放弃）保留供重试复用。
+   */
+  let lastAttempt: { hash: string; uuid: string } | null = null
+
+  /** segments 序列化指纹（JSON 全等。restore→重发走同一 getSegments 构造路径，键序稳定）。 */
+  function hashSegments(segments: Segment[]): string {
+    return JSON.stringify(segments)
+  }
+
+  /** 取本次 create 的 clientUuid：同段重试复用黏滞槽，换段/已清槽则新 uuid 并记槽。 */
+  function takeClientUuidFor(segments: Segment[]): string {
+    const hash = hashSegments(segments)
+    if (lastAttempt && lastAttempt.hash === hash) return lastAttempt.uuid
+    const uuid = crypto.randomUUID()
+    lastAttempt = { hash, uuid }
+    return uuid
+  }
 
   // 受控写入口 controller（父编排器独占）：setter 不再模块级 export，杜绝子模块 /
   // 组件越权 import 调用。本编排器独占后，按需把具体 setter 作为参数下发给子模块。
@@ -193,13 +253,16 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 「页面不跳转、只 composer 消失」。此处清空后 sessionId=null → Landing 正确渲染。
    */
   async function startFlow(presetCwd?: string): Promise<void> {
+    // [G] createInFlight 守卫必须在终态重建之前：handover 后 deliver 窗口（state 已 completed
+    // 而 createInFlight 仍 true）按 ⌘N 时，旧序会先 transitionUnchecked('idle') + bind(null)
+    // 再早退——零价值的 state/bind 翻转把交付中的流程搅成 idle 残留。守卫前置后零副作用。
+    if (createInFlight.value) return // submitFirstMessage 飞行中，忽略重复触发
     // 终态重建（AC-3.12）：completed 后 ⌘N 销毁重建。completed→idle 不在 ALLOWED 表（completed 无出口），
     // 必须用 transitionUnchecked（@internal 终态重建语义），随后 idle→landing 走正常 transition。
     if (state.value === 'completed') {
       controller.transitionUnchecked('idle')
       controller.bindCurrentSession(null)
     }
-    if (createInFlight.value) return // submitFirstMessage 飞行中，忽略重复触发
     // 幂等：已 landing 态再 startFlow（initApp 重试 / 多次 ⌘N）→ 不翻 state（landing→landing
     // 非法），只刷新 cwd + 不变量。避免 loadSessions 失败后 initApp 重试时 transition 抛错。
     if (state.value !== 'landing') {
@@ -272,6 +335,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     thinkingLevel?: string,
     bashCommand?: { command: string; excludeFromContext: boolean },
     perfT0?: number,
+    clientUuid?: string,
   ): Promise<Segment[] | null> {
     // D1 加载窗口语义：create 前等全部解析数据源就绪——core KV 双源（lastUsedModel +
     // 记忆表，launch-config 直接 import）+ 壳侧异步源（ports.launchConfig.ensureReady，
@@ -315,6 +379,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       pendingModel: resolved.model || null,
       segments,
       bashCommand: bashCommand ?? null,
+      // [B] clientUuid 黏滞透传（runtime 按 uuid 幂等）：同一用户意图的重试复用同一 uuid，
+      // 防 65s 超时后重试重复建 session（黏滞规则见 takeClientUuidFor）
+      clientUuid,
       // resolve 输出已是 value 域（launch-config LaunchConfig.thinkingLevel 契约：
       // authored/preset 档原样，memory/最高档经 thinkingLevelMap 转 value），cast 消除
       // string→ThinkingLevel 类型差（同改线前 Composer emit 值域先例）
@@ -393,24 +460,38 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 发送投递单源（设计审查 F13）：bash 首发（landing 态 !/!! 前缀）走 sendBash（不经 segments，
    * 原始 shell 文本透传 pi bash RPC，finalSegments 仅用于 tmpdir 迁移流程），否则普通 send。
    * handoverAndSend 与「post-create 状态复核」的后台投递分支共用，避免双实现参数漂移。
+   *
+   * [A 消费侧] 返回 boolean：false = 未进入任何可自动投递通道（send/sendBash 契约同构）。
+   * 后台投递分支据此保稿；handover 分支的成功/失败属 session 错误通道（W2 吞错 toast），
+   * 视图已交接、草稿归不回 landing，返回值不消费（D3 交接原子化）。
    */
   async function deliver(
     sid: string,
     finalSegments: Segment[],
     bashCommand?: { command: string; excludeFromContext: boolean },
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (bashCommand) {
-      await ports.chat.sendBash(sid, bashCommand.command, bashCommand.excludeFromContext)
-    } else {
-      await ports.chat.send(sid, finalSegments)
+      return ports.chat.sendBash(sid, bashCommand.command, bashCommand.excludeFromContext)
     }
+    return ports.chat.send(sid, finalSegments)
+  }
+
+  /**
+   * [E] abandonSubmit —— 创建中「取消」的真语义入口（Landing 过渡视图取消按钮调）。
+   * 只置 abandoned 标志，不改状态机 state（创建中 state 仍是 landing）；过渡视图据此进
+   * 「正在取消…」态并保持到 create settle（createInFlight 复位）——防用户在 create 仍在途时
+   * 重发造成并发双 create（createInFlight 守卫会静默丢弃，不能让用户走到那一步）。
+   * 放弃收尾在 submitFirstMessage 各出口（不投递 / 删已建 session / 静默失败）。
+   */
+  function abandonSubmit(): void {
+    submitAbandoned.value = true
   }
 
   async function submitFirstMessage(
     segments: Segment[],
     thinkingLevel?: string,
     bashCommand?: { command: string; excludeFromContext: boolean },
-  ): Promise<void> {
+  ): Promise<SubmitFirstMessageResult> {
     // [perf:landing] 首发提交起始时刻（毫秒 epoch）——各环节打点共用 t0
     const perfT0 = performance.now()
     // segments 不能为空；含 text 段时提取首段文本作 session label
@@ -418,18 +499,23 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     const trimmed = firstTextSeg?.text?.trim() ?? ''
     // 含图片/文件/skill 等非 text 段但无文本也允许发送（用户可能只贴图不写字）
     const hasOnlyNonText = segments.some((s) => s.type !== 'text')
-    if (!trimmed && !hasOnlyNonText) return
+    // 未投递早退统一报 'abandoned'（草稿归还语义——调用方 restore，不丢用户输入）
+    if (!trimmed && !hasOnlyNonText) return 'abandoned'
     if (state.value !== 'landing') {
       throw new Error('NewTaskFlow: 非 landing 态不可首发提交')
     }
-    if (createInFlight.value) return
+    if (createInFlight.value) return 'abandoned' // 飞行中重复提交静默丢弃（未投递，草稿归还）
+    submitAbandoned.value = false
     controller.setCreateInFlight(true)
     try {
       let finalSegments = segments
       // 未选目录直接发送（用默认 cwd 兜底 create），或重试场景已绑定
       if (!currentSession.value) {
-        const migrated = await createSessionForSubmit(segments, thinkingLevel, bashCommand, perfT0)
-        if (migrated === null) return
+        // [B] clientUuid 黏滞：同段重试复用同一 uuid（runtime 幂等），换段/已清槽则新 uuid
+        const migrated = await createSessionForSubmit(
+          segments, thinkingLevel, bashCommand, perfT0, takeClientUuidFor(segments),
+        )
+        if (migrated === null) return 'abandoned'
         finalSegments = migrated
       } else {
         finalSegments = await migrateRetryImages(segments)
@@ -441,16 +527,47 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       // 消息照发进新建 session（不丢用户输入），但不碰视图、不碰状态机、不报错（设计 D1）；
       // 并清 create 期绑定，防止后续 landing 提交误走 retry 分支把新消息发进旧 session（D6）。
       const sid = currentSession.value?.id
-      if (!sid) return // 防御：create/retry 两分支收敛后绑定必在（理论不可达）
+      // [E] abandoned 检查优先于 state 检查（拍板）：用户主动取消 → 不投递、删已建 session
+      // （防幽灵任务烧 token）、清绑定，静默返回（无误报——「创建失败」对主动取消是误导）。
+      // 未投递早退统一报 'abandoned'（草稿归还语义——调用方 restore，不丢用户输入）
+      if (submitAbandoned.value) {
+        if (sid) await removeSessionBestEffort(ports.session, sid)
+        controller.bindCurrentSession(null)
+        lastAttempt = null // abandoned 清槽（B 黏滞规则）
+        return 'abandoned'
+      }
+      if (!sid) return 'abandoned' // 防御：create/retry 两分支收敛后绑定必在（理论不可达）
       if (state.value !== 'landing') {
         // 与 handover 同款文件树预取（只暖缓存不碰视图）：用户点开新 session 即见首问 + 回复
         void ports.fileTree.loadTree(sid)
         controller.bindCurrentSession(null)
-        await deliver(sid, finalSegments, bashCommand)
-        return
+        const delivered = await deliver(sid, finalSegments, bashCommand)
+        // [A 消费侧] 后台投递失败（false = 未进入任何可自动投递通道）→ 草稿保底暂存
+        // （orphan 槽，下次 landing 挂载取回）；仍报 'background'（用户已切走，flow 职责终结）
+        if (!delivered) {
+          stashOrphanedDraft(finalSegments)
+        } else {
+          // [F12 可发现性] 后台投递成功才 info toast——失败时消息并未去到新 session，
+          // 「已发送」是误导（失败侧由 chat 错误通道 toast + 上方保稿兜底）
+          ports.toast.info(ports.t('newTask.backgroundDelivered'))
+        }
+        lastAttempt = null // 成功清槽（B 黏滞规则——投递已落定，重试属新意图）
+        return 'background'
       }
       // 载入 panel + 设 activeId（预建或刚建统一处理）
       await handoverAndSend(sid, finalSegments, bashCommand, perfT0)
+      lastAttempt = null // 成功清槽（B 黏滞规则）
+      return 'handed-over'
+    } catch (e) {
+      // [E] 已放弃时的失败静默化：用户主动取消，「创建失败」是误导性误报 → 'abandoned'
+      //（草稿由调用方归还）。未放弃的失败照常上抛（外层 catch 报错 toast + 保稿）。
+      if (submitAbandoned.value) {
+        lastAttempt = null // abandoned 清槽（B 黏滞规则）
+        return 'abandoned'
+      }
+      // 失败（throw 未放弃）保留 lastAttempt（B 黏滞规则）：同段重试复用同一 uuid，
+      // 防 65s 超时后重试重复建 session
+      throw e
     } finally {
       controller.setCreateInFlight(false)
     }
@@ -598,6 +715,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     isActive: computed(() => ACTIVE_STATES.has(state.value)),
     startFlow,
     submitFirstMessage,
+    abandonSubmit,
+    /** [E] 取消进行中只读视图（Landing 过渡视图「正在取消…」态判据；写经 abandonSubmit）。 */
+    isSubmitAbandoned: computed(() => submitAbandoned.value),
     presetCwd,
     setPendingModel,
     setPendingPreset,

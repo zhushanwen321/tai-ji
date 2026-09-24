@@ -404,6 +404,39 @@ function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
   }))
 }
 
+// ── 发现 B（create 幂等化）mock 面：clientUuid → 已建 session ─────────────────
+// 行为对齐 runtime create-idempotency（同 uuid 重试返回已建 session 不重复建号 +
+// TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记面即内存投影。保持签名/行为
+// 双同构，防 mock 轨（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
+const MOCK_CREATE_IDEMPOTENCY_TTL_MS = 600_000
+const MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES = 256
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：create clientUuid 幂等去重表
+// （mock 面行为对齐 runtime create-idempotency，容量上限 256 + TTL 10min，非 GUI 数据）
+const mockCreateByClientUuid = new Map<string, { session: SessionSummary; expiresAt: number }>()
+
+/** 幂等命中（TTL 内）→ 返回已建 session 副本；未命中/过期 → undefined（调用方新建并登记）。 */
+function dedupeMockCreate(clientUuid: string): SessionSummary | undefined {
+  const now = Date.now()
+  for (const [key, rec] of mockCreateByClientUuid) {
+    if (rec.expiresAt <= now) mockCreateByClientUuid.delete(key)
+  }
+  const hit = mockCreateByClientUuid.get(clientUuid)
+  return hit ? { ...hit.session } : undefined
+}
+
+/** 新建后登记（容量上限驱逐最老，同 runtime 回收策略）。 */
+function recordMockCreate(clientUuid: string, session: SessionSummary): void {
+  while (mockCreateByClientUuid.size >= MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES) {
+    const oldest = mockCreateByClientUuid.keys().next().value
+    if (oldest === undefined) break
+    mockCreateByClientUuid.delete(oldest)
+  }
+  mockCreateByClientUuid.set(clientUuid, {
+    session: { ...session },
+    expiresAt: Date.now() + MOCK_CREATE_IDEMPOTENCY_TTL_MS,
+  })
+}
+
 const sessionImpl = {
   /**
    * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
@@ -436,19 +469,26 @@ const sessionImpl = {
   },
 
   /**
-   * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参）。
+   * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参 + clientUuid）。
    * override 生效面（对齐 real 关键语义，落 SessionSummary 可断言）：
    * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
    * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
    * 覆盖值）。mock 无 pi/runtime，仅内存投影，不追求全仿真。
+   * clientUuid（发现 B）：同 uuid 幂等命中返回已建 session（不重复建号/不重复广播），
+   * 见本文件 mockCreateByClientUuid 说明。
    */
-  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel): Promise<SessionSummary> {
+  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel, clientUuid?: string): Promise<SessionSummary> {
     await sleep(TIMING.ack)
+    if (clientUuid !== undefined) {
+      const existing = dedupeMockCreate(clientUuid)
+      if (existing) return existing
+    }
     const s = createSession(cwd, label)
     if (presetId !== undefined) s.launchPresetId = presetId
     if (projectId !== undefined) s.projectId = projectId
     if (modelOverride !== undefined) s.modelId = modelOverride
     if (thinkingOverride !== undefined) s.thinkingLevel = thinkingOverride
+    if (clientUuid !== undefined) recordMockCreate(clientUuid, s)
     fixtureSessions.push(s)
     // 模拟 runtime create 后 broadcastSessionList（server-push 全量分组）
     pushSessionList()

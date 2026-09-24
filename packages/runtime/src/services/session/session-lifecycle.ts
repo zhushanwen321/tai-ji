@@ -124,6 +124,8 @@ import { clearRemovedSessionData } from '../plugin-service/session-data-store.js
 // 空闲回收占座原语与编排依赖类型（idle-pi-reclamation D6-2/D3，u2）。ReclaimSeat 是
 // reaper 判定循环与 reclaimManagedSession 共享的互斥状态（同实例注入，u3 装配）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
+// create 幂等化（发现 B）：clientUuid 去重登记表（in-flight 共用 Promise + 成功 TTL 保留）
+import { CreateIdempotencyRegistry } from './create-idempotency.js'
 import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
@@ -170,6 +172,12 @@ interface CreateOptions {
   modelOverride?: string
   /** thinkingLevel 覆盖，语义同 modelOverride（覆盖 preset.thinkingLevel，C-RL-6 优先级）。 */
   thinkingOverride?: string
+  /**
+   * create 幂等键（发现 B，session.create RPC 透传）：同 uuid 重复到达（网络重试）→
+   * 返回已建 session，不重复 spawn/建号（去重在 create 入口，见 CreateIdempotencyRegistry）。
+   * 缺省（undefined）逐次独立创建——fork/handoff/agent-managed 等内部入口旧行为不变。
+   */
+  clientUuid?: string
   /** 发起来源：'user' | 'agent'。agent-managed session 标记。 */
   spawnSource?: 'user' | 'agent'
   /** 父 agent session id（spawnSource='agent' 时必填）。 */
@@ -582,7 +590,31 @@ export class SessionLifecycle implements ISessionRegistry {
     }
   }
 
+  /** create 幂等登记表（发现 B）：随本实例生命周期，回收策略见 CreateIdempotencyRegistry。 */
+  private readonly createIdempotency = new CreateIdempotencyRegistry()
+
+  /**
+   * create 入口（发现 B 修复：clientUuid 幂等化）。
+   *
+   * **客户端放弃 ≠ 服务端放弃**：create 请求已发出、runtime 正在 spawn pi（冷启动/hang 可超过
+   * renderer 的 RPC_BACKSTOP_TIMEOUT_MS≈65s）时，客户端 backstop 超时或 WS 断连会 reject 并
+   * 提示「创建失败」，但 runtime 不受影响照常建号——若不去重，用户重试会产生重复 session +
+   * config.sessions 幻影空壳。按 clientUuid 去重后：同 uuid 重试（含 in-flight 中到达）复用
+   * 同一 Promise，返回已建 session，不重复 spawn/建号。
+   *
+   * 缺省 clientUuid（fork/handoff/agent-managed 等内部入口）→ 直走 createNew，逐次独立
+   * 创建（与旧版行为一致）。登记面回收（TTL/失败即清/容量上限）见 CreateIdempotencyRegistry。
+   */
   async create(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
+    const clientUuid = options?.clientUuid
+    if (clientUuid === undefined) {
+      return this.createNew(cwd, label, options)
+    }
+    return this.createIdempotency.run(clientUuid, () => this.createNew(cwd, label, options))
+  }
+
+  /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收口）。 */
+  private async createNew(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
     const perfT0 = performance.now()
     const tempId = crypto.randomUUID()
     const sessionCwd = resolveCreateCwd(cwd)

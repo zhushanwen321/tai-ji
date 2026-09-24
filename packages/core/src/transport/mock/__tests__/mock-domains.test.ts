@@ -127,6 +127,21 @@ describe('mock session domain', () => {
     await expect(session.remove(created.id)).rejects.toThrow('不存在')
   })
 
+  it('create clientUuid 幂等（发现 B，mock 面行为对齐 runtime）：同 uuid 复用已建 session，不同 uuid 独立创建', async () => {
+    const a = await session.create('/tmp/idem', 'idem', undefined, undefined, undefined, undefined, 'u-mock-1')
+    const b = await session.create('/tmp/idem', 'idem-retry', undefined, undefined, undefined, undefined, 'u-mock-1')
+    // 同 uuid 重试 → 同一 session（不重复建号；label 也复用首次创建值）
+    expect(b.id).toBe(a.id)
+    expect(b.label).toBe(a.label)
+    // 不同 uuid → 独立创建
+    const c = await session.create('/tmp/idem', 'idem-2', undefined, undefined, undefined, undefined, 'u-mock-2')
+    expect(c.id).not.toBe(a.id)
+    // 无 uuid → 每次独立创建（旧行为回归）
+    const d1 = await session.create('/tmp/idem', 'n1')
+    const d2 = await session.create('/tmp/idem', 'n2')
+    expect(d2.id).not.toBe(d1.id)
+  })
+
   it('fork / rename / setProject / removeByCwd / setThinkingLevel', async () => {
     const src = await session.create('/tmp/y', 'src')
     const forked = await session.fork(src.id, { label: 'forked' })

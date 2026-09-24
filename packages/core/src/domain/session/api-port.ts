@@ -23,6 +23,8 @@ export interface SessionApiPort {
    * 新建 session（createSessionFlow 用；返回含 cwd 用于 INV-7 降级比对；projectId = D14 创建时归属）。
    * modelOverride/thinkingOverride：Landing Chip 覆盖值，session 创建即带正确模型（B3）。
    * 优先级：override > preset > 全局默认。消除 config.sessions 广播覆盖的竞态。
+   * clientUuid（发现 B，create 幂等化）：客户端幂等 id，同一次「新建任务」的网络重试复用
+   * 同一 uuid，runtime 按其去重返回已建 session；缺省省略（旧行为）。
    */
   create(
     cwd: string,
@@ -31,6 +33,7 @@ export interface SessionApiPort {
     projectId?: string,
     modelOverride?: string,
     thinkingOverride?: ThinkingLevel,
+    clientUuid?: string,
   ): Promise<SessionSummary>
   /** 重命名 session（乐观更新后调） */
   rename(id: string, label: string): Promise<void>

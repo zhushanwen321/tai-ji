@@ -56,6 +56,8 @@ export async function list(): Promise<SessionGroup[]> {
  * 创建新 session（#1 cwd 透传，位置参数 create(cwd?, label?)，issues #1 方案 A）。
  * cwd=undefined → payload 不含 cwd 键（runtime 回退 process.cwd()，AC-1.2 回归）。
  * presetId：session 创建时锁定的 pi 启动预设 id（设计文档 §4.1），透传给 runtime。
+ * clientUuid（发现 B，create 幂等化）：客户端幂等 id，同一次「新建任务」的网络重试复用
+ * 同一 uuid，runtime 按其去重返回已建 session；缺省省略（旧行为，逐次独立创建）。
  * reply envelope 是 { session }，解包 .session。
  */
 export async function create(
@@ -65,8 +67,9 @@ export async function create(
   projectId?: string,
   modelOverride?: string,
   thinkingOverride?: ThinkingLevel,
+  clientUuid?: string,
 ): Promise<SessionSummary> {
-  const payload: { cwd?: string; label?: string; presetId?: string; projectId?: string; modelOverride?: string; thinkingOverride?: ThinkingLevel } = {}
+  const payload: { cwd?: string; label?: string; presetId?: string; projectId?: string; modelOverride?: string; thinkingOverride?: ThinkingLevel; clientUuid?: string } = {}
   if (cwd !== undefined) payload.cwd = cwd
   if (label !== undefined) payload.label = label
   if (presetId !== undefined) payload.presetId = presetId
@@ -77,6 +80,8 @@ export async function create(
   // session 创建即带正确模型，消除 config.sessions 广播覆盖的竞态。
   if (modelOverride !== undefined) payload.modelOverride = modelOverride
   if (thinkingOverride !== undefined) payload.thinkingOverride = thinkingOverride
+  // 发现 B（create 幂等化）：clientUuid 幂等键透传 runtime（缺省省略，向后兼容）。
+  if (clientUuid !== undefined) payload.clientUuid = clientUuid
   const reply = await command('session.create', payload, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.session
 }

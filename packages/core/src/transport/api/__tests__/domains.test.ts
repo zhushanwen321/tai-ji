@@ -478,6 +478,11 @@ describe('session 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ session: { id: 's2' } })
     await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high')
     expect(mockCommand.mock.calls[2][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high' })
+
+    // clientUuid 幂等键透传（发现 B）：传入时 payload 含 clientUuid；缺省省略（见上例，向后兼容）
+    mockCommand.mockResolvedValueOnce({ session: { id: 's3' } })
+    await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high', 'u-create-1')
+    expect(mockCommand.mock.calls[3][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high', clientUuid: 'u-create-1' })
   })
 
   it('switchSession / restoreSession / forceQuit / fork', async () => {

@@ -444,6 +444,15 @@ export interface ClientMessageMap {
     projectId?: string
     modelOverride?: string
     thinkingOverride?: ThinkingLevel
+    /**
+     * clientUuid（create 幂等化，发现 B）：客户端幂等 id（同一次「新建任务」的网络重试
+     * 复用同一 uuid）。runtime 按其去重——同 uuid 的 create 重复到达（backstop 超时/WS
+     * 断连后客户端放弃重试，而 runtime 侧 spawn 正常完成）时返回已建 session，不重复
+     * spawn/建号（登记面 = session-lifecycle create-idempotency：in-flight 共用同一
+     * Promise + 成功记录短保留 TTL 后回收）。省略 = 每次 create 独立创建（旧行为，向后兼容）。
+     * 与 message.send 的 clientUuid 是互不相干的幂等键空间（本键无 u-<uuid> 形态约定）。
+     */
+    clientUuid?: string
   }
   'session.delete': { sessionId: string }
   // session.deleteByCwd：批量删除指定 cwd（folder）下所有 session（folder 维度清理）。

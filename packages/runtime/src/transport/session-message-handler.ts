@@ -306,6 +306,9 @@ export class SessionMessageHandler {
       projectId: msg.payload.projectId,
       modelOverride: msg.payload.modelOverride,
       thinkingOverride: msg.payload.thinkingOverride,
+      // 发现 B（create 幂等化）：clientUuid 幂等键透传 session-lifecycle 去重层
+      // （同 uuid 重试返回已建 session）。缺省 undefined = 旧行为（逐次独立创建）。
+      clientUuid: msg.payload.clientUuid,
     })
     this.ctx.reply(ws, msg.id, 'session.created', { session })
     this.ctx.broadcastSessionList()
