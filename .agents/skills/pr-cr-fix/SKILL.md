@@ -18,7 +18,7 @@ description: >-
 - taiji git worktree 中，当前分支相对 main 有 commits（`git log main..HEAD` 非空）
 - 有 GitHub CLI（`gh`）认证
 - 全局安装 fallow（`npm i -g fallow`，实测 2.88.2）——阶段 1.5 度量门禁依赖
-- pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 的绝对路径>`（按名解析已退役，裸名一律 not_found——从 `<available_workflows>` 清单的 location 取路径；脚本随 git 分发）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
+- pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 绝对路径>`（按名解析已退役，裸名一律 not_found——从 `<available_workflows>` 清单的 location 取路径；脚本随 git 分发）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
 - zcode 环境走路径 2（原生 workflow）：完整生命周期 = `CreateWorkflow` 以 `path` 指向本仓自带的 `.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`（随 git 分发）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用全局 saved workflow `review-fix-loop`（`~/.zcode/workflows/`，无需额外安装）
 
 ## 调用约定
@@ -199,7 +199,7 @@ node scripts/select-constraints.mjs --base main
 
 #### 路径 1：pi 环境（pi 版 pr-lifecycle 单 workflow 全链）
 
-**适用条件**：当前主 agent 是 pi agent，且有 workflow 工具（subagent-workflow extension 提供）。workflow 按脚本**绝对路径**调起（`name` 参数收 `<available_workflows>` 清单的 location；按名解析已退役，裸名 not_found）；发现扫描按低→高优先序、last-writer-wins 后扫者胜（SSOT = `packages/subagent-core/src/shared/resource-discovery.ts`）：用户级（user-pi / user-agents / npm / npm-dev / extension paths）→ 内置（pi-host 注入，高于用户级）→ 项目 `.pi/workflows/` → 项目 `.agents/workflows/`（project-agents，最高优先）。
+**适用条件**：当前主 agent 是 pi agent，且有 workflow 工具（subagent-workflow extension 提供）。workflow 按脚本**绝对路径**调起（`name` 参数收 `<available_workflows>` 清单的 location；按名解析已退役，裸名 not_found）；发现扫描按低→高优先序、last-writer-wins 后扫者胜（SSOT = `packages/subagent-core/src/shared/resource-discovery.ts`）：user-pi → user-agents → npm 全局 → 内置（core 包，注入于 npm 槽内末位，低于 npm-dev）→ npm-dev → extension paths → 项目 `.pi/workflows/` → 项目 `.agents/workflows/`（project-agents，最高优先）。
 
 > **[MANDATORY] 主 agent 直接派，禁止 subagent 封装**：workflow 工具 `action:"run"` 是异步后台运行 + notifyDone 自动注入结果，主 agent 直接拿 return 值。workflow 自己会派 review agent + fix agent，subagent 封装只是多一层中转，白耗 context。
 
@@ -219,7 +219,7 @@ node scripts/select-constraints.mjs --base main
 
 **发起前披露义务 [MANDATORY]**（与路径 2 同款）：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖，**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `simplifyMode: "report"`。
 
-**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/skippedSteps/nextAction`；`status=failed` 含 `failedStep/error/recovery`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。
+**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/skippedSteps/nextAction`；`status=failed` 含 `failedStep/error/recovery`，pr-submit 已成功时另含 `prUrl`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。中断时若有 gate 子进程在跑（abort 只终止 workflow 线程，不杀 detached 的 gate 子树），重发起前先确认无残留（`pgrep -f "pr-pre-merge|coverage-gate|metrics-gate"`），避免孤儿 gate 与新 run 并发写 `.review/` 读数。
 
 cr-fix 内联循环的熔断语义与路径 2 完全一致：某 agent `mustFix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复均复发（regressed）→ `terminated=needs-redesign`（fixAttempts 计修复失败次数，not-fixed 由 stuck 防线承接；deferred 条目唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 failed 终态 error 的申述清单带出）；cr-fix `stuck`/`max-rounds`/`needs-redesign`/`needs-human` 一律 failed 人工接管（不放行，语义同路径 2 门禁收紧条款）。
 

@@ -175,7 +175,7 @@ async function dirtyWorktree(): Promise<string> {
       let p = line.slice(3).trim().replace(/^"|"$/g, "");
       const arrow = p.indexOf(" -> ");
       if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
-      return !p.startsWith(".review/");
+      return !p.startsWith(".review/") && !p.startsWith(".tmp/");
     })
     .join("\n");
 }
@@ -669,6 +669,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 "",
                 `第一步：Read 评审定义文件 ${d.path}——其中是你的完整审查 checklist，按它执行审查。`,
                 `审查范围：先跑 git diff ${diffBase}...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（dimensions 含本维度的条目逐条核对，enforcement: review 的条目是重点；权威源文档按需 Read 原文）。`,
+                skipSet.has("constraints") ? "注意：本次 constraints step 被跳过，.review/constraints.md 可能是旧 run 残留——清单与当前 diff 明显不符时以代码事实为准。" : "",
                 "只读审查：禁止修改、新建、删除任何代码文件。",
                 reconBlock,
                 "",
@@ -708,7 +709,9 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     if (rawClean && !reconUnfixed) {
       for (const v of verdicts) {
         for (const r of v.reconciliation) {
-          const it = activeBefore.find((i) => i.id === r.prevId);
+          // 归一化匹配（对齐 ES3 键空间）：reviewer 抄录 id 的漂移形态（大小写/尾注）
+          // 严格相等匹配会静默丢 fixed 申报，条目被误走「漏报保留」多修一轮
+          const it = findIssue(activeBefore, r.prevId);
           if (it && r.status === "fixed" && r.evidence.trim() !== "") it.status = "fixed";
         }
       }
@@ -772,8 +775,10 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     lastAggPath = agg.reportFile;
 
     let seq = 0;
+    // null 元素防御：LLM 数组元素可能为 null（与 fixes/disputed/deferred 同款防御），
+    // 畸形元素丢弃不裸 TypeError
     const nextIssues: IssueRecord[] = (agg.issues ?? [])
-      .filter((i) => i.adjudication === "evidence")
+      .filter((i): i is NonNullable<typeof i> => i !== null && typeof i === "object" && i.adjudication === "evidence")
       .map((i) => {
         let prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
         if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
@@ -807,9 +812,14 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
           // deferred 不经聚合重报复活——唯一复活入口 = reviewer 对注入清单申报 escalate。
           return prev;
         }
+        // id 复用守卫：L1 标题不兼容被拒（或 id 未命中台账但与台账现有 id 撞车）时，
+        // 复用该 id 会让新建 open 条目借保留块 dedup 把旧条目（deferred/disputed/fixed）
+        // 挤出台账——deferred 由此绕过「唯一复活入口 = escalate」。冲突/空串时强制新 id
+        //（空串 id 不是合法台账键——pi 版 schema 已加 minLength，此处兜底同语义）
+        const idOk = i.id && !issues.some((p) => p.id === i.id);
         seq += 1;
         return {
-          id: i.id ?? `MF-${round}-${seq}`,
+          id: idOk ? i.id! : `MF-${round}-${seq}`,
           title: i.title,
           severity: i.severity,
           files: i.files,
@@ -828,7 +838,8 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         if (old.status !== "open" && old.status !== "regressed") continue;
         if (consumed.has(old.id)) continue;
         const fixedClaim = verdicts.some((v) =>
-          (v.reconciliation ?? []).some((r) => r.prevId === old.id && r.status === "fixed" && r.evidence.trim() !== ""),
+          (v.reconciliation ?? []).some((r) =>
+            normIssueId(r.prevId) === normIssueId(old.id) && r.status === "fixed" && r.evidence.trim() !== ""),
         );
         if (fixedClaim) {
           old.status = "fixed";
@@ -853,9 +864,15 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 
     for (const v of verdicts) {
       for (const r of v.reconciliation ?? []) {
-        const it = nextIssues.find((i) => i.id === r.prevId);
+        // 归一化匹配 + 台账内守卫：reconciliation 只对注入台账（activeBefore = 上轮
+        // open/regressed）生效——fixed/regressed/not-fixed 命中台账外条目（幻觉 prevId、
+        // 保留块并入的 deferred/disputed、已 fixed 条目）不套用：防申述/延迟条目被对账
+        // 翻转（disputed 被 fixed 掉 = needs-human 收集丢失）、防同轮 L1 重报 +1 与对账
+        // 申报 +1 双计 fixAttempts。escalate 豁免：其对象 deferred 本就不在注入台账。
+        const it = findIssue(nextIssues, r.prevId);
         if (!it) continue;
-        if (r.status === "fixed" && r.evidence.trim() !== "") {
+        const inLedger = findIssue(activeBefore, r.prevId) !== undefined;
+        if (r.status === "fixed" && inLedger && r.evidence.trim() !== "") {
           it.status = "fixed";
           it.consecutiveUnfixed = 0;
         } else if (r.status === "regressed") {
@@ -873,7 +890,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
             it.consecutiveUnfixed = 0;
             log(`escalate 复活：${it.id}（${it.title}）——reviewer 申报上下文已变，重回修复队列`);
           }
-        } else if (r.status === "not-fixed") {
+        } else if (r.status === "not-fixed" && inLedger) {
           it.consecutiveUnfixed += 1;
         }
       }
@@ -1159,6 +1176,9 @@ await step("pr-meta", async () => {
   const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
   const diffStat = await world.run("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  if (commits.exitCode !== 0 || diffStat.exitCode !== 0 || names.exitCode !== 0) {
+    throw new Error(`pr-meta 读分支 commits/diff 失败（log=${commits.exitCode} stat=${diffStat.exitCode} names=${names.exitCode}）：\n${tailLines(commits.stderr + diffStat.stderr + names.stderr, 10)}；确认仓库状态（preflight 被跳过时此检查是首道防线）后重新发起`);
+  }
   const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
   // changeset 任务段触发条件：static-gate 实跑且报 WARN（常规）；或 static-gate 被
   // skip（changeset-check 未执行，状态未知——agent 已在看全 diff，自行判断，宁可起草）
@@ -1223,7 +1243,14 @@ await step("pr-meta", async () => {
     if (v.changeset.action === "draft") {
       // 起草文件由 workflow 统一显式路径提交（.changeset/ 被 git 跟踪，不 commit 会
       // 留脏工作区被 simplify/final-gates 防线拦截且错误归因；pr-submit 只 push 已提交）
-      const drafted = (v.changeset.files ?? []).filter((f): f is string => typeof f === "string" && f.trim() !== "");
+      // 路径前缀硬校验：files 是 LLM 自报字段直通 git add——workflow 唯一该类写入口，
+      // 非 .changeset/ 前缀（受污染输出/幻觉路径）拒绝，不放行仓库任意路径进 commit
+      const declared = (v.changeset.files ?? []).filter((f): f is string => typeof f === "string" && f.trim() !== "");
+      const illegal = declared.filter((f) => !f.trim().startsWith(".changeset/"));
+      if (illegal.length > 0) {
+        throw new Error(`changeset files 含 .changeset/ 外路径，拒绝 git add：${illegal.join("、")}`);
+      }
+      const drafted = declared.map((f) => f.trim());
       if (drafted.length === 0) {
         throw new Error(`pr-meta agent 返回 action=draft 但 files 为空（起草文件路径列表必填）：${JSON.stringify(v.changeset).slice(0, 200)}`);
       }
@@ -1252,6 +1279,9 @@ await step("pr-meta", async () => {
 // step 4：skill-yaml（条件：diff 触及 .agents/skills/）
 await step("skill-yaml", async () => {
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  if (names.exitCode !== 0) {
+    throw new Error(`skill-yaml 读 diff 文件清单失败（exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
+  }
   const skillFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => f.startsWith(".agents/skills/"));
   if (skillFiles.length === 0) {
     skippedSteps.push({ step: "skill-yaml", reason: "diff 未触及 .agents/skills/，条件不满足" });
@@ -1317,6 +1347,10 @@ async function readCoverageJson(): Promise<CoverageJson | null> {
 }
 async function sharedSrcArgs(): Promise<string[]> {
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  if (names.exitCode !== 0) {
+    // 静默降级会让 shared src 改动漏传 --extra-packages、gate 口径错——fail 与 preflight 同语义
+    throw new Error(`读 diff 文件清单失败（sharedSrcArgs，exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
+  }
   return /(?:^|\n)packages\/shared\/(?:.+\/*\/)?src\//.test(`\n${names.stdout}`)
     ? ["--extra-packages", "packages/runtime,packages/renderer"]
     : [];
@@ -1479,7 +1513,11 @@ await step("cr-fix", async () => {
       throw new Error(`cr-fix 连续 ${CR_FIX_MAX_ATTEMPTS} 次 ${last.terminated}（环境类失败）：检查引擎凭证/模型配额后重新发起（cr-fix 整体重跑）。nested message：${last.message}`);
     }
     // STUCK 集：人工接管双分支
-    const reportRef = last.aggregatedFile || last.runDir;
+    // 确定性优先：aggregatedFile 是聚合 agent 自报路径（幻觉形态会指错文件），
+    // 不在 runDir 内时不采信，回退到 prompt 指定的确定性位置
+    const reportRef = last.aggregatedFile && last.aggregatedFile.startsWith(last.runDir)
+      ? last.aggregatedFile
+      : `${last.runDir}/round-${last.rounds}/aggregated.md`;
     const disputedDetail = (last.disputed ?? [])
       .map((d) => `- ${d.id} [${d.severity}] ${d.title}\n  反证: ${(d.evidence || "(无)").replace(/\n/g, " ")}`)
       .join("\n");
@@ -1561,7 +1599,7 @@ await step("simplify", async () => {
   if (dirt !== "") {
     throw new Error(
       `simplify agent 返回后存在未提交改动（agent 声称 applied=${applied}）：\n${dirt}\n` +
-      `${applied > 0 ? "agent 声称已应用但未 commit = 半成品" : "agent 违规改动代码（无应用授权却留下改动）"}；查看 ${reportPath} 后人工处置（显式路径 commit 或还原），再重新发起或带 skipSteps 含 "simplify" 接管`,
+      `${applied > 0 ? "agent 声称已应用但未 commit = 半成品" : "agent 违规改动代码（无应用授权却留下改动），或为更早 step 的降级残留（fix 未申报 affectedFiles / git add 全失败时改动留工作区）"}；查看 ${reportPath} 后人工处置（显式路径 commit 或还原），再重新发起或带 skipSteps 含 "simplify" 接管`,
     );
   }
   if (!(await existsViaNode(reportPath))) {

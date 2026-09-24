@@ -89,8 +89,9 @@ for (const key of Object.keys($ARGS)) {
 }
 const strArg = (v) => (typeof v === "string" ? v.trim() : "");
 const base = strArg($ARGS.base) !== "" ? strArg($ARGS.base) : "main";
-// 上界 50：每轮 cr-fix 产生 ~2 条 report，引擎 256 条/run 上限会在 maxRounds 过大时
-// 中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）。显式非法值（非数字/<1）
+// 上界 50：pi 侧 log() 进 run.state.errorLogs（MAX_ERROR_LOGS=500 截最旧），
+// 50 轮 cr-fix 每轮 7-10 条 log 已贴截断线（截断只伤可观测性不伤控制流，但早轮
+// 日志会丢）；50 已远超实际收敛轮数（stuck 阈值 3）。显式非法值（非数字/<1）
 // fail-fast 不静默回落默认——与拼错键 fail-fast 同姿态（意图被无声改写比报错危险）
 const maxRoundsRaw = typeof $ARGS.maxRounds === "number"
   ? $ARGS.maxRounds
@@ -156,6 +157,9 @@ function tailLines(text, n) {
 // 事件循环在长 gate 期间可处理 abort 消息。ENOENT（命令不在 PATH）归一为既有
 // 「exit 2 工具错误」约定 + [cmd-missing] stderr 标记：gate 循环按 exit 2 不派
 // 修复 agent 空烧，调用方按标记给安装指引。
+// abort 边界（引擎能力缺口，脚本侧无法回收）：abort/terminate 只杀 worker 线程，
+// 不通知本脚本——detached gate 子树会继续跑完（写 .review/）；重发起前人工确认
+// 无残留（pgrep -f pr-pre-merge / coverage-gate / metrics-gate，见 SKILL.md 断点恢复节）。
 const CMD_MISSING = "[cmd-missing]";
 function killGroup(child, sig) {
   try {
@@ -171,23 +175,42 @@ function runCmd(cmd, argsArr, timeoutMs) {
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32", // POSIX：子进程任组长，超时可整组 kill
     });
-    const cap = 64 * 1024 * 1024; // 对齐原 spawnSync maxBuffer（超限截断不爆）
-    const outChunks = [];
-    const errChunks = [];
-    let outLen = 0;
-    let errLen = 0;
+    // 64MB 上限（对齐原 spawnSync maxBuffer）：滚动保留**末段**——诊断消费方全部
+    // 用 tailLines 取尾，截断保头会让错误摘要点位失效
+    const cap = 64 * 1024 * 1024;
+    const collect = (chunksRef) => {
+      const chunks = chunksRef.chunks;
+      return (d) => {
+        chunks.push(d);
+        chunksRef.len += d.length;
+        while (chunksRef.len > cap) {
+          chunksRef.len -= chunks[0].length;
+          chunks.shift();
+          chunksRef.truncated = true;
+        }
+      };
+    };
+    const outRef = { chunks: [], len: 0, truncated: false };
+    const errRef = { chunks: [], len: 0, truncated: false };
+    child.stdout.on("data", collect(outRef));
+    child.stderr.on("data", collect(errRef));
     let timedOut = false;
-    child.stdout.on("data", (d) => { if (outLen < cap) { outChunks.push(d); outLen += d.length; } });
-    child.stderr.on("data", (d) => { if (errLen < cap) { errChunks.push(d); errLen += d.length; } });
+    const timeoutNote = (t) => t
+      ? "\n[timeout] 子进程超时被终止（整进程组：" + cmd + " " + argsArr.join(" ") + "）"
+      : "";
+    const truncateNote = (ref, label) => (ref.truncated ? "\n[truncated] " + label + " 超 64MB，仅保留末段" : "");
     let timer = null;
     let killer = null;
+    let forceSettle = null;
     const settle = (exitCode, extraStderr) => {
       if (timer) clearTimeout(timer);
       if (killer) clearTimeout(killer);
+      if (forceSettle) clearTimeout(forceSettle);
       resolve({
         exitCode,
-        stdout: Buffer.concat(outChunks).toString("utf-8"),
-        stderr: Buffer.concat(errChunks).toString("utf-8") + (extraStderr || ""),
+        stdout: Buffer.concat(outRef.chunks).toString("utf-8"),
+        stderr: Buffer.concat(errRef.chunks).toString("utf-8") +
+          truncateNote(outRef, "stdout") + truncateNote(errRef, "stderr") + (extraStderr || ""),
       });
     };
     if (typeof timeoutMs === "number") {
@@ -195,6 +218,12 @@ function runCmd(cmd, argsArr, timeoutMs) {
         timedOut = true;
         killGroup(child, "SIGTERM");
         killer = setTimeout(() => killGroup(child, "SIGKILL"), 10_000); // 顽固子树宽限后强杀
+        // 兜底回收：孙进程若 setsid 脱离进程组且继承 stdout 写端，close 事件永不触发
+        // （父进程持有读端）——SIGKILL 宽限后再等 5s 强制 settle，杜绝 gate 无限挂起
+        forceSettle = setTimeout(() => {
+          killGroup(child, "SIGKILL");
+          settle(124, timeoutNote(true) + "\n[force-settle] 进程组回收超时强制返回（孙进程可能脱离进程组存活，人工核查残留进程）");
+        }, timeoutMs + 15_000);
       }, timeoutMs);
     }
     child.on("error", (err) => {
@@ -205,15 +234,14 @@ function runCmd(cmd, argsArr, timeoutMs) {
       }
     });
     child.on("close", (code) => {
-      settle(
-        code === null ? (timedOut ? 124 : 1) : code,
-        timedOut ? "\n[timeout] 子进程超时被终止（整进程组：" + cmd + " " + argsArr.join(" ") + "）" : "",
-      );
+      // timedOut 强制 124：子树捕获 SIGTERM 后以 exit 0 退出的形态不得记 PASS
+      settle(timedOut ? 124 : (code === null ? 1 : code), timeoutNote(timedOut));
     });
   });
 }
 
-// porcelain 过滤 .review/（脚本自持目录）：未 gitignore 的仓里脚本写产物会自挡干净检查
+// porcelain 过滤 .review/ 与 .tmp/（脚本自持目录：marker/coverage 读数与 cr-fix 报告）：
+// 未 gitignore 的仓里脚本写产物会自挡干净检查
 async function dirtyWorktree() {
   const st = await runCmd("git", ["status", "--porcelain"]);
   if (st.exitCode !== 0) {
@@ -230,7 +258,7 @@ async function dirtyWorktree() {
       let p = line.slice(3).trim().replace(/^"|"$/g, "");
       const arrow = p.indexOf(" -> ");
       if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
-      return !p.startsWith(".review/");
+      return !p.startsWith(".review/") && !p.startsWith(".tmp/");
     })
     .join("\n");
 }
@@ -574,7 +602,7 @@ const aggregationSchema = {
         type: "object",
         required: ["title", "severity", "files", "evidence", "guidance", "adjudication"],
         properties: {
-          id: { type: "string", description: "延续上轮的问题必填（复用原 id）；新问题按 MF-<轮>-<序号> 格式分配" },
+          id: { type: "string", minLength: 1, description: "延续上轮的问题必填（复用原 id，非空）；新问题按 MF-<轮>-<序号> 格式分配" },
           title: { type: "string", description: "一行问题标题（跨轮身份锚点）" },
           severity: { type: "string", enum: ["critical", "major", "minor"] },
           files: { type: "array", items: { type: "string" }, description: "涉及文件路径" },
@@ -788,6 +816,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
               "",
               "第一步：Read 评审定义文件 " + d.path + "——其中是你的完整审查 checklist，按它执行审查。",
               "审查范围：先跑 git diff " + diffBase + "...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（dimensions 含本维度的条目逐条核对，enforcement: review 的条目是重点；权威源文档按需 Read 原文）。",
+              skipSet.has("constraints") ? "注意：本次 constraints step 被跳过，.review/constraints.md 可能是旧 run 残留——清单与当前 diff 明显不符时以代码事实为准。" : "",
               "只读审查：禁止修改、新建、删除任何代码文件。",
               reconBlock,
               "",
@@ -842,7 +871,9 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
     if (rawClean && !reconUnfixed) {
       for (const v of verdicts) {
         for (const r of v.reconciliation) {
-          const it = activeBefore.find((i) => i.id === r.prevId);
+          // 归一化匹配（对齐 ES3 键空间）：reviewer 抄录 id 的漂移形态（大小写/尾注）
+          // 严格相等匹配会静默丢 fixed 申报，条目被误走「漏报保留」多修一轮
+          const it = findIssue(activeBefore, r.prevId);
           if (it && r.status === "fixed" && r.evidence.trim() !== "") it.status = "fixed";
         }
       }
@@ -905,8 +936,10 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
     lastAggPath = agg.reportFile;
 
     let seq = 0;
+    // null 元素防御：parseResult 的字符串兜底路径绕过 ajv 元素级校验，畸形元素
+    // 丢弃不裸 TypeError（fixes/disputed/deferred/reconciliation 均有同款防御）
     const nextIssues = (agg.issues || [])
-      .filter((i) => i.adjudication === "evidence")
+      .filter((i) => i !== null && typeof i === "object" && i.adjudication === "evidence")
       .map((i) => {
         let prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
         if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
@@ -940,9 +973,14 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
           // deferred 不经聚合重报复活——唯一复活入口 = reviewer 对注入清单申报 escalate。
           return prev;
         }
+        // id 复用守卫：L1 标题不兼容被拒（或 id 未命中台账但与台账现有 id 撞车）时，
+        // 复用该 id 会让新建 open 条目借保留块 dedup 把旧条目（deferred/disputed/fixed）
+        // 挤出台账——deferred 由此绕过「唯一复活入口 = escalate」。冲突时强制分配新 id
+        //（空串 id 同样走新 id——空串不是合法台账键）
+        const idOk = i.id && !issues.some((p) => p.id === i.id);
         seq += 1;
         return {
-          id: i.id || "MF-" + round + "-" + seq,
+          id: idOk ? i.id : "MF-" + round + "-" + seq,
           title: i.title,
           severity: i.severity,
           files: i.files,
@@ -961,7 +999,8 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
         if (old.status !== "open" && old.status !== "regressed") continue;
         if (consumed.has(old.id)) continue;
         const fixedClaim = verdicts.some((v) =>
-          (v.reconciliation || []).some((r) => r.prevId === old.id && r.status === "fixed" && r.evidence.trim() !== ""),
+          (v.reconciliation || []).some((r) =>
+            normIssueId(r.prevId) === normIssueId(old.id) && r.status === "fixed" && r.evidence.trim() !== ""),
         );
         if (fixedClaim) {
           old.status = "fixed";
@@ -986,12 +1025,18 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
 
     for (const v of verdicts) {
       for (const r of v.reconciliation || []) {
-        const it = nextIssues.find((i) => i.id === r.prevId);
+        // 归一化匹配 + 台账内守卫：reconciliation 只对注入台账（activeBefore = 上轮
+        // open/regressed）生效——fixed/regressed/not-fixed 命中台账外条目（幻觉 prevId、
+        // 保留块并入的 deferred/disputed、已 fixed 条目）不套用：防申述/延迟条目被对账
+        // 翻转（disputed 被 fixed 掉 = needs-human 收集丢失）、防同轮 L1 重报 +1 与对账
+        // 申报 +1 双计 fixAttempts。escalate 豁免：其对象 deferred 本就不在注入台账。
+        const it = findIssue(nextIssues, r.prevId);
         if (!it) continue;
-        if (r.status === "fixed" && r.evidence.trim() !== "") {
+        const inLedger = findIssue(activeBefore, r.prevId) !== undefined;
+        if (r.status === "fixed" && inLedger && r.evidence.trim() !== "") {
           it.status = "fixed";
           it.consecutiveUnfixed = 0;
-        } else if (r.status === "regressed") {
+        } else if (r.status === "regressed" && inLedger) {
           // fixAttempts 语义 = 修复失败次数（对齐 pi 版 applyFixAttemptedOutcome）：只在
           // regressed（修了又坏）时 +1；not-fixed（一直没修好）只计 consecutiveUnfixed 走 stuck。
           it.status = "regressed";
@@ -1006,7 +1051,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
             it.consecutiveUnfixed = 0;
             log("escalate 复活：" + it.id + "（" + it.title + "）——reviewer 申报上下文已变，重回修复队列");
           }
-        } else if (r.status === "not-fixed") {
+        } else if (r.status === "not-fixed" && inLedger) {
           it.consecutiveUnfixed += 1;
         }
       }
@@ -1310,6 +1355,10 @@ await step("pr-meta", async () => {
   const commits = await runCmd("git", ["log", baseHash + "..HEAD", "--format=%s%n%b---"]);
   const diffStat = await runCmd("git", ["diff", baseHash + "..HEAD", "--stat"]);
   const names = await runCmd("git", ["diff", baseHash + "..HEAD", "--name-only"]);
+  if (commits.exitCode !== 0 || diffStat.exitCode !== 0 || names.exitCode !== 0) {
+    throw new Error("pr-meta 读分支 commits/diff 失败（log=" + commits.exitCode + " stat=" + diffStat.exitCode + " names=" + names.exitCode + "）：" +
+      tailLines(commits.stderr + diffStat.stderr + names.stderr, 10) + "；确认仓库状态（preflight 被跳过时此检查是首道防线）后重新发起");
+  }
   const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
   // changeset 任务段触发条件：static-gate 实跑且报 WARN（常规）；或 static-gate 被
   // skip（changeset-check 未执行，状态未知——agent 已在看全 diff，自行判断，宁可起草）
@@ -1376,8 +1425,15 @@ await step("pr-meta", async () => {
     }
     if (v.changeset.action === "draft") {
       // 起草文件由 workflow 统一显式路径提交（.changeset/ 被 git 跟踪，不 commit 会
-      // 留脏工作区被 simplify/final-gates 防线拦截且错误归因；pr-submit 只 push 已提交）
-      const drafted = (v.changeset.files || []).filter((f) => typeof f === "string" && f.trim() !== "");
+      // 留脏工作区被 simplify/final-gates 防线拦截且错误归因；pr-submit 只 push 已提交）。
+      // 路径前缀硬校验：files 是 LLM 自报字段直通 git add——workflow 唯一该类写入口，
+      // 非 .changeset/ 前缀（受污染输出/幻觉路径）拒绝，不放行仓库任意路径进 commit
+      const declared = (v.changeset.files || []).filter((f) => typeof f === "string" && f.trim() !== "");
+      const illegal = declared.filter((f) => !f.trim().startsWith(".changeset/"));
+      if (illegal.length > 0) {
+        throw new Error("changeset files 含 .changeset/ 外路径，拒绝 git add：" + illegal.join("、"));
+      }
+      const drafted = declared.map((f) => f.trim());
       if (drafted.length === 0) {
         throw new Error("pr-meta agent 返回 action=draft 但 files 为空（起草文件路径列表必填）：" + JSON.stringify(v.changeset).slice(0, 200));
       }
@@ -1406,6 +1462,9 @@ await step("pr-meta", async () => {
 // step 4：skill-yaml（条件：diff 触及 .agents/skills/）
 await step("skill-yaml", async () => {
   const names = await runCmd("git", ["diff", baseHash + "..HEAD", "--name-only"]);
+  if (names.exitCode !== 0) {
+    throw new Error("skill-yaml 读 diff 文件清单失败（exit " + names.exitCode + "）：" + tailLines(names.stderr, 10) + "；确认仓库状态后重新发起");
+  }
   const skillFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => f.startsWith(".agents/skills/"));
   if (skillFiles.length === 0) {
     skippedStepsList.push({ step: "skill-yaml", reason: "diff 未触及 .agents/skills/，条件不满足" });
@@ -1462,6 +1521,10 @@ function readCoverageJson() {
 }
 async function sharedSrcArgs() {
   const names = await runCmd("git", ["diff", baseHash + "..HEAD", "--name-only"]);
+  if (names.exitCode !== 0) {
+    // 静默降级会让 shared src 改动漏传 --extra-packages、gate 口径错——fail 与 preflight 同语义
+    throw new Error("读 diff 文件清单失败（sharedSrcArgs，exit " + names.exitCode + "）：" + tailLines(names.stderr, 10) + "；确认仓库状态后重新发起");
+  }
   return /(?:^|\n)packages\/shared\/(?:.+\/*\/)?src\//.test("\n" + names.stdout)
     ? ["--extra-packages", "packages/runtime,packages/renderer"]
     : [];
@@ -1621,7 +1684,11 @@ await step("cr-fix", async () => {
       throw new Error("cr-fix 连续 " + CR_FIX_MAX_ATTEMPTS + " 次 " + last.terminated + "（环境类失败）：检查引擎凭证/模型配额后重新发起（cr-fix 整体重跑）。nested message：" + last.message);
     }
     // STUCK 集：人工接管双分支
-    const reportRef = last.aggregatedFile || last.runDir;
+    // 确定性优先：aggregatedFile 是聚合 agent 自报路径（幻觉形态会指错文件），
+    // 不在 runDir 内时不采信，回退到 prompt 指定的确定性位置
+    const reportRef = last.aggregatedFile && last.aggregatedFile.startsWith(last.runDir)
+      ? last.aggregatedFile
+      : last.runDir + "/round-" + last.rounds + "/aggregated.md";
     const disputedDetail = (last.disputed || [])
       .map((d) => "- " + d.id + " [" + d.severity + "] " + d.title + "\n  反证: " + (d.evidence || "(无)")
       .replace(/\n/g, " "))
@@ -1708,7 +1775,7 @@ await step("simplify", async () => {
   if (dirt !== "") {
     throw new Error(
       "simplify agent 返回后存在未提交改动（agent 声称 applied=" + applied + "）：\n" + dirt + "\n" +
-      (applied > 0 ? "agent 声称已应用但未 commit = 半成品" : "agent 违规改动代码（无应用授权却留下改动）") +
+      (applied > 0 ? "agent 声称已应用但未 commit = 半成品" : "agent 违规改动代码（无应用授权却留下改动），或为更早 step 的降级残留（fix 未申报 affectedFiles / git add 全失败时改动留工作区）") +
       "；查看 " + reportPath + " 后人工处置（显式路径 commit 或还原），再重新发起或带 skipSteps 含 \"simplify\" 接管",
     );
   }
