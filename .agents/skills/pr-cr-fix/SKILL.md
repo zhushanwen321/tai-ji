@@ -125,7 +125,7 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 
 **口径 [MANDATORY]**：**增量覆盖率 ≥ 80% 才达标。**（2026-08-21 用户决策：从 50% 起步值 ratchet 至业界事实标准 80%——Sonar Way 默认「coverage on new code ≥80%」门禁，调研见 `references/coverage-industry-research.md`）与 Gate-1.5 互补：Gate-1.5 是静态结构度量（不跑测试），Gate-1.6 跑测试量「新代码有没有被测到」。与 renderer 全量 thresholds gate（vitest.config 内、CI 强制）互补：全量阈值防整体退化，增量阈值防「新代码不写测试」。TEST-STRATEGY.md §7「以增量覆盖率为准」的工具化落地。
 
-**执行顺序：coverage-gate 先跑，metrics-gate 后跑。** coverage-gate 产出 `.review/coverage.json` 的 `files` 节（全文件级真实 lcov 覆盖率），metrics-gate 消费它把 complexity warn 中**真实文件覆盖 ≥80%** 的条目移入 covered 列表（出 warn、保留证据链），替换 fallow 静态估算。阶段 1 初跑与 3a 复跑均按 **coverage → metrics** 顺序；coverage.json 缺失或 base 不匹配时 metrics-gate 自动降级静态估算（不阻塞，报告标注 `fallow-static`）。
+**执行顺序：coverage-gate 先跑，metrics-gate 后跑。** coverage-gate 产出 `.review/coverage.json` 的 `files` 节（全文件级真实 lcov 覆盖率），metrics-gate 消费它把 complexity warn 中**真实文件覆盖 ≥80%** 的条目移入 covered 列表（出 warn、保留证据链），替换 fallow 静态估算。阶段 1 初跑与 3a 复跑均按 **coverage → metrics** 顺序；coverage.json 缺失或 base 不匹配时 metrics-gate 自动降级静态估算（不阻塞，报告标注 `fallow-static`）。两道 gate 都失败时按上下文重合度聚合派发：失败常同文件同源，主 agent 把两份失败明细（uncovered_files + metrics fail 清单）合成一份修复任务派单个 worker（同一文件的多类问题一次修完），修完 commit 后按序重跑两道——对应 zcode 路径 2 gate-suite step 的同款约定。
 
 ### 执行（主 agent 直接跑）
 
@@ -213,7 +213,7 @@ pi workflow run review-fix-loop --args '{
 
 **适用条件**：当前主 agent 是 zcode（有 `CreateWorkflow` 工具）。无需任何插件依赖。
 
-pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight / static gate / changeset / pr-meta / skill-yaml / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（coverage-1 / metrics-1）→ 阶段 2（cr-fix：内联与全局 saved `review-fix-loop` 同源的循环本体，8 维 agent .md）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一原生 workflow 脚本。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
+pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight / static gate / pr-meta 含条件 changeset / skill-yaml / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（gate-suite：coverage + metrics 聚合门禁）→ 阶段 2（cr-fix：内联与全局 saved `review-fix-loop` 同源的循环本体，8 维 agent .md）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一原生 workflow 脚本（10 step）。**agent 上下文重合度合并约定**（2026-09-24）：两个会话各自必须加载的工作上下文重合高且无独立性要求的合并为一个 agent 一次处理——changeset 与 pr-meta 输入全同（commits + diff stat + changeset 清单）合为一个会话；coverage 与 metrics 失败常同文件同源，gate-suite 每轮聚合两道明细派单个修复会话（同文件多类问题一次修完）。独立视角要求的会话不合并（8 维 reviewer 各自 fresh eyes 读同一份 diff 是 review 的对价）。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
 
 **发起（CreateWorkflow）**：
 
@@ -225,11 +225,11 @@ CreateWorkflow:
     reviewers: [...]      # 可选，维度白名单（缺省全部 8 维）
     maxRounds: 10         # 可选，cr-fix 轮次上限
     simplifyMode: apply   # 可选，apply | report
-    skipSteps: [...]      # 可选，人工接管逃生舱（12 step id）
+    skipSteps: [...]      # 可选，人工接管逃生舱（10 step id）
   name: "PR 生命周期"
 ```
 
-- 脚本 args 白名单 fail-fast（拼错键直接报错不静默回落）；`skipSteps` 合法值 = 十二 step id（preflight / static-gate / changeset / pr-meta / skill-yaml / pr-submit / constraints / coverage-1 / metrics-1 / cr-fix / simplify / final-gates），被跳过的 step 终态逐项披露
+- 脚本 args 白名单 fail-fast（拼错键直接报错不静默回落）；`skipSteps` 合法值 = 十 step id（preflight / static-gate / pr-meta / skill-yaml / pr-submit / constraints / gate-suite / cr-fix / simplify / final-gates），被跳过的 step 终态逐项披露（changeset 已并入 pr-meta——跳过 changeset 判定用 skipSteps 含 pr-meta；coverage 与 metrics 合并为 gate-suite，不可单独跳其一）
 - run 后台执行，完成通知自动回流（禁止轮询）；中途被停止（用户 / provider 故障 / 进程退出）→ `ResumeWorkflowRun` 续跑（引擎 journal 重放，已完成的 ask 与 world.run 不重付费）
 
 **发起前披露义务 [MANDATORY]**：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖（固化契约 `agents/simplify-apply.md`），**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `simplifyMode: "report"`（完全不改码，断点语义完整保留）。
@@ -239,7 +239,7 @@ CreateWorkflow:
 | scriptResult.status | 主 agent 动作 |
 |---|---|
 | `awaiting-push` | ① **逐项披露 skippedSteps**（每项 step + reason——被跳过的门禁必须让用户知情后才谈 push）；② 汇报 prUrl / gates（coverage/metrics/premerge）/ terminated / simplify；③ 请求 push 授权。**push 恒 `git push github HEAD:<branch> --force-with-lease`**（与 workflow 内 pr-submit.sh 同构：无条件 `--force-with-lease`，lease 在快进场景无副作用、远端有新提交时安全拒绝）；push 后验证远端 ref（`git rev-parse HEAD github/<branch>` 一致） |
-| `failed` | 按 `failedStep` + `error`（内含恢复指引）处置：gate 修复子循环 3 轮超限 → 人工修复、显式路径 commit 后**重新发起**；coverage/metrics exit 2（工具错误）→ 按输出修复后重新发起；pr-submit exit 2/3/5 → 按 error 指引（远端连通性 / `gh auth status`）后重新发起；cr-fix `stuck`/`max-rounds`/`needs-redesign` → 读 error 中报告路径（`.tmp/review-fix-loop/prl-<hash>/round-N/`）人工判定：**误报 → 重新发起并带 skipSteps 含 `"cr-fix"`（接管，终态逐项披露）；真问题 → 修复 commit 后重新发起**；cr-fix `needs-human` → 按 result.disputed 反证逐项裁决（真问题修复 commit 后重新发起，误报带 skipSteps 接管），裁决结论逐项披露 |
+| `failed` | 按 `failedStep` + `error`（内含恢复指引）处置：gate 修复子循环 3 轮超限 → 人工修复、显式路径 commit 后**重新发起**；gate-suite/final-gates exit 2（工具错误）→ 按输出修复后重新发起；pr-submit exit 2/3/5 → 按 error 指引（远端连通性 / `gh auth status`）后重新发起；cr-fix `stuck`/`max-rounds`/`needs-redesign` → 读 error 中报告路径（`.tmp/review-fix-loop/prl-<hash>/round-N/`）人工判定：**误报 → 重新发起并带 skipSteps 含 `"cr-fix"`（接管，终态逐项披露）；真问题 → 修复 commit 后重新发起**；cr-fix `needs-human` → 按 result.disputed 反证逐项裁决（真问题修复 commit 后重新发起，误报带 skipSteps 接管），裁决结论逐项披露 |
 
 **断点恢复语义**：run 被**中断**（非 failed 终态——用户停止 / provider 故障 / 进程退出）→ `ResumeWorkflowRun` 原地续跑（引擎 journal 重放：已完成的确定性 gate 与 ask 零成本重放）；**failed 终态**（gate 超限 / cr-fix 熔断 / 工具错误）→ 处置后**重新发起**（可带 skipSteps 跳过已人工接管的 step）。cr-fix 重跑 = loop 整体重跑（fix commit 已进 git 历史，重跑面向当前 diff，已修复问题不再报出，通常 1-2 轮收敛）。脚本有结构性错误（编译诊断 / 逻辑错）→ 编辑 run 的脚本文件后 `AmendWorkflow`（导入已完成工作为缓存，只重付改动部分）。
 

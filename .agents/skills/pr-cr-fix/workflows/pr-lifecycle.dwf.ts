@@ -24,7 +24,7 @@ args:
     default: apply
   skipSteps:
     type: json
-    description: 跳过的 step id 数组（人工接管逃生舱；合法值 preflight/static-gate/changeset/pr-meta/skill-yaml/pr-submit/constraints/coverage-1/metrics-1/cr-fix/simplify/final-gates，终态逐项披露）
+    description: 跳过的 step id 数组（人工接管逃生舱；合法值 preflight/static-gate/pr-meta/skill-yaml/pr-submit/constraints/gate-suite/cr-fix/simplify/final-gates，终态逐项披露）
     default: []
 */
 
@@ -34,9 +34,11 @@ args:
 // 两版本收敛裁决（2026-09-24）：完整 PR 生命周期只留 zcode 原生版（本文件）与
 // pi 版（pi 内置 review-fix-loop + 主 agent 手工门禁，见 SKILL.md 路径 1）。
 //
-// 12 step 执行序（与 zsw 版注册表一致）：
-//   preflight → static-gate → changeset(条件) → pr-meta → skill-yaml(条件) →
-//   pr-submit → constraints → coverage-1 → metrics-1 → cr-fix → simplify(条件) → final-gates
+// 10 step 执行序（2026-09-24 上下文重合度合并：changeset 并入 pr-meta、
+// coverage-1+metrics-1 并为 gate-suite——判据 = 两个会话各自必须加载的工作上下文
+// 重合度，重合高且无独立性要求的合并，一次加载一次修复）：
+//   preflight → static-gate → pr-meta(含条件 changeset) → skill-yaml(条件) →
+//   pr-submit → constraints → gate-suite → cr-fix → simplify(条件) → final-gates
 //
 // 与 zsw 版的机制差异（语义等价或更强，非降级）：
 // - 断点恢复：zsw 自持 state.json（step 级 --runId resume）→ 引擎 journal（run 被
@@ -72,8 +74,8 @@ if (args.simplifyMode !== undefined && args.simplifyMode !== "apply" && args.sim
 }
 const simplifyMode = args.simplifyMode === "report" ? "report" : "apply";
 const STEP_IDS = [
-  "preflight", "static-gate", "changeset", "pr-meta", "skill-yaml", "pr-submit",
-  "constraints", "coverage-1", "metrics-1", "cr-fix", "simplify", "final-gates",
+  "preflight", "static-gate", "pr-meta", "skill-yaml", "pr-submit",
+  "constraints", "gate-suite", "cr-fix", "simplify", "final-gates",
 ] as const;
 const skipSteps = Array.isArray(args.skipSteps)
   ? (args.skipSteps as unknown[]).map((x) => String(x))
@@ -86,7 +88,7 @@ for (const s of skipSteps) {
 const skipSet = new Set(skipSteps);
 
 // ── step 级 agent 返回契约（命名 interface：引擎从类型合成运行时 schema） ──
-interface ChangesetDraft {
+interface ChangesetVerdict {
   /** draft = 已写入 changeset 文件；no-release = 全部为非发布改动 */
   action: "draft" | "no-release";
   /** 已写入的 .changeset/*.md 路径（action=draft 时必填） */
@@ -95,11 +97,13 @@ interface ChangesetDraft {
   skipReasons?: string[];
 }
 
-interface PrMeta {
+interface PrStageResult {
   /** PR title，conventional commit 风格，英文 */
   title: string;
   /** PR body 全文 markdown，英文 */
   body: string;
+  /** changeset 任务段被包含时必填（static-gate 报 WARN 或被 skip 时） */
+  changeset?: ChangesetVerdict;
 }
 
 interface SimplifyResult {
@@ -1036,9 +1040,10 @@ await step("preflight", async () => {
   log(`[preflight] base=${base} → ${baseHash.slice(0, 12)}，前置条件全部通过`);
 });
 
-phase("静态门禁与 changeset 补齐");
+phase("静态门禁");
 // step 2：static-gate（typecheck 三处 + lint，不跑测试）
 let changesetWarn = false;
+let staticGateSkipped = false;
 await step("static-gate", async () => {
   const out = await gateFixLoop(
     "static-gate",
@@ -1048,69 +1053,53 @@ await step("static-gate", async () => {
   );
   changesetWarn = /WARN changeset-check/.test(out.stdout);
 });
+// step wrapper 已把 skip 记入 skippedSteps；changeset 语义由 pr-meta 的条件任务段承接
+staticGateSkipped = skipSet.has("static-gate");
 
-// step 3：changeset（条件：static-gate 实跑且输出含 WARN changeset-check）
-await step("changeset", async () => {
-  if (skipSet.has("static-gate")) {
-    // static-gate 被跳过 = changeset-check 未执行（状态未知），不能谎报「无发布级改动」
-    skippedSteps.push({ step: "changeset", reason: "static-gate 被 skipSteps 跳过，changeset-check 未执行（有无缺 changeset 的发布级改动状态未知，由发起方接管核验）" });
-    return;
-  }
-  if (!changesetWarn) {
-    skippedSteps.push({ step: "changeset", reason: "changeset-check 无 WARN：无 extension src/ 发布级改动，条件不满足" });
-    return;
-  }
-  const diffStat = await world.run("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
-  const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
-  const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
-  const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
-  const v = await agent("changeset-draft", "你是发布管理工程师：按 diff 逐包判断是否需要 changeset，只起草不询问。").ask<ChangesetDraft>(
-    [
-      "任务：为分支改动补齐 changeset（对齐 Gate-1a.5 自动分类，不弹窗询问）。",
-      "",
-      "背景：检测到部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check）。",
-      "请按 diff 逐包分类并处理：",
-      "- 实质行为改动（逻辑/接口/行为变化）→ 直接写入 .changeset/<slug>.md：",
-      "  - frontmatter 声明受影响包，如：",
-      "    ---",
-      "    '@zhushanwen/pi-xxx': minor",
-      "    ---",
-      "  - type 初判按分支 conventional commits：feat→minor / fix→patch / BREAKING→major（type 终判 merge 阶段人工定）",
-      "  - body 英文写用户可感变化（将进 CHANGELOG）",
-      "- 非发布改动（纯注释/类型注解/测试/零行为差重构）→ 不写文件，记入 skipReasons（格式「包名: 原因 + 证据」）",
-      "- 已删除的包跳过（package.json 读不到）",
-      "",
-      `diff --stat（base=${baseHash}..HEAD）：`,
-      tailLines(diffStat.stdout, 120),
-      "",
-      "commits：",
-      tailLines(commits.stdout, 120),
-      "",
-      changesetFiles.length
-        ? `现有 changeset 文件（勿重复声明）：\n${changesetFiles.join("\n")}`
-        : "现有 changeset 文件：无",
-      "",
-      "完成后以 action=draft + files（写入的文件路径列表）或 action=no-release + skipReasons（格式「包名: 原因 + 证据」）返回。",
-    ].join("\n"),
-  );
-  if (!v || (v.action !== "draft" && v.action !== "no-release")) {
-    throw new Error(`changeset agent 返回不符合契约：${JSON.stringify(v).slice(0, 200)}`);
-  }
-  log(`[changeset] ${v.action === "draft" ? `已起草 ${(v.files ?? []).length} 个 changeset 文件` : `非发布改动跳过：${(v.skipReasons ?? []).join("; ")}`}`);
-});
-
-phase("生成 PR 描述并创建 PR");
-// step 4：pr-meta（生成 PR title/body 并落盘）
+phase("生成 PR 描述与 changeset 并创建 PR");
+// step 3：pr-meta（title/body + 条件性 changeset 补全——两者输入全同：commits +
+// diff stat + changeset 清单，拆成两个会话 = 同一批上下文重复加载一遍，故合并）
 let prTitle = "";
 await step("pr-meta", async () => {
   const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
   const diffStat = await world.run("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   const changesetFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => /^\.changeset\/.+\.md$/.test(f));
-  const v = await agent("pr-meta", "你是 PR 文案撰写者：从分支 commit 历史提炼英文 title 与 body，忠实反映改动，不夸大不遗漏。").ask<PrMeta>(
+  // changeset 任务段触发条件：static-gate 实跑且报 WARN（常规）；或 static-gate 被
+  // skip（changeset-check 未执行，状态未知——agent 已在看全 diff，自行判断，宁可起草）
+  const changesetTask = changesetWarn || staticGateSkipped;
+  const changesetSection = changesetTask
+    ? [
+        "",
+        "【任务一：changeset 补全（先做）】",
+        changesetWarn
+          ? "背景：static gate 检测到部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check）。"
+          : "背景：static gate 被发起方跳过，changeset-check 未执行（状态未知）——请按 diff 自行判断，宁可起草。",
+        "按 diff 逐包分类并处理：",
+        "- 实质行为改动（逻辑/接口/行为变化）→ 直接写入 .changeset/<slug>.md：",
+        "  - frontmatter 声明受影响包，如：",
+        "    ---",
+        "    '@zhushanwen/pi-xxx': minor",
+        "    ---",
+        "  - type 初判按分支 conventional commits：feat→minor / fix→patch / BREAKING→major（type 终判 merge 阶段人工定）",
+        "  - body 英文写用户可感变化（将进 CHANGELOG）",
+        "- 非发布改动（纯注释/类型注解/测试/零行为差重构）→ 不写文件，记入 changeset.skipReasons（格式「包名: 原因 + 证据」）",
+        "- 已删除的包跳过（package.json 读不到）",
+        "",
+        "任务一完成后以 changeset 字段返回：action=draft + files（写入的文件路径列表）或 action=no-release + skipReasons。",
+      ]
+    : [
+        "",
+        "【任务一：changeset】本次无 WARN 且 static gate 已实跑——无发布级改动缺口，跳过（不返回 changeset 字段）。",
+      ];
+  const v = await agent(
+    "pr-meta",
+    "你是 PR 文案与发布管理工程师：先按 diff 完成 changeset 分类（如任务一被包含），再从分支 commit 历史提炼英文 title 与 body；忠实反映改动，不夸大不遗漏，只起草不询问。",
+  ).ask<PrStageResult>(
     [
-      "任务：从分支全部 commit 自动生成 PR title 与 body（英文，无需用户提供）。",
+      changesetSection.join("\n"),
       "",
+      "【任务二：生成 PR title 与 body（英文，无需用户提供）】",
       "title 规则：conventional commit 风格（fix(scope): short summary；多 scope 取最核心的，或省略 scope）。",
       "body 规则（三节模板）：",
       "- ## Summary：改动目的",
@@ -1125,19 +1114,27 @@ await step("pr-meta", async () => {
       tailLines(diffStat.stdout, 120),
       "",
       changesetFiles.length
-        ? `changeset 文件（在 Changes 节展示）：\n${changesetFiles.join("\n")}`
+        ? `changeset 文件（任务一勿重复声明；任务二在 Changes 节展示）：\n${changesetFiles.join("\n")}`
         : "changeset 文件：无",
+      "",
+      "返回 JSON：{title, body}（+ 任务一被包含时附 changeset 字段）。",
     ].join("\n"),
   );
   if (!v || !v.title?.trim() || !v.body?.trim()) {
     throw new Error(`pr-meta agent 返回不符合契约：${JSON.stringify(v).slice(0, 200)}`);
+  }
+  if (changesetTask) {
+    if (!v.changeset || (v.changeset.action !== "draft" && v.changeset.action !== "no-release")) {
+      throw new Error(`pr-meta agent 的 changeset 段返回不符合契约（任务被包含时必填）：${JSON.stringify(v).slice(0, 200)}`);
+    }
+    log(`[pr-meta] changeset：${v.changeset.action === "draft" ? `已起草 ${(v.changeset.files ?? []).length} 个文件` : `非发布改动跳过：${(v.changeset.skipReasons ?? []).join("; ")}`}`);
   }
   prTitle = v.title;
   await writeViaNode(".review/pr-workflow/pr-title.txt", v.title);
   await writeViaNode(".review/pr-workflow/pr-body.md", v.body);
 });
 
-// step 5：skill-yaml（条件：diff 触及 .agents/skills/）
+// step 4：skill-yaml（条件：diff 触及 .agents/skills/）
 await step("skill-yaml", async () => {
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   const skillFiles = names.stdout.split("\n").map((s) => s.trim()).filter((f) => f.startsWith(".agents/skills/"));
@@ -1152,7 +1149,7 @@ await step("skill-yaml", async () => {
   }
 });
 
-// step 6：pr-submit（push 分支 + 开/更新 PR）
+// step 5：pr-submit（push 分支 + 开/更新 PR）
 await step("pr-submit", async () => {
   if (!prTitle) throw new Error("pr-submit 前置产物缺失：pr-meta 未 done（被跳过或失败）；请先补 PR 标题或去掉 skipSteps 中的 pr-meta");
   const res = await world.run("bash", [
@@ -1177,7 +1174,7 @@ await step("pr-submit", async () => {
 });
 
 phase("约束加载与覆盖率/度量门禁");
-// step 7：constraints（约束动态加载 → .review/constraints.md，reviewer 消费）
+// step 6：constraints（约束动态加载 → .review/constraints.md，reviewer 消费）
 await step("constraints", async () => {
   const res = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
   if (res.exitCode !== 0) {
@@ -1188,7 +1185,7 @@ await step("constraints", async () => {
   }
 });
 
-// step 8：coverage-1（增量覆盖率门禁；shared src 改动带下游追加）
+// ── gate-suite 辅助（coverage/metrics 产物解析与失败上下文） ──
 interface CoverageJson {
   verdict?: string;
   packages?: Record<string, {
@@ -1247,51 +1244,78 @@ async function coverageFixContext(): Promise<string> {
   ].join("\n");
 }
 
-await step("coverage-1", async () => {
-  const extra = await sharedSrcArgs();
-  await gateFixLoop(
-    "coverage-1",
-    `coverage-gate.py --base ${base}`,
-    () => world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 3_600_000 }),
-    async () => {
-      const cov = await readCoverageJson();
-      const pct = coveragePctOf(cov);
-      gates.coverage = cov?.verdict ?? "pass"; // fallback：final-gates 被 skip 时的终态披露仍有初跑读数（final-gates onPass 会覆盖）
-      log(`[coverage-1] verdict=${cov?.verdict ?? "?"}${pct !== null ? `，增量覆盖率 ${pct}%` : ""}`);
-    },
-    coverageFixContext,
-  );
-});
-
-// step 9：metrics-1（结构度量门禁）
+// step 7：gate-suite（增量覆盖率 + 结构度量聚合门禁——两道 gate 的失败常同文件同源，
+// 拆两个独立修复子循环 = 同一批文件被两个冷启动会话各读一遍；聚合后每轮一个修复
+// 会话拿全量失败清单，同一文件的多类问题一次修完）
 interface MetricsJson {
   verdict?: string;
   fail?: { type?: string; path?: string; files?: string[]; name?: string; reason?: string }[];
 }
-await step("metrics-1", async () => {
-  await gateFixLoop(
-    "metrics-1",
-    `metrics-gate.py --base ${base}`,
-    () => world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 1_800_000 }),
-    async () => {
-      const m = await readJsonViaNode<MetricsJson>(".review/metrics.json");
-      log(`[metrics-1] verdict=${m?.verdict ?? "?"}`);
-    },
-    async () => {
-      const m = await readJsonViaNode<MetricsJson>(".review/metrics.json");
-      const fails = m?.fail ?? [];
-      if (fails.length === 0) return "metrics.json 不可读或无 fail 明细：以失败输出定位。";
-      return [
-        `metrics.json fail 明细（.review/metrics.json，前 10 条）：`,
-        ...fails.slice(0, 10).map((f) => `- [${f.type}] ${f.path || (f.files ?? []).join(",")} ${f.name || ""} — ${f.reason || ""}`),
-        "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import）；不放松 .fallowrc.json 阈值。",
-      ].join("\n");
-    },
-  );
+async function metricsFixContext(): Promise<string> {
+  const m = await readJsonViaNode<MetricsJson>(".review/metrics.json");
+  const fails = m?.fail ?? [];
+  if (fails.length === 0) return "metrics.json 不可读或无 fail 明细：以失败输出定位。";
+  return [
+    "metrics.json fail 明细（.review/metrics.json，前 10 条）：",
+    ...fails.slice(0, 10).map((f) => `- [${f.type}] ${f.path || (f.files ?? []).join(",")} ${f.name || ""} — ${f.reason || ""}`),
+    "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import）；不放松 .fallowrc.json 阈值。",
+  ].join("\n");
+}
+
+const GATE_SUITE_ROUNDS = 3;
+await step("gate-suite", async () => {
+  const extra = await sharedSrcArgs();
+  for (let round = 1; round <= GATE_SUITE_ROUNDS; round++) {
+    // 两道都跑完才进修复判定（聚合面完整：coverage 失败不阻塞 metrics 的诊断信息；
+    // coverage exit 2 工具错误时跳过 metrics，直接走工具错误分支）
+    const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 3_600_000 });
+    const met = cov.exitCode === 2 ? null : await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 1_800_000 });
+    if (cov.exitCode === 2 || met?.exitCode === 2) {
+      throw new Error(
+        `gate-suite exit 2（工具错误，不自动重试）：\n${tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账不闭合，需人看）`,
+      );
+    }
+    if (cov.exitCode === 0 && met !== null && met.exitCode === 0) {
+      const covJson = await readCoverageJson();
+      const pct = coveragePctOf(covJson);
+      gates.coverage = covJson?.verdict ?? "pass"; // fallback：final-gates 被 skip 时终态披露仍有初跑读数（final-gates onPass 会覆盖）
+      gates.metrics = (await readJsonViaNode<MetricsJson>(".review/metrics.json"))?.verdict ?? "pass";
+      log(`[gate-suite] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics}${round > 1 ? `（第 ${round} 轮收敛）` : "（首轮全绿）"}`);
+      return;
+    }
+    if (round === GATE_SUITE_ROUNDS) break;
+    const repairer = agent(
+      `gate-repairer-r${round}`,
+      "你是 gate 修复工程师：拿聚合失败清单一次修复（覆盖率缺口与结构度量常同文件同源），只修清单直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
+    );
+    await repairer.ask(
+      [
+        `gate-suite 第 ${round} 轮验证失败（增量覆盖率 + 结构度量两道 gate，输出摘要末 60 行）：`,
+        tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 60),
+        "",
+        "失败明细（两道 gate 聚合，按文件聚类阅读）：",
+        "",
+        await coverageFixContext(),
+        "",
+        await metricsFixContext(),
+        "",
+        "要求：",
+        "1. 修复上述全部问题，只改与失败直接相关的文件；同一文件的多类问题一次修完。",
+        `2. 修完自行 commit：git add <显式路径> && git commit -m "fix: gate-suite round ${round}"。`,
+        "3. 禁止 git add -A / git add .（会把工作区无关改动一起提交）。",
+        "4. 修不完的部分在回复中明确说明，不要静默跳过。",
+      ].join("\n"),
+    );
+    const dirt = await dirtyWorktree();
+    if (dirt !== "") {
+      throw new Error(`gate-suite 修复 agent 返回后存在未提交改动（第 1 次止损，不烧后续轮次）：\n${dirt}\n人工检查后显式路径 commit 或 checkout 还原，再重新发起本 workflow`);
+    }
+  }
+  throw new Error(`gate-suite（coverage + metrics 聚合）经 ${GATE_SUITE_ROUNDS} 轮修复仍未通过。处置：人工修复并 commit 后重新发起本 workflow（gate 面对已 commit 的改动正常判定）`);
 });
 
 phase("评审修复循环");
-// step 10：cr-fix（内联 review-fix-loop；环境类失败自动重试 1 次）
+// step 8：cr-fix（内联 review-fix-loop；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
   const relReviewers = (await files.glob(".agents/skills/pr-cr-fix/agents/review-*.md")).sort();
   const picked = reviewers.length > 0
@@ -1344,7 +1368,7 @@ await step("cr-fix", async () => {
 });
 
 phase("代码简化");
-// step 11：simplify（条件：cr-fix clean/converged；apply 档 A 类自动落地）
+// step 9：simplify（条件：cr-fix clean/converged；apply 档 A 类自动落地）
 await step("simplify", async () => {
   if (crFixTerminated !== "clean" && crFixTerminated !== "converged") {
     skippedSteps.push({ step: "simplify", reason: `cr-fix 未 clean/converged（${crFixTerminated ?? "未执行或被跳过"}），简化缺位（仅在 review 收敛后执行）` });
@@ -1420,7 +1444,7 @@ await step("simplify", async () => {
 });
 
 phase("终局三道门禁");
-// step 12：final-gates（coverage → metrics → pre-merge --test-result + 收尾防线 + e2e 披露）
+// step 10：final-gates（coverage → metrics → pre-merge --test-result + 收尾防线 + e2e 披露）
 await step("final-gates", async () => {
   const extra = await sharedSrcArgs();
   let lastCovJson: CoverageJson | null = null;
