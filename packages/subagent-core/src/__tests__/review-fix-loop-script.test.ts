@@ -801,3 +801,36 @@ describe("review-fix-loop.js degraded 透出锚点（三落点字段防移除）
     );
   });
 });
+
+// 弱通道终判恢复指引 + 兜底差集清单（设计 §3.1 失败路径 / §3.4.2）：源文本锚定防
+// 「终判文案被精简后丢恢复指引」「兜底 WARN 被精简后丢差集清单」——行为级断言
+// （终判 message 内容 / WARN 输出）在 subagent-workflow e2e mock 轨，此处锁源级形态。
+describe("review-fix-loop.js 弱通道终判恢复指引 + 兜底差集清单锚点（§3.1 失败路径）", () => {
+  it("恢复指引常量单一声明 + 语义覆盖弱通道未命中与检查动作", () => {
+    expect(WORKFLOW_SOURCE).toContain("const REVIEWER_RECOVERY_HINT = ");
+    // 语义三要素：弱通道不可用判定 / 报告文件+计数行检查 / 工具受限检查
+    expect(WORKFLOW_SOURCE).toContain("报告文件缺失或无固定格式计数行");
+    expect(WORKFLOW_SOURCE).toContain("- Must-fix: N");
+    expect(WORKFLOW_SOURCE).toContain("检查 agent 定义与扩展配置");
+  });
+
+  it("两处 reviewer 终判分支（触发点 a/b 落入处）都以常量拼接收尾——防一处直写字面量漂移", () => {
+    // 触发点 a 落入的终判（审查 agent 调用失败）
+    expect(WORKFLOW_SOURCE).toContain('+ " — " + raw.error + REVIEWER_RECOVERY_HINT;');
+    // 触发点 b 落入的终判（审查 agent 结果无效，缺 must_fix）
+    expect(WORKFLOW_SOURCE).toContain('.slice(0, 400) + REVIEWER_RECOVERY_HINT;');
+    // 消费恰好两处（1 声明 + 2 消费 = 标识符共 3 次）——第三处内联即红
+    expect(WORKFLOW_SOURCE.match(/REVIEWER_RECOVERY_HINT/g)?.length).toBe(3);
+    expect(WORKFLOW_SOURCE.match(/\+ REVIEWER_RECOVERY_HINT;/g)?.length).toBe(2);
+  });
+
+  it("兜底 commit WARN 含差集文件清单（分支 2 空清单显式标注 / 分支 3 拼接路径清单）", () => {
+    // 「混向残余 WARN 清单可见」的源级守卫：差集为空显式 (empty)、commit 失败拼清单
+    expect(WORKFLOW_SOURCE).toContain("diff-set: (empty)");
+    expect(WORKFLOW_SOURCE).toContain('); diff-set: "');
+    expect(WORKFLOW_SOURCE).toContain('+ fallbackPaths.join(", ") + "; error: "');
+    // 两处 WARN 均以 diff-set: 呈报——一处被删后计数即红
+    expect(WORKFLOW_SOURCE).toContain("diff-set: ");
+    expect(WORKFLOW_SOURCE.match(/diff-set: /g)?.length).toBe(2);
+  });
+});

@@ -173,6 +173,12 @@ const {
 // 另一侧即红）。
 const DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL = "Structured output failed deterministically:";
 
+/** reviewer 弱通道终判恢复指引（设计 §3.1 失败路径 / §3.4.2 流程图「失败 → 维持
+ *  现状终判（错误信息 + 恢复指引）」）：落入终判 = 弱通道也未命中（报告文件缺失或
+ *  无固定格式计数行）。两处终判分支共用（触发点 a / b），追加到 finalMessage 末尾，
+ *  文风对齐 fixer 终判既有「恢复动作：」格式（错误 → 权威源 → 重试闭环）。 */
+const REVIEWER_RECOVERY_HINT = "；弱格式通道亦未命中（报告文件缺失或无固定格式计数行），恢复动作：检查 roundDir 下该 agent 的报告文件（<report 名>.md）是否落盘、其中 `- Must-fix: N` 计数行是否存在；若 agent 工具受限（tools 白名单不含 structured-output/写盘工具），检查 agent 定义与扩展配置";
+
 /** 降级 WARN 摘要（设计 §3.4.2 WARN 规格）：触发 error 头 240 字符——保 F-1 前缀与
  *  failureKind 分类段（恢复方向「修环境 vs 模型质量」可辨），信息量不低于现状终判
  *  分支的 raw.error 透出，防降级通道吞掉既有线索。value 解析失败形态（无 error）取
@@ -997,7 +1003,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "review-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 调用失败 " + active[i].name + " — " + raw.error;
+        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 调用失败 " + active[i].name + " — " + raw.error + REVIEWER_RECOVERY_HINT;
         batchIndex = BATCHES.length + 1; // 终止外层循环
         break;
       }
@@ -1055,7 +1061,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "review-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 结果无效（缺 must_fix） " + active[i].name + " raw=" + JSON.stringify(raw.value).slice(0, 400);
+        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 结果无效（缺 must_fix） " + active[i].name + " raw=" + JSON.stringify(raw.value).slice(0, 400) + REVIEWER_RECOVERY_HINT;
         batchIndex = BATCHES.length + 1; // 终止外层循环
         break;
       }
