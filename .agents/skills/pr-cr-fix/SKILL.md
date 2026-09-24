@@ -180,7 +180,7 @@ node scripts/select-constraints.mjs --base main
 
 **review-fix-loop 宿主路由（循环本体双版本）**：review+fix 循环本体有两个同源实现，按主 agent 宿主路由——pi 主 agent 用 **pi 内置版**（`pi workflow run review-fix-loop`，路径 1）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，缺省全部 8 维））。两版本共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，autoCommit 由循环统一显式路径 commit（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。zcode 版差异：无 `aggregatorModel`（per-call 模型路由不存在，模型由 run 级 subagent_model 承载）、无嵌套 workflow、断点恢复走引擎原生（AmendWorkflow / ResumeWorkflowRun）、报告落 `{reportDir}/{topic}/round-<n>/`（`reportDir` 默认 `.tmp/review-fix-loop`，`topic` 执行开始时命名）。适用边界：**只跑 review+fix 循环**（不进门禁、不开 PR）时按宿主路由单跑；**完整 PR 生命周期**走路径 2（zcode 原生 pr-lifecycle，cr-fix step 内联同源循环）。
 
-**循环本体行为差异登记表**（2026-09-24 一致性审查后集中登记——两版循环骨架同源，以下为已知的语义分叉，改任一侧前先查此表；2026-09-24 A1/A2 对齐后 needs-redesign 前置与 deferred 复活通道两行已消除，现行共同语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
+**循环本体行为差异登记表**（2026-09-24 一致性审查后集中登记——两版循环骨架同源，以下为已知的语义分叉，改任一侧前先查此表。两版共同的熔断与复活语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
 
 | 差异点 | pi 版 | zcode 版（saved + prl 内联） | 备注 |
 |---|---|---|---|
