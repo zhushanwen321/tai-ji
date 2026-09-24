@@ -55,7 +55,7 @@ export default {
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
     steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
-    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · @ subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
+    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
     deferHint: 'Session busy — ⏎ will queue and send when free…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',

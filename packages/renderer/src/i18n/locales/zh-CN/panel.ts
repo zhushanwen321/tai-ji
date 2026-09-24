@@ -55,7 +55,7 @@ export default {
     sendEmptyHint: '请输入内容后再发送',
     sendHint: '输入内容后发送',
     steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮 · Shift+⏎ 换行…',
-    inputHint: '描述你想让 AI 做什么…（/ 命令 · $ 文件 · # 会话 · @ 子代理 · ! bash · Shift+⏎ 换行 · ↑/↓ 历史 · Shift+Tab 思考档 · Ctrl+P/Ctrl+Shift+P 模型）',
+    inputHint: '描述你想让 AI 做什么…（/ 命令 · $ 文件 · # 会话 · {\'@\'} 子代理 · ! bash · Shift+⏎ 换行 · ↑/↓ 历史 · Shift+Tab 思考档 · Ctrl+P/Ctrl+Shift+P 模型）',
     deferHint: '会话占用中，⏎ 将排队、空闲后自动发送…',
     addContent: '添加内容（附件 / 命令）',
     attach: '附件',
