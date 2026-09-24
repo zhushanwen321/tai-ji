@@ -8,6 +8,7 @@
  *   4. M2 回归：全 fixed + 新发现 → reconcile 门控（reconCount）+ 新发现 merge 独立执行（E2E-4）
  *   5. M4 回归：recheckAfterFix=true → 全批重派 + clean agent 走 scoped 分支（E2E-5）
  *   6. F1 回归：doc-reviewer-only 批（reconciliation 恒空）→ merge 重新报告转换 → needs-redesign（E2E-6）
+ *   另含弱格式通道降级 describe（设计 §3.4.2，W1-W9）。
  *
  * 与 workflows-e2e.test.ts 同模式：真实 runAndWait + 真实 worker thread +
  * 唯一 mock 是 deps.runner（AgentRunner）。runner 按调用分流：
@@ -2976,6 +2977,60 @@ describe("review-fix-loop 弱格式通道降级（§3.4.2 mock 轨）", () => {
       // state.meta 落数据层（rfl 仪表后续接入的数据面）
       const st = readState(outcome.runDir!);
       expect((st.meta as Record<string, unknown>).degradedRounds).toBe(2);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W9: fixer 触发线 b——value 解析失败无 error（非 JSON 纯文本）→ 降级续跑，run 续跑收 clean",
+    async () => {
+      // 与 W3（触发线 a：F-1 error）对照：fixer 返回无 JSON 可提取的纯文本 value、
+      // 无 error（结构化信号丢失但 value 到达的旧引擎形态）——落决策 7 触发线 (b)
+      //（value 存在 + parseResult null + 无 error）降级续跑而非 fix-failure 终判
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/w9-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
+          () => ({
+            report_file: "/tmp/w9-r2.md", must_fix: 0, suggestion: 0,
+            reconciliation: [
+              { prev_id: "MF-1", status: "fixed", evidence: "read confirmed" },
+              { prev_id: "MF-2", status: "fixed", evidence: "read confirmed" },
+            ],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/w9-agg.md", must_fix: 2, suggestion: 0,
+          must_fix_ids: [
+            { id: "MF-1", severity: "major" },
+            { id: "MF-2", severity: "major" },
+          ],
+          fixes_caution: [],
+        }),
+        // __invalidOutput 哨兵携带纯文本 = returnMeta { value: <纯文本>, error: undefined }
+        // ——parseResult 空转 null、raw.value 非 null，精确命中 (b) 分支
+        fix: () => ({ __invalidOutput: "Fix agent turn output concatenated as plain text without schema envelope" }),
+      });
+      const outcome = await runWeakChannelCase(runner, {});
+
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.message).toContain("(degraded: 1 round(s))");
+      expect(outcome.degradedRounds).toBe(1);
+      expect(outcome.totalFixed).toBe(0); // 记账行 1：不虚增
+      const st = readState(outcome.runDir!);
+      const fr = (st.fixResults as Array<Record<string, unknown>>)[0]!;
+      expect(fr.degraded).toBe(true);
+      expect(fr.fixed_count).toBeNull();
+      expect(fr.degradedGroups).toEqual(["G1"]);
+      // ES3 豁免：降级组 issueIds 照常标 fix-attempted，R2 对账清账无残留
+      expect(outcome.remaining).toEqual([]);
+      expect(st.fixCount).toBe(1);
+      // R2 重审真实发生（降级续跑而非 fix-failure 终止；降级组不重派 fixer）
+      const { kinds } = runner.stats();
+      expect(kinds.filter((k) => k === "review").length).toBe(2);
+      expect(kinds.filter((k) => k === "fix").length).toBe(1);
+      // value 解析失败形态的触发摘要取 raw.value 头 240（W2 同款断言）
+      expect(String((st.meta as Record<string, unknown>).lastDegradedTrigger))
+        .toContain("concatenated as plain text");
     },
     RUN_TIMEOUT_MS,
   );

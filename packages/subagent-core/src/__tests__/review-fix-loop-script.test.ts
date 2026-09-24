@@ -3,9 +3,10 @@
 // 测试方法（限制见文末 import 用例）：review-fix-loop.js 是 pi worker 模板脚本——
 // 顶层执行 + 顶层 return，不可作为 ES module import（vite/esbuild 直接 SyntaxError）。
 // 因此用 vm.Script 对源码文本做「函数段抽取求值」：从源文件按函数名定位 + brace
-// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord 三段，在注入
-// log/Buffer 的沙箱里求值后取回引用。抽取定位失败（函数改名/移动）会显式 throw，
-// 不会静默测到旧副本。
+// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord /
+// summarizeDegradedTrigger 四段（前三段在 loadScriptFns 集中求值，末段在其
+// describe 内单段抽取），在注入 log/Buffer 的沙箱里求值后取回引用。抽取定位
+// 失败（函数改名/移动）会显式 throw，不会静默测到旧副本。
 //
 // 回归锚点（对照修复史，断言在旧实现上会红）：
 //   - W1：失败调用（returnMeta={value,error}）不得触发 telemetry-missing WARN

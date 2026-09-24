@@ -259,6 +259,9 @@ workflow run 的事件流持久化：`<agentDir>/workflow-state/<runId>.events.j
 ### 武装回执（armed，workflow 域）
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。
 
+### 弱格式通道（workflow 域，2026-09-24）
+review-fix-loop 的结构化返回链路断裂时从磁盘报告文件降级采信、让 run 跑完而非判死的机制。reviewer 腿两触发线：(a) 引擎 F-1 deterministic 前缀 error（`Structured output failed deterministically:`，SSOT = pi-subagent-cli `DETERMINISTIC_SCHEMA_FAILURE_PREFIX`，脚本字面量由前缀契约锁定测试双侧防漂移）/ (b) 无 error + 值解析失败（旧引擎形态）；采信源 = roundDir 下报告文件的 `- Must-fix: N` 计数行（复用 `parseAggregatedMd`）。fixer 腿两触发线同形：(a) error 含 F-1 前缀 / (b) 无 error + value 解析失败，均降级续跑（AgentRegistry not found / 超时等非确定性 error 维持终判），修复以基线差集兜底 commit 落盘（message 带 `[degraded-fix]` revert 锚点，只覆盖差集内修复）。降级可观测三落点：降级 WARN（头 240 字符触发摘要）/ 轮级条目 degraded 标记 / run 返回值 `degradedRounds` + 成功类终态 message 后缀 `(degraded: N round(s))`（下游机器判别口径；max-rounds 失败终态为分号诊断段）。非 F-1 error（结果未到达的失败）不进弱通道、维持终判 + 恢复指引。消费方呈报义务：[dev-merge skill](../.agents/skills/dev-merge/SKILL.md) 降级 clean 处置条款（呈报用户后才进合并）。机制落点：`packages/subagent-core/workflows/review-fix-loop.js` + `review-fix-loop-utils.cjs`。
+
 ### 终局必达通知
 workflow run 的结果语义通知纪律：成功/失败/取消一律出终局通知，走确认式送达（持久账本 + 幂等键，at-least-once）。是 C-ext-19 确认式送达在 workflow 域的细化（C-ext-26），终局内容由 run 状态机统一裁决，禁止旁路第二通知面。
 
