@@ -421,12 +421,23 @@ function collectRecentTurnEntriesFromTail(
 /**
  * entries → Message[]（共享 mapper + port 翻译 + entry 专属回填，全量读与①②档窗口共用单点）。
  *
+ * [message-revoke U6a] 活跃路径裁剪接入：leafId 取窗口/文件**最后一条** entry 的 id——
+ * pi 树重放规则（重启后叶子 = 文件最后一条 entry）保证文件尾即活跃叶子；撤回后 label
+ * entry 落文件尾，被撤子树条目按文件序先于 label，经 computeActivePathEntries 沿 parentId
+ * 回溯滤除（离线尾读 / oversize 窗口 / 全量文件读 / 游标窗口四条腿共用本单点，被撤分支
+ * 在文件源腿同样不渲染）。已知边界（设计 D3 允许的降级面）：turn 计数与字节预算在
+ * collect 阶段按原始行计算（含旧分支行）→ 分支 session 的窗口可能欠填（可见 turns 少于
+ * 预算）、totalTurnsEstimate 偏大——内容正确性优先，truncated=true 时「加载更多」可继续
+ * 翻页补全。末条 entry 无 string id（畸形文件尾）→ leafId undefined → 不裁剪（现行为降级）。
+ *
  * 回填步骤 applyEntryEndTimes：用 entry 时间戳写 assistant 消息的产出结束时刻（Message.endedAt，
  * pi 落盘于 message_end → ≈ 该消息产出结束）；turn 聚合口径（「已工作」时长/时刻区间）
  * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
  */
 function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
-  const { messages, entryIds } = mapSessionEntries(entries)
+  const last = entries[entries.length - 1]
+  const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined
+  const { messages, entryIds } = mapSessionEntries(entries, leafId)
   const converted = sessionStore.convertHistory(messages, entryIds)
   applyEntryEndTimes(converted, entries)
   return converted

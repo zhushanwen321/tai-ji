@@ -276,3 +276,44 @@ describe('边界用例', () => {
     expect(truncated).toBe(false)
   })
 })
+
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径裁剪（message-revoke U6a）：文件源腿（全量文件读 / 离线尾读）
+// ════════════════════════════════════════════════════════════════════
+// 文件腿无 RPC leafId，convertWindowEntries 以窗口/文件末条 entry 为 leafId（pi 树重放
+// 规则：文件尾 = 活跃叶子）；被撤子树按文件序先于 label 锚，经 parentId 回溯滤除。
+
+describe('活跃路径裁剪（message-revoke U6a 文件源腿）', () => {
+  /** 有分支链式 fixture（真实撤回形态）：root → a1 → [m(被撤) → am] / [label(锚) → n]。 */
+  function branchedFile(): string {
+    const label = {
+      type: 'label',
+      id: 'lbl',
+      parentId: 'a1',
+      timestamp: '2026-01-01T00:00:00Z',
+      label: 'taiji:revoked',
+      targetId: 'm',
+    } as PiSessionEntry
+    const entries = [
+      { ...msgEntry('q', 'user', '问题'), parentId: null },
+      { ...msgEntry('a1', 'assistant', '回答'), parentId: 'q' },
+      { ...msgEntry('m', 'user', '发错的消息'), parentId: 'a1' },
+      { ...msgEntry('am', 'assistant', '对发错的回复'), parentId: 'm' },
+      label,
+      { ...msgEntry('n', 'user', '撤回后新消息'), parentId: 'lbl' },
+    ]
+    return writeJsonl(entries)
+  }
+
+  it('getHistoryFromFilePath: 有分支文件 → 旧分支（发错的消息及其回复）不渲染', async () => {
+    const { messages } = await getHistoryFromFilePath(branchedFile(), realStore)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    expect(messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+  })
+
+  it('tailReadHistory: 有分支文件 → 离线尾读窗口同样滤除旧分支条目', async () => {
+    const { messages } = await tailReadHistory(branchedFile(), realStore, 20)
+    expect(messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+    expect(messages.some((m) => m.piEntryId === 'm' || m.piEntryId === 'am')).toBe(false)
+  })
+})

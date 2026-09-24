@@ -1,7 +1,7 @@
 import type { Message, Segment, SegmentsMetadataFile } from '@taiji/shared'
 import type { PiSessionEntry, PiHistoryToolResult, PiSessionCustomEntry } from './pi-protocol.js'
 import { convertPiHistory } from './message-converter.js'
-import { applyEntryEndTimes, mapSessionEntries } from './session-entry-mapper.js'
+import { applyEntryEndTimes, computeActivePathEntries, mapSessionEntries } from './session-entry-mapper.js'
 
 /**
  * entry-tree-builder —— 从 pi get_entries 返回的 entry 树重建 taiji Message[]。
@@ -212,14 +212,24 @@ function backfillSegments(
  *
  * @param entries pi get_entries 返回的 entries 数组（全量或 since 增量）
  * @param segmentsMetadata segments.json sidecar（null 表示无 sidecar，全降级）
+ * @param leafId 活跃叶子 entry id（message-revoke U6a）：提供时先裁剪为活跃路径
+ *（computeActivePathEntries，被撤分支不渲染）；缺省 = 现行为（全文件）。增量窗口调用方
+ * 不传（delta 是活跃路径后缀切片，裁剪是全树语义——见 getIncrementalHistory 契约注释）。
  */
 export function rebuildHistoryFromEntries(
   entries: PiSessionEntry[],
   segmentsMetadata: SegmentsMetadataFile | null,
+  leafId?: string,
 ): RebuiltHistory {
+  // [message-revoke U6a] 活跃路径裁剪在编排最前做一次，后续三步（映射 / clientUuid 映射 /
+  // defer 标记提取 / endedAt 回填）全部消费同一 scoped 子集——被撤消息的 custom 映射
+  //（taiji.client-msg-id）与其 user entry 同生死：entry 不在活跃路径 → 映射目标缺失 →
+  // segments 回填不命中即正确语义（census §4.1「映射失效即正确语义」）。
+  const scoped = computeActivePathEntries(entries, leafId)
+
   // 1. mapSessionEntries 统一映射（共享单点，M2 接入）：四类 entry → messages 伪消息，
   //    custom → customDataEntries；entryIds 与 messages 平行对齐（AGENTS.md 关键规则 9）。
-  const { messages, entryIds, customDataEntries } = mapSessionEntries(entries)
+  const { messages, entryIds, customDataEntries } = mapSessionEntries(scoped)
 
   // 2. clientUuidMap 从 customDataEntries 建（扫 taiji.client-msg-id custom entry）。
   const clientUuidMap = buildClientUuidMap(customDataEntries)
@@ -227,7 +237,7 @@ export function rebuildHistoryFromEntries(
   // [defer segments 化 / D-A1-2 ③] defer 裸标记 id 提取在 convert 之前（原始 entries 的
   // user message 文本含裸标记；converted 文本已被 convertMessageBody 剥标记，backfill 内
   // match 不可行——第 3 轮复审修正）。
-  const deferIdByEntryId = buildDeferEntryIdMap(entries)
+  const deferIdByEntryId = buildDeferEntryIdMap(scoped)
 
   // 3. 整个数组走 convertPiHistory（复用 toolResult 合并 + 系统消息完整处理，C1 修复核心）。
   //    entryIds 平行传入使产出 Message 带 piEntryId，供第 4 步回填 badge。
@@ -239,9 +249,10 @@ export function rebuildHistoryFromEntries(
   backfillSegments(converted, clientUuidMap, segmentsMetadata, deferIdByEntryId)
 
   // 5. 回填 assistant 消息产出结束时刻（Message.endedAt = entry 时间戳）：turn 聚合口径
-  //    （「已工作」时长/时刻区间）的时间轴右端。展示字段回填，不进 reducer（理由见
-  //    applyEntryEndTimes 头注释——保 apply-entry 两条喂入路径逐字节同构）。
-  applyEntryEndTimes(converted, entries)
+  //（「已工作」时长/时刻区间）的时间轴右端。展示字段回填，不进 reducer（理由见
+  // applyEntryEndTimes 头注释——保 apply-entry 两条喂入路径逐字节同构）。
+  // 传 scoped（与 converted 同源）：被撤分支的 entry 时刻不回填到任何存活消息上。
+  applyEntryEndTimes(converted, scoped)
 
   return { messages: converted, clientUuidMap, orphanToolResults }
 }
