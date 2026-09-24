@@ -22,8 +22,8 @@
  */
 import { applyPendingDiff, scanPendingEntries } from "@zhushanwen/extension-protocol";
 
-/** 异步操作类型（来源：workflow / subagent / bash 后台任务） */
-export type PendingType = "workflow" | "subagent" | "bash";
+/** 异步操作类型（来源：workflow / subagent / bash 后台任务 / session 完成通知债权） */
+export type PendingType = "workflow" | "subagent" | "bash" | "session";
 
 /** 异步操作终态/过渡状态。active = 仍在运行；其他都视为已结束 */
 export type PendingStatus = "active" | "completed" | "failed" | "cancelled" | "expired" | "time_limited" | "aborted";
@@ -46,7 +46,7 @@ export interface PendingEntry {
 
 /** countActiveFromEntries 的过滤选项。 */
 export interface CountActiveOptions {
-	/** 只统计指定类型的活跃 pending；缺省 = 全部类型（subagent + workflow + bash） */
+	/** 只统计指定类型的活跃 pending；缺省 = 全部类型（subagent + workflow + bash + session） */
 	types?: PendingType[];
 	/**
 	 * [跨 session 残留过滤] 当前 session id（过滤基准）：传入时按「register entry 的
@@ -143,18 +143,22 @@ function filterActiveRegisters(
 }
 
 /**
- * type 归一化：subagent/bash 原样保留，其余（含缺失/未知值）归 workflow。
+ * type 归一化：subagent/bash/session 原样保留，其余（含缺失/未知值）归 workflow。
  * state.ts 与 index.ts 两处归一化共用本函数，防止「写入侧直通、读取侧归并」漂移。
  *
  * [偏好显式化] 缺失/未知 type 默认归 workflow = 宁挂账不失明：未知类型照常进差集
  * （守卫不因类型畸形失明），收口通道按类型分流——workflow / 畸形条目由 core 注册
  * 对账 sweep 收口（查 WorkflowRun store：终态 ∪ state 文件不存在 → 补注销）；bash 无
  * record/store 可查——注册随进程退出注销，进程死亡窗口的丢失无补发通道，属显式
- * 边界（每孤儿 bash 注册至多 1 条静态虚报，熔断限损）。
+ * 边界（每孤儿 bash 注册至多 1 条静态虚报，熔断限损）；session（notify-once D6
+ * 词表真身在此——否则写侧归一成 workflow 展示错标）由 watch 应答 unregister 与
+ * extension session_start 重启收口腿（D7③）收口，reconcile-sweep 对该 raw type
+ * 显式 skip（不入 workflow run-state 判据，防误销活跃 claim）。
  */
 export function normalizePendingType(raw: unknown): PendingType {
 	if (raw === "subagent") return "subagent";
 	if (raw === "bash") return "bash";
+	if (raw === "session") return "session";
 	return "workflow";
 }
 
