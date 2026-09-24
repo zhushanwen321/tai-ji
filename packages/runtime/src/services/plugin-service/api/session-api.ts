@@ -334,6 +334,45 @@ function toPluginSessionEntry(raw: unknown, customType: string): PluginSessionEn
 }
 
 /**
+ * 活跃路径过滤（readEntries 投影前的 raw entries 裁剪）：从 leafId 沿 parentId 回溯得
+ * 活跃路径 id 集合，只保留链上条目——消息撤回（navigateTree 树回退）后，被撤子树的
+ * custom op entry 不得再进入插件镜像的折叠输入（scheduler-manager 面板残留缺陷的
+ * runtime 数据面落点；全量与增量两模式同过本过滤）。与 extensions 侧 todo/plan/goal/
+ * scheduler 的 filterActivePath、runtime infra/pi/entry-tree-builder 是设计登记的并行
+ * 同构实现（extension 不能 import runtime 包的约束所致；census 收敛决策归阶段 6）。
+ *
+ * 防御语义（与 scheduler 扩展同构）：leafId 缺失/null/不在条目集 → 不过滤（回退现行为
+ * ——增量批的父链可越批悬空，按「不丢数据」优先）；parentId 环 → `!activeIds.has`
+ * 守卫终止（不死循环）；无 string id 的条目按线性语义保留（投影层 toPluginSessionEntry
+ * 会再次收窄，此处不提前丢弃）。
+ */
+export function filterEntriesToActivePath(rawEntries: unknown[], leafId: string | null | undefined): unknown[] {
+  if (rawEntries.length === 0) return rawEntries
+  const byId = new Map<string, string | null>()
+  for (const entry of rawEntries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const id = (entry as Record<string, unknown>).id
+    if (typeof id !== 'string') continue
+    const parentId = (entry as Record<string, unknown>).parentId
+    byId.set(id, typeof parentId === 'string' ? parentId : null)
+  }
+  // 无任何树信息（legacy 线性 fixture）→ 不过滤，保持裁剪前行为
+  if (byId.size === 0) return rawEntries
+  if (leafId === undefined || leafId === null || !byId.has(leafId)) return rawEntries
+  const activeIds = new Set<string>()
+  let current: string | null = leafId
+  while (current !== null && !activeIds.has(current)) {
+    activeIds.add(current)
+    current = byId.get(current) ?? null
+  }
+  return rawEntries.filter((entry) => {
+    if (typeof entry !== 'object' || entry === null) return true
+    const id = (entry as Record<string, unknown>).id
+    return typeof id !== 'string' || activeIds.has(id)
+  })
+}
+
+/**
  * live only 的 client 解析：pm 已接线且进程存活才返回 client；否则抛 SESSION_NOT_ACTIVE。
  * 读不调 ensureActive、不做磁盘折叠——一次 modal 打开不该 spawn 进程（AP-4 读路径单分支）。
  */
@@ -419,12 +458,15 @@ export function registerSessionRpcHandlers(
       )
     }
     const raw = await resolved.client.getEntries(sinceEntryId) as EntriesSinceResult
+    const leafId = raw.data?.leafId
     const entries: PluginSessionEntry[] = []
-    for (const rawEntry of raw.data?.entries ?? []) {
+    // 投影前先做活跃路径裁剪（filterEntriesToActivePath）——被撤子树的 op entry 不出
+    // runtime，插件镜像折叠输入天然干净；parentId 等树结构字段仍只在本函数内消费、
+    // 不进投影（对外契约零变更）。
+    for (const rawEntry of filterEntriesToActivePath(raw.data?.entries ?? [], leafId)) {
       const projected = toPluginSessionEntry(rawEntry, customType)
       if (projected) entries.push(projected)
     }
-    const leafId = raw.data?.leafId
     return {
       sessionFile: read.getSessionSummary(sessionId)?.sessionFile,
       entries,

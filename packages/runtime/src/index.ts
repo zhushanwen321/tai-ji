@@ -1,6 +1,10 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
+import {
+  REVOKED_SIGNAL_CUSTOM_TYPE,
+  setActiveRevocationSignalNotifier,
+} from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
 // 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
@@ -942,6 +946,14 @@ async function main(): Promise<void> {
 
   // ── Phase 3: wire cross-service runtime deps ──
   pluginService.setSessionService(sessionService)
+  // [U7 插件镜像重建] 撤回信号广播槽注册（getActiveDeliveryRegistry 同款进程内活动槽
+  // 先例——组合根创建后可读，避免为编排新增 session-service → plugin-service 接线）：
+  // RevokeOrchestrator 派生态失效时点（树回退确认后，与 records 失效腿恒配对）按
+  // (sessionId, 'taiji:revoked') 双匹配命中插件订阅注册表定向 notify（scheduler-manager
+  // 据此丢弃累计镜像全量重建）。
+  setActiveRevocationSignalNotifier((sessionId) => {
+    pluginService.notifyEntryInvalidation(sessionId, REVOKED_SIGNAL_CUSTOM_TYPE)
+  })
   // GitService：composition root 注入 infra executor（数组参数防注入）+ sessionService（取 cwd）。
   // 经 server.setServices 注入到 GitMessageHandler（git.* 路由）。
   // perf W17（03 D4-4 U2）：gitService.getStatus 收编走 GitStateService（上方已创建，

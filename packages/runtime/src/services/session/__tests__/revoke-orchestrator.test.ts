@@ -26,7 +26,11 @@ import {
   resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../session-delivery-registry.js'
-import { RevokeOrchestrator } from '../revoke-orchestrator.js'
+import {
+  RevokeOrchestrator,
+  resetRevocationSignalNotifierForTest,
+  setActiveRevocationSignalNotifier,
+} from '../revoke-orchestrator.js'
 import { MessageDispatcher } from '../message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
 import type { IPiEngine } from '../../ports/pi-engine.js'
@@ -101,6 +105,9 @@ function makeHarness(opts: HarnessOptions = {}) {
   let releaseGate: (() => void) | null = null
   const evictSpy = vi.fn()
   const invalidateSpy = vi.fn()
+  // 撤回信号广播腿经进程内活动槽注入（生产 = 组合根注册 pluginService.notifyEntryInvalidation）
+  const signalSpy = vi.fn()
+  setActiveRevocationSignalNotifier(signalSpy)
 
   const client = {
     prompt: vi.fn(async (text: string) => {
@@ -162,7 +169,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     for (let i = 0; i < 30; i += 1) await Promise.resolve()
   }
   return {
-    view, tree, registry, client, promptCalls, evictSpy, invalidateSpy, revoke, flush,
+    view, tree, registry, client, promptCalls, evictSpy, invalidateSpy, signalSpy, revoke, flush,
     setTree: (entries: unknown[], leafId: string | null) => {
       tree.entries = entries
       tree.leafId = leafId
@@ -189,6 +196,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   resetActiveDeliveryRegistryForTest()
+  resetRevocationSignalNotifierForTest()
 })
 
 /** 标准树：e1(首条 user) → e2(user M，撤回目标) → e3(assistant)，leaf=e3。 */
@@ -612,6 +620,63 @@ describe('派生态失效时序（⑥ 树回退校验通过后触发——信令
     // 失效触发的重算消费撤回后树：调用时点 label 锚已挂、叶子已切（若失效先行触发，
     // 此处消费的是撤回前树 → 全量重建被撤残影）
     expect(consumedTrees).toEqual([{ leafId: 'L-e2', hasLabel: true }])
+  })
+})
+
+describe('撤回信号广播（插件镜像重建腿：与派生态失效恒配对，U7）', () => {
+  it('⑥′ 时点：撤回信号广播晚于信令 prompt 与 ⑥ 校验读，且与 invalidateDerivedState 成对触发', async () => {
+    const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+
+    const reply = await h.revoke('e2')
+    expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
+
+    // 时序（vi 全局单调调用序）：信号晚于信令 prompt 与 ⑥ 校验读（树回退确认后——
+    // 信令前广播 = 插件重拉仍读撤回前数据，无效重建）
+    expect(h.signalSpy).toHaveBeenCalledTimes(1)
+    expect(h.signalSpy).toHaveBeenCalledWith(SID)
+    const signalOrder = h.signalSpy.mock.invocationCallOrder[0]!
+    expect(signalOrder).toBeGreaterThan(h.client.prompt.mock.invocationCallOrder[0]!)
+    expect(signalOrder).toBeGreaterThan(h.client.getEntries.mock.invocationCallOrder[1]!)
+    // 恒配对：records 失效腿先行同批触发（同处 invalidateDerived 私有入口）
+    expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(h.invalidateSpy.mock.invocationCallOrder[0]).toBeLessThan(signalOrder)
+  })
+
+  it('树未回退（「目标仍在活跃链」nav-failed 分支）→ 无信号无失效', async () => {
+    const h = makeHarness() // 无 rewind = 树不变
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+
+    const reply = await h.revoke('e2')
+    expect(reply).toEqual({ sessionId: SID, revoked: false, error: 'nav-failed' })
+    expect(h.signalSpy).not.toHaveBeenCalled()
+    expect(h.invalidateSpy).not.toHaveBeenCalled()
+  })
+
+  it('定位失败提前 return（no-mapping）→ 无信号', async () => {
+    const h = makeHarness()
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+
+    const reply = await h.revoke('e999')
+    expect(reply).toEqual({ sessionId: SID, revoked: false, error: 'no-mapping' })
+    expect(h.signalSpy).not.toHaveBeenCalled()
+  })
+
+  it('⑤ 幂等分支（目标已被前序撤回带走）→ 信号与失效同步各一次', async () => {
+    const h = makeHarness()
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+    // 前次撤回真实生效但 reply 丢失的形态：label 挂 e1、leaf 切走
+    applyRewind(h.tree, 'e2', 'e1')
+
+    const reply = await h.revoke('e2')
+    expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
+    expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(h.signalSpy).toHaveBeenCalledTimes(1)
+    expect(h.signalSpy).toHaveBeenCalledWith(SID)
   })
 })
 

@@ -36,6 +36,33 @@ import type { SystemCommandOutcome } from './message-dispatcher.js'
 const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 
 /**
+ * 撤回失效信号的 customType（双侧同构字面量，域字符串自由域、零 RPC 契约变更）：
+ * 与 agent-ext navigateTree 的 LabelEntry label 'taiji:revoked'、scheduler-manager 插件
+ * 订阅串三侧同串。组合根经 SessionService 的撤回信号回调把它转
+ * pluginService.notifyEntryInvalidation(sessionId, 本串) 广播给插件 Worker。
+ */
+export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
+
+// ── 撤回信号广播活动槽（组合根动态注册）─────────────────────────────────────────
+// 进程内活动槽动态读取——getActiveDeliveryRegistry() 同款先例（组合根创建后可读，
+// 避免为编排新增 session-service → plugin-service 接线）。未注册（存量测试构造 /
+// 无插件子系统的装配）时取值 null，invalidateDerived 侧 no-op；进程单例注册一次，
+// 测试经 resetRevocationSignalNotifierForTest 复位（resetActiveDeliveryRegistryForTest
+// 同款纪律）。
+
+let activeRevocationSignalNotifier: ((sessionId: string) => void) | null = null
+
+/** 组合根注册撤回信号广播腿：转 pluginService.notifyEntryInvalidation(sid, REVOKED_SIGNAL_CUSTOM_TYPE)。 */
+export function setActiveRevocationSignalNotifier(notifier: (sessionId: string) => void): void {
+  activeRevocationSignalNotifier = notifier
+}
+
+/** 测试复位（与 resetActiveDeliveryRegistryForTest 同款纪律，afterEach 调用防跨用例泄漏）。 */
+export function resetRevocationSignalNotifierForTest(): void {
+  activeRevocationSignalNotifier = null
+}
+
+/**
  * 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）：结构同 MSG_ID_TAG_RE 捕获组 2 的
  * 裸 uuid 段（8-4-4-4-12 hex）全串锚定——与 pi entryId 的 8 位 hex 形态构造性区分（无连字符
  * 不匹配）。[双侧同构字面量] uuid 结构须与 shared message.ts MSG_ID_TAG_RE 的 uuid 段同步，
@@ -283,7 +310,7 @@ export class RevokeOrchestrator {
           // 幂等分支同样触发派生态失效：首次尝试可能已「信令送达 + 树回退、但⑥校验读失败
           // 归 nav-failed」（失效未触发，残影仍在）；重试此刻触发的全量重算消费的已是撤回
           // 后树（时序合法——与⑥′同款后置契约）。
-          this.deps.invalidateDerivedState(sessionId)
+          this.invalidateDerived(sessionId)
           return { sessionId, revoked: true, content: located.content }
         }
         return { sessionId, revoked: false, error: 'no-mapping' }
@@ -314,13 +341,13 @@ export class RevokeOrchestrator {
       const after = await readTreeSnapshot(client)
       if (!after) {
         warn(`nav-failed: post-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
-        this.deps.invalidateDerivedState(sessionId)
+        this.invalidateDerived(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
       const post = walkActiveChain(after)
       if (!post.complete) {
         warn(`nav-failed: active chain broken/cyclic after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
-        this.deps.invalidateDerivedState(sessionId)
+        this.invalidateDerived(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
       // 谓词（注释锚③）：按回溯链 entry.id 集合判定，禁序列化字符串包含判法——
@@ -336,13 +363,13 @@ export class RevokeOrchestrator {
         expectedParentId === null ? post.terminalParentId === null : post.ids.has(expectedParentId)
       if (!parentReached) {
         warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}, terminalParentId=${post.terminalParentId}`)
-        this.deps.invalidateDerivedState(sessionId)
+        this.invalidateDerived(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
 
       // ── ⑥′ 派生态失效（树回退确认后——时序契约见④段注释）：此刻触发的全量重算
       // 消费撤回后树，被撤派生（plan 残影等）随活跃路径裁剪收敛清除。
-      this.deps.invalidateDerivedState(sessionId)
+      this.invalidateDerived(sessionId)
 
       // ── ⑦ reply：revoked:true + transcript 原文（含投递裸标记，raw 不剥）──────────
       return { sessionId, revoked: true, content: located.content }
@@ -353,6 +380,20 @@ export class RevokeOrchestrator {
       // queued 死轮询（恢复通道仅重启 app）。幂等（dispose 已清场时 no-op）。
       registry.endRevokeHold(sessionId)
     }
+  }
+
+  /**
+   * 派生态失效 + 撤回信号广播（恒配对入口——全部失效点唯一走此处，结构性杜绝单腿）：
+   * SessionRecords 全量重算腿（invalidateDerivedState）与插件镜像重建腿（活动槽广播
+   * REVOKED_SIGNAL_CUSTOM_TYPE）消费同一「活跃路径已变更」事实，只失效 records 腿会
+   * 复现 scheduler-manager 面板残留缺陷（插件镜像折叠输入含被撤子树 op）。调用点 =
+   * ⑤ 幂等分支 + ⑥ post-signal 三防御分支 + ⑥′ 确认点——均为树回退已确认或防御性
+   * 不确定态，广播的镜像重建幂等（重拉经 readEntries 活跃路径过滤，树未回退时收敛到
+   * 同态）。「目标仍在活跃链」分支刻意双双不调用（树确证未回退，无残影产生）。
+   */
+  private invalidateDerived(sessionId: string): void {
+    this.deps.invalidateDerivedState(sessionId)
+    activeRevocationSignalNotifier?.(sessionId)
   }
 
   /**

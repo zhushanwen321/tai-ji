@@ -16,6 +16,8 @@
  *    ensureMirror 为新 sid 补挂）
  * ⑧ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
  *    成功标记且无原因行——经 handleOpen 推树断言）
+ * ⑨ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
+ *    任务域订阅仍走增量不误重建）
  *
  * 隔离：被测模块持有模块级状态（mirrors Map / focusSessionId），每条用例
  * vi.resetModules() 后动态 import 取 fresh 模块。timer 面（防抖 200ms / 重试 2s）
@@ -108,8 +110,8 @@ interface Harness {
   api: ReturnType<typeof createMockAgentAPI>
   /** activate() 注册的 command handlers（id → handler） */
   handlers: Map<string, (args?: unknown) => unknown>
-  /** onEntriesInvalidated 捕获的失效回调（外部信号注入口） */
-  invalidate: (sessionId: string) => void
+  /** onEntriesInvalidated 捕获的失效回调（外部信号注入口；customType 缺省 = 任务域） */
+  invalidate: (sessionId: string, customType?: string) => void
   /** readEntries 调用记录 */
   readCalls: Array<{ sessionId: string; opts: { customType: string; sinceEntryId?: string } }>
   /** sendMessage 调用记录 */
@@ -205,14 +207,16 @@ async function setup(opts: {
   )
   api.ui.updateHeaderAction = vi.fn(async () => ({ updated: true }))
 
-  let invalidateHandler: ((sessionId: string, customType: string) => void) | null = null
+  let invalidateHandlers = new Map<string, (sessionId: string, customType: string) => void>()
   api.sessions.onEntriesInvalidated = vi.fn(
     (
       _sessionId: string,
-      _customType: string,
+      customType: string,
       handler: (sessionId: string, customType: string) => void,
     ): { dispose: () => void } => {
-      invalidateHandler = handler
+      // 按 customType 分键捕获（插件对 TASK_ENTRY_TYPE 与 'taiji:revoked' 各订一条，
+      // 同一 mock 承载双订阅；dispose 注入错误对两条订阅同样生效）
+      invalidateHandlers.set(customType, handler)
       return {
         dispose: () => {
           if (opts.invalidateDisposeError) throw opts.invalidateDisposeError
@@ -273,7 +277,8 @@ async function setup(opts: {
     mod,
     api,
     handlers,
-    invalidate: (sessionId: string) => invalidateHandler?.(sessionId, TASK_ENTRY_TYPE),
+    invalidate: (sessionId: string, customType: string = TASK_ENTRY_TYPE) =>
+      invalidateHandlers.get(customType)?.(sessionId, customType),
     readCalls,
     sendCalls,
     showModalCalls,
@@ -814,6 +819,57 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     const lastCall = vi.mocked(h.api.views.update).mock.calls.at(-1)
     expect(lastCall?.[0]).toBe('modal-scheduler-manager-scheduler-manager.panel')
     expect(lastCall?.[2]).toEqual({ sessionId: 's-2' })
+  })
+})
+
+// ── ⑨ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重拉）────────────
+
+describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
+  const REVOKED = 'taiji:revoked'
+
+  it('创建任务 op 累计后撤回信号到达 → 丢弃累计 + 无游标全量重拉 → 折叠不含被撤任务', async () => {
+    const h = await setup({
+      readScript: [
+        // 首拉全量：任务 op 在累计镜像内（缺陷形态：被撤任务残留启用态徽标 1）
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+        // 撤回后全量重拉：runtime 活跃路径过滤使被撤 op 不在回包（空集 + 新游标）
+        { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'L-e2' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(h.readCalls).toHaveLength(1)
+    expect(lastHeaderAction(h.api).badge).toBe('1')
+
+    // 撤回信号（runtime 树回退确认后广播）→ 镜像重建路径
+    h.invalidate('s-1', REVOKED)
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    // 全量重拉（无 sinceEntryId——累计与游标均已丢弃，不带走被撤 op 的增量基线）
+    expect(h.readCalls).toHaveLength(2)
+    expect(h.readCalls[1]?.opts).toEqual({ customType: TASK_ENTRY_TYPE })
+    // 折叠结果 = 干净集合：徽标清空、面板回空态提示、零任务操作条
+    expect(lastHeaderAction(h.api).badge).toBeUndefined()
+    expect(h.lastTree().filter((n) => n.type === 'action-bar')).toHaveLength(0)
+    expect(ansiLines(h.lastTree())).toContain(
+      '本会话还没有定时任务 —— 在对话里说，或手敲 /schedule <排期> <内容> 创建。',
+    )
+  })
+
+  it('任务域订阅与撤回域订阅并存：TASK_ENTRY_TYPE 信号仍走增量（不误重建）', async () => {
+    const h = await setup({
+      readScript: [
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+        // 任务域失效 → 增量 append（游标仍在，不全量）
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('ccccdddd', false, 'e2')], leafEntryId: 'e2' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    h.invalidate('s-1') // TASK_ENTRY_TYPE（缺省）
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    expect(h.readCalls[1]?.opts.sinceEntryId).toBe('e1')
+    expect(lastHeaderAction(h.api).badge).toBe('1')
   })
 })
 
