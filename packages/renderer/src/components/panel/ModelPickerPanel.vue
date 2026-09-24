@@ -42,15 +42,23 @@ const props = withDefaults(defineProps<{
   hasCandidates?: boolean
   /** 列表项 data-testid 前缀（消费方自定义，便于各自回归断言） */
   itemTestIdPrefix?: string
+  /**
+   * hover 选择（W3a，D2 模型聚合的 hover 切换）：开启时行 pointerenter 即上抛 hoverSelect；
+   * 默认关闭——不传时行为与改动前逐字节一致（其他三个模型选择面不受影响）。
+   */
+  hoverSelect?: boolean
 }>(), {
   modelValue: '',
   hasCandidates: undefined,
   itemTestIdPrefix: 'model-picker-item',
+  hoverSelect: false,
 })
 
 const emit = defineEmits<{
   /** 选中项 id（消费方据此映射 provider / 回写状态） */
   'update:modelValue': [id: string]
+  /** hover 过某行（仅 hoverSelect 开启时上抛；值未变的去重在消费方） */
+  hoverSelect: [id: string]
 }>()
 
 const { t } = useI18n()
@@ -75,6 +83,11 @@ const filteredGroups = computed<ModelPickerGroup[]>(() => {
 
 function onPick(id: string): void {
   emit('update:modelValue', id)
+}
+
+/** 行 hover：仅 hoverSelect 开启时上抛（关闭时是空操作，DOM 形态不受影响） */
+function onRowEnter(id: string): void {
+  if (props.hoverSelect) emit('hoverSelect', id)
 }
 </script>
 
@@ -111,6 +124,7 @@ function onPick(id: string): void {
           class="flex w-full items-center gap-2 rounded-none px-2.5 py-[7px] text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
           :class="model.id === modelValue && SELECTED_ITEM_CLASS"
           @click="onPick(model.id)"
+          @pointerenter="onRowEnter(model.id)"
         >
           <span class="flex-1 text-left">{{ model.name ?? model.id }}</span>
           <Check

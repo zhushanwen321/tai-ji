@@ -75,10 +75,9 @@ export default {
     corruptBanner: 'Task data corrupted; ignored (.corrupt snapshot kept)',
     disconnectBanner: 'Disconnected; refreshes automatically after reconnect',
     /** Order-3 overflow entry (`»` ellipsis; a different semantic from the aggregate entry's stacked icons) */
-    more: 'More tools',
-    /** Order-4 aggregate entry (stacked icons + running count): title / aria-label interpolates the count */
+    /** Order-4 aggregate entry (single layers icon + running-count badge, W3a): title / aria-label is always "All tools" (count lives in the badge, not the title) */
     aggregate: {
-      title: 'Task tray · {running} running',
+      allTools: 'All tools',
     },
     /**
      * Fourth entry "child sessions" (u7, design mode-system-composer-density §6.7 D7).

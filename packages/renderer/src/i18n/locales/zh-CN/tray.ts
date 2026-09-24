@@ -76,10 +76,9 @@ export default {
     corruptBanner: '任务数据损坏，已忽略（.corrupt 保留现场）',
     disconnectBanner: '连接断开，重连后自动刷新',
     /** 序 3 溢出入口（`»` 省略号；与聚合入口的层叠图标是两个语义，见 Composer.vue 底栏注释） */
-    more: '更多工具',
-    /** 序 4 聚合入口（层叠图标 + 运行数）：title / aria-label 带运行数插值 */
+    /** 序 4 聚合入口（单图标 layers + 运行数数字角标，W3a）：title / aria-label 恒为「全部工具」（运行数走角标不进 title） */
     aggregate: {
-      title: '任务托盘 · {running} 项进行中',
+      allTools: '全部工具',
     },
     /**
      * 第 4 件「子会话」（u7，设计 mode-system-composer-density §6.7 D7）。

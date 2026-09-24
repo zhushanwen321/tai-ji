@@ -187,6 +187,8 @@ export default {
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
+    // Metrics aggregate entry (W3a single-icon button; hover opens the capacity/speed/cache aggregate page) title
+    metricsAggregateTitle: 'Metrics',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
@@ -369,6 +371,8 @@ export default {
     searchPlaceholder: 'Search models…',
     noMatch: 'No matching models',
     placeholder: '\u2026',
+    // Model + thinking aggregate entry (W3a single-icon button; click opens model list + thinking levels) title
+    modelThinkingAggregateTitle: 'Model · Thinking',
   },
   thinkingLevel: {
     title: 'Thinking level',

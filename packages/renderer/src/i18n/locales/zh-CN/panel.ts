@@ -185,6 +185,8 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
+    // 指标聚合入口（W3a 单图标聚合按钮，hover 出容量+速度+缓存聚合页）title
+    metricsAggregateTitle: '指标',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',
@@ -364,6 +366,8 @@ export default {
     searchPlaceholder: '搜索模型…',
     noMatch: '无匹配模型',
     placeholder: '\u2026',
+    // 模型聚合入口（W3a 单图标聚合按钮，click 出模型列表+思考档位）title
+    modelThinkingAggregateTitle: '模型 · 思考等级',
   },
   thinkingLevel: {
     title: '思考级别',
