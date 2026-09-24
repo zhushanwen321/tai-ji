@@ -67,13 +67,9 @@ export default [
       // （设计 D1），src=dist 同字节直发不做 TS 化——同 extensions/**/workflows 先例豁免。
       'packages/subagent-core/workflows/**',
       'extensions/**/examples/**',
-      // zsub/zflow workflow 脚本（.agents/workflows/*.js）：CJS 是 zflow 加载器契约
-      // （module.exports + require，.cjs 后缀不被其发现层扫描），与根 package.json
-      // type:module 的冲突由同目录 package.json {"type":"commonjs"} 解决；
-      // no-require-imports 对其是误报（同 extensions/**/workflows/** 先例）
-      '.agents/workflows/**',
-      // skill 内置 workflow 脚本（pr-lifecycle 入口 + lib.cjs + node 直测 run-tests.js）：
-      // CJS 是 workflow 加载器契约（同上），no-require-imports 对其是误报
+      // skill 内置 workflow 脚本（pr-cr-fix workflows/pr-lifecycle.dwf.ts）：
+      // zcode-workflow facade（declare agent/world 等）只在引擎编译器内成立，
+      // 仓库 eslint 环境下是未定义符号，故豁免
       '.agents/skills/**/workflows/**',
     ],
   },
