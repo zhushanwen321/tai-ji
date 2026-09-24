@@ -817,7 +817,7 @@ export class SkillRegistry {
     const dir = key === GLOBAL_KEY ? 'global' : `project:${key}`
     const affected = this.getAffectedSessionIds(key === GLOBAL_KEY ? undefined : key)
     console.log(
-      `[skill-reload] dir=${dir} event=${[...events].join(',')} affectedSessions=[${affected.join(',')}]`,
+      `[skill-rescan] dir=${dir} event=${[...events].join(',')} affectedSessions=[${affected.join(',')}]`,
     )
   }
 }

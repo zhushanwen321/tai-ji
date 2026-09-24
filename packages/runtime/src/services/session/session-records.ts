@@ -826,7 +826,7 @@ export class SessionRecords {
    * 注释），失效标记透传 + skillNotice 提示（与主链同款，不再静默）。
    *
    * 刻意直接 client.prompt 绕过 dispatcher busy 预检 / BeforeSend hook（对称
-   * promptReload 的绕过模式）：定向消息必须「主 agent 生成中也能发」（设计 §3.3.4
+   * 维护命令直达的绕过模式）：定向消息必须「主 agent 生成中也能发」（设计 §3.3.4
    * 直达目标），且 hook 审核的是主 agent prompt，不适用于 subagent 定向文本。
    */
   async subagentAction(

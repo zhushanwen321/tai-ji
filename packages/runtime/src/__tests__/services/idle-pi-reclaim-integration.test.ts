@@ -240,7 +240,6 @@ describe.skipIf(!FAUX_PI_READY)(
         },
         getMessageBus: () => bus,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       }
       const pm = new ProcessManager(tmpdir())
       lifecycle = new SessionLifecycle(
@@ -302,7 +301,6 @@ describe.skipIf(!FAUX_PI_READY)(
           seat,
           listRelayChildrenByMainSession: () => [],
           reapBackgroundTasks: async () => {},
-          clearPendingReload: () => {},
         }
         const broadcastSpy = vi.fn()
         reaper = startIdlePiReaper({

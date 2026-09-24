@@ -136,7 +136,6 @@ function makeMocks(opts: {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspace, registerDeps)
@@ -301,7 +300,6 @@ describe('session-lifecycle preset integration', () => {
         adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
         getMessageBus: () => null,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       },
     )
     await lifecycle2.registerSession('s1', {} as unknown as IPiEngine, '/repo', 's1', '/tmp/s1.jsonl')

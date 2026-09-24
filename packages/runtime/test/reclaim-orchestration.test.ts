@@ -133,7 +133,6 @@ function makeLifecycleDeps() {
     }) as unknown as IEventAdapter),
     getMessageBus: () => null,
     broadcastGlobal: vi.fn(),
-    notifyMessageComplete: vi.fn(),
   }
   return {
     svc,
@@ -188,7 +187,6 @@ function makeReclaimDeps(seat: ReclaimSeat, relay: ReturnType<typeof makeRelayFa
     seat,
     listRelayChildrenByMainSession: vi.fn((sid: string) => relay.list(sid)),
     reapBackgroundTasks: vi.fn(async () => {}),
-    clearPendingReload: vi.fn(),
   } satisfies ReclaimSessionDeps
 }
 
@@ -243,7 +241,7 @@ describe('reclaimManagedSession 七步编排（D3）', () => {
     vi.restoreAllMocks()
   })
 
-  it('主路径：detach → destroy → 摘除 → pendingReload 定向清 → 尾扫快照 kill → finally 释放占座', async () => {
+  it('主路径：detach → destroy → 摘除 → 尾扫快照 kill → finally 释放占座', async () => {
     const { lifecycle, deps } = makeLifecycle()
     const pm = deps.pm
     await attachSession(lifecycle, pm, 's-1')
@@ -262,8 +260,6 @@ describe('reclaimManagedSession 七步编排（D3）', () => {
     // ④ 进程销毁
     expect(pm.destroySession).toHaveBeenCalledWith('s-1')
     expect(pm.clientsById.has('s-1')).toBe(false)
-    // ⑥b pendingReload 定向清
-    expect(reclaimDeps.clearPendingReload).toHaveBeenCalledWith('s-1')
     // ⑤① relay 尾扫：setImmediate 后 kill 执行（fire-and-forget 不占座）
     await flushSetImmediate()
     expect(relay.killSpies[0]).toHaveBeenCalledTimes(1)
@@ -378,8 +374,6 @@ describe('reclaimManagedSession 七步编排（D3）', () => {
     expect(reborn).not.toBe(original as unknown)
     // 新进程保留
     expect(pm.clientsById.has('s-1')).toBe(true)
-    // pendingReload 定向清也不执行（整段摘除取消）
-    expect(reclaimDeps.clearPendingReload).not.toHaveBeenCalled()
     // 占座释放（finally 兜底）
     expect(seat.isHeld('s-1')).toBe(false)
     // 尾扫不执行：代际取消路径未采集快照，relay 孤儿留给下一拍判定
