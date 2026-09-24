@@ -386,12 +386,23 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     // per-session sid：显式传 newSid，不依赖全局 activeId（双 panel 隔离）
     // tmpdir 迁移已在上方分支完成（create 分支=createSessionFlow.migratedSegments，
     // retry 分支=migrateRetryImages），finalSegments 即迁移后的段。bashCommand 无图片段，无副作用。
-    // 发送阶段：bash 首发（landing 态 !/!! 前缀）走 sendBash，否则普通 send
-    // bash 不经 segments（原始 shell 文本透传 pi bash RPC），finalSegments 仅用于 tmpdir 迁移流程（bash 无图片段，无副作用）
+    await deliver(newSid, finalSegments, bashCommand)
+  }
+
+  /**
+   * 发送投递单源（设计审查 F13）：bash 首发（landing 态 !/!! 前缀）走 sendBash（不经 segments，
+   * 原始 shell 文本透传 pi bash RPC，finalSegments 仅用于 tmpdir 迁移流程），否则普通 send。
+   * handoverAndSend 与「post-create 状态复核」的后台投递分支共用，避免双实现参数漂移。
+   */
+  async function deliver(
+    sid: string,
+    finalSegments: Segment[],
+    bashCommand?: { command: string; excludeFromContext: boolean },
+  ): Promise<void> {
     if (bashCommand) {
-      await ports.chat.sendBash(newSid, bashCommand.command, bashCommand.excludeFromContext)
+      await ports.chat.sendBash(sid, bashCommand.command, bashCommand.excludeFromContext)
     } else {
-      await ports.chat.send(newSid, finalSegments)
+      await ports.chat.send(sid, finalSegments)
     }
   }
 
@@ -423,8 +434,23 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       } else {
         finalSegments = await migrateRetryImages(segments)
       }
+      // [robustness P0] post-create 状态复核：create 飞行期 flow 可能已被外部取消（侧栏切
+      // session → cancelActiveFlow 置 cancelled / Landing 卸载 D4 守卫）。此时 handover 三步会
+      // ①setActiveSession 强切用户视图 ②transition('completed') 撞 cancelled→completed 非法
+      // 转换抛错 ③外层 catch 误报「任务创建失败」（实际已创建成功）。语义 = 后台完成投递：
+      // 消息照发进新建 session（不丢用户输入），但不碰视图、不碰状态机、不报错（设计 D1）；
+      // 并清 create 期绑定，防止后续 landing 提交误走 retry 分支把新消息发进旧 session（D6）。
+      const sid = currentSession.value?.id
+      if (!sid) return // 防御：create/retry 两分支收敛后绑定必在（理论不可达）
+      if (state.value !== 'landing') {
+        // 与 handover 同款文件树预取（只暖缓存不碰视图）：用户点开新 session 即见首问 + 回复
+        void ports.fileTree.loadTree(sid)
+        controller.bindCurrentSession(null)
+        await deliver(sid, finalSegments, bashCommand)
+        return
+      }
       // 载入 panel + 设 activeId（预建或刚建统一处理）
-      await handoverAndSend(currentSession.value!.id, finalSegments, bashCommand, perfT0)
+      await handoverAndSend(sid, finalSegments, bashCommand, perfT0)
     } finally {
       controller.setCreateInFlight(false)
     }

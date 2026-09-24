@@ -32,6 +32,8 @@ import type { Segment } from '@taiji/shared'
 import type { BashCommandExtract, StagingAction } from '../types'
 import { segmentsToPrompt } from '@taiji/shared'
 import { toErrorMessage } from '../../../utils/error-message'
+import { stashOrphanedDraft } from '../orphan-draft'
+import { nextTick } from 'vue'
 
 /**
  * 本模块视角的最小契约：发送前快照只需 getSegments。
@@ -41,6 +43,11 @@ import { toErrorMessage } from '../../../utils/error-message'
  */
 interface ComposerInputInstance {
   getSegments: () => Segment[]
+  /**
+   * 失败恢复后焦点拉回（robustness P1：创建中过渡视图 display:none 丢焦修复）。可选——
+   * 低配壳缺省时静默跳过（同 insertSkillChip?.() 可选降级范式）。
+   */
+  focus?: () => void
 }
 
 /**
@@ -183,7 +190,18 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
     const bashCommand = bashExtract.type === 'command' ? bashExtract : undefined
     await deps.flow.submitFirstMessage(segments, deps.localThinkingLevel.value, bashCommand)
   } catch (e) {
-    deps.restoreSegments(segments)
+    if (deps.inputRef.value) {
+      deps.restoreSegments(segments)
+      // [robustness P1] 创建中过渡视图（display:none）丢焦 → 焦点拉回。必须延到 nextTick：
+      // createInFlight 复位虽在本 catch 前（finally），但 v-show 翻回可见是异步渲染 flush，
+      // 对 display:none 内元素调 focus() 会静默失败（真机实测 activeElement 停在 BODY）
+      void nextTick(() => deps.inputRef.value?.focus?.())
+    } else {
+      // [robustness P2/③b] 目标实例已随 Landing 卸载（create 飞行中切 session 等），restore
+      // 写不进任何活实例（?. 静默 no-op）= 输入丢失 → 暂存 orphan 槽，下次 landing composer
+      // 挂载时取回恢复（composer-shell onMounted takeOrphanedDraft 接线）
+      stashOrphanedDraft(segments)
+    }
     deps.toastError(deps.t('panel.panel.taskFailed', { error: toErrorMessage(e) }))
   } finally {
     deps.isSending.value = false

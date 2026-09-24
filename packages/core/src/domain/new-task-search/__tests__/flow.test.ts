@@ -370,6 +370,121 @@ describe('useNewTaskFlow', () => {
     expect(flow.isInflight.value).toBe(false)
   })
 
+  it('TC-6f [robustness P0/③a] create 飞行中被取消（侧栏切走）→ 后台投递：消息照发、不碰视图、不碰状态机', async () => {
+    const deps = makeDeps()
+    const flow = useNewTaskFlow(deps)
+    await enterLanding(flow)
+    // 门闩：让 create 在途可控（模拟 warm 1.6s / cold 4.4s 飞行窗口）
+    let openCreate!: () => void
+    const createGate = new Promise<void>((resolve) => {
+      openCreate = resolve
+    })
+    ;(deps.ports.createSessionFlow.createSession as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await createGate
+      return { session: mockSession, migratedSegments: [textSeg('hello')] }
+    })
+
+    const pending = flow.submitFirstMessage([textSeg('hello')])
+    await flushMicrotasks()
+    // 竞态步：create 飞行中用户点侧栏切 session（selectSession → cancelActiveFlow →
+    // transition('cancelled')，landing→cancelled 合法；随后 Landing 卸载，D4 守卫查 isActive 为 noop）
+    flow.cancelFlow()
+    expect(useNewTaskFlowState().state.value).toBe('cancelled')
+    openCreate()
+    // 原缺陷：此处 throw「非法状态转换: cancelled → completed」（cancelled→completed 不在 ALLOWED）
+    // → 外层 catch 误报「任务创建失败」+ restore 写死实例丢输入 + 视图已被 setActiveSession 强切
+    await expect(pending).resolves.toBeUndefined()
+
+    // 消息照发进新建 session（不丢用户输入）
+    expect(deps.ports.chat.send).toHaveBeenCalledWith('s1', [textSeg('hello')])
+    // 不碰视图：setActiveSession/pushChat 零调用；loadPanel 仅剩 startFlow 进 landing 时的
+    // 解绑调用（('p1', null)），不得出现 handover 的 ('p1', 's1')（不强切用户正在看的 session）
+    expect(deps.ports.navigation.setActiveSession).not.toHaveBeenCalled()
+    expect(deps.ports.navigation.loadPanel).not.toHaveBeenCalledWith('p1', 's1')
+    expect(deps.ports.navigation.pushChat).not.toHaveBeenCalled()
+    // 文件树预取照常（只暖缓存，用户点开新 session 即见首问 + 回复）
+    expect(deps.ports.fileTree.loadTree).toHaveBeenCalledWith('s1')
+    // 状态机零非法转换：state 保持 cancelled（未 completed、未被非法转换重置 idle）
+    expect(useNewTaskFlowState().state.value).toBe('cancelled')
+    // D6：create 期绑定被清（防后续 landing 提交误走 retry 分支把新消息发进旧 session）
+    expect(flow.currentSessionId.value).toBeNull()
+    // finally：createInFlight 清理（过渡视图消失）
+    expect(flow.isInflight.value).toBe(false)
+  })
+
+  it('TC-6g [robustness P0/③a] bash 首发竞态 → 后台 sendBash（参数逐位一致），send 不调', async () => {
+    const deps = makeDeps()
+    const flow = useNewTaskFlow(deps)
+    await enterLanding(flow)
+    let openCreate!: () => void
+    const createGate = new Promise<void>((resolve) => {
+      openCreate = resolve
+    })
+    ;(deps.ports.createSessionFlow.createSession as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await createGate
+      return { session: mockSession, migratedSegments: [] }
+    })
+
+    const pending = flow.submitFirstMessage([textSeg('!ls -la')], undefined, {
+      command: 'ls -la',
+      excludeFromContext: true,
+    })
+    await flushMicrotasks()
+    flow.cancelFlow()
+    openCreate()
+    await expect(pending).resolves.toBeUndefined()
+
+    // bash 后台投递参数与 handoverAndSend 完全一致（deliver 单源，无双实现漂移）
+    expect(deps.ports.chat.sendBash).toHaveBeenCalledWith('s1', 'ls -la', true)
+    expect(deps.ports.chat.send).not.toHaveBeenCalled()
+    expect(deps.ports.navigation.setActiveSession).not.toHaveBeenCalled()
+  })
+
+  it('TC-6h [robustness P0/③a] retry 分支同竞态（迁移 await 中被取消）→ 后台投递，不重复 create', async () => {
+    const deps = makeDeps()
+    const flow = useNewTaskFlow(deps)
+    await enterLanding(flow)
+    // 绑定已有 session（重试/预建场景）
+    bindSession(mockSession)
+    let openMigrate!: () => void
+    const migrateGate = new Promise<void>((resolve) => {
+      openMigrate = resolve
+    })
+    ;(deps.ports.migrateImage.migrateImage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await migrateGate
+      return { path: '/attachments/s1/a.png' }
+    })
+
+    const pending = flow.submitFirstMessage([imageSeg('/tmp/a.png', true)])
+    await flushMicrotasks()
+    flow.cancelFlow()
+    openMigrate()
+    await expect(pending).resolves.toBeUndefined()
+
+    expect(deps.ports.createSessionFlow.createSession).not.toHaveBeenCalled()
+    // 后台投递用迁移后的段（与 handover 同源）
+    expect(deps.ports.chat.send).toHaveBeenCalledWith('s1', [
+      expect.objectContaining({ type: 'image', path: '/attachments/s1/a.png', needsMigrate: false }),
+    ])
+    expect(deps.ports.navigation.setActiveSession).not.toHaveBeenCalled()
+    expect(flow.currentSessionId.value).toBeNull()
+  })
+
+  it('TC-6i [robustness P0] create reject → 异常上抛 + createInFlight 复位 + state 停留 landing（可重试）', async () => {
+    const deps = makeDeps()
+    const flow = useNewTaskFlow(deps)
+    await enterLanding(flow)
+    ;(deps.ports.createSessionFlow.createSession as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('create failed'))
+
+    await expect(flow.submitFirstMessage([textSeg('hello')])).rejects.toThrow('create failed')
+
+    // 回滚清单断言：在途标志复位（过渡视图消失）、flow 停留 landing（可直接重试）、绑定未写入、视图零切换
+    expect(flow.isInflight.value).toBe(false)
+    expect(useNewTaskFlowState().state.value).toBe('landing')
+    expect(flow.currentSessionId.value).toBeNull()
+    expect(deps.ports.navigation.setActiveSession).not.toHaveBeenCalled()
+  })
+
   it('TC-7: retry 分支——session 已绑定走 migrateImage 迁移 + 部分失败 toast 不阻断', async () => {
     const deps = makeDeps()
     const flow = useNewTaskFlow(deps)

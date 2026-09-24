@@ -22,7 +22,7 @@
  * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
  * staging > bash > steerHint > inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
  */
-import { computed, reactive, type ComputedRef, type Ref } from 'vue'
+import { computed, onMounted, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitFork, Upload } from '@lucide/vue'
 import type { ProviderId, Segment } from '@taiji/shared'
@@ -37,6 +37,7 @@ import {
   useComposerBash,
   useComposerSubmit,
   useComposerSend,
+  takeOrphanedDraft,
   resolveSendRoute,
   IDLE_SESSION_PHASE,
   type SendRoute,
@@ -267,6 +268,17 @@ export function useComposerShell(params: ComposerShellParams) {
     inputRef,
     drafts,
     sessionId: sessionIdRef,
+  })
+
+  // [robustness P2/③b] orphan 草稿取回：上次 landing 首发失败且 Composer 已卸载（create 飞行
+  // 中切 session 等）时 sendLandingFirstMessage catch 只能把草稿暂存 orphan 槽；下次 landing
+  // composer 挂载时取回恢复（text + 全类 chip，image 段含 needsMigrate 标志）。仅 landing
+  // （sid null）消费——session composer 草稿走 drafts store（Composer.vue watch(sessionId)）。
+  // onMounted 时机 = 子组件 ComposerInput 已挂载、inputRef 就绪（chip 插入需要活实例）。
+  onMounted(() => {
+    if (sessionIdRef.value) return
+    const orphan = takeOrphanedDraft()
+    if (orphan && orphan.length > 0) restoreSegments(orphan)
   })
 
   // ── Fork 提问模式（core dispatch/fork-mode）──

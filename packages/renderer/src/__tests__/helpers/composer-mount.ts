@@ -285,7 +285,8 @@ export function makeTypeAndEnter(ComposerInputMock: Component) {
  * ComposerInput mock 工厂（density-wiring / smoke / bash-mode / compact-queue /
  * dispatch-route / btw-button 共用 expose 面）：input 事件捕获进 lastInputText 供
  * getSegments 读段；testid 锚点供冒烟断言。beforeEach 重置 lastInputText.value = ''
- * 即可复用于下一用例。extraEmits 供变体追加事件声明（makeFocusableComposerInputMock
+ * 即可复用于下一用例。lastSetText 记录 setText 收到的值（孤儿草稿恢复类用例的落值观察面）。
+ * extraEmits 供变体追加事件声明（makeFocusableComposerInputMock
  * 的 focus/blur 即经此注入）。expose 含 getText（Composer.vue 切 session 存草稿读它），
  * setup 返回 clear/setText 供 wrapper.vm 直取断言（bash/queue/dispatch 的 vm.clear 面）。
  */
@@ -294,19 +295,20 @@ function buildComposerInputMock(
   opts: { props?: Record<string, unknown>; extendExpose?: (lastInputText: Ref<string>) => Record<string, unknown> } = {},
 ) {
   const lastInputText = ref('')
+  const lastSetText = ref<string | null>(null)
   const ComposerInputMock = defineComponent({
     name: 'ComposerInput',
     props: opts.props,
     emits: { input: (val: string) => { lastInputText.value = val; return true }, keydown: null, 'slash-trigger': null, 'file-trigger': null, ...extraEmits },
     setup(_, { expose }) {
       const clear = vi.fn()
-      const setText = vi.fn()
+      const setText = vi.fn((text: string) => { lastSetText.value = text })
       expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value), getText: () => lastInputText.value, ...opts.extendExpose?.(lastInputText) })
       return { clear, setText }
     },
     template: '<div data-testid="composer-input" />',
   })
-  return { lastInputText, ComposerInputMock }
+  return { lastInputText, lastSetText, ComposerInputMock }
 }
 
 export function makeComposerInputMock() {

@@ -16,11 +16,12 @@
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useComposerSend, type ComposerSendDeps } from './send'
 import type { BashCommandExtract } from '../types'
 import type { StagingAction } from '../types'
 import type { Segment } from '@taiji/shared'
+import { takeOrphanedDraft, __resetOrphanedDraftForTesting } from '../orphan-draft'
 
 interface DepsControl {
   canSend: boolean
@@ -34,6 +35,8 @@ interface DepsControl {
   bashTryReturn: boolean
   bashExtract: BashCommandExtract
   localThinkingLevel: string | undefined
+  /** inputRef 实例存活（false = Composer 已卸载，③b orphan 槽分支用） */
+  inputAlive: boolean
 }
 
 // 各 spy = 真实签名（ComposerSendDeps 对应成员类型）& vi.fn 能力：
@@ -51,6 +54,7 @@ interface Spies {
   trySendBash: Spy<(rawText: string) => Promise<boolean>>
   extractBashCommand: Spy<(text: string) => BashCommandExtract>
   getSegments: Spy<() => Segment[]>
+  focus: Spy<() => void>
 }
 
 const SEGMENTS: Segment[] = [{ type: 'text', text: 'hello' }] as unknown as Segment[]
@@ -68,6 +72,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     bashTryReturn: false,
     bashExtract: { type: 'not-bash' },
     localThinkingLevel: undefined,
+    inputAlive: true,
     ...initial,
   }
   const spies: Spies = {
@@ -82,6 +87,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     trySendBash: vi.fn(async (_rawText: string) => ctrl.bashTryReturn),
     extractBashCommand: vi.fn((_text: string) => ctrl.bashExtract),
     getSegments: vi.fn((): Segment[] => SEGMENTS),
+    focus: vi.fn(() => {}),
   }
   const isSending = ref(false)
   const deps: ComposerSendDeps = {
@@ -97,7 +103,12 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     canSend: computed(() => ctrl.canSend),
     hasInput: computed(() => ctrl.hasInput),
     draft: computed(() => ctrl.draft),
-    inputRef: computed(() => ({ getSegments: spies.getSegments })) as unknown as ComposerSendDeps['inputRef'],
+    // 组件 ref 语义（非 computed 缓存）：每次读取求值——⑫b 中途卸载翻转 inputAlive 后立即生效
+    inputRef: {
+      get value() {
+        return ctrl.inputAlive ? { getSegments: spies.getSegments, focus: spies.focus } : null
+      },
+    } as unknown as ComposerSendDeps['inputRef'],
     sessionIdRef: computed(() => ctrl.sessionId),
     variantRef: computed(() => ctrl.variant),
     composerBash: {
@@ -371,11 +382,38 @@ describe('useComposerSend.onSend', () => {
     expect(spies.clearInput).not.toHaveBeenCalled()
   })
 
-  it('⑫ landing 首发失败 → restoreSegments + toastError', async () => {
+  it('⑫ landing 首发失败 → restoreSegments + toastError + 焦点拉回（robustness P1）', async () => {
     const { deps, spies } = setup({ variant: 'landing' })
     spies.submitFirstMessage.mockRejectedValueOnce(new Error('landing fail'))
     await useComposerSend(deps).onSend()
     expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
+    // [robustness P1] 焦点拉回延到 nextTick（v-show 翻回可见后的渲染 flush，display:none 内
+    // focus() 会静默失败）——待一拍后断言；调用序 restore → focus
+    await nextTick()
+    expect(spies.focus).toHaveBeenCalledTimes(1)
+    expect(spies.restoreSegments.mock.invocationCallOrder[0]).toBeLessThan(spies.focus.mock.invocationCallOrder[0])
+    expect(spies.toastError).toHaveBeenCalledWith('panel.panel.taskFailed')
+  })
+
+  it('⑫b [robustness P2/③b] create 飞行中 Composer 卸载后失败 → orphan 槽暂存（不向死实例 restore/focus）', async () => {
+    __resetOrphanedDraftForTesting()
+    const { deps, spies, ctrl } = setup({ variant: 'landing' })
+    // 真实时序（③b）：快照（getSegments）发生在发送时刻（实例活），失败回滚时实例已随
+    // Landing 卸载（create 飞行中切 session）——mock 实现内翻转 inputAlive 模拟中途卸载
+    spies.submitFirstMessage.mockImplementationOnce(async () => {
+      ctrl.inputAlive = false
+      throw new Error('landing fail')
+    })
+    await useComposerSend(deps).onSend()
+    // 防断言空转：发送流程确实推进到了 submitFirstMessage
+    expect(spies.submitFirstMessage).toHaveBeenCalledTimes(1)
+    // 目标实例消亡：不向死实例写入，草稿整段（含 chip）暂存 orphan 槽待下次 landing 挂载取回
+    expect(spies.restoreSegments).not.toHaveBeenCalled()
+    expect(spies.focus).not.toHaveBeenCalled()
+    expect(takeOrphanedDraft()).toEqual(SEGMENTS)
+    // 一次性语义：二次 take 为 null（防重复恢复双份草稿）
+    expect(takeOrphanedDraft()).toBeNull()
+    // 失败反馈不丢（用户可见形态）
     expect(spies.toastError).toHaveBeenCalledWith('panel.panel.taskFailed')
   })
 })

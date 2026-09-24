@@ -18,9 +18,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
+import { stashOrphanedDraft, __resetOrphanedDraftForTesting } from '@taiji/core/domain/composer'
 import Panel from '@/components/panel/Panel.vue'
 import { makeComposerInputMock } from '../helpers/composer-mount'
 
@@ -135,7 +135,7 @@ vi.mock('@/stores/session', () => ({
 }))
 
 // ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
-const { lastInputText, ComposerInputMock } = makeComposerInputMock()
+const { lastInputText, lastSetText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const stubs = {
@@ -165,6 +165,9 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
+  lastSetText.value = null
+  __resetOrphanedDraftForTesting()
+  uiMock.formReq.value = undefined
 })
 
 describe('首屏冒烟（TC19）', () => {
@@ -187,6 +190,38 @@ describe('首屏冒烟（TC19）', () => {
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // Landing 顶部元信息 chip（spec §3.1）
     expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+  })
+})
+
+describe('[robustness P2/③b] orphan 草稿挂载取回（composer-shell onMounted 接线）', () => {
+  it('Landing mount → 上次失败草稿恢复进输入区；一次性消费不重复恢复', () => {
+    // 前置：上次 landing 首发失败且 Composer 已卸载 → catch 暂存 orphan 槽（暂存侧由 send.test ⑫b 锁定）
+    stashOrphanedDraft([{ type: 'text', text: 'lost draft' }])
+
+    // 使用者/观察者形态：恢复文本经 setText 落进输入区（onMounted take → restoreSegments）
+    // ——若 composer-shell 接线丢失，本断言红（③b 恢复链消费端唯一出口）
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: null, sessionLabel: '', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBe('lost draft')
+
+    // 一次性消费：再挂载不重复恢复（防双份草稿）
+    lastSetText.value = null
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: null, sessionLabel: '', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBeNull()
+  })
+
+  it('session 态 mount 不消费 orphan 槽（仅 landing 接线，session 草稿走 drafts store）', () => {
+    stashOrphanedDraft([{ type: 'text', text: 'lost draft' }])
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: 'session-A', sessionLabel: 'session-A', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBeNull()
   })
 })
 
