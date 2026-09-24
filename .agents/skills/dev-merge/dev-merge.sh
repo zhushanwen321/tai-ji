@@ -11,7 +11,7 @@
 #   2  合并冲突（脚本已停在 merge 中间态，冲突清单见输出；解决后 git add + git commit 完成 merge，再跑 cleanup）
 #
 # 设计约束（SKILL.md 为编排权威，本脚本只做机械步骤）：
-# - 不自动提交未提交改动（提交是 AI 决策行为：message / 粒度 / 认知外改动检查）
+# - 不自动提交未提交改动（提交是 AI 决策行为：message / 粒度 / 非本次会话产生的改动检查）
 # - 不 push（push 必须用户明确授权）
 # - cleanup 拒绝删除未合并分支 / 脏 worktree（脏检查在删除前由脚本 status --short 预检，rm -rf 无内建拒删）
 # - 删除用显式两步 rm -rf + worktree prune（先删目录后清登记，顺序与 git worktree remove 内部相反，
@@ -60,7 +60,7 @@ fi
 check_clean() {
   local dir="$1" label="$2"
   git -C "$dir" diff --quiet && git -C "$dir" diff --cached --quiet \
-    || die "$label 有未提交改动（tracked）。先按提交策略处理（自己的改动 commit；认知外改动先询问用户），再重跑本脚本"
+    || die "$label 有未提交改动（tracked）。先按提交策略处理（自己的改动 commit；非本次会话产生的改动先询问用户），再重跑本脚本"
 }
 
 is_merged() { git -C "$DEV_DIR" merge-base --is-ancestor "$CUR_BRANCH" "$DEV_BRANCH"; }
@@ -103,7 +103,7 @@ case "$SUBCMD" in
       # 不自动 clean：删未提交/未跟踪文件是破坏性操作，须用户检视确认（脚本不内置强删，见 SKILL.md 安全语义）
       die "源 worktree 有未提交/未跟踪文件，rm -rf 会无条件删除它们，脚本拒绝继续。git status --short 清单：
 $UNTRACKED
-先检视上述文件：本次会话产生的按提交策略处理；认知外的询问用户；确认全部可丢弃后执行 git -C $CUR_DIR clean -fd，再重跑：bash $0 cleanup $DEV_BRANCH"
+先检视上述文件：本次会话产生的按提交策略处理；来源不明的询问用户；确认全部可丢弃后执行 git -C $CUR_DIR clean -fd，再重跑：bash $0 cleanup $DEV_BRANCH"
     fi
 
     # 先 cd 出待删目录（macOS 删除 cwd 所在目录后 shell cwd 悬空，后续命令无法执行）

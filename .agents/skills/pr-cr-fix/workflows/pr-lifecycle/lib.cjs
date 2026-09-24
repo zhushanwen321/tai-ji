@@ -1097,12 +1097,12 @@ function simplifyPrompt(mode, contractText, baseHash, reportPath) {
   const modeHeader = mode === 'apply'
     ? [
         '【覆盖声明——本 task 的最高裁决条款】',
-        '本 agent 由 pr-lifecycle workflow 以 simplifyMode=apply 发起，code-simplify skill 的「先报告、用户确认后改」确认断点在本上下文视为已获用户授权，授权范围仅 A 档（行为不变）高置信项；B 档（行为敏感）与低置信项只产报告不落地。',
+        '本 agent 由 pr-lifecycle workflow 以 simplifyMode=apply 发起，code-simplify skill 的「先报告、用户确认后改」中的人工确认环节在本上下文视为已获用户授权，授权范围仅 A 档（行为不变）高置信项；B 档（行为敏感）与低置信项只产报告不落地。',
         '',
       ]
     : [
         '【模式声明】',
-        '本 run 以 simplifyMode=report 发起，code-simplify 的确认断点完整保留：只产报告，不改任何代码、不 commit。下方契约中「覆盖声明」与本模式冲突，以本声明为准。',
+        '本 run 以 simplifyMode=report 发起，code-simplify 的人工确认环节完整保留：只产报告，不改任何代码、不 commit。下方契约中「覆盖声明」与本模式冲突，以本声明为准。',
         '',
       ];
   return [
