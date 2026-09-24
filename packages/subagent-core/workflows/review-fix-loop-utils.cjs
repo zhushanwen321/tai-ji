@@ -111,6 +111,8 @@ const ROUND_CONTEXT_MARKER = "--- ROUND CONTEXT ---";
  * 共享静态审查协议（R1/R2+/scoped 三模板同一来源）。reviewPrompt（用户参数）与
  * reviewInstruction（base 锁定后的 target 指令）在同一 run 内恒定，属静态段。
  * 含 6.2 第一环：报告「Fix suggestion」必填列（guidance 数据链的 reviewer 源头）。
+ * 计数行段（§3.4.1）：报告文件前两行固定计数行——结构化通道断链时
+ * recoverFromReportFile 经 parseAggregatedMd 从报告恢复计数的采信源。
  */
 function buildReviewProtocolStatic({ reviewPrompt, reviewInstruction }) {
   return [
@@ -134,6 +136,11 @@ function buildReviewProtocolStatic({ reviewPrompt, reviewInstruction }) {
     "must_fix, suggestion, and reconciliation. reconciliation is an array —",
     "return [] when there is no previous round to reconcile; on later rounds",
     "every previous issue_id must have a status entry.",
+    "",
+    "Report header: the FIRST two lines of your report file MUST be:",
+    "- Must-fix: <N>",
+    "- Suggestions: <N>",
+    "(N = your JSON counts; a fallback parser depends on this exact format)",
     "",
     ROUND_CONTEXT_MARKER,
   ].join("\n");

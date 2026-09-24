@@ -612,6 +612,9 @@ function lastModifiedFiles() {
 }
 
 // buildReviewCall 分支构造：fallow 内置工具型（无 .md，静态分析 prompt）。
+// 计数行段（§3.4.1，与 buildReviewProtocolStatic 静态段同款）：fallow 不经共享段，
+// 独立补——「未安装」分支给带冒号固定格式行（旧 `must_fix=0, suggestion=0` 不匹配
+// parseAggregatedMd 正则 Must[-_]fix\s*[:：]，断链降级时计数无从恢复）。
 function buildFallowReviewCall(base, def, header, roundDir) {
   return {
     ...base,
@@ -622,10 +625,16 @@ function buildFallowReviewCall(base, def, header, roundDir) {
       "",
       "Steps:",
       "1. Check if fallow is installed: `which fallow`",
-      "2. If NOT installed: write the report with a one-line note, must_fix=0, suggestion=0.",
+      "2. If NOT installed: write the report with a one-line note and the fixed",
+      "   header lines `- Must-fix: 0` / `- Suggestions: 0`.",
       "3. If installed, run: `fallow audit --base " + lockedBase.base + " --format json --quiet`",
       "4. Extract: complexity hotspots, dead code, unused exports, circular deps",
       "5. Classify findings: critical/major count into must_fix; minor into suggestion.",
+      "",
+      "Report header: the FIRST two lines of your report file MUST be:",
+      "- Must-fix: <N>",
+      "- Suggestions: <N>",
+      "(N = your JSON counts; a fallback parser depends on this exact format)",
       "",
       "output 路径：" + roundDir + "/" + def.report + ".md",
       "Write report to: " + roundDir + "/" + def.report + ".md",
