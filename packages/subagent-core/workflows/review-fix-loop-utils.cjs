@@ -111,8 +111,6 @@ const ROUND_CONTEXT_MARKER = "--- ROUND CONTEXT ---";
  * 共享静态审查协议（R1/R2+/scoped 三模板同一来源）。reviewPrompt（用户参数）与
  * reviewInstruction（base 锁定后的 target 指令）在同一 run 内恒定，属静态段。
  * 含 6.2 第一环：报告「Fix suggestion」必填列（guidance 数据链的 reviewer 源头）。
- * 计数行段（§3.4.1）：报告文件前两行固定计数行——结构化通道断链时
- * recoverFromReportFile 经 parseAggregatedMd 从报告恢复计数的采信源。
  */
 function buildReviewProtocolStatic({ reviewPrompt, reviewInstruction }) {
   return [
@@ -136,11 +134,6 @@ function buildReviewProtocolStatic({ reviewPrompt, reviewInstruction }) {
     "must_fix, suggestion, and reconciliation. reconciliation is an array —",
     "return [] when there is no previous round to reconcile; on later rounds",
     "every previous issue_id must have a status entry.",
-    "",
-    "Report header: the FIRST two lines of your report file MUST be:",
-    "- Must-fix: <N>",
-    "- Suggestions: <N>",
-    "(N = your JSON counts; a fallback parser depends on this exact format)",
     "",
     ROUND_CONTEXT_MARKER,
   ].join("\n");
@@ -475,7 +468,7 @@ function parseResult(raw) {
 
 /**
  * aggregator prompt（5.4 裁决段 + 防护规格）：现状 aggregator prompt 函数化 + 追加裁决段。
- * PART 1 写文件（Summary 格式保留，fallback 解析依赖 Must-fix: N）+ PART 2 JSON
+ * PART 1 写文件（Summary 格式保留）+ PART 2 JSON
  * （must_fix_ids/fixes_caution）+ 裁决段（证据裁决/降级保真/采信抽查/裁决自检）+ 防注入
  * （reviewResults wrapUntrusted + 语义声明）。
  */
@@ -521,7 +514,6 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     "```",
     "",
     "Followed by tables of Must-Fix Issues, Suggestions, Infos, and a Conclusion section.",
-    "The format `- Must-fix: N` and `- Suggestions: N` is critical: a fallback parser depends on it.",
     "",
     "─── ADJUDICATION (evidence review, 5.4) ───────────────────",
     "For EACH must-fix issue in the tables, adjudicate the evidence:",
@@ -1397,39 +1389,6 @@ function filterDormantFromRecon(reconSeen, reconEscalate, dormant) {
   return { seen, escalate };
 }
 
-/** 从 aggregated.md 内容回退解析（JSON 无效时的兜底，依赖 "- Must-fix: N" 固定格式）。 */
-function parseAggregatedMd(content) {
-  const mustFixMatch = content.match(/[-*]\s*Must[-_]fix\s*[:：]\s*(\d+)/i);
-  if (!mustFixMatch) return null;
-  const suggestionMatch = content.match(/[-*]\s*Suggestions?\s*[:：]\s*(\d+)/i);
-  return {
-    must_fix: parseInt(mustFixMatch[1], 10),
-    suggestion: suggestionMatch ? parseInt(suggestionMatch[1], 10) : 0,
-  };
-}
-
-/**
- * 弱格式通道（reviewer 腿，设计 §3.4.2）：结构化信封断裂时从 reviewer 报告文件
- * 恢复计数——复用 parseAggregatedMd（同一 "- Must-fix: N" 固定格式行约定，P4，
- * 与 aggregator md 兜底完全同构、测试矩阵共享）。文件缺失 / 无固定格式行 → null
- * （调用方维持现状终判 review-failure）；命中只恢复计数（numeric-only），
- * reconciliation 数据链丢失是决策 6 登记的降级代价。
- * 依赖注入（readFile/parseMd）保持纯函数可测。
- * @returns { must_fix, suggestion, report_file } | null
- */
-function recoverFromReportFile({ roundDir, reportName, readFile, parseMd }) {
-  const reportPath = roundDir + "/" + reportName + ".md";
-  let content;
-  try {
-    content = readFile(reportPath, "utf-8");
-  } catch {
-    return null; // 文件缺失（A4 场景：报告通道也断）
-  }
-  const parsed = parseMd(String(content));
-  if (!parsed || typeof parsed.must_fix !== "number") return null; // 无固定格式行
-  return { must_fix: parsed.must_fix, suggestion: parsed.suggestion ?? 0, report_file: reportPath };
-}
-
 /**
  * rfl 仪表（tier-1 §7.5）：run 存储根解析——~/.review-fix-loop/<slug>/<runId>。
  * slug = git toplevel 路径的分隔符替换为 '-'（rev-parse 失败用 cwd——非 git 项目）；
@@ -1577,7 +1536,7 @@ function backfillNote(m) {
   return m === "clean"
     ? "clean-round deterministic backfill: LLM dimensions unavailable (no aggregation on the clean-terminating round)"
     : m === "unverifiable"
-      ? "regression unverifiable: no tracked issues matched this round (aggregator numeric-only fallback?); treat as missing data"
+      ? "regression unverifiable: no tracked issues matched this round (aggregator returned no per-issue data?); treat as missing data"
       : "deterministic backfill: aggregation ran but returned no usable fix score entry";
 }
 
@@ -1838,61 +1797,6 @@ function planUnifiedCommit(fixes, counters, exists) {
   };
 }
 
-/**
- * git status --porcelain 输出 → 工作区脏路径集（降级兜底 commit 的 run 启动基线
- * 快照数据源，设计 §3.4.2 记账行 3）。行形态 "XY path"（XY = 两字符状态码，untracked
- * = "?? path"）；rename 形态 "XY orig -> new" 取 new 路径（旧路径已被替换，后续
- * diff 报的是新路径）。带引号路径（git core.quotepath 对非 ASCII 的默认转义形态）
- * 剥引号还原——JSON 转义失败保原样（路径级差集比对可容忍）。无法解析的行跳过
- * （对齐 prevHead 的容错惯例：基线通道自身不得炸主流程）。
- */
-function parsePorcelainPaths(out) {
-  const paths = [];
-  for (const rawLine of String(out || "").split("\n")) {
-    if (rawLine.length < 4) continue;
-    let p = rawLine.slice(3); // 前 3 字符 = XY 状态码 + 一个空格；路径可含空格，不 trim
-    const arrow = p.indexOf(" -> ");
-    if (arrow !== -1) p = p.slice(arrow + 4);
-    if (p.length >= 2 && p.startsWith('"') && p.endsWith('"')) {
-      try { p = JSON.parse(p); } catch { /* 转义畸形保原样 */ }
-    }
-    if (p) paths.push(p);
-  }
-  return paths;
-}
-
-/**
- * 降级兜底 commit 的差集计算（设计 §3.4.2 记账行 3，契约收窄版）：
- * 兜底集 =（tracked 变更 `git diff --name-only prevHead` ∪ untracked
- * `git ls-files --others --exclude-standard`）− 基线路径集。
- * 路径粒度隔离：「修复触及基线内路径」的增量被一并剔除（留工作区由下轮重审裁决，
- * 已接受取舍）；「run 启动快照之后的用户并发改动」会被捕获（混向残余，WARN 清单
- * 可见 + revert 锚点可恢复）。依赖注入（exec）保持纯函数可测；git 探测失败各自
- * 容错返回空数组（兜底通道自身不得炸主流程，对齐 prevHead 的 try/catch 置空惯例）。
- * @param prevHead fix 阶段开始时的 HEAD（与 modifiedFiles 统计同源；空串 = 无 HEAD
- *   可比（空仓首次 commit 前），tracked 侧为空集，untracked 侧照常）
- * @param baselinePaths run 启动快照的基线路径集（空数组 = 干净树基线）
- */
-function computeDegradedCommitSet({ prevHead, baselinePaths, exec }) {
-  const execFn = exec || ((cmd) =>
-    require("child_process").execSync(cmd, { encoding: "utf-8", timeout: 10_000 }));
-  const run = (cmd) => {
-    try {
-      return execFn(cmd).split("\n").map((s) => s.trim()).filter(Boolean);
-    } catch {
-      return [];
-    }
-  };
-  const tracked = prevHead ? run("git diff --name-only " + prevHead) : [];
-  const untracked = run("git ls-files --others --exclude-standard");
-  const baseline = new Set(baselinePaths || []);
-  const merged = [];
-  for (const p of [...tracked, ...untracked]) {
-    if (!baseline.has(p) && !merged.includes(p)) merged.push(p);
-  }
-  return merged;
-}
-
 // ── 批内调度（2026-09-20 实测 5 轮排名驱动，对齐 zcode 原生版同构实现）──────
 // REVIEWER_BATCH 切批下慢者同批可省 review 墙钟（实测 ~18%），但精确排名每轮漂移、
 // 只有分组稳定（5 轮实测：慢组恒前 4、快组恒后段）。调度形态 = 慢批固定 3 + 动态 1 /
@@ -2045,10 +1949,6 @@ module.exports = {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
-  parseAggregatedMd,
-  recoverFromReportFile,
-  parsePorcelainPaths,
-  computeDegradedCommitSet,
   resolveRunRoot,
   computeOrigin,
   recordDormant,

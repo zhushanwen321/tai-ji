@@ -3,9 +3,8 @@
 // 测试方法（限制见文末 import 用例）：review-fix-loop.js 是 pi worker 模板脚本——
 // 顶层执行 + 顶层 return，不可作为 ES module import（vite/esbuild 直接 SyntaxError）。
 // 因此用 vm.Script 对源码文本做「函数段抽取求值」：从源文件按函数名定位 + brace
-// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord /
-// summarizeDegradedTrigger 四段（前三段在 loadScriptFns 集中求值，末段在其
-// describe 内单段抽取），在注入 log/Buffer 的沙箱里求值后取回引用。抽取定位
+// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord 三段（loadScriptFns
+// 集中求值），在注入 log/Buffer 的沙箱里求值后取回引用。抽取定位
 // 失败（函数改名/移动）会显式 throw，不会静默测到旧副本。
 //
 // 回归锚点（对照修复史，断言在旧实现上会红）：
@@ -13,6 +12,12 @@
 //         （旧实现不排除 error 分支，agent 失败被误诊为引擎透传未上线并烧掉 once 名额）
 //   - A11：model 缺省回退 "(default)"（请求时参数语义）
 //   - A12：promptMode=null（aggregator/fixer）必须保持 null，不被 || 误转 "full"
+//
+// 注：弱格式通道相关测试（summarizeDegradedTrigger 直测 / F-1 前缀契约锁定 /
+// degraded 三落点锚点 / 兜底差集清单锚点）已随 fail-fast 改造整体退役——
+// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测面；引擎侧
+// DETERMINISTIC_SCHEMA_FAILURE_PREFIX 常量仍被宿主 execute-agent-call 重试分诊
+// 消费（output-collector.test.ts 侧覆盖），与本脚本无契约关系。
 import { execFile } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,10 +26,6 @@ import { promisify } from "node:util";
 import vm from "node:vm";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
-// F-1 前缀契约锁定（决策 3 守卫）：脚本 worker 沙箱无法 import 引擎包、只能内联
-// 字面量，等值性守卫只能落在测试侧——devDep import 引擎 SSOT 常量做双侧防漂移
-import { DETERMINISTIC_SCHEMA_FAILURE_PREFIX } from "@zhushanwen/pi-subagent-cli";
 
 const WORKFLOW_SOURCE = readFileSync(
   join(__dirname, "..", "..", "workflows", "review-fix-loop.js"),
@@ -712,126 +713,41 @@ describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲�
   });
 });
 
-// ── 弱格式通道（设计 §3.4.2）：summarizeDegradedTrigger 纯函数直测 + 前缀契约锁定 ──
-// 行为级接线（触发点 a/b、记账五消费点、ES3 豁免、非确定性 error 终判）由
-// subagent-workflow 侧 review-fix-loop-e2e mock 轨覆盖（真实 worker 全链）；
-// 本文件覆盖循环体外的纯函数与「字面量 ↔ 引擎常量」的等值契约（常量已顶部 import）。
-describe("review-fix-loop.js summarizeDegradedTrigger（降级 WARN 触发摘要）", () => {
-  function loadSummarize(): (raw: unknown) => string {
-    // 函数声明语句的完成值是 undefined——尾部补引用表达式取回（loadBuildRemaining 同款）
-    const src = [extractFn("summarizeDegradedTrigger"), "summarizeDegradedTrigger"].join("\n");
-    return vm.runInNewContext(src, {}) as (raw: unknown) => string;
-  }
-
-  it("error 优先：raw.error 原样开头（F-1 前缀 + failureKind 分类段不被吞）", () => {
-    const summarize = loadSummarize();
-    const err = DETERMINISTIC_SCHEMA_FAILURE_PREFIX + " failureKind=schema_mismatch; turns=2";
-    expect(summarize({ error: err, value: "ignored" })).toBe(err);
-  });
-
-  it("头 240 字符截断：长 error 前缀完整保留（前缀 40 字符 ≪ 240，截断只切尾）", () => {
-    const summarize = loadSummarize();
-    const long = DETERMINISTIC_SCHEMA_FAILURE_PREFIX + " " + "x".repeat(500);
-    expect(summarize({ error: long })).toHaveLength(240);
-    expect(summarize({ error: long }).startsWith(DETERMINISTIC_SCHEMA_FAILURE_PREFIX)).toBe(true);
-  });
-
-  it("无 error → 取 raw.value 头 240 字符（触发点 b 拼接文本形态——仅作线索）", () => {
-    const summarize = loadSummarize();
-    const text = "Round 1 report body text without schema envelope " + "y".repeat(300);
-    expect(summarize({ value: text })).toHaveLength(240);
-    expect(summarize({ value: text }).startsWith("Round 1 report")).toBe(true);
-  });
-
-  it("value 非字符串（对象形态）→ JSON.stringify 后截断；null/undefined → 空串", () => {
-    const summarize = loadSummarize();
-    expect(summarize({ value: { foo: "bar" } })).toBe('{"foo":"bar"}');
-    expect(summarize({ value: null })).toBe("");
-    expect(summarize(undefined)).toBe("");
-    expect(summarize("raw-string")).toBe("");
-  });
-
-  it("error 非字符串（数字等 truthy 值）→ 不走 error 分支，回落 value（防 String(error) 意外形态）", () => {
-    const summarize = loadSummarize();
-    expect(summarize({ error: 42, value: "fallback" })).toBe("fallback");
-  });
-});
-
-describe("review-fix-loop.js F-1 前缀契约锁定（决策 3 守卫，双侧防漂移）", () => {
-  it("脚本触发判据字面量与引擎 DETERMINISTIC_SCHEMA_FAILURE_PREFIX 逐字等值", () => {
-    // worker 沙箱无法 import 引擎包（脚本只能内联字面量）；引擎侧（pi-subagent-cli
-    // output-collector 以该常量开头构造 error）或脚本侧任一变更未同步对方，此断言即红
-    expect(WORKFLOW_SOURCE).toContain(
-      "const DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL = "
-      + JSON.stringify(DETERMINISTIC_SCHEMA_FAILURE_PREFIX) + ";",
-    );
-  });
-
-  it("字面量单一声明 + 恰好两处使用（reviewer 触发点 a / fixer 触发点 a）——防第二处内联漂移", () => {
-    expect(WORKFLOW_SOURCE.split("DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL").length - 1).toBe(3);
-    // 两处使用都必须是 includes 判据形态（error 分支内的触发条件）
-    expect(
-      WORKFLOW_SOURCE.match(/raw\.error\.includes\(DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL\)/g)?.length,
-    ).toBe(2);
-  });
-});
-
-describe("review-fix-loop.js degraded 透出锚点（三落点字段防移除）", () => {
-  it("run 返回体透出 degradedRounds（shorthand）", () => {
-    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
-    expect(returnBlock).toContain("degradedRounds,");
-  });
-
-  it("clean 分支 message 构造直接拼 degradedRoundsSuffix（clean 路径不赋值 finalMessage，旁路即丢后缀）", () => {
-    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
-    expect(returnBlock).toContain('issue(s) fixed total." + degradedRoundsSuffix');
-  });
-
-  it("后缀附加点先于 needs-human 改道判定（改道后 message 走 finalMessage，后缀须已落入）", () => {
-    const suffixAt = WORKFLOW_SOURCE.indexOf("const degradedRoundsSuffix = ");
-    const escalateAt = WORKFLOW_SOURCE.indexOf("terminated = \"needs-human\";");
-    expect(suffixAt).toBeGreaterThan(-1);
-    expect(escalateAt).toBeGreaterThan(suffixAt);
-    // 附加实现形态：成功类终态把后缀落进 finalMessage（改道构造的输入）
-    expect(WORKFLOW_SOURCE).toContain("finalMessage += (finalMessage ? \"\" : \"All batches clean.\") + degradedRoundsSuffix;");
-  });
-
-  it("max-rounds 触顶 finalMessage 含分号诊断段构造（degraded 计数 + last trigger）", () => {
-    expect(WORKFLOW_SOURCE).toContain(
-      '"；degraded: " + degradedRoundKeys.size + " round(s), last trigger: " + lastDegradedTrigger',
-    );
-  });
-});
-
-// 弱通道终判恢复指引 + 兜底差集清单（设计 §3.1 失败路径 / §3.4.2）：源文本锚定防
-// 「终判文案被精简后丢恢复指引」「兜底 WARN 被精简后丢差集清单」——行为级断言
-// （终判 message 内容 / WARN 输出）在 subagent-workflow e2e mock 轨，此处锁源级形态。
-describe("review-fix-loop.js 弱通道终判恢复指引 + 兜底差集清单锚点（§3.1 失败路径）", () => {
-  it("恢复指引常量单一声明 + 语义覆盖弱通道未命中与检查动作", () => {
+// ── 结构化失败终判恢复指引（fail-fast：错误信息带恢复动作是要求，不是兜底）──
+// 源文本锚定防「终判文案被精简后丢恢复指引」——行为级断言（终判 message 内容）
+// 在 subagent-workflow e2e mock 轨（review-fix-loop-e2e.test.ts fail-fast describe），
+// 此处锁源级形态。弱格式通道相关锚点（summarizeDegradedTrigger 直测 / F-1 前缀
+// 契约锁定 / degraded 三落点 / 兜底差集清单）已随通道拆除整体退役。
+describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
+  it("恢复指引常量单一声明 + 语义覆盖结构化链路检查动作与重试闭环", () => {
     expect(WORKFLOW_SOURCE).toContain("const REVIEWER_RECOVERY_HINT = ");
-    // 语义三要素：弱通道不可用判定 / 报告文件+计数行检查 / 工具受限检查
-    expect(WORKFLOW_SOURCE).toContain("报告文件缺失或无固定格式计数行");
-    expect(WORKFLOW_SOURCE).toContain("- Must-fix: N");
-    expect(WORKFLOW_SOURCE).toContain("检查 agent 定义与扩展配置");
+    // 语义三要素：tools 白名单检查（受限 tools 过滤 schema 工具）/ 引擎 schema 支持 / 重跑闭环
+    expect(WORKFLOW_SOURCE).toContain("tools 白名单须放行 structured-output");
+    expect(WORKFLOW_SOURCE).toContain("schema 结构化返回");
+    expect(WORKFLOW_SOURCE).toContain("重跑 workflow");
   });
 
-  it("两处 reviewer 终判分支（触发点 a/b 落入处）都以常量拼接收尾——防一处直写字面量漂移", () => {
-    // 触发点 a 落入的终判（审查 agent 调用失败）
-    expect(WORKFLOW_SOURCE).toContain('+ " — " + raw.error + REVIEWER_RECOVERY_HINT;');
-    // 触发点 b 落入的终判（审查 agent 结果无效，缺 must_fix）
+  it("两处 reviewer 终判分支（结构化 error catch / 结果无效落入处）都以常量拼接收尾——防一处直写字面量漂移", () => {
+    // 结构化 error 落入的终判（failFastAgent catch：failedLabel + e.message）
+    expect(WORKFLOW_SOURCE).toContain('String(e)) + REVIEWER_RECOVERY_HINT;');
+    // 结果无效落入的终判（审查 agent 结果无效，缺 must_fix）
     expect(WORKFLOW_SOURCE).toContain('.slice(0, 400) + REVIEWER_RECOVERY_HINT;');
     // 消费恰好两处（1 声明 + 2 消费 = 标识符共 3 次）——第三处内联即红
     expect(WORKFLOW_SOURCE.match(/REVIEWER_RECOVERY_HINT/g)?.length).toBe(3);
     expect(WORKFLOW_SOURCE.match(/\+ REVIEWER_RECOVERY_HINT;/g)?.length).toBe(2);
   });
 
-  it("兜底 commit WARN 含差集文件清单（分支 2 空清单显式标注 / 分支 3 拼接路径清单）", () => {
-    // 「混向残余 WARN 清单可见」的源级守卫：差集为空显式 (empty)、commit 失败拼清单
-    expect(WORKFLOW_SOURCE).toContain("diff-set: (empty)");
-    expect(WORKFLOW_SOURCE).toContain('); diff-set: "');
-    expect(WORKFLOW_SOURCE).toContain('+ fallbackPaths.join(", ") + "; error: "');
-    // 两处 WARN 均以 diff-set: 呈报——一处被删后计数即红
-    expect(WORKFLOW_SOURCE).toContain("diff-set: ");
-    expect(WORKFLOW_SOURCE.match(/diff-set: /g)?.length).toBe(2);
+  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测面", () => {
+    // failFastAgent 单一声明 + reviewer/fixer 两处消费（声明含 `(`，共 3 次）
+    expect(WORKFLOW_SOURCE).toContain("function failFastAgent(call, failedLabel)");
+    expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(3);
+    // F-1 引擎前缀字面量不再内联（引擎侧常量仍被宿主重试分诊消费，与本脚本无契约关系）
+    expect(WORKFLOW_SOURCE).not.toContain("Structured output failed deterministically");
+    // 弱格式降级可观测面零残留（degraded 三落点已整体拆除）
+    expect(WORKFLOW_SOURCE).not.toContain("degradedRounds");
+    expect(WORKFLOW_SOURCE).not.toContain("degradedRoundKeys");
+    expect(WORKFLOW_SOURCE).not.toContain("baselineDirtyPaths");
+    expect(WORKFLOW_SOURCE).not.toContain("recoverFromReportFile");
+    expect(WORKFLOW_SOURCE).not.toContain("parseAggregatedMd");
   });
 });
