@@ -784,7 +784,8 @@ async function main(): Promise<void> {
   // restore 清场 'suppress' 静默）。'delete' 即时发声销账 + clearSession（检查点①语义不动，
   // 发声覆盖 active/scanned 两分支）；suppressedDeaths 抑制标（供随后的 removeSessionEntry
   // 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——scanned/未找到
-  // throw/btw 直删无销毁回调消费点，无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
+  // throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated → removeSessionEntry
+  // 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
   // 'delete' 已发声销账，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省一次空批查询）。
   subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
     if (disposition === 'delete') {
@@ -1011,9 +1012,10 @@ async function main(): Promise<void> {
   sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
   // notify-once D5 销毁汇聚点（追加式列表的第二订阅者）：
   // - 同步 exit 链腿（exitChainLegs 同步标）→ 跳过——respawn 终态事件随后裁决（stash 在挂）；
-  // - suppressedDeaths 已标（active 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
-  //   无标路径（非 active 'delete' 理论无销毁回调不可达；active 'delete' 的迟到发声）对
-  //   'delete' 已清的账本幂等空转无害；
+  // - suppressedDeaths 已标（在册 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
+  //   非在册 'delete'（scanned / 冷线）无销毁回调、本分支结构性不可达——「delete 漏标
+  //   误发声」无可达面（unreasonable#3 判据修复：hasDestroySink = 在册）；唯一残留标
+  //  （adapter.detach 抛错致删除整体失败）被后续销毁消费时，对 'delete' 已清账本幂等空转无害；
   // - 其余 = forceQuit / abort 阶梯强杀等不经 pm.onSessionExit 的收敛链（exit 事件被双层
   //   守卫拦截）→ 汇聚点补发声 'exited'（exitCode null = 被杀无退出码，与 session.exited 协议同语义）。
   sessionService.setOnSessionDestroyed((summary) => {

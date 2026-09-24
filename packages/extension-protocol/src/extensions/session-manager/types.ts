@@ -296,7 +296,7 @@ export interface SessionManagerWatchRespondPayload {
   deathSeq?: number
   /** settle 批身份（per session 递增；批身份 = settleSeq/deathSeq——同批身份才合一条 record） */
   settleSeq?: number
-  /** 本次应答销账的债权笔数（runtime 已知直供；死亡/结果新闻正文消费 fulfills N） */
+  /** 本批兑现总笔数（同批每条应答携带同值）；death 侧 = 同 deathSeq 的 claim 数（D3 合批口径，runtime 直供，死亡/结果新闻正文消费 fulfills N） */
   fulfillsN?: number
   /** death 应答携带：exit 腿诊断数据通路复刻（400 字截尾沿用现值），extension 文案构造消费 */
   exitCode?: number | null
