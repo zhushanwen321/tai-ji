@@ -115,19 +115,35 @@ function formatLintErrorSummary(lintResult: LintResult): string {
 }
 
 /**
- * 可用 workflow 清单（not found 拒单的自救指引段）。每项两行（name + description，
- * 缩进 location 绝对路径）——按名解析已退役，location 是唯一可派发形态。
+ * 可用 workflow 清单 item 模板单源。每项一行起头（可选 [source] 标签 + name +
+ * ":" + description），includeLocation 时追加缩进 location 绝对路径行——按名解析
+ * 已退役，location 是唯一可派发形态。
  *
- * 拒单清单的单一实现：core 内层入口（runAndWait / executeNestedWorkflow）与
- * extension 顶层 tool（workflow / subagents 的 not found 拒单）共用本函数，
- * 经 barrel 导出消费——文案两份漏改即自救指引漂移。
+ * 该模板是三个 render 点的共同底座（available filter 与 item 行拼接只许在这里）：
+ * - run 拒单（workflowNotFoundMessage，缺省形态）与 core 内层入口
+ * - 壳 workflow-script lint 的 not-found 清单（缺省形态——与 run 拒单有意统一，
+ *   清单带 location 行，LLM 自纠指引一致）
+ * - 壳 workflow-script list 的 actionList（includeSource:true / includeLocation:false
+ *   ——source 标签保留、分隔符统一为 ":"）。标题与空态文案属调用点语境，不在此。
+ *
+ * 缺省参数组合的输出与历史 run 拒单格式逐字节一致（既有测试锁定）。
+ *
+ * @param opts 两个布尔选项，缺省 includeLocation=true / includeSource=false。
+ *   出现第三个选项的需求时先停下——这层刻意只表达「行内投影裁剪」这一个变化轴。
  */
-export function formatAvailableWorkflowRefs(all: readonly WorkflowScript[]): string {
+export function formatAvailableWorkflowRefs(
+  all: readonly WorkflowScript[],
+  opts?: { includeLocation?: boolean; includeSource?: boolean },
+): string {
+  const includeLocation = opts?.includeLocation ?? true;
+  const includeSource = opts?.includeSource ?? false;
   return all
     .filter((wf) => wf.available)
-    .map(
-      (wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`,
-    )
+    .map((wf) => {
+      const sourceTag = includeSource ? `[${wf.source}] ` : "";
+      const locationLine = includeLocation ? `\n    location: ${wf.path}` : "";
+      return `  - ${sourceTag}${wf.name}: ${wf.meta.description || "(no description)"}${locationLine}`;
+    })
     .join("\n");
 }
 

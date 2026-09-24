@@ -130,17 +130,21 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
     expect(r.isError).toBe(false);
   });
 
-  it("name 不存在 → throw 完整 not-found 文案，仅列 available 脚本（不可用项剔除）", async () => {
+  it("name 不存在 → throw 完整 not-found 文案，清单走 core 拒单格式（含 location 行，不可用项剔除）", async () => {
     const registry = makeRegistry([
       { ...makeScript("broken-wf", "// x"), available: false, meta: { description: "解析失败" } },
       { ...makeScript("clean-scripts", "// x"), meta: { description: "remove stale tmp scripts" } },
     ]);
     const tool = captureTool(registry);
-    // toThrow 为子串匹配——传入完整多行文案即锁定全文（含 available 建议行格式）
-    await expect(lintCall(tool, "ghost-wf")).rejects.toThrow(
+    // 全文精确匹配（toBe）——同时锁定 item 行 = core formatAvailableWorkflowRefs
+    // 缺省形态（与 run 拒单有意统一，带 location 行）与不可用项剔除（broken-wf 零出现）
+    const err = (await lintCall(tool, "ghost-wf").catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe(
       "Workflow 'ghost-wf' not found or not available.\n" +
         "Available:\n" +
-        "  - clean-scripts: remove stale tmp scripts",
+        "  - clean-scripts: remove stale tmp scripts\n" +
+        "    location: /abs/clean-scripts.js",
     );
   });
 

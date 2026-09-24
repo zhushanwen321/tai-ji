@@ -32,6 +32,7 @@ import {
 // deleteWorkflow/lintScript 均为 barrel 导出面；深路径在 npm/vendored 形态不可达）
 import {
   deleteWorkflow,
+  formatAvailableWorkflowRefs,
   generateWorkflowScript,
   lintScript,
   saveWorkflow,
@@ -263,11 +264,11 @@ async function actionLint(
   }
   const source = await loadScriptSource(name, registry);
   if (!source) {
+    // 清单 item 走 core formatAvailableWorkflowRefs 缺省形态（有意统一：与 run 拒单
+    // 一致带 location 行，自纠指引同构）；"Available:" 标题与 (none) 空态是本调用点
+    // 的语境文案。
     const all = await registry.loadAll();
-    const available = all.filter((wf) => wf.available);
-    const suggestions = available
-      .map((wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}`)
-      .join("\n");
+    const suggestions = formatAvailableWorkflowRefs(all);
     throw new Error(
       `Workflow '${name}' not found or not available.\nAvailable:\n${suggestions || "  (none)"}`,
     );
@@ -355,16 +356,16 @@ function actionDelete(
 async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScriptExecuteResult> {
   try {
     const all = await registry.loadAll();
-    const available = all.filter((wf) => wf.available);
-    if (available.length === 0) {
+    // item 行走 core formatAvailableWorkflowRefs（includeSource 保留 [saved]/[tmp]
+    // 标签、去 location 行、分隔符统一为 ":"——与拒单 item 模板单源）；标题与空态
+    // 是本调用点的语境文案。
+    const lines = formatAvailableWorkflowRefs(all, { includeSource: true, includeLocation: false });
+    if (lines === "") {
       return textResult("No workflow scripts available.");
     }
-    const lines = available.map(
-      (wf) => `  [${wf.source}] ${wf.name} — ${wf.meta.description || "(no description)"}`,
-    );
     return {
-      content: [{ type: "text", text: `Available workflows:\n${lines.join("\n")}` }],
-      details: { action: "list", count: available.length },
+      content: [{ type: "text", text: `Available workflows:\n${lines}` }],
+      details: { action: "list", count: all.filter((wf) => wf.available).length },
     };
   } catch (err: unknown) {
     throwPrefixed("List failed", err);
