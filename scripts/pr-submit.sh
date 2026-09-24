@@ -106,7 +106,7 @@ log() { echo "[pr-submit] $*" >&2; }
 
 # ── 1. push（force-with-lease 安全推送，禁止 --force）
 # Push remote 选择：bare repo workspace 模式下 origin 是本地 bare repo（非 GitHub），
-# github remote 才是真正的 GitHub 远程（见 CLAUDE.md §10）。有 github remote 优先用，
+# github remote 才是真正的 GitHub 远程（见 AGENTS.md 关键规则 #11）。有 github remote 优先用，
 # 否则 fallback origin（普通 repo 场景，origin 即 GitHub）。
 if git remote get-url github >/dev/null 2>&1; then
     PUSH_REMOTE="github"

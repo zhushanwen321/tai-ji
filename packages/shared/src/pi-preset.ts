@@ -129,7 +129,7 @@ export interface PiLaunchPreset {
   // ── 其他配置 ──
   /** 禁用所有 skill（映射 --no-skills） */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md/CLAUDE.md，映射 --no-context-files） */
+  /** 禁用 context files（AGENTS.md，映射 --no-context-files） */
   noContextFiles?: boolean
 }
 

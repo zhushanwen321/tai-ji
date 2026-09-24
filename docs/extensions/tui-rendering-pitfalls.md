@@ -304,7 +304,7 @@ data === "\x1b[A"   // 只命中 4 族之一
 
 **根因**：自定义组件**同时**承担「列表导航」和「文本 filter 输入」两种交互，导航键和 filter 字母共用同一批键。
 
-**正确做法**（已固化为 CLAUDE.md 规范）：
+**正确做法**：
 
 - ✅ 导航**只用方向键**，经 `matchesKey(data, Key.up)` 识别。因为 `Key.up` 是功能键 keyId（`"up"`），字母 "k"/"j" 不会匹配 `"up"`，自然落到 printable 分支进 filter。（注意：若误用 `matchesKey(data, "k")` 做导航，字母 k 会命中——因为 matchesKey 对字母 keyId 返回 true。）
 - ✅ **刻意不查** `kb.matches(data,"tui.select.up/down")`——那会连带命中用户把 j/k 绑给 select 的自定义键位。

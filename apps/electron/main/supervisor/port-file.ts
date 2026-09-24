@@ -6,7 +6,7 @@
  * 这是 thin shell 文件——签名即设计，不深化骨架（methodology §1）。
  *
  * [HISTORICAL] 不变量：
- * - 路径动态推导：$TAIJI_AGENT_DATA_DIR ?? ~/.taiji（CLAUDE.md：禁止硬编码路径）
+ * - 路径动态推导：$TAIJI_AGENT_DATA_DIR ?? ~/.taiji（AGENTS.md 关键规则 #15：禁止写死绝对路径）
  * - 写失败不阻塞主流程（端口文件非关键，console.error 后继续）
  *
  * 依赖方向：port-file → node:fs + node:path + node:os

@@ -11,7 +11,7 @@
  *  3. When `append.enabled === true` and `append.prompt` is non-blank,
  *     appends the user's text to the event's systemPrompt.
  *  4. Reads the global instructions file `~/.agents/AGENTS.md` (candidates
- *     AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD) every turn and appends it
+ *     AGENTS.md / AGENTS.MD, exact case match) every turn and appends it
  *     under a labeled header. Modeled on pi's native `loadContextFileFromDir`
  *     but deliberately narrower: pi 0.84.4 also probes `AGENTS.override.md`
  *     and applies its candidate list to project dirs, whereas this list only
@@ -66,12 +66,12 @@ function cachedReadFileSync(filePath: string): string | null {
 
 /**
  * Global instruction candidates. Modeled on pi's native loadContextFileFromDir
- * but deliberately not a strict mirror: pi 0.84.4 probes
- * ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]
- * against project dirs, while these candidates apply only to the global agents
- * directory and intentionally exclude AGENTS.override.md.
+ * but deliberately not a strict mirror: pi 0.84.4 probes its own candidate
+ * list (including AGENTS.override.md) against project dirs, while these
+ * candidates apply only to the global agents directory, intentionally exclude
+ * AGENTS.override.md, and recognize only AGENTS.md case variants.
  */
-const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD']
+const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD']
 
 /**
  * taiji capability 固定注入段（设计 D6）：告知 AI 本渲染器的能力面，让新会话无需
@@ -239,8 +239,8 @@ function readSection(raw: unknown): { enabled: boolean; prompt: string } {
 }
 
 /**
- * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md / CLAUDE.md
- * 发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
+ * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md
+ * 自动发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
  * 的等价短形式（cli/args.ts），两种形式都必须命中守卫——与镜像侧
  * （argv-mirror.ts 同样解析两种形式）保持一致。
  */
