@@ -84,8 +84,15 @@ function expectDeterministic(raw: unknown[], entryIds?: string[]): ChatViewState
 /** ms → ISO（fixture 统一 timestamp 形态） */
 const ts = (ms: number) => new Date(ms).toISOString()
 
-/** uuidv7 形态假 id（replay 侧专用，模拟 pi 持久化 id 空间） */
+/** uuidv7 形态假 id（replay 侧专用 fixture 约定，模拟 pi 持久化 id 空间） */
 const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+
+/**
+ * id 口径澄清（全文同口径，勿误读）：真实 pi entryId = 8 位 hex（`randomUUID().slice(0, 8)`，
+ * pi 实装 generateId；uuidv7 仅用于 pi session id）——本文件 fixture 的 uuidv7 形态假 id 只是
+ * 测试内部约定（异源于真实 entryId 不影响等价性断言：归一按内容比对、id 形态本就两侧异源）。
+ * 消息撤回 U8 的 8 位 hex 形态判别见 revoke-orchestrator BARE_UUID_RE。
+ */
 
 /**
  * 归一：剥消息 id 与 piEntryId（live 客户端前缀 id / reducer e<N> 派生 vs replay pi

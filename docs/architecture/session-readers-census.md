@@ -47,6 +47,8 @@ grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFrom
 
 # R3 · runtime 侧流式逐行扫描（2 文件：usage-stats-service 读者 + logger 写流排除项）
 grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
+# P3 · plugin 族读者（经 runtime session-api readEntries 通道，不经 extensions/ 的 getEntries 锚——2026-09-25 A14 验收补锚）
+grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 ```
 
 闭合规则：任一锚点出现本清单未登记的新命中 → 按 C-proc-28 同 commit 归类登记后再合入。「接入单元」列 = message-revoke 流水线内承接裁剪/重建接线的单元（U6a-U6d）；「—」= 照实/非投影/豁免，无代码改动。
@@ -81,6 +83,9 @@ grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.
 | `infra/pi/session-entry-mapper.ts` | `mapSessionEntries`（RPC / 文件两条历史链共用映射单点） | 随树 | 喂入裁剪后 entries；无分支 session leafId 缺省 = 文件尾 = 现行为 | U6a |
 | `services/session-history.ts` | `getHistoryFromFilePath` + 离线尾读（`tailReadOffline`） | 随树 | 同一历史投影的文件源腿；离线尾读等价裁剪 | U6a |
 | `services/session/history-rebuild-cache.ts` | 全量重建缓存 | 随树 | 缓存基线语义 = 活跃路径投影（非全文件）；撤回编排显式清缓存强制全量重建 | U6a |
+| `services/plugin-service/api/session-api.ts` | `readEntries` handler（plugin 族读面的 runtime 投影点：pi get_entries → `filterEntriesToActivePath` 活跃路径过滤 → 五字段投影，parentId 不出 runtime） | 随树 | 插件镜像的折叠输入 = 本投影回包——过滤在投影前使被撤子树 op 构造性不达任何插件（scheduler-manager 面板残留缺陷的 runtime 数据面落点，U7）；防御语义与 extensions 裁剪同构但有意异源：leafId 缺失/悬空 → **不过滤**（增量批不丢数据优先，extensions 侧按文件尾回退是全量语义），环状 parentId `!activeIds.has` 防环 | U7（撤回信号广播同批） |
+
+> **§4.1 防御语义异源登记（R2 审查采纳，防后续审查误报）**：extensions 侧四包（todo/plan/goal/scheduler）的活跃路径防御与 pi `buildSessionPath` 同构——leafId 缺失/失效**回退文件尾**（全量语义，宁全勿漏）；runtime 重建链（entry-tree-builder 族）同构同源。与两者有意异源的是 §4.1 末行 plugin 投影点（leafId 悬空**不过滤**——增量批部分数据，不丢数据优先）与 runtime 侧「降级 warn + 原样返回」的 SSOT 形态（对话流宁多显 vs 注入面宁裁勿漏——G2 二分准则在各面的落地形态差异，均为有意设计非漂移）。
 
 ### 4.2 派生提取器族（随树）
 
@@ -124,6 +129,9 @@ grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.
 | permission | `index.ts` `pi.on("session_tree")` → statusline/footer 重绘 | 重绘时读新分支 config，不读 session 文件 |
 | plugin-bridge | `index.ts` `observeHandler("session_tree")` | 事件转发给 taiji plugins（observe 通道） |
 | subagent-workflow | `session_tree` → `terminateRunningRuns` | 撤回编排以 workflow-running 前置检查阻止该副作用触发（撤回遇活跃 run 不放行） |
+| scheduler（extensions/universal） | `backend.ts` `pi.on("session_tree")` → 重折叠任务集 | 纯重建体（loadTasks 换 Map），零 dispatch 零 append；被撤任务到点不触发（A14） |
+
+**runtime 侧插件读者（readEntries 通道，非 session_tree）**：`resources/plugins/scheduler-manager`——per-session 任务镜像（累计 task op 折叠 + sinceEntryId 增量），随树语义经两通道兑现：①runtime readEntries 投影点活跃路径过滤（§4.1 末行，被撤 op 构造性不达插件）；②撤回信号 `'taiji:revoked'`（revoke-orchestrator 失效点广播 → pluginService.notifyEntryInvalidation）驱动插件丢弃累计镜像全量重建（U7）。插件不能 import runtime/extensions 包，filterActivePath 语义在插件消费面由 runtime 投影层代偿——同构实现的有意分层，非漏接。
 
 `session_tree` / `session_before_tree` 不经 RPC 事件流（extension 进程内专属）；runtime 侧完成确认走 reply + get_entries 校验。
 

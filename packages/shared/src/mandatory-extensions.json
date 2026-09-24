@@ -9,7 +9,7 @@
   { "name": "@zhushanwen/pi-permission", "description": "Permission tool for tool execution approval/denial", "tier": "feature" },
   { "name": "@zhushanwen/pi-scheduler", "description": "Task scheduling and delayed execution", "tier": "feature" },
   { "name": "@zhushanwen/pi-rename-session", "description": "Auto-generate session title after first successful round", "tier": "feature" },
-  { "name": "@zhushanwen/pi-agent-ext", "description": "Internal host commands for extension reload and system prompt fetch", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-agent-ext", "description": "Internal host commands: extension reload, system prompt fetch, and session tree navigation (__taiji_nav__ for message revoke)", "tier": "infrastructure" },
   { "name": "@zhushanwen/pi-system-prompt", "description": "System prompt injection extension", "tier": "infrastructure" },
   { "name": "@zhushanwen/pi-msg-id-mapper", "description": "Client UUID ↔ user entry ID mapping extension", "tier": "infrastructure" },
   { "name": "@zhushanwen/pi-system-prompt-trace", "description": "System prompt trace: append taiji:system-prompt entries when the effective system prompt is established or changes", "tier": "feature" },
