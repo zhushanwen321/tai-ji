@@ -16,7 +16,7 @@
  *   重建、TTL 与 shutdown 机器已删除）——「落盘了什么」与「查询到什么」共用同一份扫描，
  *   结构上不可分歧
  * - 纯函数，不依赖 Pi 运行时（ExtensionAPI/appendEntry），可独立单元测试
- * - 差集刻意不校验 expiresAt（三类型全 process 档，长任务 >1h 仍应视为活跃，
+ * - 差集刻意不校验 expiresAt（四类型（workflow/subagent/bash/session）全 process 档，长任务 >1h 仍应视为活跃，
  *   对齐 goal continuation 守卫语义）；历史 session 文件中遗留的带 expiresAt 的
  *   register entry 无需迁移——差集语义不读该键
  */
