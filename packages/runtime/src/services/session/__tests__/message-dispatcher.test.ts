@@ -181,7 +181,7 @@ describe('MessageDispatcher × SkillInjector 挂载（D9）', () => {
     // [u3b 预检改读 occupancy] 预检输入 = occupancy 投影（D1 立场），turn='generating' 计忙
     const h = makeHarness({ sessionByClient: { occupancy: { turn: 'generating', compacting: false, bash: false } } })
     const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
     expect(h.injectMock).not.toHaveBeenCalled()
     expect(h.client.prompt).not.toHaveBeenCalled()
   })
@@ -227,7 +227,7 @@ describe('MessageDispatcher busy 预检裁决（D2 settling 计忙，u3b）', ()
   ] as const)('turn=%s 计忙：拒绝转 send.rejected{reason:%s}，prompt 不发送', async (turn, reason) => {
     const h = makeHarness({ sessionByClient: { occupancy: { turn, compacting: false, bash: false } } })
     const result = await h.dispatcher.sendMessage('s1', 'settling 窗口内的消息')
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
     expect(h.client.prompt).not.toHaveBeenCalled()
     expect(h.published).toContainEqual({
       type: 'send.rejected',
@@ -245,7 +245,7 @@ describe('MessageDispatcher busy 预检裁决（D2 settling 计忙，u3b）', ()
       },
     })
     const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
     expect(h.client.prompt).not.toHaveBeenCalled()
     expect(h.injectMock).not.toHaveBeenCalled()
   })
@@ -255,19 +255,19 @@ describe('MessageDispatcher busy 预检裁决（D2 settling 计忙，u3b）', ()
       sessionByClient: { occupancy: { turn: 'idle', compacting: true, bash: false } },
     })
     const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'compacting' })
     expect(h.published).toContainEqual({
       type: 'send.rejected',
       payload: { sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' },
     })
   })
 
-  it('bash 命中：拒绝 reason=busy', async () => {
+  it('bash 命中：回执 reason=bash（D6/u5a 三态拆分），广播线保持 busy 词表', async () => {
     const h = makeHarness({
       sessionByClient: { occupancy: { turn: 'idle', compacting: false, bash: true } },
     })
     const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ blocked: true, rejected: true, reason: 'bash' })
     expect(h.published).toContainEqual(expect.objectContaining({ type: 'send.rejected' }))
   })
 

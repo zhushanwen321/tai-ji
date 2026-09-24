@@ -30,7 +30,7 @@
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
+// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照；⑫ [B2] 轮终派生 manifest 投影） | `.state` 收条 + binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 注销发射点② |
 // | [collect 退役] markBatchFinalized 原语行已随 sync 批机制删除 |
 // | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | entry（best-effort） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
@@ -281,7 +281,9 @@ export class RecordStore {
 
   /**
    * [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）的通道：records 传共享 Map
-   * 引用（零拷贝）；`.state` 收条经 persistSettledState 注入（避开七名）；pending
+   * 引用（零拷贝）；`.state` 收条经 persistSettledState 注入（避开七名）；轮终派生
+   * manifest 投影经 writeDerivedManifest 注入（[B2/簿记⑫]，D7 写面约束——manifest
+   * 写函数调用字面只留本文件，与 persistSettledState 注入先例同构）；pending
    * 注销经 emitPendingUnregister 闭包（调用时读 this.pendingUnregister——
    * setPendingUnregister 注入后生效）。
    */
@@ -322,6 +324,10 @@ export class RecordStore {
     this.roundsCtx = {
       records: this.records,
       persistSettledState: (file, payload) => writeSettledState(file, payload),
+      // [B2 / 簿记⑫] 轮终派生 manifest 投影——session-reader manifest 直读主路径的
+      // 数据源（轮终留内存 idle 的 record 不经任何终态/回收写点）。D7 写面约束：
+      // manifest 写函数调用字面只留本文件，轴文件经 ctx 注入（persistSettledState 先例）。
+      writeDerivedManifest: (rec) => this.writeManifestPersisted(rec.id, derivedManifestRecord(recordToSubagent(rec))),
       emitPendingUnregister: (id, status) => this.pendingUnregister?.(id, status),
       reportRecordTransition: (r) => this.reportRecordTransition(r),
       notifyChange: () => this.notifyChange(),
@@ -409,7 +415,7 @@ export class RecordStore {
   /**
    * 意图原语：轮末收口——**写 idle**（[two-state-convergence U4/D3] A-lite 桥接退役：
    * 收口权威词对齐 §3.2.2 事件表；SP-5 升级链兼容性依据见 record-store-rounds
-   * 方法头）。簿记全集（①-⑪）：
+   * 方法头）。簿记全集（①-⑫）：
    *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
    *      字段已退役（[U5/D4] idle 即 resumable，无簿记动作）；⑥
@@ -422,7 +428,10 @@ export class RecordStore {
    *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
    *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
    *      pi 腿 `.state` 收条 + binding 快照 / zcode 腿锚键 binding 快照——正常轮终后
-   *      宿主崩溃 revive 水合 turns/tokens 不归零）。
+   *      宿主崩溃 revive 水合 turns/tokens 不归零）；⑫ [B2] 轮终派生 manifest 投影
+   *      （writeDerivedManifest——session-reader manifest 直读主路径的数据源，
+   *      idle 派生投影 = legacy "running" + executionStatus "idle"；缓存性质重复写
+   *      幂等无害）。
    * worktree/通知等副作用编排留调用方。
    *
    * @param outcome 轮终结果（kind 判别：success=content / failed=reason）

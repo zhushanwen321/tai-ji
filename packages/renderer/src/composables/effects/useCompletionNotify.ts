@@ -22,6 +22,7 @@ import { playSuccess, playError } from '@/composables/effects/useCompletionSound
 import { markUnread } from '@/composables/useSessionMarkers'
 import { useBackgroundWork } from '@/composables/features/chat/useBackgroundWork'
 import { getSettingsStore } from '@taiji/core'
+import { isBtwVirtualId } from '@taiji/shared'
 
 /** 上次播放提示音的时间戳（模块级，防抖用） */
 let lastPlayTime = 0
@@ -44,6 +45,12 @@ export function handleCompletion(
   focusedSessionId: string | null,
   willRetry?: boolean,
 ): void {
+  // 0. [M4-a / btw-question D9③ 投影收窄·通知面抑制执行点②] btw 线完成不进全局通知：
+  // 提示音与 sidebar 未读标记都是主视图面——线的回复/完成通知走 drawer badge per-line
+  // 通道（D7/D8 终态表），不落 `taiji:session-markers` localStorage（否则已删线的 vid
+  // 会成为永久死标记条目，违背 G4「不留下痕迹」）。派生键结构上到不了本面（message.complete
+  // 只携会话 id），本守卫针对线 vid 本体。
+  if (isBtwVirtualId(sessionId)) return
   // 1. 过滤 stopReason：aborted 不触发
   if (stopReason === 'aborted') return
 

@@ -52,6 +52,9 @@ import { QuotaMessageHandler } from './quota-message-handler.js'
 import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
+import { BtwMessageHandler } from './btw-message-handler.js'
+// BtwRoutingDeps（btw-question M2-b / B1 授权）：组合根构造 BtwService 后经 optional.btw 注入。
+import type { BtwRoutingDeps } from './btw-message-handler.js'
 import type { MessageHandlerContext, ErrorDetails } from './message-context.js'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 import type { ProjectStore } from '../services/project/project-store.js'
@@ -112,6 +115,13 @@ export interface RuntimeServerOptionalServices {
    * 可选：未注入时 reply 超限占位文案退化为「（见 runtime 日志）」，阈值仍用默认常量。
    */
   replyGuardResolver?: (sessionId: string) => string | null | undefined
+  /**
+   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄面 + 主会话解析。
+   * 组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此构造
+   * BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落 unknown_type——
+   * 生产组合根恒注入，缺省语义服务存量测试装配）。
+   */
+  btw?: BtwRoutingDeps
 }
 
 export class RuntimeServer implements IMessageBroker {
@@ -161,6 +171,8 @@ export class RuntimeServer implements IMessageBroker {
   private usageMessageHandler!: UsageMessageHandler
   private presetMessageHandler!: PresetMessageHandler
   private sessionManagerHandler!: SessionManagerHandler
+  /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
+  private btwMessageHandler?: BtwMessageHandler
 
   /**
    * u7c（crash-forensics D5）：滚动重启状态只读查询 provider（组合根 setRollingRestartStatusProvider
@@ -377,7 +389,7 @@ export class RuntimeServer implements IMessageBroker {
    * usage / preset——按对应 service 是否注入条件装配，守卫条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { workspace, project, worktree, terminal, quota, preset } = optional
+    const { workspace, project, worktree, terminal, quota, preset, btw } = optional
     if (this.gitService) {
       this.gitMessageHandler = new GitMessageHandler({
         ...messaging,
@@ -448,6 +460,17 @@ export class RuntimeServer implements IMessageBroker {
         presetService: preset,
       })
     }
+    if (btw) {
+      this.btwMessageHandler = new BtwMessageHandler({
+        ...messaging,
+        btwService: btw.service,
+        resolveMain: btw.resolveMain,
+        // state topic 'btw' 广播通道：组合根在 setServices 前已 setMessageBus（与
+        // sessionHandler ctx 同款时序前提，server.messageBus 在本阶段恒就绪）。
+        messageBus: this.messageBus,
+        nextPushId: () => this.broker.nextPushId(),
+      })
+    }
   }
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
@@ -499,6 +522,7 @@ export class RuntimeServer implements IMessageBroker {
     const quotaHandler = this.quotaMessageHandler
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
+    const btwHandler = this.btwMessageHandler
     return new Map([
       ['ping', (msg, ws) => this.broker.reply(ws, msg.id, 'pong', {})],
       // u7c（crash-forensics D5）：滚动重启状态只读查询（与 request 同名 reply；provider
@@ -518,6 +542,8 @@ export class RuntimeServer implements IMessageBroker {
       ...(quotaHandler ? quotaHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => quotaHandler.handleQuotaMessage(msg, ws)] as const) : []),
       ...usageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => usageHandler.handleUsageMessage(msg, ws)] as const),
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
+      // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
+      ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
     ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>)
   }
 

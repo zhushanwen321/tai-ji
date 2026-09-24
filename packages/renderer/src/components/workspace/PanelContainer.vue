@@ -146,6 +146,10 @@
                起由 PlanDocsPanel 承载（L2 文档 tab + file.read 正文 + 划选评论），面板内部
                docs 空时自渲染空态（D10），替代 u1-drawer-tab 的过渡空骨架。 -->
           <PlanDocsPanel v-else-if="drawerTab === 'plan'" :session-id="panelSessionId" />
+          <!-- btw tab（btw-question D7，M3-a）：旁路线面板。无条件注入（与 plan 同款——
+               tab 激活即渲染，面板自渲染线列表空态；D7② 焦点绑定经 :session-id=panelSessionId
+               透传当前焦点主会话，线列表按 mainSid 拉取） -->
+          <BtwPanel v-else-if="drawerTab === 'btw'" :session-id="panelSessionId" />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -194,6 +198,7 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
 import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
+import BtwPanel from '@/components/panel/BtwPanel.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'

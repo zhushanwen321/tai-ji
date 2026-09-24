@@ -90,14 +90,15 @@ function refreshOverlayState(): void {
 const isMinimized = computed(() => overlayState.value === 'minimized')
 
 /**
- * z-index 状态驱动（契约闭环）：expanded → 模态层（活跃顶层）；minimized/restored → 覆盖层
- * （低层级，为多 overlay 编排预留语义）；无状态（undefined）→ 不设 z-index（默认层）。
- * 单 dialog 场景值实际恒定，但契约要求状态驱动层级（design-token，非硬编码魔数）。
+ * z-index 状态驱动（契约闭环）：expanded → 用户待决确认层（--z-dialog，高于 modal——
+ * AP-2 规则③：plugin modal 打开期间新到的 ui-request 叠在其上，用户待决优先，token
+ * 定义在 renderer style.css）；minimized/restored → 覆盖层（低层级，为多 overlay 编排
+ * 预留语义）；无状态（undefined）→ 不设 z-index（默认层）。
  */
 const bandStyle = computed<Record<string, string> | undefined>(() => {
   const s = overlayState.value
   if (s === undefined) return undefined
-  return { zIndex: s === 'expanded' ? 'var(--z-modal)' : 'var(--z-overlay)' }
+  return { zIndex: s === 'expanded' ? 'var(--z-dialog)' : 'var(--z-overlay)' }
 })
 
 /** 收起当前 overlay（transition expanded→minimized；inject 缺失静默跳过） */

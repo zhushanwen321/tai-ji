@@ -34,6 +34,12 @@ export default taijiTestConfig({
             'logs/__tests__/**/*.test.ts',
             'images/__tests__/**/*.test.ts',
             'diagnostics/__tests__/**/*.test.ts',
+            // main-run-state：真实文件 IO（run-state marker/checkpoint 写盘）+ mock 驱动
+            // main.ts 真实 import 链（app.isPackaged=true 会执行打包 pin 分支改写
+            // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截面内
+            // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截面，pin 改写 env 后
+            // marker 落进真实 ~/.taiji）。
+            'test/main-run-state.test.ts',
           ],
           setupFiles: [FS_GUARD_PATH],
         },
@@ -45,7 +51,12 @@ export default taijiTestConfig({
           // 与 guarded 的 logs/__tests__ 前缀精确互斥，防同文件跨池重复收集。
           // ../scripts/__tests__：dev-instance-lib 纯函数层（MF-8，C-build-08 装配器可测层），
           // 同样无 electron 运行时依赖，随 main 纯函数测试一起跑（dev-0.9.19 合并并入）。
-          include: ['test/**/*.test.ts', 'update/__tests__/**/*.test.ts', '../scripts/__tests__/**/*.test.mjs'],
+          include: [
+            'test/**/*.test.ts',
+            '!test/main-run-state.test.ts',
+            'update/__tests__/**/*.test.ts',
+            '../scripts/__tests__/**/*.test.mjs',
+          ],
         },
       },
     ],

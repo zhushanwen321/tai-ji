@@ -171,6 +171,14 @@ export interface CrashJournalEvent {
   signal?: string | null
   /** [plugin-worker-crash] 崩溃时挂在该进程上的插件 id 集（trusted 进程最多 10 个受影响；plugin-host-process.ts）。 */
   pluginIds?: string[] | null
+  /**
+   * [pi crash] 崩溃时刻机器面 taiji 家族 pi 幸存者紧凑摘要（crash-correlation.ts
+   * captureMachinePiDigest，`alive=N; [pid/ppid] cmd…` 形态，≤1KB）：跨实例连坐归因的
+   * 机器面视图——死亡者自身不可见（证据在 exitCode/detailDigest），幸存者的 ppid 归属
+   * 可判「本实例孤儿化」与「他实例仍持有同族进程」。空串 = 未采到（ps 失败等，
+   * 「不知道 ≠ 没打点」）。
+   */
+  machinePiDigest?: string | null
 }
 
 /** 台账文件角色：main writer 写 main.jsonl，runtime writer 写 runtime.jsonl（D1 双文件）。 */

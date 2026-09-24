@@ -1,44 +1,28 @@
-import { open, type FileHandle } from 'node:fs/promises'
-import { closeSync, openSync, readSync } from 'node:fs'
+import {
+  readFirstJsonlLine,
+  readFirstJsonlLineSync,
+  type SessionHeader,
+} from '@zhushanwen/session-core'
 
 /**
- * [ext-simplify-18 D5] session 文件首行 header 读取的包内单源（原 subagents.ts / find.ts
- * 两份 async 副本 + tool-handler.ts 一份 sync 副本合一）。不进 shared——跨包第二消费方
- * 不存在（runtime 侧首行读取是另一形态 + 分层禁反向 import，设计负面清单同口径）。
+ * [session-reader-shared-core Phase 1] session 文件首行 header 读取的包内单源（原
+ * subagents.ts / find.ts 两份 async 副本 + tool-handler.ts 一份 sync 副本合一后的单源）。
+ *
+ * 字节原语（buffer 管理/续读/CRLF/空文件）已收敛至基座 `readFirstJsonlLine`（sync/async
+ * 双形态）——本模块只剩两件 reader 私有事：
+ * ① **header 谓词薄包装**（G4 红线，设计 §5 Phase 0）：reader 仅要求 `type==='session'`
+ *    且 `id` 为 string，cwd/parentSession 可缺。runtime 侧「id+cwd 非空」严谓词是不同的
+ *    行为契约（缺 cwd 的 header 在 reader 候选集必须可见），谓词语义绝不统一进基座；
+ * ② **错误分流薄包装**：旧副本契约是「任何失败都视为无 header → undefined/null」，基座
+ *    原语 IO 错误上抛（错误分类留给有消费方的调用侧），reader 无错误分类消费方，catch-all
+ *    收敛回旧契约。
  */
 
-/** session header（首行 type==='session' entry 的消费子集）。 */
-export interface SessionHeader {
-  id: string
-  cwd?: string
-  parentSession?: string
-}
+export type { SessionHeader }
 
 /**
- * 首行读取 buffer 上限。header 超 8KB 的极端情况会截断致 parse 失败（parseSessionHeader
- * 返回 null）——session header（id/cwd/parentSession）实测 < 300 字节，8KB 约 27 倍余量。
+ * 解析 header 首行为 SessionHeader（谓词薄包装）。非 session 行/缺 id/坏 JSON → null。
  */
-export const HEADER_READ_BYTES = 8192
-
-/** 读文件首行（header）。定长 8KB 一次 read；空文件/读失败返回 undefined。 */
-export async function readSessionHeaderFirstLine(path: string): Promise<string | undefined> {
-  let fh: FileHandle | undefined
-  try {
-    fh = await open(path, 'r')
-    const buf = Buffer.alloc(HEADER_READ_BYTES)
-    const { bytesRead } = await fh.read(buf, 0, HEADER_READ_BYTES, 0)
-    if (bytesRead === 0) return undefined
-    const text = buf.subarray(0, bytesRead).toString('utf8')
-    const nl = text.indexOf('\n')
-    return nl === -1 ? text : text.slice(0, nl)
-  } catch {
-    return undefined
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-}
-
-/** 解析 header 首行为 SessionHeader。非 session 行/缺 id → null。 */
 export function parseSessionHeader(line: string | undefined): SessionHeader | null {
   if (!line) return null
   let raw: unknown
@@ -56,48 +40,25 @@ export function parseSessionHeader(line: string | undefined): SessionHeader | nu
   return h
 }
 
-/** readSessionHeaderIdSync 读首行的 buffer 上限。session header 实测 < 300 字节，4KB 足够。 */
-const SYNC_HEADER_READ_BYTES = 4096
+/** 读文件首行（header）薄包装：基座原语 + IO 失败收敛 undefined（空文件基座已返 undefined）。 */
+export async function readSessionHeaderFirstLine(path: string): Promise<string | undefined> {
+  try {
+    return await readFirstJsonlLine(path)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * 同步读 session 文件首行 header，返回 type==='session' 的 id。
- *
- * 任何异常（文件不存在/空文件/解析失败/type 不符）返回 undefined。与 async 版
- * readSessionHeaderFirstLine/parseSessionHeader 同构（定长 buffer 读首行 + JSON.parse +
- * type 校验），但用同步 fs API（resolveSessionId 内仅调用 1 次，同步开销可接受），
- * 窗口取 4KB（仅取 id）——sync 形态与窗口差异是刻意的调用上下文适配，独立常量、
- * 不与 async 版 8KB 强行统一。
+ * 任何失败（文件不存在/空文件/解析失败/type 不符）→ undefined（旧 sync 副本契约不变）。
  */
 export function readSessionHeaderIdSync(filePath: string): string | undefined {
-  let fd: number | undefined
+  let line: string | undefined
   try {
-    fd = openSync(filePath, 'r')
-    const buf = Buffer.alloc(SYNC_HEADER_READ_BYTES)
-    const bytesRead = readSync(fd, buf, 0, SYNC_HEADER_READ_BYTES, 0)
-    if (bytesRead === 0) return undefined
-    const text = buf.subarray(0, bytesRead).toString('utf8')
-    const nl = text.indexOf('\n')
-    const line = nl === -1 ? text : text.slice(0, nl)
-    let raw: unknown
-    try {
-      raw = JSON.parse(line)
-    } catch {
-      return undefined
-    }
-    if (typeof raw !== 'object' || raw === null) return undefined
-    const o = raw as Record<string, unknown>
-    if (o.type !== 'session' || typeof o.id !== 'string') return undefined
-    return o.id
+    line = readFirstJsonlLineSync(filePath)
   } catch {
     return undefined
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd)
-      } catch {
-        // closeSync 失败：fd 可能已无效，header 数据已读取，关闭失败不影响结果（best-effort）
-        void fd
-      }
-    }
   }
+  return parseSessionHeader(line)?.id
 }

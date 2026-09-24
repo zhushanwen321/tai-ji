@@ -17,8 +17,11 @@
  *   targetPath 构造（encodeCwd(resolve(cwd))）
  *
  * 夹具：os.tmpdir() 真实形态 header jsonl（与 scan-external.test.ts 同手法），afterAll 清理。
- * copy 失败注入：vi.mock 拦截 node:fs/promises.copyFile（failNext 单次翻转，其余透传 actual），
- * 平台无关、不依赖权限位。
+ * write 相位故障注入：stub source 的 write 闭包抛普通 Error（编排层相位分离 catch 的
+ * import_copy_failed 重包装路径），平台无关、不依赖权限位。**禁止**用文件级
+ * vi.mock('node:fs/promises') 注入 copy 失败——文件级 fs mock 会整体覆盖 fs-guard 的
+ * 全局 mock，本文件 fs/promises 防线即失效，叠加 env 未钉即静默写真实数据目录
+ * （2026-09-22 污染事故根因，见 test-guard/fs-guard.ts「边界」注释）。
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -26,9 +29,6 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ImportSourceKind } from '@taiji/shared'
-
-// copyFile 失败注入开关（vi.hoisted：vi.mock 工厂提升后仍可引用）。
-const copyFailureState = vi.hoisted(() => ({ failNext: false }))
 
 // getPiGlobalAgentDir 定向覆盖（缺省 rootDir 用例）：真实推导在 TAIJI_AGENT_DATA_DIR 指向
 // dev/真实数据目录时会解析到 ~/.pi/agent（用户 pi CLI 目录）——fs-guard 会正确拦截。
@@ -41,20 +41,6 @@ vi.mock('../infra/pi/pi-maintenance.js', async (importOriginal) => {
   return {
     ...actual,
     getPiGlobalAgentDir: () => piGlobalDirState.dir,
-  }
-})
-
-vi.mock('node:fs/promises', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>()
-  return {
-    ...actual,
-    copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
-      if (copyFailureState.failNext) {
-        copyFailureState.failNext = false
-        throw new Error('simulated copy failure (disk full)')
-      }
-      return actual.copyFile(...args)
-    },
   }
 })
 
@@ -337,16 +323,32 @@ describe('ImportService.importSession', () => {
     expect(readFileSync(fulfilledC.value.targetPath, 'utf-8')).toContain(fulfilledC.value.sessionId)
   })
 
-  it('copy 失败：无残留 + 正式名未落地 + 互斥链异常安全第二跳成功', async () => {
-    const root = join(fixturesRoot, 'copyfail-root')
-    mkdirSync(root, { recursive: true })
+  it('write 相位环境故障（非领域错误）：import_copy_failed 重包装 + 无残留 + 正式名未落地 + 互斥链异常安全第二跳成功', async () => {
+    // 故障注入走 stub source 的 write 闭包（failFirst 单次翻转）而非文件级 fs mock——
+    // 见文件头「禁止文件级 vi.mock('node:fs/promises')」注。真实 copyFile 链路已由
+    // 其余导入用例全量覆盖，本用例锁编排层对 write 相位环境故障的语义：catch 重包装
+    // import_copy_failed（磁盘满等非领域错误）+ tmp 主动清理 + 互斥链可复用。
     const cwd = '/tmp/copyfail-cwd'
-    const src = join(root, 'cf.jsonl')
-    writeSessionJsonl(src, 'copyfail-id-0001', cwd, 'CopyFail')
-    const svc = makeImportService()
+    let failFirst = true
+    const stub: SessionImportSource = {
+      kind: 'pi',
+      listCandidates: async () => ({ total: 0, items: [], dirs: [] }),
+      prepareImport: async () => ({
+        header: { id: 'copyfail-id-0001', timestamp: '2026-01-01T00:00:00.000Z', cwd },
+        fileName: 'cf.jsonl',
+        write: async (tmpPath) => {
+          if (failFirst) {
+            failFirst = false
+            throw new Error('simulated write failure (disk full)')
+          }
+          writeFileSync(tmpPath, `${JSON.stringify({ type: 'session', version: 1, id: 'copyfail-id-0001', cwd, timestamp: '2026-01-01T00:00:00.000Z' })}\n`)
+        },
+        degradations: [],
+      }),
+    }
+    const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>([['pi', stub]]))
 
-    copyFailureState.failNext = true
-    await expect(catchCode(() => svc.importSession({ sourcePath: src, projectId: 'proj-1' })))
+    await expect(catchCode(() => svc.importSession({ sourcePath: '/stub/source-not-read-by-stub', projectId: 'proj-1' })))
       .resolves.toBe('import_copy_failed')
 
     // 无残留：目标目录无 .tmp-import- 临时名，正式名从未落地（重试不被去重拦截，D1 原子性）
@@ -356,7 +358,7 @@ describe('ImportService.importSession', () => {
     expect(existsSync(join(targetDir, 'cf.jsonl'))).toBe(false)
 
     // 第二跳：互斥链未被前序失败污染（r4-S1 异常安全）
-    const second = await svc.importSession({ sourcePath: src, projectId: 'proj-1' })
+    const second = await svc.importSession({ sourcePath: '/stub/source-not-read-by-stub', projectId: 'proj-1' })
     expect(second.sessionId).toBe('copyfail-id-0001')
     expect(existsSync(second.targetPath)).toBe(true)
   })

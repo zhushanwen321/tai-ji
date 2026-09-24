@@ -19,8 +19,12 @@
  * bashTask tab（2026-09 background-task-sidebar-view D5①）：后台命令详情（命令全文/元信息/输出尾部跟随/终止）。
  * plan tab（2026-09 plan 模式重设计 u1-drawer-tab）：计划产物（agent 按 skill 流程产出的多文档审阅面）。
  * 无打开参数（OpenDrawerOptions 零加员，bashTask 同款先例）；自动打开经 ADR-0053 per-session
- * pendingOpen 语义（renderer 接线，core 只持 tab 枚举成员）。 */
-export type SideDrawerTab = 'terminal' | 'browser' | 'git' | 'doc' | 'detail' | 'subagent' | 'workflow' | 'bashTask' | 'plan'
+ * pendingOpen 语义（renderer 接线，core 只持 tab 枚举成员）。
+ * btw tab（btw-question D7，M3-a 第 10 员）：drawer 旁路线面板（线列表 + MessageStream
+ * :session-id=vid + Composer variant=panel :show-btw=false + fork pill）。内容由壳层
+ * （PanelContainer）经默认 slot v-if chain 注入 BtwPanel（留壳 slot 模式）；打开经
+ * openDrawerTab('btw')（composer btw 按钮入口归 M3-b）。无打开参数（零加员先例）。 */
+export type SideDrawerTab = 'terminal' | 'browser' | 'git' | 'doc' | 'detail' | 'subagent' | 'workflow' | 'bashTask' | 'plan' | 'btw'
 
 /** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab） */
 export interface OpenDrawerOptions {
@@ -44,6 +48,12 @@ export interface DrawerControlState {
   /** bashTask tab 当前展示的后台任务 id（registry taskId，background-task-sidebar-view D5①）；undefined=未选中（bashTask tab 显空态）。
    *  可选成员：默认控制态（core control.ts createDefaultControlState）无需初始化即可满足本接口。 */
   selectedBackgroundTaskId?: string
+  /** btw tab 当前查看的旁路线 vid（`btw:<piSessionId>`，由 BtwPanel 选中线时写入）；undefined=未查看。
+   *  D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段
+   *  三分量 → chat store 注入 evictIfNeeded，入口刷新该线 recency——查看中恒不落阈值驱逐）；
+   *  切走/关 drawer 不清（D7④ 切回恢复面板语义），predicate 已含 isOpen/activeTab 双闸不泄漏豁免。
+   *  可选成员：默认控制态零加员即可满足本接口（selectedBackgroundTaskId 同款先例）。 */
+  selectedBtwVid?: string
 }
 
 /** openSubagent 的参数（D3/D4：drawer SubagentTab 复用 MessageStream，virtualId 由调用方算好传入） */

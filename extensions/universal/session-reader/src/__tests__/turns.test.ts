@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { segmentTurns } from '../core/turns.js'
-import type { Entry } from '../core/parser.js'
-import { parseSessionFile } from '../core/parser.js'
+import { parseSessionFile, type Entry } from '@zhushanwen/session-core'
 import { buildTreeView } from '../core/tree.js'
 import { REAL_SESSION, HAS_REAL_SESSION } from './real-data.js'
 

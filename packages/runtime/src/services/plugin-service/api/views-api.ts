@@ -23,9 +23,11 @@ export interface ViewService {
   mountPoints: string[]
   /**
    * 视图更新处理（校验 + 下行广播 plugin:viewUpdate）。
-   * ES2：无活跃 session 时由实现方丢弃广播 + warning；未知 viewId 仍广播（渲染端按需激活兜底）。
+   * [plugin-header-action-modal-points D1/u5b] payload.sessionId 显式必填——归属投递按
+   * 调用方声明的会话（modal 内容绑打开时所在会话）；旧「ActiveSessionResolver 盖戳猜测
+   * 第一个活跃会话」路径已删除（D1 被否④：空闲会话常态下推送被丢弃/落错分区）。
    */
-  handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[]) => void
+  handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], sessionId: string) => void
 }
 
 /**
@@ -45,6 +47,9 @@ export function registerViewRpcHandlers(
     // 畸形即抛 INVALID_*，不触发广播。
     const pluginId = asString(params.pluginId, 'pluginId')
     const viewId = asSafeKey(params.viewId, 'viewId')
+    // [D1/u5b] sessionId 显式必填（E15）：缺/非法 → INVALID_SESSION_ID 拒绝，不走
+    // ActiveSessionResolver 盖戳猜测（被否④），按 payload.sessionId 定向投递 publish。
+    const sessionId = asSafeKey(params.sessionId, 'sessionId')
     const guiTree = params.guiTree
     if (!Array.isArray(guiTree)) {
       throw errorWithCode(
@@ -53,7 +58,7 @@ export function registerViewRpcHandlers(
       )
     }
 
-    service.handleViewUpdate(pluginId, viewId, guiTree as GuiComponent[])
+    service.handleViewUpdate(pluginId, viewId, guiTree as GuiComponent[], sessionId)
 
     return { updated: true }
   })
@@ -67,20 +72,22 @@ export function registerViewRpcHandlers(
 /**
  * 创建 Worker 侧 Views API 代理对象。
  *
- * update(viewId, guiTree)：经 RPC 把视图树推给主线程 → 校验 + 广播 plugin:viewUpdate。
+ * update(viewId, guiTree, opts)：经 RPC 把视图树推给主线程 → 校验 + 按 opts.sessionId
+ * 定向广播 plugin:viewUpdate。sessionId 显式必填（D1：modal 内容绑打开时所在会话；
+ * 缺省在 RPC 层拒绝 INVALID_SESSION_ID）。
  * listMountPoints()：经 RPC 查询 runtime 中继的挂载点集合。
  */
 export function createViewsApi(
   rpcClient: PluginRpcClient,
   pluginId: string,
 ): {
-  update(viewId: string, guiTree: GuiComponent[]): Promise<void>
+  update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string }): Promise<void>
   listMountPoints(): Promise<string[]>
 } {
   return {
-    update: (viewId: string, guiTree: GuiComponent[]) =>
+    update: (viewId: string, guiTree: GuiComponent[], opts: { sessionId: string }) =>
       rpcClient
-        .request('plugin.views.update', { pluginId, viewId, guiTree })
+        .request('plugin.views.update', { pluginId, viewId, guiTree, sessionId: opts.sessionId })
         .then(() => {}),
 
     listMountPoints: () =>

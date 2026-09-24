@@ -355,6 +355,25 @@ describe('W12→W18 阶段 4：session.subagents 数据源 = entry 扫描派生�
     } as PiTranslatedEvent])
     expect(invalidations).toHaveLength(0)
   })
+
+  it('customType 放宽：非 record 域主信号（pi-scheduler:task）同样触发失效回调并透传 customType', () => {
+    // D5「失效转发的三段链路」②③：PiTranslatedEvent / interpreter 回调的 customType
+    // 已从三字面量放宽为 string——镜像域信号原样透传，无字面量过滤。
+    const sid = 'w18-sub-relaxed'
+    const { interpreter, invalidations } = makeInterpreter(sid)
+    interpreter.interpret([{ kind: 'record-entry-appended', customType: 'pi-scheduler:task' } as PiTranslatedEvent])
+    expect(invalidations).toEqual([{ sessionId: sid, customType: 'pi-scheduler:task' }])
+  })
+
+  it('customType 放宽：无订阅者语境（onRecordEntriesInvalidated 缺省）派发 no-op 不炸', () => {
+    // 派发层（组合根/u2c）无订阅者 → no-op；interpreter 层契约 = 回调缺省时
+    // 可选链跳过，任何 customType 主信号都不抛错。
+    const sid = 'w18-sub-no-subscriber'
+    const frames: ServerMessage[] = []
+    const interpreter = new EventInterpreter(sid, { send: (m) => { frames.push(m) } })
+    expect(() => interpreter.interpret([{ kind: 'record-entry-appended', customType: 'pi-scheduler:task' } as PiTranslatedEvent])).not.toThrow()
+    expect(frames).toHaveLength(0)
+  })
 })
 
 describe('W12 阶段 1：session.commands publish 数据源 = commands 实例快照（mock RPC 层）', () => {

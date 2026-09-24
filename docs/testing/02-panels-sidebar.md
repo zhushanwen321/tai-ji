@@ -308,7 +308,7 @@ test.describe('文件树 E2E', () => {
 ---
 
 
-> 覆盖：SideDrawer 抽屉（5 tab：terminal/browser/git/doc/detail）、文件预览（detail tab，diff/preview 切换）、git 面板
+> 覆盖：SideDrawer 抽屉（10 tab：terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw，枚举以 DrawerPanel 实装为准）、文件预览（detail tab，diff/preview 切换）、git 面板
 >
 > 先读 [00-overview.md](./00-overview.md) 理解双轨制和公共前置。
 
@@ -328,7 +328,7 @@ SideDrawer 是 workspace-body 级的右侧抽屉，承载 5 个 tab：
 
 ## 2. 组件结构概述
 
-`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（terminal/browser/git/doc/detail，`drawer-tab-{key}` testid）、钉住按钮（`drawer-pin`）、关闭按钮（`drawer-close`）。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）。
+`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、钉住按钮（`drawer-pin`）、关闭按钮（`drawer-close`）。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
 
 ## 3. data-testid 清单
 
@@ -344,7 +344,7 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 | `detail-binary` | DetailPane.vue | 二进制文件 |
 | `detail-content` | DetailPane.vue | 内容区（恒显，加载完成后） |
 | `detail-truncated` | DetailPane.vue | 文件 >1MB 截断 |
-| `drawer-tab-{key}` | DrawerPanel.vue | tab 栏按钮（terminal/browser/git/doc/detail 等） |
+| `drawer-tab-{key}` | DrawerPanel.vue | tab 栏按钮（terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw） |
 | `drawer-panel` / `drawer-pin` / `drawer-close` | DrawerPanel.vue | 抽屉容器 / 钉住 / 关闭 |
 
 > GitPanel 仅有 `git-inject-file` 一个 testid，git 状态内容查询仍靠内部元素文本；CommandDocPanel 无 testid。bashTask tab（后台命令详情）的完整 testid 清单见 [02-panels-sidebar.md](./02-panels-sidebar.md)。
@@ -793,7 +793,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 | `gui-columns` | Columns | `rendering-protocol/primitives/Columns.vue` |
 | `gui-list-tree` | ListTree | `rendering-protocol/primitives/ListTree.vue` |
 | `tool-block-header` | Block tool 块 header（点击展开） | `features/chat/Block.vue` |
-| `drawer-tab-{key}` | DrawerPanel tab 按钮（key=terminal/browser/git/doc/detail） | `features/drawer/DrawerPanel.vue` |
+| `drawer-tab-{key}` | DrawerPanel tab 按钮（key=terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw） | `features/drawer/DrawerPanel.vue` |
 
 ## 2. 渲染路径概述
 

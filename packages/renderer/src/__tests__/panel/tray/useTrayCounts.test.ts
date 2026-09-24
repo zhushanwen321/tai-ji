@@ -401,3 +401,27 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
     expect(data().bashPartition.value.fetchFailed).toBe(true)
   })
 })
+
+describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不投影 subagent/workflow）', () => {
+  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首拉 RPC；bash（线自身任务）照常', async () => {
+    const vid = 'btw:line-tray-1'
+    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播腿落分区）
+    useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
+    useWorkflowStore().applyRecords(vid, [makeWorkflow({ runId: 'wf-line', status: 'running' })])
+    // bash = 线自身后台命令（非派生虚拟键，抑制面不覆盖）
+    partitionState = reactive({
+      tasks: [makeTask({ taskId: 't-line' })], loaded: true, corrupted: false, fetchFailed: false,
+    })
+
+    mountHarness(vid)
+
+    expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().lists.subagent.running.value).toHaveLength(0)
+    expect(data().lists.workflow.running.value).toHaveLength(0)
+    expect(data().counts.value.bash.total).toBe(1) // 边界：bash 不在派生抑制面
+    // 首拉被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
+    expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
+    expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
+  })
+})

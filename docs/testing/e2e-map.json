@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）/ ZCODE（zcode 引擎会话库域）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill 编辑触发 reload 非破坏化真实 app 轨）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -179,7 +179,7 @@
       "run": "npx playwright test --project=electron",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言的 @taiji/ui 渲染面——gui-components.spec.ts 的 8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）+ v6-shell-baseline 打开 drawer 后断言的容器（renderer `components/workspace/PanelContainer.vue` 渲染 `features/drawer/DrawerPanel.vue`，`aside[aria-label=\"侧边抽屉\"]` 即其根）；改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。（归属澄清：v6-shell-baseline 的 shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 属 renderer 的 `packages/renderer/src/components/panel/Composer.vue`（输入区 ComposerInput 来自 @taiji/ui）——前者由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。"
+      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言的 @taiji/ui 渲染面——gui-components.spec.ts 的 8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）+ v6-shell-baseline 打开 drawer 后断言的容器（renderer `components/workspace/PanelContainer.vue` 渲染 `features/drawer/DrawerPanel.vue`，`aside[aria-label=\"侧边抽屉\"]` 即其根）；改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。（归属澄清：v6-shell-baseline 的 shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 属 renderer 的 `packages/renderer/src/components/panel/Composer.vue`（输入区 ComposerInput 来自 @taiji/ui）——前者由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。[2026-09-22 btw-question M4-b] MOCK 轨 5 条单测化沉淀归属登记（设计 §4 e2e 影响面：5 条确定性断言随各单元 L1 落地，不占 e2e 执行面）——S1 主 turn 中 btw 提问·双流隔离 → packages/runtime/src/transport/__tests__/btw-p-isolation.test.ts（P-isolation 分区无串扰）+ packages/runtime/src/services/session/__tests__/btw-no-abort.test.ts（P-no-abort 主 turn 面）；S2 btw 第二轮携带自身上文 → packages/runtime/src/__tests__/btw-ensure-branch.test.ts（同 vid 续问 ensureProcess 分支=第二轮落同一线；LLM 上文质量面归 A2/L4，mock 只承载路由半边）；S5 删主级联 → packages/runtime/src/services/session/__tests__/btw-cascade.test.ts（P-cascade + 三路并发收敛 + P-invisible runtime 面）；S6 持久恢复 → packages/runtime/src/services/session/__tests__/btw-persist-reload.test.ts（重建/孤儿补账/checkpoint 豁免）+ packages/renderer/src/__tests__/stores/btw-replay.test.ts（文件→chatStore 分区回放）；S9 交互路由 → packages/renderer/src/__tests__/panel/btw-overlay-routing.test.ts（vid 路由 + 终态机四行 + 外溢隔离）。scope 核对：btw 改动面已在本 rule 既有 scope 内，无需扩。"
     },
     {
       "id": "E2E-MOCK-02",
@@ -276,6 +276,32 @@
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。"
+    },
+    {
+      "id": "E2E-BTW-01",
+      "summary": "btw S7 双进程并发不变量（真实进程轨）：主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort / 无 steer 注入 / 主流历史不含 btw 内容",
+      "scope": [
+        "packages/runtime/src/services/session/btw-service.ts",
+        "packages/runtime/src/services/session/session-lifecycle.ts",
+        "packages/runtime/src/transport/btw-message-handler.ts",
+        "packages/runtime/src/transport/session-message-handler.ts",
+        "packages/shared/src/protocol.ts",
+        "packages/shared/src/virtual-session-id.ts",
+        "e2e/btw-turn-isolation.spec.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/btw-turn-isolation.spec.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_PI_LIVE=1 npx playwright test e2e/btw-turn-isolation.spec.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 归宿（来源设计 btw-question §4 S7 负面场景 + impl-plan 验收计划 A7「L3 脚本」；M4-b 只交付可运行资产，执行归阶段 5 验收按改动面空载串行，PR/merge/CI 门禁不跑——AGENTS.md e2e 执行准则）。执行侧六要素：①触发 = scope diff 命中（btw 会话生命周期/消息路由/协议帧/vid 工厂 + spec 自身）时开发期执行，双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail，防全量扫跑烧 token）；前置 = real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK——launch-real pre-flight fail-fast 指路）+ 空载串行（serial=是）。②预算 = test.setTimeout 300s；主 turn 在飞窗口旋钮 = 主 prompt 的 bash `sleep 40`（真实 LLM 三轮 btw 问答须在窗口内完成——窗口不足属预算校准，调 sleep 秒数，不放宽断言）；单事件等待 30-90s。③事件 = listen WS 订阅 mainSid 与 btw vid 的 message.message_start / message.complete（失败打印 seen types，按 AGENTS 准则区分「LLM 推进慢」与「真死锁」）+ message.error / send.rejected / session.exited 负向监听。④断言 = 设计 S7 三条：主 turn 正常 complete 且 stopReason≠aborted，且第 3 轮 btw complete 时主 turn 尚未 complete（窗口重叠）/ 主会话 pi session JSONL 全文无 steer·abort 痕迹（MAIN 哨兵恰 1 次 + 无 stopReason=aborted 终态 + 无 message.error/send.rejected/session.exited 帧）/ 主流历史不含三问哨兵（滚动检查 = JSONL 全文扫描）；正面对照 = btw 线会话文件含三问哨兵（证明问题确实落线、缺席主流才有意义）。⑤失败归档 = writeDiag 落 /tmp/s7-*.json（事件类型序 + seen types + runtime/pi 日志尾 + 目录清单）+ playwright trace/screenshot/video（retain-on-failure）+ <dataDir>/logs/（pi stdout tee = pi 卡死时唯一证据）。⑥重试禁令 = 失败先读 trace/diag 归因（窗口不足→预算旋钮；事件缺席→seen types 分诊），禁止不归因直接重试、禁止放宽断言或膨胀预算换绿灯（AGENTS.md e2e 执行准则）。layer=L3 按 impl-plan A7 方式列（真实 LLM）：faux 统一队列无法表达「主长 turn × btw 三短问」的进程间异构节奏（两进程独立 shift 同一序列、turn 边界对齐），model-keyed 分道又被 btw spawn 的 inheritSessionModel（model:undefined，无 --model argv）挡死——故不翻 L2.5。[2026-09-22 M4-b] scope 核对（计划 §4 圈定清单）：MOCK-01/02、REAL-01、SKILLRELOAD×4、EQUIV-01、VISUAL-01 既有 scope 已覆盖 btw 改动面（packages/renderer/src/**、services/session/**、core/domain/**、apps/electron/**、e2e/visual*），无需扩；差异清零披露见 M4-b test_evidence。[2026-09-23 阶段 5 A7 执行适配] 凭证源目录新增 env 覆盖 TAIJI_S7_CREDENTIAL_SOURCE（spec sourceAgentDir 只读该目录、写面恒为临时 dataDir）——真实安装的 auth.json/models.json 不必然在默认 agent 子树（本机真实目录无此二文件，dev 实例目录有），无覆盖时探测默认位置、缺失即 skip 不 fail，行为不变。"
     },
     {
       "id": "E2E-SKILLRELOAD-01",
@@ -489,7 +515,7 @@
       "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动面跑",
-      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，盘面实为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = pi-fixture.ts REAL_PI_READY）属开发阶段按改动面空载串行执行，无 CI/门禁触发面，不在本表登记独立 rule"
+      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，盘面实为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = pi-fixture.ts REAL_PI_READY）属开发阶段按改动面空载串行执行，无 CI/门禁触发面，不在本表登记独立 rule。[2026-09-22 btw-question M4-b 评估结论更新] 设计 §4 登记对账段：btw 不新增 entry 类型，重载链复用 applyEntry 全量回放 → **btw 分区纳入等价性覆盖面（live≡reload 构造性成立）**；btw 回放/驱逐语义的承接单测 = packages/renderer/src/__tests__/stores/btw-replay.test.ts（回放接线 + live≡reload 等价口径 describe）+ packages/core/src/domain/chat/__tests__/chat-lru-btw.test.ts（主驱逐不联动 btw 分区 + btw 驱逐同驱派生键）。scope 核对：btw 改动面（services/session/**、core/domain/chat/**）已在本 rule scope 内，无需扩；本 rule 保持不跑真实 LLM 面（equivalence real-pi 池按改动面开发期另行执行）。"
     },
     {
       "id": "E2E-EQUIV-02",
@@ -799,14 +825,14 @@
       "id": "E2E-BATCH-06",
       "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R2 已激活并执行 PASS 2026-09-17 A6）",
       "scope": [
-        "extensions/universal/subagent-workflow/src/interface/helpers.ts",
+        "extensions/universal/subagent-workflow/src/workflow-notify.ts",
         "packages/subagent-core/src/execution/notify/**"
       ],
       "layer": "L2.5",
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/helpers.ts"
+          "ref": "extensions/universal/subagent-workflow/src/workflow-notify.ts"
         },
         {
           "kind": "harness",
@@ -819,6 +845,78 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+    },
+    {
+      "id": "E2E-MODELS-02",
+      "summary": "provider-live-sync 真机链：运行中新增/删除 provider·模型·凭据 → 可直接切换（真实 pi 进程 + 本地 mock LLM，零外网）",
+      "scope": [
+        "extensions/universal/provider-live-sync/**",
+        "packages/runtime/src/services/session/session-model-control.ts",
+        "packages/runtime/src/transport/model-message-handler.ts",
+        "packages/runtime/src/services/provider-config-helper.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-provider-live-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "node scripts/verify-provider-live-sync.mjs",
+      "owner": "extensions/universal/provider-live-sync",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "faux 轨：真实 pi 二进制 + 真实扩展 + 本地 mock LLM（OpenAI chat-completions 流式，随机端口）——零 token 零外网；断言基线（新增前 Model not found）/ 新增后可直接切换 + get_state 真生效 / model_change 落 JSONL / 删除生效且其它模型无塌陷 / 扩展日志。验收结果与测试时序陷阱见 .tmp/tech-design/acceptance/pi-live-provider-e2e-RESULTS.md（设计过程档案）"
+    },
+    {
+      "id": "E2E-PLUGINCONTRACT-01",
+      "summary": "verify-plugin-contract：插件 API 契约硬化脚本轨（CT-D2 命令链+复合键防劫持 / CT-D1 session 事件端到端+events 降级 / CT-D1b 激活订阅定向投递）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/**",
+        "packages/runtime/src/transport/**",
+        "resources/plugins/**",
+        "scripts/verify-plugin-contract.sh",
+        "scripts/bundle-extensions.mjs",
+        "scripts/prepare-builtin-plugins.sh"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-plugin-contract.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "bash scripts/verify-plugin-contract.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（2026-09-20 阶段6收尾裁决，impl-plan 残留风险 #5 闭环）：开发期按改动面手工跑（验收计划表回归项），不在 CI 门禁（真实 pi 子进程链路，CI 只跑 unit 轨同口径）；自含 pnpm install、隔离 TAIJI_AGENT_DATA_DIR、空载串行；CT-D1b 段 SDK API 未就位时 SKIP 不计失败（u5b 已落地转硬 PASS）；标记行协议与 exit code 一致；scope 含插件装载链两脚本（bundle-extensions 引擎副本重建 + prepare-builtin-plugins 插件装载前置，u6a 验收串联项）——链变更随契约脚本一并回归"
+    },
+    {
+      "id": "E2E-SAMPLING-01",
+      "summary": "render-sampling 渲染采样管道：真机渲染验收/基线采集共用管道（设计期工具，R3 归档 docs/testing/render-sampling.md）",
+      "scope": [
+        "scripts/render-sampling/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/cli.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/render-sampling/lib.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（人工预飞形态——管道冒烟需真机 CDP：node scripts/render-sampling/cli.mjs --cdp-port <端口> --sample <样本.md> --out <目录> --name <名>；改管道本身时按 docs/testing/render-sampling.md 预飞纪律人工跑通）",
+      "owner": "docs/testing",
+      "authority": "docs/testing/render-sampling.md",
+      "note": "R3 归档态（2026-09-20 收尾登记）：管道六环节 SSOT = render-sampling.md，脚本与文档同 commit 维护；场景脚本自写不进本目录；on-diff = 改管道本身时提醒预飞，无独立 CI 环节"
     },
     {
       "id": "E2E-BATCH-07",

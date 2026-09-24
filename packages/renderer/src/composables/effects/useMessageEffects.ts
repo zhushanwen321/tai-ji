@@ -23,7 +23,7 @@ import { handleCompletion } from '@/composables/effects/useCompletionNotify'
 import { consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { invalidateStreamSubscription, subscribeSession } from '@taiji/core'
 import type { InboundEffects } from '@taiji/core'
-import { subagentVirtualId } from '@taiji/shared'
+import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } from '@taiji/shared'
 
 const t = i18n.global.t
@@ -215,7 +215,11 @@ function handleSubagentEntries(
   subagentId: string,
   entries: Array<PiEntry | PiToolCallEntryForm>,
 ): void {
-  useChatStore().applySubagentEntries(subagentVirtualId(sessionId, subagentId), entries)
+  // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
+  // 帧 sessionId 是 bus 路由键（btw 线 = vid 原样到达），键构造前先 extract——vid 不入键
+  //（工厂对 `btw:` 前缀 fail-fast，未翻译即 throw 断 effects 链）；非 btw 输入零变化。
+  const owner = isBtwVirtualId(sessionId) ? extractBtwPiSessionId(sessionId) : sessionId
+  useChatStore().applySubagentEntries(subagentVirtualId(owner, subagentId), entries)
 }
 
 /** 处理 session.workflowUpdate 事件（workflow 增量信号兜底）。update 锚定 protocol SSOT（MF-4）。 */

@@ -3,7 +3,7 @@ import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, B
 import type { StatusBarItem, PluginInfo } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
-import type { ServerMessage } from '@taiji/shared'
+import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
 import { PluginRegistry } from './plugin-registry.js'
 import { PluginStorage } from './plugin-storage.js'
 import { SessionDataStore } from './session-data-store.js'
@@ -14,6 +14,7 @@ import { registerAllRpcMethods } from './plugin-rpc-setup.js'
 import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
+import { EntryInvalidationDispatch, ENTRY_INVALIDATION_NOTIFY_METHOD } from './plugin-entry-invalidation-dispatch.js'
 import { executeCommand as executePluginCommand, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
 import type { InstallResult } from '../ports/plugin-installer.js'
 import { handleBridgeToolExecute, handleBridgeEvent, handleBridgeIntercept, BridgeToolCache, PI_HOOK_EVENT_MAP } from './bridge-interop.js'
@@ -26,6 +27,9 @@ import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plu
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
 import { toPluginInfos } from './plugin-info-mapper.js'
 import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEntries } from './plugin-contributions.js'
+import { dismissRuntimeModalForPluginGone } from './api/ui-api.js'
+import { broadcastOrBrokerWith, publishViewUpdateTo, createUiRequestBroadcastFn } from './plugin-broadcast.js'
+import type { PluginBroadcastDeps, ViewUpdateBroadcastPayload } from './plugin-broadcast.js'
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
 import { join } from 'node:path'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -106,6 +110,9 @@ export class PluginService implements IPluginService {
   /** session 生命周期事件注册表（S3-W2）：handlerId → workerId 定向投递 */
   private readonly sessionEventDispatch: SessionEventDispatch
 
+  /** Entry 失效信号订阅注册表（AP-4，U2）：(sessionId, customType) 分桶，notifyEntryInvalidation 派发 */
+  private readonly entryInvalidationDispatch: EntryInvalidationDispatch
+
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报，views.listMountPoints 中继查询，AC10） */
   private mountPoints: string[] = []
 
@@ -145,6 +152,14 @@ export class PluginService implements IPluginService {
     // session 事件注册表：复用同一 rpcServer（workerId↔port 映射 + notify 通道）
     this.sessionEventDispatch = new SessionEventDispatch(this.rpcServer)
 
+    // Entry 失效信号订阅注册表（AP-4，U2）。存在性谓词取 listPersistedSessions（侧边栏
+    // 会话列表同一权威源）——getSummary 只查内存 lifecycle 表，会误拒「存在但未加载」的
+    // 历史会话。deps.sessionService 后置绑定，谓词调用时求值（activeSessionResolver 同模式）。
+    this.entryInvalidationDispatch = new EntryInvalidationDispatch({
+      sessionExists: (sessionId) =>
+        this.deps.sessionService?.listPersistedSessions().flatMap(g => g.sessions).some(s => s.id === sessionId) ?? false,
+    })
+
     // Hook 管道：持有共享 hookRegistry（rpc-setup 注册侧与本类消费侧同一实例），
     // 复用 host / rpcServer 引用。
     this.hookPipeline = new HookPipeline({
@@ -153,45 +168,22 @@ export class PluginService implements IPluginService {
       rpcServer: this.rpcServer,
     })
 
-    // UI 请求队列：广播走 broadcastFn（优先）或 broker.broadcast（回退），与原实现一致。
-    // MF-2：广播 payload 注入当前活跃 sessionId（与 views.update 同源，ActiveSessionResolver 求值时点）——
-    // 前端 DialogRequestQueue/useExtensionUI 均按 sessionId 分区消费，无 sid 的 uiRequest 会被双消费方
-    // 丢弃（C2 守卫），plugin dialog 永不弹出。resolve 时点求值：同一会话串行队列内 resolve 稳定。
-    // wave:perf-w08（02 文档 D1-1）：sid 为 string 且 bus 已装配 → bus.publish(sid) 定向发布
-    // （plugin:uiRequest 归 stream 类，分配 seq + 入 ring 可回放），不再 broadcast；
-    // sid undefined（无活跃 session 的弹窗仍须必达全部连接）或 bus 未装配 → 保持全局广播。
-    this.uiRequestQueue = new UiRequestQueue((type, payload) => {
-      // 撤窗广播不走 session 级 bus（D2 收尾修正，与 D3 permissionRequestExpired 直发
-      // 形态对称）：bus.publish(sid) 落 session 级帧 onGlobal 永不可达 → 撤窗生产常态
-      // 失效。直发 global 通道；payload 注入活跃 sessionId（协议可选字段，S1：renderer
-      // 重启后 requestId 反查 Map 为空致过期弹窗残留——renderer 以 requestId 反查 Map 为主（MF-4），
-      // payload sid 仅作 renderer 重启后 Map 为空的兜底）。
-      if (type === 'plugin:uiRequestExpired') {
-        const sid = this.activeSessionResolver.resolve()?.id
-        this.broadcastOrBroker(type, `ui_${payload.requestId}`, { ...payload, sessionId: sid })
-        return
-      }
-      const active = this.activeSessionResolver.resolve()
-      const sid = active?.id
-      const fullPayload = { ...payload, sessionId: sid }
-      if (sid !== undefined && this.messageBus) {
-        // m2：'plugin:uiRequest' 已收录 ServerMessageMap 具名条目（requestId 必带 + 索引签名
-        // 透传 dialog 字段），UiBroadcastFn payload 同步收紧——免 as ServerMessage 断言，
-        // payload 形状漂移在编译期被 shared 契约拦截。
-        this.messageBus.publish(sid, {
-          type,
-          id: `ui_${payload.requestId}`,
-          payload: fullPayload,
-        })
-        return
-      }
-      this.broadcastOrBroker(type, `ui_${payload.requestId}`, fullPayload)
-    })
+    // UI 请求队列：广播回调装配迁 plugin-broadcast.ts（u5a max-lines 回落拆分，行为保持——
+    // MF-2 活跃 sessionId 注入 / 撤窗直发 global / bus 定向与回退双腿的决策注释随迁彼处）。
+    // 动态状态经闭包注入（调用时求值）：activeSessionResolver / messageBus（晚期注入）/
+    // broadcastOrBroker（动态读 broadcastFn 与 broker）。
+    this.uiRequestQueue = new UiRequestQueue(createUiRequestBroadcastFn({
+      resolveActiveSessionId: () => this.activeSessionResolver.resolve()?.id,
+      getMessageBus: () => this.messageBus,
+      broadcastOrBroker: (type, id, payload) => this.broadcastOrBroker(type, id, payload),
+    }))
 
     // Status bar 注册表：广播保持 `plugin:statusBarUpdate` 契约（ADR-0015）。
+    // MF-3-1：该 type 无 ServerMessageMapBase 具名条目，经 Exclude 占位腿收
+    // Record<string, unknown>，字面量窄→宽可直赋 ServerMessage，免 as 断言。
     this.statusBarRegistry = new StatusBarRegistry((payload) => this.broker.broadcast({
       type: 'plugin:statusBarUpdate', id: `sb_${Date.now()}`, payload,
-    } as ServerMessage))
+    }))
 
     this.activator = new PluginActivator({
       permissionChecker: this.permissionChecker,
@@ -207,13 +199,19 @@ export class PluginService implements IPluginService {
     })
   }
 
-  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（广播契约不变） */
-  private broadcastOrBroker(type: string, id: string, payload: unknown): void {
-    if (this.deps.broadcastFn) {
-      this.deps.broadcastFn(type, payload)
-    } else {
-      this.broker.broadcast({ type, id, payload } as ServerMessage)
+  /** 广播出口共享依赖快照（动态读 messageBus 晚期注入 / deps.broadcastFn，调用时求值）。 */
+  private get broadcastDeps(): PluginBroadcastDeps {
+    return {
+      broadcastFn: this.deps.broadcastFn,
+      broker: this.broker,
+      getMessageBus: () => this.messageBus,
     }
+  }
+
+  /** 广播优先走 broadcastFn，否则回退 broker.broadcast（实现迁 plugin-broadcast.ts，行为保持）。
+   *  type/payload 经 ServerMessageMap 泛型关联（MF-2-4：构造点契约校验，免 as 断言）。 */
+  private broadcastOrBroker<T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]): void {
+    broadcastOrBrokerWith(this.broadcastDeps, type, id, payload)
   }
 
   /**
@@ -245,32 +243,12 @@ export class PluginService implements IPluginService {
 
   /**
    * views.update 的广播出口（wave:perf-w08，02 文档 D1-1；rpc-setup 的
-   * handleViewUpdate 构造 payload 后经此发布）。
-   *
-   * payload.sessionId 由调用方保证存在（rpc-setup ES2：无活跃 session 已提前丢弃）。
-   * bus 已装配 → publish 定向（plugin:viewUpdate 归 transient 类：高频 UI 流，不占
-   * seq、不入 ring，直传订阅者——丢失可接受，ExtensionHost 不靠 ring 回放重建状态），
-   **不再 broadcast**；bus 未装配（测试构造）→ 回退全局广播，保持消息不丢。
+   * handleViewUpdate 构造 payload 后经此发布）。实现迁 plugin-broadcast.ts
+   * （u5a max-lines 回落拆分，行为保持）：bus 已装配 → publish 定向（transient 类），
+   * 未装配（测试构造）→ 回退全局广播。
    */
-  publishViewUpdate(payload: {
-    sessionId: string
-    viewId: string
-    pluginId: string
-    guiTree: import('@zhushanwen/extension-protocol').GuiComponent[]
-    updatedAt: number
-  }): void {
-    if (this.messageBus) {
-      // m2/m3：'plugin:viewUpdate' 已是 ServerMessageMap 精确条目（payload 形状一致），
-      // 免 as ServerMessage 断言；push id 改单调计数（Date.now() 同毫秒多视图更新会碰撞，
-      // 前端按 id 去重/追踪场景下碰撞导致更新被误判重复）。
-      this.messageBus.publish(payload.sessionId, {
-        type: 'plugin:viewUpdate',
-        id: this.nextViewUpdateId(),
-        payload,
-      })
-      return
-    }
-    this.broadcastOrBroker('plugin:viewUpdate', this.nextViewUpdateId(), payload)
+  publishViewUpdate(payload: ViewUpdateBroadcastPayload): void {
+    publishViewUpdateTo(this.broadcastDeps, payload, () => this.nextViewUpdateId())
   }
 
   /**
@@ -327,10 +305,13 @@ export class PluginService implements IPluginService {
       // 都指向已死 Worker，调用必超时）。rebuild 成功后 onRebuilt 重激活会重新注册。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
+        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（崩溃插件的层必须收起）
+        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId)
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
         this.sessionEventDispatch.clearForPlugin(pluginId)
+        this.entryInvalidationDispatch.clearForPlugin(pluginId)
       }
       void this.syncToolsToBridge().catch((err: unknown) => {
         console.error('[plugin-service] syncToolsToBridge after crash failed:', toErrorMessage(err))
@@ -426,7 +407,32 @@ export class PluginService implements IPluginService {
       })
       this.deps.sessionService.setOnSessionDestroyed(summary => {
         this.sessionEventDispatch.didDestroy(sessionInfoFromSummary(summary))
+        // AP-4（U2）：设计 §3.4 钦定与 didDestroy 同址（回调体内链式追加）；sessionId 维度
+        // 清理 owner，缺此路则长会话反复建删时订阅条目单调累积。setOnSessionDestroyed
+        // 为追加式回调列表（D6a），不挤占既有投递。
+        this.entryInvalidationDispatch.clearForSession(summary.id)
       })
+      // AP-4 会话激活 relay ③（u5a）：session.switch 成功（含自动 restore）→ transport 层
+      // notifySessionActivated（relay ①②）流经本回调 → 激活订阅注册表定向投递 didActivate
+      // （sessionInfoFromSummary 转换照 didCreate 先例）。onSessionActivated 为追加式回调
+      // 列表（禁 setOnSessionCreated 式单槽），与既有 didCreate/didDestroy 接线互不挤占；
+      // u5b 落地 registerActivate 前 SessionEventDispatch.activateHandlers 恒空，投递 no-op。
+      this.deps.sessionService.onSessionActivated(summary => {
+        this.sessionEventDispatch.didActivate(sessionInfoFromSummary(summary))
+      })
+    }
+  }
+
+  /**
+   * Entry 失效信号派发（AP-4，U2）：组合根 onRecordEntriesInvalidated 两路注入的 plugin 腿
+   * （session 腿 = invalidateRecordEntries，record 三族早退门保留）。按 (sessionId,
+   * customType) 双匹配命中订阅注册表，命中者经 rpcServer.notify 定向投递（server→Worker
+   * notify 非 WS 帧，与 didCreate/didDestroy 同族；Worker 已死时静默 no-op 既有口径）；
+   * 无订阅者零开销（零 notify）。
+   */
+  notifyEntryInvalidation(sessionId: string, customType: string): void {
+    for (const { workerId, handlerId } of this.entryInvalidationDispatch.dispatch(sessionId, customType)) {
+      this.rpcServer.notify(workerId, ENTRY_INVALIDATION_NOTIFY_METHOD, { handlerId, sessionId, customType })
     }
   }
 
@@ -445,11 +451,26 @@ export class PluginService implements IPluginService {
         await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
         // 激活成功后，对外部插件启动热重载监听
         this.watchExternalIfActive(descriptor)
+        // E2 修复：enable 腿补 plugin:statusChange 广播（此前全仓唯一 producer 在 external
+        // 热重载回调，toggle 腿无广播 → renderer E2 触发链无触发源，重启用不恢复顶栏按钮）。
+        // newStatus 按激活终态派生（对齐 hot-reload producer 的 getState 判定；激活未达
+        // ACTIVE 不产虚假 active 帧致 renderer 重放声明）。payload 键集逐字对齐
+        // StatusChangeCallback 契约（pluginId/oldStatus/newStatus），信封与 crashed 腿同款
+        //（broker.broadcast 三键 type/id/payload，id 前缀按源命名：crash_/watch_/toggle_）。
+        if (this.activator.getState(pluginId) === 'ACTIVE') {
+          this.broker.broadcast({
+            type: 'plugin:statusChange',
+            id: `toggle_${pluginId}_${Date.now()}`,
+            payload: { pluginId, oldStatus: 'inactive', newStatus: 'active' },
+          })
+        }
       } else {
         // 禁用
         await this.activator.deactivatePlugin(pluginId, this.host)
         this.activator.stopWatching(pluginId) // 停止热重载监听
         this.statusBarRegistry.clearForPlugin(pluginId) // 清理 status bar items
+        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（禁用插件的层必须收起）
+        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId) // P-1：清 hook 注册，禁用插件的 hook 不再执行
         // Fix-7：禁用插件的工具/命令同步清注册——与 P-1 的 hook 清理对称，否则禁用插件的
         // 工具仍可被 bridge 调用、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
@@ -457,7 +478,19 @@ export class PluginService implements IPluginService {
         this.removeCommandEntriesFor(pluginId)
         // S3-W2：session 事件注册表同步清理（禁用插件的 didCreate/didDestroy 订阅不再投递）
         this.sessionEventDispatch.clearForPlugin(pluginId)
+        this.entryInvalidationDispatch.clearForPlugin(pluginId)
         await this.syncToolsToBridge()
+        // E2 修复：disable 腿补 plugin:statusChange 广播——renderer E2 触发链
+        //（plugin-status-change{inactive} → handlePluginGone：三容器清理 + 命令注销 +
+        // 顶栏按钮/modal 收起）此前无触发源，禁用后按钮残留。deactivatePlugin 抛错走
+        // catch 不广播（虚假 inactive 帧会清掉仍在运行的插件的 renderer 镜像）；
+        // 正常返回（含对未装载插件重入禁用）终态必为 UNLOADED，'inactive' 恒为真。
+        // payload/信封与 enable 腿及 hot-reload producer 同形状。
+        this.broker.broadcast({
+          type: 'plugin:statusChange',
+          id: `toggle_${pluginId}_${Date.now()}`,
+          payload: { pluginId, oldStatus: 'active', newStatus: 'inactive' },
+        })
       }
      
     } catch (err: unknown) {
@@ -545,9 +578,12 @@ export class PluginService implements IPluginService {
     this.removeCommandEntriesFor(pluginId)
     // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
     this.sessionEventDispatch.clearForPlugin(pluginId)
+    this.entryInvalidationDispatch.clearForPlugin(pluginId)
 
     // 清理 status bar items
     this.statusBarRegistry.clearForPlugin(pluginId)
+    // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（卸载插件的层必须收起）
+    dismissRuntimeModalForPluginGone(pluginId)
 
     await this.syncToolsToBridge()
     this.broadcastPluginList()
@@ -704,6 +740,11 @@ export class PluginService implements IPluginService {
       activeSessionResolver: this.activeSessionResolver,
       commandRegistry: this.commandRegistry,
       sessionEvents: this.sessionEventDispatch,
+      // [u5b] sessionRead 装配（u2d 移交）与 E10 判定的装配缝：失效订阅表与
+      // notifyEntryInvalidation 派发共享同一实例；pending 表直读（pendingUiRequests
+      // 是 UiRequestQueue 公开字段，无新增队列面）。
+      entryInvalidation: this.entryInvalidationDispatch,
+      hasPendingUiRequest: () => this.uiRequestQueue.pendingUiRequests.size > 0,
       deliverInvokeResult: (handlerId, payload, sourceWorkerId) =>
         deliverPluginInvokeResult(
           { commandRegistry: this.commandRegistry, commandInvokes: this.commandInvokes },

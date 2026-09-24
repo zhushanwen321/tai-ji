@@ -94,12 +94,22 @@ extraResources:
   # built-in taiji plugins（resources/plugins/<name>，如 statusline）。
   # prepare-builtin-plugins.sh 预编译 index.ts → index.js（与源同目录）；plugin-registry
   # 打包后扫描 <cwd>/resources/plugins（cwd=Resources），故 to 保持 resources/plugins 嵌套。
-  # 排除 .ts 源码（运行时不需要，防体积浪费；入口以 manifest main 的 index.js 为准）。
+  # 运行时只消费各插件 package.json（manifest）+ manifest main 指向的 index.js
+  # （esbuild 自包含 bundle，无 runtime 依赖），其余全排除。extraResources 是文件系统
+  # 拷贝、不受 .gitignore 影响，测试基建与产物必须在此显式排除，否则随本地构建面入包：
+  # .ts 源码 / __tests__ / vitest.config / tsconfig.json / test-results（junit 含本机
+  # 绝对路径）/ coverage / node_modules（本地测试依赖 @vitest/coverage-v8）。
   - from: ../../resources/plugins
     to: resources/plugins
     filter:
       - "**/*"
       - "!**/*.ts"
+      - "!**/__tests__/**"
+      - "!**/test-results/**"
+      - "!**/coverage/**"
+      - "!**/node_modules/**"
+      - "!**/tsconfig.json"
+      - "!**/vitest.config.*"
   # taiji-settings CLI（从 tsup 打包的 cli.cjs）
   # packaged app 中位置：resources/bin/taiji-settings
   # pi Skill 通过绝对路径引用此文件

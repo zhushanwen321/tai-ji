@@ -19,6 +19,12 @@
    以 rev-list 为锚做瞬态判定 + 3 次重试 + 空输出且有 commit ahead 时 exit 2。
 5. extensions/shared/<lib> 三层目录曾被 parts[:2] 切到不存在的 extensions/shared/
    package.json 而静默漏门禁。修复：pkg_dir_of() 按前缀分层切片。
+6. [2026-09-22 盲区] extensions/universal|taiji/<pkg>（同为三层）仍被旧特判折叠成
+   无 package.json 的组目录、resources/plugins/<name> 落在 PKG_PREFIXES 外——6 包
+   40 个 src 文件 + scheduler-manager 668 行合入时 gate 零可见。修复：pkg_dir_of()
+   改为向上探测最近含 package.json 的祖先（深度不再硬编码）、resources/plugins/
+   前缀纳入 PKG_PREFIXES（builtin 插件包根平铺布局走 flat 档 include）、前缀内
+   缺装配的目录记 unmeasured 显式登记（stderr + coverage.json），静默路径清零。
 
 对 base...HEAD 改动过 src/ 的 workspace 包跑 `vitest run --coverage`（lcov），
 解析 lcov 的 DA 行命中数据 + git diff 新增行号，计算**可执行新增行的覆盖率**。
@@ -59,8 +65,16 @@ import time
 from pathlib import Path
 
 MIN_INCREMENTAL_DEFAULT = 80.0
-# 只对这些 workspace 前缀下的包做 gate（apps/electron 无独立 vitest 包）
-PKG_PREFIXES = ("packages/", "extensions/")
+# S4 文件级增量门槛默认值（防单文件盲区被包百分比稀释，见 main() 内注释）
+MIN_FILE_INCREMENTAL_DEFAULT = 60.0
+FILE_GATE_MIN_LINES_DEFAULT = 8
+# 只对这些前缀下的包做 gate（apps/electron 无独立 vitest 包；resources/plugins =
+# builtin 插件包，2026-09-22 显式裁决纳入——scheduler-manager 装配 vitest 后盲区合入
+# 的 MF-1-7 形态不允许再发生；前缀内缺装配的包由 unmeasured 登记显式出声，不静默）
+PKG_PREFIXES = ("packages/", "extensions/", "resources/plugins/")
+# builtin 插件包根平铺布局的源文件扩展（无 src/ 段，判据与 workspace 包不同）；
+# 匹配用 .search（后缀锚定）——re.match 锚串首，对完整 repo 路径恒不命中
+PLUGIN_SOURCE_SUFFIX = re.compile(r"\.(ts|tsx|mts|vue)$")
 
 DEBUG = False
 
@@ -101,28 +115,57 @@ def git_diff_names(repo_root: Path, base: str) -> list[str]:
     sys.exit(2)
 
 
-def pkg_dir_of(repo_file: str) -> str | None:
-    """repo 相对文件 → 所属 workspace 包目录。extensions/shared/<lib> 是三层，其余两层。"""
+def pkg_dir_of(repo_root: Path, repo_file: str) -> str | None:
+    """repo 相对文件 → 所属包目录（向上探测最近含 package.json 的祖先）。
+
+    [HISTORICAL 2026-09-22 盲区] 旧实现按前缀特判切片（extensions/shared/ 三层、
+    其余两层）：extensions/universal|taiji/<pkg> 被折叠成无 package.json 的组目录、
+    resources/plugins/<name> 落在 PKG_PREFIXES 外——两者都被 changed_packages 的
+    is_file 过滤静默吞掉（6 包 40 个 src 文件 + scheduler-manager 668 行合入时
+    gate 零可见，MF-1-8）。修复：分层深度不再硬编码，从文件父目录逐级向上（最多
+    3 层：packages/<pkg> 两层、extensions/<group>/<pkg> 与 resources/plugins/<name>
+    三层），最近含 package.json 的目录即包根；候选必须落在 PKG_PREFIXES 之下，
+    探测跳出前缀即 None（组目录无 package.json 的中间态由 changed_packages 记
+    unmeasured，不静默）。
+    """
     parts = repo_file.split("/")
-    if repo_file.startswith("extensions/shared/"):
-        pkg = "/".join(parts[:3])
-    else:
-        pkg = "/".join(parts[:2])
-    return pkg if pkg.startswith(PKG_PREFIXES) else None
+    for depth in range(min(len(parts) - 1, 3), 1, -1):
+        candidate = "/".join(parts[:depth])
+        if not candidate.startswith(PKG_PREFIXES):
+            break  # 前缀是路径段前缀，一旦跳出更浅的候选不可能再命中
+        if (repo_root / candidate / "package.json").is_file():
+            return candidate
+    return None
 
 
-def changed_packages(repo_root: Path, base: str) -> dict[str, list[str]]:
-    """返回 {包目录: 改动的 src 文件列表（repo 相对路径）}。"""
+def changed_packages(repo_root: Path, base: str) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """返回 ({包目录: 改动的源文件列表}, {包目录: 不测量原因})。
+
+    源文件判据：/src/ 路径段（workspace 包布局），或 resources/plugins/ 前缀下的
+    源扩展（builtin 插件包根平铺布局——index.ts 在包根，无 src/ 段；测试文件
+    __tests__/**.test.* 不算源）。前缀内但缺 package.json / vitest.config.ts 的
+    目录记入 unmeasured（gate 输出显式登记「改动不测量」，不静默跳过）。
+    """
     pkgs: dict[str, list[str]] = {}
+    unmeasured: dict[str, str] = {}
     for f in git_diff_names(repo_root, base):
-        if "/src/" not in f:
+        in_plugin_prefix = f.startswith("resources/plugins/")
+        if "/src/" not in f and not (
+            in_plugin_prefix and PLUGIN_SOURCE_SUFFIX.search(f) and "__tests__" not in f
+        ):
             continue
-        pkg = pkg_dir_of(f)
+        pkg = pkg_dir_of(repo_root, f)
         if pkg is None:
             continue
-        if (repo_root / pkg / "package.json").is_file() and (repo_root / pkg / "vitest.config.ts").is_file():
-            pkgs.setdefault(pkg, []).append(f)
-    return pkgs
+        if not (repo_root / pkg / "package.json").is_file():
+            unmeasured.setdefault(pkg, "缺 package.json（非包目录布局）")
+            continue
+        if not (repo_root / pkg / "vitest.config.ts").is_file():
+            unmeasured.setdefault(
+                pkg, "缺 vitest.config.ts（无测试装配，改动不测量；装配后自动纳入）")
+            continue
+        pkgs.setdefault(pkg, []).append(f)
+    return pkgs, unmeasured
 
 
 def coverage_declared(pkg_dir: Path) -> bool:
@@ -140,20 +183,24 @@ def coverage_declared(pkg_dir: Path) -> bool:
     return "@vitest/coverage-v8" in deps
 
 
-def run_coverage(pkg_dir: Path) -> tuple[bool, str]:
+def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
     """包内跑 vitest --coverage 产 lcov。返回 (ok, 说明)。
 
     TAIJI_SKIP_REAL_PI=1 与 CI 同口径（TEST-STRATEGY §4 双轨设计）：真实 pi 子进程用例
     不在覆盖率测量目标内（慢且环境敏感，插桩开销下必超时），走 mock 双轨即可。
     reportsDirectory 显式钉死：防包级 vitest.config 覆盖默认输出位置。
+    flat_layout（resources/plugins 插件包，包根平铺：index.ts 在包根、测试在
+    __tests__/）：include= 整包 + exclude __tests__；workspace 包维持 src/ 档。
     """
     lcov = pkg_dir / "coverage" / "lcov.info"
+    cov_include = "." if flat_layout else "src"
+    cov_exclude = "__tests__/**" if flat_layout else "src/**/__tests__/**"
     cmd = [
         "npx", "vitest", "run", "--coverage",
         "--coverage.reporter=lcov", "--coverage.reporter=json-summary",
         "--coverage.reportsDirectory=coverage",
-        "--coverage.include=src",
-        "--coverage.exclude=src/**/__tests__/**",
+        f"--coverage.include={cov_include}",
+        f"--coverage.exclude={cov_exclude}",
     ]
     import os
     # 降载开关（opt-in，默认口径不变）：TAIJI_COVERAGE_GATE_SERIAL=1 时测试文件串行跑。
@@ -206,17 +253,19 @@ def added_lines(repo_root: Path, base: str, files: list[str]) -> dict[str, set[i
 
 
 def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
-                    added: dict[str, set[int]]) -> tuple[float, int, int, list[str], list[str]]:
-    """(增量覆盖率%, 覆盖行数, 可执行新增行数, 未覆盖文件清单, 无 lcov 记录文件清单)。
+                    added: dict[str, set[int]]) -> tuple[float, int, int, list[str], list[str], list[dict]]:
+    """(增量覆盖率%, 覆盖行数, 可执行新增行数, 未覆盖文件清单, 无 lcov 记录文件清单, 文件级明细)。
 
     lcov SF 是包相对路径（SF:src/App.vue），added 是 repo 相对（packages/<pkg>/src/App.vue）：
     去包前缀后全字符串精确匹配。禁止 basename 兜底——同名文件（多个 index.ts）会拿错
     hits_map（2026-08-21 假 pass 根因 #2）。无 lcov 记录的新文件不入分母（无可执行行或
-    未被任何测试加载），但列出供 debug。
+    未被任何测试加载），但列出供 debug。文件级明细（S4）= 每个有可执行新增行的文件的
+    executable/hit/pct，供文件级门槛消费——包百分比会稀释单文件零覆盖盲区。
     """
     covered = total = 0
     uncovered_files: list[str] = []
     no_lcov: list[str] = []
+    file_details: list[dict] = []
     for rel_file, lines in added.items():
         sf_key = rel_file[len(pkg) + 1:] if rel_file.startswith(pkg + "/") else rel_file
         hits_map = coverage.get(sf_key)
@@ -231,11 +280,15 @@ def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
             # 条目语义 = 未覆盖行数/总可执行行（I-13 修正：旧格式 (hit/total) 是已覆盖数，
             # 与字段名 uncovered 直觉相反，下游按「未覆盖 X 行」消费会系统性夸大缺口）。
             uncovered_files.append(f"{rel_file} ({len(executable) - hit} uncovered / {len(executable)})")
+        file_details.append({
+            "file": rel_file, "executable": len(executable), "hit": hit,
+            "pct": round(hit / len(executable) * 100, 1),
+        })
         covered += hit
         total += len(executable)
         debug(f"match {rel_file}: executable={len(executable)} hit={hit}")
     pct = (covered / total * 100) if total else 100.0
-    return pct, covered, total, uncovered_files, no_lcov
+    return pct, covered, total, uncovered_files, no_lcov, file_details
 
 
 def main() -> None:
@@ -243,6 +296,12 @@ def main() -> None:
     args = sys.argv[1:]
     base = args[args.index("--base") + 1] if "--base" in args else "main"
     min_pct = float(args[args.index("--min-incremental") + 1]) if "--min-incremental" in args else MIN_INCREMENTAL_DEFAULT
+    # S4 文件级增量门槛：包百分比会稀释单文件盲区（PR #20 组 A 的 A2 形态——
+    # composer-shell.ts 6/6 全未覆盖但所在包 93.6% 过线）。对新增可执行行 ≥
+    # min_file_lines 的文件单独卡线，防稀释；阈值 60% 拦「严重稀释」（0%/13%/37% 型），
+    # 78-90% 边缘属断言强度问题（不可守卫化，归 review）。min_file_lines 排除小文件噪声。
+    min_file_pct = float(args[args.index("--min-file-incremental") + 1]) if "--min-file-incremental" in args else MIN_FILE_INCREMENTAL_DEFAULT
+    min_file_lines = int(args[args.index("--file-gate-min-lines") + 1]) if "--file-gate-min-lines" in args else FILE_GATE_MIN_LINES_DEFAULT
     # --packages 与 --extra-packages 语义不同、可共存：前者是交集过滤器（只收窄
     # changed_packages() 结果，无 src/ 改动的包加不进去）；后者是追加器（无条件并入
     # 包集合，见文件头 docstring）
@@ -251,9 +310,15 @@ def main() -> None:
     DEBUG = "--debug" in args
 
     repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    pkgs = changed_packages(repo_root, base)
+    pkgs, unmeasured = changed_packages(repo_root, base)
     if only:
         pkgs = {k: v for k, v in pkgs.items() if k in only}
+    # 前缀内但缺装配的目录：显式登记「改动不测量」——静默跳过正是 2026-09-22 盲区
+    # 根因（extensions/<group>/<pkg> 折叠丢失 + resources 落前缀外，MF-1-8）
+    if unmeasured:
+        print("WARN: 前缀内目录改动不测量（缺装配，登记如下，不静默）：", file=sys.stderr)
+        for pkg_dir_name, reason in sorted(unmeasured.items()):
+            print(f"  UNMEASURED {pkg_dir_name}: {reason}", file=sys.stderr)
     # --extra-packages 追加（在 --packages 过滤之后，追加不受交集过滤器影响）。追加包
     # 不要求 src/ 改动（setdefault：已在 changed 集合的包保留原 files 列表）。路径无效/
     # 缺 vitest.config.ts 的同样并入集合（记账闭合守卫要求每个迭代包产出 report 条目），
@@ -274,7 +339,8 @@ def main() -> None:
         print(f"Gate-1.6 pass：base={base} 无带 src/ 改动的 vitest 包")
         (repo_root / ".review").mkdir(exist_ok=True)
         (repo_root / ".review" / "coverage.json").write_text(json.dumps(
-            {"verdict": "pass", "base": base, "packages": {}, "note": "no changed vitest packages"}, indent=2))
+            {"verdict": "pass", "base": base, "packages": {}, "unmeasured": unmeasured,
+             "note": "no changed vitest packages"}, indent=2))
         sys.exit(0)
 
     report: dict[str, dict] = {}
@@ -299,7 +365,7 @@ def main() -> None:
             report[pkg] = entry
             print(f"  SKIP {pkg}: {entry['note']}")
             continue
-        ok, err = run_coverage(pkg_dir)
+        ok, err = run_coverage(pkg_dir, flat_layout=pkg.startswith("resources/plugins/"))
         if not ok:
             entry.update({"status": "FAIL", "reason": err})
             report[pkg] = entry
@@ -316,7 +382,30 @@ def main() -> None:
                 "pct": round(hit / executable * 100, 1) if executable else 100.0,
             }
         added = added_lines(repo_root, base, files)
-        pct, covered, total, unc, no_lcov = incremental_pct(cov, pkg, added)
+        pct, covered, total, unc, no_lcov, file_details = incremental_pct(cov, pkg, added)
+        # S4 文件级门槛：新增可执行行 ≥ min_file_lines 的文件，自身增量 < min_file_pct 即
+        # 违规（包整体过线不能稀释单文件盲区）。违规不覆盖包级判定——两者独立，任一红即红。
+        # 豁免机制（登记式，与 taste-lint 行内登记同构）：文件头注释含
+        # `coverage-file-gate-exempt: <理由>` → 该文件退出文件级门槛（包级仍卡），
+        # 报告登记为 exempt（可见不静默）——适用面：组合根装配接线（单测不可达，
+        # 行为由 e2e/bundle 验证承载）、跨环境分支（本轨结构性不可达，另轨由
+        # 专项守卫覆盖）。
+        raw_violations = [f for f in file_details
+                          if f["executable"] >= min_file_lines and f["pct"] < min_file_pct]
+        file_violations = []
+        file_exempt = []
+        for v in raw_violations:
+            abs_file = repo_root / v["file"]
+            try:
+                head = abs_file.read_text(encoding="utf-8", errors="replace")[:2400]
+            except OSError:
+                head = ""
+            m = re.search(r"coverage-file-gate-exempt:\s*(.+)", head)
+            if m:
+                file_exempt.append({"file": v["file"], "pct": v["pct"],
+                                    "executable": v["executable"], "reason": m.group(1).strip()})
+            else:
+                file_violations.append(v)
         summary_file = pkg_dir / "coverage" / "coverage-summary.json"
         overall = ""
         if summary_file.is_file():
@@ -331,10 +420,24 @@ def main() -> None:
             "executable_added_lines": total,
             "overall": overall, "uncovered_files": unc[:10],
             "files_without_lcov": no_lcov[:10],
+            "file_gate": {"min_file_pct": min_file_pct, "min_file_lines": min_file_lines,
+                          "violations": [{"file": v["file"], "pct": v["pct"],
+                                          "executable": v["executable"]} for v in file_violations],
+                          "exempt": file_exempt},
         })
         if pct < min_pct:
             entry["status"] = "FAIL"
             entry["reason"] = f"增量覆盖率 {pct:.1f}% < {min_pct}%"
+            verdict = "fail"
+        elif file_violations:
+            entry["status"] = "FAIL"
+            worst = min(file_violations, key=lambda v: v["pct"])
+            entry["reason"] = (
+                f"文件级增量门槛：{len(file_violations)} 个新增文件自身覆盖率 < {min_file_pct}%"
+                f"（最差 {worst['file']} {worst['pct']}% = {worst['hit']}/{worst['executable']} 行，"
+                "包整体过线不能稀释单文件盲区）；恢复：为违规文件补测试（见 file_gate.violations）"
+                "或该文件属不可测面时在 PR 说明并经裁决后调整"
+            )
             verdict = "fail"
         report[pkg] = entry
         print(f"  {entry['status']:<4} {pkg}: 增量 {pct:.1f}% ({covered}/{total} 可执行新增行) {overall}")
@@ -355,7 +458,8 @@ def main() -> None:
         sys.exit(2)
 
     out = {"verdict": verdict, "base": base, "min_incremental": min_pct,
-           "packages": report, "files": file_cov}
+           "min_file_incremental": min_file_pct, "file_gate_min_lines": min_file_lines,
+           "packages": report, "files": file_cov, "unmeasured": unmeasured}
     (repo_root / ".review").mkdir(exist_ok=True)
     (repo_root / ".review" / "coverage.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
     print(f"Gate-1.6 verdict={verdict}  min_incremental={min_pct}%  (base={base}, pkgs={len(report)})")

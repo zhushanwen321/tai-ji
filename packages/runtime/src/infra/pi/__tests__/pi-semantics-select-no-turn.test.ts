@@ -1,8 +1,8 @@
 /**
- * PS-42 探针：pi 扩展 UI 应答（extension_ui_response）只 resolve 扩展 Promise——不回灌对话、不开 turn
+ * PS-45 探针：pi 扩展 UI 应答（extension_ui_response）只 resolve 扩展 Promise——不回灌对话、不开 turn
  * （设计 U7 / §4 e2e 探针检查点——form-submit-busy-convergence 前提 1 守卫）。
  *
- * 登记条目（docs/pi-semantics.json PS-42）：taiji 表单/对话应答回传 pi 只用于 resolve 扩展持有的
+ * 登记条目（docs/pi-semantics.json PS-45）：taiji 表单/对话应答回传 pi 只用于 resolve 扩展持有的
  * Promise，从不回灌对话、不开 turn——expectTurn 分型通路与 ADR-0072 桥接语义都锚在该前提上；
  * pi 升级若在此路径引入对话写入/轮次启动，前提失锚且无显式信号，故以本探针拦为红灯。
  *
@@ -274,7 +274,7 @@ function analyze(srcRaw: string): Analysis {
 const FOUND_HINT = '分派块未定位——先按「定位装置」用例的恢复动作处理'
 
 describe.skipIf(!RPC_DIST)(
-  `PS-42 探针：extension_ui_response 只 resolve 不回灌/不开 turn（应答可达效应集缺席断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
+  `PS-45 探针：extension_ui_response 只 resolve 不回灌/不开 turn（应答可达效应集缺席断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
     const rpcMode = readFileSync(join(RPC_DIST as string, 'modes', 'rpc', 'rpc-mode.js'), 'utf-8')
     const analysis = analyze(rpcMode)
@@ -282,7 +282,7 @@ describe.skipIf(!RPC_DIST)(
     it('定位装置：extension_ui_response 应答分派块提取成功（比较位或 case 位）', () => {
       expect(
         analysis.found,
-        'PS-42 漂移：rpc-mode.js 未能定位 extension_ui_response 分派块——协议串改名 / 抽成谓词函数 / 移入常量比较等形态演化。' +
+        'PS-45 漂移：rpc-mode.js 未能定位 extension_ui_response 分派块——协议串改名 / 抽成谓词函数 / 移入常量比较等形态演化。' +
           '恢复动作：先核对 taiji packages/runtime/src/infra/pi/rpc-client.ts 发送的 type 串与实装是否仍一致' +
           '（不一致 = wire 契约漂移，runtime 同步改并重审本条 claim）；语义未变则按新形态更新本探针定位器',
       ).toBe(true)
@@ -292,7 +292,7 @@ describe.skipIf(!RPC_DIST)(
       expect(analysis.found, FOUND_HINT).toBe(true)
       expect(
         /\.resolve\s*\(/.test(analysis.joined),
-        'PS-42 漂移：应答路径可达效应集内无 .resolve( 调用——resolve 被移出可达面（超出调用展开深度/改走别的完成机制）' +
+        'PS-45 漂移：应答路径可达效应集内无 .resolve( 调用——resolve 被移出可达面（超出调用展开深度/改走别的完成机制）' +
           '或应答机制改形。恢复动作：复核 rpc-mode.js 应答段与本探针 expandScope 展开装置',
       ).toBe(true)
     })
@@ -301,7 +301,7 @@ describe.skipIf(!RPC_DIST)(
       expect(analysis.found, FOUND_HINT).toBe(true)
       expect(
         analysis.exitOk,
-        'PS-42 漂移：应答分派块既无终止语句也不邻接 else——应答路径可能落入后续命令分派/消息路径（真漂移），' +
+        'PS-45 漂移：应答分派块既无终止语句也不邻接 else——应答路径可能落入后续命令分派/消息路径（真漂移），' +
           '或控制形态出现第三种演化（形态演化）。恢复动作：复核 rpc-mode.js 应答段语义，确认语义后更新本探针',
       ).toBe(true)
     })
@@ -310,7 +310,7 @@ describe.skipIf(!RPC_DIST)(
       expect(analysis.found, FOUND_HINT).toBe(true)
       expect(
         analysis.violations,
-        `PS-42 漂移：应答路径可达面出现对话效应——pi select 应答不再「只 resolve」，前提 1 失效，` +
+        `PS-45 漂移：应答路径可达面出现对话效应——pi select 应答不再「只 resolve」，前提 1 失效，` +
           `ADR-0072 分型与 expectTurn 全链须重审。命中：${analysis.violations.join('；')}`,
       ).toEqual([])
     })

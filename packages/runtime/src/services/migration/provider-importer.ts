@@ -288,6 +288,8 @@ function validateApplyRequest(importId: unknown, selectedIds: unknown): ImportEr
  * 组 1 单条处理：models.json 已定义的 provider（分体系处理）。
  *
  * 返回 null = 未勾选（不产生条目）；否则返回 imported/skipped/failed 三态条目之一。
+ * 分解件（metrics-gate 复杂度偿还，编排序不变）：catalog 凭据腿归 applyCatalogCredential、
+ * models.json 落盘腿归 upsertProviderViaPolicy，本函数只做勾选/冲突/catalog 分路。
  */
 async function applyProviderEntry(
   provider: ParsedProvider,
@@ -305,23 +307,39 @@ async function applyProviderEntry(
 
   // catalog 分路：pi 内置 provider 定义的秘钥归 auth.json，不建 models.json 条目
   if (isCatalogProvider(provider._sourceName) && credentialWriter) {
-    try {
-      if (provider.apiKey && provider.apiKey !== '') {
-        await credentialWriter.saveCredential(provider._sourceName, { type: 'api_key', key: provider.apiKey })
-      }
-      // catalog 提供定义——即使无 apiKey 也标记 imported（catalog 定义即可用）
-      return { id: provider._sourceName, name: provider._sourceName, status: 'imported' }
-    } catch (e) {
-      return {
-        id: provider._sourceName,
-        name: provider._sourceName,
-        status: 'failed',
-        reason: e instanceof Error ? e.message : String(e),
-      }
-    }
+    return applyCatalogCredential(provider, credentialWriter)
   }
 
   // 自定义 provider 或 credentialWriter 未注入：写 models.json（经防线载体转译）
+  return upsertProviderViaPolicy(provider)
+}
+
+/** 失败条目构造（异常 reason 统一提取：Error 取 message，其余 String 化）。 */
+function toFailedImportItem(id: string, e: unknown): ProviderImportedItem {
+  return { id, name: id, status: 'failed', reason: e instanceof Error ? e.message : String(e) }
+}
+
+/**
+ * catalog 分路落盘（组 1）：有 apiKey 才写 auth.json；catalog 提供定义即可用——
+ * 即使无 apiKey 也标记 imported。写入异常 → failed 条目（不中断其余条目）。
+ */
+async function applyCatalogCredential(provider: ParsedProvider, credentialWriter: CredentialWriter): Promise<ProviderImportedItem> {
+  try {
+    if (provider.apiKey && provider.apiKey !== '') {
+      await credentialWriter.saveCredential(provider._sourceName, { type: 'api_key', key: provider.apiKey })
+    }
+    return { id: provider._sourceName, name: provider._sourceName, status: 'imported' }
+  } catch (e) {
+    return toFailedImportItem(provider._sourceName, e)
+  }
+}
+
+/**
+ * models.json 落盘腿（自定义 provider，或 credentialWriter 未注入的 catalog）：剥离 _
+ * 前缀元数据 → 防线载体转译（source='import'）→ upsert；防线拦截（skipUpsert）与
+ * 写侧异常统一转 failed 条目，丢弃的非法模型项 surface 到 warnings（U6②）。
+ */
+function upsertProviderViaPolicy(provider: ParsedProvider): ProviderImportedItem {
   try {
     // 剥离 _ 前缀元数据（对象解构，剩余即干净的 PiProviderConfig）
     const {
@@ -338,7 +356,7 @@ async function applyProviderEntry(
     const modelEntries = models?.map((m) => ({ ...m }))
     // 防线载体（设计 D1④）：source='import' 时 catalog 的 provider 级 api/baseUrl 一律剥除
     // （导入数据不是用户在 UI 显式设置的网关，不产生隐形网关）；空串转译同 settings 路径。
-    const { skipUpsert } = applyProviderWritePolicy(
+    const { skipUpsert, droppedModels } = applyProviderWritePolicy(
       merged,
       { name, baseUrl, apiKey, api, models: modelEntries },
       kind,
@@ -358,14 +376,18 @@ async function applyProviderEntry(
     }
     // as 断言约定见 applyProviderWritePolicy JSDoc「维护约定」（形状安全由载体字段族保证）
     upsertProvider(_sourceName, merged as PiProviderConfig)
-    return { id: _sourceName, name: _sourceName, status: 'imported' }
-  } catch (e) {
+    // U6②：写侧丢弃的非法模型项 surface 到结果 warnings（用户可见；静默丢弃违反 P0 契约）。
+    // 形态如：「已导入，但 2 个模型项因 id 非法被跳过：gpt-4 (dropped: …)、…」
     return {
-      id: provider._sourceName,
-      name: provider._sourceName,
-      status: 'failed',
-      reason: e instanceof Error ? e.message : String(e),
+      id: _sourceName,
+      name: _sourceName,
+      status: 'imported',
+      ...(droppedModels && droppedModels.length > 0
+        ? { warnings: [`${droppedModels.length} model(s) skipped (invalid id): ${droppedModels.join('; ')}`] }
+        : {}),
     }
+  } catch (e) {
+    return toFailedImportItem(provider._sourceName, e)
   }
 }
 

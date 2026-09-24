@@ -58,6 +58,7 @@ import { isRunningProjection } from '@/lib/subagent-bucket'
 import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import { isBtwVirtualId } from '@taiji/shared'
 
 /** built-in 三件（任务域面板类型 / TrayNativePanel 分桶键 / retry 分派键） */
 export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
@@ -191,11 +192,20 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
   // excludeOrigin 选项式（S1 判据单源化，与 hasRunning 同形态；禁止内联 filter 第二判据）
-  const subagentRecords = computed(() =>
-    subagentStore
+  // [M4-a / D9③ 投影收窄·任务托盘抑制执行点①] btw 线（sessionId=vid，drawer 内 Composer
+  // 同样挂载本托盘）不投影派生任务：subagent/workflow-run 两件按线 owner 分区读，
+  // 在此构造性归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener
+  //（对齐 zcode）。bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
+  const derivedSuppressed = computed(() => {
+    const sid = normalizedSid.value
+    return sid !== null && isBtwVirtualId(sid)
+  })
+  const subagentRecords = computed(() => {
+    if (derivedSuppressed.value) return []
+    return subagentStore
       .recordsOf(normalizedSid.value ?? '', { excludeOrigin: 'workflow' })
-      .value,
-  )
+      .value
+  })
   const subagentRunning = computed(() => subagentRecords.value.filter((r) => isRunningProjection(r)))
   // 已结束 = !isRunningProjection（[两视图裁决 2026-09-16]：「已收起」机制已全链路删除，
   // 已结束桶判据 = !isRunningProjection）。两桶互斥且并集 = 全量。
@@ -204,7 +214,11 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   )
 
   // ── workflow：进行中 = running（一次性生命周期 D-2：paused 值已从状态机删除）──
-  const workflowRecords = computed(() => workflowStore.recordsOf(normalizedSid.value ?? '').value)
+  //（抑制面见上方 derivedSuppressed——同为 D9③ 托盘抑制执行点）
+  const workflowRecords = computed(() => {
+    if (derivedSuppressed.value) return []
+    return workflowStore.recordsOf(normalizedSid.value ?? '').value
+  })
   const workflowRunning = computed(() =>
     workflowRecords.value.filter((r) => r.status === 'running'),
   )
@@ -264,7 +278,9 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   watch(
     normalizedSid,
     (sid) => {
-      if (!sid) return
+      // [D9③ 抑制] btw 线不发首拉（getSubagents/getWorkflows 对线 vid 零消费方——
+      // 行集已构造性归零，拉取只是无效 RPC）。
+      if (!sid || isBtwVirtualId(sid)) return
       void subagentStore.loadSubagents(sid)
       void workflowStore.loadWorkflows(sid)
     },
@@ -276,10 +292,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     const sid = normalizedSid.value
     if (!sid) return
     if (kind === 'subagent') {
+      if (isBtwVirtualId(sid)) return // D9③ 抑制面同口径（retry 不绕过构造性归零）
       await subagentStore.loadSubagents(sid)
       return
     }
     if (kind === 'workflow') {
+      if (isBtwVirtualId(sid)) return
       await workflowStore.loadWorkflows(sid)
       return
     }

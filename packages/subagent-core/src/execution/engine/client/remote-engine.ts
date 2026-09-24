@@ -48,8 +48,10 @@ export interface RemoteEngineManifestSnapshot {
   capabilities: EngineCapabilities;
   /**
    * manifest `modelCatalog` 三态（§2.4：缺省 = 不注入保持 undefined；null 合法等价
-   * 省略；`models: []` 仅作者显式声明）。解析器**不得**把省略填成 `[]`——否则
-   * 「无枚举面」语义不可达（恒走 buildEmptyModelsHint 与事实不符）。
+   * 省略；`models: []` 仅作者显式声明）。解析器**不得**把省略填成 `[]`——省略与
+   * 显式 `[]` 的下游语义不同：validateModel 成员实现与否（构造器摘除判定）；
+   * listModels 上 dynamic:false 的显式 `[]` 走 buildEmptyModelsHint（显式空清单），
+   * 省略走 buildCoreAlignedHint（无枚举面）——填充会让该区分不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
 }
@@ -270,14 +272,21 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * listModels 三态映射（必写死）：
+   * listModels 四态映射（必写死）：
    *   省略 modelCatalog / models null → 返回 null（buildCoreAlignedHint 语义）；
-   *   显式 `models: []` → 返回 []（buildEmptyModelsHint）；
-   *   数组 → 原样返回。
+   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举面」：dynamic:true 声明
+   *     清单运行期由引擎凭据链动态发现，静态空目录 ≠ 无模型——与 validateModel 的
+   *     dynamic:true 放行对称化。若映射为 []，model-prompt 会走 buildEmptyModelsHint
+   *     注入「no credentialed models — configure the provider in ZCode desktop first」
+   *     误导性文案，模型据此错误拒绝派发，B1 缺陷根因）；
+   *   dynamic:false 且 `models: []` → 返回 []（buildEmptyModelsHint，显式空清单语义）；
+   *   静态非空数组 → 原样返回（dynamic 任意，dynamic:true 非空仍返回静态部分作提示面，
+   *     运行期发现不限于此）。
    */
   listModels(): Array<{ id: string; name?: string }> | null {
     const catalog = this.opts.manifest.modelCatalog;
     if (catalog === undefined || catalog === null) return null;
+    if (catalog.dynamic === true && catalog.models.length === 0) return null;
     return catalog.models;
   }
 
