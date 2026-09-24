@@ -92,7 +92,11 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({
     submitFirstMessage: vi.fn(),
     currentModel: { value: null },
+    // [U4r2] composer-shell 壳层读取 pendingPreset.value（landing 态 preset chip 数据源），
+    // 形态对齐 core flow.ts 的 ref<string | null>
+    pendingPreset: ref(null),
     setPendingModel: vi.fn(),
+    startFlow: vi.fn(),
     currentCwd: ref(null),
   }),
   resetNewTaskFlow: vi.fn(),

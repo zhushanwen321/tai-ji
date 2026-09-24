@@ -18,7 +18,7 @@
  * 运行：cd packages/renderer && npx vitest run src/composables/panel/__tests__/composer-shell-model-toast.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { computed, defineComponent, effectScope, h, ref } from 'vue'
+import { computed, defineComponent, h, ref } from 'vue'
 import { mount, enableAutoUnmount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import {
@@ -33,7 +33,6 @@ import {
   type ComposerShellParams,
   type ComposerShellReturn,
 } from '@/composables/panel/composer-shell'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import type { ProviderId } from '@taiji/shared'
 
 // ── useComposerModelThinking 可控注入（reject 源；其余导出面保持实装）──
@@ -107,12 +106,6 @@ enableAutoUnmount(afterEach)
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  // 单例首次创建放 active effect scope（onScopeDispose 注册 cleanup，防 Vue warn；
-  // composer-smoke.test.ts 同款），并清空分区（单例跨用例共享）
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  useCompactQueue()._clearAllForTest()
 })
 
 describe('onModelSelectUi / onThinkingSelectUi 错误→toast 包装（U4 三纪律）', () => {

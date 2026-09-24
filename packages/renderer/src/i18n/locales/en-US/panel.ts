@@ -120,7 +120,6 @@ export default {
     viewCommandDoc: 'View command docs',
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
-    compactingFlushHint: 'Will send {count} queued message(s) when done',
     // [system-notice-rendering-upgrade U3] compacting "N queued" chip (consumed by ActivityStrip, D4;
     // long sub-copy becomes a chip, count semantics unchanged)
     compactingQueueChip: '{count} queued',
