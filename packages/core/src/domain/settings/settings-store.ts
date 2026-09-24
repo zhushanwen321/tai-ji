@@ -30,6 +30,7 @@ import type {
 import { getPlatform } from '../../platform/port'
 import { updateSystem } from './system-storage'
 import { getSettingsTransport } from './transport'
+import { optimisticUpdate, refCell } from '../../foundation/optimistic-update'
 import { DEFAULT_SYSTEM, type SystemSettings, type ExtensionItem } from './types'
 
 /** createSettingsStore() 返回的 store 实例形状（消费方类型标注用）。 */
@@ -88,21 +89,12 @@ export function createSettingsStore() {
    * 原 renderer 实现中「同步 DOM + i18n」部分（applySystemToDom）下沉 ui 包/壳（TC2），
    * core 侧无 DOM 副作用。
    *
-   * 乐观更新 + 失败回滚（D9 修复语义保留）：
-   *   原实现先乐观改 system.value，再 await updateSystem，失败时 system.value 已是新值不回滚
-   *   → store 说新主题 DOM 是旧主题，状态脱节。现顺序：存快照 → 改 state → await 持久化
-   *   → 失败 catch 还原 state → throw（让调用方 toast 反馈）。
+   * 乐观更新 + 失败回滚（D9 修复语义保留，编排收进乐观更新协议）：
+   *   存快照 → 改 state → await 持久化 → 失败还原 state → rethrow（调用方 toast 反馈）。
    */
   async function setSystem(patch: Partial<SystemSettings>): Promise<void> {
-    const snapshot = { ...system.value }
-    system.value = { ...system.value, ...patch }
-    try {
-      await updateSystem(getPlatform().storage, patch)
-    } catch (e) {
-      // 持久化失败：回滚 state，保持 state/storage 一致
-      system.value = snapshot
-      throw e
-    }
+    const next = { ...system.value, ...patch }
+    await optimisticUpdate(refCell(system), next, () => updateSystem(getPlatform().storage, patch))
   }
 
   /**

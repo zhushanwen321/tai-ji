@@ -28,6 +28,7 @@
 import { effectScope, watch } from 'vue'
 import type { EffectScope } from 'vue'
 import { getState, getSettingsTransport } from '@taiji/core'
+import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
 
@@ -128,9 +129,8 @@ export function usePiPresets() {
   /**
    * 设置全局默认预设。
    *
-   * 乐观更新 + 失败回滚（RD-4#2，与 create/update/remove 同构）：
-   * 备份旧 defaultPresetId → 立即写 store（UI 即时响应）→ await RPC 持久化；
-   * RPC 失败回滚 store 后向上 throw（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
+   * 乐观更新协议（RD-4#2，与 create/update/remove 同构）：快照旧 defaultPresetId → 乐观写
+   * → await RPC；失败回滚后 rethrow（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
    *
    * 成功后 loadPresets() 强拉权威值：preset 域无广播（installPresetAutoLoad 仅首次 connected
    * 拉一次），乐观镜像与后端的背离不会自行消除——强拉是唯一的对齐通道。loadPresets 内部
@@ -138,73 +138,76 @@ export function usePiPresets() {
    */
   async function setDefault(presetId: string): Promise<void> {
     const previous = store.defaultPresetId
-    store.setDefaultPresetId(presetId)
-    try {
-      await getSettingsTransport().setDefaultPreset(presetId)
-    } catch (e) {
-      store.setDefaultPresetId(previous)
-      throw e
-    }
+    await runOptimisticUpdate({
+      apply: () => {
+        store.setDefaultPresetId(presetId)
+      },
+      rollback: () => {
+        store.setDefaultPresetId(previous)
+      },
+      commit: () => getSettingsTransport().setDefaultPreset(presetId),
+    })
     await loadPresets()
   }
 
   /**
    * 创建自定义预设。
    *
-   * 乐观更新：立即 upsert 到 store（UI 即时显示），随后发 RPC 持久化。
-   * RPC 成功后用 reply 回写 store（W-RN-3：runtime 可能补全 order/id 等字段，本地
-   * optimistic 镜像与持久态对齐，避免 order 错乱）。
-   * RPC 失败时回滚（removePreset），调用方 catch 后 toast。
+   * 乐观更新协议：立即 upsert 到 store（UI 即时显示）→ RPC 持久化；成功后用 reply 回写 store
+   * （W-RN-3：runtime 可能补全 order/id 等字段，本地 optimistic 镜像与持久态对齐）。
+   * 失败回滚 = 逆操作 removePreset（快照还原不适用——插入前不存在），回滚后 rethrow。
    */
   async function create(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
-    store.upsertPreset(preset)
-    try {
-      const saved = await getSettingsTransport().createPreset(preset)
-      // 用 RPC reply 回写（runtime 可能补全 order/id 等字段）
-      store.upsertPreset(saved)
-      return saved
-    } catch (e) {
-      store.removePreset(preset.id)
-      throw e
-    }
+    const saved = await runOptimisticUpdate({
+      apply: () => {
+        store.upsertPreset(preset)
+      },
+      rollback: () => {
+        store.removePreset(preset.id)
+      },
+      commit: () => getSettingsTransport().createPreset(preset),
+    })
+    // 用 RPC reply 回写（runtime 可能补全 order/id 等字段）
+    store.upsertPreset(saved)
+    return saved
   }
 
   /**
    * 更新预设（含内置预设的可编辑字段）。
    *
-   * 乐观更新：立即 upsert 到 store，随后发 RPC 持久化。
-   * RPC 成功后用 reply 回写 store（W-RN-3：runtime 对内置预设有 PresetGuard 规范化，
-   * reply 是权威态，覆盖本地乐观镜像）。
-   * RPC 失败时全量刷新回滚（内置预设保护等复杂场景，loadPresets 更可靠）。
+   * 乐观更新协议：立即 upsert → RPC 持久化；成功后用 reply 回写（runtime 对内置预设有
+   * PresetGuard 规范化，reply 是权威态）。失败回滚 = 异步全量刷新（内置预设保护等复杂场景，
+   * loadPresets 更可靠），完成后 rethrow。
    */
   async function update(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
-    store.upsertPreset(preset)
-    try {
-      const saved = await getSettingsTransport().updatePreset(preset)
-      // 用 RPC reply 回写（runtime 规范化后的权威态）
-      store.upsertPreset(saved)
-      return saved
-    } catch (e) {
-      await loadPresets()
-      throw e
-    }
+    const saved = await runOptimisticUpdate({
+      apply: () => {
+        store.upsertPreset(preset)
+      },
+      rollback: () => loadPresets(),
+      commit: () => getSettingsTransport().updatePreset(preset),
+    })
+    // 用 RPC reply 回写（runtime 规范化后的权威态）
+    store.upsertPreset(saved)
+    return saved
   }
 
   /**
    * 删除自定义预设（内置不可删）。
    *
-   * 乐观更新：备份 → 立即 removePreset，随后发 RPC 持久化。
-   * RPC 失败时回滚（upsertPreset 备份），调用方 catch 后 toast。
+   * 乐观更新协议：快照 backup → 乐观 removePreset → RPC；失败回滚（upsertPreset 备份）后 rethrow。
    */
   async function remove(presetId: string): Promise<void> {
     const backup = store.presets.find((p) => p.id === presetId)
-    store.removePreset(presetId)
-    try {
-      await getSettingsTransport().removePreset(presetId)
-    } catch (e) {
-      if (backup) store.upsertPreset(backup)
-      throw e
-    }
+    await runOptimisticUpdate({
+      apply: () => {
+        store.removePreset(presetId)
+      },
+      rollback: () => {
+        if (backup) store.upsertPreset(backup)
+      },
+      commit: () => getSettingsTransport().removePreset(presetId),
+    })
   }
 
   return {
