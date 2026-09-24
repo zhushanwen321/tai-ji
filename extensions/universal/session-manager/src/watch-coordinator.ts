@@ -16,9 +16,8 @@
 //      （入参 = entry id 即 notifyId，P4 三键零改动），每 entry 独立 handler 禁串行 await。
 //
 // 合批的 record 幂等键 = 批内首个响应的 notifyId（A6 口径：每 notifyId 至多一条、
-// fulfills 总数守恒；death 槽同语义——同槽只出一条）。fulfills 取 runtime 直供
-// fulfillsN（D6「本次应答销账的债权笔数」，death 语义为同 deathSeq 的 claim 数），
-// 缺席回退批内响应笔数。
+// fulfills 总数守恒；death 槽同语义——同槽只出一条）。fulfillsN = runtime 直供本批
+// 兑现总笔数（同批应答同值，设计 D3 合批段；缺席回退批内应答笔数）。
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -43,6 +42,23 @@ const WATCH_FLUSH_DEBOUNCE_MS = 50;
  *  （extension 进程内 session 隔离约定——槽键含 sessionId，跨子会话不串）。 */
 function deathSlotKey(sessionId: string, deathSeq: number): string {
 	return `${sessionId} ${deathSeq}`;
+}
+
+/** 畸形/词表外应答的漂移形态摘要里键清单的截断上限（防大 payload 刷屏留痕） */
+const DRIFT_KEY_PREVIEW_LIMIT = 8;
+
+/** 畸形/词表外应答的漂移形态摘要（warn 留痕用，同 non-json 分支的 responseHead
+ *  形态——只描述形状不做归因）：对象 → reason 原词 + 键清单（截断防大 payload 刷屏），
+ *  非对象 → typeof。 */
+function describeRespondDrift(parsed: unknown): string {
+	if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+		const rec = parsed as Record<string, unknown>;
+		const reason = rec["reason"];
+		const reasonPart = typeof reason === "string" ? reason : typeof reason;
+		const keys = Object.keys(rec).slice(0, DRIFT_KEY_PREVIEW_LIMIT).join(",");
+		return `reason=${reasonPart} keys=[${keys}]`;
+	}
+	return `typeof=${Array.isArray(parsed) ? "array" : typeof parsed}`;
 }
 
 /** 入窗待攒批的应答（cancelled/orphaned 例外1 不入窗） */
@@ -154,16 +170,33 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 			}
 			return;
 		}
-		// 读侧不信任外部格式（AGENTS 关键规则 5）：null（旧 runtime 象限，respond null →
-		// JSON "null"）/ 畸形 / 词表外 reason → 折叠 cancelled 静默收口（D6 兼容矩阵——
-		// 不伪造死亡通知）；error envelope {error,...} 同路（runtime params 守卫拒绝态）。
+		// 读侧不信任外部格式（AGENTS 关键规则 5），null 与畸形/词表外拆开处置：
+		//   ① null（旧 runtime 象限，respond null → JSON "null"）是 D6 兼容矩阵的显式
+		//      静默豁免——折叠 cancelled 收口、不 warn（非漂移信号，不伪造死亡通知）；
+		//   ② 畸形对象 / 词表外 reason / error envelope {error,...}（runtime params 守卫
+		//      拒绝态）= 协议漂移信号 → 必须 warn 留痕（同上方 non-json/channel-error
+		//      分支形态：notifyId + 漂移形态摘要），再折叠 cancelled 清 stale register。
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(result.value);
 		} catch {
-			parsed = undefined;
+			// unreachable 防御（callMarkerRpc ok:true 已过 JSON 合法性检测）——真到即漂移
+			logger.warn(
+				"[session-manager] watch respond unparsable — folding cancelled (protocol drift)",
+				{ notifyId, drift: "unparsable-json" },
+			);
+			unregisterPending(notifyId, "cancelled");
+			return;
+		}
+		if (parsed === null) {
+			unregisterPending(notifyId, "cancelled");
+			return;
 		}
 		if (!isSessionManagerWatchRespondPayload(parsed)) {
+			logger.warn(
+				"[session-manager] watch respond malformed/out-of-vocab — folding cancelled (protocol drift)",
+				{ notifyId, drift: describeRespondDrift(parsed) },
+			);
 			unregisterPending(notifyId, "cancelled");
 			return;
 		}

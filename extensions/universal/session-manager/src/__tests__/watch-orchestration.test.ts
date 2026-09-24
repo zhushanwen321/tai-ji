@@ -9,6 +9,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
 
+// logger 打桩（同 tool-non-json-response 先例）：drift 留痕断言只认 warn 通道
+const loggerMock = vi.hoisted(() => ({
+	error: vi.fn(),
+	warn: vi.fn(),
+	debug: vi.fn(),
+}));
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+	getLogger: () => loggerMock,
+	setPiHandle: vi.fn(),
+}));
+
 import registerExtension from "../index.ts";
 
 const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
@@ -145,6 +156,7 @@ function recordSpy(): ReturnType<typeof vi.fn> {
 
 beforeEach(() => {
 	vi.useFakeTimers();
+	loggerMock.warn.mockClear();
 });
 
 afterEach(() => {
@@ -559,9 +571,11 @@ describe("兼容与防御", () => {
 		await vi.advanceTimersByTimeAsync(50);
 		expect(record).not.toHaveBeenCalled();
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
+		// D6 显式静默豁免：null 不是漂移信号，零 warn 留痕
+		expect(loggerMock.warn).not.toHaveBeenCalled();
 	});
 
-	it("畸形/词表外 payload → 折叠 cancelled 静默收口（不落 default 误标、不产通知）", async () => {
+	it("畸形/词表外 payload → 折叠 cancelled 收口（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
 		const record = recordSpy();
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
@@ -572,6 +586,14 @@ describe("兼容与防御", () => {
 		await vi.advanceTimersByTimeAsync(50);
 		expect(record).not.toHaveBeenCalled();
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
+		// 协议漂移信号必须留痕：warn 带 notifyId + 漂移形态摘要（词表外 reason 原词）
+		expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+		const [warnMsg, warnData] = loggerMock.warn.mock.calls.at(-1)!;
+		expect(warnMsg).toContain("folding cancelled");
+		expect(warnData).toMatchObject({
+			notifyId: expect.stringMatching(/^sm-/),
+			drift: expect.stringContaining("some-future-reason"),
+		});
 	});
 
 	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收口腿）", async () => {
