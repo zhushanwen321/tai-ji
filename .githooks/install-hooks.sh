@@ -566,6 +566,51 @@ if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix
 fi
 
 # ============================================================================
+# 2h. zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5）
+#     scripts/check-bun-driver.mjs：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
+#     生产宿主唯一可用 sqlite 驱动（bun 下 import('node:sqlite') 失败，P-bun-host
+#     实测）。ext 常规 vitest 跑 node 只覆盖 node:sqlite 路径——bun 驱动路径是
+#     F4「本地绿产品挂」陷阱的同构盲区，同一断言集必须在 bun 运行时再跑一遍。
+#     fail-open 仅限 bun 缺失场景（输出安装指引后放行，bun 趟由 CI 承担）；
+#     测试失败必红，无放行分支。--require-bun（CI 用）把缺失翻转为红。
+#     注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底；
+#     AGENTS.md SKIP_* 清单登记成本见其清单注释）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^scripts/check-bun-driver\.mjs$"; then
+    print_section "[zcode-session-source bun 驱动双跑]"
+
+    if ! node scripts/check-bun-driver.mjs; then
+        echo -e "${RED}[ERROR] bun 趟未通过——bun:sqlite 驱动路径（生产宿主实际路径）有断言未过，按上方明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] bun 驱动双跑检查通过${NC}"
+fi
+
+# ============================================================================
+# 2h-2. P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）
+#     scripts/check-pbundle.mjs：builtin staged 产物内 sqlite 驱动探测代码必须保持
+#     「运行期解析」形态——spec 被静态化（esbuild 升级 / 驱动实现回改字面量）时
+#     bundle 成功但 staged 运行期 Cannot find module，比不拆更糟。触发面 = staged
+#     命中 staged 产物的两个源（reader 扩展 / zcode-session-source）或门脚本本体；
+#     CI invariants 免 staged 前提 --rebuild 全量兜底（D7 通则，与 2h 同一挂载理由）。
+#     --rebuild 先重建 staged（bundle-extensions <1s，防「检查的是滞后产物」）；
+#     不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/universal/session-reader/|^scripts/check-pbundle\.mjs$"; then
+    print_section "[P-bundle 门（staged 驱动 spec 运行期解析形态）]"
+
+    if ! node scripts/check-pbundle.mjs --rebuild; then
+        echo -e "${RED}[ERROR] P-bundle 门未通过——staged 产物内驱动 spec 被静态化，按上方 [FIX] 修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] P-bundle 门检查通过${NC}"
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 
@@ -976,13 +1021,15 @@ fi
 #   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
+#   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 守卫
+#                                    DOCUMENTED_MODULES 双向对账（登记漂移即红，MF-5-1 形态）
 #   注：与 R1 同例不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     print_section "[架构约束登记检查]"
 
-    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py; do
+    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py check_layering_registry_sync.py; do
         CHECKER_PATH=".githooks/$CONSTRAINT_CHECKER"
         if [ ! -f "$CHECKER_PATH" ]; then
             echo -e "${YELLOW}[WARN] 找不到检查脚本 $CHECKER_PATH${NC}"
@@ -1002,6 +1049,38 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     echo -e "${GREEN}[OK] 架构约束登记检查通过${NC}"
 else
     echo -e "${YELLOW}[SKIP] 架构约束登记检查已跳过${NC}"
+fi
+
+# ============================================================================
+# 非.workspace 结构接线对账（S1，PR #20 组 D 守卫化）
+#   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
+#   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
+#   必须在 docs/structure-wiring.json 登记各管线接线面（CI typecheck / 测试装配 /
+#   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
+#   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
+#   触发面：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
+#   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[结构接线对账]"
+    STRUCT_WIRING_TRIGGER=0
+    if echo "$STAGED_FILES" | grep -qE "^(pnpm-workspace\.yaml|docs/structure-wiring\.json)$|^(packages|extensions|resources/plugins)/.*package\.json$"; then
+        STRUCT_WIRING_TRIGGER=1
+    fi
+    if [ "$STRUCT_WIRING_TRIGGER" -eq 1 ]; then
+        echo -e "${BLUE}[INFO] 结构接线相关变更，运行对账...${NC}"
+        node scripts/check-structure-wiring.mjs
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] 结构接线对账失败${NC}"
+            echo -e "${YELLOW}[INFO] 新顶层结构第一笔 commit 只做接线与登记（docs/structure-wiring.json SSOT）${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无结构接线相关变更，跳过对账${NC}"
+    fi
 fi
 
 # ============================================================================

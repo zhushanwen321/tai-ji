@@ -45,7 +45,7 @@ function createMockSessionService(sessions: SessionSummary[] = []): ISessionServ
   return {
     listPersistedSessions: vi.fn().mockReturnValue(groups),
     getSummary: vi.fn((id: string) => sessionMap.get(id)),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
+    sendMessage: vi.fn().mockResolvedValue({ blocked: false }),
     create: vi.fn().mockResolvedValue(createSessionSummary()),
     delete: vi.fn().mockResolvedValue(undefined),
     renameSession: vi.fn().mockResolvedValue(undefined),
@@ -170,7 +170,8 @@ describe('Session RPC Handlers — real sessionService calls', () => {
       content: 'Hello',
     })
 
-    expect(mockSessionService.sendMessage).toHaveBeenCalledWith('s1', 'Hello')
+    // [D6/u5b] 透传链：dispatcher 签名 (sessionId, content, images?, clientUuid?, requireCommand?)
+    expect(mockSessionService.sendMessage).toHaveBeenCalledWith('s1', 'Hello', undefined, undefined, undefined)
   })
 
   it('falls back to stub when sessionService is undefined', async () => {

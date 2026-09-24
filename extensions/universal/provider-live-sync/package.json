@@ -1,0 +1,45 @@
+{
+  "name": "@zhushanwen/pi-provider-live-sync",
+  "version": "0.2.0",
+  "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential config changes.",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "provider",
+    "model",
+    "refresh"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts",
+    "skills/"
+  ],
+  "dependencies": {
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  }
+}

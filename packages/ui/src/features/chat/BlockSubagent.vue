@@ -16,10 +16,9 @@
       <component
         :is="BLOCK_ICON_LUCIDE.subagent"
         v-else
-        class="size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover"
-        :class="isFailed ? 'hover:text-warn' : ''"
+        :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']"
       />
-      <span class="mr-0.5 inline-block shrink-0 whitespace-nowrap font-mono text-[length:var(--text-2xs)] font-semibold tracking-[0.08em] text-neutral-dim">Subagent</span>
+      <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.subagent') }}</span>
       <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent">{{ subagentAgent }}</span>
       <template v-if="subagentSlug">
         <span class="text-neutral-faint">·</span>
@@ -37,16 +36,19 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ToolCall } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 import { openSubagent } from '@taiji/core/domain/drawer'
-import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG } from './block-icon'
+import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG } from './block-icon'
 
 const props = defineProps<{
   tool: ToolCall
   /** 所属主 session ID（构造 subagent 虚拟 id 的 mainSid 段；点击开 drawer 用） */
   sessionId?: string | null
 }>()
+
+const { t } = useI18n()
 
 const isFailed = computed(() => props.tool.status === 'error')
 const isRunning = computed(() => props.tool.status === 'running')

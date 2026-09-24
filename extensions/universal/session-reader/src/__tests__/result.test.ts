@@ -267,10 +267,10 @@ describe('result action（U6）', () => {
     }
   })
 
-  it('6. 不存在 id：sa-id 无 manifest → 无匹配 record；uuid 片段零匹配 → 无匹配 session', async () => {
+  it('6. 不存在 id：sa-id 无 manifest → zcode_record_not_found（U9 统一错误面）；uuid 片段零匹配 → 无匹配 session', async () => {
     await expect(
       handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, { agentDir: dir }),
-    ).rejects.toThrow(/无匹配 record/)
+    ).rejects.toThrow(/zcode_record_not_found/)
     try {
       await handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, { agentDir: dir })
     } catch (e) {

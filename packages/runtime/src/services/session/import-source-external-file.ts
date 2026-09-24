@@ -7,7 +7,9 @@
  * 现状 import-service（单源期）的 pi 特有逻辑原样搬入（行为零变化）：
  * - listCandidates：scanExternalSessions 默认 TTL 读 + alreadyImported/cwdExists 打标 +
  *   query 过滤（五字段 includes）+ dirLabel 目录聚合 + 「根存在但不可读」复核
- * - prepareImport：首行异步读（r4-S2）+ parseHeaderFromFirstLine 字段清单校验（D1）+
+ * - prepareImport：首行异步读（r4-S2，基座字节原语 readFirstJsonlLine——本模块原 async
+ *   副本随 session-reader-shared-core 场景 6 收敛删除，IO 错误 catch-all → 既有失败语义
+ *   由消费侧薄包装承接）+ parseHeaderFromFirstLine 字段清单校验（D1）+
  *   文件名临时标记拒绝（r2-S1）；write = copyFile（字节级复制，大文件不重序列化），
  *   degradations 恒空数组（无转换即无降级）
  *
@@ -16,7 +18,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { copyFile, open, readdir } from 'node:fs/promises'
+import { copyFile, readdir } from 'node:fs/promises'
 import { basename, dirname, relative } from 'node:path'
 import type {
   ImportCandidate,
@@ -24,6 +26,7 @@ import type {
   ImportCandidatesRequest,
   ImportRequest,
 } from '@taiji/shared'
+import { readFirstJsonlLine } from '@zhushanwen/session-core'
 import { toErrorMessage } from '../../utils/errors.js'
 import {
   scanExternalSessions,
@@ -38,9 +41,6 @@ const DEFAULT_CANDIDATE_LIMIT = 100
 
 /** uuid 短 ID 匹配长度（D5：uuid 前 6 位短 ID，与 30 字符 UI 惯例无关）。 */
 const SHORT_ID_LENGTH = 6
-
-/** header 首行读块大小（与 session-file-utils 的 parseSessionHeader 同策略：4KB 覆盖正常 header）。 */
-const HEADER_CHUNK_BYTES = 4096
 
 /**
  * dirLabel：候选文件相对 rootDir 的所属目录（D5：目录 chip 分组用）。顶层文件为 ''（非
@@ -58,43 +58,11 @@ function matchesQuery(item: ImportCandidate, query: string): boolean {
   )
 }
 
-/**
- * 异步读 JSONL 首行（r4-S2：不沿用 sync 原语，NFS 源的 sync 读会阻塞事件循环）。
- *
- * 与 parseSessionHeader 同策略：先读 4KB 块取首行；块内无换行且未读满（文件本身小于块）
- * 按无首行终止处理；块读满仍无换行（首行超长）继续续读——等价于回退全量读首行的语义。
- * 空文件返回 null。
- *
- * 跨块解码（r1-S2）：块以 Buffer 累积、检测换行时 Buffer.concat 后整体 toString——
- * 逐块 toString 会在多字节 UTF-8 字符（CJK）跨 4KB 块边界时拆出 U+FFFD，长中文路径的
- * header 首行会被静默损坏。
- */
-async function readFirstLineAsync(filePath: string): Promise<string | null> {
-  const fh = await open(filePath, 'r')
-  try {
-    const buffer = Buffer.alloc(HEADER_CHUNK_BYTES)
-    const chunks: Buffer[] = []
-    for (;;) {
-      const { bytesRead } = await fh.read(buffer, 0, HEADER_CHUNK_BYTES, null)
-      if (bytesRead === 0) {
-        return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-      }
-      // 换行先在原始 Buffer 上定位（r5-S4：避免逐块 Buffer.concat 的 O(n²) 复制——超长首行
-      // 续读多轮时，每轮 concat 全量重组）；换行前内容才入 chunks，最终一次性 concat 解码。
-      const nl = buffer.subarray(0, bytesRead).indexOf('\n'.charCodeAt(0))
-      if (nl >= 0) {
-        chunks.push(Buffer.from(buffer.subarray(0, nl)))
-        return Buffer.concat(chunks).toString('utf-8')
-      }
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
-      if (bytesRead < HEADER_CHUNK_BYTES) {
-        return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
-      }
-    }
-  } finally {
-    await fh.close()
-  }
-}
+// 首行读取消费基座字节原语 readFirstJsonlLine（async 形态，r4-S2 语义不变——超长首行
+// 续读、跨块 CJK 多字节无损；本模块原 async 副本随 session-reader-shared-core 场景 6
+// 删除）。基座契约：空文件/首行剥 CR 后纯空白 → undefined；IO 错误（不存在/权限等）
+// 上抛——「任何 IO 失败 → import_source_missing」的既有分流由下方消费点 catch 承接
+//（消费侧薄包装职责，基座不吞错误分类信息）。
 
 // header 解析（parseHeaderFromFirstLine）直接消费 session-file-external-scan 导出的同一函数
 //（D1 字段清单 SSOT 单副本）：含 null/非 object 运行时守卫，null 首行（TOCTOU 源文件被
@@ -172,14 +140,14 @@ export class ExternalFileImportSource implements SessionImportSource {
     const { sourcePath } = request
     const sourceName = basename(sourcePath)
 
-    // 1. 源文件存在校验 + header 异步读（r4-S2）
-    let firstLine: string | null
+    // 1. 源文件存在校验 + header 异步读（r4-S2，基座原语；IO 失败 → 既有 import_source_missing）
+    let firstLine: string | undefined
     try {
-      firstLine = await readFirstLineAsync(sourcePath)
+      firstLine = await readFirstJsonlLine(sourcePath)
     } catch (e) {
       throw new ImportServiceError('import_source_missing', `文件不存在或不可读：${sourcePath}（${toErrorMessage(e)}）`)
     }
-    if (firstLine === null) {
+    if (firstLine === undefined) {
       throw new ImportServiceError('import_invalid_session', `不是有效的 pi session 文件（首行缺少合法 session header）：${sourcePath}`)
     }
     const header = parseHeaderFromFirstLine(firstLine)

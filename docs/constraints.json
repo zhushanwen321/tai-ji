@@ -1403,7 +1403,7 @@
     },
     {
       "id": "C-proc-03",
-      "summary": "worktree 创建必须走 git-cwt（自动 install + Electron dist 缓存）；bare repo 模式 origin=.bare、GitHub remote 叫 github；gh 命令带 --repo",
+      "summary": "worktree 创建必须走 git-cwt（自动 install + Electron dist 缓存）；bare repo 模式唯一 remote 叫 github、分支间整合走本地 refs（worktree 共享 .bare 的 refs，兄弟分支纳入 main 直接 git merge main）；gh 命令带 --repo",
       "scope": [
         "global"
       ],
@@ -2421,6 +2421,7 @@
         "extensions/shared/ext-guards/**",
         "extensions/universal/smart-context/**",
         "extensions/universal/plan/**",
+        "extensions/universal/provider-live-sync/**",
         "extensions/universal/scheduler/**",
         "extensions/universal/structured-output/**",
         "extensions/universal/subagent-workflow/**",
@@ -2875,6 +2876,160 @@
         {
           "type": "review",
           "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-22",
+      "summary": "引擎协议判据 6——wire 可选键三分类（advisory/degradable/behavior）与行为键必配门：behavior 键（引擎静默忽略会改变任务语义）必须绑定能力位并在宿主派发前预检（先例 resume↔conversation gate、forkSource），degradable 键缺省最弱档 + 判据 5 能力位双向回指 + 预检豁免（先例 streamMode↔eventGranularity），advisory 直接 additive；判别式「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）。执行方式 = review（新 wire 可选键按判别式分类并核对能力门绑定/双向回指）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/common/capability-gate.test.ts（behavior 键派发前预检既有回归）、packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts（能力位类型面必填断言）；条文权威 = ADR-0071 与 engine-protocol.ts 头注判据 6",
+      "scope": [
+        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/subagent-core/src/execution/engine/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071",
+        "../packages/subagent-engine-sdk/src/protocol/engine-protocol.ts"
+      ],
+      "dimensions": [
+        "business-logic",
+        "type-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-23",
+      "summary": "引擎协议四张词表锁——事件/方法/通道/能力位键集四张词表统一为常量 SSOT 派生或键集互锁：AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES、ProtocolMethod ⟷ PROTOCOL_METHODS、ReverseChannel ⟷ REVERSE_CHANNELS 双向 AssertMutuallyAssignable（编译期锁），keyof CONSERVATIVE_CAPABILITIES ⟷ keyof EngineCapabilities（11=11）与 keyof CAPABILITY_ENUMS ⟷ Exclude<keyof EngineCapabilities,'maxTurns'>（10=10）键集互等；union/schema enum/manifest 两表任一处漏同步即 typecheck 红（堵 schema enum 静默缺值与缺键 undefined 透传 + gate 字面值判据放行洞）。执行方式 = 编译期断言（落在测试文件内随 typecheck 生效）+ 守卫锚点（测试文件路径）= packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts、packages/subagent-engine-sdk/src/__tests__/protocol.test.ts、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts、packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts；条文权威 = ADR-0071（病灶 why）与 engine-protocol.ts 头注",
+      "scope": [
+        "packages/subagent-engine-sdk/src/**",
+        "packages/subagent-core/src/execution/engine/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071",
+        "../packages/subagent-engine-sdk/src/protocol/contract-types.ts"
+      ],
+      "dimensions": [
+        "type-safety",
+        "test-coverage"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-type-safety"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-24",
+      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 守卫锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
+      "scope": [
+        "packages/subagent-engine-sdk/src/**",
+        "packages/subagent-core/src/execution/engine/__tests__/conformance/**",
+        "docs/extensions/subagents/engine-development-guide.md",
+        "docs/architecture/engine-adaptation/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0071"
+      ],
+      "dimensions": [
+        "business-logic",
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-25",
+      "summary": "同数据目录单 runtime 实例互斥：runtime 进程启动必须经 single-instance-guard 探活（<dataDir>/runtime-instance.json 与 supervisor runtime.port 双候选端口 TCP 探活），活实例在场即 fail-fast 拒绝启动（早于一切子进程 spawn）；probe 通过即原子写 runtime-instance.json 预登记（早于 listen：并发同启时后到实例的 probe 读到登记且 pid 存活即拒绝——端口未 listen 但持有 pid 存活同判拒绝，漏防窗口缩到单文件原子写内；双方写入前的毫秒级并发窗口为设计内残差，pid 死亡残留由判活天然放行接管）。禁止双 runtime 共享同一 TAIJI_AGENT_DATA_DIR 并行——第二实例 reattach 抢管他人 session + reaping orphan 杀幸存 subagent，退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent（2026-09-22 批量 subagent exit 143 事故形态）。验收/e2e/脚本起 runtime 必须用独立数据目录（mkdtemp / 实例目录），不得继承 prod 数据目录 env；单测守护 = packages/runtime/src/__tests__/infra/single-instance-guard.test.ts",
+      "scope": [
+        "packages/runtime/src/infra/single-instance-guard.ts",
+        "packages/runtime/src/index.ts"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-26",
+      "summary": "数据目录缺省反转（fail-safe default，2026-09-23）：getDataDir() 缺省 = ~/.taiji-dev，prod 数据目录（~/.taiji）只能被显式声明触达——打包 main 经 resolvePackagedDataDir 钉死（外部值仅 ~/.taiji 树内采信，与 dev 侧 resolveDevDataDir 镜像对称）并自置位 TAIJI_AGENT_PACKAGED=1，dev main 经 resolveDevDataDir（~/.taiji-dev 树内采信）；main spawn runtime 时 TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 组合根最早期（早于 initLogger）经 spawnDataDirContractViolation 交叉断言缺一即 fail-fast。第二支柱 prod 值准入守卫：getDataDir 内 assertNotLeakedProdDataDir——非 PACKAGED 进程持有 ~/.taiji 树值即 throw（堵「env 被污染 + 防线不在场」组合：bun test 等绕过 vitest config 的执行器恰逢宿主泄漏 ~/.taiji 值，globalSetup 脱钩与 fs-guard 双防线同时失守的 2026-09-22 事故残余形态），守卫挂在唯一入口不依赖任何 config 被加载。裸跑（手动 tsx / 验证脚本 / 探针）一律落缺省 dev 树。测试守护 = packages/shared __tests__/paths.test.ts（守卫矩阵 + 缺省字面断言）+ apps/electron/main test/packaged-data-dir.test.ts（行为矩阵）+ test/main-dev-datadir-pin.test.ts packaged describe（接线时序 + 自置位）+ packages/runtime src/utils/__tests__/runtime-env.test.ts（契约函数）；validate-runtime-bundle.sh 起 runtime 必须 mkdtemp 注入数据目录并剥 TAIJI_AGENT_PACKAGED",
+      "scope": [
+        "packages/shared/src/paths.ts",
+        "apps/electron/main/main.ts",
+        "apps/electron/main/utils/packaged-data-dir.ts",
+        "packages/runtime/src/utils/runtime-env.ts",
+        "packages/runtime/src/index.ts",
+        "scripts/validate-runtime-bundle.sh"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "process-safety",
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-27",
+      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 守卫化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线面（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量面），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/守卫面全漏）由本守卫在 commit 时拦截",
+      "scope": [
+        "docs/structure-wiring.json",
+        "scripts/check-structure-wiring.mjs",
+        "pnpm-workspace.yaml",
+        ".github/workflows/ci.yml"
+      ],
+      "authority": [
+        "structure-wiring.json"
+      ],
+      "dimensions": [
+        "monorepo-impact"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-structure-wiring.mjs"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-20",
+      "summary": "分层例外登记互指机器化（S2②，2026-09-24 源自 PR #20 组 B 的 MF-5-1 形态守卫化）：runtime-layering.md §3「跨切面例外」表行模块集与 check_services_infra_import.py 的 DOCUMENTED_MODULES 集合双向相等——§3 登记了守卫未收录 = 该模块 value import 被误拦；守卫收录了 §3 未登记 = 例外面静默扩大。基线债模块（BASELINE_MODULES）不在对账面（待 ports 收编，收编完成移除；应转正例外则先 §3 登记再移入 DOCUMENTED）。守卫白名单增删 §3 相关成员时必须同步另一侧，同 commit 落地",
+      "scope": [
+        "docs/architecture/runtime-layering.md",
+        ".githooks/check_services_infra_import.py"
+      ],
+      "authority": [
+        "architecture/runtime-layering.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check_layering_registry_sync.py"
         }
       ]
     }

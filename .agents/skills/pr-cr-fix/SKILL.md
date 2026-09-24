@@ -136,7 +136,7 @@ python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-pa
 ```
 
 - 自动检测 base...HEAD 改动过 `src/` 的 vitest 包（含 `extensions/shared/<lib>` 三层目录），逐包跑 `vitest run --coverage`（lcov），解析 lcov DA 行命中 × git diff 新增行号（精确路径匹配），算**可执行新增行覆盖率**
-- **判定**：任一被 gate 包增量 < 80%（默认）或测试失败 → `verdict=fail` exit 1；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 `.review/coverage.json`（packages 增量口径 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
+- **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释——PR #20 组 A 的 A2 形态；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 `.review/coverage.json`（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
 - **shared 下游传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，承接「1.1 不再跑全量测试」后的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
 - `--packages <pkg>` 是交集过滤器（单包探针用，会以单包产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages` 是追加器，两者语义不同、可共存。**注意**：修复 worker 在途时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
 

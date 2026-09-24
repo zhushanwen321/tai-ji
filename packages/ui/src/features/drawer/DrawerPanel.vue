@@ -103,7 +103,7 @@
 import { Comment, computed, useSlots } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BookOpen, Bot, FileText, GitBranch, Globe, Pin, PinOff, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
+import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, Pin, PinOff, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import type { SideDrawerTab } from '@taiji/core/domain/drawer'
 
@@ -229,6 +229,18 @@ const tabs = computed<TabMeta[]>(() => {
       icon: SquareCheckBig,
       emptyText: t('plan.drawer.noPlan'),
       emptyHint: t('plan.drawer.planHint'),
+    },
+    // btw tab（btw-question D7，M3-a 第 10 员）：旁路线面板（线列表 + MessageStream +
+    // Composer 复用 + fork pill）。内容由壳层（PanelContainer）经默认 slot v-if chain 注入
+    // BtwPanel（留壳 slot 模式，ui 库不 import renderer 组件）；打开经 openDrawerTab('btw')
+    // （composer btw 按钮入口归 M3-b）。i18n key 落 btw 域文件（btw.drawer.*）——对齐 plan
+    // 域先例，tab 语义属 btw 功能域不并入 panel.sideDrawer。
+    {
+      key: 'btw',
+      label: t('btw.drawer.tabBtw'),
+      icon: MessagesSquare,
+      emptyText: t('btw.drawer.noThread'),
+      emptyHint: t('btw.drawer.threadHint'),
     },
   ]
   return base

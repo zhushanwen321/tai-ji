@@ -11,6 +11,10 @@ import { taijiTestConfig } from "../../test-guard/factory.ts";
 export default taijiTestConfig({
   test: {
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    // 包级 env 净化：剥离宿主 ambient RELAY 五键（详见
+    // src/__tests__/setup/ambient-relay-strip.setup.ts 头注——pi 子进程链宿主跑测时
+    // relay 分支会绕过 PATH fixture 致 protocol e2e 族成批红）
+    setupFiles: ["./src/__tests__/setup/ambient-relay-strip.setup.ts"],
     // live 真机测试仅在 TAIJI_PI_LIVE=1 时真正执行（随迁原 core 侧口径）
   },
 });

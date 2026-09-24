@@ -319,6 +319,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(steerHarness.calls).toEqual(['ensureActive', 'inject', 'prompt', 'record'])
     expect(steerHarness.promptArgs()[2]).toBe('steer')
 
+
     const followHarness = makeHarness()
     await followHarness.dispatcher.followUpMessage('s1', 'followUp 文本')
     await followHarness.flush()
@@ -334,6 +335,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
  */
 describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () => {
   it('turn=generating：零 send.rejected + 内核按 steer 车道即时投递（turn 边界注入，不等拒绝）', async () => {
+
     const h = makeHarness({
       sessionByClient: {
         occupancy: { turn: 'generating', compacting: false, bash: false },
@@ -359,6 +361,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     await h.flush()
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+
     expect(h.client.prompt).not.toHaveBeenCalled()
     expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（消息不丢）
   })
@@ -366,6 +369,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
   it('compacting 命中：零拒绝广播 + 持有；compaction 结束后自动投递', async () => {
     const h = makeHarness({
       sessionByClient: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
+
     })
     const result = await h.dispatcher.sendMessage('s1', '压缩中消息')
     await h.flush()
@@ -380,6 +384,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
   })
 
   it('bash 命中：零拒绝广播 + 持有（bash 与 prompt 互斥由内核持有承接）', async () => {
+
     const h = makeHarness({
       sessionByClient: { isBashRunning: true, occupancy: { turn: 'idle', compacting: false, bash: true } },
     })
@@ -388,6 +393,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
     expect(h.client.prompt).not.toHaveBeenCalled()
+
   })
 
   it('occupancy 全 idle：直发成功（对照组——空闲路径不受影响）', async () => {

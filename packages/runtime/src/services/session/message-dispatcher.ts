@@ -113,6 +113,26 @@ function randomTokenSuffix(): string {
  */
 export { classifyPromptRejection, type PromptRejectionReason } from './session-delivery-registry.js'
 
+/**
+ * sendMessage 回执 reason 词表（plugin-header-action-modal-points D6/AP-4，u5a）：
+ * 投递所有权内核架构下受理段实际产出 = 'command-missing'（requireCommand 未命中）与
+ * 'hook-blocked'（BeforeSend hook 拦截）两值；busy/compacting/bash 三态已随「排队取代
+ * 拒绝」（D5）退役——暂不可收时态由内核持有，不再回拒。词表保留全值集为 interfaces
+ * 层插件回执契约（plugin-sdk / plugin-service api/session-api 映射消费兼容），插件不得
+ * 依赖 reason 精确值做行为分支（运行面只看 blocked）。
+ */
+export type SendPromptReason = 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+
+/**
+ * requireCommand 未命中的短重试参数（P9 探针定案，impl-plan u-probe 行）：命令可用 gap
+ * 实测 1.3-3.0ms，500ms 间隔 × 6 次重试对 E4「30s 内首个 tick」约束留 10 倍余量。非
+ * 任务级超时（AGENTS.md #19）：发送路径内的确定性失败探测，量级按恢复窗口校准。
+ * 内核架构语义：client 未附着（restore 在途）时同样进入重试等待附着——附着后命令表
+ * 即可探测；总预算 3s 内未附着或未命中均拒发（fail-closed）。
+ */
+const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
+const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
+
 export class MessageDispatcher {
   private sendMessageHook: SendMessageHook | null = null
   /** per-session 受理串行链（hook 竞态顺序闭合，见 sendMessage；settled 后自清）。 */
@@ -180,8 +200,11 @@ export class MessageDispatcher {
    *
    * rejected 返回值保留为类型完备（恒 undefined）——handler 的 message.status{rejected}
    * ack 分支自此不可达，protocol 条目退役归 u5。
+   *
+   * [plugin-header-action-modal-points D6/u5a] requireCommand 透传（可选，既有调用方零改动）：
+   * 插件写路径的前置原子校验，插入点见 runAcceptance 内注释。回执 reason 词表见 SendPromptReason。
    */
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult }> {
+  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string, requireCommand?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
     // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
     // 出站交接（ensureActive/restore 600ms-3s + prompt）在注册表侧异步发生，若不入口
     // touch，「hook 执行中 + 交接在途」窗口内空闲回收判定会误回收在途 session。
@@ -192,7 +215,7 @@ export class MessageDispatcher {
     // ── per-session 受理串行链（到达序 = 内核提交序）──
     // 前驱失败不毒化链（catch 吞 rejection，错误面已由链内各层自广播）。
     const prev = this.sendMessageChains.get(sessionId) ?? Promise.resolve()
-    const run = prev.catch(() => undefined).then(() => this.runAcceptance(sessionId, content, images, clientUuid))
+    const run = prev.catch(() => undefined).then(() => this.runAcceptance(sessionId, content, images, clientUuid, requireCommand))
     this.sendMessageChains.set(sessionId, run)
     run.then(
       () => this.releaseSendChain(sessionId, run),
@@ -201,22 +224,69 @@ export class MessageDispatcher {
     return run
   }
 
-  /** 受理段（hook + 内核提交）——仅经 per-session 串行链进入。 */
+  /** 受理段（hook + requireCommand 校验 + 内核提交）——仅经 per-session 串行链进入。 */
   private async runAcceptance(
     sessionId: string,
     content: string,
     images?: Array<{ data: string; mimeType: string }>,
     clientUuid?: string,
-  ): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult }> {
+    requireCommand?: string,
+  ): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
     // ── BeforeSend hook（提交前唯一拦截面）──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
+    // [D6/u5a] reason:'hook-blocked' 为回执面增量（hook 管道既有 reason 已随 message.error 上浮）。
     const hookOutcome = await this.runBeforeSendHook(sessionId, content)
     if (hookOutcome.blocked) {
-      return { blocked: true }
+      return { blocked: true, reason: 'hook-blocked' }
     }
+
+    // ── requireCommand 原子校验（plugin-header-action-modal-points D6/u5a）──
+    // 插件写路径前置校验：未命中 → 拒发回执（reason='command-missing'），不广播
+    // message.error——回执机制（E14）就是它的反馈面，命令串不进模型、对话流无新消息。
+    // 校验位置 = hook 之后、内核提交之前（main 侧原位置为「restore 之后、busy 预检之前」，
+    // 内核架构下 busy 预检已退役；restore 窗口由 ensureCommandAvailable 的重试循环覆盖：
+    // client 未附着时按间隔重取，附着后命令表即可探测，总预算耗尽 fail-closed）。
+    if (requireCommand !== undefined) {
+      const available = await this.ensureCommandAvailable(sessionId, requireCommand)
+      if (!available) {
+        console.warn(
+          `[message-dispatcher] requireCommand "${requireCommand}" not registered after ${REQUIRE_COMMAND_RETRY_ATTEMPTS} retries, rejecting send (reason=command-missing), sid=${sessionId}`,
+        )
+        return { blocked: true, rejected: true, reason: 'command-missing' }
+      }
+    }
+
     const receipt = this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
     return { blocked: false, receipt }
+  }
+
+  /**
+   * requireCommand 探测（plugin-header-action-modal-points D6/u5a）：直连
+   * client.getCommands()（不走 sessionService.getCommands 的 markDirty 查询语义——那是
+   * UI 状态查询面路径），未命中按间隔短重试。client 未附着（restore 在途）同样进入
+   * 重试等待——附着后命令表即可探测；总预算耗尽 fail-closed（拒发由调用方收口）。
+   * 探测 RPC 失败（transport 抖动等）视同未命中参与重试，不中断发送主流程——
+   * warn 落日志留排查线索（非静默吞）。
+   */
+  private async ensureCommandAvailable(sessionId: string, requireCommand: string): Promise<boolean> {
+    for (let attempt = 0; attempt <= REQUIRE_COMMAND_RETRY_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, REQUIRE_COMMAND_RETRY_INTERVAL_MS))
+      }
+      const client = this.pm.getClient(sessionId)
+      if (!client) continue
+      try {
+        const commands = await client.getCommands()
+        if (commands.some((c) => c.name === requireCommand)) return true
+      } catch (e) {
+        console.warn(
+          `[message-dispatcher] requireCommand probe failed (attempt ${attempt + 1}/${REQUIRE_COMMAND_RETRY_ATTEMPTS + 1}):`,
+          toErrorMessage(e),
+        )
+      }
+    }
+    return false
   }
 
   /** 串行链尾自清：本 run 仍是链尾时释放槽位（跨 session 恒不互相阻塞）。 */

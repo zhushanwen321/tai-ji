@@ -189,3 +189,97 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
     expect(getViewedVids()).toEqual(new Set())
   })
 })
+
+describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () => {
+  // 组合链与 subagent 同构（三分量：isOpen + activeTab==='btw' + selectedBtwVid）；
+  // 查询源同样钉死 panel 枚举，禁止 drawer 分区全枚举。
+  let panels: Ref<Array<string | null>>
+
+  beforeEach(() => {
+    panels = ref<Array<string | null>>([])
+    bindViewedVidPanels(panels)
+  })
+
+  it('drawer 开在 btw tab 且正在查看某线 → 该线 vid 计入豁免集（查看中不驱逐）', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-1')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set(['btw:pi-1']))
+  })
+
+  it('关闭 drawer 后不豁免（同 A6 语义：关 drawer 即离开查看态）', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-1')
+    closeDrawer()
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('drawer 切到其他 tab → btw 线不豁免（选中残留不泄漏豁免）', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-1')
+    setDrawerTab('terminal')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('btw tab 打开但未选中线 → 空集（线列表浏览态无查看对象）', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('混合形态：A 看 btw 线、B 看 agentcall → 两族各自计入（互不挤占）', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-a')
+    focusSession('B')
+    drawerControl.setSubagentView('agentcall:acs-b', 'workflow')
+    panels.value = ['A', 'B']
+
+    expect(getViewedVids()).toEqual(new Set(['btw:pi-a', 'agentcall:acs-b']))
+  })
+
+  it('禁止全枚举（D7 焦点绑定侧面）：panel 枚举外分区的 btw 选中不豁免', () => {
+    // B 曾在 btw tab 选中线，焦点切走后 B 分区保留——panel 枚举只含 A，
+    // B 的选中线不得进入豁免集（否则永久过度豁免，btw 分区永不驱逐）
+    focusSession('B')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-b')
+    focusSession('A')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('切回恢复（D7④）：离开 btw tab 再切回，选中未清、恢复豁免', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-1')
+    panels.value = ['A']
+
+    setDrawerTab('git')
+    expect(getViewedVids()).toEqual(new Set())
+
+    setDrawerTab('btw')
+    expect(getViewedVids()).toEqual(new Set(['btw:pi-1']))
+  })
+
+  it('清空选中（setBtwView(undefined)，关线/面板空态调用）→ 不再豁免', () => {
+    focusSession('A')
+    openDrawerTab('btw')
+    drawerControl.setBtwView('btw:pi-1')
+    drawerControl.setBtwView(undefined)
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+})

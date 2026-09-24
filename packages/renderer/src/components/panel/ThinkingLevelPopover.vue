@@ -4,7 +4,7 @@
     触发器与列表均中性配色（与上下文容量 / 模型触发器同款 text-neutral-dim），仅选中态走 accent。
     等级强度靠 popover 内 off→max 的语义表达。
   -->
-  <Popover v-model:open="open">
+  <Popover v-model:open="canOpen">
     <PopoverTrigger as-child>
       <Button
         variant="ghost"
@@ -12,7 +12,9 @@
         :class="props.iconOnly && 'px-1.5'"
         :title="iconOnlyTitle"
       >
-        <Brain class="size-3 shrink-0" />
+        <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
+        <LoaderCircle v-if="switching" class="size-3 shrink-0 animate-spin" />
+        <Brain v-else class="size-3 shrink-0" />
         <span v-if="!props.iconOnly">{{ currentLabel }}</span>
         <ChevronDown
           v-if="!props.iconOnly"
@@ -54,7 +56,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, ChevronDown, Brain } from '@lucide/vue'
+import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -89,6 +91,11 @@ const props = withDefaults(
      *  undefined/空 = 下发链路未接通 → 归一默认五档（off..high）。 */
     supportedLevels?: string[]
     /**
+     * U4「切换中」：true 时档位触发器显示转圈并**忽略开合与点选**（禁用重复点击）。
+     * 读条件由调用方判 sessionId 等值后传入（本组件不感知 session）。
+     */
+    switching?: boolean
+    /**
      * 纯图标态（u6b fit L2 图标化）：只留 Brain 图标，档位名进 title（点击仍出档位 popover，
      * 交互路径不丢）。
      */
@@ -98,12 +105,18 @@ const props = withDefaults(
     level: undefined,
     levelMap: undefined,
     supportedLevels: undefined,
+    switching: false,
     iconOnly: false,
   },
 )
 
 const { t } = useI18n()
 const open = ref(false)
+// U4：切换中禁止开合（内联处理，避免侵入通用 popover 原语）
+const canOpen = computed({
+  get: () => open.value,
+  set: (v: boolean) => { open.value = props.switching ? false : v },
+})
 // prop level 是 runtime 返回的 value，反查 map 得到 UI 档位 key
 const level = ref<ThinkingLevel>(
   props.level

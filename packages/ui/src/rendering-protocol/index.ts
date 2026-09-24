@@ -16,6 +16,10 @@
 // 供 GuiComponentRenderer 内部消费（TC2 总则：原语是 RenderingProtocol 内部实现细节）。
 export { default as AnsiText } from './primitives/AnsiText.vue'
 export { default as GuiComponentRenderer } from './GuiComponentRenderer.vue'
+// action-bar 执行器注入契约（AP-3）：壳层 provide 真实实现（useExtensionHostBridge），
+// Actionbar.vue 内部 inject 同一 key——key symbol 必须跨包同一实例，故经 barrel 导出消费面
+export { ACTION_EXECUTOR_KEY } from './action-executor-key'
+export type { ActionExecutor, ActionArgs } from './action-executor-key'
 export {
   resolveComponent,
   type ResolvedRender,

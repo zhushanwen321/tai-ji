@@ -107,7 +107,7 @@ describe('Session API — registerSessionRpcHandlers', () => {
       listSessions: () => mockSessions,
       getSession: (id: string) => mockSessions.find(s => s.id === id),
       getActiveSession: () => mockSessions.find(s => s.status === 'active'),
-      sendMessage: async (_sessionId: string | undefined, _role: string, _content: string) => {},
+      sendMessage: async (_sessionId: string, _role: string, _content: string, _requireCommand?: string) => ({ blocked: false }),
       // S3-W2：session 事件注册表（本测试不触事件投递，空表即可）
       sessionEvents: new SessionEventDispatch(rpc),
     })

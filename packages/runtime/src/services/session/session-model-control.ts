@@ -9,33 +9,182 @@
  * 无 onSessionDisposed）。Facade 保留两方法一行委托（ISessionService 契约不变）。
  */
 import type { ProviderId } from '@taiji/shared'
-import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
+import { DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS } from '@taiji/shared'
+import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import type { SessionReplicatedStates } from './session-state-projection.js'
-import { toErrorMessage, errorWithCode, SESSION_NOT_ACTIVE } from '../../utils/errors.js'
+import {
+  toErrorMessage,
+  errorWithCode,
+  SESSION_ACTIVATE_FAILED,
+  SESSION_ACTIVATE_TIMEOUT,
+  SESSION_NOT_FOUND,
+  MODEL_NOT_CONFIGURED,
+  RESTORE_FAILED,
+  BUILTIN_EXTENSIONS_MISSING,
+  MODEL_NOT_FOUND,
+  PROVIDER_CREDENTIAL_MISSING,
+  ENGINE_MODEL_MISSING,
+  PI_MODEL_NOT_FOUND_PREFIX,
+} from '../../utils/errors.js'
 import { logger } from '../../infra/logger.js'
 
-/** 无活跃 pi 进程时状态变更类 RPC 的统一错误（RT-4#4：fail-fast，禁止降级假成功）。 */
-function sessionNotActiveError(sessionId: string): Error & { code: string | number } {
-  return errorWithCode(`会话未活跃（${sessionId} 无活跃进程），重开后可重试`, SESSION_NOT_ACTIVE)
+/**
+ * 激活阶段可原样透传的既有码（U2，设计 §3.4 优先级规则）：这些码的语义与恢复指引已被上层
+ * 消费（未配模型 → 去设置选默认模型；产物断链 → 重装应用），重包成 `SESSION_ACTIVATE_FAILED`
+ * 会把可操作错误降级成笼统的「会话无法恢复」。
+ */
+const ACTIVATION_PASSTHROUGH_CODES: ReadonlySet<string | number> = new Set([
+  SESSION_NOT_FOUND,
+  MODEL_NOT_CONFIGURED,
+  RESTORE_FAILED,
+  BUILTIN_EXTENSIONS_MISSING,
+  SESSION_ACTIVATE_TIMEOUT,
+])
+
+/**
+ * 激活等待套一层上界（实现范式与 `process-manager.ts` 的 raceReadyTimeout 同款）。
+ *
+ * 关键语义（设计 §3.6「激活的等待上界」行）：**超时不取消后台恢复** —— 底层 promise 继续跑
+ * （join 语义保留，用户重试时 join 同一 in-flight），此处只终止 RPC 等待；定时器 `unref()`
+ * 不阻止进程退出；超时后给底层 promise 补挂 no-op 双向挂接，防其后续 settle 触发
+ * unhandled rejection。
+ */
+function raceActivateTimeout<T>(p: Promise<T>, ms: number, sessionId: string): Promise<T> {
+  if (ms <= 0) return p
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      p.then(
+        () => {},
+        () => {},
+      )
+      reject(errorWithCode(
+        `session activation timed out after ${ms}ms (sessionId=${sessionId}; background restore continues, retry later)`,
+        SESSION_ACTIVATE_TIMEOUT,
+      ))
+    }, ms)
+    timer.unref()
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
+/**
+ * 激活阶段错误分型（U2）：既有码原样透传，其余（含无码错误）包 `SESSION_ACTIVATE_FAILED`
+ * 并保留原始 message（排障可读性）。
+ */
+export function classifyActivationError(e: unknown, sessionId: string): Error & { code: string | number } {
+  const code = (e as { code?: string | number } | null | undefined)?.code
+  if (code !== undefined && ACTIVATION_PASSTHROUGH_CODES.has(code)) {
+    return e as Error & { code: string | number }
+  }
+  return errorWithCode(
+    `session activation failed for ${sessionId}: ${toErrorMessage(e)}`,
+    SESSION_ACTIVATE_FAILED,
+  )
+}
+
+/** pi `set_model` 的「模型未找到」文本判定（前缀匹配；pi 实装文本见 `PI_MODEL_NOT_FOUND_PREFIX`）。 */
+export function isPiModelNotFoundError(e: unknown): boolean {
+  return toErrorMessage(e).startsWith(PI_MODEL_NOT_FOUND_PREFIX)
 }
 
 /**
  * SessionModelControl 装配依赖（窄注入，S5/D2 风格：原 Facade 字段/子模块直读的逐字等价面）。
  */
 export interface SessionModelControlDeps {
-  /** pi 进程管理（getClient：set RPC + get_state 回执读回）。 */
-  pm: IProcessManager
   /** sessions Map 只读查询（lifecycle 所有者）：session 定位 + modelId/thinkingLevel 直写。 */
   getSession(sessionId: string): IManagedSessionView | undefined
   /** 标量实例组访问器（projection）：modelId/usage/thinkingLevel 三实例的 markDirty 失效。 */
   getReplicatedStates(sessionId: string): SessionReplicatedStates | undefined
   /** trace 增量腿补拉（traceSync）：set_model/set_thinking_level 的 RPC 成功后补拉。 */
   syncTraceEntries(sessionId: string, trigger: string): void
+  /**
+   * 会话激活（U2/D5）：停止态/回收态 → 拉起或 join 引擎，返回**存活** client。
+   * 既有错误码原样抛出（SESSION_NOT_FOUND / MODEL_NOT_CONFIGURED / RESTORE_FAILED /
+   * BUILTIN_EXTENSIONS_MISSING），由本类按 ACTIVATION_PASSTHROUGH_CODES 透传。
+   */
+  ensureActive(sessionId: string): Promise<IPiEngine>
+  /**
+   * 模型是否在当前 taiji 注册表（`configService.listProviders()` 投影：catalog 合并集 +
+   * models.json override）。用于 `Model not found` 三型分型：不在注册表 = 模型真已不存在。
+   * 未就绪（configService 尚未注入）时 fail-open 返 true（宁落双因文案，不误报「已不存在」）。
+   */
+  isModelRegistered(provider: string, modelId: string): boolean
+  /**
+   * provider 是否有可用凭据（apiKey 落盘 / OAuth / ambient / env_var 引用）。同一 fail-open
+   * 语义：无法证明缺凭据时不误报 `PROVIDER_CREDENTIAL_MISSING`。
+   */
+  hasProviderCredential(provider: string): boolean
+  /** 激活等待上界（ms，默认 15s；≤0 = 不限时逃生门）。 */
+  activateTimeoutMs?: number
 }
 
 export class SessionModelControl {
   constructor(private readonly deps: SessionModelControlDeps) {}
+
+  private get activateTimeoutMs(): number {
+    return this.deps.activateTimeoutMs ?? DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS
+  }
+
+  /**
+   * 激活 + 守卫（U2）：`ensureActive` 前置（回收态不在 Map / client 已死两态都能拉活），
+   * 施加 RPC 边界上界并做错误分型；返回的 client 必须**未退出**（`exited` 过滤是
+   * 「不把死 client 交给 set RPC」的守卫面）。
+   */
+  private async activate(sessionId: string): Promise<IPiEngine> {
+    let client: IPiEngine
+    try {
+      client = await raceActivateTimeout(this.deps.ensureActive(sessionId), this.activateTimeoutMs, sessionId)
+    } catch (e) {
+      const wrapped = classifyActivationError(e, sessionId)
+      if (wrapped !== e) {
+        console.error(`[session-service] ensureActive failed: sessionId=${sessionId}, ${toErrorMessage(e)}`)
+      }
+      throw wrapped
+    }
+    if (client.exited) {
+      // 激活返回已死 client（reaper 竞态 / 进程刚退）= 内部不变量破坏，不把死 client 交给 set RPC。
+      const err = errorWithCode(
+        `activation returned an exited pi client (sessionId=${sessionId})`,
+        SESSION_ACTIVATE_FAILED,
+      )
+      console.error(`[session-service] ${err.message}`)
+      throw err
+    }
+    return client
+  }
+
+  /**
+   * `Model not found` 三型分型（U2，设计 §3.4）：pi 的错误文本只说明「引擎快照里没这个模型」，
+   * 三种成因由 taiji 侧两判分开——① 不在注册表 → `MODEL_NOT_FOUND`；② 在注册表但 provider
+   * 无凭据 → `PROVIDER_CREDENTIAL_MISSING`；③ 在注册表且凭据齐备 → `ENGINE_MODEL_MISSING`
+   * （快照未同步 or 配置含坏内容，两因不机器可分 → 双因文案，D11）。
+   * 非该文本的错误原样返回（不吞、不重包）。
+   */
+  private classifySetModelError(e: unknown, provider: string, modelId: string): unknown {
+    if (!isPiModelNotFoundError(e)) return e
+    const target = `${provider}/${modelId}`
+    if (!this.deps.isModelRegistered(provider, modelId)) {
+      return errorWithCode(
+        `model not in taiji registry: ${target} (pi said: ${toErrorMessage(e)})`,
+        MODEL_NOT_FOUND,
+      )
+    }
+    if (!this.deps.hasProviderCredential(provider)) {
+      return errorWithCode(
+        `provider has no credential: ${provider} (pi said: ${toErrorMessage(e)})`,
+        PROVIDER_CREDENTIAL_MISSING,
+      )
+    }
+    return errorWithCode(
+      `engine has not recognized the model yet: ${target} (pi said: ${toErrorMessage(e)}; `
+      + 'snapshot not yet refreshed, or provider config rejected by the engine)',
+      ENGINE_MODEL_MISSING,
+    )
+  }
 
   /**
    * session 级状态单一 owner：切换模型的 RPC + 缓存更新 + 失效。
@@ -56,22 +205,25 @@ export class SessionModelControl {
    * pi 权威值（pi 侧 setModel 后 getContextUsage 天然按新模型窗口），结构自愈。
    */
   async switchModel(sessionId: string, provider: ProviderId, modelId: string): Promise<string> {
-    const session = this.deps.getSession(sessionId)
-    if (!session) throw new Error('session not active')
     const newModelId = `${provider}/${modelId}`
-    const client = this.deps.pm.getClient(sessionId)
-    if (!client) {
-      // [code-harden RT-4#4] 无活跃 pi 进程（回收/崩溃窗口）= 状态变更不可达：fail-fast
-      // 抛错（code=SESSION_NOT_ACTIVE，transport 全局 catch 透传 code + details.sessionId），
-      // 替代旧的 `return sessionId` 降级——那会被 transport 按「请求值」回 model.switched，
-      // UI 乐观确认一个未生效的档位（违 ADR-0065 禁乐观写），且旧路径全程零日志。
-      throw sessionNotActiveError(sessionId)
+    // U2/D5：**激活前置**——停止态（不在 Map）/ 回收态 / 死 client 一律先拉活（join 同一
+    // in-flight），再谈缓存写与广播。旧实现把 `getSession` 判空放在最前、且 `getClient`
+    // 不过滤已死进程，两个状态都到不了激活分支：不在 Map → throw 'session not active'；
+    // 无 client → 直接 `return sessionId` 假成功（前端按请求值回显，用户看到切了但引擎没动）。
+    const client = await this.activate(sessionId)
+    const session = this.deps.getSession(sessionId)
+    if (!session) {
+      // 激活成功但 Map 仍无条目 = 内部不变量破坏（激活路径负责注册），显式失败不静默。
+      throw errorWithCode(
+        `session not registered after activation (sessionId=${sessionId})`,
+        SESSION_ACTIVATE_FAILED,
+      )
     }
     try {
       await client.setModel(provider, modelId)
     } catch (e) {
       console.error(`[session-service] switchModel RPC failed: sessionId=${sessionId}, model=${newModelId}`, e)
-      throw e
+      throw this.classifySetModelError(e, provider, modelId)
     }
     // 回执普查（U6，D3④）：pi pattern 引擎可能把请求模型静默换成同族条目（事故 A 形态），
     // 请求值 ≠ 生效值——set 后 get_state 读回实际生效模型，双写缓存与返回值都用生效值
@@ -148,12 +300,16 @@ export class SessionModelControl {
    * ADR-0062）。
    */
   async setThinkingLevel(sessionId: string, level: string): Promise<string> {
-    const client = this.deps.pm.getClient(sessionId)
-    if (!client) {
-      // [code-harden RT-4#4] 无活跃进程 = 状态变更不可达：fail-fast 抛错（同 switchModel），
-      // 替代旧的「请求值直写 + return」——直写请求值会把未生效档位污染进双写缓存与
-      // state_changed fallback 投影（违 ADR-0065 禁乐观写）。
-      throw sessionNotActiveError(sessionId)
+    // U2/D7：与 switchModel **同一激活语义**——停止态/回收态先在引擎侧真生效；不再有
+    // 「无 client 时请求值兜底 + 内存直写」的第三种语义（它让 UI 显示一个引擎里并不存在的
+    // 档位，且与相邻的模型控件行为不一致）。
+    const client = await this.activate(sessionId)
+    const session = this.deps.getSession(sessionId)
+    if (!session) {
+      throw errorWithCode(
+        `session not registered after activation (sessionId=${sessionId})`,
+        SESSION_ACTIVATE_FAILED,
+      )
     }
     await client.setThinkingLevel(level)
     // session-trace（A33）：thinking_level_change 的 append 虽有事件但消费点在 pi 侧
@@ -170,12 +326,11 @@ export class SessionModelControl {
       effective,
       clamped: effective !== level,
     })
-    const session = this.deps.getSession(sessionId)
     // PR #185 S2 裁决的永久双写形态：effective 来自 pi get_state（权威值），直写让
     // toSummary 与 state_changed fallback 在实例防抖重拉窗口内即读准值（modelId 同理，
     // 见 switchModel）。值未变时 pi 不发事件、不写 entry（PS-04），此直写是唯一同步点；
     // 值变场景事件随后到达，直写保证防抖窗口内的即时性。
-    if (session) session.thinkingLevel = effective
+    session.thinkingLevel = effective
     // 持久层唯一写方 = pi（thinking_level_change entry 落 JSONL，缓存治理 U8a W2 写点退役），
     // 本方法只负责内存直写投影。
     return effective

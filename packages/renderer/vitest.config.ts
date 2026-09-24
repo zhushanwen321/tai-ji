@@ -6,6 +6,11 @@ export default taijiTestConfig({
   test: {
     environment: 'happy-dom',
     setupFiles: ['./src/__tests__/vitest-i18n-setup.ts'],
+    // 单用例超时预算：coverage 插桩 + 全包并行 worker 的负载下，mount+flush 类用例
+    // 可越 vitest 默认 5s（2026-09-24 两例：zcode-session-source recovery 阶梯、
+    // system-page-smart-context mount——空载单跑均毫秒级，仅重负载下超线）。预算是
+    // 环境余量不是断言语义，真死锁用例仍会红（15s）。
+    testTimeout: 15000,
     // W1 i18n-frontend-p2：注入 VITE_MOCK=true，让 useSearch 等 mock-mode 分支在测试环境默认走 mock fixture。
     // （mock fixture 是 i18n-frontend-p2 U1 等用例的预期数据源；real 轨无 seed 数据会让 recents/suggested 全空导致断言失败。）
     env: {

@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.14.0
+
+### Minor Changes
+
+- 43a50ae2e: Adds `action-bar` as the first interactive GuiComponent primitive, and sinks the scheduler task folder and its formatters from the scheduler extension into this shared protocol package (single source for cross-package schedule draft handling).
+
 ## 0.13.0
 
 ### Minor Changes

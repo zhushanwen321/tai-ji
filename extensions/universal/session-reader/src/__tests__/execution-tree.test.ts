@@ -596,6 +596,12 @@ describe('buildExecutionTree - fixture', () => {
     const tree2 = await buildExecutionTree(MAIN, dir)
     expect(tree2.root.sessionFile).toBeUndefined()
     expect(tree2.totalNodes).toBe(1)
+
+    // 空串哨兵归一：mainSessionFile=''（zcode family 路由反查未命中的降级形态）与
+    // 不传等价——root 节点 details 不携带 sessionFile:"" 这类非路径占位值
+    const tree3 = await buildExecutionTree(MAIN, dir, '')
+    expect(tree3.root.sessionFile).toBeUndefined()
+    expect(tree3.totalNodes).toBe(1)
   })
 
   it('TC-m3b-max-depth：21+ 层 parentRecordId 链在 MAX_DEPTH(20) 截断，truncated=true 不抛错（MF-4）', async () => {

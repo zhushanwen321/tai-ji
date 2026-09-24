@@ -12,7 +12,8 @@
  * - C-1 条件注册守卫三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
  *   无 scope 时 cleanup 保留在注册表 = 前提 2）
  * - C-1 census 静态锁（扫描设施与快照单一源 = scripts/check-session-scoped-state-census.mjs，
- *   本文件薄包装消费其导出保持 CI 覆盖；快照 13 文件各 1 处，清单外新调用点即红）
+ *   本文件薄包装消费其导出保持 CI 覆盖；快照 15 文件各 1 处，清单外新调用点即红）
+
  *
  * 运行：cd packages/core && npx vitest run src/foundation/use-session-scoped-state.test.ts
  * 禁止 node:test / tsx --test。
@@ -343,11 +344,12 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
   // 干跑同一实现，零双口径）；匹配口径（双形态锁模式 / 工厂定义行排除 / 扫描剪枝）与
   // 快照修正流程登记在脚本头注释。锁模式回归（如漏掉泛型形态）会表现为 census 计数
   // 下降 → 下方双向对账 diff 非空即红，无需独立自检用例。
-  it('全仓非测试调用点 census 与快照逐文件一致（13 文件各 1 处，清单外新调用点即红）', () => {
+  it('全仓非测试调用点 census 与快照逐文件一致（15 文件各 1 处，清单外新调用点即红）', () => {
     const actual = collectCensusCallSites()
     // 双向对账：新增 / 消失 / 计数变化任一即非 null（逐文件清单而非总数——防
     // 「+1 新调用 +1 删除」净额抵消漏检）
     expect(censusDiffToSnapshot(actual)).toBeNull()
-    expect(Object.keys(actual)).toHaveLength(13)
+    expect(Object.keys(actual)).toHaveLength(15)
+
   })
 })

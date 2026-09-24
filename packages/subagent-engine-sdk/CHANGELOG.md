@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-engine-sdk
 
+## 0.6.1
+
+### Patch Changes
+
+- 43a50ae2e: Design-code-sync round 1: fixes dangling references, tightens message purity, and splits the error-mapping path.
+
 ## 0.6.0
 
 ### Minor Changes

@@ -155,8 +155,11 @@ export function buildTitleMessages(
 
 // ──────────────────────── debug 证据链 + 超时 ────────────────────────
 
-/** rename LLM 超时（固定值：输入 ≤8k token + 输出 64 token，30s 宽裕；超时归一 ok:false 静默跳过）。 */
+/** rename LLM 超时（固定值：实测 2048 预算下独立调用 5-12.5s，30s 约 2.4x+ 余量；超时归一 ok:false 静默跳过）。 */
 const RENAME_TIMEOUT_MS = 30_000;
+
+/** title empty warn 的 raw 预览上限（Unicode 码点数；预览是 LLM 标题候选，非对话原文）。 */
+const TITLE_EMPTY_RAW_PREVIEW_CODE_POINTS = 100;
 
 /** debug 开关 live 读（每次调用查 process.env，非模块加载时读——vi.stubEnv 可测 + 运行时可切换）。 */
 export function isRenameDebugEnabled(): boolean {
@@ -295,8 +298,13 @@ export async function callRenameLLM(
 		model,
 		systemPrompt: RENAME_SYSTEM_PROMPT,
 		messages,
-		// 标题只需几个词，64 token 足够且省 quota
-		maxTokens: 64,
+		// 输出预算必须覆盖「thinking + 标题」两部分：thinking 计入 maxTokens 的模型
+		//（StepFun step-5-preview 实测 thinking 600-1500 tokens 且不可禁用/不可压低，
+		// reasoning_effort/thinking 参数均被无视）在 64 预算下正文必然截断为空。
+		// 2048 = 实测最大总输出 843 tokens 的 2.4x 余量；不给 4096+ 是因为最坏满额时长
+		//（4096 ÷ 67 tok/s ≈ 61s）远超 30s 超时线。截断发生时空标题 warn 带 stopReason=length 留痕，
+		// 该 warn 累积出现即上调本常量的数据信号。maxTokens 是截断上限非预扣额度，按实际用量计费。
+		maxTokens: 2048,
 		// 固定 30s 超时（网络抖动归一为 ok:false 走静默跳过，不悬挂 fire-and-forget promise）
 		timeoutMs: RENAME_TIMEOUT_MS,
 		// thinkingLevel 直接透传（含 "off"）；llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）
@@ -327,6 +335,15 @@ export async function callRenameLLM(
 
 	const title = cleanTitle(result.content, config.maxTitleLength);
 	if (!title) {
+		// A1 契约（不可用不静默）：调用成功但标题为空是可排查的失败形态，不走 debugLog——
+		// warn 经 appendEntry 无条件写 session 文件（rename-session:log entry），任何环境可 grep。
+		// stopReason=length = 输出预算被 thinking 吃光（上调 maxTokens 的数据信号）；
+		// stopReason=stop = 模型正常返回空/纯标点文本（换标题模型）。raw 是 LLM 生成的标题候选非对话原文。
+		logger.warn("title empty after clean, skipping rename", {
+			model: `${model.provider}/${model.id}`,
+			stopReason: result.stopReason,
+			raw: truncateCodePoints(result.content, TITLE_EMPTY_RAW_PREVIEW_CODE_POINTS, "…"),
+		});
 		debugLog("skip: title empty");
 		return null;
 	}

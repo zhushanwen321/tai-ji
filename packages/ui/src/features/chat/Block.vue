@@ -21,8 +21,8 @@
       >
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动 -->
         <div class="flex items-center gap-1.5 min-h-[1.5rem]">
-          <component :is="BLOCK_ICON_LUCIDE.thinking" class="size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover" />
-          <span class="mr-0.5 inline-block shrink-0 whitespace-nowrap font-mono text-[length:var(--text-2xs)] font-semibold uppercase tracking-[0.08em] text-neutral-dim">{{ t('panel.message.thinkingBlock') }}</span>
+          <component :is="BLOCK_ICON_LUCIDE.thinking" :class="BLOCK_ICON_CLASS" />
+          <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.thinkingBlock') }}</span>
           <span v-if="!working" class="text-neutral-faint" :class="thinkingExpanded ? 'invisible' : ''">·</span>
           <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
                justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
@@ -102,8 +102,8 @@
         >
           <!-- running 态 loader（双环 + accent），其余走 list-checks ICON -->
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else class="size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover" :class="isFailed ? 'hover:text-warn' : ''" />
-          <span class="mr-0.5 inline-block shrink-0 whitespace-nowrap font-mono text-[length:var(--text-2xs)] font-semibold tracking-[0.08em] text-neutral-dim">{{ t('panel.message.workflow') }}</span>
+          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
+          <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
           <span v-if="workflowFields.name" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent">{{ workflowFields.name }}</span>
           <template v-if="workflowFields.slug">
             <span class="text-neutral-faint">·</span>
@@ -123,7 +123,7 @@
         >
           <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <component :is="headerBlockIcon" v-else class="size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover" :class="isFailed ? 'hover:text-warn' : ''" />
+          <component :is="headerBlockIcon" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
           <span class="shrink-0 normal-case tracking-normal">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader -->
@@ -237,7 +237,7 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
-import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
+import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
 import { formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
@@ -384,7 +384,7 @@ const { metaItems } = useToolMeta({
 /** bash 展开后去掉行数统计（命令+output 已完整展示，行数无参考价值） */
 const filteredMetaItems = computed(() => {
   if (!isBashTool.value) return metaItems.value
-  return metaItems.value.filter((item) => !item.text.endsWith('行'))
+  return metaItems.value.filter((item) => item.kind !== 'lines')
 })
 
 /* ── 块类型路由：subagent / workflow ── */

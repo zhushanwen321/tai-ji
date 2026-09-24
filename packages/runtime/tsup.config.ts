@@ -58,7 +58,11 @@ export default defineConfig({
   // （argv 构造 / LF-only 分帧 / pending 表 / 命令帧组装 / 杀链 / 出站 env 组装），
   // rpc-client 薄壳消费——同 pi-file-lock 形态（exports 直指 src 的纯 TS 源码包，
   // esbuild 直接编译无需 build 前置）
-  noExternal: ['ws', 'semver', 'fast-glob', 'tar', '@taiji/shared', '@zhushanwen/extension-protocol', '@zhushanwen/session-delivery', '@taiji/core', '@zhushanwen/subagent-core', '@zhushanwen/subagent-engine-sdk', '@zhushanwen/pi-file-lock', '@zhushanwen/pi-rpc', '@earendil-works/pi-ai', 'chokidar', '@iarna/toml', 'taiji-plugin-sdk'],
+  // @zhushanwen/session-core + @zhushanwen/zcode-session-source [session-reader-shared-core
+  // U10]：导入 source 薄包装消费的 canonical 模型/首行字节原语/序列化原语与 zcode 会话库
+  // 读取基座（双驱动 + 四级恢复阶梯 + converter）——同 pi-file-lock 形态（exports 直指
+  // src 的纯 TS 源码包，esbuild 直接编译无需 build 前置）
+  noExternal: ['ws', 'semver', 'fast-glob', 'tar', '@taiji/shared', '@zhushanwen/extension-protocol', '@zhushanwen/session-delivery', '@taiji/core', '@zhushanwen/subagent-core', '@zhushanwen/subagent-engine-sdk', '@zhushanwen/pi-file-lock', '@zhushanwen/pi-rpc', '@earendil-works/pi-ai', 'chokidar', '@iarna/toml', 'taiji-plugin-sdk', '@zhushanwen/session-core', '@zhushanwen/zcode-session-source'],
   // platform: 'node' 已自动处理所有 node:* 内置模块，无需手动 external
   // node-pty 是 native module（含 .node 二进制），不能打包进 JS bundle：
   // 其 JS 入口用 node-gyp-build 动态 require prebuilds/<platform>/*.node，

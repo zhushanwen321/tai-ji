@@ -10,6 +10,7 @@
  *   反转 generating；非 busy → message.error）在本文件锁定。
  * - busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
  *   src/services/session/__tests__/message-dispatcher.test.ts（同构用例已收拢，本文件不再重复）。
+
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-send-rejection.test.ts
  */
@@ -196,6 +197,7 @@ describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () =>
     expect(result).toMatchObject({ blocked: false })
     expect(findRejected(h.broadcasts)).toBeUndefined()
     const err = findError(h.broadcasts)
+
     expect(err).toBeDefined()
     expect((err!.payload as { message: string }).message).toContain('No model configured')
   })

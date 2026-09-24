@@ -20,8 +20,10 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { effectScope } from 'vue'
-import type { SessionGroup, SessionSummary } from '@taiji/shared'
+import { effectScope, computed, defineComponent, h } from 'vue'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { Message, SessionGroup, SessionSummary } from '@taiji/shared'
+import { subagentVirtualId } from '@taiji/shared'
 
 // ── mock fileTree store：捕获 clearSession ──
 const clearSessionMock = vi.hoisted(() => vi.fn())
@@ -56,6 +58,8 @@ vi.mock('@/lib/ipc', async (importOriginal) => ({
 }))
 
 // ── mock api 域（deleteSession/deleteFolder/newSession + useNewTaskFlow ports 的并集）──
+// [M4-a] btw 域：useBtwTabData 登记通道的数据源（级联前端腿用例先拉取登记映射）。
+const btwListMock = vi.hoisted(() => vi.fn())
 const removeMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const removeByCwdMock = vi.hoisted(() => vi.fn(() =>
   Promise.resolve({ cwd: '/proj', deleted: [] as string[], failed: [] })))
@@ -74,6 +78,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getCommands: vi.fn(() => Promise.resolve({ commands: [] })),
   },
   file: { tree: vi.fn().mockResolvedValue([]), expand: vi.fn().mockResolvedValue([]) },
+  btw: { list: btwListMock, create: vi.fn(), remove: vi.fn() },
   git: { status: vi.fn().mockResolvedValue({ isRepo: false }), checkout: vi.fn(), checkoutByCwd: vi.fn(), createBranch: vi.fn() },
   workspace: { detect: vi.fn().mockResolvedValue({ mode: 'not-repo', isBareMode: false, wsRoot: '', repoRoot: '' }) },
   worktree: { list: vi.fn().mockResolvedValue([]) },
@@ -117,6 +122,9 @@ import { useSessionStore } from '@/stores/session'
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useForkNoticeFeed, pushForkNoticeAsk, resetForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
+import { useBtwTabData, getBtwVirtualIdsByMain } from '@/composables/panel/useBtwTabData'
+import { useChatStore } from '@/stores/chat'
+import { useWorkflowStore } from '@/stores/workflow'
 import { registerSessionCleanup, __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 
 function makeSummary(id: string): SessionSummary {
@@ -142,6 +150,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   removeMock.mockResolvedValue(undefined)
   removeByCwdMock.mockResolvedValue({ cwd: '/proj', deleted: [], failed: [] })
+  btwListMock.mockResolvedValue([])
   switchSessionMock.mockResolvedValue(undefined)
   workspaceStoreMock.records = []
   workspaceStoreMock.defaultCwd = undefined
@@ -377,5 +386,58 @@ describe('useSidebar deleteSession 触发 session-scoped cleanup（W5 / ADR-0049
     }
 
     scope.stop()
+  })
+})
+
+// ── [M4-a / btw-question D4 消费面①] deleteSession 级联的前端腿（m7/agentcall 先例同构）──
+// useBtwTabData 最小宿主：仅用于经真实 refresh 登记 mainSid → vid 映射（登记面先写后读）。
+const BtwHost = defineComponent({
+  props: { sid: { type: String, required: true } },
+  setup(props) {
+    useBtwTabData(computed(() => props.sid))
+    return () => h('div')
+  },
+})
+
+function msg(id: string): Message {
+  return { id, role: 'assistant', content: 'x', status: 'complete', timestamp: 0 }
+}
+
+describe('useSidebar deleteSession 级联前端腿：btw 线虚拟分区 + 派生键清理（M4-a）', () => {
+  it('U-M4a：枚举名下 btw 线 → 逐线清 vid 分区 + 派生 subagent/agentcall 键 → 清映射；他主名下线不受误伤', async () => {
+    // 登记面：真实 refresh 拉取 btw.list → reconcile 登记映射（M3-b 先写后读）
+    btwListMock.mockResolvedValue([{ vid: 'btw:line-c1' }])
+    const host = mount(BtwHost, { props: { sid: 's1' } })
+    await flushPromises()
+    expect(getBtwVirtualIdsByMain('s1')).toEqual(['btw:line-c1'])
+
+    // 分区面：线分区 + 派生键（D9③ 中段位约定：owner = 线 piSessionId）+ agentcall（按线 vid 挂名）
+    const chat = useChatStore()
+    chat.setMessages('btw:line-c1', [msg('l1')])
+    chat.setMessages(subagentVirtualId('line-c1', 's1'), [msg('d1')])
+    chat.setMessages('agentcall:acs-c1', [msg('ac1')])
+    useWorkflowStore().registerAgentCall('btw:line-c1', 'agentcall:acs-c1')
+    chat.setMessages('btw:line-c2', [msg('keep')]) // 他主名下线（对照）
+    chat.setMessages('s2', [msg('other-main')]) // 相邻主分区（对照）
+    // 前置：seed 生效（防假绿）
+    expect(chat.getMessages('btw:line-c1')).toHaveLength(1)
+    expect(chat.getMessages(subagentVirtualId('line-c1', 's1'))).toHaveLength(1)
+
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+    await sidebar.deleteSession('s1')
+    await flushPromises()
+
+    // 级联：vid 分区 + 派生两半边清；映射出册；不误伤对照
+    expect(chat.getMessages('btw:line-c1')).toHaveLength(0)
+    expect(chat.getMessages(subagentVirtualId('line-c1', 's1'))).toHaveLength(0)
+    expect(chat.getMessages('agentcall:acs-c1')).toHaveLength(0)
+    expect(getBtwVirtualIdsByMain('s1')).toEqual([])
+    expect(chat.getMessages('btw:line-c2')).toHaveLength(1)
+    expect(chat.getMessages('s2')).toHaveLength(1)
+
+    scope.stop()
+    host.unmount()
   })
 })

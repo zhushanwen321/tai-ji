@@ -247,3 +247,53 @@ export function attachPromisesModule(target: Record<string, unknown>): Record<st
   target.promises = wrapOpenFns(wrapModule(source, FS_ASYNC_FNS), source, FS_PROMISES_OPEN_FNS)
   return target
 }
+
+/**
+ * worker 进程内跨测试文件的 TAIJI_AGENT_DATA_DIR 钉扎槽（挂 globalThis：模块注册表每
+ * 个测试文件重建，模块级变量跨文件不存续；globalThis 在 worker 进程内存续——isolate=false
+ * 等 worker 复用形态下正是靠它把首见值带到后续文件）。
+ */
+const DATA_DIR_ENV_PIN = Symbol.for('taiji.test-guard.dataDirEnvPin')
+
+const DATA_DIR_ENV_KEY = 'TAIJI_AGENT_DATA_DIR'
+
+/**
+ * [2026-09-22 import-service 污染事故] env 钉扎漂移恢复（worker 复用形态防线）。
+ *
+ * globalSetup 只在 vitest 进程启动时执行一次，把 TAIJI_AGENT_DATA_DIR 钉到 tmp；worker
+ * 进程 fork 时继承该值。但 isolate=false 等 worker 进程复用形态下，前序测试文件对
+ * process.env 的变更（如 afterEach `delete process.env.TAIJI_AGENT_DATA_DIR`）会跨文件
+ * 泄漏（探针实证：同 worker 后续文件读到 undefined）——后续文件的 getSessionsDir() 按
+ * 缺省解析到真实 ~/.taiji，叠加文件级 vi.mock('node:fs/promises') 解除 fs-guard 时即
+ * 静默污染真实数据目录。本函数由 fs-guard setupFile 在每个测试文件执行前调用：
+ * 首次执行记录当前值（= globalSetup 钉扎值或合法注入值），后续执行发现漂移即恢复并
+ * 告警（错误信息含背景与恢复动作）。默认 isolate（每文件新 fork）下槽随进程重建，
+ * 首见即钉扎值，恒 no-op——零开销。
+ *
+ * 返回是否发生了恢复（供元测试断言）。
+ */
+export function repinDataDirEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const registry = globalThis as Record<symbol, { value: string | undefined } | undefined>
+  const current = env[DATA_DIR_ENV_KEY]
+  const slot = registry[DATA_DIR_ENV_PIN]
+  if (!slot) {
+    registry[DATA_DIR_ENV_PIN] = { value: current }
+    return false
+  }
+  if (current === slot.value) return false
+  env[DATA_DIR_ENV_KEY] = slot.value
+  console.warn(
+    `[fs-guard] TAIJI_AGENT_DATA_DIR 在同 worker 前序测试文件中被改动（${current === undefined ? '被删除' : `被改为 ${current}`}），` +
+      `已恢复为本 worker 首个测试文件执行时的钉扎值 ${slot.value ?? '(未设置)'}。\n` +
+      '  背景：isolate=false 等 worker 进程复用形态下 process.env 变更跨测试文件泄漏，' +
+      '前序文件删除该 env 会让后续文件的 getSessionsDir() 缺省解析到真实 ~/.taiji（数据污染风险）。\n' +
+      '  修复动作：测试内需改动 TAIJI_AGENT_DATA_DIR 时，在 afterAll/afterEach 恢复进入时原值，不要以 delete 收尾。',
+  )
+  return true
+}
+
+/** 测试专用：清空 env 钉扎槽（fs-guard.test.ts 元测试用例间隔离；生产代码禁调）。 */
+export function _resetDataDirEnvPinForTest(): void {
+  const registry = globalThis as Record<symbol, { value: string | undefined } | undefined>
+  delete registry[DATA_DIR_ENV_PIN]
+}

@@ -557,7 +557,7 @@ describe('useComposerShortcutActions', () => {
       expect(onModelSelect.mock.calls[1][0]).toEqual({ modelId: 'b', provider: 'prov' })
     })
 
-    it('reject 清：RPC 失败清除意图目标 + console.warn + 无 toast——连按从真值重新起算', async () => {
+    it('reject 清：RPC 失败清除意图目标 + console.warn 诊断 + 一次 toast（U4 改写原「无 toast」规格）——连按从真值重新起算', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const { deps, onModelSelect, toastInfo, toastError } = makeDeps({ currentModelId: 'prov/a' })
       onModelSelect.mockImplementationOnce(() => Promise.reject(new Error('rpc down')))
@@ -567,7 +567,11 @@ describe('useComposerShortcutActions', () => {
       await flushPromises()
       expect(warnSpy).toHaveBeenCalledTimes(1)
       expect(toastInfo).not.toHaveBeenCalled()
-      expect(toastError).not.toHaveBeenCalled()
+      // U4（model-switch-live-provider-sync §3.4/D7）：键盘循环是用户显式动作，失败必须闭环提示——
+      // 每条路径恰一个 toast 点（键盘路径 = 此处；UI 路径 = 壳层包装，二者不叠加）。
+      // 无 code 的错误落 general 文案 key。
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(toastError).toHaveBeenCalledWith('panel.panel.modelSwitch.general')
 
       // 意图已清 → 从真值 a 起算目标 b（若残留意图 b 则会算出 c）
       handler(makeKeyEvent('p', { ctrl: true }).e)

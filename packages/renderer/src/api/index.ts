@@ -28,6 +28,7 @@ import * as realWorkspace from '@taiji/core/transport/api/domains/workspace'
 import * as realQuota from '@taiji/core/transport/api/domains/quota'
 import * as realPreset from '@taiji/core/transport/api/domains/preset'
 import * as realProject from '@taiji/core/transport/api/domains/project'
+import * as realBtw from '@taiji/core/transport/api/domains/btw'
 import * as mockApi from '@taiji/core/transport/mock'
 
 const isMock = import.meta.env.VITE_MOCK === 'true'
@@ -57,6 +58,10 @@ export const project = isMock ? mockApi.project : realProject
 // preset：pi 启动预设域（pi-launch-presets wave1）。mock 轨走 mockApi.preset 占位（空列表 + 默认 id），
 // real 轨走真实 RPC（preset.list/getDefault/setDefault）。
 export const preset = isMock ? mockApi.preset : realPreset
+// btw：旁路提问 3 控制帧（btw-question D6，M2-a 残留接线点①——主 agent 授权 M3-a 补线）。
+// mock 轨走 mockApi.btw（in-memory 线注册表，G4 类型锚定签名全等）；real 轨走 core
+// transport 域（运行时 handler 注册归 M2-b，接线前真实 RPC 不可达）。
+export const btw = isMock ? mockApi.btw : realBtw
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。
 // 本门面不再导出 search（renderer 版 useSearch.ts 已随域迁移删除，2026-09-11）。

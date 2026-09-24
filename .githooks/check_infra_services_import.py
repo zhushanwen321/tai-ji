@@ -20,6 +20,8 @@ check_services_infra_import.py 只拦 services→infra，infra→services 方向
   llm-retry-config-helper：kernel 纯函数（merge/resolve/validate，无 IO 无状态）
   scanner-base：inferSourceType 纯函数（路径→来源类型分类，无 IO）
   provider-catalog：纯派生函数（deriveEnabled / isCatalogProvider / getMergedCatalogModels）
+  provider-model-item：模型项 pi-schema 谓词纯函数（normalizeModelIdOrReject，无 IO 无状态；
+    写侧与 infra 启动清洗侧共享同一口径的单点，分层论证见该模块头注释）
   inflight-mirror：[u7b D5 例外] 在途镜像单例（marker 旁路写、滚动重启判定读，
     event-adapter 消费点已有同款注释登记）
 
@@ -41,6 +43,7 @@ ALLOWED_MODULES = {
     "llm-retry-config-helper",
     "scanner-base",
     "provider-catalog",
+    "provider-model-item",
     "inflight-mirror",
 }
 
