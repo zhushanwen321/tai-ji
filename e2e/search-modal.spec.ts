@@ -126,6 +126,12 @@ test.describe('搜索浮层 E2E', () => {
     // 输入 auth 查到文件，Enter confirm（useSearchJump.confirmFile → mock file.read）
     await page.getByTestId('search-input').pressSequentially('auth')
     await expect(page.getByTestId('search-section-文件')).toBeVisible({ timeout: 5_000 })
+    // Enter 消费当前选中项：等选中收敛为 auth 文件项再按 Enter——与 SM-E2E-7/8/9 同款守卫
+    // （防抖窗口内旧结果排前时 Enter 可能消费应用命令（如 toggle-sidebar：收侧栏 + ok:true 关弹层、
+    // 不开 drawer、recents 无记录），2026-09-24 批内实发：二次 openSearch 侧栏不可点 → 30s 超时）
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('auth', { timeout: 5_000 })
+
     // Enter confirm 第一项（selIdx=0，auth/session.ts 排第一）
     await page.getByTestId('search-input').press('Enter')
     // confirm 成功 → modal 关闭（AC-6.7 ok:true 才关）
