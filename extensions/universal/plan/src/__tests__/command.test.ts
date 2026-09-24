@@ -31,6 +31,7 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
   const controllers = new Map<string, AbortController>();
+  const epochs = new Map<string, number>();
 
   const pi = {
     registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
@@ -61,6 +62,7 @@ function createMocks() {
     pi,
     ctx,
     controllers,
+    epochs,
     getHandler: () => capturedHandler!,
   };
 }
@@ -83,7 +85,7 @@ describe("registerPlanCommand", () => {
     ctx = mocks.ctx;
     controllers = mocks.controllers;
     const sessions = new Map();
-    registerPlanCommand(pi, sessions, controllers);
+    registerPlanCommand(pi, sessions, controllers, mocks.epochs);
     handler = mocks.getHandler();
   });
 
@@ -102,7 +104,7 @@ describe("registerPlanCommand", () => {
   it("abort: resets state and restores tools when active", async () => {
     // Enter plan mode first — handler uses the sessions map from registerPlanCommand closure
     await handler("implement user auth", ctx);
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     vi.clearAllMocks();
 
     // Now abort — state is active in the sessions map
@@ -168,7 +170,7 @@ describe("registerPlanCommand", () => {
       "/tmp/test-project/.tmp/plans/implement-user-auth",
       { recursive: true },
     );
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("[PLAN MODE]")));
     expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("Implement User Auth")));
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", {
@@ -176,9 +178,13 @@ describe("registerPlanCommand", () => {
       planFilePath: "/tmp/test-project/.tmp/plans/implement-user-auth/plan.md",
       requirement: "Implement User Auth",
       templateName: "",
+      templateProvidedPath: undefined,
       skills: [],
       docs: [],
-      reviewState: undefined,
+      state: "planning",
+      selfReview: undefined,
+      resumeHint: undefined,
+      lastSubmitReviewDocsFingerprint: undefined,
     });
   });
 
@@ -331,7 +337,7 @@ describe("registerPlanCommand", () => {
           skills: [],
         }),
       );
-      expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
       const prompt = sentMessage();
       // 直传声明 + 全文内嵌（文件内容直达模型，不赌自发 read——D5）
       expect(prompt).toContain("template was provided via --template");

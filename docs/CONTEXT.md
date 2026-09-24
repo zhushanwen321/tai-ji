@@ -182,7 +182,7 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### 计划模式（Plan Mode）
 
-pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 或 `/plan <需求> --template <path>` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或模板流程产出计划文档——模板三源发现（内置 5 + 用户级 `~/.agents/plans/` + 项目级 `.agents/plans/`，同名项目 > 用户 > 内置 last-writer-wins），进入计划态时清单以 `<available-plans>` 段随提示词一次性注入（name + location，模型自选，无查询 action），`select-template` 返回 content 携带胜者文件全文、错名报错自带可用清单；`--template` 直传任意外部 md（与 `--skills` 互斥 fail-fast）时提示词内嵌该文件全文且不注入清单段。文档就绪后 `submit-review` 挂审阅，用户两键裁决（approve 确认执行 / revise 提交评论并要求修订；取消走 dismiss 对话框消散，非批准），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：≤2 个检测到的 plan-exec skill 档（`Execute via skill: <name>`，`plan-exec: true` frontmatter 四根扫描检测，同构 pi loadSkillsFromDir，root 序前 2 个）+ Execute 档（goal 跟踪已整合：可用时先建 goal 跟踪，再按复杂度派发 subagent / 本会话直执）+ 暂不执行（Not now，留在 plan mode）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入；marker 交互另需 `ctx.mode === 'rpc'`，env 泄漏到 TUI 等非 rpc 形态回落文本软门）。
+pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 或 `/plan <需求> --template <path>` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或模板流程产出计划文档——模板三源发现（内置 5 + 用户级 `~/.agents/plans/` + 项目级 `.agents/plans/`，同名项目 > 用户 > 内置 last-writer-wins），进入计划态时清单以 `<available-plans>` 段随提示词一次性注入（name + location，模型自选，无查询 action），`select-template` 返回 content 携带胜者文件全文、错名报错自带可用清单；`--template` 直传任意外部 md（与 `--skills` 互斥 fail-fast）时提示词内嵌该文件全文且不注入清单段。文档就绪后 `submit-review`（必带 selfReview 自审结论，见词条「selfReview（自审结论）」）挂审阅，用户三键裁决（approve 确认执行 / revise 提交评论并要求修订 / dismiss 搁置——非破坏协议级决策，见词条「dismiss（搁置）」；选择框被解散非批准），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：≤2 个检测到的 plan-exec skill 档（`Execute via skill: <name>`，`plan-exec: true` frontmatter 四根扫描检测，同构 pi loadSkillsFromDir，root 序前 2 个）+ Execute 档（goal 跟踪已整合：可用时先建 goal 跟踪，再按复杂度派发 subagent / 本会话直执）+ 暂不执行（Not now，留在 plan mode）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入；marker 交互另需 `ctx.mode === 'rpc'`，env 泄漏到 TUI 等非 rpc 形态回落文本软门）。
 
 **代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills/--template 解析 / tool.ts 六 action（enter / select-template / register-doc / submit-review / complete / abort）/ state.ts 状态 / prompts.ts 提示词四段（模板流程含三源清单注入与直传全文内嵌）/ index.ts hooks）。
 
@@ -204,9 +204,21 @@ plan 模式流程的单一显式状态契约（状态散落三处 → 任意两�
 
 **代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（`PlanLifecycleEvent` + 边表）。
 
+### selfReview（自审结论）
+
+agent 提交计划审批（submit-review）前的自审摘要，审批交互的硬门参数（D9）：每次 submit-review 必带非空 selfReview（**无豁免**，含修订后重挂——自审对象是新版本文档），缺失/空被拒收并附纠偏指令。门语义三层边界：存在性（非空必填）= 结构保证；防照抄（文档已变而 selfReview 与上次逐字节相同 → 拒收）= 启发式；语义级新鲜度（自审是否真的对着新文档做了）= 提示词纪律（Phase C.5 自审清单），机器不可判。单字段双角色：E3 会话重启重挂的回传源（steer 携带上轮全文，指示原样回传不重新思考——豁免只在「自审内容」，过门义务不豁免）+ 防照抄比较基线。有界 4KB（写侧单点截断，UTF-8 码点界安全）。投影面止于审批请求帧（`PlanReviewRequest.selfReview` → `extension.ui_request`）：不进 `PlanStateView` / `session.planState` 帧；entry 持久字段 = `plan-state.selfReview`。
+
+**代码映射**: `packages/extension-protocol/src/extensions/plan/review-contract.ts`（截断/上限权威）+ `core/types.ts`（`PlanReviewRequest.selfReview`）；消费面勾销锚 = 同目录 `consumers.md`。
+
+### dismiss（搁置）
+
+plan 审批的第三键裁决（D3）：`PlanReviewResponse` 判别联合 `{ decision: 'dismiss' }`，用户「暂不审阅本次提交」的**非破坏**协议级决策（不杀 turn、不丢状态，无需确认 Popover）——取代旧「忽略 = message.abort 杀整个 turn」的副作用实现（F1/F2/F3 根因构造性消除）。语义：转移 `reviewing --dismiss--> planning` 落盘，plan 模式保持、文档与进度不变，**被搁置的审批不复活**（重开 session 不卷土重来）；tool result 指示 agent 简短告知用户已搁置并询问下一步（继续完善/等待指示），**不实施改动**。与「退出」（exit，退出整个模式）语义距离三层；值域守卫 canonical = `review-contract.ts`（未知 decision 值域降级为「宿主/扩展版本不匹配」指引，**不再引导重挂**——防再入循环）。
+
+**代码映射**: `packages/extension-protocol/src/core/types.ts`（`PlanReviewDecision` 三键值域）+ `extensions/plan/review-contract.ts`（值域守卫）；消费面勾销锚 = 同目录 `consumers.md`。
+
 ### PLAN_REVIEW_MARKER
 
-plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染两键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise 必带 `{ quote, comment }[]`）。
+plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs, selfReview }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染三键审批（提交修订/确认执行/搁置）而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise 必带 `{ quote, comment }[]` / dismiss 无评论）。
 
 **代码映射**: `packages/extension-protocol/src/core/markers.ts`（常量）+ `core/types.ts`（payload/decision/comment 契约 SSOT）。
 

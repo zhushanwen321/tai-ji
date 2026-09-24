@@ -69,7 +69,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
-  registerPlanTool(pi, sessions, controllers);
+  registerPlanTool(pi, sessions, controllers, new Map());
 
   const ctx = {
     sessionId: "test-session",
@@ -154,19 +154,37 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     expect(res.content[0].text).toContain("(from conversation context)");
   });
 
-  it("新轮次进入：上轮残留的 reviewStateSource 随进入失效（跨 plan run 残留防护，§3.4 清除点）", async () => {
+  it("新轮次进入：上轮残留的 selfReview/resumeHint/指纹随进入失效（清除点三处之二，D9①防跨轮误触新鲜度门）", async () => {
     const { exec, pi, sessions } = setup();
-    // 模拟上轮残留：崩溃/bad-response 等绕过 resetPlanState 的路径留下的来源标记
-    sessions.set("test-session", { ...DEFAULT_PLAN_STATE, isActive: false, reviewStateSource: "explain" });
+    // 模拟上轮残留：崩溃/bad-response 等绕过 resetPlanState 的路径留下的降级标记与基线
+    sessions.set("test-session", {
+      ...DEFAULT_PLAN_STATE,
+      isActive: false,
+      state: "exited",
+      selfReview: "stale self-review",
+      resumeHint: "resubmit",
+      lastSubmitReviewDocsFingerprint: "old.md:3",
+    });
 
     const res = await exec({ action: "enter", requirement: "new round" });
 
     expect(res.details.action).toBe("enter");
-    // activatePlanMode 新轮次重置组清来源标记（与 resetPlanState 对齐）
-    const state = sessions.get("test-session") as { reviewStateSource?: string };
-    expect(state.reviewStateSource).toBeUndefined();
-    // 新轮 entry 无来源标记（undefined 序列化自然消失——D4）
+    // activatePlanMode 新轮次重置组清三字段（与 resetPlanState 对齐）
+    const state = sessions.get("test-session") as PlanState;
+    expect(state.selfReview).toBeUndefined();
+    expect(state.resumeHint).toBeUndefined();
+    expect(state.lastSubmitReviewDocsFingerprint).toBeUndefined();
+    // enter 边落盘（exited --enter--> planning 新一轮）；entry 无残留字段
     const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
-    expect(lastEntry.reviewStateSource).toBeUndefined();
+    expect(lastEntry.state).toBe("planning");
+    expect(lastEntry.resumeHint).toBeUndefined();
+  });
+
+  it("状态写走 transition()：idle --enter--> planning 落盘（新会话缺省态进入）", async () => {
+    const { exec, pi } = setup();
+    await exec({ action: "enter", requirement: "first round" });
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.state).toBe("planning");
+    expect(lastEntry.isActive).toBe(true);
   });
 });

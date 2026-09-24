@@ -1,7 +1,13 @@
 import { readdirSync, rmdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
+import type {
+  PlanDocMeta,
+  PlanLifecycleEvent,
+  PlanLifecycleState,
+  PlanTransitionResult,
+} from "@zhushanwen/extension-protocol";
+import { PLAN_LIFECYCLE_STATES, transition, truncateSelfReview } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
@@ -9,21 +15,17 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 const logger = getLogger("pi-plan");
 
 /**
- * 审阅态两值（D1）——awaiting = 文档就绪等审批；revising = 修订中；
- * 无值 = 进行中。approve 不设中间态：直接走 complete → resetPlanState 落
- * isActive=false，PlanModeBar 消失由 isActive 驱动。
+ * 降级态等待原因（D2 resumeHint，取代旧 reviewStateSource 语义）：'resubmit' =
+ * 会话重启（E3）后 agent 尚未重新提交审批。写入点 = index.ts E3 steer 重挂处；
+ * 清除点三处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置组 /
+ * submit-review 转移落盘时（重挂起点））——不变量：resumeHint 只描述当前降级
+ * 等待的原因，不跨轮残留（缺清除 = 跨 plan run 残留，C-U2 同型缺陷）。字面量与
+ * shared PlanStateView.resumeHint 严格一致。
  */
-export type PlanReviewState = "awaiting" | "revising";
+export type PlanResumeHint = "resubmit";
 
-/**
- * 降级态来源标记（plan-mode-ux-refactor §3.4）：reviewState='awaiting' 且无挂起 select
- * 时区分等待原因——'resubmit' = 会话重启（E3）后 agent 尚未重新提交。写入点 =
- * index.ts E3 steer 重挂处；清除点三处（resetPlanState 终态清理组 / activatePlanMode
- * 新轮次重置组 / submit-review 重挂起点重置）——缺清除 = 跨 plan run 残留（C-U2 同型
- * 缺陷：bad-response 等罕见路径可渲染上一轮的来源文案）。字面量与 shared
- * PlanStateView.reviewStateSource 严格一致。
- */
-export type PlanReviewStateSource = "resubmit";
+/** 终态两值（D1）：completed = 批准并派发执行；exited = 主动退出。共享全部终态规则。 */
+export type PlanTerminalState = Extract<PlanLifecycleState, "completed" | "exited">;
 
 export interface PlanState {
   isActive: boolean;
@@ -41,9 +43,20 @@ export interface PlanState {
   skills: string[];
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
   docs: PlanDocMeta[];
-  reviewState?: PlanReviewState;
-  /** 降级态来源标记（见 PlanReviewStateSource）；仅 reviewState 有值时有语义，无值 = 来源未知 */
-  reviewStateSource?: PlanReviewStateSource;
+  /**
+   * 生命周期状态（D1 八值，D2 取代式演进）：每次转移落盘，取代 reviewState/reviewStateSource
+   * 的隐含编码（两旧键停写，仅旧 entry 映射读——见 applyPlanStateEntry）。生命周期写唯一
+   * 通道 = applyPlanEvent（transition 纯函数）。
+   */
+  state: PlanLifecycleState;
+  /**
+   * 上次 submit-review 的 selfReview（D9①④）：单字段双角色——E3 重挂回传源 + 防照抄
+   * 比较基线（同值同写点无分歧路径）。写入点 = submit-review 转移落盘（写侧 4KB 截断）；
+   * 清除点 = resetPlanState / activatePlanMode 进入重置组。
+   */
+  selfReview?: string;
+  /** 降级态等待原因（见 PlanResumeHint）；清除点三处（头注释） */
+  resumeHint?: PlanResumeHint;
   /**
    * 上次 submit-review 时的 docs 快照指纹（planDocsFingerprint 产物）。缺失 = 无既往
    * 提交（首次提交 / reset 后 / 旧版 entry 重挂），重提交无变化检测不警告；reset 随
@@ -59,14 +72,20 @@ export const DEFAULT_PLAN_STATE: PlanState = {
   templateName: "",
   skills: [],
   docs: [],
+  state: "idle",
 };
 
 /**
  * 计划态工具白名单（进入计划模式三处共用——slash 命令 / plan(enter) tool / session_start
  * 恢复；bash 在白名单内，文件写约束来自注入的计划模式提示词，见 pi-ext-021）。
  * 放在 state.ts（叶模块）而非 tool.ts：enter.ts 与本常量互需会造成 enter↔tool 循环依赖。
+ *
+ * ask_user（D10/F9）：提示词 Phase B 本就指示「Use ask_user tool if available」，白名单
+ * 曾把它排除（结构性禁言）。feature-tier 依赖降级：ask-user 是可禁扩展，pi setActiveTools
+ * 对不存在的工具名静默跳过（0.84.4 已核实）——被禁时不报错不生效，提示词 "if available"
+ * 条件语义即降级（回退对话流提问）。
  */
-export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan"];
+export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan", "ask_user"];
 
 /**
  * plan 包注入消息的 customType（pi.sendMessage custom message 注入的 8 处调用
@@ -78,6 +97,44 @@ export const PLAN_CONTEXT_CUSTOM_TYPE = "plan-context";
 
 /** Per-session state cache. Keyed by sessionId. */
 export type PlanSessionMap = Map<string, PlanState>;
+
+/**
+ * reset 世代计数器（D3 连带段 epoch 世代判别）——session 级单调递增，替代门闩标记
+ * （门闩标记在「规划期退出无挂起 select 时 cancelled 分支不执行」的形态下会跨轮残留、
+ * 把下一次外部解散误判为命令解散，已否决）。
+ *
+ * 三句纪律（D3）：① epoch 是进程内存态，**禁入 PlanState/entry**（reconstructPlanState
+ * 白名单重建会把入 entry 的计数归零错位）；② map 缺失值按「未变」处理（`?? 0` 两侧一致
+ * ——新 session 首挂捕 0、比较 0）；③ activatePlanMode 不递增——正确性不依赖「enter 时
+ * 无挂起 select」的可达性（逐挂起点捕获 epoch 使每个新 select 拿到当时代际，对任何到达序
+ * 都正确；enter 若递增反而误伤同轮旧 select 归口）。
+ *
+ * 递增点 = resetPlanState 任何调用路径（含 /plan abort 的 handleAbort、tool executeAbort、
+ * complete 终局）。生命周期随 abortControllers 注册表同款做 session_shutdown 内存清理
+ * （无正确性依赖——注意 session_start 不清：清掉已递增的槽会让在途归口的世代比较失真）。
+ */
+export type PlanResetEpochs = Map<string, number>;
+
+/** 归口点判别基线：缺失按 0（纪律②，`?? 0` 两侧一致） */
+export function currentResetEpoch(epochs: PlanResetEpochs, sessionId: string): number {
+  return epochs.get(sessionId) ?? 0;
+}
+
+/** reset 即递增（纪律①的写侧唯一出口，resetPlanState 内部调用） */
+function bumpResetEpoch(epochs: PlanResetEpochs, sessionId: string): void {
+  epochs.set(sessionId, currentResetEpoch(epochs, sessionId) + 1);
+}
+
+/**
+ * 生命周期写唯一通道（D1）：六 action 的状态写全走本函数——转移成功才改 state.state，
+ * 副作用（persist / 注入 / 工具集）由调用方内联在转移成功后执行；`ok:false` 不落盘、
+ * 不执行副作用（终态上 ok:false 不落盘 = 归口点的兜底保险）。
+ */
+export function applyPlanEvent(state: PlanState, event: PlanLifecycleEvent): PlanTransitionResult {
+  const result = transition(state.state, event);
+  if (result.ok) state.state = result.next;
+  return result;
+}
 
 /**
  * requirement 长度封顶（64KB）：session.planState 帧在 runtime 出站守卫（outbound-frame-registry）
@@ -149,9 +206,11 @@ export function getPlanState(
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
-  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（reviewState /
-  // reviewStateSource / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON 序列化
-  // 自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
+  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（templateProvidedPath /
+  // selfReview / resumeHint / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON
+  // 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
+  // D2 取代式演进：reviewState / reviewStateSource 停写——新写只落 state / resumeHint /
+  // selfReview；读侧对旧 entry 的映射见 applyPlanStateEntry（D2 读方①）。
   pi.appendEntry("plan-state", {
     isActive: state.isActive,
     planFilePath: state.planFilePath,
@@ -160,8 +219,9 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     templateProvidedPath: state.templateProvidedPath,
     skills: state.skills,
     docs: state.docs,
-    reviewState: state.reviewState,
-    reviewStateSource: state.reviewStateSource,
+    state: state.state,
+    selfReview: state.selfReview,
+    resumeHint: state.resumeHint,
     lastSubmitReviewDocsFingerprint: state.lastSubmitReviewDocsFingerprint,
   });
 }
@@ -169,7 +229,8 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
 /**
  * Reset plan state to idle, persist, and clean up session cache.
  *
- * 终态矩阵（D5/E10）：isActive=false + reviewState 清空 + skills 清空（挂载声明失效）+
+ * 终态矩阵（D5/E10/D3 连带段）：isActive=false + state=terminal（默认 'exited'，complete
+ * 终局传 'completed'）+ selfReview/resumeHint/指纹清空 + skills 清空（挂载声明失效）+
  * docs 保留——产物 tab 由 docs.length 驱动、与 isActive 解耦，执行期（approve 后）与
  * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首拉仍恢复
  * docs 显示，至下次 /plan 同 slug 覆写。
@@ -191,9 +252,14 @@ function removeEmptyPlanDir(planFilePath: string): void {
 export function resetPlanState(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
+  epochs: PlanResetEpochs,
   sessionId: string,
   ctx: ExtensionContext,
+  terminal: PlanTerminalState = "exited",
 ): PlanState {
+  // epoch 先递增（D3 连带段）：abort()→reset 同步临界段的归口点必在 reset 后运行，
+  // 世代事实先行置位保证任何中途异常都不会漏递增（S15 同步临界段不变量的另一半）
+  bumpResetEpoch(epochs, sessionId);
   const state = getPlanState(sessions, sessionId, ctx);
   state.isActive = false;
   // 空目录清理必须在 planFilePath 清空之前（路径是唯一的目录推导来源）
@@ -203,10 +269,13 @@ export function resetPlanState(
   state.templateName = "";
   delete state.templateProvidedPath;
   state.skills = [];
-  delete state.reviewState;
-  // 来源标记与 reviewState 同生命周期随退出失效：残留 'explain' 会让下一轮经
-  // bad-response 等罕见路径渲染「已收到你的问题」而本轮无人提问（C-U2 同型残留）
-  delete state.reviewStateSource;
+  // 终态参数（D3 连带段）：默认 'exited'，complete 终局传 'completed'——防 reset 覆写
+  // completed（终态两值仅留诊断/审计区分，共享全部终态规则）
+  state.state = terminal;
+  // selfReview 随退出失效（E3 回传源 + 比较基线都只在本轮内有效，跨轮残留会误触新鲜度门）
+  delete state.selfReview;
+  // resumeHint 与降级等待同生命周期随退出失效（清除点三处之一）
+  delete state.resumeHint;
   // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
   // 首次 submit-review 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
   delete state.lastSubmitReviewDocsFingerprint;
@@ -215,7 +284,7 @@ export function resetPlanState(
   return state;
 }
 
-function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<Partial<PlanState>> & { customType: "plan-state" } {
+function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<LegacyPlanEntryData> & { customType: "plan-state" } {
   // 判别式收窄（type === "custom"）后可直接访问 customType/data，无需 cast。
   // 「字段存在即合法」：新字段全部 optional，旧四字段 entry 同样合法（D4 向后兼容）。
   return (
@@ -225,6 +294,15 @@ function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<Partial<Pla
     entry.data !== null
   );
 }
+
+/**
+ * 旧 schema entry data（D2 读方①映射源）：reviewState/reviewStateSource 是已停写的历史字段
+ * （取代式演进——新写只落 state/resumeHint/selfReview），只在重建读侧映射消费。
+ */
+type LegacyPlanEntryData = Partial<PlanState> & {
+  reviewState?: unknown;
+  reviewStateSource?: unknown;
+};
 
 /** skills 白名单式读取：数组 + 逐项 string 守卫，垃圾项丢弃（垃圾数据不进内存态） */
 function readSkills(data: Partial<PlanState>): string[] {
@@ -245,18 +323,35 @@ function readDocs(data: Partial<PlanState>): PlanDocMeta[] {
   return data.docs.filter(isPlanDocMeta);
 }
 
-/** reviewState 值域守卫：'awaiting' | 'revising' 之外的值按无值处理 */
-function readReviewState(data: Partial<PlanState>): PlanReviewState | undefined {
-  return data.reviewState === "awaiting" || data.reviewState === "revising"
-    ? data.reviewState
-    : undefined;
+/**
+ * 生命周期状态读取（D2 读方①，旧字段映射归一点）：
+ * ① 新字段直读（值域守卫：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射）；
+ * ② 旧 entry 无 state 时映射 reviewState（awaiting→reviewing / revising→revising /
+ *    无→planning|idle 按 isActive）。
+ */
+function readLifecycleState(data: LegacyPlanEntryData, isActive: boolean): PlanLifecycleState {
+  const raw = data.state;
+  if (typeof raw === "string" && (PLAN_LIFECYCLE_STATES as readonly string[]).includes(raw)) {
+    return raw as PlanLifecycleState;
+  }
+  if (data.reviewState === "awaiting") return "reviewing";
+  if (data.reviewState === "revising") return "revising";
+  return isActive ? "planning" : "idle";
 }
 
-/** reviewStateSource 值域守卫：域外值按无值处理（与 readReviewState 同风格）。
- * 旧版 entry 的 'explain' 存量值同样归无值——explain 交互已删（2026-09-21 审批两键
- * 收敛），renderer 缺省分支据此渲染通用文案，无需为存量值保留枚举成员。 */
-function readReviewStateSource(data: Partial<PlanState>): PlanReviewStateSource | undefined {
-  return data.reviewStateSource === "resubmit" ? data.reviewStateSource : undefined;
+/** resumeHint 读取：新字段直读 + 旧 reviewStateSource 同义映射（D2 读方①），域外值按无值 */
+function readResumeHint(data: LegacyPlanEntryData): PlanResumeHint | undefined {
+  if (data.resumeHint === "resubmit") return "resubmit";
+  return data.reviewStateSource === "resubmit" ? "resubmit" : undefined;
+}
+
+/**
+ * selfReview 白名单式读取 + 有界防御：非 string（含缺失）归无值；读侧同样 4KB 截断
+ * （对齐 readRequirement 读侧防御先例——保证派生/回传恒有界，封顶前旧 entry 超长文本
+ * 在重建时同样封顶）。
+ */
+function readSelfReview(data: LegacyPlanEntryData): string | undefined {
+  return typeof data.selfReview === "string" ? truncateSelfReview(data.selfReview) : undefined;
 }
 
 /** requirement 白名单式读取 + 长度封顶：非 string（含缺失）归空串；封顶前旧版 entry 的
@@ -281,7 +376,7 @@ function readTemplateProvidedPath(data: Partial<PlanState>): string | undefined 
  * 单条 plan-state entry 数据的逐字段应用（调用方已过 isPlanStateEntry 门，data 为
  * 非空对象；`?? {}` 仅为 data?: T 的类型 shim）。
  */
-function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefined): void {
+function applyPlanStateEntry(state: PlanState, data: LegacyPlanEntryData | undefined): void {
   // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）；
   // 新字段缺失（旧 entry）归一为空清单/无值（D4 字段级降级）
   const entryData = data ?? {};
@@ -292,8 +387,10 @@ function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefi
   state.templateProvidedPath = readTemplateProvidedPath(entryData);
   state.skills = readSkills(entryData);
   state.docs = readDocs(entryData);
-  state.reviewState = readReviewState(entryData);
-  state.reviewStateSource = readReviewStateSource(entryData);
+  // 生命周期状态：新字段直读 + 旧 reviewState 映射（isActive 兜底，D2 读方①）
+  state.state = readLifecycleState(entryData, state.isActive);
+  state.selfReview = readSelfReview(entryData);
+  state.resumeHint = readResumeHint(entryData);
   state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 

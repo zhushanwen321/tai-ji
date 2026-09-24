@@ -7,7 +7,7 @@ vi.mock("../tool.js", () => ({
       captured.controllers = controllers;
     },
   ),
-  PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan"],
+  PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan", "ask_user"],
 }));
 vi.mock("../command.js", () => ({ registerPlanCommand: vi.fn() }));
 vi.mock("../compact.js", () => ({ registerPlanEventHandlers: vi.fn() }));
@@ -68,8 +68,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("session_start hook（E3：awaiting 重挂提醒）", () => {
-  it("awaiting + no live select → steers the agent to re-call submit-review (pi 懒重生之后跑)", async () => {
+describe("session_start hook（E3：按 state 查表恢复）", () => {
+  it("reviewing + no live select → steers the agent to re-call submit-review with 上轮 selfReview 全文（D9④）", async () => {
     const { handlers, pi } = setup();
     const ctx = makeCtx([
       planStateEntry({
@@ -79,13 +79,14 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
         templateName: "",
         skills: ["tech-design"],
         docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
-        reviewState: "awaiting",
+        state: "reviewing",
+        selfReview: "3 requirements covered; 2 assumptions verified.",
       }),
     ]);
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     // custom message 三要素 + streaming steer options 断言（A6）
     expect(pi.sendMessage).toHaveBeenCalledWith(
       {
@@ -95,11 +96,41 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
       },
       { deliverAs: "steer", triggerTurn: true },
     );
-    // E3 重挂即落盘（§3.4 降级两源：该处曾只发 steer 不落盘——不落盘则 renderer 冷启动
-    // 扫描的 View 恒无 source、恒渲染通用文案）
+    // D9④：steer 携带上轮 selfReview 全文 + 原样回传指令（豁免只在「自审内容」，过门义务不豁免）
+    const steerContent = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0].content as string;
+    expect(steerContent).toContain("3 requirements covered; 2 assumptions verified.");
+    expect(steerContent).toContain("VERBATIM");
+    expect(steerContent).toContain("selfReview");
+    // E3 重挂即落盘（§3.4 降级两源）：resumeHint='resubmit'（旧 reviewStateSource 语义取代）
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
-      expect.objectContaining({ isActive: true, reviewState: "awaiting", reviewStateSource: "resubmit" }),
+      expect.objectContaining({ isActive: true, state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("旧 entry（reviewState='awaiting' 无 state 字段）经映射同样落 reviewing 重挂分支（D2 读方①）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        reviewState: "awaiting",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("submit-review") }),
+      expect.anything(),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "reviewing", resumeHint: "resubmit" }),
     );
   });
 
@@ -113,13 +144,13 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
         templateName: "",
         skills: ["tech-design"],
         docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
-        reviewState: "revising",
+        state: "revising",
       }),
     ]);
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     expect(pi.sendMessage).toHaveBeenCalledWith(
       {
         customType: PLAN_CONTEXT_CUSTOM_TYPE,
@@ -128,9 +159,41 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
       },
       { deliverAs: "steer", triggerTurn: true },
     );
-    // revising 恢复不落 source 标记（'resubmit' 只描述 awaiting 降级等待；revising 由
+    // revising 恢复不落 resumeHint（'resubmit' 只描述 reviewing 降级等待；revising 由
     // steer triggerTurn 立即开轮接续，恢复期间显示的 revising 是真实进行中）
     expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("dispatching + no live select → review_aborted 边落 approved + steer 重调 complete（D5 E3 新支）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        state: "dispatching",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    // 崩溃消散的表单 = 无选择解散极端形态：dispatching --review_aborted--> approved 落盘
+    //（批准事实保留，且使重调 complete 的 approve 边合法）
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "approved", isActive: true }),
+    );
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("plan(action='complete')"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
   });
 
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
@@ -145,7 +208,7 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     expect(captured.controllers!.has("test-session")).toBe(false);
   });
 
-  it("active without awaiting (in progress) → no reminder", async () => {
+  it("active without pending review (in progress) → no reminder", async () => {
     const { handlers, pi } = setup();
     const ctx = makeCtx([
       planStateEntry({
@@ -162,7 +225,28 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalled();
     expect(pi.sendMessage).not.toHaveBeenCalled();
-    // 非 awaiting 不落盘：E3 source 标记只在 awaiting 重挂分支写
+    // 非 reviewing/dispatching 不落盘：E3 resumeHint 只在 reviewing 重挂分支写
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("approved（later 后重开）不打扰：无 E3 重挂（S16「重开 session 无 E3 重挂打扰」）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        state: "approved",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.setActiveTools).toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 

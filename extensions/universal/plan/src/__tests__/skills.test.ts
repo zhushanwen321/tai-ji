@@ -167,7 +167,7 @@ describe("E1 fail-fast via /plan handler", () => {
       },
     } as unknown as ExtensionContext;
     controllers = new Map();
-    registerPlanCommand(pi, new Map(), controllers);
+    registerPlanCommand(pi, new Map(), controllers, new Map());
     handler = capturedHandler!;
   });
 
@@ -221,7 +221,7 @@ describe("E1 fail-fast via /plan handler", () => {
   it("valid skills: enters plan mode, persists skills and injects skill paths in the prompt", async () => {
     await handler("重构 auth --skills tech-design,code review", ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
     expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
     expect(pi.appendEntry).toHaveBeenCalledWith(

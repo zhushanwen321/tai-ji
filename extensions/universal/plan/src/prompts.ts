@@ -56,10 +56,27 @@ const PHASE_D_SECTION =
   `3. After plan complete: the user picks an execution method in the completion dialog — up to 2 detected plan-exec skills (Execute via skill: <name>, when detected), Execute (goal tracking integrated when available), or Not now (stay in plan mode).`;
 
 /**
- * /plan 命令的提示词四段注入（D2）：
+ * Phase C.5 自审清单（D9②）：submit-review 前的自审引导——产物纪律段之后恒注入（全流程，
+ * 不随模板/技能流程分叉——自审硬门对每次 submit-review 生效，含修订后重挂）。
+ * 门语义三层边界：存在性 = 结构保证（tool 参数门）/ 防照抄 = 启发式（逐字节拒收）/
+ * 语义级新鲜度 = 本提示词纪律（机器不可判）。自审发现的问题先修文档再提交。
+ */
+const PHASE_C_5_SECTION =
+  `## Phase C.5: Self-Review Before Submission\n` +
+  `Before every plan(action='submit-review'), do a self-review and put the conclusions into the selfReview parameter:\n` +
+  `1. **Requirement coverage**: check each requirement item is covered by the documents, one by one.\n` +
+  `2. **Assumption audit**: clear or explicitly list every [UNVERIFIED] assumption.\n` +
+  `3. **Chapter completeness**: compare against the template's chapter structure — no unwritten chapters.\n` +
+  `4. **Acceptance realism**: verify the acceptance scenarios are truly executable.\n` +
+  `Fix any issues found DURING the self-review in the documents first (then re-register), then submit with the self-review conclusions.`;
+
+/**
+ * /plan 命令的提示词段注入（D2）：
  * ① 技能指令（仅挂载 --skills 时）——按技能 SKILL.md 流程产出计划文档；
- * ② 产物纪律（恒注入）——register-doc 登记 / 修订重调 version+1 / 全部完成调
- *    submit-review / submit-review 被消费后当轮回应完重挂直到确认；
+ * ② 产物纪律（恒注入）——register-doc 登记 / 修订重调 version+1 / 全部完成先自审再调
+ *    submit-review（必带 selfReview）/ submit-review 被消费后当轮回应完重挂直到确认 /
+ *    收到重挂请求直接 submit-review（D8 提示词纪律）；
+ * ②.5 Phase C.5 自审清单（恒注入，产物纪律段之后，D9②）；
  * ③ 只读纪律（恒注入，现状 pi-ext-021 提示词保持）；
  * ④ 模板流程（仅未指定 --skills 时）——<available-plans> 三源清单注入（内置 5
  *    + 用户级 + 项目级，模型自选模板，D8）；空发现不注入段（warn 另落）。
@@ -83,14 +100,16 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
     );
   }
 
-  // ② 产物纪律
+  // ② 产物纪律 + ②.5 Phase C.5 自审清单（D9②：产物纪律段之后恒注入）
   sections.push(
     `## Deliverable Discipline\n` +
     `- Write every deliverable document into the plan directory (.tmp/plans/<slug>/), then register it: plan(action='register-doc', fileName='design.md', sourceSkill='<skill name or omit>').\n` +
     `- After revising a document, REWRITE the file and re-register it with plan(action='register-doc', fileName=...) again — the version is bumped so the UI refreshes its content.\n` +
-    `- When ALL documents are done, call plan(action='submit-review') to request user review.\n` +
-    `- After submit-review is consumed (a revision request), finish responding for the current turn, then call plan(action='submit-review') again to re-hang the review — repeat until the user confirms execution.`,
+    `- When ALL documents are done, self-review first (Phase C.5), then call plan(action='submit-review', selfReview='<your self-review conclusions>') to request user review — selfReview is REQUIRED every time (including re-submissions after revisions).\n` +
+    `- After submit-review is consumed (a revision request), finish responding for the current turn, revise the documents, redo the self-review for the revised versions, then call plan(action='submit-review', selfReview='...') again to re-hang the review — repeat until the user confirms execution.\n` +
+    `- When the user asks to re-submit the plan review (e.g. a re-submit notice like "请重新提交计划审批"), call plan(action='submit-review', selfReview='...') IMMEDIATELY — carry back your previous self-review VERBATIM when the documents are unchanged.`,
   );
+  sections.push(PHASE_C_5_SECTION);
 
   // ③ 只读纪律（现状 pi-ext-021 提示词保持）
   sections.push(
@@ -134,8 +153,9 @@ export function buildPlanModePrompt(input: PlanPromptInput): string {
 }
 
 /**
- * revise decision 的评论清单注入文本（D5 decision 消费；explain 决策已删，
- * PlanReviewDecision 收敛为 'approve' | 'revise'，approve 走 complete 流程不经本函数）。
+ * revise decision 的评论清单注入文本（D5 decision 消费；explain 决策已删——PlanReviewDecision
+ * 现为三键值域 'approve' | 'revise' | 'dismiss'（D3 加员）：approve 走 complete 流程、
+ * dismiss 走搁置分支，均不经本函数）。
  * 评论语义：quote 是用户划选引文（agent 定位段落用），comment 是评语。
  */
 export function formatReviewComments(comments: PlanReviewComment[]): string {

@@ -2,12 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
-import { capPlanRequirement, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
+import { applyPlanEvent, capPlanRequirement, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
+
+const logger = getLogger("pi-plan");
 
 export const MAX_SLUG_LENGTH = 30;
 
@@ -80,7 +83,8 @@ export interface ActivatePlanModeOutcome {
  * 副作用顺序钉死：状态字段 → persistPlanState（entry 落盘）→ updatePlanWidget →
  * setActiveTools → 构造 prompt。persist 先于工具收拢，保证「已持久 isActive 但工具未收」
  * 的半进入态不可达（崩溃窗口内重开 session 经 entry 恢复 isActive，session_start hook
- * 会补 setActiveTools）。
+ * 会补 setActiveTools）。生命周期写唯一通道 = applyPlanEvent('enter')（D1：idle|终态
+ * --enter--> planning 新一轮；activatePlanMode 不递增 reset epoch——纪律③）。
  */
 export function activatePlanMode(
   pi: ExtensionAPI,
@@ -110,11 +114,22 @@ export function activatePlanMode(
   state.templateProvidedPath = input.template?.absPath;
   state.skills = skills.map((s) => s.name);
   state.docs = [];
-  // 新轮次重置：reviewState、来源标记与指纹基线随进入失效（与 resetPlanState 对齐；
-  // reviewStateSource 残留会让新一轮降级态渲染上一轮来源文案——C-U2 同型残留）
-  delete state.reviewState;
-  delete state.reviewStateSource;
+  // 新轮次重置：selfReview、resumeHint 与指纹基线随进入失效（与 resetPlanState 对齐——
+  // 清除点三处之二；跨轮残留会误触新鲜度门 / 渲染上一轮降级文案（C-U2 同型残留））
+  delete state.selfReview;
+  delete state.resumeHint;
   delete state.lastSubmitReviewDocsFingerprint;
+
+  // 状态写走 transition()（D1 'enter' 边：idle|completed|exited → planning 新一轮）。
+  // 不一致格降级（isActive=false 且 state 落活跃族——仅坏数据/旧映射残留可达，P-6 单写入方
+  // 下正常不可达）：按 isActive 推断归一到 idle 再进（与读侧兜底同构），坏数据不拒绝用户
+  // 的进入意图；正常路径一律经 applyPlanEvent 单通道。
+  const entered = applyPlanEvent(state, "enter");
+  if (!entered.ok) {
+    logger.warn("plan: enter normalized inconsistent lifecycle state", { from: state.state });
+    state.state = "idle";
+    applyPlanEvent(state, "enter");
+  }
 
   persistPlanState(pi, state);
   updatePlanWidget(ctx, state);
