@@ -37,6 +37,7 @@ import { bindNotifyLedgerHost, type NotifyLedgerHost } from "@zhushanwen/subagen
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { maybeCleanupExpiredSessionFiles } from "@zhushanwen/subagent-core";
+import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
 import {
   getSubagentService,
   setSubagentService,
@@ -102,18 +103,15 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
  *
  * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
  * 目录 B resume cwd 为 A 的 session 时，新 run 的 state 文件/journal 落 B 的 slug
- * 目录、旧 run 的在 A——GC/retention sweep（同规则推导）读不到旧 run 的磁盘足迹，
- * 兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。修复
- * 需与 core 读侧 resolvePiWorkflowStateDir（workflow-state-root.ts，有意对齐进程
- * cwd）同步改锚，单侧改会制造新的读写错位——taiji 桌面场景（spawn cwd 恒等于
- * session cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
+ * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
+ * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
+ * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
+ * 只动 core 单点，本薄消费自动跟随。taiji 桌面场景（spawn cwd 恒等于 session
+ * cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
  */
 function resolveSessionDir(): string {
-  const defaultDir = getAgentDir();
-  const sessionSlug = `--${process.cwd().replace(/^\//, "").replace(/\//g, "-")}--`;
-  // F2：根改 getAgentDir() 派生（实例隔离）；保留 sessionScopedDir 存在则用之的探测语义
-  const sessionScopedDir = path.join(getAgentDir(), "sessions", sessionSlug);
-  return fs.existsSync(sessionScopedDir) ? sessionScopedDir : defaultDir;
+  // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
+  return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
 }
 
 // ── 进程级单例（dialog queue；原 index.ts module 级随域搬移） ────────────────────

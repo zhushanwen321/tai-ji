@@ -536,6 +536,13 @@ export {
   type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
 
+// resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
+// 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
+// 注入 pi SDK 活源 getAgentDir() 薄消费（原壳侧同形手写已删，收敛单源防漂移）；
+// resolvePiWorkflowStateDir 为其 workflow-state 后缀派生，core 读侧装配经相对
+// 路径消费，不需要 barrel 面。
+export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
+
 // RunPersistThrottle：RunStore 两 adapter（FileRunStore / pi 壳 JsonlRunStore）
 // 共享的落盘节流决策单点（判定五要素 + 记账时机）——收编前两侧平行实现无共享
 // 测试锚定（B3 单侧修复实证独立演化风险）。壳生产消费必须走 barrel（深路径
