@@ -219,17 +219,3 @@ export function deriveClosedDisplay(input: { closedReason?: string; error?: stri
   if (reason === 'gc' && input.error) return 'failed'
   return 'done'
 }
-
-/**
- * 占用两态投影（永久会话模型 §3.2.2 G2；[U6] 契约收窄后类型已两态，本函数退化为
- * 直投恒等——保留导出作「legacy 数据兼容语义」的历史记录位，消费方可直接读 status）。
- *   running → running；idle → idle。
- *
- * legacy 值（done/failed/cancelled/crashed/closed）的兼容投影已上移至解析边界：
- * runtime normalizeSubagentStatus 归一（two-state-convergence D5）——renderer 永不见
- * legacy 值。旧终态值全部归 idle 而非 running：旧数据里的终态 record 没有在飞轮，
- * 映射成 running 会复活 spinner / 活跃计数（归一兜底方向与之一致）。
- */
-export function projectSubagentExecutionStatus(status: SubagentStatus): 'running' | 'idle' {
-  return status === 'running' ? 'running' : 'idle'
-}

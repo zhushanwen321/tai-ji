@@ -8,7 +8,7 @@
  *   标记 + 截断）+ 内核状态迁移经 onChange 跟随（queued → in-flight）
  * - 持有态（compacting）：lane/state 双 queued（V9 队列态可撤的帧形态前提）
  * - 帧数据源 = 内核 entries() **投影视图**（D9②/D5③）：cancelled 不投影、delivered 投影、
- *   tombstone 元数据不泄漏；假句柄路锁定「以 entries(options) 投影形态调用」（防误用全量视图）
+ *   tombstone 元数据不泄漏；真实内核锁定「以 entries(options) 投影形态调用」（防误用全量视图）
  * - 变更驱动（onChange）而非轮询：无变更推进 60s 零新帧（负断言）
  * - state topic last-value（真实 MessageBus）：同 session 多帧 stateSnapshot 只留最新 +
  *   不入 ring + topicOf('session.delivery') === 'state'（登记表锁）
@@ -39,7 +39,7 @@ import type { BusClient } from '../../services/message-bus/types.js'
 import type { IManagedSessionView } from '../../services/session/types.js'
 import type { IPiEngine } from '../../services/ports/pi-engine.js'
 import type { SkillInjector, SkillInjectionResult } from '../../services/session/skill-injector.js'
-import type { DeliveryEntry, DeliveryHandle, DeliveryHandleV2, DeliveryProjectionOptions } from '@zhushanwen/session-delivery'
+import type { DeliveryHandleV2 } from '@zhushanwen/session-delivery'
 import type { ClientMessage, ServerMessage } from '@taiji/shared'
 
 // ── 常量 / 装置 ───────────────────────────────────────────────────
@@ -73,50 +73,13 @@ function makeSession(overrides: Partial<IManagedSessionView> = {}): IManagedSess
   }
 }
 
-function makeFakeHandle(entries: DeliveryEntry[]) {
-  let current = entries
-  const subs = new Set<() => void>()
-  const handle = {
-    send: vi.fn(),
-    sendChecked: vi.fn(async () => {}),
-    flush: vi.fn(),
-    depth: vi.fn(() => 0),
-    dispose: vi.fn(),
-    // 双视图分流：无参 = 全量视图（active + tombstones），带 options = 投影视图（D9②）
-    entries: vi.fn((options?: DeliveryProjectionOptions) =>
-      options === undefined
-        ? { active: current, tombstones: [{ id: 'tombstone-leak', state: 'cancelled', lane: 'queued', settledAt: 1 }] }
-        : { entries: current },
-    ),
-    onChange: vi.fn((cb: () => void) => {
-      subs.add(cb)
-      return () => {
-        subs.delete(cb)
-      }
-    }),
-  }
-  return {
-    handle,
-    setEntries: (next: DeliveryEntry[]) => {
-      current = next
-      for (const cb of [...subs]) cb()
-    },
-    /** 退订是否仍生效（release 断言用）。 */
-    subscriberCount: () => subs.size,
-  }
-}
-
-function makeEntry(id: string, state: DeliveryEntry['state'], lane: DeliveryEntry['lane']): DeliveryEntry {
-  return { id, state, lane, payload: { kind: 'text', content: `body-${id}` }, createdAt: 1, updatedAt: 1, sendAttempts: 0 }
-}
-
 interface Harness {
   handler: SessionMessageHandler
   registry: SessionDeliveryRegistry
   bus: MessageBus
   session: IManagedSessionView
   promptFn: ReturnType<typeof vi.fn>
-  /** 真实内核句柄（registry 装配；伪造句柄用例自带独立类型，见 makeFakeHandle）。 */
+  /** 真实内核句柄（registry 装配）。 */
   handle: DeliveryHandleV2
   sent: ServerMessage[]
   replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
@@ -407,6 +370,16 @@ describe('delivery.submit × BeforeSend hook（hook 属受理阶段：veto 不�
 
 // ── 帧数据源 = 投影视图（D9②/D5③） ───────────────────────────────
 
+/** 这组用例的最小 pi client（真实内核 pump 路径：prompt/clearQueue/getEntries 桩，ensureActive 返回）。 */
+function makePiClient() {
+  return {
+    prompt: vi.fn(async () => ({})),
+    touchActivity: vi.fn(),
+    clearQueue: vi.fn(async () => ({ steering: [], followUp: [] })),
+    getEntries: vi.fn(async () => ({ data: { entries: [] } })),
+  }
+}
+
 describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tombstone 不泄漏）', () => {
   it('活跃全量 + delivered 投影 + cancelled 不投影（真实内核三态同帧）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
@@ -430,75 +403,85 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
     expect(h.registry.entries(SID)?.tombstones.map((t) => t.id).sort()).toEqual([UUID_A, UUID_B])
   })
 
-  it('装配以 entries(options) 投影形态调用（假句柄双视图分流：全量视图的 tombstone 不入帧）', () => {
+  it('装配以 entries(options) 投影形态调用（真实内核双视图分流：全量视图的 tombstone 不入帧）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []
     const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
     bus.subscribe(SID, client)
 
-    const fake = makeFakeHandle([makeEntry('u-fake-1', 'queued', 'steer')])
     const registry = createSessionDeliveryRegistry(
       {
         getSession: () => makeSession(),
-        ensureActive: async () => ({}) as unknown as IPiEngine,
+        ensureActive: async () => makePiClient() as unknown as IPiEngine,
         subscribeAgentSettled: () => () => {},
         recordWorkspace: vi.fn(),
         getMessageBus: () => bus,
       },
       { inject: vi.fn(async (_c: IPiEngine, text: string) => ({ text, notices: [] })) } as unknown as SkillInjector,
     )
-    registry.getOrCreateDelivery(SID, () => fake.handle as unknown as DeliveryHandle)
+    const handle = registry.getOrCreateDelivery(SID)
+    // 真实内核制造 tombstone：queued 提交即本地撤销（full 视图留 cancelled 记录，投影不投影）
+    registry.submit(SID, { content: 'msg-A', clientUuid: UUID_A })
+    await registry.cancel(SID, UUID_A)
 
+    const entriesSpy = vi.spyOn(handle, 'entries')
     const topic = new SessionDeliveryTopic({ getRegistry: () => registry, getBus: () => bus, nextPushId: () => 'push-t' })
     topic.sync(SID)
 
-    expect(fake.handle.entries).toHaveBeenCalledWith({})
+    // 投影形态锁定：topic 以 entries(options) 投影视图装配帧（resolveHandle 的存在性判定
+    // 走 registry.entries() 全量视图，故 spy 同时含无参调用——此处只锁投影形态被调用）
+    expect(entriesSpy).toHaveBeenCalledWith({})
     const frames = sent.filter((m) => m.type === 'session.delivery') as ServerMessage<'session.delivery'>[]
     expect(frames).toHaveLength(1)
-    expect(frames[0]?.payload.entries).toEqual([{ clientUuid: 'u-fake-1', preview: 'body-u-fake-1', state: 'queued', lane: 'steer' }])
+    // 双视图分流：full 视图有 cancelled tombstone，帧条目为空（cancelled 不投影、不泄漏）
+    expect(registry.entries(SID)?.tombstones.map((t) => t.id)).toContain(UUID_A)
+    expect(frames[0]?.payload.entries).toEqual([])
     registry.disposeAll()
   })
 
-  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅面）', () => {
+  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅面）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []
     const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
     bus.subscribe(SID, client)
 
-    const fake = makeFakeHandle([makeEntry('u-fake-1', 'queued', 'queued')])
     const registry = createSessionDeliveryRegistry(
       {
         getSession: () => makeSession(),
-        ensureActive: async () => ({}) as unknown as IPiEngine,
+        ensureActive: async () => makePiClient() as unknown as IPiEngine,
         subscribeAgentSettled: () => () => {},
         recordWorkspace: vi.fn(),
         getMessageBus: () => bus,
       },
       { inject: vi.fn(async (_c: IPiEngine, text: string) => ({ text, notices: [] })) } as unknown as SkillInjector,
     )
-    registry.getOrCreateDelivery(SID, () => fake.handle as unknown as DeliveryHandle)
+    registry.getOrCreateDelivery(SID)
+    // 提交先于 sync（onChange 尚未接线）——首帧只能来自 sync 的全量快照发布
+    registry.submit(SID, { content: 'msg-A', clientUuid: UUID_A })
+    // 先冲掉提交链微任务（受理 → in-flight 迁移），内核进入稳态再推进时间：
+    // 否则 watchdog（30s tick 的 flush）会在「60s 零新帧」窗口内消费积压条目产生合法变更帧
+    await vi.advanceTimersByTimeAsync(1)
 
     const topic = new SessionDeliveryTopic({ getRegistry: () => registry, getBus: () => bus, nextPushId: () => 'push-t' })
     topic.sync(SID)
     const afterSync = sent.filter((m) => m.type === 'session.delivery').length
     expect(afterSync).toBe(1)
-    // 订阅数 = topic 本帧订阅 + registry 的在途镜像订阅（u2 既有 onChange 消费方）
-    const subsAfterSync = fake.subscriberCount()
 
     vi.advanceTimersByTime(60_000)
-    expect(sent.filter((m) => m.type === 'session.delivery')).toHaveLength(1) // 无变更 → 无帧（非轮询）
+    expect(sent.filter((m) => m.type === 'session.delivery')).toHaveLength(1) // 稳态无变更 → 无帧（非轮询）
 
-    // 内核迁移 → onChange 驱动一帧（新值）
-    fake.setEntries([makeEntry('u-fake-1', 'in-flight', 'queued')])
+    // 内核变更 → onChange 驱动新帧（新值；含排队提交 + 在途迁移，帧数随变更数增长）
+    registry.submit(SID, { content: 'msg-B', clientUuid: UUID_B })
+    await vi.advanceTimersByTimeAsync(1)
     const frames = sent.filter((m) => m.type === 'session.delivery') as ServerMessage<'session.delivery'>[]
-    expect(frames).toHaveLength(2)
-    expect(frames[1]?.payload.entries[0]?.state).toBe('in-flight')
+    expect(frames.length).toBeGreaterThanOrEqual(2)
+    expect(frames[frames.length - 1]?.payload.entries.map((e) => e.clientUuid)).toContain(UUID_B)
 
     // release 后本 topic 退订 + 内核变更不再发帧（session 销毁清理语义）
     topic.release(SID)
-    expect(fake.subscriberCount()).toBe(subsAfterSync - 1)
-    fake.setEntries([makeEntry('u-fake-1', 'failed', 'queued')])
-    expect(sent.filter((m) => m.type === 'session.delivery')).toHaveLength(2)
+    registry.submit(SID, { content: 'msg-C', clientUuid: UUID_C })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(sent.filter((m) => m.type === 'session.delivery')).toHaveLength(frames.length)
     registry.disposeAll()
   })
 })

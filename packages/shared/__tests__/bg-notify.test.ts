@@ -152,7 +152,9 @@ describe('parseBgNotifyDetails', () => {
       endedAt: 2,
       patchFile: 'p',
       closedReason: 'c',
+      outcome: 'failed',
       round: 1,
+      notifyId: 'x',
     }) as BgNotifyRecord
     expect(Object.keys(rec)).toEqual([
       'id',
@@ -165,7 +167,36 @@ describe('parseBgNotifyDetails', () => {
       'endedAt',
       'patchFile',
       'closedReason',
+      'outcome',
       'round',
+      'notifyId',
     ])
+  })
+
+  it('closed 通知的 outcome / notifyId 写侧字段透传（与 subagent-core notifier 实装对齐）', () => {
+    const rec = parseBgNotifyDetails({
+      id: 'r3',
+      status: 'closed',
+      agent: 'coder',
+      startedAt: 100,
+      closedReason: 'gc',
+      outcome: 'failed',
+      round: 2,
+      notifyId: 'r3:2',
+    }) as BgNotifyRecord
+    expect(rec.outcome).toBe('failed')
+    expect(rec.notifyId).toBe('r3:2')
+    expect(rec.round).toBe(2)
+  })
+
+  it('outcome 非法值 → 不写入（字面量校验 === 链与联合对齐）；running 通知语义上无 outcome', () => {
+    const rec = parseBgNotifyDetails({
+      id: 'r4',
+      status: 'closed',
+      agent: 'coder',
+      startedAt: 100,
+      outcome: 'succeeded',
+    }) as BgNotifyRecord
+    expect(rec.outcome).toBeUndefined()
   })
 })

@@ -20,6 +20,19 @@ export function toErrorMessage(e: unknown): string {
 }
 
 /**
+ * 从任意 thrown 值提取业务错误码（守卫式：仅当 `code` 是 string 时返回，否则 undefined）。
+ *
+ * 替代散落的 `(e as Error & { code?: string }).code` 裸断言（无运行时守卫，非 string code
+ * 会谎报类型穿透）与「先读 unknown 再 typeof 收窄」两步样板。调用方以返回值做差异化
+ * 分派（如 MODEL_NOT_CONFIGURED / SESSION_NOT_FOUND 特判）或以 `?? 兜底码` 重映射。
+ */
+export function errorCodeOf(e: unknown): string | undefined {
+  if (typeof e !== 'object' || e === null) return undefined
+  const code = (e as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
+}
+
+/**
  * 判断错误是否为 ENOENT（文件/目录不存在）。
  *
  * 结构化判定 `code === 'ENOENT'`，替代脆弱的字符串包含匹配

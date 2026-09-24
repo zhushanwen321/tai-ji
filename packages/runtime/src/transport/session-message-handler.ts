@@ -14,7 +14,7 @@ import { zcodeImportDbAllowlist } from '../services/session/zcode-import/sqlite-
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
 // 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'
-import { toErrorMessage, isEnoent, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND, RESTORE_FAILED } from '../utils/errors.js'
+import { toErrorMessage, isEnoent, errorCodeOf, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND, RESTORE_FAILED } from '../utils/errors.js'
 import type { MessageHandlerContext } from './message-context.js'
 // MessageBus（wave:runtime-wiring）：session.subscribe/unsubscribe RPC handler 用它注册订阅。
 // type-only import（handler 不持有 bus 实例的创建，只调它的方法）。
@@ -140,41 +140,6 @@ export class SessionMessageHandler {
     this.deliveryTopic.release(sessionId)
   }
 
-  /** D1: 本 handler 认领的 ClientMessageType 清单（session.compact 单独路由，故不在此列）。 */
-  readonly handles: ClientMessageType[] = [
-    'session.create', 'session.delete', 'session.deleteByCwd', 'config.sessions', 'session.switch', 'session.restore', 'session.history', 'session.rename', 'session.getCommands', 'session.getContext', 'session.fork', 'session.setProject',
-    // 导入 pi 会话（import-session D5/U2）：候选列表 + 执行导入（case 分发由 u3-rpc-wiring 落地）。
-    'session.importCandidates', 'session.import',
-    'session.handoff', 'session.abortHandoff',
-    // 强制退出（sidebar 右键）：杀 pi 进程 + stopped 收敛，区别于协作式 message.abort。
-    'session.forceQuit',
-    // wave:runtime-wiring：session.subscribe/unsubscribe RPC（IF6/IF7）。
-    'session.subscribe', 'session.unsubscribe',
-    'session.getSubagents', 'session.getSubagentHistory',
-    // plan 模式重设计（D1⑥/D5）：getPlanState 冷启动/切换首拉 + abortPlan 退出命令（PlanModeBar 确认 Popover 后）。
-    'session.getPlanState', 'session.abortPlan',
-    // [U7] 子代理引擎配置（Settings 引擎选择器：动态列表 + defaultEngine 读写）
-    'session.getSubagentEngineConfig', 'session.setSubagentDefaultEngine',
-    'session.getWorkflows', 'session.getAgentCallHistory', 'session.getAgentCallFilePath',
-    'session.workflowAction', 'session.subagentAction',
-    // session-trace（design D4）：全量 trace 台账拉取（A1 混合路由归 session-service）。
-    'session.getTraceEntries',
-    // session-trace（design §3.1 失败路径）：现取当前 system prompt（常驻扩展通道）。
-    'session.fetchCurrentSystemPrompt',
-    // wave:runtime-patch ipc-converge-a3 W2：业务持久化写 WS（session 数据单一出口归 runtime）
-    'session.writeImage', 'session.migrateImage', 'session.writeSegments',
-    // composer-gen-stats（D4）：生成指标恢复腿（切 session 视图主动拉，架构约定 #7 时序竞争）。
-    'session.getGenStats',
-    'message.send', 'message.abort', 'message.steer', 'message.follow_up',
-    'message.bash', 'message.abortBash',
-    // delivery 域（投递所有权内核 D5，u3a）：统一提交 / 单条撤销 / 全量回收回草稿 / 断连重报
-    // 四 RPC（ADR-0046 配对；message.steer/follow_up 与 send.rejected 的退役归 u5）。
-    'delivery.submit', 'delivery.cancel', 'delivery.drain', 'delivery.resync',
-    // backgroundTask 域（background-task-sidebar D3，u-runtime-rpc）：后台命令拉取/详情/终止 3 RPC。
-    // 变更广播不经此处（SessionService 组装的 onTasksChanged → bus.publish 单向推送）。
-    'backgroundTask.list', 'backgroundTask.output', 'backgroundTask.kill',
-  ]
-
   /**
    * case 路由表：key 集合与原 switch case 一一对应。未知 type 查表落空即返回
    * （不发任何消息，同原 switch 无 default 的落空行为）。
@@ -234,6 +199,15 @@ export class SessionMessageHandler {
     'backgroundTask.kill': (msg, ws) => this.handleBackgroundTaskKill(msg, ws),
   }
 
+  /**
+   * D1: 本 handler 认领的 ClientMessageType 清单——派生自 routes 表（S1 收敛：单一事实源，
+   * 「只改 handles 漏改 routes」的漂移类结构性消灭，RT-1#6 运行时守卫随之退为纯防御）。
+   * 不含 session.compact：它由 server 路由表直接接 handleSessionCompact（不经本表分发），
+   * 且 server 装配期 b26-F2 撞键 fail-fast 会把双登记拦死——与退役前手写清单的排除理由一致。
+   * 声明必须位于 routes 之后（字段初始化按声明序执行，派生读 this.routes）。
+   */
+  readonly handles: ClientMessageType[] = Object.keys(this.routes) as ClientMessageType[]
+
   async handleSessionMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     const handler = this.routes[msg.type]
     // RT-1#6：落空不再静默 return——handles 清单与内部 routes 表漂移（漏登记）时，
@@ -255,32 +229,71 @@ export class SessionMessageHandler {
     await handler(msg as never, ws)
   }
 
+  // ── 失败收口 / 可选服务守卫（S3 收敛：catch 尾三连与判空样板单一实现）──
+
+  /**
+   * 请求级失败统一收口（D10/P0-B）：toErrorMessage 归一 + console.error 留痕 + error envelope。
+   * envelope 四元组（code/message/id/details）与收敛前各 case 逐字节一致；message 覆写槽供
+   * 需拼恢复指引的 case 使用（留痕恒记原始 errMsg，与收敛前日志一致）。
+   * import 域的「code 透传变体」不入本 helper：其日志嵌 resolved code（errorCodeOf 求值先于
+   * sendError），两段式日志形状不同，保留内联。
+   */
+  private reportFailure(
+    ws: WsType,
+    msgId: string | undefined,
+    code: string,
+    e: unknown,
+    opts: { scope: string; sessionId?: string; message?: string },
+  ): void {
+    const errMsg = toErrorMessage(e)
+    console.error(`[runtime] ${opts.scope} failed:`, errMsg)
+    return this.ctx.sendError(ws, code, opts.message ?? errMsg, msgId, opts.sessionId !== undefined ? { sessionId: opts.sessionId } : undefined)
+  }
+
+  /**
+   * delivery 域可选注册表守卫（四 RPC 共用）：缺省时回 delivery_unsupported error envelope
+   * 并返回 undefined（调用方早退）；命中返回注册表实例。
+   */
+  private requireDeliveryRegistry(ws: WsType, msg: { id?: string }, sessionId: string): SessionDeliveryRegistry | undefined {
+    const registry = this.ctx.deliveryRegistry
+    if (!registry) {
+      this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+      return undefined
+    }
+    return registry
+  }
+
+  /**
+   * backgroundTask 域可选端口守卫（三 RPC 共用）：缺省时回 background_task_unsupported
+   * error envelope 并返回 undefined（调用方早退）；命中返回服务消费面窄视图。
+   */
+  private requireBackgroundTasks(ws: WsType, msg: { id?: string }, sessionId: string): BackgroundTaskRpcPort | undefined {
+    const port = this.ctx.sessionService.backgroundTasks
+    if (!port) {
+      this.ctx.sendError(ws, 'background_task_unsupported', 'background task service not available', msg.id, { sessionId })
+      return undefined
+    }
+    return port
+  }
+
   // ── case handlers（原 switch case 体逐一提取；语句与注释原样保留，行为保持）──
 
   private async handleSessionCreate(msg: Extract<ClientMessage, { type: 'session.create' }>, ws: WsType): Promise<void> {
-    try {
-      // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
-      // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
-      // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
-      // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兑底）。
-      const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {
-        hidden: msg.payload.hidden,
-        presetId: msg.payload.presetId,
-        projectId: msg.payload.projectId,
-        modelOverride: msg.payload.modelOverride,
-        thinkingOverride: msg.payload.thinkingOverride,
-      })
-      this.ctx.reply(ws, msg.id, 'session.created', { session })
-      this.ctx.broadcastSessionList()
-    } catch (e) {
-      // L4: model 未配置时返回差异化 error code，前端据此引导去 Settings 配置。
-      const code = (e as Error & { code?: string }).code
-      if (code === MODEL_NOT_CONFIGURED) {
-        this.ctx.sendError(ws, MODEL_NOT_CONFIGURED, toErrorMessage(e), msg.id)
-        return
-      }
-      throw e
-    }
+    // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
+    // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
+    // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
+    // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兑底）。
+    // 错误路径直通 server 中央 catch（S2 收敛）：create payload 无 sessionId 字段，中央
+    // code 透传（含 MODEL_NOT_CONFIGURED L4 差异化引导）产出的信封与原 per-case 特判逐字节一致。
+    const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {
+      hidden: msg.payload.hidden,
+      presetId: msg.payload.presetId,
+      projectId: msg.payload.projectId,
+      modelOverride: msg.payload.modelOverride,
+      thinkingOverride: msg.payload.thinkingOverride,
+    })
+    this.ctx.reply(ws, msg.id, 'session.created', { session })
+    this.ctx.broadcastSessionList()
   }
 
   private async handleSessionRestore(msg: Extract<ClientMessage, { type: 'session.restore' }>, ws: WsType): Promise<void> {
@@ -313,33 +326,25 @@ export class SessionMessageHandler {
 
   private async handleSessionFork(msg: Extract<ClientMessage, { type: 'session.fork' }>, ws: WsType): Promise<void> {
     // fork：runtime 读源 JSONL 截断 → 新进程 switch_session。reply session.created（复用类型）。
+    // 错误路径直通 server 中央 catch（S2 收敛，理由同 handleSessionCreate）：fork payload 无
+    // sessionId 字段（仅 srcSessionId），中央 code 透传信封与原 per-case MODEL 特判逐字节一致。
     const { srcSessionId, fromPiEntryId, fromMessageTimestamp, fromMessageRole, includeFrom, label, modelOverride, thinkingOverride } = msg.payload
-    try {
-      const session = await this.ctx.sessionService.forkSession(
-        srcSessionId, fromPiEntryId, includeFrom ?? true, label,
-        // Staging Mode（ADR-0056）：透传 composer 暂存的 modelOverride/thinkingOverride，
-        // 让 fork 出的新 session 用用户当前选定的模型/思考等级，而非单纯继承源 preset。
-        { fromMessageTimestamp, fromMessageRole, modelOverride, thinkingOverride },
-      )
-      this.ctx.reply(ws, msg.id, 'session.created', { session })
-      // [W2 FR-12] fork 成功后广播 session.forkNotice：通知 srcSession 所在 panel
-      // 在对话流插一条 ForkNotice 反馈行（spec §3）。广播在 reply + broadcastSessionList 之后，
-      // 确保新 session 已入列表 + reply 已发出（前端可据 newSessionId 跳转）。
-      this.ctx.broadcast({
-        type: 'session.forkNotice',
-        id: this.ctx.nextPushId(),
-        payload: { srcSessionId, newSessionId: session.id, branchName: label },
-      })
-      this.ctx.broadcastSessionList()
-    } catch (e) {
-      // L4: model 未配置时返回差异化 error code（与 session.create 同模式）。
-      const code = (e as Error & { code?: string }).code
-      if (code === MODEL_NOT_CONFIGURED) {
-        this.ctx.sendError(ws, MODEL_NOT_CONFIGURED, toErrorMessage(e), msg.id)
-        return
-      }
-      throw e
-    }
+    const session = await this.ctx.sessionService.forkSession(
+      srcSessionId, fromPiEntryId, includeFrom ?? true, label,
+      // Staging Mode（ADR-0056）：透传 composer 暂存的 modelOverride/thinkingOverride，
+      // 让 fork 出的新 session 用用户当前选定的模型/思考等级，而非单纯继承源 preset。
+      { fromMessageTimestamp, fromMessageRole, modelOverride, thinkingOverride },
+    )
+    this.ctx.reply(ws, msg.id, 'session.created', { session })
+    // [W2 FR-12] fork 成功后广播 session.forkNotice：通知 srcSession 所在 panel
+    // 在对话流插一条 ForkNotice 反馈行（spec §3）。广播在 reply + broadcastSessionList 之后，
+    // 确保新 session 已入列表 + reply 已发出（前端可据 newSessionId 跳转）。
+    this.ctx.broadcast({
+      type: 'session.forkNotice',
+      id: this.ctx.nextPushId(),
+      payload: { srcSessionId, newSessionId: session.id, branchName: label },
+    })
+    this.ctx.broadcastSessionList()
   }
 
   private async handleSessionHandoff(msg: Extract<ClientMessage, { type: 'session.handoff' }>, ws: WsType): Promise<void> {
@@ -361,17 +366,13 @@ export class SessionMessageHandler {
       })
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
     } catch (e) {
-      // L4: model 未配置时返回差异化 error code（与 session.create / session.fork 同模式），
+      // L4: model 未配置时上抛交由 server 中央 catch 透传（S2 收敛：handoff payload 带
+      // sessionId，中央透传的 code/message/details 与原 per-case 特判信封逐字节一致），
       // 前端据此引导去 Settings 配置，而非泛化的 handoff_failed 气泡。
-      const code = (e as Error & { code?: string }).code
-      if (code === MODEL_NOT_CONFIGURED) {
-        return this.ctx.sendError(ws, MODEL_NOT_CONFIGURED, toErrorMessage(e), msg.id, { sessionId })
-      }
+      if (errorCodeOf(e) === MODEL_NOT_CONFIGURED) throw e
       // runHandoff 失败（历史为空 / session 不存在 / 已有进行中 handoff）走 error envelope。
       // 所有错误路径统一走此处的 sendError，不再有 onTurnEnd 内部广播路径。
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] session.handoff failed:', errMsg)
-      return this.ctx.sendError(ws, 'handoff_failed', errMsg, msg.id, { sessionId })
+      return this.reportFailure(ws, msg.id, 'handoff_failed', e, { scope: 'session.handoff', sessionId })
     }
   }
 
@@ -398,9 +399,7 @@ export class SessionMessageHandler {
       // 无论 aborted 与否都 reply ack（RPC ack 让 renderer pending resolve）
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'aborted' })
     } catch (e) {
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] session.abortHandoff failed:', errMsg)
-      return this.ctx.sendError(ws, 'handoff_failed', errMsg, msg.id, { sessionId })
+      return this.reportFailure(ws, msg.id, 'handoff_failed', e, { scope: 'session.abortHandoff', sessionId })
     }
   }
 
@@ -496,11 +495,9 @@ export class SessionMessageHandler {
     // 拉取是唯一真相）。副作用 = 把 session 加入 watched 集合（D8③，订阅语义由 list
     // 隐含，D3 被否 subscribe/unsubscribe 专设消息）。顺序：先读后 mark——markWatched
     // 以当前 mtime 为基线（「调用方刚拉取过全量」语义），之后的变更才触发广播，不重播。
-    const port = this.ctx.sessionService.backgroundTasks
     const listSid = msg.payload.sessionId
-    if (!port) {
-      return this.ctx.sendError(ws, 'background_task_unsupported', 'background task service not available', msg.id, { sessionId: listSid })
-    }
+    const port = this.requireBackgroundTasks(ws, msg, listSid)
+    if (!port) return
     const { entries, corrupted } = port.listTasks(listSid)
     port.markWatched(listSid)
     return this.ctx.reply(ws, msg.id, 'backgroundTask.tasks', { sessionId: listSid, tasks: entries, corrupted })
@@ -512,10 +509,14 @@ export class SessionMessageHandler {
     // reply 正常回执（不走 error envelope——文件清理是预期态，非请求失败）。
     // maxBytes clamp 1MB（D6 #1，BG-4）：客户端传超大窗口时钳制——协议字段无上界约束，
     // 不钳制则单请求 Buffer.alloc(maxBytes) 可被恶意/失控客户端打到内存失控。
-    const port = this.ctx.sessionService.backgroundTasks
     const { sessionId: outSid, taskId, maxBytes } = msg.payload
-    if (!port) {
-      return this.ctx.sendError(ws, 'background_task_unsupported', 'background task service not available', msg.id, { sessionId: outSid })
+    const port = this.requireBackgroundTasks(ws, msg, outSid)
+    if (!port) return
+    // wire 预检（对齐 delivery 域 invalid_payload 范式）：maxBytes 类型标注 number，但 JSON
+    // 层可写任意形态（同 import dbPath 的 typeof 守卫先例）；负数/NaN 穿透 clamp 会在下游
+    // output-tail 的 Buffer.alloc 抛 Node 内部 RangeError（handler_error 泛化、不可操作）。
+    if (maxBytes !== undefined && (typeof maxBytes !== 'number' || !(maxBytes >= 0))) {
+      return this.ctx.sendError(ws, 'invalid_payload', 'backgroundTask.output requires "maxBytes" to be a non-negative number', msg.id, { sessionId: outSid })
     }
     const clampedMaxBytes = maxBytes === undefined ? undefined : Math.min(maxBytes, OUTPUT_TAIL_MAX_REQUEST_BYTES)
     const tail = port.getOutputTail(outSid, taskId, clampedMaxBytes)
@@ -532,11 +533,9 @@ export class SessionMessageHandler {
     // 终止任务（D6 五分支矩阵全在 service，handler 只透传回执）。reason 枚举
     // （killed/already-exited/identity-unverifiable/registry-write-failed）驱动 renderer
     // 分支 toast 文案；成功路径的列表翻转不依赖 reply——killing 自写自检广播即时推送。
-    const port = this.ctx.sessionService.backgroundTasks
     const killSid = msg.payload.sessionId
-    if (!port) {
-      return this.ctx.sendError(ws, 'background_task_unsupported', 'background task service not available', msg.id, { sessionId: killSid })
-    }
+    const port = this.requireBackgroundTasks(ws, msg, killSid)
+    if (!port) return
     const result = await port.killTask(killSid, msg.payload.taskId)
     return this.ctx.reply(ws, msg.id, 'backgroundTask.killResult', {
       sessionId: killSid,
@@ -640,9 +639,7 @@ export class SessionMessageHandler {
       await this.ctx.sessionService.abortPlan(sessionId)
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
     } catch (e) {
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] session.abortPlan failed:', errMsg)
-      return this.ctx.sendError(ws, 'abort_plan_failed', errMsg, msg.id, { sessionId })
+      return this.reportFailure(ws, msg.id, 'abort_plan_failed', e, { scope: 'session.abortPlan', sessionId })
     }
   }
 
@@ -766,9 +763,12 @@ export class SessionMessageHandler {
       const snapshot = await this.ctx.sessionService.getTraceEntries(traceSid)
       return this.ctx.reply(ws, msg.id, 'session.traceEntries', snapshot)
     } catch (e) {
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] session.getTraceEntries failed:', errMsg)
-      return this.ctx.sendError(ws, 'trace_fetch_failed', `Failed to load session trace: ${errMsg} — retry by reopening the Trace view; if it persists, check the session JSONL file is readable`, msg.id, { sessionId: traceSid })
+      // 错误指向恢复动作：message 覆写槽拼指引，留痕仍记原始 errMsg（reportFailure 契约）
+      return this.reportFailure(ws, msg.id, 'trace_fetch_failed', e, {
+        scope: 'session.getTraceEntries',
+        sessionId: traceSid,
+        message: `Failed to load session trace: ${toErrorMessage(e)} — retry by reopening the Trace view; if it persists, check the session JSONL file is readable`,
+      })
     }
   }
 
@@ -847,10 +847,9 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'session.importCandidates', result)
     } catch (e) {
       // ImportServiceError.code 透传（错误规格表权威清单）；非预期错误归 import_failed
-      //（对齐 worktree handler 的「无 code 兜底」模式）。守卫式读取：先判型再收窄，
-      // 非 string code 一律 undefined 走兜底。
-      const rawCode = (e as { code?: unknown }).code
-      const code = typeof rawCode === 'string' ? rawCode : undefined
+      //（对齐 worktree handler 的「无 code 兜底」模式）。errorCodeOf 守卫式读取：非 string
+      // code 一律 undefined 走兜底。日志嵌 resolved code（reportFailure 形状之外，保留内联）。
+      const code = errorCodeOf(e)
       const errMsg = toErrorMessage(e)
       console.error(`[runtime] session.importCandidates failed (code=${code ?? 'unknown'}):`, errMsg)
       return this.ctx.sendError(ws, code ?? 'import_failed', errMsg, msg.id)
@@ -895,9 +894,8 @@ export class SessionMessageHandler {
       //（对齐 session.create / session.setProject 惯例）。
       this.ctx.broadcastSessionList()
     } catch (e) {
-      // 守卫式读取（同 importCandidates 分支）：非 string code 一律 undefined 走兜底
-      const rawCode = (e as { code?: unknown }).code
-      const code = typeof rawCode === 'string' ? rawCode : undefined
+      // errorCodeOf 守卫式读取（同 importCandidates 分支）：非 string code 一律 undefined 走兜底
+      const code = errorCodeOf(e)
       const errMsg = toErrorMessage(e)
       console.error(`[runtime] session.import failed (code=${code ?? 'unknown'}):`, errMsg)
       return this.ctx.sendError(ws, code ?? 'import_failed', errMsg, msg.id)
@@ -933,9 +931,7 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: steerSid, status: 'steered' })
     } catch (e) {
       // D10/P0-B: 请求级失败走统一 error envelope（区别于 message-dispatcher 的流式 message.error 广播）。
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] message.steer failed:', errMsg)
-      return this.ctx.sendError(ws, 'steer_failed', errMsg, msg.id, { sessionId: steerSid })
+      return this.reportFailure(ws, msg.id, 'steer_failed', e, { scope: 'message.steer', sessionId: steerSid })
     }
   }
 
@@ -946,9 +942,7 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: followSid, status: 'queued' })
     } catch (e) {
       // D10/P0-B: 请求级失败走统一 error envelope（区别于 message-dispatcher 的流式 message.error 广播）。
-      const errMsg = toErrorMessage(e)
-      console.error('[runtime] message.follow_up failed:', errMsg)
-      return this.ctx.sendError(ws, 'follow_up_failed', errMsg, msg.id, { sessionId: followSid })
+      return this.reportFailure(ws, msg.id, 'follow_up_failed', e, { scope: 'message.follow_up', sessionId: followSid })
     }
   }
 
@@ -1005,10 +999,8 @@ export class SessionMessageHandler {
 
   private async handleDeliverySubmit(msg: Extract<ClientMessage, { type: 'delivery.submit' }>, ws: WsType): Promise<void> {
     const { sessionId, content, images, clientUuid } = msg.payload
-    const registry = this.ctx.deliveryRegistry
-    if (!registry) {
-      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
-    }
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
     // 字段校验（协议面防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
     if (typeof sessionId !== 'string' || sessionId === '' || typeof content !== 'string' || typeof clientUuid !== 'string' || clientUuid === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.submit requires non-empty sessionId, content and clientUuid', msg.id, { sessionId })
@@ -1042,10 +1034,8 @@ export class SessionMessageHandler {
 
   private async handleDeliveryCancel(msg: Extract<ClientMessage, { type: 'delivery.cancel' }>, ws: WsType): Promise<void> {
     const { sessionId, clientUuid } = msg.payload
-    const registry = this.ctx.deliveryRegistry
-    if (!registry) {
-      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
-    }
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
     if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.cancel requires non-empty sessionId and clientUuid', msg.id, { sessionId })
     }
@@ -1065,10 +1055,8 @@ export class SessionMessageHandler {
 
   private async handleDeliveryDrain(msg: Extract<ClientMessage, { type: 'delivery.drain' }>, ws: WsType): Promise<void> {
     const { sessionId } = msg.payload
-    const registry = this.ctx.deliveryRegistry
-    if (!registry) {
-      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
-    }
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
     if (typeof sessionId !== 'string' || sessionId === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.drain requires a non-empty sessionId', msg.id, { sessionId })
     }
@@ -1084,10 +1072,8 @@ export class SessionMessageHandler {
 
   private async handleDeliveryResync(msg: Extract<ClientMessage, { type: 'delivery.resync' }>, ws: WsType): Promise<void> {
     const { sessionId, clientUuids } = msg.payload
-    const registry = this.ctx.deliveryRegistry
-    if (!registry) {
-      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
-    }
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
     if (typeof sessionId !== 'string' || sessionId === '' || !Array.isArray(clientUuids)) {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.resync requires a non-empty sessionId and clientUuids array', msg.id, { sessionId })
     }

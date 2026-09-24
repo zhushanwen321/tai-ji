@@ -11,8 +11,9 @@
  * - **P-F9b**：`prompt` 带裸标记 `<!--taiji:msg:<uuid>-->` 文本 → 等 turn 结束 → `get_entries`
  *   可读到含该标记的 user message entry（标记扫描可行性 = reattach 判重锚的机制基础）。
  * - **检查点 4**（settling 窗口空闲判定精确性）：turn_end 边沿立即 steer → 等 agent_settled
- *   + 1.5s → `get_state.pendingMessageCount`：≥1 = settling 不是 drain 窗口（保守档
- *   「settling 一律 queued」成立）；0 = pi 在 settling 期间仍 drain（结论记入汇报）。
+ *   + 1.5s → `get_state.pendingMessageCount` 两态判定（结论进退出码）：≥1 = settling 不是
+ *   drain 窗口（保守档「settling 一律 queued」成立，PASS）；0 = pi 在 settling 期间仍 drain
+ *   （保守档被推翻，FAIL → exit 1）。
  *   同点旁证：完全空闲 pi 的 steer 滞留（F11）——滞留即无人 drain，必须由对账器收回。
  *
  * 运行：cd packages/runtime && node src/__tests__/probes/p-f9-queue-primitives.mjs
@@ -187,7 +188,13 @@ async function main() {
       await sleep(1500) // 观察窗：settling 之后是否有 drain
       const stateAfterSettle = await rpc('get_state', {})
       const pendingAfterSettle = stateAfterSettle.data?.pendingMessageCount
-      console.log(`  [meas] settling 期 steer 后 pendingMessageCount=${String(pendingAfterSettle)}（≥1 = 未被 drain：settling 非投递窗口 → 保守档成立）`)
+      // 两态判定（结论进退出码，不只记汇报）：0 = settling 期间被 drain → 保守档不成立 → 红；
+      // ≥1 = settling 非投递窗口 → 保守档成立。
+      check(
+        typeof pendingAfterSettle === 'number' && pendingAfterSettle >= 1,
+        'settling 期 steer 滞留未被 drain（保守档「settling 一律 queued」成立）',
+        `pendingMessageCount=${String(pendingAfterSettle)}（0 = pi 在 settling 期间 drain，保守档被推翻）`,
+      )
       const cq2 = await rpc('clear_queue', {})
       check(Array.isArray(cq2.data?.steering), '测量后 clear_queue 可收回（槽位滞留由对账器路径处理）')
     }

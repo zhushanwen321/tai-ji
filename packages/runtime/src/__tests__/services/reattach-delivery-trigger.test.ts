@@ -26,7 +26,7 @@ import {
 } from '../../services/session/session-delivery-registry.js'
 import { createReattachRestore } from '../../services/session/reattach-delivery-trigger.js'
 import { runStartupReattach } from '../../services/startup-reattach.js'
-import { initRuntimeCheckpointStore, type RuntimeCheckpointStore } from '../../services/session/runtime-checkpoint.js'
+import type { RuntimeCheckpointStore } from '../../services/session/runtime-checkpoint.js'
 import type { IManagedSessionView } from '../../services/session/types.js'
 import type { IPiEngine } from '../../services/ports/pi-engine.js'
 import type { IMessageBus } from '../../services/message-bus/message-bus.js'
@@ -178,23 +178,10 @@ describe('无提交活动下的 reattach 收养重建（A5/V5）', () => {
   it('端到端编排腿：runStartupReattach（checkpoint 单候选）→ restore 包装被调 → 收养路径触发', async () => {
     const runDir = mkdtempSync(join(tmpdir(), 'u4-reattach-trigger-'))
     try {
-      writeFileSync(
-        join(runDir, 'runtime-checkpoint.json'),
-        JSON.stringify({
-          version: 1,
-          sessions: [{
-            piSessionId: SID,
-            filePath: join(runDir, 'session.jsonl'),
-            lastActivityAt: Date.now(),
-            lastViewedAt: Date.now(),
-            occupancy: 'idle',
-            backgroundTasks: false,
-            relayChildren: false,
-          }],
-        }),
-      )
+      // 只写 session.jsonl（restoreOne staleness guard 依赖 fileExists(entry.filePath)）。
+      // runtime-checkpoint.json 磁盘文件不写：checkpoint 读面被下方 mock store 覆盖，
+      // 真文件不进任何断言；deleteCheckpointFile 对不存在路径走 ENOENT 容错（返回 false）。
       writeFileSync(join(runDir, 'session.jsonl'), '{}\n')
-      initRuntimeCheckpointStore({ dir: runDir })
       const h = makeRegistryHarness()
       const restoreCalls: string[] = []
       const report = await runStartupReattach(

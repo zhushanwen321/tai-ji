@@ -53,11 +53,17 @@ export { DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS } from './outbound-frame-registry.
  *
  * 出站守卫判定点与既有日志/守卫行为**同点双写**：告警档 → frame-truncated(warn-tier)、
  * 契约保持式截断档 → frame-truncated(trunc-tier)、注册表 miss（含替换后仍超限）→
- * registry-miss。守卫行为本身零改动（append 是 fire-and-forget 旁路，writer 未初始化时
- * no-op 单例、内部自吞异常——台账任何故障不反噬出站主链，D1 best-effort 语义）。
- * 事件是评估器条件 #1/#2 的数据源（附录 A）。
+ * registry-miss、publish 序列化失败丢帧 → frame-unserializable（与 registry-miss 同为
+ * 核心链整帧丢弃，台账覆盖对称）。守卫行为本身零改动（append 是 fire-and-forget 旁路，
+ * writer 未初始化时 no-op 单例、内部自吞异常——台账任何故障不反噬出站主链，D1
+ * best-effort 语义）。事件是评估器条件 #1/#2 的数据源（附录 A）。
  */
-function appendFrameJournal(event: 'frame-truncated' | 'registry-miss', reason: string, sessionId: string, detail: Record<string, unknown>): void {
+function appendFrameJournal(
+  event: 'frame-truncated' | 'registry-miss' | 'frame-unserializable',
+  reason: string,
+  sessionId: string,
+  detail: Record<string, unknown>,
+): void {
   getCrashJournal().append({
     layer: 'runtime',
     event,
@@ -159,7 +165,6 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'message.file_changes': 'stream',
   'message.auto_retry_start': 'stream',
   'message.auto_retry_end': 'stream',
-  'message.queue_update': 'stream',
   'message.stream_error': 'stream',
   'session.compacting': 'stream',
   'session.compacted': 'stream',
@@ -298,6 +303,22 @@ export const STATE_NO_KEY_TOPICS: ReadonlySet<string> = new Set(['session.subage
 const warnedStateNoKeyTypes = new Set<string>()
 
 /**
+ * B7 预算驱逐遥测的周期汇总间隔（帧数）：首次驱逐必告警，此后每累计该帧数汇总一条，
+ * 防高频驱逐刷屏（观测面零行为介入）。
+ */
+const EVICT_WARN_INTERVAL_FRAMES = 1000
+
+/**
+ * 处于「stateSnapshot 超预算已告警」态的 session 集合（M1 边沿触发，复制 backpressure-warn
+ * 范式）：进入超预算态 warn 一条，持续超限不重复刷；回落预算内移除，再次越限再告警。
+ * clearSession 时随 entry 一并清理。
+ */
+const snapshotOverBudgetWarned = new Set<string>()
+
+/** 已留痕过 send 失败的 ws 集合（M1：断连窗口内逐条 warn 刷屏，每 ws 仅首条留痕；WeakSet 随 ws 回收）。 */
+const sendFailureWarned = new WeakSet<object>()
+
+/**
  * RT-1#5 运行时纵深：state 类无 typeKey 出处且不在例外白名单时 warn 一次——该形态下
  * 快照静默不写、重连投影失效，此前零日志。守卫测试已把漏登记挡在提交期，这里覆盖
  * 「测试期之后发生的漂移」（热载/运行期表变更等）。null 的两种成因文案区分：
@@ -415,8 +436,8 @@ export class MessageBus implements IMessageBus {
    *
    * 广播（三类共用）：readyState===1（OPEN）的 ws 调 send(序列化文本)；单个 ws.send 抛错
    * try/catch 兜底（ES4），不影响其它 ws 与 publish 主流程。序列化失败（循环引用等不可
-   * 序列化载荷）→ seq 回滚 + 丢弃 + error 日志（u4a 零抛错：守卫设施不成为新崩溃源；
-   * 原行为向调用方冒泡 stringify 异常，守卫语义下收紧为有痕丢弃）。
+   * 序列化载荷）→ seq 回滚 + 丢弃 + error 日志 + frame-unserializable 台账（u4a 零抛错：
+   * 守卫设施不成为新崩溃源；原行为向调用方冒泡 stringify 异常，守卫语义下收紧为有痕丢弃）。
    *
    * @param sessionId 目标 session
    * @param message 待发布消息（广播时 JSON.stringify；注意 state/stream 类会原地写入
@@ -437,6 +458,12 @@ export class MessageBus implements IMessageBus {
       payload = JSON.stringify(message)
     } catch (e) {
       this.rollbackSeq(state, message, isTransient)
+      // M3（b21 台账对称收尾）：序列化失败丢帧与 registry-miss 同为核心链整帧丢弃——
+      // error 日志之外补台账事件（评估器条件信号），append 旁路自吞不反噬本路径。
+      appendFrameJournal('frame-unserializable', 'serialize-failed', sessionId, {
+        frameType: message.type,
+        channel: 'push',
+      })
       console.error('[message-bus] publish payload serialization failed — message dropped:', e)
       return
     }
@@ -476,16 +503,7 @@ export class MessageBus implements IMessageBus {
       const truncatedBytes = Buffer.byteLength(truncatedJson, 'utf8')
       if (!isTransient) {
         // 截断版替代原消息占位：stream 入 ring、state 写快照——回放/重订阅拿到同一份截断版。
-        if (topic === 'state') {
-          const typeKey = stateTypeKey(truncated)
-          if (typeKey !== null) {
-            this.setStateSnapshotEntry(state, typeKey, truncated, truncatedBytes, sessionId)
-          } else {
-            warnStateNoKeyOnce(truncated.type)
-          }
-        } else {
-          this.ringPush(state.streamRing, truncated, truncatedBytes)
-        }
+        this.persistFrame(state, topic, truncated, truncatedBytes, sessionId)
       }
       this.broadcastText(state.subscribers, truncatedJson)
       return
@@ -507,20 +525,27 @@ export class MessageBus implements IMessageBus {
       this.broadcastText(state.subscribers, payload)
       return
     }
+    this.persistFrame(state, topic, message, bytes, sessionId)
+    this.broadcastText(state.subscribers, payload)
+  }
+
+  /**
+   * state/stream 持久化分流单点（截断与正常双路径共用，两处仅帧对象/字节数不同）：
+   * state → 写快照（同 typeKey 覆盖；typeKey 缺映射 → 快照跳写 + warn-once 显形）；
+   * stream → ringPush（覆盖写 + B7 字节记账/超预算加速淘汰）。transient 不进本方法
+   * （调用方各自早退直传）——保守形态不统一 transient 走法，零时序语义变化。
+   */
+  private persistFrame(state: SessionBusState, topic: TopicKind, frame: ServerMessage, frameBytes: number, sessionId: string): void {
     if (topic === 'state') {
-      // state：写快照（同 typeKey 覆盖，状态去重语义），不入 ring。字节记账（B7）仅观测。
-      // typeKey 缺映射（例外白名单外的漂移）→ 快照跳写 + warn 显形（RT-1#5，此前静默）。
-      const typeKey = stateTypeKey(message)
+      const typeKey = stateTypeKey(frame)
       if (typeKey !== null) {
-        this.setStateSnapshotEntry(state, typeKey, message, bytes, sessionId)
+        this.setStateSnapshotEntry(state, typeKey, frame, frameBytes, sessionId)
       } else {
-        warnStateNoKeyOnce(message.type)
+        warnStateNoKeyOnce(frame.type)
       }
     } else {
-      // stream：入 O(1) 环形缓冲（满则覆盖最旧 + B7 字节记账/超预算加速淘汰）。
-      this.ringPush(state.streamRing, message, bytes)
+      this.ringPush(state.streamRing, frame, frameBytes, sessionId)
     }
-    this.broadcastText(state.subscribers, payload)
   }
 
   /**
@@ -577,6 +602,7 @@ export class MessageBus implements IMessageBus {
         this.wsSubscriptions.delete(ws)
       }
     }
+    this.pruneEmptySession(sessionId)
   }
 
   /**
@@ -592,6 +618,7 @@ export class MessageBus implements IMessageBus {
     if (!subs) return
     for (const sid of subs) {
       this.sessions.get(sid)?.subscribers.delete(ws)
+      this.pruneEmptySession(sid)
     }
     this.wsSubscriptions.delete(ws)
   }
@@ -617,6 +644,23 @@ export class MessageBus implements IMessageBus {
       }
     }
     this.sessions.delete(sessionId)
+    snapshotOverBudgetWarned.delete(sessionId)
+  }
+
+  /**
+   * M4（b21）：回收「三空」entry（subscribers 空 + ring 空 + 快照空）——subscribe 对
+   * 未知 sid（renderer 重连竞态等）也会 lazy 建 entry，该 sid 无销毁路径可触发
+   * clearSession 时 entry 进程生命周期泄漏。数据全空的 entry 无任何可回放内容，回收
+   * 安全（下次 publish/subscribe 重建）；有任一驻留数据的 entry 不回收（真实 session
+   * 暂无订阅者时仍需为重连保留 ring/快照回放面），已知 session 销毁路径（clearSession
+   * 全清）不变。双向不变量不受影响：entry 无其他订阅者时才满足回收条件。
+   */
+  private pruneEmptySession(sessionId: string): void {
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    if (state.subscribers.size === 0 && state.streamRing.size === 0 && state.stateSnapshot.size === 0) {
+      this.sessions.delete(sessionId)
+    }
   }
 
   /**
@@ -635,8 +679,9 @@ export class MessageBus implements IMessageBus {
    * @param ring 目标环形缓冲
    * @param message 待写入消息（实际入 ring 的那份——截断档帧传 truncated 版）
    * @param frameBytes 实际入 ring 那份的序列化字节数（与 wire 同源，不可用截断前 bytes）
+   * @param sessionId 归因标签（仅用于驱逐遥测 warn，M2）
    */
-  private ringPush(ring: StreamRingBuffer, message: ServerMessage, frameBytes: number): void {
+  private ringPush(ring: StreamRingBuffer, message: ServerMessage, frameBytes: number, sessionId: string): void {
     const cap = ring.buf.length
     // 容量 0 = 不保留 ring 历史（与旧 push/shift 实现在 capacity=0 下的行为等价），且避开 %0 NaN。
     if (cap === 0) return
@@ -653,10 +698,26 @@ export class MessageBus implements IMessageBus {
     ring.bytes += frameBytes
     // 超预算加速淘汰：从最旧起逐帧淘汰至回到预算内；下界 = 仅剩最新帧（size > 1），
     // 单帧自身超预算时瞬时超调驻留，不逐刚 push 帧不死循环。
+    let evicted = 0
     while (ring.bytes > this.ringBudgetBytes && ring.size > 1) {
       this.evictOldest(ring)
+      evicted += 1
+    }
+    // M2（b21）驱逐遥测：首次驱逐必告警，此后每累计 EVICT_WARN_INTERVAL_FRAMES 帧汇总
+    // 一条（周期计数防高频刷屏）。驱逐行为零改动——观测先于武装。
+    if (evicted > 0) {
+      this.evictedFrameTotal += evicted
+      if (this.evictedFrameTotal - this.evictWarnedTotal >= (this.evictWarnedTotal === 0 ? 1 : EVICT_WARN_INTERVAL_FRAMES)) {
+        this.evictWarnedTotal = this.evictedFrameTotal
+        console.warn(`[message-bus] ring budget eviction: sessionId=${sessionId} evictedNow=${evicted} evictedTotal=${this.evictedFrameTotal} budget=${this.ringBudgetBytes} — replay window shortened (gap visible downstream, getHistory hydrate refills)`)
+      }
     }
   }
+
+  /** B7 驱逐遥测累计（M2）：进程生命周期内被预算驱逐的帧总数。 */
+  private evictedFrameTotal = 0
+  /** 已告警覆盖到的驱逐累计水位（首次驱逐即告警，此后每 EVICT_WARN_INTERVAL_FRAMES 一条）。 */
+  private evictWarnedTotal = 0
 
   /**
    * B7：淘汰最旧帧——引用置 undefined（释放驻留对象）+ 记账扣减 + head/size 前移。
@@ -696,10 +757,17 @@ export class MessageBus implements IMessageBus {
     for (const b of state.stateSnapshotBytes.values()) {
       total += b
     }
+    // M1（b21）边沿触发（复制 backpressure-warn 范式）：进入超预算态 warn 一条，持续
+    // 超限不逐条刷；回落预算内移除标记，再次越限再告警。clearSession 随 entry 清理。
     if (total > this.ringBudgetBytes) {
-      console.warn(
-        `[message-bus] stateSnapshot bytes over budget (observe-only, no eviction): sessionId=${sessionId} typeKey=${typeKey} totalBytes=${total} budget=${this.ringBudgetBytes}`,
-      )
+      if (!snapshotOverBudgetWarned.has(sessionId)) {
+        snapshotOverBudgetWarned.add(sessionId)
+        console.warn(
+          `[message-bus] stateSnapshot bytes over budget (observe-only, no eviction): sessionId=${sessionId} typeKey=${typeKey} totalBytes=${total} budget=${this.ringBudgetBytes}`,
+        )
+      }
+    } else {
+      snapshotOverBudgetWarned.delete(sessionId)
     }
   }
 
@@ -731,7 +799,11 @@ export class MessageBus implements IMessageBus {
         warnIfBacklogged(ws, 'publish')
       } catch (e) {
         // ES4：单个 ws.send 抛错（连接已断 / 内部异常）不应影响其它订阅者或 publish 主流程。
-        console.warn('[message-bus] ws.send failed during publish:', e)
+        // M1（b21）：断连窗口内逐条 warn 会刷屏——每 ws 仅首条留痕（WeakSet 随 ws 回收）。
+        if (!sendFailureWarned.has(ws)) {
+          sendFailureWarned.add(ws)
+          console.warn('[message-bus] ws.send failed during publish (first failure for this ws, further failures silenced):', e)
+        }
       }
     }
   }

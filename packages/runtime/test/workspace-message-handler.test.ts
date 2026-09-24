@@ -19,6 +19,7 @@ import {
   resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../src/services/session/session-delivery-registry.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 /**
  * [u2 投递所有权内核] 装配投递内核（dispatcher 只提交，出站交接在适配层）。
@@ -37,11 +38,6 @@ function wireDeliveryKernel(deps: {
     recordWorkspace: deps.record,
     getMessageBus: () => deps.bus as ReturnType<SessionDeliveryDeps['getMessageBus']>,
   })
-}
-
-/** flush 投递交接异步链（port.send → ensureActive → inject → prompt → 三副作用）。 */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 30; i += 1) await Promise.resolve()
 }
 
 // ── T1.9: WorkspaceMessageHandler RPC 贯穿 ─────────────────────
@@ -287,7 +283,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     wireDeliveryKernel({ getSession: () => activeSession, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
 
     const result = await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
 
     expect(result.blocked).toBe(false)
     expect(workspaceRecord).toHaveBeenCalledWith('/project')
@@ -321,7 +317,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
 
     const result = await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
 
     expect(result.blocked).toBe(true)
     expect(workspaceRecord).not.toHaveBeenCalled()
@@ -351,7 +347,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
     // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行
     const result = await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
     expect(result.blocked).toBe(false)
     expect(workspaceRecord).not.toHaveBeenCalled()
     const types = (bus as unknown as { publish: { mock: { calls: unknown[][] } } }).publish.mock.calls

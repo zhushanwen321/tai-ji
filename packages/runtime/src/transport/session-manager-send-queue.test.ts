@@ -23,7 +23,6 @@ import { applySessionOccupancyTransition } from '../services/session/event-inter
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { ISessionService } from '../interfaces.js'
 import type { IManagedSessionView } from '../services/session/types.js'
-import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import type { SessionSummary } from '@taiji/shared'
 
 // ─── harness：真 registry + 真 handler，材料层全 mock ─────────────────────
@@ -224,23 +223,11 @@ describe('A3-singleton-registry-vitest: 同 sessionId 复用同一 delivery hand
     expect(b).toBe(a)
   })
 
-  it('不同 sessionId 各自独立 handle；factory 只在首次调用一次', () => {
+  it('不同 sessionId 各自独立 handle', () => {
     const h = makeHarness()
-    const factory = vi.fn(
-      (): DeliveryHandle => ({
-        send: vi.fn(),
-        sendChecked: vi.fn(),
-        flush: vi.fn(),
-        depth: vi.fn(),
-        dispose: vi.fn(),
-      }),
-    )
-    const a = h.registry.getOrCreateDelivery('sid-a', factory)
-    h.registry.getOrCreateDelivery('sid-a', factory)
-    expect(factory).toHaveBeenCalledTimes(1)
-    const b = h.registry.getOrCreateDelivery('sid-b', factory)
+    const a = h.registry.getOrCreateDelivery('sid-a')
+    const b = h.registry.getOrCreateDelivery('sid-b')
     expect(b).not.toBe(a)
-    expect(factory).toHaveBeenCalledTimes(2)
   })
 
   it('dispose(sessionId) 后再取是新 handle（旧队列随 dispose 丢弃）', () => {

@@ -28,6 +28,7 @@ import type { IDispatcherSessionOps } from '../../services/session/session-inter
 import type { IPiEngine, IProcessManager } from '../../services/ports/pi-engine.js'
 import type { IMessageBus } from '../../services/message-bus/message-bus.js'
 import type { WorkspaceService } from '../../services/workspace/workspace-service.js'
+import { flushDelivery } from '../../../test/helpers/flush-delivery.js'
 
 interface Fixture {
   dispatcher: MessageDispatcher
@@ -81,11 +82,6 @@ function makeFixture(attached = true): Fixture {
   return { dispatcher, order, touchActivity, promptFn, ensureActive, hook }
 }
 
-/** flush 投递交接异步链（ensureActive → inject → prompt）。 */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 30; i += 1) await Promise.resolve()
-}
-
 afterEach(() => {
   resetActiveDeliveryRegistryForTest()
 })
@@ -102,7 +98,7 @@ describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', (
     expect(fx.touchActivity).toHaveBeenCalledTimes(1)
 
     await p
-    await flushDelivery()
+    await flushDelivery(30)
     // 完整调用序：touch（入口，同步）→ hook（BeforeSend，串行链内）→ restore（ensureActive）→ prompt
     expect(fx.order).toEqual(['touch', 'hook', 'restore', 'prompt'])
   })
@@ -114,7 +110,7 @@ describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', (
     // 无附着 client：入口零动作（不抛 TypeError），hook 在串行链的微任务窗口启动
     expect(fx.order).toEqual([])
     await p
-    await flushDelivery()
+    await flushDelivery(30)
 
     expect(fx.order).toEqual(['hook', 'restore', 'prompt'])
     expect(fx.touchActivity).not.toHaveBeenCalled()

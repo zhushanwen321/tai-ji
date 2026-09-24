@@ -167,6 +167,32 @@ export interface IManagedSessionView {
    * 已随 W11 删除）。
    */
   handedOffTo?: string
+  /**
+   * launch preset id 的内存态持有（W-RT-4，设计文档 §4.2）。
+   *
+   * 与 handedOffTo 同族收编（照其先例）：字段实携在 session 对象上（create/restore/fork
+   * 经 hydrateBindingMeta 动态 patch），且有跨文件读者——toSummary 投影到
+   * SessionSummary.launchPresetId、forkSession 继承源 preset（W-RT-5 内存态兑底）。
+   * 类型不声明才是泄漏抽象（此前消费方各自 as-cast 读同一形状）。
+   *
+   * 持久化走 `.preset.json` sidecar（create 路径 V9-④ 已放行落盘）；内存态兜底
+   * sidecar 缺失的异常时序（如 pi 未返回 sessionFilePath）。
+   */
+  launchPresetId?: string
+  /**
+   * 归属 project id 的内存态持有（D14 语义修正）。
+   *
+   * 与 launchPresetId 同族收编：写入链 = create/fork options 携带 + setProject 直写
+   * （active 路径）；读者 = toSummary 投影 / fork 继承 / handoff 承接继承。
+   * 持久化走 `.project.json` sidecar；空值（undefined）= 默认项目（未归类）。
+   */
+  projectId?: string
+  /**
+   * project 绑定已持久化标记（tryPersistProjectBinding 防重复写的 session 级运行时标记，
+   * 不进 toSummary、不持久化）。置位 = sidecar 兜底写入已完成，后续 turn_end/agent_end
+   * 不再重复写。session 条目删除时随对象一同丢弃。
+   */
+  projectBindingPersisted?: boolean
 }
 
 /**

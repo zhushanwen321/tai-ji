@@ -31,7 +31,7 @@ export type {
 export type {
   MessageRole, MessageStatus, ToolCallStatus,
   ToolCall, ThinkingBlock, ContentBlockType, ContentBlock, Usage, Message,
-  FileChangeStatus, FileChange, ChangeSetStatus, ReviewDecision,
+  FileChangeStatus, FileChange, ChangeSetStatus,
   CompactionSummary, BranchSummary,
   BgNotifyRecord, BgNotifyDetails,
   BackgroundBashEndReason, BackgroundBashDetails,
@@ -39,7 +39,7 @@ export type {
   SubagentDirectiveData,
   PiRespawnNoticeVariant,
 } from './message'
-export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify } from './message'
+export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify, MSG_ID_TAG_RE, decodeNewlineEscapes } from './message'
 // w21 pi-entry：pi session entry wire 类型（runtime 实时重构 ↔ core reducer ↔ protocol payload 三方共用）
 export type {
   PiEntry, PiEntryBase, PiMessageEntry, PiMessageBody,
@@ -140,7 +140,9 @@ import type { RecommendedExtension } from './extension'
 const recommendedExtensions = recommendedExtensionsRaw as RecommendedExtension[]
 export { recommendedExtensions }
 // 强制安装扩展列表 SSOT（runtime boot 时自动安装+升级）
-// 带类型断言：JSON import 默认推断为宽泛类型，断言为 MandatoryExtension[] 保证 tier 字段拼写错误编译期可捕获
+// 带类型断言：resolveJsonModule 对 JSON 字符串值宽化推断，断言只约束形状不约束值域
+// ——tier 字段拼写错误编译期恒过（非编译期可捕获）；值域防线在 runtime 侧 boot 校验
+// （组合根 exitIfMandatoryExtensionTierInvalid：非法 tier 列出违规条目后 fail-fast）。
 import mandatoryExtensionsRaw from './mandatory-extensions.json'
 import type { MandatoryExtension } from './extension'
 const mandatoryExtensions = mandatoryExtensionsRaw as MandatoryExtension[]
@@ -194,9 +196,7 @@ export { QUOTA_PRESETS, matchQuotaPreset } from './quota-presets'
 // SUBAGENT_STATUS_ALL：枚举值全集（B3 护栏，renderer bucket 测试的全集覆盖矩阵数据源）。
 // SUBAGENT_OUTCOME_PLACEHOLDER：③级占位文案（D6 三端锚点 SSOT 值，core 同值字面量 /
 // runtime 钉子断言 / renderer 思考行判据的消费入口）。
-// projectSubagentExecutionStatus：占用两态投影（U8 旧数据只读兼容——legacy 六值 →
-// running|idle，renderer U8b 分桶/过滤器对新旧词汇统一判定的映射 SSOT）。
-export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER, projectSubagentExecutionStatus } from './subagent'
+export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER } from './subagent'
 export type {
   WorkflowRunStatus,
   WorkflowDoneReason,

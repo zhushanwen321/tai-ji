@@ -32,6 +32,7 @@ import type {
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine, PiEventListener } from '../src/services/ports/pi-engine.js'
 import type { MockInstance } from 'vitest'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 // ── vi.hoisted：在 vi.mock 工厂执行前就绪的 mock 句柄 ───────────────
 const mocks = vi.hoisted(() => ({
@@ -241,14 +242,6 @@ interface Setup {
   /** [u2] 投递所有权内核注册表（dispatcher 只提交，出站交接在适配层）。 */
   deliveryRegistry: ReturnType<typeof createSessionDeliveryRegistry>
   triggerExit: (sid: string, code: number | null, stderr?: string) => void
-}
-
-/**
- * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
- * → 三副作用置位）——isGenerating 等三副作用在 prompt 受理之后（D-18），断言前须推进微任务。
- */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
 function resetMockState(): void {

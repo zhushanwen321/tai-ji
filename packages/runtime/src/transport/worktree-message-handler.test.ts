@@ -80,11 +80,6 @@ describe('WorktreeMessageHandler.handles', () => {
     const handler = new WorktreeMessageHandler(mockContext())
     expect(handler.handles).toContain('workspace.detect')
   })
-
-  it('认领 workspace.detectBare', () => {
-    const handler = new WorktreeMessageHandler(mockContext())
-    expect(handler.handles).toContain('workspace.detectBare')
-  })
 })
 
 // ── worktree.create ─────────────────────────────────────────
@@ -433,17 +428,6 @@ describe('WorktreeMessageHandler workspace.detect', () => {
       repoRoot: '/project',
       defaultBranch: 'main',
     })
-  })
-
-  it('workspace.detectBare 别名等价于 workspace.detect', async () => {
-    const ctx = mockContext()
-    const handler = new WorktreeMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleWorktreeMessage(msg('workspace.detectBare', { cwd: '/project' }), ws)
-
-    expect(ctx.worktreeService.detect).toHaveBeenCalledWith('/project')
-    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'workspace.detected', expect.anything())
   })
 
   it('detect 失败时 sendError', async () => {

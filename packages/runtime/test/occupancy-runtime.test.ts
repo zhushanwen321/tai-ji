@@ -28,6 +28,7 @@ import type { IManagedSessionView } from '../src/services/session/types.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
 import type { IConfigStore } from '../src/services/ports/config.js'
 import type { ISessionStore } from '../src/services/ports/session.js'
 import type { IEventAdapter } from '../src/interfaces.js'
@@ -74,14 +75,6 @@ function publishedByType<T extends ServerMessage['type']>(
     if (msg.type === type) return msg as ServerMessage<T>
   }
   return undefined
-}
-
-/**
- * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject →
- * prompt → 三副作用置位）——dispatcher 只提交，出站交接异步落在注册表适配层。
- */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
 // ── Part A：occupancy 写原语（幂等合并 + 去重，经转移原语驱动） ────

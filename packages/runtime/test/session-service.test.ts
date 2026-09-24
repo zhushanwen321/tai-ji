@@ -21,7 +21,7 @@
  * - onSessionExit：构造函数注册的进程退出回调
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { MockInstance } from 'vitest'
+import type { Mock, MockInstance } from 'vitest'
 import { tmpdir, homedir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -36,22 +36,26 @@ import type {
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine, PiEventListener } from '../src/services/ports/pi-engine.js'
 import type { SessionSummary, SessionGroup, Message, ServerMessage, ProviderId, SegmentsMetadataEntry, SegmentsMetadataFile } from '@taiji/shared'
-import { HISTORY_BUDGET } from '@taiji/shared'
+import { HISTORY_BUDGET, decodeNewlineEscapes } from '@taiji/shared'
 import { getAttachmentsDir } from '@taiji/shared/paths'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 // ── vi.hoisted：在 vi.mock 工厂执行前就绪的 mock 句柄 ───────────────
 
+/** scanPiSessions mock 的行形状（pushScannedSession helper 与 hoisted 声明共用）。 */
+interface MockScannedSession {
+  id: string
+  filePath: string
+  cwd: string
+  name: string | null
+  lastModified: number
+  timestamp: string
+  size: number
+  outcome: 'done' | 'error' | 'stopped' | null
+}
+
 const mocks = vi.hoisted(() => ({
-  mockScannedSessions: [] as Array<{
-    id: string
-    filePath: string
-    cwd: string
-    name: string | null
-    lastModified: number
-    timestamp: string
-    size: number
-    outcome: 'done' | 'error' | 'stopped' | null
-  }>,
+  mockScannedSessions: [] as Array<MockScannedSession>,
   // 可重新赋值：null 表示未配置 model
   defaultModel: {
     value: { provider: 'test-provider', modelId: 'test-model' } as
@@ -412,15 +416,6 @@ async function seedUsageSnapshot(
 }
 
 /**
- * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
- * → 三副作用置位）——dispatcher 只提交，出站交接异步落在注册表适配层，紧随 sendMessage
- * 的断言（prompt 实参 / isGenerating / message.error）必须先推进微任务链。
- */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 40; i += 1) await Promise.resolve()
-}
-
-/**
  * W12：等 state 话题快照挂钩发布落地——对齐 w12-owner-snapshot-publish.test.ts 正解
  * （fake timers 推进，替换旧「真 timers 固定睡 400ms」）。
  *
@@ -432,6 +427,93 @@ async function flushDelivery(): Promise<void> {
 async function waitForSnapshotPublish(): Promise<void> {
   await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
   vi.useRealTimers()
+}
+
+/**
+ * 向 scanPiSessions mock 追加一条 scanned session（补默认字段：name/outcome null、
+ * lastModified/timestamp 取当下）。listPersistedSessions 排序类断言需要稳定值时显式传。
+ */
+function pushScannedSession(input: {
+  id: string
+  filePath: string
+  cwd: string
+  name?: string | null
+  lastModified?: number
+  timestamp?: string
+}): MockScannedSession {
+  const row: MockScannedSession = {
+    id: input.id,
+    filePath: input.filePath,
+    cwd: input.cwd,
+    name: input.name ?? null,
+    lastModified: input.lastModified ?? Date.now(),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    size: 0,
+    outcome: null,
+  }
+  mockScannedSessions.push(row)
+  return row
+}
+
+/**
+ * 让下一次 pm.createSession 返回给定 client。默认 mockResolvedValueOnce（单次）；
+ * `persistent` 走 mockResolvedValue（同 id 二次 restore 等需要持续返回的场景）。
+ * mockResolvedValueOnce 会绕过 createSession 默认实现（后者负责写 clientMap），
+ * 需要 ensureActive/getClient 取到该 client 时传 `clientMapId` 手动关联。
+ */
+function stubNextCreatedClient(
+  target: Setup,
+  client: MockClient,
+  opts?: { persistent?: boolean; clientMapId?: string },
+): void {
+  const mocked = vi.mocked(target.pm.createSession)
+  if (opts?.persistent) mocked.mockResolvedValue(client as unknown as IPiEngine)
+  else mocked.mockResolvedValueOnce(client as unknown as IPiEngine)
+  if (opts?.clientMapId !== undefined) target.clientMap.set(opts.clientMapId, client)
+}
+
+/**
+ * 建真实临时 session 文件（mkdtemp + writeFileSync），用例体跑完无论成败都递归清理
+ * （rmSync 参数单点化）。fn 收到目录与文件路径——restoreSession/delete 等直读 JSONL
+ * 的路径必须用真实文件（existsSync / stripEnd 语义）。
+ */
+async function withTempSessionFile(
+  dirPrefix: string,
+  fileName: string,
+  content: string,
+  fn: (dir: string, filePath: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), dirPrefix))
+  try {
+    const filePath = join(dir, fileName)
+    writeFileSync(filePath, content)
+    await fn(dir, filePath)
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  }
+}
+
+/**
+ * 双 createSetup 用例（adapter detach/attach 可观测断言）的第二套装置：在独立 setup 上
+ * 手动装配 SessionService，adapter 工厂注入 spy（attach/detach 调用可断言），
+ * workspace 桩与 createSetup 同形（record no-op / list 空）。
+ */
+function createServiceWithSpyAdapters(
+  base: Setup,
+  attachSpy: Mock<() => void>,
+  detachSpy: Mock<() => void>,
+): SessionService {
+  return new SessionService(
+    base.pm,
+    base.broker,
+    () => ({ attach: attachSpy, detach: detachSpy }),
+    '/tmp',
+    base.extensionService,
+    new PiConfigStore(),
+    new PiSessionStore(),
+    base.gitInfoReader,
+    { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
+  )
 }
 
 // 保险：waitForSnapshotPublish 契约外的 fake timers 泄漏防护（用例中途 fail 时未及还原，
@@ -745,7 +827,7 @@ describe('SessionService · lifecycle', () => {
       const stateless = makeMockClient({
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({}),
       })
-      vi.mocked(setup.pm.createSession).mockResolvedValueOnce(stateless as unknown as IPiEngine)
+      stubNextCreatedClient(setup, stateless)
       await expect(setup.service.create(tmpdir())).rejects.toThrow('did not return a session ID')
       expect(setup.pm.destroySession).toHaveBeenCalledTimes(1)
     })
@@ -783,19 +865,11 @@ describe('SessionService · lifecycle', () => {
 
     it('trashes the session file when it exists on disk (non-active scanned)', async () => {
       // 用真实临时文件让 existsSync 返回 true
-      const dir = mkdtempSync(join(tmpdir(), 'del-'))
-      try {
-        const filePath = join(dir, 's.jsonl')
-        writeFileSync(filePath, '{}')
-        mockScannedSessions.push({
-          id: 'scan-del', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
+      await withTempSessionFile('del-', 's.jsonl', '{}', async (dir, filePath) => {
+        pushScannedSession({ id: 'scan-del', filePath, cwd: dir })
         await setup.service.delete('scan-del')
         expect(mocks.trashMock).toHaveBeenCalledWith(filePath)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      })
     })
 
     it('throws when session neither active nor scanned', async () => {
@@ -825,10 +899,7 @@ describe('SessionService · lifecycle', () => {
     })
 
     it('non-active session：短命 pi 附着后 set_session_name RPC（W11：直写全删）', async () => {
-      mockScannedSessions.push({
-        id: 'scan-ren', filePath: '/fake/scan-ren.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'scan-ren', filePath: '/fake/scan-ren.jsonl', cwd: tmpdir() })
       const ephemeral = makeMockClient()
       vi.mocked(setup.pm.withEphemeralPi).mockImplementationOnce(async (_f, fn) =>
         fn(ephemeral as unknown as IPiEngine))
@@ -842,24 +913,21 @@ describe('SessionService · lifecycle', () => {
   describe('restoreSession', () => {
     it('reuses scanned sessionId and sends switch_session with file path', async () => {
       // B7: restoreSession 直读 JSONL 文件（stripSessionEnd 已删），需真实文件
-      const dir = mkdtempSync(join(tmpdir(), 'restore-'))
-      const filePath = join(dir, 'persist-1.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info', name: 'old' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-1', filePath, cwd: dir, name: 'old',
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient()
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-        const summary = await setup.service.restoreSession('persist-1')
-        expect(summary.id).toBe('persist-1')
-        // [W1 语义变更：直附着正式文件] switchSession 收到原 filePath（不再写
-        // $TMPDIR tmpFile 后切 tmp——pi switch_session 永久重绑读写目标）
-        expect(client.switchSession).toHaveBeenCalledWith(filePath)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await withTempSessionFile(
+        'restore-',
+        'persist-1.jsonl',
+        JSON.stringify({ type: 'session_info', name: 'old' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-1', filePath, cwd: dir, name: 'old' })
+          const client = makeMockClient()
+          stubNextCreatedClient(setup, client)
+          const summary = await setup.service.restoreSession('persist-1')
+          expect(summary.id).toBe('persist-1')
+          // [W1 语义变更：直附着正式文件] switchSession 收到原 filePath（不再写
+          // $TMPDIR tmpFile 后切 tmp——pi switch_session 永久重绑读写目标）
+          expect(client.switchSession).toHaveBeenCalledWith(filePath)
+        },
+      )
     })
 
     it('throws when persisted session not found', async () => {
@@ -867,10 +935,7 @@ describe('SessionService · lifecycle', () => {
     })
 
     it('throws when no default model configured', async () => {
-      mockScannedSessions.push({
-        id: 'persist-2', filePath: '/fake/p2.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'persist-2', filePath: '/fake/p2.jsonl', cwd: tmpdir() })
       mocks.defaultModel.value = null
       await expect(setup.service.restoreSession('persist-2')).rejects.toThrow('No model configured')
     })
@@ -878,87 +943,67 @@ describe('SessionService · lifecycle', () => {
     // W3 事件监听器所有权（自 session-pool-restoresession.test.ts 归并）：
     // 同 id 二次 restore 必须先 detach 第一次的 adapter（EventAdapter 是 pi 事件监听唯一 owner）
     it('detaches the first adapter when the same sessionId is restored twice', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'restore-detach-'))
-      const filePath = join(dir, 'persist-detach.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-detach', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const detachSpy = vi.fn()
-        const attachSpy = vi.fn()
-        const localSetup = createSetup()
-        // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
-        const localService = new SessionService(
-          localSetup.pm,
-          localSetup.broker,
-          () => ({ attach: attachSpy, detach: detachSpy }),
-          '/tmp',
-          localSetup.extensionService,
-          new PiConfigStore(),
-          new PiSessionStore(),
-          localSetup.gitInfoReader,
-          { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
-        )
-        const client = makeMockClient()
-        vi.mocked(localSetup.pm.createSession).mockResolvedValue(client as unknown as IPiEngine)
+      await withTempSessionFile(
+        'restore-detach-',
+        'persist-detach.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-detach', filePath, cwd: dir })
+          const detachSpy = vi.fn()
+          const attachSpy = vi.fn()
+          const localSetup = createSetup()
+          // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
+          const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
+          stubNextCreatedClient(localSetup, makeMockClient(), { persistent: true })
 
-        await localService.restoreSession('persist-detach')
-        expect(detachSpy).not.toHaveBeenCalled()
+          await localService.restoreSession('persist-detach')
+          expect(detachSpy).not.toHaveBeenCalled()
 
-        // 同 id 二次 restore——应先 detach 第一次的 adapter
-        await localService.restoreSession('persist-detach')
-        expect(detachSpy).toHaveBeenCalledTimes(1)
-        expect(attachSpy).toHaveBeenCalledTimes(2)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+          // 同 id 二次 restore——应先 detach 第一次的 adapter
+          await localService.restoreSession('persist-detach')
+          expect(detachSpy).toHaveBeenCalledTimes(1)
+          expect(attachSpy).toHaveBeenCalledTimes(2)
+        },
+      )
     })
 
     // cwd fallback（自 session-pool-restoresession.test.ts 归并）：死路径 cwd → homedir 兜底
     it('falls back to home dir when the scanned session cwd does not exist', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'restore-cwd-'))
-      const filePath = join(dir, 'persist-cwd.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        const nonexistentCwd = join(dir, 'taiji-test-cwd-nonexistent')
-        mockScannedSessions.push({
-          id: 'persist-cwd', filePath, cwd: nonexistentCwd, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient()
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
+      await withTempSessionFile(
+        'restore-cwd-',
+        'persist-cwd.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          const nonexistentCwd = join(dir, 'taiji-test-cwd-nonexistent')
+          pushScannedSession({ id: 'persist-cwd', filePath, cwd: nonexistentCwd })
+          const client = makeMockClient()
+          stubNextCreatedClient(setup, client)
 
-        await setup.service.restoreSession('persist-cwd')
+          await setup.service.restoreSession('persist-cwd')
 
-        // createSession 收到的 cwd 不含死路径（F3 归一化兜底 homedir）
-        expect(vi.mocked(setup.pm.createSession).mock.calls[0]?.[1]).not.toContain('taiji-test-cwd-nonexistent')
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+          // createSession 收到的 cwd 不含死路径（F3 归一化兜底 homedir）
+          expect(vi.mocked(setup.pm.createSession).mock.calls[0]?.[1]).not.toContain('taiji-test-cwd-nonexistent')
+        },
+      )
     })
 
     it('destroys created session when switch_session fails', async () => {
       // B7: restoreSession 直读 JSONL 文件，需真实文件
-      const dir = mkdtempSync(join(tmpdir(), 'restore-fail-'))
-      const filePath = join(dir, 'persist-3.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-3', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient({
-          // W2 收口后 restoreSession 用 client.switchSession，失败时抛错触发清理
-          switchSession: vi.fn<(sessionPath: string) => Promise<void>>().mockRejectedValue(new Error('switch failed')),
-        })
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-        await expect(setup.service.restoreSession('persist-3')).rejects.toThrow('switch failed')
-        expect(setup.pm.destroySession).toHaveBeenCalledWith('persist-3')
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await withTempSessionFile(
+        'restore-fail-',
+        'persist-3.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-3', filePath, cwd: dir })
+          const client = makeMockClient({
+            // W2 收口后 restoreSession 用 client.switchSession，失败时抛错触发清理
+            switchSession: vi.fn<(sessionPath: string) => Promise<void>>().mockRejectedValue(new Error('switch failed')),
+          })
+          stubNextCreatedClient(setup, client)
+          await expect(setup.service.restoreSession('persist-3')).rejects.toThrow('switch failed')
+          expect(setup.pm.destroySession).toHaveBeenCalledWith('persist-3')
+        },
+      )
     })
   })
 })
@@ -1397,15 +1442,10 @@ describe('SessionService · Facade', () => {
     })
 
     it('restores session when client missing and returns new client', async () => {
-      mockScannedSessions.push({
-        id: 'persist-ens', filePath: '/fake/ens.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'persist-ens', filePath: '/fake/ens.jsonl', cwd: tmpdir() })
       const client = makeMockClient()
-      // mockResolvedValueOnce 会绕过 createSession 默认实现（后者负责写 clientMap），
-      // 因此手动把 client 关联进 clientMap，让 ensureActive 末尾的 getClient 能取到。
-      vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-      setup.clientMap.set('persist-ens', client)
+      // 手动把 client 关联进 clientMap，让 ensureActive 末尾的 getClient 能取到。
+      stubNextCreatedClient(setup, client, { clientMapId: 'persist-ens' })
       const got = await setup.service.ensureActive('persist-ens')
       expect(got).toBe(client)
     })
@@ -1559,11 +1599,9 @@ describe('SessionService · Facade', () => {
 
   describe('listPersistedSessions', () => {
     it('groups persisted sessions by cwd', () => {
-      mockScannedSessions.push(
-        { id: 'a', filePath: '/fake/a.jsonl', cwd: '/proj', name: null, lastModified: 1, timestamp: '', size: 0, outcome: null },
-        { id: 'b', filePath: '/fake/b.jsonl', cwd: '/proj', name: null, lastModified: 2, timestamp: '', size: 0, outcome: null },
-        { id: 'c', filePath: '/fake/c.jsonl', cwd: '/other', name: null, lastModified: 3, timestamp: '', size: 0, outcome: null },
-      )
+      pushScannedSession({ id: 'a', filePath: '/fake/a.jsonl', cwd: '/proj', lastModified: 1, timestamp: '' })
+      pushScannedSession({ id: 'b', filePath: '/fake/b.jsonl', cwd: '/proj', lastModified: 2, timestamp: '' })
+      pushScannedSession({ id: 'c', filePath: '/fake/c.jsonl', cwd: '/other', lastModified: 3, timestamp: '' })
       const groups = setup.service.listPersistedSessions() as SessionGroup[]
       const projGroup = groups.find(g => g.cwd === '/proj')
       expect(projGroup?.sessions.map(s => s.id).sort()).toEqual(['a', 'b'])
@@ -1572,10 +1610,7 @@ describe('SessionService · Facade', () => {
 
     it('includes active sessions and excludes their duplicate file entries', async () => {
       const { id } = await setup.seedSession({ sessionFile: '/fake/dup.jsonl', cwd: tmpdir() })
-      mockScannedSessions.push({
-        id, filePath: '/fake/dup.jsonl', cwd: tmpdir(), name: null,
-        lastModified: 1, timestamp: '', size: 0, outcome: null,
-      })
+      pushScannedSession({ id, filePath: '/fake/dup.jsonl', cwd: tmpdir(), lastModified: 1, timestamp: '' })
       const groups = setup.service.listPersistedSessions()
       const allIds = groups.flatMap(g => g.sessions.map(s => s.id))
       // 活跃 session 出现一次，持久化副本被过滤
@@ -1635,7 +1670,7 @@ describe('SessionService · Facade', () => {
 
     // ── 换行编码（转义协议，composer 四符号 §3.3.3 / 探针 P3）──
     // 命令必须单行：真实换行编码为字面 \n 两字符，原生反斜杠编码为 \\（防歧义），
-    // extension 侧 decodeNewlineEscapes 互逆还原（两侧测试对同一 wire 协议双向钉死）。
+    // extension 侧经 shared decodeNewlineEscapes 互逆还原（规范实现单源，见下方互逆断言）。
 
     it('message text 含真实换行 → 编码为字面 \\n（命令保持单行）', async () => {
       const { id, client } = await setup.seedSession()
@@ -1658,19 +1693,16 @@ describe('SessionService · Facade', () => {
       expect(client.prompt).toHaveBeenCalledWith('/subagents start my-slug 任务一\\n任务二')
     })
 
-    // ── 转义协议互逆（encode ↔ extension decodeNewlineEscapes）──
-    // decode 镜像：extension 侧 decodeNewlineEscapes 的等价实现（runtime 不依赖
-    // extension 包，互逆性靠两侧测试对同一 wire 协议各自钉死）。
-    const decodeMirror = (s: string): string =>
-      s.replace(/\\\\|\\n/g, (m) => (m === '\\\\' ? '\\' : '\n'))
-
+    // ── 转义协议互逆（encode（runtime 自写）↔ decodeNewlineEscapes（@taiji/shared 规范实现））──
+    // 真单源断言：decode 不再用本文件手工镜像（双侧同错假绿形态），直接消费 shared
+    // 导出的规范实现（extension command-actions 同语义），encode 与 decode 分属两处实现。
     it.each([
       ['原文含字面 \\n（反斜杠+n）', '路径 C:\\new folder'],
       ['原文含反斜杠（非 n 前缀）', '正则 \\d+ 与 \\\\server\\share'],
       ['原文含真实换行', '第一行\n第二行'],
       ['混合：反斜杠 + 真实换行 + 字面 \\n 同文', 'C:\\new\n正则 \\d+\n收尾'],
     ])('encodeDirectiveText 互逆（%s）→ decode(encode(x)) === x', (_label, original) => {
-      expect(decodeMirror(encodeDirectiveText(original))).toBe(original)
+      expect(decodeNewlineEscapes(encodeDirectiveText(original))).toBe(original)
     })
 
     it('encodeDirectiveText 产物不含真实换行（命令单行不变式）', () => {
@@ -1776,17 +1808,7 @@ describe('SessionService · onSessionExit callback', () => {
     const attachSpy = vi.fn()
     const localSetup = createSetup()
     // 替换 adapterFactory：直接 new 一个带 spy 的 service
-    const localService = new SessionService(
-      localSetup.pm,
-      localSetup.broker,
-      () => ({ attach: attachSpy, detach: detachSpy }),
-      '/tmp',
-      localSetup.extensionService,
-      new PiConfigStore(),
-      new PiSessionStore(),
-      localSetup.gitInfoReader,
-      { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
-    )
+    const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
     const piSid = 'pi-detach-1'
     const client = makeMockClient({
       // W2 收口后 create 用 client.getState()，返回归一后的 state 对象
@@ -1794,8 +1816,7 @@ describe('SessionService · onSessionExit callback', () => {
         sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
       }),
     })
-    vi.mocked(localSetup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-    localSetup.clientMap.set(piSid, client)
+    stubNextCreatedClient(localSetup, client, { clientMapId: piSid })
     await localService.create(tmpdir(), 'l')
     expect(attachSpy).toHaveBeenCalledTimes(1)
     localSetup.triggerExit(piSid, 0)

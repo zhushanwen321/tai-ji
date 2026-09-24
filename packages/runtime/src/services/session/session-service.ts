@@ -466,7 +466,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // setCapabilityDriftSink 上报 + runtime 日志）。一次调用，fire-and-forget——对账是
       // 纯旁路诊断，失败绝不阻断附着（内部已降级，catch 双保险）。
       if (this.modelCapabilityReconciler) {
-        this.modelCapabilityReconciler(sessionId).catch(() => { /* 降级吞错：附着主链路优先 */ })
+        // 降级不吞错（harden b23-3）：对账是纯旁路诊断，失败绝不阻断附着主链，但必须留痕可归因
+        // （能力漂移对账长期静默失败 = 守卫失效）。
+        this.modelCapabilityReconciler(sessionId).catch((e: unknown) => console.error(`[session-service] capability reconcile failed (sessionId=${sessionId}):`, e))
       }
     })
     // D3 checkpoint（crash-forensics §3.3 D3，u4）attach / respawn 成功挂点：onSessionRegistered
@@ -1295,10 +1297,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   async destroyAll(): Promise<void> {
+    // 逐步隔离（code-harden RT-4#1，对齐 runDestroyStepIsolated 范式）：shutdown 收敛链
+    // 任一步失败不阻断后续清理（detach 扇出 → pm.destroyAll 进程收割 → 内存态清空），
+    // 失败逐步留痕（detach 步进台账 reason=destroy-chain-step-failed 可归因）。
     for (const session of this.lifecycle.values()) {
-      session.adapter.detach()
+      runDestroyStepIsolated('destroyAll.adapter.detach', session.id, () => session.adapter.detach())
     }
-    await this.pm.destroyAll()
+    // pm.destroyAll 是异步整体调用，runDestroyStepIsolated（同步 fn）不直接适用——等价
+    // .catch 留痕：单进程收割失败不阻断 shutdown 收敛，其余清理继续。
+    await this.pm.destroyAll().catch((e: unknown) => {
+      console.error('[session-service] destroyAll: pm.destroyAll failed (continuing shutdown):', e)
+    })
     // shutdown 路径：只清 sessions Map（Map 所有者执行），刻意不触发 dispose/销毁通知
     // ——进程将亡，缓存随进程同灭（迁移前行为保持，设计 D2②）。
     this.lifecycle.clear()
@@ -1345,7 +1354,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * session 不存在/文件未落盘（延迟写入窗口）→ 静默跳过（不阻断归类流程，下次 create 兑底）。
    */
   async setProject(sessionId: string, projectId: string): Promise<void> {
-    const active = this.lifecycle.get(sessionId) as (IManagedSessionView & { projectId?: string }) | undefined
+    const active = this.lifecycle.get(sessionId)
     if (active) {
       active.projectId = projectId || undefined
       if (active.sessionFilePath) {
@@ -1485,11 +1494,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 用 projectBindingPersisted 标记防重复写（session 级运行时标记，不进 toSummary）。
    */
   private tryPersistProjectBinding(s: IManagedSessionView): void {
-    const projectId = (s as IManagedSessionView & { projectId?: string }).projectId
-    const persisted = (s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted
+    const projectId = s.projectId
+    const persisted = s.projectBindingPersisted
     if (persisted || !projectId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
     this.sessionStore.persistProjectBinding(s.sessionFilePath, projectId)
-    ;(s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted = true
+    s.projectBindingPersisted = true
   }
 
   /**
@@ -1517,10 +1526,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 用于 session 恢复后拉取用量——pi 从历史估算，重启后旧 session 也能显示当前占用。
    * 复用 context.update 契约（inputTokens/contextLimit/usagePercent）。
    * contextUsage.tokens=null（compaction 后未跑新 turn）或 session 未激活时返回 null。
+   * usagePercent 可选（[RT-4#7] 无值纪律：pi percent=null 时字段缺省不折 0——「未知」
+   * 与「真 0%」不可混淆；wire 契约 context.update 的 usagePercent 本就可选，字段缺失 = 无值）。
    * @throws session 未激活或 pi rpc 失败时抛（调用方 try-catch）
    */
   async fetchContext(sessionId: string): Promise<{
-    inputTokens: number; contextLimit: number; usagePercent: number
+    inputTokens: number; contextLimit: number; usagePercent?: number
   } | null> {
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error(`session ${sessionId} not active`)
@@ -1541,7 +1552,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       return {
         inputTokens: cu.tokens,
         contextLimit: cu.contextWindow,
-        usagePercent: Math.round(cu.percent ?? 0),
+        usagePercent: cu.percent != null ? Math.round(cu.percent) : undefined,
       }
     }
     return null

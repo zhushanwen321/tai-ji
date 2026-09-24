@@ -59,11 +59,6 @@ import type { CatalogRefreshResult } from './services/provider-catalog-refresh.j
  * @deprecated 从 services/ports/pi-engine.js 导入 IPiEngine / IProcessManager。
  */
 export type { IPiEngine, IProcessManager } from './services/ports/pi-engine.js'
-/**
- * IRpcClient 是 IPiEngine 的兼容别名（D24 合并遗留）。
- * @deprecated 改用 IPiEngine（见 services/ports/pi-engine.js）。
- */
-export type IRpcClient = IPiEngine
 
 // ── IMessageBroker ────────────────────────────────────────────────
 
@@ -287,9 +282,10 @@ export interface ISessionService {
   /**
    * 拉取 session 上下文用量（pi getSessionStats → contextUsage）。
    * contextUsage.tokens=null（compaction 后未跑新 turn）或 session 未激活时返回 null。
+   * usagePercent 可选（无值 = 字段缺省，[RT-4#7] 无值纪律：pi percent=null 不折 0）。
    * 用于 renderer 切 session 后主动拉取（修复 broadcast 与订阅时序竞争）。
    */
-  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent: number } | null>
+  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent?: number } | null>
   /** 活跃 session id 列表（含公共 session）。供 SkillRegistry 计算 skill 变更广播的 affectedSessionIds。 */
   getActiveSessionIds(): string[]
   /** 取 session 的 cwd（未激活/不存在返回 undefined）。供 SkillRegistry 按项目 skill 变更定位受影响 session。 */
@@ -353,14 +349,14 @@ export interface ISessionService {
    */
   getUsagePercent(sessionId: string): number | null
   /** Get the underlying RpcClient for direct command sending (e.g., extension responses). */
-  getRpcClient(sessionId: string): IRpcClient | undefined
+  getRpcClient(sessionId: string): IPiEngine | undefined
 
   /**
    * Ensure a session is active (has a running pi process). If not, auto-restore it.
-   * @returns The active RpcClient
+   * @returns The active pi engine handle
    * @throws if restore fails or session not found
    */
-  ensureActive(sessionId: string): Promise<IRpcClient>
+  ensureActive(sessionId: string): Promise<IPiEngine>
 
   listPersistedSessions(): SessionGroup[]
   destroyAll(): Promise<void>
@@ -478,15 +474,29 @@ export interface IConfigService {
   migrateSettingsSkillsToDiscovery(): void
   loadSkills(projectRoot: string): SkillInfo[]
   saveSkills(projectRoot: string, skills: SkillInfo[]): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.setSkill RPC 的兼容期服务端实现（core config.setSkill
+   * 发送方仍在）。实做 = 按 skill.sourcePath 把目录并入 discovery.json skillPaths（非 no-op）。
+   * 目录级模型的正规入口 = setSkillDirs。
+   */
   upsertSkill(skill: SkillInfo): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.deleteSkill RPC 的兼容期服务端实现（core config.deleteSkill
+   * 发送方仍在）。实做 = 从 discovery.json skillPaths 移除 skill 所在目录（非 no-op）。
+   * 目录级模型的正规入口 = setSkillDirs。
+   */
   deleteSkill(skillId: string): void
   loadAgents(projectRoot: string): AgentInfo[]
   saveAgents(projectRoot: string, agents: AgentInfo[]): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.setAgent RPC 的兼容期服务端实现（core config.setAgent
+   * 发送方仍在）。实做 = 写 .md agent 文件（非 no-op）。目录级模型的正规入口 = setAgentDirs。
+   */
   upsertAgent(agent: AgentInfo): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.deleteAgent RPC 的兼容期服务端实现（core config.deleteAgent
+   * 发送方仍在）。实做 = 删 .md agent 文件（非 no-op）。目录级模型的正规入口 = setAgentDirs。
+   */
   deleteAgent(agentId: string): void
   scanSkills(sources: string[], existingIds: Set<string>): ScannedSkillInfo[]
   scanAgents(sources: string[], existingIds: Set<string>): ScannedAgentInfo[]

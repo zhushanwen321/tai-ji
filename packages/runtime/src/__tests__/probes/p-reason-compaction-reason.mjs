@@ -54,6 +54,16 @@ function check(ok, label, detail = '') {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** 各场景 pi 进程的 stderr 尾部（场景结束采集；崩溃/断言红时的失败原因诊断源）。 */
+const stderrTails = []
+
+/** 断言红 / 未捕获异常时把各场景 pi stderr 尾部打进诊断输出（RPC timeout 等异常本身不带上下文）。 */
+function printStderrTails() {
+  stderrTails.forEach((tail, i) => {
+    if (tail.trim()) console.error(`[probe] pi stderr 尾部（场景 ${i + 1}）：`, tail)
+  })
+}
+
 /**
  * 起一个探针 pi 进程（真 pi + faux LLM）。
  * @param {object} opts
@@ -175,6 +185,7 @@ async function scenarioManualIdle() {
     check(!abortedTurnEnd, '空闲 manual compact 无 abort 掐断（对照：条件③ 不成立）')
   } finally {
     await pi.stop()
+    stderrTails.push(pi.getStderr().slice(-800))
   }
 }
 
@@ -196,14 +207,18 @@ async function scenarioDuringActiveRun() {
     const warmed = await pi.waitEvent('agent_settled', 0, 60_000)
     check(!!warmed, '预热 turn 已 settle（压缩有可摘要内容）')
     const from = pi.events.length
-    // 不 await prompt（流式进行中才有掐断窗口）
-    void pi.rpc('prompt', { message: 'P-reason 活跃 run 场景' }).catch(() => {})
+    // 不 await prompt（流式进行中才有掐断窗口）；reject 不判红（断言以事件面为准），失败原因留痕
+    void pi.rpc('prompt', { message: 'P-reason 活跃 run 场景' }).catch((e) => {
+      console.error('[probe] prompt rpc 失败（留痕不判红）：', e)
+    })
     const streaming = await pi.waitEvent('agent_start', from, 30_000)
     check(!!streaming, 'run 已启动（agent_start）', streaming ? '' : pi.eventTypes(from))
     // 等首个已提交内容块，确保 abort 落在流式窗口内
     const contentStarted = await pi.waitEvent('message_update', from, 30_000)
     check(!!contentStarted, '流式内容已开始（message_update）', contentStarted ? '' : pi.eventTypes(from))
-    void pi.rpc('compact', {}).catch(() => {})
+    void pi.rpc('compact', {}).catch((e) => {
+      console.error('[probe] compact rpc 失败（留痕不判红，compaction_end 断言会红）：', e)
+    })
     const end = await pi.waitEvent('compaction_end', from, 60_000)
     check(!!end, 'compaction_end 到达', end ? `reason=${String(end.event.reason)}` : pi.eventTypes(from))
     check(end?.event.reason === 'manual', '掐断式压缩 reason === "manual"', `实际=${String(end?.event.reason)}`)
@@ -227,6 +242,7 @@ async function scenarioDuringActiveRun() {
     console.log(`  [meas] 事件序：${pi.eventTypes(from)}`)
   } finally {
     await pi.stop()
+    stderrTails.push(pi.getStderr().slice(-800))
   }
 }
 
@@ -243,7 +259,9 @@ async function scenarioAutoThreshold() {
   try {
     await pi.rpc('get_state', {}, 20_000)
     const from = pi.events.length
-    void pi.rpc('prompt', { message: 'P-reason 自动压缩场景（首轮后 threshold 命中）' }).catch(() => {})
+    void pi.rpc('prompt', { message: 'P-reason 自动压缩场景（首轮后 threshold 命中）' }).catch((e) => {
+      console.error('[probe] prompt rpc 失败（留痕不判红，compaction_start 断言会红）：', e)
+    })
     const start = await pi.waitEvent('compaction_start', from, 60_000)
     check(!!start, '自动压缩 compaction_start 到达（threshold 命中）', start ? `reason=${String(start.event.reason)}` : pi.eventTypes(from))
     check(
@@ -259,6 +277,7 @@ async function scenarioAutoThreshold() {
     }
   } finally {
     await pi.stop()
+    stderrTails.push(pi.getStderr().slice(-800))
   }
 }
 
@@ -284,10 +303,15 @@ async function main() {
   await scenarioAutoThreshold()
 
   console.log(`\n[probe] 结果：${failures.length === 0 ? 'PASS（全部断言绿）' : `FAIL（${failures.length} 条）: ${failures.join(' | ')}`}`)
-  process.exit(failures.length > 0 ? 1 : 0)
+  if (failures.length > 0) {
+    printStderrTails()
+    process.exit(1)
+  }
+  process.exit(0)
 }
 
 main().catch((e) => {
   console.error('[probe] 未捕获异常：', e)
+  printStderrTails()
   process.exit(1)
 })

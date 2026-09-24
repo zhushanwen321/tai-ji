@@ -21,7 +21,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HandoffService } from '../src/services/handoff-service.js'
 import { createSessionDeliveryRegistry } from '../src/services/session/session-delivery-registry.js'
-import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import { SessionService } from '../src/services/session/session-service.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
@@ -126,20 +125,20 @@ describe('hasDeliveryActivity（D2 #5）', () => {
     expect(registry.hasDeliveryActivity('s-1')).toBe(false)
   })
 
-  it('factory 注入替身 handle：depth > 0 即命中——查询面是 handle.depth() 委托', () => {
-    const { deps } = makeDeliveryFixture()
+  it('真内核 gated 队列：busy session 提交停于 queued，depth > 0 即命中——查询面是 handle.depth() 委托', async () => {
+    const { deps, views } = makeDeliveryFixture()
+    // isGenerating true → port.isIdle false → 内核 gate 拦截：条目停于 queued（未受理、
+    // ensureActive 不被触达），depth 是唯一队列状态查询面，registry 判定只委托它
+    views.set('s-2', { isGenerating: true, isCompacting: false, isBashRunning: false } as IManagedSessionView)
     const registry = createSessionDeliveryRegistry(deps)
-    // 替身 handle（接口注释明示 factory 供测试注入替身）：depth() 是 DeliveryHandle
-    // 唯一队列状态查询，registry 判定只委托它，不反推内核内部
-    registry.getOrCreateDelivery('s-2', () => ({
-      send: vi.fn(),
-      sendChecked: vi.fn(async () => {}),
-      flush: vi.fn(),
-      depth: () => 3,
-      dispose: vi.fn(),
-    }) as unknown as DeliveryHandle)
-    expect(registry.hasDeliveryActivity('s-2')).toBe(true)
+    const handle = registry.getOrCreateDelivery('s-2')
+    const pending = handle.sendChecked({ payload: { kind: 'text', content: 'queued-notify' } })
+    await vi.waitFor(() => expect(registry.hasDeliveryActivity('s-2')).toBe(true))
     expect(registry.hasDeliveryActivity('s-1')).toBe(false)
+    // dispose：内核契约 = 挂起的 sendChecked 显式 reject；回收后查询回落 false
+    registry.dispose('s-2')
+    await expect(pending).rejects.toThrow('delivery handle disposed')
+    expect(registry.hasDeliveryActivity('s-2')).toBe(false)
   })
 })
 

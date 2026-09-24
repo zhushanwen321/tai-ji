@@ -296,7 +296,7 @@ export class MessageDispatcher {
    * aborted 完成帧广播两种 source 均保持不变（前端 no-op，U2 明确不动广播逻辑）。
    */
   async abort(sessionId: string, source: AbortSource = 'user'): Promise<void> {
-    const client = this.getClientOrThrow(sessionId, 'abort')
+    const client = this.getClientOrThrow(sessionId)
     try {
       await client.abort()
     } catch (e) {
@@ -766,7 +766,7 @@ export class MessageDispatcher {
    * sent=false（守卫短路 / 发送失败）不得谎报 aborted。
    */
   async abortBash(sessionId: string): Promise<{ sent: boolean }> {
-    const client = this.getClientOrThrow(sessionId, 'abortBash')
+    const client = this.getClientOrThrow(sessionId)
     const activeSession = this.svc.getSessionByClient(client)
     // [W1 + P6 断言④] 守卫：isBashRunning（runtime 在等待）或 orphanBashRunning（D2 超时后
     // runtime 已停止等待但 pi 侧孤儿 bash 仍在跑）任一在 → 放行。旧守卫只看 isBashRunning，
@@ -838,17 +838,13 @@ export class MessageDispatcher {
   }
 
   /**
-   * D8: abort/steer/followUp 共享的「getClient → 空抛」骨架（此前 3 处逐行平行，只差方法名）。
-   * @param op 调用方方法名，仅用于构造诊断串。
+   * abort/abortBash 共享的「getClient → 空抛」骨架。steer/followUp 内核化（u2）后不再取
+   * client，报错串只保留 abort 历史形态（无前缀，测试锚定文本）。
    */
-  private getClientOrThrow(sessionId: string, op: 'abort' | 'steer' | 'followUp' | 'abortBash'): IPiEngine {
+  private getClientOrThrow(sessionId: string): IPiEngine {
     const client = this.pm.getClient(sessionId)
     if (!client) {
-      // abort 的历史报错串是 "Session X not found"（无前缀），steer/followUp 带 [message-dispatcher] 前缀。
-      // 保持原样以免破坏依赖报错文本的测试。
-      throw op === 'abort' || op === 'abortBash'
-        ? new Error(`Session ${sessionId} not found`)
-        : new Error(`[message-dispatcher] ${op}: session ${sessionId} not active`)
+      throw new Error(`Session ${sessionId} not found`)
     }
     return client
   }

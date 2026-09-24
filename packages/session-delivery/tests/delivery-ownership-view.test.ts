@@ -55,7 +55,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.dispose()
   })
 
-  it('deliveredWindow 默认 50：56 条 delivered 只投影最近 50 条完整条目', () => {
+  it('投影窗口恒 50：56 条 delivered 只投影最近 50 条完整条目', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -65,30 +65,12 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     }
 
     const proj = handle.entries({})
-    expect(proj.entries).toHaveLength(50) // deliveredWindow 默认 50
+    expect(proj.entries).toHaveLength(50) // 投影窗口恒 50（DEFAULT_DELIVERED_WINDOW）
     expect(proj.entries.map((e) => e.id)).toEqual(
       Array.from({ length: 50 }, (_, i) => `u-${i + 6}`), // 最近 50 条：u-6..u-55
     )
     // 全量视图 tombstone 不受窗口影响（判重正确性不依赖展示窗口）
     expect(handle.entries().tombstones).toHaveLength(56)
-
-    handle.dispose()
-  })
-
-  it('deliveredWindow 可配：window=2 只投影最近 2 条', () => {
-    const port = makeMockPort()
-    const handle = createDelivery(port)
-
-    for (const id of ['u-1', 'u-2', 'u-3']) {
-      handle.send(textMsg(id), { id })
-      handle.confirmDelivered(id)
-    }
-
-    expect(handle.entries({ deliveredWindow: 2 }).entries.map((e) => e.id)).toEqual([
-      'u-2',
-      'u-3',
-    ])
-    expect(handle.entries({ deliveredWindow: 0 }).entries).toEqual([]) // 窗口 0 = delivered 全裁
 
     handle.dispose()
   })

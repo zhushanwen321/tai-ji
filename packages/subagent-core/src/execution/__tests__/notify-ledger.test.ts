@@ -174,7 +174,6 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
 
   function scheduleFlush(attempt: number): void {
     if (disposed || queue.length === 0 || inFlight) return;
-    if (cfg.busyPolicy === "park" && attempt > 0) return;
     if (backoffTimer !== undefined) {
       clearTimeout(backoffTimer);
       backoffTimer = undefined;

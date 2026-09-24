@@ -34,9 +34,8 @@
  *
  * 双视图（D9②/D5③）：entries() 无参 = 全量视图（活跃条目 + 全量 tombstone，对账/
  * 判重消费）；带 DeliveryProjectionOptions = 投影视图（活跃全量 + delivered 最近
- * N 条完整条目，cancelled 不投影）。delivered 完整条目留存上限 = 默认投影窗口 50
- * （tombstone 全量保留不受限——判重正确性不依赖展示窗口，N > 50 时仅能取到留存
- * 范围，实施裁决登记）。
+ * 50 条完整条目，cancelled 不投影；窗口恒为默认常量）。delivered 完整条目留存上限
+ * = 默认投影窗口 50（tombstone 全量保留不受限——判重正确性不依赖展示窗口）。
  *
  * 判重 tombstone（D5②）：delivered 与 cancelled 都写 tombstone，runtime 存活期内
  * 全量保留、不设数量窗口；resync 重报/重建以显式 id 查活跃集与 tombstone 去重
@@ -97,15 +96,37 @@ export interface DeliverySubmitOptions {
   lane?: DeliveryLane
 }
 
+/**
+ * send() 受理结果（b31-D6：失败双表面窄口收口）。调用方忽略返回值不受影响
+ * （v1 句柄面 send 仍声明 void，结构兼容）。三分口径：
+ * - accepted：已入队并进入投递流程（id = 条目 id，供调用方对账/判重锚定）
+ * - swallowed：幂等吞（already-seen = 显式 id 命中活跃集/tombstone；duplicate-content
+ *   = dedupeKey 内容级去重命中）——设计内去重，非失败
+ * - rejected：拒收未入队（disposed = 句柄已销毁；unsupported-payload = 通路能力
+ *   不含该 payload kind）——仅 warn 单表面 + 本返回值，无终态无 onSettled
+ *
+ * void 兼容口径（与 SendReceipt 的 U2 扩展位同构）：接口返回类型含 void——
+ * v1 → v2 测试替身适配（runtime asHandleV2 直转发 v1 handle.send）返回 void =
+ * 受理未知；内核本体实现恒返回具体结果，void 分支仅为替身/旧实现预留。
+ */
+export type DeliverySendResult =
+  | { kind: 'accepted'; id: string }
+  | { kind: 'swallowed'; reason: 'already-seen' | 'duplicate-content' }
+  | { kind: 'rejected'; reason: 'disposed' | 'unsupported-payload' }
+
 /** v2 句柄：v1 DeliveryHandle 的超集（结构兼容，既有消费者零改动）。 */
 export interface DeliveryHandleV2 extends DeliveryHandle {
-  send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void
+  /** 唯一常规入口（D4 入口收敛）；返回受理/吞/拒收口径（void = 受理未知，替身兼容）。 */
+  send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): DeliverySendResult | void
   sendChecked(msg: DeliveryMessage, opts?: DeliverySubmitOptions): Promise<void>
   /** 全量视图（D9②）：活跃条目（完整字段）+ 全部 tombstone。快照（防御性拷贝）。 */
   entries(): DeliveryEntriesFull
-  /** 投影视图（D9②/D5③）：活跃全量 + delivered 最近 N 条完整条目，cancelled 不投影。 */
+  /** 投影视图（D9②/D5③）：活跃全量 + delivered 最近 50 条完整条目，cancelled 不投影。 */
   entries(options: DeliveryProjectionOptions): DeliveryEntriesProjection
-  /** 变更订阅（state topic 装配用）：任何条目创建/迁移/终态触发。返回退订函数。 */
+  /**
+   * 变更订阅（state topic 装配用）：任何条目创建/迁移/终态触发。返回退订函数。
+   * 回调实现不应抛——异常由内核捕获并 warn，不影响其余订阅者与状态机。
+   */
   onChange(cb: () => void): () => void
   /**
    * 送达回执驱动转 delivered（D9③）。接受 in-flight（正规路径）与 queued
@@ -151,6 +172,15 @@ const DEFAULT_CONFIG: Required<
 
 /** 投影视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
 const DEFAULT_DELIVERED_WINDOW = 50
+
+/**
+ * port.send 悬挂兜底超时（b31-D1，C-proc-19 控制面单请求粒度：秒级）。
+ * port 契约（types.ts DeliveryPort.send）声明实现必须 settle；本兜底只覆盖适配器
+ * 违约的极端形态——超时按发送失败收口（warn 留痕 + 错误重试链），inFlight 复位可达。
+ * 已接受代价（与判重责任登记同源）：迟到原请求与重试可能构成重复投递，通道内判重
+ * 由适配器/对端按裸标记负责。
+ */
+const PORT_SEND_SETTLE_TIMEOUT_MS = 60_000
 
 /** sendChecked 的挂账：resolve/reject 挂钩所属条目的 port.send 受理结果。 */
 interface CheckedWaiter {
@@ -249,11 +279,13 @@ function settleChecked(
 }
 
 // ─── isIdle 安全调用（catch → 视为不可发送） ──────────────
-function safeIsIdle(port: DeliveryPort): boolean {
+// onFault：降级留痕钩子（b31-D3——静默降级必须可见；warn 频控由调用方裁决）
+function safeIsIdle(port: DeliveryPort, onFault?: (err: unknown) => void): boolean {
   try {
     return port.isIdle()
-  } catch {
+  } catch (err) {
     // session 已关闭等异常 → 视为不可发送
+    onFault?.(err)
     return false
   }
 }
@@ -261,12 +293,13 @@ function safeIsIdle(port: DeliveryPort): boolean {
 // ─── busy 判定（isIdle + hasPendingMessages 双条件，G4）────
 // 旧 scheduler gate 为 !isIdle() || hasPendingMessages()；内核单判 isIdle 会把
 // 「idle 但 pi 队列尚有消息未注入」误判为可投，提前投递与迁移前不等价。
-function isBusy(port: DeliveryPort): boolean {
-  if (!safeIsIdle(port)) return true
+function isBusy(port: DeliveryPort, onFault?: (err: unknown) => void): boolean {
+  if (!safeIsIdle(port, onFault)) return true
   try {
     return port.hasPendingMessages()
-  } catch {
+  } catch (err) {
     // 探测异常（session 关闭等）→ 保守视为 busy 不投
+    onFault?.(err)
     return true
   }
 }
@@ -331,10 +364,12 @@ export function createDelivery(
   let sendAttempts = 0 // 当前出站批次的 port.send 尝试次数（错误重试计数）
   let mergeTimer: ReturnType<typeof setTimeout> | undefined
   let backoffTimer: ReturnType<typeof setTimeout> | undefined
+  let hangTimer: ReturnType<typeof setTimeout> | undefined // port.send 悬挂兜底（b31-D1）
   let watchdogTimer: ReturnType<typeof setInterval> | undefined
   let disposed = false
   let settledUnsub: (() => void) | undefined
   let missingKeyWarned = false // #12 dedupeKey 缺失提示按 handle 一次性
+  let probeFaultWarned = false // busy 探测异常降级提示按 handle 一次性（b31-D3，防退避循环刷屏）
   let idSeq = 0 // 内部条目 id 计数器（未显式传 id 时）
 
   // 去重（v1 内容级 dedupe 配置，与 v2 显式 id 幂等判重正交叠加）
@@ -367,7 +402,42 @@ export function createDelivery(
   }
 
   function notifyChange(): void {
-    for (const cb of changeSubs) cb()
+    // 回调异常隔离（b31-D2）：一处订阅者 throw 不得中断其余订阅者与状态机
+    for (const cb of changeSubs) {
+      try {
+        cb()
+      } catch (err) {
+        warn('onChange callback threw; isolated to keep notifying remaining subscribers', err)
+      }
+    }
+  }
+
+  /**
+   * onSettled 回调异常隔离（b31-D2）：回调异常 ≠ 投递失败，捕获留痕后状态机照常
+   * （状态迁移已先行落定，回调只负责通知面）。
+   */
+  function callOnSettled(msg: DeliveryMessage, outcome: 'delivered' | 'rejected'): void {
+    try {
+      cfg.onSettled?.(msg, outcome)
+    } catch (err) {
+      warn(`onSettled callback threw (outcome=${outcome}); isolated from delivery state machine`, err)
+    }
+  }
+
+  /**
+   * busy 探测降级留痕（b31-D3）：探测异常保守归 busy 属设计内降级，但零留痕违反
+   * 红线。按 handle 一次性 warn——gate 退避 100ms 循环下逐次 warn 会刷屏（复用
+   * missingKeyWarned 一次性模式）。
+   */
+  function warnProbeFault(err: unknown): void {
+    if (probeFaultWarned) return
+    probeFaultWarned = true
+    warn('port busy probe (isIdle/hasPendingMessages) threw; conservatively treating as busy', err)
+  }
+
+  /** isBusy(port) 的 handle 内包装：挂接降级留痕钩子。 */
+  function isBusySafe(): boolean {
+    return isBusy(port, warnProbeFault)
   }
 
   /** 活跃条目是否仍在册（出站批/迟到回执守卫：已 cancel/drain/dispose 的条目不在）。 */
@@ -416,8 +486,8 @@ export function createDelivery(
 
   // ─── 合批窗口 timer ─────────────────────────────────────────
   // 拆 clear/arm 两半：合批路径用 resetMergeTimer（清旧 + 重设窗口）；非合批路径
-  // 只 clear——立即投递无窗口语义，重设会留下一个到期触发 flush 的孤儿 timer
-  // （park 策略下成为意外的「外部触发」，把本应等待的消息冲出）。
+  // 只 clear——立即投递无窗口语义，重设会留下一个到期触发 flush 的孤儿 timer，
+  // 成为意外的「外部触发」，把本应等待的消息提前冲出。
   function clearMergeTimer(): void {
     if (mergeTimer !== undefined) {
       clearTimeout(mergeTimer)
@@ -439,13 +509,29 @@ export function createDelivery(
     armMergeTimer()
   }
 
+  /** gate 退避 timer 清理（b31-R3 复用收敛：与 stopWatchdog 同款 helper 三处复用）。 */
+  function clearBackoffTimer(): void {
+    if (backoffTimer !== undefined) {
+      clearTimeout(backoffTimer)
+      backoffTimer = undefined
+    }
+  }
+
+  /** port.send 悬挂兜底 timer 清理（随批次终态/drain/dispose 撤销兜底）。 */
+  function clearHangTimer(): void {
+    if (hangTimer !== undefined) {
+      clearTimeout(hangTimer)
+      hangTimer = undefined
+    }
+  }
+
   // ─── settled 订阅管理 ──────────────────────────────────────
   function ensureSettledSub(): void {
     if (settledUnsub || !port.subscribeSettled) return
     settledUnsub = port.subscribeSettled(() => {
       if (disposed) return
       // settled 边沿 → busy 复核（isIdle 已先于事件复位，agent-session.js:327-336）→ flush
-      if (!isBusy(port)) {
+      if (!isBusySafe()) {
         flush()
       }
     })
@@ -465,7 +551,7 @@ export function createDelivery(
     watchdogTimer = setInterval(() => {
       if (disposed || inFlight) return
       if (!hasQueuedEntries()) return
-      if (!isBusy(port)) {
+      if (!isBusySafe()) {
         flush()
       }
     }, cfg.watchdogMs)
@@ -486,9 +572,36 @@ export function createDelivery(
     try {
       const result = port.send(composed, intent)
       if (isThenable(result)) {
+        // 悬挂兜底（b31-D1）：port 契约声明实现必须 settle；适配器违约（promise 永不
+        // settle）时 inFlight 防重永久占位、watchdog/pump 全被短路 → handle 停摆。
+        // 超时按发送失败收口（warn 留痕 + 错误重试链），量级 = 控制面单请求秒级
+        // （C-proc-19）。settled 单向闩：超时强制失败后迟到的原 settle 不得二次驱动
+        // 状态机（重复投递代价已在 DeliveryPort.send 契约登记）。
+        let settled = false
+        clearHangTimer()
+        hangTimer = setTimeout(() => {
+          if (settled || disposed) return
+          settled = true
+          hangTimer = undefined
+          warn(
+            `port.send hung; force-failed after ${PORT_SEND_SETTLE_TIMEOUT_MS}ms ` +
+              '(retries may duplicate-deliver; see DeliveryPort.send settle contract)',
+          )
+          onSendFail(new Error(`port.send promise did not settle within ${PORT_SEND_SETTLE_TIMEOUT_MS}ms`))
+        }, PORT_SEND_SETTLE_TIMEOUT_MS)
         result.then(
-          (receipt) => onSendReceipt(receipt),
-          (err: unknown) => onSendFail(err),
+          (receipt) => {
+            if (settled) return
+            settled = true
+            clearHangTimer()
+            onSendReceipt(receipt)
+          },
+          (err: unknown) => {
+            if (settled) return
+            settled = true
+            clearHangTimer()
+            onSendFail(err)
+          },
         )
       } else {
         onSendReceipt(result)
@@ -575,7 +688,7 @@ export function createDelivery(
         e.updatedAt = ts
         e.settledAt = ts
         changed = true
-        cfg.onSettled?.(e.msg, 'rejected')
+        callOnSettled(e.msg, 'rejected')
       }
       if (changed) notifyChange()
       pump()
@@ -636,18 +749,12 @@ export function createDelivery(
     // in-flight 防重（含错误重试在途：不打断其重试节奏，也不清其 timer）
     if (inFlight) return
 
-    // park 策略：不主动重试，等外部触发
-    if (cfg.busyPolicy === 'park' && attempt > 0) return
-
     // 清残留 gate 退避 timer（settled 回调 / flush 外部入口可能覆盖旧 schedule；
     // 错误重试 timer 不在此列——inFlight 时上面已提前 return）
-    if (backoffTimer !== undefined) {
-      clearTimeout(backoffTimer)
-      backoffTimer = undefined
-    }
+    clearBackoffTimer()
 
     // busy gate（isIdle + hasPendingMessages 双条件）
-    if (isBusy(port) && attempt < cfg.backoff.max) {
+    if (isBusySafe() && attempt < cfg.backoff.max) {
       if (port.subscribeSettled) {
         // 有订阅装配：busy 消息由 settled 边沿驱动，退避强发不启动（与事件驱动
         // 竞速会提前注入正在进行的 run）；watch-dog 兜底 settled 丢失（D8）
@@ -719,23 +826,29 @@ export function createDelivery(
 
   // ─── 入口函数 ──────────────────────────────────────────────
 
-  function send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void {
-    if (disposed) return
+  function send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): DeliverySendResult {
+    if (disposed) {
+      warn('send ignored: delivery handle disposed (caller should re-create the handle)')
+      return { kind: 'rejected', reason: 'disposed' }
+    }
 
     // 1. payload 能力 fail-fast（D9）
     if (!port.supportedPayloads.includes(msg.payload.kind)) {
       warn(`unsupported payload kind: ${msg.payload.kind}`)
-      return
+      return { kind: 'rejected', reason: 'unsupported-payload' }
     }
 
     // 2. 显式 id 幂等判重（D5②：resync 重报已 delivered/cancelled 的 id 不重投）
-    if (seenId(opts?.id)) return
+    if (seenId(opts?.id)) {
+      warn(`send swallowed by idempotency dedupe: id already seen (id=${opts?.id})`)
+      return { kind: 'swallowed', reason: 'already-seen' }
+    }
 
     // 3. dedup（v1 内容级，正交保留）
-    if (!passDedupe(msg)) return
+    if (!passDedupe(msg)) return { kind: 'swallowed', reason: 'duplicate-content' }
 
     // 4. 入条目（queued）
-    createEntry(msg, opts)
+    const entry = createEntry(msg, opts)
 
     // 5. 合批窗口判定
     const useMerge =
@@ -746,13 +859,14 @@ export function createDelivery(
       resetMergeTimer()
       // 订阅 settled（等待边沿唤醒）
       ensureSettledSub()
-      return
+      return { kind: 'accepted', id: entry.id }
     }
 
     // 6. 立即投：无合批依赖。只清残留合批 timer（不重设——见 clearMergeTimer 注释）
     clearMergeTimer()
     ensureSettledSub() // 确保 settled 订阅
     scheduleFlush(0)
+    return { kind: 'accepted', id: entry.id }
   }
 
   async function sendChecked(msg: DeliveryMessage, opts?: DeliverySubmitOptions): Promise<void> {
@@ -763,8 +877,11 @@ export function createDelivery(
       throw new Error(`unsupported payload kind: ${msg.payload.kind}`)
     }
 
-    // 显式 id 幂等判重（已见过，resolve——与 dedupe 命中同语义）
-    if (seenId(opts?.id)) return
+    // 显式 id 幂等判重（已见过，resolve——与 dedupe 命中同语义；b31-D3 留痕）
+    if (seenId(opts?.id)) {
+      warn(`sendChecked swallowed by idempotency dedupe: id already seen (id=${opts?.id})`)
+      return
+    }
 
     // dedupe
     if (!passDedupe(msg)) return // 已见过，resolve
@@ -790,11 +907,7 @@ export function createDelivery(
 
   function flush(): void {
     if (disposed) return
-    // 清合批 timer
-    if (mergeTimer !== undefined) {
-      clearTimeout(mergeTimer)
-      mergeTimer = undefined
-    }
+    clearMergeTimer()
     scheduleFlush(0)
   }
 
@@ -819,13 +932,10 @@ export function createDelivery(
         tombstones: [...tombstones.values()].map((t) => ({ ...t })),
       }
     }
-    // 投影视图（D5③）：活跃全量 + delivered 最近 N 条完整条目；cancelled 不投影
-    // （cancel 即出活跃集且不进 deliveredLog，结构性满足）。window=0 = delivered
-    // 全裁（注意 slice(-0) 会退化为全量，须显式分支）
-    const window = options.deliveredWindow ?? DEFAULT_DELIVERED_WINDOW
-    const deliveredSlice = window > 0 ? deliveredLog.slice(-window) : []
-    const projected = [...active.map(snapshot), ...deliveredSlice.map(snapshot)]
-    return { entries: projected }
+    // 投影视图（D5③）：活跃全量 + delivered 最近 50 条完整条目（deliveredLog 环形
+    // 留存上限即 DEFAULT_DELIVERED_WINDOW，投影恒用默认常量）；cancelled 不投影
+    // （cancel 即出活跃集且不进 deliveredLog，结构性满足）
+    return { entries: [...active.map(snapshot), ...deliveredLog.map(snapshot)] }
   }
 
   function onChange(cb: () => void): () => void {
@@ -836,7 +946,10 @@ export function createDelivery(
   }
 
   function confirmDelivered(id: string): boolean {
-    if (disposed) return false
+    if (disposed) {
+      warn(`confirmDelivered ignored: delivery handle disposed (id=${id})`)
+      return false
+    }
     const e = activeIndex.get(id)
     if (!e) return false // 未知 id / 已终态（tombstone 在册）：幂等 no-op
     // 接受 in-flight（正规送达路径）与 queued（扩展①：rebuild 直确认 / 出站中
@@ -844,12 +957,16 @@ export function createDelivery(
     if (e.state !== 'queued' && e.state !== 'in-flight') return false
     finalizeEntry(e, 'delivered')
     // D9⑤：'delivered' 仅由送达回执（本调用）驱动回调；per-message 契约保持
-    if (!disposed) cfg.onSettled?.(e.msg, 'delivered')
+    if (!disposed) callOnSettled(e.msg, 'delivered')
     return true
   }
 
   function requeue(ids: readonly string[]): number {
-    if (disposed || ids.length === 0) return 0
+    if (disposed) {
+      warn('requeue ignored: delivery handle disposed')
+      return 0
+    }
+    if (ids.length === 0) return 0
     const found: KernelEntry[] = []
     const seen = new Set<string>()
     for (const id of ids) {
@@ -881,7 +998,12 @@ export function createDelivery(
   }
 
   function cancel(id: string): DeliveryCancelResult {
-    if (disposed) return { kind: 'not-found' }
+    if (disposed) {
+      // disposed 后按 b31-D6 以 not-found 返回（判别联合不扩面，runtime 消费方零改动），
+      // 真因经 warn 留痕（返回值语义失真 = 观测问题，不是状态问题）
+      warn(`cancel ignored: delivery handle disposed (id=${id}, reported as not-found)`)
+      return { kind: 'not-found' }
+    }
     const e = activeIndex.get(id)
     if (!e) {
       const tb = tombstones.get(id)
@@ -909,12 +1031,10 @@ export function createDelivery(
 
   function drain(): DrainResult {
     if (disposed) return []
-    // 清调度 timer（合批/重试/gate 退避）；watchdog 随队列清空一并停
+    // 清调度 timer（合批/重试/gate 退避）+ 悬挂兜底；watchdog 随队列清空一并停
     clearMergeTimer()
-    if (backoffTimer !== undefined) {
-      clearTimeout(backoffTimer)
-      backoffTimer = undefined
-    }
+    clearBackoffTimer()
+    clearHangTimer()
     const drained = active.slice()
     active.length = 0
     activeIndex.clear()
@@ -946,14 +1066,9 @@ export function createDelivery(
     disposed = true
 
     // 清所有 timer
-    if (mergeTimer !== undefined) {
-      clearTimeout(mergeTimer)
-      mergeTimer = undefined
-    }
-    if (backoffTimer !== undefined) {
-      clearTimeout(backoffTimer)
-      backoffTimer = undefined
-    }
+    clearMergeTimer()
+    clearBackoffTimer()
+    clearHangTimer()
     stopWatchdog()
     teardownSettledSub()
 

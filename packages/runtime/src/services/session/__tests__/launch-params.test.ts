@@ -40,7 +40,7 @@ import {
 import { SessionLifecycle, setMigrationGate } from '../session-lifecycle.js'
 import { PresetService } from '../../preset-service.js'
 import { ExtensionService } from '../../extension-service.js'
-import type { ILifecycleSessionOps, ISessionRegisterDeps, ManagedSession } from '../session-internal.js'
+import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../session-internal.js'
 import type { IConfigStore } from '../../ports/config.js'
 import type { IExtensionService, IConfigService } from '../../../interfaces.js'
 import type { PresetService as PresetServiceType, PresetResolution } from '../../preset-service.js'
@@ -585,8 +585,8 @@ function makeP2Env(userPresetsFile?: unknown) {
     toSummary: (s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: 'test', cwd: s.cwd, status: 'idle', lastActiveAt: Date.now(),
       modelId: s.modelId, tokenCount: 0,
-      // binding 扩展字段经 as 读取（ManagedSession 既有 patch 模式，session-internal.ts）
-      launchPresetId: (s as ManagedSession).launchPresetId,
+      // launchPresetId 已收编进 IManagedSessionView（types.ts），直接读
+      launchPresetId: s.launchPresetId,
     }),
     notifySessionCreated: vi.fn(),
     findScannedSession: () => undefined,

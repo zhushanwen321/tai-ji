@@ -178,8 +178,8 @@ function resolveStartModel(options: RpcClientOptions): string | undefined {
 /**
  * bash RPC 超时解析（timeout-slow-flow-wallclock D2 env 逃生门）。
  *
- * 优先级：env `TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS`（0=不限时，非法/负值回退默认）>
- * shared `BASH_RPC_TIMEOUT_MS`（1h）。env 覆盖读取刻意留在 runtime 侧（renderer 不可达
+ * 优先级：env `TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS`（0=不限时；空/空白/非法/负值回退默认）
+ * > shared `BASH_RPC_TIMEOUT_MS`（1h）。env 覆盖读取刻意留在 runtime 侧（renderer 不可达
  * 进程 env），renderer 侧 backstop 由 D5 的 shared 常量 + margin 独立取值。
  *
  * 读一次缓存：pi 是长驻子进程，超时决策在进程生命周期内稳定——若每次 bash() 重读 env，
@@ -191,8 +191,10 @@ let cachedBashRpcTimeoutMs: number | null = null
 
 export function resolveBashRpcTimeoutMs(): number {
   if (cachedBashRpcTimeoutMs === null) {
-    const raw = process.env.TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS
-    const parsed = raw !== undefined ? Number(raw) : Number.NaN
+    // 空串防御（harden b23-6）：`Number('') === 0` 会把「env 设了空值」折成 0=不限时，
+    // 意外解除任务级兜底——空/空白必须与未设同待遇（回退默认），只有显式写 0 才是不限时。
+    const raw = process.env.TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS?.trim()
+    const parsed = raw ? Number(raw) : Number.NaN
     cachedBashRpcTimeoutMs = Number.isFinite(parsed) && parsed >= 0 ? parsed : BASH_RPC_TIMEOUT_MS
   }
   return cachedBashRpcTimeoutMs
@@ -407,11 +409,9 @@ export class RpcClient implements IPiEngine {
     })
 
     // Parse stdout JSONL（D10：LF-only 读取器，U+2028/U+2029 不拆帧——pi rpc/jsonl.js 帧协议的对端）
-    // stdout error 吞转发（2026-09-04 事故审计，原 readline 防护语义在 LF-only 读取器上保留）：
-    // pi 崩溃/被杀时 stdout 管道流错误无 listener 直接 throw 成 uncaughtException →
-    // 整机 shutdown（stderr 已有同款防护，见下方 stderr 段注释）；attachLfOnlyLineReader
-    // 只挂 data/end，error 防护在此补齐；pi 退出处置归 exit/kill 链路，此处只堵转发逃逸。
-    proc.stdout!.on('error', () => {})
+    // stdout error 防护由下方 stream error 统一接线承接（2026-09-04 事故审计：pi 崩溃/被杀时
+    // 管道流错误无 listener 会升级成 uncaughtException → 整机 shutdown；attachLfOnlyLineReader
+    // 只挂 data/end）；pi 退出处置归 exit/kill 链路，此处只堵转发逃逸。
     attachLfOnlyLineReader(proc.stdout!, (line) => {
       if (!line.trim()) return
       // tee 原始 JSONL 到 pi session 日志（架构约定 #4，卡死诊断证据）
@@ -425,35 +425,24 @@ export class RpcClient implements IPiEngine {
       }
     })
 
-    // W2：监听 stdout stream 的 'error' 事件。
-    // proc.on('error') 只覆盖 spawn 失败；stdout 是独立的 Readable stream，pi 崩溃 /
-    // 管道断裂（EPIPE / ECONNRESET）时 stdout 会 emit 'error'，若无 listener 则升级为
-    // uncaughtException → runtime 主进程崩溃。此处捕获后 rejectAll pending 并标记 _exited，
-    // 把 stream error 纳入与进程退出相同的清理路径。
+    // W2：stdout/stdin/stderr 三个 stream 的 'error' 统一接线（handleStreamError 单实现）。
+    // 为什么必须在源头接线：proc.on('error') 只覆盖 spawn 失败；stdout/stderr 是独立
+    // Readable stream，pi 崩溃 / 管道断裂（EPIPE / ECONNRESET）时它们各自 emit 'error'，
+    // 若无 listener 则升级为 uncaughtException → runtime 主进程崩溃（2026-09-04 stdout
+    // 事故）。stdin 是 runtime → pi 的唯一写入面（sendCommand / sendRaw）；pi 半关闭
+    // （写端已死）或崩溃后再写 stdin，流错误（EPIPE / ERR_STREAM_DESTROYED）异步 emit
+    // 到 stdin——写调用本身不抛，try/catch 接不住；若无 listener 会被 uncaught-policy
+    // log-continue 吞掉：_exited 不置位、pending 不 reject、自愈强杀不触发 → 后续每条
+    // RPC 各挂满超时且误归因「pi 无响应」（RT-2#1）。故三个流都必须在源头接线，不得
+    // 依赖 uncaught-policy 兜底。
     //
-    // 管道断裂但进程可能仍存活（孤儿泄漏）：SIGKILL 加速其死亡，让下方 proc.on('exit')
-    // 作为死亡通知的唯一出口（避免「stream error 通知 + exit 通知」双触发）。
-    // 刻意调 ChildProcess 原生 kill 而非 this.kill()：后者置 _killing=true，
+    // 管道断裂但进程可能仍存活（孤儿泄漏）：handleStreamError 内 SIGKILL 加速其死亡，
+    // 让 proc.on('exit') 作为死亡通知的唯一出口（避免「stream error 通知 + exit 通知」
+    // 双触发）。刻意调 ChildProcess 原生 kill 而非 this.kill()：后者置 _killing=true，
     // exit 处理器会跳过 exitCallbacks —— 死亡通知整条丢失。
-    proc.stdout?.on('error', (err: NodeJS.ErrnoException) => {
-      console.error('[rpc] stdout stream error:', err)
-      this._exited = true
-      this.rejectAll(new Error(`pi stdout stream error: ${err.message}`))
-      this.killProcAfterStreamError('stdout')
-    })
+    proc.stdout?.on('error', (err: NodeJS.ErrnoException) => this.handleStreamError('stdout', err))
 
-    // RT-2#1：stdin 流错误与 stdout/stderr 同款源头收口。stdin 是 runtime → pi 的唯一
-    // 写入面（sendCommand / sendRaw）；pi 半关闭（写端已死）或崩溃后再写 stdin，流错误
-    // （EPIPE / ERR_STREAM_DESTROYED）异步 emit 到 stdin——写调用本身不抛，try/catch 接不住。
-    // 若无 listener 会升级为 uncaughtException，被 uncaught-policy log-continue 吞掉：
-    // _exited 不置位、pending 不 reject、自愈强杀不触发 → 后续每条 RPC 各挂满超时且
-    // 误归因「pi 无响应」。故必须在源头接线，不得依赖 uncaught-policy 兜底。
-    proc.stdin?.on('error', (err: NodeJS.ErrnoException) => {
-      console.error('[rpc] stdin stream error:', err)
-      this._exited = true
-      this.rejectAll(new Error(`pi stdin stream error: ${err.message}`))
-      this.killProcAfterStreamError('stdin')
-    })
+    proc.stdin?.on('error', (err: NodeJS.ErrnoException) => this.handleStreamError('stdin', err))
 
     // 收集 stderr 用于错误诊断，同时转发到日志
     this.stderrChunks = []
@@ -472,20 +461,25 @@ export class RpcClient implements IPiEngine {
           this.stderrTruncated = true
         }
       })
-      // W2：同 stdout，stderr stream 的 'error' 独立于 proc.on('error')。
-      // pi 崩溃时 stderr 管道可能先断，未捕获会变 uncaughtException。捕获后 rejectAll + 标记 _exited。
-      proc.stderr.on('error', (err: NodeJS.ErrnoException) => {
-        console.error('[rpc] stderr stream error:', err)
-        this._exited = true
-        this.rejectAll(new Error(`pi stderr stream error: ${err.message}`))
-        this.killProcAfterStreamError('stderr')
-      })
+      proc.stderr.on('error', (err: NodeJS.ErrnoException) => this.handleStreamError('stderr', err))
     }
   }
 
   /**
+   * 三个 stream（stdout/stdin/stderr）'error' 的统一处置（W2，单实现收敛自三块近似复制）：
+   * console.error 留痕 → 置 _exited → rejectAll pending → SIGKILL 加速进程死亡。
+   * 注册点语义与降级理由见 wireProcessHandlers 内 stream error 接线段注释。
+   */
+  private handleStreamError(stream: 'stdout' | 'stdin' | 'stderr', err: NodeJS.ErrnoException): void {
+    console.error(`[rpc] ${stream} stream error:`, err)
+    this._exited = true
+    this.rejectAll(new Error(`pi ${stream} stream error: ${err.message}`))
+    this.killProcAfterStreamError(stream)
+  }
+
+  /**
    * stream error 后 SIGKILL 加速进程死亡（W2，死亡通知唯一出口语义）——
-   * 细节与降级理由见 wireProcessHandlers 内 stdout 段注释。
+   * 细节与降级理由见 wireProcessHandlers 内 stream error 接线段注释。
    */
   private killProcAfterStreamError(stream: 'stdout' | 'stderr' | 'stdin'): void {
     try {
@@ -671,13 +665,6 @@ export class RpcClient implements IPiEngine {
   }
 
   /**
-   * timeout ≤ 0 = 不限时：不挂墙钟 timer，pending 等到响应/进程退出才 settle。
-   * 唯一合法入口是 bash RPC 的 env 逃生门 `TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS=0`
-   * （timeout-slow-flow-wallclock D2：0=不限时）——其余命令不得传 ≤0（控制面单请求
-   * 秒级是有界兜底档，规则 19）。clearTimeout(undefined) 是 no-op，resolve/reject
-   * 路径对无 timer 形态天然安全。
-   */
-  /**
    * 向 pi stdin 写入一行原始 JSON，不注册 pending、不等 RPC reply。
    *
    * 用于 pi 不回复 `{type:'response'}` 的命令（目前仅 `extension_ui_response`——
@@ -731,7 +718,9 @@ export class RpcClient implements IPiEngine {
       }
 
       // pending 注册（pi-rpc registry 部件）：timeout ≤ 0 = 不限时（D2 env 逃生门
-      // 0=不限时，唯一合法入口是 bash RPC）；超时时序（delete → timedOutIds 记入
+      // 0=不限时，唯一合法入口是 bash RPC——其余命令不得传 ≤0，控制面单请求秒级是
+      // 有界兜底档，规则 19）；不挂墙钟 timer 的形态下 clearTimeout(undefined) 是
+      // no-op，resolve/reject 路径天然安全。超时时序（delete → timedOutIds 记入
       // 5s TTL → reject）在部件内与迁移前逐字一致。
       this.pendingRegistry.register(
         id,
@@ -762,10 +751,7 @@ export class RpcClient implements IPiEngine {
 
       try {
         console.log('[rpc] send: type=' + type)
-        const ok = this.proc.stdin!.write(msg)
-        if (!ok) {
-          this.proc.stdin!.once('drain', () => {})
-        }
+        this.proc.stdin!.write(msg)
       } catch (e) {
         this.pendingRegistry.cancel(id)
         reject(new Error(`Failed to write to pi stdin: ${e}`))
@@ -972,18 +958,12 @@ export class RpcClient implements IPiEngine {
     return this.sendCommand('set_session_name', { name }, FAST_TIMEOUT_MS)
   }
 
-  /** [DEAD] pi get_messages 死路径——生产零调用（session-service.getHistory 走 client.getEntries entry 树重建）。
-   *  保留供未来扁平 message 列表场景；删除前确认无 mock/测试依赖。 */
-  getHistory(): Promise<PiMessage> {
-    return this.sendCommand('get_messages')
-  }
-
   /**
    * 拉取 pi session 的完整 entry 树（get_entries RPC）。
    *
-   * 与 getHistory（get_messages，只返回扁平 message 列表）不同：get_entries 返回全部 entry 类型
-   * （message/custom/label/compaction/branch_summary/...），含 parentId 树结构。
-   * entry-tree-builder 用 message entry + "taiji.client-msg-id" custom entry 重建结构化 Message[]。
+   * 返回全部 entry 类型（message/custom/label/compaction/branch_summary/...），含 parentId
+   * 树结构。entry-tree-builder 用 message entry + "taiji.client-msg-id" custom entry 重建
+   * 结构化 Message[]。
    *
    * since 可选：传 entry id 时返回该 entry 之后的 entry（增量拉取，pi 找不到 since id 会报错）。
    * 返回的 PiMessage.data 已由 sendCommand 归一（data ?? payload），调用方按 GetEntriesResponse 断言。
@@ -1046,14 +1026,6 @@ export class RpcClient implements IPiEngine {
   /** 取消进行中的 bash 执行（pi abort_bash 命令）。 */
   abortBash(): Promise<PiMessage> {
     return this.sendCommand('abort_bash')
-  }
-
-  /**
-   * Clear is not directly supported by pi RPC. Use new_session instead.
-   * Kept for API compatibility — creates a new session.
-   */
-  clear(): Promise<PiMessage> {
-    return this.sendCommand('new_session')
   }
 
   async getCommands(): Promise<PiCommandInfo[]> {

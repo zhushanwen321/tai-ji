@@ -85,11 +85,12 @@ describe('usage fetchSnapshot（get_session_stats contextUsage 投影）', () =>
     await expect(cfg({ contextUsage: {} }).fetchSnapshot()).resolves.toEqual({})
   })
 
-  it('正常投影：tokens / contextWindow / percent 三字段（percent 缺省 0）', async () => {
+  it('正常投影：tokens / contextWindow / percent 三字段（percent 无值 = 字段缺省，不折 0）', async () => {
     await expect(cfg({ contextUsage: { tokens: 1000, contextWindow: 10000, percent: 10 } }).fetchSnapshot())
       .resolves.toEqual({ inputTokens: 1000, contextLimit: 10000, usagePercent: 10 })
+    // [R2-b23-2] 无值缺省（RT-4#7 纪律）：null 不折成合法 0% 假信号
     await expect(cfg({ contextUsage: { tokens: 500, contextWindow: 8000 } }).fetchSnapshot())
-      .resolves.toEqual({ inputTokens: 500, contextLimit: 8000, usagePercent: 0 })
+      .resolves.toEqual({ inputTokens: 500, contextLimit: 8000 })
   })
 
   it('percent 越界 clamp 100；contextWindow 非 number → 0（投影口径对齐 fetchContext）', async () => {

@@ -57,27 +57,22 @@ function msg(type: string, payload: Record<string, unknown>, id = 'm1'): ClientM
 const WS = {} as never
 
 describe('W1/L4: session.create/fork model 未配置返回 MODEL_NOT_CONFIGURED', () => {
-  it('create: model 未配置 → sendError(MODEL_NOT_CONFIGURED)，不 reply success', async () => {
+  it('create: model 未配置 → 错误上抛（MODEL_NOT_CONFIGURED 信封由 server 中央透传等价给出）', async () => {
     const createError = errorWithCode(
       'No model configured. Please configure a provider and model in Settings before starting a session.',
       MODEL_NOT_CONFIGURED,
     )
     const { cap, handler } = makeHandler(vi.fn().mockRejectedValue(createError))
-    await handler.handleSessionMessage(
+    // [R3-b22-S2] create/fork 的专用 try/catch 已删——错误上抛 server.ts 外层 catch，
+    // code 信封逐字节等价由 server-error-envelope 套件锁定；此处断言不吞错且 code 不变
+    await expect(handler.handleSessionMessage(
       msg('session.create', { cwd: '/repo', label: 'repo' }),
       WS,
-    )
-    expect(cap.errors).toHaveLength(1)
-    expect(cap.errors[0]).toMatchObject({
-      id: 'm1',
-      code: MODEL_NOT_CONFIGURED,
-      message: expect.stringContaining('No model configured'),
-    })
-    // 关键：不 reply success（否则前端误判 session 已创建）
+    )).rejects.toMatchObject({ code: MODEL_NOT_CONFIGURED })
     expect(cap.replies).toHaveLength(0)
   })
 
-  it('fork: model 未配置 → sendError(MODEL_NOT_CONFIGURED)，不 reply success', async () => {
+  it('fork: model 未配置 → 错误上抛（MODEL_NOT_CONFIGURED 信封由 server 中央透传等价给出）', async () => {
     const forkError = errorWithCode(
       'No model configured. Please configure a provider and model in Settings before forking a session.',
       MODEL_NOT_CONFIGURED,
@@ -86,12 +81,10 @@ describe('W1/L4: session.create/fork model 未配置返回 MODEL_NOT_CONFIGURED'
       vi.fn().mockResolvedValue({ id: 's1' }),
       vi.fn().mockRejectedValue(forkError),
     )
-    await handler.handleSessionMessage(
+    await expect(handler.handleSessionMessage(
       msg('session.fork', { srcSessionId: 'src1', fromPiEntryId: 'entry1', includeFrom: true }),
       WS,
-    )
-    expect(cap.errors).toHaveLength(1)
-    expect(cap.errors[0]).toMatchObject({ id: 'm1', code: MODEL_NOT_CONFIGURED })
+    )).rejects.toMatchObject({ code: MODEL_NOT_CONFIGURED })
     expect(cap.replies).toHaveLength(0)
   })
 

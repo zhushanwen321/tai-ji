@@ -335,6 +335,30 @@ describe('u2 错误分类迁移（D6）', () => {
     expect(h.registry.entries('s1')?.tombstones).toHaveLength(0)
   })
 
+  it('pi 重生（句柄变更）→ pi 侧压缩标记随旧进程作废：持有释放、挂起条目重投（自愈）', async () => {
+    const h = makeHarness({ promptError: new Error(PI_COMPACTING_MSG) })
+    h.registry.submit('s1', { content: '撞压缩后 pi 重生', clientUuid: 'u-3c333333-3333-4333-8333-333333333333' })
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(1) // 首次尝试：pi 报压缩中 → piCompactingBlocked 置位持有
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued')
+
+    // pi 崩溃 respawn：compaction_end 事件随旧进程消失，事件型对账触发 ensureActive
+    // 拿到新句柄 → watchClient 句柄变更 → 压缩标记重置（自愈入口）
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      return {}
+    })
+    const respawned = { ...h.client } as unknown as IPiEngine
+    h.deps.ensureActive = vi.fn(async () => respawned)
+    await h.registry.reconcile('s1', 'agent-settled')
+
+    // 修复前：标记永挂 → waitDeliverable 永不释放、条目永不重投
+    await vi.advanceTimersByTimeAsync(1200)
+    await h.flush()
+    expect(h.promptCalls.length).toBeGreaterThanOrEqual(2)
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
+  })
+
   it('pi 报 already processing（runtime 不知情的 turn）→ occupancy 反转 generating + 按 steer 重投', async () => {
     const h = makeHarness({ promptError: new Error(PI_PROCESSING_MSG) })
     h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
@@ -422,6 +446,32 @@ describe('u2 撤销（cancel）', () => {
     const redelivered = h.promptCalls.slice(2).map((c) => c[0] as string)
     expect(redelivered.some((t) => t.includes('保留的'))).toBe(true)
     expect(redelivered.every((t) => !t.includes('撤销的'))).toBe(true)
+  })
+
+  it('同文本两条 + 撤销第一条：第二条按自身条目 id 正常出站（判定锚 = marker 身份，非全文反查）', async () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const id1 = 'u-30000001-0000-4000-8000-000000000001'
+    const id2 = 'u-30000002-0000-4000-8000-000000000002'
+    h.registry.submit('s1', { content: '同文本', clientUuid: id1 })
+    h.registry.submit('s1', { content: '同文本', clientUuid: id2 })
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(0) // 持有期：两条都在册
+
+    const outcome = await h.registry.cancel('s1', id1)
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.content).toContain('同文本')
+
+    applySessionOccupancyTransition(h.view, null, 'compacting-end')
+    await vi.advanceTimersByTimeAsync(600)
+    await h.flush()
+    // 修复前：第二条出站按全文反查命中第一条的已撤销记录 → 被当作已撤销跳过（消息消失）
+    expect(h.promptCalls).toHaveLength(1)
+    expect(h.promptCalls[0]![0] as string).toContain('30000002')
+    const full = h.registry.entries('s1')!
+    expect(full.tombstones.some((t) => t.id === id1 && t.state === 'cancelled')).toBe(true)
+    expect(full.active).toHaveLength(1)
+    expect(full.active[0]).toMatchObject({ id: id2, state: 'in-flight' })
   })
 })
 

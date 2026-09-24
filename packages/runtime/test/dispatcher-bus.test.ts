@@ -35,11 +35,7 @@ import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
-
-/** flush 投递交接异步链（port.send → ensureActive → inject → prompt）。 */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 30; i += 1) await Promise.resolve()
-}
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
   return {
@@ -145,7 +141,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('pi crashed'),
     })
     await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.error' }))
     // occupancy 帧（u5a-p3）先于 message.error 入列，按 type 定位（原 calls[0] 断言失真同步）
     const errCall = messageBus.publish.mock.calls.map((c: any[]) => c[1]).find((m: ServerMessage) => m.type === 'message.error')
@@ -156,7 +152,7 @@ describe('message-dispatcher bus integration', () => {
   it('sendMessage busy → 零 send.rejected（u2 退役：排队取代拒绝，改由内核按 steer 承接）', async () => {
     const { dispatcher, messageBus } = makeMocks({ isGenerating: true })
     await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
     // 退役面显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
     const types = messageBus.publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
     expect(types).not.toContain('send.rejected')
@@ -427,7 +423,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('s1', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
     // occupancy 帧（u5a-p3：dispatching + catch 复位 idle）与 message.error 并存，
     // 本用例锁的是 message.error 单通道无双发——按 type 过滤后计数（原全量计数失真同步）。
     const errCalls = messageBus.publish.mock.calls.filter(
@@ -444,7 +440,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('my-session-123', 'hello')
-    await flushDelivery()
+    await flushDelivery(30)
     expect(messageBus.publish).toHaveBeenCalledWith('my-session-123', expect.any(Object))
   })
 })

@@ -1,15 +1,15 @@
 /**
- * 错误分类迁移（D6）与拒绝面退役验收测试（u2 迁移自 message-dispatcher-send-rejection.test.ts）。
+ * 错误分类迁移（D6）验收测试。
  *
- * 迁移口径（原断言 → 新落点）：
+ * 迁移口径：
  * - `classifyPromptRejection` 双字符串映射：**逐字保留**（迁移后由内核适配器
  *   session-delivery-registry.promptWithBusyRetry 消费；dispatcher 侧 re-export 保持既有
  *   import 路径与 PS-22/PS-23 探针锁定面）。registry 侧行为断言见
  *   src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
- * - busy 预检分型 + `send.rejected` 广播：**退役**（排队取代拒绝 D5）——原断言强度平移到
- *   「零拒绝广播 + 内核在册承接」面；compacting 拒绝 → 持有等 compaction_end（D6 行）；
- *   processing 拒绝 → occupancy 反转 generating（D6 行，防幽灵空闲）。
- * - 非 busy pi 错误：message.error 保留（错因可见），零 send.rejected。
+ * - pi busy 类拒绝的处置迁移（compacting → 持有等 compaction_end；processing → occupancy
+ *   反转 generating；非 busy → message.error）在本文件锁定。
+ * - busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
+ *   src/services/session/__tests__/message-dispatcher.test.ts（同构用例已收拢，本文件不再重复）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-send-rejection.test.ts
  */
@@ -21,7 +21,6 @@ import {
   resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
-import { applySessionOccupancyTransition } from '../services/session/event-interpreter.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
 import type { IManagedSessionView } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
@@ -162,48 +161,9 @@ describe('classifyPromptRejection —— pi 拒绝原文映射（D6 识别函数
   })
 })
 
-describe('busy 预检与 send.rejected 退役（D5：排队取代拒绝）', () => {
-  it('isCompacting=true：零 send.rejected + 内核排队 + 不调 prompt；compaction_end 后自动投递', async () => {
-    const h = makeMocks({ isCompacting: true })
-    const result = await h.dispatcher.sendMessage('s1', 'hello')
-    await h.flush()
-    expect(result).toMatchObject({ blocked: false })
-    expect(findRejected(h.broadcasts)).toBeUndefined()
-    expect(h.promptFn).not.toHaveBeenCalled()
-    expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（不丢）
-
-    applySessionOccupancyTransition(h.session, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
-    await h.flush()
-    expect(h.promptFn).toHaveBeenCalledTimes(1)
-  })
-
-  it('仅 isGenerating=true：零 send.rejected + 按 lane=steer 即时投递（turn 边界注入）', async () => {
-    const h = makeMocks({ isGenerating: true })
-    const result = await h.dispatcher.sendMessage('s1', 'hello')
-    await h.flush()
-    expect(result).toMatchObject({ blocked: false })
-    expect(findRejected(h.broadcasts)).toBeUndefined()
-    expect(h.promptCalls[0]?.[2]).toBe('steer')
-  })
-
-  it('仅 isBashRunning=true：零 send.rejected + 持有（不调 prompt）', async () => {
-    const h = makeMocks({ isBashRunning: true })
-    const result = await h.dispatcher.sendMessage('s1', 'hello')
-    await h.flush()
-    expect(result).toMatchObject({ blocked: false })
-    expect(findRejected(h.broadcasts)).toBeUndefined()
-    expect(h.promptFn).not.toHaveBeenCalled()
-  })
-
-  it('clientUuid 透传进入内核条目 id（renderer 消歧锚从广播挪到条目 id）', async () => {
-    const h = makeMocks()
-    await h.dispatcher.sendMessage('s1', 'hello', undefined, 'u-11111111-1111-4111-8111-111111111111')
-    await h.flush()
-    expect(h.registry.entries('s1')?.active[0]?.id).toBe('u-11111111-1111-4111-8111-111111111111')
-    expect(h.promptCalls[0]?.[0] as string).toContain('<!--taiji:msg:11111111-1111-4111-8111-111111111111-->')
-  })
-})
+// busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
+// src/services/session/__tests__/message-dispatcher.test.ts「busy 维度退役」describe
+// （同构用例已收拢，本文件不再重复——R3-B2）。
 
 describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () => {
   it('manual 压缩原文（TOCTOU）→ 零 send.rejected + 持有等 compaction_end（不误判失败）', async () => {
@@ -250,6 +210,14 @@ describe('正常路径行为不变', () => {
     expect((h.promptCalls[0]?.[0] as string)).toContain('hello')
     expect(findRejected(h.broadcasts)).toBeUndefined()
     expect(findError(h.broadcasts)).toBeUndefined()
+  })
+
+  it('clientUuid 透传进入内核条目 id（renderer 消歧锚从广播挪到条目 id）', async () => {
+    const h = makeMocks()
+    await h.dispatcher.sendMessage('s1', 'hello', undefined, 'u-11111111-1111-4111-8111-111111111111')
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]?.id).toBe('u-11111111-1111-4111-8111-111111111111')
+    expect(h.promptCalls[0]?.[0] as string).toContain('<!--taiji:msg:11111111-1111-4111-8111-111111111111-->')
   })
 })
 

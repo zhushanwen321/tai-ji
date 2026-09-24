@@ -11,6 +11,10 @@
  * - **退役面显式断言**（原测试的否定面转正）：busy 预检与 send.rejected 退役后，busy 维度
  *   不再产生拒绝广播、不再拦提交（排队取代拒绝，D5），消息由内核在册持有。
  *
+ * 本文件是「busy 退役断言」与 dispatcher 投递错误路径的唯一归宿（原 message-dispatcher-precheck.test.ts
+ * 的独有断言已收编：prompt 失败 isGenerating 复位并入投递失败用例、workspace.record 降级单列；
+ * send-rejection 侧同构用例已删除，仅存 clientUuid 透传用例）。
+ *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/message-dispatcher.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -57,6 +61,8 @@ interface HarnessOptions {
   sessionByClient?: Partial<IManagedSessionView>
   /** [CP6 移植] deps.getSession 的返回视图（收口窗回调重查/置位断言用；缺省同 session）。 */
   sessionView?: unknown
+  /** workspace.record 同步抛错（best-effort 副作用的降级路径用例注入）。 */
+  recordWorkspaceError?: Error
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -89,6 +95,7 @@ function makeHarness(opts: HarnessOptions = {}) {
   const workspaceService = {
     record: vi.fn(() => {
       calls.push('record')
+      if (opts.recordWorkspaceError) throw opts.recordWorkspaceError
     }),
   } as unknown as WorkspaceService
   const published: ServerMessage[] = []
@@ -265,13 +272,34 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect('clientUuid' in (msg?.payload ?? {})).toBe(false)
   })
 
-  it('投递失败（prompt 抛错）→ message.error 广播 + 不发 skillNotice（提示不空投）', async () => {
+  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不空投）', async () => {
     const h = makeHarness({ promptError: new Error('rpc dead') })
     h.injectState.notices = [notice('skill_missing', ['ghost'])]
     await h.dispatcher.sendMessage('s1', '带 skill 的消息')
     await h.flush()
     expect(h.published.filter((m) => m.type === 'session.skillNotice')).toHaveLength(0)
     expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
+    // busy 态复位（原 precheck 用例收编）：turn 没跑起来，不得滞留 dispatching/isGenerating
+    expect(h.session.isGenerating).toBe(false)
+    expect(h.session.occupancy?.turn).toBe('idle')
+  })
+
+  it('workspace.record 抛同步异常 → 注册表 best-effort catch（warn 留痕）+ 投递不受阻（原 precheck W6 收编）', async () => {
+    const h = makeHarness({ recordWorkspaceError: new Error('cache boom') })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = await h.dispatcher.sendMessage('s1', 'hello')
+      await h.flush()
+      // 不向上抛，prompt 正常受理（record 失败不阻断发消息主流程）
+      expect(result.blocked).toBe(false)
+      expect(h.client.prompt).toHaveBeenCalledTimes(1)
+      // prompt 成功置位不回退（record 副作用失败不影响状态机）
+      expect(h.session.isGenerating).toBe(true)
+      // 有诊断信号（非 fail-silent）
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('无 notices 时不发布任何 skillNotice', async () => {

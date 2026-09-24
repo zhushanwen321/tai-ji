@@ -30,15 +30,12 @@
 import { createDelivery } from '@zhushanwen/session-delivery'
 import type {
   DeliveryEntriesFull,
-  DeliveryEntriesProjection,
   DeliveryEntryState,
-  DeliveryHandle,
   DeliveryHandleV2,
   DeliveryIntent,
   DeliveryLane,
   DeliveryMessage,
   DeliveryPayload,
-  DeliveryProjectionOptions,
 } from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
@@ -93,19 +90,18 @@ export interface DeliveryCancelOutcome {
   reason?: string
 }
 
-/** 对账触发点（设计 D3 五触发点 + 撤销兜底） */
+/** 对账触发点（设计 D3 五触发点） */
 export type ReconcileTrigger =
   | 'agent-settled'
   | 'compaction-end'
   | 'abort-idle'
   | 'pi-restored'
   | 'watchdog'
-  | 'cancel'
 
 /** 注册表对外接口（SessionManagerHandler / MessageDispatcher / transport u3a 经此消费投递能力） */
 export interface SessionDeliveryRegistry {
-  /** 同 sessionId 复用同一 handle（单例约束）；factory 仅供测试注入替身（v1 句柄面，内部适配） */
-  getOrCreateDelivery(sessionId: string, factory?: (sessionId: string) => DeliveryHandle): DeliveryHandleV2
+  /** 同 sessionId 复用同一 handle（单例约束） */
+  getOrCreateDelivery(sessionId: string): DeliveryHandleV2
   /** 投递入口（D1）：lane 判定 + 裸标记 + 内核提交（受理即回执，不阻塞等待送达） */
   submit(sessionId: string, input: DeliverySubmitInput): DeliverySubmitResult
   /** 单条撤销（delivery.cancel）：queued 本地移除；投递中走 clear_queue 收回-重投路径 */
@@ -319,31 +315,6 @@ function genLocalId(): string {
   return `m-${Date.now().toString(LOCAL_ID_TIME_RADIX)}-${localIdSeq}`
 }
 
-/**
- * 测试替身句柄适配（factory 注入路径，`DeliveryHandle` v1 → v2 视图）：v2 独占方法给空实现
- * （替身无内核状态），状态查询 depth() 委托原句柄（reclaim 豁免判定消费面）。唯一 cast 是
- * entries 的 overload 合并（full/projection 两形态），有测试替身形态不作为生产路径的运行时
- * guard 兜底（factory 仅测试使用——接口注释为契约）。
- */
-function asHandleV2(handle: DeliveryHandle): DeliveryHandleV2 {
-  const maybe = handle as Partial<DeliveryHandleV2>
-  const emptyEntries = ((options?: DeliveryProjectionOptions): DeliveryEntriesFull | DeliveryEntriesProjection =>
-    options ? { entries: [] } : { active: [], tombstones: [] }) as DeliveryHandleV2['entries']
-  return {
-    send: (msg, opts) => handle.send(msg, opts),
-    sendChecked: (msg) => handle.sendChecked(msg),
-    flush: () => handle.flush(),
-    depth: () => handle.depth(),
-    dispose: () => handle.dispose(),
-    entries: maybe.entries?.bind(handle) ?? emptyEntries,
-    onChange: maybe.onChange?.bind(handle) ?? (() => () => {}),
-    confirmDelivered: maybe.confirmDelivered?.bind(handle) ?? (() => false),
-    requeue: maybe.requeue?.bind(handle) ?? (() => 0),
-    cancel: maybe.cancel?.bind(handle) ?? (() => ({ kind: 'not-found' as const })),
-    drain: maybe.drain?.bind(handle) ?? (() => []),
-  }
-}
-
 /** 出站交接选项。 */
 interface DeliverOptions {
   /** pi streamingBehavior（intent 映射；undefined = 直投，create 首发）。 */
@@ -380,35 +351,56 @@ export function createSessionDeliveryRegistry(
 
   // ── 出站交接（port.send 的实现面） ────────────────────────────────────────
 
+  /** 合批拆分产物单段：段全文（含裸标记，若有）+ 命中的内核条目 id（agent 通路段无 id）。 */
+  interface ComposedPart {
+    text: string
+    id?: string
+  }
+
   /**
    * 合批拆分（u2 适配层；V1/V6/V9/V10 的结构性前提）：内核 doSend/pump 会把同时处于 queued
    * 的多条条目合批为一条 composed 消息（buildBatchPayload 以 BATCH_SEP 连接）——agent 通路的
    * 合批语义保留，但用户消息必须逐条进 transcript（每条一个 user entry + 可单条撤销）。
-   * 拆法：按已提交全文（submitted 表）在 composed 文本中按标记序做**精确子串**定位并逐段切出；
-   * 段间只允许 BATCH_SEP 或未知文本（agent 通路条目无标记）。任一定位失败 → 放弃拆分，按内核
-   * 合批语义整条投递（不猜测切分——宁合不裂）。   */
-  function splitComposed(text: string, state: RuntimeState): string[] {
+   * 拆法：按已提交全文（submitted 表）在 composed 文本中按标记序做**精确子串**定位并逐段切出，
+   * 段携带自身条目 id（deliverOne 的撤销/抑制判定锚 = marker 身份，不再按文本反查）；段间只
+   * 允许 BATCH_SEP 或未知文本（agent 通路条目无标记）。任一定位失败 → 放弃拆分，按内核合批
+   * 语义整条投递（不猜测切分——宁合不裂），放弃即 warn 显形（撤销粒度退化为整批，须可观测）。
+   */
+  function splitComposed(text: string, state: RuntimeState): ComposedPart[] {
     const known = extractMarkerIds(text).map((bare) => findSubmittedByMarker(state, bare))
-    if (known.length === 0 || known.some((r) => r === undefined)) return [text]
-    const parts: string[] = []
+    if (known.length === 0) return [{ text }] // 无标记（agent 通路/sendDirect 首发）：整条投递即合批语义，非降级
+    if (known.some((r) => r === undefined)) {
+      warn('splitComposed: composed batch has markers without submitted record — delivering as one batch (undo granularity lost), sid=', state.sessionId)
+      return [{ text }]
+    }
+    const parts: ComposedPart[] = []
     let cursor = 0
     for (const record of known as SubmittedRecord[]) {
       const idx = text.indexOf(record.text, cursor)
-      if (idx < 0) return [text]
+      if (idx < 0) {
+        warn('splitComposed: submitted text not found in composed batch — delivering as one batch (undo granularity lost), sid=', state.sessionId)
+        return [{ text }]
+      }
       if (idx > cursor) {
         const gap = text.slice(cursor, idx)
-        if (!gap.startsWith(BATCH_SEP)) return [text]
+        if (!gap.startsWith(BATCH_SEP)) {
+          warn('splitComposed: unexpected gap between batch segments — delivering as one batch (undo granularity lost), sid=', state.sessionId)
+          return [{ text }]
+        }
         const unknown = gap.slice(BATCH_SEP.length)
-        if (unknown.length > 0) parts.push(unknown)
+        if (unknown.length > 0) parts.push({ text: unknown })
       }
-      parts.push(record.text)
+      parts.push({ text: record.text, id: record.id })
       cursor = idx + record.text.length
     }
     if (cursor < text.length) {
       const tail = text.slice(cursor)
-      if (!tail.startsWith(BATCH_SEP)) return [text]
+      if (!tail.startsWith(BATCH_SEP)) {
+        warn('splitComposed: unexpected tail after batch segments — delivering as one batch (undo granularity lost), sid=', state.sessionId)
+        return [{ text }]
+      }
       const unknown = tail.slice(BATCH_SEP.length)
-      if (unknown.length > 0) parts.push(unknown)
+      if (unknown.length > 0) parts.push({ text: unknown })
     }
     return parts
   }
@@ -419,14 +411,6 @@ export function createSessionDeliveryRegistry(
     if (direct) return direct
     for (const record of state.submitted.values()) {
       if (record.id === markerId) return record
-    }
-    return undefined
-  }
-
-  /** 出站文本 → 已提交记录（精确匹配；agent 通路条目无记录）。 */
-  function findSubmittedByText(state: RuntimeState, text: string): SubmittedRecord | undefined {
-    for (const record of state.submitted.values()) {
-      if (record.text === text) return record
     }
     return undefined
   }
@@ -513,27 +497,28 @@ export function createSessionDeliveryRegistry(
     opts: DeliverOptions,
   ): Promise<void> {
     let steerRetried = false
-    for (;;) {      try {
-      await client.prompt(text, opts.images, opts.behavior)
-      return
-    } catch (e) {
-      const reason = classifyBusyRejection(e)
-      if (reason === null) throw e
-      const view = viewOf(sessionId)
-      if (reason === 'processing') {
-        if (steerRetried) throw e
-        warn('prompt rejected (agent already processing) — occupancy reversed, retry as steer, sid=', sessionId)
-        if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-processing')
-        opts = { ...opts, behavior: 'steer' }
-        steerRetried = true
-        continue
+    for (;;) {
+      try {
+        await client.prompt(text, opts.images, opts.behavior)
+        return
+      } catch (e) {
+        const reason = classifyBusyRejection(e)
+        if (reason === null) throw e
+        const view = viewOf(sessionId)
+        if (reason === 'processing') {
+          if (steerRetried) throw e
+          warn('prompt rejected (agent already processing) — occupancy reversed, retry as steer, sid=', sessionId)
+          if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-processing')
+          opts = { ...opts, behavior: 'steer' }
+          steerRetried = true
+          continue
+        }
+        warn('prompt rejected (compaction in progress) — holding until compaction ends, sid=', sessionId)
+        if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-other')
+        state.piCompactingBlocked = true
+        await waitDeliverable(sessionId, state)
+        if (state.disposed) throw e
       }
-      warn('prompt rejected (compaction in progress) — holding until compaction ends, sid=', sessionId)
-      if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-other')
-      state.piCompactingBlocked = true
-      await waitDeliverable(sessionId, state)
-      if (state.disposed) throw e
-    }
     }
   }
 
@@ -545,6 +530,8 @@ export function createSessionDeliveryRegistry(
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
    * 抑制/撤销守卫 → 持有等待 → 显式投递放行 → ensureActive → skill 注入 → prompt（busy 类
    * 拒绝按 D6 处置）→ skillNotice → 三副作用置位。置位晚于 prompt 受理（成功才显示 working）。
+   * entryId = 本段对应的内核条目 id（splitComposed 按 marker 定位直传；agent 通路无标记段
+   * undefined）——撤销/抑制判定的唯一锚是条目身份，同文本多条互不误伤（V 裁决 R2-A2）。
    */
   async function deliverOne(
     sessionId: string,
@@ -552,15 +539,15 @@ export function createSessionDeliveryRegistry(
     handle: DeliveryHandleV2,
     text: string,
     opts: DeliverOptions = {},
+    entryId?: string,
   ): Promise<void> {
-    const record = findSubmittedByText(state, text)
-    if (record && state.suppressed.has(record.id)) {
-      state.suppressed.delete(record.id) // rebuild 判定已送达：只记账，不碰 pi
+    if (entryId !== undefined && state.suppressed.has(entryId)) {
+      state.suppressed.delete(entryId) // rebuild 判定已送达：只记账，不碰 pi
       return
     }
-    if (record && !stillActive(handle, record.id)) return // 持有期被撤销：撤销生效
+    if (entryId !== undefined && !stillActive(handle, entryId)) return // 持有期被撤销：撤销生效
     await waitDeliverable(sessionId, state)
-    if (record && !stillActive(handle, record.id)) return
+    if (entryId !== undefined && !stillActive(handle, entryId)) return
     // [D4] 显式投递清标记（新意图）：先于 ensureActive/restore（restore-abort 读不到标记即不掐）
     userStoppedGate.consumeForExplicitDelivery(sessionId)
     const client = await deps.ensureActive(sessionId)
@@ -618,6 +605,12 @@ export function createSessionDeliveryRegistry(
     state.unsubClient = undefined
     const changed = state.client !== undefined && state.client !== client
     state.client = client
+    if (changed) {
+      // pi 重生（崩溃/回收后 respawn）：旧进程的事件流已断，compaction_end 永不再来——
+      // pi 侧压缩事实随旧进程作废，标记必须随之重置，否则 waitDeliverable 以
+      // 'compacting-pi' 永久持有（自愈入口，R2-A1；无标记时重置为幂等无害）。
+      state.piCompactingBlocked = false
+    }
     if (typeof client.onEvent !== 'function') {
       // 装配面缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
       // 投递本身照常（不因此失败）
@@ -671,7 +664,10 @@ export function createSessionDeliveryRegistry(
     rt.reconciling = true
     rt.lastReconcileAt = now
     try {
-      const client = rt.client ?? (await clientForAttachedTrigger(sessionId, rt, trigger))
+      // 事件型触发统一经 clientForAttachedTrigger（ensureActive 幂等读取 + watchClient 重挂）：
+      // 不能拿 rt.client 旧引用短路——pi 重生后旧句柄是尸体，changed 分支（压缩标记自愈入口）
+      // 永远不会被触发。事件来自活进程时 ensureActive 返回同一实例（幂等，零成本）。
+      const client = await clientForAttachedTrigger(sessionId, rt, trigger)
       const primitive = client ? queuePrimitive(client) : null
       if (primitive) {
         // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；F9）
@@ -695,8 +691,10 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * 事件型触发下的 client 解析：settled / compaction_end / abort / pi restored 四类事件成立
-   * = pi 必已附着（事件只能来自活进程），此时 ensureActive 是幂等读取（不新建进程）；
+   * 事件型触发下的 client 解析（reconcile 唯一取 client 通道）：settled / compaction_end /
+   * abort / pi restored 四类事件成立 = pi 必已附着（事件只能来自活进程），此时 ensureActive
+   * 是幂等读取（不新建进程）且顺带 watchClient 重挂（句柄变更即压缩标记自愈 + pi-restored
+   * 对账）；pi 已死（崩溃后的人为触发，如 abort）则 restore respawn——句柄刷新的唯一机会。
    * watchdog 触发**不解析**——静默的 idle session 不应被对账唤醒（idle pi 回收语义）。
    */
   async function clientForAttachedTrigger(
@@ -905,6 +903,8 @@ export function createSessionDeliveryRegistry(
       void reconcile(sessionId, 'watchdog')
       rt.handle.flush()
     }, WATCHDOG_MS)
+    // 纯兜底周期任务不持有事件循环（对齐全仓定时器惯例，M3）；dispose 显式 clearInterval 收口
+    rt.watchdog.unref?.()
   }
 
   // ── 运行时装配 ──────────────────────────────────────────────────────────
@@ -942,19 +942,19 @@ export function createSessionDeliveryRegistry(
         for (let i = 0; i < parts.length; i += 1) {
           // images 只随首段投递（合批拼接的 images 归属首条；一期 renderer 走路径模式不传
           // images——已知窄边界，见交付说明）
-          const part = parts[i] as string
-          await deliverOne(sessionId, state, handle, part, {
+          const part = parts[i] as ComposedPart
+          await deliverOne(sessionId, state, handle, part.text, {
             behavior: toStreamingBehavior(intent),
             ...(i === 0 && images !== undefined && images.length > 0 ? { images } : {}),
-          })
-          confirmMarkerlessAccepted(state, handle, part)
+          }, part.id)
+          confirmMarkerlessAccepted(state, handle, part.text)
         }
         return { accepted: true }
       },
     }
   }
 
-  function buildRuntime(sessionId: string, injected?: DeliveryHandleV2): SessionRuntime {
+  function buildRuntime(sessionId: string): SessionRuntime {
     const state: RuntimeState = {
       sessionId,
       submitted: new Map(),
@@ -967,22 +967,20 @@ export function createSessionDeliveryRegistry(
     }
     // handle 后置产出（port 构造先于 createDelivery 返回）——经 handleRef 让 port 读到最终句柄
     const handleRef: { handle?: DeliveryHandleV2 } = {}
-    const handle =
-      injected ??
-      createDelivery(buildPort(sessionId, state, handleRef), {
-        // 默认意图：turn 边界抢占（D3）；pi 词汇映射在 toStreamingBehavior
-        intent: 'interrupt-at-turn-boundary',
-        // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）
-        onSettled: (msg, outcome) => {
-          if (outcome === 'rejected') {
-            warn(
-              'kernel onSettled(rejected), sid=',
-              sessionId,
-              payloadText(msg.payload).slice(0, LOG_PAYLOAD_PREVIEW_CHARS),
-            )
-          }
-        },
-      })
+    const handle = createDelivery(buildPort(sessionId, state, handleRef), {
+      // 默认意图：turn 边界抢占（D3）；pi 词汇映射在 toStreamingBehavior
+      intent: 'interrupt-at-turn-boundary',
+      // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）
+      onSettled: (msg, outcome) => {
+        if (outcome === 'rejected') {
+          warn(
+            'kernel onSettled(rejected), sid=',
+            sessionId,
+            payloadText(msg.payload).slice(0, LOG_PAYLOAD_PREVIEW_CHARS),
+          )
+        }
+      },
+    })
     handleRef.handle = handle
     // 同一对象上补 handle 字段（Object.assign 返回 target 本身——state 与 rt 必须同源，
     // port 闭包持有 state，任何拷贝都会让后续写入不可见）
@@ -995,12 +993,12 @@ export function createSessionDeliveryRegistry(
     return rt
   }
 
-  function ensureRuntime(sessionId: string, factory?: (sessionId: string) => DeliveryHandle): SessionRuntime {
+  function ensureRuntime(sessionId: string): SessionRuntime {
     const existing = runtimes.get(sessionId)
     if (existing) return existing
-    const rt = buildRuntime(sessionId, factory ? asHandleV2(factory(sessionId)) : undefined)
+    const rt = buildRuntime(sessionId)
     runtimes.set(sessionId, rt)
-    if (!factory) ensureWatchdog(sessionId, rt)
+    ensureWatchdog(sessionId, rt)
     return rt
   }
 
@@ -1013,8 +1011,8 @@ export function createSessionDeliveryRegistry(
   }
 
   const registry: SessionDeliveryRegistry = {
-    getOrCreateDelivery(sessionId, factory) {
-      return ensureRuntime(sessionId, factory).handle
+    getOrCreateDelivery(sessionId) {
+      return ensureRuntime(sessionId).handle
     },
     submit(sessionId, input) {
       const rt = ensureRuntime(sessionId)
@@ -1042,7 +1040,11 @@ export function createSessionDeliveryRegistry(
       const rt = runtimes.get(sessionId)
       if (!rt) return { cancelled: false, reason: 'session delivery unknown' }
       const first = rt.handle.cancel(clientUuid)
-      if (first.kind === 'cancelled') return { cancelled: true, content: payloadText(first.entry.payload) }
+      if (first.kind === 'cancelled') {
+        // 撤销即出册（R2-A2）：判定锚随条目终结清账，防同文本后续条目被反查到死记录
+        rt.submitted.delete(bareMarkerId(clientUuid))
+        return { cancelled: true, content: payloadText(first.entry.payload) }
+      }
       if (first.kind === 'not-found') return { cancelled: false, reason: 'not found' }
       if (first.kind === 'already-final') return { cancelled: false, reason: `already ${first.tombstone.state}` }
       // 投递中（在 pi 槽位）：复用对账回收-重投路径——clear_queue 全收 → 目标条目回草稿，
@@ -1070,9 +1072,11 @@ export function createSessionDeliveryRegistry(
         return { cancelled: false, reason: '已投递不可撤（未找到在途文本）' }
       }
       const second = rt.handle.cancel(clientUuid)
-      return second.kind === 'cancelled'
-        ? { cancelled: true, content: payloadText(second.entry.payload) }
-        : { cancelled: false, reason: '已投递不可撤' }
+      if (second.kind === 'cancelled') {
+        rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同上）
+        return { cancelled: true, content: payloadText(second.entry.payload) }
+      }
+      return { cancelled: false, reason: '已投递不可撤' }
     },
     drain(sessionId) {
       const rt = runtimes.get(sessionId)
@@ -1161,7 +1165,10 @@ export function createSessionDeliveryRegistry(
     clientUuid: string,
   ): Promise<DeliveryCancelOutcome> {
     const second = rt.handle.cancel(clientUuid)
-    if (second.kind === 'cancelled') return { cancelled: true, content: payloadText(second.entry.payload) }
+    if (second.kind === 'cancelled') {
+      rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同 cancel 主路径）
+      return { cancelled: true, content: payloadText(second.entry.payload) }
+    }
     warn('cancel: pi not attached and entry not cancellable, sid=', sessionId, clientUuid)
     return { cancelled: false, reason: '已投递不可撤' }
   }

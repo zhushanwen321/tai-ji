@@ -292,30 +292,6 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
     handle.dispose()
     vi.useRealTimers()
   })
-
-  it('#2 park 策略下错误也不无限重试之外排队：达上限同样 rejected', () => {
-    // busyPolicy 'park' 管 busy gate；port.send 错误重试是独立恢复路径，同样有上限
-    vi.useFakeTimers()
-    const settled: string[] = []
-    const port = makeMockPort({
-      send: () => { throw new Error('boom') },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, {
-      busyPolicy: 'park',
-      backoff: { ms: 50, max: 1 },
-      onSettled: (_m, outcome) => settled.push(outcome),
-    })
-
-    handle.send(textMsg('hello'))
-    vi.advanceTimersByTime(50)
-    expect(port.sendCalls).toHaveLength(2)
-    expect(settled).toEqual(['rejected'])
-
-    warnSpy.mockRestore()
-    handle.dispose()
-    vi.useRealTimers()
-  })
 })
 
 describe('A6-inflight onSettled 终态信号', () => {

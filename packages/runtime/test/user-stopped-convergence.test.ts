@@ -34,6 +34,7 @@ import type { IManagedSessionView } from '../src/services/session/types.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 /** 记账式 mock 标记宿主（模拟 session-service.ts 模块级 Map 的语义）。 */
 function makeMarkStore(): UserStoppedMarkStore & {
@@ -56,14 +57,6 @@ function makeGate() {
   const gate = new UserStoppedGate()
   gate.configure({ marks: store, abortSession })
   return { gate, store, abortSession }
-}
-
-/**
- * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
- * → 三副作用置位）——dispatcher 只提交，显式投递清标记（D4）随出站交接异步落地。
- */
-async function flushDelivery(): Promise<void> {
-  for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
 // ── Part A：UserStoppedGate 收敛环状态机（fake timers）──────────

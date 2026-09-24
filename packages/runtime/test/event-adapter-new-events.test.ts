@@ -225,7 +225,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
   })
 
   describe('FR-3: queue_update', () => {
-    it('translates queue_update to message.queue_update', async () => {
+    it('queue_update 已退役（u5a/R1-A5）→ NULL_EVENTS no-op，不出帧也不落 Unhandled warn', async () => {
       dispatchOne(adapter, {
         type: 'queue_update',
         steering: ['s1'],
@@ -233,12 +233,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       })
       await flushAsync()
 
-      expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('message.queue_update')
-      expect(sent[0].payload).toMatchObject({
-        steering: ['s1'],
-        followUp: ['f1'],
-      })
+      expect(sent).toHaveLength(0)
     })
   })
 

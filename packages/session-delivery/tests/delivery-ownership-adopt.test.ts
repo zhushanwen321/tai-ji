@@ -9,8 +9,7 @@
  *   在途并正常投递（「空闲 + 槽位非空」两条件触发口径的 Reconciler 侧判定归
  *   u2 registry；本文件锁内核侧收养通道与幂等面）。
  *
- * 形态：真实 createDelivery + fake port 重放收养序列（e2e 级回归由
- * completion-backflow-e2e 承担）。
+ * 形态：真实 createDelivery + fake port 重放收养序列（e2e 层暂无收养回归——待补）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'

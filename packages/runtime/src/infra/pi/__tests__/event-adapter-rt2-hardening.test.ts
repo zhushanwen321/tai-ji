@@ -3,8 +3,9 @@
  *
  * 锁定：
  * - #3a translate 隔离：attach 内 translate 与 interpret 同处隔离边界——pi 字段漂移致
- *   handler 直读炸掉（queue_update.steering 非数组）时，失败在 adapter 内显形为
- *   message.stream_warn（MF-1-13：非终结性 system 提示，前端不调 finalizeSession、
+ *   handler 直读炸掉（tool_execution_update.partialResult.content 数组形态缺位：条目为
+ *   null/undefined，normalizeWithTailCap 直读 c.type 抛 TypeError）时，失败在 adapter 内
+ *   显形为 message.stream_warn（MF-1-13：非终结性 system 提示，前端不调 finalizeSession、
  *   session 保持 streaming——pi 流继续，turn 可能照常成功；stream_error 会被
  *   registry 无条件收口成 error 终态）并留 [ADAPTER-FAIL] 日志，流继续（后续好帧
  *   照常翻译）。修复前 translate 在 try 外：异常逃逸进 rpc-client 的 stdout parse
@@ -14,6 +15,8 @@
  *   新增 method 尤其阻塞式时无痕丢弃会让 pi 侧 Promise 永挂）。已知落点 setTitle
  *   （宿主不实现的 fire-and-forget，预决策只补类型与 warn）。
  *
+ * 失败载体 = 活体 handler tool_execution_update（event-adapter attach 注释点名的漂移
+ * 炸点；原载体 queue_update 已退役为 NULL_EVENTS no-op，不再经过任何 handler）。
  * translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出消息；attach 路径用
  * 最小 fake client（onEvent 捕获 listener）驱动。
  *
@@ -21,7 +24,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { EventAdapter, translate } from '../event-adapter.js'
-import type { PiExtensionUiRequestEvent, PiQueueUpdateEvent } from '../pi-protocol.js'
+import type { PiExtensionUiRequestEvent, PiToolExecutionUpdateEvent } from '../pi-protocol.js'
 import type { PiTranslatedEvent } from '../../../services/session/types.js'
 
 /** 最小 fake client：捕获 attach 注册的 listener，测试经 emit 驱动。 */
@@ -49,6 +52,16 @@ function soleMessage(events: PiTranslatedEvent[]): { type: string; payload: Reco
   return ev.message as { type: string; payload: Record<string, unknown> }
 }
 
+/** 坏帧构造：partialResult.content 数组内条目形态漂移（normalizeWithTailCap 直读炸点）。 */
+function updateEvent(contentItems: unknown[]): PiToolExecutionUpdateEvent {
+  return {
+    type: 'tool_execution_update',
+    toolCallId: 't1',
+    toolName: 'bash',
+    partialResult: { content: contentItems },
+  }
+}
+
 describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
   it('translate 抛错 → [ADAPTER-FAIL] 日志 + message.stream_warn 非终结显形（MF-1-13）', () => {
     const interpret = vi.fn()
@@ -60,9 +73,10 @@ describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     let adapterFailLogged = false
     try {
-      // 触发面：handleQueueUpdate 的 [...event.steering] 直读（pi 字段漂移致非数组）
+      // 触发面：handleToolExecutionUpdate → normalizeWithTailCap 的 content 条目直读
+      //（pi 字段漂移致数组内混入 null 条目）
       // 修复前此 emit 同步抛出（translate 在 try 外），interpret 收不到任何事件
-      client.emit({ type: 'queue_update', steering: null, followUp: [] } as unknown as PiQueueUpdateEvent)
+      client.emit(updateEvent([null]))
       adapterFailLogged = errSpy.mock.calls.some((c) => String(c[0]).includes('[ADAPTER-FAIL]'))
     } finally {
       errSpy.mockRestore()
@@ -86,16 +100,22 @@ describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
     adapter.attach(client)
 
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    client.emit({ type: 'queue_update', steering: null, followUp: [] } as unknown as PiQueueUpdateEvent)
+    client.emit(updateEvent([null]))
     errSpy.mockRestore()
 
-    // 第二帧（合法）正常产出 queue_update 广播帧
-    client.emit({ type: 'queue_update', steering: ['hi'], followUp: [] } as unknown as PiQueueUpdateEvent)
+    // 第二帧（合法）正常产出 tool_execution_update 广播帧
+    client.emit({
+      type: 'tool_execution_update',
+      toolCallId: 't2',
+      toolName: 'bash',
+      partialResult: { content: [{ type: 'text', text: 'hi' }] },
+    })
 
     expect(interpret).toHaveBeenCalledTimes(2)
     const msg = soleMessage(interpret.mock.calls[1][0] as PiTranslatedEvent[])
-    expect(msg.type).toBe('message.queue_update')
-    expect(msg.payload.pendingMessageCount).toBe(1)
+    expect(msg.type).toBe('message.tool_call_update')
+    expect(msg.payload.toolCallId).toBe('t2')
+    expect(msg.payload.output).toBe('hi')
   })
 
   it('同一失败原因去重显形一次，相异原因各显形一次（MF-1-13）', () => {
@@ -107,11 +127,10 @@ describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       // 同一原因连发两帧（漂移按帧复发的真实形态）：只显形一次
-      client.emit({ type: 'queue_update', steering: null, followUp: [] } as unknown as PiQueueUpdateEvent)
-      client.emit({ type: 'queue_update', steering: null, followUp: [] } as unknown as PiQueueUpdateEvent)
-      // 相异原因：followUp 传 number（[...5] 与 [...null] 的 TypeError 文本不同，
-      // 去重按错误文本分键）；steering: [] 使首个 spread 通过、落在 followUp 的 spread 上
-      client.emit({ type: 'queue_update', steering: [], followUp: 5 } as unknown as PiQueueUpdateEvent)
+      client.emit(updateEvent([null]))
+      client.emit(updateEvent([null]))
+      // 相异原因：undefined 条目（与 null 条目的 TypeError 文本不同，去重按错误文本分键）
+      client.emit(updateEvent([undefined]))
     } finally {
       errSpy.mockRestore()
     }

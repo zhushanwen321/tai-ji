@@ -13,7 +13,7 @@ import type { ThinkingLevel, ProviderId } from '@taiji/shared'
 /**
  * pi 任意 JSON 响应的逃生类型。
  *
- * pi 的命令响应结构是动态的（get_state/fork/getHistory 各不相同），无法用单一精确类型
+ * pi 的命令响应结构是动态的（get_state/fork/getEntries 各不相同），无法用单一精确类型
  * 描述。services 用 `as PiMessage` 后再 `as` 具体结构——这是「类型系统对 pi 动态响应认输」
  * 的诚实标注，不是协议泄露。
  *
@@ -140,7 +140,7 @@ export interface SendCommandOptions {
  * pi 引擎 port —— 每个 session 对应一个实例（RpcClient 实现）。
  *
  * 涵盖「单个 pi 进程的全部能力」：与 pi 的命令通信 + 该进程自身的生命周期
- * （start / kill / onExit / exited）+ session 级命令（compact / clear）。
+ * （start / kill / onExit / exited）+ session 级命令（compact）。
  *
  * 逃生口已关闭（W2 收口）：sendCommand/sendRaw 不再暴露，响应归一下沉到 RpcClient 内部。
  * 调用方消费语义方法（switchSession/getState/sendExtensionUiResponse 等），不再有「发任意 pi 命令」的能力。
@@ -176,15 +176,13 @@ export interface IPiEngine {
    * success:false / 超时 reject，失败语义由调用方决定（rename 抛错 / create-fork 降级）。
    */
   setSessionName(name: string): Promise<PiMessage>
-  /** [DEAD] pi get_messages 死路径——见 RpcPiEngine.getHistory（生产零调用） */
-  getHistory(): Promise<PiMessage>
   /**
    * 拉取 pi session 的完整 entry 树（get_entries RPC）。
    *
-   * 与 getHistory（get_messages，只返回扁平 message 列表）不同：get_entries 返回全部 entry 类型
-   * （message/custom/label/compaction/branch_summary/...），含 parentId 树结构。
-   * entry-tree-builder.rebuildHistoryFromEntries 用 message entry + "taiji.client-msg-id" custom entry
-   * 重建结构化 Message[]（重开 session 时按 clientUuid ↔ userEntryId 映射回填 image/file badge）。
+   * 返回全部 entry 类型（message/custom/label/compaction/branch_summary/...），含 parentId
+   * 树结构。entry-tree-builder.rebuildHistoryFromEntries 用 message entry + "taiji.client-msg-id"
+   * custom entry 重建结构化 Message[]（重开 session 时按 clientUuid ↔ userEntryId 映射回填
+   * image/file badge）。
    *
    * since 可选：传 entry id 时返回该 entry 之后的 entry（增量拉取，pi 找不到 since id 会报错）。
    * 返回的 PiMessage.data 已由 sendCommand 归一（data ?? payload），调用方按 GetEntriesResponse 断言。
@@ -209,8 +207,6 @@ export interface IPiEngine {
   // ── session 级命令 ──
   /** 压缩当前会话上下文（pi compact 命令）。customInstructions 透传给 pi 压缩 prompt。返回 CompactionResult 供 dispatcher 广播 summary + 刷新 context 用量。 */
   compact(customInstructions?: string): Promise<PiCompactionResult>
-  /** 清空当前会话上下文（pi clear 命令）。 */
-  clear(): Promise<PiMessage>
   /**
    * 直接执行 bash 命令（pi bash 命令，不经 LLM turn）。
    *
@@ -281,14 +277,3 @@ export interface IProcessManager {
   /** 探测 pi 二进制版本（首次 execSync，后续读缓存）。失败返回 'unknown'。 */
   getPiVersion(): Promise<string>
 }
-
-/**
- * 兼容别名：IRpcClient === IPiEngine。
- *
- * 历史上 interfaces.ts 定义过 IRpcClient（与 ports/pi-engine.ts 的 IPiEngine 重复，
- * 见 D24）。现已合并为 IPiEngine，保留此别名让尚未迁移的 import 继续编译；
- * 新代码应直接用 IPiEngine。待调用点全量迁移后删除。
- *
- * @deprecated 改用 IPiEngine。
- */
-export type IRpcClient = IPiEngine

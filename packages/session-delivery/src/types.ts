@@ -6,11 +6,11 @@
  * - 意图驱动：调用方声明 intent，内核处理与 session 运行状态的冲突
  * - 判别联合 payload：适配器声明 supportedPayloads 能力
  *
- * v2 增量（投递所有权内核，设计 .tmp/tech-design/delivery-ownership-kernel.md，
- * 单元 u-contracts）：条目状态机/lane/条目双形态（活跃条目 + tombstone）/entries()
- * 双视图/对账三分处置类型。类型-only 单元——行为实现归 u1。lane 字面量中的
- * 'steer' 是投递车道语义名（设计 §1.1 术语表/D1），非 pi API 词汇——intent →
- * 底层参数的翻译在适配器内部，本包只记录车道，零依赖纪律对 lane 不破例。
+ * v2 增量（投递所有权内核，设计 .tmp/tech-design/delivery-ownership-kernel.md）：
+ * 条目状态机/lane/条目双形态（活跃条目 + tombstone）/entries() 双视图；行为实现在
+ * 本包 src/delivery.ts。lane 字面量中的 'steer' 是投递车道语义名（设计 §1.1 术语表
+ * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录车道，
+ * 零依赖纪律对 lane 不破例。
  */
 
 // ─── 投递意图 ───────────────────────────────────────────────
@@ -53,8 +53,6 @@ export interface DeliveryMessage {
   intent?: DeliveryIntent
   /** 去重 key（开 dedupe 时必填）。 */
   dedupeKey?: string
-  /** 持久性预留（一期仅 'in-memory'）。 */
-  durability?: 'in-memory'
 }
 
 // ─── 端口（注入运行时能力） ──────────────────────────────────
@@ -85,6 +83,12 @@ export interface DeliveryPort {
    * 投递消息（intent → pi 参数的翻译在适配器内部）。
    * 返回受理回执（U2 扩展位）：显式 `{accepted:false}` = 受理失败（内核按发送失败
    * 处理）；void / `{accepted:true}` = 受理成功。旧实现返回 void 兼容。
+   *
+   * settle 契约：返回 promise 时实现必须 settle（resolve 或 reject）——悬挂的
+   * promise 会让内核 in-flight 防重永久占位。内核侧按控制面单请求粒度设有界兜底
+   * （默认 60s，C-proc-19）：超时按发送失败收口（warn 留痕 + 走错误重试链）。
+   * 已接受代价：迟到的原请求在超时强制失败后仍可能到达底层通道，与重试构成重复
+   * 投递；通道内判重由适配器/对端按裸标记（clientUuid）负责，内核不建第二套判重。
    */
   send(msg: DeliveryMessage, intent: DeliveryIntent): Promise<SendReceipt | void> | SendReceipt | void
   /** agent_settled 边沿订阅（D8）。缺省时内核退化退避轮询。返回退订函数。 */
@@ -97,8 +101,8 @@ export interface DeliveryPort {
 export interface DeliveryConfig {
   /** 默认意图：'interrupt-at-turn-boundary'（D3）。 */
   intent?: DeliveryIntent
-  /** busy 策略：'retry-force'（默认）/ 'park'。 */
-  busyPolicy?: 'retry-force' | 'park'
+  /** busy 策略：唯一档 'retry-force'（settled 边沿驱动 flush + 退避达上限强发）。 */
+  busyPolicy?: 'retry-force'
   /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
   mergeWindowMs?: number
   /** 合批依赖谓词（D4 must-fix #1）。true 时 send() 走合批窗口，false/缺省时立即投。
@@ -123,7 +127,10 @@ export interface DeliveryConfig {
    * （受理 ≠ 送达——SendReceipt 注释口径的机制化落地）。**显式例外：sendChecked 的
    * 同步 settle 维持受理口径不变**——session_manager send 的「立即受理确认」契约
    * 锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束
-   * （steer 类车道可达数十秒）。行为实现归 u1；本注释即接口口径权威声明。
+   * （steer 类车道可达数十秒）。本注释即接口口径权威声明。
+   *
+   * 异常契约：实现不应抛——回调异常由内核捕获并 warn 留痕，不影响条目状态机与
+   * 其余条目的回调（回调异常 ≠ 投递失败，不进错误重试链）。
    */
   onSettled?: (msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
@@ -136,7 +143,7 @@ export interface DeliveryHandle {
   send(msg: DeliveryMessage, opts?: { merge?: boolean }): void
   /** 入队 + 可达性同步确认。reject = 入队失败。 */
   sendChecked(msg: DeliveryMessage): Promise<void>
-  /** 强制投递尝试（shutdown / park 外部重触发 / settled 边沿内部复用）。 */
+  /** 强制投递尝试（shutdown flush / 外部重触发 / settled 边沿内部复用）。 */
   flush(): void
   /** 队列深度（诊断/测试）。 */
   depth(): number
@@ -216,36 +223,18 @@ export interface DeliveryEntriesFull {
 }
 
 /**
- * 投影视图选项（D9②/D5③）。deliveredWindow = delivered 条目进投影的数量窗口 N
- * （仅最近 N 条**完整条目**，缺省 50）；cancelled 一律不投影。N 是 UI 展示投影参数
- * 而非判重依据——正确性不依赖展示窗口（判重查 tombstone 全量表）。
+ * 投影视图选项（D9②/D5③）。当前无可调字段：投影窗口恒为默认常量 50
+ * （delivery.ts DEFAULT_DELIVERED_WINDOW）；展示窗口不参与判重正确性（判重查
+ * tombstone 全量表）。参数位保留以维持调用方 `entries({})` 形态稳定，多余属性
+ * 结构性拒绝。
  */
-export interface DeliveryProjectionOptions {
-  deliveredWindow?: number
-}
+export type DeliveryProjectionOptions = Record<string, never>
 
 /**
  * 投影视图（D9②/D5③）：session.delivery 帧装配用。活跃条目（queued/in-flight/failed）
- * 全量 + delivered 最近 N 条完整条目；稳态体积有界 ≤ deliveredWindow + 活跃条目数。
+ * 全量 + delivered 最近 50 条完整条目；稳态体积有界 ≤ 50 + 活跃条目数。
  * 装配（帧 DTO 转换）归 runtime transport 侧（u3a），内核只产出本视图。
  */
 export interface DeliveryEntriesProjection {
   entries: readonly DeliveryEntry[]
 }
-
-// ─── 对账/回收（D3）──────────────────────────────────────────
-
-/**
- * 对账回收文本的三分处置（D3）。判别逻辑在 runtime 对账器（Reconciler，registry
- * 侧——对账不下沉内核包，零依赖界线见 D9 被否项），内核消费处置结果执行：
- * - `own`：自有在途条目被收回 → 重置 queued 至队首（保持原相对序）重投
- * - `rebuild`：带标记但内核无记录（reattach 场景判重表已随进程清空）→ 适配器先对
- *   transcript 做标记扫描判 delivered，再按判定结果重建：delivered=true 重建为
- *   delivered 条目（判重/投影锚），false 重建为 queued 条目重投
- * - `adopt`：无标记外来文本（存量注入通道产物）收养 → 以新 id 入 FIFO 正常投递，
- *   不丢弃、不原样回塞（D3 被否项①②的形态排除）
- */
-export type ReconcileDisposition =
-  | { kind: 'own'; id: string }
-  | { kind: 'rebuild'; id: string; delivered: boolean; lane: DeliveryLane; payload: DeliveryPayload }
-  | { kind: 'adopt'; newId: string; payload: DeliveryPayload }

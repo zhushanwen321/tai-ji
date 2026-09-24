@@ -90,8 +90,9 @@ export function deliveryPreview(text: string): string {
 /**
  * 投影视图 → 帧条目数组（保持内核序：活跃条目 FIFO → delivered 窗口，u3c 队列区按帧序渲染）。
  * 投影中残留的 cancelled（内核不投影，理论不可达）跳过而非静默转其他态——不谎报状态。
+ * 模块私有：唯一消费点是本文件 publish（帧装配封闭在 topic 装配层）。
  */
-export function deliveryFrameEntries(projection: DeliveryEntriesProjection): DeliveryFrameEntry[] {
+function deliveryFrameEntries(projection: DeliveryEntriesProjection): DeliveryFrameEntry[] {
   const out: DeliveryFrameEntry[] = []
   for (const entry of projection.entries) {
     const frameEntry = toFrameEntry(entry)

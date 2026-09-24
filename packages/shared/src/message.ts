@@ -45,6 +45,27 @@ export interface SubagentDirectiveData {
   text: string
 }
 
+// ── details 对象守卫（防御解析器族共用）────────────────────────────
+/** details 收窄为 Record：非对象形态（null / 原始类型 / 数组）→ null（防御性解析，不信任运行时形状）。 */
+function asDetailsRecord(details: unknown): Record<string, unknown> | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  // as 安全性：上方 typeof + Array.isArray 守卫已排除全部非 Record 形态。
+  return details as Record<string, unknown>
+}
+
+/**
+ * 还原 runtime encodeDirectiveText（runtime session-records.ts）的定向文本转义编码：
+ * 字面 `\n`（反斜杠 + n）→ 真实换行，字面 `\\`（两反斜杠）→ 单反斜杠。
+ *
+ * composer 多行输入在 client.prompt 传输前把真实换行编码为字面 \n、原生反斜杠编码为
+ * \\（命令保持单行），本函数是其互逆还原。反斜杠转义必须与换行转义在**单次遍历**里
+ * 成对处理（交替分支 `\\\\|\\n`，两反斜杠优先匹配）——若只处理 \n，原文里的字面
+ * 反斜杠 + n（如路径 `C:\new`）会被误解码为换行，产生往返歧义。
+ */
+export function decodeNewlineEscapes(s: string): string {
+  return s.replace(/\\\\|\\n/g, (m) => (m === '\\\\' ? '\\' : '\n'))
+}
+
 /**
  * 防御性解析 subagent-directive custom message → 定向数据。
  *
@@ -57,8 +78,8 @@ export interface SubagentDirectiveData {
  * 降级不崩溃）；content 非 string 时 text 归空串（details 有效则气泡仍携带去向信息）。
  */
 export function parseSubagentDirective(content: unknown, details: unknown): SubagentDirectiveData | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   if (typeof d.subagentId !== 'string' || typeof d.slug !== 'string' || d.direction !== 'user') return null
   return {
     subagentId: d.subagentId,
@@ -90,10 +111,25 @@ export type PiRespawnNoticeVariant = 'restored' | 'restoreFailed'
  * 解析失败（details 畸形 / variant 非法）→ null（消费侧降级为普通 system 文本行，不崩溃）。
  */
 export function parseRespawnNoticeVariant(details: unknown): PiRespawnNoticeVariant | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const v = (details as Record<string, unknown>).variant
+  const d = asDetailsRecord(details)
+  if (!d) return null
+  const v = d.variant
   return v === 'restored' || v === 'restoreFailed' ? v : null
 }
+
+/**
+ * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
+ * `u-<uuid>`（renderer 气泡 id 写入面，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
+ * （内核出站标记形态，刻意不被 msg-id-mapper 剥离——出站身份必须存活进 transcript
+ * 供送达回执匹配）。两形态指向同一 clientUuid，回归期（renderer 拼 u- 形态 + 内核
+ * 追加裸形态）首个命中即正确值。
+ *
+ * 捕获组：1 = 可选 `u-` 前缀；2 = 裸 uuid。i 旗标 + 小写字符类等价覆盖大写十六进制，
+ * 消费方统一 toLowerCase 归一。/i 无 lastIndex 状态，模块级单例可安全跨消费方共享。
+ * （收敛自 core user-delivery.ts 与 runtime skill-notice-publisher.ts 两份已漂移手写体。）
+ */
+export const MSG_ID_TAG_RE =
+  /<!--taiji:msg:(u-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
 /** 消息生命周期状态（steer/followup 解耦后 pending 不再进消息流——m4 清理）。 */
 export type MessageStatus = 'streaming' | 'complete' | 'error'
 export type ToolCallStatus = 'running' | 'completed' | 'error' | 'end_not_received'
@@ -115,8 +151,6 @@ export interface ToolCall {
   outputTruncated?: boolean
   /** pi tool_execution_end result.details — 结构化扩展数据 */
   details?: Record<string, unknown>
-  /** Extension tool_call_update 进度百分比 (0-100) */
-  progress?: number
   /** Extension tool_call_update 详细信息。
    *  subagent sync 模式下存 pi-subagents 推送的 AgentProgress 快照（聚合摘要：
    *  currentTool/turnCount/tokens/recentTools 等），前端据此滚动更新 subagent 行。 */
@@ -125,7 +159,8 @@ export interface ToolCall {
   error?: string
   /**
    * 工具结果携带的图片（W5 提取，pi toolResult content 的 image 块：base64 data + mimeType）。
-   * core apply-entry 保字段写入（normalizePiToolResult 归一）；渲染消费待后续 wave。
+   * core apply-entry 保字段写入（normalizePiToolResult 归一）；渲染消费 = ui ToolResultImages
+   * （Block 按字段有值挂载）。
    */
   images?: Array<{ data: string; mimeType: string }>
   status: ToolCallStatus
@@ -201,12 +236,10 @@ export interface BashExecutionData {
 /**
  * Background subagent 完成通知的单条记录。
  *
- * 对应 pi-subagent-workflow 扩展 notifier.ts 的 BgNotifyRecord，经 customType:"subagent-bg-notify"
- * 的 CustomMessage details 传递。扩展在主对话流注入此通知，triggerTurn:true 唤醒
- * 父 agent 接力处理结果。
- *
- * 来源：extensions/universal/subagent-workflow/src/execution/notifier.ts（本仓源码；
- * 运行时安装在 ~/.taiji/npm/node_modules/@zhushanwen/pi-subagent-workflow/）
+ * 生产端权威 = packages/subagent-core/src/execution/notify/notifier.ts 的 BgNotifyRecord，
+ * 经 customType:"subagent-bg-notify" 的 CustomMessage details 传递。写侧在主对话流注入
+ * 此通知，triggerTurn:true 唤醒父 agent 接力处理结果。本接口是 wire 契约镜像：
+ * 增删字段须与写侧字段表对齐（OPTIONAL_RECORD_FIELD_WRITERS 按接口属性序拷贝）。
  */
 export interface BgNotifyRecord {
   id: string
@@ -229,10 +262,23 @@ export interface BgNotifyRecord {
   /** fork+worktree 模式下子 agent 改动的 patch 路径（worktree cleanup 后留存）。
    *  closed 时通知显式提示 git apply，否则改动会静默丢失。 */
   patchFile?: string
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。对齐 notifier.ts ClosedReason。 */
+  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。词表对齐
+   *  packages/subagent-core/src/execution/assembly/types.ts 的 ClosedReason。 */
   closedReason?: string
+  /**
+   * 终态三态对外语义（仅 closed 通知携带；running 轮次通知语义上无 outcome，缺省）。
+   * 写侧在 notify() 投影边界物化（closed 缺省时按 closedReason+error 派生）——消费侧
+   * 读本字段即得一等成败判定，无需自行从 closedReason 派生。
+   */
+  outcome?: 'completed' | 'failed' | 'cancelled'
   /** 对话轮次计数（仅 running 轮次通知有意义，非轮次通知恒定）。dedup key 按 id:round 去重。 */
   round?: number
+  /**
+   * 通知身份键（写侧 notify() 投影边界物化 = 去重/回执匹配键：`id` / `id:round`，
+   * 世代 epoch>0 扩为 `id:epoch:round`）。凭此可跨进程识别「同一条通知的重复注入」；
+   * 只进 details 不进 LLM 文案。
+   */
+  notifyId?: string
 }
 
 /**
@@ -246,7 +292,8 @@ export type BgNotifyDetails = BgNotifyRecord | { batch: true; items: BgNotifyRec
 /**
  * 防御性解析 customType:"subagent-bg-notify" 的 details 字段。
  *
- * details 两种形态（notifier.ts flushPendingNotifications）：
+ * details 两种形态（写侧 packages/subagent-core/src/execution/notify/notifier.ts
+ * flushPendingNotifications）：
  *   - 单条：BgNotifyRecord
  *   - 批量：{ batch: true, items: BgNotifyRecord[] }
  *
@@ -300,7 +347,7 @@ function parseRequiredRecordFields(d: Record<string, unknown>): Pick<BgNotifyRec
 /** 单个可选字段的拷贝 writer（窄化 + 条件写入） */
 type RecordFieldWriter = (record: BgNotifyRecord, d: Record<string, unknown>) => void
 
-function stringFieldWriter(field: 'model' | 'result' | 'error' | 'patchFile' | 'closedReason'): RecordFieldWriter {
+function stringFieldWriter(field: 'model' | 'result' | 'error' | 'patchFile' | 'closedReason' | 'notifyId'): RecordFieldWriter {
   return (record, d) => {
     const value = asRecordString(d[field])
     if (value !== null) record[field] = value
@@ -314,6 +361,17 @@ function numberFieldWriter(field: 'endedAt' | 'round'): RecordFieldWriter {
   }
 }
 
+/** outcome 字面量校验：=== 链与 BgNotifyRecord.outcome 联合逐一对齐（终态三态），非法值 → null */
+function asBgNotifyOutcome(v: unknown): BgNotifyRecord['outcome'] | null {
+  return v === 'completed' || v === 'failed' || v === 'cancelled' ? v : null
+}
+
+/** outcome 专用 writer：字面量联合不落宽 string（与 status 校验同款 === 链范式） */
+function outcomeFieldWriter(record: BgNotifyRecord, d: Record<string, unknown>): void {
+  const value = asBgNotifyOutcome(d.outcome)
+  if (value !== null) record.outcome = value
+}
+
 /** 可选字段拷贝表：数组顺序 = record 属性写入顺序（JSON.stringify 序列化依赖属性序，重排即 WS 帧/落盘字节漂移） */
 const OPTIONAL_RECORD_FIELD_WRITERS: ReadonlyArray<RecordFieldWriter> = [
   stringFieldWriter('model'),
@@ -322,7 +380,9 @@ const OPTIONAL_RECORD_FIELD_WRITERS: ReadonlyArray<RecordFieldWriter> = [
   numberFieldWriter('endedAt'),
   stringFieldWriter('patchFile'),
   stringFieldWriter('closedReason'),
+  outcomeFieldWriter,
   numberFieldWriter('round'),
+  stringFieldWriter('notifyId'),
 ]
 
 function copyOptionalRecordFields(d: Record<string, unknown>, record: BgNotifyRecord): void {
@@ -384,8 +444,8 @@ function asBackgroundBashEndReason(v: unknown): BackgroundBashEndReason | null {
  *   其余非 number 值 → 整体拒绝（字段类型异常不静默吞）
  */
 export function parseBackgroundBashDetails(details: unknown): BackgroundBashDetails | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   const taskId = asRecordString(d.taskId)
   const command = asRecordString(d.command)
   const durationMs = asRecordNumber(d.durationMs)
@@ -438,7 +498,8 @@ export interface WorkflowResultNotify {
   runId: string
   /** 三态判定（消费侧映射：failed → failedCount；neutral → neutralCount；completed → 成功计数） */
   outcome: WorkflowResultOutcome
-  /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome） */
+  /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome）。
+   *  诊断透传字段：当前零生产读取，成败判定一律走 outcome。 */
   reason?: WorkflowDoneReason
 }
 
@@ -454,8 +515,8 @@ export interface WorkflowResultNotify {
  * - reason 缺失 / 词表外 → outcome:'neutral'：记录级中性
  */
 export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotify | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   const runId = asRecordString(d.runId)
   if (!runId) return null
   const reason = asWorkflowDoneReason(d.reason)
@@ -473,8 +534,10 @@ export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotif
  * - write 新建文件 → added；覆盖既有文件 → modified
  * - edit 永远 → modified
  * - bash 驱动的删除/移动 → deleted（需 git 对账判定，见 ADR-0024）
- * - unmerged → git 冲突态（由 runtime git.status 推送，见 protocol.ts GitFileStatus；
- *   file_changes 与 git.status 共用本枚举，FR-11/C15）
+ * - unmerged → git 冲突态
+ *
+ * 与 git.ts GitFileStatus 是两个词表、不共用：后者面向 git.status 全量投影，多
+ * renamed/untracked 两值——file_changes 通道只消费 pi 工具语义面，不收 renamed/untracked。
  */
 export type FileChangeStatus = 'added' | 'modified' | 'deleted' | 'unmerged'
 
@@ -500,12 +563,6 @@ export interface FileChange {
  * superseded：agent 又改了一轮，旧变更集折叠归档
  */
 export type ChangeSetStatus = 'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'
-
-/**
- * 单文件审查决策（W14 ChangeSet Detail Accept/Reject 用）。
- * pending 为初始默认值，accepted/rejected 由用户在 Side Drawer 落定。
- */
-export type ReviewDecision = 'pending' | 'accepted' | 'rejected'
 
 export interface Message {
   id: string
@@ -547,8 +604,6 @@ export interface Message {
    * 仅 assistant 消息有值；user/system 消息不设置。
    */
   fileChanges?: FileChange[]
-  /** 发送模式，仅 user 消息有值（'send' 成员已删——无写入点，§3.3.6） */
-  sendMode?: 'steer' | 'follow-up'
   /** 是否被 abort 中断，仅 assistant 消息有值 */
   isInterrupted?: boolean
   /**
