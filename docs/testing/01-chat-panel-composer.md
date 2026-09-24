@@ -54,6 +54,7 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 | `branch-name-error` | CreateBranchModal.vue | 新建分支名校验错误 |
 | `submit-btn` | CreateBranchModal.vue | 新建分支提交按钮 |
 | `composer-box` | Composer.vue | composer 容器（Landing + Panel 态都有） |
+| `msg-revoke-button` | packages/ui `UserBubble.vue` | hover user 气泡显示；生成中 `aria-disabled=true` + title「生成中，停止后可撤回」（消息撤回，ADR-0076） |
 
 ## 4. 状态机（useNewTaskFlow）
 

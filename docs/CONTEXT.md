@@ -52,6 +52,9 @@ session 导入统一入口的多 coding-agent 抽象：一个导入源负责「�
 ### 消息投影（Message Projection）
 源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
+### 消息撤回（Message Revoke）
+撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生面口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
+
 ### 会话读取基座（session-core / zcode-session-source）
 session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
 
