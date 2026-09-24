@@ -32,17 +32,14 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['subagent'])
 export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'subagents'])
 
 /**
- * W16 [D4]：subagent 自描述持久化 entry 的 customType（runtime 侧消费值）。
+ * W16 [D4]：subagent 自描述持久化 entry 的 customType。
  *
- * 权威源在 extensions/universal/subagent-workflow（跨包依赖方向不允许 runtime
- * import extensions/ 源码，只能在此复制字面量并保持等值）：
- * - `subagent-record`：extensions/universal/subagent-workflow/src/execution/record-entry.ts 的
- *   SUBAGENT_RECORD_CUSTOM_TYPE（record 状态迁移点 append 完整快照，data schema v1）
- *
- * 消费方：event-adapter / session-records（entry_appended 失效过滤）、subagent-extractor
- * （entry 扫描的自描述分支）。extension 升级 customType 值时必须同步此处。
- * （workflow-record 的 customType 已收敛至 @zhushanwen/subagent-core 的
- * WORKFLOW_RECORD_CUSTOM_TYPE 单源——runtime 经 core barrel 消费，不经本文件。）
+ * 权威源 = @zhushanwen/subagent-core 的 SUBAGENT_RECORD_CUSTOM_TYPE
+ * （execution/persistence/record-entry.ts；runtime 三个消费模块与壳写点均经
+ * core barrel 消费，不经本文件）。本常量是 renderer（浏览器 bundle，不依赖
+ * Node 侧 core 包）的镜像副本：等值由双侧字面量锁钉住——shared 侧
+ * __tests__/constants.test.ts、core 侧 record-entry-collect.test.ts，任一侧
+ * 改值即双侧红灯。
  */
 export const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
 

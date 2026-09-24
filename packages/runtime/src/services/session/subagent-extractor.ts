@@ -9,7 +9,7 @@
  * 数据来源优先级：
  * 1. **自描述 `subagent-record` entry（W16 v1，权威）**：pi-subagent-workflow 在 record 状态
  *    迁移点（register/archive/reportRecordTransition）经 pi.appendEntry 落完整快照（customType
- *    常量 = shared SUBAGENT_RECORD_CUSTOM_TYPE）。读取方无需逆向解析 toolCall/toolResult。
+ *    常量 = @zhushanwen/subagent-core 的 SUBAGENT_RECORD_CUSTOM_TYPE，经 barrel 消费）。读取方无需逆向解析 toolCall/toolResult。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W16 改造前创建的旧 session）时走
  *    旧双管线的磁盘解析逻辑——从 toolCall/toolResult/bg-notify 配对重建。降级表现 = 旧
  *    session 数据滞后但可用（登记表 #8 标注）。
@@ -38,8 +38,9 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { getSubagentSessionDir } from '../../infra/pi/pi-paths.js'
-import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared'
-import { parseEngineHandle } from '@zhushanwen/subagent-core'
+import { parseBgNotifyDetails } from '@taiji/shared'
+// subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
+import { parseEngineHandle, SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
 import { isEnoent } from '../../utils/errors.js'

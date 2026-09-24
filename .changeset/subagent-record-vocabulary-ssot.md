@@ -1,0 +1,4 @@
+'@zhushanwen/subagent-core': minor
+---
+
+Converge the subagent-record entry vocabulary on subagent-core as the single source: the record store's four appendEntry write sites now use the SUBAGENT_RECORD_CUSTOM_TYPE constant instead of bare literals (the constant is already exported via the core barrel), and the runtime consumers (event-adapter, session-records, subagent-extractor) import it from the core barrel instead of @taiji/shared. The @taiji/shared copy remains as a renderer-only mirror (the renderer bundle does not depend on the Node-side core package) with its stale header comment rewritten to name the real source, and its value is now pinned by literal locks on both sides (shared constants.test.ts and core record-entry-collect.test.ts) so any drift turns red at the offending package.

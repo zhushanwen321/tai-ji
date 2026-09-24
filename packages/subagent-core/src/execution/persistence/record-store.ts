@@ -100,7 +100,7 @@ import { statStateStamp, writeFinalizedState, writeCancelledState, writeSettledS
 // binding 读写函数的调用已随终态轴/投影轴外迁（readRecordBinding/writeRecordBinding/
 // updateRecordBinding 仅经轴文件 import——读函数与 binding 写不在 D7 七名拦截面）。
 import { RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
-import { toSubagentRecordEntry } from "./record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "./record-entry.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
@@ -341,7 +341,7 @@ export class RecordStore {
    *  扩展数据持久化权威，custom entry 不进 LLM context。 */
   register(record: ExecutionRecord): void {
     this.records.set(record.id, record);
-    this.pi?.appendEntry?.("subagent-record", toSubagentRecordEntry(recordToSubagent(record)));
+    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry(recordToSubagent(record)));
     this.notifyChange();
   }
 
@@ -355,7 +355,7 @@ export class RecordStore {
    */
   archive(record: ExecutionRecord): void {
     this.records.delete(record.id);
-    this.pi?.appendEntry?.("subagent-record", toSubagentRecordEntry(recordToSubagent(record)));
+    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry(recordToSubagent(record)));
     this.notifyChange();
   }
 
@@ -368,7 +368,7 @@ export class RecordStore {
    * pi 未注入（session_start 前）时可选链静默降级，不阻断主流程。
    */
   reportRecordTransition(record: ExecutionRecord): void {
-    this.pi?.appendEntry?.("subagent-record", toSubagentRecordEntry(recordToSubagent(record)));
+    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry(recordToSubagent(record)));
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1045,7 +1045,7 @@ export class RecordStore {
    * 投影 appendEntry，绕过 recordToSubagent）。pi 未注入时可选链静默。
    */
   reportSubagentRecord(record: SubagentRecord): void {
-    this.pi?.appendEntry?.("subagent-record", toSubagentRecordEntry(record));
+    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry(record));
   }
 
   /**

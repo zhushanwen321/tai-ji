@@ -41,8 +41,8 @@
 import type { ServerMessage, ServerMessageType } from '@taiji/shared'
 import type { FileChange } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
-// workflow-record 词表单源 core（与 workflow-extractor/event-adapter 同源消费）
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+// subagent-record / workflow-record 词表单源 core（与 subagent-extractor/event-adapter 同源消费）
+import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import { CompactionNotifier } from './event-interpreter-compaction.js'
 import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
 import { PingProbe } from './event-interpreter-ping.js'
@@ -1223,7 +1223,7 @@ export class EventInterpreter {
     // record 状态迁移点（register / run flush）已 append 自描述 entry（entry_appended
     // 主信号先于本事件到达），此处失效用于主信号丢失时的双保险收敛。
     if (SUBAGENT_TOOL_NAMES.has(toolName)) {
-      this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'subagent-record')
+      this.opts.onRecordEntriesInvalidated?.(this.sessionId, SUBAGENT_RECORD_CUSTOM_TYPE)
     }
     if (WORKFLOW_TOOL_NAMES.has(toolName)) {
       this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
@@ -1355,7 +1355,7 @@ export class EventInterpreter {
   private handleSubagentBgNotify(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
     if (payload?.customType !== 'subagent-bg-notify') return
-    this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'subagent-record')
+    this.opts.onRecordEntriesInvalidated?.(this.sessionId, SUBAGENT_RECORD_CUSTOM_TYPE)
   }
 
   /**
