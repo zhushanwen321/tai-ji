@@ -1,9 +1,14 @@
 /**
  * 端口探测 + stale 进程清理。
  * Windows 仅使用 netstat/tasklist/taskkill；Unix 保留 lsof/ps/信号逻辑。
+ *
+ * 清杀决策必须落 main log（mainLogger.warn）：清杀动作只打 console 时不落盘，
+ * 「谁 SIGTERM 了端口占用者」在排障时不可考（2026-09-24 runtime 连环被杀事故的
+ * 取证缺口之一）。mainLogger 未 init（单测）时 no-op，行为不变。
  */
 import { execFileSync, execSync } from 'node:child_process'
 import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import { mainLogger } from '../logs/main-logger.js'
 import { isPortInUse } from './health-checker.js'
 import { terminateWindowsProcessTree } from './windows-process.js'
 
@@ -109,13 +114,17 @@ export function killStaleProcessOnPort(port: number, platform: PlatformProvider 
   const pids = currentPlatform === 'win32' ? getWindowsListeningPids(port) : getUnixListeningPids(port)
   for (const pid of pids) {
     if (!isSafeToKill(pid, () => currentPlatform)) {
-      console.warn(`[runtime] Port ${port} occupied by PID ${pid} but process name not in allowlist, skipping kill`)
+      mainLogger.warn(`[port-cleanup] Port ${port} occupied by PID ${pid} but process name not in allowlist, skipping kill`)
       continue
     }
-    console.log(`[runtime] Killing stale process ${pid} on port ${port}`)
+    mainLogger.warn('[port-cleanup] kill decision', {
+      action: 'kill_stale_port_process',
+      target: { pid, port },
+      reason: `port ${port} occupied by PID ${pid} (process name in allowlist); SIGTERM then SIGKILL after ${KILL_WAIT_MS}ms`,
+    })
     if (currentPlatform === 'win32') {
       if (!isWindowsPidListeningOnPort(pid, port)) {
-        console.warn(`[runtime] Port ${port} PID ${pid} changed before kill, skipping`)
+        mainLogger.warn(`[port-cleanup] Port ${port} PID ${pid} changed before kill, skipping`)
         continue
       }
       terminateWindowsProcessTree(pid)
@@ -143,7 +152,7 @@ export async function findAvailablePort(retryMs: number = PORT_RETRY_MS): Promis
       if (cleanedAny) await sleep(retryMs)
       return port
     }
-    console.warn(`[runtime] Port ${port} in use, cleaning up stale process`)
+    mainLogger.warn(`[port-cleanup] Port ${port} in use, cleaning up stale process`)
     killStaleProcessOnPort(port)
     cleanedAny = true
     await sleep(retryMs)

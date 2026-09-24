@@ -618,8 +618,8 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       setTimeout(() => controller.abort(), 150);
       const result = await runP;
       expect(result.success).toBe(false);
-      // 信号退出折算 = SIGNAL_EXIT_CODE_BASE（128），不与信号序号相加
-      expect(result.error).toBe("pi child exited with code 128");
+      // POSIX 信号退出折算 = 128 + signo（SIGTERM=15 → 143），与 runtime relay 侧退出码口径一致
+      expect(result.error).toBe("pi child exited with code 143");
       expect(result.failureKind).toBe("unknown");
       expect(result.turns).toBe(0);
     } finally {

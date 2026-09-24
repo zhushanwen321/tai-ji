@@ -437,7 +437,10 @@ export class RelayRegistry {
         cwd: frame.cwd,
         env: buildChildEnv(frame),
         stdio: ['pipe', 'pipe', 'pipe'],
-        // 不 detached：与 runtime 同进程组，runtime 崩溃时整组收割是双保险的主腿（§3.3-②）
+        // 不 detached：与 runtime 同进程组。注意：这只在「信号发给整个进程组」时才构成
+        // 收割——当前无组信号发送方（supervisor/端口清杀路径均只 SIGTERM runtime 单进程），
+        // Unix 父死子不亡，child 会 reparent 给 launchd 残活。实际兜底链 = deinit
+        // destroyAll + supervisor stop 的预记录后代清理 + 启动 orphan sweep。
         detached: false,
         windowsHide: true,
       })
