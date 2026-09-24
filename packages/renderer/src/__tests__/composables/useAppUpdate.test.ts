@@ -8,27 +8,29 @@
  * - onUpdateError → error/unsupported（SSOT）
  * - restorePreloadedUpdate 有效产物 → downloaded / 无效 no-op
  * - 状态守卫 ES4（downloaded 同版本不覆盖）/ ES5（downloaded 追新版退回 available）
- * - performDownload catch 兜底 / 传给 ipc 的是 plain object（toRaw 解包）
+ * - performDownload catch 兜底 / 传给 ipc 的是 version 字符串（批次 3 契约）
  *
  * w2 改造：旧一键 performUpdate 拆为 performDownload（downloaded 态）+ performInstall（restarting 态）。
- * ipc 层新增 updateDownload/updateInstall/getPreloaded 三导出，本测试同步补 mock。
  *
- * Mock 策略：
- * - vi.mock('@/api/domains/settings') 桩 8 个 update 方法；onUpdateProgress/onUpdateError 捕获 cb 供测试手动触发
+ * Mock 策略（控制器化）：
+ * - createAppUpdateController({ ipc }) 注入内存 adapter（helpers/update-ipc-mock.ts 的
+ *   createMemoryAppUpdateIpc，每 beforeEach 新建即隔离）；onUpdateProgress/onUpdateError 捕获 cb
+ *   供测试手动触发（ipc.fireProgress / ipc.fireError）
  * - vi.mock('@/composables/logic/markdown') 桩 renderMarkdown 避免加载 shiki WASM
- * - effectScope 包 useAppUpdate（onScopeDispose 依赖活跃 scope）
- * - _resetForTest 在 beforeEach 重置 module-level 单例 state
+ * - effectScope 包 controller.subscribeProgress / initAutoCheck（onScopeDispose 依赖活跃 scope）
+ * - afterEach 兜底 stop 活跃 scope（定时器/visibility listener/订阅随 onScopeDispose 清理）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
+import type { EffectScope } from 'vue'
 import type { LatestReleaseInfo } from '@taiji/shared'
-import { updateIpcBridge, updateIpcModule } from '../helpers/update-ipc-mock'
-
-// IPC 桥 mock 底座收敛在 helpers/update-ipc-mock.ts（r2-01：原 vi.hoisted 块外移为
-// helper 模块单例，vi.mock 工厂经顶层 import 转发注册；断言引用同一批 vi.fn）
-vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
+import { createMemoryAppUpdateIpc, type MemoryAppUpdateIpc } from '../helpers/update-ipc-mock'
+import {
+  createAppUpdateController,
+  type AppUpdateControllerInternal,
+} from '@/composables/features/settings/useAppUpdate'
 
 // markdown mock 留文件内：默认 html 与调用断言属本文件行为面（非 IPC 桥）
 const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
@@ -46,8 +48,6 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => toastFns,
 }))
 
-import { useAppUpdate, __testing, _resetForTest } from '@/composables/features/settings/useAppUpdate'
-
 /** 构造测试用 LatestReleaseInfo */
 function makeRelease(version = '0.9.0'): LatestReleaseInfo {
   return {
@@ -60,55 +60,55 @@ function makeRelease(version = '0.9.0'): LatestReleaseInfo {
   }
 }
 
-/** 在 effectScope 内运行 useAppUpdate，返回 result + scope.stop 清理函数（与 pending.test.ts 对齐）。
+/** 内存 ipc adapter + 绑定它的控制器（每 beforeEach 重建，用例间零残留） */
+let ipc: MemoryAppUpdateIpc
+let controller: AppUpdateControllerInternal
+/** 兜底清理：用例中断未 stop 时，afterEach 统一触发 onScopeDispose 清理 */
+let activeScope: EffectScope | null = null
+
+/** 在 effectScope 内订阅并激活控制器，返回 result + scope.stop 清理函数（与 pending.test.ts 对齐）。
  *  options.initAutoCheck=true 时在 scope 内同步调 initAutoCheck（onScopeDispose 需绑定到活跃 scope）。 */
 function setupUseAppUpdate(options?: { initAutoCheck?: boolean }): {
-  result: ReturnType<typeof useAppUpdate>
+  result: AppUpdateControllerInternal
   stop: () => void
 } {
   const scope = effectScope()
-  let result: ReturnType<typeof useAppUpdate> | undefined
+  activeScope = scope
   scope.run(() => {
-    result = useAppUpdate()
+    controller.subscribeProgress()
     if (options?.initAutoCheck) {
-      result.initAutoCheck()
+      controller.initAutoCheck()
     }
   })
-  return { result: result!, stop: () => scope.stop() }
+  return { result: controller, stop: () => scope.stop() }
 }
 
 beforeEach(() => {
-  _resetForTest()
+  ipc = createMemoryAppUpdateIpc()
+  controller = createAppUpdateController({ ipc })
   // __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之。
   // 默认 '0.0.0' 让版本守卫不拦截（< 任何 preloaded 版本），保持现有用例意图。
   vi.stubGlobal('__APP_VERSION__', '0.0.0')
-  updateIpcBridge.checkForUpdate.mockReset()
-  updateIpcBridge.updateDownload.mockReset()
-  updateIpcBridge.updateInstall.mockReset()
-  updateIpcBridge.getPreloaded.mockReset()
-  updateIpcBridge.getUpdateSettings.mockReset()
   // 默认 autoUpdate=true（批次 4 默认值）：存量 autoCheck 用例行为不变
-  updateIpcBridge.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
-  updateIpcBridge.openUpdateFallbackUrl.mockReset()
-  updateIpcBridge.onUpdateProgress.mockClear()
-  updateIpcBridge.onUpdateError.mockClear()
+  ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
+  // 默认值：两阶段 mock 的合理默认（各用例按需覆盖）
+  ipc.updateDownload.mockResolvedValue({ downloaded: true })
+  ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
+  ipc.getPreloaded.mockResolvedValue(null)
+  ipc.getPendingUpdate.mockResolvedValue(null)
   hoistedRenderMarkdown.mockReset()
   hoistedRenderMarkdown.mockResolvedValue('<h2>新特性</h2>')
-  // 默认值：两阶段 mock 的合理默认（各用例按需覆盖）
-  updateIpcBridge.updateDownload.mockResolvedValue({ downloaded: true })
-  updateIpcBridge.updateInstall.mockResolvedValue({ triggerRestart: true })
-  updateIpcBridge.getPreloaded.mockResolvedValue(null)
-  updateIpcBridge.getPendingUpdate.mockReset()
-  updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
 })
 
 afterEach(() => {
+  activeScope?.stop()
+  activeScope = null
   vi.unstubAllGlobals()
 })
 
 describe('useAppUpdate', () => {
   it('checkForUpdate 有新版 → state="available" + latestRelease 填充', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     // renderMarkdown 异步，waitFor 等 html 填充
@@ -124,7 +124,7 @@ describe('useAppUpdate', () => {
   })
 
   it('checkForUpdate 无新版 → state="idle"', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     expect(result.state.state).toBe('idle')
@@ -135,13 +135,13 @@ describe('useAppUpdate', () => {
   it('checkForUpdate 限额退避（rateLimited=true）→ 状态不回退 + 每窗口一次性提示（RM2.3）', async () => {
     toastFns.info.mockClear()
     // 先进入 available（已有升级提醒）
-    updateIpcBridge.checkForUpdate.mockResolvedValueOnce({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValueOnce({ info: makeRelease('0.9.0'), rateLimited: false })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     expect(result.state.state).toBe('available')
 
     // 退避窗口内的检查（周期/补查/手动同路径）：null + rateLimited=true
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
     await result.checkForUpdate(true)
     // 「限额未知」≠「确认无新版」：available 提醒不回退 idle
     expect(result.state.state).toBe('available')
@@ -154,12 +154,12 @@ describe('useAppUpdate', () => {
     expect(toastFns.info).toHaveBeenCalledTimes(1)
 
     // 窗口结束（拿到确定答案）→ 去重标记复位；确认无新版正常回退 idle
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     await result.checkForUpdate(true)
     expect(result.state.state).toBe('idle')
 
     // 新退避窗口可再次提示
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
     await result.checkForUpdate(true)
     expect(toastFns.info).toHaveBeenCalledTimes(2)
     stop()
@@ -168,18 +168,18 @@ describe('useAppUpdate', () => {
   it('onUpdateError UPDATE_STALE_RELEASE → 不进 error 态，自动重查拿新 latest（§3.5.1② / T3）', async () => {
     toastFns.info.mockClear()
     toastFns.error.mockClear()
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     expect(result.state.state).toBe('available')
 
     // 用户点下载期间服务端发了更新版本：main 权威解析拒绝旧版本并推 STALE 错误
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
-      updateIpcBridge.fireError({ stage: 'downloading', message: '更新信息已过期', errorCode: 'UPDATE_STALE_RELEASE' })
+    ipc.updateDownload.mockImplementation(async () => {
+      ipc.fireError({ stage: 'downloading', message: '更新信息已过期', errorCode: 'UPDATE_STALE_RELEASE' })
       throw { message: '更新信息已过期', stage: 'downloading', errorCode: 'UPDATE_STALE_RELEASE' }
     })
     // 自动重查拿到更新的 latest
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.1'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.1'), rateLimited: false })
 
     await result.performDownload()
 
@@ -196,17 +196,17 @@ describe('useAppUpdate', () => {
 
   it('onUpdateError UPDATE_STALE_RELEASE + 自动重查恰逢限额 → 不固化 downloading 假态（#24 回归）', async () => {
     toastFns.info.mockClear()
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     expect(result.state.state).toBe('available')
 
     // STALE 错误推送触发自动重查，重查恰逢限额退避窗口：{info:null, rateLimited:true}
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
-      updateIpcBridge.fireError({ stage: 'downloading', message: '更新信息已过期', errorCode: 'UPDATE_STALE_RELEASE' })
+    ipc.updateDownload.mockImplementation(async () => {
+      ipc.fireError({ stage: 'downloading', message: '更新信息已过期', errorCode: 'UPDATE_STALE_RELEASE' })
       throw { message: '更新信息已过期', stage: 'downloading', errorCode: 'UPDATE_STALE_RELEASE' }
     })
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: true })
 
     await result.performDownload()
 
@@ -223,11 +223,11 @@ describe('useAppUpdate', () => {
   })
 
   it('performDownload 经 onUpdateProgress 推送做 stage 转换（downloading→replacing），downloaded:true 后置 downloaded', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.updateDownload.mockImplementation(async () => {
       // 触发主进程推送：downloading 30% → replacing 100%（verifying 已随批次 3 删 perform 移除，m3）
-      updateIpcBridge.fireProgress({ stage: 'downloading', percent: 30 })
-      updateIpcBridge.fireProgress({ stage: 'replacing', percent: 100 })
+      ipc.fireProgress({ stage: 'downloading', percent: 30 })
+      ipc.fireProgress({ stage: 'replacing', percent: 100 })
       return { downloaded: true }
     })
     const { result, stop } = setupUseAppUpdate()
@@ -237,15 +237,15 @@ describe('useAppUpdate', () => {
     // 推送过程中 percent 累积到 100；downloaded:true → state=downloaded（下载止于此，restart 是 install 阶段）
     expect(result.state.percent).toBe(100)
     expect(result.state.state).toBe('downloaded')
-    expect(updateIpcBridge.updateDownload).toHaveBeenCalled()
+    expect(ipc.updateDownload).toHaveBeenCalled()
     stop()
   })
 
   it('performDownload 在 progress 推到中间态后 resolve {downloaded:true}，state 置 downloaded 不卡在 downloading', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     // 模拟：main 只推了一次 downloading 进度，updateDownload 随即 resolve
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
-      updateIpcBridge.fireProgress({ stage: 'downloading', percent: 50 })
+    ipc.updateDownload.mockImplementation(async () => {
+      ipc.fireProgress({ stage: 'downloading', percent: 50 })
       return { downloaded: true }
     })
     const { result, stop } = setupUseAppUpdate()
@@ -259,8 +259,8 @@ describe('useAppUpdate', () => {
   })
 
   it('performDownload downloaded=true → state="downloaded"（基础成功路径）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
-    updateIpcBridge.updateDownload.mockResolvedValue({ downloaded: true })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.updateDownload.mockResolvedValue({ downloaded: true })
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     await result.performDownload()
@@ -270,10 +270,10 @@ describe('useAppUpdate', () => {
   })
 
   it('onUpdateError 推送 → state="error" + errorMessage（SSOT）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.updateDownload.mockImplementation(async () => {
       // 触发主进程错误推送（SSOT 优先于 performDownload catch）
-      updateIpcBridge.fireError({ stage: 'downloading', message: '校验失败：sha256 不匹配' })
+      ipc.fireError({ stage: 'downloading', message: '校验失败：sha256 不匹配' })
       return { downloaded: false }
     })
     const { result, stop } = setupUseAppUpdate()
@@ -286,9 +286,9 @@ describe('useAppUpdate', () => {
   })
 
   it('onUpdateError errorCode="UPDATE_UNSUPPORTED_PLATFORM" → state="unsupported"', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
-    updateIpcBridge.updateDownload.mockImplementation(async () => {
-      updateIpcBridge.fireError({
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.updateDownload.mockImplementation(async () => {
+      ipc.fireError({
         stage: 'init',
         message: '当前平台不支持自动升级',
         errorCode: 'UPDATE_UNSUPPORTED_PLATFORM',
@@ -304,9 +304,9 @@ describe('useAppUpdate', () => {
   })
 
   it('performDownload catch 在 !errorHandled 时兜底置 error（去重：onUpdateError 未触发）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     // updateDownload reject 且未触发 onUpdateError → 走兜底 error
-    updateIpcBridge.updateDownload.mockRejectedValue(new Error('网络中断'))
+    ipc.updateDownload.mockRejectedValue(new Error('网络中断'))
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     await result.performDownload()
@@ -322,7 +322,7 @@ describe('useAppUpdate', () => {
 
   it('onUpdateError 带 suggestion 的网络类错误 → errorSuggestion = suggestion + D9 追加段', () => {
     const { result, stop } = setupUseAppUpdate()
-    updateIpcBridge.fireError({
+    ipc.fireError({
       stage: 'downloading',
       message: '无法连接代理 (EHOSTUNREACH)',
       errorCode: 'UPDATE_PROXY_UNREACHABLE',
@@ -339,7 +339,7 @@ describe('useAppUpdate', () => {
 
   it('无 suggestion 的网络类错误 → errorSuggestion = D9 手动下载指引', () => {
     const { result, stop } = setupUseAppUpdate()
-    updateIpcBridge.fireError({ stage: 'downloading', message: '网络连接失败', errorCode: 'UPDATE_NETWORK_FAILED' })
+    ipc.fireError({ stage: 'downloading', message: '网络连接失败', errorCode: 'UPDATE_NETWORK_FAILED' })
 
     expect(result.state.state).toBe('error')
     expect(result.state.errorMessage).toBe('网络连接失败')
@@ -351,7 +351,7 @@ describe('useAppUpdate', () => {
     setupUseAppUpdate()
     // toastFns 为模块级 hoisted spy（不被 beforeEach 重置），用例内先清零隔离
     toastFns.error.mockClear()
-    updateIpcBridge.fireError({
+    ipc.fireError({
       stage: 'downloading',
       message: '无法连接代理 (EHOSTUNREACH)',
       errorCode: 'UPDATE_PROXY_UNREACHABLE',
@@ -368,17 +368,15 @@ describe('useAppUpdate', () => {
   // 事故：state.latestRelease 存入 reactive(state) 后被 Vue 深度代理化（含嵌套 assets），
   // performDownload 把 proxy 传给 ipcRenderer.invoke → Electron structured clone 抛
   // "an object could not be cloned" → invoke reject 被 catch 吞成 errorMessage，
-  // 用户在 UpdateButton hover 看到英文 clone 报错。现有用例 mock @/api/domains/settings 接收的是
-  // makeRelease() 返回的普通对象，测不到此问题；本用例在 reactive 上下文（effectScope +
-  // useAppUpdate 内部 reactive state）下验证传给 ipc 的对象可被 structuredClone。
+  // 用户在 UpdateButton hover 看到英文 clone 报错。
   // [批次 3 RC1] 旧用例验证「传给 ipc 的是 plain object（toRaw 解包）」——契约版本号化后
   // updateDownload 只传 version 字符串，proxy/structuredClone 问题不再存在；本用例改为
   // 断言传给 ipc 的是 available release 的 version 字段（意图透传）。
   it('performDownload 传给 ipc 的是 available release 的 version 字符串（批次 3 契约）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
     // 捕获 updateDownload 实际收到的参数（IPC 入参）
     const received: string[] = []
-    updateIpcBridge.updateDownload.mockImplementation(async (v) => {
+    ipc.updateDownload.mockImplementation(async (v) => {
       received.push(v)
       return { downloaded: true }
     })
@@ -392,21 +390,21 @@ describe('useAppUpdate', () => {
 
   it('openFallbackUrl 调 ipc.openUpdateFallbackUrl(latestRelease.htmlUrl)', async () => {
     const release = makeRelease('0.9.0')
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: release, rateLimited: false })
-    updateIpcBridge.openUpdateFallbackUrl.mockResolvedValue(undefined)
+    ipc.checkForUpdate.mockResolvedValue({ info: release, rateLimited: false })
+    ipc.openUpdateFallbackUrl.mockResolvedValue(undefined)
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
     await result.openFallbackUrl()
 
-    expect(updateIpcBridge.openUpdateFallbackUrl).toHaveBeenCalledWith(release.htmlUrl)
+    expect(ipc.openUpdateFallbackUrl).toHaveBeenCalledWith(release.htmlUrl)
     stop()
   })
 
   // ── RD-4#9：逃生通道自身裸崩修复 ──
   it('RD-4#9: openFallbackUrl IPC 失败 → toastError 带可复制 URL（不变 unhandledRejection）', async () => {
     const release = makeRelease('0.9.0')
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: release, rateLimited: false })
-    updateIpcBridge.openUpdateFallbackUrl.mockRejectedValue(new Error('shell.openPath failed'))
+    ipc.checkForUpdate.mockResolvedValue({ info: release, rateLimited: false })
+    ipc.openUpdateFallbackUrl.mockRejectedValue(new Error('shell.openPath failed'))
     toastFns.error.mockClear()
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate()
@@ -419,7 +417,7 @@ describe('useAppUpdate', () => {
 
   // ── RD-4#5：手动检查失败显形 / 自动检查保持静默 ──
   it('RD-4#5: manual 检查网络失败 → state="error" + errorMessage（与「已是最新」可区分）', async () => {
-    updateIpcBridge.checkForUpdate.mockRejectedValue(new Error('network down'))
+    ipc.checkForUpdate.mockRejectedValue(new Error('network down'))
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate(true, 'manual')
 
@@ -429,7 +427,7 @@ describe('useAppUpdate', () => {
   })
 
   it('RD-4#5: auto 检查网络失败 → 保持静默回退 idle（不打 error 态）', async () => {
-    updateIpcBridge.checkForUpdate.mockRejectedValue(new Error('network down'))
+    ipc.checkForUpdate.mockRejectedValue(new Error('network down'))
     const { result, stop } = setupUseAppUpdate()
     await result.checkForUpdate(false, 'auto')
 
@@ -442,7 +440,7 @@ describe('useAppUpdate', () => {
   it('performInstall 乐观置 replacing（IPC 往返延迟内 state 立即变 replacing，堵二次点击竞态）', async () => {
     // updateInstall 返回 pending promise，调 performInstall 后同步检查 state
     let resolveInstall!: (v: { triggerRestart: boolean }) => void
-    updateIpcBridge.updateInstall.mockImplementation(
+    ipc.updateInstall.mockImplementation(
       () => new Promise<{ triggerRestart: boolean }>((r) => { resolveInstall = r }),
     )
     const { result, stop } = setupUseAppUpdate()
@@ -455,7 +453,7 @@ describe('useAppUpdate', () => {
   })
 
   it('performInstall triggerRestart=true → state="restarting"', async () => {
-    updateIpcBridge.updateInstall.mockResolvedValue({ triggerRestart: true })
+    ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
     const { result, stop } = setupUseAppUpdate()
     await result.performInstall()
     expect(result.state.state).toBe('restarting')
@@ -463,7 +461,7 @@ describe('useAppUpdate', () => {
   })
 
   it('performInstall 失败 → state="error" + errorMessage（兜底）', async () => {
-    updateIpcBridge.updateInstall.mockRejectedValue(new Error('替换文件失败'))
+    ipc.updateInstall.mockRejectedValue(new Error('替换文件失败'))
     const { result, stop } = setupUseAppUpdate()
     await result.performInstall()
     expect(result.state.state).toBe('error')
@@ -474,9 +472,9 @@ describe('useAppUpdate', () => {
   // ── restorePreloadedUpdate（功能 2：预下载恢复）──
   it('restorePreloadedUpdate 有效预下载产物 → state="downloaded" + latestRelease 填充，返回 true', async () => {
     const release = makeRelease('0.9.0')
-    updateIpcBridge.getPreloaded.mockResolvedValue({ release, filePath: '/tmp/preloaded.zip' })
+    ipc.getPreloaded.mockResolvedValue({ release, filePath: '/tmp/preloaded.zip' })
     const { result, stop } = setupUseAppUpdate()
-    const restored = await __testing.restorePreloadedUpdate()
+    const restored = await controller.restorePreloadedUpdate()
 
     expect(restored).toBe(true)
     expect(result.state.state).toBe('downloaded')
@@ -485,9 +483,9 @@ describe('useAppUpdate', () => {
   })
 
   it('restorePreloadedUpdate 无预下载产物（null）→ no-op，state 不变，返回 false', async () => {
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { result, stop } = setupUseAppUpdate()
-    const restored = await __testing.restorePreloadedUpdate()
+    const restored = await controller.restorePreloadedUpdate()
 
     expect(restored).toBe(false)
     expect(result.state.state).toBe('idle')
@@ -498,9 +496,9 @@ describe('useAppUpdate', () => {
   // ── restorePreloadedUpdate 版本守卫（w2-frontend-guard：前端兜底拦截过期产物）──
   it('W2TC1：currentVersion < preloaded.version（0.8.48 < 0.8.49）→ 守卫放行，恢复 downloaded', async () => {
     vi.stubGlobal('__APP_VERSION__', '0.8.48')
-    updateIpcBridge.getPreloaded.mockResolvedValue({ release: makeRelease('0.8.49'), filePath: '/tmp/x.zip' })
+    ipc.getPreloaded.mockResolvedValue({ release: makeRelease('0.8.49'), filePath: '/tmp/x.zip' })
     const { result, stop } = setupUseAppUpdate()
-    const restored = await __testing.restorePreloadedUpdate()
+    const restored = await controller.restorePreloadedUpdate()
 
     expect(restored).toBe(true)
     expect(result.state.state).toBe('downloaded')
@@ -510,9 +508,9 @@ describe('useAppUpdate', () => {
 
   it('W2TC2：currentVersion >= preloaded.version（0.8.49 >= 0.8.49）→ 守卫拦截，不恢复，回退 pending', async () => {
     vi.stubGlobal('__APP_VERSION__', '0.8.49')
-    updateIpcBridge.getPreloaded.mockResolvedValue({ release: makeRelease('0.8.49'), filePath: '/tmp/x.zip' })
+    ipc.getPreloaded.mockResolvedValue({ release: makeRelease('0.8.49'), filePath: '/tmp/x.zip' })
     const { result, stop } = setupUseAppUpdate()
-    const restored = await __testing.restorePreloadedUpdate()
+    const restored = await controller.restorePreloadedUpdate()
 
     expect(restored).toBe(false)
     expect(result.state.state).not.toBe('downloaded')
@@ -525,12 +523,12 @@ describe('useAppUpdate', () => {
     vi.stubGlobal('__APP_VERSION__', '0.8.49')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // makeRelease 填合法字段，仅覆盖 version 为非法 semver 触发 compare 抛错
-    updateIpcBridge.getPreloaded.mockResolvedValue({
+    ipc.getPreloaded.mockResolvedValue({
       release: { ...makeRelease('0.8.49'), version: 'not-a-version' },
       filePath: '/tmp/x.zip',
     })
     const { result, stop } = setupUseAppUpdate()
-    const restored = await __testing.restorePreloadedUpdate()
+    const restored = await controller.restorePreloadedUpdate()
 
     expect(warnSpy).toHaveBeenCalled()
     expect(restored).toBe(true)
@@ -544,10 +542,10 @@ describe('useAppUpdate', () => {
     // 通过 restorePreloadedUpdate 恢复 downloaded 态：同时设 pendingRestored=true，
     // 否则 checkForUpdate 进入时会置 checking 态破坏守卫前提（pendingRestored 守的是 checking 回退）
     const preloadedRelease = makeRelease('0.8.44')
-    updateIpcBridge.getPreloaded.mockResolvedValue({ release: preloadedRelease, filePath: '/tmp/x.zip' })
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.8.44'), rateLimited: false }) // 同版本
+    ipc.getPreloaded.mockResolvedValue({ release: preloadedRelease, filePath: '/tmp/x.zip' })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.8.44'), rateLimited: false }) // 同版本
     const { result, stop } = setupUseAppUpdate()
-    await __testing.restorePreloadedUpdate()
+    await controller.restorePreloadedUpdate()
     expect(result.state.state).toBe('downloaded')
 
     await result.checkForUpdate()
@@ -559,10 +557,10 @@ describe('useAppUpdate', () => {
 
   it('状态守卫 ES5：downloaded 态检测到更新版本 → 退回 available（追新版）', async () => {
     const preloadedRelease = makeRelease('0.8.44')
-    updateIpcBridge.getPreloaded.mockResolvedValue({ release: preloadedRelease, filePath: '/tmp/x.zip' })
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: makeRelease('0.8.46'), rateLimited: false }) // 更新版本
+    ipc.getPreloaded.mockResolvedValue({ release: preloadedRelease, filePath: '/tmp/x.zip' })
+    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.8.46'), rateLimited: false }) // 更新版本
     const { result, stop } = setupUseAppUpdate()
-    await __testing.restorePreloadedUpdate()
+    await controller.restorePreloadedUpdate()
     expect(result.state.state).toBe('downloaded')
 
     await result.checkForUpdate()
@@ -578,49 +576,48 @@ describe('useAppUpdate 订阅引用计数（RD-4#4）', () => {
   it('多消费者：listener 只注册一次；首/中 dispose 不退订，末位 dispose 才退订', () => {
     const scope1 = effectScope()
     const scope2 = effectScope()
-    let r1: ReturnType<typeof useAppUpdate> | undefined
-    let r2: ReturnType<typeof useAppUpdate> | undefined
-    scope1.run(() => { r1 = useAppUpdate() })
-    scope2.run(() => { r2 = useAppUpdate() })
+    scope1.run(() => { controller.subscribeProgress() })
+    scope2.run(() => { controller.subscribeProgress() })
+    const r1 = controller
+    const r2 = controller
 
-    // 两个消费者读同一份 module-level state
-    expect(r1!.state).toBe(r2!.state)
+    // 同一控制器的多消费者读同一份 state（容器化后单实例共享 state，结构恒成立）
+    expect(r1.state).toBe(r2.state)
     // 旧 bug：第 2 消费者在 refCount!==1 时早退 return，永不注册 onScopeDispose。修正后
     // listener 仍只注册一次（仅首个消费者），但每个消费者都挂了 onScopeDispose。
-    expect(updateIpcBridge.onUpdateProgress).toHaveBeenCalledTimes(1)
-    expect(updateIpcBridge.onUpdateError).toHaveBeenCalledTimes(1)
+    expect(ipc.onUpdateProgress).toHaveBeenCalledTimes(1)
+    expect(ipc.onUpdateError).toHaveBeenCalledTimes(1)
 
     // 首个消费者 dispose → refCount 2→1（未归零），不退订：进度推送仍可达存活消费者
     scope1.stop()
-    updateIpcBridge.fireProgress({ stage: 'downloading', percent: 42 })
-    expect(r2!.state.percent).toBe(42)
+    ipc.fireProgress({ stage: 'downloading', percent: 42 })
+    expect(r2.state.percent).toBe(42)
 
     // 末位消费者 dispose → refCount 归零，退订：进度推送不再可达
     scope2.stop()
-    updateIpcBridge.fireProgress({ stage: 'downloading', percent: 99 })
-    expect(r2!.state.percent).toBe(42)
+    ipc.fireProgress({ stage: 'downloading', percent: 99 })
+    expect(r2.state.percent).toBe(42)
   })
 
   it('三个消费者：第 3 个 dispose 后才真正退订（onUpdateError 亦只注册一次）', () => {
     const scopes = [effectScope(), effectScope(), effectScope()]
-    const results = scopes.map((s) => {
-      let r: ReturnType<typeof useAppUpdate> | undefined
-      s.run(() => { r = useAppUpdate() })
-      return r!
+    scopes.forEach((s) => {
+      s.run(() => { controller.subscribeProgress() })
     })
-    expect(updateIpcBridge.onUpdateError).toHaveBeenCalledTimes(1)
+    const results = [controller, controller, controller]
+    expect(ipc.onUpdateError).toHaveBeenCalledTimes(1)
 
     scopes[0].stop()
     scopes[1].stop()
     // 还差一个存活：错误推送仍可达
-    updateIpcBridge.fireError({ stage: 'downloading', message: 'still alive' })
+    ipc.fireError({ stage: 'downloading', message: 'still alive' })
     expect(results[2].state.state).toBe('error')
     expect(results[2].state.errorMessage).toBe('still alive')
 
     // 末位 dispose → 退订，错误推送不再可达
     results[2].state.state = 'idle'
     scopes[2].stop()
-    updateIpcBridge.fireError({ stage: 'downloading', message: 'after teardown' })
+    ipc.fireError({ stage: 'downloading', message: 'after teardown' })
     expect(results[2].state.state).toBe('idle')
   })
 })
@@ -634,20 +631,20 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
   })
 
   it('30s 首次触发 checkForUpdate(force=false)（批次 4 RM2.1：周期走缓存）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
-    updateIpcBridge.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
     // initAutoCheck 必须在 scope 内调（onScopeDispose 需绑定活跃 scope），用 options 触发
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
-    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledWith({ force: false })
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenCalledWith({ force: false })
     stop()
   })
 
   it('autoUpdate=false → 恢复链照走但零定时器/零 listener/零联网（RM1，验收①）', async () => {
-    updateIpcBridge.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
+    ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
     const addListenerSpy = vi.spyOn(document, 'addEventListener')
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
     // settings 读取是 fire-and-forget 异步：flush 微任务后再断言
@@ -655,94 +652,94 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
 
     // 零联网：30s 首查从未发生
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
     // 零 listener：visibilitychange 未挂载
     expect(
       addListenerSpy.mock.calls.some(([name]) => name === 'visibilitychange'),
     ).toBe(false)
     // 恢复链照走（本地读取不联网）：getPreloaded/getLaunchResult 被调
-    expect(updateIpcBridge.getPreloaded).toHaveBeenCalled()
-    expect(updateIpcBridge.getLaunchResult).toHaveBeenCalled()
+    expect(ipc.getPreloaded).toHaveBeenCalled()
+    expect(ipc.getLaunchResult).toHaveBeenCalled()
     addListenerSpy.mockRestore()
     stop()
   })
 
   it('首次完成后 60min 周期触发第二次 checkForUpdate', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
 
     // 30s 首次触发
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
     // 60min（60 * 60 * 1000ms）周期触发第二次
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(2)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
     stop()
   })
 
   it('守卫：state.state="downloaded" 时定时器触发跳过 checkForUpdate，但仍排下一次', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
     // 置为升级流程态（downloaded），定时器触发时不应打断
     result.state.state = 'downloaded'
 
     await vi.advanceTimersByTimeAsync(30000)
     // 守卫跳过本次检查
-    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
     // 恢复可检测态后，下一个周期应恢复检测（证明仍排了下一次定时器）
     result.state.state = 'idle'
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
     stop()
   })
 
   it('守卫：state.state="replacing" 时定时器触发跳过 checkForUpdate', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
     result.state.state = 'replacing'
 
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
     stop()
   })
 
   it('onScopeDispose 清理定时器：dispose 后周期不再触发 checkForUpdate', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
 
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
     stop() // 触发 onScopeDispose → clearAutoCheckTimer
 
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1) // 不再触发
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // 不再触发
   })
 
   it('可见性补查 10min 节流（RM2.4）：10min 内无重复联网补查（净效果断言）', async () => {
-    updateIpcBridge.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+    ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     const { result, stop } = setupUseAppUpdate({ initAutoCheck: true })
     // flush settings promise → 30s 首查 timer 排上
     await vi.advanceTimersByTimeAsync(0)
 
     // 首查触发
     await vi.advanceTimersByTimeAsync(30000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
     // hidden（含 document.hidden，runAutoCheck 守卫读的是它）→ 周期触发置 skipped
     const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1) // hidden 期间周期跳过联网
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // hidden 期间周期跳过联网
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     hiddenSpy.mockReturnValue(false)
 
     // 恢复可见 → 距首查 60min+ > 10min 窗口 → 补查正常触发（第 2 次）
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
 
     // 10min 窗口内再次切窗切回（skipped 未置）→ 无第二次补查联网（净效果）
     const hiddenSpy2 = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
@@ -751,7 +748,7 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
     hiddenSpy2.mockReturnValue(false)
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
-    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
     stop()
   })
 })
@@ -759,20 +756,15 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
 // ── W4: 启动结果 toast（launch result）──────────────────────────
 describe('W4: launch result toast', () => {
   beforeEach(() => {
-    _resetForTest()
     vi.clearAllMocks()
-    updateIpcBridge.getLaunchResult.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue(null)
     vi.stubGlobal('__APP_VERSION__', '0.0.0')
   })
 
-  afterEach(() => {
-    _resetForTest()
-  })
-
   it('A4-done-toast-vitest: done status → info toast sidebar.update.upgradedToast（i18n 解析）', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'done', version: '0.9.9' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'done', version: '0.9.9' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     // initAutoCheck 内 checkLaunchResult 是 fire-and-forget，等微任务完成。
     // 断言真实 i18n（@/i18n 默认 zh-CN）解析插值后的完整文案，同时锁住 {version} 占位传参
@@ -784,9 +776,9 @@ describe('W4: launch result toast', () => {
   })
 
   it('A6-rolledback-toast-vitest: rolled-back status → warning toast sidebar.update.rolledBack（i18n 解析）', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'rolled-back', version: '0.9.7' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'rolled-back', version: '0.9.7' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     // 精确断言 {version} 插值位置在句尾旧版本处
     await vi.waitFor(() => {
@@ -796,9 +788,9 @@ describe('W4: launch result toast', () => {
   })
 
   it('A5-failed-toast-vitest: failed status → warning toast sidebar.update.upgradeFailed（无版本号）', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     // upgradeFailed 键不含 {version} 占位：精确断言完整文案 + 仅此一次调用（排除混入带版本的键）
     await vi.waitFor(() => {
@@ -809,9 +801,9 @@ describe('W4: launch result toast', () => {
   })
 
   it('A5b-failed-error-mapping-vitest: failed + extract failed → 细分原因文案（A-D1 透传映射）', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'extract failed' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'extract failed' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('解压新版本失败，请检查磁盘空间后重试')
@@ -821,9 +813,9 @@ describe('W4: launch result toast', () => {
   })
 
   it('A5c-failed-unknown-error-fallback-vitest: failed + 未收录 error 码 → 回退通用文案', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'future-code' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'future-code' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成')
@@ -832,9 +824,9 @@ describe('W4: launch result toast', () => {
   })
 
   it('A5d-failed-installer-exited-vitest: failed + win 动态码 installer exited 1626 → 安装器文案（前缀匹配）', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'installer exited 1626' })
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue({ status: 'failed', version: '0.9.9', error: 'installer exited 1626' })
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('安装程序执行失败，请重新下载更新')
@@ -843,14 +835,14 @@ describe('W4: launch result toast', () => {
   })
 
   it('A7-null-no-toast-vitest: null result → no toast + getLaunchResult 被调用', async () => {
-    updateIpcBridge.getLaunchResult.mockResolvedValue(null)
-    updateIpcBridge.getPendingUpdate.mockResolvedValue(null)
-    updateIpcBridge.getPreloaded.mockResolvedValue(null)
+    ipc.getLaunchResult.mockResolvedValue(null)
+    ipc.getPendingUpdate.mockResolvedValue(null)
+    ipc.getPreloaded.mockResolvedValue(null)
     const { stop } = setupUseAppUpdate({ initAutoCheck: true })
     // 给微任务时间完成（0ms 宏任务让步足够——姊妹用例已证明，无需 50ms 真实等待）
     await new Promise((r) => setTimeout(r, 0))
     // A7: getLaunchResult 必须被调用（新实现的 checkLaunchResult 会调它）
-    expect(updateIpcBridge.getLaunchResult).toHaveBeenCalled()
+    expect(ipc.getLaunchResult).toHaveBeenCalled()
     // null 结果不弹 toast
     expect(toastFns.info).not.toHaveBeenCalled()
     expect(toastFns.warning).not.toHaveBeenCalled()
