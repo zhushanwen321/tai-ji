@@ -489,7 +489,8 @@ describe('[RT-4#9] invalidateRecordEntries 未知 customType 早退门 warn 显�
       // 同一未知类型两次：warn 只落一次（去重）
       records.invalidateRecordEntries('s1', 'future-record-kind')
       records.invalidateRecordEntries('s1', 'future-record-kind')
-      const warns = warnSpy.mock.calls.filter((c) => String(c[0]).includes("unknown customType 'future-record-kind'"))
+      // 文案子串随 D5 放宽后的双形态指引更新（旧形态 "unknown customType ... dropped" 已退役）
+      const warns = warnSpy.mock.calls.filter((c) => String(c[0]).includes("non-record customType 'future-record-kind' reached the gate"))
       expect(warns).toHaveLength(1)
 
       // 白名单类型不受影响：正常调度防抖拉取
