@@ -11,7 +11,8 @@ export default {
     // and closes the prompt while keeping the plan intact
     ignore: 'Dismiss',
     ignoreTip: 'Stop the agent and close this prompt; the plan is kept unchanged',
-    ignoreError: 'Dismiss failed: {message}. The agent may be unresponsive — retry, or exit plan mode via the left-zone exit button',
+    // D13⑧ copy without layout jargon ("left-zone") + D13⑨ em dash rewritten
+    ignoreError: 'Dismiss failed: {message}. The agent may be unresponsive. Retry, or exit plan mode via the "Exit" button on the left',
     revising: 'The agent is revising docs based on your comments; versions update here when done',
     waitingResubmit: 'Waiting for the agent to resubmit for review',
     // §3.4 degraded state (single source + legacy-entry generic): shared recovery hint;
@@ -33,7 +34,7 @@ export default {
     // Stage-dot tooltips (meaning of each stage)
     stageExploringTip: 'The agent is exploring requirements; no plan document yet',
     stageWritingTip: 'The agent is writing the plan document',
-    stageReviewingTip: 'Plan document ready — awaiting your review',
+    stageReviewingTip: 'Plan document is ready and awaiting your review',
     exit: 'Exit',
     // E9: error message embeds the recovery action, the bar stays as-is
     exitError: 'Exit failed: {message}. Fix the issue and retry, or type /plan abort in the conversation',
@@ -41,7 +42,7 @@ export default {
     // aborted (GUI drafts were already cleared at revise submit); with drafts = they will be discarded;
     // first matching warning wins
     exitConfirmTitle: 'Exit plan mode?',
-    exitWarnRevising: 'The agent is revising docs — exiting will abort the revision',
+    exitWarnRevising: 'The agent is revising docs; exiting will abort the revision',
     exitWarnDrafts: '{count} comment drafts will be discarded',
     exitConfirm: 'Confirm exit',
     exitCancel: 'Cancel',
@@ -51,13 +52,14 @@ export default {
     // Keys live in the plan domain file — tab semantics belong to plan mode, not panel.sideDrawer
     tabPlan: 'Plan Artifacts',
     noPlan: 'No plan artifacts yet',
-    planHint: 'Documents produced by the agent appear here after entering plan mode',
+    // D13⑩ empty-state guidance contains the /plan start hint (S13 copy anchor)
+    planHint: 'Type /plan to start planning; documents produced by the agent appear here',
     // Pending-state matrix (plan-mode-ux-refactor §3.2, u-drawer-gate): two states while isActive && docs empty.
     // #1 aligns with derivePlanStage's exploring semantics (neutral progressive, no specific action asserted);
     // #2 idle-waiting (isGenerating lazy derivation has a brief mis-show window; copy stays neutral,
     // never asserts "paused" — accepted explicitly)
     pendingActive: 'Exploring requirements and drafting the plan document…',
-    pendingIdle: 'The agent has not made progress yet — send a message to continue',
+    pendingIdle: 'The agent has not made progress yet; send a message to continue',
     // Recovery-entry hint: interaction semantics = guide the user to send a message (no standalone button;
     // recovery entry is copy-only guidance, landed with u-drawer-gate — no programmatic action)
     pendingIdleHint: 'Send any message in the composer to nudge the agent forward',
@@ -83,7 +85,7 @@ export default {
     delete: 'Delete',
     // Design §3.1 failure path: comments disabled while revising (no concurrent-revision semantics);
     // popover still shows, button unavailable
-    revisingDisabled: 'Revising in progress — comments are temporarily disabled',
+    revisingDisabled: 'Revising in progress; comments are temporarily disabled',
     draftsTitle: 'Comment drafts ({count})',
   },
 }

@@ -21,25 +21,29 @@
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.pendingActive') }}</p>
   </div>
   <!-- §3.2 矩阵 #2：isActive && docs 空 && agent 空闲 → pending 等待态 + 恢复入口提示
-       （交互语义 = 指引用户发消息，无独立按钮；恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作） -->
+       （交互语义 = 指引用户发消息，无独立按钮；恢复入口 = 文案指引，已随 u-drawer-gate 落地，无程序动作）
+       D13⑤ 小字去 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.5） -->
   <div
     v-else-if="pendingIdle"
     data-testid="plan-docs-pending-idle"
     class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
   >
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.pendingIdle') }}</p>
-    <p class="text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim opacity-50">
+    <p class="text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim">
       {{ t('plan.drawer.pendingIdleHint') }}
     </p>
   </div>
-  <!-- §3.2 矩阵 #4：无 plan 状态 / !isActive 且无产物 → 空态（正常退出落此态） -->
+  <!-- §3.2 矩阵 #4：无 plan 状态 / !isActive 且无产物 → 空态（正常退出落此态）。
+       D13⑩ 空态补图标与「输入 /plan 开始规划」指引（S13：图标 + 起步指引可见）；
+       D13⑤ planHint 小字去 opacity 叠乘 -->
   <div
     v-else-if="docItems.length === 0"
     data-testid="plan-docs-empty"
     class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
   >
+    <FileText class="size-5 text-neutral-faint" aria-hidden="true" />
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.noPlan') }}</p>
-    <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('plan.drawer.planHint') }}</p>
+    <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('plan.drawer.planHint') }}</p>
     <!-- 首拉失败（分区 loadError，u1-store 错误通路）：view 为空时状态带不渲染（isActive 门），
          错误若只落状态带呈全面即静默降级（C-U1）——本面板空态就近呈现「错误 + 恢复指引」，
          与 PlanModeBar 状态带错误行同款形态 -->
@@ -55,7 +59,8 @@
   </div>
   <div v-else data-testid="plan-docs-panel" class="flex h-full min-h-0 flex-col overflow-hidden">
     <!-- L2 横排文档 tab（demo doc-tabs 形态）：fileName ellipsis 截断（title 全名）+
-         来源技能 chip + version meta + 修订中圆点；降级单文件条目无 chip/version（D4） -->
+         version meta + 修订中圆点；sourceSkill 只留 meta 行一份（D13③，删 tab chip 重复）；
+         降级单文件条目无 version（D4）。D13④ 选中态 = bg-bg-elevated 中性浮起（§3.4 tab 型规则） -->
     <div
       role="tablist"
       data-testid="plan-docs-tabs"
@@ -70,7 +75,7 @@
         class="h-auto max-w-[200px] shrink-0 justify-start gap-1.5 rounded-t-[var(--radius-sm)] rounded-b-none px-3 py-2 font-normal text-[length:var(--text-xs)]"
         :class="
           doc.absPath === selectedDoc?.absPath
-            ? 'bg-surface-hover text-neutral-fg'
+            ? 'bg-bg-elevated text-neutral-fg'
             : 'text-neutral-dim hover:text-neutral-mid'
         "
         :aria-selected="doc.absPath === selectedDoc?.absPath"
@@ -78,11 +83,6 @@
         @click="selectedAbsPath = doc.absPath"
       >
         <span class="truncate">{{ doc.fileName }}</span>
-        <span
-          v-if="doc.sourceSkill"
-          data-testid="plan-docs-tab-skill"
-          class="shrink-0 rounded-full bg-surface-hover px-1.5 py-px font-mono text-[length:var(--text-3xs)] text-neutral-mid"
-        >{{ doc.sourceSkill }}</span>
         <span
           v-if="!doc.degraded"
           data-testid="plan-docs-tab-version"
@@ -122,9 +122,10 @@
         class="rounded-full bg-warn-soft px-2 py-0.5 text-[length:var(--text-3xs)] text-warn"
       >{{ t('plan.docs.revisingBadge') }}</span>
     </div>
-    <!-- 正文滚动区 + 划选评论目标容器 -->
-    <div ref="bodyEl" data-testid="plan-docs-body" class="min-h-0 flex-1 overflow-auto px-4 py-3">
-      <template v-if="selectedDoc">
+    <!-- 正文滚动区（划选评论目标 = 文档内容区 docContentEl；草稿列表区在其外，
+         划选草稿引文不触发评论浮条——D13⑪） -->
+    <div data-testid="plan-docs-body" class="min-h-0 flex-1 overflow-auto px-4 py-3">
+      <div v-if="selectedDoc" ref="docContentEl" data-testid="plan-docs-content-area">
         <!-- E2：file.read 失败 → 占位错误态（条目不清，恢复 = agent 重新产出或用户忽略） -->
         <div
           v-if="loadFailed"
@@ -150,7 +151,7 @@
           :content="content"
           :session-id="sessionId ?? undefined"
         />
-      </template>
+      </div>
       <!-- 评论草稿列表（D6：提交前 GUI 草稿，可多条可删除；提交打包由 PlanReviewBar 负责。
            §3.5 草稿回看锚点：审批条评论计数点击 → 本面板消费 plan-store 回看请求滚动至此） -->
       <div
@@ -159,7 +160,9 @@
         data-testid="plan-comment-drafts"
         class="mt-6 border-t border-border pt-3"
       >
-        <p class="mb-2 text-[length:var(--text-2xs)] font-medium uppercase tracking-wider text-neutral-dim">
+        <!-- D13①「评论草稿」标题去 uppercase tracking-wider（DESIGN.md 禁 AI slop：
+             uppercase tracking-wider 装饰文字） -->
+        <p class="mb-2 text-[length:var(--text-2xs)] font-medium text-neutral-dim">
           {{ t('plan.comment.draftsTitle', { count: drafts.length }) }}
         </p>
         <div
@@ -190,8 +193,9 @@
         </div>
       </div>
     </div>
-    <!-- 划选评论浮条（revising 态评论按钮禁用——设计 §3.1 失败路径） -->
-    <PlanCommentPopover :target="bodyEl" :disabled="revising" @submit="addDraft" />
+    <!-- 划选评论浮条（revising 态评论按钮禁用——设计 §3.1 失败路径）。
+         target = 文档内容区（不含草稿列表）：草稿列表区划选不触发评论浮条（D13⑪） -->
+    <PlanCommentPopover :target="docContentEl" :disabled="revising" @submit="addDraft" />
   </div>
 </template>
 
@@ -219,7 +223,7 @@
  */
 import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2, X } from '@lucide/vue'
+import { FileText, Loader2, X } from '@lucide/vue'
 import { Button, MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
 import type { PlanDocMeta } from '@taiji/shared'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
@@ -310,7 +314,8 @@ const selectedDoc = computed<DocTabItem | null>(
 )
 
 // ── 正文加载（file.read + E2 占位）──
-const bodyEl = ref<HTMLElement | null>(null)
+/** 文档内容区容器 = 划选评论目标（D13⑪：草稿列表区不在 target 内，划选引文不弹浮条） */
+const docContentEl = ref<HTMLElement | null>(null)
 const content = ref<string | null>(null)
 const loadFailed = ref(false)
 /** [RD-2#4] 请求在途标记：切换/修订刷新即清正文进 loading 态（正文区渲染加载行，不残留旧文档） */

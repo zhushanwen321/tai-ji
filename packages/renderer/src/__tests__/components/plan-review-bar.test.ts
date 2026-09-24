@@ -169,7 +169,8 @@ describe('PlanReviewBar 四分支显示公式（D5）', () => {
     // §3.5 文案条款：approve 键文案「确认并执行」（防回归——曾被写为「确认，开始执行」）
     expect(wrapper.find('[data-testid="plan-review-approve"]').text()).toContain('确认并执行')
     expect(wrapper.find('[data-testid="plan-review-ignore"]').text()).toContain('忽略')
-    expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
+    // D13⑦ 0 草稿不渲染评论计数键（常态归零）——原「0 条评论」计数文本断言随合规包失效
+    expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
   })
 
   it('分支② reviewState=revising → 修订中状态条，三键不渲染（禁用语义=不可达）', async () => {
@@ -257,11 +258,11 @@ describe('PlanReviewBar 两键 respond payload（PlanReviewResponse 判别联合
     expect(store.draftComments).toHaveLength(0)
 
     // 跨 run 模拟：同 session 再次 /plan 挂起新审批请求 → 计数归零（旧评论不残留、
-    // 不会被误打包进新 run 的 revise payload）
+    // 不会被误打包进新 run 的 revise payload）。D13⑦：归零即不渲染计数键
     emitPlanReviewRequest('pr-2')
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-summary"]').text()).toContain('0 条评论')
+    expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
   })
 
   it('revise → comments 打包自草稿快照（{quote, comment} 数组），提交后草稿清空（D6）', async () => {
@@ -398,6 +399,9 @@ describe('PlanReviewBar §3.5 守卫与回看', () => {
     await flushAsync()
 
     expect(usePlanStore().draftsRevealSeq).toBe(0)
+    // D13⑦：计数键只在有草稿时渲染——先建草稿再走回看链
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
     await wrapper.find('[data-testid="plan-review-summary"]').trigger('click')
     await flushAsync()
 

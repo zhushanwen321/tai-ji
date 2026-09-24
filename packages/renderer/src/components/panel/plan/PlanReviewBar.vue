@@ -29,11 +29,14 @@
       {{ ignoreError }}
     </p>
     <!-- 分支① 全功能审批键（isActive 且有挂起请求；正常时序 reviewState=awaiting 同真）。
-         2026-09-21 用户裁决两键+忽略：评论 / 执行 / 忽略（解释键删除） -->
+         2026-09-21 用户裁决两键+忽略：评论 / 执行 / 忽略（解释键删除）。
+         D13⑦ 0 草稿不渲染评论计数键（常态归零）；D13② 评论计数图标/角标去 warn 色
+         （warn 语义回归 §5.6 异常待处理），图标 accent / 角标 neutral -->
     <template v-if="mode === 'ready'">
       <!-- 评论计数可点（§3.5 草稿回看）：打开/聚焦 drawer 计划产物 tab + 滚动到草稿列表
            （滚动消费在 PlanDocsPanel，经 plan-store 回看请求信号跨挂载补消费） -->
       <Button
+        v-if="drafts.length > 0"
         variant="ghost"
         size="sm"
         data-testid="plan-review-summary"
@@ -41,7 +44,7 @@
         :title="t('plan.reviewBar.viewDrafts')"
         @click="onViewDrafts"
       >
-        <MessageSquare class="size-3 text-warn" aria-hidden="true" />
+        <MessageSquare class="size-3 text-accent" aria-hidden="true" />
         <span>{{ t('plan.reviewBar.commentsCount', { count: drafts.length }) }}</span>
       </Button>
       <span class="flex-1" aria-hidden="true" />
@@ -57,7 +60,7 @@
         {{ t('plan.reviewBar.submitRevise') }}
         <span
           v-if="drafts.length > 0"
-          class="rounded-full bg-warn-soft px-1.5 py-px font-mono text-[length:var(--text-3xs)] font-bold text-warn"
+          class="rounded-full bg-surface-hover px-1.5 py-px font-mono text-[length:var(--text-3xs)] font-bold text-neutral-mid"
         >{{ drafts.length }}</span>
       </Button>
       <Button
@@ -106,9 +109,10 @@
       <Hourglass class="size-3 shrink-0" aria-hidden="true" />
       <span class="flex min-w-0 flex-col items-end leading-snug">
         <span data-testid="plan-review-degraded-reason">{{ degradedReason }}</span>
+        <!-- D13⑤ 小字去 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.7） -->
         <span
           data-testid="plan-review-degraded-hint"
-          class="text-[length:var(--text-2xs)] text-neutral-dim opacity-70"
+          class="text-[length:var(--text-2xs)] text-neutral-dim"
         >{{ t('plan.reviewBar.degradedRecoverHint') }}</span>
       </span>
     </div>

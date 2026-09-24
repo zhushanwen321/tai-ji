@@ -9,6 +9,8 @@
     overflow hidden 会裁剪溢出，Teleport 后浮层脱离文档流不受裁剪。
     revising 态（disabled）：浮条照常出现、「评论」按钮禁用 + title 提示（§3.1 失败路径
     「修订中评论禁用」——避免并发修订语义，恢复 = 等修订完成）。
+    D13⑪ Esc 关闭：浮条/编辑态均可 Esc 关闭（Esc = 安全选择，不提交即弃）；草稿列表区
+    划选不触发本浮条（target = 文档内容区，见 PlanDocsPanel 接线）。
   -->
   <Teleport to="body">
     <div
@@ -209,14 +211,22 @@ function onMouseDown(e: MouseEvent): void {
   dismiss()
 }
 
+/** Esc 关闭（D13⑪ / DESIGN.md §5.13 Esc 关闭 overlay）：浮条/编辑态均整体关闭（安全选择 = 不提交） */
+function onKeyDown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || !sel.value) return
+  dismiss()
+}
+
 // 监听器常驻挂载（target 未就绪时 handler 内部忽略）——组件生命周期与面板一致，随面板卸载移除
 onMounted(() => {
   document.addEventListener('mouseup', onMouseUp)
   document.addEventListener('mousedown', onMouseDown)
+  document.addEventListener('keydown', onKeyDown)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mouseup', onMouseUp)
   document.removeEventListener('mousedown', onMouseDown)
+  document.removeEventListener('keydown', onKeyDown)
 })
 </script>

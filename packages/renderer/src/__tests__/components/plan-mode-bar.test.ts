@@ -28,6 +28,16 @@
  * 退出确认层经 reka Popover Portal 渲染在 document.body（UpdateButton.test.ts 同款断言
  * 形态）：mount attachTo document.body + 用例末尾统一 unmount（afterEach），禁 innerHTML 强删。
  *
+ * D13 合规清单索引（S13 降级兑现，11 项逐条落位——本文件 = 状态带/审批条/文案侧）：
+ * ①「评论草稿」标题去 uppercase → plan-docs-panel.test.ts「D13 合规断言（drawer 面板）」；
+ * ② 评论计数图标/角标非 warn 色 → 本文件；③ sourceSkill 只留 meta chip →
+ * plan-docs-panel.test.ts L2 tab 渲染；④ L2 tab 选中 bg-bg-elevated → plan-docs-panel.test.ts；
+ * ⑤ 三处小字去 opacity 叠乘 → 本文件（降级提示）+ plan-docs-panel.test.ts（pending/空态提示）；
+ * ⑥ 退出键 padding 收敛进按钮尺寸体系 → 本文件；⑦ 0 草稿不渲染评论计数键 → 本文件；
+ * ⑧ 文案去「左区」布局黑话 → 本文件静态断言；⑨ em dash 改写 → 本文件静态断言；
+ * ⑩ 空态图标 +「输入 /plan 开始规划」→ plan-docs-panel.test.ts；⑪ 浮层 Esc + 草稿区划选
+ * 不触发 → plan-docs-panel.test.ts。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-mode-bar.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -93,6 +103,8 @@ vi.mock('@/composables/useToast', () => ({
 
 import PlanModeBar from '@/components/panel/plan/PlanModeBar.vue'
 import Panel from '@/components/panel/Panel.vue'
+import zhPlan from '@/i18n/locales/zh-CN/plan'
+import enPlan from '@/i18n/locales/en-US/plan'
 import { usePlanStore } from '@/stores/plan-store'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { isPlanReviewRequest, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
@@ -514,5 +526,85 @@ describe('挂载位：Panel 内 composer 下方（.composer-band 之后）', () 
     expect(bandIdx).toBeGreaterThan(-1)
     expect(barIdx).toBeGreaterThan(bandIdx)
     wrapper.unmount()
+  })
+})
+
+/** locale 值递归展平（文案合规静态断言的输入面） */
+function flattenStrings(obj: unknown, out: string[] = []): string[] {
+  if (typeof obj === 'string') {
+    out.push(obj)
+    return out
+  }
+  if (obj && typeof obj === 'object') {
+    for (const v of Object.values(obj as Record<string, unknown>)) flattenStrings(v, out)
+  }
+  return out
+}
+
+describe('D13 视觉/文案合规断言（S13 降级兑现：状态带/审批条/文案侧②⑤⑥⑦⑧⑨）', () => {
+  it('D13⑥ 退出键 padding 收敛进按钮尺寸体系（size=dense 档，无任意值 padding）', async () => {
+    const wrapper = await mountBar()
+    const cls = wrapper.find('[data-testid="plan-mode-bar-exit"]').classes()
+    // 回归形态 = px-[7px] py-[3px] 自定义任意值 padding；现 = Button 尺寸档（dense：h-8 px-3）
+    expect(cls.some((c) => /^p[xy]?-\[/.test(c))).toBe(false)
+    expect(cls).toContain('px-3')
+    expect(cls).toContain('h-8')
+  })
+
+  it('D13⑦ 0 草稿不渲染评论计数键（常态归零）；有草稿才出现且计数正确', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
+
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
+    const summary = wrapper.find('[data-testid="plan-review-summary"]')
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toContain('1 条评论')
+  })
+
+  it('D13② 评论计数图标/角标非 warn 色（图标 accent / 角标 neutral，warn 回归异常语义）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    emitPlanReviewRequest('pr-1')
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
+
+    const icon = wrapper.find('[data-testid="plan-review-summary"] svg')
+    expect(icon.exists()).toBe(true)
+    expect(icon.classes()).not.toContain('text-warn')
+    expect(icon.classes()).toContain('text-accent')
+
+    const badge = wrapper.find('[data-testid="plan-review-revise"] span')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).not.toContain('text-warn')
+    expect(badge.classes()).not.toContain('bg-warn-soft')
+    expect(badge.classes()).toContain('text-neutral-mid')
+  })
+
+  it('D13⑤ 降级提示小字无 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.7）', async () => {
+    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    await flushAsync()
+    const hint = wrapper.find('[data-testid="plan-review-degraded-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+  })
+
+  it('D13⑧⑨ 文案合规（静态）：无布局黑话「左区」/left-zone；plan 域文案无 em dash；zh 无键盘标点', () => {
+    const zh = flattenStrings(zhPlan)
+    const en = flattenStrings(enPlan)
+    expect(zh.length).toBeGreaterThan(0)
+    expect(en.length).toBeGreaterThan(0)
+    for (const s of [...zh, ...en]) {
+      // D13⑧：用户可见文案不暴露布局黑话（改「左侧的『退出』」类指引）
+      expect(s).not.toContain('左区')
+      expect(s).not.toContain('left-zone')
+      // D13⑨：em dash 全部改写（en 实测 5 处字符串含 ignoreError，设计计 4 处）
+      expect(s).not.toContain('—')
+    }
+    // 中文文案键盘标点（半角 ,;:!?()）清零：中文语境用全角标点（D13 规则族）
+    for (const s of zh) {
+      expect(s).not.toMatch(/[(),;:!?]/)
+    }
   })
 })

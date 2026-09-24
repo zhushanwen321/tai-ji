@@ -56,13 +56,14 @@
     <!-- 退出（D5：确认后 emit session.abortPlan WS 命令，E10：
          挂起 select 期退出联动在 extension 侧）。§3.5 退出确认 Popover：确认前置 + 分情境
          警示（revising = agent 侧修订将中止 / 有评论草稿 = 将丢弃，按序取首个命中）；
-         2026-09-21 精简后本按钮是退出唯一入口（degraded 态不再另设右区退出） -->
+         2026-09-21 精简后本按钮是退出唯一入口（degraded 态不再另设右区退出）。
+         D13⑥ 自定义 padding 收敛进按钮尺寸体系（size=dense，删 px-[7px] py-[3px] 任意值） -->
     <Popover :open="exitConfirmOpen" @update:open="exitConfirmOpen = $event">
       <PopoverTrigger as-child>
         <Button
           variant="ghost"
-          size="sm"
-          class="ml-auto shrink-0 gap-1 rounded-[var(--radius-sm)] px-[7px] py-[3px] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+          size="dense"
+          class="ml-auto shrink-0 gap-1 rounded-[var(--radius-sm)] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
           data-testid="plan-mode-bar-exit"
           :disabled="exiting"
         >
