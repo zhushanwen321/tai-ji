@@ -1518,9 +1518,10 @@ export type RevokeMessageErrorCode =
 /**
  * session.revokeMessage 的 reply（消息撤回设计 D2 ⑦/D7/D8）。
  *
- * 成功形态：revoked:true + content——runtime 剥除裸标记后的用户原文（MSG_ID_TAG_RE
- * 同源正则逐段剥除，D7），供 renderer 草稿回填；幂等重试（目标已被前序撤回带走，
- * D2 ⑤ 二次判定命中）同样回成功形态，重试安全。
+ * 成功形态：revoked:true + content——transcript entry 原文 raw 不剥投递裸标记（标记是
+ * renderer 切条锚点，runtime 剥掉则 renderer 无锚；剥标记与整批切条还原在 renderer 侧
+ * D7 两层规则，见 shared/revoke-restore），供 renderer 草稿回填；幂等重试（目标已被
+ * 前序撤回带走，D2 ⑤ 二次判定命中）同样回成功形态，重试安全。
  * 错误形态：revoked:false + error 六码闭集（见 RevokeMessageErrorCode）。六码不走统一
  * error envelope——它们是设计内领域回执（renderer 按码驱动置灰 / toast / 刷新建议，
  * D8 呈现列），不是传输错误；判别字段 revoked。

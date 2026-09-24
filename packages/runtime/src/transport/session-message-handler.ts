@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
@@ -69,14 +69,18 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   形态对齐 backgroundTasks 先例，缺省仅出现在测试最小 mock 中。
    * - notifySessionActivated（plugin-header-action-modal-points AP-4/u5a relay ①）：
    *   session.switch 成功分支投递激活信号（PluginService 注册回调 → didActivate 定向投递）。
-   *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应让
-   *   switch 请求失败。
+   *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应
+   *   让 switch 请求失败。
+   * - revokeMessage（message-revoke 设计 §3.3 D2，U4）：session.revokeMessage 七步编排
+   *   （RevokeOrchestrator）的转发面。可选成员形态对齐 getPlanState 先例——缺省仅出现
+   *   在测试最小 mock 中，case 内判空走 revoke_unsupported 防御分支。
    */
   sessionService: ISessionService & {
     readonly backgroundTasks?: BackgroundTaskRpcPort
     markSessionViewed?(sessionId: string): void
     getPlanState?(sessionId: string): Promise<PlanStateView>
     notifySessionActivated?(summary: SessionSummary): void
+    revokeMessage?(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply>
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -187,6 +191,10 @@ export class SessionMessageHandler {
     'session.setProject': (msg, ws) => this.handleSessionSetProject(msg, ws),
     'session.importCandidates': (msg, ws) => this.handleSessionImportCandidates(msg, ws),
     'session.import': (msg, ws) => this.handleSessionImport(msg, ws),
+    // 消息撤回（message-revoke 设计 §3.3 D2，U4）：已送达消息的 session 树内回退。
+    // reply 与 request 同名（payload 消费型），领域回执（revoked/error 六码，D8 SSOT）
+    // 不走 error envelope——六码是设计内回执非传输错误。
+    'session.revokeMessage': (msg, ws) => this.handleSessionRevokeMessage(msg, ws),
     'message.send': (msg, ws) => this.handleMessageSend(msg, ws),
     'message.steer': (msg, ws) => this.handleMessageSteer(msg, ws),
     'message.follow_up': (msg, ws) => this.handleMessageFollowUp(msg, ws),
@@ -1110,6 +1118,31 @@ export class SessionMessageHandler {
     const deduped = await registry.resync(sessionId, clientUuids)
     this.deliveryTopic.sync(sessionId)
     return this.ctx.reply(ws, msg.id, 'delivery.resync', { sessionId, deduped })
+  }
+
+  // ── 消息撤回（message-revoke 设计 §3.3 D2，U4）────────────────────────────
+
+  private async handleSessionRevokeMessage(msg: Extract<ClientMessage, { type: 'session.revokeMessage' }>, ws: WsType): Promise<void> {
+    // handler 只透传 payload 字段（七步编排全在 RevokeOrchestrator）；reply 直接透传
+    // SessionRevokeMessageReply（revoked:true + content / revoked:false + error 六码）。
+    // 领域回执不走 error envelope——错误码驱动 renderer 置灰 / toast / 刷新建议（D8
+    // 呈现列）；此处 catch 只收口编排 throw（组合根装配缺失类运行时异常）。
+    const { sessionId, targetId } = msg.payload
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof targetId !== 'string' || targetId === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'session.revokeMessage requires non-empty sessionId and targetId', msg.id, { sessionId })
+    }
+    const revoke = this.ctx.sessionService.revokeMessage
+    if (!revoke) {
+      // SessionService 未组装转发（仅测试最小 mock 形态，对齐 getPlanState 防御分支口径）
+      // → 显式报错不留静默。
+      return this.ctx.sendError(ws, 'revoke_unsupported', 'revoke orchestrator not available', msg.id, { sessionId })
+    }
+    try {
+      const reply = await revoke.call(this.ctx.sessionService, sessionId, targetId)
+      return this.ctx.reply(ws, msg.id, 'session.revokeMessage', reply)
+    } catch (e) {
+      return this.reportFailure(ws, msg.id, 'revoke_failed', e, { scope: 'session.revokeMessage', sessionId })
+    }
   }
 
   async handleSessionCompact(msg: Extract<ClientMessage, { type: 'session.compact' }>, ws: WsType): Promise<void> {

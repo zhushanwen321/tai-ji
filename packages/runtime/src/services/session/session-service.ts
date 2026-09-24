@@ -30,7 +30,7 @@
  */
 import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -78,6 +78,7 @@ import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccup
 import type { DeliverySubmitResult } from './session-delivery-registry.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
+import { RevokeOrchestrator } from './revoke-orchestrator.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
 // B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
 // type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
@@ -153,6 +154,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private lifecycle!: SessionLifecycle
   private dispatcher!: MessageDispatcher
   private scanner!: SessionScanner
+  /**
+   * 消息撤回编排域（message-revoke 设计 §3.3 D2，U4）：revokeMessage 七步编排——
+   * revoking hold 置位/释放 + cancel active + 定位 + 清缓存 + 信令前校验 + nav 信令 +
+   * reply。构造点在 dispatcher 之后（sendSystemCommand 依赖其实例），见 assembleSubmodules。
+   */
+  private revokeOrchestrator!: RevokeOrchestrator
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -521,6 +528,22 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // registry 构造点（runtime/src/index.ts）传 sessionService.skillMappingSource 共源。
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
+
+    // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读面、
+    // workflow 检查经 records 磁盘扫描（W17 workflow-record entry，run 启动冷路径立即落盘）、
+    // history 缓存清理绑本 Facade 既有入口、信令经 dispatcher.sendSystemCommand 旁路。
+    this.revokeOrchestrator = new RevokeOrchestrator({
+      getSession: (sessionId) => this.lifecycle.get(sessionId),
+      ensureActive: (sessionId) => this.ensureActive(sessionId),
+      hasRunningWorkflow: async (sessionId) =>
+        (await this.records.getWorkflows(sessionId)).records.some((r) => r.status === 'running'),
+      evictHistoryRebuildCache: (sessionId) => this.evictHistoryRebuildCache(sessionId),
+      // U6d 接线点（复审 F2 拆边）：派生态失效窄接口，U4 以 no-op 占位实现——U6d
+      // committed 后替换为 SessionRecords 丢 cursor 强制全量重建的真实调用（主 agent
+      // 在 U6d commit 核验后监督核销该接线点，阶段 3 一致性审查复核）。
+      invalidateDerivedState: () => undefined,
+      sendSystemCommand: (sid, cmd, req) => this.dispatcher.sendSystemCommand(sid, cmd, req),
+    })
 
     // 后台任务域组装（u-runtime-rpc①②）：广播回调经 this.messageBus 动态读（getter 语义，
     // 与 registerDeps/traceSync 的晚期注入同款——setMessageBus 后置注入前触发时 publish
@@ -1128,6 +1151,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * SessionHistoryReader.onSessionReclaimed）。
    */
   evictHistoryRebuildCache(sessionId: string): void { this.historyReader.onSessionReclaimed(sessionId) }
+
+  /**
+   * 消息撤回编排入口（message-revoke D2，U4）：七步编排全在 RevokeOrchestrator，reply
+   * 形状见 shared SessionRevokeMessageReply（D8 错误规格表 SSOT）。领域回执（六码）不走
+   * error envelope；编排 throw（装配缺失类）由 transport handler 收口。
+   */
+  revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply> {
+    return this.revokeOrchestrator.revokeMessage(sessionId, targetId)
+  }
 
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 

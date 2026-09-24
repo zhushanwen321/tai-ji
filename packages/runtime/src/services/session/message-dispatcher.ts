@@ -133,6 +133,20 @@ export type SendPromptReason = 'busy' | 'compacting' | 'bash' | 'command-missing
 const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
 const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
 
+/**
+ * sendSystemCommand 的判别结果（消息撤回 D1/D8）：编排按 kind 映射错误码——
+ * 'sent' = prompt resolve（完成确认由调用方 get_entries 校验，受理口径不反映执行结果）；
+ * 'extension-missing' = requireCommand 探测耗尽（fail-closed，命令串未进模型）；
+ * 'pi-reclaimed' = ensureActive 拉活失败（终态码，区别于命令真缺失）；
+ * 'error' = prompt 抛错（传输级；pi 侧 command 执行错误不发此形态——command 抛错只发
+ * extension error 事件、prompt 照常成功 'sent'，缺陷面由调用方事后校验兜住）。
+ */
+export type SystemCommandOutcome =
+  | { kind: 'sent' }
+  | { kind: 'extension-missing' }
+  | { kind: 'pi-reclaimed' }
+  | { kind: 'error'; message: string }
+
 export class MessageDispatcher {
   private sendMessageHook: SendMessageHook | null = null
   /** per-session 受理串行链（hook 竞态顺序闭合，见 sendMessage；settled 后自清）。 */
@@ -280,6 +294,8 @@ export class MessageDispatcher {
         const commands = await client.getCommands()
         if (commands.some((c) => c.name === requireCommand)) return true
       } catch (e) {
+        // 降级策略（best-effort 探测）：单次 RPC 抖动视同未命中参与下一轮重试（总预算
+        // 耗尽 fail-closed），不中断发送/信令主流程——warn 留排查线索，非静默吞。
         console.warn(
           `[message-dispatcher] requireCommand probe failed (attempt ${attempt + 1}/${REQUIRE_COMMAND_RETRY_ATTEMPTS + 1}):`,
           toErrorMessage(e),
@@ -294,6 +310,62 @@ export class MessageDispatcher {
     if (this.sendMessageChains.get(sessionId) === run) {
       this.sendMessageChains.delete(sessionId)
     }
+  }
+
+  /**
+   * 系统信令入口（消息撤回设计 D1：sendSystemCommand）——与用户消息链路（sendMessage）
+   * 刻意分流的旁路通道，供 runtime 编排对 pi 触发 extension command（`/` 前缀 prompt——
+   * pi 同步执行、不进模型、无 turn，P2 前提）。
+   *
+   * 分流契约（D1 逐条）：
+   * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写面
+   *   （hook 的 transform 可破坏命令形态，D1 否决记录的第三缺陷）；
+   * - **不经 registry.submit**：无裸标记尾附（标记会污染 command args 使 navigateTree throw）、
+   *   无内核条目、无车道判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
+   *   提交会自锁死等）；
+   * - **复用 ensureCommandAvailable 探测**（requireCommand 语义保留：命令未注册 fail-closed
+   *   extension-missing，命令串不进模型）；
+   * - **前置 ensureActive 交接 + 入口 touchActivity**：restore 的唯一触发点在内核出站交接，
+   *   旁路必须自带——否则「发错消息隔久回来撤」形态下 pi 已被空闲回收，纯探测耗尽误报
+   *   extension-missing 且诊断错位；touch 防「探测+prompt 在途窗口被回收器误杀」。
+   *
+   * 返回判别结果（不 throw——编排按 kind 映射 D8 错误码；'error' = prompt 抛错等传输级
+   * 失败，编排归 nav-failed 可重试）。
+   */
+  async sendSystemCommand(
+    sessionId: string,
+    commandLine: string,
+    requireCommand?: string,
+  ): Promise<SystemCommandOutcome> {
+    // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前——与 sendMessage 同款）──
+    this.pm.getClient(sessionId)?.touchActivity()
+    // ── ensureActive 交接（旁路自带的 restore 触发点；拉活失败 = pi-reclaimed 终态码）──
+    let client: IPiEngine
+    try {
+      client = await this.svc.ensureActive(sessionId)
+    } catch (e) {
+      console.error(`[message-dispatcher] sendSystemCommand: ensureActive failed, sid=${sessionId}`, toErrorMessage(e))
+      return { kind: 'pi-reclaimed' }
+    }
+    // 拉活后 touch：restore spawn 的新 client lastActivityAt 初值 = spawn 时刻（天然新鲜），
+    // 此处防御性刷新覆盖「探测重试循环（≤3s）+ prompt 在途」窗口的回收误杀。
+    client.touchActivity()
+    if (requireCommand !== undefined) {
+      const available = await this.ensureCommandAvailable(sessionId, requireCommand)
+      if (!available) {
+        console.warn(
+          `[message-dispatcher] sendSystemCommand: command "${requireCommand}" not registered after ${REQUIRE_COMMAND_RETRY_ATTEMPTS} retries (fail-closed), sid=${sessionId}`,
+        )
+        return { kind: 'extension-missing' }
+      }
+    }
+    try {
+      await client.prompt(commandLine)
+    } catch (e) {
+      console.error(`[message-dispatcher] sendSystemCommand: prompt failed, sid=${sessionId}`, toErrorMessage(e))
+      return { kind: 'error', message: toErrorMessage(e) }
+    }
+    return { kind: 'sent' }
   }
 
   /**

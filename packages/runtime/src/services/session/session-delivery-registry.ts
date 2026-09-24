@@ -121,6 +121,18 @@ export interface SessionDeliveryRegistry {
   hasDeliveryActivity(sessionId: string): boolean
   /** 对账器入口（五触发点共用；内部自行节流与幂等） */
   reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void>
+  /**
+   * 置位撤回编排的 revoking hold（消息撤回 D2①：入口同步临界区内调用，无 await 间隔）。
+   * 返回 false = 该 session 已有撤回进行中（互斥自检——并发第二撤回回 busy）。
+   * 置位与自检在同一同步段完成（无 check-then-act 缝隙）。
+   */
+  beginRevokeHold(sessionId: string): boolean
+  /**
+   * 释放撤回编排的 revoking hold（D2 硬契约：编排 try/finally 全路径必达——含 busy /
+   * workflow-running / no-mapping / pi-reclaimed 等全部提前 return；泄漏 = 该 session
+   * 后续提交永久 queued 死轮询）。幂等（无运行时条目时 no-op——dispose 已清场形态）。
+   */
+  endRevokeHold(sessionId: string): void
   /** 丢弃单 session 队列（session 删除等场景） */
   dispose(sessionId: string): void
   disposeAll(): void
@@ -200,8 +212,10 @@ function payloadText(payload: DeliveryPayload): string {
   return payload.content
 }
 
-/** pi message content（parts 数组 / string）→ 纯文本（非 text part 忽略）。 */
-function piContentText(content: unknown): string {
+/** pi message content（parts 数组 / string）→ 纯文本（非 text part 忽略）。
+ *  导出供 revoke-orchestrator 复用（transcript entry 原文查取——裸标记扫描与 reply
+ *  content 构造共用同一 content 文本化口径，禁双侧手写漂移）。 */
+export function piContentText(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   let text = ''
@@ -232,8 +246,13 @@ export function resetActiveDeliveryRegistryForTest(): void {
 
 // ── 持有判定（D1 唯一判定源） ─────────────────────────────────
 
-/** 不可投原因：pi 暂不可收（内核持有等时机）。null = 可投。 */
-type HoldReason = 'compacting' | 'bash' | 'settling'
+/**
+ * 不可投原因：pi 暂不可收（内核持有等时机）。null = 可投。
+ * 'revoking'（消息撤回 D2①）= 撤回编排进行中——撤回的树回退语义要求窗口内无新消息
+ * 投出（新分支上「凭空出现」破坏 G2），与 piCompactingBlocked 同型：registry 私有
+ * 标志（不在 occupancy 投影通道），经 currentHold 第四判定输入生效。
+ */
+type HoldReason = 'compacting' | 'bash' | 'settling' | 'revoking'
 
 /**
  * 持有判定（D1 唯一判定源，读 runtime 权威 occupancy 投影）：
@@ -266,6 +285,9 @@ function toStreamingBehavior(intent: DeliveryIntent): 'steer' | 'followUp' {
 function triggerOfHold(reason: HoldReason | 'compacting-pi'): ReconcileTrigger {
   if (reason === 'compacting' || reason === 'compacting-pi') return 'compaction-end'
   if (reason === 'settling') return 'agent-settled'
+  // 'revoking' 归 'abort-idle'（重投触发点族）：revoking 释放后的投递恢复主路径 =
+  // deliverOne 内 waitDeliverable 轮询自行续走（挂起的出站交接继续），此处 reconcile
+  // 只是顺带对账（幂等无害）——撤回期间内核条目已被编排全量 cancel，通常无事可做。
   return 'abort-idle'
 }
 
@@ -296,6 +318,14 @@ interface RuntimeState {
    * 事件驱动的持有释放，避免按挂钟空转重试（规则 19）。
    */
   piCompactingBlocked: boolean
+  /**
+   * 撤回编排进行中（消息撤回 D2①硬契约）：置位 = 编排最前（入口同步临界区内）、
+   * 释放 = 编排 try/finally 全路径（含 busy / no-mapping 等提前 return）。泄漏形态 =
+   * 该 session 后续提交永久 queued 死轮询（恢复通道仅重启 app），故释放契约不可缺。
+   * 经 currentHold 第四判定输入生效（piCompactingBlocked 同型，勿复用 compacting
+   * 投影通道）；置位/释放入口 = beginRevokeHold / endRevokeHold（互斥自检在置位内）。
+   */
+  revoking: boolean
   unsubClient?: () => void
   unsubSettled?: () => void
   watchdog?: ReturnType<typeof setInterval>
@@ -471,10 +501,13 @@ export function createSessionDeliveryRegistry(
     }
   }
 
-  /** 当前持有原因（view 判定 ⊕ pi 侧压缩事实；piCompactingBlocked 由 compaction_end 事件释放）。 */
+  /** 当前持有原因（view 判定 ⊕ 撤回标志 ⊕ pi 侧压缩事实；piCompactingBlocked 由 compaction_end 事件释放）。 */
   function currentHold(sessionId: string, state: RuntimeState): HoldReason | 'compacting-pi' | null {
     const fromView = holdReasonOf(viewOf(sessionId))
     if (fromView !== null) return fromView
+    // revoking 判定（消息撤回 D2）：registry 私有标志，不进 occupancy 投影通道——
+    // view 优先保持「叠加时按 view 原因报告」的最小改动语义（叠加 hold 任一非 null 即持有）。
+    if (state.revoking) return 'revoking'
     return state.piCompactingBlocked ? 'compacting-pi' : null
   }
 
@@ -961,6 +994,7 @@ export function createSessionDeliveryRegistry(
       suppressed: new Set(),
       inFlightCount: 0,
       piCompactingBlocked: false,
+      revoking: false,
       reconciling: false,
       lastReconcileAt: 0,
       disposed: false,
@@ -1142,6 +1176,16 @@ export function createSessionDeliveryRegistry(
     },
     reconcile(sessionId, trigger) {
       return reconcile(sessionId, trigger)
+    },
+    beginRevokeHold(sessionId) {
+      const rt = ensureRuntime(sessionId)
+      if (rt.revoking) return false
+      rt.revoking = true
+      return true
+    },
+    endRevokeHold(sessionId) {
+      const rt = runtimes.get(sessionId)
+      if (rt) rt.revoking = false
     },
     dispose(sessionId) {
       const rt = runtimes.get(sessionId)
