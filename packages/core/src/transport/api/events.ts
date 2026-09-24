@@ -2,7 +2,7 @@
  * Events 层 —— ServerMessage 订阅分发。
  *
  * 三条独立通道：
- * - session 通道（on/off/dispatchSession）：按 sessionId 路由。CLAUDE.md line 98
+ * - session 通道（on/off/dispatchSession）：按 sessionId 路由。AGENTS.md 关键规则 #7
  *   要求 session 级消息必须含 sessionId。隔离规则不变。
  * - global 通道（onGlobal/onGlobalType/dispatchGlobal）：无 sessionId 的 server-push
  *   （config.providers / model.list / config.skills / config.agents / config.plugins /

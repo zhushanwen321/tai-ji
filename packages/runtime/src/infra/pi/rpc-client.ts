@@ -111,7 +111,7 @@ export interface RpcClientOptions {
   noTools?: boolean
   /** 禁用所有 skill，映射 pi `--no-skills`。调用方同时需清空 skillPaths。 */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md/CLAUDE.md 自动发现），映射 pi `--no-context-files`。 */
+  /** 禁用 context files（AGENTS.md 自动发现），映射 pi `--no-context-files`。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，映射 pi `--thinking <level>`（注意：非 --thinking-level，附录 A.4）。 */
   thinkingLevel?: ThinkingLevel
@@ -319,7 +319,7 @@ export class RpcClient implements IPiEngine {
 
     // Bun 编译的 bundled pi 用 process.execPath 定位资源（package.json、themes 等），
     // 不依赖 process.cwd() 查找 package.json。因此 spawn cwd 可以安全地设为用户项目目录。
-    // 这样 pi 的初始 session、system prompt、CLAUDE.md 查找、bash 工具都基于正确的 cwd。
+    // 这样 pi 的初始 session、system prompt、AGENTS.md 查找、bash 工具都基于正确的 cwd。
     // Re-verified 2026-08-20 (W6 A-11 探针) on upstream 0.84.1，双形态均不依赖 cwd：
     // - bun binary（打包产物 apps/electron/resources/pi/pi-darwin-arm64）：getPackageDir() =
     //   dirname(process.execPath)（pi 0.84.1 dist config.js isBunBinary 分支）；cwd=/tmp spawn

@@ -78,7 +78,7 @@ node scripts/verify-scheduler-e2e.cjs
 | **使用者（黑盒）** | 用户能否完成目标（DOM 可见断言） | **[MANDATORY] 补齐** |
 | **观察者（形态）** | 渲染长什么样（首屏冒烟） | **[MANDATORY] 补齐** |
 
-**四条 MANDATORY 规则**（详见 CLAUDE.md 测试规范#5-#8）：
+**四条 MANDATORY 规则**：
 
 1. 每条集成/E2E 用例至少一个用户可见断言（`wrapper.find().exists()`/`.text()`/`.html()`）。纯内部断言（`state.value`、`toHaveBeenCalled`）不计 DoD
 2. 集成/E2E 必须mount test-strategy 指定的组件树入口（如 `Panel`），禁止悄悄换更小被测对象。入口无法 mount 时显式说明并降级入口
@@ -145,10 +145,10 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | 基线 | 描述 | 来源事故 | 守护测试 |
 |------|------|---------|---------|
 | **slash 命令契约** | 输入 `/` → 浮层弹出 → 选中 → chip 插入；session.commands 时序竞争修复 | `2026-06-28-lite-slash-command-fix`（broadcast 早于订阅丢失） | `src/__tests__/useSidebar-get-commands.test.ts`（U1-U3）+ `landing-precreate-session.test.ts`（U4/U5）+ `composer-slash-trigger.test.ts`（U1-U10） |
-| **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | CLAUDE.md 规则#7 | 各 domain/store 单测 |
+| **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | AGENTS.md 关键规则 #7 | 各 domain/store 单测 |
 | **渲染 gate** | mount 顶层容器断言结构元素 DOM 存在（防「测试全绿功能不可用」） | 2026-06-27 事故 | 每功能首屏冒烟用例 |
-| **错误状态重置** | 错误路径必须收口生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | CLAUDE.md 规则#3 | useChat 错误路径测试 |
-| **emit 单 payload** | emit 不传多参数 | CLAUDE.md 规则#1 | - |
+| **错误状态重置** | 错误路径必须收口生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | AGENTS.md 关键规则 #3 | useChat 错误路径测试 |
+| **emit 单 payload** | emit 不传多参数 | AGENTS.md 关键规则 #1 | - |
 | **runtime broadcast 时序** | session 级 broadcast 早于 renderer 订阅会丢消息；切换/创建 session 后需立即消费的状态必须主动拉取（`session.getCommands` RPC） | `2026-06-28-lite-slash-command-fix` | U1-U3 + U4/U5（见上） |
 | **搜索查询乱序守卫** | useSearch.query 内 loadSeq 自增序列号，await 后 `seq !== loadSeq` 丢弃旧响应；快速连续查询时旧响应晚到不得覆盖新结果（数据错乱=事故） | NFR S-8 `[from: 2026-06-30-search-modal §execution T1.12]` | `packages/core/src/domain/new-task-search/__tests__/search.test.ts`（TC-2 loadSeq 乱序守卫，原 T1.12）+ `packages/core/src/domain/new-task-search/__tests__/file-match.test.ts`（TC-9c~9k file 匹配分级，原 T3.10）|
 | **搜索 slash 命令注入链路** | SearchModal 点击 slash 命令 → commandStore.pendingSlash 一次性通道 → Composer watch 消费 → insertSlashChip 注入 chip。watch 非 immediate（防残留误注入）+ sessionId 过滤（split 不串台）+ 先注入后清除（防读到 null）。commandKind 区分 slash/app（pi 命令名无 / 前缀，不可靠 title 猜测） | `2026-07-01-search-slash-injection`（injectSlash 回调断链 + commandKind 误判） `[from: 2026-07-01-search-slash-injection §plan]` | `src/__tests__/panel/composer-slash-injection.test.ts`（U12-U16,U18，仍在 renderer）+ `packages/core/src/domain/new-task-search/__tests__/search-jump.test.ts`（TC-8 commandKind 分发 / pendingSlash 注入，原 U7-U11）+ `packages/core/src/domain/new-task-search/__tests__/command-store.test.ts`（TC-5 pendingSlash 一次性通道，原 U1-U4）|

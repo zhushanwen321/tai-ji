@@ -660,7 +660,7 @@ export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: Pro
   /**
    * 新增模型到清单（来自底部新增表单）。
    * D15a：空名/重名 id 抛错（调用方 catch 后填 actionError），替代原静默 return。
-   * 抛错而非静默：CLAUDE.md 规则 #3——用户操作无反馈是 bug。
+   * 抛错而非静默：AGENTS.md 关键规则 #3——用户操作无反馈是 bug。
    */
   function addModel(): void {
     const name = newModel.name.trim()
