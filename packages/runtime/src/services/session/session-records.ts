@@ -4,7 +4,7 @@
  * 域内容（一个概念域的两半，冷热同源）：
  * - W18 派生缓存族：recordEntriesCaches + get_entries 增量重拉编排（entry_appended
  *   失效信号 → 防抖 → cursor 三路径拉取 → merge → 送达水位发布；plan 模式重设计 D1③④
- *   扩容第三族——第二道 customType 早退门 + scanPlanStateEntries 派生 + session.planState
+ *   扩容第三族——record 三族 customType 早退门 + scanPlanStateEntries 派生 + session.planState
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
  * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows/getPlanState（冷启动磁盘扫描，与缓存刷新
@@ -148,9 +148,10 @@ interface WorkflowUpdateSignal {
 }
 
 /**
- * [RT-4#9] 未知 customType warn 去重表（模块级：类型字符串有限集合，无清理必要）。
- * 三道 customType 运行时字符串门（event-adapter 白名单 / 本模块早退门 / entry 扫描器）
- * 扩容不同步时，本 warn 是失效链断链的唯一显形信号。
+ * [RT-4#9] 非 record 族 customType warn 去重表（模块级：类型字符串有限集合，无清理必要）。
+ * customType 运行时字符串门共两道（D5 放宽后：第一道 = invalidateRecordEntries 的三族
+ * 早退门，第二道 = entry 扫描器族；event-adapter 已放宽为任意 string 透传，不再是门）——
+ * record 族新成员漏扩两道门时失效链静默断链，本 warn 是唯一显形信号。
  */
 const warnedCustomTypes = new Set<string>()
 
@@ -158,8 +159,10 @@ function warnUnknownCustomTypeOnce(customType: string): void {
   if (warnedCustomTypes.has(customType)) return
   warnedCustomTypes.add(customType)
   console.warn(
-    `[session-records] invalidateRecordEntries: unknown customType '${customType}' dropped —` +
-    ` if this is a new record family, extend the gate set here + event-adapter whitelist + entry scanners together`,
+    `[session-records] invalidateRecordEntries: non-record customType '${customType}' reached the gate, no-op —` +
+    ` if this is a new record family, extend the three-family gate here + entry scanners together;` +
+    ` otherwise it is a legit non-record customType (e.g. rename-session / pi-scheduler / pending-notifications entries)` +
+    ` expected to pass through — no action needed`,
   )
 }
 
@@ -292,10 +295,12 @@ export class SessionRecords {
    * 的磁盘扫描承接。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void {
-    // 第二道 customType 早退门（D1③）：与 event-adapter 白名单（第一道门）同批扩容——
-    // 白名单放行而此处早退则 live 链静默 no-op（三道运行时字符串门之一，编译器不保护）。
-    // [RT-4#9] 未知 customType 落 warn 显形（按类型字符串去重防刷屏）：三道门扩容漏改时
-    // 该类型 record 的失效链静默断链，无日志不可排查——此前纯早退 = 永久静默丢弃。
+    // 第一道 customType 早退门（D1③）：record 三族之外一律早退。D5 放宽后 event-adapter
+    // 对任意 string customType 透传（不再是门），生产侧合法非 record 族 customType
+    // （rename-session / pi-scheduler / pending-notifications 等 extension entry）会到达
+    // 此处预期穿透（编译器不保护）。
+    // [RT-4#9] 非 record 族 customType 落 warn 显形（按类型字符串去重防刷屏）：record 族
+    // 新成员漏扩本门/扫描器时失效链静默断链，无日志不可排查——此前纯早退 = 永久静默丢弃。
     if (
       customType !== SUBAGENT_RECORD_CUSTOM_TYPE &&
       customType !== WORKFLOW_RECORD_CUSTOM_TYPE &&

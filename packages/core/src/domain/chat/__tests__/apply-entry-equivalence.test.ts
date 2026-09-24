@@ -1363,7 +1363,7 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
 // plan-state 是 extension appendEntry 落盘的 type:'custom' 纯数据 entry（D1 schema：旧四
 // 字段 isActive/planFilePath/requirement/templateName；新七字段 + skills/docs/reviewState
 // 三 optional——D4 字段级判存在兼容）。两条通路的对话流语义：
-// - live：event-adapter 白名单（u1-proj）认出后走 record-entry-appended 失效信号 → runtime
+// - live：event-adapter 对任意 string customType 产出失效信号（D5 放宽）→ runtime
 //   scanPlanStateEntries 派生 → stateSnapshot('plan') 独立通道——不经 message_end 进对话流
 //   reducer（D1 显式决策：plan 不进 chat reducer）；
 // - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 对非

@@ -305,19 +305,30 @@ export class RevokeOrchestrator {
         warn(`nav-failed: nav command transport error, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, message=${outcome.message}`)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
+      // [post-signal 防御性失效] 以下三个 nav-failed 分支（校验读失败 / 活跃链断裂 /
+      // parentReached 不过）的共同前提：nav 信令已送达 pi（sendSystemCommand 已 resolve），
+      // 树可能已实际回退而校验未能确证——三处均补派生态失效。失效幂等：树未回退时全量
+      // 重算消费未变树，收敛到同态零副作用；已回退时立即按撤回后树清残影，不等用户重试
+      // （重试前存在残影窗口）。与⑥′的差别 = 时机证据强度：⑥′是树回退确证后的失效，
+      // 此处是不确定态的防御性失效。
       const after = await readTreeSnapshot(client)
       if (!after) {
         warn(`nav-failed: post-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
+        this.deps.invalidateDerivedState(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
       const post = walkActiveChain(after)
       if (!post.complete) {
         warn(`nav-failed: active chain broken/cyclic after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
+        this.deps.invalidateDerivedState(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
       // 谓词（注释锚③）：按回溯链 entry.id 集合判定，禁序列化字符串包含判法——
       // LabelEntry.targetId 字段指向被撤消息，字符串包含判法会误报「路径仍含目标」。
       if (post.ids.has(located.entryId)) {
+        // 此分支刻意不失效（与上方三分支相反）：目标仍在活跃链 = 树确证未回退（回退后
+        // 目标必不在活跃链），无残影产生——树未回退时失效收敛到同态，纯冗余调用；
+        // nav-failed 语义 = 本轮未完成，重试走⑤正常路径。
         warn(`nav-failed: target still on active path after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
@@ -325,6 +336,7 @@ export class RevokeOrchestrator {
         expectedParentId === null ? post.terminalParentId === null : post.ids.has(expectedParentId)
       if (!parentReached) {
         warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}, terminalParentId=${post.terminalParentId}`)
+        this.deps.invalidateDerivedState(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
 
