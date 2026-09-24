@@ -159,6 +159,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 	const pi = currentPi;
 	if (pi === undefined) return;
 	try {
+		if (task.taskId.length > 0) throw new Error("v2-acceptance-inject: simulate delivery failure");
 		pi.sendMessage(
 			{
 				customType: BACKGROUND_BASH_CUSTOM_TYPE,
