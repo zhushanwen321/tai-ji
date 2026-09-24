@@ -106,6 +106,10 @@ export type ClientMessageType =
   | 'session.workflowAction' | 'session.subagentAction'
   // session.forceQuit：强制退出卡死 session（杀 pi 子进程 + stopped 收敛，区别于 message.abort 的协作式中止）。
   | 'session.forceQuit'
+  // session.revokeMessage（消息撤回设计 D2）：已送达消息的 session 树内回退撤回（S8 已消费层）。
+  // 归 session 域而非 delivery 域——语义是 session 树操作不是投递操作；在途态由 UI 路由
+  // 既有 delivery.cancel（D6 统一入口，RPC 层不合并），错开两域职责。
+  | 'session.revokeMessage'
   // wave:runtime-patch ipc-converge-a3 W2：业务持久化写迁 WS（session 数据单一出口归 runtime）。
   // session.writeImage 粘贴截图落地 attachments；session.migrateImage landing tmpdir→attachments 迁移；
   // session.writeSegments 追加/覆盖 segments.json sidecar。原 main IPC handler，现 runtime session-service。
@@ -450,6 +454,12 @@ export interface ClientMessageMap {
   'session.switch': { sessionId: string }
   'session.restore': { sessionId: string }
   'session.forceQuit': { sessionId: string }
+  // session.revokeMessage（消息撤回设计 D2）：targetId = 消息 id 原样（不钉 clientUuid 形态）。
+  // renderer 消息 id 有两个互斥空间——live 乐观气泡 `u-<uuid>`（= clientUuid）与 history
+  // 基线 / 重开后的 pi entryId（8 位 hex）；把 clientUuid 定死为入参会使「同一 session 第二次
+  // 撤回 / 重开后撤回」对全部消息失效（刷新后 clientUuid 不再可从消息取到）。两形态的运行时
+  // 分派定位是编排侧职责（U4），契约层统一为 string。
+  'session.revokeMessage': { sessionId: string; targetId: string }
   // session.history 参数（D4 中期分页协议，u6-paging-protocol）：
   // - 不带 cursor：最近窗口（u4b 双预算现状）——「打开/切入 session」与 hydrate 通路。
   // - 带 cursor：游标翻页——cursor = turn 边界锚点 entryId（renderer 当前窗口最早消息的
@@ -935,6 +945,9 @@ export type ServerMessageType =
   // 与 session.occupancy 同模式——重连/切回 session 自动恢复，不依赖广播时序）。
   // 数据源 = 内核 entries() 投影视图（D9②，D5③ 修剪规则）。QueueBubble 单一数据源（D7）。
   | 'session.delivery'
+  // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
+  // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
+  | 'session.revokeMessage'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
   // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
@@ -1473,6 +1486,49 @@ export interface SessionSetProjectMutationReply {
   projectId: string
 }
 
+// ── 消息撤回具名 DTO（message revoke，设计 §3.3 D2/D7/D8——D8 错误规格表为 SSOT）──────
+
+/**
+ * `__taiji_nav__` internal command 名（消息撤回设计 D1 信令通道）：runtime 编排经
+ * sendSystemCommand 直连 `client.prompt('/__taiji_nav__ <entryId>')` 触发 pi
+ * navigateTree；注册方 = extensions/taiji/agent-ext（mandatory infrastructure，不可禁）。
+ * `__` 前缀经 internal-command-filter 过滤，不出现在用户 slash 浮层；command 不进模型、
+ * 无 turn（P2 前提），故不走用户消息链路（不经 hook / 不经内核）。
+ */
+export const TAIJI_NAV_COMMAND = '__taiji_nav__'
+
+/**
+ * session.revokeMessage 的错误码闭集（消息撤回设计 §3.3 D8 错误规格表——字面量与
+ * 触发条件逐字对齐；改码须先改设计表再同步此处，renderer 呈现按码分流）。
+ */
+export type RevokeMessageErrorCode =
+  // isStreaming / isCompacting / settling / isBashRunning / revoking 进行中（D2 ① 检查全维）
+  | 'busy'
+  // targetId 定位失败（clientUuid 空间双通道均 miss，或 entryId 空间目标不在文件——基线 stale）
+  | 'no-mapping'
+  // __taiji_nav__ 命令探测耗尽（agent-ext 为 mandatory infrastructure 不可禁，正常不触达）
+  | 'extension-missing'
+  // reply 后 get_entries 校验不过（含 navigateTree throw 形态与 get_entries RPC 自身失败）
+  | 'nav-failed'
+  // pi 已被空闲回收且编排 ensureActive 拉活失败（终态码，区别于命令真缺失的 extension-missing）
+  | 'pi-reclaimed'
+  // session 有在跑 workflow run（D2 ① 扩展检查——撤回不得静默终止后台任务）
+  | 'workflow-running'
+
+/**
+ * session.revokeMessage 的 reply（消息撤回设计 D2 ⑦/D7/D8）。
+ *
+ * 成功形态：revoked:true + content——runtime 剥除裸标记后的用户原文（MSG_ID_TAG_RE
+ * 同源正则逐段剥除，D7），供 renderer 草稿回填；幂等重试（目标已被前序撤回带走，
+ * D2 ⑤ 二次判定命中）同样回成功形态，重试安全。
+ * 错误形态：revoked:false + error 六码闭集（见 RevokeMessageErrorCode）。六码不走统一
+ * error envelope——它们是设计内领域回执（renderer 按码驱动置灰 / toast / 刷新建议，
+ * D8 呈现列），不是传输错误；判别字段 revoked。
+ */
+export type SessionRevokeMessageReply =
+  | { sessionId: string; revoked: true; content: string }
+  | { sessionId: string; revoked: false; error: RevokeMessageErrorCode }
+
 // ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────
 
 /**
@@ -1777,6 +1833,10 @@ export interface ServerMessageMapBase {
   // 仅最近 deliveredWindow 条完整条目；cancelled 不投影（D5③）——稳态帧体积有界。
   // QueueBubble 的单一数据源（D7）。
   'session.delivery': { sessionId: string; entries: DeliveryFrameEntry[] }
+  // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply（与 request 同名，
+  // payload 消费型）。形状见 SessionRevokeMessageReply——成功 = revoked:true + 消息原文
+  //（草稿回填，D7）；错误 = revoked:false + error 六码闭集（D8 错误规格表 SSOT）。
+  'session.revokeMessage': SessionRevokeMessageReply
   // ── delivery 域四 RPC reply（投递所有权内核 D5，u-contracts；与 ClientMessageMap request 同名配对）──
   'delivery.submit': DeliverySubmitReply
   'delivery.cancel': DeliveryCancelReply
@@ -2507,6 +2567,9 @@ export interface ReplyPayloadMap {
   'session.getPlanState': ServerMessageMap['session.planState']
   'session.getWorkflows': ServerMessageMap['session.workflows']
   'session.history': ServerMessageMap['session.history']
+  // session.revokeMessage（消息撤回设计 D2/D3）：payload 消费型——renderer 读 revoked/content
+  //（成功 → 重拉 session.history + 草稿回填，reply 即成功信号）与 error 六码（按 D8 呈现列分流）。
+  'session.revokeMessage': ServerMessageMap['session.revokeMessage']
   'config.sessions': ServerMessageMap['config.sessions']
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request 同名
   'session.importCandidates': ServerMessageMap['session.importCandidates']

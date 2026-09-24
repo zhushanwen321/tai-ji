@@ -29,7 +29,12 @@ export type {
   // 跨包具名消费（core chat 域 / renderer 队列区）经本出口。
   DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply,
   DeliveryDrainReplyEntry, DeliveryDrainReply, DeliveryResyncReply,
+  // 消息撤回（message revoke，U3）：revokeMessage RPC 的错误码闭集 + reply 判别 union
+  RevokeMessageErrorCode, SessionRevokeMessageReply,
 } from './protocol'
+// 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
+// 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
+export { TAIJI_NAV_COMMAND } from './protocol'
 export type {
   MessageRole, MessageStatus, ToolCallStatus,
   ToolCall, ThinkingBlock, ContentBlockType, ContentBlock, Usage, Message,
