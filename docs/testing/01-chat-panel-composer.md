@@ -39,7 +39,8 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
-| `new-task-landing` | Landing.vue | Landing 态恒显 |
+| `new-task-landing` | Landing.vue | Landing 态恒显（根容器；首发提交创建中仍在场，内容态被 v-show 隐藏） |
+| `new-task-creating` | Landing.vue | 仅首发提交创建中（`flow.isInflight=true`）显示——跳转先行过渡视图（perf-landing） |
 | `chip-directory` | Landing.vue | Landing 态恒显（directory chip 行） |
 | `chip-branch` | Landing.vue | 仅 git 目录（`gitInfo != null`）显示 |
 | `retry-history` | Landing.vue | 仅 `historyError=true`（getHistory 失败）时显示 |
@@ -171,6 +172,7 @@ pnpm dev
 | E2E-NT-2：点 directory chip 弹出选目录浮层 | `dir-select-popover` / `workspace-item` | popover 可见，含工作区项 |
 | E2E-NT-3：选目录后 chip 回灌 | `chip-directory` 含目录名文本 | 文本从「选择目录」变为目录名 |
 | E2E-NT-4：首发提交进入对话流 | `new-task-landing` 消失，MessageStream 出现 | Landing 不再可见，对话流可见 |
+| E2E-NT-5：首发提交跳转先行（perf-landing） | 点击同帧 `new-task-creating` 出现（创建中过渡视图），create 完成后 Landing 卸载 | 点击后立即离开 landing 内容态，不等 pi boot（warm ~1.6s / cold ~4.2s） |
 
 ### 7.2 完整 E2E 示例代码
 

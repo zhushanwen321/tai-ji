@@ -271,6 +271,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     segments: Segment[],
     thinkingLevel?: string,
     bashCommand?: { command: string; excludeFromContext: boolean },
+    perfT0?: number,
   ): Promise<Segment[] | null> {
     // D1 加载窗口语义：create 前等全部解析数据源就绪——core KV 双源（lastUsedModel +
     // 记忆表，launch-config 直接 import）+ 壳侧异步源（ports.launchConfig.ensureReady，
@@ -283,6 +284,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
         .catch(() => undefined)
       : Promise.resolve()
     await Promise.allSettled([ensureLaunchDataReady(), shellReady])
+    if (perfT0 != null) {
+      console.log(`[perf:landing] launchDataReady +${Math.round(performance.now() - perfT0)}ms`)
+    }
     // D1 单一解析层：submit 侧消费 resolve 终值（pending 三兄弟 + Composer authored 档位
     // 作 explicit 输入，覆盖壳侧数据基座）——与显示侧（chip）同一 resolve 输出，
     // 「显示 ≡ 生效」由构造成立
@@ -317,6 +321,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       pendingThinkingLevel: resolved.thinkingLevel as ThinkingLevel,
     }
     const result = await ports.createSessionFlow.createSession(input)
+    if (perfT0 != null) {
+      console.log(`[perf:landing] session.create rpc done +${Math.round(performance.now() - perfT0)}ms`)
+    }
     // 空 content guard 命中（createSessionFlow 返回 null）→ abort send（不 send，session 未创建）
     if (!result) return null
     controller.bindCurrentSession(result.session)
@@ -363,11 +370,16 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     newSid: string,
     finalSegments: Segment[],
     bashCommand?: { command: string; excludeFromContext: boolean },
+    perfT0?: number,
   ): Promise<void> {
     ports.navigation.setActiveSession(newSid)
     ports.navigation.loadPanel(ports.navigation.activePanelId(), newSid)
     ports.navigation.pushChat(newSid)
     transition('completed')
+    // [perf:landing] 跳转落点：setActiveSession+loadPanel+pushChat 同步完成，下一帧即渲染新 session 页面
+    if (perfT0 != null) {
+      console.log(`[perf:landing] view switched +${Math.round(performance.now() - perfT0)}ms`)
+    }
     // 文件树预加载：新建 session 后侧栏「文件」tab 计数（fileCount 读 store.getTree）立即更新。
     // fire-and-forget：失败不阻断首发发送（文件树缺失仅致 tab 计数为 0）。
     void ports.fileTree.loadTree(newSid)
@@ -388,6 +400,8 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     thinkingLevel?: string,
     bashCommand?: { command: string; excludeFromContext: boolean },
   ): Promise<void> {
+    // [perf:landing] 首发提交起始时刻（毫秒 epoch）——各环节打点共用 t0
+    const perfT0 = performance.now()
     // segments 不能为空；含 text 段时提取首段文本作 session label
     const firstTextSeg = segments.find((s): s is Extract<Segment, { type: 'text' }> => s.type === 'text')
     const trimmed = firstTextSeg?.text?.trim() ?? ''
@@ -403,14 +417,14 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       let finalSegments = segments
       // 未选目录直接发送（用默认 cwd 兜底 create），或重试场景已绑定
       if (!currentSession.value) {
-        const migrated = await createSessionForSubmit(segments, thinkingLevel, bashCommand)
+        const migrated = await createSessionForSubmit(segments, thinkingLevel, bashCommand, perfT0)
         if (migrated === null) return
         finalSegments = migrated
       } else {
         finalSegments = await migrateRetryImages(segments)
       }
       // 载入 panel + 设 activeId（预建或刚建统一处理）
-      await handoverAndSend(currentSession.value!.id, finalSegments, bashCommand)
+      await handoverAndSend(currentSession.value!.id, finalSegments, bashCommand, perfT0)
     } finally {
       controller.setCreateInFlight(false)
     }

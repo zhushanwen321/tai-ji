@@ -78,6 +78,10 @@ export default {
     retryHistory: 'Retry loading history',
     gitRepo: 'Git repo',
   },
+  // [perf-landing jump-first] first submit → creating-session transition view (leaves landing content same frame as click)
+  creating: {
+    hint: 'Creating new task…',
+  },
   presetSelect: {
     title: 'Launch mode',
     setAsDefault: 'Set as default',

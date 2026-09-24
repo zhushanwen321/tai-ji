@@ -13,6 +13,7 @@
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/landing.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -49,6 +50,8 @@ const flowMock = vi.hoisted(() => ({
   state: { value: 'idle' as string },
   // [D4 卸载守卫] onMounted 自动 startFlow + onUnmounted isActive 才 cancelFlow
   isActive: { value: false as boolean },
+  // [perf-landing] 首发提交飞行标记（Landing 创建中过渡视图判据）
+  isInflight: { value: false as boolean },
   startFlow: vi.fn(),
   cancelFlow: vi.fn(),
 }))
@@ -92,6 +95,8 @@ beforeEach(() => {
   flowMock.worktreeItems.value = []
   // [D4] 卸载守卫输入默认非活跃（completed/cancelled 路径守卫 noop）；活跃用例单独设 true
   flowMock.isActive.value = false
+  // [perf-landing] 创建中过渡视图默认不飞行；飞行用例单独设 true
+  flowMock.isInflight.value = false
 })
 
 const DONE = 'done' as DerivedStatus
@@ -232,6 +237,44 @@ describe('Landing 组件（presentational）', () => {
     const chip = wrapper.find('[data-testid="chip-directory"]')
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toContain('选择目录')
+  })
+
+  // ── [perf-landing 跳转先行] 创建中过渡视图 ──
+  // 注：jsdom 的 getComputedStyle 不解析 v-show 父层 display（返回 ""），VTU isVisible() 对
+  // v-show 隐藏祖先失效——故直接断言 v-show 包裹层（div.contents）的内联 style（v-show 的落点）。
+
+  it('isInflight=true → 创建中过渡视图出现，问候语/chip/composer 内容态隐藏（点击同帧离开 landing）', async () => {
+    flowMock.isInflight.value = true
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: landingStubs },
+    })
+    await nextTick()
+    // 过渡视图接管（用户可见 DOM 断言）
+    expect(wrapper.find('[data-testid="new-task-creating"]').exists()).toBe(true)
+    // 内容态包裹层被 v-show 隐藏（内联 display:none = 用户不可见）
+    expect(wrapper.find('div.contents').attributes('style')).toContain('display: none')
+    // 问候语与 chip 仍在 DOM（v-show 保挂载，非 v-if 卸载）
+    expect(wrapper.find('h1').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+    // Composer 保持挂载（失败回滚 restoreSegments 写目标不能卸载）
+    expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
+  })
+
+  it('isInflight 复位 false → 内容态回显（create 失败路径：草稿回滚后输入区可见）', async () => {
+    // mock 惯例：flowMock 反应字段为 plain object（挂载前求值，同 isActive 注释），
+    // 复位态用新 wrapper 重挂载验证（生产侧 isInflight 是真 ref，computed 失效链由 e2e 点击路径看护）
+    flowMock.isInflight.value = false
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: landingStubs },
+    })
+    await nextTick()
+    // 过渡视图不在场，内容态回显（包裹层无内联 display:none = v-show 复位）
+    expect(wrapper.find('[data-testid="new-task-creating"]').exists()).toBe(false)
+    expect((wrapper.find('div.contents').attributes('style') ?? '')).not.toContain('display: none')
+    expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
   })
 
   it('点 directory chip → 调 useNewTaskFlow.openDirPopover（#5 渲染绑定）', async () => {

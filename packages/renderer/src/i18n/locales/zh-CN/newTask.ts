@@ -78,6 +78,10 @@ export default {
     retryHistory: '重试加载历史',
     gitRepo: 'Git 仓库',
   },
+  // [perf-landing 跳转先行] 首发提交 → session 创建中的过渡视图（点击同帧离开 landing 内容态）
+  creating: {
+    hint: '正在创建新任务…',
+  },
   presetSelect: {
     title: '选择启动模式',
     setAsDefault: '设为默认',
