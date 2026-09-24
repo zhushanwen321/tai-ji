@@ -14,11 +14,11 @@
  * 见 core quota-configure-module.ts 文件头注释）。
  */
 import { inject } from 'vue'
-import type { InjectionKey } from 'vue'
-import type { QuotaConfigureFactory, QuotaConfigureModule } from '@taiji/core'
+import type { ComputedRef, InjectionKey } from 'vue'
+import type { ProviderEditModelsModule, QuotaConfigureFactory, QuotaConfigureModule } from '@taiji/core'
 
-// 契约 SSOT re-export（消费方 CodingPlanSection / settings barrel 经本模块取类型）
-export type { QuotaConfigureFactory, QuotaConfigureModule }
+// 契约 SSOT re-export（消费方 CodingPlanSection / ModelListSection / settings barrel 经本模块取类型）
+export type { ProviderEditModelsModule, QuotaConfigureFactory, QuotaConfigureModule }
 
 // ── ① Toast ──
 
@@ -111,4 +111,28 @@ export const SETTINGS_CHOOSE_DIRECTORY_KEY: InjectionKey<ChooseDirectoryFn> =
 
 export function useChooseDirectory(): ChooseDirectoryFn | undefined {
   return inject(SETTINGS_CHOOSE_DIRECTORY_KEY, undefined)
+}
+
+// ── ⑤ 模型清单 CRUD module（C4：原 provide('modelListDeps') 字符串 key + 非空断言的无型缝）──
+/**
+ * ModelListSection 的注入面 = core 模型 CRUD module（ProviderEditModelsModule）+ providerApi
+ * 派生（compat 字段集判定的 provider 级回退，ProviderEditBody 按当前编辑体装配）。
+ * 原 11 成员逐名 provide 收编为「整 module 实例 + 1 个派生位」——与 ② QuotaConfigure seam
+ * 同范式（跨 seam 直接持有 module 实例）。
+ */
+export interface ModelListDeps extends ProviderEditModelsModule {
+  /** provider 级 api（model 级 api 缺失时的回退，用于 compat 字段集判断） */
+  providerApi: ComputedRef<string | undefined>
+}
+
+export const MODEL_LIST_DEPS_KEY: InjectionKey<ModelListDeps> = Symbol('modelListDeps')
+
+// DI 失败语义（与 ② module 缺失同裁决）：ModelListSection 脱离 ProviderEditBody 单独渲染是
+// 接线错误——抛错 loud fail，禁止空壳渲染把漏接伪装成「功能正常但没数据」。
+export function useModelListDeps(): ModelListDeps {
+  const v = inject(MODEL_LIST_DEPS_KEY, null)
+  if (!v) {
+    throw new Error('[ui/settings] MODEL_LIST_DEPS_KEY not provided; ModelListSection must render under ProviderEditBody')
+  }
+  return v
 }

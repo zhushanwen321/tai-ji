@@ -5,7 +5,8 @@
     凭据（名称/类型/baseUrl/凭证区[OAuth 状态 | apiKey]/authHeader/headers）+ Coding Plan 额度 +
     测试/发现 + 模型清单（custom=ModelListSection / catalog=混合列表）+ sticky save-bar。
 
-    业务编排全在 useProviderEdit composable（core 域），本组件只做展示 + 事件绑定。
+    业务编排全在 core 编辑 session（[C4] 三组 module：表单+dirty / discover / 模型 CRUD），
+    本组件只做展示 + 事件绑定。
     OAuth 状态机不在此组件（ui 零 renderer import 铁律）：凭证区登录/切换按钮经
     @oauth-login 上抛父组件（ProviderPage 共享单实例 useProviderOAuth，无双 listener）。
     dirty 状态经 @dirty-change 上抛父组件做展开切换守卫；保存/取消经 @saved/@cancel 通知父收起。
@@ -331,7 +332,7 @@ import { matchQuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
 import { useProviderEdit } from '@taiji/core'
-import { QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
+import { MODEL_LIST_DEPS_KEY, QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import ModelListSection from '../common/ModelListSection.vue'
 import ProviderTestDiscoverSection from './ProviderTestDiscoverSection.vue'
@@ -374,36 +375,29 @@ const matchedPreset = computed(() => {
   return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
 })
 
-// 业务编排全在 composable。整份返回值留作 edit：展示接线 composable 从这里读 test 状态与模型数
-// （test/discover 结果不再逐个解构到本组件——第 1 轮抽走展示逻辑后本组件行数余量已用尽）。
+// 业务编排全在 core 三组 module（[C4] 31 成员扁平返回面收敛为 form / discover / models 三组
+// 子 interface，调用方按组消费）。整份 session 传给展示接线 composable（useCatalogDisplay
+// 按组读 test 状态与模型数）；本组件每组只解构模板绑定所需成员，不再逐名消费 28 名扁平面。
 const edit = useProviderEdit(toRef(props, 'provider'), { t })
+const { form: formEdit, discover, models } = edit
+// form 组：表单草稿 + dirty/快照 + headers CRUD + save（模板 v-model 绑 draft）
 const {
-  form,
-  newModel,
-  localModels,
+  draft: form,
   headerRows,
   showKey,
-  showAddModel,
   saving,
   actionError,
   isDirty,
-  expandedCompat,
-  getStrategyFromMap,
-  testConnection,
-  autoDiscover,
   save,
   clearApiKey,
-  toggleInput,
-  toggleNewInput,
-  updateCtx,
-  pickStrategy,
-  addModel,
-  removeModel,
-  toggleCompatExpand,
   addHeader,
   removeHeader,
   syncHeadersFromRows,
-} = edit
+} = formEdit
+// discover 组：探活编排（结果状态经 useCatalogDisplay 转 testDiscoverProps）
+const { testConnection, autoDiscover } = discover
+// models 组：清单 CRUD（addModel 抛错由 onAddModel 捕获填 actionError）
+const { showAddModel, addModel } = models
 
 // [C1] quota configure module 实例：经注入的工厂（renderer 实现）按当前编辑体物化，
 // provide 给 CodingPlanSection 跨 seam 直接持有。工厂缺失（壳未接线）时不渲染该区块
@@ -458,24 +452,16 @@ function confirmAuthSwitch(): void {
   }
 }
 
-// ModelListSection 经 provide('modelListDeps') 拿到状态/方法（与原 ProviderEditModal 同构）
-provide('modelListDeps', {
-  newModel,
-  localModels,
-  toggleNewInput,
-  toggleInput,
-  updateCtx,
-  pickStrategy,
-  getStrategyFromMap,
-  removeModel,
-  expandedCompat,
-  toggleCompatExpand,
-  // providerApi（ModelListSection 据此选 compat 字段集，design D5 消费点表）：
-  // catalog 的 provider 级协议 = runtime 派生值（ProviderInfo.api；混合协议 → undefined），
-  // **不取 form.api**——composable 对 catalog 的回填是 `p.api ?? 'anthropic-messages'`
-  // （三值 Select 历史兜底，对 catalog 无用户语义），拿它会把混合 provider 误判成
-  // anthropic-messages 的 compat 字段集；undefined 时 ModelListSection 走通用字段集，
-  // 并由模型自身 api 回落（见 ModelListSection compat 判定）。
+// ModelListSection 经 MODEL_LIST_DEPS_KEY typed seam 拿到模型 CRUD module（C4：原
+// provide('modelListDeps') 11 成员无型缝收编为整 module + providerApi 派生）。
+// providerApi（ModelListSection 据此选 compat 字段集，design D5 消费点表）：
+// catalog 的 provider 级协议 = runtime 派生值（ProviderInfo.api；混合协议 → undefined），
+// **不取 form.api**——composable 对 catalog 的回填是 `p.api ?? 'anthropic-messages'`
+// （三值 Select 历史兜底，对 catalog 无用户语义），拿它会把混合 provider 误判成
+// anthropic-messages 的 compat 字段集；undefined 时 ModelListSection 走通用字段集，
+// 并由模型自身 api 回落（见 ModelListSection compat 判定）。
+provide(MODEL_LIST_DEPS_KEY, {
+  ...models,
   providerApi: computed(() => isCatalog.value ? props.provider?.api : form.api),
 })
 

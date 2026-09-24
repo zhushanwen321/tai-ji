@@ -3,7 +3,8 @@
     ModelListSection —— ProviderEditModal 右侧「模型清单」子组件。
     从 ProviderEditModal.vue 提取，保持主模板 ≤400 行。
     包含：标题栏 + 手动添加表单 + 模型列表表格（输入类型 / 上下文 / 思考 / 删除）。
-    状态与编排全在父组件 useProviderEdit composable，经 provide('modelListDeps') 注入。
+    状态与编排全在 core 模型 CRUD module（ProviderEditModelsModule），经
+    MODEL_LIST_DEPS_KEY typed seam 注入（C4，原 provide('modelListDeps') 无型缝收编）。
   -->
   <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
     <div class="flex items-center justify-between border-b border-border px-5 py-3">
@@ -191,7 +192,7 @@
 
 <script setup lang="ts">
 import { Button, Input, Label, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Switch } from '@taiji/ui'
-import { inject, unref, computed, type Ref, type ComputedRef } from 'vue'
+import { unref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FileText, ImageIcon, X, Settings2 } from '@lucide/vue'
 
@@ -200,14 +201,14 @@ import {
   CONTEXT_OPTIONS,
   THINKING_STRATEGIES,
   type ThinkingStrategy,
-  type LocalModel,
 } from '@taiji/core'
+import { useModelListDeps } from '../injection-keys'
 
 /**
  * 设计：showAddModel 受控 + update:showAddModel emit；
- * newModel / localModels / CRUD 方法经 provide('modelListDeps') 注入（父组件 useProviderEdit 单例）。
- * 用 inject 而非 prop 传 newModel：v-model 改 newModel.name 会触发 vue/no-mutating-props lint；
- * inject 拿到的是同一 reactive 引用，运行时改同一对象，lint 不报。
+ * newModel / localModels / CRUD 方法经 MODEL_LIST_DEPS_KEY typed seam 注入（父组件持有的
+ * core 模型 CRUD module 单例）。用注入而非 prop 传 newModel：v-model 改 newModel.name 会触发
+ * vue/no-mutating-props lint；注入拿到的是同一 reactive 引用，运行时改同一对象， lint 不报。
  *
  * B-2 混合列表复用：catalog provider 复用本组件编辑 override 条目——titleKey 换区标题
  * （「自定义模型」）、badgeText 在每行 id 旁渲染来源徽章（「自定义」），custom provider
@@ -229,31 +230,7 @@ defineEmits<{
   addModel: []
 }>()
 
-interface ModelListDeps {
-  newModel: {
-    name: string
-    inputTypes: Array<'text' | 'image'>
-    contextWindow: number | undefined
-    thinking: string | undefined
-    /** 思考能力开关（D4：出厂显式 boolean；非 all-levels 策略自动 true，用户可显式关） */
-    reasoning: boolean
-  }
-  localModels: Ref<LocalModel[]>
-  toggleNewInput: (type: 'text' | 'image') => void
-  toggleInput: (m: LocalModel, type: 'text' | 'image') => void
-  updateCtx: (m: LocalModel, value: number) => void
-  pickStrategy: (m: LocalModel, strategy: ThinkingStrategy) => void
-  getStrategyFromMap: (map?: Record<string, string | null>) => ThinkingStrategy
-  removeModel: (index: number) => void
-  /** 展开了 compat 编辑器的 model id 集合（reactive Set，直接 mutate） */
-  expandedCompat: Set<string>
-  /** 切换某 model 的 compat 编辑器展开 */
-  toggleCompatExpand: (modelId: string) => void
-  /** provider 级 api（model 级 api 缺失时的回退，用于 compat 字段集判断） */
-  providerApi: ComputedRef<string>
-}
-
-const deps = inject<ModelListDeps>('modelListDeps')!
+const deps = useModelListDeps()
 
 const { t } = useI18n()
 
@@ -261,12 +238,12 @@ const { t } = useI18n()
 const ctxOptions = CONTEXT_OPTIONS
 const thinkingStrategies = THINKING_STRATEGIES
 
-// deps.localModels / deps.expandedCompat / deps.providerApi 是 ref/computed（useProviderEdit return
-// 的状态或 form.api 的 computed）。Vue 模板对 setup 顶层 ref 自动解包，但对 inject 对象的嵌套
+// deps.localModels / deps.expandedCompat / deps.providerApi 是 ref/computed（module 返回
+// 的状态或 providerApi 的 computed）。Vue 模板对 setup 顶层 ref 自动解包，但对注入对象的嵌套
 // ref 不解包——模板里 deps.localModels.length 拿到的是 ref 本体（.length=undefined，导致「暂无
 // 模型」永远显示）。用 computed 显式解包，模板用 localModels / isCompatExpanded / providerApi 读。
 const localModels = computed(() => unref(deps.localModels))
-const providerApi = computed(() => unref(deps.providerApi) as string | undefined)
+const providerApi = computed(() => unref(deps.providerApi))
 const isCompatExpanded = (modelId: string): boolean => unref(deps.expandedCompat).has(modelId)
 /** model 级 api 优先，缺失回退 provider 级 api（compat 字段集 + 预设按钮按此过滤） */
 const resolveApi = (modelApi?: string): string | undefined => modelApi || providerApi.value
