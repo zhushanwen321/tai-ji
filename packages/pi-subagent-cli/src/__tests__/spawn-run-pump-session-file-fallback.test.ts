@@ -11,7 +11,7 @@
 //     必达且 LC-4 兜底链不被跳过（G1：链上任一步抛错不许跳过后续步骤）；
 //   - LC-4 回填链 onHandleReady 抛错 → resolveExit 仍必达，sessionFile 已落位
 //     （先赋值后回调）；
-//   - agent_end 未置位（信号退出）→ 退出码仍按 128+ 折算，warn 步骤不改变退出码口径。
+//   - agent_end 未置位（信号退出）→ 退出码按 POSIX 128+signo 折算，warn 步骤不改变退出码口径。
 //   - child 'error' 事件（spawn 失败，F4）：失败码 127 收尾 + 错误消息快照落 runEnd，
 //     真实 close 迟到再达不得改写已 settle 的失败终态（Node ENOENT 实测时序）。
 //
@@ -214,15 +214,16 @@ describe("close finalizer sessionFile 兜底接线（LC-4 + 仍缺响亮 warn）
     expect(sessionFileWarnings()).toHaveLength(0); // sessionFile 已落位 → 无 unobtainable warn
   });
 
-  it("agent_end 未置位（信号退出）：退出码仍按 128+ 折算，warn 步骤不改变退出码口径", async () => {
+  it("agent_end 未置位（信号退出）：退出码按 POSIX 128+signo 折算（SIGTERM=143），warn 步骤不改变退出码口径", async () => {
     const h = wirePump({}, false);
 
     h.fireClose(null, "SIGTERM");
     const exitCode = await h.exitPromise;
 
-    expect(exitCode).toBe(128);
+    // SIGTERM=15 → 128+15=143（batch A：bare 128 误导 crash triage，与 runtime relay 侧口径对齐）
+    expect(exitCode).toBe(143);
     expect(h.identity.sessionFile).toBeUndefined();
-    expect(sessionFileWarnings()).toHaveLength(1); // 仍缺 → warn 照发（口径与 128+ 并存）
+    expect(sessionFileWarnings()).toHaveLength(1); // 仍缺 → warn 照发（口径与 128+signo 并存）
   });
 });
 
