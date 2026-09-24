@@ -13,11 +13,12 @@
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { UserBubble, ChatViewDepsKey } from '@taiji/ui'
+import { getDeliveryProjectionRef } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
-import type { Message, Segment } from '@taiji/shared'
+import type { DeliveryFrameEntry, Message, Segment } from '@taiji/shared'
 import { buildSkillMarker, segmentsToPrompt, segmentsToText } from '@taiji/shared'
 import { createMockDeps, mockChatProvide } from './helpers'
 
@@ -74,21 +75,21 @@ describe('W4TC3: UserBubble 展示态', () => {
 
   it('canEdit=true + 非 sessionEditable → 编辑按钮存在', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    // hover actions 容器内有 2 个 button（复制 + 编辑）
+    // hover actions 容器内有 3 个 button（复制 + 编辑 + 撤回 [U5]）
+    const actions = wrapper.find('.group\\/user .opacity-0')
+    expect(actions.findAll('button').length).toBe(3)
+  })
+
+  it('canEdit=false → 复制 + 撤回按钮（编辑不显示）', () => {
+    const wrapper = mountBubble({ canEdit: false })
     const actions = wrapper.find('.group\\/user .opacity-0')
     expect(actions.findAll('button').length).toBe(2)
   })
 
-  it('canEdit=false → 只有复制按钮', () => {
-    const wrapper = mountBubble({ canEdit: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
-    expect(actions.findAll('button').length).toBe(1)
-  })
-
-  it('isSessionEditable=true → 只有复制按钮（活跃态禁止编辑）', () => {
+  it('isSessionEditable=true → 复制 + 撤回按钮（活跃态禁止编辑，撤回入口不受限）', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: true })
     const actions = wrapper.find('.group\\/user .opacity-0')
-    expect(actions.findAll('button').length).toBe(1)
+    expect(actions.findAll('button').length).toBe(2)
   })
 })
 
@@ -345,10 +346,10 @@ describe('[MF-1] UserBubble slash 段（归位序渲染 + live ≡ reload）', (
 describe('W4TC3: UserBubble 编辑态', () => {
   it('canEdit=true 点编辑按钮 → 进入编辑态 + emit edit-state-change', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    // hover actions 容器的第 2 个 button 是编辑
+    // hover actions 容器的第 2 个 button 是编辑（[U5] 撤回按钮在编辑之后，index 2）
     const actions = wrapper.find('.group\\/user .opacity-0')
     const buttons = actions.findAll('button')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(3)
     // 点编辑按钮
     await buttons[1].trigger('click')
     // emit edit-state-change（D2：负载携带 turnKey = turnStableId(turn) = 'u1'）
@@ -628,5 +629,90 @@ describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
     // 已进入编辑态（textarea 渲染）
     expect(wrapper.find('textarea').exists()).toBe(true)
     expect(wrapper.find('[data-testid="user-timestamp"]').exists()).toBe(false)
+  })
+})
+
+// ── [U5 消息撤回 D6] 撤回按钮三态路由（在途 cancel / 已送达 revokeMessage / 生成中置灰）──
+// 判定数据源 = core 内核投影（getDeliveryProjectionRef，测试直接 replaceDeliveryProjection
+// 注入帧数据）+ deps.isActive（生成中态）。断言对象是 ChatViewDeps 两回调的调用分派——
+// RPC 编排（cancel/revoke 的 reply 消费）在 core useChat 测试覆盖，此处锁定 UI 路由判别。
+describe('[U5] UserBubble 撤回三态路由（D6）', () => {
+  const onRevokePendingMessage = vi.fn()
+  const onRevokeMessage = vi.fn()
+
+  function mountRevokeBubble(projectionEntries: Array<Pick<DeliveryFrameEntry, 'clientUuid' | 'state'> & Partial<DeliveryFrameEntry>>, isActive = false) {
+    // 投影注入：直接写模块级 ref（replaceDeliveryProjection 未在包根导出；ref 可写性与
+    // 生产写方同形——整体替换 Map 触发响应式）
+    const entries: DeliveryFrameEntry[] = projectionEntries.map((e) => ({
+      clientUuid: e.clientUuid,
+      preview: 'preview',
+      state: e.state,
+      lane: e.lane ?? 'steer',
+    }))
+    getDeliveryProjectionRef().value = entries.length === 0 ? new Map() : new Map([['s1', entries]])
+    return mount(UserBubble, {
+      props: { turn: makeTurn(), sessionId: 's1', canEdit: false, isSessionEditable: false },
+      global: {
+        provide: mockChatProvide({ onRevokePendingMessage, onRevokeMessage, isActive: () => isActive }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+  }
+
+  function revokeButton(wrapper: ReturnType<typeof mount>) {
+    const btn = wrapper.find('[data-testid="msg-revoke-button"]')
+    expect(btn.exists()).toBe(true)
+    return btn
+  }
+
+  beforeEach(() => {
+    onRevokePendingMessage.mockClear()
+    onRevokeMessage.mockClear()
+    getDeliveryProjectionRef().value = new Map()
+  })
+
+  it('在途（内核投影 state 未 delivered）→ 路由 onRevokePendingMessage（cancel 腿），不触达已送达腿', async () => {
+    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'queued' }])
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokePendingMessage).toHaveBeenCalledTimes(1)
+    expect(onRevokePendingMessage).toHaveBeenCalledWith('s1', 'u1')
+    expect(onRevokeMessage).not.toHaveBeenCalled()
+  })
+
+  it('在途含 in-flight（pi 槽位）与 direct 车道投出瞬间——同属未注入层，均路由 cancel 腿', async () => {
+    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'in-flight', lane: 'direct' }])
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokePendingMessage).toHaveBeenCalledWith('s1', 'u1')
+  })
+
+  it('已送达（投影无该条目——已 morph 为 transcript）→ 路由 onRevokeMessage（已送达腿）', async () => {
+    const wrapper = mountRevokeBubble([])
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokeMessage).toHaveBeenCalledTimes(1)
+    expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
+    expect(onRevokePendingMessage).not.toHaveBeenCalled()
+  })
+
+  it('已送达（投影残留 delivered 条目——D4 惰性残留）→ 同样路由已送达腿', async () => {
+    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'delivered' }])
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
+  })
+
+  it('生成中（isActive）→ 置灰（aria-disabled）+ tooltip 文案，点击不触达任何撤回腿（D2 附带裁决）', async () => {
+    const wrapper = mountRevokeBubble([], true)
+    const btn = revokeButton(wrapper)
+    expect(btn.attributes('aria-disabled')).toBe('true')
+    // tooltip 文案断言（title = i18n key；测试环境 t 回显 key）
+    expect(btn.attributes('title')).toBe('panel.message.revokeGenerating')
+    await btn.trigger('click')
+    expect(onRevokePendingMessage).not.toHaveBeenCalled()
+    expect(onRevokeMessage).not.toHaveBeenCalled()
+  })
+
+  it('非生成中 → tooltip 为撤回默认文案（可撤态）', () => {
+    const wrapper = mountRevokeBubble([])
+    expect(revokeButton(wrapper).attributes('title')).toBe('panel.message.revoke')
+    expect(revokeButton(wrapper).attributes('aria-disabled')).toBe('false')
   })
 })

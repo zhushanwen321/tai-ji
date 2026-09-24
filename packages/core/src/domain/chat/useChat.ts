@@ -19,7 +19,7 @@
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
 import type { Segment, ServerMessage } from '@taiji/shared'
-import { segmentsToPrompt } from '@taiji/shared'
+import { segmentsToPrompt, restoreRevokedDraft } from '@taiji/shared'
 import {
   subscribeSession,
   clearSubscription,
@@ -33,13 +33,15 @@ import { createMessageCoalescer } from './delta-coalescer'
 import { getExecutingBash } from './bash-effects'
 import { toErrorMessage } from '../../utils/error-message'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
-import type { DeliveryFrameEntry } from './api-port'
+import type { DeliveryFrameEntry, DeliveryCancelReply } from './api-port'
+import type { RevokeMessageErrorCode } from '@taiji/shared'
 import { createDevOnceFrameWarn } from './effects/registry'
 import {
   replaceDeliveryProjection,
   captureMorphSegments,
   clearDeliveryProjection,
   resetDeliveryProjectionForTest,
+  getDeliveryProjection,
 } from './effects/user-delivery'
 
 // 类型契约原样迁 use-chat-types.ts（max-lines 行为保持抽取，纯类型零运行时）；
@@ -56,6 +58,20 @@ export type {
  * slug 仅作展示/唯一标识（用户无感自动生成），无需可读性。
  */
 const SUBAGENT_SLUG_RADIX = 36
+
+/**
+ * [U5 消息撤回 D8] revokeMessage 六错误码 → toast 文案 key 映射（D8 错误规格表呈现列为
+ * SSOT——改码/改呈现先改设计表再同步此处）。busy 用 D2 附带裁决同款文案（按钮置灰是第一
+ * 道防线，服务端 busy 到达 = 置灰漏网的服务端兜底）。
+ */
+const REVOKE_ERROR_TOAST_KEYS: Record<RevokeMessageErrorCode, string> = {
+  busy: 'composable.revokeBusy',
+  'no-mapping': 'composable.revokeNoMapping',
+  'extension-missing': 'composable.revokeExtensionMissing',
+  'nav-failed': 'composable.revokeNavFailed',
+  'pi-reclaimed': 'composable.revokePiReclaimed',
+  'workflow-running': 'composable.revokeWorkflowRunning',
+}
 
 /**
  * 会话级流式订阅表（sessionId → 取消函数）。
@@ -263,6 +279,99 @@ function handleSessionDelivery(
     // morph = 非 direct 车道：无「本条即将触发 message_start」的 dispatching 空窗，
     // 乐观占位立即回收（direct 车道占位仍由 message_start 自动清）
     chat.clearPendingSend(sid)
+  }
+}
+
+/**
+ * [U5 消息撤回 D6] 统一撤回编排（模块级编排体，handleSessionDelivery 同款形态）：
+ * 在途 / 已送达双态路由 + reply 消费。
+ *
+ * 路由判定（内核投影 state 未 delivered = 在途，判定形态与 useQueueRows 队列气泡的
+ * deliveryQueueEntries 同源——state !== 'delivered'）：
+ * - 在途（未注入层）→ 既有 delivery.cancel 两段式收回（内核删除 + clear_queue 分拣），
+ *   与队列气泡 × 撤销共用同一 runtime 管道；
+ * - 已送达（S8 已消费层）→ session.revokeMessage（runtime 七步编排，树内回退）。
+ *
+ * 已送达 reply 消费：revoked:true → 重拉 history（reply 即刷新信号——session_tree 不经
+ * RPC 流，无事件可订阅，主动拉是主路径，D3）+ content 经 restoreRevokedDraft（D7 两层
+ * 切条，shared SSOT）回填草稿；revoked:false → 按 D8 错误码 toast（映射 SSOT 在
+ * REVOKE_ERROR_TOAST_KEYS）。
+ */
+async function handleRevokeMessage(
+  sid: string,
+  targetId: string,
+  chat: ChatStoreInstance,
+  deps: UseChatDeps,
+): Promise<void> {
+  // D6 路由：内核投影中该条目仍活跃（未 delivered）→ 在途分支
+  const pendingEntry = getDeliveryProjection(sid).find((e) => e.clientUuid === targetId)
+  if (pendingEntry && pendingEntry.state !== 'delivered') {
+    await handleCancelPendingDelivery(sid, targetId, deps)
+    return
+  }
+  let reply: Awaited<ReturnType<UseChatDeps['chatApi']['revokeMessage']>>
+  try {
+    reply = await deps.chatApi.revokeMessage(sid, targetId)
+  } catch (e) {
+    const msg = toErrorMessage(e)
+    deps.toast.error(deps.t('composable.revokeFailed', { msg }))
+    return
+  }
+  if (!reply.revoked) {
+    deps.toast.error(deps.t(REVOKE_ERROR_TOAST_KEYS[reply.error]))
+    return
+  }
+  // 成功：重拉 history 替换对话流（树回退后 live ≡ reload，reconcileHistory 是汇合点）。
+  try {
+    const history = await deps.chatApi.getHistory(sid)
+    chat.reconcileHistory(sid, history.messages, historyWindowFromReply(history))
+  } catch (e) {
+    // best-effort 降级：撤回已生效（runtime ⑥校验过才 reply），重拉失败只 stale 不失真——
+    // warn 留痕，对话流由下次切入/刷新的既有主动拉收敛；重抛会破坏 fire-and-forget 契约。
+    console.warn(`[useChat] post-revoke history refresh failed for ${sid}:`, e)
+  }
+  // 草稿回填（D7）：content 含投递裸标记，剥标记/整批切条后送 composer
+  const draft = restoreRevokedDraft(reply.content)
+  if (!draft.trim()) return
+  try {
+    deps.restoreDraft?.(sid, { text: draft })
+  } catch (e) {
+    // best-effort 降级：回填是撤回的增强不是前提（重拉已做，原文在旧分支文件可审计）；
+    // 壳层 DOM 故障不重抛——fire-and-forget 契约 + warn 留痕。
+    console.warn(`[useChat] post-revoke draft restore failed for ${sid}:`, e)
+  }
+}
+
+/**
+ * [U5 消息撤回 D6] 在途撤回腿：delivery.cancel + reply 消费（cancel reply 的 content
+ * 已由 runtime 剥标记——WS handler 链统一剥除，回填直用不经 restoreRevokedDraft）。
+ * 竞态落败（cancelled=false = 点击瞬间已注入）→ 指引转已送达层撤回，不静默。
+ */
+async function handleCancelPendingDelivery(sid: string, clientUuid: string, deps: UseChatDeps): Promise<void> {
+  let reply: DeliveryCancelReply
+  try {
+    reply = await deps.chatApi.cancelDelivery(sid, clientUuid)
+  } catch (e) {
+    const msg = toErrorMessage(e)
+    deps.toast.error(deps.t('composable.revokeCancelFailed', { msg }))
+    return
+  }
+  if (!reply.cancelled) {
+    deps.toast.error(deps.t('composable.revokeDeliveredRace'))
+    return
+  }
+  // runtime 契约承诺 cancelled=true 携带完整文本——缺失/空白是契约违规，出声而非静默回空草稿
+  const content = reply.content ?? ''
+  if (!content.trim()) {
+    deps.toast.error(deps.t('composable.revokeRestoreContentMissing'))
+    return
+  }
+  try {
+    deps.restoreDraft?.(sid, { text: content, segments: reply.segments })
+  } catch (e) {
+    // best-effort 降级：撤销已在 runtime 完成（条目随 state 帧消失），回填失败只 warn——
+    // 重抛破坏 fire-and-forget 契约，用户可从对话流/队列区确认状态后手动复制。
+    console.warn(`[useChat] post-cancel draft restore failed for ${sid}:`, e)
   }
 }
 
@@ -1011,6 +1120,15 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
+   * [U5 消息撤回 D6] 统一撤回编排：在途 / 已送达双态路由 + reply 消费（fire-and-forget，
+   * 不 throw——错误全部经 toast 消化，与 abort/compact 同契约）。编排体在模块级
+   * handleRevokeMessage（handleSessionDelivery 同款形态——factory 保持行数门禁内）。
+   */
+  function revokeMessage(sessionId: string, targetId: string): Promise<void> {
+    return handleRevokeMessage(sessionId, targetId, chat, deps)
+  }
+
+  /**
    * N1: 查询 session 历史是否被截断（有更早的 turn 可加载）。
    * [u4d] 从 store 截断窗口状态派生（SSOT，无独立布尔表）。
    */
@@ -1112,6 +1230,7 @@ export function createUseChat(deps: UseChatDeps) {
     abort,
     compact,
     editAndResend,
+    revokeMessage,
     loadMoreHistory,
     hasMoreHistory,
     disposeSession,

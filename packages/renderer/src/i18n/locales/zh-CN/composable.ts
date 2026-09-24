@@ -5,6 +5,18 @@ export default {
   stopFailed: '停止失败：{msg}',
   compactFailed: '压缩失败：{msg}',
   bashFailed: 'Bash 执行失败：{msg}',
+  // [U5 消息撤回 D8] 撤回编排 toast 文案（D8 错误规格表呈现列为 SSOT，与 core useChat 的
+  // REVOKE_ERROR_TOAST_KEYS 六键一一对应）+ 在途 cancel 腿与 RPC 传输失败文案
+  revokeFailed: '撤回失败：{msg}',
+  revokeCancelFailed: '撤销投递失败：{msg}',
+  revokeDeliveredRace: '消息刚已送达，请再次点击撤回',
+  revokeRestoreContentMissing: '撤回成功，但原文恢复失败（内容缺失）',
+  revokeBusy: '生成中，停止后可撤回',
+  revokeNoMapping: '该消息不支持撤回',
+  revokeExtensionMissing: '撤回组件未就绪，建议重启会话',
+  revokeNavFailed: '撤回未完成，请重试',
+  revokePiReclaimed: '会话进程已回收，恢复失败请重试',
+  revokeWorkflowRunning: '后台任务运行中，完成或停止后再撤回',
   // `@` 定向消息（U2b）：空文本挡 + RPC 失败（错误可读，S8 恢复动作 = 重试 / 重新 @ 选择）
   subagentDirectiveEmpty: '定向消息内容为空，请输入发送给 subagent 的内容',
   subagentDirectiveFailed: '定向消息发送失败：{msg}',

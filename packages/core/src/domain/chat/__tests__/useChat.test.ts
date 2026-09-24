@@ -22,7 +22,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope, nextTick, toRaw } from 'vue'
 import { segmentsToText, textToSegments } from '@taiji/shared'
-import type { Segment, ServerMessage } from '@taiji/shared'
+import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
@@ -44,11 +44,14 @@ interface Fixture {
     abortBash: ReturnType<typeof vi.fn>
     getHistory: ReturnType<typeof vi.fn>
     streamSubscribe: ReturnType<typeof vi.fn>
+    revokeMessage: ReturnType<typeof vi.fn>
+    cancelDelivery: ReturnType<typeof vi.fn>
   }
   chatStore: ReturnType<typeof createChatStore>
   sessionStore: { applySnapshot: ReturnType<typeof vi.fn>; revive: ReturnType<typeof vi.fn> }
   toast: { error: ReturnType<typeof vi.fn>; warning: ReturnType<typeof vi.fn> }
   writeSegments: ReturnType<typeof vi.fn>
+  restoreDraft: ReturnType<typeof vi.fn>
   /** 主动向 sid 的 streamSubscribe handler 注入一条 ServerMessage（模拟 WS 事件） */
   emit: (sid: string, m: ServerMessage) => void
   dispose: () => void
@@ -76,15 +79,20 @@ function makeFixture(): Fixture {
         streamHandlers.delete(sid)
       }
     }),
+    // [U5 消息撤回] 两条撤回 RPC 腿（默认成功臂；错误臂用例 mockResolvedValueOnce 覆写）
+    revokeMessage: vi.fn().mockResolvedValue({ sessionId: 's1', revoked: true, content: '' }),
+    cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
   }
   const sessionStore = { applySnapshot: vi.fn(), revive: vi.fn() }
   const toast = { error: vi.fn(), warning: vi.fn() }
+  const restoreDraft = vi.fn()
   const deps: UseChatDeps = {
     chatApi,
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore,
     toast,
+    restoreDraft,
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k),
   }
   const useChat = createUseChat(deps)
@@ -94,6 +102,7 @@ function makeFixture(): Fixture {
     chatStore,
     sessionStore,
     toast,
+    restoreDraft,
     writeSegments: deps.writeSegments as unknown as ReturnType<typeof vi.fn>,
     emit: (sid, m) => {
       streamHandlers.get(sid)?.(m)
@@ -1016,6 +1025,122 @@ describe('未列 session.* 帧类型的 dev 观测（RD-1#9）', () => {
 
     f.emit('s92', msg('s92', 'session.exited', { code: 1 }))
     expect(frameWarns(warn)).toHaveLength(0)
+    f.dispose()
+  })
+})
+
+// ── [U5 消息撤回 D6/D7/D8] 统一撤回编排：双态路由 + reply 消费 ──
+describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
+  const UUID = '0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9'
+  const TAG = `<!--taiji:msg:${UUID}-->`
+  const JOINER = '\n\n---\n\n'
+  const TAG2 = `<!--taiji:msg:1b2c3d4e-5f60-7182-8394-b5c6d7e8f9a0-->`
+
+  function makeHistMsg(id: string): Message {
+    return { id, role: 'assistant', content: `msg-${id}`, status: 'complete', timestamp: Date.now() }
+  }
+
+  /** 预置投影条目（在途路由判定数据源） */
+  function seedProjection(sid: string, entries: Array<{ clientUuid: string; state: 'queued' | 'in-flight' | 'delivered' | 'failed'; lane?: 'direct' | 'steer' | 'queued' }>): void {
+    replaceDeliveryProjection(sid, entries.map((e) => ({ clientUuid: e.clientUuid, preview: 'p', state: e.state, lane: e.lane ?? 'steer' })))
+  }
+
+  beforeEach(() => {
+    resetDeliveryProjectionForTest()
+  })
+
+  it('在途路由（投影条目未 delivered）→ 走 cancelDelivery 腿，不触达 revokeMessage RPC', async () => {
+    const f = makeFixture()
+    seedProjection('sr1', [{ clientUuid: 'u-1', state: 'queued' }])
+    f.chatApi.cancelDelivery.mockResolvedValueOnce({ clientUuid: 'u-1', cancelled: true, content: '收回原文', segments: [{ type: 'text', text: '收回原文' }] })
+    await f.useChat.revokeMessage('sr1', 'u-1')
+    expect(f.chatApi.cancelDelivery).toHaveBeenCalledWith('sr1', 'u-1')
+    expect(f.chatApi.revokeMessage).not.toHaveBeenCalled()
+    // cancel reply 的 content 已由 runtime 剥标记——原样回填（segments 透传）
+    expect(f.restoreDraft).toHaveBeenCalledWith('sr1', { text: '收回原文', segments: [{ type: 'text', text: '收回原文' }] })
+    f.dispose()
+  })
+
+  it('在途竞态落败（cancelled=false）→ toast 指引转已送达层，不回填', async () => {
+    const f = makeFixture()
+    seedProjection('sr2', [{ clientUuid: 'u-2', state: 'in-flight' }])
+    f.chatApi.cancelDelivery.mockResolvedValueOnce({ clientUuid: 'u-2', cancelled: false })
+    await f.useChat.revokeMessage('sr2', 'u-2')
+    expect(f.toast.error).toHaveBeenCalledWith('composable.revokeDeliveredRace')
+    expect(f.restoreDraft).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('已送达 → revokeMessage RPC；revoked:true → 重拉 history（reconcileHistory 链）+ 草稿剥标记回填', async () => {
+    const f = makeFixture()
+    // 投影无该条目（已 morph 为 transcript）= 已送达
+    f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr3', revoked: true, content: `原文内容\n${TAG}` })
+    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [makeHistMsg('m1')], truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
+    await f.useChat.revokeMessage('sr3', 'entry-1')
+    expect(f.chatApi.revokeMessage).toHaveBeenCalledWith('sr3', 'entry-1')
+    expect(f.chatApi.cancelDelivery).not.toHaveBeenCalled()
+    // 重拉经 reconcileHistory 写入分区（live ≡ reload 汇合点）
+    expect(f.chatApi.getHistory).toHaveBeenCalledWith('sr3')
+    expect(f.chatStore.getMessages('sr3').map((m) => m.id)).toEqual(['m1'])
+    // 草稿回填：content 剥标记后送 composer（D7）
+    expect(f.restoreDraft).toHaveBeenCalledWith('sr3', { text: '原文内容' })
+    f.dispose()
+  })
+
+  it('revoked:true 整批形态 → restoreRevokedDraft 两层切条后回填（空行连接）', async () => {
+    const f = makeFixture()
+    const batch = `第一条\n${TAG}${JOINER}第二条\n${TAG2}`
+    f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr4', revoked: true, content: batch })
+    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
+    await f.useChat.revokeMessage('sr4', 'entry-2')
+    expect(f.restoreDraft).toHaveBeenCalledWith('sr4', { text: '第一条\n\n第二条' })
+    f.dispose()
+  })
+
+  it('重拉失败不阻断回填（撤回已生效——warn 留痕，restoreDraft 照做）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr5', revoked: true, content: `原文\n${TAG}` })
+    f.chatApi.getHistory.mockRejectedValueOnce(new Error('ws down'))
+    await f.useChat.revokeMessage('sr5', 'entry-3')
+    expect(warn).toHaveBeenCalled()
+    expect(f.restoreDraft).toHaveBeenCalledWith('sr5', { text: '原文' })
+    warn.mockRestore()
+    f.dispose()
+  })
+
+  it('RPC reject → revokeFailed toast（不 throw）', async () => {
+    const f = makeFixture()
+    f.chatApi.revokeMessage.mockRejectedValueOnce(new Error('ws down'))
+    await expect(f.useChat.revokeMessage('sr6', 'entry-4')).resolves.toBeUndefined()
+    expect(f.toast.error).toHaveBeenCalledWith('composable.revokeFailed:{"msg":"ws down"}')
+    f.dispose()
+  })
+
+  // D8 错误码 toast 闭集断言（六码各一键，呈现 SSOT）
+  it.each([
+    ['busy', 'composable.revokeBusy'],
+    ['no-mapping', 'composable.revokeNoMapping'],
+    ['extension-missing', 'composable.revokeExtensionMissing'],
+    ['nav-failed', 'composable.revokeNavFailed'],
+    ['pi-reclaimed', 'composable.revokePiReclaimed'],
+    ['workflow-running', 'composable.revokeWorkflowRunning'],
+  ] as const)('revoked:false + error=%s → toast %s（D8 呈现 SSOT）', async (code, key) => {
+    const f = makeFixture()
+    f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr7', revoked: false, error: code })
+    await f.useChat.revokeMessage('sr7', 'entry-5')
+    expect(f.toast.error).toHaveBeenCalledWith(key)
+    expect(f.restoreDraft).not.toHaveBeenCalled()
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('成功但草稿空白（契约违规形态）→ 不回填不出声轰炸（静默跳过空草稿）', async () => {
+    const f = makeFixture()
+    f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr8', revoked: true, content: '' })
+    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
+    await f.useChat.revokeMessage('sr8', 'entry-6')
+    expect(f.restoreDraft).not.toHaveBeenCalled()
     f.dispose()
   })
 })

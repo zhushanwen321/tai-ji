@@ -105,7 +105,7 @@
       <MarkdownRenderer v-if="!userSegments.length && typeof turn.user?.content === 'string'" :content="turn.user!.content" :session-id="sessionId" />
       </div>
     </div>
-    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示。 -->
+    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回三态路由（D6）。 -->
     <div
       v-if="!isEditingThisUser"
       class="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 group-focus-within/user:opacity-100"
@@ -130,6 +130,21 @@
       >
         <Pencil class="size-3" />
       </Button>
+      <!-- [U5 消息撤回 D6] 撤回按钮：生成中（isActive 置灰 + tooltip，D2 附带裁决）用伪禁用
+           （aria-disabled + click 守卫）而非 disabled attribute——disabled 元素不触发 hover，
+           tooltip 会被一并吞掉。 -->
+      <Button
+        variant="ghost"
+        size="icon"
+        class="size-6 text-neutral-dim"
+        :class="isRevokeDisabled ? 'cursor-not-allowed opacity-40' : 'hover:text-neutral-fg'"
+        :aria-disabled="isRevokeDisabled"
+        data-testid="msg-revoke-button"
+        :title="isRevokeDisabled ? t('panel.message.revokeGenerating') : t('panel.message.revoke')"
+        @click="onRevokeClick"
+      >
+        <Undo2 class="size-3" />
+      </Button>
     </div>
   </div>
 </template>
@@ -137,12 +152,12 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, Check, Copy, FileText, Pencil } from '@lucide/vue'
+import { ArrowRight, Check, Copy, FileText, Pencil, Undo2 } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Textarea } from '../../primitives/textarea'
-import { turnStableId } from '@taiji/core/domain/chat'
+import { turnStableId, getDeliveryProjectionRef } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { Segment } from '@taiji/shared'
 import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder } from '@taiji/shared'
@@ -173,7 +188,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { editAndResend, openDrawer, onFileClick, isPendingSend } = useChatViewDeps()
+const chatViewDeps = useChatViewDeps()
+const { editAndResend, openDrawer, onFileClick, isPendingSend } = chatViewDeps
 
 /** 点击 skill badge → 打开 drawer Doc tab */
 function openCommandDoc(commandName: string): void {
@@ -245,6 +261,40 @@ function boundarySpaceBefore(i: number): boolean {
 /** 复制反馈 */
 const { copied, copy } = useCopy()
 const userCopyKey = computed(() => `user-${props.turn.user?.id ?? props.turn.index}`)
+
+/* ── [U5 消息撤回 D6] 统一撤回入口三态路由：在途（cancel）/ 已送达（revokeMessage）/ 生成中置灰 ── */
+
+/** 撤回 targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid / 基线重开态 pi entryId，形态分派在 runtime） */
+const revokeTargetId = computed(() => props.turn.user?.id ?? null)
+
+/**
+ * 在途判定（D6）：内核投影该条目 state 未 delivered——判定形态与 useQueueRows 队列气泡的
+ * deliveryQueueEntries 同源（state !== 'delivered'，不限 lane：direct 车道投出瞬间同样属
+ * 「未注入」可 cancel）。投影中无该条目（已 morph 成 transcript / 已收敛）= 已送达。
+ */
+const isPendingDelivery = computed(() => {
+  const id = revokeTargetId.value
+  if (!id) return false
+  const entry = getDeliveryProjectionRef().value.get(props.sessionId)?.find((e) => e.clientUuid === id)
+  return !!entry && entry.state !== 'delivered'
+})
+
+/**
+ * 生成中置灰（D2 附带裁决）：isActive = isGenerating ∨ pendingSend 的保守超集——撤回编排
+ * 前置 = session 空闲，提交在途的空窗同样拦截（比 isGenerating 严一档，防撤回撞 turn 开启）。
+ */
+const isRevokeDisabled = computed(() => chatViewDeps.isActive(props.sessionId))
+
+/** 撤回点击：三态路由——生成中守卫（伪禁用兜底）→ 在途 cancel / 已送达 revokeMessage */
+function onRevokeClick(): void {
+  const id = revokeTargetId.value
+  if (!id || isRevokeDisabled.value) return
+  if (isPendingDelivery.value) {
+    chatViewDeps.onRevokePendingMessage?.(props.sessionId, id)
+  } else {
+    chatViewDeps.onRevokeMessage?.(props.sessionId, id)
+  }
+}
 
 /* ── 编辑（= fork）：编辑 user 消息后 fork 新会话 ── */
 const editingUserId = ref<string | null>(null)

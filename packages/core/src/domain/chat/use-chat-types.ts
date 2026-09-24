@@ -6,7 +6,7 @@
  * re-export 全部类型，domain/chat/index.ts 与 __tests__ 的既有 `from './useChat'`
  * 消费零改动。
  */
-import type { SessionViewSnapshot } from '@taiji/shared'
+import type { Segment, SessionViewSnapshot } from '@taiji/shared'
 import type { ChatApiPort, WriteSegmentsFn } from './api-port'
 import type { ChatStoreInstance } from './store'
 
@@ -65,4 +65,10 @@ export interface UseChatDeps {
   /** [session-dead 第三环] warning 同 EnsureStreamSubDeps */
   toast: { error: (msg: string) => void; warning: (msg: string) => void }
   t: (key: string, params?: Record<string, unknown>) => string
+  /**
+   * [U5 消息撤回 D7] 撤回 reply 的草稿回填注入（壳层 composer 输入区能力）。optional：
+   * 未注入时撤回成功链路跳过回填（重拉照做）——core 不绑 DOM，回填能力只能来自壳。
+   * segments 缺省（撤回原文恒纯文本，restoreRevokedDraft 产物）。
+   */
+  restoreDraft?: (sessionId: string, payload: { text: string; segments?: Segment[] }) => void
 }

@@ -30,11 +30,13 @@ import type {
   ChatApiPort,
   ChatStoreInstance,
 } from '@taiji/core'
+import type { Segment } from '@taiji/shared'
 import { resetChatModuleStateForTest as resetChatModuleState } from '@taiji/core'
 import { chat as chatApi, session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
+import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import i18n from '@/i18n'
 
 /**
@@ -63,6 +65,11 @@ const chatApiPort: ChatApiPort = {
   abortBash: chatApi.abortBash,
   getHistory: chatApi.getHistory,
   streamSubscribe: chatApi.streamSubscribe,
+  // [U5 消息撤回 D6] 统一撤回入口的两条 RPC 腿（实现在 session / chat 域，经端口暴露给
+  // core useChat.revokeMessage 的路由分派）。revokeMessage 懒解引用（同 subagentAction：
+  // 部分 mock 测试 vi.mock session 域时未导出新方法，调用时才读）。
+  revokeMessage: (sid, targetId) => sessionApi.revokeMessage(sid, targetId),
+  cancelDelivery: chatApi.cancelDelivery,
 }
 
 /**
@@ -84,6 +91,22 @@ function rendererSubDeps(): EnsureStreamSubDeps {
 }
 
 /**
+ * [U5 消息撤回 D7] 撤回 reply 的草稿回填注入——composerInjectionStore 一次性通道
+ * （useSidebarSessionActions.forceQuit 回收同款跨组件树通路）：useChat 是全局编排器
+ * （非 Composer 作用域），restoreToDraft 的 DOM 能力（Composer 壳）不可直取，经注入通道
+ * 送入目标 session 的 composer。空输入/追加统一由 Composer 消费面（insertTextAtCursor）
+ * 处理——不覆盖用户正在输入的内容；槽位已有 text 时按 forceQuit 先例 '\n\n' 累积。
+ */
+function restoreRevokedDraftToComposer(sessionId: string, payload: { text: string; segments?: Segment[] }): void {
+  const pendingText = composerInjectionStore.pendingInjection.value?.text
+  composerInjectionStore.requestInjection({
+    target: 'current',
+    sessionId,
+    text: pendingText ? `${pendingText}\n\n${payload.text}` : payload.text,
+  })
+}
+
+/**
  * useChat —— chat 业务编排（renderer 薄包装）。
  * 20 个消费方（Composer/Panel/Sidebar/useNewTaskFlow/useForkActions/useSidebar 等）零改动。
  */
@@ -91,6 +114,7 @@ export function useChat() {
   return createUseChat({
     chatApi: chatApiPort,
     writeSegments: sessionApi.writeSegments,
+    restoreDraft: restoreRevokedDraftToComposer,
     // [w5 类型鸿沟] useChatStore() 返回 pinia Store（defineStore 包装后 state ref 被解包 + 多 $state/
     // $patch 等），与 core ChatStoreInstance（createChatStore factory 产物 plain object）类型不兼容。
     // 运行时等价：pinia setup store 的 actions 原样保留 factory 方法（useChat 只调方法不碰 messages

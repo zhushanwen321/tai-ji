@@ -111,6 +111,9 @@ export default {
     handoffFailed: '交接失败：{error}',
     handoffAbortFailed: '取消交接失败：{error}，交接仍在进行中。',
     editReplace: '编辑（替换并重新发送）',
+    // [U5 消息撤回 D6/D2 附带裁决] 撤回按钮 tooltip（默认态 + 生成中置灰态）
+    revoke: '撤回（回到发送前，原文回草稿）',
+    revokeGenerating: '生成中，停止后可撤回',
     editAfterReplace: '编辑后替换并重新发送',
     cancel: '取消',
     viewCommandDoc: '查看命令文档',

@@ -35,6 +35,9 @@ export type {
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
 export { TAIJI_NAV_COMMAND } from './protocol'
+// 消息撤回（U5，设计 D7）：撤回草稿还原纯函数族（剥标记 / 整批两层切条）——
+// core useChat reply 消费侧跨包取用，同 allowlist 纪律。
+export { stripDeliveryMarkers, restoreRevokedDraft } from './revoke-restore'
 export type {
   MessageRole, MessageStatus, ToolCallStatus,
   ToolCall, ThinkingBlock, ContentBlockType, ContentBlock, Usage, Message,

@@ -29,6 +29,9 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     setTakeover: vi.fn(),
     abortBash: vi.fn(),
     editAndResend: vi.fn(),
+    // [U5 消息撤回 D6] 统一撤回入口两回调（optional 成员，mock 默认 spy——三态路由用例直取断言）
+    onRevokePendingMessage: vi.fn(),
+    onRevokeMessage: vi.fn(),
     onFork: vi.fn(),
     onForkAsk: vi.fn(),
     onHandoff: vi.fn(),

@@ -68,7 +68,7 @@ export function useChatViewDeps(
   const { error: toastError } = useToast()
   const chat = useChatStore()
   const sessionStore = useSessionStore()
-  const { abortBash, editAndResend } = useChat()
+  const { abortBash, editAndResend, revokeMessage } = useChat()
   const turnExpansion = useTurnExpansion(sessionId)
   const { forkSession, handoff } = useSidebar()
   const drawer = useSideDrawer()
@@ -149,6 +149,15 @@ export function useChatViewDeps(
     },
     editAndResend: (sid: string, messageId: string, segments: Segment[]): void => {
       void editAndResend(sid, messageId, segments)
+    },
+    // [U5 消息撤回 D6] 统一撤回入口两条腿：UserBubble 按内核投影三态路由（在途 / 已送达 /
+    // 生成中置灰），两条回调分别落到 useChat.revokeMessage 的在途路由腿（delivery.cancel）
+    // 与已送达腿（session.revokeMessage）——core 侧同一 action 内做投影复核，双入口收敛单编排。
+    onRevokePendingMessage: (sid: string, clientUuid: string): void => {
+      void revokeMessage(sid, clientUuid)
+    },
+    onRevokeMessage: (sid: string, targetId: string): void => {
+      void revokeMessage(sid, targetId)
     },
     /** fork 后台：从指定 assistant 空白 fork，留在原线（includeFrom=true）。失败 toast 反馈。 */
     onFork: (sid: string, msg: Message): void => {

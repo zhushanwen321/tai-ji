@@ -112,6 +112,9 @@ export default {
     handoffFailed: 'Handoff failed: {error}',
     handoffAbortFailed: 'Abort handoff failed: {error}. Handoff is still running.',
     editReplace: 'Edit (replace and resend)',
+    // [U5 message revoke D6 / D2 side ruling] revoke button tooltips (default + generating-disabled)
+    revoke: 'Revoke (back to before sending, text restored to draft)',
+    revokeGenerating: 'Generating — stop the turn to revoke',
     editAfterReplace: 'Edit then replace and resend',
     cancel: 'Cancel',
     viewCommandDoc: 'View command docs',

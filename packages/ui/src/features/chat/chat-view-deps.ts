@@ -73,6 +73,17 @@ export interface ChatViewDeps {
   abortBash: (sessionId: string, messageId?: string) => void
   /** 编辑并重发 user message（useChat.editAndResend，segments 是重建后的 Segment[]） */
   editAndResend: (sessionId: string, messageId: string, segments: Segment[]) => void
+  /**
+   * [U5 消息撤回 D6] 撤回在途消息（内核投影 state 未 delivered 的条目 → delivery.cancel
+   * 两段式收回，原文回草稿）。optional：未 provide（旧壳层/mock）时撤回按钮 no-op；
+   * renderer useChatViewDeps 运行时总 provide 真实现（useChat.revokeMessage 的在途路由腿）。
+   */
+  onRevokePendingMessage?: (sessionId: string, clientUuid: string) => void
+  /**
+   * [U5 消息撤回 D6] 撤回已送达消息（session.revokeMessage，树内回退 + reply 驱动重拉 +
+   * D7 草稿回填）。optional：同上。
+   */
+  onRevokeMessage?: (sessionId: string, targetId: string) => void
   /** fork turn（后台，useTurnActions.fork） */
   onFork: (sessionId: string, message: Message) => void
   /** fork 并提问（useTurnActions.forkAsk） */

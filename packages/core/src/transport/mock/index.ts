@@ -743,6 +743,16 @@ const sessionImpl = {
     const normalized = raw.replace(/^sess_/, '').replace(/_/g, '-')
     return { sessionId: normalized, targetPath: `/mock/taiji/sessions/zcode-demo/${normalized}.jsonl` }
   },
+
+  /**
+   * [U5 消息撤回] mock 无 runtime 编排（无树回退），协议合法最小响应 = no-mapping 错误臂
+   * （cancelDelivery mock 同款「不伪造事实」哲学：撤回能力在 mock 模式如实不可用，
+   * 消费侧按 D8 no-mapping 呈现兜底 toast，不谎报撤销成功）。
+   */
+  async revokeMessage(sessionId: string, _targetId: string): Promise<import('@taiji/shared').SessionRevokeMessageReply> {
+    await sleep(TIMING.ack)
+    return { sessionId, revoked: false, error: 'no-mapping' }
+  },
 }
 
 // [G4] 参数全等断言：mock session 任一方法少参/多参/错型（含 override 参数）在此行编译失败

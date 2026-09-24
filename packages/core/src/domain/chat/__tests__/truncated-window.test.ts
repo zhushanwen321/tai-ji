@@ -53,6 +53,10 @@ function makeFixture() {
     abortBash: vi.fn().mockResolvedValue(undefined),
     getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
     streamSubscribe: vi.fn(() => vi.fn()),
+    // [U5 消息撤回] ChatApiPort 新增必选成员（revokeMessage/cancelDelivery）——本套件不触达
+    // 撤回链，mock 补协议合法最小响应（类型完备；行为断言在 useChat.test.ts）
+    revokeMessage: vi.fn().mockResolvedValue({ sessionId: 's1', revoked: false, error: 'no-mapping' }),
+    cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
   }
   const deps: UseChatDeps = {
     chatApi,

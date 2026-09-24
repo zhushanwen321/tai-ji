@@ -5,6 +5,18 @@ export default {
   stopFailed: 'Failed to stop: {msg}',
   compactFailed: 'Failed to compact: {msg}',
   bashFailed: 'Failed to run bash: {msg}',
+  // [U5 message revoke D8] revoke orchestration toasts (D8 spec table is the presentation SSOT;
+  // keys map 1:1 to core useChat REVOKE_ERROR_TOAST_KEYS) + pending-cancel leg and RPC failures
+  revokeFailed: 'Revoke failed: {msg}',
+  revokeCancelFailed: 'Failed to cancel delivery: {msg}',
+  revokeDeliveredRace: 'Message was just delivered — click revoke again',
+  revokeRestoreContentMissing: 'Revoked, but the original text could not be restored',
+  revokeBusy: 'Generating — stop the turn to revoke',
+  revokeNoMapping: 'This message cannot be revoked',
+  revokeExtensionMissing: 'Revoke component not ready — restart the session',
+  revokeNavFailed: 'Revoke incomplete — please retry',
+  revokePiReclaimed: 'Session process was reclaimed and could not be restored — please retry',
+  revokeWorkflowRunning: 'Background task running — finish or stop it before revoking',
   // `@` directive messages (U2b): empty-text guard + RPC failure (readable error, S8)
   subagentDirectiveEmpty: 'Directive message is empty, please type content for the subagent',
   subagentDirectiveFailed: 'Failed to send directive message: {msg}',

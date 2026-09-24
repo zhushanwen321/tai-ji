@@ -11,11 +11,11 @@
  * getHistory 返回类型用内联结构（{ messages; truncated; loadedTurns; totalTurnsEstimate }），
  * 不依赖 chat 域的 HistoryResult（保持 core 平台无关）。
  */
-import type { DeliveryFrameEntry, DeliverySubmitReply, Message, SegmentsMetadataEntry, ServerMessageUnion } from '@taiji/shared'
+import type { DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply, Message, SegmentsMetadataEntry, ServerMessageUnion, SessionRevokeMessageReply } from '@taiji/shared'
 
 // delivery DTO 具名类型（投递所有权内核 D5，u-contracts 契约）：shared 根入口已收编
 // （u3a 落地），本文件 re-export 供域内消费方沿用既有 import 路径（./api-port）。
-export type { DeliverySubmitReply, DeliveryFrameEntry }
+export type { DeliverySubmitReply, DeliveryFrameEntry, DeliveryCancelReply }
 
 /**
  * chat 域后端操作端口。
@@ -62,6 +62,19 @@ export interface ChatApiPort {
     action: 'cancel' | 'message' | 'start',
     params: { subagentId?: string; text?: string; slug?: string; task?: string },
   ): Promise<void>
+  /**
+   * 撤回已送达消息（session.revokeMessage RPC，消息撤回设计 D2/D8）。实现同样在 session 域，
+   * 经本端口暴露给 chat 域撤回链路（useChat.revokeMessage 的已送达分支），与 subagentAction
+   * 的跨域暴露同理。reply 判别字段 revoked；成功臂 content 含投递裸标记（剥标记/切条在
+   * useChat 消费侧经 shared revoke-restore 处理）。
+   */
+  revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply>
+  /**
+   * 撤回在途条目（delivery.cancel RPC，D6 统一入口的在途路由腿）。撤回入口（UserBubble）对
+   * 内核投影 state 未 delivered 的消息路由到本 RPC（两段式收回：内核删除 + clear_queue 分拣），
+   * 与队列气泡 × 撤销（useQueueRows.onCancelEntry）共用同一 runtime 管道、不同 UI 消费面。
+   */
+  cancelDelivery(sessionId: string, clientUuid: string): Promise<DeliveryCancelReply>
   // [u5a 退役] `steer` / `followUp` 端口成员已删除：u3b 统一 submit 化后 core 编排侧对
   // `deps.chatApi.steer` / `followUp` 零调用（grep 实测），chat 域客户端封装同批删除。
   /** 中断当前回合（message.abort）*/

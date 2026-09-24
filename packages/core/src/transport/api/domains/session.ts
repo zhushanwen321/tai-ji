@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -318,6 +318,16 @@ export function handoff(
  */
 export function abortHandoff(sessionId: string): Promise<void> {
   return command('session.abortHandoff', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 撤回已送达消息（消息撤回设计 §3.3 D2/D8）：runtime 七步编排（树内回退）的 renderer 入口。
+ * targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid 空间 / 基线与重开态 pi entryId 空间，
+ * 形态分派在 runtime）。reply 判别字段 revoked：成功臂 content = transcript entry 原文（含
+ * 投递裸标记，剥标记与整批切条在消费侧 revoke-restore.ts）；错误臂 error 六码闭集按 D8 呈现。
+ */
+export function revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply> {
+  return command('session.revokeMessage', { sessionId, targetId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**
