@@ -139,6 +139,9 @@ const {
   parseResult,
   normalizeAggregatorResult,
   parseAggregatedMd,
+  recoverFromReportFile,
+  parsePorcelainPaths,
+  computeDegradedCommitSet,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
@@ -161,6 +164,28 @@ const {
   planReviewerOrder,
   parseDiffStats,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
+
+// F-1 deterministic 失败前缀（弱通道触发判据，设计 §3.3 决策 3）：SSOT = pi-subagent-cli
+// 的 DETERMINISTIC_SCHEMA_FAILURE_PREFIX（output-collector.ts 构造 error 时开头拼接，
+// 引擎 returnMeta 原样透传到脚本层）。worker 沙箱无法 import 引擎包（worker-script-builder
+// 生成的沙箱无 node_modules 解析面），此处只能内联字面量——与 SSOT 的逐字等值由
+// review-fix-loop-script.test.ts 的契约锁定测试守卫（双侧防漂移：任一侧变更未同步
+// 另一侧即红）。
+const DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL = "Structured output failed deterministically:";
+
+/** 降级 WARN 摘要（设计 §3.4.2 WARN 规格）：触发 error 头 240 字符——保 F-1 前缀与
+ *  failureKind 分类段（恢复方向「修环境 vs 模型质量」可辨），信息量不低于现状终判
+ *  分支的 raw.error 透出，防降级通道吞掉既有线索。value 解析失败形态（无 error）取
+ *  raw.value 头 240 字符——拼接文本头部无稳定结构，摘要仅作线索不作判据。 */
+function summarizeDegradedTrigger(raw) {
+  let s = "";
+  if (raw && typeof raw === "object" && typeof raw.error === "string" && raw.error) {
+    s = raw.error;
+  } else if (raw && typeof raw === "object" && raw.value !== undefined && raw.value !== null) {
+    s = typeof raw.value === "string" ? raw.value : JSON.stringify(raw.value);
+  }
+  return s.slice(0, 240);
+}
 
 // 白名单校验：未知参数名（防 batchX 拼错如 batchl）→ 报错
 for (const key of Object.keys($ARGS)) {
@@ -773,6 +798,22 @@ const state = loadState();
 // 5.6 锁定结果落 state.meta.baseHash（commit 1 声称与实现一致化，run 后可从 state.json 追溯审查基线）
 state.meta = state.meta || {};
 state.meta.baseHash = lockedBase.hash || "";
+// 弱格式降级可观测状态（设计 §3.4.2 degraded 三落点）：轮键 Set（batch-round 去重——
+// degradedRounds 语义 = 发生过降级的轮数，同轮多事件只计 1）+ 最后触发摘要（max-rounds
+// 触顶 finalMessage 诊断段用）。每次脚本执行重新初始化（attempt-2 重放同 run 语义一致）。
+const degradedRoundKeys = new Set();
+let lastDegradedTrigger = "";
+// 弱格式通道基线快照（设计 §3.4.2 记账行 3）：run 启动时采集工作区脏路径集作基线，
+// 降级兜底差集 = fix 实测变更 − 基线（防混入用户 WIP）。快照失败/非 git → null = 该
+// run 降级兜底 commit 整体禁用 + 惰性 WARN（首次降级兜底取基线时才打——健康 run 恒
+// 零新噪音）；禁用而非空基线继续——空基线会把用户 WIP 全量混入，复活本行要防的污染。
+try {
+  state.meta.baselineDirtyPaths = parsePorcelainPaths(require("child_process").execSync(
+    "git status --porcelain", { encoding: "utf-8", timeout: 10_000 }));
+} catch {
+  state.meta.baselineDirtyPaths = null;
+}
+let baselineWarnFired = false; // 惰性 WARN 名额（每 run 一次）
 let totalFixed = 0;
 let finalMessage = "";
 
@@ -897,7 +938,53 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     const reconAll = new Set(); // M2: 所有 status 条目（含 fixed）的 prev_id 去重——reconcile 门控数据源
     for (let i = 0; i < allRaw.length; i++) {
       const raw = allRaw[i];
+      // 弱格式通道降级采信（reviewer 腿，设计 §3.4.2）：结构化信封断裂但报告文件在
+      // 磁盘上时，从固定格式行恢复计数（numeric-only）继续循环。调用点两处——(a) F-1
+      // deterministic 前缀 error（引擎确定性 schema 失败 = 链路断而非 agent 没跑）；
+      // (b) 无 error + 值解析失败（覆盖 F-1 信号丢失的旧引擎形态，如 2026-09-24 事故
+      // 的 dev-0.10.6——武装断言与 F-1 都没触发，value 为拼接文本）。非 F-1 error
+      // （AgentRegistry not found / 超时 / 武装断言 fail-fast 的 [schema-arming]）不
+      // 进弱通道：该类失败结果未到达，无从采信，维持终判。reconciliation 视为 []——
+      // 对账数据链丢失是决策 6 登记的降级代价（台账 open 条目不因降级清账）。
+      const recoverReviewerCounts = (agentIdx, triggerSummary) => {
+        const def = active[agentIdx];
+        const recovered = recoverFromReportFile({
+          roundDir, reportName: def.report,
+          readFile: fs.readFileSync, parseMd: parseAggregatedMd,
+        });
+        if (!recovered) return false;
+        degradedRoundKeys.add(batchIndex + "-" + round);
+        lastDegradedTrigger = triggerSummary;
+        log("WARN: Review agent structured return lost — counts recovered from report file (degraded): "
+          + def.name + "; trigger: " + triggerSummary);
+        reviewResults.push({
+          report_file: recovered.report_file,
+          must_fix: recovered.must_fix,
+          suggestion: recovered.suggestion,
+          reconciliation: [],
+        });
+        const agentAllClean = recovered.must_fix === 0 && recovered.suggestion === 0;
+        if (agentAllClean) {
+          recordAgentClean(state, def.name, batchIndex);
+          cleanNames.add(def.name);
+        } else {
+          recordAgentDirty(state, def.name, recovered.must_fix, batchIndex);
+        }
+        agentRoundResults.push({
+          name: def.name, must_fix: recovered.must_fix, suggestion: recovered.suggestion,
+          clean: agentAllClean, degraded: true, // degraded 三落点之二：轮级条目（journal/state.json）
+        });
+        return true;
+      };
       if (raw && typeof raw === "object" && raw.error) {
+        // (a) F-1 deterministic 前缀 → 先试弱通道（决策 3 触发点 a）：报告文件照常
+        // 落盘（P2），计数可从固定格式行恢复。取不到（文件缺失/无格式行）或非 F-1
+        // error（AgentRegistry not found / 超时等结果未到达的失败）→ 落下方终判。
+        if (typeof raw.error === "string"
+          && raw.error.includes(DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL)
+          && recoverReviewerCounts(i, summarizeDegradedTrigger(raw))) {
+          continue;
+        }
         // 审查 agent 调用失败（含 AgentRegistry not found / 超时）。不裸 throw——与
         // aggregator-failure/stuck/fix-failure 路径一致：saveState + terminated 结构化终止，
         // 保证 state.json 有记录、调用方拿到结构化结果而非裸异常（MF-3）。
@@ -954,6 +1041,12 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         }
         agentRoundResults.push({ name: def.name, must_fix: parsed.must_fix, suggestion: parsed.suggestion ?? 0, clean: agentAllClean });
       } else {
+        // (b) 无 error + 值解析失败 → 先试弱通道（决策 3 触发点 b：覆盖 F-1 信号丢失的
+        // 旧引擎形态——value 为多轮拼接文本，normalizeReviewResult 切片解析必然 null）。
+        // 取不到（报告文件缺失/无格式行）→ 落下方终判。
+        if (recoverReviewerCounts(i, summarizeDegradedTrigger(raw))) {
+          continue;
+        }
         // tools 受限的 agent（如 tools: read）会过滤掉 structured-output → schema 失效，
         // 结果缺 must_fix。结构化终止（MF-3），raw 完整 dump 便于定位。
         // W8：同 review-failure——当前轮条目落 batchRounds（phase 时长保留在时间线）；
@@ -1568,11 +1661,33 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     // returnMeta 下 fxRaw = {value, error}：先查 error（失败分支可达，MF-1），再对 value 做
     // parseResult；各组逐个检查后合并（单组时与旧单 fixer 行为等价）。
+    // 弱格式通道降级续跑（设计 §3.4.2 决策 7）：fixer 的确定性结构化失败——(a) error 含
+    // F-1 deterministic 前缀，或 (b) value 存在 + 解析失败 + 无 error——不终止 run：其
+    // 代码改动落在 git 工作区不依赖结构化返回到达，收敛权威本来就是下轮重审。非确定性
+    // error（AgentRegistry not found / 超时等 fixer 从未跑起的失败）维持终判——该类
+    // 失败工作区零改动，降级续跑会让 fixCount++ 记「fix-attempted 已发生」与事实相反
+    // 并空转烧轮次。降级轮记账五消费点见下方各落点（totalFixed / fixCount / autoCommit
+    // 基线差集 / ES3 豁免 / fixResults 单条目）。
     const perGroupResults = [];
+    const degradedFixGroups = []; // 降级组登记（元素 = fixGroups[gi] 原引用，issueIds 供 ES3 豁免与 fix-attempted 标记）
+    const degradeFixGroup = (gi) => {
+      const raw = fixRaws[gi];
+      degradedFixGroups.push(fixGroups[gi]);
+      const trigger = summarizeDegradedTrigger(raw);
+      degradedRoundKeys.add(batchIndex + "-" + round);
+      lastDegradedTrigger = trigger;
+      log("WARN: Fix agent structured return lost — continuing to next round re-review; workspace changes remain authoritative ("
+        + groupCalls[gi].description + "); trigger: " + trigger);
+    };
     for (let gi = 0; gi < fixRaws.length; gi++) {
       const raw = fixRaws[gi];
       if (raw && typeof raw === "object" && raw.error) {
-        // fix agent 调用失败（AgentRegistry not found / 超时等）。
+        if (typeof raw.error === "string"
+          && raw.error.includes(DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL)) {
+          degradeFixGroup(gi);
+          continue;
+        }
+        // fix agent 调用失败（AgentRegistry not found / 超时等非确定性失败——维持终判）。
         // 与 review 路径（raw.error → review-failure）对齐：结构化终止而非静默当成功——
         // 否则 fixed_count 缺失被 `?? mustFix` 回退，totalFixed 虚增且 must_fix 不降白跑轮次（MF-1）。
         log("Fix agent failed (" + groupCalls[gi].description + "), stopping.");
@@ -1588,6 +1703,12 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       const fxOne = parseResult(raw.value);
       const rOne = fxOne ? normalizeFixResult(fxOne) : null;
       if (!rOne) {
+        // (b) value 存在 + 解析失败 + 无 error → 降级续跑（决策 7 口径）；value 缺失的
+        // 畸形形态（worker 恒 resolve value，理论不可达）维持终判。
+        if (raw && typeof raw === "object" && raw.value !== undefined && raw.value !== null) {
+          degradeFixGroup(gi);
+          continue;
+        }
         log("Fix agent result invalid (" + groupCalls[gi].description + "), stopping.");
         batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
@@ -1601,6 +1722,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       perGroupResults.push(rOne);
     }
     if (terminated === "fix-failure") break; // 已结构化终止，退出 round 循环（MF-3）
+    const anyDegradedFix = degradedFixGroups.length > 0;
     const fixResult = {
       fixed_count: perGroupResults.reduce((a, r) => a + (typeof r.fixed_count === "number" ? r.fixed_count : 0), 0),
       fixes: perGroupResults.flatMap((r) => r.fixes || []),
@@ -1618,7 +1740,15 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // idMap（本轮表格号→台账键）只翻译 deferred 交叉核对的查表输入；mustFixIds 与
     // fixes[].issue_id 的集合比较双侧保持表格号空间（同源 aggregated.md，翻译即误杀）。
     const fixIdMap = (state.idMap && state.idMap.round === round && state.idMap.map) || {};
-    const es3Violations = validateFixResult(fixResult, filterActiveIds(agg.must_fix_ids), state.issues, fixIdMap);
+    // ES3 漏修校验的降级轮豁免（记账行 4）：降级轮 fixes[] 缺失不代表漏修（fixer 可能
+    // 已修，只是返回丢失），漏修与否由下轮重审裁决（reviewer 没再现 = 已修的既有语义）。
+    // 豁免范围 = 降级组承担的 must_fix_ids 子集（混合批的健康组照常受校验——单腿形态
+    // 不豁免会全量误判漏修 → fix-failure，把降级续跑打回原形）。
+    const degradedFixIssueIds = new Set(degradedFixGroups.flatMap((g) => g.issueIds || []));
+    const es3MustFixIds = anyDegradedFix
+      ? filterActiveIds(agg.must_fix_ids).filter((id) => !degradedFixIssueIds.has(id))
+      : filterActiveIds(agg.must_fix_ids);
+    const es3Violations = validateFixResult(fixResult, es3MustFixIds, state.issues, fixIdMap);
     if (es3Violations.length > 0) {
       // m7: violation 分四类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed）/
       // disputed 申述格式非法（untracked / no-evidence），finalMessage 文案区分：
@@ -1681,6 +1811,45 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           finalMessage = "Batch " + batchIndex + " round " + round + ": 统一 commit 失败（改动在工作区/staged，未提交；恢复动作：人工检查 git status 后补提交或修 git 环境）— " + errMsg;
           batchIndex = BATCHES.length + 1;
           break;
+        }
+      }
+      // 降级组兜底差集 commit（记账行 3，设计 §3.4.2 基线差集三分支）：降级组的
+      // affected_files 不可得（结构化返回丢失），以 git 实测差集兜底——契约 = 差集内
+      // 修复以 commit 落盘推进（autoCommit=true 主消费形态 dev-merge CR 门以 git log
+      // 判断修复推进，留工作区形态下门会误判修复停滞）。revert 锚点 = message 的
+      // [degraded-fix]（git log --grep），只覆盖差集内修复（路径粒度收窄的已接受取舍）。
+      if (anyDegradedFix) {
+        if (state.meta.baselineDirtyPaths === null) {
+          // 分支 1：快照失败 / 非 git → 该 run 降级兜底 commit 整体禁用 + 惰性 WARN
+          //（首次取基线才打，健康 run 恒零新噪音）+ run 不阻断（改动留工作区由下轮重审裁决）
+          if (!baselineWarnFired) {
+            baselineWarnFired = true;
+            log("WARN: degraded fallback baseline unavailable (run-start git status snapshot failed / not a git repo) — degraded fallback commit disabled for this run; workspace changes remain for next-round re-review");
+          }
+        } else {
+          const fallbackPaths = computeDegradedCommitSet({
+            prevHead,
+            baselinePaths: state.meta.baselineDirtyPaths,
+          });
+          if (fallbackPaths.length === 0) {
+            // 分支 2：差集空 → 跳过 + WARN（含清单——差集为空时显式标注）
+            log("WARN: degraded fallback diff-set empty — no [degraded-fix] commit this round; changes (if any) remain in the working tree for next-round re-review. diff-set: (empty)");
+          } else {
+            try {
+              const fallbackMsg = "fix: review batch " + batchIndex + " round " + round
+                + " [degraded-fix] — " + fallbackPaths.length + " path(s): " + fallbackPaths.join(", ");
+              require("child_process").execFileSync("git", ["add", "--", ...fallbackPaths], { stdio: "pipe", timeout: 30_000 });
+              require("child_process").execFileSync("git", ["commit", "-m", fallbackMsg], { encoding: "utf-8", timeout: 60_000 });
+              log("Degraded fallback commit (" + fallbackPaths.length + " files): " + fallbackMsg);
+            } catch (e) {
+              // 分支 3：兜底 commit 自身抛错 → 跳过 + WARN（含差集清单）+ 续跑——
+              // 改动本就以下轮重审为权威，兜底通道不得反向升级成终止
+              const stderrText = e && e.stderr ? String(e.stderr).trim() : "";
+              log("WARN: degraded fallback commit failed — skipped, continuing (workspace changes remain for next-round re-review); diff-set: "
+                + fallbackPaths.join(", ") + "; error: "
+                + (e && e.message ? e.message : String(e)) + (stderrText ? " | stderr: " + stderrText : ""));
+            }
+          }
         }
       }
     }
@@ -1751,14 +1920,43 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         });
       }
     }
+    // 降级组 issueIds 照常标 fix-attempted（记账行 5：活跃 issue 照常标——fixer 可能
+    // 已修只是返回丢失；下轮 reviewer 不再报 = 已修，走既有 applyFixAttemptedOutcome
+    // 语义，不改保守 open——改了会让降级 run 因 hasOpenResidue 追账到不了 clean）。
+    // status 守卫防与上方健康组 fixes 循环双记（组间 issueIds 不相交为常态，防御性）。
+    for (const g of degradedFixGroups) {
+      for (const id of g.issueIds || []) {
+        const trackedKey = findIssueKey(state.issues, translateId(fixIdMap, id, state.issues));
+        if (trackedKey && state.issues[trackedKey].status !== "fix-attempted") {
+          state.issues[trackedKey].status = "fix-attempted";
+          state.issues[trackedKey].history.push({ round, status: "fix-attempted" });
+        }
+      }
+    }
     // known-remaining 同步更新：deferred 在本轮 fix 后即生效，R2+ prompt 立即消费
     // （不依赖下轮 reconcile 才生成——否则滞后一轮，reviewer 本轮看不到 deferred 清单）
     state.knownRemaining = computeKnownRemaining(state.issues);
     if (!state.fixResults) state.fixResults = [];
-    state.fixResults.push({ ...fixResult, round }); // round 供对账段标注轮号（S-3）
+    // 记账行 5：每轮单条目——混合批为单条目内嵌（健康组 fixes 照常 + degradedGroups
+    // 标记降级组）；fixResults 三处消费点（R2 prompt / 打分回填 / 对账段标注）全取
+    // [length-1] 当上轮结果，双条目会让一侧信息静默丢失。全降级（无健康组）时
+    // fixed_count 落 null（显式未知，区别于「修了 0 个」）。
+    state.fixResults.push({
+      ...fixResult,
+      round, // round 供对账段标注轮号（S-3）
+      ...(anyDegradedFix ? {
+        degraded: true,
+        degradedGroups: degradedFixGroups.map((g) => g.id),
+        ...(perGroupResults.length === 0 ? { fixed_count: null } : {}),
+      } : {}),
+    });
 
-    const fixedCount = fixResult.fixed_count ?? mustFix;
+    // 记账行 1：降级轮不触发 `?? mustFix` 虚增回退——计数权威是下轮重审不是 fixer
+    // 自报；全降级时 fixResult.fixed_count = 0（reduce 空数组），totalFixed 不递增。
+    const fixedCount = anyDegradedFix ? fixResult.fixed_count : (fixResult.fixed_count ?? mustFix);
     totalFixed += fixedCount;
+    // 记账行 2：fixCount++ / roundHasFix 照常——保守方向（fix-attempted 已发生），
+    // clean agent 不因此跨批跳过、recheckAfterFix 强回归重派打开，未验证的 fix 逃不过重审
     state.fixCount++;
     roundHasFix = true;
 
@@ -1796,7 +1994,13 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     finalMessage = "Batch " + batchIndex + " (" + BATCH_NAMES[batchIndex - 1] + ") 达到 maxRounds=" + maxRounds
       + " 仍有 must-fix，终止整个 workflow。残留: "
       + (remainingIds.length ? remainingIds.join(", ") : "(issues 未追踪)")
-      + (state.knownRemaining && state.knownRemaining.length ? "；deferred: " + state.knownRemaining.join("; ") : "");
+      + (state.knownRemaining && state.knownRemaining.length ? "；deferred: " + state.knownRemaining.join("; ") : "")
+      // 触顶信息量补偿（设计 §3.4.2 WARN 规格段）：degraded 轮存在的触顶终态附加分号
+      // 诊断段——人读线索（降级触发 error 摘要携带恢复方向），与成功类终态的括号后缀
+      // 格式/用途区分（后缀 = 机器判别标记，诊断段 = 人读线索）
+      + (degradedRoundKeys.size > 0
+        ? "；degraded: " + degradedRoundKeys.size + " round(s), last trigger: " + lastDegradedTrigger
+        : "");
     log(finalMessage);
     saveState(state);
     batchIndex = BATCHES.length + 1;
@@ -1820,6 +2024,11 @@ function buildRemaining(issues) {
 }
 
 log("\n=== Loop Complete ===");
+// degraded 落数据层（三落点之三的 state.meta 面，设计 §3.4.2）：degradedRounds 计数 +
+// 最后触发摘要——rfl 仪表（rfl.mjs）展示后续按需接入，此处保证 state.json 可查。
+const degradedRounds = degradedRoundKeys.size;
+state.meta.degradedRounds = degradedRounds;
+if (degradedRounds > 0) state.meta.lastDegradedTrigger = lastDegradedTrigger;
 saveState(state);
 
 // B2（2026-09-20 与 zcode 原生版对齐）：终态残留问题的**结构化**清单——此前只把残留 ID
@@ -1827,6 +2036,17 @@ saveState(state);
 // 拆字符串；给出 id/title/severity/status 四字段后，「converged 却 remaining 非空」这类
 // 自相矛盾终态在消费侧可机器判定。残留口径 = status != fixed/deferred（与 message 同源）。
 const remaining = buildRemaining(state.issues);
+
+// degraded 后缀（三落点之三的 message 面）：成功类终态（clean/converged，含 disputed
+// 升级 needs-human 的改道形态）的降级完成标记 = 括号后缀（下游机器判别口径，上游消费方
+// = dev-merge CR 门的 pi 宿主腿）。**附加点必须在下方 needs-human 改道判定之前**——
+// clean 路径从不赋值 finalMessage，改道后 message 走 finalMessage 构造（clean 臂字面量
+// 不参与），后缀若只拼在 return 的 clean 臂会在该形态丢失；此处先落进 finalMessage，
+// 保证改道后仍带后缀。
+const degradedRoundsSuffix = degradedRounds > 0 ? " (degraded: " + degradedRounds + " round(s))" : "";
+if ((terminated === "clean" || terminated === "converged") && degradedRoundsSuffix) {
+  finalMessage += (finalMessage ? "" : "All batches clean.") + degradedRoundsSuffix;
+}
 
 // 2026-09-23 disputed 申述裁决权移交：收敛/clean 终态若存在未裁决申述，升级 needs-human
 //——修复成果照常入账（commit 已完成），人类按 result.disputed 的反证逐项裁决后处置
@@ -1850,6 +2070,9 @@ return {
   remaining,
   // disputed 申述清单（needs-human 终态的主要消费面；人类按 evidence 逐项裁决）
   disputed: disputedOutstanding,
+  // 弱格式降级轮计数（degraded 三落点之三的返回值面；成功类终态 message 带
+  // (degraded: N round(s)) 后缀、max-rounds 触顶带分号诊断段——格式与用途区分见上）
+  degradedRounds,
   // 5.9 terminated 透出：非 clean 时 message 含终止原因 + 残留 ID 清单 + deferred 理由
   // （stuck/needs-redesign/converged/max-rounds/*-failure 均由 finalMessage 承载）。
   // 渲染层特判（launcher 对 terminated 非 clean 的视觉区分）留 TODO：当前 tool 结果
@@ -1857,7 +2080,7 @@ return {
   // 5.9 视觉区分：非 clean 终止加 [UNRESOLVED] 前缀（tool 结果即主 agent 可见层，
   // launcher 透传 message——无需跨模块渲染特判，W5C3 决策更新）
   message: terminated === "clean"
-    ? "All batches clean. " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
+    ? "All batches clean. " + totalFixed + " issue(s) fixed total." + degradedRoundsSuffix + " State: " + STATE_FILE
     : terminated === "converged" || terminated === "needs-human"
       ? (terminated === "needs-human" ? "[NEEDS-HUMAN] " : "") + finalMessage + " " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
       : "[UNRESOLVED] " + finalMessage + ". State: " + STATE_FILE,

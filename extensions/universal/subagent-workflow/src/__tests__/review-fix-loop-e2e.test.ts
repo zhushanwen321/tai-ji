@@ -41,6 +41,9 @@ import {
 } from "@zhushanwen/subagent-core/orchestration/models/workflow-script.ts";
 import type { WorkflowScriptRegistry } from "@zhushanwen/subagent-core";
 import { WorkerHostImpl } from "@zhushanwen/subagent-core";
+// 弱格式通道（设计 §3.4.2）：F-1 触发判据的引擎 SSOT 常量——剧本哨兵与断言共用；
+// 与脚本侧字面量的逐字等值由 subagent-core 侧 review-fix-loop-script.test.ts 锁定
+import { DETERMINISTIC_SCHEMA_FAILURE_PREFIX } from "@zhushanwen/pi-subagent-cli";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = join(__dirname, "..", "..", "node_modules", "@zhushanwen", "subagent-core", "workflows");
@@ -156,19 +159,64 @@ function assertScriptOutcome(scriptResult: unknown): {
   return raw as { terminated: string; totalFixed?: number; message?: string; runDir?: string };
 }
 
+/**
+ * 剧本单次调用返回值：正常结构化数据 / __invalidOutput 哨兵（违约 value）/
+ * __error 哨兵（returnMeta error 形态——弱格式通道用例：F-1 deterministic 前缀
+ * 或 AgentRegistry not found 等非确定性 error）。
+ */
+type ScenarioReturn =
+  | Record<string, unknown>
+  | { __invalidOutput: unknown }
+  | { __error: string; __failureKind?: string };
+
+/**
+ * 剧本哨兵解包：__error = AgentResult 带 error、parsedOutput 缺席（脚本 returnMeta
+ * 侧收到 {value: content, error}——error 分支优先）。__error 默认带
+ * failureKind="schema_deterministic"（对齐真实 F-1 形态：引擎产出侧 output-collector
+ * 构造 error 时同步标记，execute-agent-call 分诊不重试、error 原样透传到脚本层——
+ * returnMeta 只挑 error 字段，脚本只见字符串）；显式传 __failureKind: undefined 形态
+ * （如 AgentRegistry not found）走引擎可重试路径（重试耗尽后透传）。__invalidOutput
+ * = value 刻意违约（既有 F2/F3 语义）。两者都跳过 miniValidator（契约校验防的是
+ * mock 无意脱节，刻意违约剧本必须绕过）。
+ */
+function unwrapScenario(raw: ScenarioReturn): {
+  parsed: unknown;
+  error: string | undefined;
+  failureKind: string | undefined;
+  skipContractCheck: boolean;
+} {
+  if (raw && typeof raw === "object" && "__error" in raw) {
+    // 默认 schema_deterministic（F-1 真实形态，不重试直达脚本层）；非确定性场景
+    // 显式传其他值（如 "unknown"）——execute-agent-call 分诊只认 stale_context /
+    // schema_deterministic，其余落可重试路径（幂等剧本重试耗尽后透传 error）
+    return {
+      parsed: undefined,
+      error: String((raw as { __error: unknown }).__error),
+      failureKind: (raw as { __error: string; __failureKind?: string }).__failureKind ?? "schema_deterministic",
+      skipContractCheck: true,
+    };
+  }
+  if (raw && typeof raw === "object" && "__invalidOutput" in raw) {
+    return { parsed: (raw as { __invalidOutput: unknown }).__invalidOutput, error: undefined, failureKind: undefined, skipContractCheck: true };
+  }
+  return { parsed: raw, error: undefined, failureKind: undefined, skipContractCheck: false };
+}
+
 interface Scenario {
   /** review 调用序 → 返回数据生成器；R2+ 回调收到 prompt 文本（可用于对账/传递断言）。
    * 返回 { __invalidOutput: value } 哨兵 = 模拟「reviewer 输出无效」（F3 锁定用例，
-   * 语义同 aggregate 哨兵）。 */
-  review: Array<(prompt: string) => Record<string, unknown>>;
+   * 语义同 aggregate 哨兵）；返回 { __error } 哨兵 = 模拟结构化工具失败（弱格式通道）。 */
+  review: Array<(prompt: string) => ScenarioReturn>;
   /**
    * aggregate 剧本（回调收到 prompt 文本——可从中解析 roundDir 预写 fallback 依赖的
    * aggregated.md）。返回 { __invalidOutput: value } 哨兵 = 模拟「aggregator 输出无效」
    * （真实 LLM 违约场景，F2 e2e）：runner 解包后直接返回 value 并跳过 miniValidator
    * ——契约校验防的是 mock 无意脱节，刻意违约剧本必须绕过。
    */
-  aggregate: (prompt: string) => Record<string, unknown> | { __invalidOutput: unknown };
-  fix: () => Record<string, unknown>;
+  aggregate: (prompt: string) => ScenarioReturn;
+  /** fix 剧本；回调收到 prompt 文本（弱格式通道用例按 "group G<k>/<n>" header 分流
+   * 混合批的健康组/降级组，并模拟 fixer 改动落工作区）。 */
+  fix: (prompt: string) => ScenarioReturn;
 }
 
 /**
@@ -188,7 +236,11 @@ function makeScenarioRunner(scenario: Scenario) {
     calls.push({ kind, prompt, agent: opts.agent, schema: opts.schema, model: opts.model });
     let parsed: unknown = null;
     // F2 e2e：__invalidOutput 哨兵 = 刻意模拟 aggregator 违约输出（缺 must_fix 等），
-    // miniValidator 对故意无效无校验意义，跳过（防契约校验拦截违约剧本）。
+    // miniValidator 对故意无效无校验意义，跳过（防契约校验拦截违约剧本）；
+    // 弱格式通道：__error 哨兵 = returnMeta error 形态（F-1 前缀 / 非确定性 error），
+    // failureKind 对齐引擎产出侧标记（execute-agent-call 分诊依据）。
+    let error: string | undefined;
+    let failureKind: string | undefined;
     let skipContractCheck = false;
     if (kind === "review") {
       const idx = reviewCalls.length;
@@ -197,22 +249,14 @@ function makeScenarioRunner(scenario: Scenario) {
       reviewCalls.push({ prompt, result });
       // F3 锁定用例：review 剧本同样支持 __invalidOutput 哨兵——模拟 reviewer 违约
       // 输出（缺 must_fix），绕过 miniValidator（契约校验防的是 mock 无意脱节）。
-      if (result && typeof result === "object" && "__invalidOutput" in result) {
-        parsed = (result as { __invalidOutput: unknown }).__invalidOutput;
-        skipContractCheck = true;
-      } else {
-        parsed = result;
-      }
+      const unwrapped = unwrapScenario(result);
+      parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else if (kind === "aggregate") {
-      const raw = scenario.aggregate(prompt);
-      if (raw && typeof raw === "object" && "__invalidOutput" in raw) {
-        parsed = (raw as { __invalidOutput: unknown }).__invalidOutput;
-        skipContractCheck = true;
-      } else {
-        parsed = raw;
-      }
+      const unwrapped = unwrapScenario(scenario.aggregate(prompt));
+      parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else {
-      parsed = scenario.fix();
+      const unwrapped = unwrapScenario(scenario.fix(prompt));
+      parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     }
     // m8：schema 契约校验——mock 返回的 parsedOutput 必须符合 workflow 声明的权威 schema
     // （防止未来 schema 收紧时 E2E 仍绿）。校验失败抛错让测试立即失败。
@@ -224,7 +268,8 @@ function makeScenarioRunner(scenario: Scenario) {
       usage: MOCK_USAGE,
       durationMs: 1,
       sessionId: "sess-e2e-" + (calls.length - 1),
-      error: undefined,
+      error,
+      ...(failureKind !== undefined ? { failureKind } : {}),
     };
   });
   return {
@@ -2358,5 +2403,580 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       }
     },
     RUN_TIMEOUT_MS * 2,
+  );
+});
+
+// ── 弱格式通道降级（设计 §3.4.2，A1 mock 轨单测化）───────────────────────
+//
+// 覆盖：reviewer 触发点 a/b + recoverFromReportFile 命中（未命中 = 既有 F3
+// review-failure 用例）、fixer F-1 限定降级 / 非确定性 error 终判、记账五消费点
+// （totalFixed / fixCount / autoCommit 基线差集三分支 / ES3 豁免含混合批 /
+// fixResults 单条目内嵌 degradedGroups）、degraded 三落点（WARN 摘要经
+// state.meta.lastDegradedTrigger 同源断言 / 轮级条目 / 返回值 degradedRounds +
+// message 后缀与 max-rounds 分号诊断段）、needs-human 改道后缀保真。
+describe("review-fix-loop 弱格式通道降级（§3.4.2 mock 轨）", () => {
+  /** F-1 哨兵：前缀逐字 = 引擎 SSOT 常量；附 failureKind 分类段（WARN 摘要可辨恢复方向）。 */
+  const F1_ERROR = DETERMINISTIC_SCHEMA_FAILURE_PREFIX
+    + " failureKind=schema_mismatch (structured-output tool absent) — mock F-1 sentinel";
+
+  /** 从 review prompt 的 "Write report to: <roundDir>/<report>.md" 行解析 roundDir。 */
+  function roundDirFromReviewPrompt(prompt: string): string {
+    const m = /^Write report to: (.+)\/[^/]+\.md$/m.exec(prompt);
+    if (!m) throw new Error("weak-channel e2e: report path line not found in review prompt");
+    return m[1].trim();
+  }
+
+  /** 初始 commit 后的工作区形状（基线脏 = run 启动快照的输入）。 */
+  function seedGitRepo(repo: string, trackedFiles: string[]): void {
+    for (const f of trackedFiles) {
+      mkdirSync(dirname(join(repo, f)), { recursive: true });
+      writeFileSync(join(repo, f), "base\n", "utf-8");
+    }
+    execFileSync("git", ["add", "-A"], { cwd: repo, timeout: 10_000, env: gitEnv() });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo, timeout: 10_000, env: gitEnv() });
+  }
+
+  const gitLogSubjects = (repo: string): string[] =>
+    execFileSync("git", ["log", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+
+  const committedFiles = (repo: string, ref: string): string[] =>
+    execFileSync("git", ["show", "--name-only", "--pretty=", ref], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
+      .split("\n").map((s) => s.trim()).filter(Boolean).sort();
+
+  const porcelain = (repo: string): string[] =>
+    execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+
+  /** state.json 读取（runDir 在 rflHomeDir 隔离树下）。 */
+  const readState = (runDir: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(runDir, "state.json"), "utf8")) as Record<string, unknown>;
+
+  interface WeakChannelOutcome {
+    terminated: string;
+    totalFixed?: number;
+    message?: string;
+    runDir?: string;
+    degradedRounds?: number;
+    remaining?: Array<{ id: string; status: string }>;
+    disputed?: unknown[];
+  }
+
+  async function runWeakChannelCase(
+    runner: ReturnType<typeof makeScenarioRunner>,
+    args: Record<string, unknown>,
+  ): Promise<WeakChannelOutcome> {
+    const deps = makeDeps(runner);
+    const result = await runAndWait(
+      wf("review-fix-loop"),
+      { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(), ...args },
+      deps, undefined, RUN_TIMEOUT_MS,
+    );
+    expect(result.reason).toBe("completed");
+    expect(result.error).toBeUndefined();
+    return assertScriptOutcome(result.scriptResult) as WeakChannelOutcome;
+  }
+
+  it(
+    "W1: 环境级断链全链降级（reviewer F-1 + aggregator md 兜底 + fixer F-1）→ clean + 后缀 + 基线差集兜底 commit",
+    async () => {
+      const repo = makeTmpGitRepo();
+      seedGitRepo(repo, ["README.md", "wip-tracked.ts"]);
+      // 预置基线脏（run 启动快照输入）：tracked WIP 修改 + untracked 新文件
+      writeFileSync(join(repo, "wip-tracked.ts"), "base\n// user WIP edit\n", "utf-8");
+      writeFileSync(join(repo, "wip-untracked.ts"), "user new file\n", "utf-8");
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            // R1：F-1 error（触发点 a）+ 报告文件已在盘（P2：报告早于结构化提交落盘）→ 弱通道恢复计数
+            (prompt) => {
+              const roundDir = roundDirFromReviewPrompt(prompt);
+              writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 0\n\n# Report\nfound one issue\n", "utf-8");
+              return { __error: F1_ERROR };
+            },
+            // R2：健康（重审权威裁决 R1 降级轮的修复）
+            () => ({ report_file: "/tmp/w1-r2.md", must_fix: 0, suggestion: 0, reconciliation: [] }),
+          ],
+          aggregate: (prompt) => {
+            // aggregator 断链 → 既有重试 + md 兜底（本腿不改造，F2 同款形态）
+            const m = /^outputDir: (.+)$/m.exec(prompt);
+            if (!m) throw new Error("weak-channel e2e: outputDir not found in aggregator prompt");
+            writeFileSync(join(m[1].trim(), "aggregated.md"), "## Summary\n- Must-fix: 1\n- Suggestions: 0\n", "utf-8");
+            return { __invalidOutput: { fixes_caution: [] } };
+          },
+          fix: () => {
+            // fixer F-1 降级；代码改动照常落工作区（不依赖结构化返回到达）——
+            // 模拟修复触及干净文件（fix-degraded-a.ts 新建）与基线内文件（wip-tracked.ts）
+            writeFileSync(join(repo, "fix-degraded-a.ts"), "fixer change\n", "utf-8");
+            writeFileSync(join(repo, "wip-tracked.ts"), "base\n// user WIP edit\n// fixer also touched baseline file\n", "utf-8");
+            return { __error: F1_ERROR };
+          },
+        });
+        const outcome = await runWeakChannelCase(runner, { autoCommit: true });
+
+        // G1 终态：降级完成而非判死（A1 显式断言：非 review-failure / fix-failure）
+        expect(outcome.terminated).toBe("clean");
+        // degraded 三落点之三：message 后缀 + 返回值计数
+        expect(outcome.message).toContain("All batches clean");
+        expect(outcome.message).toContain("(degraded: 1 round(s))");
+        expect(outcome.degradedRounds).toBe(1);
+        // 记账行 1：全降级轮 totalFixed 不虚增（无 ?? mustFix 回退）
+        expect(outcome.totalFixed).toBe(0);
+
+        const st = readState(outcome.runDir!);
+        // state.meta 落数据层：计数 + 触发摘要（WARN 的 trigger 段同源——F-1 前缀与
+        // failureKind 分类段不被吞，头 240 截断只切尾）
+        expect((st.meta as Record<string, unknown>).degradedRounds).toBe(1);
+        const lastTrigger = String((st.meta as Record<string, unknown>).lastDegradedTrigger);
+        expect(lastTrigger.startsWith(DETERMINISTIC_SCHEMA_FAILURE_PREFIX)).toBe(true);
+        expect(lastTrigger).toContain("failureKind=schema_mismatch");
+        // 三落点之二（reviewer 轮级条目）+ fixResults 单条目（记账行 5：fixed_count
+        // null = 显式未知，区别于「修了 0 个」；degradedGroups 标记降级组）
+        const r1Agents = ((st.batches as Array<{ rounds: Array<{ agents: Array<{ degraded?: boolean }> }> }>)[0]!.rounds[0]!.agents);
+        expect(r1Agents.some((a) => a.degraded)).toBe(true);
+        const fr = (st.fixResults as Array<Record<string, unknown>>)[0]!;
+        expect(fr.degraded).toBe(true);
+        expect(fr.fixed_count).toBeNull();
+        expect(fr.degradedGroups).toEqual(["G1"]);
+        // 记账行 2：fixCount 照常递增（fix-attempted 已发生，防跨批误跳）
+        expect(st.fixCount).toBe(1);
+
+        // 记账行 3（基线差集兜底 + 部分重叠形态）：差集内修复以 commit 落盘推进——
+        // commit 只含干净文件（fix-degraded-a.ts），基线内文件（wip-tracked.ts）的
+        // 修复增量被剔除、留工作区由下轮重审裁决；基线 untracked 文件不出现在 commit
+        expect(gitLogSubjects(repo)[0]).toContain("[degraded-fix]");
+        expect(committedFiles(repo, "HEAD")).toEqual(["fix-degraded-a.ts"]);
+        // 捕获面双向断言：不漏（差集内修复已 commit、无滞留）且不污染（基线文件不进 commit、留工作区）
+        expect(porcelain(repo)).toContain("M wip-tracked.ts");
+        expect(porcelain(repo)).toContain("?? wip-untracked.ts");
+        expect(existsSync(join(repo, "fix-degraded-a.ts"))).toBe(true);
+        // R2 重审真实发生（fixer 降级续跑而非终止）
+        const { kinds } = runner.stats();
+        expect(kinds.filter((k) => k === "review").length).toBe(2);
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W2: reviewer 触发点 b（无 error 的拼接文本 + 报告文件在盘）→ 弱通道采信降级，run 完成",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          // 旧引擎形态：F-1 信号丢失，value 为多轮拼接文本（normalizeReviewResult 必然 null）
+          (prompt) => {
+            const roundDir = roundDirFromReviewPrompt(prompt);
+            writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 1\n\n# Report\nlegacy envelope loss\n", "utf-8");
+            return { __invalidOutput: "Round 1 turn output concatenated as plain text without schema envelope" };
+          },
+          () => ({
+            report_file: "/tmp/w2-r2.md", must_fix: 0, suggestion: 0,
+            reconciliation: [{ prev_id: "S-1", status: "fixed", evidence: "read confirmed" }],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/w2-agg.md", must_fix: 0, suggestion: 1,
+          must_fix_ids: [], fixes_caution: [],
+        }),
+        fix: () => ({
+          fixed_count: 1,
+          fixes: [{ issue_id: "S-1", description: "mock fix", self_check: "grep: 1 hit", affected_files: [] }],
+          deferred: [],
+        }),
+      });
+      const outcome = await runWeakChannelCase(runner, {});
+
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.message).toContain("(degraded: 1 round(s))");
+      expect(outcome.degradedRounds).toBe(1);
+      // 降级采信的计数进入循环（R1 弱通道 must_fix=1 + suggestion=1 → 派 fix）
+      const { kinds } = runner.stats();
+      expect(kinds.filter((k) => k === "fix").length).toBe(1);
+      // value 解析失败形态的触发摘要取 raw.value 头 240（拼接文本头部，仅作线索）
+      const st = readState(outcome.runDir!);
+      expect(String((st.meta as Record<string, unknown>).lastDegradedTrigger))
+        .toContain("concatenated as plain text");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W3: 单腿形态（aggregator 健康 + fixer 降级）→ ES3 不误判漏修，run 续跑收 clean",
+    async () => {
+      // 回归锚点：不豁免时 fixes=[] 对 must_fix_ids 全量误判 must-fix-not-fixed
+      // → fix-failure，把降级续跑打回原形
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/w3-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
+          () => ({
+            report_file: "/tmp/w3-r2.md", must_fix: 0, suggestion: 0,
+            reconciliation: [
+              { prev_id: "MF-1", status: "fixed", evidence: "read confirmed" },
+              { prev_id: "MF-2", status: "fixed", evidence: "read confirmed" },
+            ],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/w3-agg.md", must_fix: 2, suggestion: 0,
+          must_fix_ids: [
+            { id: "MF-1", severity: "major" },
+            { id: "MF-2", severity: "major" },
+          ],
+          fixes_caution: [],
+        }),
+        fix: () => ({ __error: F1_ERROR }),
+      });
+      const outcome = await runWeakChannelCase(runner, {});
+
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.message).toContain("(degraded: 1 round(s))");
+      expect(outcome.totalFixed).toBe(0); // 记账行 1：不虚增
+      const st = readState(outcome.runDir!);
+      const fr = (st.fixResults as Array<Record<string, unknown>>)[0]!;
+      expect(fr.fixed_count).toBeNull();
+      expect(fr.degradedGroups).toEqual(["G1"]); // 无 groups 时 reconcileGroups 兜底单组
+      // 降级组 issueIds 照常标 fix-attempted（记账行 5），R2 对账 + backfill 清账
+      expect(outcome.remaining).toEqual([]);
+      // ES3 豁免的另一面：重审后收敛，无残留
+      expect(st.fixCount).toBe(1);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W4: 混合批（G1 健康 + G2 降级）——健康组照常入账统一 commit、降级组兜底差集、fixResults 单条目内嵌 degradedGroups、ES3 分治",
+    async () => {
+      const repo = makeTmpGitRepo();
+      seedGitRepo(repo, ["README.md", "wip-baseline.ts"]);
+      writeFileSync(join(repo, "wip-baseline.ts"), "base\n// user WIP\n", "utf-8"); // 基线脏（部分重叠的基线侧）
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            () => ({ report_file: "/tmp/w4-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
+            () => ({
+              report_file: "/tmp/w4-r2.md", must_fix: 0, suggestion: 0,
+              reconciliation: [
+                { prev_id: "MF-1", status: "fixed", evidence: "read confirmed" },
+                { prev_id: "MF-2", status: "fixed", evidence: "read confirmed" },
+              ],
+            }),
+          ],
+          aggregate: () => ({
+            report_file: "/tmp/w4-agg.md", must_fix: 2, suggestion: 0,
+            must_fix_ids: [
+              { id: "MF-1", severity: "major", files: ["src/a.ts"] },
+              { id: "MF-2", severity: "major", files: ["src/b.ts"] },
+            ],
+            groups: [
+              { id: "G1", issueIds: ["MF-1"], files: ["src/a.ts"] },
+              { id: "G2", issueIds: ["MF-2"], files: ["src/b.ts"] },
+            ],
+            fixes_caution: [],
+          }),
+          fix: (prompt) => {
+            // 按 prompt 的组 header 分流（parallel 起跑顺序不定，不能按调用序）
+            if (prompt.includes("group G1/2")) {
+              // 健康组：fixes 照常（affected_files 真实落盘——统一 commit 存在性过滤）
+              mkdirSync(join(repo, "src"), { recursive: true });
+              writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+              return {
+                fixed_count: 1,
+                fixes: [{ issue_id: "MF-1", description: "fix g1", self_check: "grep: 1 hit", affected_files: ["src/a.ts"] }],
+                deferred: [],
+              };
+            }
+            // 降级组：F-1 + 改动落工作区
+            mkdirSync(join(repo, "src"), { recursive: true });
+            writeFileSync(join(repo, "src", "b.ts"), "export const b = 2;\n", "utf-8");
+            return { __error: F1_ERROR };
+          },
+        });
+        const outcome = await runWeakChannelCase(runner, { autoCommit: true });
+
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.message).toContain("(degraded: 1 round(s))");
+        // 记账行 1（混合批）：健康组计数照常入账，降级组不虚增
+        expect(outcome.totalFixed).toBe(1);
+        // 记账行 5：每轮单条目——健康组 fixes 内嵌 + degradedGroups 标记；
+        // 混合批 fixed_count = 健康组之和（非 null——null 只属于全降级形态）
+        const st = readState(outcome.runDir!);
+        const fr = (st.fixResults as Array<Record<string, unknown>>)[0]!;
+        expect(fr.degraded).toBe(true);
+        expect(fr.degradedGroups).toEqual(["G2"]);
+        expect(fr.fixed_count).toBe(1);
+        expect((fr.fixes as Array<{ issue_id: string }>).map((f) => f.issue_id)).toEqual(["MF-1"]);
+        // 双 commit：HEAD = 降级兜底（[degraded-fix]，差集 = src/b.ts——src/b.ts 是
+        // 基线外新文件）；HEAD~1 = 健康组统一 commit（src/a.ts）
+        const subjects = gitLogSubjects(repo);
+        expect(subjects[0]).toContain("[degraded-fix]");
+        expect(committedFiles(repo, "HEAD")).toEqual(["src/b.ts"]);
+        expect(committedFiles(repo, "HEAD~1")).toEqual(["src/a.ts"]);
+        // ES3 分治锚点（隐含于 terminated=clean）：G2 的 MF-2 豁免漏修判定——
+        // 若全量校验则 must-fix-not-fixed → fix-failure（本用例在旧实现上红）
+        // 基线内文件（wip-baseline.ts）不出现在任何 commit，仍留工作区
+        expect(porcelain(repo)).toContain("M wip-baseline.ts");
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W5a: 基线快照失败（非 git 目录）→ 该 run 降级兜底 commit 整体禁用，run 不阻断",
+    async () => {
+      const nonGitDir = mkdtempSync(join(tmpdir(), "rfl-e2e-nongit-"));
+      const origCwd = process.cwd();
+      process.chdir(nonGitDir);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            (prompt) => {
+              const roundDir = roundDirFromReviewPrompt(prompt);
+              writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 0\n\n# Report\n", "utf-8");
+              return { __error: F1_ERROR };
+            },
+            () => ({ report_file: "/tmp/w5a-r2.md", must_fix: 0, suggestion: 0, reconciliation: [] }),
+          ],
+          aggregate: (prompt) => {
+            const m = /^outputDir: (.+)$/m.exec(prompt);
+            if (!m) throw new Error("weak-channel e2e: outputDir not found");
+            writeFileSync(join(m[1].trim(), "aggregated.md"), "## Summary\n- Must-fix: 1\n- Suggestions: 0\n", "utf-8");
+            return { __invalidOutput: { fixes_caution: [] } };
+          },
+          fix: () => ({ __error: F1_ERROR }),
+        });
+        const outcome = await runWeakChannelCase(runner, { autoCommit: true });
+
+        // 分支 1：禁用而非终判——run 降级完成（分支 3 的对照：统一 commit 失败才是终判）
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.degradedRounds).toBe(1);
+        const st = readState(outcome.runDir!);
+        expect((st.meta as Record<string, unknown>).baselineDirtyPaths).toBeNull();
+      } finally {
+        process.chdir(origCwd);
+        rmSync(nonGitDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W5b: 差集空（修复全部落在基线内路径）→ 无 degraded commit 产生，改动留工作区",
+    async () => {
+      const repo = makeTmpGitRepo();
+      seedGitRepo(repo, ["README.md", "wip-only.ts"]);
+      writeFileSync(join(repo, "wip-only.ts"), "base\n// user WIP\n", "utf-8"); // 基线脏
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            (prompt) => {
+              const roundDir = roundDirFromReviewPrompt(prompt);
+              writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 0\n\n# Report\n", "utf-8");
+              return { __error: F1_ERROR };
+            },
+            () => ({ report_file: "/tmp/w5b-r2.md", must_fix: 0, suggestion: 0, reconciliation: [] }),
+          ],
+          aggregate: (prompt) => {
+            const m = /^outputDir: (.+)$/m.exec(prompt);
+            if (!m) throw new Error("weak-channel e2e: outputDir not found");
+            writeFileSync(join(m[1].trim(), "aggregated.md"), "## Summary\n- Must-fix: 1\n- Suggestions: 0\n", "utf-8");
+            return { __invalidOutput: { fixes_caution: [] } };
+          },
+          fix: () => {
+            // fixer 只改基线内文件（部分重叠形态的极限：差集空）
+            writeFileSync(join(repo, "wip-only.ts"), "base\n// user WIP\n// fixer edit on baseline path\n", "utf-8");
+            return { __error: F1_ERROR };
+          },
+        });
+        const outcome = await runWeakChannelCase(runner, { autoCommit: true });
+
+        // 分支 2：差集空 → 跳过 + WARN，无 [degraded-fix] commit；run 照常降级完成
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.degradedRounds).toBe(1);
+        expect(gitLogSubjects(repo)).toEqual(["init"]);
+        // 路径粒度收窄的已接受取舍：基线路径修复留工作区，由下轮重审裁决
+        expect(porcelain(repo)).toContain("M wip-only.ts");
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W5c: 兜底 commit 自身 git 抛错（index.lock 争用）→ 跳过 + WARN + 续跑，不终判",
+    async () => {
+      const repo = makeTmpGitRepo();
+      seedGitRepo(repo, ["README.md"]);
+      // 预置 index.lock：只拦写 index 的命令（git add）——基线快照（status）与
+      // prevHead（rev-parse）均为只读不受影响
+      writeFileSync(join(repo, ".git", "index.lock"), "", "utf-8");
+      const origCwd = process.cwd();
+      process.chdir(repo);
+      try {
+        const runner = makeScenarioRunner({
+          review: [
+            (prompt) => {
+              const roundDir = roundDirFromReviewPrompt(prompt);
+              writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 0\n\n# Report\n", "utf-8");
+              return { __error: F1_ERROR };
+            },
+            () => ({ report_file: "/tmp/w5c-r2.md", must_fix: 0, suggestion: 0, reconciliation: [] }),
+          ],
+          aggregate: (prompt) => {
+            const m = /^outputDir: (.+)$/m.exec(prompt);
+            if (!m) throw new Error("weak-channel e2e: outputDir not found");
+            writeFileSync(join(m[1].trim(), "aggregated.md"), "## Summary\n- Must-fix: 1\n- Suggestions: 0\n", "utf-8");
+            return { __invalidOutput: { fixes_caution: [] } };
+          },
+          fix: () => {
+            // 差集非空（基线外新文件）→ 兜底 git add 被调用 → index.lock 冲突 → 抛错
+            writeFileSync(join(repo, "fix-locked-out.ts"), "fixer change\n", "utf-8");
+            return { __error: F1_ERROR };
+          },
+        });
+        const outcome = await runWeakChannelCase(runner, { autoCommit: true });
+
+        // 分支 3：兜底通道不得反向升级成终止（对照 MF-1-1b：统一 commit 失败 = 终判）
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.degradedRounds).toBe(1);
+        expect(gitLogSubjects(repo)).toEqual(["init"]);
+        // 改动本就以下轮重审为权威：留工作区
+        expect(existsSync(join(repo, "fix-locked-out.ts"))).toBe(true);
+      } finally {
+        process.chdir(origCwd);
+        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W6: fixer 非确定性 error（AgentRegistry not found）→ 维持 fix-failure 终判，不降级",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/w6-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/w6-agg.md", must_fix: 1, suggestion: 0,
+          must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+        }),
+        fix: () => ({ __error: "AgentRegistry not found: no agent named 'fix' is registered", __failureKind: "unknown" }),
+      });
+      const outcome = await runWeakChannelCase(runner, {});
+
+      // 决策 7：fixer 从未跑起的失败（工作区零改动）维持终判——降级会让 fixCount++
+      // 记「fix-attempted 已发生」与事实相反并空转烧轮次
+      expect(outcome.terminated).toBe("fix-failure");
+      expect(outcome.message).toContain("AgentRegistry not found");
+      expect(outcome.degradedRounds).toBe(0);
+      // 无续跑：R2 review 不发生
+      const { kinds } = runner.stats();
+      expect(kinds.filter((k) => k === "review").length).toBe(1);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W7: 降级 clean + 未裁决 disputed → needs-human 改道后 message 仍带 (degraded) 后缀",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/w7-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
+          () => ({
+            report_file: "/tmp/w7-r2.md", must_fix: 0, suggestion: 0,
+            reconciliation: [
+              { prev_id: "MF-1", status: "fixed", evidence: "read confirmed" },
+              { prev_id: "MF-2", status: "fixed", evidence: "read confirmed" },
+            ],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/w7-agg.md", must_fix: 2, suggestion: 0,
+          must_fix_ids: [
+            { id: "MF-1", severity: "major", files: ["src/a.ts"] },
+            { id: "MF-2", severity: "major", files: ["src/b.ts"] },
+          ],
+          groups: [
+            { id: "G1", issueIds: ["MF-1"], files: ["src/a.ts"] },
+            { id: "G2", issueIds: ["MF-2"], files: ["src/b.ts"] },
+          ],
+          fixes_caution: [],
+        }),
+        fix: (prompt) => {
+          if (prompt.includes("group G1/2")) {
+            // 健康组：修复 + 对 MF-1 提出格式合法的 disputed 申述（file:line 反证）
+            return {
+              fixed_count: 0,
+              fixes: [],
+              disputed: [{ issue_id: "MF-1", evidence: "src/a.ts:42 aggregator missed existing null guard" }],
+              deferred: [],
+            };
+          }
+          return { __error: F1_ERROR };
+        },
+      });
+      const outcome = await runWeakChannelCase(runner, {});
+
+      // clean 终态因 disputed 升级 needs-human——后缀附加点在改道判定之前，
+      // 改道后 message 走 finalMessage 构造（clean 臂字面量不参与）仍带后缀
+      expect(outcome.terminated).toBe("needs-human");
+      expect(outcome.message).toContain("[NEEDS-HUMAN]");
+      expect(outcome.message).toContain("(degraded: 1 round(s))");
+      expect(outcome.disputed).toHaveLength(1);
+      expect(outcome.degradedRounds).toBe(1);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "W8: 连续降级至 maxRounds 触顶 → max-rounds 终态 message 带分号诊断段（非括号后缀）",
+    async () => {
+      const runner = makeScenarioRunner({
+        // 剧本耗尽后重复末元素：每轮 reviewer 都 F-1 + 报告 must_fix=1（不收敛）
+        review: [
+          (prompt) => {
+            const roundDir = roundDirFromReviewPrompt(prompt);
+            writeFileSync(join(roundDir, "reviewer.md"), "- Must-fix: 1\n- Suggestions: 0\n\n# Report\n", "utf-8");
+            return { __error: F1_ERROR };
+          },
+        ],
+        aggregate: (prompt) => {
+          const m = /^outputDir: (.+)$/m.exec(prompt);
+          if (!m) throw new Error("weak-channel e2e: outputDir not found");
+          writeFileSync(join(m[1].trim(), "aggregated.md"), "## Summary\n- Must-fix: 1\n- Suggestions: 0\n", "utf-8");
+          return { __invalidOutput: { fixes_caution: [] } };
+        },
+        fix: () => ({ __error: F1_ERROR }),
+      });
+      const outcome = await runWeakChannelCase(runner, { maxRounds: 2 });
+
+      // 触顶终态（有界，非静默成功）：分号诊断段 = 人读线索（degraded 计数 +
+      // last trigger 摘要），与成功类终态的括号后缀格式/用途区分
+      expect(outcome.terminated).toBe("max-rounds");
+      expect(outcome.message).toContain("[UNRESOLVED]");
+      expect(outcome.message).toContain("degraded: 2 round(s), last trigger: ");
+      expect(outcome.message).toContain(DETERMINISTIC_SCHEMA_FAILURE_PREFIX);
+      // 括号后缀只属成功类终态——失败终态不出现
+      expect(outcome.message).not.toContain("(degraded:");
+      expect(outcome.degradedRounds).toBe(2);
+      // state.meta 落数据层（rfl 仪表后续接入的数据面）
+      const st = readState(outcome.runDir!);
+      expect((st.meta as Record<string, unknown>).degradedRounds).toBe(2);
+    },
+    RUN_TIMEOUT_MS,
   );
 });
