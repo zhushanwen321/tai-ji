@@ -194,7 +194,7 @@ export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pau
 // 前端审批条渲染并经 respond 回传 PlanReviewResponse。
 // shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（PlanDocMeta 保持同形镜像——
 // 值形状惯例；PlanLifecycleState 已 type-only 直引本包，D2 裁决：plan 状态机处
-// 同形惯例不适用），形状漂移由双端注释互指 + 投影链契约测试守卫）。
+// 同形惯例不适用）。形状漂移由双端注释互指 + 投影链契约测试守卫。
 
 /**
  * 计划产物文档元数据——agent 调 register-doc 登记的一份产物。

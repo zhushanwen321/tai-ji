@@ -75,7 +75,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
-| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；develop 内置 / plan-exec skill / goal） |
+| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |

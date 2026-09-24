@@ -93,7 +93,7 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   subagent.directive：标量/小列表状态帧。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
-// - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧在 :854）：交互请求
+// - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧产点 :875）：交互请求
 //   帧不登记，selfReview ≤4KB 有界性由扩展写侧 truncateSelfReview 截断保证
 //   （PLAN_SELF_REVIEW_MAX_BYTES）。
 // - extension:widget / widgetGui / status / notify / setEditorText：extension 上报小载荷。
