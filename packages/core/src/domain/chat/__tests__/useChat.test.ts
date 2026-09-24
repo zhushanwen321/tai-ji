@@ -4,7 +4,11 @@
  * 锁定 createUseChat(deps) factory 产物的纯行为（不经 renderer 薄包装）：
  * 统一 submit（乐观气泡 + delivery.submit）/ session.delivery 帧消费与气泡 morph /
  * 送达回执入流 / ensureStreamSubscription 幂等 / message.* 单一入口 / session.* 跨 store
- * 协调 / 错误路径 toast 不 throw / hydrateHistory / loadMoreHistory / disposeSession。
+ * 协调 / 错误路径 toast 不 throw / loadMoreHistory / disposeSession。
+ *
+ * 历史注入的生产通路 = session 域 reconcile（use-session 点击切入统一入口，经
+ * historyWindowFromReply 归一后写 store.hydrate/reconcileHistory）——原 useChat.hydrateHistory
+ * 死导出已删（b05 候选 4），hydrate 相关用例改走 store.hydrate 验收路径。
  *
  * [u3b 退役] defer flush/S1 拒绝检测/1s 重投 timer/5 次熔断/handleSendRejected/pendingDirectSends
  * /steer pendingBuffer 计数腿相关 describe 已删除（设计 §3.1 删除面），由「统一 submit +
@@ -25,7 +29,8 @@ import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
 import { getDeliveryProjection, replaceDeliveryProjection, resetDeliveryProjectionForTest } from '../effects/user-delivery'
-import { msg } from './helpers/fixtures'
+import { historyWindowFromReply } from '../truncated-window'
+import { msg, userEndFrame } from './helpers/fixtures'
 
 interface Fixture {
   useChat: ReturnType<typeof createUseChat>
@@ -107,7 +112,8 @@ describe('createUseChat factory 行为', () => {
 
   it('send 流程：统一 submit——appendUser 乐观气泡 + submitDelivery（content + clientUuid = 气泡 id）', async () => {
     const f = makeFixture()
-    await f.useChat.send('s1', textToSegments('hello'))
+    // [R2-A5 失败信号] 成功路径返回 true（Promise<boolean> 契约）
+    await expect(f.useChat.send('s1', textToSegments('hello'))).resolves.toBe(true)
     expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(1)
     const [calledSid, calledContent, calledUuid] = f.chatApi.submitDelivery.mock.calls[0] as unknown as [
       string, string, string,
@@ -253,22 +259,22 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('hydrateHistory：注入历史 + truncated 窗口标志', async () => {
+  it('hydrate（reconcile 生产通路验收路径）：注入历史 + truncated 窗口标志', () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: true, loadedTurns: 20, totalTurnsEstimate: 20 })
-    await f.useChat.hydrateHistory('s10')
+    // use-session 点击切入把 getHistory reply 经 historyWindowFromReply 归一后写 store
+    // （use-session.ts reconcileHistory 通路）；store.hydrate 消费同形态窗口契约
+    f.chatStore.hydrate('s10', [], historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 20 }))
     expect(f.useChat.hasMoreHistory('s10')).toBe(true)
-    // 幂等：二次 hydrate 不重复请求
-    const callsBefore = f.chatApi.getHistory.mock.calls.length
-    await f.useChat.hydrateHistory('s10')
-    expect(f.chatApi.getHistory.mock.calls.length).toBe(callsBefore)
     f.dispose()
   })
 
   it('[u6] loadMoreHistory：游标翻页（cursor = 分区最旧消息身份）页响应收敛 truncated=false', async () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [{ id: 'm1', role: 'user', content: 'q', status: 'complete', timestamp: 1 }], truncated: true, loadedTurns: 20, totalTurnsEstimate: 20 })
-    await f.useChat.hydrateHistory('s11')
+    f.chatStore.hydrate(
+      's11',
+      [{ id: 'm1', role: 'user', content: 'q', status: 'complete', timestamp: 1 }],
+      historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 20 }),
+    )
     expect(f.useChat.hasMoreHistory('s11')).toBe(true)
     // 游标翻页走 getHistory（带 cursor = 分区最旧消息 m1 的 id）；空页（翻页到头）收敛
     f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
@@ -280,8 +286,7 @@ describe('createUseChat factory 行为', () => {
 
   it('[u6] loadMoreHistory：页响应仍 truncated=true → 顶部条入口保持', async () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
-    await f.useChat.hydrateHistory('s11b')
+    f.chatStore.hydrate('s11b', [], historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 }))
     // 窗口契约字段写入 store 窗口状态（u4b 透传）
     expect(f.chatStore.getHistoryWindow('s11b')).toEqual({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
     // [u6] 游标翻页页响应仍截断（锚前有更早历史）
@@ -490,8 +495,9 @@ describe('send 定向分流（含 subagent 段）', () => {
         { type: 'subagent', subagentId: 'rec-x', slug: 'closed-one' },
         { type: 'text', text: '继续' },
       ]),
-      // [u3b] send 契约 Promise<void>：定向分流内部消化 toast（boolean 契约随 B 策略退役）
-    ).resolves.toBeUndefined()
+      // [R2-A5 失败信号] send 契约 Promise<boolean>：定向分流 RPC 失败内部消化 toast，
+      // false = 输入未消费（调用方 restoreSegments 恢复草稿）
+    ).resolves.toBe(false)
     expect(f.toast.error).toHaveBeenCalledWith(
       'composable.subagentDirectiveFailed:{"msg":"subagent 已结束"}',
     )
@@ -550,28 +556,12 @@ describe('统一 submit 的 inflight 占位闭环（u3b：占位保留服务 dir
     resetDeliveryProjectionForTest()
   })
 
-  /** message_end(user) 帧（无标记形态——落 ② 纯计数兜底） */
-  function userEnd(sid: string, text: string): ServerMessage {
-    return {
-      type: 'message.message_end',
-      payload: {
-        sessionId: sid,
-        entry: {
-          type: 'message',
-          parentId: null,
-          timestamp: new Date(0).toISOString(),
-          message: { role: 'user', content: [{ type: 'text', text }], timestamp: 0 },
-        },
-      },
-    } as ServerMessage
-  }
-
   it('send 乐观插入 → inflight +1；确认帧到达 → 抵消归零（direct 车道抵消机制保留，D7）', async () => {
     const f = makeFixture()
     await f.useChat.send('s30', textToSegments('hi'))
     expect(f.chatStore.getInflight('s30')).toBe(1)
 
-    f.emit('s30', userEnd('s30', 'hi'))
+    f.emit('s30', userEndFrame('s30', 'hi'))
     expect(f.chatStore.getInflight('s30')).toBe(0)
     f.dispose()
   })
@@ -580,7 +570,8 @@ describe('统一 submit 的 inflight 占位闭环（u3b：占位保留服务 dir
     const f = makeFixture()
     f.chatApi.submitDelivery.mockRejectedValueOnce(new Error('WS断'))
 
-    await f.useChat.send('s31', textToSegments('hi'))
+    // [R2-A5 失败信号] 失败路径返回 false（内部已 toast + 回滚，调用方恢复草稿）
+    await expect(f.useChat.send('s31', textToSegments('hi'))).resolves.toBe(false)
 
     expect(f.chatStore.getInflight('s31')).toBe(0)
     expect(f.chatStore.getMessages('s31')).toHaveLength(0)
@@ -595,7 +586,8 @@ describe('统一 submit 的 inflight 占位闭环（u3b：占位保留服务 dir
     f.emit('s33', msg('s33', 'message.message_start', { messageId: 'a1' }))
     f.emit('s33', msg('s33', 'message.complete', { stopReason: 'end_turn' }))
 
-    await f.useChat.editAndResend('s33', userMsgId, textToSegments('edited'))
+    // [R2-A5 失败信号] 成功路径返回 true（Promise<boolean> 契约，与 send 同）
+    await expect(f.useChat.editAndResend('s33', userMsgId, textToSegments('edited'))).resolves.toBe(true)
 
     // 统一 submit 化后编辑重发与 send 同编排：乐观气泡 + inflight 占位（原「不挂钩」契约退役）。
     // 首发的 1（未确认——本用例未发 message_end(user)）+ 编辑重发的 1 = 2。
@@ -622,22 +614,6 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
         entries: entries.map((e) => ({ clientUuid: e.clientUuid, preview: 'p', state: e.state, lane: e.lane })),
       },
     } as unknown as ServerMessage
-  }
-
-  /** message_end(user) 帧携带内核裸标记（标记 id = clientUuid 去 u- 前缀，u3b 契约桥） */
-  function userEndMarked(sid: string, text: string, bareUuid: string): ServerMessage {
-    return {
-      type: 'message.message_end',
-      payload: {
-        sessionId: sid,
-        entry: {
-          type: 'message',
-          parentId: null,
-          timestamp: new Date(0).toISOString(),
-          message: { role: 'user', content: [{ type: 'text', text: `${text}\n<!--taiji:msg:${bareUuid}-->` }], timestamp: 0 },
-        },
-      },
-    } as ServerMessage
   }
 
   it('morph：steer 车道帧到达 → 乐观气泡移出对话流 + 投影落位（队列区数据）+ dispatching 占位回收', async () => {
@@ -699,7 +675,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
 
     // 2) 内核投递完成：message_end(user) 携带裸标记（bare = clientUuid 去 u- 前缀）
     const bare = bubbleId.slice(2)
-    f.emit('m4', userEndMarked('m4', 'deploy --prod', bare))
+    f.emit('m4', userEndFrame('m4', 'deploy --prod', bare))
 
     // morph 段按原 segments 回填为正常 user 气泡（按序入流，用户可见 DOM 断言）
     const users = f.chatStore.getMessages('m4').filter((m) => m.role === 'user')
@@ -732,8 +708,8 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     expect(getDeliveryProjection('m5')).toHaveLength(2)
     // 投递序回执：第一条先回（气泡回填），第二条后回——回填顺序与发送序一致
     //（回执入流产生新消息 id（appendUser 生成新 u-<uuid>），按 content 文本断言顺序）
-    f.emit('m5', userEndMarked('m5', '第一条', ids[0]!.slice(2)))
-    f.emit('m5', userEndMarked('m5', '第二条', ids[1]!.slice(2)))
+    f.emit('m5', userEndFrame('m5', '第一条', ids[0]!.slice(2)))
+    f.emit('m5', userEndFrame('m5', '第二条', ids[1]!.slice(2)))
     const users = f.chatStore.getMessages('m5').filter((m) => m.role === 'user')
     expect(users).toHaveLength(2)
     const textOf = (m: (typeof users)[number]) =>

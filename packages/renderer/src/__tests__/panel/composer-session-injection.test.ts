@@ -20,13 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import {
-  composerChatModule,
-  composerFlowModule,
-  composerApiModule,
-  composerChatStoreModule,
-  composerChildStubs,
-} from '../helpers/composer-mount'
+import { composerChildStubs } from '../helpers/composer-mount'
 
 // ── mock composable / api（防真依赖构造报错，同 composer-file-injection.test.ts）──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -49,6 +43,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
     state: ref('idle'),
     currentSessionId: ref(null),
     currentCwd: ref(null),
+    pendingPreset: ref(null), // landing 态 launchConfigView 解析消费
   }),
   resetNewTaskFlow: vi.fn(),
 }))
@@ -141,7 +136,7 @@ function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'l
 function mountSessionItem(id: string, label: string) {
   const wrapper = mount(SessionItem, {
     attachTo: document.body,
-    props: { session: { id, label, cwd: '/p', lastActiveAt: 0 }, active: false, status: 'done' as never },
+    props: { session: { id, label, cwd: '/p', lastActiveAt: 0 }, active: false, status: 'done' },
     global: { stubs: composerChildStubs },
   })
   mounted.push(wrapper)

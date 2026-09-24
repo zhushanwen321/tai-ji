@@ -1,9 +1,12 @@
 /**
  * useChat 集成测试（T1.4/T1.5/T5.1）—— send 全链 + 失败回滚 + editAndResend pendingSend 对称。
  *
- * T1.4: idle + send(text) → appendUser + addPendingSend + api.send → message_start → clearPendingSend
- * T1.5: send + api.send reject → clearPendingSend（[W2] 不 throw，toast 消化错误）
- * T5.1: editAndResend → truncate + appendUser + addPendingSend + send, catch → clearPendingSend
+ * T1.4: idle + send(text) → appendUser + addPendingSend + submitDelivery → message_start → clearPendingSend
+ * T1.5: submitDelivery reject → 返回 false + clearPendingSend（[W2] 不 throw，toast 消化错误）
+ * T5.1: editAndResend → truncate + appendUser + addPendingSend + submitDelivery，失败 → false + clearPendingSend
+ *
+ * 五方法返回契约（Promise<boolean>）：true = 提交成功或无事发生（busy/空白早退无丢失面）；
+ * false = RPC 失败（内部已 toast 且乐观副作用已回滚，调用方据此恢复草稿）。
  *
  * [MANDATORY] 集成用例补 DOM 断言：mount(Composer) 验证 send 全链/失败后 composer-box 可见 + 用户可重试态。
  *
@@ -169,8 +172,9 @@ describe('T1.5 send 提交失败回滚', () => {
     const chat = useChatStore()
     const { send } = useChat()
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）
-    await expect(send('s-fail', textToSegments('hello'))).resolves.toBeUndefined()
+    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
+    // 失败信号经返回值传递（false = RPC 失败，调用方据此恢复草稿）
+    await expect(send('s-fail', textToSegments('hello'))).resolves.toBe(false)
     // clearPendingSend：isActive 恢复 false（无 streaming entity + 无 pendingSend）
     expect(chat.isActive('s-fail')).toBe(false)
   })
@@ -204,8 +208,8 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     const userMsg = chat.getMessages('s-edit-fail').find((m) => m.role === 'user')!
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
     const { editAndResend } = useChat()
-    // [W2] editAndResend 失败不再 throw（与 steer/followUp/abort 对齐）
-    await expect(editAndResend('s-edit-fail', userMsg.id, textToSegments('text'))).resolves.toBeUndefined()
+    // [W2] editAndResend 失败不再 throw（与 steer/followUp/abort 对齐）；false = RPC 失败信号
+    await expect(editAndResend('s-edit-fail', userMsg.id, textToSegments('text'))).resolves.toBe(false)
     // 失败后 pendingSend 被清（isActive=false，无 streaming）
     expect(chat.isActive('s-edit-fail')).toBe(false)
   })
@@ -217,8 +221,8 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     chat.addPendingSend('s-edit-busy')
     expect(chat.isActive('s-edit-busy')).toBe(true)
     const { editAndResend } = useChat()
-    // busy 时早退，不 throw，不提交
-    await expect(editAndResend('s-edit-busy', 'msg-id', textToSegments('text'))).resolves.toBeUndefined()
+    // busy 时早退：不 throw、不提交，返回 true（「无事发生」——早退无丢失面，调用方不恢复草稿）
+    await expect(editAndResend('s-edit-busy', 'msg-id', textToSegments('text'))).resolves.toBe(true)
     expect(apiMock.submitDelivery).not.toHaveBeenCalled()
   })
 })
@@ -268,11 +272,11 @@ describe('T1.4/T1.5 send 全链 Composer DOM 断言（用户可见行为）', ()
     await wrapper.vm.$nextTick()
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
     // flushPromises 排空全部 microtask（含 submitSegments await chatApi.submitDelivery 的 reject
-    // + catch + clearPendingSend 后的 render flush），不依赖固定 nextTick 计数（同上注释）。
+    // + catch + clearPendingSend 后的 render flush），不依赖固定 nextTick 计数（同上注释）；
+    // 单次调用即排空 store 状态与 DOM 渲染两阶段，无需二次冲洗
     await flushPromises()
     // store 侧：pendingSend 已清，无 streaming → isActive=false（用户可重试）
     expect(chat.isActive('s-dom-fail')).toBe(false)
-    await flushPromises()
     // DOM 断言 1：composer-box 仍渲染（输入区未消失）
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // DOM 断言 2：无停止按钮（非活跃态，用户可重新发送）

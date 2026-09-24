@@ -6,8 +6,9 @@
  * followUp / abort）提供的原语，不持任何状态。
  *
  * 提取到 composable 以满足 Composer.vue <script setup> 行数上限（300 行）。
- * 行为与原 Composer.vue 内联实现等价（仅搬运）；[D2] onSteer 例外——steer 返回 boolean
- * 后分支内消费失败恢复（restoreSegments），不再经 submit 的 catch 包装。
+ * 行为与原 Composer.vue 内联实现等价（仅搬运）；[D2] onSteer、[R2-A5] onFollowUp 两通路
+ * 均在分支内消费 useChat 失败信号（false → restoreSegments），不经 submit 的 catch 包装
+ * （useChat 契约内不 throw，包装 catch 只对契约外异常有意义）。
  *
  * 不含：onSend（fork/landing/compact 分支太多，留 Composer.vue）/ 输入编辑
  * （留 Composer.vue / 其他 composable）。
@@ -48,8 +49,10 @@ interface ComposerSubmitDeps {
   restoreSegments: (segments: Segment[]) => void
   /** 追加 steer（useChat 提供）。[D2] 返回 false = RPC 失败（内部已 toast），调用方恢复草稿。 */
   steer: (sessionId: string, segments: Segment[]) => Promise<boolean>
-  /** 追加 follow-up（useChat 提供） */
-  followUp: (sessionId: string, segments: Segment[]) => Promise<void>
+  /** 追加 follow-up（useChat 提供）。[R2-A5] 契约对齐 steer：false = RPC 失败（内部已
+   *  toast），调用方恢复草稿。类型面 Promise<boolean | void> 为宽兼容槽（useChat 侧契约
+   *  落地前后提供方均可注入），合流后可收窄为 Promise<boolean>。 */
+  followUp: (sessionId: string, segments: Segment[]) => Promise<boolean | void>
   /** 停止当前回合（useChat 提供） */
   abort: (sessionId: string) => Promise<void>
 }
@@ -99,11 +102,21 @@ export function useComposerSubmit(deps: ComposerSubmitDeps) {
     }
   }
 
-  /** 追加 follow-up：Alt+⏎ 触发；非流式退化为普通发送 */
+  /**
+   * 追加 follow-up：Alt+⏎ 触发；非流式退化为普通发送。
+   * [R2-A5 失败恢复接回] 原经 submit 包装，但 followUp 契约内不 throw（toast + 返回失败
+   * 信号），包装 catch → restoreInput 是 dead path——改与 onSteer 同范式：分支内消费
+   * boolean，失败 restoreSegments 恢复完整草稿（text + chips）。不补 toast（useChat
+   * 内部已 toast，防双提示）。
+   */
   async function onFollowUp(): Promise<void> {
     if (!deps.hasInput.value) return
+    // clearInput 会清空 DOM，必须在清空前提取 segments（同 onSteer 快照范式）
     const segments = deps.inputRef.value?.getSegments() ?? []
-    await submit(deps.draft.value, () => deps.followUp(deps.sessionIdRef.value!, segments))
+    deps.clearInput()
+    // 严格比较 false：只认显式失败信号（宽兼容槽下 void 提供方 resolve undefined 不触发恢复）
+    const delivered = await deps.followUp(deps.sessionIdRef.value!, segments)
+    if (delivered === false) deps.restoreSegments(segments)
   }
 
   /** 停止（S6）：调 abort（G-025 流转 DEFERRED，方法存在） */

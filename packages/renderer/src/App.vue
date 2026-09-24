@@ -23,6 +23,12 @@
           data-testid="runtime-error-cause"
           class="max-w-[320px] text-center text-[11.5px] text-neutral-dim"
         >{{ t('connection.errorCause', { message: runtimeStartError }) }}</span>
+        <!-- bootstrap 五步自身失败的真因（本地 cause 通道，与 runtimeStartError 台账通道分开显示） -->
+        <span
+          v-if="bootstrapError"
+          data-testid="bootstrap-error-cause"
+          class="max-w-[320px] text-center text-[11.5px] text-neutral-dim"
+        >{{ t('connection.bootstrapErrorCause', { message: bootstrapError }) }}</span>
         <Button variant="default" size="sm" data-testid="runtime-retry-btn" @click="onRetry">
           {{ t('connection.retry') }}
         </Button>
@@ -96,6 +102,7 @@ import { bindHandoffEffect } from '@/composables/effects/useHandoffEffect'
 import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSync'
 import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
 import { useMemoryPressure } from '@/composables/useMemoryPressure'
+import { useToast } from '@/composables/useToast'
 import { onRuntimeError, getRuntimeStartError } from '@/lib/ipc'
 import { reportRuntimeStartError } from '@/boot/error-reporter'
 
@@ -108,6 +115,7 @@ import { reportRuntimeStartError } from '@/boot/error-reporter'
 bootstrapSettingsCore()
 
 const { t, locale } = useI18n()
+const { error: toastError } = useToast()
 // 窗口标题随语言切换：太极（zh）/ TaiJi（en）。index.html 的 <title> 是渲染前的 fallback。
 // dev 模式加「 - dev」后缀，与打包版并存时窗口标题可区分（renderer 加载前的初始 title
 // 由 window-factory 设 'TaiJi dev'，此处接管后保持一致后缀）。
@@ -124,6 +132,9 @@ const { state: connectionState, teardown, retryRuntime } = useConnection()
 // 拉取」既有规则。connected 即清（陈旧真因不再显示）。
 const runtimeStartError = ref<string | null>(null)
 let removeRuntimeErrorListener: (() => void) | null = null
+// bootstrap 五步自身失败（initConnection 等步骤 reject）的真因：只上 failed 屏（本地 cause），
+// 不进 runtimeStartError 通道（该通道语义 = runtime 启动失败台账，混用污染归因）。
+const bootstrapError = ref<string | null>(null)
 
 /** 记录真因 + 落台账（幂等：同因去重；空消息丢弃）。状态转移归 core，本组件不置态 */
 function handleRuntimeStartError(message: string): void {
@@ -156,9 +167,8 @@ bindHandoffEffect()
 // 对齐派生态视野（isGenerating 由消息实体 per-session 惰性派生，D-3），消除惰性订阅盲区（非交互 session 终态事件丢失 → 侧栏卡 running）。
 // flush:'sync' 保证 appendSession 同 tick 建订阅（fork-ask 路径 send 前订阅就绪）。onScopeDispose 随 App 卸载退订。
 bindSessionStreamSync()
-// [u3c] useCompactQueue 单例初始化已随投递所有权内核退役（设计 §3.1 删除面）：队列状态帧
-// 投影的清理由 core 侧 per-session 键控承担（disposeSession / 测试 reset 双清理点，ADR-0049），
-// App 层不再需要挂 app 级 scope 保活旧队列单例。
+// 队列状态帧投影的清理由 core 侧 per-session 键控承担（disposeSession / 测试 reset 双清理点，
+// ADR-0049）；App 层不挂任何队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
 // warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
@@ -187,6 +197,8 @@ const perm = usePermissionRequest()
 onMounted(() => {
   void bootstrap({ platform: resolvePlatform() }).catch((err) => {
     console.error('[App] bootstrap failed', err)
+    // 真因上屏（err.message 提取，非 Error 值也可见），failed 屏不再只有通用文案
+    bootstrapError.value = err instanceof Error ? err.message : String(err)
     setFailed()
   })
 })
@@ -200,6 +212,7 @@ watch(connectionState, (s) => {
   if (s === 'connected') {
     // RD-3#2：连接成功即清除启动失败真因（陈旧原因不再出现在后续 failed 屏）
     runtimeStartError.value = null
+    bootstrapError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
     // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
@@ -210,9 +223,12 @@ watch(connectionState, (s) => {
 })
 
 /** 用户点击「重试」：委托 IPC runtime-restart → 主进程 supervisor.restartRuntime。
- *  重启成功后 supervisor 广播 runtime-port，onRuntimePort 监听自动重连 → 回到 connected。 */
+ *  重启成功后 supervisor 广播 runtime-port，onRuntimePort 监听自动重连 → 回到 connected。
+ *  IPC 失败时 toast 可见反馈（含「重试」恢复动作）——failed 态停留是诚实的，但请求失败必须出声。 */
 function onRetry(): void {
-  void retryRuntime()
+  retryRuntime().catch((err: unknown) => {
+    toastError(t('connection.restartRequestFailed', { message: err instanceof Error ? err.message : String(err) }))
+  })
 }
 
 onBeforeUnmount(() => {

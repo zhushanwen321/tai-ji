@@ -6,88 +6,9 @@
  * re-export 全部类型，domain/chat/index.ts 与 __tests__ 的既有 `from './useChat'`
  * 消费零改动。
  */
-import type { Segment, SessionViewSnapshot } from '@taiji/shared'
+import type { SessionViewSnapshot } from '@taiji/shared'
 import type { ChatApiPort, WriteSegmentsFn } from './api-port'
 import type { ChatStoreInstance } from './store'
-
-/**
- * CompactQueueLike —— useChat 消费 compactQueue 的最小结构类型（renderer useCompactQueue
- * 单例自动满足，经 deps.getCompactQueue 注入——session.compacted → flush 先例的既有模式）。
- *
- * 契约对端：packages/renderer/src/composables/panel/useCompactQueue.ts（CompactQueue /
- * QueuedMessage）——结构类型 seam，有意不合并：core 不反向依赖 renderer 实现，仅以本
- * 最小结构面约束实现方；任一侧扩展字段时需同步核对另一侧结构面。
- *
- * session-occupancy-send-closure（已删除，git 可追溯）D2 P1：send.rejected{reason:'compacting'} 兜底入队复用
- * compactQueue（enqueue）+ flush 重放来源消歧（peek 命中条目 id 即跳过重入队）。
- * [u4a / D5.3 ①] 扩展投递确认回调（confirmDelivery）与条目提交通道标记（mode）——
- * message_end(user) 三分支处理序 ①（defer 分区 FIFO 文本匹配）的 core 消费面。
- */
-export interface CompactQueueEntrySnapshot {
-  id: string
-  text: string
-  /**
-   * [defer segments 化 / D-A1-1] 提交载荷（富内容段）。入队时写入：enqueue 路径快照的
-   * Segment[]（image/skill/file chip 等）；send.rejected 重入队路径包 `[{type:'text',text}]`
-   * 单段。renderer QueuedMessage.segments 恒有值，此处可选是防御（core mock/旧实现形态）。
-   */
-  segments?: Segment[]
-  /**
-   * [defer segments 化 / D-A1-1] 提交文本（= segmentsToPrompt(segments)），**提交时**写入
-   * （flush 侧算好后落条目）。供 ①b 文本 FIFO 兜底匹配——富内容条目 draft（text）≠
-   * 序列化文本，匹配源必须用提交时的真实落盘文本。undefined = 未提交/旧形态，消费方
-   * 回退 text。
-   */
-  submitText?: string
-  /**
-   * [u4a / D5.3] 提交通道标记：flush 提交该条目时写入（队首 'send'、其余 'steer'——
-   * 与 flush 的首条 send + 后续 steer 提交顺序一致）；undefined = 未提交（还没被任何
-   * flush 提交过）。双消费：① 匹配资格判据（未提交条目不可能产生投递确认帧，若被同
-   * 文本他帧误配出队 = 消息永不被投递即丢失）+ send 占位回收判据（命中 send 条目
-   * decrementInflight 回收占位，steer 条目不挂占位不动计数）。
-   */
-  mode?: 'send' | 'steer'
-}
-
-export interface CompactQueueLike {
-  /**
-   * flush 队列（逐条提交，D5）。返回值三态契约 [A1 收窄]：
-   * - resolve true：全部条目提交编排完成；
-   * - resolve false：S1 busy 类拒绝（条目留队，等下一次 occupancy idle 帧自动重投）——
-   *   自愈路径，调用方不 toast；
-   * - reject：RPC reject（传输级真错误，如 WS 断连）——调用方 toast「发送失败: {原因}」
-   *   （设计 §3.5 错误规格表）。
-   */
-  flush: (sid: string) => Promise<boolean>
-  /**
-   * 入队一条待发消息，返回含 id 的条目（id 供 flush 提交时的 clientUuid 消歧，u4b 消费）。
-   * [defer segments 化 / D-A1-1] segments 入队快照（富内容段）；未传时实现方包
-   * `[{type:'text',text}]` 单段（纯文本条目等价形态）。submitText 仅 send.rejected
-   * 静默重入队路径传（已序列化 promptText，原文本即提交文本）；普通入队路径的
-   * submitText 由 flush 提交时写入。
-   */
-  enqueue: (
-    sid: string,
-    text: string,
-    segments?: Segment[],
-    submitText?: string,
-  ) => { id: string; text: string }
-  /** 只读快照（副本），兜底 handler 据此判定 rejected.clientUuid 是否命中已有条目；
-   *  [u4a] message_end(user) ① 据此做 defer 分区 FIFO 文本匹配（按入队序，最早同文本优先） */
-  peek: (sid: string) => ReadonlyArray<CompactQueueEntrySnapshot>
-  /**
-   * [u5b / D6] 队列非空判定（occupancy 全 idle 时 flush 触发条件的「且队列非空」半边）。
-   * count>0 的布尔投影；实现方（renderer useCompactQueue）已有同签名方法。
-   */
-  hasPending: (sid: string) => boolean
-  /**
-   * [u4a / D5.3] 投递确认回调：message_end(user) ① 命中 defer 条目时由 core 调用。
-   * 队列实现侧执行「标记确认 + 出队」（转态/pending 气泡收口归 u4b 消费条目 id）；
-   * 按 id 精确出队，未知 id no-op 返回 false。返回 true = 出队成功，core 继续剔快照
-   * 实例与回收 send 占位；false = 匹配作废，帧落 ②③ 现状链（不丢帧）。
-   */
-  confirmDelivery: (sid: string, id: string) => boolean
-}
 
 /**
  * SessionStoreLike —— useChat 消费 session store 的最小结构类型。
@@ -134,8 +55,7 @@ export interface EnsureStreamSubDeps {
  * - getChatStore/getSessionStore：getter 函数（延迟调用，规避 pinia/composable
  *   必须在 setup 上下文调用的约束；factory 调用时机与 store 实例化解耦）
  * - toast/t：壳层 UI/i18n 注入（core 不绑 toast/i18n 实现）
- * [投递所有权内核 u3b] getCompactQueue 成员已随 defer 队列状态机退役摘除；
- * CompactQueueLike/CompactQueueEntrySnapshot 类型保留至 u3c useCompactQueue 退役后清扫。
+ * [投递所有权内核 u3b] getCompactQueue 成员已随 defer 队列状态机退役摘除。
  */
 export interface UseChatDeps {
   chatApi: ChatApiPort

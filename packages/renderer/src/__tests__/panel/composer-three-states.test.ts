@@ -2,7 +2,8 @@
  * Composer 三态 UI + B 策略 E2E 测试（T2.2/T2.3/T2.5/T9.14）。
  *
  * 锁定 fix-state-tearing 的 UI 层核心：
- * - D-001 B 策略：busy 时 Enter / 点发送位 → 调 steer（不调 send）
+ * - u3c/D1 统一提交：busy 时 Enter / 点发送位 → 调 send（lane 判定归 runtime 内核；
+ *   曾有的「busy Enter 本地转 steer」B 策略已退役，防回归锁见 [u3c/D1] 用例内注释）
  * - T2.5：busy 时停止按钮始终可见（isActive 驱动 v-if="isActive"）
  * - T9.14：Composer 三态渲染回归（idle=发送按钮 / sending=spinner / busy=停止按钮）
  *
@@ -168,10 +169,13 @@ describe('[u3c/D1] busy 时 Enter → 统一提交（B 策略本地转 steer 已
 
     // 模拟 Enter 键
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick() // onSend 是 async，需 flush
+    // onSend 是多层 async 链（core D6 分发器），统一单 flushPromises 清空整条 microtask
+    // 链后再断言（拍数式 nextTick 不够 flush，全文件断言前统一此形态）
+    await flushPromises()
 
     expect(chatApiMock.send).toHaveBeenCalledWith(sid, textToSegments('补充内容'))
+    // 防回归锁（全文件唯一一处 steer 负断言）：busy Enter 曾本地转 steer（B 策略），
+    // 随 u3b/D1 退役（lane 判定归内核）——此处防 renderer 侧 steer 路由回归
     expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 })
@@ -183,15 +187,10 @@ describe('T2.3 B 策略：idle 时 Enter → send', () => {
     await wrapper.vm.$nextTick()
 
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
-    // u5b D6 分发器（core dispatch/send）onSend 是多层 async 链（routeSteer → routeStaging →
-    // sendActiveMessage → trySendBash，约 4 个 microtask 拍才到 deps.send）——两拍 nextTick
-    // 不够 flush，必须 flushPromises 清空整条 microtask 链后再断言
+    // 同 [u3c/D1] 用例：单 flushPromises 清空 D6 分发器整条 async 链后再断言
     await flushPromises()
 
     expect(chatApiMock.send).toHaveBeenCalledWith('s-send-enter', textToSegments('第一条消息'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 })
 
@@ -207,12 +206,10 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     // Enter + isComposing: true（拼音未确认）
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
       new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     // 不应调 send
     expect(chatApiMock.send).not.toHaveBeenCalled()
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 
   it('idle 态 composition 结束后 Enter 正常 send', async () => {
@@ -229,9 +226,7 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     // compositionend → 正常 Enter (isComposing=false, 触发 send)
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
       new KeyboardEvent('keydown', { key: 'Enter', isComposing: false }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
-    // 同上：D6 分发器 async 链需 flushPromises 清空后才到 deps.send
+    // 同 [u3c/D1] 用例：单 flushPromises 清空 D6 分发器整条 async 链后再断言
     await flushPromises()
 
     expect(chatApiMock.send).toHaveBeenCalledWith('s-ime-idle-end', textToSegments('你好世界'))
@@ -248,13 +243,11 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '补充')
     await wrapper.vm.$nextTick()
 
-    // composition 中 Enter → 不触发 steer
+    // composition 中 Enter → 不触发提交
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
       new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 })

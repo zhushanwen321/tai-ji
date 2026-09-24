@@ -156,8 +156,9 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
    * 的 onMounted 遗留请求补消费（草稿可见、可改、可一键重发）。
    * [F-U2] 槽位是单值覆盖通道（forceQuit 后、restore 前任何其他注入都会覆盖），回收侧写入前
    * 读槽位现状做 '\n\n' 累积追加，防止 toast 已宣称「已收回草稿」的文本被后续注入静默吞掉。
-   * toast 一条「N 条排队消息已收回草稿」（N=0 不提示）；drain RPC 失败必须出声（回收文本不可
-   * 再生，静默失败 = 故事 A 的丢失形态）。
+ * toast 一条「N 条排队消息已收回草稿」（N=实际收回的非空条目数，0 不提示）；drain RPC 失败
+ * 必须出声（回收文本不可再生，静默失败 = 故事 A 的丢失形态）；条目内容为空的同样出声计入
+ * 失败（写不回草稿且不可再生）。
    * [HISTORICAL] 前身：本地 defer 队列 drain + clearDeferFlushRetryTimer（1s 重投 timer + 熔断
    * 计数）——内核接管重投（backoff + settled 边沿 + watchdog），renderer 不再持队列/定时器
    * （设计 §3.1 删除面），编排收窄为「drain RPC → 文本回草稿」。
@@ -184,26 +185,31 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
       toastError(t('sidebar.forceQuitQueueRecoverFailed', { msg }))
       return
     }
-    if (drained.length > 0) {
-      const draftText = drained
-        .map((entry) => entry.content)
-        .filter((text) => text.trim().length > 0)
-        .join('\n\n')
-      if (draftText) {
-        // [F-U2] 槽位为单值覆盖语义（幂等以最后一次为准）：回收文本是唯一副本（内核条目已
-        // drain，不可再生），直接请求会在「forceQuit 后、restore 前」窗口被任何其他注入
-        // （drawer 注入 / 另一 session 的 forceQuit 回收）覆盖丢失，且 toast 已宣称「已收回
-        // 草稿」——违背「消息不丢」。故槽位已有 text 时累积 '\n\n' 追加而非覆盖（不动 store
-        // 的单值通道语义，拼接留在唯一需要它的回收侧）。槽位为 path/refSessionId chip 注入时
-        // 无 text 可拼，回收文本优先覆盖——chip 由用户操作产生可重发，唯一副本优先。
-        const pendingText = composerInjectionStore.pendingInjection.value?.text
-        composerInjectionStore.requestInjection({
-          target: 'current',
-          sessionId: id,
-          text: pendingText ? `${pendingText}\n\n${draftText}` : draftText,
-        })
-      }
-      toastInfo(t('sidebar.forceQuitQueueRecovered', drained.length, { named: { count: drained.length } }))
+    // 空内容条目计入失败出声：content ?? '' 防御（类型声明 string，runtime 帧字段缺失时可能
+    // nullish）——空内容写不回草稿且内核条目已 drain（不可再生），静默 = 消息丢失形态；
+    // 成功 toast 只按实际收回条数报，不按条目数虚报。
+    const recoveredTexts = drained.map((entry) => entry.content ?? '').filter((text) => text.trim().length > 0)
+    const emptyCount = drained.length - recoveredTexts.length
+    if (emptyCount > 0) {
+      toastError(t('sidebar.forceQuitQueueRecoverEmpty', emptyCount, { named: { count: emptyCount } }))
+    }
+    if (recoveredTexts.length > 0) {
+      const draftText = recoveredTexts.join('\n\n')
+      // [F-U2] 槽位为单值覆盖语义（幂等以最后一次为准）：回收文本是唯一副本（内核条目已
+      // drain，不可再生），直接请求会在「forceQuit 后、restore 前」窗口被任何其他注入
+      // （drawer 注入 / 另一 session 的 forceQuit 回收）覆盖丢失，且 toast 已宣称「已收回
+      // 草稿」——违背「消息不丢」。故槽位已有 text 时累积 '\n\n' 追加而非覆盖（不动 store
+      // 的单值通道语义，拼接留在唯一需要它的回收侧）。槽位为 path/refSessionId chip 注入时
+      // 无 text 可拼，回收文本优先覆盖——chip 由用户操作产生可重发，唯一副本优先。
+      const pendingText = composerInjectionStore.pendingInjection.value?.text
+      composerInjectionStore.requestInjection({
+        target: 'current',
+        sessionId: id,
+        text: pendingText ? `${pendingText}\n\n${draftText}` : draftText,
+      })
+      toastInfo(
+        t('sidebar.forceQuitQueueRecovered', recoveredTexts.length, { named: { count: recoveredTexts.length } }),
+      )
     }
   }
 

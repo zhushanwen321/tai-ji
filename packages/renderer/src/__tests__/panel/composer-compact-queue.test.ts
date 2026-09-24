@@ -136,11 +136,20 @@ function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'l
   return mount(Composer, { props, global: { stubs: otherStubs } })
 }
 
-/** 模拟用户输入文本 + Enter 发送 */
-async function typeAndEnter(wrapper: ReturnType<typeof mountComposer>, text: string): Promise<void> {
+/** 模拟用户输入文本（不触发发送；按钮路径 TC12 复用） */
+async function typeText(wrapper: ReturnType<typeof mountComposer>, text: string): Promise<void> {
   wrapper.findComponent(ComposerInputMock).vm.$emit('input', text)
   await wrapper.vm.$nextTick()
-  wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
+}
+
+/** 模拟用户输入文本 + Enter 发送（mods 透传 KeyboardEventInit，如 Alt+⏎） */
+async function typeAndEnter(
+  wrapper: ReturnType<typeof mountComposer>,
+  text: string,
+  mods: KeyboardEventInit = {},
+): Promise<void> {
+  await typeText(wrapper, text)
+  wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter', ...mods }))
   await wrapper.vm.$nextTick()
   await wrapper.vm.$nextTick() // onSend 是 async，需 flush
 }
@@ -165,8 +174,7 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
-    wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'world')
-    await wrapper.vm.$nextTick()
+    await typeText(wrapper, 'world')
 
     const sendBtn = wrapper.find('.queue-send-btn')
     expect(sendBtn.exists()).toBe(true)
@@ -201,11 +209,7 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
-    wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'alt-msg')
-    await wrapper.vm.$nextTick()
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter', altKey: true }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    await typeAndEnter(wrapper, 'alt-msg', { altKey: true })
 
     // sendRoute 在 compacting 行是 queued（UI 预测）→ Alt+⏎ 走统一提交；followUp 不被调
     expect(chatApiMock.followUp).not.toHaveBeenCalled()

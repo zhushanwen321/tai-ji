@@ -11,19 +11,11 @@
  * getHistory 返回类型用内联结构（{ messages; truncated; loadedTurns; totalTurnsEstimate }），
  * 不依赖 chat 域的 HistoryResult（保持 core 平台无关）。
  */
-import type { Message, SegmentsMetadataEntry, ServerMessageMap, ServerMessageUnion } from '@taiji/shared'
+import type { DeliveryFrameEntry, DeliverySubmitReply, Message, SegmentsMetadataEntry, ServerMessageUnion } from '@taiji/shared'
 
-/**
- * delivery DTO 的结构派生别名（投递所有权内核 D5，u-contracts 契约）。
- *
- * 为什么派生而非命名 import：u-contracts 新类型暂不可经 shared 根入口命名 import
- * （根入口为显式白名单 re-export——实施计划残留风险 #8，收编动作归属 u3a 领地）；
- * deep import 被 shared exports map 挡。ServerMessageMap 已导出且含全部 delivery 键，
- * 索引派生与源类型零漂移（u3a 收编白名单后可换回直接命名 import）。
- */
-export type DeliverySubmitReply = ServerMessageMap['delivery.submit']
-/** session.delivery 帧条目（D5）：{clientUuid, preview, state, lane}。 */
-export type DeliveryFrameEntry = ServerMessageMap['session.delivery']['entries'][number]
+// delivery DTO 具名类型（投递所有权内核 D5，u-contracts 契约）：shared 根入口已收编
+// （u3a 落地），本文件 re-export 供域内消费方沿用既有 import 路径（./api-port）。
+export type { DeliverySubmitReply, DeliveryFrameEntry }
 
 /**
  * chat 域后端操作端口。

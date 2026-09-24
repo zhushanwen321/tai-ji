@@ -269,7 +269,6 @@ function mountHarness(
         clearActiveSession: vi.fn(),
         setActiveSession: vi.fn(),
         pushChat: vi.fn(),
-        defaultCwd: vi.fn(() => '/default'),
       },
       toast: { error: vi.fn(), warning: vi.fn() },
       fileTree: { loadTree: vi.fn(), selectFile: vi.fn() },
@@ -282,7 +281,7 @@ function mountHarness(
       detect: vi.fn().mockResolvedValue({ mode: 'not-repo' }),
       listWorktrees: vi.fn().mockResolvedValue({ items: [] }),
     },
-    workspaceState: { defaultCwd: vi.fn(() => '/default'), record: vi.fn() },
+    workspaceState: { record: vi.fn() },
   }
   const flow = useNewTaskFlow({
     ...deps,

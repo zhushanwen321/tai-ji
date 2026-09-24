@@ -4,7 +4,7 @@
  * 锁定：runtime session.occupancy state topic 帧（live 广播 + subscribeSession 的
  * stateSnapshot 回放共用 useChat.ensureStreamSubscription 的同一 handler 通路）驱动
  * chat store 的 sessionPhase 投影：
- * - turn 四态帧序列 → getOccupancy/sessionPhase/isCompacting（compacting 维度派生）跟随
+ * - turn 四态帧序列 → sessionPhase/isCompacting（compacting 维度派生）跟随
  * - 快照恢复（重连 resubscribeAll / 切回 session 的 stateSnapshot 回放）→ 投影收敛到帧值
  * - setCompacting 双轨通路无残留引用（grep 断言，验收⑥）
  *
@@ -18,10 +18,12 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { readFileSync, readdirSync } from 'node:fs'
+import { flushPromises } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerMessage } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+import { walkFiles } from '../helpers/walk-files'
 
 type StreamCb = (msg: ServerMessage) => void
 
@@ -75,7 +77,7 @@ describe('session.occupancy 帧 → sessionPhase 投影（D1）', () => {
 
     streamCbHolder.current!(occupancyMsg('o1', 'dispatching', false, false))
     expect(chat.sessionPhase('o1')).toEqual({ turn: 'dispatching', compacting: false, bash: false })
-    expect(chat.getOccupancy('o1').turn).toBe('dispatching')
+    expect(chat.sessionPhase('o1').turn).toBe('dispatching')
 
     streamCbHolder.current!(occupancyMsg('o1', 'generating', false, false))
     expect(chat.sessionPhase('o1').turn).toBe('generating')
@@ -179,11 +181,12 @@ describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责
     chat.clearPendingSend('f1')
 
     streamCbHolder.current!(occupancyMsg('f1', 'settling', false, false))
-    await Promise.resolve()
     streamCbHolder.current!(occupancyMsg('f1', 'idle', false, true))
-    await Promise.resolve()
     streamCbHolder.current!(occupancyMsg('f1', 'idle', false, false))
-    await Promise.resolve()
+
+    // 帧序列发完后统一排空全部微任务再断言负向（[R2-b15-F7]）：逐帧单微任务冲洗对
+    // 「延迟提交」实现会假绿——flushPromises 排空后「零提交 RPC」才成立
+    await flushPromises()
 
     // 投影跟随（帧驱动）而零提交 RPC：投递时机不在 renderer
     expect(chat.sessionPhase('f1')).toEqual({ turn: 'idle', compacting: false, bash: false })
@@ -192,20 +195,6 @@ describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责
 })
 
 describe('setCompacting 双轨通路无残留（验收⑥，grep 断言）', () => {
-  /** 递归收集目录下 .ts/.vue 文件（不含 __tests__） */
-  function collectSourceFiles(dir: string, acc: string[] = []): string[] {
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name)
-      if (name === '__tests__' || name === 'node_modules') continue
-      if (readdirSync(dir, { withFileTypes: true }).find((e) => e.name === name)?.isDirectory()) {
-        collectSourceFiles(p, acc)
-      } else if (name.endsWith('.ts') || name.endsWith('.vue')) {
-        acc.push(p)
-      }
-    }
-    return acc
-  }
-
   it('renderer + core 生产源码零 `.setCompacting(` 调用（通路废弃，u5b 收口）', () => {
     const roots = [
       join(__dirname, '../../composables'),
@@ -216,7 +205,8 @@ describe('setCompacting 双轨通路无残留（验收⑥，grep 断言）', () 
     ]
     const offenders: string[] = []
     for (const root of roots) {
-      for (const file of collectSourceFiles(root)) {
+      // 共享遍历 helper（__tests__/helpers/walk-files）：跳 __tests__/node_modules，收 .ts/.vue
+      for (const file of walkFiles(root, { extensions: ['.ts', '.vue'], skipDirs: ['__tests__', 'node_modules'] })) {
         const content = readFileSync(file, 'utf-8')
         if (/\.setCompacting\(/.test(content)) offenders.push(file)
       }

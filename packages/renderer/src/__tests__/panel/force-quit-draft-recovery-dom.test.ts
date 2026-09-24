@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   composerChatModule,
@@ -33,61 +33,12 @@ import {
   composerChildStubs,
 } from '../helpers/composer-mount'
 
-// ── mock composable / api（对齐 composer-file-injection.test.ts 的可挂载最小面）──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    startFlow: vi.fn(),
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    setPendingModel: vi.fn(),
-    state: { value: 'idle' },
-    currentSessionId: { value: null },
-    currentCwd: { value: null },
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
-
-// ── mock store（commandStore / chat / session / settings 依赖面）──
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    isCompacting: () => false,
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言面专属）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/stores/chat', () => composerChatStoreModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput stub：expose 面带 insertTextAtCursor / setText 等 spy（消费 API 断言面）──
 interface InputCalls {

@@ -8,10 +8,12 @@
  * bash 不走 segment 提取（原始 shell 文本透传 pi bash RPC）。
  *
  * 错误策略：sendBash（壳层注入）内部已 try/catch + toast 且不重抛（与 send/abort/compact
- * 对称），故 trySendBash 失败时不再恢复 draft 输入。已知限制：sendBash 失败时 !command
- * 文本会丢失（草稿已在 clearInput 时清空）。长期治理方向：把 toast + restoreInput 收敛到
- * 调用方（本 composable），让 sendBash 改为抛错；但该改动牵连 submitFirstMessage 直调
- * sendBash 的完成转换路径，本次（W6/S10/S12 PR#116 review）不做。
+ * 对称）。[R2-A5 同族/b08] 失败信号契约：sendBash 返回 false = RPC 失败——本 composable
+ * 消费该信号 console.warn 留痕（失败时输入已清、当前无恢复原语，见下）。
+ * 已知限制（renderer 侧剩余缺口）：sendBash 失败时 !command 文本丢失（草稿已在 clearInput
+ * 清空）。恢复需壳层（composer-shell 的 useComposerBash 注入点）传入 restoreInput 后在本
+ * composable 的失败分支接线——bash 文本不经 segments（原始 shell 文本透传），restoreSegments
+ * 不适用，须纯文本 restoreInput。
  *
  * [W3 迁移] 迁自 renderer composables/panel/useComposerBash.ts。改动：
  * - 去掉 renderer 跨域依赖 `import { useChat } from '@/composables/features/useChat'`
@@ -36,8 +38,9 @@ export interface ComposerBashOptions {
   isSending: Ref<boolean>
   /** session id（landing 态为 null，调用方需保证 trySendBash 在非 landing 分支调用） */
   sessionId: () => string | null
-  /** 执行 bash 命令（useChat.sendBash 注入）。内部已 try/catch + toast 且不重抛 */
-  sendBash: (sessionId: string, command: string, excludeFromContext: boolean) => Promise<void>
+  /** 执行 bash 命令（useChat.sendBash 注入）。内部已 try/catch + toast 且不重抛。
+   *  [R2-A5 同族] 返回 false = RPC 失败（宽兼容槽：Promise<void> 提供方同样可注入）。 */
+  sendBash: (sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean | void>
 }
 
 export interface UseComposerBash {
@@ -85,13 +88,19 @@ export function useComposerBash(opts: ComposerBashOptions): UseComposerBash {
 
     opts.clearInput()
     opts.isSending.value = true
+    let delivered: boolean | void
     try {
-      await opts.sendBash(sid, extracted.command, extracted.excludeFromContext)
+      delivered = await opts.sendBash(sid, extracted.command, extracted.excludeFromContext)
     } finally {
       opts.isSending.value = false
     }
-    // [W6/S10] sendBash 内部已 try/catch + toast 且不重抛（与 send/abort/compact 对称），
-    // 故此处不再 catch：失败时草稿不恢复（已知限制，见模块头注释）。错误已通过 toast 消化。
+    // [R2-A5 同族] 显式 false = RPC 失败（错误已由 useChat.sendBash toast 消化）；严格比较
+    // 只认显式信号——宽兼容槽下 void 提供方 resolve undefined（含成功路径）不误报。输入恢复
+    // 为 renderer 侧剩余缺口：restoreInput 未注入（见模块头注释），先 console.warn 留痕——
+    // 静默丢输入 ≠ 无声失败。
+    if (delivered === false) {
+      console.warn(`[useComposerBash] bash 执行失败，命令文本未恢复（restoreInput 待壳层注入）: ${extracted.command}`)
+    }
     return true
   }
 

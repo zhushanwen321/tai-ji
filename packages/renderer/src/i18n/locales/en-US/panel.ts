@@ -109,9 +109,6 @@ export default {
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
     compactingFlushHint: 'Will send {count} queued message(s) when done',
-    // [system-notice-rendering-upgrade U3] compacting "N queued" chip (consumed by ActivityStrip, D4;
-    // long sub-copy becomes a chip, count semantics unchanged)
-    compactingQueueChip: '{count} queued',
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
@@ -422,6 +419,9 @@ export default {
     cancelUnavailable: 'Already delivered — cannot be cancelled',
     cancelUnavailableWithReason: 'Cannot cancel: {reason}',
     cancelFailed: 'Cancel failed: {msg}',
+    // Post-cancel draft-restore failure variants (each failure domain gets its own copy: RPC vs restore vs missing text)
+    restoreDraftFailed: 'Cancelled, but restoring to the composer failed: {msg}',
+    restoreContentMissing: 'Message cancelled, but its original text could not be recovered — please re-enter it',
     retry: 'Retry sending',
     retryFailed: 'Retry failed: {msg}',
   },

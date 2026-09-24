@@ -8,19 +8,13 @@
  * 注：mock 模式下不走本域（api/index 切到 mock 门面）。
  */
 import type {
+  DeliveryCancelReply,
+  DeliveryDrainReply,
+  DeliveryResyncReply,
+  DeliverySubmitReply,
   Message,
-  ServerMessageMap,
   ServerMessageUnion,
 } from '@taiji/shared'
-
-/**
- * delivery reply DTO 索引派生别名（u-contracts 契约；shared 根入口白名单暂不可命名
- * import——实施计划残留风险 #8，收编归 u3a；ServerMessageMap 已导出，索引派生零漂移）。
- */
-type DeliverySubmitReply = ServerMessageMap['delivery.submit']
-type DeliveryCancelReply = ServerMessageMap['delivery.cancel']
-type DeliveryDrainReply = ServerMessageMap['delivery.drain']
-type DeliveryResyncReply = ServerMessageMap['delivery.resync']
 import {
   BASH_RPC_TIMEOUT_MS,
   COMPACT_RPC_TIMEOUT_MS,

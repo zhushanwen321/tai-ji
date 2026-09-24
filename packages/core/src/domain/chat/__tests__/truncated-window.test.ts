@@ -41,12 +41,12 @@ function makeMsg(id: string): Message {
 function makeFixture() {
   const scope = effectScope(true)
   const chatStore = scope.run(() => createChatStore())!
+  // [u5a 退役] ChatApiPort 已无 steer/followUp 成员（core 发送链统一 submitDelivery）——
+  // mock 不留残留键（变量传参绕过 excess check，死键恒绿误导）
   const chatApi = {
     send: vi.fn().mockResolvedValue(undefined),
     submitDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }),
     subagentAction: vi.fn().mockResolvedValue(undefined),
-    steer: vi.fn().mockResolvedValue(undefined),
-    followUp: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
     bash: vi.fn().mockResolvedValue(undefined),
@@ -76,15 +76,15 @@ describe('store 截断窗口状态（hydrate/reconcile 接线）', () => {
     resetChatModuleStateForTest()
   })
 
-  it('必测⑤ hydrate 接线：hydrateHistory 把窗口契约字段正确写入 store 窗口状态', async () => {
+  it('必测⑤ hydrate 接线：窗口契约字段经 historyWindowFromReply 归一后正确写入 store 窗口状态', () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({
-      messages: [makeMsg('m1')],
+    // use-session 点击切入的生产通路：getHistory reply → historyWindowFromReply 归一 →
+    // store.hydrate/reconcileHistory 写入（原 useChat.hydrateHistory 死导出已删，验收路径不变）
+    f.chatStore.hydrate('s1', [makeMsg('m1')], historyWindowFromReply({
       truncated: true,
       loadedTurns: 20,
       totalTurnsEstimate: 42,
-    })
-    await f.useChat.hydrateHistory('s1')
+    }))
     expect(f.chatStore.getHistoryWindow('s1')).toEqual({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
     // 布尔显隐从窗口状态派生（单一事实）
     expect(f.useChat.hasMoreHistory('s1')).toBe(true)
@@ -133,13 +133,7 @@ describe('loadMoreHistory 游标翻页（[u6] 需求③：点击「加载更早�
 
   it('truncated=true 时点击：游标 = 分区最旧消息身份，页响应收敛 truncated=false（翻页到头）', async () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({
-      messages: [makeMsg('m1')],
-      truncated: true,
-      loadedTurns: 20,
-      totalTurnsEstimate: 42,
-    })
-    await f.useChat.hydrateHistory('s1')
+    f.chatStore.hydrate('s1', [makeMsg('m1')], historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 }))
     expect(f.useChat.hasMoreHistory('s1')).toBe(true)
 
     // 「加载更早」→ session.history 带 cursor（游标 = 分区最旧消息 m1 的 id）
@@ -158,8 +152,7 @@ describe('loadMoreHistory 游标翻页（[u6] 需求③：点击「加载更早�
 
   it('页响应仍 truncated=true（锚前有更早历史）→ 入口保持可见 + 窗口累计', async () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [makeMsg('m1')], truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
-    await f.useChat.hydrateHistory('s1')
+    f.chatStore.hydrate('s1', [makeMsg('m1')], historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 }))
     f.chatApi.getHistory.mockResolvedValueOnce({ messages: [makeMsg('m0')], truncated: true, loadedTurns: 20, totalTurnsEstimate: 40 })
     await f.useChat.loadMoreHistory('s1')
     expect(f.useChat.hasMoreHistory('s1')).toBe(true)
@@ -169,8 +162,7 @@ describe('loadMoreHistory 游标翻页（[u6] 需求③：点击「加载更早�
 
   it('cursor 未命中（runtime 返回空页 truncated=false）：分区不变 + 入口收敛，不报错', async () => {
     const f = makeFixture()
-    f.chatApi.getHistory.mockResolvedValueOnce({ messages: [makeMsg('m1')], truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
-    await f.useChat.hydrateHistory('s1')
+    f.chatStore.hydrate('s1', [makeMsg('m1')], historyWindowFromReply({ truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 }))
     f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
     await f.useChat.loadMoreHistory('s1')
     expect(f.chatStore.getMessages('s1').map((m) => m.id)).toEqual(['m1']) // 分区不变

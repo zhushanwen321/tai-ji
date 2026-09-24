@@ -12,8 +12,8 @@
  *
  * 策略：
  *  - 真 pinia + 真 commandStore（需观察 pendingSlash 真实值 / clearPendingSlash 真实副作用）
- *  - mock chat/session/settings store（最小 stub，Composer 构造期读取不报错）
- *  - mock useChat / useNewTaskFlow / @/api（与现有 composer-slash-trigger 范式一致）
+ *  - mock stores/chat + stores/session（委托 helpers/composer-mount 工厂，Composer 构造期
+ *    读取不报错）；useChat / useNewTaskFlow / @/api 不 mock（本文件用例不触发其调用路径）
  *  - ComposerInput 用真实组件 vs stub：真实组件需要 contenteditable DOM，注入 spy 难以挂。
  *    改用「mock './ComposerInput.vue' factory 返回带 defineExpose(insertSlashChip: vi.fn) 的组件」，
  *    这样 Composer 的 inputRef.value.insertSlashChip 即可控 spy。其余子组件用 global.stubs 空 div。
@@ -22,38 +22,19 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick, defineComponent, ref } from 'vue'
+import { nextTick, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
-  composerChatModule,
-  composerFlowModule,
-  composerApiModule,
   composerChatStoreModule,
   composerSessionStoreModule,
   composerChildStubs,
 } from '../helpers/composer-mount'
 
-// ── mock：composable / api / store（公共骨架收敛到 helpers/composer-mount.ts 单源）──
+// ── mock：store（委托 helpers/composer-mount.ts 工厂，同 sidebar-ondeletefolder 先例）──
 // command store 保持真实（ setActivePinia 后 useCommandStore() ），便于观察 pendingSlash。
-// 注意：isActive（合并态）驱动 Composer 停止按钮/steer guard，mock 返回 false（非活跃）。
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    isCompacting: () => false,
-    // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
-vi.mock('@/stores/session', () => ({
-  // applySnapshot：features/useModel 乐观更新调用（切模型/思考等级后立即同步）。
-  // 本测试关注 slash 注入，store 更新为 no-op 即可。
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// 注意：isActive（合并态）驱动 Composer 停止按钮/steer guard，工厂 mock 恒返回 false（非活跃）。
+vi.mock('@/stores/chat', () => composerChatStoreModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：defineExpose 暴露 insertSlashChip / insertSkillChip 为独立 vi.fn() spy ──
 // 每个测试 mount 前重新生成 spy：通过 factory 读取最新 spy 引用。

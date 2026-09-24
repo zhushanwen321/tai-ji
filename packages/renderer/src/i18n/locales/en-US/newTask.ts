@@ -81,6 +81,7 @@ export default {
   presetSelect: {
     title: 'Launch mode',
     setAsDefault: 'Set as default',
+    setDefaultFailed: 'Failed to set default: {message}, please retry',
     alreadyDefault: 'Already default',
     presetLockedTooltip: 'This session was created with "{name}" and cannot be changed',
     legacySessionTooltip: '(legacy session, mode not recorded)',

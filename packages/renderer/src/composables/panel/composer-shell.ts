@@ -25,7 +25,7 @@
 import { computed, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitFork, Upload } from '@lucide/vue'
-import type { Segment, Message } from '@taiji/shared'
+import type { Segment } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
 import {
   useComposerModelThinking,
@@ -141,26 +141,15 @@ export interface ComposerShellParams {
 }
 
 /**
- * 历史派生的引用键缓存（ADR-0039 兑现）：chat store 消息不可变替换（commitMessages 整体
- * 替换分区内层 ref，无原地写入）⇒ 源数组引用同则内容同。↑/↓ 长按导航（~30Hz keydown）下
- * 跳过全量 messages 重遍历 + 每条 normalizeContent 重建。键为源数组本身（WeakMap 弱引用）：
- * 分区数组被替换后旧键随 GC 回收，无 per-session 生命周期管理；getMessages 空分区每次
- * 新建 []，天然 miss（重算 O(1) 无害）。
- */
-// @data-owner #7 —— #7 消息列表的 composer 历史派生缓存（引用键纯派生，非第二写方）
-const historyDeriveCache = new WeakMap<Message[], string[]>()
-
-/**
  * 历史条目派生（替代 chatStore.getMessages 直读，core history 模块经 deps 注入）。
  * 倒序 + role==='user' + status==='complete' + 去重连续相同文本（原 shim 逻辑平移）。
- * 结果按源数组引用缓存（见 historyDeriveCache）并返回缓存实例——消费方
- * （core input/history computed）只读遍历（.length / 索引读取），实例复用安全。
- * 导出供单测（缓存刷新语义）。
+ * 纯派生函数（无自带缓存）：唯一消费链是 core history 模块内的 Vue computed，
+ * 记忆化由 computed 承担（↑/↓ 长按期间 messages 未变 → 直接命中 computed 缓存；
+ * messages 变化 → 数组引用必换 → 重算），派生层不再叠第二层缓存。
+ * 导出供单测（派生语义基线）。
  */
 export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatStore>, sid: string): string[] {
   const msgs = chatStore.getMessages(sid)
-  const cached = historyDeriveCache.get(msgs)
-  if (cached) return cached
   const result: string[] = []
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]
@@ -169,7 +158,6 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
     if (result.length > 0 && result[result.length - 1] === text) continue
     result.push(text)
   }
-  historyDeriveCache.set(msgs, result)
   return result
 }
 
@@ -216,24 +204,24 @@ export function useComposerShell(params: ComposerShellParams) {
     // [U4r2] 显式 preset 选择进 chip 侧 resolve 输入（D1 pending 三兄弟补齐）：flow
     // pendingPreset 只读视图（Landing.onPresetSelect 写入）——chip 显示与 submit 透传
     // 同源同输入，显式 preset 捆绑字段不再只在 submit 侧生效（显示 ≠ 生效破口修复）。
-    // 视图缺失（部分测试 mock 的 flow 简化形态）= 无显式选择 → null，不阻断 chip 解析
-    pendingPreset: () => flow.pendingPreset?.value ?? null,
+    // 仅 landing 态消费（core model-thinking 内部按 sessionId 门控）
+    pendingPreset: () => flow.pendingPreset.value,
     setPendingModel: (model: string) => flow.setPendingModel(model),
     switchModel,
     setThinkingLevel,
     getThinkingLevelMap: (modelId: string) => {
       // 旧版守卫：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
-      // 不碰 providers（测试 mock 的 settingsStore 可能无 providers）。
+      // 不碰 providers。
       if (!modelId.includes('/')) return undefined
       const [providerId, modelName] = modelId.split('/')
-      const provider = settingsStore.providers?.value?.find((p: { id: string }) => p.id === providerId)
+      const provider = settingsStore.providers.value.find((p: { id: string }) => p.id === providerId)
       return provider?.models.find((m: { id: string }) => m.id === modelName)?.thinkingLevelMap
     },
     getSupportedLevels: (modelId: string) => {
       // 与 submit 侧 supportedLevelsOf 即同一函数（U6：runtime 注册表 pi 同源计算的
       // view-ready 下发，可用档判定唯一权威，不再本地推算）。曾与本文件各持一份实现，
       // 显示侧漏 enabled 检查 → 禁用 provider 下显示档与生效档发散（F5 统一）。
-      return supportedLevelsOf(modelId, settingsStore.providers?.value ?? [])
+      return supportedLevelsOf(modelId, settingsStore.providers.value)
     },
     // [U2d] landing 显示链完整解析数据注入（D1 单一解析层）：preset 档可达（preset 档
     // 此前在 core 无镜像，显示恒跳过）+ D4 lastUsedModel 校验获得 providers 能力表。
@@ -243,7 +231,7 @@ export function useComposerShell(params: ComposerShellParams) {
     launchData: {
       presets: () => presetStore.presets,
       defaultPresetId: () => presetStore.defaultPresetId || null,
-      providers: () => settingsStore.providers?.value,
+      providers: () => settingsStore.providers.value,
     },
   })
 
@@ -256,12 +244,13 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   // ── 输入历史导航（↑/↓ shell 风格，core input/history）──
-  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing } = useComposerHistory(sessionIdRef, {
-    getText: () => inputRef.value?.getText() ?? '',
-    setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
-    clear: () => inputRef.value?.clear(),
-    getHistoryEntries: (sid: string) => deriveHistoryFromChatStore(chatStore, sid),
-  })
+  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing, isBrowsingFor, getSavedDraft } =
+    useComposerHistory(sessionIdRef, {
+      getText: () => inputRef.value?.getText() ?? '',
+      setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
+      clear: () => inputRef.value?.clear(),
+      getHistoryEntries: (sid: string) => deriveHistoryFromChatStore(chatStore, sid),
+    })
 
   // ── 已附上下文 chip 行（core context/context-chips）──
   const { attachedItems, refreshAttachedItems, onRemoveContextChip } = useComposerContextChips(inputRef)
@@ -491,8 +480,8 @@ export function useComposerShell(params: ComposerShellParams) {
   // ── Composer 命令动作表（composer-pi-shortcuts U1③组装；分发链「动作表」分支消费）──
   // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
   // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
-  // 重排的显示序，即模型循环序）。models?. 同款防御：测试 mock 的 settingsStore 可能缺字段。
-  const enabledModels = computed(() => (settingsStore.models?.value ?? []).filter((m) => m.enabled !== false))
+  // 重排的显示序，即模型循环序）。
+  const enabledModels = computed(() => settingsStore.models.value.filter((m) => m.enabled !== false))
   /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
   const isStaging = computed(() => staging.activeStaging.value !== null)
   const shortcutActions = useComposerShortcutActions({
@@ -530,6 +519,8 @@ export function useComposerShell(params: ComposerShellParams) {
     handleArrowDown,
     resetBrowsing,
     isBrowsing,
+    isBrowsingFor,
+    getSavedDraft,
     // context chips
     attachedItems,
     refreshAttachedItems,

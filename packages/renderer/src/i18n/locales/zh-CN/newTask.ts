@@ -81,6 +81,7 @@ export default {
   presetSelect: {
     title: '选择启动模式',
     setAsDefault: '设为默认',
+    setDefaultFailed: '设为默认失败：{message}，请稍后重试',
     alreadyDefault: '已是默认',
     presetLockedTooltip: '此会话以「{name}」创建，不可更改',
     legacySessionTooltip: '（历史会话，未记录模式）',

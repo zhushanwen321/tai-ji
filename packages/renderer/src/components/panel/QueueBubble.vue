@@ -5,7 +5,9 @@
   getDeliveryProjectionRef），不再读 queue_update 快照 + 本地 defer 队列双拼（D7）。
   每条未送达消息一行：状态 chip（排队中 / 投递中 / 发送失败）+ truncate 预览文本 +
   hover × 撤销（delivery.cancel，V9 queued 态 / V10 投递中收回-重投）+ failed 行重试钮
-  （delivery.resync 单条重报，§3.4 重试耗尽行）。多条显前 3 条 + 「+N」。
+  （delivery.resync 单条重报，§3.4 重试耗尽行）。折叠口径（useQueueRows `foldQueueRows`
+  唯一定义点）：failed 行置顶且恒可见（重试/撤销入口不折叠），其余显前 3 条 + 「+N」
+  （+N 只计被折叠的非 failed 行）。
 
   [M4 queue 子域] 纯 props 展示（行数据/提示文案由 Composer 经 useQueueRows 算好传入），
   组件内不取数不持状态；撤销/重试只 emit 事件，RPC 编排在 useQueueRows。
@@ -88,10 +90,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Hourglass, RefreshCw, X, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import type { QueueRow } from '@/composables/panel/useQueueRows'
+import { foldQueueRows, type QueueRow } from '@/composables/panel/useQueueRows'
 
 const props = defineProps<{
-  /** 队列条目（调用方已按「非 direct 且未 delivered」过滤，帧序 = 内核 FIFO 发送序） */
+  /** 队列条目（调用方已按「非 direct 且未 delivered」过滤，帧序 = 内核 FIFO 发送序；显示折叠在本组件内经 foldQueueRows 完成） */
   rows: QueueRow[]
   /** 行 hover title（session 级单一值：按占用分档的「等什么结束」，由 Composer 传入） */
   hint: string
@@ -134,8 +136,11 @@ function stateLabelOf(state: QueueRow['state']): string {
   return t('panel.queueBubble.stateQueued')
 }
 
-/** 前 3 条可见（v6 §8.5：多条显前 2-3 条 + 「+N」） */
-const VISIBLE_MAX = 3
-const visibleRows = computed(() => props.rows.slice(0, VISIBLE_MAX))
-const overflowCount = computed(() => Math.max(0, props.rows.length - VISIBLE_MAX))
+/**
+ * 折叠口径唯一定义点 = useQueueRows `foldQueueRows`：failed 行置顶恒可见（重试入口
+ * 不折叠，§3.4），其余按帧序填充剩余可见位；+N 只计被折叠的非 failed 行。
+ */
+const folded = computed(() => foldQueueRows(props.rows))
+const visibleRows = computed(() => folded.value.visible)
+const overflowCount = computed(() => folded.value.overflowCount)
 </script>

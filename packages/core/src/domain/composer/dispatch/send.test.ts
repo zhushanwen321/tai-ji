@@ -46,8 +46,8 @@ interface Spies {
   clearInput: Spy<() => void>
   restoreSegments: Spy<(segments: Segment[]) => void>
   submitFirstMessage: Spy<ComposerSendDeps['flow']['submitFirstMessage']>
-  send: Spy<(sessionId: string, segments: Segment[]) => Promise<void>>
-  compact: Spy<(sessionId: string, customInstructions?: string) => Promise<void>>
+  send: Spy<(sessionId: string, segments: Segment[]) => Promise<boolean>>
+  compact: Spy<(sessionId: string, customInstructions?: string) => Promise<boolean>>
   toastError: Spy<(msg: string) => void>
   trySendBash: Spy<(rawText: string) => Promise<boolean>>
   extractBashCommand: Spy<(text: string) => BashCommandExtract>
@@ -77,8 +77,9 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     clearInput: vi.fn(() => {}),
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     submitFirstMessage: vi.fn(async () => {}) as unknown as Spies['submitFirstMessage'],
-    send: vi.fn(async (_sessionId: string, _segments: Segment[]) => {}),
-    compact: vi.fn(async (_sessionId: string, _customInstructions?: string) => {}),
+    // 默认 resolve true = 契约成功路径（useChat 失败信号契约：false = RPC 失败已 toast）
+    send: vi.fn(async (_sessionId: string, _segments: Segment[]) => true),
+    compact: vi.fn(async (_sessionId: string, _customInstructions?: string) => true),
     toastError: vi.fn((_msg: string) => {}),
     trySendBash: vi.fn(async (_rawText: string) => ctrl.bashTryReturn),
     extractBashCommand: vi.fn((_text: string) => ctrl.bashExtract),
@@ -314,6 +315,62 @@ describe('useComposerSend.onSend', () => {
     await useComposerSend(deps).onSend()
     expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
     expect(spies.toastError).toHaveBeenCalledWith('panel.panel.sendFailed')
+  })
+
+  // ── [R2-A5] 失败信号契约：send/compact 返回 false = RPC 失败（useChat 已 toast），恢复草稿 ──
+
+  it('⑪b [R2-A5] send 契约失败（false）→ restoreSegments 恢复草稿 + 不补 toast + isSending 复位', async () => {
+    // useChat.send 内部已 toast（错误面行为不变），调用方补 toast 会双提示——对齐 steer 先例。
+    const { deps, spies } = setup({ variant: 'panel', draft: 'hello' })
+    spies.send.mockResolvedValueOnce(false)
+    await useComposerSend(deps).onSend()
+    expect(spies.send).toHaveBeenCalledTimes(1)
+    expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
+    expect(spies.toastError).not.toHaveBeenCalled()
+    expect(deps.isSending.value).toBe(false)
+  })
+
+  it('⑪c [R2-A5] send 契约成功（true）→ 不恢复草稿', async () => {
+    const { deps, spies } = setup({ variant: 'panel', draft: 'hello' })
+    await useComposerSend(deps).onSend()
+    expect(spies.restoreSegments).not.toHaveBeenCalled()
+    expect(spies.toastError).not.toHaveBeenCalled()
+  })
+
+  it('⑨d [R2-A5 同族] compact 契约失败（false）→ restoreSegments（slash chip + 指令完整恢复）+ 不补 toast + isSending 复位', async () => {
+    const { deps, spies } = setup({ variant: 'panel', draft: '/compact focus on auth' })
+    spies.getSegments.mockReturnValue([
+      { type: 'slash', name: 'compact' },
+      { type: 'text', text: 'focus on auth' },
+    ])
+    spies.compact.mockResolvedValueOnce(false)
+    await useComposerSend(deps).onSend()
+    expect(spies.compact).toHaveBeenCalledWith('s1', 'focus on auth')
+    expect(spies.restoreSegments).toHaveBeenCalledTimes(1)
+    expect(spies.toastError).not.toHaveBeenCalled()
+    expect(deps.isSending.value).toBe(false)
+  })
+
+  it('⑨e compact 期间 isSending 置位（双发锁），结束复位——对齐 send 分支形态', async () => {
+    const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
+    spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
+    let sendingDuringRpc: boolean | undefined
+    spies.compact.mockImplementationOnce(async () => {
+      sendingDuringRpc = deps.isSending.value
+      return true
+    })
+    await useComposerSend(deps).onSend()
+    expect(sendingDuringRpc).toBe(true)
+    expect(deps.isSending.value).toBe(false)
+  })
+
+  it('⑬ [b08-F2] session 缺失（null）→ panel 分支守卫早退：不 bash/compact/send、不清输入', async () => {
+    const { deps, spies } = setup({ variant: 'panel', sessionId: null, draft: '!ls' })
+    await useComposerSend(deps).onSend()
+    expect(spies.trySendBash).not.toHaveBeenCalled()
+    expect(spies.compact).not.toHaveBeenCalled()
+    expect(spies.send).not.toHaveBeenCalled()
+    expect(spies.clearInput).not.toHaveBeenCalled()
   })
 
   it('⑫ landing 首发失败 → restoreSegments + toastError', async () => {

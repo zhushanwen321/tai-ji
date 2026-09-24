@@ -28,7 +28,6 @@ export {
   DEFER_FLUSH_MARKER_RE,
 } from './effects/user-delivery'
 export type { DeliveryFrameEntry, DeliverySubmitReply } from './api-port'
-export type { CompactQueueLike, CompactQueueEntrySnapshot } from './useChat'
 export { createChatStore } from './store'
 
 export type { ChatStoreOptions } from './store'

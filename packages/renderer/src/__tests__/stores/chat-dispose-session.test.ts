@@ -43,7 +43,11 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     store.hydrate(sid, [makeMessage('m1')])
     store.addPendingSend(sid)
     store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
-    // retryStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
+    // retryStates 经 applyMessageEvent 写入（message.auto_retry_start，同 chat-transient-reset 播种形态）
+    store.applyMessageEvent(sid, {
+      type: 'message.auto_retry_start',
+      payload: { sessionId: sid, attempt: 1, maxAttempts: 3 },
+    })
     store.markHistoryFailed(sid)
     // changeSetStatuses：key 格式 `${sid}:${messageId}`，disposeSession 按前缀清理（W19 Fix-2）
     store.setChangeSetStatus(sid, 'm1', 'added')
@@ -53,6 +57,7 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     expect(store.isHydrated(sid)).toBe(true)
     expect(store.isActive(sid)).toBe(true) // pendingSend → active
     expect(store.isCompacting(sid)).toBe(true)
+    expect(store.getRetryState(sid)).toBeDefined()
 
     // act
     store.disposeSession(sid)
@@ -62,13 +67,15 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     expect(store.isHydrated(sid)).toBe(false)
     expect(store.isActive(sid)).toBe(false) // pendingSend 清空 → 不再 active
     expect(store.isCompacting(sid)).toBe(false)
+    // auto_retry_start 播种后的清空断言（不 dispose 则恒 defined，与 disposeSession 有因果）
     expect(store.getRetryState(sid)).toBeUndefined()
     // changeSetStatuses 的 `${sid}:` 前缀条目已清理（W19 Fix-2 抽取的
     // deleteChangeSetStatusesFor 挂点）——此处补上原注释承诺的断言
     expect(store.getChangeSetStatus(sid, 'm1')).toBeUndefined()
-    // failedHistory 是 Set 且无公开 getter——disposeSession 的 setRefs 遍历
-    // （core store.ts:1306 含 failedHistory）覆盖其清理；可观测回归经
-    // m7-virtual-key-cleanup / delete-cleanup 的分区释放断言承担
+    // failedHistory 无公开读取器，经行为投影断言：Panel.vue 重试出口判据即
+    // `chat.failedHistory.has(sessionId)`，dispose 后为 false = 分区已清
+    // （disposeSession 的 setRefs 遍历含 failedHistory，见 core domain/chat/store.ts:1108）
+    expect(store.failedHistory.has(sid)).toBe(false)
   })
 
   it('disposeSession 对未写入的 session 幂等（不抛错）', () => {

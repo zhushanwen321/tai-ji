@@ -108,9 +108,6 @@ export default {
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
     compactingFlushHint: '完成后自动发送 {count} 条待发消息',
-    // [system-notice-rendering-upgrade U3] 压缩中「待发 N」chip（ActivityStrip 消费，D4；
-    // 形态从副文案长句变 chip，计数口径不变）
-    compactingQueueChip: '待发 {count}',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
@@ -417,6 +414,9 @@ export default {
     cancelUnavailable: '消息已投递，无法撤销',
     cancelUnavailableWithReason: '无法撤销：{reason}',
     cancelFailed: '撤销失败：{msg}',
+    // 撤销成功后的回草稿失败分型（失败域各自留痕：RPC ≠ 回草稿 ≠ 契约缺文本）
+    restoreDraftFailed: '已撤销，但恢复到输入框失败：{msg}',
+    restoreContentMissing: '消息已撤销，但原文未能取回——请重新输入',
     retry: '重试发送',
     retryFailed: '重试失败：{msg}',
   },

@@ -29,6 +29,8 @@ const flowMock = vi.hoisted(() => ({
   currentSessionId: { value: null as string | null },
   currentSession: { value: null as { launchPresetId?: string } | null },
   currentModel: { value: null as string | null },
+  // landing 态 launchConfigView 解析消费（model-thinking 单一解析层输入）；显式选择未发生恒 null
+  pendingPreset: { value: null as string | null },
   gitInfo: { value: { branch: 'main' } as { branch: string } | null },
   mode: { value: 'plain-repo' as string },
   worktreeItems: { value: [] as Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> },

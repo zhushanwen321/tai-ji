@@ -8,8 +8,31 @@
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
 import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from '@taiji/shared'
+import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
+
+/** PI_THINKING_LEVELS 成员判定（shared 权威词表，string → ThinkingLevel 类型收窄） */
+function isPiThinkingLevel(value: string): value is ThinkingLevel {
+  return (PI_THINKING_LEVELS as readonly string[]).includes(value)
+}
+
+/**
+ * Staging thinkingOverride 边界收窄：composer 暂存链路是自由 string（model-thinking
+ * stagingThinking），shared 协议已把 session.fork/handoff 的 thinkingOverride 收窄为
+ * ThinkingLevel（PI_THINKING_LEVELS 权威词表）。transport 边界按词表校验：合法值原样
+ * 放行，非法值 fail-fast（UI 候选集已过 isThinkingLevel 过滤，非法值只可能来自协议
+ * 漂移/代码 bug——静默丢弃会复现 A-03「override 不生效」silent bug）。
+ */
+function narrowThinkingOverride(value: string | undefined): ThinkingLevel | undefined {
+  if (value === undefined) return undefined
+  if (!isPiThinkingLevel(value)) {
+    throw new Error(
+      `thinkingOverride "${value}" 不在 PI_THINKING_LEVELS 值域（${PI_THINKING_LEVELS.join('/')}），session RPC 拒发`,
+    )
+  }
+  return value
+}
 
 /**
  * handoff RPC 超时：对齐 runtime HandoffService.HANDOFF_TIMEOUT_MS（600s）+ 60s 余量（agent_end 后的 create/broadcast）。
@@ -115,7 +138,7 @@ export async function fork(
     includeFrom: opts.includeFrom,
     label: opts.label,
     modelOverride: opts.modelOverride,
-    thinkingOverride: opts.thinkingOverride,
+    thinkingOverride: narrowThinkingOverride(opts.thinkingOverride),
   }, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.session
 }
@@ -285,7 +308,7 @@ export function handoff(
     sessionId,
     reply,
     modelOverride: options?.modelOverride,
-    thinkingOverride: options?.thinkingOverride,
+    thinkingOverride: narrowThinkingOverride(options?.thinkingOverride),
   }, HANDOFF_RPC_TIMEOUT_MS)
 }
 

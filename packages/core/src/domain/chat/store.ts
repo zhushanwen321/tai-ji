@@ -289,6 +289,9 @@ export interface ChatStoreOptions {
   agentCallEvictionsOf?: (mainSid: string) => string[]
 }
 
+/** pendingSend 空窗期 timer 阈值（D-015/F4，接管 dispatchingTimer 30s 语义）。导出供测试 import（禁魔数复制漂移） */
+export const PENDING_SEND_TIMEOUT_MS = 30_000
+
 export function createChatStore(options: ChatStoreOptions = {}) {
   /** 按 sessionId 分区的消息表（UC-2 隔离） */
   // W10 D-1 容器范式：`ShallowRef<Map<string, ShallowRef<Message[]>>>`——外层 Map 恒等稳定
@@ -402,8 +405,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const { historyWindows, setHistoryWindow, getHistoryWindow, clearHistoryWindow } = createTruncatedWindowController()
 
-  /** pendingSend 空窗期 timer 阈值（D-015/F4，接管 dispatchingTimer 30s 语义） */
-  const PENDING_SEND_TIMEOUT_MS = 30_000
   /**
    * pendingSend 空窗期 timer（按 sessionId 隔离）。
    *
@@ -819,7 +820,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
         appendUser,
         applyEntryFrame,
         getInflight,
-        incrementInflight,
         decrementInflight,
         clearInflight,
       },
@@ -972,18 +972,13 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     occupancies.value = next
   }
 
-  /** [u5b / D1] 读 occupancy 投影。无记录（未收到任何帧 / 已断连收口）= 全 idle 缺省。 */
-  function getOccupancy(sessionId: string): SessionOccupancyState {
-    return occupancies.value.get(sessionId) ?? { turn: 'idle', compacting: false, bash: false }
-  }
-
   /**
-   * [u5b / D1] sessionPhase —— occupancy 投影的等价读口（P4 ActivityStrip / 发送位四态 /
-   * 发送分发器 getSendRoute 的单一数据源）。与 getOccupancy 同值（语义命名面向消费方：
-   * P4 从「phase」取展示态，分发器从「occupancy」算路由）。
+   * [u5b / D1] sessionPhase —— occupancy 投影读口（P4 ActivityStrip / 发送位四态 /
+   * 发送分发器 getSendRoute 的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
+   * 已断连收口）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
    */
   function sessionPhase(sessionId: string): SessionOccupancyState {
-    return getOccupancy(sessionId)
+    return occupancies.value.get(sessionId) ?? { turn: 'idle', compacting: false, bash: false }
   }
 
   /** 设置/清除 compacting reason 文案源（session.compacting{reason} 写 / session.compacted 清）。
@@ -1182,7 +1177,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     isCompacting,
     setOccupancy,
     clearOccupancy,
-    getOccupancy,
     sessionPhase,
     setCompactingReason,
     getCompactingReason,
@@ -1247,7 +1241,7 @@ export type ChatStoreReaders = Pick<
   | 'getMessages' | 'getRetryState' | 'getChangeSetStatus'
   | 'isHydrated' | 'isGenerating' | 'isActive'
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
-  | 'getOccupancy' | 'sessionPhase' | 'isPendingSend'
+  | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
   | 'getInflight'
   | 'getHistoryWindow'

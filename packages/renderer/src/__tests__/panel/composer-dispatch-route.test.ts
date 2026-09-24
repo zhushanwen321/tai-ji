@@ -25,6 +25,7 @@ import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
+import { composerChildStubs } from '../helpers/composer-mount'
 
 // ── mock useChat（spy 化 send / steer / followUp / compact）+ useToast ──
 const chatApiMock = vi.hoisted(() => ({
@@ -84,17 +85,10 @@ const ComposerInputMock = defineComponent({
   template: '<div data-testid="composer-input" />',
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+// 兄弟组件 stub 收敛到共享 helper（ComposerInput 本文件 spy 面自留，其余八项委托）
 const otherStubs = {
   ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
+  ...composerChildStubs,
 }
 
 import Composer from '@/components/panel/Composer.vue'

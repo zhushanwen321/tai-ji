@@ -210,8 +210,8 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('network'))
     const { send } = useChat()
     // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
-    // [u3b] send 契约 Promise<void>（form-hang-fix 的 boolean 契约随 B 策略退役）
-    await expect(send('s-fail', textToSegments('hi'))).resolves.toBeUndefined()
+    // [R2-A5] send 契约 Promise<boolean>——失败返回 false，dispatch 侧按 false 恢复草稿
+    await expect(send('s-fail', textToSegments('hi'))).resolves.toBe(false)
     expect(chat.pendingSend.has('s-fail')).toBe(false)
     expect(chat.isActive('s-fail')).toBe(false)
   })
@@ -317,7 +317,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-fu-rollback', textToSegments('first'))
     const before = chat.getMessages('s-fu-rollback').length
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
-    await expect(followUp('s-fu-rollback', textToSegments('下轮'))).resolves.toBeUndefined()
+    await expect(followUp('s-fu-rollback', textToSegments('下轮'))).resolves.toBe(false)
     expect(chat.getMessages('s-fu-rollback')).toHaveLength(before)
   })
 })
@@ -352,7 +352,7 @@ describe('useChat compact 状态机（#6）', () => {
     const chat = useChatStore()
     apiMock.compact.mockRejectedValueOnce(new Error('Session not found'))
     const { compact } = useChat()
-    await expect(compact('c-err')).resolves.toBeUndefined()
+    await expect(compact('c-err')).resolves.toBe(false)
     // M8: compact 错误走 toast 而非 appendSystemNotice，不再插入 system 消息
     const msgs = chat.getMessages('c-err')
     expect(msgs).toEqual([])

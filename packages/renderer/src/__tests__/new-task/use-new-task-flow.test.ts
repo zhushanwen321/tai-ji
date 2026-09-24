@@ -24,7 +24,8 @@ import type { SessionSummary, SessionGroup } from '@taiji/shared'
 
 const apiMock = vi.hoisted(() => ({
   create: vi.fn(
-    // 六参签名（D14 projectId 透传断言用，原 session-project-attribution.test.ts 并入）
+    // 调用契约六参（cwd/label/presetId/projectId/modelOverride/thinkingOverride），
+    // mock 只命名前四参；projectId 透传断言用第 4 参
     (cwd?: string, _label?: string, _presetId?: string, projectId?: string): Promise<SessionSummary> =>
       Promise.resolve({
         id: `s-${Math.random().toString(36).slice(2, 8)}`,
@@ -617,9 +618,7 @@ describe('useNewTaskFlow 状态机', () => {
 //    非法态守卫覆盖，不再重复）──
 describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
   function seedHistGroup(cwd: string): void {
-    useSessionStore().applySnapshot({ groups: [
-      { cwd, sessions: [{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }] },
-    ] as SessionGroup[] })
+    setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }])
   }
 
   it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {

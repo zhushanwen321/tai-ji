@@ -291,10 +291,27 @@ const timers = new Set<ReturnType<typeof setTimeout>>()
 /** session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义） */
 const DELIVERY_PREVIEW_MAX_CHARS = 80
 
+/**
+ * 已广播 in-flight 投递条目、且流式序列尚未走完的 session（abort 终态帧依据）。
+ * submitDelivery 登记、runSendStream settle（complete 或 aborted 中断退出）时清除——
+ * abort 据此区分「有在飞投递可补终态帧」与「流已自然走完」（后者 abort 不补帧，保持既有行为）。
+ */
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞投递条目跟踪（abort 终态帧依据，非 GUI 数据）
+const inflightDeliveryEntries = new Map<string, { clientUuid: string; preview: string }>()
+
+/** 在飞 sleep 的 resolve 句柄（__clearTimers teardown 时统一 settle，防在飞 runSendStream 永久悬挂在 await sleep） */
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞 sleep resolve 句柄（teardown settle 用，非 GUI 数据）
+const pendingSleepResolves = new Set<() => void>()
+
 /** 清理所有未触发的 timer（测试 teardown / 模块卸载时调用） */
 export function __clearTimers(): void {
   for (const t of timers) clearTimeout(t)
   timers.clear()
+  // 清 timer 的同时 settle 全部挂起的 sleep promise：只 clearTimeout 不 settle 会把在飞的
+  // runSendStream 永久悬挂在 await sleep（promise 泄漏）；settle 后其下一轮 cancelled
+  // 检查静默退出，teardown 不悬挂。
+  for (const resolve of [...pendingSleepResolves]) resolve()
+  pendingSleepResolves.clear()
 }
 
 let idSeq = 0
@@ -305,7 +322,18 @@ function nextId(prefix: string): string {
 }
 
 function emit(sessionId: string, msg: ServerMessageUnion): void {
-  streamHandlers.get(sessionId)?.forEach((h) => h(msg))
+  const handlers = streamHandlers.get(sessionId)
+  if (!handlers) return
+  for (const h of handlers) {
+    try {
+      h(msg)
+    } catch (e) {
+      // 订阅者异常隔离，语义对齐 real 侧 events.ts safeForEach（M4）：单 handler 抛错不中断
+      // 同通道其余订阅者，也不穿透 runSendStream——否则 mock 流以「无 complete/error 帧」的
+      // 合法形态中断，isGenerating 卡至 pendingSend 30s 兜底才复位。console.error 留痕非静默吞。
+      console.error(`[mock] stream handler threw for session ${sessionId}, continuing dispatch:`, e)
+    }
+  }
 }
 
 // [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
@@ -317,9 +345,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const t = setTimeout(() => {
       timers.delete(t)
+      pendingSleepResolves.delete(resolve)
       resolve()
     }, ms)
     timers.add(t)
+    pendingSleepResolves.add(resolve)
   })
 }
 
@@ -783,27 +813,19 @@ const chatImpl = {
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
   },
 
-  // options.clientUuid（session-occupancy D2）：mock 不模拟 send.rejected，参数仅签名对齐
-  // real 域（门面三元要求两侧同构），运行时忽略。
+  /**
+   * [降级 stub] u3b 统一提交后生产零调用，协议镜像保留：core 编排侧发送链已收敛
+   * submitDelivery（useChat / new-task 全走 composable 提交通路），本方法仅剩门面三元
+   * 同构要求（G4 锚定成员存在、签名不动）。实现降为 ack stub——不再驱动流式序列
+   * （mock 流式演示由 submitDelivery 承担，同一 runSendStream 流）。
+   */
   async send(
-    sessionId: string,
-    text: string,
+    _sessionId: string,
+    _text: string,
     _images?: Array<{ data: string; mimeType: string }>,
     _options?: { clientUuid?: string },
   ): Promise<void> {
-    cancelled.delete(sessionId)
-    // ack 语义：仅模拟 pi 接收命令，立即 resolve；流式序列 fire-and-forget（不 await）。
-    // isStreaming 由 message_start/complete 事件驱动（useChat.ts），不受此处 resolve 时机影响，
-    // 故 Composer :disabled=isSending 不会全程 true，流式中可 steer/retry。
     await sleep(TIMING.ack)
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
   },
 
   /**
@@ -823,6 +845,21 @@ const chatImpl = {
   async abort(sessionId: string): Promise<void> {
     // 标记取消，send 循环下一轮检测后退出
     cancelled.add(sessionId)
+    // [mock 投递状态机不悬挂] abort 时对在飞的 submitDelivery 条目补发终态帧：state 取
+    // 'failed'——shared DeliveryFrameEntry 投影态无 'aborted'（D5③ cancelled 不投影），
+    // 'delivered' 会伪造送达事实，'failed' 是唯一诚实表达「未送达」的投影终态。仅当该
+    // session 有未走完的投递流时发（流已自然走完的 session abort 保持既有行为，不补帧）。
+    const delivery = inflightDeliveryEntries.get(sessionId)
+    if (delivery) {
+      inflightDeliveryEntries.delete(sessionId)
+      emit(sessionId, {
+        type: 'session.delivery',
+        payload: {
+          sessionId,
+          entries: [{ clientUuid: delivery.clientUuid, preview: delivery.preview, state: 'failed', lane: 'direct' }],
+        },
+      })
+    }
     emit(sessionId, {
       type: 'message.complete',
       payload: { sessionId, stopReason: 'aborted' },
@@ -897,6 +934,10 @@ const chatImpl = {
         entries: [{ clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS), state: 'in-flight', lane: 'direct' }],
       },
     })
+    // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
+    // 避免流走完后 session 再 abort 被误补 failed 帧。
+    inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
+    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
     void runSendStream(sessionId, text, {
       nextId,
       emit,
@@ -905,6 +946,14 @@ const chatImpl = {
       isCancelled: (s) => cancelled.has(s),
       TIMING,
     })
+      .catch((e) => {
+        console.error('[mock] send stream failed:', e)
+      })
+      .finally(() => {
+        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+          inflightDeliveryEntries.delete(sessionId)
+        }
+      })
     return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
@@ -972,6 +1021,15 @@ const providersSubWithScoped = makeMockSubscription(() => ({
 const skillsSub = makeMockSubscription(() => fixtureSkills.map((s) => ({ ...s })))
 const agentsSub = makeMockSubscription(() => fixtureAgents.map((a) => ({ ...a })))
 const defaultsSub = makeMockSubscription(() => 'Anthropic/claude-sonnet-4.5')
+
+/** 向 skills 订阅者广播最新 fixture 快照（模拟 runtime 动作后广播；同 broadcastProviders 先例） */
+function broadcastSkills(): void {
+  skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+}
+/** 向 agents 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastAgents(): void {
+  agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+}
 
 // ADR-0021 §1 discovery 加载路径配置（v2 嵌套 project/global，UI 层 A 勾选/↑↓ 用）。
 // preset 直接引 shared SSOT（PRESET_*_DIRS），scope 按路径特征拆（相对→project / ~或/开头→global），
@@ -1211,7 +1269,7 @@ const configImpl = {
   async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
     await sleep(TIMING.ack)
     // 扫描后广播当前 skills 快照（runtime scan 后会刷新 config.skills）
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
     return []
   },
   // W2（ADR-0051）：按 session cwd 拉 project skill。mock 返回空（mock 模式无真实文件系统扫描）。
@@ -1234,24 +1292,24 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockSkillDirs = dirs.map((d) => ({ ...d }))
     skillDirsSub.broadcast(buildMockDirConfigs(mockSkillDirs, PRESET_SKILL_DIRS_PROJECT, PRESET_SKILL_DIRS_GLOBAL).map((d) => ({ ...d })))
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async setSkill(skill: SkillInfo) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skill.id)
     if (idx >= 0) fixtureSkills[idx] = { ...skill }
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async deleteSkill(skillId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skillId)
     if (idx >= 0) fixtureSkills.splice(idx, 1)
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   /** [G4 锚定 ConfigDomain] 返回类型补齐（同 scanSkills——real 返回 ScannedAgentInfo[]，mock 无扫描返回空） */
   async scanAgents(_sources: string[]): Promise<ScannedAgentInfo[]> {
     await sleep(TIMING.ack)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
     return []
   },
   /**
@@ -1299,7 +1357,7 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockAgentDirs = dirs.map((d) => ({ ...d }))
     agentDirsSub.broadcast(buildMockDirConfigs(mockAgentDirs, PRESET_AGENT_DIRS_PROJECT, PRESET_AGENT_DIRS_GLOBAL).map((d) => ({ ...d })))
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   /** Phase 4 目录级管道写入（v2 scope 穿越）：更新 mock extensionDirs + 广播目录配置（靠后端权威值推回） */
   async setExtensionDirs(dirs: SkillDirConfig[]) {
@@ -1311,13 +1369,13 @@ const configImpl = {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agent.id)
     if (idx >= 0) fixtureAgents[idx] = { ...agent }
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   async deleteAgent(agentId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agentId)
     if (idx >= 0) fixtureAgents.splice(idx, 1)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   // ── 系统提示词配置（W6 FR-4/FR-5，与 real domains/config 同构）──
   // mock 持内存默认配置；setSystemPrompt 广播 config.systemPrompt，与 runtime 行为一致。
@@ -1412,12 +1470,17 @@ export const model: ModelDomain = modelImpl
 
 const extensionsSub = makeMockSubscription(() => fixtureExtensions.map((e) => ({ ...e })))
 
+/** 向 extensions 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastExtensions(): void {
+  extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+}
+
 export const extension = {
   onExtensions: (h: GlobalHandler<unknown>) => extensionsSub.subscribe(h),
   /** 主动重拉（对齐 runtime extension.list → 广播 config.extensions 刷新） */
   async scan() {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async toggle(name: string, enabled: boolean): Promise<{ extensions: ReturnType<typeof toCandidate>[] }> {
     await sleep(TIMING.ack)
@@ -1428,7 +1491,7 @@ export const extension = {
     // （toCandidate 覆盖 ExtensionInfo 必需字段，类型可赋给 Ref<ExtensionInfo[]>）。
     // broadcast 保留以模拟连接级 onExtensions 推送（幂等，值一致）。
     const snapshot = fixtureExtensions.map(toCandidate)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
     return { extensions: snapshot }
   },
   /**
@@ -1443,13 +1506,13 @@ export const extension = {
     if (!fixtureExtensions.some((e) => e.name === name)) {
       fixtureExtensions.push({ name, version: '0.0.0', description: `mock-installed: ${name}`, enabled: true, tools: [] })
     }
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async uninstall(name: string) {
     await sleep(TIMING.ack)
     const idx = fixtureExtensions.findIndex((e) => e.name === name)
     if (idx >= 0) fixtureExtensions.splice(idx, 1)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   /** dir/git 多步第一步：返回发现的候选（mock 把现有 fixture 当候选） */
   async installDir(_path: string) {
@@ -1463,7 +1526,7 @@ export const extension = {
   /** 多步第二步：选中即视为已装（mock 已在 fixture 中，仅广播刷新） */
   async finishInstall(_tempDir: string, _selected: string[]) {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async cancelInstall(_tempDir: string) {
     await sleep(TIMING.ack)

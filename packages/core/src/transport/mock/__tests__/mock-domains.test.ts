@@ -2,7 +2,7 @@
  * mock 门面 + mock file/git domain 单测 —— VITE_MOCK 演示轨道的行为契约：
  * fixture 快照隔离（深拷贝）、session CRUD + 不存在抛错、config/extension/composer/
  * search/workspace/quota/project/preset 各域签名同构（facade 三元）、
- * chat 流式闭环（send → complete）、queue（steer/followUp drain）、bash 四态分流。
+ * chat 流式闭环（submitDelivery → complete，chat.send 已降 ack stub）、queue（steer/followUp drain）、bash 四态分流。
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
@@ -272,13 +272,16 @@ describe('mock chat domain', () => {
     un()
   })
 
-  it('send：完整流式闭环（message_start → … → complete(usage)）', async () => {
+  // [R3-b03-1 降 stub 连带] chat.send 已降 ack stub（u3b 后生产零调用，协议镜像保留），
+  // 流式闭环断言改从 submitDelivery 驱动（同一 runSendStream 流，覆盖不缩水）。
+  // submitDelivery 先广播一条 session.delivery 快照帧，序列断言过滤该帧保持原语义。
+  it('submitDelivery：完整流式闭环（message_start → … → complete(usage)）', async () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-send', (m) => frames.push(m))
-    await chat.send('s-send', 'hello')
+    await chat.submitDelivery('s-send', 'hello', 'u-send-1')
     await waitFor(() => frames.some((m) => m.type === 'message.complete'), 20_000)
     un()
-    const types = frames.map((m) => m.type)
+    const types = frames.filter((m) => m.type !== 'session.delivery').map((m) => m.type)
     expect(types[0]).toBe('message.message_start')
     expect(types).toContain('message.thinking_start')
     expect(types).toContain('message.tool_call_start')

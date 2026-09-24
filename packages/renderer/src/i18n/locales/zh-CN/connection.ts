@@ -5,6 +5,10 @@ export default {
   reconnecting: '重新连接中…',
   restarting: 'runtime 重启中…',
   failed: 'runtime 不可用，重试多次仍失败',
+  // 重试按钮 IPC 失败的用户可见反馈（含「重试」恢复动作）
+  restartRequestFailed: 'runtime 重启请求失败：{message}，请重试或重启应用',
+  // bootstrap 五步自身失败的真因上屏（与 runtime 启动失败台账通道分开）
+  bootstrapErrorCause: '应用初始化失败：{message}',
   errorCause: '原因：{message}',
   retry: '重试',
   runtimeExited: '会话进程已退出：{reason}',

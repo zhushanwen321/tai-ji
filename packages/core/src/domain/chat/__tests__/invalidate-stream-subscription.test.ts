@@ -11,7 +11,7 @@
  * 直接调模块级 ensureStreamSubscription / invalidateStreamSubscription；注入
  * setSubscriptionPorts 捕获 subscribe RPC（subscribeSession 端口）。
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
@@ -26,14 +26,30 @@ import {
   getSubscriptionState,
 } from '../../../coordination/subscription-state'
 
-/** 等 fire-and-forget 的 subscribeSession（async）收敛 */
-const flushSubscribes = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+/**
+ * 等 fire-and-forget 的 subscribeSession（async）收敛。
+ *
+ * 确定性收敛信号（非 setTimeout 魔法等待）：await 每个 subscribe RPC 的真实 promise
+ * ——settle 即 subscribeSession 的同步续体（写订阅状态）已在微任务队列跑完；用例 3 注入的
+ * 永挂死 Promise（in-flight 窗口）经已 resolve 哨兵 race 跳过，不依赖 timer。
+ * 尾部两轮微任务排空续体链残余——排空不足只会让随后的 subscribed 正断言假红（可见），
+ * 不产生假绿方向。
+ */
+const flushSubscribes = async (subscribeRpc: ReturnType<typeof vi.fn>): Promise<void> => {
+  for (const r of subscribeRpc.mock.results) {
+    await Promise.race([r.value, Promise.resolve()])
+  }
+  await Promise.resolve()
+  await Promise.resolve()
+}
 
 interface Fixture {
   /** 对固定 sid 调 ensureStreamSubscription（chat/sessionStore/deps 已闭包注入） */
   ensure: (sid: string) => void
   streamSubscribe: ReturnType<typeof vi.fn>
   subscribeRpc: ReturnType<typeof vi.fn>
+  /** effectScope.stop（对齐 useChat.test.ts fixture dispose 先例） */
+  dispose: () => void
 }
 
 function makeFixture(): Fixture {
@@ -66,6 +82,7 @@ function makeFixture(): Fixture {
       ),
     streamSubscribe,
     subscribeRpc,
+    dispose: () => scope.stop(),
   }
 }
 
@@ -77,11 +94,15 @@ describe('invalidateStreamSubscription（session.exited 订阅失效）', () => 
     f = makeFixture()
   })
 
+  afterEach(() => {
+    f.dispose()
+  })
+
   it('invalidate 后再次 ensure：重发 events 订阅 + 重发 subscribe RPC + 重建订阅状态', async () => {
     const sid = 's-dead'
     f.ensure(sid)
     expect(f.streamSubscribe).toHaveBeenCalledTimes(1)
-    await flushSubscribes()
+    await flushSubscribes(f.subscribeRpc)
     expect(f.subscribeRpc).toHaveBeenCalledTimes(1)
     expect(getSubscriptionState(sid)?.subscribed).toBe(true)
 
@@ -92,7 +113,7 @@ describe('invalidateStreamSubscription（session.exited 订阅失效）', () => 
     // respawn 后 ensure 不被幂等守卫短路：三层全部重发
     f.ensure(sid)
     expect(f.streamSubscribe).toHaveBeenCalledTimes(2)
-    await flushSubscribes()
+    await flushSubscribes(f.subscribeRpc)
     expect(f.subscribeRpc).toHaveBeenCalledTimes(2)
     expect(getSubscriptionState(sid)?.subscribed).toBe(true)
   })
@@ -115,7 +136,7 @@ describe('invalidateStreamSubscription（session.exited 订阅失效）', () => 
     // subscribe RPC 永不 resolve（模拟 runtime 侧 session 已删、reply 不来，65s 超时前的窗口）
     f.subscribeRpc.mockImplementation(() => new Promise(() => {}))
     f.ensure(sid)
-    await flushSubscribes()
+    await flushSubscribes(f.subscribeRpc)
     expect(f.subscribeRpc).toHaveBeenCalledTimes(1)
 
     invalidateStreamSubscription(sid)
@@ -123,7 +144,7 @@ describe('invalidateStreamSubscription（session.exited 订阅失效）', () => 
     // 恢复正常 resolve：首次 ensure 必须发新 RPC，而非被 in-flight 去重收敛到旧死 Promise
     f.subscribeRpc.mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 })
     f.ensure(sid)
-    await flushSubscribes()
+    await flushSubscribes(f.subscribeRpc)
     expect(f.subscribeRpc).toHaveBeenCalledTimes(2)
     expect(getSubscriptionState(sid)?.subscribed).toBe(true)
   })

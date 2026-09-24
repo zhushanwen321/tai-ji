@@ -41,7 +41,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   }),
 }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn() }),
+  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn(), pendingPreset: ref(null) }),
   resetNewTaskFlow: vi.fn(),
 }))
 // P7 用：getProjectSkills 可控 mock（vi.hoisted 提升供断言/改返回值）

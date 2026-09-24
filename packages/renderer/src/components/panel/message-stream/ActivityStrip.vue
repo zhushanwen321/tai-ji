@@ -33,8 +33,6 @@
   Loader2 spinner + --text-xs，太极纯灰 tokens，无 emoji 无硬编码颜色）。文档流 block
   （Virtualizer 之后），fork notice 等后续文档流内容自然堆叠在其后（ForkNotice 为文档流
   block，无 absolute 定位——定位链已随 D6 死路径清理删除）。
-  dev 断言：COMPACTING_NOTICE_HEIGHT / EXECUTING_BASH_NOTICE_HEIGHT 常量漂移检测随行迁入
-  （useConstantHeightAssert，生产裁剪零开销）。
 -->
 <template>
   <div v-if="rows.length > 0" class="flex flex-col" data-testid="activity-strip">
@@ -44,7 +42,6 @@
            上下 hairline；-mx-5 抵消滚动容器 px-5，任意面板宽（含 >720px）下通栏到面板边缘。 -->
       <div
         v-if="row.kind === 'compacting'"
-        :ref="(el) => bindRowRef(row.kind, el)"
         class="-mx-5 flex items-center justify-center gap-2 border-y border-hairline bg-[var(--accent-soft)] px-5 py-[14px]"
         :data-testid="`activity-strip-row-${row.kind}`"
       >
@@ -64,7 +61,6 @@
       <!-- bash / thinking / settling 行：维持原 system-notice + content-col 形态（左右 hairline） -->
       <div
         v-else
-        :ref="(el) => bindRowRef(row.kind, el)"
         class="system-notice content-col flex min-w-0 items-center gap-2 py-1"
         :data-testid="`activity-strip-row-${row.kind}`"
       >
@@ -90,9 +86,7 @@ import { Loader2 } from '@lucide/vue'
 import type { ExecutingBash } from '@taiji/core'
 import { getDeliveryProjectionRef } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
-import { useConstantHeightAssert } from '@/composables/panel/useConstantHeightAssert'
 import { deliveryQueueEntries } from '@/composables/panel/useQueueRows'
-import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
 
 const props = defineProps<{
   /** session id（occupancy 投影 / compacting reason 的查询键） */
@@ -160,18 +154,4 @@ const rows = computed<ActivityRow[]>(() => {
 const flushCount = computed(
   () => deliveryQueueEntries(getDeliveryProjectionRef().value.get(props.sessionId) ?? []).length,
 )
-
-// dev-only 像素常量漂移检测（随行迁入本组件；compacting 行升级通栏带后 COMPACTING_NOTICE_HEIGHT
-// 已随 §2.2 同步 24 → 50，bash 行结构不变 EXECUTING_BASH_NOTICE_HEIGHT 不动）
-const [compactingEl, executingBashEl] = useConstantHeightAssert([
-  { name: 'COMPACTING_NOTICE_HEIGHT', expected: COMPACTING_NOTICE_HEIGHT },
-  { name: 'EXECUTING_BASH_NOTICE_HEIGHT', expected: EXECUTING_BASH_NOTICE_HEIGHT },
-]).els
-
-/** v-for 行的函数 ref 分发（thinking / settling 行不参与高度断言，el 丢弃） */
-function bindRowRef(kind: ActivityRow['kind'], el: unknown): void {
-  const node = el instanceof HTMLElement ? el : null
-  if (kind === 'compacting') compactingEl.value = node
-  else if (kind === 'bash') executingBashEl.value = node
-}
 </script>

@@ -14,6 +14,10 @@
  * - queued / in-flight / failed：队列区一行（三态可见，G3「排队中/投递中」）。
  * 刷新/重连后队列区不丢：状态在 runtime 内核，state 帧重放即恢复（D7 效果项）。
  *
+ * preview 直用帧值：runtime 帧装配（session-delivery-topic `deliveryPreview`）已剥投递标记
+ * 并截断，帧契约测试断言无标记——显示层不再二次剥除（单点剥离，防双规则漂移）。
+ * 队列区折叠（failed 置顶恒可见 / +N 计数）见 `foldQueueRows`（显示序，不改帧序语义）。
+ *
  * × 撤销（V9/V10）：queued 态立即移除；投递中（pi 槽位）走内核 clear_queue 全收 → 标记识别
  * → 其余条目保持相对序重投（收回-重投复用对账器路径）。reply.cancelled=false = 不可撤
  * （已 delivered 或收回失败），提示「已投递不可撤」（§3.4），条目由对账器下轮兜底。
@@ -28,7 +32,7 @@
 import { computed, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Segment } from '@taiji/shared'
-import { DEFER_FLUSH_MARKER_RE, getDeliveryProjectionRef } from '@taiji/core'
+import { getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
 import { delivery } from '@/api/domains/delivery'
 import { useChatStore } from '@/stores/chat'
@@ -50,6 +54,25 @@ export interface QueueRow {
  */
 export function deliveryQueueEntries(entries: readonly DeliveryFrameEntry[]): DeliveryFrameEntry[] {
   return entries.filter((e) => e.lane !== 'direct' && e.state !== 'delivered')
+}
+
+/** 队列区可见行数上限（v6 §8.5：多条显前 N 条 + 「+N」）。 */
+export const QUEUE_VISIBLE_MAX = 3
+
+/**
+ * 队列区折叠口径（**唯一定义点**，QueueBubble 显示消费）：failed 行置顶且**恒可见**——
+ * 重试耗尽条目必须保留重试/撤销入口，不得折叠进「+N」静默滞留（§3.4）；其余行保持帧序
+ * 填充剩余可见位。「+N」只计被折叠的非 failed 行（failed 恒可见 → 溢出天然不含 failed）。
+ * 仅显示序：不改 `deliveryQueueEntries` 的内核 FIFO 帧序语义。
+ */
+export function foldQueueRows(rows: readonly QueueRow[]): { visible: QueueRow[]; overflowCount: number } {
+  const failed = rows.filter((r) => r.state === 'failed')
+  const active = rows.filter((r) => r.state !== 'failed')
+  const visibleActive = Math.max(0, QUEUE_VISIBLE_MAX - failed.length)
+  return {
+    visible: [...failed, ...active.slice(0, visibleActive)],
+    overflowCount: Math.max(0, active.length - visibleActive),
+  }
 }
 
 /** 撤销/重试回草稿的注入面（Composer 壳提供——草稿/chip 操作属壳层 DOM 能力，本层不直连 inputRef）。 */
@@ -78,10 +101,10 @@ export function useQueueRows(
   const rows = computed<QueueRow[]>(() => {
     const sid = sessionId.value
     if (!sid) return []
-    // 显示层剥内核出站裸标记（预览理论上不含标记——防御性同规则，SSOT = core apply-entry-convert）
+    // preview 直用帧值（runtime 装配已剥标记截断，见文件头）——本层不做二次文本加工
     return deliveryQueueEntries(projection.value.get(sid) ?? []).map((e) => ({
       clientUuid: e.clientUuid,
-      preview: e.preview.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd(),
+      preview: e.preview,
       state: e.state,
     }))
   })
@@ -100,17 +123,33 @@ export function useQueueRows(
   async function onCancelEntry(clientUuid: string): Promise<void> {
     const sid = sessionId.value
     if (!sid) return
+    // 失败域拆分：cancelDelivery RPC / restoreDraft 回草稿是两个独立失败面——混在一个 try
+    // 会把「回草稿失败」误标成「撤销失败」（撤销已成功、行随 state 帧消失，文案与事实相反）。
+    let reply: Awaited<ReturnType<typeof delivery.cancelDelivery>>
     try {
-      const reply = await delivery.cancelDelivery(sid, clientUuid)
-      if (!reply.cancelled) {
-        // 不可撤（已 delivered / 收回失败）：明确反馈而非静默——条目由对账器下轮兜底（§3.4）
-        toast.error(reply.reason ? t('panel.queueBubble.cancelUnavailableWithReason', { reason: reply.reason }) : t('panel.queueBubble.cancelUnavailable'))
-        return
-      }
-      deps.restoreDraft({ text: reply.content ?? '', segments: reply.segments })
+      reply = await delivery.cancelDelivery(sid, clientUuid)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('panel.queueBubble.cancelFailed', { msg }))
+      return
+    }
+    if (!reply.cancelled) {
+      // 不可撤（已 delivered / 收回失败）：明确反馈而非静默——条目由对账器下轮兜底（§3.4）
+      toast.error(reply.reason ? t('panel.queueBubble.cancelUnavailableWithReason', { reason: reply.reason }) : t('panel.queueBubble.cancelUnavailable'))
+      return
+    }
+    // runtime 契约承诺 cancelled=true 携带完整文本——缺失/空白是契约违规，出声而非静默回
+    // 空草稿（条目已撤销，静默 = 用户文本无痕丢失且无重输提示）。
+    const content = reply.content ?? ''
+    if (!content.trim()) {
+      toast.error(t('panel.queueBubble.restoreContentMissing'))
+      return
+    }
+    try {
+      deps.restoreDraft({ text: content, segments: reply.segments })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('panel.queueBubble.restoreDraftFailed', { msg }))
     }
   }
 

@@ -38,8 +38,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   /**
    * Fork 会话：从指定源 session 截断历史到 fork 点，新建 session（独立 pi 进程）。
    *
-   * 语义（问题 6 AI 收尾 fork）：includeFrom=true → 保留到该 assistant（含），
-   * openInStandby 打开另一 panel。原 session 不变。
+   * 语义（问题 6 AI 收尾 fork）：includeFrom=true → 保留到该 assistant（含）。原 session 不变。
    *
    * 实现：runtime 读源 session JSONL 按 piEntryId 截断 → 新进程 switch_session 加载。
    * 不再前端 hydrate（runtime 通过 switch_session 让 pi 加载截断历史，selectSession 的
@@ -51,7 +50,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   async function forkSession(
     srcSessionId: string,
     fromMessageId: string,
-    opts?: { includeFrom?: boolean; openInStandby?: boolean },
+    opts?: { includeFrom?: boolean },
   ): Promise<string> {
     // 从前端 Message.id 查到 piEntryId（runtime fork 截断定位用）
     const msgs = chat.getMessages(srcSessionId)
@@ -68,7 +67,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     })
     session.appendSession(created)
     // [W2 fast-fork] 后台 fork 不切焦点：fork 后留在原线，对话流经 session.forkNotice 广播插反馈行
-    // （FR-9/10），侧栏静默新增。openInStandby 选项保留为契约（调用方可能传入），但行为退化为「不切焦点」。
+    // （FR-9/10），侧栏静默新增。
     return created.id
   }
 
@@ -139,7 +138,11 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
       // disposeSession 与 deleteSession 清理口径一致（取消 WS 订阅 + clearPendingSend + 清 messages）。
       // [W1] 只做资源清理，不 toast、不吞错——rethrow 让调用方 handleForkSend 统一反馈 + restoreInput。
       disposeSession(newId)
-      await sessionApi.remove(newId).catch(() => {})
+      // 回滚清理是 best-effort：remove 失败只留痕（runtime 侧可能残留孤儿空壳，重启后经
+      // 会话扫描重现），不吞主错误——主错误在下方 rethrow 由调用方统一 toast。
+      await sessionApi.remove(newId).catch((err) =>
+        console.warn(`[useForkActions] rollback remove(${newId}) failed:`, err),
+      )
       session.removeFromList(newId)
       throw e
     }
@@ -173,7 +176,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     const last = lastAssistantOfFocused()
     if (!last) return
     try {
-      await forkSession(last.sessionId, last.messageId, { includeFrom: true, openInStandby: false })
+      await forkSession(last.sessionId, last.messageId, { includeFrom: true })
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
       toastError(t('panel.message.forkFailed', { error }))

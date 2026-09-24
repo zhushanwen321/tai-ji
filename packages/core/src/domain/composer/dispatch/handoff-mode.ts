@@ -9,7 +9,8 @@
  * - handoffBoxClass / handoffPlaceholder：handoff 模式派生的 class 与 placeholder 文案
  * - handleHandoffEsc：Esc 退出（清空输入 + exitHandoffMode），返回是否已消费
  * - handleHandoffSend：handoff 模式发送（调 handoff(srcId, text) + 退出），返回是否已消费
- * - handoffModeRef：{ value: boolean } 包装对象，给 defineExpose 用（避免 Vue 解包顶层 ref）
+ * - handoffModeRef：{ value: boolean } 包装对象（不被 Vue 解包；返回面兼容保留——跨组件
+ *   触发走 handoffEnterSignal channel，Composer defineExpose 通路已删）
  *
  * 与 fork 模式互斥：进 handoff 前退出 fork（deps.exitForkMode）；fork 模式自身进 handoff 时也对称退出。
  *
@@ -45,7 +46,7 @@ interface HandoffSourceShape {
 /** useComposerHandoffMode 返回类型（从函数内联类型提取为命名 interface，便于复用 + 阅读） */
 export interface ComposerHandoffModeReturn {
   handoffMode: Ref<boolean>
-  /** { value: boolean } 包装对象，给 defineExpose 用（不被 Vue 解包） */
+  /** { value: boolean } 包装对象（不被 Vue 解包；返回面兼容保留——跨组件触发走 handoffEnterSignal channel） */
   handoffModeRef: { readonly value: boolean }
   enterHandoffMode: (srcSessionId: string) => void
   exitHandoffMode: () => void

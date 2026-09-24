@@ -172,15 +172,19 @@ describe('onForceQuitSession 队列回收编排（投递所有权内核 u3c / D1
     expect(toastMocks.info).not.toHaveBeenCalled()
   })
 
-  it('FQ-4: 条目全为空白文本 → 提示条目数，但不向输入框注入空串', async () => {
+  it('FQ-4: 条目全为空白文本 → toastError(空内容未能收回)，不注入空串、不发成功提示', async () => {
     deliveryMock.drainDelivery.mockResolvedValue(drainReply('s1', ['   ']))
     const { actions, unmount } = mountActionsHost()
     wrappers.push({ unmount })
 
     await actions.onForceQuitSession('s1')
 
+    expect(deliveryMock.drainDelivery).toHaveBeenCalledWith('s1')
     expect(composerInjectionStore.pendingInjection.value).toBeNull()
-    expect(toastMocks.info).toHaveBeenCalledWith('1 条排队消息已收回草稿')
+    // 空内容条目计入失败出声（forceQuitQueueRecoverEmpty = '{count} 条排队条目内容为空，
+    // 未能收回草稿'）：内核条目已 drain 不可再生，静默 = 消息丢失形态
+    expect(toastMocks.error).toHaveBeenCalledWith('1 条排队条目内容为空，未能收回草稿')
+    expect(toastMocks.info).not.toHaveBeenCalled()
   })
 
   it('FQ-5 [F-U2]: 连续两次 forceQuit（不同 session）→ 槽位两批文本 \\n\\n 连接，前一批不丢失', async () => {

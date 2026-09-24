@@ -9,10 +9,10 @@
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send-route.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { resolveSendRoute, IDLE_SESSION_PHASE } from './send-route'
+import { resolveSendRoute, IDLE_SESSION_PHASE, type SessionPhase } from './send-route'
 
-/** 行工厂：占位维按用例覆写 */
-function phase(over: Partial<{ turn: 'idle' | 'dispatching' | 'generating' | 'settling'; compacting: boolean; bash: boolean }>) {
+/** 行工厂：占位维按用例覆写（Partial<SessionPhase> 与生产类型同源，turn 联合扩值时本表不再漂移） */
+function phase(over: Partial<SessionPhase>) {
   return { ...IDLE_SESSION_PHASE, ...over }
 }
 

@@ -104,7 +104,7 @@ describe('useChat.sendBash / abortBash', () => {
     emitBashStart('s-term', 'sleep 3700')
     emitBashResult('s-term', 'sleep 3700', '命令执行超过 1 小时，已停止等待——命令可能仍在后台运行。……')
     rejectBash(new Error('Bash execution failed'))
-    await expect(sending).resolves.toBeUndefined() // 不 throw（错误已消化，与 send/abort 同策略）
+    await expect(sending).resolves.toBe(false) // 不 throw（错误已消化，与 send/abort 同策略）；[R2-A5] 失败返回 false
 
     expect(apiMock.bash).toHaveBeenCalledOnce()
     expect(toastError).not.toHaveBeenCalled()
@@ -120,7 +120,7 @@ describe('useChat.sendBash / abortBash', () => {
     const sending = sendBash('s-inflight', 'sleep 3700', false)
     emitBashStart('s-inflight', 'sleep 3700')
     rejectBash(new Error('request timeout after 3660000ms'))
-    await expect(sending).resolves.toBeUndefined()
+    await expect(sending).resolves.toBe(false)
 
     expect(apiMock.bash).toHaveBeenCalledOnce()
     expect(toastError).toHaveBeenCalledOnce()

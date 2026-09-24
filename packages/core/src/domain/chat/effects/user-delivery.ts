@@ -21,11 +21,12 @@
  * reset 钩子已按 ADR-0049 分区纪律对齐。
  */
 import { ref } from 'vue'
-import { textToSegments } from '@taiji/shared'
+import { textToSegments, MSG_ID_TAG_RE } from '@taiji/shared'
 import type { PiMessageEntry, Segment } from '@taiji/shared'
 import type { MessageEffectContext } from '../effect-types'
 import type { DeliveryFrameEntry } from '../api-port'
 import { DEFER_FLUSH_MARKER_RE } from '../apply-entry-convert'
+import { isDevMode } from '../../../platform/dev-mode'
 
 /**
  * [簇 A2 沿用] 内核出站裸标记的显示层剥标记正则——SSOT 在 apply-entry-convert.ts（剥标记
@@ -34,16 +35,18 @@ import { DEFER_FLUSH_MARKER_RE } from '../apply-entry-convert'
 export { DEFER_FLUSH_MARKER_RE }
 
 /**
- * [u3b 契约桥] 回执标记提取正则（双形态，只服务送达回执匹配）：内核出站标记 id 期望 =
- * 条目 clientUuid 去 `u-` 前缀的裸 uuid（与显示剥标记 SSOT 同空间——裸标记不被
- * msg-id-mapper input hook 剥除，PS-26），同时兼容 u-<uuid> 原文形态（u1 若以 clientUuid
- * verbatim 出标记也命中——双形态收口消除跨单元契约错配面）。捕获组 2 统一归一为裸 uuid。
- *
- * 为什么不复用 DEFER_FLUSH_MARKER_RE：其字符集结构性排除 u- 前缀（显示层只需裸形态）；
- * 本正则是回执匹配专用，与显示剥标记职责分离，不改 SSOT。
+ * [u3b 契约桥] 回执标记提取：SSOT = @taiji/shared 的 MSG_ID_TAG_RE（投递身份标记正则，
+ * 双形态 `u-<uuid>` / 裸 `<uuid>`，捕获组 2 = 裸 uuid——本文件原手写体已收敛进该 SSOT，
+ * 与 runtime skill-notice-publisher 同源）。只服务送达回执匹配；与显示剥标记
+ * DEFER_FLUSH_MARKER_RE 职责分离（其字符集结构性排除 u- 前缀，显示层只需裸形态），不改 SSOT。
  */
-const DELIVERY_RECEIPT_MARKER_RE =
-  /<!--taiji:msg:(u-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
+
+/**
+ * [R2-b04-2] 回执匹配用全局形态（由 shared SSOT 派生，不复制模式文本）：matchAll 取文本内
+ * **最后一个**标记——内核标记恒追加在消息尾部，用户正文自带（粘贴）标记时首匹配会命中
+ * 粘贴 id 而非本条投递身份（误配不命中投影 → 条目滞留 in-flight 至下一帧快照覆盖）。
+ */
+const MSG_ID_TAG_RE_GLOBAL = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.flags}g`)
 
 // ── session.delivery 帧投影（D7 队列区单一数据源）──────────────────────────────
 
@@ -51,11 +54,34 @@ const DELIVERY_RECEIPT_MARKER_RE =
 // taste:allow-no-data-owner W24-EX-C（内核状态帧投影，interim 承载说明见文件头注）
 const deliveryEntriesBySession = ref<Map<string, DeliveryFrameEntry[]>>(new Map())
 
-/** steer/queued 条目 morph 时捕获的乐观气泡 segments（sid → clientUuid → segments）。
- *  非响应式核心记账：送达回执时一次性消费（按原段入流），消费即删。 */
+/** steer/queued 条目 morph 时捕获的乐观气泡 segments（sid → clientUuid → 快照）。
+ *  非响应式核心记账：送达回执时一次性消费（按原段入流），消费即删。
+ *  [R2-b04-4] 值带 capturedAt——投递丢失/内核作废时回执永不到达，无 TTL 的模块级 Map
+ *  会永久驻留（A 类慢泄漏）；TTL 语义见下方常量注释。 */
+interface MorphSegmentsSnapshot {
+  segments: Segment[]
+  capturedAt: number
+}
 // taste:allow-no-data-owner W24-EX-C（进程内流程状态——morph 暂存的段待回执消费，非 GUI 数据源；
 // 与上方投影同批 interim 承载，登记表条目随 u3c/u5 收编评估一并补登）
-const morphSegmentsBySession = new Map<string, Map<string, Segment[]>>()
+const morphSegmentsBySession = new Map<string, Map<string, MorphSegmentsSnapshot>>()
+
+/**
+ * [R2-b04-4] morph 段 TTL（对齐 store RESPAWN_NOTICE_RETENTION_MS 5min 先例）：过期段在
+ * 写入侧（captureMorphSegments 惰性清扫）与消费侧（consumeDeliveryReceipt 到期判否）
+ * 清理，无定时器、不抛错——过期即视为无 morph 段，回执落 ② 纯文本降级链（可见性不丢）。
+ */
+const MORPH_SEGMENTS_TTL_MS = 300_000
+
+/** 清扫全表过期 morph 段（惰性触发：captureMorphSegments 写入前调用）。 */
+function purgeExpiredMorphSegments(now: number): void {
+  for (const [sid, partition] of morphSegmentsBySession) {
+    for (const [clientUuid, snapshot] of partition) {
+      if (now - snapshot.capturedAt > MORPH_SEGMENTS_TTL_MS) partition.delete(clientUuid)
+    }
+    if (partition.size === 0) morphSegmentsBySession.delete(sid)
+  }
+}
 
 /** 消费 session.delivery 帧：投影整体替换（空条目集删键，不积累空形态——对齐 retryStates 惯例）。 */
 export function replaceDeliveryProjection(sid: string, entries: DeliveryFrameEntry[]): void {
@@ -98,8 +124,10 @@ export function resetDeliveryProjectionForTest(): void {
  * 重放产出同文消息）。重复捕获以最后一次为准（同 clientUuid 只会提交一次，防御性语义）。
  */
 export function captureMorphSegments(sid: string, clientUuid: string, segments: Segment[]): void {
-  const partition = morphSegmentsBySession.get(sid) ?? new Map<string, Segment[]>()
-  partition.set(clientUuid, segments)
+  // [R2-b04-4] 写入前惰性清扫过期段（无定时器，TTL 见常量注释）
+  purgeExpiredMorphSegments(Date.now())
+  const partition = morphSegmentsBySession.get(sid) ?? new Map<string, MorphSegmentsSnapshot>()
+  partition.set(clientUuid, { segments, capturedAt: Date.now() })
   morphSegmentsBySession.set(sid, partition)
 }
 
@@ -107,6 +135,7 @@ export function captureMorphSegments(sid: string, clientUuid: string, segments: 
  * 送达回执消费（一次性）：条目投影转 delivered（队列区随即隐去）+ 返回捕获的 morph 段
  * （未 morph 过的条目返回 undefined——direct 气泡保持原位，无重复入流面）。
  * 幂等：已 delivered 条目返回 undefined（重复回执不二次入流）。
+ * [R2-b04-4] TTL：过期段不消费（视为无 morph 段，回执落 ② 纯文本降级链），就地清理不抛错。
  */
 function consumeDeliveryReceipt(sid: string, clientUuid: string): Segment[] | undefined {
   const entries = deliveryEntriesBySession.value.get(sid)
@@ -116,13 +145,16 @@ function consumeDeliveryReceipt(sid: string, clientUuid: string): Segment[] | un
     next.set(sid, entries!.map((e) => (e.clientUuid === clientUuid ? { ...e, state: 'delivered' as const } : e)))
     deliveryEntriesBySession.value = next
   }
-  const segments = morphSegmentsBySession.get(sid)?.get(clientUuid)
-  if (segments !== undefined) {
-    const partition = morphSegmentsBySession.get(sid)!
+  const partition = morphSegmentsBySession.get(sid)
+  const snapshot = partition?.get(clientUuid)
+  if (partition && snapshot) {
     partition.delete(clientUuid)
     if (partition.size === 0) morphSegmentsBySession.delete(sid)
   }
-  return segments
+  if (snapshot && Date.now() - snapshot.capturedAt <= MORPH_SEGMENTS_TTL_MS) {
+    return snapshot.segments
+  }
+  return undefined
 }
 
 // ── message_end(user) 送达回执（①a 泛化，C-data-08 修订方向）──────────────────
@@ -134,8 +166,10 @@ function consumeDeliveryReceipt(sid: string, clientUuid: string): Segment[] | un
  * （P2 探针，pi 不 trim）；wire 宽形态也可能到达 string（lift/异常帧），两种都归一为
  * 纯文本。非 text part（image 等）不拼接。text parts 按顺序拼接与 reducer 的 textContent
  * 累加同语义（apply-entry-convert）。
+ * [R1-b04-候选2] 模块私有（生产仅同文件 confirmKernelDeliveryOnMessageEnd 消费，测试
+ * 直接 import = 0）——收窄多余公开面。
  */
-export function extractUserContentText(entry: PiMessageEntry): string {
+function extractUserContentText(entry: PiMessageEntry): string {
   const content = entry.message.content
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -185,16 +219,20 @@ export function confirmKernelDeliveryOnMessageEnd(
 ): boolean {
   const text = extractUserContentText(entry)
   if (!text) return false
-  const marker = text.match(DELIVERY_RECEIPT_MARKER_RE)
+  // [R2-b04-2] 取文本内最后一个标记（内核标记恒追加尾部，防用户正文自带标记首匹配误配）
+  const marker = [...text.matchAll(MSG_ID_TAG_RE_GLOBAL)].pop()
   if (!marker) return false
   const bareId = marker[2]!
-  // 双形态匹配（契约桥见 DELIVERY_RECEIPT_MARKER_RE 注释）：裸 uuid（期望形态）/ u-<uuid> 原文
+  // 双形态匹配（契约桥见 MSG_ID_TAG_RE 注释）：裸 uuid（期望形态）/ u-<uuid> 原文
   const entries = deliveryEntriesBySession.value.get(sid) ?? []
   const hit = entries.find(
     (e) => (e.clientUuid === bareId || e.clientUuid === `u-${bareId}`) && e.state !== 'delivered',
   )
   if (!hit) return false
   const segments = consumeDeliveryReceipt(sid, hit.clientUuid)
+  // [R2-b04-3] 外来投递观测判定（须在 ② 入流前取——appendUser 会改变 hasLocalBubble 结果）：
+  // 无 morph 段且 ref 无同 id 气泡 = 本地未挂账的投递（外来注入 / reattach 形态）。
+  const isForeignReceipt = segments === undefined && !hasLocalBubble(ctx, sid, hit.clientUuid)
   if (segments) {
     // ① morph 段入流（气泡已移除的条目按原 segments 恢复为正常 user 气泡——overlay-only，
     // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）
@@ -203,9 +241,22 @@ export function confirmKernelDeliveryOnMessageEnd(
     // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示
     ctx.appendUser(sid, textToSegments(text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()))
   }
+  if (isForeignReceipt) logForeignReceiptDecrement(sid, hit)
   // inflight 占位回收：统一 submit 的每条乐观气泡挂 1，本帧即其确认帧（② 不再重复扣）
   ctx.decrementInflight(sid, 1)
   return true
+}
+
+/** [R2-b04-3] 外来投递回执扣 inflight 的 dev 计数/日志（生产零开销；钳制幂等机制不变）。 */
+let foreignReceiptDecrementCount = 0
+function logForeignReceiptDecrement(sid: string, hit: DeliveryFrameEntry): void {
+  if (!isDevMode()) return
+  foreignReceiptDecrementCount++
+  console.warn(
+    `[user-delivery] foreign receipt decremented inflight (total=${foreignReceiptDecrementCount}, sid=${sid},` +
+      ` clientUuid=${hit.clientUuid}, lane=${hit.lane})` +
+      ` — no local morph segments and no local bubble; the decrement may consume another direct submission's confirmation quota (clamped >= 0, idempotent)`,
+  )
 }
 
 /** ref 分区是否已有该 id 的气泡（appendUser 契约：气泡 id = clientUuid；truncateFrom 幂等）。 */

@@ -30,10 +30,10 @@ import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
+import zhPanel from '@/i18n/locales/zh-CN/panel'
+import enPanel from '@/i18n/locales/en-US/panel'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
@@ -391,27 +391,20 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 })
 
 describe('ActivityStrip · i18n key 完整（P5）', () => {
-  /** 四个行文案 key：compacting 手动/自动、bash、thinking（ActivityStrip 唯一新增消费面） */
-  const KEYS: Array<[string, string, string]> = [
-    ['panel.message.compressing', "compressing: '压缩中'", "compressing: 'Compacting'"],
-    ['panel.message.autoCompressing', "autoCompressing: '正在自动压缩上下文'", "autoCompressing: 'Auto-compacting context…'"],
-    ['panel.message.executingBash', "executingBash: '正在执行'", "executingBash: 'Running'"],
-    ['panel.message.dispatching', "dispatching: '思考中…'", "dispatching: 'Thinking…'"],
-  ]
+  /** 直接 import 双侧 locale 模块断言嵌套键（locale 为纯 `export default {}`，可安全导入）——
+   *  替代原 readFileSync + 精确文本行镜像（镜像实现把源码格式当契约，格式扰动即误红）。 */
+  const ZH_MESSAGE: Record<string, unknown> = zhPanel.message
+  const EN_MESSAGE: Record<string, unknown> = enPanel.message
 
   it('compressing/autoCompressing/executingBash/dispatching 在 zh/en locale 均定义', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../i18n/locales/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en-US/panel.ts'), 'utf8')
-    for (const [key, zhLine, enLine] of KEYS) {
-      expect(zh, `${key} 缺 zh-CN 定义`).toContain(zhLine)
-      expect(en, `${key} 缺 en-US 定义`).toContain(enLine)
+    for (const key of ['compressing', 'autoCompressing', 'executingBash', 'dispatching']) {
+      expect(ZH_MESSAGE[key], `panel.message.${key} 缺 zh-CN 定义`).toEqual(expect.any(String))
+      expect(EN_MESSAGE[key], `panel.message.${key} 缺 en-US 定义`).toEqual(expect.any(String))
     }
   })
 
-  it('被迁出的 TurnMeta 占位 key（panel.message.thinking）已随占位删除同批清扫', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../i18n/locales/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en-US/panel.ts'), 'utf8')
-    expect(zh).not.toContain("thinking: '思考中'")
-    expect(en).not.toContain("thinking: 'Thinking'")
+  it('被迁出的 TurnMeta 占位 key（panel.message.thinking）已随占位删除同批清扫（防复活）', () => {
+    expect(ZH_MESSAGE.thinking).toBeUndefined()
+    expect(EN_MESSAGE.thinking).toBeUndefined()
   })
 })

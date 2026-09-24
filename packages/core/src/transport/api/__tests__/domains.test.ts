@@ -51,7 +51,12 @@ import * as workspace from '../domains/workspace'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // resetAllMocks（非 clearAllMocks）：mockClear 只清 calls/results，不清
+  // mockResolvedValueOnce 队列——前测中断残留的 Once 值会在下测前几次调用顶掉兜底
+  // 实现，失败原因指向被测函数而非前测残留。reset 连实现一并清，基线 stub 在下
+  // 一行重播；各用例对 mockOn / mockOnGlobalType / mockWsSend 均为用例内显式配置，
+  // 无需在 beforeEach 重建。vi.mock 工厂内的箭头函数转发层非 vi.fn 本体，reset 不影响。
+  vi.resetAllMocks()
   mockCommand.mockImplementation(async () => ({}))
 })
 
@@ -104,7 +109,9 @@ describe('chat 域 RPC 封装', () => {
     const [type, payload, timeout] = mockCommand.mock.calls[0]
     expect(type).toBe('session.compact')
     expect(payload).toEqual({ sessionId: 's1', customInstructions: 'instr' })
-    expect(timeout).toBeGreaterThan(RPC_BACKSTOP_TIMEOUT_MS)
+    // 钉字面毫秒值（COMPACT_RPC_TIMEOUT_MS 1_800_000 + RENDERER_RPC_MARGIN_MS 60_000）：
+    // 不引用同批常量防镜像互证，compact/bash 两档互换（1860s ↔ 3660s）即红
+    expect(timeout).toBe(1_860_000)
   })
 
   it('bash：excludeFromContext 未传时不带该键，传了透传；超时用 BASH 档', async () => {
@@ -112,7 +119,8 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', command: 'ls' })
     await chat.bash('s1', 'ls', true)
     expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', command: 'ls', excludeFromContext: true })
-    expect(mockCommand.mock.calls[1][2]).toBeGreaterThan(RPC_BACKSTOP_TIMEOUT_MS)
+    // 钉字面毫秒值（BASH_RPC_TIMEOUT_MS 3_600_000 + RENDERER_RPC_MARGIN_MS 60_000），同上防镜像互证
+    expect(mockCommand.mock.calls[1][2]).toBe(3_660_000)
   })
 
   it('abortBash 走 message.abortBash', async () => {

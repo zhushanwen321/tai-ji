@@ -97,7 +97,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { presets, defaultPresetId, presetOpenRequest, loadPresets, setDefaultPreset, flow } = useNewTaskDeps()
+const { presets, defaultPresetId, presetOpenRequest, loadPresets, setDefaultPreset, toast, flow } =
+  useNewTaskDeps()
 
 /**
  * 显式选择档（resolve 输入，非回显真源）：用户真实点击 popover 项时记录（onSelectPreset），
@@ -301,10 +302,20 @@ function onSelectPreset(preset: PiLaunchPreset): void {
  * 勾选/取消「设为默认」。
  * 勾选：调 setDefaultPreset(displayPresetId) 把当前显示/将生效的预设写为全局默认。
  * 取消：no-op（全局默认至少有一个值，不支持取消到空——用户可选其他预设设默认替代）。
+ * 失败：setDefaultPreset 契约 = RPC 失败时 store 已乐观回滚后 rethrow（usePiPresets），
+ * 本处 catch 转 toast 可见反馈（checkbox 回弹 + 失败原因，两条腿都不缺）。
  */
 async function onToggleDefault(checked: boolean | string): Promise<void> {
   if (checked && displayPresetId.value) {
-    await setDefaultPreset(displayPresetId.value)
+    try {
+      await setDefaultPreset(displayPresetId.value)
+    } catch (err) {
+      toast.error(
+        t('newTask.presetSelect.setDefaultFailed', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
   }
 }
 </script>

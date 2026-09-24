@@ -65,8 +65,6 @@ export interface MessageEffectContext {
    */
   /** 读 per-session inflight 计数（无记录 = 0）。 */
   getInflight: (sessionId: string) => number
-  /** inflight += n（默认 1；统一提交乐观挂账 +1）。n ≤ 0 no-op。 */
-  incrementInflight: (sessionId: string, n?: number) => void
   /** inflight -= n（默认 1；message_end(user) 确认 / send 失败回滚）。钳制 ≥ 0，归零删条目。 */
   decrementInflight: (sessionId: string, n?: number) => void
   /** inflight 清零（abort（message.complete{aborted}）挂点，D4：确认基线随队列作废）。幂等。 */

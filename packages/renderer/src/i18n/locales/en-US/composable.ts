@@ -1,5 +1,4 @@
 export default {
-  agentProcessing: 'Agent is processing',
   sendFailed: 'Failed to send message: {msg}',
   supplementSendFailed: 'Failed to send supplement: {msg}',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
@@ -23,8 +22,6 @@ export default {
   cwdFallbackToHome: 'No directory selected, created in home directory',
   imageMigratePartialFailed: '{count} image(s) failed to migrate (temp file may be cleaned), will try original path',
   loadFailed: 'Load failed',
-  contextCompacted: 'Context compacted',
-  branched: 'Branched',
   copyLabel: 'Copy',
   removeLabel: 'Remove',
   // skill chip tooltip (C5): injection behavior + size cap (50KB = injection budget cap)

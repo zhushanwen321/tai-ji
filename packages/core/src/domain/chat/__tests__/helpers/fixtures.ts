@@ -6,10 +6,13 @@
  * - MessageEffectContext 构造 makeCtx（原 effects / entry-truncate 两处同构版：全 vi.fn 回调；形态随投递所有权内核 u3b 后的 MessageEffectContext 终态——drainN/reconcilePending/queueStates 已退役摘除，premature-timeout 两方法随上游移除同步摘除）
  * - PiMessageEntry 构造 msgEntry（原 apply-entry / apply-entry-convert /
  *   apply-entry-fold-equivalence 三处本地版）
+ * - message_end(user) 帧工厂 userEndFrame（原 useChat.test 的 userEnd / userEndMarked、
+ *   effects-delivery-receipt.test 的 userEnd 三处本地版——payload 逐字同构收敛；
+ *   marker 参数覆盖「内核裸标记 / 无标记（落 ② 纯计数兜底）」双形态）
  *
  * 有意不收敛（本地版有语义差异，保留各文件实现；此处登记差异防误合并）：
- * - effects-defer-confirmation.test.ts makeCtx：inflight 三键是真实计数语义（读写真实
- *   Map，非 vi.fn）且返回类型扩展 inflightOf()——命中回收断言读数值而非调用记录
+ * - effects-delivery-receipt.test.ts makeCtx：inflight 键是真实计数语义（读写真实
+ *   Map，非 vi.fn）且返回类型扩展 inflightOf()/addInflight()——命中回收断言读数值而非调用记录
  * - pending-drain-fifo.test.ts queueUpdate：store 编排内联帧构造（固定 type + sut 闭包），
  *   非通用 msg 形态
  * - Message 实体构造器（store.test.ts 的 userMsg/streamingAssistant/completeAssistant/
@@ -43,9 +46,9 @@ export function makeCtx(initial: Message[] = [], sid = 's-test'): MessageEffectC
     appendUser: vi.fn(),
     // w21：entry 载体帧喂 reducer 的接入点（store.applyEntryFrame 注入）
     applyEntryFrame: vi.fn(),
-    // steer-bubble u1/D2：inflight 确认计数读写（message_end 纯计数兜底裁决输入，store 注入）
+    // steer-bubble u1/D2：inflight 确认计数（message_end 纯计数兜底裁决输入，store 注入；
+    // 增量入口 incrementInflight 已收口到 store 方法面，ctx 只暴露读/减/清三操作）
     getInflight: vi.fn(() => 0),
-    incrementInflight: vi.fn(),
     decrementInflight: vi.fn(),
     clearInflight: vi.fn(),
   }
@@ -68,4 +71,25 @@ export function msgEntry(
     timestamp: overrides?.timestamp ?? '2026-08-19T10:00:00.000Z',
     message: body,
   }
+}
+
+/**
+ * 构造 message_end(user) 帧（content 落盘形态）。marker 缺省 = 无标记形态（送达回执落
+ * ② 纯计数兜底）；传 marker 时拼接 `<!--taiji:msg:<marker>-->` 内核标记（裸 uuid 或
+ * u-<uuid> 原文均命中——u3b 契约桥双形态，提取正则 SSOT = @taiji/shared MSG_ID_TAG_RE）。
+ */
+export function userEndFrame(sid: string, text: string, marker?: string): ServerMessage {
+  const fullText = marker === undefined ? text : `${text}\n<!--taiji:msg:${marker}-->`
+  return {
+    type: 'message.message_end',
+    payload: {
+      sessionId: sid,
+      entry: {
+        type: 'message',
+        parentId: null,
+        timestamp: new Date(0).toISOString(),
+        message: { role: 'user', content: [{ type: 'text', text: fullText }], timestamp: 0 },
+      },
+    },
+  } as ServerMessage
 }

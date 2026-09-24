@@ -123,10 +123,15 @@ export interface ComposerSendDeps {
   localThinkingLevel: Ref<string | undefined>
   // ── 统一 submit 终端 ──
   /** 统一提交（useChat 提供：乐观气泡 + delivery.submit，lane 由 runtime 内核判定——D1）。
-   *  [u3b] 原 steer dep（D6 steer 路由终端）与 enqueueCompact dep（defer 入队）随两分支退役。 */
-  send: (sessionId: string, segments: Segment[]) => Promise<void>
-  /** 压缩上下文（useChat 提供） */
-  compact: (sessionId: string, customInstructions?: string) => Promise<void>
+   *  [u3b] 原 steer dep（D6 steer 路由终端）与 enqueueCompact dep（defer 入队）随两分支退役。
+   *  [R2-A5 失败信号契约] 返回 false = RPC 失败（useChat 内部已 toast + 回滚乐观气泡），
+   *  调用方据此 restoreSegments 恢复草稿（对齐 steer 先例）；true = 已受理。
+   *  类型面 Promise<boolean | void> 是宽兼容槽：boolean 可赋 void 返回位（提供方在
+   *  useChat 侧契约落地前后均可注入），合流后可收窄为 Promise<boolean>。 */
+  send: (sessionId: string, segments: Segment[]) => Promise<boolean | void>
+  /** 压缩上下文（useChat 提供）。[R2-A5 失败信号契约] 同 send：false = RPC 失败（内部
+   *  双分型反馈：compaction 级进对话流 / transport 级 toast），调用方恢复草稿。 */
+  compact: (sessionId: string, customInstructions?: string) => Promise<boolean | void>
   // ── 反馈 ──
   /** toast 错误（useToast 提供） */
   toastError: (msg: string) => void
@@ -191,9 +196,24 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
 
 /**
  * active 态分支（priority 4-6）：bash 分流（!/!! 前缀，必须在 /compact 前）→ /compact →
- * 统一 submit（u3b/D1：direct/steer/queued 全车道收敛，失败 restoreSegments 回滚）。
+ * 统一 submit（u3b/D1：direct/steer/queued 全车道收敛）。
+ *
+ * [R2-A5 失败恢复] send / compact 失败信号（false）→ restoreSegments 恢复完整草稿
+ * （slash chip + 文本，W8 通路复活）——useChat 侧已回滚乐观气泡（u3b）并 toast/对话流分型
+ * 反馈，调用方只恢复输入不补 toast（防双提示，对齐 submit.ts onSteer 先例）；catch 仅兜
+ * 契约外异常（useChat 契约内不 throw），此路径 useChat 未 toast，故补 toast。
  */
 async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], text: string): Promise<void> {
+  // [b08-F2] session 缺失守卫（删除/LRU 驱逐的时序窗口）：本地早退，不发 sessionId:null 的
+  // RPC——此前 `sessionIdRef.value!` 非空断言让该失败漂到 runtime 边界才爆，报错指向 runtime
+  // 而非「session 不存在」。守卫先于 clearInput：输入原地保留不丢。
+  // toast 缺口：composer 域无「session 不存在」i18n 词条（locale 界外不新增 key），以
+  // console.warn 留痕 + 输入保留兜底；renderer 侧补 key 后在此接 toastError。
+  const sessionId = deps.sessionIdRef.value
+  if (!sessionId) {
+    console.warn('[useComposerSend] panel 发送早退：当前无活跃 session（输入已保留，可切换 session 后重发）')
+    return
+  }
   if (await deps.composerBash.trySendBash(text)) return
   // [D4-c 迁移] /compact 拦截输入从 draft.value 迁 segmentsToPrompt——判定源单一化 +
   // 消除 draft 快照失真窗口：`segmentsToPrompt(segments)` 即发送载荷本身，判定与载荷构造
@@ -204,14 +224,29 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
       ? trimmed.slice('/compact '.length).trim() || undefined
       : undefined
     deps.clearInput()
-    await deps.compact(deps.sessionIdRef.value!, customInstructions)
+    // isSending 置位/复位对齐 send 分支形态（双发锁：compact RPC 期间禁止并发提交）
+    deps.isSending.value = true
+    try {
+      // 严格比较 false：只认显式失败信号——宽兼容槽下 void 提供方（useChat 契约落地前）
+      // resolve undefined，真值判断会把成功发送误判为失败
+      const delivered = await deps.compact(sessionId, customInstructions)
+      if (delivered === false) deps.restoreSegments(segments)
+    } catch (e) {
+      deps.restoreSegments(segments)
+      deps.toastError(deps.t('composable.compactFailed', { msg: toErrorMessage(e) }))
+    } finally {
+      deps.isSending.value = false
+    }
     return
   }
   deps.clearInput()
   deps.isSending.value = true
   try {
-    await deps.send(deps.sessionIdRef.value!, segments)
+    // 严格比较 false（同 compact 分支）：void 提供方 resolve undefined 不触发恢复
+    const delivered = await deps.send(sessionId, segments)
+    if (delivered === false) deps.restoreSegments(segments)
   } catch (e) {
+    // 契约外异常防御（useChat.send 契约内不 throw、不 toast 之外的意外抛出）：W8 回滚 + toast
     deps.restoreSegments(segments)
     deps.toastError(deps.t('panel.panel.sendFailed', { error: toErrorMessage(e) }))
   } finally {
@@ -230,7 +265,10 @@ export function useComposerSend(deps: ComposerSendDeps): { onSend: () => Promise
    * 发送分流（统一分发器，Enter / Alt+Enter / 发送按钮共用）：
    * staging > canSend 守卫 > staging.send > landing（含 bash 检测）> bash(!/!!) >
    * /compact > send（统一 submit）。
-   * 失败均 restoreSegments 回滚草稿（W8）。
+   * 失败恢复（W8）：landing 首发 catch → restoreSegments；active 态 send/compact 消费
+   * useChat 失败信号（false）→ restoreSegments（契约失败路径已由 useChat toast/分型，
+   * 不双提示）；catch 仅兜契约外异常（补 toast）。bash 分支失败信号见 bash.ts（输入恢复
+   * 待 renderer 注入 restoreInput，登记缺口）。
    *
    * 各优先级分支提取为模块级 helper（routeStaging / sendLandingFirstMessage /
    * sendActiveMessage），此处只留编排；text 在门检查前捕获（computed 读纯函数，时序等价）。

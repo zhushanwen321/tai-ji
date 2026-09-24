@@ -23,14 +23,13 @@
          composer-box 内 focus 算 inside 不触发 dismiss，键盘路由见 onKeydown。
          cwd：landing 态 $ 候选的 cwd 通道（landing-composer-session-file-symbols D2；
          panel 有 sid 不消费。flow.currentCwd 是普通对象内嵌套 ComputedRef，模板不自动
-         解包，须显式 .value；可选链 + ?? null 兑容无 currentCwd 字段的旧 mock/flow 形态，
-         缺失即无 cwd 不弹，与 S4b 空态语义一致） -->
+         解包，须显式 .value；缺失即无 cwd 不弹，与 S4b 空态语义一致） -->
     <CommandPopover
       ref="commandPopoverRef"
       v-model:open="cmdOpen"
       :type="cmdType"
       :session-id="sessionId ?? undefined"
-      :cwd="flow.currentCwd?.value ?? null"
+      :cwd="flow.currentCwd.value"
       :variant="variant"
       :project-skills="projectSkills"
       :global-skills="globalSkills"
@@ -339,7 +338,7 @@ const projectSkillsCwd = computed<string | null>(() => {
     if (!props.sessionId) return null
     return sessionStore.list.find((s) => s.id === props.sessionId)?.cwd ?? null
   }
-  return flow.currentCwd?.value ?? null
+  return flow.currentCwd.value
 })
 const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
@@ -427,15 +426,14 @@ const {
   handleArrowUp,
   handleArrowDown,
   resetBrowsing,
-  isBrowsing,
+  isBrowsingFor,
+  getSavedDraft,
   attachedItems,
   refreshAttachedItems,
   onRemoveContextChip,
   onDragOver,
   onDragLeave,
   onDrop,
-  fork,
-  handoff,
   staging,
   onFollowUp,
   onAbort,
@@ -468,8 +466,11 @@ watch(
   () => props.sessionId,
   (newId, oldId) => {
     if (oldId) {
-      // browsing 态 getText() 返回历史条目，存用户实际输入
-      drafts.saveDraft(oldId, isBrowsing.value ? (draft.value || '') : (inputRef.value?.getText() ?? ''))
+      // browsing 态 getText() 已被历史条目替换，用户真实输入存在 history navState.savedDraft。
+      // browsing 判定与草稿读取都按旧 sid 显式取分区——watch 回调触发时 sessionIdRef 已指向
+      // 新 session，isBrowsing 只能读到新分区恒 false（R2-A6：此前该分支恒死、存入的恒是
+      // 历史条目文本，用户切回后草稿不可见、重新输入即永久丢失）。
+      drafts.saveDraft(oldId, isBrowsingFor(oldId) ? getSavedDraft(oldId) : (inputRef.value?.getText() ?? ''))
     }
     // 切 session 退出活跃 staging 模式（fork/handoff），避免来源残留指向错误 session
     staging.exit()
@@ -564,16 +565,4 @@ const composerInputDeps: ComposerInputDeps = {
   t: (key: string) => t(key),
 }
 provide(ComposerInputDepsKey, composerInputDeps)
-
-// Fork/Handoff 模式 API 暴露：modeRef 是 {value} 包装对象（非 ref 不被 defineExpose 解包）
-defineExpose({
-  forkMode: fork.forkModeRef,
-  enterForkMode: fork.enterForkMode,
-  exitForkMode: fork.exitForkMode,
-  handoffMode: handoff.handoffModeRef,
-  enterHandoffMode: handoff.enterHandoffMode,
-  exitHandoffMode: handoff.exitHandoffMode,
-  // 派生提交守卫（ref 解包为 boolean）：测试断言 staging 双发锁 / streaming 放行分支用
-  canSubmit,
-})
 </script>

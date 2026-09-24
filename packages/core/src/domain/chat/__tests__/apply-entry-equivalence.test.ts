@@ -77,6 +77,44 @@ function expectDeterministic(raw: unknown[], entryIds?: string[]): ChatViewState
   return first
 }
 
+// ── 断言基建共享 helper（原各组逐字重复的本地副本收敛至此；只合并归一/时钟/假 id
+// 生成器等断言策略设施。各组 fixture 消息体「两侧独立手写」的等价性惯例不受影响——
+// 那条约束防的是假等价，本区不是等价性证据）────────────────────────────────────
+
+/** ms → ISO（fixture 统一 timestamp 形态） */
+const ts = (ms: number) => new Date(ms).toISOString()
+
+/** uuidv7 形态假 id（replay 侧专用，模拟 pi 持久化 id 空间） */
+const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+
+/**
+ * 归一：剥消息 id 与 piEntryId（live 客户端前缀 id / reducer e<N> 派生 vs replay pi
+ * uuidv7 entry id——id 空间异源属 W21 已裁决差异类，等价性按内容断言）。
+ * 剥除后回填占位 id，保持 ChatViewState 形态（对比内容不受影响——两侧同规则剥除 + 同占位）。
+ */
+function normalizeIds(state: ChatViewState): ChatViewState {
+  const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
+    ...rest,
+    id: 'normalized',
+  })) as Message[]
+  return { ...state, messages }
+}
+
+/** turn 骨架投影（分组断言：turn 数 / user / assistants / trigger / noticeCommands / 非消息项） */
+const skeleton = (state: ChatViewState, msgs: Message[]) =>
+  toRenderItems(normalizeIds({ ...state, messages: msgs }).messages)
+    .map((item) =>
+      item.kind === 'turn'
+        ? {
+            kind: 'turn' as const,
+            user: item.turn.user?.content ?? null,
+            assistants: item.turn.assistants.map((a) => a.content),
+            trigger: item.turn.trigger ?? null,
+            noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
+          }
+        : { kind: item.kind, content: item.message.content },
+    )
+
 describe('applyEntry reducer 确定性 —— 同序列两次喂入 state 全等', () => {
   it('user + assistant 文本消息（message-converter.test L6 fixture）', () => {
     expectDeterministic([
@@ -263,25 +301,7 @@ describe('lift 保真（shim 路径 == 直接 entry 喂入）', () => {
 // pi 落盘时刻，差值为投递延迟）均为 W21 已裁决并在各构造点注释登记的差异类——归一只
 // 剥 id/piEntryId，timestamp 两侧 fixture 用同值隔离无关变量。
 describe('live ≡ reload 构造性等价（W6 全类型）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-
-  /** uuidv7 形态假 id（replay 侧专用，模拟 pi 持久化 id 空间） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
-
-  /**
-   * 归一：剥消息 id 与 piEntryId（live 客户端前缀 id / reducer e<N> 派生 vs replay pi
-   * uuidv7 entry id——id 空间异源属 W21 已裁决差异类，等价性按内容断言）。
-   */
-  // 剥除 id/piEntryId（uuidv7 异源差异）后回填占位 id，保持 ChatViewState 形态
-  // （对比内容不受影响——两侧同规则剥除 + 同占位）
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
+  // ts / piId / normalizeIds / skeleton 用文件级共享 helper（见「断言基建共享 helper」区）
 
   /** live 侧 entry 序列：各构造点真实 id 形态（appendUser u- / bashResultEffect bash- / customStart cm- / compactionSummary cmp- / message_end 无 id） */
   const liveEntries: PiEntry[] = [
@@ -386,22 +406,9 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 
     // ② 分组骨架一致：cancelled bash 是 turn 内 inline notice（W3 规则），两侧 turn 数 /
     //    user / assistants / notices 全等（含 noticeCommands——不再需要剥离分歧点）
-    const skeleton = (state: ChatViewState) =>
-      toRenderItems(normalizeIds(state).messages)
-        .map((item) =>
-          item.kind === 'turn'
-            ? {
-                kind: 'turn' as const,
-                user: item.turn.user?.content ?? null,
-                assistants: item.turn.assistants.map((a) => a.content),
-                trigger: item.turn.trigger ?? null,
-                noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
-              }
-            : { kind: item.kind, content: item.message.content },
-        )
-    expect(skeleton(liveState)).toEqual(skeleton(replayState))
-    expect(skeleton(liveState)).toHaveLength(2) // 两个 user 锚 turn
-    expect(skeleton(liveState)[0]).toMatchObject({ kind: 'turn', noticeCommands: ['sleep 300'] }) // cancelled 归首 turn notices
+    expect(skeleton(liveState, liveState.messages)).toEqual(skeleton(replayState, replayState.messages))
+    expect(skeleton(liveState, liveState.messages)).toHaveLength(2) // 两个 user 锚 turn
+    expect(skeleton(liveState, liveState.messages)[0]).toMatchObject({ kind: 'turn', noticeCommands: ['sleep 300'] }) // cancelled 归首 turn notices
   })
 
   it('E3b: transport 抛错例外锁定（收窄后唯一残余分歧——abort 且 await 抛错时 live 无 cancelled entry、pi 独立落盘有）', () => {
@@ -434,19 +441,6 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 
     // ② 分组不因它变化：turn 骨架（turn 数 / user / assistants / trigger）两侧一致，
     //    差异仅首 turn 的 notices 多一条——bash 是 inline notice，不影响 turn 边界
-    const skeleton = (state: ChatViewState, msgs: Message[]) =>
-      toRenderItems(normalizeIds({ ...state, messages: msgs }).messages)
-        .map((item) =>
-          item.kind === 'turn'
-            ? {
-                kind: 'turn' as const,
-                user: item.turn.user?.content ?? null,
-                assistants: item.turn.assistants.map((a) => a.content),
-                trigger: item.turn.trigger ?? null,
-                noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
-              }
-            : { kind: item.kind, content: item.message.content },
-        )
     const liveSkeleton = skeleton(liveState, liveState.messages)
     const replaySkeleton = skeleton(replayState, replayState.messages)
     expect(liveSkeleton).toHaveLength(2) // 两个 user 锚 turn，两侧一致
@@ -798,11 +792,10 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     resetDeliveryProjectionForTest()
   })
 
-  /** ms → ISO（fixture 统一 timestamp 形态） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-
-  /** uuidv7 形态假 id（重放侧专用，模拟 pi 持久化 id 空间；独立于 W6 块的同形 helper） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-0000000000${n}0`
+  // ts 用文件级共享 helper；本组假 id 保留异形本地副本（尾组编码 = n×10，与共享版不同形，
+  // 独立命名防混淆——不强行并入共享参数化，保 id 形态覆盖面）
+  /** uuidv7 形态假 id（重放侧专用，模拟 pi 持久化 id 空间） */
+  const steerPiId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-0000000000${n}0`
 
   /** 构造独立 store 实例（effectScope 包裹 onScopeDispose 注册 + 测试隔离）。 */
   function makeStore(): { store: ChatStoreInstance; dispose: () => void } {
@@ -920,7 +913,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     expect(s.store.getInflight(sid)).toBe(0)
 
     // 重放投影：同内容持久化 entry（uuidv7 id，pi 落盘 timestamp = 帧 timestamp）
-    const replayState = replayEntries([persistedUserEntry(piId(1), text, t0)])
+    const replayState = replayEntries([persistedUserEntry(steerPiId(1), text, t0)])
     expect(replayState.messages.filter((m) => m.role === 'user')).toHaveLength(1)
     const replay = replayState.messages[0]!
 
@@ -988,7 +981,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     // 两侧剥标记同点同规则（apply-entry-convert DEFER_FLUSH_MARKER_RE 复用）即本断言对象。
     const replayState = replayEntries([{
       type: 'message',
-      id: piId(2),
+      id: steerPiId(2),
       parentId: null,
       timestamp: ts(2000),
       message: {
@@ -1041,7 +1034,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     expect(s.store.getInflight(sid)).toBe(0)
 
     // 回执 ref 气泡 vs 同 entry 重放投影（ref timestamp = 回执 appendUser 点时钟，窗口 t0/t1）
-    const replayState = replayEntries([persistedUserEntry(piId(3), text, t0)])
+    const replayState = replayEntries([persistedUserEntry(steerPiId(3), text, t0)])
     const replay = replayState.messages[0]!
     expect(stripHetero(live)).toEqual(stripHetero(replay))
     expect(live).toMatchObject({ role: 'user', status: 'complete', content: segments })
@@ -1063,7 +1056,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
 // toolCallId」。entry 按生产构造点形态手写（tool_call_end：event-adapter
 // handleToolExecutionEnd；message_end：handleMessageEnd——同内容同构、均无 entry id）。
 describe('双入口等价（R2-TC S1）——同 toolCallId 双帧喂入 ≡ 单帧喂入', () => {
-  const ts = (ms: number) => new Date(ms).toISOString()
+  // ts 用文件级共享 helper（见「断言基建共享 helper」区）
 
   const assistantWithTc1: PiEntry = {
     type: 'message',
@@ -1152,19 +1145,7 @@ describe('双入口等价（R2-TC S1）——同 toolCallId 双帧喂入 ≡ 单
 // 同一 reducer 承担：live 累积（分区最终内容）与重开重放（get_entries 全量重放）对
 // 同一 entry 序列，经同一窗口函数投影后必得同一页。
 describe('预算窗口内 live ≡ reload（u6 re-scope）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态；独立于 W6 块的同形 helper） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-  /** uuidv7 形态假 id（replay 侧专用；独立于 W6 块的同形 helper） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
-
-  /** 归一（W6 同款：剥消息 id 与 piEntryId 后回填占位，uuidv7 异源差异类） */
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
+  // ts / piId / normalizeIds 用文件级共享 helper（见「断言基建共享 helper」区）
 
   it('W1: 同序列两侧各自经预算窗口投影后仍 deep-equal（窗口外翻页恢复，不在等价域）', () => {
     // 多 turn 序列（每条 user 开新 turn），体量超默认窗口（RECENT_TURNS=20）——
@@ -1381,10 +1362,7 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
 // 「live ≡ reload 对话流呈现一致」由「reload 侧多出的 entry 被 reducer 忽略」构造性成立，
 // 本组钉住且断言新旧两种 schema 行为一致（schema 扩展不改对话流——plan 投影走独立通道）。
 describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态；独立于 W6 块的同形 helper） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-  /** uuidv7 形态假 id（reload 侧专用，模拟 pi 持久化 id 空间） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+  // ts / piId / normalizeIds 用文件级共享 helper（见「断言基建共享 helper」区）
 
   /** 旧四字段 plan-state entry（JSONL 落盘形态：type:'custom'，设计 §2.1 现状实态） */
   const legacyPlanEntry: PiEntry = {
@@ -1434,15 +1412,6 @@ describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）
 
   /** reload 侧完整序列：对话流载体之间插入新旧两种 schema 的 plan-state entry */
   const reloadWithPlan: PiEntry[] = [reloadChat[0]!, legacyPlanEntry, reloadChat[1]!, extendedPlanEntry]
-
-  /** 归一（W6 同款：剥消息 id 与 piEntryId 后回填占位，uuidv7 异源差异类） */
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
 
   it('新旧两种 schema 的 plan-state entry 均不进对话流，两 schema 对话流行为一致', () => {
     const state = replayEntries(reloadWithPlan)

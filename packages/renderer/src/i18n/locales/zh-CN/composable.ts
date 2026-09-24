@@ -1,5 +1,4 @@
 export default {
-  agentProcessing: 'Agent 正在处理',
   sendFailed: '消息发送失败：{msg}',
   supplementSendFailed: '补充消息发送失败：{msg}',
   nextTurnSendFailed: '下轮消息发送失败：{msg}',
@@ -23,8 +22,6 @@ export default {
   cwdFallbackToHome: '未选择目录，已在主目录创建',
   imageMigratePartialFailed: '{count} 张图片迁移失败（临时文件可能已清理），将尝试用原路径发送',
   loadFailed: '加载失败',
-  contextCompacted: '上下文已压缩',
-  branched: '已分支',
   copyLabel: '复制',
   removeLabel: '移除',
   // skill chip tooltip（C5）：告知发送时注入行为与体量上限（50KB = 注入预算上限）

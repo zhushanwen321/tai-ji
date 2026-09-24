@@ -1,30 +1,23 @@
 /**
- * Composer file 注入集成测试（W2, U6-U9/R1/R3）。
+ * Composer file 注入集成测试（W2, U6-U9）。
  *
  * 验证 useComposerInjection 的 watch 消费行为：
  *  - U6 target=current 按 sessionId 匹配消费（insertFileChip 调用 + pendingInjection 清空）
+ *  - U6b lineRange 透传 insertFileChip
  *  - U7 target=current sessionId 不匹配不消费（不误清，留给目标 composer）
  *  - U8 target=new 仅 landing composer（variant=landing）消费
  *  - U9 target=new 不被 session composer（variant=panel）消费
- *  - R1 端到端：store 写入 → Composer 真实消费 → DOM 真实 chip（real 层）
- *  - R3 target=new 真实路由 landing composer 消费（real 层，不依赖 sessionId 匹配）
  *
- * 策略同 composer-slash-injection.test.ts：真 pinia + 真 composerInjectionStore，
- * mock 其余 store/composable/api，ComposerInput stub 暴露 insertFileChip spy。
- * R1/R3 用真实 ComposerInput（验证真实 DOM chip）。
+ * 策略：真 pinia + 真 composerInjectionStore，mock 其余 store/composable/api——mock 段
+ * 内联自足（不委托 helpers/composer-mount 工厂，仅消费其 composerChildStubs）：本文件
+ * flow mock 带 pendingPreset（landing 态 launchConfigView 解析消费），相对 helper 的
+ * composerFlowModule 为超集。ComposerInput stub 暴露 insertFileChip spy。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import {
-  composerChatModule,
-  composerFlowModule,
-  composerApiModule,
-  composerChatStoreModule,
-  composerSessionStoreModule,
-  composerChildStubs,
-} from '../helpers/composer-mount'
+import { composerChildStubs } from '../helpers/composer-mount'
 
 // ── mock composable / api（防真依赖构造报错）──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -47,6 +40,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
     state: { value: 'idle' },
     currentSessionId: { value: null },
     currentCwd: ref(null), // W4：useProjectSkills(flow.currentCwd) watch 需要真 ref，非裸对象
+    pendingPreset: ref(null), // landing 态 launchConfigView 解析消费
   }),
   resetNewTaskFlow: vi.fn(),
 }))

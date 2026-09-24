@@ -153,7 +153,7 @@ export function useChatViewDeps(
     /** fork 后台：从指定 assistant 空白 fork，留在原线（includeFrom=true）。失败 toast 反馈。 */
     onFork: (sid: string, msg: Message): void => {
       if (!msg) return
-      void forkSession(sid, msg.id, { includeFrom: true, openInStandby: false }).catch((e: unknown) => {
+      void forkSession(sid, msg.id, { includeFrom: true }).catch((e: unknown) => {
         const error = e instanceof Error ? e.message : String(e)
         toastError(t('panel.message.forkFailed', { error }))
       })

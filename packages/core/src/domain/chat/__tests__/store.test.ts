@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope, effect } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { createChatStore } from '../store'
+import { createChatStore, PENDING_SEND_TIMEOUT_MS } from '../store'
 import type { ChatStoreInstance } from '../store'
 import { textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
@@ -496,18 +496,12 @@ describe('createChatStore factory', () => {
     // [投递所有权内核 u3b / D7] 前身用例「steer 投递（queue_update drain）后 user 气泡进消息流
     // 且 segments 完整（用户可见行为）」已迁移：queue_update 帧降级为内核内部回执，不再直驱
     // 对话流（D7 队列区数据源 = session.delivery 状态帧单一源），其显示链（submit 乐观气泡 →
-    // session.delivery 帧 morph → message_end 标记回执按原段回填）编排在 useChat 层——用户可见
+    // session.delivery 帧 morph → message_end 标记按原段回填）编排在 useChat 层——用户可见
     // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至 useChat.test.ts
     // 「送达回执 → 按序入流」用例；等价性维度见 apply-entry-equivalence.test.ts E5a/E5c。
-    // 此处保留退役锁断言（防无设计依据地复活该驱动链）。
-    it('[u3b/D7 退役锁] queue_update 帧不再驱动 ref 气泡（队列区数据源 = session.delivery 状态帧单一源）', () => {
-      const sid = 's-w2-steer-retired'
-      // pi 入队帧 + drain 帧（前身腿 1 的投递证据链，逐字节保留原形态）：退役后两帧都不再
-      // 产生 ref 气泡（[B1] 其消费面 pendingBuffer 计数腿已整体删除，无暂存可消费）
-      sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: ['skill deploy 展开后全文'], pendingMessageCount: 1 } } as ServerMessage)
-      sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: [], pendingMessageCount: 0 } } as ServerMessage)
-      expect(sut.store.getMessages(sid)).toHaveLength(0)
-    })
+    // 原退役锁断言（构造 queue_update 帧断言不产生 ref 气泡）已删除：u5a/R1-A5 已把
+    // message.queue_update 条目从 ServerMessageType 整体删除（shared/protocol.ts），
+    // 「防无设计依据地复活该驱动链」现由协议类型删除承担（tsc 层锁，强于运行时断言）。
   })
 
   // [u6 退役] hydrate 尾窗锚 describe（W5 D5）已随游标翻页改造删除（锚无消费方，
@@ -829,7 +823,7 @@ describe('createChatStore factory', () => {
       const sid = 's-timer'
       sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
       sut.store.addPendingSend(sid)
-      vi.advanceTimersByTime(30_000)
+      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
       const line = finalizeWarnLines().find((s) => s.includes(`sid=${sid}`) && s.includes('reason=timeout'))
       expect(line).toBeDefined()
       expect(sut.store.isActive(sid)).toBe(false) // 兜底收口照旧（D3 timer 语义零改动）
@@ -994,8 +988,8 @@ describe('createChatStore factory', () => {
       sut.store.addPendingSend(sid)
       expect(sut.store.isActive(sid)).toBe(true)
 
-      // 推进 30s（PENDING_SEND_TIMEOUT_MS），pendingSend timer 触发 finalizeSession('timeout')
-      vi.advanceTimersByTime(30_000)
+      // 推进一个超时窗（PENDING_SEND_TIMEOUT_MS），pendingSend timer 触发 finalizeSession('timeout')
+      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
       expect(sut.store.isGenerating(sid)).toBe(false) // streaming 被 timeout 收口
     })
 
@@ -1005,7 +999,7 @@ describe('createChatStore factory', () => {
       sut.store.addPendingSend(sid)
       sut.store.clearPendingSend(sid)
 
-      vi.advanceTimersByTime(30_000)
+      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
       expect(sut.store.isGenerating(sid)).toBe(true) // timer 已被清，未被 timeout 收口
     })
 

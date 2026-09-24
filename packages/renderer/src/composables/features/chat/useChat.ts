@@ -2,7 +2,7 @@
  * useChat —— createUseChat 薄包装（P3 chat 域绞杀 w5）。
  *
  * [归位] useChat 业务编排逻辑（send/steer/followUp/abort/compact/bash/abortBash/
- * editAndResend/hydrateHistory/loadMoreHistory/disposeSession + ensureStreamSubscription
+ * editAndResend/loadMoreHistory/disposeSession + ensureStreamSubscription
  * 会话级订阅编排 + session.* 跨 store 协调）已迁 @taiji/core/domain/chat/useChat.ts
  * 的 createUseChat factory（IF5/IF6 契约）。本文件仅做三件事：
  *

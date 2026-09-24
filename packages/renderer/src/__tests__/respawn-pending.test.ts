@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref, nextTick } from 'vue'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
+import type { PanelViewInput } from '@taiji/core'
 
 const mockHolder = vi.hoisted(() => {
   return {
@@ -94,6 +95,21 @@ async function initAndConnect(): Promise<void> {
   mockHolder.stateRef.value = 'connected'
 }
 
+/** Panel 派生事实包（三个用例的单源入参；hasMessages/isTraceView/hasFormOverlay/isFlowActive 本文件恒定）。 */
+function panelFacts(): PanelViewInput {
+  const chatStore = useChatStore()
+  const sessionStore = useSessionStore()
+  return {
+    sessionId: 's-respawn',
+    hasMessages: true,
+    isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
+    isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
+    isTraceView: false,
+    hasFormOverlay: false,
+    isFlowActive: false,
+  }
+}
+
 /** 意外退出注入（code: 1 = 崩溃形态；强制退出走 forced-exit-marks 标记区分，帧形状相同） */
 function injectExited(sessionId = 's-respawn'): void {
   mockHolder.routeHandler!({
@@ -128,15 +144,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     // 过渡态分区置位（侧栏 status 仍 dead——置灰准确；panel 派生被 isSessionRespawning 抑制）
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('dead')
-    const view = derivePanelView({
-      sessionId: 's-respawn',
-      hasMessages: true,
-      isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-      isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-      isTraceView: false,
-      hasFormOverlay: false,
-      isFlowActive: false,
-    })
+    const view = derivePanelView(panelFacts())
     // conversation 形态 = Panel.vue Composer 渲染判据（dead 才卸载 composer）
     expect(view.kind).toBe('conversation')
   })
@@ -194,8 +202,11 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     //（runtime 侧 ensureActive join 等恢复完成后送达——该半边已有 runtime 单测）
     // [u3c/D1] 发送链已收敛统一提交：RPC 类型为 delivery.submit（旧 message.send 保留至 u5 协议退役）
     const { useChat } = await import('@/composables/features/chat/useChat')
-    // [u3b] send 契约 Promise<void>（失败 toast 消化不 throw，成功路径无返回值）
-    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBeUndefined()
+    // [R2-A5] send 契约 Promise<boolean>：不 throw（失败 toast 消化 + 乐观回滚），
+    // false = RPC 失败。本环境 ws-client mock 的 send 返回 falsy（= 未送上 wire），
+    // request 层 fast-fail → false——用例锁定「恢复窗口发送不被 dead 拦截、提交链照常
+    // 出站 delivery.submit」，RPC 回复半边归 runtime 单测。
+    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBe(false)
     const sentTypes = wsSend.mock.calls.map((args) => (args[0] as { type?: string }).type)
     expect(sentTypes).toContain('delivery.submit')
   })
@@ -220,7 +231,6 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     try {
       await initAndConnect()
       const chatStore = useChatStore()
-      const sessionStore = useSessionStore()
       const { derivePanelView } = await import('@taiji/core')
 
       injectExited()
@@ -229,37 +239,33 @@ describe('respawn 过渡态（T4 回流修复）', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
       // dead 已置（exited 时），过渡态清除后派生回落 dead 占位（「重新打开」出口）
-      const view = derivePanelView({
-        sessionId: 's-respawn',
-        hasMessages: true,
-        isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-        isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-        isTraceView: false,
-        hasFormOverlay: false,
-        isFlowActive: false,
-      })
+      const view = derivePanelView(panelFacts())
       expect(view.kind).toBe('dead')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('⑦ 手动重开（useSidebar.restoreSession）：restore RPC 成功即收口过渡态（手动路径无 restored 帧，本地收口兜底）', async () => {
+  it('⑦ 手动重开（useSidebar.restoreSession）：restore RPC 成功即收口过渡态 + revive（手动路径无 restored 帧，本地收口兜底）', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
+    const sessionStore = useSessionStore()
     const sessionApiMod = await import('@/api')
 
     injectExited()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
 
-    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会 reject——
-    // 收口点在 selectSession 之前（restore RPC 成功即恢复事实成立），reject 不影响断言
-    vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn' } as never)
+    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会失败——壳侧
+    // catch 降级（toast + warn，不重抛），revive 不被切入失败阻断照常执行
+    vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn', label: 'test', cwd: '/repo' })
     const { useSidebar } = await import('@/composables/features/sidebar/useSidebar')
     const sidebar = useSidebar()
-    await expect(sidebar.restoreSession('s-respawn')).rejects.toThrow()
+    await expect(sidebar.restoreSession('s-respawn')).resolves.toBeUndefined()
 
+    // restore RPC 成功即收口过渡态（唯一出口：手动路径 runtime 不再 publish session.restored）
+    // + revive 复位 dead → idle（切入失败不阻断）
     expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
+    expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('idle')
   })
 
   it('⑧ 恢复窗口发消息 → message_start 到达（join 路径无 restored 帧）→ 收口 + dead 复位 + T4 条（Gate B A7 缺陷回归）', async () => {
@@ -295,15 +301,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     const notice = msgs.find((m) => m.role === 'system' && (m.details as { variant?: string } | undefined)?.variant === 'restored')
     expect(notice).toBeDefined()
     // 派生保持 conversation 形态（Panel.vue Composer 渲染判据，dead 占位不出现）
-    const view = derivePanelView({
-      sessionId: 's-respawn',
-      hasMessages: true,
-      isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-      isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-      isTraceView: false,
-      hasFormOverlay: false,
-      isFlowActive: false,
-    })
+    const view = derivePanelView(panelFacts())
     expect(view.kind).toBe('conversation')
   })
 })

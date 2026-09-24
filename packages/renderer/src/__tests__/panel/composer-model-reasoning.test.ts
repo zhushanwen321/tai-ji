@@ -35,7 +35,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => chatApiMock,
 }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn() }),
+  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null), pendingPreset: ref(null) }),
   resetNewTaskFlow: vi.fn(),
 }))
 vi.mock('@/api', () => ({

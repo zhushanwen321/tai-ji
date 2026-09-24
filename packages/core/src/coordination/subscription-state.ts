@@ -94,8 +94,9 @@ function subscribeKey(sessionId: string, fromSeq?: number): string {
 /**
  * subscribe RPC 签名类型（D3 连带①）：直引 core transport/api/domains/session 的
  * subscribe（不再从 TransportPorts 派生——后者已降级为 route-inbound 的内部测试 seam）。
+ * 模块内私有（零外部消费，不放大 @taiji/core 公共面）。
  */
-export type SubscribeRpc = typeof sessionDomain.subscribe
+type SubscribeRpc = typeof sessionDomain.subscribe
 
 /**
  * route-inbound 侧需要的最小端口面（subscribe RPC + 回放 dispatcher）。
@@ -104,8 +105,9 @@ export type SubscribeRpc = typeof sessionDomain.subscribe
  * 注入，实现 = routeInbound 的共享路由核心（seq gap 去重 + ROUTE_TABLE effects +
  * crossSession 分发），sid 固定为 subscribe 目标 session。回放与 live 共享同一语义，
  * 不再裸调 events.dispatchSession（那会绕过去重与全部 effect 兜底）。
+ * 模块内私有（零外部消费；注入面 = setSubscriptionPorts 函数）。
  */
-export type SubscriptionPorts = {
+type SubscriptionPorts = {
   subscribe: SubscribeRpc
   /** 回放分发：snapshot/stateSnapshot 内消息经此进入与 live 相同的路由管线。 */
   replay(sessionId: string, msg: ServerMessage): void
@@ -168,8 +170,9 @@ function recordGapDispatchedSeq(sessionId: string, seq: number): void {
  * - pass 带 reconcileFromSeq：gap（dispatch 当前消息 + fire-and-forget subscribeSession(sid, reconcileFromSeq) 回拉）
  *   reconcileFromSeq = lastSeenSeq（runtime session.subscribe 的 fromSeq 是排他下界：只返
  *   seq > fromSeq 的消息（session-message-handler.ts filter），传 lastSeenSeq 恰好覆盖全部缺失段）
+ * 模块内私有（零外部消费；evalSeqGap 函数维持 export 供白盒断言）。
  */
-export type SeqGapDecision = { action: 'drop' } | { action: 'pass'; reconcileFromSeq?: number }
+type SeqGapDecision = { action: 'drop' } | { action: 'pass'; reconcileFromSeq?: number }
 
 /**
  * 判定一条带 seq 的 server-push 消息应如何处理（IF3 六分支）。
@@ -210,8 +213,9 @@ export function evalSeqGap(
 /**
  * seq gate 判定结果（对外 gate 面）：action 用 dispatch/drop 表达路由侧语义
  * （evalSeqGap 的 pass ↔ 消息继续分发），reconcileFromSeq 为 gap 时的回拉意图。
+ * 模块内私有（零外部消费；seqGate 函数本身维持 export 供 route-inbound 接线）。
  */
-export type SeqGateResult = { action: 'drop' } | { action: 'dispatch'; reconcileFromSeq?: number }
+type SeqGateResult = { action: 'drop' } | { action: 'dispatch'; reconcileFromSeq?: number }
 
 /**
  * seq 协议 gate——判定 + 簿记写入 + 基线推进一体（D1 归位后的协议入口）。

@@ -13,9 +13,8 @@
  *            → api.events.streamSubscribe → store.applyMessageEvent（message.* 单一入口）
  *            → MessageStream 响应式渲染 + useVirtuaFollow.followIfStuck
  *
- * hydrate：首次进入 session 调 api.chat.getHistory 注入历史（含 tool_call/summary），
- * 让 UC-2 切换会话可见块类型丰富度（G2-006）。messages 为 applyEntry reducer 重放投影
- * （W20 D5，详见 hydrateHistory 注释）。
+ * hydrate：历史注入的生产通路 = session 域 reconcile（use-session 三处点击切入统一入口，
+ * store.hydrate 消费，含图片落盘编排）。messages 为 applyEntry reducer 重放投影（W20 D5）。
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
@@ -29,13 +28,13 @@ import {
 } from '../../coordination/subscription-state'
 import type { ChatStoreInstance } from './store'
 import { historyWindowFromReply } from './truncated-window'
-import { collectImagesFromMessages, persistImagesNewestFirst, disposeImageCacheForSession } from './image-cache'
+import { disposeImageCacheForSession } from './image-cache'
 import { createMessageCoalescer } from './delta-coalescer'
 import { getExecutingBash } from './bash-effects'
 import { toErrorMessage } from '../../utils/error-message'
-import { isDevMode } from '../../platform/dev-mode'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
 import type { DeliveryFrameEntry } from './api-port'
+import { createDevOnceFrameWarn } from './effects/registry'
 import {
   replaceDeliveryProjection,
   captureMorphSegments,
@@ -47,8 +46,6 @@ import {
 // re-export 保持既有 import 路径（domain/chat/index.ts 与 __tests__ 经 './useChat'
 // 消费）零改动。[u3b] SubmitQueuedEntryDeps 已随 defer flush 退役摘除。
 export type {
-  CompactQueueEntrySnapshot,
-  CompactQueueLike,
   EnsureStreamSubDeps,
   SessionStoreLike,
   UseChatDeps,
@@ -123,31 +120,25 @@ const manualCompactionState = new Map<string, boolean>()
  */
 
 /**
- * [RD-1#9] 已 warn 过的未列 session.* 帧类型（dev 去重防刷屏）。
+ * [RD-1#9 / R1-B12 双轨收敛] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
  *
  * streamSubscribe 回调的 session.* switch default 对「有意 no-op」的帧（exited/restored/
  * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅面）与「协议漂移」
  * （runtime 新增而前端漏接）不可区分——去重后一次/类型，dev 下留痕、生产零开销。
+ * 「dev 门 + Set 去重 + warn」三段式收敛到 registry.createDevOnceFrameWarn 工厂（与
+ * registry 未注册 message.* 帧观测同一实现）；session.* 前缀过滤是本调用点的语义差异，
+ * 留在本地：app.info / config.* / plugin:* / rollingRestart:* 等全局帧经同一
+ * streamSubscribe 到达，本就由其他域消费，warn 会是误报。
  * 清理：resetChatModuleStateForTest（测试隔离，与同文件其余模块级 Map 同模式）。
  */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
-const warnedUnhandledSessionFrameTypes = new Set<string>()
-
-/**
- * [RD-1#9] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
- *
- * 只对 session.* 前缀生效：app.info / config.* / plugin:* / rollingRestart:* 等全局帧经
- * 同一 streamSubscribe 到达，本就由其他域消费，warn 会是误报。
- */
-function warnUnhandledSessionFrame(type: string, sid: string): void {
-  if (!isDevMode()) return
-  if (!type.startsWith('session.')) return
-  if (warnedUnhandledSessionFrameTypes.has(type)) return
-  warnedUnhandledSessionFrameTypes.add(type)
-  console.warn(
+const sessionFrameWarn = createDevOnceFrameWarn(
+  (type, sid) =>
     `[useChat] unhandled session frame type ${type} (sid=${sid}) — no case in ensureStreamSubscription handler;` +
-      ` frame is a no-op here (consumed elsewhere by design, or protocol drift)`,
-  )
+    ` frame is a no-op here (consumed elsewhere by design, or protocol drift)`,
+)
+function warnUnhandledSessionFrame(type: string, sid: string): void {
+  if (!type.startsWith('session.')) return
+  sessionFrameWarn.warn(type, sid)
 }
 
 /** steer 拒绝日志的文本截断长度（前 60 字符足以辨识输入内容，防长文本刷屏） */
@@ -205,7 +196,7 @@ export function resetChatModuleStateForTest(): void {
   resetSubscriptionStates()
   // [RD-1#9] 清未列 session.* 帧类型的 warn 去重集合（测试间不 reset 会让下一用例的
   // 「一次/类型」断言因上一用例已 warn 过而静默失效）。
-  warnedUnhandledSessionFrameTypes.clear()
+  sessionFrameWarn.reset()
 }
 
 /**
@@ -245,7 +236,11 @@ function handleSessionDelivery(
   chat: ChatStoreInstance,
   msg: ServerMessage<'session.delivery'>,
 ): void {
-  const entries = msg.payload.entries as DeliveryFrameEntry[]
+  // 形态守卫（对齐 registry A5 形态门控）：entries 非数组 = 坏帧，整体丢弃——先投影替换
+  // 后 morph 的两段消费在坏帧上会产生「投影已换、morph 未做」的半更新，守卫前置于两段之前。
+  const rawEntries: unknown = msg.payload.entries
+  if (!Array.isArray(rawEntries)) return
+  const entries = rawEntries as DeliveryFrameEntry[]
   replaceDeliveryProjection(sid, entries)
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!
@@ -520,7 +515,7 @@ export function ensureStreamSubscription(
  * 全经 UseChatDeps 注入。renderer useChat() 薄包装注入 deps，20 消费方零 churn。
  *
  * @param deps 依赖注入（chatApi/writeSegments/getChatStore/getSessionStore/toast/t）
- * @returns send/steer/followUp/abort/compact/editAndResend/hydrateHistory/loadMoreHistory/
+ * @returns send/steer/followUp/abort/compact/editAndResend/loadMoreHistory/
  *          hasMoreHistory/disposeSession/sendBash/abortBash
  */
 export function createUseChat(deps: UseChatDeps) {
@@ -555,16 +550,17 @@ export function createUseChat(deps: UseChatDeps) {
    *                            pi userEntryId 映射，extension input hook 剥标记后写 custom
    *                            entry）+ delivery.submit 条目 id（回执/morph/resync 判重锚）
    * @param precomputedPromptText 调用方已算过的 segmentsToPrompt(segments)（非空白——调用方
-   *                            !text.trim() 守卫保证）。传入复用避免 submitSegments
-   *                            内部再算一遍（S4 修复，热路径去重）。
+   *                            !text.trim() 守卫保证）。必传：唯一调用点 submitNewMessage
+   *                            恒传；原「缺省时内部兜底重算」的分支无运行时命中且会掩盖
+   *                            调用方契约违反（S4 修复目的即消除重复计算），已删。
    */
   async function submitSegments(
     sessionId: string,
     segments: Segment[],
     clientUuid: string,
-    precomputedPromptText?: string,
+    precomputedPromptText: string,
   ): Promise<void> {
-    const promptText = precomputedPromptText ?? segmentsToPrompt(segments)
+    const promptText = precomputedPromptText
     // 最小写入：纯文本消息（全部 segment 为 text）跳过 sidecar + 标记——重开时 textToSegments
     // 降级与结构化回填渲染等价，只有非纯文本段（image/file/skill/mention/handoff）的 badge
     // 依赖映射回填。谓词对未知新类型默认保留写入（≠ text/slash 即写），失败方向安全。
@@ -641,11 +637,11 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * 发送消息：统一 submit（乐观气泡 + delivery.submit）。
    *
-   * [form-hang-fix D2/B 策略返回信号] 返回值（Promise<boolean>）：true = 正常路径
-   * （含空输入早退——输入为空无丢失面，调用方无需恢复；含直发 RPC 失败——错误已 toast
-   * 消化且乐观气泡仍在对话流，恢复草稿会造成气泡 + 草稿双份）；false = B 策略转 steer
-   * 未消费（steer 早退/RPC 失败，内部已 toast）——调用方（sendActiveMessage）据此
-   * restoreSegments 恢复草稿。不 throw（W2「内部消化」契约不变）。
+   * [R2-A5 失败信号] 返回值（Promise<boolean>，steer 先例照抄）：true = 提交成功或无事
+   * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
+   * RPC 失败（内部已 toast 消化且乐观副作用已回滚）——调用方（dispatch send）据
+   * `=== false`（严格比较，宽兼容 void 提供方 resolve undefined 不误报）restoreSegments
+   * 恢复草稿。不 throw（W2「内部消化」契约不变）。
    *
    * 流式状态由会话级订阅的事件驱动（message_start→true，complete/error→false），
    * 不依赖 submit 的 resolve 时机——避免 ack 早于首个 chunk 导致订阅被提前拆除。
@@ -657,9 +653,9 @@ export function createUseChat(deps: UseChatDeps) {
    * 显式接收 sessionId：双 panel 下 Composer 各自有独立 sessionId（panel leaf 绑定），
    * send 目标由调用方传入，不读全局 session.activeId（否则 standby panel 发消息会串到 active panel）。
    */
-  async function send(sessionId: string, segments: Segment[]): Promise<void> {
+  async function send(sessionId: string, segments: Segment[]): Promise<boolean> {
     const sid = sessionId
-    if (segments.length === 0) return
+    if (segments.length === 0) return true
     // `@` 定向分流（composer-symbol-system §3.3.4/§3.3.7）：含 subagent 段的消息改走
     // session.subagentAction RPC，不经 message.send 主 agent 通道（结构性保证无主 agent
     // turn，§3.3.8 命题 1）。分流点必须在下方两道 guard 之前：
@@ -671,19 +667,21 @@ export function createUseChat(deps: UseChatDeps) {
       (s): s is Extract<Segment, { type: 'subagent' }> => s.type === 'subagent',
     )
     if (subagentSeg) {
-      await sendSubagentDirective(sid, segments, subagentSeg)
-      return
+      // 定向通路失败信号同契约传递（内部已 toast，false = 输入未消费可恢复）
+      return sendSubagentDirective(sid, segments, subagentSeg)
     }
     const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim()) return
+    if (!promptText.trim()) return true
 
     // [u3b/D1] 统一 submit：乐观气泡 + delivery.submit（失败 toast 不 throw——错误已消化，
     // 消费侧 Composer.onSend 的 catch 不再触发；throw 只会变 unhandled rejection）。
     try {
       await submitNewMessage(sid, segments, promptText)
+      return true
     } catch (e) {
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))
+      return false
     }
   }
 
@@ -704,6 +702,8 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * 错误处理对齐 send 的 catch 模式：toast + 不 throw（throw 只会变 unhandled rejection，
    * 消费侧 Composer.onSend 的 catch 不触发——错误已通过 toast 消化，消息不静默丢失）。
+   * [R2-A5 失败信号] 返回 boolean 与 send 同契约：true = 提交成功；false = 空文本挡/
+   * RPC 失败（内部已 toast，输入未消费——send 分流点原样透传给调用方恢复草稿）。
    *
    * @param sid 目标 session
    * @param segments 原始 segments（text/file/session/image 段照常序列化进定向文本——
@@ -714,7 +714,7 @@ export function createUseChat(deps: UseChatDeps) {
     sid: string,
     segments: Segment[],
     subagentSeg: Extract<Segment, { type: 'subagent' }>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // subagent 段序列化为空串（shared/segments 路由标记），segmentsToPrompt 即
     // 其余段序列化：file → path(:L 范围)、session → #sessionId、image → 裸路径。
     const text = segmentsToPrompt(segments)
@@ -724,7 +724,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 纯空白文本若不在此拦会直发 RPC。
     if (!text.trim()) {
       deps.toast.error(deps.t('composable.subagentDirectiveEmpty'))
-      return
+      return false
     }
     ensureStreamSubscription(sid, chat, session, subDeps)
     try {
@@ -741,11 +741,13 @@ export function createUseChat(deps: UseChatDeps) {
         const slug = 'chat-' + Date.now().toString(SUBAGENT_SLUG_RADIX)
         await deps.chatApi.subagentAction(sid, 'start', { slug, task: text })
       }
+      return true
     } catch (e) {
       // RPC 失败（WS 断连 / extension 报「subagent 已结束」等）：toast 明确提示，
       // 消息不静默丢失（S8：留在输入区或明确失败提示——此处为后者，与 send 失败同款）。
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.subagentDirectiveFailed', { msg }))
+      return false
     }
   }
 
@@ -794,25 +796,31 @@ export function createUseChat(deps: UseChatDeps) {
    * 结束后另起一轮」语义，pendingBuffer 暂存退役）。
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
+   * [R2-A5 失败信号] 返回值（Promise<boolean>，steer 先例照抄）：true = 提交成功或无事
+   * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已 toast + 回滚乐观
+   * 副作用，不 throw）——调用方（composer submit.onFollowUp）据 `=== false`
+   * restoreSegments 恢复草稿，否则 clearInput 已清空的输入静默丢失。
+   *
    * 显式接收 sessionId：与 send 同理，per-panel 隔离。
    */
-  async function followUp(sessionId: string, segments: Segment[]): Promise<void> {
+  async function followUp(sessionId: string, segments: Segment[]): Promise<boolean> {
     const sid = sessionId
-    if (segments.length === 0) return
+    if (segments.length === 0) return true
     const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim()) return
+    if (!promptText.trim()) return true
 
-    // 非活跃（含空窗期）退化为普通发送，避免 Alt+⏎ 死键
+    // 非活跃（含空窗期）退化为普通发送，避免 Alt+⏎ 死键（失败信号原样透传 send 契约）
     if (!chat.isActive(sid)) {
-      await send(sid, segments)
-      return
+      return send(sid, segments)
     }
 
     try {
       await submitNewMessage(sid, segments, promptText)
+      return true
     } catch (e) {
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.nextTurnSendFailed', { msg }))
+      return false
     }
   }
 
@@ -848,14 +856,18 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * 错误处理与 abort/compact 对齐：toast + 不 throw（消费侧 Composer.onSend 已有 try/catch，
    * throw 只会变 unhandled rejection）。
+   * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = RPC 受理成功；false = RPC 失败
+   * （内部已 toast 或终态帧已呈现故抑制 toast）——调用方（dispatch bash）据 `=== false`
+   * 留痕输入未恢复（restoreInput 待壳层注入）。早退无。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
    */
-  async function sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void> {
+  async function sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<boolean> {
     const sid = sessionId
     ensureStreamSubscription(sid, chat, session, subDeps)
     try {
       await deps.chatApi.bash(sid, command, excludeFromContext)
+      return true
     } catch (e) {
       // [①b timeout-slow-flow-wallclock D2/r4 极性修正] RPC 错误 reject（error envelope /
       // backstop 超时）与 bashResult 合成终态帧的到达时序：runtime 先广播终态帧再回 error
@@ -868,10 +880,11 @@ export function createUseChat(deps: UseChatDeps) {
       // 到达置 true），此处是反向标志（终态到达清空）——「查到非空」绝不抑制。
       if (!getExecutingBash(sid)) {
         console.warn(`[useChat] sendBash RPC failed after terminal frame already rendered, toast suppressed, sid=${sid}`, e)
-        return
+        return false
       }
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.bashFailed', { msg }))
+      return false
     }
   }
 
@@ -908,16 +921,20 @@ export function createUseChat(deps: UseChatDeps) {
    *   - transport/busy 级（RPC 未达 pi / dispatcher busy 预检拒绝）：pi 未发 compaction_end，interpreter
    *     不参与 → 零反馈。此处 catch 见 ended=false → toast 兜底（AGENTS.md 规则 #3 错误必须可见）。
    * 不 throw（consumer fire-and-forget）。compacting 态由 session.compacted 复位（interpreter 发，必达）。
+   * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = RPC 受理成功；false = RPC reject
+   * （compaction 级 / transport 级均算——错误面已按上述分型消化）——调用方（dispatch send
+   * 的 /compact 分支）据 `=== false` restoreSegments 恢复草稿。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
    */
-  async function compact(sessionId: string, customInstructions?: string): Promise<void> {
+  async function compact(sessionId: string, customInstructions?: string): Promise<boolean> {
     const sid = sessionId
     ensureStreamSubscription(sid, chat, session, subDeps)
     // MF-1：标记 manual compact in-flight（key 存在），compaction_end 到达时 handler 置 value=true
     manualCompactionState.set(sid, false)
     try {
       await deps.chatApi.compact(sid, customInstructions)
+      return true
     } catch (e) {
       const compactionEnded = manualCompactionState.get(sid) === true
       if (!compactionEnded) {
@@ -927,6 +944,7 @@ export function createUseChat(deps: UseChatDeps) {
         deps.toast.error(deps.t('composable.compactFailed', { msg }))
       }
       console.warn(`[useChat] compact RPC failed (compaction-ended=${compactionEnded}, surfaced via ${compactionEnded ? 'interpreter/dialog flow' : 'toast fallback'})`, e)
+      return false
     } finally {
       manualCompactionState.delete(sid)
     }
@@ -944,8 +962,10 @@ export function createUseChat(deps: UseChatDeps) {
    * `(sessionId, userMessageId, segments: Segment[])`。调用方（Turn.vue submitEdit）
    * 负责构造 segments——从原 user message 保留 image segments + 编辑后的 text segment。
    *
- * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
- * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
+   * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
+   * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
+   * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事发生（空白 prompt/
+   * active session 早退无丢失面）；false = RPC 失败（内部已 toast）。
    *
    * 显式接收 sessionId：编辑可发生在非 active 的 standby panel，不能依赖全局 activeId。
    *
@@ -953,47 +973,22 @@ export function createUseChat(deps: UseChatDeps) {
    * 的 sidecar 条目残留。不影响功能（重开按 piEntryId→clientUuid 精确匹配，孤立条目不引用），
    * 占少量磁盘（~200B/条）。完整清理随 session 删除/压缩统一治理（YAGNI，不在本函数做）。
    */
-  async function editAndResend(sessionId: string, userMessageId: string, segments: Segment[]): Promise<void> {
+  async function editAndResend(sessionId: string, userMessageId: string, segments: Segment[]): Promise<boolean> {
     const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim() || chat.isActive(sessionId)) return
+    if (!promptText.trim() || chat.isActive(sessionId)) return true
     chat.truncateFrom(sessionId, userMessageId, true)
     // [u3b/D1] 与 send 同一统一 submit 编排（乐观气泡 + inflight 占位 + delivery.submit）：
     // 编辑重发同样持有确认配额（其 message_end 走 ① 标记匹配回收），失败统一回滚。
     try {
       await submitNewMessage(sessionId, segments, promptText)
+      return true
     } catch (e) {
       // [W2] 错误处理策略与 send/steer/followUp/abort 对齐：toast + 不 throw。
       // 消费侧 Turn.vue submitEdit 无 try/catch，不 throw 避免其产生 unhandled rejection（错误已通过 toast 消化）。
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))
+      return false
     }
-  }
-
-  /**
-   * 拉取并注入历史（首次进入 session）。
-   * 无历史（空 session）也标记 hydrated，避免反复请求。
-   *
-   * [W20 D5 重放喂入侧] getHistory 返回的 messages 是 core applyEntry reducer 对
-   * pi entry 日志的重放投影（runtime wire 层：getEntries → liftHistoryToEntries →
-   * replayEntries，见 infra/pi/message-converter.ts）——hydrate 直接消费 reducer 产物，
-   * 不做二次转换；getHistory RPC 链不变（session-service getEntries 增量现状保留）。
-   * [W21 已接] 实时侧喂同一 reducer：message_end / tool_call_end 重构 entry 经
-   * store.applyMessageEvent → applyEntryFrame 累积 per-session reducer state
-   * （messages ref 的实时渲染仍走 overlay 路径，ref 与 reducer state 收敛归 W22 对账）。
-   * [u6] loadMoreHistory 已改游标翻页（游标取分区最旧消息文件侧身份），hydrate 尾窗锚
-   * 机制退役——两条历史读取路径（RPC getEntries entry 树重建 / 文件尾读 mapSessionEntries）
-   * 都携带 entry 派生 id，游标身份稳定可得。
-   */
-  async function hydrateHistory(sessionId: string): Promise<void> {
-    if (chat.isHydrated(sessionId)) return
-    const reply = await deps.chatApi.getHistory(sessionId)
-    // [u4d] 窗口状态随 hydrate 写入 store（SSOT：truncated/loadedTurns/totalTurnsEstimate
-    // 单点存 chat store；N1 historyTruncatedSessions 双轨退役，hasMoreHistory 派生读）。
-    chat.hydrate(sessionId, reply.messages, historyWindowFromReply(reply))
-    // [D6-⑨ u7] toolResult 图片落盘 hydrate 编排（fire-and-forget 不阻塞历史注入）：
-    // 收集消息序图片反转新→旧交 main 按序落盘、超帽即停；无 electronAPI 宿主（headless/
-    // mock）内建 no-op。失败静默——渲染组件挂载兜底逐图重试。
-    void persistImagesNewestFirst(sessionId, collectImagesFromMessages(reply.messages))
   }
 
   /**
@@ -1017,8 +1012,8 @@ export function createUseChat(deps: UseChatDeps) {
    * - cursor 未命中（消息已被清理/超扫描域）→ runtime 返回空页 + truncated=false
    *   （翻页到头语义，不报错），分区不变、按钮收敛。
    *
-   * 幂等：空页不写入（显式短路 + prependHistoryMut 空数组安全网）。RPC 失败不破坏
-   * 现有消息（catch 吞错，与 hydrateHistory 的 markHistoryFailed 同策略），用户可重试。
+ * 幂等：空页不写入（显式短路 + prependHistoryMut 空数组安全网）。RPC 失败不破坏
+ * 现有消息（catch 吞错，用户可重试）。
    *
    * [RD-1#4] 失败显形：返回 false（原 void 签名）——失败时分区与 truncated 窗口均不变
    * （「已到头」与「失败」在窗口状态上不可区分，旧签名让调用方只能静默复位 loading，
@@ -1098,7 +1093,6 @@ export function createUseChat(deps: UseChatDeps) {
     abort,
     compact,
     editAndResend,
-    hydrateHistory,
     loadMoreHistory,
     hasMoreHistory,
     disposeSession,
