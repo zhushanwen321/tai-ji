@@ -1002,10 +1002,10 @@ export class JsonlRunStore implements RunStore {
    * 2. **idle-GC 双轨**：core GC（FileRunStore 通道）终局化只写 state 文件不改
    *   entry，resume 后恢复链从 entry 读到 running 再次转 failed，覆盖 GC 终局。
    *
-   * 证据读序（与 loadAll 读序同构）：journal `run-settled` 帧（权威——一个 run
-   * 恰好一帧）> state 文件终态快照 > 无证据（保持 running，交 recoverCrashedRuns
-   * 按崩溃语义收编）。journal 被保留期裁剪后（cap+TTL）降级到 state 文件通道；
-   * 两通道皆失守的极旧 run 按 failed 收编，语义可接受。
+   * 证据读序的权威声明 = core orchestration/run-events.ts 文件头「终局证据读序」
+   * （journal run-settled 帧 > state 终态快照 > manifest，此处不重复展开）。本
+   * 调和取前两级：无证据时保持 running，交 recoverCrashedRuns 按崩溃语义收编
+   * （两通道皆失守的极旧 run 按 failed 收编，语义可接受）。
    *
    * 调和只走 running→done（转移表唯一合法边），终局内容（reason/error）取自
    * 证据源；in-flight calls 收口对齐 recoverCrashedRuns 的收编动作。调和自身

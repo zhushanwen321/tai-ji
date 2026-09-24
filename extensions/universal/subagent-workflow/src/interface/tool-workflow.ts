@@ -354,7 +354,9 @@ export async function actionRun(
 ): Promise<WorkflowExecuteResult> {
   const name = params.name;
   if (!name) {
-    throw new Error("run requires 'name' parameter (absolute .js path from <available_workflows> <location>). Correct: {\"action\":\"run\",\"name\":\"<ref>\",\"args\":{...}}");
+    throw new Error(
+      "run requires 'name' parameter (absolute .js path from <available_workflows> <location>). Correct: {\"action\":\"run\",\"name\":\"<ref>\"}",
+    );
   }
   // 弱模型常见误用（P0 静默失败）：把 task/items 等 args 子字段平铺到 workflow params
   // 顶层（缺 args 嵌套）。args ?? {} 会静默 args={}，启动缺参 run 不报错——比 subagent
@@ -503,7 +505,9 @@ async function actionAbort(
 ): Promise<WorkflowExecuteResult> {
   const runId = params.runId;
   if (!runId) {
-    throw new Error(`'runId' is required for abort. Correct: {"action":"abort","runId":"<id>"} (use action:"status" to find runId)`);
+    throw new Error(
+      "abort requires 'runId' parameter. Correct: {\"action\":\"abort\",\"runId\":\"<id>\"} (use action:\"status\" to find runId)",
+    );
   }
   const run = deps.runs.get(runId);
   if (!run) {

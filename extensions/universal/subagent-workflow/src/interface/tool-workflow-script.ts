@@ -14,7 +14,8 @@
  * generateWorkflowScript（报错文案逐字平移，CA2 前提）；save/delete 改调 core
  * barrel（第三可选目录参数缺省即 pi 布局 .pi/workflows——pi 现两参调用形态零变化）。
  * 结构化 {ok}|{error} → pi 的 execute-throw 契约转换在本层（pi 只对 execute throw
- * 置 isError:true）；AbortSignal 的 aborted 检查留宿主层（C4 偏差 #4 已声明）。
+ * 置 isError:true）；AbortSignal 的 aborted 检查在 execute 入口统一拦截（与
+ * workflow / subagents 两 tool 同源，tool-shared assertNotAborted；C4 偏差 #4）。
  *
  * 层归属：Interface。依赖 Pi SDK + engine script-lint + infra workflow-files。
  */
@@ -180,10 +181,14 @@ export function registerWorkflowScriptTool(
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<WorkflowScriptExecuteResult> {
+      // P1-2 abort 前置（三 tool 对称）：5 个 action 统一在 execute 入口拦截——
+      // 原先只在 generate 内检查，lint/save/delete/list 四路径漏拦。throw（W4b）：
+      // pi 只对 execute throw 置 isError:true，返回值里的 isError 被 agent-loop 丢弃。
+      assertNotAborted(signal);
       let result: WorkflowScriptExecuteResult;
       switch (params.action) {
         case "generate":
-          result = actionGenerate(params, signal);
+          result = actionGenerate(params);
           break;
         case "lint":
           result = await actionLint(params, registry);
@@ -223,10 +228,10 @@ export function registerWorkflowScriptTool(
 
 // ── generate action ──────────────────────────────────────────
 
-export function actionGenerate(params: ScriptParams, signal: AbortSignal | undefined): WorkflowScriptExecuteResult {
+export function actionGenerate(params: ScriptParams): WorkflowScriptExecuteResult {
   // throw（W4b）：pi 只对 execute throw 置 isError:true（返回值 isError 被丢弃）。
-  // AbortSignal 是 pi tool 契约层关注——core 管线不含 signal 检查，宿主自留（C4 偏差 #4）
-  assertNotAborted(signal);
+  // abort 前置在 execute 入口统一拦截（三 tool 同源，tool-shared assertNotAborted），
+  // 本函数不再自带 signal 检查。
   const name = params.name ?? "";
   const script = params.script ?? "";
 
@@ -260,7 +265,9 @@ async function actionLint(
 ): Promise<WorkflowScriptExecuteResult> {
   const name = params.name;
   if (!name) {
-    throw new Error("lint requires 'name' parameter");
+    throw new Error(
+      "lint requires 'name' parameter. Correct: {\"action\":\"lint\",\"name\":\"<script>\"}",
+    );
   }
   const source = await loadScriptSource(name, registry);
   if (!source) {
@@ -313,7 +320,9 @@ async function loadScriptSource(
 async function actionSave(params: ScriptParams): Promise<WorkflowScriptExecuteResult> {
   const name = params.name;
   if (!name) {
-    throw new Error("save requires 'name' parameter (tmp script name)");
+    throw new Error(
+      "save requires 'name' parameter (tmp script name). Correct: {\"action\":\"save\",\"name\":\"<tmp-script>\"}",
+    );
   }
   try {
     const result = await saveWorkflow(name, params.newName);
@@ -335,7 +344,9 @@ function actionDelete(
 ): WorkflowScriptExecuteResult {
   const name = params.name;
   if (!name) {
-    throw new Error("delete requires 'name' parameter");
+    throw new Error(
+      "delete requires 'name' parameter. Correct: {\"action\":\"delete\",\"name\":\"<script>\"}",
+    );
   }
  // deleteWorkflow 内部检查 isRunning（防止删运行中脚本）
   try {

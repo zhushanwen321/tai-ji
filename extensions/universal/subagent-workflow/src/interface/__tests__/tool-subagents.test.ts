@@ -348,14 +348,14 @@ describe("错误规格（D9）", () => {
   it("tasks 缺失 → throw 带 Correct 示例（runWorkflow 未被调用）", async () => {
     const err = await runSubagentsBatch({} as never, makeDeps(makeRegistry()) as never, undefined)
       .catch((e: unknown) => e as Error);
-    expect(err.message).toBe('tasks is required (non-empty string array). Correct: {"tasks":["...","..."]}');
+    expect(err.message).toBe('subagents requires \'tasks\' parameter (non-empty string array). Correct: {"tasks":["...","..."]}');
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
   });
 
   it("tasks 空数组 → 同一 Correct 文案", async () => {
     const err = await runSubagentsBatch({ tasks: [] }, makeDeps(makeRegistry()) as never, undefined)
       .catch((e: unknown) => e as Error);
-    expect(err.message).toContain("tasks is required (non-empty string array)");
+    expect(err.message).toContain("subagents requires 'tasks' parameter (non-empty string array)");
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
   });
 
@@ -432,7 +432,7 @@ describe("reentry guard：与 workflow tool 共用同一实例", () => {
     const guard: ReentryGuardRef = { isProcessing: false };
     const tool = captureSubagentsTool(guard, makeRegistry());
     const err = await tool.execute("call-1", {}, undefined, undefined, undefined).catch((e: unknown) => e as Error);
-    expect(err.message).toContain("tasks is required");
+    expect(err.message).toContain("subagents requires 'tasks' parameter");
     expect(guard.isProcessing).toBe(false);
   });
 

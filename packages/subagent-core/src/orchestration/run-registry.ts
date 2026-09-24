@@ -17,9 +17,11 @@
 // 两步转移，写 manifest（outcome:failed + errorCode:interrupted_abandoned），
 // journal 随之获清理资格（pruneTerminalRunFiles，file-run-store 单源）。
 //
-// 能力边界（D5 权威性分层）：journal 清理执行不落在本模块——已终局 run 的
-// state + journal 成对裁剪在 pruneTerminalRunFiles（file-run-store.ts，与 cap/TTL
-// 同一判定单元）；本模块只负责让 interrupted 「无悬挂态」。
+// 能力边界：终局证据三通道（journal 帧 / state 快照 / manifest）的角色与采信
+// 顺序见 run-events.ts 文件头「终局证据读序」权威声明，此处不重复展开。journal
+// 清理执行不落在本模块——已终局 run 的 state + journal 成对裁剪在
+// pruneTerminalRunFiles（file-run-store.ts，与 cap/TTL 同一判定单元）；本模块
+// 只负责让 interrupted「无悬挂态」。
 //
 // 层归属：Engine。依赖 run-events（状态机 + journal）与 manifest-store（终局投影
 // 写面）；零时钟依赖进纯函数（now/windowMs 显式传参）。

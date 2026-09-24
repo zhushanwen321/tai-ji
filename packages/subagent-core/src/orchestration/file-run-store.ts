@@ -156,9 +156,9 @@ export interface PruneStateDeps {
 //    超期即裁）；mtime 判定锚 = state 文件（run 磁盘足迹的主投影文件）——journal
 //    作为同 stem 附属随 run 成对裁剪，不单独计时；
 // ③ 裁剪执行按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
-//    删）——已终局 run 过保留期后 journal 降级为可清诊断证据（D5 权威性分层）；
-//    manifest（.json 结尾）结构性不在候选，终局持久权威永不随裁（清理后投影回落
-//    manifest 终局面，drawer 投影不消失）；
+//    删）——journal 过保留期降级为可清诊断证据、manifest 结构性不在候选（终局
+//    持久权威永不随裁，清理后投影回落 manifest 终局面）的分层依据 = run-events.ts
+//    文件头「终局证据读序」权威声明；
 // ④ 任何失败不抛（辅助清理降级不拖垮持久化主链）：readdir 失败静默放弃本轮，
 //    manifest 读取按「无资格」降级，单文件 unlink 失败 warn 留证后继续。
 //

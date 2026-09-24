@@ -168,11 +168,12 @@ export async function runSubagentsBatch(
   signal: AbortSignal | undefined,
 ): Promise<SubagentsExecuteResult> {
   // D9：tasks 缺失/空数组 → 入口 throw（pi 只对 execute throw 置 isError:true）。
-  // 文案带 Correct 示例：弱模型照抄即可自纠。
+  // 文案与其他 tool 的必填参数拒单同模板（<subject> requires '<param>' parameter.
+  // Correct: <最小正确调用例>）：本工具无 action，主语用工具名。
   const tasks = params.tasks;
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error(
-      'tasks is required (non-empty string array). Correct: {"tasks":["...","..."]}',
+      'subagents requires \'tasks\' parameter (non-empty string array). Correct: {"tasks":["...","..."]}',
     );
   }
 
