@@ -546,6 +546,19 @@ export {
 // worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格
 // 判定），壳零消费——按 D3 判定标准不进 barrel。
 
+// ── workflow-record entry 契约（词表/guard 收敛单源）──────────
+// customType / entry schema 版本 / v1 判定分类：壳 jsonl-run-store（写点 +
+// loadAll 重建）与 runtime workflow-extractor（entry 扫描投影）共用的 entry 层
+// 契约单源（收敛前壳与 shared 各持一份字面量、v1 guard 壳/runtime 双实现）。
+// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方；snapshot 层
+// 解码仍在 run-snapshot.ts codec（entry 层 v 与 snapshot 层 v 两级独立版本）。
+export {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  classifyWorkflowRecordEntryData,
+  type WorkflowRecordEntryClassification,
+} from "./orchestration/workflow-record-entry.ts";
+
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
 // 可读）、live 字段 strip、更高版本跳过（宿主侧 warn 可见性自决）。

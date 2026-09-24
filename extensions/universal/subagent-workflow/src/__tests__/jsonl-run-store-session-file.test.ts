@@ -31,7 +31,8 @@ import { Trace } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } from "../jsonl-run-store.ts";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
 function makeSpec(): RunSpec {

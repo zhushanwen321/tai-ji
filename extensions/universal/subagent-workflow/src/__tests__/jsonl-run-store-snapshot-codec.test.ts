@@ -32,7 +32,8 @@ import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 import { fromRunSnapshot, toRunSnapshot } from "@zhushanwen/subagent-core/orchestration/run-snapshot.ts";
-import { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } from "../jsonl-run-store.ts";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
 
 const SESSION_FILE = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl";

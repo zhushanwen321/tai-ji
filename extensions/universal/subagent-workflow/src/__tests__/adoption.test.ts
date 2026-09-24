@@ -37,6 +37,7 @@ import type { CustomEntry, ExtensionContext } from "@earendil-works/pi-coding-ag
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
@@ -315,7 +316,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
   });
 
   it("store rebind 后 appendEntry 走新 pi（旧 pi 不再收权威 entry）", async () => {
-    const { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } = await import("../jsonl-run-store.ts");
+    const { JsonlRunStore } = await import("../jsonl-run-store.ts"); // WORKFLOW_RECORD_CUSTOM_TYPE 已收 core（顶部静态 import）
     const entriesOld: CustomEntry[] = [];
     const entriesNew: CustomEntry[] = [];
     const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-store-"));

@@ -7,7 +7,7 @@
  *
  * 数据来源优先级：
  * 1. **自描述 `workflow-record` entry（W17 v1，权威）**：pi-subagent-workflow 每次成功
- *    flush 同步 append 完整 RunSnapshot（customType 常量 = shared WORKFLOW_RECORD_CUSTOM_TYPE，
+ *    flush 同步 append 完整 RunSnapshot（customType 常量 = core WORKFLOW_RECORD_CUSTOM_TYPE，
  *    data = {v:1, snapshot, updatedAt}）。同 runId 多条取最后一条（后者更新）。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W17 改造前创建的旧 session）时走
  *    workflow-state-link 指针 entry + state 文件读取。降级表现 = 数据滞后但可用（登记表
@@ -25,7 +25,13 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+// workflow-record entry 契约（customType / v1 判定）单源 core barrel——壳写点与
+// runtime 投影共用同一词表（原 shared 字面量副本 + 双侧各自 guard 已收敛）。
+import {
+  SNAPSHOT_VERSION,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  classifyWorkflowRecordEntryData,
+} from '@zhushanwen/subagent-core'
 // RunSnapshot 格式版本（D-5 版本守卫判据）单源 import 自 subagent-core barrel（权威定义
 // orchestration/run-snapshot.ts；extension 侧 jsonl-run-store.ts 留壳消费同一常量）——
 // 无本地字面量副本，runtime 与 extension 的快照格式版本对齐由 workspace 依赖承载。
@@ -33,7 +39,6 @@ import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
 // lastProgressAt、state.health/outcome/errorCode）读侧无需同步——格式重构（字段改形/
 // 删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段逐项 `??` 缺省，历史
 // run 投影保留）。字段集演进时对照权威源的 projectRunEvents 注释核对（fold 填充面）。
-import { SNAPSHOT_VERSION } from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { isEnoent } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
@@ -188,31 +193,36 @@ function collectSelfDescribedWorkflowRecords(entries: unknown[]): WorkflowRunRec
 /**
  * 单条 entry → RunSnapshot（type/customType/data/版本/runId 存在性逐层守卫，坏 entry 返回
  * null）。同 runId 后出现的覆盖前面的（entry 顺序 = 时间顺序，后者更新）。
+ *
+ * v1 判定单源 core classifyWorkflowRecordEntryData（reason 词表见其模块注释）；本侧
+ * 保留日志策略与 warnOnce 键去重：missing-v/future-v → warnOnce 留证（版本 skew 可
+ * 观测），wrong-type/no-snapshot → 静默跳过（收敛前行为逐分支保持）。
  */
 function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null {
   if (typeof entry !== 'object' || entry === null) return null
   const e = entry as JsonlCustomEntry
   if (e.type !== 'custom' || e.customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return null
-  const data = e.data
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (d.v !== 1) {
-    // warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏 entry 只出声一次；
-    // snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）
-    const snapForId = d.snapshot
+  const classification = classifyWorkflowRecordEntryData(e.data)
+  if (!classification.ok) {
+    if (classification.reason === 'wrong-type' || classification.reason === 'no-snapshot') return null
+    // missing-v / future-v：warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
+    // entry 只出声一次；snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）。
+    // data 此时必为对象（wrong-type 已排除），cast 仅为读取日志键字段。
+    const raw = e.data as Record<string, unknown>
+    const snapForId = raw.snapshot
     const entryRunId = typeof snapForId === 'object' && snapForId !== null
       && typeof (snapForId as Record<string, unknown>).runId === 'string'
       ? ((snapForId as Record<string, unknown>).runId as string)
       : '(no runId)'
     warnOnce(
-      `entry-schema:${entryRunId}:${String(d.v)}`,
-      `[workflow-extractor] workflow-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
+      `entry-schema:${entryRunId}:${String(raw.v)}`,
+      `[workflow-extractor] workflow-record entry schema version '${String(raw.v)}' unsupported (expected 1) — ` +
         `extension/runtime version skew, skip this entry. Fix: align schema with ` +
         `extensions/universal/subagent-workflow/src/jsonl-run-store.ts (W17 v1).`,
     )
     return null
   }
-  const snapshot = d.snapshot
+  const snapshot = classification.snapshot
   if (typeof snapshot !== 'object' || snapshot === null) return null
   const snap = snapshot as Record<string, unknown>
   // runId 存在性守卫（snapshot 内嵌完整 runId；无 runId 视为坏 entry 跳过）

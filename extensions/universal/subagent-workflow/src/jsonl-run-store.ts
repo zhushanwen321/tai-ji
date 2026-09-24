@@ -105,6 +105,9 @@ import { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
   closeOutInFlightCalls,
   SNAPSHOT_VERSION,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  classifyWorkflowRecordEntryData,
   createRunEventJournal,
   fromRunSnapshot,
   projectRunEvents,
@@ -128,13 +131,12 @@ import {
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Workflow-record self-describing entry (W17, D4) ─────────
-
-/**
- * 自描述 workflow record entry 的 customType（W17 [D4]）。命名对齐 W16 的
- * `subagent-record`（连字符风格）。写点字面量与本常量的等值由
- * __tests__/jsonl-run-store-session-file.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。
- */
-export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
+//
+// customType / entry schema 版本 / v1 判定已收 core
+// orchestration/workflow-record-entry.ts 单源（本模块原本地常量与 v1 guard
+// 判定删除，改经 barrel 消费——词表漂移结构性不可达）；本模块保留：写点
+// data 组装（toWorkflowRecordEntryData）、loadAll 重建的日志策略与 snapshot
+// 层解码（SNAPSHOT_VERSION guard + fromRunSnapshot——不在词表收敛范围）。
 
 /**
  * `workflow-record` entry 的 data schema（v1）。
@@ -147,7 +149,7 @@ export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 // 模块内类型（不导出：无外部消费方，fallow unused_types/private_type_leaks 双轨判定；
 // 运行侧 workflow-extractor 的同形结构独立定义，见其注释）。
 interface WorkflowRecordEntryData {
-  /** schema 版本（W17 起 v1）。消费方按 v 判别解析，不认识的版本跳过而非猜测。 */
+  /** schema 版本（W17 起 v1，常量单源 core WORKFLOW_RECORD_ENTRY_VERSION）。消费方按 v 判别解析，不认识的版本跳过而非猜测。 */
   v: 1;
   /** 完整 RunSnapshot（与同次 flush 写入 state 文件的内容是同一份，不二次序列化）。 */
   snapshot: RunSnapshot;
@@ -157,7 +159,7 @@ interface WorkflowRecordEntryData {
 
 /** 已序列化快照 → 自描述 entry data（doFlush 消费同一 snapshot，保证 entry 与 state 文件一致）。 */
 function toWorkflowRecordEntryData(snapshot: RunSnapshot): WorkflowRecordEntryData {
-  return { v: 1, snapshot, updatedAt: new Date().toISOString() };
+  return { v: WORKFLOW_RECORD_ENTRY_VERSION, snapshot, updatedAt: new Date().toISOString() };
 }
 
 // ── Serialization → core codec（下沉收口 D4）──────────────────
@@ -182,27 +184,33 @@ function toWorkflowRecordEntryData(snapshot: RunSnapshot): WorkflowRecordEntryDa
  */
 function collectRecordRun(entry: CustomEntry, entryIndex: number, recordRuns: Map<string, WorkflowRun>): boolean {
   if (entry.customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return false;
-  // v1 entry guard：schema 版本不认识 → 跳过（不猜测解析）。细分两种形态：
-  // 显式版本号非 1 = 未来版本（升级前装旧版读取属正常降级，静默跳过）；
-  // v 缺失（写点恒定 v:1，缺失即形态损坏——半写/手改）→ warn 留证，对齐
-  // SO-DATA-2 的 per-entry 损坏留证口径（原实现两者共用静默分支，损坏无从归因）。
-  const data = entry.data as WorkflowRecordEntryData | undefined;
-  if (data?.v === undefined) {
+  // v1 entry guard：判定单源 core classifyWorkflowRecordEntryData（reason 词表与
+  // 分支语义见其模块注释），日志策略留本侧。版本可见性分层（D4 裁决③宿主侧落地）：
+  // future-v（显式版本号非 1 = 未来版本，升级前装旧版读取属正常降级）→ 静默跳过；
+  // wrong-type/missing-v（data 非对象或 v 缺失——写点恒定 v:1，缺失即形态损坏：
+  // 半写/手改）→ warn 留证，对齐 SO-DATA-2 的 per-entry 损坏留证口径（两种形态
+  // 共用同一文案与原实现一致：原判定 `data?.v === undefined` 同样一并覆盖）。
+  const classification = classifyWorkflowRecordEntryData(entry.data);
+  if (!classification.ok) {
+    if (classification.reason === "future-v") return true; // 静默跳过（不猜测解析）
+    if (classification.reason === "no-snapshot") {
+      logger.warn(
+        `[subagent-workflow] workflow-record entry #${entryIndex} malformed (v1 without snapshot), skipped run rebuild`,
+      );
+      return true;
+    }
+    // wrong-type / missing-v
     logger.warn(
       `[subagent-workflow] workflow-record entry #${entryIndex} malformed (missing v), skipped run rebuild`,
     );
     return true;
   }
-  if (data.v !== 1) return true;
-  if (!data.snapshot) {
-    logger.warn(
-      `[subagent-workflow] workflow-record entry #${entryIndex} malformed (v1 without snapshot), skipped run rebuild`,
-    );
-    return true;
-  }
+  // ok = v1 且 snapshot truthy；snapshot 解码留在本侧（codec 形状校验不抛，
+  // 损坏走 undefined 返回的 warn 分支）。
+  const snapshot = classification.snapshot as RunSnapshot;
   try {
-    if (data.snapshot.v === SNAPSHOT_VERSION) {
-      const run = fromRunSnapshot(data.snapshot);
+    if (snapshot.v === SNAPSHOT_VERSION) {
+      const run = fromRunSnapshot(snapshot);
       if (run) {
         recordRuns.set(run.runId, run); // 后写覆盖 = 最后一条 entry 胜出
       } else {
