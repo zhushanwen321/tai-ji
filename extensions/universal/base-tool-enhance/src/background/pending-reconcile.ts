@@ -111,7 +111,7 @@ export interface ReconcileResult {
 	reconciled: number;
 	/** 差集 active 但判据不满足（活任务 / registry 无条目）而保守跳过的 task_id。 */
 	skipped: string[];
-	/** 补投消息已发起（sendMessage 调用未同步失败）的 task_id——实装下不等于已落盘，见 ReconcilePi.sendMessage 注释。 */
+	/** 补投消息已成功送达（sendMessage settle 通过，同步 throw 与 await reject 均不计入）的 task_id——实装桥接层丢 promise，不等于 pi 侧已落盘，见 ReconcilePi.sendMessage 注释。 */
 	redelivered: string[];
 }
 

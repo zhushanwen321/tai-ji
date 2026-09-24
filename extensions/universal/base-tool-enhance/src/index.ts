@@ -8,6 +8,8 @@
  * session 替换接管）+ 挂 exit 边沿通知回调（unregister emit + sendMessage steer）+
  * session_start 对账（appendEntry 权威路径兜底 pending 收尾）+ 完成通知补投
  * （bg-task-notify-durability：终态无痕迹无标记的任务下次激活合并补投 + 同步幂等标记）。
+ * 维护链双触发面：session_start 事件 + `__taiji_bg_reconcile__` 内部命令（taiji runtime
+ * 在 getCommands 时按节流补触发，覆盖「切走切回同进程重挂接、session_start 不重发」场景）。
  * 收殓下沉（u-bte-remove）：M5 孤儿收殓已移交 taiji runtime（background-task-
  * reaper 双触发面——session 销毁时 + 启动期兜底扫描，设计 file-lock-unification-
  * and-reaper-sink.md §3.2 D2），extension 不再做全局扫描/全局锁；session_start
@@ -17,6 +19,7 @@
 
 import type {
 	ExtensionAPI,
+	ExtensionCommandContext,
 	ExtensionContext,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -60,10 +63,27 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
 		return runSessionStartMaintenance(pi, ctx, event.reason);
 	});
+	// 第二触发面（bg-task-notify-durability 补强）：桌面「切走会话再切回」是同进程重新
+	// 挂接——pi 进程存活、不重发 session_start（真机实证），挂在 session_start 上的
+	// 维护链在「投递失败但进程存活」场景（设计 G2 核心场景）永不触发。taiji runtime 在
+	// getCommands（切回后 renderer 主动拉取命令的必经查询）时经 client.prompt 发起本
+	// 命令（60s per-session 节流、fire-and-forget），handler 调同一维护函数（reason 传
+	// 'resume' 语义）。`/__` 双下划线前缀 = 内部命令（前端 internal-command-filter 过滤
+	// 不显示）；无待补任务时维护链三判据早退，零输出零 turn。
+	pi.registerCommand("__taiji_bg_reconcile__", {
+		description:
+			"Internal: rerun pending background-task reconcile + completion-notify redelivery (triggered by taiji runtime on session resume; session_start does not refire for same-process reattach)",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			return runSessionStartMaintenance(pi, ctx, "resume");
+		},
+	});
 }
 
 /**
  * session_start 维护链（M3 对账 + 补投——收殓下沉 runtime 后，u-bte-remove）。
+ *
+ * 双入口共用本函数：① session_start 事件（reason 透传）；② `__taiji_bg_reconcile__`
+ * 内部命令（runtime 切回触发，reason 恒 'resume'）。维护逻辑与幂等性对两入口完全一致。
  *
  * 执行形态：async（补投 await sendMessage，bg-task-notify-durability 设计决策 1
  * 规格①；实装下 pi.sendMessage 恒同步返回，见 pending-reconcile.ts ReconcilePi

@@ -141,6 +141,16 @@ export const userStoppedMarkStore: UserStoppedMarkStore = {
   },
 }
 
+/**
+ * background 任务完成通知补投触发（bg-task-notify-durability 第二触发面）的内部命令与
+ * per-session 节流窗口。命令名与扩展侧注册（extensions/universal/base-tool-enhance
+ * src/index.ts 的 pi.registerCommand）是跨包字符串契约，字面量锤定不 import（先例
+ * trace-sync 的 /__taiji_get_system_prompt__）——`/__` 双下划线前缀 = 内部命令（前端
+ * internal-command-filter 过滤不显示），两处注释互为指针，改名必须同批。
+ */
+const BG_RECONCILE_COMMAND = '/__taiji_bg_reconcile__'
+const BG_RECONCILE_TRIGGER_THROTTLE_MS = 60_000
+
 export class SessionService implements ISessionService, ILifecycleSessionOps, IDispatcherSessionOps, IScannerSessionOps {
   /**
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
@@ -344,6 +354,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 意图——非候选无害（豁免判定只会多豁免不会误杀），恢复后继续有效；量级每 sid 一个数字。
    */
   private readonly lastViewedAtBySession = new Map<string, number>()
+  /**
+   * background 任务完成通知补投的 per-session 触发节流（bg-task-notify-durability
+   * runtime 触发面）：sessionId → 最近一次发起 `__taiji_bg_reconcile__` 的时间戳。
+   *
+   * 位置先例 = 上方 lastViewedAtBySession（per-sid Map、随实例生命周期生灭、刻意不做
+   * 删除清理——量级每 sid 一个数字，回收态残留条目只影响节流窗口不影响正确性；60s
+   * 内切走再切回属正常节奏，不重复打扰 pi）。写方唯一 = maybeTriggerBgReconcile。
+   */
+  private readonly bgReconcileTriggeredAt = new Map<string, number>()
   /**
    * 空闲回收占座（idle-pi-reclamation D6-2，u2）。u3 组合根经 setReclaimSeat 注入与
    * reaper/reclaimManagedSession 共享的同实例；缺省 null = 行为不变（ensureActive 无
@@ -1487,7 +1506,36 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.projection.getReplicatedStates(sessionId)?.commands.markDirty()
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error(`session ${sessionId} not active`)
+    this.maybeTriggerBgReconcile(sessionId, client)
     return client.getCommands()
+  }
+
+  /**
+   * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
+   *
+   * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
+   * （真机实证），扩展侧挂在 session_start 上的维护链在「投递失败但进程存活」场景
+   * （设计 G2 核心场景）永不触发。getCommands 是切回后 renderer 主动拉取的必经查询
+   * （broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
+   *
+   * 执行形态：fire-and-forget——不 await（getCommands 延迟敏感，补投结果不阻塞查询）、
+   * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。命令通道
+   * `{ maintenance: true }`（SendCommandOptions 维护豁免口的首个用户）——补投不体现
+   * 用户活跃，不得刷新 lastActivityAt 妨碍空闲回收。
+   *
+   * 节流：60s per-session（bgReconcileTriggeredAt Map）。时间戳在发起时记录（对触发
+   * 尝试节流，非对完成节流——fire-and-forget 无完成点）。无待补任务时扩展侧三判据
+   * 早退，零输出零 turn。
+   */
+  private maybeTriggerBgReconcile(sessionId: string, client: IPiEngine): void {
+    const now = Date.now()
+    const last = this.bgReconcileTriggeredAt.get(sessionId)
+    if (last !== undefined && now - last < BG_RECONCILE_TRIGGER_THROTTLE_MS) return
+    this.bgReconcileTriggeredAt.set(sessionId, now)
+    // fire-and-forget：void 前缀表达「不消费结果」，.catch 防 unhandled rejection
+    void client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true }).catch((err) => {
+      console.warn(`[session-service] bg reconcile trigger failed (sessionId=${sessionId}):`, err)
+    })
   }
 
   /**

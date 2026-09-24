@@ -47,6 +47,9 @@ import type { ExtensionAPI, SessionStartEvent } from "@earendil-works/pi-coding-
 function createMockPi() {
 	return {
 		registerTool: vi.fn(),
+		// __taiji_bg_reconcile__ 第二触发面（runtime 切回补投）注册桩——本文件只验证
+		// session_start 入口，命令注册面断言在 index.test.ts
+		registerCommand: vi.fn(),
 		on: vi.fn(),
 		appendEntry: vi.fn(),
 		events: { emit: vi.fn(), on: vi.fn() },
