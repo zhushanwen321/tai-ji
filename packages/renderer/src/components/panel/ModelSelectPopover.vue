@@ -20,7 +20,9 @@
         show-chevron
         :title="t('panel.modelSelect.switchModel')"
       >
-        <span class="truncate">{{ currentName }}</span>
+        <!-- 模型名两态规格（S4）：非聚合态恒完整展示，DOM 不得带 truncate/max-w 截断 class——
+             名字过长由 fit 实测回路升级到聚合按钮（两态），不在展开态内省略。 -->
+        <span>{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
     <PopoverContent side="top" class="w-[220px] p-0">
