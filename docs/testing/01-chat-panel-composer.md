@@ -315,21 +315,22 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 触发/可见条件 |
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
-| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged`）；本表不重复登记，避免两处漂移 |
+| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-metrics-aggregate` / `composer-model-thinking-aggregate`）；本表不重复登记，避免两处漂移 |
 | `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
 
 ### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
 
-> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
+> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度，**2026-09-25 修订为「三步聚合 + 锚点保护」**：640/520 tier 轴、`»` 溢出菜单、88/56px 模型名截断、simplified/iconic 中间态全部退役）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（实测回路）· `packages/renderer/src/components/panel/ComposerMetricsAggregate.vue` · `packages/renderer/src/components/panel/ModelThinkingAggregate.vue` · `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
 
-**底栏三簇 + 按序退化 + 溢出菜单**：
+**底栏三簇 + 三步聚合 + 锚点保护**：
 
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
-| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行） |
-| `composer-overflow-menu` | Composer.vue | 序 3 生效且有被收起项（零贡献插件 toolbar 时不渲染，不留死入口） |
-| `composer-capacity-merged` / `composer-model-merged` | Composer.vue | 序 1 / 序 2 合流态（`density.slots.* === 'merged'`） |
+| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
+| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 2 生效（`data-slot-metrics === 'aggregated'`，实测指标放不下）；单图标指标聚合按钮（hover 弹聚合页） |
+| `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
+| [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
 **任务托盘（built-in 四件 + 协议 widget 区）**：
 
@@ -338,7 +339,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
 | `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
 | `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
-| `tray-aggregate-button` | 序 4 生效（`<520px`）且托盘有条目（`hasTrayItems`）；聚合入口 = 层叠图标 + 运行数 |
+| `tray-aggregate-button` | fit L1 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
 | `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
 | `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
 | `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
