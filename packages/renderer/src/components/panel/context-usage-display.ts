@@ -9,7 +9,7 @@
 
 /** 用量分档阈值（<70 accent · 70–90 warning · >90 danger，与设计 §3 一致） */
 export const USAGE_HIGH_THRESHOLD = 70
-export const USAGE_DANGER_THRESHOLD = 90
+const USAGE_DANGER_THRESHOLD = 90
 
 const K_THRESHOLD = 1000
 const M_THRESHOLD = 1_000_000

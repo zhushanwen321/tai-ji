@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import type { NormalizedQuotaRow, ProviderInfo } from '@taiji/shared'
+import type { NormalizedQuotaRow, ProviderId, ProviderInfo } from '@taiji/shared'
 
 // ── mock ──
 
@@ -80,7 +80,7 @@ beforeEach(() => {
 // ── fixtures ──
 
 const zhipuProvider: ProviderInfo = {
-  id: 'zhipu',
+  id: 'zhipu' as ProviderId,
   name: 'zhipu',
   baseUrl: 'https://open.bigmodel.cn/api',
   apiKeySet: true,
@@ -90,7 +90,7 @@ const zhipuProvider: ProviderInfo = {
 }
 
 const deepseekProvider: ProviderInfo = {
-  id: 'deepseek',
+  id: 'deepseek' as ProviderId,
   name: 'deepseek',
   baseUrl: 'https://api.deepseek.com',
   apiKeySet: true,
@@ -383,6 +383,66 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       expect(entry).toBeDefined()
       expect(entry!.data).toEqual(mockQuotaRow)
       expect(entry!.error).toBe('panel.context.quotaFailUnauthorized')
+      wrapper.unmount()
+    })
+
+    it('refresh 按钮 → refreshQuota fulfilled 无 reason → setCache 写入新数据且清空 error（onRefresh 成功分支）', async () => {
+      setupProviders([zhipuProvider])
+      const quotaStore = useQuotaStore()
+      // 先置失败态（旧数据 + error）：成功刷新后 error 应被 setCache 清空（MF-1-3 成功分支锚）
+      quotaStore.setCache('zhipu', mockQuotaRow, 500)
+      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
+      const freshRow: NormalizedQuotaRow = {
+        label: '智谱 GLM Coding Plan',
+        wins: [{ pct: 90, resetSec: 3600 }, { pct: 80, resetSec: 86400 }, { pct: null, resetSec: null }],
+      }
+      vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: freshRow, lastFetchAt: 2000 })
+
+      const wrapper = await openPopover()
+
+      // 点击前失败态可见（用户可见 DOM 前置锚）
+      expect(document.body.textContent).toContain('查询失败：panel.context.quotaFailNetwork')
+
+      const refreshBtn = findBodyButton('刷新')
+      expect(refreshBtn).toBeTruthy()
+      refreshBtn!.click()
+      await flushPromises()
+
+      // 成功分支：新 data + lastFetchAt 写入，error 清空
+      const entry = quotaStore.getEntry('zhipu')
+      expect(entry).toBeDefined()
+      expect(entry!.data).toEqual(freshRow)
+      expect(entry!.lastFetchAt).toBe(2000)
+      expect(entry!.error).toBeNull()
+      // 用户可见 DOM：失败提示随 error 清空退出
+      expect(document.body.textContent).not.toContain('查询失败：panel.context.quotaFailNetwork')
+      wrapper.unmount()
+    })
+
+    it('refresh 按钮 → refreshQuota reject（连接层异常）→ setError 留旧 data + refreshing 复位（onRefresh 异常分支）', async () => {
+      setupProviders([zhipuProvider])
+      const quotaStore = useQuotaStore()
+      quotaStore.setCache('zhipu', mockQuotaRow, 500)
+      vi.mocked(quotaApi.refreshQuota).mockRejectedValue(new Error('boom'))
+
+      const wrapper = await openPopover()
+
+      const refreshBtn = findBodyButton('刷新')
+      expect(refreshBtn).toBeTruthy()
+      refreshBtn!.click()
+      await flushPromises()
+
+      // 异常分支：旧 data 保留，error 写异常消息
+      const entry = quotaStore.getEntry('zhipu')
+      expect(entry).toBeDefined()
+      expect(entry!.data).toEqual(mockQuotaRow)
+      expect(entry!.error).toBe('boom')
+      // 用户可见 DOM：失败提示带异常消息
+      expect(document.body.textContent).toContain('查询失败：boom')
+      // refreshing 复位：按钮文案回到「刷新」且不再禁用（可再次点击）
+      const btnAfter = findBodyButton('刷新')
+      expect(btnAfter).toBeTruthy()
+      expect((btnAfter as HTMLButtonElement).disabled).toBe(false)
       wrapper.unmount()
     })
 

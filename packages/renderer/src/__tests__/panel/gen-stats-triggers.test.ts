@@ -476,6 +476,27 @@ describe('浮层内容（观察者形态）', () => {
     expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
   })
 
+  // ── formatIdle ≥1h 分支（MF-1-4 边界锚）：整点「3h」/ 非整点「3h50m」──
+  it.each([
+    { idleMs: 13_800_000, duration: '3h50m' },
+    { idleMs: 10_800_000, duration: '3h' },
+  ])('归因态浮层：idleMs=$idleMs（≥1h）→ 说明行含「$duration」（小时档格式化）', async ({ idleMs, duration }) => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 96, currentMiss: { reason: 'idle-expiry', idleMs } },
+      }),
+    })
+    await flushPromises()
+
+    const note = wrapper.find('[data-testid="genstats-cache-miss-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain(`距上次请求已空闲 ${duration}`)
+  })
+
   it('context-rewrite 归因浮层：压缩重建说明行', async () => {
     const wrapper = mountTriggers(true)
     await flushPromises()

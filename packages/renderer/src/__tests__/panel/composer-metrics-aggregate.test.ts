@@ -44,11 +44,14 @@ const HOVER_STUBS = {
   HoverCardContent: { name: 'HoverCardContent', template: '<div><slot /></div>' },
 }
 
+/** 帧工厂（ttft 基线与 gen-stats-triggers.test.ts 同源：current=820 →「820ms」；ttft 为
+ *  GenStatsFrame 必填字段，缺省即类型漂移——typecheck:test 白名单收口后由编译期拦截） */
 function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
   return {
     sessionId,
     speed: { current: 35, day: 28, d7: 22, d30: 19 },
     cacheRatio: { current: 91, day: 87 },
+    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
     model: 'prov-a/m1',
     ...overrides,
   }
@@ -141,7 +144,7 @@ describe('聚合页四段卡（观察者形态）', () => {
     expect(separators).toHaveLength(3)
   })
 
-  it('帧驱动：stats 帧直达聚合页（速度 35 t/s / 命中率 91% 实时可见）', async () => {
+  it('帧驱动：stats 帧直达聚合页（速度 35 t/s / 命中率 91% / TTFT 820ms 实时可见）', async () => {
     const wrapper = mountAggregate(true)
     await flushPromises()
 
@@ -152,6 +155,8 @@ describe('聚合页四段卡（观察者形态）', () => {
     const text = wrapper.text()
     expect(text).toContain('35 t/s')
     expect(text).toContain('91%')
+    // TTFT 卡行值（GenStatsTtftCard 四行 p50：current 820 →「820ms」）
+    expect(text).toContain('820ms')
     expect(text).toContain('近 7 天')
     expect(wrapper.find('[data-testid="genstats-speed-model"]').text()).toBe('prov-a/m1')
     // 缓存 bar：宽度 = 命中率（观察者形态）

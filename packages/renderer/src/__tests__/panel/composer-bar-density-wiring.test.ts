@@ -35,21 +35,33 @@ import { textToSegments } from '@taiji/shared'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
 import { ManualResizeObserverStub } from '../effects/_virtua-mock-helper'
+import {
+  dispatchFitGeometry as stubFitGeometry,
+  makeMountPointSource as makeHelperSource,
+  toolbarEntry,
+} from './_density-geometry-helper'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import Composer from '@/components/panel/Composer.vue'
 
 // ── 托盘三态替身：计数可注入（数组型行集对本文件无消费方，恒空）──
-const trayFixture = vi.hoisted(() => ({ bashRunning: 2, subagentRunning: 1 }))
+// state = mock 工厂挂载的 reactive 计数（挂载前 null）：mount 前定值与 mount 后中途变更
+// （归零→恢复 emitter 存活链用例）都经 setTrayCounts 写同一 proxy，驱动 counts 重算。
+const trayFixture = vi.hoisted(() => ({
+  state: null as { bashRunning: number; subagentRunning: number } | null,
+}))
 
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
+  const { computed, reactive } = await import('vue')
+  const state = reactive({ bashRunning: 2, subagentRunning: 1 })
+  trayFixture.state = state
   const emptyList = (): ReturnType<typeof computed<never[]>> => computed(() => [])
   return {
     ...actual,
     useTrayCounts: (): UseTrayCountsReturn => ({
       counts: computed(() => ({
-        bash: { running: trayFixture.bashRunning, ended: 0, total: trayFixture.bashRunning },
-        subagent: { running: trayFixture.subagentRunning, ended: 0, total: trayFixture.subagentRunning },
+        bash: { running: state.bashRunning, ended: 0, total: state.bashRunning },
+        subagent: { running: state.subagentRunning, ended: 0, total: state.subagentRunning },
         workflow: { running: 0, ended: 0, total: 0 },
         // u7 第 4 件：本文件不验 session 件（无子会话 → 该件不渲染），恒 0
         session: { running: 0, ended: 0, total: 0 },
@@ -145,24 +157,10 @@ const stubs = {
 const SID = 's-density'
 
 /**
- * 挂载点数据源替身：**只服务 `getView(sid, 'composer.toolbar')`**（插件 toolbar 贡献面），
- * `getViewIds` 恒空——不冒充 widget 区条目（否则挂载点 view 会被托盘 widget 区当成条目）。
+ * 挂载点数据源替身（几何 helper 单份替身的本文件绑 SID 形态）。
  */
 function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostSource {
-  return {
-    getView: (sid, viewId) => (sid === SID ? partition.get(viewId) : undefined),
-    getViewIds: () => [],
-  }
-}
-
-/** 一个非空 guiTree 的挂载点条目（贡献数 > 0） */
-function toolbarEntry(): ViewCacheEntry {
-  return {
-    viewId: 'composer.toolbar',
-    pluginId: 'ext-x',
-    guiTree: [{ type: 'ansi-text', props: { lines: ['toolbar'] } }],
-    updatedAt: 1_760_000_000_000,
-  }
+  return makeHelperSource(SID, partition)
 }
 
 let wrapper: VueWrapper | null = null
@@ -194,20 +192,11 @@ async function dispatchTick(): Promise<void> {
   await nextTick()
 }
 
-/** 等 fit 收敛回路跑完（rAF 链；happy-dom 有 rAF） */
-async function flushFitPasses(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) {
-    await new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
-      else setTimeout(resolve, 0)
-    })
-  }
-  await nextTick()
-}
+/** 等 fit 收敛回路跑完（helper 单份；本文件调用点见 dispatchFitGeometry） */
 
 /**
- * 打桩底栏几何并派发 RO：可用宽 + 左簇占宽（右簇占宽按当前 `data-fit` 分级回落——
- * 模拟「形态聚合 → 需求宽下降」的真实收敛过程），随后等回路收敛。
+ * 打桩底栏几何并派发 RO：真差异（从 Composer wrapper 查三簇节点）留本文件，
+ * 打桩 + 派发 + rAF 排空同构本体在 `_density-geometry-helper` 单份。
  */
 async function dispatchFitGeometry(
   avail: number,
@@ -218,14 +207,7 @@ async function dispatchFitGeometry(
   const leftEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="left"]')
   const rightEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="right"]')
   if (!leftEl || !rightEl) throw new Error('底栏两簇节点缺失：模板与 fit 回路不同步？')
-  Object.defineProperty(barEl, 'clientWidth', { value: avail, configurable: true })
-  vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: left } as DOMRect)
-  vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
-    () => ({ width: widthByFit[barEl.getAttribute('data-fit') ?? '0'] }) as DOMRect,
-  )
-  const observer = ManualResizeObserverStub.created()[0]
-  observer.dispatch([{ target: barEl, contentRect: { width: avail } as DOMRectReadOnly }])
-  await flushFitPasses()
+  await stubFitGeometry({ bar: barEl, left: leftEl, right: rightEl }, avail, left, widthByFit)
 }
 
 /** 底栏首/末按钮（序 0 锚点断言用） */
@@ -237,12 +219,19 @@ function lastButtonTitle(): string | undefined {
   return buttons[buttons.length - 1]?.attributes('title')
 }
 
+/** 写托盘计数（响应式 state：mount 前定值与 mount 后中途变更同口） */
+function setTrayCounts(bashRunning: number, subagentRunning: number): void {
+  const state = trayFixture.state
+  if (!state) throw new Error('tray fixture state 未初始化：useTrayCounts mock 工厂未执行')
+  state.bashRunning = bashRunning
+  state.subagentRunning = subagentRunning
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
-  trayFixture.bashRunning = 2
-  trayFixture.subagentRunning = 1
+  setTrayCounts(2, 1)
   ManualResizeObserverStub.install()
 })
 
@@ -381,14 +370,33 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
 
 describe('不留死入口（能力标志 → 左簇形态）', () => {
   it('托盘全无条目 + 插件零贡献 → leftCluster absent，任何状态无聚合入口', async () => {
-    trayFixture.bashRunning = 0
-    trayFixture.subagentRunning = 0
+    setTrayCounts(0, 0)
     mountComposer(makeMountPointSource(reactive(new Map())))
     await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
     expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
     // `+` 仍在（序 0 与托盘无关）
     expect(firstButtonTitle()).toBe('添加内容（附件 / 命令）')
+  })
+
+  it('非保护态托盘恒挂载：条目归零→恢复，聚合按钮经 absent 再回来（emitter 存活链）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    // L1 聚合态起步：聚合入口在场
+    await dispatchFitGeometry(400, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+
+    // 条目归零 → has-items false 上抛（托盘外壳未被卸载，emitter 存活）→ leftCluster absent
+    setTrayCounts(0, 0)
+    await nextTick()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+
+    // 条目恢复 → 同一 emitter 仍上抛 → 聚合按钮重新渲染（形态恢复，无需重挂）
+    setTrayCounts(2, 1)
+    await nextTick()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 })
 

@@ -23,6 +23,12 @@ import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
 import { ManualResizeObserverStub } from '../../effects/_virtua-mock-helper'
 import {
+  dispatchFitGeometry as stubGeometry,
+  flushFitPasses,
+  makeMountPointSource as makeHelperSource,
+  toolbarEntry,
+} from '../_density-geometry-helper'
+import {
   useComposerBarDensity,
   AGGREGATE_GROUP_CLASS,
   EXPANDED_GROUP_CLASS,
@@ -56,21 +62,11 @@ const Host = defineComponent({
   `,
 })
 
-/** 挂载点数据源替身（getViewIds 恒空：只服务 plugin toolbar 贡献面查询） */
+/** 挂载点数据源替身（helper 单份替身的本文件绑 SID 形态；entry 缺省 = 零贡献分区） */
 function makeSource(entry?: ViewCacheEntry): ViewHostSource {
-  return {
-    getView: (sid, viewId) => (sid === SID && viewId === 'composer.toolbar' ? entry : undefined),
-    getViewIds: () => [],
-  }
-}
-
-function toolbarEntry(): ViewCacheEntry {
-  return {
-    viewId: 'composer.toolbar',
-    pluginId: 'ext-x',
-    guiTree: [{ type: 'ansi-text', props: { lines: ['toolbar'] } }],
-    updatedAt: 1_760_000_000_000,
-  }
+  const partition = new Map<string, ViewCacheEntry>()
+  if (entry) partition.set(entry.viewId, entry)
+  return makeHelperSource(SID, partition)
 }
 
 let wrapper: VueWrapper | null = null
@@ -89,36 +85,27 @@ function hostEl(selector: string): HTMLElement {
   return node.element as HTMLElement
 }
 
-/** 等 fit 回路跑完（rAF 链；happy-dom 有 rAF，兜底宏任务同样被覆盖） */
-async function flushFitPasses(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) {
-    await new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
-      else setTimeout(resolve, 0)
-    })
-  }
-  await nextTick()
-}
+/** 等 fit 回路跑完（helper 单份；直接消费于手动派发用例） */
 
 /**
- * 打桩宿主几何：底栏可用宽（clientWidth）+ 左右两簇占宽，并派发一次 RO 回调触发测量 pass。
- * 测试宿主无样式表 → computed padding = 0 → clientWidth 即可用宽。
+ * 打桩宿主几何并派发 RO：真差异（从 Host wrapper 查三节点）留本文件，
+ * 打桩 + 派发 + rAF 排空同构本体在 `_density-geometry-helper` 单份。
  *
  * @param avail 底栏内容可用宽（px；NaN 模拟脏可用宽）
  * @param left 左簇占宽（px）
  * @param right 右簇占宽（px）
  */
 async function dispatchGeometry(avail: number, left: number, right: number): Promise<void> {
-  const bar = hostEl('[data-testid="host-bar"]')
-  const leftEl = hostEl('[data-testid="host-left"]')
-  const rightEl = hostEl('[data-testid="host-right"]')
-  Object.defineProperty(bar, 'clientWidth', { value: avail, configurable: true })
-  vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: left } as DOMRect)
-  vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: right } as DOMRect)
-  const observer = ManualResizeObserverStub.created()[0]
-  if (!observer) throw new Error('ResizeObserver 未创建：接线件未挂载')
-  observer.dispatch([{ target: bar, contentRect: { width: avail } as DOMRectReadOnly }])
-  await flushFitPasses()
+  await stubGeometry(
+    {
+      bar: hostEl('[data-testid="host-bar"]'),
+      left: hostEl('[data-testid="host-left"]'),
+      right: hostEl('[data-testid="host-right"]'),
+    },
+    avail,
+    left,
+    right,
+  )
 }
 
 /** 派发一条缺 contentRect 的脏 entry（polyfill/异常宿主形态）——回调不读 entry，不应崩 */
@@ -316,6 +303,53 @@ describe('useComposerBarDensity：测量收敛回路（三步聚合 + 锚点保�
     vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
     await dispatchGeometry(400, 20, 300)
     expect(host.getDensity().fitLevel).toBeGreaterThanOrEqual(1)
+  })
+
+  it('FIT_MAX_PASSES 硬闸：收敛失控（每轮 changed）时第 8 轮后停止 schedule（rAF 环兜底）', async () => {
+    // 失控构造：可用宽逐轮递增（windowWidened 恒真）+ 需求宽交替「超宽 / 放得下」
+    // → 升级/置保护 ↔ 解保护振荡，每轮都产生 changed=true；唯一的环终止机制 = passCount 硬闸
+    const rafQueue: Array<() => void> = []
+    const rafStub = vi.fn((cb: () => void) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    vi.stubGlobal('requestAnimationFrame', rafStub)
+
+    const host = mountHost(makeSource())
+    // 按测量轮的右簇需求宽：前 4 轮超宽（升到顶格 + 置保护），随后超宽/放得下交替（振荡）
+    const demandByPass = [5000, 5000, 5000, 5000, 300, 5000, 300, 5000]
+    let passTick = 0
+    let widthTick = 0
+    const leftEl = hostEl('[data-testid="host-left"]')
+    const rightEl = hostEl('[data-testid="host-right"]')
+    const barEl = hostEl('[data-testid="host-bar"]')
+    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
+    vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(() => {
+      const width = demandByPass[Math.min(passTick, demandByPass.length - 1)]
+      return { width } as DOMRect
+    })
+    Object.defineProperty(barEl, 'clientWidth', {
+      configurable: true,
+      get: () => 200 + 100 * widthTick,
+    })
+
+    ManualResizeObserverStub.created()[0]?.dispatch([
+      { target: barEl, contentRect: { width: 200 } as DOMRectReadOnly },
+    ])
+
+    // 手动逐帧驱动（rAF 已 stub：回调进 rafQueue，本循环即帧时钟；队列空 = 已停 schedule）
+    for (let frame = 0; frame < 16 && rafQueue.length > 0; frame += 1) {
+      passTick = frame
+      widthTick = frame
+      for (const cb of rafQueue.splice(0)) cb()
+      await nextTick()
+    }
+
+    // schedule 次数封顶：初始 1 次 + 前 7 轮各 1 次 = 8（第 8 轮 passCount>=8 命中硬闸不再排下一帧）
+    expect(rafStub.mock.calls.length).toBe(8)
+    // 停环后形态冻结在顶格 + 保护
+    expect(host.getDensity().fitLevel).toBe(3)
+    expect(host.getDensity().anchorProtected).toBe(true)
   })
 })
 

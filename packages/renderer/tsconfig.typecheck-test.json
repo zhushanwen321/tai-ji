@@ -11,6 +11,10 @@
     "src/__tests__/settings/settings-modal-smoke.test.ts",
     "src/__tests__/settings/settings-modal-skill-dirs.test.ts",
     "src/components/settings/extension/__tests__/PluginContributionsPage.test.ts",
+    "src/__tests__/panel/composer-metrics-aggregate.test.ts",
+    "src/__tests__/panel/context-usage-display.test.ts",
+    "src/__tests__/panel/context-capacity-quota.test.ts",
+    "src/__tests__/panel/gen-stats-triggers.test.ts",
     "src/**/*.d.ts",
     "../../apps/electron/preload/index.d.ts"
   ],

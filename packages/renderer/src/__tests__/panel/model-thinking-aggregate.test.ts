@@ -16,15 +16,15 @@ import { mount, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import type { ModelInfo } from '@taiji/shared'
+import type { ModelInfo, ProviderId } from '@taiji/shared'
 import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
 
 import ModelThinkingAggregate from '@/components/panel/ModelThinkingAggregate.vue'
 
 const MODELS: ModelInfo[] = [
-  { id: 'claude-4', name: 'Claude 4', providerId: 'anthropic', providerName: 'Anthropic' },
-  { id: 'gpt-4', name: 'GPT-4', providerId: 'openai', providerName: 'OpenAI' },
-] as unknown as ModelInfo[]
+  { id: 'claude-4', name: 'Claude 4', providerId: 'anthropic' as ProviderId, providerName: 'Anthropic' },
+  { id: 'gpt-4', name: 'GPT-4', providerId: 'openai' as ProviderId, providerName: 'OpenAI' },
+]
 
 /** 高低两档映射（max 发 xhigh，与 ThinkingLevelPopover 测试同款 fixture） */
 const LEVEL_MAP = { off: 'off', high: 'high', max: 'xhigh' }
@@ -151,6 +151,44 @@ describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', 
 
     expect(w.emitted('selectThinking')).toBeUndefined()
   })
+
+  it('hover 启动切换后同目标 click 幂等：只发一条 selectModel（pending 去重）', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
+    expect(gptRow).not.toBeNull()
+    // hover 已 emit 启动切换（pending = gpt-4），随后指针落定同目标的 click 不得再发第二条 RPC
+    await hover(gptRow!)
+    await click(gptRow!)
+
+    const emitted = w.emitted('selectModel')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(1)
+    expect(emitted![0][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+  })
+
+  it('switching=true（U4 单飞锁）→ hover/click 均不 emit，click 仅关弹层', async () => {
+    const w = mountAggregate({ switching: true })
+    await openAggregate(w)
+
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
+    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')
+    expect(gptRow).not.toBeNull()
+    expect(maxRow).not.toBeNull()
+
+    // 切换中：hover 模型行 / 思考行均不触发 emit
+    await hover(gptRow!)
+    await hover(maxRow!)
+    expect(w.emitted('selectModel')).toBeUndefined()
+    expect(w.emitted('selectThinking')).toBeUndefined()
+
+    // click 同样不 emit，仅保留关浮层语义
+    await click(gptRow!)
+    expect(w.emitted('selectModel')).toBeUndefined()
+    expect(w.emitted('selectThinking')).toBeUndefined()
+    expect(pickerPanel()).toBeNull()
+  })
 })
 
 describe('click 选中（关弹层）', () => {
@@ -187,8 +225,8 @@ describe('数据面与 ModelSelectPopover 同源（model-picker-data）', () => 
   it('enabled===false 的模型不进聚合列表（双保险过滤同源）', async () => {
     const mixed: ModelInfo[] = [
       ...MODELS,
-      { id: 'claude-haiku', name: 'Claude Haiku', providerId: 'anthropic', providerName: 'Anthropic', enabled: false },
-    ] as unknown as ModelInfo[]
+      { id: 'claude-haiku', name: 'Claude Haiku', providerId: 'anthropic' as ProviderId, providerName: 'Anthropic', enabled: false },
+    ]
     getSettingsStore().models.value = mixed
 
     const w = mountAggregate()

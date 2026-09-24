@@ -17,7 +17,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   COMPOSER_DEGRADATION_ORDER,
-  COMPOSER_DENSITY_EXPANDED_MIN_WIDTH,
   COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
   COMPOSER_FIT_LEVEL_LEFT_AGGREGATE,
   COMPOSER_FIT_LEVEL_METRICS_AGGREGATE,
@@ -54,10 +53,6 @@ function allCombos(): Array<{ level: number; caps: ComposerDensityCapabilities; 
 }
 
 describe('常量与归一', () => {
-  it('首帧种子宽保留 640（[HISTORICAL] 原全展开档断点，不再参与形态判定）', () => {
-    expect(COMPOSER_DENSITY_EXPANDED_MIN_WIDTH).toBe(640)
-  })
-
   it('fit 顶格 = 3，级命名常量与退化序一一对应', () => {
     expect(COMPOSER_DENSITY_MAX_FIT_DEGRADATION).toBe(3)
     expect(COMPOSER_FIT_LEVEL_NONE).toBe(0)

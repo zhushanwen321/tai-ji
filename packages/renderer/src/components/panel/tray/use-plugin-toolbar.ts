@@ -6,14 +6,18 @@
  *
  * 数据源经 inject VIEW_HOST_SOURCE_KEY（未 provide 时恒 false，不崩不 warn——缺 source 只影响
  * 聚合入口/承接段判定）；有贡献 = `getView(sessionId, viewId)?.guiTree.length > 0`——挂载点把
- * N 个贡献合成一个 view，只有布尔面（与 use-composer-bar-density 的
- * pluginToolbarContributionCount 同口径）。
+ * N 个贡献合成一个 view，只有布尔面。**本文件是插件 toolbar 挂载点标识（PLUGIN_TOOLBAR_VIEW_ID）
+ * 与贡献判定的单份持有处**：use-composer-bar-density 的 pluginToolbarContributionCount（0/1）
+ * 经本 hook 派生，不在此判定之外复制第二份 getView/guiTree 判定。
  */
 import { computed, inject, toValue } from 'vue'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 
-/** 插件 toolbar 挂载点名（= Composer 模板 `view-id` 字面量，与 use-composer-bar-density 同源） */
+/**
+ * 插件 toolbar 挂载点名（= Composer 模板 `view-id` 字面量）。单份持有：任何需要引用该挂载点
+ * 标识的代码 import 本常量，禁止再造字面量副本（拼写漂移会让插件 toolbar 静默消失且无编译期拦截）。
+ */
 export const PLUGIN_TOOLBAR_VIEW_ID = 'composer.toolbar'
 
 /**

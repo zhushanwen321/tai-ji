@@ -44,7 +44,7 @@ export function bareModelId(v: string): string {
  * 故前端兜底再过滤一次（双保险）。
  * providerFilter 限定展示的 provider（ProviderPage 默认 pill 传 [p.id]；聚合页不传 = 全量）。
  */
-export function buildModelGroups(
+function buildModelGroups(
   models: readonly ModelInfo[],
   providerFilter?: readonly ProviderId[],
 ): ModelGroup[] {
@@ -64,7 +64,7 @@ export function buildModelGroups(
 }
 
 /** ModelPickerPanel 分组形状映射（providerId 不进表现层） */
-export function toPickerGroups(groups: readonly ModelGroup[]): PickerGroupRef[] {
+function toPickerGroups(groups: readonly ModelGroup[]): PickerGroupRef[] {
   return groups.map((g) => ({
     provider: g.provider,
     models: g.models.map((m) => ({ id: m.id, name: m.name })),

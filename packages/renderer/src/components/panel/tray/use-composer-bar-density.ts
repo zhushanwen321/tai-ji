@@ -27,19 +27,19 @@
  * 能力标志来源：
  * - `pluginToolbarContributionCount`：ViewHost 的 `composer.toolbar` 挂载点当前缓存条目（挂载点把
  *   N 个贡献合成**一个** view，故只有布尔面 → 有内容记 1、无记 0；状态机只判定 `> 0`）。
+ *   判定单份在 `./use-plugin-toolbar`（挂载点标识 + getView/guiTree 判定），本处只投影为计数。
  * - `hasTrayItems`：**不由本文件推导**（托盘三态的唯一真源是 `useTrayCounts` 数据面，唯一实例在
  *   ComposerTray）——外壳经 `update:has-items` 事件上抛，本文件只承载该 ref。缺省 `true`
  *   （状态机的保守缺省），首帧后即被真实值覆盖。
  *
- * 首帧宽度取 `COMPOSER_DENSITY_EXPANDED_MIN_WIDTH` 种子语义等价物——fitLevel 初值 0（全展开）：
- * 实测回调紧随 observe 到达，「先全展开再按实测收口」是无闪烁的那一侧。
+ * 首帧种子 = fitLevel 初值 0（全展开）：实测回调紧随 observe 到达，「先全展开再按实测收口」
+ * 是无闪烁的那一侧。
  *
  * [领地说明] 接线件落在 `panel/tray/` 下（u6b 领地 = Composer.vue 底栏区 + tray/**）；底栏其余部分
  * 未抽离是为了控制 Composer.vue 的 script 行数余量（该文件已贴 300 行硬门禁）。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import {
   COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
   COMPOSER_FIT_LEVEL_NONE,
@@ -49,9 +49,7 @@ import type {
   ComposerDensityLayout,
   ComposerFitDegradationLevel,
 } from '@/components/panel/composer-density'
-
-/** 插件 toolbar 挂载点名（= Composer 模板 `view-id` 字面量，ViewHost viewId 同源） */
-const PLUGIN_TOOLBAR_MOUNT_POINT = 'composer.toolbar'
+import { usePluginToolbarContribution } from './use-plugin-toolbar'
 
 /** 左右两簇的 data 属性（fit 测量定位用；中簇是可压缩占位，不参与需求宽） */
 const CLUSTER_LEFT_SELECTOR = '[data-composer-cluster="left"]'
@@ -123,8 +121,6 @@ function nextFrame(callback: () => void): void {
  * @param sessionId 焦点 session id（插件 toolbar 贡献数按 session 分区读）
  */
 export function useComposerBarDensity(sessionId: Ref<string | null>): UseComposerBarDensityReturn {
-  const viewHostSource = inject(VIEW_HOST_SOURCE_KEY, null)
-
   const barRef = ref<HTMLElement | null>(null)
   const hasTrayItems = ref(true)
   /** fit 退化级（0–3）：0 = 未触发；由实测回路收敛，见文件头「测量收敛回路」 */
@@ -136,13 +132,15 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
    */
   const anchorProtected = ref(false)
 
-  /** 插件 toolbar 贡献面（0/1：挂载点合成单 view，只有布尔面） */
-  const pluginToolbarContributionCount = computed(() => {
-    const sid = sessionId.value
-    if (!sid || !viewHostSource) return 0
-    const view = viewHostSource.getView(sid, PLUGIN_TOOLBAR_MOUNT_POINT)
-    return view !== undefined && view.guiTree.length > 0 ? 1 : 0
-  })
+  /**
+   * 插件 toolbar 贡献面（0/1：挂载点合成单 view，只有布尔面）——判定单份在 use-plugin-toolbar
+   * （挂载点标识 + getView/guiTree 判定不在此复制），本处只做布尔→计数的投影与 sid 空值守卫
+   * （内层 computed 惰性：sid 空时不触发挂载点查询，与旧短路行为等价）。
+   */
+  const pluginToolbarHasContribution = usePluginToolbarContribution(() => sessionId.value ?? '')
+  const pluginToolbarContributionCount = computed(() =>
+    sessionId.value && pluginToolbarHasContribution.value ? 1 : 0,
+  )
 
   const density = computed(() =>
     resolveComposerDensity(

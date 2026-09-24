@@ -12,8 +12,8 @@
 import type { GenStatsCacheMiss } from '@taiji/shared'
 
 /** 缓存命中率语义色三档阈值（设计 §3.1：≥80 success / 50–80 warn / <50 danger） */
-export const CACHE_SUCCESS_THRESHOLD = 80
-export const CACHE_WARN_THRESHOLD = 50
+const CACHE_SUCCESS_THRESHOLD = 80
+const CACHE_WARN_THRESHOLD = 50
 
 /** 缓存命中率的语义色档（neutral = 无值 / 归因态，非故障） */
 export type CacheTier = 'success' | 'warn' | 'danger' | 'neutral'

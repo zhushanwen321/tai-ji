@@ -22,8 +22,8 @@
  * 与旧版（tier + fit 双轴）的差异 [HISTORICAL]：
  * - **tier 固定阈值轴（≥640/≥520 三档）已退役**：旧版按容器宽判「起始形态」再叠 fit 轴，
  *   导致「合体 chip 无条件 88px 截断」这类**与实测溢出脱钩**的退化（宽 640 以下即使整栏放得下
- *   也截模型名）。新版全部形态由实测溢出驱动的 fit 级唯一决定；`COMPOSER_DENSITY_EXPANDED_MIN_WIDTH`
- *   仅保留作 ResizeObserver 首回调前的**首帧种子宽**，不是断点。
+ *   也截模型名）。新版全部形态由实测溢出驱动的 fit 级唯一决定；首帧种子 = fitLevel 初值 0
+ *   （全展开），不存在任何宽度断点。
  * - **88px / 56px 模型名截断态删除**（原 `MODEL_MERGED_CHIP_CLASS` / `MODEL_SIMPLIFIED_CHIP_CLASS`）。
  * - **`»` Ellipsis 溢出菜单退役**（原 `overflowItems` / `overflowMenuVisible`：插件 toolbar 并入
  *   左簇聚合按钮，指标并入指标聚合按钮，底栏不再有省略号入口）。
@@ -39,12 +39,6 @@
  * 可变状态、不修改入参，同输入恒同输出。**不读容器宽度**：宽度→fit 级的换算（测量回路）在
  * 接线层 `tray/use-composer-bar-density.ts`，本模块只做「级 → 形态」映射。
  */
-
-/**
- * 首帧种子宽：ResizeObserver 首回调前按全展开渲染，避免首帧闪聚合态。
- * [HISTORICAL] 原为全展开档断点（≥640 expanded / ≥520 compact），tier 轴退役后**不再参与形态判定**。
- */
-export const COMPOSER_DENSITY_EXPANDED_MIN_WIDTH = 640
 
 /** fit 退化级命名常量（L0–L3，= 退化序 1–3） */
 export const COMPOSER_FIT_LEVEL_NONE = 0

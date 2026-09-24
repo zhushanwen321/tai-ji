@@ -97,7 +97,6 @@ export {
   formatTtftDuration,
   ttftTier,
   TTFT_TRIGGER_TIER_CLASSES,
-  type TtftTier,
 } from './gen-stats-display'
 </script>
 

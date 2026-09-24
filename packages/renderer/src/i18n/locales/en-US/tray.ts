@@ -74,7 +74,6 @@ export default {
     /** Panel top banners (bash) */
     corruptBanner: 'Task data corrupted; ignored (.corrupt snapshot kept)',
     disconnectBanner: 'Disconnected; refreshes automatically after reconnect',
-    /** Order-3 overflow entry (`»` ellipsis; a different semantic from the aggregate entry's stacked icons) */
     /** Order-4 aggregate entry (single layers icon + running-count badge, W3a): title / aria-label is always "All tools" (count lives in the badge, not the title) */
     aggregate: {
       allTools: 'All tools',
