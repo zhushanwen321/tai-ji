@@ -51,8 +51,8 @@ export const STATE_DIR_NAME = "workflow-state";
 // ── 磁盘保留（C1，语义对齐 pi jsonl-run-store mtime 裁剪） ─────────
 
 /**
- * 磁盘保留默认上限（OR-5 跨 run 保留修复）：pi 宿主 jsonl-run-store env 通道
- * （getEnvStateMaxRuns）在 env 未设/空时的缺省上限。
+ * 磁盘保留默认上限（OR-5 跨 run 保留修复）：cap env 通道
+ * （{@link resolveStateMaxRuns}）在 env 未设/空时的缺省上限。
  *
  * OR-5 将「STATE_MAX_RUNS opt-in 默认关」（无界累积）改为默认开：跨 run state
  * 文件按 mtime 裁剪到本上限。取值 50 是无真实 run 体积分布数据下的保守值
@@ -60,6 +60,31 @@ export const STATE_DIR_NAME = "workflow-state";
  * 误删仍被引用的 run 缓存，故取保守端。
  */
 export const DEFAULT_STATE_MAX_RUNS = 50;
+
+/**
+ * 磁盘保留上限 env 通道（OR-5 ⑥b 默认开的用户旋钮；解析单源见
+ * {@link resolveStateMaxRuns}——pi 宿主 jsonl-run-store 的 retention 轮经
+ * barrel 消费，原壳侧同形实现已收编）：
+ * - 未设/空 → 按默认上限 {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——
+ *   OR-5 修复前的 opt-in「默认关」正是跨 run 无界累积缺陷本身）；
+ * - 有限正数 → 上限 = env 值（显式覆盖默认值）；
+ * - 非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：用户意图不明时不动
+ *   磁盘，对齐 prune 内部「任何失败都不抛」的保守哲学）。
+ *
+ * 用 TAIJI_ 前缀而非 PI_：本 env 是 pi 进程内读的配置 env，taiji 桌面 spawn 链按
+ * ENV_WHITELIST_PREFIXES（只有 TAIJI_ 等）过滤，PI_ 前缀在桌面场景被静默丢弃——
+ * 同 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的改名教训。
+ */
+export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
+
+/** 解析保留上限；env 未设/空 → 默认上限，显式非法/≤0 → undefined（不清理）。 */
+export function resolveStateMaxRuns(): number | undefined {
+  const raw = process.env[STATE_MAX_RUNS_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
 
 // ── save 节流（OR-5 单 run 快照 O(n²) 主修） ──────────────────
 

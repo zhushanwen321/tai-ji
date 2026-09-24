@@ -84,7 +84,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-// DEFAULT_SAVE_MIN_INTERVAL_MS / DEFAULT_STATE_MAX_RUNS 经 core barrel 消费
+// DEFAULT_SAVE_MIN_INTERVAL_MS 经 core barrel 消费
 // （u-2c 删 ./* 通配后深路径 tsc 不可解析，barrel 是壳侧唯一消费通道）；
 // RUN_EVENT_JOURNAL_SUFFIX / STATE_DIR_NAME 同理经 barrel 单源（C3 常量上收：
 // journal 后缀与 workflow-state 目录分量原为本地镜像，漂移即 watcher 失配 /
@@ -93,7 +93,6 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // 修复实证独立演化风险）。
 import {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
-  DEFAULT_STATE_MAX_RUNS,
   RUN_EVENT_JOURNAL_SUFFIX,
   STATE_DIR_NAME,
   createRunPersistThrottle,
@@ -116,16 +115,19 @@ import {
   type RunEventJournal,
   type RunOutcome,
   type RunSnapshot,
+  type RunStore,
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 // [Q2 / D5 清理规则] retention 维护单源（core 消费，barrel 导出）：
 // - pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪（manifest 资格 + cap + TTL +
 //   journal 成对删）——本模块 P1b-2 的本地资格感知实现已收口于此；
 // - abandonElapsedInterruptedRuns：interrupted 放弃窗终局化（D5 规则③，无悬挂态）；
-// - resolveStateTtlMs：TTL env 解析单源（常量随迁 core）。
+// - resolveStateTtlMs / resolveStateMaxRuns：TTL 与 cap 的 env 解析单源（常量与
+//   解析都在 core file-run-store.ts，经 barrel 消费）。
 import {
   abandonElapsedInterruptedRuns,
   pruneTerminalRunFiles,
+  resolveStateMaxRuns,
   resolveStateTtlMs,
 } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -303,9 +305,8 @@ function runSettledOutcomeToDoneReason(outcome: RunOutcome): DoneReason {
 // 全部在 core pruneTerminalRunFiles（file-run-store.ts）；interrupted 放弃窗终局化
 // （D5 规则③，无悬挂态）在 core abandonElapsedInterruptedRuns（run-registry.ts）。
 // 本面只保留触发点（新 run 首写的冷路径——每个新 run 进场做一轮完整 retention
-// 维护）与宿主侧 cap env 解析（getEnvStateMaxRuns——cap env 双实现为存量格局，
-// 与 core FileRunStore envName 通道同形）。TTL 常量/env 解析已随收口迁入 core
-// （resolveStateTtlMs 单源）。
+// 维护）；cap / TTL 的 env 解析同样单源 core（resolveStateMaxRuns /
+// resolveStateTtlMs，经 barrel 消费）。
 
 // ── JsonlRunStore ────────────────────────────────────────────
 
@@ -329,33 +330,6 @@ const DEFAULT_SAVE_DEBOUNCE_MS = 200;
  * 模块私有：无外部消费方（测试经构造参数注入小窗口）。
  */
 const DEFAULT_EVENT_EDGE_DEBOUNCE_MS = 1000;
-
-/**
- * 磁盘保留清理的上限 env（OR-5 ⑥b 默认开）：workflow-state 目录内 run state
- * 文件上限。
- *
- * 解析语义与 core FileRunStore envName 通道一致（两实现面单源 {@link
- * DEFAULT_STATE_MAX_RUNS}）：
- * - 未设/空 → 按默认上限 {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——
- *   OR-5 修复前的 opt-in「默认关」正是跨 run 无界累积缺陷本身）；
- * - 有限正数 → 上限 = env 值（显式覆盖默认值）；
- * - 非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：用户意图不明时不动
- *   磁盘，对齐 prune 内部「任何失败都不抛」的保守哲学）。
- *
- * 用 TAIJI_ 前缀而非 PI_：本 env 是 pi 进程内读的配置 env，taiji 桌面 spawn 链按
- * ENV_WHITELIST_PREFIXES（只有 TAIJI_ 等）过滤，PI_ 前缀在桌面场景被静默丢弃——
- * 同 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的改名教训（lifecycle-manager.ts）。
- */
-export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
-
-/** 解析保留上限；env 未设/空 → 默认上限，显式非法/≤0 → undefined（不清理）。 */
-function getEnvStateMaxRuns(): number | undefined {
-  const raw = process.env[STATE_MAX_RUNS_ENV];
-  if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return parsed;
-}
 
 /** journal 文件后缀（<runId>.events.jsonl）——watcher 边沿判定消费 core barrel
  *  单源 RUN_EVENT_JOURNAL_SUFFIX（retention 裁剪判定在 core pruneTerminalRunFiles，
@@ -404,7 +378,25 @@ interface JsonlRunStoreOptions {
   watchJournalEdges?: boolean;
 }
 
-export class JsonlRunStore {
+/**
+ * RunStore port 的 pi 宿主 Infra 实现（session 锚定：权威 entry 落 pi session
+ * JSONL，state 文件是性能缓存）。port 契约类型经 core barrel（RunStore 三方法
+ * save / loadAll / stateFilePath，models/ports.ts）——implements 显式化后签名
+ * 漂移（如返回类型收窄、方法改名）由 tsc 在本类拦截，不再靠约定对齐。
+ *
+ * 本类的五个 interface 面（方法分组索引，便于按消费场景定位）：
+ * 1. **port 面**（RunStore 契约）：save / loadAll / stateFilePath——组合根装配
+ *    LifecycleDeps.store 的注入面；
+ * 2. **adoption 面**（skill-reload 接管）：rebind + resendSnapshots——post-reload
+ *    session_start 就地重绑 entry 写入源并重发权威快照；
+ * 3. **生命周期面**：dispose + flushPendingSaves——shutdown 收尾 / 测试与排查的
+ *    主动冲刷；
+ * 4. **测试通道**：simulateJournalEdgeForTest——fake timers 下驱动 journal 边沿
+ *    调度链（真实 watcher 不可控）；
+ * 5. **词表导出**：无（customType / entry schema 版本已收 core
+ *    workflow-record-entry.ts 单源，本模块不再导出词表常量）。
+ */
+export class JsonlRunStore implements RunStore {
   private readonly sessionDir: string;
   /**
    * workflow-record entry 的 appendEntry 源。store 对 pi 的唯一消费面是 doFlush 的
@@ -814,7 +806,7 @@ export class JsonlRunStore {
         `[subagent-workflow] state retention: interrupted-abandon sweep failed: ${toErrorMessage(err)}`,
       );
     }
-    const maxRuns = getEnvStateMaxRuns();
+    const maxRuns = resolveStateMaxRuns();
     if (maxRuns === undefined) return; // cap opt-out：显式非法值整轮不清理（既有语义）
     try {
       await pruneTerminalRunFiles(

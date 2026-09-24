@@ -21,7 +21,12 @@ import { configureCore, resetCoreForTests, type HostServices } from "../../core/
 import { Budget } from "../models/budget.ts";
 import { Trace } from "../models/trace.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
-import { FileRunStore } from "../file-run-store.ts";
+import {
+  DEFAULT_STATE_MAX_RUNS,
+  FileRunStore,
+  STATE_MAX_RUNS_ENV,
+  resolveStateMaxRuns,
+} from "../file-run-store.ts";
 
 let dataRoot: string;
 let logSpy: ReturnType<typeof vi.fn<(level: import("../../core/logger.ts").LogLevel, component: string, message: string, data?: unknown) => void>>;
@@ -384,5 +389,42 @@ describe("FileRunStore — stateFilePath / 端口语义", () => {
   it("未 configureCore 即消费 dataRoot → core_host_not_configured（§3.4 fail-loud）", () => {
     resetCoreForTests();
     expect(() => store.stateFilePath("wf-x-3")).toThrowError("core_host_not_configured");
+  });
+});
+
+// ── env 通道解析（cap 单源，收编自 pi 宿主壳 getEnvStateMaxRuns）──────────
+//
+// 表驱动锁定三档语义：未设/空 → 默认上限（默认开）；有限正数 → 显式覆盖；
+// 非法值（非有限数/≤0）→ undefined（不清理，显式 opt-out）。壳消费方
+// （pi jsonl-run-store 的 retention 轮）行为等价性由壳
+// jsonl-run-store-retention.test.ts 端到端锁定，此处锁解析器本身的值域分档。
+
+describe("resolveStateMaxRuns 表驱动（cap env 通道三档语义）", () => {
+  afterEach(() => {
+    delete process.env[STATE_MAX_RUNS_ENV];
+  });
+
+  const CASES: Array<{ name: string; raw: string | undefined; expected: number | undefined }> = [
+    { name: "未设 → 默认上限（默认开，OR-5）", raw: undefined, expected: DEFAULT_STATE_MAX_RUNS },
+    { name: "空串 → 默认上限", raw: "", expected: DEFAULT_STATE_MAX_RUNS },
+    { name: "有限正整数 → 显式覆盖", raw: "3", expected: 3 },
+    { name: "有限正小数 → 透传", raw: "2.5", expected: 2.5 },
+    { name: "0 → 不清理（opt-out）", raw: "0", expected: undefined },
+    { name: "负数 → 不清理", raw: "-1", expected: undefined },
+    { name: "非数字 → 不清理", raw: "abc", expected: undefined },
+    { name: "Infinity → 不清理（非有限数）", raw: "Infinity", expected: undefined },
+  ];
+
+  it.each(CASES)("$name", ({ raw, expected }) => {
+    if (raw === undefined) {
+      delete process.env[STATE_MAX_RUNS_ENV];
+    } else {
+      process.env[STATE_MAX_RUNS_ENV] = raw;
+    }
+    expect(resolveStateMaxRuns()).toBe(expected);
+  });
+
+  it("env 名常量钉住（壳侧测试与宿主文档按此名设置）", () => {
+    expect(STATE_MAX_RUNS_ENV).toBe("TAIJI_SUBAGENT_STATE_MAX_RUNS");
   });
 });

@@ -514,8 +514,10 @@ export type {
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
 // pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
 // manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
-// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
-// pi 宿主 jsonl-run-store 的 retention 维护轮生产消费（barrel 先例同上）。
+// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）；
+// resolveStateMaxRuns / STATE_MAX_RUNS_ENV：cap env 通道单源（自 pi 宿主壳收编——
+// 原壳侧 getEnvStateMaxRuns 同形实现删除）。pi 宿主 jsonl-run-store 的 retention
+// 维护轮生产消费（barrel 先例同上）。
 // [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
 // `<sessionDir>/workflow-state` 与 core `<dataRoot>/workflow-state` 同名分量单源
 // ——壳侧字面量改 import 消费，防布局分量漂移。
@@ -524,9 +526,11 @@ export {
   DEFAULT_STATE_MAX_RUNS,
   DEFAULT_STATE_TTL_MS,
   STATE_DIR_NAME,
+  STATE_MAX_RUNS_ENV,
   STATE_TTL_MS_ENV,
   FileRunStore,
   pruneTerminalRunFiles,
+  resolveStateMaxRuns,
   resolveStateTtlMs,
   type PruneTerminalRunFilesOptions,
   type PruneTerminalRunFilesResult,
