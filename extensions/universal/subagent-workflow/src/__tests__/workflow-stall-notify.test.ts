@@ -198,10 +198,13 @@ describe("stall informational 通知（D6-2）", () => {
     expect(message.customType).toBe("workflow-stall");
     expect(message.display).toBe(true);
     expect(message.options).toBeUndefined(); // 无 triggerTurn——informational 不打断主 agent
-    expect(message.content).toContain("still running");
-    expect(message.content).toContain("no action is needed");
-    expect(message.content).toContain("NOT be terminated");
-    expect(message.content).toContain("deploy");
+    // 全文逐字锚定（workflow-notify.ts notifyStall 单表达式文案）：尾帧 ts = 12:00
+    // 起 -25min，首个 tick 在 +60s（fake timers 随 interval 推进墙钟）→ 26 分钟。
+    expect(message.content).toBe(
+      "Workflow 'deploy' (wf-stall-slow) has shown no progress for about 26 minutes. " +
+        "It is still running - no action is needed, and it will NOT be terminated automatically. " +
+        'Inspect it via the workflow tool (action:"status") if you want details.',
+    );
     const details = message.details as Record<string, unknown>;
     expect(details["runId"]).toBe(runId);
     expect(details["thresholdMs"]).toBe(STALL_THRESHOLD_MS);

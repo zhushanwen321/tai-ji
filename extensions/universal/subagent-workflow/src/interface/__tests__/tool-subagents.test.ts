@@ -34,6 +34,7 @@ import {
   runSubagentsBatch,
 } from "../tool-subagents.ts";
 import { REENTRY_BUSY_MESSAGE, type ReentryGuardRef } from "../reentry-guard.ts";
+import { captureTool } from "./capture-tool.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_SRC = readFileSync(join(__dirname, "../tool-subagents.ts"), "utf-8");
@@ -45,7 +46,7 @@ interface CapturedProperty {
   optional?: boolean;
 }
 
-interface CapturedTool {
+interface SubagentsToolView {
   name: string;
   label: string;
   description: string;
@@ -68,17 +69,14 @@ interface ThemeStub {
   bold(text: string): string;
 }
 
-/** 注册并取回 tool 定义（fake pi 捕获 registerTool 入参）。 */
-function captureTool(reentryRef: ReentryGuardRef, registry: Record<string, unknown>): CapturedTool {
-  const captured: unknown[] = [];
-  const pi = {
-    registerTool: (tool: unknown): void => {
-      captured.push(tool);
-    },
-  };
-  registerSubagentsTool(pi as never, makeDeps(registry) as never, reentryRef);
-  expect(captured).toHaveLength(1);
-  return captured[0] as CapturedTool;
+/** 注册并取回 tool 定义（fake pi 捕获单点见 capture-tool.ts；此处只留差异面）。 */
+function captureSubagentsTool(
+  reentryRef: ReentryGuardRef,
+  registry: Record<string, unknown>,
+): SubagentsToolView {
+  return captureTool<SubagentsToolView>(
+    (pi) => registerSubagentsTool(pi as never, makeDeps(registry) as never, reentryRef),
+  );
 }
 
 // ── registry / deps stubs ──
@@ -177,7 +175,7 @@ function lastSpec(): Record<string, unknown> {
 // ══════════════════════════════════════════════════════════════
 describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
   it("注册名/label/description 存在，且以 batch 语义自述（one-shot 成员 + 一条通知）", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(tool.name).toBe("subagents");
     expect(tool.label.length).toBeGreaterThan(0);
     expect(tool.description).toContain("one-shot batch member");
@@ -188,7 +186,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
   });
 
   it("参数全平铺：无 action 分发、无 args 嵌套、无嵌套 object 参数", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const keys = Object.keys(tool.parameters.properties);
     expect(keys.sort()).toEqual(
       ["agents", "aggregate", "model", "slug", "tasks", "thinkingLevel", "time", "tokens"].sort(),
@@ -201,7 +199,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
   });
 
   it("tasks 为必填形态（未经 Type.Optional 构造）且类型为数组", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(tool.parameters.properties.tasks?.type).toBe("array");
     // mock typebox 的 Optional 标记：tasks 不得带该标记（真 typebox 下即 required）
     expect(tool.parameters.properties.tasks?.optional).toBeUndefined();
@@ -231,7 +229,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
   });
 
   it("promptGuidelines 含分工句/调用正例/预算默认（弱模型结构信号依赖面）", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
@@ -414,7 +412,7 @@ describe("错误规格（D9）", () => {
 // ══════════════════════════════════════════════════════════════
 describe("reentry guard：与 workflow tool 共用同一实例", () => {
   it("guard 被占用 → throw busy 文案，且不触达 runWorkflow", async () => {
-    const tool = captureTool({ isProcessing: true }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: true }, makeRegistry());
     await expect(
       tool.execute("call-1", { tasks: TWO_TASKS }, undefined, undefined, undefined),
     ).rejects.toThrow(REENTRY_BUSY_MESSAGE);
@@ -423,7 +421,7 @@ describe("reentry guard：与 workflow tool 共用同一实例", () => {
 
   it("成功路径释放 guard（同一 guard 可再次进入）", async () => {
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tool = captureTool(guard, makeRegistry());
+    const tool = captureSubagentsTool(guard, makeRegistry());
     await tool.execute("call-1", { tasks: TWO_TASKS }, undefined, undefined, undefined);
     expect(guard.isProcessing).toBe(false);
     await tool.execute("call-2", { tasks: TWO_TASKS }, undefined, undefined, undefined);
@@ -432,7 +430,7 @@ describe("reentry guard：与 workflow tool 共用同一实例", () => {
 
   it("失败路径经 finally 释放 guard（错误不粘住批量入口）", async () => {
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tool = captureTool(guard, makeRegistry());
+    const tool = captureSubagentsTool(guard, makeRegistry());
     const err = await tool.execute("call-1", {}, undefined, undefined, undefined).catch((e: unknown) => e as Error);
     expect(err.message).toContain("tasks is required");
     expect(guard.isProcessing).toBe(false);
@@ -440,7 +438,7 @@ describe("reentry guard：与 workflow tool 共用同一实例", () => {
 
   it("signal 已 abort → 起步即 throw（不占 guard）", async () => {
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tool = captureTool(guard, makeRegistry());
+    const tool = captureSubagentsTool(guard, makeRegistry());
     const aborted = AbortSignal.abort();
     await expect(
       tool.execute("call-1", { tasks: TWO_TASKS }, aborted as never, undefined, undefined),
@@ -465,7 +463,7 @@ describe("集合收录（D1：单收录 WORKFLOW，不进 SUBAGENT）", () => {
 // ══════════════════════════════════════════════════════════════
 describe("TUI 渲染（renderCall/renderResult 既有惯例）", () => {
   it("renderCall 单行：subagents + 任务数 + slug", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const text = renderedText(tool.renderCall(
       { tasks: TWO_TASKS, slug: "foo-tri-review" },
       makeTheme(),
@@ -477,13 +475,13 @@ describe("TUI 渲染（renderCall/renderResult 既有惯例）", () => {
   });
 
   it("renderCall 无 slug/无 tasks 时不崩（streaming partial args 形态）", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(() => tool.renderCall({}, makeTheme())).not.toThrow();
     expect(() => tool.renderCall({ tasks: "not-an-array" }, makeTheme())).not.toThrow();
   });
 
   it("renderResult 透出返回文案（多行保留）", () => {
-    const tool = captureTool({ isProcessing: false }, makeRegistry());
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const text = renderedText(tool.renderResult(
       { content: [{ type: "text", text: "Started batch 'x' (wf-1) as workflow run 'fan-out'" }] },
       undefined,

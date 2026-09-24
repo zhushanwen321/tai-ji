@@ -19,8 +19,10 @@ import type { DoneReason } from "@zhushanwen/subagent-core";
 
 import type { ReentryGuardRef } from "../reentry-guard.ts";
 import { registerWorkflowTool } from "../tool-workflow.ts";
+import { captureTool, type CapturedTool } from "./capture-tool.ts";
 
-// ── capture helper（注册层黑盒：actionStatus 未导出，经 execute 唯一入口）──
+// ── capture helper（注册层黑盒：actionStatus 未导出，经 execute 唯一入口；
+//    fake pi 捕获单点见 capture-tool.ts，此处只留差异面）──
 
 interface StatusResult {
   content: Array<{ type: string; text: string }>;
@@ -33,8 +35,7 @@ interface StatusResult {
   isError?: boolean;
 }
 
-interface CapturedTool {
-  name: string;
+interface StatusToolView extends CapturedTool {
   execute: (
     toolCallId: string,
     params: Record<string, unknown>,
@@ -44,7 +45,7 @@ interface CapturedTool {
   ) => Promise<StatusResult>;
 }
 
-function captureTool(runs: Map<string, WorkflowRun>): CapturedTool {
+function captureStatusTool(runs: Map<string, WorkflowRun>): StatusToolView {
   const deps = {
     runs,
     // status 路径只触 store.stateFilePath（RunSummary 宿主扩展字段）
@@ -52,13 +53,10 @@ function captureTool(runs: Map<string, WorkflowRun>): CapturedTool {
     registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
   };
   const guard: ReentryGuardRef = { isProcessing: false };
-  const tools: CapturedTool[] = [];
-  const pi = { registerTool: (t: unknown) => tools.push(t as CapturedTool) };
-  registerWorkflowTool(pi as never, deps as never, guard);
-  if (!tools[0] || tools[0].name !== "workflow") {
-    throw new Error("registerWorkflowTool did not register the workflow tool");
-  }
-  return tools[0];
+  return captureTool<StatusToolView>(
+    (pi) => registerWorkflowTool(pi as never, deps as never, guard),
+    "workflow",
+  );
 }
 
 /** 真实 WorkflowRun 聚合根（reconstruct 工厂——status 路径只读投影面）。 */
@@ -106,7 +104,7 @@ afterEach(() => {
 
 describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
   it("runs 为空 → 固定空态文案 + 空 runs details", async () => {
-    const tool = captureTool(new Map());
+    const tool = captureStatusTool(new Map());
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {});
     expect(r.content).toEqual([{ type: "text", text: "No workflows in current session." }]);
     expect(r.details).toMatchObject({ action: "status", runs: [] });
@@ -141,7 +139,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
       [doneFailed.runId, doneFailed],
       [doneCompleted.runId, doneCompleted],
     ]);
-    const tool = captureTool(runs);
+    const tool = captureStatusTool(runs);
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {});
 
     expect(r.content).toEqual([
@@ -191,7 +189,7 @@ describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
   type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: unknown[] } } } };
 
   it("RPC ctx → details 附带 __gui__（status → list-tree 组件）", async () => {
-    const tool = captureTool(new Map());
+    const tool = captureStatusTool(new Map());
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
@@ -203,7 +201,7 @@ describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
   });
 
   it("TUI ctx → details 无 __gui__（走 pi 原生渲染）", async () => {
-    const tool = captureTool(new Map());
+    const tool = captureStatusTool(new Map());
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {
       mode: "tui",
       hasUI: true,

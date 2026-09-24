@@ -50,18 +50,26 @@ type RunMock = {
     status: string;
     reason?: string;
     scriptResult?: unknown;
+    /** failed 终局时 extractFailureErrorCode 遍历的调用注册表（其他形态不触达）。 */
+    calls?: Map<unknown, unknown>;
     trace: { toArray: () => Array<{ stepIndex: number; agent: string; status: string }> };
   };
 };
 
-function makeRun(overrides?: { scriptName?: string; scriptResult?: unknown }): RunMock {
+function makeRun(overrides?: {
+  scriptName?: string;
+  scriptResult?: unknown;
+  reason?: string;
+  trace?: Array<{ stepIndex: number; agent: string; status: string }>;
+}): RunMock {
   return {
     spec: { scriptName: overrides?.scriptName ?? "build" },
     state: {
       status: "done",
-      reason: "completed",
+      reason: overrides?.reason ?? "completed",
       scriptResult: overrides?.scriptResult,
-      trace: { toArray: () => [] },
+      calls: new Map(),
+      trace: { toArray: () => overrides?.trace ?? [] },
     },
   };
 }
@@ -182,7 +190,15 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     // ② courier 投递：送达通道 workflow-result（W18 信号前提），details 携带 notifyId
     expect(mock.sentMessages).toHaveLength(1);
     expect(mock.sentMessages[0]?.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
-    expect(mock.sentMessages[0]?.content).toContain("Workflow 'fan-out' done: done (completed)");
+    // 全文逐字锚定（分支矩阵锁见文末 describe）：header + Script Result + Agent Trace
+    expect(mock.sentMessages[0]?.content).toBe(
+      "Workflow 'fan-out' done: done (completed)\n" +
+        "\n" +
+        "--- Script Result ---\n" +
+        '{\n  "status": "ok"\n}\n' +
+        "\n" +
+        "--- Agent Trace ---",
+    );
     expect(mock.sentMessages[0]?.details).toMatchObject({
       notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-17abc`,
       runId: "wf-17abc",
@@ -323,11 +339,113 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
     ];
     expect(msg.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
     expect(msg.display).toBe(true);
-    expect(msg.content).toContain("Workflow 'build' done");
+    // 全文逐字锚定：completed + 无 scriptResult + 空 trace + 无 artifacts 的最小形态
+    expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
     expect(msg.details.notifyId).toBe(`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-fallback`);
     // u9 偏差裁决（D7 账本化配套）：deliverAs 已删
     expect(opts).toEqual({ triggerTurn: true });
     // 账本零写入（无绑定）
     expect(mock.entries).toHaveLength(0);
+  });
+});
+
+// ── content 全文锚定（LLM 可见文本锁） ────────────────────────
+
+// notifyDone 的 content 分支矩阵（workflow-notify.ts parts 构造，期望值逐字取自实现）：
+//   ① header 恒有：`Workflow '<name>' done: <status>[ (<reason>)]`
+//   ② F3 防偷懒收尾指令段：reason ∈ isTerminalDoneReason 词表（failed/aborted/
+//     invalid_args/budget_limited/time_limited——completed 不含）时追加
+//   ③ Script Result 段：scriptResult 非 undefined 且非 null 时追加（含 bounded
+//     pretty 序列化形态，序列化本体由 core bounded-serialize.test.ts 锚定）
+//   ④ Agent Trace 段恒有：空 trace = 仅标题；非空 = `[<i>] <agent>: <status>` 行
+//   ⑤ Artifacts 段：artifactsDir 传入时追加（含 events journal 派生路径）
+// 经降级路径直测（ledger 未 bind → pi.sendMessage 直发，上文 describe 的
+// afterEach 已 dispose 绑定）；prompt-quality-batch1 的源码关键词断言是源码级
+// 防线，与这里的输出级锚定互补，不在此重复。
+
+describe("notifyDone — content 分支矩阵全文锚定", () => {
+  it("F3 段：terminal reason（budget_limited）→ 追加防偷懒收尾指令（逐字）", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun({ reason: "budget_limited" });
+
+    notifyDone(pi, "wf-budget", runAsParam(run), new Set());
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toBe(
+      "Workflow 'build' done: done (budget_limited)\n" +
+        "\n" +
+        "This is NOT task completion. Summarize what was DONE and VERIFIED, list what remains NOT DONE, and give the user the single most important next step.\n" +
+        "\n" +
+        "--- Agent Trace ---",
+    );
+  });
+
+  it("Artifacts 段：artifactsDir 传入 → 末尾追加产物指针（含 events journal 派生路径）", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun();
+
+    notifyDone(pi, "wf-art-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state");
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toBe(
+      "Workflow 'build' done: done (completed)\n" +
+        "\n" +
+        "--- Agent Trace ---\n" +
+        "\n" +
+        "--- Artifacts ---\n" +
+        "Artifacts dir: /tmp/wf-state\n" +
+        "Events journal: /tmp/wf-state/wf-art-1.events.jsonl",
+    );
+  });
+
+  it("全段组合：failed + 无 scriptResult + 非空 trace + artifactsDir（F3/Trace 行/Artifacts 齐）", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun({
+      reason: "failed",
+      trace: [
+        { stepIndex: 0, agent: "builder", status: "completed" },
+        { stepIndex: 1, agent: "reviewer", status: "failed" },
+      ],
+    });
+
+    notifyDone(pi, "wf-full-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state");
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toBe(
+      "Workflow 'build' done: done (failed)\n" +
+        "\n" +
+        "This is NOT task completion. Summarize what was DONE and VERIFIED, list what remains NOT DONE, and give the user the single most important next step.\n" +
+        "\n" +
+        "--- Agent Trace ---\n" +
+        "[0] builder: completed\n" +
+        "[1] reviewer: failed\n" +
+        "\n" +
+        "--- Artifacts ---\n" +
+        "Artifacts dir: /tmp/wf-state\n" +
+        "Events journal: /tmp/wf-state/wf-full-1.events.jsonl",
+    );
+  });
+
+  it("scriptResult null → 无 Script Result 段（null 与 undefined 同为缺省形态）", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun({ scriptResult: null });
+
+    notifyDone(pi, "wf-null", runAsParam(run), new Set());
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
+  });
+
+  it("reason undefined（异常形态）→ header 无 reason 后缀，无 F3 段", () => {
+    const { pi, sendMessage } = makePi();
+    const run: RunMock = {
+      spec: { scriptName: "build" },
+      state: { status: "done", trace: { toArray: () => [] } },
+    };
+
+    notifyDone(pi, "wf-noreason", runAsParam(run), new Set());
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toBe("Workflow 'build' done: done\n\n--- Agent Trace ---");
   });
 });

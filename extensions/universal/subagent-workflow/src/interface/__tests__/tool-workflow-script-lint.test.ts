@@ -15,23 +15,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { captureTool, type ScriptResultToolView } from "./capture-tool.ts";
 
-// ── capture helper（注册层黑盒：actionLint 未导出，经 execute 唯一入口）──
-
-interface CapturedTool {
-  name: string;
-  execute: (
-    toolCallId: string,
-    params: Record<string, unknown>,
-    signal: AbortSignal | undefined,
-    onUpdate: unknown,
-    ctx: unknown,
-  ) => Promise<{
-    content: Array<{ type: string; text: string }>;
-    details: unknown;
-    isError?: boolean;
-  }>;
-}
+// ── capture helper（注册层黑盒：actionLint 未导出，经 execute 唯一入口；
+//    fake pi 捕获单点见 capture-tool.ts，此处只留差异面）──
 
 /** registry stub（duck-typed WorkflowScriptRegistry——lint 只触 get/loadAll）。 */
 function makeRegistry(scripts: Array<Record<string, unknown>>) {
@@ -44,14 +31,11 @@ function makeRegistry(scripts: Array<Record<string, unknown>>) {
   };
 }
 
-function captureTool(registry: ReturnType<typeof makeRegistry>): CapturedTool {
-  const tools: CapturedTool[] = [];
-  const pi = { registerTool: (t: unknown) => tools.push(t as CapturedTool) };
-  registerWorkflowScriptTool(pi as never, registry as never, () => false);
-  if (!tools[0] || tools[0].name !== "workflow-script") {
-    throw new Error("registerWorkflowScriptTool did not register the workflow-script tool");
-  }
-  return tools[0];
+function captureScriptTool(registry: ReturnType<typeof makeRegistry>): ScriptResultToolView {
+  return captureTool<ScriptResultToolView>(
+    (pi) => registerWorkflowScriptTool(pi as never, registry as never, () => false),
+    "workflow-script",
+  );
 }
 
 /** 可用脚本 stub（loadScriptSource 经 registry.get 取 sourceCode）。 */
@@ -59,7 +43,7 @@ function makeScript(name: string, sourceCode: string) {
   return { name, source: "saved", path: `/abs/${name}.js`, sourceCode, available: true, meta: {} };
 }
 
-function lintCall(tool: CapturedTool, name: string) {
+function lintCall(tool: ScriptResultToolView, name: string) {
   // ctx 传 {}（mode 非 rpc）→ details 不附加 __gui__，锁的是 pi 侧可见原始输出
   return tool.execute("id", { action: "lint", name }, undefined, undefined, {});
 }
@@ -83,7 +67,7 @@ const UNNAMED_AGENT_SCRIPT = 'await agent({ prompt: "work" });';
 describe("actionLint 输出形态（LLM 可见文本锁）", () => {
   it("0 findings → ✅ 单行文案，无 details、无 isError", async () => {
     const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await lintCall(tool, "clean-wf");
     expect(registry.get).toHaveBeenCalledWith("clean-wf");
     expect(r.content).toEqual([{ type: "text", text: "✅ No issues found in 'clean-wf'." }]);
@@ -93,7 +77,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
 
   it("error finding → ❌ 行 + Suggestion 缩进续行 + Errors 标题，details/isError 结构化", async () => {
     const registry = makeRegistry([makeScript("no-entry-wf", NO_ENTRY_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await lintCall(tool, "no-entry-wf");
     expect(r.content).toEqual([
       {
@@ -115,7 +99,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
 
   it("warning-only finding（agent 缺 description）→ ⚠️ 行 + Warnings 标题，isError=false 不拦截", async () => {
     const registry = makeRegistry([makeScript("unnamed-wf", UNNAMED_AGENT_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await lintCall(tool, "unnamed-wf");
     expect(r.content).toEqual([
       {
@@ -135,7 +119,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
       { ...makeScript("broken-wf", "// x"), available: false, meta: { description: "解析失败" } },
       { ...makeScript("clean-scripts", "// x"), meta: { description: "remove stale tmp scripts" } },
     ]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     // 全文精确匹配（toBe）——同时锁定 item 行 = core formatAvailableWorkflowRefs
     // 缺省形态（与 run 拒单有意统一，带 location 行）与不可用项剔除（broken-wf 零出现）
     const err = (await lintCall(tool, "ghost-wf").catch((e: unknown) => e)) as Error;
@@ -150,7 +134,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
 
   it("name 不存在且无可用脚本 → 建议清单降级为 (none)", async () => {
     const registry = makeRegistry([]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     await expect(lintCall(tool, "ghost-wf")).rejects.toThrow(
       "Workflow 'ghost-wf' not found or not available.\nAvailable:\n  (none)",
     );
@@ -165,7 +149,7 @@ describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
 
   it("RPC ctx → details 附带 __gui__（lint findings → stats-line warn）", async () => {
     const registry = makeRegistry([makeScript("no-entry-wf", NO_ENTRY_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await tool.execute("id", { action: "lint", name: "no-entry-wf" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
@@ -178,7 +162,7 @@ describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
 
   it("RPC ctx + 纯文本结果（details undefined）→ details 保持 undefined", async () => {
     const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await tool.execute("id", { action: "lint", name: "clean-wf" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
@@ -188,7 +172,7 @@ describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
 
   it("非 RPC ctx（lintCall 既有形态）→ details 无 __gui__", async () => {
     const registry = makeRegistry([makeScript("no-entry-wf", NO_ENTRY_SCRIPT)]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await lintCall(tool, "no-entry-wf");
     expect((r.details as GuiProjection).__gui__).toBeUndefined();
   });

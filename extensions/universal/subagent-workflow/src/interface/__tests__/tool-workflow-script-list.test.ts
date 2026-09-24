@@ -16,23 +16,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { captureTool, type ScriptResultToolView } from "./capture-tool.ts";
 
-// ── capture helper（注册层黑盒：actionList 未导出，经 execute 唯一入口）──
-
-interface CapturedTool {
-  name: string;
-  execute: (
-    toolCallId: string,
-    params: Record<string, unknown>,
-    signal: AbortSignal | undefined,
-    onUpdate: unknown,
-    ctx: unknown,
-  ) => Promise<{
-    content: Array<{ type: string; text: string }>;
-    details: unknown;
-    isError?: boolean;
-  }>;
-}
+// ── capture helper（注册层黑盒：actionList 未导出，经 execute 唯一入口；
+//    fake pi 捕获单点见 capture-tool.ts，此处只留差异面）──
 
 /** registry stub（duck-typed WorkflowScriptRegistry——list 只触 loadAll）。 */
 function makeRegistry(scripts: Array<Record<string, unknown>>) {
@@ -43,17 +30,14 @@ function makeRegistry(scripts: Array<Record<string, unknown>>) {
   };
 }
 
-function captureTool(registry: ReturnType<typeof makeRegistry>): CapturedTool {
-  const tools: CapturedTool[] = [];
-  const pi = { registerTool: (t: unknown) => tools.push(t as CapturedTool) };
-  registerWorkflowScriptTool(pi as never, registry as never, () => false);
-  if (!tools[0] || tools[0].name !== "workflow-script") {
-    throw new Error("registerWorkflowScriptTool did not register the workflow-script tool");
-  }
-  return tools[0];
+function captureScriptTool(registry: ReturnType<typeof makeRegistry>): ScriptResultToolView {
+  return captureTool<ScriptResultToolView>(
+    (pi) => registerWorkflowScriptTool(pi as never, registry as never, () => false),
+    "workflow-script",
+  );
 }
 
-function listCall(tool: CapturedTool) {
+function listCall(tool: ScriptResultToolView) {
   // ctx 传 {}（mode 非 rpc）→ details 不附加 __gui__，锁的是 pi 侧可见原始输出
   return tool.execute("id", { action: "list" }, undefined, undefined, {});
 }
@@ -69,7 +53,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
       makeListScript("deploy-wf", "saved", "deploy the app"),
       makeListScript("scratch-wf", "tmp", "one-off scratch task"),
     ]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(registry.loadAll).toHaveBeenCalledOnce();
     expect(r.content).toEqual([
@@ -90,7 +74,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
       makeListScript("deploy-wf", "saved", "deploy the app"),
       { ...makeListScript("broken-wf", "saved", "解析失败"), available: false },
     ]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(r.content).toEqual([
       { type: "text", text: "Available workflows:\n  - [saved] deploy-wf: deploy the app" },
@@ -100,7 +84,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
 
   it("description 缺省 → (no description) 占位（core formatter 行为透传）", async () => {
     const registry = makeRegistry([makeListScript("bare-wf", "saved", "")]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(r.content).toEqual([
       { type: "text", text: "Available workflows:\n  - [saved] bare-wf: (no description)" },
@@ -109,7 +93,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
 
   it("空清单（无任何脚本）→ 空态单行文案，无 details、无 isError", async () => {
     const registry = makeRegistry([]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(r.content).toEqual([{ type: "text", text: "No workflow scripts available." }]);
     expect(r.details).toBeUndefined();
@@ -118,7 +102,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
 
   it("全不可用清单 → 同空态文案（available filter 后为空）", async () => {
     const registry = makeRegistry([{ ...makeListScript("broken-wf", "saved", "x"), available: false }]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(r.content).toEqual([{ type: "text", text: "No workflow scripts available." }]);
   });
@@ -131,7 +115,7 @@ describe("actionList GUI attach（execute 级 RPC/非 RPC 分发）", () => {
 
   it("RPC ctx → details 附带 __gui__（list → scripts 计数 stats-line）", async () => {
     const registry = makeRegistry([makeListScript("deploy-wf", "saved", "deploy the app")]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await tool.execute("id", { action: "list" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
@@ -144,7 +128,7 @@ describe("actionList GUI attach（execute 级 RPC/非 RPC 分发）", () => {
 
   it("非 RPC ctx → details 无 __gui__（原始 details 结构保留）", async () => {
     const registry = makeRegistry([makeListScript("deploy-wf", "saved", "deploy the app")]);
-    const tool = captureTool(registry);
+    const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect((r.details as GuiProjection).__gui__).toBeUndefined();
     expect(r.details).toEqual({ action: "list", count: 1 });

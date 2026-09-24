@@ -42,6 +42,7 @@ import { registerWorkflowTool } from "../tool-workflow.ts";
 import { Budget, Trace, WorkflowRun } from "@zhushanwen/subagent-core";
 import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 import type { ReentryGuardRef } from "../reentry-guard.ts";
+import { captureTool, type CapturedTool } from "./capture-tool.ts";
 
 // ── fixture：可用 workflow 脚本（@pi-meta 新格式，无参数声明） ──
 
@@ -280,8 +281,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     details: Record<string, unknown> | undefined;
   }
 
-  interface WorkflowCapturedTool {
-    name: string;
+  interface AbortToolView extends CapturedTool {
     execute: (
       toolCallId: string,
       params: Record<string, unknown>,
@@ -291,8 +291,9 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     ) => Promise<AbortResult>;
   }
 
-  /** 注册层黑盒（actionAbort 未导出，经 execute 唯一入口；范式同 status 测试）。 */
-  function captureTool(runs: Map<string, WorkflowRun>): WorkflowCapturedTool {
+  /** 注册层黑盒（actionAbort 未导出，经 execute 唯一入口；范式同 status 测试；
+   *  fake pi 捕获单点见 capture-tool.ts，此处只留差异面）。 */
+  function captureAbortTool(runs: Map<string, WorkflowRun>): AbortToolView {
     const deps = {
       runs,
       // abort 路径不触 store/registry（占位齐 deps 形态）
@@ -300,13 +301,10 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
       registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
     };
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tools: WorkflowCapturedTool[] = [];
-    const pi = { registerTool: (t: unknown) => tools.push(t as WorkflowCapturedTool) };
-    registerWorkflowTool(pi as never, deps as never, guard);
-    if (!tools[0] || tools[0].name !== "workflow") {
-      throw new Error("registerWorkflowTool did not register the workflow tool");
-    }
-    return tools[0];
+    return captureTool<AbortToolView>(
+      (pi) => registerWorkflowTool(pi as never, deps as never, guard),
+      "workflow",
+    );
   }
 
   /** 真实 WorkflowRun 聚合根（reconstruct 工厂——abort 路径只读 spec/state 投影面）。 */
@@ -347,7 +345,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
   it("running run → abort → 'running → done (aborted)'（reason 后缀拼接形态）", async () => {
     stubAbortTransition({ reason: "aborted" });
     const run = makeRun("wf-1719500000000-a1b2c3", "demo-wf");
-    const tool = captureTool(new Map([[run.runId, run]]));
+    const tool = captureAbortTool(new Map([[run.runId, run]]));
 
     const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
     expect(r.content[0]?.text).toBe("Workflow 'demo-wf' (wf-1719500000000-a1b2c3): running → done (aborted)");
@@ -357,7 +355,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
   it("无 reason → 转移段无后缀（reasonSuffix 条件拼接）", async () => {
     stubAbortTransition({ reason: undefined });
     const run = makeRun("wf-1719600000000-z9y8x7", "cleanup-wf");
-    const tool = captureTool(new Map([[run.runId, run]]));
+    const tool = captureAbortTool(new Map([[run.runId, run]]));
 
     const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
     expect(r.content[0]?.text).toBe("Workflow 'cleanup-wf' (wf-1719600000000-z9y8x7): running → done");
