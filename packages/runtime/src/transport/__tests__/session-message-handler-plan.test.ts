@@ -14,6 +14,9 @@
  *      （msg.id + sessionId 必带），不 reply——前端 sendCommand 检查 reply success 失败后
  *      经 sendError 呈现 E9 恢复指引。编排语义断言在
  *      src/services/session/__tests__/session-service-abort-plan.test.ts
+ * - message.abort 失效链（D6，plan-mode-state-machine F4①，S15 锚定）：
+ *   ① invalidatePendingUiRequests 先于 sessionService.abort 调用（失效帧前置）；
+ *   ② sessionService.abort 抛错时失效帧仍发布（try/finally 兜底——renderer 不留僵尸 ready）。
  *
  * Mock 边界：全部 mock（ctx 仿 session-message-handler-background-task 测试装置），不起真实 pi。
  * 运行：cd packages/runtime && npx vitest run src/transport/__tests__/session-message-handler-plan.test.ts
@@ -149,6 +152,53 @@ describe('SessionMessageHandler session.abortPlan', () => {
       'msg-err',
       { sessionId: SID },
     )
+    expect(ctx.reply).not.toHaveBeenCalled()
+  })
+})
+
+// ── message.abort 失效链（D6，S15 锚定）────────────────────────
+
+describe('SessionMessageHandler message.abort（D6 失效链：invalidate 前置 + try/finally）', () => {
+  it('S15：invalidatePendingUiRequests 先于 sessionService.abort 调用', async () => {
+    const callOrder: string[] = []
+    const abort = vi.fn(async () => {
+      callOrder.push('abort')
+    })
+    const ctx = mockContext({ abort } as unknown as ISessionService)
+    ctx.invalidatePendingUiRequests = vi.fn(() => {
+      callOrder.push('invalidate')
+    })
+    const handler = new SessionMessageHandler(ctx)
+
+    await handler.handleSessionMessage(msg('message.abort', { sessionId: SID }), mockWs())
+
+    expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith(SID, 'turn-aborted')
+    expect(abort).toHaveBeenCalledWith(SID)
+    // 顺序断言：失效帧前置（旧序 abort→invalidate 时 callOrder[0]==='abort'，本断言即红）
+    expect(callOrder[0]).toBe('invalidate')
+    // ack 契约不变（D round5-must-fix-1）
+    expect(ctx.reply).toHaveBeenCalledWith(expect.anything(), 'msg-1', 'message.status', {
+      sessionId: SID,
+      status: 'aborted',
+    })
+  })
+
+  it('S15：sessionService.abort 抛错时失效帧仍发布（try/finally 兜底）', async () => {
+    const abort = vi.fn(async () => {
+      // F4① 实锤形态：pi 不在活跃表时 dispatcher getClientOrThrow 直接 throw（abort 的 try 之外）
+      throw new Error('pi not in active table')
+    })
+    const ctx = mockContext({ abort } as unknown as ISessionService)
+    const handler = new SessionMessageHandler(ctx)
+
+    // abort 极端失败行为不变（D6）：异常继续传播，不 reply ack
+    await expect(
+      handler.handleSessionMessage(msg('message.abort', { sessionId: SID }), mockWs()),
+    ).rejects.toThrow('pi not in active table')
+
+    // 失效帧仍必达：invalidate 携带 sessionId + reason（renderer 据此摘除挂起请求，不留僵尸 ready）
+    expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith(SID, 'turn-aborted')
+    expect(abort).toHaveBeenCalledWith(SID)
     expect(ctx.reply).not.toHaveBeenCalled()
   })
 })

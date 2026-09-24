@@ -935,11 +935,23 @@ export class SessionMessageHandler {
     // D(round5-must-fix-1): 必须回复 ack，否则 renderer pending.register(id) 的 Promise 永挂，pendingMap 泄漏无上限。
     // 与 message.send/steer/follow_up 对称，走 message.status 回复。
     const abortSid = msg.payload.sessionId
-    await this.ctx.sessionService.abort(abortSid)
     // P2-2 失效链：turn abort 级联解散挂起交互（审批 select / 执行方式 form / ask-user），
     // 响应永不可达——摘除 runtime pending 缓存 + 广播失效帧，renderer 移除本屏请求
     //（「忽略」按钮的审批条消失即由本链驱动）。
-    this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+    // D6（plan-mode-state-machine F4①）失效帧前置 + try/finally 双保险：
+    // ① 前置——invalidate 是纯本地缓存操作 + 广播（空清单不发布、重复摘除天然幂等，
+    //    不产生第二帧），无依赖 abort 结果；先行执行使 abort RPC 60s 超时阶梯期间
+    //    失效帧不迟到（被否形态：只补 try/finally 不调序——分钟级阶梯期间失效帧仍
+    //    迟到，renderer 65s backstop 先报错）。
+    // ② finally 兜底——abort 抛错（getClientOrThrow 不在 dispatcher try 内 / RPC 阶梯）
+    //    时失效帧仍必达，renderer 不留僵尸 ready。abort 极端失败的其余行为（异常传播、
+    //    不 reply ack）保持不变（D6「行为不变、概率不增」）。
+    try {
+      this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+      await this.ctx.sessionService.abort(abortSid)
+    } finally {
+      this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+    }
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: abortSid, status: 'aborted' })
   }
 
