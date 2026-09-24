@@ -1,7 +1,7 @@
 /* zcode-workflow
-description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow：发起前检查 → 静态门禁
-  （typecheck+lint）→ changeset 自动补全 → 生成 PR 标题/描述 → skill YAML 校验 → 开 PR →
-  约束加载 → 增量覆盖率门禁 → 度量门禁 → 多维评审修复循环（内联 review-fix-loop，8 维并行
+description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow（10 step）：发起前检查 →
+  静态门禁（typecheck+lint）→ PR 标题/描述 + 条件 changeset 补全 → skill YAML 校验 → 开 PR →
+  约束加载 → 覆盖率+度量聚合门禁 → 多维评审修复循环（内联 review-fix-loop，8 维并行
   review → 聚合 → 分组修复 → 对账重审）→ code-simplify → 终局三道门禁 → 停在 awaiting-push
   等 push 授权。与 pi 版（pi 内置 review-fix-loop + 主 agent 手工门禁）为仅有的两个版本。
 whenToUse: zcode 主 agent 执行 pr-cr-fix skill 的完整 PR 生命周期时发起本 workflow（CreateWorkflow
@@ -65,7 +65,10 @@ for (const key of Object.keys(args)) {
   }
 }
 const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base : "main";
-const maxRounds = typeof args.maxRounds === "number" && args.maxRounds >= 1 ? Math.floor(args.maxRounds) : 10;
+// 上界 50：每轮 cr-fix 产生 ~2 条 report（逐轮 + 每 attempt 汇总），引擎 256 条/run
+// 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）
+const maxRounds =
+  typeof args.maxRounds === "number" && args.maxRounds >= 1 ? Math.min(50, Math.floor(args.maxRounds)) : 10;
 const reviewers = Array.isArray(args.reviewers)
   ? (args.reviewers as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "")
   : [];
@@ -259,7 +262,9 @@ async function gateFixLoop<R>(
 }
 
 // ══ cr-fix 内联主体（与 ~/.zcode/workflows/review-fix-loop.dwf.ts 循环语义同源；
-//     差异仅：args→函数入参、agent 名带 attempt 段、topic 前缀 prl-、终态返回值化） ══
+//     已登记差异：args→函数入参、agent 名带 attempt 段、topic 前缀 prl-、终态返回值化、
+//     base 锁定（prl 由 preflight 前 throw，saved 循环内降级 ref+warn）、reviewer prompt
+//     增 constraints.md 消费行与统一 commit 降级路径说明；其余机制改任一侧须同步） ══
 
 interface ReconEntry {
   /** 上轮问题 id（R2+ 对账；R1 恒返回空数组） */
@@ -514,6 +519,18 @@ const titleUnits = (t: string): number => {
   return n;
 };
 const normalizeTitle = (t: string): string => String(t ?? "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+/** issue ID 归一化（对齐 pi 版 normIssueId）：小写 + 剥尾部 "(...)" 尾注——LLM 产出的
+ *  ID 漂移形态（"mf-1"/"MF-1"/"MF-1 (fixed)"）经此归一后与台账键匹配，防 ES3 严格
+ *  比较把漂移 ID 误判 must-fix 漏修（pi 版注释明言该形态曾真实发生）。空串返回 ""。 */
+const normIssueId = (s: unknown): string =>
+  String(s ?? "").toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").trim();
+
+/** 台账查找（精确优先，归一化兜底）——ES3 与 fix 后台账更新的共用键空间。 */
+const findIssue = (issues: IssueRecord[], rawId: unknown): IssueRecord | undefined => {
+  const raw = typeof rawId === "string" ? rawId : "";
+  return issues.find((i) => i.id === raw) ?? issues.find((i) => normIssueId(i.id) === normIssueId(raw));
+};
+
 const titlesCompatible = (a: string, b: string): boolean => {
   const na = normalizeTitle(a);
   const nb = normalizeTitle(b);
@@ -910,29 +927,32 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 
     // ES3 硬校验：disputed 格式合法性（命中活跃台账 + 反证非空洞）；deferred 只允许
     // minor（severity 以台账为准）；must-fix 漏修不静默。违规 → fix-failure 诚实终止。
+    // ID 匹配走 findIssue（归一化兜底，防 LLM ID 漂移误判漏修）；字符串字段先 typeof
+    // 防御（畸形值走违规分支诚实终止，不裸 TypeError 绕过重试链）。
     {
       const es3: string[] = [];
       for (const d of merged.deferred) {
-        const it = issues.find((i) => i.id === d.issueId);
+        const it = findIssue(issues, d.issueId);
         const sev = it ? it.severity : "minor";
         if (sev !== "minor") es3.push(`deferred 含非 minor 条目（${d.issueId}，台账 severity=${sev}）`);
       }
-      const disputedIds = new Set<string>();
+      const disputedNorms = new Set<string>();
       for (const d of merged.disputed) {
-        const it = issues.find((i) => i.id === d.issueId);
+        const it = findIssue(issues, d.issueId);
         if (!it || (it.status !== "open" && it.status !== "regressed")) {
           es3.push(`disputed 申述未命中活跃台账条目（${d.issueId}）`);
           continue;
         }
-        if (d.evidence.trim().length < 20) {
+        const ev = typeof d.evidence === "string" ? d.evidence.trim() : "";
+        if (ev.length < 20) {
           es3.push(`disputed 申述缺实质反证（${d.issueId}，需 file:line + 聚合方核实遗漏点）`);
           continue;
         }
-        disputedIds.add(d.issueId);
+        disputedNorms.add(normIssueId(d.issueId));
       }
-      const handledIds = new Set<string>([...merged.fixes.map((f) => f.issueId), ...disputedIds]);
+      const handledNorms = new Set<string>([...merged.fixes.map((f) => normIssueId(f.issueId)), ...disputedNorms]);
       for (const it of active) {
-        if (it.severity !== "minor" && !handledIds.has(it.id)) {
+        if (it.severity !== "minor" && !handledNorms.has(normIssueId(it.id))) {
           es3.push(`must-fix 漏修（${it.id} 不在 fixes[]/disputed[]）`);
         }
       }
@@ -941,9 +961,18 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       }
     }
 
-    // 统一 commit（并行 fixer 各自 commit 会争 git index 锁；显式路径纪律保持）
+    // 统一 commit（并行 fixer 各自 commit 会争 git index 锁；显式路径纪律保持；
+    // affectedFiles 先 Array.isArray + 元素 typeof 防御——LLM 返回非数组/非字符串不裸崩）
     {
-      const rawPaths = [...new Set(merged.fixes.flatMap((f) => f.affectedFiles ?? []).map((s) => s.trim()).filter(Boolean))];
+      const rawPaths = [
+        ...new Set(
+          merged.fixes
+            .flatMap((f) => (Array.isArray(f.affectedFiles) ? f.affectedFiles : []))
+            .filter((s): s is string => typeof s === "string")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ];
       const paths: string[] = [];
       for (const raw of rawPaths) {
         const p = raw.split(/\s+/)[0] ?? "";
@@ -981,18 +1010,18 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     lastFix = merged;
     const fixedCount = merged.fixes.length;
     for (const f of merged.fixes) {
-      const it = issues.find((i) => i.id === f.issueId);
+      const it = findIssue(issues, f.issueId);
       if (it) it.fixAttempts += 1;
     }
     for (const d of merged.deferred) {
-      const it = issues.find((i) => i.id === d.issueId);
+      const it = findIssue(issues, d.issueId);
       if (it) it.status = "deferred";
     }
     for (const d of merged.disputed) {
-      const it = issues.find((i) => i.id === d.issueId);
+      const it = findIssue(issues, d.issueId);
       if (it && (it.status === "open" || it.status === "regressed")) {
         it.status = "disputed";
-        it.disputeEvidence = d.evidence;
+        it.disputeEvidence = typeof d.evidence === "string" ? d.evidence : "";
       }
     }
     log(`第 ${round} 轮修复：fixed=${fixedCount}，disputed=${merged.disputed.length}，deferred=${merged.deferred.length}${merged.commitMessage ? `，commit=${merged.commitMessage}` : ""}`);
@@ -1005,8 +1034,9 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
   );
 }
 
-// ══ 12 step 主流程 ══
+// ══ 10 step 主流程 ══
 
+phase("发起前检查");
 // base 锁定（step 体系外的幂等读——preflight 被 skipSteps 跳过时 baseHash 依然锁定，
 // zsw 版同设计；恢复移植时误放进可跳过 step 的丢失）：下游 changeset / pr-meta /
 // skill-yaml / coverage 的 sharedSrcArgs / final-gates / cr-fix 六个消费点依赖该值，
@@ -1018,7 +1048,6 @@ if (baseLockRes.exitCode !== 0 || baseLockRes.stdout.trim() === "") {
 }
 const baseHash = baseLockRes.stdout.trim();
 
-phase("发起前检查");
 // step 1：preflight（仓库根 / 工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用）
 await step("preflight", async () => {
   const failures: string[] = [];
@@ -1073,7 +1102,7 @@ await step("pr-meta", async () => {
         "",
         "【任务一：changeset 补全（先做）】",
         changesetWarn
-          ? "背景：static gate 检测到部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check）。"
+          ? "背景：static gate 检测到部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check，检测口径 git diff main...HEAD——base 非 main 的 stacked PR 上 WARN 可能由 base 分支已有改动触发，分类时以本分支实际触及的包为准）。"
           : "背景：static gate 被发起方跳过，changeset-check 未执行（状态未知）——请按 diff 自行判断，宁可起草。",
         "按 diff 逐包分类并处理：",
         "- 实质行为改动（逻辑/接口/行为变化）→ 直接写入 .changeset/<slug>.md：",
@@ -1086,12 +1115,10 @@ await step("pr-meta", async () => {
         "- 非发布改动（纯注释/类型注解/测试/零行为差重构）→ 不写文件，记入 changeset.skipReasons（格式「包名: 原因 + 证据」）",
         "- 已删除的包跳过（package.json 读不到）",
         "",
+        "写完不 commit——changeset 文件由 workflow 统一显式路径提交（你要 commit 也不要用 git add -A）。",
         "任务一完成后以 changeset 字段返回：action=draft + files（写入的文件路径列表）或 action=no-release + skipReasons。",
       ]
-    : [
-        "",
-        "【任务一：changeset】本次无 WARN 且 static gate 已实跑——无发布级改动缺口，跳过（不返回 changeset 字段）。",
-      ];
+    : [];
   const v = await agent(
     "pr-meta",
     "你是 PR 文案与发布管理工程师：先按 diff 完成 changeset 分类（如任务一被包含），再从分支 commit 历史提炼英文 title 与 body；忠实反映改动，不夸大不遗漏，只起草不询问。",
@@ -1127,7 +1154,29 @@ await step("pr-meta", async () => {
     if (!v.changeset || (v.changeset.action !== "draft" && v.changeset.action !== "no-release")) {
       throw new Error(`pr-meta agent 的 changeset 段返回不符合契约（任务被包含时必填）：${JSON.stringify(v).slice(0, 200)}`);
     }
-    log(`[pr-meta] changeset：${v.changeset.action === "draft" ? `已起草 ${(v.changeset.files ?? []).length} 个文件` : `非发布改动跳过：${(v.changeset.skipReasons ?? []).join("; ")}`}`);
+    if (v.changeset.action === "draft") {
+      // 起草文件由 workflow 统一显式路径提交（.changeset/ 被 git 跟踪，不 commit 会
+      // 留脏工作区被 simplify/final-gates 防线拦截且错误归因；pr-submit 只 push 已提交）
+      const drafted = (v.changeset.files ?? []).filter((f): f is string => typeof f === "string" && f.trim() !== "");
+      if (drafted.length === 0) {
+        throw new Error(`pr-meta agent 返回 action=draft 但 files 为空（起草文件路径列表必填）：${JSON.stringify(v.changeset).slice(0, 200)}`);
+      }
+      for (const f of drafted) {
+        const r = await world.run("git", ["add", "--", f]);
+        if (r.exitCode !== 0) {
+          throw new Error(`changeset 文件 git add 失败（${f}，exit ${r.exitCode}）：${r.stderr.trim()}；确认 agent 实际写入了该路径`);
+        }
+      }
+      const commitRes = await world.run("git", ["commit", "-m", "chore: add changeset"]);
+      if (commitRes.exitCode !== 0) {
+        throw new Error(`changeset 统一 commit 失败（exit ${commitRes.exitCode}）：${commitRes.stderr.trim() || commitRes.stdout.trim()}；文件已 staged，人工 commit 后重新发起`);
+      }
+      log(`[pr-meta] changeset：已起草 ${drafted.length} 个文件并独立 commit`);
+    } else {
+      log(`[pr-meta] changeset：非发布改动跳过：${(v.changeset.skipReasons ?? []).join("; ")}`);
+    }
+  } else {
+    log("[pr-meta] changeset：changeset-check 无 WARN（已实跑），无需补全");
   }
   prTitle = v.title;
   await writeViaNode(".review/pr-workflow/pr-title.txt", v.title);
@@ -1220,8 +1269,9 @@ function coveragePctOf(cov: CoverageJson | null): number | null {
   if (total === 0) return null;
   return Math.round((covered / total) * 1000) / 10;
 }
-async function coverageFixContext(): Promise<string> {
+async function coverageFixContext(covPassed: boolean): Promise<string> {
   const cov = await readCoverageJson();
+  if (covPassed) return "coverage-gate 本道已通过（无失败明细，本轮失败在另一道 gate）。";
   if (!cov) return "coverage.json 不可读：以失败输出定位失败包。";
   const lines: string[] = [];
   for (const pkg of Object.keys(cov.packages ?? {})) {
@@ -1246,12 +1296,18 @@ async function coverageFixContext(): Promise<string> {
 
 // step 7：gate-suite（增量覆盖率 + 结构度量聚合门禁——两道 gate 的失败常同文件同源，
 // 拆两个独立修复子循环 = 同一批文件被两个冷启动会话各读一遍；聚合后每轮一个修复
-// 会话拿全量失败清单，同一文件的多类问题一次修完）
+// 会话拿全量失败清单，同一文件的多类问题一次修完）。
+// 预算边界：zsw 版两道独立子循环合计最多 4 个修复会话 / 6 次 gate-run；聚合后共享
+// 3 轮 = 2 个修复会话——「修 coverage 引入 metrics 失败且需 >1 轮恢复」的级联场景
+// 弱化，3 轮耗尽即 failed。实践出现级联失败时提升 GATE_SUITE_ROUNDS。
+// 双骨架纪律：本循环与 gateFixLoop（exit 2 分流 / 修复后脏检查 / 轮次耗尽 throw 三段
+// 同构）是两套并存实现——改任一处的 exit 码约定或脏检查时机须同步另一处。
 interface MetricsJson {
   verdict?: string;
   fail?: { type?: string; path?: string; files?: string[]; name?: string; reason?: string }[];
 }
-async function metricsFixContext(): Promise<string> {
+async function metricsFixContext(metPassed: boolean): Promise<string> {
+  if (metPassed) return "metrics-gate 本道已通过（无失败明细，本轮失败在另一道 gate）。";
   const m = await readJsonViaNode<MetricsJson>(".review/metrics.json");
   const fails = m?.fail ?? [];
   if (fails.length === 0) return "metrics.json 不可读或无 fail 明细：以失败输出定位。";
@@ -1295,9 +1351,9 @@ await step("gate-suite", async () => {
         "",
         "失败明细（两道 gate 聚合，按文件聚类阅读）：",
         "",
-        await coverageFixContext(),
+        await coverageFixContext(cov.exitCode === 0),
         "",
-        await metricsFixContext(),
+        await metricsFixContext(met !== null && met.exitCode === 0),
         "",
         "要求：",
         "1. 修复上述全部问题，只改与失败直接相关的文件；同一文件的多类问题一次修完。",
@@ -1483,7 +1539,7 @@ await step("final-gates", async () => {
       const pct = coveragePctOf(cov);
       log(`[final-gates] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics} premerge=${gates.premerge}`);
     },
-    async () => `${await coverageFixContext()}\n注：本 step 三动作（coverage → metrics → pre-merge --test-result）每轮从 ① 头部重跑。`,
+    async () => `${await coverageFixContext(false)}\n注：本 step 三动作（coverage → metrics → pre-merge --test-result）每轮从 ① 头部重跑。`,
   );
   void out;
   // 收尾防线：step 完成前最后一次 porcelain——防「修复改动未 commit → 读数假绿 → push 后修复静默丢失」
@@ -1502,32 +1558,35 @@ await step("final-gates", async () => {
 });
 
 // ══ 终态 ══
-report({ stage: "terminal", status: failure ? "failed" : "awaiting-push", failedStep: failure?.step ?? null });
+// as 断言：failure 只在 step() 闭包内赋值，控制流窄化会把它收窄为 never（已探针
+// 复现——模块模式下同样发生），断言回联合类型保证终态读取编译稳定
+const fail = failure as { step: string; error: string } | null;
+report({ stage: "terminal", status: fail ? "failed" : "awaiting-push", failedStep: fail?.step ?? null });
 
 const summaryLines = [
-  `# PR lifecycle：${failure ? "failed" : "awaiting-push"}`,
+  `# PR lifecycle：${fail ? "failed" : "awaiting-push"}`,
   "",
-  failure
-    ? `- failedStep: **${failure.step}**`
+  fail
+    ? `- failedStep: **${fail.step}**`
     : `- prUrl: ${prUrl ?? "（未知）"}\n- cr-fix: ${crFixTerminated ?? "（未执行）"}\n- simplify: ${simplifySummary ?? "（未执行）"}\n- gates: coverage=${gates.coverage} / metrics=${gates.metrics} / premerge=${gates.premerge}`,
   skippedSteps.length ? `- skippedSteps:\n${skippedSteps.map((s) => `  - ${s.step}: ${s.reason}`).join("\n")}` : "- skippedSteps: 无",
-  failure ? `\n> ${failure.error}` : "\n> push 需用户授权：主 agent 披露上述结果并请求授权后执行 `git push github HEAD:<branch> --force-with-lease`",
+  fail ? `\n> ${fail.error}` : "\n> push 需用户授权：主 agent 披露上述结果并请求授权后执行 `git push github HEAD:<branch> --force-with-lease`",
 ];
 try {
   await artifact.markdown("summary", summaryLines.join("\n"), {
-    title: failure ? `PR lifecycle failed：${failure.step}` : "PR lifecycle awaiting-push",
-    description: (failure ? failure.error.split("\n")[0] : "全部门禁通过，等待 push 授权。").slice(0, 500),
+    title: fail ? `PR lifecycle failed：${fail.step}` : "PR lifecycle awaiting-push",
+    description: (fail ? fail.error.split("\n")[0] : "全部门禁通过，等待 push 授权。").slice(0, 500),
     primary: true,
   });
 } catch {
   log("WARN: 终态摘要 artifact 发布失败（不影响流程结果）");
 }
 
-if (failure) {
+if (fail) {
   return {
     status: "failed" as const,
-    failedStep: failure.step,
-    error: failure.error,
+    failedStep: fail.step,
+    error: fail.error,
     skippedSteps,
     recovery: `处置后重新发起本 workflow（CreateWorkflow path 指向 .agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts）；已人工接管的 step 在 args.skipSteps 中跳过。run 被中断（非 failed）时优先 ResumeWorkflowRun。`,
   };

@@ -178,7 +178,23 @@ node scripts/select-constraints.mjs --base main
 - **zcode 主 agent** → 路径 2（原生 pr-lifecycle 单 workflow 全链）；只跑 review+fix 循环时用全局 saved `review-fix-loop`
 - **无 workflow 能力环境** → 路径 3（手工编排，上限 2 轮）
 
-**review-fix-loop 宿主路由（循环本体双版本）**：review+fix 循环本体有两个同源实现，按主 agent 宿主路由——pi 主 agent 用 **pi 内置版**（`pi workflow run review-fix-loop`，路径 1）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`）。两版本共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，autoCommit 由循环统一显式路径 commit（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。zcode 版差异：无 `aggregatorModel`（per-call 模型路由不存在，模型由 run 级 subagent_model 承载）、无嵌套 workflow、断点恢复走引擎原生（AmendWorkflow / ResumeWorkflowRun）、报告落 `{reportDir}/{topic}/round-<n>/`（`reportDir` 默认 `.tmp/review-fix-loop`，`topic` 执行开始时命名）。适用边界：**只跑 review+fix 循环**（不进门禁、不开 PR）时按宿主路由单跑；**完整 PR 生命周期**走路径 2（zcode 原生 pr-lifecycle，cr-fix step 内联同源循环）。
+**review-fix-loop 宿主路由（循环本体双版本）**：review+fix 循环本体有两个同源实现，按主 agent 宿主路由——pi 主 agent 用 **pi 内置版**（`pi workflow run review-fix-loop`，路径 1）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，缺省全部 8 维））。两版本共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，autoCommit 由循环统一显式路径 commit（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。zcode 版差异：无 `aggregatorModel`（per-call 模型路由不存在，模型由 run 级 subagent_model 承载）、无嵌套 workflow、断点恢复走引擎原生（AmendWorkflow / ResumeWorkflowRun）、报告落 `{reportDir}/{topic}/round-<n>/`（`reportDir` 默认 `.tmp/review-fix-loop`，`topic` 执行开始时命名）。适用边界：**只跑 review+fix 循环**（不进门禁、不开 PR）时按宿主路由单跑；**完整 PR 生命周期**走路径 2（zcode 原生 pr-lifecycle，cr-fix step 内联同源循环）。
+
+**循环本体行为差异登记表**（2026-09-24 一致性审查后集中登记——两版循环骨架同源，以下为已知的语义分叉，改任一侧前先查此表）：
+
+| 差异点 | pi 版 | zcode 版（saved + prl 内联） | 备注 |
+|---|---|---|---|
+| needs-redesign 前置 | 要求条目 regressed（修了又坏）且 fixAttempts 达上限 | 无 regressed 前置，聚合仍报即计数 | pi 更宽容精准；zcode 早熔断 |
+| deferred 复活通道 | R2 reviewer 受控 escalate 申报（prompt 注入 deferred 清单 + 不许重报） | 无 escalate 状态，靠聚合重报 L1/L2 命中被动复活 | zcode 通道弱（deferred 低频，待裁决是否补） |
+| converged 判定 | 新发现率收敛（convergeRounds 轮 ≤N 新问题且无 critical）+ 活跃清零 | 仅活跃清零（R1 全 clean 报 clean） | zcode 无「边修边冒新问题」防护，靠 stuck 兜底 |
+| stuck 计数起算 | 对账数据缺失才计数式，R1 不起算 | 恒双轨且 R1 起算 | zcode 早一轮触发 |
+| 会话墙钟超时 | reviewer/aggregator 1h | 无超时 | zcode 符合「任务级默认无超时」裁决（AGENTS.md 规则 19） |
+| aggregator 失败 fallback | aggregated.md 解析 numeric fallback | fail-closed 无 fallback | zcode 防「结构化丢失→空 issues 假 clean」 |
+| fixer prompt 增强 | minimal-fix 纪律 + 防注入 caution 段 | S7 checklist（行号锚点同步 + 依赖 pin） | 各自吸收不同实战教训 |
+| pi 独有可选参数 | recheckAfterFix / fixAgent / reviewPrompt / fixPrompt / targetType=file\|dir\|text / fallowScan 前置批 / 多批 batch1..N / converge 参数 / rfl 仪表 | 无对应物 | pr-lifecycle 场景多数不需要；recheckAfterFix 需求出现时按需加 |
+| autoCommit 默认 | false | saved 版 true；prl 恒统一 commit | 单跑 saved 不传参即产生 commit 副作用 |
+| rawClean+对账残留走向 | 清 clean 名单重派 review 追账 | 进聚合管线多修一轮 | 两种「不假 clean」策略 |
+| reviewer 定义投射 | agent .md 作为 systemPrompt（frontmatter model 传播） | 通用 persona + prompt 指示第一步 Read 定义文件 | 平台能力差异 |
 
 #### 路径 1：pi 环境（有 pi workflow 能力）
 
@@ -205,9 +221,9 @@ pi workflow run review-fix-loop --args '{
 }'
 ```
 
-内置行为要点：某 agent `must_fix === 0` 判 clean；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复未收敛 → `terminated=needs-redesign`；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 result.disputed 带出）；聚合器内置（合并去重为 `aggregated.md` + must_fix 计数）。
+内置行为要点：某 agent `must_fix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复未收敛 → `terminated=needs-redesign`（pi 实装要求条目处于 regressed——修了又坏才算；zcode 版无此前置，聚合仍报即计数，两版熔断严格度差异见「宿主路由」差异登记表）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 result.disputed 带出）；聚合器内置（合并去重为 `aggregated.md` + must_fix 计数）。
 
-**Gate-2**：workflow `terminated` ∈ {`clean`, `converged`, `stuck`, `needs-human`} → 进阶段 3（`needs-human` 须先按 `result.disputed` 反证逐项裁决：真问题修复后进阶段 3，误报 ack 后进阶段 3，裁决结论逐项披露）。`terminated=needs-redesign` = 结构性问题需人工介入，**停手上报用户**。`terminated ∈ {review-failure, aggregator-failure}` = 结构化失败终态（review agent 调用失败/结果无效、aggregator 失败且 fallback 失败；实装见 review-fix-loop.js）：环境问题，调参重跑一次，再败**停手上报用户**（处置与路径 2 同类问题一致）。
+**Gate-2**：workflow `terminated` ∈ {`clean`, `converged`, `stuck`, `needs-human`} → 进阶段 3（`needs-human` 须先按 `result.disputed` 反证逐项裁决：真问题修复后进阶段 3，误报 ack 后进阶段 3，裁决结论逐项披露）。`terminated=needs-redesign` = 结构性问题需人工介入，**停手上报用户**。`terminated ∈ {review-failure, aggregator-failure, fix-failure, max-rounds}` = 失败终态（review/aggregator/fix agent 调用失败或结果无效、轮次耗尽）：环境类（review/aggregator/fix-failure）调参重跑一次再败停手上报；`max-rounds` 读 `{reportDir}/{topic}/` 下聚合报告人工判定（误报接管披露、真问题修复 commit 后重新发起）——处置与路径 2 同类问题一致。
 
 #### 路径 2：zcode 环境（原生 pr-lifecycle 单 workflow 全链）
 
@@ -342,7 +358,7 @@ bash scripts/pr-pre-merge.sh --test-result <PASS|FAIL> --quiet
 ```
 
 - ③ 注入值 = ① 的测试判定（任一被 gate 包测试失败 → 注入 FAIL）。脚本校验 `.review/coverage.json` 存在且 base 与当前一致（防注入过期读数），不一致 exit 2 → 恢复：重跑 ① 后再 ③
-- **任一 gate FAIL 仍走完 ③ 写 marker**（pr-status.sh 可见终态），Gate-3a 拦截不 push；按失败输出派 worker / 测试 subagent 修复后**从 ① 头部重跑**
+- **任一 gate FAIL 仍走完 ③ 写 marker**（pr-status.sh 可见终态），Gate-3a 拦截不 push；按失败输出派 worker / 测试 subagent 修复后**从 ① 头部重跑**。路径 2 例外：pr-lifecycle 的 final-gates 在 coverage 失败时短路返回（不跑 metrics/pre-merge、marker 不写），直接进修复子循环——省时且语义等价（修复轮从 ① 头部重跑覆盖全部三道）
 
 **Gate-3a**（硬 gate）：三道 gate 全部 exit 0 且 marker `result=PASS` 才继续。coverage-gate exit 1 → 增量不足派测试 subagent 补测试 / 测试失败按失败用例派 worker；metrics-gate fail → 派 worker 修复；pre-merge FAIL → 按失败步骤对应工种修复。
 
