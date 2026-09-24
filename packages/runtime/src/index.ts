@@ -677,14 +677,19 @@ async function main(): Promise<void> {
 
   /** crash exit → respawn 终态期间的退出现场 stash（熔断发声时携回 exitCode/stderrTail/transcript） */
   const pendingExitDeaths = new Map<string, { exitCode: number | null; stderrTail?: string; sessionFilePath?: string }>()
-  /** 同步 exit 链的销毁腿标记（本回调与 removeSessionEntry 同 tick；forceQuit 等异步到达的销毁不带标 → 发声） */
+  /** 同步 exit 链的销毁腿标记（本回调与 removeSessionEntry 同 tick；forceQuit 等异步到达的销毁不带标 → 发声）。
+   *  消费点核销（审查 unreasonable#3 同步核）：pm.onSessionExit 仅组合根本腿 + SessionService
+   *  清理腿两个订阅者（RT-4#1 逐回调隔离必达）、两侧同图同判（getSession ≡ lifecycle.get）——
+   *  view 在册 ⇒ 同 tick 的 removeSessionEntry 销毁回调必经销毁扇出消费，无 suppressedDeaths
+   *  同型滞留面；forceQuit/delete 等不经 exit 链的销毁本就不带标。 */
   const exitChainLegs = new Set<string>()
   /** 非终局杀静默标记（session-lifecycle 'delete'/'suppress' 处置 → 销毁回调查过即消） */
   const suppressedDeaths = new Set<string>()
 
   // TTL 清扫消费环（D7：respondOrphaned 同步应答防孤儿 promise）。**注册先于 ClaimLedger
-  // 构造**：同周期下本环首次 due 恒早于内部自动清扫 ε（构造时点差），每拍本环先跑，
-  // 内部清扫不产生无人消费的转移（双清扫竞态不丢 respond——见 runClaimSweep 职责注释）。
+  // 构造**：同周期下本环首次 due 恒早于内部自动清扫 ε（构造时点差）——组合环先跑覆盖
+  // 常相位；恰落 ε 缝隙的带 watch 转移由内部环产生时 respondOrphaned 不被消费——已知
+  // 微窗（D-16 登记），孤儿由父重启收口腿清理（分腿语义见 runClaimSweep 职责注释）。
   // 闭包引用下方 const（首次执行在注册 +60s 后，无 TDZ 窗口）。
   const CLAIM_SWEEP_INTERVAL_MS = 60_000
   const claimSweepTimer = setInterval(() => {
@@ -776,13 +781,16 @@ async function main(): Promise<void> {
   })
 
   // 死亡处置汇聚点（session-lifecycle：delete 在 pm.destroySession 之前立 latch，检查点①；
-  // restore 清场 'suppress' 静默）——'delete' 即时发声销账，两者均标 suppressedDeaths
-  // 使随后的销毁回调跳过（幂等空转亦无害，标记只是省一次空批查询）。
-  subscribeSessionDeathDisposition((sessionId, disposition) => {
+  // restore 清场 'suppress' 静默）。'delete' 即时发声销账 + clearSession（检查点①语义不动，
+  // 发声覆盖 active/scanned 两分支）；suppressedDeaths 抑制标（供随后的 removeSessionEntry
+  // 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——scanned/未找到
+  // throw/btw 直删无销毁回调消费点，无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
+  // 'delete' 已发声销账，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省一次空批查询）。
+  subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
     if (disposition === 'delete') {
       speakSessionDeath(sessionId, 'delete')
-      suppressedDeaths.add(sessionId)
-    } else {
+    }
+    if (detail.hasDestroySink) {
       suppressedDeaths.add(sessionId)
     }
   })
@@ -1003,7 +1011,9 @@ async function main(): Promise<void> {
   sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
   // notify-once D5 销毁汇聚点（追加式列表的第二订阅者）：
   // - 同步 exit 链腿（exitChainLegs 同步标）→ 跳过——respawn 终态事件随后裁决（stash 在挂）；
-  // - delete/suppress 处置已标 → 跳过（delete 已发声 / restore 清场非终局）；
+  // - suppressedDeaths 已标（active 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
+  //   无标路径（非 active 'delete' 理论无销毁回调不可达；active 'delete' 的迟到发声）对
+  //   'delete' 已清的账本幂等空转无害；
   // - 其余 = forceQuit / abort 阶梯强杀等不经 pm.onSessionExit 的收敛链（exit 事件被双层
   //   守卫拦截）→ 汇聚点补发声 'exited'（exitCode null = 被杀无退出码，与 session.exited 协议同语义）。
   sessionService.setOnSessionDestroyed((summary) => {

@@ -68,21 +68,31 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 //   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
 // 回收（reclaim）与 destroyAll 刻意不经本登记：前者不走 removeSessionEntry 汇聚点、
 // 后者随进程内存消亡，均无销毁回调需抑制。
+// detail.hasDestroySink（审查 unreasonable#3）：本次处置之后**是否必有 removeSessionEntry
+// 销毁回调**——组合根的 suppressedDeaths 抑制标只在 true 时立（标由该回调消费）。
+// scanned / 未找到 throw / btw 直删等无销毁回调路径若无差别立标 = stale id 无界滞留。
 export type SessionDeathDisposition = 'delete' | 'suppress'
-const deathDispositionSubscribers = new Set<(sessionId: string, disposition: SessionDeathDisposition) => void>()
+
+/** 处置详情（fire 点按控制流判定，订阅方消费——判定归属在发起方，不靠订阅侧同图反推）。 */
+export interface SessionDeathDispositionDetail {
+  /** 随后必经 removeSessionEntry 销毁回调（抑制标必被消费；false = 立标必滞留）。 */
+  hasDestroySink: boolean
+}
+
+const deathDispositionSubscribers = new Set<(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail) => void>()
 
 /** 订阅死亡处置登记（返回退订函数；组合根接线，多订阅者隔离由扇出侧 try/catch 保证）。 */
 export function subscribeSessionDeathDisposition(
-  cb: (sessionId: string, disposition: SessionDeathDisposition) => void,
+  cb: (sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail) => void,
 ): () => void {
   deathDispositionSubscribers.add(cb)
   return () => { deathDispositionSubscribers.delete(cb) }
 }
 
-function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition): void {
+function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
   for (const cb of [...deathDispositionSubscribers]) {
     try {
-      cb(sessionId, disposition)
+      cb(sessionId, disposition, detail)
     } catch (e: unknown) {
       // 订阅者异常不得阻断删除/清场主链（best-effort 留痕，可回溯）
       console.error(`[session-lifecycle] death-disposition subscriber error (sessionId=${sessionId}, disposition=${disposition}):`, e)
@@ -967,21 +977,30 @@ export class SessionLifecycle implements ISessionRegistry {
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。
     userStoppedGate.disposeForDelete(sessionId)
+    // 分支先行只读判定（hasDestroySink 判据，见 fireDeathDisposition 处登记）：抑制标只能
+    // 立在随后必经 removeSessionEntry 销毁回调的处置上——scanned / 未找到 throw / btw 直删
+    // 无销毁回调，无差别立标 = stale id 无界滞留（审查 unreasonable#3；「delete 失败提前
+    // throw」同型滞留由本判定收口：not-found throw 落在 inactive 侧，天然不立标）。
+    // btwOps 本地 const 捕获：供 isBtwLine 别名判定在 if 处收窄（模块级 let 不走别名收窄）。
+    const btwOps = btwCascadeOps
+    const isBtwLine = isBtwVirtualId(sessionId) && btwOps !== null
+    const session = this.get(sessionId)
     // [notify-once D5] 死亡汇聚点立 latch（先于任何杀进程/文件处置，覆盖 active 与
     // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声销账 + clearSession，
     // 随后 active 分支的 pm.destroySession 即便漏出 exit 事件也查无记录（'deleted' 必胜出）。
-    fireDeathDisposition(sessionId, 'delete')
+    // 发声两分支恒执行（检查点①语义不动）；抑制标仅 active 立——该分支 destroySession
+    //（内部全 catch）与 removeSessionEntry（步隔离扇出）均不抛，标必被销毁回调消费。
+    fireDeathDisposition(sessionId, 'delete', { hasDestroySink: session !== undefined && !isBtwLine })
     // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
     // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
     // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
     // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
     // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
-    if (isBtwVirtualId(sessionId) && btwCascadeOps !== null) {
-      await btwCascadeOps.closeLine(sessionId, { deleteSessionFile: true })
+    if (isBtwLine) {
+      await btwOps.closeLine(sessionId, { deleteSessionFile: true })
       return
     }
-    const session = this.get(sessionId)
     // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
     // 启动孤儿补账兑底清理线目录）。
     let cascadeCwd: string | undefined
@@ -1221,7 +1240,9 @@ export class SessionLifecycle implements ISessionRegistry {
     if (!existing) return
     // [notify-once D5] 非终局杀立 'suppress' latch（先于 kill）：同 id 随即重开（restore
     // 清场），销毁回调据此静默——不产生伪造死亡通知（respawn/restore 链静默同族）。
-    fireDeathDisposition(sessionId, 'suppress')
+    // hasDestroySink 恒 true：本方法仅从 active 在册发起（上方 existing 守卫），随后
+    // detach → safeDestroy（内部 catch）→ removeSessionEntry 必经，标必被销毁回调消费。
+    fireDeathDisposition(sessionId, 'suppress', { hasDestroySink: true })
     console.warn(`[session-lifecycle] killing active pi before restore, session ${sessionId} (kill_source=restore_clear | who: restore request while old pi still active (session.restore RPC / ensureActive) | chain: detach -> safeDestroy old pi -> respawn + switch_session)`)
     this.detachSession(sessionId)
     await this.safeDestroy(sessionId)
