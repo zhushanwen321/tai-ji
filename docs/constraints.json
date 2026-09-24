@@ -3032,6 +3032,27 @@
           "hook": "check_layering_registry_sync.py"
         }
       ]
+    },
+    {
+      "id": "C-proc-28",
+      "summary": "session 文件读者普查闭合（message-revoke G2）：全部读取 pi session .jsonl 内容（extension 侧 ctx.sessionManager.getEntries() / runtime 侧 jsonl 解析原语与提取扫描函数族）的读者必须登记于 docs/architecture/session-readers-census.md 并按二分准则归类——未来状态随树（可由活跃路径确定性重建的当前状态，撤回后按活跃路径重算）/ 已发生事实照实（重建即伪造事实：run 执行、token 消耗、通知账本、名字结局）；新增派生读者时同 commit 在该清单登记归类（含归类理由与接入单元指针），未归类的新读者不得合入。可执行检查 = 重跑普查清单 §2 机器锚点命令族（E1 getEntries / E2 session-core 直读 / R1 utils-jsonl 消费 / R2 提取扫描函数族 / R3 createReadStream 流扫），任一锚点出现清单未登记的新命中即先补登记再合入",
+      "scope": [
+        "extensions/**",
+        "packages/runtime/src/**",
+        "docs/architecture/session-readers-census.md"
+      ],
+      "authority": [
+        "architecture/session-readers-census.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
     }
   ]
 }
