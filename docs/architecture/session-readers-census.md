@@ -59,6 +59,7 @@ grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.
 | plan | `state.ts` `reconstructPlanState`（逆序取最后一条 plan-state entry） | 随树 | plan 状态 = 当前状态；逆序扫描接活跃路径裁剪 + 新增 `session_tree` handler 即时重建（纯重建两行体，无 steer 副作用） | U6b |
 | plan | `session_before_compact` / `session_before_tree` 摘要注入面（摘要从 plan state 派生） | 随树 | 随 state 重建生效；撤回走 `summarize:false` 不触发 tree summary（注入面安全前提） | U6b |
 | goal | `session.ts` `reconstructGoalState`（全文件倒序重建；`before_agent_start` 注入读内存态不重算） | 随树 | goal 状态 = 当前状态；同款裁剪 + 新增 `session_tree` handler 即时重建（否则被撤 goal 逐轮注入模型上下文） | U6c |
+| goal | `ports.ts` SessionPort 接口声明 + `adapters/ports.ts` 一行委托（`getEntries: () => ctx.sessionManager.getEntries()`） | 消费面委托（随树） | 锚点命中但自身不读文件（类型声明 / 一行委托）；读取语义落在 `session.ts` `reconstructGoalState`，随树判定由 U6c 覆盖 | U6c |
 | goal | `adapters/event-handlers/agent-end.ts` + `command-adapter.ts` `countActiveFromEntries` 活跃性守卫 / `goal-history` 展示 | 照实 | 活跃 run 是已发生事实（与撤回互斥由编排 workflow-running 检查承载）；history 命令展示历史记录 | — |
 | scheduler | `backend.ts` `loadTasks` 折叠（全文件折叠恢复 pending 定时任务） | 随树 | pending 定时任务 = 未来将发生的事；被撤子树任务不得复活触发（重折叠 + `session_tree` handler） | U6c |
 | scheduler | `ack-turn.ts` `hasAssistantEntry` 落盘判据（fail-closed 只读） | 照实 | 判据 = 文件是否已有 assistant flush（文件事实），非状态投影 | — |

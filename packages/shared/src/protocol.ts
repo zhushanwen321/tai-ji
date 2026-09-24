@@ -458,7 +458,9 @@ export interface ClientMessageMap {
   // renderer 消息 id 有两个互斥空间——live 乐观气泡 `u-<uuid>`（= clientUuid）与 history
   // 基线 / 重开后的 pi entryId（8 位 hex）；把 clientUuid 定死为入参会使「同一 session 第二次
   // 撤回 / 重开后撤回」对全部消息失效（刷新后 clientUuid 不再可从消息取到）。两形态的运行时
-  // 分派定位是编排侧职责（U4），契约层统一为 string。
+  // 分派定位是编排侧职责（U4），契约层统一为 string。例外：U8 外来条目保号可为裸 uuid 形态
+  // （chat store appendUser 无前缀校验）——撤回分派对 uuid 形态目标走裸标记通道 b 收编
+  // （见 revoke-orchestrator locateTarget）。
   'session.revokeMessage': { sessionId: string; targetId: string }
   // session.history 参数（D4 中期分页协议，u6-paging-protocol）：
   // - 不带 cursor：最近窗口（u4b 双预算现状）——「打开/切入 session」与 hydrate 通路。

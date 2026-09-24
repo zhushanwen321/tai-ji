@@ -35,6 +35,14 @@ import type { SystemCommandOutcome } from './message-dispatcher.js'
  */
 const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 
+/**
+ * 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）：结构同 MSG_ID_TAG_RE 捕获组 2 的
+ * 裸 uuid 段（8-4-4-4-12 hex）全串锚定——与 pi entryId 的 8 位 hex 形态构造性区分（无连字符
+ * 不匹配）。[双侧同构字面量] uuid 结构须与 shared message.ts MSG_ID_TAG_RE 的 uuid 段同步，
+ * 禁单侧修改。
+ */
+const BARE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /** 编排依赖（窄注入，测试可 mock；组合根在 session-service 装配）。 */
 export interface RevokeOrchestratorDeps {
   /** occupancy 空闲检查数据源（①——三维 turn/compacting/bash 的权威投影）。 */
@@ -160,18 +168,23 @@ function endsWithMarkerFor(text: string, bareId: string): boolean {
 }
 
 /**
- * ③ 定位目标 entryId（targetId 双形态分派——renderer 消息 id 两空间互斥使分派构造性可靠）：
- * - `u-` 前缀（live 态 clientUuid）→ 双通道：a) msg-id-mapper custom entry 映射（富消息）；
- *   b) miss 时 user entry 文本裸标记末尾锚 + uuid === bareMarkerId(targetId) 校验（纯文本
- *   消息无映射 entry 的主导形态）。双通道均 miss → null（调用方回 no-mapping）。
- * - 无 `u-` 前缀（基线/重开态 pi entryId）→ 直接用作 entryId（⑤ 活跃路径校验兜底语义
- *   错误目标——不在全文件即 no-mapping）；content 尽力查取（目标非 user message 时空串）。
+ * ③ 定位目标 entryId（targetId 双形态分派）。原前提「renderer 消息 id 两空间互斥使分派
+ * 构造性可靠」被 U8 保号削弱：外来条目 clientUuid 可为裸 uuid 形态（chat store appendUser
+ * 无前缀校验），其投递裸标记恰以裸 uuid 落在 transcript——uuid 形态目标（`u-` 前缀或裸
+ * uuid 子形态）统一进双通道分派收编，仅 pi entryId（8 位 hex）保持直用：
+ * - uuid 形态（`u-` 前缀 live 态 clientUuid / U8 保号裸 uuid）→ 双通道：a) msg-id-mapper
+ *   custom entry 映射（富消息；裸 uuid 目标现无映射 entry——mapper 只写 u- 形态，扫过即
+ *   miss，兜未来映射面扩展）；b) miss 时 user entry 文本裸标记末尾锚 + uuid ===
+ *   bareMarkerId(targetId) 校验（纯文本消息无映射 entry 的主导形态；裸 uuid 经
+ *   bareMarkerId 恒等归一后同样命中）。双通道均 miss → null（调用方回 no-mapping）。
+ * - 其余形态（基线/重开态 pi entryId，8 位 hex）→ 直接用作 entryId（⑤ 活跃路径校验兜底
+ *   语义错误目标——不在全文件即 no-mapping）；content 尽力查取（目标非 user message 时空串）。
  */
 function locateTarget(
   snapshot: TreeSnapshot,
   targetId: string,
 ): { entryId: string; content: string } | null {
-  if (targetId.startsWith('u-')) {
+  if (targetId.startsWith('u-') || BARE_UUID_RE.test(targetId)) {
     // 通道 a：custom entry 映射（customType 过滤 + data 形状守卫——entry-tree-builder 同款防御）
     for (const entry of snapshot.byId.values()) {
       if (entry.customType !== CLIENT_MSG_ID_TYPE) continue
@@ -243,7 +256,10 @@ export class RevokeOrchestrator {
       // get_entries 失败归 nav-failed（可重试语义——与 ⑥ 校验读失败同族；重试时若撤回
       // 实际已成功，⑤ 幂等判定兜住不误报 no-mapping）
       const before = await readTreeSnapshot(client)
-      if (!before) return { sessionId, revoked: false, error: 'nav-failed' }
+      if (!before) {
+        warn(`nav-failed: pre-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}`)
+        return { sessionId, revoked: false, error: 'nav-failed' }
+      }
 
       // ── ③ 定位目标 entryId ─────────────────────────────────────────────────────
       const located = locateTarget(before, targetId)
@@ -264,6 +280,10 @@ export class RevokeOrchestrator {
         // 幂等回 revoked:true + 原文（重试同样完成 D7 草稿回填闭环）；不存在 → no-mapping。
         // 两分支均不发信令——防复活性跳转（对旧分支目标的 navigateTree 会把叶子挪回去）。
         if (before.byId.has(located.entryId)) {
+          // 幂等分支同样触发派生态失效：首次尝试可能已「信令送达 + 树回退、但⑥校验读失败
+          // 归 nav-failed」（失效未触发，残影仍在）；重试此刻触发的全量重算消费的已是撤回
+          // 后树（时序合法——与⑥′同款后置契约）。
+          this.deps.invalidateDerivedState(sessionId)
           return { sessionId, revoked: true, content: located.content }
         }
         return { sessionId, revoked: false, error: 'no-mapping' }
@@ -282,18 +302,31 @@ export class RevokeOrchestrator {
       }
       if (outcome.kind === 'error') {
         // prompt 传输级失败：无法确认树状态——nav-failed（重试安全：⑤ 幂等判定兜住）
+        warn(`nav-failed: nav command transport error, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, message=${outcome.message}`)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
       const after = await readTreeSnapshot(client)
-      if (!after) return { sessionId, revoked: false, error: 'nav-failed' }
+      if (!after) {
+        warn(`nav-failed: post-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
+        return { sessionId, revoked: false, error: 'nav-failed' }
+      }
       const post = walkActiveChain(after)
-      if (!post.complete) return { sessionId, revoked: false, error: 'nav-failed' }
+      if (!post.complete) {
+        warn(`nav-failed: active chain broken/cyclic after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
+        return { sessionId, revoked: false, error: 'nav-failed' }
+      }
       // 谓词（注释锚③）：按回溯链 entry.id 集合判定，禁序列化字符串包含判法——
       // LabelEntry.targetId 字段指向被撤消息，字符串包含判法会误报「路径仍含目标」。
-      if (post.ids.has(located.entryId)) return { sessionId, revoked: false, error: 'nav-failed' }
+      if (post.ids.has(located.entryId)) {
+        warn(`nav-failed: target still on active path after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
+        return { sessionId, revoked: false, error: 'nav-failed' }
+      }
       const parentReached =
         expectedParentId === null ? post.terminalParentId === null : post.ids.has(expectedParentId)
-      if (!parentReached) return { sessionId, revoked: false, error: 'nav-failed' }
+      if (!parentReached) {
+        warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}, terminalParentId=${post.terminalParentId}`)
+        return { sessionId, revoked: false, error: 'nav-failed' }
+      }
 
       // ── ⑥′ 派生态失效（树回退确认后——时序契约见④段注释）：此刻触发的全量重算
       // 消费撤回后树，被撤派生（plan 残影等）随活跃路径裁剪收敛清除。

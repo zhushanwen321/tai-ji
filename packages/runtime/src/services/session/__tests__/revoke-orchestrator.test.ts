@@ -257,6 +257,35 @@ describe('U4 撤回编排：happy path（⑧ 信令不污染 + ⑦ 前置）', (
     expect(h.promptCalls).toEqual([`/${TAIJI_NAV_COMMAND} e2`])
   })
 
+  it('裸 uuid 形态 targetId（U8 保号，无 u- 前缀）→ 进双通道，通道 b 末尾锚命中', async () => {
+    const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+
+    // U8 外来条目保号：气泡/内核条目 id 为裸 uuid（无 u- 前缀），裸标记恰以裸 uuid 落盘
+    const reply = await h.revoke(UUID_A)
+
+    expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
+    expect(h.promptCalls).toEqual([`/${TAIJI_NAV_COMMAND} e2`])
+  })
+
+  it('8 位 hex entryId 形态（pi entryId）仍直用：不进 uuid 双通道分派', async () => {
+    const h = makeHarness({ rewind: { target: 'a1b2c3d4', parent: 'e1' } })
+    h.setTree(
+      [
+        msgEntry('e1', null, 'user', '你好'),
+        msgEntry('a1b2c3d4', 'e1', 'user', '直用目标'),
+        msgEntry('e3', 'a1b2c3d4', 'assistant', '回复'),
+      ],
+      'e3',
+    )
+
+    const reply = await h.revoke('a1b2c3d4')
+
+    expect(reply).toEqual({ sessionId: SID, revoked: true, content: '直用目标' })
+    expect(h.promptCalls).toEqual([`/${TAIJI_NAV_COMMAND} a1b2c3d4`])
+  })
+
   it('首条消息完备分支：expectedParentId=null → 回溯链终止于根（label 成根）校验通过', async () => {
     const h = makeHarness({ rewind: { target: 'e1', parent: null } })
     h.setTree(
@@ -312,6 +341,8 @@ describe('② nav-failed 幂等重试（A8/A12：⑥ 校验失败 → 重试命�
     const first = await h.revoke('e2')
     expect(first).toEqual({ sessionId: SID, revoked: false, error: 'nav-failed' })
     expect(h.promptCalls).toHaveLength(1)
+    // nav-failed 不触发派生态失效（树未确认回退）
+    expect(h.invalidateSpy).not.toHaveBeenCalled()
 
     // 重试时点：树实际已回退（前次撤回真实生效但 reply 丢失的形态）——label 挂 e1、leaf 切走
     applyRewind(h.tree, 'e2', 'e1')
@@ -323,6 +354,9 @@ describe('② nav-failed 幂等重试（A8/A12：⑥ 校验失败 → 重试命�
     expect(h.promptCalls).toHaveLength(1)
     // 只消费了一次 get_entries（⑤ 数据面），无 ⑥ 校验读
     expect(h.client.getEntries.mock.calls.length).toBe(getEntriesBefore + 1)
+    // 幂等分支补触发派生态失效（首次尝试可能已树回退但失效未触发——残影在此清除）
+    expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(h.invalidateSpy).toHaveBeenCalledWith(SID)
   })
 
   it('get_entries RPC 自身失败归 nav-failed（不误报 no-mapping），不触发信令', async () => {
