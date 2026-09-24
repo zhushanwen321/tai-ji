@@ -99,6 +99,23 @@ export default function planExtension(pi: ExtensionAPI) {
     }
   });
 
+  // U6b：树回退（撤回 __taiji_nav__ → navigateTree / 用户树跳转）后即时重建 plan
+  // 内存态，消除 getPlanState 缓存命中短路的 stale 窗口（运行中撤回后压缩摘要会按
+  // 陈旧 state 注入被撤 requirement）。
+  //
+  // 纯重建体（todo 的 session_tree handler 同款）——只做 reconstruct + 缓存同步 +
+  // widget 刷新。为什么绝不复刻 session_start 块的副作用（E3 steer 重挂 /
+  // setActiveTools / persistPlanState）：本事件由撤回编排触发，steer 会让撤回编排
+  // 自己注入消息（违背「被撤内容从未发生」语义），persist 会向回退后的新分支追加
+  // entry 污染文件尾。缓存同步（sessions.set）保持「getPlanState 缓存命中 = 最新
+  // 重建态」——session_start 块的重建走同一 reconstructPlanState（已含活跃路径裁剪）。
+  pi.on("session_tree", async (_event: unknown, ctx: ExtensionContext) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const state = reconstructPlanState(ctx);
+    sessions.set(sessionId, state);
+    updatePlanWidget(ctx, state);
+  });
+
   // D9：AI 主动建议（轻量引导），仅 taiji 形态注入。
   // 信号用 TAIJI_AGENT_EXT_LOG 而非 TAIJI_RUNTIME_TOKEN——后者在 SPAWN_ENV 出站
   // deny list 被强制剥除（C-proc-09），pi 子进程 env 里恒不可见，照抄即引导

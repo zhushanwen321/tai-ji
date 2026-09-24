@@ -74,7 +74,7 @@ function setup() {
     hasUI: true,
     mode: "tui" as const,
     isProjectTrusted: () => true,
-    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
+    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] },
     ui: { select: vi.fn(), notify: vi.fn() },
   };
 

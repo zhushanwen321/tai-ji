@@ -29,7 +29,7 @@ function makeCtx() {
   const onErrorFns: Array<(e: Error) => void> = [];
 
   return {
-    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] as unknown[] },
+    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] as unknown[] },
     ui: { notify: vi.fn() },
     compact: vi.fn((opts: { onComplete?: () => void; onError?: (e: Error) => void }) => {
       if (opts.onComplete) onCompleteFns.push(opts.onComplete);

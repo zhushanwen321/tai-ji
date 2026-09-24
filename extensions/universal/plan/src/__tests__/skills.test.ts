@@ -157,6 +157,7 @@ describe("E1 fail-fast via /plan handler", () => {
       cwd: "/tmp/test-project",
       sessionManager: {
         getSessionId: () => "test-session",
+        getLeafId: () => null,
         getEntries: () => [] as unknown[],
       },
       ui: {

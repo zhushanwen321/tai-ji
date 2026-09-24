@@ -48,6 +48,7 @@ function makeCtx(entries: unknown[]): ExtensionContext {
   return {
     sessionManager: {
       getSessionId: () => "test-session",
+      getLeafId: () => null,
       getEntries: () => entries,
     },
     ui: { setWidget: vi.fn(), setStatus: vi.fn(), theme: { fg: (_t: string, text: string) => text } },
