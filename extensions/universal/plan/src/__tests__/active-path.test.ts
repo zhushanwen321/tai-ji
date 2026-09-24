@@ -112,6 +112,22 @@ describe("reconstructPlanState 活跃路径裁剪（U6b）", () => {
   });
 });
 
+describe("环状 parentId 防御（损坏文件 / 非 pi 产出写入）", () => {
+  it("环状 parentId（a↔b，leafId 指向环内）→ 回溯终止不挂死，重建完成且不抛错", () => {
+    // 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 守卫终止
+    const entries = [
+      planStateEntry("a", "b", { isActive: true, planFilePath: "/p/cycle-a.md", requirement: "cycle-a", templateName: "" }),
+      planStateEntry("b", "a", { isActive: true, planFilePath: "/p/cycle-b.md", requirement: "cycle-b", templateName: "" }),
+    ];
+
+    const state = reconstructPlanState(makeCtx(entries, "a"));
+
+    // 终止形态（实现语义）：activeIds = {a, b}，逆序扫描命中回溯链上最后一条 plan-state b
+    expect(state.requirement).toBe("cycle-b");
+    expect(state.planFilePath).toBe("/p/cycle-b.md");
+  });
+});
+
 describe("session_tree handler 即时重建（U6b：纯重建体 + 缓存同步）", () => {
   type PiMock = ExtensionAPI & {
     sendMessage: ReturnType<typeof vi.fn>;

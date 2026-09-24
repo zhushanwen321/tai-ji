@@ -106,6 +106,24 @@ describe("reconstructState 活跃路径裁剪（U6b）", () => {
 	});
 });
 
+describe("环状 parentId 防御（损坏文件 / 非 pi 产出写入）", () => {
+	it("环状 parentId（a↔b，leafId 指向环内）→ 回溯终止不挂死，重建完成且不抛错", () => {
+		// 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 守卫终止
+		const entries = [
+			todoEntry("a", "b", [{ id: 1, text: "cycle-a", status: "pending" }], 2),
+			todoEntry("b", "a", [{ id: 1, text: "cycle-b", status: "in_progress" }], 2),
+		];
+
+		const state = createTodoSessionState();
+		expect(() => reconstructState(state, makeCtx(entries, "a"))).not.toThrow();
+
+		// 终止形态（实现语义）：activeIds = {a, b}，回放链上最后一条 todo 快照 b
+		expect(state.todos).toHaveLength(1);
+		expect(state.todos[0]?.text).toBe("cycle-b");
+		expect(state.nextId).toBe(2);
+	});
+});
+
 describe("session_tree handler 回归（重建态与裁剪后一致）", () => {
 	it("触发 session_tree → state 重建为活跃路径态 + refreshDisplay 调用", async () => {
 		const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<unknown>>();

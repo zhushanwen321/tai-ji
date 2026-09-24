@@ -312,7 +312,7 @@ function filterActivePath(sessionManager: ExtensionContext["sessionManager"]): S
   const leafId = sessionManager.getLeafId();
   let current: SessionEntry | undefined = (leafId ? byId.get(leafId) : undefined) ?? entries[entries.length - 1];
   const activeIds = new Set<string>();
-  while (current) {
+  while (current && !activeIds.has(current.id)) {
     activeIds.add(current.id);
     current = current.parentId ? byId.get(current.parentId) : undefined;
   }
