@@ -37,7 +37,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     listProviders: vi.fn(async () => ({ providers: [] })),
     // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
     refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    setProvider: vi.fn(async () => undefined),
+    setProvider: vi.fn(async () => ({})),
     setSkillDirs: vi.fn(async () => undefined),
     setAgentDirs: vi.fn(async () => undefined),
     setExtensionDirs: vi.fn(async () => undefined),
@@ -98,7 +98,7 @@ function stubTransport(overrides: Partial<SettingsTransport> = {}): SettingsTran
   return {
     listProviders: async () => ({ providers: [] }),
     listModels: async () => [],
-    setProvider: async () => undefined,
+    setProvider: async () => ({}),
     setScopedModels: async () => [],
     discoverModels: async () => ({ success: true, models: [] }),
     setSkillDirs: async () => undefined,

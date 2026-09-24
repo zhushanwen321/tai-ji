@@ -123,6 +123,7 @@ export default {
     defaultPill: '默认供应商',
     defaultAutoUpdated: '默认模型已自动更新为 {model}',
     autoEnabledToast: 'API Key 已配置，已自动启用 {name}',
+    quotaAutoEnabledToast: '已自动开启「{name}」的 Coding Plan 额度显示，可在设置中关闭',
     modelsCount: '{count} 模型',
     editTitle: '编辑供应商',
     deleteTitle: '删除供应商',

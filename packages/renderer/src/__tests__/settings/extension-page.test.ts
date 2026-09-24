@@ -295,7 +295,7 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
     return {
       listProviders: async () => ({ providers: [] }),
       listModels: async () => [],
-      setProvider: async () => undefined,
+      setProvider: async () => ({}),
       setScopedModels: async () => [],
       discoverModels: async () => ({ success: true, models: [] }),
       setSkillDirs: async () => undefined,

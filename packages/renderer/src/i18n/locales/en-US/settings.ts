@@ -123,6 +123,7 @@ export default {
     defaultPill: 'Default',
     defaultAutoUpdated: 'Default model auto-updated to {model}',
     autoEnabledToast: 'API Key configured, {name} enabled automatically',
+    quotaAutoEnabledToast: 'Auto-enabled Coding Plan quota display for "{name}" — turn it off in Settings',
     modelsCount: '{count} models',
     editTitle: 'Edit provider',
     deleteTitle: 'Delete provider',

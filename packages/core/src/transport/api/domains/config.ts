@@ -257,7 +257,11 @@ export function setExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {
   return command('config.setExtensionDirs', { dirs }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-export function setProvider(providerId: ProviderId, data: SetProviderData): Promise<void> {
+/**
+ * 保存 provider。返回 quotaAutoEnabled（新建分支自动开启 coding-plan 额度显示写成功，
+ * quota-auto-enable.ts）——调用方据此 toast（与导入路径 quotaAutoEnabled 同语义）。
+ */
+export function setProvider(providerId: ProviderId, data: SetProviderData): Promise<{ quotaAutoEnabled?: boolean }> {
   return command('config.setProvider', { providerId, ...data }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 

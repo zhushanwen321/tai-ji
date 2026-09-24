@@ -1174,6 +1174,8 @@ const configImpl = {
       }
     }
     broadcastProviders()
+    // 对齐 real reply 形状（config.providerUpdated 载荷消费型）：mock 不模拟额度自动开启
+    return {}
   },
   async deleteProvider(providerId: ProviderId) {
     await sleep(TIMING.ack)

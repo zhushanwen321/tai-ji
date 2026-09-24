@@ -82,10 +82,12 @@ export interface ProviderEditDeps {
   t: (key: string, params?: Record<string, unknown>) => string
 }
 
-/** save 结果：ok=是否成功；wroteApiKey=本次是否写入了非空 apiKey（明文/env 引用，哨兵清空与「不变」均 false） */
+/** save 结果：ok=是否成功；wroteApiKey=本次是否写入了非空 apiKey（明文/env 引用，哨兵清空与「不变」均 false）；
+ * quotaAutoEnabled=setProvider reply（新建分支自动开启 coding-plan 额度显示写成功，供父组件 toast） */
 export interface SaveResult {
   ok: boolean
   wroteApiKey: boolean
+  quotaAutoEnabled?: boolean
 }
 
 // ── 常量 ──
@@ -583,9 +585,9 @@ export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: Pro
     // 网关输入框值：trim 后判定（纯空白串与空串同视，runtime 侧同样按 trim 判定）
     const baseUrl = form.baseUrl.trim()
     try {
-      await getSettingsTransport().setProvider(providerId, buildSetProviderPayload(isCatalog, baseUrl))
+      const res = await getSettingsTransport().setProvider(providerId, buildSetProviderPayload(isCatalog, baseUrl))
       // 哨兵→''、空→undefined 均为 falsy：只有本次真正写入非空 key（明文或 $ENV 引用）才 true
-      return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(form.apiKey)) }
+      return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(form.apiKey)), quotaAutoEnabled: res?.quotaAutoEnabled }
     } catch (e) {
       actionError.value = e instanceof Error ? e.message : String(e)
       return { ok: false, wroteApiKey: false }

@@ -55,7 +55,9 @@ const configMock = vi.hoisted(() => ({
   setDefaultModel: vi.fn(() => Promise.resolve()),
   onDefaultsWithSource: vi.fn(() => () => {}),
   // B-1 编辑体 OAuth 接线：登录 flow + presence 查询 + authMethod 持久化
-  setProvider: vi.fn(() => Promise.resolve()),
+  setProvider: vi.fn(() => Promise.resolve({})),
+  // QuickSetup 打开链（onTemplateSelect → oauth.checkEnv → config.checkEnvVars）
+  checkEnvVars: vi.fn(() => Promise.resolve({})),
   oauthLogin: vi.fn(() => Promise.resolve({ started: false })),
   oauthCancel: vi.fn(() => Promise.resolve({ cancelled: false })),
   oauthLogout: vi.fn(() => Promise.resolve({ ok: true })),
@@ -103,18 +105,30 @@ function mountPage(providers: ProviderInfo[]): ReturnType<typeof mount> {
         ProviderEditBody: {
           name: 'ProviderEditBody',
           props: ['provider', 'oauthPresent', 'oauthSupported'],
-          emits: ['oauthLogin', 'oauthLogout'],
+          emits: ['oauthLogin', 'oauthLogout', 'saved'],
           template: `<div data-testid="provider-edit-body-stub">
             <span data-testid="stub-kind">{{ provider?.kind ?? "new" }}</span>
             <span data-testid="stub-oauth-present">{{ oauthPresent ? 'present' : 'absent' }}</span>
             <button data-testid="stub-oauth-login-btn" @click="$emit('oauthLogin')">login</button>
             <button data-testid="stub-oauth-logout-btn" @click="$emit('oauthLogout')">logout</button>
+            <button data-testid="stub-saved-quota-on-btn" @click="$emit('saved', { wroteApiKey: false, quotaAutoEnabled: true })">save-quota-on</button>
+            <button data-testid="stub-saved-btn" @click="$emit('saved', { wroteApiKey: false })">save</button>
           </div>`,
         },
         ProviderImportMenu: { template: '<div />' },
-        ProviderTemplatePicker: { template: '<div />' },
+        ProviderTemplatePicker: {
+          name: 'ProviderTemplatePicker',
+          props: ['providers'],
+          emits: ['select', 'custom'],
+          template: `<div><button data-testid="stub-template-select-btn" @click="$emit('select', { id: 'zai-coding-cn', name: 'Z.AI Coding CN', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', models: [], envVars: [] })">pick</button></div>`,
+        },
         ProviderImportPreviewDialog: { template: '<div />' },
-        ProviderQuickSetup: { template: '<div />' },
+        ProviderQuickSetup: {
+          name: 'ProviderQuickSetup',
+          props: ['open', 'template', 'oauthAuthorized'],
+          emits: ['save', 'cancel', 'oauthLogin'],
+          template: `<div><button data-testid="stub-quicksetup-save-btn" @click="$emit('save', { providerId: 'zai-coding-cn', data: { name: 'Z.AI Coding CN', apiKey: 'sk-plain' } })">qs-save</button></div>`,
+        },
         OAuthDialog: { template: '<div />' },
         ConfirmDialog: {
           name: 'ConfirmDialog',
@@ -519,5 +533,62 @@ describe('B-1: 编辑体凭证区 OAuth 事件接线', () => {
     await flushPromises()
 
     expect(configMock.setProvider).not.toHaveBeenCalled()
+  })
+})
+
+// ══ 新增即默认同意：quotaAutoEnabled reply → toast 提示额度显示自动开启 ══════════════
+
+describe('新增即默认同意：setProvider 返回 quotaAutoEnabled → toast（用户可见 DOM 信号）', () => {
+  it('QuickSetup 保存返回 quotaAutoEnabled → info toast 含 provider 名 + Coding Plan 提示', async () => {
+    configMock.setProvider.mockResolvedValueOnce({ quotaAutoEnabled: true })
+    wrapper = mountPage([])
+    await flushPromises()
+
+    await wrapper.find('[data-testid="stub-template-select-btn"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="stub-quicksetup-save-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(configMock.setProvider).toHaveBeenCalledWith('zai-coding-cn', expect.objectContaining({ name: 'Z.AI Coding CN' }))
+    const toasts = useToast().toasts.value
+    expect(toasts.some(t => t.type === 'info' && t.message.includes('Coding Plan') && t.message.includes('Z.AI Coding CN'))).toBe(true)
+  })
+
+  it('QuickSetup 保存无 quotaAutoEnabled（env 占位 key 等）→ 不 toast 额度提示', async () => {
+    configMock.setProvider.mockResolvedValueOnce({})
+    wrapper = mountPage([])
+    await flushPromises()
+
+    await wrapper.find('[data-testid="stub-template-select-btn"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="stub-quicksetup-save-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(useToast().toasts.value.some(t => t.message.includes('Coding Plan'))).toBe(false)
+  })
+
+  it('编辑体 @saved 带 quotaAutoEnabled → info toast 含 provider 名（展开行内保存）', async () => {
+    wrapper = mountPage([CUSTOM_P])
+    await flushPromises()
+    await wrapper.find('[role="button"][aria-expanded="false"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="stub-saved-quota-on-btn"]').trigger('click')
+    await flushPromises()
+
+    const toasts = useToast().toasts.value
+    expect(toasts.some(t => t.type === 'info' && t.message.includes('Coding Plan') && t.message.includes('My Custom'))).toBe(true)
+  })
+
+  it('编辑体 @saved 无 quotaAutoEnabled（编辑既有条目）→ 不 toast 额度提示', async () => {
+    wrapper = mountPage([CUSTOM_P])
+    await flushPromises()
+    await wrapper.find('[role="button"][aria-expanded="false"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="stub-saved-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(useToast().toasts.value.some(t => t.message.includes('Coding Plan'))).toBe(false)
   })
 })

@@ -65,7 +65,8 @@ export interface SettingsTransport {
   listProviders(): Promise<{ providers: ProviderInfo[]; scopedModels?: string[] }>
   /** 聚合模型列表主动拉取（对齐 listProviders，连接后兜底防订阅时序竞态） */
   listModels(): Promise<ModelInfo[]>
-  setProvider(id: string, data: SetProviderData): Promise<void>
+  /** 保存 provider（返回 quotaAutoEnabled：新建分支自动开启 coding-plan 额度显示写成功，供 toast） */
+  setProvider(id: string, data: SetProviderData): Promise<{ quotaAutoEnabled?: boolean }>
   /** 设置 scoped models 白名单（provider/modelId 复合串数组，序=显示序；[]=清除） */
   setScopedModels(models: string[]): Promise<string[]>
   discoverModels(req: DiscoverModelsRequest): Promise<DiscoverModelsResponse>

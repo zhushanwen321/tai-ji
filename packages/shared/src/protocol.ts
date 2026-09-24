@@ -2156,7 +2156,9 @@ export interface ServerMessageMapBase {
   // config.providerUpdated：setProvider/deleteProvider reply（settings-message-handler.ts:37/51/65）。
   // 三种 shape：setProvider 成功 { saved: true }；deleteProvider { providerId, deleted: true }；
   // setProvider 首启用 fallback { providerId }（统一并集，字段均 optional 除共性外）。
-  'config.providerUpdated': { providerId?: string; saved?: boolean; deleted?: boolean }
+  // quotaAutoEnabled：setProvider 新建分支自动开启 coding-plan 额度显示成功（quota-auto-enable.ts，
+  // 「新增即默认同意」）——前端据此 toast（与导入路径 quotaAutoEnabled 同语义：写成功才报）。
+  'config.providerUpdated': { providerId?: string; saved?: boolean; deleted?: boolean; quotaAutoEnabled?: boolean }
   // config.skillUpdated：setSkill reply（settings-message-handler.ts:86 reply { skill, success: true }）。
   'config.skillUpdated': { skill: SkillInfo; success: boolean }
   // config.skillDeleted：deleteSkill reply（settings-message-handler.ts:93 reply { skillId, success: true }）。
@@ -2507,7 +2509,7 @@ export interface ReplyPayloadMap {
   'config.setAgentDirs': void     // reply config.agentDirs
   'config.setDefaultModel': void  // reply config.defaults
   'config.setExtensionDirs': void // reply config.extensionDirs
-  'config.setProvider': void      // reply config.providerUpdated
+  'config.setProvider': ServerMessageMap['config.providerUpdated']  // payload 消费型（quotaAutoEnabled 供 toast）
   'config.toggleProviderEnabled': void  // wave4：reply config.providerUpdated（同 setProvider 模式）
   'config.removeProviderByKind': void   // wave4：reply config.providerUpdated（同 deleteProvider 模式）
   'config.setSkill': void         // reply config.skillUpdated

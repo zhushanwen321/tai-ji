@@ -38,7 +38,7 @@ function makeRecordingTransport() {
   const transport: SettingsTransport = {
     listProviders: vi.fn(async () => ({ providers: [] })),
     listModels: vi.fn(async () => []),
-    setProvider: vi.fn(async () => {}),
+    setProvider: vi.fn(async () => ({})),
     setScopedModels: vi.fn(async () => [] as string[]),
     discoverModels: vi.fn(async () => ({ success: true })),
     setSkillDirs: vi.fn(async () => {}),

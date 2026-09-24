@@ -375,8 +375,9 @@ const props = defineProps<{
   oauthSupported?: boolean
 }>()
 const emit = defineEmits<{
-  /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」） */
-  saved: [payload?: { wroteApiKey: boolean }]
+  /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」；
+   * quotaAutoEnabled=新建分支自动开启 coding-plan 额度显示写成功，父组件 toast） */
+  saved: [payload?: { wroteApiKey: boolean; quotaAutoEnabled?: boolean }]
   cancel: []
   /** dirty 状态变化（true=有未保存改动）。父组件用于展开切换守卫 */
   dirtyChange: [value: boolean]
@@ -556,7 +557,7 @@ async function onSave(): Promise<void> {
   const result = await save()
   if (result.ok) {
     toastInfo(t('settings.saved'))
-    emit('saved', { wroteApiKey: result.wroteApiKey })
+    emit('saved', { wroteApiKey: result.wroteApiKey, quotaAutoEnabled: result.quotaAutoEnabled })
   }
 }
 </script>

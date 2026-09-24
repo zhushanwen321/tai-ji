@@ -203,7 +203,7 @@ const toastStub: SettingsToast = {
 
 // ── transport / platform stub（core 模块级单例注入）──
 
-const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => undefined)
+const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({}))
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
 

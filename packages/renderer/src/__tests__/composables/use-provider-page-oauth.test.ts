@@ -36,7 +36,7 @@ const configMock = vi.hoisted(() => ({
   oauthCancel: vi.fn(async () => ({ cancelled: false })),
   oauthLogout: vi.fn(async () => ({ ok: true })),
   hasOAuth: vi.fn(async () => false),
-  setProvider: vi.fn(async () => {}),
+  setProvider: vi.fn(async () => ({})),
   checkEnvVars: vi.fn(async () => ({})),
   onProviders: vi.fn(() => () => {}),
   listProviders: vi.fn(async () => ({ providers: [] })),

@@ -272,6 +272,7 @@ import {
 } from '@taiji/ui/features/settings'
 import { useProviderPageOauth } from '@/composables/features/settings/useProviderPageOauth'
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
+import { useQuotaAutoEnableNotice } from '@/composables/features/settings/useQuotaAutoEnableNotice'
 import { useAccordionGuard } from '@/composables/features/settings/useAccordionGuard'
 import { useScopedModels } from '@/composables/features/settings/useScopedModels'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
@@ -350,13 +351,14 @@ async function onQuickSetupSave({
   data: SetProviderData
 }): Promise<void> {
   try {
-    await config.setProvider(providerId as ProviderId, data)
+    const res = await config.setProvider(providerId as ProviderId, data)
     showQuickSetup.value = false
     selectedTemplate.value = null
     // apikey 模式（plaintext 填值 / env '$VAR' 引用）保存后：被禁用的 provider 自动启用
     // （oauth/ambient 分支 data.apiKey 无值不触发；新建 runtime ensure 已启用 → no-op）
     await afterApiKeySave(providerId, Boolean(data.apiKey))
     toast.info(t('settings.provider.builtinTemplate.toastSuccess', { name: data.name ?? providerId }))
+    notifyQuotaAutoEnabled(res?.quotaAutoEnabled, data.name ?? providerId)
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
   }
@@ -498,12 +500,15 @@ const { toggling, onToggleEnabled, afterApiKeySave } = useApiKeyAutoEnable({
   providers: () => props.providers,
   setActionError: msg => { actionError.value = msg },
 })
+const { notifyQuotaAutoEnabled } = useQuotaAutoEnableNotice()
 
-/** 编辑体保存成功 → 收起展开行；本次写入了 apikey 且该 provider 被禁用 → 自动启用（afterApiKeySave） */
-async function onEditSaved(payload?: { wroteApiKey: boolean }): Promise<void> {
+/** 编辑体保存成功 → 收起展开行；本次写入了 apikey 且该 provider 被禁用 → 自动启用（afterApiKeySave）；
+ * 新建分支额度显示自动开启写成功 → toast（useQuotaAutoEnableNotice，与 QuickSetup 路径同语义） */
+async function onEditSaved(payload?: { wroteApiKey: boolean; quotaAutoEnabled?: boolean }): Promise<void> {
   const savedId = expandedId.value
   onBodySaved()
   if (payload?.wroteApiKey && savedId) await afterApiKeySave(savedId, true)
+  notifyQuotaAutoEnabled(payload?.quotaAutoEnabled, savedId ? (props.providers.find(p => p.id === savedId)?.name ?? savedId) : undefined)
 }
 
 // ── 删除/移除（wave4 IF3：按 ProviderInfo.kind 走 removeProviderByKind） ──

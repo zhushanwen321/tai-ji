@@ -31,7 +31,7 @@ const configMock = vi.hoisted(() => ({
   listBuiltinProviders: vi.fn(async () => [] as BuiltinProviderTemplate[]),
   // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
   refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-  setProvider: vi.fn(async () => {}),
+  setProvider: vi.fn(async () => ({})),
   // apikey 自动启用链路（useApiKeyAutoEnable）：写 enabledModels 白名单
   toggleProviderEnabled: vi.fn(async () => {}),
   onProviders: vi.fn(() => () => {}),

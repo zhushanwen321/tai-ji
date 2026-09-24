@@ -26,7 +26,7 @@ function makeFakeTransport(): SettingsTransport {
     listProviders: vi.fn(async () => ({ providers: [] })),
     listModels: vi.fn(async () => [] as ModelInfo[]),
     setScopedModels: vi.fn(async (_models: string[]): Promise<string[]> => []),
-    setProvider: vi.fn(async () => {}),
+    setProvider: vi.fn(async () => ({})),
     discoverModels: vi.fn(async () => ({ success: true })),
     setSkillDirs: vi.fn(async () => {}),
     setAgentDirs: vi.fn(async () => {}),
