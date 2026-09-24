@@ -131,10 +131,14 @@
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
                aggregated = 序 1 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
-               禁多 icon 重叠），面板内分段展示；absent = 无内容或锚点保护（不留死入口）。
+               禁多 icon 重叠），面板内分段展示。
+               **挂载条件刻意只门锚点保护，不吃 `leftCluster === 'absent'`**：`update:has-items` 的
+               emitter 活在本组件内，若按「无条目」卸载托盘，标志永冻 false → 切回有条目会话时
+               托盘永不重挂（e2e workflow-sidebar-sync T2 死锁回归）。无条目/零贡献的「不留死入口」
+               由托盘内部三态（逐件不渲染）与聚合按钮自身可见条件（有条目或有贡献才出）承接。
                @update:has-items = 托盘三态上抛（托盘数据面唯一实例在外壳，Composer 不建第二份）。 -->
           <ComposerTray
-            v-if="sessionId && density.slots.leftCluster !== 'absent'"
+            v-if="sessionId && !density.anchorProtected"
             :session-id="sessionId"
             :aggregated="density.slots.leftCluster === 'aggregated'"
             @update:has-items="onTrayItemsChange"
