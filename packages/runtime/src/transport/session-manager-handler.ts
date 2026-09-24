@@ -175,7 +175,7 @@ export function runClaimSweep(claims: ClaimLedger, respond: WatchRespondFn): Swe
   return result
 }
 
-/** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道 deferred 返回 null，不产生本形状 */
+/** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道三分支（fail-closed / 挂等 / 晚 respond）均返回 null，不产生本形状 */
 type SessionManagerDispatchResult =
   | SessionManagerCreateResult
   | SessionManagerSendResult
