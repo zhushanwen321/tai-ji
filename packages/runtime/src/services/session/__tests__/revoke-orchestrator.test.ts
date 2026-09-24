@@ -216,7 +216,7 @@ describe('U4 撤回编排：happy path（⑧ 信令不污染 + ⑦ 前置）', (
     expect(h.promptCalls).toEqual([`/${TAIJI_NAV_COMMAND} e2`])
     // ⑧：信令不经内核（registry 无条目——若经 submit 会留下条目/标记文本）
     expect(h.registry.entries(SID)?.active ?? []).toHaveLength(0)
-    // ④：缓存清理两入口均触达（history 既有入口 + 派生态窄接口）
+    // ④ history 缓存清理触达；派生态失效同样触达但后置⑥（时序契约见「派生态失效时序」用例）
     expect(h.evictSpy).toHaveBeenCalledWith(SID)
     expect(h.invalidateSpy).toHaveBeenCalledWith(SID)
   })
@@ -346,7 +346,7 @@ describe('③ no-mapping 双分支', () => {
     const reply = await h.revoke(`u-${UUID_B}`)
     expect(reply).toEqual({ sessionId: SID, revoked: false, error: 'no-mapping' })
     expect(h.promptCalls).toHaveLength(0)
-    // 定位失败提前 return：④ 清缓存未触达（撤回未发生）
+    // 定位失败提前 return：④ history 缓存清理未触达（撤回未发生）
     expect(h.evictSpy).not.toHaveBeenCalled()
   })
 
@@ -536,6 +536,48 @@ describe('⑧ 信令不污染（A6 单测腿：prompt 只收命令串、无标�
     // 内核无信令条目（信令不进 FIFO / 不占车道）
     const entries = h.registry.entries(SID)
     expect([...(entries?.active ?? []), ...(entries?.tombstones ?? [])].map((e) => e.id)).not.toContain(cmd)
+  })
+})
+
+describe('派生态失效时序（⑥ 树回退校验通过后触发——信令前失效 = 无效失效，回归钉）', () => {
+  it('invalidateDerivedState 晚于信令 prompt 与 ⑥ 校验读，且失效时点的树 = 撤回后树（label 锚已挂、leaf 已切）', async () => {
+    const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
+    const t = standardTree()
+    h.setTree(t.entries, t.leafId)
+
+    // pi 真实时序模拟（harness 的 prompt 副作用按 navigateTree 语义切树，getEntries 返回值
+    // 随之切换）：逐次记录 getEntries 返回的 leafId——信令前（③⑤ 定位/校验读）= 撤回前
+    // leaf，信令后（⑥ 校验读）= 撤回后 leaf，钉住「无参 getEntries 的取数时序」缺陷核心面。
+    const getEntriesLeafIds: Array<string | null> = []
+    const baseGetEntries = h.client.getEntries.getMockImplementation()!
+    h.client.getEntries.mockImplementation(async () => {
+      const msg = await baseGetEntries()
+      getEntriesLeafIds.push(msg.data.leafId)
+      return msg
+    })
+    // 失效时点的树快照（SessionRecords.invalidateDerivedState 同步触发 fire-and-forget
+    // 全量重算——重算消费调用时点的树；记录调用时点可变树状态即重算消费面）
+    const consumedTrees: Array<{ leafId: string | null; hasLabel: boolean }> = []
+    h.invalidateSpy.mockImplementation(() => {
+      consumedTrees.push({
+        leafId: h.tree.leafId,
+        hasLabel: h.tree.entries.some((e) => (e as { id?: unknown }).id === 'L-e2'),
+      })
+    })
+
+    const reply = await h.revoke('e2')
+    expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
+
+    // 取数时序：两次拉取即 ③⑤ 数据面（撤回前 leaf=e3）与 ⑥ 校验读（撤回后 leaf=L-e2），
+    // 值切换点 = prompt 副作用，构造性对齐真实 pi 的同 client 顺序处理
+    expect(getEntriesLeafIds).toEqual(['e3', 'L-e2'])
+    // 时序断言（vi 全局单调调用序）：失效晚于信令 prompt、也晚于 ⑥ 校验读（树回退确认后）
+    const invalidateOrder = h.invalidateSpy.mock.invocationCallOrder[0]!
+    expect(invalidateOrder).toBeGreaterThan(h.client.prompt.mock.invocationCallOrder[0]!)
+    expect(invalidateOrder).toBeGreaterThan(h.client.getEntries.mock.invocationCallOrder[1]!)
+    // 失效触发的重算消费撤回后树：调用时点 label 锚已挂、叶子已切（若失效先行触发，
+    // 此处消费的是撤回前树 → 全量重建被撤残影）
+    expect(consumedTrees).toEqual([{ leafId: 'L-e2', hasLabel: true }])
   })
 })
 

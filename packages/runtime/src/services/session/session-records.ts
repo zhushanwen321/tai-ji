@@ -330,8 +330,9 @@ export class SessionRecords {
    *
    * 同步立即触发一轮重算（fire-and-forget；与在途增量轮经 forceFullRebuild 标记 +
    * inflight 合并竞态安全，见 RecordEntriesCache.forceFullRebuild 注释）——撤回 reply 前
-   * 面板残影窗口收敛到本轮拉取时延。调用方 = revoke-orchestrator ④ 注入窄接口
-   * invalidateDerivedState（组合根 no-op 占位由本方法替换接线，主 agent 核销）。
+   * 面板残影窗口收敛到本轮拉取时延。调用方 = revoke-orchestrator（⑥ 树回退校验通过后
+   * 注入窄接口 invalidateDerivedState——失效触发的重算消费调用时点的树快照，信令前调用
+   * 会消费撤回前树重建出被撤残影；组合根 no-op 占位由本方法替换接线，主 agent 核销）。
    *
    * session 未激活（无缓存条目）→ no-op：冷启动路径（getSubagents/getWorkflows/
    * getPlanState 磁盘扫描）已各自接活跃路径/照实语义，无需失效。

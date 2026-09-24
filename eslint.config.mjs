@@ -717,4 +717,16 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // session-file-utils 是 session JSONL 读侧工具聚合文件（header/name/outcome/handoff/model
+  // 反向读 + sidecar 家族导出路径 + 活跃路径裁剪喂数）。trimFileEntriesToActivePath 两降级
+  // 分支补显形 warn（静默不裁剪 = 活跃路径裁剪断链不可观测）净增 ~13 行代码，统计行
+  // 513 > 500 微超即提额（pi-provider-store RT-3#5 / preset-service 同型）。提额而非 off：
+  // 保留 520 软上限告警，超限即再暴露；再拆工具家族独立文件（residue-cleanup /
+  // scan-degraded 先例）属独立重构任务。
+  {
+    files: ['packages/runtime/src/infra/pi/session-file-utils.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
 ];

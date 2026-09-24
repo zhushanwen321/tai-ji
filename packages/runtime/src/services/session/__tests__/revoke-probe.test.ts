@@ -337,7 +337,7 @@ describe('A9 workflow-running 拦截回执（探针：mock workflow 投影）', 
     expect(after).toEqual(before)
     // 拦截先于数据面：编排零 get_entries 拉取（此后仅 +1 = after 快照自身的对照读）
     expect(h.client.getEntries.mock.calls.length).toBe(getEntriesBeforeRevoke + 1)
-    // ④ 清缓存未触达（撤回未发生——history / 派生态失效均不应触发）
+    // ④ history 缓存清理与 ⑥′ 派生态失效均未触达（撤回未发生，拦截先于缓存步骤）
     expect(h.evictSpy).not.toHaveBeenCalled()
     expect(h.invalidateSpy).not.toHaveBeenCalled()
   })

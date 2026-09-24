@@ -588,12 +588,13 @@ function findLastEntryField<R>(
  *    文件最后一条 entry）保证文件尾即活跃叶子；撤回后 label 锚落文件尾，被撤子树条目按
  *    文件序先于 label，经 parentId 回溯滤除。
  *
- * 降级契约（两守卫，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为）：
- * - 末条 entry 无 string id（畸形文件尾 / 全量无 id 的 legacy 形态）→ 不裁剪；
+ * 降级契约（两守卫，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为，降级即 warn 留痕，
+ * 措辞对齐 computeActivePathEntries 的降级口径）：
+ * - 末条 entry 无 string id（畸形文件尾 / 全量无 id 的 legacy 形态）→ warn 后不裁剪；
  * - **混合缺 id**（部分 entry 无 id）：真实 pi 文件全部 entry 均带 id（append* 统一
  *   generateId，含 session_info；0.84.4 实锚），混合形态属 legacy/外部产出——树结构不可
- *   靠，不裁剪（computeActivePathEntries 的投影语义会静默滤掉无 id 条目，对字段提取
- *   = 丢数据）。
+ *   靠，warn 后不裁剪（computeActivePathEntries 的投影语义会静默滤掉无 id 条目，对字段
+ *   提取 = 丢数据）。
  *
  * 消费方：extractLatestModelFromJsonl（model binding 随树腿）、plan-state-extractor
  * extractPlanStateFromSessionFile（冷启动腿）。增量/窗口切片语义（链在集合边界终止是正常
@@ -604,7 +605,21 @@ export function trimFileEntriesToActivePath(entries: unknown[]): unknown[] {
   const scoped = entries.filter((e) => typeof e === 'object' && e !== null && (e as Record<string, unknown>).type !== 'session')
   const last = scoped.at(-1) as { id?: unknown } | undefined
   const leafId = typeof last?.id === 'string' ? last.id : undefined
-  if (leafId === undefined || scoped.some((e) => typeof (e as { id?: unknown }).id !== 'string')) return scoped
+  if (leafId === undefined) {
+    // 降级即显形（静默不裁剪 = 活跃路径裁剪断链不可观测——被撤分支照常命中无信号）
+    console.warn(
+      `[session-file-utils] trimFileEntriesToActivePath: last of ${scoped.length} entries has no string id`
+      + ` — skipping active-path trim (malformed file tail or legacy id-less entries; showing full set)`,
+    )
+    return scoped
+  }
+  if (scoped.some((e) => typeof (e as { id?: unknown }).id !== 'string')) {
+    console.warn(
+      `[session-file-utils] trimFileEntriesToActivePath: ${scoped.length} entries with mixed missing ids`
+      + ` (valid pi files tag every entry) — skipping active-path trim (legacy/external file; showing full set)`,
+    )
+    return scoped
+  }
   return computeActivePathEntries(scoped as Array<{ id?: unknown; parentId?: unknown }>, leafId)
 }
 

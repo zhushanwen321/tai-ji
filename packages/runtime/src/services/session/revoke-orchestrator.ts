@@ -3,8 +3,9 @@
  *
  * 职责：`session.revokeMessage {sessionId, targetId}` 的领域编排——入口同步临界区（置位
  * revoking + 空闲/互斥检查）→ cancel 全部 active（D4）→ 定位 entryId（targetId 双形态
- * 分派）→ 清缓存 → 信令前校验（幂等判定 + 顺取 expectedParentId）→ sendSystemCommand
- * 触发 pi navigateTree + prompt resolve 后 get_entries 校验 → reply（D2 ⑦/D7/D8）。
+ * 分派）→ 清 history 重建缓存 → 信令前校验（幂等判定 + 顺取 expectedParentId）→
+ * sendSystemCommand 触发 pi navigateTree + prompt resolve 后 get_entries 校验 →
+ * 派生态失效（校验通过后，时序契约见④段注释）→ reply（D2 ⑦/D7/D8）。
  *
  * 关键契约（注释锚三处——hold 释放 / 末尾锚 / entry.id 集合谓词，见各 inline 注释）：
  * - revoking hold 的置位在编排最前（入口同步临界区内）、释放 = try/finally 全路径；
@@ -51,9 +52,11 @@ export interface RevokeOrchestratorDeps {
   /** history 重建缓存清理（④——Facade evictHistoryRebuildCache 既有入口，复审 F1 核实）。 */
   evictHistoryRebuildCache(sessionId: string): void
   /**
-   * 派生态失效（④——注入窄接口：plan-state 等未来状态派生视图失效。组合根以 no-op
-   * 占位实现，U6d 接线点——SessionRecords 丢 cursor 强制全量重建；U6d committed 后
-   * 替换为真实调用，主 agent 核销该接线点）。
+   * 派生态失效（⑥ 树回退校验通过后——注入窄接口：plan-state 等未来状态派生视图失效。
+   * 组合根以 no-op 占位实现，U6d 接线点——SessionRecords 丢 cursor 强制全量重建；U6d
+   * committed 后替换为真实调用，主 agent 核销该接线点）。调用时点契约：失效经
+   * SessionRecords 同步触发 fire-and-forget 全量重算，重算消费调用时点的树快照——
+   * 必须后置到树回退确认之后，信令前触发是无效失效（重建消费撤回前数据，见④段注释）。
    */
   invalidateDerivedState(sessionId: string): void
   /** 系统信令入口（⑥——MessageDispatcher.sendSystemCommand，不经 hook / 不经内核）。 */
@@ -246,9 +249,13 @@ export class RevokeOrchestrator {
       const located = locateTarget(before, targetId)
       if (!located) return { sessionId, revoked: false, error: 'no-mapping' }
 
-      // ── ④ 清缓存（history 既有入口 + 派生态注入窄接口）───────────────────────────
+      // ── ④ 清 history 重建缓存（惰性清除——下次重建时才读树，无数据时序问题）──────
+      // 派生态失效不在此触发（后置到⑥ 校验通过后，见调用点注释）：失效经 SessionRecords
+      // 同步触发 fire-and-forget 全量重算，重算消费的是调用时点的树快照——信令前调用时
+      // 树尚未回退，无参 getEntries 先于信令到达 pi（同一 client 顺序处理），返回撤回前
+      // 快照 → 全量重建派生被撤残影 + cursor 回写撤回前 leafId，信令生效后增量批
+      // 「保持基线」→ 残影永续。信令前失效 = 无效失效（时序错位缺陷的根修落点）。
       this.deps.evictHistoryRebuildCache(sessionId)
-      this.deps.invalidateDerivedState(sessionId)
 
       // ── ⑤ 信令前校验（用 nav 前数据——放⑥则恒假/恒真皆失效）──────────────────────
       const pre = walkActiveChain(before)
@@ -287,6 +294,10 @@ export class RevokeOrchestrator {
       const parentReached =
         expectedParentId === null ? post.terminalParentId === null : post.ids.has(expectedParentId)
       if (!parentReached) return { sessionId, revoked: false, error: 'nav-failed' }
+
+      // ── ⑥′ 派生态失效（树回退确认后——时序契约见④段注释）：此刻触发的全量重算
+      // 消费撤回后树，被撤派生（plan 残影等）随活跃路径裁剪收敛清除。
+      this.deps.invalidateDerivedState(sessionId)
 
       // ── ⑦ reply：revoked:true + transcript 原文（含投递裸标记，raw 不剥）──────────
       return { sessionId, revoked: true, content: located.content }
