@@ -25,13 +25,14 @@
 | # | 读方 | 义务 | 负责 | 勾销 |
 |---|------|------|------|------|
 | ① | 扩展 `reconstructPlanState`（自有读边界） | 旧 entry 无 `state` 时映射 reviewState（awaiting→reviewing / revising→revising / 无→planning\|idle 按 isActive）；reviewStateSource:'resubmit' → resumeHint:'resubmit' | U2 | ☐ |
-| ② | runtime `plan-state-extractor`（派生单点） | 同一映射在派生处归一，产出 View **恒携带 `state`**、**旧字段不透出**；断言驱动源 = `packages/shared/src/__tests__/fixtures/plan-state-entries.ts` 的 `LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS`（5 对等价契约，fixture 定契约、断言在此落位） | U3b | ☐ |
+| ② | runtime `plan-state-extractor`（派生单点） | 同一映射在派生处归一，产出 View **恒携带 `state`**、**旧字段不透出**；断言驱动源 = `packages/shared/src/__tests__/fixtures/plan-state-entries.ts` 的 `LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS`（5 对等价契约，fixture 定契约、断言在此落位） | U3b | ✅（`plan-state-extractor.ts` 归一 + `__tests__/plan-state-extractor.test.ts` 等价对断言，U3b） |
 | ③ | renderer 读侧兜底映射（混装格） | `state ?? reviewState 映射 ?? 按 isActive 推断`（与读方①同构）——覆盖「旧 runtime × 新扩展」错配格（D2/R2③），退化不双盲；derivePhase/degradedReason 的 reviewState 分支全部迁移 | U4b | ☐ |
+| ④ | runtime `session-records` `planStateEquals`（View 发布 diff 基线——**隐性消费面，清单漏项**） | D2 归一改变 View 字段域时，diff 比对维度必须同步（现 = state/resumeHint；reviewState/reviewStateSource 两行比对已删——旧字段恒缺后比对其 = 恒等，state/resumeHint 单维变化被抑制不广播，谎言 UI 族）；同类「对 View 形状敏感」的写侧 diff/快照面新增时先登记本表 | U3b（fix 轮 1 临时领土扩展） | ✅（`session-records.ts` planStateEquals + 测试迁移（session-records.test.ts / session-records-reconcile.test.ts / equivalence live-reload.test.ts），U3b fix 轮 1） |
 
 **附加勾销（同批登记面）**：
 - U2：`prompts.ts:138` 注释「PlanReviewDecision 收敛为 'approve' | 'revise'」随 D3 加员过时（现为三键值域）——同 commit 修正。
 - U4b：`useExtensionUI.ts` 的 `pickPlanFields` 白名单加 selfReview（热帧 `toExtensionUIRequest` 与冷补 `getPendingRequests` **两条入店路径**都过，契约测试覆盖两路径的 selfReview 存在性——防「切回 session 有自审行、实时挂起无」半残形态）；plan-store/useExtensionUI 头注释过时陈述（「renderer 不依赖 extension-protocol」）修正。
-- U3b：`tryTranslatePlanReviewSelect` 透传 selfReview（截断在扩展写侧——上限与截断 canonical = `review-contract.ts` 的 `PLAN_SELF_REVIEW_MAX_BYTES` / `truncateSelfReview`）。
+- U3b：`tryTranslatePlanReviewSelect` 透传 selfReview（截断在扩展写侧——上限与截断 canonical = `review-contract.ts` 的 `PLAN_SELF_REVIEW_MAX_BYTES` / `truncateSelfReview`）——✅（`event-adapter.ts` 条件落键 + `event-adapter-plan-review-marker.test.ts` 帧携带/缺席/空串/超限边界，U3b）。
 
 ## 三、状态机接线（D1 消费面）
 

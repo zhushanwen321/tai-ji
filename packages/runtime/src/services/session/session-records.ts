@@ -1003,10 +1003,17 @@ function isInReconcileDomain(cache: RecordEntriesCache): boolean {
  * subagentRecordEquals 的 diff 先例）。null 与 View 恒不等（无 entry → 有 entry 是真变化，
  * 由 applyRecordEntries 分支显式处理，本函数只管 View vs View）。
  *
- * 结构固定（shared PlanStateView 八字段），逐字段比对而非 JSON.stringify（顺序无关、
- * 无序列化抖动）；optional 字段以 undefined === undefined 参与比对（两 View 同缺某
- * optional 字段 = 相等，单缺 = 不等——「无新字段区」的差异是真实显示差异，必须 publish；
- * 旧 entry 无 reviewStateSource，两 View 同缺 = 相等，天然兼容）；
+ * 比对维度随 PlanStateView 字段域同步（plan 状态机显式化 D2 归一——本函数是 consumers.md
+ * §二④ 登记的隐性消费面，清单漏项 U3b fix 轮 1 补登）：派生归一后 View 恒携带
+ * state/resumeHint、旧字段 reviewState/reviewStateSource 恒缺——比对维度必须落在
+ * state/resumeHint 上（沿用旧字段比对 = state/resumeHint 单维变化被判「无变化」抑制
+ * session.planState 广播，谎言 UI 族回归）。
+ * 结构固定（八维逐字段比对而非 JSON.stringify——顺序无关、无序列化抖动：四必填 +
+ * state/resumeHint/skills/docs；deprecated 只读兼容位 reviewState/reviewStateSource 刻意
+ * 不比对——新派生恒缺、其语义差异已由 state/resumeHint 归一等价覆盖）；optional 字段以
+ * undefined === undefined 参与比对（两 View 同缺某 optional 字段 = 相等，单缺 = 不等——
+ * 「无新字段区」的差异是真实显示差异，必须 publish；旧 entry 派生恒有 state，两 View
+ * 同缺 resumeHint = 相等，天然兼容）；
  * skills/docs 数组逐元素比对（数组引用每轮重新派生，=== 引用比较对同值也判不等）。
  */
 function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
@@ -1014,8 +1021,8 @@ function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
   if (a.planFilePath !== b.planFilePath) return false
   if (a.requirement !== b.requirement) return false
   if (a.templateName !== b.templateName) return false
-  if (a.reviewState !== b.reviewState) return false
-  if (a.reviewStateSource !== b.reviewStateSource) return false
+  if (a.state !== b.state) return false
+  if (a.resumeHint !== b.resumeHint) return false
   if (!stringArrayEquals(a.skills, b.skills)) return false
   return planDocListEquals(a.docs, b.docs)
 }

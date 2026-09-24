@@ -351,19 +351,23 @@ describe('plan-state entry 等价（A7 静态 fixture）：live 增量折叠 ≡
     expect(live).toEqual(cold)
   })
 
-  it('新旧 schema 派生形态：旧 entry 无新字段区（optional 缺省不设键）；新 entry 三 optional 透传', () => {
-    // 旧 schema（前缀止于旧 entry，噪声 message 已被穿越）：无新字段键（D4 字面语义）
+  it('新旧 schema 派生形态：旧 entry state 归一（恒携带）+ optional 缺省不设键；新 entry skills/docs 透传 + state 归一（旧字段不透出）', () => {
+    // 旧 schema（前缀止于旧 entry，噪声 message 已被穿越）：state 恒携带（无 reviewState
+    // 且 isActive → planning，D2 读方② 归一），新字段区不设键、旧字段不透出
     const legacyOnly = scanPlanStateEntries(SEQUENCE.slice(0, 2))
     expect(legacyOnly).toEqual({
       isActive: true,
       planFilePath: '/tmp/taiji-harness/auth/plan.md',
       requirement: '重构 auth 模块',
       templateName: 'refactor',
+      state: 'planning',
     })
     expect('skills' in legacyOnly!).toBe(false)
     expect('docs' in legacyOnly!).toBe(false)
     expect('reviewState' in legacyOnly!).toBe(false)
-    // 新 schema（全量终态）：skills/docs/reviewState 逐字段透传，两路径同形
+    expect('reviewStateSource' in legacyOnly!).toBe(false)
+    // 新 schema（全量终态）：skills/docs 逐字段透传 + reviewState 归一为 state
+    //（awaiting→reviewing，旧字段不透出），两路径同形
     const cold = scanPlanStateEntries(SEQUENCE)
     expect(cold).toMatchObject({
       isActive: true,
@@ -371,8 +375,9 @@ describe('plan-state entry 等价（A7 静态 fixture）：live 增量折叠 ≡
       requirement: '重构 auth 模块',
       templateName: 'refactor',
       skills: ['tech-design', 'dev-flow'],
-      reviewState: 'awaiting',
+      state: 'reviewing',
     })
+    expect('reviewState' in cold!).toBe(false)
     expect(cold!.docs).toEqual([
       { fileName: 'design.md', absPath: '/tmp/taiji-harness/auth/design.md', sourceSkill: 'tech-design', version: 1 },
     ])

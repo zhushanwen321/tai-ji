@@ -848,9 +848,12 @@ describe('plan-state 投影（D1③④）', () => {
     expect(payload.planState).toEqual(expect.objectContaining({
       isActive: true,
       skills: ['tech-design', 'dev-flow'],
-      reviewState: 'awaiting',
+      state: 'reviewing',
       docs: [expect.objectContaining({ fileName: 'design.md', version: 1 })],
     }))
+    // D2 归一：旧字段不透出（entry reviewState:'awaiting' 归一为 state:'reviewing'）
+    expect(payload.planState).not.toHaveProperty('reviewState')
+    expect(payload.planState).not.toHaveProperty('reviewStateSource')
   })
 
   it('无 plan entry 不 publish（派生 null 且基线 null = 无变化，GUI 缺省即未激活）', async () => {
@@ -893,7 +896,7 @@ describe('plan-state 投影（D1③④）', () => {
     records.invalidateRecordEntries('s1', 'plan-state')
     await flushDebounce()
 
-    // revise：reviewState awaiting → revising（第二帧）
+    // revise：entry reviewState awaiting → revising（第二帧；D2 归一后派生 state reviewing → revising）
     client.getEntries.mockResolvedValue({
       data: { entries: [planStateEntry(fullPlanData('revising'), 'e2')], leafId: 'e2' },
     })
@@ -911,14 +914,15 @@ describe('plan-state 投影（D1③④）', () => {
 
     const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
     expect(planMsgs).toHaveLength(3)
-    expect((planMsgs[1]![1] as { payload: { planState: { reviewState: string } } }).payload.planState.reviewState).toBe('revising')
+    expect((planMsgs[1]![1] as { payload: { planState: { state: string } } }).payload.planState.state).toBe('revising')
     expect((planMsgs[2]![1] as { payload: { planState: { docs: Array<{ version: number }> } } }).payload.planState.docs[0]!.version).toBe(2)
   })
 
-  // §3.4 四触点第 3 层（发布水位）：仅 reviewStateSource 变化（其余七字段全等）必须
-  // publish——漏比对会把 source 变化判「无变化」而抑制 session.planState 广播，
-  // renderer live 更新唯一通道是 WS 帧，帧被抑制即恒渲染旧降级文案（第 3 轮审查 P1）。
-  it('仅 reviewStateSource 变化（其余七字段全等）→ 恰好 publish 一帧 session.planState', async () => {
+  // §3.4 四触点第 3 层（发布水位）：仅 reviewStateSource 变化（D2 归一为 resumeHint，
+  // 其余比对维度全等）必须 publish——漏比对会把 resumeHint 变化判「无变化」而抑制
+  // session.planState 广播，renderer live 更新唯一通道是 WS 帧，帧被抑制即恒渲染旧降级
+  // 文案（第 3 轮审查 P1）。
+  it('仅 reviewStateSource→resumeHint 归一维度变化（其余维度全等）→ 恰好 publish 一帧 session.planState', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     // 首拉基线：awaiting 且无 source（旧 entry 形态，undefined 缺省）
@@ -941,7 +945,7 @@ describe('plan-state 投影（D1③④）', () => {
 
     const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
     expect(planMsgs).toHaveLength(2)
-    expect((planMsgs[1]![1] as { payload: { planState: { reviewStateSource?: string } } }).payload.planState.reviewStateSource).toBe('resubmit')
+    expect((planMsgs[1]![1] as { payload: { planState: { resumeHint?: string } } }).payload.planState.resumeHint).toBe('resubmit')
   })
 
   it('reset entry：isActive=false 且 docs 保留仍 publish（产物 tab 回看驱动，与 isActive 解耦）', async () => {
@@ -987,7 +991,8 @@ describe('plan-state 投影（D1③④）', () => {
       })
       const view = await records.getPlanState('s1')
       expect(view.isActive).toBe(true)
-      expect(view.reviewState).toBe('awaiting')
+      expect(view.state).toBe('reviewing')
+      expect('reviewState' in view).toBe(false)
       expect(view.docs).toEqual([expect.objectContaining({ fileName: 'design.md', version: 1 })])
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
