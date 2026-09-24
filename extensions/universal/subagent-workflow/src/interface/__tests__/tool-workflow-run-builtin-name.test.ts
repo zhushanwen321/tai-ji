@@ -19,6 +19,9 @@
  *
  * mock 策略：lifecycle 深路径 stub（runWorkflow/abortRun 为 vi.fn——不起真 Worker，
  * 只验证 run 启动面的脚本解析与 spec 组装）。框架：vitest（禁 node:test）。
+ *
+ * 另承载：run 启动文案 / abort 转移文案的全文锚定（文末两个 describe，第四轮
+ * 架构审查 Strong 项）。
  */
 import { mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,9 +36,12 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
 }));
 
 // 被 mock 的模块——import 路径与被测源文件（tool-workflow.ts 深路径 import）一致
-import { runWorkflow } from "@zhushanwen/subagent-core/orchestration/lifecycle.ts";
+import { runWorkflow, abortRun } from "@zhushanwen/subagent-core/orchestration/lifecycle.ts";
 import { actionRun } from "../tool-workflow.ts";
+import { registerWorkflowTool } from "../tool-workflow.ts";
+import { Budget, Trace, WorkflowRun } from "@zhushanwen/subagent-core";
 import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
+import type { ReentryGuardRef } from "../reentry-guard.ts";
 
 // ── fixture：可用 workflow 脚本（@pi-meta 新格式，无参数声明） ──
 
@@ -220,5 +226,141 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
   it("fixture 卫生断言：fixture 目录无其他 .js 泄漏（避免 discoverWorkflows 误扫）", () => {
     const projectDir = join(fixtureDir, "ws", ".pi", "workflows");
     expect(readdirSync(projectDir).filter((f) => f.endsWith(".js"))).toEqual(["chain.js"]);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// LLM 直接消费文案全文锚定（第四轮架构审查 Strong 项）。
+//
+// run 启动文案（防轮询段）与 abort 转移文案此前零锚定——重构/顺手清理改写无红灯。
+// 本节逐字锁 LLM 看到的 content[0].text（期望值从 tool-workflow.ts 实现逐字复制）。
+// abort 的终态语义（done/aborted 由 lifecycle transition 落位）归 core lifecycle
+// 测试；此处 mock abortRun 仅落位 state（actionAbort 从 run 对象读转移前后状态
+// 拼接文案的真实行为面不变）。captureTool/makeRun 范式同 tool-workflow-status.test.ts。
+// ══════════════════════════════════════════════════════════════
+
+describe("run 启动文案全文锚定（LLM 可见文本锁）", () => {
+  /** fake registry：getPath 命中 demo script（无参数声明——平铺检测跳过）。 */
+  function demoRegistry(): Record<string, unknown> {
+    const demo = makeScript("demo", "/abs/demo.js");
+    return {
+      get: vi.fn().mockResolvedValue(undefined),
+      getPath: vi.fn().mockResolvedValue(demo),
+      loadAll: vi.fn().mockResolvedValue([demo]),
+    };
+  }
+
+  it("含 slug → 'name · slug (runId)' + 防轮询段（逐字 toBe）", async () => {
+    const result = await actionRun(
+      { action: "run", name: "/abs/demo.js", slug: "tri-review" } as never,
+      makeDeps(demoRegistry()) as never,
+      undefined,
+    );
+    // runId 来自 beforeEach 的 runWorkflow mockResolvedValue("run-id-1")
+    expect(result.content[0]?.text).toBe(
+      "Started workflow 'demo' · tri-review (run-id-1). Running in background — DO NOT bash sleep or poll status; results are auto-delivered via notifyDone.",
+    );
+  });
+
+  it("不含 slug → 'name (runId)' 无 · 段（逐字 toBe）", async () => {
+    const result = await actionRun(
+      { action: "run", name: "/abs/demo.js" } as never,
+      makeDeps(demoRegistry()) as never,
+      undefined,
+    );
+    expect(result.content[0]?.text).toBe(
+      "Started workflow 'demo' (run-id-1). Running in background — DO NOT bash sleep or poll status; results are auto-delivered via notifyDone.",
+    );
+  });
+});
+
+describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
+  interface AbortResult {
+    content: Array<{ type: string; text: string }>;
+    details: Record<string, unknown> | undefined;
+  }
+
+  interface WorkflowCapturedTool {
+    name: string;
+    execute: (
+      toolCallId: string,
+      params: Record<string, unknown>,
+      signal: AbortSignal | undefined,
+      onUpdate: unknown,
+      ctx: unknown,
+    ) => Promise<AbortResult>;
+  }
+
+  /** 注册层黑盒（actionAbort 未导出，经 execute 唯一入口；范式同 status 测试）。 */
+  function captureTool(runs: Map<string, WorkflowRun>): WorkflowCapturedTool {
+    const deps = {
+      runs,
+      // abort 路径不触 store/registry（占位齐 deps 形态）
+      store: { stateFilePath: (runId: string) => `/state/${runId}.jsonl` },
+      registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
+    };
+    const guard: ReentryGuardRef = { isProcessing: false };
+    const tools: WorkflowCapturedTool[] = [];
+    const pi = { registerTool: (t: unknown) => tools.push(t as WorkflowCapturedTool) };
+    registerWorkflowTool(pi as never, deps as never, guard);
+    if (!tools[0] || tools[0].name !== "workflow") {
+      throw new Error("registerWorkflowTool did not register the workflow tool");
+    }
+    return tools[0];
+  }
+
+  /** 真实 WorkflowRun 聚合根（reconstruct 工厂——abort 路径只读 spec/state 投影面）。 */
+  function makeRun(runId: string, scriptName: string): WorkflowRun {
+    return WorkflowRun.reconstruct(
+      runId,
+      {
+        scriptSource: "// stub source",
+        args: {},
+        scriptName,
+        scriptPath: `/abs/${scriptName}.js`,
+      },
+      {
+        status: "running",
+        reason: undefined,
+        budget: new Budget(),
+        calls: new Map(),
+        trace: new Trace(),
+        errorLogs: [],
+        error: undefined,
+      },
+      { startedAt: "2026-01-01T00:00:00.000Z" },
+    );
+  }
+
+  /** mock abortRun 落位终态（模拟 lifecycle transition 语义：status=done + 可选 reason）。 */
+  function stubAbortTransition(opts: { reason?: string }): void {
+    vi.mocked(abortRun).mockReset();
+    vi.mocked(abortRun).mockImplementation(async (runId, deps) => {
+      const run = deps.runs.get(runId);
+      if (run) {
+        run.state.status = "done";
+        run.state.reason = opts.reason;
+      }
+    });
+  }
+
+  it("running run → abort → 'running → done (aborted)'（reason 后缀拼接形态）", async () => {
+    stubAbortTransition({ reason: "aborted" });
+    const run = makeRun("wf-1719500000000-a1b2c3", "demo-wf");
+    const tool = captureTool(new Map([[run.runId, run]]));
+
+    const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
+    expect(r.content[0]?.text).toBe("Workflow 'demo-wf' (wf-1719500000000-a1b2c3): running → done (aborted)");
+    expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done", reason: "aborted" });
+  });
+
+  it("无 reason → 转移段无后缀（reasonSuffix 条件拼接）", async () => {
+    stubAbortTransition({ reason: undefined });
+    const run = makeRun("wf-1719600000000-z9y8x7", "cleanup-wf");
+    const tool = captureTool(new Map([[run.runId, run]]));
+
+    const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
+    expect(r.content[0]?.text).toBe("Workflow 'cleanup-wf' (wf-1719600000000-z9y8x7): running → done");
+    expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done" });
   });
 });

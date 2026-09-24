@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { ListHandlerResult } from "@zhushanwen/subagent-core";
+import type { ListHandlerResult, StartHandlerResult } from "@zhushanwen/subagent-core";
 import { adapter } from "../interface/subagent-actions.ts";
 import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 
@@ -54,6 +54,18 @@ function runningListResult(running: number, count: number): ListHandlerResult {
 	return { response: { running, items } };
 }
 
+/** 构造一个 start domain object（负断言用：start 无 reminder）。 */
+function startResult(): StartHandlerResult {
+	return {
+		kind: "bg",
+		subagentId: "bg-0",
+		sessionFile: undefined,
+		slug: "task-0",
+		model: undefined,
+		response: { status: "running", mode: "background", message: BG_MESSAGE },
+	};
+}
+
 describe("subagent-actions adapter list action reminder (FR-4/AC-4)", () => {
 	it("list action 返回 content 是数组且第二个 text block 含 'auto-notif' 关键词", () => {
 		// 模拟 service 调用 listHandler（不依赖 service 实例，构造 domain object 直接喂 adapter）
@@ -74,6 +86,33 @@ describe("subagent-actions adapter list action reminder (FR-4/AC-4)", () => {
 
 		expect(result.content.length).toBeGreaterThanOrEqual(2);
 		expect((result.content[1] as { text: string }).text).toMatch(/auto-notif|do not poll/i);
+	});
+});
+
+// ── list reminder 全文锚定（LLM 直接消费文本锁，第四轮架构审查 Strong 项）──
+
+describe("list reminder 全文锚定", () => {
+	// 上方 reminder describe 只断言关键词——重构/顺手清理改写全文不会红。本 describe
+	// 逐字锁 LLM 看到的第二个 text block（期望值从 subagent-actions.ts 实现逐字复制）。
+
+	it("list action 第二个 text block 逐字等于 reminder 全文（含前导 \\n\\n）", () => {
+		const result = adapter({ action: "list", domain: emptyListResult() });
+
+		expect(result.content).toHaveLength(2);
+		expect(result.content[1]).toEqual({
+			type: "text",
+			text: "\n\nReminder: Subagent completion is auto-notified via auto-injected message (turn-triggering on idle). DO NOT bash sleep or poll in a loop — there is no poll action. Use action:'list' only when you concretely need state, then continue working or stop.",
+		});
+	});
+
+	it("start action 无 reminder：第二个 text block 为空串（实现是空串形态，非省略 block）", () => {
+		// start 的防轮询提醒在 BG_MESSAGE 里（response.message），list 专属 reminder
+		// 不追加——content 恒两个 text block，非 list action 第二个为空串。
+		const result = adapter({ action: "start", domain: startResult() });
+
+		expect(result.content).toHaveLength(2);
+		expect(result.content[0].type).toBe("text");
+		expect((result.content[1] as { text: string }).text).toBe("");
 	});
 });
 
