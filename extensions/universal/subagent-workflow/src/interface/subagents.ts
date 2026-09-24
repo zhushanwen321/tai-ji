@@ -14,22 +14,16 @@ import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import { displayAgentName } from "@zhushanwen/subagent-core";
 import { messageHandler, startHandler } from "@zhushanwen/subagent-core";
+import { SUBAGENT_DIRECTIVE_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
 import { parseSubagentRpcCommand } from "./command-actions.ts";
 import type { SubagentRpcAction } from "./command-actions.ts";
 import { LIST_LIMIT } from "./list-shared.ts";
 import { createSubagentsView } from "./list-view.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-/**
- * subagent-directive custom_message 的 customType。
- *
- * 定向消息留痕载体（设计 §3.3.3）：message/start 成功派发后落主 session 的
- * custom_message entry，一 entry 双消费——
- * 1. 主 agent 上下文（custom_message 进 context，主 agent 下次 turn 可见定向对话）
- * 2. renderer 定向气泡渲染源（§3.3.3a live/reload 双链路，后续 wave 消费）
- * 字段形状是 GUI 契约，改动需与 renderer 侧同步。
- */
-export const SUBAGENT_DIRECTIVE_CUSTOM_TYPE = "subagent-directive";
+// subagent-directive customType 经 extension-protocol 单源（与 shared/runtime 消费侧
+// 同源；等值锁 = src/__tests__/contract.notify-custom-types.test.ts）。定向消息留痕
+// 载体语义见下方 emitSubagentDirective 注释。
 
 /** subagent-directive entry 的 details 形状（GUI 定向气泡渲染契约）。 */
 export interface SubagentDirectiveDetails {

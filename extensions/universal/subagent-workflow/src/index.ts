@@ -28,10 +28,7 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 // ═══ core 宿主端口接线（subagent-core 包抽离 u0-wire；实现见 src/host/pi-host.ts） ═══
 import { configureCore } from "@zhushanwen/subagent-core";
 import { configureNotifyDomain } from "@zhushanwen/subagent-core";
-import { setInFlightListener } from "@zhushanwen/subagent-core";
 import { createPiHostServices, createPiNotifyDomainPorts } from "./host/pi-host.ts";
-// [u7a D5] 壳层在途上报出口：core 状态迁移 → 本出口 → select 通道（marker 帧）→ runtime。
-import { createInFlightReporter } from "./host/inflight-reporter.ts";
 
 // ═══ 经 core barrel 消费执行域（执行运行时住 packages/subagent-core） ═══
 // [U7] 引擎列表状态文件（registry → engines.json，GUI 引擎选择器数据源）
@@ -44,6 +41,8 @@ import { syncEnginesFile } from "@zhushanwen/subagent-core";
 import { registerZcodeEngine } from "@zhushanwen/subagent-core";
 import { markAllSpawnedChildrenDead } from "@zhushanwen/subagent-core";
 import { runAndWait, type WorkflowRunResult } from "@zhushanwen/subagent-core";
+// bg-notify 送达通道 customType（notify 词表单源，与 shared/runtime/core 消费侧同源）
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
 // [engine-awareness U3/D7-④] per-turn 引擎检测编排 + before_agent_start 链尾接线
 import { setupEngineAwarenessInjector } from "./injectors/engine-awareness.ts";
 import { setupModelListInjector } from "./injectors/model-list-injector.ts";
@@ -139,13 +138,6 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // [P3 引擎接线] 登记 'zcode'（幂等同上）。D8 薄壳：vendored 定位 cli descriptor。
   registerZcodeEngine();
 
-  // [u7a D5] 在途聚合上报接线：core 状态迁移（spawn/close/arm/disarm）→ 出口回调 →
-  // 本 reporter 经 select 通道推绝对计数帧。出口为进程级单监听（在途记账本身是 pi
-  // 进程级模块状态），后注册覆盖先注册（jiti 重载幂等）；回调同步 void，不进任何
-  // 生命周期 await 链（D5 接线约束①）。ctx 由 session_start 注入（factory 阶段无 ui）。
-  const inflightReporter = createInFlightReporter();
-  setInFlightListener(inflightReporter.onInFlightChanged);
-
   // [U7b] 引擎列表在 extension 模块加载时即同步 engines.json（不等 session_start——
   // 用户体验拍板 2026-08-25：taiji 打开后激活任意 session 的第一时间（含 TUI 等价
   // 场景）GUI 引擎选择器就该有数据；session_start 处保留幂等重写兜底 jiti 双路径/
@@ -165,7 +157,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // ════════════════════════════════════════════════════════════
   registerSubagentTool(pi);
   registerSubagentsCommand(pi);
-  pi.registerMessageRenderer("subagent-bg-notify", renderBgNotifyMessage);
+  pi.registerMessageRenderer(SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, renderBgNotifyMessage);
 
   // ════════════════════════════════════════════════════════════
   //  injectors：before_agent_start 注入 <available_subagents> + <available_workflows>
@@ -186,9 +178,10 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //  状态创建（lsRef / notifiedRunIds / workerHost / registry / sessionState）、log、
   //  makeLifecycleDeps / makeDeps、7 个 pi.on handler、getWorkflowDeps 守卫 +
   //  lazyDeps 已收编 workflow-events.ts（事件族 seam，与 session-lifecycle.ts 同构；
-  //  7 个 handler 的注册相对顺序原样保留）。此处仅接线。
+  //  7 个 handler 的注册相对顺序原样保留）。此处仅接线——在途上报（createInFlightReporter
+  //  + setInFlightListener 登记与 attach/detach 驱动）同为该 seam 家内装配。
   // ════════════════════════════════════════════════════════════
-  const workflow = setupWorkflowDomain(pi, { inflightReporter });
+  const workflow = setupWorkflowDomain(pi);
 
   // ════════════════════════════════════════════════════════════
   //  [U7 + engine-awareness U3] before_agent_start：引擎感知注入（链尾注册，D7——

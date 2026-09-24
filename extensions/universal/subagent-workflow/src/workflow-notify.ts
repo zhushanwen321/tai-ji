@@ -48,11 +48,11 @@ import {
   guiComponent,
   type GuiContext,
   type GuiRenderResult,
-  guiResult,
-  isGuiCapable,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
 } from "@zhushanwen/extension-protocol";
 import { mapRunIcon, mapRunStatus } from "./interface/gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./interface/id-preview.ts";
+import { withGuiAttach } from "./interface/tool-shared.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -89,13 +89,12 @@ function runEventsJournalPath(artifactsDir: string, runId: string): string {
  */
 export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
 
-/**
- * workflow 收口通知的送达 customType。保持与账本化前一致：runtime
- * event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
- * （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
- * （COMPLETE_NOTIFY_CUSTOM_TYPES）亦按它收录——不可复用 subagent-bg-notify 通道。
- */
-const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
+// workflow 收口通知的送达 customType 经 extension-protocol 单源
+// （WORKFLOW_RESULT_CUSTOM_TYPE，与 shared/runtime/core 消费侧同源）：runtime
+// event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
+// （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
+// （COMPLETE_NOTIFY_CUSTOM_TYPES）亦按它收录——不可复用 subagent-bg-notify 通道。
+// 等值/单源锁 = src/__tests__/contract.notify-custom-types.test.ts。
 
 /**
  * notifiedRunIds 去重窗口大小。
@@ -272,7 +271,7 @@ export function notifyDone(
 
   // 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
   // 按该类型识别；迁移不改变消息类型与文案字节，只改变投递可靠性机制）
-  const details: WorkflowNotifyDetails = {
+  const baseDetails: WorkflowNotifyDetails = {
     runId,
     name,
     status: run.state.status,
@@ -285,35 +284,36 @@ export function notifyDone(
   };
   if (run.state.reason === "failed") {
     const errorCode = extractFailureErrorCode(run);
-    if (errorCode !== undefined) details.errorCode = errorCode;
+    if (errorCode !== undefined) baseDetails.errorCode = errorCode;
   }
   if (run.state.reason === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
-    details.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
+    baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
   }
   if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
-    details.artifactsDir = artifactsDir;
-    details.eventsJournalPath = eventsJournalPath;
+    baseDetails.artifactsDir = artifactsDir;
+    baseDetails.eventsJournalPath = eventsJournalPath;
   }
 
-  // GUI 协议：RPC 模式下附加结构化渲染数据
-  if (ctx && isGuiCapable(ctx)) {
+  // GUI 协议：RPC 模式下附加结构化渲染数据。attach 经 interface 层单点 withGuiAttach
+  // （第四处 GUI 点收敛，返回新对象替代就地 mutation——details 为本函数局部对象，
+  // 下游 record/sendMessage 均经返回值消费，无人依赖 mutation 副作用，字节等价）。
+  // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）；
+  // 非 RPC 模式 build 回调不执行（零构造成本）。
+  const details = withGuiAttach(baseDetails, ctx, () => {
     const reason = run.state.reason;
     const statusStr = `${run.state.status}${reason ? ` (${reason})` : ""}`;
-    // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）
     const slug = run.spec.slug;
     const label = [name, slug, runId.slice(0, ID_PREVIEW_LENGTH)]
       .filter(Boolean)
       .join(" ");
-    details.__gui__ = guiResult(
-      guiComponent("list-tree", {
-        items: [{
-          label,
-          status: mapRunStatus(statusStr),
-          icon: mapRunIcon(statusStr),
-        }],
-      }),
-    );
-  }
+    return guiComponent("list-tree", {
+      items: [{
+        label,
+        status: mapRunStatus(statusStr),
+        icon: mapRunIcon(statusStr),
+      }],
+    });
+  });
 
   const ledger = getBoundNotifyLedger();
   if (ledger) {

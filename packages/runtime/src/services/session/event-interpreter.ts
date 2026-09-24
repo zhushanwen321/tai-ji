@@ -55,6 +55,8 @@ export { ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-d
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 import type { IFileChangeDiff } from '../ports/file-change-diff.js'
 import type {
   ForceQuitSource,
@@ -1354,7 +1356,7 @@ export class EventInterpreter {
    */
   private handleSubagentBgNotify(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
-    if (payload?.customType !== 'subagent-bg-notify') return
+    if (payload?.customType !== SUBAGENT_BG_NOTIFY_CUSTOM_TYPE) return
     this.opts.onRecordEntriesInvalidated?.(this.sessionId, SUBAGENT_RECORD_CUSTOM_TYPE)
   }
 
@@ -1364,7 +1366,7 @@ export class EventInterpreter {
    */
   private handleWorkflowResult(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
-    if (payload?.customType !== 'workflow-result') return
+    if (payload?.customType !== WORKFLOW_RESULT_CUSTOM_TYPE) return
     this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
   }
 

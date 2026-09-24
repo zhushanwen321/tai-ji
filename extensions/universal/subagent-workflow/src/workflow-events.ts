@@ -18,7 +18,7 @@
  *      workflow-events-registration-order.test.ts 锁定）
  *   4. getWorkflowDeps 守卫（单一出口，discriminated union）+ lazyDeps（tool lazy 注入源）
  *
- * 组合根消费面：setupWorkflowDomain(pi, { inflightReporter }) 返回
+ * 组合根消费面：setupWorkflowDomain(pi) 返回
  * WorkflowDomainHandle（state / lazyDeps / getWorkflowDeps / isScriptRunning），
  * tool + command 注册与 pi.__workflowRun 仍留 index.ts。
  *
@@ -52,6 +52,7 @@ import { bestEffort } from "@zhushanwen/subagent-core";
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { executeNestedWorkflow, terminateRunningRuns } from "@zhushanwen/subagent-core";
+import { setInFlightListener } from "@zhushanwen/subagent-core";
 import {
   evictDoneRunsBeyondCap,
   MAX_RETAINED_DONE_RUNS,
@@ -62,9 +63,9 @@ import {
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { WorkerHostImpl } from "@zhushanwen/subagent-core";
 import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
-// [u7a D5] 在途上报出口类型（实例由组合根创建并接线 setInFlightListener，
-// 本模块只在 session_start / session_shutdown 驱动 attach/detach）。
-import type { InFlightReporter } from "./host/inflight-reporter.ts";
+// [u7a D5] 在途上报出口：实例由本 seam 创建并接线 setInFlightListener（组合根零
+// 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
+import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
 import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
 import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
@@ -273,9 +274,17 @@ export interface WorkflowDomainHandle {
  */
 export function setupWorkflowDomain(
   pi: ExtensionAPI,
-  wiring: { inflightReporter: InFlightReporter },
+  wiring: { inflightReporter?: InFlightReporter } = {},
 ): WorkflowDomainHandle {
-  const { inflightReporter } = wiring;
+  // [u7a D5] 在途聚合上报接线（自组合根 index.ts 收编）：core 状态迁移
+  // （spawn/close/arm/disarm）→ 出口回调 → reporter 经 select 通道推绝对计数帧。
+  // 出口为进程级单监听（在途记账本身是 pi 进程级模块状态），后注册覆盖先注册
+  // （jiti 重载幂等）；回调同步 void，不进任何生命周期 await 链（D5 接线约束①）。
+  // ctx 由 session_start 注入（factory 阶段无 ui）。wiring.inflightReporter 是测试
+  // 注入面（fake reporter 观察 attach/detach 驱动时点）；生产路径缺省真实创建——
+  // 组合根对实例零知识（纯管道参数已删）。
+  const inflightReporter = wiring.inflightReporter ?? createInFlightReporter();
+  setInFlightListener(inflightReporter.onInFlightChanged);
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
   //  factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
