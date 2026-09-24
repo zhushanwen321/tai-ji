@@ -66,11 +66,14 @@ for (const key of Object.keys(args)) {
     throw new Error(`未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
   }
 }
-const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base : "main";
+const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base.trim() : "main";
 // 上界 50：每轮 cr-fix 产生 ~2 条 report（逐轮 + 每 attempt 汇总），引擎 256 条/run
-// 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）
-const maxRounds =
-  typeof args.maxRounds === "number" && args.maxRounds >= 1 ? Math.min(50, Math.floor(args.maxRounds)) : 10;
+// 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）。
+// 显式非法值（非数字/<1）fail-fast 不静默回落默认——与拼错键 fail-fast 同姿态
+if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
+  throw new Error(`参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）——0/负数/非数字不静默回落默认 10`);
+}
+const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
 const reviewers = Array.isArray(args.reviewers)
   ? (args.reviewers as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "")
   : [];
@@ -166,7 +169,14 @@ async function dirtyWorktree(): Promise<string> {
     .split("\n")
     .map((s) => s.trimEnd())
     .filter(Boolean)
-    .filter((line) => !line.slice(3).trim().replace(/^"|"$/g, "").startsWith(".review/"))
+    // rename 行（R  old -> new）：过滤判据看新路径——slice(3) 拿到的是 "old -> new"，
+    // 不剥箭头会让「rename 进 .review/」的行漏过滤（pi 版同构同步）
+    .filter((line) => {
+      let p = line.slice(3).trim().replace(/^"|"$/g, "");
+      const arrow = p.indexOf(" -> ");
+      if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
+      return !p.startsWith(".review/");
+    })
     .join("\n");
 }
 
@@ -567,7 +577,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     }));
     if ((terminated === "converged" || terminated === "clean") && disputedRecs.length > 0) {
       terminated = "needs-human";
-      message += `；${disputedRecs.length} 条 fixer 申述待人工裁决（${disputedRecs.map((i) => i.id).join("、")}），反证见 result.disputed`;
+      message += `；${disputedRecs.length} 条 fixer 申述待人工裁决（${disputedRecs.map((i) => i.id).join("、")}），反证随 failed 终态 error 的申述清单带出`;
     }
     const remaining = issues
       .filter((i) => i.status === "open" || i.status === "regressed")
@@ -829,11 +839,16 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       }
     }
 
-    // deferred 条目跨轮保留（escalate 复活通道的对象面）：deferred 是有意退出修复队列的
-    // 条目，不要求聚合覆盖（不走「漏报 WARN」语义）——直接并入台账，等待 reviewer 对
-    // 注入清单申报 escalate。聚合重报不复活（L1/L2 合并点已禁），唯一入口 = escalate 申报。
+    // deferred/disputed 条目跨轮保留：deferred 是有意退出修复队列的条目（escalate 复活
+    // 通道的对象面），disputed 是待人工裁决的申述——两者都不要求聚合覆盖（不走「漏报
+    // WARN」语义），直接并入台账：deferred 等 reviewer 对注入清单申报 escalate（唯一
+    // 复活入口，聚合重报不复活，L1/L2 合并点已禁），disputed 等 finish() 收集升
+    // needs-human（多轮申述不因下轮聚合漏报蒸发，也不回修复队列——active 过滤自然排除）。
+    // 聚合已并入同 id 条目时跳过（L1/L2 合并点会把重报条目按原状态返回 nextIssues，防双份）。
     for (const old of issues) {
-      if (old.status === "deferred") nextIssues.push(old);
+      if (old.status !== "deferred" && old.status !== "disputed") continue;
+      if (nextIssues.some((i) => i.id === old.id)) continue;
+      nextIssues.push(old);
     }
 
     for (const v of verdicts) {
@@ -1465,11 +1480,17 @@ await step("cr-fix", async () => {
     }
     // STUCK 集：人工接管双分支
     const reportRef = last.aggregatedFile || last.runDir;
+    const disputedDetail = (last.disputed ?? [])
+      .map((d) => `- ${d.id} [${d.severity}] ${d.title}\n  反证: ${(d.evidence || "(无)").replace(/\n/g, " ")}`)
+      .join("\n");
     throw new Error(
       `cr-fix 终态 ${last.terminated}：读 ${reportRef}\n` +
       `处置分支：① 判定为 reviewer 误报 → 重新发起本 workflow 并带 skipSteps 含 "cr-fix"（人工接管，终态逐项披露）；` +
       `② 真问题 → 修复 commit 后重新发起（cr-fix 整体重跑，已 fix 的问题不会再被报出，通常 1-2 轮收敛）。` +
-      `needs-human 时先按 result.disputed 反证逐项裁决。nested message：${last.message}`,
+      (disputedDetail
+        ? `\nneeds-human 申述清单（逐项裁决：真问题修复 commit 后重跑，误报带 skipSteps 含 "cr-fix" 接管）：\n${disputedDetail}`
+        : `needs-human 时先按 error 中申述清单逐项裁决。`) +
+      `\nnested message：${last.message}`,
     );
   }
 });
@@ -1583,9 +1604,11 @@ await step("final-gates", async () => {
       const marker = await readPremergeMarker();
       gates.coverage = cov?.verdict ?? "pass";
       gates.metrics = met?.verdict ?? "pass";
-      gates.premerge = marker ?? "PASS";
-      if (gates.premerge !== "PASS") {
-        throw new Error(`final-gates：pre-merge marker result=${gates.premerge}（非 PASS）`);
+      // marker 读取失败不推翻 gate 判定（pre-merge exit 0 才走到这里，是权威），但披露
+      // 不伪造 PASS——标注未读到；只有读到的真实非 PASS 值才拦
+      gates.premerge = marker !== null ? marker : "PASS（marker 未读到，以 pre-merge exit 0 为准）";
+      if (marker !== null && marker !== "PASS") {
+        throw new Error(`final-gates：pre-merge marker result=${marker}（非 PASS）`);
       }
       const pct = coveragePctOf(cov);
       log(`[final-gates] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics} premerge=${gates.premerge}`);
@@ -1618,7 +1641,7 @@ const summaryLines = [
   `# PR lifecycle：${fail ? "failed" : "awaiting-push"}`,
   "",
   fail
-    ? `- failedStep: **${fail.step}**`
+    ? `- failedStep: **${fail.step}**${prUrl ? `\n- prUrl: ${prUrl}（PR 已开，处置后重跑 pr-submit 幂等更新）` : ""}`
     : `- prUrl: ${prUrl ?? "（未知）"}\n- cr-fix: ${crFixTerminated ?? "（未执行）"}\n- simplify: ${simplifySummary ?? "（未执行）"}\n- gates: coverage=${gates.coverage} / metrics=${gates.metrics} / premerge=${gates.premerge}`,
   skippedSteps.length ? `- skippedSteps:\n${skippedSteps.map((s) => `  - ${s.step}: ${s.reason}`).join("\n")}` : "- skippedSteps: 无",
   fail ? `\n> ${fail.error}` : "\n> push 需用户授权：主 agent 披露上述结果并请求授权后执行 `git push github HEAD:<branch> --force-with-lease`",
@@ -1638,8 +1661,10 @@ if (fail) {
     status: "failed" as const,
     failedStep: fail.step,
     error: fail.error,
+    // pr-submit 已成功后才失败时 PR 信息不丢（重跑 pr-submit 幂等更新既有 PR，不会重复开）
+    ...(prUrl ? { prUrl } : {}),
     skippedSteps,
-    recovery: `处置后重新发起本 workflow（CreateWorkflow path 指向 .agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts）；已人工接管的 step 在 args.skipSteps 中跳过。run 被中断（非 failed）时优先 ResumeWorkflowRun。`,
+    recovery: `处置后重新发起本 workflow（CreateWorkflow path 指向 .agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts）；已人工接管的 step 在 args.skipSteps 中跳过。run 被中断（非 failed）时优先 ResumeWorkflowRun。${prUrl ? `PR 已开（${prUrl}），重新发起时 pr-submit 幂等更新既有 PR。` : ""}`,
   };
 }
 return {
