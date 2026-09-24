@@ -13,12 +13,7 @@
 // content（JSON 字符串）给 LLM，details（SubagentToolResult）给 renderResult，同源同处生成。
 
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import {
-  guiComponent,
-  type GuiContext,
-  guiResult,
-  isGuiCapable,
-} from "@zhushanwen/extension-protocol";
+import { guiComponent, type GuiContext } from "@zhushanwen/extension-protocol";
 
 import type {
   CancelHandlerResult,
@@ -31,6 +26,7 @@ import type {
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { withGuiAttach } from "./tool-shared.ts";
 
 // ============================================================
 // 渲染层常量 / 类型（pi TUI 渲染族，按设计留壳）
@@ -44,8 +40,9 @@ function assertNever(value: never): string {
 /**
  * action ↔ domain 配对的承重类型（替代三处松散 `as`）。
  * 调用方必须传匹配的 {action, domain}——TS 在调用点校验，错配编译报错。
+ * export：gui-mode-dispatch.test.ts 经 type-only import 消费（RPC/TUI 模式分发契约）。
  */
-type AdapterInput =
+export type AdapterInput =
   | { action: "start"; domain: StartHandlerResult }
   | { action: "list"; domain: ListHandlerResult }
   | { action: "cancel"; domain: CancelHandlerResult }
@@ -96,10 +93,13 @@ export function adapter(
     detailsBase = { action: "start", subagentId: d.subagentId, sessionFile: d.sessionFile ?? null, slug: d.slug, model: d.model, bgResponse: d.response };
   }
 
-  // GUI 协议：RPC 模式下附加结构化渲染数据（union 各成员已声明 __gui__?，无需强转）
-  const details: SubagentToolResult = ctx && isGuiCapable(ctx)
-    ? { ...detailsBase, __gui__: guiResult(buildGuiComponent(input, result)) }
-    : detailsBase;
+  // GUI 协议：RPC 模式下附加结构化渲染数据（attach 单点在 tool-shared；组件构造
+  // 用 input/result 而非 detailsBase——与 adapter 领域对象同源）
+  const details: SubagentToolResult = withGuiAttach(
+    detailsBase,
+    ctx,
+    () => buildGuiComponent(input, result),
+  );
 
   // [W3 修复] list action 追加 reminder text block：LLM 调 list 时提醒不要轮询。
   // reminder 作为第二个 text block（独立追加，不污染 details/JSON schema）。

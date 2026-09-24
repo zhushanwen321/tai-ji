@@ -22,10 +22,7 @@ const logger = getLogger("tool-workflow");
 import { Text } from "@earendil-works/pi-tui";
 import {
   guiComponent,
-  type GuiContext,
   type GuiRenderResult,
-  guiResult,
-  isGuiCapable,
 } from "@zhushanwen/extension-protocol";
 import { type Static, Type } from "typebox";
 
@@ -65,8 +62,9 @@ import {
   buildRunSpecFromScript,
   optionSlugSuffix,
   renderTextResult,
+  throwPrefixed,
+  withGuiAttach,
 } from "./tool-shared.ts";
-import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Parameter schema ─────────────────────────────────────────
 
@@ -187,18 +185,6 @@ export type WorkflowToolDetails =
 type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
 
 // ── GUI 协议 helpers ───────────────────────────────────────
-
-/** 为 details 附加 __gui__（RPC 模式下）。union 各成员已声明 __gui__?，无需强转。 */
-function withGui(
-  details: WorkflowToolDetails | undefined,
-  ctx?: GuiContext,
-): WorkflowToolDetails | undefined {
-  if (!details) return undefined;
-  if (ctx && isGuiCapable(ctx)) {
-    return { ...details, __gui__: guiResult(buildWorkflowGui(details)) };
-  }
-  return details;
-}
 
 /** 按 WorkflowToolDetails 构造对应的 GuiComponent。 */
 export function buildWorkflowGui(details: WorkflowToolDetails) {
@@ -328,10 +314,10 @@ export function registerWorkflowTool(
             throw new Error(`Unknown action: ${String(_exhaustive)}`);
           }
         }
-        // GUI 协议：RPC 模式下附加 __gui__ 到 details
+        // GUI 协议：RPC 模式下附加 __gui__ 到 details（attach 单点在 tool-shared）
         return {
           ...result,
-          details: withGui(result.details, toGuiCtx(_ctx)),
+          details: withGuiAttach(result.details, toGuiCtx(_ctx), buildWorkflowGui),
         };
       } finally {
         releaseReentryGuard(reentryRef);
@@ -355,9 +341,7 @@ export function registerWorkflowTool(
       );
     },
 
-    renderResult(result: { content?: Array<{ type: string; text?: string }> }, _options: unknown, _theme: Theme, _context?: unknown) {
-      return renderTextResult(result);
-    },
+    renderResult: renderTextResult,
   });
 }
 
@@ -542,9 +526,8 @@ async function actionAbort(
       details: { action: "abort", runId, status: newStatus, reason: run.state.reason },
     };
   } catch (err) {
-    // throw（W4b）：abortRun 失败改 throw（原 return isError 被 pi 丢弃），"Error: " 前缀保持
-    const msg = toErrorMessage(err);
-    throw new Error(`Error: ${msg}`);
+    // "Error: " 前缀是 abortRun 失败的既有 LLM 可见形态，保持不变
+    throwPrefixed("Error", err);
   }
 }
 

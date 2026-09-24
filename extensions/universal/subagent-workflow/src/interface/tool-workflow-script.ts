@@ -26,10 +26,7 @@ import { type Static, Type } from "typebox";
 
 import {
   guiComponent,
-  type GuiContext,
   type GuiRenderResult,
-  guiResult,
-  isGuiCapable,
 } from "@zhushanwen/extension-protocol";
 // C5②/C5⑦：创作闭环统一走 core barrel（generateWorkflowScript/saveWorkflow/
 // deleteWorkflow/lintScript 均为 barrel 导出面；深路径在 npm/vendored 形态不可达）
@@ -41,8 +38,8 @@ import {
 } from "@zhushanwen/subagent-core";
 import type { WorkflowScriptRegistry } from "@zhushanwen/subagent-core";
 import { toGuiCtx } from "./gui-mappers.ts";
-import { assertNotAborted, renderTextResult } from "./tool-shared.ts";
-import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import type { WorkflowToolResult } from "./tool-result.ts";
+import { assertNotAborted, renderTextResult, throwPrefixed, withGuiAttach } from "./tool-shared.ts";
 
 // ── Parameter schema ─────────────────────────────────────────
 
@@ -82,17 +79,13 @@ export type WorkflowScriptToolDetails =
   | { action: "save"; name: string; ok: boolean; __gui__?: GuiRenderResult }
   | { action: "delete"; name: string; ok: boolean; __gui__?: GuiRenderResult };
 
-/** Result returned by the `workflow-script` tool's execute. */
-export interface TextContent {
-  content: Array<{ type: "text"; text: string }>;
-  details: WorkflowScriptToolDetails | undefined;
-  isError?: boolean;
-}
+/** Result returned by the `workflow-script` tool's execute（公共骨架见 tool-result.ts）。 */
+export type WorkflowScriptExecuteResult = WorkflowToolResult<WorkflowScriptToolDetails | undefined>;
 
 // ── GUI 协议 helpers ───────────────────────────────────────
 
 /**
- * 为 details 附加 __gui__（RPC 模式下）。
+ * 按 WorkflowScriptToolDetails 构造 stats-line GuiComponent。
  *
  * 所有 5 个 action 都映射到 stats-line（单行统计，无复杂结构）：
  *   - generate: 显示生成的脚本名
@@ -100,20 +93,6 @@ export interface TextContent {
  *   - list: 脚本数量
  *   - save/delete: ok/warn
  */
-function withScriptGui(
-  result: TextContent,
-  ctx?: GuiContext,
-): TextContent {
-  if (!ctx || !isGuiCapable(ctx) || !result.details) return result;
-  const details = result.details;
-  // union 各成员已声明 __gui__?，spread + 补字段类型安全，无需强转
-  return {
-    ...result,
-    details: { ...details, __gui__: guiResult(buildScriptGui(details)) },
-  };
-}
-
-/** 按 WorkflowScriptToolDetails 构造 stats-line GuiComponent。 */
 export function buildScriptGui(details: WorkflowScriptToolDetails) {
   switch (details.action) {
     case "generate":
@@ -199,8 +178,8 @@ export function registerWorkflowScriptTool(
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
-    ): Promise<TextContent> {
-      let result: TextContent;
+    ): Promise<WorkflowScriptExecuteResult> {
+      let result: WorkflowScriptExecuteResult;
       switch (params.action) {
         case "generate":
           result = actionGenerate(params, signal);
@@ -222,8 +201,11 @@ export function registerWorkflowScriptTool(
           // isError:true，返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483）。
           throw new Error(`Unknown action: ${String(params.action)}`);
       }
-      // GUI 协议：RPC 模式下附加 __gui__ 到 details
-      return withScriptGui(result, toGuiCtx(ctx));
+      // GUI 协议：RPC 模式下附加 __gui__ 到 details（attach 单点在 tool-shared）
+      return {
+        ...result,
+        details: withGuiAttach(result.details, toGuiCtx(ctx), buildScriptGui),
+      };
     },
 
     renderCall(args: ScriptParams, theme: Theme, _context?: unknown) {
@@ -234,20 +216,13 @@ export function registerWorkflowScriptTool(
       return new Text(text, 0, 0);
     },
 
-    renderResult(
-      result: { content?: Array<{ type: string; text?: string }> },
-      _options: unknown,
-      _theme: Theme,
-      _context?: unknown,
-    ) {
-      return renderTextResult(result);
-    },
+    renderResult: renderTextResult,
   });
 }
 
 // ── generate action ──────────────────────────────────────────
 
-export function actionGenerate(params: ScriptParams, signal: AbortSignal | undefined): TextContent {
+export function actionGenerate(params: ScriptParams, signal: AbortSignal | undefined): WorkflowScriptExecuteResult {
   // throw（W4b）：pi 只对 execute throw 置 isError:true（返回值 isError 被丢弃）。
   // AbortSignal 是 pi tool 契约层关注——core 管线不含 signal 检查，宿主自留（C4 偏差 #4）
   assertNotAborted(signal);
@@ -281,7 +256,7 @@ export function actionGenerate(params: ScriptParams, signal: AbortSignal | undef
 async function actionLint(
   params: ScriptParams,
   registry: WorkflowScriptRegistry,
-): Promise<TextContent> {
+): Promise<WorkflowScriptExecuteResult> {
   const name = params.name;
   if (!name) {
     throw new Error("lint requires 'name' parameter");
@@ -334,7 +309,7 @@ async function loadScriptSource(
 
 // ── save action ──────────────────────────────────────────────
 
-async function actionSave(params: ScriptParams): Promise<TextContent> {
+async function actionSave(params: ScriptParams): Promise<WorkflowScriptExecuteResult> {
   const name = params.name;
   if (!name) {
     throw new Error("save requires 'name' parameter (tmp script name)");
@@ -346,10 +321,7 @@ async function actionSave(params: ScriptParams): Promise<TextContent> {
       details: { action: "save", name, ok: true },
     };
   } catch (err: unknown) {
-    // throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的 isError 被
-    // agent-loop 丢弃，agent-loop.js:453-483）——文案原样进 toolResult。
-    const msg = toErrorMessage(err);
-    throw new Error(`Save failed: ${msg}`);
+    throwPrefixed("Save failed", err);
   }
 }
 
@@ -359,7 +331,7 @@ function actionDelete(
   params: ScriptParams,
   registry: WorkflowScriptRegistry,
   isRunning: (name: string) => boolean,
-): TextContent {
+): WorkflowScriptExecuteResult {
   const name = params.name;
   if (!name) {
     throw new Error("delete requires 'name' parameter");
@@ -374,15 +346,13 @@ function actionDelete(
       details: { action: "delete", name, ok: true },
     };
   } catch (err: unknown) {
-    // throw（W4）：同 save——pi 契约只有 throw 才置 isError:true。
-    const msg = toErrorMessage(err);
-    throw new Error(`Delete failed: ${msg}`);
+    throwPrefixed("Delete failed", err);
   }
 }
 
 // ── list action ──────────────────────────────────────────────
 
-async function actionList(registry: WorkflowScriptRegistry): Promise<TextContent> {
+async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScriptExecuteResult> {
   try {
     const all = await registry.loadAll();
     const available = all.filter((wf) => wf.available);
@@ -397,9 +367,7 @@ async function actionList(registry: WorkflowScriptRegistry): Promise<TextContent
       details: { action: "list", count: available.length },
     };
   } catch (err: unknown) {
-    // throw（W4b）：list 失败改 throw（原 return isError 被 pi 丢弃），文案保持
-    const msg = toErrorMessage(err);
-    throw new Error(`List failed: ${msg}`);
+    throwPrefixed("List failed", err);
   }
 }
 
@@ -410,7 +378,7 @@ async function actionList(registry: WorkflowScriptRegistry): Promise<TextContent
  * isError:true，返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483），
  * 错误一律 throw，编译器兜底防回潮）。
  */
-function textResult(text: string): TextContent {
+function textResult(text: string): WorkflowScriptExecuteResult {
   return {
     content: [{ type: "text", text }],
     details: undefined,

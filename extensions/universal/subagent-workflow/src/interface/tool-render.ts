@@ -65,14 +65,14 @@ function getTermWidth(): number {
 // ============================================================
 
 /**
- * renderResult 的 context（SDK ToolRenderContext 的有意子集——只读 state/invalidate）。
- * SDK 实际传入更完整的 { args, toolCallId, cwd, executionStarted, argsComplete, isPartial,
- * expanded, showImages, isError, lastComponent, ... }，本组件结构兼容只取需要的字段。
+ * renderResult 的 context（SDK ToolRenderContext 的有意子集——结构兼容只声明
+ * 本组件需要的字段）。SDK 实际传入更完整的 { args, toolCallId, cwd,
+ * executionStarted, argsComplete, isPartial, expanded, showImages, isError,
+ * lastComponent, ... }。
  *
  * 注意：不使用 lastComponent。每次 renderResult 返回新 Container（参照 nicobailon）。
  */
 export interface RenderContext {
-  state: Record<string, never>;
   invalidate(): void;
 }
 
@@ -228,7 +228,10 @@ function buildCompactLines(d: SubagentToolResult, theme: ThemeLike): string[] {
 }
 
 /**
- * 展开视图行内容生成。完整 eventLog + 交付物。
+ * 展开视图行内容生成。除下列两个特例外与 compact 逐字节相同（一次性 block 无
+ * 细节可展开），测试锁字节等价：
+ * - list：compact 结果之上每 item 追加 sessionFile 路径行（renderListExpanded）
+ * - fork-from：源文件用完整路径（compact 用 basename 短标签）
  */
 function buildExpandedLines(d: SubagentToolResult, theme: ThemeLike): string[] {
   const width = getTermWidth();
@@ -236,34 +239,15 @@ function buildExpandedLines(d: SubagentToolResult, theme: ThemeLike): string[] {
   if (d.action === "list" && d.listResponse) {
     return renderListExpanded(d.listResponse, theme, width);
   }
-  if (d.action === "cancel" && d.cancelResponse) {
+  if (d.action === "fork-from" && d.forkFromResponse) {
     return [truncLine(
-      `${theme.fg("muted", "■")} ${theme.fg("dim", "cancelled ")}${theme.fg("accent", d.subagentId ?? "?")}`,
+      `${theme.fg("accent", "⑂")} ${theme.fg("dim", "forked-from ")}${theme.fg("accent", d.forkFromResponse.sourceSessionFile)}` +
+      ` ${theme.fg("dim", "→ new: ")}${theme.fg("accent", d.subagentId ?? "?")}`,
       width,
     )];
   }
-  if (d.action === "fork-from" && d.forkFromResponse) {
-    // expanded 与 compact 同形（一次性 block 无细节可展开），另附源文件完整路径行。
-    return [
-      truncLine(
-        `${theme.fg("accent", "⑂")} ${theme.fg("dim", "forked-from ")}${theme.fg("accent", d.forkFromResponse.sourceSessionFile)}` +
-        ` ${theme.fg("dim", "→ new: ")}${theme.fg("accent", d.subagentId ?? "?")}`,
-        width,
-      ),
-    ];
-  }
-
-  const lines: string[] = [];
-  // bg 占位 expanded 与 compact 同（一次性 block 无细节可展开）
-  if ("bgResponse" in d) {
-    lines.push(truncLine(
-      `${theme.fg("accent", "●")} ${theme.fg("dim", "background: ")}${theme.fg("accent", d.subagentId ?? "?")}`
-      + ` ${theme.fg("dim", "· detached")}`,
-      width,
-    ));
-    return lines;
-  }
-  return [truncLine(theme.fg("warning", "(subagent: no response)"), width)];
+  // cancel / start(bg) / fallback：expanded 与 compact 逐字节相同
+  return buildCompactLines(d, theme);
 }
 
 // ============================================================

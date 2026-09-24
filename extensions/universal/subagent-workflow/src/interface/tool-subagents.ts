@@ -309,8 +309,6 @@ export function registerSubagentsTool(
       );
     },
 
-    renderResult(result: { content?: Array<{ type: string; text?: string }> }, _options: unknown, _theme: Theme, _context?: unknown) {
-      return renderTextResult(result);
-    },
+    renderResult: renderTextResult,
   });
 }

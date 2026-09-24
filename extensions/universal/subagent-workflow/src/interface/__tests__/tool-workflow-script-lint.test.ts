@@ -152,3 +152,40 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
     );
   });
 });
+
+// ── GUI attach（RPC 模式分发；attach 实现单点在 tool-shared withGuiAttach）──
+
+describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
+  /** details 的 __gui__ 投影形态（协议 GuiRenderResult 的断言子集）。 */
+  type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: Array<{ label?: string; value?: string }> } } } };
+
+  it("RPC ctx → details 附带 __gui__（lint findings → stats-line warn）", async () => {
+    const registry = makeRegistry([makeScript("no-entry-wf", NO_ENTRY_SCRIPT)]);
+    const tool = captureTool(registry);
+    const r = await tool.execute("id", { action: "lint", name: "no-entry-wf" }, undefined, undefined, {
+      mode: "rpc",
+      hasUI: true,
+    });
+    const gui = (r.details as GuiProjection).__gui__;
+    expect(gui).toBeDefined();
+    expect(gui?.component?.type).toBe("stats-line");
+    expect(gui?.component?.props?.items).toEqual([{ label: "lint", value: "1 findings", severity: "warn" }]);
+  });
+
+  it("RPC ctx + 纯文本结果（details undefined）→ details 保持 undefined", async () => {
+    const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
+    const tool = captureTool(registry);
+    const r = await tool.execute("id", { action: "lint", name: "clean-wf" }, undefined, undefined, {
+      mode: "rpc",
+      hasUI: true,
+    });
+    expect(r.details).toBeUndefined();
+  });
+
+  it("非 RPC ctx（lintCall 既有形态）→ details 无 __gui__", async () => {
+    const registry = makeRegistry([makeScript("no-entry-wf", NO_ENTRY_SCRIPT)]);
+    const tool = captureTool(registry);
+    const r = await lintCall(tool, "no-entry-wf");
+    expect((r.details as GuiProjection).__gui__).toBeUndefined();
+  });
+});

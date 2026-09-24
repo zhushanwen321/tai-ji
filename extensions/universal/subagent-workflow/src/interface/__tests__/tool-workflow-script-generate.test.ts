@@ -15,7 +15,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { actionGenerate, type ScriptParams, type TextContent, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { actionGenerate, type ScriptParams, type WorkflowScriptExecuteResult, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
 import { deleteWorkflow, saveWorkflow } from "@zhushanwen/subagent-core";
 
 // node:fs 只覆写两个写盘函数、其余保持真实——C5② 后被测链经 barrel 拉起完整 core
@@ -41,8 +41,8 @@ function gen(script: string, name = "test-wf"): ScriptParams {
   return { action: "generate", name, script } as ScriptParams;
 }
 
-/** TextContent.text 在 content[0].text。 */
-function textOf(r: TextContent): string {
+/** WorkflowScriptExecuteResult.text 在 content[0].text。 */
+function textOf(r: WorkflowScriptExecuteResult): string {
   return r.content[0]?.text ?? "";
 }
 
@@ -208,7 +208,7 @@ describe("actionSave/actionDelete error paths (W4: throw 范式)", () => {
       signal: AbortSignal | undefined,
       onUpdate: unknown,
       ctx: unknown,
-    ) => Promise<TextContent>;
+    ) => Promise<WorkflowScriptExecuteResult>;
   }
   function captureTool(): CapturedTool {
     const tools: CapturedTool[] = [];
