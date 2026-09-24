@@ -1,0 +1,25 @@
+---
+name: {{SKILL_NAME}}
+description: {{DESCRIPTION}}
+plan-exec: true
+---
+
+# {{SKILL_NAME}}（plan 模式验收 fixture 执行技能）
+
+> 本技能是 plan 模式验收（设计 plan-mode-state-machine S5）的 fixture：
+> 携带 `plan-exec: true` frontmatter 标记，使命中「用技能执行」档出现在执行方式表单。
+> 生命周期 = 独立测试项目目录（`.agents/skills/` 项目级根）内生成、验收窗结束随测试目录清理
+>（fixture-skill.mjs create/clean，S12 断言无残留）。
+
+## 执行入口
+
+用户在执行方式表单选择「用技能执行」后，agent 会 read 本文件并按以下流程执行已批准的计划：
+
+1. 读取计划文档（审批条登记的产物清单），按文档章节逐项实施。
+2. 每完成一项在对话流报进度；遇到计划未覆盖的假设先向用户确认。
+3. 全部完成后输出执行摘要（改动文件清单 + 验证结果）。
+
+## 约束
+
+- 只执行已批准的计划内容，不扩大改动面。
+- 本 fixture 仅用于验收，勿在真实工作流中引用。
