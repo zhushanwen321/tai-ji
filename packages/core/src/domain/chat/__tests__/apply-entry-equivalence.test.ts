@@ -998,7 +998,8 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     expect(stripHetero(live)).toEqual(stripHetero(replay))
     // [消息撤回 U8] id 保号（外来形态单列断言，不走共享 helper 的 u- 形态断言）：live
     // 气泡 id = 内核条目 clientUuid（外来形态为裸 uuid——保号语义优先于 u- 形态约束，
-    // store.appendUser 注释）；重放 id 为 pi uuidv7，异源不等
+    // store.appendUser 注释）；重放 id 沿用 fixture entry id（形态独立于真实 pi entryId
+    // 的 8 位 hex 口径），异源不等
     expect(live.id).toBe(foreignId)
     expect(replay.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(live.id).not.toBe(replay.id)

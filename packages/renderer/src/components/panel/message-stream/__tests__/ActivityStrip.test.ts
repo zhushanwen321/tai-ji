@@ -255,9 +255,7 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
     const hint = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
     expect(hint.exists()).toBe(true)
     // 文案 = 同键同参解析结果，不锁措辞（计数错误如把 direct/已送达计入 = 4，两侧文案即不等）。
-    // [疑似组件缺陷待修] 组件引用的 panel.message.compactingQueueChip 当前在 zh/en locale 均缺
-    // 定义（6d6ebb905 按死键清扫删除，合并后组件仍引用）——键缺失期间 mock 返回裸 key，本断言
-    // 退化为键引用一致性；键恢复后自动升级为真实计数断言
+    // locale 双侧均有真实键定义，断言解析的是真实文案而非裸 key 回退
     expect(hint.text()).toBe(t('panel.message.compactingQueueChip', { count: 2 }))
     // chip 形态：mono text-3xs + border-strong 描边（替代原副文案长句的「·」拼接）
     expect(hint.classes()).toContain('font-mono')

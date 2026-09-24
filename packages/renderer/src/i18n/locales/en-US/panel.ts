@@ -121,6 +121,9 @@ export default {
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
     compactingFlushHint: 'Will send {count} queued message(s) when done',
+    // [system-notice-rendering-upgrade U3] compacting "N queued" chip (consumed by ActivityStrip, D4;
+    // long sub-copy becomes a chip, count semantics unchanged)
+    compactingQueueChip: '{count} queued',
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',

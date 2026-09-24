@@ -12,7 +12,7 @@ export default {
   revokeDeliveredRace: 'Message was just delivered — click revoke again',
   revokeRestoreContentMissing: 'Revoked, but the original text could not be restored',
   revokeBusy: 'Generating — stop the turn to revoke',
-  revokeNoMapping: 'This message cannot be revoked',
+  revokeNoMapping: 'Message cannot be revoked. Try refreshing the conversation and retry.',
   revokeExtensionMissing: 'Revoke component not ready — restart the session',
   revokeNavFailed: 'Revoke incomplete — please retry',
   revokePiReclaimed: 'Session process was reclaimed and could not be restored — please retry',

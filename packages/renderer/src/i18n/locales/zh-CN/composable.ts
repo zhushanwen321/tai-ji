@@ -12,7 +12,7 @@ export default {
   revokeDeliveredRace: '消息刚已送达，请再次点击撤回',
   revokeRestoreContentMissing: '撤回成功，但原文恢复失败（内容缺失）',
   revokeBusy: '生成中，停止后可撤回',
-  revokeNoMapping: '该消息不支持撤回',
+  revokeNoMapping: '该消息不支持撤回，可尝试刷新对话流后重试',
   revokeExtensionMissing: '撤回组件未就绪，建议重启会话',
   revokeNavFailed: '撤回未完成，请重试',
   revokePiReclaimed: '会话进程已回收，恢复失败请重试',

@@ -120,6 +120,9 @@ export default {
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
     compactingFlushHint: '完成后自动发送 {count} 条待发消息',
+    // [system-notice-rendering-upgrade U3] 压缩中「待发 N」chip（ActivityStrip 消费，D4；
+    // 形态从副文案长句变 chip，计数口径不变）
+    compactingQueueChip: '待发 {count}',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
