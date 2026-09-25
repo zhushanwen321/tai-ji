@@ -27,10 +27,9 @@ import { textToSegments } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { composerChildStubs } from '../helpers/composer-mount'
 
-// ── mock useChat（spy 化 send / steer / followUp / compact）+ useToast ──
+// ── mock useChat（spy 化 send / followUp / compact）+ useToast ──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -53,7 +52,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   resetNewTaskFlow: vi.fn(),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
+  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
@@ -140,7 +139,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     // [D1] 占用期照常提交（内核判 lane），renderer 不再本地转 steer
     expect(chatApiMock.send).toHaveBeenCalledTimes(1)
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('补充：别忘了加测试'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     // 输入已清空（提交语义完成）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
@@ -155,7 +153,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     await pressKey(wrapper, {})
 
     expect(chatApiMock.send).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 
   it('行 4：settling ⏎ → 统一提交（不再本地 defer 入队，内核 queued 承接）', async () => {
@@ -167,7 +164,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     await pressKey(wrapper, {})
 
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('settling 中发送'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
@@ -180,7 +176,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     await pressKey(wrapper, {})
 
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('bash 忙时发送'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
@@ -195,7 +190,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     expect(chatApiMock.send).toHaveBeenCalledTimes(1)
     // useChat mock 的 send 签名 = (sid, segments)（底层 RPC 的 clientUuid 透传在 core 编排内）
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('普通消息'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 
   it('Alt+⏎ steer 路由行（generating）→ followUp（下一轮语义保留，非 steer）', async () => {
@@ -208,7 +202,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     await pressKey(wrapper, { altKey: true })
 
     expect(chatApiMock.followUp).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
@@ -230,7 +223,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     const wrapper = mountComposer()
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 })

@@ -41,15 +41,16 @@ PACKAGE_JSON = RENDERER_ROOT / 'package.json'
 
 # 豁免的 import（无需在 package.json 声明）
 BUILTIN_EXEMPT = {
-    # node 内置全集（tsup/electron external；逐个补丁式维护曾两次漏项——
-    # node:fs、node:vm 均曾误报，改为一次登记 Node.js builtin 模块全集）
+    # node 内置顶层模块全集（extract_bare_spec 剥 node: 前缀 + 截子路径后与本清单匹配；
+    # 对照源 node -e "require('module').builtinModules"——新增顶层 builtin 须同步本清单）
     'assert', 'async_hooks', 'buffer', 'child_process', 'cluster',
     'console', 'constants', 'crypto', 'dgram', 'diagnostics_channel',
     'dns', 'domain', 'events', 'fs', 'http', 'http2', 'https',
     'inspector', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
-    'punycode', 'querystring', 'readline', 'repl', 'stream',
-    'string_decoder', 'timers', 'tls', 'trace_events', 'tty', 'url',
-    'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
+    'punycode', 'querystring', 'readline', 'repl', 'sea', 'sqlite',
+    'stream', 'string_decoder', 'sys', 'test', 'timers', 'tls',
+    'trace_events', 'tty', 'url', 'util', 'v8', 'vm', 'wasi',
+    'worker_threads', 'zlib',
     # workspace 内部包
     '@taiji/shared',
 }

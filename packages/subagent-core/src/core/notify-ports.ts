@@ -7,8 +7,9 @@
 //
 // 闭包红线：本文件是 core 对上述两包的唯一替代面——下方 Delivery* 结构化类型为手工
 // 转写（与 packages/session-delivery/src/types.ts 逐字段结构兼容），禁止 import 两包
-// （D9 闭包守卫扫描对象）。结构兼容由注入点 typecheck 守护：pi 壳直传真实
-// createDelivery、拆 CountActiveResult.count 时，上游签名漂移即 typecheck 红。
+// （D9 闭包守卫扫描对象）。上游增删字段须手工同步本转写类型，漏同步由
+// extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
+// 行为锁拦截——typecheck 对删字段形态不亮红（bivariance + optional 吸收漂移）。
 //
 // 缺席语义（设计 §3.4 core_port_missing 精神：可选端口缺席是合法形态，不报错）：
 //   - 计数器缺席 → 恒 0（零活跃）：pending 门全开，缺省内聚在本端口层。
@@ -84,7 +85,9 @@ export interface DeliveryConfig {
 
 /**
  * 提交选项转写（与 session-delivery 的 DeliverySubmitOptions 消费面字段结构兼容——
- * 手工转写契约，上游增删字段须同步本类型，结构兼容由 pi-host 注入点 typecheck 守护）。
+ * 手工转写契约，上游增删字段须同步本类型，漏同步由
+ * extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
+ * 行为锁拦截——typecheck 对删字段形态不亮红）。
  */
 export interface DeliverySubmitOptions {
   /** 合批窗口判定覆盖。 */

@@ -42,7 +42,6 @@ const apiMock = vi.hoisted(() => {
     getHistory: vi.fn(() => Promise.resolve([])),
     abort: vi.fn(() => Promise.resolve()),
     compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
     // useChat subagent 定向消息转发（原 useChat-subagent-directive.test.ts 并入）
     subagentAction: vi.fn(() => Promise.resolve()),
@@ -57,7 +56,6 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getHistory: apiMock.getHistory,
     abort: apiMock.abort,
     compact: apiMock.compact,
-    steer: apiMock.steer,
     followUp: apiMock.followUp,
   },
   session: {
@@ -161,7 +159,6 @@ describe('useChat 流式状态机', () => {
     await send('s-busy', textToSegments('second'))
     // 两次都经统一提交（内核判 lane：queued/steer 由内核承接），renderer 不再本地转 steer
     expect(apiMock.submitDelivery).toHaveBeenCalledTimes(2)
-    expect(apiMock.steer).not.toHaveBeenCalled()
   })
 })
 

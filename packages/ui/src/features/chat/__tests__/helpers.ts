@@ -44,8 +44,8 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
       mode: 'incremental',
       cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
     }),
-    // [审计候选 18] finalize 判定收单阈值字段；默认取大阈值 = 静默路径不触发（等价原
-    // shouldFinalizeStreamingFence: () => false 默认——需要静默行为的用例显式覆写）
+    // [审计候选 18] finalize 判定收单阈值字段；默认取大阈值 = 静默路径不触发
+    // （需要静默行为的用例显式覆写）
     streamingFenceSilenceMs: 60_000,
     renderMermaid: vi.fn().mockResolvedValue({ svg: '' }),
     toMarkdown: vi.fn().mockReturnValue(''),

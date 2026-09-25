@@ -73,7 +73,6 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
 // ── chat / flow / api / session store mock（composer-bar-density-wiring 同范式 + btw 域）──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -105,7 +104,6 @@ vi.mock('@/api', () => ({
   project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   chat: {
     send: chatApiMock.send,
-    steer: chatApiMock.steer,
     streamSubscribe: vi.fn(() => () => {}),
     // btw-replay（M2-c 接线，chatStore 装配）：drawer 选中线时的回放腿——空快照即可
     // （本文件不验回放，只需不走失败告警路径）

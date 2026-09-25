@@ -38,7 +38,6 @@ import enPanel from '@/i18n/locales/en-US/panel'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn(() => () => {}),
 }))
 
@@ -52,7 +51,7 @@ function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
 }
 
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: apiMock.send, steer: apiMock.steer, streamSubscribe: apiMock.streamSubscribe },
+  chat: { send: apiMock.send, streamSubscribe: apiMock.streamSubscribe },
   session: {},
 }))
 // MessageStream 挂载的重依赖 composable（对齐 MessageStream.wire.test.ts 的隔离策略）

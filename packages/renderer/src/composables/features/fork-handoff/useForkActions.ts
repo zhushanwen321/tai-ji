@@ -169,8 +169,8 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
    * 无末条 assistant 时静默 no-op（无消息可 fork）。
    *
    * RPC 失败在函数内 catch + toast：⌘G 快捷键路径调用方 void 丢弃（useGlobalShortcuts），
-   * 裸 reject 成 unhandled 且用户零反馈——形态对齐 useChatViewDeps.onFork 的
-   * catch+toastError 先例（forkSessionAsk 不在此列：其调用方 handleForkSend 统一反馈）。
+   * 裸 reject 成 unhandled 且用户零反馈（forkSessionAsk 不在此列：其调用方 handleForkSend
+   * 统一反馈）。
    */
   async function forkFromLastAssistant(): Promise<void> {
     const last = lastAssistantOfFocused()

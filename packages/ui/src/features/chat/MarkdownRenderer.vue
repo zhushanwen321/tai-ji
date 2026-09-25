@@ -54,7 +54,7 @@
  * Markdown 渲染器（w6 迁 ui，deps 注入重构）。
  * - D-5 增量消费（W23）：流式渲染状态机在 useMarkdownStreaming（rAF 节流 + latest-wins 串行 +
  *   前缀段引用恒等缓存 + tail 段每帧重建 + streaming-fence 占位/finalize/粘滞 + 卸载清理）；
- *   壳未提供增量能力时回退 renderMarkdown 全量（等价旧版）
+ *   渲染模式 = deps.renderMarkdownIncremental（必填注入，无全量回退路径）
  * - 文件路径经 deps.onFileClick/openDrawer 桥接；歧义浮层选中是本组件本地编排
  *   （onAmbiguousSelect → onFileClick + openDrawer + 清浮层状态）
  * - 代码块复制是 DOM 副作用（v-html 内），ui 内本地处理（base64 解码 data-code + is-copied class）

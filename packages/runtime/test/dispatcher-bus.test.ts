@@ -333,7 +333,11 @@ describe('message-dispatcher bus integration', () => {
     expect(session.occupancy?.compacting).toBe(true)
 
     // 第二发：预检读 isCompacting=true → 拒绝（不发出第二个 RPC）
-    await expect(dispatcher.compact('s1')).rejects.toThrow('Cannot compact while compaction already running')
+    const second = dispatcher.compact('s1')
+    await expect(second).rejects.toThrow('Cannot compact while compaction already running')
+    // 锁定 error envelope code 属性（产生点 = message-dispatcher compact 预检的
+    // Object.assign(new Error(errMsg), { code: 'compact_busy' })）
+    await expect(second).rejects.toMatchObject({ code: 'compact_busy' })
     expect(compactFn).toHaveBeenCalledTimes(1)
 
     // 第一发完成：finally 复位（compacting-end）

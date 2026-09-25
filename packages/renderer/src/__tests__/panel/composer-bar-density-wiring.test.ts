@@ -70,7 +70,6 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
 // ── chat / flow / api / session store mock（composer-send-button-states 同范式）──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -91,7 +90,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
 }))
 vi.mock('@/api', () => ({
   project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
+  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },

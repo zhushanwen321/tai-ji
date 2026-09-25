@@ -686,10 +686,11 @@ export interface Message {
   customType?: string
   /** pi CustomMessage 的 display 字段透传（ADR-0048）。
    *  pi 协议层是必填 boolean：false=隐藏不渲染，true=用区别于 user message 的样式渲染。
-   *  taiji 当前只消费 false 分支（filterDisplayableMessages 按 `!== false` 过滤），
-   *  true 与 undefined 在渲染上等价（ADR-0048 决策点 3 scope 只做过滤，未实现区别样式）。
+   *  taiji 只消费 false 分支，现役消费方 = core message-turns 分组管线：display===false 的
+   *  完成通知（customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES）作 turn 边界触发器，其余
+   *  display===false 消息在分组输入透明跳过（不产出渲染项）；true 与 undefined 在渲染上
+   *  等价（ADR-0048 决策点 3 scope 只做过滤，未实现区别样式）。
    *  shared.Message 是聚合类型含非 custom 消息，故 optional——
-   *  消费侧（renderer filterDisplayableMessages）按 `display !== false` 判断：
    *  仅 false 隐藏，undefined/true 都显示（undefined 来自无 customType 的普通消息或旧数据）。 */
   display?: boolean
   /** Bash 执行结果（composer-bash-execute）。system 消息有值：实时经 message.bashResult
