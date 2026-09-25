@@ -274,6 +274,33 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
   });
 });
 
+describe("E3 降级态用户输入重提（放行语义，F-W3-1 另一半）", () => {
+  it("state=reviewing + resumeHint='resubmit'（E3 降级残留）时重调 submit-review → 照常重挂 select + resumeHint 清除（reviewing 自环降级，恢复触发权在用户的路径必须放行）", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx, pi } = setup({
+      ...activeStateWithDocs(),
+      state: "reviewing",
+      resumeHint: "resubmit",
+      selfReview: SELF_REVIEW,
+      lastSubmitReviewDocsFingerprint: "design.md:1",
+    });
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "dismiss" }));
+
+    const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
+
+    // 放行：不因降级态残留而拒绝重挂（用户点「重新提交审批」按钮 = 显式重提意图）
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    // select 应答被正常消费（链路完整走通到 decision 消费段）
+    expect(res.details).toMatchObject({ action: "review-dismissed" });
+    // 重挂落盘（倒数第二条；最后一条是 dismiss 应答的转移落盘）：reviewing 自环
+    //（状态值不变）+ resumeHint 清除（降级等待解除，清除点三处之三；persistPlanState
+    // 显式携带键，undefined 经 JSON 序列化自然消失——按值语义断言）
+    const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as Record<string, unknown>);
+    expect(entries.at(-2)).toMatchObject({ state: "reviewing" });
+    expect(entries.at(-2)?.resumeHint).toBeUndefined();
+  });
+});
+
 describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8）", () => {
   /** select mock 对齐 pi 实装 createDialogPromise 语义（rpc-mode.js:48）：signal 已 abort 首行短路 resolve undefined；挂起中 abort → resolve undefined */
   function selectHonoringSignal(ctx: { ui: { select: unknown } }): void {

@@ -8,6 +8,8 @@ vi.mock("../tool.js", () => ({
     },
   ),
   PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan", "ask_user"],
+  // E3 宿主分流（F-W3-1）依赖：与 tool.ts 实装同源的一行 env 读（受 vi.stubEnv 控制）
+  isTaijiHost: () => process.env.TAIJI_AGENT_EXT_LOG === "1",
 }));
 vi.mock("../command.js", () => ({ registerPlanCommand: vi.fn() }));
 vi.mock("../compact.js", () => ({ registerPlanEventHandlers: vi.fn() }));
@@ -44,8 +46,9 @@ function setup() {
   return { handlers, pi };
 }
 
-function makeCtx(entries: unknown[]): ExtensionContext {
+function makeCtx(entries: unknown[], mode?: string): ExtensionContext {
   return {
+    mode,
     sessionManager: {
       getSessionId: () => "test-session",
       getEntries: () => entries,
@@ -127,6 +130,69 @@ describe("session_start hook（E3：按 state 查表恢复）", () => {
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("submit-review") }),
       expect.anything(),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("taiji GUI 宿主（signal=1 + mode=rpc）reviewing → 不自动 steer 重挂（F-W3-1 审批条复活拦截），只落 resumeHint 交 degraded 按钮恢复", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { handlers, pi } = setup();
+    const ctx = makeCtx(
+      [
+        planStateEntry({
+          isActive: true,
+          planFilePath: "/p/plan.md",
+          requirement: "r",
+          templateName: "",
+          skills: [],
+          docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+          state: "reviewing",
+          selfReview: "carried conclusions",
+        }),
+      ],
+      "rpc",
+    );
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    // 审批条不自动复活：E3 不得无人值守重提审批（steer triggerTurn = 自动重提通道）
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    // 工具集收拢照常（E3 的非交互恢复职责保留）
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
+    // resumeHint 落盘：renderer degraded 分支（reviewing ∧ 无挂起）据此呈现
+    // 「审批提问已随会话重启失效 + 重新提交审批」按钮——恢复触发权归用户
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ isActive: true, state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("taiji 宿主 env 泄漏到非 rpc 形态（signal=1 + mode=tui）→ steer 照旧（与 executeSubmitReview 的 E8 分流对齐）", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { handlers, pi } = setup();
+    const ctx = makeCtx(
+      [
+        planStateEntry({
+          isActive: true,
+          planFilePath: "/p/plan.md",
+          requirement: "r",
+          templateName: "",
+          skills: [],
+          docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+          state: "reviewing",
+        }),
+      ],
+      "tui",
+    );
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("submit-review") }),
+      { deliverAs: "steer", triggerTurn: true },
     );
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",

@@ -196,8 +196,12 @@ function relativePath(fullPath: string, projectDir: string): string {
  * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
  * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
  * env 并纳入恒注入，不得沿用本名。
+ *
+ * export（F-W3-1）：index.ts E3 reviewing 恢复分支复用同一宿主信号做 GUI 分流
+ * （taiji GUI 宿主有 degraded 恢复按钮，不自动重挂审批；独立 pi 无按钮保留 steer）——
+ * 第四消费方，同帧失效约束随登记面扩展。
  */
-function isTaijiHost(): boolean {
+export function isTaijiHost(): boolean {
   return process.env.TAIJI_AGENT_EXT_LOG === "1";
 }
 
