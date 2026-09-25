@@ -9,14 +9,21 @@ import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
-// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）。
-import { getMigrationGate, setBtwCascadeOps } from './services/session/session-lifecycle.js'
+// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）；
+// subscribeSessionDeathDisposition：notify-once D5 死亡处置登记（delete/suppress 汇聚点）。
+import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition } from './services/session/session-lifecycle.js'
 // [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
 import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
-import { createCompletionBackflow } from './services/session/completion-backflow.js'
+// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡/清扫腿；
+// 词形映射与 respond 回执助手自 session-manager-handler 模块复用（映射单点）。
+import { createClaimLedger, type DeathCause } from './services/session/notify-claims.js'
+import { collectStderrTail, deliverRespondTargets, runClaimSweep } from './transport/session-manager-handler.js'
+// notify-once D5：respawn 终态命运（熔断发声 / 恢复静默）——pi-respawn 模块级订阅。
+import { onRespawnFate } from './services/session/pi-respawn.js'
+import type { SessionManagerWatchRespondPayload } from '@zhushanwen/extension-protocol'
 import { fanOutSettled } from './services/session/agent-settled-fanout.js'
 // D4（rename-session-three-modes）：session-renamed 扇出处理体（label 回写 + 整表广播）。
 import { createSessionRenamedHandler } from './services/session/session-rename-fanout.js'
@@ -290,7 +297,7 @@ function startMemoryWatermarkTimer(
 
 /**
  * sd-u5/u6 共用：组合根 agentSettledListeners 多播列表的订阅装配（add + 返回退订函数）。
- * sessionDelivery（U5 send 排队）与 completionBackflow（U6 完成回流）同一列表、同一语义。
+ * sessionDelivery（send 排队）与 notify-claims settle 兑现腿同一列表、同一语义。
  */
 function subscribeAgentSettledIn(
   listeners: Set<(sessionId: string) => void>,
@@ -452,7 +459,7 @@ async function main(): Promise<void> {
   // resolver 实例——出站帧超限的占位文案（formatTruncationNote / formatReplyOversizeMessage）
   // 从「（见 runtime 日志）」升级为携带 session 文件实路径（错误规格表「出站 reply/push 超
   // 32MB」两行的恢复指引）。闭包引用 sessionService 声明在下方（createAdapter/
-  // completionBackflow 同款「先声明后构造、调用时恒就绪」模式——publish/reply 仅发生在
+  // notify-claims 接线同款「先声明后构造、调用时恒就绪」模式——publish/reply 仅发生在
   // server.start 后，构造期无调用窗口）。解析链：活跃 session 直读内存 sessionFilePath；
   // 否则扫盘（findScannedSession）兜底冷 session。实现抛错被守卫吞掉退化为 null 占位
   // （resolvePathSafe，不打断消息流转）。
@@ -647,20 +654,157 @@ async function main(): Promise<void> {
   // sd-u5（session-delivery）：agent_settled 多播订阅列表。原 onAgentSettled 注入点是
   // flushPendingBashResults 单播（下方 createAdapter 闭包内）；扩展为多播形态——interpreter
   // 注入点仍保持单回调，回调体内先执行原单播腿再分发到本列表（delivery 内核的 settled
-  // 边沿唤醒经 sessionDelivery 装配订阅；sd-u6 完成回流检测将挂更多订阅者）。
+  // 边沿唤醒经 sessionDelivery 装配订阅；notify-once settle 兑现腿同挂本列表）。
   // 声明须在 createAdapter 之前（闭包捕获；订阅发生在 sessionService 构造之后，无时序耦合）。
   const agentSettledListeners = new Set<(sessionId: string) => void>()
 
-  // sd-u6（session-delivery）：完成回流编排（design.md §3.1 调用方 C）。子 session（agent-managed）
-  // settled / exit → 查 spawnSource+parentAgentSessionId → 经 sd-u5 注册表投父（单例 handle）。
-  // 顺序约束：exit 订阅须先于 `new SessionService` 内的 exit 清理腿（removeSessionEntry 删内存态，
-  // 按订阅序分发，本腿排前才能读到打标）；getSession/getDelivery 前向引用（createAdapter 同款模式）。
-  const completionBackflow = createCompletionBackflow({
-    getSession: (sid) => sessionService.getSession(sid),
-    subscribeAgentSettled: subscribeAgentSettledIn(agentSettledListeners),
-    subscribeSessionExit: (cb) => pm.onSessionExit(cb),
-    getSessionOutcome: (filePath) => sessionStore.extractSessionOutcome(filePath),
-    getDelivery: (parentSid) => sessionDelivery.getOrCreateDelivery(parentSid),
+  // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
+  // 职责面：respond 写回通道 / settle 兑现腿（agentSettledListeners）/ 终局死亡发声
+  //（delete·forceQuit·非 respawn 链 exit·熔断四汇聚点）/ 父死亡批量 orphan（触发器②）/
+  // TTL 清扫消费 / shutdown 非零 warn（D7b）。
+  // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
+  // `new SessionService` 的 exit 清理腿（按订阅序分发，本腿排前才能读到 session 内存态）。
+  // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
+  //
+  // watch 应答写回（D7① boolean 传导）：按发起方 parentSid 直发，true = 已写入发起方 pi 进程 stdin
+  //（非 pi 侧消费确认；语义锚见 session-manager-handler WatchRespondFn JSDoc）；
+  // client 缺失/写入失败 → false（计 respond 失败 → orphaned + undelivered 计数）。
+  const respondWatch = (parentSid: string, watchId: string, payload: SessionManagerWatchRespondPayload): boolean =>
+    sessionService.getRpcClient(parentSid)?.sendExtensionUiResponse(watchId, JSON.stringify(payload), 'select') ?? false
+
+  /** session 文件路径（respond payload optional sessionFilePath；查不到不填） */
+  const resolveSessionFile = (sid: string): string | undefined =>
+    sessionService.getSummary(sid)?.sessionFile ?? sessionService.getSession(sid)?.sessionFilePath ?? undefined
+
+  /** crash exit → respawn 终态期间的退出现场 stash（熔断发声时携回 exitCode/stderrTail/transcript）。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  speakSessionDeath 死亡发声消费 delete + onRespawnFate 'recovered' 复活分支丢弃 delete。 */
+  const pendingExitDeaths = new Map<string, { exitCode: number | null; stderrTail?: string; sessionFilePath?: string }>()
+  /** 同步 exit 链的销毁腿标记（本回调与 removeSessionEntry 同 tick；forceQuit 等异步到达的销毁不带标 → 发声）。
+   *  消费点核销（审查 unreasonable#3 同步核）：pm.onSessionExit 仅组合根本腿 + SessionService
+   *  清理腿两个订阅者（RT-4#1 逐回调隔离必达）、两侧同图同判（getSession ≡ lifecycle.get）——
+   *  view 在册 ⇒ 同 tick 的 removeSessionEntry 销毁回调必经销毁扇出消费，无 suppressedDeaths
+   *  同型滞留面；forceQuit/delete 等不经 exit 链的销毁本就不带标。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  setOnSessionDestroyed 销毁回调 exitChainLegs.delete 查过即消。 */
+  const exitChainLegs = new Set<string>()
+  /** 非终局杀静默标记（session-lifecycle 'delete'/'suppress' 处置 → 销毁回调查过即消）。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  setOnSessionDestroyed 销毁回调查过即消（suppressedDeaths.delete）。 */
+  const suppressedDeaths = new Set<string>()
+
+  // TTL 清扫消费环（D7：respondOrphaned 同步应答防孤儿 promise）。**注册先于 ClaimLedger
+  // 构造**：同周期下本环首次 due 恒早于内部自动清扫 ε（构造时点差）——组合环先跑覆盖
+  // 常相位；恰落 ε 缝隙的带 watch 转移由内部环产生时 respondOrphaned 不被消费——已知
+  // 微窗（D-16 登记），孤儿由父重启收口腿清理（分腿语义见 runClaimSweep 职责注释）。
+  // 闭包引用下方 const（首次执行在注册 +60s 后，无 TDZ 窗口）。
+  const CLAIM_SWEEP_INTERVAL_MS = 60_000
+  const claimSweepTimer = setInterval(() => {
+    runClaimSweep(claimLedger, respondWatch)
+  }, CLAIM_SWEEP_INTERVAL_MS)
+  claimSweepTimer.unref?.()
+  // @data-owner #45（data-source-registry.md）：session-manager 通知债权账本（notify-once
+  // U2）——内部 Map 族（records 主账 + bySession/byParent 索引 + settle/death/undelivered
+  // 计数器）为 runtime 内存态，唯一写入口 = ClaimLedger 方法族，空值语义与已知代价见主表 #45。
+  const claimLedger = createClaimLedger({ sweepIntervalMs: CLAIM_SWEEP_INTERVAL_MS })
+
+  /**
+   * 终局死亡发声（D5 汇聚点共用）：onSessionDeath 同 deathSeq 批终结（即时删除）→
+   * 逐 target respond（携 sessionFilePath/exitCode/stderrTail）→ clearSession 立 latch
+   *（清残留记录 + seq/undelivered 计数器——迟到 exit 腿查无记录自然静默）。
+   * 幂等：重复调用空批空转（不占 deathSeq、无二次 respond）。
+   */
+  const speakSessionDeath = (
+    sessionId: string,
+    cause: DeathCause,
+    extra: { exitCode?: number | null; stderrTail?: string; sessionFilePath?: string } = {},
+  ): void => {
+    const batch = claimLedger.onSessionDeath(sessionId, cause)
+    if (batch.terminated.length > 0) {
+      deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
+        sessionFilePath: extra.sessionFilePath ?? resolveSessionFile(sessionId),
+        ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+        ...(extra.stderrTail !== undefined ? { stderrTail: extra.stderrTail } : {}),
+      })
+    }
+    claimLedger.clearSession(sessionId)
+    pendingExitDeaths.delete(sessionId)
+  }
+
+  // settle 兑现腿（D4 锚）：injected 的 kind=claim 兑现并 respond（armed/lifetime 不动）。
+  // 非 agent-managed session 无债权记录，短路文件 I/O；outcome = session_end 终态
+  //（无 entry/null → completed，与原回流口径一致）。
+  subscribeAgentSettledIn(agentSettledListeners)((sid) => {
+    const summary = sessionService.getSummary(sid)
+    // managed 判定与 handler isOwnedBy 同源同判（SessionSummary 已投影 spawnSource/
+    // parentAgentSessionId）——session-internal 打标字段改名时此处随类型报错；原
+    // `view as {...}` 收窄读法在字段改名时静默全灭，已删。
+    const managed = summary?.spawnSource === 'agent' && summary?.parentAgentSessionId !== undefined
+    const outcomePath = managed ? summary?.sessionFile : undefined
+    const outcome = outcomePath
+      ? sessionStore.extractSessionOutcome(outcomePath)
+      : null
+    const batch = claimLedger.settle(sid, outcome)
+    if (batch.targets.length > 0) {
+      deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
+        sessionFilePath: summary?.sessionFile ?? resolveSessionFile(sid),
+      })
+    }
+  })
+
+  // exit 两腿（订阅先于 SessionService 清理腿）：
+  // ① D7 触发器②：父 pi 死亡 → 其名下未终结债权批量 orphaned + warn（只 warn 不 respond——父进程已死）；
+  // ② 终局死亡分流：session 不在内存 = respawn 链不会接管（exit 清理腿同判空早退）→ 立即发声；
+  //    否则留退出现场 stash + 同步 exit 链标记，挂 respawn 终态事件裁决（见下 onRespawnFate）。
+  pm.onSessionExit((sessionId, code, stderr) => {
+    const orphaned = claimLedger.orphanByParent(sessionId)
+    for (const r of orphaned.orphaned) {
+      console.warn(
+        `[notify-claims] claim orphaned on parent session exit — notifyId=${r.notifyId} sessionId=${r.sessionId} state=${r.state} reason=parent-exit`,
+      )
+    }
+    const view = sessionService.getSession(sessionId)
+    if (!view) {
+      speakSessionDeath(sessionId, 'exit', {
+        exitCode: code,
+        stderrTail: collectStderrTail(stderr),
+        sessionFilePath: resolveSessionFile(sessionId),
+      })
+      return
+    }
+    exitChainLegs.add(sessionId)
+    pendingExitDeaths.set(sessionId, {
+      exitCode: code,
+      stderrTail: collectStderrTail(stderr),
+      sessionFilePath: view.sessionFilePath,
+    })
+  })
+
+  // respawn 终态裁决（D5）：retry-pending = respawn 链接管（静默，claim 悬挂交 TTL）；
+  // recovered = 复活（静默，丢弃退出现场）；terminal = 熔断按不可恢复 crash 发声（携 stash）。
+  onRespawnFate((e) => {
+    if (e.fate === 'retry-pending') return
+    if (e.fate === 'terminal') {
+      speakSessionDeath(e.sessionId, 'exit', pendingExitDeaths.get(e.sessionId) ?? {})
+      return
+    }
+    pendingExitDeaths.delete(e.sessionId)
+  })
+
+  // 死亡处置汇聚点（session-lifecycle：delete 在 pm.destroySession 之前立 latch，检查点①；
+  // restore 清场 'suppress' 静默）。'delete' 即时发声销账 + clearSession（检查点①语义不动，
+  // 发声覆盖 active/scanned 两分支）；suppressedDeaths 抑制标（供随后的 removeSessionEntry
+  // 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——scanned/未找到
+  // throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated → removeSessionEntry
+  // 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
+  // 'delete' 已发声销账，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省一次空批查询）。
+  subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
+    if (disposition === 'delete') {
+      speakSessionDeath(sessionId, 'delete')
+    }
+    if (detail.hasDestroySink) {
+      suppressedDeaths.add(sessionId)
+    }
   })
 
   const createAdapter = (sessionId: string, send: (msg: import('@taiji/shared').ServerMessage) => void, cwd?: string) => {
@@ -797,7 +941,7 @@ async function main(): Promise<void> {
       // W1（fix-chat-flow-order 探针 ②）：agent_settled（run 级联结束，晚于 pi finally 的
       // bash 落盘 flush）→ dispatcher 按序发布 per-session bash 待落列（D2 双分支延迟）。
       // sd-u5 起多播化：bash flush 是第一条腿（原单播语义不变），其后分发 agentSettledListeners
-      // （delivery 内核 settled 边沿唤醒 + sd-u6 回流检测）；逐订阅者隔离 try/catch 收敛在
+      // （delivery 内核 settled 边沿唤醒 + notify-once settle 兑现）；逐订阅者隔离 try/catch 收敛在
       // fanOutSettled（agent-settled-fanout.ts，可单测——本文件 import 即执行 main() 不可直测）。
       onAgentSettled: (sid) => {
         sessionService.flushPendingBashResults(sid)
@@ -845,10 +989,11 @@ async function main(): Promise<void> {
   )
 
   // sd-u5（session-delivery）：delivery 内核的 runtime 装配（design.md §3.1 调用方 B）。
-  // sessionId 单例注册表——session-manager 的 send 排队（U5）与完成回流（U6 复用）共用；
+  // sessionId 单例注册表——session-manager 的 send 排队/create 直投与 landing 首发共用；
   // subscribeSettled 经上方 agentSettledListeners 多播（interpreter onAgentSettled 注入点的
-  // 分发腿）；port.send 的 ensureActive → prompt(streamingBehavior) → D7 置位副作用见
-  // session-delivery-registry.ts。
+  // 分发腿）；onSettledMessage = notify-once D2 受理回执锚（delivered → markInjected /
+  // rejected → 投递失败腿 disarm，claimLedger 消费）；port.send 的 ensureActive →
+  // prompt(streamingBehavior) → D7 置位副作用见 session-delivery-registry.ts。
   const sessionDelivery = createSessionDeliveryRegistry({
     getSession: (sid) => sessionService.getSession(sid),
     ensureActive: (sid) => sessionService.ensureActive(sid),
@@ -857,6 +1002,18 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
+    // notify-once D2 受理回执（P9 帧序：内核同栈于 port.send 受理回调触发，先于 settled 帧）。
+    onSettledMessage: (_sid, msg, outcome) => {
+      const meta = msg.meta
+      const notifyId = typeof meta?.notifyId === 'string' ? meta.notifyId : undefined
+      const parentSid = typeof meta?.parentSid === 'string' ? meta.parentSid : undefined
+      if (notifyId === undefined || parentSid === undefined) return
+      if (outcome === 'delivered') {
+        claimLedger.markInjected(parentSid, notifyId)
+      } else {
+        claimLedger.disarmDeliveryFailed(parentSid, notifyId)
+      }
+    },
   },
   // [A1 接线] skill 注入映射源与 dispatcher/records 共源（sessionService.skillSource
   // 晚绑定占位——下方 SkillRegistry 构造后 bind，三个注入挂点一份映射源，D7 单权威）。
@@ -864,6 +1021,20 @@ async function main(): Promise<void> {
   // session 销毁（主动删 / 进程退出 / restore 清场全部路径）→ 丢弃该 session 的 delivery
   // 队列与订阅（setOnSessionDestroyed 追加式注册，与 server 的 extension timeout 清理腿并存）。
   sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
+  // notify-once D5 销毁汇聚点（追加式列表的第二订阅者）：
+  // - 同步 exit 链腿（exitChainLegs 同步标）→ 跳过——respawn 终态事件随后裁决（stash 在挂）；
+  // - suppressedDeaths 已标（在册 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
+  //   非在册 'delete'（scanned / 冷线）无销毁回调、本分支结构性不可达——「delete 漏标
+  //   误发声」无可达面（unreasonable#3 判据修复：hasDestroySink = 在册）；唯一残留标
+  //  （adapter.detach 抛错致删除整体失败）被后续销毁消费时，对 'delete' 已清账本幂等空转无害；
+  // - 其余 = forceQuit / abort 阶梯强杀等不经 pm.onSessionExit 的收敛链（exit 事件被双层
+  //   守卫拦截）→ 汇聚点补发声 'exited'（exitCode null = 被杀无退出码，与 session.exited 协议同语义）。
+  sessionService.setOnSessionDestroyed((summary) => {
+    const sid = summary.id
+    if (exitChainLegs.delete(sid)) return
+    if (suppressedDeaths.delete(sid)) return
+    speakSessionDeath(sid, 'exit', { exitCode: null, sessionFilePath: summary.sessionFile ?? undefined })
+  })
 
   // HandoffService：fast-handoff 编排层。依赖 sessionService（create/sendMessage/abort/getHistory/getSession）
   // + server（IMessageBroker 广播）+ pm（getClient 取源 session pi 句柄）。与 GitService/FileService 同模式
@@ -1187,6 +1358,9 @@ async function main(): Promise<void> {
     // sd-u5：sessionId 单例注册表（上方 createSessionDeliveryRegistry 装配）。
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
+    // notify-once U3（偏差 D-1）：通知债权状态机透传 server → SessionManagerHandler
+    //（settle/死亡/清扫腿在上方组合根直接消费同一实例）。
+    claims: claimLedger,
     // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
     // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。
     importService,
@@ -1221,7 +1395,7 @@ async function main(): Promise<void> {
     // #3 有在途 relay 子进程（失败模式 C）。registry 由 initRelayServer（listen 后）创建，
     // 此处延迟解析；未激活（测试/降级）= 无在途子进程，方向安全（宁漏不误杀）。
     hasInflightRelayChildren: (sid) => getActiveRelayRegistry()?.hasByMainSessionId(sid) ?? false,
-    // #4 handoff 进行中。#5 delivery 内核有排队投递（completion-backflow 回流）。
+    // #4 handoff 进行中。#5 delivery 内核有排队投递（session_manager send 排队/直投在途）。
     hasHandoffInflight: (sid) => handoffService.hasInflightHandoff(sid),
     hasQueuedDeliveries: (sid) => sessionDelivery.hasDeliveryActivity(sid),
     // #6 最近被查看时间戳（undefined = 从未被查看，不豁免——0 是合法 epoch 不可当哨兵）。
@@ -1330,9 +1504,17 @@ async function main(): Promise<void> {
       shutdownStep('dispose-git-head-watcher')
       gitHeadWatcher.dispose()
       gitChangeTrigger?.dispose()
-      // sd-u6：退订完成回流（settled / exit 两腿）
-      shutdownStep('dispose-completion-backflow')
-      completionBackflow.dispose()
+      // sd-u5：ClaimLedger 收口——先读 count（D7b 非零 warn：内存账本随重启物理消失，
+      // 持久化二期根治）再停清扫环与内部定时器（顺序约束：warn 在 dispose 前读 count）。
+      shutdownStep('dispose-claim-ledger')
+      clearInterval(claimSweepTimer)
+      const unsettledClaims = claimLedger.count()
+      if (unsettledClaims > 0) {
+        console.warn(
+          `[notify-claims] runtime shutdown with ${unsettledClaims} claim record(s) still on the in-memory ledger — pending notifications lost this boot (D7b; persistent claim journal is phase 2)`,
+        )
+      }
+      claimLedger.dispose()
       // E-2 + W8：relay 优雅关停与引擎协议客户端 dispose **并行**——deinitRelayServer
       // 内部有 3s grace，串行（先 relay 后 dispose）会把引擎进程消失时间拖到 3s 之后，
       // 违反 A11「dispose 发起起算 1s 内引擎进程消失」；并行发起后 dispose 单侧上界

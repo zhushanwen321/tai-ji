@@ -8,7 +8,8 @@
  * - watch-dog 低频复核（D8 兜底层①：settled 事件丢失的恢复路径）
  * - port.send 失败 → 消息留在途、按 backoff 有限重试，达上限 settle rejected（D4 错误重试）
  * - 终态上报 per-message（ext-simplify-08 D1/B1）：onSettled 对批次内每条消息各回调
- *   一次，msg 为该条原始消息（非 composed 合批消息）；单消息批次行为不变
+ *   一次，msg 为该条原始消息（非 composed 合批消息）——additive meta（notifyId 等）
+ *   随原消息引用原样透传到回调（内核不读不改）；单消息批次行为不变
  * - sendChecked() 统一经投递循环：resolve 挂钩 port.send 受理结果（busy 时经
  *   streaming 受理入 pi 队列即回，以此确认可达）；首次受理失败即 reject（入口即拦）
  * - in-flight 防重：单 handle 至多一个 port.send 在途

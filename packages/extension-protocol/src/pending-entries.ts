@@ -100,6 +100,13 @@ export function collectActivePendingIds(entries: unknown[], opts?: CollectPendin
  * reopened → completed）——防新词落 default 被记为 completed 的误标（cancelled 同族
  * 事故先例：新枚举值漏映射静默落兜底）。
  *
+ * [notify-once D3 族映射] session-manager watch 应答的 4 个新 reason 同族接入：
+ * stopped→aborted（用户 UI 掐断含债权轮）、exited/deleted/orphaned→cancelled
+ * （终局死亡/删除/orphan 吸收态）。**不扩 MappedPendingStatus/PendingStatus 词表**——
+ * 四个新 reason 全仓零读方按 status 分流（countActiveFromEntries 只用 register−unregister
+ * 差集、notify-summary outcome 读 details 不读 entry.status），精确状态由通知正文与
+ * get_session_status 承载，高于 G2 感知线。
+ *
  * 返回值 MappedPendingStatus（本文件封闭字面量联合）：PendingStatus 枚举留在
  * pending-notifications（本包不引 extension 侧类型），本联合是其终态子集——消费方
  * 免 as 收窄直接赋值。
@@ -137,6 +144,15 @@ export function mapReasonToStatus(reason: string): MappedPendingStatus {
       return 'aborted'
     case 'reopened':
       return 'completed'
+    // ── notify-once D3 族映射（4 case，终态子集内映射，词表零扩张）──
+    case 'stopped':
+      // 用户 UI 掐断含债权轮 → 既有终态 aborted（用户干预不取消债权，精确态归正文）
+      return 'aborted'
+    case 'exited':
+    case 'deleted':
+    case 'orphaned':
+      // 终局死亡/删除/orphan 吸收态 → 既有终态 cancelled（防落 default 误标 completed）
+      return 'cancelled'
     default:
       return 'completed'
   }

@@ -6,6 +6,7 @@ import {
   applyPendingDiff,
   collectActivePendingIds,
   mapReasonToStatus,
+  type MappedPendingStatus,
 } from './pending-entries'
 
 const reg = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -128,6 +129,11 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
       ['interrupted-by-restart', 'aborted'],
       ['interrupted-by-parent', 'aborted'],
       ['reopened', 'completed'],
+      // notify-once D3 族映射 4 case（stopped→aborted、exited/deleted/orphaned→cancelled）
+      ['stopped', 'aborted'],
+      ['exited', 'cancelled'],
+      ['deleted', 'cancelled'],
+      ['orphaned', 'cancelled'],
     ]
     for (const [reason, expected] of cases) {
       expect(mapReasonToStatus(reason)).toBe(expected)
@@ -138,6 +144,33 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
     expect(mapReasonToStatus('budget_limited')).not.toBe('budget_limited')
     expect(mapReasonToStatus('interrupted-by-restart')).not.toBe('interrupted-by-restart')
     expect(mapReasonToStatus('reopened')).not.toBe('reopened')
+    // notify-once 4 新 case 同样全部非 identity（否则即词表扩张）
+    expect(mapReasonToStatus('stopped')).not.toBe('stopped')
+    expect(mapReasonToStatus('exited')).not.toBe('exited')
+    expect(mapReasonToStatus('deleted')).not.toBe('deleted')
+    expect(mapReasonToStatus('orphaned')).not.toBe('orphaned')
+  })
+
+  it('禁扩词表：MappedPendingStatus 值域封闭在既有 6 终态（Record 全键锁定，加词即编译错）', () => {
+    // D3 明令四个新 reason 不扩 MappedPendingStatus/PendingStatus——本断言的类型面
+    // 是 Record<MappedPendingStatus, true> 全键字面量：值域长出第 7 个成员即 TS 编译失败
+    const fullVocabulary: Record<MappedPendingStatus, true> = {
+      completed: true,
+      failed: true,
+      cancelled: true,
+      expired: true,
+      time_limited: true,
+      aborted: true,
+    }
+    const mapped = [
+      mapReasonToStatus('stopped'),
+      mapReasonToStatus('exited'),
+      mapReasonToStatus('deleted'),
+      mapReasonToStatus('orphaned'),
+    ]
+    for (const status of mapped) {
+      expect(fullVocabulary[status]).toBe(true)
+    }
   })
 
   it('未知 reason 落 default 兜底 completed（未来新词不再静默误标口径的登记处）', () => {

@@ -120,7 +120,7 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('idle')
   })
 
-  it('内核 send 入口（session_manager send / completion-backflow 消费方）：同款注入', async () => {
+  it('内核 send 入口（session_manager send / create 直投消费方）：同款注入', async () => {
     const h = makeHarness()
     await h.registry.getOrCreateDelivery('s1').sendChecked({ payload: { kind: 'text', content: 'agent 构造' } })
     expect(h.inject).toHaveBeenCalledTimes(1)

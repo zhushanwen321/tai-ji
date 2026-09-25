@@ -1,7 +1,12 @@
 // src/index.ts — @zhushanwen/pi-session-manager
 // 6 个 session 管理工具，通过 ctx.ui.select(SESSION_MANAGER_MARKER) 通道与 runtime handler 通信。
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	SessionCompactEvent,
+	SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 import {
 	SESSION_MANAGER_MARKER,
 	callMarkerRpc,
@@ -12,6 +17,9 @@ import {
 } from "@zhushanwen/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
+
+import { ensureLedgerBound, runLedgerCompactionCheck } from "./notify-ledger.ts";
+import { createWatchCoordinator } from "./watch-coordinator.ts";
 
 // 模块级 logger（default export 首行 setPiHandle 注入后自动走 appendEntry 持久化，
 // 注入前/失败降级文件日志——见 extension-logger 三层通道设计）
@@ -47,8 +55,11 @@ const AbortSessionParams = Type.Object({
 
 // ── select 通道辅助 ──
 
-/** select 超时（ms）：工具等待 runtime handler respond 的最大时间（create/history 走长链路放宽） */
-const SELECT_TIMEOUT_MS: Record<SessionManagerAction, number> = {
+/** select 超时（ms）：工具等待 runtime handler respond 的最大时间（create/history 走长链路放宽）。
+ *  watch 刻意缺席（notify-once D2：不传 timeout、fire-and-forget 长挂——P1 实测 `if
+ *  (opts?.timeout)` 才设 timer）。形制 = `Exclude<SessionManagerAction, "watch">`：
+ *  协议 action 集 6→7 后漏配键即编译期红（计划 blocker #1 的修复形态）。 */
+const SELECT_TIMEOUT_MS: Record<Exclude<SessionManagerAction, "watch">, number> = {
 	create: 60_000,
 	send: 30_000,
 	history: 60_000,
@@ -60,7 +71,10 @@ const SELECT_TIMEOUT_MS: Record<SessionManagerAction, number> = {
 /**
  * 通过 select 通道向 runtime handler 发送 session 管理请求（传输核走 protocol 的
  * callMarkerRpc 原语，D8）。回包为 handler respond 的 JSON 字符串（value 恒 raw）；
- * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一折叠 isError。
+ * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一 throw——
+ * pi agent-loop 仅在 execute throw 时置 isError:true，返回值里的 isError 字段被丢弃
+ * （pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall：正常 return
+ * 硬编码 isError:false、catch 置 true——0.84.4 实读 :468/:470-476；语义登记 PS-56）。
  * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
  */
 function callSessionManager(
@@ -81,51 +95,63 @@ function callSessionManager(
 		ui: { select: ctx.ui.select.bind(ctx.ui) },
 	};
 	return callMarkerRpc(guiCtx, SESSION_MANAGER_MARKER, payload, {
-		timeout: SELECT_TIMEOUT_MS[action],
+		// watch 不传 timeout（D2/P1：无 timer 长挂不死，任意晚的 respond 按 id 精确 resolve；PS-55）
+		timeout: action === "watch" ? undefined : SELECT_TIMEOUT_MS[action],
 		log: (msg, detail) => logger.error(`[session-manager] ${msg}`, detail),
 	});
+}
+
+/** notifyId 生成（notify-once D2）：`sm-` + UUID4——与协议 isSessionManagerNotifyId
+ *  同形态（runtime 受理点按该形态判 arm）。 */
+function newNotifyId(): string {
+	return `sm-${crypto.randomUUID()}`;
+}
+
+/** 运行时守卫（读侧不信任外部格式）：结果是否 JSON object——形状断言前的类型 guard。 */
+function asResultRecord(v: unknown): Record<string, unknown> | undefined {
+	return typeof v === "object" && v !== null && !Array.isArray(v)
+			? (v as Record<string, unknown>)
+			: undefined;
 }
 
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
  * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
- * 必须带 isError: true（extension-conventions「禁止错误成功模式」——
- * 调用方 agent 需能区分成功与失败以决定重试/放弃）。
+ * 必须 throw（extension-conventions「禁止错误成功模式」——pi 契约里 execute 只有
+ * throw 才被置 isError:true，返回值携带 isError 字段会被 agent-loop 丢弃
+ * （agent-loop.js:453-483，PS-56），ask-user/scheduler/session-reader 的 W4 throw
+ * 范式同款；调用方 agent 需能区分成功与失败以决定重试/放弃）。
  */
 async function executeTool(
 	ctx: ExtensionContext,
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
-): Promise<{ isError?: boolean; content: Array<{ type: "text"; text: string }>; details: undefined }> {
+	onResult?: (ctx: ExtensionContext, params: Record<string, unknown>, result: unknown) => void,
+): Promise<{ content: Array<{ type: "text"; text: string }>; details: undefined }> {
 	const result = await callSessionManager(ctx, action, params);
 	if (!result.ok) {
 		// 行为微变①（D8，有意——对齐 plugin-bridge 形态）：非 JSON 回包从「catch 后
-		// parsed=undefined 静默当成功文本返回」改为 isError + 提示文本（留痕由原语
+		// parsed=undefined 静默当成功文本返回」改为 throw + 提示文本（留痕由原语
 		// 经注入的 logger.error 承担）；其余三态维持原 cancelled/timeout 折叠文案。
 		const text =
 			result.reason === "non-json"
 				? `Session manager ${action}: non-JSON response from runtime (protocol mismatch — redeploy same-version runtime + extension; see extension logs).`
 				: `Session manager ${action}: cancelled or timed out.`;
-		return {
-			isError: true,
-			content: [{ type: "text" as const, text }],
-			details: undefined,
-		};
+		throw new Error(text);
 	}
 	const raw = result.value;
 	// 合法性已由原语检测（ok:true ⇒ 同一字符串 JSON.parse 必成功），parse 只为字段检测。
 	// runtime 错误闭环（respond({error}) 走同一 select 通道）——检测与文本拼接单源于
-	// protocol 的 isChannelErrorResult / formatChannelErrorText（D8）：命中即 isError: true
+	// protocol 的 isChannelErrorResult / formatChannelErrorText（D8）：命中即 throw
 	//（extension-conventions「禁止错误成功模式」：agent 需能区分成功与同步失败以决定
 	// 重试/放弃，不能靠读 content 文本自行判错）。
 	const parsed: unknown = JSON.parse(raw);
 	if (isChannelErrorResult(parsed)) {
-		return {
-			isError: true,
-			content: [{ type: "text" as const, text: formatChannelErrorText(parsed) }],
-			details: undefined,
-		};
+		throw new Error(formatChannelErrorText(parsed));
 	}
+	// 成功路径副作用编排（notify-once U4）：send/create 的 willNotify arm（register + 开表）、
+	// label 缓存回填（list）——错误路径已 throw，天然不触发。
+	onResult?.(ctx, params, parsed);
 	return {
 		content: [{ type: "text" as const, text: raw }],
 		details: undefined,
@@ -143,6 +169,8 @@ interface SessionToolConfig<S extends TObject> {
 	action: SessionManagerAction
 	/** schema params → 协议 params 的映射（undefined 字段由 JSON.stringify 丢弃） */
 	toParams: (params: Static<S>) => Record<string, unknown>
+	/** 成功结果钩子（仅非错误通道结果触发）——notify-once 的 arm/label 缓存编排 */
+	onResult?: (ctx: ExtensionContext, params: Record<string, unknown>, result: unknown) => void
 }
 
 /**
@@ -163,7 +191,7 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 			_onUpdate: unknown,
 			ctx: ExtensionContext,
 		) {
-			return executeTool(ctx, cfg.action, cfg.toParams(params));
+			return executeTool(ctx, cfg.action, cfg.toParams(params), cfg.onResult);
 		},
 	});
 }
@@ -172,22 +200,75 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	// logger 持久化通道接入（appendEntry custom entry，不进 LLM 上下文）
 	setPiHandle(pi);
 
+	// watch 桥编排（notify-once U4）：工具结果 arm / watch 应答两层攒批 record /
+	// session_start 重启收口腿共用同一闭包状态（label 缓存 + 死亡新闻槽 + 攒批队列）。
+	const coordinator = createWatchCoordinator({
+		pi,
+		callWatch: (ctx, notifyId) => callSessionManager(ctx, "watch", { notifyId }),
+	});
+
+	// 重启收口腿（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
+	// 逐条重开 watch（入参 = entry id 即 notifyId），应答经 watch 处理链静默注销，
+	// 活跃集回归基线；每 entry 独立 handler（禁串行 await）在 coordinator 内保证。
+	// ledger 装配纪律①②（D3）：session_start 无条件 bind + recoverFromSession 成对
+	//（唯一装配方形态，与 subagent-workflow bindLedgerHostAndRecover 同款——先装配，
+	// 收口腿/watch 应答到达时消费面已就绪）。
+	pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+		ensureLedgerBound(pi, ctx);
+		coordinator.recoverStaleRegisters(ctx);
+	});
+	// compactionCheck 接线（D3 装配纪律④，P-B4 降级——subagent-workflow 同款先例）
+	pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
+		runLedgerCompactionCheck();
+	});
+
 	registerSessionTool(pi, {
 		name: "create_managed_session",
 		label: "Create Managed Session",
-		description: "Create a new agent-managed session in the specified working directory. Optionally provide an initial prompt, which is sent immediately (new sessions are always idle, so it is delivered directly). Returns a session ID and initial status. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description:
+			"Create a new agent-managed session in the specified working directory. Optionally provide an initial prompt, which is sent immediately (new sessions are always idle, so it is delivered directly). Returns a session ID, initial status and willNotify: when a prompt is provided, exactly one completion notification is delivered to this session after that run finishes (see pending_notifications, type 'session'); without a prompt willNotify is false and no completion notification is sent. Terminal session death is notified once regardless. Requires the taiji desktop runtime; standalone pi CLI will time out.",
 		parameters: CreateManagedSessionParams,
 		action: "create",
-		toParams: (p) => ({ cwd: p.cwd, label: p.label, prompt: p.prompt }),
+		toParams: (p) => ({
+			cwd: p.cwd,
+			label: p.label,
+			prompt: p.prompt,
+			// 债权只可能在带 prompt 时产生（G1）——无 prompt 不携带 notifyId（缺省即不 arm）
+			notifyId: p.prompt !== undefined ? newNotifyId() : undefined,
+		}),
+		onResult: (ctx, params, result) => {
+			const r = asResultRecord(result);
+			if (!r || typeof r.sessionId !== "string") return;
+			const rawLabel =
+				typeof params.label === "string" && params.label !== "" ? params.label : undefined;
+			const name = rawLabel ?? r.sessionId;
+			coordinator.noteLabel(r.sessionId, name);
+			const notifyId = params.notifyId;
+			if (r.willNotify === true && typeof notifyId === "string") {
+				coordinator.armSessionNotify(ctx, notifyId, name);
+			}
+			if (typeof r.lifetimeNotifyId === "string") {
+				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name);
+			}
+		},
 	});
 
 	registerSessionTool(pi, {
 		name: "send_to_session",
 		label: "Send to Session",
-		description: "Send a prompt/message to an existing managed session. The message is asynchronously queued: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary, and {queued: true} is returned immediately. On synchronous failure the tool returns an error result (isError) with a hint (check get_session_status, then retry). Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description:
+			"Send a prompt/message to an existing managed session. The message is asynchronously queued: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary, and {queued: true} is returned immediately. Returns willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes (several queued messages merge into a single notification with a count). On synchronous failure the tool call fails with an error (check get_session_status, then retry). Requires the taiji desktop runtime; standalone pi CLI will time out.",
 		parameters: SendToSessionParams,
 		action: "send",
-		toParams: (p) => ({ sessionId: p.sessionId, prompt: p.prompt }),
+		toParams: (p) => ({ sessionId: p.sessionId, prompt: p.prompt, notifyId: newNotifyId() }),
+		onResult: (ctx, params, result) => {
+			const r = asResultRecord(result);
+			if (!r || r.willNotify !== true) return;
+			const notifyId = params.notifyId;
+			const sessionId = params.sessionId;
+			if (typeof notifyId !== "string" || typeof sessionId !== "string") return;
+			coordinator.armSessionNotify(ctx, notifyId, coordinator.labelFor(sessionId));
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -206,6 +287,20 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		parameters: ListMySessionsParams,
 		action: "list",
 		toParams: () => ({}),
+		// label 缓存回填（D9 正常路径 label 源的兜底——进程重启后 create 缓存丢失，
+		// send 的文案/register name 退化为 sessionId 前先经 list 恢复真 label）
+		onResult: (_ctx, _params, result) => {
+			const r = asResultRecord(result);
+			if (!r || !Array.isArray(r.sessions)) return;
+			for (const item of r.sessions) {
+				const s = asResultRecord(item);
+				if (!s || typeof s.id !== "string") continue;
+				coordinator.noteLabel(
+					s.id,
+					typeof s.label === "string" && s.label !== "" ? s.label : s.id,
+				);
+			}
+		},
 	});
 
 	registerSessionTool(pi, {

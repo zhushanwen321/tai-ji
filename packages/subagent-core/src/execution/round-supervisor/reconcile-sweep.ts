@@ -41,6 +41,11 @@
 //    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂账方向代价 =
 //    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 守卫读侧过滤已使子 session
 //    不受污染，本 session 虚报 defer 由熔断限损）。
+//  - type=session → **显式 skip**（notify-once D7③）：managed session 完成通知债权的
+//    register（id = notifyId `sm-` 前缀），收口通道 = watch 应答 unregister + extension
+//    session_start 重启收口腿，**不入 workflow run-state 判据**——notifyId 对
+//    FileRunStore 查无 state 文件 → 「不存在 → 补注销」判据会把活跃 claim 误销
+//    （G2 查询面破坏），故在分流前拦下，不调任何判据。
 
 import * as fs from "node:fs";
 
@@ -87,6 +92,9 @@ export interface ReconcileSweepResult {
   /** 差集内无收口通道而保守跳过的注册 id（bash；或 deps 未注入 workflow 判据时
    *  的 workflow/未知类型——显式偏差面，见文件头注 bash 段）。 */
   skippedNonSubagent: string[];
+  /** type=session 显式 skip 的注册 id（notify-once D7③：收口归 extension watch 应答
+   *  与重启收口腿，不入 workflow run-state 判据——防误销活跃 claim，见文件头注）。 */
+  skippedSession: string[];
 }
 
 /**
@@ -98,6 +106,7 @@ export function runReconcileSweep(deps: ReconcileSweepDeps): ReconcileSweepResul
     reconciled: [],
     skippedActive: [],
     skippedNonSubagent: [],
+    skippedSession: [],
   };
   if (!deps.sessionFile) return result;
 
@@ -128,6 +137,13 @@ function sweepSingleRegister(
   const id = entry.id;
   if (entry.type === "bash") {
     result.skippedNonSubagent.push(id);
+    return;
+  }
+  if (entry.type === "session") {
+    // notify-once D7③：session 债权 register 不归 sweep 收口——必须在 workflow run-state
+    // 判据之前拦下（notifyId 查 FileRunStore 必 missing → 「查不到即补注销」会误销
+    // 活跃 claim）。收口通道 = watch 应答 unregister + extension 重启收口腿。
+    result.skippedSession.push(id);
     return;
   }
   const state = entry.type === "subagent"
