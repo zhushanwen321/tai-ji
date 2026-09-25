@@ -278,12 +278,13 @@ export function useSidebar() {
     if (newTaskFlow.isActive.value) newTaskFlow.cancelFlow()
 
     await sessionApi.restoreSession(id)
-    // [T4] restore RPC 成功 = 恢复事实已发生（runtime 侧 spawn+attach 完成），即收口
-    // respawnPending 过渡态（恢复窗口内用户点了「重新打开」走手动 restore——手动路径
-    // runtime 不再 publish session.restored，此清理是过渡态在该路径的唯一出口；清在
-    // selectSession 之前，UI 切入失败也不留过渡条干等超时）。超时 timer 到期查
-    // isRespawnPending no-op 自清，无需跨模块卸载。
-    useChatStore().clearRespawnPending(id)
+    // [T4→D3] respawnPending 过渡态的收口权归 runtime：restore RPC 成功即走 facade 尾部
+    // 三合一出口（msg-pipeline-debloat D3）——respawn 编排上下文命中（失败计数>0 含熔断
+    // 态 / 抢占窗口 pending timer / attemptInFlight）时发布 session.restored，帧经恢复窗口
+    // 订阅到达驱动收口（useMessageEffects.handleSessionRestored）。本地 clearRespawnPending
+    // 清账已删（与根源同缺口的补偿，发布点补齐后为纯噪音）。runtime 重启后编排器状态全
+    // 内存即清、三信号构造性 miss 无帧——该场景由下方 revive-on-RPC-reply 收口（保留件），
+    // 30s TTL 兜底过渡态回收。
     // revive 不被切入失败阻断：restore RPC 成功 = runtime 侧 spawn+attach 已完成，revive 语义
     // 是 UI 死态清除，与切入 RPC 成败解耦——不 revive 会留下「进程已恢复、列表仍置灰」的
     // 半完成窗口。切入失败留痕不吞（用户重试本路径时，runtime 对已 spawn session 的二次

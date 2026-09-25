@@ -246,7 +246,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     }
   })
 
-  it('⑦ 手动重开（useSidebar.restoreSession）：restore RPC 成功即收口过渡态 + revive（手动路径无 restored 帧，本地收口兜底）', async () => {
+  it('⑦ 手动重开（useSidebar.restoreSession）：本地清账已删（D3），过渡态收口改由 restored 帧驱动；revive-on-RPC-reply 保留即时复位 dead', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
     const sessionStore = useSessionStore()
@@ -262,10 +262,16 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     const sidebar = useSidebar()
     await expect(sidebar.restoreSession('s-respawn')).resolves.toBeUndefined()
 
-    // restore RPC 成功即收口过渡态（唯一出口：手动路径 runtime 不再 publish session.restored）
-    // + revive 复位 dead → idle（切入失败不阻断）
-    expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
+    // revive-on-RPC-reply（D3 保留件）：RPC 成功即复位 dead → idle（切入失败不阻断）；
+    // runtime 重启后无 restored 帧的场景靠它收口
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('idle')
+    // [D3] 本地 clearRespawnPending 已删：RPC 成功本身不再清过渡态（清账权归 runtime
+    // facade 尾部出口的 restored 帧——手动恢复于 respawn 编排上下文命中时发布）
+    expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
+
+    // runtime 尾部出口发布 restored（手动路径信号③/①命中）→ 经恢复窗口订阅收口
+    injectRestored()
+    expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
   })
 
   it('⑧ 恢复窗口发消息 → message_start 到达（join 路径无 restored 帧）→ 收口 + dead 复位 + T4 条（Gate B A7 缺陷回归）', async () => {

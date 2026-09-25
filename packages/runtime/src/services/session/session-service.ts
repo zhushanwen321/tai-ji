@@ -894,11 +894,24 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async renameSession(sessionId: string, newName: string): Promise<void> { return this.lifecycle.renameSession(sessionId, newName) }
   async restoreSession(sessionId: string): Promise<SessionSummary> {
     const summary = await this.lifecycle.restoreSession(sessionId)
-    // u8（crash-resilience D7 熔断语义）：任一恢复成功（自动 respawn / 用户手动 / 惰性
-    // ensureActive）→ 清零连续失败计数，保证未来崩溃获得全新自动恢复额度（熔断只针对
-    // 连续失败，成功即出清；唯一清零入口，与 pi-respawn.cancel 只清 timer 不清计数配套）。
-    this.respawn.notifyRestored(sessionId)
+    // [D3 msg-pipeline-debloat] 恢复成功三合一出口（单一发布事实源）：判别 → 发布
+    // session.restored → 清零连续失败计数。本 facade 是恢复四入口的真实汇合点（自动
+    // respawn / 惰性 ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是它），
+    // 发布锚钉在此；三信号判别读取先于清零（见 pi-respawn.onRestoreSuccess）。普通懒
+    // spawn / startup-reattach 三信号皆空静默恢复不发布；熔断只针对连续失败，成功即出清
+    //（唯一清零入口，与 pi-respawn.cancel 只清 timer 不清计数配套）。
+    this.onRestoreSuccess(sessionId)
     return summary
+  }
+
+  /**
+   * [D3] 恢复成功三合一出口（判别 → 发布 session.restored → 清连续失败计数），委托
+   * respawn 编排器（三信号状态全在其内）。生产唯一调用点 = restoreSession facade 成功
+   * 尾部；组装级测试的 restoreSession 替身（spy 掉 lifecycle 的 FS/spawn 链）按同一契约
+   * 在成功尾部调用本方法，保证发布判别链与生产一致。
+   */
+  onRestoreSuccess(sessionId: string): void {
+    this.respawn.onRestoreSuccess(sessionId)
   }
   async forkSession(
     srcSessionId: string,

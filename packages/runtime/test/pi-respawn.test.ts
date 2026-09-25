@@ -1,16 +1,26 @@
 /**
- * RespawnOrchestrator 单测（crash-resilience §3.3 D7 / 实施计划 u8-pi-respawn）。
+ * RespawnOrchestrator 单测（crash-resilience §3.3 D7 / 实施计划 u8-pi-respawn；发布判别
+ * 补充 msg-pipeline-debloat D3 四入口矩阵）。
  *
  * 覆盖（验收必测断言，timer 全部 fake timers）：
- * - ①非主动退出 5s 后触发一次 restore（且只一次）；
+ * - ①非主动退出 5s 后触发一次 restore（且只一次）——D3 后成功发布走 facade 尾部三合一
+ *   出口，本用例同时锁「首试成功（timer 已删 + 计数 0）仍恰好一条 restored」的信号②
+ *   脆弱点；
  * - ③join（ensureRestored）：并发调用等待同一 in-flight Promise（③c = 自动恢复执行
  *   路径也登记 in-flight——timer 触发后 restore 进行中，并发 join 不双跑，D7-③ 双向）；
  * - ④in-flight 恢复时自动恢复跳过（schedule 与 timer 触发两道守卫）；
  * - ⑤熔断：连续失败 2 次停止自动重试；
- * - ⑥成功清零：任一次恢复成功（notifyRestored）后熔断计数归零，未来崩溃获得全新额度；
+ * - ⑥成功清零：任一次恢复成功（onRestoreSuccess 三合一出口）后熔断计数
+ *   归零，未来崩溃获得全新额度；
  * - ⑦shutdown 取消语义：cancelAll 清全部 pending timer（timer unref 断言）；
  * - ⑧session 删除取消：cancel 清该 session 的 pending timer；
- * - ⑨restored/restoreFailed 消息形态（sessionId 必带，仓规规则 7）。
+ * - ⑨restored/restoreFailed 消息形态（sessionId 必带，仓规规则 7）；
+ * - D3 发布判别矩阵（信号① pending timer / ② attemptInFlight / ③ 失败计数，含
+ *   attemptInFlight 置位/清除的黑盒观测）。
+ *
+ * mock 契约（D3）：restore 内核 = facade.restoreSession（生产装配 deps.restore = facade
+ * 本尊），session.restored 的发布点 = facade 成功尾部（onRestoreSuccess）——需要发布
+ * 断言的用例用 wireFacadeContract 把 restore 替身升级为同一契约，否则发布链断裂。
  *
  * 挂点/forceQuit 反向/join 等组装级行为在 session-service-respawn.test.ts（真实构造器
  * 接线 + dispatcher 链路）。本文件零 IO、零真实 pi、零真实数据目录。
@@ -20,11 +30,13 @@ import { RespawnOrchestrator, RESPAWN_DELAY_MS, RESPAWN_MAX_CONSECUTIVE_FAILURES
 import type { RespawnDeps } from '../src/services/session/pi-respawn.js'
 import type { ServerMessage } from '@taiji/shared'
 
-function createDeps(overrides: Partial<RespawnDeps> = {}): RespawnDeps & {
+type RespawnTestDeps = RespawnDeps & {
   restore: ReturnType<typeof vi.fn>
   publish: ReturnType<typeof vi.fn>
-  setActive: (id: string, active: boolean) => void
-} {
+  setActive: (id: string, on: boolean) => void
+}
+
+function createDeps(overrides: Partial<RespawnDeps> = {}): RespawnTestDeps {
   const active = new Set<string>()
   const restore = vi.fn<(id: string) => Promise<unknown>>().mockResolvedValue(undefined)
   const publish = vi.fn<(id: string, msg: ServerMessage) => void>()
@@ -37,6 +49,19 @@ function createDeps(overrides: Partial<RespawnDeps> = {}): RespawnDeps & {
   } as never
 }
 
+/**
+ * [D3] 把 restore 替身升级为「真实 facade 契约」形态：内核成功 = spawn+attach 完成
+ * （pm 有活 client）+ facade 尾部三合一出口回调。生产装配 deps.restore = facade 本尊，
+ * 不做此接线的替身（如纯 reject / 早期 join 用例）发布链断流属预期。
+ */
+function wireFacadeContract(deps: RespawnTestDeps, orchestrator: RespawnOrchestrator): void {
+  deps.restore.mockImplementation(async (id: string) => {
+    deps.setActive(id, true)
+    orchestrator.onRestoreSuccess(id)
+    return undefined
+  })
+}
+
 describe('RespawnOrchestrator（crash-resilience D7）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -45,9 +70,10 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     vi.useRealTimers()
   })
 
-  it('①非主动退出：schedule 后 5s 触发一次 restore（且只一次），成功推 session.restored', async () => {
+  it('①非主动退出：schedule 后 5s 触发一次 restore（且只一次），成功经 facade 尾部出口推 session.restored', async () => {
     const deps = createDeps()
     const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
     orchestrator.schedule('s1')
     // 5s 前不触发
     vi.advanceTimersByTime(RESPAWN_DELAY_MS - 1)
@@ -58,12 +84,14 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     // restore 是异步链：flush 微任务后发布 restored
     await vi.runAllTimersAsync()
     await Promise.resolve()
+    // [D3] 恰好一条（S3①）——首试成功时 timer 已删 + 计数 0，发布全靠信号②
+    // attemptInFlight（脆弱点锁，r5 主审：缺此信号则本子走法 0 帧）
     expect(deps.publish).toHaveBeenCalledTimes(1)
     const [sid, msg] = deps.publish.mock.calls[0] as [string, ServerMessage]
     expect(sid).toBe('s1')
     expect(msg.type).toBe('session.restored')
-    // ⑨sessionId 必带（仓规规则 7）
-    expect(msg.payload).toMatchObject({ sessionId: 's1' })
+    // ⑨sessionId 必带（仓规规则 7）；attempts 语义 = 成功前连续失败次数 + 1（首试 = 1）
+    expect(msg.payload).toMatchObject({ sessionId: 's1', attempts: 1 })
     // 只触发一次：后续时间推进不再 restore
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(1)
@@ -149,7 +177,13 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
   it('③c 自动恢复执行登记 in-flight：timer 已触发、restore 进行中（spawn+attach 未完成）→ 并发 ensureRestored join 同一 Promise，restore 内核只跑一次', async () => {
     const deps = createDeps()
     let resolveRestore!: () => void
-    deps.restore.mockImplementationOnce(() => new Promise<unknown>((res) => { resolveRestore = () => res(undefined) }))
+    // [D3] 替身按 facade 契约收尾：内核成功（resolve）→ 尾部三合一出口
+    deps.restore.mockImplementationOnce(async (id: string) => {
+      await new Promise<unknown>((res) => { resolveRestore = () => res(undefined) })
+      deps.setActive(id, true)
+      orchestrator.onRestoreSuccess(id)
+      return undefined
+    })
     const orchestrator = new RespawnOrchestrator(deps)
     orchestrator.schedule('s1')
     await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
@@ -167,12 +201,13 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     resolveRestore()
     await join
     expect(settled).toBe(true)
-    // 只 spawn 一个：restore 内核全程只进入一次；restored 恰好一推（join 方不重复终态）
+    // 只 spawn 一个：restore 内核全程只进入一次；restored 恰好一推（join 方不重复终态；
+    // [D3] 矩阵「fire 后 join 子态」= 信号②命中发布）
     expect(deps.restore).toHaveBeenCalledTimes(1)
     expect(deps.publish).toHaveBeenCalledTimes(1)
     const [, msg] = deps.publish.mock.calls[0] as [string, ServerMessage]
     expect(msg.type).toBe('session.restored')
-    expect(msg.payload).toMatchObject({ sessionId: 's1' })
+    expect(msg.payload).toMatchObject({ sessionId: 's1', attempts: 1 })
   })
 
   it('⑤熔断：连续失败 2 次后停止自动重试（第 1 次失败续排，第 2 次失败不再续排）', async () => {
@@ -203,30 +238,40 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     const deps = createDeps()
     deps.restore.mockRejectedValueOnce(new Error('spawn failed'))
     const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
     orchestrator.schedule('s1')
     await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
     const [, firstMsg] = deps.publish.mock.calls[0] as [string, ServerMessage]
     expect(firstMsg.type).toBe('session.restoreFailed')
     expect(firstMsg.payload).toMatchObject({ sessionId: 's1', attempts: 1, willRetry: true })
-    // 重试成功 → 计数清零 + restored
+    // 重试成功 → facade 尾部出口发布 restored（attempts = 成功前失败次数 1 + 1 = 2）+ 计数清零
     await vi.runAllTimersAsync()
     const [, secondMsg] = deps.publish.mock.calls[1] as [string, ServerMessage]
     expect(secondMsg.type).toBe('session.restored')
+    expect(secondMsg.payload).toMatchObject({ sessionId: 's1', attempts: 2 })
     expect(orchestrator.isTripped('s1')).toBe(false)
   })
 
-  it('⑥成功清零：手动恢复成功（notifyRestored）后熔断解除，未来崩溃获得全新自动恢复额度', async () => {
+  it('⑥成功清零：手动恢复成功（onRestoreSuccess，信号③命中）后熔断解除，未来崩溃获得全新自动恢复额度', async () => {
     const deps = createDeps()
     deps.restore.mockRejectedValue(new Error('attach failed'))
     const orchestrator = new RespawnOrchestrator(deps)
     orchestrator.schedule('s1')
     await vi.runAllTimersAsync()
     expect(orchestrator.isTripped('s1')).toBe(true)
-    // 用户手动重试成功（facade.restoreSession 成功路径回调）
-    orchestrator.notifyRestored('s1')
+    // 用户手动重试成功（facade.restoreSession 成功尾部回调）：失败计数 2 > 0 →
+    // [D3] 矩阵「手动（熔断态）」= 信号③命中发布，attempts = 2 次失败 + 1 = 3
+    orchestrator.onRestoreSuccess('s1')
+    const manualMsg = deps.publish.mock.calls.at(-1) as [string, ServerMessage]
+    expect(manualMsg[1].type).toBe('session.restored')
+    expect(manualMsg[1].payload).toMatchObject({ sessionId: 's1', attempts: 3 })
     expect(orchestrator.isTripped('s1')).toBe(false)
-    // 未来崩溃 → 正常调度并自动恢复
-    deps.restore.mockResolvedValue(undefined)
+    // 未来崩溃 → 正常调度并自动恢复（替身按 facade 契约收尾）
+    deps.restore.mockImplementationOnce(async (id: string) => {
+      deps.setActive(id, true)
+      orchestrator.onRestoreSuccess(id)
+      return undefined
+    })
     orchestrator.schedule('s1')
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(3)
@@ -296,5 +341,100 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     expect(orchestrator.pendingSessionIds()).toEqual(['s1'])
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(1)
+  })
+
+  // ── [D3] 发布判别四入口矩阵（msg-pipeline-debloat；restored 帧只在 respawn 编排上下文
+  // 命中时发布，三信号皆空 = 普通懒 spawn / startup-reattach 静默）──
+
+  it('D3-① 信号① pending timer：fire 前惰性抢占恢复成功 → 发布恰好一条；timer 到点 attempt 让位不双发', async () => {
+    const deps = createDeps()
+    const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
+    orchestrator.schedule('s1')
+    // 5s 窗口内用户发消息 → 惰性恢复完成（timer 仍在册 → facade 尾部信号①命中）
+    await orchestrator.ensureRestored('s1')
+    expect(deps.publish).toHaveBeenCalledTimes(1)
+    const [, msg] = deps.publish.mock.calls[0] as [string, ServerMessage]
+    expect(msg.type).toBe('session.restored')
+    expect(msg.payload).toMatchObject({ sessionId: 's1', attempts: 1 })
+    // timer 到点：attempt 复查 isActive（内核成功 = pm 有活 client）→ 让位，无双发
+    await vi.runAllTimersAsync()
+    expect(deps.restore).toHaveBeenCalledTimes(1)
+    expect(deps.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('D3-② 跨 fire 子态（D7-41 行为基线）：惰性恢复 fire 前发起、fire 后完成 → 三信号皆 miss 不发帧（收口归 message_start gate）', async () => {
+    const deps = createDeps()
+    let resolveRestore!: () => void
+    const orchestrator = new RespawnOrchestrator(deps)
+    // 替身按 facade 契约收尾（惰性恢复的 restore 内核 = facade）
+    deps.restore.mockImplementationOnce(async (id: string) => {
+      await new Promise<unknown>((res) => { resolveRestore = () => res(undefined) })
+      deps.setActive(id, true)
+      orchestrator.onRestoreSuccess(id)
+      return undefined
+    })
+    orchestrator.schedule('s1')
+    // fire 前惰性恢复发起（attempt 会在 in-flight 上让位）
+    const lazy = orchestrator.ensureRestored('s1')
+    expect(orchestrator.isRestoring('s1')).toBe(true)
+    // timer 到点：attempt 复查 isRestoring → 让位裸 return（early return 不置 attemptInFlight）
+    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
+    expect(deps.restore).toHaveBeenCalledTimes(1)
+    // fire 后惰性恢复完成：timer 已被 fire 回调删除、标志未置、计数 0 → 三信号皆 miss
+    resolveRestore()
+    await lazy
+    expect(deps.publish).not.toHaveBeenCalled()
+  })
+
+  it('D3-③ early return 不置位（isActive 变体）：让位后再恢复不因标志泄漏误发假「崩溃恢复」帧', async () => {
+    const deps = createDeps()
+    const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
+    orchestrator.schedule('s1')
+    // fire 时 session 已活跃（用户先恢复完成）→ attempt 让位（若此路径置位即泄漏）
+    deps.setActive('s1', true)
+    await vi.runAllTimersAsync()
+    expect(deps.restore).not.toHaveBeenCalled()
+    // 后续无上下文 restore（内核成功再回调出口）：timer 已删 / 计数 0 / 标志未置 → 静默
+    await orchestrator.ensureRestored('s1')
+    expect(deps.publish).not.toHaveBeenCalled()
+  })
+
+  it('D3-④ finally 清除：自动恢复成功后再做无上下文 restore 不双发（attemptInFlight 泄漏防线）', async () => {
+    const deps = createDeps()
+    const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
+    orchestrator.schedule('s1')
+    await vi.runAllTimersAsync()
+    // 首试成功：信号②命中恰好一条
+    expect(deps.publish).toHaveBeenCalledTimes(1)
+    // 成功后 attemptInFlight 已被 finally 清除 → 无上下文 restore（如再次手动 RPC /
+    // startup-reattach 形态）三信号皆空，静默不发布
+    await orchestrator.ensureRestored('s1')
+    expect(deps.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('D3-⑤ 信号③ 失败窗口（非熔断）：1 次自动失败后无上下文恢复成功 → 命中计数>0 发布（attempts=2）', async () => {
+    const deps = createDeps()
+    deps.restore.mockRejectedValueOnce(new Error('spawn failed'))
+    const orchestrator = new RespawnOrchestrator(deps)
+    wireFacadeContract(deps, orchestrator)
+    orchestrator.schedule('s1')
+    // 第 1 次尝试失败：计数=1，restoreFailed{willRetry=true}，重试续排
+    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
+    const [, failMsg] = deps.publish.mock.calls[0] as [string, ServerMessage]
+    expect(failMsg.type).toBe('session.restoreFailed')
+    // 重试窗口内用户先手动/惰性恢复成功（不经 attemptRespawn，无上下文信号①②）
+    // → 信号③ 计数>0 命中发布
+    await orchestrator.ensureRestored('s1')
+    const [, restoredMsg] = deps.publish.mock.calls.at(-1) as [string, ServerMessage]
+    expect(restoredMsg.type).toBe('session.restored')
+    expect(restoredMsg.payload).toMatchObject({ sessionId: 's1', attempts: 2 })
+    // 计数已清零，熔断未触发
+    expect(orchestrator.isTripped('s1')).toBe(false)
+    // 已成功的恢复让后续 timer fire 走 isActive 让位，不产生第二路恢复/发布
+    await vi.runAllTimersAsync()
+    expect(deps.publish).toHaveBeenCalledTimes(2)
   })
 })

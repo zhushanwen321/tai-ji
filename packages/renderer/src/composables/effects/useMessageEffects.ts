@@ -38,9 +38,12 @@ const t = i18n.global.t
 // 两条通路在不改 runtime 的前提下结构性不可达。
 //
 // 修法（最小可靠形态）：exited（非强制）时进 respawnPending 过渡态 + 立即重发 subscribe
-// 建立「恢复窗口订阅」——自动恢复路径 restored publish 前无清场（死亡时已清过一次），
-// renderer 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收口。手动 restore
-// 清场场景由 useSidebar.restoreSession 的本地 revive 兜底。
+// 建立「恢复窗口订阅」——恢复路径（自动/手动）restored publish 前无清场（死亡时已清过
+// 一次；msg-pipeline-debloat D3 后手动恢复于 respawn 编排上下文命中时同样经 facade 尾部
+// 发布），renderer 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收口。
+// runtime 重启后编排器状态全内存即清、无 restored 帧——该场景由 revive-on-RPC-reply
+//（useSidebar.restoreSession / useSessionRespawnRetry，D3 保留件）收口，30s TTL 兜底
+// 过渡态回收。
 
 /** 恢复超时（无 restored/restoreFailed 到达即放弃等待，切回终态 dead 页）。30s：respawn
  *  实测 6s 级（5s 延迟 + spawn/attach），熔断最迟 ~10s 出结果，30s 覆盖两次重试仍有裕量。 */
