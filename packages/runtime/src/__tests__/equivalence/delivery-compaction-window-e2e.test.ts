@@ -44,10 +44,14 @@ const STEP_TIMEOUT_MS = 120_000
 /** 两条消息的唯一标记（user message 注入断言锚点；裸标记 = clientUuid 去 'u-' 前缀） */
 const MARK_A = 'COMPACT-WINDOW-A:'
 const MARK_B = 'COMPACT-WINDOW-B:'
-const CLIENT_UUID_A = 'u-compact-window-a'
-const CLIENT_UUID_B = 'u-compact-window-b'
-const BARE_MARKER_A = 'compact-window-a'
-const BARE_MARKER_B = 'compact-window-b'
+// clientUuid 必须是真 uuid 形态：投递身份判据 DELIVERY_MARKER_ID_RE（registry，SSOT =
+// shared MSG_ID_TAG_RE 派生）只认 uuid 段 + m-<base36>-<seq> 双形态——非 uuid 字面量的
+// 出站标记被 extractMarkerIds 判 0，message_end 回执命中与 sweepInFlight 对账兜底双通道
+// 同时失明，条目永挂 in-flight（断言第 7 步 tombstone 恒空）。
+const CLIENT_UUID_A = 'u-1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
+const CLIENT_UUID_B = 'u-9a8b7c6d-5e4f-4a3b-8c9d-0e1f2a3b4c5d'
+const BARE_MARKER_A = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
+const BARE_MARKER_B = '9a8b7c6d-5e4f-4a3b-8c9d-0e1f2a3b4c5d'
 /** turn 1 的 faux 节流（tokens/s）：计数序列 ≈ 30+ tokens → 秒级流式窗口，覆盖两次出站
  *  与断言链的测试侧耗时（第二条出站时 pi 大概率仍在 turn 1 → 走 D6 steer 重试分支） */
 const FAUX_TPS = '6'
