@@ -741,9 +741,10 @@ export class SessionMessageHandler {
       // messageBus 未注入（理论不可达——组合根保证），防御性报错。
       return this.ctx.sendError(ws, 'subscribe_unsupported', 'message bus not available', msg.id, { sessionId })
     }
-    // delivery 域装配（D5/D7）：subscribe **之前**发一帧 session.delivery 全量快照——
-    // 本次 subscribe 的 stateSnapshot 即含该帧，renderer 队列区在切 session/重连后零竞态恢复
-    // （G2/V5「断连重连队列区自动恢复」的装配面）。零抛错（sync 内部 warn 降级）：
+    // delivery 域装配（D5/D7；msg-pipeline-debloat D4-4 后唯一装配入口）：subscribe
+    // **之前**发一帧 session.delivery 全量快照——本次 subscribe 的 stateSnapshot 即含该帧，
+    // renderer 队列区在切 session/重连后零竞态恢复（G2/V5「断连重连队列区自动恢复」的装配面，
+    // [HISTORICAL] 约束 7 的主动拉取机制，非冗余）。零抛错（sync 内部 warn 降级）：
     // 帧装配失败不得拖垮订阅主链。已有内核运行时才发帧（无运行时 = 无队列事实可投影）。
     this.deliveryTopic.sync(sessionId)
     const result = bus.subscribe(sessionId, ws as unknown as BusClient)
@@ -1003,10 +1004,12 @@ export class SessionMessageHandler {
   // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
   //
   // 四 RPC = 内核适配器（u2 registry）的协议面：handler 只做「payload 校验 → 委托 →
-  // 帧发布 → reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
-  // 每次调用后 `deliveryTopic.sync()` 发布一帧全量快照（内核 onChange 已内联触发一次，
-  // sync 幂等再发一帧兜底「首次调用前无订阅」的装配缺口）——帧先于 reply 到达 renderer，
-  // 保证 reply 语义（受理确认）落地时 UI 状态已在位。
+  // reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
+  // 帧单发（msg-pipeline-debloat D4-4）：RPC 入口不再 sync()——内核每次真实变更经
+  // onChange 内联同步发一帧（先于 reply 到达 renderer，reply 语义落地时 UI 状态已在位），
+  // 无变更零帧；订阅装配与首配快照唯一入口 = session.subscribe（本文件 handleSessionSubscribe，
+  // [HISTORICAL] 约束 7 的主动拉取机制）。RPC 入口重发已删：同一变更 sync 幂等再发一帧
+  // = 常态双发（浪费 + 「同一状态两帧」的消费者歧义）。
 
   private async handleDeliverySubmit(msg: Extract<ClientMessage, { type: 'delivery.submit' }>, ws: WsType): Promise<void> {
     const { sessionId, content, images, clientUuid, segments } = msg.payload
@@ -1039,8 +1042,7 @@ export class SessionMessageHandler {
     }
     // 受理口径（D9⑤）：submit 同步返回（lane + 条目态），不等底层送达——内核 FIFO 无界，
     // 正常路径无拒绝态（send.rejected 退役归 u5；hook 否决发生在受理之前，不构成受理拒绝）。
-    // 受理失败经 registry 侧广播 + 日志。
-    this.deliveryTopic.sync(sessionId)
+    // 受理失败经 registry 侧广播 + 日志。帧经内核 onChange 单发（D4-4），先于本 reply。
     return this.ctx.reply(ws, msg.id, 'delivery.submit', {
       clientUuid: result.clientUuid,
       // 条目态映射（D5③：cancelled 不投影）。submit 返回时刻 cancelled 结构上不可达
@@ -1060,7 +1062,6 @@ export class SessionMessageHandler {
     // queued/failed 本地移除；in-flight 走 clear_queue 收回-重投（D3 复用对账路径）。
     // 不可撤（已 delivered / 收回失败）→ cancelled:false + reason（§3.4），条目由对账器兜底。
     const outcome = await registry.cancel(sessionId, clientUuid)
-    this.deliveryTopic.sync(sessionId)
     // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
     const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
     // segments 快照（MF-1-2）：提交时经 attachSegments 持有的原始 segments，撤销成功才返回
@@ -1084,7 +1085,6 @@ export class SessionMessageHandler {
     // 全量回收（D10/V11，forceQuit 专用）：kernel drain 同步取回全部未终态条目文本（发送序）；
     // registry 侧尽力 clear_queue 清 pi 槽位（滞留清理，session 即将销毁 → 不再收养投递）。
     const drained = registry.drain(sessionId)
-    this.deliveryTopic.sync(sessionId)
     return this.ctx.reply(ws, msg.id, 'delivery.drain', {
       sessionId,
       entries: drained.map((d) => ({
@@ -1104,9 +1104,9 @@ export class SessionMessageHandler {
     }
     // 断连/刷新重连重报（D5）：clientUuid 幂等去重（内核查终态判重记录 + reattach 场景
     // transcript 标记扫描，判重锚全在 runtime）。reply 只带 deduped——存留条目的权威状态
-    // 经随后的 session.delivery 全量快照帧恢复（last-value 单源，防双源分叉）。
+    // 以 session.delivery 帧为单源（last-value，防双源分叉）：重连 session.subscribe 的
+    // 首配快照帧 + reattach 变更的 onChange 帧（无变更零帧，D4-4）。
     const deduped = await registry.resync(sessionId, clientUuids)
-    this.deliveryTopic.sync(sessionId)
     return this.ctx.reply(ws, msg.id, 'delivery.resync', { sessionId, deduped })
   }
 

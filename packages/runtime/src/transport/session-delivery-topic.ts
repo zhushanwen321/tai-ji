@@ -125,9 +125,10 @@ export class SessionDeliveryTopic {
   constructor(private readonly deps: SessionDeliveryTopicDeps) {}
 
   /**
-   * 装配入口（幂等；delivery.* 四 RPC 与 session.subscribe 共用）：确保该 session 的
-   * onChange 订阅在位，并立即发布一帧全量快照（覆盖「订阅建立前的内核变更」缺口——
-   * 帧是全量快照，后发即权威）。
+   * 装配入口（幂等；唯一调用点 = session.subscribe，msg-pipeline-debloat D4-4 单发收敛：
+   * delivery.* RPC 入口不再 sync——后续变更只经 onChange 单发，常态零重发）：确保该 session
+   * 的 onChange 订阅在位，并立即发布一帧全量快照（首配快照，[HISTORICAL] 约束 7 主动拉取
+   * 机制——覆盖「订阅建立前的内核变更」缺口，帧是全量快照，后发即权威）。
    *
    * 零抛错：装配/发布异常 warn 留痕后返回（见文件头「零抛错」）。
    */

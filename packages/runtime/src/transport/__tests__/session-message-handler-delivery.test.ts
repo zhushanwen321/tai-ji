@@ -10,6 +10,9 @@
  * - 帧数据源 = 内核 entries() **投影视图**（D9②/D5③）：cancelled 不投影、delivered 投影、
  *   tombstone 元数据不泄漏；真实内核锁定「以 entries(options) 投影形态调用」（防误用全量视图）
  * - 变更驱动（onChange）而非轮询：无变更推进 60s 零新帧（负断言）
+ * - 帧单发收敛（msg-pipeline-debloat D4-4）：订阅首配快照恰好一帧（约束 7 主动拉取面）+
+ *   同一状态变更恰好一帧（RPC 入口不重发）+ 无变更零帧——「网络面板无常态重复 delivery
+ *   帧」验收（S3 场景④）的单测等价
  * - state topic last-value（真实 MessageBus）：同 session 多帧 stateSnapshot 只留最新 +
  *   不入 ring + topicOf('session.delivery') === 'state'（登记表锁）
  * - session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连恢复装配面，V5）
@@ -204,11 +207,15 @@ function msg(type: string, payload: Record<string, unknown>, id = 'req-1'): Clie
 
 const WS = {} as never
 
-/** 订阅该 session 的一条连接（live 帧落到 harness.sent）。 */
-function subscribeLive(h: Harness): BusClient {
+/**
+ * 经真实入口装配该 session 的订阅（renderer 时序，msg-pipeline-debloat D4-4 后唯一装配面）：
+ * session.subscribe 触发 handleSessionSubscribe → sync（onChange 装配 + 首配快照帧入
+ * reply 的 stateSnapshot，不走广播）→ bus.subscribe（后续 onChange 帧广播到 harness.sent）。
+ * handler 体无 await 点，同步完成。
+ */
+function subscribeLive(h: Harness): void {
   const client = h.attachSubscriber()
-  h.bus.subscribe(SID, client)
-  return client
+  void h.handler.handleSessionMessage(msg('session.subscribe', { sessionId: SID }), client as never)
 }
 
 /** 最后一条指定 type 的 reply payload。 */
@@ -493,6 +500,8 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
 
   it('last-value：同 session 多帧只留最新（stateSnapshot 单条）+ 不入 ring', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    // 先经真实入口装配（D4-4 后帧只经 onChange 产生，last-value 收敛才有帧可收敛）
+    subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'B', clientUuid: UUID_B }), WS)
@@ -607,8 +616,85 @@ describe('delivery.resync（D5：判重去重 + 单源恢复）', () => {
     expect(reply.sessionId).toBe(SID)
     expect(reply.deduped).toEqual([UUID_A])
     expect(Object.keys(reply)).toEqual(['sessionId', 'deduped']) // 条目权威在帧，reply 不复述
-    // 存留条目（delivered 窗口内）经随后的帧可见（last-value 单源）
+    // 存留条目（delivered 窗口内）经 onChange 帧可见（confirmDelivered 变更单发；
+    // resync deduped 全命中无内核变更 → 零新帧，最后一帧即权威投影，D4-4）
     expect(frameEntries(h).map((e) => [e.clientUuid, e.state])).toEqual([[UUID_A, 'delivered']])
+  })
+})
+
+// ── 帧单发收敛（msg-pipeline-debloat D4-4） ──────────────────────
+//
+// S3 场景④「网络面板无常态重复 delivery 帧」的单测等价：帧序列断言——
+// 同一状态变更恰好一帧（onChange 单发）、订阅首配快照恰好一帧（约束 7 主动拉取面，
+// 保留半边）、无内核变更零帧。held 场景（compacting）不 pump，变更帧数确定无迁移噪声。
+
+describe('帧单发收敛（D4-4：首配快照一次 + 同一变更恰好一帧 + 无变更零帧）', () => {
+  // held 场景（compacting）不 pump，变更帧数确定无迁移噪声；类型标注保留字面量推断
+  const held: Parameters<typeof makeHarness>[0] = {
+    session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
+  }
+
+  it('订阅首配快照恰好一帧：订阅前的内核变更不丢（全量投影补齐），且订阅前零帧白发', async () => {
+    const h = makeHarness(held)
+    // 订阅前提交：onChange 未装配、bus 无订阅者 → 零帧（不白发），事实由首配快照覆盖
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
+    expect(h.frames()).toHaveLength(0)
+
+    await h.handler.handleSessionMessage(msg('session.subscribe', { sessionId: SID }), h.attachSubscriber() as never)
+    const payload = replyOf(h, 'session.subscribe') as { stateSnapshot: ServerMessage[] } | undefined
+    const frames = payload?.stateSnapshot.filter((m) => m.type === 'session.delivery') ?? []
+    expect(frames).toHaveLength(1)
+    expect((frames[0] as ServerMessage<'session.delivery'>).payload.entries.map((e) => e.clientUuid)).toEqual([UUID_A])
+  })
+
+  it('同一状态变更恰好一帧：submit 受理只产一帧（RPC 入口 sync 幂等重发半边已删）', async () => {
+    const h = makeHarness(held)
+    subscribeLive(h)
+    // 首配空帧走 reply 的 stateSnapshot（bus.subscribe 注册在 sync 发布之后），广播从零起算
+    expect(h.frames()).toHaveLength(0)
+
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
+
+    // 条目创建（内核变更 1 次）→ onChange 恰好 1 帧；旧实现此处 sync 再发一帧 = 双发
+    expect(h.frames()).toHaveLength(1)
+    expect(frameEntries(h).map((e) => [e.clientUuid, e.state])).toEqual([[UUID_A, 'queued']])
+  })
+
+  it('cancel / drain 经 onChange 单发：每次 RPC 应答只随真实内核变更附加一帧', async () => {
+    const h = makeHarness(held)
+    subscribeLive(h)
+
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
+    expect(h.frames()).toHaveLength(1)
+
+    await h.handler.handleSessionMessage(msg('delivery.cancel', { sessionId: SID, clientUuid: UUID_A }), WS)
+    // 条目离场（1 次内核变更）→ 1 帧；cancelled:false 分支才零帧
+    expect(h.frames()).toHaveLength(2)
+    expect(frameEntries(h)).toEqual([])
+
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'B', clientUuid: UUID_B }), WS)
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'C', clientUuid: UUID_C }), WS)
+    expect(h.frames()).toHaveLength(4)
+
+    await h.handler.handleSessionMessage(msg('delivery.drain', { sessionId: SID }), WS)
+    // 全量回收（1 次内核变更）→ 1 帧空条目集；两条 drain reply 不产生额外帧
+    expect(h.frames()).toHaveLength(5)
+    expect(frameEntries(h)).toEqual([])
+  })
+
+  it('无变更零帧：resync deduped 全命中（无内核变更）→ 零新帧', async () => {
+    const h = makeHarness(held)
+    subscribeLive(h)
+
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
+    expect(h.handle.confirmDelivered(UUID_A)).toBe(true)
+    const beforeResync = h.frames().length
+    expect(beforeResync).toBeGreaterThanOrEqual(2) // 创建 + delivered 回执，各自一帧
+
+    await h.handler.handleSessionMessage(msg('delivery.resync', { sessionId: SID, clientUuids: [UUID_A] }), WS)
+    expect(h.frames().length).toBe(beforeResync)
+    // reply 照常（判重结果直达），帧面零扰动——「无变更不重发」锁死
+    expect(replyOf(h, 'delivery.resync')).toEqual({ sessionId: SID, deduped: [UUID_A] })
   })
 })
 
@@ -643,7 +729,7 @@ describe('delivery 域防御路径', () => {
     expect(h.promptFn).not.toHaveBeenCalled() // 非法请求不进内核
   })
 
-  it('releaseDeliveryTopic（session 销毁清理）：解绑后内核变更不再发帧；RPC 入口按需重装', async () => {
+  it('releaseDeliveryTopic（session 销毁清理）：解绑后不再发帧；重装收敛到 session.subscribe 唯一入口（D4-4）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
     subscribeLive(h)
 
@@ -655,10 +741,19 @@ describe('delivery 域防御路径', () => {
     h.handle.confirmDelivered(UUID_A)
     expect(h.frames().length).toBe(afterSubmit)
 
-    // 下一次 RPC 装配入口按需重装 + 发布最新投影（自愈，无需外部重新接线）
+    // delivery.* RPC 不再是装配入口（D4-4）：submit 照常受理、但零帧（无 onChange 订阅）
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'B', clientUuid: UUID_B }), WS)
     expect(h.errors).toHaveLength(0)
-    expect(frameEntries(h).map((e) => [e.clientUuid, e.state])).toEqual([
+    expect(h.frames().length).toBe(afterSubmit)
+
+    // session.subscribe 重装 + 首配快照发布最新投影（自愈，无需外部重新接线）
+    await h.handler.handleSessionMessage(msg('session.subscribe', { sessionId: SID }), h.attachSubscriber() as never)
+    const payload = replyOf(h, 'session.subscribe') as { stateSnapshot: ServerMessage[] } | undefined
+    const frames = payload?.stateSnapshot.filter((m) => m.type === 'session.delivery') ?? []
+    expect(frames).toHaveLength(1)
+    expect(
+      (frames[0] as ServerMessage<'session.delivery'>).payload.entries.map((e) => [e.clientUuid, e.state]),
+    ).toEqual([
       [UUID_B, 'queued'],
       [UUID_A, 'delivered'],
     ])
