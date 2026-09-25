@@ -28,6 +28,7 @@ taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表
 3. **对账器**：五触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog）在「空闲 + pi 槽位非空」时 `clear_queue` 全收，按消息标记三分处置——reclaim（内核在途条目回队首重投）/ rebuild（带标记但内核无记录，先按标记对 transcript 全量扫描判已送达再决定重建或仅记账）/ adopt（无标记外来文本收养入队）。撤销（`delivery.cancel`）与投递中收回复用同一路径（pi 只有队列级原语，不新造条目级原语）。
 4. **消息身份**：出站文本尾附裸标记 `<!--taiji:msg:<uuid>-->`（与 msg-id-mapper 的 `u-` 前缀标记空间互斥、正交共存），随文本进 transcript 成为逐消息精确身份；判重按 id 匹配（禁计数 FIFO / 文本匹配）；终态 tombstone 在 runtime 存活期内全量保留供 `delivery.resync` 去重，不跨 runtime 重启——reattach 场景判重锚回落 transcript 全量标记扫描。
 5. **UI 单一数据源**：队列区状态帧 = `session.delivery`（内核条目**投影视图**：活跃态全量 + delivered 最近 50 条完整条目 + lane；cancelled 不投影），`queue_update` 帧降级为内核内部回执；pi 的 steer/followUp/clear_queue/get_state/get_entries/nextTurn 契约原语全部保留复用，零绕过、零重造。
+6. **回执锚申报制（`DeliverySubmitOptions.receiptAnchor`，消息链路去冗余 D1）**：条目级提交选项 `'marker' | 'acceptance'`（缺省 `'marker'` = 保守语义）——`'marker'` 条目出站文本尾附裸标记、等 `message_end` 回执命中转 delivered；`'acceptance'` 条目（无回执锚点的 agent 通路文本）port.send 受理即落 delivered——「受理 = 送达」是无锚条目唯一可判事实（前提 = pi 无逐条回执原语）。申报制替代旧适配层文本反查（反查在合批/混合批次下构造性失效——G2 投递死锁根因：无标记合批第 5 环确认落空 → in-flight 永挂 → gate 恒关）；内核保持零正则、零 pi 知识，无标记判定归有身份知识的提交方。receiptAnchor 是 KernelEntry 内部字段，不进条目视图 DTO、不进 session.delivery 帧（投影面零扩散）。**来源清单（SSOT；新增无标记投递来源必须显式申报 `'acceptance'` 并回登本清单——漏申报 = 条目永挂 in-flight、该 session 投递 gate 恒关，诊断链见 [data-source-registry #15](../architecture/data-source-registry.md)）**：`'marker'` 恒申报 = runtime registry `submit`/`submitToKernel`（`withDeliveryMarker` 在自己手里）；`'acceptance'` 申报点 = `completion-backflow.ts`（agent 完成回流）/ `session-manager-handler.ts`（agent-managed send）/ subagent-core `notifier.ts` handle.send fallback（通知出站文本无标记）/ subagent-core pi-host（custom payload，经 notify-ports.ts 影子契约同步）。护栏 = 提交方行为锁单测（subagent-workflow notifier-receipt-anchor 装配测试 + runtime S1 复现单测，重构丢申报时亮红；无通用正则护栏——与内核零正则冲突，有意不做）。演进路径 = D7-33 per-id 回执契约改造后，`'acceptance'` 保守口径被逐条回执替代。
 
 **后果**：消息「按序必达」由结构保证——任一窗口的判定误判从致命降级为一次对账回收，新发送方接入即继承（无需各自发明时序防御）。已接受代价：出站消息文本携带 ~40 字符裸标记进 LLM 上下文与 session 文件（展示层剥离 SSOT = `apply-entry-convert.ts`，live/reload 同点）；判重表不跨 runtime 重启（reattach 走一次 O(transcript) 标记扫描）；删除 session = 显式废弃未送达条目（与既有语义等价）；消息内核 outbox 不落盘——应用整体退出/崩溃时未送达消息需用户重发（不劣于既有 renderer 内存队列形态）。权威域注记见 [pi-boundary-reliability.md 附录 E](../architecture/pi-boundary-reliability.md)。登记 C-data-08、C-data-25。
 
@@ -205,7 +206,37 @@ widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（�
 
 ### ADR-0077 投递身份判据形态二分：判定严格、剥除宽松（2026-09-24 架构审查裁决）
 
-`<!--taiji:msg:...-->` 模式串同时服务「投递身份判定」与「标记剥除」，两需求的形态要求相反：**判定要准**——宽松 `[^>]*` 形态曾作为身份判据（原 `BARE_MARKER_RE`），用户文本中字面假标记（如从 transcript 复制的标记）经 rebuild 路径以假 id 重建投递，产生重复投递（现实击中，架构审查 MF-1-1）；**剥除要净**——严格 uuid 形态会漏剥残缺/历史形态标记留下脏文本。**决定**：身份判据（提取/回执对账/rebuild 分派）只允许 `DELIVERY_MARKER_ID_RE`（shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态，uuid 段禁手写）；宽松形态仅授权剥除面（`stripDeliveryMarkers` / `DEFER_FLUSH_MARKER_RE` 家族）；rebuild 重投另加**出站尾附锚**判据（仅 trimEnd 后处于文末的标记构成 rebuild 身份——出站标记恒尾附，与 `withDeliveryMarker` 写侧同形；文本中部标记字面量走 adopt 收养，不丢弃不重投）。**为什么**：判据分叉的修复成本随调用点增殖上升（难逆）；「同一正则两种形态边界」无上下文会惊讶；收敛后 SSOT 形态变化自动跟随，消灭手写体静默漂移（MF-1-11 同族）。
+`<!--taiji:msg:...-->` 模式串同时服务「投递身份判定」与「标记剥除」，两需求的形态要求相反：**判定要准**——宽松 `[^>]*` 形态曾作为身份判据（原 `BARE_MARKER_RE`），用户文本中字面假标记（如从 transcript 复制的标记）经 rebuild 路径以假 id 重建投递，产生重复投递（现实击中，架构审查 MF-1-1）；**剥除要净**——严格 uuid 形态会漏剥残缺/历史形态标记留下脏文本。**决定**：身份判据（提取/回执对账/rebuild 分派）只允许 `DELIVERY_MARKER_ID_RE`（shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态，uuid 段禁手写）；宽松形态仅授权剥除面（`stripDeliveryMarkers` / `DEFER_FLUSH_MARKER_RE` 家族）；rebuild 重投另加**出站尾附锚**判据（仅处于**精确文末**的标记构成 rebuild 身份——原文串末尾锚定、不 trimEnd 尾换行，与剥除口径「剥标记不吞尾换行」（P5）同源：出站标记恒尾附，与 `withDeliveryMarker` 写侧同形；文本中部标记字面量走 adopt 收养，不丢弃不重投）。**为什么**：判据分叉的修复成本随调用点增殖上升（难逆）；「同一正则两种形态边界」无上下文会惊讶；收敛后 SSOT 形态变化自动跟随，消灭手写体静默漂移（MF-1-11 同族）。
+
+### ADR-0078 消息协议收口：分类码定码 + 中止独立帧 + 非终结呈现通道 + respawn 发布点统一（2026-09-25 消息链路去冗余裁决）
+
+四项协议收口终态（错误判别契约：instanceof 错误类 + 分类码词表，废除文案前缀匹配与时序推断）：
+
+1. **分类码词表 shared 单点**：`CompactErrorCode`（`compact_busy` = dispatcher compact busy 预检拒绝 / `compact_failed` = pi 层执行失败）与 `SendPromptReason`（`'command-missing' | 'hook-blocked' | 'error'`）均定义于 `packages/shared/src/protocol.ts` / `message.ts`，消费方一律 import——五处手写词表收敛单点。SendPromptReason 的 busy/compacting/bash 退役值删除：投递所有权内核「排队取代拒绝」后运行面只产三值；收窄裁决非 breaking（plugin-sdk `private:true` 不发布 npm、词表非外部契约面 + 运行面只消费 blocked/rejected 布尔、reason 是诊断/文案面 + 仓内零处退役值比较）。WS 广播 `send.rejected`（'busy' | 'compacting' | 'processing'）保留——bash 通道 busy 预检的防御反馈词表，不经 SendPromptReason。
+2. **bash 中止走独立 `message.bashAborted` 帧**：中止是终态不是错误——UI 呈现「已取消」中性形态（statusTag 中性色，非 text-danger），协议回执 `message.status{aborted}` + bashResult `cancelled:true`；不经 message.error 误导收口。
+3. **非终结反馈通道 = `message.stream_warn`**：busy 拒绝（compact busy 预检）等非终结提示经 stream_warn 内联进对话流（turn 内 notice，不切断 turn 分组、不触发错误收口；`message.error` 保留给真错误——错误作为 assistant 消息插入对话流的规则不变）；分类错误的 toast 呈现标志已删（呈现职责归对话流）。
+4. **respawn 恢复发布点统一（D3）**：`session.restored` 发布锚 = pi-respawn facade 尾部（四入口拓扑全汇合点：attemptRespawn timer / ensureActive 惰性 / 手动 RPC / startup-reattach），经编排上下文判别 + 三信号（pendingTimers 在册 / attemptInFlight / 失败计数>0）判别发布——恢复一次成型恰好一帧，删除「惰性路径成功不发 / 经编排器路径发」的双点不对称；普通懒 spawn（进程存活首启）构造性排除（三信号皆零 miss）。renderer 恢复窗口订阅 / respawnPending 分区 / respawn TTL 拣回保留（非冗余：帧丢失与 bus 订阅生命周期的独立防线）。已知判据残余洞（attempt 让位裸 return 不置标志 → 跨 fire 子态三信号皆 miss）登记 D7-41，收口靠保留的 message_start gate（真机验证：该子态无 restored 帧、gate 恰好 1 条提示条收口、不落 dead 终态页）。
+
+**发布配套义务**：`@zhushanwen/session-delivery` 0.10.1→0.11.0（DeliverySubmitOptions.receiptAnchor 增补 + port `hasPendingMessages` / DeliveryConfig `busyPolicy` 拆除；0.x 阶段 minor 位表 breaking）；npm 发布时 `@zhushanwen/pi-subagent-workflow` 消费方同批配套发版（notifier-receipt-anchor 行为锁依赖 0.11.0 语义）。
+
+**D7 延后登记表收编**（15 项 = 投递审计 13 项 + 本设计新增 D7-40/41；每项 = 触发条件满足才启动，不预付任何实现）：
+
+| # | 延后项 | 触发条件 | 触发后去向 |
+|---|--------|---------|-----------|
+| D7-27/28 | followUp 双键分流幻影语义 + DeliveryIntent 'after-run' 透传链 | 产品裁决：恢复 intent 载体兑现双键语义 vs 承认同义删分流 | A → 独立设计补 intent 语义链；B → 纯删除 |
+| D7-29 | 投递确认②计数兜底 → per-id 挂账 | R2-b04-3 dev 观测数据到位 | 与 33 合并契约专项 |
+| D7-30 | TurnRenderCache 尾部快车道 + redrive 车道 | 一次真机测量（三车道 vs fullRescan 帧耗时对比） | 数据证收益才保留，否则删 |
+| D7-31 | readers.ts 11 函数容差层 | 协议 W05-W07 收紧 wave | 帧类型收紧后退场 |
+| D7-32 | mergeBaselineWithLive 判据②③ 内容启发式 | wire Message 透出 clientUuid | 启发式收窄为兜底 |
+| D7-33 | splitComposed 合批拆批 → port 逐条投递契约 | 与 29 合并的「内核↔适配层契约收口」专项立项 | ADR-0074 acceptance 口径被 per-id 回执替代 |
+| D7-34 | notifyHoldRelease 手动边沿义务散落 | occupancy 原语加边沿回调的跨模块设计 | 3 手动点收敛 |
+| D7-35 | 9 个 *_unsupported 防御码家族 | 惯例一致性裁决（缺服务码 vs 必选注入） | 统一其一 |
+| D7-36 | msg-id-mapper 双标记载体 | 登记决策裁决（收敛方向：backfill 改派生/写侧退役/读侧兼容） | 按裁决执行 |
+| D7-37 | morph 段 TTL（R2-b04-4 防泄漏兜底，core 模块级 Map 双侧惰性清扫） | delivery 条目作废生命周期事件挂钩改造立项（事件挂钩后 TTL 降级为兜底或删除） | 与 respawn 恢复事件零耦合，非同根源，独立立项 |
+| D7-38 | 双 30s watchdog flush 半边冗余 | 随内核清理顺带 | 删半边 |
+| D7-39 | gap 判定泄漏 ring 内部知识 | bus.subscribe 返回面扩 oldestSeq/gap 的协议变更窗口 | 随协议 wave |
+| D7-40 | ui↔renderer 镜像族收编 @taiji/shared（镜像守卫生效后的正式收编） | 下次 renderer 域改动立项时顺带 | 3 处镜像归 shared 单份，守卫测试删除 |
+| D7-41 | 惰性恢复跨 timer fire 子态发帧（attempt 让位裸 return 不置标志 → 三信号皆 miss；根治 = 第四信号或让位腿 join+标志改造，需裁决 join 失败记账归属） | 该格 UX 收口退化——症状锚点 = 活 session 回落 dead 终态页需手动解锁，或下次 respawn 域专项 | 判据封闭或收口机制重构 |
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
